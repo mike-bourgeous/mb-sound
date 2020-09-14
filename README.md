@@ -128,3 +128,4 @@ processing:
 [0]: https://www.youtube.com/playlist?list=PLpRqC8LaADXnwve3e8gI239eDNRO3Nhya
 [1]: https://www.youtube.com/playlist?list=PLpRqC8LaADXlYhKRTwSpdW3ineaQnM9zK
 [2]: https://jackschaedler.github.io/circles-sines-signals/
+[3]: https://ccrma.stanford.edu/~jos/#books
