@@ -1,3 +1,5 @@
+require 'cmath'
+
 module MB
   # Convenience functions for making quick work of sound.
   #
