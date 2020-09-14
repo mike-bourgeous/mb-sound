@@ -1,4 +1,4 @@
-# mb-rb-sound
+# mb-sound
 
 A library of simple Ruby tools for processing sound.  This is a companion
 library to an [educational video series I'm making about sound][0].
@@ -47,14 +47,14 @@ RUBY_VERSION=2.7.1
 rvm install $RUBY_VERSION
 
 # Clone the repo
-git clone git@github.com:mike-bourgeous/mb-rb-sound.git
-cd mb-rb-sound
+git clone git@github.com:mike-bourgeous/mb-sound.git
+cd mb-sound
 
 # Lock the repo to your preferred Ruby version (using the variable set above)
-echo $RUBY_VERSION > mb-rb-sound/.ruby-version
+echo $RUBY_VERSION > mb-sound/.ruby-version
 
 # Install Gem dependencies
-cd mb-rb-sound
+cd mb-sound
 gem install bundler
 bundle install
 ```
@@ -74,9 +74,11 @@ See the Examples section for some things to try.
 If you're already familiar with Ruby and Gems, then you can add this repo as a
 dependency to a new project's Gemfile.
 
+*TODO: add gemspec so this actually works*
+
 ```ruby
 # your-project/Gemfile
-gem 'mb-rb-sound', git: 'git@github.com:mike-bourgeous/mb-rb-sound.git'
+gem 'mb-sound', git: 'git@github.com:mike-bourgeous/mb-sound.git'
 ```
 
 ## Examples
