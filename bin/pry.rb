@@ -8,11 +8,14 @@ require 'benchmark'
 require 'pry'
 require 'pry-byebug'
 
+require 'io/console'
+require 'word_wrap'
+
 $LOAD_PATH << File.expand_path('../lib', __dir__)
 
 require 'mb/sound'
 
-puts <<-EOF
+puts WordWrap.ww(<<-EOF, IO.console.winsize[1], true)
 
 \e[33;1mWelcome to the interactive sound environment!\e[0m
 
@@ -20,8 +23,8 @@ If you're new to Pry, check out https://pry.github.io/.
 
 \e[3mSome things to try:\e[0m
 
-\e[1mls \e[32mMB::Sound\e[0m (that's \e[1mls\e[0m for "list") to get a list of
-the easiest to use sound functions.
+\e[1mls \e[32mMB::Sound\e[0m (that's \e[1mls\e[0m for "list") to get a list of the easiest to
+use sound functions.
 
 EOF
 

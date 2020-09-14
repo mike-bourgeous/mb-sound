@@ -7,4 +7,6 @@ gem 'pry'
 gem 'pry-byebug'
 gem 'pry-doc'
 
+gem 'word_wrap'
+
 gem 'rspec'
