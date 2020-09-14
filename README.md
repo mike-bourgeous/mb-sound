@@ -42,16 +42,14 @@ cd ~/projects
 mkdir sound_code_series
 cd sound_code_series
 
-# Install Ruby (replace 2.7.1 with another version if you like)
-RUBY_VERSION=2.7.1
-rvm install $RUBY_VERSION
+# Install Ruby
+# (disable-binary is needed on Ubuntu 20.04 to fix "/usr/bin/mkdir not found"
+# error in the binary package of 2.7.1)
+rvm install --disable-binary 2.7.1
 
 # Clone the repo
 git clone git@github.com:mike-bourgeous/mb-sound.git
 cd mb-sound
-
-# Lock the repo to your preferred Ruby version (using the variable set above)
-echo $RUBY_VERSION > mb-sound/.ruby-version
 
 # Install Gem dependencies
 cd mb-sound
