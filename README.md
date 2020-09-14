@@ -125,6 +125,6 @@ processing:
 - Online [books by Julius O. Smith][3] (I recommend buying the print versions)
 
 
-[0] https://www.youtube.com/playlist?list=PLpRqC8LaADXnwve3e8gI239eDNRO3Nhya
-[1] https://www.youtube.com/playlist?list=PLpRqC8LaADXlYhKRTwSpdW3ineaQnM9zK
-[2] https://jackschaedler.github.io/circles-sines-signals/
+[0]: https://www.youtube.com/playlist?list=PLpRqC8LaADXnwve3e8gI239eDNRO3Nhya
+[1]: https://www.youtube.com/playlist?list=PLpRqC8LaADXlYhKRTwSpdW3ineaQnM9zK
+[2]: https://jackschaedler.github.io/circles-sines-signals/
