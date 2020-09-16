@@ -1,4 +1,6 @@
 language: ruby
+
+dist: focal
 os:
   - linux
   # - osx
