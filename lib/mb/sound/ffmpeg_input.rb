@@ -9,6 +9,9 @@ module MB
     class FFMPEGInput < IOInput
       attr_reader :filename, :rate, :channels, :frames, :info
 
+      OPEN_TAG = %r{\A\[[A-Z0-9_-]+\]\n?\z}
+      CLOSE_TAG = %r{\A\[/[A-Z0-9_-]+\]\n?\z}
+
       # Uses ffprobe to get information about the specified file.  Pass an
       # unescaped filename (no shell backslashes, quotes, etc).
       #
@@ -16,14 +19,25 @@ module MB
       def self.parse_info(filename)
         fnesc = filename.shellescape
 
-        # TODO: add -show_format
-        raw_info = `ffprobe -loglevel 8 -show_streams -select_streams a #{fnesc}`
+        raw_info = `ffprobe -loglevel 8 -show_format -show_streams -select_streams a #{fnesc}`
+        raise "ffprobe failed: #{$?}" unless $?.success?
 
-        streams = raw_info.each_line.chunk_while { |b, a|
-          a != "[STREAM]\n" && b != "[/STREAM]\n"
-        }.select { |chunk|
-          chunk[0] == "[STREAM]\n"
-        }.map { |chunk|
+        info = raw_info.each_line.chunk_while { |b, a|
+          !(a =~ OPEN_TAG || b =~ CLOSE_TAG)
+        }
+
+        info_hash = info.select { |chunk|
+          chunk[0] =~ /\A\[[A-Z]+\]\n/
+        }.group_by { |chunk|
+          chunk[0]
+        }.map { |name, chunks|
+          [name[1..-3].downcase.to_sym, parse_info_kvp(chunks)]
+        }.to_h
+      end
+
+      # For internal use by .parse_info.
+      def self.parse_info_kvp(chunks)
+        chunks.map { |chunk|
           # Filter out start/end tags and any line that isn't a key/value pair
           chunk.reject { |l|
             l.start_with?('[') || !l.include?('=')
@@ -77,7 +91,7 @@ module MB
           raise "Channel count must be an integer greater than 0" unless channels.is_a?(Integer) && channels > 0
           @channels = channels
         else
-          @channels = @info[stream_id][:channels]
+          @channels = @info[:stream][stream_id][:channels]
           raise "Missing channels from stream info" unless @channels
         end
 
@@ -85,12 +99,12 @@ module MB
           raise "Sampling rate must be an integer greater than 0" unless resample.is_a?(Integer) && resample > 0
           @rate = resample
         else
-          @rate = @info[stream_id][:sample_rate]
+          @rate = @info[:stream][stream_id][:sample_rate]
         end
 
-        start = @info[stream_id][:start_time]
+        start = @info[:stream][stream_id][:start_time]
         start = 0 unless start.is_a?(Numeric)
-        duration = @info[stream_id][:duration]
+        duration = @info[:stream][stream_id][:duration]
         @frames = (start + duration * @rate).ceil
 
         resample_opt = resample ? "-ar '#{@rate}'" : ''
