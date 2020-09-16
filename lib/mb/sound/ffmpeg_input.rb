@@ -1,4 +1,5 @@
 require 'shellwords'
+require 'json'
 
 require_relative 'io_input'
 
@@ -9,8 +10,11 @@ module MB
     class FFMPEGInput < IOInput
       attr_reader :filename, :rate, :channels, :frames, :info
 
-      OPEN_TAG = %r{\A\[[A-Z0-9_-]+\]\n?\z}
-      CLOSE_TAG = %r{\A\[/[A-Z0-9_-]+\]\n?\z}
+      # A list of metadata keys that should not be parsed numerically.
+      EXCLUDED_CONVERSIONS = [
+        # Channel layout of e.g. '7.1' should stay as a String
+        :channel_layout
+      ]
 
       # Uses ffprobe to get information about the specified file.  Pass an
       # unescaped filename (no shell backslashes, quotes, etc).
@@ -19,52 +23,51 @@ module MB
       def self.parse_info(filename)
         fnesc = filename.shellescape
 
-        raw_info = `ffprobe -loglevel 8 -show_format -show_streams -select_streams a #{fnesc}`
+        raw_info = `ffprobe -loglevel 8 -print_format json -show_format -show_streams -select_streams a #{fnesc}`
         raise "ffprobe failed: #{$?}" unless $?.success?
 
-        info = raw_info.each_line.chunk_while { |b, a|
-          !(a =~ OPEN_TAG || b =~ CLOSE_TAG)
-        }
-
-        info_hash = info.select { |chunk|
-          chunk[0] =~ /\A\[[A-Z]+\]\n/
-        }.group_by { |chunk|
-          chunk[0]
-        }.map { |name, chunks|
-          [name[1..-3].downcase.to_sym, parse_info_kvp(chunks)]
-        }.to_h
+        convert_values(JSON.parse(raw_info, symbolize_names: true))
       end
 
-      # For internal use by .parse_info.
-      def self.parse_info_kvp(chunks)
-        chunks.map { |chunk|
-          # Filter out start/end tags and any line that isn't a key/value pair
-          chunk.reject { |l|
-            l.start_with?('[') || !l.include?('=')
-          }.map { |l|
-            kv = l.split('=', 2).map(&:strip)
+      # For internal use by .parse_info.  Converts numbers represented as
+      # strings to Ruby numeric types.
+      def self.convert_values(h)
+        renames = []
 
-            kv[0] = kv[0].to_sym
+        h.each do |k, v|
+          if k.to_s =~ /\A[[:upper:]_-]+\z/
+            renames << k
+          end
 
-            case kv[1]
-            when /\A[0-9]+\z/
-              kv[1] = kv[1].to_i
+          next if EXCLUDED_CONVERSIONS.include?(k)
 
-            when /\A[0-9]+\.[0-9]+\z/
-              # FIXME: this parses channel_layout: "7.1" as float
-              kv[1] = kv[1].to_f
+          case v
+          when Array
+            h[k] = v.map { |el| convert_values(el) }
 
-            when %r{\A[0-9]+/0\z}
-              # Prevent division by zero
-              kv[1] = 0
+          when Hash
+            h[k] = convert_values(v)
 
-            when %r{\A[0-9]+/[0-9]+\z}
-              kv[1] = kv[1].to_r
-            end
+          when /\A[0-9]+\z/
+            h[k] = v.to_i
 
-            kv
-          }.to_h
-        }
+          when /\A[0-9]+\.[0-9]+\z/
+            h[k] = v.to_f
+
+          when %r{\A[0-9]+/0\z}
+            # Prevent division by zero in the following Rational conversion
+            h[k] = 0
+
+          when %r{\A[0-9]+/[0-9]+\z}
+            h[k] = v.to_r
+          end
+        end
+
+        renames.each do |k|
+          h[k.to_s.downcase.to_sym] = h.delete(k)
+        end
+
+        h
       end
 
       # Initializes an input stream that will use the `ffmpeg` command to read
@@ -91,7 +94,7 @@ module MB
           raise "Channel count must be an integer greater than 0" unless channels.is_a?(Integer) && channels > 0
           @channels = channels
         else
-          @channels = @info[:stream][stream_id][:channels]
+          @channels = @info[:streams][stream_id][:channels]
           raise "Missing channels from stream info" unless @channels
         end
 
@@ -99,13 +102,15 @@ module MB
           raise "Sampling rate must be an integer greater than 0" unless resample.is_a?(Integer) && resample > 0
           @rate = resample
         else
-          @rate = @info[:stream][stream_id][:sample_rate]
+          @rate = @info[:streams][stream_id][:sample_rate]
         end
 
-        start = @info[:stream][stream_id][:start_time]
+        start = @info[:streams][stream_id][:start_time]
         start = 0 unless start.is_a?(Numeric)
-        duration = @info[:stream][stream_id][:duration]
+        duration = @info[:streams][stream_id][:duration]
         @frames = (start + duration * @rate).ceil
+
+        # FIXME: stream_id is not being handled correctly
 
         resample_opt = resample ? "-ar '#{@rate}'" : ''
         channels_opt = channels ? "-ac '#{@channels}' -af 'aresample=matrix_encoding=dplii'" : ''

@@ -5,13 +5,13 @@ RSpec.describe MB::Sound::FFMPEGInput do
     }
     it 'can read stream info from a .flac sound file' do
       expect(info).to be_a(Hash)
-      expect(info[:stream][0][:duration_ts]).to eq(48000)
-      expect(info[:stream][0][:duration].round(4)).to eq(1)
-      expect(info[:stream][0][:channels]).to eq(1)
+      expect(info[:streams][0][:duration_ts]).to eq(48000)
+      expect(info[:streams][0][:duration].round(4)).to eq(1)
+      expect(info[:streams][0][:channels]).to eq(1)
     end
 
     it 'can read format info from a .flac sound file' do
-      expect(info[:format][0][:'TAG:TITLE']).to eq('Sine 100Hz 1s mono')
+      expect(info[:format][:tags][:title]).to eq('Sine 100Hz 1s mono')
     end
   end
 
