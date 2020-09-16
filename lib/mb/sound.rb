@@ -23,4 +23,6 @@ module MB
 end
 
 require_relative 'sound/io_input'
+require_relative 'sound/io_output'
 require_relative 'sound/ffmpeg_input'
+require_relative 'sound/ffmpeg_output'

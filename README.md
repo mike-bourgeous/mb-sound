@@ -112,7 +112,6 @@ This code uses some really cool other projects either directly or indirectly:
 - FFMPEG
 - Numo gems
 - Pry interactive console for Ruby
-- sndfile
 
 ### References
 

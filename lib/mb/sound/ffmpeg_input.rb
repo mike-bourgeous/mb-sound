@@ -1,8 +1,6 @@
 require 'shellwords'
 require 'json'
 
-require_relative 'io_input'
-
 module MB
   module Sound
     # An input stream type that uses FFMPEG to parse an audio stream from most
@@ -85,9 +83,10 @@ module MB
       # +resample+ - If an integer, asks ffmpeg to resample to that rate.
       # +channels+ - If not nil, asks ffmpeg to convert the number of channels.
       def initialize(filename, stream_idx: 0, resample: nil, channels: nil)
+        # TODO: Support special ffmpeg inputs like Pulseaudio?
         raise "File #{filename.inspect} is not readable" unless File.readable?(filename)
         @filename = filename
-        @fnesc = filename.shellescape
+        fnesc = filename.shellescape
 
         # Get info for all streams from ffprobe so we know stream IDs, etc.
         @raw_info = FFMPEGInput.parse_info(@filename)
@@ -111,18 +110,25 @@ module MB
         if resample
           raise "Sampling rate must be an integer greater than 0" unless resample.is_a?(Integer) && resample > 0
           @rate = resample
+          if @info[:duration_ts]
+            @frames = @info[:duration_ts] * @rate / @info[:sample_rate]
+          end
         else
           @rate = @info[:sample_rate]
+          @frames = @info[:duration_ts]
         end
 
+        @frames ||= (@info[:duration] * @rate).ceil
+
+        # Compensate for possible delay at the start of a stream e.g. in a
+        # video where the audio starts after the video
         start = @info[:start_time]
         start = 0 unless start.is_a?(Numeric)
-        duration = @info[:duration]
-        @frames = (start + duration * @rate).ceil
+        @frames += (start * @rate).ceil
 
         resample_opt = resample ? "-ar '#{@rate}'" : ''
         channels_opt = channels ? "-ac '#{@channels}' -af 'aresample=matrix_encoding=dplii'" : ''
-        pipe = IO.popen(["sh", "-c", "ffmpeg -nostdin -loglevel 8 -i #{@fnesc} #{resample_opt} #{channels_opt} -map 0:#{@stream_id} -f f32le -"], "r")
+        pipe = IO.popen(["sh", "-c", "ffmpeg -nostdin -loglevel 8 -i #{fnesc} #{resample_opt} #{channels_opt} -map 0:#{@stream_id} -f f32le -"], "r")
 
         super(pipe, @channels)
       end
