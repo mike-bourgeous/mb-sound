@@ -99,7 +99,7 @@ module MB
         super(@pipe, @channels)
       end
 
-      # Closes the input pipe to arecord, which should cause arecord to exit.
+      # Closes the input pipe from ffmpeg, which should cause it to exit.
       def close
         @pipe.close if @pipe && !@pipe.closed?
         @pipe = nil
