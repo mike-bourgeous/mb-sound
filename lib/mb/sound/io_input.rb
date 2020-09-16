@@ -22,6 +22,8 @@ module MB
       # Reads +frames+ frames of raw 32-bit floats for +@channels+ channels from
       # the IO given to the constructor.  Returns an array of @channels NArrays.
       def read(frames)
+        raise IOError, "Input is closed" if @io.nil? || @io.closed?
+
         bytes = @io.read(frames * @frame_bytes)
         return [ Numo::SFloat[] ] * @channels if bytes.nil? # end of file
 
@@ -32,6 +34,16 @@ module MB
 
         # TODO: each_slice + transpose is probably slow; do something faster
         bytes.unpack('e*').each_slice(@channels).to_a.transpose.map { |c| Sound.array_to_narray(c) }
+      end
+
+      # Closes the input IO object.  Returns the process exit status object if
+      # the IO object was opened by popen.
+      def close
+        return unless @io
+        @io.close
+        result = @io.respond_to?(:pid) ? $? : nil
+        @io = nil
+        result
       end
     end
   end
