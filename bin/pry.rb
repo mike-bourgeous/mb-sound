@@ -5,11 +5,9 @@ require 'bundler/setup'
 
 require 'benchmark'
 
-require 'pry'
-require 'pry-byebug'
-
 require 'io/console'
-require 'word_wrap'
+
+Bundler.require
 
 $LOAD_PATH << File.expand_path('../lib', __dir__)
 
