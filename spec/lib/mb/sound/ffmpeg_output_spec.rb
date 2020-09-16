@@ -18,7 +18,7 @@ RSpec.describe MB::Sound::FFMPEGOutput do
         output.write(test_data)
         expect(output.close.success?).to eq(true)
 
-        expect(File.readable?('./tmp/test_out.flac')).to eq(true) rescue (puts Dir['./tmp'].inspect)
+        expect(File.readable?('./tmp/test_out.flac')).to eq(true)
         expect(File.size('./tmp/test_out.flac')).to be > 0
 
         input = MB::Sound::FFMPEGInput.new('tmp/test_out.flac')

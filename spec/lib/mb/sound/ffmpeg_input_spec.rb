@@ -53,15 +53,22 @@ RSpec.describe MB::Sound::FFMPEGInput do
       expect(input.rate).to eq(48000)
       expect(input.channels).to eq(1)
       expect(input.info[:tags][:title]).to eq('Sine 100Hz 1s mono')
+
+      input.read(100000) # allow ffmpeg to empty its buffer
+      expect(input.close.success?).to eq(true)
     end
 
     it 'can change the number of channels' do
       expect(input_2ch.channels).to eq(2)
+      expect(input_2ch.read(100000).size).to eq(2)
+      expect(input_2ch.close.success?).to eq(true)
     end
 
     it 'can change the sample rate' do
       expect(input_441.frames).to eq(44100)
       expect(input_441.rate).to eq(44100)
+      expect(input_441.read(100000)[0].size).to eq(44100)
+      expect(input_441.close.success?).to eq(true)
     end
 
     it 'can load a second audio stream' do
@@ -69,14 +76,22 @@ RSpec.describe MB::Sound::FFMPEGInput do
       expect(input_multi_0.channels).to eq(1)
       expect(input_multi_1.rate).to eq(44100)
       expect(input_multi_1.channels).to eq(2)
+
+      expect(input_multi_0.read(100000)[0].size).to eq(48000)
+      expect(input_multi_1.read(100000)[0].size).to eq(44100)
+
+      expect(input_multi_0.close.success?).to eq(true)
+      expect(input_multi_1.close.success?).to eq(true)
     end
   end
 
   describe '#read' do
     it 'can read all data at once' do
-      d1 = input.read(input.frames)
+      d1 = input.read(100000)
       expect(d1.length).to eq(input.channels)
       expect(d1[0].length).to eq(input.frames)
+
+      expect(input.close.success?).to eq(true)
     end
 
     it 'can read data in chunks' do
@@ -90,6 +105,8 @@ RSpec.describe MB::Sound::FFMPEGInput do
       d3 = d1.concatenate(d2)
       scale = d3.max / dref.max
       expect(d1.concatenate(d2).map { |v| v.round(3) }).to eq(dref.map { |v| (v * scale).round(3) })
+
+      expect(input.close.success?).to eq(true)
     end
 
     it 'reads data correctly' do
@@ -100,6 +117,8 @@ RSpec.describe MB::Sound::FFMPEGInput do
       expect(d.median).to be < 0.1
       expect(d.max).to be_between(0.4, 1.0).inclusive
       expect(d.min).to be_between(-1.0, -0.4).inclusive
+
+      expect(input.close.success?).to eq(true)
     end
 
     it 'reads the correct input stream' do
@@ -110,6 +129,9 @@ RSpec.describe MB::Sound::FFMPEGInput do
       expect(d2.length).to eq(2)
       expect(d1[0].length).to eq(48000)
       expect(d2[0].length).to eq(44100)
+
+      expect(input_multi_0.close.success?).to eq(true)
+      expect(input_multi_1.close.success?).to eq(true)
     end
   end
 

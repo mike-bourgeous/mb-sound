@@ -29,7 +29,7 @@ module MB
             'ffmpeg',
             '-nostdin',
             '-y',
-            '-loglevel', 'warning',
+            '-loglevel', '8',
             '-ar', @rate.to_s,
             '-ac', @channels.to_s,
             '-f', 'f32le',

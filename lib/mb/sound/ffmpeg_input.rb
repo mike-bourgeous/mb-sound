@@ -128,7 +128,7 @@ module MB
 
         resample_opt = resample ? "-ar '#{@rate}'" : ''
         channels_opt = channels ? "-ac '#{@channels}' -af 'aresample=matrix_encoding=dplii'" : ''
-        pipe = IO.popen(["sh", "-c", "ffmpeg -nostdin -loglevel warning -i #{fnesc} #{resample_opt} #{channels_opt} -map 0:#{@stream_id} -f f32le -"], "r")
+        pipe = IO.popen(["sh", "-c", "ffmpeg -nostdin -loglevel 8 -i #{fnesc} #{resample_opt} #{channels_opt} -map 0:#{@stream_id} -f f32le -"], "r")
 
         super(pipe, @channels)
       end
