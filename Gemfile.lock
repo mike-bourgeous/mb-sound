@@ -1,3 +1,10 @@
+PATH
+  remote: .
+  specs:
+    mb-sound (0.0.0.usegit)
+      cmath (~> 1.0.0)
+      numo-narray (~> 0.9.1.8)
+
 GEM
   remote: https://rubygems.org/
   specs:
@@ -38,6 +45,7 @@ PLATFORMS
 
 DEPENDENCIES
   cmath
+  mb-sound!
   numo-narray
   pry
   pry-byebug

@@ -26,4 +26,7 @@ Gem::Specification.new do |spec|
   spec.bindir        = "bin"
   spec.executables   = spec.files.grep(%r{^bin/}) { |f| File.basename(f) }
   spec.require_paths = ["lib"]
+
+  spec.add_runtime_dependency 'cmath', '~> 1.0.0'
+  spec.add_runtime_dependency 'numo-narray', '~> 0.9.1.8'
 end
