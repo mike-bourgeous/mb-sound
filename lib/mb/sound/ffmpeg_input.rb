@@ -128,9 +128,15 @@ module MB
       end
 
       # Closes the input pipe from ffmpeg, which should cause it to exit.
+      # Returns the Process::Status object for the ffmpeg process.
       def close
-        @pipe.close if @pipe && !@pipe.closed?
+        if @pipe && !@pipe.closed?
+          @pipe.close
+          result = $?
+        end
         @pipe = nil
+
+        result
       end
     end
   end

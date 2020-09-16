@@ -1,3 +1,5 @@
+require 'benchmark'
+
 RSpec.describe MB::Sound::FFMPEGInput do
   describe '.parse_info' do
     let(:info) {
@@ -70,7 +72,58 @@ RSpec.describe MB::Sound::FFMPEGInput do
     end
   end
 
-  pending '#read'
+  describe '#read' do
+    it 'can read all data at once' do
+      d1 = input.read(input.frames)
+      expect(d1.length).to eq(input.channels)
+      expect(d1[0].length).to eq(input.frames)
+    end
 
-  pending '#close'
+    it 'can read data in chunks' do
+      d1 = input.read(5000)[0]
+      d2 = input.read(input.frames - 5000)[0]
+      expect(d1.length).to eq(5000)
+      expect(d2.length).to eq(43000)
+
+      # Compare to the stereo version (compensating for pan law)
+      dref = input_2ch.read(input_2ch.frames)[0]
+      d3 = d1.concatenate(d2)
+      scale = d3.max / dref.max
+      expect(d1.concatenate(d2).map { |v| v.round(3) }).to eq(dref.map { |v| (v * scale).round(3) })
+    end
+
+    it 'reads data correctly' do
+      d = input.read(input.frames)[0]
+
+      # Check for statistical characteristics of a sine wave
+      expect(d.sum.abs).to be < 0.01
+      expect(d.median).to be < 0.1
+      expect(d.max).to be_between(0.4, 1.0).inclusive
+      expect(d.min).to be_between(-1.0, -0.4).inclusive
+    end
+
+    it 'reads the correct input stream' do
+      d1 = input_multi_0.read(48000)
+      d2 = input_multi_1.read(48000)
+
+      expect(d1.length).to eq(1)
+      expect(d2.length).to eq(2)
+      expect(d1[0].length).to eq(48000)
+      expect(d2[0].length).to eq(44100)
+    end
+  end
+
+  describe '#close' do
+    it 'can close a file before finishing reading' do
+      result = nil
+      delay = Benchmark.realtime do
+        expect { result = input.close }.not_to raise_exception
+      end
+
+      expect(delay).to be < 1
+      expect(result).to be_a(Process::Status)
+
+      expect { input.read(1) }.to raise_exception(IOError)
+    end
+  end
 end
