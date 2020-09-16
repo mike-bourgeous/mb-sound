@@ -1,5 +1,7 @@
 require 'cmath'
 
+require_relative 'sound/version'
+
 module MB
   # Convenience functions for making quick work of sound.
   #
