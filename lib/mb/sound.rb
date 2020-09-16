@@ -1,4 +1,5 @@
 require 'cmath'
+require 'numo/narray'
 
 require_relative 'sound/version'
 
