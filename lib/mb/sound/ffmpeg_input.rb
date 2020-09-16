@@ -16,6 +16,7 @@ module MB
       def self.parse_info(filename)
         fnesc = filename.shellescape
 
+        # TODO: add -show_format
         raw_info = `ffprobe -loglevel 8 -show_streams -select_streams a #{fnesc}`
 
         streams = raw_info.each_line.chunk_while { |b, a|

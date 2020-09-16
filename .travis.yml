@@ -3,3 +3,7 @@ os:
   - linux
   # - osx
 script: bundle exec rspec
+addons:
+  apt:
+    packages:
+      - ffmpeg
