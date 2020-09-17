@@ -9,19 +9,25 @@ RSpec.describe MB::Sound::FFMPEGOutput do
     ]
   }
 
+  before(:all) do
+    FileUtils.mkdir_p('./tmp')
+    File.unlink('./tmp/test_out.flac')
+    File.unlink('./tmp/test_out.wav')
+  end
+
   ['flac', 'wav'].each do |format|
     context "when writing .#{format}" do
       it 'can write a file that can be read by FFMPEGInput' do
-        FileUtils.mkdir_p('./tmp')
-
-        output = MB::Sound::FFMPEGOutput.new("./tmp/test_out.#{format}", rate: 44100, channels: 3)
+        name = "tmp/test_out.#{format}"
+        output = MB::Sound::FFMPEGOutput.new(name, rate: 44100, channels: 3)
+        expect(output.filename).to include(name)
         output.write(test_data)
         expect(output.close.success?).to eq(true)
 
-        expect(File.readable?('./tmp/test_out.flac')).to eq(true)
-        expect(File.size('./tmp/test_out.flac')).to be > 0
+        expect(File.readable?(name)).to eq(true)
+        expect(File.size(name)).to be > 0
 
-        input = MB::Sound::FFMPEGInput.new('tmp/test_out.flac')
+        input = MB::Sound::FFMPEGInput.new(name)
         expect(input.rate).to eq(44100)
         expect(input.channels).to eq(3)
         expect(input.frames).to eq(4)

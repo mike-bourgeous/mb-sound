@@ -15,7 +15,7 @@ module MB
         dirname = File.expand_path(File.dirname(filename))
         raise "#{dirname.inspect} isn't a directory" unless File.directory?(dirname)
         raise "Directory #{dirname.inspect} isn't writable" unless File.writable?(dirname)
-        full_path = File.join(dirname, File.basename(filename))
+        @filename = File.join(dirname, File.basename(filename))
 
         raise "Sample rate must be a positive Integer" unless rate.is_a?(Integer) && rate > 0
         @rate = rate
@@ -36,7 +36,7 @@ module MB
             '-i', 'pipe:',
             *(codec ? ['-acodec', codec.to_s] : []),
             *(bitrate ? ['-b:a', bitrate.to_s] : []), 
-            full_path
+            @filename
           ],
           'w'
         )
