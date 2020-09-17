@@ -25,6 +25,12 @@ RSpec.describe MB::Sound::FFMPEGInput do
       expect(info[:streams].length).to eq(1)
       expect(info_multi[:streams].length).to eq(2)
     end
+
+    it 'raises an error if an invalid format override is given' do
+      expect {
+        MB::Sound::FFMPEGInput.parse_info('spec/test_data/two_audio_streams.mkv', format: 'wav')
+      }.to raise_error(/ffprobe/)
+    end
   end
 
   let(:input) {
@@ -82,6 +88,21 @@ RSpec.describe MB::Sound::FFMPEGInput do
 
       expect(input_multi_0.close.success?).to eq(true)
       expect(input_multi_1.close.success?).to eq(true)
+    end
+
+    context 'with format override' do
+      it 'raises an error for an invalid format' do
+        expect {
+          MB::Sound::FFMPEGInput.new('sounds/sine/sine_100_1s_mono.flac', format: 'avi')
+        }.to raise_error(/ffprobe/)
+      end
+
+      it 'does not raise an error for a matching format' do
+        a = MB::Sound::FFMPEGInput.new('sounds/sine/sine_100_1s_mono.flac', format: 'flac')
+        d = a.read(a.frames)
+        expect(d[0].max).to be_between(0.4, 1.0)
+        expect(a.close.success?).to eq(true)
+      end
     end
   end
 
