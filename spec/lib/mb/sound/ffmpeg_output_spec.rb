@@ -11,8 +11,8 @@ RSpec.describe MB::Sound::FFMPEGOutput do
 
   before(:all) do
     FileUtils.mkdir_p('./tmp')
-    File.unlink('./tmp/test_out.flac')
-    File.unlink('./tmp/test_out.wav')
+    File.unlink('./tmp/test_out.flac') rescue nil
+    File.unlink('./tmp/test_out.wav') rescue nil
   end
 
   ['flac', 'wav'].each do |format|
