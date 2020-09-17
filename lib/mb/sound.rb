@@ -14,9 +14,9 @@ module MB
     # channel.
     #
     # See MB::Sound::FFMPEGInput for more flexible sound input.
-    def self.read(filename)
+    def self.read(filename, max_frames: nil)
       input = MB::Sound::FFMPEGInput.new(filename)
-      input.read(input.frames)
+      input.read(max_frames || input.frames)
     ensure
       input&.close
     end
