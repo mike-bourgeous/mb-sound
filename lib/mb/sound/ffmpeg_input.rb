@@ -75,6 +75,10 @@ module MB
       # the specified audio stream (first stream if unspecified) from the given
       # file.
       #
+      # Note that this supports recording audio by using a platform-specific
+      # ffmpeg virtual format (e.g. dshow, alsa, pulse, or avfoundation), but
+      # this method of recording audio introduces significant delay.
+      #
       # +filename+ - The filename to read.  The file must exist, unless a
       #              +format+ is specified (to support capture devices).
       # +stream_idx+ - The number of audio stream to read in multi-stream files
@@ -86,7 +90,8 @@ module MB
       # +channels+ - If not nil, asks ffmpeg to convert the number of channels.
       # +format+ - An optional input format to override ffmpeg's detection
       #            based on file extension.  Run `ffmpeg -formats` for a list
-      #            of formats supported by your copy of ffmpeg.
+      #            of formats supported by your copy of ffmpeg.  This may, for
+      #            example, allow you to record audio from a sound card.
       # +loglevel+ - A log level to pass to ffmpeg (e.g. 'warning', 'error').
       #              The default is 8, which suppresses all or nearly all
       #              console output from ffmpeg.

@@ -24,6 +24,7 @@ module MB
       # channel.
       def write(data)
         raise IOError, 'Output is closed' if @io.nil? || @io.closed?
+        raise ArgumentError, "Received #{data.length} channels when #{@channels} were expected" if data.length != @channels
 
         buf = String.new(capacity: data.first.size * @frame_bytes)
         data.first.size.times do |idx|
@@ -34,7 +35,7 @@ module MB
         raise 'Bytes written was not a multiple of frame size' unless bytes % @frame_bytes == 0
 
         frames = bytes / @frame_bytes
-        puts "Warning: wrote #{frames_write} frames when #{frames} were requested" if frames != data.first.size
+        puts "Warning: wrote #{frames} frames when #{data.first.size} were requested" if frames != data.first.size
 
         @frames_written += frames
 
