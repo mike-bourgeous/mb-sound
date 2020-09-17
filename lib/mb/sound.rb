@@ -36,6 +36,58 @@ module MB
       output&.close
     end
 
+    # Plays a sound file if a String is given, or an audio buffer if an audio
+    # buffer is given.  If an audio buffer is given, the sample rate should be
+    # specified (defaults to 48k).  The sample rate is ignored for an audio
+    # file.
+    def self.play(filename_or_data, rate: 48000, gain: 1.0)
+      case filename_or_data
+      when String
+        return play_file(filename_or_data, gain: gain)
+
+      when Array
+        data = filename_or_data
+        channels = data.length < 2 ? 2 : data.length
+        data = data * 2 if data.length < 2
+        output = MB::Sound::output(rate: rate, channels: channels)
+        output.write(data)
+
+      else
+        raise "Unsupported type #{filename_or_data.class.name} for playback"
+      end
+    ensure
+      output&.close
+    end
+
+    # Plays the given filename using the default audio output returned by
+    # MB::Sound.output.  The +:channels+ parameter may be used to force mono
+    # playback (mono sound is converted to stereo by default), or to ask ffmpeg
+    # to upmix or downmix audio to a different number of channels.
+    def self.play_file(filename, channels: nil, gain: 1.0)
+      input = MB::Sound::FFMPEGInput.new(filename, channels: channels)
+      output = MB::Sound.output(channels: channels || (input.channels < 2 ? 2 : input.channels))
+
+      # TODO: Move the loop to a processing helper method when those are added
+      loop do
+        data = input.read(1000)
+        break if data.nil? || data.empty? || data[0].empty?
+
+        data.map { |d|
+          d.inplace * gain
+        }
+
+        # Ensure the output is at least stereo (Pulseaudio plays nothing for
+        # mono output on my system)
+        data = data * 2 if data.length == 1 && channels.nil?
+
+        output.write(data)
+      end
+
+    ensure
+      input&.close
+      output&.close
+    end
+
     # Tries to auto-detect an input device for recording sound.  Returns a
     # sound input stream with a :read method.
     #
