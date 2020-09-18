@@ -17,12 +17,16 @@ module MB
       # Uses ffprobe to get information about the specified file.  Pass an
       # unescaped filename (no shell backslashes, quotes, etc).
       #
-      # Returns an array of Hashes, one Hash for each audio stream in the file.
-      def self.parse_info(filename, format: nil)
+      # Returns a Hash with :streams, containing an array of Hashes describing
+      # each audio/video/other stream in the file (or just audio streams if
+      # +audio_only+ is true); and :format, containing a Hash describing the
+      # file as a whole.
+      def self.parse_info(filename, format: nil, audio_only: true)
         fnesc = filename.shellescape
 
         format_opt = format ? "-f #{format.shellescape}" : ''
-        raw_info = `ffprobe -loglevel 8 -print_format json -show_format -show_streams -select_streams a #{format_opt} #{fnesc}`
+        audio_opt = audio_only ? '-select_streams a' : ''
+        raw_info = `ffprobe -loglevel 8 -print_format json -show_format -show_streams #{audio_opt} #{format_opt} #{fnesc}`
         raise "ffprobe failed: #{$?}" unless $?.success?
 
         convert_values(JSON.parse(raw_info, symbolize_names: true)).tap { |h|

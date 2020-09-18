@@ -20,6 +20,15 @@ installing the dependencies, and launching the interactive command line.
 You can either tinker within this project, or use it as a Git-sourced Gem in
 your own projects.
 
+There are some base packages you'll need first:
+
+```bash
+# Debian-/Ubuntu-based Linux (macOS/Arch/CentOS will differ)
+sudo apt-get install ffmpeg gnuplot-qt
+```
+
+Then you'll want to install Ruby 2.7.1.
+
 If you don't already have a recent version of Ruby installed, and a Ruby version
 manager of your choosing, I highly recommend using [RVM](https://rvm.io).  You
 can find installation instructions for RVM at https://rvm.io.

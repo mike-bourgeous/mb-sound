@@ -12,8 +12,8 @@ module MB
     class Plot
       # Creates an ASCII-art plotter sized to the terminal.
       def self.terminal(width_fraction: 1.0, height_fraction: 0.5)
-        cols = (MB::Sound::U.width - 1) * width_fraction
-        rows = (MB::Sound::U.height - 1) * height_fraction
+        cols = ((MB::Sound::U.width - 1) * width_fraction).round
+        rows = ((MB::Sound::U.height - 1) * height_fraction).round
         Plot.new(terminal: 'dumb', width: cols, height: rows)
       end
 
@@ -26,10 +26,14 @@ module MB
       # If true, all incoming lines from gnuplot are printed to the terminal.
       attr_accessor :debug
 
+      attr_reader :width, :height
+
       # Use a longer +timeout+ if you will be plotting lots of data.
       def initialize(terminal: 'qt', title: nil, width: 800, height: 800, timeout: 5)
         @width = width
         @height = height
+        @yrange = nil
+        @title = title
         @rows = nil
         @cols = nil
         @logscale = false
@@ -153,7 +157,10 @@ module MB
       # growth.  But if the terminal type is 'dumb', then the buffer will be
       # cleared before and after plotting so the resulting plot can be
       # displayed.
-      def plot(data, rows: nil, columns: nil)
+      #
+      # If +:print+ is true, then 'dumb' terminal plots are printed to the
+      # console.  If false, then plots are returned as an array of lines.
+      def plot(data, rows: nil, columns: nil, print: true)
         @read_mutex.synchronize {
           if @terminal == 'dumb'
             @buf.clear
@@ -234,7 +241,7 @@ module MB
         command 'pause 0.01'
 
         if @terminal == 'dumb'
-          print_terminal_plot
+          print_terminal_plot(print)
         end
 
       ensure
@@ -246,14 +253,14 @@ module MB
 
       private
 
-      def print_terminal_plot
-        lines = read[-(@height + 10)..-1].reject { |l| l.empty? || l.include?('plot>') }
-        start_index = lines.index { |l| l.include?('-----') }
-        graph = lines[start_index..-1].join("\n")
+      def print_terminal_plot(print)
+        buf = read.reject { |l| l.empty? || l.include?('plot>') }
+        start_index = buf.index { |l| l.include?('+----') }
+        lines = buf[start_index..-1]
 
         row = 0
         in_graph = false
-        lines = lines.map.with_index { |l, idx|
+        lines.map!.with_index { |l, idx|
           if l.include?('+----')
             if in_graph
               in_graph = false
@@ -270,7 +277,14 @@ module MB
             .gsub(/(?<=[|])-[+]| [+] |[+]-(?=[|])/, "\e[1;35m\\&\e[0m")
             .gsub(/[+]-+[+]|[|]/, "\e[1;30m\\&\e[0m")
         }
-        puts lines
+
+        binding.pry if lines.any? { |l| l.include?('plot') } # XXX seeing some spurious lines above graphs
+
+        if print
+          puts lines
+        else
+          lines
+        end
       end
 
       # Waits for the gnuplot prompt.
