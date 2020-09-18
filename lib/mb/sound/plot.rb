@@ -45,7 +45,7 @@ module MB
 
         @buf = []
         @buf_idx = 0 # offset in the buf where we left off looking for something
-        @stdout, @stdin, @pid = PTY.spawn("sh", "-c", "gnuplot 2>&1")
+        @stdout, @stdin, @pid = PTY.spawn('gnuplot')
 
         @run = true
         @debug = false
@@ -124,7 +124,7 @@ module MB
         end
 
         @run = false
-        @t&.kill
+        @t&.join
         @stdout&.close
         @stdout = nil
 
@@ -335,6 +335,8 @@ module MB
 
           puts "\e[33mGNUPLOT: \e[1m#{line}\e[0m" if @debug
         end
+      rescue => e
+        e
       end
 
       def set_multiplot(rows, cols)
