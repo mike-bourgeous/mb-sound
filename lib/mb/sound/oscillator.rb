@@ -56,8 +56,8 @@ module MB
         end
         @wave_type = wave_type
 
-        raise "Invalid frequency #{frequency.inspect}" unless frequency.is_a?(Numeric)
-        @frequency = frequency.to_f
+        raise "Invalid frequency #{frequency.inspect}" unless frequency.is_a?(Numeric) || frequency.respond_to?(:sample)
+        @frequency = frequency
 
         raise "Invalid phase #{phase.inspect}" unless phase.is_a?(Numeric)
         @phase = phase.to_f % (2.0 * Math::PI)
@@ -137,7 +137,18 @@ module MB
 
         advance = @advance
         advance += RAND.rand(@random_advance) if @random_advance != 0
-        @phi += @frequency * advance
+
+        # TODO: this doesn't modulate strongly enough
+        # FM attempt:
+        # fm = Oscillator.new(
+        #   :sine,
+        #   frequency: Oscillator.new(:sine, frequency: 220, range: -970..370, advance: Math::PI / 24000),
+        #   advance: Math::PI / 24000
+        # )
+        freq = @frequency
+        freq = freq.sample if freq.respond_to?(:sample)
+
+        @phi += freq * advance
         while @phi >= 2.0 * Math::PI
           @phi -= 2.0 * Math::PI
         end
