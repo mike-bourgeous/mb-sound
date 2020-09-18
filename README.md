@@ -61,7 +61,7 @@ Now that everything's installed, you are ready to start playing with sound:
 
 ```bash
 # Launch the interactive command line
-bin/pry.rb
+bin/prysound.rb
 ```
 
 See the Examples section for some things to try.
@@ -81,7 +81,34 @@ gem 'mb-sound', git: 'git@github.com:mike-bourgeous/mb-sound.git'
 
 ## Examples
 
-TODO: Examples will be added as the library progresses.
+These examples can be run in the `bin/prysound.rb` interactive environment.
+
+### Generating tones
+
+```ruby
+5.times do
+  play 100.hz.triangle.at(-20.db).for(0.25)
+  play 133.hz.triangle.at(-20.db).for(0.25)
+  play 150.hz.triangle.at(-20.db).for(0.25)
+  play 100.hz.triangle.at(-20.db).for(0.25)
+  play 200.hz.ramp.at(-23.db).for(1.6)
+end
+```
+
+### Playing a sound file
+
+```ruby
+play 'sounds/sine/sine_100_1s_mono.flac', gain: -6.db
+```
+
+### Loading a sound file into memory
+
+```ruby
+data = read 'sounds/sine/sine_100_1s_mono.flac'
+# => [Numo::DFloat#shape=[48000]
+# [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1.19209e-07, ...]]
+play data, rate: 48000
+```
 
 ## Testing
 

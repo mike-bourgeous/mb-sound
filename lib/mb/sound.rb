@@ -11,11 +11,11 @@ module MB
     class FileExistsError < IOError; end
 
     # Reads an entire sound file into an array of Numo::NArrays, one per
-    # channel.
+    # channel.  Always resamples to 48kHz.
     #
     # See MB::Sound::FFMPEGInput for more flexible sound input.
     def self.read(filename, max_frames: nil)
-      input = MB::Sound::FFMPEGInput.new(filename)
+      input = MB::Sound::FFMPEGInput.new(filename, resample: 48000)
       input.read(max_frames || input.frames)
     ensure
       input&.close

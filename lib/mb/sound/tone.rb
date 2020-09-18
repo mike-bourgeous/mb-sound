@@ -23,6 +23,7 @@ module MB
         def db
           10.0 ** (self / 20.0)
         end
+        alias dB db
 
         # Converts this number from a linear gain value to a decibel value.
         # Since decibels represent magnitude only without a sign, negative and
