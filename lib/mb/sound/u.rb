@@ -28,11 +28,25 @@ module MB
         Pry::ColorPrinter.pp(object, '', columns || width)
       rescue LoadError
         begin
-          require 'coderay'
-          CodeRay.scan(object.inspect, :ruby).terminal
+          syntax(object.inspect)
         rescue LoadError
           "\e[1m#{object.inspect}\e[0m"
         end
+      end
+
+      # Returns a String with the given Ruby code highlighted by CodeRay.  If
+      # CodeRay is not available, then a simple character highlight will be
+      # applied.
+      def self.syntax(code)
+        require 'coderay'
+        CodeRay.scan(code.to_s, :ruby).terminal
+      rescue LoadError
+        code.to_s
+          .gsub(/[0-9]+/, "\e[34m\\&\e[37m")
+          .gsub(/[[:upper:]][[:alpha:]_]+/, "\e[32m\\&\e[37m")
+          .gsub(/[{}=<>]+/, "\e[33m\\&\e[37m")
+          .gsub(/["'`]+/, "\e[35m\\&\e[37m")
+          .gsub(/[:,]+/, "\e[36m\\&\e[37m")
       end
     end
   end
