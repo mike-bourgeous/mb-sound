@@ -1,5 +1,4 @@
 require 'io/console'
-require 'word_wrap'
 
 module MB
   module Sound
@@ -15,9 +14,13 @@ module MB
       end
 
       # Wraps the given text for the current terminal width, or 80 columns if
-      # the terminal width is unknown.
+      # the terminal width is unknown.  Returns the text unmodified if WordWrap
+      # is unavailable.
       def self.wrap(text)
+        require 'word_wrap'
         WordWrap.ww(text, width - 1, true)
+      rescue LoadError
+        text
       end
 
       # Returns a String with a syntax highlighted form of the given +object+,
