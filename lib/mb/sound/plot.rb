@@ -12,9 +12,9 @@ module MB
     # Created because Numo::Gnuplot was giving an error.
     class Plot
       # Creates an ASCII-art plotter sized to the terminal.
-      def self.terminal(width_fraction: 1.0, height_fraction: 0.5)
-        cols = ((MB::Sound::U.width - 1) * width_fraction).round
-        rows = ((MB::Sound::U.height - 1) * height_fraction).round
+      def self.terminal(width_fraction: 1.0, height_fraction: 0.5, width: nil, height: nil)
+        cols = (((width || MB::Sound::U.width) - 1) * width_fraction).round
+        rows = (((height || MB::Sound::U.height) - 1) * height_fraction).round
         Plot.new(terminal: 'dumb', width: cols, height: rows)
       end
 
@@ -274,7 +274,7 @@ module MB
           end
 
           clr = (row + 1) % 6 + 31
-          l.gsub(/[+-]?\d+(\.\d+)?/, "\e[1;35m\\&\e[0m")
+          l.gsub(/^\s+([+-]?\d+(\.\d+)?\s*){1,}/, "\e[1;35m\\&\e[0m")
             .gsub(/([[:alnum:]_-]+ ){0,}[*]+/, "\e[1;#{clr}m\\&\e[0m")
             .gsub(/(?<=[|])-[+]| [+] |[+]-(?=[|])/, "\e[1;35m\\&\e[0m")
             .gsub(/[+]-+[+]|[|]/, "\e[1;30m\\&\e[0m")
