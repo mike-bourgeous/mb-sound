@@ -34,6 +34,8 @@ If you're new to Pry, check out https://pry.github.io/.
 
 EOF
 
+Pry.config.commands.rename_command('pry-play', 'play')
+
 Pry.pry(
   MB::Sound,
   prompt: Pry::Prompt.new(:mb_sound, "The interactive sound environment's default prompt", [

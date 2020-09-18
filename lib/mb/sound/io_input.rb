@@ -33,7 +33,7 @@ module MB
         @frames_read += frames_read / @channels
 
         # TODO: each_slice + transpose is probably slow; do something faster
-        bytes.unpack('e*').each_slice(@channels).to_a.transpose.map { |c| Sound.array_to_narray(c) }
+        bytes.unpack('e*').each_slice(@channels).to_a.transpose.map { |c| M.array_to_narray(c) }
       end
 
       # Closes the input IO object.  Returns the process exit status object if

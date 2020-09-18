@@ -36,24 +36,28 @@ module MB
       output&.close
     end
 
-    # Plays a sound file if a String is given, or an audio buffer if an audio
-    # buffer is given.  If an audio buffer is given, the sample rate should be
-    # specified (defaults to 48k).  The sample rate is ignored for an audio
-    # file.
-    def self.play(filename_or_data, rate: 48000, gain: 1.0)
-      case filename_or_data
+    # Plays a sound file if a String is given, a generated tone if a Tone is
+    # given, or an audio buffer if an audio buffer is given.  If an audio
+    # buffer or tone is given, the sample rate should be specified (defaults to
+    # 48k).  The sample rate is ignored for an audio filename.
+    def self.play(file_tone_data, rate: 48000, gain: 1.0)
+      case file_tone_data
       when String
-        return play_file(filename_or_data, gain: gain)
+        return play_file(file_tone_data, gain: gain)
 
       when Array
-        data = filename_or_data
+        data = file_tone_data
         channels = data.length < 2 ? 2 : data.length
         data = data * 2 if data.length < 2
-        output = MB::Sound::output(rate: rate, channels: channels)
+        output = MB::Sound.output(rate: rate, channels: channels)
         output.write(data)
 
+      when Tone
+        output = MB::Sound.output(rate: rate)
+        file_tone_data.write(output)
+
       else
-        raise "Unsupported type #{filename_or_data.class.name} for playback"
+        raise "Unsupported type #{file_tone_data.class.name} for playback"
       end
     ensure
       output&.close
@@ -157,18 +161,6 @@ module MB
       inp&.close
       outp&.close
     end
-
-    # Converts a Ruby Array of any nesting depth to a Numo::NArray with a
-    # matching number of dimensions.  All nested arrays at a particular depth
-    # should have the same size (that is, all positions should be filled).
-    #
-    # Chained subscripts on the Array become comma-separated subscripts on the
-    # NArray, so array[1][2] would become narray[1, 2].
-    def self.array_to_narray(array)
-      return array if array.is_a?(Numo::NArray)
-      narray = Numo::NArray[array]
-      narray.reshape(*narray.shape[1..-1])
-    end
   end
 end
 
@@ -180,3 +172,4 @@ require_relative 'sound/ffmpeg_output'
 require_relative 'sound/alsa_input'
 require_relative 'sound/alsa_output'
 require_relative 'sound/oscillator'
+require_relative 'sound/tone'
