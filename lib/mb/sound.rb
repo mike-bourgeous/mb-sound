@@ -172,9 +172,11 @@ module MB
   end
 end
 
+require_relative 'sound/m'
 require_relative 'sound/io_input'
 require_relative 'sound/io_output'
 require_relative 'sound/ffmpeg_input'
 require_relative 'sound/ffmpeg_output'
 require_relative 'sound/alsa_input'
 require_relative 'sound/alsa_output'
+require_relative 'sound/oscillator'
