@@ -62,7 +62,7 @@ RSpec.describe MB::Sound::FFMPEGOutput do
       expect(output.close.success?).to eq(true)
 
       info = MB::Sound::FFMPEGInput.parse_info(name)
-      expect(info[:format][:format_name]).to match /flac/
+      expect(info[:format][:format_name]).to match(/flac/)
     end
 
     it 'can specify a bitrate' do

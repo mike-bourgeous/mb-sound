@@ -27,6 +27,7 @@ RSpec.describe MB::Sound do
       name = 'tmp/sound_write_test.flac'
       MB::Sound.write(name, [Numo::SFloat[0,0.5,-0.5,0]], rate: 48000)
       info = MB::Sound::FFMPEGInput.parse_info(name)
+      expect(info[:streams][0][:duration_ts]).to eq(4)
     end
 
     context 'when overwrite is false (by default)' do
