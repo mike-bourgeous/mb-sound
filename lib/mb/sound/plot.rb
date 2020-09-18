@@ -1,5 +1,6 @@
 require 'pty'
 require 'tempfile'
+require 'timeout'
 
 module MB
   module Sound
@@ -86,17 +87,18 @@ module MB
       end
 
       # Switches the GNUplot terminal to write to a PNG file on the next plot.
-      def save_image(filename, w: 1080, h: 1080)
-        case filename
-        when /.svg\z/
+      def save_image(filename, width: 1080, height: 1080)
+        ext = File.extname(filename)
+        case ext
+        when '.svg'
           term = 'svg'
-        when /.png\z/
+        when '.png'
           term = 'pngcairo'
         else
-          raise "Unknown file extension #{filename.rpartition('.').last}"
+          raise "Unknown file extension #{ext}"
         end
 
-        terminal(terminal: term, width: w, height: h, title: nil)
+        terminal(terminal: term, width: width, height: height, title: nil)
         command "set output #{filename.inspect}"
       end
 
