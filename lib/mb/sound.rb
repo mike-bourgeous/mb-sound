@@ -41,6 +41,8 @@ module MB
     # buffer or tone is given, the sample rate should be specified (defaults to
     # 48k).  The sample rate is ignored for an audio filename.
     def self.play(file_tone_data, rate: 48000, gain: 1.0)
+      puts "\e[36mPlaying\e[0m #{MB::Sound::U.highlight(file_tone_data)}"
+
       case file_tone_data
       when String
         return play_file(file_tone_data, gain: gain)
@@ -164,6 +166,7 @@ module MB
   end
 end
 
+require_relative 'sound/u'
 require_relative 'sound/m'
 require_relative 'sound/io_input'
 require_relative 'sound/io_output'

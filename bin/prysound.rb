@@ -16,7 +16,7 @@ require 'mb/sound'
 puts
 puts `clear` if ARGV.include?('--clear')
 
-puts WordWrap.ww(<<-EOF, IO.console.winsize[1], true)
+puts MB::Sound::U.wrap(<<-EOF.strip)
 \e[33;1mWelcome to the interactive sound environment!\e[0m
 
 If you're new to Ruby, see https://www.ruby-lang.org/en/documentation/quickstart/.
