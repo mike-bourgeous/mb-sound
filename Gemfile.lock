@@ -1,7 +1,7 @@
 PATH
   remote: .
   specs:
-    mb-sound (0.0.0.usegit)
+    mb-sound (0.0.1.usegit)
       cmath (~> 1.0.0)
       numo-narray (~> 0.9.1.8)
 
