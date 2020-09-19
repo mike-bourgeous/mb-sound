@@ -168,7 +168,8 @@ module MB
     # Plots a subset of the given audio file, test tone, or data, starting at
     # +offset+, and plotting the following +samples+ samples.  If +all+ is true
     # then the entirety of the file, tone, or data will be plotted.
-    def self.plot(file_tone_data, samples: 960, offset: 0, all: false)
+    def self.plot(file_tone_data, samples: 960, offset: 0, all: false, graphical: false)
+      # FIXME: This function is hard to read
       STDOUT.write("\e[H\e[2J") if all == true
 
       if all == true || all == false
@@ -198,15 +199,17 @@ module MB
         raise "Cannot plot type #{file_tone_data.class.name}"
       end
 
-      @p ||= MB::Sound::Plot.terminal(height_fraction: 0.8)
+      @pt ||= MB::Sound::Plot.terminal(height_fraction: 0.8)
+      @pg ||= MB::Sound::Plot.new
+      p = graphical ? @pg : @pt
 
       if all == true
         t = Process.clock_gettime(Process::CLOCK_MONOTONIC)
 
         until offset >= data[0].length
           STDOUT.write("\e[#{header_lines}H\e[36mPress Ctrl-C to stop  \e[1;35m#{offset} / #{data[0].length}\e[0m\e[K\n")
-          @p.yrange(data.map(&:min).min, data.map(&:max).max) unless all.nil?
-          plot(data, samples: samples, offset: offset, all: nil)
+          p.yrange(data.map(&:min).min, data.map(&:max).max) unless all.nil?
+          plot(data, samples: samples, offset: offset, all: nil, graphical: graphical)
 
           now = Process.clock_gettime(Process::CLOCK_MONOTONIC)
           elapsed = [now - t, 0.1].min
@@ -220,14 +223,21 @@ module MB
       else
         data = data.map { |c| c[offset...([offset + samples, c.length].min)] || [] }
 
-        @p.yrange(data.map(&:min).min, data.map(&:max).max) unless all.nil?
-        @lines = @p.plot(data.map.with_index { |c, idx| [idx.to_s, c] }.to_h, print: false)
+        p.yrange(data.map(&:min).min, data.map(&:max).max) unless all.nil?
+        @lines = p.plot(data.map.with_index { |c, idx| [idx.to_s, c] }.to_h, print: false)
         puts @lines
       end
 
       nil
     ensure
-      puts "\e[#{@p.height + (header_lines || 2) + 2}H" if all == true
+      if all == true
+        if graphical
+          @pg.close
+          @pg = nil
+        else
+          puts "\e[#{@pt.height + (header_lines || 2) + 2}H"
+        end
+      end
     end
   end
 end
