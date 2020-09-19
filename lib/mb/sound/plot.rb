@@ -51,6 +51,11 @@ module MB
         @debug = false
         @t = Thread.new do read_loop end
 
+        at_exit do
+          @timeout = 1
+          close rescue nil
+        end
+
         # Wait for any output
         wait_for('')
 
@@ -104,23 +109,25 @@ module MB
 
       # Stops gnuplot and closes the connecting pipes.
       def close
-        raise 'Already closed' if @pid.nil?
+        return if @pid.nil?
 
-        begin
-          @stdin.puts 'exit'
-          @stdin.puts ''
-          @stdin.puts ''
-          wait_for('gnuplot>')
-        rescue => e
-          puts "Could not exit gnuplot: #{e}"
-        end
+        e = nil
+
+        @stdin.puts 'exit'
+        @stdin.puts ''
+        @stdin.puts ''
+        wait_for(/plot>.*exit/) rescue e = $!
 
         Process.kill(:TERM, @pid)
         @stdin&.close
         @stdin = nil
 
-        Timeout.timeout(@timeout) do
-          Process.wait(@pid)
+        begin
+          Timeout.timeout(@timeout) do
+            Process.wait(@pid)
+          end
+        rescue => e
+          e ||= $!
         end
 
         @run = false
@@ -131,6 +138,8 @@ module MB
         @pid = nil
         @rows = nil
         @cols = nil
+
+        raise e if e
       end
 
       def logscale(enabled = true)
