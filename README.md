@@ -81,8 +81,6 @@ See the Examples section for some things to try.
 If you're already familiar with Ruby and Gems, then you can add this repo as a
 dependency to a new project's Gemfile.
 
-*TODO: add gemspec so this actually works*
-
 ```ruby
 # your-project/Gemfile
 gem 'mb-sound', git: 'git@github.com:mike-bourgeous/mb-sound.git'
