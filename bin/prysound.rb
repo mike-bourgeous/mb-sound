@@ -26,9 +26,20 @@ If you're new to Pry, check out https://pry.github.io/.
 
 \e[1mls\e[0m (for "list") to get a list of the easiest to use sound functions.
 
-\e[1m#{MB::Sound::U.syntax("Dir['sounds/**/*.*']")}\e[0m to get a list of included sounds.
+\e[1;32m#{MB::Sound::U.syntax("Dir['sounds/**/*.*']")}\e[0m to get a list of included sounds.
 
-\e[1m#{MB::Sound::U.syntax("play('sounds/sine/sine_100_1s_mono.flac')")}\e[0m to play a sound file.
+\e[1;33m#{MB::Sound::U.syntax("play 'sounds/sine/sine_100_1s_mono.flac'")}\e[0m to play a sound file.
+
+\e[1;33m#{MB::Sound::U.syntax("play 123.hz")}\e[0m to play a 123Hz tone for a few seconds.
+
+\e[1;33m#{MB::Sound::U.syntax("play 123.hz.triangle.at(-20.db).forever")}\e[0m to play a 123Hz triangle wave tone forever.
+
+\e[1;35m#{MB::Sound::U.syntax("plot 123.hz")}\e[0m to graph part of a 123Hz tone.
+
+\e[1;35m#{MB::Sound::U.syntax("plot 123.hz, all: true")}\e[0m to graph a 123Hz tone as it would be played.
+
+\e[1;35m#{MB::Sound::U.syntax("plot 'sounds/sine/sine_100_1s_mono.flac', all: true")}\e[0m to graph a
+sound file at the same speed it would be played.
 
 \e[1m#{MB::Sound::U.syntax('cd ::')}\e[0m for experienced Ruby/Pry users to leave the sound context.
 

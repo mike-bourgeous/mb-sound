@@ -100,9 +100,11 @@ module MB
         self
       end
 
-      # Generates +count+ samples of the tone.  The tone cannot be changed
-      # after this method is called.
-      def generate(count = 48000)
+      # Generates +count+ samples of the tone, defaulting to the duration of
+      # the tone, or 48000 samples if duration is infinite.  The tone
+      # parameters cannot be changed after this method is called.
+      def generate(count = nil)
+        count ||= @duration ? @duration * @rate : 48000
         @oscillator ||= MB::Sound::Oscillator.new(
           @wave_type,
           frequency: @frequency,
@@ -115,6 +117,8 @@ module MB
       # Writes the tone's full duration to the +output+ stream.  The tone will
       # be written into every channel of the output stream (TODO: support
       # different channels) at the output stream's sample rate.
+      #
+      # The tone parameters cannot be changed after this method is called.
       def write(output)
         # TODO: Fade in and out at the start and end
 

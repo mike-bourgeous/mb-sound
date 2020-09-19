@@ -240,7 +240,6 @@ module MB
         end
 
         command 'unset multiplot'
-        command 'pause 0.01'
 
         if @terminal == 'dumb'
           print_terminal_plot(print)
@@ -256,7 +255,7 @@ module MB
       private
 
       def print_terminal_plot(print)
-        buf = read.reject { |l| l.empty? || l.include?('plot>') }
+        buf = read.reject { |l| l.empty? || l.include?('plot>') || l.strip.start_with?(/[[:alpha:]]/) }
         start_index = buf.index { |l| l.include?('+----') }
         lines = buf[start_index..-1]
 
