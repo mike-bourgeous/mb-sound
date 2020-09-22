@@ -100,6 +100,11 @@ module MB
         self
       end
 
+      # Converts this Tone to the nearest Note based on its frequency.
+      def to_note
+        MB::Sound::Note.new(self)
+      end
+
       # Generates +count+ samples of the tone, defaulting to the duration of
       # the tone, or 48000 samples if duration is infinite.  The tone
       # parameters cannot be changed after this method is called.
