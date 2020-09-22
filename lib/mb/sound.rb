@@ -41,22 +41,23 @@ module MB
     # buffer or tone is given, the sample rate should be specified (defaults to
     # 48k).  The sample rate is ignored for an audio filename.
     def self.play(file_tone_data, rate: 48000, gain: 1.0)
-      puts "\e[36mPlaying\e[0m #{MB::Sound::U.highlight(file_tone_data)}"
+      header = "\e[H\e[J\e[36mPlaying\e[0m #{MB::Sound::U.highlight(file_tone_data)}"
+      puts header
 
       # TODO: Allow plotting while playing
       case file_tone_data
       when String
-        return play_file(file_tone_data, gain: gain)
+        return play_file(file_tone_data, gain: gain, plot: { header_lines: header.lines.count })
 
       when Array
         data = file_tone_data
         channels = data.length < 2 ? 2 : data.length
         data = data * 2 if data.length < 2
-        output = MB::Sound.output(rate: rate, channels: channels)
+        output = MB::Sound.output(rate: rate, channels: channels, plot: { header_lines: header.lines.count })
         output.write(data)
 
       when Tone
-        output = MB::Sound.output(rate: rate)
+        output = MB::Sound.output(rate: rate, plot: { header_lines: header.lines.count })
         file_tone_data.write(output)
 
       else
@@ -70,9 +71,9 @@ module MB
     # MB::Sound.output.  The +:channels+ parameter may be used to force mono
     # playback (mono sound is converted to stereo by default), or to ask ffmpeg
     # to upmix or downmix audio to a different number of channels.
-    def self.play_file(filename, channels: nil, gain: 1.0)
+    def self.play_file(filename, channels: nil, gain: 1.0, plot: true)
       input = MB::Sound::FFMPEGInput.new(filename, channels: channels)
-      output = MB::Sound.output(channels: channels || (input.channels < 2 ? 2 : input.channels))
+      output = MB::Sound.output(channels: channels || (input.channels < 2 ? 2 : input.channels), plot: plot)
 
       # TODO: Move the loop to a processing helper method when those are added
       loop do
@@ -129,20 +130,30 @@ module MB
     # take precedence.
     #
     # See FFMPEGOutput and AlsaOutput for more flexible playback.
-    def self.output(rate: 48000, channels: 2, device: nil, buffer_size: nil)
+    #
+    # Pass either true or a Hash of options for MB::Sound::PlotOutput in
+    # +:plot+ to enable live plotting.
+    def self.output(rate: 48000, channels: 2, device: nil, buffer_size: nil, plot: nil)
+      o = nil
       case RUBY_PLATFORM
       when /linux/
         if device
-          MB::Sound::AlsaOutput.new(device: device, rate: rate, channels: channels, buffer_size: buffer_size)
+          o = MB::Sound::AlsaOutput.new(device: device, rate: rate, channels: channels, buffer_size: buffer_size)
         elsif `pgrep pulseaudio`.strip.length > 0
-          MB::Sound::AlsaOutput.new(device: 'pulse', rate: rate, channels: channels, buffer_size: buffer_size)
+          o = MB::Sound::AlsaOutput.new(device: 'pulse', rate: rate, channels: channels, buffer_size: buffer_size)
         else
-          MB::Sound::AlsaOutput.new(device: 'default', rate: rate, channels: channels, buffer_size: buffer_size)
+          o = MB::Sound::AlsaOutput.new(device: 'default', rate: rate, channels: channels, buffer_size: buffer_size)
         end
 
       else
         raise NotImplementedError, 'TODO: support other platforms'
       end
+
+      if plot
+        o = MB::Sound::PlotOutput.new(output, **(plot == true ? {} : plot))
+      end
+
+      o
     end
 
     # Endlessly streams audio in non-overlapping +:block_size+ chunks from
@@ -154,7 +165,7 @@ module MB
     # Press Ctrl-C to interrupt, or call break in the block.
     def self.loopback(rate: 48000, channels: 2, block_size: 512)
       inp = input(rate: rate, channels: channels, buffer_size: block_size)
-      outp = output(rate: rate, channels: channels, buffer_size: block_size)
+      outp = output(rate: rate, channels: channels, buffer_size: block_size, plot: true)
       loop do
         data = inp.read(block_size)
         data = yield data if block_given?
@@ -261,3 +272,4 @@ require_relative 'sound/oscillator'
 require_relative 'sound/tone'
 require_relative 'sound/note'
 require_relative 'sound/plot'
+require_relative 'sound/plot_output'
