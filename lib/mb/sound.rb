@@ -239,6 +239,26 @@ module MB
         end
       end
     end
+
+    # Silly experiment for defining note names as ruby constants.
+    def self.const_missing(name)
+      name = name.to_s
+      if name =~ /\A([A-G])([sb]?)([0-9])\z/
+        note = $1
+        accidental = $2
+        octave = $3.to_i
+        octave += (note.upcase.ord - 'A'.ord).to_f / 7.0 # 7tet is not exactly right
+        case accidental
+        when 's'
+          octave += 1.0 / 12.0
+        when 'b'
+          octave -= 1.0 / 12.0
+        end
+        const_set(name, (440.0 * 2.0 ** (octave - 4.0)).hz)
+      else
+        super(name)
+      end
+    end
   end
 end
 
