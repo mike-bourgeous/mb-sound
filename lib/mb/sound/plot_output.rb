@@ -21,32 +21,46 @@ module MB
         if graphical
           @p = MB::Sound::Plot.new
         else
-          @p = MB::Sound::Plot.terminal(height_fraction: 0.7)
+          @p = MB::Sound::Plot.terminal(height_fraction: (U.height - header_lines - 2).to_f / U.height)
         end
 
-        # Clear existing text on the screen
-        puts "\e[H#{@header_lines + 1}"
-        puts "\e[K\n" * (IO.console.winsize[0] - header_lines - 1)
+        @min = -0.1
+        @max = 0.1
 
-        @run = true
-        @t = Thread.new(&method(:plot_thread))
+        @next_time = nil
       end
 
       # Writes the data to the output, saves it for the plotting thread, then
       # wakes up the plotting thread.
       def write(data)
         @output.write(data)
-        @data = data
-        @t.wakeup
+
+        period = data[0].length.to_f / @output.rate
+        now = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+
+        # Subtract some time to build up a buffer before plotting
+        first_time = @next_time.nil?
+        @next_time ||= Process.clock_gettime(Process::CLOCK_MONOTONIC) - 0.2
+
+        remaining = @next_time - now
+        this_time = @next_time
+        @next_time += period
+
+        if remaining > 0.5 * period || first_time
+          plot(data)
+
+          # The sleep is necessary to maintain sync
+          remaining = this_time - Process.clock_gettime(Process::CLOCK_MONOTONIC)
+          sleep 0.75 * remaining if remaining > 0
+        elsif remaining < 0
+          # Force a plot eventually for really large lags (e.g. when looping
+          # input to output)
+          @next_time += 0.1 * period
+        end
       end
 
       # Stops the plotting thread and closes the output stream.
       def close
-        @run = false
-        @t.kill
-        @t.join
-        @data = nil
-        @last_data = nil
         puts "\e[#{@p.height + @header_lines + 2}H"
         @p.close
         @output.close
@@ -54,24 +68,22 @@ module MB
 
       private
 
-      def plot_thread
-        while @run do
-          if @last_data != @data
-            @last_data = @data
+      def plot(data)
+        puts "\e[#{@header_lines + 1}H\e[36mPress Ctrl-C to stop\e[0m\e[K"
 
-            puts "\e[#{@header_lines + 2}H\e[36mPress Ctrl-C to stop\e[0m\e[K"
+        samples = [@window_size, data[0].length].min
 
-            @p.yrange(@last_data.map(&:min).min, @last_data.map(&:max).max)
+        max = data.map { |c| c.abs.max * 0.999 }.max
+        @max = (max * 2).ceil * 0.5 if max > @max
 
-            samples = [@window_size, @last_data[0].length].min
-            d = @last_data.map.with_index.map { |c, idx|
-              [idx, c[-samples..-1]]
-            }.to_h
-            @p.plot(d)
-          end
+        @p.xrange(0, samples)
+        @p.yrange(-@max, @max)
 
-          sleep
-        end
+        d = data.map.with_index.map { |c, idx|
+          [idx, c[-samples..-1]]
+        }.to_h
+
+        @p.plot(d)
       end
     end
   end

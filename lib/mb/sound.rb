@@ -40,24 +40,25 @@ module MB
     # given, or an audio buffer if an audio buffer is given.  If an audio
     # buffer or tone is given, the sample rate should be specified (defaults to
     # 48k).  The sample rate is ignored for an audio filename.
-    def self.play(file_tone_data, rate: 48000, gain: 1.0)
+    def self.play(file_tone_data, rate: 48000, gain: 1.0, plot: nil)
       header = "\e[H\e[J\e[36mPlaying\e[0m #{MB::Sound::U.highlight(file_tone_data)}"
       puts header
 
-      # TODO: Allow plotting while playing
+      plot = { header_lines: header.lines.count } if plot.nil?
+
       case file_tone_data
       when String
-        return play_file(file_tone_data, gain: gain, plot: { header_lines: header.lines.count })
+        return play_file(file_tone_data, gain: gain, plot: plot)
 
       when Array
         data = file_tone_data
         channels = data.length < 2 ? 2 : data.length
         data = data * 2 if data.length < 2
-        output = MB::Sound.output(rate: rate, channels: channels, plot: { header_lines: header.lines.count })
+        output = MB::Sound.output(rate: rate, channels: channels, plot: plot)
         output.write(data)
 
       when Tone
-        output = MB::Sound.output(rate: rate, plot: { header_lines: header.lines.count })
+        output = MB::Sound.output(rate: rate, plot: plot)
         file_tone_data.write(output)
 
       else
@@ -72,12 +73,12 @@ module MB
     # playback (mono sound is converted to stereo by default), or to ask ffmpeg
     # to upmix or downmix audio to a different number of channels.
     def self.play_file(filename, channels: nil, gain: 1.0, plot: true)
-      input = MB::Sound::FFMPEGInput.new(filename, channels: channels)
+      input = MB::Sound::FFMPEGInput.new(filename, channels: channels, resample: 48000)
       output = MB::Sound.output(channels: channels || (input.channels < 2 ? 2 : input.channels), plot: plot)
 
-      # TODO: Move the loop to a processing helper method when those are added
+      # TODO: Move all playback loops to a processing helper method when those are added
       loop do
-        data = input.read(1000)
+        data = input.read(960)
         break if data.nil? || data.empty? || data[0].empty?
 
         data.map { |d|
@@ -150,7 +151,7 @@ module MB
       end
 
       if plot
-        o = MB::Sound::PlotOutput.new(output, **(plot == true ? {} : plot))
+        o = MB::Sound::PlotOutput.new(o, **(plot == true ? {} : plot))
       end
 
       o
@@ -164,7 +165,10 @@ module MB
     #
     # Press Ctrl-C to interrupt, or call break in the block.
     def self.loopback(rate: 48000, channels: 2, block_size: 512)
+      puts "\e[H\e[J"
+
       inp = input(rate: rate, channels: channels, buffer_size: block_size)
+      inp.read(1)
       outp = output(rate: rate, channels: channels, buffer_size: block_size, plot: true)
       loop do
         data = inp.read(block_size)
@@ -191,7 +195,6 @@ module MB
         header_lines = all
       end
 
-      # TODO: Allow plotting audio input in realtime
       case file_tone_data
       when Array || Numo::NArray
         data = file_tone_data

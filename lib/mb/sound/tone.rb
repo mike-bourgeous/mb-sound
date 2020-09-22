@@ -128,16 +128,16 @@ module MB
         # TODO: Fade in and out at the start and end
 
         @rate = output.rate
-        samples = @duration * @rate if @duration
+        samples_left = @duration * @rate if @duration
 
         loop do
-          current_samples = [samples || 1000, 1000].min
+          current_samples = [samples_left || 960, 960].min
           d = [ generate(current_samples) ]
           output.write(d * output.channels)
 
-          if samples
-            samples -= current_samples
-            break if samples <= 0
+          if samples_left
+            samples_left -= current_samples
+            break if samples_left <= 0
           end
         end
       end
