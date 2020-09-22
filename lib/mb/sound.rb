@@ -239,6 +239,13 @@ module MB
         end
       end
     end
+
+    # Silly experiment for retrieving notes by name as ruby constants.
+    def self.const_missing(name)
+      MB::Sound::Note.new(name)
+    rescue ArgumentError
+      super(name)
+    end
   end
 end
 
@@ -252,4 +259,5 @@ require_relative 'sound/alsa_input'
 require_relative 'sound/alsa_output'
 require_relative 'sound/oscillator'
 require_relative 'sound/tone'
+require_relative 'sound/note'
 require_relative 'sound/plot'
