@@ -151,7 +151,10 @@ module MB
       end
 
       if plot
-        o = MB::Sound::PlotOutput.new(o, **(plot == true ? {} : plot))
+        p = { plot: @pt || @pg }
+        p.merge!(plot) if plot.is_a?(Hash)
+
+        o = MB::Sound::PlotOutput.new(o, **p)
       end
 
       o
@@ -164,12 +167,12 @@ module MB
     # Array of Numo::NArrays.
     #
     # Press Ctrl-C to interrupt, or call break in the block.
-    def self.loopback(rate: 48000, channels: 2, block_size: 512)
+    def self.loopback(rate: 48000, channels: 2, block_size: 512, plot: true)
       puts "\e[H\e[J"
 
       inp = input(rate: rate, channels: channels, buffer_size: block_size)
       inp.read(1)
-      outp = output(rate: rate, channels: channels, buffer_size: block_size, plot: true)
+      outp = output(rate: rate, channels: channels, buffer_size: block_size, plot: plot)
       loop do
         data = inp.read(block_size)
         data = yield data if block_given?
@@ -214,7 +217,7 @@ module MB
       end
 
       @pt ||= MB::Sound::Plot.terminal(height_fraction: 0.8)
-      @pg ||= MB::Sound::Plot.new
+      @pg ||= MB::Sound::Plot.new if graphical
       p = graphical ? @pg : @pt
 
       if all == true
@@ -222,7 +225,6 @@ module MB
 
         until offset >= data[0].length
           STDOUT.write("\e[#{header_lines}H\e[36mPress Ctrl-C to stop  \e[1;35m#{offset} / #{data[0].length}\e[0m\e[K\n")
-          p.yrange(data.map(&:min).min, data.map(&:max).max) unless all.nil?
           plot(data, samples: samples, offset: offset, all: nil, graphical: graphical)
 
           now = Process.clock_gettime(Process::CLOCK_MONOTONIC)
@@ -237,7 +239,7 @@ module MB
       else
         data = data.map { |c| c[offset...([offset + samples, c.length].min)] || [] }
 
-        p.yrange(data.map(&:min).min, data.map(&:max).max) unless all.nil?
+        p.yrange(data.map(&:min).min, data.map(&:max).max) if p.respond_to?(:yrange) && !all.nil?
         @lines = p.plot(data.map.with_index { |c, idx| [idx.to_s, c] }.to_h, print: false)
         puts @lines
       end
