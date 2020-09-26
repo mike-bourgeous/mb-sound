@@ -68,7 +68,6 @@ module MB
 
       def detune=(detune)
         @detune = detune
-        set_number(@number + detune / 100.0)
         set_frequency(get_freq)
       end
 
