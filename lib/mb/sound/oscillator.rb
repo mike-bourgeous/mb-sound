@@ -20,7 +20,8 @@ module MB
         square: 1.0,
       }
 
-      attr_accessor :frequency, :phase, :advance, :wave_type, :pre_power, :post_power, :range
+      attr_accessor :frequency, :advance, :wave_type, :pre_power, :post_power, :range
+      attr_reader :phase
 
       # TODO: maybe use a clock provider instead of +advance+?  The challenge is
       # that floating point accuracy goes down as a shared clock advances, and
@@ -50,7 +51,7 @@ module MB
       #             to #sample.  This should be (2 * Math::PI / sample_rate)
       #             for audio oscillators.
       # +random_advance+ - The internal phase is incremented by a random value up to this amount on top of +advance+.
-      def initialize(wave_type, frequency: 1.0, phase: 0.0, range: nil, pre_power: 1.0, post_power: 1.0, advance: Math::PI / 1000.0, random_advance: 0.0)
+      def initialize(wave_type, frequency: 1.0, phase: 0.0, range: nil, pre_power: 1.0, post_power: 1.0, advance: Math::PI / 48000.0, random_advance: 0.0)
         unless WAVE_TYPES.include?(wave_type)
           raise "Invalid wave type #{wave_type.inspect}; only #{WAVE_TYPES.map(&:inspect).join(', ')} are supported"
         end
@@ -77,6 +78,18 @@ module MB
 
         raise "Invalid random advance #{random_advance.inspect}" unless random_advance.is_a?(Numeric)
         @random_advance = random_advance
+      end
+
+      # Changes the phase offset for this oscillator.
+      def phase=(phase)
+        @phi += (phase - @phase)
+        @phase = phase
+        while @phi < 0
+          @phi += 2.0 * Math::PI
+        end
+        while @phi >= 2.0 * Math::PI
+          @phi -= 2.0 * Math::PI
+        end
       end
 
       # Returns the value of the oscillator for a given phase between 0 and 2pi.

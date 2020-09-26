@@ -145,6 +145,14 @@ module MB
       def to_s
         inspect
       end
+
+      private
+
+      # Allows subclasses (e.g. Note) to change the frequency after construction.
+      def set_frequency(freq)
+        @frequency = freq.to_f
+        @oscillator&.frequency = @frequency
+      end
     end
   end
 end

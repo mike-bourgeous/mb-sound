@@ -66,6 +66,12 @@ module MB
         end
       end
 
+      def detune=(detune)
+        @detune = detune
+        set_number(@number + detune / 100.0)
+        set_frequency(get_freq)
+      end
+
       private
 
       # Calculates the frequency based on the note's MIDI note number.
