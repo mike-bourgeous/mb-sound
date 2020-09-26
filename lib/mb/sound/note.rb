@@ -3,7 +3,7 @@ module MB
     # Represents a musical note in the 12-tone equal temperament scale, using
     # MIDI note numbers.
     class Note < Tone
-      # Major scale intervals (for calculating 
+      # Major scale intervals (for calculating note name offsets).
       SCALE_INTERVAL = [
         200,
         200,
@@ -52,25 +52,7 @@ module MB
 
         when String, Symbol
           name = tone_name_number.to_s
-
-          # =~ sets $1, $2, etc.
-          unless name =~ /\A([A-G])([s#b]?)(-?[0-9])([+-]\d+(\.\d+)?)?\z/
-            raise ArgumentError, "Invalid note name format #{name}"
-          end
-
-          note = $1
-          accidental = $2
-          octave = $3.to_i
-          detune = $4&.to_f || 0
-          octave_cents = NOTE_CENTS[note.to_sym]
-          case accidental
-          when 's', '#'
-            octave_cents += 100.0
-          when 'b'
-            octave_cents -= 100.0
-          end
-
-          set_number((octave + 1) * 12 + (octave_cents + detune) / 100.0)
+          set_name(tone_name_number.to_s)
           super(frequency: get_freq)
 
         when Tone
@@ -91,25 +73,47 @@ module MB
         TUNE_FREQ * 2 ** ((@number + @detune / 100.0 - TUNE_NOTE) / 12.0)
       end
 
+      # Sets note name, number, and detuning from a note name string.
+      def set_name(name)
+        # =~ sets $1, $2, etc.
+        unless name =~ /\A([A-G])([s#b]?)(-?[0-9])([+-]\d+(\.\d+)?)?\z/
+          raise ArgumentError, "Invalid note name format #{name}"
+        end
+
+        note = $1
+        accidental = $2
+        octave = $3.to_i
+        detune = $4&.to_f || 0
+        octave_cents = NOTE_CENTS[note.to_sym]
+        case accidental
+        when 's', '#'
+          octave_cents += 100.0
+        when 'b'
+          octave_cents -= 100.0
+        end
+
+        set_number((octave + 1) * 12 + (octave_cents + detune) / 100.0)
+      end
+
       # Sets integer note number, note name, and detuning from the given
       # fractional note number.
       def set_number(number)
-        @number = number
+        @number = number.round
         raise "Note number #{@number} is out of the range 0..127" unless (0..127).cover?(@number)
+
+        @detune = (100 * (number - @number)).round(2)
 
         # Note C4 is 60, octaves start with C
         # TODO: There's probably a cleaner way to do this, maybe just a bigger lookup table
         octave = (@number / 12).floor - 1
         note_in_octave = @number % 12
         octave_cents = note_in_octave * 100
-        closest_cents = SCALE_CENTS.min_by { |c| (c - octave_cents).abs }
+        closest_cents = SCALE_CENTS.min_by { |c| (c - (octave_cents + @detune)).abs }
         note_name = NOTE_NAMES[SCALE_CENTS.index(closest_cents)]
-        @detune = (octave_cents - NOTE_CENTS[note_name]).round(2)
-        if @detune < -50
-          @detune += 100
+        offset = (octave_cents - NOTE_CENTS[note_name]).round(2)
+        if offset < -50
           accidental = 'b'
-        elsif @detune > 50
-          @detune -= 100
+        elsif offset > 50
           accidental = 's'
         end
 
