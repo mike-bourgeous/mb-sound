@@ -111,6 +111,8 @@ module MB
       when /linux/
         if device
           MB::Sound::AlsaInput.new(device: device, rate: rate, channels: channels, buffer_size: buffer_size)
+        elsif `pgrep jackd`.strip.length > 0
+          o = MB::Sound::JackInput.new(ports: channels.times.map { |t| "system:capture_#{t + 1}" }, buffer_size: buffer_size)
         elsif `pgrep pulseaudio`.strip.length > 0
           MB::Sound::AlsaInput.new(device: 'pulse', rate: rate, channels: channels, buffer_size: buffer_size)
         else
@@ -140,6 +142,8 @@ module MB
       when /linux/
         if device
           o = MB::Sound::AlsaOutput.new(device: device, rate: rate, channels: channels, buffer_size: buffer_size)
+        elsif `pgrep jackd`.strip.length > 0
+          o = MB::Sound::JackOutput.new(ports: channels.times.map { |t| "system:playback_#{t + 1}" }, buffer_size: buffer_size)
         elsif `pgrep pulseaudio`.strip.length > 0
           o = MB::Sound::AlsaOutput.new(device: 'pulse', rate: rate, channels: channels, buffer_size: buffer_size)
         else
@@ -273,6 +277,8 @@ require_relative 'sound/ffmpeg_input'
 require_relative 'sound/ffmpeg_output'
 require_relative 'sound/alsa_input'
 require_relative 'sound/alsa_output'
+require_relative 'sound/jack_input'
+require_relative 'sound/jack_output'
 require_relative 'sound/oscillator'
 require_relative 'sound/tone'
 require_relative 'sound/note'
