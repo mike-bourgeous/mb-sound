@@ -51,7 +51,7 @@ module MB
       #             to #sample.  This should be (2 * Math::PI / sample_rate)
       #             for audio oscillators.
       # +random_advance+ - The internal phase is incremented by a random value up to this amount on top of +advance+.
-      def initialize(wave_type, frequency: 1.0, phase: 0.0, range: nil, pre_power: 1.0, post_power: 1.0, advance: Math::PI / 48000.0, random_advance: 0.0)
+      def initialize(wave_type, frequency: 1.0, phase: 0.0, range: nil, pre_power: 1.0, post_power: 1.0, advance: Math::PI / 24000.0, random_advance: 0.0)
         unless WAVE_TYPES.include?(wave_type)
           raise "Invalid wave type #{wave_type.inspect}; only #{WAVE_TYPES.map(&:inspect).join(', ')} are supported"
         end
