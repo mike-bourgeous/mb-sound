@@ -254,7 +254,7 @@ module MB
         if graphical
           @pg.close
           @pg = nil
-        else
+        elsif @pt.respond_to?(:height)
           puts "\e[#{@pt.height + (header_lines || 2) + 2}H"
         end
       end
