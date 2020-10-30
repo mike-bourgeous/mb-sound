@@ -15,6 +15,7 @@ require 'mb/sound'
 
 def clear
   STDOUT.write("\e[H\e[2J")
+  STDOUT.flush
 end
 
 puts
