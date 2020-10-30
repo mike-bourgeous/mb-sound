@@ -13,8 +13,12 @@ $LOAD_PATH << File.expand_path('../lib', __dir__)
 
 require 'mb/sound'
 
+def clear
+  STDOUT.write("\e[H\e[2J")
+end
+
 puts
-puts `clear` if ARGV.include?('--clear')
+clear if ARGV.include?('--clear')
 
 puts MB::Sound::U.wrap(<<-EOF.strip)
 \e[33;1mWelcome to the interactive sound environment!\e[0m
