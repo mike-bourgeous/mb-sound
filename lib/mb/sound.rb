@@ -40,11 +40,11 @@ module MB
     # given, or an audio buffer if an audio buffer is given.  If an audio
     # buffer or tone is given, the sample rate should be specified (defaults to
     # 48k).  The sample rate is ignored for an audio filename.
-    def self.play(file_tone_data, rate: 48000, gain: 1.0, plot: nil)
+    def self.play(file_tone_data, rate: 48000, gain: 1.0, plot: nil, graphical: false)
       header = "\e[H\e[J\e[36mPlaying\e[0m #{MB::Sound::U.highlight(file_tone_data)}"
       puts header
 
-      plot = { header_lines: header.lines.count } if plot.nil?
+      plot = { header_lines: header.lines.count, graphical: graphical } if plot.nil? || plot == true
 
       case file_tone_data
       when String
@@ -52,10 +52,16 @@ module MB
 
       when Array
         data = file_tone_data
-        channels = data.length < 2 ? 2 : data.length
         data = data * 2 if data.length < 2
+        channels = data.length
+
+        # TODO: if this code needs to be modified much in the future, come up
+        # with a shared way of chunking data that can work for all play and
+        # plot methods
         output = MB::Sound.output(rate: rate, channels: channels, plot: plot)
-        output.write(data)
+        (0...data[0].length).step(960).each do |offset|
+          output.write(data.map { |c| c[offset...([offset + 960, c.length].min)] })
+        end
 
       when Tone
         output = MB::Sound.output(rate: rate, plot: plot)
@@ -155,7 +161,8 @@ module MB
       end
 
       if plot
-        p = { plot: @pt || @pg }
+        graphical = plot.is_a?(Hash) && plot[:graphical] || false
+        p = { plot: plotter(graphical: graphical) }
         p.merge!(plot) if plot.is_a?(Hash)
 
         o = MB::Sound::PlotOutput.new(o, **p)
@@ -185,6 +192,14 @@ module MB
     ensure
       inp&.close
       outp&.close
+    end
+
+    # Returns either a terminal-based plotting object if +graphical+ is false,
+    # or a graphical window-based plotting object if +graphical+ is true.
+    def self.plotter(graphical:)
+      @pt ||= MB::Sound::Plot.terminal(height_fraction: 0.8)
+      @pg ||= MB::Sound::Plot.new if graphical
+      graphical ? @pg : @pt
     end
 
     # Plots a subset of the given audio file, test tone, or data, starting at
@@ -220,9 +235,7 @@ module MB
         raise "Cannot plot type #{file_tone_data.class.name}"
       end
 
-      @pt ||= MB::Sound::Plot.terminal(height_fraction: 0.8)
-      @pg ||= MB::Sound::Plot.new if graphical
-      p = graphical ? @pg : @pt
+      p = plotter(graphical: graphical)
 
       if all == true
         t = Process.clock_gettime(Process::CLOCK_MONOTONIC)
