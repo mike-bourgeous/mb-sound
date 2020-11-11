@@ -11,6 +11,8 @@ module MB
     #
     # Created because Numo::Gnuplot was giving an error.
     class Plot
+      class StopReadLoop < RuntimeError; end
+
       # Creates an ASCII-art plotter sized to the terminal.
       def self.terminal(width_fraction: 1.0, height_fraction: 0.5, width: nil, height: nil)
         cols = (((width || MB::Sound::U.width) - 1) * width_fraction).round
@@ -111,35 +113,43 @@ module MB
       def close
         return if @pid.nil?
 
-        e = nil
+        err = nil
 
         @stdin.puts 'exit'
         @stdin.puts ''
         @stdin.puts ''
-        wait_for(/plot>.*exit/) rescue e = $!
+        @stdin.flush
+        wait_for(/plot>.*exit/) rescue err ||= $!
 
-        Process.kill(:TERM, @pid)
         @stdin&.close
         @stdin = nil
 
         begin
-          Timeout.timeout(@timeout) do
-            Process.wait(@pid)
+          begin
+            Timeout.timeout(@timeout) do
+              Process.wait(@pid)
+            end
+          rescue Timeout::Error
+            Process.kill(:TERM, @pid)
+            Timeout.timeout(@timeout) do
+              Process.wait(@pid)
+            end
           end
         rescue => e
-          e ||= $!
+          err ||= $!
         end
 
         @run = false
-        @t&.join
+        @t&.raise StopReadLoop, 'Closing the plotter' if @t&.alive?
         @stdout&.close
+        @t&.join rescue err ||= $!
         @stdout = nil
 
         @pid = nil
         @rows = nil
         @cols = nil
 
-        raise e if e
+        raise err if err
       end
 
       def logscale(enabled = true)
@@ -172,6 +182,8 @@ module MB
       # If +:print+ is true, then 'dumb' terminal plots are printed to the
       # console.  If false, then plots are returned as an array of lines.
       def plot(data, rows: nil, columns: nil, print: true)
+        raise 'Plotter is closed' unless @pid
+
         @read_mutex.synchronize {
           if @terminal == 'dumb'
             @buf.clear
@@ -343,8 +355,9 @@ module MB
 
           puts "\e[33mGNUPLOT: \e[1m#{line}\e[0m" if @debug
         end
-      rescue => e
-        e
+
+      rescue StopReadLoop, Errno::EIO
+        # Ignore
       end
 
       def set_multiplot(rows, cols)
