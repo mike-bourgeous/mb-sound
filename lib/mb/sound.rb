@@ -50,8 +50,8 @@ module MB
       when String
         return play_file(file_tone_data, gain: gain, plot: plot)
 
-      when Array
-        data = file_tone_data
+      when Array, Numo::NArray
+        data = make_array_plottable(file_tone_data)
         data = data * 2 if data.length < 2
         channels = data.length
 
@@ -202,6 +202,16 @@ module MB
       graphical ? @pg : @pt
     end
 
+    # If given a raw NArray or an array of numeric values, wraps it in an
+    # Array.
+    def self.make_array_plottable(array)
+      if array.is_a?(Numo::NArray) || (array.is_a?(Array) && !array[0].is_a?(Numo::NArray))
+        array = [array]
+      end
+
+      array
+    end
+
     # Plots a subset of the given audio file, test tone, or data, starting at
     # +offset+, and plotting the following +samples+ samples.  If +all+ is true
     # then the entirety of the file, tone, or data will be plotted in slices of
@@ -218,10 +228,7 @@ module MB
 
       case file_tone_data
       when Array, Numo::NArray
-        data = file_tone_data
-        if data.is_a?(Numo::NArray) || (data.is_a?(Array) && !data[0].is_a?(Numo::NArray))
-          data = [data]
-        end
+        data = make_array_plottable(file_tone_data)
 
       when String
         # TODO: Read speaker names
