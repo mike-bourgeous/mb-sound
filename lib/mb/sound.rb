@@ -10,6 +10,22 @@ module MB
   module Sound
     class FileExistsError < IOError; end
 
+    # Make sure that plotters are resized when the terminal window changes
+    # size.
+    trap :WINCH do
+      Thread.new do
+        old_pt = @pt
+        old_pg = @pg
+        @pt&.close
+        @pg&.close
+        @pt = nil
+        @pg = nil
+
+        plotter(graphical: false) if old_pt
+        plotter(graphical: true) if old_pt
+      end
+    end
+
     # Reads an entire sound file into an array of Numo::NArrays, one per
     # channel.  Always resamples to 48kHz.
     #
