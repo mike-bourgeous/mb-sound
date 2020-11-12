@@ -204,7 +204,8 @@ module MB
 
     # Plots a subset of the given audio file, test tone, or data, starting at
     # +offset+, and plotting the following +samples+ samples.  If +all+ is true
-    # then the entirety of the file, tone, or data will be plotted.
+    # then the entirety of the file, tone, or data will be plotted in slices of
+    # +samples+ samples.
     def self.plot(file_tone_data, samples: 960, offset: 0, all: false, graphical: false)
       # FIXME: This function is hard to read
       STDOUT.write("\e[H\e[2J") if all == true
@@ -213,14 +214,12 @@ module MB
         header = "\e[36mPlotting #{MB::Sound::U.highlight(file_tone_data)}\e[0m"
         header_lines = header.lines.count
         puts header
-      elsif all.is_a?(Numeric)
-        header_lines = all
       end
 
       case file_tone_data
-      when Array || Numo::NArray
+      when Array, Numo::NArray
         data = file_tone_data
-        if data.is_a?(Array) && !data[0].is_a?(Numo::NArray)
+        if data.is_a?(Numo::NArray) || (data.is_a?(Array) && !data[0].is_a?(Numo::NArray))
           data = [data]
         end
 
@@ -242,6 +241,9 @@ module MB
 
         until offset >= data[0].length
           STDOUT.write("\e[#{header_lines}H\e[36mPress Ctrl-C to stop  \e[1;35m#{offset} / #{data[0].length}\e[0m\e[K\n")
+
+          p.yrange(data.map(&:min).min, data.map(&:max).max) if p.respond_to?(:yrange)
+
           plot(data, samples: samples, offset: offset, all: nil, graphical: graphical)
 
           now = Process.clock_gettime(Process::CLOCK_MONOTONIC)
@@ -257,6 +259,7 @@ module MB
         data = data.map { |c| c[offset...([offset + samples, c.length].min)] || [] }
 
         p.yrange(data.map(&:min).min, data.map(&:max).max) if p.respond_to?(:yrange) && !all.nil?
+
         @lines = p.plot(data.map.with_index { |c, idx| [idx.to_s, c] }.to_h, print: false)
         puts @lines
       end
