@@ -24,7 +24,7 @@ module MB
       # is unavailable.
       def self.wrap(text)
         require 'word_wrap'
-        WordWrap.ww(text, width - 1, true)
+        WordWrap.ww(text, width - 1, true) # FIXME: doesn't ignore ANSI escapes
       rescue LoadError
         text
       end

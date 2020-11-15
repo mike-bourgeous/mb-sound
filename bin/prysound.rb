@@ -43,8 +43,9 @@ If you're new to Pry, check out https://pry.github.io/.
 
 \e[1;35m#{MB::Sound::U.syntax("plot 123.hz, all: true")}\e[0m to graph a 123Hz tone as it would be played.
 
-\e[1;35m#{MB::Sound::U.syntax("plot 'sounds/sine/sine_100_1s_mono.flac', all: true")}\e[0m to graph a
-sound file at the same speed it would be played.
+\e[1;35m#{MB::Sound::U.syntax("plot 'sounds/sine/sine_100_1s_mono.flac', all: true")}\e[0m to graph a sound file at the same speed it would be played.
+
+\e[1;33m#{MB::Sound::U.syntax("123.hz.wavelength")}\e[0m to show the wavelength of a 123Hz tone (at room temperature at sea level).
 
 \e[1m#{MB::Sound::U.syntax('cd ::')}\e[0m for experienced Ruby/Pry users to leave the sound context.
 

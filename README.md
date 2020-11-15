@@ -102,6 +102,35 @@ These examples can be run in the `bin/prysound.rb` interactive environment.
 end
 ```
 
+### Calculating wavelength and frequency
+
+There are DSL methods for working with distances and wavelengths:
+
+```ruby
+1.hz.wavelength
+# => 343 meters
+
+343.meters.hz
+# => #<MB::Sound::Tone:0x000055f66a23a2b0
+# @amplitude=0.1,
+# @duration=5.0,
+# @frequency=1.0,
+# @oscillator=nil,
+# @rate=48000,
+# @wave_type=:sine,
+# @wavelength=343.0 meters>
+```
+
+You can convert between feet and meters:
+
+```ruby
+1000.hz.wavelength.feet
+# => 1.1253280839895015 feet
+
+1.foot.meters
+# => 0.30479999999999996 meters
+```
+
 ### Playing a sound file
 
 ```ruby
