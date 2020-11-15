@@ -26,8 +26,31 @@ module MB
       #
       # Creating 8 unconnected output ports:
       #     MB::Sound::JackOutput.new(ports: 8)
+      #
+      # Connecting to the system output ports, or using the DEVICE or
+      # OUTPUT_DEVICE environment variable as prefix (environment variables
+      # override the +device:+ key):
+      #     MB::Sound::JackOutput.new(ports: { device: nil, count: 8 })
+      #     MB::Sound::JackOutput.new(ports: { device: 'system:playback_', count: 8 })
+      #
+      #     # Run timemachine -c 8
+      #     ENV['DEVICE'] = 'TimeMachine:in_'
+      #     MB::Sound::JackOutput.new(ports: { device: 'whatever', count: 8 })
+      #
+      #     # Or
+      #     ENV['OUTPUT_DEVICE'] = 'TimeMachine:in_'
+      #     MB::Sound::JackOutput.new(ports: { device: 'whatever', count: 8 })
       def initialize(ports:, rate: 48000, buffer_size: 2048)
-        ports = [nil] * ports if ports.is_a?(Integer)
+        case ports
+        when Integer
+          ports = [nil] * ports
+        when Hash
+          prefix = ENV['OUTPUT_DEVICE'] || ENV['DEVICE'] || ports[:device] || 'system:playback_'
+          ports = ports[:count].times.map { |c|
+            "#{prefix}#{c + 1}"
+          }
+        end
+
         @ports = ports
         @rate = rate
         @channels = @ports.size

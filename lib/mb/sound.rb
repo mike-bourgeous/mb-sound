@@ -56,7 +56,7 @@ module MB
     # given, or an audio buffer if an audio buffer is given.  If an audio
     # buffer or tone is given, the sample rate should be specified (defaults to
     # 48k).  The sample rate is ignored for an audio filename.
-    def self.play(file_tone_data, rate: 48000, gain: 1.0, plot: nil, graphical: false)
+    def self.play(file_tone_data, rate: 48000, gain: 1.0, plot: nil, graphical: false, device: nil)
       header = "\e[H\e[J\e[36mPlaying\e[0m #{MB::Sound::U.highlight(file_tone_data)}"
       puts header
 
@@ -64,7 +64,7 @@ module MB
 
       case file_tone_data
       when String
-        return play_file(file_tone_data, gain: gain, plot: plot)
+        return play_file(file_tone_data, gain: gain, plot: plot, device: device)
 
       when Array, Numo::NArray
         data = make_array_plottable(file_tone_data)
@@ -74,13 +74,13 @@ module MB
         # TODO: if this code needs to be modified much in the future, come up
         # with a shared way of chunking data that can work for all play and
         # plot methods
-        output = MB::Sound.output(rate: rate, channels: channels, plot: plot)
+        output = MB::Sound.output(rate: rate, channels: channels, plot: plot, device: device)
         (0...data[0].length).step(960).each do |offset|
           output.write(data.map { |c| c[offset...([offset + 960, c.length].min)] })
         end
 
       when Tone
-        output = MB::Sound.output(rate: rate, plot: plot)
+        output = MB::Sound.output(rate: rate, plot: plot, device: device)
         file_tone_data.write(output)
 
       else
@@ -94,9 +94,9 @@ module MB
     # MB::Sound.output.  The +:channels+ parameter may be used to force mono
     # playback (mono sound is converted to stereo by default), or to ask ffmpeg
     # to upmix or downmix audio to a different number of channels.
-    def self.play_file(filename, channels: nil, gain: 1.0, plot: true)
+    def self.play_file(filename, channels: nil, gain: 1.0, plot: true, device: nil)
       input = MB::Sound::FFMPEGInput.new(filename, channels: channels, resample: 48000)
-      output = MB::Sound.output(channels: channels || (input.channels < 2 ? 2 : input.channels), plot: plot)
+      output = MB::Sound.output(channels: channels || (input.channels < 2 ? 2 : input.channels), plot: plot, device: device)
 
       # TODO: Move all playback loops to a processing helper method when those are added
       loop do
@@ -152,7 +152,8 @@ module MB
     # For output types that support naming a specific device, the OUTPUT_DEVICE
     # environment variable, the DEVICE environment variable or +:device+
     # parameter may be used to override the default.  Environment variables
-    # take precedence.
+    # take precedence.  For JackD, the device is a prefix for port names, with
+    # the default being 'system:playback_'.
     #
     # See FFMPEGOutput and AlsaOutput for more flexible playback.
     #
@@ -162,14 +163,12 @@ module MB
       o = nil
       case RUBY_PLATFORM
       when /linux/
-        if device
-          o = MB::Sound::AlsaOutput.new(device: device, rate: rate, channels: channels, buffer_size: buffer_size)
-        elsif `pgrep jackd`.strip.length > 0
-          o = MB::Sound::JackOutput.new(ports: channels.times.map { |t| "system:playback_#{t + 1}" }, buffer_size: buffer_size)
+        if `pgrep jackd`.strip.length > 0
+          o = MB::Sound::JackOutput.new(ports: { device: device, count: channels }, buffer_size: buffer_size)
         elsif `pgrep pulseaudio`.strip.length > 0
           o = MB::Sound::AlsaOutput.new(device: 'pulse', rate: rate, channels: channels, buffer_size: buffer_size)
         else
-          o = MB::Sound::AlsaOutput.new(device: 'default', rate: rate, channels: channels, buffer_size: buffer_size)
+          o = MB::Sound::AlsaOutput.new(device: device || 'default', rate: rate, channels: channels, buffer_size: buffer_size)
         end
 
       else
