@@ -125,16 +125,17 @@ module MB
     # For input types that support naming a specific device, the INPUT_DEVICE
     # environment variable, the DEVICE environment variable, or the +:device+
     # parameter may be used to override the default.  Environment variables
-    # take precedence.
+    # take precedence.  For Jackd, the device is a prefix for port names, with
+    # the default being 'system:capture_'.
     #
-    # See FFMPEGInput and AlsaInput for more flexible recording.
+    # See FFMPEGInput, JackInput, and AlsaInput for more flexible recording.
     def self.input(rate: 48000, channels: 2, device: nil, buffer_size: nil)
       case RUBY_PLATFORM
       when /linux/
         if device
           MB::Sound::AlsaInput.new(device: device, rate: rate, channels: channels, buffer_size: buffer_size)
         elsif `pgrep jackd`.strip.length > 0
-          o = MB::Sound::JackInput.new(ports: channels.times.map { |t| "system:capture_#{t + 1}" }, buffer_size: buffer_size)
+          o = MB::Sound::JackInput.new(ports: { device: device, count: channels }, buffer_size: buffer_size)
         elsif `pgrep pulseaudio`.strip.length > 0
           MB::Sound::AlsaInput.new(device: 'pulse', rate: rate, channels: channels, buffer_size: buffer_size)
         else
@@ -155,7 +156,7 @@ module MB
     # take precedence.  For JackD, the device is a prefix for port names, with
     # the default being 'system:playback_'.
     #
-    # See FFMPEGOutput and AlsaOutput for more flexible playback.
+    # See FFMPEGOutput, JackOutput, and AlsaOutput for more flexible playback.
     #
     # Pass either true or a Hash of options for MB::Sound::PlotOutput in
     # +:plot+ to enable live plotting.

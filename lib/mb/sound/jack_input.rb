@@ -25,13 +25,34 @@ module MB
       # used in any processing algorithms.  This needs to be at least twice the
       # jackd buffer size.
       #
+      # Examples:
+      #
       # Recording from the first two system input channels:
       #     MB::Sound::JackInput.new(ports: ['system:capture_1', 'system:capture_2']
       #
       # Creating 8 unconnected input ports:
       #     MB::Sound::JackInput.new(ports: 8)
+      #
+      # Connecting to either the system input ports, or to ports with prefix
+      # specified by the INPUT_DEVICE or DEVICE environment variable
+      # (environment variables override the +device:+ key):
+      #     # Will default to the system capture ports if the env vars are not set
+      #     MB::Sound::JackOutput.new(ports: { device: nil, count: 8 })
+      #
+      #     # Will connect to ZynAddSubFX, if it's running
+      #     ENV['INPUT_DEVICE'] = 'zynaddsubfx:out_'
+      #     MB::Sound::JackInput.new(ports: { device: nil, count: 2 })
       def initialize(ports:, rate: 48000, buffer_size: 2048)
-        ports = [nil] * ports if ports.is_a?(Integer)
+        case ports
+        when Integer
+          ports = [nil] * ports
+        when Hash
+          prefix = ENV['INPUT_DEVICE'] || ENV['DEVICE'] || ports[:device] || 'system:capture_'
+          ports = ports[:count].times.map { |c|
+            "#{prefix}#{c + 1}"
+          }
+        end
+
         @ports = ports
         @rate = rate
         @channels = @ports.size
