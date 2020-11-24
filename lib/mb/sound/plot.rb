@@ -320,8 +320,8 @@ module MB
       def wait_for(text, timeout: nil)
         timeout ||= @timeout
 
-        start = Process.clock_gettime(Process::CLOCK_MONOTONIC)
-        while (Process.clock_gettime(Process::CLOCK_MONOTONIC) - start) < timeout
+        start = ::MB::Sound.clock_now
+        while (::MB::Sound.clock_now - start) < timeout
           # @stdout.expect is locking up on #eof? when combined with the read
           # thread, so we'll just do our own thing.
           @read_mutex.synchronize {

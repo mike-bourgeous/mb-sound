@@ -26,6 +26,12 @@ module MB
       end
     end
 
+    # Returns the current time from the system's monotonically increasing
+    # clock.  A shorthand for Process.clock_gettime(Process::CLOCK_MONOTONIC).
+    def self.clock_now
+      Process.clock_gettime(Process::CLOCK_MONOTONIC)
+    end
+
     # Reads an entire sound file into an array of Numo::NArrays, one per
     # channel.  Always resamples to 48kHz.
     #
@@ -260,7 +266,7 @@ module MB
       p = plotter(graphical: graphical)
 
       if all == true
-        t = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+        t = clock_now
 
         until offset >= data[0].length
           STDOUT.write("\e[#{header_lines}H\e[36mPress Ctrl-C to stop  \e[1;35m#{offset} / #{data[0].length}\e[0m\e[K\n")
@@ -269,7 +275,7 @@ module MB
 
           plot(data, samples: samples, offset: offset, all: nil, graphical: graphical)
 
-          now = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+          now = clock_now
           elapsed = [now - t, 0.1].min
           t = now
 
