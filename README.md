@@ -27,7 +27,7 @@ There are some base packages you'll need first:
 sudo apt-get install ffmpeg gnuplot-qt
 ```
 
-Then you'll want to install Ruby 2.7.1.
+Then you'll want to install Ruby 2.7.2.
 
 If you don't already have a recent version of Ruby installed, and a Ruby version
 manager of your choosing, I highly recommend using [RVM](https://rvm.io).  You
@@ -53,8 +53,8 @@ cd sound_code_series
 
 # Install Ruby
 # (disable-binary is needed on Ubuntu 20.04 to fix "/usr/bin/mkdir not found"
-# error in the binary package of 2.7.1)
-rvm install --disable-binary 2.7.1
+# error in the binary package of 2.7.2)
+rvm install --disable-binary 2.7.2
 
 # Clone the repo
 git clone git@github.com:mike-bourgeous/mb-sound.git
