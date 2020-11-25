@@ -59,6 +59,12 @@ module MB
           ],
           'w'
         )
+
+        # Usually format is set when ffmpeg is being used for realtime output,
+        # so set a smaller pipe size to reduce buffer lag and apply
+        # backpressure to playback in that case.
+        MB::Sound::U.pipe_size(pipe, 2048 * channels) if format
+
         super(pipe, channels)
       end
     end

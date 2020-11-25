@@ -58,6 +58,7 @@ module MB
         ports = @ports.map { |n| (n || "invalid port #{rand(100000)}").shellescape }.join(' ')
 
         @pipe = IO.popen(["sh", "-c", "jack-stdin -p 25 -L -e floating-point -q -S #{@buffer_size} #{ports}"], "w")
+        MB::Sound::U.pipe_size(@pipe, @buffer_size * @channels * 4)
 
         super(@pipe, channels)
       end

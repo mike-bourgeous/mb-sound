@@ -23,6 +23,7 @@ module MB
         @channels = channels.to_i
         @buffer_size = buffer_size.to_i
         @pipe = IO.popen(["sh", "-c", "aplay -t raw -f FLOAT_LE -r '#{@rate}' -c '#{@channels}' --buffer-size=#{@buffer_size} -D #{@device.shellescape} -q"], "w")
+        MB::Sound::U.pipe_size(@pipe, @buffer_size * @channels * 4)
 
         super(@pipe, channels)
       end

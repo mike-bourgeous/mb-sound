@@ -57,6 +57,22 @@ module MB
           .gsub(/["'`]+/, "\e[35m\\&\e[37m")
           .gsub(/[:,]+/, "\e[36m\\&\e[37m")
       end
+
+      # On Linux, changes the kernel's buffer size for the given pipe.  This
+      # should cause the pipe to exert more backpressure on reading or writing.
+      # See F_SETPIPE_SZ in the pipe(7) manual page for more details.
+      #
+      # Returns the actual size set by the kernel on success.
+      #
+      # Raises SystemCallError or possibly IOError on failure.
+      def self.pipe_size(io, size)
+        if RUBY_PLATFORM =~ /linux/
+          # TODO: Use the value from Fcntl when a stable Ruby release provides
+          # F_SETPIPE_SZ.  Until then, hard-code the Linux-specific fcntl ID of
+          # 1031.
+          return io.fcntl(1031, size)
+        end
+      end
     end
   end
 end
