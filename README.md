@@ -102,6 +102,16 @@ These examples can be run in the `bin/prysound.rb` interactive environment.
 end
 ```
 
+You can play different tones in each channel:
+
+```ruby
+# Stereo octave
+play [200.hz, 100.hz]
+
+# Binaural beat
+play [100.hz, 103.hz]
+```
+
 ### Calculating wavelength and frequency
 
 There are DSL methods for working with distances and wavelengths:

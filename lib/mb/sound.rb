@@ -52,6 +52,8 @@ module MB
         raise FileExistsError, "#{filename.inspect} already exists"
       end
 
+      data = make_array_plottable(data)
+
       output = MB::Sound::FFMPEGOutput.new(filename, rate: rate, channels: data.length)
       output.write(data)
     ensure
@@ -225,13 +227,31 @@ module MB
     end
 
     # If given a raw NArray or an array of numeric values, wraps it in an
-    # Array.
+    # Array.  If given a Tone or array of Tones, calls its/their
+    # MB::Sound::Tone#generate method.
     def self.make_array_plottable(array)
-      if array.is_a?(Numo::NArray) || (array.is_a?(Array) && !array[0].is_a?(Numo::NArray))
-        array = [array]
-      end
+      case array
+      when Numo::NArray
+        [array]
 
-      array
+      when Array
+        case array[0]
+        when Numeric
+          [array]
+
+        else
+          array.map { |el|
+            el = el.generate if el.is_a?(MB::Sound::Tone)
+            el
+          }
+        end
+
+      when MB::Sound::Tone
+        [array.generate]
+
+      else
+        array
+      end
     end
 
     # Plots a subset of the given audio file, test tone, or data, starting at

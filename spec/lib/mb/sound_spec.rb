@@ -23,11 +23,35 @@ RSpec.describe MB::Sound do
       File.unlink('tmp/sound_write_exists.flac') rescue nil
     end
 
-    it 'can write a sound file' do
-      name = 'tmp/sound_write_test.flac'
-      MB::Sound.write(name, [Numo::SFloat[0,0.5,-0.5,0]], rate: 48000)
-      info = MB::Sound::FFMPEGInput.parse_info(name)
-      expect(info[:streams][0][:duration_ts]).to eq(4)
+    context 'when writing to a file that does not yet exist' do
+      let(:name) { 'tmp/sound_write_test.flac' }
+      let(:data) { Numo::SFloat[0, 0.5, -0.5, 0] }
+
+      it 'can write an array of NArrays to a sound file' do
+        MB::Sound.write(name, [data], rate: 48000)
+        info = MB::Sound::FFMPEGInput.parse_info(name)
+        expect(info[:streams][0][:duration_ts]).to eq(4)
+      end
+
+      it 'can write a raw NArray to a sound file' do
+        MB::Sound.write(name, data, rate: 48000)
+        info = MB::Sound::FFMPEGInput.parse_info(name)
+        expect(info[:streams][0][:duration_ts]).to eq(4)
+      end
+
+      it 'can write a Tone to a sound file' do
+        MB::Sound.write(name, 100.hz.for(1), rate: 48000)
+        info = MB::Sound::FFMPEGInput.parse_info(name)
+        expect(info[:streams][0][:duration_ts]).to eq(48000)
+        expect(info[:streams][0][:channels]).to eq(1)
+      end
+
+      it 'can write multiple tones to a sound file' do
+        MB::Sound.write(name, [100.hz.for(1), 200.hz.for(1)], rate: 48000)
+        info = MB::Sound::FFMPEGInput.parse_info(name)
+        expect(info[:streams][0][:duration_ts]).to eq(48000)
+        expect(info[:streams][0][:channels]).to eq(2)
+      end
     end
 
     context 'when overwrite is false (by default)' do
