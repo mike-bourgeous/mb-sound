@@ -70,7 +70,7 @@ Now that everything's installed, you are ready to start playing with sound:
 
 ```bash
 # Launch the interactive command line
-bin/prysound.rb
+bin/sound.rb
 ```
 
 See the Examples section for some things to try.
@@ -88,7 +88,7 @@ gem 'mb-sound', git: 'git@github.com:mike-bourgeous/mb-sound.git'
 
 ## Examples
 
-These examples can be run in the `bin/prysound.rb` interactive environment.
+These examples can be run in the `bin/sound.rb` interactive environment.
 
 ### Generating tones
 

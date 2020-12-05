@@ -1,4 +1,6 @@
 #!/usr/bin/env ruby
+# Interactive sound environment.  Uses Pry within the MB::Sound module context.
+# See README.md for more info, including copyright and license.
 
 require 'rubygems'
 require 'bundler/setup'
