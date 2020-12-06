@@ -23,7 +23,8 @@ end
 puts
 clear if ARGV.include?('--clear')
 
-puts MB::Sound::U.wrap(<<-EOF.strip)
+def show_intro
+  puts MB::Sound::U.wrap(<<-EOF.strip)
 \e[33;1mWelcome to the interactive sound environment!\e[0m
 
 If you're new to Ruby, see https://www.ruby-lang.org/en/documentation/quickstart/.
@@ -50,8 +51,10 @@ If you're new to Pry, check out https://pry.github.io/.
 \e[1;33m#{MB::Sound::U.syntax("123.hz.wavelength")}\e[0m to show the wavelength of a 123Hz tone (at room temperature at sea level).
 
 \e[1m#{MB::Sound::U.syntax('cd ::')}\e[0m for experienced Ruby/Pry users to leave the sound context.
+  EOF
+end
 
-EOF
+show_intro
 
 Pry.config.commands.rename_command('pry-play', 'play')
 
