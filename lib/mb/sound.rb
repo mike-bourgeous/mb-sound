@@ -75,7 +75,7 @@ module MB
     # buffer or tone is given, the sample rate should be specified (defaults to
     # 48k).  The sample rate is ignored for an audio filename.
     def self.play(file_tone_data, rate: 48000, gain: 1.0, plot: nil, graphical: false, device: nil)
-      header = "\e[H\e[J\e[36mPlaying\e[0m #{MB::Sound::U.highlight(file_tone_data)}"
+      header = MB::Sound::U.wrap("\e[H\e[J\e[36mPlaying\e[0m #{MB::Sound::U.highlight(file_tone_data)}".lines.map(&:strip).join(' ') + "\n\n")
       puts header
 
       plot = { header_lines: header.lines.count, graphical: graphical } if plot.nil? || plot == true
