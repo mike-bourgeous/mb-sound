@@ -33,7 +33,7 @@ If you're new to Pry, check out https://pry.github.io/.
 
 \e[1mls\e[0m (for "list") to get a list of the easiest to use sound functions.
 
-\e[1;32m#{MB::Sound::U.syntax("Dir['sounds/**/*.*']")}\e[0m to get a list of included sounds.
+\e[1;32m#{MB::Sound::U.syntax("list")}\e[0m to get a list of included sounds.
 
 \e[1;33m#{MB::Sound::U.syntax("play 'sounds/sine/sine_100_1s_mono.flac'")}\e[0m to play a sound file.
 

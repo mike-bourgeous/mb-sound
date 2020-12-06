@@ -60,6 +60,16 @@ module MB
       output&.close
     end
 
+    # Lists all files under the given directory, or under a 'sounds' directory
+    # if no path is given.
+    def self.list(dir=nil)
+      path = dir || File.join(Dir.pwd, 'sounds')
+      files = Dir[File.join(path, '**', '*.*')].map { |f|
+        File.relative_path(dir || Dir.pwd, f)
+      }
+      puts files
+    end
+
     # Plays a sound file if a String is given, a generated tone if a Tone is
     # given, or an audio buffer if an audio buffer is given.  If an audio
     # buffer or tone is given, the sample rate should be specified (defaults to
