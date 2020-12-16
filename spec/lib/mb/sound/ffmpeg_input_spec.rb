@@ -41,6 +41,10 @@ RSpec.describe MB::Sound::FFMPEGInput do
     MB::Sound::FFMPEGInput.new('sounds/sine/sine_100_1s_mono.flac', channels: 2)
   }
 
+  let(:input_6ch) {
+    MB::Sound::FFMPEGInput.new('sounds/sine/sine_100_1s_mono.flac', channels: 6)
+  }
+
   let(:input_441) {
     MB::Sound::FFMPEGInput.new('sounds/sine/sine_100_1s_mono.flac', resample: 44100)
   }
@@ -153,6 +157,22 @@ RSpec.describe MB::Sound::FFMPEGInput do
 
       expect(input_multi_0.close.success?).to eq(true)
       expect(input_multi_1.close.success?).to eq(true)
+    end
+  end
+
+  describe '#frames_read' do
+    it 'returns the expected number of frames read for 2 channels' do
+      input_2ch.read(1234)
+      expect(input_2ch.frames_read).to eq(1234)
+      input_2ch.read(5)
+      expect(input_2ch.frames_read).to eq(1239)
+    end
+
+    it 'returns the expected number of frames read for 6 channels' do
+      input_6ch.read(1234)
+      expect(input_6ch.frames_read).to eq(1234)
+      input_6ch.read(5)
+      expect(input_6ch.frames_read).to eq(1239)
     end
   end
 

@@ -29,11 +29,14 @@ module MB
 
         raise 'Bytes read was not a multiple of frame size' unless bytes.size % @frame_bytes == 0
 
+        # @frame_bytes is already scaled by the number of channels
         frames_read = bytes.size / @frame_bytes
-        @frames_read += frames_read / @channels
+        @frames_read += frames_read
 
-        # TODO: each_slice + transpose is probably slow; do something faster
-        bytes.unpack('e*').each_slice(@channels).to_a.transpose.map { |c| M.array_to_narray(c) }
+        data = Numo::SFloat.from_binary(bytes).reshape(frames_read, @channels)
+        @channels.times.map { |c|
+          data[nil, c]
+        }
       end
 
       # Closes the input IO object.  Returns the process exit status object if
