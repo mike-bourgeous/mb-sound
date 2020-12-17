@@ -7,17 +7,19 @@ module MB
     class PlotOutput
       extend Forwardable
 
-      def_delegators :@output, :rate, :channels
+      def_delegators :@output, :rate, :channels, :buffer_size
 
-      # Initializes an output plotter for the given +output+.
+      # Initializes an output plotter for the given +output+.  Up to
+      # +:window_size+ samples will be drawn from each call to #write.
       #
       # +:plot+ can be used to customize the Plot instance, or to pass a
       # different compatible plotter.
       def initialize(output, window_size: 960, graphical: false, header_lines: 1, plot: nil)
         raise "Output streams must respond to #write" unless output.respond_to?(:write)
+        raise "Output streams must respond to #buffer_size" unless output.respond_to?(:buffer_size)
 
         @header_lines = header_lines
-        @window_size = 960
+        @window_size = window_size || output.buffer_size
 
         @output = output
 

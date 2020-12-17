@@ -241,10 +241,11 @@ module MB
         # TODO: Fade in and out at the start and end
 
         @rate = output.rate
+        buffer_size = output.buffer_size
         samples_left = @duration * @rate if @duration
 
         loop do
-          current_samples = [samples_left || 960, 960].min
+          current_samples = [samples_left || buffer_size, buffer_size].min
           d = [ generate(current_samples) ]
           output.write(d * output.channels)
 

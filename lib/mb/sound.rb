@@ -93,8 +93,9 @@ module MB
         # with a shared way of chunking data that can work for all play and
         # plot methods
         output = MB::Sound.output(rate: rate, channels: channels, plot: plot, device: device)
-        (0...data[0].length).step(960).each do |offset|
-          output.write(data.map { |c| c[offset...([offset + 960, c.length].min)] })
+        buffer_size = output.buffer_size
+        (0...data[0].length).step(buffer_size).each do |offset|
+          output.write(data.map { |c| c[offset...([offset + buffer_size, c.length].min)] })
         end
 
       when Tone
@@ -116,9 +117,11 @@ module MB
       input = MB::Sound::FFMPEGInput.new(filename, channels: channels, resample: 48000)
       output = MB::Sound.output(channels: channels || (input.channels < 2 ? 2 : input.channels), plot: plot, device: device)
 
+      buffer_size = output.buffer_size
+
       # TODO: Move all playback loops to a processing helper method when those are added
       loop do
-        data = input.read(960)
+        data = input.read(buffer_size)
         break if data.nil? || data.empty? || data[0].empty?
 
         data.map { |d|

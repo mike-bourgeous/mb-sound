@@ -1,7 +1,7 @@
 module MB
   module Sound
     class FFMPEGOutput < IOOutput
-      attr_reader :filename, :rate, :channels
+      attr_reader :filename, :rate, :channels, :buffer_size
 
       # Starts an FFMPEG process to write audio to the given +filename+.  The
       # +filename+ must point to a writable directory, unless a +format+
@@ -40,6 +40,9 @@ module MB
 
         raise "Channels must be a positive Integer" unless channels.is_a?(Integer) && channels > 0
         @channels = channels
+
+        # Chosen arbitrarily
+        @buffer_size = 2048
 
         # no shellescape because no shell
         pipe = IO.popen(
