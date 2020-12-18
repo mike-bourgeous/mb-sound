@@ -1,6 +1,12 @@
 require 'cmath'
 require 'numo/narray'
 
+begin
+  require 'mb-sound-jackffi'
+rescue LoadError
+  # JackFFI is unavailable
+end
+
 require_relative 'sound/version'
 
 module MB
@@ -153,10 +159,12 @@ module MB
     def self.input(rate: 48000, channels: 2, device: nil, buffer_size: nil)
       case RUBY_PLATFORM
       when /linux/
-        if device
-          MB::Sound::AlsaInput.new(device: device, rate: rate, channels: channels, buffer_size: buffer_size)
-        elsif `pgrep jackd`.strip.length > 0
-          o = MB::Sound::JackInput.new(ports: { device: device, count: channels }, buffer_size: buffer_size)
+        if `pgrep jackd`.strip.length > 0
+          if defined?(JackFFI)
+            MB::Sound::JackFFI[client_name: 'mb-sound'].input(channels: channels, connect: device || :physical)
+          else
+            MB::Sound::JackInput.new(ports: { device: device, count: channels }, buffer_size: buffer_size)
+          end
         elsif `pgrep pulseaudio`.strip.length > 0
           MB::Sound::AlsaInput.new(device: 'pulse', rate: rate, channels: channels, buffer_size: buffer_size)
         else
@@ -186,7 +194,11 @@ module MB
       case RUBY_PLATFORM
       when /linux/
         if `pgrep jackd`.strip.length > 0
-          o = MB::Sound::JackOutput.new(ports: { device: device, count: channels }, buffer_size: buffer_size)
+          if defined?(JackFFI)
+            o = MB::Sound::JackFFI[client_name: 'mb-sound'].output(channels: channels, connect: device || :physical)
+          else
+            o = MB::Sound::JackOutput.new(ports: { device: device, count: channels }, buffer_size: buffer_size)
+          end
         elsif `pgrep pulseaudio`.strip.length > 0
           o = MB::Sound::AlsaOutput.new(device: 'pulse', rate: rate, channels: channels, buffer_size: buffer_size)
         else
