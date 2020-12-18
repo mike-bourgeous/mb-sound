@@ -1,8 +1,8 @@
 GIT
-  remote: git@github.com:mike-bourgeous/mb-sound-jackffi
-  revision: bf4ac77d7e98470c1543e44edc11e8cfc6307cfc
+  remote: https://github.com/mike-bourgeous/mb-sound-jackffi.git
+  revision: b52cec5b2a0a1f70624bb58d001fcd375a573ced
   specs:
-    mb-sound-jackffi (0.0.2.usegit)
+    mb-sound-jackffi (0.0.3.usegit)
       ffi (~> 1.13.0)
       numo-narray (~> 0.9.1)
 
@@ -33,19 +33,19 @@ GEM
       pry (~> 0.11)
       yard (~> 0.9.11)
     rake (13.0.1)
-    rspec (3.9.0)
-      rspec-core (~> 3.9.0)
-      rspec-expectations (~> 3.9.0)
-      rspec-mocks (~> 3.9.0)
-    rspec-core (3.9.2)
-      rspec-support (~> 3.9.3)
-    rspec-expectations (3.9.2)
+    rspec (3.10.0)
+      rspec-core (~> 3.10.0)
+      rspec-expectations (~> 3.10.0)
+      rspec-mocks (~> 3.10.0)
+    rspec-core (3.10.0)
+      rspec-support (~> 3.10.0)
+    rspec-expectations (3.10.0)
       diff-lcs (>= 1.2.0, < 2.0)
-      rspec-support (~> 3.9.0)
-    rspec-mocks (3.9.1)
+      rspec-support (~> 3.10.0)
+    rspec-mocks (3.10.0)
       diff-lcs (>= 1.2.0, < 2.0)
-      rspec-support (~> 3.9.0)
-    rspec-support (3.9.3)
+      rspec-support (~> 3.10.0)
+    rspec-support (3.10.0)
     word_wrap (1.0.0)
     yard (0.9.25)
 
@@ -55,7 +55,7 @@ PLATFORMS
 DEPENDENCIES
   cmath
   mb-sound!
-  mb-sound-jackffi!
+  mb-sound-jackffi (>= 0.0.3.usegit)!
   numo-narray
   pry
   pry-byebug
