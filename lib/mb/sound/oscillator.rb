@@ -1,3 +1,6 @@
+require 'midi-message'
+require 'nibbler'
+
 module MB
   module Sound
     # An oscillator that can generate different wave types.  This can be used
@@ -20,8 +23,26 @@ module MB
         square: 1.0,
       }
 
-      attr_accessor :frequency, :advance, :wave_type, :pre_power, :post_power, :range
-      attr_reader :phase
+      # Note that is used as tuning reference
+      TUNE_NOTE = 69 # A4
+
+      # Frequency that the tuning reference should be
+      TUNE_FREQ = 440
+
+      # Calculates a frequency in Hz for the given MIDI note number and
+      # detuning in cents.
+      def self.calc_freq(note_number, detune_cents = 0)
+        TUNE_FREQ * 2 ** ((note_number + detune_cents / 100.0 - TUNE_NOTE) / 12.0)
+      end
+
+      # Calculates a fractional MIDI note number for the given frequency,
+      # assuming equal temperament.
+      def self.calc_number(frequency_hz)
+        12.0 * Math.log2(frequency_hz / TUNE_FREQ) + TUNE_NOTE
+      end
+
+      attr_accessor :advance, :wave_type, :pre_power, :post_power, :range
+      attr_reader :phase, :frequency
 
       # TODO: maybe use a clock provider instead of +advance+?  The challenge is
       # that floating point accuracy goes down as a shared clock advances, and
@@ -57,8 +78,7 @@ module MB
         end
         @wave_type = wave_type
 
-        raise "Invalid frequency #{frequency.inspect}" unless frequency.is_a?(Numeric) || frequency.respond_to?(:sample)
-        @frequency = frequency
+        self.frequency = frequency
 
         raise "Invalid phase #{phase.inspect}" unless phase.is_a?(Numeric)
         @phase = phase.to_f % (2.0 * Math::PI)
@@ -89,6 +109,50 @@ module MB
         end
         while @phi >= 2.0 * Math::PI
           @phi -= 2.0 * Math::PI
+        end
+      end
+
+      def frequency=(frequency)
+        raise "Invalid frequency #{frequency.inspect}" unless frequency.is_a?(Numeric) || frequency.respond_to?(:sample)
+
+        @frequency = frequency
+        frequency = frequency.respond_to?(:sample) ? frequency.sample : frequency.to_f
+        @note_number = Oscillator.calc_number(frequency)
+      end
+
+      # Sets the oscillator's frequency to the given MIDI note number.
+      def number=(note_number)
+        @note_number = note_number
+        self.frequency = Oscillator.calc_freq(note_number)
+      end
+
+      # Updates the oscillator baesd on the given MIDI event, which should be
+      # an event type from the midi-nibbler gem.  Uses NoteOn to change the
+      # frequency, NoteOff to silence the oscillator, and CC#1 (mod wheel) to
+      # control the oscillator power (distortion).
+      #
+      # TODO: Allow changing waveform
+      def handle_midi(midi_event)
+        case midi_event
+        when MIDIMessage::NoteOn
+          self.number = midi_event.note
+          amplitude = midi_event.velocity * 0.5 / 127 + 0.01
+          self.range = -amplitude..amplitude
+
+        when MIDIMessage::NoteOff
+          # Only turn off the oscillator if the note off event matches the
+          # current frequency (this allows playing legato; multiple note on and
+          # note off events will be received, but only the note off event for
+          # the current note will count)
+          if midi_event.note == @note_number
+            self.range = 0..0
+          end
+
+        when MIDIMessage::ControlChange
+          if midi_event.index == 1
+            # Mod wheel
+            self.post_power = MB::Sound::M.scale(midi_event.value, 0..127, 1.0..0.1)
+          end
         end
       end
 

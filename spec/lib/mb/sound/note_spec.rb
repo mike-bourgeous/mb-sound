@@ -91,8 +91,8 @@ RSpec.describe MB::Sound::Note do
     end
 
     context 'when given a Tone object' do
-      let!(:hz) { MB::Sound::Note::TUNE_FREQ }
-      let!(:n) { MB::Sound::Note::TUNE_NOTE }
+      let!(:hz) { MB::Sound::Oscillator::TUNE_FREQ }
+      let!(:n) { MB::Sound::Oscillator::TUNE_NOTE }
 
       it 'finds octaves of the tuning reference' do
         expect(MB::Sound::Note.new(hz.hz).number).to eq(n)

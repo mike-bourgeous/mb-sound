@@ -150,4 +150,53 @@ RSpec.describe MB::Sound::Oscillator do
       expect(data.sum.round(2)).to eq(0)
     end
   end
+
+  describe '#handle_midi' do
+    let (:oscil) {
+      MB::Sound::Oscillator.new(:sine, frequency: 0, range: 0..0)
+    }
+
+    context 'with a note on event' do
+      it 'changes frequency' do
+        expect(oscil.frequency).to eq(0)
+        oscil.handle_midi(MIDIMessage::NoteOn.new(0, 25, 0))
+        expect(oscil.frequency).to eq(MB::Sound::Note.new(25).frequency)
+        oscil.handle_midi(MIDIMessage::NoteOn.new(0, 75, 0))
+        expect(oscil.frequency).to eq(MB::Sound::Note.new(75).frequency)
+      end
+
+      it 'changes amplitude' do
+        expect(oscil.range).to eq(0..0)
+        oscil.handle_midi(MIDIMessage::NoteOn.new(0, 25, 127))
+        expect(oscil.range).to eq(-0.51..0.51)
+      end
+    end
+
+    context 'with a note off event' do
+      it 'does not change frequency' do
+        oscil.handle_midi(MIDIMessage::NoteOff.new(0, 25, 0))
+        expect(oscil.frequency).to eq(0)
+      end
+
+      it 'silences the oscillator for a matching event' do
+      oscil.handle_midi(MIDIMessage::NoteOn.new(0, 25, 0))
+      oscil.handle_midi(MIDIMessage::NoteOff.new(0, 24, 0))
+      end
+
+      it 'does not silence the oscillator for a non-matching event' do
+        oscil.handle_midi(MIDIMessage::NoteOn.new(0, 25, 0))
+        oscil.handle_midi(MIDIMessage::NoteOff.new(0, 24, 0))
+        expect(oscil.range).to eq(-0.01..0.01)
+      end
+    end
+
+    context 'wtih a control change' do
+      it 'changes oscillator power for the mod wheel' do
+        oscil.handle_midi(MIDIMessage::ControlChange.new(0, 1, 0))
+        expect(oscil.post_power.round(4)).to eq(1.0)
+        oscil.handle_midi(MIDIMessage::ControlChange.new(0, 1, 127))
+        expect(oscil.post_power.round(4)).to eq(0.1)
+      end
+    end
+  end
 end

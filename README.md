@@ -83,12 +83,13 @@ dependency to a new project's Gemfile.
 
 ```ruby
 # your-project/Gemfile
-gem 'mb-sound', git: 'git@github.com:mike-bourgeous/mb-sound.git'
+gem 'mb-sound', git: 'https://github.com/mike-bourgeous/mb-sound.git'
 ```
 
 ## Examples
 
-These examples can be run in the `bin/sound.rb` interactive environment.
+These examples can be run in the `bin/sound.rb` interactive environment.  There
+are other examples in the scripts under the `bin/` directory.
 
 ### Generating tones
 
@@ -212,6 +213,7 @@ This code uses some really cool other projects either directly or indirectly:
 - Numo gems
 - Pry interactive console for Ruby
 - GNUplot
+- The MIDI Nibbler gem
 
 ### References
 

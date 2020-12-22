@@ -32,12 +32,6 @@ module MB
       # Map of note names to cents.
       NOTE_CENTS = NOTE_NAMES.zip(SCALE_CENTS).to_h
 
-      # Note that is used as tuning reference
-      TUNE_NOTE = 69 # A4
-
-      # Frequency that the tuning reference should be
-      TUNE_FREQ = 440
-
       attr_reader :number, :name, :detune
 
       # Initializes a note of the given MIDI note number, the note name with
@@ -58,7 +52,7 @@ module MB
         when Tone
           tone = tone_name_number
           freq = tone.frequency
-          set_number(12.0 * Math.log2(freq / TUNE_FREQ) + TUNE_NOTE)
+          set_number(Oscillator.calc_number(freq))
           super(frequency: get_freq, wave_type: tone.wave_type, amplitude: tone.amplitude, duration: tone.duration, rate: tone.rate)
 
         else
@@ -71,11 +65,16 @@ module MB
         set_frequency(get_freq)
       end
 
+      def number=(number)
+        set_number(number)
+        set_frequency(get_freq)
+      end
+
       private
 
       # Calculates the frequency based on the note's MIDI note number.
       def get_freq
-        TUNE_FREQ * 2 ** ((@number + @detune / 100.0 - TUNE_NOTE) / 12.0)
+        Oscillator.calc_freq(@number, @detune)
       end
 
       # Sets note name, number, and detuning from a note name string.
