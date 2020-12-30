@@ -7,7 +7,7 @@ RSpec.describe(MB::Sound::Filter::FilterChain) do
     it 'accepts an NArray for calculating multiple response points' do
       points = Numo::SComplex.linspace(0, Math::PI, 100)
       f = MB::Sound::Filter::Butterworth.new(:lowpass, 5, 48000, 4800)
-      expect(Sound.round(f.response(points), 4)).to eq(points.map { |v| Sound.round(f.response(v), 4) })
+      expect(MB::Sound::M.round(f.response(points), 4)).to eq(points.map { |v| MB::Sound::M.round(f.response(v), 4) })
     end
   end
 
@@ -21,7 +21,7 @@ RSpec.describe(MB::Sound::Filter::FilterChain) do
       ].reshape(grid_size, grid_size)
 
       f = MB::Sound::Filter::Butterworth.new(:lowpass, 5, 48000, 4800)
-      expect(Sound.round(f.z_response(points), 4)).to eq(points.map { |v| Sound.round(f.z_response(v), 4) })
+      expect(MB::Sound::M.round(f.z_response(points), 4)).to eq(points.map { |v| MB::Sound::M.round(f.z_response(v), 4) })
     end
   end
 

@@ -13,12 +13,12 @@ module MB
           @center_frequency = f_center
 
           filters = Butterworth.qvalues(order).map { |q|
-            Sound::Filter::Cookbook.new(filter_type, f_samp, f_center, quality: q)
+            MB::Sound::Filter::Cookbook.new(filter_type, f_samp, f_center, quality: q)
           }
 
           if order.odd?
             ft1p = filter_type == :highpass ? :highpass : :lowpass
-            filters << Sound::Filter::FirstOrder.new(ft1p, f_samp, f_center)
+            filters << MB::Sound::Filter::FirstOrder.new(ft1p, f_samp, f_center)
           end
 
           super(*filters)
@@ -29,10 +29,10 @@ module MB
 
           @filters.each do |f|
             case f
-            when Sound::Filter::FirstOrder
+            when MB::Sound::Filter::FirstOrder
               f.set_parameters(f.filter_type, @sample_rate, @center_frequency)
 
-            when Sound::Filter::Cookbook
+            when MB::Sound::Filter::Cookbook
               f.set_parameters(f.filter_type, @sample_rate, @center_frequency, quality: f.quality)
 
             else

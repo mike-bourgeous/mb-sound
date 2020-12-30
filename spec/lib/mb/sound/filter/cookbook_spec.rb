@@ -60,8 +60,8 @@ RSpec.describe MB::Sound::Filter::Cookbook do
 
       fpz = MB::Sound::Filter::Cookbook.new(:lowpass, 48000, 2400, quality: 0.5 ** 0.5).polezero
 
-      expect(fpz[:poles].map { |v| Sound.sigfigs(v, 3) }).to eq(poles)
-      expect(fpz[:zeros].map { |v| Sound.sigfigs(v, 3) }).to eq(zeros)
+      expect(fpz[:poles].map { |v| MB::Sound::M.sigfigs(v, 3) }).to eq(poles)
+      expect(fpz[:zeros].map { |v| MB::Sound::M.sigfigs(v, 3) }).to eq(zeros)
     end
   end
 
@@ -252,18 +252,18 @@ RSpec.describe MB::Sound::Filter::Cookbook do
 
           # Each fft bin should be 1hz
           noise = Numo::SFloat.new(48000).rand(-1, 1)
-          before = Sound.pos_dft(noise)
+          before = Sound.pos_dft(noise) # FIXME
           below_before = before[10..200].abs.sum
           above_before = before[10000..20000].abs.sum
 
           filter.reset(noise[0])
           result = filter.process(noise)
-          after = Sound.pos_dft(result)
+          after = Sound.pos_dft(result) # FIXME
           below_after = after[10..200].abs.sum
           above_after = after[10000..20000].abs.sum
 
-          below_db = Sound.linear_to_db(below_after / below_before)
-          above_db = Sound.linear_to_db(above_after / above_before)
+          below_db = (below_after / below_before).to_db
+          above_db = (above_after / above_before).to_db
 
           # Within 0.1dB
           expect((below_db - gain).abs).to be <= 0.1

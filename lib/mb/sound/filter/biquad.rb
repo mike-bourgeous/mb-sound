@@ -117,8 +117,8 @@ module MB
           # Zeros
           # a = @b0, b = @b1, c = @b2
           {
-            poles: Sound.quadratic_roots(1.0, @a1, @a2).reject(&:zero?),
-            zeros: Sound.quadratic_roots(@b0, @b1, @b2).reject(&:zero?)
+            poles: MB::Sound::M.quadratic_roots(1.0, @a1, @a2).reject(&:zero?),
+            zeros: MB::Sound::M.quadratic_roots(@b0, @b1, @b2).reject(&:zero?)
           }
         end
 

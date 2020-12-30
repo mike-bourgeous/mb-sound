@@ -9,7 +9,7 @@ module MB
           # the filter bank.  Yields the index and scaled f_center for the index,
           # if f_center is a Range.
           def freq_scaled(size, f_center)
-            Sound::Filter::FilterBank.new(size) { |idx|
+            MB::Sound::Filter::FilterBank.new(size) { |idx|
               f_center = f_center..f_center unless f_center.is_a?(Range)
               fc = MB::Sound::M.scale(idx, 0..(size - 1), f_center)
               yield idx, fc
@@ -24,7 +24,7 @@ module MB
           # initial state of the filters.
           def butterworth(size, filter_type, order, f_samp, f_center, reset: 0)
             bank = freq_scaled(size, f_center) { |idx, fc|
-              f = Sound::Filter::Butterworth.new(filter_type, order, f_samp, fc)
+              f = MB::Sound::Filter::Butterworth.new(filter_type, order, f_samp, fc)
               f.reset(reset)
               f
             }
@@ -41,7 +41,7 @@ module MB
           # vary across the filter bank.
           def cookbook(size, filter_type, f_samp, f_center, db_gain: nil, quality: nil, bandwidth_oct: nil, shelf_slope: nil, reset: 0)
             bank = freq_scaled(size, f_center) { |idx, fc|
-              f = Sound::Filter::Cookbook.new(filter_type, f_samp, fc, db_gain: db_gain, quality: quality, bandwidth_oct: bandwidth_oct, shelf_slope: shelf_slope)
+              f = MB::Sound::Filter::Cookbook.new(filter_type, f_samp, fc, db_gain: db_gain, quality: quality, bandwidth_oct: bandwidth_oct, shelf_slope: shelf_slope)
               f.reset(reset)
               f
             }

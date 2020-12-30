@@ -11,7 +11,7 @@ module MB
           @rate = rate.to_f
           @decay_db = decay_db.to_f
           @decay_s = decay_s.to_f
-          @decay_per_sample = Sound.db_to_linear(@decay_db) ** (1.0 / (@decay_s * @rate))
+          @decay_per_sample = @decay_db.db ** (1.0 / (@decay_s * @rate))
 
           @v = 0.0
         end
