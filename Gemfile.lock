@@ -27,6 +27,8 @@ GEM
     midi-nibbler (0.2.4)
       midi-message (~> 0.4, >= 0.4.4)
     numo-narray (0.9.1.9)
+    numo-pocketfft (0.2.1)
+      numo-narray (~> 0.9.1)
     pry (0.13.1)
       coderay (~> 1.1)
       method_source (~> 1.0)
@@ -61,6 +63,7 @@ DEPENDENCIES
   mb-sound!
   mb-sound-jackffi (>= 0.0.7.usegit)!
   numo-narray
+  numo-pocketfft (~> 0.2.1)
   pry
   pry-byebug
   pry-doc

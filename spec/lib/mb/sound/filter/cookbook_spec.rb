@@ -1,3 +1,5 @@
+require 'numo/pocketfft'
+
 RSpec.describe MB::Sound::Filter::Cookbook do
   context 'lowpass' do
     it 'produces the right coefficients for 25Hz/48kHz/Q0.707' do
@@ -252,13 +254,13 @@ RSpec.describe MB::Sound::Filter::Cookbook do
 
           # Each fft bin should be 1hz
           noise = Numo::SFloat.new(48000).rand(-1, 1)
-          before = Sound.pos_dft(noise) # FIXME
+          before = Numo::Pocketfft.rfft(noise)
           below_before = before[10..200].abs.sum
           above_before = before[10000..20000].abs.sum
 
           filter.reset(noise[0])
           result = filter.process(noise)
-          after = Sound.pos_dft(result) # FIXME
+          after = Numo::Pocketfft.rfft(result)
           below_after = after[10..200].abs.sum
           above_after = after[10000..20000].abs.sum
 
