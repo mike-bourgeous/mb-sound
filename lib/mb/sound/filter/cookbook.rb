@@ -28,11 +28,23 @@ module MB
           super(@b0, @b1, @b2, @a1, @a2)
         end
 
+        # Sets the center/cutoff frequency of the filter.
+        def center_frequency=(freq)
+          raise 'Frequency must be between 0 and sample_rate/2' if freq <= 0 || freq > @sample_rate * 0.5
+          set_parameters(@filter_type, @sample_rate, freq, db_gain: @db_gain, quality: @quality, bandwidth_oct: @bandwidth_oct, shelf_slope: @shelf_slope)
+        end
+
+        # Sets the quality factor of the filter.
+        def quality=(q)
+          set_parameters(@filter_type, @sample_rate, @center_frequency, db_gain: @db_gain, quality: q)
+        end
+
         # Recalculates filter coefficients based on the given filter parameters.
         def set_parameters(filter_type, f_samp, f_center, db_gain: nil, quality: nil, bandwidth_oct: nil, shelf_slope: nil)
           @filter_type = filter_type
           @sample_rate = f_samp
           @center_frequency = f_center
+          @db_gain = db_gain
 
           amp = 10.0 ** (db_gain / 40.0) if db_gain
           omega = 2.0 * Math::PI * f_center / f_samp
