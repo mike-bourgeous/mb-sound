@@ -146,6 +146,39 @@ module MB
       output&.close
     end
 
+    # Filters a sound with the given filter parameters (see
+    # MB::Sound::Filter::Cookbook).
+    #
+    # +:frequency+ - The center or cutoff frequency of the filter.
+    # +:filter_type+ - One of the filter types from MB::Sound::Filter::Cookbook::FILTER_TYPES.
+    # +:rate+ - The sample rate to use for the filter (defaults to sound.rate if sound responds to :rate, or 48000).
+    # +:quality+ - The "quality factor" of the filter.  Higher values are more
+    #              resonant.  Must specify one of quality, slope, or bandwidth.
+    # +:slope+ - The slope for a shelf filter.  Specify one of quality, slope, or bandwidth.
+    # +:bandwidth+ - The bandwidth of a peaking filter.
+    # +:gain+ - The gain of a shelf or peaking filter.
+    def self.filter(sound, frequency:, filter_type: :lowpass, rate: nil, quality: nil, slope: nil, bandwidth: nil, gain: nil)
+      # TODO: Further develop filters and sound sources into a sound
+      # source/sink graph, where a complete graph can be built up with a DSL,
+      # and actual generation only occurs on demand?
+      sound = make_array_plottable(sound)
+      rate ||= sound.respond_to?(:rate) ? sound.rate : 48000
+      frequency = frequency.frequency if frequency.respond_to?(:frequency) # get 343 from 343.hz
+      filter = MB::Sound::Filter::Cookbook.new(
+        filter_type,
+        rate,
+        frequency,
+        db_gain: gain&.to_db,
+        quality: quality,
+        bandwidth_oct: bandwidth,
+        shelf_slope: slope,
+      )
+      sound.map { |c|
+        filter.reset(c[0])
+        filter.process(c)
+      }
+    end
+
     # Tries to auto-detect an input device for recording sound.  Returns a
     # sound input stream with a :read method.
     #

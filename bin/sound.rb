@@ -42,6 +42,8 @@ If you're new to Pry, check out https://pry.github.io/.
 
 \e[1;33m#{MB::Sound::U.syntax("play 123.hz.triangle.at(-20.db).forever")}\e[0m to play a 123Hz triangle wave tone forever.
 
+\e[1;33m#{MB::Sound::U.syntax("play filter(333.hz.ramp, frequency: 850, quality: 10)")}\e[0m to play a sawtooth wave through a low-pass filter.
+
 \e[1;35m#{MB::Sound::U.syntax("plot 123.hz")}\e[0m to graph part of a 123Hz tone.
 
 \e[1;35m#{MB::Sound::U.syntax("plot 123.hz, all: true")}\e[0m to graph a 123Hz tone as it would be played.
