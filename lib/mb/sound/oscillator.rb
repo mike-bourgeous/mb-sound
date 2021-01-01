@@ -132,6 +132,7 @@ module MB
       # control the oscillator power (distortion).
       #
       # TODO: Allow changing waveform
+      # TODO: Maybe this belongs in a different class
       def handle_midi(midi_event)
         case midi_event
         when MIDIMessage::NoteOn
