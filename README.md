@@ -245,9 +245,6 @@ platforms.
 
 This project is released under a 2-clause BSD license.  See the LICENSE file.
 
-Note, however, that if you use the FFT routines from FFTW, your app may be
-subject to the GPL.
-
 ## Standing on the shoulders of giants
 
 ### Dependencies

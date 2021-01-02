@@ -13,6 +13,7 @@ PATH
       cmath (~> 1.0.0)
       midi-nibbler (~> 0.2.4)
       numo-narray (~> 0.9.1.8)
+      numo-pocketfft (~> 0.2.1)
 
 GEM
   remote: https://rubygems.org/
@@ -63,7 +64,6 @@ DEPENDENCIES
   mb-sound!
   mb-sound-jackffi (>= 0.0.8.usegit)!
   numo-narray
-  numo-pocketfft (~> 0.2.1)
   pry
   pry-byebug
   pry-doc
