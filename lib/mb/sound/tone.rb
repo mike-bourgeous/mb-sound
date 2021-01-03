@@ -98,7 +98,7 @@ module MB
         # Returns the number of seconds at the given sample rate (default
         # 48kHz).
         def samples(rate = 48000)
-          self / rate
+          self.to_f / rate
         end
 
         # Creates a Tone object with this frequency.  If this is a Meters or

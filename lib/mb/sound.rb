@@ -11,6 +11,7 @@ require_relative 'sound/version'
 require_relative 'sound/io_methods'
 require_relative 'sound/plot_methods'
 require_relative 'sound/playback_methods'
+require_relative 'sound/fft_methods'
 
 module MB
   # Convenience functions for making quick work of sound.
@@ -24,6 +25,7 @@ module MB
     extend IOMethods
     extend PlotMethods
     extend PlaybackMethods
+    extend FFTMethods
 
     # Returns the current time from the system's monotonically increasing
     # clock.  A shorthand for Process.clock_gettime(Process::CLOCK_MONOTONIC).
