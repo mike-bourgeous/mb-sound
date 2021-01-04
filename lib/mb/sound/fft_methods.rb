@@ -60,13 +60,13 @@ module MB
         when Numo::NArray
           case data.ndim
           when 1
-            Numo::Pocketfft.ifft(data) * data.length
+            (Numo::Pocketfft.ifft(data).inplace * data.length).not_inplace!
 
           when 2
-            Numo::Pocketfft.ifft2(data) * data.length
+            (Numo::Pocketfft.ifft2(data).inplace * data.length).not_inplace!
 
           else
-            Numo::Pocketfft.ifftn(data) * data.length
+            (Numo::Pocketfft.ifftn(data).inplace * data.length).not_inplace!
           end
 
         when Array

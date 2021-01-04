@@ -80,7 +80,7 @@ RSpec.describe MB::Sound do
   end
 
   context 'FFTMethods' do
-    4.times do |n|
+    3.times do |n|
       ndim = n + 1
 
       context "with a #{ndim}D array" do
@@ -89,15 +89,23 @@ RSpec.describe MB::Sound do
         }
 
         let(:dc_input_large) {
-          Numo::DFloat.ones(*([64] * ndim))
+          Numo::DFloat.ones(*([32] * ndim))
         }
 
         let(:sine_input_small) {
-          12000.hz.at(1).generate(48)
+          tone = 12000.hz.at(1).generate(24)
+          n.times do
+            tone = Numo::SFloat.cast([tone] * 24)
+          end
+          tone
         }
 
         let(:sine_input_large) {
-          4000.hz.at(1).generate(480)
+          tone = 4000.hz.at(1).generate(48)
+          n.times do
+            tone = Numo::SFloat.cast([tone] * 48)
+          end
+          tone
         }
 
         describe '.fft' do
@@ -117,11 +125,23 @@ RSpec.describe MB::Sound do
             expect(MB::Sound.fft(dc_input_large).sum.imag.round(5)).to eq(0)
           end
 
-          pending 'returns + and - bin values of 0.5 for a bin-centered sinusoid'
+          it 'returns + and - bin values of +/-0.5i for a bin-centered sinusoid' do
+            small_idx = [0] * n + [6]
+            small_fft = MB::Sound.fft(sine_input_small)
+            expect(small_fft.abs.sum.round(6)).to eq(1)
+            expect(MB::Sound::M.round(small_fft[*small_idx], 6)).to eq(0-0.5i)
+            expect(MB::Sound::M.round(small_fft[*small_idx.map(&:-@)], 6)).to eq(0+0.5i)
 
-          pending 'returns 0 phase for a sine'
+            large_idx = [0] * n + [4]
+            large_fft = MB::Sound.fft(sine_input_large)
+            expect(large_fft.abs.sum.round(6)).to eq(1)
+            expect(MB::Sound::M.round(large_fft[*large_idx], 6)).to eq(0-0.5i)
+            expect(MB::Sound::M.round(large_fft[*large_idx.map(&:-@)], 6)).to eq(0+0.5i)
+          end
 
-          pending 'returns PI/4 phase for a cosine'
+          pending 'returns 0 phase for a cosine'
+
+          pending 'returns PI/4 phase for a sine'
         end
 
         describe '.ifft' do
