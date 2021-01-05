@@ -211,11 +211,70 @@ RSpec.describe MB::Sound do
         end
 
         describe '.real_fft' do
-          pending
+          it 'returns only the positive frequencies' do
+            expect(MB::Sound.real_fft(ramp_input).shape).to eq([48] * (ndim - 1) + [25])
+          end
+
+          it 'returns a DC value of 2.0 for an array filled with ones' do
+            expect(MB::Sound.real_fft(dc_input_small)[*([0] * ndim)].real.round(4)).to eq(2)
+            expect(MB::Sound.real_fft(dc_input_small)[*([1] * ndim)].real.round(4)).to eq(0)
+            expect(MB::Sound.real_fft(dc_input_small)[*([0] * ndim)].imag.round(4)).to eq(0)
+            expect(MB::Sound.real_fft(dc_input_small)[*([1] * ndim)].imag.round(4)).to eq(0)
+            expect(MB::Sound.real_fft(dc_input_small).sum.real.round(5)).to eq(2)
+            expect(MB::Sound.real_fft(dc_input_small).sum.imag.round(5)).to eq(0)
+
+            expect(MB::Sound.real_fft(dc_input_large)[*([0] * ndim)].real.round(4)).to eq(2)
+            expect(MB::Sound.real_fft(dc_input_large)[*([1] * ndim)].real.round(4)).to eq(0)
+            expect(MB::Sound.real_fft(dc_input_large)[*([0] * ndim)].imag.round(4)).to eq(0)
+            expect(MB::Sound.real_fft(dc_input_large)[*([1] * ndim)].imag.round(4)).to eq(0)
+            expect(MB::Sound.real_fft(dc_input_large).sum.real.round(5)).to eq(2)
+            expect(MB::Sound.real_fft(dc_input_large).sum.imag.round(5)).to eq(0)
+          end
+
+          it 'returns a bin value of -1i for a bin-centered sinusoid' do
+            small_fft = MB::Sound.real_fft(sine_input_small)
+            expect(MB::Sound::M.round(small_fft[*small_idx], 6)).to eq(0-1i)
+            expect(small_fft.abs.sum.round(6)).to eq(1)
+
+            large_fft = MB::Sound.real_fft(sine_input_large)
+            expect(MB::Sound::M.round(large_fft[*large_idx], 6)).to eq(0-1i)
+            expect(large_fft.abs.sum.round(6)).to eq(1)
+          end
+
+          it 'returns 0 phase for a cosine' do
+            fft = MB::Sound.real_fft(cosine_input)
+            expect(fft[*small_idx].real.round(6)).to eq(1)
+            expect(fft[*small_idx].imag.round(6)).to eq(0)
+          end
+
+          it 'returns PI/4 phase for a sine' do
+            fft = MB::Sound.real_fft(sine_input_small)
+            expect(fft[*small_idx].abs.round(6)).to eq(1)
+            expect(fft[*small_idx].arg.round(6)).to eq(-(Math::PI / 2).round(6))
+          end
         end
 
         describe '.real_ifft' do
-          pending
+          it "returns the original signal when passed the output of #real_fft" do
+            all_inputs.each do |name, input|
+              fft = MB::Sound.real_fft(input)
+              inv_fft = MB::Sound.real_ifft(fft)
+
+              # Including the name so the diff for failed comparisons will show the name
+              expect([name, MB::Sound::M.round(inv_fft, 6)]).to eq([name, MB::Sound::M.round(input, 6)])
+            end
+          end
+
+          it 'returns an array of all ones for a 2.0 DC value' do
+            dc_fft = Numo::DFloat.zeros([5] * ndim)
+            dc_fft[0] = 2
+            result = MB::Sound.real_ifft(dc_fft)
+            expect(result.sum.abs.round(6)).to eq(result.length)
+            expect(result.abs.min.round(6)).to eq(1)
+            expect(result.abs.max.round(6)).to eq(1)
+          end
+
+          pending 'with odd_length true'
         end
       end
     end

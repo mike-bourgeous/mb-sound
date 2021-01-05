@@ -77,8 +77,8 @@ module MB
         end
       end
 
-      # Returns the normalized complex FFT of the given data (e.g.
-      # Numo::NArray, Tone, or Array thereof).
+      # Returns only the positive normalized complex FFT of the given real data
+      # (e.g.  Numo::SFloat/DFloat, Tone, or Array thereof).
       #
       # See the MB::Sound::FFTMethods module documentation for more
       # information.
@@ -87,13 +87,13 @@ module MB
         when Numo::NArray
           case data.ndim
           when 1
-            Numo::Pocketfft.rfft(data)
+            (Numo::Pocketfft.rfft(data).inplace * (2.0 / data.length)).not_inplace!
 
           when 2
-            Numo::Pocketfft.rfft2(data)
+            (Numo::Pocketfft.rfft2(data).inplace * (2.0 / data.length)).not_inplace!
 
           else
-            Numo::Pocketfft.rfftn(data)
+            (Numo::Pocketfft.rfftn(data).inplace * (2.0 / data.length)).not_inplace!
           end
 
         when Array
@@ -106,24 +106,34 @@ module MB
         end
       end
 
+      # Returns the real component of the inverse normalized FFT of the given
+      # positive-frequencies-only frequency-domain data (e.g. Numo::NArray,
+      # Tone, or Array thereof).  This method compensates for the normalization
+      # performed by FFTMethods#real_fft.
+      #
+      # See the MB::Sound::FFTMethods module documentation for more
+      # information.
       def real_ifft(data, odd_length: false)
         if odd_length
-          # TODO: support more dimensions?
+          # TODO: implement.  and support more dimensions?
           raise "Odd lengths can only be inverted for 1-dimensional data" unless data.ndim == 1
           data = generate_negative_freqs(data, odd_length: true)
+          orig_length = data.shape[0..-2].reduce(1, &:*) * (data.shape[-1] - 1) * 2 # FIXME wrong
+        else
+          orig_length = data.shape[0..-2].reduce(1, &:*) * (data.shape[-1] - 1) * 2
         end
 
         case data
         when Numo::NArray
           case data.ndim
           when 1
-            Numo::Pocketfft.irfft(data)
+            (Numo::Pocketfft.irfft(data).inplace * (orig_length / 2.0)).not_inplace!
 
           when 2
-            Numo::Pocketfft.irfft2(data)
+            (Numo::Pocketfft.irfft2(data).inplace * (orig_length / 2.0)).not_inplace!
 
           else
-            Numo::Pocketfft.irfftn(data)
+            (Numo::Pocketfft.irfftn(data).inplace * (orig_length / 2.0)).not_inplace!
           end
 
         when Array
