@@ -93,7 +93,7 @@ RSpec.describe MB::Sound do
         }
 
         let(:sine_input_small) {
-          tone = 12000.hz.at(1).generate(24)
+          tone = Numo::DFloat.cast(12000.hz.at(1).generate(24))
           n.times do
             tone = Numo::DFloat.cast([tone] * 24)
           end
@@ -101,7 +101,7 @@ RSpec.describe MB::Sound do
         }
 
         let(:sine_input_large) {
-          tone = 4000.hz.at(1).generate(48)
+          tone = Numo::DFloat.cast(4000.hz.at(1).generate(48))
           n.times do
             tone = Numo::DFloat.cast([tone] * 48)
           end
@@ -117,7 +117,7 @@ RSpec.describe MB::Sound do
         }
 
         let(:cosine_input) {
-          tone = 12000.hz.with_phase(-90.degrees).at(1).generate(24)
+          tone = Numo::DFloat.cast(12000.hz.with_phase(90.degrees).at(1).generate(24))
           n.times do
             tone = Numo::DFloat.cast([tone] * 24)
           end
@@ -125,7 +125,7 @@ RSpec.describe MB::Sound do
         }
 
         let(:ramp_input) {
-          tone = 4000.hz.ramp.at(1).generate(48)
+          tone = Numo::DFloat.cast(4000.hz.ramp.at(1).generate(48))
           n.times do
             tone = Numo::DFloat.cast([tone] * 48)
           end
@@ -145,17 +145,17 @@ RSpec.describe MB::Sound do
 
         describe '.fft' do
           it 'returns a DC value of 2.0 for an array filled with ones' do
-            expect(MB::Sound.fft(dc_input_small)[*([0] * ndim)].real.round(5)).to eq(2)
-            expect(MB::Sound.fft(dc_input_small)[*([1] * ndim)].real.round(5)).to eq(0)
-            expect(MB::Sound.fft(dc_input_small)[*([0] * ndim)].imag.round(5)).to eq(0)
-            expect(MB::Sound.fft(dc_input_small)[*([1] * ndim)].imag.round(5)).to eq(0)
+            expect(MB::Sound.fft(dc_input_small)[*([0] * ndim)].real.round(4)).to eq(2)
+            expect(MB::Sound.fft(dc_input_small)[*([1] * ndim)].real.round(4)).to eq(0)
+            expect(MB::Sound.fft(dc_input_small)[*([0] * ndim)].imag.round(4)).to eq(0)
+            expect(MB::Sound.fft(dc_input_small)[*([1] * ndim)].imag.round(4)).to eq(0)
             expect(MB::Sound.fft(dc_input_small).sum.real.round(5)).to eq(2)
             expect(MB::Sound.fft(dc_input_small).sum.imag.round(5)).to eq(0)
 
-            expect(MB::Sound.fft(dc_input_large)[*([0] * ndim)].real.round(5)).to eq(2)
-            expect(MB::Sound.fft(dc_input_large)[*([1] * ndim)].real.round(5)).to eq(0)
-            expect(MB::Sound.fft(dc_input_large)[*([0] * ndim)].imag.round(5)).to eq(0)
-            expect(MB::Sound.fft(dc_input_large)[*([1] * ndim)].imag.round(5)).to eq(0)
+            expect(MB::Sound.fft(dc_input_large)[*([0] * ndim)].real.round(4)).to eq(2)
+            expect(MB::Sound.fft(dc_input_large)[*([1] * ndim)].real.round(4)).to eq(0)
+            expect(MB::Sound.fft(dc_input_large)[*([0] * ndim)].imag.round(4)).to eq(0)
+            expect(MB::Sound.fft(dc_input_large)[*([1] * ndim)].imag.round(4)).to eq(0)
             expect(MB::Sound.fft(dc_input_large).sum.real.round(5)).to eq(2)
             expect(MB::Sound.fft(dc_input_large).sum.imag.round(5)).to eq(0)
           end
@@ -174,18 +174,18 @@ RSpec.describe MB::Sound do
 
           it 'returns 0 phase for a cosine' do
             fft = MB::Sound.fft(cosine_input)
-            expect(fft[*small_idx].abs.round(6)).to eq(1)
-            expect(fft[*small_idx].arg.round(6)).to eq(0)
+            expect(fft[*small_idx].real.round(6)).to eq(1)
+            expect(fft[*small_idx].imag.round(6)).to eq(0)
             expect(fft[*small_idx.map(&:-@)].abs.round(6)).to eq(1)
-            expect(fft[*small_idx.map(&:-@)].arg.round(6)).to eq(Math::PI.round(6))
+            expect(fft[*small_idx.map(&:-@)].arg.round(6)).to eq(0)
           end
 
           it 'returns PI/4 phase for a sine' do
-            fft = MB::Sound.fft(cosine_input)
+            fft = MB::Sound.fft(sine_input_small)
             expect(fft[*small_idx].abs.round(6)).to eq(1)
-            expect(fft[*small_idx].arg.round(6)).to eq((Math::PI / 2).round(6))
+            expect(fft[*small_idx].arg.round(6)).to eq(-(Math::PI / 2).round(6))
             expect(fft[*small_idx.map(&:-@)].abs.round(6)).to eq(1)
-            expect(fft[*small_idx.map(&:-@)].arg.round(6)).to eq((-Math::PI / 2).round(6))
+            expect(fft[*small_idx.map(&:-@)].arg.round(6)).to eq((Math::PI / 2).round(6))
           end
         end
 
