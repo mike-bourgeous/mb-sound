@@ -11,3 +11,4 @@
 /*.flac
 /*.wav
 /spec/examples.txt
+.gdb_history

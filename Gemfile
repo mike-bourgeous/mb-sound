@@ -11,6 +11,9 @@ gem 'rake', '~> 13.0.1'
 gem 'cmath'
 gem 'numo-narray'
 
+# See https://github.com/yoshoku/numo-pocketfft/pull/4; remove this and update versions when that is merged
+gem 'numo-pocketfft', git: 'https://github.com/mike-bourgeous/numo-pocketfft.git', branch: 'fix-issue-3-crash-temporary-branch'
+
 # Interactive command line gems
 gem 'pry'
 gem 'pry-byebug'

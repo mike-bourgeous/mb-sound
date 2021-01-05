@@ -6,6 +6,14 @@ GIT
       ffi (~> 1.13.0)
       numo-narray (~> 0.9.1)
 
+GIT
+  remote: https://github.com/mike-bourgeous/numo-pocketfft.git
+  revision: 5b3ba66ed621110919e48de2340d6afcff65c35b
+  branch: fix-issue-3-crash-temporary-branch
+  specs:
+    numo-pocketfft (0.2.1)
+      numo-narray (~> 0.9.1)
+
 PATH
   remote: .
   specs:
@@ -28,8 +36,6 @@ GEM
     midi-nibbler (0.2.4)
       midi-message (~> 0.4, >= 0.4.4)
     numo-narray (0.9.1.9)
-    numo-pocketfft (0.2.1)
-      numo-narray (~> 0.9.1)
     pry (0.13.1)
       coderay (~> 1.1)
       method_source (~> 1.0)
@@ -64,6 +70,7 @@ DEPENDENCIES
   mb-sound!
   mb-sound-jackffi (>= 0.0.8.usegit)!
   numo-narray
+  numo-pocketfft!
   pry
   pry-byebug
   pry-doc
