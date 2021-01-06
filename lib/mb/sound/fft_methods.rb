@@ -149,6 +149,17 @@ module MB
         end
       end
 
+      # Generates negative frequencies from the given FFT data with only
+      # positive frequencies.  This is not required if you use the #real_fft
+      # and #real_ifft methods.
+      def generate_negative_freqs(data, odd_length: false)
+        raise NotImplementedError, 'Only one dimension supported at this time' if data.ndim != 1
+
+        # TODO: Use inplace! where possible if it speeds things up
+        neg = pos_dft[1..(odd_length ? -1 : -2)].reverse
+        pos_dft.concatenate(neg.conj)
+      end
+
       # TODO: conditionally use FFTW version
       if defined?(Numo::Pocketfft)
         include PocketfftMethods
