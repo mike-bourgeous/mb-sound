@@ -117,13 +117,12 @@ module MB
         # information.
         def real_ifft(data, odd_length: false)
           if odd_length
-            # TODO: implement.  and support more dimensions?
-            raise "Odd lengths can only be inverted for 1-dimensional data" unless data.ndim == 1
+            # TODO: support more dimensions?
             data = generate_negative_freqs(data, odd_length: true)
-            orig_length = data.shape[0..-2].reduce(1, &:*) * (data.shape[-1] - 1) * 2 # FIXME wrong
-          else
-            orig_length = data.shape[0..-2].reduce(1, &:*) * (data.shape[-1] - 1) * 2
+            return ifft(data).real
           end
+
+          orig_length = data.shape[0..-2].reduce(1, &:*) * (data.shape[-1] - 1) * 2
 
           case data
           when Numo::NArray
@@ -156,11 +155,11 @@ module MB
         raise NotImplementedError, 'Only one dimension supported at this time' if data.ndim != 1
 
         # TODO: Use inplace! where possible if it speeds things up
-        neg = pos_dft[1..(odd_length ? -1 : -2)].reverse
-        pos_dft.concatenate(neg.conj)
+        neg = data[1..(odd_length ? -1 : -2)].reverse
+        data.concatenate(neg.conj)
       end
 
-      # TODO: conditionally use FFTW version
+      # TODO: conditionally use FFTW if present?
       if defined?(Numo::Pocketfft)
         include PocketfftMethods
       else

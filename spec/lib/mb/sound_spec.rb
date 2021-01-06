@@ -274,7 +274,21 @@ RSpec.describe MB::Sound do
             expect(result.abs.max.round(6)).to eq(1)
           end
 
-          pending 'with odd_length true'
+          context 'with odd_length: true' do
+            if ndim == 1
+              it "returns the original data from an odd-length dataset with #{ndim} dimensions" do
+                all_inputs.each do |name, input|
+                  odd = input[0..-2]
+                  fft = MB::Sound.real_fft(odd)
+                  inv_fft = MB::Sound.real_ifft(fft, odd_length: true)
+
+                  expect([name, MB::Sound::M.round(inv_fft, 6)]).to eq([name, MB::Sound::M.round(odd, 6)])
+                end
+              end
+            else
+              it "returns the original data from an odd-length dataset with #{ndim} dimensions"
+            end
+          end
         end
       end
     end
