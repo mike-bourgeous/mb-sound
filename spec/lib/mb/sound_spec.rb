@@ -187,6 +187,18 @@ RSpec.describe MB::Sound do
             expect(fft[*small_idx.map(&:-@)].abs.round(6)).to eq(1)
             expect(fft[*small_idx.map(&:-@)].arg.round(6)).to eq((Math::PI / 2).round(6))
           end
+
+          it 'can process an Array of Float' do
+            small_fft = MB::Sound.fft(sine_input_small.to_a)
+            expect(small_fft.abs.sum.round(6)).to eq(2)
+            expect(MB::Sound::M.round(small_fft[*small_idx], 6)).to eq(0-1i)
+          end
+
+          it 'can process an Array of Complex' do
+            small_fft = MB::Sound.fft(Numo::SComplex.cast(sine_input_small).to_a)
+            expect(Numo::SComplex.cast(small_fft).abs.sum.round(6)).to eq(2)
+            expect(MB::Sound::M.round(small_fft[*small_idx], 6)).to eq(0-1i)
+          end
         end
 
         describe '.ifft' do
@@ -207,6 +219,19 @@ RSpec.describe MB::Sound do
             expect(result.sum.abs.round(6)).to eq(5 ** ndim)
             expect(result.abs.min.round(6)).to eq(1)
             expect(result.abs.max.round(6)).to eq(1)
+          end
+
+          it 'can process an Array of Complex' do
+            fft_arr = MB::Sound.fft(sine_input_small).to_a
+
+            first = fft_arr
+            while first.is_a?(Array)
+              first = first[0]
+            end
+            expect(first).to be_a(Complex)
+
+            inv_fft = MB::Sound.ifft(fft_arr)
+            expect(MB::Sound::M.round(inv_fft, 6)).to eq(MB::Sound::M.round(sine_input_small, 6))
           end
         end
 
@@ -252,6 +277,12 @@ RSpec.describe MB::Sound do
             expect(fft[*small_idx].abs.round(6)).to eq(1)
             expect(fft[*small_idx].arg.round(6)).to eq(-(Math::PI / 2).round(6))
           end
+
+          it 'can process an Array of Float' do
+            small_fft = MB::Sound.real_fft(sine_input_small.to_a)
+            expect(small_fft.abs.sum.round(6)).to eq(1)
+            expect(MB::Sound::M.round(small_fft[*small_idx], 6)).to eq(0-1i)
+          end
         end
 
         describe '.real_ifft' do
@@ -274,6 +305,19 @@ RSpec.describe MB::Sound do
             expect(result.abs.max.round(6)).to eq(1)
           end
 
+          it 'can process an Array of Complex' do
+            fft_arr = MB::Sound.real_fft(sine_input_small).to_a
+
+            first = fft_arr
+            while first.is_a?(Array)
+              first = first[0]
+            end
+            expect(first).to be_a(Complex)
+
+            inv_fft = MB::Sound.real_ifft(fft_arr)
+            expect(MB::Sound::M.round(inv_fft, 6)).to eq(MB::Sound::M.round(sine_input_small, 6))
+          end
+
           context 'with odd_length: true' do
             if ndim == 1
               it "returns the original data from an odd-length dataset with #{ndim} dimensions" do
@@ -285,8 +329,15 @@ RSpec.describe MB::Sound do
                   expect([name, MB::Sound::M.round(inv_fft, 6)]).to eq([name, MB::Sound::M.round(odd, 6)])
                 end
               end
+
+              it 'can process a numeric Array' do
+                odd = sine_input_small[0..-2].to_a
+                fft_arr = MB::Sound.real_fft(odd)
+                inv_fft = MB::Sound.real_ifft(fft_arr, odd_length: true)
+                expect(MB::Sound::M.round(inv_fft, 6)).to eq(MB::Sound::M.round(odd, 6))
+              end
             else
-              it "returns the original data from an odd-length dataset with #{ndim} dimensions"
+              pending "#{ndim} dimensions"
             end
           end
         end

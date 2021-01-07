@@ -25,6 +25,8 @@ module MB
         # See the MB::Sound::FFTMethods module documentation for more
         # information.
         def fft(data)
+          data = convert_sound_to_narray(data) unless data.is_a?(Numo::NArray)
+
           case data
           when Numo::NArray
             case data.ndim
@@ -39,12 +41,10 @@ module MB
             end
 
           when Array
-            any_sound_to_array(data).map { |v|
-              fft(v)
-            }
+            data.map { |v| fft(v) }
 
           else
-            fft(any_sound_to_array(data)[0])
+            raise "Unsupported data type: #{data.class}"
           end
         end
 
@@ -56,6 +56,8 @@ module MB
         # See the MB::Sound::FFTMethods module documentation for more
         # information.
         def ifft(data)
+          data = convert_sound_to_narray(data) unless data.is_a?(Numo::NArray)
+
           case data
           when Numo::NArray
             case data.ndim
@@ -70,21 +72,22 @@ module MB
             end
 
           when Array
-            any_sound_to_array(data).map { |v|
-              ifft(v)
-            }
+            data.map { |v| ifft(v) }
 
           else
-            ifft(any_sound_to_array(data)[0])
+            raise "Unsupported data type: #{data.class}"
           end
         end
 
-        # Returns only the positive normalized complex FFT of the given real data
-        # (e.g.  Numo::SFloat/DFloat, Tone, or Array thereof).
+        # Returns only the positive frequencies of the normalized complex FFT
+        # of the given real data (e.g. Numo::SFloat/DFloat, Tone, or Array
+        # thereof).
         #
         # See the MB::Sound::FFTMethods module documentation for more
         # information.
         def real_fft(data)
+          data = convert_sound_to_narray(data) unless data.is_a?(Numo::NArray)
+
           case data
           when Numo::NArray
             case data.ndim
@@ -99,12 +102,10 @@ module MB
             end
 
           when Array
-            any_sound_to_array(data).map { |v|
-              real_fft(v)
-            }
+            data.map { |v| real_fft(v) }
 
           else
-            real_fft(any_sound_to_array(data)[0])
+            raise "Unsupported data type: #{data.class}"
           end
         end
 
@@ -116,16 +117,18 @@ module MB
         # See the MB::Sound::FFTMethods module documentation for more
         # information.
         def real_ifft(data, odd_length: false)
-          if odd_length
-            # TODO: support more dimensions?
-            data = generate_negative_freqs(data, odd_length: true)
-            return ifft(data).real
-          end
-
-          orig_length = data.shape[0..-2].reduce(1, &:*) * (data.shape[-1] - 1) * 2
+          data = convert_sound_to_narray(data) unless data.is_a?(Numo::NArray)
 
           case data
           when Numo::NArray
+            if odd_length
+              # TODO: support more dimensions?
+              data = generate_negative_freqs(data, odd_length: true)
+              return ifft(data).real
+            end
+
+            orig_length = data.shape[0..-2].reduce(1, &:*) * (data.shape[-1] - 1) * 2
+
             case data.ndim
             when 1
               (Numo::Pocketfft.irfft(data).inplace * (orig_length / 2.0)).not_inplace!
@@ -138,12 +141,10 @@ module MB
             end
 
           when Array
-            any_sound_to_array(data).map { |v|
-              real_ifft(v)
-            }
+            data.map { |v| real_ifft(v) }
 
           else
-            real_ifft(any_sound_to_array(data)[0])
+            raise "Unsupported data type: #{data.class}"
           end
         end
       end

@@ -5,32 +5,45 @@ module MB
     # See the modules MB::Sound extends itself with to find all command-line
     # interface methods.
     module IOMethods
-      # If given a raw NArray or an array of numeric values, wraps it in an
-      # Array.  If given a Tone or array of Tones, calls its/their
-      # MB::Sound::Tone#generate method.
-      def any_sound_to_array(array)
-        case array
-        when Numo::NArray
-          [array]
-
+      # Returns true if the given Array looks like a (possibly nested) numeric
+      # array, false if it's not an array or contains non-numeric data.  Only
+      # checks the first element of an array.
+      def is_numeric_array?(array)
+        case array[0]
         when Array
-          case array[0]
-          when Numeric
-            [array]
+          is_numeric_array?(array[0])
 
-          else
-            array.map { |el|
-              el = el.generate if el.is_a?(MB::Sound::Tone)
-              el
-            }
-          end
-
-        when MB::Sound::Tone
-          [array.generate]
+        when Numeric
+          true
 
         else
-          array
+          false
         end
+      end
+
+      # Converts a single Tone or Numeric Array to NArray.  If given an Array
+      # of Tones or Numeric Arrays, returns an Array of NArray.
+      def convert_sound_to_narray(sound)
+        case sound
+        when Tone
+          sound.generate
+
+        when Array
+          if is_numeric_array?(sound)
+            Numo::NArray.cast(sound)
+          else
+            sound.map { |el| convert_sound_to_narray(el) }
+          end
+
+        else
+          sound
+        end
+      end
+
+      # Like #convert_sound_to_narray, but wraps everything in a top-level
+      # Array if it is not already in one.
+      def any_sound_to_array(array)
+        convert_sound_to_narray(array).yield_self { |v| v.is_a?(Array) ? v : [v] }
       end
 
       # Reads an entire sound file into an array of Numo::NArrays, one per
