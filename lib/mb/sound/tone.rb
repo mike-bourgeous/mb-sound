@@ -98,7 +98,7 @@ module MB
         # Returns the number of seconds at the given sample rate (default
         # 48kHz).
         def samples(rate = 48000)
-          self / rate
+          self.to_f / rate
         end
 
         # Creates a Tone object with this frequency.  If this is a Meters or
@@ -143,10 +143,20 @@ module MB
           Meters.new(self)
         end
         alias meter meters
+
+        # Returns the number itself (radians are the default).
+        def radians
+          self
+        end
+
+        # Converts degrees to radians.
+        def degrees
+          self * Math::PI / 180.0
+        end
       end
       ::Numeric.include NumericToneMethods
 
-      attr_reader :wave_type, :frequency, :amplitude, :duration, :rate, :wavelength
+      attr_reader :wave_type, :frequency, :amplitude, :duration, :rate, :wavelength, :phase
 
       # Initializes a representation of a simple generated waveform.
       #
@@ -154,13 +164,16 @@ module MB
       # +frequency+ - The frequency of the tone, in Hz at the given +:rate+ (or
       #               a wavelength as Meters or Feet).
       # +amplitude+ - The linear peak amplitude of the tone.
+      # +phase+ - The starting phase, in radians relative to a sine wave (0
+      #           radians phase starts at 0 and rises).
       # +duration+ - How long the tone should play in seconds (default is 5s).
       # +rate+ - The sample rate to use to calculate the frequency.
-      def initialize(wave_type: :sine, frequency: 440, amplitude: 0.1, duration: 5, rate: 48000)
+      def initialize(wave_type: :sine, frequency: 440, amplitude: 0.1, phase: 0, duration: 5, rate: 48000)
         @wave_type = wave_type
         @amplitude = amplitude.to_f
         @duration = duration&.to_f
         @rate = rate
+        @phase = 0
         @oscillator = nil
         set_frequency(frequency)
       end
@@ -213,6 +226,16 @@ module MB
         self
       end
 
+      # Changes the initial phase of the tone, in radians relative to a sine
+      # wave.  0 phase starts oscillators at 0 and rising (or at the top half
+      # of the cycle for a square wave).
+      #
+      # Example: 123.hz.with_phase(90.degrees)
+      def with_phase(phase)
+        @phase = phase
+        self
+      end
+
       # Converts this Tone to the nearest Note based on its frequency.
       def to_note
         MB::Sound::Note.new(self)
@@ -226,7 +249,8 @@ module MB
         @oscillator ||= MB::Sound::Oscillator.new(
           @wave_type,
           frequency: @frequency,
-          advance: Math::PI * 2.0 / @rate
+          phase: @phase,
+          advance: Math::PI * 2.0 / @rate,
         )
 
         @oscillator.sample(count) * @amplitude

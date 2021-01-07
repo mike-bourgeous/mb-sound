@@ -84,6 +84,10 @@ dependency to a new project's Gemfile.
 ```ruby
 # your-project/Gemfile
 gem 'mb-sound', git: 'https://github.com/mike-bourgeous/mb-sound.git'
+
+# Until https://github.com/yoshoku/numo-pocketfft/pull/4 is merged, this fixes
+# occasional crashing in FFT code
+gem 'numo-pocketfft', git: 'https://github.com/mike-bourgeous/numo-pocketfft.git', branch: 'fix-issue-3-crash-temporary-branch'
 ```
 
 ## Examples
@@ -245,9 +249,6 @@ platforms.
 
 This project is released under a 2-clause BSD license.  See the LICENSE file.
 
-Note, however, that if you use the FFT routines from FFTW, your app may be
-subject to the GPL.
-
 ## Standing on the shoulders of giants
 
 ### Dependencies
@@ -255,7 +256,8 @@ subject to the GPL.
 This code uses some really cool other projects either directly or indirectly:
 
 - FFMPEG
-- Numo gems
+- Numo::NArray
+- Numo::Pocketfft
 - Pry interactive console for Ruby
 - GNUplot
 - The MIDI Nibbler gem
