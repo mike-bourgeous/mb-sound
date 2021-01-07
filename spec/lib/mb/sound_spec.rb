@@ -80,6 +80,27 @@ RSpec.describe MB::Sound do
   end
 
   context 'FFTMethods' do
+    [:fft, :real_fft].each do |m|
+      describe m do
+        it 'can process a Tone object' do
+          fft = MB::Sound.send(m, 4000.hz.at(1).for(1))
+          expect(fft.abs.max_index).to eq(4000)
+          expect(fft[4000].abs.round(3)).to eq(1)
+        end
+
+        it 'can process an Array of Tone objects' do
+          fft = MB::Sound.send(m, [4000.hz.at(1).for(1), 8000.hz.at(1).for(1)])
+          expect(fft).to be_a(Array)
+          expect(fft[0].abs.max_index).to eq(4000)
+          expect(fft[1].abs.max_index).to eq(8000)
+          expect(fft[0][4000].abs.round(3)).to eq(1)
+          expect(fft[0][8000].abs.round(3)).to eq(0)
+          expect(fft[1][4000].abs.round(3)).to eq(0)
+          expect(fft[1][8000].abs.round(3)).to eq(1)
+        end
+      end
+    end
+
     3.times do |n|
       ndim = n + 1
 
@@ -199,6 +220,12 @@ RSpec.describe MB::Sound do
             expect(Numo::SComplex.cast(small_fft).abs.sum.round(6)).to eq(2)
             expect(MB::Sound::M.round(small_fft[*small_idx], 6)).to eq(0-1i)
           end
+
+          it 'can process an Array of NArrays' do
+            ffts = MB::Sound.fft([sine_input_small, sine_input_large])
+            expect(ffts[0][*small_idx].abs.round).to eq(1)
+            expect(ffts[1][*large_idx].abs.round).to eq(1)
+          end
         end
 
         describe '.ifft' do
@@ -232,6 +259,12 @@ RSpec.describe MB::Sound do
 
             inv_fft = MB::Sound.ifft(fft_arr)
             expect(MB::Sound::M.round(inv_fft, 6)).to eq(MB::Sound::M.round(sine_input_small, 6))
+          end
+
+          it 'can process an Array of NArrays' do
+            ffts = MB::Sound.fft(all_inputs.values)
+            inv_ffts = MB::Sound.ifft(ffts)
+            expect(MB::Sound::M.round(inv_ffts, 6)).to eq(MB::Sound::M.round(all_inputs.values, 6))
           end
         end
 
@@ -283,6 +316,12 @@ RSpec.describe MB::Sound do
             expect(small_fft.abs.sum.round(6)).to eq(1)
             expect(MB::Sound::M.round(small_fft[*small_idx], 6)).to eq(0-1i)
           end
+
+          it 'can process an Array of NArrays' do
+            ffts = MB::Sound.real_fft([sine_input_small, sine_input_large])
+            expect(ffts[0][*small_idx].abs.round).to eq(1)
+            expect(ffts[1][*large_idx].abs.round).to eq(1)
+          end
         end
 
         describe '.real_ifft' do
@@ -316,6 +355,12 @@ RSpec.describe MB::Sound do
 
             inv_fft = MB::Sound.real_ifft(fft_arr)
             expect(MB::Sound::M.round(inv_fft, 6)).to eq(MB::Sound::M.round(sine_input_small, 6))
+          end
+
+          it 'can process an Array of NArrays' do
+            ffts = MB::Sound.real_fft(all_inputs.values)
+            inv_ffts = MB::Sound.real_ifft(ffts)
+            expect(MB::Sound::M.round(inv_ffts, 6)).to eq(MB::Sound::M.round(all_inputs.values, 6))
           end
 
           context 'with odd_length: true' do
