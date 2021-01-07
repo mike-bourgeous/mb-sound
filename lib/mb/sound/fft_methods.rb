@@ -160,6 +160,30 @@ module MB
         data.concatenate(neg.conj)
       end
 
+      # Converts the given +data+ to a complex analytic signal with real and
+      # imaginary components (the real component should match the original if the
+      # original signal was real).
+      #
+      # Note that if the data is not periodic, the imaginary component produced
+      # near the endpoints may not match what would be produced for the same region
+      # when in the middle of the data window.
+      #
+      # See #positive_freqs and #generate_negative_freqs
+      def analytic_signal(data)
+        full_dft = fft(data).inplace
+
+        # See https://www.gaussianwaves.com/2017/04/analytic-signal-hilbert-transform-and-fft/
+        # See https://ccrma.stanford.edu/~jos/mdft/Analytic_Signals_Hilbert_Transform.html
+        midpoint = full_dft.size / 2
+        end_pos = midpoint - (data.length.odd? ? 0 : 1)
+        end_neg = midpoint + 1
+
+        full_dft[1..end_pos] += full_dft[end_neg..-1].reverse.conj
+        full_dft[end_neg..-1] = 0
+
+        ifft(full_dft).not_inplace!
+      end
+
       # TODO: conditionally use FFTW if present?
       if defined?(Numo::Pocketfft)
         include PocketfftMethods
