@@ -57,8 +57,16 @@ RSpec.describe MB::Sound::FFMPEGInput do
     MB::Sound::FFMPEGInput.new('spec/test_data/two_audio_streams.mkv', stream_idx: 1)
   }
 
+  let(:mp3_48k) {
+    MB::Sound::FFMPEGInput.new('spec/test_data/48k_300hz_1s.mp3')
+  }
+
+  let(:mp3_44k) {
+    MB::Sound::FFMPEGInput.new('spec/test_data/44k_300hz_1s.mp3')
+  }
+
   describe '#initialize' do
-    it 'can load and parse info from a .flac sound' do
+    it 'can load and parse info from a .flac file' do
       expect(input.frames).to eq(48000)
       expect(input.rate).to eq(48000)
       expect(input.channels).to eq(1)
@@ -66,6 +74,24 @@ RSpec.describe MB::Sound::FFMPEGInput do
 
       input.read(100000) # allow ffmpeg to empty its buffer
       expect(input.close.success?).to eq(true)
+    end
+
+    it 'can load and parse info from a .mp3 file' do
+      # For some reason ffprobe returns a longer duration than can actually be
+      # read from the file.
+      expect(mp3_48k.frames).to be_between(45000, 51000)
+      expect(mp3_44k.frames).to be_between(41000, 49000)
+
+      data_48k = mp3_48k.read(1000000).first
+      data_44k = mp3_44k.read(1000000).first
+      expect(data_48k.length).to eq(48000)
+      expect(data_44k.length).to eq(44100)
+
+      expect(MB::Sound.real_fft(data_48k).abs.max_index).to eq(300)
+      expect(MB::Sound.real_fft(data_44k).abs.max_index).to eq(300)
+
+      expect(mp3_48k.close.success?).to eq(true)
+      expect(mp3_44k.close.success?).to eq(true)
     end
 
     it 'can change the number of channels' do

@@ -17,7 +17,7 @@ GIT
 PATH
   remote: .
   specs:
-    mb-sound (0.0.4.usegit)
+    mb-sound (0.0.5.usegit)
       cmath (~> 1.0.0)
       midi-nibbler (~> 0.2.4)
       numo-narray (~> 0.9.1.8)

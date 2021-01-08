@@ -6,6 +6,7 @@ module MB
     # An input stream type that uses FFMPEG to parse an audio stream from most
     # file formats.
     class FFMPEGInput < IOInput
+      # Note: number of frames may be approximate
       attr_reader :filename, :rate, :channels, :frames, :info, :raw_info
 
       # A list of metadata keys that should not be parsed numerically.
@@ -123,18 +124,22 @@ module MB
           raise "Missing channels from stream info" unless @channels
         end
 
+        @rate = info[:sample_rate]
+
+        if @info[:duration_ts]
+          @frames = @info[:duration_ts].to_r
+          @frames *= @info[:time_base] || (1.to_r / @info[:sample_rate])
+          @frames *= @info[:sample_rate]
+          @frames = @frames.ceil
+        else
+          @frames = ((@info[:duration] || 0) * @rate).ceil
+        end
+
         if resample
           raise "Sampling rate must be an integer greater than 0" unless resample.is_a?(Integer) && resample > 0
           @rate = resample
-          if @info[:duration_ts]
-            @frames = @info[:duration_ts] * @rate / @info[:sample_rate]
-          end
-        else
-          @rate = @info[:sample_rate]
-          @frames = @info[:duration_ts]
+          @frames = @frames * @rate / @info[:sample_rate] if @info.include?(:sample_rate)
         end
-
-        @frames ||= ((@info[:duration] || 0) * @rate).ceil
 
         # Compensate for possible delay at the start of a stream e.g. in a
         # video where the audio starts after the video
