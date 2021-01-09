@@ -358,5 +358,21 @@ RSpec.describe(MB::Sound::FFTMethods) do
         end
       end
     end
+
+    it 'can process a Tone' do
+      signal = MB::Sound.analytic_signal(300.hz.at(1))
+      expect(signal.real.max.round(6)).to eq(1)
+      expect(signal.real.min.round(6)).to eq(-1)
+      expect(signal.imag.max.round(6)).to eq(1)
+      expect(signal.imag.min.round(6)).to eq(-1)
+    end
+
+    it 'can process an Array of Tones' do
+      signal = MB::Sound.analytic_signal([300.hz.at(1), 400.hz.at(0.1)])
+      expect(signal.map { |c| c.real.max.round(6) }).to eq([1, 0.1])
+      expect(signal.map { |c| c.real.min.round(6) }).to eq([-1, -0.1])
+      expect(signal.map { |c| c.imag.max.round(6) }).to eq([1, 0.1])
+      expect(signal.map { |c| c.imag.min.round(6) }).to eq([-1, -0.1])
+    end
   end
 end

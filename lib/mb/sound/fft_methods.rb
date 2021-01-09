@@ -170,6 +170,11 @@ module MB
       #
       # See #positive_freqs and #generate_negative_freqs
       def analytic_signal(data)
+        data = convert_sound_to_narray(data)
+        if data.is_a?(Array)
+          return data.map { |v| analytic_signal(v) }
+        end
+
         full_dft = fft(data).inplace
 
         # See https://www.gaussianwaves.com/2017/04/analytic-signal-hilbert-transform-and-fft/
