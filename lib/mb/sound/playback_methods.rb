@@ -7,11 +7,15 @@ module MB
       # given, or an audio buffer if an audio buffer is given.  If an audio
       # buffer or tone is given, the sample rate should be specified (defaults to
       # 48k).  The sample rate is ignored for an audio filename.
-      def play(file_tone_data, rate: 48000, gain: 1.0, plot: nil, graphical: false, device: nil)
+      #
+      # If +spectrum+ is true, then each chunk of audio plotted is shown in the
+      # frequency domain instead of the time domain.
+      def play(file_tone_data, rate: 48000, gain: 1.0, plot: nil, graphical: false, spectrum: false, device: nil)
         header = MB::Sound::U.wrap("\e[H\e[J\e[36mPlaying\e[0m #{MB::Sound::U.highlight(file_tone_data)}".lines.map(&:strip).join(' ') + "\n\n")
         puts header
 
         plot = { header_lines: header.lines.count, graphical: graphical } if plot.nil? || plot == true
+        plot[:spectrum] = spectrum unless plot.include?(:spectrum)
 
         case file_tone_data
         when String

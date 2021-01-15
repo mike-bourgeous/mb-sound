@@ -33,17 +33,26 @@ module MB
 
       # Returns either a terminal-based plotting object if +graphical+ is false,
       # or a graphical window-based plotting object if +graphical+ is true.
+      #
+      # Overriding this method to return some other compatible object allows
+      # other plotting systems to be used by the CLI DSL.
       def plotter(graphical:)
         @pt ||= MB::Sound::Plot.terminal(height_fraction: 0.8)
         @pg ||= MB::Sound::Plot.new if graphical
         graphical ? @pg : @pt
       end
 
+      # Plots the spectrum of the given data (split into chunks).  This method
+      # is for convenience and just calls #plot(..., spectrum: true).
+      def spectrum(data, **kwargs)
+        plot(data, **kwargs, spectrum: true)
+      end
+
       # Plots a subset of the given audio file, test tone, or data, starting at
       # +offset+, and plotting the following +samples+ samples.  If +all+ is true
       # then the entirety of the file, tone, or data will be plotted in slices of
       # +samples+ samples.
-      def plot(file_tone_data, samples: 960, offset: 0, all: false, graphical: false)
+      def plot(file_tone_data, samples: 960, offset: 0, all: false, graphical: false, spectrum: false)
         # FIXME: This function is hard to read
         STDOUT.write("\e[H\e[2J") if all == true
 
@@ -76,9 +85,13 @@ module MB
           until offset >= data[0].length
             STDOUT.write("\e[#{header_lines}H\e[36mPress Ctrl-C to stop  \e[1;35m#{offset} / #{data[0].length}\e[0m\e[K\n")
 
-            p.yrange(data.map(&:min).min, data.map(&:max).max) if p.respond_to?(:yrange)
+            if spectrum
+              p.yrange(-80, 0) if p.respond_to?(:yrange)
+            else
+              p.yrange(data.map(&:min).min, data.map(&:max).max) if p.respond_to?(:yrange)
+            end
 
-            plot(data, samples: samples, offset: offset, all: nil, graphical: graphical)
+            plot(data, samples: samples, offset: offset, all: nil, graphical: graphical, spectrum: spectrum)
 
             now = clock_now
             elapsed = [now - t, 0.1].min
@@ -91,6 +104,13 @@ module MB
           end
         else
           data = data.map { |c| c[offset...([offset + samples, c.length].min)] || [] }
+
+          if spectrum
+            p.logscale if p.respond_to?(:logscale)
+            data = data.map { |c| MB::Sound.real_fft(c).abs.map(&:to_db).clip(-80, 80) }
+          else
+            p.logscale(false) if p.respond_to?(:logscale)
+          end
 
           p.yrange(data.map(&:min).min, data.map(&:max).max) if p.respond_to?(:yrange) && !all.nil?
 

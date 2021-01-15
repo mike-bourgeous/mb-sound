@@ -24,36 +24,36 @@ puts
 clear if ARGV.include?('--clear')
 
 def show_intro
-  puts MB::Sound::U.wrap(<<-EOF.strip)
+  puts <<-EOF.strip
 \e[33;1mWelcome to the interactive sound environment!\e[0m
 
-If you're new to Ruby, see https://www.ruby-lang.org/en/documentation/quickstart/.
-If you're new to Pry, check out https://pry.github.io/.
+If you're new to \e[1;31mRuby\e[0m, see \e[1;34mhttps://www.ruby-lang.org/en/documentation/quickstart/\e[0m.
+If you're new to \e[1;31mPry\e[0m, check out \e[1;34mhttps://pry.github.io/\e[0m.
 
 \e[3mSome things to try:\e[0m
+EOF
 
-\e[1mls\e[0m (for "list") to get a list of the easiest to use sound functions.
+  examples = {
+    "\e[1mls\e[0m" => "(for \"list\") to get a list of the easiest to use sound functions.",
+    "\e[1;32m#{MB::Sound::U.syntax("list")}\e[0m" => "to get a list of included sounds.",
+    "\e[1;33m#{MB::Sound::U.syntax("play 'sounds/sine/sine_100_1s_mono.flac'")}\e[0m" => "to play a sound file.",
+    "\e[1;33m#{MB::Sound::U.syntax("play 123.hz")}\e[0m" => "to play a 123Hz tone for a few seconds.",
+    "\e[1;33m#{MB::Sound::U.syntax("play 123.hz.triangle.at(-20.db).forever")}\e[0m" => "to play a 123Hz triangle wave tone forever.",
+    "\e[1;33m#{MB::Sound::U.syntax("play filter(333.hz.ramp, frequency: 850, quality: 10)")}\e[0m" => "to play a sawtooth wave through a low-pass filter.",
+    "\e[1;33m#{MB::Sound::U.syntax("play filter(333.hz.ramp, frequency: 850, quality: 10), spectrum: true")}\e[0m" => "to play a sawtooth wave through a low-pass filter and view its frequency spectrum.",
+    "\e[1;35m#{MB::Sound::U.syntax("plot 123.hz")}\e[0m" => "to graph part of a 123Hz tone.",
+    "\e[1;35m#{MB::Sound::U.syntax("plot 123.hz, all: true")}\e[0m" => "to graph a 123Hz tone as it would be played.",
+    "\e[1;35m#{MB::Sound::U.syntax("plot 'sounds/sine/sine_100_1s_mono.flac', all: true")}\e[0m" => "to graph a sound file at the same speed it would be played.",
+    "\e[1;35m#{MB::Sound::U.syntax("plot 'sounds/sine/log_sweep_20_20k.flac', all: true, spectrum: true")}\e[0m" => "to graph the frequency spectrum of a sound file at the same speed it would be played.",
+    "\e[1;33m#{MB::Sound::U.syntax("123.hz.wavelength")}\e[0m" => "to show the wavelength of a 123Hz tone (at room temperature at sea level).",
+    "\e[1m#{MB::Sound::U.syntax('cd ::')}\e[0m" => "for experienced Ruby/Pry users to leave the sound context.",
+  }
 
-\e[1;32m#{MB::Sound::U.syntax("list")}\e[0m to get a list of included sounds.
-
-\e[1;33m#{MB::Sound::U.syntax("play 'sounds/sine/sine_100_1s_mono.flac'")}\e[0m to play a sound file.
-
-\e[1;33m#{MB::Sound::U.syntax("play 123.hz")}\e[0m to play a 123Hz tone for a few seconds.
-
-\e[1;33m#{MB::Sound::U.syntax("play 123.hz.triangle.at(-20.db).forever")}\e[0m to play a 123Hz triangle wave tone forever.
-
-\e[1;33m#{MB::Sound::U.syntax("play filter(333.hz.ramp, frequency: 850, quality: 10)")}\e[0m to play a sawtooth wave through a low-pass filter.
-
-\e[1;35m#{MB::Sound::U.syntax("plot 123.hz")}\e[0m to graph part of a 123Hz tone.
-
-\e[1;35m#{MB::Sound::U.syntax("plot 123.hz, all: true")}\e[0m to graph a 123Hz tone as it would be played.
-
-\e[1;35m#{MB::Sound::U.syntax("plot 'sounds/sine/sine_100_1s_mono.flac', all: true")}\e[0m to graph a sound file at the same speed it would be played.
-
-\e[1;33m#{MB::Sound::U.syntax("123.hz.wavelength")}\e[0m to show the wavelength of a 123Hz tone (at room temperature at sea level).
-
-\e[1m#{MB::Sound::U.syntax('cd ::')}\e[0m for experienced Ruby/Pry users to leave the sound context.
-  EOF
+  examples.each do |code, description|
+    line_length = MB::Sound::U.remove_ansi(code.lines.last).length
+    wrapped = MB::Sound::U.wrap('.' * (line_length - 1) + ' ' + description, width: MB::Sound::U.width - 3)[line_length..-1].gsub(/\n/m, "\n   ").strip
+    puts " * #{code} #{wrapped}\n\n"
+  end
 end
 
 show_intro

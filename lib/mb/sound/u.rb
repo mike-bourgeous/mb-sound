@@ -22,11 +22,16 @@ module MB
       # Wraps the given text for the current terminal width, or 80 columns if
       # the terminal width is unknown.  Returns the text unmodified if WordWrap
       # is unavailable.
-      def self.wrap(text)
+      def self.wrap(text, width: self.width)
         require 'word_wrap'
         WordWrap.ww(text, width - 1, true) # FIXME: doesn't ignore ANSI escapes
       rescue LoadError
         text
+      end
+
+      # Returns a copy of the String with ANSI-style escape sequences removed.
+      def self.remove_ansi(str)
+        str.gsub(/\e\[[^A-Za-z]*[A-Za-z]/, '')
       end
 
       # Returns a String with a syntax highlighted form of the given +object+,

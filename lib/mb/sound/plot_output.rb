@@ -14,12 +14,14 @@ module MB
       #
       # +:plot+ can be used to customize the Plot instance, or to pass a
       # different compatible plotter.
-      def initialize(output, window_size: 960, graphical: false, header_lines: 1, plot: nil)
+      def initialize(output, window_size: 960, graphical: false, header_lines: 1, plot: nil, spectrum: false)
         raise "Output streams must respond to #write" unless output.respond_to?(:write)
         raise "Output streams must respond to #buffer_size" unless output.respond_to?(:buffer_size)
 
         @header_lines = header_lines
         @window_size = window_size || output.buffer_size
+
+        @spectrum = spectrum
 
         @output = output
 
@@ -83,11 +85,25 @@ module MB
 
         samples = [@window_size, data[0].length].min
 
+        if @spectrum
+          @p.logscale if @p.respond_to?(:logscale)
+          # TODO: Use a window function
+          data = data.map { |c| MB::Sound.real_fft(c[-samples..-1]).abs.map(&:to_db).clip(-80, 80) }
+          samples = data[0].length
+          @p.xrange(1, samples) if @p.respond_to?(:xrange)
+        else
+          @p.logscale(false) if @p.respond_to?(:logscale)
+          @p.xrange(0, samples) if @p.respond_to?(:xrange)
+        end
+
         max = data.map { |c| c.abs.max * 0.999 }.max
         @max = (max * 2).ceil * 0.5 if max > @max
 
-        @p.xrange(0, samples) if @p.respond_to?(:xrange)
-        @p.yrange(-@max, @max) if @p.respond_to?(:yrange)
+        if @spectrum
+          @p.yrange(-80, 0) if @p.respond_to?(:yrange)
+        else
+          @p.yrange(-@max, @max) if @p.respond_to?(:yrange)
+        end
 
         d = data.map.with_index.map { |c, idx|
           [idx, c[-samples..-1]]
