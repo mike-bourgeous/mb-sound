@@ -29,7 +29,7 @@ Gem::Specification.new do |spec|
 
   spec.add_runtime_dependency 'cmath', '~> 1.0.0'
   spec.add_runtime_dependency 'numo-narray', '~> 0.9.1.8'
-  spec.add_runtime_dependency 'numo-pocketfft', '~> 0.2.1'
+  spec.add_runtime_dependency 'numo-pocketfft', '~> 0.2.2'
 
   spec.add_runtime_dependency 'midi-nibbler', '~> 0.2.4'
 end
