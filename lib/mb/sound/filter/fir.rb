@@ -23,6 +23,8 @@ module MB
 
           # Find the smallest difference between subsequent frequencies and
           # validate types of frequencies and gains
+          #
+          # TODO: better filter size selection, better interpolation
           mindiff, _ = gain_map.each_with_object([nil, nil]) { |(freq, gain), state|
             mindiff = state[0]
             prior = state[1]
@@ -40,7 +42,14 @@ module MB
             puts "Previous diff was #{mindiff.inspect}"
             raise "Frequencies must be in ascending order" unless diff.nil? || diff > 0
 
-            mindiff = diff if mindiff.nil? || diff < mindiff
+            # FIXME: This is all ugly
+            if mindiff.nil?
+              mindiff = diff
+              mindiff ||= freq if freq > 0
+            else
+              mindiff = freq if freq && freq > 0 && freq < mindiff
+              mindiff = diff if diff && diff < mindiff
+            end
 
             state[0] = mindiff
             state[1] = freq
@@ -48,8 +57,20 @@ module MB
 
           puts "Mindiff is #{mindiff}"
 
-          filter_length = @rate / mindiff
-          puts "Filter length chosen is #{filter_length}"
+          filter_length = (@rate.to_f / mindiff).ceil
+          hz_per_bin = @rate.to_f / filter_length
+          puts "Filter length chosen is #{filter_length} with #{hz_per_bin}Hz per bin"
+
+          # Convert to logarithmic
+          logmap = {}
+          gain_map.each do |freq, gain|
+            octave = Math.log2(freq / 20.0)
+            octave = -5.0 if octave < -5.0
+            phase = gain.arg
+            gain = Complex.polar(gain.to_db, phase)
+
+            # WRONG
+          end
 
           raise NotImplementedError
 
