@@ -8,7 +8,7 @@ GIT
 
 GIT
   remote: https://github.com/mike-bourgeous/numo-pocketfft.git
-  revision: 5b3ba66ed621110919e48de2340d6afcff65c35b
+  revision: df7ecbe952d67a3e2d1f25cbabdec016e8d9a83e
   branch: fix-issue-3-crash-temporary-branch
   specs:
     numo-pocketfft (0.2.1)
