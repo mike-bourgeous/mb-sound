@@ -130,11 +130,11 @@ module MB
           # Extrapolate to 0Hz
           if gain_map.keys.first > 0
             if gain_map.keys.first <= 0.625
-              final_gain_map[0] = gain_map.first[1]
+              final_gain_map[0] = gain_map.values.first
             elsif gain_map.values.first == 0
               final_gain_map[0] = 0
             else
-              final_gain_map[0] = interp_gain(0, *gain_map.first(2)).real
+              final_gain_map[0] = interp_gain(0, *gain_map.first(2))
             end
           end
 
