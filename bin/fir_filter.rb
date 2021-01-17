@@ -55,14 +55,15 @@ begin
   puts MB::Sound::U.highlight(filter.gain_map)
 
   puts "\e[34mFilter length: \e[1m#{filter.filter_length}\e[0m"
+  puts "\e[32mFFT length: \e[1m#{filter.window_length}\e[0m"
 
   pad = Numo::SFloat.zeros(filter.window_length + filter.filter_length)
 
   p = MB::Sound::Plot.terminal(height_fraction: 0.4)
   p.logscale
   p.plot({magnitude: filter.filter_fft.abs.map{|v|v.to_db}, phase: filter.filter_fft.arg}, columns: 2)
-  p2 = MB::Sound::Plot.terminal(height_fraction: 0.4)
-  p2.plot({impulse: filter.impulse})
+  p.logscale(false)
+  p.plot({impulse: filter.impulse})
 
   sound = MB::Sound.read(in_file)
   processed = sound.map { |c|

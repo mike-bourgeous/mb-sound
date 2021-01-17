@@ -184,7 +184,10 @@ module MB
           # wrong thing for some complex gain values?
           @impulse = MB::Sound::A.rol(@impulse, @impulse.length / 2)
 
-          @window_length ||= 2 ** Math.log2(@filter_length * 3).ceil
+          # Window length trades off between delay and efficiency
+          min_length = 2 ** Math.log2(@filter_length * 3).ceil
+          min_length = 128 if min_length < 128
+          @window_length ||= min_length
           raise "Window length #{@window_length} is too short for filter length #{@filter_length}" unless @window_length > @filter_length
 
           @filter_overlap = @filter_length - 1
