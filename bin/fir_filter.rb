@@ -13,11 +13,11 @@ require 'mb/sound'
 def usage(msg)
   puts "\e[1;31mError:\e[22m #{msg}\e[0m\n\n" if msg
 
-  puts "Usage: #{$0} in_file out_file freq1 gain1 freq2 gain2 [freq3 gain3 ...]"
+  puts "\e[1mUsage:\e[0m #{$0} in_file out_file freq1 gain1 freq2 gain2 [freq3 gain3 ...]"
   puts "At least two frequency/gain pairs must be specified."
-  puts "Append 'db' to gains to use decibles; otherwise they will be treated as complex linear."
+  puts "Append 'db' to gains to use decibels; otherwise they will be treated as complex linear."
 
-  puts "\nExample (cut bass): #{$0} sounds/synth0.flac /tmp/x.flac 20 -60db 200 0db 2000 0db"
+  puts "\nExample (cut bass): #{$0} sounds/synth0.flac /tmp/x.flac 20 -60db 200 0db 2000 0db\n\n"
 
   exit(1)
 end
@@ -64,6 +64,7 @@ begin
   p.plot({magnitude: filter.filter_fft.abs.map{|v|v.to_db}, phase: filter.filter_fft.arg}, columns: 2)
   p.logscale(false)
   p.plot({impulse: filter.impulse})
+  puts
 
   sound = MB::Sound.read(in_file)
   processed = sound.map { |c|
