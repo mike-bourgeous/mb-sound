@@ -17,7 +17,9 @@ def usage(msg)
   puts "At least two frequency/gain pairs must be specified."
   puts "Append 'db' to gains to use decibels; otherwise they will be treated as complex linear."
 
-  puts "\nExample (cut bass): #{$0} sounds/synth0.flac /tmp/x.flac 20 -60db 200 0db 2000 0db\n\n"
+  puts "\nExamples:\n\tCut bass: #{$0} sounds/synth0.flac /tmp/x.flac 20 -60db 200 0db 2000 0db"
+  puts "\tRotate phase 90 degrees: #{$0} sounds/synth0.flac /tmp/90.flac 20 1i 40 1i"
+  puts
 
   exit(1)
 end
@@ -61,7 +63,7 @@ begin
 
   p = MB::Sound::Plot.terminal(height_fraction: 0.4)
   p.logscale
-  p.plot({magnitude: filter.filter_fft.abs.map{|v|v.to_db}, phase: filter.filter_fft.arg}, columns: 2)
+  p.plot({magnitude: filter.filter_fft.abs.map{|v| MB::Sound::M.clamp(-80, 80, v.to_db) }, phase: filter.filter_fft.arg}, columns: 2)
   p.logscale(false)
   p.plot({impulse: filter.impulse})
   puts
