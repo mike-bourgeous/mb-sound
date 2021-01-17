@@ -1,9 +1,11 @@
 module MB
   module Sound
     class Filter
+      # TODO: Docs
       class FIR < Filter
-        attr_reader :filter_length, :window_length, :rate
+        attr_reader :filter_length, :window_length, :rate, :gain_map
 
+        # TODO: Docs
         def initialize(gains, filter_length: nil, window_length: nil, rate: 48000)
           @filter_length = filter_length
           @window_length = window_length
@@ -15,6 +17,7 @@ module MB
             set_from_hash(gains)
 
           when Numo::NArray
+            @gain_map = nil
             set_from_narray(gains)
 
           else
@@ -66,6 +69,15 @@ module MB
           ret = @out[0...data.length].copy
           @out = MB::Sound::A.shl(@out, data.length) # TODO: Add an in-place shift
           ret
+        end
+
+        # Resets all internal buffers to the given steady-state value.
+        def reset(value = 0)
+          @in_count = 0
+          @out_count = @window_length
+          @in[0...@in_max].fill(value)
+          @in[@in_max..-1].fill(0)
+          @out.fill(value)
         end
 
         private
