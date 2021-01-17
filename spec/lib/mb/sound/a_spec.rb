@@ -120,4 +120,68 @@ RSpec.describe(MB::Sound::A) do
       expect(MB::Sound::A.opad(Numo::SFloat[], 2)).to eq(Numo::SFloat[1, 1])
     end
   end
+
+  describe '.rol' do
+    it 'returns the same array with a rotation of 0' do
+      expect(MB::Sound::A.rol(Numo::SFloat[1,2,3], 0)).to eq(Numo::SFloat[1,2,3])
+    end
+
+    it 'can rotate left' do
+      expect(MB::Sound::A.rol(Numo::SFloat[1,2,3], 1)).to eq(Numo::SFloat[2,3,1])
+      expect(MB::Sound::A.rol(Numo::SFloat[1,2,3], 2)).to eq(Numo::SFloat[3,1,2])
+    end
+
+    it 'can rotate right' do
+      expect(MB::Sound::A.rol(Numo::SFloat[1,2,3], -1)).to eq(Numo::SFloat[3,1,2])
+      expect(MB::Sound::A.rol(Numo::SFloat[1,2,3], -2)).to eq(Numo::SFloat[2,3,1])
+    end
+  end
+
+  describe '.ror' do
+    it 'returns the same array with a rotation of 0' do
+      expect(MB::Sound::A.ror(Numo::SFloat[1,2,3], 0)).to eq(Numo::SFloat[1,2,3])
+    end
+
+    it 'can rotate left' do
+      expect(MB::Sound::A.ror(Numo::SFloat[1,2,3], -1)).to eq(Numo::SFloat[2,3,1])
+      expect(MB::Sound::A.ror(Numo::SFloat[1,2,3], -2)).to eq(Numo::SFloat[3,1,2])
+    end
+
+    it 'can rotate right' do
+      expect(MB::Sound::A.ror(Numo::SFloat[1,2,3], 1)).to eq(Numo::SFloat[3,1,2])
+      expect(MB::Sound::A.ror(Numo::SFloat[1,2,3], 2)).to eq(Numo::SFloat[2,3,1])
+    end
+  end
+
+  describe '.shl' do
+    it 'returns the same array with a shift of 0' do
+      expect(MB::Sound::A.shl(Numo::SFloat[1,2,3], 0)).to eq(Numo::SFloat[1,2,3])
+    end
+
+    it 'can shift left' do
+      expect(MB::Sound::A.shl(Numo::SFloat[1,2,3], 1)).to eq(Numo::SFloat[2,3,0])
+      expect(MB::Sound::A.shl(Numo::SFloat[1,2,3], 2)).to eq(Numo::SFloat[3,0,0])
+      expect(MB::Sound::A.shl(Numo::SFloat[1,2,3], 3)).to eq(Numo::SFloat[0,0,0])
+    end
+
+    it 'cannot shift right' do
+      expect { MB::Sound::A.shl(Numo::SFloat[1,2,3], -1) }.to raise_error(ArgumentError)
+    end
+  end
+
+  describe '.shr' do
+    it 'returns the same array with a shift of 0' do
+      expect(MB::Sound::A.shr(Numo::SFloat[1,2,3], 0)).to eq(Numo::SFloat[1,2,3])
+    end
+
+    it 'can shift right' do
+      expect(MB::Sound::A.shr(Numo::SFloat[1,2,3], 1)).to eq(Numo::SFloat[0,1,2])
+      expect(MB::Sound::A.shr(Numo::SFloat[1,2,3], 2)).to eq(Numo::SFloat[0,0,1])
+      expect(MB::Sound::A.shr(Numo::SFloat[1,2,3], 3)).to eq(Numo::SFloat[0,0,0])
+    end
+
+    it 'cannot shift left' do
+      expect { MB::Sound::A.shr(Numo::SFloat[1,2,3], -1) }.to raise_error(ArgumentError)
+    end
+  end
 end

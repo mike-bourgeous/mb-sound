@@ -84,6 +84,36 @@ module MB
       def self.opad(narray, min_length, alignment: 0)
         pad(narray, min_length, value: 1, alignment: alignment)
       end
+
+      # Rotates a 1D NArray left by +n+ places, which must be less than the
+      # length of the NArray.  Returns the array unmodified if +n+ is zero.
+      # Use negative values for +n+ to rotate right.
+      def self.rol(array, n)
+        return array if n == 0
+        a, b = array.split([n])
+        b.concatenate(a)
+      end
+
+      # Rotates a 1D NArray right by +n+ places (calls .rol(array, -n)).
+      def self.ror(array, n)
+        rol(array, -n)
+      end
+
+      # Removes the first +n+ entries of 1D +array+ and adds +n+ zeros at the
+      # end.  Cannot shift right; use .shr for that.
+      def self.shl(array, n)
+        return array if n == 0 || array.size == 0
+        return array.class.zeros(array.size) if array.size <= n
+        array[n..-1].concatenate(array.class.zeros(n))
+      end
+
+      # Removes the last +n+ entries of 1D +array+ and adds +n+ zeros at the
+      # start.  Cannot shift left; use .shl for that.
+      def self.shr(array, n)
+        return array if n == 0 || array.size == 0
+        return array.class.zeros(array.size) if array.size <= n
+        array.class.zeros(n).concatenate(array[0..-(n + 1)])
+      end
     end
   end
 end
