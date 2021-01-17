@@ -34,12 +34,9 @@ module MB
           # overflow the input buffer
           new_count = @in_count + data.length
           if new_count > @in_max
-            puts "At depth #{caller.length} got #{data.length} on top of #{@in_count} to add to #{new_count} which exceeds #{@in_max} limit" # XXX
             excess = new_count - @in_max
             first_chunk = data[0...-excess]
             second_chunk = data[-excess..-1]
-
-            puts "Excess is #{excess}, first chunk size is #{first_chunk.length}, second chunk is #{second_chunk.length}, total is #{first_chunk.length + second_chunk.length}" # XXX
 
             # TODO: create a single buffer and place the data into that buffer
             # iteratively instead of recursively concatenating?
@@ -110,8 +107,6 @@ module MB
             prior = state[1]
 
             diff = freq - prior if prior
-            puts "Diff from #{prior.inspect} to #{freq.inspect} is #{diff.inspect}"
-            puts "Previous diff was #{mindiff.inspect}"
             raise "Frequencies must be in ascending order" unless diff.nil? || diff > 0
 
             # FIXME: This is all ugly
@@ -127,11 +122,8 @@ module MB
             state[1] = freq
           }
 
-          puts "Mindiff is #{mindiff}"
-
           @filter_length ||= (@rate.to_f / mindiff / 2).ceil * 2
           hz_per_bin = @rate.to_f / @filter_length
-          puts "Filter length chosen is #{@filter_length} with #{hz_per_bin}Hz per bin"
 
           final_gain_map = {}
 
