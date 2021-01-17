@@ -2,8 +2,8 @@ module MB
   module Sound
     class Filter
       class FIR < Filter
-        def initialize(gains, samples: nil, rate: 48000)
-          @samples = samples
+        def initialize(gains, filter_length: nil, rate: 48000)
+          @filter_length = filter_length
           @rate = rate
           @nyquist = rate / 2.0
 
@@ -63,9 +63,9 @@ module MB
 
           puts "Mindiff is #{mindiff}"
 
-          filter_length = (@rate.to_f / mindiff / 2).ceil * 2
-          hz_per_bin = @rate.to_f / filter_length
-          puts "Filter length chosen is #{filter_length} with #{hz_per_bin}Hz per bin"
+          @filter_length ||= (@rate.to_f / mindiff / 2).ceil * 2
+          hz_per_bin = @rate.to_f / @filter_length
+          puts "Filter length chosen is #{@filter_length} with #{hz_per_bin}Hz per bin"
 
           final_gain_map = {}
 
@@ -95,13 +95,13 @@ module MB
 
           @gain_map = final_gain_map.sort_by(&:first)
 
-          response = Numo::DComplex.zeros(filter_length / 2)
+          response = Numo::DComplex.zeros(@filter_length / 2)
 
           g0 = @gain_map[0]
           g1 = @gain_map[1]
           gidx = 1
           response.inplace.map_with_index do |_, idx|
-            hz = idx.to_f * @rate / filter_length
+            hz = idx.to_f * @rate / @filter_length
             if hz > g1[0]
               g0 = g1
               gidx += 1
