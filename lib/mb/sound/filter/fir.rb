@@ -1,11 +1,44 @@
 module MB
   module Sound
     class Filter
-      # TODO: Docs
+      # A simple implementation of FIR filtering using the FFT to perform
+      # convolution.  Filter parameters are specified either as a Hash from
+      # frequency to gain values, or as a Numo::NArray with positive FFT
+      # coefficients of the desired frequency response.
+      #
+      # If a Hash frequency/gain map is specified, a naive filter design
+      # algorithm will determine filter size (this could be improved) and
+      # generate an FIR filter, interpolating between the specified
+      # frequencies.  If the Hash does not contain a value for 0Hz or for the
+      # Nyquist frequency (half the sample rate), then the slope of the
+      # adjacent frequency/gain values will be extrapolated to 0Hz and/or
+      # Nyquist as needed.
+      #
+      # The current filter size selection algorithm will choose a filter size
+      # based solely on the closest-spaced frequencies in the gain map.  This
+      # may be improved in the future to take slope into account.
+      #
+      # TODO: Allow specifying a time-domain impulse response
+      #
+      # Examples:
+      #
+      #     # Bass cut (added 200Hz so that extrapolated slope for Nyquist is flat)
+      #     MB::Sound::Filter::FIR.new(gains: { 20 => -60.db, 100 => 0.db, 200 => 0.db)
+      #
+      #     # Phase rotation (the lower the frequencies and/or closer together, the
+      #     # better the bass response)
+      #     rotation = Complex.polar(1, Math::PI / 4)
+      #     MB::Sound::Filter::FIR.new(gains: { 20 => rotation, 100 => rotation })
       class FIR < Filter
         attr_reader :filter_length, :window_length, :rate, :gain_map, :filter_fft, :gains, :impulse
 
-        # TODO: Docs
+        # Initializes an FIR filter with the given frequency +gains+.  The
+        # +gains+ may either be a Hash mapping frequencies to gain values, or a
+        # Numo::NArray with FFT-domain gain values starting from DC.
+        #
+        # The +:filter_length+, +:window_length+ (size of FFT, which must be
+        # larger than the filter length and should be several times larger for
+        # best performance), and sample +:rate+ may be overridden.
         def initialize(gains, filter_length: nil, window_length: nil, rate: 48000)
           @filter_length = filter_length
           @window_length = window_length
@@ -39,7 +72,7 @@ module MB
             second_chunk = data[-excess..-1]
 
             # TODO: create a single buffer and place the data into that buffer
-            # iteratively instead of recursively concatenating?
+            # iteratively instead of recursively concatenating
             return process(first_chunk).concatenate(process(second_chunk))
           end
 
@@ -66,7 +99,7 @@ module MB
           @out_count -= data.length
           raise "BUG: out_count dropped below 0" if @out_count < 0
           ret = @out[0...data.length].copy
-          @out = MB::Sound::A.shl(@out, data.length) # TODO: Add an in-place shift
+          @out = MB::Sound::A.shl(@out, data.length) # TODO: Add an in-place shift instead of allocating a new array
           ret
         end
 
@@ -170,7 +203,7 @@ module MB
             interp_gain(hz, g0, g1)
           end
 
-          @gain_map = @gain_map.to_h
+          @gain_map = @gain_map.to_h.freeze
 
           set_from_narray(response)
         end
@@ -182,6 +215,8 @@ module MB
           # TODO: Do something about minimum phase, etc. so that impulse
           # doesn't have energy at the end?  Will this rol actually do the
           # wrong thing for some complex gain values?
+          #
+          # TODO: Allow using a window function to taper the ends of the impulse response
           @impulse = MB::Sound::A.rol(@impulse, @impulse.length / 2)
 
           # Window length trades off between delay and efficiency
@@ -203,11 +238,13 @@ module MB
           @out_count = @window_length
         end
 
-        # TODO: Make a buffer class that can be linear or circular or whatever?
+        # TODO: Make a buffer class that can be linear, circular, overlap-add,
+        # or whatever, and can call a processing callback when the buffer
+        # reaches a set point?
         # Returns new buffer count
         def append_to_buffer(buffer, buffer_count, buffer_limit, data)
           new_count = buffer_count + data.length
-          raise "Buffer is full" if new_count > buffer_limit # FIXME: need to be able to split off chunks
+          raise "Buffer is full" if new_count > buffer_limit
           buffer[buffer_count...(buffer_count + data.length)] = data
           new_count
         end
