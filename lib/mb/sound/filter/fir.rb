@@ -192,6 +192,7 @@ module MB
 
           @filter_overlap = @filter_length - 1
           @filter_fft = MB::Sound.real_fft(MB::Sound::A.zpad(@impulse, @window_length))
+          @filter_fft.inplace * (@filter_fft.length.to_f / @gains.length) # Compensate for padding
 
           # TODO: Allow complex output like IIR filters
           @in = Numo::SFloat.zeros(@window_length)
