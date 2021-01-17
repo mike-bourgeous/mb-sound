@@ -128,7 +128,7 @@ module MB
           final_gain_map = {}
 
           # Extrapolate to 0Hz
-          if !gain_map.include?(0)
+          if gain_map.keys.first > 0
             if gain_map.keys.first <= 0.625
               final_gain_map[0] = gain_map.first[1]
             elsif gain_map.values.first == 0
@@ -141,7 +141,7 @@ module MB
           final_gain_map.merge!(gain_map)
 
           # Extrapolate to Nyquist
-          if !gain_map.include?(@nyquist)
+          if gain_map.keys.last < @nyquist
             if gain_map.keys.last >= (@nyquist - 1.0).floor
               final_gain_map[@nyquist] = gain_map.values.last
             elsif gain_map.values.last == 0
