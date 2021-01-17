@@ -41,6 +41,8 @@ module MB
 
             puts "Excess is #{excess}, first chunk size is #{first_chunk.length}, second chunk is #{second_chunk.length}, total is #{first_chunk.length + second_chunk.length}" # XXX
 
+            # TODO: create a single buffer and place the data into that buffer
+            # iteratively instead of recursively concatenating?
             return process(first_chunk).concatenate(process(second_chunk))
           end
 
@@ -146,7 +148,7 @@ module MB
 
           final_gain_map.merge!(gain_map)
 
-          # Extrapolate to nyquist
+          # Extrapolate to Nyquist
           if !gain_map.include?(@nyquist)
             if gain_map.keys.last >= (@nyquist - 1.0).floor
               final_gain_map[@nyquist] = gain_map.values.last
@@ -182,9 +184,13 @@ module MB
         end
 
         def set_from_narray(gains)
-          # TODO: pad size to convenient FFT size
           @gains = gains
           @impulse = MB::Sound.real_ifft(gains)
+
+          # TODO: Do something about minimum phase, etc. so that impulse
+          # doesn't have energy at the end?  Will this rol actually do the
+          # wrong thing for some complex gain values?
+          @impulse = MB::Sound::A.rol(@impulse, @impulse.length / 2)
 
           @window_length ||= 2 ** Math.log2(@filter_length * 3).ceil
           raise "Window length #{@window_length} is too short for filter length #{@filter_length}" unless @window_length > @filter_length

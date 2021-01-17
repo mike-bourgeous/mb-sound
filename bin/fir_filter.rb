@@ -55,7 +55,7 @@ begin
   puts "\e[1;33mGains:\e[0m"
   puts MB::Sound::U.highlight(filter.gain_map)
 
-  pad = Numo::SFloat.zeros(filter.window_length)
+  pad = Numo::SFloat.zeros(filter.window_length + filter.filter_length)
 
   sound = MB::Sound.read(in_file)
   processed = sound.map { |c|
