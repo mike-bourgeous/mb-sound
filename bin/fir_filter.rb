@@ -28,7 +28,6 @@ usage "Input file #{in_file} not found or not readable" unless File.readable?(in
 
 out_file = ARGV.shift
 usage "No output file given" unless out_file && !out_file.empty?
-usage "Output file exists" if File.exists?(out_file)
 
 gains = {}
 while ARGV.length >= 2
@@ -55,7 +54,15 @@ begin
   puts "\e[1;33mGains:\e[0m"
   puts MB::Sound::U.highlight(filter.gain_map)
 
+  puts "\e[34mFilter length: \e[1m#{filter.filter_length}\e[0m"
+
   pad = Numo::SFloat.zeros(filter.window_length + filter.filter_length)
+
+  p = MB::Sound::Plot.terminal(height_fraction: 0.4)
+  p.logscale
+  p.plot({magnitude: filter.filter_fft.abs.map{|v|v.to_db}, phase: filter.filter_fft.arg}, columns: 2)
+  p2 = MB::Sound::Plot.terminal(height_fraction: 0.4)
+  p2.plot({impulse: filter.impulse})
 
   sound = MB::Sound.read(in_file)
   processed = sound.map { |c|

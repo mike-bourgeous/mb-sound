@@ -3,7 +3,7 @@ module MB
     class Filter
       # TODO: Docs
       class FIR < Filter
-        attr_reader :filter_length, :window_length, :rate, :gain_map
+        attr_reader :filter_length, :window_length, :rate, :gain_map, :filter_fft, :gains, :impulse
 
         # TODO: Docs
         def initialize(gains, filter_length: nil, window_length: nil, rate: 48000)
