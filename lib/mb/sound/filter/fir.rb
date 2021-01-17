@@ -63,8 +63,8 @@ module MB
           # Remove and return data.length samples from the output buffer
           @out_count -= data.length
           raise "BUG: out_count dropped below 0" if @out_count < 0
-          ret = @out[0...data.length]
-          MB::Sound::A.shl(@out, data.length)
+          ret = @out[0...data.length].copy
+          @out = MB::Sound::A.shl(@out, data.length) # TODO: Add an in-place shift
           ret
         end
 
@@ -89,7 +89,8 @@ module MB
           # Find the smallest difference between subsequent frequencies to help
           # decide filter size (TODO there's probably a much better way)
           #
-          # TODO: better filter size selection, better interpolation
+          # TODO: better filter size selection, better interpolation, probably
+          # need to take slope into account when deciding filter size for better results
           mindiff, _ = gain_map.each_with_object([nil, nil]) { |(freq, gain), state|
             mindiff = state[0]
             prior = state[1]
