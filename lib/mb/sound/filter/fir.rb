@@ -97,7 +97,7 @@ module MB
 
             raise "Gains must be numeric (got #{gain.class.name} for #{freq})" unless gain.is_a?(Numeric)
 
-            [freq.to_f, gain.to_f]
+            [freq.to_f, gain.to_c]
           }.to_h
 
           # Find the smallest difference between subsequent frequencies to help
