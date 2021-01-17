@@ -2,10 +2,11 @@ module MB
   module Sound
     class Filter
       class FIR < Filter
-        attr_reader :filter_length
+        attr_reader :filter_length, :window_length, :rate
 
         def initialize(gains, filter_length: nil, window_length: nil, rate: 48000)
           @filter_length = filter_length
+          @window_length = window_length
           @rate = rate
           @nyquist = rate / 2.0
 
@@ -23,15 +24,48 @@ module MB
 
         def process(data)
           data = Numo::NArray[data] if data.is_a?(Numeric)
-          A.append_shift(@buffer, data) # Wrong
+          data = Numo::NArray.cast(data) if data.is_a?(Array)
+
+          # FIXME: ugly and slow
+          # Split the incoming buffer into two chunks if it would partially
+          # overflow the input buffer
+          new_count = @in_count + data.length
+          if new_count > @in_max
+            puts "At depth #{caller.length} got #{data.length} on top of #{@in_count} to add to #{new_count} which exceeds #{@in_max} limit" # XXX
+            excess = new_count - @in_max
+            first_chunk = data[0...-excess]
+            second_chunk = data[-excess..-1]
+
+            puts "Excess is #{excess}, first chunk size is #{first_chunk.length}, second chunk is #{second_chunk.length}, total is #{first_chunk.length + second_chunk.length}" # XXX
+
+            return process(first_chunk).concatenate(process(second_chunk))
+          end
+
+          @in_count = append_to_buffer(@in, @in_count, @in_max, data)
 
           # If the input buffer is full, run another convolution
-          # TODO
+          if @in_count == @in_max
+            fft = MB::Sound.real_fft(@in)
+            fft.inplace * @filter_fft
+            result = MB::Sound.real_ifft(fft)
+            @in_count = 0
 
-          # Append the result of the convolution to the output buffer
-          # TODO
+            # Append the result of the convolution to the output buffer
+            start_overlap = @out_count - @filter_overlap
+            start_overlap = 0 if start_overlap < 0
+            end_overlap = start_overlap + @filter_overlap
+            remaining = result.length - @filter_overlap
+            @out[start_overlap...end_overlap] += result[0...@filter_overlap]
+            @out[end_overlap...(end_overlap + remaining)] = result[@filter_overlap..-1]
+            @out_count += remaining
+          end
 
           # Remove and return data.length samples from the output buffer
+          @out_count -= data.length
+          raise "BUG: out_count dropped below 0" if @out_count < 0
+          ret = @out[0...data.length]
+          MB::Sound::A.shl(@out, data.length)
+          ret
         end
 
         private
@@ -139,11 +173,28 @@ module MB
           @gains = gains
           @impulse = MB::Sound.real_ifft(gains)
 
-          @window_length ||= 2 ** Math.log2(@filter_length * 8).ceil
-          raise "Window length #{@window_length} is too short for filter length #{@filter_length}" unless @window_length >= @filter_length
+          @window_length ||= 2 ** Math.log2(@filter_length * 3).ceil
+          raise "Window length #{@window_length} is too short for filter length #{@filter_length}" unless @window_length > @filter_length
+
+          @filter_overlap = @filter_length - 1
+          @filter_fft = MB::Sound.real_fft(MB::Sound::A.zpad(@impulse, @window_length))
 
           # TODO: Allow complex output like IIR filters
-          @buffer = Numo::SFloat.zeros(@window_length)
+          @in = Numo::SFloat.zeros(@window_length)
+          @in_max = @window_length - @filter_overlap
+          @in_count = 0
+
+          @out = Numo::SFloat.zeros(@window_length * 2)
+          @out_count = @window_length
+        end
+
+        # TODO: Make a buffer class that can be linear or circular or whatever?
+        # Returns new buffer count
+        def append_to_buffer(buffer, buffer_count, buffer_limit, data)
+          new_count = buffer_count + data.length
+          raise "Buffer is full" if new_count > buffer_limit # FIXME: need to be able to split off chunks
+          buffer[buffer_count...(buffer_count + data.length)] = data
+          new_count
         end
 
         def interp_gain(f, f1g1, f2g2)
