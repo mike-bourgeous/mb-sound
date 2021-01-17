@@ -2,7 +2,9 @@ module MB
   module Sound
     class Filter
       class FIR < Filter
-        def initialize(gains, filter_length: nil, rate: 48000)
+        attr_reader :filter_length
+
+        def initialize(gains, filter_length: nil, window_length: nil, rate: 48000)
           @filter_length = filter_length
           @rate = rate
           @nyquist = rate / 2.0
@@ -18,6 +20,21 @@ module MB
             raise "Gains must be a Numo::NArray or a Hash mapping frequencies in Hz to linear gains (which may be complex)" unless gains.is_a?(Hash)
           end
         end
+
+        def process(data)
+          data = Numo::NArray[data] if data.is_a?(Numeric)
+          A.append_shift(@buffer, data) # Wrong
+
+          # If the input buffer is full, run another convolution
+          # TODO
+
+          # Append the result of the convolution to the output buffer
+          # TODO
+
+          # Remove and return data.length samples from the output buffer
+        end
+
+        private
 
         def set_from_hash(gain_map)
           raise "Gain map must contain at least two elements" if gain_map.length < 2
@@ -121,9 +138,13 @@ module MB
           # TODO: pad size to convenient FFT size
           @gains = gains
           @impulse = MB::Sound.real_ifft(gains)
-        end
 
-        private
+          @window_length ||= 2 ** Math.log2(@filter_length * 8).ceil
+          raise "Window length #{@window_length} is too short for filter length #{@filter_length}" unless @window_length >= @filter_length
+
+          # TODO: Allow complex output like IIR filters
+          @buffer = Numo::SFloat.zeros(@window_length)
+        end
 
         def interp_gain(f, f1g1, f2g2)
           # Octave -5 relative to 20Hz is 0.625Hz; use that as minimum frequency
