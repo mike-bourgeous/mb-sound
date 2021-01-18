@@ -39,6 +39,9 @@ module MB
         # The +:filter_length+, +:window_length+ (size of FFT, which must be
         # larger than the filter length and should be several times larger for
         # best performance), and sample +:rate+ may be overridden.
+        #
+        # The +:filter_length+ parameter is ignored if +gains+ is a
+        # Numo::NArray.
         def initialize(gains, filter_length: nil, window_length: nil, rate: 48000)
           @filter_length = filter_length
           @window_length = window_length
@@ -221,6 +224,7 @@ module MB
           #
           # TODO: Allow using a window function to taper the ends of the impulse response
           @impulse = MB::Sound::A.rol(@impulse, @impulse.length / 2)
+          @filter_length ||= @impulse.length
 
           # Window length trades off between delay and efficiency
           min_length = 2 ** Math.log2(@filter_length * 3).ceil

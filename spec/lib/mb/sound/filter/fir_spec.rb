@@ -29,6 +29,12 @@ RSpec.describe MB::Sound::Filter::FIR do
     )
   }
 
+  let (:freq_filter) {
+    MB::Sound::Filter::FIR.new(
+      Numo::DFloat.linspace(1.0, 0.0, 65)
+    )
+  }
+
   describe '#initialize' do
     context 'when given a Hash' do
       it 'can design a filter from a Hash' do
@@ -59,7 +65,29 @@ RSpec.describe MB::Sound::Filter::FIR do
       end
     end
 
-    pending 'when given a Numo::NArray'
+    context 'when given a Numo::NArray' do
+      it 'can initialize a filter with frequency-domain coefficients' do
+        expect(freq_filter.gain_map).to be_nil
+        expect(freq_filter.gains.length).to eq(65)
+        expect(freq_filter.impulse.length).to eq(128)
+        expect(freq_filter.gains.length).to be < freq_filter.filter_fft.length
+      end
+
+      it 'has expected gain at DC' do
+        expect(freq_filter.gains[0].abs.round(4)).to eq(1)
+        expect(freq_filter.filter_fft[0].abs.round(4)).to eq(1)
+      end
+
+      it 'has the expected gain in the middle of the spectrum' do
+        expect(freq_filter.gains[freq_filter.gains.length / 2].abs.round(4)).to eq(0.5)
+        expect(freq_filter.filter_fft[freq_filter.filter_fft.length / 2].abs.round(4)).to eq(0.5)
+      end
+
+      it 'has the expected gain near Nyquist' do
+        expect(freq_filter.gains[-1].abs.round(4)).to eq(0)
+        expect(freq_filter.filter_fft[-1].abs.round(4)).to eq(0)
+      end
+    end
   end
 
   describe '#process' do
