@@ -109,7 +109,10 @@ module MB
           @out_count = @window_length
           @in[0...@in_max].fill(value)
           @in[@in_max..-1].fill(0)
-          @out.fill(value)
+
+          # FIXME: need to put step response after value so next overlap-add
+          # works correctly
+          @out.fill((value * filter_fft[0]).real)
         end
 
         private
@@ -227,7 +230,9 @@ module MB
 
           @filter_overlap = @filter_length - 1
           @filter_fft = MB::Sound.real_fft(MB::Sound::A.zpad(@impulse, @window_length))
-          @filter_fft.inplace * (@filter_fft.length.to_f / @gains.length) # Compensate for padding
+
+          # TODO: Understand why @filter_fft.length.to_f / @gains.length doesn't fully compensate for lost gain
+          @filter_fft.inplace * (@gains[1..-2].abs.mean / @filter_fft[1..-2].abs.mean) # Compensate for padding
 
           # TODO: Allow complex output like IIR filters
           @in = Numo::SFloat.zeros(@window_length)
