@@ -104,5 +104,14 @@ RSpec.describe MB::Sound::Filter::FIR do
     end
   end
 
+  describe '#response' do
+    it 'returns frequency response from the padded FFT' do
+      expect(freq_filter.response(0)).to eq(freq_filter.filter_fft[0])
+      expect(freq_filter.response(Math::PI)).to eq(freq_filter.filter_fft[-1])
+      expect(freq_filter.response(Math::PI / 2)).to eq(freq_filter.filter_fft[freq_filter.filter_fft.length / 2])
+      expect(freq_filter.response(-Math::PI / 2)).to eq(freq_filter.filter_fft[freq_filter.filter_fft.length / 2].conj)
+    end
+  end
+
   pending '#reset'
 end

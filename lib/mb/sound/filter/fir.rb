@@ -19,6 +19,7 @@ module MB
       # may be improved in the future to take slope into account.
       #
       # TODO: Allow specifying a time-domain impulse response
+      # TODO: Add getters to return the processing delay, total delay, and impulse delay
       #
       # Examples:
       #
@@ -118,6 +119,22 @@ module MB
           @out.fill((value * filter_fft[0]).real)
         end
 
+        # Returns the frequency response of the filter at the given angular
+        # frequency, from 0 (DC) to Math::PI (Nyquist).
+        def response(omega)
+          omega %= 2.0 * Math::PI
+          clamped = omega > Math::PI ? 2.0 * Math::PI - omega : omega
+
+          idxf = clamped * (filter_fft.length - 1) / Math::PI
+          idx1 = idxf.floor
+          idx2 = idxf.ceil
+          delta = idxf - idx1
+
+          v = filter_fft[idx1] * (1.0 - delta) + filter_fft[idx2] * delta
+          v = v.conj if omega > Math::PI
+          v
+        end
+
         private
 
         def set_from_hash(gain_map)
@@ -161,6 +178,8 @@ module MB
             state[1] = freq
           }
 
+          # TODO: What needs to be done differently if an odd filter length is
+          # given to the constructor?
           @filter_length ||= (@rate.to_f / mindiff / 2).ceil * 2
           hz_per_bin = @rate.to_f / @filter_length
 
