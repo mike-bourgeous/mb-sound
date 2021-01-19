@@ -33,6 +33,19 @@ module MB
       class FIR < Filter
         attr_reader :filter_length, :window_length, :rate, :gain_map, :filter_fft, :gains, :impulse
 
+        # The processing delay of the filter.  This delay allows the filter to
+        # buffer incoming data into window-sized chunks while always returning
+        # the same number of samples in the #process method.
+        attr_reader :processing_delay
+
+        # The impulse delay of the filter (the offset of the impulse's peak
+        # sample).
+        attr_reader :impulse_delay
+
+        # The total delay of the filter in samples, including processing delay
+        # and impulse phase delay.
+        attr_reader :delay
+
         # Initializes an FIR filter with the given frequency +gains+.  The
         # +gains+ may either be a Hash mapping frequencies to gain values, or a
         # Numo::NArray with FFT-domain gain values starting from DC.
@@ -272,7 +285,11 @@ module MB
           # TODO: Understand why @filter_fft.length.to_f / @gains.length doesn't fully compensate for lost gain
           @filter_fft.inplace * (@gains[1..-2].abs.mean / @filter_fft[1..-2].abs.mean) # Compensate for padding
 
-          # TODO: Allow complex output like IIR filters
+          @process_delay = @window_length - @filter_overlap
+          @impulse_delay = @impulse.abs.max_index
+          @delay = @process_delay + @impulse_delay
+
+          # TODO: Allow complex output, like IIR filters
           @in = Numo::SFloat.zeros(@window_length)
           @in_max = @window_length - @filter_overlap
           @in_count = 0

@@ -90,19 +90,24 @@ RSpec.describe MB::Sound::Filter::FIR do
     end
   end
 
+  describe '#delay' do
+    [:unity_filter, :freq_filter, :complex_filter, :real_filter].each do |f|
+      it "has the expected value for #{f}" do
+        filter = send(f)
+        process_delay = filter.window_length - (filter.filter_length - 1)
+        impulse_delay = filter.filter_length / 2
+        expect(filter.delay).to eq(process_delay + impulse_delay)
+      end
+    end
+  end
+
   describe '#process' do
     let(:noise) {
       Numo::SFloat.zeros(20000).rand(-1, 1)
     }
 
-    let(:delay) {
-      process_delay = unity_filter.window_length - (unity_filter.filter_length - 1) # TODO: add a delay accessor
-      impulse_delay = unity_filter.filter_length / 2 - 1
-      process_delay + impulse_delay
-    }
-
     let(:padded_noise) {
-      noise.concatenate(Numo::SFloat.zeros(delay))
+      noise.concatenate(Numo::SFloat.zeros(unity_filter.delay))
     }
 
     it 'has unity gain for a pass-through filter' do
@@ -118,7 +123,7 @@ RSpec.describe MB::Sound::Filter::FIR do
     end
 
     it 'preserves a long signal exactly through a unity gain filter' do
-      result = unity_filter.process(padded_noise)[delay..-1]
+      result = unity_filter.process(padded_noise)[unity_filter.delay..-1]
       expect(MB::Sound::M.round(result, 5)).to eq(MB::Sound::M.round(noise, 5))
     end
 
@@ -126,7 +131,7 @@ RSpec.describe MB::Sound::Filter::FIR do
       result = Numo::SFloat.zeros(noise.length)
       padded_noise.each_with_index do |v, idx|
         o = unity_filter.process(v)[0]
-        result[idx - delay] = o if idx >= delay
+        result[idx - unity_filter.delay] = o if idx >= unity_filter.delay
       end
       expect(MB::Sound::M.round(result, 5)).to eq(MB::Sound::M.round(noise, 5))
     end
