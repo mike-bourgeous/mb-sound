@@ -221,7 +221,7 @@ module MB
 
           @gain_map = final_gain_map.sort_by(&:first)
 
-          response = Numo::DComplex.zeros(@filter_length / 2)
+          response = Numo::DComplex.zeros(@filter_length / 2 + 1)
 
           g0 = @gain_map[0]
           g1 = @gain_map[1]
@@ -251,9 +251,14 @@ module MB
           # doesn't have energy at the end?  Will this rol actually do the
           # wrong thing for some complex gain values?
           #
-          # TODO: Allow using a window function to taper the ends of the impulse response
+          # TODO: Allow using a window function to taper the ends of the
+          # impulse response and specifying a shorter filter length than the
+          # gains array or gain map would imply
           @impulse = MB::Sound::A.rol(@impulse, @impulse.length / 2)
-          @filter_length ||= @impulse.length
+          if @filter_length && @filter_length != @impulse.length
+            puts "Specified filter length #{@filter_length} does not match impulse length #{@impulse.length}"
+          end
+          @filter_length = @impulse.length
 
           # Window length trades off between delay and efficiency
           min_length = 2 ** Math.log2(@filter_length * 3).ceil
