@@ -116,7 +116,8 @@ module MB
 
           # FIXME: need to put step response after value so next overlap-add
           # works correctly
-          @out.fill((value * filter_fft[0]).real)
+          @out[0...@window_length].fill((value * filter_fft[0]).real)
+          @out[@window_length..-1].fill(0)
         end
 
         # Returns the frequency response of the filter at the given angular

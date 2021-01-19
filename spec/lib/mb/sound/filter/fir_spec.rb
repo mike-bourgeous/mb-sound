@@ -113,5 +113,29 @@ RSpec.describe MB::Sound::Filter::FIR do
     end
   end
 
-  pending '#reset'
+  describe '#reset' do
+    it 'can reset to 0' do
+      noise = Numo::SFloat.zeros(20000).rand(-1, 1)
+      real_filter.process(noise)
+      real_filter.reset(0)
+      expect(real_filter.process(Numo::SFloat.zeros(20000))).to eq(Numo::SFloat.zeros(20000))
+    end
+
+    [0.5, -0.75].each do |v|
+      it "can reset to #{v}" do
+        # Processing significantly more data than the internal buffer should
+        # ensure that we see any glitches that might occur anywhere in that
+        # buffer, e.g. because the overlap-add portion is not handled right.
+        noise = Numo::SFloat.zeros(20000).rand(-1, 1)
+        real_filter.process(noise)
+        real_filter.reset(v)
+
+        result = MB::Sound::M.round(real_filter.process(Numo::DFloat.zeros(20000).fill(v)), 3)
+        expected = Numo::SFloat.zeros(20000).fill((v * -10.db).round(3))
+        expect(result.min).to eq(expected.min)
+        expect(result.max).to eq(expected.max)
+        expect(result).to eq(expected)
+      end
+    end
+  end
 end
