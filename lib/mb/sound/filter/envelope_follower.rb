@@ -1,7 +1,8 @@
 module MB
   module Sound
     class Filter
-      # Implements a very simple envelope follower based on exponential decay.
+      # Implements a very simple envelope follower based on instant rise and
+      # exponential decay.
       class EnvelopeFollower < Filter
         attr_reader :decay_db, :decay_s, :decay_per_sample
 

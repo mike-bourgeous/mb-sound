@@ -152,10 +152,19 @@ RSpec.describe MB::Sound::Filter::FIR do
   end
 
   describe '#response' do
-    it 'returns frequency response from the padded FFT' do
+    it 'returns frequency response from the padded FFT at 0' do
       expect(freq_filter.response(0)).to eq(freq_filter.filter_fft[0])
+    end
+
+    it 'returns frequency response from the padded FFT at pi' do
       expect(freq_filter.response(Math::PI)).to eq(freq_filter.filter_fft[-1])
+    end
+
+    it 'returns frequency response from the padded FFT at pi/2' do
       expect(freq_filter.response(Math::PI / 2)).to eq(freq_filter.filter_fft[freq_filter.filter_fft.length / 2])
+    end
+
+    it 'returns frequency response from the padded FFT at -pi/2' do
       expect(freq_filter.response(-Math::PI / 2)).to eq(freq_filter.filter_fft[freq_filter.filter_fft.length / 2].conj)
     end
 
@@ -170,17 +179,26 @@ RSpec.describe MB::Sound::Filter::FIR do
       expect(r.real).to be_between(*[g1.real, g2.real].sort)
       expect(r.imag).to be_between(*[g1.imag, g2.imag].sort)
     end
+
+    it 'accepts an NArray for calculating response' do
+      input = Numo::SFloat[0, Math::PI, Math::PI / 2, -Math::PI / 2]
+      output = Numo::DComplex[
+        freq_filter.filter_fft[0],
+        freq_filter.filter_fft[-1],
+        freq_filter.filter_fft[freq_filter.filter_fft.length / 2],
+        freq_filter.filter_fft[freq_filter.filter_fft.length / 2].conj,
+      ]
+
+      expect(MB::Sound::M.round(freq_filter.response(input), 5)).to eq(MB::Sound::M.round(output, 5))
+    end
   end
 
   describe '#reset' do
-    it 'can reset to 0' do
-      noise = Numo::SFloat.zeros(20000).rand(-1, 1)
-      real_filter.process(noise)
-      real_filter.reset(0)
-      expect(real_filter.process(Numo::SFloat.zeros(20000))).to eq(Numo::SFloat.zeros(20000))
-    end
+    [0, 0.5, -0.75].each do |v|
+      it "returns the steady-state output for #{v}" do
+        expect(real_filter.reset(v).round(6)).to eq((v * real_filter.filter_fft[0].real).round(6))
+      end
 
-    [0.5, -0.75].each do |v|
       it "can reset to #{v}" do
         # Processing significantly more data than the internal buffer should
         # ensure that we see any glitches that might occur anywhere in that

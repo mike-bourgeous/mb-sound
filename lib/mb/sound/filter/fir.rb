@@ -122,7 +122,7 @@ module MB
 
         # Resets all internal buffers to the given steady-state input value, so
         # the output is as if that value had been steady at the input for a
-        # very long time.
+        # very long time.  Returns the steady-state output for the given input.
         def reset(value = 0)
           @in_count = 0
           @out_count = @window_length
@@ -137,7 +137,8 @@ module MB
           fft = MB::Sound.real_fft(subset).inplace * @filter_fft / @filter_fft[0]
           result = MB::Sound.real_ifft(fft)
           @out[(start + @filter_length)...(start + @window_length - @filter_length)] = result[@filter_length...-@filter_length]
-          value
+
+          @out[0]
         end
 
         # Returns the frequency response of the filter at the given angular
@@ -145,7 +146,11 @@ module MB
         #
         # FIXME: remove linear phase offset caused by t=N/2 delay
         def response(omega)
-          omega %= 2.0 * Math::PI
+          if omega.is_a?(Numo::NArray)
+            return Numo::DComplex.cast(omega).map { |v| response(v.real) }
+          end
+
+          omega = omega.real % (2.0 * Math::PI)
           clamped = omega > Math::PI ? 2.0 * Math::PI - omega : omega
 
           idxf = clamped * (filter_fft.length - 1) / Math::PI
