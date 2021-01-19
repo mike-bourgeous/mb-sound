@@ -107,21 +107,30 @@ module MB
           ret
         end
 
-        # Resets all internal buffers to the given steady-state value.
+        # Resets all internal buffers to the given steady-state input value, so
+        # the output is as if that value had been steady at the input for a
+        # very long time.
         def reset(value = 0)
           @in_count = 0
           @out_count = @window_length
           @in[0...@in_max].fill(value)
           @in[@in_max..-1].fill(0)
 
-          # FIXME: need to put step response after value so next overlap-add
-          # works correctly
-          @out[0...@window_length].fill((value * filter_fft[0]).real)
-          @out[@window_length..-1].fill(0)
+          @out[0...(@window_length - @filter_length + 1)].fill((value * filter_fft[0]).real)
+          @out[(@window_length - filter_length + 1)..-1].fill(0)
+
+          start = @window_length / 2
+          subset = @out[start...(start + @window_length)]
+          fft = MB::Sound.real_fft(subset).inplace * @filter_fft / @filter_fft[0]
+          result = MB::Sound.real_ifft(fft)
+          @out[(start + @filter_length)...(start + @window_length - @filter_length)] = result[@filter_length...-@filter_length]
+          value
         end
 
         # Returns the frequency response of the filter at the given angular
         # frequency, from 0 (DC) to Math::PI (Nyquist).
+        #
+        # FIXME: remove linear phase offset caused by t=N/2 delay
         def response(omega)
           omega %= 2.0 * Math::PI
           clamped = omega > Math::PI ? 2.0 * Math::PI - omega : omega

@@ -131,7 +131,7 @@ RSpec.describe MB::Sound::Filter::FIR do
         real_filter.reset(v)
 
         result = MB::Sound::M.round(real_filter.process(Numo::DFloat.zeros(20000).fill(v)), 3)
-        expected = Numo::SFloat.zeros(20000).fill((v * -10.db).round(3))
+        expected = Numo::SFloat.zeros(20000).fill((v * real_filter.filter_fft[0].real).round(3))
         expect(result.min).to eq(expected.min)
         expect(result.max).to eq(expected.max)
         expect(result).to eq(expected)
