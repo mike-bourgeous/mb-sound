@@ -158,6 +158,18 @@ RSpec.describe MB::Sound::Filter::FIR do
       expect(freq_filter.response(Math::PI / 2)).to eq(freq_filter.filter_fft[freq_filter.filter_fft.length / 2])
       expect(freq_filter.response(-Math::PI / 2)).to eq(freq_filter.filter_fft[freq_filter.filter_fft.length / 2].conj)
     end
+
+    it 'interpolates between fft values' do
+      omega = 1.0
+      idx = (omega * (real_filter.filter_fft.length - 1) / Math::PI).floor
+      g1 = real_filter.filter_fft[idx]
+      g2 = real_filter.filter_fft[idx + 1]
+      r = real_filter.response(omega)
+      expect(r).not_to eq(g1)
+      expect(r).not_to eq(g2)
+      expect(r.real).to be_between(*[g1.real, g2.real].sort)
+      expect(r.imag).to be_between(*[g1.imag, g2.imag].sort)
+    end
   end
 
   describe '#reset' do
