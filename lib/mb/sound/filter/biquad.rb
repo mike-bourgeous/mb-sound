@@ -68,11 +68,17 @@ module MB
           reset
         end
 
+        # Resets the filter's internal state as if it had received the given
+        # value for a very long time.  The filter's output will be this value
+        # multiplied by the DC gain (Biquad#response(0)).
+        #
+        # Returns the steady-state output value for the given input value.
         def reset(initial_value = 0)
           @x1 = initial_value
           @x2 = initial_value
-          @y1 = initial_value
-          @y2 = initial_value
+          @y1 = initial_value * (@b0 + @b1 + @b2) / (1.0 + @a1 + @a2)
+          @y2 = @y1
+          @y1
         end
 
         # Returns an array with b0, b1, b2, a1, a2.

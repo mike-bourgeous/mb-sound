@@ -64,22 +64,14 @@ RSpec.describe(MB::Sound::Filter::Biquad) do
   end
 
   describe '#reset' do
-    it 'can reset to 0' do
-      f = MB::Sound::Filter::Cookbook.new(:lowshelf, 48000, 100, shelf_slope: 1.0, db_gain: -6.0)
-      f.reset(0)
-      expect(MB::Sound::M.round(f.process(Numo::SFloat.zeros(500)), 5)).to eq(Numo::SFloat.zeros(500))
-    end
-
-    it 'can reset to 0.5' do
-      f = MB::Sound::Filter::Cookbook.new(:lowshelf, 48000, 100, shelf_slope: 1.0, db_gain: -6.0)
-      f.reset(0.5)
-      expect(MB::Sound::M.round(f.process(Numo::SFloat.zeros(500).fill(0.5)), 5)).to eq(Numo::SFloat.zeros(500).fill(0.5) * f.response(0).real)
-    end
-
-    it 'can reset to -0.75' do
-      f = MB::Sound::Filter::Cookbook.new(:lowshelf, 48000, 100, shelf_slope: 1.0, db_gain: -6.0)
-      f.reset(-0.75)
-      expect(MB::Sound::M.round(f.process(Numo::SFloat.zeros(500).fill(-0.75)), 5)).to eq(Numo::SFloat.zeros(500).fill(-0.75) * f.response(0).real)
+    [0, 0.5, -0.75].each do |v|
+      it "can reset to #{v}" do
+        f = MB::Sound::Filter::Cookbook.new(:lowshelf, 48000, 100, shelf_slope: 1.0, db_gain: -6.0)
+        f.reset(v)
+        input = Numo::SFloat.zeros(500).fill(v)
+        output = input * f.response(0).real
+        expect(MB::Sound::M.round(f.process(input), 5)).to eq(MB::Sound::M.round(output, 5))
+      end
     end
   end
 
