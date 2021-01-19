@@ -59,7 +59,7 @@ RSpec.describe MB::Sound::Filter::FIR do
         # Have to re-rotate the impulse to compensate for delay so that the impulse peak is at t=0
         # Could also compute and subtract the linear phase in the frequency domain instead
         long_impulse = MB::Sound.real_ifft(complex_filter.filter_fft)
-        long_impulse = MB::Sound::A.rol(long_impulse, complex_filter.filter_length / 2 - 1)
+        long_impulse = MB::Sound::A.rol(long_impulse, complex_filter.filter_length / 2)
         imp_fft = MB::Sound.real_fft(long_impulse)
         expect(MB::Sound::M.round(imp_fft[imp_fft.length / 2], 2)).to eq(0+1i)
       end
@@ -90,13 +90,27 @@ RSpec.describe MB::Sound::Filter::FIR do
     end
   end
 
-  describe '#delay' do
+  context 'delay accessors' do
     [:unity_filter, :freq_filter, :complex_filter, :real_filter].each do |f|
-      it "has the expected value for #{f}" do
-        filter = send(f)
-        process_delay = filter.window_length - (filter.filter_length - 1)
-        impulse_delay = filter.filter_length / 2
-        expect(filter.delay).to eq(process_delay + impulse_delay)
+      let(:filter) { send(f) }
+      let(:process_delay) { filter.window_length - (filter.filter_length - 1) }
+      let(:impulse_delay) { filter.impulse.max_index }
+      describe '#delay' do
+        it "has the expected value for #{f}" do
+          expect(filter.delay).to eq(process_delay + impulse_delay)
+        end
+      end
+
+      describe '#impulse_delay' do
+        it "has the expected value for #{f}" do
+          expect(filter.impulse_delay).to eq(impulse_delay)
+        end
+      end
+
+      describe '#processing_delay' do
+        it "has the expected value for #{f}" do
+          expect(filter.processing_delay).to eq(process_delay)
+        end
       end
     end
   end

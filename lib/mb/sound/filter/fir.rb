@@ -129,8 +129,8 @@ module MB
           @in[0...@in_max].fill(value)
           @in[@in_max..-1].fill(0)
 
-          @out[0...(@window_length - @filter_length + 1)].fill((value * filter_fft[0]).real)
-          @out[(@window_length - filter_length + 1)..-1].fill(0)
+          @out[0...@processing_delay].fill((value * filter_fft[0]).real)
+          @out[@processing_delay..-1].fill(0)
 
           start = @window_length / 2
           subset = @out[start...(start + @window_length)]
@@ -285,13 +285,13 @@ module MB
           # TODO: Understand why @filter_fft.length.to_f / @gains.length doesn't fully compensate for lost gain
           @filter_fft.inplace * (@gains[1..-2].abs.mean / @filter_fft[1..-2].abs.mean) # Compensate for padding
 
-          @process_delay = @window_length - @filter_overlap
+          @processing_delay = @window_length - @filter_overlap
           @impulse_delay = @impulse.abs.max_index
-          @delay = @process_delay + @impulse_delay
+          @delay = @processing_delay + @impulse_delay
 
           # TODO: Allow complex output, like IIR filters
           @in = Numo::SFloat.zeros(@window_length)
-          @in_max = @window_length - @filter_overlap
+          @in_max = @processing_delay
           @in_count = 0
 
           @out = Numo::SFloat.zeros(@window_length * 2)
