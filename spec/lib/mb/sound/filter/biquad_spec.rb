@@ -63,6 +63,18 @@ RSpec.describe(MB::Sound::Filter::Biquad) do
     end
   end
 
+  describe '#reset' do
+    [0, 0.5, -0.75].each do |v|
+      it "can reset to #{v}" do
+        f = MB::Sound::Filter::Cookbook.new(:lowshelf, 48000, 100, shelf_slope: 1.0, db_gain: -6.0)
+        f.reset(v)
+        input = Numo::SFloat.zeros(500).fill(v)
+        output = input * f.response(0).real
+        expect(MB::Sound::M.round(f.process(input), 5)).to eq(MB::Sound::M.round(output, 5))
+      end
+    end
+  end
+
   describe '#z_response' do
     it 'returns the same value as #response for values on the unit circle' do
       f = MB::Sound::Filter::Cookbook.new(:lowpass, 48000, 12000, quality: 0.5 ** 0.5)

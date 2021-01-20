@@ -23,6 +23,9 @@ module MB
         # Initializes a filter based on Robert Bristow-Johnson's filter cookbook.
         # +filter_type+ is one of :lowpass, :highpass, :bandpass (0dB peak),
         # :notch, :allpass, :peak, :lowshelf, or :highshelf.
+        #
+        # The +:shelf_slope+ should be 1.0 to have maximum slope without
+        # overshoot.  See comments on https://www.musicdsp.org/en/latest/Filters/197-rbj-audio-eq-cookbook.html
         def initialize(filter_type, f_samp, f_center, db_gain: nil, quality: nil, bandwidth_oct: nil, shelf_slope: nil)
           set_parameters(filter_type, f_samp, f_center, db_gain: db_gain, quality: quality, bandwidth_oct: bandwidth_oct, shelf_slope: shelf_slope)
           super(@b0, @b1, @b2, @a1, @a2)

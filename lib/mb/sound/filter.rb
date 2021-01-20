@@ -11,7 +11,8 @@ module MB
         raise NotImplementedError, 'Subclasses must override #process'
       end
 
-      # If implemented, should reset
+      # If implemented, should reset filter to the given steady-state input.
+      # Must return the steady-state output for the given input.
       def reset(value = 0)
         raise NotImplementedError, 'Subclasses must override #reset if supported'
       end
@@ -49,3 +50,4 @@ require_relative 'filter/filter_bank'
 require_relative 'filter/filter_sum'
 require_relative 'filter/butterworth'
 require_relative 'filter/envelope_follower'
+require_relative 'filter/fir'

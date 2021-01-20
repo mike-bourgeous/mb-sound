@@ -28,7 +28,7 @@ module MB
         def reset(value)
           raise 'Not all filters support #reset' unless @filters.all? { |f| f.respond_to?(:reset) }
 
-          @filters.each { |f| f.reset(value) }
+          @filters.reduce(value) { |v, f| f.reset(v) }
         end
 
         # Computes the combined response of all filters at the given angular
