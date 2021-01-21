@@ -13,7 +13,7 @@ module MB
     class AlsaInput < MB::Sound::IOInput
       attr_reader :device, :rate, :channels, :buffer_size
 
-      DEFAULT_BUFFER = 512
+      DEFAULT_BUFFER = 1024
 
       # Initializes an ALSA input stream for the given device name, sample rate,
       # and number of channels.  Alsa will be told to use the given buffer
