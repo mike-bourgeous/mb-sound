@@ -135,6 +135,7 @@ module MB
           p = { plot: plotter(graphical: graphical) }
           p.merge!(plot) if plot.is_a?(Hash)
 
+          @plot_outputs ||= {}
           o = @plot_outputs[[plot, info]]
           o = nil if o.closed?
           o ||= MB::Sound::PlotOutput.new(output(**info), **p)
