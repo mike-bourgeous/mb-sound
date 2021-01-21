@@ -22,4 +22,5 @@ gem 'rspec'
 
 # Comment this out if you don't want to use Jack via FFI or don't want to
 # install FFI.
-gem 'mb-sound-jackffi', '>= 0.0.8.usegit', git: 'https://github.com/mike-bourgeous/mb-sound-jackffi.git'
+#gem 'mb-sound-jackffi', '>= 0.0.8.usegit', git: 'https://github.com/mike-bourgeous/mb-sound-jackffi.git'
+gem 'mb-sound-jackffi', path: '../mb-sound-jackffi'

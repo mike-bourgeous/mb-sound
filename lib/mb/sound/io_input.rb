@@ -19,6 +19,11 @@ module MB
         @frames_read = 0
       end
 
+      # Returns true if the input has been closed.
+      def closed?
+        @io.nil? || @io.closed?
+      end
+
       # Reads +frames+ frames of raw 32-bit floats for +@channels+ channels from
       # the IO given to the constructor.  Returns an array of @channels NArrays.
       def read(frames)

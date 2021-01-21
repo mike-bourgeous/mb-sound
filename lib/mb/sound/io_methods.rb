@@ -128,6 +128,20 @@ module MB
       # Pass either true or a Hash of options for MB::Sound::PlotOutput in
       # +:plot+ to enable live plotting.
       def output(rate: 48000, channels: 2, device: nil, buffer_size: nil, plot: nil)
+        info = {rate: rate, channels: channels, device: device, buffer_size: buffer_size}
+
+        if plot
+          graphical = plot.is_a?(Hash) && plot[:graphical] || false
+          p = { plot: plotter(graphical: graphical) }
+          p.merge!(plot) if plot.is_a?(Hash)
+
+          return MB::Sound::PlotOutput.new(output(**info), **p)
+        end
+
+        @outputs ||= {}
+        o = @outputs[info]
+        return o if o && !(o.respond_to?(:closed?) && o.closed?)
+        
         o = nil
         case RUBY_PLATFORM
         when /linux/
@@ -147,13 +161,7 @@ module MB
           raise NotImplementedError, 'TODO: support other platforms'
         end
 
-        if plot
-          graphical = plot.is_a?(Hash) && plot[:graphical] || false
-          p = { plot: plotter(graphical: graphical) }
-          p.merge!(plot) if plot.is_a?(Hash)
-
-          o = MB::Sound::PlotOutput.new(o, **p)
-        end
+        @outputs[info] = o
 
         o
       end
