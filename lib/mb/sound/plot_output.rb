@@ -9,6 +9,11 @@ module MB
 
       def_delegators :@output, :rate, :channels, :buffer_size
 
+      # If true, PlotOutput will try to manage audio/video sync by sleeping.
+      # Set this to false if something else applies backpressure to maintain
+      # sync (e.g. a synchronous plotting backend).
+      attr_accessor :sleep
+
       # Initializes an output plotter for the given +output+.  Up to
       # +:window_size+ samples will be drawn from each call to #write.
       #
@@ -42,6 +47,8 @@ module MB
 
         @next_time = nil
         @frame = 0
+
+        @sleep = true
       end
 
       # Writes the data to the output, saves it for the plotting thread, then
@@ -60,12 +67,12 @@ module MB
         @next_time += period
 
         @frame += 1
-        if remaining > 0.5 * period || @frame % 5 == 0
+        if !@sleep || remaining > 0.5 * period || @frame % 5 == 0
           plot(data)
 
           # The sleep is necessary to maintain sync
           remaining = this_time - ::MB::Sound.clock_now
-          sleep 0.75 * remaining if remaining > 0
+          sleep 0.75 * remaining if @sleep && remaining > 0
         elsif remaining < 0
           # Force a plot eventually for really large lags (e.g. happens when
           # looping input to output)
@@ -81,6 +88,7 @@ module MB
         @output.close
       end
 
+      # Returns true if the plotter or the output stream has been closed.
       def closed?
         out_closed = (@output.respond_to?(:closed?) && @output.closed?)
         close if out_closed && !@closed
