@@ -15,7 +15,7 @@ module MB
         puts header
 
         plot = { header_lines: header.lines.count, graphical: graphical } if plot.nil? || plot == true
-        plot[:spectrum] = spectrum unless plot.include?(:spectrum)
+        plot[:spectrum] = spectrum if plot.is_a?(Hash) && !plot.include?(:spectrum)
 
         case file_tone_data
         when String
