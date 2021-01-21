@@ -31,9 +31,10 @@ module MB
           # plot methods
           output = MB::Sound.output(rate: rate, channels: channels, plot: plot, device: device)
           buffer_size = output.buffer_size
-          buffer_size = 800 if buffer_size.nil? || buffer_size == 0
           (0...data[0].length).step(buffer_size).each do |offset|
-            output.write(data.map { |c| c[offset...([offset + buffer_size, c.length].min)] })
+            output.write(data.map { |c|
+              MB::Sound::A.zpad(c[offset...([offset + buffer_size, c.length].min)], buffer_size)
+            })
           end
 
         when Tone
