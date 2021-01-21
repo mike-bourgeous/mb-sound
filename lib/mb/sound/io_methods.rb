@@ -137,7 +137,7 @@ module MB
 
           @plot_outputs ||= {}
           o = @plot_outputs[[plot, info]]
-          o = nil if o.closed?
+          o = nil if o&.closed?
           o ||= MB::Sound::PlotOutput.new(output(**info), **p)
           @plot_outputs[[plot, info]] ||= o
 

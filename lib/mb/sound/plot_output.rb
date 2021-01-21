@@ -82,7 +82,9 @@ module MB
       end
 
       def closed?
-        @closed || (@output.respond_to?(:closed?) && @output.closed?)
+        out_closed = (@output.respond_to?(:closed?) && @output.closed?)
+        close if out_closed && !@closed
+        @closed
       end
 
       private
