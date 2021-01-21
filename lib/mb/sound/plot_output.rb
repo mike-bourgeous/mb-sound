@@ -18,6 +18,8 @@ module MB
         raise "Output streams must respond to #write" unless output.respond_to?(:write)
         raise "Output streams must respond to #buffer_size" unless output.respond_to?(:buffer_size)
 
+        @closed = false
+
         @header_lines = header_lines
         @window_size = window_size || output.buffer_size
 
@@ -73,9 +75,14 @@ module MB
 
       # Closes the output stream and stops plotting.
       def close
+        @closed = true
         puts "\e[#{@p.height + @header_lines + 2}H" if @p.respond_to?(:height)
         @p.close unless @plot_set
         @output.close
+      end
+
+      def closed?
+        @closed || (@output.respond_to?(:closed?) && @output.closed?)
       end
 
       private

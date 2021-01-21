@@ -1,6 +1,6 @@
 GIT
   remote: https://github.com/mike-bourgeous/mb-sound-jackffi.git
-  revision: 9d61946f66801c5f8b3d928ddec2ed645cf34e31
+  revision: 27860212e92fd7ac1bb1be44541565bb4c19bf85
   specs:
     mb-sound-jackffi (0.0.9.usegit)
       ffi (~> 1.13.0)

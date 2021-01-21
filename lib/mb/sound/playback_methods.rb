@@ -44,8 +44,6 @@ module MB
         else
           raise "Unsupported type #{file_tone_data.class.name} for playback"
         end
-      ensure
-        output&.close
       end
 
       # Plays the given filename using the default audio output returned by
@@ -77,9 +75,7 @@ module MB
 
       ensure
         input&.close
-        output&.close
       end
-
     end
   end
 end
