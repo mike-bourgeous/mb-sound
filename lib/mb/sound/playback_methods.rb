@@ -44,7 +44,11 @@ module MB
         else
           raise "Unsupported type #{file_tone_data.class.name} for playback"
         end
+
+        puts "\n\n"
       end
+
+      private
 
       # Plays the given filename using the default audio output returned by
       # MB::Sound.output.  The +:channels+ parameter may be used to force mono
