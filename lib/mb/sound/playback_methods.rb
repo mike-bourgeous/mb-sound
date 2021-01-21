@@ -62,8 +62,9 @@ module MB
           data = input.read(buffer_size)
           break if data.nil? || data.empty? || data[0].empty?
 
-          data.map { |d|
-            d.inplace * gain
+          # Apply gain and pad the final input chunk to the output buffer size
+          data = data.map { |d|
+            MB::Sound::A.zpad(d.inplace * gain, buffer_size).not_inplace!
           }
 
           # Ensure the output is at least stereo (Pulseaudio plays nothing for
