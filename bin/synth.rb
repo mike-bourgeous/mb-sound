@@ -17,7 +17,7 @@ require 'mb-sound-jackffi'
 require 'mb/sound'
 
 # A ring/pool of objects (e.g. oscillators) to be used in FIFO order.
-# Error handling left as an exercise for the reader /s
+# Error handling and better voice stealing left as an exercise for the reader /s
 class Ring
   extend Forwardable
 
@@ -63,7 +63,7 @@ jack = MB::Sound::JackFFI[]
 midi_in = jack.input(port_type: :midi, port_names: ['midi_in'], connect: ARGV[0])
 audio_out = jack.output(port_names: ['audio_out'], connect: [['system:playback_1', 'system:playback_2']])
 
-OSCIL_COUNT = 4
+OSCIL_COUNT = 9
 oscil_bank = Ring.new(
   OSCIL_COUNT.times.map {
     MB::Sound::Oscillator.new(:ramp, frequency: 440, advance: Math::PI * 2 / audio_out.rate, range: -0.0..0.0)
