@@ -72,7 +72,7 @@ oscil_bank = Ring.new(
 
 nib = Nibbler.new
 
-filter = MB::Sound::Filter::Cookbook.new(:lowpass, audio_out.rate, 2400, quality: 0.707)
+filter = MB::Sound::Filter::Cookbook.new(:lowpass, audio_out.rate, 2400, quality: 4)
 
 puts "\e[1;34mMaking \e[33mmusic\e[0m"
 
@@ -99,7 +99,7 @@ loop do
           # Filter resonance
           filter.quality = MB::Sound::M.scale(e.value, 0..127, 0.1..4.0)
 
-        when 74
+        when 1, 74
           # Filter frequency
           decade = MB::Sound::M.scale(e.value, 0..127, 0..3)
           freq = 20.0 * 10.0 ** decade
