@@ -126,34 +126,19 @@ module MB
         self.frequency = Oscillator.calc_freq(note_number)
       end
 
-      # Updates the oscillator baesd on the given MIDI event, which should be
-      # an event type from the midi-nibbler gem.  Uses NoteOn to change the
-      # frequency, NoteOff to silence the oscillator, and CC#1 (mod wheel) to
-      # control the oscillator power (distortion).
-      #
-      # TODO: Allow changing waveform
-      # TODO: Maybe this belongs in a different class
-      def handle_midi(midi_event)
-        case midi_event
-        when MIDIMessage::NoteOn
-          self.number = midi_event.note
-          amplitude = midi_event.velocity * 0.5 / 127 + 0.01
-          self.range = -amplitude..amplitude
+      # Restarts the oscillator at the given note number and velocity.
+      def trigger(note_number, velocity)
+        self.number = note_number
+        amplitude = MB::Sound::M.scale(velocity, 0..127, -30..-6).db
+        self.range = -amplitude..amplitude
+        @phi = @phase
+      end
 
-        when MIDIMessage::NoteOff
-          # Only turn off the oscillator if the note off event matches the
-          # current frequency (this allows playing legato; multiple note on and
-          # note off events will be received, but only the note off event for
-          # the current note will count)
-          if midi_event.note == @note_number
-            self.range = 0..0
-          end
-
-        when MIDIMessage::ControlChange
-          if midi_event.index == 1
-            # Mod wheel
-            self.post_power = MB::Sound::M.scale(midi_event.value, 0..127, 1.0..0.1)
-          end
+      # Stops the oscillator at the given release velocity (which may be
+      # ignored), if its note number matches the given note number.
+      def release(note_number, velocity)
+        if note_number == @note_number
+          self.range = 0..0
         end
       end
 
