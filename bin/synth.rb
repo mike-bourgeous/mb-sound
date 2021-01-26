@@ -87,6 +87,13 @@ loop do
       puts MB::Sound::U.highlight(e) unless e.is_a?(MIDIMessage::SystemRealtime)
 
       case e
+      when MIDIMessage::ProgramChange
+        wave_type = MB::Sound::Oscillator::WAVE_TYPES[e.program % MB::Sound::Oscillator::WAVE_TYPES.length]
+        puts "\n\e[34mWave type: \e[1m#{wave_type}\e[0m\n\n"
+        oscil_bank.each do |o|
+          o.wave_type = wave_type
+        end
+
       when MIDIMessage::NoteOn
         oscil_bank.next(e.note).trigger(e.note, e.velocity)
 
