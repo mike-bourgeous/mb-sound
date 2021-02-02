@@ -245,15 +245,21 @@ module MB
       # the tone, or 48000 samples if duration is infinite.  The tone
       # parameters cannot be changed after this method is called.
       def generate(count = nil)
-        count ||= @duration ? @duration * @rate : 48000
+        count ||= @duration ? @duration * @rate
+        oscillator.sample(count.round) * @amplitude
+      end
+
+      # Returns an Oscillator that will generate a wave with the wave type,
+      # frequency, etc. from this tone.  If this tone's frequency is changed
+      # (e.g. by the Note subclass), the Oscillator will change frequency as
+      # well.
+      def oscillator
         @oscillator ||= MB::Sound::Oscillator.new(
           @wave_type,
           frequency: @frequency,
           phase: @phase,
           advance: Math::PI * 2.0 / @rate,
         )
-
-        @oscillator.sample(count) * @amplitude
       end
 
       # Writes the tone's full duration to the +output+ stream.  The tone will
