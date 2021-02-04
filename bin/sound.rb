@@ -30,7 +30,6 @@ def show_intro
 If you're new to \e[1;31mRuby\e[0m, see \e[1;34mhttps://www.ruby-lang.org/en/documentation/quickstart/\e[0m.
 If you're new to \e[1;31mPry\e[0m, check out \e[1;34mhttps://pry.github.io/\e[0m.
 
-\e[3mSome things to try:\e[0m
 EOF
 
   examples = {
