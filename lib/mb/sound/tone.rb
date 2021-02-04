@@ -242,11 +242,11 @@ module MB
       end
 
       # Generates +count+ samples of the tone, defaulting to the duration of
-      # the tone, or 48000 samples if duration is infinite.  The tone
+      # the tone, or one second of samples if duration is infinite.  The tone
       # parameters cannot be changed after this method is called.
       def generate(count = nil)
-        count ||= @duration ? @duration * @rate
-        oscillator.sample(count.round) * @amplitude
+        count ||= @duration ? @duration * @rate : @rate
+        oscillator.sample(count.round).tap { |d| d * @amplitude }
       end
 
       # Returns an Oscillator that will generate a wave with the wave type,

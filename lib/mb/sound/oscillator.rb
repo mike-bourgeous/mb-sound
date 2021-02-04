@@ -187,7 +187,8 @@ module MB
         s
       end
 
-      # Returns the next value of the oscillator and advances the internal phase.
+      # Returns the next value (or +count+ values in an NArray, if specified)
+      # of the oscillator and advances the internal phase.
       def sample(count = nil)
         if count
           return Numo::SFloat.zeros(count).map { sample }
