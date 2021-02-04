@@ -24,7 +24,7 @@ puts
 clear if ARGV.include?('--clear')
 
 def show_intro
-  puts <<-EOF.strip
+  puts <<-EOF
 \e[33;1mWelcome to the interactive sound environment!\e[0m
 
 If you're new to \e[1;31mRuby\e[0m, see \e[1;34mhttps://www.ruby-lang.org/en/documentation/quickstart/\e[0m.
@@ -48,11 +48,16 @@ EOF
     "\e[1m#{MB::Sound::U.syntax('cd ::')}\e[0m" => "for experienced Ruby/Pry users to leave the sound context.",
   }
 
+  width = [MB::Sound::U.width - 3, 90].min
   examples.each do |code, description|
-    line_length = MB::Sound::U.remove_ansi(code.lines.last).length
-    wrapped = MB::Sound::U.wrap('.' * (line_length - 1) + ' ' + description, width: MB::Sound::U.width - 3)[line_length..-1].gsub(/\n/m, "\n   ").strip
-    puts " * #{code} #{wrapped}\n\n"
+    colorless_line = MB::Sound::U.remove_ansi(code.lines.last)
+    line_length = colorless_line.length
+    ref_string = '.' * (line_length) + ' ' + description
+    wrapped = MB::Sound::U.wrap(ref_string, width: width)[line_length..-1].gsub(/\n/m, "\n   ").strip
+    puts " * #{code} #{wrapped}"
   end
+
+  puts
 end
 
 show_intro
