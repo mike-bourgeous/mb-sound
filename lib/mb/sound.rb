@@ -48,8 +48,8 @@ module MB
       # TODO: Further develop filters and sound sources into a sound
       # source/sink graph, where a complete graph can be built up with a DSL,
       # and actual generation only occurs on demand?
-      sound = any_sound_to_array(sound)
       rate ||= sound.respond_to?(:rate) ? sound.rate : 48000
+      sound = any_sound_to_array(sound)
       frequency = frequency.frequency if frequency.respond_to?(:frequency) # get 343 from 343.hz
       filter = MB::Sound::Filter::Cookbook.new(
         filter_type,
