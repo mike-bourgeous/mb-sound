@@ -48,6 +48,37 @@ module MB
         plot(data, **kwargs, spectrum: true)
       end
 
+      # Plots time-domain and frequency-domain magnitudes of the given data.
+      # Supports plotting filter responses.
+      def time_freq(data, **kwargs)
+        data = any_sound_to_array(data)
+
+        plot(
+          data.flat_map { |c|
+            if c.is_a?(Filter)
+              [c.impulse_response, c.frequency_response.abs.map { |v| v.to_db }]
+            else
+              [c, real_fft(c).abs.map { |v| v.to_db }]
+            end
+          },
+          **kwargs
+        )
+      end
+
+      # Plots frequency-domain magnitude and phase of the given data.  Supports
+      # plotting filter responses.
+      def mag_phase(data, **kwargs)
+        data = any_sound_to_array(data)
+
+        plot(
+          data.flat_map { |c|
+            f = c.is_a?(Filter) ? c.frequency_response : real_fft(c)
+            [ f.abs.map { |v| v.to_db }, f.arg ]
+          },
+          **kwargs
+        )
+      end
+
       # Plots a subset of the given audio file, test tone, or data, starting at
       # +offset+, and plotting the following +samples+ samples.  If +all+ is true
       # then the entirety of the file, tone, or data will be plotted in slices of
@@ -72,6 +103,9 @@ module MB
 
         when Tone
           data = [file_tone_data.generate(all ? nil : samples + offset)]
+
+        when Filter
+          data = [file_tone_data.impulse_response, file_tone_data.frequency_response.abs]
 
         else
           raise "Cannot plot type #{file_tone_data.class.name}"

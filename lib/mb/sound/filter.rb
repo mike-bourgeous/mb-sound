@@ -37,6 +37,22 @@ module MB
         # Process forward and backward
         process(process(samples).reverse).reverse
       end
+
+      # Generates a time domain impulse response for the filter by processing a
+      # single 1 followed by zeros.  This resets the state of the filter.
+      def impulse_response(count = 500)
+        reset(0)
+        data = Numo::SFloat.zeros(count)
+        data[0] = 1
+        process(data).tap { reset(0) }
+      end
+
+      # Returns a complex frequency-domain response, with +count+ evenly spaced
+      # samples from 0 to pi.  The filter subclass must implement #response.
+      def frequency_response(count = 500)
+        raise 'This filter does not support returning the frequency domain response' unless respond_to?(:response)
+        response(Numo::SFloat.linspace(0, Math::PI, count))
+      end
     end
   end
 end
