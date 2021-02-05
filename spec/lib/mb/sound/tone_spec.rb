@@ -192,7 +192,7 @@ RSpec.describe MB::Sound::Tone do
     it 'can write tone samples to a file' do
       name = 'tmp/tonegen.flac'
       FileUtils.mkdir_p('tmp')
-      output = MB::Sound::FFMPEGOutput.new(name, channels: 1, rate: 48000)
+      output = MB::Sound::FFMPEGOutput.new(name, channels: 1, rate: 48000, buffer_size: 311713)
       100.hz.for(311713.0 / 48000.0).write(output)
       output.close
 
