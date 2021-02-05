@@ -246,7 +246,7 @@ module MB
       # parameters cannot be changed after this method is called.
       def generate(count = nil)
         count ||= @duration ? @duration * @rate : @rate
-        oscillator.sample(count.round).tap { |d| d * @amplitude }
+        oscillator.sample(count.round).tap { |d| d.inplace * @amplitude }
       end
 
       # Returns an Oscillator that will generate a wave with the wave type,
