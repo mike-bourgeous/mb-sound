@@ -38,6 +38,17 @@ module MB
         process(process(samples).reverse).reverse
       end
 
+      # Appends another filter after this filter, returning a filter chain.
+      def chain(next_filter)
+        FilterChain.new(self, next_filter)
+      end
+
+      # Most filters cannot contain other filters, so return false unless this
+      # is the same exact filter.  See FilterChain#has_filter?.
+      def has_filter?(filter)
+        self.equal?(filter)
+      end
+
       # Generates a time domain impulse response for the filter by processing a
       # single 1 followed by zeros.  This resets the state of the filter.
       def impulse_response(count = 500)

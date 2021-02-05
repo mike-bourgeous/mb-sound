@@ -214,7 +214,7 @@ module MB
         self
       end
 
-      # Changes the linear gain of the tone.
+      # Changes the linear gain of the tone.  This may be negative.
       def at(amplitude)
         @amplitude = amplitude.to_f
         self
@@ -261,6 +261,42 @@ module MB
           advance: Math::PI * 2.0 / @rate,
           range: -@amplitude..@amplitude
         )
+      end
+
+      # Returns a second-order low-pass Filter with this Tone's frequency as its
+      # cutoff.  Only the tone's frequency and sample rate parameters are used.
+      #
+      # Examples:
+      #
+      #     1000.hz.lowpass
+      #     1000.hz.at_rate(44100).lowpass
+      def lowpass(quality: 1)
+        MB::Sound::Filter::Cookbook.new(:lowpass, @rate, @frequency, quality: quality)
+      end
+
+      # Returns a second-order high-pass Filter with this Tone's frequency as
+      # its cutoff.  Only the tone's frequency and sample rate parameters are
+      # used.
+      #
+      # Examples:
+      #
+      #     120.hz.highpass
+      #     120.hz.at_rate(96000).highpass
+      def highpass(quality: 1)
+        MB::Sound::Filter::Cookbook.new(:highpass, @rate, @frequency, quality: quality)
+      end
+
+      # Returns a peaking Filter with this Tone's frequency as its center, the
+      # tone's amplitude as its gain factor (unless +:gain+ is specified), and
+      # the given bandwidth in +:octaves+).
+      #
+      # Examples:
+      #
+      #     500.hz.at(3.db).peak
+      #     500.hz.peak(octaves: 2, gain: -3.db)
+      def peak(octaves: 0.5, gain: nil)
+        gain ||= @amplitude
+        MB::Sound::Filter::Cookbook.new(:peak, @rate, @frequency, bandwidth_oct: octaves, db_gain: gain.to_db)
       end
 
       # Writes the tone's full duration to the +output+ stream.  The tone will

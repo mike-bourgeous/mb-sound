@@ -17,7 +17,7 @@ module MB
           :highshelf,
         ]
 
-        attr_reader :filter_type, :sample_rate, :center_frequency
+        attr_reader :filter_type, :sample_rate, :center_frequency, :db_gain
         attr_reader :quality, :bandwidth_oct, :shelf_slope
 
         # Initializes a filter based on Robert Bristow-Johnson's filter cookbook.

@@ -1,14 +1,22 @@
+require 'set'
+
 module MB
   module Sound
     class Filter
       # A linear chain of filters, with the output of one applied to the input of
       # the next.
       class FilterChain < Filter
+        class FilterDuplicationError < RuntimeError; end
+        class FilterCycleError < RuntimeError; end
+
+        attr_reader :filters
+
         # Initializes a filter chain with the given filters.  Filters are applied
         # first-to-last/left-to-right, so the first filter at the left receives
         # the original input, and the last filter produces the final output.
         def initialize(*filters)
           @filters = filters
+          check_for_cycle
         end
 
         # Processes +samples+ through each filter in the chain.  Returns the
@@ -62,6 +70,67 @@ module MB
             acc[:zeros] += fpz[:zeros]
             acc
           }
+        end
+
+        # Appends another filter to this filter chain.  Building up a filter
+        # chain is something like O(n^2), as every filter is checked for
+        # duplication and cycles.  Raises an error if a cycle would be created
+        # or a filter is already in the chain.
+        #
+        # This method tries to detect duplication and cycles, but cannot
+        # prevent all scenarios where a filter would end up in multiple chains.
+        # Filters are not designed to handle being used in more than one
+        # context as they contain internal state, so this should be avoided.
+        # That is, a filter of any type should be used directly in only one
+        # place, or it should be added to only one chain.
+        def chain(next_filter)
+          raise FilterDuplicationError, 'Cannot add a filter that is already in a chain to that chain again' if has_filter?(next_filter)
+          raise FilterDuplicationError, 'Cannot add a chain to another chain that already contains it' if next_filter.has_filter?(self)
+
+          @filters << next_filter
+
+          begin
+            check_for_cycle
+          rescue
+            @filters.delete_at(-1)
+            raise
+          end
+
+          self
+        end
+
+        # Returns true if this FilterChain, or any nested FilterChain contained
+        # within it, contains (or is) the given +filter+.  This method will not
+        # work if a filter cycle is created despite the cycle detection in the
+        # constructor.
+        def has_filter?(filter)
+          filter.equal?(self) ||
+            @filters.include?(filter) ||
+            @filters.select { |f| f.is_a?(FilterChain) }.any? { |f| f.has_filter?(filter) }
+        end
+
+        protected
+
+        # Raises an error if this filter chain has a cycle or any duplicated
+        # filters.
+        def check_for_cycle
+          traversed = {}
+
+          chains = [self]
+
+          traversed[self] = { idx: -1, from: self }
+
+          chains.each do |c|
+            c.filters.each_with_index do |f, idx|
+              if seen = traversed[f]
+                raise FilterCycleError, "Filter #{f} at position #{idx} within #{c} was already seen at index #{seen[:idx]} within #{seen[:from]}"
+              end
+
+              traversed[f] = { idx: idx, from: c }
+
+              chains << f if f.is_a?(FilterChain) && idx >= 0
+            end
+          end
         end
       end
     end

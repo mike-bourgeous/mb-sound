@@ -201,6 +201,50 @@ RSpec.describe MB::Sound::Tone do
     end
   end
 
+  describe '#oscillator' do
+    it 'returns an Oscillator with the same frequency and range' do
+      tone = 222.hz.at(-5.db)
+      osc = tone.oscillator
+      expect(osc).to be_a(MB::Sound::Oscillator)
+      expect(osc.frequency).to eq(tone.frequency)
+      expect(osc.range).to eq(-tone.amplitude..tone.amplitude)
+    end
+  end
+
+  describe '#lowpass' do
+    it 'returns a Filter' do
+      f = 123.hz.at_rate(47999).lowpass(quality: 3)
+      expect(f).to be_a(MB::Sound::Filter::Cookbook)
+      expect(f.center_frequency).to eq(123)
+      expect(f.sample_rate).to eq(47999)
+      expect(f.filter_type).to eq(:lowpass)
+      expect(f.quality).to eq(3)
+    end
+  end
+
+  describe '#highpass' do
+    it 'returns a Filter' do
+      f = 423.hz.at_rate(8000).highpass(quality: 4)
+      expect(f).to be_a(MB::Sound::Filter::Cookbook)
+      expect(f.center_frequency).to eq(423)
+      expect(f.sample_rate).to eq(8000)
+      expect(f.filter_type).to eq(:highpass)
+      expect(f.quality).to eq(4)
+    end
+  end
+
+  describe '#highpass' do
+    it 'returns a Filter' do
+      f = 523.hz.at(-5.db).at_rate(32323).peak(octaves: 1.1)
+      expect(f).to be_a(MB::Sound::Filter::Cookbook)
+      expect(f.center_frequency).to eq(523)
+      expect(f.sample_rate).to eq(32323)
+      expect(f.filter_type).to eq(:peak)
+      expect(f.bandwidth_oct).to eq(1.1)
+      expect(f.db_gain.round(4)).to eq(-5)
+    end
+  end
+
   describe '#initialize' do
     it 'can be constructed from a wavelength' do
       expect(MB::Sound::Tone.new(frequency: 343.meters).wavelength).to eq(343.meters)
