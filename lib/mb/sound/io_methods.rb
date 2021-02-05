@@ -106,7 +106,7 @@ module MB
           elsif `pgrep pulseaudio`.strip.length > 0
             MB::Sound::AlsaInput.new(device: 'pulse', rate: rate, channels: channels, buffer_size: buffer_size)
           else
-            MB::Sound::AlsaInput.new(device: 'default', rate: rate, channels: channels, buffer_size: buffer_size)
+            MB::Sound::AlsaInput.new(device: device || 'default', rate: rate, channels: channels, buffer_size: buffer_size)
           end
 
         else
