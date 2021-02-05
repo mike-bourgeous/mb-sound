@@ -151,52 +151,59 @@ RSpec.describe MB::Sound::Oscillator do
     end
   end
 
-  describe '#handle_midi' do
+  # FIXME: test #trigger and #release instead
+  describe '#trigger' do
     let (:oscil) {
       MB::Sound::Oscillator.new(:sine, frequency: 0, range: 0..0)
     }
 
-    context 'with a note on event' do
-      it 'changes frequency' do
-        expect(oscil.frequency).to eq(0)
-        oscil.handle_midi(MIDIMessage::NoteOn.new(0, 25, 0))
-        expect(oscil.frequency).to eq(MB::Sound::Note.new(25).frequency)
-        oscil.handle_midi(MIDIMessage::NoteOn.new(0, 75, 0))
-        expect(oscil.frequency).to eq(MB::Sound::Note.new(75).frequency)
-      end
+    it 'changes frequency' do
+      expect(oscil.frequency).to eq(0)
 
-      it 'changes amplitude' do
-        expect(oscil.range).to eq(0..0)
-        oscil.handle_midi(MIDIMessage::NoteOn.new(0, 25, 127))
-        expect(oscil.range).to eq(-0.51..0.51)
-      end
+      oscil.trigger(25, 0)
+      expect(oscil.frequency).to eq(MB::Sound::Note.new(25).frequency)
+      expect(oscil.number).to eq(25)
+
+      oscil.trigger(75, 0)
+      expect(oscil.frequency).to eq(MB::Sound::Note.new(75).frequency)
+      expect(oscil.number).to eq(75)
     end
 
-    context 'with a note off event' do
-      it 'does not change frequency' do
-        oscil.handle_midi(MIDIMessage::NoteOff.new(0, 25, 0))
-        expect(oscil.frequency).to eq(0)
-      end
+    it 'changes amplitude' do
+      expect(oscil.range).to eq(0..0)
+      oscil.trigger(25, 127)
+      expect(oscil.range.min.round(3)).to eq(-1 * -6.db.round(3))
+      expect(oscil.range.max.round(3)).to eq(-6.db.round(3))
+    end
+  end
 
-      it 'silences the oscillator for a matching event' do
-      oscil.handle_midi(MIDIMessage::NoteOn.new(0, 25, 0))
-      oscil.handle_midi(MIDIMessage::NoteOff.new(0, 24, 0))
-      end
+  describe '#release' do
+    let (:oscil) {
+      MB::Sound::Oscillator.new(:sine, frequency: 0, range: 0.5..0.5)
+    }
 
-      it 'does not silence the oscillator for a non-matching event' do
-        oscil.handle_midi(MIDIMessage::NoteOn.new(0, 25, 0))
-        oscil.handle_midi(MIDIMessage::NoteOff.new(0, 24, 0))
-        expect(oscil.range).to eq(-0.01..0.01)
-      end
+    it 'can handle out-of-range note numbers' do
+      expect(oscil.number).not_to be_finite
+      expect { oscil.release(oscil.number, 0) }.not_to raise_error
+      expect(oscil.range).to eq(0..0)
     end
 
-    context 'wtih a control change' do
-      it 'changes oscillator power for the mod wheel' do
-        oscil.handle_midi(MIDIMessage::ControlChange.new(0, 1, 0))
-        expect(oscil.post_power.round(4)).to eq(1.0)
-        oscil.handle_midi(MIDIMessage::ControlChange.new(0, 1, 127))
-        expect(oscil.post_power.round(4)).to eq(0.1)
-      end
+    it 'does not change frequency' do
+      oscil.release(25, 0)
+      expect(oscil.frequency).to eq(0)
+    end
+
+    it 'silences the oscillator for a matching event' do
+      oscil.trigger(25, 0)
+      oscil.release(25, 0)
+      expect(oscil.range).to eq(0..0)
+    end
+
+    it 'does not silence the oscillator for a non-matching event' do
+      oscil.trigger(25, 0)
+      oscil.release(24, 0)
+      expect(oscil.range.min.round(3)).to eq(-1 * -30.db.round(3))
+      expect(oscil.range.max.round(3)).to eq(-30.db.round(3))
     end
   end
 end

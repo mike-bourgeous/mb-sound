@@ -120,10 +120,18 @@ module MB
         @note_number = Oscillator.calc_number(frequency)
       end
 
-      # Sets the oscillator's frequency to the given MIDI note number.
+      # Returns an approximate MIDI note number for the oscillators frequency,
+      # assuming equal temperament.  This value may be fractional, and may be
+      # outside of the MIDI range of 0..127.
+      def number
+        @note_number
+      end
+
+      # Sets the oscillator's frequency to the given MIDI note number, using
+      # equal temperament.
       def number=(note_number)
-        @note_number = note_number
         self.frequency = Oscillator.calc_freq(note_number)
+        @note_number = note_number
       end
 
       # Restarts the oscillator at the given note number and velocity.
@@ -137,7 +145,7 @@ module MB
       # Stops the oscillator at the given release velocity (which may be
       # ignored), if its note number matches the given note number.
       def release(note_number, velocity)
-        if note_number == @note_number
+        if note_number == @note_number || (note_number.round == @note_number.round rescue nil)
           self.range = 0..0
         end
       end
