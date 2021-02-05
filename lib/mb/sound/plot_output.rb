@@ -72,7 +72,7 @@ module MB
 
           # The sleep is necessary to maintain sync
           remaining = this_time - ::MB::Sound.clock_now
-          sleep 0.75 * remaining if @sleep && remaining > 0
+          Kernel.sleep(0.75 * remaining) if @sleep && remaining > 0
         elsif remaining < 0
           # Force a plot eventually for really large lags (e.g. happens when
           # looping input to output)
