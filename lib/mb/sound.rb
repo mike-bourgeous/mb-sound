@@ -78,6 +78,7 @@ end
 require_relative 'sound/a'
 require_relative 'sound/u'
 require_relative 'sound/m'
+require_relative 'sound/io_base'
 require_relative 'sound/io_input'
 require_relative 'sound/io_output'
 require_relative 'sound/ffmpeg_input'

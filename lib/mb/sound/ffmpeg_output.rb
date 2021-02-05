@@ -1,7 +1,7 @@
 module MB
   module Sound
     class FFMPEGOutput < IOOutput
-      attr_reader :filename, :rate, :channels, :buffer_size
+      attr_reader :filename, :rate # TODO: Move rate up one or two levels
 
       # Starts an FFMPEG process to write audio to the given +filename+.  The
       # +filename+ must point to a writable directory, unless a +format+
@@ -25,7 +25,12 @@ module MB
       # +loglevel+ - A log level to pass to ffmpeg (e.g. 'warning', 'error').
       #              The default is 8, which suppresses all or nearly all
       #              console output from ffmpeg.
-      def initialize(filename, rate:, channels:, codec: nil, bitrate: nil, format: nil, loglevel: nil)
+      # +buffer_size+ - The number of samples per channel per buffer to return
+      #                 in #buffer_size.  This value is sometimes used as the
+      #                 minimum quantity of writable data, and on Linux is also
+      #                 used by IOInput to suggest a pipe buffer size to the
+      #                 kernel to reduce latency.
+      def initialize(filename, rate:, channels:, codec: nil, bitrate: nil, format: nil, loglevel: nil, buffer_size: nil)
         if format
           @filename = filename
         else
@@ -39,20 +44,21 @@ module MB
         @rate = rate
 
         raise "Channels must be a positive Integer" unless channels.is_a?(Integer) && channels > 0
-        @channels = channels
 
-        # Chosen arbitrarily
-        @buffer_size = 2048
+        # Usually format is set when ffmpeg is being used for realtime output,
+        # so set a smaller pipe size to reduce buffer lag and apply
+        # backpressure to playback in that case.
+        buffer_size ||= format ? 2048 : 32768
 
         # no shellescape because no shell
-        pipe = IO.popen(
+        super(
           [
             'ffmpeg',
             '-nostdin',
             '-y',
             '-loglevel', loglevel || '8',
             '-ar', @rate.to_s,
-            '-ac', @channels.to_s,
+            '-ac', channels.to_s,
             '-f', 'f32le',
             '-i', 'pipe:',
             *(format ? ['-f', format.to_s] : []),
@@ -60,16 +66,9 @@ module MB
             *(bitrate ? ['-b:a', bitrate.to_s] : []), 
             @filename
           ],
-          'w',
-          pgroup: 0
+          channels,
+          buffer_size
         )
-
-        # Usually format is set when ffmpeg is being used for realtime output,
-        # so set a smaller pipe size to reduce buffer lag and apply
-        # backpressure to playback in that case.
-        MB::Sound::U.pipe_size(pipe, 2048 * channels) if format
-
-        super(pipe, channels)
       end
     end
   end

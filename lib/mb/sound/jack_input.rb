@@ -10,8 +10,10 @@ module MB
     # in any processing algorithms.  This needs to be at least one half of the
     # jackd period size.  The jack-stdout internal buffer will be set larger to
     # handle jitter in processing time.
+    #
+    # You should use mb-sound-jackffi instead if you can.
     class JackInput < MB::Sound::IOInput
-      attr_reader :channels, :ports, :buffer_size, :rate
+      attr_reader :ports, :rate
 
       # Initializes a JACK input stream for the given list of port names (pass
       # `nil` to try to leave a port disconnected; this will give a nonexistent
@@ -55,14 +57,15 @@ module MB
 
         @ports = ports
         @rate = rate
-        @channels = @ports.size
-        @buffer_size = buffer_size&.to_i || 2048
+        channels = @ports.size
+        buffer_size = buffer_size&.to_i || 2048
         ports = @ports.map { |n| (n || "invalid port #{rand(100000)}").shellescape }.join(' ')
 
-        @pipe = IO.popen(["sh", "-c", "jack-stdout -L -e floating-point -q -S #{@buffer_size} #{ports} 2> /dev/null"], "r", pgroup: 0)
-        MB::Sound::U.pipe_size(@pipe, @buffer_size * @channels * 4)
-
-        super(@pipe, @channels)
+        super(
+          ["sh", "-c", "jack-stdout -L -e floating-point -q -S #{buffer_size} #{ports} 2> /dev/null"],
+          channels,
+          buffer_size
+        )
       end
     end
   end

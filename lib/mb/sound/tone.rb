@@ -269,6 +269,11 @@ module MB
       # The tone parameters cannot be changed after this method is called.
       def write(output)
         # TODO: Fade in and out at the start and end
+        # TODO: Maybe change this to act like an input instead, with a read
+        # method and a frames method?
+        # TODO: Maybe eventually have a way to detect outputs with strict
+        # buffer size requirements, and only pad them, while leaving e.g.
+        # ffmpegoutput unpadded.
 
         @rate = output.rate
         buffer_size = output.buffer_size

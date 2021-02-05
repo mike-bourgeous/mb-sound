@@ -11,38 +11,31 @@ module MB
     #
     # TODO: It might be possible to use ruby-ffi to interact with ALSA
     # directly, as is done with mb-sound-jackffi.
-    class AlsaInput < MB::Sound::IOInput
-      attr_reader :device, :rate, :channels, :buffer_size
-
-      DEFAULT_BUFFER = 1024
+    class AlsaInput < IOInput
+      attr_reader :device, :rate
 
       # Initializes an ALSA input stream for the given device name, sample rate,
-      # and number of channels.  Alsa will be told to use the given buffer
-      # size as well.  Warning: does no error checking to see whether arecord was
-      # able to open the device!
+      # and number of channels.  Alsa will be told to use the given buffer size
+      # (number of samples per channel per buffer) as well.  Warning: does no
+      # error checking to see whether arecord was able to open the device!
       def initialize(device:, rate:, channels:, buffer_size: nil)
         @device = ENV['INPUT_DEVICE'] || ENV['DEVICE'] || device
         @rate = rate.to_i
-        @buffer_size = buffer_size&.to_i || DEFAULT_BUFFER
-        @channels = channels.to_i
 
-        @pipe = IO.popen(
+        super(
           [
             'arecord',
             '-t', 'raw',
             '-f', 'FLOAT_LE',
             '-r', "#{@rate}",
-            '-c', "#{@channels}",
-            "--buffer-size=#{@buffer_size}",
+            '-c', "#{channels}",
+            "--buffer-size=#{buffer_size}",
             '-D', "#{@device.shellescape}",
             '-q'
           ],
-          'r',
-          pgroup: 0
+          channels,
+          buffer_size
         )
-        MB::Sound::U.pipe_size(@pipe, @buffer_size * @channels * 4)
-
-        super(@pipe, @channels)
       end
     end
   end

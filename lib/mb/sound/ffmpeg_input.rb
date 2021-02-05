@@ -7,7 +7,7 @@ module MB
     # file formats.
     class FFMPEGInput < IOInput
       # Note: number of frames may be approximate
-      attr_reader :filename, :rate, :channels, :frames, :info, :raw_info
+      attr_reader :filename, :rate, :frames, :info, :raw_info
 
       # A list of metadata keys that should not be parsed numerically.
       EXCLUDED_CONVERSIONS = [
@@ -100,7 +100,12 @@ module MB
       # +loglevel+ - A log level to pass to ffmpeg (e.g. 'warning', 'error').
       #              The default is 8, which suppresses all or nearly all
       #              console output from ffmpeg.
-      def initialize(filename, stream_idx: 0, resample: nil, channels: nil, format: nil, loglevel: nil)
+      # +buffer_size+ - The number of samples per channel per buffer to return
+      #                 in #buffer_size.  This value is sometimes used as the
+      #                 minimum quantity of readable data, and on Linux is also
+      #                 used by IOInput to suggest a pipe buffer size to the
+      #                 kernel to reduce latency.
+      def initialize(filename, stream_idx: 0, resample: nil, channels: nil, format: nil, loglevel: nil, buffer_size: nil)
         raise "File #{filename.inspect} is not readable" unless File.readable?(filename) || format
         @filename = filename
         fnesc = filename.shellescape
@@ -118,10 +123,9 @@ module MB
 
         if channels
           raise "Channel count must be an integer greater than 0" unless channels.is_a?(Integer) && channels > 0
-          @channels = channels
         else
-          @channels = @info[:channels]
-          raise "Missing channels from stream info" unless @channels
+          channels = @info[:channels]
+          raise "Missing channels from stream info" unless channels
         end
 
         @rate = info[:sample_rate]
@@ -141,6 +145,11 @@ module MB
           @frames = @frames * @rate / @info[:sample_rate] if @info.include?(:sample_rate)
         end
 
+        # Usually format is set when ffmpeg is being used for realtime input,
+        # so set a smaller pipe size to reduce buffer lag and drop frames to
+        # keep live sync in that case.
+        buffer_size ||= format ? 2048 : 32768
+
         # Compensate for possible delay at the start of a stream e.g. in a
         # video where the audio starts after the video
         start = @info[:start_time]
@@ -148,25 +157,19 @@ module MB
         @frames += (start * @rate).ceil
 
         resample_opt = resample ? "-ar '#{@rate}'" : ''
-        channels_opt = channels ? "-ac '#{@channels}' -af 'aresample=matrix_encoding=dplii'" : ''
+        channels_opt = channels ? "-ac '#{channels}' -af 'aresample=matrix_encoding=dplii'" : ''
         format_opt = format ? "-f #{format.shellescape}" : ''
         log_opt = "-loglevel #{loglevel&.to_s&.shellescape || 8}"
-        pipe = IO.popen(
+
+        super(
           [
             "sh", "-c",
             "ffmpeg -nostdin #{log_opt} #{format_opt} -i #{fnesc} #{resample_opt} " +
             "#{channels_opt} -map 0:#{@stream_id} -f f32le -"
           ],
-          "r",
-          pgroup: 0
+          channels,
+          buffer_size
         )
-
-        # Usually format is set when ffmpeg is being used for realtime input,
-        # so set a smaller pipe size to reduce buffer lag and drop frames to
-        # keep live sync in that case.
-        MB::Sound::U.pipe_size(pipe, 2048 * @channels) if format
-
-        super(pipe, @channels)
       end
     end
   end

@@ -12,9 +12,7 @@ module MB
     # TODO: It might be possible to use ruby-ffi to interact with ALSA
     # directly, as is done with mb-sound-jackffi.
     class AlsaOutput < MB::Sound::IOOutput
-      attr_reader :device, :rate, :channels, :buffer_size
-
-      DEFAULT_BUFFER = 1024
+      attr_reader :device, :rate
 
       # Initializes an ALSA output stream for the given device name, sample rate,
       # and number of channels.  Alsa will also be told to use the given buffer
@@ -23,26 +21,21 @@ module MB
       def initialize(device:, rate:, channels:, buffer_size: nil)
         @device = device.shellescape
         @rate = rate.to_i
-        @channels = channels.to_i
-        @buffer_size = buffer_size&.to_i || DEFAULT_BUFFER
 
-        @pipe = IO.popen(
+        super(
           [
             'aplay',
             '-t', 'raw',
             '-f', 'FLOAT_LE',
             '-r', "#{@rate}",
-            '-c', "#{@channels}",
-            "--buffer-size=#{@buffer_size}",
+            '-c', "#{channels}",
+            "--buffer-size=#{buffer_size}",
             '-D', "#{@device}",
             '-q'
           ],
-          'w',
-          pgroup: 0
+          channels,
+          buffer_size
         )
-        MB::Sound::U.pipe_size(@pipe, @buffer_size * @channels * 4)
-
-        super(@pipe, channels)
       end
     end
   end

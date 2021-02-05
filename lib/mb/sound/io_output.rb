@@ -3,24 +3,19 @@ module MB
     # Base functionality for audio output streams that writes 32-bit
     # little-endian floats to a byte-wise IO stream (e.g. STDOUT, or an
     # application opened with IO.popen).
-    class IOOutput
-      attr_reader :channels, :frames_written
+    #
+    # See FFMPEGOutput for an example.
+    class IOOutput < IOBase
+      attr_reader :frames_written
 
       # Initializes an IO-writing audio output stream for the given IO object
-      # and number of channels.
-      def initialize(io, channels)
-        raise 'IO must respond to :write' unless io.respond_to?(:write)
-        raise 'Channels must be an int >= 1' unless channels.is_a?(Integer) && channels >= 1
-
-        @io = io
-        @channels = channels
-        @frame_bytes = channels * 4
+      # and number of channels.  The first parameter may be an Array of
+      # arguments to pass to IOBase#run.
+      def initialize(io, channels, buffer_size)
+        raise 'IO must respond to :write' unless io.is_a?(Array) || io.respond_to?(:write)
+        io = [io, 'w'] if io.is_a?(Array)
+        super(io, channels, buffer_size)
         @frames_written = 0
-      end
-
-      # Returns true if the output has been closed.
-      def closed?
-        @io.nil? || @io.closed?
       end
 
       # Writes +data+ (an Array of Numo::NArrays) to the IO given to the
@@ -45,19 +40,6 @@ module MB
         @frames_written += frames
 
         frames
-      end
-
-      # Closes the input IO object.  Returns the process exit status object if
-      # the IO object was opened by popen.
-      def close
-        return unless @io
-
-        old_result = $?
-        @io.close
-        @io = nil
-        new_result = $?
-
-        new_result == old_result ? nil : new_result
       end
     end
   end
