@@ -253,7 +253,7 @@ module MB
             @yrange = nil
           end
 
-          if @logscale
+          if plotinfo[:logscale] == true || (plotinfo[:logscale] != false && @logscale)
             command "set logscale x 10"
           else
             command "unset logscale x"

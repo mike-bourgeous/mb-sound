@@ -36,7 +36,7 @@ module MB
       #
       # Overriding this method to return some other compatible object allows
       # other plotting systems to be used by the CLI DSL.
-      def plotter(graphical:)
+      def plotter(graphical: false)
         @pt ||= MB::Sound::Plot.terminal(height_fraction: 0.8)
         @pg ||= MB::Sound::Plot.new if graphical
         graphical ? @pg : @pt
@@ -70,13 +70,39 @@ module MB
       def mag_phase(data, **kwargs)
         data = any_sound_to_array(data)
 
-        plot(
-          data.flat_map { |c|
-            f = c.is_a?(Filter) ? c.frequency_response : real_fft(c)
-            [ f.abs.map { |v| v.to_db }, f.arg ]
-          },
-          **kwargs
-        )
+        freq = data.map { |c| c.is_a?(Filter) ? c.frequency_response(2000) : real_fft(c) }
+
+        mag = freq.map.with_index { |c, idx|
+          [
+            "#{idx} mag",
+            {
+              data: c.abs.map { |v| v.to_db }.clip(-80, 80),
+              logscale: true,
+            }
+          ]
+        }
+
+        mag_min = mag.map { |v| v[1][:data].min }.min
+        mag_max = mag.map { |v| v[1][:data].max }.max
+        mag_range = [mag_min, mag_max]
+        mag.each do |v|
+          v[1][:yrange] = mag_range
+        end
+
+        phase = freq.map.with_index { |c, idx|
+          [
+            "#{idx} phase",
+            {
+              data: c.arg,
+              yrange: [-Math::PI, Math::PI],
+              logscale: true,
+            }
+          ]
+        }
+
+        plotinfo = mag.zip(phase).flat_map { |v| v }.to_h
+
+        plotter(graphical: kwargs[:graphical] || false).plot(plotinfo)
       end
 
       # Plots a subset of the given audio file, test tone, or data, starting at
