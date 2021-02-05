@@ -246,19 +246,20 @@ module MB
       # parameters cannot be changed after this method is called.
       def generate(count = nil)
         count ||= @duration ? @duration * @rate : @rate
-        oscillator.sample(count.round).tap { |d| d.inplace * @amplitude }
+        oscillator.sample(count.round)
       end
 
       # Returns an Oscillator that will generate a wave with the wave type,
       # frequency, etc. from this tone.  If this tone's frequency is changed
       # (e.g. by the Note subclass), the Oscillator will change frequency as
-      # well.
+      # well, but other parameters cannot be changed.
       def oscillator
         @oscillator ||= MB::Sound::Oscillator.new(
           @wave_type,
           frequency: @frequency,
           phase: @phase,
           advance: Math::PI * 2.0 / @rate,
+          range: -@amplitude..@amplitude
         )
       end
 
