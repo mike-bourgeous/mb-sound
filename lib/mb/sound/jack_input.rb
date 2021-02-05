@@ -62,7 +62,11 @@ module MB
         ports = @ports.map { |n| (n || "invalid port #{rand(100000)}").shellescape }.join(' ')
 
         super(
-          ["sh", "-c", "jack-stdout -L -e floating-point -q -S #{buffer_size} #{ports} 2> /dev/null"],
+          [
+            "sh",
+            "-c",
+            ->() { "jack-stdout -L -e floating-point -q -S #{@buffer_size} #{ports} 2> /dev/null" }
+          ],
           channels,
           buffer_size
         )

@@ -29,7 +29,7 @@ module MB
             '-f', 'FLOAT_LE',
             '-r', "#{@rate}",
             '-c', "#{channels}",
-            "--buffer-size=#{buffer_size}",
+            ->() { "--buffer-size=#{@buffer_size}" },
             '-D', "#{@device}",
             '-q'
           ],

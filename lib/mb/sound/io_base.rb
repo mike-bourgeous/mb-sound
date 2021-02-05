@@ -23,7 +23,6 @@ module MB
         else
           @io = io_or_popen_args
         end
-
       end
 
       # Returns true if the input or output has been closed.
@@ -51,7 +50,17 @@ module MB
       # Ctrl-C doesn't interrupt it.
       #
       # +command+ is a String or an Array, +direction+ is 'r' or 'w'.
+      #
+      # If +command+ is an Array, any Procs in the array will be called and the
+      # Proc's return value used in their place (works with anything that
+      # responds to :call).  This allows referencing instance variables like
+      # @buffer_size that aren't set until after the command array has to be
+      # built.
       def run(command, direction)
+        if command.is_a?(Array)
+          command = command.map { |v| v.respond_to?(:call) ? v.call : v }
+        end
+
         IO.popen(command, direction, pgroup: 0).tap { |pipe|
           size = @buffer_size * @channels * 4
           MB::Sound::U.pipe_size(pipe, size)
