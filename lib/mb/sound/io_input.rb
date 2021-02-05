@@ -48,10 +48,13 @@ module MB
       # the IO object was opened by popen.
       def close
         return unless @io
+
+        old_result = $?
         @io.close
-        result = @io.respond_to?(:pid) ? $? : nil
         @io = nil
-        result
+        new_result = $?
+
+        new_result == old_result ? nil : new_result
       end
     end
   end

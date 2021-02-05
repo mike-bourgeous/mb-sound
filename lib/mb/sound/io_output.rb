@@ -18,6 +18,11 @@ module MB
         @frames_written = 0
       end
 
+      # Returns true if the output has been closed.
+      def closed?
+        @io.nil? || @io.closed?
+      end
+
       # Writes +data+ (an Array of Numo::NArrays) to the IO given to the
       # constructor as raw 32-bit little-endian floats.  Data is written in
       # interleaved frames, with one frame containing one sample for every
@@ -46,10 +51,13 @@ module MB
       # the IO object was opened by popen.
       def close
         return unless @io
+
+        old_result = $?
         @io.close
-        result = @io.respond_to?(:pid) ? $? : nil
         @io = nil
-        result
+        new_result = $?
+
+        new_result == old_result ? nil : new_result
       end
     end
   end

@@ -157,8 +157,14 @@ module MB
             "ffmpeg -nostdin #{log_opt} #{format_opt} -i #{fnesc} #{resample_opt} " +
             "#{channels_opt} -map 0:#{@stream_id} -f f32le -"
           ],
-          "r"
+          "r",
+          pgroup: 0
         )
+
+        # Usually format is set when ffmpeg is being used for realtime input,
+        # so set a smaller pipe size to reduce buffer lag and drop frames to
+        # keep live sync in that case.
+        MB::Sound::U.pipe_size(pipe, 2048 * @channels) if format
 
         super(pipe, @channels)
       end

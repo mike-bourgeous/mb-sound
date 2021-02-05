@@ -60,7 +60,8 @@ module MB
             *(bitrate ? ['-b:a', bitrate.to_s] : []), 
             @filename
           ],
-          'w'
+          'w',
+          pgroup: 0
         )
 
         # Usually format is set when ffmpeg is being used for realtime output,

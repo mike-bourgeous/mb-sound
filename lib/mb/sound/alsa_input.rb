@@ -9,7 +9,8 @@ module MB
     # Note: as a starting point, set the buffer size equal to the hop size used
     # in any processing algorithms.
     #
-    # TODO: It might be possible to use ruby-ffi to interact with ALSA directly.
+    # TODO: It might be possible to use ruby-ffi to interact with ALSA
+    # directly, as is done with mb-sound-jackffi.
     class AlsaInput < MB::Sound::IOInput
       attr_reader :device, :rate, :channels, :buffer_size
 
@@ -24,7 +25,22 @@ module MB
         @rate = rate.to_i
         @buffer_size = buffer_size&.to_i || DEFAULT_BUFFER
         @channels = channels.to_i
-        @pipe = IO.popen(["sh", "-c", "arecord -t raw -f FLOAT_LE -r '#{@rate}' -c '#{@channels}' --buffer-size=#{@buffer_size} -D #{@device.shellescape} -q"], "r")
+
+        @pipe = IO.popen(
+          [
+            'arecord',
+            '-t', 'raw',
+            '-f', 'FLOAT_LE',
+            '-r', "#{@rate}",
+            '-c', "#{@channels}",
+            "--buffer-size=#{@buffer_size}",
+            '-D', "#{@device.shellescape}",
+            '-q'
+          ],
+          'r',
+          pgroup: 0
+        )
+        MB::Sound::U.pipe_size(@pipe, @buffer_size * @channels * 4)
 
         super(@pipe, @channels)
       end
