@@ -53,16 +53,40 @@ module MB
       def time_freq(data, **kwargs)
         data = any_sound_to_array(data)
 
-        plot(
-          data.flat_map { |c|
-            if c.is_a?(Filter)
-              [c.impulse_response, c.frequency_response.abs.map { |v| v.to_db }]
-            else
-              [c, real_fft(c).abs.map { |v| v.to_db }]
-            end
-          },
-          **kwargs
-        )
+        time_samples = kwargs[:time_samples] || 200
+        freq_samples = kwargs[:freq_samples] || 2000
+
+        time = data.map.with_index { |c, idx|
+          c = c.is_a?(Filter) ? c.impulse_response(time_samples) : c
+          [
+            "#{idx} time",
+            {
+              data: c,
+              yrange: [c.min, c.max],
+            }
+          ]
+        }
+        freq = data.map.with_index { |c, idx|
+          [
+            "#{idx} freq",
+            {
+              data: c.is_a?(Filter) ? c.frequency_response(freq_samples).abs : real_fft(c).abs,
+              logscale: true,
+              x_label: 'f',
+            }
+          ]
+        }
+
+        freq_min = freq.map { |v| v[1][:data].min }.min
+        freq_max = freq.map { |v| v[1][:data].max }.max
+        freq_range = [freq_min, freq_max]
+        freq.each do |v|
+          v[1][:yrange] = freq_range
+        end
+
+        plotinfo = time.zip(freq).flat_map { |el| el }.to_h
+
+        plotter(graphical: kwargs[:graphical] || false).plot(plotinfo)
       end
 
       # Plots frequency-domain magnitude and phase of the given data.  Supports
@@ -70,7 +94,9 @@ module MB
       def mag_phase(data, **kwargs)
         data = any_sound_to_array(data)
 
-        freq = data.map { |c| c.is_a?(Filter) ? c.frequency_response(2000) : real_fft(c) }
+        freq_samples = kwargs[:freq_samples] || 2000
+
+        freq = data.map { |c| c.is_a?(Filter) ? c.frequency_response(freq_samples) : real_fft(c) }
 
         mag = freq.map.with_index { |c, idx|
           [
@@ -78,6 +104,7 @@ module MB
             {
               data: c.abs.map { |v| v.to_db }.clip(-80, 80),
               logscale: true,
+              x_label: 'f',
             }
           ]
         }
@@ -96,6 +123,7 @@ module MB
               data: c.arg,
               yrange: [-Math::PI, Math::PI],
               logscale: true,
+              x_label: 'f',
             }
           ]
         }

@@ -51,6 +51,8 @@ module MB
 
       # Generates a time domain impulse response for the filter by processing a
       # single 1 followed by zeros.  This resets the state of the filter.
+      #
+      # TODO: compensate for the delay in FIR filters?
       def impulse_response(count = 500)
         reset(0)
         data = Numo::SFloat.zeros(count)
