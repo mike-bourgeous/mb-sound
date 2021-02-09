@@ -74,7 +74,7 @@ RSpec.describe(MB::Sound::Filter::FilterChain) do
     it 'cannot create a chain that contains an artificially inserted cycle' do
       c2 = MB::Sound::Filter::FilterChain.new(chain)
       c3 = MB::Sound::Filter::FilterChain.new(c2)
-      chain.filters << c2
+      chain.filters << c3
 
       expect { MB::Sound::Filter::FilterChain.new(chain) }.to raise_error(MB::Sound::Filter::FilterChain::FilterCycleError)
     end
