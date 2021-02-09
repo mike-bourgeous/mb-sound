@@ -99,7 +99,7 @@ module MB
         when /linux/
           if `pgrep jackd`.strip.length > 0
             if defined?(JackFFI)
-              MB::Sound::JackFFI[client_name: 'mb-sound'].input(channels: channels, connect: device || :physical)
+              MB::Sound::JackFFI[].input(channels: channels, connect: device || :physical)
             else
               MB::Sound::JackInput.new(ports: { device: device, count: channels }, buffer_size: buffer_size)
             end
@@ -153,7 +153,7 @@ module MB
         when /linux/
           if `pgrep jackd`.strip.length > 0
             if defined?(JackFFI)
-              jack = MB::Sound::JackFFI[client_name: 'mb-sound']
+              jack = MB::Sound::JackFFI['mb-sound']
               jack.logger = Logger.new(STDOUT, level: Logger::ERROR)
               o = jack.output(channels: channels, connect: device || :physical)
             else
