@@ -50,7 +50,7 @@ module MB
 
       # Plots time-domain and frequency-domain magnitudes of the given data.
       # Supports plotting filter responses.
-      def time_freq(data, graphical: false, time_samples: 200, freq_samples: 2000, freq_yrange: nil, logarithmic: true)
+      def time_freq(data, graphical: false, time_samples: 200, freq_samples: 2000, time_yrange: nil, freq_yrange: nil, logarithmic: true)
         data = any_sound_to_array(data)
 
         time = data.map.with_index { |c, idx|
@@ -63,7 +63,7 @@ module MB
             "#{idx} time",
             {
               data: c,
-              yrange: [c.min, c.max],
+              yrange: time_yrange || [c.min, c.max],
             }
           ]
         }
@@ -97,8 +97,6 @@ module MB
           v[1][:yrange] = freq_yrange
           v[1][:data] = v[1][:data].clip(*freq_yrange)
         end
-
-        puts "Freq yrange: #{freq_yrange}"
 
         plotinfo = time.zip(freq).flat_map { |el| el }.to_h
 
