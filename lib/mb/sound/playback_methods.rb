@@ -10,10 +10,14 @@ module MB
       #
       # If +spectrum+ is true, then each chunk of audio plotted is shown in the
       # frequency domain instead of the time domain.
+      #
+      # If the PLOT environment variable is set to '0', then plotting defaults
+      # to false.  Otherwise, plotting defaults to true.
       def play(file_tone_data, rate: 48000, gain: 1.0, plot: nil, graphical: false, spectrum: false, device: nil)
         header = MB::Sound::U.wrap("\e[H\e[J\e[36mPlaying\e[0m #{MB::Sound::U.highlight(file_tone_data)}".lines.map(&:strip).join(' ') + "\n\n")
         puts header
 
+        plot = false if ENV['PLOT'] == '0' && plot.nil?
         plot = { header_lines: header.lines.count, graphical: graphical } if plot.nil? || plot == true
         plot[:spectrum] = spectrum if plot.is_a?(Hash) && !plot.include?(:spectrum)
 
