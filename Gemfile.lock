@@ -1,8 +1,8 @@
 GIT
   remote: https://github.com/mike-bourgeous/mb-sound-jackffi.git
-  revision: 8403634d08014757a8b108afdc0b72f7e9d46ce2
+  revision: 11a663c1f47934d92a0bf92af83162b30c66620d
   specs:
-    mb-sound-jackffi (0.0.8.usegit)
+    mb-sound-jackffi (0.0.10.usegit)
       ffi (~> 1.13.0)
       numo-narray (~> 0.9.1)
 
@@ -62,7 +62,7 @@ PLATFORMS
 DEPENDENCIES
   cmath
   mb-sound!
-  mb-sound-jackffi (>= 0.0.8.usegit)!
+  mb-sound-jackffi (>= 0.0.10.usegit)!
   numo-narray
   pry
   pry-byebug
