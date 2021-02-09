@@ -76,6 +76,7 @@ filter = MB::Sound::Filter::Cookbook.new(:lowpass, audio_out.rate, 2400, quality
 
 puts "\e[1;34mMaking \e[33mmusic\e[0m"
 
+x = 0
 loop do
   nib.clear_buffer
   while event = midi_in.read(blocking: false)[0]
@@ -118,5 +119,11 @@ loop do
   end
 
   frame = oscil_bank.map { |o| o.sample(audio_out.buffer_size) }.reduce(&:+)
-  audio_out.write([filter.process(frame)])
+  processed = filter.process(frame)
+  audio_out.write([processed])
+
+  x += 1
+  if x%3==0
+    MB::Sound.time_freq([processed, filter], time_samples: processed.length, time_yrange: [-0.5, 0.5], freq_yrange: [-30, 10])
+  end
 end
