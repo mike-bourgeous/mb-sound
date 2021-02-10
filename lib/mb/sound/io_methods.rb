@@ -25,16 +25,20 @@ module MB
 
       # Converts a single Tone or Numeric Array to NArray.  If given an Array
       # of Tones or Numeric Arrays, returns an Array of NArray.
-      def convert_sound_to_narray(sound)
+      def convert_sound_to_narray(sound, depth = 0)
         case sound
         when Tone
           sound.generate
+
+        when String
+          # If the filename is within an array, only return the first channel
+          read(sound).yield_self { |v| depth > 0 ? v[0] : v }
 
         when Array
           if is_numeric_array?(sound)
             Numo::NArray.cast(sound)
           else
-            sound.map { |el| convert_sound_to_narray(el) }
+            sound.map { |el| convert_sound_to_narray(el, depth + 1) }
           end
 
         else
