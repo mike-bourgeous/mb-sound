@@ -51,16 +51,16 @@ module MB
       # Plots time-domain and frequency-domain magnitudes of the given data.
       # Supports plotting filter responses.
       def time_freq(data, graphical: false, time_samples: 200, freq_samples: 2000, time_yrange: nil, freq_yrange: nil, logarithmic: true)
-        data = any_sound_to_array(data)
+        data = any_sound_to_hash(data)
 
-        time = data.map.with_index { |c, idx|
+        time = data.map { |label, c|
           c = c.is_a?(Filter) ? c.impulse_response(time_samples) : c
 
           time_samples = c.length if c.length < time_samples
           c = c[0...time_samples] if time_samples < c.length
 
           [
-            "#{idx} time",
+            "#{label} time",
             {
               data: c,
               yrange: time_yrange || [c.min, c.max],
@@ -68,7 +68,7 @@ module MB
           ]
         }
 
-        freq = data.map.with_index { |c, idx|
+        freq = data.map { |label, c|
           case c
           when Filter
             c = c.frequency_response(freq_samples)
@@ -78,10 +78,10 @@ module MB
             c /= c.abs.max
           end
 
-          c = c.abs.map { |v| v.to_db > -80 ? v.to_db : -80 }
+          c = c.abs.map { |v| v != 0 ? v.to_db : -100 }
 
           [
-            "#{idx} freq",
+            "#{label} freq",
             {
               data: c,
               logscale: logarithmic,
@@ -91,13 +91,15 @@ module MB
         }
 
         freq_min = freq.map { |v| v[1][:data].min }.min
+        freq_min = -80 if freq_min < -80
         freq_max = freq.map { |v| v[1][:data].max }.max
+        freq_max = 80 if freq_max > 80
         freq_yrange ||= [freq_min, freq_max]
         freq.each do |v|
           v[1][:yrange] = freq_yrange
-          v[1][:data] = v[1][:data].clip(*freq_yrange)
         end
 
+        # flat_map just removes one level of arrays, namely the ones added by zip
         plotinfo = time.zip(freq).flat_map { |el| el }.to_h
 
         plotter(graphical: graphical).plot(plotinfo)
@@ -106,15 +108,20 @@ module MB
       # Plots frequency-domain magnitude and phase of the given data.  Supports
       # plotting filter responses.
       def mag_phase(data, graphical: false, freq_samples: 2000, freq_yrange: nil, logarithmic: true)
-        data = any_sound_to_array(data)
+        data = any_sound_to_hash(data)
 
-        freq = data.map { |c| c.is_a?(Filter) ? c.frequency_response(freq_samples) : real_fft(c) }
-
-        mag = freq.map.with_index { |c, idx|
+        freq = data.map { |k, c|
           [
-            "#{idx} mag",
+            k,
+            c.is_a?(Filter) ? c.frequency_response(freq_samples) : real_fft(c[0...[c.length, freq_samples * 2].min])
+          ]
+        }.to_h
+
+        mag = freq.map { |label, c|
+          [
+            "#{label} mag",
             {
-              data: c.abs.map { |v| v != 0 ? v.to_db : -30 }.clip(-30, 30),
+              data: c.abs.map { |v| v != 0 ? v.to_db : -100 },
               logscale: logarithmic,
               x_label: 'f',
               yrange: freq_yrange || [-30, 30],
@@ -122,18 +129,19 @@ module MB
           ]
         }
 
-        phase = freq.map.with_index { |c, idx|
+        phase = freq.map { |label, c|
           [
-            "#{idx} phase",
+            "#{label} phase",
             {
               data: c.arg,
               yrange: [-Math::PI, Math::PI],
-              logscale: true,
+              logscale: logarithmic,
               x_label: 'f',
             }
           ]
         }
 
+        # flat_map just removes one level of arrays, namely the ones added by zip
         plotinfo = mag.zip(phase).flat_map { |v| v }.to_h
 
         plotter(graphical: graphical).plot(plotinfo)

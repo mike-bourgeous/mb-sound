@@ -40,9 +40,27 @@ module MB
         end
       end
 
+      # Like #any_sound_to_array, but ensures everything is in a Hash.  If
+      # given an Array, returns a Hash mapping array indices to the converted
+      # sounds.
+      def any_sound_to_hash(sounds)
+        if sounds.is_a?(Array)
+          sounds = sounds.length.times.to_a.zip(sounds).to_h
+        elsif !sounds.is_a?(Hash)
+          sounds = {0 => sounds}
+        end
+
+        any_sound_to_array(sounds)
+      end
+
       # Like #convert_sound_to_narray, but wraps everything in a top-level
-      # Array if it is not already in one.
+      # Array if it is not already in one.  If given a Hash, then preserves the
+      # keys and maps them to the new values.
       def any_sound_to_array(array)
+        if array.is_a?(Hash)
+          return array.keys.zip(any_sound_to_array(array.values)).to_h
+        end
+
         convert_sound_to_narray(array).yield_self { |v| v.is_a?(Array) ? v : [v] }
       end
 
