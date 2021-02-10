@@ -66,7 +66,9 @@ module MB
       }
     end
 
-    # Silly experiment for retrieving notes by name as ruby constants.
+    # Allows retrieving a Note by name using e.g. MB::Sound::A4 (or just A4 in
+    # the interactive CLI).  A new Note object is created each time to allow
+    # for modifications to old Notes and changes in global tuning.
     def self.const_missing(name)
       MB::Sound::Note.new(name)
     rescue ArgumentError

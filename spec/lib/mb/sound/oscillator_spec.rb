@@ -151,7 +151,6 @@ RSpec.describe MB::Sound::Oscillator do
     end
   end
 
-  # FIXME: test #trigger and #release instead
   describe '#trigger' do
     let (:oscil) {
       MB::Sound::Oscillator.new(:sine, frequency: 0, range: 0..0)
@@ -174,6 +173,30 @@ RSpec.describe MB::Sound::Oscillator do
       oscil.trigger(25, 127)
       expect(oscil.range.min.round(3)).to eq(-1 * -6.db.round(3))
       expect(oscil.range.max.round(3)).to eq(-6.db.round(3))
+    end
+
+    context 'with custom tuning' do
+      after(:each) {
+        MB::Sound::Oscillator.tune_note = nil
+        MB::Sound::Oscillator.tune_freq = nil
+        expect(MB::Sound::A3.frequency.round(5)).to eq(220)
+      }
+
+      it 'uses custom tuning references but only after triggering' do
+        oscil.trigger(69, 127)
+        expect(oscil.frequency.round(5)).to eq(440)
+
+        MB::Sound::Oscillator.tune_freq = 460
+        expect(oscil.frequency.round(5)).to eq(440)
+        oscil.trigger(69, 127)
+        expect(oscil.frequency.round(5)).to eq(460)
+
+        MB::Sound::Oscillator.tune_note = 72
+        MB::Sound::Oscillator.tune_freq = 512
+        expect(oscil.frequency.round(5)).to eq(460)
+        oscil.trigger(60, 127)
+        expect(oscil.frequency.round(5)).to eq(256)
+      end
     end
   end
 
