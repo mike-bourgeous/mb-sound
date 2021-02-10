@@ -50,7 +50,7 @@ module MB
 
       # Plots time-domain and frequency-domain magnitudes of the given data.
       # Supports plotting filter responses.
-      def time_freq(data, graphical: false, time_samples: 200, freq_samples: 2000, time_yrange: nil, freq_yrange: nil, logarithmic: true)
+      def time_freq(data, graphical: false, time_samples: 800, freq_samples: 2000, time_yrange: nil, freq_yrange: nil, logarithmic: true)
         data = any_sound_to_hash(data)
 
         time = data.map { |label, c|
