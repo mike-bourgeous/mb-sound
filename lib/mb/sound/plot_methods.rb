@@ -75,7 +75,7 @@ module MB
 
           else
             c = real_fft(c[0...([c.length, freq_samples * 2].min)])
-            c /= [c.real.max, c.imag.max].max
+            c /= c.abs.max
           end
 
           c = c.abs.map { |v| v.to_db > -80 ? v.to_db : -80 }
