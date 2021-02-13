@@ -78,7 +78,7 @@ module MB
             c /= c.abs.max
           end
 
-          c = c.abs.map { |v| v != 0 ? v.to_db : -100 }
+          c = c.abs.map { |v| (v != 0 && v.finite?) ? v.to_db : -100 }
 
           [
             "#{label} freq",
