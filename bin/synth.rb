@@ -16,6 +16,8 @@ $LOAD_PATH << File.expand_path('../lib', __dir__)
 require 'mb-sound-jackffi'
 require 'mb/sound'
 
+PLOT = ENV['PLOT'] != '0'
+
 # A ring/pool of objects (e.g. oscillators) to be used in FIFO order.
 # Error handling and better voice stealing left as an exercise for the reader /s
 class Ring
@@ -123,7 +125,7 @@ loop do
   audio_out.write([processed])
 
   x += 1
-  if x%3==0
+  if PLOT && x%3==0
     MB::Sound.time_freq([processed, filter], time_samples: processed.length, time_yrange: [-0.5, 0.5], freq_yrange: [-30, 10])
   end
 end
