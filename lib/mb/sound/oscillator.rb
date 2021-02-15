@@ -129,6 +129,8 @@ module MB
 
         raise "Invalid random advance #{random_advance.inspect}" unless random_advance.is_a?(Numeric)
         @random_advance = random_advance
+
+        @osc_buf = nil
       end
 
       # Changes the phase offset for this oscillator.
@@ -220,43 +222,46 @@ module MB
           raise "Invalid wave type #{@wave_type.inspect}"
         end
 
-        s = MB::Sound::M.safe_power(s, @pre_power) if @pre_power != 1.0
-        s = MB::Sound::M.clamp(-1.0, 1.0, s * NEGATIVE_POWER_SCALE[@wave_type]) if @pre_power < 0
-
         s
       end
 
       # Returns the next value (or +count+ values in an NArray, if specified)
       # of the oscillator and advances the internal phase.
       def sample(count = nil)
-        if count
-          return Numo::SFloat.zeros(count).map { sample }
+        return sample(1)[0] if count.nil?
+
+        @osc_buf = Numo::SFloat.zeros(count) if @osc_buf.nil? || @osc_buf.length != count
+
+        count.times do |idx|
+          result = oscillator(@phi)
+          result = MB::Sound::M.safe_power(result, @pre_power) if @pre_power != 1.0
+          result = MB::Sound::M.clamp(-1.0, 1.0, result * NEGATIVE_POWER_SCALE[@wave_type]) if @pre_power < 0
+
+          # TODO: this doesn't modulate strongly enough
+          # FM attempt:
+          # fm = Oscillator.new(
+          #   :sine,
+          #   frequency: Oscillator.new(:sine, frequency: 220, range: -970..370, advance: Math::PI / 24000),
+          #   advance: Math::PI / 24000
+          # )
+          freq = @frequency
+          freq = freq.sample if freq.respond_to?(:sample)
+
+          advance = @advance
+          advance += RAND.rand(@random_advance) if @random_advance != 0
+
+          @phi += freq * advance
+          while @phi >= 2.0 * Math::PI
+            @phi -= 2.0 * Math::PI
+          end
+
+          @osc_buf[idx] = result
         end
 
-        result = oscillator(@phi)
+        @osc_buf = MB::Sound::M.scale(@osc_buf, -1.0..1.0, @range) if @range
+        @osc_buf = MB::Sound::M.safe_power(@osc_buf, @post_power) if @post_power != 1.0
 
-        result = MB::Sound::M.scale(result, -1.0..1.0, @range) if @range
-        result = MB::Sound::M.safe_power(result, @post_power) if @post_power != 1.0
-
-        advance = @advance
-        advance += RAND.rand(@random_advance) if @random_advance != 0
-
-        # TODO: this doesn't modulate strongly enough
-        # FM attempt:
-        # fm = Oscillator.new(
-        #   :sine,
-        #   frequency: Oscillator.new(:sine, frequency: 220, range: -970..370, advance: Math::PI / 24000),
-        #   advance: Math::PI / 24000
-        # )
-        freq = @frequency
-        freq = freq.sample if freq.respond_to?(:sample)
-
-        @phi += freq * advance
-        while @phi >= 2.0 * Math::PI
-          @phi -= 2.0 * Math::PI
-        end
-
-        result
+        @osc_buf
       end
     end
   end
