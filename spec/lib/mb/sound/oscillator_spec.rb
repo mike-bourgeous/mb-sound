@@ -51,26 +51,6 @@ RSpec.describe MB::Sound::Oscillator do
       expect(lfo.oscillator(1.5 * Math::PI).round(6)).to eq(-1)
       expect(lfo.oscillator(1.875 * Math::PI).round(6)).to eq(-1)
     end
-
-    it 'includes pre_power' do
-      lfo = MB::Sound::Oscillator.new(:triangle, pre_power: 0.5)
-
-      expect(lfo.oscillator(0).round(6)).to eq(0)
-      expect(lfo.oscillator(0.125 * Math::PI).round(6)).to eq((0.25 ** 0.5).round(6))
-      expect(lfo.oscillator(0.25 * Math::PI).round(6)).to eq((0.5 ** 0.5).round(6))
-      expect(lfo.oscillator(0.5 * Math::PI).round(6)).to eq(1)
-      expect(lfo.oscillator(0.75 * Math::PI).round(6)).to eq((0.5 ** 0.5).round(6))
-      expect(lfo.oscillator(Math::PI).round(6)).to eq(0)
-      expect(lfo.oscillator(1.25 * Math::PI).round(6)).to eq(-(0.5 ** 0.5).round(6))
-      expect(lfo.oscillator(1.5 * Math::PI).round(6)).to eq(-1)
-      expect(lfo.oscillator(1.75 * Math::PI).round(6)).to eq(-(0.5 ** 0.5).round(6))
-      expect(lfo.oscillator(1.875 * Math::PI).round(6)).to eq(-(0.25 ** 0.5).round(6))
-    end
-
-    it 'clamps values with negative pre_power' do
-      lfo = MB::Sound::Oscillator.new(:triangle, pre_power: -100)
-      expect(lfo.oscillator(0.0001).round(6)).to eq(1.0)
-    end
   end
 
   describe '#sample' do
@@ -121,6 +101,47 @@ RSpec.describe MB::Sound::Oscillator do
       expect(lfo.sample.round(6)).to eq(2)
       expect(lfo.sample.round(6)).to eq(2.75)
       expect(lfo.sample.round(6)).to eq(3.5)
+    end
+
+    it 'includes pre_power' do
+      lfo = MB::Sound::Oscillator.new(:triangle, pre_power: 0.5, advance: 0.125 * Math::PI)
+
+      expect(lfo.sample.round(6)).to eq(0)
+      expect(lfo.sample.round(6)).to eq((0.25 ** 0.5).round(6))
+      expect(lfo.sample.round(6)).to eq((0.5 ** 0.5).round(6))
+      expect(lfo.sample.round(6)).to eq((0.75 ** 0.5).round(6))
+      expect(lfo.sample.round(6)).to eq(1)
+      expect(lfo.sample.round(6)).to eq((0.75 ** 0.5).round(6))
+      expect(lfo.sample.round(6)).to eq((0.5 ** 0.5).round(6))
+      expect(lfo.sample.round(6)).to eq((0.25 ** 0.5).round(6))
+      expect(lfo.sample.round(6)).to eq(0)
+      expect(lfo.sample.round(6)).to eq(-(0.25 ** 0.5).round(6))
+      expect(lfo.sample.round(6)).to eq(-(0.5 ** 0.5).round(6))
+      expect(lfo.sample.round(6)).to eq(-(0.75 ** 0.5).round(6))
+      expect(lfo.sample.round(6)).to eq(-1)
+      expect(lfo.sample.round(6)).to eq(-(0.75 ** 0.5).round(6))
+      expect(lfo.sample.round(6)).to eq(-(0.5 ** 0.5).round(6))
+      expect(lfo.sample.round(6)).to eq(-(0.25 ** 0.5).round(6))
+      expect(lfo.sample.round(6)).to eq(0)
+    end
+
+    it 'clamps values with negative pre_power' do
+      lfo = MB::Sound::Oscillator.new(:triangle, pre_power: -100)
+      expect(lfo.sample.round(6)).to eq(-1.0)
+      expect(lfo.sample.round(6)).to eq(1.0)
+    end
+
+    it 'applies pre_power before scaling' do
+      lfo = MB::Sound::Oscillator.new(:triangle, range: 2..4, pre_power: 0.5, advance: 0.25 * Math::PI)
+      expect(lfo.sample.round(6)).to eq(3)
+      expect(lfo.sample.round(6)).to eq((3 + 0.5 ** 0.5).round(6))
+      expect(lfo.sample.round(6)).to eq(4)
+      expect(lfo.sample.round(6)).to eq((3 + 0.5 ** 0.5).round(6))
+      expect(lfo.sample.round(6)).to eq(3)
+      expect(lfo.sample.round(6)).to eq((3 - 0.5 ** 0.5).round(6))
+      expect(lfo.sample.round(6)).to eq(2)
+      expect(lfo.sample.round(6)).to eq((3 - 0.5 ** 0.5).round(6))
+      expect(lfo.sample.round(6)).to eq(3)
     end
 
     it 'applies post_power after scaling' do

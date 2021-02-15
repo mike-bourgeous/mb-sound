@@ -183,8 +183,10 @@ module MB
         end
       end
 
-      # Returns the value of the oscillator for a given phase between 0 and 2pi.
-      # The output value ranges from -1 to 1.
+      # Returns the value of the oscillator for a given phase between 0 and
+      # 2pi.  The output value ranges from -1 to 1.  The power, range, and
+      # other modifiers to the oscillator are not applied by this method (see
+      # #sample).
       def oscillator(phi)
         case @wave_type
         when :sine
@@ -227,6 +229,9 @@ module MB
 
       # Returns the next value (or +count+ values in an NArray, if specified)
       # of the oscillator and advances the internal phase.
+      #
+      # Note that future calls to this method may overwrite the buffer returned
+      # by previous calls.
       def sample(count = nil)
         return sample(1)[0] if count.nil?
 
@@ -234,8 +239,6 @@ module MB
 
         count.times do |idx|
           result = oscillator(@phi)
-          result = MB::Sound::M.safe_power(result, @pre_power) if @pre_power != 1.0
-          result = MB::Sound::M.clamp(-1.0, 1.0, result * NEGATIVE_POWER_SCALE[@wave_type]) if @pre_power < 0
 
           # TODO: this doesn't modulate strongly enough
           # FM attempt:
@@ -258,10 +261,13 @@ module MB
           @osc_buf[idx] = result
         end
 
-        @osc_buf = MB::Sound::M.scale(@osc_buf, -1.0..1.0, @range) if @range
-        @osc_buf = MB::Sound::M.safe_power(@osc_buf, @post_power) if @post_power != 1.0
+        buf = @osc_buf
+        buf = MB::Sound::M.safe_power(@osc_buf, @pre_power) if @pre_power != 1.0
+        buf = MB::Sound::M.clamp(-1.0, 1.0, buf * NEGATIVE_POWER_SCALE[@wave_type]) if @pre_power < 0
+        buf = MB::Sound::M.scale(buf, -1.0..1.0, @range) if @range
+        buf = MB::Sound::M.safe_power(buf, @post_power) if @post_power != 1.0
 
-        @osc_buf
+        buf
       end
     end
   end
