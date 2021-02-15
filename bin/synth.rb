@@ -66,7 +66,10 @@ end
 
 jack = MB::Sound::JackFFI[]
 midi_in = jack.input(port_type: :midi, port_names: ['midi_in'], connect: ARGV[0])
-audio_out = jack.output(port_names: ['audio_out'], connect: [['system:playback_1', 'system:playback_2']])
+audio_out = jack.output(
+  port_names: ['audio_out'],
+  connect: ENV['JACKFFI_OUTPUT_CONNECT'] ? nil : [['system:playback_1', 'system:playback_2']]
+)
 
 OSCIL_COUNT = 9
 oscil_bank = Ring.new(
