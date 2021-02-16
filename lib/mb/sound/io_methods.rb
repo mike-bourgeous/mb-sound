@@ -125,7 +125,7 @@ module MB
             if defined?(JackFFI)
               @jack ||= MB::Sound::JackFFI[]
               @jack.logger = Logger.new(STDOUT, level: Logger::ERROR)
-              o = @jack.output(channels: channels, connect: device || :physical)
+              o = @jack.input(channels: channels, connect: device || :physical)
             else
               MB::Sound::JackInput.new(ports: { device: device, count: channels }, buffer_size: buffer_size)
             end
