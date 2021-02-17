@@ -50,14 +50,14 @@ module MB
       # given an Array, returns a Hash mapping array indices to the converted
       # sounds.
       def any_sound_to_hash(sounds)
-        if sounds.is_a?(Array)
+        if sounds.is_a?(Array) && !sounds[0].is_a?(Numeric)
           sounds = sounds.map.with_index { |v, idx|
             case v
             when String
-              k = File.basename(v)
+              k = "#{idx}: #{File.basename(v)}"
 
             when Tone
-              k = "#{v.frequency.round(2)}Hz"
+              k = "#{idx}: #{v.frequency.round(2)}Hz"
 
             else
               k = idx
