@@ -51,7 +51,20 @@ module MB
       # sounds.
       def any_sound_to_hash(sounds)
         if sounds.is_a?(Array)
-          sounds = sounds.length.times.to_a.zip(sounds).to_h
+          sounds = sounds.map.with_index { |v, idx|
+            case v
+            when String
+              k = File.basename(v)
+
+            when Tone
+              k = "#{v.frequency.round(2)}Hz"
+
+            else
+              k = idx
+            end
+
+            [k, v]
+          }.to_h
         elsif !sounds.is_a?(Hash)
           sounds = {0 => sounds}
         end
