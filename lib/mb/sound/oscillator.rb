@@ -73,7 +73,7 @@ module MB
       end
 
       attr_accessor :advance, :wave_type, :pre_power, :post_power, :range
-      attr_reader :phase, :frequency
+      attr_reader :phi, :phase, :frequency
 
       # TODO: maybe use a clock provider instead of +advance+?  The challenge is
       # that floating point accuracy goes down as a shared clock advances, and
@@ -112,7 +112,7 @@ module MB
         self.frequency = frequency
 
         raise "Invalid phase #{phase.inspect}" unless phase.is_a?(Numeric)
-        @phase = phase.to_f % (2.0 * Math::PI)
+        @phase = phase % (2.0 * Math::PI)
         @phi = @phase
 
         raise "Invalid range #{range.inspect}" unless range.nil? || range.first.is_a?(Numeric)
@@ -133,16 +133,21 @@ module MB
         @osc_buf = nil
       end
 
-      # Changes the phase offset for this oscillator.
+      # Changes the starting phase offset for this oscillator, shifting the
+      # oscillator's current phase accordingly.
       def phase=(phase)
-        @phi += (phase - @phase)
-        @phase = phase
-        while @phi < 0
-          @phi += 2.0 * Math::PI
-        end
-        while @phi >= 2.0 * Math::PI
-          @phi -= 2.0 * Math::PI
-        end
+        @phi = (@phi + phase - @phase) % (Math::PI * 2)
+        @phase = phase % (Math::PI * 2)
+      end
+
+      # Directly sets the current phase offset for this oscillator.
+      def phi=(phi)
+        @phi = phi % (Math::PI * 2)
+      end
+
+      # Resets the oscillator phase to its starting phase (see #phase).
+      def reset
+        @phi = @phase
       end
 
       def frequency=(frequency)
@@ -169,10 +174,10 @@ module MB
 
       # Restarts the oscillator at the given note number and velocity.
       def trigger(note_number, velocity)
+        reset
         self.number = note_number
         amplitude = MB::Sound::M.scale(velocity, 0..127, -30..-6).db
         self.range = -amplitude..amplitude
-        @phi = @phase
       end
 
       # Stops the oscillator at the given release velocity (which may be
@@ -253,10 +258,7 @@ module MB
           advance = @advance
           advance += RAND.rand(@random_advance) if @random_advance != 0
 
-          @phi += freq * advance
-          while @phi >= 2.0 * Math::PI
-            @phi -= 2.0 * Math::PI
-          end
+          @phi = (@phi + freq * advance) % (Math::PI * 2)
 
           @osc_buf[idx] = result
         end

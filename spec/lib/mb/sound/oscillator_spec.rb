@@ -157,6 +157,7 @@ RSpec.describe MB::Sound::Oscillator do
       lfo = MB::Sound::Oscillator.new(:square, phase: 0.9 * Math::PI, advance: 0.2 * Math::PI)
       expect(lfo.sample).to eq(1)
       expect(lfo.sample).to eq(-1)
+
       lfo = MB::Sound::Oscillator.new(:square, phase: 1.5 * Math::PI, advance: Math::PI)
       expect(lfo.sample).to eq(-1)
       expect(lfo.sample).to eq(1)
@@ -248,6 +249,72 @@ RSpec.describe MB::Sound::Oscillator do
       oscil.release(24, 0)
       expect(oscil.range.min.round(3)).to eq(-1 * -30.db.round(3))
       expect(oscil.range.max.round(3)).to eq(-30.db.round(3))
+    end
+  end
+
+  describe '#phi=' do
+    let (:oscil) {
+      MB::Sound::Oscillator.new(:sine, frequency: 0)
+    }
+
+    it 'can change the oscillator phase' do
+      # Check twice to make sure frequency is at 0
+      expect(oscil.sample.round(5)).to eq(0)
+      expect(oscil.sample.round(5)).to eq(0)
+
+      oscil.phi += 90.degrees
+      expect(oscil.sample.round(5)).to eq(1)
+
+      oscil.phi += 90.degrees
+      expect(oscil.sample.round(5)).to eq(0)
+
+      oscil.phi += 90.degrees
+      expect(oscil.sample.round(5)).to eq(-1)
+
+      oscil.phi += 45.degrees
+      expect(oscil.sample.round(5)).to eq(-(0.5 ** 0.5).round(5))
+
+      oscil.phi += 45.degrees
+      expect(oscil.sample.round(5)).to eq(0)
+    end
+
+    it 'clamps phase to 0..2pi' do
+      oscil.phi = 362.degrees
+      expect(oscil.phi.round(5)).to eq(2.degrees.round(5))
+      oscil.phi = -2.degrees
+      expect(oscil.phi.round(5)).to eq(358.degrees.round(5))
+    end
+  end
+
+  describe '#phase=' do
+    let (:oscil) {
+      MB::Sound::Oscillator.new(:sine, frequency: 0)
+    }
+
+    it 'shifts the current phase by the difference in starting phases' do
+      oscil.phi = 1
+      oscil.phase = 1
+      expect(oscil.phi).to eq(2)
+
+      oscil.phase = 0
+      oscil.phi = 0
+      oscil.phase = -10
+      expect(oscil.phi).to eq(-10 % (Math::PI * 2))
+    end
+  end
+
+  describe '#reset' do
+    let (:oscil) {
+      MB::Sound::Oscillator.new(:sine, frequency: 0)
+    }
+
+    it 'sets the phase to its initial phase' do
+      oscil.phi = 1
+      oscil.reset
+      expect(oscil.phi).to eq(0)
+      oscil.phase = 2
+      oscil.reset
+      expect(oscil.phi).to eq(2)
     end
   end
 end
