@@ -57,7 +57,7 @@ module MB
               k = "#{idx}: #{File.basename(v)}"
 
             when Tone
-              k = "#{idx}: #{v.frequency.round(2)}Hz"
+              k = "#{idx}: #{v.frequency.round(2)}Hz #{v.wave_type}"
 
             else
               k = idx
