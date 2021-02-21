@@ -1,0 +1,1 @@
+require 'mb/sound'
