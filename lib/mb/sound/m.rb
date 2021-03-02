@@ -6,6 +6,10 @@ module MB
       # Raises the given +value+ to the given +power+, but using the absolute
       # value function to prevent complex results.
       def self.safe_power(value, power)
+        if value.is_a?(Numo::NArray)
+          return value.map { |v| safe_power(v, power) }
+        end
+
         sign = value.positive? ? 1.0 : -1.0
         value.abs ** power * sign
       end
@@ -21,7 +25,7 @@ module MB
           if value.length != 0 && !value[0].is_a?(Float)
             value = value.cast_to(Numo::SFloat)
           end
-        elsif value.respond_to?(:to_f)
+        elsif !value.is_a?(Float) && value.respond_to?(:to_f)
           value = value.to_f
         end
 

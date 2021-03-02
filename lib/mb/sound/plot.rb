@@ -76,6 +76,8 @@ module MB
       # Sends the given command to gnuplot, then waits for the gnuplot command
       # prompt to return.
       def command(cmd)
+        raise 'Plot is closed' unless @stdin
+
         @stdin.puts cmd
         wait_prompt # wait for the 'gnuplot>' that came before the current line
 
@@ -251,7 +253,7 @@ module MB
             @yrange = nil
           end
 
-          if @logscale
+          if plotinfo[:logscale] == true || (plotinfo[:logscale] != false && @logscale)
             command "set logscale x 10"
           else
             command "unset logscale x"

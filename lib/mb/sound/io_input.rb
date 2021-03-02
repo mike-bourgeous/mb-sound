@@ -3,19 +3,17 @@ module MB
     # Base functionality for input streams that read 32-bit little-endian
     # floats from a byte-wise IO stream (e.g. STDIN, or a program via popen).
     #
-    # See FFMPEGInput for example.
-    class IOInput
-      attr_reader :channels, :frames_read
+    # See FFMPEGInput for an example.
+    class IOInput < IOBase
+      attr_reader :frames_read
 
-      # Initializes an IO-reading audio input stream for the given I/O object and
-      # number of channels.
-      def initialize(io, channels)
-        raise 'IO must respond to :read' unless io.respond_to?(:read)
-        raise 'Channels must be an int >= 1' unless channels.is_a?(Integer) && channels >= 1
-
-        @io = io
-        @channels = channels
-        @frame_bytes = channels * 4
+      # Initializes an IO-reading audio input stream for the given I/O object
+      # and number of channels.  The first parameter may be a command to pass
+      # to IOBase#run (an Array or a String).
+      def initialize(io_or_cmd, channels, buffer_size)
+        raise 'IO must respond to :read' unless io_or_cmd.is_a?(Array) || io_or_cmd.respond_to?(:read)
+        io_or_cmd = [io_or_cmd, 'r'] if io_or_cmd.is_a?(Array)
+        super(io_or_cmd, channels, buffer_size)
         @frames_read = 0
       end
 
@@ -37,16 +35,6 @@ module MB
         @channels.times.map { |c|
           data[nil, c]
         }
-      end
-
-      # Closes the input IO object.  Returns the process exit status object if
-      # the IO object was opened by popen.
-      def close
-        return unless @io
-        @io.close
-        result = @io.respond_to?(:pid) ? $? : nil
-        @io = nil
-        result
       end
     end
   end

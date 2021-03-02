@@ -1,3 +1,5 @@
+require 'logger'
+
 module MB
   module Sound
     # IO-related methods to include in the sound command-line interface.
@@ -23,16 +25,20 @@ module MB
 
       # Converts a single Tone or Numeric Array to NArray.  If given an Array
       # of Tones or Numeric Arrays, returns an Array of NArray.
-      def convert_sound_to_narray(sound)
+      def convert_sound_to_narray(sound, depth = 0)
         case sound
         when Tone
           sound.generate
+
+        when String
+          # If the filename is within an array, only return the first channel
+          read(sound).yield_self { |v| depth > 0 ? v[0] : v }
 
         when Array
           if is_numeric_array?(sound)
             Numo::NArray.cast(sound)
           else
-            sound.map { |el| convert_sound_to_narray(el) }
+            sound.map { |el| convert_sound_to_narray(el, depth + 1) }
           end
 
         else
@@ -40,9 +46,40 @@ module MB
         end
       end
 
+      # Like #any_sound_to_array, but ensures everything is in a Hash.  If
+      # given an Array, returns a Hash mapping array indices to the converted
+      # sounds.
+      def any_sound_to_hash(sounds)
+        if sounds.is_a?(Array) && !sounds[0].is_a?(Numeric)
+          sounds = sounds.map.with_index { |v, idx|
+            case v
+            when String
+              k = "#{idx}: #{File.basename(v)}"
+
+            when Tone
+              k = "#{idx}: #{v.frequency.round(2)}Hz #{v.wave_type}"
+
+            else
+              k = idx
+            end
+
+            [k, v]
+          }.to_h
+        elsif !sounds.is_a?(Hash)
+          sounds = {0 => sounds}
+        end
+
+        any_sound_to_array(sounds)
+      end
+
       # Like #convert_sound_to_narray, but wraps everything in a top-level
-      # Array if it is not already in one.
+      # Array if it is not already in one.  If given a Hash, then preserves the
+      # keys and maps them to the new values.
       def any_sound_to_array(array)
+        if array.is_a?(Hash)
+          return array.keys.zip(any_sound_to_array(array.values)).to_h
+        end
+
         convert_sound_to_narray(array).yield_self { |v| v.is_a?(Array) ? v : [v] }
       end
 
@@ -99,14 +136,16 @@ module MB
         when /linux/
           if `pgrep jackd`.strip.length > 0
             if defined?(JackFFI)
-              MB::Sound::JackFFI[].input(channels: channels, connect: device || :physical)
+              @jack ||= MB::Sound::JackFFI[]
+              @jack.logger = Logger.new(STDOUT, level: Logger::ERROR)
+              o = @jack.input(channels: channels, connect: device || :physical)
             else
               MB::Sound::JackInput.new(ports: { device: device, count: channels }, buffer_size: buffer_size)
             end
           elsif `pgrep pulseaudio`.strip.length > 0
             MB::Sound::AlsaInput.new(device: 'pulse', rate: rate, channels: channels, buffer_size: buffer_size)
           else
-            MB::Sound::AlsaInput.new(device: 'default', rate: rate, channels: channels, buffer_size: buffer_size)
+            MB::Sound::AlsaInput.new(device: device || 'default', rate: rate, channels: channels, buffer_size: buffer_size)
           end
 
         else
@@ -128,12 +167,34 @@ module MB
       # Pass either true or a Hash of options for MB::Sound::PlotOutput in
       # +:plot+ to enable live plotting.
       def output(rate: 48000, channels: 2, device: nil, buffer_size: nil, plot: nil)
+        info = {rate: rate, channels: channels, device: device, buffer_size: buffer_size}
+
+        if plot
+          graphical = plot.is_a?(Hash) && plot[:graphical] || false
+          p = { plot: plotter(graphical: graphical) }
+          p.merge!(plot) if plot.is_a?(Hash)
+
+          @plot_outputs ||= {}
+          o = @plot_outputs[[plot, info]]
+          o = nil if o&.closed?
+          o ||= MB::Sound::PlotOutput.new(output(**info), **p)
+          @plot_outputs[[plot, info]] ||= o
+
+          return o
+        end
+
+        @outputs ||= {}
+        o = @outputs[info]
+        return o if o && !(o.respond_to?(:closed?) && o.closed?)
+        
         o = nil
         case RUBY_PLATFORM
         when /linux/
           if `pgrep jackd`.strip.length > 0
             if defined?(JackFFI)
-              o = MB::Sound::JackFFI[].output(channels: channels, connect: device || :physical)
+              @jack ||= MB::Sound::JackFFI[]
+              @jack.logger = Logger.new(STDOUT, level: Logger::ERROR)
+              o = @jack.output(channels: channels, connect: device || :physical)
             else
               o = MB::Sound::JackOutput.new(ports: { device: device, count: channels }, buffer_size: buffer_size)
             end
@@ -147,13 +208,7 @@ module MB
           raise NotImplementedError, 'TODO: support other platforms'
         end
 
-        if plot
-          graphical = plot.is_a?(Hash) && plot[:graphical] || false
-          p = { plot: plotter(graphical: graphical) }
-          p.merge!(plot) if plot.is_a?(Hash)
-
-          o = MB::Sound::PlotOutput.new(o, **p)
-        end
+        @outputs[info] = o
 
         o
       end

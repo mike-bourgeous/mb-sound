@@ -54,4 +54,84 @@ RSpec.describe(MB::Sound::Filter::FilterChain) do
       expect(MB::Sound::M.round(f.z_response(points), 4)).to eq(points.map { |v| MB::Sound::M.round(f.z_response(v), 4) })
     end
   end
+
+  describe '#initialize' do
+    it 'can initialize a filter chain' do
+      expect(chain.filters.length).to eq(3)
+    end
+
+    it 'can create a chain with nested chains' do
+      c2 = MB::Sound::Filter::FilterChain.new(chain)
+      c3 = MB::Sound::Filter::FilterChain.new(c2)
+
+      expect(c3.has_filter?(chain)).to eq(true)
+    end
+
+    it 'cannot create a chain with duplication' do
+      expect { MB::Sound::Filter::FilterChain.new(chain, chain.filters[0]) }.to raise_error(MB::Sound::Filter::FilterChain::FilterCycleError)
+    end
+
+    it 'cannot create a chain that contains an artificially inserted cycle' do
+      c2 = MB::Sound::Filter::FilterChain.new(chain)
+      c3 = MB::Sound::Filter::FilterChain.new(c2)
+      chain.filters << c3
+
+      expect { MB::Sound::Filter::FilterChain.new(chain) }.to raise_error(MB::Sound::Filter::FilterChain::FilterCycleError)
+    end
+  end
+
+  describe '#chain' do
+    it 'returns the existing filter chain instead of creating a new one' do
+      expect(chain.chain(123.hz.lowpass)).to equal(chain)
+    end
+
+    it 'increases the number of filters in the chain' do
+      prior_length = chain.filters.length
+      chain.chain(123.hz.lowpass)
+      expect(chain.filters.length).to eq(prior_length + 1)
+    end
+
+    it 'cannot add the filter chain to itself' do
+      expect { chain.chain(chain) }.to raise_error(/Cannot add/)
+    end
+
+    it 'cannot create a trivial cycle' do
+      c2 = MB::Sound::Filter::FilterChain.new(chain)
+      expect { c2.chain(chain) }.to raise_error(MB::Sound::Filter::FilterChain::FilterDuplicationError)
+      expect { chain.chain(c2) }.to raise_error(MB::Sound::Filter::FilterChain::FilterDuplicationError)
+    end
+
+    it 'cannot create a more complex cycle' do
+      c2 = MB::Sound::Filter::FilterChain.new(chain)
+      c3 = MB::Sound::Filter::FilterChain.new(c2)
+
+      expect { c3.chain(chain) }.to raise_error(MB::Sound::Filter::FilterChain::FilterDuplicationError)
+      expect { chain.chain(c3) }.to raise_error(MB::Sound::Filter::FilterChain::FilterDuplicationError)
+    end
+
+    it 'cannot add a duplicate' do
+      f = 123.hz.lowpass
+      chain.chain(f)
+      expect { chain.chain(f) }.to raise_error(MB::Sound::Filter::FilterChain::FilterDuplicationError)
+    end
+
+    it 'cannot chain itself' do
+      expect { chain.chain(chain) }.to raise_error(MB::Sound::Filter::FilterChain::FilterDuplicationError)
+    end
+  end
+
+  describe '#has_filter?' do
+    it 'returns true for a filter that is in the chain' do
+      expect(chain.filters.map { |f| chain.has_filter?(f) }).to eq(chain.filters.map { true })
+    end
+
+    it 'returns false for a filter that is not in the chain' do
+      expect(chain.has_filter?(123.hz.lowpass)).to eq(false)
+    end
+
+    it 'can follow nested filter chains' do
+      c2 = MB::Sound::Filter::FilterChain.new(chain)
+      expect(c2.has_filter?(chain.filters[0])).to eq(true)
+    end
+  end
 end

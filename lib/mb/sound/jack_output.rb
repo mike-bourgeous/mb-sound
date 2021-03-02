@@ -5,8 +5,10 @@ module MB
     # An audio output stream that opens the `jack-stdin` command in a pipe and
     # writes 32-bit little-endian float data to it, for playing directly to a
     # jackd audio network.
+    #
+    # Use the mb-sound-jackffi gem instead, if you can.
     class JackOutput < MB::Sound::IOOutput
-      attr_reader :channels, :ports, :buffer_size, :rate
+      attr_reader :ports, :rate
 
       # Initializes a JACK output stream for the given list of port names (pass
       # `nil` for a port name to leave that port disconnected).  Alternatively,
@@ -53,14 +55,18 @@ module MB
 
         @ports = ports
         @rate = rate
-        @channels = @ports.size
-        @buffer_size = buffer_size&.to_i || 2048
+        channels = @ports.size
+        buffer_size = buffer_size&.to_i || 2048
         ports = @ports.map { |n| (n || "invalid port #{rand(100000)}").shellescape }.join(' ')
 
-        @pipe = IO.popen(["sh", "-c", "jack-stdin -p 25 -L -e floating-point -q -S #{@buffer_size} #{ports}"], "w")
-        MB::Sound::U.pipe_size(@pipe, @buffer_size * @channels * 4)
-
-        super(@pipe, channels)
+        super(
+          [
+            "sh", "-c",
+            ->() { "jack-stdin -p 25 -L -e floating-point -q -S #{@buffer_size} #{ports} > /dev/null 2>&1" }
+          ],
+          channels,
+          buffer_size
+        )
       end
     end
   end

@@ -10,12 +10,16 @@ module MB
       #
       # If +spectrum+ is true, then each chunk of audio plotted is shown in the
       # frequency domain instead of the time domain.
+      #
+      # If the PLOT environment variable is set to '0', then plotting defaults
+      # to false.  Otherwise, plotting defaults to true.
       def play(file_tone_data, rate: 48000, gain: 1.0, plot: nil, graphical: false, spectrum: false, device: nil)
         header = MB::Sound::U.wrap("\e[H\e[J\e[36mPlaying\e[0m #{MB::Sound::U.highlight(file_tone_data)}".lines.map(&:strip).join(' ') + "\n\n")
         puts header
 
+        plot = false if ENV['PLOT'] == '0' && plot.nil?
         plot = { header_lines: header.lines.count, graphical: graphical } if plot.nil? || plot == true
-        plot[:spectrum] = spectrum unless plot.include?(:spectrum)
+        plot[:spectrum] = spectrum if plot.is_a?(Hash) && !plot.include?(:spectrum)
 
         case file_tone_data
         when String
@@ -31,9 +35,10 @@ module MB
           # plot methods
           output = MB::Sound.output(rate: rate, channels: channels, plot: plot, device: device)
           buffer_size = output.buffer_size
-          buffer_size = 800 if buffer_size.nil? || buffer_size == 0
           (0...data[0].length).step(buffer_size).each do |offset|
-            output.write(data.map { |c| c[offset...([offset + buffer_size, c.length].min)] })
+            output.write(data.map { |c|
+              MB::Sound::A.zpad(c[offset...([offset + buffer_size, c.length].min)], buffer_size)
+            })
           end
 
         when Tone
@@ -43,9 +48,11 @@ module MB
         else
           raise "Unsupported type #{file_tone_data.class.name} for playback"
         end
-      ensure
-        output&.close
+
+        puts "\n\n"
       end
+
+      private
 
       # Plays the given filename using the default audio output returned by
       # MB::Sound.output.  The +:channels+ parameter may be used to force mono
@@ -62,8 +69,9 @@ module MB
           data = input.read(buffer_size)
           break if data.nil? || data.empty? || data[0].empty?
 
-          data.map { |d|
-            d.inplace * gain
+          # Apply gain and pad the final input chunk to the output buffer size
+          data = data.map { |d|
+            MB::Sound::A.zpad(d.inplace * gain, buffer_size).not_inplace!
           }
 
           # Ensure the output is at least stereo (Pulseaudio plays nothing for
@@ -75,9 +83,7 @@ module MB
 
       ensure
         input&.close
-        output&.close
       end
-
     end
   end
 end

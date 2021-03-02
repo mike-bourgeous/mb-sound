@@ -156,25 +156,22 @@ module MB
       end
       ::Numeric.include NumericToneMethods
 
-      attr_reader :wave_type, :frequency, :amplitude, :duration, :rate, :wavelength, :phase
+      attr_reader :wave_type, :frequency, :amplitude, :range, :duration, :rate, :wavelength, :phase
 
       # Initializes a representation of a simple generated waveform.
       #
       # +wave_type+ - One of the waveform types supported by MB::Sound::Oscillator (e.g. :sine).
       # +frequency+ - The frequency of the tone, in Hz at the given +:rate+ (or
       #               a wavelength as Meters or Feet).
-      # +amplitude+ - The linear peak amplitude of the tone.
+      # +amplitude+ - The linear peak amplitude of the tone, or a Range.
       # +phase+ - The starting phase, in radians relative to a sine wave (0
       #           radians phase starts at 0 and rises).
       # +duration+ - How long the tone should play in seconds (default is 5s).
       # +rate+ - The sample rate to use to calculate the frequency.
       def initialize(wave_type: :sine, frequency: 440, amplitude: 0.1, phase: 0, duration: 5, rate: 48000)
         @wave_type = wave_type
-        @amplitude = amplitude.to_f
-        @duration = duration&.to_f
-        @rate = rate
-        @phase = 0
         @oscillator = nil
+        self.at(amplitude).for(duration).at_rate(rate).with_phase(phase)
         set_frequency(frequency)
       end
 
@@ -214,9 +211,17 @@ module MB
         self
       end
 
-      # Changes the linear gain of the tone.
+      # Changes the linear gain of the tone.  This may be negative to invert
+      # the phase of the tone, or may be a Range to add a DC offset.
       def at(amplitude)
-        @amplitude = amplitude.to_f
+        if amplitude.is_a?(Range)
+          @range = amplitude.begin.to_f..amplitude.end.to_f
+          @amplitude = (@range.end - @range.begin) / 2
+        else
+          @amplitude = amplitude.to_f
+          @range = -@amplitude..@amplitude
+        end
+
         self
       end
 
@@ -242,18 +247,62 @@ module MB
       end
 
       # Generates +count+ samples of the tone, defaulting to the duration of
-      # the tone, or 48000 samples if duration is infinite.  The tone
+      # the tone, or one second of samples if duration is infinite.  The tone
       # parameters cannot be changed after this method is called.
       def generate(count = nil)
-        count ||= @duration ? @duration * @rate : 48000
+        count ||= @duration ? @duration * @rate : @rate
+        oscillator.sample(count.round)
+      end
+
+      # Returns an Oscillator that will generate a wave with the wave type,
+      # frequency, etc. from this tone.  If this tone's frequency is changed
+      # (e.g. by the Note subclass), the Oscillator will change frequency as
+      # well, but other parameters likely won't be changed by changing the
+      # Tone.
+      def oscillator
         @oscillator ||= MB::Sound::Oscillator.new(
           @wave_type,
           frequency: @frequency,
           phase: @phase,
           advance: Math::PI * 2.0 / @rate,
+          range: @range
         )
+      end
 
-        @oscillator.sample(count) * @amplitude
+      # Returns a second-order low-pass Filter with this Tone's frequency as its
+      # cutoff.  Only the tone's frequency and sample rate parameters are used.
+      #
+      # Examples:
+      #
+      #     1000.hz.lowpass
+      #     1000.hz.at_rate(44100).lowpass
+      def lowpass(quality: 1)
+        MB::Sound::Filter::Cookbook.new(:lowpass, @rate, @frequency, quality: quality)
+      end
+
+      # Returns a second-order high-pass Filter with this Tone's frequency as
+      # its cutoff.  Only the tone's frequency and sample rate parameters are
+      # used.
+      #
+      # Examples:
+      #
+      #     120.hz.highpass
+      #     120.hz.at_rate(96000).highpass
+      def highpass(quality: 1)
+        MB::Sound::Filter::Cookbook.new(:highpass, @rate, @frequency, quality: quality)
+      end
+
+      # Returns a peaking Filter with this Tone's frequency as its center, the
+      # tone's amplitude as its gain factor (unless +:gain+ is specified), and
+      # the given bandwidth in +:octaves+).
+      #
+      # Examples:
+      #
+      #     500.hz.at(3.db).peak
+      #     500.hz.peak(octaves: 2, gain: -3.db)
+      def peak(octaves: 0.5, gain: nil)
+        gain ||= @amplitude
+        MB::Sound::Filter::Cookbook.new(:peak, @rate, @frequency, bandwidth_oct: octaves, db_gain: gain.to_db)
       end
 
       # Writes the tone's full duration to the +output+ stream.  The tone will
@@ -263,6 +312,11 @@ module MB
       # The tone parameters cannot be changed after this method is called.
       def write(output)
         # TODO: Fade in and out at the start and end
+        # TODO: Maybe change this to act like an input instead, with a read
+        # method and a frames method?
+        # TODO: Maybe eventually have a way to detect outputs with strict
+        # buffer size requirements, and only pad them, while leaving e.g.
+        # ffmpegoutput unpadded.
 
         @rate = output.rate
         buffer_size = output.buffer_size
@@ -270,7 +324,7 @@ module MB
 
         loop do
           current_samples = [samples_left || buffer_size, buffer_size].min
-          d = [ generate(current_samples) ]
+          d = [ MB::Sound::A.zpad(generate(current_samples), buffer_size) ]
           output.write(d * output.channels)
 
           if samples_left

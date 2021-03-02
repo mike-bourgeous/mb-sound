@@ -48,8 +48,8 @@ module MB
       # TODO: Further develop filters and sound sources into a sound
       # source/sink graph, where a complete graph can be built up with a DSL,
       # and actual generation only occurs on demand?
-      sound = any_sound_to_array(sound)
       rate ||= sound.respond_to?(:rate) ? sound.rate : 48000
+      sound = any_sound_to_array(sound)
       frequency = frequency.frequency if frequency.respond_to?(:frequency) # get 343 from 343.hz
       filter = MB::Sound::Filter::Cookbook.new(
         filter_type,
@@ -66,7 +66,9 @@ module MB
       }
     end
 
-    # Silly experiment for retrieving notes by name as ruby constants.
+    # Allows retrieving a Note by name using e.g. MB::Sound::A4 (or just A4 in
+    # the interactive CLI).  A new Note object is created each time to allow
+    # for modifications to old Notes and changes in global tuning.
     def self.const_missing(name)
       MB::Sound::Note.new(name)
     rescue ArgumentError
@@ -78,6 +80,7 @@ end
 require_relative 'sound/a'
 require_relative 'sound/u'
 require_relative 'sound/m'
+require_relative 'sound/io_base'
 require_relative 'sound/io_input'
 require_relative 'sound/io_output'
 require_relative 'sound/ffmpeg_input'

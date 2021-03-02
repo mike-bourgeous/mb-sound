@@ -23,26 +23,57 @@ module MB
         square: 1.0,
       }
 
-      # Note that is used as tuning reference
-      TUNE_NOTE = 69 # A4
+      # Default note that is used as tuning reference
+      DEFAULT_TUNE_NOTE = 69 # A4
 
-      # Frequency that the tuning reference should be
-      TUNE_FREQ = 440
+      # Default frequency that the tuning reference should be
+      DEFAULT_TUNE_FREQ = 440
+
+      # Sets the MIDI note number to use as tuning reference.  C4 (middle C) is
+      # note 60, A4 is note 69.  This only affects future frequency changes;
+      # existing Tones, Notes, or Oscillators will not be modified.  The
+      # default is DEFAULT_TUNE_NOTE (A4, note number 69).
+      def self.tune_note=(note_number)
+        @tune_note = note_number
+      end
+
+      # Returns the MIDI note number used as tuning reference.  This note will
+      # be tuned to the tune_freq.  See also the calc_freq method.  The default
+      # is DEFAULT_TUNE_NOTE (note 69, A4).
+      def self.tune_note
+        @tune_note ||= DEFAULT_TUNE_NOTE
+      end
+
+      # Sets the frequency in Hz of the tune_note.  This only affects future
+      # frequency changes.  Existing Tones, Notes, or Oscillators will not be
+      # changed.  The default is DEFAULT_TUNE_FREQ (440Hz).  Set to nil to
+      # restore the default.
+      def self.tune_freq=(freq_hz)
+        @tune_freq = freq_hz
+      end
+
+      # Returns the frequency in Hz that the tune_note should be.  The default
+      # is DEFAULT_TUNE_FREQ (440Hz).
+      def self.tune_freq
+        @tune_freq ||= DEFAULT_TUNE_FREQ
+      end
 
       # Calculates a frequency in Hz for the given MIDI note number and
-      # detuning in cents.
+      # detuning in cents, based on the tuning parameters set by the tune_freq=
+      # and tune_note= class methods and using 12 tone equal temperament
+      # (defaults to 440Hz A4).
       def self.calc_freq(note_number, detune_cents = 0)
-        TUNE_FREQ * 2 ** ((note_number + detune_cents / 100.0 - TUNE_NOTE) / 12.0)
+        tune_freq * 2 ** ((note_number + detune_cents / 100.0 - tune_note) / 12.0)
       end
 
       # Calculates a fractional MIDI note number for the given frequency,
       # assuming equal temperament.
       def self.calc_number(frequency_hz)
-        12.0 * Math.log2(frequency_hz / TUNE_FREQ) + TUNE_NOTE
+        12.0 * Math.log2(frequency_hz / tune_freq) + tune_note
       end
 
       attr_accessor :advance, :wave_type, :pre_power, :post_power, :range
-      attr_reader :phase, :frequency
+      attr_reader :phi, :phase, :frequency
 
       # TODO: maybe use a clock provider instead of +advance+?  The challenge is
       # that floating point accuracy goes down as a shared clock advances, and
@@ -81,7 +112,7 @@ module MB
         self.frequency = frequency
 
         raise "Invalid phase #{phase.inspect}" unless phase.is_a?(Numeric)
-        @phase = phase.to_f % (2.0 * Math::PI)
+        @phase = phase % (2.0 * Math::PI)
         @phi = @phase
 
         raise "Invalid range #{range.inspect}" unless range.nil? || range.first.is_a?(Numeric)
@@ -98,18 +129,25 @@ module MB
 
         raise "Invalid random advance #{random_advance.inspect}" unless random_advance.is_a?(Numeric)
         @random_advance = random_advance
+
+        @osc_buf = nil
       end
 
-      # Changes the phase offset for this oscillator.
+      # Changes the starting phase offset for this oscillator, shifting the
+      # oscillator's current phase accordingly.
       def phase=(phase)
-        @phi += (phase - @phase)
-        @phase = phase
-        while @phi < 0
-          @phi += 2.0 * Math::PI
-        end
-        while @phi >= 2.0 * Math::PI
-          @phi -= 2.0 * Math::PI
-        end
+        @phi = (@phi + phase - @phase) % (Math::PI * 2)
+        @phase = phase % (Math::PI * 2)
+      end
+
+      # Directly sets the current phase offset for this oscillator.
+      def phi=(phi)
+        @phi = phi % (Math::PI * 2)
+      end
+
+      # Resets the oscillator phase to its starting phase (see #phase).
+      def reset
+        @phi = @phase
       end
 
       def frequency=(frequency)
@@ -120,45 +158,40 @@ module MB
         @note_number = Oscillator.calc_number(frequency)
       end
 
-      # Sets the oscillator's frequency to the given MIDI note number.
-      def number=(note_number)
-        @note_number = note_number
-        self.frequency = Oscillator.calc_freq(note_number)
+      # Returns an approximate MIDI note number for the oscillators frequency,
+      # assuming equal temperament.  This value may be fractional, and may be
+      # outside of the MIDI range of 0..127.
+      def number
+        @note_number
       end
 
-      # Updates the oscillator baesd on the given MIDI event, which should be
-      # an event type from the midi-nibbler gem.  Uses NoteOn to change the
-      # frequency, NoteOff to silence the oscillator, and CC#1 (mod wheel) to
-      # control the oscillator power (distortion).
-      #
-      # TODO: Allow changing waveform
-      # TODO: Maybe this belongs in a different class
-      def handle_midi(midi_event)
-        case midi_event
-        when MIDIMessage::NoteOn
-          self.number = midi_event.note
-          amplitude = midi_event.velocity * 0.5 / 127 + 0.01
-          self.range = -amplitude..amplitude
+      # Sets the oscillator's frequency to the given MIDI note number, using
+      # equal temperament.
+      def number=(note_number)
+        self.frequency = Oscillator.calc_freq(note_number)
+        @note_number = note_number
+      end
 
-        when MIDIMessage::NoteOff
-          # Only turn off the oscillator if the note off event matches the
-          # current frequency (this allows playing legato; multiple note on and
-          # note off events will be received, but only the note off event for
-          # the current note will count)
-          if midi_event.note == @note_number
-            self.range = 0..0
-          end
+      # Restarts the oscillator at the given note number and velocity.
+      def trigger(note_number, velocity)
+        reset
+        self.number = note_number
+        amplitude = MB::Sound::M.scale(velocity, 0..127, -30..-6).db
+        self.range = -amplitude..amplitude
+      end
 
-        when MIDIMessage::ControlChange
-          if midi_event.index == 1
-            # Mod wheel
-            self.post_power = MB::Sound::M.scale(midi_event.value, 0..127, 1.0..0.1)
-          end
+      # Stops the oscillator at the given release velocity (which may be
+      # ignored), if its note number matches the given note number.
+      def release(note_number, velocity)
+        if note_number == @note_number || (note_number.round == @note_number.round rescue nil)
+          self.range = 0..0
         end
       end
 
-      # Returns the value of the oscillator for a given phase between 0 and 2pi.
-      # The output value ranges from -1 to 1.
+      # Returns the value of the oscillator for a given phase between 0 and
+      # 2pi.  The output value ranges from -1 to 1.  The power, range, and
+      # other modifiers to the oscillator are not applied by this method (see
+      # #sample).
       def oscillator(phi)
         case @wave_type
         when :sine
@@ -196,42 +229,47 @@ module MB
           raise "Invalid wave type #{@wave_type.inspect}"
         end
 
-        s = MB::Sound::M.safe_power(s, @pre_power) if @pre_power != 1.0
-        s = MB::Sound::M.clamp(-1.0, 1.0, s * NEGATIVE_POWER_SCALE[@wave_type]) if @pre_power < 0
-
         s
       end
 
-      # Returns the next value of the oscillator and advances the internal phase.
+      # Returns the next value (or +count+ values in an NArray, if specified)
+      # of the oscillator and advances the internal phase.
+      #
+      # Note that future calls to this method may overwrite the buffer returned
+      # by previous calls.
       def sample(count = nil)
-        if count
-          return Numo::SFloat.zeros(count).map { sample }
+        return sample(1)[0] if count.nil?
+
+        @osc_buf = Numo::SFloat.zeros(count) if @osc_buf.nil? || @osc_buf.length != count
+
+        count.times do |idx|
+          result = oscillator(@phi)
+
+          # TODO: this doesn't modulate strongly enough
+          # FM attempt:
+          # fm = Oscillator.new(
+          #   :sine,
+          #   frequency: Oscillator.new(:sine, frequency: 220, range: -970..370, advance: Math::PI / 24000),
+          #   advance: Math::PI / 24000
+          # )
+          freq = @frequency
+          freq = freq.sample if freq.respond_to?(:sample)
+
+          advance = @advance
+          advance += RAND.rand(@random_advance) if @random_advance != 0
+
+          @phi = (@phi + freq * advance) % (Math::PI * 2)
+
+          @osc_buf[idx] = result
         end
 
-        result = oscillator(@phi)
+        buf = @osc_buf
+        buf = MB::Sound::M.safe_power(@osc_buf, @pre_power) if @pre_power != 1.0
+        buf = MB::Sound::M.clamp(-1.0, 1.0, buf * NEGATIVE_POWER_SCALE[@wave_type]) if @pre_power < 0
+        buf = MB::Sound::M.scale(buf, -1.0..1.0, @range) if @range
+        buf = MB::Sound::M.safe_power(buf, @post_power) if @post_power != 1.0
 
-        result = MB::Sound::M.scale(result, -1.0..1.0, @range) if @range
-        result = MB::Sound::M.safe_power(result, @post_power) if @post_power != 1.0
-
-        advance = @advance
-        advance += RAND.rand(@random_advance) if @random_advance != 0
-
-        # TODO: this doesn't modulate strongly enough
-        # FM attempt:
-        # fm = Oscillator.new(
-        #   :sine,
-        #   frequency: Oscillator.new(:sine, frequency: 220, range: -970..370, advance: Math::PI / 24000),
-        #   advance: Math::PI / 24000
-        # )
-        freq = @frequency
-        freq = freq.sample if freq.respond_to?(:sample)
-
-        @phi += freq * advance
-        while @phi >= 2.0 * Math::PI
-          @phi -= 2.0 * Math::PI
-        end
-
-        result
+        buf
       end
     end
   end

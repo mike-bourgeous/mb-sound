@@ -86,6 +86,22 @@ module MB
           [@b0, @b1, @b2, @a1, @a2]
         end
 
+        # Wraps Filter#impulse_response to preserve the filter's internal
+        # state, allowing this function to be called on a filter that is in
+        # active use.
+        def impulse_response(count = 500)
+          x1 = @x1
+          x2 = @x2
+          y1 = @y1
+          y2 = @y2
+          super(count).tap {
+            @x1 = x1
+            @x2 = x2
+            @y1 = y1
+            @y2 = y2
+          }
+        end
+
         # Returns the complex z-plane response of the filter transfer function at
         # the given angular frequency on the unit circle from 0 to Math::PI (0Hz
         # to fs/2).  Call .abs on the result to get the magnitude, and .arg to

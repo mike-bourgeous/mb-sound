@@ -36,7 +36,7 @@ module MB
       #
       # Overriding this method to return some other compatible object allows
       # other plotting systems to be used by the CLI DSL.
-      def plotter(graphical:)
+      def plotter(graphical: false)
         @pt ||= MB::Sound::Plot.terminal(height_fraction: 0.8)
         @pg ||= MB::Sound::Plot.new if graphical
         graphical ? @pg : @pt
@@ -46,6 +46,105 @@ module MB
       # is for convenience and just calls #plot(..., spectrum: true).
       def spectrum(data, **kwargs)
         plot(data, **kwargs, spectrum: true)
+      end
+
+      # Plots time-domain and frequency-domain magnitudes of the given data.
+      # Supports plotting filter responses.
+      def time_freq(data, graphical: false, time_samples: 800, freq_samples: 2000, time_yrange: nil, freq_yrange: nil, logarithmic: true)
+        data = any_sound_to_hash(data)
+
+        time = data.map { |label, c|
+          c = c.is_a?(Filter) ? c.impulse_response(time_samples) : c
+
+          time_samples = c.length if c.length < time_samples
+          c = c[0...time_samples] if time_samples < c.length
+
+          [
+            "#{label} time",
+            {
+              data: c,
+              yrange: time_yrange || [c.min, c.max],
+            }
+          ]
+        }
+
+        freq = data.map { |label, c|
+          case c
+          when Filter
+            c = c.frequency_response(freq_samples)
+
+          else
+            c = real_fft(c[0...([c.length, freq_samples * 2].min)])
+            c /= c.abs.max
+          end
+
+          c = c.abs.map { |v| (v != 0 && v.finite?) ? v.to_db : -100 }
+
+          [
+            "#{label} freq",
+            {
+              data: c,
+              logscale: logarithmic,
+              x_label: 'f',
+            }
+          ]
+        }
+
+        freq_min = freq.map { |v| v[1][:data].min }.min
+        freq_min = -80 if freq_min < -80
+        freq_max = freq.map { |v| v[1][:data].max }.max
+        freq_max = 80 if freq_max > 80
+        freq_yrange ||= [freq_min, freq_max]
+        freq.each do |v|
+          v[1][:yrange] = freq_yrange
+        end
+
+        # flat_map just removes one level of arrays, namely the ones added by zip
+        plotinfo = time.zip(freq).flat_map { |el| el }.to_h
+
+        plotter(graphical: graphical).plot(plotinfo)
+      end
+
+      # Plots frequency-domain magnitude and phase of the given data.  Supports
+      # plotting filter responses.
+      def mag_phase(data, graphical: false, freq_samples: 2000, freq_yrange: nil, logarithmic: true)
+        data = any_sound_to_hash(data)
+
+        freq = data.map { |k, c|
+          [
+            k,
+            c.is_a?(Filter) ? c.frequency_response(freq_samples) : real_fft(c[0...[c.length, freq_samples * 2].min])
+          ]
+        }.to_h
+
+        mag = freq.map { |label, c|
+          [
+            "#{label} mag",
+            {
+              data: c.abs.map { |v| v != 0 ? v.to_db : -100 },
+              logscale: logarithmic,
+              x_label: 'f',
+              yrange: freq_yrange || [-30, 30],
+            }
+          ]
+        }
+
+        phase = freq.map { |label, c|
+          [
+            "#{label} phase",
+            {
+              data: c.arg,
+              yrange: [-Math::PI, Math::PI],
+              logscale: logarithmic,
+              x_label: 'f',
+            }
+          ]
+        }
+
+        # flat_map just removes one level of arrays, namely the ones added by zip
+        plotinfo = mag.zip(phase).flat_map { |v| v }.to_h
+
+        plotter(graphical: graphical).plot(plotinfo)
       end
 
       # Plots a subset of the given audio file, test tone, or data, starting at
@@ -72,6 +171,9 @@ module MB
 
         when Tone
           data = [file_tone_data.generate(all ? nil : samples + offset)]
+
+        when Filter
+          data = [file_tone_data.impulse_response, file_tone_data.frequency_response.abs]
 
         else
           raise "Cannot plot type #{file_tone_data.class.name}"
