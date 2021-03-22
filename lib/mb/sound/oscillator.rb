@@ -265,7 +265,7 @@ module MB
 
         buf = @osc_buf
         buf = MB::Sound::M.safe_power(@osc_buf, @pre_power) if @pre_power != 1.0
-        buf = MB::Sound::M.clamp(-1.0, 1.0, buf * NEGATIVE_POWER_SCALE[@wave_type]) if @pre_power < 0
+        buf = MB::Sound::M.clamp(buf * NEGATIVE_POWER_SCALE[@wave_type], -1.0, 1.0) if @pre_power < 0
         buf = MB::Sound::M.scale(buf, -1.0..1.0, @range) if @range
         buf = MB::Sound::M.safe_power(buf, @post_power) if @post_power != 1.0
 

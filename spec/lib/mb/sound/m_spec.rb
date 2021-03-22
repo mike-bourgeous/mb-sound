@@ -13,37 +13,37 @@ RSpec.describe MB::Sound::M do
 
   describe '.clamp' do
     it 'passes through valid values' do
-      expect(MB::Sound::M.clamp(0, 1, 0.5)).to eq(0.5)
+      expect(MB::Sound::M.clamp(0.5, 0, 1)).to eq(0.5)
     end
 
     it 'returns max for high values' do
-      expect(MB::Sound::M.clamp(0, 1, 1.5)).to eq(1)
+      expect(MB::Sound::M.clamp(1.5, 0, 1)).to eq(1)
     end
 
     it 'returns min for low values' do
-      expect(MB::Sound::M.clamp(0, 1, -1)).to eq(0)
+      expect(MB::Sound::M.clamp(-1, 0, 1)).to eq(0)
     end
 
     it 'passes through high values but not low values if max is nil' do
-      expect(MB::Sound::M.clamp(0, nil, Float::MAX)).to eq(Float::MAX)
-      expect(MB::Sound::M.clamp(0, nil, -Float::MAX)).to eq(0)
-      expect(MB::Sound::M.clamp(0, nil, 1)).to eq(1)
-      expect(MB::Sound::M.clamp(0, nil, -1)).to eq(0)
+      expect(MB::Sound::M.clamp(Float::MAX, 0, nil)).to eq(Float::MAX)
+      expect(MB::Sound::M.clamp(-Float::MAX, 0, nil)).to eq(0)
+      expect(MB::Sound::M.clamp(1, 0, nil)).to eq(1)
+      expect(MB::Sound::M.clamp(-1, 0, nil)).to eq(0)
     end
 
     it 'passes through low values but not high values if min is nil' do
-      expect(MB::Sound::M.clamp(nil, 1, Float::MAX)).to eq(1)
-      expect(MB::Sound::M.clamp(nil, 1, -Float::MAX)).to eq(-Float::MAX)
-      expect(MB::Sound::M.clamp(nil, 1, 0.1)).to eq(0.1)
-      expect(MB::Sound::M.clamp(nil, 1, 1.1)).to eq(1)
+      expect(MB::Sound::M.clamp(Float::MAX, nil, 1)).to eq(1)
+      expect(MB::Sound::M.clamp(-Float::MAX, nil, 1)).to eq(-Float::MAX)
+      expect(MB::Sound::M.clamp(0.1, nil, 1)).to eq(0.1)
+      expect(MB::Sound::M.clamp(1.1, nil, 1)).to eq(1)
     end
 
     it 'can clamp an NArray' do
-      expect(MB::Sound::M.clamp(-1, 1, Numo::SFloat[-3, -2, -1, 0, 1, 2, 3])).to eq(Numo::SFloat[-1, -1, -1, 0, 1, 1, 1])
+      expect(MB::Sound::M.clamp(Numo::SFloat[-3, -2, -1, 0, 1, 2, 3], -1, 1)).to eq(Numo::SFloat[-1, -1, -1, 0, 1, 1, 1])
     end
 
     it 'converts ints to to floats if clamping an integer narray to a float range' do
-      expect(MB::Sound::M.clamp(-1.5, 1.5, Numo::Int32[-3, -2, -1, 0, 1, 2, 3])).to eq(Numo::SFloat[-1.5, -1.5, -1, 0, 1, 1.5, 1.5])
+      expect(MB::Sound::M.clamp(Numo::Int32[-3, -2, -1, 0, 1, 2, 3], -1.5, 1.5)).to eq(Numo::SFloat[-1.5, -1.5, -1, 0, 1, 1.5, 1.5])
     end
   end
 

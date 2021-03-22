@@ -43,7 +43,7 @@ module MB
       #
       # Note that for scalar values the types for +min+ and +max+ are preserved, so
       # pass the same type as +value+ if that matters to you.
-      def self.clamp(min, max, value)
+      def self.clamp(value, min, max)
         if value.is_a?(Numo::NArray)
           return with_inplace(value, false) { |vnotinp|
             if vnotinp.length > 0 && vnotinp[0].is_a?(Integer) && (min || max)
