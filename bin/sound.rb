@@ -63,6 +63,7 @@ end
 show_intro
 
 Pry.config.commands.rename_command('pry-play', 'play')
+Pry.config.commands.rename_command('pry-reset', 'reset')
 
 Pry.pry(
   MB::Sound,
