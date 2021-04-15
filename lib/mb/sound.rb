@@ -8,6 +8,7 @@ rescue LoadError
 end
 
 require 'mb-math'
+require 'mb-util'
 
 require_relative 'sound/version'
 require_relative 'sound/io_methods'

@@ -93,7 +93,7 @@ loop do
 
     # TODO: Allow changing waveform
     event.each do |e|
-      puts MB::Sound::U.highlight(e) unless e.is_a?(MIDIMessage::SystemRealtime)
+      puts MB::U.highlight(e) unless e.is_a?(MIDIMessage::SystemRealtime)
 
       case e
       when MIDIMessage::ProgramChange

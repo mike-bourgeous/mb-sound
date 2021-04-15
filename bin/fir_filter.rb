@@ -54,7 +54,7 @@ begin
   filter = MB::Sound::Filter::FIR.new(gains.sort_by(&:first).to_h, rate: 48000)
 
   puts "\e[1;33mGains:\e[0m"
-  puts MB::Sound::U.highlight(filter.gain_map)
+  puts MB::U.highlight(filter.gain_map)
 
   puts "\e[34mFilter length: \e[1m#{filter.filter_length}\e[0m"
   puts "\e[32mFFT length: \e[1m#{filter.window_length}\e[0m"

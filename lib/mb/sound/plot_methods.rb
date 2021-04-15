@@ -156,7 +156,7 @@ module MB
         STDOUT.write("\e[H\e[2J") if all == true
 
         if all == true || all == false
-          header = "\e[36mPlotting #{MB::Sound::U.highlight(file_tone_data)}\e[0m"
+          header = "\e[36mPlotting #{MB::U.highlight(file_tone_data)}\e[0m"
           header_lines = header.lines.count
           puts header
         end

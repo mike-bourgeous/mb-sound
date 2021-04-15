@@ -63,7 +63,7 @@ module MB
 
         IO.popen(command, direction, pgroup: 0).tap { |pipe|
           size = @buffer_size * @channels * 4
-          MB::Sound::U.pipe_size(pipe, size)
+          MB::U.pipe_size(pipe, size)
         }
       end
     end

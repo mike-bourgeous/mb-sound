@@ -14,11 +14,20 @@ GIT
       ffi (~> 1.13.0)
       numo-narray (~> 0.9.1)
 
+GIT
+  remote: https://github.com/mike-bourgeous/mb-util.git
+  revision: 6ecdb8fa5cfc8f83c92d900ff72fc0b431365be7
+  specs:
+    mb-util (0.0.1.usegit)
+      word_wrap
+
 PATH
   remote: .
   specs:
     mb-sound (0.1.1.usegit)
       cmath (~> 1.0.0)
+      mb-math
+      mb-util
       midi-nibbler (~> 0.2.4)
       numo-narray (~> 0.9.1.8)
       numo-pocketfft (~> 0.2.2)
@@ -72,6 +81,7 @@ DEPENDENCIES
   mb-math (>= 0.0.1.usegit)!
   mb-sound!
   mb-sound-jackffi (>= 0.0.15.usegit)!
+  mb-util (>= 0.0.1.usegit)!
   numo-narray
   pry
   pry-byebug
