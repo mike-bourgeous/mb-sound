@@ -62,8 +62,8 @@ RSpec.describe MB::Sound::Filter::Cookbook do
 
       fpz = MB::Sound::Filter::Cookbook.new(:lowpass, 48000, 2400, quality: 0.5 ** 0.5).polezero
 
-      expect(fpz[:poles].map { |v| MB::Sound::M.sigfigs(v, 3) }).to eq(poles)
-      expect(fpz[:zeros].map { |v| MB::Sound::M.sigfigs(v, 3) }).to eq(zeros)
+      expect(fpz[:poles].map { |v| MB::M.sigfigs(v, 3) }).to eq(poles)
+      expect(fpz[:zeros].map { |v| MB::M.sigfigs(v, 3) }).to eq(zeros)
     end
   end
 

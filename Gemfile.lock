@@ -1,4 +1,13 @@
 GIT
+  remote: https://github.com/mike-bourgeous/mb-math.git
+  revision: 57a571055727417af8a833ccac9cf22461ca3dfd
+  branch: copy-from-other-repos
+  specs:
+    mb-math (0.0.1.usegit)
+      cmath (~> 1.0.0)
+      numo-narray (~> 0.9.1)
+
+GIT
   remote: https://github.com/mike-bourgeous/mb-sound-jackffi.git
   revision: 30381aec4e8e1ffd0ed5c2dc968a190911f497ad
   specs:
@@ -61,6 +70,7 @@ PLATFORMS
 
 DEPENDENCIES
   cmath
+  mb-math (>= 0.0.1.usegit)!
   mb-sound!
   mb-sound-jackffi (>= 0.0.15.usegit)!
   numo-narray

@@ -30,20 +30,20 @@ RSpec.describe MB::Sound::Filter::FirstOrder do
   context 'lowpass' do
     it 'has a response of 0.707 at the cutoff frequency' do
       f = MB::Sound::Filter::FirstOrder.new(:lowpass, 48000, 2000)
-      expect(MB::Sound::M.sigfigs(f.response(2.0 * Math::PI * 2000 / 48000).abs, 6)).to eq(MB::Sound::M.sigfigs(0.5 ** 0.5, 6))
+      expect(MB::M.sigfigs(f.response(2.0 * Math::PI * 2000 / 48000).abs, 6)).to eq(MB::M.sigfigs(0.5 ** 0.5, 6))
 
       f = MB::Sound::Filter::FirstOrder.new(:lowpass, 48000, 6000)
-      expect(MB::Sound::M.sigfigs(f.response(2.0 * Math::PI * 6000 / 48000).abs, 6)).to eq(MB::Sound::M.sigfigs(0.5 ** 0.5, 6))
+      expect(MB::M.sigfigs(f.response(2.0 * Math::PI * 6000 / 48000).abs, 6)).to eq(MB::M.sigfigs(0.5 ** 0.5, 6))
     end
   end
 
   context 'highpass' do
     it 'has a response of 0.707 at the cutoff frequency' do
       f = MB::Sound::Filter::FirstOrder.new(:highpass, 48000, 2000)
-      expect(MB::Sound::M.sigfigs(f.response(2.0 * Math::PI * 2000 / 48000).abs, 6)).to eq(MB::Sound::M.sigfigs(0.5 ** 0.5, 6))
+      expect(MB::M.sigfigs(f.response(2.0 * Math::PI * 2000 / 48000).abs, 6)).to eq(MB::M.sigfigs(0.5 ** 0.5, 6))
 
       f = MB::Sound::Filter::FirstOrder.new(:highpass, 48000, 6000)
-      expect(MB::Sound::M.sigfigs(f.response(2.0 * Math::PI * 6000 / 48000).abs, 6)).to eq(MB::Sound::M.sigfigs(0.5 ** 0.5, 6))
+      expect(MB::M.sigfigs(f.response(2.0 * Math::PI * 6000 / 48000).abs, 6)).to eq(MB::M.sigfigs(0.5 ** 0.5, 6))
     end
   end
 end

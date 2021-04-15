@@ -104,13 +104,13 @@ RSpec.describe(MB::Sound::FFTMethods) do
         it 'returns + and - bin values of +/-1i for a bin-centered sinusoid' do
           small_fft = MB::Sound.fft(sine_input_small)
           expect(small_fft.abs.sum.round(6)).to eq(2)
-          expect(MB::Sound::M.round(small_fft[*small_idx], 6)).to eq(0-1i)
-          expect(MB::Sound::M.round(small_fft[*small_idx.map(&:-@)], 6)).to eq(0+1i)
+          expect(MB::M.round(small_fft[*small_idx], 6)).to eq(0-1i)
+          expect(MB::M.round(small_fft[*small_idx.map(&:-@)], 6)).to eq(0+1i)
 
           large_fft = MB::Sound.fft(sine_input_large)
           expect(large_fft.abs.sum.round(6)).to eq(2)
-          expect(MB::Sound::M.round(large_fft[*large_idx], 6)).to eq(0-1i)
-          expect(MB::Sound::M.round(large_fft[*large_idx.map(&:-@)], 6)).to eq(0+1i)
+          expect(MB::M.round(large_fft[*large_idx], 6)).to eq(0-1i)
+          expect(MB::M.round(large_fft[*large_idx.map(&:-@)], 6)).to eq(0+1i)
         end
 
         it 'returns 0 phase for a cosine' do
@@ -132,13 +132,13 @@ RSpec.describe(MB::Sound::FFTMethods) do
         it 'can process an Array of Float' do
           small_fft = MB::Sound.fft(sine_input_small.to_a)
           expect(small_fft.abs.sum.round(6)).to eq(2)
-          expect(MB::Sound::M.round(small_fft[*small_idx], 6)).to eq(0-1i)
+          expect(MB::M.round(small_fft[*small_idx], 6)).to eq(0-1i)
         end
 
         it 'can process an Array of Complex' do
           small_fft = MB::Sound.fft(Numo::SComplex.cast(sine_input_small).to_a)
           expect(Numo::SComplex.cast(small_fft).abs.sum.round(6)).to eq(2)
-          expect(MB::Sound::M.round(small_fft[*small_idx], 6)).to eq(0-1i)
+          expect(MB::M.round(small_fft[*small_idx], 6)).to eq(0-1i)
         end
 
         it 'can process an Array of NArrays' do
@@ -155,7 +155,7 @@ RSpec.describe(MB::Sound::FFTMethods) do
             inv_fft = MB::Sound.ifft(fft).real
 
             # Including the name so the diff for failed comparisons will show the name
-            expect([name, MB::Sound::M.round(inv_fft, 6)]).to eq([name, MB::Sound::M.round(input, 6)])
+            expect([name, MB::M.round(inv_fft, 6)]).to eq([name, MB::M.round(input, 6)])
           end
         end
 
@@ -178,13 +178,13 @@ RSpec.describe(MB::Sound::FFTMethods) do
           expect(first).to be_a(Complex)
 
           inv_fft = MB::Sound.ifft(fft_arr)
-          expect(MB::Sound::M.round(inv_fft, 6)).to eq(MB::Sound::M.round(sine_input_small, 6))
+          expect(MB::M.round(inv_fft, 6)).to eq(MB::M.round(sine_input_small, 6))
         end
 
         it 'can process an Array of NArrays' do
           ffts = MB::Sound.fft(all_inputs.values)
           inv_ffts = MB::Sound.ifft(ffts)
-          expect(MB::Sound::M.round(inv_ffts, 6)).to eq(MB::Sound::M.round(all_inputs.values, 6))
+          expect(MB::M.round(inv_ffts, 6)).to eq(MB::M.round(all_inputs.values, 6))
         end
       end
 
@@ -211,11 +211,11 @@ RSpec.describe(MB::Sound::FFTMethods) do
 
         it 'returns a bin value of -1i for a bin-centered sinusoid' do
           small_fft = MB::Sound.real_fft(sine_input_small)
-          expect(MB::Sound::M.round(small_fft[*small_idx], 6)).to eq(0-1i)
+          expect(MB::M.round(small_fft[*small_idx], 6)).to eq(0-1i)
           expect(small_fft.abs.sum.round(6)).to eq(1)
 
           large_fft = MB::Sound.real_fft(sine_input_large)
-          expect(MB::Sound::M.round(large_fft[*large_idx], 6)).to eq(0-1i)
+          expect(MB::M.round(large_fft[*large_idx], 6)).to eq(0-1i)
           expect(large_fft.abs.sum.round(6)).to eq(1)
         end
 
@@ -234,7 +234,7 @@ RSpec.describe(MB::Sound::FFTMethods) do
         it 'can process an Array of Float' do
           small_fft = MB::Sound.real_fft(sine_input_small.to_a)
           expect(small_fft.abs.sum.round(6)).to eq(1)
-          expect(MB::Sound::M.round(small_fft[*small_idx], 6)).to eq(0-1i)
+          expect(MB::M.round(small_fft[*small_idx], 6)).to eq(0-1i)
         end
 
         it 'can process an Array of NArrays' do
@@ -251,7 +251,7 @@ RSpec.describe(MB::Sound::FFTMethods) do
             inv_fft = MB::Sound.real_ifft(fft)
 
             # Including the name so the diff for failed comparisons will show the name
-            expect([name, MB::Sound::M.round(inv_fft, 6)]).to eq([name, MB::Sound::M.round(input, 6)])
+            expect([name, MB::M.round(inv_fft, 6)]).to eq([name, MB::M.round(input, 6)])
           end
         end
 
@@ -274,13 +274,13 @@ RSpec.describe(MB::Sound::FFTMethods) do
           expect(first).to be_a(Complex)
 
           inv_fft = MB::Sound.real_ifft(fft_arr)
-          expect(MB::Sound::M.round(inv_fft, 6)).to eq(MB::Sound::M.round(sine_input_small, 6))
+          expect(MB::M.round(inv_fft, 6)).to eq(MB::M.round(sine_input_small, 6))
         end
 
         it 'can process an Array of NArrays' do
           ffts = MB::Sound.real_fft(all_inputs.values)
           inv_ffts = MB::Sound.real_ifft(ffts)
-          expect(MB::Sound::M.round(inv_ffts, 6)).to eq(MB::Sound::M.round(all_inputs.values, 6))
+          expect(MB::M.round(inv_ffts, 6)).to eq(MB::M.round(all_inputs.values, 6))
         end
 
         context 'with odd_length: true' do
@@ -291,7 +291,7 @@ RSpec.describe(MB::Sound::FFTMethods) do
                 fft = MB::Sound.real_fft(odd)
                 inv_fft = MB::Sound.real_ifft(fft, odd_length: true)
 
-                expect([name, MB::Sound::M.round(inv_fft, 6)]).to eq([name, MB::Sound::M.round(odd, 6)])
+                expect([name, MB::M.round(inv_fft, 6)]).to eq([name, MB::M.round(odd, 6)])
               end
             end
 
@@ -299,7 +299,7 @@ RSpec.describe(MB::Sound::FFTMethods) do
               odd = sine_input_small[0..-2].to_a
               fft_arr = MB::Sound.real_fft(odd)
               inv_fft = MB::Sound.real_ifft(fft_arr, odd_length: true)
-              expect(MB::Sound::M.round(inv_fft, 6)).to eq(MB::Sound::M.round(odd, 6))
+              expect(MB::M.round(inv_fft, 6)).to eq(MB::M.round(odd, 6))
             end
           else
             pending "#{ndim} dimensions"
@@ -316,7 +316,7 @@ RSpec.describe(MB::Sound::FFTMethods) do
           s = Numo::SFloat[1, 0, -1, 0, 1, 0, -1, 0, 1]
           s = s[0..-2] if l == 0
           a = MB::Sound.analytic_signal(s)
-          expect(MB::Sound::M.round(a.real, 4)).to eq(s)
+          expect(MB::M.round(a.real, 4)).to eq(s)
         end
 
         it 'preserves a sine wave as the real value of the output signal' do
@@ -324,7 +324,7 @@ RSpec.describe(MB::Sound::FFTMethods) do
             Math.sin(v * Math::PI / 50)
           }
           a = MB::Sound.analytic_signal(s)
-          expect(MB::Sound::M.round(a.real, 4)).to eq(MB::Sound::M.round(s, 4))
+          expect(MB::M.round(a.real, 4)).to eq(MB::M.round(s, 4))
         end
 
         it 'preserves a cosine wave as the real value of the output signal' do
@@ -332,7 +332,7 @@ RSpec.describe(MB::Sound::FFTMethods) do
             Math.cos(v * Math::PI / 50)
           }
           a = MB::Sound.analytic_signal(s)
-          expect(MB::Sound::M.round(a.real, 4)).to eq(MB::Sound::M.round(s, 4))
+          expect(MB::M.round(a.real, 4)).to eq(MB::M.round(s, 4))
         end
 
         it 'preserves an off-integer-multiple cosine wave as real output' do
@@ -340,7 +340,7 @@ RSpec.describe(MB::Sound::FFTMethods) do
             Math.cos(v * Math::PI / 37.13487)
           }
           a = MB::Sound.analytic_signal(s)
-          expect(MB::Sound::M.round(a.real, 4)).to eq(MB::Sound::M.round(s, 4))
+          expect(MB::M.round(a.real, 4)).to eq(MB::M.round(s, 4))
         end
 
         it 'preserves the sum of two frequencies as real output' do
@@ -348,13 +348,13 @@ RSpec.describe(MB::Sound::FFTMethods) do
             Math.sin(v * Math::PI / 59.3) + Math.cos(v * Math::PI / 11.97)
           }
           a = MB::Sound.analytic_signal(s)
-          expect(MB::Sound::M.round(a.real, 4)).to eq(MB::Sound::M.round(s, 4))
+          expect(MB::M.round(a.real, 4)).to eq(MB::M.round(s, 4))
         end
 
         it 'preserves a linear ramp as real output' do
           s = Numo::DFloat.linspace(-1, 1, 10 + l)
           a = MB::Sound.analytic_signal(s)
-          expect(MB::Sound::M.round(a.real, 4)).to eq(MB::Sound::M.round(s, 4))
+          expect(MB::M.round(a.real, 4)).to eq(MB::M.round(s, 4))
         end
       end
     end

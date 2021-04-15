@@ -335,8 +335,8 @@ module MB
 
           # TODO: Better phase interpolation around the circle (e.g. +0.9PI and
           # -0.9PI should interpolate through +PI instead of 0)
-          mag = MB::Sound::M.scale(oct_f, oct_range, db1..db2).db
-          phase = MB::Sound::M.scale(oct_f, oct1..oct2, f1g1[1].arg..f2g2[1].arg)
+          mag = MB::M.scale(oct_f, oct_range, db1..db2).db
+          phase = MB::M.scale(oct_f, oct1..oct2, f1g1[1].arg..f2g2[1].arg)
 
           Complex.polar(mag, phase)
         end

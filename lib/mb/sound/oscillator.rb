@@ -176,7 +176,7 @@ module MB
       def trigger(note_number, velocity)
         reset
         self.number = note_number
-        amplitude = MB::Sound::M.scale(velocity, 0..127, -30..-6).db
+        amplitude = MB::M.scale(velocity, 0..127, -30..-6).db
         self.range = -amplitude..amplitude
       end
 
@@ -264,10 +264,10 @@ module MB
         end
 
         buf = @osc_buf
-        buf = MB::Sound::M.safe_power(@osc_buf, @pre_power) if @pre_power != 1.0
-        buf = MB::Sound::M.clamp(buf * NEGATIVE_POWER_SCALE[@wave_type], -1.0, 1.0) if @pre_power < 0
-        buf = MB::Sound::M.scale(buf, -1.0..1.0, @range) if @range
-        buf = MB::Sound::M.safe_power(buf, @post_power) if @post_power != 1.0
+        buf = MB::M.safe_power(@osc_buf, @pre_power) if @pre_power != 1.0
+        buf = MB::M.clamp(buf * NEGATIVE_POWER_SCALE[@wave_type], -1.0, 1.0) if @pre_power < 0
+        buf = MB::M.scale(buf, -1.0..1.0, @range) if @range
+        buf = MB::M.safe_power(buf, @post_power) if @post_power != 1.0
 
         buf
       end

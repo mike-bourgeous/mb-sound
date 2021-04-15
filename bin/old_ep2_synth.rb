@@ -110,7 +110,7 @@ loop do
       when MIDIMessage::ControlChange
         case e.index
         when 1
-          decade = MB::Sound::M.scale(e.value, 0..127, 0..3)
+          decade = MB::M.scale(e.value, 0..127, 0..3)
           freq = 20.0 * 10.0 ** decade
           filter.center_frequency = freq
         end
