@@ -143,18 +143,6 @@ module MB
           Meters.new(self)
         end
         alias meter meters
-
-        # Returns the number itself (radians are the default).
-        def radians
-          self
-        end
-        alias radian radians
-
-        # Converts degrees to radians.
-        def degrees
-          self * Math::PI / 180.0
-        end
-        alias degree degrees
       end
       ::Numeric.include NumericToneMethods
 
