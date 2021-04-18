@@ -54,14 +54,14 @@ RSpec.describe MB::Sound::Filter::FIR do
       end
 
       it 'accepts complex gains' do
-        expect(MB::Sound::M.round(complex_filter.gains[complex_filter.gains.length / 2], 4)).to eq(0+1i)
+        expect(MB::M.round(complex_filter.gains[complex_filter.gains.length / 2], 4)).to eq(0+1i)
 
         # Have to re-rotate the impulse to compensate for delay so that the impulse peak is at t=0
         # Could also compute and subtract the linear phase in the frequency domain instead
         long_impulse = MB::Sound.real_ifft(complex_filter.filter_fft)
-        long_impulse = MB::Sound::A.rol(long_impulse, complex_filter.filter_length / 2)
+        long_impulse = MB::M.rol(long_impulse, complex_filter.filter_length / 2)
         imp_fft = MB::Sound.real_fft(long_impulse)
-        expect(MB::Sound::M.round(imp_fft[imp_fft.length / 2], 2)).to eq(0+1i)
+        expect(MB::M.round(imp_fft[imp_fft.length / 2], 2)).to eq(0+1i)
       end
     end
 
@@ -126,19 +126,19 @@ RSpec.describe MB::Sound::Filter::FIR do
 
     it 'has unity gain for a pass-through filter' do
       unity_filter.process(Numo::SFloat.ones(unity_filter.window_length * 10))
-      expect(MB::Sound::M.round(unity_filter.process(Numo::SFloat.ones(300)), 4)).to eq(Numo::SFloat.ones(300))
+      expect(MB::M.round(unity_filter.process(Numo::SFloat.ones(300)), 4)).to eq(Numo::SFloat.ones(300))
     end
 
     it 'accepts arbitrary length buffers to process' do
       real_filter.process(Numo::SFloat.ones(real_filter.window_length + real_filter.filter_length))
-      expect(MB::Sound::M.round(real_filter.process(Numo::SFloat.ones(10)), 4)).to eq(Numo::SFloat.ones(10) * real_filter.filter_fft[0].real.round(4))
-      expect(MB::Sound::M.round(real_filter.process(Numo::SFloat.ones(17)), 4)).to eq(Numo::SFloat.ones(17) * real_filter.filter_fft[0].real.round(4))
-      expect(MB::Sound::M.round(real_filter.process(Numo::SFloat.ones(1)), 4)).to eq(Numo::SFloat.ones(1) * real_filter.filter_fft[0].real.round(4))
+      expect(MB::M.round(real_filter.process(Numo::SFloat.ones(10)), 4)).to eq(Numo::SFloat.ones(10) * real_filter.filter_fft[0].real.round(4))
+      expect(MB::M.round(real_filter.process(Numo::SFloat.ones(17)), 4)).to eq(Numo::SFloat.ones(17) * real_filter.filter_fft[0].real.round(4))
+      expect(MB::M.round(real_filter.process(Numo::SFloat.ones(1)), 4)).to eq(Numo::SFloat.ones(1) * real_filter.filter_fft[0].real.round(4))
     end
 
     it 'preserves a long signal exactly through a unity gain filter' do
       result = unity_filter.process(padded_noise)[unity_filter.delay..-1]
-      expect(MB::Sound::M.round(result, 5)).to eq(MB::Sound::M.round(noise, 5))
+      expect(MB::M.round(result, 5)).to eq(MB::M.round(noise, 5))
     end
 
     it 'preserves a signal sent one sample at a time' do
@@ -147,7 +147,7 @@ RSpec.describe MB::Sound::Filter::FIR do
         o = unity_filter.process(v)[0]
         result[idx - unity_filter.delay] = o if idx >= unity_filter.delay
       end
-      expect(MB::Sound::M.round(result, 5)).to eq(MB::Sound::M.round(noise, 5))
+      expect(MB::M.round(result, 5)).to eq(MB::M.round(noise, 5))
     end
   end
 
@@ -189,7 +189,7 @@ RSpec.describe MB::Sound::Filter::FIR do
         freq_filter.filter_fft[freq_filter.filter_fft.length / 2].conj,
       ]
 
-      expect(MB::Sound::M.round(freq_filter.response(input), 5)).to eq(MB::Sound::M.round(output, 5))
+      expect(MB::M.round(freq_filter.response(input), 5)).to eq(MB::M.round(output, 5))
     end
   end
 
@@ -207,7 +207,7 @@ RSpec.describe MB::Sound::Filter::FIR do
         real_filter.process(noise)
         real_filter.reset(v)
 
-        result = MB::Sound::M.round(real_filter.process(Numo::DFloat.zeros(20000).fill(v)), 3)
+        result = MB::M.round(real_filter.process(Numo::DFloat.zeros(20000).fill(v)), 3)
         expected = Numo::SFloat.zeros(20000).fill((v * real_filter.filter_fft[0].real).round(3))
         expect(result.min).to eq(expected.min)
         expect(result.max).to eq(expected.max)

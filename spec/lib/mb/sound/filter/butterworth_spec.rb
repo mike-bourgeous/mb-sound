@@ -37,8 +37,8 @@ RSpec.describe MB::Sound::Filter::Butterworth do
 
       fpz = MB::Sound::Filter::Butterworth.new(:lowpass, 5, 48000, 2400).polezero
 
-      expect(fpz[:poles].map { |v| MB::Sound::M.sigfigs(v, 5) }).to eq(poles)
-      expect(fpz[:zeros].map { |v| MB::Sound::M.sigfigs(v, 5) }).to eq(zeros)
+      expect(fpz[:poles].map { |v| MB::M.sigfigs(v, 5) }).to eq(poles)
+      expect(fpz[:zeros].map { |v| MB::M.sigfigs(v, 5) }).to eq(zeros)
     end
 
     pending

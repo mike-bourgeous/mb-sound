@@ -33,6 +33,9 @@ Gem::Specification.new do |spec|
 
   spec.add_runtime_dependency 'midi-nibbler', '~> 0.2.4'
 
+  spec.add_runtime_dependency 'mb-math'
+  spec.add_runtime_dependency 'mb-util'
+
   spec.add_development_dependency 'pry', '~> 0.13.1'
   spec.add_development_dependency 'pry-byebug', '~> 3.9.0'
 end

@@ -4,7 +4,10 @@ A library of simple Ruby tools for processing sound.  This is a companion
 library to an [educational video series I'm making about sound][0].
 
 You'll find simple functions for loading and saving audio files, playing and
-recording sound in realtime (on Linux, and only for really simple algorithms).
+recording sound in realtime (on Linux, and only for really simple algorithms),
+and plotting sounds.
+
+https://user-images.githubusercontent.com/5015814/115160392-c485e500-a04c-11eb-8b5f-675f3c3eef8c.mp4
 
 This is written in Ruby for speed of prototyping, convenience of the Ruby
 command line, and for the sake of novelty.  Another reason is that, if we can
@@ -15,80 +18,13 @@ More information may be added here as the video series progresses.  For now,
 the most interesting things you'll want to know about using this library are
 installing the dependencies, and launching the interactive command line.
 
-## Installation and usage
+You might also be interested in [mb-math][4], [mb-geometry][5], and
+[mb-util][6].
 
-You can either tinker within this project, or use it as a Git-sourced Gem in
-your own projects.
+## Quick start
 
-There are some base packages you'll need first:
-
-```bash
-# Debian-/Ubuntu-based Linux (macOS/Arch/CentOS will differ)
-sudo apt-get install ffmpeg gnuplot-qt
-```
-
-Then you'll want to install Ruby 2.7.2.
-
-If you don't already have a recent version of Ruby installed, and a Ruby version
-manager of your choosing, I highly recommend using [RVM](https://rvm.io).  You
-can find installation instructions for RVM at https://rvm.io.
-
-### Using the project by itself
-
-After getting RVM installed, you'll want to clone this repository, install
-Ruby, and install the Gems needed by this code.
-
-I also recommend making a separate projects directory just for this video
-series.
-
-This assumes basic familiarity with the Linux/macOS/WSL command line, or enough
-independent knowledge to make this work on your operating system of choice.
-I'll provide an overly detailed Linux example here:
-
-```bash
-# Make a project directory (substitute your own preferred paths)
-cd ~/projects
-mkdir sound_code_series
-cd sound_code_series
-
-# Install Ruby
-# (disable-binary is needed on Ubuntu 20.04 to fix "/usr/bin/mkdir not found"
-# error in the binary package of 2.7.2)
-rvm install --disable-binary 2.7.2
-
-# Clone the repo
-git clone git@github.com:mike-bourgeous/mb-sound.git
-cd mb-sound
-
-# Install Gem dependencies
-cd mb-sound
-gem install bundler
-bundle install
-```
-
-Now that everything's installed, you are ready to start playing with sound:
-
-```bash
-# Launch the interactive command line
-bin/sound.rb
-```
-
-See the Examples section for some things to try.
-
-
-### Using the project as a dependency
-
-If you're already familiar with Ruby and Gems, then you can add this repo as a
-dependency to a new project's Gemfile.
-
-```ruby
-# your-project/Gemfile
-gem 'mb-sound', git: 'https://github.com/mike-bourgeous/mb-sound.git'
-
-# Until https://github.com/yoshoku/numo-pocketfft/pull/4 is merged, this fixes
-# occasional crashing in FFT code
-gem 'numo-pocketfft', git: 'https://github.com/mike-bourgeous/numo-pocketfft.git', branch: 'fix-issue-3-crash-temporary-branch'
-```
+Clone the repo, follow the [installation instructions
+below](#installation-and-usage), then run `bin/sound.rb`.
 
 ## Examples
 
@@ -268,6 +204,81 @@ plot 100.hz.ramp, spectrum: true
 loopback(plot: { spectrum: true })
 ```
 
+## Installation and usage
+
+You can either tinker within this project, or use it as a Git-sourced Gem in
+your own projects.
+
+There are some base packages you'll need first:
+
+```bash
+# Debian-/Ubuntu-based Linux (macOS/Arch/CentOS will differ)
+sudo apt-get install ffmpeg gnuplot-qt
+```
+
+Then you'll want to install Ruby 2.7.2.
+
+If you don't already have a recent version of Ruby installed, and a Ruby version
+manager of your choosing, I highly recommend using [RVM](https://rvm.io).  You
+can find installation instructions for RVM at https://rvm.io.
+
+### Using the project by itself
+
+After getting RVM installed, you'll want to clone this repository, install
+Ruby, and install the Gems needed by this code.
+
+I also recommend making a separate projects directory just for this video
+series.
+
+This assumes basic familiarity with the Linux/macOS/WSL command line, or enough
+independent knowledge to make this work on your operating system of choice.
+I'll provide an overly detailed Linux example here:
+
+```bash
+# Make a project directory (substitute your own preferred paths)
+cd ~/projects
+mkdir sound_code_series
+cd sound_code_series
+
+# Install Ruby
+# (disable-binary is needed on Ubuntu 20.04 to fix "/usr/bin/mkdir not found"
+# error in the binary package of 2.7.2)
+rvm install --disable-binary 2.7.2
+
+# Clone the repo
+git clone git@github.com:mike-bourgeous/mb-sound.git
+cd mb-sound
+
+# Install Gem dependencies
+cd mb-sound
+gem install bundler
+bundle install
+```
+
+Now that everything's installed, you are ready to start playing with sound:
+
+```bash
+# Launch the interactive command line
+bin/sound.rb
+```
+
+See the Examples section for some things to try.
+
+
+### Using the project as a dependency
+
+If you're already familiar with Ruby and Gems, then you can add this repo as a
+dependency to a new project's Gemfile.
+
+```ruby
+# your-project/Gemfile
+gem 'mb-sound', git: 'https://github.com/mike-bourgeous/mb-sound.git'
+
+# Also specify Git location for other mb-* dependencies
+gem 'mb-util', git: 'https://github.com/mike-bourgeous/mb-util.git'
+gem 'mb-math', git: 'https://github.com/mike-bourgeous/mb-math.git'
+```
+
 ## Testing
 
 You can run the integrated test suite with `rspec`.
@@ -286,7 +297,7 @@ platforms.
 
 This project is released under a 2-clause BSD license.  See the LICENSE file.
 
-## Standing on the shoulders of giants
+## See also
 
 ### Dependencies
 
@@ -314,3 +325,6 @@ processing:
 [1]: https://www.youtube.com/playlist?list=PLpRqC8LaADXlYhKRTwSpdW3ineaQnM9zK
 [2]: https://jackschaedler.github.io/circles-sines-signals/
 [3]: https://ccrma.stanford.edu/~jos/#books
+[4]: https://github.com/mike-bourgeous/mb-math
+[5]: https://github.com/mike-bourgeous/mb-geometry
+[6]: https://github.com/mike-bourgeous/mb-util

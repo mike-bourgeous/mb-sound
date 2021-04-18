@@ -11,7 +11,7 @@ module MB
           def freq_scaled(size, f_center)
             MB::Sound::Filter::FilterBank.new(size) { |idx|
               f_center = f_center..f_center unless f_center.is_a?(Range)
-              fc = MB::Sound::M.scale(idx, 0..(size - 1), f_center)
+              fc = MB::M.scale(idx, 0..(size - 1), f_center)
               yield idx, fc
             }
           end

@@ -34,26 +34,26 @@ EOF
 
   examples = {
     "\e[1mls\e[0m" => "(for \"list\") to get a list of the easiest to use sound functions.",
-    "\e[1;32m#{MB::Sound::U.syntax("list")}\e[0m" => "to get a list of included sounds.",
-    "\e[1;33m#{MB::Sound::U.syntax("play 'sounds/sine/sine_100_1s_mono.flac'")}\e[0m" => "to play a sound file.",
-    "\e[1;33m#{MB::Sound::U.syntax("play 123.hz")}\e[0m" => "to play a 123Hz tone for a few seconds.",
-    "\e[1;33m#{MB::Sound::U.syntax("play 123.hz.triangle.at(-20.db).forever")}\e[0m" => "to play a 123Hz triangle wave tone forever.",
-    "\e[1;33m#{MB::Sound::U.syntax("play filter(333.hz.ramp, frequency: 850, quality: 10)")}\e[0m" => "to play a sawtooth wave through a low-pass filter.",
-    "\e[1;33m#{MB::Sound::U.syntax("play filter(333.hz.ramp, frequency: 850, quality: 10), spectrum: true")}\e[0m" => "to play a sawtooth wave through a low-pass filter and view its frequency spectrum.",
-    "\e[1;35m#{MB::Sound::U.syntax("plot 123.hz")}\e[0m" => "to graph part of a 123Hz tone.",
-    "\e[1;35m#{MB::Sound::U.syntax("plot 123.hz, all: true")}\e[0m" => "to graph a 123Hz tone as it would be played.",
-    "\e[1;35m#{MB::Sound::U.syntax("plot 'sounds/sine/sine_100_1s_mono.flac', all: true")}\e[0m" => "to graph a sound file at the same speed it would be played.",
-    "\e[1;35m#{MB::Sound::U.syntax("plot 'sounds/sine/log_sweep_20_20k.flac', all: true, spectrum: true")}\e[0m" => "to graph the frequency spectrum of a sound file at the same speed it would be played.",
-    "\e[1;33m#{MB::Sound::U.syntax("123.hz.wavelength")}\e[0m" => "to show the wavelength of a 123Hz tone (at room temperature at sea level).",
-    "\e[1m#{MB::Sound::U.syntax('cd ::')}\e[0m" => "for experienced Ruby/Pry users to leave the sound context.",
+    "\e[1;32m#{MB::U.syntax("list")}\e[0m" => "to get a list of included sounds.",
+    "\e[1;33m#{MB::U.syntax("play 'sounds/sine/sine_100_1s_mono.flac'")}\e[0m" => "to play a sound file.",
+    "\e[1;33m#{MB::U.syntax("play 123.hz")}\e[0m" => "to play a 123Hz tone for a few seconds.",
+    "\e[1;33m#{MB::U.syntax("play 123.hz.triangle.at(-20.db).forever")}\e[0m" => "to play a 123Hz triangle wave tone forever.",
+    "\e[1;33m#{MB::U.syntax("play filter(333.hz.ramp, frequency: 850, quality: 10)")}\e[0m" => "to play a sawtooth wave through a low-pass filter.",
+    "\e[1;33m#{MB::U.syntax("play filter(333.hz.ramp, frequency: 850, quality: 10), spectrum: true")}\e[0m" => "to play a sawtooth wave through a low-pass filter and view its frequency spectrum.",
+    "\e[1;35m#{MB::U.syntax("plot 123.hz")}\e[0m" => "to graph part of a 123Hz tone.",
+    "\e[1;35m#{MB::U.syntax("plot 123.hz, all: true")}\e[0m" => "to graph a 123Hz tone as it would be played.",
+    "\e[1;35m#{MB::U.syntax("plot 'sounds/sine/sine_100_1s_mono.flac', all: true")}\e[0m" => "to graph a sound file at the same speed it would be played.",
+    "\e[1;35m#{MB::U.syntax("plot 'sounds/sine/log_sweep_20_20k.flac', all: true, spectrum: true")}\e[0m" => "to graph the frequency spectrum of a sound file at the same speed it would be played.",
+    "\e[1;33m#{MB::U.syntax("123.hz.wavelength")}\e[0m" => "to show the wavelength of a 123Hz tone (at room temperature at sea level).",
+    "\e[1m#{MB::U.syntax('cd ::')}\e[0m" => "for experienced Ruby/Pry users to leave the sound context.",
   }
 
-  width = [MB::Sound::U.width - 3, 90].min
+  width = [MB::U.width - 3, 90].min
   examples.each do |code, description|
-    colorless_line = MB::Sound::U.remove_ansi(code.lines.last)
+    colorless_line = MB::U.remove_ansi(code.lines.last)
     line_length = colorless_line.length
     ref_string = '.' * (line_length) + ' ' + description
-    wrapped = MB::Sound::U.wrap(ref_string, width: width)[line_length..-1].gsub(/\n/m, "\n   ").strip
+    wrapped = MB::U.wrap(ref_string, width: width)[line_length..-1].gsub(/\n/m, "\n   ").strip
     puts " * #{code} #{wrapped}"
   end
 
@@ -63,6 +63,7 @@ end
 show_intro
 
 Pry.config.commands.rename_command('pry-play', 'play')
+Pry.config.commands.rename_command('pry-reset', 'reset')
 
 Pry.pry(
   MB::Sound,

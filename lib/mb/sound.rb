@@ -7,6 +7,9 @@ rescue LoadError
   # JackFFI is unavailable
 end
 
+require 'mb-math'
+require 'mb-util'
+
 require_relative 'sound/version'
 require_relative 'sound/io_methods'
 require_relative 'sound/plot_methods'
@@ -77,9 +80,6 @@ module MB
   end
 end
 
-require_relative 'sound/a'
-require_relative 'sound/u'
-require_relative 'sound/m'
 require_relative 'sound/io_base'
 require_relative 'sound/io_input'
 require_relative 'sound/io_output'

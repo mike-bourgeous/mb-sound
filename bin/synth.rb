@@ -93,7 +93,7 @@ loop do
 
     # TODO: Allow changing waveform
     event.each do |e|
-      puts MB::Sound::U.highlight(e) unless e.is_a?(MIDIMessage::SystemRealtime)
+      puts MB::U.highlight(e) unless e.is_a?(MIDIMessage::SystemRealtime)
 
       case e
       when MIDIMessage::ProgramChange
@@ -113,11 +113,11 @@ loop do
         case e.index
         when 71
           # Filter resonance
-          filter.quality = MB::Sound::M.scale(e.value, 0..127, 0.1..4.0)
+          filter.quality = MB::M.scale(e.value, 0..127, 0.1..4.0)
 
         when 1, 74
           # Filter frequency
-          decade = MB::Sound::M.scale(e.value, 0..127, 0..3)
+          decade = MB::M.scale(e.value, 0..127, 0..3)
           freq = 20.0 * 10.0 ** decade
           puts "Filter frequency: #{freq}"
           filter.center_frequency = freq
