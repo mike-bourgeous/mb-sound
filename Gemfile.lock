@@ -1,6 +1,6 @@
 GIT
   remote: https://github.com/mike-bourgeous/mb-math.git
-  revision: 7fa3f9cd17b969226961be38cb6e82d40bcfb49f
+  revision: f5530823ad488955f926980a415cc80ebda2a378
   specs:
     mb-math (0.0.1.usegit)
       cmath (~> 1.0.0)

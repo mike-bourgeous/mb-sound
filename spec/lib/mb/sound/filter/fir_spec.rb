@@ -59,7 +59,7 @@ RSpec.describe MB::Sound::Filter::FIR do
         # Have to re-rotate the impulse to compensate for delay so that the impulse peak is at t=0
         # Could also compute and subtract the linear phase in the frequency domain instead
         long_impulse = MB::Sound.real_ifft(complex_filter.filter_fft)
-        long_impulse = MB::Sound::A.rol(long_impulse, complex_filter.filter_length / 2)
+        long_impulse = MB::M.rol(long_impulse, complex_filter.filter_length / 2)
         imp_fft = MB::Sound.real_fft(long_impulse)
         expect(MB::M.round(imp_fft[imp_fft.length / 2], 2)).to eq(0+1i)
       end

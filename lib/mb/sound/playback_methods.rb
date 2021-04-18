@@ -37,7 +37,7 @@ module MB
           buffer_size = output.buffer_size
           (0...data[0].length).step(buffer_size).each do |offset|
             output.write(data.map { |c|
-              MB::Sound::A.zpad(c[offset...([offset + buffer_size, c.length].min)], buffer_size)
+              MB::M.zpad(c[offset...([offset + buffer_size, c.length].min)], buffer_size)
             })
           end
 
@@ -71,7 +71,7 @@ module MB
 
           # Apply gain and pad the final input chunk to the output buffer size
           data = data.map { |d|
-            MB::Sound::A.zpad(d.inplace * gain, buffer_size).not_inplace!
+            MB::M.zpad(d.inplace * gain, buffer_size).not_inplace!
           }
 
           # Ensure the output is at least stereo (Pulseaudio plays nothing for

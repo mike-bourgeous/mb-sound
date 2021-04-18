@@ -80,8 +80,6 @@ module MB
   end
 end
 
-require_relative 'sound/a'
-require_relative 'sound/u'
 require_relative 'sound/io_base'
 require_relative 'sound/io_input'
 require_relative 'sound/io_output'

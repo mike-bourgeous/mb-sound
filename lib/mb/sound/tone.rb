@@ -314,7 +314,7 @@ module MB
 
         loop do
           current_samples = [samples_left || buffer_size, buffer_size].min
-          d = [ MB::Sound::A.zpad(generate(current_samples), buffer_size) ]
+          d = [ MB::M.zpad(generate(current_samples), buffer_size) ]
           output.write(d * output.channels)
 
           if samples_left

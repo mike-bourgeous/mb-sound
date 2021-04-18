@@ -116,7 +116,7 @@ module MB
           @out_count -= data.length
           raise "BUG: out_count dropped below 0" if @out_count < 0
           ret = @out[0...data.length].copy
-          @out = MB::Sound::A.shl(@out, data.length) # TODO: Add an in-place shift instead of allocating a new array
+          @out = MB::M.shl(@out, data.length) # TODO: Add an in-place shift instead of allocating a new array
           ret
         end
 
@@ -272,7 +272,7 @@ module MB
           # TODO: Allow using a window function to taper the ends of the
           # impulse response and specifying a shorter filter length than the
           # gains array or gain map would imply
-          @impulse = MB::Sound::A.rol(@impulse, @impulse.length / 2)
+          @impulse = MB::M.rol(@impulse, @impulse.length / 2)
           if @filter_length && @filter_length != @impulse.length
             puts "Specified filter length #{@filter_length} does not match impulse length #{@impulse.length}"
           end
@@ -285,7 +285,7 @@ module MB
           raise "Window length #{@window_length} is too short for filter length #{@filter_length}" unless @window_length > @filter_length
 
           @filter_overlap = @filter_length - 1
-          @filter_fft = MB::Sound.real_fft(MB::Sound::A.zpad(@impulse, @window_length))
+          @filter_fft = MB::Sound.real_fft(MB::M.zpad(@impulse, @window_length))
 
           # TODO: Understand why @filter_fft.length.to_f / @gains.length doesn't fully compensate for lost gain
           @filter_fft.inplace * (@gains[1..-2].abs.mean / @filter_fft[1..-2].abs.mean) # Compensate for padding
