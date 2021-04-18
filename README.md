@@ -85,9 +85,9 @@ dependency to a new project's Gemfile.
 # your-project/Gemfile
 gem 'mb-sound', git: 'https://github.com/mike-bourgeous/mb-sound.git'
 
-# Until https://github.com/yoshoku/numo-pocketfft/pull/4 is merged, this fixes
-# occasional crashing in FFT code
-gem 'numo-pocketfft', git: 'https://github.com/mike-bourgeous/numo-pocketfft.git', branch: 'fix-issue-3-crash-temporary-branch'
+# Also specify Git location for other mb-* dependencies
+gem 'mb-util', git: 'https://github.com/mike-bourgeous/mb-util.git'
+gem 'mb-math', git: 'https://github.com/mike-bourgeous/mb-math.git'
 ```
 
 ## Examples
