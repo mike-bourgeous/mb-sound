@@ -7,6 +7,8 @@ You'll find simple functions for loading and saving audio files, playing and
 recording sound in realtime (on Linux, and only for really simple algorithms),
 and plotting sounds.
 
+https://user-images.githubusercontent.com/5015814/115160392-c485e500-a04c-11eb-8b5f-675f3c3eef8c.mp4
+
 This is written in Ruby for speed of prototyping, convenience of the Ruby
 command line, and for the sake of novelty.  Another reason is that, if we can
 write sound algorithms that work fast enough in Ruby, then they'll definitely
