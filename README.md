@@ -15,6 +15,9 @@ More information may be added here as the video series progresses.  For now,
 the most interesting things you'll want to know about using this library are
 installing the dependencies, and launching the interactive command line.
 
+You might also be interested in [mb-math][4], [mb-geometry][5], and
+[mb-util][6].
+
 ## Installation and usage
 
 You can either tinker within this project, or use it as a Git-sourced Gem in
@@ -286,7 +289,7 @@ platforms.
 
 This project is released under a 2-clause BSD license.  See the LICENSE file.
 
-## Standing on the shoulders of giants
+## See also
 
 ### Dependencies
 
@@ -314,3 +317,6 @@ processing:
 [1]: https://www.youtube.com/playlist?list=PLpRqC8LaADXlYhKRTwSpdW3ineaQnM9zK
 [2]: https://jackschaedler.github.io/circles-sines-signals/
 [3]: https://ccrma.stanford.edu/~jos/#books
+[4]: https://github.com/mike-bourgeous/mb-math
+[5]: https://github.com/mike-bourgeous/mb-geometry
+[6]: https://github.com/mike-bourgeous/mb-util
