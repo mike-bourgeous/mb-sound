@@ -110,6 +110,10 @@ module MB
         def weighted_process(data, strength = 1.0)
           raise 'Data size does not match filter bank size' unless data.size == @size
 
+          if data[0].is_a?(Complex) && @last_result[0].is_a?(Float)
+            @last_result = Numo::DComplex.zeros(@size)
+          end
+
           @filters.each_with_index do |f, idx|
             d = data[idx]
             if d.respond_to?(:length) || strength == 1.0
