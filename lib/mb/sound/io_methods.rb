@@ -116,18 +116,19 @@ module MB
         puts files
       end
 
-      # Opens the given file as an input stream with a :read method.  Keyword
-      # arguments are passed to MB::Sound::FFMPEGInput#initialize.
-      def file_input(filename, **kwargs)
-        MB::Sound::FFMPEGInput.new(filename, **kwargs)
+      # Opens the given file as an input stream with a :read method.  Resamples
+      # to 48k by default.  Other keyword arguments are passed to
+      # MB::Sound::FFMPEGInput#initialize.
+      def file_input(filename, resample: 48000, **kwargs)
+        MB::Sound::FFMPEGInput.new(filename, resample: resample, **kwargs)
       end
 
       # Opens the given file as an output stream with a :write method.  The
-      # sample +:rate+ and number of +:channels+ must be provided.  Existing
-      # files will not be overwritten, and an error will be raised, unless
-      # +:overwrite+ is true.  Other keyword arguments are passed to
+      # number of +:channels+ must be provided.  Sample rate defaults to 48k.
+      # Existing files will not be overwritten, and an error will be raised,
+      # unless +:overwrite+ is true.  Other keyword arguments are passed to
       # MB::Sound::FFMPEGOutput#initialize.
-      def file_output(filename, rate:, channels:, overwrite: false, **kwargs)
+      def file_output(filename, rate: 48000, channels:, overwrite: false, **kwargs)
         if !overwrite && File.exist?(filename)
           raise FileExistsError, "#{filename.inspect} already exists"
         end
