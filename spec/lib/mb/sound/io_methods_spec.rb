@@ -14,6 +14,13 @@ RSpec.describe(MB::Sound::IOMethods) do
       expect(a[0].max).to be_between(0.4, 1.0)
     end
 
+    it 'can read without resampling' do
+      a = MB::Sound.read('sounds/sine/sine_100_44k.flac', rate: nil)
+      expect(a.length).to eq(1)
+      expect(a[0].length).to eq(44100)
+      expect(a[0].max).to be_between(0.4, 1.0)
+    end
+
     it 'can read part of a sound file' do
       a = MB::Sound.read('sounds/sine/sine_100_1s_mono.flac', max_frames: 500)
       expect(a.length).to eq(1)

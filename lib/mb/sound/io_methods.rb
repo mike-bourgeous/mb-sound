@@ -84,11 +84,12 @@ module MB
       end
 
       # Reads an entire sound file into an array of Numo::NArrays, one per
-      # channel.  Always resamples to 48kHz.
+      # channel.  Resamples to 48kHz unless a different +:rate+ is specified.
+      # Pass nil for +:rate+ to disable resampling.
       #
       # See MB::Sound::FFMPEGInput for more flexible sound input.
-      def read(filename, max_frames: nil)
-        input = file_input(filename, resample: 48000)
+      def read(filename, max_frames: nil, rate: 48000)
+        input = file_input(filename, resample: rate)
         input.read(max_frames || input.frames)
       ensure
         input&.close
@@ -97,8 +98,11 @@ module MB
       # Writes an Array of Numo::NArrays into the given sound file.  If the sound
       # file already exists and +:overwrite+ is false, an error will be raised.
       #
+      # The sample +:rate+ defaults to 48kHz to match the default resampling of
+      # #read, and the default sample rate of #input and #output.
+      #
       # See MB::Sound::FFMPEGOutput for more flexible sound output.
-      def write(filename, data, rate:, overwrite: false)
+      def write(filename, data, rate: 48000, overwrite: false)
         data = any_sound_to_array(data)
         output = file_output(filename, rate: rate, channels: data.length, overwrite: overwrite)
         output.write(data)
@@ -119,6 +123,8 @@ module MB
       # Opens the given file as an input stream with a :read method.  Resamples
       # to 48k by default.  Other keyword arguments are passed to
       # MB::Sound::FFMPEGInput#initialize.
+      #
+      # See MB::Sound::FFMPEGInput.
       def file_input(filename, resample: 48000, **kwargs)
         MB::Sound::FFMPEGInput.new(filename, resample: resample, **kwargs)
       end
@@ -128,6 +134,8 @@ module MB
       # Existing files will not be overwritten, and an error will be raised,
       # unless +:overwrite+ is true.  Other keyword arguments are passed to
       # MB::Sound::FFMPEGOutput#initialize.
+      #
+      # See MB::Sound::FFMPEGOutput.
       def file_output(filename, rate: 48000, channels:, overwrite: false, **kwargs)
         if !overwrite && File.exist?(filename)
           raise FileExistsError, "#{filename.inspect} already exists"
