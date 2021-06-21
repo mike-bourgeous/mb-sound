@@ -189,6 +189,13 @@ module MB
         self
       end
 
+      # Changes the waveform type to inverse Gaussian.  The histogram of this
+      # waveform shows a roughly Gaussian distribution.
+      def gauss
+        @wave_type = :gauss
+        self
+      end
+
       # Sets the duration to the given number of seconds.
       def for(duration)
         @duration = duration.to_f

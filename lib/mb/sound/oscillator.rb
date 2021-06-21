@@ -227,6 +227,8 @@ module MB
           end
 
         when :gauss
+          # FIXME: amplitudes are wrong
+
           #s = Math.erf(phi - Math::PI)
           #if s < 0.0
           #  s = -1.0 - s
@@ -237,11 +239,24 @@ module MB
           #x = phi / Math::PI - 1.0
           #s = x - Math.erf(Math.sqrt(2.0 * Math::PI) * x) / (2.0 * Math.sqrt(2))
 
+          # Sideways Gaussian attempt 1
+          #x = phi / Math::PI
+          #if x < 1.0
+          #  s = Math.sqrt(2 * Math.log(1.0 / (1.0 - x))) rescue binding.pry
+          #else
+          #  s = -Math.sqrt(2 * Math.log(1.0 / (x - 1.0))) rescue binding.pry
+          #end
+
+          # Sideways Gaussian attempt 2
+          # This has an approximately Gaussian distribution, but the crest
+          # factor when generating noise is 16dB instead of the expected 14dB,
+          # and the min and max do not go to infinity.
           x = phi / Math::PI
           if x < 1.0
-            s = Math.sqrt(2 * Math.log(1.0 / (1.0 - x))) rescue binding.pry
+            # 1.6487212707 is ~Math.sqrt(Math::E)
+            s = Math.sqrt(2 * Math.log(1.6487212707 / (1.0 - x))) - 1
           else
-            s = -Math.sqrt(2 * Math.log(1.0 / (x - 1.0))) rescue binding.pry
+            s = -Math.sqrt(2 * Math.log(1.6487212707 / (x - 1.0))) + 1
           end
 
         else
