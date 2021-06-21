@@ -241,6 +241,10 @@ module MB
             s = (-Math.sqrt(2 * Math.log(1.6487212707 / (x - 1.0))) + 1) * -3.01.db
           end
 
+          # Clamp range to prevent periodic clicks when we get infinity at phi=pi
+          s = -3 if s < -3
+          s = 3 if s > 3
+
         else
           raise "Invalid wave type #{@wave_type.inspect}"
         end
