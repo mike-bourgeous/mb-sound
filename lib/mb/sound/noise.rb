@@ -65,6 +65,8 @@ module MB
       #
       # If +buffer+ is given, then the noise will be generated in-place using
       # that buffer, avoiding allocating a new buffer.
+      #
+      # See bin/play_noise.rb for an example.
       def self.spectral_power_noise(bins, db_per_octave, linear_gain, buffer: nil)
         buffer ||= Numo::DComplex.zeros(bins)
         raise "Buffer length must equal the number of bins: #{bins}" unless buffer.length == bins
