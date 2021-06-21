@@ -377,4 +377,80 @@ RSpec.describe(MB::Sound::FFTMethods) do
   end
 
   pending '#trunc_fft'
+
+  describe '.unwrap_phase' do
+    def linear_phase(start, stop, n)
+      phase = Numo::DFloat.linspace(start, stop, n).inplace!.map { |v| MB::M.sigfigs(v, 6) }
+      cplx = Numo::DComplex.zeros(n).inplace!.map_with_index { |_, idx| Complex.polar(1.0, phase[idx]) }
+      return phase.not_inplace!, cplx.not_inplace!
+    end
+
+    def sine_phase(amp, n)
+      phase = Numo::DFloat.linspace(0.0, Math::PI * 6.0, n).inplace!.map { |v|
+        MB::M.sigfigs(Math.sin(v) * amp, 6)
+      }
+      cplx = Numo::DComplex.zeros(n).inplace!.map_with_index { |_, idx| Complex.polar(1.0, phase[idx]) }
+      return phase.not_inplace!, cplx.not_inplace!
+    end
+
+    def unwrapped_sigfigs(cplx)
+      MB::Sound.unwrap_phase(cplx).inplace!.map{ |v| MB::M.sigfigs(v, 6) }.not_inplace!
+    end
+
+    it 'returns phase unmodified when delta is less than pi' do
+      # Generate linear phase from -pi to pi using Complex.polar
+      phase, complex = linear_phase(-Math::PI, Math::PI, 100)
+      expect(MB::M.sigfigs(complex.angle, 6).to_a).to eq(phase.to_a)
+      expect(unwrapped_sigfigs(complex).to_a).to eq(phase.to_a) # to_a because narray truncates to_s
+    end
+
+    it 'can correct a single discontinuity upward' do
+      # Generate linear phase from -pi to 2pi using Complex.polar
+      phase, complex = linear_phase(-Math::PI, 2.0 * Math::PI, 100)
+      expect(MB::M.sigfigs(complex.angle, 6).to_a).not_to eq(phase.to_a)
+      expect(unwrapped_sigfigs(complex).to_a).to eq(phase.to_a) # to_a because narray truncates to_s
+    end
+
+    it 'can correct a single discontinuity downward' do
+      # Generate linear phase from pi to -2pi using Complex.polar
+      phase, complex = linear_phase(Math::PI, -2.0 * Math::PI, 100)
+      expect(MB::M.sigfigs(complex.angle, 6).to_a).not_to eq(phase.to_a)
+      expect(unwrapped_sigfigs(complex).to_a).to eq(phase.to_a) # to_a because narray truncates to_s
+    end
+
+    it 'can correct repeating discontinuities upward' do
+      # Generate linear phase from -pi to 5pi
+      phase, complex = linear_phase(-Math::PI, 7.0 * Math::PI, 100)
+      expect(MB::M.sigfigs(complex.angle, 6).to_a).not_to eq(phase.to_a)
+      expect(unwrapped_sigfigs(complex).to_a).to eq(phase.to_a) # to_a because narray truncates to_s
+    end
+
+    it 'can correct repeating discontinuities downward' do
+      # Generate linear phase from pi to -5pi
+      phase, complex = linear_phase(Math::PI, -7.0 * Math::PI, 100)
+      expect(MB::M.sigfigs(complex.angle, 6).to_a).not_to eq(phase.to_a)
+      expect(unwrapped_sigfigs(complex).to_a).to eq(phase.to_a) # to_a because narray truncates to_s
+    end
+
+    it 'passes through non-wrapping sinusoidal phase' do
+      # Generate sinusoidal phase with magnitude less than pi to verify sinusoidal generation
+      phase, complex = sine_phase(2.0, 100)
+      expect(MB::M.sigfigs(complex.angle, 6).to_a).to eq(phase.to_a)
+      expect(unwrapped_sigfigs(complex).to_a).to eq(phase.to_a) # to_a because narray truncates to_s
+    end
+
+    it 'can correct alternating discontinuities' do
+      # Generate sinusoidal phase using Complex.polar with magnitude between pi and 2pi
+      phase, complex = sine_phase(4.0, 100)
+      expect(MB::M.sigfigs(complex.angle, 6).to_a).not_to eq(phase.to_a)
+      expect(unwrapped_sigfigs(complex).to_a).to eq(phase.to_a) # to_a because narray truncates to_s
+    end
+
+    it 'can correct repeating and alternating discontinuities' do
+      # Generate sinusoidal phase using Complex.polar with magnitude greater than 3pi
+      phase, complex = sine_phase(20.0, 500)
+      expect(MB::M.sigfigs(complex.angle, 6).to_a).not_to eq(phase.to_a)
+      expect(unwrapped_sigfigs(complex).to_a).to eq(phase.to_a) # to_a because narray truncates to_s
+    end
+  end
 end

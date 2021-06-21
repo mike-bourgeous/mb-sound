@@ -208,6 +208,36 @@ module MB
         ifft(full_dft).not_inplace!
       end
 
+      # Returns unwrapped phase from the given complex +data+, by adding or
+      # subtracting a shift of 2pi whenever the phase jumps by more than pi.
+      def unwrap_phase(data)
+        MB::M.with_inplace(data, false) do |d|
+          offset = 0.0
+          prior = nil
+          max_delta = 0
+          d.arg.map { |v|
+            prior ||= v
+
+            loop do
+              delta = v - prior + offset
+
+              max_delta = delta if delta.abs > max_delta.abs
+
+              if delta > Math::PI
+                offset -= 2.0 * Math::PI
+              elsif delta < -Math::PI
+                offset += 2.0 * Math::PI
+              else
+                break
+              end
+            end
+
+            prior = v + offset
+            prior
+          }
+        end
+      end
+
       # TODO: conditionally use FFTW if present?
       if defined?(Numo::Pocketfft)
         include PocketfftMethods
