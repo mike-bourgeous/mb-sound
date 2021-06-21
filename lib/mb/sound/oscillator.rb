@@ -13,7 +13,7 @@ module MB
     # values are scaled to the desired output range.
     class Oscillator
       RAND = Random.new
-      WAVE_TYPES = [:sine, :square, :triangle, :ramp]
+      WAVE_TYPES = [:sine, :square, :triangle, :ramp, :gauss]
 
       # See #initialize; this is used to make negative powers more useful.
       NEGATIVE_POWER_SCALE = {
@@ -21,6 +21,7 @@ module MB
         triangle: 0.01,
         ramp: 0.01,
         square: 1.0,
+        gauss: 0.01,
       }
 
       # Default note that is used as tuning reference
@@ -72,7 +73,7 @@ module MB
         12.0 * Math.log2(frequency_hz / tune_freq) + tune_note
       end
 
-      attr_accessor :advance, :wave_type, :pre_power, :post_power, :range
+      attr_accessor :advance, :wave_type, :pre_power, :post_power, :range, :random_advance
       attr_reader :phi, :phase, :frequency
 
       # TODO: maybe use a clock provider instead of +advance+?  The challenge is
@@ -225,6 +226,17 @@ module MB
             s = phi / Math::PI - 2.0
           end
 
+        when :gauss
+          #s = Math.erf(phi - Math::PI)
+          #if s < 0.0
+          #  s = -1.0 - s
+          #else
+          #  s = 1.0 - s
+          #end
+
+          x = phi / Math::PI - 1.0
+          s = x - Math.erf(Math.sqrt(2.0 * Math::PI) * x) / (2.0 * Math.sqrt(2))
+
         else
           raise "Invalid wave type #{@wave_type.inspect}"
         end
@@ -256,7 +268,7 @@ module MB
           freq = freq.sample if freq.respond_to?(:sample)
 
           advance = @advance
-          advance += RAND.rand(@random_advance) if @random_advance != 0
+          advance += RAND.rand(@random_advance.to_f) if @random_advance != 0
 
           @phi = (@phi + freq * advance) % (Math::PI * 2)
 
