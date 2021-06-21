@@ -4,10 +4,11 @@ require 'nibbler'
 module MB
   module Sound
     # An oscillator that can generate different wave types.  This can be used
-    # to generate sound, or as an LFO (low-frequency oscillator).  All
-    # oscillators should start at 0 (except for e.g. square, which doesn't have
-    # a zero), and rise first before falling, unless a phase offset is
-    # specified.
+    # to generate sound, or as an LFO (low-frequency oscillator).  It can also
+    # generate noise with various statistical distributions by setting advance
+    # to 0 and random_advance to 2*pi.  All oscillators should start at 0
+    # (except for e.g. square, which doesn't have a zero), and rise first
+    # before falling, unless a phase offset is specified.
     #
     # An exponential distortion can be applied to the output before or after
     # values are scaled to the desired output range.
