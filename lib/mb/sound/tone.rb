@@ -208,6 +208,9 @@ module MB
       #
       # Example:
       #     1.hz.gauss.noise
+      #
+      # Also see the MB::Sound::Noise class for another way to synthesize
+      # noise.
       def noise
         @noise = true
         self
