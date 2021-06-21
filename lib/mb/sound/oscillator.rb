@@ -234,8 +234,15 @@ module MB
           #  s = 1.0 - s
           #end
 
-          x = phi / Math::PI - 1.0
-          s = x - Math.erf(Math.sqrt(2.0 * Math::PI) * x) / (2.0 * Math.sqrt(2))
+          #x = phi / Math::PI - 1.0
+          #s = x - Math.erf(Math.sqrt(2.0 * Math::PI) * x) / (2.0 * Math.sqrt(2))
+
+          x = phi / Math::PI
+          if x < 1.0
+            s = Math.sqrt(2 * Math.log(1.0 / (1.0 - x))) rescue binding.pry
+          else
+            s = -Math.sqrt(2 * Math.log(1.0 / (x - 1.0))) rescue binding.pry
+          end
 
         else
           raise "Invalid wave type #{@wave_type.inspect}"
