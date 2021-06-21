@@ -251,12 +251,14 @@ module MB
           # This has an approximately Gaussian distribution, but the crest
           # factor when generating noise is 16dB instead of the expected 14dB,
           # and the min and max do not go to infinity.
+          #
+          # TODO: see if there's a better way to calculate this same function
           x = phi / Math::PI
           if x < 1.0
             # 1.6487212707 is ~Math.sqrt(Math::E)
-            s = Math.sqrt(2 * Math.log(1.6487212707 / (1.0 - x))) - 1
+            s = (Math.sqrt(2 * Math.log(1.6487212707 / (1.0 - x))) - 1) * -3.01.db
           else
-            s = -Math.sqrt(2 * Math.log(1.6487212707 / (x - 1.0))) + 1
+            s = (-Math.sqrt(2 * Math.log(1.6487212707 / (x - 1.0))) + 1) * -3.01.db
           end
 
         else
