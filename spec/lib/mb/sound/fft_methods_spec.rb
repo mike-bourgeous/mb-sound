@@ -375,4 +375,6 @@ RSpec.describe(MB::Sound::FFTMethods) do
       expect(signal.map { |c| c.imag.min.round(6) }).to eq([-1, -0.1])
     end
   end
+
+  pending '#trunc_fft'
 end

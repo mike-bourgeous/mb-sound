@@ -149,6 +149,25 @@ module MB
         end
       end
 
+      # Computes the DFT of the given +narray+, shifts it so the DC coefficient is
+      # in the middle, and keeps at most +bins+ bins on either side.  If +db+ is
+      # true, the values will be converted to decibels.  Useful for visualizing
+      # window functions.
+      def trunc_fft(narray, bins, db = false)
+        dft = fft(narray)
+        mid = dft.size * 0.5
+        min = [0, (mid - bins).to_i].max
+        max = [dft.size - 1, (mid + bins).to_i].min
+        dft = MB::M.rol(dft, mid.to_i)
+        dft = dft[min..max]
+        # TODO: Remove to_a conversion step if possible
+        db ? MB::M.array_to_narray(dft.to_a.map { |v|
+          db = v.to_db
+          db = [-60, db].max unless db.nan?
+          db
+        }) : dft
+      end
+
       # Generates negative frequencies from the given FFT data with only
       # positive frequencies.  This is not required if you use the #real_fft
       # and #real_ifft methods.
