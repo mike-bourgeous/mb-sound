@@ -13,46 +13,82 @@ module MB
     # TODO: Document these better in the context of the MB::Sound CLI.
     module WindowMethods
       # Non-overlapping processing of an entire file in a single FFT.  Passes
-      # an array of Numo::DComplex DFTs of each channel and the sound info from
-      # in_filename to the +block+, configured for in-place processing, then
-      # writes the inverse DFT of whatever is returned by the block to
-      # out_filename.  Thus the block may either modify the arrays in place and
-      # return them, or create new arrays of the same or different sizes.
+      # an array of Numo::DComplex DFTs of each channel to the +block+,
+      # configured for in-place processing, then writes the inverse DFT of
+      # whatever is returned by the block to out_filename.  Thus the block may
+      # either modify the arrays in place and return them, or create new arrays
+      # of the same or different sizes.
       #
       # The yielded DFT arrays will contain only positive frequencies.
       #
-      # Example:
+      # Input files are always resampled to 48kHz.
       #
-      #   # Simple amplifier
-      #   process('input.wav', 'output.wav') do |dfts, info|
-      #     dfts.map do |c|
-      #       c * 2 # in-place processing, but must return the dfts
+      # Examples (MB::Sound may be omitted when running in bin/sound.rb):
+      #
+      #     # Simple amplifier
+      #     MB::Sound.process('sounds/synth0.flac', '/tmp/louder.flac') do |dfts|
+      #       dfts.map do |c|
+      #         c * 2 # in-place processing, but must return the dfts
+      #       end
       #     end
-      #   end
+      #     play '/tmp/louder.flac'
+      #
+      #     # Reverse an audio file (the slow way)
+      #     MB::Sound.process('sounds/synth0.flac', '/tmp/reverse.flac') do |dfts|
+      #       dfts.map(&:conj)
+      #     end
+      #     play '/tmp/reverse.flac'
+      #
+      #     # Scramble an audio file's frequencies
+      #     # This tends to blur the sound of an audio file across the entire file.
+      #     MB::Sound.process('sounds/synth0.flac', '/tmp/scramble.flac') do |dfts|
+      #       dfts.map { |c|
+      #         # This is obviously suboptimal (in-place shuffling would be faster)
+      #         # Creation and concatenation of Ruby Array is faster than for Numo::NArray
+      #         Sound.array_to_narray(c.split(c.size / 100).map { |s| s.to_a.shuffle! }.reduce(&:concat))
+      #       }
+      #     end
+      #     play '/tmp/scramble.flac'
+      #
+      #     # Gradually roll off higher frequencies
+      #     # Just a subtle treble reduction:
+      #     MB::Sound.process('sounds/synth0.flac', '/tmp/dark.flac') do |dfts|
+      #       scale = Numo::SFloat.linspace(1, 0, dfts.first.size)
+      #       dfts.map { |c| c * scale }
+      #     end
+      #     play '/tmp/dark.flac'
+      #
+      #     # Or a more notable rolloff:
+      #     MB::Sound.process('sounds/synth0.flac', '/tmp/darker.flac') do |dfts|
+      #       scale = Numo::SFloat.logspace(0, -5, dfts.first.size)
+      #       dfts.map { |c| c * scale }
+      #     end
+      #     play '/tmp/darker.flac'
       def process(in_filename, out_filename, &block)
         raise 'No block given' unless block_given?
 
-        # FIXME: the new #read method doesn't return any info
-        channels, info = read(in_filename)
+        channels = read(in_filename)
         frames = channels.first.size
 
         dfts = channels.map { |c| real_fft(c).inplace! }
-        modified = yield dfts, info
-        results = modified.map { |c| real_ifft(c, frames.odd?) }
+        modified = yield dfts
+        results = modified.map { |c| real_ifft(c, odd_length: frames.odd?) }
 
         normalize_max(results)
 
-        write(out_filename, results, info)
+        write(out_filename, results)
       end
 
-      # Splits the sound into chunks of +split_size+ frames with no overlap, then
-      # sequentially yields the DFTs of each chunk to the block.  The final chunk
-      # is padded with zeros.
+      # Non-overlapping processing of an entire file in multiple DFTs.  Splits
+      # the sound into chunks of +split_size+ frames with no overlap, then
+      # sequentially yields the DFTs of each chunk to the block.  The final
+      # chunk is padded with zeros.
+      #
+      # Input files are always resampled to 48kHz.
       def process_split(in_filename, out_filename, split_size, &block)
         raise 'No block given' unless block_given?
 
-        # FIXME: the new #read method doesn't return any info
-        channels, info = read(in_filename)
+        channels = read(in_filename)
         frames = channels.first.size
 
         splits = (split_size...frames).step(split_size).to_a
@@ -63,8 +99,8 @@ module MB
         results = []
         for idx in 0...channels.first.size
           dfts = channels.map { |c| real_fft(c[idx]) }
-          modified = yield dfts, info
-          results << modified.map { |c| real_ifft(c, c.size.odd?) }
+          modified = yield dfts
+          results << modified.map { |c| real_ifft(c, odd_length: c.size.odd?) }
         end
 
         puts "Processed #{results.size} chunks of size #{split_size}"
@@ -73,16 +109,18 @@ module MB
 
         normalize_max(results)
 
-        write(out_filename, results, info)
+        write(out_filename, results)
       end
 
       # Processes a sound file in chunks of length +split_size+, with a cross-faded
       # overlap of +overlap_size+.
+      #
+      # Input files are always resampled to 48kHz.
       def process_overlap(in_filename, out_filename, split_size, overlap_size, &block)
         raise 'No block given' unless block_given?
         raise 'Overlap size must be less than split size' unless overlap_size < split_size
 
-        channels, info = read(in_filename)
+        channels = read(in_filename)
         frames = channels.first.size
 
         hop_size = split_size - overlap_size
@@ -98,12 +136,12 @@ module MB
           count += 1
           slice = channels.map { |c| MB::M.zpad(c[offset...[offset + split_size, c.size].min], split_size) }
           dfts = slice.map { |c| real_fft(c) }
-          modified = yield dfts, info
+          modified = yield dfts
           outputs ||= modified.size.times.map { Numo::SFloat.zeros(frames + split_size) }
           raise "Channel count changed from #{outputs.size} to #{modified.size}" if modified.size != outputs.size
 
           outputs.each_with_index do |out, idx|
-            c = real_ifft(modified[idx], split_size.odd?).inplace!
+            c = real_ifft(modified[idx], odd_length: split_size.odd?).inplace!
             out_span = out[offset...(offset + split_size)].inplace!
 
             if offset > 0
@@ -123,7 +161,7 @@ module MB
 
         normalize_max(outputs)
 
-        write(out_filename, outputs, info)
+        write(out_filename, outputs)
       end
 
       # Processes audio using overlapping cross-fades, from an +input_stream+ that
@@ -213,12 +251,12 @@ module MB
         process_time_stream(input_stream, output_stream, split_size, hop_size) do |in_bufs|
           dfts = in_bufs.map { |c| real_fft(c) }
           if block_given?
-            modified = yield dfts, nil # TODO define a standard parameter system with time domain, frequency domain, stream info, etc.
+            modified = yield dfts # TODO define a standard parameter system with time domain, frequency domain, stream info, etc.
           else
             modified = in_bufs
           end
 
-          modified.map { |c| real_ifft(c, split_size.odd?) }
+          modified.map { |c| real_ifft(c, odd_length: split_size.odd?) }
         end
       end
 
