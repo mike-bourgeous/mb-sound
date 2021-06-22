@@ -134,8 +134,30 @@ RSpec.describe(MB::Sound::GainMethods) do
   end
 
   describe '#normalize_max_sum' do
-    pending 'can use a custom limit'
-    pending 'makes louder sounds quieter'
-    pending 'does not make quieter sounds louder'
+    let(:less_than_one_orig) { Numo::SFloat[0.25, 0.5, 0.125].freeze }
+    let(:greater_than_one_orig) { Numo::SFloat[0.5, 0.5, 0.75].freeze }
+    let(:less_than_one) { less_than_one_orig.dup }
+    let(:greater_than_one) { greater_than_one_orig.dup }
+
+    it 'can use a custom limit' do
+      MB::Sound.normalize_max_sum([less_than_one], 0.4375)
+      expect(less_than_one).to eq(less_than_one_orig * 0.5)
+    end
+
+    it 'makes louder sounds quieter' do
+      MB::Sound.normalize_max_sum([greater_than_one])
+      expect(MB::M.round(greater_than_one, 6)).to eq(MB::M.round(greater_than_one_orig * (1.0 / 1.75), 6))
+    end
+
+    it 'does not make quieter sounds louder' do
+      MB::Sound.normalize_max_sum([less_than_one])
+      expect(less_than_one).to eq(less_than_one_orig)
+    end
+
+    it 'does not use the same gain for each channel' do
+      MB::Sound.normalize_max_sum([greater_than_one, less_than_one])
+      expect(MB::M.round(greater_than_one, 6)).to eq(MB::M.round(greater_than_one_orig * (1.0 / 1.75), 6))
+      expect(less_than_one).to eq(less_than_one_orig)
+    end
   end
 end
