@@ -2,19 +2,14 @@
 # Generates brown noise in a file.  The output will have a roughly Gaussian
 # distribution.
 
-require 'rubygems'
 require 'bundler/setup'
-
-require 'benchmark'
-require 'ruby-progressbar'
 
 require 'pry'
 require 'pry-byebug'
 
 $LOAD_PATH << File.expand_path('../lib', __dir__)
 
-require 'sound'
-require 'noise'
+require 'mb-sound'
 
 PROGRESS_FORMAT = "\e[36m%a \e[35m%e\e[0m \e[34m[\e[1m%B\e[0;34m] %p%%\e[0m"
 RATE = 48000
