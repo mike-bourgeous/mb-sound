@@ -40,7 +40,7 @@ module MB
           c.not_inplace!
           sum = c.abs.sum
           if sum > max_sum
-            c.inplace / sum
+            c.inplace * (max_sum / sum)
           end
         end
       end
