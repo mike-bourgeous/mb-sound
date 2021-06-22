@@ -2,18 +2,19 @@ module MB
   module Sound
     # Methods for adjusting and normalizing the loudness of sounds.
     module GainMethods
-      # Normalizes +channels+ (an Array of Numo::NArray) together to have a maximum
-      # absolute value less than or equal to +limit+.  All channels receive the
-      # same amplification.  This is most useful when applied to the time domain.
+      # Normalizes +channels+ (either a single Numo::NArray or an Array of
+      # Numo::NArray) together to have a maximum absolute value less than or
+      # equal to +limit+.  All channels receive the same amplification.  This
+      # is most useful when applied to the time domain.
       #
-      # If +louder+ is true, then quieter sounds will be amplified so that their
-      # maximum absolute value equals +limit+.  If +louder+ is a Numeric, then the
-      # scaling factor for quieter sounds will be blended between no modification
-      # for louder = 0, and total normalization for louder = 1.  When applied in
-      # overlapping windows, a fractional value for +louder+ acts similarly to a
-      # volume leveler.
+      # If +louder+ is true, then quieter sounds will be amplified so that
+      # their maximum absolute value equals +limit+.  If +louder+ is a Numeric,
+      # then the scaling factor for quieter sounds will be blended between no
+      # modification for louder = 0, and total normalization for louder = 1.
+      # When applied in overlapping windows, a fractional value for +louder+
+      # acts similarly to a volume leveler.
       #
-      # Modifies data in place.
+      # Modifies data in place.  Returns the +channels+ parameter.
       def normalize_max(channels, limit = 1, louder: false)
         return normalize_max([channels], limit, louder: louder)[0] unless channels.is_a?(Array)
 
