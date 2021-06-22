@@ -15,6 +15,7 @@ require_relative 'sound/io_methods'
 require_relative 'sound/plot_methods'
 require_relative 'sound/playback_methods'
 require_relative 'sound/fft_methods'
+require_relative 'sound/gain_methods'
 require_relative 'sound/window_methods'
 
 module MB
@@ -30,6 +31,7 @@ module MB
     extend PlotMethods
     extend PlaybackMethods
     extend FFTMethods
+    extend GainMethods
     extend WindowMethods
 
     # Returns the current time from the system's monotonically increasing
