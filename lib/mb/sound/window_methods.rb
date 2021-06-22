@@ -21,7 +21,8 @@ module MB
       #
       # The yielded DFT arrays will contain only positive frequencies.
       #
-      # Input files are always resampled to 48kHz.
+      # Input files are always resampled to 48kHz, and output values are
+      # normalized to a maximum of 1.0.
       #
       # Examples (MB::Sound may be omitted when running in bin/sound.rb):
       #
