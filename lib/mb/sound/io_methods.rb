@@ -185,6 +185,10 @@ module MB
       # take precedence.  For JackD, the device is a prefix for port names, with
       # the default being 'system:playback_'.
       #
+      # The output type may be changed using the OUTPUT_TYPE environment
+      # variable.  Supported output types are :jack_ffi, :jack, :alsa_pulse,
+      # :alsa, and :null.
+      #
       # See FFMPEGOutput, JackOutput, and AlsaOutput for more flexible playback.
       #
       # Pass either true or a Hash of options for MB::Sound::PlotOutput in
@@ -209,31 +213,59 @@ module MB
         @outputs ||= {}
         o = @outputs[info]
         return o if o && !(o.respond_to?(:closed?) && o.closed?)
-        
+
         o = nil
-        case RUBY_PLATFORM
-        when /linux/
-          if `pgrep jackd`.strip.length > 0
-            if defined?(JackFFI)
-              @jack ||= MB::Sound::JackFFI[]
-              @jack.logger = Logger.new(STDOUT, level: Logger::ERROR)
-              o = @jack.output(channels: channels, connect: device || :physical)
-            else
-              o = MB::Sound::JackOutput.new(ports: { device: device, count: channels }, buffer_size: buffer_size)
-            end
-          elsif `pgrep pulseaudio`.strip.length > 0
-            o = MB::Sound::AlsaOutput.new(device: 'pulse', rate: rate, channels: channels, buffer_size: buffer_size)
-          else
-            o = MB::Sound::AlsaOutput.new(device: device || 'default', rate: rate, channels: channels, buffer_size: buffer_size)
-          end
+        output_type = detect_output
+        case output_type
+        when :jack_ffi
+          @jack ||= MB::Sound::JackFFI[]
+          @jack.logger = Logger.new(STDOUT, level: Logger::ERROR)
+          o = @jack.output(channels: channels, connect: device || :physical)
+
+        when :jack
+          o = MB::Sound::JackOutput.new(ports: { device: device, count: channels }, buffer_size: buffer_size)
+
+        when :alsa_pulse
+          o = MB::Sound::AlsaOutput.new(device: 'pulse', rate: rate, channels: channels, buffer_size: buffer_size)
+
+        when :alsa
+          o = MB::Sound::AlsaOutput.new(device: device || 'default', rate: rate, channels: channels, buffer_size: buffer_size)
+
+        when :null
+          o = MB::Sound::NullOutput.new(channels: channels, rate: rate)
 
         else
-          raise NotImplementedError, 'TODO: support other platforms'
+          raise "Unsupported output type: #{output_type.inspect}"
         end
 
         @outputs[info] = o
 
         o
+      end
+
+      # Returns a Symbol describing the type of output that should be used,
+      # based on operating system-specific detection and the OUTPUT_TYPE
+      # environment variable.  See #output.
+      def detect_output
+        return ENV['OUTPUT_TYPE'].gsub(/^:/, '').to_sym if ENV['OUTPUT_TYPE']
+
+        case RUBY_PLATFORM
+        when /linux/
+          if `pgrep jackd`.strip.length > 0
+            if defined?(JackFFI)
+              :jack_ffi
+            else
+              :jack
+            end
+          elsif `pgrep pulseaudio`.strip.length > 0
+            :alsa_pulse
+          else
+            :alsa
+          end
+
+        else
+          raise NotImplementedError, 'TODO: support other platforms'
+        end
       end
 
       # Endlessly streams audio in non-overlapping +:block_size+ chunks from
