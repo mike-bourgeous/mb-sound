@@ -6,16 +6,17 @@ module MB
     #
     # See FFMPEGOutput for an example.
     class IOOutput < IOBase
-      attr_reader :frames_written
+      attr_reader :frames_written, :rate
 
       # Initializes an IO-writing audio output stream for the given IO object
       # and number of channels.  The first parameter may be an Array of
       # arguments to pass to IOBase#run.
-      def initialize(io, channels, buffer_size)
+      def initialize(io, channels, buffer_size, rate: nil)
         raise 'IO must respond to :write' unless io.is_a?(Array) || io.respond_to?(:write)
         io = [io, 'w'] if io.is_a?(Array)
         super(io, channels, buffer_size)
         @frames_written = 0
+        @rate = rate
       end
 
       # Writes +data+ (an Array of Numo::NArrays) to the IO given to the
