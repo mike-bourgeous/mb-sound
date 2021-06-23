@@ -331,6 +331,10 @@ module MB
         loop do
           window_writer.write(yield)
         end
+
+      ensure
+        # Drain the window overlap buffer to the output stream unless there was an error
+        window_writer&.drain unless $!
       end
 
       # Like #analyze_time_window, but yields positive DFT frequencies instead of
@@ -360,7 +364,9 @@ module MB
           fft_writer.write(yield)
         end
 
-        fft_writer.drain
+      ensure
+        # Drain the window overlap buffer to the output stream unless there was an error
+        fft_writer&.drain unless $!
       end
 
       # Processes time domain audio in overlapping windows from the +input_stream+
@@ -394,13 +400,14 @@ module MB
       # The +block+ should return the same number of channels as expected by the
       # +output_stream+.
       #
+      # If skip_overlap is true, then each hop's full window length will be
+      # written to the file for analysis (this will not sound good).  If
+      # skip_overlap is a positive integer, than that many samples of 0 will be
+      # written between hops to make the edges clearer.
+      #
       # FIXME: Getting clicks on window boundaries due to edges not going to zero.
       # Maybe need to zero pad save extra, or make position algorithms generate
-      # minimum-phase filters, or apply a post-IFFT window.  If skip_overlap is
-      # true, then each hop's full window length will be written to the file for
-      # analysis (this will not sound good).  If skip_overlap is a positive
-      # integer, than that many samples of 0 will be written between hops to make
-      # the edges clearer.
+      # minimum-phase filters, or apply a post-IFFT window.
       #
       # TODO: Take advantage of the fact that FFTs are circular to avoid having
       # to copy the remnant buffer data around, and just rotate the window

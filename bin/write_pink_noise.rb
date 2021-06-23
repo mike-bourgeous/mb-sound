@@ -28,18 +28,19 @@ framesize = (bins - 1) * 2
 seconds = ARGV[3].to_f rescue 0
 raise "Invalid number of seconds given (must be > 0) #{USAGE}" unless seconds > 0
 
-input = MB::Sound::NullInput.new(channels: 1, length: (48000 * seconds).round)
 output = MB::Sound::FFMPEGOutput.new(outfile, rate: 48000, channels: channels)
 window = MB::Sound::Window::DoubleHann.new(framesize)
 
 begin
-  # TODO write a synthesize_window function so we aren't wasting time
-  # generating zeros and windowing them with the input window?
-  MB::Sound.process_window(input, output, window) do
+  length = 0
+  # TODO: Get the length exactly right (it gets padded with window lead-in and drain-out)
+  MB::Sound.synthesize_window(output, window) do
+    break if length >= seconds
+    length += window.hop / 48000.0
+
     # Multiply by 3.5 (could really get away with 4) to compensate for window
     # averaging loss.  Possibly a more accurate approach would be to look up or
-    # calculate the right power spectral density correction factor in Heinzel
-    # 2002?
+    # calculate the right power spectral density correction factor in Heinzel 2002?
     channels.times.map { MB::Sound::Noise.spectral_pink_noise(bins) * 3.5 }
   end
 ensure

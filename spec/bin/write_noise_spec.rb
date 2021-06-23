@@ -14,7 +14,9 @@ RSpec.describe('Noise generation scripts') do
         result = ($?)
         expect(result).to be_success
         expect(out_sound.length).to eq(1)
-        expect(out_sound[0].length).to eq(4800)
+        # windowing causes length to be greater than 0.1 seconds
+        expect(out_sound[0].length).to be >= 4800
+        expect(out_sound[0].length).to be < 16000
         expect(out_sound[0].min).to be < -0.25
         expect(out_sound[0].max).to be > 0.25
 
@@ -29,7 +31,9 @@ RSpec.describe('Noise generation scripts') do
         expect(result).to be_success
         expect(out_sound.length).to eq(4)
         out_sound.each do |c|
-          expect(c.length).to eq(4800)
+          # windowing causes length to be greater than 0.1 seconds
+          expect(c.length).to be >= 4800
+          expect(c.length).to be < 16000
           expect(c.min).to be < -0.25
           expect(c.max).to be > 0.25
         end
