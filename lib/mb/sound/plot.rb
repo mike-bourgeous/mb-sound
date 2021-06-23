@@ -32,7 +32,7 @@ module MB
       attr_reader :width, :height
 
       # Use a longer +timeout+ if you will be plotting lots of data.
-      def initialize(terminal: 'qt', title: nil, width: 800, height: 800, timeout: 5)
+      def initialize(terminal: ENV['PLOT_TERMINAL'] || 'qt', title: nil, width: ENV['PLOT_WIDTH']&.to_i || 800, height: ENV['PLOT_HEIGHT']&.to_i || 800, timeout: 5)
         @width = width
         @height = height
         @yrange = nil

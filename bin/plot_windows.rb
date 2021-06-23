@@ -85,7 +85,9 @@ plots = window_list.map { |c|
 p = MB::Sound::Plot.new
 begin
   loop do
+    # Loop because gnuplot doesn't resize plots when the window is resized
     p.plot(plots.reduce(&:merge), columns: plots.first.size)
+    break if ENV['PLOT_TERMINAL'] == 'dumb' # Allow testing
     sleep 5
   end
 ensure
