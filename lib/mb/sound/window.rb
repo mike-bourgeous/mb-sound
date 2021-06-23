@@ -22,7 +22,7 @@ module MB
         private
 
         def inherited(subclass)
-          puts "Registering window #{subclass.name} as '#{subclass.window_name}'"
+          puts "Registering window #{subclass.name} as '#{subclass.window_name}'" if $debug
           @@windows ||= []
           @@windows << subclass
           @@windows_by_name ||= {}
