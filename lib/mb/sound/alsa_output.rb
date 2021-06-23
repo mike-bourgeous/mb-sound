@@ -12,7 +12,7 @@ module MB
     # TODO: It might be possible to use ruby-ffi to interact with ALSA
     # directly, as is done with mb-sound-jackffi.
     class AlsaOutput < MB::Sound::IOOutput
-      attr_reader :device, :rate
+      attr_reader :device
 
       # Initializes an ALSA output stream for the given device name, sample rate,
       # and number of channels.  Alsa will also be told to use the given buffer
@@ -34,7 +34,8 @@ module MB
             '-q'
           ],
           channels,
-          buffer_size
+          buffer_size,
+          rate: rate
         )
       end
     end
