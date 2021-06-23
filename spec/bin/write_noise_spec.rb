@@ -10,7 +10,7 @@ RSpec.describe('Noise generation scripts') do
   ['brown', 'pink', 'white'].each do |n|
     describe "bin/write_#{n}_noise.rb" do
       it 'generates a non-silent file' do
-        text = `bin/write_#{n}_noise.rb #{output} 1 2401 0.1 2>&1`
+        text = `RANDOM_SEED=0 bin/write_#{n}_noise.rb #{output} 1 2401 0.1 2>&1`
         result = ($?)
         expect(result).to be_success
         expect(out_sound.length).to eq(1)
@@ -26,7 +26,7 @@ RSpec.describe('Noise generation scripts') do
       end
 
       it 'can generate multiple channels' do
-        text = `bin/write_#{n}_noise.rb #{output} 4 2401 0.1 2>&1`
+        text = `RANDOM_SEED=0 bin/write_#{n}_noise.rb #{output} 4 2401 0.1 2>&1`
         result = ($?)
         expect(result).to be_success
         expect(out_sound.length).to eq(4)

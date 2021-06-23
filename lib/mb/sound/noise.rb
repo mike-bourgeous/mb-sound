@@ -2,7 +2,9 @@ module MB
   module Sound
     # Methods for generating noise with different spectral characteristics.
     module Noise
-      RAND = Random.new
+      # TODO: Remember why a separate Random instance was used here, and make a
+      # better way to set the seed for reproducibility.
+      RAND = ENV['RANDOM_SEED'] ? Random.new(ENV['RANDOM_SEED'].to_i) : Random.new
 
       # Returns the given number of (positive plus zero) bins of frequency
       # domain white noise.  For example, to generate 4800 time domain samples,
