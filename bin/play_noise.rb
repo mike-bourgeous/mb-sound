@@ -152,6 +152,18 @@ class NoiseGenerator
   end
 
   def run
+    puts " \e[1mq\e[0m - \e[35mQuit\e[0m"
+    puts " \e[1mp\e[0m - \e[35mSwitch to pink noise\e[0m"
+    puts " \e[1mw\e[0m - \e[35mSwitch to white noise\e[0m"
+    puts " \e[1mb\e[0m - \e[35mSwitch to brown noise\e[0m"
+    puts " \e[1m!\e[0m - \e[35mSwitch to power noise\e[0m"
+    puts " \e[1m~\e[0m - \e[35mSwitch to wave noise\e[0m"
+    puts " \e[1m>\e[0m - \e[35mIncrease power noise slope (-3dB == pink)\e[0m"
+    puts " \e[1m<\e[0m - \e[35mDecrease power noise slope (-6dB == brown)\e[0m"
+    puts " \e[1m+\e[0m - \e[35mIncrease output gain\e[0m"
+    puts " \e[1m-\e[0m - \e[35mDecrease output gain\e[0m"
+    puts
+
     `stty raw opost -echo`
 
     counter = 0
@@ -181,7 +193,7 @@ class NoiseGenerator
   end
 end
 
-noise_type = ARGV[0]
+noise_type = ARGV[0] || 'brown'
 raise "Missing noise type #{USAGE}" unless noise_type.is_a?(String) && !noise_type.empty?
 
 channels = ARGV[1]&.to_i || 2
@@ -192,4 +204,5 @@ gain = ARGV[2]&.to_f || 0
 output = MB::Sound.output(rate: 48000, channels: channels)
 generator = NoiseGenerator.new(output, gain, noise_type)
 
+puts "\e[1;33m#{USAGE}\e[0m\n\n"
 generator.run
