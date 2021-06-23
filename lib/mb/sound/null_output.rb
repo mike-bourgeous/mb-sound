@@ -13,6 +13,9 @@ module MB
       # The fake sample rate given to the constructor.
       attr_reader :rate
 
+      # The number of samples that have been written.
+      attr_reader :samples_written
+
       # Initializes a null output stream for the given number of +:channels+.
       # The sample +:rate+ controls sleep duration.  The +:buffer_size+ is
       # stored for compatibility, but otherwise ignored.
@@ -26,12 +29,14 @@ module MB
         @rate = rate
         @buffer_size = buffer_size
         @sleep = sleep
+        @samples_written = 0
       end
 
       # Verifies the correct number of channels were given, sleeps for the
       # duration of the data, then ignores the data.
       def write(data)
         raise "Expected #{@channels} channels, got #{data.length}" unless @channels == data.length
+        @samples_written += data[0].length
         sleep data[0].length.to_f / @rate if @sleep
       end
     end
