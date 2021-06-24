@@ -144,6 +144,14 @@ module MB
         MB::Sound::FFMPEGOutput.new(filename, channels: channels, rate: rate, **kwargs)
       end
 
+      # When the mb-sound-jackffi gem is present and the :jack_ffi input or
+      # output type is used, this returns a shared instance of the
+      # MB::Sound::JackFFI connection to the Jackd audio server.  Used by
+      # #input and #output.
+      def jack
+        @jack ||= MB::Sound::JackFFI[].tap { |j| j.logger = Logger.new(STDOUT, level: Logger::ERROR) }
+      end
+
       # Tries to auto-detect an input device for recording sound.  Returns a
       # sound input stream with a :read method.
       #
@@ -153,23 +161,54 @@ module MB
       # take precedence.  For Jackd, the device is a prefix for port names, with
       # the default being 'system:capture_'.
       #
+      # The input type may be changed using the INPUT_TYPE environment
+      # variable.  Supported input types are :jack_ffi, :jack, :alsa_pulse,
+      # :alsa, and :null.
+      #
       # See FFMPEGInput, mb-sound-jackffi, JackInput, and AlsaInput for more
       # flexible recording.
       def input(rate: 48000, channels: 2, device: nil, buffer_size: nil)
+        input_type = detect_input
+
+        case input_type
+        when :jack_ffi
+          jack.input(channels: channels, connect: device || :physical)
+
+        when :jack
+          MB::Sound::JackInput.new(ports: { device: device, count: channels }, buffer_size: buffer_size)
+
+        when :pulse
+          MB::Sound::AlsaInput.new(device: 'pulse', rate: rate, channels: channels, buffer_size: buffer_size)
+
+        when :alsa
+          MB::Sound::AlsaInput.new(device: device || 'default', rate: rate, channels: channels, buffer_size: buffer_size)
+
+        when :null
+          MB::Sound::NullInput.new(rate: rate, channels: channels)
+
+        else
+          raise NotImplementedError, 'TODO: support other platforms'
+        end
+      end
+
+      # Returns a Symbol describing the type of input that should be used,
+      # based on operating system-specific detection and the INPUT_TYPE
+      # environment variable.  See #input.
+      def detect_input
+        return ENV['INPUT_TYPE'].gsub(/^:/, '').to_sym if ENV['INPUT_TYPE']
+
         case RUBY_PLATFORM
         when /linux/
           if `pgrep jackd`.strip.length > 0
             if defined?(JackFFI)
-              @jack ||= MB::Sound::JackFFI[]
-              @jack.logger = Logger.new(STDOUT, level: Logger::ERROR)
-              o = @jack.input(channels: channels, connect: device || :physical)
+              :jack_ffi
             else
-              MB::Sound::JackInput.new(ports: { device: device, count: channels }, buffer_size: buffer_size)
+              :jack
             end
           elsif `pgrep pulseaudio`.strip.length > 0
-            MB::Sound::AlsaInput.new(device: 'pulse', rate: rate, channels: channels, buffer_size: buffer_size)
+            :alsa_pulse
           else
-            MB::Sound::AlsaInput.new(device: device || 'default', rate: rate, channels: channels, buffer_size: buffer_size)
+            :alsa
           end
 
         else
@@ -220,8 +259,7 @@ module MB
         output_type = detect_output
         case output_type
         when :jack_ffi
-          @jack ||= MB::Sound::JackFFI[].tap { |j| j.logger = Logger.new(STDOUT, level: Logger::ERROR) }
-          o = @jack.output(channels: channels, connect: device || :physical)
+          o = jack.output(channels: channels, connect: device || :physical)
 
         when :jack
           o = MB::Sound::JackOutput.new(ports: { device: device, count: channels }, buffer_size: buffer_size)
@@ -233,7 +271,7 @@ module MB
           o = MB::Sound::AlsaOutput.new(device: device || 'default', rate: rate, channels: channels, buffer_size: buffer_size)
 
         when :null
-          o = MB::Sound::NullOutput.new(channels: channels, rate: rate)
+          o = MB::Sound::NullOutput.new(channels: channels, rate: rate, buffer_size: buffer_size)
 
         else
           raise "Unsupported output type: #{output_type.inspect}"

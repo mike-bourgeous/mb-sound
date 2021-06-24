@@ -34,7 +34,7 @@ module MB
         raise 'Channels must be positive' if channels < 1
         @channels = channels
         @rate = rate
-        @buffer_size = buffer_size
+        @buffer_size = buffer_size || 800
         @sleep = sleep
         @frames_written = 0
       end
