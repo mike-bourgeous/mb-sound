@@ -1,5 +1,7 @@
 # mb-sound
 
+[![Tests](https://github.com/mike-bourgeous/mb-sound/actions/workflows/test.yml/badge.svg)](https://github.com/mike-bourgeous/mb-sound/actions/workflows/test.yml)
+
 A library of simple Ruby tools for processing sound.  This is a companion
 library to an [educational video series I'm making about sound][0].
 
