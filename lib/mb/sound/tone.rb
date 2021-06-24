@@ -161,6 +161,7 @@ module MB
       def initialize(wave_type: :sine, frequency: 440, amplitude: 0.1, phase: 0, duration: 5, rate: 48000)
         @wave_type = wave_type
         @oscillator = nil
+        @noise = false
         self.at(amplitude).for(duration).at_rate(rate).with_phase(phase)
         set_frequency(frequency)
       end
@@ -186,6 +187,32 @@ module MB
       # Changes the waveform type to ramp.
       def ramp
         @wave_type = :ramp
+        self
+      end
+
+      # Changes the waveform type to inverse Gaussian.  The histogram of this
+      # waveform shows a truncated, roughly Gaussian distribution.  The peaks
+      # of this wave type are higher, to match the RMS of the ramp wave.
+      def gauss
+        @wave_type = :gauss
+        self
+      end
+
+      # Changes the oscillator to generate white noise using the distribution
+      # of the current waveform.  For uniform noise, use the ramp wave type.
+      # For approximately Gaussian noise, use the gauss wave type.  The
+      # frequency should probably be 1Hz, but definitely needs to be nonzero.
+      #
+      # This sets the oscillator's +advance+ to 0, and +random_advance+ to
+      # 2*pi.
+      #
+      # Example:
+      #     1.hz.gauss.noise
+      #
+      # Also see the MB::Sound::Noise class for another way to synthesize
+      # noise.
+      def noise
+        @noise = true
         self
       end
 
@@ -254,7 +281,8 @@ module MB
           @wave_type,
           frequency: @frequency,
           phase: @phase,
-          advance: Math::PI * 2.0 / @rate,
+          advance: @noise ? 0 : Math::PI * 2.0 / @rate,
+          random_advance: @noise ? Math::PI * 2.0 : 0,
           range: @range
         )
       end

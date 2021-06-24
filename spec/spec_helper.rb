@@ -1,5 +1,13 @@
+require 'fileutils'
+
 require 'simplecov'
-SimpleCov.start
+SimpleCov.start do
+  SimpleCov.track_files("bin/*")
+end
+
+# Ensure subprocesses load simplecov
+require 'shellwords'
+ENV['RUBYOPT'] = "-r#{File.join(__dir__, 'simplecov_helper.rb')} #{ENV['RUBYOPT']}".strip
 
 require 'mb/sound'
 

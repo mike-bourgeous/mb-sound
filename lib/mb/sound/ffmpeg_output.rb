@@ -1,7 +1,7 @@
 module MB
   module Sound
     class FFMPEGOutput < IOOutput
-      attr_reader :filename, :rate # TODO: Move rate up one or two levels
+      attr_reader :filename
 
       # Starts an FFMPEG process to write audio to the given +filename+.  The
       # +filename+ must point to a writable directory, unless a +format+
@@ -67,7 +67,8 @@ module MB
             @filename
           ],
           channels,
-          buffer_size
+          buffer_size,
+          rate: rate
         )
       end
     end

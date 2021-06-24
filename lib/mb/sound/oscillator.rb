@@ -4,16 +4,17 @@ require 'nibbler'
 module MB
   module Sound
     # An oscillator that can generate different wave types.  This can be used
-    # to generate sound, or as an LFO (low-frequency oscillator).  All
-    # oscillators should start at 0 (except for e.g. square, which doesn't have
-    # a zero), and rise first before falling, unless a phase offset is
-    # specified.
+    # to generate sound, or as an LFO (low-frequency oscillator).  It can also
+    # generate noise with various statistical distributions by setting advance
+    # to 0 and random_advance to 2*pi.  All oscillators should start at 0
+    # (except for e.g. square, which doesn't have a zero), and rise first
+    # before falling, unless a phase offset is specified.
     #
     # An exponential distortion can be applied to the output before or after
     # values are scaled to the desired output range.
     class Oscillator
       RAND = Random.new
-      WAVE_TYPES = [:sine, :square, :triangle, :ramp]
+      WAVE_TYPES = [:sine, :square, :triangle, :ramp, :gauss]
 
       # See #initialize; this is used to make negative powers more useful.
       NEGATIVE_POWER_SCALE = {
@@ -21,6 +22,7 @@ module MB
         triangle: 0.01,
         ramp: 0.01,
         square: 1.0,
+        gauss: 0.01,
       }
 
       # Default note that is used as tuning reference
@@ -72,7 +74,7 @@ module MB
         12.0 * Math.log2(frequency_hz / tune_freq) + tune_note
       end
 
-      attr_accessor :advance, :wave_type, :pre_power, :post_power, :range
+      attr_accessor :advance, :wave_type, :pre_power, :post_power, :range, :random_advance
       attr_reader :phi, :phase, :frequency
 
       # TODO: maybe use a clock provider instead of +advance+?  The challenge is
@@ -225,6 +227,25 @@ module MB
             s = phi / Math::PI - 2.0
           end
 
+        when :gauss
+          # Sideways Gaussian attempt 2
+          # This has an approximately Gaussian distribution, but the crest
+          # factor when generating noise is 16dB instead of the expected 14dB,
+          # and the min and max do not go to infinity.
+          #
+          # TODO: see if there's a better way to calculate this same function
+          x = phi / Math::PI
+          if x < 1.0
+            # 1.6487212707 is ~Math.sqrt(Math::E)
+            s = (Math.sqrt(2 * Math.log(1.6487212707 / (1.0 - x))) - 1) * -3.01.db
+          else
+            s = (-Math.sqrt(2 * Math.log(1.6487212707 / (x - 1.0))) + 1) * -3.01.db
+          end
+
+          # Clamp range to prevent periodic clicks when we get infinity at phi=pi
+          s = -3 if s < -3
+          s = 3 if s > 3
+
         else
           raise "Invalid wave type #{@wave_type.inspect}"
         end
@@ -256,7 +277,7 @@ module MB
           freq = freq.sample if freq.respond_to?(:sample)
 
           advance = @advance
-          advance += RAND.rand(@random_advance) if @random_advance != 0
+          advance += RAND.rand(@random_advance.to_f) if @random_advance != 0
 
           @phi = (@phi + freq * advance) % (Math::PI * 2)
 

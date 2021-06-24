@@ -1,5 +1,3 @@
-require 'shellwords'
-
 module MB
   module Sound
     # A sound output stream that opens the `aplay` command in a pipe and writes
@@ -12,14 +10,17 @@ module MB
     # TODO: It might be possible to use ruby-ffi to interact with ALSA
     # directly, as is done with mb-sound-jackffi.
     class AlsaOutput < MB::Sound::IOOutput
-      attr_reader :device, :rate
+      attr_reader :device
 
       # Initializes an ALSA output stream for the given device name, sample rate,
       # and number of channels.  Alsa will also be told to use the given buffer
       # size.  Warning: does no error checking to see whether aplay was able to
       # open the device!
+      #
+      # The OUTPUT_DEVICE or DEVICE environment variable may be used to
+      # override any device specified by the calling code.
       def initialize(device:, rate:, channels:, buffer_size: nil)
-        @device = device.shellescape
+        @device = ENV['OUTPUT_DEVICE'] || ENV['DEVICE'] || device
         @rate = rate.to_i
 
         super(
@@ -28,13 +29,14 @@ module MB
             '-t', 'raw',
             '-f', 'FLOAT_LE',
             '-r', "#{@rate}",
-            '-c', "#{channels}",
-            ->() { "--buffer-size=#{@buffer_size}" },
+            '-c', "#{channels.to_i}",
+            ->() { "--buffer-size=#{@buffer_size.to_i}" },
             '-D', "#{@device}",
             '-q'
           ],
           channels,
-          buffer_size
+          buffer_size,
+          rate: rate
         )
       end
     end

@@ -8,7 +8,7 @@ module MB
     #
     # Use the mb-sound-jackffi gem instead, if you can.
     class JackOutput < MB::Sound::IOOutput
-      attr_reader :ports, :rate
+      attr_reader :ports
 
       # Initializes a JACK output stream for the given list of port names (pass
       # `nil` for a port name to leave that port disconnected).  Alternatively,
@@ -65,7 +65,8 @@ module MB
             ->() { "jack-stdin -p 25 -L -e floating-point -q -S #{@buffer_size} #{ports} > /dev/null 2>&1" }
           ],
           channels,
-          buffer_size
+          buffer_size,
+          rate: rate
         )
       end
     end

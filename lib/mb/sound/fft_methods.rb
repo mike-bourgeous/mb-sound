@@ -149,6 +149,25 @@ module MB
         end
       end
 
+      # Computes the DFT of the given +narray+, shifts it so the DC coefficient is
+      # in the middle, and keeps at most +bins+ bins on either side.  If +db+ is
+      # true, the values will be converted to decibels.  Useful for visualizing
+      # window functions.
+      def trunc_fft(narray, bins, db = false)
+        dft = fft(narray)
+        mid = dft.size * 0.5
+        min = [0, (mid - bins).to_i].max
+        max = [dft.size - 1, (mid + bins).to_i].min
+        dft = MB::M.rol(dft, mid.to_i)
+        dft = dft[min..max]
+        # TODO: Remove to_a conversion step if possible
+        db ? MB::M.array_to_narray(dft.to_a.map { |v|
+          db = v.to_db
+          db = [-60, db].max unless db.nan?
+          db
+        }) : dft
+      end
+
       # Generates negative frequencies from the given FFT data with only
       # positive frequencies.  This is not required if you use the #real_fft
       # and #real_ifft methods.
@@ -187,6 +206,36 @@ module MB
         full_dft[end_neg..-1] = 0
 
         ifft(full_dft).not_inplace!
+      end
+
+      # Returns unwrapped phase from the given complex +data+, by adding or
+      # subtracting a shift of 2pi whenever the phase jumps by more than pi.
+      def unwrap_phase(data)
+        MB::M.with_inplace(data, false) do |d|
+          offset = 0.0
+          prior = nil
+          max_delta = 0
+          d.arg.map { |v|
+            prior ||= v
+
+            loop do
+              delta = v - prior + offset
+
+              max_delta = delta if delta.abs > max_delta.abs
+
+              if delta > Math::PI
+                offset -= 2.0 * Math::PI
+              elsif delta < -Math::PI
+                offset += 2.0 * Math::PI
+              else
+                break
+              end
+            end
+
+            prior = v + offset
+            prior
+          }
+        end
       end
 
       # TODO: conditionally use FFTW if present?

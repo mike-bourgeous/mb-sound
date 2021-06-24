@@ -147,6 +147,40 @@ module MB
         plotter(graphical: graphical).plot(plotinfo)
       end
 
+      # Plots a histogram of the given data, centered on 0 and scaled so that
+      # the largest dataset's largest values reaches the final histogram bin.
+      # If +log+ is true, then a logarithmic histogram is plotted (log(n+1);
+      # TODO: not sure if this is how it's supposed to be calculated).
+      def hist(data, bins: 800, log: false, graphical: false)
+        data = any_sound_to_hash(data)
+
+        dmax = data.values.map { |d| d.abs.max }.max
+
+        histograms = data.map { |k, d|
+          # TODO: Extract this histogram generation into mb-math maybe
+          histogram = Numo::DFloat.zeros(bins)
+
+          d.each do |v|
+            idx = MB::M.scale(v, -dmax..dmax, 0..(bins - 1)).round
+            histogram[idx] += 1
+          end
+
+          histogram.inplace.map { |v| Math.log(v + 1) } if log
+
+          [
+            k,
+            {
+              data: histogram,
+              yrange: [0, histogram.max]
+            }
+          ]
+        }.to_h
+
+        plotter(graphical: graphical).plot(histograms)
+
+        histograms
+      end
+
       # Plots a subset of the given audio file, test tone, or data, starting at
       # +offset+, and plotting the following +samples+ samples.  If +all+ is true
       # then the entirety of the file, tone, or data will be plotted in slices of

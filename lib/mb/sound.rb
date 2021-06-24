@@ -15,6 +15,8 @@ require_relative 'sound/io_methods'
 require_relative 'sound/plot_methods'
 require_relative 'sound/playback_methods'
 require_relative 'sound/fft_methods'
+require_relative 'sound/gain_methods'
+require_relative 'sound/window_methods'
 
 module MB
   # Convenience functions for making quick work of sound.
@@ -29,6 +31,8 @@ module MB
     extend PlotMethods
     extend PlaybackMethods
     extend FFTMethods
+    extend GainMethods
+    extend WindowMethods
 
     # Returns the current time from the system's monotonically increasing
     # clock.  A shorthand for Process.clock_gettime(Process::CLOCK_MONOTONIC).
@@ -89,9 +93,18 @@ require_relative 'sound/alsa_input'
 require_relative 'sound/alsa_output'
 require_relative 'sound/jack_input'
 require_relative 'sound/jack_output'
+require_relative 'sound/null_input'
+require_relative 'sound/null_output'
 require_relative 'sound/oscillator'
 require_relative 'sound/tone'
 require_relative 'sound/note'
 require_relative 'sound/plot'
 require_relative 'sound/plot_output'
 require_relative 'sound/filter'
+require_relative 'sound/noise'
+
+require_relative 'sound/window'
+require_relative 'sound/window_reader'
+require_relative 'sound/window_writer'
+require_relative 'sound/fft_writer'
+require_relative 'sound/multi_writer'
