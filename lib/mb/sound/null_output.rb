@@ -44,7 +44,7 @@ module MB
       def write(data)
         raise "Expected #{@channels} channels, got #{data.length}" unless @channels == data.length
         @frames_written += data[0].length
-        sleep data[0].length.to_f / @rate if @sleep
+        Kernel.sleep(data[0].length.to_f / @rate) if @sleep
       end
     end
   end
