@@ -1,17 +1,18 @@
-name: test
+# See https://github.com/actions/starter-workflows/blob/1dd15d20337289b85cecafdde824b3a44bc8ed27/ci/ruby.yml
+# which was used as a reference
+name: Tests
 on:
   push:
     branches: [ master ]
   pull_request:
     branches: [ master ]
 
-strategy:
-  matrix:
-    ruby-version: [2.7.x, 3.0.x]
-
 jobs:
   test:
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        ruby-version: [2.7.x, 3.0.x]
     steps:
       - uses: actions/checkout@v2
       - name: Install Ruby
