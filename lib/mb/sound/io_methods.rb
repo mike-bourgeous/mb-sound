@@ -184,6 +184,7 @@ module MB
           MB::Sound::AlsaInput.new(device: device || 'default', rate: rate, channels: channels, buffer_size: buffer_size)
 
         when :null
+          # TODO: Allow changing the duration of the null input using environment variables
           MB::Sound::NullInput.new(rate: rate, channels: channels)
 
         else
