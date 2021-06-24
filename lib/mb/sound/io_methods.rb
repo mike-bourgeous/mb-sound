@@ -153,7 +153,8 @@ module MB
       # take precedence.  For Jackd, the device is a prefix for port names, with
       # the default being 'system:capture_'.
       #
-      # See FFMPEGInput, JackInput, and AlsaInput for more flexible recording.
+      # See FFMPEGInput, mb-sound-jackffi, JackInput, and AlsaInput for more
+      # flexible recording.
       def input(rate: 48000, channels: 2, device: nil, buffer_size: nil)
         case RUBY_PLATFORM
         when /linux/
@@ -189,7 +190,8 @@ module MB
       # variable.  Supported output types are :jack_ffi, :jack, :alsa_pulse,
       # :alsa, and :null.
       #
-      # See FFMPEGOutput, JackOutput, and AlsaOutput for more flexible playback.
+      # See FFMPEGOutput, mb-sound-jackffi, JackOutput, and AlsaOutput for more
+      # flexible playback.
       #
       # Pass either true or a Hash of options for MB::Sound::PlotOutput in
       # +:plot+ to enable live plotting.
@@ -218,8 +220,7 @@ module MB
         output_type = detect_output
         case output_type
         when :jack_ffi
-          @jack ||= MB::Sound::JackFFI[]
-          @jack.logger = Logger.new(STDOUT, level: Logger::ERROR)
+          @jack ||= MB::Sound::JackFFI[].tap { |j| j.logger = Logger.new(STDOUT, level: Logger::ERROR) }
           o = @jack.output(channels: channels, connect: device || :physical)
 
         when :jack

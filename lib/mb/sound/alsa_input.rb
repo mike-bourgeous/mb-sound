@@ -1,5 +1,3 @@
-require 'shellwords'
-
 module MB
   module Sound
     # A sound input stream that opens the `arecord` command in a pipe and reads
@@ -18,6 +16,9 @@ module MB
       # and number of channels.  Alsa will be told to use the given buffer size
       # (number of samples per channel per buffer) as well.  Warning: does no
       # error checking to see whether arecord was able to open the device!
+      #
+      # The INPUT_DEVICE or DEVICE environment variable may be used to override
+      # any device specified by the calling code.
       def initialize(device:, rate:, channels:, buffer_size: nil)
         @device = ENV['INPUT_DEVICE'] || ENV['DEVICE'] || device
         @rate = rate.to_i
@@ -28,10 +29,10 @@ module MB
             '-t', 'raw',
             '-f', 'FLOAT_LE',
             '-r', "#{@rate}",
-            '-c', "#{channels}",
-            ->() { "--buffer-size=#{@buffer_size}" },
-            '-D', "#{@device.shellescape}",
-            '-q'
+            '-c', "#{channels.to_i}",
+            ->() { "--buffer-size=#{@buffer_size.to_i}" },
+            '-D', "#{@device}",
+            '-q',
           ],
           channels,
           buffer_size

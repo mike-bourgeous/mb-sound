@@ -1,5 +1,3 @@
-require 'shellwords'
-
 module MB
   module Sound
     # A sound output stream that opens the `aplay` command in a pipe and writes
@@ -18,8 +16,11 @@ module MB
       # and number of channels.  Alsa will also be told to use the given buffer
       # size.  Warning: does no error checking to see whether aplay was able to
       # open the device!
+      #
+      # The OUTPUT_DEVICE or DEVICE environment variable may be used to
+      # override any device specified by the calling code.
       def initialize(device:, rate:, channels:, buffer_size: nil)
-        @device = device.shellescape
+        @device = ENV['OUTPUT_DEVICE'] || ENV['DEVICE'] || device
         @rate = rate.to_i
 
         super(
@@ -28,8 +29,8 @@ module MB
             '-t', 'raw',
             '-f', 'FLOAT_LE',
             '-r', "#{@rate}",
-            '-c', "#{channels}",
-            ->() { "--buffer-size=#{@buffer_size}" },
+            '-c', "#{channels.to_i}",
+            ->() { "--buffer-size=#{@buffer_size.to_i}" },
             '-D', "#{@device}",
             '-q'
           ],
