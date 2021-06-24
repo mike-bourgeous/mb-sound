@@ -44,6 +44,9 @@ module MB
       def write(data)
         raise "Expected #{@channels} channels, got #{data.length}" unless @channels == data.length
         @frames_written += data[0].length
+
+        # FIXME: This should sleep relative to the previous call to maintain a
+        # rate, rather than sleeping for a fixed duration.
         Kernel.sleep(data[0].length.to_f / @rate) if @sleep
       end
     end
