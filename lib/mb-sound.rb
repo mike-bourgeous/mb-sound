@@ -1,1 +1,1 @@
-require 'mb/sound'
+require_relative 'mb/sound'
