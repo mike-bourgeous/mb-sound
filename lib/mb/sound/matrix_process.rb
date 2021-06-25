@@ -6,6 +6,8 @@ module MB
     # frequency-domain data by a Ruby Matrix object, producing one or more output
     # streams (depending on the size of the Matrix).
     #
+    # The incoming data and the processing matrix may contain Complex numbers.
+    #
     # The incoming channels are treated as a column vector, which when
     # multiplied by the processing matrix results in another column vector for
     # the output channels.
@@ -23,6 +25,8 @@ module MB
     class MatrixProcess
       attr_reader :input_channels, :output_channels
 
+      # TODO: Maybe a .from_file method that can load from JSON, YML, or CSV?
+
       # Initializes a matrix processor with the given +matrix+, which must be a
       # Ruby Matrix.
       def initialize(matrix)
@@ -31,12 +35,6 @@ module MB
 
         @input_channels = matrix.column_count
         @output_channels = matrix.row_count
-
-        if @matrix.any? { |v| v.is_a?(Complex) || v.is_a?(Numo::SComplex) || v.is_a?(Numo::DComplex) }
-          @default_output_class = Numo::SComplex
-        else
-          @default_output_class = Numo::SFloat
-        end
       end
 
       # Multiplies the list of channels by the processing matrix and returns
@@ -45,24 +43,7 @@ module MB
       # `Numo::NArray#not_inplace!` on the data before passing).
       def process(data)
         raise "Expected #{@input_channels} channels, got #{data.length}" unless data.length == @input_channels
-
-        # TODO: Reuse buffers to reduce GC churn
-        if data.any? { |d| d.is_a?(Numo::SComplex) || d.is_a?(Numo::DComplex) }
-          outputs = @output_channels.times.map { Numo::SComplex.zeros(data[0].length) }
-        else
-          outputs = @output_channels.times.map { @default_output_class.zeros(data[0].length) }
-        end
-
-        for idx in 0...data[0].length
-          v = Vector[*data.map { |d| d[idx] }]
-          o = @matrix * v
-
-          for c in 0...@output_channels do
-            outputs[c][idx] = o[c]
-          end
-        end
-
-        outputs
+        (@matrix * Vector[*data]).to_a
       end
     end
   end
