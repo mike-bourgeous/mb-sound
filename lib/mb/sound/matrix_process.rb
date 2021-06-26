@@ -90,6 +90,9 @@ module MB
     # TODO: Should there be an extra 1.0 column for translation / DC bias?
     # TODO: Allow changing the matrix?
     # TODO: Think of a better name? -- ProcessingMatrix
+    # TODO: consider ways to specify a channel layout or channel names in a
+    # matrix, so the correct channel layout can be given to FFMPEG when
+    # exporting audio.
     class MatrixProcess
       attr_reader :input_channels, :output_channels
 
@@ -145,9 +148,6 @@ module MB
 
       # Initializes a matrix processor with the given +matrix+, which must be a
       # Ruby Matrix.
-      #
-      # TODO: should it be possible to give names to input and output channels
-      # here?  Where would such names be used?
       def initialize(matrix)
         raise MatrixTypeError, "Processing matrix must be a Ruby Matrix class, not #{matrix.class}" unless matrix.is_a?(::Matrix)
         raise MatrixTypeError, 'Processing matrix must have at least one row and one column' if matrix.empty?

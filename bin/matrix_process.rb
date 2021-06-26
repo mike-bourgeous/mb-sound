@@ -38,7 +38,7 @@ raise "Matrix file #{mat_file.inspect} not found.\n#{USAGE}" unless File.readabl
 p = MB::Sound::MatrixProcess.from_file(mat_file)
 
 puts "\nProcessing \e[1;34m#{in_file.inspect}\e[0m through matrix \e[1;36m#{mat_file.inspect}\e[0m."
-puts "Expecting \e[1m#{p.input_channels}\e[0m input channels, producing \e[1m#{p.output_channels}\e[0m output channels."
+puts "Expecting \e[1m#{p.input_channels}\e[0m input channel(s), producing \e[1m#{p.output_channels}\e[0m output channel(s)."
 
 MB::U.prevent_overwrite(out_file, prompt: true)
 
@@ -46,6 +46,11 @@ input_stream = MB::Sound::FFMPEGInput.new(in_file, channels: p.input_channels)
 input = input_stream.read(input_stream.frames)
 input_stream.close
 
+if input_stream.info[:channels] != p.input_channels
+  puts "\e[1mNote:\e[0;33m audio file originally had \e[1m#{input_stream.info[:channels]}\e[22m channel(s), not \e[1m#{p.input_channels}\e[0m."
+end
+
+# TODO: Somehow pass channel layout to FFMPEG
 output_stream = MB::Sound::FFMPEGOutput.new(out_file, rate: input_stream.rate, channels: p.output_channels)
 output = p.process(input)
 output_stream.write(output)
