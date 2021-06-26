@@ -34,12 +34,6 @@ module MB
     extend GainMethods
     extend WindowMethods
 
-    # Returns the current time from the system's monotonically increasing
-    # clock.  A shorthand for Process.clock_gettime(Process::CLOCK_MONOTONIC).
-    def self.clock_now
-      Process.clock_gettime(Process::CLOCK_MONOTONIC)
-    end
-
     # Filters a sound with the given filter parameters (see
     # MB::Sound::Filter::Cookbook).
     #

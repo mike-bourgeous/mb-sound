@@ -57,10 +57,10 @@ module MB
         @output.write(data)
 
         period = data[0].length.to_f / @output.rate
-        now = ::MB::Sound.clock_now
+        now = ::MB::U.clock_now
 
         # Subtract some time to build up a buffer before plotting
-        @next_time ||= ::MB::Sound.clock_now - 0.2
+        @next_time ||= ::MB::U.clock_now - 0.2
 
         remaining = @next_time - now
         this_time = @next_time
@@ -71,7 +71,7 @@ module MB
           plot(data)
 
           # The sleep is necessary to maintain sync
-          remaining = this_time - ::MB::Sound.clock_now
+          remaining = this_time - ::MB::U.clock_now
           Kernel.sleep(0.75 * remaining) if @sleep && remaining > 0
         elsif remaining < 0
           # Force a plot eventually for really large lags (e.g. happens when
