@@ -1,9 +1,10 @@
 GIT
   remote: https://github.com/mike-bourgeous/mb-math.git
-  revision: f5530823ad488955f926980a415cc80ebda2a378
+  revision: f461cbf8ae563675abaf4a2fe0dfe8d97e37d8e3
   specs:
-    mb-math (0.0.1.usegit)
+    mb-math (0.0.3.usegit)
       cmath (~> 1.0.0)
+      mb-util (>= 0.1.0.usegit)
       numo-narray (~> 0.9.1)
 
 GIT
@@ -16,17 +17,17 @@ GIT
 
 GIT
   remote: https://github.com/mike-bourgeous/mb-util.git
-  revision: e083d47981e5930e9abb869d5a85d8fc2f6c620d
+  revision: 511a2e636f88eb402a87a87da59c4c1edbc6821d
   specs:
-    mb-util (0.0.2.usegit)
+    mb-util (0.1.1.usegit)
 
 PATH
   remote: .
   specs:
-    mb-sound (0.2.0.usegit)
+    mb-sound (0.2.1.usegit)
       cmath (~> 1.0.0)
-      mb-math
-      mb-util
+      mb-math (>= 0.0.3.usegit)
+      mb-util (>= 0.1.1.usegit)
       midi-nibbler (~> 0.2.4)
       numo-narray (~> 0.9.1.8)
       numo-pocketfft (~> 0.2.2)
@@ -84,10 +85,10 @@ PLATFORMS
 
 DEPENDENCIES
   cmath
-  mb-math (>= 0.0.1.usegit)!
+  mb-math!
   mb-sound!
   mb-sound-jackffi (>= 0.0.15.usegit)!
-  mb-util (>= 0.0.2.usegit)!
+  mb-util!
   numo-narray
   pry
   pry-byebug
