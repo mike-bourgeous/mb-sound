@@ -89,7 +89,7 @@ module MB
     #
     # TODO: Should there be an extra 1.0 column for translation / DC bias?
     # TODO: Allow changing the matrix?
-    # TODO: Think of a better name?
+    # TODO: Think of a better name? -- ProcessingMatrix
     class MatrixProcess
       attr_reader :input_channels, :output_channels
 
