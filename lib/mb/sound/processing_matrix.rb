@@ -45,14 +45,14 @@ module MB
     # Examples:
     #
     #     # Pass-through of two channels
-    #     p = MB::Sound::MatrixProcess.new(
+    #     p = MB::Sound::ProcessingMatrix.new(
     #       Matrix.identity(2) # Same thing as Matrix[[1, 0], [0, 1]]
     #     )
     #     p.process([Numo::SFloat[1, 2, 3], Numo::SFloat[4, 5, 6]])
     #     # => [Numo::SFloat[1, 2, 3], Numo::SFloat[4, 5, 6]]
     #
     #     # Swap channels
-    #     p = MB::Sound::MatrixProcess.new(
+    #     p = MB::Sound::ProcessingMatrix.new(
     #       Matrix[
     #         [0, 1],
     #         [1, 0]
@@ -64,7 +64,7 @@ module MB
     #     # Hafler circuit to generate rear ambience from stereo
     #     # Two input channels, four output channels
     #     # https://en.wikipedia.org/wiki/Hafler_circuit
-    #     p = MB::Sound::MatrixProcess.new(
+    #     p = MB::Sound::ProcessingMatrix.new(
     #       Matrix[
     #         [1, 0], # Left
     #         [0, 1], # Right
@@ -78,7 +78,7 @@ module MB
     #     # ElectroVoice Stereo-4 (1970) encoder
     #     # Four input channels, two output channels
     #     # https://en.wikipedia.org/wiki/Stereo-4
-    #     p = MB::Sound::MatrixProcess.new(
+    #     p = MB::Sound::ProcessingMatrix.new(
     #       Matrix[
     #         [1.0, 0.3, 1.0, -0.5], # Left total
     #         [0.3, 1.0, -0.5, 1.0], # Right total
@@ -93,7 +93,7 @@ module MB
     # TODO: consider ways to specify a channel layout or channel names in a
     # matrix, so the correct channel layout can be given to FFMPEG when
     # exporting audio.
-    class MatrixProcess
+    class ProcessingMatrix
       attr_reader :input_channels, :output_channels
 
       class MatrixTypeError < ArgumentError
@@ -102,7 +102,7 @@ module MB
         end
       end
 
-      # Creates a MatrixProcess instance from a 2D array of numbers (real or
+      # Creates a ProcessingMatrix instance from a 2D array of numbers (real or
       # complex) loaded from the given +filename+, which may be CSV, TSV, JSON,
       # or YAML.
       #
@@ -135,7 +135,7 @@ module MB
           data = convert_to_numbers(data).map(&method(:Array))
         end
 
-        MatrixProcess.new(Matrix[*data])
+        ProcessingMatrix.new(Matrix[*data])
       end
 
       # Tries to convert every element of the array to Float if possible,

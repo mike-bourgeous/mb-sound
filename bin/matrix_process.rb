@@ -11,7 +11,7 @@
 #
 # The matrix file should be a CSV, TSV, JSON, or YAML file that contains a 1D
 # or 2D array of numbers (real or complex).  See
-# MB::Sound::MatrixProcess.from_file for more information about the matrix file
+# MB::Sound::ProcessingMatrix.from_file for more information about the matrix file
 # format.
 
 require 'bundler/setup'
@@ -35,7 +35,7 @@ in_file, mat_file, out_file = ARGV
 raise "Input file #{in_file.inspect} not found.\n#{USAGE}" unless File.readable?(in_file)
 raise "Matrix file #{mat_file.inspect} not found.\n#{USAGE}" unless File.readable?(mat_file)
 
-p = MB::Sound::MatrixProcess.from_file(mat_file)
+p = MB::Sound::ProcessingMatrix.from_file(mat_file)
 
 puts "\nProcessing \e[1;34m#{in_file.inspect}\e[0m through matrix \e[1;36m#{mat_file.inspect}\e[0m."
 puts "Expecting \e[1m#{p.input_channels}\e[0m input channel(s), producing \e[1m#{p.output_channels}\e[0m output channel(s)."

@@ -103,7 +103,7 @@ require_relative 'sound/plot'
 require_relative 'sound/plot_output'
 require_relative 'sound/filter'
 require_relative 'sound/noise'
-require_relative 'sound/matrix_process'
+require_relative 'sound/processing_matrix'
 
 require_relative 'sound/window'
 require_relative 'sound/window_reader'
