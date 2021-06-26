@@ -1,4 +1,7 @@
 require 'matrix'
+require 'csv'
+require 'yaml'
+require 'json'
 
 module MB
   module Sound
@@ -60,6 +63,7 @@ module MB
     #
     #     # Hafler circuit to generate rear ambience from stereo
     #     # Two input channels, four output channels
+    #     # https://en.wikipedia.org/wiki/Hafler_circuit
     #     p = MB::Sound::MatrixProcess.new(
     #       Matrix[
     #         [1, 0], # Left
@@ -89,12 +93,64 @@ module MB
     class MatrixProcess
       attr_reader :input_channels, :output_channels
 
+      class MatrixTypeError < ArgumentError
+        def initialize(msg = 'Data must be an Array of Numerics, or an Array of Arrays of Numerics')
+          super(msg)
+        end
+      end
+
       # TODO: Maybe a .from_file method that can load from JSON, YML, or CSV?
+      def self.from_file(filename)
+        # TODO: Maybe merge with the similar code in mb-geometry and move into mb-util
+        case File.extname(filename).downcase
+        when '.json'
+          data = JSON.parse(File.read(filename))
+
+        when '.yml', '.yaml'
+          data = YAML.load(File.read(filename))
+
+        when '.csv'
+          data = CSV.read(filename, converters: :numeric)
+
+        when '.tsv'
+          data = CSV.read(filename, col_sep: "\t", converters: :numeric)
+
+        else
+          raise "Unsupported extension on file #{filename.inspect}"
+        end
+
+        raise MatrixTypeError unless data.is_a?(Array)
+
+        if data.all?(Array)
+          data.map! { |d| convert_to_numbers(d) }
+        else
+          data = convert_to_numbers(data).map(&method(:Array))
+        end
+
+        MatrixProcess.new(Matrix[*data])
+      end
+
+      # Tries to convert every element of the array to Float if possible,
+      # Complex if not.  Raises an error if any element could not be converted.
+      # Modifies the array in-place.  Used by .from_file.
+      def self.convert_to_numbers(arr)
+        arr.map! { |v|
+          begin
+            v.is_a?(Numeric) ? v : (Float(v) rescue Complex(v.gsub(/\s+/, '')))
+          rescue => e
+            raise MatrixTypeError
+          end
+        }
+      end
 
       # Initializes a matrix processor with the given +matrix+, which must be a
       # Ruby Matrix.
+      #
+      # TODO: should it be possible to give names to input and output channels
+      # here?  Where would such names be used?
       def initialize(matrix)
-        raise "Processing matrix must be a Ruby Matrix class, not #{matrix.class}" unless matrix.is_a?(::Matrix)
+        raise MatrixTypeError, "Processing matrix must be a Ruby Matrix class, not #{matrix.class}" unless matrix.is_a?(::Matrix)
+        raise MatrixTypeError, 'Processing matrix must have at least one row and one column' if matrix.empty?
         @matrix = matrix
 
         @input_channels = matrix.column_count
@@ -106,7 +162,7 @@ module MB
       # which should not be set to in-place modification (call
       # `Numo::NArray#not_inplace!` on the data before passing).
       def process(data)
-        raise "Expected #{@input_channels} channels, got #{data.length}" unless data.length == @input_channels
+        raise ArgumentError, "Expected #{@input_channels} channels, got #{data.length}" unless data.length == @input_channels
         (@matrix * Vector[*data]).to_a
       end
     end
