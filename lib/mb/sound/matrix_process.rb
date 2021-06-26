@@ -102,7 +102,12 @@ module MB
         end
       end
 
-      # TODO: Maybe a .from_file method that can load from JSON, YML, or CSV?
+      # Creates a MatrixProcess instance from a 2D array of numbers (real or
+      # complex) loaded from the given +filename+, which may be CSV, TSV, JSON,
+      # or YAML.
+      #
+      # See example matrix files in the matrices/ directory at the top of the
+      # project.
       def self.from_file(filename)
         # TODO: Maybe merge with the similar code in mb-geometry and move into mb-util
         case File.extname(filename).downcase
