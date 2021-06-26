@@ -82,7 +82,7 @@ plots = window_list.map { |c|
   }
 }
 
-p = MB::Sound::Plot.new
+p = MB::M::Plot.new
 begin
   loop do
     # Loop because gnuplot doesn't resize plots when the window is resized

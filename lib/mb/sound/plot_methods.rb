@@ -37,8 +37,8 @@ module MB
       # Overriding this method to return some other compatible object allows
       # other plotting systems to be used by the CLI DSL.
       def plotter(graphical: false)
-        @pt ||= MB::Sound::Plot.terminal(height_fraction: 0.8)
-        @pg ||= MB::Sound::Plot.new if graphical
+        @pt ||= MB::M::Plot.terminal(height_fraction: 0.8)
+        @pg ||= MB::M::Plot.new if graphical
         graphical ? @pg : @pt
       end
 

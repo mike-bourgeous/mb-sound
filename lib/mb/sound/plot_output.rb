@@ -37,9 +37,9 @@ module MB
           @p = plot
           @plot_set = true
         elsif graphical
-          @p = MB::Sound::Plot.new
+          @p = MB::M::Plot.new
         else
-          @p = MB::Sound::Plot.terminal(height_fraction: (U.height - header_lines - 2).to_f / U.height)
+          @p = MB::M::Plot.terminal(height_fraction: (U.height - header_lines - 2).to_f / U.height)
         end
 
         @min = -0.1

@@ -16,9 +16,9 @@ require 'mb-sound'
 # Histogram
 $distr = Numo::Int64.zeros(1001)
 
-$p = MB::Sound::Plot.new
+$p = MB::M::Plot.new
 
-$p2 = MB::Sound::Plot.new
+$p2 = MB::M::Plot.new
 $p2.plot(histogram: $distr)
 
 def min_gain_for_bins(bins)

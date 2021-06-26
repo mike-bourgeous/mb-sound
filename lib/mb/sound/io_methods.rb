@@ -233,7 +233,7 @@ module MB
       # See FFMPEGOutput, mb-sound-jackffi, JackOutput, and AlsaOutput for more
       # flexible playback.
       #
-      # Pass either true or a Hash of options for MB::Sound::PlotOutput in
+      # Pass either true or a Hash of options for MB::M::PlotOutput in
       # +:plot+ to enable live plotting.
       def output(rate: 48000, channels: 2, device: nil, buffer_size: nil, plot: nil)
         info = {rate: rate, channels: channels, device: device, buffer_size: buffer_size}
@@ -246,7 +246,7 @@ module MB
           @plot_outputs ||= {}
           o = @plot_outputs[[plot, info]]
           o = nil if o&.closed?
-          o ||= MB::Sound::PlotOutput.new(output(**info), **p)
+          o ||= MB::M::PlotOutput.new(output(**info), **p)
           @plot_outputs[[plot, info]] ||= o
 
           return o

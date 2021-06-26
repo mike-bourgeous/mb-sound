@@ -36,7 +36,7 @@ gains = (10..1000).map { |bins|
 # gain to prevent time domain clipping.
 #
 # The goal is to have the minimum gain as close to 1 as reasonable.
-p = MB::Sound::Plot.new
+p = MB::M::Plot.new
 p.yrange(0, 2)
 p.plot({min: gains.map(&:min), max: gains.map(&:max), avg: gains.map { |v| v.sum / v.size }, percentnotone: gains.map { |v| v.count { |g| g < 0.999 } / v.size.to_f }})
 STDIN.readline
