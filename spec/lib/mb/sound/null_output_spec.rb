@@ -4,8 +4,17 @@ RSpec.describe(MB::Sound::NullOutput) do
   let(:null_sleep) { MB::Sound::NullOutput.new(channels: 1, sleep: true) }
   let(:null_sleep_44k) { MB::Sound::NullOutput.new(channels: 1, sleep: true, rate: 44100) }
   let(:null_no_sleep) { MB::Sound::NullOutput.new(channels: 1, sleep: false) }
+  let(:null_3ch) { MB::Sound::NullOutput.new(channels: 3, sleep: false) }
   let(:short_data) { [Numo::SFloat.zeros(12000)] }
   let(:long_data) { [Numo::SFloat.zeros(96000)] }
+
+  describe '#close' do
+    it 'prevents further writing' do
+      expect { null_3ch.write([short_data] * 3) }.not_to raise_error
+      null_3ch.close
+      expect { null_3ch.write([short_data] * 3) }.to raise_error(/closed/)
+    end
+  end
 
   describe '#write' do
     context 'when sleep is true' do

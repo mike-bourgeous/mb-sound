@@ -22,11 +22,13 @@ module MB
         @fill = fill
         @buffer = Numo::SFloat.new(initial_buffer).fill(@fill)
         @samples_read = 0
+        @closed = false
       end
 
       # Reads +frames+ frames of raw 32-bit floats of +@fill+ for +@channels+
       # channels.  Returns an array of buffers, one buffer per channel.
       def read(frames)
+        raise 'This input is closed' if @closed
         raise 'Must read at least one frame' if frames < 1
 
         if @length > 0
@@ -44,6 +46,17 @@ module MB
         @samples_read += frames
 
         [@buffer[0..(frames - 1)]] * @channels
+      end
+
+      # Closes the input, preventing future writing (for compatibility with
+      # other input types).
+      def close
+        @closed = true
+      end
+
+      # Returns true if this input has been closed.
+      def closed?
+        @closed
       end
     end
   end

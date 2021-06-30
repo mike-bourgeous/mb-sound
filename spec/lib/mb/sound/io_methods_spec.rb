@@ -1,4 +1,30 @@
 RSpec.describe(MB::Sound::IOMethods) do
+  describe '#output' do
+    before(:each) {
+      ENV['OUTPUT_TYPE'] = ':null'
+    }
+
+    after(:each) {
+      ENV.delete('OUTPUT_TYPE')
+    }
+
+    it 'returns a working null output when ENV["OUTPUT_TYPE"] is :null' do
+      o = MB::Sound.output
+      expect(o).to be_a(MB::Sound::NullOutput)
+      expect { o.write([Numo::SFloat.zeros(800)] * 2) }.not_to raise_error
+      o.close
+    end
+
+    it 'returns a working PlotOutput when plot is set' do
+      ENV['OUTPUT_TYPE'] = ':null'
+      o = MB::Sound.output(plot: { plot: MB::M::Plot.terminal.tap { |p| p.print = false } })
+      expect(o).to be_a(MB::Sound::PlotOutput)
+      expect(o.output).to be_a(MB::Sound::NullOutput)
+      expect { o.write([Numo::SFloat.zeros(800)] * 2) }.not_to raise_error
+      o.close
+    end
+  end
+
   describe '#read' do
     it 'can read a sound file' do
       a = MB::Sound.read('sounds/sine/sine_100_1s_mono.flac')

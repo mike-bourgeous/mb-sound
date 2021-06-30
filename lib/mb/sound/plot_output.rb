@@ -14,6 +14,9 @@ module MB
       # sync (e.g. a synchronous plotting backend).
       attr_accessor :sleep
 
+      # The output stream to which this PlotOutput will forward audio data.
+      attr_reader :output
+
       # Initializes an output plotter for the given +output+.  Up to
       # +:window_size+ samples will be drawn from each call to #write.
       #
@@ -83,7 +86,7 @@ module MB
       # Closes the output stream and stops plotting.
       def close
         @closed = true
-        puts "\e[#{@p.height + @header_lines + 2}H" if @p.respond_to?(:height)
+        puts "\e[#{@p.height + @header_lines + 2}H" if @p.respond_to?(:height) && @p.respond_to?(:print) && @p.print
         @p.close unless @plot_set
         @output.close
       end
@@ -98,7 +101,7 @@ module MB
       private
 
       def plot(data)
-        puts "\e[#{@header_lines + 1}H\e[36mPress Ctrl-C to stop\e[0m\e[K"
+        puts "\e[#{@header_lines + 1}H\e[36mPress Ctrl-C to stop\e[0m\e[K" if !@p.respond_to?(:print) || @p.print
 
         samples = [@window_size, data[0].length].min
 

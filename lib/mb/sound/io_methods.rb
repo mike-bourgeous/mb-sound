@@ -236,7 +236,7 @@ module MB
       # Pass either true or a Hash of options for MB::Sound::PlotOutput in
       # +:plot+ to enable live plotting.
       def output(rate: 48000, channels: 2, device: nil, buffer_size: nil, plot: nil)
-        info = {rate: rate, channels: channels, device: device, buffer_size: buffer_size}
+        info = {rate: rate, channels: channels, device: device, buffer_size: buffer_size, plot: plot}
 
         if plot
           graphical = plot.is_a?(Hash) && plot[:graphical] || false
@@ -246,7 +246,7 @@ module MB
           @plot_outputs ||= {}
           o = @plot_outputs[[plot, info]]
           o = nil if o&.closed?
-          o ||= MB::Sound::PlotOutput.new(output(**info), **p)
+          o ||= MB::Sound::PlotOutput.new(output(**info.merge(plot: nil)), **p)
           @plot_outputs[[plot, info]] ||= o
 
           return o
