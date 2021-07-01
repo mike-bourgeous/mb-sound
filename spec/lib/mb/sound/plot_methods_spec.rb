@@ -44,6 +44,11 @@ RSpec.describe(MB::Sound::PlotMethods) do
       expect(text).to include('mag **')
       expect(text).to include('phase **')
     end
+
+    it 'can plot a Filter' do
+      lines = MB::Sound.mag_phase(5000.hz.lowpass)
+      expect(lines.length).to be_between(37, 41).inclusive
+    end
   end
 
   describe '#time_freq' do
@@ -57,6 +62,11 @@ RSpec.describe(MB::Sound::PlotMethods) do
       expect(text).not_to match(/^\s*0 .*\*{5,}.*\|$/) # no extended dwell at zero
       check_regex(text, /^\s*0 .*(\*+[^*|]+){12,}.*\|$/) # at least 12 zero crossings
       check_regex(text, /^\s*-40 .*\*{10,}.*\|$/) # lots of frequency plot density
+    end
+
+    it 'can plot a Filter' do
+      lines = MB::Sound.time_freq(5000.hz.lowpass)
+      expect(lines.length).to be_between(37, 41).inclusive
     end
   end
 
@@ -132,6 +142,20 @@ RSpec.describe(MB::Sound::PlotMethods) do
       expect(text).to include('1 **')
       expect(text).to include('2 **')
       expect(text).to include('3 **')
+    end
+
+    it 'can plot an entire sound in a loop when :all is true' do
+      expect(MB::Sound).to receive(:sleep).at_least(4).times
+      expect(MB::Sound).to receive(:puts).at_least(2).times
+      expect(STDOUT).to receive(:write).at_least(2).times
+      lines = MB::Sound.plot(123.hz.sine.generate(3200), all: true, samples: 800)
+      expect(lines.length).to be_between(37, 41).inclusive
+    end
+
+    it 'can plot a Filter' do
+      expect(MB::Sound).to receive(:puts).with(/Plotting.*Filter/m)
+      lines = MB::Sound.plot(5000.hz.lowpass)
+      expect(lines.length).to be_between(37, 41).inclusive
     end
   end
 end

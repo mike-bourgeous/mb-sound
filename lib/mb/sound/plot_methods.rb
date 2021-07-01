@@ -227,7 +227,7 @@ module MB
         p = plotter(graphical: graphical)
 
         if all == true
-          t = clock_now
+          t = MB::U.clock_now
 
           result = nil
 
@@ -242,7 +242,7 @@ module MB
 
             result = plot(data, samples: samples, offset: offset, all: nil, graphical: graphical, spectrum: spectrum)
 
-            now = clock_now
+            now = MB::U.clock_now
             elapsed = [now - t, 0.1].min
             t = now
 
