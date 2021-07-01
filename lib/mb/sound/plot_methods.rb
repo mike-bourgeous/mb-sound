@@ -18,17 +18,30 @@ module MB
       end
 
       # Called by the SIGWINCH signal handler to resize plots when the terminal
-      # window is resized.
+      # window is resized.  Closes any existing plotters and recreates any that
+      # previously existed (necessary if SIGWINCH arrives in the middle of a
+      # function that is using a plotter through instance variables).
       def reset_plotter
+        @pt ||= nil
+        @pg ||= nil
         old_pt = @pt
         old_pg = @pg
+
+        close_plotter
+
+        plotter(graphical: false) if old_pt
+        plotter(graphical: true) if old_pg
+      end
+
+      # Closes existing MB::M::Plot plotters without creating new ones.  Useful
+      # for cleaning up between tests.
+      def close_plotter
+        @pt ||= nil
+        @pg ||= nil
         @pt&.close
         @pg&.close
         @pt = nil
         @pg = nil
-
-        plotter(graphical: false) if old_pt
-        plotter(graphical: true) if old_pg
       end
 
       # Returns either a terminal-based plotting object if +graphical+ is false,
@@ -36,9 +49,9 @@ module MB
       #
       # Overriding this method to return some other compatible object allows
       # other plotting systems to be used by the CLI DSL.
-      def plotter(graphical: false)
-        @pt ||= MB::M::Plot.terminal(height_fraction: 0.8)
-        @pg ||= MB::M::Plot.new if graphical
+      def plotter(graphical: false, **kwargs)
+        @pt ||= MB::M::Plot.terminal(height_fraction: 0.8, **kwargs)
+        @pg ||= MB::M::Plot.new(**kwargs) if graphical
         graphical ? @pg : @pt
       end
 
@@ -177,8 +190,6 @@ module MB
         }.to_h
 
         plotter(graphical: graphical).plot(histograms)
-
-        histograms
       end
 
       # Plots a subset of the given audio file, test tone, or data, starting at
@@ -218,6 +229,8 @@ module MB
         if all == true
           t = clock_now
 
+          result = nil
+
           until offset >= data[0].length
             STDOUT.write("\e[#{header_lines}H\e[36mPress Ctrl-C to stop  \e[1;35m#{offset} / #{data[0].length}\e[0m\e[K\n")
 
@@ -227,7 +240,7 @@ module MB
               p.yrange(data.map(&:min).min, data.map(&:max).max) if p.respond_to?(:yrange)
             end
 
-            plot(data, samples: samples, offset: offset, all: nil, graphical: graphical, spectrum: spectrum)
+            result = plot(data, samples: samples, offset: offset, all: nil, graphical: graphical, spectrum: spectrum)
 
             now = clock_now
             elapsed = [now - t, 0.1].min
@@ -238,6 +251,8 @@ module MB
             STDOUT.flush
             sleep 0.02
           end
+
+          result if p.respond_to?(:print) && !p.print
         else
           data = data.map { |c| c[offset...([offset + samples, c.length].min)] || [] }
 
@@ -251,10 +266,10 @@ module MB
           p.yrange(data.map(&:min).min, data.map(&:max).max) if p.respond_to?(:yrange) && !all.nil?
 
           @lines = p.plot(data.map.with_index { |c, idx| [idx.to_s, c] }.to_h, print: false)
-          puts @lines
-        end
+          puts @lines if p.respond_to?(:print) && p.print
 
-        nil
+          @lines if p.respond_to?(:print) && !p.print
+        end
       ensure
         if all == true
           if graphical
