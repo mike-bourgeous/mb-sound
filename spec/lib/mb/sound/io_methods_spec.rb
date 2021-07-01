@@ -16,12 +16,18 @@ RSpec.describe(MB::Sound::IOMethods) do
     end
 
     it 'returns a working PlotOutput when plot is set' do
-      ENV['OUTPUT_TYPE'] = ':null'
-      o = MB::Sound.output(plot: { plot: MB::M::Plot.terminal.tap { |p| p.print = false } })
-      expect(o).to be_a(MB::Sound::PlotOutput)
-      expect(o.output).to be_a(MB::Sound::NullOutput)
-      expect { o.write([Numo::SFloat.zeros(800)] * 2) }.not_to raise_error
-      o.close
+      begin
+        ENV['OUTPUT_TYPE'] = ':null'
+        o = MB::Sound.output(plot: { plot: MB::M::Plot.terminal.tap { |p| p.print = false } })
+        expect(o).to be_a(MB::Sound::PlotOutput)
+        expect(o.output).to be_a(MB::Sound::NullOutput)
+
+        o.sleep = false
+        expect { o.write([Numo::SFloat.zeros(800)] * 2) }.not_to raise_error
+
+      ensure
+        o&.close
+      end
     end
   end
 
