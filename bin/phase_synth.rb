@@ -72,17 +72,19 @@ end
 
 phases << { start: samples + RATE, phase: nil } unless phases.last[:phase].nil?
 
+# TODO: print or highlight these during processing?
 puts "\n\e[1;33mIndex \e[32m  Start  \e[34mPhase\e[0m"
 phases.each_with_index do |p, idx|
   puts "\e[33m#{idx.to_s.rjust(4)}: \e[32m#{p[:start].to_s.rjust(7)} \e[34m#{(p[:phase] ? '%.2f' % p[:phase] : 'END').rjust(6)}\e[0m"
 end
 
+osc = MB::Sound::Oscillator.new(ENV['WAVE_TYPE'].sub(/^:/, '').to_sym)
 sample = 0
 phase_idx = 0
 prior_phase = phases[0][:phase]
 data = [Numo::SFloat.zeros(phases.last[:start]), Numo::SFloat.zeros(phases.last[:start])]
 while sample <= phases.last[:start] # XXX <= should be < but testing another condition
-  amp = 0.5
+  amp = 0.25
 
   # Fade in at start
   if sample < AMP_TRANSITION
@@ -103,8 +105,8 @@ while sample <= phases.last[:start] # XXX <= should be < but testing another con
 
   # phase is divided by 360 for half phase in each channel
   base_phase = sample * freq * 2.0 * Math::PI / RATE
-  data[0][sample] = amp * Math.sin(base_phase + phase * Math::PI / 360.0)
-  data[1][sample] = amp * Math.sin(base_phase - phase * Math::PI / 360.0)
+  data[0][sample] = amp * osc.oscillator((base_phase + phase * Math::PI / 360.0) % (2.0 * Math::PI))
+  data[1][sample] = amp * osc.oscillator((base_phase - phase * Math::PI / 360.0) % (2.0 * Math::PI))
 
   sample += 1
 
