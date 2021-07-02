@@ -198,6 +198,12 @@ module MB
         self
       end
 
+      # Changes the waveform type to parabolic.
+      def parabola
+        @wave_type = :parabola
+        self
+      end
+
       # Changes the oscillator to generate white noise using the distribution
       # of the current waveform.  For uniform noise, use the ramp wave type.
       # For approximately Gaussian noise, use the gauss wave type.  The

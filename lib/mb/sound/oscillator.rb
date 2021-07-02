@@ -14,7 +14,7 @@ module MB
     # values are scaled to the desired output range.
     class Oscillator
       RAND = Random.new
-      WAVE_TYPES = [:sine, :square, :triangle, :ramp, :gauss]
+      WAVE_TYPES = [:sine, :square, :triangle, :ramp, :gauss, :parabola]
 
       # See #initialize; this is used to make negative powers more useful.
       NEGATIVE_POWER_SCALE = {
@@ -23,6 +23,7 @@ module MB
         ramp: 0.01,
         square: 1.0,
         gauss: 0.01,
+        parabola: 0.01,
       }
 
       # Default note that is used as tuning reference
@@ -245,6 +246,13 @@ module MB
           # Clamp range to prevent periodic clicks when we get infinity at phi=pi
           s = -3 if s < -3
           s = 3 if s > 3
+
+        when :parabola
+          if phi < Math::PI
+            s = 1.0 - (1.0 - phi * 2.0 / Math::PI) ** 2
+          else
+            s = (phi * 2.0 / Math::PI - 3.0) ** 2 - 1.0
+          end
 
         else
           raise "Invalid wave type #{@wave_type.inspect}"
