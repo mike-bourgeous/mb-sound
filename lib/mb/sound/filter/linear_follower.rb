@@ -11,10 +11,13 @@ module MB
       #
       # Different upward and downward maximums may be set.
       #
-      # One application of this class is smoothing control parameter changes.
+      # Applications of this class include smoothing control parameter changes
+      # and following signal envelopes.
       #
       # This is analogous to a slew rate limiter, and will have strange
-      # nonlinear effects if applied to audio.
+      # nonlinear effects if applied to audio.  Specifically, on audio it acts
+      # kind of like a low-pass filter plus distortion, where the distortion
+      # goes up and the cutoff frequency goes down as a signal gets louder.
       class LinearFollower < Filter
         # The sample rate given to the constructor, in Hz.
         attr_reader :rate

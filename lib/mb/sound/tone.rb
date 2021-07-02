@@ -323,6 +323,28 @@ module MB
         MB::Sound::Filter::Cookbook.new(:peak, @rate, @frequency, bandwidth_oct: octaves, db_gain: gain.to_db)
       end
 
+      # Returns a LinearFollower with its max_rise and max_fall set to allow
+      # variations back and forth between the max amplitude set by #at no
+      # faster than this Tone's frequency.  This is a nonlinear filter with an
+      # amplitude- and waveform-dependent effect.  It acts sort of like a
+      # lowpass filter whose cutoff frequency decreases (and harmonic
+      # distortion increases) as the signal amplitude increases.
+      def follower
+        # Multiple of 4 below:
+        #   2 for the fact that a full cycle requires both a rise and fall, so
+        #   must be twice frequency
+        #
+        #   2 for the fact that amplitude is one-sided, but the cycle must rise
+        #   from -amplitude to +amplitude (so it travels a total of
+        #   2*amplitude)
+        MB::Sound::Filter::LinearFollower.new(
+          rate: @rate,
+          max_rise: 4 * @frequency * @amplitude,
+          max_fall: 4 * @frequency * @amplitude,
+          absolute: false
+        )
+      end
+
       # Writes the tone's full duration to the +output+ stream.  The tone will
       # be written into every channel of the output stream (TODO: support
       # different channels) at the output stream's sample rate.
