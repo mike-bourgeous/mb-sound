@@ -1,7 +1,7 @@
 #!/usr/bin/env ruby
 # Plots different window functions and their overlap
-# Usage: bin/windows.rb [window_length [hop]] [window and plot names]
-# e.g. bin/windows.rb 2048 Hann dft
+# Usage: bin/plot_windows.rb [window_length [hop]] [window and plot names]
+# e.g. bin/plot_windows.rb 2048 Hann dft
 
 require 'rubygems'
 require 'bundler/setup'
