@@ -274,7 +274,7 @@ RSpec.describe MB::Sound::Tone do
     end
   end
 
-  describe '#highpass' do
+  describe '#peak' do
     it 'returns a Filter' do
       f = 523.hz.at(-5.db).at_rate(32323).peak(octaves: 1.1)
       expect(f).to be_a(MB::Sound::Filter::Cookbook)
@@ -283,6 +283,43 @@ RSpec.describe MB::Sound::Tone do
       expect(f.filter_type).to eq(:peak)
       expect(f.bandwidth_oct).to eq(1.1)
       expect(f.db_gain.round(4)).to eq(-5)
+    end
+  end
+
+  describe '#follower' do
+    let(:f) { 375.hz.at(1).follower }
+
+    it 'generates a linear velocity-limited signal follower' do
+      expect(f).to be_a(MB::Sound::Filter::LinearFollower)
+      expect(f.rate).to eq(48000)
+      expect(f.max_rise).to eq(375 * 4 / 48000.0)
+      expect(f.max_fall).to eq(375 * 4 / 48000.0)
+      expect(f.absolute).to eq(false)
+    end
+
+    it 'increases the rise and fall rates with frequency' do
+      expect(500.hz.follower.max_rise).to be > 250.hz.follower.max_rise
+      expect(500.hz.follower.max_fall).to be > 250.hz.follower.max_fall
+    end
+
+    it 'increases the rise and fall rates with amplitude' do
+      expect(500.hz.at(1).follower.max_rise).to be > 500.hz.at(0.5).follower.max_rise
+      expect(500.hz.at(1).follower.max_fall).to be > 500.hz.at(0.5).follower.max_fall
+    end
+
+    it 'passes a lower-frequency triangle wave unmodified' do
+      data = 50.hz.triangle.at(1).generate(1024)
+      expect(MB::M.round(f.process(data), 6)).to eq(MB::M.round(data, 6))
+    end
+
+    it 'passes an equal-frequency triangle wave unmodified' do
+      data = 375.hz.triangle.at(1).generate(1024)
+      expect(MB::M.round(f.process(data), 6)).to eq(MB::M.round(data, 6))
+    end
+
+    it 'does not pass an equal-frequency sine wave unmodified' do
+      data = 375.hz.sine.at(1).generate(1024)
+      expect(MB::M.round(f.process(data), 6)).not_to eq(MB::M.round(data, 6))
     end
   end
 

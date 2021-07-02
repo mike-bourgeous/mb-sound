@@ -62,4 +62,15 @@ RSpec.describe(MB::Sound::Filter::LinearFollower) do
       expect(MB::M.round(lf.process(data), 6)).to eq(expected)
     end
   end
+
+  describe '#reset' do
+    it 'sets the filters output value directly' do
+      lf = MB::Sound::Filter::LinearFollower.new(rate: 1, max_rise: 1, max_fall: 2)
+      data = Numo::SFloat[0, 0, 0, 0, 100]
+      expected = Numo::SFloat[48, 46, 44, 42, 43]
+
+      lf.reset(50)
+      expect(MB::M.round(lf.process(data), 6)).to eq(expected)
+    end
+  end
 end
