@@ -158,4 +158,48 @@ RSpec.describe(MB::Sound::PlotMethods) do
       expect(lines.length).to be_between(37, 41).inclusive
     end
   end
+
+  describe '#table' do
+    it 'can display an evaluated method call' do
+      expect(MB::Sound).to receive(:puts).with(/[|+]/).exactly(23).times
+      MB::Sound.table(CMath.method(:acos))
+    end
+
+    it 'can display a proc' do
+      expect(MB::Sound).to receive(:puts).with(/[|+]/).exactly(2).times
+      expect(MB::Sound).to receive(:puts).with(/15151/).exactly(21).times
+      MB::Sound.table(->(x){15151})
+    end
+
+    it 'can display an NArray' do
+      expect(MB::Sound).to receive(:puts).with(/[|+]/).exactly(2).times
+      expect(MB::Sound).to receive(:puts).with(/50/)
+      expect(MB::Sound).to receive(:puts).with(/40/)
+      expect(MB::Sound).to receive(:puts).with(/30/)
+      expect(MB::Sound).to receive(:puts).with(/20/)
+      expect(MB::Sound).to receive(:puts).with(/10/)
+      MB::Sound.table(Numo::Int32[50, 40, 30, 20, 10], steps: 5)
+    end
+
+    it 'can display complex numbers' do
+      expect(MB::Sound).to receive(:puts).with(/#.*0/)
+      expect(MB::Sound).to receive(:puts).with(/-\+-/)
+      expect(MB::Sound).to receive(:puts).with(/5.*1.*-.*1.*i/)
+      expect(MB::Sound).to receive(:puts).with(/6.*1.*-.*1.*i/)
+      MB::Sound.table([1-1i], range: 5..6, steps: 2)
+    end
+
+    it 'can use a custom range and steps' do
+      expect(MB::Sound).to receive(:puts).with(/[|+]/).exactly(2).times
+      expect(MB::Sound).to receive(:puts).with(/-2.5.*20/)
+      expect(MB::Sound).to receive(:puts).with(/-1.5.*30/)
+      MB::Sound.table([20, 30], range: -3..-2, steps: [-2.5, -1.5])
+    end
+
+    it 'can display multiple columns' do
+      expect(MB::Sound).to receive(:puts).with(/[|+]/).exactly(2).times
+      expect(MB::Sound).to receive(:puts).with(/.+\|.+\|.+/).exactly(21).times
+      MB::Sound.table([CMath.method(:acos), CMath.method(:asin)])
+    end
+  end
 end
