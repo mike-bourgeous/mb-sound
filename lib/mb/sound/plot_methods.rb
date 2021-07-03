@@ -220,6 +220,9 @@ module MB
         when Filter
           data = [file_tone_data.impulse_response, file_tone_data.frequency_response.abs]
 
+        when Proc, Method
+          data = [Numo::SFloat.linspace(-1, 1, samples).map { |v| file_tone_data.call(v) }]
+
         else
           raise "Cannot plot type #{file_tone_data.class.name}"
         end
@@ -278,6 +281,96 @@ module MB
           elsif @pt.respond_to?(:height)
             puts "\e[#{@pt.height + (header_lines || 2) + 2}H"
           end
+        end
+      end
+
+      # Prints a table of values for the given +data+ source, which may be a
+      # Numo::NArray, a callable Proc or Method, an Array thereof, or a Hash
+      # with labels pointing to Numo::NArrays or Procs.
+      #
+      # For a Numo::NArray, +:steps+ elements (or steps.length elements if
+      # +:steps+ is an Array) are taken from the array and associated with a
+      # linearly mapped value from the +:range+ for display.
+      #
+      # For a callable Method or Proc, the +:range+ is divided into equally
+      # spaced +:steps+ equally spaced steps (or +:steps+ is used directly if
+      # it is an Array), and each step is passed to the callable.
+      #
+      # TODO: Maybe this should be in mb-math.
+      def table(data, range: -1..1, steps: 21)
+        # Gradually coerce any incoming data type into a Hash of callable or NArray
+        data = Numo::NArray.cast(data) if is_numeric_array?(data)
+        data = [data] unless data.is_a?(Array) || data.is_a?(Hash)
+        data = data.map.with_index { |v, idx| [table_key(v, idx), v] }.to_h if data.is_a?(Array)
+
+        steps = Numo::DFloat.linspace(range.begin, range.end, steps) unless steps.respond_to?(:map)
+
+        results = [steps.to_a] + data.map { |k, v|
+          evaluate(v, range: range, steps: steps).to_a
+        }
+        results = results.transpose
+
+        formatted = results.map { |row|
+          row.map { |v|
+            v = MB::M.sigfigs(v, 6) if v.is_a?(Numeric)
+            MB::U.highlight(v).strip
+          }
+        }
+        column_width = 2 + formatted.flatten.map { |hl|
+          MB::U.remove_ansi(hl).length
+        }.max
+
+        header = (['#'] + data.keys).map.with_index { |k, idx| "\e[1;#{31 + idx % 7}m#{k.to_s.center(column_width)}\e[0m" }.join('|')
+        separator = (['-' * column_width] * (data.length + 1)).join('+')
+
+        puts header
+        puts separator
+
+        formatted.each do |row|
+          puts(
+            row.map { |hl|
+              len = MB::U.remove_ansi(hl).length
+              extra = column_width - len
+              pre = extra / 2
+              post = extra - pre
+              "#{' ' * pre}#{hl}#{' ' * post}"
+            }.join('|')
+          )
+        end
+
+        nil
+      end
+
+      private
+
+      # Used by #table to generate table entries for the given +data+.
+      def evaluate(data, range:, steps:, try_convert: true)
+        if data.respond_to?(:call)
+          steps.map { |s| data.call(s) }
+        elsif data.respond_to?(:[])
+          steps.map { |s|
+            idx = MB::M.scale(s, range, 0..(data.length - 1))
+            idx = 0 if idx < 0
+            idx = data.length - 1 if idx > data.length - 1
+            data[idx]
+          }
+        elsif try_convert
+          evaluate(convert_sound_to_narray(data), range: range, steps: steps, try_convert: false)
+        else
+          raise "Don't know how to evaluate #{data.class} data"
+        end
+      end
+
+      def table_key(value, index)
+        case value
+        when Method, Class
+          "#{index}: #{value.name}"
+
+        when Proc
+          "#{index}: Proc"
+
+        else
+          index.to_s
         end
       end
     end

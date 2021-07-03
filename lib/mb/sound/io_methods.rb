@@ -11,6 +11,8 @@ module MB
       # array, false if it's not an array or contains non-numeric data.  Only
       # checks the first element of an array.
       def is_numeric_array?(array)
+        return false unless array.is_a?(Array)
+
         case array[0]
         when Array
           is_numeric_array?(array[0])
