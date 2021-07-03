@@ -297,6 +297,34 @@ module MB
       # it is an Array), and each step is passed to the callable.
       #
       # TODO: Maybe this should be in mb-math.
+      #
+      # Example:
+      #
+      #     table([Math.method(:acos), Math.method(:asin)], range: -1..1, steps: 21)
+      #
+      #          #     |  0: acos  |  1: asin
+      #     -----------+-----------+-----------
+      #     -1.0       | 3.14159   |-1.5708
+      #     -0.9       | 2.69057   |-1.11977
+      #     -0.8       | 2.49809   |-0.927295
+      #     -0.7       | 2.34619   |-0.775397
+      #     -0.6       | 2.2143    |-0.643501
+      #     -0.5       | 2.0944    |-0.523599
+      #     -0.4       | 1.98231   |-0.411517
+      #     -0.3       | 1.87549   |-0.304693
+      #     -0.2       | 1.77215   |-0.201358
+      #     -0.1       | 1.67096   |-0.100167
+      #      0.0       | 1.5708    | 0.0
+      #      0.1       | 1.47063   | 0.100167
+      #      0.2       | 1.36944   | 0.201358
+      #      0.3       | 1.2661    | 0.304693
+      #      0.4       | 1.15928   | 0.411517
+      #      0.5       | 1.0472    | 0.523599
+      #      0.6       | 0.927295  | 0.643501
+      #      0.7       | 0.795399  | 0.775397
+      #      0.8       | 0.643501  | 0.927295
+      #      0.9       | 0.451027  | 1.11977
+      #      1.0       | 0.0       | 1.5708
       def table(data, range: -1..1, steps: 21)
         # Gradually coerce any incoming data type into a Hash of callable or NArray
         data = Numo::NArray.cast(data) if is_numeric_array?(data)
@@ -329,10 +357,14 @@ module MB
         formatted.each do |row|
           puts(
             row.map { |hl|
-              len = MB::U.remove_ansi(hl).length
+              colorless = MB::U.remove_ansi(hl)
+              len = colorless.length
               extra = column_width - len
-              pre = extra / 2
+              # TODO: align on the decimal point
+              # pre = extra / 2
+              pre = colorless.start_with?('-') ? 0 : 1
               post = extra - pre
+              post = 0 if post < 0
               "#{' ' * pre}#{hl}#{' ' * post}"
             }.join('|')
           )
