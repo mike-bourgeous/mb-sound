@@ -332,6 +332,7 @@ module MB
         data = data.map.with_index { |v, idx| [table_key(v, idx), v] }.to_h if data.is_a?(Array)
 
         steps = Numo::DFloat.linspace(range.begin, range.end, steps) unless steps.respond_to?(:map)
+        steps = steps.to_a
 
         results = [steps.to_a] + data.map { |k, v|
           evaluate(v, range: range, steps: steps).to_a
@@ -381,7 +382,7 @@ module MB
           steps.map { |s| data.call(s) }
         elsif data.respond_to?(:[])
           steps.map { |s|
-            idx = MB::M.scale(s, range, 0..(data.length - 1))
+            idx = MB::M.scale(s.real, range, 0..(data.length - 1))
             idx = 0 if idx < 0
             idx = data.length - 1 if idx > data.length - 1
             data[idx]
