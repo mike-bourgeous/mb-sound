@@ -78,7 +78,7 @@ phases.each_with_index do |p, idx|
   puts "\e[33m#{idx.to_s.rjust(4)}: \e[32m#{p[:start].to_s.rjust(7)} \e[34m#{(p[:phase] ? '%.2f' % p[:phase] : 'END').rjust(6)}\e[0m"
 end
 
-osc = MB::Sound::Oscillator.new(ENV['WAVE_TYPE'].sub(/^:/, '').to_sym)
+osc = MB::Sound::Oscillator.new(ENV['WAVE_TYPE']&.sub(/^:/, '')&.to_sym || :sine)
 sample = 0
 phase_idx = 0
 prior_phase = phases[0][:phase]
