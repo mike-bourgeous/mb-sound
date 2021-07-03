@@ -208,7 +208,14 @@ module MB
 
         case file_tone_data
         when Array, Numo::NArray
-          data = any_sound_to_array(file_tone_data)
+          data = file_tone_data.map { |d|
+            if d.respond_to?(:call)
+              Numo::SFloat.linspace(-1, 1, samples).map { |v| d.call(v) }
+            else
+              d
+            end
+          }
+          data = any_sound_to_array(data)
 
         when String
           # TODO: Read speaker names
