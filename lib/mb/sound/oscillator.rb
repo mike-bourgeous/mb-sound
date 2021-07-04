@@ -14,7 +14,14 @@ module MB
     # values are scaled to the desired output range.
     class Oscillator
       RAND = Random.new
-      WAVE_TYPES = [:sine, :square, :triangle, :ramp, :gauss, :parabola]
+      WAVE_TYPES = [:sine, :complex_sine, :square, :complex_square, :triangle, :ramp, :gauss, :parabola]
+
+      # Buffer type to use for each oscillator.  Anything not included here
+      # uses Numo::SFloat.
+      BUFFER_CLASS = {
+        complex_sine: Numo::SComplex,
+        complex_square: Numo::SComplex,
+      }
 
       # See #initialize; this is used to make negative powers more useful.
       NEGATIVE_POWER_SCALE = {
@@ -200,6 +207,9 @@ module MB
         when :sine
           s = Math.sin(phi)
 
+        when :complex_sine
+          s = CMath.exp(1i * (phi - Math::PI / 2))
+
         when :triangle
           if phi < 0.5 * Math::PI
             # Initial rise from 0..1 in 0..pi/2
@@ -218,6 +228,18 @@ module MB
           else
             s = -1.0
           end
+
+        when :complex_square
+          # FIXME: This doesn't draw a perfect rectangle in the side polar
+          # view.  The imaginary part is not symmetric around discontinuities.
+          # Perhaps the phase needs to be shifted by one half sample.
+          s = 2.0 * MB::M.csc_int(phi).conj * 1i / Math::PI + 1.0
+          unless s.finite?
+            s = 2.0 * MB::M.csc_int(phi + 0.0000001).conj * 1i / Math::PI + 1.0
+          end
+
+          s = Complex(s.real, -6) if s.imag < -6
+          s = Complex(s.real, 6) if s.imag > 6
 
         when :ramp
           if phi < Math::PI
@@ -269,7 +291,7 @@ module MB
       def sample(count = nil)
         return sample(1)[0] if count.nil?
 
-        @osc_buf = Numo::SFloat.zeros(count) if @osc_buf.nil? || @osc_buf.length != count
+        build_buffer(count)
 
         count.times do |idx|
           result = oscillator(@phi)
@@ -299,6 +321,15 @@ module MB
         buf = MB::M.safe_power(buf, @post_power) if @post_power != 1.0
 
         buf
+      end
+
+      private
+
+      def build_buffer(count)
+        buf_class = BUFFER_CLASS[@wave_type] || Numo::SFloat
+        if @osc_buf.nil? || @osc_buf.class != buf_class || @osc_buf.length != count
+          @osc_buf = buf_class.zeros(count)
+        end
       end
     end
   end

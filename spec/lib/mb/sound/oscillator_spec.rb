@@ -51,6 +51,34 @@ RSpec.describe MB::Sound::Oscillator do
       expect(lfo.oscillator(1.5 * Math::PI).round(6)).to eq(-1)
       expect(lfo.oscillator(1.875 * Math::PI).round(6)).to eq(-1)
     end
+
+    it 'returns expected complex sine values' do
+      o = MB::Sound::Oscillator.new(:complex_sine)
+      expect(MB::M.round(o.oscillator(0), 6)).to eq(0-1i)
+      expect(MB::M.round(o.oscillator(45.degrees), 6)).to eq(MB::M.round(CMath.exp(-45i.degrees), 6))
+      expect(MB::M.round(o.oscillator(90.degrees), 6)).to eq(1+0i)
+      expect(MB::M.round(o.oscillator(180.degrees), 6)).to eq(0+1i)
+      expect(MB::M.round(o.oscillator(270.degrees), 6)).to eq(-1+0i)
+    end
+
+    it 'returns expected complex square values' do
+      o = MB::Sound::Oscillator.new(:complex_square)
+      expect(MB::M.round(o.oscillator(45.degrees), 6).real).to eq(1)
+      expect(MB::M.round(o.oscillator(45.degrees), 6).imag).to be < 0.25
+
+      expect(MB::M.round(o.oscillator(90.degrees), 6)).to eq(1)
+
+      expect(MB::M.round(o.oscillator(135.degrees), 6).real).to eq(1)
+      expect(MB::M.round(o.oscillator(135.degrees), 6).imag).to be > 0.25
+
+      expect(MB::M.round(o.oscillator(225.degrees), 6).real).to eq(-1)
+      expect(MB::M.round(o.oscillator(225.degrees), 6).imag).to be > 0.25
+
+      expect(MB::M.round(o.oscillator(270.degrees), 6)).to eq(-1)
+
+      expect(MB::M.round(o.oscillator(315.degrees), 6).real).to eq(-1)
+      expect(MB::M.round(o.oscillator(315.degrees), 6).imag).to be < -0.25
+    end
   end
 
   describe '#sample' do
@@ -170,6 +198,25 @@ RSpec.describe MB::Sound::Oscillator do
       expect(data.min.round(3)).to eq(-1)
       expect(data.max.round(3)).to eq(1)
       expect(data.sum.round(2)).to eq(0)
+    end
+
+    it 'matches the analytic signal for a complex sine wave' do
+      oscil = 240.hz.complex_sine.at(1).oscillator
+      result = oscil.sample(1600)
+      target = Numo::SComplex.cast(MB::Sound.analytic_signal(240.hz.at(1).generate(1600)))
+
+      expect(MB::M.round(result, 5)).to eq(MB::M.round(target, 5))
+    end
+
+    it 'matches the analytic signal for a complex square wave' do
+      oscil = 240.hz.complex_square.at(1).oscillator
+      result = oscil.sample(1600)
+      target = Numo::SComplex.cast(MB::Sound.analytic_signal(240.hz.square.at(1).generate(16000))[6402...8002])
+
+      # FIXME
+      delta = result - target
+      expect(MB::M.round(result.real, 5)).to eq(MB::M.round(target.real, 5))
+      expect(MB::M.round(result.imag[20..180], 5)).to eq(MB::M.round(target.imag[20..180], 5))
     end
   end
 

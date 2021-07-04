@@ -204,6 +204,25 @@ module MB
         self
       end
 
+      # Changes the waveform to complex sine.  The real part is equal to the
+      # sine waveform, and the complex part is such that the combined waveform
+      # spirals counterclockwise.
+      def complex_sine
+        @wave_type = :complex_sine
+        self
+      end
+
+      # Changes the waveform to complex square.  The real part is approximately
+      # equal to the square waveform, and the complex part is the integral of
+      # the cosecant, such that the resulting waveform matches the analytic
+      # signal form of the square wave and spirals counterclockwise.
+      def complex_square
+        @wave_type = :complex_square
+        self
+      end
+
+      # TODO: implement complex triangle
+
       # Changes the oscillator to generate white noise using the distribution
       # of the current waveform.  For uniform noise, use the ramp wave type.
       # For approximately Gaussian noise, use the gauss wave type.  The
