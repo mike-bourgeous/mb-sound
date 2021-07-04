@@ -208,15 +208,17 @@ RSpec.describe MB::Sound::Oscillator do
       expect(MB::M.round(result, 5)).to eq(MB::M.round(target, 5))
     end
 
-    it 'matches the analytic signal for a complex square wave' do
+    it 'matches the analytic signal for a complex square wave (approximately)' do
       oscil = 240.hz.complex_square.at(1).oscillator
       result = oscil.sample(1600)
-      target = Numo::SComplex.cast(MB::Sound.analytic_signal(240.hz.square.at(1).generate(16000))[6402...8002])
+      target = Numo::SComplex.cast(MB::Sound.analytic_signal(240.hz.square.at(1).generate(16000))[6401...8001])
 
-      # FIXME
-      delta = result - target
       expect(MB::M.round(result.real, 5)).to eq(MB::M.round(target.real, 5))
-      expect(MB::M.round(result.imag[20..180], 5)).to eq(MB::M.round(target.imag[20..180], 5))
+
+      delta = result.imag - target.imag
+      expect(delta.abs.max).to be < 0.4
+      expect(delta.mean.abs).to be < 0.001
+      expect(delta.abs.mean).to be < 0.05
     end
   end
 

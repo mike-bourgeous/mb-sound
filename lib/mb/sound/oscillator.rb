@@ -294,8 +294,6 @@ module MB
         build_buffer(count)
 
         count.times do |idx|
-          result = oscillator(@phi)
-
           # TODO: this doesn't modulate strongly enough
           # FM attempt:
           # fm = Oscillator.new(
@@ -308,8 +306,16 @@ module MB
 
           advance = @advance
           advance += RAND.rand(@random_advance.to_f) if @random_advance != 0
+          delta = freq * advance
 
-          @phi = (@phi + freq * advance) % (Math::PI * 2)
+          if @wave_type == :complex_square
+            # TODO: Find a way to move this wavetype-specific code out of this function
+            result = oscillator(@phi + delta / 2)
+          else
+            result = oscillator(@phi)
+          end
+
+          @phi = (@phi + delta) % (Math::PI * 2)
 
           @osc_buf[idx] = result
         end
