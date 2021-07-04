@@ -16,4 +16,6 @@ RSpec.describe('bin/plot_windows.rb') do
     expect(text).to include('DoubleHann')
     expect(text).not_to include('Rectangular')
   end
+
+  pending 'can override window size and hop'
 end
