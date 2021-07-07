@@ -210,7 +210,8 @@ module MB
         when Array, Numo::NArray
           data = file_tone_data.map { |d|
             if d.respond_to?(:call)
-              Numo::SFloat.linspace(-1, 1, samples).map { |v| d.call(v) }
+              # TODO: could this be moved into any_sound_to_array?
+              Numo::SFloat.linspace(-10, 10, samples).map { |v| d.call(v) }
             else
               d
             end
@@ -228,7 +229,7 @@ module MB
           data = [file_tone_data.impulse_response, file_tone_data.frequency_response.abs]
 
         when Proc, Method
-          data = [Numo::SFloat.linspace(-1, 1, samples).map { |v| file_tone_data.call(v) }]
+          data = [Numo::SFloat.linspace(-10, 10, samples).map { |v| file_tone_data.call(v) }]
 
         else
           raise "Cannot plot type #{file_tone_data.class.name}"
