@@ -14,13 +14,24 @@ module MB
     # values are scaled to the desired output range.
     class Oscillator
       RAND = Random.new
-      WAVE_TYPES = [:sine, :complex_sine, :square, :complex_square, :triangle, :ramp, :gauss, :parabola]
+      WAVE_TYPES = [
+        :sine,
+        :complex_sine,
+        :square,
+        :complex_square,
+        :triangle,
+        :complex_triangle,
+        :ramp,
+        :gauss,
+        :parabola,
+      ]
 
       # Buffer type to use for each oscillator.  Anything not included here
       # uses Numo::SFloat.
       BUFFER_CLASS = {
         complex_sine: Numo::SComplex,
         complex_square: Numo::SComplex,
+        complex_triangle: Numo::SComplex,
       }
 
       # See #initialize; this is used to make negative powers more useful.
@@ -222,6 +233,18 @@ module MB
             s = phi * 2.0 / Math::PI - 4.0
           end
 
+        when :complex_triangle
+          # The constant factor scales the triangle portion to a range of -1..1.
+          # In Sage:
+          #     f = integrate(-2*atanh(e^(i*x)), x)
+          #     limit(f, x = 0)
+          #     # -pi*log(2) + I*dilog(2)
+          #
+          # The -pi*log(2) cancels the real part of dilog(2) leaving:
+          #     (-pi*log(2) + I*dilog(2)).n()
+          #     # 2.46740110027234*I
+          s = MB::M.csc_int_int(phi + Math::PI / 2) * 1i / 2.46740110027234
+
         when :square
           if phi < Math::PI
             s = 1.0
@@ -230,9 +253,8 @@ module MB
           end
 
         when :complex_square
-          # FIXME: This doesn't draw a perfect rectangle in the side polar
-          # view.  The imaginary part is not symmetric around discontinuities.
-          # Perhaps the phase needs to be shifted by one half sample.
+          # Note: to draw a rectangle in the polar view, the phase needs to be
+          # shifted by one half sample.  This is done in #sample.
           s = 2.0 * MB::M.csc_int(phi).conj * 1i / Math::PI + 1.0
           unless s.finite?
             s = 2.0 * MB::M.csc_int(phi + 0.0000001).conj * 1i / Math::PI + 1.0
