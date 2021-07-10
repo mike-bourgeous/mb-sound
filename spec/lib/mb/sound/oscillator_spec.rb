@@ -220,6 +220,19 @@ RSpec.describe MB::Sound::Oscillator do
       expect(delta.mean.abs).to be < 0.001
       expect(delta.abs.mean).to be < 0.05
     end
+
+    it 'matches the analytic signal for a complex triangle wave (approximately)' do
+      oscil = 240.hz.complex_triangle.at(1).oscillator
+      result = oscil.sample(1600)
+      target = Numo::SComplex.cast(MB::Sound.analytic_signal(240.hz.triangle.at(1).generate(16000))[6400...8000])
+
+      expect(MB::M.round(result.real, 6)).to eq(MB::M.round(target.real, 6))
+
+      delta = result.imag - target.imag
+      expect(delta.abs.max).to be < 0.005
+      expect(delta.mean.abs).to be < 0.0005
+      expect(delta.abs.mean).to be < 0.0005
+    end
   end
 
   describe '#trigger' do
