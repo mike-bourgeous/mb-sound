@@ -80,10 +80,12 @@ midi = Nibbler.new
 
 OSC_COUNT = 8
 osc_pool = OscPool.new(
-  OSC_COUNT.times.map { 240.hz.ramp.at(0).oscillator }
+  OSC_COUNT.times.map { 240.hz.complex_ramp.at(0).oscillator }
 )
 
 filter = 1500.hz.lowpass(quality: 4)
+
+rot = 1
 
 loop do
   midi.clear_buffer
@@ -106,11 +108,17 @@ loop do
           freq = 20.0 * 10.0 ** decade
           filter.center_frequency = freq
         end
+
+      when MIDIMessage::PitchBend
+        v = e.high * 128 + e.low
+        phi = MB::M.scale(v, 0..16384, 0..Math::PI)
+        rot = CMath.exp(1i * phi)
+        puts "Rotation is now #{rot} because of #{v} / #{phi} / #{e.high} / #{e.low}"
       end
     end
   end
 
-  data = osc_pool.map { |osc| osc.sample(output.buffer_size) }.sum
+  data = osc_pool.map { |osc| (osc.sample(output.buffer_size) * rot).real }.sum
   data = filter.process(data)
   output.write([data, filter.impulse_response(output.buffer_size)])
 end
