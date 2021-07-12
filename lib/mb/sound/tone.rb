@@ -222,15 +222,22 @@ module MB
       end
 
       # Changes the waveform to complex triangle.  The real part is a triangle
-      # waveform, and the complex part is the second integral of the cosecant,
-      # such that the resulting waveform matches the analytic signal form of
-      # the triangle wave and spirals counterclockwise.
+      # waveform, and the imaginary part is the second integral of the
+      # cosecant, such that the resulting waveform matches the analytic signal
+      # form of the triangle wave and spirals counterclockwise.
       def complex_triangle
         @wave_type = :complex_triangle
         self
       end
 
-      # TODO: implement complex ramp
+      # Changes the waveform to complex ramp.  The real part matches the
+      # standard ramp waveform, and the imaginary part is an integral of a
+      # modified cotangent function, such that the resulting waveform matches
+      # the analytic signal of a ramp wave, spiraling counterclockwise.
+      def complex_ramp
+        @wave_type = :complex_ramp
+        self
+      end
 
       # Changes the oscillator to generate white noise using the distribution
       # of the current waveform.  For uniform noise, use the ramp wave type.

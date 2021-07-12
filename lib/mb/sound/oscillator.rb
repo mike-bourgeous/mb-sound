@@ -22,6 +22,7 @@ module MB
         :triangle,
         :complex_triangle,
         :ramp,
+        :complex_ramp,
         :gauss,
         :parabola,
       ]
@@ -32,6 +33,7 @@ module MB
         complex_sine: Numo::SComplex,
         complex_square: Numo::SComplex,
         complex_triangle: Numo::SComplex,
+        complex_ramp: Numo::SComplex,
       }
 
       # See #initialize; this is used to make negative powers more useful.
@@ -272,6 +274,12 @@ module MB
             s = phi / Math::PI - 2.0
           end
 
+        when :complex_ramp
+          s = MB::M.cot_int(phi + Math::PI / 2) * 1i
+
+          s = Complex(s.real, -6) if s.imag < -6
+          s = Complex(s.real, 6) if s.imag > 6
+
         when :gauss
           # Sideways Gaussian attempt 2
           # This has an approximately Gaussian distribution, but the crest
@@ -330,9 +338,12 @@ module MB
           advance += RAND.rand(@random_advance.to_f) if @random_advance != 0
           delta = freq * advance
 
-          if @wave_type == :complex_square
-            # TODO: Find a way to move this wavetype-specific code out of this function
+          # Compensate for sampling offset of some wave types
+          # TODO: Find a way to move this wavetype-specific code out of this function
+          case @wave_type
+          when :complex_square, :complex_ramp
             result = oscillator(@phi + delta / 2)
+
           else
             result = oscillator(@phi)
           end

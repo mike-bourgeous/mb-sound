@@ -233,6 +233,21 @@ RSpec.describe MB::Sound::Oscillator do
       expect(delta.mean.abs).to be < 0.0005
       expect(delta.abs.mean).to be < 0.0005
     end
+
+    it 'matches the analytic signal for a complex ramp wave (approximately)' do
+      oscil = 240.hz.complex_ramp.at(1).oscillator
+      result = oscil.sample(1600)
+
+      base = MB::Sound.analytic_signal(120.hz.ramp.at(1).generate(32000)).reshape(16000, 2)[nil, 1] # shift 240hz by half sample
+      target = Numo::SComplex.cast(base)[6400...8000]
+
+      expect(MB::M.round(result.real, 6)).to eq(MB::M.round(target.real, 6))
+
+      delta = result.imag.clip(-1, 1) - target.imag.clip(-1, 1)
+      expect(delta.abs.max).to be < 0.05
+      expect(delta.mean.abs).to be < 0.0005
+      expect(delta.abs.mean).to be < 0.01
+    end
   end
 
   describe '#trigger' do
