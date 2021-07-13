@@ -10,20 +10,26 @@ module MB
     # descriptions I had read of analog audio tape and filmstock, with a
     # central linear range, and a long, infinite soft tail.
     class SoftestClip
+      # Initializes a soft clipper that is linear between +/- +:threshold+, and
+      # hyperbolically approaches +:limit+ above that.
       def initialize(threshold:, limit: 1)
         # TODO: Asymmetric clipping?
         @t = threshold.abs
         @l = limit.abs
 
-        @a = -(-@t + @l) ** 2
+        raise 'Limit must be greater than or equal to threshold' if @l < @t
+
+        @a = -(-@t + @l) ** 2.0
         @b = @l
-        @c = -2 * @t + @l
+        @c = -2.0 * @t + @l
       end
 
       # Soft-clips the given +samples+, returning the result.  The soft-clip
       # has no memory, so prior data cannot affect the output.  Supports
       # in-place processing of NArray.
       def process(samples)
+        return process([samples])[0] if samples.is_a?(Numeric)
+
         samples.map { |s|
           case
           when s < -@t
@@ -33,21 +39,6 @@ module MB
             @a / (s + @c) + @b
 
           else
-            s
-          end
-
-          # Experimental soft-knee
-          v = @a / (s.abs + @c) + @b
-          v *= -1 if s < 0
-          if s.abs >= @t - 0.1 && s.abs <= @t + 0.1
-            blend = (s.abs - (@t - 0.1)) / 0.2
-            puts "s: #{s} v: #{v} t: #{@t} blend: #{blend}"
-            MB::M.interp(s, v, MB::M.smootherstep(blend))
-          elsif s.abs > @t + 0.1
-            puts "v: #{v}"
-            v
-          else
-            puts "s: #{s}"
             s
           end
         }
