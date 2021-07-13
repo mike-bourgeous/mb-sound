@@ -35,6 +35,21 @@ module MB
           else
             s
           end
+
+          # Experimental soft-knee
+          v = @a / (s.abs + @c) + @b
+          v *= -1 if s < 0
+          if s.abs >= @t - 0.1 && s.abs <= @t + 0.1
+            blend = (s.abs - (@t - 0.1)) / 0.2
+            puts "s: #{s} v: #{v} t: #{@t} blend: #{blend}"
+            MB::M.interp(s, v, MB::M.smootherstep(blend))
+          elsif s.abs > @t + 0.1
+            puts "v: #{v}"
+            v
+          else
+            puts "s: #{s}"
+            s
+          end
         }
       end
     end
