@@ -36,10 +36,11 @@ module MB
       # output.  The +:center_gain+ parameter controls the panning gain curve
       # (see the class description).
       def initialize(center_gain: DB_45)
-        self.center_pan = center_pan
+        self.center_gain = center_gain
         @pan = 0.0
         @phase = 0.0
 
+        # TODO: Smoothed pan/phase
         @pan_s = 0.0
         @phase_s = 0.0
       end
@@ -50,6 +51,12 @@ module MB
       def center_gain=(center_gain)
         @center_gain = center_gain
         @pan_power = Math.log(@center_gain) / Math.log(0.5)
+      end
+
+      # Immediately set pan and phase values to their target values, skipping
+      # any smoothing curve.  Call #pan= and/or #phase= first, then call this.
+      def reset(pan: @pan, phase: @phase)
+        # TODO: reset if there is a smoothing curve
       end
 
       # Pans and rotates the given +data+ and returns [l, r] based on the

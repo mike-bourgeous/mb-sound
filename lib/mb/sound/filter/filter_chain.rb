@@ -32,7 +32,8 @@ module MB
         end
 
         # Resets all underlying filters to the given value, if they all support
-        # #reset.
+        # #reset.  Each later filter in the chain receives the result of the
+        # previous filter's #reset.
         def reset(value)
           raise 'Not all filters support #reset' unless @filters.all? { |f| f.respond_to?(:reset) }
 

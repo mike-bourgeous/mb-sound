@@ -1,4 +1,31 @@
 RSpec.describe(MB::Sound::ComplexPan) do
+  let(:f45) { MB::Sound::ComplexPan.new }
+
+  describe '#process' do
+    it 'can process a single input' do
+      expect(f45.process(1)).to eq([0.5 ** 0.75, 0.5 ** 0.75])
+    end
+
+    it 'can process Numo::SFloat' do
+      data = Numo::SFloat[-1, 0, 1]
+      expected = [Numo::SFloat[-0.5 ** 0.75, 0, 0.5 ** 0.75]] * 2
+      expect(f45.process(data)).to eq(expected)
+    end
+
+    it 'can process a Numo::NArray' do
+      data = Numo::SComplex[0.1+0.3i, 0, -1]
+      expected = [
+        Numo::SComplex[(0.3-0.1i) * 0.5 ** 0.75, 0, 1i * 0.5 ** 0.75],
+        Numo::SComplex[(-0.3+0.1i) * 0.5 ** 0.75, 0, -1i * 0.5 ** 0.75]
+      ]
+
+      f45.phase = 180.degrees
+      f45.reset
+
+      expect(MB::M.round(f45.process(data), 6)).to eq(MB::M.round(expected, 6))
+    end
+  end
+
   describe '.gains' do
     it 'returns linear gains for linear -6dB pan law' do
       expect(MB::Sound::ComplexPan.gains(-1, 0, 1)).to eq([1, 0])
