@@ -262,8 +262,9 @@ module MB
             s = 2.0 * MB::M.csc_int(phi + 0.0000001).conj * 1i / Math::PI + 1.0
           end
 
-          s = Complex(s.real, -6) if s.imag < -6
-          s = Complex(s.real, 6) if s.imag > 6
+          # Experimentally obtained clipping values to preserve approximate timbre
+          s = Complex(s.real, -3.8) if s.imag < -3.8
+          s = Complex(s.real, 3.8) if s.imag > 3.8
 
         when :ramp
           if phi < Math::PI
@@ -277,8 +278,9 @@ module MB
         when :complex_ramp
           s = MB::M.cot_int(phi + Math::PI / 2) * 1i
 
-          s = Complex(s.real, -6) if s.imag < -6
-          s = Complex(s.real, 6) if s.imag > 6
+          # Experimentally obtained clipping values to preserve approximate timbre
+          s = Complex(s.real, -3.5) if s.imag < -3.5
+          s = Complex(s.real, 3.5) if s.imag > 3.5
 
         when :gauss
           # Sideways Gaussian attempt 2
