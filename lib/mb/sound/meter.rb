@@ -23,7 +23,7 @@ module MB
       # may be an array of strings up to 7 characters long to display before the
       # meter.
       def self.linear_meters(levels, rows_below = 0, texts = nil)
-        cols = IO.console.winsize[1] - (5 + 7 + 8 + 2) # 5 for index, 7 for decibels, 8 for frequency, 2 for good measure
+        cols = MB::U.width - (5 + 7 + 8 + 2) # 5 for index, 7 for decibels, 8 for frequency, 2 for good measure
 
         up(levels.size - 1 + rows_below)
 
