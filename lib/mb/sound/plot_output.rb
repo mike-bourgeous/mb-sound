@@ -28,7 +28,7 @@ module MB
 
         @closed = false
 
-        @header_lines = header_lines
+        @header_lines = header_lines + output.channels + 1
         @window_size = window_size || output.buffer_size
 
         @spectrum = spectrum
@@ -105,6 +105,7 @@ module MB
 
       def plot(data)
         puts "\e[#{@header_lines + 1}H\e[36mPress Ctrl-C to stop\e[0m\e[K" if !@p.respond_to?(:print) || @p.print
+        Meter.linear_meters(data.map { |v| v.abs.max }, 3)
 
         samples = [@window_size, data[0].length].min
 
