@@ -79,15 +79,6 @@ module MB
           core_str = "#{'=' * lower_core}|#{'=' * upper_core}"
           meter_str = "#{'-' * lower_axis}#{core_str}#{'-' * upper_axis}"
 
-          puts(
-            '',
-            CodeRay.scan(
-              {label: label, cols: cols, cw: core_width, lc: lower_core, uc: upper_core, cs: core_str, la: lower_axis, ua: upper_axis, ms: meter_str, total: core_width + lower_axis + upper_axis}.pretty_inspect,
-              :ruby
-            ).term,
-            ''
-          ) if false# XXX
-
           label_text = label.ljust(5)
           value_text = ('%.4f' % avg).rjust(7)
 

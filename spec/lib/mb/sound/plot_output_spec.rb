@@ -17,6 +17,7 @@ RSpec.describe(MB::Sound::PlotOutput) do
 
   before(:each) {
     ENV['PLOT_TYPE'] = 'dumb'
+    allow(STDOUT).to receive(:write).at_least(1).times
   }
 
   after(:each) {
@@ -65,6 +66,7 @@ RSpec.describe(MB::Sound::PlotOutput) do
 
   describe '#write' do
     it 'can plot in the time domain' do
+      expect(MB::Sound::Meter).to receive(:linear_meters).at_least(1).times
       expect(plot).to receive(:plot).with(short_data)
       po_time.write(short_data.values)
 
@@ -73,6 +75,7 @@ RSpec.describe(MB::Sound::PlotOutput) do
     end
 
     it 'can plot in the frequency domain' do
+      expect(MB::Sound::Meter).to receive(:linear_meters).at_least(1).times
       expect(plot).to receive(:plot).with(short_dc)
       po_freq.write(short_data.values)
 

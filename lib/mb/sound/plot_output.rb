@@ -89,7 +89,7 @@ module MB
       # Closes the output stream and stops plotting.
       def close
         @closed = true
-        puts "\e[#{@p.height + @header_lines + 2}H" if @p.respond_to?(:height) && @p.respond_to?(:print) && @p.print
+        STDOUT.write "\e[#{@p.height + @header_lines + 2}H\n" if @p.respond_to?(:height) && @p.respond_to?(:print) && @p.print
         @p.close unless @plot_set
         @output.close
       end
