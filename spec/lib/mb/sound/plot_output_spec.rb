@@ -31,11 +31,13 @@ RSpec.describe(MB::Sound::PlotOutput) do
     end
 
     it 'can create a graphical plotter' do
+      expect(STDOUT).to receive(:write).at_least(1).times
       po = MB::Sound::PlotOutput.new(output, graphical: true)
       po.close
     end
 
     it 'can create a terminal plotter' do
+      expect(STDOUT).to receive(:write).at_least(1).times
       po = MB::Sound::PlotOutput.new(output)
       po.close
     end
@@ -65,6 +67,7 @@ RSpec.describe(MB::Sound::PlotOutput) do
 
   describe '#write' do
     it 'can plot in the time domain' do
+      expect(MB::Sound::Meter).to receive(:linear_meters).at_least(1).times
       expect(plot).to receive(:plot).with(short_data)
       po_time.write(short_data.values)
 
@@ -73,6 +76,7 @@ RSpec.describe(MB::Sound::PlotOutput) do
     end
 
     it 'can plot in the frequency domain' do
+      expect(MB::Sound::Meter).to receive(:linear_meters).at_least(1).times
       expect(plot).to receive(:plot).with(short_dc)
       po_freq.write(short_data.values)
 
