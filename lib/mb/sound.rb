@@ -99,6 +99,7 @@ require_relative 'sound/noise'
 require_relative 'sound/processing_matrix'
 require_relative 'sound/softest_clip'
 require_relative 'sound/complex_pan'
+require_relative 'sound/meter'
 
 require_relative 'sound/window'
 require_relative 'sound/window_reader'
