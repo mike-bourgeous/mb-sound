@@ -17,7 +17,6 @@ RSpec.describe(MB::Sound::PlotOutput) do
 
   before(:each) {
     ENV['PLOT_TYPE'] = 'dumb'
-    allow(STDOUT).to receive(:write).at_least(1).times
   }
 
   after(:each) {
@@ -32,11 +31,13 @@ RSpec.describe(MB::Sound::PlotOutput) do
     end
 
     it 'can create a graphical plotter' do
+      expect(STDOUT).to receive(:write).at_least(1).times
       po = MB::Sound::PlotOutput.new(output, graphical: true)
       po.close
     end
 
     it 'can create a terminal plotter' do
+      expect(STDOUT).to receive(:write).at_least(1).times
       po = MB::Sound::PlotOutput.new(output)
       po.close
     end
