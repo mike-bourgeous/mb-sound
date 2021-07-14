@@ -198,6 +198,47 @@ module MB
         self
       end
 
+      # Changes the waveform type to parabolic.
+      def parabola
+        @wave_type = :parabola
+        self
+      end
+
+      # Changes the waveform to complex sine.  The real part is equal to the
+      # sine waveform, and the complex part is such that the combined waveform
+      # spirals counterclockwise.
+      def complex_sine
+        @wave_type = :complex_sine
+        self
+      end
+
+      # Changes the waveform to complex square.  The real part is approximately
+      # equal to the square waveform, and the complex part is the integral of
+      # the cosecant, such that the resulting waveform matches the analytic
+      # signal form of the square wave and spirals counterclockwise.
+      def complex_square
+        @wave_type = :complex_square
+        self
+      end
+
+      # Changes the waveform to complex triangle.  The real part is a triangle
+      # waveform, and the imaginary part is the second integral of the
+      # cosecant, such that the resulting waveform matches the analytic signal
+      # form of the triangle wave and spirals counterclockwise.
+      def complex_triangle
+        @wave_type = :complex_triangle
+        self
+      end
+
+      # Changes the waveform to complex ramp.  The real part matches the
+      # standard ramp waveform, and the imaginary part is an integral of a
+      # modified cotangent function, such that the resulting waveform matches
+      # the analytic signal of a ramp wave, spiraling counterclockwise.
+      def complex_ramp
+        @wave_type = :complex_ramp
+        self
+      end
+
       # Changes the oscillator to generate white noise using the distribution
       # of the current waveform.  For uniform noise, use the ramp wave type.
       # For approximately Gaussian noise, use the gauss wave type.  The
@@ -321,6 +362,28 @@ module MB
       def peak(octaves: 0.5, gain: nil)
         gain ||= @amplitude
         MB::Sound::Filter::Cookbook.new(:peak, @rate, @frequency, bandwidth_oct: octaves, db_gain: gain.to_db)
+      end
+
+      # Returns a LinearFollower with its max_rise and max_fall set to allow
+      # variations back and forth between the max amplitude set by #at no
+      # faster than this Tone's frequency.  This is a nonlinear filter with an
+      # amplitude- and waveform-dependent effect.  It acts sort of like a
+      # lowpass filter whose cutoff frequency decreases (and harmonic
+      # distortion increases) as the signal amplitude increases.
+      def follower
+        # Multiple of 4 below:
+        #   2 for the fact that a full cycle requires both a rise and fall, so
+        #   must be twice frequency
+        #
+        #   2 for the fact that amplitude is one-sided, but the cycle must rise
+        #   from -amplitude to +amplitude (so it travels a total of
+        #   2*amplitude)
+        MB::Sound::Filter::LinearFollower.new(
+          rate: @rate,
+          max_rise: 4 * @frequency * @amplitude,
+          max_fall: 4 * @frequency * @amplitude,
+          absolute: false
+        )
       end
 
       # Writes the tone's full duration to the +output+ stream.  The tone will

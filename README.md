@@ -53,6 +53,9 @@ play [200.hz, 100.hz]
 
 # Binaural beat
 play [100.hz, 103.hz]
+
+# Surround sound chord
+play [100.hz, 200.hz, 300.hz, 400.hz, 500.hz, 600.hz, 250.hz, 333.hz].map(&:triangle)
 ```
 
 ### Calculating wavelength and frequency

@@ -14,7 +14,27 @@ module MB
     # values are scaled to the desired output range.
     class Oscillator
       RAND = Random.new
-      WAVE_TYPES = [:sine, :square, :triangle, :ramp, :gauss]
+      WAVE_TYPES = [
+        :sine,
+        :complex_sine,
+        :square,
+        :complex_square,
+        :triangle,
+        :complex_triangle,
+        :ramp,
+        :complex_ramp,
+        :gauss,
+        :parabola,
+      ]
+
+      # Buffer type to use for each oscillator.  Anything not included here
+      # uses Numo::SFloat.
+      BUFFER_CLASS = {
+        complex_sine: Numo::SComplex,
+        complex_square: Numo::SComplex,
+        complex_triangle: Numo::SComplex,
+        complex_ramp: Numo::SComplex,
+      }
 
       # See #initialize; this is used to make negative powers more useful.
       NEGATIVE_POWER_SCALE = {
@@ -23,6 +43,7 @@ module MB
         ramp: 0.01,
         square: 1.0,
         gauss: 0.01,
+        parabola: 0.01,
       }
 
       # Default note that is used as tuning reference
@@ -199,6 +220,9 @@ module MB
         when :sine
           s = Math.sin(phi)
 
+        when :complex_sine
+          s = CMath.exp(1i * (phi - Math::PI / 2))
+
         when :triangle
           if phi < 0.5 * Math::PI
             # Initial rise from 0..1 in 0..pi/2
@@ -211,12 +235,36 @@ module MB
             s = phi * 2.0 / Math::PI - 4.0
           end
 
+        when :complex_triangle
+          # The constant factor scales the triangle portion to a range of -1..1.
+          # In Sage:
+          #     f = integrate(-2*atanh(e^(i*x)), x)
+          #     limit(f, x = 0)
+          #     # -pi*log(2) + I*dilog(2)
+          #
+          # The -pi*log(2) cancels the real part of dilog(2) leaving:
+          #     (-pi*log(2) + I*dilog(2)).n()
+          #     # 2.46740110027234*I
+          s = MB::M.csc_int_int(phi + Math::PI / 2) * 1i / 2.46740110027234
+
         when :square
           if phi < Math::PI
             s = 1.0
           else
             s = -1.0
           end
+
+        when :complex_square
+          # Note: to draw a rectangle in the polar view, the phase needs to be
+          # shifted by one half sample.  This is done in #sample.
+          s = 2.0 * MB::M.csc_int(phi).conj * 1i / Math::PI + 1.0
+          unless s.finite?
+            s = 2.0 * MB::M.csc_int(phi + 0.0000001).conj * 1i / Math::PI + 1.0
+          end
+
+          # Experimentally obtained clipping values to preserve approximate timbre
+          s = Complex(s.real, -3.8) if s.imag < -3.8
+          s = Complex(s.real, 3.8) if s.imag > 3.8
 
         when :ramp
           if phi < Math::PI
@@ -226,6 +274,13 @@ module MB
             # Final rise from -1..0 in pi..2pi
             s = phi / Math::PI - 2.0
           end
+
+        when :complex_ramp
+          s = MB::M.cot_int(phi + Math::PI / 2) * 1i
+
+          # Experimentally obtained clipping values to preserve approximate timbre
+          s = Complex(s.real, -3.5) if s.imag < -3.5
+          s = Complex(s.real, 3.5) if s.imag > 3.5
 
         when :gauss
           # Sideways Gaussian attempt 2
@@ -246,6 +301,13 @@ module MB
           s = -3 if s < -3
           s = 3 if s > 3
 
+        when :parabola
+          if phi < Math::PI
+            s = 1.0 - (1.0 - phi * 2.0 / Math::PI) ** 2
+          else
+            s = (phi * 2.0 / Math::PI - 3.0) ** 2 - 1.0
+          end
+
         else
           raise "Invalid wave type #{@wave_type.inspect}"
         end
@@ -261,11 +323,9 @@ module MB
       def sample(count = nil)
         return sample(1)[0] if count.nil?
 
-        @osc_buf = Numo::SFloat.zeros(count) if @osc_buf.nil? || @osc_buf.length != count
+        build_buffer(count)
 
         count.times do |idx|
-          result = oscillator(@phi)
-
           # TODO: this doesn't modulate strongly enough
           # FM attempt:
           # fm = Oscillator.new(
@@ -278,8 +338,19 @@ module MB
 
           advance = @advance
           advance += RAND.rand(@random_advance.to_f) if @random_advance != 0
+          delta = freq * advance
 
-          @phi = (@phi + freq * advance) % (Math::PI * 2)
+          # Compensate for sampling offset of some wave types
+          # TODO: Find a way to move this wavetype-specific code out of this function
+          case @wave_type
+          when :complex_square, :complex_ramp
+            result = oscillator(@phi + delta / 2)
+
+          else
+            result = oscillator(@phi)
+          end
+
+          @phi = (@phi + delta) % (Math::PI * 2)
 
           @osc_buf[idx] = result
         end
@@ -291,6 +362,15 @@ module MB
         buf = MB::M.safe_power(buf, @post_power) if @post_power != 1.0
 
         buf
+      end
+
+      private
+
+      def build_buffer(count)
+        buf_class = BUFFER_CLASS[@wave_type] || Numo::SFloat
+        if @osc_buf.nil? || @osc_buf.class != buf_class || @osc_buf.length != count
+          @osc_buf = buf_class.zeros(count)
+        end
       end
     end
   end

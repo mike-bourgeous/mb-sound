@@ -18,17 +18,30 @@ module MB
       end
 
       # Called by the SIGWINCH signal handler to resize plots when the terminal
-      # window is resized.
+      # window is resized.  Closes any existing plotters and recreates any that
+      # previously existed (necessary if SIGWINCH arrives in the middle of a
+      # function that is using a plotter through instance variables).
       def reset_plotter
+        @pt ||= nil
+        @pg ||= nil
         old_pt = @pt
         old_pg = @pg
+
+        close_plotter
+
+        plotter(graphical: false) if old_pt
+        plotter(graphical: true) if old_pg
+      end
+
+      # Closes existing MB::M::Plot plotters without creating new ones.  Useful
+      # for cleaning up between tests.
+      def close_plotter
+        @pt ||= nil
+        @pg ||= nil
         @pt&.close
         @pg&.close
         @pt = nil
         @pg = nil
-
-        plotter(graphical: false) if old_pt
-        plotter(graphical: true) if old_pg
       end
 
       # Returns either a terminal-based plotting object if +graphical+ is false,
@@ -36,9 +49,9 @@ module MB
       #
       # Overriding this method to return some other compatible object allows
       # other plotting systems to be used by the CLI DSL.
-      def plotter(graphical: false)
-        @pt ||= MB::M::Plot.terminal(height_fraction: 0.8)
-        @pg ||= MB::M::Plot.new if graphical
+      def plotter(graphical: false, **kwargs)
+        @pt ||= MB::M::Plot.terminal(height_fraction: 0.8, **kwargs)
+        @pg ||= MB::M::Plot.new(**kwargs) if graphical
         graphical ? @pg : @pt
       end
 
@@ -177,8 +190,6 @@ module MB
         }.to_h
 
         plotter(graphical: graphical).plot(histograms)
-
-        histograms
       end
 
       # Plots a subset of the given audio file, test tone, or data, starting at
@@ -197,7 +208,15 @@ module MB
 
         case file_tone_data
         when Array, Numo::NArray
-          data = any_sound_to_array(file_tone_data)
+          data = file_tone_data.map { |d|
+            if d.respond_to?(:call)
+              # TODO: could this be moved into any_sound_to_array?
+              Numo::SFloat.linspace(-10, 10, samples).map { |v| d.call(v) }
+            else
+              d
+            end
+          }
+          data = any_sound_to_array(data)
 
         when String
           # TODO: Read speaker names
@@ -209,6 +228,9 @@ module MB
         when Filter
           data = [file_tone_data.impulse_response, file_tone_data.frequency_response.abs]
 
+        when Proc, Method
+          data = [Numo::SFloat.linspace(-10, 10, samples).map { |v| file_tone_data.call(v) }]
+
         else
           raise "Cannot plot type #{file_tone_data.class.name}"
         end
@@ -216,7 +238,9 @@ module MB
         p = plotter(graphical: graphical)
 
         if all == true
-          t = clock_now
+          t = MB::U.clock_now
+
+          result = nil
 
           until offset >= data[0].length
             STDOUT.write("\e[#{header_lines}H\e[36mPress Ctrl-C to stop  \e[1;35m#{offset} / #{data[0].length}\e[0m\e[K\n")
@@ -227,9 +251,9 @@ module MB
               p.yrange(data.map(&:min).min, data.map(&:max).max) if p.respond_to?(:yrange)
             end
 
-            plot(data, samples: samples, offset: offset, all: nil, graphical: graphical, spectrum: spectrum)
+            result = plot(data, samples: samples, offset: offset, all: nil, graphical: graphical, spectrum: spectrum)
 
-            now = clock_now
+            now = MB::U.clock_now
             elapsed = [now - t, 0.1].min
             t = now
 
@@ -238,6 +262,8 @@ module MB
             STDOUT.flush
             sleep 0.02
           end
+
+          result if p.respond_to?(:print) && !p.print
         else
           data = data.map { |c| c[offset...([offset + samples, c.length].min)] || [] }
 
@@ -251,10 +277,10 @@ module MB
           p.yrange(data.map(&:min).min, data.map(&:max).max) if p.respond_to?(:yrange) && !all.nil?
 
           @lines = p.plot(data.map.with_index { |c, idx| [idx.to_s, c] }.to_h, print: false)
-          puts @lines
-        end
+          puts @lines if p.respond_to?(:print) && p.print
 
-        nil
+          @lines if p.respond_to?(:print) && !p.print
+        end
       ensure
         if all == true
           if graphical
@@ -263,6 +289,129 @@ module MB
           elsif @pt.respond_to?(:height)
             puts "\e[#{@pt.height + (header_lines || 2) + 2}H"
           end
+        end
+      end
+
+      # Prints a table of values for the given +data+ source, which may be a
+      # Numo::NArray, a callable Proc or Method, an Array thereof, or a Hash
+      # with labels pointing to Numo::NArrays or Procs.
+      #
+      # For a Numo::NArray, +:steps+ elements (or steps.length elements if
+      # +:steps+ is an Array) are taken from the array and associated with a
+      # linearly mapped value from the +:range+ for display.
+      #
+      # For a callable Method or Proc, the +:range+ is divided into equally
+      # spaced +:steps+ equally spaced steps (or +:steps+ is used directly if
+      # it is an Array), and each step is passed to the callable.
+      #
+      # TODO: Maybe this should be in mb-math.
+      #
+      # Example:
+      #
+      #     table([Math.method(:acos), Math.method(:asin)], range: -1..1, steps: 21)
+      #
+      #          #     |  0: acos  |  1: asin
+      #     -----------+-----------+-----------
+      #     -1.0       | 3.14159   |-1.5708
+      #     -0.9       | 2.69057   |-1.11977
+      #     -0.8       | 2.49809   |-0.927295
+      #     -0.7       | 2.34619   |-0.775397
+      #     -0.6       | 2.2143    |-0.643501
+      #     -0.5       | 2.0944    |-0.523599
+      #     -0.4       | 1.98231   |-0.411517
+      #     -0.3       | 1.87549   |-0.304693
+      #     -0.2       | 1.77215   |-0.201358
+      #     -0.1       | 1.67096   |-0.100167
+      #      0.0       | 1.5708    | 0.0
+      #      0.1       | 1.47063   | 0.100167
+      #      0.2       | 1.36944   | 0.201358
+      #      0.3       | 1.2661    | 0.304693
+      #      0.4       | 1.15928   | 0.411517
+      #      0.5       | 1.0472    | 0.523599
+      #      0.6       | 0.927295  | 0.643501
+      #      0.7       | 0.795399  | 0.775397
+      #      0.8       | 0.643501  | 0.927295
+      #      0.9       | 0.451027  | 1.11977
+      #      1.0       | 0.0       | 1.5708
+      def table(data, range: -1..1, steps: 21)
+        # Gradually coerce any incoming data type into a Hash of callable or NArray
+        data = Numo::NArray.cast(data) if is_numeric_array?(data)
+        data = [data] unless data.is_a?(Array) || data.is_a?(Hash)
+        data = data.map.with_index { |v, idx| [table_key(v, idx), v] }.to_h if data.is_a?(Array)
+
+        steps = Numo::DFloat.linspace(range.begin, range.end, steps) unless steps.respond_to?(:map)
+        steps = steps.to_a
+
+        results = [steps.to_a] + data.map { |k, v|
+          evaluate(v, range: range, steps: steps).to_a
+        }
+        results = results.transpose
+
+        formatted = results.map { |row|
+          row.map { |v|
+            v = MB::M.sigfigs(v, 6) if v.is_a?(Numeric)
+            MB::U.highlight(v).strip
+          }
+        }
+        column_width = 2 + formatted.flatten.map { |hl|
+          MB::U.remove_ansi(hl).length
+        }.max
+
+        header = (['#'] + data.keys).map.with_index { |k, idx| "\e[1;#{31 + idx % 7}m#{k.to_s.center(column_width)}\e[0m" }.join('|')
+        separator = (['-' * column_width] * (data.length + 1)).join('+')
+
+        puts header
+        puts separator
+
+        formatted.each do |row|
+          puts(
+            row.map { |hl|
+              colorless = MB::U.remove_ansi(hl)
+              len = colorless.length
+              extra = column_width - len
+              # TODO: align on the decimal point
+              # pre = extra / 2
+              pre = colorless.start_with?('-') ? 0 : 1
+              post = extra - pre
+              post = 0 if post < 0
+              "#{' ' * pre}#{hl}#{' ' * post}"
+            }.join('|')
+          )
+        end
+
+        nil
+      end
+
+      private
+
+      # Used by #table to generate table entries for the given +data+.
+      def evaluate(data, range:, steps:, try_convert: true)
+        if data.respond_to?(:call)
+          steps.map { |s| data.call(s) }
+        elsif data.respond_to?(:[])
+          steps.map { |s|
+            idx = MB::M.scale(s.real, range, 0..(data.length - 1))
+            idx = 0 if idx < 0
+            idx = data.length - 1 if idx > data.length - 1
+            data[idx]
+          }
+        elsif try_convert
+          evaluate(convert_sound_to_narray(data), range: range, steps: steps, try_convert: false)
+        else
+          raise "Don't know how to evaluate #{data.class} data"
+        end
+      end
+
+      def table_key(value, index)
+        case value
+        when Method, Class
+          "#{index}: #{value.name}"
+
+        when Proc
+          "#{index}: Proc"
+
+        else
+          index.to_s
         end
       end
     end

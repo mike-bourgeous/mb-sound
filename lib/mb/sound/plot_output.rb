@@ -57,7 +57,10 @@ module MB
       # Writes the data to the output, saves it for the plotting thread, then
       # wakes up the plotting thread.
       def write(data)
-        @output.write(data)
+        dw = data.map { |c|
+          c.respond_to?(:real) ? c.real : c
+        }
+        @output.write(dw)
 
         period = data[0].length.to_f / @output.rate
         now = ::MB::U.clock_now
