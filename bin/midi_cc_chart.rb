@@ -21,11 +21,11 @@ midi_in = jack.input(port_type: :midi, port_names: ['midi_in'], connect: ARGV[0]
 
 midi = Nibbler.new
 
-cc_chart = Array.new(127)
+cc_chart = Array.new(128)
 
 puts "#{"\n" * MB::U.height}\e[H\e[J" # move to home, then clear everything
 
-# See bin/ep2_synth.rb for an example of an event loop that works with MIDI and
+# See bin/ep2_syn.rb for an example of an event loop that works with MIDI and
 # audio together (basically read MIDI with blocking: false)
 frame = 0
 loop do
