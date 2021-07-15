@@ -336,4 +336,14 @@ RSpec.describe MB::Sound::Tone do
       expect(100.hz.wavelength).to eq(MB::Sound::Tone::SPEED_OF_SOUND * 0.01)
     end
   end
+
+  describe '#to_midi' do
+    it 'returns a midi note-on message' do
+      result = 50.hz.to_midi(channel: 4, velocity: 3)
+      expect(result).to be_a(MIDIMessage::NoteOn)
+      expect(result.note).to eq(50.hz.to_note.number)
+      expect(result.velocity).to eq(3)
+      expect(result.channel).to eq(4)
+    end
+  end
 end

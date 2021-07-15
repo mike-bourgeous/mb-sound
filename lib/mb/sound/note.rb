@@ -70,6 +70,11 @@ module MB
         set_frequency(get_freq)
       end
 
+      # Converts this Tone to a MIDI NoteOn message from the midi-message gem.
+      def to_midi(velocity: 64, channel: -1)
+        MIDIMessage::NoteOn.new(channel, number.round, velocity)
+      end
+
       private
 
       # Calculates the frequency based on the note's MIDI note number.
