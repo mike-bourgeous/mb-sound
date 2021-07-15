@@ -38,9 +38,14 @@ loop do
   puts
 
   midi.clear_buffer
-  data = midi_in.read[0]
 
-  events = [midi.parse(data.bytes)].flatten
+  events = []
+  while events.empty?
+    data = midi_in.read[0]
+    # TODO: Somehow show realtime messages without clearing the other received messages
+    events = [midi.parse(data.bytes)].flatten.reject { |e| e.is_a?(MIDIMessage::SystemRealtime) }
+  end
+
   events.each_with_index do |e, idx|
     id = "#{MB::U.highlight(frame).strip}.#{MB::U.highlight(idx).strip}"
     puts "#{id}: #{MB::U.highlight(e).lines.map { |v| v.rstrip + "\e[K" }.join("\n")}"
