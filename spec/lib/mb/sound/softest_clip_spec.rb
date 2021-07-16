@@ -111,4 +111,17 @@ RSpec.describe(MB::Sound::SoftestClip) do
     diff = result.diff
     expect(diff.min).to be > 0
   end
+
+  it 'can change threshold and limit at runtime' do
+    c = MB::Sound::SoftestClip.new(threshold: 0.5, limit: 0.75)
+    expect(c.process(10000).round(2)).to eq(0.75)
+    expect(c.process(0.5)).to eq(0.5)
+    expect(c.process(1.0)).to be_between(0.5, 0.75).exclusive
+
+    c.limit = 0.6
+    c.threshold = 0.4
+    expect(c.process(-10000).round(2)).to eq(-0.6)
+    expect(c.process(0.5)).to be_between(0.4, 0.5).exclusive
+    expect(c.process(0.4)).to eq(0.4)
+  end
 end

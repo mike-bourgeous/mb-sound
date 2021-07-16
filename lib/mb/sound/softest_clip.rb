@@ -10,18 +10,23 @@ module MB
     # descriptions I had read of analog audio tape and filmstock, with a
     # central linear range, and a long, infinite soft tail.
     class SoftestClip
+      attr_reader :threshold, :limit, :a, :b, :c
+
       # Initializes a soft clipper that is linear between +/- +:threshold+, and
       # hyperbolically approaches +:limit+ above that.
       def initialize(threshold:, limit: 1)
-        # TODO: Asymmetric clipping?
-        @t = threshold.abs
-        @l = limit.abs
+        update(threshold.abs, limit.abs)
+      end
 
-        raise 'Limit must be greater than or equal to threshold' if @l < @t
+      # Sets the threshold between the linear and hyperbolic regions.
+      def threshold=(t)
+        update(t.abs, @limit)
+      end
 
-        @a = -(-@t + @l) ** 2.0
-        @b = @l
-        @c = -2.0 * @t + @l
+      # Sets the upper output limit of the hyperbolic region.  The output
+      # cannot exceed +/- this level.  The default limit is 1.
+      def limit=(l)
+        update(@threshold, l.abs)
       end
 
       # Soft-clips the given +samples+, returning the result.  The soft-clip
@@ -32,16 +37,30 @@ module MB
 
         samples.map { |s|
           case
-          when s < -@t
+          when s < -@threshold
             -@a / (-s + @c) - @b
 
-          when s > @t
+          when s > @threshold
             @a / (s + @c) + @b
 
           else
             s
           end
         }
+      end
+
+      private
+
+      # Recalculates the hyperbolic curve parameters
+      def update(threshold, limit)
+        raise 'Limit must be greater than or equal to threshold' if limit < threshold
+
+        @threshold = threshold
+        @limit = limit
+
+        @a = -(-@threshold + @limit) ** 2.0
+        @b = @limit
+        @c = -2.0 * @threshold + @limit
       end
     end
   end
