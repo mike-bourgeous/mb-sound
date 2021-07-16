@@ -24,6 +24,23 @@ RSpec.describe(MB::Sound::ComplexPan) do
 
       expect(MB::M.round(f45.process(data), 6)).to eq(MB::M.round(expected, 6))
     end
+
+    it 'smooths pan and phase' do
+      data = Numo::SComplex.ones(4800)
+
+      f45.reset(pan: -1, phase: 0)
+
+      left, right = f45.process(data)
+      diff = left.diff.abs + right.diff.abs
+      expect(diff.max).to eq(0)
+
+      f45.pan = 1
+      f45.phase = Math::PI
+
+      left, right = f45.process(data)
+      diff = left.diff.abs + right.diff.abs
+      expect(diff[0..1000].min).to be > 0
+    end
   end
 
   describe '.gains' do
