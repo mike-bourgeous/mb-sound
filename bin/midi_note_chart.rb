@@ -54,7 +54,7 @@ loop do
       note_chart[e.note] = e.velocity
 
     when MIDIMessage::NoteOff
-      note_chart[e.note] = nil
+      note_chart[e.note] = "\e[38;5;237m#{-e.velocity}\e[0m"
     end
   end
 
