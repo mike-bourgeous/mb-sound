@@ -11,7 +11,17 @@ module MB
     # then the #release_time seconds decay will start at the envelope's current
     # level.
     #
+    # A visual demonstration of the ADSR curve:
+    #     # Attack /\ Decay
+    #     #       /  \   Sustain
+    #     #      /    \_________  Release
+    #     #     /               \
+    #     #    /                 \
+    #     #   /                   \
+    #     ################################
+    #
     # Example:
+    #     # Plot the envelope (also see bin/plot_adsr.rb).
     #     env = MB::Sound::ADSREnvelope.new(
     #       attack_time: 0.05,
     #       decay_time: 0.1,
@@ -30,7 +40,10 @@ module MB
 
       # Initializes an ADSR envelope with the given +:attack_time+,
       # +:decay_time+, and +:release_time+ in seconds, and the given
-      # +:sustain_level+ relative to the peak parameter given to #trigger.
+      # +:sustain_level+ relative to the peak parameter given to #trigger.  The
+      # sample +:rate+ is required to ensure envelope times are accurate.
+      #
+      # Note that the +:sustain_level+ may be greater than 1.0.
       def initialize(attack_time:, decay_time:, sustain_level:, release_time:, rate:)
         @rate = rate.to_f
         @on = false
@@ -40,15 +53,17 @@ module MB
         @frame = @total * @rate
         @time = @total
 
-        @filter = 30.hz.at_rate(rate).lowpass1p
+        @filter = 100.hz.at_rate(rate).lowpass1p
         @peak = 0
         @value = 0
       end
 
+      # Changes the envelope's attack time to +t+ seconds.
       def attack_time=(t)
         update(t, @decay_time, @sustain_level, @release_time)
       end
 
+      # Changes the envelope's decay time to +t+ seconds.
       def decay_time=(t)
         update(@attack_time, t, @sustain_level, @release_time)
       end
@@ -61,8 +76,9 @@ module MB
         update(@attack_time, @decay_time, @sustain_level, t)
       end
 
+      # Returns true while the envelope is either sustained or releasing.
       def active?
-        @time < @total
+        @on || @time < @total
       end
 
       # Starts (or restarts) the envelope at the beginning, multiplying the

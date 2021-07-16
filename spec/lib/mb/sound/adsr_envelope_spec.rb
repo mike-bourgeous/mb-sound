@@ -14,7 +14,7 @@ RSpec.describe(MB::Sound::ADSREnvelope) do
     result = env.sample(48000)
     expect(result[0].round(6)).to eq(0)
     expect(result[4800].round(1)).to eq(2)
-    expect(result[9800].round(2)).to eq(1.75)
+    expect(result[9600..9700].mean.round(2)).to eq(1.75)
     expect(result[14400].round(2)).to eq(1.5)
     expect(result[-1].round(6)).to eq(1.5)
   end
@@ -25,7 +25,7 @@ RSpec.describe(MB::Sound::ADSREnvelope) do
     env.release
     result = env.sample(48000)
     expect(result[0].round(6)).to eq(0.75)
-    expect(result[12000..12500].mean.round(3)).to eq(0.375)
+    expect(result[11900..12100].mean.round(2)).to eq(0.38)
     expect(result[24000].round(2)).to eq(0)
     expect(result[-1].round(6)).to eq(0)
   end
@@ -37,7 +37,7 @@ RSpec.describe(MB::Sound::ADSREnvelope) do
     env.release
     result = env.sample(30000)
     expect(result[0].round(1)).to eq(1)
-    expect(result[12000..12500].mean.round(2)).to eq(0.5)
+    expect(result[11500..12500].mean.round(2)).to eq(0.5)
     expect(result[24000].round(2)).to eq(0)
     expect(result[-1].round(6)).to eq(0)
   end
