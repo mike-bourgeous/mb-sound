@@ -19,7 +19,7 @@ module MB
         # is -1 or nil, then the note number is used.  Otherwise the velocity
         # is used.
         #
-        # The MIDI message's range (e.g. 0..127 or 0..8191) will be scaled to
+        # The MIDI message's range (e.g. 0..127 or 0..16383) will be scaled to
         # the given output +:range+.
         #
         # The starting value is normally the beginning of the given +:range+,
@@ -85,7 +85,7 @@ module MB
             end
 
           when MIDIMessage::PitchBend
-            @value = MB::M.scale(message.high * 128 + message.low, 0..8191, @range)
+            @value = MB::M.scale(message.high * 128 + message.low, 0..16383, @range)
 
           when MIDIMessage::ChannelAftertouch
             @value = MB::M.scale(message.value, 0..127, @range)
