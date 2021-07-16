@@ -8,11 +8,18 @@ module MB
       class Voice
         extend Forwardable
 
-        DEFAULT_ENVELOPE = {
-          attack_time: 0.1,
-          decay_time: 0.3,
+        DEFAULT_AMP_ENVELOPE = {
+          attack_time: 0.005,
+          decay_time: 0.05,
           sustain_level: 0.5,
-          release_time: 0.3,
+          release_time: 0.6,
+        }
+
+        DEFAULT_FILTER_ENVELOPE = {
+          attack_time: 0.05,
+          decay_time: 1.5,
+          sustain_level: 0.3,
+          release_time: 0.4,
         }
 
         def_delegators :@oscillator, :frequency, :frequency=, :random_advance, :random_advance=
@@ -37,10 +44,10 @@ module MB
         # Initializes a synthesizer voice with the given +:wave_type+ (defaulting
         # to sawtooth/ramp wave) and +:filter_type+ (a shortcut on
         # MB::Sound::Tone, defaulting to :lowpass).
-        def initialize(wave_type: nil, filter_type: :lowpass, rate: 48000)
-          @filter_intensity = 2.0
-          @cutoff = 1000.0
-          @quality = 1.5
+        def initialize(wave_type: nil, filter_type: :lowpass, amp_envelope: {}, filter_envelope: {}, rate: 48000)
+          @filter_intensity = 15.0
+          @cutoff = 200.0
+          @quality = 4.0
           @gain = 1.0
           @rate = rate.to_f
           @value = 0.0
@@ -50,8 +57,8 @@ module MB
 
           self.filter_type = filter_type
 
-          @filter_envelope = MB::Sound::ADSREnvelope.new(**DEFAULT_ENVELOPE, rate: @rate)
-          @amp_envelope = MB::Sound::ADSREnvelope.new(**DEFAULT_ENVELOPE, rate: @rate)
+          @filter_envelope = MB::Sound::ADSREnvelope.new(**DEFAULT_FILTER_ENVELOPE.merge(filter_envelope), rate: @rate)
+          @amp_envelope = MB::Sound::ADSREnvelope.new(**DEFAULT_AMP_ENVELOPE.merge(amp_envelope), rate: @rate)
 
           @cutoff_filter = 60.hz.at_rate(rate).lowpass1p
           @quality_filter = 60.hz.at_rate(rate).lowpass1p
@@ -84,7 +91,7 @@ module MB
         def trigger(note, velocity)
           @oscillator.reset
           @oscillator.number = note
-          @filter_envelope.trigger(velocity / 127.0) # TODO: filter key track (raise filter freq with key freq)
+          @filter_envelope.trigger(velocity / 256.0 + 0.5) # TODO: filter key track (raise filter freq with key freq)
           @amp_envelope.trigger(MB::M.scale(velocity, 0..127, -20..-6).db)
         end
 
