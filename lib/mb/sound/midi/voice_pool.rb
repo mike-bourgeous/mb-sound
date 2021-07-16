@@ -51,7 +51,7 @@ module MB
             @value_to_key[value] = key
             @used << value
             return value
-          elsif !used.empty?
+          elsif !@used.empty?
             # Stealing an oscillator already in use
             value = @used.shift
             old_key = @value_to_key[value]
