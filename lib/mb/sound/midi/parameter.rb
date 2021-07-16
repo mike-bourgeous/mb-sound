@@ -6,7 +6,7 @@ module MB
       #
       # Filtering/smoothing is updated for every call to #value.
       class Parameter
-        attr_reader :message, :default, :range
+        attr_reader :message, :default, :range, :update_rate
 
         # Initializes a MIDI-controllable smoothed parameter.
         #
@@ -25,10 +25,10 @@ module MB
         # The starting value is normally the beginning of the given +:range+,
         # but may be changed with the +:default+ parameter.
         #
-        # The +:max_rise+ and +:max_fall+ parameters control how far a
-        # parameter may increase or decrease in a single call to #value,
-        # specified in the output range.  The default is to allow full range
-        # jumps.  See MB::Sound::Filter::LinearFollower.
+        # The +:rise+ and +:fall+ parameters control how far a parameter may
+        # increase or decrease per second, specified in the output range and
+        # based on +:update_rate+.  The default is to allow full range jumps in
+        # a single update.  See MB::Sound::Filter::LinearFollower.
         #
         # The +:filter_hz+ parameter controls the cutoff frequency of a
         # low-pass, single-pole (to avoid ringing) filter that is applied after
@@ -38,22 +38,26 @@ module MB
           @min = [range.begin, range.end].min
           @max = [range.begin, range.end].max
           @width = (@max - @min).abs
-          @default = default || range.begin
-          @value = @default
 
+          @default = default || range.begin
+
+          @update_rate = update_rate
+
+          # Call #notify to validate the message type
           @message = message
           notify(message)
 
           @filter = MB::Sound::Filter::FilterChain.new(
             @follower = MB::Sound::Filter::LinearFollower.new(
-              rate: 1.0,
-              max_rise: max_rise || @width,
-              max_fall: max_fall || @width
+              rate: update_rate,
+              max_rise: max_rise || (@width * update_rate),
+              max_fall: max_fall || (@width * update_rate)
             ),
             @lowpass = filter_hz.hz.at_rate(update_rate).lowpass1p
           )
 
-          @filter.reset(@default)
+          # Set the starting value to the default
+          reset(@default)
         end
 
         # Checks if the given +message+ matches the template that was given to

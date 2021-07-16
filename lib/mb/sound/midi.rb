@@ -7,3 +7,4 @@ module MB
 end
 
 require_relative 'midi/parameter'
+require_relative 'midi/manager'

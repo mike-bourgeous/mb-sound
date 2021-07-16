@@ -73,10 +73,8 @@ MB::Sound::Oscillator.tune_freq = 480
 MB::Sound::Oscillator.tune_note = 71
 
 jack = MB::Sound::JackFFI['EP2Synth']
-midi_in = jack.input(port_type: :midi, port_names: ['midi_in'], connect: ARGV[0] || :physical)
 output = jack.output(port_names: ['Synth', 'Impulse'], channels: 2, connect: :physical)
-
-midi = Nibbler.new
+manager = MB::Sound::MIDI::Manager.new(jack: jack, connect: ARGV[0] || :physical, channel: 0)
 
 OSC_COUNT = 8
 osc_pool = OscPool.new(
@@ -86,32 +84,23 @@ osc_pool = OscPool.new(
 filter = 1500.hz.lowpass(quality: 4)
 softclip = MB::Sound::SoftestClip.new(threshold: 0.5)
 
-loop do
-  midi.clear_buffer
+manager.on_cc(1, default: 1.8, range: 0..3) do |decade|
+  freq = 20.0 * 10.0 ** decade
+  filter.center_frequency = freq
+end
 
-  while event = midi_in.read(blocking: false)[0]
-    event = [midi.parse(event.bytes)].flatten
+manager.on_event do |e|
+  case e
+  when MIDIMessage::NoteOn
+    osc_pool.next(e.note).trigger(e.note, e.velocity)
 
-    event.each do |e|
-      next if e.respond_to?(:channel) && e.channel == 9
-
-      case e
-      when MIDIMessage::NoteOn
-        osc_pool.next(e.note).trigger(e.note, e.velocity)
-
-      when MIDIMessage::NoteOff
-        osc_pool.release(e.note)&.release(e.note, e.velocity)
-
-      when MIDIMessage::ControlChange
-        case e.index
-        when 1
-          decade = MB::M.scale(e.value, 0..127, 0..3)
-          freq = 20.0 * 10.0 ** decade
-          filter.center_frequency = freq
-        end
-      end
-    end
+  when MIDIMessage::NoteOff
+    osc_pool.release(e.note)&.release(e.note, e.velocity)
   end
+end
+
+loop do
+  manager.update
 
   data = osc_pool.map { |osc| osc.sample(output.buffer_size) }.sum
   data = filter.process(data)
