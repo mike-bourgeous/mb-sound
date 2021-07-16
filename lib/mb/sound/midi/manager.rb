@@ -48,9 +48,15 @@ module MB
           @event_callbacks << callback
         end
 
-        # Adds a callback to the given MIDI CC +index+.
+        # Adds a callback to the given MIDI CC +index+.  See #on_midi.
         def on_cc(index, range: 0.0..1.0, default: nil, filter_hz: 15, max_rise: nil, max_fall: nil, &callback)
           template = MIDIMessage::ControlChange.new(@channel, index)
+          on_midi(template, range: range, default: default, filter_hz: filter_hz, max_rise: max_rise, max_fall: max_fall, &callback)
+        end
+
+        # Adds a callback to receive pitch bend values.  See #on_midi.
+        def on_bend(range: 0.0..1.0, default: nil, filter_hz: 15, max_rise: nil, max_fall: nil, &callback)
+          template = MIDIMessage::PitchBend.new(@channel, 0)
           on_midi(template, range: range, default: default, filter_hz: filter_hz, max_rise: max_rise, max_fall: max_fall, &callback)
         end
 

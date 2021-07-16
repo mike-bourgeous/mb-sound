@@ -8,3 +8,4 @@ end
 
 require_relative 'midi/parameter'
 require_relative 'midi/manager'
+require_relative 'midi/voice_pool'
