@@ -84,6 +84,7 @@ osc_pool = OscPool.new(
 )
 
 filter = 1500.hz.lowpass(quality: 4)
+softclip = MB::Sound::SoftestClip.new(threshold: 0.5)
 
 loop do
   midi.clear_buffer
@@ -92,6 +93,8 @@ loop do
     event = [midi.parse(event.bytes)].flatten
 
     event.each do |e|
+      next if e.respond_to?(:channel) && e.channel == 9
+
       case e
       when MIDIMessage::NoteOn
         osc_pool.next(e.note).trigger(e.note, e.velocity)
@@ -112,5 +115,6 @@ loop do
 
   data = osc_pool.map { |osc| osc.sample(output.buffer_size) }.sum
   data = filter.process(data)
+  data = softclip.process(data * 0.2)
   output.write([data, filter.impulse_response(output.buffer_size)])
 end
