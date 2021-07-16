@@ -34,11 +34,13 @@ module MB
         # Sets the center/cutoff frequency of the filter.
         def center_frequency=(freq)
           raise 'Frequency must be between 0 and sample_rate/2' if freq <= 0 || freq > @sample_rate * 0.5
+          return if @center_frequency&.round(3) == freq.round(3)
           set_parameters(@filter_type, @sample_rate, freq, db_gain: @db_gain, quality: @quality, bandwidth_oct: @bandwidth_oct, shelf_slope: @shelf_slope)
         end
 
         # Sets the quality factor of the filter.
         def quality=(q)
+          return if @quality&.round(3) == q.round(3)
           set_parameters(@filter_type, @sample_rate, @center_frequency, db_gain: @db_gain, quality: q)
         end
 
