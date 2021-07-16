@@ -57,6 +57,8 @@ module MB
             old_key = @value_to_key[value]
             @key_to_value.delete(old_key)
             @value_to_key.delete(value)
+            @key_to_value[key] = value
+            @value_to_key[value] = key
             @used << value
             return value
           else
