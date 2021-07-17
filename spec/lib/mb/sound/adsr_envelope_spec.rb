@@ -25,7 +25,7 @@ RSpec.describe(MB::Sound::ADSREnvelope) do
     env.release
     result = env.sample(48000)
     expect(result[0].round(6)).to eq(0.75)
-    expect(result[11850..12100].mean.round(2)).to eq(0.38)
+    expect(result[11900..12100].mean.round(2)).to eq(0.38)
     expect(result[24000].round(2)).to eq(0)
     expect(result[-1].round(6)).to eq(0)
   end
