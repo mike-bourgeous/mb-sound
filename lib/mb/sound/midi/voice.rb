@@ -66,16 +66,11 @@ module MB
           #@quality_filter = 60.hz.at_rate(rate).lowpass1p
         end
 
-        # Changes the filter type.  This can be a Symbol that refers to a
-        # filter-generating shortcut on MB::Sound::Tone, or an actual Filter
-        # object that responds to :dynamic_process, :reset, :quality=, and
-        # :center_frequency=.
+        # Changes the filter type.  This must be a Symbol that refers to a
+        # filter-generating shortcut on MB::Sound::Tone.
         def filter_type=(filter_type)
-          if filter_type.respond_to?(:process)
-            filter = filter_type
-          else
-            filter = @cutoff.hz.at_rate(@rate).send(filter_type, quality: @quality)
-          end
+          filter = @cutoff.hz.at_rate(@rate).send(filter_type, quality: @quality)
+          filter2 = @cutoff.hz.at_rate(@rate).send(filter_type, quality: @quality)
 
           raise "Filter #{filter.class} should respond to #dynamic_process" unless filter.respond_to?(:dynamic_process)
           raise "Filter #{filter.class} should respond to #reset" unless filter.respond_to?(:reset)
@@ -84,6 +79,8 @@ module MB
 
           @filter = filter
           @filter.reset(@value)
+          @filter2 = filter2
+          @filter2.reset(@value)
         end
 
         # Restarts the amplitude and filter envelopes, and sets the oscillator's
@@ -103,12 +100,17 @@ module MB
 
         # Returns +count+ samples of the filtered, amplified oscillator.
         def sample(count)
-          buf = @oscillator.sample(count) # TODO: per-sample pitch filtering (probably way too slow)
+          buf = @oscillator.sample(count) * @amp_envelope.sample(count) # TODO: per-sample pitch filtering (probably way too slow)
+          re = buf.real
+          im = buf.imag
+
           centers = @cutoff * @filter_intensity ** @filter_envelope.sample(count)
           qualities = Numo::SFloat.zeros(count).fill(@quality)
-          @filter.dynamic_process(buf.inplace, centers, qualities) * @amp_envelope.sample(count)
+          @filter.dynamic_process(re.inplace, centers, qualities)
+          @filter2.dynamic_process(im.inplace, centers, qualities)
+
           @value = buf[-1]
-          buf.not_inplace!
+          re + im * 1i
         end
       end
     end
