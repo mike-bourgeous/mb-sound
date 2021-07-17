@@ -53,9 +53,10 @@ module MB
         @frame = @total * @rate
         @time = @total
 
-        @filter = 100.hz.at_rate(rate).lowpass1p
         @peak = 0
         @value = 0
+
+        @buf = Numo::SFloat.zeros(800)
       end
 
       # Changes the envelope's attack time to +t+ seconds.
@@ -84,6 +85,7 @@ module MB
       # Starts (or restarts) the envelope at the beginning, multiplying the
       # entire envelope by +peak+.
       def trigger(peak)
+        # TODO: Start at the current value if re-triggered while active?
         # @sust is a copy of the sustain level that will be changed if the
         # envelope is released before attack+decay finish
         @sust = @sustain_level
@@ -107,41 +109,47 @@ module MB
       # Produces one sample of the envelope (or many samples if +count+ is not
       # nil).  Call repeatedly to get envelope values over time.
       def sample(count = nil)
-        if count
-          return Numo::SFloat.zeros(count).map { sample }
+        if count.nil?
+          return sample(1)[0]
         end
 
-        if @on
-          case
-          when @time < 0
-            @value = 0.0
+        @buf = Numo::SFloat.zeros(count) if @buf.nil? || @buf.length != count
 
-          when @time < @attack_time
-            @value = MB::M.smoothstep(@time / @attack_time)
+        @buf.inplace.map {
+          if @on
+            case
+            when @time < 0
+              @value = 0.0
 
-          when @time < @release_start
-            @value = 1.0 - MB::M.smoothstep((@time - @attack_time) / @decay_time) * (1.0 - @sust)
+            when @time < @attack_time
+              @value = MB::M.smoothstep(@time / @attack_time)
 
+            when @time < @release_start
+              @value = 1.0 - MB::M.smoothstep((@time - @attack_time) / @decay_time) * (1.0 - @sust)
+
+            else
+              @value = @sust
+            end
           else
-            @value = @sust
+            case
+            when @time < @release_start
+              @value = @sust
+
+            when @time < @total
+              @value = (1.0 - MB::M.smoothstep((@time - @release_start) / @release_time)) * @sust
+
+            else
+              @value = 0.0
+            end
           end
-        else
-          case
-          when @time < @release_start
-            @value = @sust
 
-          when @time < @total
-            @value = (1.0 - MB::M.smoothstep((@time - @release_start) / @release_time)) * @sust
+          @frame += 1
+          @time = @frame / @rate
 
-          else
-            @value = 0.0
-          end
-        end
+          @value * @peak
+        }
 
-        @frame += 1
-        @time = @frame / @rate
-
-        @filter.process([@value])[0] * @peak
+        @buf.not_inplace!
       end
 
       private
