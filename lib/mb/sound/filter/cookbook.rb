@@ -160,6 +160,30 @@ module MB
             raise "Invalid filter type #{filter_type.inspect}"
           end
         end
+
+        # Processes just like Biquad#process but changes the cutoff frequency
+        # and quality to the values given for each sample processed.
+        def dynamic_process(samples, cutoffs, qualities)
+          y1 = @y1
+          y2 = @y2
+          x1 = @x1
+          x2 = @x2
+
+          samples.map_with_index { |x0, idx|
+            set_parameters(@filter_type, @sample_rate, cutoffs[idx], db_gain: @db_gain, quality: qualities[idx])
+            out = @b0 * x0 + @b1 * x1 + @b2 * x2 - @a1 * y1 - @a2 * y2
+            y2 = y1
+            y1 = out
+            x2 = x1
+            x1 = x0
+            out
+          }.tap {
+            @x1 = x1
+            @x2 = x2
+            @y1 = y1
+            @y2 = y2
+          }
+        end
       end
     end
   end

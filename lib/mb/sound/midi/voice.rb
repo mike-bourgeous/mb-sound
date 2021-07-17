@@ -60,15 +60,15 @@ module MB
           @filter_envelope = MB::Sound::ADSREnvelope.new(**DEFAULT_FILTER_ENVELOPE.merge(filter_envelope), rate: @rate)
           @amp_envelope = MB::Sound::ADSREnvelope.new(**DEFAULT_AMP_ENVELOPE.merge(amp_envelope), rate: @rate)
 
-          @cutoff_filter = 60.hz.at_rate(rate).lowpass1p
-          @quality_filter = 60.hz.at_rate(rate).lowpass1p
-
           # TODO: pitch filter for portamento
+          # TODO: get these to run fast enough
+          #@cutoff_filter = 60.hz.at_rate(rate).lowpass1p
+          #@quality_filter = 60.hz.at_rate(rate).lowpass1p
         end
 
         # Changes the filter type.  This can be a Symbol that refers to a
         # filter-generating shortcut on MB::Sound::Tone, or an actual Filter
-        # object that responds to :process, :reset, :quality=, and
+        # object that responds to :dynamic_process, :reset, :quality=, and
         # :center_frequency=.
         def filter_type=(filter_type)
           if filter_type.respond_to?(:process)
@@ -77,7 +77,7 @@ module MB
             filter = @cutoff.hz.at_rate(@rate).send(filter_type, quality: @quality)
           end
 
-          raise "Filter #{filter.class} should respond to #process" unless filter.respond_to?(:process)
+          raise "Filter #{filter.class} should respond to #dynamic_process" unless filter.respond_to?(:dynamic_process)
           raise "Filter #{filter.class} should respond to #reset" unless filter.respond_to?(:reset)
           raise "Filter #{filter.class} should respond to #quality=" unless filter.respond_to?(:quality=)
           raise "Filter #{filter.class} should respond to #center_frequency=" unless filter.respond_to?(:center_frequency=)
@@ -103,12 +103,10 @@ module MB
 
         # Returns +count+ samples of the filtered, amplified oscillator.
         def sample(count)
-          buf = @oscillator.sample(count) # TODO: per-sample pitch filtering
-          buf.inplace.map { |v|
-            @filter.center_frequency = @cutoff_filter.process([@cutoff])[0] * (@filter_intensity ** @filter_envelope.sample)
-            @filter.quality = @quality_filter.process([@quality])[0]
-            @filter.process([v])[0] * @amp_envelope.sample
-          }
+          buf = @oscillator.sample(count) # TODO: per-sample pitch filtering (probably way too slow)
+          centers = @cutoff * @filter_intensity ** @filter_envelope.sample(count)
+          qualities = Numo::SFloat.zeros(count).fill(@quality)
+          @filter.dynamic_process(buf.inplace, centers, qualities) * @amp_envelope.sample(count)
           @value = buf[-1]
           buf.not_inplace!
         end
