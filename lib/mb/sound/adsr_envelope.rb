@@ -50,12 +50,13 @@ module MB
 
         update(attack_time, decay_time, sustain_level, release_time)
 
-        @frame = @total * @rate
-        @time = @total
+        @frame = @rate * 100
+        @time = 100
 
         @filter = 100.hz.at_rate(rate).lowpass1p
         @peak = 0
         @value = 0
+        @sust = 0
       end
 
       # Changes the envelope's attack time to +t+ seconds.
