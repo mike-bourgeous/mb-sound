@@ -88,7 +88,7 @@ module MB
         def trigger(note, velocity)
           @oscillator.reset
           @oscillator.number = note
-          @filter_envelope.trigger(velocity / 256.0 + 0.5) # TODO: filter key track (raise filter freq with key freq)
+          @filter_envelope.trigger(velocity / 256.0 + 0.5)
           @amp_envelope.trigger(MB::M.scale(velocity, 0..127, -20..-6).db)
         end
 
@@ -104,8 +104,10 @@ module MB
           re = buf.real
           im = buf.imag
 
-          centers = @cutoff * @filter_intensity ** @filter_envelope.sample(count)
-          qualities = Numo::SFloat.zeros(count).fill(@quality)
+          # TODO: Reduce max quality for higher cutoff and/or oscillator frequencies?
+          centers = @cutoff * MB::M.scale(@oscillator.number, 0..127, 0.9..2.0) * @filter_intensity ** @filter_envelope.sample(count)
+          centers.inplace.clip(20, 18000)
+          qualities = Numo::SFloat.zeros(count).fill(@quality).clip(0.25, 10)
           @filter.dynamic_process(re.inplace, centers, qualities)
           @filter2.dynamic_process(im.inplace, centers, qualities)
 
