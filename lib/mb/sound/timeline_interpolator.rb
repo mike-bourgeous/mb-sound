@@ -10,7 +10,9 @@ module MB
     #     ti = MB::Sound::TimelineInterpolator.new([
     #       { time: 0.0, data: [ 0, 0, 0 ], blend: :linear },
     #       { time: 1.0, data: [ 1, -1, 0 ], blend: :smoothstep },
-    #       { time: 5.0, data: [ 0, 0, 1] },
+    #       { time: 2.5, data: [ -1, 1, -1 ], blend: :smootherstep },
+    #       { time: 5.0, data: [ 0, 0, 1 ], blend: :catmull_rom, alpha: 0.5 },
+    #       { time: 8.0, data: [ 1, 2, 3 ] },
     #     ])
     #
     #     ti.value(0.5) # FIXME TODO correct return
@@ -25,17 +27,31 @@ module MB
 
       # Initializes a timeline interpolator with the given Array of
       # +keyframes+.  A keyframe is a Hash containing the time and an Array
-      # with the values to interpolate.  If different values need different
-      # keyframes, use more than one TimelineInterpolator.  The
-      # +:default_blend+ parameter specifies the default method for
+      # with the values to interpolate.
+      #
+      # If different values need different keyframes, use more than one
+      # TimelineInterpolator.
+      #
+      # The +:default_blend+ parameter specifies the default method for
       # interpolating keyframes.
-      def initialize(keyframes, default_blend: :smootherstep)
+      #
+      # The +:default_alpha+ parameter controls the alpha value given to
+      # MB::M::InterpolationMethods#catmull_rom (or other future interpolators
+      # that accept a parameter) if a keyframe does not specify its own alpha
+      # value.
+      def initialize(keyframes, default_blend: :smootherstep, default_alpha: 0.5)
         raise "Unsupported blending mode #{default_blend.inspect}" unless INTERPOLATORS.include?(default_blend)
         @default_blend = default_blend
+
+        raise "Default alpha value must be numeric" unless default_alpha.is_a?(Numeric)
+        @default_alpha = default_alpha
 
         @keyframes = keyframes.sort_by { |s| s[:time] }
         raise "A keyframe is missing its :time" unless @keyframes.all? { |k| k.include?(:time) }
         raise "A keyframe is missing its :data" unless @keyframes.all? { |k| k.include?(:time) }
+
+        @min_time = @keyframes[0][:time]
+        @max_time = @keyframes[-1][:time]
 
         unless @keyframes.all? { |k| INTERPOLATORS.include?(k[:blend] || @default_blend) }
           raise "A keyframe has an invalid :blend"
@@ -51,7 +67,7 @@ module MB
       # which may be an Array or Numo::NArray to evaluate multiple times.
       def value(time)
         if time.is_a?(Array) || time.is_a?(Numo::NArray)
-          return time.map { |t| value(t) }
+          return time.to_a.map { |t| value(t)[:v] }
         end
 
         case
@@ -78,8 +94,34 @@ module MB
         time_offset = time - k1[:time]
         index_offset = time_span == 0 ? 0 : time_offset.to_f / time_span
 
+        case k1[:blend] || @default_blend
+        when :linear
+          v = MB::M.interp(k1[:data], k2[:data], index_offset)
+
+        when :smoothstep
+          v = MB::M.interp(k1[:data], k2[:data], MB::M.smoothstep(index_offset))
+
+        when :smootherstep
+          v = MB::M.interp(k1[:data], k2[:data], MB::M.smootherstep(index_offset))
+
+        when :catmull_rom
+          # TODO: Maybe just store the keyframes in this format
+          v0 = Numo::NArray.cast([k0[:time], *k0[:data]])
+          v1 = Numo::NArray.cast([k1[:time], *k1[:data]])
+          v2 = Numo::NArray.cast([k2[:time], *k2[:data]])
+          v3 = Numo::NArray.cast([k3[:time], *k3[:data]])
+
+          v0[0] -= 1 if v0[0] == v1[0]
+          v3[0] += 1 if v3[0] == v2[0]
+
+          v = MB::M.catmull_rom(v0, v1, v2, v3, index_offset, k1[:alpha] || @default_alpha)[1..-1]
+
+        else
+          raise "BUG: Unsupported blending mode #{k1[:blend] || @default_blend}"
+        end
+
         # XXX TODO
-        { index: idx + index_offset, time: time, time_offset: time_offset, k: [k0, k1, k2, k3] }
+        { index: idx + index_offset, offset: index_offset, time: time, time_offset: time_offset, k: [k0, k1, k2, k3], v: v }
       end
     end
   end
