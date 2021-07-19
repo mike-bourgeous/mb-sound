@@ -20,13 +20,17 @@ module MB
 
       # Sets the threshold between the linear and hyperbolic regions.
       def threshold=(t)
-        update(t.abs, @limit)
+        t = t.abs
+        l = t > @limit ? t : @limit
+        update(t, l)
       end
 
       # Sets the upper output limit of the hyperbolic region.  The output
       # cannot exceed +/- this level.  The default limit is 1.
       def limit=(l)
-        update(@threshold, l.abs)
+        l = l.abs
+        t = l < @threshold ? l : @threshold
+        update(t, l)
       end
 
       # Soft-clips the given +samples+, returning the result.  The soft-clip
