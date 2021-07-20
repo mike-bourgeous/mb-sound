@@ -3,6 +3,8 @@ module MB
     # Interpolates values using keyframes along a timeline using linear,
     # smoothstep, or other interpolation techniques.
     #
+    # Note that :catmull_rom is quite a bit slower than other methods.
+    #
     # Examples:
     #     # The :blend value controls the segment after the given keyframe.
     #     # The :time unit is arbitrary; just be consistent (always seconds, or
@@ -15,8 +17,8 @@ module MB
     #       { time: 8.0, data: [ 1, 2, 3 ] },
     #     ])
     #
-    #     ti.value(0.5) # FIXME TODO correct return
-    #     # => [ 0.5, -0.5, 0 ]
+    #     ti.value(0.5)
+    #     # => [ 0.5, -0.5, 0.0 ]
     class TimelineInterpolator
       INTERPOLATORS = [
         :catmull_rom,
@@ -51,14 +53,14 @@ module MB
         @keyframes = keyframes.sort_by { |s| s[:time] }
 
         # Keyframes in Catmull-Rom-compatible format, with an extra copy of the first and last frames.
-        # Technically we only need keyframes around :catmull_rom segments
+        # Technically we only need these modified keyframes around :catmull_rom segments
         @crframes = @keyframes.map { |k|
-          Numo::NArray.cast([k[:time], *k[:data]]).freeze
+          Numo::NArray.cast(k[:data]).freeze
         }
-        first_frame = @crframes[0].dup
-        first_frame[0] -= 1
-        last_frame = @crframes[-1].dup
-        last_frame[0] += 1
+        # FIXME: this doesn't do a good job of making :catmull_rom work at start or end segments
+        # tried using time as a dimension; maybe try using index as a dimension?
+        first_frame = @crframes[0].map { |v| v - 1 }
+        last_frame = @crframes[-1].map { |v| v + 1 }
         @crframes.unshift(first_frame.freeze)
         @crframes.push(last_frame.freeze)
 
@@ -69,7 +71,7 @@ module MB
           raise "A keyframe has an invalid :blend"
         end
 
-        num_values = @keyframes.map { |k| k[:data].length }.uniq
+        num_values = @keyframes.map { |k| k[:data].respond_to?(:length) ? k[:data].length : 1 }.uniq
         raise "All keyframes must have the same number of data values" unless num_values.length == 1
         raise "There must be at least one data value to interpolate" unless num_values[0] >= 1
       end
@@ -78,16 +80,16 @@ module MB
       # units as determined at construction, e.g. seconds, samples, frames),
       # which may be an Array or Numo::NArray to evaluate multiple times.
       def value(time)
-        if time.is_a?(Array) || time.is_a?(Numo::NArray)
-          return time.to_a.map { |t| value(t)[:v] }
+        if time.respond_to?(:map)
+          return time.to_a.map { |t| value(t) }
         end
 
         case
         when time <= @keyframes[0][:time]
-          idx = 0
+          return @keyframes[0][:data]
 
         when time >= @keyframes[-1][:time]
-          idx = @keyframes.length - 1
+          return @keyframes[-1][:data]
 
         else
           idx = @keyframes.bsearch_index { |k| k[:time] > time } || @keyframes.length - 1
@@ -104,32 +106,32 @@ module MB
         time_offset = time - k1[:time]
         index_offset = time_span == 0 ? 0 : time_offset.to_f / time_span
 
+        raise "BUG: Index offset #{index_offset} at time #{time} is not 0..1" if index_offset < 0 || index_offset > 1
+
         case k1[:blend] || @default_blend
         when :linear
-          v = MB::M.interp(k1[:data], k2[:data], index_offset)
+          MB::M.interp(k1[:data], k2[:data], index_offset)
 
         when :smoothstep
-          v = MB::M.interp(k1[:data], k2[:data], MB::M.smoothstep(index_offset))
+          MB::M.interp(k1[:data], k2[:data], MB::M.smoothstep(index_offset))
 
         when :smootherstep
-          v = MB::M.interp(k1[:data], k2[:data], MB::M.smootherstep(index_offset))
+          MB::M.interp(k1[:data], k2[:data], MB::M.smootherstep(index_offset))
 
         when :catmull_rom
-          # FIXME: maybe cr doesn't need time at the beginning
+          # TODO: this is probably not accounting for time correctly; the derivatives don't look super smooth
           v0 = @crframes[MB::M.clamp(idx0 + 1, 0, @crframes.length - 1)]
           v1 = @crframes[MB::M.clamp(idx1 + 1, 0, @crframes.length - 1)]
           v2 = @crframes[MB::M.clamp(idx2 + 1, 0, @crframes.length - 1)]
           v3 = @crframes[MB::M.clamp(idx3 + 1, 0, @crframes.length - 1)]
 
-          v = MB::M.catmull_rom(v0, v1, v2, v3, index_offset, k1[:alpha] || @default_alpha)[1..-1]
+          v = MB::M.catmull_rom(v0, v1, v2, v3, index_offset, k1[:alpha] || @default_alpha)
           v = v.to_a if k1[:data].is_a?(Array)
+          v
 
         else
           raise "BUG: Unsupported blending mode #{k1[:blend] || @default_blend}"
         end
-
-        # XXX TODO
-        { index: idx + index_offset, offset: index_offset, time: time, time_offset: time_offset, k: [k1, k2], v: v }
       end
     end
   end
