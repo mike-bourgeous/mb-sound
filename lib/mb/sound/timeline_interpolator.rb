@@ -59,6 +59,7 @@ module MB
         }
         # FIXME: this doesn't do a good job of making :catmull_rom work at start or end segments
         # tried using time as a dimension; maybe try using index as a dimension?
+        # FIXME: catmull_rom blows up if sequential points are identical
         first_frame = @crframes[0].map { |v| v - 1 }
         last_frame = @crframes[-1].map { |v| v + 1 }
         @crframes.unshift(first_frame.freeze)
