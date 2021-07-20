@@ -48,16 +48,7 @@ module MB
 
         raise "A keyframe is missing its :time" unless keyframes.all? { |k| k.include?(:time) }
         raise "A keyframe is missing its :data" unless keyframes.all? { |k| k.include?(:data) }
-
-        data_class = Numo::NArray.array_type(keyframes.map { |k| k[:data] })
-        if [Numo::Int8, Numo::Int16, Numo::Int32, Numo::Int64].include?(data_class)
-          data_class = Numo::DFloat
-        end
-        @keyframes = keyframes.sort_by { |s|
-          s[:time]
-        }.map { |k|
-          k.merge(data: data_class.cast(k[:data]))
-        }
+        @keyframes = keyframes.sort_by { |s| s[:time] }
 
         # Keyframes in Catmull-Rom-compatible format, with an extra copy of the first and last frames.
         # Technically we only need keyframes around :catmull_rom segments
@@ -131,6 +122,7 @@ module MB
           v3 = @crframes[MB::M.clamp(idx3 + 1, 0, @crframes.length - 1)]
 
           v = MB::M.catmull_rom(v0, v1, v2, v3, index_offset, k1[:alpha] || @default_alpha)[1..-1]
+          v = v.to_a if k1[:data].is_a?(Array)
 
         else
           raise "BUG: Unsupported blending mode #{k1[:blend] || @default_blend}"
