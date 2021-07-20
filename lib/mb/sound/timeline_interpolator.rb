@@ -46,9 +46,18 @@ module MB
         raise "Default alpha value must be numeric" unless default_alpha.is_a?(Numeric)
         @default_alpha = default_alpha
 
-        @keyframes = keyframes.sort_by { |s| s[:time] }
-        raise "A keyframe is missing its :time" unless @keyframes.all? { |k| k.include?(:time) }
-        raise "A keyframe is missing its :data" unless @keyframes.all? { |k| k.include?(:time) }
+        raise "A keyframe is missing its :time" unless keyframes.all? { |k| k.include?(:time) }
+        raise "A keyframe is missing its :data" unless keyframes.all? { |k| k.include?(:data) }
+
+        data_class = Numo::NArray.array_type(keyframes.map { |k| k[:data] })
+        if [Numo::Int8, Numo::Int16, Numo::Int32, Numo::Int64].include?(data_class)
+          data_class = Numo::DFloat
+        end
+        @keyframes = keyframes.sort_by { |s|
+          s[:time]
+        }.map { |k|
+          k.merge(data: data_class.cast(k[:data]))
+        }
 
         # Keyframes in Catmull-Rom-compatible format, with an extra copy of the first and last frames.
         # Technically we only need keyframes around :catmull_rom segments
@@ -115,6 +124,7 @@ module MB
           v = MB::M.interp(k1[:data], k2[:data], MB::M.smootherstep(index_offset))
 
         when :catmull_rom
+          # FIXME: maybe cr doesn't need time at the beginning
           v0 = @crframes[MB::M.clamp(idx0 + 1, 0, @crframes.length - 1)]
           v1 = @crframes[MB::M.clamp(idx1 + 1, 0, @crframes.length - 1)]
           v2 = @crframes[MB::M.clamp(idx2 + 1, 0, @crframes.length - 1)]
