@@ -50,6 +50,18 @@ module MB
         raise "A keyframe is missing its :time" unless @keyframes.all? { |k| k.include?(:time) }
         raise "A keyframe is missing its :data" unless @keyframes.all? { |k| k.include?(:time) }
 
+        # Keyframes in Catmull-Rom-compatible format, with an extra copy of the first and last frames.
+        # Technically we only need keyframes around :catmull_rom segments
+        @crframes = @keyframes.map { |k|
+          Numo::NArray.cast([k[:time], *k[:data]]).freeze
+        }
+        first_frame = @crframes[0].dup
+        first_frame[0] -= 1
+        last_frame = @crframes[-1].dup
+        last_frame[0] += 1
+        @crframes.unshift(first_frame.freeze)
+        @crframes.push(last_frame.freeze)
+
         @min_time = @keyframes[0][:time]
         @max_time = @keyframes[-1][:time]
 
@@ -85,10 +97,8 @@ module MB
         idx1 = idx - 1
         idx2 = idx
         idx3 = idx + 1
-        k0 = @keyframes[MB::M.clamp(idx0, 0, @keyframes.length - 1)]
         k1 = @keyframes[MB::M.clamp(idx1, 0, @keyframes.length - 1)]
         k2 = @keyframes[MB::M.clamp(idx2, 0, @keyframes.length - 1)]
-        k3 = @keyframes[MB::M.clamp(idx3, 0, @keyframes.length - 1)]
 
         time_span = k2[:time] - k1[:time]
         time_offset = time - k1[:time]
@@ -105,14 +115,10 @@ module MB
           v = MB::M.interp(k1[:data], k2[:data], MB::M.smootherstep(index_offset))
 
         when :catmull_rom
-          # TODO: Maybe just store the keyframes in this format
-          v0 = Numo::NArray.cast([k0[:time], *k0[:data]])
-          v1 = Numo::NArray.cast([k1[:time], *k1[:data]])
-          v2 = Numo::NArray.cast([k2[:time], *k2[:data]])
-          v3 = Numo::NArray.cast([k3[:time], *k3[:data]])
-
-          v0[0] -= 1 if v0[0] == v1[0]
-          v3[0] += 1 if v3[0] == v2[0]
+          v0 = @crframes[MB::M.clamp(idx0 + 1, 0, @crframes.length - 1)]
+          v1 = @crframes[MB::M.clamp(idx1 + 1, 0, @crframes.length - 1)]
+          v2 = @crframes[MB::M.clamp(idx2 + 1, 0, @crframes.length - 1)]
+          v3 = @crframes[MB::M.clamp(idx3 + 1, 0, @crframes.length - 1)]
 
           v = MB::M.catmull_rom(v0, v1, v2, v3, index_offset, k1[:alpha] || @default_alpha)[1..-1]
 
@@ -121,7 +127,7 @@ module MB
         end
 
         # XXX TODO
-        { index: idx + index_offset, offset: index_offset, time: time, time_offset: time_offset, k: [k0, k1, k2, k3], v: v }
+        { index: idx + index_offset, offset: index_offset, time: time, time_offset: time_offset, k: [k1, k2], v: v }
       end
     end
   end
