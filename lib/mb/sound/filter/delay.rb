@@ -19,6 +19,21 @@ module MB
           self.delay = delay
         end
 
+        # Fills the entire delay line with the given value.  Future calls to
+        # #process will return this value for #delay_samples samples, before
+        # returning the newly written data.
+        def reset(value = 0)
+          @buf.fill(value)
+          @out_buf.fill(value)
+          reset_delay
+        end
+
+        # Immediately sets the smoothed internal delay to the last value set by
+        # #delay= or #delay_samples=.
+        def reset_delay
+          # TODO: add delay smoothing
+        end
+
         # Sets the delay time in +samples+, regardless of sample rate.  The
         # number of +samples+ will be rounded to the closest Integer.
         def delay_samples=(samples)
@@ -27,6 +42,7 @@ module MB
 
           delta = samples - @delay_samples
           @delay_samples = samples
+          @delay = samples.to_f / @rate
           @read_offset = (@read_offset - delta) % @buf.length
         end
 
@@ -34,12 +50,22 @@ module MB
         # samples using the sample rate.
         def delay=(seconds)
           self.delay_samples = seconds * @rate
-          @delay = seconds.to_f
         end
 
+        # Delays the given +data+ by #delay_samples samples.
         def process(data)
-          # TODO is this true? or what is true?
-          raise 'Cannot write more than the buffer size minus the delay in samples' if data.length > @buf.length - @delay_samples
+          max_length = @buf.length - @delay_samples
+          if data.length > max_length
+            chunk_buf = data.inplace? ? data : data.dup.inplace
+
+            for idx in (0...data.length).step(max_length)
+              end_idx = idx + max_length
+              end_idx = data.length if end_idx > data.length
+              process(chunk_buf[idx...end_idx].inplace)
+            end
+
+            return chunk_buf
+          end
 
           if @write_offset + data.length > @buf.length # TODO: just > or >=?
             before = @buf.length - @write_offset
@@ -53,6 +79,7 @@ module MB
           # TODO: might need to be able to change/blend the delay on a per-sample basis
 
           if @read_offset + data.length > @buf.length # TODO: just > or >=?
+            # Wrap-around read
             before = @buf.length - @read_offset
             after = data.length - before
             @out_buf = Numo::SFloat.zeros(data.length) if @out_buf.length != data.length
@@ -65,6 +92,8 @@ module MB
 
           @read_offset = (@read_offset + data.length) % @buf.length
           @write_offset = (@write_offset + data.length) % @buf.length
+
+          data[0..-1] = ret if data.inplace?
 
           ret
         end
