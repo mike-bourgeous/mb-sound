@@ -35,25 +35,21 @@ RSpec.describe(MB::Sound::Filter::Delay) do
     end
 
     it 'can process an oversized buffer in smaller chunks with a non-inplace input' do
-      input = Numo::SFloat.zeros(20)
-      input[0] = 1
-
-      expected = Numo::SFloat.zeros(20)
-      expected[5] = 1
+      input = Numo::SFloat.zeros(20).rand(-1, 1)
+      expected = MB::M.shr(input, 5)
 
       expect(shortbuf.process(input)).to eq(expected)
       expect(input).not_to eq(expected)
     end
 
     it 'can process an oversized buffer in-place' do
-      input = Numo::SFloat.zeros(20).inplace!
-      input[0] = 1
+      input = Numo::SFloat.zeros(20).rand(-1, 1).inplace!
+      expected = MB::M.shr(input, 5)
 
-      expected = Numo::SFloat.zeros(20)
-      expected[5] = 1
-
-      expect(shortbuf.process(input).object_id).to eq(input.object_id)
+      result = shortbuf.process(input)
+      expect(result).to eq(expected)
       expect(input).to eq(expected)
+      expect(result.object_id).to eq(input.object_id)
     end
 
     it 'can process relatively prime lengths with wraparound' do
