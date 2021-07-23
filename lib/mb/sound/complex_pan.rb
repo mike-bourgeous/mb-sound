@@ -18,7 +18,10 @@ module MB
     # rotated -22.5 degrees and the other is rotated +22.5 degrees.
     #
     # You can pass the output of MB::Sound::FFTMethods#analytic_signal or a
-    # complex waveform from MB::Sound::Oscillator.
+    # complex waveform from MB::Sound::Oscillator to the #process method to
+    # generate a panned and phased result.
+    #
+    # Pan and phase values are smoothed to prevent clicks in the output.
     class ComplexPan
       # Constant to pass to #initialize for -3dB pan law.
       DB_3 = 0.5 ** 0.5
@@ -29,20 +32,39 @@ module MB
       # Constant to pass to #initialize for -6dB pan law.
       DB_6 = 0.5
 
-      attr_accessor :pan, :phase
+      # The left-right pan (-1 to 1, 0 being center, -1 left, 1 right).
+      attr_accessor :pan
+
+      # The phase (0 to Math::PI).
+      attr_accessor :phase
+
+      # The exponent used to produce the center gain (0.5 for -3dB, 0.75 for
+      # -4.5dB, 1 for -6dB).
       attr_reader :pan_power
 
       # Initializes a ComplexPan, defaulting to center-panned and in-phase
       # output.  The +:center_gain+ parameter controls the panning gain curve
       # (see the class description).
-      def initialize(center_gain: DB_45)
+      #
+      # The +:pan_hz+ and +:phase_hz+ parameters control filtering of pan and
+      # phase values through LinearFollower and FirstOrder filters, preventing
+      # clicks in the output when pan and phase are changed.
+      def initialize(center_gain: DB_45, pan_hz: 30.0, phase_hz: 30.0)
         self.center_gain = center_gain
         @pan = 0.0
         @phase = 0.0
 
-        # TODO: Smoothed pan/phase
-        @pan_s = 0.0
-        @phase_s = 0.0
+        @pan_filter = MB::Sound::Filter::FilterChain.new(
+          pan_hz.hz.at(1).follower,
+          pan_hz.hz.lowpass1p
+        )
+        @pan_buf = Numo::SFloat.zeros(800)
+
+        @phase_filter = MB::Sound::Filter::FilterChain.new(
+          phase_hz.hz.at(Math::PI / 2).follower,
+          phase_hz.hz.lowpass1p
+        )
+        @phase_buf = Numo::SFloat.zeros(800)
       end
 
       # Changes the pan gain "law" that affects the volume curve of the two
@@ -56,18 +78,31 @@ module MB
       # Immediately set pan and phase values to their target values, skipping
       # any smoothing curve.  Call #pan= and/or #phase= first, then call this.
       def reset(pan: @pan, phase: @phase)
-        # TODO: reset if there is a smoothing curve
+        @pan = pan
+        @phase = phase
+        @pan_filter.reset(@pan)
+        @phase_filter.reset(@phase)
       end
 
       # Pans and rotates the given +data+ and returns [l, r] based on the
       # current settings for :pan and :phase.
       def process(data)
-        MB::M.with_inplace(data, false) do |d|
-          # TODO: smooth pan and phase per-sample with a LinearFollower and/or low-pass filter
-          pan = @pan
-          phase = @phase
+        if data.is_a?(Numeric)
+          local_pan = @pan_filter.process([@pan])[0]
+          local_phase = @phase_filter.process([@phase])[0]
+        else
+          @pan_buf = Numo::SFloat.zeros(data.length) if @pan_buf.length != data.length
+          @phase_buf = Numo::SFloat.zeros(data.length) if @phase_buf.length != data.length
 
-          lgain, rgain = ComplexPan.gains(pan, phase, @pan_power)
+          @pan_buf.fill(@pan)
+          @phase_buf.fill(@phase)
+
+          local_pan = @pan_filter.process(@pan_buf.inplace).not_inplace!
+          local_phase = @phase_filter.process(@phase_buf.inplace).not_inplace!
+        end
+
+        MB::M.with_inplace(data, false) do |d|
+          lgain, rgain = ComplexPan.gains(local_pan, local_phase, @pan_power)
           return d * lgain, d * rgain
         end
       end

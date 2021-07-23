@@ -343,43 +343,15 @@ module MB
         steps = steps.to_a
 
         results = [steps.to_a] + data.map { |k, v|
-          evaluate(v, range: range, steps: steps).to_a
+          evaluate(v, range: range, steps: steps)
         }
-        results = results.transpose
-
-        formatted = results.map { |row|
-          row.map { |v|
-            v = MB::M.sigfigs(v, 6) if v.is_a?(Numeric)
-            MB::U.highlight(v).strip
+        results = results.transpose.map { |a|
+          a.map { |v|
+            v.is_a?(Numeric) ? MB::M.sigfigs(v, 6) : v
           }
         }
-        column_width = 2 + formatted.flatten.map { |hl|
-          MB::U.remove_ansi(hl).length
-        }.max
 
-        header = (['#'] + data.keys).map.with_index { |k, idx| "\e[1;#{31 + idx % 7}m#{k.to_s.center(column_width)}\e[0m" }.join('|')
-        separator = (['-' * column_width] * (data.length + 1)).join('+')
-
-        puts header
-        puts separator
-
-        formatted.each do |row|
-          puts(
-            row.map { |hl|
-              colorless = MB::U.remove_ansi(hl)
-              len = colorless.length
-              extra = column_width - len
-              # TODO: align on the decimal point
-              # pre = extra / 2
-              pre = colorless.start_with?('-') ? 0 : 1
-              post = extra - pre
-              post = 0 if post < 0
-              "#{' ' * pre}#{hl}#{' ' * post}"
-            }.join('|')
-          )
-        end
-
-        nil
+        MB::U.table(results, header: ['#'] + data.keys)
       end
 
       private
@@ -388,7 +360,7 @@ module MB
       def evaluate(data, range:, steps:, try_convert: true)
         if data.respond_to?(:call)
           steps.map { |s| data.call(s) }
-        elsif data.respond_to?(:[])
+        elsif data.respond_to?(:[]) && !data.is_a?(Numeric)
           steps.map { |s|
             idx = MB::M.scale(s.real, range, 0..(data.length - 1))
             idx = 0 if idx < 0

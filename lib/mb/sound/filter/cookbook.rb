@@ -34,11 +34,13 @@ module MB
         # Sets the center/cutoff frequency of the filter.
         def center_frequency=(freq)
           raise 'Frequency must be between 0 and sample_rate/2' if freq <= 0 || freq > @sample_rate * 0.5
+          return if @center_frequency&.round(3) == freq.round(3)
           set_parameters(@filter_type, @sample_rate, freq, db_gain: @db_gain, quality: @quality, bandwidth_oct: @bandwidth_oct, shelf_slope: @shelf_slope)
         end
 
         # Sets the quality factor of the filter.
         def quality=(q)
+          return if @quality&.round(3) == q.round(3)
           set_parameters(@filter_type, @sample_rate, @center_frequency, db_gain: @db_gain, quality: q)
         end
 
@@ -157,6 +159,30 @@ module MB
           else
             raise "Invalid filter type #{filter_type.inspect}"
           end
+        end
+
+        # Processes just like Biquad#process but changes the cutoff frequency
+        # and quality to the values given for each sample processed.
+        def dynamic_process(samples, cutoffs, qualities)
+          y1 = @y1
+          y2 = @y2
+          x1 = @x1
+          x2 = @x2
+
+          samples.map_with_index { |x0, idx|
+            set_parameters(@filter_type, @sample_rate, cutoffs[idx], db_gain: @db_gain, quality: qualities[idx])
+            out = @b0 * x0 + @b1 * x1 + @b2 * x2 - @a1 * y1 - @a2 * y2
+            y2 = y1
+            y1 = out
+            x2 = x1
+            x1 = x0
+            out
+          }.tap {
+            @x1 = x1
+            @x2 = x2
+            @y1 = y1
+            @y2 = y2
+          }
         end
       end
     end

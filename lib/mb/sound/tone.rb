@@ -304,6 +304,11 @@ module MB
         MB::Sound::Note.new(self)
       end
 
+      # Converts this Tone to a MIDI note-on message from the midi-message gem.
+      def to_midi(velocity: 64, channel: -1)
+        to_note.to_midi(velocity: velocity, channel: channel)
+      end
+
       # Generates +count+ samples of the tone, defaulting to the duration of
       # the tone, or one second of samples if duration is infinite.  The tone
       # parameters cannot be changed after this method is called.
@@ -337,6 +342,17 @@ module MB
       #     1000.hz.at_rate(44100).lowpass
       def lowpass(quality: 1)
         MB::Sound::Filter::Cookbook.new(:lowpass, @rate, @frequency, quality: quality)
+      end
+
+      # Returns a first-order single-pole low-pass filter with this Tone's
+      # frequency as its cutoff.  Only the tone's frequency and sample rate
+      # parameters are used.
+      #
+      # Examples:
+      #     50.hz.lowpass1p
+      #     10.hz.at_rate(60).lowpass1p
+      def lowpass1p
+        MB::Sound::Filter::FirstOrder.new(:lowpass1p, @rate, @frequency)
       end
 
       # Returns a second-order high-pass Filter with this Tone's frequency as

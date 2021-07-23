@@ -154,6 +154,7 @@ module MB
           # Direct Form I
           samples.map do |x0|
             out = @b0 * x0 + @b1 * @x1 + @b2 * @x2 - @a1 * @y1 - @a2 * @y2
+            out = 0 if out.abs < 1e-18 && @y2.abs < 1e-18 && @y1.abs < 1e-18
             @y2 = @y1
             @y1 = out
             @x2 = @x1
@@ -168,6 +169,7 @@ module MB
         # with the result.
         def weighted_process(sample, strength = 1.0)
           out = @b0 * sample + @b1 * @x1 + @b2 * @x2 - @a1 * @y1 - @a2 * @y2
+          out = 0 if out.abs < 1e-18 && @y2.abs < 1e-18 && @y1.abs < 1e-18
           out = strength * out + (1.0 - strength) * sample
           @y2 = @y1
           @y1 = out

@@ -106,3 +106,7 @@ require_relative 'sound/window_reader'
 require_relative 'sound/window_writer'
 require_relative 'sound/fft_writer'
 require_relative 'sound/multi_writer'
+
+require_relative 'sound/midi'
+require_relative 'sound/adsr_envelope'
+require_relative 'sound/timeline_interpolator'
