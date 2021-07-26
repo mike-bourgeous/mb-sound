@@ -3,20 +3,31 @@ module MB
     class Filter
       # A simple delay line.
       class Delay
-        attr_reader :delay, :delay_samples, :rate
+        attr_reader :delay, :delay_samples, :rate, :smoothing
 
-        # Initializes a single-channel delay.  The +:buffer_size+ sets the
-        # maximum possible delay (TODO: account for buffer write).
-        def initialize(delay: 0, rate: 48000, buffer_size: 48000)
+        # Initializes a single-channel delay with a given +:delay+ in seconds,
+        # based on the sample +:rate+..  The +:buffer_size+ sets the maximum
+        # possible delay.  If +:smoothing+ is true, then the delay time will be
+        # adjusted slowly to prevent sudden jumps or clicks in the output.
+        def initialize(delay: 0, rate: 48000, buffer_size: 48000, smoothing: true)
           @buf = Numo::SFloat.zeros(buffer_size)
           @out_buf = Numo::SFloat.zeros(1) # For wrap-around reads
-          @rate = rate
+          @rate = rate.to_f
           @delay = 0
           @delay_samples = 0
           @read_offset = 0
           @write_offset = 0
 
           self.delay = delay
+
+          @smoothing = !!smoothing
+          @filter = MB::Sound::Filter::LinearFollower.new(
+            rate: @rate,
+            max_rise: @rate / 2.0, # TODO: maybe allow changing this
+            max_fall: @rate / 2.0
+          )
+          @filter.reset(@delay_samples)
+          @filter_buf = Numo::Int32.zeros(buffer_size).fill(@delay_samples)
         end
 
         # Fills the entire delay line with the given value.  Future calls to
@@ -31,7 +42,15 @@ module MB
         # Immediately sets the smoothed internal delay to the last value set by
         # #delay= or #delay_samples=.
         def reset_delay
-          # TODO: add delay smoothing
+          @filter.reset(@delay_samples)
+        end
+
+        # Enables or disables delay smoothing, and resets the smoothed delay to
+        # the current target delay value set by #delay= or #delay_samples=.
+        # See #reset_delay.
+        def smoothing=(enabled)
+          reset_delay
+          @smoothing = !!enabled
         end
 
         # Sets the delay time in +samples+, regardless of sample rate.  The
@@ -54,7 +73,12 @@ module MB
 
         # Delays the given +data+ by #delay_samples samples.
         def process(data)
-          max_length = @buf.length - @delay_samples
+          if @smoothing
+            max_length = @buf.length - MB::M.max(@delay_samples, @filter.peek)
+          else
+            max_length = @buf.length - @delay_samples
+          end
+
           if data.length > max_length
             chunk_buf = data.inplace? ? data : data.dup.inplace
 
@@ -67,7 +91,7 @@ module MB
             return chunk_buf
           end
 
-          if @write_offset + data.length > @buf.length # TODO: just > or >=?
+          if @write_offset + data.length > @buf.length
             before = @buf.length - @write_offset
             after = data.length - before
             @buf[@write_offset..-1] = data[0...before]
@@ -76,24 +100,31 @@ module MB
             @buf[@write_offset...(@write_offset + data.length)] = data
           end
 
-          # TODO: might need to be able to change/blend the delay on a per-sample basis
-
-          if @read_offset + data.length > @buf.length # TODO: just > or >=?
-            # Wrap-around read
-            before = @buf.length - @read_offset
-            after = data.length - before
-            @out_buf = Numo::SFloat.zeros(data.length) if @out_buf.length != data.length
-            @out_buf[0...before] = @buf[@read_offset..-1]
-            @out_buf[before..-1] = @buf[0...after]
-            ret = @out_buf
+          if @smoothing
+            # TODO: Fractional addressing / interpolation / resampling might sound better
+            delay = @filter.process(@filter_buf[0...data.length].fill(@delay_samples).inplace).not_inplace!
+            ret = data.map_with_index { |_, idx|
+              read_offset = (@write_offset - delay[idx] + idx) % @buf.length
+              @buf[read_offset]
+            }
           else
-            ret = @buf[@read_offset...(@read_offset + data.length)]
+            if @read_offset + data.length > @buf.length
+              # Wrap-around read
+              before = @buf.length - @read_offset
+              after = data.length - before
+              @out_buf = Numo::SFloat.zeros(data.length) if @out_buf.length != data.length
+              @out_buf[0...before] = @buf[@read_offset..-1]
+              @out_buf[before..-1] = @buf[0...after]
+              ret = @out_buf
+            else
+              ret = @buf[@read_offset...(@read_offset + data.length)]
+            end
           end
 
           @read_offset = (@read_offset + data.length) % @buf.length
           @write_offset = (@write_offset + data.length) % @buf.length
 
-          data[0..-1] = ret if data.inplace?
+          data[0..-1] = ret if data.inplace? && data.object_id != ret.object_id
 
           ret
         end

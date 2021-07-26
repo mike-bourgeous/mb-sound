@@ -93,6 +93,11 @@ module MB
             end
           }
         end
+
+        # Returns the current output value without changing the filter state.
+        def peek
+          @s
+        end
       end
     end
   end
