@@ -17,13 +17,13 @@ module MB
       # Initializes a HaasPan with the given relative +:delay+ in seconds
       # (positive delays right, negative delays left), and the given sample
       # +:rate+.
-      def initialize(delay: 0, rate: 48000)
+      def initialize(delay: 0, rate: 48000, smoothing: true)
         @rate = rate.to_f
 
         # Two separate delays are needed, because of delay smoothing.  Without
         # delay smoothing only one delay object could be used.
-        @left_delay = MB::Sound::Filter::Delay.new(delay: 0, rate: rate, smoothing: true)
-        @right_delay = MB::Sound::Filter::Delay.new(delay: 0, rate: rate, smoothing: true)
+        @left_delay = MB::Sound::Filter::Delay.new(delay: 0, rate: rate, smoothing: smoothing)
+        @right_delay = MB::Sound::Filter::Delay.new(delay: 0, rate: rate, smoothing: smoothing)
 
         self.delay = delay
 

@@ -2,13 +2,15 @@ module MB
   module Sound
     class Filter
       # A simple delay line.
-      class Delay
+      class Delay < Filter
         attr_reader :delay, :delay_samples, :rate, :smoothing
 
         # Initializes a single-channel delay with a given +:delay+ in seconds,
         # based on the sample +:rate+..  The +:buffer_size+ sets the maximum
         # possible delay.  If +:smoothing+ is true, then the delay time will be
-        # adjusted slowly to prevent sudden jumps or clicks in the output.
+        # adjusted slowly to prevent sudden jumps or clicks in the output.  If
+        # +:smoothing+ is a numeric value, then that is the maximum delay
+        # change in seconds allowed per second.
         def initialize(delay: 0, rate: 48000, buffer_size: 48000, smoothing: true)
           @buf = Numo::SFloat.zeros(buffer_size)
           @out_buf = Numo::SFloat.zeros(1) # For wrap-around reads
@@ -21,10 +23,11 @@ module MB
           self.delay = delay
 
           @smoothing = !!smoothing
+          @smooth_limit = @rate * (smoothing.is_a?(Numeric) ? smoothing : 0.5)
           @filter = MB::Sound::Filter::LinearFollower.new(
             rate: @rate,
-            max_rise: @rate / 2.0, # TODO: maybe allow changing this
-            max_fall: @rate / 2.0
+            max_rise: @smooth_limit,
+            max_fall: @smooth_limit
           )
           @filter.reset(@delay_samples)
           @filter_buf = Numo::Int32.zeros(buffer_size).fill(@delay_samples)
@@ -73,6 +76,8 @@ module MB
 
         # Delays the given +data+ by #delay_samples samples.
         def process(data)
+          raise 'Cannot process a zero-length array' if data.length == 0
+
           if @smoothing
             max_length = @buf.length - MB::M.max(@delay_samples, @filter.peek)
           else

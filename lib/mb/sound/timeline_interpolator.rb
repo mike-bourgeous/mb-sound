@@ -27,6 +27,11 @@ module MB
         :smootherstep,
       ]
 
+      # The number of values being interpolated.
+      attr_reader :num_values
+
+      attr_reader :min_time, :max_time, :num_keyframes
+
       # Initializes a timeline interpolator with the given Array of
       # +keyframes+.  A keyframe is a Hash containing the time and an Array
       # with the values to interpolate.
@@ -51,6 +56,7 @@ module MB
         raise "A keyframe is missing its :time" unless keyframes.all? { |k| k.include?(:time) }
         raise "A keyframe is missing its :data" unless keyframes.all? { |k| k.include?(:data) }
         @keyframes = keyframes.sort_by { |s| s[:time] }
+        @num_keyframes = keyframes.length
 
         # Keyframes in Catmull-Rom-compatible format, with an extra copy of the first and last frames.
         # Technically we only need these modified keyframes around :catmull_rom segments
@@ -75,6 +81,40 @@ module MB
         num_values = @keyframes.map { |k| k[:data].respond_to?(:length) ? k[:data].length : 1 }.uniq
         raise "All keyframes must have the same number of data values" unless num_values.length == 1
         raise "There must be at least one data value to interpolate" unless num_values[0] >= 1
+        @num_values = num_values[0]
+      end
+
+      # Samples the output +scale+ times the number of keyframes across the
+      # range between #min_time and #max_time, e.g. for plotting.  Returns a
+      # plottable Hash that can be given to MB::M::Plot#plot, or a compatible
+      # method.
+      def sample(scale = 20)
+        times = Numo::SFloat.linspace(@min_time, @max_time, @num_keyframes * scale)
+        values = value(times)
+
+        @num_values.times.map { |idx|
+          value = values.map { |v| v[idx] }
+
+          puts "idx: #{idx} value: #{value}"
+
+          [
+            idx,
+            {
+              data: times.to_a.map.with_index { |t, off|
+                [t, value[off]]
+              },
+              xrange: [@min_time, @max_time],
+              yrange: [value.min, value.max],
+            }
+          ]
+        }.to_h
+      end
+
+      # Plots the datapoints against time using the given +plotter+
+      # (an instance of MB::M::Plot, or a compatible object).
+      def plot(plotter)
+        times, values = sample
+        plotter.plot(sample)
       end
 
       # Returns an interpolated keyframe at the given +time+ (in arbitrary
