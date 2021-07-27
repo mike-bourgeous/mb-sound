@@ -1,6 +1,7 @@
 #!/usr/bin/env ruby
 # Plots different window functions and their overlap
 # Usage: bin/plot_windows.rb [window_length [hop]] [window and plot names]
+# Usage: $0 [window names...] or $0 [window length] [window names...] or $0 [window_length hop_size] [window names...]
 # e.g. bin/plot_windows.rb 2048 Hann dft
 
 require 'rubygems'
@@ -13,7 +14,11 @@ $LOAD_PATH << File.expand_path('../lib', __dir__)
 
 require 'mb-sound'
 
-# Usage $0 [window names...] or $0 [window length] [window names...] or $0 [window_length hop_size] [window names...]
+if ARGV.include?('--help')
+  puts MB::U.read_header_comment.join.gsub('$0', $0)
+  exit 1
+end
+
 hop = nil
 if ARGV[0] =~ /\A\d+\z/
   if ARGV[1] =~ /\A\d+\z/
