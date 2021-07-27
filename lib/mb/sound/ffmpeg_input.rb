@@ -28,7 +28,7 @@ module MB
         format_opt = format ? "-f #{format.shellescape}" : ''
         audio_opt = audio_only ? '-select_streams a' : ''
         raw_info = `ffprobe -loglevel 8 -print_format json -show_format -show_streams #{audio_opt} #{format_opt} #{fnesc}`
-        raise "ffprobe failed: #{$?}" unless $?.success?
+        raise "ffprobe failed for #{filename.inspect}: #{$?}\n\t#{raw_info}" unless $?.success?
 
         convert_values(JSON.parse(raw_info, symbolize_names: true)).tap { |h|
           h[:streams]&.sort_by! { |s| s[:index] || 0 }
