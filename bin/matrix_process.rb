@@ -1,6 +1,8 @@
 #!/usr/bin/env ruby
 # Multiplies each sample of an audio file by a processing matrix to produce a
-# new output file.
+# new output file.  If the --decode flag is given, then the matrix is
+# transposed and the complex conjugate is taken of all coefficients to turn an
+# encoding matrix into a decoding matrix (or vice versa).
 #
 # The number of channels in the input file *should* match the number of columns
 # in the processing matrix.  If not, then FFMPEG will try to upmix or downmix
@@ -10,18 +12,20 @@
 # output file.
 #
 # The matrix file should be a CSV, TSV, JSON, or YAML file that contains a 1D
-# or 2D array of numbers (real or complex).  See
-# MB::Sound::ProcessingMatrix.from_file for more information about the matrix file
-# format.
+# or 2D array of numbers (real or complex).  See examples in the matrices/
+# directory, or see MB::Sound::ProcessingMatrix.from_file, for more information
+# about the matrix file format.
 
 require 'bundler/setup'
 require 'mb/sound'
 
-USAGE = <<-EOF.strip
-\e[0;1mUsage:\e[0m #{$0} input_audio matrix_file output_audio
+USAGE = <<-EOF
+\e[0;1mUsage:\e[0m
+    \e[1m#{$0}\e[0m [--decode] input_audio matrix_file output_audio
+    \e[1m#{$0}\e[0m --help to display help
+    \e[1m#{$0}\e[0m --list to list included matrices
 
-\e[0;36m#{MB::U.read_header_comment.join.strip}
-\e[0m
+#{MB::U.read_header_comment.join}
 EOF
 
 if ARGV.include?('--help')
@@ -29,12 +33,47 @@ if ARGV.include?('--help')
   exit 1
 end
 
-raise USAGE unless ARGV.length == 3
-in_file, mat_file, out_file = ARGV
+if ARGV.include?('--list')
+  path = File.expand_path('../matrices/', File.dirname(__FILE__))
+  puts
+
+  matrices = Dir[File.join(path, '**', '*')].map { |m|
+    name = Pathname(m).relative_path_from(path)
+    [
+      "\e[33m#{name}\e[0m",
+      "\e[36m#{MB::U.read_header_comment(m)[0]&.strip}\e[0m"
+    ]
+  }
+
+  MB::U.table(
+    matrices,
+    header: "\e[1mBuilt-in matrices \e[0m(stored in \e[36m#{path}\e[0m)",
+    variable_width: true
+  )
+
+  puts
+
+  exit 1
+end
+
+case ARGV.length
+when 3
+  in_file, mat_file, out_file = ARGV
+  decode = false
+
+when 4
+  raise USAGE if ARGV[0] != '--decode'
+  _, in_file, mat_file, out_file = ARGV
+  decode = true
+
+else
+  raise USAGE
+end
 
 raise "Input file #{in_file.inspect} not found.\n#{USAGE}" unless File.readable?(in_file)
 raise "Matrix file #{mat_file.inspect} not found.\n#{USAGE}" unless File.readable?(mat_file)
 
+# TODO: If there are no ..s or leading /s in mat_file, check under the global matrix directory first.
 p = MB::Sound::ProcessingMatrix.from_file(mat_file)
 
 puts "\nProcessing \e[1;34m#{in_file.inspect}\e[0m through matrix \e[1;36m#{mat_file.inspect}\e[0m."
