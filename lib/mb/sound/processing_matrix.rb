@@ -88,34 +88,33 @@ module MB
     #     # => [Numo::SFloat[-0.3, -0.5, -0.7], Numo::SFloat[4.8, 7.6, 10.4]]
     #
     # TODO: Should there be an extra 1.0 column for translation / DC bias?
-    # TODO: Allow changing the matrix?
-    # TODO: Think of a better name? -- ProcessingMatrix
+    # TODO: Allow changing the matrix?  e.g. for logic decoder methods that
+    # alter the matrix instead of altering the output gains
     # TODO: consider ways to specify a channel layout or channel names in a
     # matrix, so the correct channel layout can be given to FFMPEG when
     # exporting audio.
     class ProcessingMatrix
-      attr_reader :input_channels, :output_channels
-
       class MatrixTypeError < ArgumentError
-        def initialize(msg = 'Data must be an Array of Numerics, or an Array of Arrays of Numerics')
+        def initialize(msg = 'Data must be a Hash with :matrix, an Array of Numerics, or an Array of Arrays of Numerics')
           super(msg)
         end
       end
 
       # Creates a ProcessingMatrix instance from a 2D array of numbers (real or
       # complex) loaded from the given +filename+, which may be CSV, TSV, JSON,
-      # or YAML.
+      # or YAML.  The file may also contain a Hash with a :matrix key, and
+      # optional :inputs and :outputs keys.
       #
       # See example matrix files in the matrices/ directory at the top of the
       # project.
-      def self.from_file(filename)
+      def self.from_file(filename, decode: false)
         # TODO: Maybe merge with the similar code in mb-geometry and move into mb-util
         case File.extname(filename).downcase
         when '.json'
-          data = JSON.parse(File.read(filename))
+          data = JSON.parse(File.read(filename), symbolize_names: true)
 
         when '.yml', '.yaml'
-          data = YAML.load(File.read(filename))
+          data = YAML.load(File.read(filename), symbolize_names: true)
 
         when '.csv'
           data = CSV.read(filename, converters: :numeric)
@@ -127,39 +126,78 @@ module MB
           raise "Unsupported extension on file #{filename.inspect}"
         end
 
-        raise MatrixTypeError unless data.is_a?(Array)
+        from_hash_or_array(data, decode: decode)
+      end
 
-        if data.all?(Array)
-          data.map! { |d| convert_to_numbers(d) }
-        else
-          data = convert_to_numbers(data).map(&method(:Array))
+      # Creates a ProcessingMatrix instance from a 1D or 2D Array of Numerics,
+      # or a Hash containing such an Array under the :matrix key, and optional
+      # :inputs and :outputs keys to name input and output channels.
+      def self.from_hash_or_array(data, decode: false)
+        raise MatrixTypeError unless data.is_a?(Array) || (data.is_a?(Hash) && data.include?(:matrix))
+
+        if data.is_a?(Hash)
+          inputs = data[:inputs]
+          outputs = data[:outputs]
+          data = data[:matrix]
         end
 
-        ProcessingMatrix.new(Matrix[*data])
+        if data.all?(Array)
+          data = data.map { |d| convert_to_numbers(d, conjugate: decode) }
+        else
+          data = convert_to_numbers(data, conjugate: decode).map(&method(:Array))
+        end
+
+        matrix = Matrix[*data]
+
+        if decode
+          matrix = matrix.transpose
+          inputs, outputs = outputs, inputs
+        end
+
+        ProcessingMatrix.new(matrix, inputs: inputs, outputs: outputs)
       end
 
       # Tries to convert every element of the array to Float if possible,
       # Complex if not.  Raises an error if any element could not be converted.
       # Modifies the array in-place.  Used by .from_file.
-      def self.convert_to_numbers(arr)
+      #
+      # If +:conjugate+ is true, then all values will be replaced with their
+      # complex conjugate.  That is, the imaginary component will be negated,
+      # so (1+1i) becomes (1-1i).  This turns a positive rotation into a
+      # negative rotation, and vice versa.
+      def self.convert_to_numbers(arr, conjugate: false)
         arr.map! { |v|
           begin
-            v.is_a?(Numeric) ? v : (Float(v) rescue Complex(v.gsub(/\s+/, '')))
+            v = (Float(v) rescue Complex(v.gsub(/\s+/, ''))) unless v.is_a?(Numeric)
+            v = v.conj if conjugate
+            v
           rescue => e
             raise MatrixTypeError
           end
         }
       end
 
+      attr_reader :input_channels, :output_channels
+      attr_reader :inputs, :outputs
+
       # Initializes a matrix processor with the given +matrix+, which must be a
-      # Ruby Matrix.
-      def initialize(matrix)
+      # Ruby Matrix.  The +:inputs+ and +:outputs+ may be named by passing
+      # Arrays of Strings of the correct length.
+      def initialize(matrix, inputs: nil, outputs: nil)
         raise MatrixTypeError, "Processing matrix must be a Ruby Matrix class, not #{matrix.class}" unless matrix.is_a?(::Matrix)
         raise MatrixTypeError, 'Processing matrix must have at least one row and one column' if matrix.empty?
-        @matrix = matrix
+        @matrix = matrix.freeze
 
         @input_channels = matrix.column_count
         @output_channels = matrix.row_count
+
+        inputs ||= 1.upto(@input_channels).to_a
+        raise "Expected #{@input_channels} input names, but received #{inputs.length}" if inputs.length != @input_channels
+        @inputs = inputs.freeze
+
+        outputs ||= 1.upto(@output_channels).to_a
+        raise "Expected #{@output_channels} output names, but received #{outputs.length}" if outputs.length != @output_channels
+        @outputs = outputs.freeze
       end
 
       # Multiplies the list of channels by the processing matrix and returns
@@ -169,6 +207,21 @@ module MB
       def process(data)
         raise ArgumentError, "Expected #{@input_channels} channels, got #{data.length}" unless data.length == @input_channels
         (@matrix * Vector[*data]).to_a
+      end
+
+      # Returns the matrix coefficients as an Array.
+      def to_a
+        @matrix.to_a
+      end
+
+      # Prints the matrix coefficients as a table with input and output names.
+      def table(print: true)
+        MB::U.table(
+          to_a.map.with_index { |row, idx| ["\e[1m#{outputs[idx].to_s.rjust(12)}\e[0m", *row] },
+          header: ["\u2193 Out \\ In \u2192", *inputs],
+          print: print,
+          variable_width: true
+        )
       end
     end
   end
