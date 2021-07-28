@@ -168,9 +168,8 @@ module MB
       def self.convert_to_numbers(arr, conjugate: false)
         arr.map! { |v|
           begin
-            v = (Float(v) rescue Complex(v.gsub(/\s+/, ''))) unless v.is_a?(Numeric)
-            v = v.conj if conjugate
-            v
+            v = MB::M.parse_complex(v)
+            conjugate ? v.conj : v
           rescue => e
             raise MatrixTypeError
           end
