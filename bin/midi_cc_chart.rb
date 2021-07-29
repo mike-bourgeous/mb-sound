@@ -12,7 +12,7 @@ require 'mb-sound'
 require 'mb-sound-jackffi'
 
 if ARGV.include?('--help')
-  puts MB::U.read_header_comment($0)
+  puts MB::U.read_header_comment.join.gsub('$0', $0)
   exit 1
 end
 

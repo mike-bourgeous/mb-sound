@@ -1,0 +1,11 @@
+# BBC Matrix H, an experimental quadraphonic encoding matrix.
+# Coefficients from BBC RD 1974-29.  Also see h_phase.yml, with the
+# phase-adjusted passive decoding matrix from BBC RD 1977-02.
+# http://downloads.bbc.co.uk/rd/pubs/reports/1974-29.pdf
+# http://downloads.bbc.co.uk/rd/pubs/reports/1977-02.pdf
+# https://en.wikipedia.org/wiki/Matrix_H
+inputs: [ FL, FR, RL, RR ]
+outputs: [ Lt, Rt ]
+matrix:
+  - [ 0.926 + 0.163i, 0.145 + 0.310i, 0.852 - 0.397i, -0.145 - 0.310i ]
+  - [ 0.145 - 0.310i, 0.926 - 0.163i, -0.145 + 0.310i, 0.852 + 0.397i ]

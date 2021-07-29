@@ -9,7 +9,7 @@ require 'mb-util'
 require 'mb-sound'
 
 if ARGV.include?('--help') || ARGV.length != 4
-  puts MB::U.read_header_comment($0)
+  puts MB::U.read_header_comment.join.gsub('$0', $0)
   exit 1
 end
 

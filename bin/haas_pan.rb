@@ -8,7 +8,7 @@ require 'bundler/setup'
 require 'mb-sound'
 
 def usage
-  puts MB::U.read_header_comment($0).join.gsub('$0', $0)
+  puts MB::U.read_header_comment.join.gsub('$0', $0)
   exit 1
 end
 

@@ -1,0 +1,12 @@
+# BBC Matrix H (phase-adjusted), a quadraphonic decoding matrix.
+# Coefficients from BBC RD 1977-02.
+# http://downloads.bbc.co.uk/rd/pubs/reports/1974-29.pdf
+# http://downloads.bbc.co.uk/rd/pubs/reports/1977-02.pdf
+# https://en.wikipedia.org/wiki/Matrix_H
+inputs: [ Lt, Rt ]
+outputs: [ FL, FR, RL, RR ]
+matrix:
+  - [ 0.940 < 20, 0.342 < 55 ]
+  - [ 0.342 < -55, .940 < 20 ]
+  - [ 0.940 < 25, .342 < -115 ]
+  - [ 0.342 < 115, 0.940 < -25 ]

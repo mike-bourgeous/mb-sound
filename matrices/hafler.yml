@@ -1,7 +1,10 @@
-# Hafler circuit to generate rear ambience from stereo
+# Hafler circuit decoder to generate rear ambience from stereo
 # Two input channels, four output channels
 # https://en.wikipedia.org/wiki/Hafler_circuit
-- [ 1, 0 ] # Left
-- [ 0, 1 ] # Right
-- [ 1, -1 ] # Rear left
-- [ -1, 1 ] # Rear right
+inputs: [ L, R ]
+outputs: [ FL, FR, RL, RR ]
+matrix:
+  - [ 1, 0 ] # Left
+  - [ 0, 1 ] # Right
+  - [ 1, -1 ] # Rear left
+  - [ -1, 1 ] # Rear right

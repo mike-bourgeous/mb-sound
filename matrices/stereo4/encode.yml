@@ -1,0 +1,8 @@
+# Stereo-4, a quadraphonic encoding matrix (differs from decoding matrix!)
+# Four input channels, two output channels
+# https://en.wikipedia.org/wiki/Stereo-4
+inputs: [ FL, FR, RL, RR ]
+outputs: [ Lt, Rt ]
+matrix:
+  - [ 1.0, 0.3, 1.0, -0.5 ]
+  - [ 0.3, 1.0, -0.5, 1.0 ]
