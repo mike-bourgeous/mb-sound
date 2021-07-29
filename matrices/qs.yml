@@ -3,7 +3,7 @@
 # https://en.wikipedia.org/wiki/QS_Regular_Matrix
 #
 # Coefficients are from BBC RD 1974/29
-inputs: [ FL, FR, BL, BR ]
+inputs: [ FL, FR, RL, RR ]
 outputs: [ Lt, Rt ]
 matrix:
   - [ 0.924, 0.383, 0.924i, 0.383i ] # Left encoded

@@ -1,7 +1,7 @@
 # SQ Stereo Quadraphonic, a quadraphonic encoding matrix
 # Four input channels, two output channels
 # https://en.wikipedia.org/wiki/Stereo_Quadraphonic
-inputs: [ FL, FR, BL, BR ]
+inputs: [ FL, FR, RL, RR ]
 outputs: [ Lt, Rt ]
 matrix:
   - [ 1.0, 0.0, -0.7i, 0.7 ]

@@ -2,7 +2,7 @@
 # Two input channels, four output channels
 # https://en.wikipedia.org/wiki/Stereo-4
 inputs: [ Lt, Rt ]
-outputs: [ FL, FR, BL, BR ]
+outputs: [ FL, FR, RL, RR ]
 matrix:
   - [ 1.0, 0.2 ]
   - [ 0.2, 1.0 ]

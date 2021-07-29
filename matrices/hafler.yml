@@ -2,7 +2,7 @@
 # Two input channels, four output channels
 # https://en.wikipedia.org/wiki/Hafler_circuit
 inputs: [ L, R ]
-outputs: [ FL, FR, BL, BR ]
+outputs: [ FL, FR, RL, RR ]
 matrix:
   - [ 1, 0 ] # Left
   - [ 0, 1 ] # Right
