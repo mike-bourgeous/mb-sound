@@ -48,5 +48,7 @@ RSpec.describe('bin/matrix_process.rb') do
     expect(text).to include('hafler.yml')
     expect(text).to include('qs.yml')
     expect(text).to include('sq.yml')
+    expect(text).to match(%r{dynaquad/encode.yml.*4.*2.*Dynaquad.*quadraphonic})
+    expect(text).to match(%r{dynaquad/decode.yml.*2.*4.*Dynaquad.*quadraphonic})
   end
 end
