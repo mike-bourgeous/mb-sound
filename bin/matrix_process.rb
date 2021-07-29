@@ -42,17 +42,23 @@ if ARGV.include?('--list')
 
   matrices = Dir[File.join(MATRIX_PATH, '**', '*')].select { |m|
     File.file?(m)
-  }.map { |m|
+  }.sort.map { |m|
     name = Pathname(m).relative_path_from(MATRIX_PATH)
+    matrix = MB::Sound::ProcessingMatrix.from_file(m)
     [
       "\e[33m#{name}\e[0m",
+      "\e[1;32m#{matrix.input_channels}\e[0m",
+      "\e[1;34m#{matrix.output_channels}\e[0m",
       "\e[36m#{MB::U.read_header_comment(m)[0]&.strip}\e[0m"
     ]
   }
 
+  puts "\e[1mBuilt-in matrices \e[0m(stored in \e[36m#{MATRIX_PATH}\e[0m):\n\n"
+
   MB::U.table(
     matrices,
-    header: "\e[1mBuilt-in matrices \e[0m(stored in \e[36m#{MATRIX_PATH}\e[0m)",
+    header: [
+      "\e[1;33mName\e[0m", "\e[1;32mIn\e[0m", "\e[1;34mOut\e[0m", "\e[1;36mDescription\e[0m" ],
     variable_width: true
   )
 

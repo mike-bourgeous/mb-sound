@@ -17,9 +17,9 @@ GIT
 
 GIT
   remote: https://github.com/mike-bourgeous/mb-util.git
-  revision: 829d88eedf6057f6992a5b7770bc2358f8ae13c2
+  revision: 5616cc4ce6218b5c541242ac47b0c99a30952a6c
   specs:
-    mb-util (0.1.7.usegit)
+    mb-util (0.1.7.1.usegit)
 
 PATH
   remote: .
@@ -27,7 +27,7 @@ PATH
     mb-sound (0.3.2.usegit)
       cmath (~> 1.0.0)
       mb-math (>= 0.1.4.1.usegit)
-      mb-util (>= 0.1.7.usegit)
+      mb-util (>= 0.1.7.1.usegit)
       midi-nibbler (~> 0.2.4)
       numo-narray (~> 0.9.1.8)
       numo-pocketfft (~> 0.2.2)
