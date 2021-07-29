@@ -22,7 +22,7 @@ module MB
           release_time: 0.4,
         }
 
-        def_delegators :@oscillator, :frequency, :frequency=, :random_advance, :random_advance=
+        def_delegators :@oscillator, :frequency, :frequency=, :random_advance, :random_advance=, :number
         def_delegators :amp_envelope, :active?
 
         attr_reader :filter_envelope, :amp_envelope, :pitch_filter, :oscillator
@@ -86,7 +86,7 @@ module MB
         # Restarts the amplitude and filter envelopes, and sets the oscillator's
         # pitch to the given note number.
         def trigger(note, velocity)
-          @oscillator.reset
+          @oscillator.reset # TODO: maybe don't reset oscillators, or randomize phase, so phase is more interesting
           @oscillator.number = note
           @filter_envelope.trigger(velocity / 256.0 + 0.5)
           @amp_envelope.trigger(MB::M.scale(velocity, 0..127, -20..-6).db)
