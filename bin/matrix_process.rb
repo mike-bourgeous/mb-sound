@@ -130,6 +130,7 @@ end
 output_stream = MB::Sound::FFMPEGOutput.new(out_file, rate: input_stream.rate, channels: p.output_channels)
 output = p.process(input)
 output = output.map { |v| v.respond_to?(:real) ? v.real : v }
+output = MB::Sound.normalize_max(output, -0.1.db)
 output_stream.write(output)
 output_stream.close
 
