@@ -40,4 +40,13 @@ RSpec.describe('bin/matrix_process.rb') do
     expect(enc_info[:streams][0][:channels]).to eq(2)
     expect(enc_info[:streams][0][:duration_ts]).to eq(in_info[:streams][0][:duration_ts])
   end
+
+  it 'lists included matrices when given the --list flag' do
+    text = `bin/matrix_process.rb --list 2>&1`
+    expect($?).not_to be_success
+    expect(text).to include('Built-in matrices')
+    expect(text).to include('hafler.yml')
+    expect(text).to include('qs.yml')
+    expect(text).to include('sq.yml')
+  end
 end
