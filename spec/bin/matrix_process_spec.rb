@@ -51,4 +51,28 @@ RSpec.describe('bin/matrix_process.rb') do
     expect(text).to match(%r{dynaquad/encode.yml.*4.*2.*Dynaquad.*quadraphonic})
     expect(text).to match(%r{dynaquad/decode.yml.*2.*4.*Dynaquad.*quadraphonic})
   end
+
+  it 'shows matrix details when given the --show flag' do
+    text = MB::U.remove_ansi(`bin/matrix_process.rb --show qs.yml`)
+    expect($?).to be_success
+    lines = text.lines
+    expect(lines).not_to include(match(/Transposing.*decoding/))
+    expect(lines).to include(match(/QS Regular Matrix/))
+    expect(lines).to include(match(/Coefficients are from/))
+    expect(lines).to include(match(/FL.*FR.*RL.*RR/))
+    expect(lines).to include(match(/Lt.*0.924.*0.383.*0.924i.*0.383i/))
+  end
+
+  it 'can show a transposed matrix with the --show and --decode flags' do
+    text = MB::U.remove_ansi(`bin/matrix_process.rb --show --decode qs.yml`)
+    expect($?).to be_success
+    lines = text.lines
+    expect(lines).to include(match(/Transposing.*decoding/))
+    expect(lines).to include(match(/QS Regular Matrix/))
+    expect(lines).to include(match(/Coefficients are from/))
+    expect(lines).to include(match(/Lt.*Rt/))
+    expect(lines).to include(match(/FL.*0.924.*0.383/))
+    expect(lines).to include(match(/RR.*0-0.383i.*0\+0.924i/))
+    expect(lines).not_to include(match(/Lt.*0.924.*0.383.*0.924i.*0.383i/))
+  end
 end
