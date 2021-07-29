@@ -1,4 +1,4 @@
-# Dynaquad, a quadrophonic encoding matrix (differs from decoding matrix!)
+# Dynaquad, a quadraphonic encoding matrix (differs from decoding matrix!)
 # Four input channels, two output channels
 # https://en.wikipedia.org/wiki/Matrix_decoder#Dynaquad_matrix_(2:2:4)_/_(4:2:4)
 inputs: [ FL, FR, BL, BR ]
