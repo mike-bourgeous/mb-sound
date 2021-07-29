@@ -19,13 +19,12 @@
 require 'bundler/setup'
 require 'mb/sound'
 
-MATRIX_PATH = File.expand_path('../matrices/', File.dirname(__FILE__))
-
 USAGE = <<-EOF
 \e[0;1mUsage:\e[0m
     \e[1m#{$0}\e[0m [--decode] [--overwrite] input_audio matrix_file output_audio
-    \e[1m#{$0}\e[0m --help to display help
-    \e[1m#{$0}\e[0m --list to list included matrices
+    \e[1m#{$0}\e[0m --help \e[36mto display help\e[0m
+    \e[1m#{$0}\e[0m --list \e[36mto list included matrices\e[0m
+    \e[1m#{$0}\e[0m --show [--decode] matrix_file \e[36mto display detailed matrix info\e[0m
 
 #{MB::U.read_header_comment.join}
 EOF
@@ -40,10 +39,8 @@ usage if ARGV.include?('--help')
 if ARGV.include?('--list')
   puts
 
-  matrices = Dir[File.join(MATRIX_PATH, '**', '*')].select { |m|
-    File.file?(m)
-  }.sort.map { |m|
-    name = Pathname(m).relative_path_from(MATRIX_PATH)
+  matrices = MB::Sound::ProcessingMatrix.included_matrices.map { |m|
+    name = Pathname(m).relative_path_from(MB::Sound::ProcessingMatrix::MATRIX_PATH)
     matrix = MB::Sound::ProcessingMatrix.from_file(m)
     [
       "\e[33m#{name}\e[0m",
@@ -53,18 +50,44 @@ if ARGV.include?('--list')
     ]
   }
 
-  puts "\e[1mBuilt-in matrices \e[0m(stored in \e[36m#{MATRIX_PATH}\e[0m):\n\n"
+  puts "\e[1mBuilt-in matrices \e[0m(stored in \e[36m#{MB::Sound::ProcessingMatrix::MATRIX_PATH}\e[0m):\n\n"
 
   MB::U.table(
     matrices,
     header: [
-      "\e[1;33mName\e[0m", "\e[1;32mIn\e[0m", "\e[1;34mOut\e[0m", "\e[1;36mDescription\e[0m" ],
+      "\e[1;33mName\e[0m",
+      "\e[1;32mIn\e[0m",
+      "\e[1;34mOut\e[0m",
+      "\e[1;36mDescription\e[0m"
+    ],
     variable_width: true
   )
 
   puts
 
   exit 1
+end
+
+if ARGV[0] == '--show'
+  decode = !!ARGV.delete('--decode')
+  matrix_file = MB::Sound::ProcessingMatrix.find_file(ARGV[1])
+
+  p = MB::Sound::ProcessingMatrix.from_file(
+    matrix_file,
+    decode: decode
+  )
+
+  description = MB::U.read_header_comment(matrix_file)
+  description[0] = "\e[1m#{description[0]}\e[0m"
+  puts description.join
+
+  puts "\n\e[1;36mTransposing matrix for decoding.\e[0m" if decode
+
+  puts
+  p.table
+  puts
+
+  exit 0
 end
 
 overwrite = !!ARGV.delete('--overwrite')
@@ -84,33 +107,13 @@ else
   usage
 end
 
-# Check for an included matrix file in the gem directory (TODO: is there a
-# stdlib method for checking if a path has no upward directory traversal?)
-if mat_file[0] != '/' && mat_file[0] != '.' && !mat_file.split('/').include?(/^[.][.]?$/)
-  included_mat_file = File.expand_path(File.join(MATRIX_PATH, mat_file))
-  expanded_mat_file = File.expand_path(mat_file)
-
-  if File.file?(mat_file) && File.file?(included_mat_file) && expanded_mat_file != included_mat_file
-    # If an included matrix and a directly navigable file have the same name,
-    # use the directly navigable file, but print a warning.
-    puts "\e[1;33mWarning:\e[22m Ambiguous matrix filename matches included matrix.\e[0m"
-    puts "\e[33mUsing \e[1m#{expanded_mat_file}\e[22m instead of included matrix \e[1m#{included_mat_file}\e[22m.\e[0m"
-  elsif !File.file?(mat_file) && File.file?(included_mat_file)
-    # If an included matrix was found and there is no directly navigable
-    # matrix, use the included matrix.
-    puts "\e[32mUsing included matrix \e[1m#{included_mat_file}\e[0m"
-    mat_file = included_mat_file
-  end
-end
-
 raise "Input file #{in_file.inspect} not found.\n#{USAGE}" unless File.readable?(in_file)
-raise "Matrix file #{mat_file.inspect} not found.\n#{USAGE}" unless File.readable?(mat_file)
 
-p = MB::Sound::ProcessingMatrix.from_file(mat_file, decode: decode)
+p = MB::Sound::ProcessingMatrix.from_file(MB::Sound::ProcessingMatrix.find_file(mat_file), decode: decode)
 
-puts "\nProcessing \e[1;34m#{in_file.inspect}\e[0m through matrix \e[1;36m#{mat_file.inspect}\e[0m."
+puts "\nProcessing \e[1;34m#{in_file.inspect}\e[0m through matrix \e[1;33m#{mat_file.inspect}\e[0m."
 puts "Expecting \e[1m#{p.input_channels}\e[0m input channel(s), producing \e[1m#{p.output_channels}\e[0m output channel(s)."
-puts "\e[33mTransposing matrix for decoding.\e[0m" if decode
+puts "\n\e[1;36mTransposing matrix for decoding.\e[0m" if decode
 
 puts
 p.table

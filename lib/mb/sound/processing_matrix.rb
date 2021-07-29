@@ -94,9 +94,62 @@ module MB
     # matrix, so the correct channel layout can be given to FFMPEG when
     # exporting audio.
     class ProcessingMatrix
+      # The location of matrix files included with the mb-sound distribution.
+      MATRIX_PATH = File.expand_path('../../../matrices/', File.dirname(__FILE__))
+
+      # Raised when data cannot be converted to a valid processing matrix.
       class MatrixTypeError < ArgumentError
         def initialize(msg = 'Data must be a Hash with :matrix, an Array of Numerics, or an Array of Arrays of Numerics')
           super(msg)
+        end
+      end
+
+      # Returns a list of absolute paths of included matrices.
+      #
+      # See MATRIX_PATH and ProcessingMatrix.find_file.
+      def self.included_matrices
+        Dir[File.join(MB::Sound::ProcessingMatrix::MATRIX_PATH, '**', '*')].select { |m|
+          File.file?(m)
+        }.sort
+      end
+
+      # Looks for an included processing matrix matching the given name (from
+      # the matrices/ directory of the source distribution or gem install
+      # path), or a directly named matrix file, and returns the full path to
+      # the matrix file.  If +mat_file+ matches both an included matrix and an
+      # ordinary matrix file, a warning is printed and the included matrix is
+      # ignored.  See MATRIX_PATH and ProcessingMatrix.from_file.
+      def self.find_file(mat_file)
+        expanded_mat_file = File.expand_path(mat_file)
+
+        # Check for an included matrix file in the gem directory (TODO: is there a
+        # stdlib method for checking if a path has no upward directory traversal?)
+        if mat_file[0] != '/' && mat_file[0] != '.' && !mat_file.split('/').include?(/^[.][.]?$/)
+          included_mat_file = File.expand_path(File.join(MATRIX_PATH, mat_file))
+
+          if File.file?(mat_file) && File.file?(included_mat_file) && expanded_mat_file != included_mat_file
+            # If an included matrix and a directly navigable file have the same name,
+            # use the directly navigable file, but print a warning.
+            puts "\e[1;33mWarning:\e[22m Ambiguous matrix filename matches included matrix.\e[0m"
+            puts "\e[33mUsing \e[1m#{expanded_mat_file}\e[22m instead of included matrix \e[1m#{included_mat_file}\e[22m.\e[0m"
+
+            expanded_mat_file
+          elsif !File.file?(mat_file) && File.file?(included_mat_file)
+            # If an included matrix was found and there is no directly navigable
+            # matrix, use the included matrix.
+            puts "\e[32mUsing included matrix \e[1m#{included_mat_file}\e[0m"
+
+            included_mat_file
+
+          else
+            puts "\e[32mUsing external matrix \e[1m#{expanded_mat_file}\e[0m"
+            expanded_mat_file
+          end
+        else
+          # The matrix filename contained directory traversal, or was an
+          # explicitly absolute ("/blah") or relative ("./blah") path.
+          puts "\e[32mUsing external matrix \e[1m#{expanded_mat_file}\e[0m"
+          expanded_mat_file
         end
       end
 
@@ -108,6 +161,8 @@ module MB
       # See example matrix files in the matrices/ directory at the top of the
       # project.
       def self.from_file(filename, decode: false)
+        raise "Matrix file #{filename.inspect} not found." unless File.readable?(filename) && File.file?(filename)
+
         # TODO: Maybe merge with the similar code in mb-geometry and move into mb-util
         case File.extname(filename).downcase
         when '.json'
