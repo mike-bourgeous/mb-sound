@@ -23,7 +23,7 @@ MATRIX_PATH = File.expand_path('../matrices/', File.dirname(__FILE__))
 
 USAGE = <<-EOF
 \e[0;1mUsage:\e[0m
-    \e[1m#{$0}\e[0m [--decode] input_audio matrix_file output_audio
+    \e[1m#{$0}\e[0m [--decode] [--overwrite] input_audio matrix_file output_audio
     \e[1m#{$0}\e[0m --help to display help
     \e[1m#{$0}\e[0m --list to list included matrices
 
@@ -60,6 +60,8 @@ if ARGV.include?('--list')
 
   exit 1
 end
+
+overwrite = !!ARGV.delete('--overwrite')
 
 case ARGV.length
 when 3
@@ -108,7 +110,7 @@ puts
 p.table
 puts
 
-MB::U.prevent_overwrite(out_file, prompt: true)
+MB::U.prevent_overwrite(out_file, prompt: true) unless overwrite
 
 input_stream = MB::Sound::FFMPEGInput.new(in_file, channels: p.input_channels)
 input = MB::Sound.analytic_signal(input_stream.read(input_stream.frames))
