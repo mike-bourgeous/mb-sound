@@ -2,8 +2,8 @@ RSpec.describe('bin/matrix_process.rb') do
   before(:each) do
     FileUtils.mkdir_p('tmp')
     File.unlink('tmp/matrix_process_test.flac') rescue nil
-    File.unlink('tmp/matrix_process_test_qs.flac') rescue nil
-    File.unlink('tmp/matrix_process_test_qs_enc.flac') rescue nil
+    File.unlink('tmp/matrix_process_qs.flac') rescue nil
+    File.unlink('tmp/matrix_process_qs_enc.flac') rescue nil
   end
 
   it 'can convert a 2ch file to a 4ch file' do
