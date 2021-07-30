@@ -17,6 +17,7 @@ module MB
           @used = []
           @key_to_value = {}
           @value_to_key = {}
+          @sustain = 0
 
           manager.on_event(&method(:midi_event))
         end
@@ -28,7 +29,23 @@ module MB
             self.next(e.note).trigger(e.note, e.velocity)
 
           when MIDIMessage::NoteOff
-            self.release(e.note)&.release(e.note, e.velocity)
+            if @sustain < 32
+              self.release(e.note)&.release(e.note, e.velocity)
+            end
+
+          when MIDIMessage::ControlChange
+            # Sustain pedal
+            # TODO: it would be cool to support variable sustain by decreasing
+            # the envelope release time or something
+            if e.index == 64
+              if (@sustain >= 32 && e.value < 32) || e.value == 0
+                @key_to_value.each do |k, _|
+                  self.release(k)&.release(k, 0)
+                end
+              end
+
+              @sustain = e.value
+            end
           end
         end
 
