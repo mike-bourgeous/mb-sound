@@ -67,6 +67,31 @@ RSpec.describe(MB::Sound::ADSREnvelope) do
     end
   end
 
+  describe '#on?' do
+    it 'returns true while sustaining, false otherwise' do
+      expect(env).not_to be_on
+
+      env.attack_time = 0
+      env.decay_time = 0
+      env.sustain_level = 1
+
+      env.trigger(1)
+      expect(env).to be_on
+
+      env.sample(100)
+      expect(env).to be_on
+
+      env.release
+      expect(env).not_to be_on
+
+      env.sample(23999)
+      expect(env).not_to be_on
+
+      env.sample(1)
+      expect(env).not_to be_on
+    end
+  end
+
   describe '#dup' do
     it 'returns a new envelope with a new filter' do
       dup = env.dup

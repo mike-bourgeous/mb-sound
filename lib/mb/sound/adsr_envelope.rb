@@ -83,6 +83,11 @@ module MB
         @on || @time < @total
       end
 
+      # Returns true while the envelope is sustained.
+      def on?
+        @on
+      end
+
       # Starts (or restarts) the envelope at the beginning, multiplying the
       # entire envelope by +peak+.
       def trigger(peak)
