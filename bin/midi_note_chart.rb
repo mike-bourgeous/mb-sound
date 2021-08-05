@@ -50,7 +50,7 @@ loop do
     data = midi_in.read
     return if data.nil?
     # TODO: Somehow show realtime messages without clearing the other received messages
-    events = [midi.parse(data[0].bytes)].flatten.compact.reject { |e| e.is_a?(MIDIMessage::SystemRealtime) }
+    events = [midi.parse(data[0]&.bytes)].flatten.compact.reject { |e| e.is_a?(MIDIMessage::SystemRealtime) }
   end
 
   events.each_with_index do |e, idx|

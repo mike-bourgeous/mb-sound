@@ -64,7 +64,11 @@ module MB
             @index += 1
           end
 
-          [current_events]
+          if current_events.empty?
+            [nil]
+          else
+            [current_events]
+          end
         end
       end
     end
