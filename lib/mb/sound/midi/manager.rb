@@ -16,6 +16,9 @@ module MB
         #
         # :jack - An instance of MB::Sound::JackFFI (e.g. to customize the
         #         client name)
+        # :input - An optional JackFFI (or compatible) MIDI input object.
+        #          +:port_name+ and +:connect+ will be ignored if +:input+ is
+        #          specified.
         # :port_name - The name of the input port to create (e.g. if multiple
         #              MIDI managers will be used in one program)
         # :connect - The name or type of MIDI port to which to try to connect,
@@ -26,14 +29,14 @@ module MB
         #            or nil to receive all channels.  Non-channel messages will
         #            always be received.  Drums are usually on channel 10, so
         #            pass 9 to listen to the drum channel, for example.
-        def initialize(jack: MB::Sound::JackFFI[], port_name: 'midi_in', connect: nil, update_rate: 60, channel: nil)
+        def initialize(jack: MB::Sound::JackFFI[], input: nil, port_name: 'midi_in', connect: nil, update_rate: 60, channel: nil)
           @parameters = {}
           @event_callbacks = []
           @update_rate = update_rate
           @channel = channel
 
           @jack = jack
-          @midi_in = @jack.input(port_type: :midi, port_names: [port_name], connect: connect)
+          @midi_in = input || @jack.input(port_type: :midi, port_names: [port_name], connect: connect)
           @m = Nibbler.new
         end
 

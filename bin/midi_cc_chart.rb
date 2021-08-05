@@ -16,8 +16,13 @@ if ARGV.include?('--help')
   exit 1
 end
 
-jack = MB::Sound::JackFFI[]
-midi_in = jack.input(port_type: :midi, port_names: ['midi_in'], connect: ARGV[0] || :physical)
+if ARGV[0] && ARGV[0].end_with?('.mid') && File.readable?(ARGV[0])
+  puts "Reading MIDI from #{ARGV[0]}"
+  midi_in = MB::Sound::MIDI::MIDIFile.new(ARGV[0])
+else
+  jack = MB::Sound::JackFFI[]
+  midi_in = jack.input(port_type: :midi, port_names: ['midi_in'], connect: ARGV[0] || :physical)
+end
 
 midi = Nibbler.new
 
@@ -41,9 +46,10 @@ loop do
 
   events = []
   while events.empty?
-    data = midi_in.read[0]
+    data = midi_in.read
+    return if data.nil?
     # TODO: Somehow show realtime messages without clearing the other received messages
-    events = [midi.parse(data.bytes)].flatten.reject { |e| e.is_a?(MIDIMessage::SystemRealtime) }
+    events = [midi.parse(data[0].bytes)].flatten.compact.reject { |e| e.is_a?(MIDIMessage::SystemRealtime) }
   end
 
   events.each_with_index do |e, idx|
