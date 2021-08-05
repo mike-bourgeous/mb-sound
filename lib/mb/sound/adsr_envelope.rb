@@ -95,14 +95,17 @@ module MB
         @on = true
       end
 
-      # Starts the release phase of the envelope.
+      # Starts the release phase of the envelope, if it is not already in the
+      # release phase.
       def release
         # @sust is a copy of the sustain level that will be changed if the
         # envelope is released before attack+decay finish
-        @sust = @value
-        @time = @release_start
-        @frame = @release_start * @rate
-        @on = false
+        if @on
+          @sust = @value
+          @time = @release_start
+          @frame = @release_start * @rate
+          @on = false
+        end
       end
 
       # Produces one sample of the envelope (or many samples if +count+ is not

@@ -39,14 +39,24 @@ module MB
             # the envelope release time or something
             if e.index == 64
               if (@sustain >= 32 && e.value < 32) || e.value == 0
-                @key_to_value.each do |k, _|
-                  self.release(k)&.release(k, 0)
-                end
+                all_off
               end
 
               @sustain = e.value
             end
           end
+        end
+
+        # Starts the release phase of all pressed notes.
+        def all_off
+          @key_to_value.each do |k, _|
+            self.release(k)&.release(k, 0)
+          end
+        end
+
+        # Returns true if there are any sounding notes.
+        def active?
+          @voices.any?(&:active?)
         end
 
         # Samples and sums the current output of all voices/oscillators.
