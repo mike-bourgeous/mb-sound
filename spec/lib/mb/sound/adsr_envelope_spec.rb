@@ -66,4 +66,34 @@ RSpec.describe(MB::Sound::ADSREnvelope) do
       expect(env).not_to be_active
     end
   end
+
+  describe '#dup' do
+    it 'returns a new envelope with a new filter' do
+      dup = env.dup
+
+      filter = env.instance_variable_get(:@filter)
+      filter_dup = dup.instance_variable_get(:@filter)
+
+      expect(dup.object_id).not_to eq(env.object_id)
+      expect(filter_dup.object_id).not_to eq(filter.object_id)
+
+      expect(dup.rate).to eq(env.rate)
+      expect(filter_dup.sample_rate).to eq(filter.sample_rate)
+    end
+
+    it 'can change sample rate without changing the original' do
+      dup = env.dup(1500)
+
+      filter = env.instance_variable_get(:@filter)
+      filter_dup = dup.instance_variable_get(:@filter)
+
+      expect(dup.object_id).not_to eq(env.object_id)
+      expect(filter_dup.object_id).not_to eq(filter.object_id)
+
+      expect(dup.rate).to eq(1500)
+      expect(env.rate).to eq(48000)
+      expect(filter_dup.sample_rate).to eq(1500)
+      expect(filter.sample_rate).to eq(48000)
+    end
+  end
 end

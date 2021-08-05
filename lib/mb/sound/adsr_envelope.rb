@@ -154,7 +154,7 @@ module MB
       # envelope.
       def dup(rate = @rate)
         e = super()
-        @rate = rate
+        e.instance_variable_set(:@rate, rate)
         e.instance_variable_set(:@filter, 100.hz.at_rate(rate).lowpass1p)
         e
       end
