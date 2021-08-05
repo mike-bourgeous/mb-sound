@@ -20,13 +20,19 @@ module MB
         # The MIDI filename that was given to the constructor.
         attr_reader :filename
 
+        # The sequence object from the midilib gem that contains MIDI data from the file.
+        attr_reader :seq
+
         # Reads MIDI data from the given +filename+.  Call #read repeatedly to
         # receive MIDI events based on elapsed time.
         #
         # The +:clock+ parameter accepts any object that responds to
         # :clock_now.  This allows playing a MIDI file at a speed other than
         # monotonic real time.
-        def initialize(filename, clock: MB::U)
+        #
+        # If +:merge_tracks+ is false, then events will not be merged across
+        # tracks, and #read will only return events from track +:read_track+.
+        def initialize(filename, clock: MB::U, merge_tracks: true, read_track: 0)
           raise "Clock must respond to :clock_now" unless clock.respond_to?(:clock_now)
           @clock = clock
 
@@ -37,11 +43,16 @@ module MB
             @seq.read(f)
           end
 
-          @track0 = @seq.tracks[0]
-          @seq.tracks[1..-1].each do |t|
-            @track0.merge(t.events)
+          track = @seq.tracks[read_track]
+
+          if merge_tracks
+            @seq.tracks[0..-1].each_with_index do |t, idx|
+              next if idx == read_track
+              track.merge(t.events)
+            end
           end
-          @events = @track0.events
+
+          @events = track.events
 
           @index = 0
         end
