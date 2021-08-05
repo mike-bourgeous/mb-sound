@@ -23,7 +23,7 @@ module MB
 
         @buffer_size = streams[0].buffer_size
         unless streams.all? { |s| s.buffer_size == @buffer_size }
-          raise BufferSizeMismatch, "All output streams must have the same buffer size (got #{streams.map(&:buffer_size)})"
+          raise BufferSizeMismatch, "All output streams must have the same buffer size (got #{streams.map { |s| "#{s.class.name} => #{s.buffer_size}" }.join(', ') })"
         end
 
         @channels = streams.map(&:channels).max
