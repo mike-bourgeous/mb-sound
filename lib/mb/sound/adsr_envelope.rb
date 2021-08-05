@@ -109,6 +109,14 @@ module MB
         end
       end
 
+      # Jump the envelope to the given time.  This does not reset the internal
+      # smoothing filter, so the transition of the output will not be
+      # instantaneous.
+      def time=(t)
+        @frame = (t * @rate).round
+        @time = @frame.to_f / @rate
+      end
+
       # Produces one sample of the envelope (or many samples if +count+ is not
       # nil).  Call repeatedly to get envelope values over time.
       def sample(count = nil)
@@ -154,7 +162,7 @@ module MB
       # envelope.
       def dup(rate = @rate)
         e = super()
-        e.instance_variable_set(:@rate, rate)
+        e.instance_variable_set(:@rate, rate.to_f)
         e.instance_variable_set(:@filter, 100.hz.at_rate(rate).lowpass1p)
         e
       end
