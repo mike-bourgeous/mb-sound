@@ -10,6 +10,9 @@ module MB
 
         def_delegators :@voices, :each, :map
 
+        # The last-triggered voice.
+        attr_reader :last
+
         # Initializes an oscillator pool with the given array of oscillators.
         def initialize(manager, voices)
           @voices = voices
@@ -18,6 +21,7 @@ module MB
           @key_to_value = {}
           @value_to_key = {}
           @sustain = 0
+          @last = voices.last
 
           manager.on_event(&method(:midi_event))
         end
@@ -26,7 +30,7 @@ module MB
         def midi_event(e)
           case e
           when MIDIMessage::NoteOn
-            self.next(e.note).trigger(e.note, e.velocity)
+            trigger(e.note, e.velocity)
 
           when MIDIMessage::NoteOff
             if @sustain < 32
@@ -45,6 +49,12 @@ module MB
               @sustain = e.value
             end
           end
+        end
+
+        # Finds and triggers the next available voice, reusing a voice if
+        # needed.  Called by #midi_event.
+        def trigger(note, velocity)
+          @last = self.next(e.note).trigger(e.note, e.velocity)
         end
 
         # Starts the release phase of all pressed notes.
