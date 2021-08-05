@@ -104,7 +104,7 @@ module MB
           @m.clear_buffer
 
           while data = @midi_in.read(blocking: blocking)&.[](0)
-            events = [@m.parse(data.bytes)].flatten.compact
+            events = [@m.parse(data.bytes)].flatten.compact rescue []
 
             events.each do |e|
               next if @channel && e.respond_to?(:channel) && e.channel != @channel
