@@ -17,6 +17,9 @@ module MB
         # elapsed.
         attr_reader :index
 
+        # The MIDI filename that was given to the constructor.
+        attr_reader :filename
+
         # Reads MIDI data from the given +filename+.  Call #read repeatedly to
         # receive MIDI events based on elapsed time.
         #
@@ -26,6 +29,8 @@ module MB
         def initialize(filename, clock: MB::U)
           raise "Clock must respond to :clock_now" unless clock.respond_to?(:clock_now)
           @clock = clock
+
+          @filename = filename
 
           @seq = ::MIDI::Sequence.new
           File.open(filename, 'rb') do |f|
