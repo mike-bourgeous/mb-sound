@@ -54,7 +54,7 @@ module MB
         # Finds and triggers the next available voice, reusing a voice if
         # needed.  Called by #midi_event.
         def trigger(note, velocity)
-          @last = self.next(e.note).trigger(e.note, e.velocity)
+          @last = self.next(note).trigger(note, velocity)
         end
 
         # Starts the release phase of all pressed notes.
