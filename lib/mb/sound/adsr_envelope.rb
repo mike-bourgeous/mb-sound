@@ -36,7 +36,7 @@ module MB
     #     total = a.concatenate(b)
     #     plotter.plot(envelope: total)
     class ADSREnvelope
-      attr_reader :attack_time, :decay_time, :sustain_level, :release_time
+      attr_reader :attack_time, :decay_time, :sustain_level, :release_time, :total, :peak, :time, :rate
 
       # Initializes an ADSR envelope with the given +:attack_time+,
       # +:decay_time+, and +:release_time+ in seconds, and the given
@@ -50,11 +50,12 @@ module MB
 
         update(attack_time, decay_time, sustain_level, release_time)
 
-        @frame = @rate * 100
-        @time = 100
+        @time = @total + 100
+        @frame = @rate * @time
 
+        # Single-pole filter avoids overshoot
         @filter = 100.hz.at_rate(rate).lowpass1p
-        @peak = 0
+        @peak = 1
         @value = 0
         @sust = 0
       end
@@ -146,6 +147,16 @@ module MB
         @time = @frame / @rate
 
         @filter.process([@value])[0] * @peak
+      end
+
+      # Returns a duplicate copy of the envelope, allowing the duplicate to be
+      # sampled (e.g. for plotting) without changing the state of the original
+      # envelope.
+      def dup(rate = @rate)
+        e = super()
+        @rate = rate
+        e.instance_variable_set(:@filter, 100.hz.at_rate(rate).lowpass1p)
+        e
       end
 
       private
