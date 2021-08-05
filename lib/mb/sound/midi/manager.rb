@@ -103,7 +103,7 @@ module MB
         def update(blocking: false)
           @m.clear_buffer
 
-          while data = @midi_in.read(blocking: blocking)[0]
+          while data = @midi_in.read(blocking: blocking)&.[](0)
             events = [@m.parse(data.bytes)].flatten.compact
 
             events.each do |e|
