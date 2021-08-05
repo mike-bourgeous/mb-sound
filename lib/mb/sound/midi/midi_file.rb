@@ -13,6 +13,8 @@ module MB
       # Due to limitations in the midilib gem, this does not support MIDI files
       # that change tempo.
       class MIDIFile
+        # Reads MIDI data from the given +filename+.  Call #read repeatedly to
+        # receive MIDI events based on elapsed time.
         def initialize(filename)
           @seq = ::MIDI::Sequence.new
           File.open(filename, 'rb') do |f|
@@ -26,6 +28,11 @@ module MB
           @events = @track0.events
 
           @index = 0
+        end
+
+        # Returns true if there are no more events available to #read.
+        def empty?
+          @events.empty? || @index >= @events.length
         end
 
         # Returns events from the MIDI file whose timestamps are less than or
