@@ -15,7 +15,14 @@ module MB
       class MIDIFile
         # Reads MIDI data from the given +filename+.  Call #read repeatedly to
         # receive MIDI events based on elapsed time.
-        def initialize(filename)
+        #
+        # The +:clock+ parameter accepts any object that responds to
+        # :clock_now.  This allows playing a MIDI file at a speed other than
+        # monotonic real time.
+        def initialize(filename, clock: MB::U)
+          raise "Clock must respond to :clock_now" unless clock.respond_to?(:clock_now)
+          @clock = clock
+
           @seq = ::MIDI::Sequence.new
           File.open(filename, 'rb') do |f|
             @seq.read(f)
@@ -43,18 +50,18 @@ module MB
         def read(blocking: true)
           return nil if @events.empty? || @index >= @events.length
 
-          @start ||= MB::U.clock_now
+          @start ||= @clock.clock_now
 
           current_events = ''
 
           if blocking
             # Sleep until the scheduled time of the next event
             ev = @events[@index]
-            delay = MB::U.clock_now - (@start + @seq.pulses_to_seconds(ev.time_from_start))
+            delay = @clock.clock_now - (@start + @seq.pulses_to_seconds(ev.time_from_start))
             sleep delay if delay > 0
           end
 
-          now = MB::U.clock_now
+          now = @clock.clock_now
           elapsed = now - @start
 
           while @index < @events.length
