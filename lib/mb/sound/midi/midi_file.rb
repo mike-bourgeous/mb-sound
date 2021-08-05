@@ -13,6 +13,10 @@ module MB
       # Due to limitations in the midilib gem, this does not support MIDI files
       # that change tempo.
       class MIDIFile
+        # The index of the next MIDI event to read, when its timestamp has
+        # elapsed.
+        attr_reader :index
+
         # Reads MIDI data from the given +filename+.  Call #read repeatedly to
         # receive MIDI events based on elapsed time.
         #
@@ -40,6 +44,13 @@ module MB
         # Returns true if there are no more events available to #read.
         def empty?
           @events.empty? || @index >= @events.length
+        end
+
+        # Sets the current time used by #read to +time+.  Negative values delay
+        # the start of playback.
+        def seek(time)
+          @start = @clock.clock_now - time
+          @index = @events.bsearch_index { |ev| @seq.pulses_to_seconds(ev.time_from_start) >= time } || @events.length
         end
 
         # Returns events from the MIDI file whose timestamps are less than or
