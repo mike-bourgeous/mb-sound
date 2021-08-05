@@ -89,6 +89,7 @@ require_relative 'sound/jack_input'
 require_relative 'sound/jack_output'
 require_relative 'sound/null_input'
 require_relative 'sound/null_output'
+require_relative 'sound/loopback'
 
 require_relative 'sound/oscillator'
 require_relative 'sound/tone'
