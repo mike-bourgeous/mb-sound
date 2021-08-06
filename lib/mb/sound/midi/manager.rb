@@ -66,6 +66,12 @@ module MB
           on_midi(template, range: range, default: default, filter_hz: filter_hz, max_rise: max_rise, max_fall: max_fall, &callback)
         end
 
+        # Calls the callback with (note_number, velocity, on) whenever a note
+        # on or note off event is received.
+        def on_note(&callback)
+          @note_callbacks << callback
+        end
+
         # Adds a callback to receive smoothed values in the given +:range+ for
         # the given MIDI message template.
         #
@@ -144,6 +150,12 @@ module MB
             rescue => e
               # TODO: use a logging facility
               STDERR.puts "Error in MIDI event callback #{cb}: #{e}\n\t#{e.backtrace.join("\n\t")}"
+            end
+          end
+
+          if event.is_a?(MIDIMessage::NoteOn) || event.is_a?(MIDIMessage::NoteOff)
+            @note_callbacks.each do |cb|
+              cb.call(event.note, event.velocity, event.is_a?(MIDIMessage::NoteOn))
             end
           end
         end
