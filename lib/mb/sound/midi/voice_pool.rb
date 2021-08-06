@@ -24,19 +24,23 @@ module MB
           @last = voices.last
 
           manager.on_event(&method(:midi_event))
+          manager.on_note(&method(:midi_note))
+        end
+
+        def midi_note(note, velocity, onoff)
+          if onoff
+            trigger(note, velocity)
+
+          else
+            if @sustain < 32
+              release(note)&.release(note, velocity)
+            end
+          end
         end
 
         # Called by the MIDI manager when a MIDI event is received.
         def midi_event(e)
           case e
-          when MIDIMessage::NoteOn
-            trigger(e.note, e.velocity)
-
-          when MIDIMessage::NoteOff
-            if @sustain < 32
-              self.release(e.note)&.release(e.note, e.velocity)
-            end
-
           when MIDIMessage::ControlChange
             # Sustain pedal
             # TODO: it would be cool to support variable sustain by decreasing

@@ -11,6 +11,10 @@ module MB
       class Manager
         attr_reader :update_rate, :channel, :cc
 
+        # Transposes note events received via #on_note (but not raw events via
+        # #on_event).  This may be fractional for use with VoicePool.
+        attr_accessor :transpose
+
         # Initializes a MIDI manager that parses MIDI data from jackd and sends
         # smoothed control values to callbacks when #update is called.
         #
@@ -41,6 +45,8 @@ module MB
           @jack = jack
           @midi_in = input || @jack.input(port_type: :midi, port_names: [port_name], connect: connect)
           @m = Nibbler.new
+
+          @transpose = 0
         end
 
         # Closes the MIDI input port created for this MIDI manager.
@@ -67,7 +73,8 @@ module MB
         end
 
         # Calls the callback with (note_number, velocity, on) whenever a note
-        # on or note off event is received.
+        # on or note off event is received.  The note number received may be
+        # fractional if #transpose is fractional.
         def on_note(&callback)
           @note_callbacks << callback
         end
@@ -155,7 +162,7 @@ module MB
 
           if event.is_a?(MIDIMessage::NoteOn) || event.is_a?(MIDIMessage::NoteOff)
             @note_callbacks.each do |cb|
-              cb.call(event.note, event.velocity, event.is_a?(MIDIMessage::NoteOn))
+              cb.call(event.note + @transpose, event.velocity, event.is_a?(MIDIMessage::NoteOn))
             end
           end
         end
