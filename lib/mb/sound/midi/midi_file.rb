@@ -1,5 +1,23 @@
 require 'midilib'
 
+# Patch midilib for Ruby 3.0 because the Ruby 3.0 fix has not been released to
+# rubygems.org yet, and the midilib Git repo is not directly installable as a
+# gem source due to the spec living inside the Rakefile instead of a .gemspec
+# file.
+#
+# Array#[] on a subclass of Array returns the subclass on 2.7, but Array on 3.
+#
+# See https://github.com/jimm/midilib/commit/a8d16566f5eebfab0e53b9a0d609d11f7fd9b1c7#diff-67c4a811efdcb8cdca6a5131315ed1de1f5a9b30017dbf6b1171c60840f54848
+
+if RUBY_VERSION >= '3.0'
+  class ::MIDI::Array
+    alias_method :old_split_mbsound, :split
+    def split
+      old_split_mbsound.map { |a| ::MIDI::Array.new(a) }
+    end
+  end
+end
+
 module MB
   module Sound
     module MIDI
