@@ -55,7 +55,7 @@ module MB
 
         # Single-pole filter avoids overshoot
         @filter = 100.hz.at_rate(rate).lowpass1p
-        @peak = 1
+        @peak = 0.5
         @value = 0
         @sust = 0
       end
