@@ -8,6 +8,18 @@ module MB
       class Parameter
         attr_reader :message, :default, :range, :update_rate
 
+        # The last filtered and scaled value calculated for the parameter, or
+        # the default value if no changes have been received.  This is useful
+        # for getting the current state of a parameter (e.g. for display)
+        # without updating the filter state.
+        #
+        # This is updated whenever #value is called.
+        attr_reader :last_value
+
+        # The last-received (or default) raw value of the parameter, or nil if
+        # no MIDI events have changed the parameter.
+        attr_reader :raw_value
+
         # Initializes a MIDI-controllable smoothed parameter.
         #
         # The +:message+ is a template MIDIMessage (from the midi-message gem)
@@ -72,27 +84,33 @@ module MB
             # If a note number was given to the constructor, use velocity.
             # Otherwise, use note number.
             if @message.note && @message.note >= 0 && @message.note <= 127
-              @value = MB::M.scale(message.velocity, 0..127, @range)
+              @raw_value = message.velocity
+              @value = MB::M.scale(@raw_value, 0..127, @range)
             else
-              @value = MB::M.scale(message.note, 0..127, @range)
+              @raw_value = message.note
+              @value = MB::M.scale(@raw_value, 0..127, @range)
             end
 
           when MIDIMessage::ControlChange
             # TODO: support MSB+LSB for higher resolution?
             # TODO: support NRPN?
             if @message.index == message.index
-              @value = MB::M.scale(message.value, 0..127, @range)
+              @raw_value = message.value
+              @value = MB::M.scale(@raw_value, 0..127, @range)
             end
 
           when MIDIMessage::PitchBend
-            @value = MB::M.scale(message.high * 128 + message.low, 0..16383, @range)
+            @raw_value = message.high * 128 + message.low
+            @value = MB::M.scale(@raw_value, 0..16383, @range)
 
           when MIDIMessage::ChannelAftertouch
-            @value = MB::M.scale(message.value, 0..127, @range)
+            @raw_value = message.value
+            @value = MB::M.scale(@raw_value, 0..127, @range)
 
           when MIDIMessage::PolyphonicAftertouch
             if @message.note == message.note
-              @value = MB::M.scale(message.value, 0..127, @range)
+              @raw_value = message.value
+              @value = MB::M.scale(@raw_value, 0..127, @range)
             end
 
           else
@@ -110,13 +128,15 @@ module MB
         # smoothing and filtering.  Pass nil to reset to the initial default.
         def reset(v)
           @value = @filter.reset(v || @default)
+          @raw_value = nil
+          @last_value = @value
         end
 
         # Retrieves the current smoothed/filtered value of the parameter, and
         # updates the filter.  This should be called 60 times per second (or
         # whatever was given to the constructor's :update_rate parameter).
         def value(count = nil)
-          MB::M.clamp(@filter.process([@value])[0], @min, @max)
+          @last_value = MB::M.clamp(@filter.process([@value])[0], @min, @max)
         end
       end
     end

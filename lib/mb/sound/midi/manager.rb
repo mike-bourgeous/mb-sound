@@ -9,7 +9,7 @@ module MB
       # callbacks.  The #update method should be called 60 times per second, or
       # whatever value was given to the update_rate constructor parameter.
       class Manager
-        attr_reader :update_rate, :channel
+        attr_reader :update_rate, :channel, :cc
 
         # Initializes a MIDI manager that parses MIDI data from jackd and sends
         # smoothed control values to callbacks when #update is called.
@@ -32,8 +32,11 @@ module MB
         def initialize(jack: MB::Sound::JackFFI[], input: nil, port_name: 'midi_in', connect: nil, update_rate: 60, channel: nil)
           @parameters = {}
           @event_callbacks = []
+          @note_callbacks = []
           @update_rate = update_rate
           @channel = channel
+
+          @cc = Array.new(128)
 
           @jack = jack
           @midi_in = input || @jack.input(port_type: :midi, port_names: [port_name], connect: connect)
@@ -85,6 +88,11 @@ module MB
           @parameters[message_template.class] ||= {}
           @parameters[message_template.class][new_parameter] = []
           @parameters[message_template.class][new_parameter] << callback
+
+          case message_template
+          when MIDIMessage::ControlChange
+            @cc[message_template.index] = new_parameter
+          end
 
           nil
         end
