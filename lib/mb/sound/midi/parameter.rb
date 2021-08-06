@@ -6,7 +6,30 @@ module MB
       #
       # Filtering/smoothing is updated for every call to #value.
       class Parameter
-        attr_reader :message, :default, :range, :update_rate
+        # MIDI event ranges for different MIDI event types.
+        RAW_RANGE = {
+          MIDIMessage::NoteOn => 0..127,
+          MIDIMessage::NoteOff => 0..127,
+          MIDIMessage::ControlChange => 0..127, # TODO: support MSB/LSB and NRPN?
+          MIDIMessage::PitchBend => 0..16383,
+          MIDIMessage::ChannelAftertouch => 0..127,
+          MIDIMessage::PolyphonicAftertouch => 0..127,
+        }
+
+        attr_reader :message, :default, :range, :raw_range, :update_rate
+
+        # The last filtered and scaled value calculated for the parameter, or
+        # the default value if no changes have been received.  This is useful
+        # for getting the current state of a parameter (e.g. for display)
+        # without updating the filter state.
+        #
+        # This is updated whenever #value is called.
+        attr_reader :last_value
+
+        # The last-received (or default) raw value of the parameter, or the
+        # default value in the raw range if no MIDI events have changed the
+        # value.
+        attr_reader :raw_value
 
         # Initializes a MIDI-controllable smoothed parameter.
         #
@@ -35,6 +58,10 @@ module MB
         # +:max_rise+ and +:max_fall+.  See MB::Sound::Filter::FirstOrder.
         def initialize(message:, range: 0.0..1.0, default: nil, max_rise: nil, max_fall: nil, filter_hz: 15, update_rate: 60)
           @range = range
+
+          @raw_range = RAW_RANGE[message.class]
+          raise "Unsupported message type #{message.class}" if @raw_range.nil?
+
           @min = [range.begin, range.end].min
           @max = [range.begin, range.end].max
           @width = (@max - @min).abs
@@ -72,51 +99,56 @@ module MB
             # If a note number was given to the constructor, use velocity.
             # Otherwise, use note number.
             if @message.note && @message.note >= 0 && @message.note <= 127
-              @value = MB::M.scale(message.velocity, 0..127, @range)
+              @raw_value = message.velocity
             else
-              @value = MB::M.scale(message.note, 0..127, @range)
+              @raw_value = message.note
             end
 
           when MIDIMessage::ControlChange
             # TODO: support MSB+LSB for higher resolution?
             # TODO: support NRPN?
             if @message.index == message.index
-              @value = MB::M.scale(message.value, 0..127, @range)
+              @raw_value = message.value
             end
 
           when MIDIMessage::PitchBend
-            @value = MB::M.scale(message.high * 128 + message.low, 0..16383, @range)
+            @raw_value = message.high * 128 + message.low
 
           when MIDIMessage::ChannelAftertouch
-            @value = MB::M.scale(message.value, 0..127, @range)
+            @raw_value = message.value
 
           when MIDIMessage::PolyphonicAftertouch
             if @message.note == message.note
-              @value = MB::M.scale(message.value, 0..127, @range)
+              @raw_value = message.value
             end
 
           else
             raise "Unsupported message type: #{message.class}"
           end
+
+          @value = MB::M.scale(@raw_value, @raw_range, @range)
         end
 
         # Sets the pre-filtered value of the parameter, clamping to the
         # parameter's range.  Smoothing and filtering will still apply.
         def value=(v)
           @value = MB::M.clamp(v, @min, @max)
+          @raw_value = MB::M.scale(@value, @range, @raw_range)
         end
 
         # Immediately sets the post-filtered value of the parameter, bypassing
         # smoothing and filtering.  Pass nil to reset to the initial default.
         def reset(v)
           @value = @filter.reset(v || @default)
+          @raw_value = MB::M.scale(@value, @range, @raw_range)
+          @last_value = @value
         end
 
         # Retrieves the current smoothed/filtered value of the parameter, and
         # updates the filter.  This should be called 60 times per second (or
         # whatever was given to the constructor's :update_rate parameter).
         def value(count = nil)
-          MB::M.clamp(@filter.process([@value])[0], @min, @max)
+          @last_value = MB::M.clamp(@filter.process([@value])[0], @min, @max)
         end
       end
     end

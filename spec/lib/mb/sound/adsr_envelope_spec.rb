@@ -66,4 +66,59 @@ RSpec.describe(MB::Sound::ADSREnvelope) do
       expect(env).not_to be_active
     end
   end
+
+  describe '#on?' do
+    it 'returns true while sustaining, false otherwise' do
+      expect(env).not_to be_on
+
+      env.attack_time = 0
+      env.decay_time = 0
+      env.sustain_level = 1
+
+      env.trigger(1)
+      expect(env).to be_on
+
+      env.sample(100)
+      expect(env).to be_on
+
+      env.release
+      expect(env).not_to be_on
+
+      env.sample(23999)
+      expect(env).not_to be_on
+
+      env.sample(1)
+      expect(env).not_to be_on
+    end
+  end
+
+  describe '#dup' do
+    it 'returns a new envelope with a new filter' do
+      dup = env.dup
+
+      filter = env.instance_variable_get(:@filter)
+      filter_dup = dup.instance_variable_get(:@filter)
+
+      expect(dup.object_id).not_to eq(env.object_id)
+      expect(filter_dup.object_id).not_to eq(filter.object_id)
+
+      expect(dup.rate).to eq(env.rate)
+      expect(filter_dup.sample_rate).to eq(filter.sample_rate)
+    end
+
+    it 'can change sample rate without changing the original' do
+      dup = env.dup(1500)
+
+      filter = env.instance_variable_get(:@filter)
+      filter_dup = dup.instance_variable_get(:@filter)
+
+      expect(dup.object_id).not_to eq(env.object_id)
+      expect(filter_dup.object_id).not_to eq(filter.object_id)
+
+      expect(dup.rate).to eq(1500)
+      expect(env.rate).to eq(48000)
+      expect(filter_dup.sample_rate).to eq(1500)
+      expect(filter.sample_rate).to eq(48000)
+    end
+  end
 end

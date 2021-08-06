@@ -9,13 +9,20 @@ module MB
       # callbacks.  The #update method should be called 60 times per second, or
       # whatever value was given to the update_rate constructor parameter.
       class Manager
-        attr_reader :update_rate, :channel
+        attr_reader :update_rate, :channel, :cc
+
+        # Transposes note events received via #on_note (but not raw events via
+        # #on_event).  This may be fractional for use with VoicePool.
+        attr_accessor :transpose
 
         # Initializes a MIDI manager that parses MIDI data from jackd and sends
         # smoothed control values to callbacks when #update is called.
         #
         # :jack - An instance of MB::Sound::JackFFI (e.g. to customize the
         #         client name)
+        # :input - An optional JackFFI (or compatible) MIDI input object.
+        #          +:port_name+ and +:connect+ will be ignored if +:input+ is
+        #          specified.
         # :port_name - The name of the input port to create (e.g. if multiple
         #              MIDI managers will be used in one program)
         # :connect - The name or type of MIDI port to which to try to connect,
@@ -26,15 +33,20 @@ module MB
         #            or nil to receive all channels.  Non-channel messages will
         #            always be received.  Drums are usually on channel 10, so
         #            pass 9 to listen to the drum channel, for example.
-        def initialize(jack: MB::Sound::JackFFI[], port_name: 'midi_in', connect: nil, update_rate: 60, channel: nil)
+        def initialize(jack: MB::Sound::JackFFI[], input: nil, port_name: 'midi_in', connect: nil, update_rate: 60, channel: nil)
           @parameters = {}
           @event_callbacks = []
+          @note_callbacks = []
           @update_rate = update_rate
           @channel = channel
 
+          @cc = Array.new(128)
+
           @jack = jack
-          @midi_in = @jack.input(port_type: :midi, port_names: [port_name], connect: connect)
+          @midi_in = input || @jack.input(port_type: :midi, port_names: [port_name], connect: connect)
           @m = Nibbler.new
+
+          @transpose = 0
         end
 
         # Closes the MIDI input port created for this MIDI manager.
@@ -60,6 +72,13 @@ module MB
           on_midi(template, range: range, default: default, filter_hz: filter_hz, max_rise: max_rise, max_fall: max_fall, &callback)
         end
 
+        # Calls the callback with (note_number, velocity, on) whenever a note
+        # on or note off event is received.  The note number received may be
+        # fractional if #transpose is fractional.
+        def on_note(&callback)
+          @note_callbacks << callback
+        end
+
         # Adds a callback to receive smoothed values in the given +:range+ for
         # the given MIDI message template.
         #
@@ -83,6 +102,11 @@ module MB
           @parameters[message_template.class][new_parameter] = []
           @parameters[message_template.class][new_parameter] << callback
 
+          case message_template
+          when MIDIMessage::ControlChange
+            @cc[message_template.index] = new_parameter
+          end
+
           nil
         end
 
@@ -100,8 +124,8 @@ module MB
         def update(blocking: false)
           @m.clear_buffer
 
-          while data = @midi_in.read(blocking: blocking)[0]
-            events = [@m.parse(data.bytes)].flatten
+          while data = @midi_in.read(blocking: blocking)&.[](0)
+            events = [@m.parse(data.bytes)].flatten.compact rescue []
 
             events.each do |e|
               next if @channel && e.respond_to?(:channel) && e.channel != @channel
@@ -133,6 +157,12 @@ module MB
             rescue => e
               # TODO: use a logging facility
               STDERR.puts "Error in MIDI event callback #{cb}: #{e}\n\t#{e.backtrace.join("\n\t")}"
+            end
+          end
+
+          if event.is_a?(MIDIMessage::NoteOn) || event.is_a?(MIDIMessage::NoteOff)
+            @note_callbacks.each do |cb|
+              cb.call(event.note + @transpose, event.velocity, event.is_a?(MIDIMessage::NoteOn))
             end
           end
         end

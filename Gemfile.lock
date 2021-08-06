@@ -24,11 +24,12 @@ GIT
 PATH
   remote: .
   specs:
-    mb-sound (0.3.4.usegit)
+    mb-sound (0.3.5.usegit)
       cmath (~> 1.0.0)
       mb-math (>= 0.1.4.1.usegit)
       mb-util (>= 0.1.7.1.usegit)
       midi-nibbler (~> 0.2.4)
+      midilib (~> 2.0.5)
       numo-narray (~> 0.9.1.8)
       numo-pocketfft (~> 0.2.2)
 
@@ -45,6 +46,7 @@ GEM
     midi-message (0.4.9)
     midi-nibbler (0.2.4)
       midi-message (~> 0.4, >= 0.4.4)
+    midilib (2.0.5)
     numo-narray (0.9.1.9)
     numo-pocketfft (0.2.2)
       numo-narray (~> 0.9.1)
