@@ -22,7 +22,7 @@ module MB
           release_time: 0.4,
         }
 
-        def_delegators :@oscillator, :frequency, :frequency=, :random_advance, :random_advance=, :number
+        def_delegators :@oscillator, :frequency, :frequency=, :random_advance, :random_advance=, :number, :wave_type, :wave_type=
         def_delegators :amp_envelope, :active?
 
         attr_reader :filter_envelope, :amp_envelope, :pitch_filter, :oscillator

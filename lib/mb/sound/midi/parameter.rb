@@ -11,6 +11,7 @@ module MB
           MIDIMessage::NoteOn => 0..127,
           MIDIMessage::NoteOff => 0..127,
           MIDIMessage::ControlChange => 0..127, # TODO: support MSB/LSB and NRPN?
+          MIDIMessage::ProgramChange => 0..127,
           MIDIMessage::PitchBend => 0..16383,
           MIDIMessage::ChannelAftertouch => 0..127,
           MIDIMessage::PolyphonicAftertouch => 0..127,
@@ -110,6 +111,9 @@ module MB
             if @message.index == message.index
               @raw_value = message.value
             end
+
+          when MIDIMessage::ProgramChange
+            @raw_value = message.program
 
           when MIDIMessage::PitchBend
             @raw_value = message.high * 128 + message.low

@@ -79,6 +79,13 @@ module MB
           @note_callbacks << callback
         end
 
+        # Calls the callback with the program number whenever a program change
+        # event is received.
+        def on_program(&callback)
+          template = MIDIMessage::ProgramChange.new(@channel, 0)
+          on_midi(template, range: 0..127, default: 0, filter_hz: 100, max_rise: 12700, max_fall: 12700, &callback)
+        end
+
         # Adds a callback to receive smoothed values in the given +:range+ for
         # the given MIDI message template.
         #
