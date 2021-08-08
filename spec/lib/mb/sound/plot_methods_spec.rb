@@ -145,7 +145,7 @@ RSpec.describe(MB::Sound::PlotMethods) do
     end
 
     it 'can plot an entire sound in a loop when :all is true' do
-      expect(MB::Sound).to receive(:sleep).at_least(4).times
+      expect(MB::Sound).to receive(:sleep).at_least(3).times
       expect(MB::Sound).to receive(:puts).at_least(2).times
       expect(STDOUT).to receive(:write).at_least(2).times
       lines = MB::Sound.plot(123.hz.sine.generate(3200), all: true, samples: 800)
