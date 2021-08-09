@@ -44,6 +44,12 @@ module MB
           set_parameters(@filter_type, @sample_rate, @center_frequency, db_gain: @db_gain, quality: q)
         end
 
+        # Sets the sample rate of the filter.
+        def sample_rate=(rate)
+          return if @sample_rate.round(3) == rate.round(3)
+          set_parameters(@filter_type, rate, @center_frequency, db_gain: @db_gain, quality: @quality, bandwidth_oct: @bandwidth_oct, shelf_slope: @shelf_slope)
+        end
+
         # Recalculates filter coefficients based on the given filter parameters.
         def set_parameters(filter_type, f_samp, f_center, db_gain: nil, quality: nil, bandwidth_oct: nil, shelf_slope: nil)
           @filter_type = filter_type

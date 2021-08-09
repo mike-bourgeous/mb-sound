@@ -25,7 +25,7 @@ module MB
         def_delegators :@oscillator, :frequency, :frequency=, :random_advance, :random_advance=, :number, :wave_type, :wave_type=
         def_delegators :amp_envelope, :active?
 
-        attr_reader :filter_envelope, :amp_envelope, :pitch_filter, :oscillator
+        attr_reader :filter_envelope, :amp_envelope, :oscillator, :filter, :rate
 
         # The filter's base cutoff frequency.  The envelope multiplies this
         # frequency by a value from 1 to #filter_intensity.
