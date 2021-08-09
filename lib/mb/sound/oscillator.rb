@@ -95,7 +95,7 @@ module MB
         12.0 * Math.log2(frequency_hz / tune_freq) + tune_note
       end
 
-      attr_accessor :advance, :wave_type, :pre_power, :post_power, :range, :random_advance
+      attr_accessor :advance, :wave_type, :pre_power, :post_power, :range, :advance, :random_advance
       attr_reader :phi, :phase, :frequency
 
       # TODO: maybe use a clock provider instead of +advance+?  The challenge is
