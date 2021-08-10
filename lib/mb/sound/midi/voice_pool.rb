@@ -32,6 +32,7 @@ module MB
             trigger(note, velocity)
 
           else
+            # TODO: Move sustain handling into Manager?
             if @sustain < 32
               release(note)&.release(note, velocity)
             end

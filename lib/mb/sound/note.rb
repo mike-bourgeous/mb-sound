@@ -32,7 +32,7 @@ module MB
       # Map of note names to cents.
       NOTE_CENTS = NOTE_NAMES.zip(SCALE_CENTS).to_h
 
-      attr_reader :number, :name, :detune
+      attr_reader :number, :name, :base_name, :accidental, :detune
 
       # Initializes a note of the given MIDI note number, the note name with
       # octave, or a Tone object.  Note names look like 'C0', 'As2', 'Gb3'.
@@ -73,6 +73,16 @@ module MB
       # Converts this Tone to a MIDI NoteOn message from the midi-message gem.
       def to_midi(velocity: 64, channel: -1)
         MIDIMessage::NoteOn.new(channel, number.round, velocity)
+      end
+
+      # Returns true if this Note represents a white key on a piano keyboard.
+      def white_key?
+        @white_key
+      end
+
+      # Returns true if this Note represents a black key on a piano keyboard.
+      def black_key?
+        @black_key
       end
 
       private
@@ -127,6 +137,10 @@ module MB
         end
 
         @name = "#{note_name}#{accidental}#{octave}"
+        @base_name = note_name
+        @accidental = accidental
+        @white_key = accidental.nil? || accidental.empty?
+        @black_key = !@white_key
         @number = @number.to_i
       end
     end
