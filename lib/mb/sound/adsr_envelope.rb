@@ -126,7 +126,7 @@ module MB
       # nil).  Call repeatedly to get envelope values over time.
       def sample(count = nil, filter: true)
         if count
-          return Numo::SFloat.zeros(count).map { sample }
+          return Numo::SFloat.zeros(count).map { sample(filter: filter) }
         end
 
         if @on
