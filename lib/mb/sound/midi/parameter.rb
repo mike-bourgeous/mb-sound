@@ -151,6 +151,9 @@ module MB
         # Retrieves the current smoothed/filtered value of the parameter, and
         # updates the filter.  This should be called 60 times per second (or
         # whatever was given to the constructor's :update_rate parameter).
+        #
+        # Use #last_value to retrieve the parameter value without updating the
+        # filter (e.g. for displaying in a UI).
         def value(count = nil)
           @last_value = MB::M.clamp(@filter.process([@value])[0], @min, @max)
         end
