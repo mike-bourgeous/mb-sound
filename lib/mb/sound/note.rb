@@ -32,7 +32,18 @@ module MB
       # Map of note names to cents.
       NOTE_CENTS = NOTE_NAMES.zip(SCALE_CENTS).to_h
 
-      attr_reader :number, :name, :base_name, :accidental, :detune, :octave
+      attr_reader :number, :name, :accidental, :detune, :octave
+
+      # The name of the key without any accidental (A, B, C, D, E, F, or G).
+      attr_reader :base_name
+
+      # The index of the note within its octave including accidentals, C being
+      # 0, B being 11.
+      attr_reader :note_in_octave
+
+      # The index of the key name within the octave ignoring accidentals, C
+      # being 0, B being 5.
+      attr_reader :key_in_octave
 
       # Initializes a note of the given MIDI note number, the note name with
       # octave, or a Tone object.  Note names look like 'C0', 'As2', 'Gb3'.
@@ -128,7 +139,8 @@ module MB
         note_in_octave = @number % 12
         octave_cents = note_in_octave * 100
         closest_cents = SCALE_CENTS.min_by { |c| (c - (octave_cents + @detune)).abs }
-        note_name = NOTE_NAMES[SCALE_CENTS.index(closest_cents)]
+        key_index = SCALE_CENTS.index(closest_cents)
+        note_name = NOTE_NAMES[key_index]
         offset = (octave_cents - NOTE_CENTS[note_name]).round(2)
         if offset < -50
           accidental = 'b'
@@ -143,6 +155,8 @@ module MB
         @black_key = !@white_key
         @number = @number.to_i
         @octave = octave
+        @note_in_octave = note_in_octave
+        @key_in_octave = key_index
       end
     end
   end
