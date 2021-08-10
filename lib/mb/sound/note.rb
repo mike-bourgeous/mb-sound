@@ -32,7 +32,7 @@ module MB
       # Map of note names to cents.
       NOTE_CENTS = NOTE_NAMES.zip(SCALE_CENTS).to_h
 
-      attr_reader :number, :name, :base_name, :accidental, :detune
+      attr_reader :number, :name, :base_name, :accidental, :detune, :octave
 
       # Initializes a note of the given MIDI note number, the note name with
       # octave, or a Tone object.  Note names look like 'C0', 'As2', 'Gb3'.
@@ -142,6 +142,7 @@ module MB
         @white_key = accidental.nil? || accidental.empty?
         @black_key = !@white_key
         @number = @number.to_i
+        @octave = octave
       end
     end
   end
