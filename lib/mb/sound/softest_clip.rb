@@ -39,18 +39,28 @@ module MB
       def process(samples)
         return process([samples])[0] if samples.is_a?(Numeric)
 
-        samples.map { |s|
-          case
-          when s < -@threshold
-            -@a / (-s + @c) - @b
+        if samples[0].is_a?(Complex)
+          samples.map { |s|
+            if s.abs > @threshold
+              Complex.polar(@a / (s.abs + @c) + @b, s.arg)
+            else
+              s
+            end
+          }
+        else
+          samples.map { |s|
+            case
+            when s < -@threshold
+              -@a / (-s + @c) - @b
 
-          when s > @threshold
-            @a / (s + @c) + @b
+            when s > @threshold
+              @a / (s + @c) + @b
 
-          else
-            s
-          end
-        }
+            else
+              s
+            end
+          }
+        end
       end
 
       private
