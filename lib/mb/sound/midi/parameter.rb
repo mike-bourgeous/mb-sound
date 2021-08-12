@@ -75,6 +75,7 @@ module MB
           @message = message
           notify(message)
 
+          # TODO: Allow bypassing the filters
           @filter = MB::Sound::Filter::FilterChain.new(
             @follower = MB::Sound::Filter::LinearFollower.new(
               rate: update_rate,
