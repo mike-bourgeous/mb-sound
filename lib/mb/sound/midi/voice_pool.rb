@@ -13,6 +13,9 @@ module MB
         # The last-triggered voice.
         attr_reader :last
 
+        # The pitch bend amount, in fractional semitones.
+        attr_reader :bend
+
         # Initializes an oscillator pool with the given array of oscillators.
         def initialize(manager, voices)
           @voices = voices
@@ -22,11 +25,13 @@ module MB
           @value_to_key = {}
           @sustain = 0
           @last = voices.last
+          @bend = 0
 
           manager.on_event(&method(:midi_event))
           manager.on_note(&method(:midi_note))
         end
 
+        # Called by the MIDI manager when a note on or off event is received.
         def midi_note(note, velocity, onoff)
           if onoff
             trigger(note, velocity)
@@ -48,6 +53,7 @@ module MB
             # the envelope release time or something
             if e.index == 64
               if (@sustain >= 32 && e.value < 32) || e.value == 0
+                # TODO: Only release notes that have received a note off event (aren't still being held)
                 all_off
               end
 
@@ -60,7 +66,15 @@ module MB
         # needed.  Called by #midi_event.
         def trigger(note, velocity)
           @last = self.next(note)
-          @last.trigger(note, velocity)
+          @last.trigger(note + @bend, velocity)
+        end
+
+        # Bends all playing and future notes by the given number of semitones.
+        def bend=(bend)
+          @bend = bend.to_f
+          @key_to_value.each do |k, osc|
+            osc.number = k + @bend
+          end
         end
 
         # Starts the release phase of all pressed notes.

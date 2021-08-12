@@ -86,10 +86,19 @@ module MB
         # Restarts the amplitude and filter envelopes, and sets the oscillator's
         # pitch to the given note number.
         def trigger(note, velocity)
-          @oscillator.reset # TODO: maybe don't reset oscillators, or randomize phase, so phase is more interesting
+          # TODO: maybe don't reset oscillators, or randomize phase, so phase
+          # is more interesting, but that would make consistent plotting more
+          # challenging
+          @oscillator.reset
           @oscillator.number = note
           @filter_envelope.trigger(velocity / 256.0 + 0.5)
           @amp_envelope.trigger(MB::M.scale(velocity, 0..127, -20..-6).db)
+        end
+
+        # Sets the oscillator's pitch to the given note number without
+        # resetting any envelopes.
+        def number=(note)
+          @oscillator.number = note
         end
 
         # Starts the release phase of the filter and amplitude envelopes.
