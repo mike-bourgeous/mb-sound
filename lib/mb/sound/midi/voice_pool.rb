@@ -69,9 +69,13 @@ module MB
 
         # Bends all playing and future notes by the given number of semitones.
         def bend=(bend)
+          delta = bend - @bend
           @bend = bend.to_f
           @key_to_value.each do |k, osc|
             osc.number = k + @bend
+          end
+          @available.each do |osc|
+            osc.number += delta
           end
         end
 
