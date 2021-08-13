@@ -23,43 +23,41 @@ module MB
           @used = []
           @key_to_value = {}
           @value_to_key = {}
-          @sustain = 0
+          @sustain = false
           @last = voices.last
           @bend = 0
+          @released = {}
 
-          manager.on_event(&method(:midi_event))
           manager.on_note(&method(:midi_note))
+          manager.on_cc_threshold(64, 64, 64, &method(:sustain))
         end
 
         # Called by the MIDI manager when a note on or off event is received.
         def midi_note(note, velocity, onoff)
           if onoff
+            @released.delete(note)
             trigger(note, velocity)
 
           else
             # TODO: Move sustain handling into Manager?
-            if @sustain < 32
+            if !@sustain
               release(note)&.release(note, velocity)
+            else
+              @released[note] = velocity
             end
           end
         end
 
-        # Called by the MIDI manager when a MIDI event is received.
-        def midi_event(e)
-          case e
-          when MIDIMessage::ControlChange
-            # Sustain pedal
-            # TODO: it would be cool to support variable sustain by decreasing
-            # the envelope release time or something
-            if e.index == 64
-              if (@sustain >= 32 && e.value < 32) || e.value == 0
-                # TODO: Only release notes that have received a note off event (aren't still being held)
-                all_off
-              end
-
-              @sustain = e.value
-            end
+        # Called by the MIDI manager when the sustain CC rises above or below
+        # the sustain threshold.
+        def sustain(_, value, onoff)
+          # TODO: it would be cool to support variable sustain by decreasing
+          # the envelope release time or something
+          if (!onoff && @sustain) || value == 0
+            release_sustain
           end
+
+          @sustain = onoff
         end
 
         # Finds and triggers the next available voice, reusing a voice if
@@ -82,6 +80,15 @@ module MB
           @key_to_value.each do |k, _|
             self.release(k)&.release(k, 0)
           end
+        end
+
+        # Starts the release phase of notes not currently held (On but no Off),
+        # for when the sustain pedal is released.
+        def release_sustain
+          @released.each do |note, velocity|
+            self.release(note)&.release(note, velocity)
+          end
+          @released.clear
         end
 
         # Returns true if there are any sounding notes.

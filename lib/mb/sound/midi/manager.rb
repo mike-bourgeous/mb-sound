@@ -41,6 +41,7 @@ module MB
           @channel = channel
 
           @cc = Array.new(128)
+          @cc_thresholds = Array.new(128)
 
           @jack = jack
           @midi_in = input || @jack.input(port_type: :midi, port_names: [port_name], connect: connect)
@@ -58,6 +59,26 @@ module MB
         # Adds a callback to receive raw MIDI events.
         def on_event(&callback)
           @event_callbacks << callback
+        end
+
+        # Adds a callback that receives only the first CC event each time a CC
+        # rises above the given threshold.  The callback will be called with
+        # (index, value, true) each time the rising threshold is crossed
+        # upward.  If a +falling_threshold+ is also specified, then the
+        # callback will be called with (index, value, false) when the falling
+        # threshold is crossed downward after the rising threshold was met.
+        def on_cc_threshold(index, rising_threshold, falling_threshold = nil, &callback)
+          raise 'Falling threshold must be <= rising threshold' if falling_threshold && falling_threshold > rising_threshold
+
+          @cc_thresholds[index] ||= []
+          @cc_thresholds[index] << {
+            rising_threshold: rising_threshold,
+            falling_threshold: falling_threshold,
+            active: false,
+            callback: callback
+          }
+
+          nil
         end
 
         # Adds a callback to the given MIDI CC +index+.  See #on_midi.
@@ -111,16 +132,11 @@ module MB
 
           case message_template
           when MIDIMessage::ControlChange
+            # FIXME: this will overwrite previous parameters, allowing only one parameter per CC
             @cc[message_template.index] = new_parameter
           end
 
           nil
-        end
-
-        # TODO: this might be useful; maybe some classes will create their own parameters and just add those here
-        def on_parameter(parameter, &callback)
-          raise NotImplementedError
-          raise 'Wrong update rate' unless parameter.update_rate == @update_rate # ??
         end
 
         # Runs one update cycle.  This should be called 60 times per second, or
@@ -167,9 +183,30 @@ module MB
             end
           end
 
-          if event.is_a?(MIDIMessage::NoteOn) || event.is_a?(MIDIMessage::NoteOff)
+          case event
+          when MIDIMessage::NoteOn, MIDIMessage::NoteOff
             @note_callbacks.each do |cb|
-              cb.call(event.note + @transpose, event.velocity, event.is_a?(MIDIMessage::NoteOn))
+              begin
+                cb.call(event.note + @transpose, event.velocity, event.is_a?(MIDIMessage::NoteOn))
+              rescue => e
+                STDERR.puts "Error in MIDI note callback #{cb}: #{e}\n\t#{e.backtrace.join("\n\t")}"
+              end
+            end
+
+          when MIDIMessage::ControlChange
+            @cc_thresholds[event.index]&.each do |cb|
+              begin
+                if !cb[:active] && event.value >= (cb[:rising_threshold] || cb[:falling_threshold])
+                  cb[:active] = true
+                  cb[:callback].call(event.index, event.value, true) if cb[:rising_threshold]
+
+                elsif cb[:active] && event.value < (cb[:falling_threshold] || cb[:rising_threshold])
+                  cb[:active] = false
+                  cb[:callback].call(event.index, event.value, false) if cb[:falling_threshold]
+                end
+              rescue => e
+                STDERR.puts "Error in MIDI CC threshold callback #{cb}: #{e}\n\t#{e.backtrace.join("\n\t")}"
+              end
             end
           end
         end
