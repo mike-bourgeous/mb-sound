@@ -2,7 +2,7 @@ RSpec.describe(MB::Sound::PlaybackMethods) do
   before(:each) do
     ENV['OUTPUT_TYPE'] = 'null'
   end
-  
+
   after(:each) do
     ENV.delete('OUTPUT_TYPE')
   end

@@ -120,7 +120,7 @@ module MB
               raise 'Weight is not supported with multi-sample processing' if strength != 1.0
               d = Numo::NArray[d] unless d.respond_to?(:length)
               @last_result[idx] = f.process(d)
-            elsif 
+            elsif
               w = strength.respond_to?(:length) ? strength[idx] : strength
               @last_result[idx] = f.weighted_process(data[idx], w)
             end

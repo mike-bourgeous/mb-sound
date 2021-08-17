@@ -117,7 +117,7 @@ class NoiseGenerator
       @target_gain = @db_gain - GAIN_INCREMENT
     end
   end
-  
+
   def show_status
     msg = "\r\e[#{NOISE_COLORS[@noise_type]}m#{@noise_type}"
     msg << " #{@power_slope.round(3)}dB/Oct" if @noise_type == :power

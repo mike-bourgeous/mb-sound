@@ -28,7 +28,7 @@ RSpec.describe(MB::Sound::PlotMethods) do
     it 'can draw a histogram' do
       lines = MB::Sound.hist(tone).map(&MB::U.method(:remove_ansi))
       expect(lines.length).to be_between(37, 41).inclusive
-      
+
       text = lines.join("\n")
       check_regex(text, /^\s*1000 \|-\+\s+\* {5,10}\*.*\|$/)
       check_regex(text, /^\s*200 \|-\+\s+\* {15,25}\*.*\|$/)
