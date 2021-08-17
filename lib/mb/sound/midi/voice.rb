@@ -23,7 +23,7 @@ module MB
         }
 
         def_delegators :@oscillator, :frequency, :frequency=, :random_advance, :random_advance=, :number, :wave_type, :wave_type=
-        def_delegators :amp_envelope, :active?
+        def_delegators :amp_envelope, :active?, :on?
 
         attr_reader :filter_envelope, :amp_envelope, :oscillator, :filter, :rate
 
