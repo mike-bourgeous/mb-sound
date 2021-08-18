@@ -280,8 +280,8 @@ module MB
 
           desc = @cc_thresholds[index].map { |v| v[:description] }.compact[0]
 
-          cc_name = MIDIMessage::Constant::Group.find('Control Change').find_by_value(index)
-          name = desc || "CC Switch #{index}#{name ? " (#{name})" : ''}"
+          cc_name = MIDIMessage::Constant::Group.find('Control Change').find_by_value(index)&.key
+          name = desc || "CC Switch #{index}#{cc_name ? " (#{cc_name})" : ''}"
 
           xml.param(name: name) do |p|
             p.flags do |f|
