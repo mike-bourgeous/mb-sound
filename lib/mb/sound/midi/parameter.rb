@@ -177,7 +177,11 @@ module MB
               f.flag('LOCAL')
             end
 
-            p.ChannelMask(65535)
+            if @message.is_a?(MIDIMessage::ControlChange)
+              p.ChannelMask(1)
+            else
+              p.ChannelMask(65535)
+            end
 
             p.MIDIMsg(@message.to_byte_array[0])
 
