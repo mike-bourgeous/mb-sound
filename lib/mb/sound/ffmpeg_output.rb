@@ -63,7 +63,7 @@ module MB
             '-i', 'pipe:',
             *(format ? ['-f', format.to_s] : []),
             *(codec ? ['-acodec', codec.to_s] : []),
-            *(bitrate ? ['-b:a', bitrate.to_s] : []), 
+            *(bitrate ? ['-b:a', bitrate.to_s] : []),
             @filename
           ],
           channels,

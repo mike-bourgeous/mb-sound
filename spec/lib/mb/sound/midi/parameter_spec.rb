@@ -22,4 +22,11 @@ RSpec.describe(MB::Sound::MIDI::Parameter) do
   it 'can be constructed with a polyphonic aftertouch event' do
     MB::Sound::MIDI::Parameter.new(message: MIDIMessage::PolyphonicAftertouch.new(-1, 0, 0))
   end
+
+  it 'can generate XML' do
+    param = MB::Sound::MIDI::Parameter.new(message: MIDIMessage::PolyphonicAftertouch.new(-1, 0, 0), description: 'Poly After Test')
+    xml = param.to_acid_xml.target!
+
+    expect(xml).to match(/<param.*Poly After Test/)
+  end
 end

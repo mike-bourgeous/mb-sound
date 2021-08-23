@@ -32,7 +32,18 @@ module MB
       # Map of note names to cents.
       NOTE_CENTS = NOTE_NAMES.zip(SCALE_CENTS).to_h
 
-      attr_reader :number, :name, :detune
+      attr_reader :number, :name, :accidental, :detune, :octave
+
+      # The name of the key without any accidental (A, B, C, D, E, F, or G).
+      attr_reader :base_name
+
+      # The index of the note within its octave including accidentals, C being
+      # 0, B being 11.
+      attr_reader :note_in_octave
+
+      # The index of the key name within the octave ignoring accidentals, C
+      # being 0, B being 5.
+      attr_reader :key_in_octave
 
       # Initializes a note of the given MIDI note number, the note name with
       # octave, or a Tone object.  Note names look like 'C0', 'As2', 'Gb3'.
@@ -73,6 +84,16 @@ module MB
       # Converts this Tone to a MIDI NoteOn message from the midi-message gem.
       def to_midi(velocity: 64, channel: -1)
         MIDIMessage::NoteOn.new(channel, number.round, velocity)
+      end
+
+      # Returns true if this Note represents a white key on a piano keyboard.
+      def white_key?
+        @white_key
+      end
+
+      # Returns true if this Note represents a black key on a piano keyboard.
+      def black_key?
+        @black_key
       end
 
       private
@@ -118,7 +139,8 @@ module MB
         note_in_octave = @number % 12
         octave_cents = note_in_octave * 100
         closest_cents = SCALE_CENTS.min_by { |c| (c - (octave_cents + @detune)).abs }
-        note_name = NOTE_NAMES[SCALE_CENTS.index(closest_cents)]
+        key_index = SCALE_CENTS.index(closest_cents)
+        note_name = NOTE_NAMES[key_index]
         offset = (octave_cents - NOTE_CENTS[note_name]).round(2)
         if offset < -50
           accidental = 'b'
@@ -127,7 +149,14 @@ module MB
         end
 
         @name = "#{note_name}#{accidental}#{octave}"
+        @base_name = note_name
+        @accidental = accidental
+        @white_key = accidental.nil? || accidental.empty?
+        @black_key = !@white_key
         @number = @number.to_i
+        @octave = octave
+        @note_in_octave = note_in_octave
+        @key_in_octave = key_index
       end
     end
   end

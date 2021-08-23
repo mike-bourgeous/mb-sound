@@ -22,7 +22,7 @@ module MB
   module Sound
     module MIDI
       # Reads from a MIDI file, returning MIDI data at the appropriate times
-      # for each MIDI event.  Can be ysed by MB::Sound::MIDI::Manager to play a
+      # for each MIDI event.  Can be used by MB::Sound::MIDI::Manager to play a
       # MIDI file.
       #
       # This implements just enough compatibility with

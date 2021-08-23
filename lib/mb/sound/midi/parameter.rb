@@ -17,7 +17,7 @@ module MB
           MIDIMessage::PolyphonicAftertouch => 0..127,
         }
 
-        attr_reader :message, :default, :range, :raw_range, :update_rate
+        attr_reader :message, :default, :raw_default, :range, :raw_range, :update_rate, :description
 
         # The last filtered and scaled value calculated for the parameter, or
         # the default value if no changes have been received.  This is useful
@@ -57,7 +57,7 @@ module MB
         # The +:filter_hz+ parameter controls the cutoff frequency of a
         # low-pass, single-pole (to avoid ringing) filter that is applied after
         # +:max_rise+ and +:max_fall+.  See MB::Sound::Filter::FirstOrder.
-        def initialize(message:, range: 0.0..1.0, default: nil, max_rise: nil, max_fall: nil, filter_hz: 15, update_rate: 60)
+        def initialize(message:, range: 0.0..1.0, default: nil, max_rise: nil, max_fall: nil, filter_hz: 15, update_rate: 60, description: nil)
           @range = range
 
           @raw_range = RAW_RANGE[message.class]
@@ -68,13 +68,16 @@ module MB
           @width = (@max - @min).abs
 
           @default = default || range.begin
-
+          @raw_default = MB::M.scale(@default, @range, @raw_range).round
           @update_rate = update_rate
 
           # Call #notify to validate the message type
           @message = message
           notify(message)
 
+          @description = description&.to_s || default_description(message)
+
+          # TODO: Allow bypassing the filters
           @filter = MB::Sound::Filter::FilterChain.new(
             @follower = MB::Sound::Filter::LinearFollower.new(
               rate: update_rate,
@@ -144,7 +147,7 @@ module MB
         # smoothing and filtering.  Pass nil to reset to the initial default.
         def reset(v)
           @value = @filter.reset(v || @default)
-          @raw_value = MB::M.scale(@value, @range, @raw_range)
+          @raw_value = MB::M.scale(@value, @range, @raw_range).round
           @last_value = @value
         end
 
@@ -156,6 +159,89 @@ module MB
         # filter (e.g. for displaying in a UI).
         def value(count = nil)
           @last_value = MB::M.clamp(@filter.process([@value])[0], @min, @max)
+        end
+
+        # Returns Builder-generated XML describing this parameter in the format
+        # used by Sony/MAGIX ACID.  Pass the parent element in +xml+ to nest
+        # within another XML element.
+        #
+        # You will need the Builder gem in your project to use this method.
+        def to_acid_xml(xml = nil)
+          require 'builder'
+
+          xml ||= Builder::XmlMarkup.new(indent: 2)
+          xml.param(name: @description) do |p|
+            p.flags do |f|
+              f.flag('DEFAULT')
+              f.flag('ACTIVE')
+              f.flag('LOCAL')
+            end
+
+            if @message.is_a?(MIDIMessage::ControlChange)
+              p.ChannelMask(1)
+            else
+              p.ChannelMask(65535)
+            end
+
+            p.MIDIMsg(@message.to_byte_array[0])
+
+            if @message.is_a?(MIDIMessage::ControlChange)
+              p.ccMsg(@message.index)
+            else
+              p.ccMsg(0)
+            end
+
+            p.CurveType('LINEAR')
+            p.CurveMask do |c|
+              c.curve('HOLD')
+              c.curve('LINEAR')
+              c.curve('LOG FAST')
+              c.curve('LOG SLOW')
+              c.curve('CUBIC SHARP TANGENT')
+              c.curve('CUBIC SMOOTH')
+            end
+
+            p.Min(@raw_range.min)
+            p.Max(@raw_range.max)
+            p.Neutral(@raw_default)
+          end
+
+          xml
+
+        rescue LoadError => e
+          raise 'The builder gem is required for generating ACID controller XML templates'
+        end
+
+        private
+
+        def default_description(message)
+          case message
+          when MIDIMessage::NoteOn, MIDIMessage::NoteOff
+            if message.note && message.note >= 0 && message.note <= 127
+              "Note #{message.note} Velocity"
+            else
+              'Note Number'
+            end
+
+          when MIDIMessage::ControlChange
+            name = message.name
+            "CC #{message.index}#{name ? " (#{name})" : ''}"
+
+          when MIDIMessage::PitchBend
+            'Pitch Bend'
+
+          when MIDIMessage::ChannelAftertouch
+            'Aftertouch'
+
+          when MIDIMessage::PolyphonicAftertouch
+            'Polyphonic Aftertouch'
+
+          when MIDIMessage::ProgramChange
+            'Program Change'
+
+          else
+            raise "Unsupported message class #{message.class}"
+          end
         end
       end
     end

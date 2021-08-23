@@ -124,9 +124,9 @@ module MB
 
       # Produces one sample of the envelope (or many samples if +count+ is not
       # nil).  Call repeatedly to get envelope values over time.
-      def sample(count = nil)
+      def sample(count = nil, filter: true)
         if count
-          return Numo::SFloat.zeros(count).map { sample }
+          return Numo::SFloat.zeros(count).map { sample(filter: filter) }
         end
 
         if @on
@@ -159,7 +159,12 @@ module MB
         @frame += 1
         @time = @frame / @rate
 
-        @filter.process([@value])[0] * @peak
+        if filter
+          @filter.process([@value])[0] * @peak
+        else
+          @filter.process([@value])
+          @value * @peak
+        end
       end
 
       # Returns a duplicate copy of the envelope, allowing the duplicate to be
