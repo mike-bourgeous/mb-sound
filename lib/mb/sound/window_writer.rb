@@ -19,7 +19,7 @@ module MB
       def initialize(output_stream, window, skip_overlap: false, pad_factor: 1)
         @output_stream = output_stream
         @channels = output_stream.channels
-        @buffer_size = output_stream.buffer_size
+        @buffer_size = window.length * pad_factor
         @window = window
         @pad_factor = pad_factor
 
