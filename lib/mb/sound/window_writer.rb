@@ -23,7 +23,7 @@ module MB
         @window = window
         @pad_factor = pad_factor
 
-        @length = window.length * pad_factor
+        @length = @buffer_size
         @hop = window.hop
         @overlap = @length - @hop
         @post_window = MB::M.zpad(window.post_window, @length, alignment: 0.5) if window.post_window
