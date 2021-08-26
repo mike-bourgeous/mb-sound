@@ -54,6 +54,13 @@ module MB
           set_parameters(@filter_type, rate, @center_frequency, db_gain: @db_gain, quality: @quality, bandwidth_oct: @bandwidth_oct, shelf_slope: @shelf_slope)
         end
 
+        # Sets the filter type.
+        def filter_type=(type)
+          raise "Invalid filter type #{type.inspect}" unless FILTER_TYPES.include?(type)
+          return if @filter_type == type
+          set_parameters(type, @sample_rate, @center_frequency, db_gain: @db_gain, quality: @quality, bandwidth_oct: @bandwidth_oct, shelf_slope: @shelf_slope)
+        end
+
         # Recalculates filter coefficients based on the given filter parameters.
         def set_parameters(filter_type, f_samp, f_center, db_gain: nil, quality: nil, bandwidth_oct: nil, shelf_slope: nil)
           @filter_type = filter_type

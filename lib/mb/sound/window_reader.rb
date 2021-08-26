@@ -3,7 +3,7 @@ module MB
     # Reads windowed time-domain data from an input stream using a given window
     # function, padding with zeros to drain the buffer at the end.
     class WindowReader
-      attr_reader :channels, :length
+      attr_reader :channels, :length, :buffer_size
 
       def initialize(input_stream, window, pad_factor: 1)
         raise 'Input stream must respond to #read' unless input_stream.respond_to?(:read)
@@ -11,9 +11,10 @@ module MB
 
         @input_stream = input_stream
         @channels = input_stream.channels
+        @buffer_size = window.length * pad_factor
 
         @window = window
-        @length = window.length * pad_factor
+        @length = @buffer_size
         @hop = window.hop
         @overlap = @length - @hop
         @pre_window = MB::M.zpad(@window.pre_window, @length, alignment: 0.5).not_inplace!
@@ -28,7 +29,7 @@ module MB
       # zeros returned for subsequent reads until the next read would return only
       # the appended zeros.  After the buffer has been completely drained,
       # returns nil.
-      def read
+      def read(ignored = nil)
         if !@drain
           input = @input_stream.read(@hop)
 
