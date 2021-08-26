@@ -5,8 +5,9 @@ module MB
     class Loopback
       attr_reader :buffer_size, :rate, :channels
 
-      # Initializes a loopback I/O.
-      def initialize(channels:, rate: 48000, buffer_size: 800)
+      # Initializes a loopback I/O.  A block may be given to process each
+      # buffer as it is read.
+      def initialize(channels:, rate: 48000, buffer_size: 800, &process)
         raise 'Channels must be an int >= 1' unless channels.is_a?(Integer) && channels >= 1
 
         @buffer_size = buffer_size
@@ -14,14 +15,18 @@ module MB
         @rate = rate
         @zero = [Numo::SFloat.zeros(@buffer_size).freeze] * @channels
         @buf = []
+
+        @process = process
       end
 
       # Reads the oldest buffer that was given to #write, or reads all zeros if
       # there is no buffer available.
       def read(frames = @buffer_size)
-        raise 'Frame count to read must match buffer size' unless frames == @buffer_size
+        raise "Frame count to read (got #{frames.inspect}) must match buffer size (#{@buffer_size.inspect})" unless frames == @buffer_size
 
-        @buf.shift || @zero
+        buf = @buf.shift || @zero
+        buf = @process.call(buf) if @process
+        buf
       end
 
       # Adds the given +data+ (an Array of Numo::NArray) to the internal

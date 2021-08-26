@@ -31,6 +31,20 @@ RSpec.describe(MB::Sound::Loopback) do
     expect(lo.read).to eq([Numo::SFloat.zeros(123)] * 3)
   end
 
+  describe '#initialize' do
+    it 'can accept a block to process audio' do
+      loproc = MB::Sound::Loopback.new(channels: 2, buffer_size: 3) do |data|
+        data.map { |c| -c }
+      end
+
+      loproc.write([Numo::SFloat[1, 2, 3], Numo::SFloat[-1, 2, -3]])
+      loproc.write([Numo::SFloat[-3, 2, 1], Numo::SFloat[3, -1, -2]])
+
+      expect(loproc.read(3)).to eq([Numo::SFloat[-1, -2, -3], Numo::SFloat[1, -2, 3]])
+      expect(loproc.read(3)).to eq([Numo::SFloat[3, -2, -1], Numo::SFloat[-3, 1, 2]])
+    end
+  end
+
   describe '#read' do
     it 'raises an error if given the wrong number of frames to read' do
       expect { lo.read(321) }.to raise_error(/buffer size/)
