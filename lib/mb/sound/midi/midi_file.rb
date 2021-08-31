@@ -8,7 +8,6 @@ require 'midilib'
 # Array#[] on a subclass of Array returns the subclass on 2.7, but Array on 3.
 #
 # See https://github.com/jimm/midilib/commit/a8d16566f5eebfab0e53b9a0d609d11f7fd9b1c7#diff-67c4a811efdcb8cdca6a5131315ed1de1f5a9b30017dbf6b1171c60840f54848
-
 if RUBY_VERSION >= '3.0'
   class ::MIDI::Array
     alias_method :old_split_mbsound, :split
@@ -30,6 +29,10 @@ module MB
       #
       # Due to limitations in the midilib gem, this does not support MIDI files
       # that change tempo.
+      #
+      # Also note that track names from midilib might include a trailing NUL
+      # ("\x00") byte.  This happens with MIDI files exported from ACID Pro,
+      # for example.
       class MIDIFile
         # The index of the next MIDI event to read, when its timestamp has
         # elapsed.

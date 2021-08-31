@@ -20,7 +20,7 @@ title = f.seq.name
 track_info = f.seq.tracks.map.with_index { |t, idx|
   {
     '#' => idx,
-    'Name' => t.name,
+    'Name' => t.name.gsub("\x00", ''),
     'Inst.' => t.instrument,
     'Ch. mask' => t.channels_used.to_s(2).chars.map.with_index { |v, idx| v == '1' ? idx : nil }.compact,
     'Event ch.' => t.events.select { |v| v.is_a?(::MIDI::ChannelEvent) }.map(&:channel).uniq,
