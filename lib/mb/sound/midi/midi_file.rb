@@ -64,7 +64,7 @@ module MB
             @seq.read(f)
           end
 
-          track = @seq.tracks[read_track]
+          track = @seq.tracks[read_track].dup
 
           if merge_tracks
             @seq.tracks[0..-1].each_with_index do |t, idx|
@@ -76,6 +76,38 @@ module MB
           @events = track.events
 
           @index = 0
+        end
+
+        # Returns information about each track in the underlying midilib
+        # sequence object (see #seq).
+        def tracks
+          @track_info ||= seq.tracks.map.with_index { |t, idx|
+            {
+              index: idx,
+              name: t.name.gsub("\x00", ''),
+              instrument: t.instrument,
+              channel_mask: t.channels_used.to_s(2).chars.map.with_index { |v, idx| v == '1' ? idx : nil }.compact,
+              event_channels: t.events.select { |v| v.is_a?(::MIDI::ChannelEvent) }.map(&:channel).uniq,
+              channel: t.events.group_by { |v| v.is_a?(::MIDI::ChannelEvent) ? v.channel : nil }.max_by { |ch, events| events.count }[0],
+              num_events: t.events.length,
+              num_notes: t.events.select { |v| v.is_a?(::MIDI::NoteEvent) }.length,
+            }
+          }
+        end
+
+        # Returns the track information for the track having the most notes or
+        # events on the given channel, breaking ties using the highest track
+        # index.
+        #
+        # This is useful for finding the track name given a channel number, for
+        # example.  This works best on MIDI files that use a separate track for
+        # each MIDI channel.
+        def track_for_channel(channel)
+          tracks.select { |t|
+            t[:channel] == channel
+          }.max_by { |t|
+            [t[:num_notes], t[:num_events], t[:index]]
+          }
         end
 
         # Returns true if there are no more events available to #read.

@@ -17,20 +17,22 @@ f = MB::Sound::MIDI::MIDIFile.new(ARGV[0], merge_tracks: false)
 
 title = f.seq.name
 
-track_info = f.seq.tracks.map.with_index { |t, idx|
-  {
-    '#' => idx,
-    'Name' => t.name.gsub("\x00", ''),
-    'Inst.' => t.instrument,
-    'Ch. mask' => t.channels_used.to_s(2).chars.map.with_index { |v, idx| v == '1' ? idx : nil }.compact,
-    'Event ch.' => t.events.select { |v| v.is_a?(::MIDI::ChannelEvent) }.map(&:channel).uniq,
-    'Events' => t.events.length,
-    'Notes' => t.events.select { |v| v.is_a?(::MIDI::NoteEvent) }.length,
-  }
-}.reduce({}) { |h, t|
+NAME_MAP = {
+  index: '#',
+  name: 'Name',
+  instrument: 'Inst.',
+  channel_mask: 'Ch. mask',
+  event_channels: 'Event ch.',
+  channel: 'Ch.',
+  num_events: 'Events',
+  num_notes: 'Notes',
+}.freeze
+
+track_info = f.tracks.reduce({}) { |h, t|
   t.each do |k, v|
-    h[k] ||= []
-    h[k] << v
+    kname = NAME_MAP[k] || k.to_s
+    h[kname] ||= []
+    h[kname] << v
   end
 
   h

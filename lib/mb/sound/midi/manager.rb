@@ -50,6 +50,23 @@ module MB
           @transpose = 0
         end
 
+        # If the input is a JackFFI MIDI input, returns an Array of Strings
+        # with the names of ports connected to the MIDI input.  If the input is
+        # a MIDI file, returns the MIDI filename in an Array.  Otherwise,
+        # returns the input in String form using String interpolation.
+        def connections
+          case @midi_in
+          when MB::Sound::MIDI::MIDIFile
+            [@midi_in.filename]
+
+          when MB::Sound::JackFFI::Input
+            @midi_in.connections.flatten
+
+          else
+            "#{@midi_in}"
+          end
+        end
+
         # Closes the MIDI input port created for this MIDI manager.
         def close
           @midi_in.close
