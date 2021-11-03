@@ -329,6 +329,9 @@ There are some base packages you'll need first:
 sudo apt-get install ffmpeg gnuplot-qt
 ```
 
+If you are on OS X, make sure to get the dependencies from `ruby-gnuplot`, otherwise you may get PTY.spawn errors.
+- Link: https://github.com/rdp/ruby_gnuplot
+
 Then you'll want to install Ruby 2.7.2.
 
 If you don't already have a recent version of Ruby installed, and a Ruby version
