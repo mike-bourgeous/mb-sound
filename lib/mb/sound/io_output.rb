@@ -27,7 +27,7 @@ module MB
         raise IOError, 'Output is closed' if @io.nil? || @io.closed?
         raise ArgumentError, "Received #{data.length} channels when #{@channels} were expected" if data.length != @channels
 
-        buf = String.new(capacity: data.first.size * @frame_bytes)
+        buf = String.new(capacity: data.first.size * @frame_bytes, encoding: Encoding::ASCII_8BIT)
         data.first.size.times do |idx|
           buf << data.map { |c| c[idx] }.pack('e*')
         end
