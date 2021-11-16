@@ -17,7 +17,7 @@ module MB
         header = MB::U.wrap("\e[H\e[J\e[36mPlaying\e[0m #{MB::U.highlight(file_tone_data)}".lines.map(&:strip).join(' ') + "\n\n")
         puts header
 
-        plot = false if ENV['PLOT'] == '0' && plot.nil?
+        plot = false if plot.nil? && (ENV['PLOT'] == '0' || !MB_M_PTY_AVAILABLE)
         plot = { header_lines: header.lines.count, graphical: graphical } if plot.nil? || plot == true
         plot[:spectrum] = spectrum if plot.is_a?(Hash) && !plot.include?(:spectrum)
 
