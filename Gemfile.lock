@@ -1,9 +1,9 @@
 GIT
   remote: https://github.com/mike-bourgeous/mb-math.git
-  revision: 6fe8106e6828d7860e38eb0fcccc72a17d3442cb
+  revision: 0cb49dc17474a57cc430d98d36c6d538b61c1426
   branch: truffleruby
   specs:
-    mb-math (0.1.7.2.usegit)
+    mb-math (0.1.8.0.truffle.usegit)
       cmath (~> 1.0.0)
       mb-util (>= 0.1.0.usegit)
       numo-narray (~> 0.9.1)
@@ -90,7 +90,7 @@ PLATFORMS
 DEPENDENCIES
   builder (~> 3.2.4)
   cmath
-  mb-math!
+  mb-math (>= 0.1.8.0.truffle.usegit)!
   mb-sound!
   mb-sound-jackffi (>= 0.0.15.usegit)!
   mb-util!

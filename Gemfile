@@ -24,5 +24,5 @@ gem 'rspec'
 # install FFI.
 gem 'mb-sound-jackffi', '>= 0.0.15.usegit', github: 'mike-bourgeous/mb-sound-jackffi.git'
 
-gem 'mb-math', github: 'mike-bourgeous/mb-math.git', branch: 'truffleruby'
+gem 'mb-math', '>= 0.1.8.0.truffle.usegit', github: 'mike-bourgeous/mb-math.git', branch: 'truffleruby'
 gem 'mb-util', github: 'mike-bourgeous/mb-util.git'
