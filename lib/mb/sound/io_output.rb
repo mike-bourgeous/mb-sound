@@ -28,6 +28,13 @@ module MB
         raise ArgumentError, "Received #{data.length} channels when #{@channels} were expected" if data.length != @channels
 
         buf = String.new(capacity: data.first.size * @frame_bytes, encoding: Encoding::ASCII_8BIT)
+
+        data = data.map { |c|
+          c = c.real if c.is_a?(Numo::SComplex) || c.is_a?(Numo::DComplex)
+          c = Numo::SFloat.cast(c) unless c.is_a?(Numo::SFloat)
+          c
+        }
+
         data.first.size.times do |idx|
           buf << data.map { |c| c[idx] }.pack('e*')
         end
