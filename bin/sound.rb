@@ -76,6 +76,6 @@ Pry.pry(
     }
   ]),
   exception_handler: ->(output, exception, _pry) {
-    output.puts(MB::U.highlight(exception))
+    output.puts(MB::U.color_trace(exception, exclude: %r{/pry-.*/lib/pry}))
   }
 )

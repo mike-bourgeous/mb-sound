@@ -17,9 +17,9 @@ GIT
 
 GIT
   remote: https://github.com/mike-bourgeous/mb-util.git
-  revision: 544849c40ef24b53ded7dde744fad4352b1542bd
+  revision: 1ef62b50381e8b6d16af38c3ce120626780aae53
   specs:
-    mb-util (0.1.12.usegit)
+    mb-util (0.1.13.1.usegit)
 
 PATH
   remote: .
@@ -92,7 +92,7 @@ DEPENDENCIES
   mb-math (>= 0.1.7.3.usegit)!
   mb-sound!
   mb-sound-jackffi (>= 0.0.15.usegit)!
-  mb-util (>= 0.1.12.usegit)!
+  mb-util (>= 0.1.13.1.usegit)!
   numo-narray
   pry
   pry-byebug
