@@ -74,5 +74,8 @@ Pry.pry(
     -> (obj, nest, pry) {
       ' ' * _pry_a.call(obj, nest, pry).gsub(/(\x01|\x02|\e\[[0-9;]*[A-Za-z])/, '').length
     }
-  ])
+  ]),
+  exception_handler: ->(output, exception, _pry) {
+    output.puts(MB::U.color_trace(exception, exclude: %r{/pry-.*/lib/pry}))
+  }
 )

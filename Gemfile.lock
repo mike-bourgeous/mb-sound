@@ -1,8 +1,8 @@
 GIT
   remote: https://github.com/mike-bourgeous/mb-math.git
-  revision: e182bca71f4eb4f98b341545df017bab7e2ea4ad
+  revision: 4c3974c99d22b2c76b8b0efb116cf857feffbc3a
   specs:
-    mb-math (0.1.4.1.usegit)
+    mb-math (0.1.7.3.usegit)
       cmath (~> 1.0.0)
       mb-util (>= 0.1.0.usegit)
       numo-narray (~> 0.9.1)
@@ -17,9 +17,9 @@ GIT
 
 GIT
   remote: https://github.com/mike-bourgeous/mb-util.git
-  revision: 5616cc4ce6218b5c541242ac47b0c99a30952a6c
+  revision: 1ef62b50381e8b6d16af38c3ce120626780aae53
   specs:
-    mb-util (0.1.7.1.usegit)
+    mb-util (0.1.13.1.usegit)
 
 PATH
   remote: .
@@ -89,10 +89,10 @@ PLATFORMS
 DEPENDENCIES
   builder (~> 3.2.4)
   cmath
-  mb-math!
+  mb-math (>= 0.1.7.3.usegit)!
   mb-sound!
   mb-sound-jackffi (>= 0.0.15.usegit)!
-  mb-util!
+  mb-util (>= 0.1.13.1.usegit)!
   numo-narray
   pry
   pry-byebug
