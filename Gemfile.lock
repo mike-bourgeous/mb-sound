@@ -1,6 +1,6 @@
 GIT
   remote: https://github.com/mike-bourgeous/mb-math.git
-  revision: 0cb49dc17474a57cc430d98d36c6d538b61c1426
+  revision: adf42b748fb4436dc8dc3b6dd95873bc800de95d
   branch: truffleruby
   specs:
     mb-math (0.1.8.0.truffle.usegit)
@@ -18,9 +18,9 @@ GIT
 
 GIT
   remote: https://github.com/mike-bourgeous/mb-util.git
-  revision: 5616cc4ce6218b5c541242ac47b0c99a30952a6c
+  revision: 544849c40ef24b53ded7dde744fad4352b1542bd
   specs:
-    mb-util (0.1.7.1.usegit)
+    mb-util (0.1.12.usegit)
 
 PATH
   remote: .
