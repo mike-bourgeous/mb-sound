@@ -61,6 +61,8 @@ module MB
           command = command.map { |v| v.respond_to?(:call) ? v.call : v }
         end
 
+        direction = "#{direction}b" unless direction.end_with?('b')
+
         IO.popen(command, direction, pgroup: 0).tap { |pipe|
           size = @buffer_size * @channels * 4
           MB::U.pipe_size(pipe, size)
