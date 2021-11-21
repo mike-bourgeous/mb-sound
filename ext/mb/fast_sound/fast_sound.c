@@ -182,20 +182,36 @@ static ssize_t wrapsize(ssize_t x, ssize_t y)
 	return x % y;
 }
 
-// Handles expansion of quarter-wave lookup table (copied/modified from mb-math)
-// Also see fetch_bounce from mb-math
-double get_lookup_i2aeixx(double table[], ssize_t len, ssize_t idx)
+static double fetch_bounce(double table[], ssize_t len, ssize_t idx)
 {
 	if (idx >= 0 && idx < len) {
 		return table[idx];
 	}
 
 	idx = wrapsize(idx, len * 2 - 2);
+
 	if (idx >= len - 1) {
-		idx = (len - 2) - idx;
+		idx = (2 * len - 2) - idx;
+	}
+
+	if (idx < 0 || idx >= len) {
+		rb_raise(rb_eRuntimeError, "Bad index %zd", idx);
 	}
 
 	return table[idx];
+}
+
+// Handles expansion of quarter-wave lookup table (copied/modified from mb-math)
+// Also see fetch_bounce from mb-math
+static double get_lookup_i2aeixx(double table[], ssize_t len, ssize_t idx)
+{
+	double v = fetch_bounce(table, len, idx);
+
+	if (idx >= len || idx <= -len) {
+		v *= -1;
+	}
+
+	return v;
 }
 
 static double simple_catmull_rom(double p0, double p1, double p2, double p3, double blend)
@@ -235,7 +251,7 @@ static double complex lookup_integrate_2_arctanh_e_i_x_x(double x)
 	double *table;
 	size_t len;
 
-	//x = wrap(x + M_PI, 2.0 * M_PI) - M_PI;
+	x = wrap(x + M_PI, 2.0 * M_PI) - M_PI;
 
 	if (x > -0.09 && x < 0.09) {
 		offset = (x + 0.1) * 20 / 0.1;
@@ -255,7 +271,7 @@ static double complex lookup_integrate_2_arctanh_e_i_x_x(double x)
 		len = sizeof(LOOKUP_INTEGRATE_2_ARCTANH_E_I_X_X) / sizeof(LOOKUP_INTEGRATE_2_ARCTANH_E_I_X_X[0]);
 	}
 
-	ssize_t idx = (ssize_t)lrint(offset);
+	ssize_t idx = floor(offset);
 	double frac = offset - idx;
 	double real = simple_catmull_rom(
 			get_lookup_i2aeixx(table, len, idx - 1),
