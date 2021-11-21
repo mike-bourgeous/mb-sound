@@ -9,6 +9,8 @@ require 'mb-sound'
 input = Numo::DComplex.linspace(0, 64.0 * Math::PI, 64000)
 
 plots = MB::Sound::Oscillator::WAVE_TYPES.flat_map { |w|
+  next unless ARGV.empty? || ARGV.include?(w.to_s)
+
   osc = MB::Sound::Oscillator.new(w)
   time = input.map { |v|
     osc.oscillator(v.real % (2.0 * Math::PI))
@@ -16,12 +18,12 @@ plots = MB::Sound::Oscillator::WAVE_TYPES.flat_map { |w|
   freq = MB::Sound.fft(time).abs.map(&:to_db)
 
   [
-    [ "#{w.to_s.gsub('_', ' ')} time", { data: time[0..4000].real, yrange: [-1.1, 1.1] } ],
+    [ "#{w.to_s.gsub('_', ' ')} time", { data: time[0..4000].imag, yrange: [-1.1, 1.1] } ],
     [ "#{w.to_s.gsub('_', ' ')} freq", { data: freq[0..240], yrange: [-80, 0] } ],
   ]
-}.to_h
+}.compact.to_h
 
-MB::Sound.plotter(graphical: true, width: 960, height: 540).plot(plots, columns: 4)
+MB::Sound.plotter(graphical: true, width: 1800, height: 900).plot(plots, columns: ARGV.empty? ? 4 : nil)
 
 begin
   STDIN.readline
