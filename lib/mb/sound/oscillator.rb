@@ -292,9 +292,9 @@ module MB
           x = phi / Math::PI
           if x < 1.0
             # 1.6487212707 is ~Math.sqrt(Math::E)
-            s = (Math.sqrt(2 * Math.log(1.6487212707 / (1.0 - x))) - 1) * -3.01.db
+            s = (Math.sqrt(2 * Math.log(1.6487212707 / (1.0 - x))) - 1) * 0.7071067811865476
           else
-            s = (-Math.sqrt(2 * Math.log(1.6487212707 / (x - 1.0))) + 1) * -3.01.db
+            s = (-Math.sqrt(2 * Math.log(1.6487212707 / (x - 1.0))) + 1) * 0.7071067811865476
           end
 
           # Clamp range to prevent periodic clicks when we get infinity at phi=pi
