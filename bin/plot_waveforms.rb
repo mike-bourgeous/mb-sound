@@ -28,7 +28,14 @@ plots = MB::Sound::Oscillator::WAVE_TYPES.flat_map { |w|
   ]
 }.compact.to_h
 
-MB::Sound.plotter(graphical: true, width: 1800, height: 900).plot(plots, columns: ARGV.empty? ? 4 : nil)
+MB::Sound.plotter(
+  graphical: true,
+  width: ENV['PLOT_WIDTH']&.to_i || 1800,
+  height: ENV['PLOT_HEIGHT']&.to_i || 900
+).plot(
+  plots,
+  columns: ARGV.empty? ? 4 : nil
+)
 
 begin
   STDIN.readline
