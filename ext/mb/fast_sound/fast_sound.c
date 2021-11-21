@@ -317,6 +317,7 @@ static double complex cot_int(double complex z)
 static double complex osc_sample(enum wave_types wave_type, double phi)
 {
 	double x;
+	double complex z;
 	double im;
 
 	switch(wave_type) {
@@ -340,6 +341,7 @@ static double complex osc_sample(enum wave_types wave_type, double phi)
 
 		case OSC_COMPLEX_TRIANGLE:
 			// see lib/mb/sound/oscillator.rb
+			// 2.4674...*i == -pi*log(2) + I*dilog(2)
 			return csc_int_int(phi + M_PI_2) * I / 2.46740110027234;
 
 		case OSC_SQUARE:
@@ -351,19 +353,19 @@ static double complex osc_sample(enum wave_types wave_type, double phi)
 			}
 
 		case OSC_COMPLEX_SQUARE:
-			x = 2.0 * conj(csc_int(phi)) * I / M_PI + 1.0;
-			if (isinf(x)) {
-				x = conj(csc_int(phi + 0.0000001)) * I / M_PI + 1.0;
+			z = 2.0 * conj(csc_int(phi)) * I / M_PI + 1.0;
+			if (isinf(creal(z)) || isinf(cimag(z))) {
+				z = 2.0 * conj(csc_int(phi + 0.0000001)) * I / M_PI + 1.0;
 			}
 
-			im = cimag(x);
+			im = cimag(z);
 			if (im > 3.8) {
-				x = creal(x) + I * 3.8;
+				z = creal(z) + I * 3.8;
 			} else if (im < -3.8) {
-				x = creal(x) - I * 3.8;
+				z = creal(z) - I * 3.8;
 			}
 
-			return x;
+			return z;
 
 		case OSC_RAMP:
 			if (phi < M_PI) {
@@ -375,16 +377,16 @@ static double complex osc_sample(enum wave_types wave_type, double phi)
 			}
 
 		case OSC_COMPLEX_RAMP:
-			x = cot_int(phi + M_PI_2) * I;
+			z = cot_int(phi + M_PI_2) * I;
 
-			im = cimag(x);
+			im = cimag(z);
 			if (im > 3.5) {
-				x = creal(x) + I * 3.5;
+				z = creal(z) + I * 3.5;
 			} else if (im < -3.5) {
-				x = creal(x) - I * 3.5;
+				z = creal(z) - I * 3.5;
 			}
 
-			return x;
+			return z;
 
 		case OSC_GAUSS:
 			// FIXME: does not match pure Ruby
@@ -451,6 +453,54 @@ static enum wave_types find_wave_type(ID wave_type)
 	}
 
 	rb_raise(rb_eRuntimeError, "Invalid wave type given: %"PRIsVALUE, wave_type);
+}
+
+static VALUE ruby_csc_int(VALUE self, VALUE z)
+{
+	double real, imag;
+
+	if (!RB_TYPE_P(z, T_COMPLEX)) {
+		real = NUM2DBL(z);
+		imag = 0;
+	} else {
+		real = rb_complex_real(z);
+		imag = rb_complex_imag(z);
+	}
+
+	complex double r = csc_int(real + I * imag);
+	return rb_dbl_complex_new(creal(r), cimag(r));
+}
+
+static VALUE ruby_csc_int_int(VALUE self, VALUE z)
+{
+	double real, imag;
+
+	if (!RB_TYPE_P(z, T_COMPLEX)) {
+		real = NUM2DBL(z);
+		imag = 0;
+	} else {
+		real = rb_complex_real(z);
+		imag = rb_complex_imag(z);
+	}
+
+	complex double r = csc_int_int(real + I * imag);
+	return rb_dbl_complex_new(creal(r), cimag(r));
+}
+
+static VALUE ruby_cot_int(VALUE self, VALUE z)
+{
+	double real, imag;
+
+	if (!RB_TYPE_P(z, T_COMPLEX)) {
+		real = NUM2DBL(z);
+		imag = 0;
+	} else {
+		real = rb_complex_real(z);
+		imag = rb_complex_imag(z);
+	}
+
+	complex double r = cot_int(real + I * imag);
+	return rb_dbl_complex_new(creal(r), cimag(r));
 }
 
 static VALUE ruby_fmod(VALUE self, VALUE x, VALUE y)
@@ -520,6 +570,11 @@ void Init_fast_sound(void)
 	sym_osc_parabola = rb_intern("parabola");
 
 	rb_define_module_function(fast_sound, "osc", ruby_osc, 2);
+
+	rb_define_module_function(fast_sound, "cot_int", ruby_cot_int, 1);
+	rb_define_module_function(fast_sound, "csc_int", ruby_csc_int, 1);
+	rb_define_module_function(fast_sound, "csc_int_int", ruby_csc_int_int, 1);
+
 	rb_define_module_function(fast_sound, "fmod", ruby_fmod, 2);
 	rb_define_module_function(fast_sound, "remainder", ruby_remainder, 2);
 	rb_define_module_function(fast_sound, "wrap", ruby_wrap, 2);

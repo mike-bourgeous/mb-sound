@@ -318,7 +318,6 @@ module MB
       end
 
       def oscillator(phi)
-        # return oscillator_ruby(phi) # XXX
         return MB::FastSound.osc(@wave_type, phi)
       end
 
