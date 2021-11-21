@@ -389,8 +389,8 @@ VALUE ruby_osc(VALUE self, VALUE wave_type, VALUE phi)
 {
 	enum wave_types wt = find_wave_type(SYM2ID(wave_type));
 
-	float complex result = osc_sample(wt, rb_float_value(phi));
-	return rb_complex_new(crealf(result), cimagf(result));
+	float complex result = osc_sample(wt, NUM2DBL(phi));
+	return rb_dbl_complex_new(crealf(result), cimagf(result));
 }
 
 void Init_fast_sound(void)
