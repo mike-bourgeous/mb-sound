@@ -1,6 +1,8 @@
 require 'midi-message'
 require 'nibbler'
 
+require 'mb/fast_sound'
+
 module MB
   module Sound
     # An oscillator that can generate different wave types.  This can be used

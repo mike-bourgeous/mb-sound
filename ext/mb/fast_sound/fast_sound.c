@@ -264,7 +264,7 @@ static float complex lookup_integrate_2_arctanh_e_i_x_x(float x)
 
 static float complex csc_int(float complex z)
 {
-	return -2.0f * conjf(catanhf(cexpf(I * z))) + M_PI_2 * I;
+	return -2.0f * conjf(catanhf(cexpf(I * z))) + M_PI / (2.0f * I);
 }
 
 static float complex csc_int_int(float x)
@@ -280,6 +280,7 @@ static float complex cot_int(float complex z)
 static float complex osc_sample(enum wave_types wave_type, float phi)
 {
 	float x;
+	float im;
 
 	switch(wave_type) {
 		case OSC_SINE:
@@ -313,7 +314,19 @@ static float complex osc_sample(enum wave_types wave_type, float phi)
 			}
 
 		case OSC_COMPLEX_SQUARE:
-			return 2.0f * conjf(csc_int(phi)) * I / M_PI + 1.0f;
+			x = 2.0f * conjf(csc_int(phi)) * I / M_PI + 1.0f;
+			if (isinf(x)) {
+				x = conjf(csc_int(phi + 0.0000001)) * I / M_PI + 1.0f;
+			}
+
+			im = cimagf(x);
+			if (im > 3.8) {
+				x = crealf(x) + I * 3.8;
+			} else if (im < -3.8) {
+				x = crealf(x) - I * 3.8;
+			}
+
+			return x;
 
 		case OSC_RAMP:
 			if (phi < M_PI) {
@@ -325,15 +338,33 @@ static float complex osc_sample(enum wave_types wave_type, float phi)
 			}
 
 		case OSC_COMPLEX_RAMP:
-			return cot_int(phi * M_PI_2) * I;
+			x = cot_int(phi + M_PI_2) * I;
+
+			im = cimagf(x);
+			if (im > 3.5) {
+				x = crealf(x) + I * 3.5;
+			} else if (im < -3.5) {
+				x = crealf(x) - I * 3.5;
+			}
+
+			return x;
 
 		case OSC_GAUSS:
+			// FIXME: does not match pure Ruby
 			x = phi / M_PI;
 			if (x < 1.0) {
-				return (sqrtf(2.0f * logf(1.6487212707 / (1.0 - x))) - 1) * 0.7071067811865476;
+				x = (sqrtf(2.0f * logf(1.6487212707 / (1.0 - x))) - 1) * 0.7071067811865476;
 			} else {
-				return (sqrtf(2.0f * logf(1.6487212707 / (x - 1.0))) + 1) * 0.7071067811865476;
+				x = (sqrtf(2.0f * logf(1.6487212707 / (x - 1.0))) + 1) * 0.7071067811865476;
 			}
+
+			if (x < -3) {
+				x = -3;
+			} else if (x > 3) {
+				x = 3;
+			}
+
+			return x;
 
 		case OSC_PARABOLA:
 			if (phi < M_PI) {
