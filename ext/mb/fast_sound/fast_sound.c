@@ -389,12 +389,11 @@ static double complex osc_sample(enum wave_types wave_type, double phi)
 			return z;
 
 		case OSC_GAUSS:
-			// FIXME: does not match pure Ruby
 			x = phi / M_PI;
 			if (x < 1.0) {
 				x = (sqrt(2.0 * log(1.6487212707 / (1.0 - x))) - 1) * 0.7071067811865476;
 			} else {
-				x = (sqrt(2.0 * log(1.6487212707 / (x - 1.0))) + 1) * 0.7071067811865476;
+				x = (1 - sqrt(2.0 * log(1.6487212707 / (x - 1.0)))) * 0.7071067811865476;
 			}
 
 			if (x < -3) {
