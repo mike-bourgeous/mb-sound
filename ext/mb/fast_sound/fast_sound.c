@@ -161,6 +161,27 @@ static double SMALL_LOOKUP_INTEGRATE_2_ARCTANH_E_I_X_X[] = {
 	0
 };
 
+// Behaves like Ruby's % operator instead of fmod
+// wraps X to be between 0 and Y
+static double wrap(double x, double y)
+{
+	// this could instead be fmod(x, y) + y if x is negative
+	return x - y * floor(x / y);
+}
+
+static ssize_t wrapsize(ssize_t x, ssize_t y)
+{
+	if (x >= 0 && x < y) {
+		return x;
+	}
+
+	if (x < 0) {
+		return x % y + y;
+	}
+
+	return x % y;
+}
+
 // Handles expansion of quarter-wave lookup table (copied/modified from mb-math)
 // Also see fetch_bounce from mb-math
 double get_lookup_i2aeixx(double table[], ssize_t len, ssize_t idx)
@@ -169,7 +190,7 @@ double get_lookup_i2aeixx(double table[], ssize_t len, ssize_t idx)
 		return table[idx];
 	}
 
-	idx %= len * 2 - 2;
+	idx = wrapsize(idx, len * 2 - 2);
 	if (idx >= len - 1) {
 		idx = (len - 2) - idx;
 	}
@@ -202,12 +223,6 @@ static double simple_catmull_rom(double p0, double p1, double p2, double p3, dou
 	double b2 = a2 * (d3t / d31) - a3 * (d1t / d31);
 
 	return b1 * (d2t / d21) - b2 * (d1t / d21);
-}
-
-// Behaves like Ruby's % operator instead of fmod
-static double wrap(double x, double y)
-{
-	return x - y * floor(x / y);
 }
 
 // Automatically generated (then manually modified) lookup-table-based
@@ -422,17 +437,37 @@ static enum wave_types find_wave_type(ID wave_type)
 	rb_raise(rb_eRuntimeError, "Invalid wave type given: %"PRIsVALUE, wave_type);
 }
 
-VALUE ruby_fmod(VALUE self, VALUE x, VALUE y)
+static VALUE ruby_fmod(VALUE self, VALUE x, VALUE y)
 {
 	return rb_float_new(fmod(NUM2DBL(x), NUM2DBL(y)));
 }
 
-VALUE ruby_remainder(VALUE self, VALUE x, VALUE y)
+static VALUE ruby_remainder(VALUE self, VALUE x, VALUE y)
 {
 	return rb_float_new(remainder(NUM2DBL(x), NUM2DBL(y)));
 }
 
-VALUE ruby_osc(VALUE self, VALUE wave_type, VALUE phi)
+static VALUE ruby_wrap(VALUE self, VALUE x, VALUE y)
+{
+	return rb_float_new(wrap(NUM2DBL(x), NUM2DBL(y)));
+}
+
+static VALUE ruby_wrapsize(VALUE self, VALUE x, VALUE y)
+{
+	return SSIZET2NUM(wrapsize(NUM2SSIZET(x), NUM2SSIZET(y)));
+}
+
+static VALUE ruby_idiv(VALUE self, VALUE x, VALUE y)
+{
+	return SSIZET2NUM(NUM2SSIZET(x) / NUM2SSIZET(y));
+}
+
+static VALUE ruby_imod(VALUE self, VALUE x, VALUE y)
+{
+	return SSIZET2NUM(NUM2SSIZET(x) % NUM2SSIZET(y));
+}
+
+static VALUE ruby_osc(VALUE self, VALUE wave_type, VALUE phi)
 {
 	enum wave_types wt = find_wave_type(SYM2ID(wave_type));
 
@@ -470,5 +505,9 @@ void Init_fast_sound(void)
 
 	rb_define_module_function(fast_sound, "osc", ruby_osc, 2);
 	rb_define_module_function(fast_sound, "fmod", ruby_fmod, 2);
-	rb_define_module_function(fast_sound, "remainder", ruby_fmod, 2);
+	rb_define_module_function(fast_sound, "remainder", ruby_remainder, 2);
+	rb_define_module_function(fast_sound, "wrap", ruby_wrap, 2);
+	rb_define_module_function(fast_sound, "wrapsize", ruby_wrapsize, 2);
+	rb_define_module_function(fast_sound, "idiv", ruby_idiv, 2);
+	rb_define_module_function(fast_sound, "imod", ruby_imod, 2);
 }
