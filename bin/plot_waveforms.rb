@@ -6,6 +6,8 @@ require 'bundler/setup'
 require 'pry-byebug'
 require 'mb-sound'
 
+show_imag = !!ARGV.delete('--imag')
+
 input = Numo::DComplex.linspace(0, 64.0 * Math::PI, 64000)
 
 plots = MB::Sound::Oscillator::WAVE_TYPES.flat_map { |w|
@@ -17,8 +19,11 @@ plots = MB::Sound::Oscillator::WAVE_TYPES.flat_map { |w|
   }
   freq = MB::Sound.fft(time).abs.map(&:to_db)
 
+  t = time[0..4000]
+  t = show_imag ? t.imag : t.real
+
   [
-    [ "#{w.to_s.gsub('_', ' ')} time", { data: time[0..4000].imag, yrange: [-1.1, 1.1] } ],
+    [ "#{w.to_s.gsub('_', ' ')} time", { data: t, yrange: [-1.1, 1.1] } ],
     [ "#{w.to_s.gsub('_', ' ')} freq", { data: freq[0..240], yrange: [-80, 0] } ],
   ]
 }.compact.to_h
