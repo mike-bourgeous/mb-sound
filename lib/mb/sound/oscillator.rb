@@ -217,7 +217,7 @@ module MB
       # 2pi.  The output value ranges from -1 to 1.  The power, range, and
       # other modifiers to the oscillator are not applied by this method (see
       # #sample).
-      def oscillator(phi)
+      def oscillator_ruby(phi)
         case @wave_type
         when :sine
           s = Math.sin(phi)
@@ -317,6 +317,11 @@ module MB
         s
       end
 
+      def oscillator(phi)
+        # return oscillator_ruby(phi) # XXX
+        return MB::FastSound.osc(@wave_type, phi)
+      end
+
       # Returns the next value (or +count+ values in an NArray, if specified)
       # of the oscillator and advances the internal phase.
       #
@@ -354,6 +359,7 @@ module MB
 
           @phi = (@phi + delta) % (Math::PI * 2)
 
+          result = result.real unless @osc_buf[0].is_a?(Complex)
           @osc_buf[idx] = result
         end
 
