@@ -27,6 +27,8 @@ Gem::Specification.new do |spec|
   spec.executables   = spec.files.grep(%r{^bin/}) { |f| File.basename(f) }
   spec.require_paths = ["lib"]
 
+  spec.extensions = ['ext/mb/fast_sound/extconf.rb']
+
   spec.add_runtime_dependency 'cmath', '~> 1.0.0'
   spec.add_runtime_dependency 'numo-narray', '~> 0.9.1.8'
   spec.add_runtime_dependency 'numo-pocketfft', '~> 0.2.2'
@@ -45,4 +47,6 @@ Gem::Specification.new do |spec|
   spec.add_development_dependency 'pry-byebug', '~> 3.9.0'
 
   spec.add_development_dependency 'simplecov', '~> 0.21.2'
+
+  spec.add_development_dependency 'rake-compiler', '~> 1.1.1'
 end
