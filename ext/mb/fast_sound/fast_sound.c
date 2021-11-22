@@ -420,19 +420,138 @@ static double complex osc_sample(enum wave_types wave_type, double phi)
 	}
 }
 
+static inline _Bool double_is_tiny(double v)
+{
+	return v < 1e-18 && v > -1e-18;
+}
+
 // Converted from lib/mb/sound/filter/biquad.rb
-static double biquad_filter(double b0, double b1, double b2, double a1, double a2, double x0, double x1, double x2, double y1, double y2)
+static double biquad_filter(
+		double b0, double b1, double b2,
+		double a1, double a2,
+		double x0, double x1, double x2,
+		double y1, double y2
+		)
 {
 	double out = b0 * x0 + b1 * x1 + b2 * x2 - a1 * y1 - a2 * y2;
 
 	// Prevent denormals
-	if (out < 1e-18 && out > -1e-18 &&
-			y1 < 1e-18 && y1 > -1e-18 &&
-			y2 < 1e-18 && y2 > -1e-18) {
+	if (double_is_tiny(out) && double_is_tiny(y1) && double_is_tiny(y2)) {
 		out = 0;
 	}
 
 	return out;
+}
+
+static double complex biquad_complex(
+		double complex b0, double complex b1, double complex b2,
+		double complex a1, double complex a2,
+		double complex x0, double complex x1, double complex x2,
+		double complex y1, double complex y2
+		)
+{
+	double complex out = b0 * x0 + b1 * x1 + b2 * x2 - a1 * y1 - a2 * y2;
+
+	// Prevent denormals
+	double real = creal(out);
+	double imag = cimag(out);
+	if (double_is_tiny(real) && double_is_tiny(creal(y1)) && double_is_tiny(creal(y2))) {
+		real = 0;
+	}
+	if (double_is_tiny(imag) && double_is_tiny(cimag(y1)) && double_is_tiny(cimag(y2))) {
+		imag = 0;
+	}
+
+	return real + I * imag;
+}
+
+// TODO: consider using a macro for these functions
+static void biquad_loop_float(
+		float *data,
+		size_t length,
+		double b0, double b1, double b2,
+		double a1, double a2,
+		double *x1, double *x2,
+		double *y1, double *y2
+		)
+{
+	double x0, y0;
+
+	for (size_t i = 0; i < length; i++) {
+		x0 = data[i];
+		y0 = biquad_filter(b0, b1, b2, a1, a2, x0, *x1, *x2, *y1, *y2);
+		data[i] = y0;
+		*y2 = *y1;
+		*y1 = y0;
+		*x2 = *x1;
+		*x1 = x0;
+	}
+}
+
+static void biquad_loop_double(
+		double *data,
+		size_t length,
+		double b0, double b1, double b2,
+		double a1, double a2,
+		double *x1, double *x2,
+		double *y1, double *y2
+		)
+{
+	double x0, y0;
+
+	for (size_t i = 0; i < length; i++) {
+		x0 = data[i];
+		y0 = biquad_filter(b0, b1, b2, a1, a2, x0, *x1, *x2, *y1, *y2);
+		data[i] = y0;
+		*y2 = *y1;
+		*y1 = y0;
+		*x2 = *x1;
+		*x1 = x0;
+	}
+}
+
+static void biquad_loop_complex_float(
+		float complex *data,
+		size_t length,
+		double b0, double b1, double b2,
+		double a1, double a2,
+		double *x1, double *x2,
+		double *y1, double *y2
+		)
+{
+	double complex x0, y0;
+
+	for (size_t i = 0; i < length; i++) {
+		x0 = data[i];
+		y0 = biquad_complex(b0, b1, b2, a1, a2, x0, *x1, *x2, *y1, *y2);
+		data[i] = y0;
+		*y2 = *y1;
+		*y1 = y0;
+		*x2 = *x1;
+		*x1 = x0;
+	}
+}
+
+static void biquad_loop_complex_double(
+		double complex *data,
+		size_t length,
+		double b0, double b1, double b2,
+		double a1, double a2,
+		double *x1, double *x2,
+		double *y1, double *y2
+		)
+{
+	double complex x0, y0;
+
+	for (size_t i = 0; i < length; i++) {
+		x0 = data[i];
+		y0 = biquad_complex(b0, b1, b2, a1, a2, x0, *x1, *x2, *y1, *y2);
+		data[i] = y0;
+		*y2 = *y1;
+		*y1 = y0;
+		*x2 = *x1;
+		*x1 = x0;
+	}
 }
 
 static enum wave_types find_wave_type(ID wave_type)
@@ -609,7 +728,11 @@ static VALUE ruby_biquad_narray(VALUE self, VALUE coeffs, VALUE state)
 	// https://github.com/ruby/ruby/blob/master/doc/extension.rdoc
 	
 	// cast will not reallocate if it doesn't have to, so no need to check class
-	buf = rb_funcall(numo_cDFloat, rb_intern("cast"), 1, buf);
+	VALUE buf_type = CLASS_OF(buf);
+	if (buf_type != numo_cDComplex && buf_type != numo_cSComplex && buf_type != numo_cSFloat && buf_type != numo_cDFloat) {
+		buf = rb_funcall(numo_cDFloat, rb_intern("cast"), 1, buf);
+		buf_type = numo_cDFloat;
+	}
 
 	GetNArray(buf, buf_int);
 
@@ -627,12 +750,9 @@ static VALUE ruby_biquad_narray(VALUE self, VALUE coeffs, VALUE state)
 	}
 
 	size_t length = NA_SHAPE(buf_int)[0];
-	double *data = (double *)na_get_pointer_for_read_write(buf);
 
-	double x0 = 0;
 	double x1 = NUM2DBL(rb_ary_entry(state, 1));
 	double x2 = NUM2DBL(rb_ary_entry(state, 2));
-	double y0 = 0;
 	double y1 = NUM2DBL(rb_ary_entry(state, 3));
 	double y2 = NUM2DBL(rb_ary_entry(state, 4));
 
@@ -642,14 +762,37 @@ static VALUE ruby_biquad_narray(VALUE self, VALUE coeffs, VALUE state)
 	double a1 = NUM2DBL(rb_ary_entry(coeffs, 3));
 	double a2 = NUM2DBL(rb_ary_entry(coeffs, 4));
 
-	for (size_t i = 0; i < length; i++) {
-		x0 = data[i];
-		y0 = biquad_filter(b0, b1, b2, a1, a2, x0, x1, x2, y1, y2);
-		data[i] = y0;
-		y2 = y1;
-		y1 = y0;
-		x2 = x1;
-		x1 = x0;
+
+	if (buf_type == numo_cSFloat) {
+		biquad_loop_float(
+				(float *)nary_get_pointer_for_read_write(buf),
+				length,
+				b0, b1, b2, a1, a2,
+				&x1, &x2, &y1, &y2
+				);
+	} else if (buf_type == numo_cDFloat) {
+		biquad_loop_double(
+				(double *)nary_get_pointer_for_read_write(buf),
+				length,
+				b0, b1, b2, a1, a2,
+				&x1, &x2, &y1, &y2
+				);
+	} else if (buf_type == numo_cSComplex) {
+		biquad_loop_complex_float(
+				(float complex *)nary_get_pointer_for_read_write(buf),
+				length,
+				b0, b1, b2, a1, a2,
+				&x1, &x2, &y1, &y2
+				);
+	} else if (buf_type == numo_cDComplex) {
+		biquad_loop_complex_double(
+				(double complex *)nary_get_pointer_for_read_write(buf),
+				length,
+				b0, b1, b2, a1, a2,
+				&x1, &x2, &y1, &y2
+				);
+	} else {
+		rb_raise(rb_eException, "BUG: Buffer was not SFloat, DFloat, SComplex, or DComplex");
 	}
 
 	if (!was_inplace) {

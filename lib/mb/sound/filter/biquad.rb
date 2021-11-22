@@ -151,7 +151,11 @@ module MB
         # If +samples+ is a Numo::NArray in in-place mode, then the samples will
         # be processed in-place, saving an array allocation.
         def process(samples)
-          process_c(samples)
+          if samples.is_a?(Numo::SComplex) || samples.is_a?(Numo::DComplex)
+            process_ruby(samples)
+          else
+            process_c(samples)
+          end
         end
 
         # C loop, C math (much faster than pure Ruby)
