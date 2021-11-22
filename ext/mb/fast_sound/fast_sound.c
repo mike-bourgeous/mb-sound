@@ -420,6 +420,21 @@ static double complex osc_sample(enum wave_types wave_type, double phi)
 	}
 }
 
+// Converted from lib/mb/sound/filter/biquad.rb
+static double biquad_filter(double b0, double b1, double b2, double a1, double a2, double x0, double x1, double x2, double y1, double y2)
+{
+	double out = b0 * x0 + b1 * x1 + b2 * x2 - a1 * y1 - a2 * y2;
+
+	// Prevent denormals
+	if (out < 1e-18 && out > -1e-18 &&
+			y1 < 1e-18 && y1 > -1e-18 &&
+			y2 < 1e-18 && y2 > -1e-18) {
+		out = 0;
+	}
+
+	return out;
+}
+
 static enum wave_types find_wave_type(ID wave_type)
 {
 	if (wave_type == sym_osc_sine) {
@@ -554,6 +569,106 @@ static VALUE ruby_osc(VALUE self, VALUE wave_type, VALUE phi)
 	}
 }
 
+static VALUE ruby_biquad(VALUE self, VALUE b0, VALUE b1, VALUE b2, VALUE a1, VALUE a2, VALUE x0, VALUE x1, VALUE x2, VALUE y1, VALUE y2)
+{
+	double result = biquad_filter(
+			NUM2DBL(b0), NUM2DBL(b1), NUM2DBL(b2),
+			NUM2DBL(a1), NUM2DBL(a2),
+			NUM2DBL(x0), NUM2DBL(x1), NUM2DBL(x2),
+			NUM2DBL(y1), NUM2DBL(y2)
+		     );
+
+	return rb_float_new(result);
+}
+
+/*
+ * Converted from lib/mb/sound/filter/biquad.rb
+ *
+ * buf must be a 1D Numo::DFloat or compatible
+ * coeffs contains [b0, b1, b2, a1, a2]
+ * state contains [buf, x1, x2, y1, y2]
+ *
+ * state will be mutated, and buf (state[0]) might be a different object!
+ *
+ * returns state
+ */
+static VALUE ruby_biquad_narray(VALUE self, VALUE coeffs, VALUE state)
+{
+	VALUE buf;
+	narray_t *buf_int;
+
+	Check_Type(state, T_ARRAY);
+	Check_Type(coeffs, T_ARRAY);
+
+	buf = rb_ary_entry(state, 0);
+
+	// References used for narray and Ruby APIs:
+	// https://github.com/yoshoku/numo-pocketfft/blob/1ab489b165d4cde06b6d3a443ed9bfbc8e5c69d0/ext/numo/pocketfft/pocketfftext.c
+	// https://github.com/ruby-numo/numo-narray/blob/6f5c91250c0cb948f6b811385d384c3f15af4dcd/ext/numo/narray/numo/intern.h
+	// https://silverhammermba.github.io/emberb/c/
+	// https://github.com/ruby/ruby/blob/master/doc/extension.rdoc
+	
+	// cast will not reallocate if it doesn't have to, so no need to check class
+	buf = rb_funcall(numo_cDFloat, rb_intern("cast"), 1, buf);
+
+	GetNArray(buf, buf_int);
+
+	if (NA_NDIM(buf_int) != 1) {
+		rb_raise(rb_eArgError, "Only 1D NArrays may be processed (got %d dimensions)", NA_NDIM(buf));
+	}
+
+	_Bool was_inplace = !!TEST_INPLACE(buf);
+
+	if (!RTEST(nary_check_contiguous(buf)) || !was_inplace) {
+		buf = nary_dup(buf);
+		SET_INPLACE(buf);
+		GetNArray(buf, buf_int);
+		was_inplace = 0;
+	}
+
+	size_t length = NA_SHAPE(buf_int)[0];
+	double *data = (double *)na_get_pointer_for_read_write(buf);
+
+	double x0 = 0;
+	double x1 = NUM2DBL(rb_ary_entry(state, 1));
+	double x2 = NUM2DBL(rb_ary_entry(state, 2));
+	double y0 = 0;
+	double y1 = NUM2DBL(rb_ary_entry(state, 3));
+	double y2 = NUM2DBL(rb_ary_entry(state, 4));
+
+	double b0 = NUM2DBL(rb_ary_entry(coeffs, 0));
+	double b1 = NUM2DBL(rb_ary_entry(coeffs, 1));
+	double b2 = NUM2DBL(rb_ary_entry(coeffs, 2));
+	double a1 = NUM2DBL(rb_ary_entry(coeffs, 3));
+	double a2 = NUM2DBL(rb_ary_entry(coeffs, 4));
+
+	for (size_t i = 0; i < length; i++) {
+		x0 = data[i];
+		y0 = biquad_filter(b0, b1, b2, a1, a2, x0, x1, x2, y1, y2);
+		data[i] = y0;
+		y2 = y1;
+		y1 = y0;
+		x2 = x1;
+		x1 = x0;
+	}
+
+	if (!was_inplace) {
+		UNSET_INPLACE(buf);
+	}
+
+	rb_ary_store(state, 0, buf);
+	rb_ary_store(state, 1, rb_float_new(x1));
+	rb_ary_store(state, 2, rb_float_new(x2));
+	rb_ary_store(state, 3, rb_float_new(y1));
+	rb_ary_store(state, 4, rb_float_new(y2));
+
+	RB_GC_GUARD(buf);
+	RB_GC_GUARD(coeffs);
+	RB_GC_GUARD(state);
+
+	return state;
+}
+
 void Init_fast_sound(void)
 {
 	VALUE mb = rb_define_module("MB");
@@ -571,6 +686,8 @@ void Init_fast_sound(void)
 	sym_osc_parabola = rb_intern("parabola");
 
 	rb_define_module_function(fast_sound, "osc", ruby_osc, 2);
+	rb_define_module_function(fast_sound, "biquad", ruby_biquad, 10);
+	rb_define_module_function(fast_sound, "biquad_narray", ruby_biquad_narray, 2);
 
 	rb_define_module_function(fast_sound, "cot_int", ruby_cot_int, 1);
 	rb_define_module_function(fast_sound, "csc_int", ruby_csc_int, 1);
