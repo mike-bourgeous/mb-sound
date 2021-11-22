@@ -3,6 +3,8 @@
 
 #include <ruby.h>
 
+#include "numo/narray.h"
+
 enum wave_types {
 	OSC_SINE,
 	OSC_COMPLEX_SINE,
