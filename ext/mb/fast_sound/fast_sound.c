@@ -465,95 +465,6 @@ static double complex biquad_complex(
 	return real + I * imag;
 }
 
-// TODO: consider using a macro for these functions
-static void biquad_loop_float(
-		float *data,
-		size_t length,
-		double b0, double b1, double b2,
-		double a1, double a2,
-		double *x1, double *x2,
-		double *y1, double *y2
-		)
-{
-	double x0, y0;
-
-	for (size_t i = 0; i < length; i++) {
-		x0 = data[i];
-		y0 = biquad_filter(b0, b1, b2, a1, a2, x0, *x1, *x2, *y1, *y2);
-		data[i] = y0;
-		*y2 = *y1;
-		*y1 = y0;
-		*x2 = *x1;
-		*x1 = x0;
-	}
-}
-
-static void biquad_loop_double(
-		double *data,
-		size_t length,
-		double b0, double b1, double b2,
-		double a1, double a2,
-		double *x1, double *x2,
-		double *y1, double *y2
-		)
-{
-	double x0, y0;
-
-	for (size_t i = 0; i < length; i++) {
-		x0 = data[i];
-		y0 = biquad_filter(b0, b1, b2, a1, a2, x0, *x1, *x2, *y1, *y2);
-		data[i] = y0;
-		*y2 = *y1;
-		*y1 = y0;
-		*x2 = *x1;
-		*x1 = x0;
-	}
-}
-
-static void biquad_loop_complex_float(
-		float complex *data,
-		size_t length,
-		double b0, double b1, double b2,
-		double a1, double a2,
-		double *x1, double *x2,
-		double *y1, double *y2
-		)
-{
-	double complex x0, y0;
-
-	for (size_t i = 0; i < length; i++) {
-		x0 = data[i];
-		y0 = biquad_complex(b0, b1, b2, a1, a2, x0, *x1, *x2, *y1, *y2);
-		data[i] = y0;
-		*y2 = *y1;
-		*y1 = y0;
-		*x2 = *x1;
-		*x1 = x0;
-	}
-}
-
-static void biquad_loop_complex_double(
-		double complex *data,
-		size_t length,
-		double b0, double b1, double b2,
-		double a1, double a2,
-		double *x1, double *x2,
-		double *y1, double *y2
-		)
-{
-	double complex x0, y0;
-
-	for (size_t i = 0; i < length; i++) {
-		x0 = data[i];
-		y0 = biquad_complex(b0, b1, b2, a1, a2, x0, *x1, *x2, *y1, *y2);
-		data[i] = y0;
-		*y2 = *y1;
-		*y1 = y0;
-		*x2 = *x1;
-		*x1 = x0;
-	}
-}
-
 static enum wave_types find_wave_type(ID wave_type)
 {
 	if (wave_type == sym_osc_sine) {
@@ -590,7 +501,7 @@ static enum wave_types find_wave_type(ID wave_type)
 	rb_raise(rb_eRuntimeError, "Invalid wave type given: %"PRIsVALUE, wave_type);
 }
 
-static VALUE ruby_csc_int(VALUE self, VALUE z)
+static complex double num_to_complex(VALUE z)
 {
 	double real, imag;
 
@@ -598,44 +509,31 @@ static VALUE ruby_csc_int(VALUE self, VALUE z)
 		real = NUM2DBL(z);
 		imag = 0;
 	} else {
-		real = rb_complex_real(z);
-		imag = rb_complex_imag(z);
+		real = NUM2DBL(rb_complex_real(z));
+		imag = NUM2DBL(rb_complex_imag(z));
 	}
 
-	complex double r = csc_int(real + I * imag);
-	return rb_dbl_complex_new(creal(r), cimag(r));
+	return real + I * imag;
+}
+
+static VALUE complex_to_num(double complex z)
+{
+	return rb_dbl_complex_new(creal(z), cimag(z));
+}
+
+static VALUE ruby_csc_int(VALUE self, VALUE z)
+{
+	return complex_to_num(csc_int(num_to_complex(z)));
 }
 
 static VALUE ruby_csc_int_int(VALUE self, VALUE z)
 {
-	double real, imag;
-
-	if (!RB_TYPE_P(z, T_COMPLEX)) {
-		real = NUM2DBL(z);
-		imag = 0;
-	} else {
-		real = rb_complex_real(z);
-		imag = rb_complex_imag(z);
-	}
-
-	complex double r = csc_int_int(real + I * imag);
-	return rb_dbl_complex_new(creal(r), cimag(r));
+	return complex_to_num(csc_int_int(num_to_complex(z)));
 }
 
 static VALUE ruby_cot_int(VALUE self, VALUE z)
 {
-	double real, imag;
-
-	if (!RB_TYPE_P(z, T_COMPLEX)) {
-		real = NUM2DBL(z);
-		imag = 0;
-	} else {
-		real = rb_complex_real(z);
-		imag = rb_complex_imag(z);
-	}
-
-	complex double r = cot_int(real + I * imag);
-	return rb_dbl_complex_new(creal(r), cimag(r));
+	return complex_to_num(cot_int(num_to_complex(z)));
 }
 
 static VALUE ruby_fmod(VALUE self, VALUE x, VALUE y)
@@ -666,6 +564,14 @@ static VALUE ruby_idiv(VALUE self, VALUE x, VALUE y)
 static VALUE ruby_imod(VALUE self, VALUE x, VALUE y)
 {
 	return SSIZET2NUM(NUM2SSIZET(x) % NUM2SSIZET(y));
+}
+
+// Splits complex into real and imaginary
+static VALUE ruby_complex(VALUE self, VALUE z)
+{
+	double complex c = num_to_complex(z);
+
+	return rb_ary_new_from_args(2, rb_float_new(creal(c)), rb_float_new(cimag(c)));
 }
 
 static VALUE ruby_osc(VALUE self, VALUE wave_type, VALUE phi)
@@ -700,24 +606,66 @@ static VALUE ruby_biquad(VALUE self, VALUE b0, VALUE b1, VALUE b2, VALUE a1, VAL
 	return rb_float_new(result);
 }
 
+static VALUE ruby_biquad_complex(VALUE self, VALUE b0, VALUE b1, VALUE b2, VALUE a1, VALUE a2, VALUE x0, VALUE x1, VALUE x2, VALUE y1, VALUE y2)
+{
+	double complex result = biquad_complex(
+			num_to_complex(b0), num_to_complex(b1), num_to_complex(b2),
+			num_to_complex(a1), num_to_complex(a2),
+			num_to_complex(x0), num_to_complex(x1), num_to_complex(x2),
+			num_to_complex(y1), num_to_complex(y2)
+		     );
+
+	return complex_to_num(result);
+}
+
+#define BIQUAD_LOOP(buf_type, coeff_type, conv_from_rb, conv_to_rb, filter_func) do { \
+	buf_type *data = (buf_type *)nary_get_pointer_for_read_write(buf); \
+\
+	coeff_type x0 = 0; \
+	coeff_type x1 = conv_from_rb(rb_ary_entry(state, 1)); \
+	coeff_type x2 = conv_from_rb(rb_ary_entry(state, 2)); \
+	coeff_type y0 = 0; \
+	coeff_type y1 = conv_from_rb(rb_ary_entry(state, 3)); \
+	coeff_type y2 = conv_from_rb(rb_ary_entry(state, 4)); \
+\
+	coeff_type b0 = conv_from_rb(rb0); \
+	coeff_type b1 = conv_from_rb(rb1); \
+	coeff_type b2 = conv_from_rb(rb2); \
+	coeff_type a1 = conv_from_rb(ra0); \
+	coeff_type a2 = conv_from_rb(ra1); \
+\
+	for (size_t i = 0; i < length; i++) { \
+		x0 = data[i]; \
+		y0 = filter_func(b0, b1, b2, a1, a2, x0, x1, x2, y1, y2); \
+		data[i] = y0; \
+		y2 = y1; \
+		y1 = y0; \
+		x2 = x1; \
+		x1 = x0; \
+	} \
+\
+	rb_ary_store(state, 1, conv_to_rb(x1)); \
+	rb_ary_store(state, 2, conv_to_rb(x2)); \
+	rb_ary_store(state, 3, conv_to_rb(y1)); \
+	rb_ary_store(state, 4, conv_to_rb(y2)); \
+} while(0);
+
 /*
  * Converted from lib/mb/sound/filter/biquad.rb
  *
- * buf must be a 1D Numo::DFloat or compatible
- * coeffs contains [b0, b1, b2, a1, a2]
+ * buf must be a 1D Numo::DFloat or Numo::DComplex or compatible
  * state contains [buf, x1, x2, y1, y2]
  *
  * state will be mutated, and buf (state[0]) might be a different object!
  *
  * returns state
  */
-static VALUE ruby_biquad_narray(VALUE self, VALUE coeffs, VALUE state)
+static VALUE ruby_biquad_narray(VALUE self, VALUE rb0, VALUE rb1, VALUE rb2, VALUE ra0, VALUE ra1, VALUE state)
 {
-	VALUE buf;
+	VALUE buf, buf_type;
 	narray_t *buf_int;
 
 	Check_Type(state, T_ARRAY);
-	Check_Type(coeffs, T_ARRAY);
 
 	buf = rb_ary_entry(state, 0);
 
@@ -727,11 +675,19 @@ static VALUE ruby_biquad_narray(VALUE self, VALUE coeffs, VALUE state)
 	// https://silverhammermba.github.io/emberb/c/
 	// https://github.com/ruby/ruby/blob/master/doc/extension.rdoc
 	
-	// cast will not reallocate if it doesn't have to, so no need to check class
-	VALUE buf_type = CLASS_OF(buf);
+	// First try NArray's automatic conversion, to get e.g. from an array
+	// of complex to DComplex
+	buf_type = CLASS_OF(buf);
+	if (buf_type != numo_cDComplex && buf_type != numo_cSComplex && buf_type != numo_cSFloat && buf_type != numo_cDFloat) {
+		buf = rb_funcall(numo_cNArray, rb_intern("cast"), 1, buf);
+		buf_type = CLASS_OF(buf);
+	}
+
+	// If that's still not a float or complex type, force conversion to float
+	buf_type = CLASS_OF(buf);
 	if (buf_type != numo_cDComplex && buf_type != numo_cSComplex && buf_type != numo_cSFloat && buf_type != numo_cDFloat) {
 		buf = rb_funcall(numo_cDFloat, rb_intern("cast"), 1, buf);
-		buf_type = numo_cDFloat;
+		buf_type = CLASS_OF(buf);
 	}
 
 	GetNArray(buf, buf_int);
@@ -751,46 +707,14 @@ static VALUE ruby_biquad_narray(VALUE self, VALUE coeffs, VALUE state)
 
 	size_t length = NA_SHAPE(buf_int)[0];
 
-	double x1 = NUM2DBL(rb_ary_entry(state, 1));
-	double x2 = NUM2DBL(rb_ary_entry(state, 2));
-	double y1 = NUM2DBL(rb_ary_entry(state, 3));
-	double y2 = NUM2DBL(rb_ary_entry(state, 4));
-
-	double b0 = NUM2DBL(rb_ary_entry(coeffs, 0));
-	double b1 = NUM2DBL(rb_ary_entry(coeffs, 1));
-	double b2 = NUM2DBL(rb_ary_entry(coeffs, 2));
-	double a1 = NUM2DBL(rb_ary_entry(coeffs, 3));
-	double a2 = NUM2DBL(rb_ary_entry(coeffs, 4));
-
-
 	if (buf_type == numo_cSFloat) {
-		biquad_loop_float(
-				(float *)nary_get_pointer_for_read_write(buf),
-				length,
-				b0, b1, b2, a1, a2,
-				&x1, &x2, &y1, &y2
-				);
+		BIQUAD_LOOP(float, double, NUM2DBL, DBL2NUM, biquad_filter);
 	} else if (buf_type == numo_cDFloat) {
-		biquad_loop_double(
-				(double *)nary_get_pointer_for_read_write(buf),
-				length,
-				b0, b1, b2, a1, a2,
-				&x1, &x2, &y1, &y2
-				);
+		BIQUAD_LOOP(double, double, NUM2DBL, DBL2NUM, biquad_filter);
 	} else if (buf_type == numo_cSComplex) {
-		biquad_loop_complex_float(
-				(float complex *)nary_get_pointer_for_read_write(buf),
-				length,
-				b0, b1, b2, a1, a2,
-				&x1, &x2, &y1, &y2
-				);
+		BIQUAD_LOOP(float complex, double complex, num_to_complex, complex_to_num, biquad_complex);
 	} else if (buf_type == numo_cDComplex) {
-		biquad_loop_complex_double(
-				(double complex *)nary_get_pointer_for_read_write(buf),
-				length,
-				b0, b1, b2, a1, a2,
-				&x1, &x2, &y1, &y2
-				);
+		BIQUAD_LOOP(double complex, double complex, num_to_complex, complex_to_num, biquad_complex);
 	} else {
 		rb_raise(rb_eException, "BUG: Buffer was not SFloat, DFloat, SComplex, or DComplex");
 	}
@@ -800,13 +724,8 @@ static VALUE ruby_biquad_narray(VALUE self, VALUE coeffs, VALUE state)
 	}
 
 	rb_ary_store(state, 0, buf);
-	rb_ary_store(state, 1, rb_float_new(x1));
-	rb_ary_store(state, 2, rb_float_new(x2));
-	rb_ary_store(state, 3, rb_float_new(y1));
-	rb_ary_store(state, 4, rb_float_new(y2));
 
 	RB_GC_GUARD(buf);
-	RB_GC_GUARD(coeffs);
 	RB_GC_GUARD(state);
 
 	return state;
@@ -830,7 +749,8 @@ void Init_fast_sound(void)
 
 	rb_define_module_function(fast_sound, "osc", ruby_osc, 2);
 	rb_define_module_function(fast_sound, "biquad", ruby_biquad, 10);
-	rb_define_module_function(fast_sound, "biquad_narray", ruby_biquad_narray, 2);
+	rb_define_module_function(fast_sound, "biquad_complex", ruby_biquad_complex, 10);
+	rb_define_module_function(fast_sound, "biquad_narray", ruby_biquad_narray, 6);
 
 	rb_define_module_function(fast_sound, "cot_int", ruby_cot_int, 1);
 	rb_define_module_function(fast_sound, "csc_int", ruby_csc_int, 1);
@@ -842,4 +762,6 @@ void Init_fast_sound(void)
 	rb_define_module_function(fast_sound, "wrapsize", ruby_wrapsize, 2);
 	rb_define_module_function(fast_sound, "idiv", ruby_idiv, 2);
 	rb_define_module_function(fast_sound, "imod", ruby_imod, 2);
+
+	rb_define_module_function(fast_sound, "complex", ruby_complex, 1);
 }

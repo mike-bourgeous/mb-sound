@@ -75,6 +75,92 @@ RSpec.describe(MB::Sound::Filter::Biquad) do
     end
   end
 
+  [:process_c, :process_ruby_c].each do |m|
+    describe "##{m}" do
+      [Numo::SFloat, Numo::DFloat].each do |c|
+        context "with #{c}" do
+          it 'can process a real sine wave through a unity gain filter' do
+            f = MB::Sound::Filter::Biquad.new(1, 0, 0, 0, 0)
+            d = c.cast(1000.hz.sine.generate(4800))
+
+            result = f.send(m, d)
+
+            expect(result).to be_a(c)
+            expect(MB::M.round(result, 8)).to eq(MB::M.round(d, 8))
+          end
+
+          it 'returns the same values as the pure Ruby code' do
+            f = 500.hz.lowpass
+            d = c.cast(1000.hz.sine.generate(4800))
+
+            f.reset
+            expected = f.process_ruby(d)
+
+            f.reset
+            result = f.send(m, d)
+
+            expect(result).to be_a(c)
+
+            delta = expected - result
+            expect(delta.abs.max).to be < 1e-8
+          end
+        end
+      end
+
+      [Numo::SComplex, Numo::DComplex].each do |c|
+        context "with #{c}" do
+          it 'can process a short sequence through a unity gain filter' do
+            f = MB::Sound::Filter::Biquad.new(1, 0, 0, 0, 0)
+            d = c[1+1i, 2+2i, 3-3i, 1-1i, 0.5, 0.5i]
+
+            result = f.send(m, d)
+
+            expect(result).to be_a(c)
+            expect(MB::M.round(result, 8)).to eq(MB::M.round(d, 8))
+          end
+
+          it 'can process a real sine wave through a unity gain filter' do
+            f = MB::Sound::Filter::Biquad.new(1, 0, 0, 0, 0)
+            d = c.cast(1000.hz.sine.generate(4800))
+
+            result = f.send(m, d)
+
+            expect(result).to be_a(c)
+            expect(MB::M.round(result, 8)).to eq(MB::M.round(d, 8))
+          end
+
+          it 'can process a complex sine wave through a unity gain filter' do
+            f = MB::Sound::Filter::Biquad.new(1, 0, 0, 0, 0)
+            d = c.cast(1000.hz.complex_sine.generate(4800))
+
+            result = f.send(m, d)
+
+            expect(result).to be_a(c)
+            expect(MB::M.round(result, 8)).to eq(MB::M.round(d, 8))
+          end
+
+          it 'returns the same values as the pure Ruby code' do
+            f = 500.hz.lowpass
+            d = c.cast(1000.hz.complex_sine.generate(4800))
+
+            f.reset
+            expected = f.process_ruby(d)
+
+            f.reset
+            result = f.send(m, d)
+
+            expect(result).to be_a(c)
+
+            delta = expected - result
+            expect(delta.real.abs.max).to be < 1e-8
+            expect(delta.imag.abs.max).to be < 1e-8
+            expect(delta.abs.max).to be < 1e-8
+          end
+        end
+      end
+    end
+  end
+
   describe '#z_response' do
     it 'returns the same value as #response for values on the unit circle' do
       f = MB::Sound::Filter::Cookbook.new(:lowpass, 48000, 12000, quality: 0.5 ** 0.5)
