@@ -476,6 +476,60 @@ static double complex biquad_complex(
 	return real + I * imag;
 }
 
+static double smoothstep(double x)
+{
+	return 3*x*x - 2*x*x*x;
+}
+
+static double smootherstep(double x)
+{
+	return 6*x*x*x*x*x - 15*x*x*x*x + 10*x*x*x;
+}
+
+static double adsr(
+		double time,
+		double attack,
+		double decay,
+		double sustain,
+		double release,
+		double peak,
+		_Bool on
+		)
+{
+	double release_start = attack + decay;
+	double total = attack + decay + release;
+
+	double value;
+
+	if (on) {
+		if (time < 0) {
+			value = 0.0;
+		} else if (time < attack) {
+			value = smoothstep(time / attack);
+		} else if (time < release_start) {
+			value = 1.0 - smoothstep((time - attack) / decay) * (1.0 - sustain);
+		} else {
+			value = sustain;
+		}
+	} else {
+		if (time < release_start) {
+			value = sustain;
+		} else if (time < total) {
+			value = (1.0 - smoothstep((time - release_start) / release)) * sustain;
+		} else {
+			value = 0.0;
+		}
+	}
+	
+#ifdef DEBUG
+	fprintf(stderr, "Time=%.15f a=%.15f d=%.15f s=%.15f r=%.15f p=%.15f o=%d v=%.15f v*p=%.15f\n",
+			time, attack, decay, sustain, release, peak, on, value, value * peak);
+	fflush(stderr);
+#endif
+
+	return value * peak;
+}
+
 static enum wave_types find_wave_type(ID wave_type)
 {
 	if (wave_type == sym_osc_sine) {
@@ -547,6 +601,16 @@ static VALUE ruby_cot_int(VALUE self, VALUE z)
 	return complex_to_num(cot_int(num_to_complex(z)));
 }
 
+static VALUE ruby_smoothstep(VALUE self, VALUE x)
+{
+	return rb_float_new(smoothstep(NUM2DBL(x)));
+}
+
+static VALUE ruby_smootherstep(VALUE self, VALUE x)
+{
+	return rb_float_new(smootherstep(NUM2DBL(x)));
+}
+
 static VALUE ruby_fmod(VALUE self, VALUE x, VALUE y)
 {
 	return rb_float_new(fmod(NUM2DBL(x), NUM2DBL(y)));
@@ -570,6 +634,11 @@ static VALUE ruby_wrapsize(VALUE self, VALUE x, VALUE y)
 static VALUE ruby_idiv(VALUE self, VALUE x, VALUE y)
 {
 	return SSIZET2NUM(NUM2SSIZET(x) / NUM2SSIZET(y));
+}
+
+static VALUE ruby_fdiv(VALUE self, VALUE x, VALUE y)
+{
+	return rb_float_new(NUM2DBL(x) / NUM2DBL(y));
 }
 
 static VALUE ruby_imod(VALUE self, VALUE x, VALUE y)
@@ -612,7 +681,7 @@ static VALUE ruby_biquad(VALUE self, VALUE b0, VALUE b1, VALUE b2, VALUE a1, VAL
 			NUM2DBL(a1), NUM2DBL(a2),
 			NUM2DBL(x0), NUM2DBL(x1), NUM2DBL(x2),
 			NUM2DBL(y1), NUM2DBL(y2)
-		     );
+			);
 
 	return rb_float_new(result);
 }
@@ -624,7 +693,7 @@ static VALUE ruby_biquad_complex(VALUE self, VALUE b0, VALUE b1, VALUE b2, VALUE
 			num_to_complex(a1), num_to_complex(a2),
 			num_to_complex(x0), num_to_complex(x1), num_to_complex(x2),
 			num_to_complex(y1), num_to_complex(y2)
-		     );
+			);
 
 	return complex_to_num(result);
 }
@@ -894,6 +963,80 @@ static VALUE ruby_cookbook(VALUE self, VALUE type_id, VALUE f_samp, VALUE f_cent
 	return out;
 }
 
+VALUE ruby_adsr(VALUE self, VALUE time, VALUE attack, VALUE decay, VALUE sustain, VALUE release, VALUE peak, VALUE on)
+{
+	return rb_float_new(adsr(
+				NUM2DBL(time),
+				NUM2DBL(attack),
+				NUM2DBL(decay),
+				NUM2DBL(sustain),
+				NUM2DBL(release),
+				NUM2DBL(peak),
+				RTEST(on)
+				));
+}
+
+VALUE ruby_adsr_narray(VALUE self, VALUE narray, VALUE frame, VALUE rate, VALUE attack, VALUE decay, VALUE sustain, VALUE release, VALUE peak, VALUE on)
+{
+	if (CLASS_OF(narray) != numo_cDFloat && CLASS_OF(narray) != numo_cSFloat) {
+		narray = rb_funcall(numo_cDFloat, rb_intern("cast"), 1, narray);
+	}
+
+	int dim = RNARRAY_NDIM(narray);
+	if (dim != 1) {
+		rb_raise(rb_eArgError, "Only 1D NArrays may be processed (got %d dimensions)", dim);
+	}
+
+	_Bool was_inplace = !!TEST_INPLACE(narray);
+
+	if (!RTEST(nary_check_contiguous(narray)) || !was_inplace) {
+		narray = nary_dup(narray);
+		SET_INPLACE(narray);
+		was_inplace = 0;
+	}
+
+	size_t length = RNARRAY_SHAPE(narray)[0];
+
+	ssize_t current_frame = NUM2SSIZET(frame);
+	double sample_rate = NUM2DBL(rate);
+	double a = NUM2DBL(attack);
+	double d = NUM2DBL(decay);
+	double s = NUM2DBL(sustain);
+	double r = NUM2DBL(release);
+	double p = NUM2DBL(peak);
+	_Bool o = RTEST(on);
+
+	if (CLASS_OF(narray) == numo_cSFloat) {
+		float *data = (float *)nary_get_pointer_for_write(narray);
+
+		for(size_t i = 0; i < length; i++) {
+			double t = current_frame / sample_rate;
+#ifdef DEBUG
+			fprintf(stderr, "CFrame=%zd, rate=%.15f, t=%.15f ", current_frame, sample_rate, t);
+			fflush(stderr);
+#endif
+			data[i] = adsr(t, a, d, s, r, p, o);
+			current_frame += 1;
+		}
+	} else if (CLASS_OF(narray) == numo_cDFloat) {
+		double *data = (double *)nary_get_pointer_for_write(narray);
+
+		for(size_t i = 0; i < length; i++) {
+			double t = current_frame / sample_rate;
+#ifdef DEBUG
+			fprintf(stderr, "CFrame=%zd, rate=%.15f, t=%.15f ", current_frame, sample_rate, t);
+			fflush(stderr);
+#endif
+			data[i] = adsr(t, a, d, s, r, p, o);
+			current_frame += 1;
+		}
+	}
+
+	RB_GC_GUARD(narray);
+
+	return narray;
+}
+
 void Init_fast_sound(void)
 {
 	VALUE mb = rb_define_module("MB");
@@ -910,15 +1053,26 @@ void Init_fast_sound(void)
 	sym_osc_gauss = rb_intern("gauss");
 	sym_osc_parabola = rb_intern("parabola");
 
+	// Oscillator functions
 	rb_define_module_function(fast_sound, "osc", ruby_osc, 2);
+
+	// Filtering functions
 	rb_define_module_function(fast_sound, "biquad", ruby_biquad, 10);
 	rb_define_module_function(fast_sound, "biquad_complex", ruby_biquad_complex, 10);
 	rb_define_module_function(fast_sound, "biquad_narray", ruby_biquad_narray, 6);
 	rb_define_module_function(fast_sound, "cookbook", ruby_cookbook, 7);
 
+	// Envelope functions
+	rb_define_module_function(fast_sound, "adsr", ruby_adsr, 7);
+	rb_define_module_function(fast_sound, "adsr_narray", ruby_adsr_narray, 9);
+
+	// Faster implementations of functions from mb-math
 	rb_define_module_function(fast_sound, "cot_int", ruby_cot_int, 1);
 	rb_define_module_function(fast_sound, "csc_int", ruby_csc_int, 1);
 	rb_define_module_function(fast_sound, "csc_int_int", ruby_csc_int_int, 1);
+
+	rb_define_module_function(fast_sound, "smoothstep", ruby_smoothstep, 1);
+	rb_define_module_function(fast_sound, "smootherstep", ruby_smootherstep, 1);
 
 	// Functions used when comparing C and Ruby's behavior for integer
 	// division (C rounds to zero, Ruby rounds downward) and modulus (-1 %
@@ -928,6 +1082,7 @@ void Init_fast_sound(void)
 	rb_define_module_function(fast_sound, "wrap", ruby_wrap, 2);
 	rb_define_module_function(fast_sound, "wrapsize", ruby_wrapsize, 2);
 	rb_define_module_function(fast_sound, "idiv", ruby_idiv, 2);
+	rb_define_module_function(fast_sound, "fdiv", ruby_fdiv, 2);
 	rb_define_module_function(fast_sound, "imod", ruby_imod, 2);
 
 	// Functions to test conversion to and from Ruby complex datatypes

@@ -11,6 +11,16 @@ module MB
     # then the #release_time seconds decay will start at the envelope's current
     # level.
     #
+    # This implementation may resuscitate decayed envelopes or end playing
+    # notes if times are changed shortly after a note is released.  If I were
+    # to reimplement this, I would use a state machine instead of comparing the
+    # time value to switch between phases of the curve.
+    #
+    # Also, one notable difference between this implementation and other
+    # possible implementations is that the times here are literal, while in an
+    # exponential envelope the time value may be an exponential time constant
+    # (time at which the decay is 1/e).
+    #
     # A visual demonstration of the ADSR curve:
     #     # Attack /\ Decay
     #     #       /  \   Sustain
@@ -107,11 +117,20 @@ module MB
         # @sust is a copy of the sustain level that will be changed if the
         # envelope is released before attack+decay finish
         if @on
+          @peak = 1.0
           @sust = @value
-          @time = @release_start
-          @frame = @release_start * @rate
+          self.time = @release_start
           @on = false
         end
+      end
+
+      # Turn off the envelope and reset the filter.  For testing only; will
+      # cause clicking if used on actual audio.
+      def reset
+        @frame = 0
+        @time = 0
+        @on = false
+        @filter.reset(0)
       end
 
       # Jump the envelope to the given time.  This does not reset the internal
@@ -119,14 +138,93 @@ module MB
       # instantaneous.
       def time=(t)
         @frame = (t * @rate).round
-        @time = @frame.to_f / @rate
+        @time = @frame / @rate.to_f
       end
 
-      # Produces one sample of the envelope (or many samples if +count+ is not
-      # nil).  Call repeatedly to get envelope values over time.
+      # Produces one sample (or many samples if +count+ is not nil) of the
+      # envelope.  Call repeatedly to get envelope values over time.
       def sample(count = nil, filter: true)
+        sample_c(count, filter: filter)
+      end
+
+      def sample_c(count = nil, filter: true)
         if count
-          return Numo::SFloat.zeros(count).map { sample(filter: filter) }
+          sample_count_c(count, filter: filter)
+        else
+          sample_one_c(filter: filter)
+        end
+      end
+
+      # TODO: Support, test, and document reusing an existing buffer
+      def sample_count_c(count, filter: true)
+        narray = MB::FastSound.adsr_narray(
+          count.is_a?(Numo::NArray) ? count : Numo::SFloat.zeros(count).inplace!,
+          @frame,
+          @rate,
+          @attack_time,
+          @decay_time,
+          @sust,
+          @release_time,
+          @peak,
+          @on
+        )
+
+        @value = narray[-1]
+        @frame += count
+        @time = @frame.to_f / @rate
+
+        if filter
+          narray = @filter.process(narray.inplace!)
+        else
+          @filter.process(narray.not_inplace!)
+        end
+
+        narray.not_inplace!
+      end
+
+      def sample_ruby_c(count, filter: true)
+        if count
+          return Numo::SFloat.zeros(count).map { sample_one_c(filter: filter) }
+        end
+
+        return sample_one_c(filter: filter)
+      end
+
+      def sample_one_c(filter: true)
+        if defined?($debug) && $debug # XXX
+          STDERR.puts("RFrame=#{@frame}, rate=%.15f, t=%.15f " % [@rate, @time])
+          STDERR.flush
+        end
+
+        @value = MB::FastSound.adsr(
+          @time,
+          @attack_time,
+          @decay_time,
+          @sust,
+          @release_time,
+          @peak,
+          @on
+        )
+
+        @frame += 1
+        @time = @frame / @rate.to_f
+
+        if filter
+          @filter.process_one(@value)
+        else
+          @filter.process_one(@value)
+          @value
+        end
+      end
+
+      def sample_ruby(count = nil, filter: true)
+        if count
+          return Numo::SFloat.zeros(count).map { sample_ruby(filter: filter) }
+        end
+
+        if defined?($debug) && $debug # XXX
+          STDERR.puts("rFrame=#{@frame}, rate=%.15f, t=%.15f " % [@rate, @time])
+          STDERR.flush
         end
 
         if @on
@@ -156,24 +254,26 @@ module MB
           end
         end
 
+        @value *= @peak
         @frame += 1
-        @time = @frame / @rate
+        @time = @frame / @rate.to_f
 
         if filter
-          @filter.process_one(@value) * @peak
+          @filter.process_one(@value)
         else
           @filter.process_one(@value)
-          @value * @peak
+          @value
         end
       end
 
-      # Returns a duplicate copy of the envelope, allowing the duplicate to be
-      # sampled (e.g. for plotting) without changing the state of the original
-      # envelope.
+      # Returns an inactive duplicate copy of the envelope, allowing the
+      # duplicate to be sampled (e.g. for plotting) without changing the state
+      # of the original envelope.
       def dup(rate = @rate)
         e = super()
         e.instance_variable_set(:@rate, rate.to_f)
         e.instance_variable_set(:@filter, 100.hz.at_rate(rate).lowpass1p)
+        e.reset
         e
       end
 
