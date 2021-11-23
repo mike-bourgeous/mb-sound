@@ -618,6 +618,22 @@ static VALUE ruby_biquad_complex(VALUE self, VALUE b0, VALUE b1, VALUE b2, VALUE
 	return complex_to_num(result);
 }
 
+static VALUE ruby_narray_to_array(VALUE self, VALUE narray)
+{
+	narray = rb_funcall(numo_cDComplex, rb_intern("cast"), 1, narray);
+	size_t length = RNARRAY_SHAPE(narray)[0];
+	VALUE out = rb_ary_new_capa(length);
+
+	rb_warn("Size is %zu, ndim is %d, length is %zu\n", RNARRAY_SIZE(narray), RNARRAY_NDIM(narray), length);
+
+	double complex *ptr = (double complex *)nary_get_pointer_for_read(narray);
+	for(size_t i = 0; i < length; i++) {
+		rb_ary_store(out, i, complex_to_num(ptr[i]));
+	}
+
+	return out;
+}
+
 #define BIQUAD_LOOP(buf_type, coeff_type, conv_from_rb, conv_to_rb, filter_func) do { \
 	buf_type *data = (buf_type *)nary_get_pointer_for_read_write(buf); \
 \
@@ -663,7 +679,6 @@ static VALUE ruby_biquad_complex(VALUE self, VALUE b0, VALUE b1, VALUE b2, VALUE
 static VALUE ruby_biquad_narray(VALUE self, VALUE rb0, VALUE rb1, VALUE rb2, VALUE ra0, VALUE ra1, VALUE state)
 {
 	VALUE buf, buf_type;
-	narray_t *buf_int;
 
 	Check_Type(state, T_ARRAY);
 
@@ -690,10 +705,9 @@ static VALUE ruby_biquad_narray(VALUE self, VALUE rb0, VALUE rb1, VALUE rb2, VAL
 		buf_type = CLASS_OF(buf);
 	}
 
-	GetNArray(buf, buf_int);
-
-	if (NA_NDIM(buf_int) != 1) {
-		rb_raise(rb_eArgError, "Only 1D NArrays may be processed (got %d dimensions)", NA_NDIM(buf));
+	int dim = RNARRAY_NDIM(buf);
+	if (dim != 1) {
+		rb_raise(rb_eArgError, "Only 1D NArrays may be processed (got %d dimensions)", dim);
 	}
 
 	_Bool was_inplace = !!TEST_INPLACE(buf);
@@ -701,11 +715,10 @@ static VALUE ruby_biquad_narray(VALUE self, VALUE rb0, VALUE rb1, VALUE rb2, VAL
 	if (!RTEST(nary_check_contiguous(buf)) || !was_inplace) {
 		buf = nary_dup(buf);
 		SET_INPLACE(buf);
-		GetNArray(buf, buf_int);
 		was_inplace = 0;
 	}
 
-	size_t length = NA_SHAPE(buf_int)[0];
+	size_t length = RNARRAY_SHAPE(buf)[0];
 
 	if (buf_type == numo_cSFloat) {
 		BIQUAD_LOOP(float, double, NUM2DBL, DBL2NUM, biquad_filter);
@@ -756,6 +769,9 @@ void Init_fast_sound(void)
 	rb_define_module_function(fast_sound, "csc_int", ruby_csc_int, 1);
 	rb_define_module_function(fast_sound, "csc_int_int", ruby_csc_int_int, 1);
 
+	// Functions used when comparing C and Ruby's behavior for integer
+	// division (C rounds to zero, Ruby rounds downward) and modulus (-1 %
+	// 3 in Ruby is 2, in C it's -1)
 	rb_define_module_function(fast_sound, "fmod", ruby_fmod, 2);
 	rb_define_module_function(fast_sound, "remainder", ruby_remainder, 2);
 	rb_define_module_function(fast_sound, "wrap", ruby_wrap, 2);
@@ -763,5 +779,7 @@ void Init_fast_sound(void)
 	rb_define_module_function(fast_sound, "idiv", ruby_idiv, 2);
 	rb_define_module_function(fast_sound, "imod", ruby_imod, 2);
 
+	// Functions to test conversion to and from Ruby complex datatypes
 	rb_define_module_function(fast_sound, "complex", ruby_complex, 1);
+	rb_define_module_function(fast_sound, "narray_to_array", ruby_narray_to_array, 1);
 }
