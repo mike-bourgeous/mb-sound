@@ -520,12 +520,6 @@ static double adsr(
 			value = 0.0;
 		}
 	}
-	
-#ifdef DEBUG
-	fprintf(stderr, "Time=%.15f a=%.15f d=%.15f s=%.15f r=%.15f p=%.15f o=%d v=%.15f v*p=%.15f\n",
-			time, attack, decay, sustain, release, peak, on, value, value * peak);
-	fflush(stderr);
-#endif
 
 	return value * peak;
 }
@@ -769,7 +763,7 @@ static VALUE ruby_biquad_narray(VALUE self, VALUE rb0, VALUE rb1, VALUE rb2, VAL
 	// https://github.com/ruby-numo/numo-narray/blob/6f5c91250c0cb948f6b811385d384c3f15af4dcd/ext/numo/narray/numo/intern.h
 	// https://silverhammermba.github.io/emberb/c/
 	// https://github.com/ruby/ruby/blob/master/doc/extension.rdoc
-	
+
 	// First try NArray's automatic conversion, to get e.g. from an array
 	// of complex to DComplex
 	buf_type = CLASS_OF(buf);
@@ -1011,31 +1005,7 @@ VALUE ruby_adsr_narray(VALUE self, VALUE narray, VALUE frame, VALUE rate, VALUE 
 
 		for(size_t i = 0; i < length; i++) {
 			double t = current_frame / sample_rate;
-#ifdef DEBUG
-			fprintf(stderr, "CFrame=%zd, rate=%.15f, t=%.15f ", current_frame, sample_rate, t);
-			fflush(stderr);
-#endif
 			data[i] = adsr(t, a, d, s, r, p, o);
-
-			VALUE adsr_debug = rb_gv_get("$adsr_debug");
-			if (RB_TYPE_P(adsr_debug, T_ARRAY)) { // XXX
-				VALUE dbg_arr = rb_ary_new_from_args(
-						11,
-						rb_id2sym(rb_intern("cS")),
-						SSIZET2NUM(current_frame),
-						DBL2NUM(sample_rate),
-						DBL2NUM(t),
-						DBL2NUM(a),
-						DBL2NUM(d),
-						DBL2NUM(s),
-						DBL2NUM(r),
-						DBL2NUM(p),
-						o ? Qtrue : Qfalse,
-						DBL2NUM(data[i])
-						);
-				rb_ary_push(adsr_debug, dbg_arr);
-			}
-
 			current_frame += 1;
 		}
 	} else if (CLASS_OF(narray) == numo_cDFloat) {
@@ -1043,31 +1013,7 @@ VALUE ruby_adsr_narray(VALUE self, VALUE narray, VALUE frame, VALUE rate, VALUE 
 
 		for(size_t i = 0; i < length; i++) {
 			double t = current_frame / sample_rate;
-#ifdef DEBUG
-			fprintf(stderr, "CFrame=%zd, rate=%.15f, t=%.15f ", current_frame, sample_rate, t);
-			fflush(stderr);
-#endif
 			data[i] = adsr(t, a, d, s, r, p, o);
-
-			VALUE adsr_debug = rb_gv_get("$adsr_debug");
-			if (RB_TYPE_P(adsr_debug, T_ARRAY)) { // XXX
-				VALUE dbg_arr = rb_ary_new_from_args(
-						11,
-						rb_id2sym(rb_intern("cD")),
-						SSIZET2NUM(current_frame),
-						DBL2NUM(sample_rate),
-						DBL2NUM(t),
-						DBL2NUM(a),
-						DBL2NUM(d),
-						DBL2NUM(s),
-						DBL2NUM(r),
-						DBL2NUM(p),
-						o ? Qtrue : Qfalse,
-						DBL2NUM(data[i])
-						);
-				rb_ary_push(adsr_debug, dbg_arr);
-			}
-
 			current_frame += 1;
 		}
 	}

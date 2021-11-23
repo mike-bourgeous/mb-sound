@@ -81,39 +81,17 @@ RSpec.describe(MB::Sound::ADSREnvelope) do
             ruby_rise = env2.sample_ruby(5000, filter: filt)
             env2.release
 
-            # FIXME: these differ after release because time (current frame)
-            # starts being fractionally different between Ruby and C
-
-            # require 'pry-byebug'; binding.pry # XXX
-
-            $debug = true
-            $adsr_debug = []
-            c_early = env.send(m, 100, filter: filt)
-            c_dbg = $adsr_debug
-            $adsr_debug = []
-            ruby_early = env2.sample_ruby(100, filter: filt)
-            r_dbg = $adsr_debug
-            $adsr_debug = false
-            $debug = false
-
-            MB::U.table(c_dbg.zip(r_dbg).flat_map{|v|v}, header: [:source, :frame, :rate, :time, :attack, :decay, :sustain, :release, :peak, :on, :value], variable_width: true)
-
             c_fall = env.send(m, 36000, filter: filt)
             ruby_fall = env2.sample_ruby(36000, filter: filt)
 
-            c = c_rise.concatenate(c_early).concatenate(c_fall)
-            ruby = ruby_rise.concatenate(ruby_early).concatenate(ruby_fall)
+            c = c_rise.concatenate(c_fall)
+            ruby = ruby_rise.concatenate(ruby_fall)
 
             # 32-bit float resolution of 0.5 ** 24 is 5.960464477539063e-08
             # For some reason rounding to 6 or 8 decimals and then comparing
             # fails, but rounding the delta works
             delta = (c - ruby).abs
             expect(MB::M.round(delta, filt ? 6 : 7).max).to eq(0)
-
-          rescue Exception => e
-            require 'pry-byebug'; binding.pry # XXX
-
-            raise
           end
         end
       end

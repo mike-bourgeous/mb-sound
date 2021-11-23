@@ -55,8 +55,6 @@ module MB
       #
       # Note that the +:sustain_level+ may be greater than 1.0.
       def initialize(attack_time:, decay_time:, sustain_level:, release_time:, rate:)
-        $adsr_debug ||= false# XXX
-
         @rate = rate.to_f
         @on = false
 
@@ -194,11 +192,6 @@ module MB
       end
 
       def sample_one_c(filter: true)
-        if defined?($debug) && $debug # XXX
-          STDERR.puts("RFrame=#{@frame}, rate=%.15f, t=%.15f " % [@rate, @time])
-          STDERR.flush
-        end
-
         @value = MB::FastSound.adsr(
           @time,
           @attack_time,
@@ -223,11 +216,6 @@ module MB
       def sample_ruby(count = nil, filter: true)
         if count
           return Numo::SFloat.zeros(count).map { sample_ruby(filter: filter) }
-        end
-
-        if defined?($debug) && $debug # XXX
-          STDERR.puts("rFrame=#{@frame}, rate=%.15f, t=%.15f " % [@rate, @time])
-          STDERR.flush
         end
 
         if @on
@@ -258,10 +246,6 @@ module MB
         end
 
         @value *= @peak
-
-        if defined?($adsr_debug) && $adsr_debug.is_a?(Array)
-          $adsr_debug << [:ruby, @frame, @rate, @time, @attack_time, @decay_time, @sust, @release_time, @peak, @on, @value]
-        end
 
         @frame += 1
         @time = @frame / @rate.to_f
