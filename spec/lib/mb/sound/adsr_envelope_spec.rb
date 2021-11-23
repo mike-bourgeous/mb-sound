@@ -61,7 +61,11 @@ RSpec.describe(MB::Sound::ADSREnvelope) do
             b = env.sample_ruby(36000, filter: filt)
             ruby = a.concatenate(b)
 
-            expect(MB::M.round(c, 8)).to eq(MB::M.round(ruby, 8))
+            # 32-bit float resolution of 0.5 ** 24 is 5.960464477539063e-08
+            # For some reason rounding to 6 or 8 decimals and then comparing
+            # fails, but rounding the delta works
+            delta = (c - ruby).abs
+            expect(MB::M.round(delta, filt ? 6 : 7).max).to eq(0)
           end
 
           it 'returns the same curve as the original Ruby for an interrupted cycle' do
@@ -80,7 +84,7 @@ RSpec.describe(MB::Sound::ADSREnvelope) do
             # FIXME: these differ after release because time (current frame)
             # starts being fractionally different between Ruby and C
 
-            # XXX require 'pry-byebug'; binding.pry # XXX
+            # require 'pry-byebug'; binding.pry # XXX
 
             $debug = true
             $adsr_debug = []
@@ -94,15 +98,22 @@ RSpec.describe(MB::Sound::ADSREnvelope) do
 
             MB::U.table(c_dbg.zip(r_dbg).flat_map{|v|v}, header: [:source, :frame, :rate, :time, :attack, :decay, :sustain, :release, :peak, :on, :value], variable_width: true)
 
-            # XXX require 'pry-byebug'; binding.pry # XXX
-
             c_fall = env.send(m, 36000, filter: filt)
             ruby_fall = env2.sample_ruby(36000, filter: filt)
 
             c = c_rise.concatenate(c_early).concatenate(c_fall)
             ruby = ruby_rise.concatenate(ruby_early).concatenate(ruby_fall)
 
-            expect(MB::M.round(c, 8)).to eq(MB::M.round(ruby, 8))
+            # 32-bit float resolution of 0.5 ** 24 is 5.960464477539063e-08
+            # For some reason rounding to 6 or 8 decimals and then comparing
+            # fails, but rounding the delta works
+            delta = (c - ruby).abs
+            expect(MB::M.round(delta, filt ? 6 : 7).max).to eq(0)
+
+          rescue Exception => e
+            require 'pry-byebug'; binding.pry # XXX
+
+            raise
           end
         end
       end
