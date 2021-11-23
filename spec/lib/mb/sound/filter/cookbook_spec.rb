@@ -227,8 +227,10 @@ RSpec.describe MB::Sound::Filter::Cookbook do
       magratio = cb_resp.abs / bq_resp.abs
       phaseratio = cb_resp.arg / bq_resp.arg
 
-      expect((magratio - 1.0).abs.max).to be <= 0.00001
-      expect((phaseratio - 1.0).abs.max).to be <= 0.00001
+      expect(MB::M.round(cookbook.coefficients, 5)).to eq(MB::M.round(biquad.coefficients, 5))
+
+      expect((magratio - 1.0).abs.max).to be <= 0.000015
+      expect((phaseratio - 1.0).abs.max).to be <= 0.000015
     end
 
     it 'produces the right coefficients for 1234/43210/G6' do
@@ -339,6 +341,13 @@ RSpec.describe MB::Sound::Filter::Cookbook do
       below = cookbook.response(1233)
       above = cookbook.response(1235)
       expect(below.arg.positive?).not_to eq(above.arg.positive?)
+    end
+  end
+
+  describe '#omega' do
+    it 'returns the angular frequency of the filter' do
+      f = MB::Sound::Filter::Cookbook.new(:lowpass, 48000, 1200, quality: 0.7)
+      expect(f.omega&.round(6)).to eq((1200 * Math::PI / 24000.0).round(6))
     end
   end
 end

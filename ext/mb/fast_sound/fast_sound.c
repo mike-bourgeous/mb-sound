@@ -18,6 +18,17 @@ enum wave_types {
 	OSC_PARABOLA,
 };
 
+enum filter_types {
+	FILT_LOWPASS,
+	FILT_HIGHPASS,
+	FILT_BANDPASS,
+	FILT_NOTCH,
+	FILT_ALLPASS,
+	FILT_PEAK,
+	FILT_LOWSHELF,
+	FILT_HIGHSHELF,
+};
+
 static ID sym_osc_sine;
 static ID sym_osc_complex_sine;
 static ID sym_osc_triangle;
@@ -744,6 +755,145 @@ static VALUE ruby_biquad_narray(VALUE self, VALUE rb0, VALUE rb1, VALUE rb2, VAL
 	return state;
 }
 
+/*
+ * Generates cookbook filter biquad parameters, from lib/mb/sound/filter/cookbook.rb.
+ *
+ * Returns [omega, b0, b1, b2, a1, a2].
+ */
+static VALUE ruby_cookbook(VALUE self, VALUE type_id, VALUE f_samp, VALUE f_center, VALUE db_gain, VALUE quality, VALUE bandwidth_oct, VALUE shelf_slope)
+{
+	double amp = 0;
+	if (RTEST(db_gain)) {
+		amp = pow(10.0, NUM2DBL(db_gain) / 40.0);
+	}
+
+	double omega = 2.0 * M_PI * NUM2DBL(f_center) / NUM2DBL(f_samp);
+	double cosine = cos(omega); // real part
+	double sine = sin(omega); // imaginary part
+
+	double alpha;
+	if (RTEST(quality)) {
+		alpha = sine / (2.0 * NUM2DBL(quality));
+	} else if (RTEST(bandwidth_oct)) {
+		alpha = sine * sinh(M_LN2 / 2.0 * NUM2DBL(bandwidth_oct) * omega / sine);
+	} else if (RTEST(shelf_slope)) {
+		alpha = sine * 0.5 * sqrt((amp + 1.0 / amp) * (1.0 / NUM2DBL(shelf_slope) - 1) + 2);
+	} else {
+		rb_raise(rb_eArgError, "Missing quality/bandwidth_oct/shelf_slope");
+	}
+
+	double a0_inv, a1, a2, b0, b1, b2;
+	enum filter_types ftype = NUM2INT(type_id);
+	switch(ftype) {
+		case FILT_LOWPASS:
+			a0_inv = 1.0 / (1.0 + alpha);
+			a1 = -2.0 * cosine * a0_inv;
+			a2 = (1.0 - alpha) * a0_inv;
+			b0 = 0.5 * (1.0 - cosine) * a0_inv;
+			b1 = (1.0 - cosine) * a0_inv;
+			b2 = 0.5 * (1.0 - cosine) * a0_inv;
+			break;
+
+		case FILT_HIGHPASS:
+			a0_inv = 1.0 / (1.0 + alpha);
+			a1 = -2.0 * cosine * a0_inv;
+			a2 = (1.0 - alpha) * a0_inv;
+			b0 = 0.5 * (1.0 + cosine) * a0_inv;
+			b1 = -(1.0 + cosine) * a0_inv;
+			b2 = 0.5 * (1.0 + cosine) * a0_inv;
+			break;
+
+		case FILT_BANDPASS:
+			a0_inv = 1.0 / (1.0 + alpha);
+			a1 = -2.0 * cosine * a0_inv;
+			a2 = (1.0 - alpha) * a0_inv;
+			b0 = alpha * a0_inv;
+			b1 = 0;
+			b2 = -alpha * a0_inv;
+			break;
+
+		case FILT_NOTCH:
+			a0_inv = 1.0 / (1.0 + alpha);
+			a1 = -2.0 * cosine * a0_inv;
+			a2 = (1.0 - alpha) * a0_inv;
+			b0 = a0_inv;
+			b1 = -2.0 * cosine * a0_inv;
+			b2 = a0_inv;
+			break;
+
+		case FILT_ALLPASS:
+			a0_inv = 1.0 / (1.0 + alpha);
+			a1 = -2.0 * cosine * a0_inv;
+			a2 = (1.0 - alpha) * a0_inv;
+			b0 = (1.0 - alpha) * a0_inv;
+			b1 = -2.0 * cosine * a0_inv;
+			b2 = (1.0 + alpha) * a0_inv;
+			break;
+
+		case FILT_PEAK:
+			if (!RTEST(db_gain)) {
+				rb_raise(rb_eArgError, "Missing db_gain");
+			}
+
+			a0_inv = 1.0 / (1.0 + alpha / amp);
+			a1 = -2.0 * cosine * a0_inv;
+			a2 = (1.0 - alpha / amp) * a0_inv;
+			b0 = (1.0 + alpha * amp) * a0_inv;
+			b1 = -2.0 * cosine * a0_inv;
+			b2 = (1.0 - alpha * amp) * a0_inv;
+			break;
+
+		case FILT_LOWSHELF:
+			if (!RTEST(db_gain)) {
+				rb_raise(rb_eArgError, "Missing db_gain");
+			} else {
+				double ap1 = amp + 1;
+				double am1 = amp - 1;
+				double asq2al = 2.0 * sqrt(amp) * alpha;
+
+				a0_inv = 1.0 / (ap1 + am1 * cosine + asq2al);
+				a1 = -2.0 * (am1 + ap1 * cosine) * a0_inv;
+				a2 = (ap1 + am1 * cosine - asq2al) * a0_inv;
+				b0 = amp * (ap1 - am1 * cosine + asq2al) * a0_inv;
+				b1 = 2.0 * amp * (am1 - ap1 * cosine) * a0_inv;
+				b2 = amp * (ap1 - am1 * cosine - asq2al) * a0_inv;
+			}
+
+			break;
+
+		case FILT_HIGHSHELF:
+			if (!RTEST(db_gain)) {
+				rb_raise(rb_eArgError, "Missing db_gain");
+			} else {
+				double ap1 = amp + 1;
+				double am1 = amp - 1;
+				double asq2al = 2.0 * sqrt(amp) * alpha;
+
+				a0_inv = 1.0 / (ap1 - am1 * cosine + asq2al);
+				a1 = 2.0 * (am1 - ap1 * cosine) * a0_inv;
+				a2 = (ap1 - am1 * cosine - asq2al) * a0_inv;
+				b0 = amp * (ap1 + am1 * cosine + asq2al) * a0_inv;
+				b1 = -2.0 * amp * (am1 + ap1 * cosine) * a0_inv;
+				b2 = amp * (ap1 + am1 * cosine - asq2al) * a0_inv;
+			}
+
+			break;
+
+		default:
+			rb_raise(rb_eArgError, "Invalid filter type ID %"PRIsVALUE, type_id);
+	}
+
+	VALUE out = rb_ary_new_capa(6);
+	rb_ary_store(out, 0, rb_float_new(omega));
+	rb_ary_store(out, 1, rb_float_new(b0));
+	rb_ary_store(out, 2, rb_float_new(b1));
+	rb_ary_store(out, 3, rb_float_new(b2));
+	rb_ary_store(out, 4, rb_float_new(a1));
+	rb_ary_store(out, 5, rb_float_new(a2));
+
+	return out;
+}
+
 void Init_fast_sound(void)
 {
 	VALUE mb = rb_define_module("MB");
@@ -764,6 +914,7 @@ void Init_fast_sound(void)
 	rb_define_module_function(fast_sound, "biquad", ruby_biquad, 10);
 	rb_define_module_function(fast_sound, "biquad_complex", ruby_biquad_complex, 10);
 	rb_define_module_function(fast_sound, "biquad_narray", ruby_biquad_narray, 6);
+	rb_define_module_function(fast_sound, "cookbook", ruby_cookbook, 7);
 
 	rb_define_module_function(fast_sound, "cot_int", ruby_cot_int, 1);
 	rb_define_module_function(fast_sound, "csc_int", ruby_csc_int, 1);

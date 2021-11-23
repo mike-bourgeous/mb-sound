@@ -15,7 +15,9 @@ module MB
           :peak,
           :lowshelf,
           :highshelf,
-        ]
+        ].freeze
+
+        FILTER_TYPE_IDS = FILTER_TYPES.map.with_index.to_h.freeze
 
         attr_reader :filter_type, :sample_rate, :center_frequency, :omega, :db_gain
         attr_reader :quality, :bandwidth_oct, :shelf_slope
@@ -56,13 +58,34 @@ module MB
 
         # Sets the filter type.
         def filter_type=(type)
-          raise "Invalid filter type #{type.inspect}" unless FILTER_TYPES.include?(type)
+          raise "Invalid filter type #{type.inspect}" unless FILTER_TYPE_IDS.include?(type)
           return if @filter_type == type
           set_parameters(type, @sample_rate, @center_frequency, db_gain: @db_gain, quality: @quality, bandwidth_oct: @bandwidth_oct, shelf_slope: @shelf_slope)
         end
 
-        # Recalculates filter coefficients based on the given filter parameters.
         def set_parameters(filter_type, f_samp, f_center, db_gain: nil, quality: nil, bandwidth_oct: nil, shelf_slope: nil)
+          set_parameters_c(filter_type, f_samp, f_center, db_gain: db_gain, quality: quality, bandwidth_oct: bandwidth_oct, shelf_slope: shelf_slope)
+        end
+
+        def set_parameters_c(filter_type, f_samp, f_center, db_gain: nil, quality: nil, bandwidth_oct: nil, shelf_slope: nil)
+          type_id = FILTER_TYPE_IDS[filter_type]
+          @filter_type = filter_type
+          @sample_rate = f_samp
+          @center_frequency = f_center
+          @db_gain = db_gain
+
+          @quality = quality
+          @bandwidth_oct = bandwidth_oct
+          @shelf_slope = shelf_slope
+
+          @omega, @b0, @b1, @b2, @a1, @a2 = MB::FastSound.cookbook(
+            type_id, f_samp, f_center,
+            db_gain, quality, bandwidth_oct, shelf_slope
+          )
+        end
+
+        # Recalculates filter coefficients based on the given filter parameters.
+        def set_parameters_ruby(filter_type, f_samp, f_center, db_gain: nil, quality: nil, bandwidth_oct: nil, shelf_slope: nil)
           @filter_type = filter_type
           @sample_rate = f_samp
           @center_frequency = f_center
@@ -71,7 +94,6 @@ module MB
           amp = 10.0 ** (db_gain / 40.0) if db_gain
           omega = 2.0 * Math::PI * f_center / f_samp
           @omega = omega
-          x = Math.exp(-omega)
 
           cosine = Math.cos(omega)
           sine = Math.sin(omega)
