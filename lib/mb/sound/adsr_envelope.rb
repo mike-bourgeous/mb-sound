@@ -160,9 +160,9 @@ module MB
         @time = @frame / @rate
 
         if filter
-          @filter.process([@value])[0] * @peak
+          @filter.process_one(@value) * @peak
         else
-          @filter.process([@value])
+          @filter.process_one(@value)
           @value * @peak
         end
       end

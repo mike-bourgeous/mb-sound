@@ -154,6 +154,16 @@ module MB
           process_c(samples)
         end
 
+        # Process a single real (not Complex) sample through the filter.
+        def process_one(sample)
+          out = MB::FastSound.biquad(@b0, @b1, @b2, @a1, @a2, sample, @x1, @x2, @y1, @y2)
+          @y2 = @y1
+          @y1 = out
+          @x2 = @x1
+          @x1 = sample
+          out
+        end
+
         # C loop, C math (much faster than pure Ruby)
         def process_c(samples)
           samples, @x1, @x2, @y1, @y2 = MB::FastSound.biquad_narray(
