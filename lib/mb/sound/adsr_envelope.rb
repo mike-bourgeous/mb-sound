@@ -55,6 +55,8 @@ module MB
       #
       # Note that the +:sustain_level+ may be greater than 1.0.
       def initialize(attack_time:, decay_time:, sustain_level:, release_time:, rate:)
+        $adsr_debug ||= false# XXX
+
         @rate = rate.to_f
         @on = false
 
@@ -118,7 +120,8 @@ module MB
         # envelope is released before attack+decay finish
         if @on
           @peak = 1.0
-          @sust = @value
+          # Convert to 32-bit float for consistency between C and Ruby loops
+          @sust = Numo::SFloat[@value][0]
           self.time = @release_start
           @on = false
         end
@@ -255,6 +258,11 @@ module MB
         end
 
         @value *= @peak
+
+        if defined?($adsr_debug) && $adsr_debug.is_a?(Array)
+          $adsr_debug << [:ruby, @frame, @rate, @time, @attack_time, @decay_time, @sust, @release_time, @peak, @on, @value]
+        end
+
         @frame += 1
         @time = @frame / @rate.to_f
 
