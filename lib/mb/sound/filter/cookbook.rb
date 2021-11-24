@@ -68,7 +68,7 @@ module MB
         end
 
         def set_parameters_c(filter_type, f_samp, f_center, db_gain: nil, quality: nil, bandwidth_oct: nil, shelf_slope: nil)
-          type_id = FILTER_TYPE_IDS[filter_type]
+          type_id = FILTER_TYPE_IDS.fetch(filter_type)
           @filter_type = filter_type
           @sample_rate = f_samp
           @center_frequency = f_center
@@ -203,8 +203,36 @@ module MB
 
         # Processes just like Biquad#process but changes the cutoff frequency
         # and quality to the values given for each sample processed.  Only
-        # works with real data, not complex.
+        # works with real data, not complex, and will perform best (no
+        # duplication of data) with SFloat.
         def dynamic_process(samples, cutoffs, qualities)
+          dynamic_process_c(samples, cutoffs, qualities)
+        end
+
+        def dynamic_process_c(samples, cutoffs, qualities)
+          coeffs = self.coefficients
+          state = [@x1, @x2, @y1, @y2]
+
+          result = MB::FastSound.dynamic_biquad(
+            samples,
+            cutoffs,
+            qualities,
+            FILTER_TYPE_IDS.fetch(filter_type),
+            @sample_rate,
+            @db_gain,
+            coeffs,
+            state
+          )
+
+          @b0, @b1, @b2, @a1, @a2 = coeffs
+          @x1, @x2, @y1, @y2 = state
+          @quality = qualities[-1]
+          @center_frequency = cutoffs[-1]
+
+          result
+        end
+
+        def dynamic_process_ruby_c(samples, cutoffs, qualities)
           y1 = @y1
           y2 = @y2
           x1 = @x1

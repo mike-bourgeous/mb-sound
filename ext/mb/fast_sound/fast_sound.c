@@ -29,6 +29,13 @@ enum filter_types {
 	FILT_HIGHSHELF,
 };
 
+// Used by cookbook()
+struct biquad_coeffs {
+	double b0, b1, b2;
+	double a1, a2;
+	double omega; // angular frequency
+};
+
 static ID sym_osc_sine;
 static ID sym_osc_complex_sine;
 static ID sym_osc_triangle;
@@ -476,6 +483,127 @@ static double complex biquad_complex(
 	return real + I * imag;
 }
 
+// Pass NaN for quality/bandwidth/slope to indicate "not set".
+static struct biquad_coeffs cookbook(enum filter_types ftype, double rate, double center, double db_gain, double quality, double bandwidth_oct, double shelf_slope)
+{
+	struct biquad_coeffs coeffs = {};
+
+	double amp = 0;
+	if (!isnan(db_gain)) {
+		amp = pow(10.0, db_gain / 40.0);
+	}
+
+	coeffs.omega = 2.0 * M_PI * center / rate;
+	double cosine = cos(coeffs.omega);
+	double sine = sin(coeffs.omega);
+
+	double alpha;
+	if (!isnan(quality)) {
+		alpha = sine / (2.0 * quality);
+	} else if (!isnan(bandwidth_oct)) {
+		alpha = sine * sinh(M_LN2 / 2.0 * bandwidth_oct * coeffs.omega / sine);
+	} else if (!isnan(shelf_slope)) {
+		alpha = sine * 0.5 * sqrt((amp + 1.0 / amp) * (1.0 / shelf_slope - 1) + 2);
+	} else {
+		alpha = sine / 2.0; // assume quality of 1.0 if nothing was given
+	}
+
+	double a0_inv, am1, ap1, asq2al;
+	switch(ftype) {
+		case FILT_LOWPASS:
+			a0_inv = 1.0 / (1.0 + alpha);
+			coeffs.a1 = -2.0 * cosine * a0_inv;
+			coeffs.a2 = (1.0 - alpha) * a0_inv;
+			coeffs.b0 = 0.5 * (1.0 - cosine) * a0_inv;
+			coeffs.b1 = (1.0 - cosine) * a0_inv;
+			coeffs.b2 = 0.5 * (1.0 - cosine) * a0_inv;
+			break;
+
+		case FILT_HIGHPASS:
+			a0_inv = 1.0 / (1.0 + alpha);
+			coeffs.a1 = -2.0 * cosine * a0_inv;
+			coeffs.a2 = (1.0 - alpha) * a0_inv;
+			coeffs.b0 = 0.5 * (1.0 + cosine) * a0_inv;
+			coeffs.b1 = -(1.0 + cosine) * a0_inv;
+			coeffs.b2 = 0.5 * (1.0 + cosine) * a0_inv;
+			break;
+
+		case FILT_BANDPASS:
+			a0_inv = 1.0 / (1.0 + alpha);
+			coeffs.a1 = -2.0 * cosine * a0_inv;
+			coeffs.a2 = (1.0 - alpha) * a0_inv;
+			coeffs.b0 = alpha * a0_inv;
+			coeffs.b1 = 0;
+			coeffs.b2 = -alpha * a0_inv;
+			break;
+
+		case FILT_NOTCH:
+			a0_inv = 1.0 / (1.0 + alpha);
+			coeffs.a1 = -2.0 * cosine * a0_inv;
+			coeffs.a2 = (1.0 - alpha) * a0_inv;
+			coeffs.b0 = a0_inv;
+			coeffs.b1 = -2.0 * cosine * a0_inv;
+			coeffs.b2 = a0_inv;
+			break;
+
+		case FILT_ALLPASS:
+			a0_inv = 1.0 / (1.0 + alpha);
+			coeffs.a1 = -2.0 * cosine * a0_inv;
+			coeffs.a2 = (1.0 - alpha) * a0_inv;
+			coeffs.b0 = (1.0 - alpha) * a0_inv;
+			coeffs.b1 = -2.0 * cosine * a0_inv;
+			coeffs.b2 = (1.0 + alpha) * a0_inv;
+			break;
+
+		case FILT_PEAK:
+			a0_inv = 1.0 / (1.0 + alpha / amp);
+			coeffs.a1 = -2.0 * cosine * a0_inv;
+			coeffs.a2 = (1.0 - alpha / amp) * a0_inv;
+			coeffs.b0 = (1.0 + alpha * amp) * a0_inv;
+			coeffs.b1 = -2.0 * cosine * a0_inv;
+			coeffs.b2 = (1.0 - alpha * amp) * a0_inv;
+			break;
+
+		case FILT_LOWSHELF:
+			ap1 = amp + 1;
+			am1 = amp - 1;
+			asq2al = 2.0 * sqrt(amp) * alpha;
+
+			a0_inv = 1.0 / (ap1 + am1 * cosine + asq2al);
+			coeffs.a1 = -2.0 * (am1 + ap1 * cosine) * a0_inv;
+			coeffs.a2 = (ap1 + am1 * cosine - asq2al) * a0_inv;
+			coeffs.b0 = amp * (ap1 - am1 * cosine + asq2al) * a0_inv;
+			coeffs.b1 = 2.0 * amp * (am1 - ap1 * cosine) * a0_inv;
+			coeffs.b2 = amp * (ap1 - am1 * cosine - asq2al) * a0_inv;
+
+			break;
+
+		case FILT_HIGHSHELF:
+			ap1 = amp + 1;
+			am1 = amp - 1;
+			asq2al = 2.0 * sqrt(amp) * alpha;
+
+			a0_inv = 1.0 / (ap1 - am1 * cosine + asq2al);
+			coeffs.a1 = 2.0 * (am1 - ap1 * cosine) * a0_inv;
+			coeffs.a2 = (ap1 - am1 * cosine - asq2al) * a0_inv;
+			coeffs.b0 = amp * (ap1 + am1 * cosine + asq2al) * a0_inv;
+			coeffs.b1 = -2.0 * amp * (am1 + ap1 * cosine) * a0_inv;
+			coeffs.b2 = amp * (ap1 + am1 * cosine - asq2al) * a0_inv;
+
+			break;
+
+		default:
+			// Pass-through unity gain filter if filter type was invalid
+			coeffs.b0 = 1;
+			coeffs.b1 = 0;
+			coeffs.b2 = 0;
+			coeffs.a1 = 0;
+			coeffs.a2 = 0;
+	}
+
+	return coeffs;
+}
+
 static double smoothstep(double x)
 {
 	return 3*x*x - 2*x*x*x;
@@ -825,136 +953,149 @@ static VALUE ruby_biquad_narray(VALUE self, VALUE rb0, VALUE rb1, VALUE rb2, VAL
  */
 static VALUE ruby_cookbook(VALUE self, VALUE type_id, VALUE f_samp, VALUE f_center, VALUE db_gain, VALUE quality, VALUE bandwidth_oct, VALUE shelf_slope)
 {
-	double amp = 0;
-	if (RTEST(db_gain)) {
-		amp = pow(10.0, NUM2DBL(db_gain) / 40.0);
-	}
+	enum filter_types ftype = NUM2INT(type_id);
 
-	double omega = 2.0 * M_PI * NUM2DBL(f_center) / NUM2DBL(f_samp);
-	double cosine = cos(omega); // real part
-	double sine = sin(omega); // imaginary part
-
-	double alpha;
-	if (RTEST(quality)) {
-		alpha = sine / (2.0 * NUM2DBL(quality));
-	} else if (RTEST(bandwidth_oct)) {
-		alpha = sine * sinh(M_LN2 / 2.0 * NUM2DBL(bandwidth_oct) * omega / sine);
-	} else if (RTEST(shelf_slope)) {
-		alpha = sine * 0.5 * sqrt((amp + 1.0 / amp) * (1.0 / NUM2DBL(shelf_slope) - 1) + 2);
-	} else {
+	if (!(RTEST(quality) || RTEST(bandwidth_oct) || RTEST(shelf_slope))) {
 		rb_raise(rb_eArgError, "Missing quality/bandwidth_oct/shelf_slope");
 	}
 
-	double a0_inv, a1, a2, b0, b1, b2;
-	enum filter_types ftype = NUM2INT(type_id);
-	switch(ftype) {
-		case FILT_LOWPASS:
-			a0_inv = 1.0 / (1.0 + alpha);
-			a1 = -2.0 * cosine * a0_inv;
-			a2 = (1.0 - alpha) * a0_inv;
-			b0 = 0.5 * (1.0 - cosine) * a0_inv;
-			b1 = (1.0 - cosine) * a0_inv;
-			b2 = 0.5 * (1.0 - cosine) * a0_inv;
-			break;
-
-		case FILT_HIGHPASS:
-			a0_inv = 1.0 / (1.0 + alpha);
-			a1 = -2.0 * cosine * a0_inv;
-			a2 = (1.0 - alpha) * a0_inv;
-			b0 = 0.5 * (1.0 + cosine) * a0_inv;
-			b1 = -(1.0 + cosine) * a0_inv;
-			b2 = 0.5 * (1.0 + cosine) * a0_inv;
-			break;
-
-		case FILT_BANDPASS:
-			a0_inv = 1.0 / (1.0 + alpha);
-			a1 = -2.0 * cosine * a0_inv;
-			a2 = (1.0 - alpha) * a0_inv;
-			b0 = alpha * a0_inv;
-			b1 = 0;
-			b2 = -alpha * a0_inv;
-			break;
-
-		case FILT_NOTCH:
-			a0_inv = 1.0 / (1.0 + alpha);
-			a1 = -2.0 * cosine * a0_inv;
-			a2 = (1.0 - alpha) * a0_inv;
-			b0 = a0_inv;
-			b1 = -2.0 * cosine * a0_inv;
-			b2 = a0_inv;
-			break;
-
-		case FILT_ALLPASS:
-			a0_inv = 1.0 / (1.0 + alpha);
-			a1 = -2.0 * cosine * a0_inv;
-			a2 = (1.0 - alpha) * a0_inv;
-			b0 = (1.0 - alpha) * a0_inv;
-			b1 = -2.0 * cosine * a0_inv;
-			b2 = (1.0 + alpha) * a0_inv;
-			break;
-
-		case FILT_PEAK:
-			if (!RTEST(db_gain)) {
-				rb_raise(rb_eArgError, "Missing db_gain");
-			}
-
-			a0_inv = 1.0 / (1.0 + alpha / amp);
-			a1 = -2.0 * cosine * a0_inv;
-			a2 = (1.0 - alpha / amp) * a0_inv;
-			b0 = (1.0 + alpha * amp) * a0_inv;
-			b1 = -2.0 * cosine * a0_inv;
-			b2 = (1.0 - alpha * amp) * a0_inv;
-			break;
-
-		case FILT_LOWSHELF:
-			if (!RTEST(db_gain)) {
-				rb_raise(rb_eArgError, "Missing db_gain");
-			} else {
-				double ap1 = amp + 1;
-				double am1 = amp - 1;
-				double asq2al = 2.0 * sqrt(amp) * alpha;
-
-				a0_inv = 1.0 / (ap1 + am1 * cosine + asq2al);
-				a1 = -2.0 * (am1 + ap1 * cosine) * a0_inv;
-				a2 = (ap1 + am1 * cosine - asq2al) * a0_inv;
-				b0 = amp * (ap1 - am1 * cosine + asq2al) * a0_inv;
-				b1 = 2.0 * amp * (am1 - ap1 * cosine) * a0_inv;
-				b2 = amp * (ap1 - am1 * cosine - asq2al) * a0_inv;
-			}
-
-			break;
-
-		case FILT_HIGHSHELF:
-			if (!RTEST(db_gain)) {
-				rb_raise(rb_eArgError, "Missing db_gain");
-			} else {
-				double ap1 = amp + 1;
-				double am1 = amp - 1;
-				double asq2al = 2.0 * sqrt(amp) * alpha;
-
-				a0_inv = 1.0 / (ap1 - am1 * cosine + asq2al);
-				a1 = 2.0 * (am1 - ap1 * cosine) * a0_inv;
-				a2 = (ap1 - am1 * cosine - asq2al) * a0_inv;
-				b0 = amp * (ap1 + am1 * cosine + asq2al) * a0_inv;
-				b1 = -2.0 * amp * (am1 + ap1 * cosine) * a0_inv;
-				b2 = amp * (ap1 + am1 * cosine - asq2al) * a0_inv;
-			}
-
-			break;
-
-		default:
-			rb_raise(rb_eArgError, "Invalid filter type ID %"PRIsVALUE, type_id);
+	if (!RTEST(db_gain) && (ftype == FILT_LOWSHELF || ftype == FILT_HIGHSHELF || ftype == FILT_PEAK)) {
+		rb_raise(rb_eArgError, "Missing db_gain");
 	}
 
+	double g = RTEST(db_gain) ? NUM2DBL(db_gain) : NAN;
+	double q = RTEST(quality) ? NUM2DBL(quality) : NAN;
+	double bw = RTEST(bandwidth_oct) ? NUM2DBL(bandwidth_oct) : NAN;
+	double ss = RTEST(shelf_slope) ? NUM2DBL(shelf_slope) : NAN;
+
+	struct biquad_coeffs coeffs = cookbook(ftype, NUM2DBL(f_samp), NUM2DBL(f_center), g, q, bw, ss);
+
 	VALUE out = rb_ary_new_capa(6);
-	rb_ary_store(out, 0, rb_float_new(omega));
-	rb_ary_store(out, 1, rb_float_new(b0));
-	rb_ary_store(out, 2, rb_float_new(b1));
-	rb_ary_store(out, 3, rb_float_new(b2));
-	rb_ary_store(out, 4, rb_float_new(a1));
-	rb_ary_store(out, 5, rb_float_new(a2));
+	rb_ary_store(out, 0, rb_float_new(coeffs.omega));
+	rb_ary_store(out, 1, rb_float_new(coeffs.b0));
+	rb_ary_store(out, 2, rb_float_new(coeffs.b1));
+	rb_ary_store(out, 3, rb_float_new(coeffs.b2));
+	rb_ary_store(out, 4, rb_float_new(coeffs.a1));
+	rb_ary_store(out, 5, rb_float_new(coeffs.a2));
 
 	return out;
+}
+
+static void ensure_inplace_sfloat(VALUE *narray, _Bool *was_inplace)
+{
+	int dim = RNARRAY_NDIM(*narray);
+	if (dim != 1) {
+		rb_raise(rb_eArgError, "Only 1D NArrays may be processed (got %d dimensions)", dim);
+	}
+
+	_Bool prior_inplace = !!TEST_INPLACE(*narray);
+
+	*narray = rb_funcall(numo_cSFloat, rb_intern("cast"), 1, *narray);
+
+	if (!RTEST(nary_check_contiguous(*narray)) || !prior_inplace) {
+		*narray = nary_dup(*narray);
+		SET_INPLACE(*narray);
+		prior_inplace = 0;
+	}
+
+	if (was_inplace != NULL) {
+		*was_inplace = prior_inplace;
+	}
+}
+
+static void ensure_sfloat(VALUE *narray)
+{
+	int dim = RNARRAY_NDIM(*narray);
+	if (dim != 1) {
+		rb_raise(rb_eArgError, "Only 1D NArrays may be processed (got %d dimensions)", dim);
+	}
+
+	*narray = rb_funcall(numo_cSFloat, rb_intern("cast"), 1, *narray);
+
+	if (!RTEST(nary_check_contiguous(*narray))) {
+		*narray = nary_dup(*narray);
+	}
+}
+
+/*
+ * Converted from lib/mb/sound/filter/cookbook.rb
+ *
+ * samples, cutoffs, and qualities should be 1D Numo::SFloat
+ * state contains [x1, x2, y1, y2] and will be mutated
+ * coeffs contains [omega, b0, b1, b2, a1, a2] and will be mutated
+ *
+ * returns samples
+ */
+static VALUE ruby_dynamic_biquad(VALUE self, VALUE samples, VALUE cutoffs, VALUE qualities, VALUE type_id, VALUE sample_rate, VALUE db_gain, VALUE coeffs, VALUE state)
+{
+	Check_Type(coeffs, T_ARRAY);
+	Check_Type(state, T_ARRAY);
+
+	_Bool was_inplace = 0;
+	ensure_inplace_sfloat(&samples, &was_inplace);
+	ensure_sfloat(&cutoffs);
+	ensure_sfloat(&qualities);
+
+	size_t length = RNARRAY_SHAPE(samples)[0];
+	if (RNARRAY_SHAPE(cutoffs)[0] != length) {
+		rb_raise(rb_eArgError, "Length of cutoff frequency array did not match length of sample array");
+	}
+	if (RNARRAY_SHAPE(qualities)[0] != length) {
+		rb_raise(rb_eArgError, "Length of quality factor array did not match length of sample array");
+	}
+
+	enum filter_types ftype = NUM2INT(type_id);
+	double g = RTEST(db_gain) ? NUM2DBL(db_gain) : NAN;
+	double rate = NUM2DBL(sample_rate);
+
+	float *samp = (float *)nary_get_pointer_for_write(samples);
+	float *cut = (float *)nary_get_pointer_for_read(cutoffs);
+	float *q = (float *)nary_get_pointer_for_read(qualities);
+	struct biquad_coeffs bq = {
+		.b0 = NUM2DBL(rb_ary_entry(coeffs, 0)),
+		.b1 = NUM2DBL(rb_ary_entry(coeffs, 1)),
+		.b2 = NUM2DBL(rb_ary_entry(coeffs, 2)),
+		.a1 = NUM2DBL(rb_ary_entry(coeffs, 3)),
+		.a2 = NUM2DBL(rb_ary_entry(coeffs, 4)),
+	};
+	double x0;
+	double x1 = NUM2DBL(rb_ary_entry(state, 0));
+	double x2 = NUM2DBL(rb_ary_entry(state, 1));
+	double y0;
+	double y1 = NUM2DBL(rb_ary_entry(state, 2));
+	double y2 = NUM2DBL(rb_ary_entry(state, 3));
+	for (size_t i = 0; i < length; i++) {
+		bq = cookbook(ftype, rate, cut[i], g, q[i], NAN, NAN);
+		x0 = samp[i];
+		y0 = biquad_filter(bq.b0, bq.b1, bq.b2, bq.a1, bq.a2, x0, x1, x2, y1, y2);
+		samp[i] = y0;
+		y2 = y1;
+		y1 = y0;
+		x2 = x1;
+		x1 = x0;
+	}
+
+	if (!was_inplace) {
+		UNSET_INPLACE(samples);
+	}
+
+	rb_ary_store(coeffs, 0, rb_float_new(bq.omega));
+	rb_ary_store(coeffs, 1, rb_float_new(bq.b0));
+	rb_ary_store(coeffs, 2, rb_float_new(bq.b1));
+	rb_ary_store(coeffs, 3, rb_float_new(bq.b2));
+	rb_ary_store(coeffs, 4, rb_float_new(bq.a1));
+	rb_ary_store(coeffs, 5, rb_float_new(bq.a2));
+
+	rb_ary_store(state, 0, rb_float_new(x1));
+	rb_ary_store(state, 1, rb_float_new(x2));
+	rb_ary_store(state, 2, rb_float_new(y1));
+	rb_ary_store(state, 3, rb_float_new(y2));
+
+	RB_GC_GUARD(samples);
+	RB_GC_GUARD(cutoffs);
+	RB_GC_GUARD(qualities);
+
+	return samples;
 }
 
 VALUE ruby_adsr(VALUE self, VALUE time, VALUE attack, VALUE decay, VALUE sustain, VALUE release, VALUE peak, VALUE on)
@@ -1046,6 +1187,7 @@ void Init_fast_sound(void)
 	rb_define_module_function(fast_sound, "biquad", ruby_biquad, 10);
 	rb_define_module_function(fast_sound, "biquad_complex", ruby_biquad_complex, 10);
 	rb_define_module_function(fast_sound, "biquad_narray", ruby_biquad_narray, 6);
+	rb_define_module_function(fast_sound, "dynamic_biquad", ruby_dynamic_biquad, 8);
 	rb_define_module_function(fast_sound, "cookbook", ruby_cookbook, 7);
 
 	// Envelope functions
