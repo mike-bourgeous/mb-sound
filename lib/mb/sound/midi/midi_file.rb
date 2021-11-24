@@ -95,6 +95,11 @@ module MB
           }
         end
 
+        # Returns an Array of channels (0-based) used in the MIDI file.
+        def channels
+          @channel_list ||= tracks.flat_map { |t| t[:event_channels] }.sort.uniq
+        end
+
         # Returns the track information for the track having the most notes or
         # events on the given channel, breaking ties using the highest track
         # index.
