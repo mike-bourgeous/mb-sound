@@ -240,8 +240,8 @@ RSpec.describe MB::Sound::Tone do
       expect(osc.phase).to eq(180.degrees)
 
       data = osc.sample(48000)
-      expect(data[0]).to eq(0)
-      expect(data[30]).to be < 0 # should go down first because of phase
+      expect(data[0].round(8)).to eq(0)
+      expect(data[30].round(8)).to be < 0 # should go down first because of phase
     end
 
     it 'passes sample rate to an oscillator' do

@@ -1,3 +1,9 @@
+/*
+ * Faster sound routines for internal use by mb-sound, typically fairly
+ * straightforward ports from existing Ruby code.
+ * (C)2021 Mike Bourgeous
+ */
+#include <stdlib.h>
 #include <math.h>
 #include <complex.h>
 
@@ -182,13 +188,14 @@ static double SMALL_LOOKUP_INTEGRATE_2_ARCTANH_E_I_X_X[] = {
 };
 
 // Behaves like Ruby's % operator instead of fmod
-// wraps X to be between 0 and Y
+// Wraps X to be between 0 and Y
 static double wrap(double x, double y)
 {
 	// this could instead be fmod(x, y) + y if x is negative
 	return x - y * floor(x / y);
 }
 
+// Wraps X to be between 0 and Y
 static ssize_t wrapsize(ssize_t x, ssize_t y)
 {
 	if (x >= 0 && x < y) {
@@ -202,6 +209,7 @@ static ssize_t wrapsize(ssize_t x, ssize_t y)
 	return x % y;
 }
 
+// Direct port from #fetch_bounce in mb-math, used for trig lookup tables.
 static double fetch_bounce(double table[], ssize_t len, ssize_t idx)
 {
 	if (idx >= 0 && idx < len) {
@@ -234,6 +242,7 @@ static double get_lookup_i2aeixx(double table[], ssize_t len, ssize_t idx)
 	return v;
 }
 
+// Used for trig table interpolation
 static double simple_catmull_rom(double p0, double p1, double p2, double p3, double blend)
 {
 	double t0 = 0.0;
@@ -652,6 +661,68 @@ static double adsr(
 	return value * peak;
 }
 
+static void ensure_inplace_sfloat(VALUE *narray, _Bool *was_inplace)
+{
+	int dim = RNARRAY_NDIM(*narray);
+	if (dim != 1) {
+		rb_raise(rb_eArgError, "Only 1D NArrays may be processed (got %d dimensions)", dim);
+	}
+
+	_Bool prior_inplace = !!TEST_INPLACE(*narray);
+
+	*narray = rb_funcall(numo_cSFloat, rb_intern("cast"), 1, *narray);
+
+	if (!RTEST(nary_check_contiguous(*narray)) || !prior_inplace) {
+		*narray = nary_dup(*narray);
+		SET_INPLACE(*narray);
+		prior_inplace = 0;
+	}
+
+	if (was_inplace != NULL) {
+		*was_inplace = prior_inplace;
+	}
+}
+
+static void ensure_inplace_sfloat_or_scomplex(VALUE *narray, _Bool *was_inplace)
+{
+	int dim = RNARRAY_NDIM(*narray);
+	if (dim != 1) {
+		rb_raise(rb_eArgError, "Only 1D NArrays may be processed (got %d dimensions)", dim);
+	}
+
+	_Bool prior_inplace = !!TEST_INPLACE(*narray);
+
+	if (CLASS_OF(*narray) == numo_cDComplex || CLASS_OF(*narray) == numo_cSComplex) {
+		*narray = rb_funcall(numo_cSComplex, rb_intern("cast"), 1, *narray);
+	} else {
+		*narray = rb_funcall(numo_cSFloat, rb_intern("cast"), 1, *narray);
+	}
+
+	if (!RTEST(nary_check_contiguous(*narray)) || !prior_inplace) {
+		*narray = nary_dup(*narray);
+		SET_INPLACE(*narray);
+		prior_inplace = 0;
+	}
+
+	if (was_inplace != NULL) {
+		*was_inplace = prior_inplace;
+	}
+}
+
+static void ensure_sfloat(VALUE *narray)
+{
+	int dim = RNARRAY_NDIM(*narray);
+	if (dim != 1) {
+		rb_raise(rb_eArgError, "Only 1D NArrays may be processed (got %d dimensions)", dim);
+	}
+
+	*narray = rb_funcall(numo_cSFloat, rb_intern("cast"), 1, *narray);
+
+	if (!RTEST(nary_check_contiguous(*narray))) {
+		*narray = nary_dup(*narray);
+	}
+}
+
 static enum wave_types find_wave_type(ID wave_type)
 {
 	if (wave_type == sym_osc_sine) {
@@ -794,6 +865,95 @@ static VALUE ruby_osc(VALUE self, VALUE wave_type, VALUE phi)
 		default:
 			return rb_dbl_complex_new(creal(result), cimag(result));
 	}
+}
+
+// state contains [phi] and will be modified in place
+static VALUE ruby_synthesize(VALUE self, VALUE buffer, VALUE wave_type, VALUE frequency, VALUE advance, VALUE random_advance, VALUE gain, VALUE offset, VALUE state)
+{
+	Check_Type(state, T_ARRAY);
+
+	if (RARRAY_LEN(state) != 1) {
+		rb_raise(rb_eArgError, "State array must have exactly one numeric element");
+	}
+
+	enum wave_types wt = find_wave_type(SYM2ID(wave_type));
+
+	double freq;
+	double adv = NUM2DBL(advance);
+	double rndadv = NUM2DBL(random_advance);
+	double g = NUM2DBL(gain);
+	double off = NUM2DBL(offset);
+	double phi = NUM2DBL(rb_ary_entry(state, 0));
+
+	_Bool was_inplace;
+	ensure_inplace_sfloat_or_scomplex(&buffer, &was_inplace);
+
+	_Bool complex_buffer = CLASS_OF(buffer) == numo_cSComplex || CLASS_OF(buffer) == numo_cDComplex;
+	complex float *complex_ptr;
+	float *float_ptr;
+
+	size_t length = RNARRAY_SHAPE(buffer)[0];
+
+	float *freqptr = NULL;
+	if (CLASS_OF(frequency) == numo_cDFloat || CLASS_OF(frequency) == numo_cSFloat) {
+		if (RNARRAY_SHAPE(frequency)[0] != length) {
+			rb_raise(rb_eArgError, "Frequency array length does not match sample buffer length");
+		}
+
+		ensure_sfloat(&frequency);
+		freqptr = (float *)nary_get_pointer_for_read(frequency);
+		freq = freqptr[0];
+	} else {
+		freq = NUM2DBL(frequency);
+	}
+
+	if (complex_buffer) {
+		complex_ptr = (float complex *)nary_get_pointer_for_write(buffer);
+	} else {
+		float_ptr = (float *)nary_get_pointer_for_write(buffer);
+	}
+
+	double delta;
+	double complex v;
+	for (size_t i = 0; i < length; i++) {
+		if (freqptr) {
+			freq = freqptr[i];
+		}
+
+		if (rndadv != 0) {
+			delta = freq * (adv + drand48() * rndadv);
+		} else {
+			delta = freq * adv;
+		}
+
+		if (wt == OSC_COMPLEX_SQUARE || wt == OSC_COMPLEX_RAMP) {
+			// Ensure symmetric imaginary components when sampled exactly on period
+			v = osc_sample(wt, phi + delta / 2.0);
+		} else {
+			v = osc_sample(wt, phi);
+		}
+
+		v = v * g + off;
+
+		if (complex_buffer) {
+			complex_ptr[i] = v;
+		} else {
+			float_ptr[i] = creal(v);
+		}
+
+		phi = wrap(phi + delta, M_PI * 2.0);
+	}
+
+	rb_ary_store(state, 0, rb_float_new(phi));
+
+	if (!was_inplace) {
+		UNSET_INPLACE(buffer);
+	}
+
+	RB_GC_GUARD(frequency);
+	RB_GC_GUARD(buffer);
+
+	return buffer;
 }
 
 static VALUE ruby_biquad(VALUE self, VALUE b0, VALUE b1, VALUE b2, VALUE a1, VALUE a2, VALUE x0, VALUE x1, VALUE x2, VALUE y1, VALUE y2)
@@ -981,42 +1141,6 @@ static VALUE ruby_cookbook(VALUE self, VALUE type_id, VALUE f_samp, VALUE f_cent
 	return out;
 }
 
-static void ensure_inplace_sfloat(VALUE *narray, _Bool *was_inplace)
-{
-	int dim = RNARRAY_NDIM(*narray);
-	if (dim != 1) {
-		rb_raise(rb_eArgError, "Only 1D NArrays may be processed (got %d dimensions)", dim);
-	}
-
-	_Bool prior_inplace = !!TEST_INPLACE(*narray);
-
-	*narray = rb_funcall(numo_cSFloat, rb_intern("cast"), 1, *narray);
-
-	if (!RTEST(nary_check_contiguous(*narray)) || !prior_inplace) {
-		*narray = nary_dup(*narray);
-		SET_INPLACE(*narray);
-		prior_inplace = 0;
-	}
-
-	if (was_inplace != NULL) {
-		*was_inplace = prior_inplace;
-	}
-}
-
-static void ensure_sfloat(VALUE *narray)
-{
-	int dim = RNARRAY_NDIM(*narray);
-	if (dim != 1) {
-		rb_raise(rb_eArgError, "Only 1D NArrays may be processed (got %d dimensions)", dim);
-	}
-
-	*narray = rb_funcall(numo_cSFloat, rb_intern("cast"), 1, *narray);
-
-	if (!RTEST(nary_check_contiguous(*narray))) {
-		*narray = nary_dup(*narray);
-	}
-}
-
 /*
  * Converted from lib/mb/sound/filter/cookbook.rb
  *
@@ -1182,6 +1306,7 @@ void Init_fast_sound(void)
 
 	// Oscillator functions
 	rb_define_module_function(fast_sound, "osc", ruby_osc, 2);
+	rb_define_module_function(fast_sound, "synthesize", ruby_synthesize, 8);
 
 	// Filtering functions
 	rb_define_module_function(fast_sound, "biquad", ruby_biquad, 10);

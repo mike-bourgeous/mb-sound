@@ -327,7 +327,56 @@ module MB
       # Note that future calls to this method may overwrite the buffer returned
       # by previous calls.
       def sample(count = nil)
-        return sample(1)[0] if count.nil?
+        buf = sample_c(count)
+
+        # TODO: Move all waveshaping into a separate class
+        if @pre_power != 1.0
+          buf = MB::M.safe_power(buf, @pre_power)
+          buf = MB::M.clamp(buf * NEGATIVE_POWER_SCALE[@wave_type], -1.0, 1.0) if @pre_power < 0
+          buf = MB::M.scale(buf, -1.0..1.0, @range) if @range
+        end
+
+        buf = MB::M.safe_power(buf, @post_power) if @post_power != 1.0
+
+        buf
+      end
+
+      def sample_c(count = nil)
+        return sample_c(1)[0] if count.nil?
+
+        build_buffer(count)
+
+        freq = @frequency
+        freq = freq.sample(count) if freq.respond_to?(:sample)
+
+        if @range && @pre_power == 1.0
+          gain = (@range.last - @range.first) / 2.0
+          offset = (@range.first + @range.last) / 2.0
+        else
+          gain = 1
+          offset = 0
+        end
+
+        state = [@phi]
+
+        buf = MB::FastSound.synthesize(
+          @osc_buf.inplace!,
+          wave_type,
+          freq,
+          advance,
+          random_advance,
+          gain,
+          offset,
+          state
+        )
+
+        @phi = state[0]
+
+        buf.not_inplace!
+      end
+
+      def sample_ruby(count = nil)
+        return sample_ruby(1)[0] if count.nil?
 
         build_buffer(count)
 
@@ -363,11 +412,7 @@ module MB
         end
 
         buf = @osc_buf
-        buf = MB::M.safe_power(@osc_buf, @pre_power) if @pre_power != 1.0
-        buf = MB::M.clamp(buf * NEGATIVE_POWER_SCALE[@wave_type], -1.0, 1.0) if @pre_power < 0
-        buf = MB::M.scale(buf, -1.0..1.0, @range) if @range
-        buf = MB::M.safe_power(buf, @post_power) if @post_power != 1.0
-
+        buf = MB::M.scale(buf, -1.0..1.0, @range) if @range && @pre_power == 1.0
         buf
       end
 
