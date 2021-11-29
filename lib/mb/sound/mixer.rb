@@ -21,28 +21,27 @@ module MB
       # :sample, in which case every summand will have a gain of 1.0, an Array
       # of two-element Arrays of the form [summand, gain], or a Hash from
       # summand to gain (yes, this is a bit redundant for Numeric summands).
-      #
-      # The +:buffer_size+ is used as an initial buffer size, but the buffer
-      # will resize if #sample is given a different number of samples.
-      def initialize(summands, buffer_size: 800)
+      def initialize(summands)
         @constant = 0
-        @summands = []
+        @summands = {}
 
         summands.each_with_index do |(s, gain), idx|
           gain ||= 1.0
 
-          if s.is_a?(Numeric)
+          case
+          when s.is_a?(Numeric)
             @constant += s * gain
-          elsif s.respond_to?(:sample)
-            @summands << [s, gain]
+
+          when s.respond_to?(:sample)
+            raise "Duplicate summand #{s} at index #{idx}" if @summands.include?(s)
+            @summands[s] = gain
+
           else
             raise ArgumentError, "Summand #{s.inspect} at index #{idx} is not a Numeric and does not respond to :sample"
           end
         end
 
         @complex = @constant.is_a?(Complex)
-
-        setup_buffer(buffer_size)
       end
 
       # Calls the #sample methods of all summands, applies gains, adds them all
@@ -64,6 +63,54 @@ module MB
         end
 
         @buf.not_inplace!
+      end
+
+      # Returns the gain value for the given +summand+, or nil if the summand
+      # is not present.  The +summand+ may be an Integer to refer to a summand
+      # by insertion order (starting at 0).
+      def [](summand)
+        summand = @summands.keys[summand] if summand.is_a?(Integer)
+        @summands[summand]
+      end
+
+      # Sets the gain value for the given +summand+ (which must respond to the
+      # :sample method), adding it to the mixer if it is not already present.
+      # The +summand+ may be an Integer to refer to a summand by insertion
+      # order (starting at 0).
+      def []=(summand, gain)
+        summand = @summands.keys[summand] if summand.is_a?(Integer)
+        raise "Summand #{summand} must respond to :sample" unless summand.respond_to?(:sample)
+        @summands[summand] = gain
+      end
+
+      # Removes the given +summand+ from the mixer.  The +summand+ may be an
+      # Integer to refer to a summand by insertion order (starting at 0), in
+      # which case summands added after this one will have their index
+      # decremented by one.
+      def delete(summand)
+        summand = @summands.keys[summand] if summand.is_a?(Integer)
+        @summands.delete(summand)
+      end
+
+      # Removes all summands, but does not reset the constant, if set.
+      def clear
+        @summands.clear
+      end
+
+      # Returns the number of summands.
+      def count
+        @summands.length
+      end
+      alias length count
+
+      # Returns an Array of the summands in this mixer (without their gains).
+      def summands
+        @summands.keys
+      end
+
+      # Returns an Array of the gains in this mixer (without their summands).
+      def gains
+        @summands.values
       end
 
       private

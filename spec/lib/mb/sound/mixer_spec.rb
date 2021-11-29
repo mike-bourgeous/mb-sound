@@ -21,4 +21,10 @@ RSpec.describe(MB::Sound::Mixer) do
     pending 'returns the same buffer object if size and data type have not changed'
     pending 'can change from SFloat to SComplex if the constant changes to complex'
   end
+
+  pending '#clear'
+  pending '#[]'
+  pending '#[]='
+  pending '#delete'
+  pending '#count'
 end
