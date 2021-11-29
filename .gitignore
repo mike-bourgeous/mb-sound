@@ -12,3 +12,4 @@
 /*.wav
 /spec/examples.txt
 .gdb_history
+/lib/**/*.so

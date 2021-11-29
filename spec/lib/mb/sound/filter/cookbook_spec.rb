@@ -227,8 +227,10 @@ RSpec.describe MB::Sound::Filter::Cookbook do
       magratio = cb_resp.abs / bq_resp.abs
       phaseratio = cb_resp.arg / bq_resp.arg
 
-      expect((magratio - 1.0).abs.max).to be <= 0.00001
-      expect((phaseratio - 1.0).abs.max).to be <= 0.00001
+      expect(MB::M.round(cookbook.coefficients, 5)).to eq(MB::M.round(biquad.coefficients, 5))
+
+      expect((magratio - 1.0).abs.max).to be <= 0.000015
+      expect((phaseratio - 1.0).abs.max).to be <= 0.000015
     end
 
     it 'produces the right coefficients for 1234/43210/G6' do
@@ -339,6 +341,67 @@ RSpec.describe MB::Sound::Filter::Cookbook do
       below = cookbook.response(1233)
       above = cookbook.response(1235)
       expect(below.arg.positive?).not_to eq(above.arg.positive?)
+    end
+  end
+
+  describe '#omega' do
+    it 'returns the angular frequency of the filter' do
+      f = MB::Sound::Filter::Cookbook.new(:lowpass, 48000, 1200, quality: 0.7)
+      expect(f.omega&.round(6)).to eq((1200 * Math::PI / 24000.0).round(6))
+    end
+  end
+
+  describe '#dynamic_process' do
+    it 'can sweep cutoff and quality' do
+      filter = 100.hz.lowpass(quality: 0.7)
+      samples = 1000.hz.at(1).generate(48000)
+      cutoffs = Numo::SFloat.linspace(100, 3100, 48000)
+      qualities = Numo::SFloat.linspace(5, 1, 48000)
+
+      result = filter.dynamic_process(samples, cutoffs, qualities)
+
+      # Ensure samples were not modified in place
+      expect(result.__id__).not_to eq(samples.__id__)
+      expect(result).not_to eq(samples)
+      expect(samples.abs.max.round(1)).to eq(1)
+
+      # Large loss due to cutoff near 100Hz
+      early = result[0...500]
+      expect(early.abs.max).to be < 0.1
+
+      # Some positive gain due to Q factor and cutoff near oscillator frequency
+      mid = result[23500...24500]
+      expect(mid.abs.max).to be > 1
+
+      # Roughly unity gain at the end due to cutoff above oscillator frequency
+      late = result[47000...48000]
+      expect(late.abs.max).to be_between(0.7, 1.1)
+    end
+
+    it 'can process samples in place' do
+      filter = 100.hz.lowpass(quality: 0.7)
+      samples = 1000.hz.at(1).generate(48000)
+      cutoffs = Numo::SFloat.linspace(100, 3100, 48000)
+      qualities = Numo::SFloat.linspace(5, 1, 48000)
+
+      result = filter.dynamic_process(samples.inplace!, cutoffs, qualities)
+
+      # Ensure the samples were modified in place
+      expect(result.__id__).to eq(samples.__id__)
+      expect(samples).to eq(result)
+      expect(samples.abs.max.round(1)).to be > 1
+
+      # Large loss due to cutoff near 100Hz
+      early = result[0...500]
+      expect(early.abs.max).to be < 0.1
+
+      # Some positive gain due to Q factor and cutoff near oscillator frequency
+      mid = result[23500...24500]
+      expect(mid.abs.max).to be > 1
+
+      # Roughly unity gain at the end due to cutoff above oscillator frequency
+      late = result[47000...48000]
+      expect(late.abs.max).to be_between(0.7, 1.1)
     end
   end
 end

@@ -25,5 +25,7 @@ jobs:
           sudo apt-get install ffmpeg gnuplot-nox
       - name: Install gem deps
         run: bundle install
+      - name: Compile native extension
+        run: bundle exec rake compile
       - name: Run tests
         run: bundle exec rspec

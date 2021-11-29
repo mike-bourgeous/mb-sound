@@ -1,6 +1,8 @@
 require 'midi-message'
 require 'nibbler'
 
+require 'mb/fast_sound'
+
 module MB
   module Sound
     # An oscillator that can generate different wave types.  This can be used
@@ -215,7 +217,7 @@ module MB
       # 2pi.  The output value ranges from -1 to 1.  The power, range, and
       # other modifiers to the oscillator are not applied by this method (see
       # #sample).
-      def oscillator(phi)
+      def oscillator_ruby(phi)
         case @wave_type
         when :sine
           s = Math.sin(phi)
@@ -292,9 +294,9 @@ module MB
           x = phi / Math::PI
           if x < 1.0
             # 1.6487212707 is ~Math.sqrt(Math::E)
-            s = (Math.sqrt(2 * Math.log(1.6487212707 / (1.0 - x))) - 1) * -3.01.db
+            s = (Math.sqrt(2 * Math.log(1.6487212707 / (1.0 - x))) - 1) * 0.7071067811865476
           else
-            s = (-Math.sqrt(2 * Math.log(1.6487212707 / (x - 1.0))) + 1) * -3.01.db
+            s = (-Math.sqrt(2 * Math.log(1.6487212707 / (x - 1.0))) + 1) * 0.7071067811865476
           end
 
           # Clamp range to prevent periodic clicks when we get infinity at phi=pi
@@ -315,13 +317,66 @@ module MB
         s
       end
 
+      def oscillator(phi)
+        return MB::FastSound.osc(@wave_type, phi)
+      end
+
       # Returns the next value (or +count+ values in an NArray, if specified)
       # of the oscillator and advances the internal phase.
       #
       # Note that future calls to this method may overwrite the buffer returned
       # by previous calls.
       def sample(count = nil)
-        return sample(1)[0] if count.nil?
+        buf = sample_c(count)
+
+        # TODO: Move all waveshaping into a separate class
+        if @pre_power != 1.0
+          buf = MB::M.safe_power(buf, @pre_power)
+          buf = MB::M.clamp(buf * NEGATIVE_POWER_SCALE[@wave_type], -1.0, 1.0) if @pre_power < 0
+          buf = MB::M.scale(buf, -1.0..1.0, @range) if @range
+        end
+
+        buf = MB::M.safe_power(buf, @post_power) if @post_power != 1.0
+
+        buf
+      end
+
+      def sample_c(count = nil)
+        return sample_c(1)[0] if count.nil?
+
+        build_buffer(count)
+
+        freq = @frequency
+        freq = freq.sample(count) if freq.respond_to?(:sample)
+
+        if @range && @pre_power == 1.0
+          gain = (@range.last - @range.first) / 2.0
+          offset = (@range.first + @range.last) / 2.0
+        else
+          gain = 1
+          offset = 0
+        end
+
+        state = [@phi]
+
+        buf = MB::FastSound.synthesize(
+          @osc_buf.inplace!,
+          wave_type,
+          freq,
+          advance,
+          random_advance,
+          gain,
+          offset,
+          state
+        )
+
+        @phi = state[0]
+
+        buf.not_inplace!
+      end
+
+      def sample_ruby(count = nil)
+        return sample_ruby(1)[0] if count.nil?
 
         build_buffer(count)
 
@@ -352,15 +407,12 @@ module MB
 
           @phi = (@phi + delta) % (Math::PI * 2)
 
+          result = result.real unless @osc_buf[0].is_a?(Complex)
           @osc_buf[idx] = result
         end
 
         buf = @osc_buf
-        buf = MB::M.safe_power(@osc_buf, @pre_power) if @pre_power != 1.0
-        buf = MB::M.clamp(buf * NEGATIVE_POWER_SCALE[@wave_type], -1.0, 1.0) if @pre_power < 0
-        buf = MB::M.scale(buf, -1.0..1.0, @range) if @range
-        buf = MB::M.safe_power(buf, @post_power) if @post_power != 1.0
-
+        buf = MB::M.scale(buf, -1.0..1.0, @range) if @range && @pre_power == 1.0
         buf
       end
 

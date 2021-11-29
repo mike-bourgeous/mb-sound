@@ -151,6 +151,55 @@ module MB
         # If +samples+ is a Numo::NArray in in-place mode, then the samples will
         # be processed in-place, saving an array allocation.
         def process(samples)
+          process_c(samples)
+        end
+
+        # Process a single real (not Complex) sample through the filter.
+        def process_one(sample)
+          out = MB::FastSound.biquad(@b0, @b1, @b2, @a1, @a2, sample, @x1, @x2, @y1, @y2)
+          @y2 = @y1
+          @y1 = out
+          @x2 = @x1
+          @x1 = sample
+          out
+        end
+
+        # C loop, C math (much faster than pure Ruby)
+        def process_c(samples)
+          samples, @x1, @x2, @y1, @y2 = MB::FastSound.biquad_narray(
+            @b0, @b1, @b2, @a1, @a2,
+            [samples, @x1, @x2, @y1, @y2]
+          )
+
+          samples
+        end
+
+        # Ruby outer loop, C math (slightly faster than pure Ruby)
+        def process_ruby_c(samples)
+          if samples.is_a?(Numo::DComplex) || samples.is_a?(Numo::SComplex) || samples[0].is_a?(Complex)
+            # Direct Form I
+            samples.map do |x0|
+              out = MB::FastSound.biquad_complex(@b0, @b1, @b2, @a1, @a2, x0, @x1, @x2, @y1, @y2)
+              @y2 = @y1
+              @y1 = out
+              @x2 = @x1
+              @x1 = x0
+              out
+            end
+          else
+            samples.map do |x0|
+              out = MB::FastSound.biquad(@b0, @b1, @b2, @a1, @a2, x0, @x1, @x2, @y1, @y2)
+              @y2 = @y1
+              @y1 = out
+              @x2 = @x1
+              @x1 = x0
+              out
+            end
+          end
+        end
+
+        # Ruby outer loop, Ruby math
+        def process_ruby(samples)
           # Direct Form I
           samples.map do |x0|
             out = @b0 * x0 + @b1 * @x1 + @b2 * @x2 - @a1 * @y1 - @a2 * @y2

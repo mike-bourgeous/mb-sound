@@ -79,6 +79,9 @@ RSpec.describe MB::Sound::Oscillator do
       expect(MB::M.round(o.oscillator(315.degrees), 6).real).to eq(-1)
       expect(MB::M.round(o.oscillator(315.degrees), 6).imag).to be < -0.25
     end
+
+    pending 'returns expected gauss values'
+    pending 'returns expected parabolic values'
   end
 
   describe '#sample' do

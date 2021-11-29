@@ -24,7 +24,7 @@ GIT
 PATH
   remote: .
   specs:
-    mb-sound (0.3.10.usegit)
+    mb-sound (0.4.0.usegit)
       cmath (~> 1.0.0)
       mb-math (>= 0.1.4.1.usegit)
       mb-util (>= 0.1.7.1.usegit)
@@ -61,6 +61,8 @@ GEM
       pry (~> 0.11)
       yard (~> 0.9.11)
     rake (13.0.1)
+    rake-compiler (1.1.1)
+      rake
     rspec (3.10.0)
       rspec-core (~> 3.10.0)
       rspec-expectations (~> 3.10.0)
@@ -98,6 +100,7 @@ DEPENDENCIES
   pry-byebug
   pry-doc
   rake (~> 13.0.1)
+  rake-compiler (~> 1.1.1)
   rspec
   simplecov (~> 0.21.2)
   word_wrap

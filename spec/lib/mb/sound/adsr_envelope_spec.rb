@@ -42,6 +42,62 @@ RSpec.describe(MB::Sound::ADSREnvelope) do
     expect(result[-1].round(6)).to eq(0)
   end
 
+  [:sample, :sample_c, :sample_ruby_c].each do |m|
+    describe "##{m}" do
+      [false, true].each do |filt|
+        context "with filter #{filt}" do
+          it 'returns the same curve as the original Ruby for a full cycle' do
+            env.reset
+            env.trigger(0.75)
+            a = env.send(m, 24000, filter: filt)
+            env.release
+            b = env.send(m, 36000, filter: filt)
+            c = a.concatenate(b)
+
+            env.reset
+            env.trigger(0.75)
+            a = env.sample_ruby(24000, filter: filt)
+            env.release
+            b = env.sample_ruby(36000, filter: filt)
+            ruby = a.concatenate(b)
+
+            # 32-bit float resolution of 0.5 ** 24 is 5.960464477539063e-08
+            # For some reason rounding to 6 or 8 decimals and then comparing
+            # fails, but rounding the delta works
+            delta = (c - ruby).abs
+            expect(MB::M.round(delta, filt ? 6 : 7).max).to eq(0)
+          end
+
+          it 'returns the same curve as the original Ruby for an interrupted cycle' do
+            env2 = env.dup
+
+            env.reset
+            env.trigger(0.75)
+            c_rise = env.send(m, 5000, filter: filt)
+            env.release
+
+            env2.reset
+            env2.trigger(0.75)
+            ruby_rise = env2.sample_ruby(5000, filter: filt)
+            env2.release
+
+            c_fall = env.send(m, 36000, filter: filt)
+            ruby_fall = env2.sample_ruby(36000, filter: filt)
+
+            c = c_rise.concatenate(c_fall)
+            ruby = ruby_rise.concatenate(ruby_fall)
+
+            # 32-bit float resolution of 0.5 ** 24 is 5.960464477539063e-08
+            # For some reason rounding to 6 or 8 decimals and then comparing
+            # fails, but rounding the delta works
+            delta = (c - ruby).abs
+            expect(MB::M.round(delta, filt ? 6 : 7).max).to eq(0)
+          end
+        end
+      end
+    end
+  end
+
   describe '#active?' do
     it 'returns true while the envelope is sustaining or releasing, false otherwise' do
       expect(env).not_to be_active
