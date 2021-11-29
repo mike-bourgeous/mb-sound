@@ -179,7 +179,7 @@ module MB
         raise "Invalid frequency #{frequency.inspect}" unless frequency.is_a?(Numeric) || frequency.respond_to?(:sample)
 
         @frequency = frequency
-        f0 = frequency.respond_to?(:sample) ? f0.sample(1)[0] : f0.to_f
+        f0 = frequency.respond_to?(:sample) ? frequency.sample(1)[0] : frequency.to_f
         @note_number = Oscillator.calc_number(f0)
       end
 

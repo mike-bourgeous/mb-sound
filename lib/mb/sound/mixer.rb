@@ -47,11 +47,11 @@ module MB
       # Calls the #sample methods of all summands, applies gains, adds them all
       # to the initial #constant value, and returns the result.
       def sample(count)
-        inputs = @summands.each do |s, gain|
+        inputs = @summands.map { |s, gain|
           v = s.sample(count).not_inplace!
           @complex = true if v.is_a?(Numo::SComplex) || v.is_a?(Numo::DComplex)
           [v, gain]
-        end
+        }
 
         setup_buffer(count)
 
