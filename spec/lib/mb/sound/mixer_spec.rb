@@ -5,11 +5,38 @@ RSpec.describe(MB::Sound::Mixer) do
       expect(ss.sample(800)).to eq(Numo::SFloat.zeros(800))
     end
 
-    pending 'can create a mixer from an Array of summands'
+    it 'can create a mixer from an Array of summands' do
+      ss = MB::Sound::Mixer.new(
+        [
+          0.5,
+          MB::Sound::ArrayInput.new(data: [Numo::SFloat.ones(600).fill(1.5)], repeat: true),
+          MB::Sound::ArrayInput.new(data: [Numo::SFloat.ones(600).fill(-0.75)], repeat: true),
+        ]
+      )
+      expect(ss.sample(800)).to eq(Numo::SFloat.zeros(800).fill(1.25))
+    end
 
-    pending 'can create a mixer from an Array of summand-gain pairs'
+    it 'can create a mixer from an Array of summand-gain pairs' do
+      ss = MB::Sound::Mixer.new(
+        [
+          [0.5, 3],
+          [MB::Sound::ArrayInput.new(data: [Numo::SFloat.ones(600).fill(1.5)], repeat: true), 2],
+          [MB::Sound::ArrayInput.new(data: [Numo::SFloat.ones(600).fill(-0.75)], repeat: true), 1],
+        ]
+      )
+      expect(ss.sample(800)).to eq(Numo::SFloat.zeros(800).fill(3.75))
+    end
 
-    pending 'can create a mixer from a Hash from summand to gain'
+    it 'can create a mixer from a Hash from summand to gain' do
+      ss = MB::Sound::Mixer.new(
+        {
+          0.5 => 3,
+          MB::Sound::ArrayInput.new(data: [Numo::SFloat.ones(600).fill(1.5)], repeat: true) => 2,
+          MB::Sound::ArrayInput.new(data: [Numo::SFloat.ones(600).fill(-0.75)], repeat: true) => 1,
+        }
+      )
+      expect(ss.sample(800)).to eq(Numo::SFloat.zeros(800).fill(3.75))
+    end
   end
 
   describe '#sample' do

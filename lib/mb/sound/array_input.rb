@@ -2,13 +2,13 @@ module MB
   module Sound
     # An input stream that returns chunks from an Array or Numo::NArray.
     class ArrayInput
-      attr_reader :channels, :frames, :rate, :offset, :remaining, :buffer_size
+      attr_reader :channels, :frames, :rate, :offset, :remaining, :buffer_size, :repeat
 
       # Initializes an audio stream that returns slices from the given +data+ (an
       # Array of Arrays or Numo::NArrays, one for each channel).  If the lengths
       # of each channel do not match, the shorter channels will return zeros
       # until all channels have ended.
-      def initialize(data:, rate: 48000, buffer_size: 800)
+      def initialize(data:, rate: 48000, buffer_size: 800, repeat: false)
         @buffer_size = buffer_size
         @channels = data.length
         @frames = data.map(&:length).max
@@ -22,6 +22,7 @@ module MB
 
         @remaining = @frames
         @offset = 0
+        @repeat = !!repeat
       end
 
       # Causes the next call to #read to start at the given frame +offset+ from
@@ -43,15 +44,35 @@ module MB
       end
 
       # Reads up to +frames+ frames starting from the current read pointer within
-      # the internal arrays.  Returns less than +frames+ if near the end, or
-      # empty arrays if at the end.
+      # the internal arrays.  Returns less than +frames+ if near the end and
+      # not repeating, or empty arrays if at the end.
       def read(frames = @buffer_size)
         raise 'Must read at least one frame' if frames < 1
 
         start = @offset
+
         if @remaining < frames
+          if @repeat
+            extra = frames - @remaining
+
+            # TODO: Handle the case where frames is more than twice the length
+            # of the total loop, or is more than the length of the loop plus
+            # the remaining frames
+            if extra == frames
+              ret = @data.map { |c| c[0...frames] }
+            else
+              ret = @data.map { |c| c[start...@frames].concatenate(c[0...extra]) }
+            end
+
+            @remaining = @frames - extra
+            @offset = extra
+
+            return ret
+          end
+
           frames = @remaining
         end
+
         @remaining -= frames
         @offset += frames
 
@@ -60,6 +81,12 @@ module MB
         else
           [ Numo::SFloat[] ] * @channels
         end
+      end
+
+      # Reads +count+ frames and returns the first channel, mainly for use in
+      # specs.
+      def sample(count)
+        read(count)[0]
       end
     end
   end
