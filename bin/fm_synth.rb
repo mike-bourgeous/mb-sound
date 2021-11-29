@@ -23,6 +23,9 @@ class FM
 
     @mod_index = 10
 
+    # TODO: use the output mixer and fix the double-sampling issue (oscillators
+    # get sampled by both the frequency mixer and output mixer causing
+    # skipping)
     @output_mixer = MB::Sound::Mixer.new(@oscillators.map { |o| [o, 0] })
   end
 
@@ -93,8 +96,12 @@ class FM
   end
 
   def sample(count)
+    @zero ||= Numo::SFloat.zeros(count)
     @manager.update
-    @output_mixer.sample(count)
+    # TODO: Maybe a sample-and-hold class would be useful that returns the same
+    # value for #sample until an update method is called
+    #@output_mixer.sample(count)
+    @oscs_used > 0 ? @oscillators[0].sample(count) : @zero
   end
 end
 
