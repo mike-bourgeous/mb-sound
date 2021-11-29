@@ -380,6 +380,9 @@ module MB
 
         build_buffer(count)
 
+        freq = @frequency
+        freq_table = freq.sample(count) if freq.respond_to?(:sample)
+
         count.times do |idx|
           # TODO: this doesn't modulate strongly enough
           # FM attempt:
@@ -388,8 +391,7 @@ module MB
           #   frequency: Oscillator.new(:sine, frequency: 220, range: -970..370, advance: Math::PI / 24000),
           #   advance: Math::PI / 24000
           # )
-          freq = @frequency
-          freq = freq.sample if freq.respond_to?(:sample)
+          freq = freq_table[idx] if freq_table
 
           advance = @advance
           advance += RAND.rand(@random_advance.to_f) if @random_advance != 0
