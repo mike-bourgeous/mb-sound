@@ -26,6 +26,6 @@ jobs:
       - name: Install gem deps
         run: bundle install
       - name: Compile native extension
-        run: rake compile
+        run: bundle exec rake compile
       - name: Run tests
         run: bundle exec rspec
