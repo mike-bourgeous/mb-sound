@@ -14,14 +14,14 @@ class FM
     # TODO: modulation index CC
 
     @oscillators = osc_count.times.map { |o|
-      o = 440.hz.at(-20.db).oscillator
+      o = 440.hz.triangle.at(-20.db).oscillator
       o.frequency = MB::Sound::Mixer.new([440])
       o
     }
     @oscs_used = 0
     @osc_map = {}
 
-    @mod_index = 10
+    @mod_index = 1000
 
     # TODO: use the output mixer and fix the double-sampling issue (oscillators
     # get sampled by both the frequency mixer and output mixer causing
@@ -110,14 +110,21 @@ synth = FM.new(update_rate: output.rate.to_f / output.buffer_size, connect: ARGV
 
 puts "\n" * MB::U.height
 
-t = 0
-loop do
-  if t % 10 == 0
-    puts "\e[H"
-    synth.print
+begin
+  t = 0
+  loop do
+    data = synth.sample(output.buffer_size)
+
+    if t % 10 == 0
+      puts "\e[H"
+      synth.print
+      MB::Sound.plot(data, graphical: true)
+    end
+
+    t += 1
+
+    output.write([data])
   end
-
-  t += 1
-
-  output.write([synth.sample(output.buffer_size)])
+ensure
+  puts "\n" * MB::U.height
 end

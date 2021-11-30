@@ -97,11 +97,17 @@ module MB
         @summands.clear
       end
 
-      # Returns the number of summands.
+      # Returns the number of summands (excluding a possible constant value).
       def count
         @summands.length
       end
       alias length count
+
+      # Returns true if there are no summands (apart from a possible constant
+      # value).
+      def empty?
+        @summands.empty?
+      end
 
       # Returns an Array of the summands in this mixer (without their gains).
       def summands
