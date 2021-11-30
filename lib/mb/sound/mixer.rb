@@ -44,6 +44,8 @@ module MB
             raise ArgumentError, "Summand #{s.inspect} at index #{idx} is not a Numeric and does not respond to :sample"
           end
         end
+
+        @buf = nil
       end
 
       # Calls the #sample methods of all summands, applies gains, adds them all

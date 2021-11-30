@@ -201,8 +201,6 @@ RSpec.describe MB::Sound::Note do
       end
 
       it 'can use a different tuning note' do
-        old_note = MB::Sound::A4
-
         MB::Sound::Oscillator.tune_note = 47 # B2
         MB::Sound::Oscillator.tune_freq = 120 # 49.36 cents flat from A440 tuning to get exactly 120Hz
 
