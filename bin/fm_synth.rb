@@ -11,10 +11,15 @@ class FM
     @manager = MB::Sound::MIDI::Manager.new(jack: jack, input: input, connect: connect, update_rate: update_rate)
     @manager.on_note(&method(:note))
 
-    # TODO: modulation index CC
+    @manager.on_cc(1, range: 0.0..10000) do |mod|
+      @mod_index = mod
+      @oscillators.each do |o|
+        o.frequency[0] = @mod_index unless o.frequency.empty?
+      end
+    end
 
     @oscillators = osc_count.times.map { |o|
-      o = 440.hz.triangle.at(-20.db).oscillator
+      o = 440.hz.parabola.at(-10.db).oscillator
       o.frequency = MB::Sound::Mixer.new([440])
       o
     }
@@ -49,6 +54,8 @@ class FM
 
   def note(number, velocity, onoff)
     if onoff
+      note(number, velocity, false) if @osc_map.include?(number)
+
       if @oscs_used < @oscillators.length
         osc = @oscillators[@oscs_used]
         @osc_map[number] = osc
@@ -118,7 +125,7 @@ begin
     if t % 10 == 0
       puts "\e[H"
       synth.print
-      MB::Sound.plot(data, graphical: true)
+      MB::Sound.plot([data, MB::Sound.real_fft(data).abs], graphical: true)
     end
 
     t += 1
