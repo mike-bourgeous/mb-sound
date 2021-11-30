@@ -1,5 +1,8 @@
 #!/usr/bin/env ruby
-# An experimental FM synthesizer that uses later notes to modulate earlier notes.
+# An experimental FM synthesizer that uses later notes to modulate earlier
+# notes.  If only one note is played, that note is unmodulated.  Each later
+# note modulates the note that came before it.  The modulation wheel controls
+# the intensity of modulation.
 # (C)2021 Mike Bourgeous
 
 require 'bundler/setup'
@@ -19,6 +22,7 @@ class FM
     end
 
     @oscillators = osc_count.times.map { |o|
+      # Parabola is a little more interesting than sine without being too chaotic
       o = 440.hz.parabola.at(-10.db).oscillator
       o.frequency = MB::Sound::Mixer.new([440])
       o
