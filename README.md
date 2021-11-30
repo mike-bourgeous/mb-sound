@@ -31,7 +31,8 @@ below](#installation-and-usage), then run `bin/sound.rb`.
 ## Examples
 
 These examples can be run in the `bin/sound.rb` interactive environment.  There
-are other examples in the scripts under the `bin/` directory.
+are other examples in the scripts under the `bin/` directory, such as an FM
+synthesizer in `bin/fm_synth.rb`.
 
 ### Generating tones
 
