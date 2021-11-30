@@ -203,6 +203,22 @@ RSpec.describe MB::Sound::Oscillator do
       expect(data.sum.round(2)).to eq(0)
     end
 
+    it 'produces expected square wave output for a low sample rate' do
+      oscil = 1.hz.square.at(0.5).at_rate(50).oscillator
+      expect(oscil.sample(25)).to eq(Numo::SFloat.zeros(25).fill(0.5))
+      expect(oscil.sample(25)).to eq(Numo::SFloat.zeros(25).fill(-0.5))
+      expect(oscil.sample(25)).to eq(Numo::SFloat.zeros(25).fill(0.5))
+      expect(oscil.sample(25)).to eq(Numo::SFloat.zeros(25).fill(-0.5))
+    end
+
+    it 'produces expected square wave output for a moderate sample rate' do
+      oscil = 1.hz.square.at_rate(1600).at(1).oscillator
+      expect(oscil.sample(800)).to eq(Numo::SFloat.zeros(800).fill(1))
+      expect(oscil.sample(800)).to eq(Numo::SFloat.zeros(800).fill(-1))
+      expect(oscil.sample(800)).to eq(Numo::SFloat.zeros(800).fill(1))
+      expect(oscil.sample(800)).to eq(Numo::SFloat.zeros(800).fill(-1))
+    end
+
     it 'matches the analytic signal for a complex sine wave' do
       oscil = 240.hz.complex_sine.at(1).oscillator
       result = oscil.sample(1600)
