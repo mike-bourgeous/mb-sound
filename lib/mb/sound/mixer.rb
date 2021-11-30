@@ -25,8 +25,12 @@ module MB
         @constant = 0
         @summands = {}
 
+        @complex = false
+
         summands.each_with_index do |(s, gain), idx|
           gain ||= 1.0
+
+          @complex = true if gain.is_a?(Complex)
 
           case
           when s.is_a?(Numeric)
@@ -40,8 +44,6 @@ module MB
             raise ArgumentError, "Summand #{s.inspect} at index #{idx} is not a Numeric and does not respond to :sample"
           end
         end
-
-        @complex = @constant.is_a?(Complex)
       end
 
       # Calls the #sample methods of all summands, applies gains, adds them all
@@ -79,6 +81,7 @@ module MB
       # order (starting at 0).
       def []=(summand, gain)
         summand = @summands.keys[summand] if summand.is_a?(Integer)
+        @complex = true if gain.is_a?(Complex)
         raise "Summand #{summand} must respond to :sample" unless summand.respond_to?(:sample)
         @summands[summand] = gain
       end
