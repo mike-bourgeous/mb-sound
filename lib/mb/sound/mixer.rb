@@ -61,7 +61,7 @@ module MB
       # return nil.
       def sample(count)
         inputs = @summands.map { |s, gain|
-          v = s.sample(count).not_inplace!
+          v = s.sample(count)&.not_inplace!
           next if v.nil? || v.empty?
           @complex = true if v.is_a?(Numo::SComplex) || v.is_a?(Numo::DComplex)
           v = MB::M.zpad(v, count) if v && v.length > 0 && v.length < count
@@ -138,6 +138,24 @@ module MB
       # Returns an Array of the gains in this mixer (without their summands).
       def gains
         @summands.values
+      end
+
+      # Creates a mixer that adds this mixer's output to +other+.  Part of a
+      # DSL experiment for building up a signal graph.
+      def +(other)
+        Mixer.new([self, other])
+      end
+
+      # Creates a mixer that subtracts +other+ from this mixer's output.  Part
+      # of a DSL experiment for building up a signal graph.
+      def -(other)
+        Mixer.new([self, [other, -1]])
+      end
+
+      # Creates a multiplier that multiplies +other+ by this mixer's output.
+      # Part of a DSL experiment for building up a signal graph.
+      def *(other)
+        Multiplier.new([self, other])
       end
 
       private

@@ -311,9 +311,28 @@ module MB
       def fm(tone, index = nil)
         raise 'This tone already has an FM modulator' if @frequency.respond_to?(:sample)
         tone = tone.hz if tone.is_a?(Numeric)
-        tone = tone.at(1) if index
-        @frequency = MB::Sound::Mixer.new([@frequency, [tone.oscillator, index || 1]])
+        tone = tone.at(1) if index && tone.is_a?(Tone)
+        tone = tone.oscillator if tone.is_a?(Tone)
+        @frequency = MB::Sound::Mixer.new([@frequency, [tone, index || 1]])
         self
+      end
+
+      # Creates a mixer that adds this tone's output to +other+.  Part of a DSL
+      # experiment for building up a signal graph.
+      def +(other)
+        Mixer.new([self, other])
+      end
+
+      # Creates a mixer that subtracts +other+ from this tone's output.  Part
+      # of a DSL experiment for building up a signal graph.
+      def -(other)
+        Mixer.new([self, [other, -1]])
+      end
+
+      # Creates a multiplier that multiplies +other+ by this tone's output.
+      # Part of a DSL experiment for building up a signal graph.
+      def *(other)
+        Multiplier.new([self, other])
       end
 
       # Converts this Tone to the nearest Note based on its frequency.
@@ -331,6 +350,25 @@ module MB
       # parameters cannot be changed after this method is called.
       def generate(count = nil)
         count ||= @duration ? @duration * @rate : @rate
+        oscillator.sample(count.round)
+      end
+
+      # Generates +count+ samples of the tone.  The tone parameters cannot be
+      # changed directly after this method is called; instead Oscillator
+      # parameters must be changed.
+      #
+      # This will return nil if the tone has a specified duration and that
+      # duration has elapsed.
+      def sample(count)
+        if @duration
+          @duration -= count.to_f / @rate
+
+          if @duration <= 0
+            @duration = 0
+            return nil
+          end
+        end
+
         oscillator.sample(count.round)
       end
 
