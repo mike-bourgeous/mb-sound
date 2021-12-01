@@ -104,6 +104,7 @@ require_relative 'sound/complex_pan'
 require_relative 'sound/haas_pan'
 require_relative 'sound/meter'
 require_relative 'sound/mixer'
+require_relative 'sound/multiplier'
 
 require_relative 'sound/window'
 require_relative 'sound/window_reader'

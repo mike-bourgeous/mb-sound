@@ -8,6 +8,8 @@ module MB
     # graphs.  If I redesigned mb-sound from scratch, I would definitely design
     # everything as nodes within a signal graph, kind of like some of my old
     # (unreleased) projects, or like Pure Data.
+    #
+    # Also see the Multiplier class.
     class Mixer
       # The constant value added to the output sum before any summands.
       attr_accessor :constant
@@ -36,6 +38,9 @@ module MB
           case
           when s.is_a?(Numeric)
             @constant += s * gain
+
+          when m.is_a?(Array)
+            raise "Multiplicand cannot be an Array, even though it responds to :sample"
 
           when s.respond_to?(:sample)
             raise "Duplicate summand #{s} at index #{idx}" if @summands.include?(s)
