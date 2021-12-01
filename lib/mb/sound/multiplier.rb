@@ -7,6 +7,8 @@ module MB
     #
     # See also the Mixer class.
     class Multiplier
+      include ArithmeticMixin
+
       # The constant value by which the output will be multiplied.
       attr_accessor :constant
 
@@ -123,24 +125,6 @@ module MB
       # constant).
       def multiplicands
         @multiplicands.keys
-      end
-
-      # Creates a mixer that adds this multiplier's output to +other+.  Part of
-      # a DSL experiment for building up a signal graph.
-      def +(other)
-        Mixer.new([self, other])
-      end
-
-      # Creates a mixer that subtracts +other+ from this multiplier's output.
-      # Part of a DSL experiment for building up a signal graph.
-      def -(other)
-        Mixer.new([self, [other, -1]])
-      end
-
-      # Creates a multiplier that multiplies +other+ by this multiplier's
-      # output.  Part of a DSL experiment for building up a signal graph.
-      def *(other)
-        Multiplier.new([self, other])
       end
 
       private

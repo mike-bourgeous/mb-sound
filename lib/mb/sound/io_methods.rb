@@ -174,24 +174,29 @@ module MB
 
         case input_type
         when :jack_ffi
-          jack.input(channels: channels, connect: device || :physical)
+          inp = jack.input(channels: channels, connect: device || :physical)
 
         when :jack
-          MB::Sound::JackInput.new(ports: { device: device, count: channels }, buffer_size: buffer_size)
+          inp = MB::Sound::JackInput.new(ports: { device: device, count: channels }, buffer_size: buffer_size)
 
         when :pulse
-          MB::Sound::AlsaInput.new(device: 'pulse', rate: rate, channels: channels, buffer_size: buffer_size)
+          inp = MB::Sound::AlsaInput.new(device: 'pulse', rate: rate, channels: channels, buffer_size: buffer_size)
 
         when :alsa
-          MB::Sound::AlsaInput.new(device: device || 'default', rate: rate, channels: channels, buffer_size: buffer_size)
+          inp = MB::Sound::AlsaInput.new(device: device || 'default', rate: rate, channels: channels, buffer_size: buffer_size)
 
         when :null
           # TODO: Allow changing the duration of the null input using environment variables
-          MB::Sound::NullInput.new(rate: rate, channels: channels)
+          inp = MB::Sound::NullInput.new(rate: rate, channels: channels)
 
         else
           raise NotImplementedError, 'TODO: support other platforms'
         end
+
+        inp.extend(IOSampleMixin) unless inp.is_a?(IOSampleMixin)
+        inp.extend(ArithmeticMixin) unless inp.is_a?(ArithmeticMixin)
+
+        inp
       end
 
       # Returns a Symbol describing the type of input that should be used,

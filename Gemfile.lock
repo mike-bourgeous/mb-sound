@@ -9,9 +9,9 @@ GIT
 
 GIT
   remote: https://github.com/mike-bourgeous/mb-sound-jackffi.git
-  revision: 30381aec4e8e1ffd0ed5c2dc968a190911f497ad
+  revision: 207b5575d2fb5d1bf520f219ed680ee1a7553d5d
   specs:
-    mb-sound-jackffi (0.0.15.usegit)
+    mb-sound-jackffi (0.0.17.usegit)
       ffi (~> 1.13.0)
       numo-narray (~> 0.9.1)
 

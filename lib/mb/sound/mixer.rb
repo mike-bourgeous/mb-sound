@@ -11,6 +11,8 @@ module MB
     #
     # Also see the Multiplier class.
     class Mixer
+      include ArithmeticMixin
+
       # The constant value added to the output sum before any summands.
       attr_accessor :constant
 
@@ -138,24 +140,6 @@ module MB
       # Returns an Array of the gains in this mixer (without their summands).
       def gains
         @summands.values
-      end
-
-      # Creates a mixer that adds this mixer's output to +other+.  Part of a
-      # DSL experiment for building up a signal graph.
-      def +(other)
-        Mixer.new([self, other])
-      end
-
-      # Creates a mixer that subtracts +other+ from this mixer's output.  Part
-      # of a DSL experiment for building up a signal graph.
-      def -(other)
-        Mixer.new([self, [other, -1]])
-      end
-
-      # Creates a multiplier that multiplies +other+ by this mixer's output.
-      # Part of a DSL experiment for building up a signal graph.
-      def *(other)
-        Multiplier.new([self, other])
       end
 
       private

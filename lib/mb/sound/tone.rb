@@ -3,6 +3,8 @@ module MB
     # Representation of a tone to generate or play.  Uses MB::Sound::Oscillator
     # for tone generation.
     class Tone
+      include ArithmeticMixin
+
       # Speed of sound for wavelength calculations, in meters per second.
       SPEED_OF_SOUND = 343.0
 
@@ -162,7 +164,8 @@ module MB
         @wave_type = wave_type
         @oscillator = nil
         @noise = false
-        self.at(amplitude).for(duration).at_rate(rate).with_phase(phase)
+        @amplitude_set = false
+        self.or_at(amplitude).for(duration).at_rate(rate).with_phase(phase)
         set_frequency(frequency)
       end
 
@@ -280,6 +283,19 @@ module MB
           @range = -@amplitude..@amplitude
         end
 
+        @amplitude_set = true
+
+        self
+      end
+
+      # Sets the linear +amplitude+ of the tone, which may be a Numeric or a
+      # Range, if #at has not yet been called.
+      def or_at(amplitude)
+        unless @amplitude_set
+          at(amplitude)
+          @amplitude_set = false
+        end
+
         self
       end
 
@@ -315,24 +331,6 @@ module MB
         tone = tone.oscillator if tone.is_a?(Tone)
         @frequency = MB::Sound::Mixer.new([@frequency, [tone, index || 1]])
         self
-      end
-
-      # Creates a mixer that adds this tone's output to +other+.  Part of a DSL
-      # experiment for building up a signal graph.
-      def +(other)
-        Mixer.new([self, other])
-      end
-
-      # Creates a mixer that subtracts +other+ from this tone's output.  Part
-      # of a DSL experiment for building up a signal graph.
-      def -(other)
-        Mixer.new([self, [other, -1]])
-      end
-
-      # Creates a multiplier that multiplies +other+ by this tone's output.
-      # Part of a DSL experiment for building up a signal graph.
-      def *(other)
-        Multiplier.new([self, other])
       end
 
       # Converts this Tone to the nearest Note based on its frequency.
