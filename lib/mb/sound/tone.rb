@@ -299,6 +299,23 @@ module MB
         self
       end
 
+      # Adds the given other +tone+ as a frequency modulator for this tone,
+      # using the given modulation +index+ (good values range from 100 to
+      # 10000, and the modulation index can also be applied to the other Tone
+      # using #at).
+      #
+      # Example:
+      #     200.hz.fm(600.hz, 1000)
+      #     # or
+      #     200.hz.fm(600.hz.at(1000))
+      def fm(tone, index = nil)
+        raise 'This tone already has an FM modulator' if @frequency.respond_to?(:sample)
+        tone = tone.hz if tone.is_a?(Numeric)
+        tone = tone.at(1) if index
+        @frequency = MB::Sound::Mixer.new([@frequency, [tone.oscillator, index || 1]])
+        self
+      end
+
       # Converts this Tone to the nearest Note based on its frequency.
       def to_note
         MB::Sound::Note.new(self)

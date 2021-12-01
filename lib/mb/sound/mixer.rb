@@ -1,7 +1,8 @@
 module MB
   module Sound
     # Sums zero or more inputs that have a #sample method that takes a buffer
-    # size parameter, such as an Oscillator.  One example use of this is as the frequency input.
+    # size parameter, such as an Oscillator.  One example use of this is as the
+    # frequency input of an Oscillator.  See MB::Sound::Tone#fm.
     #
     # This is taking a step further into the territory of composable signal
     # graphs.  If I redesigned mb-sound from scratch, I would definitely design

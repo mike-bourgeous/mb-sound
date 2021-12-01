@@ -59,6 +59,14 @@ play [100.hz, 103.hz]
 play [100.hz, 200.hz, 300.hz, 400.hz, 500.hz, 600.hz, 250.hz, 333.hz].map(&:triangle)
 ```
 
+#### Simple FM tones
+
+Frequency modulation is also possible:
+
+```ruby
+play 123.hz.fm(369.hz.at(1000))
+```
+
 ### Calculating wavelength and frequency
 
 There are DSL methods for working with distances and wavelengths:
