@@ -68,6 +68,8 @@ module MB
         @peak = 0.5
         @value = 0
         @sust = 0
+
+        @buf = nil
       end
 
       # Changes the envelope's attack time to +t+ seconds.
@@ -156,10 +158,11 @@ module MB
         end
       end
 
-      # TODO: Support, test, and document reusing an existing buffer
       def sample_count_c(count, filter: true)
-        narray = MB::FastSound.adsr_narray(
-          count.is_a?(Numo::NArray) ? count : Numo::SFloat.zeros(count).inplace!,
+        setup_buffer(count)
+
+        MB::FastSound.adsr_narray(
+          @buf.inplace!,
           @frame,
           @rate,
           @attack_time,
@@ -170,17 +173,17 @@ module MB
           @on
         )
 
-        @value = narray[-1]
+        @value = @buf[-1]
         @frame += count
         @time = @frame.to_f / @rate
 
         if filter
-          narray = @filter.process(narray.inplace!)
+          @filter.process(@buf.inplace!)
         else
-          @filter.process(narray.not_inplace!)
+          @filter.process(@buf.not_inplace!)
         end
 
-        narray.not_inplace!
+        @buf.not_inplace!
       end
 
       def sample_ruby_c(count, filter: true)
@@ -270,6 +273,13 @@ module MB
       end
 
       private
+
+      # TODO: Maybe this should be some kind of helper mixin
+      def setup_buffer(length)
+        if @buf.nil? || @buf.length != length
+          @buf = Numo::SFloat.zeros(length)
+        end
+      end
 
       def update(attack_time, decay_time, sustain_level, release_time)
         @attack_time = attack_time.to_f

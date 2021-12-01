@@ -42,6 +42,16 @@ RSpec.describe(MB::Sound::ADSREnvelope) do
     expect(result[-1].round(6)).to eq(0)
   end
 
+  it 'reuses the same buffer' do
+    env.trigger(1)
+    r1 = env.sample(48)
+    r1_data = r1.dup
+    r2 = env.sample(48)
+    expect(r1.__id__).to eq(r2.__id__)
+
+    expect(r2).not_to eq(r1_data)
+  end
+
   [:sample, :sample_c, :sample_ruby_c].each do |m|
     describe "##{m}" do
       [false, true].each do |filt|
