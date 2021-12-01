@@ -28,6 +28,12 @@ You might also be interested in [mb-math][4], [mb-geometry][5], and
 Clone the repo, follow the [installation instructions
 below](#installation-and-usage), then run `bin/sound.rb`.
 
+Try this:
+
+```ruby
+play file_input('sounds/synth0.flac') * 120.hz.fm(360.hz.at(1000))
+```
+
 ## Examples
 
 These examples can be run in the `bin/sound.rb` interactive environment.  There
@@ -102,10 +108,10 @@ Filters delay and/or change the volume of different frequencies.
 
 ```ruby
 tone = 432.hz.ramp
-filtered = filter(tone, frequency: 1500, quality: 0.25)
+filtered = 432.hz.ramp.filter(1500.hz.lowpass(quality: 0.25))
 
 # Compare the unfiltered and filtered tones
-plot [tone, filtered[0]], samples: 48000*3/432.0
+plot [tone, filtered], samples: 48000*3/432.0
 
 play filtered
 ```
@@ -151,6 +157,12 @@ You can also plot the spectrum of a playing sound instead of its waveform:
 
 ```ruby
 play 'sounds/sine/log_sweep_20_20k.flac', spectrum: true
+```
+
+You can filter the sound as well:
+
+```ruby
+play file_input('sounds/synth0.flac').filter(1500.hz.lowpass(quality: 8))
 ```
 
 ### Loading a sound file into memory

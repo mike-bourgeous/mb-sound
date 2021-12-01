@@ -66,10 +66,16 @@ module MB
         raise 'This filter does not support returning the frequency domain response' unless respond_to?(:response)
         response(Numo::SFloat.linspace(0, Math::PI, count))
       end
+
+      # Wraps a +source+ providing a :sample method with this filter.
+      def wrap(source, in_place: true)
+        SampleWrapper.new(self, source, in_place: in_place)
+      end
     end
   end
 end
 
+require_relative 'filter/sample_wrapper'
 require_relative 'filter/gain'
 require_relative 'filter/biquad'
 require_relative 'filter/first_order'

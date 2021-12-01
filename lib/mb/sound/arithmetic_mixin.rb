@@ -23,6 +23,17 @@ module MB
         other.or_at(1) if other.is_a?(Tone) # Keep amplitude high if multiplying tones
         Multiplier.new([self, other])
       end
+
+      # Applies the given filter to this sample source or sample chain.
+      # Defaults to generating a low-pass filter if given a frequency in Hz.
+      #
+      # Example:
+      #     MB::Sound.play(500.hz.ramp.filter(1200.hz.lowpass(quality: 4)))
+      def filter(filter, in_place: true)
+        filter = filter.hz if filter.is_a?(Numeric)
+        filter = filter.lowpass if filter.is_a?(Tone)
+        filter.wrap(self, in_place: in_place)
+      end
     end
   end
 end

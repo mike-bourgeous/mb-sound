@@ -8,7 +8,12 @@ module MB
       # This is for interoperability with the arithmetic DSL in MB::Sound that
       # allows combining Tones, Mixers, Multipliers, and inputs.
       def sample(count)
-        read(count)[0]
+        data = read(count)
+        return nil if data.nil? || data.empty? || data[0].empty?
+
+        buf = data[0]
+        buf = MB::M.zpad(buf, count) if buf.length < count
+        buf
       end
     end
   end

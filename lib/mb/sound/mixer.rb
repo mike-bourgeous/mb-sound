@@ -26,11 +26,18 @@ module MB
       # :sample, in which case every summand will have a gain of 1.0, an Array
       # of two-element Arrays of the form [summand, gain], or a Hash from
       # summand to gain (yes, this is a bit redundant for Numeric summands).
-      def initialize(summands)
+      #
+      # If +:stop_early+ is true (the default), then any summand returning nil
+      # or an empty NArray from its #sample method will cause this #sample
+      # method to return nil.  Otherwise, the #sample method only returns nil
+      # when all summands return nil or empty.
+      def initialize(summands, stop_early: true)
         @constant = 0
         @summands = {}
 
         @complex = false
+
+        @stop_early = stop_early
 
         summands.each_with_index do |(s, gain), idx|
           gain ||= 1.0
@@ -59,7 +66,8 @@ module MB
       # Calls the #sample methods of all summands, applies gains, adds them all
       # to the initial #constant value, and returns the result.
       #
-      # If every summand returns nil or an empty buffer, then this method will
+      # If any summand (or every summand if stop_early was set to false in the
+      # constructor) returns nil or an empty buffer, then this method will
       # return nil.
       def sample(count)
         inputs = @summands.map { |s, gain|
@@ -72,7 +80,11 @@ module MB
 
         inputs.compact!
 
-        return nil if inputs.empty? && !@multiplicands.empty?
+        if @stop_early
+          return nil if inputs.length != @summands.length
+        else
+          return nil if inputs.empty? && !@summands.empty?
+        end
 
         setup_buffer(count)
 

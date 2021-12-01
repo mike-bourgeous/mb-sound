@@ -43,6 +43,10 @@ module MB
             sound.map { |el| convert_sound_to_narray(el, depth + 1) }
           end
 
+        when ArithmeticMixin
+          # TODO: this could be improved for plotting signal chains/graphs
+          sound.sample(960)
+
         else
           sound
         end

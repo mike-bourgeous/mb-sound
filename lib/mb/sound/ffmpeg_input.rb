@@ -6,8 +6,6 @@ module MB
     # An input stream type that uses FFMPEG to parse an audio stream from most
     # file formats.
     class FFMPEGInput < IOInput
-      include IOSampleMixin
-
       # Note: number of frames may be approximate
       attr_reader :filename, :rate, :frames, :info, :raw_info
 

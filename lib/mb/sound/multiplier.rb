@@ -22,11 +22,18 @@ module MB
       #
       # The +multiplicands+ must be an Array of Numerics or objects responding
       # to :sample (or you may also use a variable-length argument list).
-      def initialize(*multiplicands)
+      #
+      # If +:stop_early+ is true (the default), then any multiplicand returning
+      # nil or an empty NArray from its #sample method will cause this #sample
+      # method to return nil.  Otherwise, the #sample method only returns nil
+      # when all multiplicands return nil or empty.
+      def initialize(*multiplicands, stop_early: true)
         @constant = 1
         @multiplicands = {}
 
         @complex = false
+
+        @stop_early = stop_early
 
         if multiplicands.is_a?(Array) && multiplicands.length == 1 && multiplicands[0].is_a?(Array)
           multiplicands = multiplicands[0] 
@@ -55,20 +62,25 @@ module MB
       # Calls the #sample methods of all multiplicands, multiplies them
       # together with the initial #constant value, and returns the result.
       #
-      # If every multiplicand returns nil or an empty buffer, then this method
-      # will return nil.
+      # If any multiplicand (or every multiplicand if stop_early was set to
+      # false in the constructor) returns nil or an empty buffer, then this
+      # method will return nil.
       def sample(count)
         inputs = @multiplicands.map { |m, _|
           v = m.sample(count)&.not_inplace!
           next if v.nil? || v.empty?
           @complex = true if v.is_a?(Numo::SComplex) || v.is_a?(Numo::DComplex)
-          v = MB::M.zpad(v, count) if v && v.length > 0 && v.length < count
+          v = MB::M.opad(v, count) if v && v.length > 0 && v.length < count
           v
         }
 
         inputs.compact!
 
-        return nil if inputs.empty? && !@multiplicands.empty?
+        if @stop_early
+          return nil if inputs.length != @multiplicands.length
+        else
+          return nil if inputs.empty? && !@multiplicands.empty?
+        end
 
         setup_buffer(count)
 
