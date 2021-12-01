@@ -149,6 +149,7 @@ module MB
       ::Numeric.include NumericToneMethods
 
       attr_reader :wave_type, :frequency, :amplitude, :range, :duration, :rate, :wavelength, :phase
+      attr_reader :duration_set, :amplitude_set
 
       # Initializes a representation of a simple generated waveform.
       #
@@ -165,7 +166,8 @@ module MB
         @oscillator = nil
         @noise = false
         @amplitude_set = false
-        self.or_at(amplitude).for(duration).at_rate(rate).with_phase(phase)
+        @duration_set = false
+        self.or_at(amplitude).or_for(duration).at_rate(rate).with_phase(phase)
         set_frequency(frequency)
       end
 
@@ -262,7 +264,18 @@ module MB
 
       # Sets the duration to the given number of seconds.
       def for(duration)
-        @duration = duration.to_f
+        @duration_set = true
+        @duration = duration&.to_f
+        self
+      end
+
+      # Sets the duration in seconds, if #for and #forever have not been
+      # called.  Pass nil to default to playing forever.
+      def or_for(duration)
+        unless @duration_set
+          @duration = duration&.to_f
+        end
+
         self
       end
 
