@@ -39,7 +39,7 @@ module MB
           when s.is_a?(Numeric)
             @constant += s * gain
 
-          when m.is_a?(Array)
+          when s.is_a?(Array)
             raise "Multiplicand cannot be an Array, even though it responds to :sample"
 
           when s.respond_to?(:sample)
@@ -56,18 +56,28 @@ module MB
 
       # Calls the #sample methods of all summands, applies gains, adds them all
       # to the initial #constant value, and returns the result.
+      #
+      # If every summand returns nil or an empty buffer, then this method will
+      # return nil.
       def sample(count)
         inputs = @summands.map { |s, gain|
           v = s.sample(count).not_inplace!
+          next if v.nil? || v.empty?
           @complex = true if v.is_a?(Numo::SComplex) || v.is_a?(Numo::DComplex)
+          v = MB::M.zpad(v, count) if v && v.length > 0 && v.length < count
           [v, gain]
         }
+
+        inputs.compact!
+
+        return nil if inputs.empty? && !@multiplicands.empty?
 
         setup_buffer(count)
 
         @buf.fill(@constant)
 
         inputs.each do |v, gain|
+          next if v.nil? || v.empty?
           @tmpbuf.fill(gain).inplace * v
           @buf.inplace + @tmpbuf
         end

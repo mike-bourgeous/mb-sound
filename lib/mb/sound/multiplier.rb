@@ -52,20 +52,28 @@ module MB
 
       # Calls the #sample methods of all multiplicands, multiplies them
       # together with the initial #constant value, and returns the result.
+      #
+      # If every multiplicand returns nil or an empty buffer, then this method
+      # will return nil.
       def sample(count)
         inputs = @multiplicands.map { |m, _|
           v = m.sample(count).not_inplace!
+          next if v.nil? || v.empty?
           @complex = true if v.is_a?(Numo::SComplex) || v.is_a?(Numo::DComplex)
-          v = MB::M.zpad(v, count) if v && v.length < count
+          v = MB::M.zpad(v, count) if v && v.length > 0 && v.length < count
           v
         }
+
+        inputs.compact!
+
+        return nil if inputs.empty? && !@multiplicands.empty?
 
         setup_buffer(count)
 
         @buf.fill(@constant)
 
         inputs.each do |v, _|
-          next if v.nil? || v.empty?
+          next if v.empty?
           @buf.inplace * v
         end
 
