@@ -1,3 +1,5 @@
+require 'forwardable'
+
 module MB
   module Sound
     class Filter
@@ -10,6 +12,7 @@ module MB
       #     # or
       #     123.hz.ramp.filter(500.hz.lowpass)
       class SampleWrapper
+        extend Forwardable
         include MB::Sound::ArithmeticMixin
 
         # Initializes a sample wrapper for the given +filter+ (which must
@@ -22,6 +25,13 @@ module MB
           @filter = filter
           @source = source
           @in_place = in_place
+
+          # TODO: Maybe there's a better way to propagate default gains and durations?
+          if @source.respond_to?(:or_at)
+            class << self
+              def_delegators :@source, :or_at, :or_for
+            end
+          end
         end
 
         # Processes +count+ samples from the source through the filter and
