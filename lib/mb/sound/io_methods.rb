@@ -183,7 +183,7 @@ module MB
         when :jack
           inp = MB::Sound::JackInput.new(ports: { device: device, count: channels }, buffer_size: buffer_size)
 
-        when :pulse
+        when :alsa_pulse
           inp = MB::Sound::AlsaInput.new(device: 'pulse', rate: rate, channels: channels, buffer_size: buffer_size)
 
         when :alsa
