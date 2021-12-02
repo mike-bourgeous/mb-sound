@@ -364,19 +364,20 @@ module MB
         oscillator.sample(count.round)
       end
 
-      # Generates +count+ samples of the tone.  The tone parameters cannot be
-      # changed directly after this method is called; instead Oscillator
-      # parameters must be changed.
+      # Generates +count+ samples of the tone, decrementing the Tone's
+      # #duration.  The tone parameters cannot be changed directly after this
+      # method is called; instead Oscillator parameters must be changed.
       #
       # This will return nil if the tone has a specified duration and that
       # duration has elapsed.
       def sample(count)
         if @duration
+          return nil if @duration <= 0
+
           @duration -= count.to_f / @rate
 
-          if @duration <= 0
+          if @duration < 0
             @duration = 0
-            return nil
           end
         end
 
