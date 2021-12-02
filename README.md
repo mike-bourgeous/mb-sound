@@ -39,6 +39,24 @@ play (input * 400.hz * 10).softclip.filter(150.hz.highpass(quality: 4))
 
 # Old telephone
 play (input * 400.hz.at(0.5..1.0) * 10).softclip(0, 1).filter(250.hz.highpass(quality: 4)).filter(3500.hz.lowpass(quality: 2)).softclip
+
+# Simple musical rhythm
+play (
+  (
+    (
+      D4.triangle.forever *
+      4.hz.ramp.at(1..0).filter(100.hz.lowpass) *
+      0.125.hz.triangle
+    ) + (
+      D2.triangle.forever *
+      2.hz.ramp.at(1..0).filter(100.hz.lowpass)
+    ) + (
+      D1.square.forever.filter(1000.hz.lowpass(quality: 4)) *
+      0.5.hz.ramp.at(1..0).filter(100.hz.lowpass) *
+      (1/32.0).hz.triangle
+    )
+  ) * 4
+).softclip(0, 0.8)
 ```
 
 ## Examples
