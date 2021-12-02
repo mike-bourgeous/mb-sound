@@ -27,6 +27,8 @@ module MB
         old_pt = @pt
         old_pg = @pg
 
+        @plot_outputs.clear
+
         close_plotter
 
         plotter(graphical: false) if old_pt

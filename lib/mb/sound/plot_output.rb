@@ -98,7 +98,7 @@ module MB
       def closed?
         out_closed = (@output.respond_to?(:closed?) && @output.closed?)
         close if out_closed && !@closed
-        @closed
+        @closed || @p.closed?
       end
 
       private
