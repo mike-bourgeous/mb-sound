@@ -46,6 +46,8 @@ module MB
     #     total = a.concatenate(b)
     #     plotter.plot(envelope: total)
     class ADSREnvelope
+      include ArithmeticMixin
+
       attr_reader :attack_time, :decay_time, :sustain_level, :release_time, :total, :peak, :time, :rate
 
       # Initializes an ADSR envelope with the given +:attack_time+,
@@ -60,6 +62,7 @@ module MB
 
         update(attack_time, decay_time, sustain_level, release_time)
 
+        @auto_release = nil
         @time = @total + 100
         @frame = @rate * @time
 
@@ -101,8 +104,10 @@ module MB
       end
 
       # Starts (or restarts) the envelope at the beginning, multiplying the
-      # entire envelope by +peak+.
-      def trigger(peak)
+      # entire envelope by +peak+.  The +:auto_release+ parameter may be an
+      # approximate number of seconds after which to release the envelope
+      # automatically.
+      def trigger(peak, auto_release: nil)
         # @sust is a copy of the sustain level that will be changed if the
         # envelope is released before attack+decay finish
         @sust = @sustain_level
@@ -110,6 +115,7 @@ module MB
         @frame = 0
         @peak = peak
         @value = 0
+        @auto_release = auto_release
         @on = true
       end
 
@@ -145,7 +151,8 @@ module MB
       end
 
       # Produces one sample (or many samples if +count+ is not nil) of the
-      # envelope.  Call repeatedly to get envelope values over time.
+      # envelope.  Call repeatedly to get envelope values over time.  Returns
+      # nil if auto_release was set and the envelope has fully released.
       def sample(count = nil, filter: true)
         sample_c(count, filter: filter)
       end
@@ -174,8 +181,8 @@ module MB
         )
 
         @value = @buf[-1]
-        @frame += count
-        @time = @frame.to_f / @rate
+
+        advance(count)
 
         if filter
           @filter.process(@buf.inplace!)
@@ -183,12 +190,16 @@ module MB
           @filter.process(@buf.not_inplace!)
         end
 
+        return nil if @auto_release && !@on && @buf.max < -100.db
+
         @buf.not_inplace!
       end
 
       def sample_ruby_c(count, filter: true)
         if count
-          return Numo::SFloat.zeros(count).map { sample_one_c(filter: filter) }
+          buf = Numo::SFloat.zeros(count).map { sample_one_c(filter: filter) }
+          return nil if @auto_release && !@on && buf.max < -100.db
+          return buf
         end
 
         return sample_one_c(filter: filter)
@@ -205,8 +216,7 @@ module MB
           @on
         )
 
-        @frame += 1
-        @time = @frame / @rate.to_f
+        advance(1)
 
         if filter
           @filter.process_one(@value)
@@ -218,7 +228,9 @@ module MB
 
       def sample_ruby(count = nil, filter: true)
         if count
-          return Numo::SFloat.zeros(count).map { sample_ruby(filter: filter) }
+          buf = Numo::SFloat.zeros(count).map { sample_ruby(filter: filter) }
+          return nil if @auto_release && !@on && buf.max < -100.db
+          return buf
         end
 
         if @on
@@ -250,8 +262,7 @@ module MB
 
         @value *= @peak
 
-        @frame += 1
-        @time = @frame / @rate.to_f
+        advance(1)
 
         if filter
           @filter.process_one(@value)
@@ -281,6 +292,9 @@ module MB
         end
       end
 
+      # Calculates internal parameters based on the given envelope parameters.
+      # FIXME: envelopes come back to life or disappear abruptly if their times
+      # are changed while playing.
       def update(attack_time, decay_time, sustain_level, release_time)
         @attack_time = attack_time.to_f
         @decay_time = decay_time.to_f
@@ -288,6 +302,13 @@ module MB
         @release_time = release_time.to_f
         @release_start = @attack_time + @decay_time
         @total = @attack_time + @decay_time + @release_time
+      end
+
+      # Advances the internal clock by the given number of +samples+.
+      def advance(samples)
+        @frame += samples
+        @time = @frame / @rate.to_f
+        release if @auto_release && @on && @time >= @auto_release
       end
     end
   end
