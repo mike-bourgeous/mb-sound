@@ -30,6 +30,7 @@ module MB
       # Example:
       #     MB::Sound.play(500.hz.ramp.filter(1200.hz.lowpass(quality: 4)))
       def filter(filter, in_place: true)
+        # TODO: some way of modulating filter cutoff e.g. with an ADSR envelope or with a tone
         filter = filter.hz if filter.is_a?(Numeric)
         filter = filter.lowpass if filter.is_a?(Tone)
         filter.wrap(self, in_place: in_place)

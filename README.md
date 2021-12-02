@@ -31,7 +31,14 @@ below](#installation-and-usage), then run `bin/sound.rb`.
 Try this:
 
 ```ruby
+# Mixing different sounds together
 play file_input('sounds/synth0.flac') * 120.hz.fm(360.hz.at(1000))
+
+# Badly tuned radio/robot effect
+play (input * 400.hz * 10).softclip.filter(150.hz.highpass(quality: 4))
+
+# Old telephone
+play (input * 400.hz.at(0.5..1.0) * 10).softclip(0, 1).filter(250.hz.highpass(quality: 4)).filter(3500.hz.lowpass(quality: 2)).softclip
 ```
 
 ## Examples
