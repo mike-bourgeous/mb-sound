@@ -65,6 +65,12 @@ play [100.hz, 103.hz]
 play [100.hz, 200.hz, 300.hz, 400.hz, 500.hz, 600.hz, 250.hz, 333.hz].map(&:triangle)
 ```
 
+#### Simple AM tones
+
+```ruby
+play 123.hz * 369.hz
+```
+
 #### Simple FM tones
 
 Frequency modulation is also possible:
