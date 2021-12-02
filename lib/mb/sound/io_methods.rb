@@ -44,7 +44,7 @@ module MB
           end
 
         when ArithmeticMixin
-          # TODO: this could be improved for plotting signal chains/graphs
+          # TODO: this could be improved for plotting or saving signal chains/graphs
           sound.sample(960)
 
         else
@@ -108,10 +108,25 @@ module MB
       # #read, and the default sample rate of #input and #output.
       #
       # See MB::Sound::FFMPEGOutput for more flexible sound output.
-      def write(filename, data, rate: 48000, overwrite: false)
-        data = any_sound_to_array(data)
-        output = file_output(filename, rate: rate, channels: data.length, overwrite: overwrite)
-        output.write(data)
+      def write(filename, data, rate: 48000, overwrite: false, max_length: nil)
+        if data.is_a?(ArithmeticMixin) && !data.is_a?(Tone)
+          # TODO: Handle the signal graph DSL better in convert_sound_to_narray
+          output = file_output(filename, rate: rate, channels: 1, overwrite: overwrite, buffer_size: 800)
+
+          t = 0
+          loop do
+            buf = data.sample(output.buffer_size)
+            break if buf.nil? || buf.empty?
+            output.write([buf])
+
+            t += output.buffer_size.to_f / rate
+            break if max_length && t >= max_length
+          end
+        else
+          data = any_sound_to_array(data)
+          output = file_output(filename, rate: rate, channels: data.length, overwrite: overwrite)
+          output.write(data)
+        end
       ensure
         output&.close
       end
