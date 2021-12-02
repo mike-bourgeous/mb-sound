@@ -39,6 +39,10 @@ module MB
 
         @stop_early = stop_early
 
+        # TODO: Allow variable length argument lists (kind of tricky to detect
+        # the different cases of arrays vs hashes vs varargs accurately)
+        summands = [summands] unless summands.is_a?(Array) || summands.is_a?(Hash)
+
         summands.each_with_index do |(s, gain), idx|
           gain ||= 1.0
 

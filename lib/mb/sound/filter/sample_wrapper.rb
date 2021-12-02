@@ -28,8 +28,14 @@ module MB
         # returns the result.
         def sample(count)
           buf = @source.sample(count)
+
+          # FIXME: FFMPEGInput -> SampleWrapper crackles and doesn't filter,
+          # but FFMPEGInput -> Mixer -> SampleWrapper is fine.
+
+          # TODO: Maybe this nil/empty/short handling could be consolidated?
           return nil if buf.nil? || buf.empty?
           buf = MB::M.zpad(buf, count) if buf.length < count
+
           buf.inplace! if @in_place
           buf = @filter.process(buf)
           buf.not_inplace!
