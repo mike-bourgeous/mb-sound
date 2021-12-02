@@ -34,6 +34,14 @@ module MB
         filter = filter.lowpass if filter.is_a?(Tone)
         filter.wrap(self, in_place: in_place)
       end
+
+      # Wraps this arithmetic signal graph in a softclip effect.
+      def softclip(threshold = 0.25, limit = 1.0)
+        MB::Sound::Filter::SampleWrapper.new(
+          MB::Sound::SoftestClip.new(threshold: threshold, limit: limit),
+          self
+        )
+      end
     end
   end
 end
