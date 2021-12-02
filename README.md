@@ -28,7 +28,7 @@ You might also be interested in [mb-math][4], [mb-geometry][5], and
 Clone the repo, follow the [installation instructions
 below](#installation-and-usage), then run `bin/sound.rb`.
 
-Try this:
+Try these first, then look at the examples section below:
 
 ```ruby
 # Mixing different sounds together
@@ -57,6 +57,10 @@ play (
     )
   ) * 4
 ).softclip(0, 0.8)
+
+# Saving a tone to an audio file
+write('/tmp/ramp.flac', D3.ramp * adsr(0.2, 0.2, 0.1, 0.4), overwrite: true)
+play '/tmp/ramp.flac'
 ```
 
 ## Examples
