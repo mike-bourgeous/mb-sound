@@ -93,7 +93,7 @@ DEPENDENCIES
   cmath
   mb-math (>= 0.1.7.6.usegit)!
   mb-sound!
-  mb-sound-jackffi (>= 0.0.15.usegit)!
+  mb-sound-jackffi (>= 0.0.17.usegit)!
   mb-util (>= 0.1.13.1.usegit)!
   numo-narray
   pry
