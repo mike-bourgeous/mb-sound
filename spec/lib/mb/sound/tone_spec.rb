@@ -207,7 +207,12 @@ RSpec.describe MB::Sound::Tone do
       # seconds remaining, far less than the duration of one sample
       # Issue was fixed by cutting off at 1e-9 remaining instead of 0.
       a = 1.hz.square.for(1)
-      expect(wrapper.sample(5000))
+      expect(a.sample(5000)).to be_a(Numo::SFloat)
+      expect(a.sample(500)).to be_a(Numo::SFloat)
+      expect(a.sample(20000)).to be_a(Numo::SFloat)
+      expect(a.sample(500)).to be_a(Numo::SFloat)
+      expect(a.sample(22000)).to be_a(Numo::SFloat)
+      expect(a.sample(100)).to eq(nil)
     end
   end
 
