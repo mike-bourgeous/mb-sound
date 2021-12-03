@@ -139,6 +139,18 @@ module MB
         @multiplicands.keys
       end
 
+      # Adds the given +other+ sample source to this multiplier.
+      def *(other)
+        if other.is_a?(Numeric)
+          @constant *= other
+        else
+          raise "Multiplicand #{other} is already present on multiplier #{self}" if @multiplicands.include?(other)
+          add(other)
+        end
+
+        self
+      end
+
       private
 
       # TODO: Maybe this should be some kind of helper mixin

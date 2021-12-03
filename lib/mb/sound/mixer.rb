@@ -158,6 +158,30 @@ module MB
         @summands.values
       end
 
+      # Adds the given +other+ sample source to this mixer with a gain of 1.0.
+      def +(other)
+        if other.is_a?(Numeric)
+          @constant += other
+        else
+          raise "Summand #{other} is already present on mixer #{self}" if @summands.include?(other)
+          self[other] = 1.0
+        end
+
+        self
+      end
+
+      # Adds the given +other+ sample source to this mixer with a gain of -1.0.
+      def -(other)
+        if other.is_a?(Numeric)
+          @constant -= other
+        else
+          raise "Summand #{other} is already present on mixer #{self}" if @summands.include?(other)
+          self[other] = -1.0
+        end
+
+        self
+      end
+
       private
 
       def setup_buffer(length)
