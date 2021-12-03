@@ -1,6 +1,30 @@
 require 'numo/pocketfft'
 
 RSpec.describe MB::Sound::Filter::Cookbook do
+  describe(MB::Sound::Filter::Cookbook::CookbookWrapper) do
+    it 'uses changing values and stops when inputs stop' do
+      f = 500.hz.lowpass
+
+      wrapper = MB::Sound::Filter::Cookbook::CookbookWrapper.new(
+        filter: f,
+        audio: 500.hz.at(1),
+        cutoff: 1.hz.square.at(20000..500).for(1),
+        quality: 4
+      )
+
+      # Verify alternating cutoff frequencies
+      expect(wrapper.sample(5000)).to be_a(Numo::SFloat)
+      expect(wrapper.sample(500).abs.max.round(3)).to eq(4)
+
+      expect(wrapper.sample(20000)).to be_a(Numo::SFloat)
+      expect(wrapper.sample(500).abs.max.round(3)).to eq(1)
+
+      # Verify end-of-stream behavior
+      expect(wrapper.sample(22000)).to be_a(Numo::SFloat)
+      expect(wrapper.sample(100)).to eq(nil)
+    end
+  end
+
   context 'lowpass' do
     it 'produces the right coefficients for 25Hz/48kHz/Q0.707' do
       coeff_25 = [

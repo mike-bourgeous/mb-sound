@@ -37,6 +37,8 @@ module MB
     # Filters a sound with the given filter parameters (see
     # MB::Sound::Filter::Cookbook).
     #
+    # TODO: Maybe remove this, as it is superseded by the ArithmeticMixin DSL.
+    #
     # +:frequency+ - The center or cutoff frequency of the filter.
     # +:filter_type+ - One of the filter types from MB::Sound::Filter::Cookbook::FILTER_TYPES.
     # +:rate+ - The sample rate to use for the filter (defaults to sound.rate if sound responds to :rate, or 48000).
@@ -45,7 +47,7 @@ module MB
     # +:slope+ - The slope for a shelf filter.  Specify one of quality, slope, or bandwidth.
     # +:bandwidth+ - The bandwidth of a peaking filter.
     # +:gain+ - The gain of a shelf or peaking filter.
-    def self.filter(sound, frequency:, filter_type: :lowpass, rate: nil, quality: nil, slope: nil, bandwidth: nil, gain: nil)
+    def self.apply_filter(sound, frequency:, filter_type: :lowpass, rate: nil, quality: nil, slope: nil, bandwidth: nil, gain: nil)
       # TODO: Further develop filters and sound sources into a sound
       # source/sink graph, where a complete graph can be built up with a DSL,
       # and actual generation only occurs on demand?

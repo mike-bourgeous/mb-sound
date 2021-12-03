@@ -315,6 +315,7 @@ module MB
       # Changes the target sample rate of the tone.
       def at_rate(rate)
         @rate = rate
+        @single_sample = 1.0 / @rate
         self
       end
 
@@ -376,7 +377,7 @@ module MB
 
           @duration -= count.to_f / @rate
 
-          if @duration < 0
+          if @duration <= 1e-9 # deal with rounding; sample rates higher than 999.9MHz are unlikely
             @duration = 0
           end
         end
@@ -453,6 +454,9 @@ module MB
       # amplitude- and waveform-dependent effect.  It acts sort of like a
       # lowpass filter whose cutoff frequency decreases (and harmonic
       # distortion increases) as the signal amplitude increases.
+      #
+      # LinearFollowers are most useful for smoothing control inputs from e.g.
+      # MIDI or analog sources.
       def follower
         # Multiple of 4 below:
         #   2 for the fact that a full cycle requires both a rise and fall, so
@@ -483,6 +487,7 @@ module MB
         # ffmpegoutput unpadded.
 
         @rate = output.rate
+        @single_sample = 1.0 / @rate
         buffer_size = output.buffer_size
         samples_left = @duration * @rate if @duration
 
