@@ -3,6 +3,8 @@ module MB
     # Representation of a tone to generate or play.  Uses MB::Sound::Oscillator
     # for tone generation.
     class Tone
+      include ArithmeticMixin
+
       # Speed of sound for wavelength calculations, in meters per second.
       SPEED_OF_SOUND = 343.0
 
@@ -147,6 +149,7 @@ module MB
       ::Numeric.include NumericToneMethods
 
       attr_reader :wave_type, :frequency, :amplitude, :range, :duration, :rate, :wavelength, :phase
+      attr_reader :duration_set, :amplitude_set
 
       # Initializes a representation of a simple generated waveform.
       #
@@ -162,7 +165,9 @@ module MB
         @wave_type = wave_type
         @oscillator = nil
         @noise = false
-        self.at(amplitude).for(duration).at_rate(rate).with_phase(phase)
+        @amplitude_set = false
+        @duration_set = false
+        self.or_at(amplitude).or_for(duration).at_rate(rate).with_phase(phase)
         set_frequency(frequency)
       end
 
@@ -259,7 +264,18 @@ module MB
 
       # Sets the duration to the given number of seconds.
       def for(duration)
-        @duration = duration.to_f
+        @duration_set = true
+        @duration = duration&.to_f
+        self
+      end
+
+      # Sets the default duration in seconds, if #for and #forever have not
+      # been called.  Pass nil to default to playing forever.
+      def or_for(duration)
+        unless @duration_set
+          @duration = duration&.to_f
+        end
+
         self
       end
 
@@ -280,12 +296,26 @@ module MB
           @range = -@amplitude..@amplitude
         end
 
+        @amplitude_set = true
+
+        self
+      end
+
+      # Sets the default linear +amplitude+ of the tone, which may be a Numeric
+      # or a Range, if #at has not yet been called.
+      def or_at(amplitude)
+        unless @amplitude_set
+          at(amplitude)
+          @amplitude_set = false
+        end
+
         self
       end
 
       # Changes the target sample rate of the tone.
       def at_rate(rate)
         @rate = rate
+        @single_sample = 1.0 / @rate
         self
       end
 
@@ -296,6 +326,24 @@ module MB
       # Example: 123.hz.with_phase(90.degrees)
       def with_phase(phase)
         @phase = phase
+        self
+      end
+
+      # Adds the given other +tone+ as a frequency modulator for this tone,
+      # using the given modulation +index+ (good values range from 100 to
+      # 10000, and the modulation index can also be applied to the other Tone
+      # using #at).
+      #
+      # Example:
+      #     200.hz.fm(600.hz, 1000)
+      #     # or
+      #     200.hz.fm(600.hz.at(1000))
+      def fm(tone, index = nil)
+        raise 'This tone already has an FM modulator' if @frequency.respond_to?(:sample)
+        tone = tone.hz if tone.is_a?(Numeric)
+        tone = tone.at(1) if index && tone.is_a?(Tone)
+        tone = tone.oscillator if tone.is_a?(Tone)
+        @frequency = MB::Sound::Mixer.new([@frequency, [tone, index || 1]])
         self
       end
 
@@ -315,6 +363,32 @@ module MB
       def generate(count = nil)
         count ||= @duration ? @duration * @rate : @rate
         oscillator.sample(count.round)
+      end
+
+      # Generates +count+ samples of the tone, decrementing the Tone's
+      # #duration.  The tone parameters cannot be changed directly after this
+      # method is called; instead Oscillator parameters must be changed.
+      #
+      # This will return nil if the tone has a specified duration and that
+      # duration has elapsed.
+      def sample(count)
+        if @duration
+          return nil if @duration <= 0
+
+          @duration -= count.to_f / @rate
+
+          if @duration < 0.5 * @single_sample # deal with rounding error
+            @duration = 0
+          end
+        end
+
+        oscillator.sample(count.round)
+      end
+
+      # See ArithmeticMixin#sources.  Returns the frequency source of the tone,
+      # which will either be a number or a signal generator.
+      def sources
+        [@frequency]
       end
 
       # Returns an Oscillator that will generate a wave with the wave type,
@@ -386,6 +460,9 @@ module MB
       # amplitude- and waveform-dependent effect.  It acts sort of like a
       # lowpass filter whose cutoff frequency decreases (and harmonic
       # distortion increases) as the signal amplitude increases.
+      #
+      # LinearFollowers are most useful for smoothing control inputs from e.g.
+      # MIDI or analog sources.
       def follower
         # Multiple of 4 below:
         #   2 for the fact that a full cycle requires both a rise and fall, so
@@ -416,6 +493,7 @@ module MB
         # ffmpegoutput unpadded.
 
         @rate = output.rate
+        @single_sample = 1.0 / @rate
         buffer_size = output.buffer_size
         samples_left = @duration * @rate if @duration
 

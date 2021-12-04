@@ -43,6 +43,10 @@ module MB
             sound.map { |el| convert_sound_to_narray(el, depth + 1) }
           end
 
+        when ArithmeticMixin
+          # TODO: this could be improved for plotting or saving signal chains/graphs
+          sound.sample(960)
+
         else
           sound
         end
@@ -104,10 +108,25 @@ module MB
       # #read, and the default sample rate of #input and #output.
       #
       # See MB::Sound::FFMPEGOutput for more flexible sound output.
-      def write(filename, data, rate: 48000, overwrite: false)
-        data = any_sound_to_array(data)
-        output = file_output(filename, rate: rate, channels: data.length, overwrite: overwrite)
-        output.write(data)
+      def write(filename, data, rate: 48000, overwrite: false, max_length: nil)
+        if data.is_a?(ArithmeticMixin) && !data.is_a?(Tone)
+          # TODO: Handle the signal graph DSL better in convert_sound_to_narray
+          output = file_output(filename, rate: rate, channels: 1, overwrite: overwrite, buffer_size: 800)
+
+          t = 0
+          loop do
+            buf = data.sample(output.buffer_size)
+            break if buf.nil? || buf.empty?
+            output.write([buf])
+
+            t += output.buffer_size.to_f / rate
+            break if max_length && t >= max_length
+          end
+        else
+          data = any_sound_to_array(data)
+          output = file_output(filename, rate: rate, channels: data.length, overwrite: overwrite)
+          output.write(data)
+        end
       ensure
         output&.close
       end
@@ -174,24 +193,29 @@ module MB
 
         case input_type
         when :jack_ffi
-          jack.input(channels: channels, connect: device || :physical)
+          inp = jack.input(channels: channels, connect: device || :physical)
 
         when :jack
-          MB::Sound::JackInput.new(ports: { device: device, count: channels }, buffer_size: buffer_size)
+          inp = MB::Sound::JackInput.new(ports: { device: device, count: channels }, buffer_size: buffer_size)
 
-        when :pulse
-          MB::Sound::AlsaInput.new(device: 'pulse', rate: rate, channels: channels, buffer_size: buffer_size)
+        when :alsa_pulse
+          inp = MB::Sound::AlsaInput.new(device: 'pulse', rate: rate, channels: channels, buffer_size: buffer_size)
 
         when :alsa
-          MB::Sound::AlsaInput.new(device: device || 'default', rate: rate, channels: channels, buffer_size: buffer_size)
+          inp = MB::Sound::AlsaInput.new(device: device || 'default', rate: rate, channels: channels, buffer_size: buffer_size)
 
         when :null
           # TODO: Allow changing the duration of the null input using environment variables
-          MB::Sound::NullInput.new(rate: rate, channels: channels)
+          inp = MB::Sound::NullInput.new(rate: rate, channels: channels)
 
         else
           raise NotImplementedError, 'TODO: support other platforms'
         end
+
+        inp.extend(IOSampleMixin) unless inp.is_a?(IOSampleMixin)
+        inp.extend(ArithmeticMixin) unless inp.is_a?(ArithmeticMixin)
+
+        inp
       end
 
       # Returns a Symbol describing the type of input that should be used,

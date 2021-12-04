@@ -901,16 +901,16 @@ static VALUE ruby_synthesize(VALUE self, VALUE buffer, VALUE wave_type, VALUE fr
 		}
 
 		ensure_sfloat(&frequency);
-		freqptr = (float *)nary_get_pointer_for_read(frequency);
+		freqptr = (float *)(nary_get_pointer_for_read(frequency) + nary_get_offset(frequency));
 		freq = freqptr[0];
 	} else {
 		freq = NUM2DBL(frequency);
 	}
 
 	if (complex_buffer) {
-		complex_ptr = (float complex *)nary_get_pointer_for_write(buffer);
+		complex_ptr = (float complex *)(nary_get_pointer_for_write(buffer) + nary_get_offset(buffer));
 	} else {
-		float_ptr = (float *)nary_get_pointer_for_write(buffer);
+		float_ptr = (float *)(nary_get_pointer_for_write(buffer) + nary_get_offset(buffer));
 	}
 
 	double delta;
@@ -986,9 +986,10 @@ static VALUE ruby_narray_to_array(VALUE self, VALUE narray)
 	size_t length = RNARRAY_SHAPE(narray)[0];
 	VALUE out = rb_ary_new_capa(length);
 
+	rb_funcall(narray, rb_intern("debug_info"), 0);
 	rb_warn("Size is %zu, ndim is %d, length is %zu\n", RNARRAY_SIZE(narray), RNARRAY_NDIM(narray), length);
 
-	double complex *ptr = (double complex *)nary_get_pointer_for_read(narray);
+	double complex *ptr = (double complex *)(nary_get_pointer_for_read(narray) + nary_get_offset(narray));
 	for(size_t i = 0; i < length; i++) {
 		rb_ary_store(out, i, complex_to_num(ptr[i]));
 	}
@@ -997,7 +998,7 @@ static VALUE ruby_narray_to_array(VALUE self, VALUE narray)
 }
 
 #define BIQUAD_LOOP(buf_type, coeff_type, conv_from_rb, conv_to_rb, filter_func) do { \
-	buf_type *data = (buf_type *)nary_get_pointer_for_read_write(buf); \
+	buf_type *data = (buf_type *)(nary_get_pointer_for_read_write(buf) + nary_get_offset(buf)); \
 \
 	coeff_type x0 = 0; \
 	coeff_type x1 = conv_from_rb(rb_ary_entry(state, 1)); \
@@ -1172,9 +1173,10 @@ static VALUE ruby_dynamic_biquad(VALUE self, VALUE samples, VALUE cutoffs, VALUE
 	double g = RTEST(db_gain) ? NUM2DBL(db_gain) : NAN;
 	double rate = NUM2DBL(sample_rate);
 
-	float *samp = (float *)nary_get_pointer_for_write(samples);
-	float *cut = (float *)nary_get_pointer_for_read(cutoffs);
-	float *q = (float *)nary_get_pointer_for_read(qualities);
+	// nary_get_offset / na_get_offset returns a byte offset, so add it before the cast
+	float *samp = (float *)(nary_get_pointer_for_write(samples) + nary_get_offset(samples));
+	float *cut = (float *)(nary_get_pointer_for_read(cutoffs) + nary_get_offset(cutoffs));
+	float *q = (float *)(nary_get_pointer_for_read(qualities) + nary_get_offset(qualities));
 	struct biquad_coeffs bq = {
 		.b0 = NUM2DBL(rb_ary_entry(coeffs, 0)),
 		.b1 = NUM2DBL(rb_ary_entry(coeffs, 1)),
@@ -1266,7 +1268,7 @@ VALUE ruby_adsr_narray(VALUE self, VALUE narray, VALUE frame, VALUE rate, VALUE 
 	_Bool o = RTEST(on);
 
 	if (CLASS_OF(narray) == numo_cSFloat) {
-		float *data = (float *)nary_get_pointer_for_write(narray);
+		float *data = (float *)(nary_get_pointer_for_write(narray) + nary_get_offset(narray));
 
 		for(size_t i = 0; i < length; i++) {
 			double t = current_frame / sample_rate;
@@ -1274,7 +1276,7 @@ VALUE ruby_adsr_narray(VALUE self, VALUE narray, VALUE frame, VALUE rate, VALUE 
 			current_frame += 1;
 		}
 	} else if (CLASS_OF(narray) == numo_cDFloat) {
-		double *data = (double *)nary_get_pointer_for_write(narray);
+		double *data = (double *)(nary_get_pointer_for_write(narray) + nary_get_offset(narray));
 
 		for(size_t i = 0; i < length; i++) {
 			double t = current_frame / sample_rate;

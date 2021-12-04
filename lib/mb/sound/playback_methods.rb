@@ -46,7 +46,17 @@ module MB
           file_tone_data.write(output)
 
         else
-          raise "Unsupported type #{file_tone_data.class.name} for playback"
+          if file_tone_data.respond_to?(:sample)
+            output = MB::Sound.output(rate: rate, plot: plot, device: device)
+            loop do
+              d = file_tone_data.sample(output.buffer_size)
+              break if d.nil? || d.empty?
+              d = MB::M.zpad(d, output.buffer_size) if d.length < output.buffer_size
+              output.write([d] * output.channels)
+            end
+          else
+            raise "Unsupported type #{file_tone_data.class.name} for playback"
+          end
         end
 
         puts "\n\n"

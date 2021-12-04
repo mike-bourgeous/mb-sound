@@ -216,6 +216,8 @@ module MB
         # between 0.0 and 1.0) blending between the incoming +sample+ (at 0.0)
         # and the filter output (at 1.0).  The filter's internal state is updated
         # with the result.
+        #
+        # This was used in an experiment with content-adaptive filtering.
         def weighted_process(sample, strength = 1.0)
           out = @b0 * sample + @b1 * @x1 + @b2 * @x2 - @a1 * @y1 - @a2 * @y2
           out = 0 if out.abs < 1e-18 && @y2.abs < 1e-18 && @y1.abs < 1e-18

@@ -5,6 +5,9 @@ module MB
     #
     # See FFMPEGInput for an example.
     class IOInput < IOBase
+      include IOSampleMixin
+      include ArithmeticMixin
+
       attr_reader :frames_read
 
       # Initializes an IO-reading audio input stream for the given I/O object

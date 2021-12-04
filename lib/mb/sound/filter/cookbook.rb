@@ -6,6 +6,93 @@ module MB
       #
       # See https://shepazu.github.io/Audio-EQ-Cookbook/audio-eq-cookbook.html
       class Cookbook < Biquad
+        # Wrapper around a cookbook filter that uses separate :sample or
+        # numeric sources for audio input, cutoff frequency, and filter
+        # quality.
+        #
+        # TODO: This might be mergeable with SampleWrapper or otherwise useful
+        # elsewhere, would be nice to be able to make higher-order butterworth
+        # filters or first-order filters available, for example
+        class CookbookWrapper
+          include ArithmeticMixin
+
+          class WrapperArgumentError < ArgumentError
+            def initialize(msg = nil, source: nil)
+              msg ||= 'Pass a Numeric, a Numo::NArray, or a non-Array object that responds to :sample, such as Tone, Oscillator, or IOInput'
+              msg << "(got #{source})" if source
+              super(msg)
+            end
+          end
+
+          attr_reader :audio, :cutoff, :quality
+
+          # Initializes a sample-chain wrapper around a cookbook filter that
+          # uses Cookbook#dynamic_process to vary the cutoff frequency
+          # and quality gradually over time.  Each parameter should have a
+          # :sample method that returns an array of audio.
+          def initialize(filter:, audio:, cutoff:, quality: 0.5 ** 0.5)
+            raise 'Filter must have a #dynamic_process method' unless filter.respond_to?(:dynamic_process)
+            @filter = filter
+
+            @audio = sample_or_narray(audio)
+            @cutoff = sample_or_narray(cutoff)
+            @quality = sample_or_narray(quality)
+
+            @cutoff = @cutoff.or_for(nil) if @cutoff.respond_to?(:@cutoff)
+            @quality = @quality.or_for(nil) if @quality.respond_to?(:@quality)
+          end
+
+          # Processes +count+ samples from the audio source through the filter,
+          # using the cutoff and quality sources to control filter parameters.
+          def sample(count, in_place: true)
+            audio = @audio.sample(count)
+            cutoff = @cutoff.sample(count)
+            quality = @quality.sample(count)
+
+            return nil if audio.nil? || cutoff.nil? || quality.nil? || audio.empty? || cutoff.empty? || quality.empty?
+
+            audio.inplace! if in_place
+
+            @filter.dynamic_process(audio, cutoff, quality).not_inplace!
+          end
+
+          # See ArithmeticMixin#sources.
+          def sources
+            [@audio, @cutoff, @quality]
+          end
+
+          private
+
+          # If given an object with :sample, returns the object itself.  If
+          # given a numeric value, returns an object with a :sample method that
+          # returns that value as a constant indefinitely.  If given a
+          # Numo::NArray, returns an ArrayInput that wraps it, without looping.
+          # Otherwise, raises an error.
+          def sample_or_narray(v)
+            case v
+            when Array
+              raise WrapperArgumentError.new(source: v)
+
+            when Numeric
+              MB::Sound::Constant.new(v)
+
+            when Numo::NArray
+              MB::Sound::ArrayInput.new(data: [v])
+
+            else
+              if v.respond_to?(:sample)
+                # TODO: Might need a better way to detect sampleable audio
+                # objects, as opposed to Ruby objects with a sample method that
+                # returns a random sampling.  Or maybe I should rename all of
+                # my sample methods to something else.
+                v
+              else
+                raise WrapperArgumentError.new(source: v)
+              end
+            end
+          end
+        end
+
         FILTER_TYPES = [
           :lowpass,
           :highpass,
@@ -210,7 +297,7 @@ module MB
         end
 
         def dynamic_process_c(samples, cutoffs, qualities)
-          coeffs = self.coefficients
+          coeffs = [@omega, @b0, @b1, @b2, @a1, @a2]
           state = [@x1, @x2, @y1, @y2]
 
           result = MB::FastSound.dynamic_biquad(
@@ -224,7 +311,7 @@ module MB
             state
           )
 
-          @b0, @b1, @b2, @a1, @a2 = coeffs
+          @omega, @b0, @b1, @b2, @a1, @a2 = coeffs
           @x1, @x2, @y1, @y2 = state
           @quality = qualities[-1]
           @center_frequency = cutoffs[-1]

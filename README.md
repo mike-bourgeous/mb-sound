@@ -2,12 +2,13 @@
 
 [![Tests](https://github.com/mike-bourgeous/mb-sound/actions/workflows/test.yml/badge.svg)](https://github.com/mike-bourgeous/mb-sound/actions/workflows/test.yml)
 
-A library of simple Ruby tools for processing sound.  This is a companion
-library to an [educational video series I'm making about sound][0].
+A library of simple Ruby tools for processing sound, and a DSL for building
+signal processing chains.  This is a companion library to an [educational video
+series I'm making about sound][0].
 
-You'll find simple functions for loading and saving audio files, playing and
-recording sound in realtime (on Linux, and only for really simple algorithms),
-and plotting sounds.
+You'll find functions for loading and saving audio files, playing and recording
+sound in realtime (on Linux, and only for really simple algorithms), generating
+sounds with subtractive, FM, and AM synthesis, and plotting sounds.
 
 https://user-images.githubusercontent.com/5015814/115160392-c485e500-a04c-11eb-8b5f-675f3c3eef8c.mp4
 
@@ -27,6 +28,41 @@ You might also be interested in [mb-math][4], [mb-geometry][5], and
 
 Clone the repo, follow the [installation instructions
 below](#installation-and-usage), then run `bin/sound.rb`.
+
+Try these first, then look at the examples section below:
+
+```ruby
+# Mixing different sounds together
+play file_input('sounds/synth0.flac') * 120.hz.fm(360.hz.at(1000))
+
+# Badly tuned radio/robot effect
+play (input * 400.hz * 10).softclip.filter(150.hz.highpass(quality: 4))
+
+# Old telephone
+play (input * 400.hz.at(0.5..1.0) * 10).softclip(0, 1).filter(250.hz.highpass(quality: 4)).filter(3500.hz.lowpass(quality: 2)).softclip
+
+# Simple musical rhythm
+play (
+  (
+    (
+      D4.triangle.forever *
+      4.hz.ramp.at(1..0).filter(100.hz.lowpass) *
+      0.125.hz.triangle
+    ) + (
+      (D2.triangle.forever + noise.at(-46.db)) *
+      2.hz.ramp.at(1..0).filter(100.hz.lowpass)
+    ) + (
+      D1.square.forever.filter(1000.hz.lowpass(quality: 4)) *
+      0.5.hz.ramp.at(1..0).filter(100.hz.lowpass) *
+      (1/32.0).hz.triangle
+    )
+  ) * 4
+).softclip(0, 0.8)
+
+# Saving a tone to an audio file
+write('/tmp/ramp.flac', D3.ramp * adsr(0.2, 0.2, 0.1, 0.4), overwrite: true)
+play '/tmp/ramp.flac'
+```
 
 ## Examples
 
@@ -57,6 +93,33 @@ play [100.hz, 103.hz]
 
 # Surround sound chord
 play [100.hz, 200.hz, 300.hz, 400.hz, 500.hz, 600.hz, 250.hz, 333.hz].map(&:triangle)
+```
+
+#### Noise
+
+```ruby
+# Mono
+play noise
+
+# Stereo
+play [noise, noise]
+
+# Brown(ish)
+play noise.at(2).filter(30.hz.lowpass1p).softclip
+```
+
+#### Simple AM tones
+
+```ruby
+play 123.hz * 369.hz
+```
+
+#### Simple FM tones
+
+Frequency modulation is also possible:
+
+```ruby
+play 123.hz.fm(369.hz.at(1000))
 ```
 
 ### Calculating wavelength and frequency
@@ -94,10 +157,10 @@ Filters delay and/or change the volume of different frequencies.
 
 ```ruby
 tone = 432.hz.ramp
-filtered = filter(tone, frequency: 1500, quality: 0.25)
+filtered = 432.hz.ramp.filter(1500.hz.lowpass(quality: 0.25))
 
 # Compare the unfiltered and filtered tones
-plot [tone, filtered[0]], samples: 48000*3/432.0
+plot [tone, filtered], samples: 48000*3/432.0
 
 play filtered
 ```
@@ -143,6 +206,12 @@ You can also plot the spectrum of a playing sound instead of its waveform:
 
 ```ruby
 play 'sounds/sine/log_sweep_20_20k.flac', spectrum: true
+```
+
+You can filter the sound as well:
+
+```ruby
+play file_input('sounds/synth0.flac').filter(1500.hz.lowpass(quality: 8))
 ```
 
 ### Loading a sound file into memory

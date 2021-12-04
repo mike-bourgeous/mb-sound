@@ -29,6 +29,8 @@ module MB
         @closed = false
 
         @header_lines = header_lines + output.channels + 1
+        max_header = MB::U.height / 5
+        @header_lines = max_header if @header_lines > max_header
         @window_size = window_size || output.buffer_size
 
         @spectrum = spectrum
@@ -42,7 +44,7 @@ module MB
         elsif graphical
           @p = MB::M::Plot.new
         else
-          @p = MB::M::Plot.terminal(height_fraction: (U.height - header_lines - 2).to_f / U.height)
+          @p = MB::M::Plot.terminal(height_fraction: (MB::U.height - header_lines - 2).to_f / MB::U.height)
         end
 
         @min = -0.1
@@ -98,7 +100,7 @@ module MB
       def closed?
         out_closed = (@output.respond_to?(:closed?) && @output.closed?)
         close if out_closed && !@closed
-        @closed
+        @closed || @p.closed?
       end
 
       private

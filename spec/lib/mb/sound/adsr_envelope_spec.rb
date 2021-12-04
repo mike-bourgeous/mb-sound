@@ -42,6 +42,16 @@ RSpec.describe(MB::Sound::ADSREnvelope) do
     expect(result[-1].round(6)).to eq(0)
   end
 
+  it 'reuses the same buffer' do
+    env.trigger(1)
+    r1 = env.sample(48)
+    r1_data = r1.dup
+    r2 = env.sample(48)
+    expect(r1.__id__).to eq(r2.__id__)
+
+    expect(r2).not_to eq(r1_data)
+  end
+
   [:sample, :sample_c, :sample_ruby_c].each do |m|
     describe "##{m}" do
       [false, true].each do |filt|
@@ -175,6 +185,24 @@ RSpec.describe(MB::Sound::ADSREnvelope) do
       expect(env.rate).to eq(48000)
       expect(filter_dup.sample_rate).to eq(1500)
       expect(filter.sample_rate).to eq(48000)
+    end
+  end
+
+  describe '#trigger' do
+    it 'can set an automatic release' do
+      env.trigger(1.0, auto_release: 0.1)
+
+      6.times do
+        expect(env.on?).to eq(true)
+        expect(env.sample(800)).to be_a(Numo::SFloat)
+      end
+
+      31.times do
+        expect(env.on?).to eq(false)
+        expect(env.sample(800)).to be_a(Numo::SFloat)
+      end
+
+      expect(env.sample(800)).to eq(nil)
     end
   end
 end

@@ -130,6 +130,31 @@ RSpec.describe(MB::Sound::Mixer) do
       ss[osc] = 1+1i
       expect(ss.sample(100)).to be_a(Numo::SComplex)
     end
+
+    it 'returns nil when any input returns nil, if stop_early is true' do
+      t1 = 0.hz.square.at(1).for(1).at_rate(50)
+      t2 = 0.hz.square.at(0.5).for(1).at_rate(100)
+      ss = MB::Sound::Mixer.new([t1, t2])
+
+      result = ss.sample(50)
+      expect(result).to eq(Numo::SFloat.zeros(50).fill(1.5))
+
+      expect(ss.sample(50)).to eq(nil)
+    end
+
+    it 'returns nil only when all inputs return nil, if stop_early is false' do
+      t1 = 0.hz.square.at(1).for(1).at_rate(50)
+      t2 = 0.hz.square.at(0.5).for(1).at_rate(100)
+      ss = MB::Sound::Mixer.new([t1, t2], stop_early: false)
+
+      result = ss.sample(50)
+      expect(result).to eq(Numo::SFloat.zeros(50).fill(1.5))
+
+      result = ss.sample(50)
+      expect(result).to eq(Numo::SFloat.zeros(50).fill(0.5))
+
+      expect(ss.sample(50)).to eq(nil)
+    end
   end
 
   describe '#clear' do

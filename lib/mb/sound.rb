@@ -37,6 +37,8 @@ module MB
     # Filters a sound with the given filter parameters (see
     # MB::Sound::Filter::Cookbook).
     #
+    # TODO: Maybe remove this, as it is superseded by the ArithmeticMixin DSL.
+    #
     # +:frequency+ - The center or cutoff frequency of the filter.
     # +:filter_type+ - One of the filter types from MB::Sound::Filter::Cookbook::FILTER_TYPES.
     # +:rate+ - The sample rate to use for the filter (defaults to sound.rate if sound responds to :rate, or 48000).
@@ -45,7 +47,7 @@ module MB
     # +:slope+ - The slope for a shelf filter.  Specify one of quality, slope, or bandwidth.
     # +:bandwidth+ - The bandwidth of a peaking filter.
     # +:gain+ - The gain of a shelf or peaking filter.
-    def self.filter(sound, frequency:, filter_type: :lowpass, rate: nil, quality: nil, slope: nil, bandwidth: nil, gain: nil)
+    def self.apply_filter(sound, frequency:, filter_type: :lowpass, rate: nil, quality: nil, slope: nil, bandwidth: nil, gain: nil)
       # TODO: Further develop filters and sound sources into a sound
       # source/sink graph, where a complete graph can be built up with a DSL,
       # and actual generation only occurs on demand?
@@ -67,6 +69,37 @@ module MB
       }
     end
 
+    # Creates a new, triggered ADSR envelope generator.  If the +:auto_release+
+    # parameter is a number of seconds (defaults to 2x attack + decay, or 0.25,
+    # whichever is longer; set it to false to disable), then the envelope will
+    # release automatically after that time.  The default sample rate is 48kHz.
+    #
+    # For DSL use in combination with tones, inputs, etc.  See
+    # MB::Sound::ArithmeticMixin.
+    def self.adsr(attack = 0.01, decay = 0.1, sustain = -12.db, release = 0.4, auto_release: nil, rate: 48000)
+      if auto_release.nil?
+        auto_release = 2.0 * (attack + decay)
+        auto_release = 0.1 if auto_release < 0.1
+      end
+
+      env = MB::Sound::ADSREnvelope.new(
+        attack_time: attack,
+        decay_time: decay,
+        sustain_level: sustain,
+        release_time: release,
+        rate: rate
+      )
+      env.trigger(1.0, auto_release: auto_release)
+      env
+    end
+
+    # Creates a uniformly distributed white noise generator that can be
+    # combined with other tones, filters, etc.  See MB::Sound::ArithmeticMixin
+    # and MB::Sound::Tone.
+    def self.noise
+      2000.hz.ramp.noise
+    end
+
     # Allows retrieving a Note by name using e.g. MB::Sound::A4 (or just A4 in
     # the interactive CLI).  A new Note object is created each time to allow
     # for modifications to old Notes and changes in global tuning.
@@ -77,6 +110,9 @@ module MB
     end
   end
 end
+
+require_relative 'sound/arithmetic_mixin'
+require_relative 'sound/io_sample_mixin'
 
 require_relative 'sound/io_base'
 require_relative 'sound/io_input'
@@ -92,6 +128,7 @@ require_relative 'sound/null_output'
 require_relative 'sound/loopback'
 require_relative 'sound/array_input'
 
+require_relative 'sound/constant'
 require_relative 'sound/oscillator'
 require_relative 'sound/tone'
 require_relative 'sound/note'
@@ -104,6 +141,7 @@ require_relative 'sound/complex_pan'
 require_relative 'sound/haas_pan'
 require_relative 'sound/meter'
 require_relative 'sound/mixer'
+require_relative 'sound/multiplier'
 
 require_relative 'sound/window'
 require_relative 'sound/window_reader'
