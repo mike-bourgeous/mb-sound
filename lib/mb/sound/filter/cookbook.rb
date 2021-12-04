@@ -297,9 +297,10 @@ module MB
         end
 
         def dynamic_process_c(samples, cutoffs, qualities)
-          coeffs = self.coefficients
+          coeffs = [@omega, @b0, @b1, @b2, @a1, @a2]
           state = [@x1, @x2, @y1, @y2]
 
+          # FIXME: this doesn't handle offsets from NArray views
           result = MB::FastSound.dynamic_biquad(
             samples,
             cutoffs,
@@ -311,7 +312,7 @@ module MB
             state
           )
 
-          @b0, @b1, @b2, @a1, @a2 = coeffs
+          @omega, @b0, @b1, @b2, @a1, @a2 = coeffs
           @x1, @x2, @y1, @y2 = state
           @quality = qualities[-1]
           @center_frequency = cutoffs[-1]
