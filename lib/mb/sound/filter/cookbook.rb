@@ -69,7 +69,7 @@ module MB
               raise WrapperArgumentError.new(source: v)
 
             when Numeric
-              MB::Sound::ArrayInput.new(data: [Numo::SFloat.zeros(48000).fill(v)], repeat: true)
+              MB::Sound::Constant.new(v)
 
             when Numo::NArray
               MB::Sound::ArrayInput.new(data: [v])
