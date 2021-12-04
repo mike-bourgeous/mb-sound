@@ -43,4 +43,21 @@ RSpec.describe(MB::Sound::ArithmeticMixin) do
     release = graph.sample(2000).abs.max
     expect(release).to be > (1.5 * sustain)
   end
+
+  it 'resets default durations on tones added or multiplied to a graph' do
+    graph = (100.hz.for(2) + 33.hz.or_for(0.1) + 25.hz.or_for(0.1) - 11.hz.or_for(0.1)) * 10.hz.or_for(0.1) * 15.hz.or_for(0.1) - 5.hz.or_for(0.1)
+
+    # Expect exactly two full seconds of audio despite potentially shorter tones mixed in
+    20.times do
+      expect(graph.sample(4800)).to be_a(Numo::SFloat)
+    end
+    expect(graph.sample(4800)).to eq(nil)
+  end
+
+  it 'resets default amplitudes on tones multiplied to a graph' do
+    graph = 0.hz.square.at(2) * 0.hz.square.or_at(0) * 0.hz.square.or_at(0)
+
+    # If the amplitude was not reset this would return 0
+    expect(graph.sample(100)).to eq(Numo::SFloat.zeros(100).fill(2))
+  end
 end

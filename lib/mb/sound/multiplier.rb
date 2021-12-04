@@ -145,6 +145,8 @@ module MB
           @constant *= other
         else
           raise "Multiplicand #{other} is already present on multiplier #{self}" if @multiplicands.include?(other)
+          other.or_for(nil) if other.respond_to?(:or_for) # Default to playing forever
+          other.or_at(1) if other.respond_to?(:or_at) # Keep amplitude high
           add(other)
         end
 

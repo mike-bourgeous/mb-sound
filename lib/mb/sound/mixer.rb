@@ -164,6 +164,7 @@ module MB
           @constant += other
         else
           raise "Summand #{other} is already present on mixer #{self}" if @summands.include?(other)
+          other.or_for(nil) if other.respond_to?(:or_for) # Default to playing forever
           self[other] = 1.0
         end
 
@@ -176,6 +177,7 @@ module MB
           @constant -= other
         else
           raise "Summand #{other} is already present on mixer #{self}" if @summands.include?(other)
+          other.or_for(nil) if other.respond_to?(:or_for) # Default to playing forever
           self[other] = -1.0
         end
 
