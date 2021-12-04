@@ -27,6 +27,37 @@ RSpec.describe MB::Sound::Filter::Cookbook do
       expect(wrapper.sample(22000)).to be_a(Numo::SFloat)
       expect(wrapper.sample(100)).to eq(nil)
     end
+
+    it 'can use an narray to control filter parameters' do
+      f = 20000.hz.lowpass
+      cutoff = 1.hz.square.at(20000..500).for(1).generate(48000)
+      wrapper = MB::Sound::Filter::Cookbook::CookbookWrapper.new(
+        filter: f,
+        audio: 500.hz.at(1),
+        cutoff: cutoff,
+        quality: 4
+      )
+
+      # Verify types within the wrapper
+      expect(wrapper.cutoff).to be_a(MB::Sound::ArrayInput)
+      expect(wrapper.quality).to be_a(MB::Sound::Constant)
+
+      # Verify cutoff array generation
+      expect(cutoff[0].round(3)).to eq(500)
+      expect(cutoff[25000].round(3)).to eq(20000)
+
+      # Verify alternating cutoff frequencies
+      expect(wrapper.sample(5000)).to be_a(Numo::SFloat)
+      expect(wrapper.sample(500).abs.max.round(3)).to eq(4)
+
+      expect(wrapper.sample(20000)).to be_a(Numo::SFloat)
+      result = wrapper.sample(500)
+      expect(result.abs.max.round(3)).to eq(1)
+
+      # Verify end-of-stream behavior
+      expect(wrapper.sample(22000)).to be_a(Numo::SFloat)
+      expect(wrapper.sample(100)).to eq(nil)
+    end
   end
 
   context 'lowpass' do
@@ -430,6 +461,24 @@ RSpec.describe MB::Sound::Filter::Cookbook do
       # Roughly unity gain at the end due to cutoff above oscillator frequency
       late = result[47000...48000]
       expect(late.abs.max).to be_between(0.7, 1.1)
+    end
+
+    it 'can work with NArray views' do
+      filter = 100.hz.lowpass
+
+      samp_whole = 1000.hz.at(1).generate(96000)
+      samp_orig = samp_whole.dup
+      samples = samp_whole[48000..-1]
+      cutoffs = Numo::SFloat.linspace(100, 3100, 96000)[48000..-1]
+      qualities = Numo::SFloat.linspace(5, 1, 96000)[48000..-1]
+
+      result = filter.dynamic_process(samples.inplace!, cutoffs, qualities)
+
+      expect(result.__id__).to eq(samples.__id__)
+      expect(samples.abs.max.round(1)).to be > 1
+
+      expect(samp_orig[0...48000]).to eq(samp_whole[0...48000])
+      expect(samp_orig[48000..-1]).not_to eq(samp_whole[48000..-1])
     end
   end
 end
