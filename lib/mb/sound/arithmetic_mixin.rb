@@ -76,6 +76,34 @@ module MB
           self
         )
       end
+
+      # Overridden by users of this mixin to return the inputs to the current
+      # object.  For example, a Mixer will return a list of objects that are
+      # added together by that mixer, as well as any constant DC offset
+      # applied.
+      #
+      # See #graph for a method that returns every source feeding into this
+      # node.
+      def sources
+        []
+      end
+
+      # Returns a list of all nodes feeding into this node, either directly or
+      # indirectly.
+      def graph
+        source_history = Set.new
+        source_queue = sources.dup
+
+        until source_queue.empty?
+          s = source_queue.shift
+          next if source_history.include?(s)
+
+          source_history << s
+          source_queue.concat(s.sources) if s.respond_to?(:sources)
+        end
+
+        source_history.to_a
+      end
     end
   end
 end

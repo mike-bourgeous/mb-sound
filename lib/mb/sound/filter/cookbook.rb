@@ -56,6 +56,11 @@ module MB
             @filter.dynamic_process(audio, cutoff, quality).not_inplace!
           end
 
+          # See ArithmeticMixin#sources.
+          def sources
+            [@audio, @cutoff, @quality]
+          end
+
           private
 
           # If given an object with :sample, returns the object itself.  If

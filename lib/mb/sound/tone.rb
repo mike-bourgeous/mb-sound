@@ -385,6 +385,12 @@ module MB
         oscillator.sample(count.round)
       end
 
+      # See ArithmeticMixin#sources.  Returns the frequency source of the tone,
+      # which will either be a number or a signal generator.
+      def sources
+        [@frequency]
+      end
+
       # Returns an Oscillator that will generate a wave with the wave type,
       # frequency, etc. from this tone.  If this tone's frequency is changed
       # (e.g. by the Note subclass), the Oscillator will change frequency as

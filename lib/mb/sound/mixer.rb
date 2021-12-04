@@ -153,6 +153,11 @@ module MB
         @summands.keys
       end
 
+      # See ArithmeticMixin#sources
+      def sources
+        @summands.keys + [@constant]
+      end
+
       # Returns an Array of the gains in this mixer (without their summands).
       def gains
         @summands.values

@@ -139,6 +139,11 @@ module MB
         @multiplicands.keys
       end
 
+      # See ArithmeticMixin#sources
+      def sources
+        @multiplicands.keys + [@constant]
+      end
+
       # Adds the given +other+ sample source to this multiplier.
       def *(other)
         if other.is_a?(Numeric)

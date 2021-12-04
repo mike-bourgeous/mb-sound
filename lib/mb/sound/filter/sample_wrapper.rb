@@ -50,6 +50,11 @@ module MB
           buf = @filter.process(buf)
           buf.not_inplace!
         end
+
+        # See ArithmeticMixin#sources.
+        def sources
+          [@source]
+        end
       end
     end
   end
