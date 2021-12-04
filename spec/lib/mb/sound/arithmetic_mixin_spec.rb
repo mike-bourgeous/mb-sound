@@ -29,8 +29,8 @@ RSpec.describe(MB::Sound::ArithmeticMixin) do
     # Ensure the correct types were created and stored
     expect(graph).to be_a(MB::Sound::Filter::Cookbook::CookbookWrapper)
     expect(graph.audio).to be_a(MB::Sound::Tone)
-    expect(graph.cutoff).to be_a(MB::Sound::ArithmeticMixin)
-    expect(graph.quality).to be_a(MB::Sound::ArithmeticMixin)
+    expect(graph.cutoff).to be_a(MB::Sound::Mixer)
+    expect(graph.quality).to be_a(MB::Sound::Mixer)
 
     # Ensure 500Hz tone gets quieter as filter frequency rises
     attack = graph.sample(2000).abs.max
