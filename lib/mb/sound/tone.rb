@@ -269,8 +269,8 @@ module MB
         self
       end
 
-      # Sets the duration in seconds, if #for and #forever have not been
-      # called.  Pass nil to default to playing forever.
+      # Sets the default duration in seconds, if #for and #forever have not
+      # been called.  Pass nil to default to playing forever.
       def or_for(duration)
         unless @duration_set
           @duration = duration&.to_f
@@ -301,8 +301,8 @@ module MB
         self
       end
 
-      # Sets the linear +amplitude+ of the tone, which may be a Numeric or a
-      # Range, if #at has not yet been called.
+      # Sets the default linear +amplitude+ of the tone, which may be a Numeric
+      # or a Range, if #at has not yet been called.
       def or_at(amplitude)
         unless @amplitude_set
           at(amplitude)
@@ -377,7 +377,7 @@ module MB
 
           @duration -= count.to_f / @rate
 
-          if @duration <= 1e-9 # deal with rounding; sample rates higher than 999.9MHz are unlikely
+          if @duration < 0.5 * @single_sample # deal with rounding error
             @duration = 0
           end
         end
