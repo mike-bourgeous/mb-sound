@@ -300,7 +300,6 @@ module MB
           coeffs = [@omega, @b0, @b1, @b2, @a1, @a2]
           state = [@x1, @x2, @y1, @y2]
 
-          # FIXME: this doesn't handle offsets from NArray views
           result = MB::FastSound.dynamic_biquad(
             samples,
             cutoffs,

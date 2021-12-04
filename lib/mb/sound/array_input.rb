@@ -2,6 +2,8 @@ module MB
   module Sound
     # An input stream that returns chunks from an Array or Numo::NArray.
     class ArrayInput
+      include ArithmeticMixin
+
       attr_reader :channels, :frames, :rate, :offset, :remaining, :buffer_size, :repeat
 
       # Initializes an audio stream that returns slices from the given +data+ (an
@@ -59,6 +61,7 @@ module MB
             # of the total loop, or is more than the length of the loop plus
             # the remaining frames
             if extra == frames
+              # TODO: this case should never execute because of the outermost if statement
               ret = @data.map { |c| c[0...frames] }
             else
               ret = @data.map { |c| c[start...@frames].concatenate(c[0...extra]) }
