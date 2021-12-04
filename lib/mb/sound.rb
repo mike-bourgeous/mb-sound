@@ -93,6 +93,13 @@ module MB
       env
     end
 
+    # Creates a uniformly distributed white noise generator that can be
+    # combined with other tones, filters, etc.  See MB::Sound::ArithmeticMixin
+    # and MB::Sound::Tone.
+    def self.noise
+      2000.hz.ramp.noise
+    end
+
     # Allows retrieving a Note by name using e.g. MB::Sound::A4 (or just A4 in
     # the interactive CLI).  A new Note object is created each time to allow
     # for modifications to old Notes and changes in global tuning.

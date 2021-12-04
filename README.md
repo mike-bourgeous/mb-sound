@@ -2,12 +2,13 @@
 
 [![Tests](https://github.com/mike-bourgeous/mb-sound/actions/workflows/test.yml/badge.svg)](https://github.com/mike-bourgeous/mb-sound/actions/workflows/test.yml)
 
-A library of simple Ruby tools for processing sound.  This is a companion
-library to an [educational video series I'm making about sound][0].
+A library of simple Ruby tools for processing sound, and a DSL for building
+signal processing chains.  This is a companion library to an [educational video
+series I'm making about sound][0].
 
-You'll find simple functions for loading and saving audio files, playing and
-recording sound in realtime (on Linux, and only for really simple algorithms),
-and plotting sounds.
+You'll find functions for loading and saving audio files, playing and recording
+sound in realtime (on Linux, and only for really simple algorithms), generating
+sounds with subtractive, FM, and AM synthesis, and plotting sounds.
 
 https://user-images.githubusercontent.com/5015814/115160392-c485e500-a04c-11eb-8b5f-675f3c3eef8c.mp4
 
@@ -48,7 +49,7 @@ play (
       4.hz.ramp.at(1..0).filter(100.hz.lowpass) *
       0.125.hz.triangle
     ) + (
-      D2.triangle.forever *
+      (D2.triangle.forever + noise.at(-46.db)) *
       2.hz.ramp.at(1..0).filter(100.hz.lowpass)
     ) + (
       D1.square.forever.filter(1000.hz.lowpass(quality: 4)) *
@@ -92,6 +93,19 @@ play [100.hz, 103.hz]
 
 # Surround sound chord
 play [100.hz, 200.hz, 300.hz, 400.hz, 500.hz, 600.hz, 250.hz, 333.hz].map(&:triangle)
+```
+
+#### Noise
+
+```ruby
+# Mono
+play noise
+
+# Stereo
+play [noise, noise]
+
+# Brown(ish)
+play noise.at(2).filter(30.hz.lowpass1p).softclip
 ```
 
 #### Simple AM tones
