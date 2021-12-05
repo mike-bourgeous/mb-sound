@@ -64,6 +64,10 @@ module MB
           def sample(count)
             call(@orig.sample(count))
           end
+
+          def sources
+            [@orig]
+          end
         end
 
         # TODO: is there a better way to pass a closure or otherwise pass a
