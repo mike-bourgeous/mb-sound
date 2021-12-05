@@ -847,6 +847,23 @@ static VALUE ruby_complex(VALUE self, VALUE z)
 	return rb_ary_new_from_args(2, rb_float_new(creal(c)), rb_float_new(cimag(c)));
 }
 
+static VALUE ruby_narray_to_array(VALUE self, VALUE narray)
+{
+	narray = rb_funcall(numo_cDComplex, rb_intern("cast"), 1, narray);
+	size_t length = RNARRAY_SHAPE(narray)[0];
+	VALUE out = rb_ary_new_capa(length);
+
+	rb_funcall(narray, rb_intern("debug_info"), 0);
+	rb_warn("Size is %zu, ndim is %d, length is %zu\n", RNARRAY_SIZE(narray), RNARRAY_NDIM(narray), length);
+
+	double complex *ptr = (double complex *)(nary_get_pointer_for_read(narray) + nary_get_offset(narray));
+	for(size_t i = 0; i < length; i++) {
+		rb_ary_store(out, i, complex_to_num(ptr[i]));
+	}
+
+	return out;
+}
+
 /*
  * Calculates the natural logarithm of every element in the NArray.  Leaves
  * SFloat, SComplex, and DComplex as their original type, converts everything
@@ -899,6 +916,117 @@ static VALUE ruby_narray_log(VALUE self, VALUE narray)
 
 	return narray;
 }
+
+/*
+ * Calculates the base two logarithm of every element in the NArray.  Leaves
+ * SFloat, SComplex, and DComplex as their original type, converts everything
+ * else to DFloat.
+ */
+static VALUE ruby_narray_log2(VALUE self, VALUE narray)
+{
+	VALUE ntype = CLASS_OF(narray);
+	if (ntype != numo_cSFloat && ntype != numo_cDFloat && ntype != numo_cSComplex && ntype != numo_cDComplex) {
+		narray = rb_funcall(numo_cDFloat, rb_intern("cast"), 1, narray);
+		ntype = numo_cDFloat;
+	}
+
+	_Bool was_inplace = !!TEST_INPLACE(narray);
+	if (!RTEST(nary_check_contiguous(narray)) || !was_inplace) {
+		narray = nary_dup(narray);
+		SET_INPLACE(narray);
+		was_inplace = 0;
+	}
+
+	size_t length = RNARRAY_SIZE(narray);
+
+	// TODO: Find a way to deduplicate with natural log; C doesn't actually
+	// have clog2 or clog10, so they need special handling for complex
+	if (ntype == numo_cSFloat) {
+		float *ptr = (float *)(nary_get_pointer_for_read_write(narray) + nary_get_offset(narray));
+		for (size_t i = 0; i < length; i++) {
+			ptr[i] = log2f(ptr[i]);
+		}
+	} else if (ntype == numo_cDFloat) {
+		double *ptr = (double *)(nary_get_pointer_for_read_write(narray) + nary_get_offset(narray));
+		for (size_t i = 0; i < length; i++) {
+			ptr[i] = log2(ptr[i]);
+		}
+	} else if (ntype == numo_cSComplex) {
+		float complex *ptr = (float complex *)(nary_get_pointer_for_read_write(narray) + nary_get_offset(narray));
+		for (size_t i = 0; i < length; i++) {
+			ptr[i] = clogf(ptr[i]) / logf(2);
+		}
+	} else if (ntype == numo_cDComplex) {
+		double complex *ptr = (double complex *)(nary_get_pointer_for_read_write(narray) + nary_get_offset(narray));
+		for (size_t i = 0; i < length; i++) {
+			ptr[i] = clog(ptr[i]) / log(2);
+		}
+	} else {
+		rb_raise(rb_eException, "BUG: Unexpected type %"PRIsVALUE, ntype);
+	}
+
+	if (!was_inplace) {
+		UNSET_INPLACE(narray);
+	}
+
+	return narray;
+}
+
+/*
+ * Calculates the base ten logarithm of every element in the NArray.  Leaves
+ * SFloat, SComplex, and DComplex as their original type, converts everything
+ * else to DFloat.
+ */
+static VALUE ruby_narray_log10(VALUE self, VALUE narray)
+{
+	VALUE ntype = CLASS_OF(narray);
+	if (ntype != numo_cSFloat && ntype != numo_cDFloat && ntype != numo_cSComplex && ntype != numo_cDComplex) {
+		narray = rb_funcall(numo_cDFloat, rb_intern("cast"), 1, narray);
+		ntype = numo_cDFloat;
+	}
+
+	_Bool was_inplace = !!TEST_INPLACE(narray);
+	if (!RTEST(nary_check_contiguous(narray)) || !was_inplace) {
+		narray = nary_dup(narray);
+		SET_INPLACE(narray);
+		was_inplace = 0;
+	}
+
+	size_t length = RNARRAY_SIZE(narray);
+
+	// TODO: Find a way to deduplicate with natural log; C doesn't actually
+	// have clog2 or clog10, so they need special handling for complex
+	if (ntype == numo_cSFloat) {
+		float *ptr = (float *)(nary_get_pointer_for_read_write(narray) + nary_get_offset(narray));
+		for (size_t i = 0; i < length; i++) {
+			ptr[i] = log10f(ptr[i]);
+		}
+	} else if (ntype == numo_cDFloat) {
+		double *ptr = (double *)(nary_get_pointer_for_read_write(narray) + nary_get_offset(narray));
+		for (size_t i = 0; i < length; i++) {
+			ptr[i] = log10(ptr[i]);
+		}
+	} else if (ntype == numo_cSComplex) {
+		float complex *ptr = (float complex *)(nary_get_pointer_for_read_write(narray) + nary_get_offset(narray));
+		for (size_t i = 0; i < length; i++) {
+			ptr[i] = clogf(ptr[i]) / logf(10);
+		}
+	} else if (ntype == numo_cDComplex) {
+		double complex *ptr = (double complex *)(nary_get_pointer_for_read_write(narray) + nary_get_offset(narray));
+		for (size_t i = 0; i < length; i++) {
+			ptr[i] = clog(ptr[i]) / log(10);
+		}
+	} else {
+		rb_raise(rb_eException, "BUG: Unexpected type %"PRIsVALUE, ntype);
+	}
+
+	if (!was_inplace) {
+		UNSET_INPLACE(narray);
+	}
+
+	return narray;
+}
+
 
 static VALUE ruby_osc(VALUE self, VALUE wave_type, VALUE phi)
 {
@@ -1031,23 +1159,6 @@ static VALUE ruby_biquad_complex(VALUE self, VALUE b0, VALUE b1, VALUE b2, VALUE
 			);
 
 	return complex_to_num(result);
-}
-
-static VALUE ruby_narray_to_array(VALUE self, VALUE narray)
-{
-	narray = rb_funcall(numo_cDComplex, rb_intern("cast"), 1, narray);
-	size_t length = RNARRAY_SHAPE(narray)[0];
-	VALUE out = rb_ary_new_capa(length);
-
-	rb_funcall(narray, rb_intern("debug_info"), 0);
-	rb_warn("Size is %zu, ndim is %d, length is %zu\n", RNARRAY_SIZE(narray), RNARRAY_NDIM(narray), length);
-
-	double complex *ptr = (double complex *)(nary_get_pointer_for_read(narray) + nary_get_offset(narray));
-	for(size_t i = 0; i < length; i++) {
-		rb_ary_store(out, i, complex_to_num(ptr[i]));
-	}
-
-	return out;
 }
 
 #define BIQUAD_LOOP(buf_type, coeff_type, conv_from_rb, conv_to_rb, filter_func) do { \
@@ -1384,6 +1495,8 @@ void Init_fast_sound(void)
 
 	// Mathematical functions that for some reason are missing from Numo::NArray
 	rb_define_module_function(fast_sound, "narray_log", ruby_narray_log, 1);
+	rb_define_module_function(fast_sound, "narray_log2", ruby_narray_log2, 1);
+	rb_define_module_function(fast_sound, "narray_log10", ruby_narray_log10, 1);
 
 	// Functions used when comparing C and Ruby's behavior for integer
 	// division (C rounds to zero, Ruby rounds downward) and modulus (-1 %
