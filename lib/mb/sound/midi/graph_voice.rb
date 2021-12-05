@@ -29,6 +29,8 @@ module MB
             g = o.respond_to?(:graph) ? o.graph : [o.frequency]
             mixer = o.graph.select { |s| s.is_a?(MB::Sound::Mixer) || s.is_a?(MB::Sound::Constant) }.last
             @freq_constants[o] = mixer if mixer
+
+            o.forever
           end
         end
 
