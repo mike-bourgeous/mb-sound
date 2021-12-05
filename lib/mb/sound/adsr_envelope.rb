@@ -190,7 +190,7 @@ module MB
           @filter.process(@buf.not_inplace!)
         end
 
-        return nil if @auto_release && !@on && @buf.max < -100.db
+        return nil if @auto_release && !@on && @time >= @total && @buf.max < -100.db
 
         @buf.not_inplace!
       end
