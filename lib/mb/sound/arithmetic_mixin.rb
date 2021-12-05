@@ -5,13 +5,28 @@ module MB
     # and the helper methods in MB::Sound, this creates a DSL that can quickly
     # generate complex sounds.
     #
-    # Examples:
-    #     # From within bin/sound.rb
-    #     play F1.at(-6.db).fm(F2.at(300) * adsr(0, 0.1, 0.0, 0.5, auto_release: false)) * adsr(0, 0, 1, 0.0, auto_release: 0.25)
+    # Examples (run in the bin/sound.rb environment):
+    #     # FM organ bass
+    #     play F1.at(-6.db).fm(F2.at(300) * adsr(0, 0.1, 0.0, 0.5, auto_release: false)) * adsr(0, 0, 1, 0, auto_release: 0.25)
+    #
+    #     # FM 90s synth bass
+    #     # See https://musictech.com/tutorials/learn-advanced-fm-synthesis-with-dexed/
+    #     # FIXME: doesn't sound right at all
+    #     cenv = adsr(0, 0.05, 0.01, 2.5)
+    #     cenv2 = adsr(0, 0.05, 0.01, 2.5)
+    #     c = cenv * C3.at(1).fm(cenv2 * C3.at(1800)).forever; nil
+    #     denv = adsr(0, 0.03, 0, 5, auto_release: 1)
+    #     d = denv * Tone.new(frequency: C3.frequency.constant * 0.9996 - 0.22).at(1).forever; nil
+    #     eenv = adsr(0, 0.03, 0.0, 2)
+    #     e = C2.at(1).fm(c * 310 + d * 300).forever; nil
+    #     fenv = adsr(0, 2, 0, 2)
+    #     f = C2.fm(e * 300) * fenv; nil
+    #     play f
     module ArithmeticMixin
       # Creates a mixer that adds this mixer's output to +other+.  Part of a
       # DSL experiment for building up a signal graph.
       def +(other)
+        self.or_for(nil) if self.respond_to?(:or_for)
         other.or_for(nil) if other.respond_to?(:or_for) # Default to playing forever
         Mixer.new([self, other])
       end
@@ -19,6 +34,7 @@ module MB
       # Creates a mixer that subtracts +other+ from this mixer's output.  Part
       # of a DSL experiment for building up a signal graph.
       def -(other)
+        self.or_for(nil) if self.respond_to?(:or_for)
         other.or_for(nil) if other.respond_to?(:or_for) # Default to playing forever
         Mixer.new([self, [other, -1]])
       end
@@ -26,6 +42,7 @@ module MB
       # Creates a multiplier that multiplies +other+ by this mixer's output.
       # Part of a DSL experiment for building up a signal graph.
       def *(other)
+        self.or_for(nil) if self.respond_to?(:or_for)
         other.or_for(nil) if other.respond_to?(:or_for) # Default to playing forever
         other.or_at(1) if other.respond_to?(:or_at) # Keep amplitude high
         Multiplier.new([self, other])

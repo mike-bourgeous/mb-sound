@@ -518,8 +518,9 @@ module MB
       # Allows subclasses (e.g. Note) to change the frequency after construction.
       def set_frequency(freq)
         freq = SPEED_OF_SOUND / freq.meters if freq.is_a?(Feet) || freq.is_a?(Meters)
-        @frequency = freq.to_f
-        @wavelength = (SPEED_OF_SOUND / @frequency).meters
+        freq = freq.to_f if freq.is_a?(Numeric)
+        @frequency = freq
+        @wavelength = (SPEED_OF_SOUND / @frequency).meters if @frequency.is_a?(Numeric)
         @oscillator&.frequency = @frequency
       end
     end
