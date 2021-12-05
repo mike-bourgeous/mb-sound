@@ -48,6 +48,12 @@ module MB
         Multiplier.new([self, other])
       end
 
+      # Wraps the numeric in a MB::Sound::Constant so that numeric values can
+      # be listed first in signal graph arithmetic operations.
+      def coerce(numeric)
+        [numeric.constant, self]
+      end
+
       # Applies the given filter (creating the filter if given a filter type)
       # to this sample source or sample chain.  If given a filter type, then a
       # dynamically updating filter is created where teh cutoff and quality are

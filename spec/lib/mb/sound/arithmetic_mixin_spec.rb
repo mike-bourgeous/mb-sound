@@ -60,4 +60,18 @@ RSpec.describe(MB::Sound::ArithmeticMixin) do
     # If the amplitude was not reset this would return 0
     expect(graph.sample(100)).to eq(Numo::SFloat.zeros(100).fill(2))
   end
+
+  describe '#coerce' do
+    it 'allows signal nodes to be preceded by numeric values in multiplication' do
+      expect(5 * 5.constant).to be_a(MB::Sound::Multiplier)
+    end
+
+    it 'allows signal nodes to be preceded by numeric values in addition' do
+      expect(5 + 5.constant).to be_a(MB::Sound::Mixer)
+    end
+
+    it 'allows signal nodes to be preceded by numeric values in subtraction' do
+      expect(5 - 5.constant).to be_a(MB::Sound::Mixer)
+    end
+  end
 end
