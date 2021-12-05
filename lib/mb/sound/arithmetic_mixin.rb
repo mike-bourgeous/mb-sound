@@ -11,7 +11,7 @@ module MB
     #
     #     # FM 90s synth bass
     #     # See https://musictech.com/tutorials/learn-advanced-fm-synthesis-with-dexed/
-    #     # FIXME: doesn't sound right at all
+    #     # FIXME: doesn't sound right at all; might need exponential FM and exponential envelopes
     #     cenv = adsr(0, 0.05, 0.01, 2.5)
     #     cenv2 = adsr(0, 0.05, 0.01, 2.5)
     #     c = cenv * C3.at(1).fm(cenv2 * C3.at(1800)).forever; nil
@@ -26,26 +26,77 @@ module MB
       # Creates a mixer that adds this mixer's output to +other+.  Part of a
       # DSL experiment for building up a signal graph.
       def +(other)
-        self.or_for(nil) if self.respond_to?(:or_for)
-        other.or_for(nil) if other.respond_to?(:or_for) # Default to playing forever
+        fixup_tones(false, self, other)
         Mixer.new([self, other])
       end
 
       # Creates a mixer that subtracts +other+ from this mixer's output.  Part
       # of a DSL experiment for building up a signal graph.
       def -(other)
-        self.or_for(nil) if self.respond_to?(:or_for)
-        other.or_for(nil) if other.respond_to?(:or_for) # Default to playing forever
+        fixup_tones(false, self, other)
         Mixer.new([self, [other, -1]])
       end
 
       # Creates a multiplier that multiplies +other+ by this mixer's output.
       # Part of a DSL experiment for building up a signal graph.
       def *(other)
-        self.or_for(nil) if self.respond_to?(:or_for)
-        other.or_for(nil) if other.respond_to?(:or_for) # Default to playing forever
-        other.or_at(1) if other.respond_to?(:or_at) # Keep amplitude high
+        fixup_tones(false, self)
+        fixup_tones(true, other)
         Multiplier.new([self, other])
+      end
+
+      # Divides incoming data by +other+, which may be a Numeric or another
+      # signal graph.
+      def /(other)
+        if other.respond_to?(:sample)
+          self.proc { |v|
+            v.inplace!
+            v / other.sample(v.length)
+            v.not_inplace!
+          }
+        else
+          self.proc { |v|
+            v.inplace!
+            v / other
+            v.not_inplace!
+          }
+        end
+      end
+
+      # Appends a node that raises the incoming values to +other+, which should
+      # be either a numeric or another signal graph.
+      def **(other)
+        if other.respond_to?(:sample)
+          self.proc { |v|
+            v.inplace!
+            v ** other.sample(v.length)
+            v.not_inplace!
+          }
+        else
+          self.proc { |v|
+            v.inplace!
+            v ** other
+            v.not_inplace!
+          }
+        end
+      end
+
+      # Appends a node that calculates the natural logarithm of values passing
+      # through.
+      def log
+        self.proc { |v| MB::FastSound.narray_log(v) }
+      end
+
+      # Appends a node that calculates the base two logarithm of values passing
+      # through.
+      def log2
+        self.proc { |v| MB::FastSound.narray_log2(v) }
+      end
+
+      # Appends a node that calculates the base two logarithm of values passing
+      # through.
+      def log10
+        self.proc { |v| MB::FastSound.narray_log10(v) }
       end
 
       # Wraps the numeric in a MB::Sound::Constant so that numeric values can
@@ -157,6 +208,17 @@ module MB
         end
 
         source_history.to_a
+      end
+
+      private
+
+      # Sets tones to play forever at full volume, if they don't have a fixed
+      # volume and duration set.
+      def fixup_tones(fix_amp, *tones)
+        tones.each do |t|
+          t.or_for(nil) if t.respond_to?(:or_for) # Default to playing forever
+          t.or_at(1) if fix_amp && t.respond_to?(:or_at) # Default to full volume
+        end
       end
     end
   end
