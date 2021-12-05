@@ -91,7 +91,7 @@ module MB
       # Returns a list of all nodes feeding into this node, either directly or
       # indirectly.
       def graph
-        source_history = Set.new
+        source_history = Set.new(self)
         source_queue = sources.dup
 
         until source_queue.empty?
