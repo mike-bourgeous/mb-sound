@@ -54,6 +54,26 @@ module MB
         [numeric.constant, self]
       end
 
+      # Adds a Ruby block to a processing chain.  The block will be called with
+      # a Numo::NArray containing samples to be modified.  Note that this can
+      # be very slow compared to the built-in algorithms implemented in C.
+      def proc(&block)
+        class << block
+          include ArithmeticMixin
+
+          def sample(count)
+            call(@orig.sample(count))
+          end
+        end
+
+        # TODO: is there a better way to pass a closure or otherwise pass a
+        # value into a singleton class or singleton method?  It feels like I've
+        # done this before somewhere but can't recall.
+        block.instance_variable_set(:@orig, self)
+
+        block
+      end
+
       # Applies the given filter (creating the filter if given a filter type)
       # to this sample source or sample chain.  If given a filter type, then a
       # dynamically updating filter is created where teh cutoff and quality are

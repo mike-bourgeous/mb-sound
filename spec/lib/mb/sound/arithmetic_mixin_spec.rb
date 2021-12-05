@@ -74,4 +74,11 @@ RSpec.describe(MB::Sound::ArithmeticMixin) do
       expect(5 - 5.constant).to be_a(MB::Sound::Mixer)
     end
   end
+
+  describe '#proc' do
+    it 'can apply Ruby code within a signal chain' do
+      graph = 0.hz.square.at(1).proc { |buf| buf * 3 }
+      expect(graph.sample(10)).to eq(Numo::SFloat.new(10).fill(3))
+    end
+  end
 end
