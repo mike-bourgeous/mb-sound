@@ -5,6 +5,15 @@ module MB
     class Constant
       include ArithmeticMixin
 
+      module NumericConstantMethods
+        # Converts this numeric value into a MB::Sound::Constant constant-value
+        # signal generator.
+        def constant
+          MB::Sound::Constant.new(self)
+        end
+      end
+      Numeric.include(NumericConstantMethods)
+
       attr_accessor :constant
 
       # Initializes a constant-output signal generator.

@@ -1,6 +1,13 @@
 module MB
   module Sound
-    # Adds methods to any
+    # Adds methods to any class that implements a :sample method to build
+    # signal generation and processing graphs.  In combination with Tone, Note,
+    # and the helper methods in MB::Sound, this creates a DSL that can quickly
+    # generate complex sounds.
+    #
+    # Examples:
+    #     # From within bin/sound.rb
+    #     play F1.at(-6.db).fm(F2.at(300) * adsr(0, 0.1, 0.0, 0.5, auto_release: false)) * adsr(0, 0, 1, 0.0, auto_release: 0.25)
     module ArithmeticMixin
       # Creates a mixer that adds this mixer's output to +other+.  Part of a
       # DSL experiment for building up a signal graph.

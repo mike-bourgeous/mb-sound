@@ -15,6 +15,8 @@ module MB
     # An exponential distortion can be applied to the output before or after
     # values are scaled to the desired output range.
     class Oscillator
+      include ArithmeticMixin
+
       RAND = Random.new
       WAVE_TYPES = [
         :sine,
@@ -156,6 +158,10 @@ module MB
         @random_advance = random_advance
 
         @osc_buf = nil
+      end
+
+      def sources
+        [@frequency]
       end
 
       # Changes the starting phase offset for this oscillator, shifting the

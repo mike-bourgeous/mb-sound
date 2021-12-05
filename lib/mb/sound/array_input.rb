@@ -35,6 +35,7 @@ module MB
         @offset = offset
         @remaining = @frames - @offset
       end
+      alias offset= seek_set
 
       # Moves the current read pointer by +offset+, which may be negative.  The
       # resulting read pointer will be clamped to the start and end of the array.
