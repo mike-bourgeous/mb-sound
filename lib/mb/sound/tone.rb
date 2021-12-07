@@ -347,6 +347,21 @@ module MB
         self
       end
 
+      # Like #fm, but the modulation index is in semitones instead of Hz.
+      #
+      # Examples:
+      #     100.hz.log_fm(200.hz.at(2))
+      def log_fm(tone, index = nil)
+        raise 'This tone already has an FM modulator' if @frequency.respond_to?(:sample)
+        tone = tone.hz if tone.is_a?(Numeric)
+        tone = tone.at(1) if index
+        tone = tone.oscillator if tone.is_a?(Tone)
+        tone = 2 ** (tone / 12)
+        tone = tone * index if index
+        @frequency = @frequency * tone
+        self
+      end
+
       # Converts this Tone to the nearest Note based on its frequency.
       def to_note
         MB::Sound::Note.new(self)
