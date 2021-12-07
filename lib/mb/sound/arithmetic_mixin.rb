@@ -108,6 +108,19 @@ module MB
         self.proc { |v| MB::FastSound.narray_log10(v) }
       end
 
+      # Interprets incoming samples as a number of decibels, outputting the
+      # corresponding linear amplitude.  This treats ADSREnvelope specially,
+      # converting to an exponential envelope with a range of -80dB.
+      def db
+        if self.is_a?(MB::Sound::ADSREnvelope)
+          # TODO: Fade all the way to zero
+          10 ** ((self * 80 - 80) / 20)
+        else
+          10 ** (self / 20)
+        end
+      end
+      alias dB db
+
       # Wraps the numeric in a MB::Sound::Constant so that numeric values can
       # be listed first in signal graph arithmetic operations.
       def coerce(numeric)
