@@ -9,18 +9,16 @@ module MB
     #     # FM organ bass
     #     play F1.at(-6.db).fm(F2.at(300) * adsr(0, 0.1, 0.0, 0.5, auto_release: false)) * adsr(0, 0, 1, 0, auto_release: 0.25)
     #
-    #     # FM 90s synth bass
-    #     # See https://musictech.com/tutorials/learn-advanced-fm-synthesis-with-dexed/
-    #     # FIXME: doesn't sound right at all; might need exponential FM and exponential envelopes
-    #     cenv = adsr(0, 0.05, 0.01, 2.5)
-    #     cenv2 = adsr(0, 0.05, 0.01, 2.5)
-    #     c = cenv * C3.at(1).fm(cenv2 * C3.at(1800)).forever; nil
-    #     denv = adsr(0, 0.03, 0, 5, auto_release: 1)
+    #     # FM classic synth bass
+    #     cenv = adsr(0, 0.005, 0.5, 2.5).db(30)
+    #     cenv2 = adsr(0, 0.01, 0.5, 2.5).db(60)
+    #     c = cenv * C3.at(1).fm(cenv2 * C3.at(1)).forever; nil
+    #     denv = adsr(0, 0.005, 0, 2).db(50)
     #     d = denv * Tone.new(frequency: C3.frequency.constant * 0.9996 - 0.22).at(1).forever; nil
-    #     eenv = adsr(0, 0.03, 0.0, 2)
-    #     e = C2.at(1).fm(c * 310 + d * 300).forever; nil
-    #     fenv = adsr(0, 2, 0, 2)
-    #     f = C2.fm(e * 300) * fenv; nil
+    #     eenv = adsr(0, 3, 0.0, 2).db
+    #     e = eenv * C2.at(1).fm(c * 4810 + d * 500).forever; nil
+    #     fenv = adsr(0, 2, 0, 2).db
+    #     f = C2.at(-10.db).fm(e * 250) * fenv; nil
     #     play f
     module ArithmeticMixin
       # Creates a mixer that adds this mixer's output to +other+.  Part of a
