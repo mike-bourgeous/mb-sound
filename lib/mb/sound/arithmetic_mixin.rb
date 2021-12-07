@@ -65,7 +65,7 @@ module MB
       # be either a numeric or another signal graph.
       def **(other)
         if other.respond_to?(:sample)
-          self.proc { |v|
+          self.proc(other) { |v|
             data = other.sample(v.length)
             if v.nil? || data.nil?
               nil
@@ -76,7 +76,7 @@ module MB
             end
           }
         else
-          self.proc { |v|
+          self.proc(other) { |v|
             if v.nil?
               nil
             else
@@ -134,7 +134,10 @@ module MB
       # Adds a Ruby block to a processing chain.  The block will be called with
       # a Numo::NArray containing samples to be modified.  Note that this can
       # be very slow compared to the built-in algorithms implemented in C.
-      def proc(&block)
+      def proc(*sources, &block)
+        sources << self
+
+        # TODO: Should this maybe be its own class?
         class << block
           include ArithmeticMixin
 
@@ -145,7 +148,7 @@ module MB
           end
 
           def sources
-            [@orig]
+            @sources
           end
         end
 
@@ -153,6 +156,7 @@ module MB
         # value into a singleton class or singleton method?  It feels like I've
         # done this before somewhere but can't recall.
         block.instance_variable_set(:@orig, self)
+        block.instance_variable_set(:@sources, sources)
 
         block
       end
@@ -224,8 +228,8 @@ module MB
       # Returns a list of all nodes feeding into this node, either directly or
       # indirectly.
       def graph
-        source_history = Set[self]
-        source_queue = sources.dup
+        source_history = Set.new
+        source_queue = [self]
 
         until source_queue.empty?
           s = source_queue.shift
@@ -236,6 +240,38 @@ module MB
         end
 
         source_history.to_a
+      end
+
+      # Returns a String containing a GraphViz representation of the signal
+      # graph.
+      def graphviz
+        source_history = Set.new
+        source_queue = [self]
+
+        digraph = "digraph {\n"
+
+        until source_queue.empty?
+          s = source_queue.shift
+          next if source_history.include?(s)
+
+          n2 = s.is_a?(Numeric) ? s.to_s : "#{s.class} (#{s.__id__})"
+          digraph << "  #{n2.inspect};\n"
+
+          source_history << s
+
+          if s.respond_to?(:sources)
+            s.sources.each do |src|
+              n1 = src.is_a?(Numeric) ? src.to_s : "#{src.class} (#{src.__id__})"
+              digraph << "  #{n1.inspect} -> #{n2.inspect};\n"
+            end
+
+            source_queue.concat(s.sources) if s.respond_to?(:sources)
+          end
+        end
+
+        digraph << "}\n"
+
+        digraph
       end
 
       private
