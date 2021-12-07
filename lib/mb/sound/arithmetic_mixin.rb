@@ -110,12 +110,18 @@ module MB
 
       # Interprets incoming samples as a number of decibels, outputting the
       # corresponding linear amplitude.  This treats ADSREnvelope specially,
-      # converting to an exponential envelope with a range of -80dB.
-      def db
+      # converting to an exponential envelope with a default range of -80dB
+      # (controllable with the +env_range+ parameter).
+      def db(env_range = nil)
         if self.is_a?(MB::Sound::ADSREnvelope)
-          # TODO: Fade all the way to zero
-          10 ** ((self * 80 - 80) / 20)
+          env_range ||= 80
+          env_range = env_range.abs
+          env_min = (-env_range).db
+          env_comp = 1.0 / (1.0 - env_min)
+          # TODO: Implement this in C if it's slow
+          (10 ** ((self * env_range - env_range) / 20) - env_min) * env_comp
         else
+          raise 'Do not specify envelope range if .db is not applied to an envelope' if env_range
           10 ** (self / 20)
         end
       end

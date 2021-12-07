@@ -56,7 +56,7 @@ module MB
       # sample +:rate+ is required to ensure envelope times are accurate.
       #
       # Note that the +:sustain_level+ may be greater than 1.0.
-      def initialize(attack_time:, decay_time:, sustain_level:, release_time:, rate:)
+      def initialize(attack_time:, decay_time:, sustain_level:, release_time:, rate:, filter_freq: 1000)
         @rate = rate.to_f
         @on = false
 
@@ -67,7 +67,7 @@ module MB
         @frame = @rate * @time
 
         # Single-pole filter avoids overshoot
-        @filter = 100.hz.at_rate(rate).lowpass1p
+        @filter = filter_freq.hz.at_rate(rate).lowpass1p
         @peak = 0.5
         @value = 0
         @sust = 0
@@ -278,7 +278,7 @@ module MB
       def dup(rate = @rate)
         e = super()
         e.instance_variable_set(:@rate, rate.to_f)
-        e.instance_variable_set(:@filter, 100.hz.at_rate(rate).lowpass1p)
+        e.instance_variable_set(:@filter, @filter.center_frequency.hz.at_rate(rate).lowpass1p)
         e.reset
         e
       end
