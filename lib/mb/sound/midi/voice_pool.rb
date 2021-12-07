@@ -6,6 +6,7 @@ module MB
       # A pool of oscillators managed by MIDI note-on and note-off events,
       # initially based on code from bin/ep2_syn.rb.
       class VoicePool
+        include ArithmeticMixin
         extend Forwardable
 
         def_delegators :@voices, :each, :map
