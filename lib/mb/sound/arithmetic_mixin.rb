@@ -68,15 +68,24 @@ module MB
       def **(other)
         if other.respond_to?(:sample)
           self.proc { |v|
-            v.inplace!
-            v ** other.sample(v.length)
-            v.not_inplace!
+            data = other.sample(v.length)
+            if v.nil? || data.nil?
+              nil
+            else
+              v.inplace!
+              v ** data
+              v.not_inplace!
+            end
           }
         else
           self.proc { |v|
-            v.inplace!
-            v ** other
-            v.not_inplace!
+            if v.nil?
+              nil
+            else
+              v.inplace!
+              v ** other
+              v.not_inplace!
+            end
           }
         end
       end
@@ -113,7 +122,9 @@ module MB
           include ArithmeticMixin
 
           def sample(count)
-            call(@orig.sample(count))
+            data = @orig.sample(count)
+            return nil if data.nil?
+            call(data)
           end
 
           def sources

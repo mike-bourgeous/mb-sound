@@ -230,11 +230,11 @@ module MB
         when Filter
           data = [file_tone_data.impulse_response, file_tone_data.frequency_response.abs]
 
-        when Proc, Method
-          data = [Numo::SFloat.linspace(-10, 10, samples).map { |v| file_tone_data.call(v) }]
-
         when ArithmeticMixin
           data = [file_tone_data.sample(samples)]
+
+        when Proc, Method
+          data = [Numo::SFloat.linspace(-10, 10, samples).map { |v| file_tone_data.call(v) }]
 
         else
           raise "Cannot plot type #{file_tone_data.class.name}"
