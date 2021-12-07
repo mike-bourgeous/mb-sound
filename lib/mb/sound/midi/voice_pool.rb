@@ -150,6 +150,11 @@ module MB
             nil
           end
         end
+
+        # Returns all of the voices in the pool that include ArithmeticMixin.
+        def sources
+          @voices.select { |v| v.is_a?(ArithmeticMixin) }
+        end
       end
     end
   end

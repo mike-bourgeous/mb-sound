@@ -7,23 +7,26 @@ module MB
       # added somewhere in its frequency input, has that constant set to the
       # triggering note frequency.
       class GraphVoice
+        include ArithmeticMixin
+
         # Initializes a voice based on the given signal graph.
         def initialize(graph)
           @graph = graph
 
           sources = graph.graph
           puts "Found #{sources.length} total graph nodes" # XXX
+          puts MB::U.highlight(sources.map(&:class))
 
           @oscillators = sources.select { |s|
             s.is_a?(MB::Sound::Tone) || s.is_a?(MB::Sound::Oscillator)
+          }.map { |o|
+            o = o.oscillator if o.is_a?(MB::Sound::Tone)
           }
           puts "Found #{@oscillators.length} oscillators" # XXX
 
           @envelopes = sources.select { |s|
             s.is_a?(MB::Sound::ADSREnvelope)
           }
-          @envelopes.each(&:trigger)
-          @envelopes.each(&:release)
           @envelopes.each(&:reset) # disable auto-release on envelopes
           puts "Found #{@envelopes.length} envelopes" # XXX
 
@@ -37,7 +40,7 @@ module MB
             # Look for the top-most mixer or constant value in the frequency input graph for the oscillator
             # FIXME: this won't handle chained multi-op FM correctly
             g = o.respond_to?(:graph) ? o.graph : [o.frequency]
-            mixer = o.graph.select { |s| s.is_a?(MB::Sound::Mixer) || s.is_a?(MB::Sound::Constant) }.last
+            mixer = g.select { |s| s.is_a?(MB::Sound::Mixer) || s.is_a?(MB::Sound::Constant) }.first
             @freq_constants[o] = mixer if mixer
 
             o.forever if o.respond_to?(:forever)
@@ -57,8 +60,10 @@ module MB
             end
           end
 
+          # TODO: somehow find a top-most envelope?  Might help to associate
+          # each source in the graph with a depth
           @envelopes.each do |env|
-            env.trigger(MB::M.scale(velocity, 0..127, -24..-6).db)
+            env.trigger(MB::M.scale(velocity, 0..127, -6..0).db)
           end
 
           @array_inputs.each do |ai|
@@ -66,9 +71,19 @@ module MB
           end
         end
 
+        def release(note, velocity)
+          @envelopes.each(&:release)
+        end
+
         # Generates the next +count+ samples for the voice/graph.
         def sample(count)
           @graph.sample(count)
+        end
+
+        # Returns the direct inputs that feed this graph voice (just the graph
+        # given to the constructor).
+        def sources
+          [@graph]
         end
       end
     end
