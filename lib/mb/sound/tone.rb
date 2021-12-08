@@ -333,12 +333,17 @@ module MB
       # Adds the given other +tone+ as a frequency modulator for this tone,
       # using the given modulation +index+ (good values range from 100 to
       # 10000, and the modulation index can also be applied to the other Tone
-      # using #at).
+      # using #at).  This is true linear frequency modulation -- the rate of
+      # phase is modulated -- as opposed to linear phase modulation, or
+      # exponential frequency modulation (see #log_fm).
       #
       # Example:
       #     200.hz.fm(600.hz, 1000)
       #     # or
       #     200.hz.fm(600.hz.at(1000))
+      #
+      # TODO: Consider implementing phase modulation to create DX7-like sounds.
+      # Would need to update both the Ruby and C oscillator code.
       def fm(tone, index = nil)
         raise 'This tone already has an FM modulator' if @frequency.respond_to?(:sample)
         tone = tone.hz if tone.is_a?(Numeric)
@@ -348,7 +353,9 @@ module MB
         self
       end
 
-      # Like #fm, but the modulation index is in semitones instead of Hz.
+      # Like #fm, but the modulation index is in semitones instead of Hz.  This
+      # mirrors classical analog exponential or "volt per octave" frequency
+      # modulation.
       #
       # Examples:
       #     100.hz.log_fm(200.hz.at(2))
