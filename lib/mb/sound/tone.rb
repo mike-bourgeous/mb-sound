@@ -176,6 +176,7 @@ module MB
         @wave_type = :sine
         self
       end
+      alias sin sine
 
       # Changes the waveform type to triangle.
       def triangle
