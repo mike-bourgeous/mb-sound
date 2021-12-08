@@ -9,8 +9,11 @@ module MB
       class GraphVoice
         include ArithmeticMixin
 
-        # Initializes a voice based on the given signal graph.
-        def initialize(graph)
+        # Initializes a voice based on the given signal graph.  If the
+        # automatic detection of envelopes and oscillators doesn't work, then
+        # the +:amp_envelopes+, +:envelopes+, and +:freq_constants+ parameters
+        # may be used to override detection.
+        def initialize(graph, amp_envelopes: nil, envelopes: nil, freq_constants: nil)
           @graph = graph
 
           sources = graph.graph
@@ -24,7 +27,8 @@ module MB
           }
           puts "Found #{@oscillators.length} oscillators" # XXX
 
-          @envelopes = sources.select { |s|
+          @amp_envelopes = amp_envelopes || []
+          @envelopes = envelopes || sources.select { |s|
             s.is_a?(MB::Sound::ADSREnvelope)
           }
           @envelopes.each(&:reset) # disable auto-release on envelopes
@@ -35,35 +39,44 @@ module MB
           }
           puts "Found #{@array_inputs.length} array inputs" # XXX
 
-          @freq_constants = {}
-          @oscillators.each do |o|
-            # Look for the top-most mixer or constant value in the frequency input graph for the oscillator
-            # FIXME: this won't handle chained multi-op FM correctly
-            g = o.respond_to?(:graph) ? o.graph : [o.frequency]
-            mixer = g.select { |s| s.is_a?(MB::Sound::Mixer) || s.is_a?(MB::Sound::Constant) }.first
-            @freq_constants[o] = mixer if mixer
-
-            o.forever if o.respond_to?(:forever)
-          end
-
-          puts "Found #{@freq_constants.length} frequency constants" # XXX
-        end
-
-        def trigger(note, velocity)
-          @oscillators.each do |o|
-            if o.frequency.is_a?(Numeric)
-              o.frequency = MB::Sound::Oscillator.calc_freq(note)
-            elsif @freq_constants.include?(o)
-              # TODO: Have a way of setting the note number instead, to allow
-              # for logarithmic portamento by filtering through a follower
-              @freq_constants[o].constant = MB::Sound::Oscillator.calc_freq(note)
+          if freq_constants
+            @freq_constants = freq_constants
+          else
+            @freq_constants = []
+            @oscillators.each do |o|
+              # Look for the top-most mixer or constant value in the frequency input graph for the oscillator
+              # FIXME: this won't handle chained multi-op FM correctly
+              g = o.respond_to?(:graph) ? o.graph : [o.frequency]
+              mixer = g.select { |s|
+                (s.is_a?(MB::Sound::Mixer) || s.is_a?(MB::Sound::Constant)) &&
+                  s.constant >= 20 # Haxx to try to separate frequency values from other values
+              }.first
+              @freq_constants << mixer if mixer
             end
           end
 
-          # TODO: somehow find a top-most envelope?  Might help to associate
-          # each source in the graph with a depth
+          puts "Found #{@freq_constants.length} frequency constants: #{@freq_constants.map(&:__id__)}" # XXX
+        end
+
+        def trigger(note, velocity)
+          puts "Trigger #{note}@#{velocity} (#{MB::Sound::Note.new(note).name})" # XXX
+          @oscillators.each do |o|
+            if o.frequency.is_a?(Numeric)
+              o.frequency = MB::Sound::Oscillator.calc_freq(note)
+            end
+          end
+
+          @freq_constants.each do |fc|
+            # TODO: Have a way of setting the note number instead, to allow
+            # for logarithmic portamento by filtering through a follower
+            fc.constant = MB::Sound::Oscillator.calc_freq(note)
+          end
+
           @envelopes.each do |env|
-            env.trigger(MB::M.scale(velocity, 0..127, -6..0).db)
+            env.trigger(1)
+          end
+          @amp_envelopes.each do |env|
+            env.trigger(MB::M.scale(velocity, 0..127, -24..-6).db)
           end
 
           @array_inputs.each do |ai|

@@ -135,11 +135,15 @@ module MB
       # a Numo::NArray containing samples to be modified.  Note that this can
       # be very slow compared to the built-in algorithms implemented in C.
       def proc(*sources, &block)
+        puts 'hey' # XXX
+
         sources << self
 
         # TODO: Should this maybe be its own class?
         class << block
           include ArithmeticMixin
+
+          attr_reader :sources, :orig, :callers
 
           def sample(count)
             data = @orig.sample(count)
@@ -157,6 +161,7 @@ module MB
         # done this before somewhere but can't recall.
         block.instance_variable_set(:@orig, self)
         block.instance_variable_set(:@sources, sources)
+        block.instance_variable_set(:@callers, caller_locations(4))
 
         block
       end
