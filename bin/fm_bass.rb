@@ -5,7 +5,7 @@ require 'mb-sound'
 
 OSC_COUNT = ENV['OSC_COUNT']&.to_i || 1
 voices = OSC_COUNT.times.map { |i|
-  note = MB::Sound::Note.new(36 + i * 16)
+  note = MB::Sound::Note.new(36)
   note2 = MB::Sound::Note.new(note.number + 12)
 
   cenv = MB::Sound.adsr(0, 0.005, 0.5, 0.005, auto_release: false).db(30)
