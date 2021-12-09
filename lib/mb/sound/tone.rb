@@ -151,6 +151,12 @@ module MB
       attr_reader :wave_type, :frequency, :amplitude, :range, :duration, :rate, :wavelength, :phase
       attr_reader :duration_set, :amplitude_set
 
+      # Shortcut for creating a new tone with the given frequency source, for
+      # building more complex FM signal graphs.
+      def self.[](frequency)
+        MB::Sound::Tone.new(frequency: frequency)
+      end
+
       # Initializes a representation of a simple generated waveform.
       #
       # +wave_type+ - One of the waveform types supported by MB::Sound::Oscillator (e.g. :sine).

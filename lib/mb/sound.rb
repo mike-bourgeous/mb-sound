@@ -101,6 +101,12 @@ module MB
       2000.hz.ramp.noise
     end
 
+    # Shortcut/DSL method for creating a tone with a given dynamic frequency
+    # source, for full control over the FM signal graph.
+    def self.tone(frequency)
+      MB::Sound::Tone[frequency]
+    end
+
     # Allows retrieving a Note by name using e.g. MB::Sound::A4 (or just A4 in
     # the interactive CLI).  A new Note object is created each time to allow
     # for modifications to old Notes and changes in global tuning.
