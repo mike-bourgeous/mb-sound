@@ -126,8 +126,8 @@ module MB
         # envelope is released before attack+decay finish
         if @on
           @peak = 1.0
-          # Convert to 32-bit float for consistency between C and Ruby loops
-          @sust = Numo::SFloat[@value][0]
+          # Convert to 32-bit float for rounding consistency between C and Ruby loops
+          @sust = MB::FastSound.f64to32(@value)
           self.time = @release_start
           @on = false
         end

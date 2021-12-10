@@ -839,6 +839,12 @@ static VALUE ruby_imod(VALUE self, VALUE x, VALUE y)
 	return SSIZET2NUM(NUM2SSIZET(x) % NUM2SSIZET(y));
 }
 
+static VALUE ruby_f64to32(VALUE self, VALUE x)
+{
+	volatile float y = NUM2DBL(x);
+	return rb_float_new(y);
+}
+
 // Splits complex into real and imaginary
 static VALUE ruby_complex(VALUE self, VALUE z)
 {
@@ -1508,6 +1514,7 @@ void Init_fast_sound(void)
 	rb_define_module_function(fast_sound, "idiv", ruby_idiv, 2);
 	rb_define_module_function(fast_sound, "fdiv", ruby_fdiv, 2);
 	rb_define_module_function(fast_sound, "imod", ruby_imod, 2);
+	rb_define_module_function(fast_sound, "f64to32", ruby_f64to32, 1);
 
 	// Functions to test conversion to and from Ruby complex datatypes
 	rb_define_module_function(fast_sound, "complex", ruby_complex, 1);
