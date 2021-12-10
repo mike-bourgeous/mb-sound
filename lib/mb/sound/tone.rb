@@ -173,6 +173,7 @@ module MB
         @noise = false
         @amplitude_set = false
         @duration_set = false
+        @phase_mod = nil
         self.or_at(amplitude).or_for(duration).at_rate(rate).with_phase(phase)
         set_frequency(frequency)
       end
@@ -371,16 +372,35 @@ module MB
       # mirrors classical analog exponential or "volt per octave" frequency
       # modulation.
       #
+      # If the current tone's frequency is already derived from a signal graph,
+      # then this new +tone+ will be multiplied by the existing graph output.
+      #
       # Examples:
       #     100.hz.log_fm(200.hz.at(2))
       def log_fm(tone, index = nil)
-        raise 'This tone already has an FM modulator' if @frequency.respond_to?(:sample)
         tone = tone.hz if tone.is_a?(Numeric)
-        tone = tone.at(1) if index
+        tone = tone.at(1) if index && tone.is_a?(Tone)
         tone = tone.oscillator if tone.is_a?(Tone)
         tone = 2 ** (tone / 12)
         tone = tone * index if index
         @frequency = @frequency * tone
+        self
+      end
+
+      # Adds the given other +tone+ or signal graph as a phase modulation
+      # source for this tone.  Like #fm, but added to the phase given to the
+      # oscillator, rather than to the frequency itself.
+      def pm(tone, index = nil)
+        tone = tone.hz if tone.is_a?(Numeric)
+        if tone.is_a?(Tone)
+          if index
+            tone.at(1)
+          else
+            tone.or_at(1)
+          end
+        end
+        tone = tone * index if index
+        @phase_mod = tone
         self
       end
 
@@ -440,7 +460,8 @@ module MB
           phase: @phase,
           advance: @noise ? 0 : Math::PI * 2.0 / @rate,
           random_advance: @noise ? Math::PI * 2.0 : 0,
-          range: @range
+          range: @range,
+          phase_mod: @phase_mod
         )
       end
 

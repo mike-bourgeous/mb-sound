@@ -1055,7 +1055,7 @@ static VALUE ruby_osc(VALUE self, VALUE wave_type, VALUE phi)
 }
 
 // state contains [phi] and will be modified in place
-static VALUE ruby_synthesize(VALUE self, VALUE buffer, VALUE wave_type, VALUE frequency, VALUE advance, VALUE random_advance, VALUE gain, VALUE offset, VALUE state)
+static VALUE ruby_synthesize(VALUE self, VALUE buffer, VALUE wave_type, VALUE frequency, VALUE phase_mod, VALUE advance, VALUE random_advance, VALUE gain, VALUE offset, VALUE state)
 {
 	Check_Type(state, T_ARRAY);
 
@@ -1066,6 +1066,7 @@ static VALUE ruby_synthesize(VALUE self, VALUE buffer, VALUE wave_type, VALUE fr
 	enum wave_types wt = find_wave_type(SYM2ID(wave_type));
 
 	double freq;
+	double phase;
 	double adv = NUM2DBL(advance);
 	double rndadv = NUM2DBL(random_advance);
 	double g = NUM2DBL(gain);
@@ -1094,6 +1095,21 @@ static VALUE ruby_synthesize(VALUE self, VALUE buffer, VALUE wave_type, VALUE fr
 		freq = NUM2DBL(frequency);
 	}
 
+	float *phaseptr = NULL;
+	if (CLASS_OF(phase_mod) == numo_cDFloat || CLASS_OF(phase_mod) == numo_cSFloat) {
+		if (RNARRAY_SHAPE(phase_mod)[0] != length) {
+			rb_raise(rb_eArgError, "Phase modulation array length does not match sample buffer length");
+		}
+
+		ensure_sfloat(&phase_mod);
+		phaseptr = (float *)(nary_get_pointer_for_read(phase_mod) + nary_get_offset(phase_mod));
+		phase = phaseptr[0];
+	} else if (RTEST(phase_mod)) {
+		phase = NUM2DBL(phase_mod);
+	} else {
+		phase = 0;
+	}
+
 	if (complex_buffer) {
 		complex_ptr = (float complex *)(nary_get_pointer_for_write(buffer) + nary_get_offset(buffer));
 	} else {
@@ -1107,6 +1123,10 @@ static VALUE ruby_synthesize(VALUE self, VALUE buffer, VALUE wave_type, VALUE fr
 			freq = freqptr[i];
 		}
 
+		if (phaseptr) {
+			phase = phaseptr[i];
+		}
+
 		if (rndadv != 0) {
 			delta = freq * (adv + drand48() * rndadv);
 		} else {
@@ -1115,9 +1135,9 @@ static VALUE ruby_synthesize(VALUE self, VALUE buffer, VALUE wave_type, VALUE fr
 
 		if (wt == OSC_COMPLEX_SQUARE || wt == OSC_COMPLEX_RAMP) {
 			// Ensure symmetric imaginary components when sampled exactly on period
-			v = osc_sample(wt, phi + delta / 2.0);
+			v = osc_sample(wt, phi + delta / 2.0 + phase);
 		} else {
-			v = osc_sample(wt, phi);
+			v = osc_sample(wt, phi + phase);
 		}
 
 		v = v * g + off;
@@ -1478,7 +1498,7 @@ void Init_fast_sound(void)
 
 	// Oscillator functions
 	rb_define_module_function(fast_sound, "osc", ruby_osc, 2);
-	rb_define_module_function(fast_sound, "synthesize", ruby_synthesize, 8);
+	rb_define_module_function(fast_sound, "synthesize", ruby_synthesize, 9);
 
 	// Filtering functions
 	rb_define_module_function(fast_sound, "biquad", ruby_biquad, 10);
