@@ -136,8 +136,8 @@ module MB
       # Turn off the envelope and reset the filter.  For testing only; will
       # cause clicking if used on actual audio.
       def reset
-        @frame = 0
-        @time = 0
+        @time = @total + 100
+        @frame = @rate * @time
         @on = false
         @filter.reset(0)
       end
