@@ -27,6 +27,7 @@ module MB
         old_pt = @pt
         old_pg = @pg
 
+        @plot_outputs ||= {}
         @plot_outputs.clear
 
         close_plotter
