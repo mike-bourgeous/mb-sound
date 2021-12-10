@@ -343,15 +343,23 @@ module MB
       # phase is modulated -- as opposed to linear phase modulation, or
       # exponential frequency modulation (see #log_fm).
       #
+      # If the current tone's frequency is already derived from a signal graph,
+      # then this new +tone+ will be added to the existing graph output.
+      #
       # Example:
+      #     # Simple FM
       #     200.hz.fm(600.hz, 1000)
       #     # or
       #     200.hz.fm(600.hz.at(1000))
       #
+      #     # Stacking is the same as adding
+      #     200.hz.fm(600.hz.at(1000)).fm(300.hz.at(1000))
+      #     # or
+      #     200.hz.fm(600.hz.at(1000) + 300.hz.at(1000))
+      #
       # TODO: Consider implementing phase modulation to create DX7-like sounds.
       # Would need to update both the Ruby and C oscillator code.
       def fm(tone, index = nil)
-        raise 'This tone already has an FM modulator' if @frequency.respond_to?(:sample)
         tone = tone.hz if tone.is_a?(Numeric)
         tone = tone.at(1) if index && tone.is_a?(Tone)
         tone = tone.oscillator if tone.is_a?(Tone)
