@@ -23,7 +23,12 @@ module MB
           @oscillators = sources.select { |s|
             s.is_a?(MB::Sound::Tone) || s.is_a?(MB::Sound::Oscillator)
           }.map { |o|
-            o = o.oscillator if o.is_a?(MB::Sound::Tone)
+            if o.is_a?(MB::Sound::Tone)
+              o.forever
+              o.oscillator
+            else
+              o
+            end
           }
           puts "Found #{@oscillators.length} oscillators" # XXX
 
@@ -49,7 +54,7 @@ module MB
               g = o.respond_to?(:graph) ? o.graph : [o.frequency]
               mixer = g.select { |s|
                 (s.is_a?(MB::Sound::Mixer) || s.is_a?(MB::Sound::Constant)) &&
-                  s.constant >= 20 # Haxx to try to separate frequency values from other values
+                  s.constant >= 20 # Haxx to try to separate frequency values from other values; might help to have some kind of units or roles for detecting these things
               }.first
               @freq_constants << mixer if mixer
             end

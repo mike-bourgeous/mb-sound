@@ -5,21 +5,23 @@ require 'mb-sound'
 
 OSC_COUNT = ENV['OSC_COUNT']&.to_i || 1
 voices = OSC_COUNT.times.map { |i|
-  note = MB::Sound::Note.new(36)
-  note2 = MB::Sound::Note.new(note.number + 12)
+  base = MB::Sound::Constant.new(440)
+
+  # FIXME: this octave difference is not preserved by GraphVoice; figure out
+  # the best way to preserve frequency ratios and offsets
 
   cenv = MB::Sound.adsr(0, 0.005, 0.5, 0.005, auto_release: false).db(30)
   cenv2 = MB::Sound.adsr(0, 0.01, 0.5, 0.01, auto_release: false).db(60)
-  c = cenv * note2.dup.at(1).fm(cenv2 * note2.dup.at(1)).forever
+  c = cenv * MB::Sound.tone(base.dup).at(1).fm(cenv2 * MB::Sound.tone(base.dup).at(1).forever).forever
 
   denv = MB::Sound.adsr(0, 0.005, 0.0, 0.005, auto_release: false).db(50)
-  d = denv * MB::Sound::Tone.new(frequency: note2.dup.frequency.constant * 0.9996 - 0.22).at(1).forever
+  d = denv * MB::Sound.tone(base.dup * 0.9996 - 0.22).at(1).forever
 
   eenv = MB::Sound.adsr(0, 2, 0, 2, auto_release: false)
-  e = eenv.db * note.dup.at(1).fm(c * 4810 + d * 500).forever
+  e = eenv.db * MB::Sound.tone(base.dup * 0.5).at(1).fm(c * 4810 + d * 500).forever
 
   fenv = MB::Sound.adsr(0, 2, 0, 2, auto_release: false)
-  f = fenv.db * note.dup.at(1).fm(e * 250)
+  f = fenv.db * MB::Sound.tone(base.dup * 0.5).at(1).fm(e * 250)
 
   MB::Sound::MIDI::GraphVoice.new(f, amp_envelopes: [fenv])
 }
