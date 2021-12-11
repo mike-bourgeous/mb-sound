@@ -77,11 +77,12 @@ module MB
             fc.constant = MB::Sound::Oscillator.calc_freq(note)
           end
 
+          # TODO: make envelope ranges controllable
           @envelopes.each do |env|
-            env.trigger(1)
+            env.trigger(MB::M.scale(velocity, 0..127, 0.9..1.05))
           end
           @amp_envelopes.each do |env|
-            env.trigger(MB::M.scale(velocity, 0..127, -24..-6).db)
+            env.trigger(MB::M.scale(velocity, 0..127, -10..-6).db)
           end
 
           @array_inputs.each do |ai|
