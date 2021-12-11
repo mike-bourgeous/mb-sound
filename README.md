@@ -214,6 +214,8 @@ You can filter the sound as well:
 play file_input('sounds/synth0.flac').filter(1500.hz.lowpass(quality: 8))
 ```
 
+<audio src="sounds/synth0.flac">
+
 ### Loading a sound file into memory
 
 ```ruby
