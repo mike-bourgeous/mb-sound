@@ -66,6 +66,7 @@ module MB
         def trigger(note, velocity)
           puts "Trigger #{note}@#{velocity} (#{MB::Sound::Note.new(note).name})" # XXX
           @oscillators.each do |o|
+            o.reset # TODO: make keysync optional
             if o.frequency.is_a?(Numeric)
               o.frequency = MB::Sound::Oscillator.calc_freq(note)
             end
