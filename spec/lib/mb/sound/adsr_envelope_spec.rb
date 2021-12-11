@@ -197,7 +197,7 @@ RSpec.describe(MB::Sound::ADSREnvelope) do
         expect(env.sample(800)).to be_a(Numo::SFloat)
       end
 
-      31.times do
+      30.times do |t|
         expect(env.on?).to eq(false)
         expect(env.sample(800)).to be_a(Numo::SFloat)
       end
