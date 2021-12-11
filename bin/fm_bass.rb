@@ -44,9 +44,14 @@ mod_constants.each do |c|
   constant_ranges[c] = c.constant..(c.constant * 2)
 end
 
+repeat = !!ARGV.delete('--loop')
+
+# TODO: Build an abstraction around switching between Jack and MIDI files for
+# input, and FLAC files for output, for use by all synthesizers
 jack = MB::Sound::JackFFI[]
 output = jack.output(channels: 1, connect: [['system:playback_1', 'system:playback_2']])
-manager = MB::Sound::MIDI::Manager.new(jack: jack, connect: ARGV[0])
+midi = MB::Sound::MIDI::MIDIFile.new(ARGV[0]) if ARGV[0].end_with?('.mid') # TODO: Add a clock source based on jackd frames
+manager = MB::Sound::MIDI::Manager.new(jack: jack, input: midi, connect: ARGV[0])
 pool = MB::Sound::MIDI::VoicePool.new(
   manager,
   voices
@@ -60,18 +65,28 @@ end
 
 output_chain = (pool * 20).softclip(0.8, 0.95)
 
-puts 'saving before graph'
-File.write('/tmp/pm_bass_before.dot', output_chain.graphviz)
-`dot -Tpng /tmp/pm_bass_before.dot -o /tmp/pm_bass_before.png`
+if ENV['DEBUG'] == '1'
+  puts 'saving before graph'
+  File.write('/tmp/pm_bass_before.dot', output_chain.graphviz)
+  `dot -Tpng /tmp/pm_bass_before.dot -o /tmp/pm_bass_before.png`
+end
 
 begin
   puts 'starting loop'
   loop do
     manager.update
     output.write([output_chain.sample(output.buffer_size)])
+
+    if midi&.empty?
+      pool.all_off
+      midi.seek(0) if repeat
+    end
+    break if midi&.empty? && !pool.active? && !repeat
   end
 ensure
-  puts 'saving after graph'
-  File.write('/tmp/pm_bass_after.dot', output_chain.graphviz)
-  `dot -Tpng /tmp/pm_bass_after.dot -o /tmp/pm_bass_after.png`
+  if ENV['DEBUG'] == '1'
+    puts 'saving after graph'
+    File.write('/tmp/pm_bass_after.dot', output_chain.graphviz)
+    `dot -Tpng /tmp/pm_bass_after.dot -o /tmp/pm_bass_after.png`
+  end
 end

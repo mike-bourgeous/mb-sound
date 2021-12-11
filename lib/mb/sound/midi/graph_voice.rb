@@ -91,8 +91,15 @@ module MB
           end
         end
 
+        # Tells all envelopes to start their release phase.
         def release(note, velocity)
           @envelopes.each(&:release)
+        end
+
+        # Returns true if any envelopes have not reached the end of their
+        # release phase.
+        def active?
+          @envelopes.any?(&:active?)
         end
 
         # Generates the next +count+ samples for the voice/graph.
