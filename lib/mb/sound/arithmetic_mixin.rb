@@ -20,7 +20,24 @@ module MB
     #     fenv = adsr(0, 2, 0, 2).db
     #     f = C2.at(-10.db).fm(e * 250) * fenv; nil
     #     play f
+    #
+    # TODO: This DSL is pretty good at fan-in (having a bunch of sources all
+    # combine to a single input), but can't really do fan-out because #sample
+    # is not idempotent.  Either a Tee object is needed that prevents in-place
+    # processing (and all processing classes would need to be tested and
+    # updated to make sure they work with in-place processing), or each node
+    # should use its own buffer and copy in the data, and #sample should be
+    # paired with an #update method to tell everything to render another window
+    # of audio.
     module ArithmeticMixin
+      attr_reader :graph_node_name
+
+      # Gives a name to this graph node to make it easier to retrieve later.
+      def named(n)
+        @graph_node_name = n&.to_s
+        self
+      end
+
       # Creates a mixer that adds this mixer's output to +other+.  Part of a
       # DSL experiment for building up a signal graph.
       def +(other)
@@ -135,8 +152,6 @@ module MB
       # a Numo::NArray containing samples to be modified.  Note that this can
       # be very slow compared to the built-in algorithms implemented in C.
       def proc(*sources, &block)
-        puts 'hey' # XXX
-
         sources << self
 
         # TODO: Should this maybe be its own class?
@@ -247,6 +262,12 @@ module MB
         source_history.to_a
       end
 
+      # Looks for the first source node within the graph feeding into this node
+      # with the given name.
+      def find_by_name(name)
+        graph.find { |s| s.respond_to?(:graph_node_name) && s.graph_node_name == name }
+      end
+
       # Returns a String containing a GraphViz representation of the signal
       # graph.
       def graphviz
@@ -259,14 +280,14 @@ module MB
           s = source_queue.shift
           next if source_history.include?(s)
 
-          n2 = s.is_a?(Numeric) ? s.to_s : "#{s.class} (#{s.__id__})"
+          n2 = s.is_a?(Numeric) ? s.to_s : "#{s.class} (#{s.graph_node_name}/#{s.__id__})"
           digraph << "  #{n2.inspect};\n"
 
           source_history << s
 
           if s.respond_to?(:sources)
             s.sources.each do |src|
-              n1 = src.is_a?(Numeric) ? src.to_s : "#{src.class} (#{src.__id__})"
+              n1 = src.is_a?(Numeric) ? src.to_s : "#{src.class} (#{src.graph_node_name}/#{src.__id__})"
               digraph << "  #{n1.inspect} -> #{n2.inspect};\n"
             end
 
