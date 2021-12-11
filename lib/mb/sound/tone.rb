@@ -445,7 +445,7 @@ module MB
       # See ArithmeticMixin#sources.  Returns the frequency source of the tone,
       # which will either be a number or a signal generator.
       def sources
-        [@frequency]
+        [@frequency, @phase_mod].compact
       end
 
       # Returns an Oscillator that will generate a wave with the wave type,
