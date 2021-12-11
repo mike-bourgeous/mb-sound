@@ -33,7 +33,7 @@ module MB
         #            or nil to receive all channels.  Non-channel messages will
         #            always be received.  Drums are usually on channel 10, so
         #            pass 9 to listen to the drum channel, for example.
-        def initialize(jack: MB::Sound::JackFFI[], input: nil, port_name: 'midi_in', connect: nil, update_rate: 60, channel: nil)
+        def initialize(jack: MB::Sound::JackFFI[], input: nil, port_name: 'midi_in', connect: nil, update_rate: 60, channel: ENV['CHANNEL']&.to_i)
           @parameters = {}
           @event_callbacks = []
           @note_callbacks = []
@@ -47,7 +47,7 @@ module MB
           @midi_in = input || @jack.input(port_type: :midi, port_names: [port_name], connect: connect)
           @m = Nibbler.new
 
-          @transpose = 0
+          @transpose = ENV['TRANSPOSE']&.to_i || 0
         end
 
         # If the input is a JackFFI MIDI input, returns an Array of Strings
