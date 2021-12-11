@@ -23,12 +23,12 @@ voices = OSC_COUNT.times.map { |i|
   denv = MB::Sound.adsr(0, 0.3, 0.0, 0.35, auto_release: false).named('denv').db(30)
   d = denv * MB::Sound.tone(bfreq.call * 2 * 0.9996 - 0.22).at(1).forever.named('d')
 
-  eenv = MB::Sound.adsr(0, 2, 0.7, 1.5, auto_release: false).named('eenv')
+  eenv = MB::Sound.adsr(0, 2, 0.7, 0.5, auto_release: false).named('eenv')
   cconst = 0.9.constant.named('cconst')
   dconst = 0.7.constant.named('dconst')
   e = eenv.db * MB::Sound.tone(bfreq.call).at(1).pm(c * cconst + d * dconst).forever.named('e')
 
-  fenv = MB::Sound.adsr(0, 2, 0.8, 1.5, auto_release: false).named('fenv')
+  fenv = MB::Sound.adsr(0, 2, 0.8, 0.5, auto_release: false).named('fenv')
   econst = 2.constant.named('econst')
   f = fenv.db * MB::Sound.tone(bfreq.call).at(1).pm(e * econst).named('f')
 
