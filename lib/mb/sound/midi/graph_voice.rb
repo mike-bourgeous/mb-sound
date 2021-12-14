@@ -9,11 +9,23 @@ module MB
       class GraphVoice
         include ArithmeticMixin
 
+        # Raised when something is wrong with the modulation constants
+        # parameter to the constructor.
+        class ModConstantError < ArgumentError
+          def initialize(msg = nil)
+            msg ||= 'Modulation constants should be a Hash from CC number to a constant ' +
+              'or Array of constants (MB::Sound::Constant, MB::Sound::Mixer, or ' +
+              'MB::Sound::Multiplier)'
+
+            super(msg)
+          end
+        end
+
         # Initializes a voice based on the given signal graph.  If the
         # automatic detection of envelopes and oscillators doesn't work, then
         # the +:amp_envelopes+, +:envelopes+, and +:freq_constants+ parameters
         # may be used to override detection.
-        def initialize(graph, amp_envelopes: nil, envelopes: nil, freq_constants: nil)
+        def initialize(graph, amp_envelopes: nil, envelopes: nil, freq_constants: nil, mod_constants: nil)
           @graph = graph
 
           sources = graph.graph
@@ -59,8 +71,23 @@ module MB
               @freq_constants << mixer if mixer
             end
           end
-
           puts "Found #{@freq_constants.length} frequency constants: #{@freq_constants.map(&:__id__)}" # XXX
+
+          @mod_constants = mod_constants
+          if @mod_constants
+            raise ModConstantError unless @mod_constants.is_a?(Hash)
+            raise ModConstantError unless @mod_constants.keys.all?(Integer)
+
+            @mod_constants.each do |cc, constants|
+              raise ModConstantError, "Control Change index #{cc} is out of range" if cc < 1 || cc > 127
+
+              if constants.is_a?(Array)
+                raise ModConstantError unless constants.all? { |v| v.respond_to?(:constant=) }
+              else
+                raise ModConstantError unless constants.respond_to?(:constant=)
+              end
+            end
+          end
         end
 
         def trigger(note, velocity)
@@ -111,6 +138,11 @@ module MB
         # given to the constructor).
         def sources
           [@graph]
+        end
+
+        # Called by VoicePool when a MIDI CC is received.
+        def midi_cc(cc, value)
+          @mod_constants[cc]
         end
       end
     end
