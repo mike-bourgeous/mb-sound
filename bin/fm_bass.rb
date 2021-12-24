@@ -50,7 +50,7 @@ repeat = !!ARGV.delete('--loop')
 # input, and FLAC files for output, for use by all synthesizers
 jack = MB::Sound::JackFFI[]
 output = jack.output(channels: 1, connect: [['system:playback_1', 'system:playback_2']])
-midi = MB::Sound::MIDI::MIDIFile.new(ARGV[0]) if ARGV[0].end_with?('.mid') # TODO: Add a clock source based on jackd frames
+midi = MB::Sound::MIDI::MIDIFile.new(ARGV[0]) if ARGV[0]&.end_with?('.mid') # TODO: Add a clock source based on jackd frames
 manager = MB::Sound::MIDI::Manager.new(jack: jack, input: midi, connect: ARGV[0])
 pool = MB::Sound::MIDI::VoicePool.new(
   manager,
