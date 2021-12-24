@@ -343,7 +343,7 @@ static double complex cot_int(double complex z)
 	return -M_2_PI * clog(cexp(I * z) + I) + I;
 }
 
-static double complex osc_sample(enum wave_types wave_type, double phi)
+static double complex osc_sample(enum wave_types wave_type, complex double phi)
 {
 	double x;
 	double complex z;
@@ -351,16 +351,16 @@ static double complex osc_sample(enum wave_types wave_type, double phi)
 
 	switch(wave_type) {
 		case OSC_SINE:
-			return sin(phi);
+			return sin(creal(phi));
 
 		case OSC_COMPLEX_SINE:
 			return cexp(I * (phi - M_PI / 2));
 
 		case OSC_TRIANGLE:
-			if (phi < M_PI_2) {
+			if (creal(phi) < M_PI_2) {
 				// Rise from 0..1 in 0..pi/2
 				return phi * M_2_PI;
-			} else if (phi < (M_PI + M_PI_2)) {
+			} else if (creal(phi) < (M_PI + M_PI_2)) {
 				// Fall from 1..-1 in pi/2..3pi/2
 				return 2.0 - phi * M_2_PI;
 			} else {
@@ -371,11 +371,11 @@ static double complex osc_sample(enum wave_types wave_type, double phi)
 		case OSC_COMPLEX_TRIANGLE:
 			// see lib/mb/sound/oscillator.rb
 			// 2.4674...*i == -pi*log(2) + I*dilog(2)
-			return csc_int_int(phi + M_PI_2) * I / 2.46740110027234;
+			return csc_int_int(creal(phi) + M_PI_2) * I / 2.46740110027234;
 
 		case OSC_SQUARE:
 			// TODO: Normalize for RMS instead of peak?
-			if (phi < M_PI) {
+			if (creal(phi) < M_PI) {
 				return 1.0;
 			} else {
 				return -1.0;
@@ -397,7 +397,7 @@ static double complex osc_sample(enum wave_types wave_type, double phi)
 			return z;
 
 		case OSC_RAMP:
-			if (phi < M_PI) {
+			if (creal(phi) < M_PI) {
 				// Initial rise from 0..1 in 0..pi
 				return phi / M_PI;
 			} else {
@@ -418,7 +418,7 @@ static double complex osc_sample(enum wave_types wave_type, double phi)
 			return z;
 
 		case OSC_GAUSS:
-			x = phi / M_PI;
+			x = creal(phi) / M_PI;
 			if (x < 1.0) {
 				x = (sqrt(2.0 * log(1.6487212707 / (1.0 - x))) - 1) * 0.7071067811865476;
 			} else {
@@ -434,7 +434,7 @@ static double complex osc_sample(enum wave_types wave_type, double phi)
 			return x;
 
 		case OSC_PARABOLA:
-			if (phi < M_PI) {
+			if (creal(phi) < M_PI) {
 				x = 1.0 - phi * M_2_PI;
 				return 1.0 - x * x;
 			} else {
@@ -722,6 +722,21 @@ static void ensure_sfloat(VALUE *narray)
 		*narray = nary_dup(*narray);
 	}
 }
+
+static void ensure_scomplex(VALUE *narray)
+{
+	int dim = RNARRAY_NDIM(*narray);
+	if (dim != 1) {
+		rb_raise(rb_eArgError, "Only 1D NArrays may be processed (got %d dimensions)", dim);
+	}
+
+	*narray = rb_funcall(numo_cSComplex, rb_intern("cast"), 1, *narray);
+
+	if (!RTEST(nary_check_contiguous(*narray))) {
+		*narray = nary_dup(*narray);
+	}
+}
+
 
 static enum wave_types find_wave_type(ID wave_type)
 {
@@ -1038,19 +1053,12 @@ static VALUE ruby_osc(VALUE self, VALUE wave_type, VALUE phi)
 {
 	enum wave_types wt = find_wave_type(SYM2ID(wave_type));
 
-	double complex result = osc_sample(wt, NUM2DBL(phi));
+	double complex result = osc_sample(wt, num_to_complex(phi));
 
-	switch(wt) {
-		case OSC_SINE:
-		case OSC_SQUARE:
-		case OSC_TRIANGLE:
-		case OSC_RAMP:
-		case OSC_GAUSS:
-		case OSC_PARABOLA:
-			return rb_float_new(creal(result));
-
-		default:
-			return rb_dbl_complex_new(creal(result), cimag(result));
+	if (cimag(result) != 0) {
+		return rb_dbl_complex_new(creal(result), cimag(result));
+	} else {
+		return rb_float_new(creal(result));
 	}
 }
 
@@ -1082,27 +1090,27 @@ static VALUE ruby_synthesize(VALUE self, VALUE buffer, VALUE wave_type, VALUE fr
 
 	size_t length = RNARRAY_SHAPE(buffer)[0];
 
-	float *freqptr = NULL;
-	if (CLASS_OF(frequency) == numo_cDFloat || CLASS_OF(frequency) == numo_cSFloat) {
+	complex float *freqptr = NULL;
+	if (CLASS_OF(frequency) == numo_cDFloat || CLASS_OF(frequency) == numo_cSFloat || CLASS_OF(frequency) == numo_cSComplex || CLASS_OF(frequency) == numo_cDComplex) {
 		if (RNARRAY_SHAPE(frequency)[0] != length) {
 			rb_raise(rb_eArgError, "Frequency array length does not match sample buffer length");
 		}
 
-		ensure_sfloat(&frequency);
-		freqptr = (float *)(nary_get_pointer_for_read(frequency) + nary_get_offset(frequency));
+		ensure_scomplex(&frequency);
+		freqptr = (float complex *)(nary_get_pointer_for_read(frequency) + nary_get_offset(frequency));
 		freq = freqptr[0];
 	} else {
 		freq = NUM2DBL(frequency);
 	}
 
-	float *phaseptr = NULL;
-	if (CLASS_OF(phase_mod) == numo_cDFloat || CLASS_OF(phase_mod) == numo_cSFloat) {
+	complex float *phaseptr = NULL;
+	if (CLASS_OF(phase_mod) == numo_cDFloat || CLASS_OF(phase_mod) == numo_cSFloat || CLASS_OF(phase_mod) == numo_cSComplex || CLASS_OF(phase_mod) == numo_cDComplex) {
 		if (RNARRAY_SHAPE(phase_mod)[0] != length) {
 			rb_raise(rb_eArgError, "Phase modulation array length does not match sample buffer length");
 		}
 
-		ensure_sfloat(&phase_mod);
-		phaseptr = (float *)(nary_get_pointer_for_read(phase_mod) + nary_get_offset(phase_mod));
+		ensure_scomplex(&phase_mod);
+		phaseptr = (float complex *)(nary_get_pointer_for_read(phase_mod) + nary_get_offset(phase_mod));
 		phase = phaseptr[0];
 	} else if (RTEST(phase_mod)) {
 		phase = NUM2DBL(phase_mod);
@@ -1116,7 +1124,7 @@ static VALUE ruby_synthesize(VALUE self, VALUE buffer, VALUE wave_type, VALUE fr
 		float_ptr = (float *)(nary_get_pointer_for_write(buffer) + nary_get_offset(buffer));
 	}
 
-	double delta;
+	double complex delta;
 	double complex v;
 	for (size_t i = 0; i < length; i++) {
 		if (freqptr) {
@@ -1148,7 +1156,7 @@ static VALUE ruby_synthesize(VALUE self, VALUE buffer, VALUE wave_type, VALUE fr
 			float_ptr[i] = creal(v);
 		}
 
-		phi = wrap(phi + delta, M_PI * 2.0);
+		phi = wrap(creal(phi + delta), M_PI * 2.0) + I * wrap(cimag(phi + delta), M_PI * 2.0);
 	}
 
 	rb_ary_store(state, 0, rb_float_new(phi));

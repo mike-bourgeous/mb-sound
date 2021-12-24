@@ -96,6 +96,7 @@ module MB
       # Calculates a fractional MIDI note number for the given frequency,
       # assuming equal temperament.
       def self.calc_number(frequency_hz)
+        frequency_hz = frequency_hz.real
         frequency_hz = 0 if frequency_hz < 0
         12.0 * Math.log2(frequency_hz / tune_freq) + tune_note
       end
