@@ -18,19 +18,19 @@ voices = OSC_COUNT.times.map { |i|
   cenv = MB::Sound.adsr(0, 0.2, 0.0, 0.1, auto_release: false).named('cenv').db(30)
   cenv2 = MB::Sound.adsr(0, 0.2, 0.0, 0.1, auto_release: false).named('cenv2').db(30)
   fbconst = 4.constant.named('fbconst')
-  c = cenv * MB::Sound.tone(bfreq.call * 2).at(1).pm(cenv2 * fbconst * MB::Sound.tone(bfreq.call * 2).at(1).forever).forever
+  c = cenv * MB::Sound.tone(bfreq.call * 2).complex_sine.at(1).pm(cenv2 * fbconst * MB::Sound.tone(bfreq.call * 2).at(1).forever).forever
 
   denv = MB::Sound.adsr(0, 0.3, 0.0, 0.35, auto_release: false).named('denv').db(30)
-  d = denv * MB::Sound.tone(bfreq.call * 2 * 0.9996 - 0.22).at(1).forever.named('d')
+  d = denv * MB::Sound.tone(bfreq.call * 2 * 0.9996 - 0.22).complex_sine.at(1).forever.named('d')
 
   eenv = MB::Sound.adsr(0, 2, 0.7, 0.5, auto_release: false).named('eenv')
   cconst = 0.9.constant.named('cconst')
   dconst = 0.7.constant.named('dconst')
-  e = eenv.db * MB::Sound.tone(bfreq.call).at(1).pm(c * cconst + d * dconst).forever.named('e')
+  e = eenv.db * MB::Sound.tone(bfreq.call).complex_sine.at(1).pm(c * cconst + d * dconst).forever.named('e')
 
   fenv = MB::Sound.adsr(0, 2, 0.8, 0.5, auto_release: false).named('fenv')
   econst = 2.constant.named('econst')
-  f = fenv.db * MB::Sound.tone(bfreq.call).at(1).pm(e * econst).named('f')
+  f = fenv.db * MB::Sound.tone(bfreq.call).complex_sine.at(1).pm(e * econst).named('f')
 
   mod_constants << fbconst
   mod_constants << cconst
