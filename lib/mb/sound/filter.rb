@@ -6,9 +6,16 @@ module MB
     class Filter
       # Should accept either a Float or a Numo::NArray (e.g. Numo::SFloat) and
       # return the single sample or array of samples as processed through the
-      # filter.
+      # filter.  Subclasses may also accept Complex values; check their
+      # documentation.
       def process(value)
         raise NotImplementedError, 'Subclasses must override #process'
+      end
+
+      # Should accept a Float (or maybe a Complex) and return the result of
+      # sending that value through the filter.
+      def process_one(value)
+        process(Numo::SFloat[value])[0]
       end
 
       # If implemented, should reset filter to the given steady-state input.
