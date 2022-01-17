@@ -104,6 +104,9 @@ module MB
       # Writes an Array of Numo::NArrays into the given sound file.  If the sound
       # file already exists and +:overwrite+ is false, an error will be raised.
       #
+      # Writes at most +:max_length+ seconds if +data+ is a Tone or a signal
+      # graph.
+      #
       # The sample +:rate+ defaults to 48kHz to match the default resampling of
       # #read, and the default sample rate of #input and #output.
       #

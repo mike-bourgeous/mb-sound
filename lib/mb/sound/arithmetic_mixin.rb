@@ -21,14 +21,18 @@ module MB
     #     f = C2.at(-10.db).fm(e * 250) * fenv; nil
     #     play f
     #
-    # TODO: This DSL is pretty good at fan-in (having a bunch of sources all
-    # combine to a single input), but can't really do fan-out because #sample
-    # is not idempotent.  Either a Tee object is needed that prevents in-place
-    # processing (and all processing classes would need to be tested and
-    # updated to make sure they work with in-place processing), or each node
-    # should use its own buffer and copy in the data, and #sample should be
-    # paired with an #update method to tell everything to render another window
-    # of audio.
+    # TODO: Figure out a way to create graph feedback from a tee
+    #
+    # TODO: Standardize a way to modify an existing graph, e.g. to inject a
+    # tee, filter, or tap.
+    #
+    # TODO: Standardize a way to detect controls on a node and their data types
+    # and ranges.
+    #
+    # TODO: Delay method
+    # TODO: In-line method to create a meter?
+    # TODO: In-line method to create some kind of a testpoint for graphing
+    # buffers at a given point?
     module ArithmeticMixin
       attr_reader :graph_node_name
 
@@ -36,6 +40,23 @@ module MB
       def named(n)
         @graph_node_name = n&.to_s
         self
+      end
+
+      # Returns +n+ (default 2) fan-out readers for creating branching signal
+      # graphs.  This is useful because the #sample method can only be called
+      # once per frame because it updates the internal state of signal nodes.
+      # Each fan-out reader gets a copy of the input buffer, so downstream
+      # nodes can call #sample (once per cycle!) on their branch of the tee and
+      # modify the resulting buffer without affecting parallel branches of the
+      # graph.
+      #
+      # Example (for bin/sound.rb):
+      #     # AM and tremolo added together for some reason
+      #     a, b = 120.hz.tee ; nil
+      #     c = a * 150.hz.at(0.5..1) + b * 0.5.hz.at(0.25..1) ; nil
+      #     play c
+      def tee(n = 2)
+        Tee.new(self, n).branches
       end
 
       # Creates a mixer that adds this mixer's output to +other+.  Part of a

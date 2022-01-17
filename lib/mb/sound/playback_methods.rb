@@ -26,6 +26,7 @@ module MB
           return play_file(file_tone_data, gain: gain, plot: plot, device: device)
 
         when Array, Numo::NArray
+          # TODO: Allow putting multiple signal graphs into an Array
           data = any_sound_to_array(file_tone_data)
           data = data * 2 if data.length < 2
           channels = data.length
