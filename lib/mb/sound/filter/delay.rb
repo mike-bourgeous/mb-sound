@@ -12,6 +12,7 @@ module MB
         # +:smoothing+ is a numeric value, then that is the maximum delay
         # change in seconds allowed per second.
         def initialize(delay: 0, rate: 48000, buffer_size: 48000, smoothing: true)
+          buffer_size = 1.1 * delay * rate if buffer_size < 1.1 * delay * rate
           @buf = Numo::SFloat.zeros(buffer_size)
           @out_buf = Numo::SFloat.zeros(1) # For wrap-around reads
           @rate = rate.to_f
@@ -78,6 +79,10 @@ module MB
         def process(data)
           raise 'Cannot process a zero-length array' if data.length == 0
 
+          if @buf.is_a?(Numo::SFloat) && (data.is_a?(Numo::SComplex) || data.is_a?(Numo::DComplex))
+            @buf = Numo::SComplex.cast(@buf)
+          end
+
           if @smoothing
             max_length = @buf.length - MB::M.max(@delay_samples, @filter.peek)
           else
@@ -107,6 +112,7 @@ module MB
 
           if @smoothing
             # TODO: Fractional addressing / interpolation / resampling might sound better
+            # TODO: Support using an NArray as the delay value
             delay = @filter.process(@filter_buf[0...data.length].fill(@delay_samples).inplace).not_inplace!
             ret = data.map_with_index { |_, idx|
               read_offset = (@write_offset - delay[idx] + idx) % @buf.length

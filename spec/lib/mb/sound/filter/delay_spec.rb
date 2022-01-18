@@ -14,6 +14,11 @@ RSpec.describe(MB::Sound::Filter::Delay) do
     end
   end
 
+  it 'can be created by DSL methods' do
+    expect(100.hz.delay(seconds: 0.01).filter).to be_a(MB::Sound::Filter::Delay)
+    expect(100.hz.delay(samples: 5).filter).to be_a(MB::Sound::Filter::Delay)
+  end
+
   it 'smooths the delay when smoothing is enabled' do
     shortbuf.delay = 0
     expect(shortbuf.process(Numo::SFloat[1,2,3,4,5,6,7,8,9])).to eq(Numo::SFloat[0,0,0,1,3,4,6,7,9])

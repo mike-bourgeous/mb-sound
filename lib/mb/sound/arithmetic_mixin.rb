@@ -27,9 +27,9 @@ module MB
     # tee, filter, or tap.
     #
     # TODO: Standardize a way to detect controls on a node and their data types
-    # and ranges.
+    # and ranges.  E.g. maybe a #controls method that returns a map from method
+    # name to an array of ranges (or, lol, a ClassyHash array schema)
     #
-    # TODO: Delay method
     # TODO: In-line method to create a meter?
     # TODO: In-line method to create some kind of a testpoint for graphing
     # buffers at a given point?
@@ -254,6 +254,13 @@ module MB
       # filter whose step response is the smoothstep function.
       def smooth(samples: nil, seconds: nil, rate: 48000)
         filter(MB::Sound::Filter::Smoothstep.new(rate: rate, samples: samples, seconds: seconds))
+      end
+
+      # Adds a MB::Sound::Filter::Dealy to the signal chain with a delay of the
+      # given number of seconds.
+      def delay(seconds: nil, samples: nil, rate: 48000)
+        seconds ||= samples.to_f / rate
+        filter(MB::Sound::Filter::Delay.new(delay: seconds, rate: rate))
       end
 
       # Wraps this arithmetic signal graph in a softclip effect.

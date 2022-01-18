@@ -37,7 +37,10 @@ voices = OSC_COUNT.times.map { |i|
   mod_constants << dconst
   mod_constants << econst
 
-  MB::Sound::MIDI::GraphVoice.new(f, amp_envelopes: [fenv], freq_constants: freq_constants)
+  dry, wet = f.tee
+  final = dry + wet.delay(seconds: 0.1) * 0.5
+
+  MB::Sound::MIDI::GraphVoice.new(final, amp_envelopes: [fenv], freq_constants: freq_constants)
 }
 
 mod_constants.each do |c|
