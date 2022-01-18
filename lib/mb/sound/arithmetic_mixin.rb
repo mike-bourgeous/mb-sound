@@ -247,6 +247,15 @@ module MB
         end
       end
 
+      # Adds a MB::Sound::Filter::Smoothstep filter to the chain, smoothing
+      # over the given number of samples or seconds.
+      #
+      # TODO: instead of reacting to step changes in the input, use an FIR
+      # filter whose step response is the smoothstep function.
+      def smooth(samples: nil, seconds: nil, rate: 48000)
+        filter(MB::Sound::Filter::Smoothstep.new(rate: rate, samples: samples, seconds: seconds))
+      end
+
       # Wraps this arithmetic signal graph in a softclip effect.
       def softclip(threshold = 0.25, limit = 1.0)
         MB::Sound::Filter::SampleWrapper.new(

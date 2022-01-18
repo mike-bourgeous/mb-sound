@@ -15,6 +15,8 @@ module MB
         extend Forwardable
         include MB::Sound::ArithmeticMixin
 
+        attr_reader :filter
+
         # Initializes a sample wrapper for the given +filter+ (which must
         # provide a #process method) and +source+ (which must provide a #sample
         # method).
