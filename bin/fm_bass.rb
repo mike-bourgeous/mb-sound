@@ -12,7 +12,7 @@ OSC_COUNT = ENV['OSC_COUNT']&.to_i || 1
 voices = OSC_COUNT.times.map { |i|
   base = MB::Sound::Constant.new(440)
   freq_constants = []
-  bfreq = -> { 2 ** base.dup.tap { |z| freq_constants << z }.log2.filter(20.hz.follower) }
+  bfreq = -> { 2 ** base.dup.tap { |z| freq_constants << z }.log2.smooth(seconds: 0.1) }
 
   # TODO: True FM/PM feedback instead of a duplicate copy of the oscillator
   cenv = MB::Sound.adsr(0, 0.2, 0.0, 0.1, auto_release: false).named('cenv').db(30)
