@@ -81,4 +81,44 @@ RSpec.describe(MB::Sound::ArithmeticMixin) do
       expect(graph.sample(10)).to eq(Numo::SFloat.new(10).fill(3))
     end
   end
+
+  describe '#spy' do
+    it 'calls a block when the sample method is called' do
+      b = nil
+      p = ->(buf) { b = buf.dup }
+
+      ref = 456.hz.spy(&p).sample(100)
+      expect(ref.abs.max).not_to eq(0)
+      expect(b).not_to equal(ref)
+      expect(b).to eq(ref)
+    end
+
+    it 'can call multiple blocks' do
+      b = nil
+      p = ->(buf) { b = buf.dup }
+
+      absmax = nil
+      p2 = ->(buf) { absmax = buf.abs.max }
+
+      ref = 456.hz.spy(&p).spy(&p2).sample(100)
+      expect(ref.abs.max).not_to eq(0)
+      expect(b).not_to equal(ref)
+      expect(b).to eq(ref)
+      expect(absmax).to eq(ref.abs.max)
+    end
+  end
+
+  describe '#clear_spies' do
+    it 'does nothing if there are no spies' do
+      expect(0.hz.clear_spies.sample(5)).to eq(Numo::SFloat.zeros(5))
+    end
+
+    it 'removes active spies' do
+      b = nil
+      p = ->(buf) { b = buf.dup }
+
+      456.hz.spy(&p).clear_spies.sample(100)
+      expect(b).to eq(nil)
+    end
+  end
 end

@@ -31,8 +31,6 @@ module MB
     # name to an array of ranges (or, lol, a ClassyHash array schema)
     #
     # TODO: In-line method to create a meter?
-    # TODO: In-line method to create some kind of a testpoint for graphing
-    # buffers at a given point?
     module ArithmeticMixin
       attr_reader :graph_node_name
 
@@ -269,6 +267,57 @@ module MB
           MB::Sound::SoftestClip.new(threshold: threshold, limit: limit),
           self
         )
+      end
+
+      # Calls the given block with each sample buffer whenever #sample is
+      # called.  Returns self to allow chaining, but this method is also useful
+      # after a chain has been constructed for spying on a specific object's
+      # output.
+      #
+      # This is like adding a trace point to tap into a circuit, and allows
+      # intermediate values in a signal graph to be plotted or saved.
+      #
+      # The block should not modify the buffer, and should not retain a
+      # reference to the buffer.  Instead, the buffer may be copied to an
+      # existing buffer using Numo::NArray#[]=:
+      #
+      #     block_buf[] = spy_buf
+      #
+      # TODO: accomplish this without monkey patching
+      def spy(&block)
+        @graph_spies ||= nil
+
+        if @graph_spies.nil?
+          @graph_spies = []
+
+          class << self
+            def sample(count)
+              super(count).tap { |buf|
+                MB::M.with_inplace(buf, false) do |b|
+                  @graph_spies.each do |s|
+                    begin
+                      s.call(b)
+                    rescue => e
+                      warn "Spy #{s} raised #{MB::U.highlight(e)}"
+                    end
+                  end
+                end
+              }
+            end
+          end
+        end
+
+        @graph_spies << block
+
+        self
+      end
+
+      # Clears any spies attached to this graph node (see #spy).
+      def clear_spies
+        @graph_spies ||= nil
+        @graph_spies&.clear
+
+        self
       end
 
       # Overridden by users of this mixin to return the inputs to the current
