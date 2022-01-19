@@ -10,4 +10,21 @@ RSpec.describe(MB::Sound::Tee) do
     expect(branches.length).to eq(5)
     expect(branches.all?(MB::Sound::Tee::Branch)).to eq(true)
   end
+
+  it 'gives the same data to each branch' do
+    a, b = 157.hz.tee
+
+    a1 = a.sample(100)
+    b1 = b.sample(100)
+    expect(a1).not_to equal(b1)
+    expect(a1).to eq(b1)
+
+    ref = a1.dup
+
+    b2 = b.sample(100)
+    a2 = a.sample(100)
+    expect(a2).not_to equal(b2)
+    expect(a2).to eq(b2)
+    expect(ref).not_to eq(b2)
+  end
 end
