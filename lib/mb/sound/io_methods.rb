@@ -215,8 +215,8 @@ module MB
           raise NotImplementedError, 'TODO: support other platforms'
         end
 
-        inp.extend(IOSampleMixin) unless inp.is_a?(IOSampleMixin)
         inp.extend(ArithmeticMixin) unless inp.is_a?(ArithmeticMixin)
+        inp.extend(IOSampleMixin) unless inp.is_a?(IOSampleMixin)
 
         inp
       end

@@ -15,6 +15,26 @@ module MB
         buf = MB::M.zpad(buf, count) if buf.length < count
         buf
       end
+
+      # Overrides the default ArithmeticMixin#graph_node_name reader to try to
+      # get a sensible name for the input, whether that's a filename, ALSA
+      # device, JACK connection list, or whatever.
+      def graph_node_name
+        if self.respond_to?(:filename)
+          name = self.filename
+        elsif self.respond_to?(:device)
+          name = self.device
+        elsif self.respond_to?(:connections)
+          name = self.connections.join(', ')
+        elsif self.respond_to?(:name)
+          name = self.name
+        else
+          @graph_node_name ||= __id__.to_s
+          name = @graph_node_name
+        end
+
+        "#{self.class.name}: #{name}"
+      end
     end
   end
 end
