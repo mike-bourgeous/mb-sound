@@ -15,8 +15,8 @@ RSpec.describe(MB::Sound::Filter::Delay) do
   end
 
   it 'can be created by DSL methods' do
-    expect(100.hz.delay(seconds: 0.01).filter).to be_a(MB::Sound::Filter::Delay)
-    expect(100.hz.delay(samples: 5).filter).to be_a(MB::Sound::Filter::Delay)
+    expect(100.hz.delay(seconds: 0.01).base_filter).to be_a(MB::Sound::Filter::Delay)
+    expect(100.hz.delay(samples: 5).base_filter).to be_a(MB::Sound::Filter::Delay)
   end
 
   it 'smooths the delay when smoothing is enabled' do
