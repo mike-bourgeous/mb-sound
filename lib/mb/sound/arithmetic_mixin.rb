@@ -200,6 +200,15 @@ module MB
         block
       end
 
+      # If this node (or its inputs) have a finite length of audio data
+      # available (e.g. a sound file), then when they run out of data then the
+      # given +sources+ (other graph nodes that respond to :sample) will be
+      # played after this node finishes.
+      def and_then(*sources)
+        raise 'No sources were given' if sources.empty?
+        MB::Sound::NodeSequence.new([self, *sources])
+      end
+
       # Applies the given filter (creating the filter if given a filter type)
       # to this sample source or sample chain.  If given a filter type, then a
       # dynamically updating filter is created where teh cutoff and quality are
