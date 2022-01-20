@@ -16,16 +16,23 @@ numerics, others = ARGV.partition { |arg| arg.strip =~ /\A\+?[0-9]+(\.[0-9]+)?\z
 
 delay, feedback = numerics.map(&:to_f)
 delay ||= 0.1
-feedback ||= 0.75
+feedback ||= 0.75 # TODO: Allow controlling first delay amplitude separately
 
 filename = others[0]
 
 if filename && File.readable?(filename)
-  # TODO: Extend input duration by a suitable delay decay time, e.g. RT60
+  # Extend input duration by a suitable delay decay time, e.g. RT60
   # feedback ** N == 0.001
   # N = log(0.001) / log(feedback)
   # padding = N * delay
-  input = MB::Sound.file_input(filename)
+  if feedback >= 1
+    extra = 10
+  else
+    extra = delay * (Math.log(0.01) / Math.log(feedback))
+    extra = 1.0 if extra <= 0
+    extra = 10 if extra > 10
+  end
+  input = MB::Sound.file_input(filename).and_then(0.hz.at(0).for(extra))
 else
   input = MB::Sound.input(channels: 1)
 end
@@ -41,7 +48,8 @@ puts MB::U.highlight(
   feedback: feedback,
   input: input.graph_node_name,
   rate: output.rate,
-  buffer: bufsize
+  buffer: bufsize,
+  extra_time: extra
 )
 
 # TODO: Make it easy to replicate a signal graph for each of N channels
@@ -58,7 +66,7 @@ begin
   d = c.softclip(0, 0.5)
 
   # Final output, with a spy to save feedback buffer
-  f = (input + d * feedback).softclip(0.75, 0.95).spy { |z| a[] = z }
+  f = (input + d * feedback).softclip(0.75, 0.95).spy { |z| a[] = z if z }
 
   loop do
     data = f.sample(output.buffer_size)
