@@ -1,6 +1,8 @@
 #!/usr/bin/env ruby
 # A simple flanger effect, to demonstrate using a signal node as a delay time.
 # (C)2022 Mike Bourgeous
+#
+# Cool pitch effect: bin/flanger.rb 0.035 0 3 2
 
 require 'bundler/setup'
 
@@ -15,7 +17,7 @@ end
 numerics, others = ARGV.partition { |arg| arg.strip =~ /\A[+-]?[0-9]+(\.[0-9]+)?\z/ }
 
 delay, feedback, hz, depth = numerics.map(&:to_f)
-delay ||= 0.02
+delay ||= 0.02193
 feedback ||= -0.3
 hz ||= -0.7
 depth ||= 0.35
@@ -62,18 +64,16 @@ puts MB::U.highlight(
 begin
   # Feedback buffers, overwritten by later calls to #spy
   a = Numo::SFloat.zeros(bufsize)
-  d_prior = Numo::SFloat.zeros(bufsize)
 
   # Split delay LFO for first-tap and feedback
-  d1, d2 = delay_samples.spy { |z| d_prior[] = z if z }.tee
-  d2 = d2.proc { |v| v + d_prior }
+  d1, d2 = delay_samples.tee
 
   # Split input into original and first delay
   s1, s2 = input.tee
   s2 = s2.delay(samples: d1)
 
-  # Feedback injector and feedback delay
-  d_fb = (d2 - output.buffer_size).proc { |v| v.inplace.clip(0, nil).not_inplace! }
+  # Feedback injector and feedback delay (compensating for buffer size)
+  d_fb = (d2 - bufsize).proc { |v| v.inplace.clip(0, nil).not_inplace! }
   b = 0.hz.forever.proc { a }.delay(samples: d_fb)
 
   # Final output, with a spy to save feedback buffer
