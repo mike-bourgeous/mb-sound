@@ -68,7 +68,7 @@ play '/tmp/ramp.flac'
 
 These examples can be run in the `bin/sound.rb` interactive environment.  There
 are other examples in the scripts under the `bin/` directory, such as an FM
-synthesizer in `bin/fm_synth.rb`.
+synthesizer in `bin/fm_synth.rb` and a flanger effect in `bin/flanger.rb`.
 
 ### Generating tones
 
