@@ -51,12 +51,17 @@ module MB
 
           buf.inplace! if @in_place
           buf = @base_filter.process(buf)
-          buf.not_inplace!
+          buf&.not_inplace!
         end
 
         # See ArithmeticMixin#sources.
         def sources
-          [@source]
+          if @base_filter.respond_to?(:sources)
+            # + instead of | because duplicate connections should be shown
+            [@source] + @base_filter.sources
+          else
+            [@source]
+          end
         end
       end
     end

@@ -7,14 +7,13 @@ require 'bundler/setup'
 require 'mb/sound'
 
 if ARGV.include?('--help')
-  puts "Usage: \e[1m#{$0}\e[0m [delay_s [feedback [filename]]]"
-  puts "   Or: \e[1m#{$0}\e[0m [filename]"
+  puts "Usage: [PITCH=1] \e[1m#{$0}\e[0m [delay_s [feedback [extra_time]]] [filename]"
   exit 1
 end
 
 numerics, others = ARGV.partition { |arg| arg.strip =~ /\A\+?[0-9]+(\.[0-9]+)?\z/ }
 
-delay, feedback = numerics.map(&:to_f)
+delay, feedback, extra = numerics.map(&:to_f)
 delay ||= 0.1
 feedback ||= 0.75 # TODO: Allow controlling first delay amplitude separately
 
@@ -26,9 +25,9 @@ if filename && File.readable?(filename)
   # N = log(0.001) / log(feedback)
   # padding = N * delay
   if feedback >= 1
-    extra = 10
+    extra ||= 10
   else
-    extra = delay * (Math.log(0.01) / Math.log(feedback))
+    extra ||= delay * (Math.log(0.01) / Math.log(feedback))
     extra = 1.0 if extra <= 0
     extra = 10 if extra > 10
   end
@@ -40,8 +39,12 @@ end
 output = MB::Sound.output
 bufsize = output.buffer_size
 
-delay_samples = delay * output.rate - output.buffer_size
+delay_samples = (delay * output.rate - output.buffer_size)
 delay_samples = 0 if delay_samples < 0
+
+if ENV['PITCH'] == '1'
+  delay_samples = delay_samples + -0.4.hz.ramp.forever.at(0..3250)
+end
 
 puts MB::U.highlight(
   delay: delay,

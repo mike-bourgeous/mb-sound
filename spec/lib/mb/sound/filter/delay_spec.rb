@@ -52,6 +52,20 @@ RSpec.describe(MB::Sound::Filter::Delay) do
           expect(shortbuf.process(Numo::SFloat[-2,1,2])).to eq(Numo::SFloat[4,5,6])
           expect(shortbuf.process(Numo::SFloat.zeros(5))).to eq(Numo::SFloat[-2,1,2,0,0])
         end
+
+        it 'accepts a sample source/graph node' do
+          data = Numo::SFloat[1,2,3,4,5,6,7,8]
+
+          delay_source = 0.5.hz.square.at_rate(1).at(1..2)
+          expect(delay_source).to receive(:sample).with(8).and_call_original
+
+          shortbuf.delay = delay_source
+
+          result = shortbuf.process(data)
+          expect(result.length).to eq(8)
+          expect(result).not_to eq(Numo::SFloat.zeros(8))
+          expect(result).not_to eq(data)
+        end
       end
 
       describe '#process' do

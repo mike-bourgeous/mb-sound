@@ -266,7 +266,13 @@ module MB
       # Adds a MB::Sound::Filter::Dealy to the signal chain with a delay of the
       # given number of seconds.
       def delay(seconds: nil, samples: nil, rate: 48000)
-        seconds ||= samples.to_f / rate
+        if samples
+          samples = samples.to_f if samples.is_a?(Numeric)
+          seconds = samples / rate
+        else
+          seconds = seconds.to_f if seconds.is_a?(Numeric)
+        end
+
         filter(MB::Sound::Filter::Delay.new(delay: seconds, rate: rate))
       end
 
