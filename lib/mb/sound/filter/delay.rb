@@ -169,11 +169,15 @@ module MB
           end
 
           if delay_buf
-            # TODO: Fractional addressing / interpolation / resampling might sound better
+            # TODO: Something better than linear interpolation?
             ret = data.map_with_index { |_, idx|
-              delay = delay_buf[idx].to_i # TODO: does this need to clamp to >= 0 ???
-              @read_offset = (@write_offset - delay + idx) % @buf.length
-              @buf[@read_offset]
+              delay = delay_buf[idx] # TODO: does this need to clamp to >= 0 ???
+              min = delay.floor
+              max = delay.ceil
+              delta = delay - min
+              @read_offset = (@write_offset - min + idx) % @buf.length
+              off2 = (@write_offset - max + idx) % @buf.length
+              @buf[@read_offset] * (1.0 - delta) + @buf[off2] * delta
             }
           else
             if @read_offset + data.length > @buf.length
