@@ -112,15 +112,53 @@ module MB
       #
       # See MB::Sound::FFMPEGOutput for more flexible sound output.
       def write(filename, data, rate: 48000, overwrite: false, max_length: nil)
+        # TODO: Handle the signal graph DSL better in convert_sound_to_narray
         if data.is_a?(ArithmeticMixin) && !data.is_a?(Tone)
-          # TODO: Handle the signal graph DSL better in convert_sound_to_narray
-          output = file_output(filename, rate: rate, channels: 1, overwrite: overwrite, buffer_size: 800)
+          buffer_size = data.graph_buffer_size || 800
+          output = file_output(
+            filename,
+            rate: rate,
+            channels: 1,
+            overwrite: overwrite,
+            buffer_size: buffer_size
+          )
 
           t = 0
           loop do
             buf = data.sample(output.buffer_size)
             break if buf.nil? || buf.empty?
             output.write([buf])
+
+            t += output.buffer_size.to_f / rate
+            break if max_length && t >= max_length
+          end
+        elsif data.is_a?(Array) && data.all?(ArithmeticMixin)
+          buffer_size = data.map(&:graph_buffer_size).compact.min || 800
+
+          output = file_output(
+            filename,
+            rate: rate,
+            channels: data.length,
+            overwrite: overwrite,
+            buffer_size: buffer_size
+          )
+
+          t = 0
+          loop do
+            buf = data.map { |d| d.sample(output.buffer_size) }
+            break if buf.all? { |d| d.nil? || d.empty? }
+
+            buf = buf.map { |d|
+              if d.nil? || d.empty?
+                Numo::SFloat.zeros(output.buffer_size)
+              elsif d.length < output.buffer_size
+                MB::M.zpad(d, output.buffer_size)
+              else
+                d
+              end
+            }
+
+            output.write(buf)
 
             t += output.buffer_size.to_f / rate
             break if max_length && t >= max_length

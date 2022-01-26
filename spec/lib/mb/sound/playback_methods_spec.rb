@@ -18,6 +18,7 @@ RSpec.describe(MB::Sound::PlaybackMethods) do
 
     pending 'can play a Tone'
     pending 'can play a Numo::NArray'
-    pending 'can play an array of sounds for separate channels'
+    pending 'can play an array of graph nodes for separate channels'
+    pending 'can play an array of other types of sounds for separate channels'
   end
 end

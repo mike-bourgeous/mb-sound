@@ -21,7 +21,7 @@ module MB
     #     f = C2.at(-10.db).fm(e * 250) * fenv; nil
     #     play f
     #
-    # TODO: Figure out a way to create graph feedback from a tee
+    # There are more examples in the bin/ directory, such as bin/flanger.rb
     #
     # TODO: Standardize a way to modify an existing graph, e.g. to inject a
     # tee, filter, or tap.
@@ -31,6 +31,8 @@ module MB
     # name to an array of ranges (or, lol, a ClassyHash array schema)
     #
     # TODO: In-line method to create a meter?
+    #
+    # TODO: Rename this module to SignalNodeMixin or similar?
     module ArithmeticMixin
       attr_reader :graph_node_name
 
@@ -361,6 +363,28 @@ module MB
         end
 
         source_history.to_a
+      end
+
+      # Finds the lowest numeric value greater than zero for any graph nodes
+      # that have a #buffer_size method.  The idea is that sound card inputs
+      # will have the smallest buffer size of any input.
+      #
+      # If there is no graph node with a buffer_size method, then this method
+      # returns nil.
+      #
+      # TODO: A buffer adapter might be useful.  The MB::Sound::Filter::Delay
+      # class is already kind of like one.
+      def graph_buffer_size
+        size = nil
+
+        graph.each do |n|
+          nsize = n.respond_to?(:buffer_size) ? n.buffer_size : nil
+          if nsize && nsize > 0 && (size.nil? || nsize < size)
+            size = nsize
+          end
+        end
+
+        size
       end
 
       # Looks for the first source node within the graph feeding into this node

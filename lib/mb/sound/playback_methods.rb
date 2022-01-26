@@ -26,38 +26,72 @@ module MB
           return play_file(file_tone_data, gain: gain, plot: plot, device: device)
 
         when Array, Numo::NArray
-          # TODO: Allow putting multiple signal graphs into an Array
-          data = any_sound_to_array(file_tone_data)
-          data = data * 2 if data.length < 2
-          channels = data.length
+          # TODO: Handle the signal graph DSL better in convert_sound_to_narray and consolidate with IOMethods#write
+          if file_tone_data.is_a?(Array) && !file_tone_data.empty? && file_tone_data.all?(ArithmeticMixin)
+            bufsize = file_tone_data.map(&:graph_buffer_size).compact.min # nil is ok here
+            output = MB::Sound.output(
+              rate: rate,
+              channels: [2, file_tone_data.length].max,
+              plot: plot,
+              device: device,
+              buffer_size: bufsize
+            )
 
-          # TODO: if this code needs to be modified much in the future, come up
-          # with a shared way of chunking data that can work for all play and
-          # plot methods
-          output = MB::Sound.output(rate: rate, channels: channels, plot: plot, device: device)
-          buffer_size = output.buffer_size
-          (0...data[0].length).step(buffer_size).each do |offset|
-            output.write(data.map { |c|
-              MB::M.zpad(c[offset...([offset + buffer_size, c.length].min)], buffer_size)
-            })
+            loop do
+              buf = file_tone_data.map { |d| d.sample(output.buffer_size) }
+              break if buf.all? { |d| d.nil? || d.empty? }
+
+              buf = buf.map { |d|
+                if d.nil? || d.empty?
+                  Numo::SFloat.zeros(output.buffer_size)
+                elsif d.length < output.buffer_size
+                  MB::M.zpad(d, output.buffer_size)
+                else
+                  d
+                end
+              }
+
+              if buf.length == 1
+                output.write(buf * output.channels)
+              else
+                output.write(buf)
+              end
+            end
+
+          else
+            data = any_sound_to_array(file_tone_data)
+            data = data * 2 if data.length < 2
+            channels = data.length
+
+            # TODO: if this code needs to be modified much in the future, come up
+            # with a shared way of chunking data that can work for all play,
+            # write, and plot methods.  Maybe convert everything to signal nodes?
+            output = MB::Sound.output(rate: rate, channels: channels, plot: plot, device: device)
+            buffer_size = output.buffer_size
+            (0...data[0].length).step(buffer_size).each do |offset|
+              output.write(data.map { |c|
+                MB::M.zpad(c[offset...([offset + buffer_size, c.length].min)], buffer_size)
+              })
+            end
           end
 
         when Tone
           output = MB::Sound.output(rate: rate, plot: plot, device: device)
           file_tone_data.write(output)
 
-        else
-          if file_tone_data.respond_to?(:sample)
-            output = MB::Sound.output(rate: rate, plot: plot, device: device)
-            loop do
-              d = file_tone_data.sample(output.buffer_size)
-              break if d.nil? || d.empty?
-              d = MB::M.zpad(d, output.buffer_size) if d.length < output.buffer_size
-              output.write([d] * output.channels)
-            end
-          else
-            raise "Unsupported type #{file_tone_data.class.name} for playback"
+        when ArithmeticMixin
+          bufsize = file_tone_data.graph_buffer_size # nil is ok here
+          output = MB::Sound.output(rate: rate, plot: plot, device: device, buffer_size: bufsize)
+          loop do
+            # TODO: Consolidate this sample+write loop with other similar or identical loops?
+            d = file_tone_data.sample(output.buffer_size)
+            break if d.nil? || d.empty?
+            d = MB::M.zpad(d, output.buffer_size) if d.length < output.buffer_size
+            output.write([d] * output.channels)
           end
+        else
+          raise "Unsupported type #{file_tone_data.class.name} for playback"
+
         end
 
         puts "\n\n"

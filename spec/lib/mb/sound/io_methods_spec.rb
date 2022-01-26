@@ -97,6 +97,9 @@ RSpec.describe(MB::Sound::IOMethods) do
         expect(info[:streams][0][:duration_ts]).to eq(48000)
         expect(info[:streams][0][:channels]).to eq(2)
       end
+
+      pending 'can write a single signal graph node to a sound file'
+      pending 'can write an array of signal graph nodes to a sound file'
     end
 
     context 'when overwrite is false (by default)' do

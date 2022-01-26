@@ -3,6 +3,12 @@ module MB
     # Extends any audio I/O object with a #read method with a #sample method
     # for compatibility with the arithmetic DSL.
     module IOSampleMixin
+      # Returns an Array of graph source nodes for each of the channels (up to
+      # +:max_channels+) on this input.  Similar to ArithmeticMixin#tee.
+      def split(max_channels: nil)
+        InputChannelSplit.new(self, max_channels: max_channels).channels
+      end
+
       # Reads +count+ frames (which should match the preferred buffer size of
       # the input object), returning only the first channel from the input.
       # This is for interoperability with the arithmetic DSL in MB::Sound that
