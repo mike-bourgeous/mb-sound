@@ -28,12 +28,12 @@ raise 'Invalid wave type' unless MB::Sound::Oscillator::WAVE_TYPES.include?(wave
 filename = others[0]
 
 if filename && File.readable?(filename)
-  input = MB::Sound.file_input(filename).and_then(0.hz.at(0).for(delay * 4))
+  inputs = MB::Sound.file_input(filename).split.map { |d| d.and_then(0.hz.at(0).for(delay * 4)) }
 else
-  input = MB::Sound.input(channels: 1)
+  inputs = MB::Sound.input(channels: 2).split
 end
 
-output = MB::Sound.output
+output = MB::Sound.output(channels: inputs.length)
 bufsize = output.buffer_size
 
 delay_samples = delay * output.rate
@@ -41,7 +41,6 @@ delay_samples = 0 if delay_samples < 0
 range = depth * delay_samples
 min_delay = delay_samples - range * 0.5
 max_delay = delay_samples + range * 0.5
-delay_samples = hz.hz.send(wave_type).forever.at(min_delay..max_delay)
 
 puts MB::U.highlight(
   wave_type: wave_type,
@@ -51,38 +50,39 @@ puts MB::U.highlight(
   depth: depth,
   min_delay: min_delay,
   max_delay: max_delay,
-  first_delay: delay_samples.sample(5),
-  input: input.graph_node_name,
+  inputs: inputs.map(&:graph_node_name),
   rate: output.rate,
   buffer: bufsize,
 )
 
 # TODO: Make it easy to replicate a signal graph for each of N channels
-# TODO: Maybe create a multi-channel version with each channel's LFO phase
-# offset by the channel's spatial angle in the room in the mb-surround project
 
 begin
-  # Feedback buffers, overwritten by later calls to #spy
-  a = Numo::SFloat.zeros(bufsize)
+  paths = inputs.map.with_index { |inp, idx|
+    # Feedback buffers, overwritten by later calls to #spy
+    a = Numo::SFloat.zeros(bufsize)
 
-  # Split delay LFO for first-tap and feedback
-  d1, d2 = delay_samples.tee
+    lfo = hz.hz.with_phase(idx * 2.0 * Math::PI / inputs.length).send(wave_type).forever.at(min_delay..max_delay)
 
-  # Split input into original and first delay
-  s1, s2 = input.tee
-  s2 = s2.delay(samples: d1)
+    # Split delay LFO for first-tap and feedback
+    d1, d2 = lfo.tee
 
-  # Feedback injector and feedback delay (compensating for buffer size)
-  d_fb = (d2 - bufsize).proc { |v| v.inplace.clip(0, nil).not_inplace! }
-  b = 0.hz.forever.proc { a }.delay(samples: d_fb)
+    # Split input into original and first delay
+    s1, s2 = inp.tee
+    s2 = s2.delay(samples: d1)
 
-  # Final output, with a spy to save feedback buffer
-  f = (s1 - s2 + feedback * b).softclip(0.85, 0.95).spy { |z| a[] = z if z }
+    # Feedback injector and feedback delay (compensating for buffer size)
+    d_fb = (d2 - bufsize).proc { |v| v.inplace.clip(0, nil).not_inplace! }
+    b = 0.hz.forever.proc { a }.delay(samples: d_fb)
+
+    # Final output, with a spy to save feedback buffer
+    (s1 - s2 + feedback * b).softclip(0.85, 0.95).spy { |z| a[] = z if z }
+  }
 
   loop do
-    data = f.sample(output.buffer_size)
-    break if data.nil?
-    output.write([data] * output.channels)
+    data = paths.map { |p| p.sample(output.buffer_size) }
+    break if data.any?(&:nil?)
+    output.write(data)
   end
 
 rescue => e
