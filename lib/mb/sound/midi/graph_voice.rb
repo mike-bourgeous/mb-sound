@@ -22,7 +22,6 @@ module MB
 
           sources = graph.graph
           puts "Found #{sources.length} total graph nodes" # XXX
-          puts MB::U.highlight(sources.map(&:class))
 
           @oscillators = sources.select { |s|
             s.is_a?(MB::Sound::Tone) || s.is_a?(MB::Sound::Oscillator)
