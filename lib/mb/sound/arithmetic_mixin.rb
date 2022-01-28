@@ -308,6 +308,7 @@ module MB
           @graph_spies = []
 
           class << self
+            # FIXME: This doesn't work with procs (their sample isn't a super method)
             def sample(count)
               super(count).tap { |buf|
                 MB::M.with_inplace(buf, false) do |b|
