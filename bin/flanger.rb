@@ -2,7 +2,7 @@
 # A simple flanger effect, to demonstrate using a signal node as a delay time.
 # (C)2022 Mike Bourgeous
 #
-# Cool pitch effect: bin/flanger.rb 0.035 0 3 2
+# Cool pitch effect: SMOOTHING=0.5 bin/flanger.rb 0.035 0 3 2
 
 require 'bundler/setup'
 
@@ -42,6 +42,13 @@ range = depth * delay_samples
 min_delay = delay_samples - range * 0.5
 max_delay = delay_samples + range * 0.5
 
+# FIXME: This doesn't work with a filter like 1000.hz.lowpass1p; maybe there's overshoot or something?
+delay_smoothing = ENV['SMOOTHING']&.to_f
+delay_smoothing2 = delay_smoothing
+
+dry_level = ENV['DRY']&.to_f || 1
+wet_level = ENV['WET']&.to_f || 1
+
 puts MB::U.highlight(
   wave_type: wave_type,
   delay: delay,
@@ -55,8 +62,6 @@ puts MB::U.highlight(
   buffer: bufsize,
 )
 
-# TODO: Make it easy to replicate a signal graph for each of N channels
-
 begin
   paths = inputs.map.with_index { |inp, idx|
     # Feedback buffers, overwritten by later calls to #spy
@@ -68,15 +73,19 @@ begin
     d1, d2 = lfo.tee
 
     # Split input into original and first delay
-    s1, s2 = inp.tee
-    s2 = s2.delay(samples: d1)
+    s1, s2 = inp.tee(2)
+    s1.named('s1')
+    s2.named('s2')
+    s2 = s2.delay(samples: d1, smoothing: delay_smoothing)
 
     # Feedback injector and feedback delay (compensating for buffer size)
     d_fb = (d2 - bufsize).proc { |v| v.inplace.clip(0, nil).not_inplace! }
-    b = 0.hz.forever.proc { a }.delay(samples: d_fb)
+    b = 0.hz.forever.proc { a }.delay(samples: d_fb, smoothing: delay_smoothing2)
 
     # Final output, with a spy to save feedback buffer
-    (s1 - s2 + feedback * b).softclip(0.85, 0.95).spy { |z| a[] = z if z }
+    wet = (feedback * b - s2).softclip(0.85, 0.95).spy { |z| a[] = z if z }
+
+    (s1 * dry_level + wet * wet_level).softclip(0.85, 0.95)
   }
 
   loop do

@@ -88,7 +88,7 @@ module MB
       def internal_sample(branch, count)
         if @read_branches.include?(branch)
           if @read_branches.length != @branches.length
-            warn "Branch #{branch} on Tee #{self} sampled again with #{@read_branches.length} of #{@branches.length} sampled"
+            warn "Branch #{branch}/#{branch.graph_node_name} on Tee #{self} sampled again with #{@read_branches.length} of #{@branches.length} sampled"
           end
 
           @read_branches.clear

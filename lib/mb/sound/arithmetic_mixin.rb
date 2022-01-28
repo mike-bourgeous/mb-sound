@@ -267,7 +267,7 @@ module MB
 
       # Adds a MB::Sound::Filter::Dealy to the signal chain with a delay of the
       # given number of seconds.
-      def delay(seconds: nil, samples: nil, rate: 48000)
+      def delay(seconds: nil, samples: nil, rate: 48000, smoothing: true)
         if samples
           samples = samples.to_f if samples.is_a?(Numeric)
           seconds = samples / rate
@@ -275,7 +275,7 @@ module MB
           seconds = seconds.to_f if seconds.is_a?(Numeric)
         end
 
-        filter(MB::Sound::Filter::Delay.new(delay: seconds, rate: rate))
+        filter(MB::Sound::Filter::Delay.new(delay: seconds, rate: rate, smoothing: smoothing))
       end
 
       # Wraps this arithmetic signal graph in a softclip effect.
