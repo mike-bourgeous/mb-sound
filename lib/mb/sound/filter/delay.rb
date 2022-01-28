@@ -1,9 +1,12 @@
 module MB
   module Sound
     class Filter
-      # A simple delay line.
+      # A fractionally addressed delay line, allowing dynamic changes of the
+      # delay time and odd pitch shift effects.
+      #
+      # See bin/flanger.rb and bin/tape_delay.rb for examples.
       class Delay < Filter
-        attr_reader :delay, :delay_samples, :rate, :smoothing
+        attr_reader :delay, :delay_samples, :rate, :smoothing, :smooth_limit
 
         # Initializes a single-channel delay with a given +:delay+ in seconds,
         # based on the sample +:rate+..  The +:buffer_size+ sets the maximum
@@ -23,20 +26,12 @@ module MB
           @delay_samples = 0
           @read_offset = 0
           @write_offset = 0
+          @smooth_limit = nil
 
-          self.delay = delay
-
-          @smoothing = !!smoothing
-          @smooth_limit = @rate * (smoothing.is_a?(Numeric) ? smoothing : 0.5)
-          @filter = MB::Sound::Filter::LinearFollower.new(
-            rate: @rate,
-            max_rise: @smooth_limit,
-            max_fall: @smooth_limit
-          )
           @filter_buf = Numo::SFloat.zeros(buffer_size)
 
           self.delay = delay
-          self.reset_delay
+          self.smoothing = smoothing
         end
 
         # Fills the entire delay line with the given value.  Future calls to
@@ -52,7 +47,9 @@ module MB
         # #delay= or #delay_samples=.  Has no effect if the delay was set to a
         # signal node with a :sample method (see ArithmeticMixin and #delay=).
         def reset_delay
-          # TODO: Support resetting with a signal node without consuming a sample from the signal node?
+          # TODO: Support resetting with a signal node without consuming a
+          # sample from the signal node?  Maybe set a flag that triggers a
+          # reset in #sample?
           if @delay_samples.is_a?(Numeric)
             @filter.reset(@delay_samples)
           end
@@ -60,10 +57,35 @@ module MB
 
         # Enables or disables delay smoothing, and resets the smoothed delay to
         # the current target delay value set by #delay= or #delay_samples=.
+        #
+        # Pass a numeric value for +smoothing+ to control how many seconds the
+        # delay time can change per second of output time (the default is 0.5).
+        # This is basically the same thing as controlling how slow the playback
+        # of the delay buffer can get.
+        #
+        # Pass a Filter for +smoothing+ to directly set a smoothing filter or
+        # filter chain.
+        #
         # See #reset_delay.
-        def smoothing=(enabled)
+        def smoothing=(smoothing)
+          @smoothing = !!smoothing
+
+          if smoothing.respond_to?(:process) && smoothing.respond_to?(:reset)
+            @filter = smoothing
+            @smooth_limit = nil
+          else
+            new_limit = @rate * (smoothing.is_a?(Numeric) ? smoothing : 0.5)
+            if new_limit != @smooth_limit
+              @smooth_limit = new_limit
+              @filter = MB::Sound::Filter::LinearFollower.new(
+                rate: @rate,
+                max_rise: @smooth_limit,
+                max_fall: @smooth_limit
+              )
+            end
+          end
+
           reset_delay
-          @smoothing = !!enabled
         end
 
         # Sets the delay time in +samples+, regardless of sample rate.  The
@@ -73,9 +95,9 @@ module MB
             @delay_samples = samples
             @delay = samples / @rate
           else
-            # TODO: Grow the buffer here instead?
             samples = samples.round
-            raise 'Delay must be less than buffer size' if samples >= @buf.length
+            # If samples exceeds buffer size, the buffer will grow in #sample
+            # (not ideal for realtime use due to allocation, but it works)
 
             delta = samples - @delay_samples
             @delay_samples = samples
@@ -123,7 +145,6 @@ module MB
             end
 
             if @smoothing
-              (require 'pry-byebug'; binding.pry) if delay_buf.nil?
               delay_buf = @filter.process(delay_buf.inplace).not_inplace!
             end
           end
@@ -145,6 +166,11 @@ module MB
             old_buf = @buf
             @buf = old_buf.class.zeros(old_buf.length + 2 * max_delay)
             @buf[0...old_buf.length] = old_buf
+
+            # FIXME: is this the right way to adjust read offset here?
+            if @write_offset < @read_offset
+              @read_offset = (@read_offset + 2 * max_delay) % @buf.length
+            end
           end
 
           if data.length > max_length
@@ -170,6 +196,7 @@ module MB
 
           if delay_buf
             # TODO: Something better than linear interpolation?
+            # TODO: Allow switching off interpolation?
             ret = data.map_with_index { |_, idx|
               delay = delay_buf[idx] # TODO: does this need to clamp to >= 0 ???
               min = delay.floor

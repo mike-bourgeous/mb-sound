@@ -21,11 +21,29 @@ RSpec.describe(MB::Sound::Filter::Delay) do
 
   it 'smooths the delay when smoothing is enabled' do
     shortbuf.delay = 0
-    expect(shortbuf.process(Numo::SFloat[1,2,3,4,5,6,7,8,9])).to eq(Numo::SFloat[0,0,0,1,3,4,6,7,9])
+    expect(shortbuf.process(Numo::SFloat[1,2,3,4,5,6,7,8,9])).to eq(Numo::SFloat[0,0,0,1,2.5,4,5.5,7,8.5])
 
-    # Using 10 instead of 9 in input to ensure that the 9 in the output is from the previous buffer
+    # Using 13 instead of 9 in input to ensure that the 9 in the output is from the previous buffer
     shortbuf.delay = 5
-    expect(shortbuf.process(Numo::SFloat[1,2,3,4,5,6,7,8,10,13,17])).to eq(Numo::SFloat[9,1,1,2,2,3,3,4,4,5,6])
+    expect(shortbuf.process(Numo::SFloat[1,2,3,4,5,6,7,8,13,17,24])).to eq(Numo::SFloat[9,5,1,1.5,2,2.5,3,3.5,4,5,6])
+  end
+
+  describe '#smoothing=' do
+    it 'can change the delay smoothing rate' do
+      shortbuf.smoothing = 0.25
+
+      shortbuf.delay = 0
+      expect(shortbuf.process(Numo::SFloat[1,2,3,4,5,6,7,8,9])).to eq(Numo::SFloat[0,0,0,0,1.25,2.5,3.75,5,6.25])
+
+      shortbuf.delay = 5
+      expect(shortbuf.process(Numo::SFloat[1,2,3,4,5,6,7,8,13,17,24])).to eq(Numo::SFloat[7,7.75,8.5,7,1,1.75,2.5,3.25,4,5,6])
+    end
+
+    it 'accepts a filter directly' do
+      shortbuf.smoothing = MB::Sound::Filter::LinearFollower.new(rate: 1, max_rise: 1, max_fall: 1)
+      shortbuf.delay = 0
+      expect(shortbuf.process(Numo::SFloat[1,2,3,4,5,6,7,8,9])).to eq(Numo::SFloat[0,0,1,3,5,6,7,8,9])
+    end
   end
 
   it 'does not smooth the delay when smoothing is disabled' do
