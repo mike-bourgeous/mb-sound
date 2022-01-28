@@ -9,12 +9,16 @@ module MB
       class GraphVoice
         include ArithmeticMixin
 
+        attr_reader :number
+
         # Initializes a voice based on the given signal graph.  If the
         # automatic detection of envelopes and oscillators doesn't work, then
         # the +:amp_envelopes+, +:envelopes+, and +:freq_constants+ parameters
         # may be used to override detection.
         def initialize(graph, amp_envelopes: nil, envelopes: nil, freq_constants: nil)
           @graph = graph
+
+          @number = nil
 
           sources = graph.graph
           puts "Found #{sources.length} total graph nodes" # XXX
@@ -64,6 +68,8 @@ module MB
         end
 
         def trigger(note, velocity)
+          @number = note
+
           puts "Trigger #{note}@#{velocity} (#{MB::Sound::Note.new(note).name})" # XXX
           @oscillators.each do |o|
             o.reset # TODO: make keysync optional
