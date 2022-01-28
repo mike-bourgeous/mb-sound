@@ -32,12 +32,14 @@ voices = OSC_COUNT.times.map { |i|
   econst = 2.constant.named('econst')
   f = fenv.db * MB::Sound.tone(bfreq.call).complex_sine.at(1).pm(e * econst).named('f')
 
+  g = f.filter(10000.hz.lowpass) # Try to cut down on aliasing chalkboard noise
+
   mod_constants << fbconst
   mod_constants << cconst
   mod_constants << dconst
   mod_constants << econst
 
-  dry, wet = f.tee
+  dry, wet = g.tee
   final = dry + wet.delay(seconds: 0.1) * 0.5
 
   MB::Sound::MIDI::GraphVoice.new(final, amp_envelopes: [fenv], freq_constants: freq_constants)
