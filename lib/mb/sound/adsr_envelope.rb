@@ -133,12 +133,14 @@ module MB
         end
       end
 
-      # Turn off the envelope and reset the filter.  For testing only; will
-      # cause clicking if used on actual audio.
+      # Turn off the envelope, reset the filter, and disable any auto-release
+      # given to #trigger.  For testing only; will cause clicking if used on
+      # actual audio.
       def reset
         @time = @total + 100
         @frame = @rate * @time
         @on = false
+        @auto_release = nil
         @filter.reset(0)
       end
 
