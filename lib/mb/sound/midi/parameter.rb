@@ -266,7 +266,13 @@ module MB
               p.ChannelMask(65535)
             end
 
-            p.MIDIMsg(@message.to_byte_array[0])
+            if @message.respond_to?(:channel) && @message.channel.nil?
+              msg = @message.dup
+              msg.channel = 0
+              p.MIDIMsg(msg.to_byte_array[0])
+            else
+              p.MIDIMsg(@message.to_byte_array[0])
+            end
 
             if @message.is_a?(MIDIMessage::ControlChange)
               p.ccMsg(@message.index)
