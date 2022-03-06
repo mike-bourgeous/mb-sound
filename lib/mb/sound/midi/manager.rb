@@ -257,15 +257,16 @@ module MB
           require 'builder'
 
           params = @parameters.values.flat_map(&:values).flat_map { |l| l.map(&:first) }
-          thresholds = @cc_thresholds.keys
+          param_groups = params.group_by(&:hash_key)
 
-          # TODO: What happens if there are duplicate CCs in the XML?
+          thresholds = @cc_thresholds.keys
 
           xml = Builder::XmlMarkup.new(indent: 2)
           xml.instruct!
           xml.parammap(mapname: name, ver: 1, summary: '', params: params.length + thresholds.length) do |m|
-            params.each do |p|
-              p.to_acid_xml(m)
+            param_groups.each do |_key, params|
+              desc = params.map(&:description).compact.uniq.join(', ')
+              params[0].to_acid_xml(m, description: desc)
             end
 
             thresholds.each do |t|

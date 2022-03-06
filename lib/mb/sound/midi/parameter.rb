@@ -254,14 +254,16 @@ module MB
 
         # Returns Builder-generated XML describing this parameter in the format
         # used by Sony/MAGIX ACID.  Pass the parent element in +xml+ to nest
-        # within another XML element.
+        # within another XML element.  The parameter description may be changed
+        # by passing +:description+ (e.g. if this parameter is being used as a
+        # representative of multiple parameters controlled by the same CC).
         #
         # You will need the Builder gem in your project to use this method.
-        def to_acid_xml(xml = nil)
+        def to_acid_xml(xml = nil, description: nil)
           require 'builder'
 
           xml ||= Builder::XmlMarkup.new(indent: 2)
-          xml.param(name: @description) do |p|
+          xml.param(name: description || @description) do |p|
             p.flags do |f|
               f.flag('DEFAULT')
               f.flag('ACTIVE')
