@@ -34,6 +34,15 @@ else
 end
 
 output = MB::Sound.output(channels: inputs.length)
+
+if defined?(MB::Sound::JackFFI) && output.is_a?(MB::Sound::JackFFI::Output)
+  # MIDI control is possible since Jack is running
+  puts "\e[1mMIDI control enabled (jackd detected)\e[0m"
+  manager = MB::Sound::MIDI::Manager.new(jack: output.jack_ffi)
+else
+  puts "\e[38;5;243mMIDI disabled (jackd not detected)\e[0m"
+end
+
 bufsize = output.buffer_size
 
 delay_samples = delay * output.rate
@@ -55,8 +64,6 @@ puts MB::U.highlight(
   feedback: feedback,
   lfo_hz: hz,
   depth: depth,
-  min_delay: min_delay,
-  max_delay: max_delay,
   inputs: inputs.map(&:graph_node_name),
   rate: output.rate,
   buffer: bufsize,
@@ -82,13 +89,26 @@ begin
     d_fb = (d2 - bufsize).proc { |v| v.inplace.clip(0, nil).not_inplace! }
     b = 0.hz.forever.proc { a }.delay(samples: d_fb, smoothing: delay_smoothing2)
 
-    # Final output, with a spy to save feedback buffer
+    # Effected output, with a spy to save feedback buffer
     wet = (feedback * b - s2).softclip(0.85, 0.95).spy { |z| a[] = z if z }
 
-    (s1 * dry_level + wet * wet_level).softclip(0.85, 0.95)
+    dryconst = dry_level.constant.named('Dry level')
+    wetconst = wet_level.constant.named('Wet level')
+    final = (s1 * dryconst + wet * wetconst).softclip(0.85, 0.95)
+
+    # GraphVoice provides on_cc to generate a cc map for the MIDI manager
+    # (TODO: probably a better way to do this)
+    MB::Sound::MIDI::GraphVoice.new(final)
+      .on_cc(1, 'Wet level', range: 0.0..1.0, relative: false)
   }
 
+  if manager
+    manager.on_cc_map(paths.map(&:cc_map))
+    puts MB::U.syntax(manager.to_acid_xml, :xml)
+  end
+
   loop do
+    manager&.update
     data = paths.map { |p| p.sample(output.buffer_size) }
     break if data.any?(&:nil?)
     output.write(data)
