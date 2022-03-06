@@ -11,6 +11,10 @@ module MB
 
         attr_reader :number
 
+        # A Hash from CC index to an Array of Hashes describing a controllable
+        # parameter.  Used by VoicePool.  See #on_cc.
+        attr_reader :cc_map
+
         # Initializes a voice based on the given signal graph.  If the
         # automatic detection of envelopes and oscillators doesn't work, then
         # the +:amp_envelopes+, +:envelopes+, and +:freq_constants+ parameters
@@ -63,9 +67,13 @@ module MB
             end
           end
 
+          @cc_map = {}
+
           puts "Found #{@freq_constants.length} frequency constants: #{@freq_constants.map(&:__id__)}" # XXX
         end
 
+        # Tells all envelopes to start their attack phase based on the given
+        # velocity, and sets all frequency constants based on the given note.
         def trigger(note, velocity)
           @number = note
 
@@ -94,6 +102,63 @@ module MB
           @array_inputs.each do |ai|
             ai.offset = 0
           end
+        end
+
+        # Assigns one or more nodes within the graph to the given CC index.
+        # The VoicePool and Manager will then set those nodes' values based on
+        # MIDI control change events.
+        #
+        # The +node+ may be the name of a node or a direct reference to a node.
+        #
+        # The +:range+ defaults to 0..1.  If +:relative+ is true (the default),
+        # then the range will be multiplicative of the current value of the
+        # node.  If +:relative+ is false, then the +:range+ is interpreted as
+        # an absolute range.
+        #
+        # Additional +options+ may be given for the Manager#on_cc method.
+        def on_cc(index, node, range: 0.0..1.0, relative: true, description: nil, **options)
+          if node.is_a?(Array)
+            node.each do |n|
+              cc(index, n, range: range, relative: relative, description: description, **options)
+            end
+
+            return
+          end
+
+          node = @graph.find_by_name(node) if node.is_a?(String)
+
+          @cc_map[index] ||= []
+
+          case
+          when node.respond_to?(:constant=)
+            getter = node.method(:constant)
+            setter = node.method(:constant=)
+
+          else
+            raise 'Only nodes that have a #constant= method are supported at this time'
+          end
+
+          base = getter.call
+
+          if relative
+            a = base * range.begin
+            b = base * range.end
+            range = a..b
+          end
+
+          description ||= "#{node.graph_node_name} (#{range})"
+
+          @cc_map[index] << options.merge(
+            index: index,
+            range: range,
+            node: node,
+            default: base,
+            get: getter,
+            set: setter,
+            description: description
+          )
+
+          nil
         end
 
         # Tells all envelopes to start their release phase.

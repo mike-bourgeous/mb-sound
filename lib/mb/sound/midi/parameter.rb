@@ -26,9 +26,17 @@ module MB
         # parameters because e.g. two MIDIMessage::ControlChange instances with
         # the exact same data will not compare equal and will not return the
         # same hash value.
-        def self.generate_message_key(message)
+        def self.generate_message_key(message, ignore_channel: false)
           key = [message.class]
-          key << message.channel if message.respond_to?(:channel)
+
+          if message.respond_to?(:channel)
+            if ignore_channel || message.channel.nil? || message.channel < 0
+              channel = nil
+            else
+              channel = message.channel
+            end
+            key << channel
+          end
 
           case message
           when MIDIMessage::NoteOn, MIDIMessage::NoteOff

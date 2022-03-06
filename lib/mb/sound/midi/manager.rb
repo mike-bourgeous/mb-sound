@@ -229,7 +229,7 @@ module MB
 
               params = @parameters[e.class]
               if params
-                key = MB::Sound::MIDI::Parameter.generate_message_key(e)
+                key = MB::Sound::MIDI::Parameter.generate_message_key(e, ignore_channel: @channel.nil?)
                 params[key]&.each do |p, _cb|
                   p.notify(e)
                 end
@@ -238,7 +238,7 @@ module MB
           end
 
           # For Parameter callbacks (e.g. #on_cc), the above loop just sets the
-          # parameter's stored value to the last received MIDI value, and this
+          # parameter's stored value to the last received MIDI value, then this
           # loop sends that value to each callback.
           @parameters.each do |_msg_class, params|
             params.each do |_hash_key, plist|

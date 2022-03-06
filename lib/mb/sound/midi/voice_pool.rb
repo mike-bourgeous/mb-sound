@@ -31,6 +31,21 @@ module MB
 
           manager.on_note(&method(:midi_note))
           manager.on_cc_threshold(64, 64, 64, &method(:sustain))
+
+          # Bind voice parameters to MIDI CCs
+          # TODO: Only add one listener to the manager per CC instead of one per voice per CC?
+          voices.each_with_index do |v, idx|
+            if v.respond_to?(:cc_map)
+              v.cc_map.each do |index, params|
+                params.each do |info|
+                  opts = info.slice(:range, :default, :filter_hz, :max_rise, :max_fall, :description)
+                  manager.on_cc(index, **opts) do |value|
+                    info[:set].call(value)
+                  end
+                end
+              end
+            end
+          end
         end
 
         # Called by the MIDI manager when a note on or off event is received.
@@ -62,7 +77,7 @@ module MB
         end
 
         # Finds and triggers the next available voice, reusing a voice if
-        # needed.  Called by #midi_event.
+        # needed.  Called by #midi_note.
         def trigger(note, velocity)
           @last = self.next(note)
           @last.trigger(note + @bend, velocity)
