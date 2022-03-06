@@ -17,7 +17,79 @@ module MB
           MIDIMessage::PolyphonicAftertouch => 0..127,
         }
 
-        attr_reader :message, :default, :raw_default, :range, :raw_range, :update_rate, :description
+        # Generates a consistent hash key for a given MIDIMessage instance
+        # (from the midi-message gem).  For example, this value will compare
+        # equal for any two messages that have the given channel number and
+        # MIDI CC number.
+        #
+        # This is necessary for the Manager class to be able to group
+        # parameters because e.g. two MIDIMessage::ControlChange instances with
+        # the exact same data will not compare equal and will not return the
+        # same hash value.
+        def self.generate_message_key(message)
+          key = [message.class]
+          key << message.channel if message.respond_to?(:channel)
+
+          case message
+          when MIDIMessage::NoteOn, MIDIMessage::NoteOff
+            # If a note number was given to the constructor, then only that
+            # note should match and the parameter will be controlled by note
+            # velocity.  Otherwise the note number controls the parameter value
+            # and should not be included in the key.
+            if message.note && message.note >= 0 && message.note <= 127
+              key << message.note.to_i
+            end
+
+          when MIDIMessage::ControlChange
+            # TODO: support MSB+LSB for higher resolution?
+            # TODO: support NRPN?
+            key << message.index
+
+          when MIDIMessage::ProgramChange, MIDIMessage::PitchBend, MIDIMessage::ChannelAftertouch
+            # Do nothing here; these messages are channel-wide so class,
+            # channel is a sufficient key.
+
+          when MIDIMessage::PolyphonicAftertouch
+            key << message.note
+
+          else
+            raise "Unsupported message type: #{message.class}"
+          end
+
+          key.freeze
+        end
+
+        # The template message (a MIDIMessage from the midi-message gem) used
+        # to set the type of MIDI message that will control this Parameter.
+        attr_reader :message
+
+        # The default output value of the parameter, in the parameter's control
+        # range.
+        attr_reader :default
+
+        # The default value of the parameter in the MIDI input range (see
+        # #raw_range).
+        attr_reader :raw_default
+
+        # The output Range of the parameter in the parameter's control range
+        # (e.g. 0.0..1.0).
+        attr_reader :range
+
+        # The MIDI input range of the parameter (e.g. 0..127).
+        attr_reader :raw_range
+
+        # The expected update rate for the parameter given to the constructor.
+        attr_reader :update_rate
+
+        # A user-friendly description of the parameter (given to the
+        # constructor).  This might be displayed in a UI or exported to a DAW
+        # control map.
+        attr_reader :description
+
+        # A value that may be used as a key into hashes to group Parameters for
+        # the same event together.  E.g. this will compare equal for all
+        # parameters for a given channel number and MIDI CC number.
+        attr_reader :hash_key
 
         # The last filtered and scaled value calculated for the parameter, or
         # the default value if no changes have been received.  This is useful
@@ -112,7 +184,9 @@ module MB
             # If a note number was given to the constructor, use velocity.
             # Otherwise, use note number.
             if @message.note && @message.note >= 0 && @message.note <= 127
-              @raw_value = message.velocity
+              if @message.note == message.note
+                @raw_value = message.velocity
+              end
             else
               @raw_value = message.note
             end

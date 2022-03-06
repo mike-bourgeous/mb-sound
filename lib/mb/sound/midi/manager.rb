@@ -129,6 +129,38 @@ module MB
           )
         end
 
+        # Adds a Parameter callback to receive MIDI note number values.  See
+        # #on_midi.
+        def on_note_number(range: 0..127, default: nil, filter_hz: nil, max_rise: nil, max_fall: nil, description: nil, &callback)
+          template = MIDIMessage::NoteOn.new(@channel, -1, -1)
+          on_midi(
+            template,
+            range: range,
+            default: default,
+            filter_hz: filter_hz,
+            max_rise: max_rise,
+            max_fall: max_fall,
+            description: description,
+            &callback
+          )
+        end
+
+        # Adds a Parameter callback to receive MIDI note-on velocity values for
+        # a specific note.  See #on_midi.
+        def on_note_velocity(note, range: 0..127, default: nil, filter_hz: nil, max_rise: nil, max_fall: nil, description: nil, &callback)
+          template = MIDIMessage::NoteOn.new(@channel, note, -1)
+          on_midi(
+            template,
+            range: range,
+            default: default,
+            filter_hz: filter_hz,
+            max_rise: max_rise,
+            max_fall: max_fall,
+            description: description,
+            &callback
+          )
+        end
+
         # Calls the callback with (note_number, velocity, on) whenever a note
         # on or note off event is received.  The note number received may be
         # fractional if #transpose is fractional.
@@ -144,7 +176,8 @@ module MB
         end
 
         # Adds a callback to receive smoothed values in the given +:range+ for
-        # the given MIDI message template.
+        # the given MIDI message template.  Callbacks will be called every time
+        # the update loop runs, regardless of whether the value changed.
         #
         # See MB::Sound::MIDI::Parameter#initialize for a description of the
         # parameters.
@@ -163,15 +196,15 @@ module MB
             update_rate: @update_rate,
             description: description
           )
-          @parameters[message_template.class] ||= {}
 
-          # TODO: Why is this an array?  Only one callback is possible here.
-          @parameters[message_template.class][new_parameter] = []
-          @parameters[message_template.class][new_parameter] << callback
+          @parameters[message_template.class] ||= {}
+          @parameters[message_template.class][new_parameter.hash_key] ||= []
+          @parameters[message_template.class][new_parameter.hash_key] << [new_parameter, callback]
 
           case message_template
           when MIDIMessage::ControlChange
             # FIXME: this will overwrite previous parameters, allowing only one parameter per CC
+            # This is only used externally through an attr_reader.
             @cc[message_template.index] = new_parameter
           end
 
@@ -194,16 +227,24 @@ module MB
 
               notify_event_cbs(e)
 
-              next unless params = @parameters[e.class]
-              params.each do |p, _|
-                p.notify(e)
+              params = @parameters[e.class]
+              if params
+                key = MB::Sound::MIDI::Parameter.generate_message_key(e)
+                params[key]&.each do |p, _cb|
+                  p.notify(e)
+                end
               end
             end
           end
 
-          @parameters.each do |_, params|
-            params.each do |p, _|
-              notify_parameter_cbs(p)
+          # For Parameter callbacks (e.g. #on_cc), the above loop just sets the
+          # parameter's stored value to the last received MIDI value, and this
+          # loop sends that value to each callback.
+          @parameters.each do |_msg_class, params|
+            params.each do |_hash_key, plist|
+              plist.each do |p, cb|
+                notify_parameter_cb(p, cb)
+              end
             end
           end
 
@@ -215,11 +256,10 @@ module MB
         def to_acid_xml(name: File.basename($0))
           require 'builder'
 
-          params = @parameters.values.flat_map(&:keys)
+          params = @parameters.values.flat_map(&:values).flat_map { |l| l.map(&:first) }
           thresholds = @cc_thresholds.keys
 
           # TODO: What happens if there are duplicate CCs in the XML?
-          # TODO: Will ACID work with UNIX line endings?
 
           xml = Builder::XmlMarkup.new(indent: 2)
           xml.instruct!
@@ -279,16 +319,14 @@ module MB
           end
         end
 
-        def notify_parameter_cbs(parameter)
+        def notify_parameter_cb(parameter, cb)
           value = parameter.value
 
-          @parameters[parameter.message.class][parameter].each do |cb|
-            begin
-              cb.call(value)
-            rescue => e
-              # TODO: use a logging facility
-              STDERR.puts "Error in MIDI parameter callback #{cb} for #{parameter.message}: #{e}\n\t#{e.backtrace.join("\n\t")}"
-            end
+          begin
+            cb.call(value)
+          rescue => e
+            # TODO: use a logging facility
+            STDERR.puts "Error in MIDI parameter callback #{cb} for #{parameter.message}: #{e}\n\t#{e.backtrace.join("\n\t")}"
           end
         end
 
