@@ -49,14 +49,18 @@ module MB
         # The starting value is normally the beginning of the given +:range+,
         # but may be changed with the +:default+ parameter.
         #
-        # The +:rise+ and +:fall+ parameters control how far a parameter may
-        # increase or decrease per second, specified in the output range and
-        # based on +:update_rate+.  The default is to allow full range jumps in
-        # a single update.  See MB::Sound::Filter::LinearFollower.
+        # The +:max_rise+ and +:max_fall+ parameters control how far a
+        # parameter may increase or decrease per second, specified in the
+        # output range and based on +:update_rate+.  The default is to allow
+        # full range jumps in a single update.  Pass false for either to
+        # disable the follower filter entirely.  See
+        # MB::Sound::Filter::LinearFollower.
         #
         # The +:filter_hz+ parameter controls the cutoff frequency of a
         # low-pass, single-pole (to avoid ringing) filter that is applied after
-        # +:max_rise+ and +:max_fall+.  See MB::Sound::Filter::FirstOrder.
+        # +:max_rise+ and +:max_fall+.  Pass nil or false for filter_hz to
+        # disable the low-pass filter entirely.  See
+        # MB::Sound::Filter::FirstOrder.
         def initialize(message:, range: 0.0..1.0, default: nil, max_rise: nil, max_fall: nil, filter_hz: 15, update_rate: 60, description: nil)
           @range = range
 
@@ -77,15 +81,20 @@ module MB
 
           @description = description&.to_s || default_description(message)
 
-          # TODO: Allow bypassing the filters
-          @filter = MB::Sound::Filter::FilterChain.new(
+          if max_rise != false && max_fall != false
             @follower = MB::Sound::Filter::LinearFollower.new(
               rate: update_rate,
               max_rise: max_rise || (@width * update_rate),
               max_fall: max_fall || (@width * update_rate)
-            ),
-            @lowpass = filter_hz.hz.at_rate(update_rate).lowpass1p
-          )
+            )
+          end
+
+          @lowpass = filter_hz && filter_hz.hz.at_rate(update_rate).lowpass1p
+
+          filter_list = [@follower, @lowpass].compact
+          @filter = MB::Sound::Filter::FilterChain.new(*filter_list)
+
+          @hash_key = Parameter.generate_message_key(message)
 
           # Set the starting value to the default
           reset(@default)
