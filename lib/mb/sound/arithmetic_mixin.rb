@@ -32,7 +32,7 @@ module MB
     #
     # TODO: In-line method to create a meter?
     #
-    # TODO: Rename this module to SignalNodeMixin or similar?
+    # TODO: Rename this module to GraphNodeMixin or similar?
     module ArithmeticMixin
       attr_reader :graph_node_name
 
@@ -124,6 +124,11 @@ module MB
             end
           }
         end
+      end
+
+      # Uses this node as the frequency value for an oscillator.
+      def tone
+        MB::Sound::Tone[self]
       end
 
       # Appends a node that calculates the natural logarithm of values passing
@@ -276,6 +281,12 @@ module MB
         end
 
         filter(MB::Sound::Filter::Delay.new(delay: seconds, rate: rate, smoothing: smoothing))
+      end
+
+      # Hard-clips the output of this node to the given min and max, one of
+      # which may be nil.
+      def clip(min, max)
+        self.proc { |v| v.clip(min, max) }
       end
 
       # Wraps this arithmetic signal graph in a softclip effect.
