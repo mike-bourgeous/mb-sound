@@ -125,7 +125,11 @@ module MB
             return
           end
 
-          node = @graph.find_by_name(node) if node.is_a?(String)
+          if node.is_a?(String)
+            n = @graph.find_by_name(node)
+            raise "Node #{node.inspect} not found" if n.nil?
+            node = n
+          end
 
           @cc_map[index] ||= []
 
@@ -135,7 +139,7 @@ module MB
             setter = node.method(:constant=)
 
           else
-            raise 'Only nodes that have a #constant= method are supported at this time'
+            raise "Only nodes that have a #constant= method are supported at this time (got #{node.class})"
           end
 
           base = getter.call
@@ -158,7 +162,7 @@ module MB
             description: description
           )
 
-          nil
+          self
         end
 
         # Tells all envelopes to start their release phase.
