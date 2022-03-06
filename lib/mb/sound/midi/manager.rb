@@ -33,10 +33,19 @@ module MB
         #            or nil to receive all channels.  Non-channel messages will
         #            always be received.  Drums are usually on channel 10, so
         #            pass 9 to listen to the drum channel, for example.
-        def initialize(jack: MB::Sound::JackFFI[], input: nil, port_name: 'midi_in', connect: nil, update_rate: 60, channel: ENV['CHANNEL']&.to_i)
+        def initialize(jack: MB::Sound::JackFFI[], input: nil, port_name: 'midi_in', connect: nil, update_rate: nil, channel: ENV['CHANNEL']&.to_i)
           @parameters = {}
           @event_callbacks = []
           @note_callbacks = []
+
+          if update_rate.nil?
+            if jack
+              update_rate = jack.rate.to_f / jack.buffer_size
+            else
+              update_rate = 60
+            end
+          end
+
           @update_rate = update_rate
           @channel = channel
 
