@@ -108,6 +108,42 @@ module MB
           nil
         end
 
+        # Binds all CCs in the given CC map (e.g. as returned by
+        # GraphVoice#cc_map) or Array of CC maps.  A CC map is a Hash mapping a
+        # CC index to an Array of Hashes describing parameters.
+        #
+        # At minimum, a parameter Hash needs a callback in :set, but may
+        # contain any parameter for #on_cc as well as extra info that will be
+        # ignored.
+        #
+        # An example CC map:
+        #
+        # {
+        #   1 => [
+        #     { index: 1, description: 'Mod wheel', range: 0.0..1.0, set: ->(v) { puts v } },
+        #     # ...
+        #   ],
+        #   # ...
+        # ]
+        def on_cc_map(cc_map)
+          if cc_map.is_a?(Array)
+            cc_map.each do |m|
+              on_cc_map(m)
+            end
+
+            return
+          end
+
+          cc_map.each do |index, params|
+            params.each do |info|
+              opts = info.slice(:range, :default, :filter_hz, :max_rise, :max_fall, :description)
+              self.on_cc(index, **opts) do |value|
+                info[:set].call(value)
+              end
+            end
+          end
+        end
+
         # Adds a callback to the given MIDI CC +index+.  See #on_midi.
         def on_cc(index, range: 0.0..1.0, default: nil, filter_hz: 15, max_rise: nil, max_fall: nil, description: nil, &callback)
           template = MIDIMessage::ControlChange.new(@channel, index)
