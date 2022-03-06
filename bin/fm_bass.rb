@@ -67,6 +67,8 @@ if ENV['DEBUG'] == '1'
   `dot -Tpng /tmp/pm_bass_before.dot -o /tmp/pm_bass_before.png`
 end
 
+puts MB::U.syntax(manager.to_acid_xml, :xml)
+
 begin
   puts 'starting loop'
   loop do
