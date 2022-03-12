@@ -43,6 +43,14 @@ module MB
           @envelopes = envelopes || sources.select { |s|
             s.is_a?(MB::Sound::ADSREnvelope)
           }
+
+          @amp_envelopes.map! { |env|
+            env.is_a?(String) ? @graph.find_by_name(env) : env
+          }
+          @envelopes.map! { |env|
+            env.is_a?(String) ? @graph.find_by_name(env) : env
+          }
+
           @envelopes.each(&:reset) # disable auto-release on envelopes
           puts "Found #{@envelopes.length} envelopes" # XXX
 
