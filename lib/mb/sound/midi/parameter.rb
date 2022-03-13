@@ -145,6 +145,8 @@ module MB
           @range = range
 
           @raw_range = RAW_RANGE[message.class]
+          @raw_min = [@raw_range.begin, @raw_range.end].min
+          @raw_max = [@raw_range.begin, @raw_range.end].max
           raise "Unsupported message type #{message.class}" if @raw_range.nil?
 
           @min = [range.begin, range.end].min
@@ -227,8 +229,18 @@ module MB
           @value = MB::M.scale(@raw_value, @raw_range, @range)
         end
 
-        # Sets the pre-filtered value of the parameter, clamping to the
-        # parameter's range.  Smoothing and filtering will still apply.
+        # Sets the input-range raw value of the parameter (e.g. for use when a
+        # MIDI message object is not available for #notify), clamping to the
+        # input range.  Smoothing and filtering will still apply in #value,
+        # which should still be called at the update rate.
+        def raw_value=(raw)
+          @raw_value = MB::M.clamp(raw, @raw_min, @raw_max)
+          @value = MB::M.scale(@raw_value, @raw_range, @range)
+        end
+
+        # Sets the output-range pre-filtered value of the parameter, clamping
+        # to the parameter's output range.  Smoothing and filtering will still
+        # apply in #value, which should still be called at the update rate.
         def value=(v)
           @value = MB::M.clamp(v, @min, @max)
           @raw_value = MB::M.scale(@value, @range, @raw_range)

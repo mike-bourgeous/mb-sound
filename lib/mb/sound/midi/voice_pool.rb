@@ -37,6 +37,10 @@ module MB
           if voices.all? { |v| v.respond_to?(:cc_map) }
             manager.on_cc_map(voices.map(&:cc_map))
           end
+
+          if voices.all? { |v| v.respond_to?(:update) }
+            manager.on_update { voices.each(&:update) }
+          end
         end
 
         # Called by the MIDI manager when a note on or off event is received.

@@ -1,10 +1,20 @@
 #!/usr/bin/env ruby
-# A tubular bell sound based on the T.BL-EXPA preset included with Dexed.
+# A tubular bell sound based in part on the T.BL-EXPA preset included with
+# Dexed.
 
 require 'bundler/setup'
 require 'mb-sound'
 
-OSC_COUNT = ENV['OSC_COUNT']&.to_i || 1
+repeat = !!ARGV.delete('--loop')
+
+# TODO: Build an abstraction around switching between Jack and MIDI files for
+# input, and FLAC files for output, for use by all synthesizers
+jack = MB::Sound::JackFFI[]
+output = jack.output(channels: 1, connect: [['system:playback_1', 'system:playback_2']])
+midi = MB::Sound::MIDI::MIDIFile.new(ARGV[0]) if ARGV[0]&.end_with?('.mid') # TODO: Add a clock source based on jackd frames
+manager = MB::Sound::MIDI::Manager.new(jack: jack, input: midi, connect: ARGV[0])
+
+OSC_COUNT = ENV['OSC_COUNT']&.to_i || 9
 voices = OSC_COUNT.times.map { |i|
   base = MB::Sound::Constant.new(440)
   freq_constants = []
@@ -15,25 +25,25 @@ voices = OSC_COUNT.times.map { |i|
   # 7 mils detuned up, 3.5 ratio
   b_ratio = 3.5.constant.named('B Ratio')
   b_osc = (bfreq.call * b_ratio * (2 ** (7.0 / 1000.0))).tone.complex_sine.at(1).named('B')
-  b_env = MB::Sound.adsr(0, 5, 0, 5).named('B Envelope').db(30)
+  b_env = MB::Sound.adsr(0, 5, 0, 4).named('B Envelope').db(30)
   b_out = (b_osc * b_env).named('B Out')
 
   # 7 mils up
   ba_const = 1.6.constant.named('B into A')
   a_osc = (bfreq.call * (2 ** (7.0 / 1000.0))).tone.complex_sine.at(1).pm(b_out * ba_const).named('A')
-  a_env = MB::Sound.adsr(0, 6, 0, 6).named('A Envelope').db(30)
+  a_env = MB::Sound.adsr(0, 6, 0, 5).named('A Envelope').db(30)
   a_out = (a_osc * a_env).named('A Out')
 
   # 5 mils up, 3.5 ratio
   d_ratio = 3.5.constant.named('D Ratio')
   d_osc = (bfreq.call * d_ratio * (2 ** (5.0 / 1000.0))).tone.complex_sine.at(1).named('D')
-  d_env = MB::Sound.adsr(0, 5, 0, 5).named('D Envelope').db(30)
+  d_env = MB::Sound.adsr(0, 5, 0, 4).named('D Envelope').db(30)
   d_out = (d_osc * d_env).named('D Out')
 
   # 2 mils up
   dc_const = 1.6.constant.named('D into C')
   c_osc = (bfreq.call * (2 ** (2.0 / 1000.0))).tone.complex_sine.at(1).pm(d_out * dc_const).named('C')
-  c_env = MB::Sound.adsr(0, 6, 0, 6).named('C Envelope').db(30)
+  c_env = MB::Sound.adsr(0, 6, 0, 5).named('C Envelope').db(30)
   d_out = (c_osc * c_env).named('C Out')
 
   sum = a_out + d_out
@@ -44,27 +54,19 @@ voices = OSC_COUNT.times.map { |i|
 
   MB::Sound::MIDI::GraphVoice.new(
     final,
+    update_rate: manager.update_rate,
     amp_envelopes: ['A Envelope', 'C Envelope'],
     freq_constants: freq_constants
   ).named('FM Tubular Bell').tap { |v|
-    v.on_cc(1, 'B into A', range: 0.25..4.0, relative: true)
-    v.on_cc(1, 'D into C', range: 0.25..4.0, relative: true)
+    v.on_velocity(['B into A', 'D into C'], range: 0.5..1.5, relative: true)
+    v.on_cc(1, ['B Ratio', 'D Ratio'], range: 3.5..4.0, relative: false)
   }
 }
 
-repeat = !!ARGV.delete('--loop')
-
-# TODO: Build an abstraction around switching between Jack and MIDI files for
-# input, and FLAC files for output, for use by all synthesizers
-jack = MB::Sound::JackFFI[]
-output = jack.output(channels: 1, connect: [['system:playback_1', 'system:playback_2']])
-midi = MB::Sound::MIDI::MIDIFile.new(ARGV[0]) if ARGV[0]&.end_with?('.mid') # TODO: Add a clock source based on jackd frames
-manager = MB::Sound::MIDI::Manager.new(jack: jack, input: midi, connect: ARGV[0])
 pool = MB::Sound::MIDI::VoicePool.new(
   manager,
   voices
 )
-
 output_chain = pool.softclip(0.8, 0.95)
 
 if ENV['DEBUG'] == '1'

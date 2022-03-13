@@ -15,12 +15,16 @@ module MB
         # parameter.  Used by VoicePool.  See #on_cc.
         attr_reader :cc_map
 
-        # Initializes a voice based on the given signal graph.  If the
-        # automatic detection of envelopes and oscillators doesn't work, then
-        # the +:amp_envelopes+, +:envelopes+, and +:freq_constants+ parameters
-        # may be used to override detection.
-        def initialize(graph, amp_envelopes: nil, envelopes: nil, freq_constants: nil)
+        # Initializes a voice based on the given signal graph.  The
+        # +:update_rate+ is passed to internal Parameter objects for parameter
+        # smoothing.  If the automatic detection of envelopes and oscillators
+        # doesn't work, then the +:amp_envelopes+, +:envelopes+, and
+        # +:freq_constants+ parameters may be used to override detection.
+        def initialize(graph, update_rate: 60, amp_envelopes: nil, envelopes: nil, freq_constants: nil)
           @graph = graph
+          @update_rate = update_rate
+
+          @parameters = []
 
           @number = nil
 
@@ -44,12 +48,8 @@ module MB
             s.is_a?(MB::Sound::ADSREnvelope)
           }
 
-          @amp_envelopes.map! { |env|
-            env.is_a?(String) ? @graph.find_by_name(env) : env
-          }
-          @envelopes.map! { |env|
-            env.is_a?(String) ? @graph.find_by_name(env) : env
-          }
+          @amp_envelopes.map! { |env| find_node(env) }
+          @envelopes.map! { |env| find_node(env) }
 
           @envelopes.each(&:reset) # disable auto-release on envelopes
           puts "Found #{@envelopes.length} envelopes" # XXX
@@ -76,6 +76,7 @@ module MB
           end
 
           @cc_map = {}
+          @velocity_listeners = []
 
           puts "Found #{@freq_constants.length} frequency constants: #{@freq_constants.map(&:__id__)}" # XXX
         end
@@ -110,13 +111,75 @@ module MB
           @array_inputs.each do |ai|
             ai.offset = 0
           end
+
+          @velocity_listeners.each do |vl|
+            vl[:parameter].raw_value = velocity
+          end
+        end
+
+        # Sends values of internal parameters to graph nodes (e.g. those from
+        # #on_velocity).  The VoicePool will have the Manager call this method
+        # at the manager's update rate.
+        #
+        # TODO: it's weird to have the manager passed into the GraphVoice just
+        # for the update_rate.  Either have GraphVoice be fully active in
+        # connecting to Manager, or fully passive with VoicePool doing all the
+        # work, but this is challenging when Parameters are constructed before
+        # the voice is added to a pool.
+        def update
+          @parameters.each do |p|
+            p[:set].call(p[:parameter].value)
+          end
+        end
+
+        # Assigns values of one or more nodes within the graph to receive
+        # values based on note attack velocity.  Unlike #on_cc, these values
+        # have no filtering applied.  Additional +options+ will be passed to
+        # MB::Sound::MIDI::Parameter#initialize.
+        def on_velocity(node, range: 0.5..1.5, relative: true, description: nil, **options)
+          # TODO: Figure out best way to do this for both attack and release
+          # velocity.  Sometimes the same parameter should be controlled by
+          # both attack and release velocity, so using two separate methods
+          # wouldn't work.
+          if node.is_a?(Array)
+            node.each do |n|
+              on_velocity(n, range: range, relative: relative, description: description)
+            end
+
+            return
+          end
+
+          node = find_node(node)
+
+          info = build_node_info(
+            node: node,
+            range: range,
+            relative: relative,
+            description: description,
+            options: options,
+          )
+
+          p = Parameter.new(
+            # TODO: Allow a parameter to specify all-note velocity
+            message: MIDIMessage::NoteOn.new(nil, 64, 64),
+            update_rate: @update_rate,
+            **info.slice(:range, :default, :max_rise, :max_fall, :filter_hz, :description)
+          )
+
+          info[:parameter] = p
+
+          @parameters << info
+          @velocity_listeners << info
+
+          self
         end
 
         # Assigns one or more nodes within the graph to the given CC index.
         # The VoicePool and Manager will then set those nodes' values based on
         # MIDI control change events.
         #
-        # The +node+ may be the name of a node or a direct reference to a node.
+        # The +node+ may be the name of a node or a direct reference to a node,
+        # or an Array thereof.
         #
         # The +:range+ defaults to 0..1.  If +:relative+ is true (the default),
         # then the range will be multiplicative of the current value of the
@@ -127,48 +190,25 @@ module MB
         def on_cc(index, node, range: 0.0..1.0, relative: true, description: nil, **options)
           if node.is_a?(Array)
             node.each do |n|
-              cc(index, n, range: range, relative: relative, description: description, **options)
+              on_cc(index, n, range: range, relative: relative, description: description, **options)
             end
 
             return
           end
 
-          if node.is_a?(String)
-            n = @graph.find_by_name(node)
-            raise "Node #{node.inspect} not found" if n.nil?
-            node = n
-          end
+          node = find_node(node)
 
           @cc_map[index] ||= []
 
-          case
-          when node.respond_to?(:constant=)
-            getter = node.method(:constant)
-            setter = node.method(:constant=)
-
-          else
-            raise "Only nodes that have a #constant= method are supported at this time (got #{node.class})"
-          end
-
-          base = getter.call
-
-          if relative
-            a = base * range.begin
-            b = base * range.end
-            range = a..b
-          end
-
-          description ||= "#{node.graph_node_name} (#{range})"
-
-          @cc_map[index] << options.merge(
-            index: index,
-            range: range,
+          node_info = build_node_info(
             node: node,
-            default: base,
-            get: getter,
-            set: setter,
-            description: description
+            range: range,
+            relative: relative,
+            description: description,
+            options: options.merge(index: index)
           )
+
+          @cc_map[index] << node_info
 
           self
         end
@@ -193,6 +233,56 @@ module MB
         # given to the constructor).
         def sources
           [@graph]
+        end
+
+        private
+
+        # If +node+ is a String, finds and returns a graph node of the given
+        # name within the signal graph.  Otherwise, returns +node+ as is.
+        def find_node(node)
+          if node.is_a?(String)
+            n = @graph.find_by_name(node)
+            raise "Node #{node.inspect} not found" if n.nil?
+            n
+          elsif node.respond_to?(:sample)
+            node
+          else
+            raise "Node #{node.inspect} does not appear to be a signal graph node"
+          end
+        end
+
+        # Assembles a Hash with getter, setter, etc. about a node for control
+        # by a Parameter.  Used in #on_cc and #on_velocity.
+        def build_node_info(node:, range:, relative:, description:, options:)
+          raise 'Graph nodes must respond to :graph_node_name' unless node.respond_to?(:graph_node_name)
+
+          case
+          when node.respond_to?(:constant=)
+            getter = node.method(:constant)
+            setter = node.method(:constant=)
+
+          else
+            raise "Only nodes that have a #constant= method are supported at this time (got #{node.class})"
+          end
+
+          base = getter.call
+
+          if relative
+            a = base * range.begin
+            b = base * range.end
+            range = a..b
+          end
+
+          description ||= "#{node.graph_node_name || node.class.name} (#{range})"
+
+          options.merge(
+            node: node,
+            range: range,
+            get: getter,
+            set: setter,
+            default: base,
+            description: description
+          )
         end
       end
     end

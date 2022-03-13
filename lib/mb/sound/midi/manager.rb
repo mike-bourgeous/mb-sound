@@ -37,6 +37,7 @@ module MB
           @parameters = {}
           @event_callbacks = []
           @note_callbacks = []
+          @update_callbacks = []
 
           if update_rate.nil?
             if jack
@@ -256,6 +257,12 @@ module MB
           nil
         end
 
+        # Calls the +callback+ once for each call to #update, allowing other
+        # objects to be synchronized to the manager's update loop.
+        def on_update(&callback)
+          @update_callbacks << callback
+        end
+
         # Runs one update cycle.  This should be called 60 times per second, or
         # whatever value was given to the constructor's update_rate parameter.
         #
@@ -292,6 +299,8 @@ module MB
               end
             end
           end
+
+          @update_callbacks.each(&:call)
 
           nil
         end
