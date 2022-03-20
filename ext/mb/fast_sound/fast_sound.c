@@ -885,6 +885,59 @@ static VALUE ruby_narray_to_array(VALUE self, VALUE narray)
 	return out;
 }
 
+static VALUE fill_narray_with_function(VALUE narray, double (*func)(double))
+{
+	_Bool was_inplace;
+	ensure_inplace_sfloat_or_scomplex(&narray, &was_inplace);
+
+	_Bool complex_buffer = CLASS_OF(narray) == numo_cSComplex;
+
+	size_t length = RNARRAY_SHAPE(narray)[0];
+
+	float complex *complex_ptr;
+	float *float_ptr;
+	if (complex_buffer) {
+		complex_ptr = (float complex *)(nary_get_pointer_for_write(narray) + nary_get_offset(narray));
+	} else {
+		float_ptr = (float *)(nary_get_pointer_for_write(narray) + nary_get_offset(narray));
+	}
+
+	for (size_t i = 0; i < length; i++) {
+		double x = ((double)i + 0.5) / (double)length; // symmetric, exclusive endpoints
+		double v = func(x);
+
+		if (complex_buffer) {
+			complex_ptr[i] = v;
+		} else {
+			float_ptr[i] = v;
+		}
+	}
+
+	if (!was_inplace) {
+		UNSET_INPLACE(narray);
+	}
+
+	return narray;
+}
+
+/*
+ * Fills the given narray (or a new narray if the narray is not inplace) with a
+ * smoothstep curve from 0 to 1 (exclusive on both ends and symmetric).
+ */
+static VALUE ruby_smoothstep_buf(VALUE self, VALUE narray)
+{
+	return fill_narray_with_function(narray, smoothstep);
+}
+
+/*
+ * Fills the given narray (or a new narray if the narray is not inplace) with a
+ * smootherstep curve from 0 to 1 (exclusive on both ends and symmetric).
+ */
+static VALUE ruby_smootherstep_buf(VALUE self, VALUE narray)
+{
+	return fill_narray_with_function(narray, smootherstep);
+}
+
 /*
  * Calculates the natural logarithm of every element in the NArray.  Leaves
  * SFloat, SComplex, and DComplex as their original type, converts everything
@@ -1526,6 +1579,10 @@ void Init_fast_sound(void)
 
 	rb_define_module_function(fast_sound, "smoothstep", ruby_smoothstep, 1);
 	rb_define_module_function(fast_sound, "smootherstep", ruby_smootherstep, 1);
+
+	// Fills a given NArray with a smoothstep curve from 0 to 1
+	rb_define_module_function(fast_sound, "smoothstep_buf", ruby_smoothstep_buf, 1);
+	rb_define_module_function(fast_sound, "smootherstep_buf", ruby_smootherstep_buf, 1);
 
 	// Mathematical functions that for some reason are missing from Numo::NArray
 	rb_define_module_function(fast_sound, "narray_log", ruby_narray_log, 1);
