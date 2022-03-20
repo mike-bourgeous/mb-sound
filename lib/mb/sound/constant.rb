@@ -16,17 +16,34 @@ module MB
 
       attr_accessor :constant
 
-      # Initializes a constant-output signal generator.
-      def initialize(constant)
+      # Initializes a constant-output signal generator.  If +:smooth+ is true,
+      # then when the constant is changed, the output value will change
+      # smoothly over the length of one buffer (TODO: use a constant-length FIR
+      # filter?  consider using or merging with filter/smoothstep.rb?).
+      def initialize(constant, smooth: true)
         raise 'The constant value must be a numeric' unless constant.is_a?(Numeric)
         @constant = constant
+        @old_constant = constant
+        @smooth = !!smooth
         @buf = nil
       end
 
       # Returns +count+ samples of the constant value.
       def sample(count)
         setup_buffer(count)
-        @buf.fill(@constant)
+
+        if @constant != @old_constant && @smooth
+          @buf.inplace!
+          @buf = MB::FastSound.smoothstep_buf(@buf)
+          @buf * (@constant - @old_constant)
+          @buf + @old_constant
+        else
+          @buf.fill(@constant)
+        end
+
+        @old_constant = @constant
+
+        @buf.not_inplace!
       end
 
       def sources

@@ -81,14 +81,12 @@ begin
     # Set up LFO depth control
     # FIXME: this has the wrong delays (makes scratchy audio)
     depthconst = depth.constant.named('Depth')
-    #delayconst = delay.constant.named('Delay')
-    #delay_samples = (delayconst * output.rate).clip(0, nil)
-    #range = depthconst * delay_samples
-    #min_delay = delay_samples - range * 0.5
+    delayconst = delay.constant.named('Delay')
+    samp = (delayconst * output.rate).clip(bufsize, nil)
 
-    lfo_scale = depthconst * delay_samples
-
-    lfo_mod = lfo * lfo_scale + min_delay
+    lfo_scale = (depthconst * samp).filter(10.hz.lowpass)
+    lfo_base = samp - lfo_scale * 0.5
+    lfo_mod = lfo * lfo_scale + lfo_base
 
     # Split delay LFO for first-tap and feedback
     d1, d2 = lfo_mod.tee
@@ -100,13 +98,14 @@ begin
     s2 = s2.delay(samples: d1, smoothing: delay_smoothing)
 
     # Feedback injector and feedback delay (compensating for buffer size)
-    d_fb = (d2 - bufsize).proc { |v| v.inplace.clip(0, nil).not_inplace! }
+    d_fb = (d2 - bufsize).clip(0, nil)
     b = 0.hz.forever.proc { a }.delay(samples: d_fb, smoothing: delay_smoothing2)
 
     # Effected output, with a spy to save feedback buffer
     wet = (feedback * b - s2).softclip(0.85, 0.95).spy { |z| a[] = z if z }
 
     # TODO: Smooth constants to fix zipper noise
+    # FIXME: still getting zipper noise on delay changes
     dryconst = dry_level.constant.named('Dry level')
     wetconst = wet_level.constant.named('Wet level')
     final = (s1 * dryconst + wet * wetconst).softclip(0.85, 0.95)
@@ -114,10 +113,11 @@ begin
     # GraphVoice provides on_cc to generate a cc map for the MIDI manager
     # (TODO: probably a better way to do this)
     MB::Sound::MIDI::GraphVoice.new(final)
-     .on_cc(1, 'LFO Hz', range: 0.0..6.0, relative: false)
-     .on_cc(1, 'Depth', range: 0.0..2.0)
-     .on_cc(1, 'Dry level', range: 1.0..0.0)
-      #.on_cc(1, 'Delay', range: 0.0..2.0)
+      .on_cc(1, 'LFO Hz', range: 0.0..6.0, relative: false)
+      .on_cc(1, 'Depth', range: 0.0..2.0)
+      .on_cc(1, 'Dry level', range: 1.0..0.0)
+      #.on_cc(1, 'Delay', range: 0.02..0.2, relative: false)
+      #.on_cc(1, 'Delay', range: 1.0..10.0)
       #.on_cc(1, 'Wet level', range: 0.0..1.0, relative: false)
   }
 
