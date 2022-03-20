@@ -74,10 +74,24 @@ begin
     # Feedback buffers, overwritten by later calls to #spy
     a = Numo::SFloat.zeros(bufsize)
 
-    lfo = hz.hz.with_phase(idx * 2.0 * Math::PI / inputs.length).send(wave_type).forever.at(min_delay..max_delay)
+    lfo_freq = hz.constant.named('LFO Hz')
+
+    lfo = lfo_freq.tone.with_phase(idx * 2.0 * Math::PI / inputs.length).send(wave_type).forever.at(1)
+
+    # Set up LFO depth control
+    # FIXME: this has the wrong delays (makes scratchy audio)
+    depthconst = depth.constant.named('Depth')
+    #delayconst = delay.constant.named('Delay')
+    #delay_samples = (delayconst * output.rate).clip(0, nil)
+    #range = depthconst * delay_samples
+    #min_delay = delay_samples - range * 0.5
+
+    lfo_scale = depthconst * delay_samples
+
+    lfo_mod = lfo * lfo_scale + min_delay
 
     # Split delay LFO for first-tap and feedback
-    d1, d2 = lfo.tee
+    d1, d2 = lfo_mod.tee
 
     # Split input into original and first delay
     s1, s2 = inp.tee(2)
@@ -92,6 +106,7 @@ begin
     # Effected output, with a spy to save feedback buffer
     wet = (feedback * b - s2).softclip(0.85, 0.95).spy { |z| a[] = z if z }
 
+    # TODO: Smooth constants to fix zipper noise
     dryconst = dry_level.constant.named('Dry level')
     wetconst = wet_level.constant.named('Wet level')
     final = (s1 * dryconst + wet * wetconst).softclip(0.85, 0.95)
@@ -99,7 +114,11 @@ begin
     # GraphVoice provides on_cc to generate a cc map for the MIDI manager
     # (TODO: probably a better way to do this)
     MB::Sound::MIDI::GraphVoice.new(final)
-      .on_cc(1, 'Wet level', range: 0.0..1.0, relative: false)
+     .on_cc(1, 'LFO Hz', range: 0.0..6.0, relative: false)
+     .on_cc(1, 'Depth', range: 0.0..2.0)
+     .on_cc(1, 'Dry level', range: 1.0..0.0)
+      #.on_cc(1, 'Delay', range: 0.0..2.0)
+      #.on_cc(1, 'Wet level', range: 0.0..1.0, relative: false)
   }
 
   if manager
