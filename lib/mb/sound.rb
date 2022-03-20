@@ -152,6 +152,7 @@ require_relative 'sound/multiplier'
 require_relative 'sound/tee'
 require_relative 'sound/input_channel_split'
 require_relative 'sound/node_sequence'
+require_relative 'sound/proc_node'
 
 require_relative 'sound/window'
 require_relative 'sound/window_reader'

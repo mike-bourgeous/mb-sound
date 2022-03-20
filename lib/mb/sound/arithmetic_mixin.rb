@@ -178,33 +178,7 @@ module MB
       # a Numo::NArray containing samples to be modified.  Note that this can
       # be very slow compared to the built-in algorithms implemented in C.
       def proc(*sources, &block)
-        sources << self
-
-        # TODO: Should this maybe be its own class?
-        class << block
-          include ArithmeticMixin
-
-          attr_reader :sources, :orig, :callers
-
-          def sample(count)
-            data = @orig.sample(count)
-            return nil if data.nil?
-            call(data)
-          end
-
-          def sources
-            @sources
-          end
-        end
-
-        # TODO: is there a better way to pass a closure or otherwise pass a
-        # value into a singleton class or singleton method?  It feels like I've
-        # done this before somewhere but can't recall.
-        block.instance_variable_set(:@orig, self)
-        block.instance_variable_set(:@sources, sources)
-        block.instance_variable_set(:@callers, caller_locations(4))
-
-        block
+        ProcNode.new(self, sources, &block)
       end
 
       # If this node (or its inputs) have a finite length of audio data
@@ -319,7 +293,6 @@ module MB
           @graph_spies = []
 
           class << self
-            # FIXME: This doesn't work with procs (their sample isn't a super method)
             def sample(count)
               super(count).tap { |buf|
                 MB::M.with_inplace(buf, false) do |b|
