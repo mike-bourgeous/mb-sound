@@ -69,6 +69,20 @@ puts MB::U.highlight(
   buffer: bufsize,
 )
 
+p = MB::Sound.plotter(graphical: true)
+p.yrange(-48000, 48000)
+
+# TODO: Maybe want a graph-wide spy function that either prints stats, draws
+# meters, or plots graphs of multiple nodes by name or reference
+spydata = {
+  depthconst: {
+    yrange: [-1, 2],
+  },
+  delayconst: {
+    yrange: [0, 1],
+  },
+}
+
 begin
   paths = inputs.map.with_index { |inp, idx|
     # Feedback buffers, overwritten by later calls to #spy
@@ -76,13 +90,13 @@ begin
 
     lfo_freq = hz.constant.named('LFO Hz')
 
-    lfo = lfo_freq.tone.with_phase(idx * 2.0 * Math::PI / inputs.length).send(wave_type).forever.at(1)
+    lfo = lfo_freq.tone.with_phase(idx * 2.0 * Math::PI / inputs.length).send(wave_type).forever.at(0..1)
 
     # Set up LFO depth control
-    # FIXME: this has the wrong delays (makes scratchy audio)
+    # FIXME: this STILL has the wrong delays (makes scratchy audio)
     depthconst = depth.constant.named('Depth')
     delayconst = delay.constant.named('Delay')
-    samp = (delayconst * output.rate).clip(bufsize, nil)
+    samp = (delayconst * output.rate).clip(0, nil)
 
     lfo_scale = (depthconst * samp).filter(10.hz.lowpass)
     lfo_base = samp - lfo_scale * 0.5
@@ -110,8 +124,27 @@ begin
     wetconst = wet_level.constant.named('Wet level')
     final = (s1 * dryconst + wet * wetconst).softclip(0.85, 0.95)
 
+    # XXX
+    if idx == 0
+      [:depthconst, :delayconst, :lfo_base, :lfo_scale, :lfo_mod, :d_fb].each do |v|
+        bdg = binding
+        bdg.local_variable_get(v).spy { |d|
+          spydata[v] ||= {name: v}
+          spydata[v].merge!(
+            name: v,
+            data: d.dup,
+            stats: {
+              min: d.min,
+              max: d.max,
+              mean: d.mean,
+            },
+          )
+        }
+      end
+    end
+
     # GraphVoice provides on_cc to generate a cc map for the MIDI manager
-    # (TODO: probably a better way to do this)
+    # (TODO: probably a better way to do this, also need on_bend, on_pitch, etc)
     MB::Sound::MIDI::GraphVoice.new(final)
       .on_cc(1, 'LFO Hz', range: 0.0..6.0, relative: false)
       .on_cc(1, 'Depth', range: 0.0..2.0)
@@ -131,6 +164,9 @@ begin
     data = paths.map { |p| p.sample(output.buffer_size) }
     break if data.any?(&:nil?)
     output.write(data)
+
+    puts MB::U.highlight(spydata.transform_values { |v| v.slice(:name, :stats) }) # XXX
+    p.plot(spydata.transform_values { |v| v.slice(:data, :yrange) })
   end
 
 rescue => e
