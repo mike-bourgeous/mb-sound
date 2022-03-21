@@ -119,7 +119,6 @@ module MB
 end
 
 require_relative 'sound/graph_node'
-require_relative 'sound/io_sample_mixin'
 
 require_relative 'sound/io_base'
 require_relative 'sound/io_input'

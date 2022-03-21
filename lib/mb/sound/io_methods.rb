@@ -254,7 +254,7 @@ module MB
         end
 
         inp.extend(GraphNode) unless inp.is_a?(GraphNode)
-        inp.extend(IOSampleMixin) unless inp.is_a?(IOSampleMixin)
+        inp.extend(GraphNode::IOSampleMixin) unless inp.is_a?(GraphNode::IOSampleMixin)
 
         inp
       end
