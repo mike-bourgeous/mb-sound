@@ -6,7 +6,7 @@ module MB
       # A pool of oscillators managed by MIDI note-on and note-off events,
       # initially based on code from bin/ep2_syn.rb.
       class VoicePool
-        include ArithmeticMixin
+        include GraphNode
         extend Forwardable
 
         def_delegators :@voices, :each, :map
@@ -161,9 +161,9 @@ module MB
           end
         end
 
-        # Returns all of the voices in the pool that include ArithmeticMixin.
+        # Returns all of the voices in the pool that include GraphNode.
         def sources
-          @voices.select { |v| v.is_a?(ArithmeticMixin) }
+          @voices.select { |v| v.is_a?(GraphNode) }
         end
       end
     end

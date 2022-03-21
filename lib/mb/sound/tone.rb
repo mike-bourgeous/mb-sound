@@ -3,7 +3,7 @@ module MB
     # Representation of a tone to generate or play.  Uses MB::Sound::Oscillator
     # for tone generation.
     class Tone
-      include ArithmeticMixin
+      include GraphNode
 
       # Speed of sound for wavelength calculations, in meters per second.
       SPEED_OF_SOUND = 343.0
@@ -364,7 +364,7 @@ module MB
         tone = tone.hz if tone.is_a?(Numeric)
         tone = tone.at(1) if index && tone.is_a?(Tone)
         tone = tone.oscillator if tone.is_a?(Tone)
-        @frequency = MB::Sound::Mixer.new([@frequency, [tone, index || 1]])
+        @frequency = MB::Sound::GraphNode::Mixer.new([@frequency, [tone, index || 1]])
         self
       end
 
@@ -442,7 +442,7 @@ module MB
         oscillator.sample(count.round)
       end
 
-      # See ArithmeticMixin#sources.  Returns the frequency source of the tone,
+      # See GraphNode#sources.  Returns the frequency source of the tone,
       # which will either be a number or a signal generator.
       def sources
         [@frequency, @phase_mod].compact

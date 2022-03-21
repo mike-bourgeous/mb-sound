@@ -1,13 +1,13 @@
-RSpec.describe(MB::Sound::InputChannelSplit) do
+RSpec.describe(MB::Sound::GraphNode::InputChannelSplit) do
   it 'can be created' do
     l, r = MB::Sound.file_input('sounds/synth0.flac').split
-    expect(l).to be_a(MB::Sound::InputChannelSplit::InputChannelNode)
-    expect(r).to be_a(MB::Sound::InputChannelSplit::InputChannelNode)
+    expect(l).to be_a(MB::Sound::GraphNode::InputChannelSplit::InputChannelNode)
+    expect(r).to be_a(MB::Sound::GraphNode::InputChannelSplit::InputChannelNode)
   end
 
   it 'can limit the number of channels' do
     l, r = MB::Sound.file_input('sounds/synth0.flac').split(max_channels: 1)
-    expect(l).to be_a(MB::Sound::InputChannelSplit::InputChannelNode)
+    expect(l).to be_a(MB::Sound::GraphNode::InputChannelSplit::InputChannelNode)
     expect(r).to eq(nil)
   end
 

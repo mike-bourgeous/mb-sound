@@ -5,8 +5,8 @@ module MB
     #
     # See FFMPEGInput for an example.
     class IOInput < IOBase
-      include ArithmeticMixin
-      include IOSampleMixin
+      include GraphNode
+      include GraphNode::IOSampleMixin
 
       attr_reader :frames_read
 

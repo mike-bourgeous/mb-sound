@@ -27,7 +27,7 @@ module MB
 
         when Array, Numo::NArray
           # TODO: Handle the signal graph DSL better in convert_sound_to_narray and consolidate with IOMethods#write
-          if file_tone_data.is_a?(Array) && !file_tone_data.empty? && file_tone_data.all?(ArithmeticMixin)
+          if file_tone_data.is_a?(Array) && !file_tone_data.empty? && file_tone_data.all?(GraphNode)
             bufsize = file_tone_data.map(&:graph_buffer_size).compact.min # nil is ok here
             output = MB::Sound.output(
               rate: rate,
@@ -79,7 +79,7 @@ module MB
           output = MB::Sound.output(rate: rate, plot: plot, device: device)
           file_tone_data.write(output)
 
-        when ArithmeticMixin
+        when GraphNode
           bufsize = file_tone_data.graph_buffer_size # nil is ok here
           output = MB::Sound.output(rate: rate, plot: plot, device: device, buffer_size: bufsize)
           loop do

@@ -46,7 +46,7 @@ module MB
     #     total = a.concatenate(b)
     #     plotter.plot(envelope: total)
     class ADSREnvelope
-      include ArithmeticMixin
+      include GraphNode
 
       attr_reader :attack_time, :decay_time, :sustain_level, :release_time, :total, :peak, :time, :rate
 

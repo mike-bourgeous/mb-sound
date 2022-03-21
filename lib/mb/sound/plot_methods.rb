@@ -231,7 +231,7 @@ module MB
         when Filter
           data = [file_tone_data.impulse_response, file_tone_data.frequency_response.abs]
 
-        when ArithmeticMixin
+        when GraphNode
           data = [file_tone_data.sample(samples)]
 
         when Proc, Method

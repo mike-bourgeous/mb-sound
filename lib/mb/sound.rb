@@ -37,7 +37,7 @@ module MB
     # Filters a sound with the given filter parameters (see
     # MB::Sound::Filter::Cookbook).
     #
-    # TODO: Maybe remove this, as it is superseded by the ArithmeticMixin DSL.
+    # TODO: Maybe remove this, as it is superseded by the GraphNode DSL.
     #
     # +:frequency+ - The center or cutoff frequency of the filter.
     # +:filter_type+ - One of the filter types from MB::Sound::Filter::Cookbook::FILTER_TYPES.
@@ -75,7 +75,7 @@ module MB
     # release automatically after that time.  The default sample rate is 48kHz.
     #
     # For DSL use in combination with tones, inputs, etc.  See
-    # MB::Sound::ArithmeticMixin.
+    # MB::Sound::GraphNode.
     def self.adsr(attack = 0.01, decay = 0.1, sustain = -12.db, release = 0.4, auto_release: nil, rate: 48000, filter_freq: 1000)
       if auto_release.nil?
         auto_release = 2.0 * (attack + decay)
@@ -95,7 +95,7 @@ module MB
     end
 
     # Creates a uniformly distributed white noise generator that can be
-    # combined with other tones, filters, etc.  See MB::Sound::ArithmeticMixin
+    # combined with other tones, filters, etc.  See MB::Sound::GraphNode
     # and MB::Sound::Tone.
     def self.noise
       2000.hz.ramp.noise
@@ -118,8 +118,7 @@ module MB
   end
 end
 
-require_relative 'sound/arithmetic_mixin'
-require_relative 'sound/io_sample_mixin'
+require_relative 'sound/graph_node'
 
 require_relative 'sound/io_base'
 require_relative 'sound/io_input'
@@ -135,7 +134,6 @@ require_relative 'sound/null_output'
 require_relative 'sound/loopback'
 require_relative 'sound/array_input'
 
-require_relative 'sound/constant'
 require_relative 'sound/oscillator'
 require_relative 'sound/tone'
 require_relative 'sound/note'
@@ -147,12 +145,6 @@ require_relative 'sound/softest_clip'
 require_relative 'sound/complex_pan'
 require_relative 'sound/haas_pan'
 require_relative 'sound/meter'
-require_relative 'sound/mixer'
-require_relative 'sound/multiplier'
-require_relative 'sound/tee'
-require_relative 'sound/input_channel_split'
-require_relative 'sound/node_sequence'
-require_relative 'sound/proc_node'
 
 require_relative 'sound/window'
 require_relative 'sound/window_reader'

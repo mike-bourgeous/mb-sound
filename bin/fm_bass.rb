@@ -7,7 +7,7 @@ require 'mb-sound'
 
 OSC_COUNT = ENV['OSC_COUNT']&.to_i || 1
 voices = OSC_COUNT.times.map { |i|
-  base = MB::Sound::Constant.new(440)
+  base = MB::Sound::GraphNode::Constant.new(440)
   freq_constants = []
   bfreq = -> { 2 ** base.dup.tap { |z| freq_constants << z }.log2.smooth(seconds: 0.1) }
 

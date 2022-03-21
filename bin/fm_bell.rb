@@ -16,7 +16,7 @@ manager = MB::Sound::MIDI::Manager.new(jack: jack, input: midi, connect: ARGV[0]
 
 OSC_COUNT = ENV['OSC_COUNT']&.to_i || 9
 voices = OSC_COUNT.times.map { |i|
-  base = MB::Sound::Constant.new(440)
+  base = MB::Sound::GraphNode::Constant.new(440)
   freq_constants = []
 
   portamento = 0.0

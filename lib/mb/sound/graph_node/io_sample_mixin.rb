@@ -1,10 +1,14 @@
 module MB
   module Sound
+    module GraphNode
     # Extends any audio I/O object with a #read method with a #sample method
     # for compatibility with the arithmetic DSL.
+    #
+    # You'll generally also want to include GraphNode in any class that
+    # includes this module.
     module IOSampleMixin
       # Returns an Array of graph source nodes for each of the channels (up to
-      # +:max_channels+) on this input.  Similar to ArithmeticMixin#tee.
+      # +:max_channels+) on this input.  Similar to GraphNode#tee.
       def split(max_channels: nil)
         InputChannelSplit.new(self, max_channels: max_channels).channels
       end
@@ -22,7 +26,7 @@ module MB
         buf
       end
 
-      # Overrides the default ArithmeticMixin#graph_node_name reader to try to
+      # Overrides the default GraphNode#graph_node_name reader to try to
       # get a sensible name for the input, whether that's a filename, ALSA
       # device, JACK connection list, or whatever.
       def graph_node_name
@@ -43,4 +47,5 @@ module MB
       end
     end
   end
+end
 end

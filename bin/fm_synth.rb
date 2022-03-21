@@ -24,7 +24,7 @@ class FM
     @oscillators = osc_count.times.map { |o|
       # Parabola is a little more interesting than sine without being too chaotic
       o = 440.hz.parabola.at(-10.db).oscillator
-      o.frequency = MB::Sound::Mixer.new([440])
+      o.frequency = MB::Sound::GraphNode::Mixer.new([440])
       o
     }
     @oscs_used = 0
@@ -35,7 +35,7 @@ class FM
     # TODO: use the output mixer and fix the double-sampling issue (oscillators
     # get sampled by both the frequency mixer and output mixer causing
     # skipping)
-    @output_mixer = MB::Sound::Mixer.new(@oscillators.map { |o| [o, 0] })
+    @output_mixer = MB::Sound::GraphNode::Mixer.new(@oscillators.map { |o| [o, 0] })
   end
 
   def print
