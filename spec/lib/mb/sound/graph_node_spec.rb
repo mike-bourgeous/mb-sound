@@ -29,8 +29,8 @@ RSpec.describe(MB::Sound::GraphNode) do
     # Ensure the correct types were created and stored
     expect(graph).to be_a(MB::Sound::Filter::Cookbook::CookbookWrapper)
     expect(graph.audio).to be_a(MB::Sound::Tone)
-    expect(graph.cutoff).to be_a(MB::Sound::Mixer)
-    expect(graph.quality).to be_a(MB::Sound::Mixer)
+    expect(graph.cutoff).to be_a(MB::Sound::GraphNode::Mixer)
+    expect(graph.quality).to be_a(MB::Sound::GraphNode::Mixer)
 
     # Ensure 500Hz tone gets quieter as filter frequency rises
     attack = graph.sample(2000).abs.max
@@ -63,15 +63,15 @@ RSpec.describe(MB::Sound::GraphNode) do
 
   describe '#coerce' do
     it 'allows signal nodes to be preceded by numeric values in multiplication' do
-      expect(5 * 5.constant).to be_a(MB::Sound::Multiplier)
+      expect(5 * 5.constant).to be_a(MB::Sound::GraphNode::Multiplier)
     end
 
     it 'allows signal nodes to be preceded by numeric values in addition' do
-      expect(5 + 5.constant).to be_a(MB::Sound::Mixer)
+      expect(5 + 5.constant).to be_a(MB::Sound::GraphNode::Mixer)
     end
 
     it 'allows signal nodes to be preceded by numeric values in subtraction' do
-      expect(5 - 5.constant).to be_a(MB::Sound::Mixer)
+      expect(5 - 5.constant).to be_a(MB::Sound::GraphNode::Mixer)
     end
   end
 

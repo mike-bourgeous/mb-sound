@@ -1,4 +1,4 @@
-RSpec.describe(MB::Sound::InputChannelSplit) do
+RSpec.describe(MB::Sound::GraphNode::InputChannelSplit) do
   it 'can be created' do
     l, r = MB::Sound.file_input('sounds/synth0.flac').split
     expect(l).to be_a(MB::Sound::InputChannelSplit::InputChannelNode)

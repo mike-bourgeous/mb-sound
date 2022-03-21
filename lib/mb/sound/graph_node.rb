@@ -168,7 +168,7 @@ module MB
       end
       alias dB db
 
-      # Wraps the numeric in a MB::Sound::Constant so that numeric values can
+      # Wraps the numeric in a MB::Sound::GraphNode::Constant so that numeric values can
       # be listed first in signal graph arithmetic operations.
       def coerce(numeric)
         [numeric.constant, self]
@@ -187,7 +187,7 @@ module MB
       # played after this node finishes.
       def and_then(*sources)
         raise 'No sources were given' if sources.empty?
-        MB::Sound::NodeSequence.new([self, *sources])
+        MB::Sound::GraphNode::NodeSequence.new([self, *sources])
       end
 
       # Applies the given filter (creating the filter if given a filter type)
@@ -421,5 +421,16 @@ module MB
         end
       end
     end
+
+    # GN is a shorthand alias for GraphNode
+    GN = GraphNode
   end
 end
+
+require_relative 'graph_node/constant'
+require_relative 'graph_node/input_channel_split'
+require_relative 'graph_node/mixer'
+require_relative 'graph_node/multiplier'
+require_relative 'graph_node/node_sequence'
+require_relative 'graph_node/proc_node'
+require_relative 'graph_node/tee'

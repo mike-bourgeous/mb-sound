@@ -1,5 +1,6 @@
 module MB
   module Sound
+    module GraphNode
     # Splits the channels from an Input with a #read method into separate graph
     # nodes for each input channel.  Sampling a channel's node twice causes the
     # next frame/buffer/window of data to be read from the input.
@@ -47,7 +48,7 @@ module MB
       # The source node feeding into this InputChannelSplit, in an array (see
       # GraphNode#sources).
       attr_reader :sources
-      
+
       # The channels from the InputChannelSplit (see IOSampleMixin#split).
       attr_reader :channels
 
@@ -109,4 +110,5 @@ module MB
       end
     end
   end
+end
 end

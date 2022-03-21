@@ -1,14 +1,14 @@
-RSpec.describe(MB::Sound::Constant) do
+RSpec.describe(MB::Sound::GraphNode::Constant) do
   it 'returns a constant value forever' do
-    expect(MB::Sound::Constant.new(123).sample(480)).to eq(Numo::SFloat.zeros(480).fill(123))
+    expect(MB::Sound::GraphNode::Constant.new(123).sample(480)).to eq(Numo::SFloat.zeros(480).fill(123))
   end
 
   it 'can use a complex constant' do
-    expect(MB::Sound::Constant.new(123+45i).sample(480)).to eq(Numo::SComplex.zeros(480).fill(123+45i))
+    expect(MB::Sound::GraphNode::Constant.new(123+45i).sample(480)).to eq(Numo::SComplex.zeros(480).fill(123+45i))
   end
 
   it 'can change to a complex constant' do
-    c = MB::Sound::Constant.new(123)
+    c = MB::Sound::GraphNode::Constant.new(123)
     expect(c.sample(480)).to eq(Numo::SFloat.zeros(480).fill(123))
 
     c.constant = 1+1i
@@ -18,7 +18,7 @@ RSpec.describe(MB::Sound::Constant) do
 
   context 'when smooth is true' do
     it 'smooths changes between values' do
-      c = MB::Sound::Constant.new(100)
+      c = MB::Sound::GraphNode::Constant.new(100)
 
       c.constant = -100
 
@@ -34,7 +34,7 @@ RSpec.describe(MB::Sound::Constant) do
 
   context 'when smooth is false' do
     it 'changes values instantly' do
-      c = MB::Sound::Constant.new(123, smooth: false)
+      c = MB::Sound::GraphNode::Constant.new(123, smooth: false)
       expect(c.sample(480)).to eq(Numo::SFloat.zeros(480).fill(123))
 
       c.constant = 1+1i

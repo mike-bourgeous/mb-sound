@@ -1,5 +1,6 @@
 module MB
   module Sound
+    module GraphNode
     # A signal graph node that switches from input node to input node as each
     # input node runs out of data.
     class NodeSequence
@@ -42,4 +43,5 @@ module MB
       end
     end
   end
+end
 end

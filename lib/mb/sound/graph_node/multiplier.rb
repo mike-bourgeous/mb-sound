@@ -1,5 +1,6 @@
 module MB
   module Sound
+    module GraphNode
     # Multiplies zero or more inputs that have a #sample method that takes a
     # buffer size parameter, such as an Oscillator or an ADSREnvelope.  The
     # main uses for this class are for applying envelopes to sounds, and for
@@ -171,4 +172,5 @@ module MB
       end
     end
   end
+end
 end

@@ -1,5 +1,6 @@
 module MB
   module Sound
+    module GraphNode
     # Sums zero or more inputs that have a #sample method that takes a buffer
     # size parameter, such as an Oscillator.  One example use of this is as the
     # frequency input of an Oscillator.  See MB::Sound::Tone#fm.
@@ -202,4 +203,5 @@ module MB
       end
     end
   end
+end
 end

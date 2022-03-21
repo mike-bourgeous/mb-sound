@@ -1,5 +1,6 @@
 module MB
   module Sound
+    module GraphNode
     # A signal-processing graph node that calls a given Ruby Proc with each
     # buffer retrieved from the source, with the result of the Proc returned
     # from the #sample method.
@@ -30,4 +31,5 @@ module MB
       end
     end
   end
+end
 end

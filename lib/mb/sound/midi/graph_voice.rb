@@ -68,7 +68,7 @@ module MB
               # FIXME: this won't handle chained multi-op FM correctly
               g = o.respond_to?(:graph) ? o.graph : [o.frequency]
               mixer = g.select { |s|
-                (s.is_a?(MB::Sound::Mixer) || s.is_a?(MB::Sound::Constant)) &&
+                (s.is_a?(MB::Sound::GraphNode::Mixer) || s.is_a?(MB::Sound::GraphNode::Constant)) &&
                   s.constant >= 20 # Haxx to try to separate frequency values from other values; might help to have some kind of units or roles for detecting these things
               }.first
               @freq_constants << mixer if mixer

@@ -1,15 +1,16 @@
 module MB
   module Sound
+    module GraphNode
     # A signal generator (with a #sample method; see GraphNode and Tone)
     # that returns a constant numeric value.
     class Constant
       include GraphNode
 
       module NumericConstantMethods
-        # Converts this numeric value into a MB::Sound::Constant constant-value
+        # Converts this numeric value into a MB::Sound::GraphNode::Constant constant-value
         # signal generator.
         def constant
-          MB::Sound::Constant.new(self)
+          MB::Sound::GraphNode::Constant.new(self)
         end
       end
       Numeric.include(NumericConstantMethods)
@@ -62,4 +63,5 @@ module MB
       end
     end
   end
+end
 end
