@@ -160,6 +160,17 @@ RSpec.describe(MB::Sound::IOMethods) do
         input&.close
       end
     end
+
+    it 'returns graph-node-compatible objects' do
+      begin
+        input = MB::Sound.file_input('sounds/sine/sine_100_44k.flac')
+        expect(input).to respond_to(:tee)
+        expect(input).to respond_to(:sample)
+        expect(input.sample(10000).max).to be_between(0.4, 1.0)
+      ensure
+        input&.close
+      end
+    end
   end
 
   describe '#file_output' do

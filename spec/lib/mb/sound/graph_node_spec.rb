@@ -61,6 +61,91 @@ RSpec.describe(MB::Sound::GraphNode) do
     expect(graph.sample(100)).to eq(Numo::SFloat.zeros(100).fill(2))
   end
 
+  describe '#tone' do
+    it 'creates tones using graph nodes as frequency value' do
+      ref = 1000.hz
+      test = 1000.constant.tone
+
+      expect(ref.sample(480)).to eq(test.sample(480))
+    end
+  end
+
+  describe '#/' do
+    it 'can divide a graph node by a number' do
+      n = 15.constant / 5
+      expect(n.sample(10)).to eq(Numo::SFloat.zeros(10).fill(3))
+    end
+
+    it 'can divide a graph node by another graph node' do
+      n1 = 15.constant
+      n2 = 5.constant
+      n3 = n1 / n2
+      expect(n3.sample(10)).to eq(Numo::SFloat.zeros(10).fill(3))
+    end
+
+    it 'can divide a number by a graph node' do
+      n = 4 / 2.constant
+      expect(n.sample(10)).to eq(Numo::SFloat.zeros(10).fill(2))
+    end
+  end
+
+  describe '#**' do
+    it 'can raise a graph node to a numeric power' do
+      n = 4.constant ** 0.5
+      expect(n.sample(10)).to eq(Numo::SFloat.zeros(10).fill(2))
+    end
+
+    it 'can raise a graph node to a graph node' do
+      n1 = 2.constant
+      n2 = 3.constant
+      n3 = n2 ** n1
+      expect(n3.sample(10)).to eq(Numo::SFloat.zeros(10).fill(9))
+    end
+  end
+
+  describe '#log' do
+    it 'takes the natural logarithm of a graph node' do
+      n = Math::E.constant.log
+      expect(MB::M.round(n.sample(10), 6)).to eq(Numo::SFloat.ones(10))
+    end
+  end
+
+  describe '#log2' do
+    it 'takes the base-2 logarithm of a graph node' do
+      n = 16.constant.log2
+      expect(n.sample(10)).to eq(Numo::SFloat.zeros(10).fill(4))
+    end
+  end
+
+  describe '#log10' do
+    it 'takes the base-10 logarithm of a graph node' do
+      n = 100.constant.log10
+      expect(n.sample(10)).to eq(Numo::SFloat.zeros(10).fill(2))
+    end
+  end
+
+  describe '#clip' do
+    # FIXME: the first sample is repeated without the with_phase option
+    let(:cliposc) { 24000.hz.square.at(10).with_phase(0.0000001) }
+
+    it 'can clip values to a range' do
+      expect(cliposc.sample(4)).to eq(Numo::SFloat[10, -10, 10, -10])
+
+      n = cliposc.clip(-4.5, 2.5)
+      expect(n.sample(4)).to eq(Numo::SFloat[2.5, -4.5, 2.5, -4.5])
+    end
+
+    it 'can clip without a lower bound' do
+      n = cliposc.clip(nil, 2.5)
+      expect(n.sample(4)).to eq(Numo::SFloat[2.5, -10, 2.5, -10])
+    end
+
+    it 'can clip without an upper bound' do
+      n = cliposc.clip(0.5, nil)
+      expect(n.sample(4)).to eq(Numo::SFloat[10, 0.5, 10, 0.5])
+    end
+  end
+
   describe '#coerce' do
     it 'allows signal nodes to be preceded by numeric values in multiplication' do
       expect(5 * 5.constant).to be_a(MB::Sound::GraphNode::Multiplier)
