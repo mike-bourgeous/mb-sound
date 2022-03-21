@@ -71,6 +71,8 @@ module MB
           # List of channels that have already read the current buffer, to detect
           # when a new buffer is needed.
           @read_channels = Set.new
+
+          @buf = nil
         end
 
         # For internal use by InputChannelNode#sample.  Returns the current
