@@ -46,7 +46,7 @@ module MB
     #     total = a.concatenate(b)
     #     plotter.plot(envelope: total)
     class ADSREnvelope
-      include ArithmeticMixin
+      include GraphNode
 
       attr_reader :attack_time, :decay_time, :sustain_level, :release_time, :total, :peak, :time, :rate
 
@@ -56,7 +56,7 @@ module MB
       # sample +:rate+ is required to ensure envelope times are accurate.
       #
       # Note that the +:sustain_level+ may be greater than 1.0.
-      def initialize(attack_time:, decay_time:, sustain_level:, release_time:, rate:)
+      def initialize(attack_time:, decay_time:, sustain_level:, release_time:, rate:, filter_freq: 1000)
         @rate = rate.to_f
         @on = false
 
@@ -67,7 +67,7 @@ module MB
         @frame = @rate * @time
 
         # Single-pole filter avoids overshoot
-        @filter = 100.hz.at_rate(rate).lowpass1p
+        @filter = filter_freq.hz.at_rate(rate).lowpass1p
         @peak = 0.5
         @value = 0
         @sust = 0
@@ -126,19 +126,21 @@ module MB
         # envelope is released before attack+decay finish
         if @on
           @peak = 1.0
-          # Convert to 32-bit float for consistency between C and Ruby loops
-          @sust = Numo::SFloat[@value][0]
+          # Convert to 32-bit float for rounding consistency between C and Ruby loops
+          @sust = MB::FastSound.f64to32(@value)
           self.time = @release_start
           @on = false
         end
       end
 
-      # Turn off the envelope and reset the filter.  For testing only; will
-      # cause clicking if used on actual audio.
+      # Turn off the envelope, reset the filter, and disable any auto-release
+      # given to #trigger.  For testing only; will cause clicking if used on
+      # actual audio.
       def reset
-        @frame = 0
-        @time = 0
+        @time = @total + 100
+        @frame = @rate * @time
         @on = false
+        @auto_release = nil
         @filter.reset(0)
       end
 
@@ -190,7 +192,7 @@ module MB
           @filter.process(@buf.not_inplace!)
         end
 
-        return nil if @auto_release && !@on && @buf.max < -100.db
+        return nil if @auto_release && !@on && @time >= @total && @buf.max < -100.db
 
         @buf.not_inplace!
       end
@@ -278,7 +280,7 @@ module MB
       def dup(rate = @rate)
         e = super()
         e.instance_variable_set(:@rate, rate.to_f)
-        e.instance_variable_set(:@filter, 100.hz.at_rate(rate).lowpass1p)
+        e.instance_variable_set(:@filter, @filter.center_frequency.hz.at_rate(rate).lowpass1p)
         e.reset
         e
       end

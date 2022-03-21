@@ -5,7 +5,7 @@ module MB
     class Filter
       # Provides a #sample method that processes another #sample source through
       # a Filter.  It's easiest to use the MB::Sound::Filter#wrap method or the
-      # MB::Sound::ArithmeticMixin#filter method to create a sample wrapper.
+      # MB::Sound::GraphNode#filter method to create a sample wrapper.
       #
       # Example:
       #     500.hz.lowpass.wrap(123.hz.ramp)
@@ -13,7 +13,9 @@ module MB
       #     123.hz.ramp.filter(500.hz.lowpass)
       class SampleWrapper
         extend Forwardable
-        include MB::Sound::ArithmeticMixin
+        include MB::Sound::GraphNode
+
+        attr_reader :base_filter
 
         # Initializes a sample wrapper for the given +filter+ (which must
         # provide a #process method) and +source+ (which must provide a #sample
@@ -22,7 +24,7 @@ module MB
         # Set +:in_place+ to false if problems occur due to in-place filter
         # processing.
         def initialize(filter, source, in_place: true)
-          @filter = filter
+          @base_filter = filter
           @source = source
           @in_place = in_place
 
@@ -43,17 +45,23 @@ module MB
           # but FFMPEGInput -> Mixer -> SampleWrapper is fine.
 
           # TODO: Maybe this nil/empty/short handling could be consolidated?
+          # TODO: Drain FIR filters and delays after a source returns nil
           return nil if buf.nil? || buf.empty?
           buf = MB::M.zpad(buf, count) if buf.length < count
 
           buf.inplace! if @in_place
-          buf = @filter.process(buf)
-          buf.not_inplace!
+          buf = @base_filter.process(buf)
+          buf&.not_inplace!
         end
 
-        # See ArithmeticMixin#sources.
+        # See GraphNode#sources.
         def sources
-          [@source]
+          if @base_filter.respond_to?(:sources)
+            # + instead of | because duplicate connections should be shown
+            [@source] + @base_filter.sources
+          else
+            [@source]
+          end
         end
       end
     end

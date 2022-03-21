@@ -33,10 +33,20 @@ module MB
         #            or nil to receive all channels.  Non-channel messages will
         #            always be received.  Drums are usually on channel 10, so
         #            pass 9 to listen to the drum channel, for example.
-        def initialize(jack: MB::Sound::JackFFI[], input: nil, port_name: 'midi_in', connect: nil, update_rate: 60, channel: nil)
+        def initialize(jack: MB::Sound::JackFFI[], input: nil, port_name: 'midi_in', connect: nil, update_rate: nil, channel: ENV['CHANNEL']&.to_i)
           @parameters = {}
           @event_callbacks = []
           @note_callbacks = []
+          @update_callbacks = []
+
+          if update_rate.nil?
+            if jack
+              update_rate = jack.rate.to_f / jack.buffer_size
+            else
+              update_rate = 60
+            end
+          end
+
           @update_rate = update_rate
           @channel = channel
 
@@ -47,7 +57,7 @@ module MB
           @midi_in = input || @jack.input(port_type: :midi, port_names: [port_name], connect: connect)
           @m = Nibbler.new
 
-          @transpose = 0
+          @transpose = ENV['TRANSPOSE']&.to_i || 0
         end
 
         # If the input is a JackFFI MIDI input, returns an Array of Strings
@@ -99,6 +109,42 @@ module MB
           nil
         end
 
+        # Binds all CCs in the given CC map (e.g. as returned by
+        # GraphVoice#cc_map) or Array of CC maps.  A CC map is a Hash mapping a
+        # CC index to an Array of Hashes describing parameters.
+        #
+        # At minimum, a parameter Hash needs a callback in :set, but may
+        # contain any parameter for #on_cc as well as extra info that will be
+        # ignored.
+        #
+        # An example CC map:
+        #
+        # {
+        #   1 => [
+        #     { index: 1, description: 'Mod wheel', range: 0.0..1.0, set: ->(v) { puts v } },
+        #     # ...
+        #   ],
+        #   # ...
+        # ]
+        def on_cc_map(cc_map)
+          if cc_map.is_a?(Array)
+            cc_map.each do |m|
+              on_cc_map(m)
+            end
+
+            return
+          end
+
+          cc_map.each do |index, params|
+            params.each do |info|
+              opts = info.slice(:range, :default, :filter_hz, :max_rise, :max_fall, :description)
+              self.on_cc(index, **opts) do |value|
+                info[:set].call(value)
+              end
+            end
+          end
+        end
+
         # Adds a callback to the given MIDI CC +index+.  See #on_midi.
         def on_cc(index, range: 0.0..1.0, default: nil, filter_hz: 15, max_rise: nil, max_fall: nil, description: nil, &callback)
           template = MIDIMessage::ControlChange.new(@channel, index)
@@ -129,6 +175,38 @@ module MB
           )
         end
 
+        # Adds a Parameter callback to receive MIDI note number values.  See
+        # #on_midi.
+        def on_note_number(range: 0..127, default: nil, filter_hz: nil, max_rise: nil, max_fall: nil, description: nil, &callback)
+          template = MIDIMessage::NoteOn.new(@channel, -1, -1)
+          on_midi(
+            template,
+            range: range,
+            default: default,
+            filter_hz: filter_hz,
+            max_rise: max_rise,
+            max_fall: max_fall,
+            description: description,
+            &callback
+          )
+        end
+
+        # Adds a Parameter callback to receive MIDI note-on velocity values for
+        # a specific note.  See #on_midi.
+        def on_note_velocity(note, range: 0..127, default: nil, filter_hz: nil, max_rise: nil, max_fall: nil, description: nil, &callback)
+          template = MIDIMessage::NoteOn.new(@channel, note, -1)
+          on_midi(
+            template,
+            range: range,
+            default: default,
+            filter_hz: filter_hz,
+            max_rise: max_rise,
+            max_fall: max_fall,
+            description: description,
+            &callback
+          )
+        end
+
         # Calls the callback with (note_number, velocity, on) whenever a note
         # on or note off event is received.  The note number received may be
         # fractional if #transpose is fractional.
@@ -144,7 +222,8 @@ module MB
         end
 
         # Adds a callback to receive smoothed values in the given +:range+ for
-        # the given MIDI message template.
+        # the given MIDI message template.  Callbacks will be called every time
+        # the update loop runs, regardless of whether the value changed.
         #
         # See MB::Sound::MIDI::Parameter#initialize for a description of the
         # parameters.
@@ -163,19 +242,25 @@ module MB
             update_rate: @update_rate,
             description: description
           )
-          @parameters[message_template.class] ||= {}
 
-          # TODO: Why is this an array?  Only one callback is possible here.
-          @parameters[message_template.class][new_parameter] = []
-          @parameters[message_template.class][new_parameter] << callback
+          @parameters[message_template.class] ||= {}
+          @parameters[message_template.class][new_parameter.hash_key] ||= []
+          @parameters[message_template.class][new_parameter.hash_key] << [new_parameter, callback]
 
           case message_template
           when MIDIMessage::ControlChange
             # FIXME: this will overwrite previous parameters, allowing only one parameter per CC
+            # This is only used externally through an attr_reader.
             @cc[message_template.index] = new_parameter
           end
 
           nil
+        end
+
+        # Calls the +callback+ once for each call to #update, allowing other
+        # objects to be synchronized to the manager's update loop.
+        def on_update(&callback)
+          @update_callbacks << callback
         end
 
         # Runs one update cycle.  This should be called 60 times per second, or
@@ -194,18 +279,28 @@ module MB
 
               notify_event_cbs(e)
 
-              next unless params = @parameters[e.class]
-              params.each do |p, _|
-                p.notify(e)
+              params = @parameters[e.class]
+              if params
+                key = MB::Sound::MIDI::Parameter.generate_message_key(e, ignore_channel: @channel.nil?)
+                params[key]&.each do |p, _cb|
+                  p.notify(e)
+                end
               end
             end
           end
 
-          @parameters.each do |_, params|
-            params.each do |p, _|
-              notify_parameter_cbs(p)
+          # For Parameter callbacks (e.g. #on_cc), the above loop just sets the
+          # parameter's stored value to the last received MIDI value, then this
+          # loop sends that value to each callback.
+          @parameters.each do |_msg_class, params|
+            params.each do |_hash_key, plist|
+              plist.each do |p, cb|
+                notify_parameter_cb(p, cb)
+              end
             end
           end
+
+          @update_callbacks.each(&:call)
 
           nil
         end
@@ -215,17 +310,17 @@ module MB
         def to_acid_xml(name: File.basename($0))
           require 'builder'
 
-          params = @parameters.values.flat_map(&:keys)
-          thresholds = @cc_thresholds.keys
+          params = @parameters.values.flat_map(&:values).flat_map { |l| l.map(&:first) }
+          param_groups = params.group_by(&:hash_key)
 
-          # TODO: What happens if there are duplicate CCs in the XML?
-          # TODO: Will ACID work with UNIX line endings?
+          thresholds = @cc_thresholds.keys
 
           xml = Builder::XmlMarkup.new(indent: 2)
           xml.instruct!
           xml.parammap(mapname: name, ver: 1, summary: '', params: params.length + thresholds.length) do |m|
-            params.each do |p|
-              p.to_acid_xml(m)
+            param_groups.each do |_key, params|
+              desc = params.map(&:description).compact.uniq.join(', ')
+              params[0].to_acid_xml(m, description: desc)
             end
 
             thresholds.each do |t|
@@ -279,16 +374,14 @@ module MB
           end
         end
 
-        def notify_parameter_cbs(parameter)
+        def notify_parameter_cb(parameter, cb)
           value = parameter.value
 
-          @parameters[parameter.message.class][parameter].each do |cb|
-            begin
-              cb.call(value)
-            rescue => e
-              # TODO: use a logging facility
-              STDERR.puts "Error in MIDI parameter callback #{cb} for #{parameter.message}: #{e}\n\t#{e.backtrace.join("\n\t")}"
-            end
+          begin
+            cb.call(value)
+          rescue => e
+            # TODO: use a logging facility
+            STDERR.puts "Error in MIDI parameter callback #{cb} for #{parameter.message}: #{e}\n\t#{e.backtrace.join("\n\t")}"
           end
         end
 

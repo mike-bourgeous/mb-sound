@@ -3,7 +3,7 @@ module MB
     # Representation of a tone to generate or play.  Uses MB::Sound::Oscillator
     # for tone generation.
     class Tone
-      include ArithmeticMixin
+      include GraphNode
 
       # Speed of sound for wavelength calculations, in meters per second.
       SPEED_OF_SOUND = 343.0
@@ -151,6 +151,12 @@ module MB
       attr_reader :wave_type, :frequency, :amplitude, :range, :duration, :rate, :wavelength, :phase
       attr_reader :duration_set, :amplitude_set
 
+      # Shortcut for creating a new tone with the given frequency source, for
+      # building more complex FM signal graphs.
+      def self.[](frequency)
+        MB::Sound::Tone.new(frequency: frequency)
+      end
+
       # Initializes a representation of a simple generated waveform.
       #
       # +wave_type+ - One of the waveform types supported by MB::Sound::Oscillator (e.g. :sine).
@@ -167,6 +173,7 @@ module MB
         @noise = false
         @amplitude_set = false
         @duration_set = false
+        @phase_mod = nil
         self.or_at(amplitude).or_for(duration).at_rate(rate).with_phase(phase)
         set_frequency(frequency)
       end
@@ -176,6 +183,7 @@ module MB
         @wave_type = :sine
         self
       end
+      alias sin sine
 
       # Changes the waveform type to triangle.
       def triangle
@@ -332,18 +340,67 @@ module MB
       # Adds the given other +tone+ as a frequency modulator for this tone,
       # using the given modulation +index+ (good values range from 100 to
       # 10000, and the modulation index can also be applied to the other Tone
-      # using #at).
+      # using #at).  This is true linear frequency modulation -- the rate of
+      # phase is modulated -- as opposed to linear phase modulation, or
+      # exponential frequency modulation (see #log_fm).
+      #
+      # If the current tone's frequency is already derived from a signal graph,
+      # then this new +tone+ will be added to the existing graph output.
       #
       # Example:
+      #     # Simple FM
       #     200.hz.fm(600.hz, 1000)
       #     # or
       #     200.hz.fm(600.hz.at(1000))
+      #
+      #     # Stacking is the same as adding
+      #     200.hz.fm(600.hz.at(1000)).fm(300.hz.at(1000))
+      #     # or
+      #     200.hz.fm(600.hz.at(1000) + 300.hz.at(1000))
+      #
+      # TODO: Consider implementing phase modulation to create DX7-like sounds.
+      # Would need to update both the Ruby and C oscillator code.
       def fm(tone, index = nil)
-        raise 'This tone already has an FM modulator' if @frequency.respond_to?(:sample)
         tone = tone.hz if tone.is_a?(Numeric)
         tone = tone.at(1) if index && tone.is_a?(Tone)
         tone = tone.oscillator if tone.is_a?(Tone)
-        @frequency = MB::Sound::Mixer.new([@frequency, [tone, index || 1]])
+        @frequency = MB::Sound::GraphNode::Mixer.new([@frequency, [tone, index || 1]])
+        self
+      end
+
+      # Like #fm, but the modulation index is in semitones instead of Hz.  This
+      # mirrors classical analog exponential or "volt per octave" frequency
+      # modulation.
+      #
+      # If the current tone's frequency is already derived from a signal graph,
+      # then this new +tone+ will be multiplied by the existing graph output.
+      #
+      # Examples:
+      #     100.hz.log_fm(200.hz.at(2))
+      def log_fm(tone, index = nil)
+        tone = tone.hz if tone.is_a?(Numeric)
+        tone = tone.at(1) if index && tone.is_a?(Tone)
+        tone = tone.oscillator if tone.is_a?(Tone)
+        tone = 2 ** (tone / 12)
+        tone = tone * index if index
+        @frequency = @frequency * tone
+        self
+      end
+
+      # Adds the given other +tone+ or signal graph as a phase modulation
+      # source for this tone.  Like #fm, but added to the phase given to the
+      # oscillator, rather than to the frequency itself.
+      def pm(tone, index = nil)
+        tone = tone.hz if tone.is_a?(Numeric)
+        if tone.is_a?(Tone)
+          if index
+            tone.at(1)
+          else
+            tone.or_at(1)
+          end
+        end
+        tone = tone * index if index
+        @phase_mod = tone
         self
       end
 
@@ -385,10 +442,10 @@ module MB
         oscillator.sample(count.round)
       end
 
-      # See ArithmeticMixin#sources.  Returns the frequency source of the tone,
+      # See GraphNode#sources.  Returns the frequency source of the tone,
       # which will either be a number or a signal generator.
       def sources
-        [@frequency]
+        [@frequency, @phase_mod].compact
       end
 
       # Returns an Oscillator that will generate a wave with the wave type,
@@ -403,7 +460,8 @@ module MB
           phase: @phase,
           advance: @noise ? 0 : Math::PI * 2.0 / @rate,
           random_advance: @noise ? Math::PI * 2.0 : 0,
-          range: @range
+          range: @range,
+          phase_mod: @phase_mod
         )
       end
 
@@ -518,8 +576,9 @@ module MB
       # Allows subclasses (e.g. Note) to change the frequency after construction.
       def set_frequency(freq)
         freq = SPEED_OF_SOUND / freq.meters if freq.is_a?(Feet) || freq.is_a?(Meters)
-        @frequency = freq.to_f
-        @wavelength = (SPEED_OF_SOUND / @frequency).meters
+        freq = freq.to_f if freq.is_a?(Numeric)
+        @frequency = freq
+        @wavelength = (SPEED_OF_SOUND / @frequency).meters if @frequency.is_a?(Numeric)
         @oscillator&.frequency = @frequency
       end
     end

@@ -97,6 +97,9 @@ RSpec.describe(MB::Sound::IOMethods) do
         expect(info[:streams][0][:duration_ts]).to eq(48000)
         expect(info[:streams][0][:channels]).to eq(2)
       end
+
+      pending 'can write a single signal graph node to a sound file'
+      pending 'can write an array of signal graph nodes to a sound file'
     end
 
     context 'when overwrite is false (by default)' do
@@ -153,6 +156,17 @@ RSpec.describe(MB::Sound::IOMethods) do
         expect(a.length).to eq(1)
         expect(a[0].length).to eq(75000)
         expect(a[0].max).to be_between(0.4, 1.0)
+      ensure
+        input&.close
+      end
+    end
+
+    it 'returns graph-node-compatible objects' do
+      begin
+        input = MB::Sound.file_input('sounds/sine/sine_100_44k.flac')
+        expect(input).to respond_to(:tee)
+        expect(input).to respond_to(:sample)
+        expect(input.sample(10000).max).to be_between(0.4, 1.0)
       ensure
         input&.close
       end

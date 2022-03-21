@@ -343,7 +343,7 @@ static double complex cot_int(double complex z)
 	return -M_2_PI * clog(cexp(I * z) + I) + I;
 }
 
-static double complex osc_sample(enum wave_types wave_type, double phi)
+static double complex osc_sample(enum wave_types wave_type, complex double phi)
 {
 	double x;
 	double complex z;
@@ -351,16 +351,16 @@ static double complex osc_sample(enum wave_types wave_type, double phi)
 
 	switch(wave_type) {
 		case OSC_SINE:
-			return sin(phi);
+			return sin(creal(phi));
 
 		case OSC_COMPLEX_SINE:
 			return cexp(I * (phi - M_PI / 2));
 
 		case OSC_TRIANGLE:
-			if (phi < M_PI_2) {
+			if (creal(phi) < M_PI_2) {
 				// Rise from 0..1 in 0..pi/2
 				return phi * M_2_PI;
-			} else if (phi < (M_PI + M_PI_2)) {
+			} else if (creal(phi) < (M_PI + M_PI_2)) {
 				// Fall from 1..-1 in pi/2..3pi/2
 				return 2.0 - phi * M_2_PI;
 			} else {
@@ -371,11 +371,11 @@ static double complex osc_sample(enum wave_types wave_type, double phi)
 		case OSC_COMPLEX_TRIANGLE:
 			// see lib/mb/sound/oscillator.rb
 			// 2.4674...*i == -pi*log(2) + I*dilog(2)
-			return csc_int_int(phi + M_PI_2) * I / 2.46740110027234;
+			return csc_int_int(creal(phi) + M_PI_2) * I / 2.46740110027234;
 
 		case OSC_SQUARE:
 			// TODO: Normalize for RMS instead of peak?
-			if (phi < M_PI) {
+			if (creal(phi) < M_PI) {
 				return 1.0;
 			} else {
 				return -1.0;
@@ -397,7 +397,7 @@ static double complex osc_sample(enum wave_types wave_type, double phi)
 			return z;
 
 		case OSC_RAMP:
-			if (phi < M_PI) {
+			if (creal(phi) < M_PI) {
 				// Initial rise from 0..1 in 0..pi
 				return phi / M_PI;
 			} else {
@@ -418,7 +418,7 @@ static double complex osc_sample(enum wave_types wave_type, double phi)
 			return z;
 
 		case OSC_GAUSS:
-			x = phi / M_PI;
+			x = creal(phi) / M_PI;
 			if (x < 1.0) {
 				x = (sqrt(2.0 * log(1.6487212707 / (1.0 - x))) - 1) * 0.7071067811865476;
 			} else {
@@ -434,7 +434,7 @@ static double complex osc_sample(enum wave_types wave_type, double phi)
 			return x;
 
 		case OSC_PARABOLA:
-			if (phi < M_PI) {
+			if (creal(phi) < M_PI) {
 				x = 1.0 - phi * M_2_PI;
 				return 1.0 - x * x;
 			} else {
@@ -723,6 +723,21 @@ static void ensure_sfloat(VALUE *narray)
 	}
 }
 
+static void ensure_scomplex(VALUE *narray)
+{
+	int dim = RNARRAY_NDIM(*narray);
+	if (dim != 1) {
+		rb_raise(rb_eArgError, "Only 1D NArrays may be processed (got %d dimensions)", dim);
+	}
+
+	*narray = rb_funcall(numo_cSComplex, rb_intern("cast"), 1, *narray);
+
+	if (!RTEST(nary_check_contiguous(*narray))) {
+		*narray = nary_dup(*narray);
+	}
+}
+
+
 static enum wave_types find_wave_type(ID wave_type)
 {
 	if (wave_type == sym_osc_sine) {
@@ -839,6 +854,12 @@ static VALUE ruby_imod(VALUE self, VALUE x, VALUE y)
 	return SSIZET2NUM(NUM2SSIZET(x) % NUM2SSIZET(y));
 }
 
+static VALUE ruby_f64to32(VALUE self, VALUE x)
+{
+	volatile float y = NUM2DBL(x);
+	return rb_float_new(y);
+}
+
 // Splits complex into real and imaginary
 static VALUE ruby_complex(VALUE self, VALUE z)
 {
@@ -847,28 +868,255 @@ static VALUE ruby_complex(VALUE self, VALUE z)
 	return rb_ary_new_from_args(2, rb_float_new(creal(c)), rb_float_new(cimag(c)));
 }
 
+static VALUE ruby_narray_to_array(VALUE self, VALUE narray)
+{
+	narray = rb_funcall(numo_cDComplex, rb_intern("cast"), 1, narray);
+	size_t length = RNARRAY_SHAPE(narray)[0];
+	VALUE out = rb_ary_new_capa(length);
+
+	rb_funcall(narray, rb_intern("debug_info"), 0);
+	rb_warn("Size is %zu, ndim is %d, length is %zu\n", RNARRAY_SIZE(narray), RNARRAY_NDIM(narray), length);
+
+	double complex *ptr = (double complex *)(nary_get_pointer_for_read(narray) + nary_get_offset(narray));
+	for(size_t i = 0; i < length; i++) {
+		rb_ary_store(out, i, complex_to_num(ptr[i]));
+	}
+
+	return out;
+}
+
+static VALUE fill_narray_with_function(VALUE narray, double (*func)(double))
+{
+	_Bool was_inplace;
+	ensure_inplace_sfloat_or_scomplex(&narray, &was_inplace);
+
+	_Bool complex_buffer = CLASS_OF(narray) == numo_cSComplex;
+
+	size_t length = RNARRAY_SHAPE(narray)[0];
+
+	float complex *complex_ptr;
+	float *float_ptr;
+	if (complex_buffer) {
+		complex_ptr = (float complex *)(nary_get_pointer_for_write(narray) + nary_get_offset(narray));
+	} else {
+		float_ptr = (float *)(nary_get_pointer_for_write(narray) + nary_get_offset(narray));
+	}
+
+	for (size_t i = 0; i < length; i++) {
+		double x = ((double)i + 0.5) / (double)length; // symmetric, exclusive endpoints
+		double v = func(x);
+
+		if (complex_buffer) {
+			complex_ptr[i] = v;
+		} else {
+			float_ptr[i] = v;
+		}
+	}
+
+	if (!was_inplace) {
+		UNSET_INPLACE(narray);
+	}
+
+	return narray;
+}
+
+/*
+ * Fills the given narray (or a new narray if the narray is not inplace) with a
+ * smoothstep curve from 0 to 1 (exclusive on both ends and symmetric).
+ */
+static VALUE ruby_smoothstep_buf(VALUE self, VALUE narray)
+{
+	return fill_narray_with_function(narray, smoothstep);
+}
+
+/*
+ * Fills the given narray (or a new narray if the narray is not inplace) with a
+ * smootherstep curve from 0 to 1 (exclusive on both ends and symmetric).
+ */
+static VALUE ruby_smootherstep_buf(VALUE self, VALUE narray)
+{
+	return fill_narray_with_function(narray, smootherstep);
+}
+
+/*
+ * Calculates the natural logarithm of every element in the NArray.  Leaves
+ * SFloat, SComplex, and DComplex as their original type, converts everything
+ * else to DFloat.
+ */
+static VALUE ruby_narray_log(VALUE self, VALUE narray)
+{
+	VALUE ntype = CLASS_OF(narray);
+	if (ntype != numo_cSFloat && ntype != numo_cDFloat && ntype != numo_cSComplex && ntype != numo_cDComplex) {
+		narray = rb_funcall(numo_cDFloat, rb_intern("cast"), 1, narray);
+		ntype = numo_cDFloat;
+	}
+
+	_Bool was_inplace = !!TEST_INPLACE(narray);
+	if (!RTEST(nary_check_contiguous(narray)) || !was_inplace) {
+		narray = nary_dup(narray);
+		SET_INPLACE(narray);
+		was_inplace = 0;
+	}
+
+	size_t length = RNARRAY_SIZE(narray);
+
+	if (ntype == numo_cSFloat) {
+		float *ptr = (float *)(nary_get_pointer_for_read_write(narray) + nary_get_offset(narray));
+		for (size_t i = 0; i < length; i++) {
+			ptr[i] = logf(ptr[i]);
+		}
+	} else if (ntype == numo_cDFloat) {
+		double *ptr = (double *)(nary_get_pointer_for_read_write(narray) + nary_get_offset(narray));
+		for (size_t i = 0; i < length; i++) {
+			ptr[i] = log(ptr[i]);
+		}
+	} else if (ntype == numo_cSComplex) {
+		float complex *ptr = (float complex *)(nary_get_pointer_for_read_write(narray) + nary_get_offset(narray));
+		for (size_t i = 0; i < length; i++) {
+			ptr[i] = clogf(ptr[i]);
+		}
+	} else if (ntype == numo_cDComplex) {
+		double complex *ptr = (double complex *)(nary_get_pointer_for_read_write(narray) + nary_get_offset(narray));
+		for (size_t i = 0; i < length; i++) {
+			ptr[i] = clog(ptr[i]);
+		}
+	} else {
+		rb_raise(rb_eException, "BUG: Unexpected type %"PRIsVALUE, ntype);
+	}
+
+	if (!was_inplace) {
+		UNSET_INPLACE(narray);
+	}
+
+	return narray;
+}
+
+/*
+ * Calculates the base two logarithm of every element in the NArray.  Leaves
+ * SFloat, SComplex, and DComplex as their original type, converts everything
+ * else to DFloat.
+ */
+static VALUE ruby_narray_log2(VALUE self, VALUE narray)
+{
+	VALUE ntype = CLASS_OF(narray);
+	if (ntype != numo_cSFloat && ntype != numo_cDFloat && ntype != numo_cSComplex && ntype != numo_cDComplex) {
+		narray = rb_funcall(numo_cDFloat, rb_intern("cast"), 1, narray);
+		ntype = numo_cDFloat;
+	}
+
+	_Bool was_inplace = !!TEST_INPLACE(narray);
+	if (!RTEST(nary_check_contiguous(narray)) || !was_inplace) {
+		narray = nary_dup(narray);
+		SET_INPLACE(narray);
+		was_inplace = 0;
+	}
+
+	size_t length = RNARRAY_SIZE(narray);
+
+	// TODO: Find a way to deduplicate with natural log; C doesn't actually
+	// have clog2 or clog10, so they need special handling for complex
+	if (ntype == numo_cSFloat) {
+		float *ptr = (float *)(nary_get_pointer_for_read_write(narray) + nary_get_offset(narray));
+		for (size_t i = 0; i < length; i++) {
+			ptr[i] = log2f(ptr[i]);
+		}
+	} else if (ntype == numo_cDFloat) {
+		double *ptr = (double *)(nary_get_pointer_for_read_write(narray) + nary_get_offset(narray));
+		for (size_t i = 0; i < length; i++) {
+			ptr[i] = log2(ptr[i]);
+		}
+	} else if (ntype == numo_cSComplex) {
+		float complex *ptr = (float complex *)(nary_get_pointer_for_read_write(narray) + nary_get_offset(narray));
+		for (size_t i = 0; i < length; i++) {
+			ptr[i] = clogf(ptr[i]) / logf(2);
+		}
+	} else if (ntype == numo_cDComplex) {
+		double complex *ptr = (double complex *)(nary_get_pointer_for_read_write(narray) + nary_get_offset(narray));
+		for (size_t i = 0; i < length; i++) {
+			ptr[i] = clog(ptr[i]) / log(2);
+		}
+	} else {
+		rb_raise(rb_eException, "BUG: Unexpected type %"PRIsVALUE, ntype);
+	}
+
+	if (!was_inplace) {
+		UNSET_INPLACE(narray);
+	}
+
+	return narray;
+}
+
+/*
+ * Calculates the base ten logarithm of every element in the NArray.  Leaves
+ * SFloat, SComplex, and DComplex as their original type, converts everything
+ * else to DFloat.
+ */
+static VALUE ruby_narray_log10(VALUE self, VALUE narray)
+{
+	VALUE ntype = CLASS_OF(narray);
+	if (ntype != numo_cSFloat && ntype != numo_cDFloat && ntype != numo_cSComplex && ntype != numo_cDComplex) {
+		narray = rb_funcall(numo_cDFloat, rb_intern("cast"), 1, narray);
+		ntype = numo_cDFloat;
+	}
+
+	_Bool was_inplace = !!TEST_INPLACE(narray);
+	if (!RTEST(nary_check_contiguous(narray)) || !was_inplace) {
+		narray = nary_dup(narray);
+		SET_INPLACE(narray);
+		was_inplace = 0;
+	}
+
+	size_t length = RNARRAY_SIZE(narray);
+
+	// TODO: Find a way to deduplicate with natural log; C doesn't actually
+	// have clog2 or clog10, so they need special handling for complex
+	if (ntype == numo_cSFloat) {
+		float *ptr = (float *)(nary_get_pointer_for_read_write(narray) + nary_get_offset(narray));
+		for (size_t i = 0; i < length; i++) {
+			ptr[i] = log10f(ptr[i]);
+		}
+	} else if (ntype == numo_cDFloat) {
+		double *ptr = (double *)(nary_get_pointer_for_read_write(narray) + nary_get_offset(narray));
+		for (size_t i = 0; i < length; i++) {
+			ptr[i] = log10(ptr[i]);
+		}
+	} else if (ntype == numo_cSComplex) {
+		float complex *ptr = (float complex *)(nary_get_pointer_for_read_write(narray) + nary_get_offset(narray));
+		for (size_t i = 0; i < length; i++) {
+			ptr[i] = clogf(ptr[i]) / logf(10);
+		}
+	} else if (ntype == numo_cDComplex) {
+		double complex *ptr = (double complex *)(nary_get_pointer_for_read_write(narray) + nary_get_offset(narray));
+		for (size_t i = 0; i < length; i++) {
+			ptr[i] = clog(ptr[i]) / log(10);
+		}
+	} else {
+		rb_raise(rb_eException, "BUG: Unexpected type %"PRIsVALUE, ntype);
+	}
+
+	if (!was_inplace) {
+		UNSET_INPLACE(narray);
+	}
+
+	return narray;
+}
+
+
 static VALUE ruby_osc(VALUE self, VALUE wave_type, VALUE phi)
 {
 	enum wave_types wt = find_wave_type(SYM2ID(wave_type));
 
-	double complex result = osc_sample(wt, NUM2DBL(phi));
+	double complex result = osc_sample(wt, num_to_complex(phi));
 
-	switch(wt) {
-		case OSC_SINE:
-		case OSC_SQUARE:
-		case OSC_TRIANGLE:
-		case OSC_RAMP:
-		case OSC_GAUSS:
-		case OSC_PARABOLA:
-			return rb_float_new(creal(result));
-
-		default:
-			return rb_dbl_complex_new(creal(result), cimag(result));
+	if (cimag(result) != 0) {
+		return rb_dbl_complex_new(creal(result), cimag(result));
+	} else {
+		return rb_float_new(creal(result));
 	}
 }
 
 // state contains [phi] and will be modified in place
-static VALUE ruby_synthesize(VALUE self, VALUE buffer, VALUE wave_type, VALUE frequency, VALUE advance, VALUE random_advance, VALUE gain, VALUE offset, VALUE state)
+static VALUE ruby_synthesize(VALUE self, VALUE buffer, VALUE wave_type, VALUE frequency, VALUE phase_mod, VALUE advance, VALUE random_advance, VALUE gain, VALUE offset, VALUE state)
 {
 	Check_Type(state, T_ARRAY);
 
@@ -879,6 +1127,7 @@ static VALUE ruby_synthesize(VALUE self, VALUE buffer, VALUE wave_type, VALUE fr
 	enum wave_types wt = find_wave_type(SYM2ID(wave_type));
 
 	double freq;
+	double phase;
 	double adv = NUM2DBL(advance);
 	double rndadv = NUM2DBL(random_advance);
 	double g = NUM2DBL(gain);
@@ -894,17 +1143,32 @@ static VALUE ruby_synthesize(VALUE self, VALUE buffer, VALUE wave_type, VALUE fr
 
 	size_t length = RNARRAY_SHAPE(buffer)[0];
 
-	float *freqptr = NULL;
-	if (CLASS_OF(frequency) == numo_cDFloat || CLASS_OF(frequency) == numo_cSFloat) {
+	complex float *freqptr = NULL;
+	if (CLASS_OF(frequency) == numo_cDFloat || CLASS_OF(frequency) == numo_cSFloat || CLASS_OF(frequency) == numo_cSComplex || CLASS_OF(frequency) == numo_cDComplex) {
 		if (RNARRAY_SHAPE(frequency)[0] != length) {
 			rb_raise(rb_eArgError, "Frequency array length does not match sample buffer length");
 		}
 
-		ensure_sfloat(&frequency);
-		freqptr = (float *)(nary_get_pointer_for_read(frequency) + nary_get_offset(frequency));
+		ensure_scomplex(&frequency);
+		freqptr = (float complex *)(nary_get_pointer_for_read(frequency) + nary_get_offset(frequency));
 		freq = freqptr[0];
 	} else {
 		freq = NUM2DBL(frequency);
+	}
+
+	complex float *phaseptr = NULL;
+	if (CLASS_OF(phase_mod) == numo_cDFloat || CLASS_OF(phase_mod) == numo_cSFloat || CLASS_OF(phase_mod) == numo_cSComplex || CLASS_OF(phase_mod) == numo_cDComplex) {
+		if (RNARRAY_SHAPE(phase_mod)[0] != length) {
+			rb_raise(rb_eArgError, "Phase modulation array length does not match sample buffer length");
+		}
+
+		ensure_scomplex(&phase_mod);
+		phaseptr = (float complex *)(nary_get_pointer_for_read(phase_mod) + nary_get_offset(phase_mod));
+		phase = phaseptr[0];
+	} else if (RTEST(phase_mod)) {
+		phase = NUM2DBL(phase_mod);
+	} else {
+		phase = 0;
 	}
 
 	if (complex_buffer) {
@@ -913,11 +1177,15 @@ static VALUE ruby_synthesize(VALUE self, VALUE buffer, VALUE wave_type, VALUE fr
 		float_ptr = (float *)(nary_get_pointer_for_write(buffer) + nary_get_offset(buffer));
 	}
 
-	double delta;
+	double complex delta;
 	double complex v;
 	for (size_t i = 0; i < length; i++) {
 		if (freqptr) {
 			freq = freqptr[i];
+		}
+
+		if (phaseptr) {
+			phase = phaseptr[i];
 		}
 
 		if (rndadv != 0) {
@@ -928,9 +1196,9 @@ static VALUE ruby_synthesize(VALUE self, VALUE buffer, VALUE wave_type, VALUE fr
 
 		if (wt == OSC_COMPLEX_SQUARE || wt == OSC_COMPLEX_RAMP) {
 			// Ensure symmetric imaginary components when sampled exactly on period
-			v = osc_sample(wt, phi + delta / 2.0);
+			v = osc_sample(wt, phi + delta / 2.0 + phase);
 		} else {
-			v = osc_sample(wt, phi);
+			v = osc_sample(wt, phi + phase);
 		}
 
 		v = v * g + off;
@@ -941,7 +1209,7 @@ static VALUE ruby_synthesize(VALUE self, VALUE buffer, VALUE wave_type, VALUE fr
 			float_ptr[i] = creal(v);
 		}
 
-		phi = wrap(phi + delta, M_PI * 2.0);
+		phi = wrap(creal(phi + delta), M_PI * 2.0) + I * wrap(cimag(phi + delta), M_PI * 2.0);
 	}
 
 	rb_ary_store(state, 0, rb_float_new(phi));
@@ -978,23 +1246,6 @@ static VALUE ruby_biquad_complex(VALUE self, VALUE b0, VALUE b1, VALUE b2, VALUE
 			);
 
 	return complex_to_num(result);
-}
-
-static VALUE ruby_narray_to_array(VALUE self, VALUE narray)
-{
-	narray = rb_funcall(numo_cDComplex, rb_intern("cast"), 1, narray);
-	size_t length = RNARRAY_SHAPE(narray)[0];
-	VALUE out = rb_ary_new_capa(length);
-
-	rb_funcall(narray, rb_intern("debug_info"), 0);
-	rb_warn("Size is %zu, ndim is %d, length is %zu\n", RNARRAY_SIZE(narray), RNARRAY_NDIM(narray), length);
-
-	double complex *ptr = (double complex *)(nary_get_pointer_for_read(narray) + nary_get_offset(narray));
-	for(size_t i = 0; i < length; i++) {
-		rb_ary_store(out, i, complex_to_num(ptr[i]));
-	}
-
-	return out;
 }
 
 #define BIQUAD_LOOP(buf_type, coeff_type, conv_from_rb, conv_to_rb, filter_func) do { \
@@ -1308,7 +1559,7 @@ void Init_fast_sound(void)
 
 	// Oscillator functions
 	rb_define_module_function(fast_sound, "osc", ruby_osc, 2);
-	rb_define_module_function(fast_sound, "synthesize", ruby_synthesize, 8);
+	rb_define_module_function(fast_sound, "synthesize", ruby_synthesize, 9);
 
 	// Filtering functions
 	rb_define_module_function(fast_sound, "biquad", ruby_biquad, 10);
@@ -1329,6 +1580,15 @@ void Init_fast_sound(void)
 	rb_define_module_function(fast_sound, "smoothstep", ruby_smoothstep, 1);
 	rb_define_module_function(fast_sound, "smootherstep", ruby_smootherstep, 1);
 
+	// Fills a given NArray with a smoothstep curve from 0 to 1
+	rb_define_module_function(fast_sound, "smoothstep_buf", ruby_smoothstep_buf, 1);
+	rb_define_module_function(fast_sound, "smootherstep_buf", ruby_smootherstep_buf, 1);
+
+	// Mathematical functions that for some reason are missing from Numo::NArray
+	rb_define_module_function(fast_sound, "narray_log", ruby_narray_log, 1);
+	rb_define_module_function(fast_sound, "narray_log2", ruby_narray_log2, 1);
+	rb_define_module_function(fast_sound, "narray_log10", ruby_narray_log10, 1);
+
 	// Functions used when comparing C and Ruby's behavior for integer
 	// division (C rounds to zero, Ruby rounds downward) and modulus (-1 %
 	// 3 in Ruby is 2, in C it's -1)
@@ -1339,6 +1599,7 @@ void Init_fast_sound(void)
 	rb_define_module_function(fast_sound, "idiv", ruby_idiv, 2);
 	rb_define_module_function(fast_sound, "fdiv", ruby_fdiv, 2);
 	rb_define_module_function(fast_sound, "imod", ruby_imod, 2);
+	rb_define_module_function(fast_sound, "f64to32", ruby_f64to32, 1);
 
 	// Functions to test conversion to and from Ruby complex datatypes
 	rb_define_module_function(fast_sound, "complex", ruby_complex, 1);

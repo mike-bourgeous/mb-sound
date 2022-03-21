@@ -197,12 +197,24 @@ RSpec.describe(MB::Sound::ADSREnvelope) do
         expect(env.sample(800)).to be_a(Numo::SFloat)
       end
 
-      31.times do
+      30.times do |t|
         expect(env.on?).to eq(false)
         expect(env.sample(800)).to be_a(Numo::SFloat)
       end
 
       expect(env.sample(800)).to eq(nil)
+    end
+  end
+
+  describe '#reset' do
+    it 'can disable an automatic release' do
+      env.trigger(1.0, auto_release: 0.1)
+      env.reset
+
+      60.times do
+        expect(env.on?).to eq(false)
+        expect(env.sample(800)).to be_a(Numo::SFloat)
+      end
     end
   end
 end

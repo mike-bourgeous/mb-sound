@@ -15,6 +15,8 @@ module MB
     # An exponential distortion can be applied to the output before or after
     # values are scaled to the desired output range.
     class Oscillator
+      include GraphNode
+
       RAND = Random.new
       WAVE_TYPES = [
         :sine,
@@ -94,11 +96,13 @@ module MB
       # Calculates a fractional MIDI note number for the given frequency,
       # assuming equal temperament.
       def self.calc_number(frequency_hz)
+        frequency_hz = frequency_hz.real
+        frequency_hz = 0 if frequency_hz < 0
         12.0 * Math.log2(frequency_hz / tune_freq) + tune_note
       end
 
       attr_accessor :advance, :wave_type, :pre_power, :post_power, :range, :advance, :random_advance
-      attr_reader :phi, :phase, :frequency
+      attr_reader :phi, :phase, :frequency, :phase_mod
 
       # TODO: maybe use a clock provider instead of +advance+?  The challenge is
       # that floating point accuracy goes down as a shared clock advances, and
@@ -128,13 +132,14 @@ module MB
       #             to #sample.  This should be (2 * Math::PI / sample_rate)
       #             for audio oscillators.
       # +random_advance+ - The internal phase is incremented by a random value up to this amount on top of +advance+.
-      def initialize(wave_type, frequency: 1.0, phase: 0.0, range: nil, pre_power: 1.0, post_power: 1.0, advance: Math::PI / 24000.0, random_advance: 0.0)
+      def initialize(wave_type, frequency: 1.0, phase: 0.0, phase_mod: nil, range: nil, pre_power: 1.0, post_power: 1.0, advance: Math::PI / 24000.0, random_advance: 0.0)
         unless WAVE_TYPES.include?(wave_type)
           raise "Invalid wave type #{wave_type.inspect}; only #{WAVE_TYPES.map(&:inspect).join(', ')} are supported"
         end
         @wave_type = wave_type
 
         self.frequency = frequency
+        self.phase_mod = phase_mod
 
         raise "Invalid phase #{phase.inspect}" unless phase.is_a?(Numeric)
         @phase = phase % (2.0 * Math::PI)
@@ -158,6 +163,10 @@ module MB
         @osc_buf = nil
       end
 
+      def sources
+        [@frequency]
+      end
+
       # Changes the starting phase offset for this oscillator, shifting the
       # oscillator's current phase accordingly.
       def phase=(phase)
@@ -175,12 +184,28 @@ module MB
         @phi = @phase
       end
 
+      # Changes the oscillator's frequency source to the given Numeric value or
+      # signal graph (responding to :sample).
+      #
+      # Samples one value from the graph source to set the MIDI note number
+      # (TODO: this may not be ideal).
       def frequency=(frequency)
         raise "Invalid frequency #{frequency.inspect}" unless frequency.is_a?(Numeric) || frequency.respond_to?(:sample)
 
         @frequency = frequency
         f0 = frequency.respond_to?(:sample) ? frequency.sample(1)[0] : frequency.to_f
         @note_number = Oscillator.calc_number(f0)
+      end
+
+      # Sets a phase modulation source.  Frequency modulation is added to the
+      # frequency before calculating phase-per-sample, while phase modulation
+      # is added directly to the phase value passed into #oscillator.
+      def phase_mod=(pm)
+        unless pm.nil? || pm.is_a?(Numeric) || pm.respond_to?(:sample)
+          raise "Phase modulation source must be nil, a Numeric, or respond to :sample"
+        end
+
+        @phase_mod = pm
       end
 
       # Returns an approximate MIDI note number for the oscillators frequency,
@@ -349,6 +374,9 @@ module MB
         freq = @frequency
         freq = freq.sample(count) if freq.respond_to?(:sample)
 
+        phase = @phase_mod || 0
+        phase = phase.sample(count) if phase.respond_to?(:sample)
+
         if @range && @pre_power == 1.0
           gain = (@range.last - @range.first) / 2.0
           offset = (@range.first + @range.last) / 2.0
@@ -363,6 +391,7 @@ module MB
           @osc_buf.inplace!,
           wave_type,
           freq,
+          phase,
           advance,
           random_advance,
           gain,
@@ -383,6 +412,9 @@ module MB
         freq = @frequency
         freq_table = freq.sample(count) if freq.respond_to?(:sample)
 
+        phase = @phase_mod || 0
+        phase_table = phase.sample(count) if phase.respond_to?(:sample)
+
         count.times do |idx|
           # TODO: this doesn't modulate strongly enough
           # FM attempt:
@@ -392,6 +424,7 @@ module MB
           #   advance: Math::PI / 24000
           # )
           freq = freq_table[idx] if freq_table
+          phase = phase_table[idx] if phase_table
 
           advance = @advance
           advance += RAND.rand(@random_advance.to_f) if @random_advance != 0

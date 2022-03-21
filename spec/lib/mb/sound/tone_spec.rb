@@ -216,6 +216,10 @@ RSpec.describe MB::Sound::Tone do
     end
   end
 
+  pending '#fm'
+  pending '#log_fm'
+  pending '#pm'
+
   describe '#oscillator' do
     it 'returns an Oscillator with the same frequency and range' do
       tone = 222.hz.at(-5.db)

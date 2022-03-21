@@ -43,7 +43,7 @@ module MB
             sound.map { |el| convert_sound_to_narray(el, depth + 1) }
           end
 
-        when ArithmeticMixin
+        when GraphNode
           # TODO: this could be improved for plotting or saving signal chains/graphs
           sound.sample(960)
 
@@ -104,20 +104,61 @@ module MB
       # Writes an Array of Numo::NArrays into the given sound file.  If the sound
       # file already exists and +:overwrite+ is false, an error will be raised.
       #
+      # Writes at most +:max_length+ seconds if +data+ is a Tone or a signal
+      # graph.
+      #
       # The sample +:rate+ defaults to 48kHz to match the default resampling of
       # #read, and the default sample rate of #input and #output.
       #
       # See MB::Sound::FFMPEGOutput for more flexible sound output.
       def write(filename, data, rate: 48000, overwrite: false, max_length: nil)
-        if data.is_a?(ArithmeticMixin) && !data.is_a?(Tone)
-          # TODO: Handle the signal graph DSL better in convert_sound_to_narray
-          output = file_output(filename, rate: rate, channels: 1, overwrite: overwrite, buffer_size: 800)
+        # TODO: Handle the signal graph DSL better in convert_sound_to_narray
+        if data.is_a?(GraphNode) && !data.is_a?(Tone)
+          buffer_size = data.graph_buffer_size || 800
+          output = file_output(
+            filename,
+            rate: rate,
+            channels: 1,
+            overwrite: overwrite,
+            buffer_size: buffer_size
+          )
 
           t = 0
           loop do
             buf = data.sample(output.buffer_size)
             break if buf.nil? || buf.empty?
             output.write([buf])
+
+            t += output.buffer_size.to_f / rate
+            break if max_length && t >= max_length
+          end
+        elsif data.is_a?(Array) && data.all?(GraphNode)
+          buffer_size = data.map(&:graph_buffer_size).compact.min || 800
+
+          output = file_output(
+            filename,
+            rate: rate,
+            channels: data.length,
+            overwrite: overwrite,
+            buffer_size: buffer_size
+          )
+
+          t = 0
+          loop do
+            buf = data.map { |d| d.sample(output.buffer_size) }
+            break if buf.all? { |d| d.nil? || d.empty? }
+
+            buf = buf.map { |d|
+              if d.nil? || d.empty?
+                Numo::SFloat.zeros(output.buffer_size)
+              elsif d.length < output.buffer_size
+                MB::M.zpad(d, output.buffer_size)
+              else
+                d
+              end
+            }
+
+            output.write(buf)
 
             t += output.buffer_size.to_f / rate
             break if max_length && t >= max_length
@@ -212,8 +253,8 @@ module MB
           raise NotImplementedError, 'TODO: support other platforms'
         end
 
-        inp.extend(IOSampleMixin) unless inp.is_a?(IOSampleMixin)
-        inp.extend(ArithmeticMixin) unless inp.is_a?(ArithmeticMixin)
+        inp.extend(GraphNode) unless inp.is_a?(GraphNode)
+        inp.extend(GraphNode::IOSampleMixin) unless inp.is_a?(GraphNode::IOSampleMixin)
 
         inp
       end

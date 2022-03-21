@@ -37,7 +37,7 @@ module MB
     # Filters a sound with the given filter parameters (see
     # MB::Sound::Filter::Cookbook).
     #
-    # TODO: Maybe remove this, as it is superseded by the ArithmeticMixin DSL.
+    # TODO: Maybe remove this, as it is superseded by the GraphNode DSL.
     #
     # +:frequency+ - The center or cutoff frequency of the filter.
     # +:filter_type+ - One of the filter types from MB::Sound::Filter::Cookbook::FILTER_TYPES.
@@ -75,8 +75,8 @@ module MB
     # release automatically after that time.  The default sample rate is 48kHz.
     #
     # For DSL use in combination with tones, inputs, etc.  See
-    # MB::Sound::ArithmeticMixin.
-    def self.adsr(attack = 0.01, decay = 0.1, sustain = -12.db, release = 0.4, auto_release: nil, rate: 48000)
+    # MB::Sound::GraphNode.
+    def self.adsr(attack = 0.01, decay = 0.1, sustain = -12.db, release = 0.4, auto_release: nil, rate: 48000, filter_freq: 1000)
       if auto_release.nil?
         auto_release = 2.0 * (attack + decay)
         auto_release = 0.1 if auto_release < 0.1
@@ -87,17 +87,24 @@ module MB
         decay_time: decay,
         sustain_level: sustain,
         release_time: release,
-        rate: rate
+        rate: rate,
+        filter_freq: filter_freq
       )
       env.trigger(1.0, auto_release: auto_release)
       env
     end
 
     # Creates a uniformly distributed white noise generator that can be
-    # combined with other tones, filters, etc.  See MB::Sound::ArithmeticMixin
+    # combined with other tones, filters, etc.  See MB::Sound::GraphNode
     # and MB::Sound::Tone.
     def self.noise
       2000.hz.ramp.noise
+    end
+
+    # Shortcut/DSL method for creating a tone with a given dynamic frequency
+    # source, for full control over the FM signal graph.
+    def self.tone(frequency)
+      MB::Sound::Tone[frequency]
     end
 
     # Allows retrieving a Note by name using e.g. MB::Sound::A4 (or just A4 in
@@ -111,8 +118,7 @@ module MB
   end
 end
 
-require_relative 'sound/arithmetic_mixin'
-require_relative 'sound/io_sample_mixin'
+require_relative 'sound/graph_node'
 
 require_relative 'sound/io_base'
 require_relative 'sound/io_input'
@@ -128,7 +134,6 @@ require_relative 'sound/null_output'
 require_relative 'sound/loopback'
 require_relative 'sound/array_input'
 
-require_relative 'sound/constant'
 require_relative 'sound/oscillator'
 require_relative 'sound/tone'
 require_relative 'sound/note'
@@ -140,8 +145,6 @@ require_relative 'sound/softest_clip'
 require_relative 'sound/complex_pan'
 require_relative 'sound/haas_pan'
 require_relative 'sound/meter'
-require_relative 'sound/mixer'
-require_relative 'sound/multiplier'
 
 require_relative 'sound/window'
 require_relative 'sound/window_reader'

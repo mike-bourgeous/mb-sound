@@ -68,7 +68,7 @@ play '/tmp/ramp.flac'
 
 These examples can be run in the `bin/sound.rb` interactive environment.  There
 are other examples in the scripts under the `bin/` directory, such as an FM
-synthesizer in `bin/fm_synth.rb`.
+synthesizer in `bin/fm_synth.rb` and a flanger effect in `bin/flanger.rb`.
 
 ### Generating tones
 
@@ -402,7 +402,7 @@ sudo apt-get install ffmpeg gnuplot-qt
 brew install ffmpeg gnuplot
 ```
 
-Then you'll want to install Ruby 2.7.2.
+Then you'll want to install Ruby 2.7.2 or newer.
 
 If you don't already have a recent version of Ruby installed, and a Ruby version
 manager of your choosing, I highly recommend using [RVM](https://rvm.io).  You
@@ -439,6 +439,9 @@ cd mb-sound
 cd mb-sound
 gem install bundler
 bundle install
+
+# Compile the mb-sound C extensions
+rake compile
 ```
 
 Now that everything's installed, you are ready to start playing with sound:

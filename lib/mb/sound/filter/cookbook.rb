@@ -14,7 +14,7 @@ module MB
         # elsewhere, would be nice to be able to make higher-order butterworth
         # filters or first-order filters available, for example
         class CookbookWrapper
-          include ArithmeticMixin
+          include GraphNode
 
           class WrapperArgumentError < ArgumentError
             def initialize(msg = nil, source: nil)
@@ -56,7 +56,7 @@ module MB
             @filter.dynamic_process(audio, cutoff, quality).not_inplace!
           end
 
-          # See ArithmeticMixin#sources.
+          # See GraphNode#sources.
           def sources
             [@audio, @cutoff, @quality]
           end
@@ -74,7 +74,7 @@ module MB
               raise WrapperArgumentError.new(source: v)
 
             when Numeric
-              MB::Sound::Constant.new(v)
+              MB::Sound::GraphNode::Constant.new(v)
 
             when Numo::NArray
               MB::Sound::ArrayInput.new(data: [v])

@@ -6,6 +6,7 @@ module MB
       # A pool of oscillators managed by MIDI note-on and note-off events,
       # initially based on code from bin/ep2_syn.rb.
       class VoicePool
+        include GraphNode
         extend Forwardable
 
         def_delegators :@voices, :each, :map
@@ -30,6 +31,16 @@ module MB
 
           manager.on_note(&method(:midi_note))
           manager.on_cc_threshold(64, 64, 64, &method(:sustain))
+
+          # Bind voice parameters to MIDI CCs
+          # TODO: Only add one listener to the manager per CC instead of one per voice per CC
+          if voices.all? { |v| v.respond_to?(:cc_map) }
+            manager.on_cc_map(voices.map(&:cc_map))
+          end
+
+          if voices.all? { |v| v.respond_to?(:update) }
+            manager.on_update { voices.each(&:update) }
+          end
         end
 
         # Called by the MIDI manager when a note on or off event is received.
@@ -61,7 +72,7 @@ module MB
         end
 
         # Finds and triggers the next available voice, reusing a voice if
-        # needed.  Called by #midi_event.
+        # needed.  Called by #midi_note.
         def trigger(note, velocity)
           @last = self.next(note)
           @last.trigger(note + @bend, velocity)
@@ -148,6 +159,11 @@ module MB
           else
             nil
           end
+        end
+
+        # Returns all of the voices in the pool that include GraphNode.
+        def sources
+          @voices.select { |v| v.is_a?(GraphNode) }
         end
       end
     end
