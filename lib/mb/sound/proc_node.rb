@@ -4,7 +4,7 @@ module MB
     # buffer retrieved from the source, with the result of the Proc returned
     # from the #sample method.
     class ProcNode
-      include ArithmeticMixin
+      include GraphNode
 
       attr_reader :sources, :source, :callers
 

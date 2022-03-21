@@ -33,7 +33,7 @@ module MB
     # TODO: In-line method to create a meter?
     #
     # TODO: Rename this module to GraphNodeMixin or similar?
-    module ArithmeticMixin
+    module GraphNode
       attr_reader :graph_node_name
 
       # Gives a name to this graph node to make it easier to retrieve later.

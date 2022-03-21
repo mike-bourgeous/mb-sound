@@ -2,7 +2,7 @@ module MB
   module Sound
     # An input stream that returns chunks from an Array or Numo::NArray.
     class ArrayInput
-      include ArithmeticMixin
+      include GraphNode
 
       attr_reader :channels, :frames, :rate, :offset, :remaining, :buffer_size, :repeat
 

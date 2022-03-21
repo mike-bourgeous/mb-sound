@@ -18,7 +18,7 @@ module MB
       #
       # TODO: Maybe this can be deduplicated with Tee.
       class InputChannelNode
-        include ArithmeticMixin
+        include GraphNode
 
         attr_reader :need_sample
 
@@ -45,7 +45,7 @@ module MB
       end
 
       # The source node feeding into this InputChannelSplit, in an array (see
-      # ArithmeticMixin#sources).
+      # GraphNode#sources).
       attr_reader :sources
       
       # The channels from the InputChannelSplit (see IOSampleMixin#split).

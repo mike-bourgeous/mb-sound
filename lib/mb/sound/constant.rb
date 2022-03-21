@@ -1,9 +1,9 @@
 module MB
   module Sound
-    # A signal generator (with a #sample method; see ArithmeticMixin and Tone)
+    # A signal generator (with a #sample method; see GraphNode and Tone)
     # that returns a constant numeric value.
     class Constant
-      include ArithmeticMixin
+      include GraphNode
 
       module NumericConstantMethods
         # Converts this numeric value into a MB::Sound::Constant constant-value

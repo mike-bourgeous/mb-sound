@@ -45,7 +45,7 @@ module MB
 
         # Immediately sets the smoothed internal delay to the last value set by
         # #delay= or #delay_samples=.  Has no effect if the delay was set to a
-        # signal node with a :sample method (see ArithmeticMixin and #delay=).
+        # signal node with a :sample method (see GraphNode and #delay=).
         def reset_delay
           # TODO: Support resetting with a signal node without consuming a
           # sample from the signal node?  Maybe set a flag that triggers a
@@ -114,7 +114,7 @@ module MB
 
         # Returns an Array of signal nodes and/or numeric values that feed this
         # delay (specifically for a delay this is the value given to
-        # #delay_samples=).  See ArithmeticMixin#sources.
+        # #delay_samples=).  See GraphNode#sources.
         def sources
           [@delay_samples]
         end

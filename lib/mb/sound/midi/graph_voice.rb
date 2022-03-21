@@ -7,7 +7,7 @@ module MB
       # added somewhere in its frequency input, has that constant set to the
       # triggering note frequency.
       class GraphVoice
-        include ArithmeticMixin
+        include GraphNode
 
         attr_reader :number
 

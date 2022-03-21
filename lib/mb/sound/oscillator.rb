@@ -15,7 +15,7 @@ module MB
     # An exponential distortion can be applied to the output before or after
     # values are scaled to the desired output range.
     class Oscillator
-      include ArithmeticMixin
+      include GraphNode
 
       RAND = Random.new
       WAVE_TYPES = [

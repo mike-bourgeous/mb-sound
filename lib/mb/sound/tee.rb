@@ -2,10 +2,10 @@ module MB
   module Sound
     # Creates fan-out branches from a signal node (any object that responds to
     # #sample and returns a single audio buffer, and ideally includes the
-    # ArithmeticMixin module), using buffer copies to prevent parallel branches
+    # GraphNode module), using buffer copies to prevent parallel branches
     # from interfering with each other.
     #
-    # The ideal way to create a Tee is with the ArithmeticMixin#tee method.
+    # The ideal way to create a Tee is with the GraphNode#tee method.
     #
     # Example:
     #     # Runnable in bin/sound.rb
@@ -15,7 +15,7 @@ module MB
     class Tee
       # An individual branch of a Tee, returned by Tee#branches.
       class Branch
-        include ArithmeticMixin
+        include GraphNode
 
         attr_reader :need_sample
 
@@ -58,14 +58,14 @@ module MB
       end
 
       # The source node feeding into this Tee, in an array (see
-      # ArithmeticMixin#sources).
+      # GraphNode#sources).
       attr_reader :sources
       
-      # The branches from the Tee (see ArithmeticMixin#tee).
+      # The branches from the Tee (see GraphNode#tee).
       attr_reader :branches
 
       # Creates a Tee from the given +source+, with +n+ branches.  Generally
-      # for internal use by ArithmeticMixin#tee.
+      # for internal use by GraphNode#tee.
       def initialize(source, n = 2)
         raise 'Source for a Tee must respond to #sample' unless source.respond_to?(:sample)
 

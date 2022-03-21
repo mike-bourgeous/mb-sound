@@ -5,7 +5,7 @@ module MB
     class Filter
       # Provides a #sample method that processes another #sample source through
       # a Filter.  It's easiest to use the MB::Sound::Filter#wrap method or the
-      # MB::Sound::ArithmeticMixin#filter method to create a sample wrapper.
+      # MB::Sound::GraphNode#filter method to create a sample wrapper.
       #
       # Example:
       #     500.hz.lowpass.wrap(123.hz.ramp)
@@ -13,7 +13,7 @@ module MB
       #     123.hz.ramp.filter(500.hz.lowpass)
       class SampleWrapper
         extend Forwardable
-        include MB::Sound::ArithmeticMixin
+        include MB::Sound::GraphNode
 
         attr_reader :base_filter
 
@@ -54,7 +54,7 @@ module MB
           buf&.not_inplace!
         end
 
-        # See ArithmeticMixin#sources.
+        # See GraphNode#sources.
         def sources
           if @base_filter.respond_to?(:sources)
             # + instead of | because duplicate connections should be shown

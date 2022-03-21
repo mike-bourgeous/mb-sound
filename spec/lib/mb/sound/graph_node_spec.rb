@@ -1,5 +1,5 @@
 # Tests for the DSL overall, including Tone, Mixer, Multiplier
-RSpec.describe(MB::Sound::ArithmeticMixin) do
+RSpec.describe(MB::Sound::GraphNode) do
   it 'can create a complex signal graph' do
     graph = (1.hz.square.at_rate(20).at(1) - 2.hz.square.at_rate(20).at(0.5) - 5 + 3 + 2) * 0.5.hz.square.at_rate(20).at(2..1) * 3 + 1
     expect(graph.sample(5)).to eq(Numo::SFloat.zeros(5).fill(2.5))

@@ -11,7 +11,7 @@ module MB
     #
     # Also see the Multiplier class.
     class Mixer
-      include ArithmeticMixin
+      include GraphNode
 
       # The constant value added to the output sum before any summands.
       attr_accessor :constant
@@ -153,7 +153,7 @@ module MB
         @summands.keys
       end
 
-      # See ArithmeticMixin#sources
+      # See GraphNode#sources
       def sources
         @summands.keys + [@constant]
       end

@@ -3,9 +3,9 @@ module MB
     # A signal graph node that switches from input node to input node as each
     # input node runs out of data.
     class NodeSequence
-      include ArithmeticMixin
+      include GraphNode
 
-      # See ArithmeticMixin#sources.
+      # See GraphNode#sources.
       attr_reader :sources
 
       # Creates a node sequence with the given sources to play in order.

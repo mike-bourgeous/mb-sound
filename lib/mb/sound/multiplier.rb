@@ -7,7 +7,7 @@ module MB
     #
     # See also the Mixer class.
     class Multiplier
-      include ArithmeticMixin
+      include GraphNode
 
       # The constant value by which the output will be multiplied.
       attr_accessor :constant
@@ -139,7 +139,7 @@ module MB
         @multiplicands.keys
       end
 
-      # See ArithmeticMixin#sources
+      # See GraphNode#sources
       def sources
         @multiplicands.keys + [@constant]
       end
