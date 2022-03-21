@@ -83,6 +83,7 @@ module MB
         # buffer has not yet been read, then a new buffer (containing all
         # channels) is read from the source node.
         def internal_sample(node, channel, count)
+          # TODO: maybe dedupe with Tee?
           if @read_channels.include?(node)
             if @read_channels.length != @channels.length
               warn "Channel #{channel} on InputChannelSplit #{self} sampled again with #{@read_channels.length} of #{@channels.length} sampled"

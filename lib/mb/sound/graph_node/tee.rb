@@ -77,6 +77,8 @@ module MB
           # List of branches that have already read the current buffer, to detect
           # when a new buffer is needed.
           @read_branches = Set.new
+
+          @buf = nil
         end
 
         # For internal use by Branch#sample.  Returns the current buffer of
@@ -87,6 +89,7 @@ module MB
         # buffer, or if the source buffer has not yet been read, then a new
         # buffer is read from the source node.
         def internal_sample(branch, count)
+          # TODO: maybe dedupe with InputChannelSplit?
           if @read_branches.include?(branch)
             if @read_branches.length != @branches.length
               warn "Branch #{branch}/#{branch.graph_node_name} on Tee #{self} sampled again with #{@read_branches.length} of #{@branches.length} sampled"
