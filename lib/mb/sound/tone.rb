@@ -287,8 +287,10 @@ module MB
         self
       end
 
-      # Sets the tone to play forever.
-      def forever
+      # Sets the tone to play forever, as well as any tones in its frequency or
+      # phase sources.
+      def forever(recursive: true)
+        super(recursive: recursive)
         @duration = nil
         self
       end

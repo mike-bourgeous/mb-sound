@@ -410,6 +410,18 @@ module MB
         digraph
       end
 
+      # Sets all Tones in the graph (or anything else with a #forever method
+      # that takes a :recursive parameter) to continue playing forever.
+      def forever(recursive: true)
+        if recursive
+          graph.each do |n|
+            n.forever(recursive: false) if n.respond_to?(:forever)
+          end
+        end
+
+        self
+      end
+
       private
 
       # Sets tones to play forever at full volume, if they don't have a fixed
