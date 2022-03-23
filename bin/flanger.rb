@@ -69,13 +69,11 @@ puts MB::U.highlight(
   buffer: bufsize,
 )
 
-p = MB::Sound.plotter(graphical: true)
-p.yrange(-48000, 48000)
-
 # TODO: Maybe want a graph-wide spy function that either prints stats, draws
 # meters, or plots graphs of multiple nodes by name or reference
 
 begin
+  # TODO: Abstract construction of a filter graph per channel
   paths = inputs.map.with_index { |inp, idx|
     # Feedback buffers, overwritten by later calls to #spy
     a = Numo::SFloat.zeros(bufsize)
@@ -89,6 +87,7 @@ begin
     delayconst = delay.constant.named('Delay')
     samp = (delayconst * output.rate).clip(0, nil)
 
+    # FIXME: need to tee samp so it doesn't skip
     lfo_scale = depthconst * samp
     lfo_base = samp - lfo_scale * 0.5
     lfo_mod = (lfo * lfo_scale + lfo_base).clip(0, nil)
