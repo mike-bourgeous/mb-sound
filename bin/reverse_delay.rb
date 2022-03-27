@@ -56,7 +56,8 @@ begin
     a = Numo::SFloat.zeros(bufsize)
 
     # TODO: Allow base delay and loop length? or mindelay and maxdelay?
-    delayconst = (delay.constant.named('Delay') + buftime).clip(buftime, nil)
+    # TODO: Smooth delay over longer than one frame
+    delayconst = (delay.constant.named('Delay')).clip(buftime, nil)
     lfo_period, delay_delay = delayconst.tee
     lfo_period.named('LFO period')
     delay_delay.named('Delay time')
