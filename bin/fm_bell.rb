@@ -19,8 +19,10 @@ voices = OSC_COUNT.times.map { |i|
   base = MB::Sound::GraphNode::Constant.new(440)
   freq_constants = []
 
-  portamento = 0.0
-  bfreq = -> { 2 ** base.dup.tap { |z| freq_constants << z }.log2.smooth(seconds: portamento) }
+  # FIXME: Pitch seems to have some miniscule portamento or lag (play several
+  # high notes, then the next OSC_COUNT low notes will have a chiff sound that
+  # goes away after OSC_COUNT times)
+  bfreq = -> { 2 ** base.dup.tap { |z| freq_constants << z }.log2 }
 
   # 7 mils detuned up, 3.5 ratio
   b_ratio = 3.5.constant.named('B Ratio')
@@ -44,9 +46,9 @@ voices = OSC_COUNT.times.map { |i|
   dc_const = 1.6.constant.named('D into C')
   c_osc = (bfreq.call * (2 ** (2.0 / 1000.0))).tone.complex_sine.at(1).pm(d_out * dc_const).named('C')
   c_env = MB::Sound.adsr(0, 6, 0, 5).named('C Envelope').db(30)
-  d_out = (c_osc * c_env).named('C Out')
+  c_out = (c_osc * c_env).named('C Out')
 
-  sum = a_out + d_out
+  sum = a_out + c_out
 
   g = sum.filter(10000.hz.lowpass) # Try to cut down on aliasing chalkboard noise
 
@@ -59,6 +61,7 @@ voices = OSC_COUNT.times.map { |i|
     freq_constants: freq_constants
   ).named('FM Tubular Bell').tap { |v|
     v.on_velocity(['B into A', 'D into C'], range: 0.5..1.5, relative: true)
+    v.on_velocity(['A Out', 'C Out'], range: 0.5..1.0, relative: true)
     v.on_cc(1, ['B Ratio', 'D Ratio'], range: 3.5..4.0, relative: false)
   }
 }
