@@ -16,13 +16,11 @@ manager = MB::Sound::MIDI::Manager.new(jack: jack, input: midi, connect: ARGV[0]
 
 OSC_COUNT = ENV['OSC_COUNT']&.to_i || 9
 voices = OSC_COUNT.times.map { |i|
-  base = MB::Sound::GraphNode::Constant.new(440)
   freq_constants = []
 
-  # FIXME: Pitch seems to have some miniscule portamento or lag (play several
-  # high notes, then the next OSC_COUNT low notes will have a chiff sound that
-  # goes away after OSC_COUNT times)
-  bfreq = -> { 2 ** base.dup.tap { |z| freq_constants << z }.log2 }
+  # TODO: Use Tee instead of .dup for base frequencies in synths?
+  base = 440.constant(smoothing: false)
+  bfreq = -> { 2 ** base.dup.tap { |z| freq_constants << z }.log2 } # smooth after log2 for portamento
 
   # 7 mils detuned up, 3.5 ratio
   b_ratio = 3.5.constant.named('B Ratio')

@@ -78,6 +78,12 @@ module MB
           @cc_map = {}
           @velocity_listeners = []
 
+          # Make sure frequency smoothing defaults to off so there is no
+          # unintentional portamento effect.
+          @freq_constants.each do |f|
+            f.smoothing = false if f.smoothing.nil?
+          end
+
           puts "Found #{@freq_constants.length} frequency constants: #{@freq_constants.map(&:__id__)}" # XXX
         end
 
