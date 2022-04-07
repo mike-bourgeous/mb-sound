@@ -130,6 +130,9 @@ module MB
             @buf = Numo::SComplex.cast(@buf)
           end
 
+          # Fill a buffer with the intended delay at each sample (if
+          # chunk_delay_buf is set, then this buffer was already generated and
+          # this is a recursive call for a subset of the incoming data).
           if chunk_delay_buf
             delay_buf = chunk_delay_buf
           else
@@ -149,12 +152,10 @@ module MB
             end
           end
 
-          # Switch to chunked processing if there's not enough room in the
-          # delay buffer for the entire incoming data, given the maximum delay.
           if delay_buf
-            max_delay = delay_buf.max
+            max_delay = delay_buf.max.ceil
           else
-            max_delay = @delay_samples
+            max_delay = @delay_samples.ceil
           end
 
           # If there's zero room in the delay buffer given the maximum delay,
@@ -173,6 +174,8 @@ module MB
             end
           end
 
+          # Switch to chunked processing if there's not enough room in the
+          # delay buffer for the entire incoming data, given the maximum delay.
           if data.length > max_length
             chunk_buf = data.inplace? ? data : data.dup.inplace
 
@@ -185,6 +188,7 @@ module MB
             return chunk_buf
           end
 
+          # Copy the new data into the delay buffer
           if @write_offset + data.length > @buf.length
             before = @buf.length - @write_offset
             after = data.length - before
@@ -195,6 +199,7 @@ module MB
           end
 
           if delay_buf
+            # Time-varying delay
             # TODO: Something better than linear interpolation?
             # TODO: Allow switching off interpolation?
             ret = data.map_with_index { |_, idx|
@@ -207,6 +212,7 @@ module MB
               @buf[@read_offset] * (1.0 - delta) + @buf[off2] * delta
             }
           else
+            # Constant delay
             if @read_offset + data.length > @buf.length
               # Wrap-around read
               before = @buf.length - @read_offset
