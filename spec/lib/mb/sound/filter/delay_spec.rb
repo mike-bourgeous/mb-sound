@@ -71,6 +71,23 @@ RSpec.describe(MB::Sound::Filter::Delay) do
           expect(shortbuf.process(Numo::SFloat.zeros(5))).to eq(Numo::SFloat[-2,1,2,0,0])
         end
 
+        it 'can trigger buffer growth without error' do
+          shortbuf.delay = 5
+          shortbuf.reset_delay
+
+          # This should wrap around the write pointer but not the read pointer
+          expect(shortbuf.process(Numo::SFloat.zeros(11))).to eq(Numo::SFloat.zeros(11))
+          expect(shortbuf.write_offset).to be < shortbuf.read_offset
+
+          shortbuf.delay = 25
+          shortbuf.reset_delay
+          shortbuf.process(Numo::SFloat.zeros(1))
+
+          expect(shortbuf.write_offset).to be < shortbuf.read_offset
+          puts shortbuf.buffer_size
+          expect((shortbuf.write_offset - shortbuf.read_offset) % shortbuf.buffer_size).to eq(25)
+        end
+
         it 'accepts a sample source/graph node' do
           data = Numo::SFloat[1,2,3,4,5,6,7,8]
 

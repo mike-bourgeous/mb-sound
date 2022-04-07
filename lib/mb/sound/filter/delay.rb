@@ -7,6 +7,7 @@ module MB
       # See bin/flanger.rb and bin/tape_delay.rb for examples.
       class Delay < Filter
         attr_reader :delay, :delay_samples, :rate, :smoothing, :smooth_limit
+        attr_reader :write_offset, :read_offset
 
         # Initializes a single-channel delay with a given +:delay+ in seconds,
         # based on the sample +:rate+..  The +:buffer_size+ sets the maximum
@@ -32,6 +33,10 @@ module MB
 
           self.delay = delay
           self.smoothing = smoothing
+        end
+
+        def buffer_size
+          @buf.length
         end
 
         # Fills the entire delay line with the given value.  Future calls to
@@ -102,7 +107,7 @@ module MB
             delta = samples - @delay_samples
             @delay_samples = samples
             @delay = samples.to_f / @rate
-            @read_offset = (@read_offset - delta) % @buf.length
+            @read_offset = (@write_offset - @delay_samples) % @buf.length
           end
         end
 
@@ -168,10 +173,7 @@ module MB
             @buf = old_buf.class.zeros(old_buf.length + 2 * max_delay)
             @buf[0...old_buf.length] = old_buf
 
-            # FIXME: is this the right way to adjust read offset here?
-            if @write_offset < @read_offset
-              @read_offset = (@read_offset + 2 * max_delay) % @buf.length
-            end
+            @read_offset = (@write_offset - @delay_samples) % @buf.length
           end
 
           # Switch to chunked processing if there's not enough room in the
