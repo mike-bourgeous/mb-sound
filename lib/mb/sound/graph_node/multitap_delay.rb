@@ -101,6 +101,7 @@ module MB
           @write_offset = 0
           @read_offset = 0 # Previous write offset, not delay read point
           @buf = Numo::SFloat[0]
+          @audio_buf = nil
           update_buf(Numo::SFloat, (initial_buffer_seconds * rate).ceil)
         end
 

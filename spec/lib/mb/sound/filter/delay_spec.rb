@@ -84,7 +84,6 @@ RSpec.describe(MB::Sound::Filter::Delay) do
           shortbuf.process(Numo::SFloat.zeros(1))
 
           expect(shortbuf.write_offset).to be < shortbuf.read_offset
-          puts shortbuf.buffer_size
           expect((shortbuf.write_offset - shortbuf.read_offset) % shortbuf.buffer_size).to eq(25)
         end
 
