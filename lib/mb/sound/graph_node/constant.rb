@@ -26,7 +26,7 @@ module MB
         # If nil, then other graph nodes (e.g. MIDI::GraphVoice) may change the
         # value (e.g. defaulting frequency constants to change instantly
         # instead of being interpolated).
-        attr_reader :smoothing
+        attr_accessor :smoothing
 
         # Initializes a constant-output signal generator.
         #

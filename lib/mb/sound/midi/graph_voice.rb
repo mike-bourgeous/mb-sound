@@ -199,7 +199,7 @@ module MB
               on_cc(index, n, range: range, relative: relative, description: description, **options)
             end
 
-            return
+            return self
           end
 
           node = find_node(node)
