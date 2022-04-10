@@ -191,14 +191,7 @@ module MB
           end
 
           # Copy the new data into the delay buffer
-          if @write_offset + data.length > @buf.length
-            before = @buf.length - @write_offset
-            after = data.length - before
-            @buf[@write_offset..-1] = data[0...before]
-            @buf[0...after] = data[before..-1]
-          else
-            @buf[@write_offset...(@write_offset + data.length)] = data
-          end
+          MB::M.circular_write(@buf, data, @write_offset)
 
           if delay_buf
             # Time-varying delay
@@ -215,17 +208,8 @@ module MB
             }
           else
             # Constant delay
-            if @read_offset + data.length > @buf.length
-              # Wrap-around read
-              before = @buf.length - @read_offset
-              after = data.length - before
-              @out_buf = Numo::SFloat.zeros(data.length) if @out_buf.length != data.length
-              @out_buf[0...before] = @buf[@read_offset..-1]
-              @out_buf[before..-1] = @buf[0...after]
-              ret = @out_buf
-            else
-              ret = @buf[@read_offset...(@read_offset + data.length)]
-            end
+            @out_buf = Numo::SFloat.zeros(data.length) if @out_buf.length < data.length
+            ret = MB::M.circular_read(@buf, @read_offset, data.length, target: @out_buf[0...data.length])
           end
 
           @read_offset = (@read_offset + data.length) % @buf.length
