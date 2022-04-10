@@ -213,7 +213,7 @@ module MB
       #
       #     # High-pass filter controlled by envelopes
       #     MB::Sound.play 500.hz.ramp.filter(:highpass, frequency: adsr() * 1000 + 100, quality: adsr() * -5 + 6)
-      def filter(filter_or_type = :lowpass, cutoff: nil, quality: nil, in_place: true, rate: 48000)
+      def filter(filter_or_type = :lowpass, cutoff: nil, quality: nil, gain: nil, in_place: true, rate: 48000)
         f = filter_or_type
         f = f.hz if f.is_a?(Numeric)
         f = f.lowpass if f.is_a?(Tone)
@@ -223,7 +223,8 @@ module MB
           raise 'Cutoff frequency must be given when creating a filter by type' if cutoff.nil?
 
           quality = quality || 0.5 ** 0.5
-          f = MB::Sound::Filter::Cookbook.new(filter_or_type, rate, 1, quality: 1)
+          # TODO: Support graph node sources for filter gain
+          f = MB::Sound::Filter::Cookbook.new(filter_or_type, rate, 1, quality: 1, db_gain: gain.to_db)
           MB::Sound::Filter::Cookbook::CookbookWrapper.new(filter: f, audio: self, cutoff: cutoff, quality: quality)
 
         when f.respond_to?(:wrap)
