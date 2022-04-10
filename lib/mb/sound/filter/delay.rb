@@ -173,7 +173,7 @@ module MB
             @buf = old_buf.class.zeros(old_buf.length + 2 * max_delay)
             @buf[0...old_buf.length] = old_buf
 
-            @read_offset = (@write_offset - @delay_samples) % @buf.length
+            @read_offset = (@write_offset - max_delay) % @buf.length
           end
 
           # Switch to chunked processing if there's not enough room in the
