@@ -116,6 +116,8 @@ module MB
         # delayed output for a given tap.
         def internal_sample(tap, delay_buf)
           max_delay = delay_buf.max.ceil
+          # Ensure there are at least three buffers for delay increases without dropouts
+          max_delay = delay_buf.length if max_delay < delay_buf.length
 
           if @sampled.include?(tap.index)
             if @sampled.length < @taps.length
@@ -145,7 +147,15 @@ module MB
 
           @sampled << tap.index
 
+          # TODO: Only allocate one complex buffer per tap if needed instead of
+          # reallocating every iteration
+          if (delay_buf.is_a?(Numo::SFloat) || delay_buf.is_a?(Numo::DFloat)) &&
+              @buf.is_a?(Numo::SComplex) || @buf.is_a?(Numo::DComplex)
+            delay_buf = Numo::SComplex.cast(delay_buf)
+          end
+
           result = delay_buf.inplace!.map_with_index { |d, idx|
+            d = d.real
             d = 0 if d < 0
             d = @buf.length - 1 if d >= @buf.length - 1
 
@@ -174,7 +184,7 @@ module MB
           length = @buf.length if @buf.length > min_length
 
           if @buf.is_a?(Numo::SFloat) && (type == Numo::SComplex || type == Numo::DComplex)
-            @buf = @buf.cast(Numo::SComplex)
+            @buf = Numo::SComplex.cast(@buf)
           end
 
           if @buf.length < min_length

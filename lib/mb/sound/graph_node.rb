@@ -32,7 +32,8 @@ module MB
     #
     # TODO: In-line method to create a meter?
     #
-    # TODO: Rename this module to GraphNodeMixin or similar?
+    # TODO: Pass default sample rate through from source nodes or have a
+    # graph-global sample rate
     module GraphNode
       attr_reader :graph_node_name
 
@@ -249,8 +250,11 @@ module MB
         filter(MB::Sound::Filter::Smoothstep.new(rate: rate, samples: samples, seconds: seconds))
       end
 
-      # Adds a MB::Sound::Filter::Dealy to the signal chain with a delay of the
-      # given number of seconds.
+      # Adds a MB::Sound::Filter::Delay to the signal chain with a delay of the
+      # given number of +:seconds+ or +:samples+.
+      #
+      # See MB::Sound::Filter::Delay#initialize for a description of the
+      # +:smoothing+ parameter.
       def delay(seconds: nil, samples: nil, rate: 48000, smoothing: true)
         if samples
           samples = samples.to_f if samples.is_a?(Numeric)
@@ -262,10 +266,48 @@ module MB
         filter(MB::Sound::Filter::Delay.new(delay: seconds, rate: rate, smoothing: smoothing))
       end
 
+      # Adds a multi-tap delay with the given delay sources, returning an Array
+      # of nodes representing the taps.  The +delays+ may be numeric values in
+      # seconds, or graph nodes that produce a number of seconds as output.
+      #
+      # To smooth delay values, use #clip_rate, #smooth, #filter, or similar
+      # methods (unlike the filter used by #delay, the
+      # MB::Sound::GraphNode::MultitapDelay does not do built-in smoothing).
+      def multitap(*delays, rate: 48000, name: nil, initial_buffer_seconds: 1)
+        MB::Sound::GraphNode::MultitapDelay.new(
+          self,
+          *delays,
+          rate: rate,
+          initial_buffer_seconds: initial_buffer_seconds
+        ).named(name).taps
+      end
+
       # Hard-clips the output of this node to the given min and max, one of
-      # which may be nil.
+      # which may be nil to disable clipping in that direction.
       def clip(min, max)
         self.proc { |v| v.clip(min, max) }
+      end
+
+      # Hard-clips the slope of the output of this node to the given +max_rise+
+      # and +max_fall+, in units per second.  If only one value is specified,
+      # then the other value will be set to its negative.
+      #
+      # A value of zero for +max_fall+ outputs a cumulative maximum value, and
+      # similarly for +max_rise+.
+      #
+      # The +:reset+ parameter may be used to set an initial value for the
+      # output before any slope limiting is applied.
+      #
+      # This method is useful for interpolating changes to constant values (see
+      # also #smooth and #filter).
+      #
+      # Uses MB::Sound::Filter::LinearFollower.
+      def clip_rate(max_rise, max_fall = nil, reset: nil, rate: 48000)
+        max_fall ||= -max_rise
+        max_rise ||= -max_fall
+        f = MB::Sound::Filter::LinearFollower.new(rate: rate, max_rise: max_rise, max_fall: max_fall)
+        f.reset(reset) if reset
+        self.filter(f)
       end
 
       # Wraps this arithmetic signal graph in a softclip effect.
