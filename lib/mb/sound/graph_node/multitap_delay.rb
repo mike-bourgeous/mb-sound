@@ -23,8 +23,7 @@ module MB
           # +:index+ - The index of this tap.
           # +:delay+ - The delay source for this tap.
           # +:rate+ - The sample rate at which the node graph is running.
-          # +:smoothing+ - Smoothing option (false, true, numeric delta seconds per second, or filter).
-          def initialize(mtd:, index:, delay_samples:, rate:, smoothing:)
+          def initialize(mtd:, index:, delay_samples:, rate:)
             @mtd = mtd
             @index = index
 
@@ -42,28 +41,6 @@ module MB
             # TODO: Support per-tap feedback into all taps?
             # TODO: Support per-tap feedback just into that tap?
 
-            # TODO: Maybe smoothing should be considered a separate function in the graph?
-            case smoothing
-            when false
-              # No smoothing of delay times
-              @smoothing = false
-
-            when true
-              # Linear smoothing of delay times
-              @smoothing = MB::Sound::Filter::LinearFollower.new(TODO)
-
-            when Numeric
-              # Smoothing at a specific number of seconds per second
-              @smoothing = TODO
-
-            else
-              if smoothing.respond_to?(:process)
-                @smoothing = smoothing
-              else
-                raise ArgumentError, 'Smoothing must be false, true, a positive real number, or a filter responding to :process'
-              end
-            end
-
             @sources = [@delay_samples, @mtd].freeze
           end
 
@@ -72,8 +49,6 @@ module MB
           def sample(count)
             delay_buf = @delay_samples.sample(count)
             return nil if delay_buf.nil?
-
-            delay_buf = @smoothing.process(delay_buf.inplace!) if @smoothing
 
             @mtd.internal_sample(self, delay_buf)
           end
@@ -93,10 +68,13 @@ module MB
         # compatibility).  See #named.
         attr_reader :graph_node_name
 
+        # Sample rate used for converting delay times to delays in samples.
+        attr_reader :rate
+
         # Creates a MultitapDelay that samples audio from one +source+ graph
         # node and produces output tap nodes for each source +delay_in_seconds+
         # (Numeric or GraphNode).
-        def initialize(source, *delays_in_seconds, smoothing: false, initial_buffer_seconds: 1, rate: 48000)
+        def initialize(source, *delays_in_seconds, initial_buffer_seconds: 1, rate: 48000)
           raise 'Delay audio source must respond to :sample' unless source.respond_to?(:sample)
 
           @rate = rate.to_f
@@ -116,7 +94,6 @@ module MB
               mtd: self,
               index: idx,
               delay_samples: d * @rate,
-              smoothing: smoothing,
               rate: @rate
             )
           }
