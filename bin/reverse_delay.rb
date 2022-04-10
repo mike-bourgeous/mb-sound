@@ -73,7 +73,7 @@ begin
     # The delay LFO controls the position in the delay buffer
     delay_lfo = freq_del.tone.ramp.at(0..2).with_phase(idx * 2.0 * Math::PI / inputs.length).named('Delay LFO') * delay_delay
 
-    final = inp.delay(seconds: delay_lfo, smoothing: false) * amp_lfo
+    final = inp.multitap(delay_lfo)[0] * amp_lfo
 
     # TODO: dry signal and feedback
 #    # Split delay LFO for first-tap and feedback
