@@ -42,6 +42,11 @@ module MB
         self
       end
 
+      # Returns the class name of the node plus the node's assigned name.
+      def to_s
+        "#{self.class.name}/#{@graph_node_name || __id__}"
+      end
+
       # Returns +n+ (default 2) fan-out readers for creating branching signal
       # graphs.  This is useful because the #sample method can only be called
       # once per frame because it updates the internal state of signal nodes.
@@ -447,3 +452,4 @@ require_relative 'graph_node/multiplier'
 require_relative 'graph_node/node_sequence'
 require_relative 'graph_node/proc_node'
 require_relative 'graph_node/tee'
+require_relative 'graph_node/multitap_delay'
