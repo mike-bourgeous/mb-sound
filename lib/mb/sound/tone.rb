@@ -174,6 +174,7 @@ module MB
         @amplitude_set = false
         @duration_set = false
         @phase_mod = nil
+        @no_trigger = false
         self.or_at(amplitude).or_for(duration).at_rate(rate).with_phase(phase)
         set_frequency(frequency)
       end
@@ -421,6 +422,22 @@ module MB
         self
       end
 
+      # Marks the Tone as being used for modulation rather than tone
+      # generation, so that MB::Sound::MIDI::GraphVoice won't retrigger it when
+      # a note is played.
+      def no_trigger(trig = true)
+        @no_trigger = trig
+        self
+      end
+      alias lfo no_trigger
+
+      # Returns true if this Tone is not intended to be retriggered when a note
+      # is played.
+      def no_trigger?
+        @no_trigger
+      end
+      alias lfo? no_trigger?
+
       # Converts this Tone to the nearest Note based on its frequency.
       def to_note
         MB::Sound::Note.new(self)
@@ -480,7 +497,8 @@ module MB
           advance: Math::PI * 2.0 / @rate - 0.5 * rand_adv,
           random_advance: rand_adv,
           range: @range,
-          phase_mod: @phase_mod
+          phase_mod: @phase_mod,
+          no_trigger: @no_trigger
         )
       end
 
