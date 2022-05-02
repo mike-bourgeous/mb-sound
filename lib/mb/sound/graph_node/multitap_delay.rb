@@ -77,6 +77,9 @@ module MB
         def initialize(source, *delays_in_seconds, initial_buffer_seconds: 1, rate: 48000)
           raise 'Delay audio source must respond to :sample' unless source.respond_to?(:sample)
 
+          @graph_node_name = nil
+          @named = false
+
           @rate = rate.to_f
           @source = source
           @sources = [source].freeze
@@ -110,7 +113,14 @@ module MB
         # individual delay tap nodes).
         def named(s)
           @graph_node_name = s&.to_s
+          @named = true
           self
+        end
+
+        # Returns true if a custom name has been assigned to this parent delay
+        # container.
+        def named?
+          @named
         end
 
         # Do not use directly.  Called by DelayTap#sample to retrieve the

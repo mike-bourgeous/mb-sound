@@ -128,6 +128,17 @@ RSpec.describe(MB::Sound::GraphNode) do
     end
   end
 
+  described '#named?' do
+    it 'returns false before and true after a node is given a name' do
+      n = 50.hz.proc {}
+      expect(n.graph_node_name).not_to be_nil # make sure named? and graph_node_name are independent
+      expect(n.named?).to eq(false)
+      n.named('test')
+      expect(n.named?).to eq(true)
+      expect(n.graph_node_name).to eq('test')
+    end
+  end
+
   describe '#clip' do
     # FIXME: the first sample is repeated without the with_phase option
     let(:cliposc) { 24000.hz.square.at(10).with_phase(0.0000001) }

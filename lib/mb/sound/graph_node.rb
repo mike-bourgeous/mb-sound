@@ -40,7 +40,13 @@ module MB
       # Gives a name to this graph node to make it easier to retrieve later.
       def named(n)
         @graph_node_name = n&.to_s
+        @named = true
         self
+      end
+
+      # Returns true if the graph node has been given a custom name.
+      def named?
+        @named ||= false
       end
 
       # Returns the class name of the node plus the node's assigned name.
