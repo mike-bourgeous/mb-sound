@@ -9,6 +9,10 @@ module MB
         attr_reader :delay, :delay_samples, :rate, :smoothing, :smooth_limit
         attr_reader :write_offset, :read_offset
 
+        # Minimum, maximum, and final delay in samples from the previous call
+        # to #process.  May not be an integer.
+        attr_reader :min_delay_samples, :max_delay_samples, :last_delay_samples
+
         # Initializes a single-channel delay with a given +:delay+ in seconds,
         # based on the sample +:rate+..  The +:buffer_size+ sets the maximum
         # possible delay.  If +:smoothing+ is true, then the delay time will be
@@ -99,6 +103,9 @@ module MB
           if samples.respond_to?(:sample)
             @delay_samples = samples
             @delay = samples / @rate
+            @min_delay_samples = 0
+            @max_delay_samples = 0
+            @last_delay_samples = 0
           else
             samples = samples.round
             # If samples exceeds buffer size, the buffer will grow in #sample
@@ -106,6 +113,9 @@ module MB
 
             delta = samples - @delay_samples
             @delay_samples = samples
+            @min_delay_samples = @delay_samples
+            @max_delay_samples = @delay_samples
+            @last_delay_samples = @delay_samples
             @delay = samples.to_f / @rate
             @read_offset = (@write_offset - @delay_samples) % @buf.length
           end
@@ -115,6 +125,12 @@ module MB
         # samples using the sample rate.
         def delay=(seconds)
           self.delay_samples = seconds * @rate
+        end
+
+        # Returns a copy of the current delay buffer, rotated so that the write
+        # pointer is always at the start of the returned buffer copy.
+        def buffer
+          MB::M.rol(@buf, @write_offset) # TODO: create and reuse a single buffer
         end
 
         # Returns an Array of signal nodes and/or numeric values that feed this
@@ -195,6 +211,9 @@ module MB
 
           if delay_buf
             # Time-varying delay
+            @min_delay_samples, @max_delay_samples = delay_buf.minmax
+            @last_delay_samples = delay_buf[-1]
+
             # TODO: Something better than linear interpolation?
             # TODO: Allow switching off interpolation?
             ret = data.map_with_index { |_, idx|
