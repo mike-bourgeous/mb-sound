@@ -38,6 +38,17 @@ module MB
         # elapsed.
         attr_reader :index
 
+        # The number of events that could be read.
+        attr_reader :count
+
+        # The *approximate* duration of the MIDI file, in seconds.  This is the
+        # maximum duration of all tracks, not just the track selected for
+        # reading.
+        #
+        # This is just the time of the last event in the file, and doesn't
+        # account for sounds' decay times.
+        attr_reader :duration
+
         # The MIDI filename that was given to the constructor.
         attr_reader :filename
 
@@ -73,7 +84,10 @@ module MB
             end
           end
 
+          @duration = @seq.pulses_to_seconds(@seq.tracks.map(&:events).map(&:last).map(&:time_from_start).max)
+
           @events = track.events
+          @count = @events.count
 
           @index = 0
         end
@@ -91,6 +105,7 @@ module MB
               channel: t.events.group_by { |v| v.is_a?(::MIDI::ChannelEvent) ? v.channel : nil }.max_by { |ch, events| events.count }[0],
               num_events: t.events.length,
               num_notes: t.events.select { |v| v.is_a?(::MIDI::NoteEvent) }.length,
+              duration: @seq.pulses_to_seconds(t.events.last.time_from_start)
             }
           }
         end
@@ -132,6 +147,11 @@ module MB
         #
         # Returns an Array containing a single String, or nil if there are no
         # events left to read.
+        #
+        # If :blocking is true, then this method will sleep to keep time with
+        # the MIDI file.  This will not work correctly if a non-realtime clock
+        # was given to the constructor, so in that case, set :blocking to false
+        # and use a different means of keeping time.
         def read(blocking: true)
           return nil if @events.empty? || @index >= @events.length
 

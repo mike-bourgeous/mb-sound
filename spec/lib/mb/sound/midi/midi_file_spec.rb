@@ -6,6 +6,12 @@ RSpec.describe(MB::Sound::MIDI::MIDIFile) do
     expect(seq.empty?).to eq(false)
   end
 
+  describe '#duration' do
+    it 'returns the timestamp of the final event' do
+      expect(seq.duration.round(3)).to eq(6.857)
+    end
+  end
+
   describe '#seek' do
     it 'changes the index' do
       expect(seq.index).to eq(0)

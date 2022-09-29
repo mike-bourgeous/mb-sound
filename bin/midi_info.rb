@@ -26,6 +26,7 @@ NAME_MAP = {
   channel: 'Ch.',
   num_events: 'Events',
   num_notes: 'Notes',
+  duration: 'Duration',
 }.freeze
 
 track_info = f.tracks.reduce({}) { |h, t|
