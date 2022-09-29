@@ -75,6 +75,9 @@ module MB
         # The sequence object from the midilib gem that contains MIDI data from the file.
         attr_reader :seq
 
+        # The full list of events that will be returned over time by #read.
+        attr_reader :events
+
         # Reads MIDI data from the given +filename+.  Call #read repeatedly to
         # receive MIDI events based on elapsed time.
         #
@@ -106,7 +109,7 @@ module MB
 
           @duration = @seq.pulses_to_seconds(@seq.tracks.map(&:events).map(&:last).map(&:time_from_start).max)
 
-          @events = track.events
+          @events = track.events.freeze
           @count = @events.count
 
           @index = 0
