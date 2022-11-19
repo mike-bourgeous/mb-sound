@@ -57,6 +57,8 @@ begin
 
     # TODO: Allow base delay and loop length? or mindelay and maxdelay?
     # TODO: Smooth delay over longer than one frame
+    # TODO: It would be cool to be able to crossfade the delay time jump; this
+    # could be possible with a multi-tap delay
     delayconst = (delay.constant.named('Delay')).clip(buftime, nil)
     lfo_period, delay_delay = delayconst.tee
     lfo_period.named('LFO period')
