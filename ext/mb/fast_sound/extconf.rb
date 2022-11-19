@@ -10,6 +10,6 @@ na = Gem.loaded_specs['numo-narray']
 raise "Could not find the numo-narray Gem; try running with Bundler" if na.nil?
 raise 'Could not find narray.h' unless find_header('numo/narray.h', File.join(na.extension_dir, 'numo'))
 
-with_cflags("#{$CFLAGS} -O3 -Wall -Wextra -Werror -Wno-unused-parameter #{ENV['EXTRACFLAGS']} -std=c99 -D_XOPEN_SOURCE=700 -D_ISOC99_SOURCE -D_GNU_SOURCE") do
+with_cflags("#{$CFLAGS} -O3 -Wall -Wextra #{ENV['EXTRACFLAGS']} -std=c99 -D_XOPEN_SOURCE=700 -D_ISOC99_SOURCE -D_GNU_SOURCE") do
   create_makefile('mb/fast_sound')
 end
