@@ -1115,6 +1115,65 @@ static VALUE ruby_osc(VALUE self, VALUE wave_type, VALUE phi)
 	}
 }
 
+struct synthesize_params {
+	enum wave_types wt;
+	double freq;
+	double phase;
+	double adv;
+	double rndadv;
+	double g;
+	double off;
+	double phi;
+	complex float *complex_ptr;
+	float *float_ptr;
+	size_t length;
+	complex float *freqptr;
+	complex float *phaseptr;
+};
+
+// for calling from ruby_synthesize() without the gvl
+static void synthesize_loop(void *data)
+{
+	struct synthesize_params *p = data;
+
+	double complex delta;
+	double complex v;
+	for (size_t i = 0; i < p->length; i++) {
+		if (p->freqptr) {
+			p->freq = p->freqptr[i];
+		}
+
+		if (p->phaseptr) {
+			p->phase = p->phaseptr[i];
+		}
+
+		if (p->rndadv != 0) {
+			delta = p->freq * (p->adv + drand48() * p->rndadv);
+		} else {
+			delta = p->freq * p->adv;
+		}
+
+		if (p->wt == OSC_COMPLEX_SQUARE || p->wt == OSC_COMPLEX_RAMP) {
+			// Ensure symmetric imaginary components when sampled exactly on period
+			v = osc_sample(p->wt, p->phi + delta / 2.0 + p->phase);
+		} else {
+			v = osc_sample(p->wt, p->phi + p->phase);
+		}
+
+		v = v * p->g + p->off;
+
+		if (p->complex_ptr) {
+			p->complex_ptr[i] = v;
+		} else {
+			p->float_ptr[i] = creal(v);
+		}
+
+		p->phi = wrap(creal(p->phi + delta), M_PI * 2.0) + I * wrap(cimag(p->phi + delta), M_PI * 2.0);
+	}
+
+
+}
+
 // state contains [phi] and will be modified in place
 static VALUE ruby_synthesize(VALUE self, VALUE buffer, VALUE wave_type, VALUE frequency, VALUE phase_mod, VALUE advance, VALUE random_advance, VALUE gain, VALUE offset, VALUE state)
 {
@@ -1138,8 +1197,8 @@ static VALUE ruby_synthesize(VALUE self, VALUE buffer, VALUE wave_type, VALUE fr
 	ensure_inplace_sfloat_or_scomplex(&buffer, &was_inplace);
 
 	_Bool complex_buffer = CLASS_OF(buffer) == numo_cSComplex || CLASS_OF(buffer) == numo_cDComplex;
-	complex float *complex_ptr;
-	float *float_ptr;
+	complex float *complex_ptr = NULL;
+	float *float_ptr = NULL;
 
 	size_t length = RNARRAY_SHAPE(buffer)[0];
 
@@ -1177,42 +1236,25 @@ static VALUE ruby_synthesize(VALUE self, VALUE buffer, VALUE wave_type, VALUE fr
 		float_ptr = (float *)(nary_get_pointer_for_write(buffer) + nary_get_offset(buffer));
 	}
 
-	double complex delta;
-	double complex v;
-	for (size_t i = 0; i < length; i++) {
-		if (freqptr) {
-			freq = freqptr[i];
-		}
+	struct synthesize_params p = {
+		.wt = wt,
+		.freq = freq,
+		.phase = phase,
+		.adv = adv,
+		.rndadv = rndadv,
+		.g = g,
+		.off = off,
+		.phi = phi,
+		.complex_ptr = complex_ptr,
+		.float_ptr = float_ptr,
+		.length = length,
+		.freqptr = freqptr,
+		.phaseptr = phaseptr
+	};
 
-		if (phaseptr) {
-			phase = phaseptr[i];
-		}
+	rb_thread_call_without_gvl2(synthesize_loop, &p, RUBY_UBF_PROCESS, NULL);
 
-		if (rndadv != 0) {
-			delta = freq * (adv + drand48() * rndadv);
-		} else {
-			delta = freq * adv;
-		}
-
-		if (wt == OSC_COMPLEX_SQUARE || wt == OSC_COMPLEX_RAMP) {
-			// Ensure symmetric imaginary components when sampled exactly on period
-			v = osc_sample(wt, phi + delta / 2.0 + phase);
-		} else {
-			v = osc_sample(wt, phi + phase);
-		}
-
-		v = v * g + off;
-
-		if (complex_buffer) {
-			complex_ptr[i] = v;
-		} else {
-			float_ptr[i] = creal(v);
-		}
-
-		phi = wrap(creal(phi + delta), M_PI * 2.0) + I * wrap(cimag(phi + delta), M_PI * 2.0);
-	}
-
-	rb_ary_store(state, 0, rb_float_new(phi));
+	rb_ary_store(state, 0, rb_float_new(p.phi));
 
 	if (!was_inplace) {
 		UNSET_INPLACE(buffer);
@@ -1220,6 +1262,7 @@ static VALUE ruby_synthesize(VALUE self, VALUE buffer, VALUE wave_type, VALUE fr
 
 	RB_GC_GUARD(frequency);
 	RB_GC_GUARD(buffer);
+	RB_GC_GUARD(phase_mod);
 
 	return buffer;
 }
