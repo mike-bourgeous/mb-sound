@@ -24,8 +24,7 @@ module MB
     # There are more examples in the bin/ directory, such as bin/flanger.rb
     #
     # TODO: Standardize a way to modify an existing graph, e.g. to inject a
-    # tee, filter, or tap, or to bypass or remove a node and have any non-GC'd
-    # resources freed
+    # tee, filter, or tap.
     #
     # TODO: Standardize a way to detect controls on a node and their data types
     # and ranges.  E.g. maybe a #controls method that returns a map from method
