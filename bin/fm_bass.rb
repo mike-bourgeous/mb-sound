@@ -56,8 +56,7 @@ midi = MB::Sound::MIDI::MIDIFile.new(ARGV[0]) if ARGV[0]&.end_with?('.mid') # TO
 manager = MB::Sound::MIDI::Manager.new(jack: jack, input: midi, connect: ARGV[0])
 pool = MB::Sound::MIDI::VoicePool.new(
   manager,
-  voices,
-  threaded: true
+  voices
 )
 
 output_chain = (pool * 20).softclip(0.8, 0.95)
