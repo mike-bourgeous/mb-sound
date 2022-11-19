@@ -18,8 +18,35 @@ module MB
         attr_reader :bend
 
         # Initializes an oscillator pool with the given array of oscillators.
-        def initialize(manager, voices)
+        #
+        # +manager+ - The MB::Sound::MIDI::Manager from which to receive MIDI events.
+        # +voices+ - An Array of MB::Sound::MIDI::Voice or MB::Sound::MIDI::GraphVoice.
+        # +:threaded+ - If true, each voice will be processed in a separate thread.  Only useful
+        #               if the voices do most of their work in C code without the global
+        #               interpreter lock.
+        def initialize(manager, voices, threaded: false)
           @voices = voices
+
+          if threaded
+            @threads = @voices.map.with_index { |v, idx|
+              size_in = Queue.new
+              buf_out = Queue.new
+              t = Thread.new do
+                loop do
+                  buf_out.push(v.sample(size_in.pop))
+                end
+              end
+
+              t.name = "Voice pool voice #{idx + 1}/#{@voices.length}"
+
+              {
+                thread: t,
+                size_in: size_in,
+                buf_out: buf_out,
+              }
+            }
+          end
+
           @available = voices.dup
           @used = []
           @key_to_value = {}
@@ -41,6 +68,18 @@ module MB
           if voices.all? { |v| v.respond_to?(:update) }
             manager.on_update { voices.each(&:update) }
           end
+        end
+
+        # Sets the names of threads in the thread pool based on the node name, if threading was
+        # enabled in the constructor.
+        def named(n)
+          super
+
+          @threads&.each&.with_index do |t, idx|
+            t[:thread].name = "Voice pool #{graph_node_name} voice #{idx + 1}/#{@threads.length}"
+          end
+
+          self
         end
 
         # Called by the MIDI manager when a note on or off event is received.
@@ -114,7 +153,15 @@ module MB
         # Samples and sums the current output of all voices/oscillators.
         # Assumes all voices given to the constructor have a #sample method.
         def sample(count)
-          @voices.map { |v| v.sample(count) }.sum
+          if @threads
+            @threads.each do |t|
+              t[:size_in].push(count)
+            end
+
+            @threads.map { |t| t[:buf_out].pop }.sum
+          else
+            @voices.map { |v| v.sample(count) }.sum
+          end
         end
 
         # Called internally.  Retrieves the next available (or stolen)
