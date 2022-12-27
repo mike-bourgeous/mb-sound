@@ -52,8 +52,9 @@ loop do
 
   events = []
   while events.empty?
-    data = midi_in.read
+    data = midi_in.read(blocking: false)
     return if data.nil?
+    break if data[0].nil?
     # TODO: Somehow show realtime messages without them overwhelming other messages
     events = [midi.parse(data[0]&.bytes)].flatten.compact.reject { |e| e.is_a?(MIDIMessage::SystemRealtime) }
   end
@@ -66,8 +67,9 @@ loop do
       cc_chart[e.index] = e.value
     end
 
-    midi_out&.write([e.to_a.pack('C*')])
+    midi_out&.write([Numo::Int8.cast(e.to_a)])
   end
 
   frame += 1
+  sleep 0.001
 end
