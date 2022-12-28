@@ -438,6 +438,12 @@ module MB
         graph.find { |s| s.respond_to?(:graph_node_name) && s.graph_node_name == name }
       end
 
+      # Returns all nodes within this nodes input graph matching the given
+      # name.
+      def find_all_by_name(name)
+        graph.select { |s| s.respond_to?(:graph_node_name) && s.graph_node_name == name }
+      end
+
       # Returns a String containing a GraphViz representation of the signal
       # graph.
       def graphviz
