@@ -75,6 +75,11 @@ module MB
         # needed.  Called by #midi_note.
         def trigger(note, velocity)
           @last = self.next(note)
+
+          @available.each do |voice|
+            voice.set_note(note, reset_portamento: true)
+          end
+
           @last.trigger(note + @bend, velocity)
         end
 

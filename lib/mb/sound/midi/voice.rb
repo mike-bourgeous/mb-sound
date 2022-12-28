@@ -106,6 +106,12 @@ module MB
           @oscillator.number = note
         end
 
+        # Same as #number=, but with an ignored keyword argument for VoicePool
+        # compatibility.  TODO: implement portamento?
+        def set_note(note, reset_portamento: :ignored)
+          self.number = note
+        end
+
         # Sets the filter quality, clamping to 0.5..10.0.
         def quality=(q)
           @quality = MB::M.clamp(q.to_f, 0.5, 10.0)
