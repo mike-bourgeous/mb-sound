@@ -71,33 +71,34 @@ begin
 
     # The amplitude LFO mutes the sound while the delay buffer jumps back to the present
     amp_lfo = freq_amp.tone.sine.at(0..1000).with_phase((idx + 0.5) * 2.0 * Math::PI / inputs.length).clip(0, 1).named('Amp LFO')
+    amp1, amp2 = amp_lfo.tee
+    amp1.named('amp1')
+    amp2.named('amp2')
 
     # The delay LFO controls the position in the delay buffer
     delay_lfo = freq_del.tone.ramp.at(0..2).with_phase(idx * 2.0 * Math::PI / inputs.length).named('Delay LFO') * delay_delay
+    d1, d2 = delay_lfo.tee(2)
+    d1.named('d1')
+    d2.named('d2')
 
-    final = inp.multitap(delay_lfo)[0] * amp_lfo
+    s1, s2 = inp.tee(2)
+    s1.named('s1')
+    s2.named('s2')
 
-    # TODO: dry signal and feedback
-#    # Split delay LFO for first-tap and feedback
-#    d1, d2 = delay_lfo.tee
-#
-#    # Split input into original and first delay
-#    s1, s2 = inp.tee(2)
-#    s1.named('s1')
-#    s2.named('s2')
-#    s2 = s2.delay(samples: d1, smoothing: false)
-#
-#    # Feedback injector and feedback delay (compensating for buffer size)
-#    d_fb = (d2 - bufsize).clip(0, nil)
-#    b = 0.hz.forever.proc { a }.delay(samples: d_fb, smoothing: false)
-#
-#    # Effected output, with a spy to save feedback buffer
-#    wet = (feedback * b - s2).softclip(0.85, 0.95).spy { |z| a[] = z if z }
-#
-#    dryconst = dry_level.constant.named('Dry level')
-#    wetconst = wet_level.constant.named('Wet level')
-#    final = (s1 * dryconst + wet * wetconst).softclip(0.85, 0.95)
-#
+    delayed = s1.multitap(d1)[0] * amp1
+
+    # TODO: create a better way to do feedback in node graphs, ideally while
+    # automatically compensating for buffer size
+    # TODO: implement cross-channel feedback
+    d_fb1, d_fb2 = (d2 - bufsize.to_f / output.rate).clip(0, nil).named('d_fb').tee
+    d_fb_amp = amp2.multitap(d_fb1)[0] # delay the amp lfo to match the feedback delay (FIXME: this seems to be off; it lets through some aliasing noise on each cycle; or maybe it's in both LFOs)
+    fb_return = 0.constant.proc { a }.multitap(d_fb2)[0] * d_fb_amp
+    wet = (feedback * fb_return + delayed).softclip(0.85, 0.95).spy { |z| a[] = z if z }
+
+    dryconst = dry_level.constant.named('Dry level')
+    wetconst = wet_level.constant.named('Wet level')
+    final = (s2 * dryconst + wet * wetconst).softclip(0.85, 0.95)
+
     # GraphVoice provides on_cc to generate a cc map for the MIDI manager
     # (TODO: probably a better way to do this, also need on_bend, on_pitch, etc)
     MB::Sound::MIDI::GraphVoice.new(final)
