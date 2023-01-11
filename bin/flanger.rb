@@ -85,12 +85,14 @@ begin
     # Set up LFO depth control
     depthconst = depth.constant.named('Depth')
     delayconst = delay.constant.named('Delay')
-    samp = (delayconst * output.rate).clip(0, nil)
+    # Need to tee samp (delay in samples) so it doesn't skip when changing the delay via MIDI
+    samp1, samp2 = (delayconst * output.rate).clip(0, nil).named('Delay in samples').tee
+    samp1.named('Delay in samples (branch 1)')
+    samp2.named('Delay in samples (branch 2)')
 
-    # FIXME: need to tee samp so it doesn't skip
-    lfo_scale = depthconst * samp
-    lfo_base = samp - lfo_scale * 0.5
-    lfo_mod = (lfo * lfo_scale + lfo_base).clip(0, nil)
+    lfo_scale1, lfo_scale2 = (depthconst * samp1).tee
+    lfo_base = samp2 - lfo_scale1 * 0.5
+    lfo_mod = (lfo * lfo_scale2 + lfo_base).clip(0, nil)
 
     # Split delay LFO for first-tap and feedback
     d1, d2 = lfo_mod.tee
