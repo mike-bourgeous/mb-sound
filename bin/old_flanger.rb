@@ -34,15 +34,6 @@ else
 end
 
 output = MB::Sound.output(channels: inputs.length)
-
-if defined?(MB::Sound::JackFFI) && output.is_a?(MB::Sound::JackFFI::Output)
-  # MIDI control is possible since Jack is running
-  puts "\e[1mMIDI control enabled (jackd detected)\e[0m"
-  manager = MB::Sound::MIDI::Manager.new(jack: output.jack_ffi)
-else
-  puts "\e[38;5;243mMIDI disabled (jackd not detected)\e[0m"
-end
-
 bufsize = output.buffer_size
 
 delay_samples = delay * output.rate
@@ -64,38 +55,22 @@ puts MB::U.highlight(
   feedback: feedback,
   lfo_hz: hz,
   depth: depth,
+  min_delay: min_delay,
+  max_delay: max_delay,
   inputs: inputs.map(&:graph_node_name),
   rate: output.rate,
   buffer: bufsize,
 )
 
-# TODO: Maybe want a graph-wide spy function that either prints stats, draws
-# meters, or plots graphs of multiple nodes by name or reference
-
 begin
-  # TODO: Abstract construction of a filter graph per channel
   paths = inputs.map.with_index { |inp, idx|
     # Feedback buffers, overwritten by later calls to #spy
     a = Numo::SFloat.zeros(bufsize)
 
-    lfo_freq = hz.constant.named('LFO Hz')
-
-    lfo = lfo_freq.tone.with_phase(idx * 2.0 * Math::PI / inputs.length).send(wave_type).forever.at(0..1)
-
-    # Set up LFO depth control
-    depthconst = depth.constant.named('Depth')
-    delayconst = delay.constant.named('Delay')
-    # Need to tee samp (delay in samples) so it doesn't skip when changing the delay via MIDI
-    samp1, samp2 = (delayconst * output.rate).clip(0, nil).named('Delay in samples').tee
-    samp1.named('Delay in samples (branch 1)')
-    samp2.named('Delay in samples (branch 2)')
-
-    lfo_scale1, lfo_scale2 = (depthconst * samp1).tee
-    lfo_base = samp2 - lfo_scale1 * 0.5
-    lfo_mod = (lfo * lfo_scale2 + lfo_base).clip(0, nil)
+    lfo = hz.hz.with_phase(idx * 2.0 * Math::PI / inputs.length).send(wave_type).forever.at(min_delay..max_delay)
 
     # Split delay LFO for first-tap and feedback
-    d1, d2 = lfo_mod.tee
+    d1, d2 = lfo.tee
 
     # Split input into original and first delay
     s1, s2 = inp.tee(2)
@@ -104,33 +79,16 @@ begin
     s2 = s2.delay(samples: d1, smoothing: delay_smoothing)
 
     # Feedback injector and feedback delay (compensating for buffer size)
-    d_fb = (d2 - bufsize).clip(0, nil)
+    d_fb = (d2 - bufsize).proc { |v| v.inplace.clip(0, nil).not_inplace! }
     b = 0.hz.forever.proc { a }.delay(samples: d_fb, smoothing: delay_smoothing2)
 
-    # Effected output, with a spy to save feedback buffer
+    # Final output, with a spy to save feedback buffer
     wet = (feedback * b - s2).softclip(0.85, 0.95).spy { |z| a[] = z if z }
 
-    dryconst = dry_level.constant.named('Dry level')
-    wetconst = wet_level.constant.named('Wet level')
-    final = (s1 * dryconst + wet * wetconst).softclip(0.85, 0.95)
-
-    # GraphVoice provides on_cc to generate a cc map for the MIDI manager
-    # (TODO: probably a better way to do this, also need on_bend, on_pitch, etc)
-    MB::Sound::MIDI::GraphVoice.new(final)
-      .on_cc(1, 'LFO Hz', range: 0.0..6.0)
-      .on_cc(1, 'Depth', range: 0.0..2.0)
-      .on_cc(1, 'Dry level', range: 1.0..0.0)
-      #.on_cc(1, 'Delay', range: 0.1..4.0)
-      #.on_cc(1, 'Wet level', range: 0.0..1.0, relative: false)
+    (s1 * dry_level + wet * wet_level).softclip(0.85, 0.95)
   }
 
-  if manager
-    manager.on_cc_map(paths.map(&:cc_map))
-    puts MB::U.syntax(manager.to_acid_xml, :xml)
-  end
-
   loop do
-    manager&.update
     data = paths.map { |p| p.sample(output.buffer_size) }
     break if data.any?(&:nil?)
     output.write(data)

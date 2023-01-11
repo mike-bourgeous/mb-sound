@@ -75,8 +75,17 @@ module MB
             end
           end
 
+          @portamento_filters = []
+          @portamento_filters = graph.find_all_by_name('portamento')
+
           @cc_map = {}
           @velocity_listeners = []
+
+          # Make sure frequency smoothing defaults to off so there is no
+          # unintentional portamento effect.
+          @freq_constants.each do |f|
+            f.smoothing = false if f.smoothing.nil?
+          end
 
           puts "Found #{@freq_constants.length} frequency constants: #{@freq_constants.map(&:__id__)}" # XXX
         end
@@ -84,20 +93,12 @@ module MB
         # Tells all envelopes to start their attack phase based on the given
         # velocity, and sets all frequency constants based on the given note.
         def trigger(note, velocity)
-          @number = note
-
           puts "Trigger #{note}@#{velocity} (#{MB::Sound::Note.new(note).name})" # XXX
-          @oscillators.each do |o|
-            o.reset # TODO: make keysync optional
-            if o.frequency.is_a?(Numeric)
-              o.frequency = MB::Sound::Oscillator.calc_freq(note)
-            end
-          end
 
-          @freq_constants.each do |fc|
-            # TODO: Have a way of setting the note number instead, to allow
-            # for logarithmic portamento by filtering through a follower
-            fc.constant = MB::Sound::Oscillator.calc_freq(note)
+          set_note(note, reset_portamento: false)
+
+          @oscillators.each do |o|
+            o.reset unless o.no_trigger
           end
 
           # TODO: make envelope ranges controllable
@@ -114,6 +115,32 @@ module MB
 
           @velocity_listeners.each do |vl|
             vl[:parameter].raw_value = velocity
+          end
+        end
+
+        # Sets the note number without triggering the envelope generators (e.g.
+        # for polyphonic portamento).
+        def set_note(note, reset_portamento: true)
+          @number = note
+
+          @oscillators.each do |o|
+            if o.frequency.is_a?(Numeric) && @freq_constants.empty?
+              o.frequency = MB::Sound::Oscillator.calc_freq(note)
+            end
+          end
+
+          freq = MB::Sound::Oscillator.calc_freq(note)
+          @freq_constants.each do |fc|
+            # TODO: Have a way of setting the note number instead, to allow
+            # for logarithmic portamento by filtering through a follower
+            fc.constant = freq
+          end
+
+          # FIXME: the assumption that the portamento filter will be using the log2 of the frequency is not a safe assumption
+          if reset_portamento
+            @portamento_filters.each do |f|
+              f.reset(Math.log2(freq))
+            end
           end
         end
 
@@ -193,7 +220,7 @@ module MB
               on_cc(index, n, range: range, relative: relative, description: description, **options)
             end
 
-            return
+            return self
           end
 
           node = find_node(node)

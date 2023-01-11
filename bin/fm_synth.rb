@@ -121,15 +121,20 @@ synth = FM.new(update_rate: output.rate.to_f / output.buffer_size, connect: ARGV
 
 puts "\n" * MB::U.height
 
+PLOT = ENV['PLOT'] != '0'
+
 begin
   t = 0
   loop do
     data = synth.sample(output.buffer_size)
 
-    if t % 10 == 0
+    if t % 20 == 0
       puts "\e[H"
       synth.print
-      MB::Sound.plot([data, MB::Sound.real_fft(data).abs], graphical: true)
+
+      if PLOT
+        MB::Sound.plot([data, MB::Sound.real_fft(data).abs], graphical: true)
+      end
     end
 
     t += 1

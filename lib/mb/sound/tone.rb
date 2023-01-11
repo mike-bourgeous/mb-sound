@@ -170,10 +170,11 @@ module MB
       def initialize(wave_type: :sine, frequency: 440, amplitude: 0.1, phase: 0, duration: 5, rate: 48000)
         @wave_type = wave_type
         @oscillator = nil
-        @noise = false
+        @noise = 0
         @amplitude_set = false
         @duration_set = false
         @phase_mod = nil
+        @no_trigger = false
         self.or_at(amplitude).or_for(duration).at_rate(rate).with_phase(phase)
         set_frequency(frequency)
       end
@@ -258,15 +259,30 @@ module MB
       # frequency should probably be 1Hz, but definitely needs to be nonzero.
       #
       # This sets the oscillator's +advance+ to 0, and +random_advance+ to
-      # 2*pi.
+      # 2*pi, or if +blend+ is used, to values between those and the original
+      # values.
+      #
+      # The +blend+ parameter may be used to give a value between 0 and 1 to
+      # interpolate between the original tone and pure noise.  Useful values
+      # are around 0.000001 to 0.0001.
       #
       # Example:
       #     1.hz.gauss.noise
       #
       # Also see the MB::Sound::Noise class for another way to synthesize
       # noise.
-      def noise
-        @noise = true
+      def noise(blend = true)
+        case blend
+        when true
+          @noise = 1.0
+
+        when false
+          @noise = 0.0
+
+        else
+          @noise = blend.to_f
+        end
+
         self
       end
 
@@ -406,6 +422,22 @@ module MB
         self
       end
 
+      # Marks the Tone as being used for modulation rather than tone
+      # generation, so that MB::Sound::MIDI::GraphVoice won't retrigger it when
+      # a note is played.
+      def no_trigger(trig = true)
+        @no_trigger = trig
+        self
+      end
+      alias lfo no_trigger
+
+      # Returns true if this Tone is not intended to be retriggered when a note
+      # is played.
+      def no_trigger?
+        @no_trigger
+      end
+      alias lfo? no_trigger?
+
       # Converts this Tone to the nearest Note based on its frequency.
       def to_note
         MB::Sound::Note.new(self)
@@ -456,14 +488,17 @@ module MB
       # well, but other parameters likely won't be changed by changing the
       # Tone.
       def oscillator
+        rand_adv = MB::M.interp(0, Math::PI * 2.0, @noise)
+
         @oscillator ||= MB::Sound::Oscillator.new(
           @wave_type,
           frequency: @frequency,
           phase: @phase,
-          advance: @noise ? 0 : Math::PI * 2.0 / @rate,
-          random_advance: @noise ? Math::PI * 2.0 : 0,
+          advance: Math::PI * 2.0 / @rate - 0.5 * rand_adv,
+          random_advance: rand_adv,
           range: @range,
-          phase_mod: @phase_mod
+          phase_mod: @phase_mod,
+          no_trigger: @no_trigger
         )
       end
 

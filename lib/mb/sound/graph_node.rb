@@ -32,14 +32,26 @@ module MB
     #
     # TODO: In-line method to create a meter?
     #
-    # TODO: Rename this module to GraphNodeMixin or similar?
+    # TODO: Pass default sample rate through from source nodes or have a
+    # graph-global sample rate
     module GraphNode
       attr_reader :graph_node_name
 
       # Gives a name to this graph node to make it easier to retrieve later.
       def named(n)
         @graph_node_name = n&.to_s
+        @named = true
         self
+      end
+
+      # Returns true if the graph node has been given a custom name.
+      def named?
+        @named ||= false
+      end
+
+      # Returns the class name of the node plus the node's assigned name.
+      def to_s
+        "#{self.class.name}/#{@graph_node_name || __id__}"
       end
 
       # Returns +n+ (default 2) fan-out readers for creating branching signal
@@ -207,7 +219,7 @@ module MB
       #
       #     # High-pass filter controlled by envelopes
       #     MB::Sound.play 500.hz.ramp.filter(:highpass, frequency: adsr() * 1000 + 100, quality: adsr() * -5 + 6)
-      def filter(filter_or_type = :lowpass, cutoff: nil, quality: nil, in_place: true, rate: 48000)
+      def filter(filter_or_type = :lowpass, cutoff: nil, quality: nil, gain: nil, in_place: true, rate: 48000)
         f = filter_or_type
         f = f.hz if f.is_a?(Numeric)
         f = f.lowpass if f.is_a?(Tone)
@@ -217,17 +229,24 @@ module MB
           raise 'Cutoff frequency must be given when creating a filter by type' if cutoff.nil?
 
           quality = quality || 0.5 ** 0.5
-          f = MB::Sound::Filter::Cookbook.new(filter_or_type, rate, 1, quality: 1)
+          # TODO: Support graph node sources for filter gain
+          f = MB::Sound::Filter::Cookbook.new(filter_or_type, rate, 1, quality: 1, db_gain: gain&.to_db)
           MB::Sound::Filter::Cookbook::CookbookWrapper.new(filter: f, audio: self, cutoff: cutoff, quality: quality)
 
         when f.respond_to?(:wrap)
-          if cutoff || quality
-            raise 'Cutoff frequency and quality should only be specified when creating a new filter by type'
+          if cutoff || quality || gain
+            raise 'Cutoff, gain, and quality should only be specified when creating a new filter by type'
           end
+
+          # FIXME: use CookbookWrapper if given a Cookbook filter
 
           f.wrap(self, in_place: in_place)
 
         when f.respond_to?(:process)
+          if cutoff || quality || gain
+            raise 'Cutoff, gain, and quality should only be specified when creating a new filter by type'
+          end
+
           MB::Sound::SampleWrapper.new(f, self, in_place: in_place)
 
         else
@@ -244,8 +263,11 @@ module MB
         filter(MB::Sound::Filter::Smoothstep.new(rate: rate, samples: samples, seconds: seconds))
       end
 
-      # Adds a MB::Sound::Filter::Dealy to the signal chain with a delay of the
-      # given number of seconds.
+      # Adds a MB::Sound::Filter::Delay to the signal chain with a delay of the
+      # given number of +:seconds+ or +:samples+.
+      #
+      # See MB::Sound::Filter::Delay#initialize for a description of the
+      # +:smoothing+ parameter.
       def delay(seconds: nil, samples: nil, rate: 48000, smoothing: true)
         if samples
           samples = samples.to_f if samples.is_a?(Numeric)
@@ -257,10 +279,48 @@ module MB
         filter(MB::Sound::Filter::Delay.new(delay: seconds, rate: rate, smoothing: smoothing))
       end
 
+      # Adds a multi-tap delay with the given delay sources, returning an Array
+      # of nodes representing the taps.  The +delays+ may be numeric values in
+      # seconds, or graph nodes that produce a number of seconds as output.
+      #
+      # To smooth delay values, use #clip_rate, #smooth, #filter, or similar
+      # methods (unlike the filter used by #delay, the
+      # MB::Sound::GraphNode::MultitapDelay does not do built-in smoothing).
+      def multitap(*delays, rate: 48000, name: nil, initial_buffer_seconds: 1)
+        MB::Sound::GraphNode::MultitapDelay.new(
+          self,
+          *delays,
+          rate: rate,
+          initial_buffer_seconds: initial_buffer_seconds
+        ).named(name).taps
+      end
+
       # Hard-clips the output of this node to the given min and max, one of
-      # which may be nil.
+      # which may be nil to disable clipping in that direction.
       def clip(min, max)
         self.proc { |v| v.clip(min, max) }
+      end
+
+      # Hard-clips the slope of the output of this node to the given +max_rise+
+      # and +max_fall+, in units per second.  If only one value is specified,
+      # then the other value will be set to its negative.
+      #
+      # A value of zero for +max_fall+ outputs a cumulative maximum value, and
+      # similarly for +max_rise+.
+      #
+      # The +:reset+ parameter may be used to set an initial value for the
+      # output before any slope limiting is applied.
+      #
+      # This method is useful for interpolating changes to constant values (see
+      # also #smooth and #filter).
+      #
+      # Uses MB::Sound::Filter::LinearFollower.
+      def clip_rate(max_rise, max_fall = nil, reset: nil, rate: 48000)
+        max_fall ||= -max_rise
+        max_rise ||= -max_fall
+        f = MB::Sound::Filter::LinearFollower.new(rate: rate, max_rise: max_rise, max_fall: max_fall)
+        f.reset(reset) if reset
+        self.filter(f)
       end
 
       # Wraps this arithmetic signal graph in a softclip effect.
@@ -312,6 +372,25 @@ module MB
         @graph_spies << block
 
         self
+      end
+
+      # Prints changes to the first sample of each buffer to STDOUT, or yields
+      # the new value to the block if given.  This is mostly useful for
+      # debugging control values, not so useful for oscillators or sound
+      # signals.
+      def spy_changes
+        current_value = nil
+        self.spy { |buf|
+          if current_value != buf[0]
+            current_value = buf[0]
+
+            if block_given?
+              yield current_value
+            else
+              puts "#{graph_node_name} value is now #{current_value}"
+            end
+          end
+        }
       end
 
       # Clears any spies attached to this graph node (see #spy).
@@ -376,6 +455,12 @@ module MB
       # with the given name.
       def find_by_name(name)
         graph.find { |s| s.respond_to?(:graph_node_name) && s.graph_node_name == name }
+      end
+
+      # Returns all nodes within this nodes input graph matching the given
+      # name.
+      def find_all_by_name(name)
+        graph.select { |s| s.respond_to?(:graph_node_name) && s.graph_node_name == name }
       end
 
       # Returns a String containing a GraphViz representation of the signal
@@ -447,3 +532,4 @@ require_relative 'graph_node/multiplier'
 require_relative 'graph_node/node_sequence'
 require_relative 'graph_node/proc_node'
 require_relative 'graph_node/tee'
+require_relative 'graph_node/multitap_delay'

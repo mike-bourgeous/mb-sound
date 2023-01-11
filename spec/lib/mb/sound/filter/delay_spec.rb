@@ -52,6 +52,19 @@ RSpec.describe(MB::Sound::Filter::Delay) do
     expect(shortbuf.process(Numo::SFloat[1,2,3,4,5,6,7,8,9])).to eq(Numo::SFloat[1,2,3,4,5,6,7,8,9])
   end
 
+  describe 'min_, max_, and last_delay_samples' do
+    it 'returns the correct range of values from a delay buffer' do
+      n = 100.hz.delay(samples: 81.hz.triangle.at(10..20), smoothing: false)
+      n.sample(1000)
+      d = n.base_filter
+      expect(d.min_delay_samples.round(1)).to eq(10)
+      expect(d.max_delay_samples.round(1)).to eq(20)
+      expect(d.last_delay_samples.round(1)).to be_between(11, 19)
+    end
+  end
+
+  pending '#buffer'
+
   [false, true].each do |smoothing|
     context "when smoothing is #{smoothing}" do
       before(:each) do
@@ -69,6 +82,22 @@ RSpec.describe(MB::Sound::Filter::Delay) do
           expect(shortbuf.process(Numo::SFloat[4,5,6])).to eq(Numo::SFloat[1,2,3])
           expect(shortbuf.process(Numo::SFloat[-2,1,2])).to eq(Numo::SFloat[4,5,6])
           expect(shortbuf.process(Numo::SFloat.zeros(5))).to eq(Numo::SFloat[-2,1,2,0,0])
+        end
+
+        it 'can trigger buffer growth without error' do
+          shortbuf.delay = 5
+          shortbuf.reset_delay
+
+          # This should wrap around the write pointer but not the read pointer
+          expect(shortbuf.process(Numo::SFloat.zeros(11))).to eq(Numo::SFloat.zeros(11))
+          expect(shortbuf.write_offset).to be < shortbuf.read_offset
+
+          shortbuf.delay = 25
+          shortbuf.reset_delay
+          shortbuf.process(Numo::SFloat.zeros(1))
+
+          expect(shortbuf.write_offset).to be < shortbuf.read_offset
+          expect((shortbuf.write_offset - shortbuf.read_offset) % shortbuf.buffer_size).to eq(25)
         end
 
         it 'accepts a sample source/graph node' do

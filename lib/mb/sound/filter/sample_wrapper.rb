@@ -63,6 +63,11 @@ module MB
             [@source]
           end
         end
+
+        # Pass other methods through to the wrapped object.
+        def method_missing(m, *a)
+          @base_filter.send(m, *a)
+        end
       end
     end
   end

@@ -104,6 +104,11 @@ module MB
       attr_accessor :advance, :wave_type, :pre_power, :post_power, :range, :advance, :random_advance
       attr_reader :phi, :phase, :frequency, :phase_mod
 
+      # An informational marker for classes like MB::Sound::MIDI::GraphVoice
+      # indicating that the oscillator should not be reset when a note is
+      # played.  Has no effect within the oscillator itself.
+      attr_accessor :no_trigger
+
       # TODO: maybe use a clock provider instead of +advance+?  The challenge is
       # that floating point accuracy goes down as a shared clock advances, and
       # every oscillator needs its own internal phase if the phase is to be kept
@@ -132,7 +137,7 @@ module MB
       #             to #sample.  This should be (2 * Math::PI / sample_rate)
       #             for audio oscillators.
       # +random_advance+ - The internal phase is incremented by a random value up to this amount on top of +advance+.
-      def initialize(wave_type, frequency: 1.0, phase: 0.0, phase_mod: nil, range: nil, pre_power: 1.0, post_power: 1.0, advance: Math::PI / 24000.0, random_advance: 0.0)
+      def initialize(wave_type, frequency: 1.0, phase: 0.0, phase_mod: nil, range: nil, pre_power: 1.0, post_power: 1.0, advance: Math::PI / 24000.0, random_advance: 0.0, no_trigger: false)
         unless WAVE_TYPES.include?(wave_type)
           raise "Invalid wave type #{wave_type.inspect}; only #{WAVE_TYPES.map(&:inspect).join(', ')} are supported"
         end
@@ -159,6 +164,8 @@ module MB
 
         raise "Invalid random advance #{random_advance.inspect}" unless random_advance.is_a?(Numeric)
         @random_advance = random_advance
+
+        @no_trigger = !!no_trigger
 
         @osc_buf = nil
       end

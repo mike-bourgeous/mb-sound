@@ -94,7 +94,7 @@ module MB
           # TODO: maybe don't reset oscillators, or randomize phase, so phase
           # is more interesting, but that would make consistent plotting more
           # challenging
-          @oscillator.reset
+          @oscillator.reset unless @oscillator.no_trigger
           @oscillator.number = note
           @filter_envelope.trigger(velocity / 256.0 + 0.5)
           @amp_envelope.trigger(MB::M.scale(velocity, 0..127, -20..-6).db)
@@ -104,6 +104,12 @@ module MB
         # resetting any envelopes.
         def number=(note)
           @oscillator.number = note
+        end
+
+        # Same as #number=, but with an ignored keyword argument for VoicePool
+        # compatibility.  TODO: implement portamento?
+        def set_note(note, reset_portamento: :ignored)
+          self.number = note
         end
 
         # Sets the filter quality, clamping to 0.5..10.0.
