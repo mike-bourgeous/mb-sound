@@ -374,6 +374,25 @@ module MB
         self
       end
 
+      # Prints changes to the first sample of each buffer to STDOUT, or yields
+      # the new value to the block if given.  This is mostly useful for
+      # debugging control values, not so useful for oscillators or sound
+      # signals.
+      def spy_changes
+        current_value = nil
+        self.spy { |buf|
+          if current_value != buf[0]
+            current_value = buf[0]
+
+            if block_given?
+              yield current_value
+            else
+              puts "#{graph_node_name} value is now #{current_value}"
+            end
+          end
+        }
+      end
+
       # Clears any spies attached to this graph node (see #spy).
       def clear_spies
         @graph_spies ||= nil
