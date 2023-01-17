@@ -10,12 +10,15 @@ module MB
       # This implements just enough compatibility with
       # MB::Sound::JackFFI::Input#read to work with MB::Sound::MIDI::Manager.
       #
-      # Due to limitations in the midilib gem, this does not support MIDI files
-      # that change tempo.
+      # This uses the midilib gem for MIDI parsing.  Due to limitations in the
+      # midilib gem, this does not support MIDI files that change tempo.
       #
       # Also note that track names from midilib might include a trailing NUL
       # ("\x00") byte.  This happens with MIDI files exported from ACID Pro,
       # for example.
+      #
+      # Useful references:
+      #  - https://www.cs.cmu.edu/~music/cmsip/readings/Standard-MIDI-file-format-updated.pdf
       class MIDIFile
         # A clock that may be passed to the constructor that returns whatever
         # value was last assigned to #clock_now=.
