@@ -6,13 +6,13 @@ module MB
     # Note: the buffer will be reused unless it has to be resized, so do not make
     # any modifications to the buffer.
     class NullInput
-      attr_reader :channels, :length, :remaining, :samples_read, :rate
+      attr_reader :channels, :length, :remaining, :samples_read, :rate, :buffer_size
 
       # Initializes a null audio stream that returns the +fill+ value +length+
       # times for the given number of +channels+ (or forever if length <= 0).
       # The initial internal buffer size will be +initial_buffer+ frames, but
       # will be grown if #read is called with a size larger than the buffer.
-      def initialize(channels:, rate: 48000, length: 0, fill: 0, initial_buffer: 4096)
+      def initialize(channels:, rate: 48000, length: 0, fill: 0, initial_buffer: 4096, buffer_size: nil)
         raise 'Channels must be an int >= 1' unless channels.is_a?(Integer) && channels >= 1
 
         @channels = channels
@@ -21,6 +21,7 @@ module MB
         @remaining = length
         @fill = fill
         @buffer = Numo::SFloat.new(initial_buffer).fill(@fill)
+        @buffer_size = buffer_size&.to_i
         @samples_read = 0
         @closed = false
       end
