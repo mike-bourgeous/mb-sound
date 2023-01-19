@@ -84,7 +84,7 @@ module MB
           # Make sure frequency smoothing defaults to off so there is no
           # unintentional portamento effect.
           @freq_constants.each do |f|
-            f.smoothing = false if f.smoothing.nil?
+            f.smoothing = false if f.respond_to?(:smoothing) && f.smoothing.nil?
           end
 
           puts "Found #{@freq_constants.length} frequency constants: #{@freq_constants.map(&:__id__)}" # XXX
