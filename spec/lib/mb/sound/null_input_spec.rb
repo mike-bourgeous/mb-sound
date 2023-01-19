@@ -36,6 +36,11 @@ RSpec.describe MB::Sound::NullInput do
       end
 
       (1..10).each do |n|
+        it "can return zero samples if zero are requested for #{n} channels" do
+          ni = MB::Sound::NullInput.new(channels: n)
+          expect(ni.read(0)).to eq([Numo::SFloat[]] * n)
+        end
+
         it "returns the expected number of samples for #{n} channels" do
           ni = MB::Sound::NullInput.new(channels: n)
           expect(ni.read(1)).to eq([Numo::SFloat.zeros(1)] * n)
@@ -60,6 +65,11 @@ RSpec.describe MB::Sound::NullInput do
       end
 
       (1..10).each do |n|
+        it "can return zero samples if zero are requested for #{n} channels" do
+          ni = MB::Sound::NullInput.new(channels: n, length: 114813)
+          expect(ni.read(0)).to eq([Numo::SFloat[]] * n)
+        end
+
         it "returns the expected number of samples for #{n} channels" do
           ni = MB::Sound::NullInput.new(channels: n, length: 114813)
 

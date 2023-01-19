@@ -21,6 +21,7 @@ module MB
         @remaining = length
         @fill = fill
         @buffer = Numo::SFloat.new(initial_buffer).fill(@fill)
+        @empty = Numo::SFloat[]
         @buffer_size = buffer_size&.to_i
         @samples_read = 0
         @closed = false
@@ -30,7 +31,10 @@ module MB
       # channels.  Returns an array of buffers, one buffer per channel.
       def read(frames)
         raise 'This input is closed' if @closed
-        raise 'Must read at least one frame' if frames < 1
+
+        if frames == 0
+          return [@empty] * @channels
+        end
 
         if @length > 0
           if @remaining < frames
