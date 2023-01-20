@@ -176,6 +176,8 @@ module MB
       # (controllable with the +env_range+ parameter).
       def db(env_range = nil)
         if self.is_a?(MB::Sound::ADSREnvelope)
+          # TODO: Do this with polymorphism?
+          # TODO: This interface for converting an envelope to logarithmic doesn't feel quite right
           env_range ||= 80
           env_range = env_range.abs
           env_min = (-env_range).db
