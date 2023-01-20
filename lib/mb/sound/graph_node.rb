@@ -62,13 +62,22 @@ module MB
       # modify the resulting buffer without affecting parallel branches of the
       # graph.
       #
+      # If a block is given, then the branches will be yielded to the block,
+      # and whatever the block returns will be returned instead of the
+      # branches.
+      #
       # Example (for bin/sound.rb):
       #     # AM and tremolo added together for some reason
       #     a, b = 120.hz.tee ; nil
       #     c = a * 150.hz.at(0.5..1) + b * 0.5.hz.at(0.25..1) ; nil
       #     play c
       def tee(n = 2)
-        Tee.new(self, n).branches
+        b = Tee.new(self, n).branches
+        if block_given?
+          yield b
+        else
+          b
+        end
       end
 
       # Creates a mixer that adds this mixer's output to +other+.  Part of a

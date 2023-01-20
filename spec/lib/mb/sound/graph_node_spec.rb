@@ -38,6 +38,27 @@ RSpec.describe(MB::Sound::GraphNode) do
     end
   end
 
+  describe '#tee' do
+    it 'returns as many branches as requested' do
+      expect(1.constant.tee.count).to eq(2)
+      expect(1.constant.tee(5).count).to eq(5)
+    end
+
+    it 'accepts a block and returns the result of the block' do
+      expect(1.constant.tee { |a, b| a + b }.sample(1)[0]).to eq(2)
+    end
+
+    it 'produces branches that yield duplicate copies of the incoming data' do
+      a, b, c = 5000.hz.ramp.at(2..3).tee(3)
+      expect(a.sample(1)[0].round(4)).to eq(2.5)
+      expect(b.sample(1)[0].round(4)).to eq(2.5)
+      expect(c.sample(1)[0].round(4)).to eq(2.5)
+      expect(a.sample(1)[0].round(4)).not_to eq(2.5)
+      expect(b.sample(1)[0].round(4)).not_to eq(2.5)
+      expect(c.sample(1)[0].round(4)).not_to eq(2.5)
+    end
+  end
+
   describe '#/' do
     it 'can divide a graph node by a number' do
       n = 15.constant / 5
