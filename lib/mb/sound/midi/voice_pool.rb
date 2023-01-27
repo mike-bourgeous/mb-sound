@@ -77,7 +77,7 @@ module MB
           @last = self.next(note)
 
           @available.each do |voice|
-            voice.set_note(note, reset_portamento: true)
+            voice.set_note(note, reset_portamento: true) unless voice.active?
           end
 
           @last.trigger(note + @bend, velocity)
@@ -159,7 +159,7 @@ module MB
             @used.delete(value)
             @key_to_value.delete(key)
             @value_to_key.delete(value)
-            @available << value
+            @available << value # FIXME: should wait for envelopes to finish
             value
           else
             nil
