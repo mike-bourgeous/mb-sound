@@ -94,6 +94,11 @@ module MB
         # control map.
         attr_reader :description
 
+        # The description given to the constructor, if any, or nil if a default
+        # description was generated.  This allows telling custom descriptions
+        # apart from default descriptions.
+        attr_reader :user_description
+
         # A value that may be used as a key into hashes to group Parameters for
         # the same event together.  E.g. this will compare equal for all
         # parameters for a given channel number and MIDI CC number.
@@ -161,7 +166,13 @@ module MB
           @message = message
           notify(message)
 
-          @description = description&.to_s || default_description(message)
+          unless description.nil?
+            @description = description.to_s
+            @user_description = @description
+          else
+            @description = default_description(message)
+            @user_description = nil
+          end
 
           if max_rise != false && max_fall != false
             @follower = MB::Sound::Filter::LinearFollower.new(

@@ -83,7 +83,8 @@ module MB
           @midi_in = nil
         end
 
-        # Adds a callback to receive raw MIDI events.
+        # Adds a callback to receive raw MIDI events (these will be event
+        # types from the midi-message gem, e.g. MIDIMessage::ControlChange).
         def on_event(&callback)
           @event_callbacks << callback
         end
@@ -332,6 +333,22 @@ module MB
 
         rescue LoadError => e
           raise 'The Builder gem is required to generate ACID controller map XML'
+        end
+
+        # Returns a Hash from CC index to a description of the parameters controlled by that CC.
+        def cc_names
+          params = @parameters[MIDIMessage::ControlChange]&.map { |k, l| [k.last, l.map(&:first).map(&:user_description)] }&.to_h || {} # XXX
+
+          (@cc_thresholds.keys | params.keys).each do |idx|
+            desc = [*(params[idx] || []), *(@cc_thresholds[idx]&.map { |v| v[:description] } || [])].compact.uniq.join('; ')
+            if desc && !desc.empty?
+              params[idx] = desc
+            else
+              params.delete(idx)
+            end
+          end
+
+          params.to_h
         end
 
         private
