@@ -24,7 +24,7 @@ GIT
 PATH
   remote: .
   specs:
-    mb-sound (0.6.5.usegit)
+    mb-sound (0.6.6.usegit)
       cmath (~> 1.0.0)
       mb-math (>= 0.1.9.usegit)
       mb-util (>= 0.1.13.1.usegit)
