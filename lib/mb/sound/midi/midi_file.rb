@@ -37,11 +37,15 @@ module MB
           end
         end
 
+        # The MIDI filename that was given to the constructor.
+        attr_reader :filename
+
         # The index of the next MIDI event to read, when its timestamp has
         # elapsed.
         attr_reader :index
 
-        # The current plauback time within the MIDI file.  See #seek.
+        # The current playback time (in seconds) within the MIDI file.  See
+        # #seek.
         attr_reader :elapsed
 
         # The number of events that could be read.
@@ -55,14 +59,14 @@ module MB
         # account for sounds' decay times.
         attr_reader :duration
 
-        # The MIDI filename that was given to the constructor.
-        attr_reader :filename
-
         # The sequence object from the midilib gem that contains MIDI data from the file.
         attr_reader :seq
 
         # The full list of events that will be returned over time by #read.
         attr_reader :events
+
+        # The track index given to the constructor.
+        attr_reader :read_track
 
         # Reads MIDI data from the given +filename+.  Call #read repeatedly to
         # receive MIDI events based on elapsed time.
@@ -84,6 +88,7 @@ module MB
             @seq.read(f)
           end
 
+          @read_track = read_track
           track = @seq.tracks[read_track].dup
 
           if merge_tracks
@@ -100,6 +105,8 @@ module MB
 
           @index = 0
           @elapsed = 0
+
+          @notes = nil
         end
 
         # Returns information about each track in the underlying midilib
@@ -114,10 +121,135 @@ module MB
               event_channels: t.events.select { |v| v.is_a?(::MIDI::ChannelEvent) }.map(&:channel).uniq,
               channel: t.events.group_by { |v| v.is_a?(::MIDI::ChannelEvent) ? v.channel : nil }.max_by { |ch, events| events.count }[0],
               num_events: t.events.length,
-              num_notes: t.events.select { |v| v.is_a?(::MIDI::NoteEvent) }.length,
+              num_notes: t.events.select { |v| v.is_a?(::MIDI::NoteOn) }.length,
               duration: @seq.pulses_to_seconds(t.events.last.time_from_start)
             }
           }
+        end
+
+        # Returns an Array containing start and end times for all notes from
+        # the #read_track (or all tracks if track merging was specified),
+        # sorted by note start time.  These times do not account for variable
+        # tempo.
+        #
+        #     {
+        #       # The note channel (0-based)
+        #       channel: 0..15,
+        #
+        #       # The note number
+        #       note: 0..127,
+        #
+        #       # The note on and note off velocities
+        #       on_velocity: 0..127,
+        #       off_velocity: 0..127,
+        #
+        #       # The time when the note begins, in seconds, from the start of the file.
+        #       on_time: Float,
+        #
+        #       # The time when the note ends, in seconds, from the start of the file.
+        #       off_time: Float,
+        #
+        #       # If the sustain pedal was held when the note was released,
+        #       # then this is the time when the sustain pedal was released
+        #       # after the note was released.
+        #       sustain_time: Float,
+        #     }
+        def notes
+          return @notes if @notes
+
+          channels = 16.times.map {
+            {
+              sustain: false,
+              active_notes: {},
+            }
+          }
+          note_list = []
+
+          @events.each do |e|
+            next unless e.respond_to?(:channel)
+
+            event_time = @seq.pulses_to_seconds(e.time_from_start)
+            ch_info = channels[e.channel]
+            ch_notes = ch_info[:active_notes]
+
+            # TODO: This code has some similarity to code in the MIDI manager
+            # and VoicePool; see if that can be deduplicated.
+            case e
+            when ::MIDI::NoteOn
+              # Treat repeated note on events as a note off followed by note on
+              # (Alternatives could include counting the number of note ons,
+              # and waiting for that number of note offs)
+              existing_note = ch_notes[e.note]
+              if existing_note
+                existing_note[:off_velocity] ||= existing_note[:on_velocity]
+                existing_note[:off_time] ||= event_time
+                existing_note[:sustain_time] ||= event_time
+                note_list << existing_note
+              end
+
+              ch_notes[e.note] = {
+                channel: e.channel,
+                number: e.note,
+                on_velocity: e.velocity,
+                off_velocity: nil,
+                on_time: event_time,
+                off_time: nil,
+                sustain_time: nil,
+              }
+
+            when ::MIDI::NoteOff
+              existing_note = ch_notes[e.note]
+              if existing_note
+                # Using ||= in case of repeated note off events during a sustain
+                existing_note[:off_velocity] ||= e.velocity
+                existing_note[:off_time] ||= event_time
+
+                unless ch_info[:sustain]
+                  # If the sustain pedal isn't pressed, move the note into the completed note list
+                  existing_note[:sustain_time] ||= event_time
+                  note_list << existing_note
+                  ch_notes.delete(e.note)
+                end
+              end
+
+            when ::MIDI::Controller
+              if e.controller == 64 # sustain pedal is CC 64
+                # TODO: what about half/variable pedal?
+                # TODO: what about sostenuto?
+                if e.value >= 64
+                  ch_info[:sustain] = true
+                else
+                  ch_info[:sustain] = false
+
+                  ch_notes.select! { |_, n|
+                    if n[:off_time]
+                      # If the note has an off time, it was sustained.  Release it.
+                      n[:sustain_time] = event_time
+                      note_list << n
+
+                      false
+                    else
+                      # Keep notes without an off time
+                      true
+                    end
+                  }
+                end
+              end
+            end
+          end
+
+          # If any notes weren't released at the end, set their release times
+          # to the MIDI file duration
+          channels.each do |ch_info|
+            ch_info[:active_notes].each do |n|
+              n[:off_velocity] ||= n[:on_velocity]
+              n[:off_time] ||= @duration
+              n[:sustain_time] ||= @duration
+              note_list << n
+            end
+          end
+
+          @notes = note_list.sort_by! { |n| [n[:on_time], n[:channel], n[:number], n[:off_time], n[:velocity]] }
         end
 
         # Returns an Array of channels (0-based) used in the MIDI file.
@@ -200,8 +332,8 @@ module MB
           end
         end
 
-        # Sets the current time used by #read to +time+.  Negative values delay
-        # the start of playback.
+        # Sets the current time used by #read to +time+ (in seconds).  Negative
+        # values delay the start of playback.
         def seek(time)
           @elasped = time.to_f
           @start = @clock.clock_now - @elapsed

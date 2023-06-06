@@ -64,5 +64,19 @@ RSpec.describe(MB::Sound::MIDI::MIDIFile) do
     end
   end
 
+  describe '#notes' do
+    it 'returns an empty list for a MIDI file with no notes' do
+      m = MB::Sound::MIDI::MIDIFile.new('spec/test_data/key_signature.mid')
+      expect(m.notes.length).to eq(0)
+    end
+
+    it 'returns some notes for a MIDI file with notes' do
+      expect(seq.notes.length).to be > 0
+      expect(seq.notes[0]).to include(:number)
+    end
+
+    pending 'records sustain pedal durations'
+  end
+
   pending '#read'
 end
