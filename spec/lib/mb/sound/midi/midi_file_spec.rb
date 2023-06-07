@@ -75,8 +75,38 @@ RSpec.describe(MB::Sound::MIDI::MIDIFile) do
       expect(seq.notes[0]).to include(:number)
     end
 
-    pending 'records sustain pedal durations'
+    it 'returns min/mid/max for a MIDI file with all notes once' do
+      m = MB::Sound::MIDI::MIDIFile.new('spec/test_data/all_notes.mid')
+      expect(m.notes.length).to eq(128)
+      expect(m.notes[0][:number]).to eq(0)
+      expect(m.notes[-1][:number]).to eq(127)
+    end
   end
 
+  describe '#note_stats' do
+    it 'returns 64 for a MIDI file with no notes' do
+      m = MB::Sound::MIDI::MIDIFile.new('spec/test_data/empty.mid')
+      expect(m.note_stats).to eq([64, 64, 64])
+    end
+
+    it 'returns min/mid/max for a MIDI file with all notes once' do
+      m = MB::Sound::MIDI::MIDIFile.new('spec/test_data/all_notes.mid')
+      expect(m.note_stats).to eq([0, 64, 127])
+    end
+  end
+
+  describe '#track_note_stats' do
+    it 'returns all 64s for a track with no notes' do
+      expect(seq.track_note_stats(0)).to eq([64, 64, 64])
+    end
+
+    it 'returns note stats for a track with notes' do
+      expect(seq.track_note_stats(1)).to eq([68, 75, 80])
+    end
+  end
+
+  pending '#track_notes'
+  pending '#track_note_stats'
+  pending '#tracks'
   pending '#read'
 end
