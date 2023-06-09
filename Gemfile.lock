@@ -29,7 +29,7 @@ PATH
       mb-math (>= 0.1.9.usegit)
       mb-util (>= 0.1.13.1.usegit)
       midi-nibbler (~> 0.2.4)
-      midilib (~> 3.1.0)
+      midilib (~> 4.0.0)
       numo-narray (~> 0.9.1.8)
       numo-pocketfft (~> 0.2.2)
 
@@ -47,7 +47,7 @@ GEM
     midi-message (0.4.9)
     midi-nibbler (0.2.4)
       midi-message (~> 0.4, >= 0.4.4)
-    midilib (3.1.0)
+    midilib (4.0.0)
     numo-narray (0.9.1.9)
     numo-pocketfft (0.2.2)
       numo-narray (~> 0.9.1)

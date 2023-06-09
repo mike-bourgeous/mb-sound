@@ -35,7 +35,7 @@ Gem::Specification.new do |spec|
 
   spec.add_runtime_dependency 'midi-nibbler', '~> 0.2.4'
 
-  spec.add_runtime_dependency 'midilib', '~> 3.1.0'
+  spec.add_runtime_dependency 'midilib', '~> 4.0.0'
 
   spec.add_runtime_dependency 'mb-math', '>= 0.1.9.usegit'
   spec.add_runtime_dependency 'mb-util', '>= 0.1.13.1.usegit'
