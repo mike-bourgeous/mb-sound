@@ -88,6 +88,21 @@ RSpec.describe MB::Sound::Note do
       it 'produces a Tone that can be played' do
         expect(MB::Sound::Note.new(56).generate(1000).max).not_to eq(0)
       end
+
+      it 'can parse an Integer note number from a String' do
+        note = MB::Sound::Note.new('61')
+        expect(note.number).to eq(61)
+        expect(note.name).to eq('Cs4')
+        expect(note.fancy_name).to eq("C\u266f4")
+      end
+
+      it 'can parse a fractional note number from a String' do
+        note = MB::Sound::Note.new('63.12')
+        expect(note.number.round(5)).to eq(63)
+        expect(note.detune.round(5)).to eq(12)
+        expect(note.name).to eq('Eb4')
+        expect(note.fancy_name).to eq("E\u266d4")
+      end
     end
 
     context 'when given a Tone object' do
@@ -128,9 +143,23 @@ RSpec.describe MB::Sound::Note do
         end
       end
 
-      it 'can accept # or s for sharps' do
+      it 'can accept #, U+266f, or s for sharps' do
         expect(MB::Sound::Note.new('C#4').number).to eq(61)
         expect(MB::Sound::Note.new('Cs4').number).to eq(61)
+        expect(MB::Sound::Note.new("C\u266f4").number).to eq(61)
+      end
+
+      it 'can accept b or U+266d for flats' do
+        expect(MB::Sound::Note.new('Eb4').number).to eq(63)
+        expect(MB::Sound::Note.new("E\u266d4").number).to eq(63)
+      end
+
+      it 'can accept U+266e for neutrals' do
+        expect(MB::Sound::Note.new("E\u266e4").number).to eq(64)
+      end
+
+      it 'can accept U+266f for sharps' do
+        expect(MB::Sound::Note.new("F\u266f4").number).to eq(66)
       end
 
       it 'can translate a half-step accidental to the neighboring note' do
@@ -211,6 +240,48 @@ RSpec.describe MB::Sound::Note do
         expect(120.hz.to_note.detune.round(5)).to eq(0)
         expect(b4.frequency.round(5)).to eq(480)
       end
+    end
+
+    it 'raises an error if given an unsupported parameter for note creation' do
+      expect { MB::Sound::Note.new({ not: 'valid' }) }.to raise_error(ArgumentError, /Note from/)
+    end
+
+    context 'when given Unicode
+    it '
+  end
+
+  describe '#fancy_name' do
+    it 'uses U+266d for flat' do
+      expect(MB::Sound::Note.new('A3-51').fancy_name).to eq("A\u266d3")
+    end
+
+    it 'uses U+266f for sharp' do
+      expect(MB::Sound::Note.new('A3+51').fancy_name).to eq("A\u266f3")
+    end
+  end
+
+  describe '#white_key?' do
+    it 'returns true if there is no accidental' do
+      expect(MB::Sound::C3.white_key?).to eq(true)
+    end
+
+    it 'returns false if there is an accidental' do
+      expect(MB::Sound::Cs3.white_key?).to eq(false)
+    end
+
+    it 'returns true for C-flat and E-sharp' do
+      expect(MB::Sound::Cb3.white_key?).to eq(true)
+      expect(MB::Sound::Es3.white_key?).to eq(true)
+    end
+  end
+
+  describe '#black_key?' do
+    it 'returns false if there is no accidental' do
+      expect(MB::Sound::C3.black_key?).to eq(false)
+    end
+
+    it 'returns true if there is an accidental' do
+      expect(MB::Sound::Cs3.black_key?).to eq(true)
     end
   end
 end
