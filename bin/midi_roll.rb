@@ -4,7 +4,7 @@
 # Usage: $0 [options] midi_file.mid
 #
 # Example to scroll through a MIDI file:
-#     for f in `seq 0 1 60`; do bin/midi_roll.rb -s $f -e $((f+20)) song.mid ; done
+#     for f in `seq 0 1 60`; do bin/midi_roll.rb -s $f -d 20 song.mid ; done
 
 require 'bundler/setup'
 
@@ -59,11 +59,24 @@ max_note = min_note + options[:rows] - 1
 max_note = 127 if max_note > 127
 
 # TODO: Sometimes the median shouldn't be in the center, so if we have room to scroll, let's scroll
+# Probably something like this:
+# if all notes are within range, do nothing
+# if see how many notes we can get away with scrolling down
 
 puts "\e[1;33;44m#{f.filename} -- #{time_range}/#{f.duration.round(2)}s\e[K\e[0m"
 
+ruler = [' '] * (cols + 1) # FIXME: why is a note sometimes going beyond the end forcing adding 1?
+ruler_step = 30
+ruler_start = MB::M.round_to(time_range.begin, ruler_step)
+ruler_end = MB::M.round_to(time_range.end, ruler_step)
+for t in (ruler_start..ruler_end).step(30) do # TODO: scale ruler based on duration
+  c = MB::M.scale(t, time_range, col_range)
+  next unless col_range.cover?(c)
+  ruler[c] = "\e[38;5;237m\u250a"
+end
+
 for number in (max_note..min_note).step(-1) do
-  r = [' '] * (cols + 1) # FIXME: why is a note sometimes going beyond the end?
+  r = ruler.dup
   note = MB::Sound::Note.new(number)
 
   notes[number]&.each do |n|

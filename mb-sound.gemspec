@@ -37,7 +37,7 @@ Gem::Specification.new do |spec|
 
   spec.add_runtime_dependency 'midilib', '~> 4.0.0'
 
-  spec.add_runtime_dependency 'mb-math', '>= 0.1.9.usegit'
+  spec.add_runtime_dependency 'mb-math', '>= 0.1.10.usegit'
   spec.add_runtime_dependency 'mb-util', '>= 0.1.16.usegit'
 
   # For generating MIDI controller templates for ACID
