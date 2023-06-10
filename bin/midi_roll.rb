@@ -46,15 +46,19 @@ for number in min_note..max_note do
     end
 
     # key release
-    r[c2] = "#{gray}\u256f"
+    if n[:sustain_time] > n[:off_time]
+      r[c2] = "#{gray}\u2539"
+    else
+      r[c2] = "#{gray}\u251b"
+    end
 
     # key sustain
     for c in (c1 + 1)...c2 do
-      r[c] = "#{gray}\u2500"
+      r[c] = "#{gray}\u2501"
     end
 
     # key press
-    r[c1] = "#{gray}\u2570"
+    r[c1] = "#{gray}\u2517"
   end
 
   bg = note.black_key? ? "\e[48;5;232m\e[38;5;253m" : "\e[48;5;236m\e[38;5;250m"
