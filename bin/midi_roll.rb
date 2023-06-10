@@ -80,8 +80,8 @@ for number in (max_note..min_note).step(-1) do
     c3 = cols + 1 if c3 > cols + 1
 
     velocity_value = MB::M.scale(n[:on_velocity], 0..127, 0.3..0.8)
-    channel_hue = MB::M.scale(n[:channel], 0..15, 0.333333..1.333333)
-    color = MB::U.hsv(channel_hue, 0.5, velocity_value)
+    channel_hue = MB::M.scale(n[:channel] * 11, 0..15, 0.333333..1.333333)
+    color = MB::U.hsv(channel_hue, (n[:channel] % 3) * 0.2 + 0.4, velocity_value)
 
     # pedal sustain
     for c in (c2 + 1)..c3 do
