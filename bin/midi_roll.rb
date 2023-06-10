@@ -36,23 +36,30 @@ for number in min_note..max_note do
     c2 = (cols_per_sec * n[:off_time]).floor
     c3 = (cols_per_sec * n[:sustain_time]).floor
 
-    # TODO: color
+    gray = "\e[38;5;#{n[:on_velocity] * 10 / 127 + 238}m"
 
+    # TODO: color by channel, better symbols
+
+    # pedal sustain
     for c in (c2 + 1)..c3 do
-      r[c] = '.'
+      r[c] = "#{gray}\u254c"
     end
 
-    r[c2] = '_'
+    # key release
+    r[c2] = "#{gray}\u256f"
 
+    # key sustain
     for c in (c1 + 1)...c2 do
-      r[c] = '-'
+      r[c] = "#{gray}\u2500"
     end
 
-    r[c1] = '|'
+    # key press
+    r[c1] = "#{gray}\u2570"
   end
 
-  bg = note.accidental ? "\e[48;5;232m" : "\e[48;5;236m"
-  puts "\e[1m#{bg}#{number.to_s.rjust(3)}\e[22m #{r.join}\e[0m"
+  bg = note.black_key? ? "\e[48;5;232m\e[38;5;253m" : "\e[48;5;236m\e[38;5;250m"
+  puts "\e[1m#{bg}#{number.to_s.rjust(3)} #{note.fancy_name.ljust(4)}\e[22m #{r.join}\e[0m"
 end
 
 # TODO: Maybe allow playing the MIDI file and showing a cursor?
+# TODO: Allow specifying a page size in seconds for either playback or keyboard-interactive scrolling
