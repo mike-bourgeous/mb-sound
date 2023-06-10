@@ -54,7 +54,11 @@ notes = f.notes.group_by { |n| n[:number] }
 # Determine note offset based on note stats and window size
 _min, mid, _max = f.note_stats
 min_note = options[:'min-note']&.number || mid - options[:rows] / 2
+min_note = 0 if min_note < 0
 max_note = min_note + options[:rows] - 1
+max_note = 127 if max_note > 127
+
+# TODO: Sometimes the median shouldn't be in the center, so if we have room to scroll, let's scroll
 
 puts "\e[1;33;44m#{f.filename} -- #{time_range}/#{f.duration.round(2)}s\e[K\e[0m"
 
