@@ -81,6 +81,8 @@ RSpec.describe(MB::Sound::MIDI::MIDIFile) do
       expect(m.notes[0][:number]).to eq(0)
       expect(m.notes[-1][:number]).to eq(127)
     end
+
+    pending 'returns sustain pedal release times with notes'
   end
 
   describe '#note_stats' do
@@ -106,7 +108,6 @@ RSpec.describe(MB::Sound::MIDI::MIDIFile) do
   end
 
   pending '#track_notes'
-  pending '#track_note_stats'
   pending '#tracks'
   pending '#read'
 end
