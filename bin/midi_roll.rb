@@ -31,11 +31,14 @@ OptionParser.new { |p|
   p.on('-d', '--duration SECONDS', Float, 'Duration to display after start time, in seconds (default is end of song)')
 }.parse!(into: options)
 
-f = MB::Sound::MIDI::MIDIFile.new(ARGV[0])
-
 if options[:'end-time'] && options[:duration]
   raise 'Specify one of --end-time or --duration, or neither, but not both'
 end
+
+filename = ARGV[0]
+raise 'Specify a MIDI file to display' unless filename
+raise "MIDI file #{filename.inspect} not found" unless File.readable?(filename)
+f = MB::Sound::MIDI::MIDIFile.new(filename)
 
 options[:'start-time'] ||= 0.0
 options[:'end-time'] ||= options[:'start-time'] + options[:duration] if options[:duration]
@@ -50,7 +53,7 @@ notes = f.notes.group_by { |n| n[:number] }
 
 # Determine note offset based on note stats and window size
 _min, mid, _max = f.note_stats
-min_note = options[:min_note] || mid - options[:rows] / 2
+min_note = options[:'min-note']&.number || mid - options[:rows] / 2
 max_note = min_note + options[:rows] - 1
 
 puts "\e[1;33;44m#{f.filename} -- #{time_range}/#{f.duration.round(2)}s\e[K\e[0m"
