@@ -5,29 +5,41 @@
 
 require 'bundler/setup'
 
+require 'optparse'
+
 require 'mb-sound'
+
+options = {
+  rows: MB::U.height - 3,
+  columns: MB::U.width,
+}
+OptionParser.new { |p|
+  p.banner = "Usage: \e[1m#{$0}\e[0m [options] midi_file"
+
+  p.accept(MB::Sound::Note) do |note|
+    MB::Sound::Note.new(note)
+  end
+
+  p.on('-r', '--rows ROWS', Integer, 'Specify the number of notes to display (defaults to terminal height - 2)')
+  p.on('-c', '--columns COLUMNS', Integer, 'Specify the number of columns to use (defaults to terminal width)')
+  p.on('-n', '--min-note NOTE', MB::Sound::Note, 'Specify the lowest note to display (number or name) (defaults to centering around median note)')
+}.parse!(into: options)
 
 f = MB::Sound::MIDI::MIDIFile.new(ARGV[0])
 
 notes = f.notes.group_by { |n| n[:number] }
 
-# Determine scaling and offset for window
-# TODO: use median note
-min_note = notes.keys.min
-max_note = notes.keys.max
+# Determine note offset based on note stats and window size
+_min, mid, _max = f.note_stats
+min_note = options[:min_note] || mid - options[:rows] / 2
+max_note = min_note + options[:rows]
 
-return if min_note.nil?
-
-if max_note - min_note >= MB::U.height
-  min_note = max_note - MB::U.height
-  min_note = 0 if min_note < 0
-  max_note = min_note + MB::U.height if max_note > min_note + MB::U.height
-end
-
-cols = MB::U.width - 5
+cols = options[:columns] - 10
 cols_per_sec = cols / f.notes.map { |n| n[:sustain_time] }.max
 
-for number in min_note..max_note do
+puts "\e[1;33;44m#{f.filename} -- #{f.duration.round(2)}s\e[K\e[0m"
+
+for number in (max_note..min_note).step(-1) do
   r = [' '] * (cols + 1) # FIXME: why is a note sometimes going beyond the end?
   note = MB::Sound::Note.new(number)
 
