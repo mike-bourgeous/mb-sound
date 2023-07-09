@@ -15,6 +15,7 @@ require 'mb-sound'
 options = {
   rows: MB::U.height - 2,
   columns: MB::U.width,
+  channel: -1,
 }
 OptionParser.new { |p|
   p.banner = "Usage: \e[1m#{$0}\e[0m [options] midi_file\n-e and -d are mutually exclusive"
@@ -29,16 +30,23 @@ OptionParser.new { |p|
   p.on('-s', '--start-time SECONDS', Float, 'Offset within song to start displaying notes, in seconds (default is 0)')
   p.on('-e', '--end-time SECONDS', Float, 'Offset within song to stop displaying notes, in seconds (default is end of song)')
   p.on('-d', '--duration SECONDS', Float, 'Duration to display after start time, in seconds (default is end of song)')
+  p.on('--channel CHANNEL', Integer, 'MIDI channel to display (1..16, or -1 for all channels (default))')
 }.parse!(into: options)
 
 if options[:'end-time'] && options[:duration]
   raise 'Specify one of --end-time or --duration, or neither, but not both'
 end
 
+channel = options[:channel] - 1
+channel = nil if channel == -2
+raise 'MIDI channel must be an integer from 1 to 16, or -1' if channel && !1..16.cover(channel)
+
 filename = ARGV[0]
 raise 'Specify a MIDI file to display' unless filename
 raise "MIDI file #{filename.inspect} not found" unless File.readable?(filename)
 f = MB::Sound::MIDI::MIDIFile.new(filename)
+
+notes = f.notes.select { |n| channel.nil? || n[:channel] == channel + 1 }.group_by { |n| n[:number] }
 
 options[:'start-time'] ||= 0.0
 options[:'end-time'] ||= options[:'start-time'] + options[:duration] if options[:duration]
@@ -49,10 +57,8 @@ raise "Start time #{options[:'start-time']} must be before end time #{options[:'
 cols = options[:columns] - 10
 col_range = 0..cols
 
-notes = f.notes.group_by { |n| n[:number] }
-
 # Determine note offset based on note stats and window size
-_min, mid, _max = f.note_stats
+_min, mid, _max = f.note_stats(channel: channel)
 min_note = options[:'min-note']&.number || mid - options[:rows] / 2
 min_note = 0 if min_note < 0
 max_note = min_note + options[:rows] - 1

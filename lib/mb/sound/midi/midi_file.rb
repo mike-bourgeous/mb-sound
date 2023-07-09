@@ -108,6 +108,7 @@ module MB
 
           @notes = nil
           @note_stats = nil
+          @note_channel_stats = []
         end
 
         # Returns information about each track in the underlying midilib
@@ -189,8 +190,15 @@ module MB
         #
         # This may be useful for setting an initial scroll position of a piano
         # roll display, for example.
-        def note_stats
-          @note_stats ||= note_list_stats(notes)
+        #
+        # If +:channel+ is not nil, then only stats for notes on the given
+        # channel are returned.
+        def note_stats(channel: nil)
+          if channel
+            @note_channel_stats[channel] ||= note_list_stats(notes, channel: channel)
+          else
+            @note_stats ||= note_list_stats(notes)
+          end
         end
 
         # Returns an Array of channels (0-based) used in the MIDI file.
@@ -432,9 +440,11 @@ module MB
           notes
         end
 
-        # Returns min, median, and max note numbers from the given list of notes, or 64 for each value if the list is empty.
-        def note_list_stats(notes)
-          numbers = notes.map { |n| n[:number] }.sort
+        # Returns min, median, and max note numbers from the given list of
+        # notes, or 64 for each value if the list is empty.  Filters to notes
+        # on the given +:channel+ (0-based) if +:channel+ is not nil.
+        def note_list_stats(notes, channel: nil)
+          numbers = notes.select { |n| channel.nil? || n[:channel] == channel }.map { |n| n[:number] }.sort
 
           [
             numbers[0] || 64,
