@@ -27,6 +27,9 @@ NAME_MAP = {
   num_events: 'Events',
   num_notes: 'Notes',
   duration: 'Duration',
+  min_note: "Min \u2669",
+  mid_note: "Med \u2669",
+  max_note: "Max \u2669",
 }.freeze
 
 track_info = f.tracks.reduce({}) { |h, t|
@@ -39,8 +42,6 @@ track_info = f.tracks.reduce({}) { |h, t|
   h
 }
 
-msg = "#{File.basename(f.filename)}: \e[1m#{title}\e[0m"
-len = MB::U.remove_ansi(msg).length
-puts '', msg, '-' * len, ''
-
-puts MB::U.table(track_info, variable_width: true)
+MB::U.headline("#{File.basename(f.filename)}: \e[1m#{title}\e[0m")
+puts
+MB::U.table(track_info, variable_width: true)

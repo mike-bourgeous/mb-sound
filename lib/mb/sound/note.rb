@@ -34,6 +34,9 @@ module MB
 
       attr_reader :number, :name, :accidental, :detune, :octave
 
+      # Name and accidental using Unicode U+266d and U+266f instead of letters.
+      attr_reader :fancy_name, :fancy_accidental
+
       # The name of the key without any accidental (A, B, C, D, E, F, or G).
       attr_reader :base_name
 
@@ -47,16 +50,15 @@ module MB
 
       # Initializes a note of the given MIDI note number, the note name with
       # octave, or a Tone object.  Note names look like 'C0', 'As2', 'Gb3'.
-      # Flats are denoted with b, sharps with s or '#'.
+      # Flats are denoted with 'b' or U+266D, sharps with 's', '#', or U+266F.
       def initialize(tone_name_number)
         case tone_name_number
-        when Numeric
+        when Numeric, /\A\d+(\.\d+)?\z/
           # Note number
-          set_number(tone_name_number)
+          set_number(tone_name_number.to_f)
           super(frequency: get_freq)
 
         when String, Symbol
-          name = tone_name_number.to_s
           set_name(tone_name_number.to_s)
           super(frequency: get_freq)
 
@@ -106,7 +108,7 @@ module MB
       # Sets note name, number, and detuning from a note name string.
       def set_name(name)
         # =~ sets $1, $2, etc.
-        unless name =~ /\A([A-G])([s#b]?)(-?[0-9])([+-]\d+(\.\d+)?)?\z/
+        unless name =~ /\A([A-G])([s#b\u266d\u266e\u266f]?)(-?[0-9])([+-]\d+(\.\d+)?)?\z/
           raise ArgumentError, "Invalid note name format #{name}"
         end
 
@@ -116,9 +118,9 @@ module MB
         detune = $4&.to_f || 0
         octave_cents = NOTE_CENTS[note.to_sym]
         case accidental
-        when 's', '#'
+        when 's', '#', "\u266f"
           octave_cents += 100.0
-        when 'b'
+        when 'b', "\u266d"
           octave_cents -= 100.0
         end
 
@@ -144,13 +146,17 @@ module MB
         offset = (octave_cents - NOTE_CENTS[note_name]).round(2)
         if offset < -50
           accidental = 'b'
+          fancy_accidental = "\u266d"
         elsif offset > 50
           accidental = 's'
+          fancy_accidental = "\u266f"
         end
 
         @name = "#{note_name}#{accidental}#{octave}"
+        @fancy_name = "#{note_name}#{fancy_accidental}#{octave}"
         @base_name = note_name
         @accidental = accidental
+        @fancy_accidental = fancy_accidental
         @white_key = accidental.nil? || accidental.empty?
         @black_key = !@white_key
         @number = @number.to_i

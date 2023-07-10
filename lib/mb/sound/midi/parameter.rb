@@ -240,10 +240,10 @@ module MB
           @value = MB::M.scale(@raw_value, @raw_range, @range)
         end
 
-        # Sets the input-range raw value of the parameter (e.g. for use when a
-        # MIDI message object is not available for #notify), clamping to the
-        # input range.  Smoothing and filtering will still apply in #value,
-        # which should still be called at the update rate.
+        # Sets the input-range (e.g. MIDI) raw value of the parameter (e.g. for
+        # use when a MIDI message object is not available for #notify),
+        # clamping to the input range.  Smoothing and filtering will still
+        # apply in #value, which should still be called at the update rate.
         def raw_value=(raw)
           @raw_value = MB::M.clamp(raw, @raw_min, @raw_max)
           @value = MB::M.scale(@raw_value, @raw_range, @range)

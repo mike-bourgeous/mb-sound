@@ -70,6 +70,9 @@ play '/tmp/ramp.flac'
 # Some hi-hat rhythms
 play 1000.hz.sine.noise.at(-30.db).filter(7000.hz.highpass(quality: 10)).filter(12345.hz.lowpass(quality: 4)) * (1.25.hz.ramp.with_phase(Math::PI).at(0..-60).db + 2.5.hz.ramp.at(-10..-70).db)
 play 1000.hz.sine.noise.at(-30.db).filter(7000.hz.highpass(quality: 10)).filter(12345.hz.lowpass(quality: 4)) * (5.hz.ramp.with_phase(Math::PI).at(0..-60).db + 5.hz.ramp.at(-10..-70).db).forever
+
+# Heavily distorted synth kick
+play (2.5.hz.ramp.at(1.85) ** 13).filter(10.hz.highpass).softclip(0.1, 0.6).filter(cutoff: 2.5.hz.ramp.at(1..0) ** 10 * 0.2.hz.sine.at(120..300) + 40, quality: 14).filter(40.hz.highpass).softclip.forever
 ```
 
 ## Examples
@@ -310,6 +313,36 @@ midi.mid: Unnamed
 ---+---------+-------+----------+-----------+--------+-------
  0 | Unnamed |       | []       | []        | 3      | 0
  1 | Unnamed |       | [0]      | [0]       | 32     | 26
+```
+
+#### `bin/midi_roll.rb`
+
+This draws a MIDI piano roll to the terminal, with each channel getting its own
+color.
+
+```bash
+bin/midi_roll.rb --help
+
+bin/midi_roll.rb -r 15 -c 80 spec/test_data/midi.mid
+```
+
+```
+spec/test_data/midi.mid -- 0.0..6.857136/6.86s
+ 82 A♯5  ┊
+ 81 A5   ┊
+ 80 G♯5  ┗━━━━━━━━━━━━━━━━┛                 ┗━━━━━━━━━━━━━━━━┗━━━━━━━━━━━━━━━━━┛
+ 79 G5   ┊                ┗━━━━━━━━━━━━━━━━━┛
+ 78 F♯5  ┊
+ 77 F5   ┊                                  ┗━━━━━━━━━━━━━━━━┛
+ 76 E5   ┊
+ 75 D♯5  ┗━━━━━━━━━━━━━━━━┗━━━━━━━━━━━━━━━━━┛                ┗━━━━━━━━━━━━━━━━━┛
+ 74 D5   ┊
+ 73 C♯5  ┊                                  ┗━━━━━━━━━━━━━━━━┛
+ 72 C5   ┗━━━━━━━━━━━━━━━━┗━━━━━━━━━━━━━━━━━┛                ┗━━━━━━━━━━━━━━━━━┛
+ 71 B4   ┊
+ 70 A♯4  ┊
+ 69 A4   ┊
+ 68 G♯4  ┊                                                   ┗━━━━━━━━━━━━━━━━━┛
 ```
 
 #### `bin/midi_cc_chart.rb`

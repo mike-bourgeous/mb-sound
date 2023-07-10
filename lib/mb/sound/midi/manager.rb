@@ -35,6 +35,7 @@ module MB
         #            pass 9 to listen to the drum channel, for example.
         def initialize(jack: MB::Sound::JackFFI[], input: nil, port_name: 'midi_in', connect: nil, update_rate: nil, channel: ENV['CHANNEL']&.to_i)
           @parameters = {}
+          @named_parameters = {}
           @event_callbacks = []
           @note_callbacks = []
           @update_callbacks = []
@@ -81,6 +82,24 @@ module MB
         def close
           @midi_in.close
           @midi_in = nil
+        end
+
+        # Sets all parameters (such as created by #on_cc or #on_bend) having
+        # the given :description to the given :midi_value (corresponding to
+        # Parameter#raw_value=), or :value (corresponding to Parameter#value=).
+        def set_parameter(description:, midi_value: nil, value: nil)
+          raise 'Specify either midi_value or value, but not both' if midi_value.nil? == value.nil?
+
+          plist = @named_parameters[description]
+          raise "Parameter named #{description} not found" if plist.nil? || plist.empty?
+
+          if midi_value
+            plist.each do |p| p.raw_value = midi_value end
+          else
+            plist.each do |p| p.value = value end
+          end
+
+          nil
         end
 
         # Adds a callback to receive raw MIDI events (these will be event
@@ -247,6 +266,9 @@ module MB
           @parameters[message_template.class] ||= {}
           @parameters[message_template.class][new_parameter.hash_key] ||= []
           @parameters[message_template.class][new_parameter.hash_key] << [new_parameter, callback]
+
+          @named_parameters[description] ||= []
+          @named_parameters[description] << new_parameter
 
           case message_template
           when MIDIMessage::ControlChange
