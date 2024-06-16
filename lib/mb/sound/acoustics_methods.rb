@@ -40,6 +40,71 @@ module MB
         # TODO: derive an RT60 from whatever decay we do find?
         raise ArgumentError, "Signal never reaches #{level.to_db}; minimum is #{(decay_val / peak_val).to_db}"
       end
+
+      # Returns a list of offsets with positive and negative peaks between zero
+      # crossings.
+      #
+      # TODO: This probably belongs in a different class/module.
+      def peak_list(data)
+        return data.map { |c| peak_envelope(data) } if data.is_a?(Array)
+        raise 'Data must be a 1D Numo::NArray' unless data.is_a?(Numo::NArray) && data.ndim == 1
+
+        # { index: Integer, value: Float }
+        peak_list = []
+
+        prior_val = data[0]
+        prior_max_val = data[0]
+        prior_max_idx = 0
+        max_val = data[0]
+        max_idx = 0
+
+        # TODO: include zero crossings in the list too?
+        # TODO: maybe create a distortion/low-pass filter that interpolates
+        # between peaks, or between peaks and zeros
+        data.each_with_index do |v, idx|
+          if (idx == 1 && (prior_val > 0 && v < 0) || (prior_val < 0 && v > 0)) || (idx > 1 && prior_val >= 0 != v >= 0)
+            # Sign changed; record the last peak
+            peak_list << { index: max_idx, value: max_val }
+            prior_max_val = max_val
+            prior_max_idx = max_idx
+            max_idx = idx
+            max_val = v
+          end
+
+          if v.abs > max_val.abs
+            max_idx = idx
+            max_val = v
+          end
+
+          prior_val = v
+        end
+
+        if max_idx != prior_max_idx && max_val != 0
+          # Record the last peak
+          peak_list << { index: max_idx, value: max_val }
+        end
+
+        peak_list
+      end
+
+      # Generates an envelope from the given +data+ by looking for peaks
+      # between zero crossings and interpolating between them.
+      def peak_envelope(data, include_negative: true)
+        return data.map { |c| peak_envelope(data) } if data.is_a?(Array)
+        raise 'Data must be a 1D Numo::NArray' unless data.is_a?(Numo::NArray) && data.ndim == 1
+
+        peaks = peak_list(data)
+        peaks.select! { |p| p[:value] > 0 } unless include_negative
+
+        raise NotImplementedError, 'TODO'
+
+        # TODO
+        # include first data value if first peak is not at start
+        # include last data value if last peak is not at end
+        # if only two peaks, interpolate using smootherstep?
+        # if three to four (six?) peaks, interpolate using ????
+        # if four or more peaks (six or more?), interpolate using catmull-rom
+      end
     end
   end
 end
