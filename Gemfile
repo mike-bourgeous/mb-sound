@@ -12,8 +12,6 @@ gem 'cmath'
 gem 'numo-narray'
 
 # Interactive command line gems
-gem 'pry'
-gem 'pry-byebug'
 gem 'pry-doc'
 gem 'word_wrap'
 
