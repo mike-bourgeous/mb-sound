@@ -92,18 +92,41 @@ module MB
       def peak_envelope(data, include_negative: true)
         return data.map { |c| peak_envelope(data) } if data.is_a?(Array)
         raise 'Data must be a 1D Numo::NArray' unless data.is_a?(Numo::NArray) && data.ndim == 1
+        raise 'Data must not be empty' if data.empty?
 
         peaks = peak_list(data)
-        peaks.select! { |p| p[:value] > 0 } unless include_negative
+        peaks.select! { |p| p[:value] >= 0 } unless include_negative
 
-        raise NotImplementedError, 'TODO'
+        keyframes = []
 
-        # TODO
-        # include first data value if first peak is not at start
-        # include last data value if last peak is not at end
-        # if only two peaks, interpolate using smootherstep?
-        # if three to four (six?) peaks, interpolate using ????
-        # if four or more peaks (six or more?), interpolate using catmull-rom
+        if peaks.empty? || peaks[0][:index] > 0
+          # Add the first value as a keyframe if there isn't a peak there
+          keyframes << { time: 0, data: [data[0].abs] }
+        end
+
+        keyframes.concat(
+          peaks.map { |p|
+            {
+              time: p[:index],
+              data: [p[:value].abs],
+            }
+          }
+        )
+
+        if peaks.empty? || peaks[-1][:index] < (data.length - 1) && data.length > 1
+          # Add the last value as a keyframe if there isn't a peak there
+          keyframes << { time: data.length - 1, data: [data[-1].abs] }
+        end
+
+        # FIXME: Catmull-Rom returns nans in the specs
+        interp = TimelineInterpolator.new(keyframes, default_blend: :catmull_rom)
+
+        result = Numo::SFloat.new(data.length).allocate
+        result.each_with_index do |v, idx|
+          result[idx] = interp.value(idx)
+        end
+
+        result
       end
     end
   end

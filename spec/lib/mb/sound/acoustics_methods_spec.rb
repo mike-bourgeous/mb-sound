@@ -60,4 +60,16 @@ RSpec.describe(MB::Sound::AcousticsMethods, aggregate_failures: true) do
       expect(MB::Sound.peak_list(data)).to eq([{ index: 3, value: -3 }])
     end
   end
+
+  describe '#peak_envelope' do
+    it 'returns expected envelope for very simple data' do
+      data = Numo::SFloat[-1, 1, -1, 1]
+      expect(MB::Sound.peak_envelope(data)).to eq(Numo::SFloat[1, 1, 1, 1])
+    end
+
+    it 'skips negative peaks if requested' do
+      data = Numo::SFloat[-1, 1, -3, 1]
+      expect(MB::Sound.peak_envelope(data, include_negative: false)).to eq(Numo::SFloat[1, 1, 1, 1]) # XXX true
+    end
+  end
 end
