@@ -13,7 +13,7 @@ module MB
       #
       # Returns the number of seconds to reach the given ratio, or raises an
       # error if that level is never reached.
-      def rt60(data, level: -60.dB, rate: 48000)
+      def rt60(data, level: -60.dB, rate: 48000, mode: :regression)
         return data.map { |c| rt60(c, level: level) } if data.is_a?(Array)
         raise 'Data must be a 1D Numo::NArray' unless data.is_a?(Numo::NArray) && data.ndim == 1
 
@@ -38,19 +38,42 @@ module MB
         #     => 0.6385493657348943
 
         # XXX analytic_signal(data).abs
-        asig = peak_envelope(data, monotonic: true, blend: :linear)
-        peak_idx = asig.max_index
-        peak_val = asig[peak_idx]
-        target_val = peak_val * level
+        case mode
+        when :peak_envelope
+          asig = peak_envelope(data, monotonic: true, blend: :linear)
+          peak_idx = asig.max_index
+          peak_val = asig[peak_idx]
+          target_val = peak_val * level
 
-        decay_val = peak_val
-        asig[peak_idx..].each_with_index do |d, idx|
-          decay_val = d
-          return idx.to_f / rate if decay_val <= target_val
+          decay_val = peak_val
+          asig[peak_idx..].each_with_index do |d, idx|
+            decay_val = d
+            return idx.to_f / rate if decay_val <= target_val
+          end
+
+          # TODO: derive an RT60 from whatever decay we do find?
+          raise ArgumentError, "Signal never reaches #{level.to_db}; minimum is #{(decay_val / peak_val).to_db}"
+
+        when :regression
+          denv = peak_envelope(data, monotonic: true, blend: :linear)
+          dsq = denv.map { |v| v.to_db }
+          peak_idx = dsq.max_index
+          post_peak = dsq[peak_idx..]
+          min_idx = post_peak.min_index
+          tail = post_peak[0..min_idx]
+          # TODO: the fit is better at min_idx / 2; look for a way to detect the end of the decay tail and/or noise floor
+
+          m, _b = MB::M.linear_regression(tail)
+
+          # RT60 is seconds per -60dB, m is dB per sample, rate is samples per second
+          rt60 = level.to_db / (m * rate)
+
+          puts rt60
+
+          return rt60
         end
 
-        # TODO: derive an RT60 from whatever decay we do find?
-        raise ArgumentError, "Signal never reaches #{level.to_db}; minimum is #{(decay_val / peak_val).to_db}"
+        raise NotImplementedError, 'BUG: unsupported mode or mode code did not return'
       end
 
       # Returns a list of offsets with positive and negative peaks between zero
