@@ -20,13 +20,25 @@ module MB
         # Some other ideas:
         # - find peak, then calculate a series of RT20, do the appropriate mean
         #   (geometric?  arithmetic probably), and convert to RT60
+        # - fit a line to the logarithm of the envelope, convert the slope of
+        #   the line into an RT60
 
         # Convert to instantaneous magnitude form
         # FIXME: analytic_signal drastically changes the envelope
         # FIXME: e.g. analytic_signal(Numo::SFloat.logspace(0, -4, 48000) *
         # FIXME: 123.Hz.sample(48000)) ends with analytic signal around 0.2, not
         # FIXME: 0.0001.
-        asig = peak_envelope(data, monotonic: true, blend: :linear)  # XXX analytic_signal(data).abs
+        # But this looks totally reasonable:
+        #     k = MB::M.zpad(1234.hz.sample(48000) * Numo::SFloat.logspace(0, -4, 48000), 96000, alignment: 0.5) { |z| analytic_signal(z) }
+        #     plot [k.real.abs.map { |v| Math.log(v) }, k.imag.abs.map { |v| Math.log(v) }, k.abs.map { |v| Math.log(v) }], samples: 48000, graphical: true
+        # and there's a consistent ratio for this test between analytic abs and real or imag abs
+        #     k[0..1000].real.abs.mean / k[0..1000].abs.mean
+        #     => 0.6366188230703546
+        #     k[10000..11000].real.abs.mean / k[10000..11000].abs.mean
+        #     => 0.6385493657348943
+
+        # XXX analytic_signal(data).abs
+        asig = peak_envelope(data, monotonic: true, blend: :linear)
         peak_idx = asig.max_index
         peak_val = asig[peak_idx]
         target_val = peak_val * level
