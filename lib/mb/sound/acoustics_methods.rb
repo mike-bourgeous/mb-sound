@@ -26,7 +26,7 @@ module MB
         # FIXME: e.g. analytic_signal(Numo::SFloat.logspace(0, -4, 48000) *
         # FIXME: 123.Hz.sample(48000)) ends with analytic signal around 0.2, not
         # FIXME: 0.0001.
-        asig = analytic_signal(data).abs
+        asig = peak_envelope(data, monotonic: true, blend: :linear)  # XXX analytic_signal(data).abs
         peak_idx = asig.max_index
         peak_val = asig[peak_idx]
         target_val = peak_val * level
@@ -92,6 +92,8 @@ module MB
       # Returns the index (within the peaks array, not within the data) of the
       # largest peak by absolute value in the list of +peaks+.
       def peak_max_index(peaks)
+        return 0 if peaks.nil? || peaks.empty?
+
         # Writing the loop directly is 1.3x-1.5x faster than
         # .each_with_index.max_by, and 2.6x-2.7x faster than .rindex(.max).
         max_idx = 0
@@ -99,7 +101,7 @@ module MB
 
         peaks.each_with_index do |v, idx|
           val = v[:value].abs
-          if val > max_val
+          if val >= max_val
             max_val = val
             max_idx = idx
           end
@@ -111,6 +113,8 @@ module MB
       # Returns the index (within the peaks array, not within the data) of the
       # smallest peak by absolute value in the list of +peaks+.
       def peak_min_index(peaks)
+        return 0 if peaks.nil? || peaks.empty?
+
         min_idx = 0
         min_val = peaks[0][:value].abs
 
@@ -142,6 +146,8 @@ module MB
 
         peaks = peak_list(data)
 
+        raise 'No peaks found' if peaks.nil? || peaks.empty?
+
         monotonic_peaks = []
 
         # TODO: Would it be possible to merge the search for these into a single iteration?  We could at least merge pre_min and max, and could maybe also get the post-peak min by resetting that min search every time we find a new max.
@@ -152,12 +158,13 @@ module MB
         monotonic_peaks << peaks[pre_min]
 
         # Rise to peak
-        prior = peaks[pre_min]
+        prior = peaks[pre_min][:value].abs
         for idx in (pre_min + 1)...max_peak do
           p = peaks[idx]
-          if p[:value] > prior[:value]
+          val = p[:value].abs
+          if val.abs >= prior
             monotonic_peaks << p
-            prior = p
+            prior = val
           end
         end
 
@@ -165,12 +172,13 @@ module MB
 
         # Fall from peak
         tail_peaks = []
-        prior = peaks[post_min]
+        prior = peaks[post_min][:value].abs
         for idx in (post_min - 1).downto(max_peak + 1) do
           p = peaks[idx]
-          if p[:value] > prior[:value]
+          val = p[:value].abs
+          if val.abs >= prior
             tail_peaks << p
-            prior = p
+            prior = val
           end
         end
 
@@ -187,6 +195,9 @@ module MB
         raise 'Data must be a 1D Numo::NArray' unless data.is_a?(Numo::NArray) && data.ndim == 1
         raise 'Data must not be empty' if data.empty?
 
+        # TODO: A monotonic envelope finder could operate on raw data instead
+        # of the peak list, allowing finding envelopes for things that never
+        # cross zero.
         peaks = monotonic ? monotonic_peak_list(data) : peak_list(data)
         peaks.select! { |p| p[:value] >= 0 } unless include_negative
 
@@ -212,6 +223,9 @@ module MB
         end
 
         # FIXME: Catmull-Rom returns nans in the specs
+        # FIXME: Catmull-Rom just looks like linear when plotted
+        # data = 1000.hz.lowpass.process(noise.sample(48000) * Numo::SFloat.logspace(0, -4, 48000))
+        # plot peak_envelope(data, blend: :catmull_rom, monotonic: true), graphical: true, samples: 4800000
         interp = TimelineInterpolator.new(keyframes, default_blend: blend)
 
         result = Numo::SFloat.new(data.length).allocate
