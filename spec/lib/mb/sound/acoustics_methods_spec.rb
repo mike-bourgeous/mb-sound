@@ -1,8 +1,9 @@
 RSpec.describe(MB::Sound::AcousticsMethods, aggregate_failures: true) do
   describe '#rt60' do
     it 'defaults to -60dB and a sample rate of 48kHz' do
-      data = Numo::SFloat.logspace(0, -4, 48000)
-      expect(MB::Sound.rt60(data)).to be_within(0.05).of(0.75)
+      # FIXME: want to be able to omit the oscillation and get RT60 for an envelope too
+      data = 123.hz.sample(48000) * Numo::SFloat.logspace(0, -4, 48000)
+      expect(MB::Sound.rt60(data)).to be_within(0.01).of(0.75)
     end
   end
 
