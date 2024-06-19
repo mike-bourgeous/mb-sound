@@ -61,6 +61,21 @@ RSpec.describe(MB::Sound::AcousticsMethods, aggregate_failures: true) do
     end
   end
 
+  describe '#monotonic_peak_list' do
+    it 'filters peaks to a monotonic rise and fall' do
+      data = Numo::SFloat[0.75, -0.125, -0.5, 3, -0.5, 2, -0.5, 4, -0.5, 3, -0.5, 1, -0.5, -1.25, 0.5, -0.25, 0.5]
+      expect(MB::Sound.monotonic_peak_list(data)).to eq([
+        { index: 2, value: -0.5 },
+        { index: 3, value: 3.0 },
+        { index: 7, value: 4.0 },
+        { index: 9, value: 3.0 },
+        { index: 13, value: -1.25 },
+        { index: 14, value: 0.5 },
+        { index: 15, value: -0.25 },
+      ])
+    end
+  end
+
   describe '#peak_envelope' do
     it 'returns expected envelope for very simple data' do
       data = Numo::SFloat[-1, 1, -1, 1]
