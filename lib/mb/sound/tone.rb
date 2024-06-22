@@ -115,19 +115,41 @@ module MB
         end
         alias Hz hz
 
-        # Converts this number as a decibel value to a linear gain value.
+        # Converts this number as a decibel value to a linear voltage gain
+        # value (-20dB = 0.1).
         def db
           10.0 ** (self / 20.0)
         end
         alias dB db
 
-        # Converts this number from a linear gain value to a decibel value.
-        # Since decibels represent magnitude only without a sign, negative and
-        # positive values of equal magnitude will both have the same decibel
-        # value.
+        # Converts this number as a decibel value to a linear power gain value
+        # (-10dB = 0.1).  Electrical power is voltage squared, so the
+        # difference between this and #db accounts for power already being
+        # squared.
+        def db10
+          10.0 ** (self / 10.0)
+        end
+        alias dbpow db10
+        alias db_pow db10
+        alias dBpow db10
+
+        # Converts this number from a linear voltage gain value to a decibel
+        # value (0.1 = -20dB).  Since decibels represent magnitude only without
+        # a sign, negative and positive input values of equal magnitude will
+        # both have the same decibel value.  For power gain, divide the result
+        # by 2, or see #to_db10.
         def to_db
           20.0 * Math.log10(self.abs)
         end
+
+        # Converts this number from a power gain value to a decibel value (0.1
+        # = -10dB).  See #to_db.
+        def to_db10
+          10.0 * Math.log10(self.abs)
+        end
+        alias to_dbpow to_db10
+        alias to_db_pow to_db10
+        alias to_dBpow to_db10
 
         # Creates a Feet object with this numeric value.
         def feet
