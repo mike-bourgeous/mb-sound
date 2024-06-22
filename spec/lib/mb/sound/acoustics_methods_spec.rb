@@ -91,5 +91,13 @@ RSpec.describe(MB::Sound::AcousticsMethods, aggregate_failures: true) do
       data = Numo::SFloat[-1, 1, -3, 1]
       expect(MB::Sound.peak_envelope(data, include_negative: false)).to eq(Numo::SFloat[1, 1, 1, 1]) # XXX true
     end
+
+    it 'can generate a monotonic envelope for multiple channels' do
+      data = [Numo::SFloat[-1, 1, -1, 1, -1], Numo::SFloat[-1, 3, -1, 2, -1]]
+      expect(MB::Sound.peak_envelope(data, monotonic: true, blend: :linear)).to eq([
+        Numo::SFloat[1, 1, 1, 1, 1],
+        Numo::SFloat[1, 3, 2.5, 2, 1],
+      ])
+    end
   end
 end
