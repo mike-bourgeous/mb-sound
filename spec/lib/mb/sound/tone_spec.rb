@@ -106,6 +106,10 @@ RSpec.describe MB::Sound::Tone do
         expect(tone.wave_type).to eq(:sine)
         expect(tone.rate).to eq(48000)
       end
+
+      it 'is aliased to Hz' do
+        expect(5.Hz).to be_a(MB::Sound::Tone)
+      end
     end
 
     describe '#db' do
@@ -168,7 +172,7 @@ RSpec.describe MB::Sound::Tone do
         expect(2.inches).to eq(2.0 / 12.0)
       end
     end
-   end
+  end
 
   describe '#generate' do
     it 'can generate triangle wave samples in an NArray' do
@@ -302,6 +306,13 @@ RSpec.describe MB::Sound::Tone do
       expect(f.filter_type).to eq(:peak)
       expect(f.bandwidth_oct).to eq(1.1)
       expect(f.db_gain.round(4)).to eq(-5)
+    end
+  end
+
+  describe '#ramp' do
+    it 'is aliased to #saw and #sawtooth' do
+      expect(100.hz.saw.wave_type).to eq(:ramp)
+      expect(100.hz.sawtooth.wave_type).to eq(:ramp)
     end
   end
 
