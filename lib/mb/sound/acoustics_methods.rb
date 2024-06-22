@@ -39,7 +39,22 @@ module MB
 
         # XXX analytic_signal(data).abs
         case mode
+        when :analytic
+          puts 'an' # XXX
+          asig = MB::M.zpad(data, data.length + 24000, alignment: 0.5) { |c| analytic_signal(c) }.abs
+          peak_idx = asig.max_index
+          peak_val = asig[peak_idx]
+          target_val = peak_val * level
+
+          decay_val = peak_val
+          asig[peak_idx..].each_with_index do |d, idx|
+            decay_val = d
+            return idx.to_f / rate if decay_val <= target_val
+          end
+
+
         when :peak_envelope
+          puts 'peak' # XXX
           asig = peak_envelope(data, monotonic: true, blend: :linear)
           peak_idx = asig.max_index
           peak_val = asig[peak_idx]
@@ -55,6 +70,7 @@ module MB
           raise ArgumentError, "Signal never reaches #{level.to_db}; minimum is #{(decay_val / peak_val).to_db}"
 
         when :regression
+          puts 'reg' # XXX
           denv = peak_envelope(data, monotonic: true, blend: :linear)
           dsq = denv.map { |v| v.to_db }
           peak_idx = dsq.max_index
