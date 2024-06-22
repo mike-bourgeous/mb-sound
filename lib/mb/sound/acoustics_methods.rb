@@ -13,6 +13,16 @@ module MB
       #
       # Returns the number of seconds to reach the given ratio, or raises an
       # error if that level is never reached.
+      #
+      # I initially made decent progress on this algorithm with blind
+      # experimentation, but ultimately looked up some better references to get
+      # early/late decay and envelope generation right.
+      #
+      # References:
+      # - https://www.ee.columbia.edu/~dpwe/papers/Schro65-reverb.pdf
+      # - https://dsp.stackexchange.com/questions/17121/calculation-of-reverberation-time-rt60-from-the-impulse-response
+      # - https://svantek.com/academy/rt60-reverberation-time/
+      # - https://www.roomeqwizard.com/help/help_en-GB/html/graph_rt60.html
       def rt60(data, level: -60.dB, rate: 48000, mode: :regression)
         return data.map { |c| rt60(c, level: level, rate: rate, mode: mode) } if data.is_a?(Array)
         raise 'Data must be a 1D Numo::NArray' unless data.is_a?(Numo::NArray) && data.ndim == 1
