@@ -126,6 +126,18 @@ RSpec.describe MB::Sound::Tone do
       end
     end
 
+    describe '#db10' do
+      it 'converts -10 to 0.1' do
+        expect(-10.db10).to eq(0.1)
+      end
+
+      it 'is aliased to #dbpow, #db_pow, and #dBpow' do
+        expect(-10.dbpow).to eq(0.1)
+        expect(-10.db_pow).to eq(0.1)
+        expect(-10.dBpow).to eq(0.1)
+      end
+    end
+
     describe '#to_db' do
       it 'converts positive values' do
         expect(0.1.to_db).to eq(-20)
@@ -133,6 +145,18 @@ RSpec.describe MB::Sound::Tone do
 
       it 'converts negative values' do
         expect(-0.1.to_db).to eq(-20)
+      end
+    end
+
+    describe '#to_db10' do
+      it 'returns -10dB for 0.1' do
+        expect(0.1.to_db10).to eq(-10)
+      end
+
+      it 'is aliased to dbpow, db_pow, and dBpow' do
+        expect(0.1.to_dbpow).to eq(-10)
+        expect(0.1.to_db_pow).to eq(-10)
+        expect(0.1.to_dBpow).to eq(-10)
       end
     end
 
