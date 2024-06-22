@@ -113,6 +113,7 @@ module MB
         def hz
           Tone.new(frequency: self)
         end
+        alias Hz hz
 
         # Converts this number as a decibel value to a linear gain value.
         def db
@@ -198,11 +199,13 @@ module MB
         self
       end
 
-      # Changes the waveform type to ramp.
+      # Changes the waveform type to ramp/sawtooth.
       def ramp
         @wave_type = :ramp
         self
       end
+      alias saw ramp
+      alias sawtooth ramp
 
       # Changes the waveform type to inverse Gaussian.  The histogram of this
       # waveform shows a truncated, roughly Gaussian distribution.  The peaks
