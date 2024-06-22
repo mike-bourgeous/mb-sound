@@ -14,7 +14,7 @@ module MB
       # Returns the number of seconds to reach the given ratio, or raises an
       # error if that level is never reached.
       def rt60(data, level: -60.dB, rate: 48000, mode: :regression)
-        return data.map { |c| rt60(c, level: level) } if data.is_a?(Array)
+        return data.map { |c| rt60(c, level: level, rate: rate, mode: mode) } if data.is_a?(Array)
         raise 'Data must be a 1D Numo::NArray' unless data.is_a?(Numo::NArray) && data.ndim == 1
 
         # Some other ideas:
@@ -28,6 +28,7 @@ module MB
         # FIXME: e.g. analytic_signal(Numo::SFloat.logspace(0, -4, 48000) *
         # FIXME: 123.Hz.sample(48000)) ends with analytic signal around 0.2, not
         # FIXME: 0.0001.
+        #
         # But this looks totally reasonable:
         #     k = MB::M.zpad(1234.hz.sample(48000) * Numo::SFloat.logspace(0, -4, 48000), 96000, alignment: 0.5) { |z| analytic_signal(z) }
         #     plot [k.real.abs.map { |v| Math.log(v) }, k.imag.abs.map { |v| Math.log(v) }, k.abs.map { |v| Math.log(v) }], samples: 48000, graphical: true
@@ -242,7 +243,11 @@ module MB
       # Generates an envelope from the given +data+ by looking for peaks
       # between zero crossings and interpolating between them.
       def peak_envelope(data, include_negative: true, monotonic: false, blend: :catmull_rom)
-        return data.map { |c| peak_envelope(data) } if data.is_a?(Array)
+        if data.is_a?(Array)
+          return data.map { |c|
+            peak_envelope(c, include_negative: include_negative, monotonic: monotonic, blend: blend)
+          }
+        end
         raise 'Data must be a 1D Numo::NArray' unless data.is_a?(Numo::NArray) && data.ndim == 1
         raise 'Data must not be empty' if data.empty?
 
