@@ -27,28 +27,16 @@ module MB
         return data.map { |c| rt60(c, level: level, rate: rate, mode: mode) } if data.is_a?(Array)
         raise 'Data must be a 1D Numo::NArray' unless data.is_a?(Numo::NArray) && data.ndim == 1
 
+
+
         # Some other ideas:
         # - find peak, then calculate a series of RT20, do the appropriate mean
         #   (geometric?  arithmetic probably), and convert to RT60
-        # - fit a line to the logarithm of the envelope, convert the slope of
-        #   the line into an RT60
-
-        # Convert to instantaneous magnitude form
-        # FIXME: analytic_signal drastically changes the envelope
-        # FIXME: e.g. analytic_signal(Numo::SFloat.logspace(0, -4, 48000) *
-        # FIXME: 123.Hz.sample(48000)) ends with analytic signal around 0.2, not
-        # FIXME: 0.0001.
         #
-        # But this looks totally reasonable:
-        #     k = MB::M.zpad(1234.hz.sample(48000) * Numo::SFloat.logspace(0, -4, 48000), 96000, alignment: 0.5) { |z| analytic_signal(z) }
-        #     plot [k.real.abs.map { |v| Math.log(v) }, k.imag.abs.map { |v| Math.log(v) }, k.abs.map { |v| Math.log(v) }], samples: 48000, graphical: true
-        # and there's a consistent ratio for this test between analytic abs and real or imag abs
-        #     k[0..1000].real.abs.mean / k[0..1000].abs.mean
-        #     => 0.6366188230703546
-        #     k[10000..11000].real.abs.mean / k[10000..11000].abs.mean
-        #     => 0.6385493657348943
-
-        # XXX analytic_signal(data).abs
+        # Noise floor estimation / noise floor removal ideas:
+        # - generate multiple sizes of linear regressions along a moving local window, compare, split into regions at local maxima of deviation of linear regression?
+        # - calculate rt60 from linear regression, set noise floor to wherever that line drops below a filtered envelope?
+        # Convert to instantaneous magnitude form
         case mode
         when :analytic
           puts 'an' # XXX
@@ -62,7 +50,6 @@ module MB
             decay_val = d
             return idx.to_f / rate if decay_val <= target_val
           end
-
 
         when :peak_envelope
           puts 'peak' # XXX
@@ -81,6 +68,8 @@ module MB
           raise ArgumentError, "Signal never reaches #{level.to_db}; minimum is #{(decay_val / peak_val).to_db}"
 
         when :regression
+          # - fit a line to the logarithm of the envelope, convert the slope of
+          #   the line into an RT60
           puts 'reg' # XXX
           denv = peak_envelope(data, monotonic: true, blend: :linear)
           dsq = denv.map { |v| v.to_db }
@@ -95,12 +84,51 @@ module MB
           # RT60 is seconds per -60dB, m is dB per sample, rate is samples per second
           rt60 = level.to_db / (m * rate)
 
-          puts rt60
-
           return rt60
+
+        when :integral1
+          # schroeder reverse integral of squared hilbert envelope, skip first 5dB and last 10dB, perform regression
+          asig = MB::M.zpad(Numo::DFloat.cast(data), data.length * 2, alignment: 0.5) { |c| analytic_signal(c) }.abs
+          peak_idx = asig.max_index
+
+          puts "Peak idx is #{peak_idx}" # XXX
+          puts "Peak value is #{peak_val}" # XXX
+
+          risig = (asig ** 2).reverse.cumsum
+          isig = risig.reverse
+
+          peak_val = isig[peak_idx]
+          first_five_target = peak_val * -10.dB
+          first_five_idx = isig[peak_idx..].each_with_index do |v, idx|
+            break idx if v <= first_five_target
+          end
+
+          puts "-5dB idx is #{first_five_idx}"
+          puts "-5dB value is #{first_five_target}"
+
+          last_ten_target = risig[0..1000].mean * 10.dB
+          last_ten_idx = risig.each_with_index do |v, idx|
+            last_ten_target = v * 10.db if last_ten_target <= 0 && v > 0
+            break idx if v >= last_ten_target
+          end
+
+          last_ten_idx = risig.length - last_ten_idx - 1
+
+          puts "last 10dB idx is #{last_ten_idx}"
+          puts "last 10dB value is #{last_ten_target}"
+
+          region = isig[first_five_idx..last_ten_idx].map(&:to_db10)
+          m, _b = MB::M.linear_regression(region)
+
+          rt60 = level.to_db / (m * rate)
+
+          return rt60 # XXX , region, isig, asig
+
+        else
+          raise NotImplementedError, "Unsupported rt60 algorithm #{mode.inspect}"
         end
 
-        raise NotImplementedError, 'BUG: unsupported mode or mode code did not return'
+        raise StandardError, "BUG: rt60 algorithm #{mode.inspect} did not return a value"
       end
 
       # Returns a list of offsets with positive and negative peaks between zero
