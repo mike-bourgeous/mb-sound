@@ -1,6 +1,6 @@
 RSpec.describe(MB::Sound::AcousticsMethods, aggregate_failures: true) do
   describe '#rt60' do
-    [:analytic, :peak_envelope, :regression].each do |mode|
+    [:analytic, :peak_envelope, :regression, :integral1].each do |mode|
       context "when :mode is #{mode}" do
         it 'returns RT60 for a decaying sine' do
           # FIXME: want to be able to omit the oscillation and get RT60 for an envelope too

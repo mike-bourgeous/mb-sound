@@ -24,12 +24,12 @@ module MB
       # Examples:
       #
       #     # Bass cut (added 200Hz so that extrapolated slope for Nyquist is flat)
-      #     MB::Sound::Filter::FIR.new(gains: { 20 => -60.db, 100 => 0.db, 200 => 0.db)
+      #     MB::Sound::Filter::FIR.new({ 20 => -60.db, 100 => 0.db, 200 => 0.db)
       #
       #     # Phase rotation (the lower the frequencies and/or closer together, the
       #     # better the bass response)
       #     rotation = Complex.polar(1, Math::PI / 4)
-      #     MB::Sound::Filter::FIR.new(gains: { 20 => rotation, 100 => rotation })
+      #     MB::Sound::Filter::FIR.new({ 20 => rotation, 100 => rotation })
       class FIR < Filter
         attr_reader :filter_length, :window_length, :rate, :gain_map, :filter_fft, :gains, :impulse
 
