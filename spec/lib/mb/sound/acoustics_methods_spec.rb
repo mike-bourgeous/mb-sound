@@ -9,6 +9,10 @@ RSpec.describe(MB::Sound::AcousticsMethods, aggregate_failures: true) do
         end
       end
     end
+
+    describe 'filter parameter' do
+      pending
+    end
   end
 
   describe '#peak_list' do
