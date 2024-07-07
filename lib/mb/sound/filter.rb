@@ -67,10 +67,34 @@ module MB
         process(data).tap { reset(0) }
       end
 
+      # Returns the complex frequency response of the filter at the given
+      # angular frequency from 0 to Math::PI.
+      #
+      # Subclasses should override this method if they have a concept of a
+      # "frequency response."
+      #
+      # Raises NotImplementedError unless overridden by subclass.
+      def response(omega)
+        raise NotImplementedError, 'This filter does not support sampling its frequency response'
+      end
+
+      # On subclasses, should return the sample rate for which the filter's
+      # parameters were calculated.
+      def rate
+        raise NotImplementedError, 'This filter does not operate at a specific sample rate or cannot return its sample rate'
+      end
+
+      # Returns the frequency response of this filter at the given frequency in
+      # Hz, using the sample rate to convert from Hz to angular frequency.
+      #
+      # Raises NotImplementedError if #response has not been implemented.
+      def response_hz(freq_hz)
+        response(freq_hz * 2.0 * Math::PI / rate)
+      end
+
       # Returns a complex frequency-domain response, with +count+ evenly spaced
       # samples from 0 to pi.  The filter subclass must implement #response.
       def frequency_response(count = 500)
-        raise 'This filter does not support returning the frequency domain response' unless respond_to?(:response)
         response(Numo::SFloat.linspace(0, Math::PI, count))
       end
 
