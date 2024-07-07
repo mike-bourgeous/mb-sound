@@ -534,7 +534,7 @@ module MB
       #
       #     1000.hz.lowpass
       #     1000.hz.at_rate(44100).lowpass
-      def lowpass(quality: 1)
+      def lowpass(quality: ::MB::Sound::SQRT1_2)
         MB::Sound::Filter::Cookbook.new(:lowpass, @rate, @frequency, quality: quality)
       end
 
@@ -557,7 +557,7 @@ module MB
       #
       #     120.hz.highpass
       #     120.hz.at_rate(96000).highpass
-      def highpass(quality: 1)
+      def highpass(quality: ::MB::Sound::SQRT1_2)
         MB::Sound::Filter::Cookbook.new(:highpass, @rate, @frequency, quality: quality)
       end
 

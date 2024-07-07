@@ -36,6 +36,9 @@ module MB
     extend WindowMethods
     extend AcousticsMethods
 
+    # Half of the square root of two, commonly used as Q for filters
+    SQRT1_2 = Math.sqrt(0.5)
+
     # Filters a sound with the given filter parameters (see
     # MB::Sound::Filter::Cookbook).
     #

@@ -1,4 +1,4 @@
-RSpec.describe MB::Sound::Tone do
+RSpec.describe MB::Sound::Tone, :aggregate_failures do
   describe MB::Sound::Tone::Meters do
     it 'can be converted to feet' do
       expect(1.meter.feet).to be_a(MB::Sound::Tone::Feet)
@@ -308,6 +308,11 @@ RSpec.describe MB::Sound::Tone do
       expect(f.filter_type).to eq(:lowpass)
       expect(f.quality).to eq(3)
     end
+
+    it 'defaults to a quality of ~0.7' do
+      f = 200.hz.lowpass
+      expect(f.quality).to eq(::MB::Sound::SQRT1_2)
+    end
   end
 
   describe '#highpass' do
@@ -318,6 +323,11 @@ RSpec.describe MB::Sound::Tone do
       expect(f.sample_rate).to eq(8000)
       expect(f.filter_type).to eq(:highpass)
       expect(f.quality).to eq(4)
+    end
+
+    it 'defaults to a quality of ~0.7' do
+      f = 200.hz.highpass
+      expect(f.quality).to eq(::MB::Sound::SQRT1_2)
     end
   end
 
