@@ -23,11 +23,14 @@ module MB
       # - https://dsp.stackexchange.com/questions/17121/calculation-of-reverberation-time-rt60-from-the-impulse-response
       # - https://svantek.com/academy/rt60-reverberation-time/
       # - https://www.roomeqwizard.com/help/help_en-GB/html/graph_rt60.html
-      def rt60(data, level: -60.dB, rate: 48000, mode: :regression)
+      def rt60(data, level: -60.dB, rate: 48000, filter: nil, mode: :regression)
         return data.map { |c| rt60(c, level: level, rate: rate, mode: mode) } if data.is_a?(Array)
         raise 'Data must be a 1D Numo::NArray' unless data.is_a?(Numo::NArray) && data.ndim == 1
 
-
+        # TODO: Allow passing in a FilterBank or an Array of Filters?
+        # e.g. third_bands = Numo::SFloat.logspace(Math.log10(100), Math.log10(5000), 18)
+        # third_bands.map { |fhz| rt60(imp, filter: fhz.hz.bandpass(bandwidth_oct: 1.0 / 3.0), mode: :integral1) }
+        data = filter.process(data) if filter
 
         # Some other ideas:
         # - find peak, then calculate a series of RT20, do the appropriate mean
@@ -36,9 +39,9 @@ module MB
         # Noise floor estimation / noise floor removal ideas:
         # - generate multiple sizes of linear regressions along a moving local window, compare, split into regions at local maxima of deviation of linear regression?
         # - calculate rt60 from linear regression, set noise floor to wherever that line drops below a filtered envelope?
-        # Convert to instantaneous magnitude form
         case mode
         when :analytic
+          # Convert to instantaneous magnitude form
           puts 'an' # XXX
           asig = MB::M.zpad(data, data.length + 24000, alignment: 0.5) { |c| analytic_signal(c) }.abs
           peak_idx = asig.max_index
