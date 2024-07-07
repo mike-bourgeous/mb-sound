@@ -549,6 +549,12 @@ module MB
         MB::Sound::Filter::FirstOrder.new(:lowpass1p, @rate, @frequency)
       end
 
+      # Returns a second-order bandpass filter with the -3dB points
+      # +:bandwidth_oct+ octaves apart.
+      def bandpass(bandwidth_oct: 1.0)
+        MB::Sound::Filter::Cookbook.new(:bandpass, @rate, @frequency, bandwidth_oct: bandwidth_oct)
+      end
+
       # Returns a second-order high-pass Filter with this Tone's frequency as
       # its cutoff.  Only the tone's frequency and sample rate parameters are
       # used.
