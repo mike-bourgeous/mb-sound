@@ -315,6 +315,25 @@ RSpec.describe MB::Sound::Tone, :aggregate_failures do
     end
   end
 
+  pending '#lowpass1p'
+
+  describe '#bandpass' do
+    it 'returns a Filter with expected 0dB and -3dB points' do
+      f = 1000.hz.at_rate(96000).bandpass(bandwidth_oct: 2.0)
+      expect(f.response_hz(1000).abs).to be_within(0.00001).of(1.0)
+      expect(f.response_hz(500).abs).to be_within(0.001).of(::MB::Sound::SQRT1_2)
+      expect(f.response_hz(2000).abs).to be_within(0.001).of(::MB::Sound::SQRT1_2)
+      expect(f.response_hz(4000).abs).to be < f.response_hz(2000).abs
+      expect(f.response_hz(250).abs).to be < f.response_hz(500).abs
+      expect(f.rate).to eq(96000)
+    end
+
+    it 'defaults to a bandwidth of 1 octave' do
+      f = 350.hz.bandpass
+      expect(f.bandwidth_oct).to eq(1.0)
+    end
+  end
+
   describe '#highpass' do
     it 'returns a Filter' do
       f = 423.hz.at_rate(8000).highpass(quality: 4)
