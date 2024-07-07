@@ -39,6 +39,28 @@ RSpec.describe(MB::Sound::Filter::FilterBank) do
     pending 'can reset to a nonzero value'
   end
 
+  describe '#rate' do
+    it 'returns the first valid sample rate in the bank' do
+      c = MB::Sound::Filter::FilterBank.new(3) do |idx|
+        if idx == 0
+          MB::Sound::Filter::Biquad.new(1, 0, 0, 0, 0)
+        else
+          (idx * 100).hz.at_rate(678 + idx - 1).lowpass
+        end
+      end
+
+      expect(c.rate).to eq(678)
+    end
+
+    it 'raises an error if no filter in the bank has a valid sample rate' do
+      c = MB::Sound::Filter::FilterBank.new(2) do
+        MB::Sound::Filter::Biquad.new(1, 0, 0, 0, 0)
+      end
+
+      expect { c.rate }.to raise_error(NotImplementedError)
+    end
+  end
+
   pending '#process'
   pending '#weighted_process'
 end
