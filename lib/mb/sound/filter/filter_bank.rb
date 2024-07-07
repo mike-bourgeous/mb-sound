@@ -1,8 +1,9 @@
 module MB
   module Sound
     class Filter
-      # An array of identical filters.  When called with an array of data to
-      # process, each filter receives its corresponding element of the array.
+      # An array of filters, typically of the same type with varying
+      # parameters.  When called with an array of data to process, each filter
+      # receives its corresponding element of the array.
       class FilterBank < Filter
         class << self
           # Used by #butterworth and #cookbook to scale filter frequency across
@@ -93,6 +94,19 @@ module MB
         # Returns the +idx+-th filter in the bank.
         def [](idx)
           @filters[idx]
+        end
+
+        # Returns the sample rate of the first filter in the filter bank that
+        # has a sample rate.
+        def rate
+          @filters.each do |f|
+            begin
+              return f.rate if f.respond_to?(:rate)
+            rescue NotImplementedError
+            end
+          end
+
+          raise NotImplementedError, 'No filter in the chain has a sample rate'
         end
 
         # Processes samples in +data+, which would generally be an array of real

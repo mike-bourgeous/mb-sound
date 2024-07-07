@@ -4,11 +4,12 @@ module MB
       # Implements low- and high-pass filters with a maximally flat Butterworth
       # response.
       class Butterworth < FilterChain
-        attr_reader :sample_rate, :center_frequency
+        attr_reader :rate, :sample_rate, :center_frequency
 
         def initialize(filter_type, order, f_samp, f_center)
           raise 'Invalid filter type' unless filter_type == :highpass || filter_type == :lowpass
 
+          @rate = f_samp
           @sample_rate = f_samp
           @center_frequency = f_center
 
