@@ -215,11 +215,12 @@ module MB
 
       # Applies the given filter (creating the filter if given a filter type)
       # to this sample source or sample chain.  If given a filter type, then a
-      # dynamically updating filter is created where teh cutoff and quality are
+      # dynamically updating filter is created where the cutoff and quality are
       # controlled by the given sample sources (e.g. numeric value, tone
       # generator, audio input, or ADSR envelope).
       #
-      # Defaults to generating a low-pass filter if given a frequency in Hz.
+      # Defaults to generating a low-pass filter with quality sqrt(1/2) if
+      # given a Tone frequency in Hz.
       #
       # Example:
       #     # Simple low-pass filter at 1200Hz center frequency
@@ -239,7 +240,7 @@ module MB
         when f.is_a?(Symbol)
           raise 'Cutoff frequency must be given when creating a filter by type' if cutoff.nil?
 
-          quality = quality || 0.5 ** 0.5
+          quality = quality || ::MB::Sound::SQRT1_2
           # TODO: Support graph node sources for filter gain
           f = MB::Sound::Filter::Cookbook.new(filter_or_type, rate, 1, quality: 1, db_gain: gain&.to_db)
           MB::Sound::Filter::Cookbook::CookbookWrapper.new(filter: f, audio: self, cutoff: cutoff, quality: quality)
