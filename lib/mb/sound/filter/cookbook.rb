@@ -5,6 +5,7 @@ module MB
       # formulae.
       #
       # See https://shepazu.github.io/Audio-EQ-Cookbook/audio-eq-cookbook.html
+      # Or see https://webaudio.github.io/Audio-EQ-Cookbook/audio-eq-cookbook.html
       class Cookbook < Biquad
         # Wrapper around a cookbook filter that uses separate :sample or
         # numeric sources for audio input, cutoff frequency, and filter
