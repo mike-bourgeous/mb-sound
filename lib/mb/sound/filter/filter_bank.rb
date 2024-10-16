@@ -111,6 +111,7 @@ module MB
           raise 'Data size does not match filter bank size' unless data.size == @size
 
           if data[0].is_a?(Complex) && @last_result[0].is_a?(Float)
+            # FIXME: should this cast prior data instead of discarding it?
             @last_result = Numo::DComplex.zeros(@size)
           end
 
