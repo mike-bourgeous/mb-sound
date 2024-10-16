@@ -68,12 +68,7 @@ module MB
         def filters_for_poles(poles)
           FilterChain.new(
             *(0..(poles.length - 1)).step(0.1).map { |idx|
-              i1 = idx.floor
-              i2 = idx.ceil
-              d = idx - i1
-              v1 = poles[i1]
-              v2 = poles[i2]
-              p = (v1 ** (1.0 - d)) * (v2 ** d)
+              p = MB::M.fractional_index(poles, idx)
               a = p / @rate
               b = (1 - a) / (1 + a)
               MB::Sound::Filter::Biquad.new(-b, 1, 0, -b, 0)
