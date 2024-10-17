@@ -8,9 +8,10 @@ require 'bundler/setup'
 require 'mb-sound'
 
 filters = {
-  shifting: (-10..10).step(2).map do |i| MB::Sound::Filter::HilbertIIR.new(offset: i) end,
-  stretching: (0.1..4.0).step(0.2).map do |i| MB::Sound::Filter::HilbertIIR.new(stretch: i) end,
-  scaling: (0.1..4.0).step(0.2).map do |i| MB::Sound::Filter::HilbertIIR.new(scale: i) end,
+  shifting: (-10..10).step(2).map { |i| MB::Sound::Filter::HilbertIIR.new(offset: i) },
+  stretching: (0.1..4.0).step(0.2).map { |i| MB::Sound::Filter::HilbertIIR.new(stretch: i) },
+  scaling: (0.1..4.0).step(0.2).map { |i| MB::Sound::Filter::HilbertIIR.new(scale: i) },
+  interpolating: (15.5..17.5).step(0.05).map { |i| MB::Sound::Filter::HilbertIIR.new(interp: i) },
 }
 
 filters.each do |group, flist|
@@ -18,12 +19,12 @@ filters.each do |group, flist|
 
   MB::Sound.plot(
     flist.map { |f|
-      p1 = MB::Sound.unwrap_phase(f.sine_response(Numo::SFloat.linspace(0, Math::PI, 24000)))
-      p2 = MB::Sound.unwrap_phase(f.cosine_response(Numo::SFloat.linspace(0, Math::PI, 24000)))
+      p1 = MB::Sound.unwrap_phase(f.sine_response(Numo::SFloat.linspace(0, Math::PI, 24000))) * 180 / Math::PI
+      p2 = MB::Sound.unwrap_phase(f.cosine_response(Numo::SFloat.linspace(0, Math::PI, 24000))) * 180 / Math::PI
 
       p1 - p2
     },
-    samples: 24000,
+    samples: ENV['SAMPLES']&.to_i || 24000,
     graphical: true
   )
 

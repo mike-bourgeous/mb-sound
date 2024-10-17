@@ -26,11 +26,11 @@ module MB
         # single input at the given sample +:rate+.  For experimentation,
         # filters may be skipped by passing indices to skip as an Array in
         # +:skip+, or values may be +:scaled+, +:stretched+, or +:offset+.
-        def initialize(rate: 48000, skip: nil, scale: nil, stretch: nil, offset: nil)
+        def initialize(rate: 48000, skip: nil, scale: nil, stretch: nil, offset: nil, interp: nil)
           @skip = skip
-          @scale = scale || 1.0
-          @stretch = stretch || 1.0
-          @offset = offset || 0.0
+          @scale = scale&.to_f || 1.0
+          @stretch = stretch&.to_f || 1.0
+          @offset = offset&.to_f || 0.0
           @rate = rate.to_f
 
           # TODO: combine pairs of poles to use three biquads per value
@@ -38,10 +38,25 @@ module MB
           # complex values and computing biquads using complex coefficients
           # TODO: find out why the ratios between successive poles are
           # 3.47, 2.19, 2.03, 2.00, 2.00, 2.00, 2.00, 2.00, 2.03, 2.19, 3.47
+          #
+
+          if interp
+            # I read somewhere that poles must alternate between the cosine and
+            # sine set, so this is an experiment with adding more poles but
+            # then still alternating.
+            all_poles = SINE_POLES.zip(COSINE_POLES).flatten
+            interp_poles = (0.0..(all_poles.length - 1)).step(1.0 / interp).map { |idx|
+              MB::M.fractional_index(all_poles, idx)
+            }
+            sines, cosines = interp_poles.partition.with_index { |_, idx| idx.even? }
+          else
+            sines = SINE_POLES
+            cosines = COSINE_POLES
+          end
 
           @filters = [
-            filters_for_poles(COSINE_POLES),
-            filters_for_poles(SINE_POLES)
+            filters_for_poles(cosines),
+            filters_for_poles(sines)
           ]
         end
 
@@ -75,7 +90,7 @@ module MB
         def filters_for_poles(poles)
           FilterChain.new(
             *poles.map.with_index { |p, idx|
-              next if @skip && @skip.include?(idx)
+              next if @skip && @skip.include?(idx.to_i)
               p *= @stretch
               a = (p * @scale * (1 + (@stretch - 1) * idx / (poles.length - 1)) + @offset) / @rate
               b = (1 - a) / (1 + a)
