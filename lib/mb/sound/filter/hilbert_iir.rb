@@ -22,8 +22,15 @@ module MB
         # Converted from original: sine.map { |p| (p * 15 * Math::PI).round(4) }
         SINE_POLES = [17.007, 129.176, 525.7754, 2109.1758, 8464.591, 37626.4374]
 
-        # Creates a Hilbert IIR filterbank that returns cosine and sine components for
-        def initialize(rate: 48000)
+        # Creates a filter chain that returns cosine and sine components for a
+        # single input at the given sample +:rate+.  For experimentation,
+        # filters may be skipped by passing indices to skip as an Array in
+        # +:skip+, or values may be +:scaled+, +:stretched+, or +:offset+.
+        def initialize(rate: 48000, skip: nil, scale: nil, stretch: nil, offset: nil)
+          @skip = skip
+          @scale = scale || 1.0
+          @stretch = stretch || 1.0
+          @offset = offset || 0.0
           @rate = rate.to_f
 
           # TODO: combine pairs of poles to use three biquads per value
@@ -67,11 +74,13 @@ module MB
         # a filter chain of MB::Sound::Filter::Biquads.
         def filters_for_poles(poles)
           FilterChain.new(
-            *poles.map { |p|
-              a = p / @rate
+            *poles.map.with_index { |p, idx|
+              next if @skip && @skip.include?(idx)
+              p *= @stretch
+              a = (p * @scale * (1 + (@stretch - 1) * idx / (poles.length - 1)) + @offset) / @rate
               b = (1 - a) / (1 + a)
               MB::Sound::Filter::Biquad.new(-b, 1, 0, -b, 0)
-            }
+            }.compact
           )
         end
       end
