@@ -33,6 +33,10 @@ module MB
           @offset = offset&.to_f || 0.0
           @rate = rate.to_f
 
+          # Empirical testing shows scaling by 2.25 puts 20Hz and 20kHz at the
+          # same error, at about 83 degrees instead of 90.
+          @scale *= 2.25
+
           # TODO: combine pairs of poles to use three biquads per value
           # TODO: experiment with combining cosine and sine coefficients into
           # complex values and computing biquads using complex coefficients
