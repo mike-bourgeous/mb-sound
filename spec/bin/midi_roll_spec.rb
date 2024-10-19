@@ -1,4 +1,4 @@
-RSpec.describe('bin/midi_roll.rb') do
+RSpec.describe('bin/midi_roll.rb', :aggregate_failures) do
   it 'can display a MIDI roll' do
     text = `bin/midi_roll.rb -r 2 -c 100 -n C3 spec/test_data/all_notes.mid 2>&1`
     expect($?).to be_success
