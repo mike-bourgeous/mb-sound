@@ -15,6 +15,8 @@ module MB
       # hilbertset function written by Sean M. Costello, which in turn were
       # taken from "Musical Engineer's Handbook" by Bernie Hutchins.  I then
       # converted them to angular frequencies to simplify the rest of the math.
+      #
+      # See https://github.com/csound/csound/blob/ceee5bf2b105acfb36fbff14e6408b5bf4b12c48/Opcodes/ugsc.c#L111-L197
       class HilbertIIR < Filter
         # Converted from original: cosine.map { |p| (p * 15 * Math::PI).round(4) }
         COSINE_POLES = [59.018, 262.3434, 1052.8561, 4223.5776, 17190.3897, 130538.4244]
@@ -35,6 +37,7 @@ module MB
 
           # Empirical testing shows scaling by 2.25 puts 20Hz and 20kHz at the
           # same error, at about 83 degrees instead of 90.
+          # TODO: maybe bake this scale factor into the pole lists above
           @scale *= 2.25
 
           # TODO: combine pairs of poles to use three biquads per value
