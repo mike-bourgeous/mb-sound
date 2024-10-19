@@ -20,6 +20,10 @@ module MB
           raise 'A biquad can only have two poles' if poles.length > 2
           raise 'A biquad can only have two zeros' if zeros.length > 2
 
+          # The coefficients come from multiplying the two binomials for the
+          # numerator and denominator to get the resulting quadratic equations,
+          # where each pole is a binomial in the denominator, and each zero is
+          # a binomial in the numerator.
           if poles.nil? || poles.empty?
             a0 = 1.0
             a1 = 0.0
@@ -174,6 +178,7 @@ module MB
 
         # C loop, C math (much faster than pure Ruby)
         def process_c(samples)
+          # FIXME: convert to SComplex/DComplex if coefficients are complex
           samples, @x1, @x2, @y1, @y2 = MB::FastSound.biquad_narray(
             @b0, @b1, @b2, @a1, @a2,
             [samples, @x1, @x2, @y1, @y2]
