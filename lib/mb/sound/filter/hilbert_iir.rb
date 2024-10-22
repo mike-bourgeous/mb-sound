@@ -24,6 +24,10 @@ module MB
         # Converted from original: sine.map { |p| (p * 15 * Math::PI).round(4) }
         SINE_POLES = [17.007, 129.176, 525.7754, 2109.1758, 8464.591, 37626.4374]
 
+        # Returns the cosine or sine FilterChain (which is a chain of Biquad
+        # filters).
+        attr_reader :cosine, :sine
+
         # Creates a filter chain that returns cosine and sine components for a
         # single input at the given sample +:rate+.  For experimentation,
         # filters may be skipped by passing indices to skip as an Array in
@@ -61,10 +65,10 @@ module MB
             cosines = COSINE_POLES
           end
 
-          @filters = [
-            filters_for_poles(cosines),
-            filters_for_poles(sines)
-          ]
+          # FIXME: do I need to swap these?  sine - cosine gives a difference of -90 rather than +90
+          @cosine = filters_for_poles(cosines)
+          @sine = filters_for_poles(sines)
+          @filters = [@cosine, @sine]
         end
 
         # Returns cosine and sine components for an analytic signal form of
@@ -74,18 +78,24 @@ module MB
           @filters.map { |f| f.process(data) }
         end
 
+        # Returns a Hash with the poles and zeros of the cosine-component filter.
         def cosine_polezero
           @filters[0].polezero
         end
 
+        # Returns a Hash with the poles and zeros of the sine-component filter.
         def sine_polezero
           @filters[1].polezero
         end
 
+        # Returns the complex frequency response of the cosine-component filter
+        # at angular frequency +w+.
         def cosine_response(w)
           @filters[0].response(w)
         end
 
+        # Returns the complex frequency response of the sine-component filter
+        # at angular frequency +w+.
         def sine_response(w)
           @filters[1].response(w)
         end

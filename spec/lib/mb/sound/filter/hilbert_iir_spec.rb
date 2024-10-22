@@ -51,4 +51,16 @@ RSpec.describe(MB::Sound::Filter::HilbertIIR, :aggregate_failures) do
     frate = MB::Sound::Filter::HilbertIIR.new(rate: 23456)
     expect(MB::M.round(filter.cosine_response(Math::PI / 4.0), 5)).not_to eq(MB::M.round(frate.cosine_response(Math::PI / 4.0), 5))
   end
+
+  describe '#sine' do
+    it 'returns the sine filter' do
+      expect(filter.sine.response(1)).to eq(filter.sine_response(1))
+    end
+  end
+
+  describe '#cosine' do
+    it 'returns the cosine filter' do
+      expect(filter.cosine.response(1)).to eq(filter.cosine_response(1))
+    end
+  end
 end
