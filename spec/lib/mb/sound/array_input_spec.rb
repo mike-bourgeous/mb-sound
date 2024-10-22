@@ -1,4 +1,161 @@
-RSpec.describe(MB::Sound::ArrayInput) do
+RSpec.describe(MB::Sound::ArrayInput, :aggregate_failures) do
+  describe '#initialize' do
+    let(:input) {
+      MB::Sound::ArrayInput.new(data: data, rate: 1)
+    }
+
+    shared_examples_for :type_promotion do
+      it "returns the correct promoted type for the inputs" do
+        result = input.read(data[0].length)
+        expect(result).to all(be_a(expected_type))
+        expect(result).to eq(data)
+      end
+    end
+
+    context 'with a complex input' do
+      let(:data) {
+        [Numo::SComplex[1, 1i, -1i, -1]]
+      }
+      let(:expected_type) { Numo::SComplex }
+    end
+
+    context 'with a mix of float and complex' do
+      context 'when complex is double precision' do
+        let(:data) {
+          [
+            Numo::SFloat[1,2,3],
+            Numo::SFloat[-3,2,-1],
+            Numo::SComplex[5,-4i,3],
+            Numo::DComplex[3,2,1i],
+          ]
+        }
+        let(:expected_type) { Numo::DComplex }
+
+        it_behaves_like :type_promotion
+      end
+
+      context 'when float is double precision' do
+        let(:data) {
+          [
+            Numo::SFloat[-3,2,-1],
+            Numo::DFloat[1,2,3],
+            Numo::SComplex[5,-4i,3],
+            Numo::SComplex[3,2,1i],
+          ]
+        }
+        let(:expected_type) { Numo::DComplex }
+
+        it_behaves_like :type_promotion
+      end
+
+      context 'when all are double precision' do
+        let(:data) {
+          [
+            Numo::DFloat[1,2,3],
+            Numo::DFloat[-3,2,-1],
+            Numo::DComplex[5,-4i,3],
+            Numo::DComplex[3,2,1i],
+          ]
+        }
+        let(:expected_type) { Numo::DComplex }
+
+        it_behaves_like :type_promotion
+      end
+
+      context 'when all are single precision' do
+        let(:data) {
+          [
+            Numo::SFloat[1,2,3],
+            Numo::SFloat[-3,2,-1],
+            Numo::SComplex[5,-4i,3],
+            Numo::SComplex[3,2,1i],
+          ]
+        }
+        let(:expected_type) { Numo::SComplex }
+
+        it_behaves_like :type_promotion
+      end
+    end
+
+    context 'with a mix of precisions' do
+      context 'with single and double precision real' do
+        let(:data) {
+          [Numo::SFloat[1,2,3], Numo::DFloat[3,-1,2]]
+        }
+        let(:expected_type) { Numo::DFloat }
+
+        it_behaves_like :type_promotion
+      end
+
+      context 'with single and double precision complex' do
+        let(:data) {
+          [Numo::SComplex[3,2,1], Numo::DComplex[1,2,3]]
+        }
+        let(:expected_type) { Numo::DComplex }
+
+        it_behaves_like :type_promotion
+      end
+
+      context 'with single precision and 32-bit ints' do
+        let(:data) { [Numo::Int32[1,2,3], Numo::SFloat[3,2,1]] }
+        let(:expected_type) { Numo::DFloat }
+
+        it_behaves_like :type_promotion
+      end
+    end
+
+    context 'with matching precisions' do
+      context 'with single precision real' do
+        let(:data) { [Numo::SFloat[1,2,3], Numo::SFloat[3,1,2]] }
+        let(:expected_type) { Numo::SFloat }
+
+        it_behaves_like :type_promotion
+      end
+
+      context 'with double precision real' do
+        let(:data) { [Numo::DFloat[1,2,3], Numo::DFloat[3,1,2]] }
+        let(:expected_type) { Numo::DFloat }
+
+        it_behaves_like :type_promotion
+      end
+
+      context 'with 16-bit integers' do
+        let(:data) { [Numo::Int16[1,2,3], Numo::Int16[3,1,2]] }
+        let(:expected_type) { Numo::SFloat }
+
+        it_behaves_like :type_promotion
+      end
+
+      context 'with 32-bit integers' do
+        let(:data) { [Numo::Int32[1,2,3], Numo::Int32[3,1,2]] }
+        let(:expected_type) { Numo::DFloat }
+
+        it_behaves_like :type_promotion
+      end
+
+      context 'with 64-bit integers' do
+        let(:data) { [Numo::Int64[1,2,3], Numo::Int64[3,1,2]] }
+        let(:expected_type) { Numo::DFloat }
+
+        it_behaves_like :type_promotion
+      end
+
+      context 'wtih single precision complex' do
+        let(:data) { [Numo::SComplex[1,1i], Numo::SComplex[-1i,-1] ] }
+        let(:expected_type) { Numo::SComplex }
+
+        it_behaves_like :type_promotion
+      end
+
+      context 'wtih double precision complex' do
+        let(:data) { [Numo::DComplex[1,1i], Numo::DComplex[-1i,-1] ] }
+        let(:expected_type) { Numo::DComplex }
+
+        it_behaves_like :type_promotion
+      end
+    end
+  end
+
   describe '#read' do
     d1 = [
       {
@@ -117,6 +274,14 @@ RSpec.describe(MB::Sound::ArrayInput) do
           expect(input.frames).to eq(t[:frames])
         end
       end
+    end
+  end
+
+  describe '#sample' do
+    it 'returns the first channel data, with zero padding' do
+      input = MB::Sound::ArrayInput.new(data: [[1, 2, 3, 4+4i], [4, 3, 2, 1]], rate: 1)
+      expect(input.sample(2)).to eq(Numo::DComplex[1, 2])
+      expect(input.sample(3)).to eq(Numo::DComplex[3, 4+4i, 0])
     end
   end
 end

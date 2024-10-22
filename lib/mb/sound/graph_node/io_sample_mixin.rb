@@ -30,6 +30,7 @@ module MB
       # get a sensible name for the input, whether that's a filename, ALSA
       # device, JACK connection list, or whatever.
       def graph_node_name
+        # FIXME: Allow renaming nodes (check @graph_node_name or @named first)
         if self.respond_to?(:filename)
           name = self.filename
         elsif self.respond_to?(:device)
