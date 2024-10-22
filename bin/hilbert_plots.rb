@@ -18,7 +18,7 @@ filters = {
   interpolating: (15.5..17.5).step(0.05).map { |i| MB::Sound::Filter::HilbertIIR.new(interp: i) },
 }
 
-def log2space(min, max, count)
+def linlogspace(min, max, count)
   Numo::SFloat.logspace(Math.log10(min), Math.log10(max), count)
 end
 
@@ -27,7 +27,7 @@ filters.each do |group, flist|
 
   flist.each.with_index do |f, idx|
     #d = 180 / Math::PI * (MB::Sound.unwrap_phase(f.sine_response(Numo::SFloat.linspace(0, Math::PI, 24000))) - MB::Sound.unwrap_phase(f.cosine_response(Numo::SFloat.linspace(0, Math::PI, 24000))))
-    d = 180 / Math::PI * (MB::Sound.unwrap_phase(f.sine_response(log2space(Math::PI/1200, Math::PI * 5/6, 24000))) - MB::Sound.unwrap_phase(f.cosine_response(log2space(Math::PI/1200, Math::PI * 5/6, 24000))))
+    d = 180 / Math::PI * (MB::Sound.unwrap_phase(f.sine_response(linlogspace(Math::PI/1200, Math::PI * 5/6, 24000))) - MB::Sound.unwrap_phase(f.cosine_response(linlogspace(Math::PI/1200, Math::PI * 5/6, 24000))))
     #d = d[20..20000]
     puts "Filter at index #{idx}: #{MB::U.highlight(first: d[0], last: d[-1], min: d.min, max: d.max, mean: d.mean, dev: d.stddev)}"
     puts "  #{MB::U.highlight((f.instance_variables - [:@filters]).map { |n| [n, f.instance_variable_get(n)] }.to_h)}\n\n"
@@ -35,8 +35,8 @@ filters.each do |group, flist|
 
   MB::Sound.plot(
     flist.map { |f|
-      p1 = MB::Sound.unwrap_phase(f.sine_response(log2space(Math::PI/1200, Math::PI * 5/6, 24000))) * 180 / Math::PI
-      p2 = MB::Sound.unwrap_phase(f.cosine_response(log2space(Math::PI/1200, Math::PI * 5/6, 24000))) * 180 / Math::PI
+      p1 = MB::Sound.unwrap_phase(f.sine_response(linlogspace(Math::PI/1200, Math::PI * 5/6, 24000))) * 180 / Math::PI
+      p2 = MB::Sound.unwrap_phase(f.cosine_response(linlogspace(Math::PI/1200, Math::PI * 5/6, 24000))) * 180 / Math::PI
 
       (p1 - p2)#[20..20000]
     },
