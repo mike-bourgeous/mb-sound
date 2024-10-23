@@ -1,5 +1,5 @@
 module MB
   module Sound
-    VERSION = "0.7.0.usegit"
+    VERSION = "0.7.1.usegit"
   end
 end

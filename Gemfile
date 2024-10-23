@@ -12,7 +12,7 @@ gem 'cmath'
 gem 'numo-narray'
 
 # Interactive command line gems
-gem 'pry'
+gem 'pry', '~> 0.13.0'
 gem 'pry-byebug'
 gem 'pry-doc'
 gem 'word_wrap'
