@@ -11,8 +11,19 @@ RSpec.describe(MB::Sound::Filter::HilbertIIR, :aggregate_failures) do
 
   it 'can process a signal' do
     result = filter.process(Numo::SFloat[1,2,3])
-    expect(result.length).to eq(2)
-    expect(result).to all(be_a(Numo::SFloat))
+    expect(result.length).to eq(3)
+    expect(result).to be_a(Numo::SComplex)
+  end
+
+  it 'has a flat combined magnitude for positive frequencies' do
+    result = filter.response(log20_20k).abs
+    expect(result.min).to be >= -0.1.dB
+    expect(result.max).to be <= 0.1.dB
+  end
+
+  it 'has a -40dB or better suppression of negative frequencies' do
+    result = filter.response(-log100_15k).abs
+    expect(result.max).to be <= -40.dB
   end
 
   it 'has a flat magnitude response for the cosine part' do

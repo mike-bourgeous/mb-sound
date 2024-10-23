@@ -2,22 +2,27 @@ module MB
   module Sound
     class Filter
       # Implements a 6th-order phase difference network that converts a
-      # real-valued input signal to a pair of complex-valued output signals
-      # corresponding to the cosine and sine components of an analytic signal.
-      # Both of these components have some varying absolute phase shift
-      # relative to the input signal, but a consistent relative phase shift of
-      # ~90 degrees relative to each other.
+      # real-valued input signal to a complex-valued output signal with the
+      # cosine and sine components of an analytic signal.  Both of these
+      # components have some varying absolute phase shift relative to the input
+      # signal, but a consistent relative phase shift of ~90 degrees relative
+      # to each other.
       #
       # Thus this is not directly a Hilbert transform of the input signal, but
-      # rather the sine output is the Hilbert transform of the cosine output.
+      # rather the sine output is the Hilbert transform of the cosine output,
+      # both of which differ from the input signal by a frequency-varying
+      # phase.
       #
       # The continuous-time pole frequencies in Hz were taken from CSound's
       # hilbertset function written by Sean M. Costello, which in turn were
       # taken from "Musical Engineer's Handbook" by Bernie Hutchins.  I then
-      # converted them to angular frequencies to simplify the rest of the math.
+      # converted them to angular frequencies to simplify the rest of the math,
+      # and scaled them to get the best response from 20Hz to 20kHz.
       #
       # See https://github.com/csound/csound/blob/ceee5bf2b105acfb36fbff14e6408b5bf4b12c48/Opcodes/ugsc.c#L111-L197
       class HilbertIIR < Filter
+        include GraphNode
+
         # Converted from original: cosine.map { |p| (p * 15 * Math::PI).round(4) }
         COSINE_POLES = [59.018, 262.3434, 1052.8561, 4223.5776, 17190.3897, 130538.4244]
 
@@ -71,11 +76,11 @@ module MB
           @filters = [@cosine, @sine]
         end
 
-        # Returns cosine and sine components for an analytic signal form of
-        # +data+ (with some phase variation relative to the input; see the
-        # class comment).
+        # Returns complex values with cosine and sine components for an
+        # analytic signal form of +data+ (with some phase variation relative to
+        # the input; see the class comment).
         def process(data)
-          @filters.map { |f| f.process(data) }
+          @cosine.process(data) + 1i * @sine.process(data)
         end
 
         # Returns a Hash with the poles and zeros of the cosine-component filter.
@@ -88,16 +93,31 @@ module MB
           @filters[1].polezero
         end
 
+        # Returns the complex response of the summed cosine and sine
+        # components.  The response suppresses negative frequencies, so you
+        # will see different results for negative vs positive values of +w+.
+        def response(w)
+          0.5 * cosine_response(w) + 0.5i * sine_response(w)
+        end
+
         # Returns the complex frequency response of the cosine-component filter
         # at angular frequency +w+.
         def cosine_response(w)
-          @filters[0].response(w)
+          @cosine.response(w)
         end
 
         # Returns the complex frequency response of the sine-component filter
         # at angular frequency +w+.
         def sine_response(w)
-          @filters[1].response(w)
+          @sine.response(w)
+        end
+
+        # Resets filters' internal states to act as if they have received +v+
+        # for a very long time.
+        def reset(v)
+          @filters.each do |f|
+            f.reset(v)
+          end
         end
 
         private
