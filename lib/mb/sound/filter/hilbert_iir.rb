@@ -21,8 +21,6 @@ module MB
       #
       # See https://github.com/csound/csound/blob/ceee5bf2b105acfb36fbff14e6408b5bf4b12c48/Opcodes/ugsc.c#L111-L197
       class HilbertIIR < Filter
-        include GraphNode
-
         # Converted from original: cosine.map { |p| (p * 15 * Math::PI).round(4) }
         COSINE_POLES = [59.018, 262.3434, 1052.8561, 4223.5776, 17190.3897, 130538.4244]
 

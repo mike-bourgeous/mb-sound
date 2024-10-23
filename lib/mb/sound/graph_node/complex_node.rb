@@ -3,6 +3,8 @@ module MB
     module GraphNode
       # Coerces a signal to its real, imaginary, magnitude, or phase component.
       class ComplexNode
+        include GraphNode
+
         VALID_MODES = [:real, :imag, :abs, :arg]
 
         attr_reader :mode

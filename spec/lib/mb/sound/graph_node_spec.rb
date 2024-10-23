@@ -126,6 +126,10 @@ RSpec.describe(MB::Sound::GraphNode) do
       n = -4.constant.real
       expect(n.sample(3)).to eq(Numo::SFloat[-4, -4, -4])
     end
+
+    it 'returns a graph node' do
+      expect(4.constant.real).to be_a(MB::Sound::GraphNode)
+    end
   end
 
   describe '#imag' do
@@ -140,6 +144,10 @@ RSpec.describe(MB::Sound::GraphNode) do
     it 'turns real values into zeros' do
       n = -4.constant.imag
       expect(n.sample(3)).to eq(Numo::SFloat[0, 0, 0])
+    end
+
+    it 'returns a graph node' do
+      expect(4.constant.imag).to be_a(MB::Sound::GraphNode)
     end
   end
 
@@ -159,6 +167,10 @@ RSpec.describe(MB::Sound::GraphNode) do
       n = 3.constant.abs
       expect(n.sample(3)).to eq(Numo::SFloat[3, 3, 3])
     end
+
+    it 'returns a graph node' do
+      expect(4.constant.abs).to be_a(MB::Sound::GraphNode)
+    end
   end
 
   describe '#arg' do
@@ -176,6 +188,10 @@ RSpec.describe(MB::Sound::GraphNode) do
 
       n = 3.constant.arg
       expect(n.sample(3)).to eq(Numo::SFloat[0, 0, 0])
+    end
+
+    it 'returns a graph node' do
+      expect(4.constant.arg).to be_a(MB::Sound::GraphNode)
     end
   end
 
