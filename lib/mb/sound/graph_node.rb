@@ -156,7 +156,7 @@ module MB
       end
 
       # Appends a node that returns the real value of a complex signal, or
-      # zeroes for a real signal.
+      # zeros for a real signal.
       def imag
         MB::Sound::GraphNode::ComplexNode.new(self, mode: :imag)
       end
@@ -168,7 +168,7 @@ module MB
       end
 
       # Appends a node that returns the instantaneous phase of a complex
-      # signal, or zeroes for a real signal.
+      # signal, or zeros or Math::PI for a real signal.
       def arg
         MB::Sound::GraphNode::ComplexNode.new(self, mode: :arg)
       end

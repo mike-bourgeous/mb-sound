@@ -5,6 +5,8 @@ module MB
       class ComplexNode
         VALID_MODES = [:real, :imag, :abs, :arg]
 
+        attr_reader :mode
+
         # Creates a complex-to-component conversion node from the given +input+
         # node in the given +:mode+.  The +:mode+ may be :real, :imag, :abs, or
         # :arg.
@@ -56,7 +58,11 @@ module MB
               data.abs
 
             when :arg
-              data.class.zeros(count)
+              # signbit returns Numo::Bit, multiplying by Math::PI first
+              # returns DFloat.  Benchmarks show that casting the bit array
+              # then multiplying is faster than multiplying directly, then
+              # casting.
+              (data.class.cast(data.signbit).inplace * Math::PI).not_inplace!
 
             else
               raise "BUG: Unsupported mode #{@mode}"

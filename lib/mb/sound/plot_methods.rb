@@ -306,9 +306,9 @@ module MB
       # +:steps+ is an Array) are taken from the array and associated with a
       # linearly mapped value from the +:range+ for display.
       #
-      # For a callable Method or Proc, the +:range+ is divided into equally
-      # spaced +:steps+ equally spaced steps (or +:steps+ is used directly if
-      # it is an Array), and each step is passed to the callable.
+      # For a callable Method or Proc, the +:range+ is divided into +:steps+
+      # equally spaced steps (or +:steps+ is used directly if it is an Array),
+      # and each step is passed to the callable.
       #
       # TODO: Maybe this should be in mb-math.
       #

@@ -113,6 +113,72 @@ RSpec.describe(MB::Sound::GraphNode) do
     end
   end
 
+  describe '#real' do
+    it 'converts complex values to real' do
+      n = (5 - 3i).constant.real
+      expect(n.sample(3)).to eq(Numo::SFloat[5, 5, 5])
+
+      n = (-2 + 3i).constant.real
+      expect(n.sample(3)).to eq(Numo::SFloat[-2, -2, -2])
+    end
+
+    it 'preserves real values as is' do
+      n = -4.constant.real
+      expect(n.sample(3)).to eq(Numo::SFloat[-4, -4, -4])
+    end
+  end
+
+  describe '#imag' do
+    it 'converts complex values to their imaginary value' do
+      n = (5 - 3i).constant.imag
+      expect(n.sample(3)).to eq(Numo::SFloat[-3, -3, -3])
+
+      n = (1 + 4.25i).constant.imag
+      expect(n.sample(3)).to eq(Numo::SFloat[4.25, 4.25, 4.25])
+    end
+
+    it 'turns real values into zeros' do
+      n = -4.constant.imag
+      expect(n.sample(3)).to eq(Numo::SFloat[0, 0, 0])
+    end
+  end
+
+  describe '#abs' do
+    it 'converts complex values to their magnitude' do
+      n = (3 - 4i).constant.abs
+      expect(n.sample(3)).to eq(Numo::SFloat[5, 5, 5])
+
+      n = (-5 + 12i).constant.abs
+      expect(n.sample(3)).to eq(Numo::SFloat[13, 13, 13])
+    end
+
+    it 'takes the absolute value of real values' do
+      n = -4.constant.abs
+      expect(n.sample(3)).to eq(Numo::SFloat[4, 4, 4])
+
+      n = 3.constant.abs
+      expect(n.sample(3)).to eq(Numo::SFloat[3, 3, 3])
+    end
+  end
+
+  describe '#arg' do
+    it 'converts complex values to their argument' do
+      n = (1 - 1i).constant.arg
+      expect(n.sample(1)).to eq(Numo::SFloat[-Math::PI / 4])
+
+      n = (-5 + 5i).constant.arg
+      expect(n.sample(2)).to eq(Numo::SFloat[Math::PI * 0.75, Math::PI * 0.75])
+    end
+
+    it 'converts the sign of real values to 0 or pi' do
+      n = -4.constant.arg
+      expect(n.sample(3)).to eq(Numo::SFloat[Math::PI, Math::PI, Math::PI])
+
+      n = 3.constant.arg
+      expect(n.sample(3)).to eq(Numo::SFloat[0, 0, 0])
+    end
+  end
+
   describe '#softclip' do
     it 'can apply softclipping' do
       graph = (1.hz.square.at_rate(20).at(10) + 9.75).softclip(0.5, 1)
