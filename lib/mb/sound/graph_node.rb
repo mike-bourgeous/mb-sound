@@ -34,6 +34,8 @@ module MB
     #
     # TODO: Pass default sample rate through from source nodes or have a
     # graph-global sample rate
+    #
+    # TODO: Document methods that nodes must implement or override
     module GraphNode
       attr_reader :graph_node_name
 
@@ -145,6 +147,30 @@ module MB
             end
           }
         end
+      end
+
+      # Appends a node that returns the real value of a complex signal, or the
+      # unmodified value of a real signal.
+      def real
+        MB::Sound::GraphNode::ComplexNode.new(self, mode: :real)
+      end
+
+      # Appends a node that returns the real value of a complex signal, or
+      # zeroes for a real signal.
+      def imag
+        MB::Sound::GraphNode::ComplexNode.new(self, mode: :imag)
+      end
+
+      # Appends a node that returns the magnitude of a complex signal, or the
+      # absolute value of a real signal.
+      def abs
+        MB::Sound::GraphNode::ComplexNode.new(self, mode: :abs)
+      end
+
+      # Appends a node that returns the instantaneous phase of a complex
+      # signal, or zeroes for a real signal.
+      def arg
+        MB::Sound::GraphNode::ComplexNode.new(self, mode: :arg)
       end
 
       # Uses this node as the frequency value for an oscillator.
@@ -544,3 +570,4 @@ require_relative 'graph_node/node_sequence'
 require_relative 'graph_node/proc_node'
 require_relative 'graph_node/tee'
 require_relative 'graph_node/multitap_delay'
+require_relative 'graph_node/complex_node'
