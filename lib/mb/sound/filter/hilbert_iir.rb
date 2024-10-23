@@ -54,7 +54,14 @@ module MB
           # complex values and computing biquads using complex coefficients
           # TODO: find out why the ratios between successive poles are
           # 3.47, 2.19, 2.03, 2.00, 2.00, 2.00, 2.00, 2.00, 2.03, 2.19, 3.47
-          #
+
+          # TODO: some references mention one of the components (cosine or
+          # sine) needing an extra single-sample delay.  Read more and
+          # determine if this is appropriate for this implementation.
+
+          # TODO: allow designing custom filters with a specified order
+
+          # TODO: experiment with optimizing coefficients with gradient descent
 
           if interp
             # I read somewhere that poles must alternate between the cosine and
