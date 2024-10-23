@@ -80,7 +80,7 @@ module MB
         # analytic signal form of +data+ (with some phase variation relative to
         # the input; see the class comment).
         def process(data)
-          @cosine.process(data) + 1i * @sine.process(data)
+          @cosine.process(data.not_inplace!) + 1i * @sine.process(data.not_inplace!)
         end
 
         # Returns a Hash with the poles and zeros of the cosine-component filter.

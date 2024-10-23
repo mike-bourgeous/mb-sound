@@ -241,7 +241,7 @@ module MB
 
       # Applies the given filter (creating the filter if given a filter type)
       # to this sample source or sample chain.  If given a filter type, then a
-      # dynamically updating filter is created where teh cutoff and quality are
+      # dynamically updating filter is created where the cutoff and quality are
       # controlled by the given sample sources (e.g. numeric value, tone
       # generator, audio input, or ADSR envelope).
       #
@@ -289,6 +289,14 @@ module MB
         else
           raise "Unsupported filter type: #{filter_or_type.inspect}"
         end
+      end
+
+      # Applies an IIR phase difference network to remove negative frequencies
+      # and produce a Complex-valued analytic signal.
+      #
+      # See MB::Sound::Filter::HilbertIIR.
+      def hilbert_iir(rate: 48000)
+        filter(MB::Sound::Filter::HilbertIIR.new(rate: rate))
       end
 
       # Adds a MB::Sound::Filter::Smoothstep filter to the chain, smoothing

@@ -215,6 +215,20 @@ RSpec.describe(MB::Sound::GraphNode) do
     end
   end
 
+  describe '#hilbert_iir' do
+    it 'removes negative frequencies' do
+      # Validation of indices for positive and negative frequencies
+      data = MB::Sound.fft(3200.hz.at(1).sample(48000))
+      expect(data[3200].abs).to be > -0.5.dB
+      expect(data[-3200].abs).to be > -0.5.dB
+
+      # Validation of suppressed negative frequency
+      data = MB::Sound.fft(3200.hz.at(1).hilbert_iir.sample(48000))
+      expect(data[3200].abs).to be > -0.5.dB
+      expect(data[-3200].abs).to be < -40.dB
+    end
+  end
+
   describe '#named?' do
     it 'returns false before and true after a node is given a name' do
       n = 50.hz.proc {}
