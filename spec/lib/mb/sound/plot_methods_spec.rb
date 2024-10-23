@@ -49,6 +49,11 @@ RSpec.describe(MB::Sound::PlotMethods) do
       lines = MB::Sound.mag_phase(5000.hz.lowpass)
       expect(lines.length).to be_between(37, 41).inclusive
     end
+
+    it 'can plot a complex-output Filter' do
+      lines = MB::Sound.mag_phase(MB::Sound::Filter::HilbertIIR.new)
+      expect(lines.length).to be_between(37, 41).inclusive
+    end
   end
 
   describe '#time_freq' do
