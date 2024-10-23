@@ -49,6 +49,11 @@ RSpec.describe(MB::Sound::PlotMethods) do
       lines = MB::Sound.mag_phase(5000.hz.lowpass)
       expect(lines.length).to be_between(37, 41).inclusive
     end
+
+    it 'can plot a complex-output Filter' do
+      lines = MB::Sound.mag_phase(MB::Sound::Filter::HilbertIIR.new)
+      expect(lines.length).to be_between(37, 41).inclusive
+    end
   end
 
   describe '#time_freq' do
@@ -66,6 +71,11 @@ RSpec.describe(MB::Sound::PlotMethods) do
 
     it 'can plot a Filter' do
       lines = MB::Sound.time_freq(5000.hz.lowpass)
+      expect(lines.length).to be_between(37, 41).inclusive
+    end
+
+    it 'can plot a complex-output Filter' do
+      lines = MB::Sound.time_freq(MB::Sound::Filter::HilbertIIR.new)
       expect(lines.length).to be_between(37, 41).inclusive
     end
   end
@@ -155,6 +165,18 @@ RSpec.describe(MB::Sound::PlotMethods) do
     it 'can plot a Filter' do
       expect(MB::Sound).to receive(:puts).with(/Plotting.*Filter/m)
       lines = MB::Sound.plot(5000.hz.lowpass)
+      expect(lines.length).to be_between(37, 41).inclusive
+    end
+
+    it 'can plot a Hilbert transform filter with a complex output' do
+      expect(MB::Sound).to receive(:puts)
+      lines = MB::Sound.plot(MB::Sound::Filter::HilbertIIR.new)
+      expect(lines.length).to be_between(37, 41).inclusive
+    end
+
+    it 'can plot complex-valued audio data' do
+      expect(MB::Sound).to receive(:puts)
+      lines = MB::Sound.plot(123.hz.complex_sine)
       expect(lines.length).to be_between(37, 41).inclusive
     end
   end

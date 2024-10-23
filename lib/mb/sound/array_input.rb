@@ -3,6 +3,7 @@ module MB
     # An input stream that returns chunks from an Array or Numo::NArray.
     class ArrayInput
       include GraphNode
+      include GraphNode::IOSampleMixin
 
       attr_reader :channels, :frames, :rate, :offset, :remaining, :buffer_size, :repeat
 
@@ -14,12 +15,34 @@ module MB
         @buffer_size = buffer_size
         @channels = data.length
         @frames = data.map(&:length).max
+
+        data = data.map { |v| Numo::NArray.cast(v) }
+
+        case
+        when data.any?(Numo::DComplex)
+          @dtype = Numo::DComplex
+
+        when data.any?(Numo::SComplex)
+          if data.any?(Numo::DFloat) || data.any?(Numo::Int32) || data.any?(Numo::Int64)
+            @dtype = Numo::DComplex
+          else
+            @dtype = Numo::SComplex
+          end
+
+        when data.any?(Numo::DFloat) || data.any?(Numo::Int32) || data.any?(Numo::Int64)
+          @dtype = Numo::DFloat
+
+        else
+          @dtype = Numo::SFloat
+        end
+
+        # Convert all arrays to have the same type and length
         @data = data.map { |v|
-          # Compensate for arrays of differing lengths (TODO: support Complex data)
-          Numo::SFloat.zeros(@frames).tap { |c|
+          @dtype.zeros(@frames).tap { |c|
             c[0...v.length] = v if @frames > 0 && v.length > 0
           }
         }
+
         @rate = rate
 
         @remaining = @frames
@@ -85,12 +108,6 @@ module MB
         else
           [ Numo::SFloat[] ] * @channels
         end
-      end
-
-      # Reads +count+ frames and returns the first channel, mainly for use in
-      # specs.
-      def sample(count)
-        read(count)[0]
       end
     end
   end

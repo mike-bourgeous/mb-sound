@@ -71,6 +71,7 @@ module MB
 
         time = data.map { |label, c|
           c = c.is_a?(Filter) ? c.impulse_response(time_samples) : c
+          c = c.abs if c.respond_to?(:imag) # For complex-output filters
 
           time_samples = c.length if c.length < time_samples
           c = c[0...time_samples] if time_samples < c.length
@@ -229,7 +230,9 @@ module MB
           data = [file_tone_data.generate(all ? nil : samples + offset)]
 
         when Filter
-          data = [file_tone_data.impulse_response, file_tone_data.frequency_response.abs]
+          impulse = file_tone_data.impulse_response(samples)
+          freq = file_tone_data.frequency_response(samples)
+          data = [impulse, freq.abs, unwrap_phase(freq)].flatten
 
         when GraphNode
           data = [file_tone_data.sample(samples)]
@@ -240,6 +243,15 @@ module MB
         else
           raise "Cannot plot type #{file_tone_data.class.name}"
         end
+
+        data = data.flat_map { |d|
+          # TODO: better ways of plotting complex-valued data and choosing between real/imag or abs/arg
+          if d.is_a?(Numo::SComplex) || d.is_a?(Numo::DComplex)
+            [d.real, d.imag]
+          else
+            [d]
+          end
+        }
 
         p = plotter(graphical: graphical)
 
@@ -306,9 +318,9 @@ module MB
       # +:steps+ is an Array) are taken from the array and associated with a
       # linearly mapped value from the +:range+ for display.
       #
-      # For a callable Method or Proc, the +:range+ is divided into equally
-      # spaced +:steps+ equally spaced steps (or +:steps+ is used directly if
-      # it is an Array), and each step is passed to the callable.
+      # For a callable Method or Proc, the +:range+ is divided into +:steps+
+      # equally spaced steps (or +:steps+ is used directly if it is an Array),
+      # and each step is passed to the callable.
       #
       # TODO: Maybe this should be in mb-math.
       #

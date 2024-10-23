@@ -1,4 +1,4 @@
-RSpec.describe(MB::Sound::Filter::Biquad) do
+RSpec.describe(MB::Sound::Filter::Biquad, :aggregate_failures) do
   describe '.from_pole_zero' do
     let(:f) {
       MB::Sound::Filter::Biquad.new(0.2, 0.5, -0.3, 0.6, 0.1)
@@ -26,6 +26,13 @@ RSpec.describe(MB::Sound::Filter::Biquad) do
       f_coeff = MB::M.round(f.coefficients, 4)
       g_coeff = MB::M.round(g.coefficients, 4)
       expect(f_coeff).to eq(g_coeff)
+    end
+
+    it 'generates real coefficients for complex conjugate poles and zeroes' do
+      f = MB::Sound::Filter::Biquad.from_pole_zero(poles: [ 0.25+0.25i, 0.25-0.25i ], zeros: [ -0.1+0.1i, -0.1-0.1i ])
+      expect(f.coefficients.map(&:imag)).to eq([0] * 5)
+      expect(f.coefficients.map(&:class)).to eq([Float] * 5)
+      expect(MB::M.round(f.coefficients, 7)).to eq([1, 0.2, 0.02, -0.5, 0.125])
     end
   end
 

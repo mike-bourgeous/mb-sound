@@ -20,16 +20,20 @@ module MB
           raise 'A biquad can only have two poles' if poles.length > 2
           raise 'A biquad can only have two zeros' if zeros.length > 2
 
+          # The coefficients come from multiplying the two binomials for the
+          # numerator and denominator to get the resulting quadratic equations,
+          # where each pole is a binomial in the denominator, and each zero is
+          # a binomial in the numerator.
           if poles.nil? || poles.empty?
-            a0 = 1
-            a1 = 0
-            a2 = 0
+            a0 = 1.0
+            a1 = 0.0
+            a2 = 0.0
           elsif poles.length == 1
-            a0 = 1
+            a0 = 1.0
             a1 = -poles[0]
-            a2 = 0
+            a2 = 0.0
           else
-            a0 = 1
+            a0 = 1.0
             a1 = -poles.reduce(0, &:+)
             a2 = poles.reduce(1, &:*)
           end
@@ -60,11 +64,18 @@ module MB
         # b0..b2 are numerator coefficients, a1..a2 denominator (all normalized
         # by a0); some references use the opposite notation
         def initialize(b0, b1, b2, a1, a2)
+          b0 = b0.real if MB::M.round(b0, 7).imag == 0
+          b1 = b1.real if MB::M.round(b1, 7).imag == 0
+          b2 = b2.real if MB::M.round(b2, 7).imag == 0
+          a1 = a1.real if MB::M.round(a1, 7).imag == 0
+          a2 = a2.real if MB::M.round(a2, 7).imag == 0
+
           @b0 = b0
           @b1 = b1
           @b2 = b2
           @a1 = a1
           @a2 = a2
+
           reset
         end
 
@@ -129,7 +140,8 @@ module MB
         end
 
         # Returns a Hash with the z-plane :poles and :zeros of the filter based
-        # on its coefficients, using the quadratic formula.
+        # on its coefficients, using the quadratic formula.  Poles and zeroes
+        # at the origin are omitted.
         def polezero
           # Poles
           # 0 = ax^2 + bx + c
@@ -166,6 +178,7 @@ module MB
 
         # C loop, C math (much faster than pure Ruby)
         def process_c(samples)
+          # FIXME: convert to SComplex/DComplex if coefficients are complex
           samples, @x1, @x2, @y1, @y2 = MB::FastSound.biquad_narray(
             @b0, @b1, @b2, @a1, @a2,
             [samples, @x1, @x2, @y1, @y2]

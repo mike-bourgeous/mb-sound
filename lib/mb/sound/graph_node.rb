@@ -34,6 +34,8 @@ module MB
     #
     # TODO: Pass default sample rate through from source nodes or have a
     # graph-global sample rate
+    #
+    # TODO: Document methods that nodes must implement or override
     module GraphNode
       attr_reader :graph_node_name
 
@@ -147,6 +149,30 @@ module MB
         end
       end
 
+      # Appends a node that returns the real value of a complex signal, or the
+      # unmodified value of a real signal.
+      def real
+        MB::Sound::GraphNode::ComplexNode.new(self, mode: :real)
+      end
+
+      # Appends a node that returns the real value of a complex signal, or
+      # zeros for a real signal.
+      def imag
+        MB::Sound::GraphNode::ComplexNode.new(self, mode: :imag)
+      end
+
+      # Appends a node that returns the magnitude of a complex signal, or the
+      # absolute value of a real signal.
+      def abs
+        MB::Sound::GraphNode::ComplexNode.new(self, mode: :abs)
+      end
+
+      # Appends a node that returns the instantaneous phase of a complex
+      # signal, or zeros or Math::PI for a real signal.
+      def arg
+        MB::Sound::GraphNode::ComplexNode.new(self, mode: :arg)
+      end
+
       # Uses this node as the frequency value for an oscillator.
       def tone
         MB::Sound::Tone[self]
@@ -215,7 +241,7 @@ module MB
 
       # Applies the given filter (creating the filter if given a filter type)
       # to this sample source or sample chain.  If given a filter type, then a
-      # dynamically updating filter is created where teh cutoff and quality are
+      # dynamically updating filter is created where the cutoff and quality are
       # controlled by the given sample sources (e.g. numeric value, tone
       # generator, audio input, or ADSR envelope).
       #
@@ -263,6 +289,14 @@ module MB
         else
           raise "Unsupported filter type: #{filter_or_type.inspect}"
         end
+      end
+
+      # Applies an IIR phase difference network to remove negative frequencies
+      # and produce a Complex-valued analytic signal.
+      #
+      # See MB::Sound::Filter::HilbertIIR.
+      def hilbert_iir(rate: 48000)
+        filter(MB::Sound::Filter::HilbertIIR.new(rate: rate))
       end
 
       # Adds a MB::Sound::Filter::Smoothstep filter to the chain, smoothing
@@ -544,3 +578,4 @@ require_relative 'graph_node/node_sequence'
 require_relative 'graph_node/proc_node'
 require_relative 'graph_node/tee'
 require_relative 'graph_node/multitap_delay'
+require_relative 'graph_node/complex_node'

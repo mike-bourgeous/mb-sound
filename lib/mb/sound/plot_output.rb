@@ -76,7 +76,11 @@ module MB
 
         @frame += 1
         if !@sleep || remaining > 0.5 * period || @frame % 5 == 0
-          plot(data)
+          dp = data.flat_map { |c|
+            # TODO: show real/imag labels, plot within same chart if possible
+            c.respond_to?(:imag) ? [c.real, c.imag] : [c]
+          }
+          plot(dp)
 
           # The sleep is necessary to maintain sync
           remaining = this_time - ::MB::U.clock_now
