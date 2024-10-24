@@ -5,6 +5,7 @@ module MB
       # that returns a constant numeric value.
       class Constant
         include GraphNode
+        include BufferHelper
 
         module NumericConstantMethods
           # Converts this numeric value into a MB::Sound::GraphNode::Constant
@@ -37,6 +38,7 @@ module MB
         def initialize(constant, smoothing: nil)
           raise 'The constant value must be a numeric' unless constant.is_a?(Numeric)
           @constant = constant
+          @complex = @constant.is_a?(Complex)
           @old_constant = constant
           @smoothing = smoothing
           @buf = nil
@@ -44,7 +46,9 @@ module MB
 
         # Returns +count+ samples of the constant value.
         def sample(count)
-          setup_buffer(count)
+          @complex ||= @constant.is_a?(Complex)
+
+          setup_buffer(length: count, complex: @complex)
 
           smoothing = @smoothing || @smoothing.nil?
           if @constant != @old_constant && smoothing
@@ -63,17 +67,6 @@ module MB
 
         def sources
           [@constant]
-        end
-
-        private
-
-        def setup_buffer(length)
-          @complex = @constant.is_a?(Complex)
-          @bufclass = @complex ? Numo::SComplex : Numo::SFloat
-
-          if @buf.nil? || @buf.length != length || @bufclass != @buf.class
-            @buf = @bufclass.zeros(length)
-          end
         end
       end
     end

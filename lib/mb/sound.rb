@@ -118,6 +118,8 @@ module MB
   end
 end
 
+require_relative 'sound/buffer_helper'
+
 require_relative 'sound/graph_node'
 
 require_relative 'sound/io_base'
