@@ -16,6 +16,11 @@ RSpec.describe(MB::Sound::GraphNode::BufferAdapter) do
 
     pending 'with values that are common factors'
     pending 'with a very large number of iterations'
+
+    # FIXME: right now any internal buffer size must be an exact factor of the
+    # upstream input's buffer size, or else the input will have to be read
+    # twice and the two channels will get out of sync.
+    pending 'with split inputs that reset themselves when re-sampled'
   end
 
   describe '#sources' do

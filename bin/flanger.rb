@@ -59,6 +59,8 @@ else
 end
 
 bufsize = output.buffer_size
+internal_bufsize = 48
+internal_bufsize -= 1 until bufsize % internal_bufsize == 0
 
 delay_samples = delay * output.rate
 delay_samples = 0 if delay_samples < 0
@@ -84,6 +86,7 @@ puts MB::U.highlight(
   inputs: inputs.map(&:graph_node_name),
   rate: output.rate,
   buffer: bufsize,
+  internal_buffer: internal_bufsize,
 )
 
 # TODO: Maybe want a graph-wide spy function that either prints stats, draws
@@ -93,8 +96,10 @@ begin
   # FIXME: feedback delay includes buffer size
   # TODO: Abstract construction of a filter graph per channel
   paths = inputs.map.with_index { |inp, idx|
+    inp = inp.with_buffer(bufsize)
+
     # Feedback buffers, overwritten by later calls to #spy
-    a = Numo::SFloat.zeros(bufsize)
+    a = Numo::SFloat.zeros(internal_bufsize)
 
     lfo_freq = hz.constant.named('LFO Hz')
 
@@ -122,7 +127,7 @@ begin
     s2 = s2.delay(samples: d1, smoothing: delay_smoothing)
 
     # Feedback injector and feedback delay (compensating for buffer size)
-    d_fb = (d2 - bufsize).clip(0, nil)
+    d_fb = (d2 - internal_bufsize).clip(0, nil)
     b = 0.hz.forever.proc { a }.delay(samples: d_fb, smoothing: delay_smoothing2)
 
     # Effected output, with a spy to save feedback buffer
@@ -130,7 +135,7 @@ begin
 
     dryconst = dry_level.constant.named('Dry level')
     wetconst = wet_level.constant.named('Wet level')
-    final = (s1 * dryconst + wet * wetconst).softclip(0.85, 0.95)
+    final = (s1 * dryconst + wet * wetconst).softclip(0.85, 0.95).with_buffer(internal_bufsize).named('final_buf')
 
     # GraphVoice provides on_cc to generate a cc map for the MIDI manager
     # (TODO: probably a better way to do this, also need on_bend, on_pitch, etc)
