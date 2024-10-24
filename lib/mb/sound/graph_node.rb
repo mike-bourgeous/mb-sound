@@ -458,7 +458,7 @@ module MB
       end
 
       # Returns a list of all nodes feeding into this node, either directly or
-      # indirectly.
+      # indirectly, plus this node itself.
       def graph
         source_history = Set.new
         source_queue = [self]
@@ -481,8 +481,7 @@ module MB
       # If there is no graph node with a buffer_size method, then this method
       # returns nil.
       #
-      # TODO: A buffer adapter might be useful.  The MB::Sound::Filter::Delay
-      # class is already kind of like one.
+      # TODO: what should this return when the graph contains a buffer adapter?
       def graph_buffer_size
         size = nil
 
@@ -494,6 +493,16 @@ module MB
         end
 
         size
+      end
+
+      # Appends a BufferAdapter to the graph with this node as its upstream
+      # source, using the given +length+ as the upstream frame size.  When
+      # downstream nodes sample the adapter, the adapter will sample the
+      # upstream node in +length+-sized chunks.  This allows running a node
+      # graph with a shorter internal buffer size than the sound card input or
+      # output buffer size, for example.
+      def with_buffer(length)
+        MB::Sound::GraphNode::BufferAdapter.new(upstream: self, upstream_count: length)
       end
 
       # Looks for the first source node within the graph feeding into this node
@@ -579,3 +588,4 @@ require_relative 'graph_node/proc_node'
 require_relative 'graph_node/tee'
 require_relative 'graph_node/multitap_delay'
 require_relative 'graph_node/complex_node'
+require_relative 'graph_node/buffer_adapter'
