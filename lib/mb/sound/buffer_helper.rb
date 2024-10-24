@@ -32,6 +32,7 @@ module MB
         @bufcomplex = complex
         @buftemp = temp
         @bufdouble = double
+        @buf ||= nil
 
         if double
           @bufclass = complex ? Numo::DComplex : Numo::DFloat
@@ -52,6 +53,7 @@ module MB
         end
 
         if temp
+          @tmpbuf ||= nil
           if @tmpbuf.nil?
             # Buffer doesn't exist; create it
             @tmpbuf = @bufclass.zeros(length)
