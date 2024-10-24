@@ -33,18 +33,13 @@ module MB
         # Returns +count+ samples, using as many or as few reads from the
         # upstream as needed to fulfill the request.
         def sample(count)
-          puts "\e[1;35mReading #{count} on #{self} with upstream #{@upstream} and current length of #{@circbuf&.length || 0}\e[0m" # XXX
-
           setup_circular_buffer(count)
 
           while @circbuf.length < count
-            puts "\e[1;36m  Have #{@circbuf.length} out of #{count}.  Asking upstream #{@upstream} for #{@upstream_count}.\e[0m" # XXX
             v = @upstream.sample(@upstream_count)
             @complex ||= v.is_a?(Numo::SComplex) || v.is_a?(Numo::DComplex)
             @circbuf.write(v)
           end
-
-          puts "\e[1;32m  Now have #{@circbuf.length}, returning #{count}.\e[0m" # XXX
 
           @circbuf.read(count).not_inplace!
         end
