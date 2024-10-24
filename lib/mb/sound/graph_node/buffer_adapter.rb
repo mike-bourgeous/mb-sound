@@ -27,7 +27,7 @@ module MB
 
         # Returns the upstream as the only source for this node.
         def sources
-          [upstream]
+          [@upstream]
         end
 
         # Returns +count+ samples, using as many or as few reads from the

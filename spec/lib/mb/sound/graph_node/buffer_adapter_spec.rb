@@ -18,6 +18,15 @@ RSpec.describe(MB::Sound::GraphNode::BufferAdapter) do
     pending 'with a very large number of iterations'
   end
 
+  describe '#sources' do
+    it 'returns the upstream as its sole source' do
+      source = 5.constant
+      chain = source.with_buffer(37)
+      expect(chain).to be_a(MB::Sound::GraphNode::BufferAdapter)
+      expect(chain.sources).to eq([source])
+    end
+  end
+
   pending 'when switching from real to complex'
   pending 'when resizing downstream count'
   pending 'when resizing upstream count'
