@@ -215,7 +215,9 @@ module MB
       end
 
       # Tries to auto-detect an input device for recording sound.  Returns a
-      # sound input stream with a :read method.
+      # sound input stream with a :read method for reading all channels, and
+      # :split and :sample methods for use with node graphs (see GraphNode and
+      # GraphNode::IOSampleMixin).
       #
       # For input types that support naming a specific device, the INPUT_DEVICE
       # environment variable, the DEVICE environment variable, or the +:device+
@@ -253,6 +255,10 @@ module MB
           raise NotImplementedError, 'TODO: support other platforms'
         end
 
+        # mb-sound-jackffi cannot depend on this gem since we depend on it.
+        # Therefore we have to mix in GraphNode stuff here instead of including
+        # it in mb-sound-jackffi.  We could split the node graph code into a
+        # separate gem to get around this.
         inp.extend(GraphNode) unless inp.is_a?(GraphNode)
         inp.extend(GraphNode::IOSampleMixin) unless inp.is_a?(GraphNode::IOSampleMixin)
 
