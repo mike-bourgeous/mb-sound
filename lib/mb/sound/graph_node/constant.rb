@@ -35,18 +35,34 @@ module MB
         # the output value will change smoothly over the length of one buffer
         # (TODO: use a constant-length FIR filter?  consider using or merging
         # with filter/smoothstep.rb?).
-        def initialize(constant, smoothing: nil)
+        def initialize(constant, smoothing: nil, rate: 48000)
           raise 'The constant value must be a numeric' unless constant.is_a?(Numeric)
           @constant = constant
           @complex = @constant.is_a?(Complex)
           @old_constant = constant
           @smoothing = smoothing
           @buf = nil
+
+          @rate = rate.to_f
+          @elapsed_samples = 0.0
+          @duration_samples = nil
         end
 
         # Returns +count+ samples of the constant value.
         def sample(count)
           @complex ||= @constant.is_a?(Complex)
+
+          if @duration_samples
+            # Return nil if we have reached the duration set by #for
+            return nil if @elapsed_samples >= @duration_samples
+
+            # Return less than requested if we have nearly reached the duration set by #for
+            if @elapsed_samples + count >= @duration_samples
+              count = @duration_samples - @elapsed_samples
+            end
+          end
+
+          @elapsed_samples += count
 
           setup_buffer(length: count, complex: @complex)
 
@@ -67,6 +83,13 @@ module MB
 
         def sources
           [@constant]
+        end
+
+        # Sets the duration for which this constant will run, or nil to run
+        # forever.
+        def for(duration_seconds)
+          @duration_samples = duration_seconds && duration_seconds.to_f * @rate
+          self
         end
       end
     end
