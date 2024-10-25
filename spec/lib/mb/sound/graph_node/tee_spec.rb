@@ -27,4 +27,6 @@ RSpec.describe(MB::Sound::GraphNode::Tee) do
     expect(a2).to eq(b2)
     expect(ref).not_to eq(b2)
   end
+
+  pending 'when the upstream is nil'
 end

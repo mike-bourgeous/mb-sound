@@ -45,6 +45,9 @@ module MB
           raise BufferUnderflow, "Read of size #{count} is greater than #{@length} available samples"
         end
 
+        # Return an empty NArray if asked to read nothing, even if the buffer is empty
+        return @buf.class[] if count == 0
+
         MB::M.circular_read(@buf, @read_pos, count, target: @tmpbuf)[0...count].tap {
           @read_pos = (@read_pos + count) % @buffer_size
           @length -= count

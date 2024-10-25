@@ -40,12 +40,22 @@ depth ||= 0.35
 wave_type = ENV['WAVE_TYPE']&.to_sym || :sine
 raise 'Invalid wave type' unless MB::Sound::Oscillator::WAVE_TYPES.include?(wave_type)
 
+# Optionally read from a file
 filename = others[0]
-
 if filename && File.readable?(filename)
-  inputs = MB::Sound.file_input(filename).split.map { |d| d.and_then(0.hz.at(0).for(delay * 4)) }
+  input = MB::Sound.file_input(filename)
+
+  # Can't use 0.hz.for(...) because GraphVoice changes all Tones to play forever.  FIXME: make GraphVoice smarter?
+  # Feedback will decay by N dB after |log_[|feedback|](-N dB)| max delay periods
+  # Always extend by at least one delay period, or at least one second
+  max_delay = delay.abs * (1 + depth.abs)
+  decay_periods = 1 + Math.log(-36.dB, MB::M.clamp(feedback.abs, 0.1, 0.99))
+  delay_time = MB::M.max(max_delay * decay_periods, 1)
+  final_tone = 0.constant.for(max_delay * decay_periods)
+  inputs = input.split.map { |d| d.and_then(final_tone) }
 else
-  inputs = MB::Sound.input(channels: ENV['CHANNELS']&.to_i || 2).split
+  input = MB::Sound.input(channels: ENV['CHANNELS']&.to_i || 2)
+  inputs = input.split
 end
 
 output = MB::Sound.output(channels: inputs.length)
@@ -127,8 +137,9 @@ begin
     s2 = s2.delay(samples: d1, smoothing: delay_smoothing)
 
     # Feedback injector and feedback delay (compensating for buffer size)
+    # TODO: better way of injecting an NArray into a node chain than constant.proc
     d_fb = (d2 - internal_bufsize).clip(0, nil)
-    b = 0.hz.forever.proc { a }.delay(samples: d_fb, smoothing: delay_smoothing2)
+    b = 0.constant.proc { a }.delay(samples: d_fb, smoothing: delay_smoothing2)
 
     # Effected output, with a spy to save feedback buffer
     wet = (feedback * b - s2).softclip(0.85, 0.95).spy { |z| a[] = z if z }
@@ -155,7 +166,7 @@ begin
   loop do
     manager&.update
     data = paths.map { |p| p.sample(output.buffer_size) }
-    break if data.any?(&:nil?)
+    break if data.any?(&:nil?) || data.any?(&:empty?) || input.closed?
     output.write(data)
   end
 

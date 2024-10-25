@@ -37,7 +37,15 @@ module MB
 
           while @circbuf.length < count
             v = @upstream.sample(@upstream_count)
+
+            # End of input; return whatever we can from the buffer, or nil
+            if v.nil? || v.empty?
+              return nil if @circbuf.length == 0
+              return @circbuf.read(MB::M.min(count, @circbuf.length))
+            end
+
             @complex ||= v.is_a?(Numo::SComplex) || v.is_a?(Numo::DComplex)
+
             @circbuf.write(v)
           end
 

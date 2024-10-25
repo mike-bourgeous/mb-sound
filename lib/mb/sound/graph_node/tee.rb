@@ -32,7 +32,7 @@ module MB
           # being sampled once.
           def sample(count)
             source_buf = @tee.internal_sample(self, count)
-            return nil if source_buf.nil?
+            return nil if source_buf.nil? || source_buf.empty?
 
             @type = source_buf.class
             update_buffer(count)
@@ -50,7 +50,7 @@ module MB
 
           private
 
-          # TODO: deduplicate buffer management/allocation/reallocation
+          # TODO: use BufferHelper#setup_buffer
           def update_buffer(count)
             if @buf.nil? || @type != @buf.class || count != @buf.length
               @buf = @type.zeros(count)
@@ -79,6 +79,7 @@ module MB
           @read_branches = Set.new
 
           @buf = nil
+          @done = false
         end
 
         # For internal use by Branch#sample.  Returns the current buffer of
@@ -99,13 +100,23 @@ module MB
             @buf = nil
           end
 
-          if @buf && @buf.length != count
-            raise "Branch #{branch} on Tee #{self} requested #{count} samples when the buffer has #{@buf.length}"
+          return nil if @done
+
+          if @buf
+            if @buf.length == 0
+              return nil
+            elsif @buf.length != count
+              raise "Branch #{branch} on Tee #{self} requested #{count} samples when the buffer has #{@buf.length}"
+            end
           end
 
           @read_branches << branch
 
           @buf ||= @source.sample(count)
+
+          @done = true if @buf.nil? || @buf.empty?
+
+          @buf
         end
       end
     end

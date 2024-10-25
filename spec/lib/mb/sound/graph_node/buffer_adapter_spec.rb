@@ -35,4 +35,5 @@ RSpec.describe(MB::Sound::GraphNode::BufferAdapter) do
   pending 'when switching from real to complex'
   pending 'when resizing downstream count'
   pending 'when resizing upstream count'
+  pending 'when the upstream is empty or nil'
 end

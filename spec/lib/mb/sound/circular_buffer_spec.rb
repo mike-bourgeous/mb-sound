@@ -39,4 +39,5 @@ RSpec.describe(MB::Sound::CircularBuffer) do
   pending 'raises errors on buffer underflow and overflow'
   pending 'can be resized'
   pending 'can be switched from real to complex'
+  pending 'when reading zero samples'
 end
