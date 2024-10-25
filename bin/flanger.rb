@@ -2,8 +2,8 @@
 # A simple flanger effect, to demonstrate using a signal node as a delay time.
 # (C)2022 Mike Bourgeous
 #
-# Usage: $0 [delay_s [feedback [hz [depth0..1]]]] [filename]
-#    Or: $0 [filename]
+# Usage: $0 [delay_s [feedback [hz [depth0..1]]]] [filename [output_filename]] [--silent]
+#    Or: $0 [filename [output_filename]] [--silent]
 #
 # Environment variables:
 #    WAVE_TYPE - oscillator waveform name (e.g. sine, ramp, triangle, square)
@@ -19,6 +19,7 @@
 #    Water drums: SMOOTHING=4 WET=1 DRY=0 $0 sounds/drums.flac 0.02 -0.3 46 6
 #    Space warp: SMOOTHING=10 WET=1 DRY=0 $0 sounds/drums.flac 0.2 -0.8 15 6
 #    Time warp: WET=1 DRY=0 $0 sounds/drums.flac 0.2 -0.8 0.3 6
+#    Bass comb: SMOOTHING=0.7 DRY=0 bin/flanger.rb sounds/drums.flac 0.04 0.95 150 1
 
 require 'bundler/setup'
 
@@ -48,6 +49,7 @@ if filename && File.readable?(filename)
   # Can't use 0.hz.for(...) because GraphVoice changes all Tones to play forever.  FIXME: make GraphVoice smarter?
   # Feedback will decay by N dB after |log_[|feedback|](-N dB)| max delay periods
   # Always extend by at least one delay period, or at least one second
+  # TODO: detect actual decay by monitoring audio level; that might be a useful graph node to add
   max_delay = delay.abs * (1 + depth.abs)
   decay_periods = 1 + Math.log(-36.dB, MB::M.clamp(feedback.abs, 0.1, 0.99))
   delay_time = MB::M.max(max_delay * decay_periods, 1)
@@ -58,7 +60,26 @@ else
   inputs = input.split
 end
 
-output = MB::Sound.output(channels: inputs.length)
+if others.delete('--silent')
+  puts "\e[1;34mNot playing realtime output\e[0m"
+else
+  output = MB::Sound.output(channels: inputs.length)
+end
+
+# Optionally write to a file
+output_filename = others[1]
+if output_filename && !output_filename.start_with?('-') && !MB::U.prevent_overwrite(output_filename, prompt: true)
+  puts "\e[33mWriting to \e[1m#{output_filename}\e[0m"
+  output = MB::Sound::MultiWriter.new([
+    output,
+    MB::Sound.file_output(
+      output_filename,
+      channels: inputs.count,
+      buffer_size: output&.buffer_size || input.buffer_size,
+      overwrite: true
+    )
+  ].compact)
+end
 
 if defined?(MB::Sound::JackFFI) && output.is_a?(MB::Sound::JackFFI::Output)
   # MIDI control is possible since Jack is running
@@ -88,6 +109,8 @@ wet_level = ENV['WET']&.to_f || 1
 phase_spread = ENV['SPREAD']&.to_f || 180.0
 
 puts MB::U.highlight(
+  args: ARGV,
+  other_args: others,
   wave_type: wave_type,
   delay: delay,
   feedback: feedback,
