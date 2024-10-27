@@ -3,6 +3,8 @@ module MB
     class Filter
       # Implements low- and high-pass filters with a maximally flat Butterworth
       # response.
+      #
+      # FIXME: this creates filters with extremely high overall gain
       class Butterworth < FilterChain
         attr_reader :sample_rate, :center_frequency
 
