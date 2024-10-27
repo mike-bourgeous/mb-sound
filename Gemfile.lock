@@ -1,8 +1,8 @@
 GIT
   remote: https://github.com/mike-bourgeous/mb-math.git
-  revision: d91920d53c625db0f54d1010f1dd70132d2d021a
+  revision: 4511820b5af69491c4d97d443f13791796aa2349
   specs:
-    mb-math (0.1.14.usegit)
+    mb-math (0.2.0.usegit)
       cmath (~> 1.0.0)
       mb-util (>= 0.1.0.usegit)
       numo-narray (~> 0.9.1)
@@ -26,7 +26,7 @@ PATH
   specs:
     mb-sound (0.7.1.usegit)
       cmath (~> 1.0.0)
-      mb-math (>= 0.1.14.usegit)
+      mb-math (>= 0.2.0.usegit)
       mb-util (>= 0.1.16.usegit)
       midi-nibbler (~> 0.2.4)
       midilib (~> 4.0.0)
@@ -91,7 +91,7 @@ PLATFORMS
 DEPENDENCIES
   builder (~> 3.2.4)
   cmath
-  mb-math (>= 0.1.14.usegit)!
+  mb-math (>= 0.2.0.usegit)!
   mb-sound!
   mb-sound-jackffi (>= 0.0.19.usegit)!
   mb-util (>= 0.1.16.usegit)!
