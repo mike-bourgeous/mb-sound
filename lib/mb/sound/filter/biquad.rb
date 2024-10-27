@@ -12,13 +12,40 @@ module MB
       class Biquad < Filter
         attr_reader :b0, :b1, :b2, :a1, :a2
 
-        # Initializes a biquad filter from the given set of poles and zeros.
+        # Initializes a biquad filter (or a chain of multiple biquad filters)
+        # from the given set of poles and zeros.  If multiple biquads are
+        # created, poles and zeroes will be grouped in the order they are
+        # given.  When creating multiple biquads, if fewer zeros are given than
+        # poles, then the zeros will be created as reciprocals of matching
+        # poles.
         #
         # TODO: accept a total gain factor and/or normalize peak gain to 1.0
         # (poles+zeros alone do not indicate overall gain)
+        #
+        # FIXME: should we just raise an error if there are fewer zeros instead
+        # of creating an allpass response with reciprocation of poles?
         def self.from_pole_zero(poles:, zeros:)
-          raise 'A biquad can only have two poles' if poles.length > 2
-          raise 'A biquad can only have two zeros' if zeros.length > 2
+          if poles.length > 2 || zeros.length > 2
+            # Create a chain of multiple biquads
+            filters = []
+
+            for i in (0...MB::M.max(poles.length, zeros.length)).step(2)
+              p_n = poles[i..(i + 1)]&.compact || []
+              z_n = zeros[i..(i + 1)]&.compact || []
+              raise "BUG: both poles and zeroes are empty for index #{i}" if p_n.empty? && z_n.empty?
+
+              p0 = p_n[0] || 0
+              p1 = p_n[1] || 0
+              z0 = zeros[i] || (poles[i].to_c != 0 ? 1.0 / p0 : 0)
+              z1 = zeros[i + 1] || (poles[i + 1].to_c != 0 ? 1.0 / p1 : 0)
+
+              puts "I: #{i} p_n: #{p0}, #{p1} z_n: #{z0}, #{z1}" # XXX
+
+              filters << from_pole_zero(poles: [p0, p1], zeros: [z0, z1])
+            end
+
+            return MB::Sound::Filter::FilterChain.new(*filters)
+          end
 
           # The coefficients come from multiplying the two binomials for the
           # numerator and denominator to get the resulting quadratic equations,
@@ -59,6 +86,9 @@ module MB
           a2 /= a0
 
           self.new(b0, b1, b2, a1, a2)
+        end
+        class << self
+          alias from_polezero from_pole_zero
         end
 
         # b0..b2 are numerator coefficients, a1..a2 denominator (all normalized
@@ -140,21 +170,32 @@ module MB
         end
 
         # Returns a Hash with the z-plane :poles and :zeros of the filter based
-        # on its coefficients, using the quadratic formula.  Poles and zeroes
-        # at the origin are omitted.
+        # on its coefficients, using the quadratic formula.
+        #
+        # FIXME: How do we represent a filter with b0=0, b1=1, b2=0 or similar (simple sample delays)?
+        # TODO: Should we only return one pole and one zero if both a2 and b2 are zero (and thus filter order is one)?
         def polezero
-          # Poles
-          # 0 = ax^2 + bx + c
-          # 0 = @a2 * z^-2, @a1 * z^-1, 1.0*z^0 -- multiply by num/denom by z^2 to get rid of negative exponent
-          # 0 = 1.0 * z^2 + @a1 * z^1 + @a2 * z^0
-          # a = 1.0, b = @a1, c = @a2
-          # Zeros
-          # a = @b0, b = @b1, c = @b2
-          {
-            poles: MB::M.quadratic_roots(1.0, @a1, @a2).reject(&:zero?),
-            zeros: MB::M.quadratic_roots(@b0, @b1, @b2).reject(&:zero?)
-          }
+          if MB::M.round(@a2, 15) == 0 && MB::M.round(@b2, 15) == 0
+            # First-order filter, so use .uniq to return only one pole and one zero
+            {
+              poles: MB::M.quadratic_roots(1.0, @a1, @a2).map { |r| MB::M.round(r, 15) }.uniq,
+              zeros: MB::M.quadratic_roots(@b0, @b1, @b2).map { |r| MB::M.round(r, 15) }.uniq
+            }
+          else
+            # Poles
+            # 0 = ax^2 + bx + c
+            # 0 = @a2 * z^-2, @a1 * z^-1, 1.0*z^0 -- multiply by num/denom by z^2 to get rid of negative exponent
+            # 0 = 1.0 * z^2 + @a1 * z^1 + @a2 * z^0
+            # a = 1.0, b = @a1, c = @a2
+            # Zeros
+            # a = @b0, b = @b1, c = @b2
+            {
+              poles: MB::M.quadratic_roots(1.0, @a1, @a2),
+              zeros: MB::M.quadratic_roots(@b0, @b1, @b2)
+            }
+          end
         end
+        alias pole_zero polezero
 
         # Processes +samples+ through the filter, updating the internal state
         # along the way.  If +reset+ is given, the internal state is reset to the
