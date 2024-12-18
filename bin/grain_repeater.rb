@@ -99,14 +99,23 @@ puts MB::U.highlight(
 # TODO: rate needs to scale based on count
 rate = 0.5 / delay
 
-paths = input_nodes.map { |inp|
+paths = input_nodes.map.with_index { |inp, idx|
   # TODO: cross-fade two delays with opposite phase instead of fading out and back in
   fade_osc = (rate * 2).hz.sine.at(0..500).with_phase(-Math::PI / 2).clip(0, 1)
 
   # TODO: multiple repeats: rate.hz.with_phase(Math::PI).ramp.at(0..1).proc { |v| v.map { |q| (q * (count).floor / (count - 1.0) }
   delay_osc = rate.hz.square.at(0..delay).with_phase(Math::PI)
 
-  inp.delay(seconds: delay_osc, smoothing: false) * fade_osc
+  case idx
+  when 0
+    inp.delay(seconds: delay_osc, smoothing: false) * fade_osc
+
+  when 1
+    fade_osc
+
+  when 2
+    delay_osc
+  end
 }
 
 loop do
