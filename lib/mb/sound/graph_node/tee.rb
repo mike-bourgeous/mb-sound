@@ -32,7 +32,7 @@ module MB
           # being sampled once.
           def sample(count)
             source_buf = @tee.internal_sample(self, count)
-            return nil if source_buf.nil?
+            return nil if source_buf.nil? || source_buf.empty?
 
             @type = source_buf.class
             update_buffer(count)
@@ -105,7 +105,7 @@ module MB
 
           @read_branches << branch
 
-          @buf ||= @source.sample(count)
+          @buf ||= @source.sample(count).yield_self { |b| MB::M.zpad(b, count) if b && !b.empty? }
         end
       end
     end
