@@ -328,7 +328,7 @@ module MB
       #
       # See MB::Sound::Filter::Delay#initialize for a description of the
       # +:smoothing+ parameter.
-      def delay(seconds: nil, samples: nil, rate: 48000, smoothing: true)
+      def delay(seconds: nil, samples: nil, rate: 48000, smoothing: true, max_delay: 1.0)
         if samples
           samples = samples.to_f if samples.is_a?(Numeric)
           seconds = samples / rate
@@ -336,7 +336,7 @@ module MB
           seconds = seconds.to_f if seconds.is_a?(Numeric)
         end
 
-        filter(MB::Sound::Filter::Delay.new(delay: seconds, rate: rate, smoothing: smoothing))
+        filter(MB::Sound::Filter::Delay.new(delay: seconds, rate: rate, smoothing: smoothing, buffer_size: rate * max_delay))
       end
 
       # Adds a multi-tap delay with the given delay sources, returning an Array

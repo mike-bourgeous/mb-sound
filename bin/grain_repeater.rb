@@ -51,8 +51,7 @@ opts.each do |opt, arg|
 
   when '--count'
     count = arg.to_i
-    raise NotImplementedError, 'Only a count of 2 is supported at this time' unless count == 2
-    # TODO raise 'Repeat count must be >= 2' unless count >= 2
+    raise 'Repeat count must be >= 2' unless count >= 2
 
   when '--channels'
     channels = arg.to_i
@@ -67,7 +66,7 @@ end
 filename = ARGV[0]
 if filename
   raise "Cannot read #{filename}" unless File.readable?(filename)
-  input = MB::Sound.file_input(filename, channels: channels)
+  input = MB::Sound.file_input(filename, channels: channels, buffer_size: 4000)
   channels = input.channels
   input_nodes = input.split
 else
@@ -80,7 +79,7 @@ output_channels = input_nodes.length
 
 if output_filename
   # TODO multiplex to file and live output
-  output = MB::Sound.file_output(output_filename, overwrite: true, channels: output_channels)
+  output = MB::Sound.file_output(output_filename, overwrite: true, channels: output_channels, buffer_size: input.buffer_size)
 else
   output = MB::Sound.output(channels: output_channels)
 end
@@ -96,30 +95,23 @@ puts MB::U.highlight(
 
 # TODO: MIDI control of parameters
 
-# TODO: rate needs to scale based on count
-rate = 0.5 / delay
+period = count * delay
+rate = 1.0 / period
 
 paths = input_nodes.map.with_index { |inp, idx|
-  # TODO: cross-fade two delays with opposite phase instead of fading out and back in
-  fade_osc = (rate * 2).hz.sine.at(0..500).with_phase(-Math::PI / 2).clip(0, 1)
+  # TODO: cross-fade two delays with opposite phase instead of fading out and back in?
+  # TODO: use a constant number of samples with smoothstep for the fade instead of scaling a sine wave
+  fade_osc = (1.0 / delay).hz.sine.forever.at(0..500).with_phase(-Math::PI / 2).clip(0, 1)
 
-  # TODO: multiple repeats: rate.hz.with_phase(Math::PI).ramp.at(0..1).proc { |v| v.map { |q| (q * (count).floor / (count - 1.0) }
-  delay_osc = rate.hz.square.at(0..delay).with_phase(Math::PI)
+  delay_osc = rate.hz.with_phase(Math::PI).ramp.forever.at(0..1.0).proc { |v| (v * count).floor / (count - 1.0) } * (period - delay)
 
-  case idx
-  when 0
-    inp.delay(seconds: delay_osc, smoothing: false) * fade_osc
-
-  when 1
-    fade_osc
-
-  when 2
-    delay_osc
-  end
+  # FIXME: if max_delay isn't set, then the first time the delay equals one second the buffer is lost
+  # e.g. bin/grain_repeater.rb --delay=0.5 --channels=3 --count=3 --output=result.flac sounds/drums.flac
+  inp.delay(seconds: delay_osc, smoothing: false, max_delay: period) * fade_osc
 }
 
 loop do
-  data = paths.map { |p| p.sample(input.buffer_size) }
+  data = paths.map { |p| p.sample(output.buffer_size) }
   break if data.any?(&:nil?)
   output.write(data)
 end
