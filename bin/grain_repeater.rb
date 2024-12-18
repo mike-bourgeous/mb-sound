@@ -74,8 +74,7 @@ else
   input_nodes = input.split
 end
 
-# XXX 4 for debugging oscillators
-output_channels = 4 # XXX input_nodes.length
+output_channels = input_nodes.length
 
 if output_filename
   # TODO multiplex to file and live output
@@ -98,19 +97,15 @@ puts MB::U.highlight(
 # TODO: rate needs to scale based on count
 rate = 0.5 / delay
 
-n0, n1 = input_nodes[0].tee(2)
+paths = input_nodes.map { |inp|
+  # TODO: cross-fade two delays with opposite phase instead of fading out and back in
+  fade_osc = (rate * 2).hz.sine.at(0..500).with_phase(-Math::PI / 2).clip(0, 1)
 
-paths = [
-  n0.yield_self { |inp|
-    delay_osc = rate.hz.square.at(0..delay).with_phase(Math::PI)
-    fade_osc = (rate * 2).hz.triangle.at(0..500).with_phase(-Math::PI / 2).clip(0, 1)
-    # TODO: multiple repeats: rate.hz.with_phase(Math::PI).ramp.at(0..1).proc { |v| v.map { |q| (q * (count).floor / (count - 1.0) }
-    inp.delay(seconds: delay_osc, smoothing: false) * fade_osc
-  },
-  n1,
-  rate.hz.square.at(0..delay).with_phase(Math::PI),
-  (rate * 2).hz.triangle.at(0..500).with_phase(-Math::PI / 2).clip(0, 1),
-]
+  # TODO: multiple repeats: rate.hz.with_phase(Math::PI).ramp.at(0..1).proc { |v| v.map { |q| (q * (count).floor / (count - 1.0) }
+  delay_osc = rate.hz.square.at(0..delay).with_phase(Math::PI)
+
+  inp.delay(seconds: delay_osc, smoothing: false) * fade_osc
+}
 
 loop do
   data = paths.map { |p| p.sample(input.buffer_size) }
