@@ -8,6 +8,7 @@ require 'bundler/setup'
 require 'benchmark'
 
 require 'io/console'
+require 'pry-byebug'
 
 Bundler.require
 
