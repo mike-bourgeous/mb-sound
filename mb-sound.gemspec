@@ -31,14 +31,14 @@ Gem::Specification.new do |spec|
 
   spec.add_runtime_dependency 'cmath', '~> 1.0.0'
   spec.add_runtime_dependency 'numo-narray', '~> 0.9.1.8'
-  spec.add_runtime_dependency 'numo-pocketfft', '~> 0.2.2'
+  spec.add_runtime_dependency 'numo-pocketfft', '~> 0.4.1'
 
   spec.add_runtime_dependency 'midi-nibbler', '~> 0.2.4'
 
   spec.add_runtime_dependency 'midilib', '~> 4.0.0'
 
-  spec.add_runtime_dependency 'mb-math', '>= 0.1.14.usegit'
-  spec.add_runtime_dependency 'mb-util', '>= 0.1.16.usegit'
+  spec.add_runtime_dependency 'mb-math', '>= 0.2.1.usegit'
+  spec.add_runtime_dependency 'mb-util', '>= 0.1.20.usegit'
 
   # For generating MIDI controller templates for ACID
   spec.add_development_dependency 'builder', '~> 3.2.4'
