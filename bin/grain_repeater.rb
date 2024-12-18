@@ -36,7 +36,7 @@ opts = GetoptLong.new(
 
 delay = 0.125
 count = 2
-channels = ENV['CHANNELS']&.to_i || 2
+channels = ENV['CHANNELS']&.to_i
 output_filename = nil
 
 opts.each do |opt, arg|
@@ -67,9 +67,11 @@ end
 filename = ARGV[0]
 if filename
   raise "Cannot read #{filename}" unless File.readable?(filename)
-  input = MB::Sound.file_input(filename)
+  input = MB::Sound.file_input(filename, channels: channels)
+  channels = input.channels
   input_nodes = input.split
 else
+  channels ||= 2
   input = MB::Sound.input(channels: channels)
   input_nodes = input.split
 end
