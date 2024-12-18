@@ -54,5 +54,6 @@ Gem::Specification.new do |spec|
 
   spec.add_development_dependency 'rake-compiler', '~> 1.1.1'
 
+  spec.add_development_dependency 'getoptlong', '~> 0.2.1'
   spec.add_development_dependency 'forwardable', '~> 1.3.3'
 end
