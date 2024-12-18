@@ -94,6 +94,7 @@ GEM
     simplecov-html (0.13.1)
     simplecov_json_formatter (0.1.4)
     singleton (0.3.0)
+    word_wrap (1.0.0)
     yard (0.9.37)
 
 PLATFORMS
@@ -116,6 +117,7 @@ DEPENDENCIES
   rake-compiler (~> 1.1.1)
   rspec
   simplecov (~> 0.21.2)
+  word_wrap (~> 1.0.0)
 
 BUNDLED WITH
    2.1.4

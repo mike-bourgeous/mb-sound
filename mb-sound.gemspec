@@ -56,4 +56,6 @@ Gem::Specification.new do |spec|
 
   spec.add_development_dependency 'getoptlong', '~> 0.2.1'
   spec.add_development_dependency 'forwardable', '~> 1.3.3'
+
+  spec.add_development_dependency 'word_wrap', '~> 1.0.0'
 end
