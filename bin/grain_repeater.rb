@@ -3,6 +3,10 @@
 # (C)2024 Mike Bourgeous
 #
 # Usage: $0 [--help] [--delay=seconds] [--count=integer] [--channels=integer] [--output=filename] [filename]
+#
+# Examples:
+#     $0 --delay=0.02083333 --count=8 sounds/drums.flac
+#     $0 --delay=0.05 --count=8 sounds/synth0.flac
 
 require 'bundler/setup'
 
