@@ -25,6 +25,18 @@ require 'mb/sound'
 #    grain at a specific point in past absolute time, or something like that.
 # 3. Use a fixed-time delay and modulate the amplitude of the wet and dry
 #    signals using a square wave.
+#
+# Ideas for improvement:
+# - MIDI CC control (of course)
+# - Trigger on MIDI CC (possibly with a "forever" mode; this would require
+#   using something other than a classical delay line)
+# - Retrigger based on MIDI note (just reset the phase of the delay time oscillator)
+# - Retrigger based on audio envelope
+# - Delay time based pitch on MIDI note
+# - Repeat while MIDI note is held
+# - Normalize/semi-normalize/compress volume of each grain, maybe with noise
+#   gate or expander
+# - Multiple different delays and repeats in parallel or series
 
 # Parameters:
 # - Grain size / delay size
