@@ -7,6 +7,7 @@
 # Examples:
 #     $0 --delay=0.02083333 --count=8 sounds/drums.flac
 #     $0 --delay=0.05 --count=8 sounds/synth0.flac
+#     $0 --delay=0.5 --count=2 sounds/sine/log_sweep_20_20k.flac
 
 require 'bundler/setup'
 
