@@ -50,6 +50,25 @@ opts.each do |opt, arg|
   end
 end
 
-puts MB::U.highlight({count: count, delay: delay})
+filename = ARGV[0]
+if filename
+  raise "Cannot read #{filename}" unless File.readable?(filename)
+  input = MB::Sound.file_input(filename)
+  input_nodes = input.split
+else
+  input = MB::Sound.input(channels ENV['CHANNELS']&.to_i || 2)
+  input_nodes = input.split
+end
+
+output = MB::Sound.output(channels: inputs.length)
+
+puts MB::U.highlight({count: count, delay: delay, input: })
+
+
+rate = 1.0 / delay
+# Delay oscillator
+# rate.hz.square.at(0..delay).with_phase(Math::PI)
+
+
 puts "\e[1;31mTODO\e[0m"
 exit 1
