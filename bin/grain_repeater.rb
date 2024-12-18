@@ -2,7 +2,7 @@
 # Very simple granular delay repeater.
 # (C)2024 Mike Bourgeous
 #
-# Usage: $0 [--help] [--delay=seconds] [--count=integer]
+# Usage: $0 [--help] [--delay=seconds] [--count=integer] [--channels=integer] [--output=filename] [filename]
 
 require 'bundler/setup'
 
@@ -29,24 +29,38 @@ require 'mb/sound'
 opts = GetoptLong.new(
   [ '--help', '-h', GetoptLong::NO_ARGUMENT ],
   [ '--delay', '-d', GetoptLong::REQUIRED_ARGUMENT ],
-  [ '--count', '-c', GetoptLong::REQUIRED_ARGUMENT ],
+  [ '--count', '-n', GetoptLong::REQUIRED_ARGUMENT ],
+  [ '--channels', '-c', GetoptLong::REQUIRED_ARGUMENT ],
+  [ '--output', GetoptLong::REQUIRED_ARGUMENT ],
 )
 
 delay = 0.125
 count = 2
+channels = ENV['CHANNELS']&.to_i || 2
+output_filename = nil
+
 opts.each do |opt, arg|
   case opt
   when '--help'
-    MB::U.print_header_comment
+    MB::U.print_header_help
     exit 1
 
   when '--delay'
     delay = arg.to_f
-    raise 'delay must be positive' unless delay > 0
+    raise 'Delay time must be positive' unless delay > 0
 
   when '--count'
     count = arg.to_i
     raise NotImplementedError, 'Only a count of 2 is supported at this time' unless count == 2
+    # TODO raise 'Repeat count must be >= 2' unless count >= 2
+
+  when '--channels'
+    channels = arg.to_i
+    raise 'Channel count must be positive' unless channels > 0
+
+  when '--output'
+    output_filename = arg
+    MB::U.prevent_overwrite(output_filename, prompt: true)
   end
 end
 
@@ -56,19 +70,50 @@ if filename
   input = MB::Sound.file_input(filename)
   input_nodes = input.split
 else
-  input = MB::Sound.input(channels ENV['CHANNELS']&.to_i || 2)
+  input = MB::Sound.input(channels: channels)
   input_nodes = input.split
 end
 
-output = MB::Sound.output(channels: inputs.length)
+# XXX 4 for debugging oscillators
+output_channels = 4 # XXX input_nodes.length
 
-puts MB::U.highlight({count: count, delay: delay, input: })
+if output_filename
+  # TODO multiplex to file and live output
+  output = MB::Sound.file_output(output_filename, overwrite: true, channels: output_channels)
+else
+  output = MB::Sound.output(channels: output_channels)
+end
 
+puts MB::U.highlight(
+  count: count,
+  delay: delay,
+  input: input.graph_node_name,
+  output: output,
+  input_buffer: input.buffer_size,
+  output_buffer: output.buffer_size,
+)
 
-rate = 1.0 / delay
-# Delay oscillator
-# rate.hz.square.at(0..delay).with_phase(Math::PI)
+# TODO: MIDI control of parameters
 
+# TODO: rate needs to scale based on count
+rate = 0.5 / delay
 
-puts "\e[1;31mTODO\e[0m"
-exit 1
+n0, n1 = input_nodes[0].tee(2)
+
+paths = [
+  n0.yield_self { |inp|
+    delay_osc = rate.hz.square.at(0..delay).with_phase(Math::PI)
+    fade_osc = (rate * 2).hz.triangle.at(0..500).with_phase(-Math::PI / 2).clip(0, 1)
+    # TODO: multiple repeats: rate.hz.with_phase(Math::PI).ramp.at(0..1).proc { |v| v.map { |q| (q * (count).floor / (count - 1.0) }
+    inp.delay(seconds: delay_osc, smoothing: false) * fade_osc
+  },
+  n1,
+  rate.hz.square.at(0..delay).with_phase(Math::PI),
+  (rate * 2).hz.triangle.at(0..500).with_phase(-Math::PI / 2).clip(0, 1),
+]
+
+loop do
+  data = paths.map { |p| p.sample(input.buffer_size) }
+  break if data.any?(&:nil?)
+  output.write(data)
+end
