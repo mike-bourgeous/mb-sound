@@ -195,6 +195,32 @@ RSpec.describe(MB::Sound::GraphNode) do
     end
   end
 
+  context 'rounding and truncation methods' do
+    let(:data) { Numo::SFloat[-1.9, -1.1, -0.7, -0.3, 0.3, 0.7, 1.1, 1.9] }
+    let(:node) { MB::Sound::ArrayInput.new(data: [data]) }
+
+    describe '#floor' do
+      it 'rounds down to integers' do
+        g = node.floor
+        expect(g.sample(data.length)).to eq(Numo::SFloat[-2, -2, -1, -1, 0, 0, 1, 1])
+      end
+    end
+
+    describe '#ceil' do
+      it 'rounds up to integers' do
+        g = node.ceil
+        expect(g.sample(data.length)).to eq(Numo::SFloat[-1, -1, -0, -0, 1, 1, 2, 2])
+      end
+    end
+
+    describe '#round' do
+      it 'rounds to the nearest integer' do
+        g = node.round
+        expect(g.sample(data.length)).to eq(Numo::SFloat[-2, -1, -1, 0, 0, 1, 1, 2])
+      end
+    end
+  end
+
   describe '#softclip' do
     it 'can apply softclipping' do
       graph = (1.hz.square.at_rate(20).at(10) + 9.75).softclip(0.5, 1)

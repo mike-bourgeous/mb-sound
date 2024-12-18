@@ -173,6 +173,21 @@ module MB
         MB::Sound::GraphNode::ComplexNode.new(self, mode: :arg)
       end
 
+      # Truncates values from the node to the next lower integer.
+      def floor
+        self.proc(&:floor)
+      end
+
+      # Raises values from the node to the next higher integer.
+      def ceil
+        self.proc(&:ceil)
+      end
+
+      # Rounds values from the node to the nearest integer.
+      def round
+        self.proc(&:round)
+      end
+
       # Uses this node as the frequency value for an oscillator.
       def tone
         MB::Sound::Tone[self]
