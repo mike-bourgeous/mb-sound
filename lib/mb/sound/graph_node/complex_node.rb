@@ -23,7 +23,7 @@ module MB
         # Returns a source list containing the original input given to the
         # constructor.
         def sources
-          [@inout]
+          [@input]
         end
 
         # Converts the next +count+ samples from the original input according

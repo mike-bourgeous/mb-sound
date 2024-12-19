@@ -13,6 +13,7 @@ module MB
       # Also see the Multiplier class.
       class Mixer
         include GraphNode
+        include BufferHelper
 
         # The constant value added to the output sum before any summands.
         attr_accessor :constant
@@ -75,10 +76,12 @@ module MB
         # constructor) returns nil or an empty buffer, then this method will
         # return nil.
         def sample(count)
+          @complex ||= @constant.is_a?(Complex)
+
           inputs = @summands.map { |s, gain|
             v = s.sample(count)&.not_inplace!
             next if v.nil? || v.empty?
-            @complex = true if v.is_a?(Numo::SComplex) || v.is_a?(Numo::DComplex)
+            @complex ||= gain.is_a?(Complex) || v.is_a?(Numo::SComplex) || v.is_a?(Numo::DComplex)
             v = MB::M.zpad(v, count) if v && v.length > 0 && v.length < count
             [v, gain]
           }
@@ -91,7 +94,7 @@ module MB
             return nil if inputs.empty? && !@summands.empty?
           end
 
-          setup_buffer(count)
+          setup_buffer(length: count, complex: @complex, temp: true)
 
           @buf.fill(@constant)
 
@@ -117,6 +120,7 @@ module MB
         # The +summand+ may be an Integer to refer to a summand by insertion
         # order (starting at 0).
         def []=(summand, gain)
+          # TODO: smooth gain changes
           summand = @summands.keys[summand] if summand.is_a?(Integer)
           @complex = true if gain.is_a?(Complex)
           raise "Summand #{summand} must respond to :sample" unless summand.respond_to?(:sample)
@@ -188,18 +192,6 @@ module MB
           end
 
           self
-        end
-
-        private
-
-        def setup_buffer(length)
-          @complex ||= @constant.is_a?(Complex)
-          @bufclass = @complex ? Numo::SComplex : Numo::SFloat
-
-          if @buf.nil? || @buf.length != length || @bufclass != @buf.class
-            @buf = @bufclass.zeros(length)
-            @tmpbuf = @bufclass.zeros(length)
-          end
         end
       end
     end

@@ -50,7 +50,7 @@ module MB
 
           private
 
-          # TODO: deduplicate buffer management/allocation/reallocation
+          # TODO: use BufferHelper#setup_buffer
           def update_buffer(count)
             if @buf.nil? || @type != @buf.class || count != @buf.length
               @buf = @type.zeros(count)
@@ -79,6 +79,7 @@ module MB
           @read_branches = Set.new
 
           @buf = nil
+          @done = false
         end
 
         # For internal use by Branch#sample.  Returns the current buffer of
@@ -99,13 +100,25 @@ module MB
             @buf = nil
           end
 
-          if @buf && @buf.length != count
-            raise "Branch #{branch} on Tee #{self} requested #{count} samples when the buffer has #{@buf.length}"
+          return nil if @done
+
+          if @buf
+            if @buf.length == 0
+              return nil
+            elsif @buf.length != count
+              raise "Branch #{branch} on Tee #{self} requested #{count} samples when the buffer has #{@buf.length}"
+            end
           end
 
           @read_branches << branch
 
-          @buf ||= @source.sample(count).yield_self { |b| MB::M.zpad(b, count) if b && !b.empty? }
+          @buf ||= @source.sample(count).yield_self { |b|
+            MB::M.zpad(b, count) if b && !b.empty?
+          }
+
+          @done = true if @buf.nil? || @buf.empty?
+
+          @buf
         end
       end
     end

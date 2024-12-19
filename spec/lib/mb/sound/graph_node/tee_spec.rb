@@ -28,6 +28,8 @@ RSpec.describe(MB::Sound::GraphNode::Tee) do
     expect(ref).not_to eq(b2)
   end
 
+  pending 'when the upstream is nil'
+
   it 'zero pads if the source returns less data' do
     source = MB::Sound::ArrayInput.new(data: [Numo::SFloat[]])
     expect(source).to receive(:sample).with(5).and_return(Numo::SFloat[1,2,3,4,5], Numo::SFloat[6,7])

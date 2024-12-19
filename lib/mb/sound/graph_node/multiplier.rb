@@ -9,6 +9,7 @@ module MB
       # See also the Mixer class.
       class Multiplier
         include GraphNode
+        include BufferHelper
 
         # The constant value by which the output will be multiplied.
         attr_accessor :constant
@@ -67,10 +68,12 @@ module MB
         # false in the constructor) returns nil or an empty buffer, then this
         # method will return nil.
         def sample(count)
+          @complex ||= @constant.is_a?(Complex)
+
           inputs = @multiplicands.map { |m, _|
             v = m.sample(count)&.not_inplace!
             next if v.nil? || v.empty?
-            @complex = true if v.is_a?(Numo::SComplex) || v.is_a?(Numo::DComplex)
+            @complex ||= v.is_a?(Numo::SComplex) || v.is_a?(Numo::DComplex)
             v = MB::M.opad(v, count) if v && v.length > 0 && v.length < count
             v
           }
@@ -83,7 +86,7 @@ module MB
             return nil if inputs.empty? && !@multiplicands.empty?
           end
 
-          setup_buffer(count)
+          setup_buffer(length: count, complex: @complex)
 
           @buf.fill(@constant)
 
@@ -157,18 +160,6 @@ module MB
           end
 
           self
-        end
-
-        private
-
-        # TODO: Maybe this should be some kind of helper mixin
-        def setup_buffer(length)
-          @complex ||= @constant.is_a?(Complex)
-          @bufclass = @complex ? Numo::SComplex : Numo::SFloat
-
-          if @buf.nil? || @buf.length != length || @bufclass != @buf.class
-            @buf = @bufclass.zeros(length)
-          end
         end
       end
     end
