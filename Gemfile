@@ -11,16 +11,9 @@ gem 'rake', '~> 13.0.1'
 gem 'cmath'
 gem 'numo-narray'
 
-# Interactive command line gems
-gem 'pry-doc'
-gem 'word_wrap'
-
-# Testing gems
-gem 'rspec'
-
 # Comment this out if you don't want to use Jack via FFI or don't want to
 # install FFI.
 gem 'mb-sound-jackffi', '>= 0.0.19.usegit', github: 'mike-bourgeous/mb-sound-jackffi.git'
 
-gem 'mb-math', '>= 0.1.14.usegit', github: 'mike-bourgeous/mb-math.git'
-gem 'mb-util', '>= 0.1.16.usegit', github: 'mike-bourgeous/mb-util.git'
+gem 'mb-math', '>= 0.2.1.usegit', github: 'mike-bourgeous/mb-math.git'
+gem 'mb-util', '>= 0.1.21.usegit', github: 'mike-bourgeous/mb-util.git'

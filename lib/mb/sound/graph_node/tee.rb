@@ -112,7 +112,9 @@ module MB
 
           @read_branches << branch
 
-          @buf ||= @source.sample(count)
+          @buf ||= @source.sample(count).yield_self { |b|
+            MB::M.zpad(b, count) if b && !b.empty?
+          }
 
           @done = true if @buf.nil? || @buf.empty?
 

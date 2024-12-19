@@ -173,6 +173,21 @@ module MB
         MB::Sound::GraphNode::ComplexNode.new(self, mode: :arg)
       end
 
+      # Truncates values from the node to the next lower integer.
+      def floor
+        self.proc(&:floor)
+      end
+
+      # Raises values from the node to the next higher integer.
+      def ceil
+        self.proc(&:ceil)
+      end
+
+      # Rounds values from the node to the nearest integer.
+      def round
+        self.proc(&:round)
+      end
+
       # Uses this node as the frequency value for an oscillator.
       def tone
         MB::Sound::Tone[self]
@@ -313,7 +328,7 @@ module MB
       #
       # See MB::Sound::Filter::Delay#initialize for a description of the
       # +:smoothing+ parameter.
-      def delay(seconds: nil, samples: nil, rate: 48000, smoothing: true)
+      def delay(seconds: nil, samples: nil, rate: 48000, smoothing: true, max_delay: 1.0)
         if samples
           samples = samples.to_f if samples.is_a?(Numeric)
           seconds = samples / rate
@@ -321,7 +336,7 @@ module MB
           seconds = seconds.to_f if seconds.is_a?(Numeric)
         end
 
-        filter(MB::Sound::Filter::Delay.new(delay: seconds, rate: rate, smoothing: smoothing))
+        filter(MB::Sound::Filter::Delay.new(delay: seconds, rate: rate, smoothing: smoothing, buffer_size: rate * max_delay))
       end
 
       # Adds a multi-tap delay with the given delay sources, returning an Array
