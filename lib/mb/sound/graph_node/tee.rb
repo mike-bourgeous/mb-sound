@@ -93,7 +93,7 @@ module MB
           # TODO: maybe dedupe with InputChannelSplit?
           if @read_branches.include?(branch)
             if @read_branches.length != @branches.length
-              warn "Branch #{branch}/#{branch.graph_node_name} on Tee #{self} sampled again with #{@read_branches.length} of #{@branches.length} sampled"
+              warn "Branch #{branch}/#{branch.graph_node_name} on Tee #{self} of #{@source} sampled again with #{@read_branches.length} of #{@branches.length} sampled"
             end
 
             @read_branches.clear

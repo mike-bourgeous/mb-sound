@@ -70,9 +70,17 @@ module MB
         def sample(count)
           @complex ||= @constant.is_a?(Complex)
 
-          inputs = @multiplicands.map { |m, _|
+          inputs = @multiplicands.map.with_index { |(m, _), idx|
             v = m.sample(count)&.not_inplace!
+
+            # Continue instead of aborting if one input ends, so that all
+            # inputs have a chance to finish (see @stop_early condition below)
             next if v.nil? || v.empty?
+
+            if v.length != count
+              raise "Input #{idx}/#{m} on #{self} gave us #{v.length} samples when we asked for #{count}"
+            end
+
             @complex ||= v.is_a?(Numo::SComplex) || v.is_a?(Numo::DComplex)
             v = MB::M.opad(v, count) if v && v.length > 0 && v.length < count
             v
@@ -90,7 +98,7 @@ module MB
 
           @buf.fill(@constant)
 
-          inputs.each do |v, _|
+          inputs.each.with_index do |v, idx|
             next if v.empty?
             @buf.inplace * v
           end

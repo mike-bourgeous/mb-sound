@@ -11,7 +11,7 @@ RSpec.describe(MB::Sound::CircularBuffer) do
     expect(cbuf.read(4)).to eq(Numo::SFloat[1,2,3,4])
     expect(cbuf.length).to eq(1)
     expect(cbuf.available).to eq(6)
-    
+
     expect(cbuf.write(Numo::SFloat[-1, -2, -3, -4, -5, -6])).to eq(7)
     expect(cbuf.length).to eq(7)
     expect(cbuf.available).to eq(0)
