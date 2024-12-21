@@ -106,7 +106,7 @@ module MB
             if @buf.length == 0
               return nil
             elsif @buf.length != count
-              raise "Branch #{branch} on Tee #{self} requested #{count} samples when the buffer has #{@buf.length}"
+              raise "Branch #{branch} on Tee #{self} of #{@source} requested #{count} samples when the buffer has #{@buf.length}"
             end
           end
 
