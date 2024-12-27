@@ -20,27 +20,34 @@ module MB
       alias count length
 
       # Whether the buffer is real (false) or complex (true)
-      attr_reader :complex
+      attr_reader :bufcomplex
+      alias complex bufcomplex
 
       # Whether the buffer is single-precision (false) or double-precision (true)
-      attr_reader :double
+      attr_reader :bufdouble
+      alias double bufdouble
 
+      # Creates a circular buffer of the given maximum +:buffer_size+.  Creates
+      # a complex buffer if +:complex+ is true (real by default).  Creates a
+      # double-precision buffer if +:double+ is true (single-precision by
+      # default).
       def initialize(buffer_size:, complex: false, double: false)
         raise ArgumentError, 'Buffer size must be a positive integer' unless buffer_size.is_a?(Integer) && buffer_size > 0
 
-        @buffer_size = buffer_size.to_i
-        @complex = complex
-        @double = double
+        @buffer_size = buffer_size
 
         @read_pos = 0
         @write_pos = 0
         @length = 0
 
-        # TODO: call this again if any attributes change
-        setup_buffer(length: buffer_size, complex: complex, temp: true, double: double)
+        setup_buffer(length: @buffer_size, complex: complex, temp: true, double: double)
       end
 
+      # Returns the next +count+ samples of the buffer.
+      #
+      # Raises BufferUnderflow if +count+ is greater than #length.
       def read(count)
+        # TODO: should we allow short reads (return less than requested)?
         if count > @length
           raise BufferUnderflow, "Read of size #{count} is greater than #{@length} available samples"
         end
@@ -56,11 +63,24 @@ module MB
 
       # Appends the given +narray+ to the circular buffer, returning the
       # new count of available samples to read.
+      #
+      # Raises BufferOverflow without writing any data if there's not enough
+      # room for the given +narray+ in the buffer.
       def write(narray)
-        # TODO: should the buffer grow automatically?
+        # TODO: should the buffer grow automatically?  If we grow the buffer
+        # here we will have to recompute the read and/or write positions if
+        # they straddle the buffer end, and probably have to move data around
+        # to preserve continuity of reads.
+        #
+        # A slower option would be to just create a brand new buffer with
+        # whatever we already have by calling the read method, then growing the
+        # buffer, so we don't have to move any data (apart from what #read
+        # already does).
         if narray.length > available
           raise BufferOverflow, "Write of size #{narray.length} is greater than #{available} space available"
         end
+
+        expand_buffer(narray, grow: false)
 
         MB::M.circular_write(@buf, narray, @write_pos)
         @write_pos = (@write_pos + narray.length) % @buffer_size
