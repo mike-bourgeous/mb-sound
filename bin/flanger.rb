@@ -12,6 +12,9 @@
 #    WET - wet output level (default 1)
 #    SPREAD - LFO phase spread across channels (default 180)
 #
+# Examples:
+#    DRY=0.5 $0 sounds/drums.flac 0.002 0.85 0.2 0.5
+#
 # Cool effects (omit filename for realtime processing from Jack):
 #    Arpeggio: SMOOTHING=0.5 $0 sounds/transient_synth.flac 0.035 0 3 2
 #    Slow arp: SMOOTHING=1.5 $0 sounds/transient_synth.flac 0.15 0 3 2
@@ -20,6 +23,9 @@
 #    Space warp: SMOOTHING=10 WET=1 DRY=0 $0 sounds/drums.flac 0.2 -0.8 15 6
 #    Time warp: WET=1 DRY=0 $0 sounds/drums.flac 0.2 -0.8 0.3 6
 #    Bass comb: SMOOTHING=0.7 DRY=0 $0 sounds/drums.flac 0.04 0.95 150 1
+#    Bass beat: SPREAD=10 $0 sounds/drums.flac 0.006 -0.98 0.4 2
+#    Gritty overtone: DRY=0.5 $0 sounds/synth0.flac 0.0029 0.85 60 0.1
+#    Decimation: DRY=0 $0 sounds/synth0.flac 0.0058 -0.85 3300 0.2
 
 require 'bundler/setup'
 
@@ -90,7 +96,7 @@ else
 end
 
 bufsize = output.buffer_size
-internal_bufsize = 48
+internal_bufsize = 24
 internal_bufsize -= 1 until bufsize % internal_bufsize == 0
 
 delay_samples = delay * output.rate
