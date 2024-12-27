@@ -4,7 +4,9 @@ module MB
     # needs an internal Numo::NArray buffer, and potentially needs to be able
     # to convert that buffer from real to complex when data types change.
     #
-    # Typical usage is to call #setup_buffer from a GraphNode#sample method.
+    # Typical usage is to call #setup_buffer from a GraphNode#sample method, or
+    # to call #setup_buffer from the constructor and #grow_buffer from the
+    # GraphNode#sample method.
     module BufferHelper
       private
 
@@ -54,6 +56,34 @@ module MB
         end
 
         nil
+      end
+
+      # Updates the buffer type and length based on the given example buffer,
+      # only promoting types and growing -- never demoting or shrinking.  Call
+      # #setup_buffer first.
+      #
+      # This method is useful for GraphNode#sample or Filter#process
+      # implementations that want to maintain a buffer to hold whatever data
+      # type comes in from upstream sources.
+      #
+      # If +:grow+ is false, then the buffer will not grow based on the example
+      # buffer length.
+      #
+      # See #setup_buffer.
+      def expand_buffer(example_buf, grow: true)
+        raise "BUG: Call #setup_buffer before calling #expand_buffer" unless defined?(@bufcomplex)
+
+        # Nothing to do if we are already at the highest type (double complex).
+        return if defined?(@bufcomplex) && @bufcomplex && @bufdouble
+
+        complex = @bufcomplex || example_buf.is_a?(Numo::SComplex) || example_buf.is_a?(Numo::DComplex)
+        double = @bufdouble || example_buf.is_a?(Numo::DFloat) || example_buf.is_a?(Numo::DComplex) ||
+          example_buf.is_a?(Numo::Int32) || example_buf.is_a?(Numo::Int64)
+
+        length = @buflen
+        length = example_buf.length if grow && example_buf.length > @buflen
+
+        setup_buffer(length: length, complex: complex, temp: @buftemp, double: double)
       end
 
       # Creates or converts the given buffer to the current type and length and
