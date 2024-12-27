@@ -19,14 +19,14 @@
 #    Water drums: SMOOTHING=4 WET=1 DRY=0 $0 sounds/drums.flac 0.02 -0.3 46 6
 #    Space warp: SMOOTHING=10 WET=1 DRY=0 $0 sounds/drums.flac 0.2 -0.8 15 6
 #    Time warp: WET=1 DRY=0 $0 sounds/drums.flac 0.2 -0.8 0.3 6
-#    Bass comb: SMOOTHING=0.7 DRY=0 bin/flanger.rb sounds/drums.flac 0.04 0.95 150 1
+#    Bass comb: SMOOTHING=0.7 DRY=0 $0 sounds/drums.flac 0.04 0.95 150 1
 
 require 'bundler/setup'
 
 require 'mb/sound'
 
 if ARGV.include?('--help')
-  puts MB::U.read_header_comment.join.gsub('$0', "\e[1m#{$0}\e[0m")
+  MB::U.print_header_help
   exit 1
 end
 
