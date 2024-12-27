@@ -62,11 +62,13 @@ module MB
         if b.nil?
           # Buffer doesn't exist; create it
           b = @bufclass.zeros(@buflen)
-        elsif b.length == @buflen && b.class != @bufclass
+        elsif b.class != @bufclass
           # Buffer has the wrong type; cast it
           # TODO: should we support demotion from Complex to Float?
           b = @bufclass.cast(b)
-        elsif b.length < @buflen
+        end
+
+        if b.length < @buflen
           # Buffer is too short; extend it with zeros
           b = MB::M.zpad(b, @buflen)
         elsif b.length > @buflen
