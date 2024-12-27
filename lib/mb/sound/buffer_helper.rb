@@ -4,16 +4,22 @@ module MB
     # needs an internal Numo::NArray buffer, and potentially needs to be able
     # to convert that buffer from real to complex when data types change.
     #
-    # Typical usage is to call #setup_buffer from a GraphNode's #sample
-    # method.
+    # Typical usage is to call #setup_buffer from a GraphNode#sample method.
     module BufferHelper
       private
 
-      # Based on the given +length+ and whether to use +complex+ values,
-      # creates or replaces a buffer in @buf as needed.  If @buf already
-      # matches +length+ and +complex+, no change is made.
+      # Creates or replaces a Numo:NArray buffer in @buf and @tmpbuf as needed,
+      # based on the given +:length+ and other parameters.  If the buffer
+      # already matches the given values, no change is made.
       #
-      # If +temp+ is true, then another buffer of the same size and type is
+      # Buffer contents will be preserved as much as possible across type and
+      # length changes.  Demotion from complex to float will raise an error.
+      #
+      # If +:complex+ is true, the buffer will use Numo::SComplex or
+      # Numo::DComplex.  If +:complex+ is false, the buffer will use
+      # Numo::SFloat or Numo::DFloat.
+      #
+      # If +:temp+ is true, then another buffer of the same size and type is
       # also created in @tmpbuf.
       #
       # If +:double+ is true, then double-precision buffers are used.
@@ -34,37 +40,42 @@ module MB
         @bufdouble = double
         @buf ||= nil
 
-        if double
-          @bufclass = complex ? Numo::DComplex : Numo::DFloat
+        if @bufdouble
+          @bufclass = @bufcomplex ? Numo::DComplex : Numo::DFloat
         else
-          @bufclass = complex ? Numo::SComplex : Numo::SFloat
+          @bufclass = @bufcomplex ? Numo::SComplex : Numo::SFloat
         end
 
-        if @buf.nil?
-          # Buffer doesn't exist; create it
-          @buf = @bufclass.zeros(length)
-        elsif @buf.length == length && @buf.class != @bufclass
-          # Buffer has the wrong type; cast it
-          @buf = @bufclass.cast(@buf)
-        elsif @buf.length < length
-          @buf = MB::M.zpad(@buf, length)
-        elsif @buf.length > length
-          @buf = @buf[0...length]
-        end
+        @buf = create_or_convert_buffer(@buf)
 
-        if temp
+        if @buftemp
           @tmpbuf ||= nil
-          if @tmpbuf.nil?
-            # Buffer doesn't exist; create it
-            @tmpbuf = @bufclass.zeros(length)
-          elsif @tmpbuf.length == length && @tmpbuf.class != @bufclass
-            # Buffer has the wrong type; cast it
-            @tmpbuf = @bufclass.cast(@tmpbuf)
-          elsif @tmpbuf.length < length
-            @tmpbuf = MB::M.zpad(@tmpbuf, length)
-          elsif @tmpbuf.length > length
-            @tmpbuf = @tmpbuf[0...length]
-          end
+          @tmpbuf = create_or_convert_buffer(@tmpbuf)
+        end
+
+        nil
+      end
+
+      # Creates or converts the given buffer to the current type and length and
+      # returns the buffer.  For use by #setup_buffer.
+      def create_or_convert_buffer(b)
+        if b.nil?
+          # Buffer doesn't exist; create it
+          b = @bufclass.zeros(@buflen)
+        elsif b.length == @buflen && b.class != @bufclass
+          # Buffer has the wrong type; cast it
+          # TODO: should we support demotion from Complex to Float?
+          b = @bufclass.cast(b)
+        elsif b.length < @buflen
+          # Buffer is too short; extend it with zeros
+          b = MB::M.zpad(b, @buflen)
+        elsif b.length > @buflen
+          # Buffer is too long; truncate it
+          b = b[0...@buflen]
+        else
+          # Buffer needs no modification (this could happen for the primary
+          # buffer if temp is changed from false to true)
+          b
         end
       end
     end
