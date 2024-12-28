@@ -6,6 +6,9 @@ module MB
       #
       # See bin/flanger.rb and bin/tape_delay.rb for examples.
       class Delay < Filter
+        # The default delay-time smoothing rate in seconds per second.
+        DEFAULT_SMOOTHING_RATE = 0.5
+
         attr_reader :delay, :delay_samples, :rate, :smoothing, :smooth_limit
         attr_reader :write_offset, :read_offset
 
@@ -15,10 +18,13 @@ module MB
 
         # Initializes a single-channel delay with a given +:delay+ in seconds,
         # based on the sample +:rate+..  The +:buffer_size+ sets the maximum
-        # possible delay.  If +:smoothing+ is true, then the delay time will be
+        # possible delay.
+        #
+        # If +:smoothing+ is true (the default), then the delay time will be
         # adjusted slowly to prevent sudden jumps or clicks in the output.  If
         # +:smoothing+ is a numeric value, then that is the maximum delay
-        # change in seconds allowed per second.
+        # change in seconds allowed per second.  The default smoothing rate is
+        # MB::Sound::Filter::Delay::DEFAULT_SMOOTHING_RATE.
         def initialize(delay: 0, rate: 48000, buffer_size: 48000, smoothing: true)
           if delay.is_a?(Numeric)
             buffer_size = 1.1 * delay * rate if buffer_size < 1.1 * delay * rate
@@ -83,7 +89,7 @@ module MB
             @filter = smoothing
             @smooth_limit = nil
           else
-            new_limit = @rate * (smoothing.is_a?(Numeric) ? smoothing : 0.5)
+            new_limit = @rate * (smoothing.is_a?(Numeric) ? smoothing : DEFAULT_SMOOTHING_RATE)
             if new_limit != @smooth_limit
               @smooth_limit = new_limit
               @filter = MB::Sound::Filter::LinearFollower.new(

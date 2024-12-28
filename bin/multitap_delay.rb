@@ -1,14 +1,21 @@
 #!/usr/bin/env ruby
 # A filtered multi-tap delay effect.
-# This is inspired by a module I saw on Andrew Huang's YouTube channel.
 # (C)2022 Mike Bourgeous
+#
+# This is inspired by a module I saw on Andrew Huang's YouTube channel.
+#
+# Usage: $0 [base_delay_seconds] [filename]
+#
+# Examples:
+#     Resonant widener: $0 0.001 sounds/transient_synth.flac
+#     Pinged filter drums: $0 0.2 sounds/drums.flac
 
 require 'bundler/setup'
 
 require 'mb/sound'
 
 if ARGV.include?('--help')
-  puts "Usage: \e[1m#{$0}\e[0m [base_delay_s] [filename]"
+  MB::U.print_header_help
   exit 1
 end
 
@@ -21,7 +28,7 @@ base_delay_s ||= 0.1
 
 filename = others[0]
 if filename && File.readable?(filename)
-  inputs = MB::Sound.file_input(filename).split.map { |d| d.and_then(0.hz.at(0).for(delay * 4)) }
+  inputs = MB::Sound.file_input(filename).split.map { |d| d.and_then(0.hz.at(0).for(base_delay_s * 4)) }
 else
   inputs = MB::Sound.input(channels: ENV['CHANNELS']&.to_i || 2).split
 end

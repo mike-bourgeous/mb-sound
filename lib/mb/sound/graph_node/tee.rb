@@ -14,33 +14,29 @@ module MB
       #     d = a * 100.hz + b * 200.hz + c * 300.hz ; nil
       #     play d
       class Tee
+        # Raised when any branch's internal buffer overflows.  This could
+        # happen if the downstream buffer size is significantly larger than the
+        # Tee's internal buffer size, or if one branch is being read more than
+        # another.
+        class BranchBufferOverflow < MB::Sound::CircularBuffer::BufferOverflow; end
+
         # An individual branch of a Tee, returned by Tee#branches.
         class Branch
           include GraphNode
 
-          attr_reader :need_sample
+          attr_reader :index
 
           # For internal use by Tee.  Initializes one parallel branch of the tee.
-          def initialize(tee)
+          def initialize(tee, index)
             @tee = tee
-            @buf = nil
-            @type = Numo::SFloat
+            @index = index
           end
 
           # Retrieves the next buffer for this branch.  The Tee will print a
           # warning if any branch is sampled more than once without all branches
           # being sampled once.
           def sample(count)
-            source_buf = @tee.internal_sample(self, count)
-            return nil if source_buf.nil? || source_buf.empty?
-
-            @type = source_buf.class
-            update_buffer(count)
-
-            # This returns source_buf, not @buf, so we can't use this as the return line.
-            @buf[] = source_buf
-
-            @buf
+            @tee.internal_sample(self, count)
           end
 
           # Returns an Array containing the source node feeding into the Tee.
@@ -48,13 +44,9 @@ module MB
             @tee.sources
           end
 
-          private
-
-          # TODO: deduplicate buffer management/allocation/reallocation
-          def update_buffer(count)
-            if @buf.nil? || @type != @buf.class || count != @buf.length
-              @buf = @type.zeros(count)
-            end
+          # Describes this branch as a String.
+          def to_s
+            "Branch #{@index + 1} of #{@tee.branches.count}#{graph_node_name && " (#{graph_node_name})"}"
           end
         end
 
@@ -67,45 +59,50 @@ module MB
 
         # Creates a Tee from the given +source+, with +n+ branches.  Generally
         # for internal use by GraphNode#tee.
-        def initialize(source, n = 2)
-          raise 'Source for a Tee must respond to #sample' unless source.respond_to?(:sample)
+        def initialize(source, n = 2, circular_buffer_size: 48000)
+          raise 'Source for a Tee must respond to #sample (and not a Ruby Array)' unless source.respond_to?(:sample) && !source.is_a?(Array)
 
           @source = source
           @sources = [source].freeze
-          @branches = n.times.map { Branch.new(self) }.freeze
+          @branches = Array.new(n) { |idx| Branch.new(self, idx) }.freeze
 
-          # List of branches that have already read the current buffer, to detect
-          # when a new buffer is needed.
-          @read_branches = Set.new
+          @cbuf = CircularBuffer.new(buffer_size: circular_buffer_size)
+          @readers = Array.new(n) { @cbuf.reader }
 
-          @buf = nil
+          @done = false
         end
 
-        # For internal use by Branch#sample.  Returns the current buffer of
-        # +count+ samples from the source node.  The +count+ must be the same for
-        # every branch (TODO: a buffer-size adapter might be useful to allow
-        # different size reads and writes; such a thing might already sort of
-        # exist in ProcessMethods).  If the +branch+ has already seen this
-        # buffer, or if the source buffer has not yet been read, then a new
-        # buffer is read from the source node.
+        # For internal use by Branch#sample.  Fills the internal circular
+        # buffer as needed until there are +count+ samples available for the
+        # given branch, or the upstream returns nil or empty.  Returns the next
+        # +count+ samples from the given branch's circular buffer reader (or
+        # fewer if the upstream has stopped).
         def internal_sample(branch, count)
           # TODO: maybe dedupe with InputChannelSplit?
-          if @read_branches.include?(branch)
-            if @read_branches.length != @branches.length
-              warn "Branch #{branch}/#{branch.graph_node_name} on Tee #{self} sampled again with #{@read_branches.length} of #{@branches.length} sampled"
+          # TODO: should we grow the buffer automatically?
+
+          r = @readers[branch.index]
+
+          while !@done && r.length < count
+            buf = @source.sample(count)
+            if buf.nil? || buf.empty?
+              @done = true
+            else
+              @cbuf.write(buf)
             end
-
-            @read_branches.clear
-            @buf = nil
           end
 
-          if @buf && @buf.length != count
-            raise "Branch #{branch} on Tee #{self} requested #{count} samples when the buffer has #{@buf.length}"
+          if r.empty?
+            nil
+          elsif r.length < count
+            # TODO: allow disabling padding?
+            MB::M.zpad(r.read(r.length), count)
+          else
+            r.read(MB::M.min(r.length, count))
           end
 
-          @read_branches << branch
-
-          @buf ||= @source.sample(count).yield_self { |b| MB::M.zpad(b, count) if b && !b.empty? }
+        rescue MB::Sound::CircularBuffer::BufferOverflow
+          raise BranchBufferOverflow, "Read of #{branch} overflowed internal buffer.  Buffers of all branches: #{@readers.map(&:length)}"
         end
       end
     end

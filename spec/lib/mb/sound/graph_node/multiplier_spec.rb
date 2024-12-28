@@ -35,6 +35,17 @@ RSpec.describe(MB::Sound::GraphNode::Multiplier) do
       expect(ss.sample(123)).to eq(Numo::SFloat.zeros(123).fill(1.5))
     end
 
+    it 'raises an error if upstream nodes give different buffer sizes' do
+      inp_a = double(MB::Sound::GraphNode)
+      inp_b = double(MB::Sound::GraphNode)
+      allow(inp_a).to receive(:sample).and_return(Numo::SFloat[1,2,3,4])
+      allow(inp_b).to receive(:sample).and_return(Numo::SFloat[1,2,3,4,5])
+
+      m = MB::Sound::GraphNode::Multiplier.new(inp_a, inp_b)
+      expect { m.sample(4) }.to raise_error(/Input 1.*asked/)
+      expect { m.sample(5) }.to raise_error(/Input 0.*asked/)
+    end
+
     it 'returns the same buffer object if size and data type have not changed' do
       ss = MB::Sound::GraphNode::Multiplier.new([1, 0.hz.square.at(0.5).oscillator])
       a = ss.sample(100)

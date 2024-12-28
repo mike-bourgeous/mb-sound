@@ -1,13 +1,18 @@
 #!/usr/bin/env ruby
 # A reverse delay effect.  This works by playing a delay buffer in reverse.
 # (C)2022 Mike Bourgeous
+#
+# Usage: $0 [delay_s [feedback]] [filename]
+#
+# Examples:
+#     DRY=0 $0 0.2 0 sounds/drums.flac
 
 require 'bundler/setup'
 
 require 'mb/sound'
 
 if ARGV.include?('--help')
-  puts "Usage: \e[1m#{$0}\e[0m [delay_s [feedback]] [filename]"
+  MB::U.print_header_help
   exit 1
 end
 

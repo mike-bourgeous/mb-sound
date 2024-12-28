@@ -45,4 +45,13 @@ RSpec.describe(MB::Sound::GraphNode::Constant) do
       expect(c.sample(480)).to eq(Numo::SComplex.zeros(480).fill(1+1i))
     end
   end
+
+  context 'with a duration set' do
+    it 'returns only the requested length of data' do
+      c = 1.constant(rate: 1).for(10)
+      expect(c.sample(6).length).to eq(6)
+      expect(c.sample(6).length).to eq(4)
+      expect(c.sample(1)).to eq(nil)
+    end
+  end
 end

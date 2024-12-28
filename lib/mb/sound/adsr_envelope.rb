@@ -47,6 +47,7 @@ module MB
     #     plotter.plot(envelope: total)
     class ADSREnvelope
       include GraphNode
+      include BufferHelper
 
       attr_reader :attack_time, :decay_time, :sustain_level, :release_time, :total, :peak, :time, :rate
 
@@ -168,7 +169,7 @@ module MB
       end
 
       def sample_count_c(count, filter: true)
-        setup_buffer(count)
+        setup_buffer(length: count)
 
         MB::FastSound.adsr_narray(
           @buf.inplace!,
@@ -287,13 +288,6 @@ module MB
       end
 
       private
-
-      # TODO: Maybe this should be some kind of helper mixin
-      def setup_buffer(length)
-        if @buf.nil? || @buf.length != length
-          @buf = Numo::SFloat.zeros(length)
-        end
-      end
 
       # Calculates internal parameters based on the given envelope parameters.
       # FIXME: envelopes come back to life or disappear abruptly if their times

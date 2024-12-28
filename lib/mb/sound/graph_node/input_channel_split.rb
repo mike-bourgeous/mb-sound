@@ -14,14 +14,18 @@ module MB
       #
       # See also the Tee class, which is very similar.
       class InputChannelSplit
+        # Raised when any channel's internal buffer overflows.  This would
+        # happen if the downstream buffer size is significantly larger than the
+        # input's buffer size, or if one channel is being read more than
+        # another.
+        class ChannelBufferOverflow < MB::Sound::CircularBuffer::BufferOverflow; end
+
         # An individual channel of an input channel splitter, returned by
         # InputChannelSplit#channels.
         #
         # TODO: Maybe this can be deduplicated with Tee.
         class InputChannelNode
           include GraphNode
-
-          attr_reader :need_sample
 
           # For internal use by InputChannelSplit.  Initializes one output
           # channel of the split.
@@ -31,9 +35,11 @@ module MB
             @graph_node_name = name
           end
 
-          # Retrieves the next buffer for this channel.  The InputChannelSplit
-          # will print a warning if any channel is sampled more than once without
-          # all channels being sampled once.
+          # Retrieves the next +count+ samples for this channel.
+          #
+          # This method may modify and return the same object multiple times,
+          # so duplicate the returned buffer if you need to retain multiple
+          # past buffers.
           def sample(count)
             @split.internal_sample(self, @channel, count)
           end
@@ -68,11 +74,12 @@ module MB
             InputChannelNode.new(self, idx, "#{source.graph_node_name}: Channel #{idx}")
           }.freeze
 
-          # List of channels that have already read the current buffer, to detect
-          # when a new buffer is needed.
-          @read_channels = Set.new
+          bufsize = MB::M.max(source.buffer_size * 3, 48000)
+          @cbufs = Array.new(max_channels) {
+            CircularBuffer.new(buffer_size: bufsize)
+          }
 
-          @buf = nil
+          @done = false
         end
 
         # For internal use by InputChannelNode#sample.  Returns the current
@@ -84,32 +91,37 @@ module MB
         # channels) is read from the source node.
         def internal_sample(node, channel, count)
           # TODO: maybe dedupe with Tee?
-          if @read_channels.include?(node)
-            if @read_channels.length != @channels.length
-              warn "Channel #{channel} on InputChannelSplit #{self} sampled again with #{@read_channels.length} of #{@channels.length} sampled"
-            end
 
-            @read_channels.clear
-            @buf = nil
+          while !@done && @cbufs[channel].length < count
+            read_once
           end
 
-          if @buf && @buf[0].length != count
-            @buf = @buf.map { |b|
-              if b
-                if !b.empty?
-                  MB::M.zpad(b, count)
-                else
-                  nil
-                end
+          return nil if @done && @cbufs[channel].empty?
+
+          @cbufs[channel].read(MB::M.min(@cbufs[channel].length, count)).not_inplace!
+        end
+
+        private
+
+        # Reads one buffer from the upstream input and stores each channel in a
+        # separate circular buffer.  This allows temporary desyncing between
+        # channels, which may happen if the input buffer size is e.g. 800 but
+        # the node graph is running with a buffer size of 1024.
+        def read_once
+          buf = @source.read(@source.buffer_size)
+
+          if buf.nil? || buf.empty? || buf.any?(&:empty?)
+            @done = true
+          else
+            @cbufs.each_with_index do |c, idx|
+              begin
+                c.write(buf[idx])
+              rescue MB::Sound::CircularBuffer::BufferOverflow => e
+                raise ChannelBufferOverflow, "Channel #{idx + 1} of #{@channels.count} buffer is full; " \
+                  "is one channel being sampled more than others?  Buffers: #{@cbufs.map(&:length)}"
               end
-            }
+            end
           end
-
-          @read_channels << node
-
-          @buf ||= @source.read(count)
-
-          @buf[channel]
         end
       end
     end

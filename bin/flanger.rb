@@ -2,8 +2,8 @@
 # A simple flanger effect, to demonstrate using a signal node as a delay time.
 # (C)2022 Mike Bourgeous
 #
-# Usage: $0 [delay_s [feedback [hz [depth0..1]]]] [filename]
-#    Or: $0 [filename]
+# Usage: $0 [delay_s [feedback [hz [depth0..1]]]] [filename [output_filename]] [--silent]
+#    Or: $0 [filename [output_filename]] [--silent]
 #
 # Environment variables:
 #    WAVE_TYPE - oscillator waveform name (e.g. sine, ramp, triangle, square)
@@ -12,6 +12,9 @@
 #    WET - wet output level (default 1)
 #    SPREAD - LFO phase spread across channels (default 180)
 #
+# Examples:
+#    DRY=0.5 $0 sounds/drums.flac 0.002 0.85 0.2 0.5
+#
 # Cool effects (omit filename for realtime processing from Jack):
 #    Arpeggio: SMOOTHING=0.5 $0 sounds/transient_synth.flac 0.035 0 3 2
 #    Slow arp: SMOOTHING=1.5 $0 sounds/transient_synth.flac 0.15 0 3 2
@@ -19,13 +22,17 @@
 #    Water drums: SMOOTHING=4 WET=1 DRY=0 $0 sounds/drums.flac 0.02 -0.3 46 6
 #    Space warp: SMOOTHING=10 WET=1 DRY=0 $0 sounds/drums.flac 0.2 -0.8 15 6
 #    Time warp: WET=1 DRY=0 $0 sounds/drums.flac 0.2 -0.8 0.3 6
+#    Bass comb: SMOOTHING=0.7 DRY=0 $0 sounds/drums.flac 0.04 0.95 150 1
+#    Bass beat: SPREAD=10 $0 sounds/drums.flac 0.006 -0.98 0.4 2
+#    Gritty overtone: DRY=0.5 $0 sounds/synth0.flac 0.0029 0.85 60 0.1
+#    Decimation: DRY=0 $0 sounds/synth0.flac 0.0058 -0.85 3300 0.2
 
 require 'bundler/setup'
 
 require 'mb/sound'
 
 if ARGV.include?('--help')
-  puts MB::U.read_header_comment.join.gsub('$0', "\e[1m#{$0}\e[0m")
+  MB::U.print_header_help
   exit 1
 end
 
@@ -40,15 +47,45 @@ depth ||= 0.35
 wave_type = ENV['WAVE_TYPE']&.to_sym || :sine
 raise 'Invalid wave type' unless MB::Sound::Oscillator::WAVE_TYPES.include?(wave_type)
 
+# Optionally read from a file
 filename = others[0]
-
 if filename && File.readable?(filename)
-  inputs = MB::Sound.file_input(filename).split.map { |d| d.and_then(0.hz.at(0).for(delay * 4)) }
+  input = MB::Sound.file_input(filename)
+
+  # Can't use 0.hz.for(...) because GraphVoice changes all Tones to play forever.  FIXME: make GraphVoice smarter?
+  # Feedback will decay by N dB after |log_[|feedback|](-N dB)| max delay periods
+  # Always extend by at least one delay period, or at least one second
+  # TODO: detect actual decay by monitoring audio level; that might be a useful graph node to add
+  max_delay = delay.abs * (1 + depth.abs)
+  decay_periods = 1 + Math.log(-36.dB, MB::M.clamp(feedback.abs, 0.1, 0.99))
+  delay_time = MB::M.max(max_delay * decay_periods, 1)
+  final_tone = 0.constant.for(max_delay * decay_periods)
+  inputs = input.split.map { |d| d.and_then(final_tone) }
 else
-  inputs = MB::Sound.input(channels: ENV['CHANNELS']&.to_i || 2).split
+  input = MB::Sound.input(channels: ENV['CHANNELS']&.to_i || 2)
+  inputs = input.split
 end
 
-output = MB::Sound.output(channels: inputs.length)
+if others.delete('--silent')
+  puts "\e[1;34mNot playing realtime output\e[0m"
+else
+  output = MB::Sound.output(channels: inputs.length)
+end
+
+# Optionally write to a file
+output_filename = others[1]
+if output_filename && !output_filename.start_with?('-') && !MB::U.prevent_overwrite(output_filename, prompt: true)
+  puts "\e[33mWriting to \e[1m#{output_filename}\e[0m"
+  output = MB::Sound::MultiWriter.new([
+    output,
+    MB::Sound.file_output(
+      output_filename,
+      channels: inputs.count,
+      buffer_size: output&.buffer_size || input.buffer_size,
+      overwrite: true
+    )
+  ].compact)
+end
 
 if defined?(MB::Sound::JackFFI) && output.is_a?(MB::Sound::JackFFI::Output)
   # MIDI control is possible since Jack is running
@@ -59,6 +96,8 @@ else
 end
 
 bufsize = output.buffer_size
+internal_bufsize = 24
+internal_bufsize -= 1 until bufsize % internal_bufsize == 0
 
 delay_samples = delay * output.rate
 delay_samples = 0 if delay_samples < 0
@@ -76,6 +115,8 @@ wet_level = ENV['WET']&.to_f || 1
 phase_spread = ENV['SPREAD']&.to_f || 180.0
 
 puts MB::U.highlight(
+  args: ARGV,
+  other_args: others,
   wave_type: wave_type,
   delay: delay,
   feedback: feedback,
@@ -84,6 +125,7 @@ puts MB::U.highlight(
   inputs: inputs.map(&:graph_node_name),
   rate: output.rate,
   buffer: bufsize,
+  internal_buffer: internal_bufsize,
 )
 
 # TODO: Maybe want a graph-wide spy function that either prints stats, draws
@@ -93,8 +135,10 @@ begin
   # FIXME: feedback delay includes buffer size
   # TODO: Abstract construction of a filter graph per channel
   paths = inputs.map.with_index { |inp, idx|
+    inp = inp.with_buffer(bufsize)
+
     # Feedback buffers, overwritten by later calls to #spy
-    a = Numo::SFloat.zeros(bufsize)
+    a = Numo::SFloat.zeros(internal_bufsize)
 
     lfo_freq = hz.constant.named('LFO Hz')
 
@@ -122,15 +166,16 @@ begin
     s2 = s2.delay(samples: d1, smoothing: delay_smoothing)
 
     # Feedback injector and feedback delay (compensating for buffer size)
-    d_fb = (d2 - bufsize).clip(0, nil)
-    b = 0.hz.forever.proc { a }.delay(samples: d_fb, smoothing: delay_smoothing2)
+    # TODO: better way of injecting an NArray into a node chain than constant.proc
+    d_fb = (d2 - internal_bufsize).clip(0, nil)
+    b = 0.constant.proc { a }.delay(samples: d_fb, smoothing: delay_smoothing2)
 
     # Effected output, with a spy to save feedback buffer
     wet = (feedback * b - s2).softclip(0.85, 0.95).spy { |z| a[] = z if z }
 
     dryconst = dry_level.constant.named('Dry level')
     wetconst = wet_level.constant.named('Wet level')
-    final = (s1 * dryconst + wet * wetconst).softclip(0.85, 0.95)
+    final = (s1 * dryconst + wet * wetconst).softclip(0.85, 0.95).with_buffer(internal_bufsize).named('final_buf')
 
     # GraphVoice provides on_cc to generate a cc map for the MIDI manager
     # (TODO: probably a better way to do this, also need on_bend, on_pitch, etc)
@@ -150,7 +195,7 @@ begin
   loop do
     manager&.update
     data = paths.map { |p| p.sample(output.buffer_size) }
-    break if data.any?(&:nil?)
+    break if data.any?(&:nil?) || data.any?(&:empty?) || input.closed?
     output.write(data)
   end
 
