@@ -22,7 +22,6 @@ module MB
 
           @upstream = upstream
           @upstream_count = upstream_count
-          @complex = false
         end
 
         # Returns the upstream as the only source for this node.
@@ -44,8 +43,6 @@ module MB
               return @circbuf.read(MB::M.min(count, @circbuf.length))
             end
 
-            @complex ||= v.is_a?(Numo::SComplex) || v.is_a?(Numo::DComplex)
-
             @circbuf.write(v)
           end
 
@@ -58,12 +55,13 @@ module MB
           # Give us a buffer that can handle a multiple of the upstream count
           # that is strictly greater than the read count.
           @bufsize = ((2 * @upstream_count + count) / @upstream_count) * @upstream_count
-          @circbuf ||= CircularBuffer.new(buffer_size: @bufsize, complex: @complex)
+          @circbuf ||= CircularBuffer.new(buffer_size: @bufsize, complex: false)
 
-          # TODO: resize buffer if needed
-          # TODO: convert to complex if needed
-          if @circbuf.buffer_size != @bufsize || @circbuf.complex != @complex
-            raise NotImplementedError, 'TODO: allow resizing the buffer or switching data types'
+          if @circbuf.buffer_size < @bufsize
+            # TODO: add in-place resizing to CircularBuffer if this is too slow
+            newbuf = CircularBuffer.new(buffer_size: @bufsize, complex: @circbuf.complex)
+            newbuf.write(@circbuf.read(@circbuf.length)) unless @circbuf.empty?
+            @circbuf = newbuf
           end
         end
       end
