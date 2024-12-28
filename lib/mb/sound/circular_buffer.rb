@@ -12,6 +12,30 @@ module MB
       # Thrown when more data is read than has been written.
       class BufferUnderflow < RuntimeError; end
 
+      # XXX multi-reader idea; see also GraphNode::MultitapDelay
+      class Reader
+        attr_reader :read_pos
+
+        def initialize(cbuf:, index:, read_pos:)
+          @cbuf = cbuf
+          @index = index
+          @read_pos = read_pos
+          @tmpbuf = nil
+        end
+
+        def length
+          (@cbuf.write_pos - @read_pos) % @cbuf.buffer_size
+        end
+
+        def read(count)
+          raise BufferUnderflow, "Reader #{@index} has #{length}, but #{count} requested" if count > length
+
+          @cbuf.direct_read(pos: @read_pos, count: count, target: nil).tap {
+            @read_pos = (@read_pos + count) % @cbuf.buffer_size
+          }
+        end
+      end
+
       # Maximum buffer size
       attr_reader :buffer_size
 
@@ -27,10 +51,15 @@ module MB
       attr_reader :bufdouble
       alias double bufdouble
 
+      # Internal buffer's write position (for use by Reader class)
+      attr_reader :write_pos
+
       # Creates a circular buffer of the given maximum +:buffer_size+.  Creates
       # a complex buffer if +:complex+ is true (real by default).  Creates a
       # double-precision buffer if +:double+ is true (single-precision by
-      # default).
+      # default).  The buffer type will change to complex or double
+      # automatically if upstream data becomes complex or double precision, but
+      # specifying complex or double up front saves a buffer reallocation.
       def initialize(buffer_size:, complex: false, double: false)
         raise ArgumentError, 'Buffer size must be a positive integer' unless buffer_size.is_a?(Integer) && buffer_size > 0
 
@@ -40,13 +69,27 @@ module MB
         @write_pos = 0
         @length = 0
 
+        @readers = []
+
         setup_buffer(length: @buffer_size, complex: complex, temp: true, double: double)
+      end
+
+      # XXX multi-reader idea/experiment
+      def reader(delay_samples = 0)
+        # FIXME: include read pos in exception check or something
+        raise 'Cannot delay more than the buffer size' if delay_samples > @buffer_size
+
+        Reader.new(cbuf: self, index: @readers.length, read_pos: (@read_pos - delay_samples) % @buffer_size).tap { |r|
+          @readers << r
+        }
       end
 
       # Returns the next +count+ samples of the buffer.
       #
       # Raises BufferUnderflow if +count+ is greater than #length.
       def read(count)
+        # TODO: XXX Just have an internal reader by default and call that?
+
         # TODO: should we allow short reads (return less than requested)?
         if count > @length
           raise BufferUnderflow, "Read of size #{count} is greater than #{@length} available samples"
@@ -59,6 +102,12 @@ module MB
           @read_pos = (@read_pos + count) % @buffer_size
           @length -= count
         }
+      end
+
+      # For internal use by Reader.  Does a direct circular read from the
+      # internal buffer at the given position.
+      def direct_read(pos:, count:, target:)
+        MB::M.circular_read(@buf, pos, count, target: target)
       end
 
       # Appends the given +narray+ to the circular buffer, returning the
@@ -80,6 +129,7 @@ module MB
           raise BufferOverflow, "Write of size #{narray.length} is greater than #{available} space available"
         end
 
+        # TODO: XXX take readers buffers into account
         expand_buffer(narray, grow: false)
 
         MB::M.circular_write(@buf, narray, @write_pos)
@@ -90,6 +140,7 @@ module MB
       # Returns the available space left in the circular buffer.  See also
       # #length.
       def available
+        # TODO: XXX take readers into account
         @buffer_size - @length
       end
 
