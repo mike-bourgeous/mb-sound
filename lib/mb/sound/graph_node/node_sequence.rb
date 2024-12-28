@@ -26,6 +26,8 @@ module MB
         # returns nil if all sources have run out of data.  If a source returns
         # fewer than +count+ samples, then the buffer will be zero-padded to
         # +count+ samples.
+        #
+        # FIXME: only zero pad the last source, otherwise concatenate sources
         def sample(count)
           buf = nil
 
