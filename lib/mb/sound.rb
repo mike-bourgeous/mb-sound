@@ -111,9 +111,10 @@ module MB
     # the interactive CLI).  A new Note object is created each time to allow
     # for modifications to old Notes and changes in global tuning.
     def self.const_missing(name)
+      super if name.to_s == 'Note'
       MB::Sound::Note.new(name)
     rescue ArgumentError
-      super(name)
+      super
     end
   end
 end
