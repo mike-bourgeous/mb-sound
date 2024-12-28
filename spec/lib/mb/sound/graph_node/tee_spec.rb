@@ -8,10 +8,10 @@ RSpec.describe(MB::Sound::GraphNode::Tee) do
   it 'can create more than two branches' do
     branches = 123.hz.tee(5)
     expect(branches.length).to eq(5)
-    expect(branches.all?(MB::Sound::GraphNode::Tee::Branch)).to eq(true)
+    expect(branches).to all(be_a(MB::Sound::GraphNode::Tee::Branch))
   end
 
-  it 'gives the same data to each branch' do
+  it 'gives the same data to two branches' do
     a, b = 157.hz.tee
 
     a1 = a.sample(100)
@@ -28,18 +28,50 @@ RSpec.describe(MB::Sound::GraphNode::Tee) do
     expect(ref).not_to eq(b2)
   end
 
-  it 'zero pads if the source returns less data' do
+  it 'gives the same data to many branches' do
+    branches = 123.hz.tee(24)
+    expect(branches.length).to eq(24)
+    expect(branches.all?(MB::Sound::GraphNode::Tee::Branch)).to eq(true)
+
+    samples = branches.map { |b| b.sample(100) }
+    expect(samples.uniq(&:to_a).count).to eq(1)
+  end
+
+  it 'only zero pads if the source returns less data at the very end' do
     source = MB::Sound::ArrayInput.new(data: [Numo::SFloat[]])
-    expect(source).to receive(:sample).with(5).and_return(Numo::SFloat[1,2,3,4,5], Numo::SFloat[6,7])
+    expect(source).to receive(:sample).with(5).and_return(Numo::SFloat[1,2,3,4], Numo::SFloat[5,6,7], nil)
     allow(source).to receive(:tee).and_call_original
 
     t1, t2 = source.tee
 
-    t1.sample(5)
-    t2.sample(5)
+    expect(t1.sample(5)).to eq(Numo::SFloat[1,2,3,4,5])
+    expect(t2.sample(5)).to eq(Numo::SFloat[1,2,3,4,5])
 
     expect(t1.sample(5)).to eq(Numo::SFloat[6,7,0,0,0])
     expect(t2.sample(5)).to eq(Numo::SFloat[6,7,0,0,0])
+  end
+
+  it 'allows branches to be sampled more than once with different sample counts' do
+    source = MB::Sound::ArrayInput.new(data: [Numo::SFloat[1,2,3,4,5,6,7,8,9,-10]])
+
+    t1, t2, t3 = source.tee(3)
+
+    expect(t1.sample(4)).to eq(Numo::SFloat[1,2,3,4])
+    expect(t1.sample(3)).to eq(Numo::SFloat[5,6,7])
+    expect(t2.sample(10)).to eq(Numo::SFloat[1,2,3,4,5,6,7,8,9,-10])
+    expect(t3.sample(5)).to eq(Numo::SFloat[1,2,3,4,5])
+    expect(t1.sample(3)).to eq(Numo::SFloat[8,9,-10])
+    expect(t3.sample(5)).to eq(Numo::SFloat[6,7,8,9,-10])
+  end
+
+  it 'raises an error if one branch gets too far out of sync' do
+    source = 1.constant
+
+    t1, t2 = source.tee
+
+    expect(t1.sample(47999)).to eq(Numo::SFloat.zeros(47999).fill(1))
+    expect(t1.sample(1)).to eq(Numo::SFloat[1])
+    expect { t1.sample(1) }.to raise_error(MB::Sound::GraphNode::Tee::BranchBufferOverflow)
   end
 
   it 'returns nil if the source returns nil' do

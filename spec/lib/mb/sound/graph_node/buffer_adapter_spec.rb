@@ -135,7 +135,19 @@ RSpec.describe(MB::Sound::GraphNode::BufferAdapter, :aggregate_failures) do
     # when one channel is sampled twice in a row.  Funnily enough, this fix for
     # Tee (already applied to IOSampleMixin) kind of makes BufferAdapter
     # unnecessary.
-    pending 'can use different buffers on different branches of a tee'
+    it 'can use different buffers on different branches of a tee' do
+      t1, t2 = 1.constant.tee
+      expect(t1).to receive(:sample).with(17).twice.and_call_original
+      expect(t2).to receive(:sample).with(11).exactly(3).times.and_call_original
+
+      b1 = t1.with_buffer(17)
+      b2 = t2.with_buffer(11)
+
+      expect(b1.sample(24)).to eq(Numo::SFloat.ones(24))
+      expect(b1.sample(3)).to eq(Numo::SFloat[1,1,1])
+
+      expect(b2.sample(23)).to eq(Numo::SFloat.ones(23))
+    end
   end
 
   describe '#sources' do

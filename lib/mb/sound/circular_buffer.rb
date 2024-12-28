@@ -55,7 +55,6 @@ module MB
         end
 
         def read(count)
-          # TODO: should we allow short reads (return less than requested)?
           if count > @length
             raise BufferUnderflow, "Read of size #{count} is greater than #{@length} available samples " \
               "on #{@index < 0 ? 'default reader' : "reader #{@index}"}"
@@ -172,14 +171,16 @@ module MB
       # room for the given +narray+ in the buffer.
       def write(narray)
         # TODO: should the buffer grow automatically?  If we grow the buffer
-        # here we will have to recompute the read and/or write positions if
-        # they straddle the buffer end, and probably have to move data around
-        # to preserve continuity of reads.
+        # here we will have to recompute the read and/or write positions of
+        # every reader if they straddle the buffer end, and probably have to
+        # move data around to preserve continuity of reads.
         #
         # A slower option would be to just create a brand new buffer with
-        # whatever we already have by calling the read method, then growing the
-        # buffer, so we don't have to move any data (apart from what #read
-        # already does).
+        # whatever we already have by calling the read method, then writing to
+        # the new buffer.
+        #
+        # Multiple readers could be updated by resetting the read position to
+        # write_pos minus the reader's length, I think.
         if narray.length > available
           raise BufferOverflow, "Write of size #{narray.length} is greater than #{available} space available"
         end
@@ -189,10 +190,12 @@ module MB
         MB::M.circular_write(@buf, narray, @write_pos)
         @write_pos = (@write_pos + narray.length) % @buffer_size
 
+        # Update each reader in multi-reader mode
         @readers&.each do |r|
           r.wrote(narray.length)
         end
 
+        # Update default reader in single-reader mode
         @r0&.wrote(narray.length)
 
         @readers&.map(&:length)&.max || length
