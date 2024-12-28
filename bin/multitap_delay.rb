@@ -5,6 +5,10 @@
 # This is inspired by a module I saw on Andrew Huang's YouTube channel.
 #
 # Usage: $0 [base_delay_seconds] [filename]
+#
+# Examples:
+#     Resonant widener: $0 0.001 sounds/transient_synth.flac
+#     Pinged filter drums: $0 0.2 sounds/drums.flac
 
 require 'bundler/setup'
 
