@@ -39,5 +39,11 @@ RSpec.describe(MB::Sound::GraphNode::InputChannelSplit) do
       l.sample(48000)
       expect { l.sample(1) }.to raise_error(MB::Sound::GraphNode::InputChannelSplit::ChannelBufferOverflow)
     end
+
+    it 'returns nil when the input is out of data' do
+      l = MB::Sound::NullInput.new(channels: 1, length: 5, buffer_size: 800).split[0]
+      expect(l.sample(50)).to eq(Numo::SFloat[0,0,0,0,0])
+      expect(l.sample(1)).to eq(nil)
+    end
   end
 end

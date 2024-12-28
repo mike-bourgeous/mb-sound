@@ -96,7 +96,7 @@ module MB
             read_once
           end
 
-          return nil if @done && @cbufs[idx].empty?
+          return nil if @done && @cbufs[channel].empty?
 
           @cbufs[channel].read(MB::M.min(@cbufs[channel].length, count)).not_inplace!
         end
