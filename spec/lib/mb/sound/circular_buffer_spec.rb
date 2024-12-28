@@ -194,12 +194,15 @@ RSpec.describe(MB::Sound::CircularBuffer, :aggregate_failures) do
         r1 = cbuf.reader
         r2 = cbuf.reader(3)
 
-        expect { cbuf.write(Numo::SFloat[1,2,3,4]) }.not_to raise_error(MB::Sound::CircularBuffer::BufferOverflow)
+        expect { cbuf.write(Numo::SFloat[1,2,3,4]) }.not_to raise_error
+
+        expect(r1.read(2)).to eq(Numo::SFloat[1,2])
+        expect(r2.read(4)).to eq(Numo::SFloat[0,0,0,1])
       end
 
       it 'raises an error if the write would pass any of the read positions' do
-        r1 = cbuf.reader
-        r2 = cbuf.reader(3)
+        _r1 = cbuf.reader
+        _r2 = cbuf.reader(3)
 
         expect { cbuf.write(Numo::SFloat[1,2,3,4,5]) }.to raise_error(MB::Sound::CircularBuffer::BufferOverflow)
       end

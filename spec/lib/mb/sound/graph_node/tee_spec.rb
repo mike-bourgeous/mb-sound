@@ -67,7 +67,7 @@ RSpec.describe(MB::Sound::GraphNode::Tee) do
   it 'raises an error if one branch gets too far out of sync' do
     source = 1.constant
 
-    t1, t2 = source.tee
+    t1, _t2 = source.tee
 
     expect(t1.sample(47999)).to eq(Numo::SFloat.zeros(47999).fill(1))
     expect(t1.sample(1)).to eq(Numo::SFloat[1])
