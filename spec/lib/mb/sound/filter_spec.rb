@@ -16,5 +16,15 @@ RSpec.describe(MB::Sound::Filter) do
 
   pending '#impulse_response'
 
+  describe '#response_hz' do
+    it 'calls #respone with angular frequency' do
+      f = MB::Sound::Filter.new
+      expect(f).to receive(:response).with(be_within(0.0001).of(Math::PI / 2)).and_return(1+1i)
+      expect(f).to receive(:rate).and_return(48000)
+      allow(f).to receive(:response_hz).and_call_original
+      expect(f.response_hz(12000)).to eq(1+1i)
+    end
+  end
+
   pending '#frequency_response'
 end

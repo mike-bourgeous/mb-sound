@@ -43,7 +43,7 @@ Gem::Specification.new do |spec|
   spec.add_development_dependency 'rake', '~> 13.0.1'
   spec.add_development_dependency 'bundler', '2.4.22'
 
-  # For generating MIDI controller templates for ACID
+  # For generating MIDI controller XML templates for ACID
   spec.add_development_dependency 'builder', '~> 3.2.4'
 
   # Interactive command line gems

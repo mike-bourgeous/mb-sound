@@ -1,4 +1,4 @@
-RSpec.describe MB::Sound::Tone do
+RSpec.describe MB::Sound::Tone, :aggregate_failures do
   describe MB::Sound::Tone::Meters do
     it 'can be converted to feet' do
       expect(1.meter.feet).to be_a(MB::Sound::Tone::Feet)
@@ -106,6 +106,10 @@ RSpec.describe MB::Sound::Tone do
         expect(tone.wave_type).to eq(:sine)
         expect(tone.rate).to eq(48000)
       end
+
+      it 'is aliased to Hz' do
+        expect(5.Hz).to be_a(MB::Sound::Tone)
+      end
     end
 
     describe '#db' do
@@ -122,6 +126,18 @@ RSpec.describe MB::Sound::Tone do
       end
     end
 
+    describe '#db10' do
+      it 'converts -10 to 0.1' do
+        expect(-10.db10).to eq(0.1)
+      end
+
+      it 'is aliased to #dbpow, #db_pow, and #dBpow' do
+        expect(-10.dbpow).to eq(0.1)
+        expect(-10.db_pow).to eq(0.1)
+        expect(-10.dBpow).to eq(0.1)
+      end
+    end
+
     describe '#to_db' do
       it 'converts positive values' do
         expect(0.1.to_db).to eq(-20)
@@ -129,6 +145,18 @@ RSpec.describe MB::Sound::Tone do
 
       it 'converts negative values' do
         expect(-0.1.to_db).to eq(-20)
+      end
+    end
+
+    describe '#to_db10' do
+      it 'returns -10dB for 0.1' do
+        expect(0.1.to_db10).to eq(-10)
+      end
+
+      it 'is aliased to dbpow, db_pow, and dBpow' do
+        expect(0.1.to_dbpow).to eq(-10)
+        expect(0.1.to_db_pow).to eq(-10)
+        expect(0.1.to_dBpow).to eq(-10)
       end
     end
 
@@ -168,7 +196,7 @@ RSpec.describe MB::Sound::Tone do
         expect(2.inches).to eq(2.0 / 12.0)
       end
     end
-   end
+  end
 
   describe '#generate' do
     it 'can generate triangle wave samples in an NArray' do
@@ -280,6 +308,30 @@ RSpec.describe MB::Sound::Tone do
       expect(f.filter_type).to eq(:lowpass)
       expect(f.quality).to eq(3)
     end
+
+    it 'defaults to a quality of ~0.7' do
+      f = 200.hz.lowpass
+      expect(f.quality).to eq(::MB::Sound::SQRT1_2)
+    end
+  end
+
+  pending '#lowpass1p'
+
+  describe '#bandpass' do
+    it 'returns a Filter with expected 0dB and -3dB points' do
+      f = 1000.hz.at_rate(96000).bandpass(bandwidth_oct: 2.0)
+      expect(f.response_hz(1000).abs).to be_within(0.00001).of(1.0)
+      expect(f.response_hz(500).abs).to be_within(0.001).of(::MB::Sound::SQRT1_2)
+      expect(f.response_hz(2000).abs).to be_within(0.001).of(::MB::Sound::SQRT1_2)
+      expect(f.response_hz(4000).abs).to be < f.response_hz(2000).abs
+      expect(f.response_hz(250).abs).to be < f.response_hz(500).abs
+      expect(f.rate).to eq(96000)
+    end
+
+    it 'defaults to a bandwidth of 1 octave' do
+      f = 350.hz.bandpass
+      expect(f.bandwidth_oct).to eq(1.0)
+    end
   end
 
   describe '#highpass' do
@@ -290,6 +342,11 @@ RSpec.describe MB::Sound::Tone do
       expect(f.sample_rate).to eq(8000)
       expect(f.filter_type).to eq(:highpass)
       expect(f.quality).to eq(4)
+    end
+
+    it 'defaults to a quality of ~0.7' do
+      f = 200.hz.highpass
+      expect(f.quality).to eq(::MB::Sound::SQRT1_2)
     end
   end
 
@@ -302,6 +359,13 @@ RSpec.describe MB::Sound::Tone do
       expect(f.filter_type).to eq(:peak)
       expect(f.bandwidth_oct).to eq(1.1)
       expect(f.db_gain.round(4)).to eq(-5)
+    end
+  end
+
+  describe '#ramp' do
+    it 'is aliased to #saw and #sawtooth' do
+      expect(100.hz.saw.wave_type).to eq(:ramp)
+      expect(100.hz.sawtooth.wave_type).to eq(:ramp)
     end
   end
 

@@ -107,7 +107,8 @@ module MB
 
         FILTER_TYPE_IDS = FILTER_TYPES.map.with_index.to_h.freeze
 
-        attr_reader :filter_type, :sample_rate, :center_frequency, :omega, :db_gain
+        # :rate and :sample_rate refer to the same value
+        attr_reader :filter_type, :rate, :sample_rate, :center_frequency, :omega, :db_gain
         attr_reader :quality, :bandwidth_oct, :shelf_slope
 
         # Initializes a filter based on Robert Bristow-Johnson's filter cookbook.
@@ -158,6 +159,7 @@ module MB
         def set_parameters_c(filter_type, f_samp, f_center, db_gain: nil, quality: nil, bandwidth_oct: nil, shelf_slope: nil)
           type_id = FILTER_TYPE_IDS.fetch(filter_type)
           @filter_type = filter_type
+          @rate = f_samp
           @sample_rate = f_samp
           @center_frequency = f_center
           @db_gain = db_gain
@@ -175,6 +177,7 @@ module MB
         # Recalculates filter coefficients based on the given filter parameters.
         def set_parameters_ruby(filter_type, f_samp, f_center, db_gain: nil, quality: nil, bandwidth_oct: nil, shelf_slope: nil)
           @filter_type = filter_type
+          @rate = f_samp
           @sample_rate = f_samp
           @center_frequency = f_center
           @db_gain = db_gain
