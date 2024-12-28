@@ -1,4 +1,4 @@
-RSpec.describe(MB::Sound::GraphNode::BufferAdapter) do
+RSpec.describe(MB::Sound::GraphNode::BufferAdapter, :aggregate_failures) do
   describe '#sample' do
     let(:upstream) { 42.constant }
 
@@ -87,12 +87,47 @@ RSpec.describe(MB::Sound::GraphNode::BufferAdapter) do
       expect(b.sample(3)).to eq(nil)
     end
 
-    pending 'with a very large number of iterations'
+    it 'continues working after many iterations' do
+      # TODO: it would be nice if node sequences could repeat but they would
+      # have to know how to reset their upstream node graph
+      # FIXME: 120.hz.square has its phase off by one sample after the first half wave
+      seq = 1.constant.for(200.0 / 48000)
+        .and_then(-1.constant.for(200.0 / 48000))
+        .and_then(1.constant.for(200.0 / 48000))
+        .and_then(-1.constant.for(200.0 / 48000))
+
+      b = seq.with_buffer(17)
+
+      expect(b.sample(200)).to eq(Numo::SFloat.zeros(200).fill(1))
+      expect(b.sample(200)).to eq(Numo::SFloat.zeros(200).fill(-1))
+
+      50.times do
+        expect(b.sample(4)).to eq(Numo::SFloat[1,1,1,1])
+      end
+
+      expect(b.sample(3)).to eq(Numo::SFloat[-1,-1,-1])
+    end
 
     # FIXME: right now any internal buffer size must be an exact factor of the
     # upstream input's buffer size, or else the input will have to be read
     # twice and the two channels will get out of sync.
-    pending 'with split inputs that reset themselves when re-sampled'
+    pending 'with split inputs that reset themselves when re-sampled' do
+      ai = MB::Sound::ArrayInput.new(
+        data: [
+          Numo::SFloat[1,2,3,4,5,6,7,8,9,10],
+          Numo::SFloat[9,8,7,6,5,4,3,2,1,0],
+        ]
+      )
+
+      l, r = ai.split.map { |c| c.with_buffer(2) }
+
+      expect(l.sample(3)).to eq(Numo::SFloat[1,2,3])
+      expect(r.sample(3)).to eq(Numo::SFloat[9,8,7])
+      expect(l.sample(2)).to eq(Numo::SFloat[4,5])
+      expect(r.sample(2)).to eq(Numo::SFloat[6,5])
+      expect(l.sample(5)).to eq(Numo::SFloat[6,7,8,9,10])
+      expect(r.sample(5)).to eq(Numo::SFloat[4,3,2,1,0])
+    end
   end
 
   describe '#sources' do
