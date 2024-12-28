@@ -111,6 +111,9 @@ RSpec.describe(MB::Sound::GraphNode::BufferAdapter, :aggregate_failures) do
     # FIXME: right now any internal buffer size must be an exact factor of the
     # upstream input's buffer size, or else the input will have to be read
     # twice and the two channels will get out of sync.
+    # TODO: IOSampleMixin could use a circular buffer for each channel, so that
+    # the extra channels are just written to their buffer when one channel is
+    # sampled twice in a row.
     pending 'with split inputs that reset themselves when re-sampled' do
       ai = MB::Sound::ArrayInput.new(
         data: [
