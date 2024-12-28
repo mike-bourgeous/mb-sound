@@ -130,11 +130,12 @@ RSpec.describe(MB::Sound::GraphNode::BufferAdapter, :aggregate_failures) do
     # upstream Tee's buffer size, or else the tee will sample the upstream
     # twice and discard data for the other branches
     # TODO: Tee could use a circular buffer for each channel like
-    # IOSampleMixin, so that the extra channels are just written to their
-    # buffer when one channel is sampled twice in a row.
-    # Funnily enough, this fix for Tee (already applied to IOSampleMixin) kind
-    # of makes BufferAdapter unnecessary.
-    pending 'can buffer one branch of a tee'
+    # IOSampleMixin (or CircularBuffer could be given a multi-reader
+    # interface), so that the extra channels are just written to their buffer
+    # when one channel is sampled twice in a row.  Funnily enough, this fix for
+    # Tee (already applied to IOSampleMixin) kind of makes BufferAdapter
+    # unnecessary.
+    pending 'can use different buffers on different branches of a tee'
   end
 
   describe '#sources' do
