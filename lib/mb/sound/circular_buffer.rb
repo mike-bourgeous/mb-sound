@@ -92,6 +92,11 @@ module MB
       def available
         @buffer_size - @length
       end
+
+      # Returns true if there are no samples in the circular buffer.
+      def empty?
+        @length == 0
+      end
     end
   end
 end
