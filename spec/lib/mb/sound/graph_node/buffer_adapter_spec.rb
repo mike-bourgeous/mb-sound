@@ -108,13 +108,7 @@ RSpec.describe(MB::Sound::GraphNode::BufferAdapter, :aggregate_failures) do
       expect(b.sample(3)).to eq(Numo::SFloat[-1,-1,-1])
     end
 
-    # FIXME: right now any internal buffer size must be an exact factor of the
-    # upstream input's buffer size, or else the input will have to be read
-    # twice and the two channels will get out of sync.
-    # TODO: IOSampleMixin could use a circular buffer for each channel, so that
-    # the extra channels are just written to their buffer when one channel is
-    # sampled twice in a row.
-    pending 'with split inputs that reset themselves when re-sampled' do
+    it 'can buffer split inputs' do
       ai = MB::Sound::ArrayInput.new(
         data: [
           Numo::SFloat[1,2,3,4,5,6,7,8,9,10],
@@ -131,6 +125,16 @@ RSpec.describe(MB::Sound::GraphNode::BufferAdapter, :aggregate_failures) do
       expect(l.sample(5)).to eq(Numo::SFloat[6,7,8,9,10])
       expect(r.sample(5)).to eq(Numo::SFloat[4,3,2,1,0])
     end
+
+    # FIXME: right now any internal buffer size must be an exact factor of the
+    # upstream Tee's buffer size, or else the tee will sample the upstream
+    # twice and discard data for the other branches
+    # TODO: Tee could use a circular buffer for each channel like
+    # IOSampleMixin, so that the extra channels are just written to their
+    # buffer when one channel is sampled twice in a row.
+    # Funnily enough, this fix for Tee (already applied to IOSampleMixin) kind
+    # of makes BufferAdapter unnecessary.
+    pending 'can buffer one branch of a tee'
   end
 
   describe '#sources' do

@@ -6,6 +6,9 @@ module MB
     # Note: the buffer will be reused unless it has to be resized, so do not make
     # any modifications to the buffer.
     class NullInput
+      include GraphNode
+      include GraphNode::IOSampleMixin
+
       attr_reader :channels, :length, :remaining, :samples_read, :rate, :buffer_size
 
       # Initializes a null audio stream that returns the +fill+ value +length+
