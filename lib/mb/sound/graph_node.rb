@@ -53,6 +53,7 @@ module MB
 
       # Returns the class name of the node plus the node's assigned name.
       def to_s
+        @graph_node_name ||= nil
         "#{self.class.name}/#{@graph_node_name || __id__}"
       end
 
