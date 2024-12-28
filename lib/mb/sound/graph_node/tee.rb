@@ -18,11 +18,12 @@ module MB
         class Branch
           include GraphNode
 
-          attr_reader :need_sample
+          attr_reader :index
 
           # For internal use by Tee.  Initializes one parallel branch of the tee.
-          def initialize(tee)
+          def initialize(tee, index)
             @tee = tee
+            @index = index
             @buf = nil
             @type = Numo::SFloat
           end
@@ -46,6 +47,11 @@ module MB
           # Returns an Array containing the source node feeding into the Tee.
           def sources
             @tee.sources
+          end
+
+          # Describes this branch as a String.
+          def to_s
+            "Branch #{@index + 1} of #{@tee.branches.count}#{graph_node_name && " (#{graph_node_name})"}"
           end
 
           private
@@ -72,7 +78,7 @@ module MB
 
           @source = source
           @sources = [source].freeze
-          @branches = n.times.map { Branch.new(self) }.freeze
+          @branches = Array.new(n) { |idx| Branch.new(self, idx) }.freeze
 
           # List of branches that have already read the current buffer, to detect
           # when a new buffer is needed.
@@ -100,8 +106,6 @@ module MB
             @buf = nil
           end
 
-          return nil if @done
-
           if @buf
             if @buf.length == 0
               return nil
@@ -111,6 +115,8 @@ module MB
           end
 
           @read_branches << branch
+
+          return nil if @done
 
           @buf ||= @source.sample(count).yield_self { |b|
             MB::M.zpad(b, count) if b && !b.empty?

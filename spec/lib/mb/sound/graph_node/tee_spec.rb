@@ -28,8 +28,6 @@ RSpec.describe(MB::Sound::GraphNode::Tee) do
     expect(ref).not_to eq(b2)
   end
 
-  pending 'when the upstream is nil'
-
   it 'zero pads if the source returns less data' do
     source = MB::Sound::ArrayInput.new(data: [Numo::SFloat[]])
     expect(source).to receive(:sample).with(5).and_return(Numo::SFloat[1,2,3,4,5], Numo::SFloat[6,7])
@@ -42,5 +40,35 @@ RSpec.describe(MB::Sound::GraphNode::Tee) do
 
     expect(t1.sample(5)).to eq(Numo::SFloat[6,7,0,0,0])
     expect(t2.sample(5)).to eq(Numo::SFloat[6,7,0,0,0])
+  end
+
+  it 'returns nil if the source returns nil' do
+    source = double(MB::Sound::GraphNode)
+    allow(source).to receive(:sample).and_return(Numo::SFloat[1,2,3], nil)
+
+    t1, t2 = MB::Sound::GraphNode::Tee.new(source).branches
+
+    expect(t1.sample(3)).to eq(Numo::SFloat[1,2,3])
+    expect(t2.sample(3)).to eq(Numo::SFloat[1,2,3])
+
+    expect(t1.sample(3)).to eq(nil)
+    expect(t2.sample(3)).to eq(nil)
+    expect(t1.sample(3)).to eq(nil)
+    expect(t2.sample(3)).to eq(nil)
+  end
+
+  it 'returns nil if the source returns empty' do
+    source = double(MB::Sound::GraphNode)
+    allow(source).to receive(:sample).and_return(Numo::SFloat[1,2,3], Numo::SFloat[])
+
+    t1, t2 = MB::Sound::GraphNode::Tee.new(source).branches
+
+    expect(t1.sample(3)).to eq(Numo::SFloat[1,2,3])
+    expect(t2.sample(3)).to eq(Numo::SFloat[1,2,3])
+
+    expect(t1.sample(3)).to eq(nil)
+    expect(t2.sample(3)).to eq(nil)
+    expect(t1.sample(3)).to eq(nil)
+    expect(t2.sample(3)).to eq(nil)
   end
 end
