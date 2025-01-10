@@ -161,3 +161,5 @@ require_relative 'sound/process_reader'
 require_relative 'sound/midi'
 require_relative 'sound/adsr_envelope'
 require_relative 'sound/timeline_interpolator'
+
+require_relative 'sound/io_logger'
