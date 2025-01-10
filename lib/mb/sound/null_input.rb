@@ -11,11 +11,16 @@ module MB
 
       attr_reader :channels, :length, :remaining, :samples_read, :rate, :buffer_size
 
+      # Whether this input should ask readers to use exactly the specified
+      # buffer size.
+      attr_reader :strict_buffer_size
+      alias strict_buffer_size? strict_buffer_size
+
       # Initializes a null audio stream that returns the +fill+ value +length+
       # times for the given number of +channels+ (or forever if length <= 0).
       # The initial internal buffer size will be +initial_buffer+ frames, but
       # will be grown if #read is called with a size larger than the buffer.
-      def initialize(channels:, rate: 48000, length: 0, fill: 0, initial_buffer: 4096, buffer_size: nil)
+      def initialize(channels:, rate: 48000, length: 0, fill: 0, initial_buffer: 4096, buffer_size: nil, strict_buffer_size: false)
         raise 'Channels must be an int >= 1' unless channels.is_a?(Integer) && channels >= 1
 
         @channels = channels
@@ -25,7 +30,9 @@ module MB
         @fill = fill
         @buffer = Numo::SFloat.new(initial_buffer).fill(@fill)
         @empty = Numo::SFloat[]
-        @buffer_size = buffer_size&.to_i
+        @buffer_size = buffer_size&.to_i || initial_buffer&.to_i
+        @strict_buffer_size = strict_buffer_size
+
         @samples_read = 0
         @closed = false
       end

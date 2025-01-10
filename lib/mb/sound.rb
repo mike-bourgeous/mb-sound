@@ -111,7 +111,7 @@ module MB
     # the interactive CLI).  A new Note object is created each time to allow
     # for modifications to old Notes and changes in global tuning.
     def self.const_missing(name)
-      super if name.to_s == 'Note'
+      super if !defined?(MB::Sound::Note) || name.to_s == 'Note'
       MB::Sound::Note.new(name)
     rescue ArgumentError
       super
@@ -136,6 +136,8 @@ require_relative 'sound/null_input'
 require_relative 'sound/null_output'
 require_relative 'sound/loopback'
 require_relative 'sound/array_input'
+require_relative 'sound/input_buffer_wrapper'
+require_relative 'sound/output_buffer_wrapper'
 
 require_relative 'sound/oscillator'
 require_relative 'sound/tone'
@@ -159,3 +161,5 @@ require_relative 'sound/process_reader'
 require_relative 'sound/midi'
 require_relative 'sound/adsr_envelope'
 require_relative 'sound/timeline_interpolator'
+
+require_relative 'sound/io_logger'

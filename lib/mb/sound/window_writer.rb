@@ -4,7 +4,7 @@ module MB
     # stream is not closed, so more audio can be written and the caller should
     # close the output stream.
     class WindowWriter
-      attr_reader :channels, :length, :buffer_size
+      attr_reader :channels, :length, :buffer_size, :rate
 
       # Initializes a new window writer with the given +output_stream+ and
       # +window+ function.  The +window+ must be provided to set the size and
@@ -17,8 +17,15 @@ module MB
       # may send more audio than the actual window size if it was also padded.
       # The pad factor of an input should match the pad factor of an output.
       def initialize(output_stream, window, skip_overlap: false, pad_factor: 1)
-        @output_stream = output_stream
+        if output_stream.is_a?(MB::Sound::OutputBufferWrapper) ||
+            (output_stream.respond_to?(:strict_buffer_size?) && !output_stream.strict_buffer_size?)
+          @output_stream = output_stream
+        else
+          @output_stream = MB::Sound::OutputBufferWrapper.new(output_stream)
+        end
+
         @channels = output_stream.channels
+        @rate = output_stream.rate
         @buffer_size = window.length * pad_factor
         @window = window
         @pad_factor = pad_factor

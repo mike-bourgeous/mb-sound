@@ -23,6 +23,11 @@ module MB
       # based on sample #rate.
       attr_reader :sleep
 
+      # Whether this output should ask writers to use exactly the specified
+      # buffer size.
+      attr_reader :strict_buffer_size
+      alias strict_buffer_size? strict_buffer_size
+
       # Initializes a null output stream for the given number of +:channels+.
       # The sample +:rate+ controls sleep duration.  The +:buffer_size+ is
       # stored for compatibility, but otherwise ignored.
@@ -30,12 +35,14 @@ module MB
       # if +:sleep+ is true (the default), then #write will simulate a normal
       # playback speed by sleeping for the duration of the data given,
       # calculated using the sample rate.
-      def initialize(channels:, rate: 48000, buffer_size: 800, sleep: true)
+      def initialize(channels:, rate: 48000, buffer_size: 800, sleep: true, strict_buffer_size: false)
         raise 'Channels must be positive' if channels < 1
         @channels = channels
         @rate = rate
         @buffer_size = buffer_size || 800
         @sleep = sleep
+        @strict_buffer_size = strict_buffer_size
+
         @frames_written = 0
         @closed = false
       end

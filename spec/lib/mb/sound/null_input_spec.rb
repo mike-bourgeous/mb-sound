@@ -1,7 +1,23 @@
 RSpec.describe MB::Sound::NullInput do
+  describe '#initialize' do
+    describe 'strict_buffer_size parameter' do
+      it 'defaults to false' do
+        expect(MB::Sound::NullInput.new(channels: 1).strict_buffer_size?).to eq(false)
+      end
+
+      it 'can be set to false' do
+        expect(MB::Sound::NullInput.new(channels: 1, strict_buffer_size: false).strict_buffer_size?).to eq(false)
+      end
+
+      it 'can be set to true' do
+        expect(MB::Sound::NullInput.new(channels: 1, strict_buffer_size: true).strict_buffer_size?).to eq(true)
+      end
+    end
+  end
+
   describe '#buffer_size' do
-    it 'returns nil by default' do
-      expect(MB::Sound::NullInput.new(channels: 1).buffer_size).to be_nil
+    it 'returns the initial buffer size by default' do
+      expect(MB::Sound::NullInput.new(channels: 1, initial_buffer: 1337).buffer_size).to eq(1337)
     end
 
     it 'returns an integer value if given' do

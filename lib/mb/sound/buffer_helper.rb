@@ -67,7 +67,7 @@ module MB
       # type comes in from upstream sources.
       #
       # If +:grow+ is false, then the buffer will not grow based on the example
-      # buffer length.
+      # buffer length -- only types will be promoted.
       #
       # See #setup_buffer.
       def expand_buffer(example_buf, grow: true)

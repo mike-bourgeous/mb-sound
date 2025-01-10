@@ -13,25 +13,25 @@ GIT
 
 GIT
   remote: https://github.com/mike-bourgeous/mb-sound-jackffi.git
-  revision: 10305d4a66ce106c2f3cd92c552571f95da39574
+  revision: d8a6d642acc4091d3d3213e1a17b5946459c8ae8
   specs:
-    mb-sound-jackffi (0.0.20.usegit)
+    mb-sound-jackffi (0.0.21.usegit)
       ffi (~> 1.13.0)
       numo-narray (~> 0.9.1)
 
 GIT
   remote: https://github.com/mike-bourgeous/mb-util.git
-  revision: f52d4db34a644b12a5d4c0bcabefa61ff966181c
+  revision: cb21d328a7813cdc4be78795f2ccf5498e0ebca4
   specs:
-    mb-util (0.1.21.usegit)
+    mb-util (0.1.22.usegit)
 
 PATH
   remote: .
   specs:
-    mb-sound (0.8.0.usegit)
+    mb-sound (0.8.1.usegit)
       cmath (~> 1.0.0)
       mb-math (>= 0.2.2.usegit)
-      mb-util (>= 0.1.21.usegit)
+      mb-util (>= 0.1.22.usegit)
       midi-nibbler (~> 0.2.4)
       midilib (~> 4.0.0)
       numo-narray (~> 0.9.2)
@@ -107,8 +107,8 @@ DEPENDENCIES
   getoptlong (~> 0.2.1)
   mb-math (>= 0.2.2.usegit)!
   mb-sound!
-  mb-sound-jackffi (>= 0.0.19.usegit)!
-  mb-util (>= 0.1.21.usegit)!
+  mb-sound-jackffi (>= 0.0.21.usegit)!
+  mb-util (>= 0.1.22.usegit)!
   pry (~> 0.13.1)
   pry-byebug (~> 3.9.0)
   pry-doc
