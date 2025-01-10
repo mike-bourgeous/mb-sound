@@ -9,7 +9,13 @@ module MB
         raise 'Input stream must respond to #read' unless input_stream.respond_to?(:read)
         raise 'Window must respond to #pre_window' unless window.respond_to?(:pre_window)
 
-        @input_stream = input_stream
+        if input_stream.is_a?(MB::Sound::InputBufferWrapper) ||
+            (input_stream.respond_to?(:strict_buffer_size?) && !input_stream.strict_buffer_size?)
+          @input_stream = input_stream
+        else
+          @input_stream = MB::Sound::InputBufferWrapper.new(input_stream)
+        end
+
         @channels = input_stream.channels
         @buffer_size = window.length * pad_factor
 
@@ -33,7 +39,7 @@ module MB
         if !@drain
           input = @input_stream.read(@hop)
 
-          if input.first.size == 0
+          if input.nil? || input.empty? || input.first.empty?
             # TODO: test with pad factor to see if we can use @window.length instead of padded @length
             @drain = @length / @hop - 1
           elsif input.first.size < @hop

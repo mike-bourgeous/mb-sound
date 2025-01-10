@@ -4,7 +4,7 @@ RSpec.describe MB::Sound::WindowReader do
       w = MB::Sound::Window::DoubleHann.new(1024)
       w.force_hop(hop)
 
-      ni = MB::Sound::NullInput.new(channels: 1, length: frames, fill: fill_value)
+      ni = MB::Sound::NullInput.new(channels: 1, length: frames, fill: fill_value, strict_buffer_size: true)
       wr = MB::Sound::WindowReader.new(ni, w)
 
       data = []

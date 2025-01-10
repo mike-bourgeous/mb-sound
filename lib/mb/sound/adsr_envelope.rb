@@ -157,7 +157,7 @@ module MB
       # envelope.  Call repeatedly to get envelope values over time.  Returns
       # nil if auto_release was set and the envelope has fully released.
       def sample(count = nil, filter: true)
-        sample_c(count, filter: filter)
+        sample_c(count&.round, filter: filter)
       end
 
       def sample_c(count = nil, filter: true)
