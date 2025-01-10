@@ -21,9 +21,9 @@ GIT
 
 GIT
   remote: https://github.com/mike-bourgeous/mb-util.git
-  revision: f52d4db34a644b12a5d4c0bcabefa61ff966181c
+  revision: cb21d328a7813cdc4be78795f2ccf5498e0ebca4
   specs:
-    mb-util (0.1.21.usegit)
+    mb-util (0.1.22.usegit)
 
 PATH
   remote: .
@@ -31,7 +31,7 @@ PATH
     mb-sound (0.8.1.usegit)
       cmath (~> 1.0.0)
       mb-math (>= 0.2.2.usegit)
-      mb-util (>= 0.1.21.usegit)
+      mb-util (>= 0.1.22.usegit)
       midi-nibbler (~> 0.2.4)
       midilib (~> 4.0.0)
       numo-narray (~> 0.9.2)
@@ -108,7 +108,7 @@ DEPENDENCIES
   mb-math (>= 0.2.2.usegit)!
   mb-sound!
   mb-sound-jackffi (>= 0.0.21.usegit)!
-  mb-util (>= 0.1.21.usegit)!
+  mb-util (>= 0.1.22.usegit)!
   pry (~> 0.13.1)
   pry-byebug (~> 3.9.0)
   pry-doc
