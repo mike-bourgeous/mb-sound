@@ -1,4 +1,4 @@
-RSpec.describe(MB::Sound::IOBufferWrapper) do
+RSpec.describe(MB::Sound::InputBufferWrapper) do
   describe '#read' do
     pending 'can read less than one buffer'
     pending 'can read exactly one buffer'

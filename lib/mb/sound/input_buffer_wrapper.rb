@@ -5,7 +5,7 @@ module MB
     # A wrapper around an I/O object that uses circular buffers to allow
     # reads of arbitrary size, instead of requiring reads to be equal to the
     # buffer size.
-    class IOBufferWrapper
+    class InputBufferWrapper
       extend Forwardable
 
       include GraphNode

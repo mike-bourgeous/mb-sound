@@ -52,7 +52,7 @@ module MB
         private
 
         def setup_circular_buffer(count)
-          # TODO: maybe dedupe with IOBufferWrapper
+          # TODO: maybe dedupe with InputBufferWrapper
 
           # Give us a buffer that can handle a multiple of the upstream count
           # that is strictly greater than the read count.
