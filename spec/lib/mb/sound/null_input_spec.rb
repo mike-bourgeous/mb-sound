@@ -1,7 +1,7 @@
 RSpec.describe MB::Sound::NullInput do
   describe '#buffer_size' do
-    it 'returns nil by default' do
-      expect(MB::Sound::NullInput.new(channels: 1).buffer_size).to be_nil
+    it 'returns the initial buffer size by default' do
+      expect(MB::Sound::NullInput.new(channels: 1, initial_buffer: 1337).buffer_size).to eq(1337)
     end
 
     it 'returns an integer value if given' do

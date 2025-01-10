@@ -25,7 +25,7 @@ module MB
         @fill = fill
         @buffer = Numo::SFloat.new(initial_buffer).fill(@fill)
         @empty = Numo::SFloat[]
-        @buffer_size = buffer_size&.to_i
+        @buffer_size = buffer_size&.to_i || initial_buffer&.to_i
         @samples_read = 0
         @closed = false
       end
