@@ -57,7 +57,7 @@ module MB
       private
 
       def setup_circular_buffers(count)
-        # TODO: maybe dedupe with BufferAdapter
+        # TODO: maybe dedupe with BufferAdapter and OutputBufferWrapper
 
         @bufsize = ((2 * @input.buffer_size + count) / @input.buffer_size) * @input.buffer_size
         @circbufs ||= Array.new(@input.channels)
