@@ -17,10 +17,7 @@ module MB
       # MB::Sound::FFMPEGInput or MB::Sound::JackFFI::Input).
       def initialize(input)
         [:read, :rate, :channels, :buffer_size].each do |req_method|
-          raise 'Input must respond to req_method' unless upstream.respond_to?(req_method)
-          raise 'Input must respond to req_method' unless upstream.respond_to?(req_method)
-          raise 'Input must respond to req_method' unless upstream.respond_to?(req_method)
-          raise 'Input must respond to req_method' unless upstream.respond_to?(req_method)
+          raise "Input must respond to #{req_method.inspect}" unless input.respond_to?(req_method)
         end
 
         @input = input
