@@ -1,62 +1,69 @@
+require 'forwardable'
+
 module MB
   module Sound
-    module GraphNode
-      # A graph node that samples its upstream graph using a different sample
-      # count from whatever is passed to this node's #sample method.
-      #
-      # This works by calling the upstream GraphNode#sample method as many
-      # times as necessary to fill the request passed to #sample here if the
-      # upstream buffer size is smaller, and by treating the buffer as a
-      # circular buffer if the upstream buffer size is larger.
-      class BufferAdapter
-        include GraphNode
+    # A wrapper around an I/O object that uses circular buffers to allow
+    # reads of arbitrary size, instead of requiring reads to be equal to the
+    # buffer size.
+    class IOBufferWrapper
+      extend Forwardable
 
-        attr_reader :upstream_count
+      include GraphNode
+      include GraphNode::IOSampleMixin
 
-        # Creates a buffer adapter with the given +:upstream+ node to sample,
-        # using the given +:upstream_count+ as the value passed to the upstream
-        # sample method.
-        def initialize(upstream:, upstream_count:)
-          raise 'Upstream must respond to :sample' unless upstream.respond_to?(:sample)
-          raise 'Upstream count must be a positive Integer' unless upstream_count.is_a?(Integer) && upstream_count > 0
+      def_delegators :@input, :rate, :channels, :buffer_size, :closed?
 
-          @upstream = upstream
-          @upstream_count = upstream_count
+      # Creates a buffer wrapper with the given +input+ instance (e.g.
+      # MB::Sound::FFMPEGInput or MB::Sound::JackFFI::Input).
+      def initialize(input)
+        [:read, :rate, :channels, :buffer_size].each do |req_method|
+          raise 'Input must respond to req_method' unless upstream.respond_to?(req_method)
+          raise 'Input must respond to req_method' unless upstream.respond_to?(req_method)
+          raise 'Input must respond to req_method' unless upstream.respond_to?(req_method)
+          raise 'Input must respond to req_method' unless upstream.respond_to?(req_method)
         end
 
-        # Returns the upstream as the only source for this node.
-        def sources
-          [@upstream]
-        end
+        @input = input
+      end
 
-        # Returns +count+ samples, using as many or as few reads from the
-        # upstream as needed to fulfill the request.
-        def sample(count)
-          setup_circular_buffer(count)
+      # Reads +frames+ frames from all channels, returning an Array of
+      # Numo::NArray.  This may return fewer frames if the end of input (e.g.
+      # end of file) has been reached.
+      def read(count)
+        setup_circular_buffers(count)
 
-          while @circbuf.length < count
-            v = @upstream.sample(@upstream_count)
+        while @circbuf[0].length < count
+          v = @input.read(@input.buffer_size)
 
-            # End of input; return whatever we can from the buffer, or nil
-            if v.nil? || v.empty?
-              return nil if @circbuf.length == 0
-              return @circbuf.read(MB::M.min(count, @circbuf.length))
-            end
-
-            @circbuf.write(v)
+          # End of input; return whatever we can from the buffer, or nil
+          if v.nil? || v.empty? || v.any?(&:empty?)
+            return nil if @circbuf[0].length == 0
           end
 
-          @circbuf.read(count).not_inplace!
+          v.each.with_index do |c, idx|
+            @circbuf[idx].write(c)
+          end
         end
 
-        private
+        if @circbuf[0].empty?
+          raise 'Input is closed' if @input.closed?
+          return nil
+        elsif @circbuf[0].length < count
+          @circbufs.map { |b| b.read(b.length).not_inplace! }
+        else
+          @circbufs.map { |b| b.read(count).not_inplace! }
+        end
+      end
 
-        def setup_circular_buffer(count)
-          # TODO: maybe dedupe with IOBufferWrapper
+      private
 
-          # Give us a buffer that can handle a multiple of the upstream count
-          # that is strictly greater than the read count.
-          @bufsize = ((2 * @upstream_count + count) / @upstream_count) * @upstream_count
+      def setup_circular_buffers(count)
+        # TODO: maybe dedupe with BufferAdapter
+
+        for idx in 0...@input.channels
+          # Give us a buffer that can handle a multiple of the buffer size that
+          # is strictly greater than the read count.
+          @bufsize = ((2 * @input.buffer_size + count) / @input.buffer_size) * @input.buffer_size
           @circbuf ||= CircularBuffer.new(buffer_size: @bufsize, complex: false)
 
           if @circbuf.buffer_size < @bufsize
