@@ -15,11 +15,16 @@ module MB
 
       # Creates a buffer wrapper with the given +output+ instance (e.g.
       # MB::Sound::FFMPEGOutput or MB::Sound::JackFFI::Output).
-      def initialize(output)
+      #
+      # If :always_pad is true, then #flush will zero-pad the data it writes to
+      # a multiple of the output buffer size even if the output does not
+      # require it.  See MB::Sound::FFMPEGOutput#strict_buffer_size?.
+      def initialize(output, always_pad: false)
         [:write, :rate, :channels, :buffer_size].each do |req_method|
           raise "Output must respond to #{req_method.inspect}" unless output.respond_to?(req_method)
         end
 
+        @always_pad = !!always_pad
         @output = output
         setup_circular_buffers(@output.buffer_size)
       end
@@ -36,23 +41,30 @@ module MB
           @circbufs[idx].write(c)
         end
 
-        while @circbufs[0].length > @output.buffer_size
+        while @circbufs[0].length >= @output.buffer_size
           @output.write(@circbufs.map { |c| c.read(@output.buffer_size) })
         end
       end
 
-      # Writes all data in the circular buffers to the output, using zero
-      # padding if there is less data than a full output buffer size.
+      # Writes all data in the circular buffers to the output.  Data will be
+      # zero padded to the buffer size if the output's strict_buffer_size?
+      # method returns true, or if it does not have that method.
       def flush
-        until @circbufs[0].empty?
-          count = MB::M.min(c.length, @output.buffer_size)
-          @output.write(@circbufs.map { |c| MB::M.zpad(c.read(count), @output.buffer_size) })
+        if @always_pad || !@output.respond_to?(:strict_buffer_size?) || @output.strict_buffer_size?
+          until @circbufs[0].empty?
+            count = MB::M.min(@circbufs[0].length, @output.buffer_size)
+            @output.write(@circbufs.map { |c| MB::M.zpad(c.read(count), @output.buffer_size) })
+          end
+        elsif !@circbufs[0].empty?
+          @output.write(@circbufs.map { |c| c.read(c.length) })
         end
       end
 
       # If the output has a close method, then this will write any remaining
-      # data (with zero padding to the output buffer size) and then close the
-      # output.
+      # data (with zero padding to match the output buffer size if needed) and
+      # then close the output.
+      #
+      # See #flush.
       def close
         raise 'Output does not respond to :close' unless @output.respond_to?(:close)
 

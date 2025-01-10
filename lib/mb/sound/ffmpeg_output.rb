@@ -71,6 +71,15 @@ module MB
           rate: rate
         )
       end
+
+      # Tell other classes that this output can accept writes of any size, not
+      # just the specified buffer size.
+      def strict_buffer_size?
+        # TODO: return true for file formats with fixed-sized frames like MP3
+        # or video files?
+        false
+      end
+      alias strict_buffer_size strict_buffer_size?
     end
   end
 end

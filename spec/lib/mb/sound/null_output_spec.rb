@@ -8,6 +8,22 @@ RSpec.describe(MB::Sound::NullOutput) do
   let(:short_data) { [Numo::SFloat.zeros(12000)] }
   let(:long_data) { [Numo::SFloat.zeros(96000)] }
 
+  describe '#initialize' do
+    describe 'strict_buffer_size parameter' do
+      it 'defaults to false' do
+        expect(null_3ch.strict_buffer_size?).to eq(false)
+      end
+
+      it 'can be set to false' do
+        expect(MB::Sound::NullOutput.new(channels: 1, strict_buffer_size: false).strict_buffer_size?).to eq(false)
+      end
+
+      it 'can be set to true' do
+        expect(MB::Sound::NullOutput.new(channels: 1, strict_buffer_size: true).strict_buffer_size?).to eq(true)
+      end
+    end
+  end
+
   describe '#close' do
     it 'prevents further writing' do
       expect { null_3ch.write([short_data] * 3) }.not_to raise_error

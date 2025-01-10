@@ -13,9 +13,9 @@ GIT
 
 GIT
   remote: https://github.com/mike-bourgeous/mb-sound-jackffi.git
-  revision: 10305d4a66ce106c2f3cd92c552571f95da39574
+  revision: d8a6d642acc4091d3d3213e1a17b5946459c8ae8
   specs:
-    mb-sound-jackffi (0.0.20.usegit)
+    mb-sound-jackffi (0.0.21.usegit)
       ffi (~> 1.13.0)
       numo-narray (~> 0.9.1)
 
@@ -107,7 +107,7 @@ DEPENDENCIES
   getoptlong (~> 0.2.1)
   mb-math (>= 0.2.2.usegit)!
   mb-sound!
-  mb-sound-jackffi (>= 0.0.19.usegit)!
+  mb-sound-jackffi (>= 0.0.21.usegit)!
   mb-util (>= 0.1.21.usegit)!
   pry (~> 0.13.1)
   pry-byebug (~> 3.9.0)
