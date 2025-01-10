@@ -1,16 +1,10 @@
-require 'forwardable'
-
 module MB
   module Sound
     # Writes overlapping time domain frames to an output stream.  The output
     # stream is not closed, so more audio can be written and the caller should
     # close the output stream.
     class WindowWriter
-      extend Forwardable
-
-      def_delegators :@output_stream, :channels, :rate, :buffer_size
-
-      attr_reader :length
+      attr_reader :channels, :length, :buffer_size
 
       # Initializes a new window writer with the given +output_stream+ and
       # +window+ function.  The +window+ must be provided to set the size and
@@ -25,10 +19,11 @@ module MB
       def initialize(output_stream, window, skip_overlap: false, pad_factor: 1)
         @output_stream = output_stream
         @channels = output_stream.channels
+        @buffer_size = window.length * pad_factor
         @window = window
         @pad_factor = pad_factor
 
-        @length = window.length * pad_factor
+        @length = @buffer_size
         @hop = window.hop
         @overlap = @length - @hop
         @post_window = MB::M.zpad(window.post_window, @length, alignment: 0.5) if window.post_window
