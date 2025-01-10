@@ -20,7 +20,7 @@ module MB
       # other code to use.  Otherwise #buffer_size delegates to the input.
       def initialize(input, buffer_size: nil)
         [:read, :rate, :channels, :buffer_size].each do |req_method|
-          raise "Input must respond to #{req_method.inspect}" unless input.respond_to?(req_method)
+          raise "Input #{input} must respond to #{req_method.inspect}" unless input.respond_to?(req_method)
         end
 
         @input = input

@@ -24,7 +24,7 @@ module MB
       # other code to use.  Otherwise #buffer_size delegates to the output.
       def initialize(output, always_pad: false, buffer_size: nil)
         [:write, :rate, :channels, :buffer_size].each do |req_method|
-          raise "Output must respond to #{req_method.inspect}" unless output.respond_to?(req_method)
+          raise "Output #{output} must respond to #{req_method.inspect}" unless output.respond_to?(req_method)
         end
 
         @output = output
