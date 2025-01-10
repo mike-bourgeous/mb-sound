@@ -11,16 +11,26 @@ module MB
       include GraphNode
       include GraphNode::IOSampleMixin
 
-      def_delegators :@input, :rate, :channels, :buffer_size, :closed?
+      def_delegators :@input, :rate, :channels, :closed?
 
       # Creates a buffer wrapper with the given +input+ instance (e.g.
       # MB::Sound::FFMPEGInput or MB::Sound::JackFFI::Input).
-      def initialize(input)
+      #
+      # The +:buffer_size+ parameter allows forcing a new buffer size value for
+      # other code to use.  Otherwise #buffer_size delegates to the input.
+      def initialize(input, buffer_size: nil)
         [:read, :rate, :channels, :buffer_size].each do |req_method|
           raise "Input must respond to #{req_method.inspect}" unless input.respond_to?(req_method)
         end
 
         @input = input
+        @buffer_size = buffer_size&.to_i
+      end
+
+      # Returns the input's buffer size unless an override value was given to
+      # the constructor.
+      def buffer_size
+        @buffer_size || @input.buffer_size
       end
 
       # Reads +frames+ frames from all channels, returning an Array of

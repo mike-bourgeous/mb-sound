@@ -44,6 +44,11 @@ RSpec.describe(MB::Sound::OutputBufferWrapper, :aggregate_failures) do
     end
 
     # TODO: Create an ArrayOutput that accumulates samples in an array?
+
+    it 'accepts a buffer size override' do
+      b = MB::Sound::OutputBufferWrapper.new(mono, buffer_size: 42)
+      expect(b.buffer_size).to eq(42)
+    end
   end
 
   describe '#write' do

@@ -36,6 +36,11 @@ RSpec.describe(MB::Sound::InputBufferWrapper) do
       expect(b.rate).to eq(48000)
       expect(b.buffer_size).to eq(buffer_size)
     end
+
+    it 'accepts a buffer size override' do
+      b = MB::Sound::InputBufferWrapper.new(mono, buffer_size: 42)
+      expect(b.buffer_size).to eq(42)
+    end
   end
 
   describe '#read' do

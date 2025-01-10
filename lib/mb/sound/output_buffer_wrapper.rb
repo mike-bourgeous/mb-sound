@@ -16,17 +16,28 @@ module MB
       # Creates a buffer wrapper with the given +output+ instance (e.g.
       # MB::Sound::FFMPEGOutput or MB::Sound::JackFFI::Output).
       #
-      # If :always_pad is true, then #flush will zero-pad the data it writes to
-      # a multiple of the output buffer size even if the output does not
+      # If +:always_pad+ is true, then #flush will zero-pad the data it writes
+      # to a multiple of the output buffer size even if the output does not
       # require it.  See MB::Sound::FFMPEGOutput#strict_buffer_size?.
-      def initialize(output, always_pad: false)
+      #
+      # The +:buffer_size+ parameter allows forcing a new buffer size value for
+      # other code to use.  Otherwise #buffer_size delegates to the output.
+      def initialize(output, always_pad: false, buffer_size: nil)
         [:write, :rate, :channels, :buffer_size].each do |req_method|
           raise "Output must respond to #{req_method.inspect}" unless output.respond_to?(req_method)
         end
 
-        @always_pad = !!always_pad
         @output = output
+        @always_pad = !!always_pad
+        @buffer_size = buffer_size&.to_i
+
         setup_circular_buffers(@output.buffer_size)
+      end
+
+      # Returns the output's buffer size unless an override value was given to
+      # the constructor.
+      def buffer_size
+        @buffer_size || @output.buffer_size
       end
 
       # Writes the given +data+ (an Array of Numo::NArray, with one Numo::NArray
