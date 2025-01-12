@@ -53,6 +53,7 @@ module MB
         raise "Default alpha value must be numeric" unless default_alpha.is_a?(Numeric)
         @default_alpha = default_alpha
 
+        # TODO: scanning keyframes twice here may be slow; consider skipping or optimizing
         raise "A keyframe is missing its :time" unless keyframes.all? { |k| k.include?(:time) }
         raise "A keyframe is missing its :data" unless keyframes.all? { |k| k.include?(:data) }
         @keyframes = keyframes.sort_by { |s| s[:time] }

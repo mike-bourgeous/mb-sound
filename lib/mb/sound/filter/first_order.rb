@@ -14,7 +14,7 @@ module MB
           :highpass1p,
         ]
 
-        attr_reader :filter_type, :sample_rate, :center_frequency
+        attr_reader :filter_type, :rate, :sample_rate, :center_frequency
 
         # Initializes a first-order filter (one pole, maybe one zero) where
         # +filter_type+ is one of the symbols in FILTER_TYPES above.
@@ -26,6 +26,7 @@ module MB
         # Recalculates filter coefficients based on the given filter parameters.
         def set_parameters(filter_type, f_samp, f_center)
           @filter_type = filter_type
+          @rate = f_samp
           @sample_rate = f_samp
           @center_frequency = f_center
 

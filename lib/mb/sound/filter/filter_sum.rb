@@ -7,6 +7,7 @@ module MB
         # Initializes a filter sum with the given filters.  All filters receive
         # the original input, and are added to produce the final output.
         def initialize(*filters)
+          filters = filters[0] if filters.length == 1 && filters[0].is_a?(Array)
           @filters = filters
         end
 
@@ -19,6 +20,18 @@ module MB
           }.reduce { |acc, d|
             acc ? acc + d.not_inplace! : d.clone.inplace!
           }.not_inplace!
+        end
+
+        # Returns the sample rate of the first filter that has a sample rate.
+        def rate
+          @filters.each do |f|
+            begin
+              return f.rate if f.respond_to?(:rate)
+            rescue NotImplementedError
+            end
+          end
+
+          raise NotImplementedError, 'No filter in the chain has a sample rate'
         end
 
         # Returns the summed responses of all filters.

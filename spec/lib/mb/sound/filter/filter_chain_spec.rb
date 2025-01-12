@@ -134,4 +134,27 @@ RSpec.describe(MB::Sound::Filter::FilterChain) do
       expect(c2.has_filter?(chain.filters[0])).to eq(true)
     end
   end
+
+  describe '#rate' do
+    it 'returns the first valid sample rate in the chain' do
+      c = MB::Sound::Filter::FilterChain.new([
+        MB::Sound::Filter::Biquad.new(1, 0, 0, 0, 0),
+        500.hz.at_rate(543).lowpass,
+        600.hz.at_rate(600).lowpass
+      ])
+      expect(c.rate).to eq(543)
+    end
+
+    it 'raises an error if no filter in the chain has a valid sample rate' do
+      c = MB::Sound::Filter::FilterChain.new([
+        MB::Sound::Filter::Biquad.new(1, 0, 0, 0, 0)
+      ])
+      expect { c.rate }.to raise_error(NotImplementedError)
+    end
+
+    it 'raises an error if the chain is empty' do
+      c = MB::Sound::Filter::FilterChain.new
+      expect { c.rate }.to raise_error(NotImplementedError)
+    end
+  end
 end

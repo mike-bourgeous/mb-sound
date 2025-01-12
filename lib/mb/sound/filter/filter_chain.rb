@@ -15,6 +15,7 @@ module MB
         # first-to-last/left-to-right, so the first filter at the left receives
         # the original input, and the last filter produces the final output.
         def initialize(*filters)
+          filters = filters[0] if filters.length == 1 && filters[0].is_a?(Array)
           @filters = filters
           check_for_cycle
         end
@@ -48,6 +49,19 @@ module MB
           raise 'Not all filters support #response' unless @filters.all? { |f| f.respond_to?(:response) }
 
           @filters.reduce(1.0) { |acc, f| acc * f.response(omega) }
+        end
+
+        # Returns the sample rate of the first filter in the chain that has a
+        # sample rate.
+        def rate
+          @filters.each do |f|
+            begin
+              return f.rate if f.respond_to?(:rate)
+            rescue NotImplementedError
+            end
+          end
+
+          raise NotImplementedError, 'No filter in the chain has a sample rate'
         end
 
         # Computes the combined z-plane response of all filters by multiplying
