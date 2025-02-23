@@ -34,6 +34,8 @@ RSpec.describe(MB::Sound::Filter::Biquad, :aggregate_failures) do
       expect(f.coefficients.map(&:class)).to eq([Float] * 5)
       expect(MB::M.round(f.coefficients, 7)).to eq([1, 0.2, 0.02, -0.5, 0.125])
     end
+
+    pending 'with more than two poles or zeros'
   end
 
   describe '#initialize' do

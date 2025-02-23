@@ -150,8 +150,7 @@ module MB
           [
             "#{label} phase",
             {
-              data: c.arg,
-              yrange: [-Math::PI, Math::PI],
+              data: unwrap_phase(c),
               logscale: logarithmic,
               x_label: 'f',
             }
