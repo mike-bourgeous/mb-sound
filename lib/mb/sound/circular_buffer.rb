@@ -104,7 +104,7 @@ module MB
       # automatically if upstream data becomes complex or double precision, but
       # specifying complex or double up front saves a buffer reallocation.
       def initialize(buffer_size:, complex: false, double: false)
-        raise ArgumentError, 'Buffer size must be a positive integer' unless buffer_size.is_a?(Integer) && buffer_size > 0
+        raise ArgumentError, "Buffer size must be a positive integer (got #{buffer_size.inspect})" unless buffer_size.is_a?(Integer) && buffer_size > 0
 
         @buffer_size = buffer_size
 

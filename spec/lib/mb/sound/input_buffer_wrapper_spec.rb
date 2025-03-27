@@ -1,4 +1,4 @@
-RSpec.describe(MB::Sound::InputBufferWrapper) do
+RSpec.describe(MB::Sound::InputBufferWrapper, :aggregate_failures) do
   let(:buffer_size) { 7 }
   let(:length) { 100 }
   let(:c1) { 12000.hz.square.at(1).with_phase(0.0000001).sample(length) }
@@ -117,6 +117,12 @@ RSpec.describe(MB::Sound::InputBufferWrapper) do
       expect(b.read(2)).to eq([Numo::SFloat[1, 2]])
       expect(b.read(5)).to eq([Numo::SFloat[3, 4, 5, 6, 7]])
       expect(b.read(1)).to eq(nil)
+    end
+
+    it 'raises a useful error message if count is not an integer' do
+      b = MB::Sound::InputBufferWrapper.new(nullinput)
+      expect { b.read(nil) }.to raise_error(ArgumentError, /Count must be an Integer.*nil/)
+      expect { b.read(3.0) }.to raise_error(ArgumentError, /Count must be an Integer.*3.0/)
     end
   end
 end

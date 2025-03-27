@@ -37,6 +37,8 @@ module MB
       # Numo::NArray.  This may return fewer frames if the end of input (e.g.
       # end of file) has been reached.
       def read(count)
+        raise ArgumentError, "Count must be an Integer (got #{count.inspect})" unless count.is_a?(Integer)
+
         setup_circular_buffers(count)
 
         while @circbufs[0].length < count

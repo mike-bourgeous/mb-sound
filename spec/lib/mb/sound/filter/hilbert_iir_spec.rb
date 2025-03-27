@@ -1,6 +1,7 @@
 RSpec.describe(MB::Sound::Filter::HilbertIIR, :aggregate_failures) do
   let(:sample_rate) { 48000.0 }
   let(:nyquist) { sample_rate * 0.5 }
+  # FIXME: sometimes the logspace arrays here are all infinity???  Is this a CPU/RAM issue or a code bug?
   let(:log100_15k) { Numo::SFloat.logspace(Math.log10(100 * Math::PI / nyquist), Math.log10(15000 * Math::PI / nyquist), 1000) }
   let(:log20_20k) { Numo::SFloat.logspace(Math.log10(20 * Math::PI / nyquist), Math.log10(20000 * Math::PI / nyquist), 1000) }
   let(:filter) { MB::Sound::Filter::HilbertIIR.new(rate: sample_rate) }
