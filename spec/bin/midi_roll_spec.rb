@@ -3,7 +3,13 @@ RSpec.describe('bin/midi_roll.rb', :aggregate_failures) do
     text = `bin/midi_roll.rb -r 2 -c 100 -n C3 spec/test_data/all_notes.mid 2>&1`
     expect($?).to be_success
 
-    lines = MB::U.remove_ansi(text.strip).lines
+    # FIXME: get simplecov working in Ruby 3.4 and subprocesses, instead of crashing
+    #     munmap_chunk(): invalid pointer
+    #     Aborted (core dumped)
+    #
+    # See spec/simplecov_helper.rb
+    lines = MB::U.remove_ansi(text.strip).lines.reject { |l| l.start_with?('TEST_IGN:') }
+
     expect(lines.count).to eq(3)
     expect(lines[0]).to include('all_notes.mid')
     expect(lines[1]).to match(/49.*C\u266f3.*\u2517\u2501.*\u251b/)
