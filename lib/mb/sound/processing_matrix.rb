@@ -169,7 +169,7 @@ module MB
           data = JSON.parse(File.read(filename), symbolize_names: true)
 
         when '.yml', '.yaml'
-          data = YAML.load(File.read(filename), symbolize_names: true)
+          data = YAML.load(File.read(filename), symbolize_names: true, permitted_classes: [Complex, Symbol])
 
         when '.csv'
           data = CSV.read(filename, converters: :numeric)
