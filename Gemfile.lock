@@ -1,6 +1,6 @@
 GIT
   remote: https://github.com/mike-bourgeous/mb-math.git
-  revision: 4d1d0c165821f03ea1223acb6a304d5f6c7c2187
+  revision: dc3422bf81fe2ac93ca528da05020c0f34c00b50
   specs:
     mb-math (0.2.2.usegit)
       bigdecimal (~> 3.1.8)
@@ -13,7 +13,7 @@ GIT
 
 GIT
   remote: https://github.com/mike-bourgeous/mb-sound-jackffi.git
-  revision: d8a6d642acc4091d3d3213e1a17b5946459c8ae8
+  revision: 209ce022e1ae7a1427a64a99e2dadac9c55fb204
   specs:
     mb-sound-jackffi (0.0.21.usegit)
       ffi (~> 1.13.0)
@@ -21,7 +21,7 @@ GIT
 
 GIT
   remote: https://github.com/mike-bourgeous/mb-util.git
-  revision: cb21d328a7813cdc4be78795f2ccf5498e0ebca4
+  revision: 2a27dcf4f71e08ab9c2fedfefdacef6a8be2b11f
   specs:
     mb-util (0.1.22.usegit)
 
@@ -30,12 +30,14 @@ PATH
   specs:
     mb-sound (0.8.2.usegit)
       cmath (~> 1.0.0)
+      csv (~> 3.3, >= 3.3.3)
       mb-math (>= 0.2.2.usegit)
       mb-util (>= 0.1.22.usegit)
       midi-nibbler (~> 0.2.4)
       midilib (~> 4.0.0)
       numo-narray (~> 0.9.2)
       numo-pocketfft (~> 0.4.1)
+      psych (~> 5.2.3)
 
 GEM
   remote: https://rubygems.org/
@@ -45,7 +47,9 @@ GEM
     byebug (11.1.3)
     cmath (1.0.0)
     coderay (1.1.3)
-    diff-lcs (1.5.1)
+    csv (3.3.3)
+    date (3.4.1)
+    diff-lcs (1.6.1)
     docile (1.4.1)
     ffi (1.13.1)
     forwardable (1.3.3)
@@ -62,15 +66,18 @@ GEM
     prime (0.1.3)
       forwardable
       singleton
-    pry (0.13.1)
+    pry (0.14.2)
       coderay (~> 1.1)
       method_source (~> 1.0)
-    pry-byebug (3.9.0)
+    pry-byebug (3.10.1)
       byebug (~> 11.0)
-      pry (~> 0.13.0)
+      pry (>= 0.13, < 0.15)
     pry-doc (1.5.0)
       pry (~> 0.11)
       yard (~> 0.9.11)
+    psych (5.2.3)
+      date
+      stringio
     rake (13.0.6)
     rake-compiler (1.1.9)
       rake
@@ -78,7 +85,7 @@ GEM
       rspec-core (~> 3.13.0)
       rspec-expectations (~> 3.13.0)
       rspec-mocks (~> 3.13.0)
-    rspec-core (3.13.2)
+    rspec-core (3.13.3)
       rspec-support (~> 3.13.0)
     rspec-expectations (3.13.3)
       diff-lcs (>= 1.2.0, < 2.0)
@@ -94,6 +101,7 @@ GEM
     simplecov-html (0.13.1)
     simplecov_json_formatter (0.1.4)
     singleton (0.3.0)
+    stringio (3.1.6)
     word_wrap (1.0.0)
     yard (0.9.37)
 
@@ -109,8 +117,8 @@ DEPENDENCIES
   mb-sound!
   mb-sound-jackffi (>= 0.0.21.usegit)!
   mb-util (>= 0.1.22.usegit)!
-  pry (~> 0.13.1)
-  pry-byebug (~> 3.9.0)
+  pry (~> 0.14.0)
+  pry-byebug (~> 3.10.0)
   pry-doc
   rake (~> 13.0.1)
   rake-compiler (~> 1.1.1)

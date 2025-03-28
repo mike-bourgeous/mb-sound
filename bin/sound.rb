@@ -8,6 +8,7 @@ require 'bundler/setup'
 require 'benchmark'
 
 require 'io/console'
+require 'pry'
 require 'pry-byebug'
 
 Bundler.require
@@ -30,6 +31,8 @@ def show_intro
 
 If you're new to \e[1;31mRuby\e[0m, see \e[1;34mhttps://www.ruby-lang.org/en/documentation/quickstart/\e[0m.
 If you're new to \e[1;31mPry\e[0m, check out \e[1;34mhttps://pry.github.io/\e[0m.
+
+Note: due to a compatibility issue in pry-0.14.x, you need to type \e[1mcd MB::Sound\e[0m.
 
 EOF
 
@@ -66,17 +69,18 @@ show_intro
 Pry.config.commands.rename_command('pry-play', 'play')
 Pry.config.commands.rename_command('pry-reset', 'reset')
 
-Pry.pry(
-  MB::Sound,
-  prompt: Pry::Prompt.new(:mb_sound, "The interactive sound environment's default prompt", [
-    _pry_a = -> (obj, nest, pry) {
-      "\1\e[36m\2#{File.basename($0)}\1\e[0m\2 \1\e[32m\2#{obj}\1\e[0;2m\2(#{nest}) > \1\e[0m\2"
-    },
-    -> (obj, nest, pry) {
-      ' ' * _pry_a.call(obj, nest, pry).gsub(/(\x01|\x02|\e\[[0-9;]*[A-Za-z])/, '').length
-    }
-  ]),
-  exception_handler: ->(output, exception, _pry) {
-    output.puts(MB::U.color_trace(exception, exclude: %r{/pry-.*/lib/pry}))
-  }
+Pry.start(
+# Re-enable after upgrading to Pry 0.15.x
+#  MB::Sound,
+#  prompt: Pry::Prompt.new(:mb_sound, "The interactive sound environment's default prompt", [
+#    _pry_a = -> (obj, nest, pry) {
+#      "\1\e[36m\2#{File.basename($0)}\1\e[0m\2 \1\e[32m\2#{obj}\1\e[0;2m\2(#{nest}) > \1\e[0m\2"
+#    },
+#    -> (obj, nest, pry) {
+#      ' ' * _pry_a.call(obj, nest, pry).gsub(/(\x01|\x02|\e\[[0-9;]*[A-Za-z])/, '').length
+#    }
+#  ]),
+#  exception_handler: ->(output, exception, _pry) {
+#    output.puts(MB::U.color_trace(exception, exclude: %r{/pry-.*/lib/pry}))
+#  }
 )
