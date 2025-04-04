@@ -51,7 +51,7 @@ Gem::Specification.new do |spec|
 
   # Interactive command line gems
   spec.add_development_dependency 'pry', '~> 0.14.0'
-  spec.add_development_dependency 'pry-byebug', '~> 3.11.0'
+  spec.add_development_dependency 'pry-byebug', '~> 3.10.0'
   spec.add_development_dependency 'pry-doc'
 
   # Testing gems
