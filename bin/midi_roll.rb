@@ -56,6 +56,7 @@ time_range = options[:'start-time']..options[:'end-time']
 raise "Start time #{options[:'start-time']} must be before end time #{options[:'end-time']}" if options[:'start-time'] > options[:'end-time']
 
 cols = options[:columns] - 10
+cols = 1 if cols < 1
 col_range = 0..cols
 
 # Determine note offset based on note stats and window size
