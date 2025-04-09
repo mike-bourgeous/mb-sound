@@ -29,6 +29,12 @@ RSpec.describe('bin/midi_roll.rb', :aggregate_failures) do
   end
 
   context 'with the --channel= parameter' do
+    it 'accepts channel -1 for all channels' do
+      text = `bin/midi_roll.rb --channel=-1 -n C3 -r 1 spec/test_data/all_notes.mid 2>&1`
+      expect($?).to be_success
+      expect(text).to include('all channels')
+    end
+
     it 'accepts channel 1' do
       # This tests off-by-one errors in range checking, which is a thing that
       # actually happened.
@@ -39,13 +45,15 @@ RSpec.describe('bin/midi_roll.rb', :aggregate_failures) do
       lines = MB::U.remove_ansi(text.strip).lines
       expect(lines.count).to eq(2)
 
+      expect(lines[0]).to include('channel 1')
       expect(lines[1]).to include('C3')
       expect(lines[1]).to match(/┗━*┛/)
     end
 
     it 'accepts channel 16' do
-      text = `bin/midi_roll.rb --channel=1 -n C3 -r 1 spec/test_data/all_notes.mid 2>&1`
+      text = `bin/midi_roll.rb --channel=16 -n C3 -r 1 spec/test_data/all_notes.mid 2>&1`
       expect($?).to be_success
+      expect(text).to include('channel 16')
       expect(text).to include('C3')
       expect(text).not_to include('┛')
     end
@@ -57,6 +65,7 @@ RSpec.describe('bin/midi_roll.rb', :aggregate_failures) do
       lines = MB::U.remove_ansi(text.strip).lines
       expect(lines.count).to eq(2)
 
+      expect(lines[0]).to include('channel 2')
       expect(lines[1]).to include('C3')
       expect(lines[1]).not_to match(/┗━*┛/)
     end
