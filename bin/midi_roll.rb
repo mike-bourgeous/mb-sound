@@ -39,7 +39,7 @@ end
 
 channel = options[:channel] - 1
 channel = nil if channel == -2
-raise 'MIDI channel must be an integer from 1 to 16, or -1' if channel && !(1..16).cover?(channel)
+raise 'MIDI channel must be an integer from 1 to 16, or -1' if channel && !(0..15).cover?(channel)
 
 filename = ARGV[0]
 raise 'Specify a MIDI file to display' unless filename
