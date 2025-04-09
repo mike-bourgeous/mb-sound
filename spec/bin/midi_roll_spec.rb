@@ -3,12 +3,7 @@ RSpec.describe('bin/midi_roll.rb', :aggregate_failures) do
     text = `bin/midi_roll.rb -r 2 -c 100 -n C3 spec/test_data/all_notes.mid 2>&1`
     expect($?).to be_success
 
-    # FIXME: get simplecov working in Ruby 3.4 and subprocesses, instead of crashing
-    #     munmap_chunk(): invalid pointer
-    #     Aborted (core dumped)
-    #
-    # See spec/simplecov_helper.rb
-    lines = MB::U.remove_ansi(text.strip).lines.reject { |l| l.start_with?('TEST_IGN:') }
+    lines = MB::U.remove_ansi(text.strip).lines
 
     expect(lines.count).to eq(3)
     expect(lines[0]).to include('all_notes.mid')
@@ -21,5 +16,15 @@ RSpec.describe('bin/midi_roll.rb', :aggregate_failures) do
     expect($?).not_to be_success
 
     expect(text).to match(/duration.*both/)
+  end
+
+  context 'with each MIDI file in the project' do
+    Dir['spec/test_data/**/*.mid', 'sounds/**/*.mid'].each do |midi_file|
+      it "can parse #{midi_file}" do
+        text = `bin/midi_roll.rb #{midi_file} 2>&1`
+        expect($?).to be_success
+        expect(text).to include(midi_file)
+      end
+    end
   end
 end
