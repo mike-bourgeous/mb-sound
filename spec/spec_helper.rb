@@ -2,7 +2,8 @@ require 'fileutils'
 
 require 'simplecov'
 SimpleCov.start do
-  SimpleCov.track_files("bin/*")
+  track_files("bin/*")
+  enable_coverage :branch
 end
 
 # Ensure subprocesses load simplecov

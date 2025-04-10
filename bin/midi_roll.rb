@@ -39,14 +39,15 @@ end
 
 channel = options[:channel] - 1
 channel = nil if channel == -2
-raise 'MIDI channel must be an integer from 1 to 16, or -1' if channel && !1..16.cover(channel)
+raise 'MIDI channel must be an integer from 1 to 16, or -1' if channel && !(0..15).cover?(channel)
+channel_description = channel.nil? ? 'all channels' : "channel #{channel + 1}"
 
 filename = ARGV[0]
 raise 'Specify a MIDI file to display' unless filename
 raise "MIDI file #{filename.inspect} not found" unless File.readable?(filename)
 f = MB::Sound::MIDI::MIDIFile.new(filename)
 
-notes = f.notes.select { |n| channel.nil? || n[:channel] == channel + 1 }.group_by { |n| n[:number] }
+notes = f.notes.select { |n| channel.nil? || n[:channel] == channel }.group_by { |n| n[:number] }
 
 options[:'start-time'] ||= 0.0
 options[:'end-time'] ||= options[:'start-time'] + options[:duration] if options[:duration]
@@ -55,6 +56,7 @@ time_range = options[:'start-time']..options[:'end-time']
 raise "Start time #{options[:'start-time']} must be before end time #{options[:'end-time']}" if options[:'start-time'] > options[:'end-time']
 
 cols = options[:columns] - 10
+cols = 1 if cols < 1
 col_range = 0..cols
 
 # Determine note offset based on note stats and window size
@@ -69,7 +71,7 @@ max_note = 127 if max_note > 127
 # if all notes are within range, do nothing
 # if see how many notes we can get away with scrolling down
 
-puts "\e[1;33;44m#{f.filename} -- #{time_range}/#{f.duration.round(2)}s\e[K\e[0m"
+puts "\e[1;33;44m#{f.filename} -- #{time_range}/#{f.duration.round(2)}s \e[37m(#{channel_description})\e[K\e[0m"
 
 ruler = [' '] * (cols + 1) # FIXME: why is a note sometimes going beyond the end forcing adding 1?
 ruler_step = 30
