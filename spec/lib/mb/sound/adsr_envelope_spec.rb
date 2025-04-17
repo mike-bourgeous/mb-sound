@@ -207,6 +207,11 @@ RSpec.describe(MB::Sound::ADSREnvelope) do
   end
 
   describe '#reset' do
+    it 'resets the envelope time' do
+      env.time = 0.5
+      expect { env.reset }.to change { env.time }
+    end
+
     it 'can disable an automatic release' do
       env.trigger(1.0, auto_release: 0.1)
       env.reset
@@ -215,6 +220,37 @@ RSpec.describe(MB::Sound::ADSREnvelope) do
         expect(env.on?).to eq(false)
         expect(env.sample(800)).to be_a(Numo::SFloat)
       end
+    end
+  end
+
+  describe '#randomize' do
+    it 'changes envelope parameters within the given range' do
+      values = []
+
+      100.times do
+        env.randomize(0..5)
+        values << env.attack_time
+        values << env.decay_time
+        values << env.release_time
+        expect(env.sustain_level).to be_between(0, 1)
+      end
+
+      expect(values.min).to be_between(0, 1)
+      expect(values.max).to be_between(4, 5)
+      expect(values.sum / values.count).to be_between(1.5, 3.5)
+    end
+
+    it 'defaults to a range of 0 to 1' do
+      env.randomize
+      expect(env.attack_time).to be_between(0, 1)
+      expect(env.decay_time).to be_between(0, 1)
+      expect(env.sustain_level).to be_between(0, 1)
+      expect(env.release_time).to be_between(0, 1)
+    end
+
+    it 'does not reset the envelope timer' do
+      env.time = 0.5
+      expect { env.randomize }.not_to change { env.time }
     end
   end
 end

@@ -86,12 +86,22 @@ module MB
         update(@attack_time, t, @sustain_level, @release_time)
       end
 
+      # Changes the sustain level to +l+, typically from 0..1 (linear; use .db
+      # to convert decibels to linear).
       def sustain_level=(l)
         update(@attack_time, @decay_time, l, @release_time)
       end
 
+      # Changes the release time to +t+ seconds.
       def release_time=(t)
         update(@attack_time, @decay_time, @sustain_level, t)
+      end
+
+      # Randomizes each of the time parameters within the given +time_range+
+      # and randomizes the sustain level between 0 and 1.  Does not reset the
+      # envelope (see #reset).
+      def randomize(time_range = 0.0..1.0)
+        update(rand(time_range), rand(time_range), rand(0.0..1.0), rand(time_range))
       end
 
       # Returns true while the envelope is either sustained or releasing.
@@ -135,8 +145,8 @@ module MB
       end
 
       # Turn off the envelope, reset the filter, and disable any auto-release
-      # given to #trigger.  For testing only; will cause clicking if used on
-      # actual audio.
+      # given to #trigger.  For testing or visualization only; will cause
+      # clicking if used on actual audio.
       def reset
         @time = @total + 100
         @frame = @rate * @time
@@ -148,6 +158,9 @@ module MB
       # Jump the envelope to the given time.  This does not reset the internal
       # smoothing filter, so the transition of the output will not be
       # instantaneous.
+      #
+      # See #reset if you want to clear the smoothing filter state and jump to
+      # time zero.
       def time=(t)
         @frame = (t * @rate).round
         @time = @frame / @rate.to_f
@@ -290,8 +303,11 @@ module MB
       private
 
       # Calculates internal parameters based on the given envelope parameters.
+      #
       # FIXME: envelopes come back to life or disappear abruptly if their times
-      # are changed while playing.
+      # are changed while playing.  The envelope time should also be updated to
+      # be at the same phase and amplitude (unless in the sustain phase) after
+      # the update.
       def update(attack_time, decay_time, sustain_level, release_time)
         @attack_time = attack_time.to_f
         @decay_time = decay_time.to_f
