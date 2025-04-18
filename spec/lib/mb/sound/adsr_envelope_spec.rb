@@ -103,6 +103,10 @@ RSpec.describe(MB::Sound::ADSREnvelope, :aggregate_failures) do
             delta = (c - ruby).abs
             expect(MB::M.round(delta, filt ? 6 : 7).max).to eq(0)
           end
+
+          it 'reuses the same buffer' do
+            expect(env.send(m, 500).object_id).to eq(env.send(m, 500).object_id)
+          end
         end
       end
     end

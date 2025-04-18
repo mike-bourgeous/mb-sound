@@ -236,9 +236,10 @@ module MB
 
       def sample_ruby_c(count, filter: true)
         if count
-          buf = Numo::SFloat.zeros(count).map { sample_one_c(filter: filter) }
-          return nil if @auto_release && !@on && buf.max < -100.db
-          return buf
+          setup_buffer(length: count)
+          @buf.inplace.map { sample_one_c(filter: filter) }
+          return nil if @auto_release && !@on && @buf.max < -100.db
+          return @buf
         end
 
         return sample_one_c(filter: filter)
@@ -267,9 +268,10 @@ module MB
 
       def sample_ruby(count = nil, filter: true)
         if count
-          buf = Numo::SFloat.zeros(count).map { sample_ruby(filter: filter) }
-          return nil if @auto_release && !@on && buf.max < -100.db
-          return buf
+          setup_buffer(length: count)
+          @buf.inplace.map { sample_ruby(filter: filter) }
+          return nil if @auto_release && !@on && @buf.max < -100.db
+          return @buf
         end
 
         if @on
