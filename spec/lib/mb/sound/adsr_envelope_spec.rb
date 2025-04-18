@@ -196,17 +196,27 @@ RSpec.describe(MB::Sound::ADSREnvelope, :aggregate_failures) do
       dup = env.dup(1000)
       expect(env.sample(800).object_id).not_to eq(dup.sample(800).object_id)
 
+      data = env.sample(800)
+      expect(data.minmax).to eq([0, 0])
+
       dup.sample_all
-      expect(env.sample(100000).minmax).to eq([0, 0])
+      expect(data.minmax).to eq([0, 0])
     end
 
     it 'does not use the same buffer as the original (using vis env)' do
       cenv2 = MB::Sound.adsr(0, 0.2, 0.0, 0.1).reset.named('cenv2')
 
-      expect(cenv2.sample(800).object_id).not_to eq(cenv2.dup.sample(800).object_id)
+      cenv2.sample(800)
+      dup = cenv2.dup(1900)
 
-      # FIXME: can't reproduce bad data in original buffer!
-      expect(cenv2.sample(800).minmax).to eq([0, 0])
+      data = cenv2.sample(800)
+      expect(data.minmax).to eq([0, 0])
+
+      # Detect dup overwriting original buffer
+      dup.sample_all
+      expect(data.minmax).to eq([0, 0])
+
+      expect(cenv2.sample(800).object_id).not_to eq(dup.sample(800).object_id)
     end
   end
 

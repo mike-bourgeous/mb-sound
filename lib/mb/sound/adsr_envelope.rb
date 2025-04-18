@@ -318,6 +318,8 @@ module MB
       # of the original envelope.
       def dup(rate = @rate)
         e = super()
+        e.instance_variable_set(:@buf, @buf.dup)
+        e.named("#{graph_node_name} (dup)")
         e.instance_variable_set(:@peak, 1.0) unless active?
         e.instance_variable_set(:@rate, rate.to_f)
         e.instance_variable_set(:@filter, @filter.center_frequency.hz.at_rate(rate).lowpass1p)
