@@ -128,6 +128,8 @@ module MB
         @value = 0
         @auto_release = auto_release
         @on = true
+
+        self
       end
 
       # Starts the release phase of the envelope, if it is not already in the
@@ -142,6 +144,8 @@ module MB
           self.time = @release_start
           @on = false
         end
+
+        self
       end
 
       # Turn off the envelope, reset the filter, and disable any auto-release
@@ -153,6 +157,7 @@ module MB
         @on = false
         @auto_release = nil
         @filter.reset(0)
+        self
       end
 
       # Jump the envelope to the given time.  This does not reset the internal
@@ -333,6 +338,8 @@ module MB
         @release_time = release_time.to_f
         @release_start = @attack_time + @decay_time
         @total = @attack_time + @decay_time + @release_time
+
+        self
       end
 
       # Advances the internal clock by the given number of +samples+.
