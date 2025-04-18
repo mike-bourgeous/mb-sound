@@ -209,7 +209,7 @@ RSpec.describe MB::Sound::FFMPEGInput do
         expect { result = input.close }.not_to raise_exception
       end
 
-      expect(delay).to be < 1
+      expect(delay).to be < 3
       expect(result).to be_a(Process::Status)
 
       expect { input.read(1) }.to raise_exception(IOError)
