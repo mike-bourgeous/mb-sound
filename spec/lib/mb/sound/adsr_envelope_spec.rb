@@ -103,6 +103,10 @@ RSpec.describe(MB::Sound::ADSREnvelope, :aggregate_failures) do
             delta = (c - ruby).abs
             expect(MB::M.round(delta, filt ? 6 : 7).max).to eq(0)
           end
+
+          it 'reuses the same buffer' do
+            expect(env.send(m, 500).object_id).to eq(env.send(m, 500).object_id)
+          end
         end
       end
     end
@@ -185,6 +189,34 @@ RSpec.describe(MB::Sound::ADSREnvelope, :aggregate_failures) do
       expect(env.rate).to eq(48000)
       expect(filter_dup.sample_rate).to eq(1500)
       expect(filter.sample_rate).to eq(48000)
+    end
+
+    it 'does not use the same buffer as the original' do
+      env.sample(800)
+      dup = env.dup(1000)
+      expect(env.sample(800).object_id).not_to eq(dup.sample(800).object_id)
+
+      data = env.sample(800)
+      expect(data.minmax).to eq([0, 0])
+
+      dup.sample_all
+      expect(data.minmax).to eq([0, 0])
+    end
+
+    it 'does not use the same buffer as the original (using vis env)' do
+      cenv2 = MB::Sound.adsr(0, 0.2, 0.0, 0.1).reset.named('cenv2')
+
+      cenv2.sample(800)
+      dup = cenv2.dup(1900)
+
+      data = cenv2.sample(800)
+      expect(data.minmax).to eq([0, 0])
+
+      # Detect dup overwriting original buffer
+      dup.sample_all
+      expect(data.minmax).to eq([0, 0])
+
+      expect(cenv2.sample(800).object_id).not_to eq(dup.sample(800).object_id)
     end
   end
 

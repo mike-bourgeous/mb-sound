@@ -179,12 +179,12 @@ module MB
         # C loop, C math (much faster than pure Ruby)
         def process_c(samples)
           # FIXME: convert to SComplex/DComplex if coefficients are complex
-          samples, @x1, @x2, @y1, @y2 = MB::FastSound.biquad_narray(
+          result, @x1, @x2, @y1, @y2 = MB::FastSound.biquad_narray(
             @b0, @b1, @b2, @a1, @a2,
             [samples, @x1, @x2, @y1, @y2]
           )
 
-          samples
+          result
         end
 
         # Ruby outer loop, C math (slightly faster than pure Ruby)

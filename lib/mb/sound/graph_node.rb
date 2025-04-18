@@ -417,11 +417,11 @@ module MB
             def sample(count)
               super(count).tap { |buf|
                 MB::M.with_inplace(buf, false) do |b|
-                  @graph_spies.each do |s|
+                  @graph_spies.each_with_index do |s, idx|
                     begin
                       s.call(b)
                     rescue => e
-                      warn "Spy #{s} raised #{MB::U.highlight(e)}"
+                      warn "Spy #{idx}/#{s} raised #{MB::U.highlight(e)}"
                     end
                   end
                 end

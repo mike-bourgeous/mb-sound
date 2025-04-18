@@ -128,6 +128,8 @@ module MB
         @value = 0
         @auto_release = auto_release
         @on = true
+
+        self
       end
 
       # Starts the release phase of the envelope, if it is not already in the
@@ -142,6 +144,8 @@ module MB
           self.time = @release_start
           @on = false
         end
+
+        self
       end
 
       # Turn off the envelope, reset the filter, and disable any auto-release
@@ -153,6 +157,7 @@ module MB
         @on = false
         @auto_release = nil
         @filter.reset(0)
+        self
       end
 
       # Jump the envelope to the given time.  This does not reset the internal
@@ -231,9 +236,10 @@ module MB
 
       def sample_ruby_c(count, filter: true)
         if count
-          buf = Numo::SFloat.zeros(count).map { sample_one_c(filter: filter) }
-          return nil if @auto_release && !@on && buf.max < -100.db
-          return buf
+          setup_buffer(length: count)
+          @buf.inplace.map { sample_one_c(filter: filter) }
+          return nil if @auto_release && !@on && @buf.max < -100.db
+          return @buf
         end
 
         return sample_one_c(filter: filter)
@@ -262,9 +268,10 @@ module MB
 
       def sample_ruby(count = nil, filter: true)
         if count
-          buf = Numo::SFloat.zeros(count).map { sample_ruby(filter: filter) }
-          return nil if @auto_release && !@on && buf.max < -100.db
-          return buf
+          setup_buffer(length: count)
+          @buf.inplace.map { sample_ruby(filter: filter) }
+          return nil if @auto_release && !@on && @buf.max < -100.db
+          return @buf
         end
 
         if @on
@@ -311,6 +318,8 @@ module MB
       # of the original envelope.
       def dup(rate = @rate)
         e = super()
+        e.instance_variable_set(:@buf, @buf.dup)
+        e.named("#{graph_node_name} (dup)")
         e.instance_variable_set(:@peak, 1.0) unless active?
         e.instance_variable_set(:@rate, rate.to_f)
         e.instance_variable_set(:@filter, @filter.center_frequency.hz.at_rate(rate).lowpass1p)
@@ -333,6 +342,8 @@ module MB
         @release_time = release_time.to_f
         @release_start = @attack_time + @decay_time
         @total = @attack_time + @decay_time + @release_time
+
+        self
       end
 
       # Advances the internal clock by the given number of +samples+.
