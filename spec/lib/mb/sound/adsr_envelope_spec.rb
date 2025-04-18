@@ -190,6 +190,24 @@ RSpec.describe(MB::Sound::ADSREnvelope, :aggregate_failures) do
       expect(filter_dup.sample_rate).to eq(1500)
       expect(filter.sample_rate).to eq(48000)
     end
+
+    it 'does not use the same buffer as the original' do
+      env.sample(800)
+      dup = env.dup(1000)
+      expect(env.sample(800).object_id).not_to eq(dup.sample(800).object_id)
+
+      dup.sample_all
+      expect(env.sample(100000).minmax).to eq([0, 0])
+    end
+
+    it 'does not use the same buffer as the original (using vis env)' do
+      cenv2 = MB::Sound.adsr(0, 0.2, 0.0, 0.1).reset.named('cenv2')
+
+      expect(cenv2.sample(800).object_id).not_to eq(cenv2.dup.sample(800).object_id)
+
+      # FIXME: can't reproduce bad data in original buffer!
+      expect(cenv2.sample(800).minmax).to eq([0, 0])
+    end
   end
 
   describe '#trigger' do
