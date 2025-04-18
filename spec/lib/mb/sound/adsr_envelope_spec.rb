@@ -1,4 +1,4 @@
-RSpec.describe(MB::Sound::ADSREnvelope) do
+RSpec.describe(MB::Sound::ADSREnvelope, :aggregate_failures) do
   let(:env) {
     MB::Sound::ADSREnvelope.new(
       attack_time: 0.1,
@@ -189,7 +189,7 @@ RSpec.describe(MB::Sound::ADSREnvelope) do
   end
 
   describe '#trigger' do
-    it 'can set an automatic release' do
+    it 'can set an automatic release for use in the interactive DSL' do
       env.trigger(1.0, auto_release: 0.1)
 
       6.times do
@@ -203,6 +203,45 @@ RSpec.describe(MB::Sound::ADSREnvelope) do
       end
 
       expect(env.sample(800)).to eq(nil)
+    end
+
+    it 'behaves correctly when given an integer peak values' do
+      env.attack_time = 50
+      env.reset
+      env.trigger(1)
+      expect(env.sample(500).max).to be_between(0.0, 0.01)
+    end
+  end
+
+  describe '#sample_all' do
+    context 'with sustain of 1' do
+      it 'remains within the expected range for the envelope' do
+        # These parameters were causing bizarre plots on one of my livestreams
+        env = described_class.new(attack_time: 0.1385901240393387, decay_time: 0.9133346228248626, sustain_level: 1, release_time: 1.8523222156741201, rate: 48000)
+
+        d = env.sample_all
+        expect(d[0]).to be_between(0, 0.01)
+        expect(d[-1]).to be_between(0, 0.01)
+        expect(d[env.rate * env.attack_time]).to be_between(0.99, 1.0)
+        expect(d[env.rate * (env.attack_time + env.decay_time)]).to be_between(0.99, 1.0)
+        expect(d.min).to be_between(0, 0.0001)
+        expect(d.max).to be_between(0.99, 1.0)
+      end
+    end
+
+    context 'with sustain of 0.5' do
+      it 'remains within the expected range for the envelope' do
+        # These parameters were causing bizarre plots on one of my livestreams
+        env = described_class.new(attack_time: 0.1385901240393387, decay_time: 0.9133346228248626, sustain_level: 0.5, release_time: 1.8523222156741201, rate: 48000)
+
+        d = env.sample_all
+        expect(d[0]).to be_between(0, 0.01)
+        expect(d[-1]).to be_between(0, 0.01)
+        expect(d[env.rate * env.attack_time]).to be_between(0.99, 1.0)
+        expect(d[env.rate * (env.attack_time + env.decay_time)]).to be_between(0.49, 0.51)
+        expect(d.min).to be_between(0, 0.0001)
+        expect(d.max).to be_between(0.99, 1.0)
+      end
     end
   end
 

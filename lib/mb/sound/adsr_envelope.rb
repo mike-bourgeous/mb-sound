@@ -173,6 +173,24 @@ module MB
         sample_c(count&.round, filter: filter)
       end
 
+      # Resets, triggers (at level 1.0), and samples the entire envelope,
+      # holding the sustain level for +:sustain_time seconds, and returning the
+      # resulting Numo::NArray.
+      #
+      # This will change the internal state of the envelope, so do not call
+      # this on an envelope that is processing audio.
+      def sample_all(sustain_time: (attack_time + decay_time + release_time) / 3.0)
+        reset
+
+        trigger(1)
+        d1 = sample(@rate * (@attack_time + @decay_time + sustain_time)).dup.not_inplace!
+
+        release
+        d2 = sample(@rate * @release_time).dup.not_inplace!
+
+        d1.concatenate(d2)
+      end
+
       def sample_c(count = nil, filter: true)
         if count
           sample_count_c(count, filter: filter)
