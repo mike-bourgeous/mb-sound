@@ -14,7 +14,7 @@ module MB
       # If the PLOT environment variable is set to '0', then plotting defaults
       # to false.  Otherwise, plotting defaults to true.
       def play(file_tone_data, rate: 48000, gain: 1.0, plot: nil, graphical: false, spectrum: false, device: nil)
-        header = MB::U.wrap("\e[H\e[J\e[36mPlaying\e[0m #{MB::U.highlight(file_tone_data)}".lines.map(&:strip).join(' ') + "\n\n")
+        header = MB::U.wrap("\e[H\e[J\e[36mPlaying\e[0m #{playback_info(file_tone_data)}".lines.map(&:strip).join(' ') + "\n\n")
         puts header
 
         plot = false if ENV['PLOT'] == '0' && plot.nil?
@@ -128,6 +128,21 @@ module MB
 
       ensure
         input&.close
+      end
+
+      # Returns a String with info to display when playing the given
+      # +file_tone_data+.
+      def playback_info(file_tone_data)
+        case file_tone_data
+        when Array
+          file_tone_data.map { |ftd| playback_info(ftd) }
+
+        when GraphNode
+          file_tone_data.graph.select { |n| n.is_a?(MB::Sound::GraphNode) }.map { |n| n.graph_node_name || n.class.name }.join(', ')
+
+        else
+          MB::U.highlight(file_tone_data)
+        end
       end
     end
   end
