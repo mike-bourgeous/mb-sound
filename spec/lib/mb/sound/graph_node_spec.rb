@@ -368,4 +368,8 @@ RSpec.describe(MB::Sound::GraphNode) do
       expect(b).to eq(nil)
     end
   end
+
+  pending '#forever'
+
+  pending '#for'
 end

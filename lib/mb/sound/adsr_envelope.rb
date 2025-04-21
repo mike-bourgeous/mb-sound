@@ -350,7 +350,11 @@ module MB
       def advance(samples)
         @frame += samples
         @time = @frame / @rate.to_f
-        release if @auto_release && @on && @time >= @auto_release
+
+        release_time = @attack_time + @decay_time if @auto_release == true
+        release_time ||= @auto_release
+
+        release if @auto_release && @on && @time >= release_time
       end
     end
   end

@@ -287,9 +287,14 @@ module MB
       end
 
       # Sets the duration to the given number of seconds.
-      def for(duration)
+      def for(duration, recursive: true)
+        puts "#{' ' * caller_locations.length} Tone#for(#{duration}, recursive: #{recursive})" # XXX
+
+        super(duration, recursive: recursive)
+
         @duration_set = true
         @duration = duration&.to_f
+
         self
       end
 

@@ -565,6 +565,21 @@ module MB
         digraph
       end
 
+      # Sets all Tones in the graph to continue playing forever.
+      def for(duration, recursive: true)
+        raise 'Recursion too deep' if caller_locations.length > 60
+        puts "#{' ' * caller_locations.length} GraphNode#for(#{duration}, recursive: #{recursive})" # XXX
+
+        if recursive
+          graph.each do |n|
+            next if n == self
+            n.for(duration, recursive: false) if n.respond_to?(:for)
+          end
+        end
+
+        self
+      end
+
       # Sets all Tones in the graph (or anything else with a #forever method
       # that takes a :recursive parameter) to continue playing forever.
       def forever(recursive: true)
