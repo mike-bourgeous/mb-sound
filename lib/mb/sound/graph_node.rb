@@ -567,9 +567,6 @@ module MB
 
       # Sets all Tones in the graph to continue playing forever.
       def for(duration, recursive: true)
-        raise 'Recursion too deep' if caller_locations.length > 60
-        puts "#{' ' * caller_locations.length} GraphNode#for(#{duration}, recursive: #{recursive})" # XXX
-
         if recursive
           graph.each do |n|
             next if n == self
