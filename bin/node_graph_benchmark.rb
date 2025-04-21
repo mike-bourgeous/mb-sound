@@ -11,7 +11,11 @@ require 'bundler/setup'
 
 require 'benchmark'
 
+require 'mb-util'
 require 'mb-sound'
+
+MB::U.sigquit_backtrace
+
 
 abenv = MB::Sound::ADSREnvelope.new(attack_time: 60, decay_time: 30, sustain_level: 0.125, release_time: 90, rate: 48000)
 
@@ -44,7 +48,6 @@ drums = (hat + kick) * drumenv
 graph = ((drums + ab + c + d) * -6.db).softclip(0.25, 0.99)
 
 envelopes = graph.graph.select { |n| n.is_a?(MB::Sound::ADSREnvelope) }
-tones = graph.graph.select { |n| n.is_a?(MB::Sound::Tone) }
 
 m, s = graph.for(180).tee
 
@@ -64,18 +67,22 @@ final_r = r.tee.yield_self { |(x, y)|
 }
 
 if ARGV.include?('--bench')
-  Benchmark.bm do |x|
+  Benchmark.bmbm do |bench|
     [100, 800, 4000].each do |bufsize|
       # Reset envelopes
-      envelopes.each do |e|
-        e.trigger(1, auto_release: true)
+      bench.report("envs @ #{bufsize}") do
+        envelopes.each do |e|
+          e.trigger(1, auto_release: true)
+        end
       end
 
       # Reset oscillators and constants
-      final_l.for(180)
-      final_r.for(180)
+      bench.report("for(180) @ #{bufsize}") do
+        final_l.for(180)
+        final_r.for(180)
+      end
 
-      x.report("bufsize=#{bufsize}") do
+      bench.report("bufsize=#{bufsize}") do
         loop do
           x = final_l.with_buffer(bufsize).sample(bufsize)
           y = final_r.with_buffer(bufsize).sample(bufsize)
