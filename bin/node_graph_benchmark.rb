@@ -20,7 +20,7 @@ cenv.trigger(1, auto_release: true)
 c = (
   266.66667.hz.triangle.forever.at(-4.db).softclip(0.05, 0.5).filter(1900.hz.lowpass1p) * 0.1.hz.lfo.at(0..1) +
   250.hz.complex_triangle.forever.at(-3.db).softclip(0.05, 0.5).filter(1900.hz.lowpass1p) * 0.1.hz.lfo.at(0..1).with_phase(Math::PI)
-) * cenv
+).softclip(0.05, 0.15) * 6.db * cenv
 
 denv = MB::Sound::ADSREnvelope.new(attack_time: 4, decay_time: 156, sustain_level: 1, release_time: 20, rate: 48000)
 denv.trigger(1, auto_release: true)
@@ -42,4 +42,8 @@ drums = (hat + kick) * drumenv
 
 graph = ((drums + ab + c + d) * -6.db).softclip(0.25, 0.99)
 
-MB::Sound.play graph.real.for(180).with_buffer(800)
+x, y = graph.tee
+
+effect = -4.db * x - -5.db * y.delay(seconds: 0.1.hz.triangle.lfo.at(0.001..0.008))
+
+MB::Sound.play effect.real.softclip(0.5, 0.99).for(180).with_buffer(800)
