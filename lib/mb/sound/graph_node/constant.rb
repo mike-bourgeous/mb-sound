@@ -90,7 +90,7 @@ module MB
         def for(duration_seconds, recursive: true)
           puts "#{' ' * caller_locations.length} Constant#for(#{duration_seconds}, recursive: #{recursive})" # XXX
 
-          super(recursive: recursive)
+          super(duration_seconds, recursive: recursive)
           @duration_samples = duration_seconds && duration_seconds.to_f * @rate
           self
         end
