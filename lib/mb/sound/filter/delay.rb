@@ -10,6 +10,8 @@ module MB
         DEFAULT_SMOOTHING_RATE = 0.5
 
         attr_reader :delay, :delay_samples, :rate, :smoothing, :smooth_limit
+        alias sample_rate rate
+
         attr_reader :write_offset, :read_offset
 
         # Minimum, maximum, and final delay in samples from the previous call

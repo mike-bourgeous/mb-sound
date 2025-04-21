@@ -21,6 +21,7 @@ module MB
       class LinearFollower < Filter
         # The sample rate given to the constructor, in Hz.
         attr_reader :rate
+        alias sample_rate rate
 
         # The computed maximum fall rate, in units *per sample*.
         attr_reader :max_fall

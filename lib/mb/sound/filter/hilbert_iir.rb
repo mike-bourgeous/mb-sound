@@ -31,6 +31,8 @@ module MB
         # filters).
         attr_reader :cosine, :sine
 
+        attr_reader :sample_rate
+
         # Creates a filter chain that returns cosine and sine components for a
         # single input at the given sample +:rate+.  For experimentation,
         # filters may be skipped by passing indices to skip as an Array in
@@ -40,7 +42,7 @@ module MB
           @scale = scale&.to_f || 1.0
           @stretch = stretch&.to_f || 1.0
           @offset = offset&.to_f || 0.0
-          @rate = rate.to_f
+          @sample_rate = rate.to_f.round
 
           # Empirical testing shows scaling by 2.25 puts 20Hz and 20kHz at the
           # same error, at about 83 degrees instead of 90.
@@ -134,9 +136,9 @@ module MB
             *poles.map.with_index { |p, idx|
               next if @skip && @skip.include?(idx.to_i)
               p *= @stretch
-              a = (p * @scale * (1 + (@stretch - 1) * idx / (poles.length - 1)) + @offset) / @rate
+              a = (p * @scale * (1 + (@stretch - 1) * idx / (poles.length - 1)) + @offset) / @sample_rate
               b = (1 - a) / (1 + a)
-              MB::Sound::Filter::Biquad.new(-b, 1, 0, -b, 0)
+              MB::Sound::Filter::Biquad.new(-b, 1, 0, -b, 0, sample_rate: @sample_rate)
             }.compact
           )
         end

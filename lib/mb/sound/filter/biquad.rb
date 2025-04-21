@@ -12,11 +12,15 @@ module MB
       class Biquad < Filter
         attr_reader :b0, :b1, :b2, :a1, :a2
 
+        # The sample rate for which the biquad's coefficients were generated,
+        # as provided to the constructor.
+        attr_reader :sample_rate
+
         # Initializes a biquad filter from the given set of poles and zeros.
         #
         # TODO: accept a total gain factor and/or normalize peak gain to 1.0
         # (poles+zeros alone do not indicate overall gain)
-        def self.from_pole_zero(poles:, zeros:)
+        def self.from_pole_zero(poles:, zeros:, sample_rate:)
           raise 'A biquad can only have two poles' if poles.length > 2
           raise 'A biquad can only have two zeros' if zeros.length > 2
 
@@ -58,12 +62,12 @@ module MB
           a1 /= a0
           a2 /= a0
 
-          self.new(b0, b1, b2, a1, a2)
+          self.new(b0, b1, b2, a1, a2, sample_rate: sample_rate)
         end
 
         # b0..b2 are numerator coefficients, a1..a2 denominator (all normalized
         # by a0); some references use the opposite notation
-        def initialize(b0, b1, b2, a1, a2)
+        def initialize(b0, b1, b2, a1, a2, sample_rate:)
           b0 = b0.real if MB::M.round(b0, 7).imag == 0
           b1 = b1.real if MB::M.round(b1, 7).imag == 0
           b2 = b2.real if MB::M.round(b2, 7).imag == 0
@@ -75,6 +79,10 @@ module MB
           @b2 = b2
           @a1 = a1
           @a2 = a2
+
+          # TODO: would we ever see a fractional sample rate?
+          raise "Sample rate must be a positive integer (got #{sample_rate.inspect})" unless sample_rate.is_a?(Integer) && sample_rate > 0
+          @sample_rate = sample_rate
 
           reset
         end

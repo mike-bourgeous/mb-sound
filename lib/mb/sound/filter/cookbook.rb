@@ -125,7 +125,7 @@ module MB
         # overshoot.  See comments on https://www.musicdsp.org/en/latest/Filters/197-rbj-audio-eq-cookbook.html
         def initialize(filter_type, f_samp, f_center, db_gain: nil, quality: nil, bandwidth_oct: nil, shelf_slope: nil)
           set_parameters(filter_type, f_samp, f_center, db_gain: db_gain, quality: quality, bandwidth_oct: bandwidth_oct, shelf_slope: shelf_slope)
-          super(@b0, @b1, @b2, @a1, @a2)
+          super(@b0, @b1, @b2, @a1, @a2, sample_rate: f_samp)
         end
 
         # Sets the center/cutoff frequency of the filter.

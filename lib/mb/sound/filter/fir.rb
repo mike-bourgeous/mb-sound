@@ -32,6 +32,7 @@ module MB
       #     MB::Sound::Filter::FIR.new(gains: { 20 => rotation, 100 => rotation })
       class FIR < Filter
         attr_reader :filter_length, :window_length, :rate, :gain_map, :filter_fft, :gains, :impulse
+        alias sample_rate rate
 
         # The processing delay of the filter.  This delay allows the filter to
         # buffer incoming data into window-sized chunks while always returning

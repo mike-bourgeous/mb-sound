@@ -1,13 +1,17 @@
 RSpec.describe(MB::Sound::Filter::Biquad, :aggregate_failures) do
+  let(:f) {
+    MB::Sound::Filter::Biquad.new(0.2, 0.5, -0.3, 0.6, 0.1, sample_rate: 48000)
+  }
+
+  let(:g) {
+    MB::Sound::Filter::Biquad.from_pole_zero(**f.polezero, sample_rate: 44100)
+  }
+
+  let(:f_unity) {
+    MB::Sound::Filter::Biquad.new(1, 0, 0, 0, 0, sample_rate: 48000)
+  }
+
   describe '.from_pole_zero' do
-    let(:f) {
-      MB::Sound::Filter::Biquad.new(0.2, 0.5, -0.3, 0.6, 0.1)
-    }
-
-    let(:g) {
-      MB::Sound::Filter::Biquad.from_pole_zero(**f.polezero)
-    }
-
     it 'results in the same poles and zeros it started with' do
       f_pz = f.polezero
       f_zeros = MB::M.round(f_pz[:zeros], 4).sort_by { |v| [v.imag, v.real] }
@@ -29,7 +33,7 @@ RSpec.describe(MB::Sound::Filter::Biquad, :aggregate_failures) do
     end
 
     it 'generates real coefficients for complex conjugate poles and zeroes' do
-      f = MB::Sound::Filter::Biquad.from_pole_zero(poles: [ 0.25+0.25i, 0.25-0.25i ], zeros: [ -0.1+0.1i, -0.1-0.1i ])
+      f = MB::Sound::Filter::Biquad.from_pole_zero(poles: [ 0.25+0.25i, 0.25-0.25i ], zeros: [ -0.1+0.1i, -0.1-0.1i ], sample_rate: 34567)
       expect(f.coefficients.map(&:imag)).to eq([0] * 5)
       expect(f.coefficients.map(&:class)).to eq([Float] * 5)
       expect(MB::M.round(f.coefficients, 7)).to eq([1, 0.2, 0.02, -0.5, 0.125])
@@ -38,19 +42,18 @@ RSpec.describe(MB::Sound::Filter::Biquad, :aggregate_failures) do
 
   describe '#initialize' do
     it 'creates a filter with specified coefficients' do
-      f = MB::Sound::Filter::Biquad.new(0.3, -0.2, 0.1, 0.0, 0.5)
+      f = MB::Sound::Filter::Biquad.new(0.3, -0.2, 0.1, 0.0, 0.5, sample_rate: 32768)
       expect(f.coefficients).to eq([0.3, -0.2, 0.1, 0.0, 0.5])
     end
   end
 
   describe '#response' do
     it 'returns the gain at all points for a simple pass-through filter' do
-      f = MB::Sound::Filter::Biquad.new(1, 0, 0, 0, 0)
-      expect(f.response(0)).to eq(1.0)
-      expect(f.response(0.5)).to eq(1.0)
-      expect(f.response(0.9)).to eq(1.0)
+      expect(f_unity.response(0)).to eq(1.0)
+      expect(f_unity.response(0.5)).to eq(1.0)
+      expect(f_unity.response(0.9)).to eq(1.0)
 
-      f = MB::Sound::Filter::Biquad.new(2, 0, 0, 0, 0)
+      f = MB::Sound::Filter::Biquad.new(2, 0, 0, 0, 0, sample_rate: 54321)
       expect(f.response(0)).to eq(2.0)
       expect(f.response(0.5)).to eq(2.0)
       expect(f.response(0.9)).to eq(2.0)
@@ -87,10 +90,9 @@ RSpec.describe(MB::Sound::Filter::Biquad, :aggregate_failures) do
       [Numo::SFloat, Numo::DFloat].each do |c|
         context "with #{c}" do
           it 'can process a real sine wave through a unity gain filter' do
-            f = MB::Sound::Filter::Biquad.new(1, 0, 0, 0, 0)
             d = c.cast(1000.hz.sine.generate(4800))
 
-            result = f.send(m, d)
+            result = f_unity.send(m, d)
 
             expect(result).to be_a(c)
             expect(MB::M.round(result, 8)).to eq(MB::M.round(d, 8))
@@ -117,30 +119,27 @@ RSpec.describe(MB::Sound::Filter::Biquad, :aggregate_failures) do
       [Numo::SComplex, Numo::DComplex].each do |c|
         context "with #{c}" do
           it 'can process a short sequence through a unity gain filter' do
-            f = MB::Sound::Filter::Biquad.new(1, 0, 0, 0, 0)
             d = c[1+1i, 2+2i, 3-3i, 1-1i, 0.5, 0.5i]
 
-            result = f.send(m, d)
+            result = f_unity.send(m, d)
 
             expect(result).to be_a(c)
             expect(MB::M.round(result, 8)).to eq(MB::M.round(d, 8))
           end
 
           it 'can process a real sine wave through a unity gain filter' do
-            f = MB::Sound::Filter::Biquad.new(1, 0, 0, 0, 0)
             d = c.cast(1000.hz.sine.generate(4800))
 
-            result = f.send(m, d)
+            result = f_unity.send(m, d)
 
             expect(result).to be_a(c)
             expect(MB::M.round(result, 8)).to eq(MB::M.round(d, 8))
           end
 
           it 'can process a complex sine wave through a unity gain filter' do
-            f = MB::Sound::Filter::Biquad.new(1, 0, 0, 0, 0)
             d = c.cast(1000.hz.complex_sine.generate(4800))
 
-            result = f.send(m, d)
+            result = f_unity.send(m, d)
 
             expect(result).to be_a(c)
             expect(MB::M.round(result, 8)).to eq(MB::M.round(d, 8))
@@ -193,12 +192,19 @@ RSpec.describe(MB::Sound::Filter::Biquad, :aggregate_failures) do
 
   describe '#polezero' do
     it 'returns expected poles and zeros for a test filter' do
-      f = MB::Sound::Filter::Biquad.new(0.17039, 0.22048, 0.10905, -0.5, 0)
+      f = MB::Sound::Filter::Biquad.new(0.17039, 0.22048, 0.10905, -0.5, 0, sample_rate: 48000)
       pz = f.polezero
       poles = MB::M.round(pz[:poles], 2)
       zeros = MB::M.round(pz[:zeros], 2)
       expect(poles).to eq([0.5])
       expect(zeros.sort_by{|v| v.imag}).to eq([-0.65-0.47i, -0.65+0.47i])
+    end
+  end
+
+  describe '#sample_rate' do
+    it 'returns the correct sample rate given to the constructor' do
+      expect(f.sample_rate).to eq(48000)
+      expect(g.sample_rate).to eq(44100)
     end
   end
 end

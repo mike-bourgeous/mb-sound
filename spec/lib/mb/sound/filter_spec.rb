@@ -20,6 +20,8 @@ RSpec.describe(MB::Sound::Filter) do
 
   context 'implementations' do
     ObjectSpace.each_object.select { |o| o.is_a?(Class) && o.ancestors.include?(MB::Sound::Filter) }.each do |f_cl|
+      next if f_cl == MB::Sound::Filter
+
       example "#{f_cl.name} implements #sample_rate" do
         expect(f_cl.public_instance_methods).to include(:sample_rate)
       end

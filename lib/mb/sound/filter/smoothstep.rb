@@ -11,6 +11,7 @@ module MB
       class Smoothstep < Filter
         # The sample rate given to the constructor, in Hz.
         attr_reader :rate
+        alias sample_rate rate
 
         # The duration of a full transition in samples.
         attr_reader :fade_samples
