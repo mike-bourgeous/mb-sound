@@ -81,8 +81,8 @@ module MB
           @a2 = a2
 
           # TODO: would we ever see a fractional sample rate?
-          raise "Sample rate must be a positive integer (got #{sample_rate.inspect})" unless sample_rate.is_a?(Integer) && sample_rate > 0
-          @sample_rate = sample_rate
+          raise "Sample rate must be a positive numeric (got #{sample_rate.inspect})" unless sample_rate.is_a?(Numeric) && sample_rate > 0
+          @sample_rate = sample_rate.to_f
 
           reset
         end

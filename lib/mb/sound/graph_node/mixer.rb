@@ -33,13 +33,16 @@ module MB
         # or an empty NArray from its #sample method will cause this #sample
         # method to return nil.  Otherwise, the #sample method only returns nil
         # when all summands return nil or empty.
-        def initialize(summands, stop_early: true)
+        def initialize(summands, sample_rate:, stop_early: true)
           @constant = 0
           @summands = {}
 
           @complex = false
 
           @stop_early = stop_early
+
+          raise 'Sample rate must be a positive numeric' unless sample_rate.is_a?(Numeric) && sample_rate > 0
+          @sample_rate = sample_rate.to_f
 
           # TODO: Allow variable length argument lists (kind of tricky to detect
           # the different cases of arrays vs hashes vs varargs accurately)

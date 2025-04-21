@@ -83,30 +83,31 @@ module MB
         end
       end
 
-      # Creates a mixer that adds this mixer's output to +other+.  Part of a
-      # DSL experiment for building up a signal graph.
+      # Creates a mixer that adds this node's #sample output to +other+ (a
+      # numeric constant or another GraphNode).
       def +(other)
         fixup_tones(false, self, other)
-        Mixer.new([self, other])
+        Mixer.new([self, other], sample_rate: self.sample_rate)
       end
 
-      # Creates a mixer that subtracts +other+ from this mixer's output.  Part
-      # of a DSL experiment for building up a signal graph.
+      # Creates a mixer that subtracts +other+ (a numeric constant or another
+      # GraphNode) from this node's #sample output.
       def -(other)
         fixup_tones(false, self, other)
-        Mixer.new([self, [other, -1]])
+        Mixer.new([self, [other, -1]], sample_rate: self.sample_rate)
       end
 
-      # Creates a multiplier that multiplies +other+ by this mixer's output.
-      # Part of a DSL experiment for building up a signal graph.
+      # Creates a multiplier that multiplies +other+ (a numeric constant or
+      # another GraphNode) by this node's #sample output.
       def *(other)
         fixup_tones(false, self)
         fixup_tones(true, other)
-        Multiplier.new([self, other])
+        Multiplier.new([self, other], sample_rate: self.sample_rate)
       end
 
       # Divides incoming data by +other+, which may be a Numeric or another
-      # signal graph.
+      # signal graph.  For signal graphs, each numerator value is divided
+      # by the corresponding denominator value at the same index.
       def /(other)
         if other.respond_to?(:sample)
           self.proc { |v|
