@@ -48,7 +48,7 @@ module MB
             else
               raise "BUG: Unsupported mode #{@mode}"
             end
-          else
+          elsif data.is_a?(Numo::NArray)
             case @mode
             when :real
               data
@@ -69,6 +69,12 @@ module MB
             else
               raise "BUG: Unsupported mode #{@mode}"
             end
+
+          elsif data.nil?
+            nil
+
+          else
+            raise "Unsupported datatype: #{data.class}"
           end
         end
       end
