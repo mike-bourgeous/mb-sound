@@ -368,4 +368,14 @@ RSpec.describe(MB::Sound::GraphNode) do
       expect(b).to eq(nil)
     end
   end
+
+  context 'implementations' do
+    context 'provide a sample_rate' do
+      ObjectSpace.each_object.select { |o| o.is_a?(Class) && o.ancestors.include?(MB::Sound::GraphNode) }.each do |cl|
+        example "#{cl.name} defines #sample_rate" do
+          expect(cl.public_instance_methods).to include(:sample_rate)
+        end
+      end
+    end
+  end
 end
