@@ -1,3 +1,5 @@
+require 'forwardable'
+
 module MB
   module Sound
     class Filter
@@ -15,6 +17,7 @@ module MB
         # elsewhere, would be nice to be able to make higher-order butterworth
         # filters or first-order filters available, for example
         class CookbookWrapper
+          extend Forwardable
           include GraphNode
 
           class WrapperArgumentError < ArgumentError
@@ -26,6 +29,8 @@ module MB
           end
 
           attr_reader :audio, :cutoff, :quality
+
+          def_delegators :@source, :sample_rate
 
           # Initializes a sample-chain wrapper around a cookbook filter that
           # uses Cookbook#dynamic_process to vary the cutoff frequency
@@ -94,6 +99,8 @@ module MB
           end
         end
 
+        # These must match the order in `enum filter_types` in
+        # ext/mb/fast_sound/fast_sound.c
         FILTER_TYPES = [
           :lowpass,
           :highpass,
@@ -146,7 +153,6 @@ module MB
 
         # Sets the filter type.
         def filter_type=(type)
-          raise "Invalid filter type #{type.inspect}" unless FILTER_TYPE_IDS.include?(type)
           return if @filter_type == type
           set_parameters(type, @sample_rate, @center_frequency, db_gain: @db_gain, quality: @quality, bandwidth_oct: @bandwidth_oct, shelf_slope: @shelf_slope)
         end
@@ -156,6 +162,7 @@ module MB
         end
 
         def set_parameters_c(filter_type, f_samp, f_center, db_gain: nil, quality: nil, bandwidth_oct: nil, shelf_slope: nil)
+          raise ArgumentError, "Invalid filter type #{filter_type.inspect}" unless FILTER_TYPE_IDS.include?(filter_type)
           type_id = FILTER_TYPE_IDS.fetch(filter_type)
           @filter_type = filter_type
           @sample_rate = f_samp
@@ -174,6 +181,7 @@ module MB
 
         # Recalculates filter coefficients based on the given filter parameters.
         def set_parameters_ruby(filter_type, f_samp, f_center, db_gain: nil, quality: nil, bandwidth_oct: nil, shelf_slope: nil)
+          raise ArgumentError, "Invalid filter type #{filter_type.inspect}" unless FILTER_TYPE_IDS.include?(filter_type)
           @filter_type = filter_type
           @sample_rate = f_samp
           @center_frequency = f_center
