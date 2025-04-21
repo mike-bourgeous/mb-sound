@@ -54,4 +54,9 @@ RSpec.describe(MB::Sound::GraphNode::Constant) do
       expect(c.sample(1)).to eq(nil)
     end
   end
+
+  descirbe '#for' do
+    pending 'resets the elapsed timer'
+    pending 'limits the duration generated'
+  end
 end

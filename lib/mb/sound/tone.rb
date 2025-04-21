@@ -296,7 +296,8 @@ module MB
         self
       end
 
-      # Sets the duration to the given number of seconds.
+      # Sets the duration to the given number of seconds, starting from now (in
+      # sample time).
       def for(duration, recursive: true)
         puts "#{' ' * caller_locations.length} Tone#for(#{duration}, recursive: #{recursive})" # XXX
 
