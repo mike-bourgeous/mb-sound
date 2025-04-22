@@ -55,7 +55,7 @@ RSpec.describe(MB::Sound::GraphNode::Constant) do
     end
   end
 
-  descirbe '#for' do
+  describe '#for' do
     pending 'resets the elapsed timer'
     pending 'limits the duration generated'
   end
