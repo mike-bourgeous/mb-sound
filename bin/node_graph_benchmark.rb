@@ -31,14 +31,14 @@ c = (
   250.hz.complex_triangle.forever.at(-3.db).softclip(0.05, 0.5).filter(1900.hz.lowpass1p) * 0.1.hz.lfo.at(0..1).with_phase(Math::PI)
 ).softclip(0.05, 0.25) * 10.db * cenv
 
-denv = MB::Sound::ADSREnvelope.new(attack_time: 4, decay_time: 156, sustain_level: 1, release_time: 10, rate: 48000)
+denv = MB::Sound::ADSREnvelope.new(attack_time: 4, decay_time: 170, sustain_level: 1, release_time: 6, rate: 48000)
 
 d = (
   50.hz.triangle.at(-3.db).forever.filter(150.hz.lowpass1p) *
   4.hz.drumramp.lfo.at(0..-30).db.filter(50.hz.lowpass)
 ).softclip(0.005, 0.25) * 10.db * denv
 
-drumenv = MB::Sound::ADSREnvelope.new(attack_time: 10, decay_time: 160, sustain_level: 1, release_time: 20, rate: 48000)
+drumenv = MB::Sound::ADSREnvelope.new(attack_time: 10, decay_time: 150, sustain_level: 1, release_time: 20, rate: 48000)
 
 hat = 10000.hz.noise.filter(9000.hz.highpass).filter(15000.hz.lowpass) * 8.hz.drumramp.lfo.at(-4..-25).filter(100.hz.lowpass).db
 kick = 50.hz.at(-3.db).fm(2.hz.drumramp.at(90.to_db..-60).db.filter(100.hz.lowpass)) * 2.hz.drumramp.at(0..-30).db.filter(100.hz.lowpass)
