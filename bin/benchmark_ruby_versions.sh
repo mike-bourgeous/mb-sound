@@ -4,6 +4,12 @@ set -e
 
 VERSION_LIST="2.7 3.0 3.1 3.2 3.3 3.4"
 
+if [ $# -ge "1" ]; then
+	VERSION_LIST="$*"
+fi
+
+printf "\n\e[1mBenchmarking versions: \e[36m$VERSION_LIST\e[0m\n\n"
+
 for version in $VERSION_LIST; do
 	printf "\n\e[38;5;242m----------------\n Setup ruby ${version}\n----------------\e[0m\n\n"
 
