@@ -2,19 +2,26 @@
 
 set -e
 
-for version in 2.7 3.0 3.1 3.2 3.3 3.4; do
-	printf "\n\e[1;33m----------------\nRuby ${version}\n----------------\e[0m\n\n"
+VERSION_LIST="2.7 3.0 3.1 3.2 3.3 3.4"
 
-	printf "\n\e[1mruby install\e[0m\n"
-	rvm install ${version}
-	rvm ${version} do rvm gemset create mb-sound
+for version in $VERSION_LIST; do
+	printf "\n\e[38;5;242m----------------\n Setup ruby ${version}\n----------------\e[0m\n\n"
 
-	printf "\n\e[1mbundle install\e[0m\n"
-	rvm ${version}@mb-sound do bundle install
+	printf "\n\e[38;5;242mruby install\e[0m\n"
+	rvm install ${version} > /dev/null
+	rvm ${version} do rvm gemset create mb-sound > /dev/null
 
-	printf "\n\e[1mrake clean compile\e[0m\n"
-	rvm ${version}@mb-sound do rake clean compile
-	
-	printf "\n\e[1mbenchmark\e[0m\n"
+	printf "\n\e[38;5;242mbundle install\e[0m\n"
+	rvm ${version}@mb-sound do bundle install > /dev/null
+
+	printf "\n\e[38;5;242mrake clean compile\e[0m\n"
+	rvm ${version}@mb-sound do rake clean compile > /dev/null
+
+	printf "\n\e[1;33m------------------\nBenchmark ruby ${version}\n------------------\e[0m\n\n"
+
+	printf "\n\e[1mbenchmark \e[36m$version \e[31mwithout jit\e[0m\n"
 	rvm ${version}@mb-sound do bin/node_graph_benchmark.rb --bench
+
+	printf "\n\e[1mbenchmark \e[36m$version \e[32mwith jit\e[0m\n"
+	RUBYOPT=--jit rvm ${version}@mb-sound do bin/node_graph_benchmark.rb --bench
 done
