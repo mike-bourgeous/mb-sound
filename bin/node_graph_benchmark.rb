@@ -66,6 +66,10 @@ final_r = r.tee.yield_self { |(x, y)|
   flanger.softclip(0.5, 0.99)
 }
 
+envelopes.each do |e|
+  e.trigger(1, auto_release: true)
+end
+
 if ARGV.include?('--bench')
   Benchmark.bmbm do |bench|
     [100, 800, 4000].each do |bufsize|
@@ -92,10 +96,10 @@ if ARGV.include?('--bench')
       end
     end
   end
+elsif ARGV[0]
+  MB::U.prevent_overwrite(ARGV[0], prompt: true)
+  MB::U.headline("Saving benchmark song to #{ARGV[0].inspect}")
+  MB::Sound.write(ARGV[0], [final_l.with_buffer(800), final_r.with_buffer(800)])
 else
-  envelopes.each do |e|
-    e.trigger(1, auto_release: true)
-  end
-
   MB::Sound.play [final_l.with_buffer(800), final_r.with_buffer(800)]
 end
