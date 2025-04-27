@@ -1,4 +1,7 @@
 RSpec.describe(MB::Sound::GraphNode::Tee) do
+  pending '#reset'
+  pending '::Branch#for'
+
   it 'can be created' do
     a, b = 123.hz.tee
     expect(a).to be_a(MB::Sound::GraphNode::Tee::Branch)

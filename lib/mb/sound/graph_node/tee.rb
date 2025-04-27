@@ -48,6 +48,12 @@ module MB
           def to_s
             "Branch #{@index + 1} of #{@tee.branches.count}#{graph_node_name && " (#{graph_node_name})"}"
           end
+
+          # Resets the internal done flag to allow this tee to flow data again.
+          def for(duration, recursive: true)
+            super(duration, recursive: recursive)
+            @tee.reset
+          end
         end
 
         # The source node feeding into this Tee, in an array (see
@@ -103,6 +109,12 @@ module MB
 
         rescue MB::Sound::CircularBuffer::BufferOverflow
           raise BranchBufferOverflow, "Read of #{branch} overflowed internal buffer.  Buffers of all branches: #{@readers.map(&:length)}"
+        end
+
+        # Clears the "done" flag that returns nil if upstreams return nil, in
+        # case the upstreams were restarted.
+        def reset
+          @done = false
         end
       end
     end

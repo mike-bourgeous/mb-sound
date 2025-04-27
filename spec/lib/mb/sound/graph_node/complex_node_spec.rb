@@ -44,6 +44,8 @@ RSpec.describe(MB::Sound::GraphNode::ComplexNode, :aggregate_failures) do
         end
       end
     end
+
+    pending 'returns nil for nil input'
   end
 
   describe '#sources' do
