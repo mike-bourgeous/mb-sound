@@ -70,6 +70,8 @@ envelopes.each do |e|
   e.trigger(1, auto_release: true)
 end
 
+loop_count = ENV['LOOP_COUNT']&.to_i
+
 if ARGV.include?('--bench')
   Benchmark.bmbm do |bench|
     [100, 800, 4000].each do |bufsize|
@@ -87,19 +89,31 @@ if ARGV.include?('--bench')
       end
 
       bench.report("bufsize=#{bufsize}") do
+        i = 0
         loop do
           x = final_l.with_buffer(bufsize).sample(bufsize)
           y = final_r.with_buffer(bufsize).sample(bufsize)
 
           break if x.nil? || y.nil?
+
+          i += 1
+          break if loop_count && i == loop_count
         end
       end
     end
   end
 elsif ARGV[0]
-  MB::U.prevent_overwrite(ARGV[0], prompt: true)
+  overwrite = ARGV.delete('--overwrite')
+  MB::U.prevent_overwrite(ARGV[0], prompt: true) unless overwrite
+
   MB::U.headline("Saving benchmark song to #{ARGV[0].inspect}")
-  MB::Sound.write(ARGV[0], [final_l.with_buffer(800), final_r.with_buffer(800)])
+
+  if loop_count
+    # FIXME: MB::Sound::GraphNode::Tee has a buffer size of 48000
+    MB::Sound.write(ARGV[0], [final_l, final_r].map { |c| c.with_buffer(800).sample(loop_count * 800) }, overwrite: true)
+  else
+    MB::Sound.write(ARGV[0], [final_l.with_buffer(800), final_r.with_buffer(800)], overwrite: true)
+  end
 else
   MB::Sound.play [final_l.with_buffer(800), final_r.with_buffer(800)]
 end
