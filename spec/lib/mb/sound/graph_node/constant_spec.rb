@@ -63,4 +63,9 @@ RSpec.describe(MB::Sound::GraphNode::Constant) do
       expect(c123i45.sample_rate).to eq(44100)
     end
   end
+
+  describe '#for' do
+    pending 'resets the elapsed timer'
+    pending 'limits the duration generated'
+  end
 end

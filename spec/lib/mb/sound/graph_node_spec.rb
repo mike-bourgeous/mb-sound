@@ -369,6 +369,10 @@ RSpec.describe(MB::Sound::GraphNode) do
     end
   end
 
+  pending '#forever'
+
+  pending '#for'
+
   context 'implementations' do
     context 'provide a sample_rate' do
       ObjectSpace.each_object.select { |o| o.is_a?(Class) && o.ancestors.include?(MB::Sound::GraphNode) }.each do |cl|

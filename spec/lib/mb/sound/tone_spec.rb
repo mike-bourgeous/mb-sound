@@ -219,6 +219,10 @@ RSpec.describe MB::Sound::Tone do
   pending '#fm'
   pending '#log_fm'
   pending '#pm'
+  describe '#for' do
+    pending 'limits duration'
+    pending 'resets elapsed timer'
+  end
 
   describe '#oscillator' do
     it 'returns an Oscillator with the same frequency and range' do

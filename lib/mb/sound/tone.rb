@@ -203,6 +203,16 @@ module MB
         @wave_type = :ramp
         self
       end
+      alias saw ramp
+      alias sawtooth ramp
+
+      # Changes the waveform type to ramp, with phase set so the oscillator
+      # starts at the bottom instead of the middle of its ramp.  This allows
+      # using #drumramp oscillators to play beats in time with each other.
+      def drumramp
+        ramp.with_phase(-Math::PI)
+      end
+      alias envramp drumramp
 
       # Changes the waveform type to inverse Gaussian.  The histogram of this
       # waveform shows a truncated, roughly Gaussian distribution.  The peaks
@@ -286,10 +296,14 @@ module MB
         self
       end
 
-      # Sets the duration to the given number of seconds.
-      def for(duration)
+      # Sets the duration to the given number of seconds, starting from now (in
+      # sample time).
+      def for(duration, recursive: true)
+        super(duration, recursive: recursive)
+
         @duration_set = true
         @duration = duration&.to_f
+
         self
       end
 

@@ -89,9 +89,11 @@ module MB
           [@constant]
         end
 
-        # Sets the duration for which this constant will run, or nil to run
-        # forever.
-        def for(duration_seconds)
+        # Sets the duration for which this constant will run *from now*, or nil
+        # to run forever.
+        def for(duration_seconds, recursive: true)
+          super(duration_seconds, recursive: recursive)
+          @elapsed_samples = 0
           @duration_samples = duration_seconds && duration_seconds.to_f * @sample_rate
           self
         end
