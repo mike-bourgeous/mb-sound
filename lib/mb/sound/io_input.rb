@@ -8,15 +8,18 @@ module MB
       include GraphNode
       include GraphNode::IOSampleMixin
 
-      attr_reader :frames_read
+      attr_reader :frames_read, :sample_rate
 
       # Initializes an IO-reading audio input stream for the given I/O object
       # and number of channels.  The first parameter may be a command to pass
       # to IOBase#run (an Array or a String).
-      def initialize(io_or_cmd, channels, buffer_size)
+      def initialize(io_or_cmd, channels, buffer_size, sample_rate:)
         raise 'IO must respond to :read' unless io_or_cmd.is_a?(Array) || io_or_cmd.respond_to?(:read)
+
         io_or_cmd = [io_or_cmd, 'r'] if io_or_cmd.is_a?(Array)
         super(io_or_cmd, channels, buffer_size)
+
+        @sample_rate = sample_rate
         @frames_read = 0
       end
 

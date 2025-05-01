@@ -170,6 +170,12 @@ module MB
         @osc_buf = nil
       end
 
+      # The sample rate of the oscillator (calculated from the phase advance
+      # value given to the constructor).
+      def sample_rate
+        2.0 * Math::PI / @advance
+      end
+
       def sources
         [@frequency]
       end

@@ -11,7 +11,7 @@ module MB
       include GraphNode
       include GraphNode::IOSampleMixin
 
-      def_delegators :@input, :rate, :channels, :closed?
+      def_delegators :@input, :sample_rate, :channels, :closed?
 
       # Creates a buffer wrapper with the given +input+ instance (e.g.
       # MB::Sound::FFMPEGInput or MB::Sound::JackFFI::Input).
@@ -19,7 +19,7 @@ module MB
       # The +:buffer_size+ parameter allows forcing a new buffer size value for
       # other code to use.  Otherwise #buffer_size delegates to the input.
       def initialize(input, buffer_size: nil)
-        [:read, :rate, :channels, :buffer_size].each do |req_method|
+        [:read, :sample_rate, :channels, :buffer_size].each do |req_method|
           raise "Input #{input} must respond to #{req_method.inspect}" unless input.respond_to?(req_method)
         end
 

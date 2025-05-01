@@ -18,6 +18,9 @@ module MB
         # The constant value added to the output sum before any summands.
         attr_accessor :constant
 
+        # The sample rate of the graph.
+        attr_reader :sample_rate
+
         # Creates a Mixer with the given inputs, which must be either Numeric
         # values or objects that have a #sample method.  Each input may have an
         # associated gain.  The summands, gains, or numeric constants may all
@@ -34,6 +37,7 @@ module MB
         # method to return nil.  Otherwise, the #sample method only returns nil
         # when all summands return nil or empty.
         def initialize(summands, sample_rate:, stop_early: true)
+          # TODO: detect sample rate from summands
           @constant = 0
           @summands = {}
 
@@ -52,6 +56,10 @@ module MB
             gain ||= 1.0
 
             @complex = true if gain.is_a?(Complex)
+
+            if s.respond_to?(:sample_rate) && @sample_rate != s.sample_rate
+              raise "Summand #{idx}/#{s} sample rate #{s.sample_rate} does not match mixer sample rate #{@sample_rate}"
+            end
 
             case
             when s.is_a?(Numeric)

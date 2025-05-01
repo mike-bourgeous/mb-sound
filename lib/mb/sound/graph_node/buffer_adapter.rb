@@ -1,3 +1,5 @@
+require 'forwardable'
+
 module MB
   module Sound
     module GraphNode
@@ -9,9 +11,13 @@ module MB
       # upstream buffer size is smaller, and by treating the buffer as a
       # circular buffer if the upstream buffer size is larger.
       class BufferAdapter
+        extend Forwardable
+
         include GraphNode
 
         attr_reader :upstream_count
+
+        def_delegators :@upstream, :sample_rate
 
         # Creates a buffer adapter with the given +:upstream+ node to sample,
         # using the given +:upstream_count+ as the value passed to the upstream

@@ -1,3 +1,5 @@
+require 'forwardable'
+
 module MB
   module Sound
     module GraphNode
@@ -14,6 +16,8 @@ module MB
       #
       # See also the Tee class, which is very similar.
       class InputChannelSplit
+        extend Forwardable
+
         # Raised when any channel's internal buffer overflows.  This would
         # happen if the downstream buffer size is significantly larger than the
         # input's buffer size, or if one channel is being read more than
@@ -33,6 +37,11 @@ module MB
             @split = split
             @channel = channel
             @graph_node_name = name
+          end
+
+          # Returns the sample rate of the input stream.
+          def sample_rate
+            @split.sample_rate
           end
 
           # Retrieves the next +count+ samples for this channel.
@@ -57,6 +66,8 @@ module MB
 
         # The channels from the InputChannelSplit (see IOSampleMixin#split).
         attr_reader :channels
+
+        def_delegators :@source, :sample_rate
 
         # Creates a InputChannelSplit from the given +source+, with up to
         # +:max_channels+ channels.  Generally for internal use by

@@ -9,7 +9,7 @@ module MB
       include GraphNode
       include GraphNode::IOSampleMixin
 
-      attr_reader :channels, :length, :remaining, :samples_read, :rate, :buffer_size
+      attr_reader :channels, :length, :remaining, :samples_read, :sample_rate, :buffer_size
 
       # Whether this input should ask readers to use exactly the specified
       # buffer size.
@@ -20,11 +20,11 @@ module MB
       # times for the given number of +channels+ (or forever if length <= 0).
       # The initial internal buffer size will be +initial_buffer+ frames, but
       # will be grown if #read is called with a size larger than the buffer.
-      def initialize(channels:, rate: 48000, length: 0, fill: 0, initial_buffer: 4096, buffer_size: nil, strict_buffer_size: false)
+      def initialize(channels:, sample_rate: 48000, length: 0, fill: 0, initial_buffer: 4096, buffer_size: nil, strict_buffer_size: false)
         raise 'Channels must be an int >= 1' unless channels.is_a?(Integer) && channels >= 1
 
         @channels = channels
-        @rate = rate
+        @sample_rate = sample_rate
         @length = length
         @remaining = length
         @fill = fill

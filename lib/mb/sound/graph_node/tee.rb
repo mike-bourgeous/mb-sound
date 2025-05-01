@@ -1,3 +1,5 @@
+require 'forwardable'
+
 module MB
   module Sound
     module GraphNode
@@ -14,6 +16,8 @@ module MB
       #     d = a * 100.hz + b * 200.hz + c * 300.hz ; nil
       #     play d
       class Tee
+        extend Forwardable
+
         # Raised when any branch's internal buffer overflows.  This could
         # happen if the downstream buffer size is significantly larger than the
         # Tee's internal buffer size, or if one branch is being read more than
@@ -22,9 +26,13 @@ module MB
 
         # An individual branch of a Tee, returned by Tee#branches.
         class Branch
+          extend Forwardable
+
           include GraphNode
 
           attr_reader :index
+
+          def_delegators :@tee, :sample_rate
 
           # For internal use by Tee.  Initializes one parallel branch of the tee.
           def initialize(tee, index)
@@ -63,10 +71,13 @@ module MB
         # The branches from the Tee (see GraphNode#tee).
         attr_reader :branches
 
+        def_delegators :@source, :sample_rate
+
         # Creates a Tee from the given +source+, with +n+ branches.  Generally
         # for internal use by GraphNode#tee.
         def initialize(source, n = 2, circular_buffer_size: 48000)
           raise 'Source for a Tee must respond to #sample (and not a Ruby Array)' unless source.respond_to?(:sample) && !source.is_a?(Array)
+          raise 'Source for a Tee must respond to #sample_rate' unless source.respond_to?(:sample_rate)
 
           @source = source
           @sources = [source].freeze

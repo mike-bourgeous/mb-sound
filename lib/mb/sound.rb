@@ -76,7 +76,7 @@ module MB
     #
     # For DSL use in combination with tones, inputs, etc.  See
     # MB::Sound::GraphNode.
-    def self.adsr(attack = 0.01, decay = 0.1, sustain = -12.db, release = 0.4, auto_release: nil, rate: 48000, filter_freq: 1000)
+    def self.adsr(attack = 0.01, decay = 0.1, sustain = -12.db, release = 0.4, auto_release: nil, sample_rate: 48000, filter_freq: 1000)
       if auto_release.nil?
         auto_release = 2.0 * (attack + decay)
         auto_release = 0.1 if auto_release < 0.1
@@ -87,7 +87,7 @@ module MB
         decay_time: decay,
         sustain_level: sustain,
         release_time: release,
-        rate: rate,
+        sample_rate: sample_rate,
         filter_freq: filter_freq
       )
       env.trigger(1.0, auto_release: auto_release)

@@ -37,7 +37,7 @@ module MB
     #       decay_time: 0.1,
     #       sustain_level: 0.7,
     #       release_time: 0.5,
-    #       rate: 48000
+    #       sample_rate: 48000
     #     )
     #     env.trigger(1)
     #     a = env.sample(48000)
@@ -49,7 +49,7 @@ module MB
       include GraphNode
       include BufferHelper
 
-      attr_reader :attack_time, :decay_time, :sustain_level, :release_time, :total, :peak, :time, :rate
+      attr_reader :attack_time, :decay_time, :sustain_level, :release_time, :total, :peak, :time, :sample_rate
 
       # Initializes an ADSR envelope with the given +:attack_time+,
       # +:decay_time+, and +:release_time+ in seconds, and the given
@@ -57,18 +57,18 @@ module MB
       # sample +:rate+ is required to ensure envelope times are accurate.
       #
       # Note that the +:sustain_level+ may be greater than 1.0.
-      def initialize(attack_time:, decay_time:, sustain_level:, release_time:, rate:, filter_freq: 1000)
-        @rate = rate.to_f
+      def initialize(attack_time:, decay_time:, sustain_level:, release_time:, sample_rate:, filter_freq: 1000)
+        @sample_rate = sample_rate.to_f
         @on = false
 
         update(attack_time, decay_time, sustain_level, release_time)
 
         @auto_release = nil
         @time = @total + 100
-        @frame = @rate * @time
+        @frame = @sample_rate * @time
 
         # Single-pole filter avoids overshoot
-        @filter = filter_freq.hz.at_rate(rate).lowpass1p
+        @filter = filter_freq.hz.at_rate(@sample_rate).lowpass1p
         @peak = 0.5
         @value = 0
         @sust = 0
@@ -153,7 +153,7 @@ module MB
       # clicking if used on actual audio.
       def reset
         @time = @total + 100
-        @frame = @rate * @time
+        @frame = @sample_rate * @time
         @on = false
         @auto_release = nil
         @filter.reset(0)
@@ -167,8 +167,8 @@ module MB
       # See #reset if you want to clear the smoothing filter state and jump to
       # time zero.
       def time=(t)
-        @frame = (t * @rate).round
-        @time = @frame / @rate.to_f
+        @frame = (t * @sample_rate).round
+        @time = @frame / @sample_rate.to_f
       end
 
       # Produces one sample (or many samples if +count+ is not nil) of the
@@ -188,10 +188,10 @@ module MB
         reset
 
         trigger(1)
-        d1 = sample(@rate * (@attack_time + @decay_time + sustain_time)).dup.not_inplace!
+        d1 = sample(@sample_rate * (@attack_time + @decay_time + sustain_time)).dup.not_inplace!
 
         release
-        d2 = sample(@rate * @release_time).dup.not_inplace!
+        d2 = sample(@sample_rate * @release_time).dup.not_inplace!
 
         d1.concatenate(d2)
       end
@@ -210,7 +210,7 @@ module MB
         MB::FastSound.adsr_narray(
           @buf.inplace!,
           @frame,
-          @rate,
+          @sample_rate,
           @attack_time,
           @decay_time,
           @sust,
@@ -316,12 +316,12 @@ module MB
       # Returns an inactive duplicate copy of the envelope, allowing the
       # duplicate to be sampled (e.g. for plotting) without changing the state
       # of the original envelope.
-      def dup(rate = @rate)
+      def dup(rate = @sample_rate)
         e = super()
         e.instance_variable_set(:@buf, @buf.dup)
         e.named("#{graph_node_name} (dup)")
         e.instance_variable_set(:@peak, 1.0) unless active?
-        e.instance_variable_set(:@rate, rate.to_f)
+        e.instance_variable_set(:@sample_rate, rate.to_f)
         e.instance_variable_set(:@filter, @filter.center_frequency.hz.at_rate(rate).lowpass1p)
         e.reset
         e
@@ -349,7 +349,7 @@ module MB
       # Advances the internal clock by the given number of +samples+.
       def advance(samples)
         @frame += samples
-        @time = @frame / @rate.to_f
+        @time = @frame / @sample_rate.to_f
 
         release_time = @attack_time + @decay_time if @auto_release == true
         release_time ||= @auto_release
