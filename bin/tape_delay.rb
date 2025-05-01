@@ -85,7 +85,7 @@ puts MB::U.highlight(
   feedback: feedback,
   extra_time: extra,
   input: input.graph_node_name,
-  rate: output.rate,
+  sample_rate: output.rate,
   buffer: bufsize,
   internal_buffer: internal_bufsize,
 )

@@ -140,8 +140,8 @@ module MB
         end
 
         if resample
-          raise "Sampling rate must be an integer greater than 0" unless resample.is_a?(Integer) && resample > 0
-          @sample_rate = resample
+          raise "Sampling rate must be a positive Numeric" unless resample.is_a?(Numeric) && resample > 0
+          @sample_rate = resample.to_f
           @frames = @frames * @sample_rate / @info[:sample_rate] if @info.include?(:sample_rate)
         end
 

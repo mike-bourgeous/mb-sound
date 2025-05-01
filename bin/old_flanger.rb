@@ -58,7 +58,7 @@ puts MB::U.highlight(
   min_delay: min_delay,
   max_delay: max_delay,
   inputs: inputs.map(&:graph_node_name),
-  rate: output.rate,
+  sample_rate: output.rate,
   buffer: bufsize,
 )
 

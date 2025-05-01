@@ -4,7 +4,7 @@ module MB
     # stream is not closed, so more audio can be written and the caller should
     # close the output stream.
     class WindowWriter
-      attr_reader :channels, :length, :buffer_size, :rate
+      attr_reader :channels, :length, :buffer_size, :sample_rate
 
       # Initializes a new window writer with the given +output_stream+ and
       # +window+ function.  The +window+ must be provided to set the size and
@@ -25,7 +25,7 @@ module MB
         end
 
         @channels = output_stream.channels
-        @rate = output_stream.rate
+        @sample_rate = output_stream.sample_rate
         @buffer_size = window.length * pad_factor
         @window = window
         @pad_factor = pad_factor

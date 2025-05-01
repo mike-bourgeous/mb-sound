@@ -90,12 +90,12 @@ module MB
       end
 
       # Reads an entire sound file into an array of Numo::NArrays, one per
-      # channel.  Resamples to 48kHz unless a different +:rate+ is specified.
-      # Pass nil for +:rate+ to disable resampling.
+      # channel.  Resamples to 48kHz unless a different +:sample_rate+ is
+      # specified.  Pass nil for +:sample_rate+ to disable resampling.
       #
       # See MB::Sound::FFMPEGInput for more flexible sound input.
-      def read(filename, max_frames: nil, rate: 48000)
-        input = file_input(filename, resample: rate)
+      def read(filename, max_frames: nil, sample_rate: 48000)
+        input = file_input(filename, resample: sample_rate)
         input.read(max_frames || input.frames)
       ensure
         input&.close
@@ -107,17 +107,17 @@ module MB
       # Writes at most +:max_length+ seconds if +data+ is a Tone or a signal
       # graph.
       #
-      # The sample +:rate+ defaults to 48kHz to match the default resampling of
+      # The +:sample_rate+ defaults to 48kHz to match the default resampling of
       # #read, and the default sample rate of #input and #output.
       #
       # See MB::Sound::FFMPEGOutput for more flexible sound output.
-      def write(filename, data, rate: 48000, overwrite: false, max_length: nil)
+      def write(filename, data, sample_rate: 48000, overwrite: false, max_length: nil)
         # TODO: Handle the signal graph DSL better in convert_sound_to_narray
         if data.is_a?(GraphNode) && !data.is_a?(Tone)
           buffer_size = data.graph_buffer_size || 800
           output = file_output(
             filename,
-            rate: rate,
+            sample_rate: sample_rate,
             channels: 1,
             overwrite: overwrite,
             buffer_size: buffer_size
@@ -129,7 +129,7 @@ module MB
             break if buf.nil? || buf.empty?
             output.write([buf])
 
-            t += output.buffer_size.to_f / rate
+            t += output.buffer_size.to_f / sample_rate
             break if max_length && t >= max_length
           end
         elsif data.is_a?(Array) && data.all?(GraphNode)
@@ -137,7 +137,7 @@ module MB
 
           output = file_output(
             filename,
-            rate: rate,
+            sample_rate: sample_rate,
             channels: data.length,
             overwrite: overwrite,
             buffer_size: buffer_size
@@ -160,12 +160,12 @@ module MB
 
             output.write(buf)
 
-            t += output.buffer_size.to_f / rate
+            t += output.buffer_size.to_f / sample_rate
             break if max_length && t >= max_length
           end
         else
           data = any_sound_to_array(data)
-          output = file_output(filename, rate: rate, channels: data.length, overwrite: overwrite)
+          output = file_output(filename, sample_rate: sample_rate, channels: data.length, overwrite: overwrite)
           output.write(data)
         end
       ensure
@@ -198,12 +198,12 @@ module MB
       # MB::Sound::FFMPEGOutput#initialize.
       #
       # See MB::Sound::FFMPEGOutput.
-      def file_output(filename, rate: 48000, channels:, overwrite: false, **kwargs)
+      def file_output(filename, sample_rate: 48000, channels:, overwrite: false, **kwargs)
         if !overwrite && File.exist?(filename)
           raise FileExistsError, "#{filename.inspect} already exists"
         end
 
-        MB::Sound::FFMPEGOutput.new(filename, channels: channels, rate: rate, **kwargs)
+        MB::Sound::FFMPEGOutput.new(filename, channels: channels, sample_rate: sample_rate, **kwargs)
       end
 
       # When the mb-sound-jackffi gem is present and the :jack_ffi input or
@@ -231,7 +231,7 @@ module MB
       #
       # See FFMPEGInput, mb-sound-jackffi, JackInput, and AlsaInput for more
       # flexible recording.
-      def input(rate: 48000, channels: 2, device: nil, buffer_size: nil)
+      def input(sample_rate: 48000, channels: 2, device: nil, buffer_size: nil)
         input_type = detect_input
 
         case input_type
@@ -242,14 +242,14 @@ module MB
           inp = MB::Sound::JackInput.new(ports: { device: device, count: channels }, buffer_size: buffer_size)
 
         when :alsa_pulse
-          inp = MB::Sound::AlsaInput.new(device: 'pulse', rate: rate, channels: channels, buffer_size: buffer_size)
+          inp = MB::Sound::AlsaInput.new(device: 'pulse', sample_rate: sample_rate, channels: channels, buffer_size: buffer_size)
 
         when :alsa
-          inp = MB::Sound::AlsaInput.new(device: device || 'default', rate: rate, channels: channels, buffer_size: buffer_size)
+          inp = MB::Sound::AlsaInput.new(device: device || 'default', sample_rate: sample_rate, channels: channels, buffer_size: buffer_size)
 
         when :null
           # TODO: Allow changing the duration of the null input using environment variables
-          inp = MB::Sound::NullInput.new(rate: rate, channels: channels)
+          inp = MB::Sound::NullInput.new(sample_rate: sample_rate, channels: channels)
 
         else
           raise NotImplementedError, 'TODO: support other platforms'
@@ -308,8 +308,8 @@ module MB
       #
       # Pass either true or a Hash of options for MB::Sound::PlotOutput in
       # +:plot+ to enable live plotting.
-      def output(rate: 48000, channels: 2, device: nil, buffer_size: nil, plot: nil)
-        info = {rate: rate, channels: channels, device: device, buffer_size: buffer_size, plot: plot}
+      def output(sample_rate: 48000, channels: 2, device: nil, buffer_size: nil, plot: nil)
+        info = {sample_rate: sample_rate, channels: channels, device: device, buffer_size: buffer_size, plot: plot}
 
         if plot
           graphical = plot.is_a?(Hash) && plot[:graphical] || false
@@ -339,13 +339,13 @@ module MB
           o = MB::Sound::JackOutput.new(ports: { device: device, count: channels }, buffer_size: buffer_size)
 
         when :alsa_pulse
-          o = MB::Sound::AlsaOutput.new(device: 'pulse', rate: rate, channels: channels, buffer_size: buffer_size)
+          o = MB::Sound::AlsaOutput.new(device: 'pulse', sample_rate: sample_rate, channels: channels, buffer_size: buffer_size)
 
         when :alsa
-          o = MB::Sound::AlsaOutput.new(device: device || 'default', rate: rate, channels: channels, buffer_size: buffer_size)
+          o = MB::Sound::AlsaOutput.new(device: device || 'default', sample_rate: sample_rate, channels: channels, buffer_size: buffer_size)
 
         when :null
-          o = MB::Sound::NullOutput.new(channels: channels, rate: rate, buffer_size: buffer_size)
+          o = MB::Sound::NullOutput.new(channels: channels, sample_rate: sample_rate, buffer_size: buffer_size)
 
         else
           raise "Unsupported output type: #{output_type.inspect}"
@@ -388,12 +388,12 @@ module MB
       # Array of Numo::NArrays.
       #
       # Press Ctrl-C to interrupt, or call break in the block.
-      def loopback(rate: 48000, channels: 2, block_size: nil, plot: true)
+      def loopback(sample_rate: 48000, channels: 2, block_size: nil, plot: true)
         puts "\e[H\e[J"
 
-        inp = input(rate: rate, channels: channels, buffer_size: block_size)
+        inp = input(sample_rate: sample_rate, channels: channels, buffer_size: block_size)
         inp.read(1)
-        outp = output(rate: rate, channels: channels, buffer_size: block_size, plot: plot)
+        outp = output(sample_rate: sample_rate, channels: channels, buffer_size: block_size, plot: plot)
         block_size = outp.buffer_size if outp.respond_to?(:buffer_size)
 
         loop do

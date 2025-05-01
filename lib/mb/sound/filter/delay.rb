@@ -27,13 +27,14 @@ module MB
         # change in seconds allowed per second.  The default smoothing rate is
         # MB::Sound::Filter::Delay::DEFAULT_SMOOTHING_RATE.
         def initialize(delay: 0, sample_rate: 48000, buffer_size: 48000, smoothing: true)
+          @sample_rate = sample_rate.to_f
+
           if delay.is_a?(Numeric)
-            buffer_size = 1.1 * delay * rate if buffer_size < 1.1 * delay * rate
+            buffer_size = 1.1 * delay * @sample_rate if buffer_size < 1.1 * delay * @sample_rate
           end
 
           @buf = Numo::SFloat.zeros(buffer_size)
           @out_buf = Numo::SFloat.zeros(1) # For wrap-around reads
-          @sample_rate = rate.to_f
           @delay = 0
           @delay_samples = 0
           @read_offset = 0

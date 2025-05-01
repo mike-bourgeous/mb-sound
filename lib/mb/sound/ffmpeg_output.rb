@@ -41,8 +41,8 @@ module MB
           @filename = File.join(dirname, File.basename(filename))
         end
 
-        raise "Sample rate must be a positive Integer" unless sample_rate.is_a?(Integer) && sample_rate > 0
-        @sample_rate = sample_rate
+        raise "Sample rate must be a positive Numeric" unless sample_rate.is_a?(Numeric) && sample_rate > 0
+        @sample_rate = sample_rate.to_f
 
         raise "Channels must be a positive Integer" unless channels.is_a?(Integer) && channels > 0
 

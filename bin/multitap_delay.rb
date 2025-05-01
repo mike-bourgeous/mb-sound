@@ -58,8 +58,8 @@ NUM_TAPS = 6
 begin
   # TODO: Abstract construction of a filter graph per channel
   paths = inputs.map.with_index { |inp, idx|
-    base = (base_delay_s.constant.named('Delay') - buftime).clip_rate(2, rate: 48000)
-    offset = base_delay_s.constant.named('Tap Offset').clip_rate(2, rate: 48000)
+    base = (base_delay_s.constant.named('Delay') - buftime).clip_rate(2, sample_rate: 48000)
+    offset = base_delay_s.constant.named('Tap Offset').clip_rate(2, sample_rate: 48000)
 
     offsets = offset.tee(NUM_TAPS)
     delays = base.tee(NUM_TAPS).map.with_index { |d, i|

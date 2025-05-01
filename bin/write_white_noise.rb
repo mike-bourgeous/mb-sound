@@ -29,7 +29,7 @@ frametime = framesize.to_f / RATE
 seconds = ARGV[3].to_f rescue 0
 raise "Invalid number of seconds given (must be > 0) #{USAGE}" unless seconds > 0
 
-output = MB::Sound::FFMPEGOutput.new(outfile, rate: 48000, channels: channels)
+output = MB::Sound::FFMPEGOutput.new(outfile, sample_rate: 48000, channels: channels)
 
 begin
   loops = (seconds / frametime).ceil

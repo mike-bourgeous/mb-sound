@@ -31,9 +31,9 @@ begin
   }
 
   input = MB::Sound.file_input(in_file, resample: nil, channels: 2)
-  output = MB::Sound.file_output(out_file, rate: input.rate, channels: 2, overwrite: true)
+  output = MB::Sound.file_output(out_file, sample_rate: input.rate, channels: 2, overwrite: true)
   interp = MB::Sound::TimelineInterpolator.new(delays, default_blend: :smootherstep)
-  haas = MB::Sound::HaasPan.new(delay: delays[0][:data][0], rate: input.rate, smoothing: 0.2)
+  haas = MB::Sound::HaasPan.new(delay: delays[0][:data][0], sample_rate: input.rate, smoothing: 0.2)
   chunk = 10#(input.rate / 100.0).round
 
   interp.plot(MB::Sound.plotter)

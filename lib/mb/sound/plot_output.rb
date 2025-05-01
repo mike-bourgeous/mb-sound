@@ -7,7 +7,7 @@ module MB
     class PlotOutput
       extend Forwardable
 
-      def_delegators :@output, :rate, :channels, :buffer_size
+      def_delegators :@output, :sample_rate, :channels, :buffer_size
 
       # If true, PlotOutput will try to manage audio/video sync by sleeping.
       # Set this to false if something else applies backpressure to maintain
@@ -64,7 +64,7 @@ module MB
         }
         @output.write(dw)
 
-        period = data[0].length.to_f / @output.rate
+        period = data[0].length.to_f / @output.sample_rate
         now = ::MB::U.clock_now
 
         # Subtract some time to build up a buffer before plotting

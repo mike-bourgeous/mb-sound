@@ -51,7 +51,7 @@ usage "Specify an even number of numeric arguments (have #{ARGV} remaining)" if 
 begin
   puts "Filtering \e[1;35m#{in_file}\e[0m to \e[1;36m#{out_file}\e[0m"
 
-  filter = MB::Sound::Filter::FIR.new(gains.sort_by(&:first).to_h, rate: 48000)
+  filter = MB::Sound::Filter::FIR.new(gains.sort_by(&:first).to_h, sample_rate: 48000)
 
   puts "\e[1;33mGains:\e[0m"
   puts MB::U.highlight(filter.gain_map)
@@ -74,7 +74,7 @@ begin
     filter.process(c.concatenate(pad))[(filter.window_length - filter.filter_length)..-1]
   }
 
-  MB::Sound.write(out_file, processed, rate: 48000)
+  MB::Sound.write(out_file, processed, sample_rate: 48000)
 
 rescue => e
   usage "#{e}\n\t#{e.backtrace.join("\n\t")}"

@@ -76,8 +76,8 @@ module MB
         # Creates a Tee from the given +source+, with +n+ branches.  Generally
         # for internal use by GraphNode#tee.
         def initialize(source, n = 2, circular_buffer_size: 48000)
-          raise 'Source for a Tee must respond to #sample (and not a Ruby Array)' unless source.respond_to?(:sample) && !source.is_a?(Array)
-          raise 'Source for a Tee must respond to #sample_rate' unless source.respond_to?(:sample_rate)
+          raise "Source #{source} for a Tee must respond to #sample (and not be a Ruby Array)" unless source.respond_to?(:sample) && !source.is_a?(Array)
+          raise "Source #{source} for a Tee must respond to #sample_rate" unless source.respond_to?(:sample_rate)
 
           @source = source
           @sources = [source].freeze

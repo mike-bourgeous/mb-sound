@@ -231,7 +231,7 @@ play file_input('sounds/synth0.flac').filter(1500.hz.lowpass(quality: 8))
 data = read 'sounds/sine/sine_100_1s_mono.flac'
 # => [Numo::DFloat#shape=[48000]
 # [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1.19209e-07, ...]]
-play data, rate: 48000
+play data, sample_rate: 48000
 ```
 
 ### Plotting sounds

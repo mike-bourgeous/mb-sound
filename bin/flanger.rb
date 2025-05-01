@@ -123,7 +123,7 @@ puts MB::U.highlight(
   lfo_hz: hz,
   depth: depth,
   inputs: inputs.map(&:graph_node_name),
-  rate: output.rate,
+  sample_rate: output.rate,
   buffer: bufsize,
   internal_buffer: internal_bufsize,
 )
