@@ -37,7 +37,7 @@ module MB
         # single input at the given sample +:rate+.  For experimentation,
         # filters may be skipped by passing indices to skip as an Array in
         # +:skip+, or values may be +:scaled+, +:stretched+, or +:offset+.
-        def initialize(rate: 48000, skip: nil, scale: nil, stretch: nil, offset: nil, interp: nil)
+        def initialize(sample_rate: 48000, skip: nil, scale: nil, stretch: nil, offset: nil, interp: nil)
           @skip = skip
           @scale = scale&.to_f || 1.0
           @stretch = stretch&.to_f || 1.0

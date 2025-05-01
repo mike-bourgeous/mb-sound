@@ -8,7 +8,7 @@ module MB
 
         # Initializes a simple envelope follower.  Peaks decay +:decay_db+
         # decibels every +decay_s+ seconds, with the given sample +rate+.
-        def initialize(rate:, decay_db: -5.0, decay_s: 0.1)
+        def initialize(sample_rate:, decay_db: -5.0, decay_s: 0.1)
           @sample_rate = rate.to_f
           @decay_db = decay_db.to_f
           @decay_s = decay_s.to_f

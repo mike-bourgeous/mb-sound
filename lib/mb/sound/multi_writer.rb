@@ -7,7 +7,7 @@ module MB
       class BufferSizeMismatch < ArgumentError; end
       class ChannelCountMismatch < ArgumentError; end
 
-      attr_reader :rate, :buffer_size, :channels
+      attr_reader :sample_rate, :buffer_size, :channels
 
       # Initializes a multiple-output writer with the given Array of output
       # streams.  All output streams must have the same buffer size and sample
@@ -16,9 +16,9 @@ module MB
         raise 'All output streams must respond to :write' unless streams.all? { |s| s.respond_to?(:write) }
         @streams = streams
 
-        @rate = streams[0].rate
-        unless streams.all? { |s| s.rate == @rate }
-          raise SampleRateMismatch, "All output streams must have the same sample rate (got #{streams.map(&:rate)})"
+        @sample_rate = streams[0].sample_rate
+        unless streams.all? { |s| s.sample_rate == @sample_rate }
+          raise SampleRateMismatch, "All output streams must have the same sample rate (got #{streams.map(&:sample_rate)})"
         end
 
         @buffer_size = streams[0].buffer_size

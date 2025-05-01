@@ -40,7 +40,7 @@ RSpec.describe(MB::Sound::Filter::Delay) do
     end
 
     it 'accepts a filter directly' do
-      shortbuf.smoothing = MB::Sound::Filter::LinearFollower.new(rate: 1, max_rise: 1, max_fall: 1)
+      shortbuf.smoothing = MB::Sound::Filter::LinearFollower.new(sample_rate: 1, max_rise: 1, max_fall: 1)
       shortbuf.delay = 0
       expect(shortbuf.process(Numo::SFloat[1,2,3,4,5,6,7,8,9])).to eq(Numo::SFloat[0,0,1,3,5,6,7,8,9])
     end

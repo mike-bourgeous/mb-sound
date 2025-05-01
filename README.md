@@ -147,7 +147,7 @@ There are DSL methods for working with distances and wavelengths:
 # @duration=5.0,
 # @frequency=1.0,
 # @oscillator=nil,
-# @rate=48000,
+# @sample_rate=48000,
 # @wave_type=:sine,
 # @wavelength=343.0 meters>
 ```
