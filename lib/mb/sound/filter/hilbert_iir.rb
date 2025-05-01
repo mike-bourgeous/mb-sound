@@ -42,7 +42,7 @@ module MB
           @scale = scale&.to_f || 1.0
           @stretch = stretch&.to_f || 1.0
           @offset = offset&.to_f || 0.0
-          @sample_rate = rate.to_f.round
+          @sample_rate = sample_rate.to_f
 
           # Empirical testing shows scaling by 2.25 puts 20Hz and 20kHz at the
           # same error, at about 83 degrees instead of 90.

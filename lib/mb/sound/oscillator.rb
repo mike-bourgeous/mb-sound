@@ -173,7 +173,7 @@ module MB
       # The sample rate of the oscillator (calculated from the phase advance
       # value given to the constructor).
       def sample_rate
-        2.0 * Math::PI / @advance
+        (2.0 * Math::PI / @advance).round(6)
       end
 
       def sources
