@@ -42,7 +42,7 @@ module MB
 
           if update_rate.nil?
             if jack
-              update_rate = jack.rate.to_f / jack.buffer_size
+              update_rate = jack.sample_rate.to_f / jack.buffer_size
             else
               update_rate = 60
             end

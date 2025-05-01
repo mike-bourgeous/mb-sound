@@ -31,10 +31,10 @@ begin
   }
 
   input = MB::Sound.file_input(in_file, resample: nil, channels: 2)
-  output = MB::Sound.file_output(out_file, sample_rate: input.rate, channels: 2, overwrite: true)
+  output = MB::Sound.file_output(out_file, sample_rate: input.sample_rate, channels: 2, overwrite: true)
   interp = MB::Sound::TimelineInterpolator.new(delays, default_blend: :smootherstep)
-  haas = MB::Sound::HaasPan.new(delay: delays[0][:data][0], sample_rate: input.rate, smoothing: 0.2)
-  chunk = 10#(input.rate / 100.0).round
+  haas = MB::Sound::HaasPan.new(delay: delays[0][:data][0], sample_rate: input.sample_rate, smoothing: 0.2)
+  chunk = 10 # (input.sample_rate / 100.0).round
 
   interp.plot(MB::Sound.plotter)
 
@@ -43,14 +43,14 @@ begin
   ts = 0
   MB::Sound.process_time_stream(input, output, chunk, chunk) do |data|
     haas.delay = interp.value(ts)[0]
-    ts += chunk.to_f / input.rate
+    ts += chunk.to_f / input.sample_rate
     haas.process(data)
   end
 
   # Drain the delay buffer
   final_delay = interp.value(ts)[0].abs
   if final_delay != 0
-    output.write(haas.process([Numo::SFloat.zeros((final_delay * input.rate).ceil)] * 2))
+    output.write(haas.process([Numo::SFloat.zeros((final_delay * input.sample_rate).ceil)] * 2))
   end
 
   output.close

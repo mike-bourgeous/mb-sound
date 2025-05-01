@@ -117,7 +117,7 @@ class FM
 end
 
 output = MB::Sound::JackFFI[].output(channels: 1, connect: [['system:playback_1', 'system:playback_2']])
-synth = FM.new(update_rate: output.rate.to_f / output.buffer_size, connect: ARGV[0])
+synth = FM.new(update_rate: output.sample_rate.to_f / output.buffer_size, connect: ARGV[0])
 
 puts "\n" * MB::U.height
 

@@ -68,7 +68,7 @@ RSpec.describe MB::Sound::FFMPEGInput do
   describe '#initialize' do
     it 'can load and parse info from a .flac file' do
       expect(input.frames).to eq(48000)
-      expect(input.rate).to eq(48000)
+      expect(input.sample_rate).to eq(48000)
       expect(input.channels).to eq(1)
       expect(input.info[:tags][:title]).to eq('Sine 100Hz 1s mono')
 
@@ -102,15 +102,15 @@ RSpec.describe MB::Sound::FFMPEGInput do
 
     it 'can change the sample rate' do
       expect(input_441.frames).to eq(44100)
-      expect(input_441.rate).to eq(44100)
+      expect(input_441.sample_rate).to eq(44100)
       expect(input_441.read(100000)[0].size).to eq(44100)
       expect(input_441.close.success?).to eq(true)
     end
 
     it 'can load a second audio stream' do
-      expect(input_multi_0.rate).to eq(48000)
+      expect(input_multi_0.sample_rate).to eq(48000)
       expect(input_multi_0.channels).to eq(1)
-      expect(input_multi_1.rate).to eq(44100)
+      expect(input_multi_1.sample_rate).to eq(44100)
       expect(input_multi_1.channels).to eq(2)
 
       expect(input_multi_0.read(100000)[0].size).to eq(48000)

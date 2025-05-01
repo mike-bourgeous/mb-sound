@@ -45,7 +45,7 @@ else
 end
 
 bufsize = output.buffer_size
-buftime = bufsize.to_f / output.rate
+buftime = bufsize.to_f / output.sample_rate
 
 puts MB::U.highlight(
   delay: base_delay_s,

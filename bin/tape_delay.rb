@@ -62,7 +62,7 @@ end
 output = MB::Sound.output
 bufsize = output.buffer_size
 
-delay_samples = delay * output.rate
+delay_samples = delay * output.sample_rate
 delay_samples = 0 if delay_samples < 0
 
 if ENV['PITCH'] == '1'
@@ -85,7 +85,7 @@ puts MB::U.highlight(
   feedback: feedback,
   extra_time: extra,
   input: input.graph_node_name,
-  sample_rate: output.rate,
+  sample_rate: output.sample_rate,
   buffer: bufsize,
   internal_buffer: internal_bufsize,
 )

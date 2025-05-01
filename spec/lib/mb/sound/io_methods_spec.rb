@@ -129,7 +129,7 @@ RSpec.describe(MB::Sound::IOMethods) do
     it 'can open a mono sound for reading' do
       begin
         input = MB::Sound.file_input('sounds/sine/sine_100_1s_mono.flac')
-        expect(input.rate).to eq(48000)
+        expect(input.sample_rate).to eq(48000)
         expect(input.channels).to eq(1)
         expect(input).to respond_to(:read)
       ensure
@@ -151,7 +151,7 @@ RSpec.describe(MB::Sound::IOMethods) do
     it 'can resample when reading' do
       begin
         input = MB::Sound.file_input('sounds/sine/sine_100_44k.flac', resample: 75000)
-        expect(input.rate).to eq(75000)
+        expect(input.sample_rate).to eq(75000)
         a = input.read(75000)
         expect(a.length).to eq(1)
         expect(a[0].length).to eq(75000)
@@ -199,7 +199,7 @@ RSpec.describe(MB::Sound::IOMethods) do
 
       begin
         input = MB::Sound.file_input(name, resample: nil)
-        expect(input.rate).to eq(32000)
+        expect(input.sample_rate).to eq(32000)
         data = input.read(10000)
         expect(data.length).to eq(3)
         expect(data[0].length).to eq(127)

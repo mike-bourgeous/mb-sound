@@ -80,10 +80,10 @@ module MB
               raise WrapperArgumentError.new(source: v)
 
             when Numeric
-              MB::Sound::GraphNode::Constant.new(v)
+              MB::Sound::GraphNode::Constant.new(v, sample_rate: @filter.sample_rate)
 
             when Numo::NArray
-              MB::Sound::ArrayInput.new(data: [v])
+              MB::Sound::ArrayInput.new(data: [v], sample_rate: @filter.sample_rate)
 
             else
               if v.respond_to?(:sample)

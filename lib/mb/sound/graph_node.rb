@@ -333,7 +333,7 @@ module MB
       def delay(seconds: nil, samples: nil, sample_rate: 48000, smoothing: true, max_delay: 1.0)
         if samples
           samples = samples.to_f if samples.is_a?(Numeric)
-          seconds = samples / rate
+          seconds = samples / sample_rate
         else
           seconds = seconds.to_f if seconds.is_a?(Numeric)
         end

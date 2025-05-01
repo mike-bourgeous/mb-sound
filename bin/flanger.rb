@@ -99,7 +99,7 @@ bufsize = output.buffer_size
 internal_bufsize = 24
 internal_bufsize -= 1 until bufsize % internal_bufsize == 0
 
-delay_samples = delay * output.rate
+delay_samples = delay * output.sample_rate
 delay_samples = 0 if delay_samples < 0
 range = depth * delay_samples
 min_delay = delay_samples - range * 0.5
@@ -123,7 +123,7 @@ puts MB::U.highlight(
   lfo_hz: hz,
   depth: depth,
   inputs: inputs.map(&:graph_node_name),
-  sample_rate: output.rate,
+  sample_rate: output.sample_rate,
   buffer: bufsize,
   internal_buffer: internal_bufsize,
 )
@@ -148,7 +148,7 @@ begin
     depthconst = depth.constant.named('Depth')
     delayconst = delay.constant.named('Delay')
     # Need to tee samp (delay in samples) so it doesn't skip when changing the delay via MIDI
-    samp1, samp2 = (delayconst * output.rate).clip(0, nil).named('Delay in samples').tee
+    samp1, samp2 = (delayconst * output.sample_rate).clip(0, nil).named('Delay in samples').tee
     samp1.named('Delay in samples (branch 1)')
     samp2.named('Delay in samples (branch 2)')
 

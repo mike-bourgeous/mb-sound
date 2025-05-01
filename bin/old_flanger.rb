@@ -36,7 +36,7 @@ end
 output = MB::Sound.output(channels: inputs.length)
 bufsize = output.buffer_size
 
-delay_samples = delay * output.rate
+delay_samples = delay * output.sample_rate
 delay_samples = 0 if delay_samples < 0
 range = depth * delay_samples
 min_delay = delay_samples - range * 0.5
@@ -58,7 +58,7 @@ puts MB::U.highlight(
   min_delay: min_delay,
   max_delay: max_delay,
   inputs: inputs.map(&:graph_node_name),
-  sample_rate: output.rate,
+  sample_rate: output.sample_rate,
   buffer: bufsize,
 )
 

@@ -46,7 +46,7 @@ else
 end
 
 bufsize = output.buffer_size
-buftime = bufsize.to_f / output.rate
+buftime = bufsize.to_f / output.sample_rate
 
 puts MB::U.highlight(
   delay: delay,
@@ -95,7 +95,7 @@ begin
     # TODO: create a better way to do feedback in node graphs, ideally while
     # automatically compensating for buffer size
     # TODO: implement cross-channel feedback
-    d_fb1, d_fb2 = (d2 - bufsize.to_f / output.rate).clip(0, nil).named('d_fb').tee
+    d_fb1, d_fb2 = (d2 - bufsize.to_f / output.sample_rate).clip(0, nil).named('d_fb').tee
     d_fb_amp = amp2.multitap(d_fb1)[0] # delay the amp lfo to match the feedback delay (FIXME: this seems to be off; it lets through some aliasing noise on each cycle; or maybe it's in both LFOs)
     fb_return = 0.constant.proc { a }.multitap(d_fb2)[0] * d_fb_amp
     wet = (feedback * fb_return + delayed).softclip(0.85, 0.95).spy { |z| a[] = z if z }

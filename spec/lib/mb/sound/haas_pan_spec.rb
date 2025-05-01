@@ -8,7 +8,7 @@ RSpec.describe(MB::Sound::HaasPan) do
       d = nil
       expect { d = d_default }.not_to raise_error
       expect(d.delay).to eq(0)
-      expect(d.rate).to eq(48000)
+      expect(d.sample_rate).to eq(48000)
       expect(d.left_delay).to eq(0)
       expect(d.right_delay).to eq(0)
       expect(d.left_delay_samples).to eq(0)
@@ -19,7 +19,7 @@ RSpec.describe(MB::Sound::HaasPan) do
       d = nil
       expect { d = d_32k_r }.not_to raise_error
       expect(d.delay).to eq(0.1)
-      expect(d.rate).to eq(32000)
+      expect(d.sample_rate).to eq(32000)
       expect(d.left_delay).to eq(0)
       expect(d.right_delay).to eq(0.1)
       expect(d.left_delay_samples).to eq(0)
@@ -30,7 +30,7 @@ RSpec.describe(MB::Sound::HaasPan) do
       d = nil
       expect { d = d_44k1_l }.not_to raise_error
       expect(d.delay).to eq(-0.2)
-      expect(d.rate).to eq(44100)
+      expect(d.sample_rate).to eq(44100)
       expect(d.left_delay).to eq(0.2)
       expect(d.right_delay).to eq(0)
       expect(d.left_delay_samples).to eq(8820)

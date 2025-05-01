@@ -11,8 +11,8 @@ module MB
           # Converts this numeric value into a MB::Sound::GraphNode::Constant
           # constant-value signal generator.  See the Constant constructor for
           # parameter details.
-          def constant(*args, **kwargs)
-            MB::Sound::GraphNode::Constant.new(self, *args, **kwargs, sample_rate: 48000)
+          def constant(*args, sample_rate: 48000, **kwargs)
+            MB::Sound::GraphNode::Constant.new(self, *args, sample_rate: sample_rate, **kwargs)
           end
         end
         Numeric.include(NumericConstantMethods)

@@ -7,9 +7,9 @@ module MB
         attr_reader :decay_db, :decay_s, :decay_per_sample, :sample_rate
 
         # Initializes a simple envelope follower.  Peaks decay +:decay_db+
-        # decibels every +decay_s+ seconds, with the given sample +rate+.
+        # decibels every +decay_s+ seconds, with the given +:sample_rate+.
         def initialize(sample_rate:, decay_db: -5.0, decay_s: 0.1)
-          @sample_rate = rate.to_f
+          @sample_rate = sample_rate.to_f
           @decay_db = decay_db.to_f
           @decay_s = decay_s.to_f
           @decay_per_sample = @decay_db.db ** (1.0 / (@decay_s * @sample_rate))
