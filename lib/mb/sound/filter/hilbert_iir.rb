@@ -34,7 +34,7 @@ module MB
         attr_reader :sample_rate
 
         # Creates a filter chain that returns cosine and sine components for a
-        # single input at the given sample +:rate+.  For experimentation,
+        # single input at the given +:sample_rate+.  For experimentation,
         # filters may be skipped by passing indices to skip as an Array in
         # +:skip+, or values may be +:scaled+, +:stretched+, or +:offset+.
         def initialize(sample_rate: 48000, skip: nil, scale: nil, stretch: nil, offset: nil, interp: nil)

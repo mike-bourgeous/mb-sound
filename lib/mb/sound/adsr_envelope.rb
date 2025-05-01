@@ -54,7 +54,7 @@ module MB
       # Initializes an ADSR envelope with the given +:attack_time+,
       # +:decay_time+, and +:release_time+ in seconds, and the given
       # +:sustain_level+ relative to the peak parameter given to #trigger.  The
-      # sample +:rate+ is required to ensure envelope times are accurate.
+      # +:sample_rate+ is required to ensure envelope times are accurate.
       #
       # Note that the +:sustain_level+ may be greater than 1.0.
       def initialize(attack_time:, decay_time:, sustain_level:, release_time:, sample_rate:, filter_freq: 1000)

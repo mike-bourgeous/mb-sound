@@ -42,7 +42,7 @@ module MB
     # +:frequency+ - The center or cutoff frequency of the filter.
     # +:filter_type+ - One of the filter types from MB::Sound::Filter::Cookbook::FILTER_TYPES.
     # +:sample_rate+ - The sample rate to use for the filter (defaults to
-    #                  sound.rate if sound responds to :rate, or 48000).
+    #                  sound.rate if sound responds to :sample_rate, or 48000).
     # +:quality+ - The "quality factor" of the filter.  Higher values are more
     #              resonant.  Must specify one of quality, slope, or bandwidth.
     # +:slope+ - The slope for a shelf filter.  Specify one of quality, slope, or bandwidth.

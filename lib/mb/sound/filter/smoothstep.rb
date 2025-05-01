@@ -23,15 +23,15 @@ module MB
         # Initializes a smoothstep signal interpolator (see the class
         # description).
         #
-        # +:rate+ is the sample rate of the system in Hz.
+        # +:sample_rate+ is the sample rate of the system in Hz.
         # +:samples+ is the duration of a full transition in samples.  Only
         #            one of +:samples+ or +:seconds+ may be specified, not
         #            both.
         # +:seconds+ is the duration of a full transition in seconds.  Only one
         #            of +:samples+ or +:seconds+ may be specified, not both.
         def initialize(sample_rate:, samples: nil, seconds: nil)
-          raise 'Sample rate must be a positive number' unless rate.is_a?(Numeric) && rate > 0
-          @sample_rate = rate.to_f
+          raise 'Sample rate must be a positive number' unless sample_rate.is_a?(Numeric) && sample_rate > 0
+          @sample_rate = sample_rate.to_f
 
           raise 'Specify a transition duration in either samples or seconds' if samples.nil? && seconds.nil?
           raise 'Specify only one of samples or seconds, not both' unless samples.nil? || seconds.nil?
