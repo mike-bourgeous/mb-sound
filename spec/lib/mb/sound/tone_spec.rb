@@ -104,7 +104,7 @@ RSpec.describe MB::Sound::Tone do
         expect(tone).to be_a(MB::Sound::Tone)
         expect(tone.frequency).to eq(5)
         expect(tone.wave_type).to eq(:sine)
-        expect(tone.rate).to eq(48000)
+        expect(tone.sample_rate).to eq(48000)
       end
     end
 
@@ -192,7 +192,7 @@ RSpec.describe MB::Sound::Tone do
     it 'can write tone samples to a file' do
       name = 'tmp/tonegen.flac'
       FileUtils.mkdir_p('tmp')
-      output = MB::Sound::FFMPEGOutput.new(name, channels: 1, rate: 48000, buffer_size: 311713)
+      output = MB::Sound::FFMPEGOutput.new(name, channels: 1, sample_rate: 48000, buffer_size: 311713)
       100.hz.for(311713.0 / 48000.0).write(output)
       output.close
 
@@ -314,7 +314,7 @@ RSpec.describe MB::Sound::Tone do
 
     it 'generates a linear velocity-limited signal follower' do
       expect(f).to be_a(MB::Sound::Filter::LinearFollower)
-      expect(f.rate).to eq(48000)
+      expect(f.sample_rate).to eq(48000)
       expect(f.max_rise).to eq(375 * 4 / 48000.0)
       expect(f.max_fall).to eq(375 * 4 / 48000.0)
       expect(f.absolute).to eq(false)

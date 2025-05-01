@@ -66,7 +66,7 @@ module MB
           tone = tone_name_number
           freq = tone.frequency
           set_number(Oscillator.calc_number(freq))
-          super(frequency: get_freq, wave_type: tone.wave_type, amplitude: tone.amplitude, duration: tone.duration, rate: tone.rate)
+          super(frequency: get_freq, wave_type: tone.wave_type, amplitude: tone.amplitude, duration: tone.duration, sample_rate: tone.sample_rate)
 
         else
           raise ArgumentError, "Cannot construct a Note from #{tone_name_number}"

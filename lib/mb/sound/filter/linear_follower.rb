@@ -20,8 +20,7 @@ module MB
       # goes up and the cutoff frequency goes down as a signal gets louder.
       class LinearFollower < Filter
         # The sample rate given to the constructor, in Hz.
-        attr_reader :rate
-        alias sample_rate rate
+        attr_reader :sample_rate
 
         # The computed maximum fall rate, in units *per sample*.
         attr_reader :max_fall
@@ -35,9 +34,9 @@ module MB
 
         # Initializes a velocity-limited signal follower.
         #
-        # +:rate+ is the sample rate of the system in Hz.  Pass 1.0 if you want
-        #         to specify +:max_rise+ and +:max_fall+ as per-sample, rather
-        #         than per-second, values.
+        # +:sample_rate+ is the sample rate of the system in Hz.  Pass 1.0 if
+        #                you want to specify +:max_rise+ and +:max_fall+ as
+        #                per-sample, rather than per-second, values.
         # +:max_rise+ is the maximum positive derivative, in units per second
         #             (not per sample!).  This may be positive or negative as
         #             the absolute value of +:max_rise+ is used.  Set to nil to
@@ -53,17 +52,17 @@ module MB
         #             used and this functions like a linear envelope follower.
         #             If false, then the positive and negative values of the
         #             signal are preserved.
-        def initialize(rate:, max_rise:, max_fall:, absolute: false)
+        def initialize(sample_rate:, max_rise:, max_fall:, absolute: false)
           # TODO: would there be some way of doing this with complex numbers?
           # maybe impose different limits on +re, -re, +im, and -im?  Or limits
           # on +/-mag and +/-phase.  Would that have any use?
 
-          raise 'Sample rate must be a positive number' unless rate.is_a?(Numeric) && rate > 0
-          @rate = rate.to_f
+          raise 'Sample rate must be a positive number' unless sample_rate.is_a?(Numeric) && sample_rate > 0
+          @sample_rate = sample_rate.to_f
 
           # parameters are rate per second, internal storage is rate per sample
-          @max_fall = max_fall && max_fall.abs.to_f / @rate
-          @max_rise = max_rise && max_rise.abs.to_f / @rate
+          @max_fall = max_fall && max_fall.abs.to_f / @sample_rate
+          @max_rise = max_rise && max_rise.abs.to_f / @sample_rate
 
           @absolute = !!absolute
 

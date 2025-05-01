@@ -8,9 +8,10 @@ module MB
       # override is specified (to allow using ffmpeg's virtual output formats,
       # such as alsa, pulse, dshow, and avfoundation).
       #
-      # +rate+ - The sample rate to write into the output file.  This should
-      #          normally match the sample rate of the input file or generated
-      #          sound, otherwise the audio will play at a different speed.
+      # +sample_rate+ - The sample rate to write into the output file.  This
+      #                 should normally match the sample rate of the input file
+      #                 or generated sound, otherwise the audio will play at a
+      #                 different speed.
       # +channels+ - The number of channels to write to the output file.
       # +codec+ - An optional audio codec string to pass to ffmpeg to override
       #           its detection based on file extension.
@@ -30,7 +31,7 @@ module MB
       #                 minimum quantity of writable data, and on Linux is also
       #                 used by IOInput to suggest a pipe buffer size to the
       #                 kernel to reduce latency.
-      def initialize(filename, rate:, channels:, codec: nil, bitrate: nil, format: nil, loglevel: nil, buffer_size: nil)
+      def initialize(filename, sample_rate:, channels:, codec: nil, bitrate: nil, format: nil, loglevel: nil, buffer_size: nil)
         if format
           @filename = filename
         else
@@ -40,8 +41,8 @@ module MB
           @filename = File.join(dirname, File.basename(filename))
         end
 
-        raise "Sample rate must be a positive Integer" unless rate.is_a?(Integer) && rate > 0
-        @rate = rate
+        raise "Sample rate must be a positive Integer" unless sample_rate.is_a?(Integer) && sample_rate > 0
+        @sample_rate = sample_rate
 
         raise "Channels must be a positive Integer" unless channels.is_a?(Integer) && channels > 0
 
@@ -57,7 +58,7 @@ module MB
             '-nostdin',
             '-y',
             '-loglevel', loglevel || '8',
-            '-ar', @rate.to_s,
+            '-ar', @sample_rate.to_s,
             '-ac', channels.to_s,
             '-f', 'f32le',
             '-i', 'pipe:',
@@ -68,7 +69,7 @@ module MB
           ],
           channels,
           buffer_size,
-          rate: rate
+          sample_rate: @sample_rate
         )
       end
 
