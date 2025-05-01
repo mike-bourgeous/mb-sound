@@ -2,7 +2,7 @@ RSpec.describe(MB::Sound::MultiWriter) do
   let(:null_out_1) { MB::Sound::NullOutput.new(channels: 1, sleep: false) }
   let(:null_out_2) { MB::Sound::NullOutput.new(channels: 2, sleep: false) }
   let(:null_out_5) { MB::Sound::NullOutput.new(channels: 5, sleep: false) }
-  let(:null_out_44k) { MB::Sound::NullOutput.new(channels: 1, rate: 44100, sleep: false) }
+  let(:null_out_44k) { MB::Sound::NullOutput.new(channels: 1, sample_rate: 44100, sleep: false) }
   let(:null_out_longbuf) { MB::Sound::NullOutput.new(channels: 1, buffer_size: 1600, sleep: false) }
 
   let(:data5) {

@@ -1,7 +1,7 @@
 RSpec.describe(MB::Sound::HaasPan) do
   let(:d_default) { MB::Sound::HaasPan.new }
-  let(:d_32k_r) { MB::Sound::HaasPan.new(delay: 0.1, rate: 32000) }
-  let(:d_44k1_l) { MB::Sound::HaasPan.new(delay: -0.2, rate: 44100) }
+  let(:d_32k_r) { MB::Sound::HaasPan.new(delay: 0.1, sample_rate: 32000) }
+  let(:d_44k1_l) { MB::Sound::HaasPan.new(delay: -0.2, sample_rate: 44100) }
 
   describe '#initialize' do
     it 'can be constructed with no parameters' do

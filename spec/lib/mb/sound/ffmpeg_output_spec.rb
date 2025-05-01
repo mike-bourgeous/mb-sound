@@ -21,7 +21,7 @@ RSpec.describe MB::Sound::FFMPEGOutput do
       context "when writing .#{format}" do
         it 'can write a file that can be read by FFMPEGInput' do
           name = "tmp/test_out.#{format}"
-          output = MB::Sound::FFMPEGOutput.new(name, rate: 44100, channels: 3)
+          output = MB::Sound::FFMPEGOutput.new(name, sample_rate: 44100, channels: 3)
           expect(output.filename).to include(name)
           output.write(test_data)
           expect(output.close.success?).to eq(true)
@@ -47,7 +47,7 @@ RSpec.describe MB::Sound::FFMPEGOutput do
 
     it 'raises an error if the wrong number of channels are given' do
       name = "tmp/test_out.flac"
-      output = MB::Sound::FFMPEGOutput.new(name, rate: 44100, channels: 2)
+      output = MB::Sound::FFMPEGOutput.new(name, sample_rate: 44100, channels: 2)
       expect {
         output.write(test_data)
       }.to raise_error(ArgumentError, /channel/)
@@ -57,7 +57,7 @@ RSpec.describe MB::Sound::FFMPEGOutput do
   describe '#initialize' do
     it 'can override the default format for an extension' do
       name = 'tmp/test_out.wav'
-      output = MB::Sound::FFMPEGOutput.new(name, rate: 48000, channels: 1, format: 'flac')
+      output = MB::Sound::FFMPEGOutput.new(name, sample_rate: 48000, channels: 1, format: 'flac')
       output.write(test_data[0..0])
       expect(output.close.success?).to eq(true)
 
@@ -68,13 +68,13 @@ RSpec.describe MB::Sound::FFMPEGOutput do
     it 'can specify a bitrate' do
       name = 'tmp/test_out.ogg'
       data = [Numo::SFloat.zeros(48000).rand]
-      output = MB::Sound::FFMPEGOutput.new(name, rate: 48000, channels: 1, bitrate: '32k')
+      output = MB::Sound::FFMPEGOutput.new(name, sample_rate: 48000, channels: 1, bitrate: '32k')
       output.write(data)
       expect(output.close.success?).to eq(true)
 
       size32 = File.size(name)
 
-      output = MB::Sound::FFMPEGOutput.new(name, rate: 48000, channels: 1, bitrate: '128k')
+      output = MB::Sound::FFMPEGOutput.new(name, sample_rate: 48000, channels: 1, bitrate: '128k')
       output.write(data)
       expect(output.close.success?).to eq(true)
 

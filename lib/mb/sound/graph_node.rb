@@ -273,7 +273,7 @@ module MB
       #
       #     # High-pass filter controlled by envelopes
       #     MB::Sound.play 500.hz.ramp.filter(:highpass, frequency: adsr() * 1000 + 100, quality: adsr() * -5 + 6)
-      def filter(filter_or_type = :lowpass, cutoff: nil, quality: nil, gain: nil, in_place: true, rate: 48000)
+      def filter(filter_or_type = :lowpass, cutoff: nil, quality: nil, gain: nil, in_place: true, sample_rate: 48000)
         f = filter_or_type
         f = f.hz if f.is_a?(Numeric)
         f = f.lowpass if f.is_a?(Tone)
@@ -321,7 +321,7 @@ module MB
       #
       # TODO: instead of reacting to step changes in the input, use an FIR
       # filter whose step response is the smoothstep function.
-      def smooth(samples: nil, seconds: nil, rate: 48000)
+      def smooth(samples: nil, seconds: nil, sample_rate: 48000)
         filter(MB::Sound::Filter::Smoothstep.new(rate: rate, samples: samples, seconds: seconds))
       end
 
@@ -330,7 +330,7 @@ module MB
       #
       # See MB::Sound::Filter::Delay#initialize for a description of the
       # +:smoothing+ parameter.
-      def delay(seconds: nil, samples: nil, rate: 48000, smoothing: true, max_delay: 1.0)
+      def delay(seconds: nil, samples: nil, sample_rate: 48000, smoothing: true, max_delay: 1.0)
         if samples
           samples = samples.to_f if samples.is_a?(Numeric)
           seconds = samples / rate
@@ -338,7 +338,7 @@ module MB
           seconds = seconds.to_f if seconds.is_a?(Numeric)
         end
 
-        filter(MB::Sound::Filter::Delay.new(delay: seconds, rate: rate, smoothing: smoothing, buffer_size: rate * max_delay))
+        filter(MB::Sound::Filter::Delay.new(delay: seconds, sample_rate: rate, smoothing: smoothing, buffer_size: rate * max_delay))
       end
 
       # Adds a multi-tap delay with the given delay sources, returning an Array
@@ -348,11 +348,11 @@ module MB
       # To smooth delay values, use #clip_rate, #smooth, #filter, or similar
       # methods (unlike the filter used by #delay, the
       # MB::Sound::GraphNode::MultitapDelay does not do built-in smoothing).
-      def multitap(*delays, rate: 48000, name: nil, initial_buffer_seconds: 1)
+      def multitap(*delays, sample_rate: 48000, name: nil, initial_buffer_seconds: 1)
         MB::Sound::GraphNode::MultitapDelay.new(
           self,
           *delays,
-          rate: rate,
+          sample_rate: rate,
           initial_buffer_seconds: initial_buffer_seconds
         ).named(name).taps
       end
@@ -377,7 +377,7 @@ module MB
       # also #smooth and #filter).
       #
       # Uses MB::Sound::Filter::LinearFollower.
-      def clip_rate(max_rise, max_fall = nil, reset: nil, rate: 48000)
+      def clip_rate(max_rise, max_fall = nil, reset: nil, sample_rate: 48000)
         max_fall ||= -max_rise
         max_rise ||= -max_fall
         f = MB::Sound::Filter::LinearFollower.new(rate: rate, max_rise: max_rise, max_fall: max_fall)

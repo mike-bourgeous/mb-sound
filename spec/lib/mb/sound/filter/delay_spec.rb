@@ -1,15 +1,15 @@
 RSpec.describe(MB::Sound::Filter::Delay) do
   let(:shortbuf) {
-    MB::Sound::Filter::Delay.new(delay: 5, rate: 1, buffer_size: 10)
+    MB::Sound::Filter::Delay.new(delay: 5, sample_rate: 1, buffer_size: 10)
   }
 
   let(:midbuf) {
-    MB::Sound::Filter::Delay.new(delay: 10, rate: 1, buffer_size: 171)
+    MB::Sound::Filter::Delay.new(delay: 10, sample_rate: 1, buffer_size: 171)
   }
 
   describe '#initialize' do
     it 'can calculate delay in samples based on sample rate' do
-      d = MB::Sound::Filter::Delay.new(delay: 0.75, rate: 4, buffer_size: 17)
+      d = MB::Sound::Filter::Delay.new(delay: 0.75, sample_rate: 4, buffer_size: 17)
       expect(d.delay_samples).to eq(3)
     end
   end

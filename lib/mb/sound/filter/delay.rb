@@ -9,8 +9,7 @@ module MB
         # The default delay-time smoothing rate in seconds per second.
         DEFAULT_SMOOTHING_RATE = 0.5
 
-        attr_reader :delay, :delay_samples, :rate, :smoothing, :smooth_limit
-        alias sample_rate rate
+        attr_reader :delay, :delay_samples, :sample_rate, :smoothing, :smooth_limit
 
         attr_reader :write_offset, :read_offset
 
@@ -19,7 +18,7 @@ module MB
         attr_reader :min_delay_samples, :max_delay_samples, :last_delay_samples
 
         # Initializes a single-channel delay with a given +:delay+ in seconds,
-        # based on the sample +:rate+..  The +:buffer_size+ sets the maximum
+        # based on the +:sample_rate+..  The +:buffer_size+ sets the maximum
         # possible delay.
         #
         # If +:smoothing+ is true (the default), then the delay time will be
@@ -27,14 +26,14 @@ module MB
         # +:smoothing+ is a numeric value, then that is the maximum delay
         # change in seconds allowed per second.  The default smoothing rate is
         # MB::Sound::Filter::Delay::DEFAULT_SMOOTHING_RATE.
-        def initialize(delay: 0, rate: 48000, buffer_size: 48000, smoothing: true)
+        def initialize(delay: 0, sample_rate: 48000, buffer_size: 48000, smoothing: true)
           if delay.is_a?(Numeric)
             buffer_size = 1.1 * delay * rate if buffer_size < 1.1 * delay * rate
           end
 
           @buf = Numo::SFloat.zeros(buffer_size)
           @out_buf = Numo::SFloat.zeros(1) # For wrap-around reads
-          @rate = rate.to_f
+          @sample_rate = rate.to_f
           @delay = 0
           @delay_samples = 0
           @read_offset = 0
@@ -91,11 +90,11 @@ module MB
             @filter = smoothing
             @smooth_limit = nil
           else
-            new_limit = @rate * (smoothing.is_a?(Numeric) ? smoothing : DEFAULT_SMOOTHING_RATE)
+            new_limit = @sample_rate * (smoothing.is_a?(Numeric) ? smoothing : DEFAULT_SMOOTHING_RATE)
             if new_limit != @smooth_limit
               @smooth_limit = new_limit
               @filter = MB::Sound::Filter::LinearFollower.new(
-                rate: @rate,
+                sample_rate: @sample_rate,
                 max_rise: @smooth_limit,
                 max_fall: @smooth_limit
               )
@@ -110,7 +109,7 @@ module MB
         def delay_samples=(samples)
           if samples.respond_to?(:sample)
             @delay_samples = samples
-            @delay = samples / @rate
+            @delay = samples / @sample_rate
             @min_delay_samples = 0
             @max_delay_samples = 0
             @last_delay_samples = 0
@@ -124,7 +123,7 @@ module MB
             @min_delay_samples = @delay_samples
             @max_delay_samples = @delay_samples
             @last_delay_samples = @delay_samples
-            @delay = samples.to_f / @rate
+            @delay = samples.to_f / @sample_rate
             @read_offset = (@write_offset - @delay_samples) % @buf.length
           end
         end
@@ -132,7 +131,7 @@ module MB
         # Sets the delay time in +seconds+, which is converted to a number of
         # samples using the sample rate.
         def delay=(seconds)
-          self.delay_samples = seconds * @rate
+          self.delay_samples = seconds * @sample_rate
         end
 
         # Returns a copy of the current delay buffer, rotated so that the write

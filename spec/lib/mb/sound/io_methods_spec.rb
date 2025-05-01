@@ -48,7 +48,7 @@ RSpec.describe(MB::Sound::IOMethods) do
     end
 
     it 'can read without resampling' do
-      a = MB::Sound.read('sounds/sine/sine_100_44k.flac', rate: nil)
+      a = MB::Sound.read('sounds/sine/sine_100_44k.flac', sample_rate: nil)
       expect(a.length).to eq(1)
       expect(a[0].length).to eq(44100)
       expect(a[0].max).to be_between(0.4, 1.0)
@@ -73,26 +73,26 @@ RSpec.describe(MB::Sound::IOMethods) do
       let(:data) { Numo::SFloat[0, 0.5, -0.5, 0] }
 
       it 'can write an array of NArrays to a sound file' do
-        MB::Sound.write(name, [data], rate: 48000)
+        MB::Sound.write(name, [data], sample_rate: 48000)
         info = MB::Sound::FFMPEGInput.parse_info(name)
         expect(info[:streams][0][:duration_ts]).to eq(4)
       end
 
       it 'can write a raw NArray to a sound file' do
-        MB::Sound.write(name, data, rate: 48000)
+        MB::Sound.write(name, data, sample_rate: 48000)
         info = MB::Sound::FFMPEGInput.parse_info(name)
         expect(info[:streams][0][:duration_ts]).to eq(4)
       end
 
       it 'can write a Tone to a sound file' do
-        MB::Sound.write(name, 100.hz.for(1), rate: 48000)
+        MB::Sound.write(name, 100.hz.for(1), sample_rate: 48000)
         info = MB::Sound::FFMPEGInput.parse_info(name)
         expect(info[:streams][0][:duration_ts]).to eq(48000)
         expect(info[:streams][0][:channels]).to eq(1)
       end
 
       it 'can write multiple tones to a sound file' do
-        MB::Sound.write(name, [100.hz.for(1), 200.hz.for(1)], rate: 48000)
+        MB::Sound.write(name, [100.hz.for(1), 200.hz.for(1)], sample_rate: 48000)
         info = MB::Sound::FFMPEGInput.parse_info(name)
         expect(info[:streams][0][:duration_ts]).to eq(48000)
         expect(info[:streams][0][:channels]).to eq(2)
@@ -107,7 +107,7 @@ RSpec.describe(MB::Sound::IOMethods) do
         name = 'tmp/sound_write_exists.flac'
         FileUtils.touch(name)
         expect {
-          MB::Sound.write(name, [Numo::SFloat[0, 0.1, -0.2, 0.3]], rate: 48000)
+          MB::Sound.write(name, [Numo::SFloat[0, 0.1, -0.2, 0.3]], sample_rate: 48000)
         }.to raise_error(MB::Sound::FileExistsError)
       end
     end
@@ -119,7 +119,7 @@ RSpec.describe(MB::Sound::IOMethods) do
         FileUtils.touch(name)
         expect(File.size(name)).to eq(0)
 
-        MB::Sound.write(name, [Numo::SFloat[0, 0.1, -0.2, 0.3]], rate: 48000, overwrite: true)
+        MB::Sound.write(name, [Numo::SFloat[0, 0.1, -0.2, 0.3]], sample_rate: 48000, overwrite: true)
         expect(File.size(name)).to be > 0
       end
     end
@@ -184,7 +184,7 @@ RSpec.describe(MB::Sound::IOMethods) do
       name = 'tmp/file_output_test.flac'
 
       begin
-        output = MB::Sound.file_output(name, rate: 32000, channels: 3)
+        output = MB::Sound.file_output(name, sample_rate: 32000, channels: 3)
         output.write([Numo::SFloat.zeros(127)] * 3)
       ensure
         output&.close
@@ -225,7 +225,7 @@ RSpec.describe(MB::Sound::IOMethods) do
         FileUtils.touch(name)
         expect(File.size(name)).to eq(0)
 
-        output = MB::Sound.file_output(name, rate: 48000, channels: 1, overwrite: true)
+        output = MB::Sound.file_output(name, sample_rate: 48000, channels: 1, overwrite: true)
         output.close
         expect(File.size(name)).to be > 0
       end

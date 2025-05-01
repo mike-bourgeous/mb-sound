@@ -1,7 +1,7 @@
 RSpec.describe(MB::Sound::ArrayInput, :aggregate_failures) do
   describe '#initialize' do
     let(:input) {
-      MB::Sound::ArrayInput.new(data: data, rate: 1)
+      MB::Sound::ArrayInput.new(data: data, sample_rate: 1)
     }
 
     shared_examples_for :type_promotion do
@@ -176,7 +176,7 @@ RSpec.describe(MB::Sound::ArrayInput, :aggregate_failures) do
 
     d1.each do |t|
       it "returns data from #{t[:description]}" do
-        input = MB::Sound::ArrayInput.new(data: t[:data], rate: 48000)
+        input = MB::Sound::ArrayInput.new(data: t[:data], sample_rate: 48000)
 
         expect(input.read(2)).to eq([[1, 2], [0, -1]])
         expect(input.remaining).to eq(8)
@@ -198,7 +198,7 @@ RSpec.describe(MB::Sound::ArrayInput, :aggregate_failures) do
         Numo::SFloat[0, -1],
         Numo::SFloat[],
       ]
-      input = MB::Sound::ArrayInput.new(data: data, rate: 1)
+      input = MB::Sound::ArrayInput.new(data: data, sample_rate: 1)
 
       expect(input.read(6)).to eq([[1, 2, 3, 4, 5, 6], [0, -1, 0, 0, 0, 0], [0, 0, 0, 0, 0, 0]])
       expect(input.read(4)).to eq([[7, 8, 9, 0], [0, 0, 0, 0], [0, 0, 0, 0]])
@@ -208,7 +208,7 @@ RSpec.describe(MB::Sound::ArrayInput, :aggregate_failures) do
       data = [
         Numo::SFloat[1, 2, 3, 4]
       ]
-      input = MB::Sound::ArrayInput.new(data: data, rate: 1)
+      input = MB::Sound::ArrayInput.new(data: data, sample_rate: 1)
 
       expect(input.read(1)).to eq([[1]])
       expect(input.read(12)).to eq([[2, 3, 4]])
@@ -223,7 +223,7 @@ RSpec.describe(MB::Sound::ArrayInput, :aggregate_failures) do
         Numo::SFloat[1, 2, 3, 4, 5, 6],
         Numo::SFloat[1, 2, 3, 4, 5, 6],
       ]
-      input = MB::Sound::ArrayInput.new(data: data, rate: 1)
+      input = MB::Sound::ArrayInput.new(data: data, sample_rate: 1)
 
       expect(input.read(2)).to eq([[1, 2]] * 3)
       input.seek_set(1)
@@ -242,7 +242,7 @@ RSpec.describe(MB::Sound::ArrayInput, :aggregate_failures) do
         Numo::SFloat[1, 2, 3, 4, 5, 6],
         Numo::SFloat[1, 2, 3, 4, 5, 6],
       ]
-      input = MB::Sound::ArrayInput.new(data: data, rate: 1)
+      input = MB::Sound::ArrayInput.new(data: data, sample_rate: 1)
 
       expect(input.read(2)).to eq([[1, 2]] * 3)
       input.seek_rel(1)
@@ -262,15 +262,15 @@ RSpec.describe(MB::Sound::ArrayInput, :aggregate_failures) do
 
   describe 'accessors' do
     [
-      { data: [[]], rate: 1, frames: 0 },
-      { data: [[], []], rate: 2, frames: 0 },
-      { data: [[1], [2, 3], [4, 5, 6]], rate: 3, frames: 3 },
+      { data: [[]], sample_rate: 1, frames: 0 },
+      { data: [[], []], sample_rate: 2, frames: 0 },
+      { data: [[1], [2, 3], [4, 5, 6]], sample_rate: 3, frames: 3 },
     ].each do |t|
       context "with #{t}" do
         it 'will return the correct frame counts, sample rate, and number of channels' do
-          input = MB::Sound::ArrayInput.new(data: t[:data], rate: t[:rate])
+          input = MB::Sound::ArrayInput.new(data: t[:data], sample_rate: t[:sample_rate])
           expect(input.channels).to eq(t[:data].length)
-          expect(input.rate).to eq(t[:rate])
+          expect(input.sample_rate).to eq(t[:sample_rate])
           expect(input.frames).to eq(t[:frames])
         end
       end
@@ -279,7 +279,7 @@ RSpec.describe(MB::Sound::ArrayInput, :aggregate_failures) do
 
   describe '#sample' do
     it 'returns the first channel data, with zero padding' do
-      input = MB::Sound::ArrayInput.new(data: [[1, 2, 3, 4+4i], [4, 3, 2, 1]], rate: 1)
+      input = MB::Sound::ArrayInput.new(data: [[1, 2, 3, 4+4i], [4, 3, 2, 1]], sample_rate: 1)
       expect(input.sample(2)).to eq(Numo::DComplex[1, 2])
       expect(input.sample(3)).to eq(Numo::DComplex[3, 4+4i, 0])
     end
