@@ -31,8 +31,7 @@ module MB
       #     rotation = Complex.polar(1, Math::PI / 4)
       #     MB::Sound::Filter::FIR.new(gains: { 20 => rotation, 100 => rotation })
       class FIR < Filter
-        attr_reader :filter_length, :window_length, :rate, :gain_map, :filter_fft, :gains, :impulse
-        alias sample_rate rate
+        attr_reader :filter_length, :window_length, :sample_rate, :gain_map, :filter_fft, :gains, :impulse
 
         # The processing delay of the filter.  This delay allows the filter to
         # buffer incoming data into window-sized chunks while always returning
@@ -53,15 +52,15 @@ module MB
         #
         # The +:filter_length+, +:window_length+ (size of FFT, which must be
         # larger than the filter length and should be several times larger for
-        # best performance), and sample +:rate+ may be overridden.
+        # best performance), and +:sample_rate+ may be overridden.
         #
         # The +:filter_length+ parameter is ignored if +gains+ is a
         # Numo::NArray.
-        def initialize(gains, filter_length: nil, window_length: nil, rate: 48000)
+        def initialize(gains, filter_length: nil, window_length: nil, sample_rate: 48000)
           @filter_length = filter_length
           @window_length = window_length
-          @rate = rate
-          @nyquist = rate / 2.0
+          @sample_rate = sample_rate
+          @nyquist = sample_rate / 2.0
 
           case gains
           when Hash
@@ -209,8 +208,8 @@ module MB
 
           # TODO: What needs to be done differently if an odd filter length is
           # given to the constructor?
-          @filter_length ||= (@rate.to_f / mindiff / 2).ceil * 2
-          hz_per_bin = @rate.to_f / @filter_length
+          @filter_length ||= (@sample_rate.to_f / mindiff / 2).ceil * 2
+          hz_per_bin = @sample_rate.to_f / @filter_length
 
           final_gain_map = {}
 
@@ -246,7 +245,7 @@ module MB
           g1 = @gain_map[1]
           gidx = 1
           response.inplace.map_with_index do |_, idx|
-            hz = idx.to_f * @rate / @filter_length
+            hz = idx.to_f * @sample_rate / @filter_length
             if hz > g1[0]
               g0 = g1
               gidx += 1

@@ -41,22 +41,23 @@ module MB
     #
     # +:frequency+ - The center or cutoff frequency of the filter.
     # +:filter_type+ - One of the filter types from MB::Sound::Filter::Cookbook::FILTER_TYPES.
-    # +:rate+ - The sample rate to use for the filter (defaults to sound.rate if sound responds to :rate, or 48000).
+    # +:sample_rate+ - The sample rate to use for the filter (defaults to
+    #                  sound.rate if sound responds to :rate, or 48000).
     # +:quality+ - The "quality factor" of the filter.  Higher values are more
     #              resonant.  Must specify one of quality, slope, or bandwidth.
     # +:slope+ - The slope for a shelf filter.  Specify one of quality, slope, or bandwidth.
     # +:bandwidth+ - The bandwidth of a peaking filter.
     # +:gain+ - The gain of a shelf or peaking filter.
-    def self.apply_filter(sound, frequency:, filter_type: :lowpass, rate: nil, quality: nil, slope: nil, bandwidth: nil, gain: nil)
+    def self.apply_filter(sound, frequency:, filter_type: :lowpass, sample_rate: nil, quality: nil, slope: nil, bandwidth: nil, gain: nil)
       # TODO: Further develop filters and sound sources into a sound
       # source/sink graph, where a complete graph can be built up with a DSL,
       # and actual generation only occurs on demand?
-      rate ||= sound.respond_to?(:rate) ? sound.rate : 48000
+      rate ||= sound.respond_to?(:sample_rate) ? sound.sample_rate : 48000
       sound = any_sound_to_array(sound)
       frequency = frequency.frequency if frequency.respond_to?(:frequency) # get 343 from 343.hz
       filter = MB::Sound::Filter::Cookbook.new(
         filter_type,
-        rate,
+        sample_rate,
         frequency,
         db_gain: gain&.to_db,
         quality: quality,

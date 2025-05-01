@@ -284,7 +284,7 @@ module MB
 
           quality = quality || 0.5 ** 0.5
           # TODO: Support graph node sources for filter gain
-          f = MB::Sound::Filter::Cookbook.new(filter_or_type, rate, 1, quality: 1, db_gain: gain&.to_db)
+          f = MB::Sound::Filter::Cookbook.new(filter_or_type, sample_rate, 1, quality: 1, db_gain: gain&.to_db)
           MB::Sound::Filter::Cookbook::CookbookWrapper.new(filter: f, audio: self, cutoff: cutoff, quality: quality)
 
         when f.respond_to?(:wrap)
@@ -312,8 +312,8 @@ module MB
       # and produce a Complex-valued analytic signal.
       #
       # See MB::Sound::Filter::HilbertIIR.
-      def hilbert_iir(rate: 48000)
-        filter(MB::Sound::Filter::HilbertIIR.new(rate: rate))
+      def hilbert_iir(sample_rate: 48000)
+        filter(MB::Sound::Filter::HilbertIIR.new(sample_rate: sample_rate))
       end
 
       # Adds a MB::Sound::Filter::Smoothstep filter to the chain, smoothing
@@ -322,7 +322,7 @@ module MB
       # TODO: instead of reacting to step changes in the input, use an FIR
       # filter whose step response is the smoothstep function.
       def smooth(samples: nil, seconds: nil, sample_rate: 48000)
-        filter(MB::Sound::Filter::Smoothstep.new(rate: rate, samples: samples, seconds: seconds))
+        filter(MB::Sound::Filter::Smoothstep.new(sample_rate: sample_rate, samples: samples, seconds: seconds))
       end
 
       # Adds a MB::Sound::Filter::Delay to the signal chain with a delay of the
@@ -338,7 +338,7 @@ module MB
           seconds = seconds.to_f if seconds.is_a?(Numeric)
         end
 
-        filter(MB::Sound::Filter::Delay.new(delay: seconds, sample_rate: rate, smoothing: smoothing, buffer_size: rate * max_delay))
+        filter(MB::Sound::Filter::Delay.new(delay: seconds, sample_rate: sample_rate, smoothing: smoothing, buffer_size: sample_rate.ceil * max_delay))
       end
 
       # Adds a multi-tap delay with the given delay sources, returning an Array
@@ -352,7 +352,7 @@ module MB
         MB::Sound::GraphNode::MultitapDelay.new(
           self,
           *delays,
-          sample_rate: rate,
+          sample_rate: sample_rate,
           initial_buffer_seconds: initial_buffer_seconds
         ).named(name).taps
       end
@@ -380,7 +380,7 @@ module MB
       def clip_rate(max_rise, max_fall = nil, reset: nil, sample_rate: 48000)
         max_fall ||= -max_rise
         max_rise ||= -max_fall
-        f = MB::Sound::Filter::LinearFollower.new(rate: rate, max_rise: max_rise, max_fall: max_fall)
+        f = MB::Sound::Filter::LinearFollower.new(sample_rate: sample_rate, max_rise: max_rise, max_fall: max_fall)
         f.reset(reset) if reset
         self.filter(f)
       end

@@ -396,7 +396,7 @@ module MB
         tone = tone.hz if tone.is_a?(Numeric)
         tone = tone.at(1) if index && tone.is_a?(Tone)
         tone = tone.oscillator if tone.is_a?(Tone)
-        @frequency = MB::Sound::GraphNode::Mixer.new([@frequency, [tone, index || 1]])
+        @frequency = MB::Sound::GraphNode::Mixer.new([@frequency, [tone, index || 1]], sample_rate: @sample_rate)
         self
       end
 

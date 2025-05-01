@@ -30,7 +30,7 @@ RSpec.describe MB::Sound::FFMPEGOutput do
           expect(File.size(name)).to be > 0
 
           input = MB::Sound::FFMPEGInput.new(name)
-          expect(input.rate).to eq(44100)
+          expect(input.sample_rate).to eq(44100)
           expect(input.channels).to eq(3)
           expect(input.frames).to eq(4)
 

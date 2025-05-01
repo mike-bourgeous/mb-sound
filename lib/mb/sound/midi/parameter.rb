@@ -176,7 +176,7 @@ module MB
 
           if max_rise != false && max_fall != false
             @follower = MB::Sound::Filter::LinearFollower.new(
-              rate: update_rate,
+              sample_rate: update_rate,
               max_rise: max_rise || (@width * update_rate),
               max_fall: max_fall || (@width * update_rate)
             )
