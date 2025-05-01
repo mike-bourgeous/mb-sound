@@ -40,6 +40,28 @@ RSpec.describe(MB::Sound::GraphNode::Mixer) do
       )
       expect(ss.sample(800)).to eq(Numo::SFloat.zeros(800).fill(3.75))
     end
+
+    it 'can infer the sample rate from its summands' do
+      mix = MB::Sound::GraphNode::Mixer.new(
+        [
+          15.hz.at_rate(1500),
+          30.hz.at_rate(1500)
+        ]
+      )
+
+      expect(mix.sample_rate).to eq(1500)
+    end
+
+    it 'raises an error if given summands with different sample rates' do
+      expect {
+        MB::Sound::GraphNode::Mixer.new(
+          [
+            15.hz.at_rate(1500),
+            30.hz.at_rate(3000)
+          ]
+        )
+      }.to raise_error(/sample rate.*3000.*1500/)
+    end
   end
 
   describe '#sample' do

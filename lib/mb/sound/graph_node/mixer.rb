@@ -36,8 +36,7 @@ module MB
         # or an empty NArray from its #sample method will cause this #sample
         # method to return nil.  Otherwise, the #sample method only returns nil
         # when all summands return nil or empty.
-        def initialize(summands, sample_rate:, stop_early: true)
-          # TODO: detect sample rate from summands
+        def initialize(summands, sample_rate: nil, stop_early: true)
           @constant = 0
           @summands = {}
 
@@ -45,20 +44,22 @@ module MB
 
           @stop_early = stop_early
 
-          raise 'Sample rate must be a positive numeric' unless sample_rate.is_a?(Numeric) && sample_rate > 0
-          @sample_rate = sample_rate.to_f
-
           # TODO: Allow variable length argument lists (kind of tricky to detect
           # the different cases of arrays vs hashes vs varargs accurately)
           summands = [summands] unless summands.is_a?(Array) || summands.is_a?(Hash)
+
+          @sample_rate = sample_rate
 
           summands.each_with_index do |(s, gain), idx|
             gain ||= 1.0
 
             @complex = true if gain.is_a?(Complex)
 
-            if s.respond_to?(:sample_rate) && @sample_rate != s.sample_rate
-              raise "Summand #{idx}/#{s} sample rate #{s.sample_rate} does not match mixer sample rate #{@sample_rate}"
+            if s.respond_to?(:sample_rate)
+              @sample_rate ||= s.sample_rate
+              if @sample_rate != s.sample_rate
+                raise "Summand #{idx}/#{s} sample rate #{s.sample_rate} does not match mixer sample rate #{@sample_rate}"
+              end
             end
 
             case
@@ -76,6 +77,9 @@ module MB
               raise ArgumentError, "Summand #{s.inspect} at index #{idx} is not a Numeric and does not respond to :sample"
             end
           end
+
+          raise 'Sample rate must be a positive numeric' unless @sample_rate.is_a?(Numeric) && @sample_rate > 0
+          @sample_rate = @sample_rate.to_f
 
           @buf = nil
         end
