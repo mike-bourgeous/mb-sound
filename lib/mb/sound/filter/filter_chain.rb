@@ -72,6 +72,7 @@ module MB
             acc
           }
         end
+        alias pole_zero polezero
 
         # Appends another filter to this filter chain.  Building up a filter
         # chain is something like O(n^2), as every filter is checked for
