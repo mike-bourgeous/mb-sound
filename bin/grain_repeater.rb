@@ -101,14 +101,14 @@ else
   output = MB::Sound.output(channels: output_channels)
 end
 
-puts MB::U.highlight(
+puts MB::U.highlight({
   count: count,
   delay: delay,
   input: input.graph_node_name,
   output: output,
   input_buffer: input.buffer_size,
   output_buffer: output.buffer_size,
-)
+})
 
 # TODO: MIDI control of parameters
 
