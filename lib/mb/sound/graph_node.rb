@@ -273,7 +273,7 @@ module MB
       #
       #     # High-pass filter controlled by envelopes
       #     MB::Sound.play 500.hz.ramp.filter(:highpass, frequency: adsr() * 1000 + 100, quality: adsr() * -5 + 6)
-      def filter(filter_or_type = :lowpass, cutoff: nil, quality: nil, gain: nil, in_place: true, sample_rate: 48000)
+      def filter(filter_or_type = :lowpass, cutoff: nil, quality: nil, gain: nil, in_place: true)
         f = filter_or_type
         f = f.hz if f.is_a?(Numeric)
         f = f.lowpass if f.is_a?(Tone)
