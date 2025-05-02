@@ -114,7 +114,7 @@ wet_level = ENV['WET']&.to_f || 1
 
 phase_spread = ENV['SPREAD']&.to_f || 180.0
 
-puts MB::U.highlight(
+puts MB::U.highlight({
   args: ARGV,
   other_args: others,
   wave_type: wave_type,
@@ -126,7 +126,7 @@ puts MB::U.highlight(
   sample_rate: output.sample_rate,
   buffer: bufsize,
   internal_buffer: internal_bufsize,
-)
+})
 
 # TODO: Maybe want a graph-wide spy function that either prints stats, draws
 # meters, or plots graphs of multiple nodes by name or reference
