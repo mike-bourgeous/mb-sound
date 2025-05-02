@@ -48,11 +48,11 @@ end
 bufsize = output.buffer_size
 buftime = bufsize.to_f / output.sample_rate
 
-puts MB::U.highlight(
+puts MB::U.highlight({
   delay: delay,
   bufsize: bufsize,
   buftime: buftime,
-)
+})
 
 begin
   # TODO: Abstract construction of a filter graph per channel

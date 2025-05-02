@@ -76,7 +76,7 @@ wet = ENV['WET']&.to_f || 1
 drive = ENV['DRIVE']&.to_f || 1
 smoothing = ENV['SMOOTHING']&.to_f || 2
 
-puts MB::U.highlight(
+puts MB::U.highlight({
   dry: dry,
   wet: wet,
   drive: drive,
@@ -88,7 +88,7 @@ puts MB::U.highlight(
   sample_rate: output.sample_rate,
   buffer: bufsize,
   internal_buffer: internal_bufsize,
-)
+})
 
 # TODO: Make it easy to replicate a signal graph for each of N channels
 # TODO: stereo+, ping-pong

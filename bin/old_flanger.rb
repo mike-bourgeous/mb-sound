@@ -49,7 +49,7 @@ delay_smoothing2 = delay_smoothing
 dry_level = ENV['DRY']&.to_f || 1
 wet_level = ENV['WET']&.to_f || 1
 
-puts MB::U.highlight(
+puts MB::U.highlight({
   wave_type: wave_type,
   delay: delay,
   feedback: feedback,
@@ -60,7 +60,7 @@ puts MB::U.highlight(
   inputs: inputs.map(&:graph_node_name),
   sample_rate: output.sample_rate,
   buffer: bufsize,
-)
+})
 
 begin
   paths = inputs.map.with_index { |inp, idx|
