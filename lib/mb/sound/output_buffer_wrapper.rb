@@ -45,6 +45,7 @@ module MB
       def write(data)
         raise 'Data must be an Array of Numo::NArray' unless data.is_a?(Array) && data.all?(Numo::NArray)
         raise "Must have #{@output.channels} channels; got #{data.length}" if data.length != @output.channels
+        raise "All channels must have the same length (got #{data.map(&:length)}" if data.map(&:length).uniq.length != 1
 
         setup_circular_buffers(data[0].length)
 

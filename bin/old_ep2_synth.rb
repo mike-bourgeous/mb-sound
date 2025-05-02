@@ -80,7 +80,7 @@ end
 
 jack = MB::Sound::JackFFI[]
 midi_in = jack.input(port_type: :midi, port_names: ['midi_in'], connect: ARGV[0] || :physical)
-output = jack.output(port_names: ['Synth', 'Impulse'], connect: :physical)
+output = MB::Sound::OutputBufferWrapper.new(jack.output(port_names: ['Synth', 'Impulse'], connect: :physical))
 
 MB::Sound::Oscillator.tune_freq = 480
 MB::Sound::Oscillator.tune_note = 71
@@ -120,5 +120,5 @@ loop do
 
   data = osc_bank.map { |osc| osc.sample(output.buffer_size) }.sum
   data = filter.process(data)
-  output.write([data, filter.impulse_response(800)])
+  output.write([data, filter.impulse_response(output.buffer_size)])
 end
