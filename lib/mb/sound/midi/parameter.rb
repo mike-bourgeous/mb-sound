@@ -17,17 +17,24 @@ module MB
           MIDIMessage::PolyphonicAftertouch => 0..127,
         }
 
-        # Generates a consistent hash key for a given MIDIMessage instance
-        # (from the midi-message gem).  For example, this value will compare
-        # equal for any two messages that have the given channel number and
-        # MIDI CC number.
+        # Generates consistent hash keys for a given MIDIMessage instance (from
+        # the midi-message gem).  For example, this value will compare equal
+        # for any two messages that have the given channel number and MIDI CC
+        # number.
         #
         # This is necessary for the Manager class to be able to group
         # parameters because e.g. two MIDIMessage::ControlChange instances with
         # the exact same data will not compare equal and will not return the
         # same hash value.
-        def self.generate_message_key(message, ignore_channel: false)
+        #
+        # For note events, two keys are generated -- one for the specific note,
+        # and one for any note.  This allows the MIDI Manager to look up
+        # non-note-specific parameters for a note-on/note-off event.
+        #
+        # See Manager#update.
+        def self.generate_message_keys(message, ignore_channel: false)
           key = [message.class]
+          keys = [key]
 
           if message.respond_to?(:channel)
             if ignore_channel || message.channel.nil? || message.channel < 0
@@ -40,6 +47,10 @@ module MB
 
           case message
           when MIDIMessage::NoteOn, MIDIMessage::NoteOff
+            # Add a second key that matches all note numbers so note events can
+            # reach non-note-specific parameters.
+            keys << key.dup
+
             # If a note number was given to the constructor, then only that
             # note should match and the parameter will be controlled by note
             # velocity.  Otherwise the note number controls the parameter value
@@ -64,7 +75,7 @@ module MB
             raise "Unsupported message type: #{message.class}"
           end
 
-          key.freeze
+          keys.uniq.map(&:freeze).freeze
         end
 
         # The template message (a MIDIMessage from the midi-message gem) used
@@ -187,7 +198,7 @@ module MB
           filter_list = [@follower, @lowpass].compact
           @filter = MB::Sound::Filter::FilterChain.new(*filter_list)
 
-          @hash_key = Parameter.generate_message_key(message)
+          @hash_key = Parameter.generate_message_keys(message)[0]
 
           # Set the starting value to the default
           reset(@default)

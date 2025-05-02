@@ -199,6 +199,7 @@ module MB
         # #on_midi.
         def on_note_number(range: 0..127, default: nil, filter_hz: nil, max_rise: nil, max_fall: nil, description: nil, &callback)
           template = MIDIMessage::NoteOn.new(@channel, -1, -1)
+
           on_midi(
             template,
             range: range,
@@ -304,9 +305,11 @@ module MB
 
               params = @parameters[e.class]
               if params
-                key = MB::Sound::MIDI::Parameter.generate_message_key(e, ignore_channel: @channel.nil?)
-                params[key]&.each do |p, _cb|
-                  p.notify(e)
+                keys = MB::Sound::MIDI::Parameter.generate_message_keys(e, ignore_channel: @channel.nil?)
+                keys.each do |k|
+                  params[k]&.each do |p, _cb|
+                    p.notify(e)
+                  end
                 end
               end
             end
