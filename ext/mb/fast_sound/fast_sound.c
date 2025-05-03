@@ -1604,4 +1604,7 @@ void Init_fast_sound(void)
 	// Functions to test conversion to and from Ruby complex datatypes
 	rb_define_module_function(fast_sound, "complex", ruby_complex, 1);
 	rb_define_module_function(fast_sound, "narray_to_array", ruby_narray_to_array, 1);
+
+	// Sampling/resampling functions
+	// TODO
 }

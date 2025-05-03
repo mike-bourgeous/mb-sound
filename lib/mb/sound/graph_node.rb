@@ -256,6 +256,14 @@ module MB
         MB::Sound::GraphNode::NodeSequence.new([self, *sources])
       end
 
+      # Adds a resampling filter to the graph with the given new sample rate.
+      # All nodes added after the resampling node must use the new sample rate.
+      #
+      # TODO: add a parameter for controlling the resampling algorithm?
+      def resample(sample_rate)
+        MB::Sound::GraphNode::Resample.new(upstream: self, sample_rate: sample_rate)
+      end
+
       # Applies the given filter (creating the filter if given a filter type)
       # to this sample source or sample chain.  If given a filter type, then a
       # dynamically updating filter is created where the cutoff and quality are
