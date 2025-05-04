@@ -27,7 +27,7 @@ Gem::Specification.new do |spec|
   spec.executables   = spec.files.grep(%r{^bin/}) { |f| File.basename(f) }
   spec.require_paths = ["lib"]
 
-  spec.extensions = ['ext/mb/fast_sound/extconf.rb']
+  spec.extensions = ['ext/mb/fast_sound/extconf.rb', 'ext/mb/sound/resample/extconf.rb']
 
   spec.add_runtime_dependency 'csv', '~> 3.3', '>= 3.3.3'
   spec.add_runtime_dependency 'psych', '~> 5.2.3'

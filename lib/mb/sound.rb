@@ -10,6 +10,9 @@ end
 require 'mb-math'
 require 'mb-util'
 
+require_relative 'fast_sound'
+require_relative 'sound/resample'
+
 require_relative 'sound/version'
 require_relative 'sound/io_methods'
 require_relative 'sound/plot_methods'
