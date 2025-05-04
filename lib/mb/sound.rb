@@ -10,8 +10,9 @@ end
 require 'mb-math'
 require 'mb-util'
 
+# Load C extensions
 require_relative 'fast_sound'
-require_relative 'sound/resample'
+require_relative 'sound/fast_resample'
 
 require_relative 'sound/version'
 require_relative 'sound/io_methods'

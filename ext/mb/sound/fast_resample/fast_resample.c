@@ -12,7 +12,7 @@
 
 #include "numo/narray.h"
 
-static VALUE resample_class;
+static VALUE fast_resample_class;
 static VALUE src_data_class;
 static VALUE src_state_class;
 
@@ -20,7 +20,7 @@ static VALUE src_state_class;
  * Initializes a libsamplerate-based resampler with the given conversion
  * +ratio+ (output rate divided by input rate).
  */
-static VALUE ruby_resample_init(VALUE self, VALUE ratio)
+static VALUE ruby_fast_resample_init(VALUE self, VALUE ratio)
 {
 	float r = NUM2DBL(ratio);
 
@@ -38,13 +38,13 @@ static VALUE ruby_resample_init(VALUE self, VALUE ratio)
 	return DBL2NUM(r);
 }
 
-void Init_resample(void)
+void Init_fast_resample(void)
 {
 	VALUE mb = rb_define_module("MB");
 	VALUE sound = rb_define_module_under(mb, "Sound");
-	resample_class = rb_define_class_under(sound, "Resample", rb_cObject);
-	src_data_class = rb_define_class_under(resample_class, "SrcData", rb_cBasicObject);
-	src_state_class = rb_define_class_under(resample_class, "SrcState", rb_cBasicObject);
+	fast_resample_class = rb_define_class_under(sound, "FastResample", rb_cObject);
+	src_data_class = rb_define_class_under(fast_resample_class, "SrcData", rb_cBasicObject);
+	src_state_class = rb_define_class_under(fast_resample_class, "SrcState", rb_cBasicObject);
 
-	rb_define_method(resample_class, "initialize", ruby_resample_init, 1);
+	rb_define_method(fast_resample_class, "initialize", ruby_fast_resample_init, 1);
 }
