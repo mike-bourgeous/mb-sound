@@ -24,7 +24,16 @@ static VALUE ruby_resample_init(VALUE self, VALUE ratio)
 {
 	float r = NUM2DBL(ratio);
 
+	if (r > 256.0) {
+		rb_raise(rb_eArgError, "Sample rate ratio must be <= 256 (got %f)", r);
+	} else if (r < 1.0 / 256.0) {
+		rb_raise(rb_eArgError, "Sample rate ratio must be >= 1/256 (%f) (got %f)", 1.0 / 256.0, r);
+	} else if (isnan(r)) {
+		rb_raise(rb_eArgError, "Sample rate ratio must not be NaN");
+	}
+
 	// TODO
+	rb_raise(rb_eNotImpError, "TODO");
 
 	return DBL2NUM(r);
 }
@@ -34,8 +43,8 @@ void Init_resample(void)
 	VALUE mb = rb_define_module("MB");
 	VALUE sound = rb_define_module_under(mb, "Sound");
 	resample_class = rb_define_class_under(sound, "Resample", rb_cObject);
-	src_data_class = rb_define_class_under(resample_class, "Data", rb_cBasicObject);
-	src_state_class = rb_define_class_under(resample_class, "State", rb_cBasicObject);
+	src_data_class = rb_define_class_under(resample_class, "SrcData", rb_cBasicObject);
+	src_state_class = rb_define_class_under(resample_class, "SrcState", rb_cBasicObject);
 
 	rb_define_method(resample_class, "initialize", ruby_resample_init, 1);
 }
