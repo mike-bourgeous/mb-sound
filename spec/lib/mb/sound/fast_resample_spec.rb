@@ -12,7 +12,12 @@ RSpec.describe(MB::Sound::FastResample, :aggregate_failures) do
     end
 
     it 'raises an error if the rate ratio is not a number' do
-      expect { MB::Sound::FastResample.new(Float::NAN) }.to raise_error(ArgumentError, /ratio.*>= 1.256/)
+      expect { MB::Sound::FastResample.new(Float::NAN) }.to raise_error(ArgumentError, /ratio.*NaN/)
+    end
+
+    it 'succeeds when given a reasonable ratio' do
+      expect { MB::Sound::FastResample.new(Math::PI) }.not_to raise_error
+      expect { MB::Sound::FastResample.new(0.1) }.not_to raise_error
     end
   end
 end
