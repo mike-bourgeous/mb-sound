@@ -168,7 +168,6 @@ static VALUE ruby_fast_resample_initialize(VALUE self, VALUE ratio)
 	rb_iv_set(self, "@callback", rb_block_proc());
 
 	// TODO: Allow switching converter type
-	// TODO: Add size tracking for Ruby's GC
 	int error = 0;
 	SRC_STATE *src_state = src_callback_new(read_callback, SRC_SINC_BEST_QUALITY, 1, &error, (void *)self);
 
@@ -176,6 +175,7 @@ static VALUE ruby_fast_resample_initialize(VALUE self, VALUE ratio)
 		rb_raise(rb_eRuntimeError, "Error %d initializing libsamplerate: %s", error, src_strerror(error));
 	}
 
+	// TODO: Add size tracking for Ruby's GC
 	VALUE state = TypedData_Wrap_Struct(src_state_class, &state_type_info, src_state);
 	rb_iv_set(self, "@state", state);
 
@@ -201,4 +201,21 @@ void Init_fast_resample(void)
 	sym_zeros = rb_intern("zeros");
 	sym_array_lookup = rb_intern("[]");
 	sym_array_assign = rb_intern("[]=");
+
+	VALUE converter_types = rb_hash_new();
+	VALUE converter_descriptions = rb_hash_new();
+	for (int index = 0; index < 1000000; index++) {
+		const char *name = src_get_name(index);
+		const char *desc = src_get_description(index);
+		if (name == NULL || desc == NULL) {
+			break;
+		}
+
+		VALUE converter_name = ID2SYM(rb_intern(name));
+		rb_hash_aset(converter_types, converter_name, INT2FIX(index));
+		rb_hash_aset(converter_descriptions, converter_name, rb_str_new_cstr(desc));
+	}
+
+	rb_define_const(fast_resample_class, "CONVERTER_IDS", converter_types);
+	rb_define_const(fast_resample_class, "CONVERTER_DESCRIPTIONS", converter_descriptions);
 }
