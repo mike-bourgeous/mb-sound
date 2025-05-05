@@ -15,6 +15,11 @@
 static VALUE fast_resample_class;
 static VALUE src_state_class;
 
+static ID sym_atbuf;
+static ID sym_atratio;
+static ID sym_atcallback;
+static ID sym_atstate;
+static ID sym_atread_size;
 static ID sym_array_lookup;
 static ID sym_array_assign;
 static ID sym_zeros;
@@ -38,10 +43,10 @@ static const rb_data_type_t state_type_info = {
 static void grow_narray(VALUE self, long min_size)
 {
 	VALUE min_rb = LONG2NUM(min_size);
-	VALUE buf = rb_iv_get(self, "@buf");
+	VALUE buf = rb_ivar_get(self, sym_atbuf);
 	if (buf == Qnil || rb_class_of(buf) != numo_cSFloat) {
 		printf("Creating internal buffer with size %ld\n", min_size); // XXX
-		rb_iv_set(self, "@buf", rb_funcall(numo_cSFloat, sym_zeros, 1, min_rb));
+		rb_ivar_set(self, sym_atbuf, rb_funcall(numo_cSFloat, sym_zeros, 1, min_rb));
 	} else {
 		narray_t *na;
 		GetNArray(buf, na);
@@ -54,7 +59,7 @@ static void grow_narray(VALUE self, long min_size)
 			VALUE assign_range = rb_range_new(INT2FIX(0), LONG2NUM(bufsize), 1);
 			rb_funcall(newbuf, sym_array_assign, 2, assign_range, buf);
 
-			rb_iv_set(self, "@buf", newbuf);
+			rb_ivar_set(self, sym_atbuf, newbuf);
 		}
 	}
 }
@@ -71,17 +76,17 @@ static VALUE ruby_read(VALUE self, VALUE count)
 	long frames_requested = NUM2LONG(count);
 	grow_narray(self, frames_requested);
 
-	VALUE buf = rb_iv_get(self, "@buf");
+	VALUE buf = rb_ivar_get(self, sym_atbuf);
 
-	VALUE state = rb_iv_get(self, "@state");
+	VALUE state = rb_ivar_get(self, sym_atstate);
 	SRC_STATE *src_state = TypedData_Get_Struct(state, SRC_STATE, &state_type_info, src_state);
 
-	double ratio = NUM2DBL(rb_iv_get(self, "@ratio"));
+	double ratio = NUM2DBL(rb_ivar_get(self, sym_atratio));
 	float *ptr = (float *)(nary_get_pointer_for_write(buf) + nary_get_offset(buf));
 
 	long upstream_frames = lround(frames_requested / ratio);
 	printf("Setting upstream frames_requested to %ld based on frames_requested=%ld and ratio=%f\n", upstream_frames, frames_requested, ratio); // XXX
-	rb_iv_set(self, "@read_size", LONG2NUM(upstream_frames));
+	rb_ivar_set(self, sym_atread_size, LONG2NUM(upstream_frames));
 
 	long frames_read = src_callback_read(src_state, ratio, frames_requested, ptr);
 
@@ -117,13 +122,13 @@ static VALUE ruby_read(VALUE self, VALUE count)
 static long read_callback(void *data, float **audio)
 {
 	VALUE self = (VALUE)data;
-	VALUE block = rb_iv_get(self, "@callback");
+	VALUE block = rb_ivar_get(self, sym_atcallback);
 	VALUE block_class = rb_class_of(block);
 	if (block_class != rb_cProc) {
 		rb_raise(rb_eTypeError, "Callback is %"PRIsVALUE", not a Proc", block_class);
 	}
 	
-	VALUE samples_requested = rb_iv_get(self, "@read_size");
+	VALUE samples_requested = rb_ivar_get(self, sym_atread_size);
 	printf("Reading %ld upstream samples for libsamplerate\n", NUM2LONG(samples_requested)); // XXX
 
 	VALUE block_args = rb_ary_new_from_args(1, samples_requested);
@@ -160,12 +165,12 @@ static VALUE ruby_fast_resample_initialize(VALUE self, VALUE ratio)
 		rb_raise(rb_eArgError, "Sample rate ratio must not be NaN");
 	}
 
-	rb_iv_set(self, "@ratio", DBL2NUM(r));
-	rb_iv_set(self, "@read_size", INT2NUM(0));
-	rb_iv_set(self, "@buf", Qnil);
+	rb_ivar_set(self, sym_atratio, DBL2NUM(r));
+	rb_ivar_set(self, sym_atread_size, INT2NUM(0));
+	rb_ivar_set(self, sym_atbuf, Qnil);
 
 	rb_need_block();
-	rb_iv_set(self, "@callback", rb_block_proc());
+	rb_ivar_set(self, sym_atcallback, rb_block_proc());
 
 	// TODO: Allow switching converter type
 	int error = 0;
@@ -177,7 +182,7 @@ static VALUE ruby_fast_resample_initialize(VALUE self, VALUE ratio)
 
 	// TODO: Add size tracking for Ruby's GC
 	VALUE state = TypedData_Wrap_Struct(src_state_class, &state_type_info, src_state);
-	rb_iv_set(self, "@state", state);
+	rb_ivar_set(self, sym_atstate, state);
 
 	return self;
 }
@@ -198,6 +203,11 @@ void Init_fast_resample(void)
 	rb_attr(fast_resample_class, rb_intern("ratio"), 1, 1, 0);
 	rb_attr(fast_resample_class, rb_intern("read_size"), 1, 1, 0);
 
+	sym_atbuf = rb_intern("@buf");
+	sym_atratio = rb_intern("@ratio");
+	sym_atcallback = rb_intern("@callback");
+	sym_atstate = rb_intern("@state");
+	sym_atread_size = rb_intern("@read_size");
 	sym_zeros = rb_intern("zeros");
 	sym_array_lookup = rb_intern("[]");
 	sym_array_assign = rb_intern("[]=");
