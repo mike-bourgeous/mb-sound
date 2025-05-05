@@ -12,11 +12,12 @@ module MB
       # of each channel do not match, the shorter channels will return zeros
       # until all channels have ended.
       def initialize(data:, sample_rate: 48000, buffer_size: 800, repeat: false)
+        data = [data] if data.is_a?(Numo::NArray)
+        data = data.map { |v| Numo::NArray.cast(v) }
+
         @buffer_size = buffer_size
         @channels = data.length
         @frames = data.map(&:length).max
-
-        data = data.map { |v| Numo::NArray.cast(v) }
 
         case
         when data.any?(Numo::DComplex)

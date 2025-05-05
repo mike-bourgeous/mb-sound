@@ -4,6 +4,12 @@ RSpec.describe(MB::Sound::ArrayInput, :aggregate_failures) do
       MB::Sound::ArrayInput.new(data: data, sample_rate: 1)
     }
 
+    it 'wraps a bare NArray as a single-channel array' do
+      arr = MB::Sound::ArrayInput.new(data: Numo::SFloat[1, 2, 3, 4, 5])
+      expect(arr.read(2)).to eq([Numo::SFloat[1, 2]])
+      expect(arr.channels).to eq(1)
+    end
+
     shared_examples_for :type_promotion do
       it "returns the correct promoted type for the inputs" do
         result = input.read(data[0].length)
