@@ -54,7 +54,18 @@ module MB
           setup_buffer(length: cbuf.buffer_size, complex: cbuf.complex, double: cbuf.double)
         end
 
+        # Consumes and returns the next +count+ samples.
         def read(count)
+          peek(count).tap { |v|
+            @read_pos = (@read_pos + count) % @cbuf.buffer_size
+            @length -= v.length
+          }
+        end
+
+        # Returns the next +count+ samples without consuming them or
+        # incrementing the read pointer.  Do not modify the returned buffer as
+        # it may be a view into the internal buffer.
+        def peek(count)
           if count > @length
             raise BufferUnderflow, "Read of size #{count} is greater than #{@length} available samples " \
               "on #{@index < 0 ? 'default reader' : "reader #{@index}"}"
@@ -65,10 +76,7 @@ module MB
           # Return an empty NArray if asked to read nothing, even if the buffer is empty
           return @buf.class[] if count == 0
 
-          @cbuf.direct_read(pos: @read_pos, count: count, target: @buf).tap { |v|
-            @read_pos = (@read_pos + count) % @cbuf.buffer_size
-            @length -= v.length
-          }
+          @cbuf.direct_read(pos: @read_pos, count: count, target: @buf)
         end
 
         # For internal use by CircularBuffer.  Increments this reader's internal length value.
@@ -118,6 +126,27 @@ module MB
         setup_buffer(length: @buffer_size, complex: complex, temp: false, double: double)
       end
 
+      # Creates a new circular buffer of the given size, then copies the data
+      # from this circular buffer into the new buffer.  This is a temporary
+      # solution to growing a circular buffer until automatic resizing might be
+      # implemented.
+      #
+      # Raises BufferOverflow if the requested size is smaller than the data
+      # stored in the buffer.
+      #
+      # Raises ReaderModeError if the buffer is in multi-reader mode.
+      def dup(new_size)
+        len = self.length
+        if new_size < len
+          raise BufferOverflow, "New buffer size #{new_size} is smaller than data stored in the buffer #{len}"
+        end
+
+        # TODO: add in-place resizing if this is too slow
+        newbuf = self.class.new(buffer_size: new_size, complex: @bufcomplex, double: @bufdouble)
+        newbuf.write(self.peek(self.length)) unless self.empty?
+        newbuf
+      end
+
       # Creates and returns a new Reader for this buffer in multi-reader mode,
       # with its own independent read pointer.  The read position defaults to
       # the current write position at time of reader creation (e.g. an empty
@@ -146,15 +175,27 @@ module MB
         }
       end
 
-      # Returns the next +count+ samples of the buffer when in single-reader
-      # mode.
+      # Consumes and returns the next +count+ samples of the buffer when in
+      # single-reader mode.
       #
-      # Raises ReaderModeError if the buffer is in multi-reader mode (e.g. if
+      # Raises ReaderModeError if the buffer is in multi-reader mode (i.e. if
       # #reader has been called).
       #
       # Raises BufferUnderflow if +count+ is greater than #length.
       def read(count)
         default_reader.read(count)
+      end
+
+      # Returns the next +count+ samples of the buffer without consuming them
+      # when in single-reader mode.  Future calls to #read or #peek will return
+      # the same samples.
+      #
+      # Raises ReaderModeError if the buffer is in multi-reader mode (i.e. if
+      # #reader has been called).
+      #
+      # Raises BufferUnderflow if +count+ is greater than #length.
+      def peek(count)
+        default_reader.peek(count)
       end
 
       # For internal use by Reader.  Does a direct circular read from the
@@ -177,10 +218,13 @@ module MB
         #
         # A slower option would be to just create a brand new buffer with
         # whatever we already have by calling the read method, then writing to
-        # the new buffer.
+        # the new buffer (see #dup).
         #
         # Multiple readers could be updated by resetting the read position to
-        # write_pos minus the reader's length, I think.
+        # write_pos minus the reader's length, I think, as long as the
+        # end-straddling data is shifted accordingly.  Basically the new zeros
+        # have to be inserted somewhere in the middle of the data, rather than
+        # at either end.
         if narray.length > available
           raise BufferOverflow, "Write of size #{narray.length} is greater than #{available} space available"
         end

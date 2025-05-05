@@ -66,10 +66,7 @@ module MB
           @circbuf ||= CircularBuffer.new(buffer_size: @bufsize, complex: false)
 
           if @circbuf.buffer_size < @bufsize
-            # TODO: add in-place resizing to CircularBuffer if this is too slow
-            newbuf = CircularBuffer.new(buffer_size: @bufsize, complex: @circbuf.complex)
-            newbuf.write(@circbuf.read(@circbuf.length)) unless @circbuf.empty?
-            @circbuf = newbuf
+            @circbuf = @circbuf.dup(@bufsize)
           end
         end
       end
