@@ -15,24 +15,52 @@ RSpec.describe(MB::Sound::GraphNode::Resample) do
         return resampled, reference
       end
 
-      it 'can upsample' do
-        resampled = 150.hz.at(1).at_rate(12000).resample(96000, mode: resample_mode).sample(24000)
-        reference = 150.hz.at(1).at_rate(96000).sample(24000)
-        resampled, reference = skip_leading_and_truncate(resampled, reference)
+      context 'when upsampling' do
+        it 'can upsample with a reasonable noise floor' do
+          resampled = 150.hz.at(1).at_rate(12000).resample(96000, mode: resample_mode).sample(24000)
+          reference = 150.hz.at(1).at_rate(96000).sample(24000)
+          resampled, reference = skip_leading_and_truncate(resampled, reference)
 
-        delta = resampled - reference
+          delta = resampled - reference
 
-        expect(delta.abs.max).to be < 0.1
+          expect(delta.abs.max).to be < 0.1
+        end
+
+        it 'does not matter what the upsampling chunk size is' do
+          large_window = 40.hz.at(1).forever.at_rate(400).resample(16000, mode: resample_mode).sample(27000)
+          small_window = 40.hz.at(1).forever.at_rate(400).resample(16000, mode: resample_mode).multi_sample(216, 125)
+          large_window, small_window = skip_leading_and_truncate(large_window, small_window)
+          large_window = large_window[0...16000]
+          small_window = small_window[0...16000]
+
+          delta = large_window - small_window
+
+          expect(delta.abs.max).to eq(0)
+        end
       end
 
-      it 'can downsample' do
-        resampled = 150.hz.at(1).at_rate(96000).resample(9600, mode: resample_mode).sample(9600)
-        reference = 150.hz.at(1).at_rate(9600).sample(9600)
-        resampled, reference = skip_leading_and_truncate(resampled, reference)
+      context 'when downsampling' do
+        it 'can downsample with a reasonable noise floor' do
+          resampled = 150.hz.at(1).at_rate(96000).resample(9600, mode: resample_mode).sample(9600)
+          reference = 150.hz.at(1).at_rate(9600).sample(9600)
+          resampled, reference = skip_leading_and_truncate(resampled, reference)
 
-        delta = resampled - reference
+          delta = resampled - reference
 
-        expect(delta.abs.max).to be < 0.1
+          expect(delta.abs.max).to be < 0.1
+        end
+
+        it 'does not matter what the downsampling chunk size is' do
+          large_window = 40.hz.at(1).forever.at_rate(16000).resample(400, mode: resample_mode).sample(27000)
+          small_window = 40.hz.at(1).forever.at_rate(16000).resample(400, mode: resample_mode).multi_sample(216, 125)
+          large_window, small_window = skip_leading_and_truncate(large_window, small_window)
+          large_window = large_window[0...16000]
+          small_window = small_window[0...16000]
+
+          delta = large_window - small_window
+
+          expect(delta.abs.max).to eq(0)
+        end
       end
     end
 
