@@ -151,7 +151,16 @@ RSpec.describe(MB::Sound::FastResample, :aggregate_failures) do
         r = MB::Sound::FastResample.new(4, :libsamplerate_zoh, &arrinput.method(:sample))
         expect(r.read(1)).to eq(Numo::SFloat[1])
         expect(r.read(3)).to eq(Numo::SFloat.ones(3));
-        expect(r.read(6)).to eq(Numo::SFloat[2, 2, 2, 2, 3, 3])
+
+        # libsamplerate has some lag so skip the extra copies of the first element
+        d = nil
+        loop do
+          d = r.read(1)
+          break if d[0] != 1
+        end
+        expect(d).to eq(Numo::SFloat[2])
+
+        expect(r.read(6)).to eq(Numo::SFloat[2, 2, 2, 3, 3, 3])
       end
     end
   end

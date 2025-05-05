@@ -89,6 +89,9 @@ static VALUE ruby_read(VALUE self, VALUE count)
 	float *ptr = (float *)(nary_get_pointer_for_write(buf) + nary_get_offset(buf));
 
 	long upstream_frames = lround(frames_requested / ratio);
+	if (upstream_frames <= 0) {
+		upstream_frames = 1;
+	}
 	printf("Setting upstream frames_requested to %ld based on frames_requested=%ld and ratio=%f\n", upstream_frames, frames_requested, ratio); // XXX
 	rb_ivar_set(self, sym_atread_size, LONG2NUM(upstream_frames));
 

@@ -22,7 +22,7 @@ module MB
           :libsamplerate_best,
         ].freeze
 
-        # TODO: change the default to something better than zero-order-hold
+        # The default mode if no mode is given to the constructor.
         DEFAULT_MODE = :libsamplerate_best
 
         # The output sample rate.
