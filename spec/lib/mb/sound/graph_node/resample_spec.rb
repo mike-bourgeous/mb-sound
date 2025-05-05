@@ -11,19 +11,20 @@ RSpec.describe(MB::Sound::GraphNode::Resample) do
         reference = MB::M.skip_leading(reference, 0)
         min_length = [resampled.length, reference.length].min
         resampled = resampled[0...min_length]
-        reference = resampled[0...min_length]
+        reference = reference[0...min_length]
         return resampled, reference
       end
 
       context 'when upsampling' do
         it 'can upsample with a reasonable noise floor' do
-          resampled = 150.hz.at(1).at_rate(12000).resample(96000, mode: resample_mode).sample(24000)
-          reference = 150.hz.at(1).at_rate(96000).sample(24000)
+          resampled = 153.hz.at(1).at_rate(12000).resample(96000, mode: resample_mode).sample(24000)
+          reference = 153.hz.at(1).at_rate(96000).sample(24000)
           resampled, reference = skip_leading_and_truncate(resampled, reference)
 
           delta = resampled - reference
 
-          expect(delta.abs.max).to be < 0.1
+          # TODO: get max lower by aligning on zero crossings after a few wavelengths
+          expect(delta.abs.max).to be_between(-250.db, 0.11)
         end
 
         it 'does not matter what the upsampling chunk size is' do
@@ -41,13 +42,14 @@ RSpec.describe(MB::Sound::GraphNode::Resample) do
 
       context 'when downsampling' do
         it 'can downsample with a reasonable noise floor' do
-          resampled = 150.hz.at(1).at_rate(96000).resample(9600, mode: resample_mode).sample(9600)
-          reference = 150.hz.at(1).at_rate(9600).sample(9600)
+          resampled = 153.hz.at(1).at_rate(96000).resample(9600, mode: resample_mode).sample(9600)
+          reference = 153.hz.at(1).at_rate(9600).sample(9600)
           resampled, reference = skip_leading_and_truncate(resampled, reference)
 
           delta = resampled - reference
 
-          expect(delta.abs.max).to be < 0.1
+          # TODO: get max lower by aligning on zero crossings after a few wavelengths
+          expect(delta.abs.max).to be_between(-250.db, 0.11)
         end
 
         it 'does not matter what the downsampling chunk size is' do
@@ -62,6 +64,13 @@ RSpec.describe(MB::Sound::GraphNode::Resample) do
           expect(delta.abs.max).to eq(0)
         end
       end
+    end
+
+    it 'gives the same results for different chunk sizes (from plot_resampler_window_delta.rb)' do
+      d1 = MB::M.skip_leading(40.hz.at(1).at_rate(400).resample(16000, mode: :ruby_zoh).sample(27000), 0)[0...16000]
+      d2 = MB::M.skip_leading(40.hz.at(1).at_rate(400).resample(16000, mode: :ruby_zoh).multi_sample(216, 125), 0)[0...16000]
+      delta = d2.not_inplace! - d1.not_inplace!
+      expect(delta.abs.max).to eq(0)
     end
 
     MB::Sound::GraphNode::Resample::MODES.each do |resample_mode|

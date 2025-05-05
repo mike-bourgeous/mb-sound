@@ -135,7 +135,7 @@ module MB
           # TODO: repeat the previous sample value in this case??
           raise "Ratio #{@inv_ratio} too low for count #{count} (tried to read zero samples from upstream)" if required == 0
 
-          puts "#{self.__id__} Reading #{required} samples to return #{count}, to go from #{@upstream.sample_rate} to #{@sample_rate}; error is #{@error}" # XXX
+          warn "#{self.__id__} Reading #{required} samples to return #{count}, to go from #{@upstream.sample_rate} to #{@sample_rate}; error is #{@error}" # XXX
 
           required
         end

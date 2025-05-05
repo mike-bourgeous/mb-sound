@@ -32,7 +32,7 @@ static ID sym_zeros;
 static void deinit_samplerate_state(void *state)
 {
 	if (state) {
-		printf("Closing libsamplerate at %p\n", state); // XXX
+		rb_warn("Closing libsamplerate at %p\n", state); // XXX
 		SRC_STATE *src_state = state;
 		src_delete(src_state);
 	}
@@ -50,7 +50,7 @@ static void grow_narray(VALUE self, long min_size)
 	VALUE min_rb = LONG2NUM(min_size);
 	VALUE buf = rb_ivar_get(self, sym_atbuf);
 	if (buf == Qnil || rb_class_of(buf) != numo_cSFloat) {
-		printf("Creating internal buffer with size %ld\n", min_size); // XXX
+		rb_warn("Creating internal buffer with size %ld\n", min_size); // XXX
 		rb_ivar_set(self, sym_atbuf, rb_funcall(numo_cSFloat, sym_zeros, 1, min_rb));
 	} else {
 		narray_t *na;
@@ -58,7 +58,7 @@ static void grow_narray(VALUE self, long min_size)
 		long bufsize = NA_SIZE(na);
 
 		if (bufsize < min_size) {
-			printf("Growing internal buffer from %ld to %ld\n", bufsize, min_size); // XXX
+			rb_warn("Growing internal buffer from %ld to %ld\n", bufsize, min_size); // XXX
 
 			VALUE newbuf = rb_funcall(numo_cSFloat, sym_zeros, 1, min_rb);
 			VALUE assign_range = rb_range_new(INT2FIX(0), LONG2NUM(bufsize), 1);
@@ -93,7 +93,7 @@ static VALUE ruby_read(VALUE self, VALUE count)
 	if (upstream_frames <= 0) {
 		upstream_frames = 1;
 	}
-	printf("Setting upstream frames_requested to %ld based on frames_requested=%ld and ratio=%f\n", upstream_frames, frames_requested, ratio); // XXX
+	rb_warn("Setting upstream frames_requested to %ld based on frames_requested=%ld and ratio=%f\n", upstream_frames, frames_requested, ratio); // XXX
 	rb_ivar_set(self, sym_atread_size, LONG2NUM(upstream_frames));
 
 	long frames_read = src_callback_read(src_state, ratio, frames_requested, ptr);
@@ -137,7 +137,7 @@ static long read_callback(void *data, float **audio)
 	}
 
 	VALUE samples_requested = rb_ivar_get(self, sym_atread_size);
-	printf("Reading %ld upstream samples for libsamplerate\n", NUM2LONG(samples_requested)); // XXX
+	rb_warn("Reading %ld upstream samples for libsamplerate\n", NUM2LONG(samples_requested)); // XXX
 
 	VALUE block_args = rb_ary_new_from_args(1, samples_requested);
 	VALUE buf = rb_proc_call(block, block_args);
@@ -152,7 +152,7 @@ static long read_callback(void *data, float **audio)
 	narray_t *na;
 	GetNArray(buf, na);
 	long samples_read = NA_SIZE(na);
-	printf("Block gave us %ld samples\n", samples_read); // XXX
+	rb_warn("Block gave us %ld samples\n", samples_read); // XXX
 
 	return samples_read;
 }
