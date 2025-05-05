@@ -88,6 +88,19 @@ module MB
           # I need something like a clocked circular buffer or a fractional
           # circular buffer where I can say "give me time t1 to t2 scaled to n
           # samples"
+          #
+          # The delay filter has some of this, as does the circular buffer.
+          # The delay filter accepts an narray to control delay time but for
+          # downsampling I suspect it wouldn't handle removal of old data, and
+          # in either case the delay times would get unreasonable over time so
+          # there'd need to be some way of resetting the delay reference.
+          #
+          # The circular buffer consumes samples by incrementing the read
+          # pointer for the full requested amount, so it would need some
+          # adaptation or wrapper to retain the extra sample(s) required and
+          # indicate how many new samples are needed to fulfill a request.  And
+          # again keeping a clock going without numbers growing larger and
+          # larger would be a challenge.
           required = (endpoint - @offset).ceil
 
           # TODO: repeat the previous sample value for ZOH or interpolate through further partial fractional steps for linear
