@@ -23,7 +23,9 @@ data = modes.flat_map { |m|
   d2 = MB::M.skip_leading(40.hz.at(1).at_rate(400).resample(16000, mode: m).multi_sample(216, 125), 0)[0...16000]
   delta = d2.not_inplace! - d1.not_inplace!
   [
-    [m, delta],
+    ["#{m} large", d1],
+    ["#{m} small", d2],
+    ["#{m} diff", delta],
   ]
 }.to_h
 

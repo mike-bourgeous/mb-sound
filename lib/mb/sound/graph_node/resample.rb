@@ -49,7 +49,7 @@ module MB
           @sample_rate = sample_rate.to_f
           @inv_ratio = upstream.sample_rate.to_f / @sample_rate
           @ratio = @sample_rate / upstream.sample_rate.to_f
-          @error = 0
+          @offset = 0.0
         end
 
         # Returns the upstream as the only source for this node.
@@ -78,26 +78,42 @@ module MB
 
         # Zero-order hold and linear interpolator in Ruby.  See #sample.
         def sample_ruby(count, mode)
-          required = required_for(count)
+          exact_required = @inv_ratio * count
+          endpoint = @offset + exact_required
 
-          # FIXME: use a circular buffer if upstreams don't like oscillating
-          # between N and N+1 samples
+          # FIXME: we probably need to retain prior samples for proper
+          # interpolation; maybe use circular buffer class and add a seek
+          # method or use direct_read or something
+          #
+          # I need something like a clocked circular buffer or a fractional
+          # circular buffer where I can say "give me time t1 to t2 scaled to n
+          # samples"
+          required = (endpoint - @offset).ceil
+
+          # TODO: repeat the previous sample value for ZOH or interpolate through further partial fractional steps for linear
+          raise "Ratio #{@inv_ratio} too low for count #{count} (tried to read zero samples from upstream)" if required == 0
+
+          warn "#{self.__id__} Reading #{required} samples (wanted #{exact_required}) to return #{count}, to go from #{@upstream.sample_rate} to #{@sample_rate}; offset is #{@offset}...#{endpoint}" # XXX
+
+          # FIXME: use a circular buffer or buffer adapter if upstreams don't
+          # like oscillating between N and N+1 samples
           data = @upstream.sample(required)
           return nil if data.nil? || data.empty?
 
           if data.length < required
+            # FIXME: probably missing some fractional error here
             count = count * data.length / required
-            required = data.length
+            endpoint = @offset + data.length
             return nil if count == 0
           end
 
           # TODO: reuse the existing buffer instead of regenerating a
-          # "linspace" every time, or maybe keep a buffer for required and
-          # required+1
+          # "linspace" every time, or maybe keep a buffer for each possible required size
           # XXX setup_buffer(length: count)
           case mode
           when :ruby_zoh
-            Numo::SFloat.linspace(0, required - 1, count).inplace.map { |v|
+            ret = Numo::DFloat.linspace(@offset, endpoint - 1, count).inplace.map { |v|
+              # FIXME, sometimes passes end
               data[v.round]
             }
 
@@ -105,7 +121,8 @@ module MB
             # TODO: add a fractional lookup helper method somewhere with
             # varying interpolation modes like nearest, linear, cubic, area
             # average, etc.
-            Numo::SFloat.linspace(0, required - 1, count).inplace.map { |v|
+            ret = Numo::DFloat.linspace(@offset, endpoint - 1, count).inplace.map { |v|
+              # FIXME, sometimes passes end
               min = v.floor
               max = v.ceil
               delta = v - min
@@ -115,29 +132,16 @@ module MB
           else
             raise "BUG: unsupported mode #{mode}"
           end
+
+          @offset = endpoint - endpoint.floor
+
+          ret
         end
 
         # Libsamplerate resampler.  See #sample.
         def sample_libsamplerate(count)
           raise "call #sample first to initialize libsamplerate" unless @fast_resample
           @fast_resample.read(count).not_inplace! # TODO: can we return inplace?
-        end
-
-        private
-
-        # Returns an integer number of samples to read from the upstream,
-        # storing the leftover fraction in @error.
-        def required_for(count)
-          exact_required = @inv_ratio * count + @error
-          required = exact_required.floor
-          @error = exact_required - required
-
-          # TODO: repeat the previous sample value in this case??
-          raise "Ratio #{@inv_ratio} too low for count #{count} (tried to read zero samples from upstream)" if required == 0
-
-          warn "#{self.__id__} Reading #{required} samples to return #{count}, to go from #{@upstream.sample_rate} to #{@sample_rate}; error is #{@error}" # XXX
-
-          required
         end
       end
     end

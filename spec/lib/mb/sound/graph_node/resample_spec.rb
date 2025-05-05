@@ -38,6 +38,9 @@ RSpec.describe(MB::Sound::GraphNode::Resample) do
 
           expect(delta.abs.max).to eq(0)
         end
+
+        pending 'handles end of stream on buffer boundary'
+        pending 'handles end of stream within a buffer'
       end
 
       context 'when downsampling' do
@@ -63,6 +66,9 @@ RSpec.describe(MB::Sound::GraphNode::Resample) do
 
           expect(delta.abs.max).to eq(0)
         end
+
+        pending 'handles end of stream on buffer boundary'
+        pending 'handles end of stream within a buffer'
       end
     end
 
@@ -82,7 +88,7 @@ RSpec.describe(MB::Sound::GraphNode::Resample) do
     context 'with the default mode' do
       it_behaves_like 'a working resampler', MB::Sound::GraphNode::Resample::DEFAULT_MODE
     end
-  end
 
-  pending 'with an upstream graph'
+    pending 'with a more complex upstream graph'
+  end
 end
