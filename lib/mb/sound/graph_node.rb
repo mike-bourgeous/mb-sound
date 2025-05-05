@@ -256,6 +256,18 @@ module MB
         MB::Sound::GraphNode::NodeSequence.new([self, *sources])
       end
 
+      # Calls #sample with +count+ requested samples +times+ times,
+      # concatenating the results into a single array.
+      def multi_sample(count, times)
+        raise "Count must be a positive Integer (got #{count.inspect})" unless count.is_a?(Integer) && count > 0
+        raise "Times must be a positive Integer (got #{count.inspect})" unless times.is_a?(Integer) && times > 0
+
+        Array.new(times)
+          .map { sample(count) }
+          .compact
+          .reduce { |a, b| a.concatenate(b) }
+      end
+
       # Adds a resampling filter to the graph with the given new sample rate.
       # All nodes added after the resampling node must use the new sample rate.
       #

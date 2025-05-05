@@ -329,6 +329,36 @@ RSpec.describe(MB::Sound::GraphNode) do
     end
   end
 
+  pending '#and_then'
+
+  describe '#multi_sample' do
+    it 'does the same thing as sample if times is 1' do
+      expect(123.hz.multi_sample(17, 1)).to eq(123.hz.sample(17))
+    end
+
+    it 'gives the same concatenated result as a single large sample' do
+      expect(123.hz.multi_sample(5, 7)).to eq(123.hz.sample(35))
+    end
+
+    it 'raises an error if count or times are zero' do
+      expect { 123.hz.multi_sample(0, 1) }.to raise_error(/Count.*positive/)
+      expect { 123.hz.multi_sample(1, 0) }.to raise_error(/Times.*positive/)
+    end
+
+    it 'returns nil at end of stream' do
+      expect(123.hz.for(0).multi_sample(100, 1)).to eq(nil)
+    end
+
+    it 'handles end of stream part way through concatenation' do
+      result = 123.hz.for(5.0 / 48000).multi_sample(2, 10)
+
+      # TODO: have oscillators return short reads and change this from 6 to 5??
+      expect(result.length).to eq(6)
+    end
+  end
+
+  pending '#resample'
+
   describe '#spy' do
     it 'calls a block when the sample method is called' do
       b = nil
