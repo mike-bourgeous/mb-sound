@@ -132,6 +132,17 @@ module MB
           # buffer / subtracting times I'll never need to revisit, so my
           # counters don't grow infinitely large (eventually you run into
           # floating point quantization errors and/or slower bigint math).
+          #
+          # ----
+          #
+          # A few hours later; time to start chipping away at the math.  It
+          # feels like this should be easy but there's a bunch of noise to
+          # filter out.
+          #
+          # I think the answer is indeed to use a circular buffer, and keep
+          # track of the range of samples stored in that buffer.  Then for each
+          # downstream request, if the circular buffer can fulfill it, don't
+          # read from the upstream.
           required = (endpoint - @offset).ceil
 
           # TODO: repeat the previous sample value for ZOH or interpolate through further partial fractional steps for linear
@@ -186,6 +197,48 @@ module MB
         def sample_libsamplerate(count)
           raise "call #sample first to initialize libsamplerate" unless @fast_resample
           @fast_resample.read(count).not_inplace! # TODO: can we return inplace?
+        end
+
+        private
+
+        # TODO: this might not be the right API for this operation; e.g. maybe
+        # we want keep_at_least(num_samples) or something like that
+        def discard_samples_before(sample_index)
+          raise NotImplementedError
+
+          # Calculate number of redundant samples (upstream start sample counter minus sample index)
+          # Consume redundant samples from the circular buffer
+          # Set upstream start sample counter to sample index
+          # Reset clocks so sample index stays low???
+        end
+
+        def last_samples(count)
+          # TODO: add a peek_last method to the CircularBuffer
+          # TODO: loop on reading from upstream until the buffer has enough data
+          # TODO: What do we do at end of stream??
+        end
+
+        # TODO maybe add a function
+        def add_samples(data)
+          @circbuf.write(data)
+          @buf_end += data.length
+          raise NotImplementedError
+
+          # Write data to circular buffer
+          # Add data.length to the upstream end sample counter
+        end
+
+        # (Re)creates the circular buffer with sufficient capacity to handle
+        # upstream reads of +count+ samples (or larger, if it was previously
+        # larger).
+        def setup_circular_buffer(count)
+          capacity = count * 2 + 4
+          @bufsize = capacity if @bufsize < capacity
+          @circbuf ||= MB::Sound::CircularBuffer.new(buffer_size: @bufsize)
+
+          if @bufsize > @circbuf.length
+            @circbuf = @circbuf.dup(@circbuf.length)
+          end
         end
       end
     end

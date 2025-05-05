@@ -39,8 +39,9 @@ RSpec.describe(MB::Sound::GraphNode::Resample) do
           expect(delta.abs.max).to eq(0)
         end
 
-        pending 'handles end of stream on buffer boundary'
-        pending 'handles end of stream within a buffer'
+        pending 'upsamples end of stream on buffer boundary'
+        pending 'upsamples end of stream within a buffer'
+        pending 'upsamples correctly when chunk sizes change'
       end
 
       context 'when downsampling' do
@@ -67,8 +68,9 @@ RSpec.describe(MB::Sound::GraphNode::Resample) do
           expect(delta.abs.max).to eq(0)
         end
 
-        pending 'handles end of stream on buffer boundary'
-        pending 'handles end of stream within a buffer'
+        pending 'downsamples end of stream on buffer boundary'
+        pending 'downsamples end of stream within a buffer'
+        pending 'downsamples correctly when chunk sizes change'
       end
     end
 
