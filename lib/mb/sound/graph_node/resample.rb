@@ -9,17 +9,46 @@ module MB
         include GraphNode
         include BufferHelper
 
-        attr_reader :sample_rate, :ratio
+        # Resampling modes supported by the class (pass to constructor's
+        # +:mode+ parameter).
+        #
+        # Note that some modes may add several buffers worth of latency.
+        MODES = [
+          :ruby_zoh,
+          :ruby_linear,
+          :libsamplerate_zoh,
+          :libsamplerate_linear,
+          :libsamplerate_fastest,
+          :libsamplerate_best,
+        ].freeze
+
+        # TODO: change the default to something better than zero-order-hold
+        DEFAULT_MODE = :libsamplerate_best
+
+        # The output sample rate.
+        attr_reader :sample_rate
+
+        # The output sample rate ratio (output rate divided by input rate).
+        attr_reader :ratio
+
+        # The input sample rate ratio (input rate divided by output rate)
+        attr_reader :inv_ratio
 
         # Creates a resampling graph node with the given +:upstream+ node and
-        # +:sample_rate+.
-        def initialize(upstream:, sample_rate:)
+        # +:sample_rate+.  The +:mode+ parameter may be one of the supported
+        # MODES listed above to change the resampling algorithm.  The default
+        # is libsamplerate's best sinc converter.
+        def initialize(upstream:, sample_rate:, mode: DEFAULT_MODE)
           raise 'Upstream must respond to :sample' unless upstream.respond_to?(:sample)
           raise 'Upstream must respond to :sample_rate' unless upstream.respond_to?(:sample_rate)
 
+          raise "Unsupported mode #{mode.inspect}" unless MODES.include?(mode)
+          @mode = mode
+
           @upstream = upstream
           @sample_rate = sample_rate.to_f
-          @ratio = upstream.sample_rate.to_f / @sample_rate
+          @inv_ratio = upstream.sample_rate.to_f / @sample_rate
+          @ratio = @sample_rate / upstream.sample_rate.to_f
           @error = 0
         end
 
@@ -31,11 +60,30 @@ module MB
         # Returns +count+ samples at the new sample rate, while requesting
         # sufficient samples from the upstream node to fulfill the request.
         def sample(count)
-          exact_required = @ratio * count + @error
+          case @mode
+          when :ruby_zoh
+            sample_zoh(count)
+
+          when :libsamplerate_best
+            # FIXME: add converter type parameter
+            @fast_resample ||= MB::Sound::FastResample.new(@ratio) do |size|
+              @upstream.sample(size)
+            end
+
+            sample_libsamplerate(count)
+
+          else
+            raise NotImplementedError, "TODO: #{@mode.inspect}"
+          end
+        end
+
+        # Zero-order hold interpolator in Ruby.  See #sample.
+        def sample_zoh(count)
+          exact_required = @inv_ratio * count + @error
           required = exact_required.floor
           @error = exact_required - required
 
-          raise "Ratio #{@ratio} too low for count #{count} (tried to read zero samples from upstream)" if required == 0
+          raise "Ratio #{@inv_ratio} too low for count #{count} (tried to read zero samples from upstream)" if required == 0
 
           puts "#{self.__id__} Reading #{required} samples to return #{count}, to go from #{@upstream.sample_rate} to #{@sample_rate}; error is #{@error}" # XXX
 
@@ -61,6 +109,12 @@ module MB
           Numo::SFloat.linspace(0, required - 1, count).inplace.map { |v|
             data[v.round]
           }
+        end
+
+        # Libsamplerate resampler.  See #sample.
+        def sample_libsamplerate(count)
+          raise "call #sample first to initialize libsamplerate" unless @fast_resample
+          @fast_resample.read(count)
         end
       end
     end

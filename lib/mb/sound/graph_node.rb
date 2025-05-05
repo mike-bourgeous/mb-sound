@@ -259,9 +259,10 @@ module MB
       # Adds a resampling filter to the graph with the given new sample rate.
       # All nodes added after the resampling node must use the new sample rate.
       #
-      # TODO: add a parameter for controlling the resampling algorithm?
-      def resample(sample_rate)
-        MB::Sound::GraphNode::Resample.new(upstream: self, sample_rate: sample_rate)
+      # The resampling +:mode+ must be one of the supported modes listed in
+      # MB::Sound::GraphNode::Resample::MODES (e.g. :libsamplerate_best).
+      def resample(sample_rate, mode: MB::Sound::GraphNode::Resample::DEFAULT_MODE)
+        MB::Sound::GraphNode::Resample.new(upstream: self, sample_rate: sample_rate, mode: mode)
       end
 
       # Applies the given filter (creating the filter if given a filter type)
