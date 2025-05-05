@@ -61,8 +61,8 @@ module MB
         # sufficient samples from the upstream node to fulfill the request.
         def sample(count)
           case @mode
-          when :ruby_zoh
-            sample_zoh(count)
+          when :ruby_zoh, :ruby_linear
+            sample_ruby(count, @mode)
 
           when :libsamplerate_best, :libsamplerate_fastest, :libsamplerate_zoh, :libsamplerate_linear
             @fast_resample ||= MB::Sound::FastResample.new(@ratio, @mode) do |size|
@@ -76,15 +76,9 @@ module MB
           end
         end
 
-        # Zero-order hold interpolator in Ruby.  See #sample.
-        def sample_zoh(count)
-          exact_required = @inv_ratio * count + @error
-          required = exact_required.floor
-          @error = exact_required - required
-
-          raise "Ratio #{@inv_ratio} too low for count #{count} (tried to read zero samples from upstream)" if required == 0
-
-          puts "#{self.__id__} Reading #{required} samples to return #{count}, to go from #{@upstream.sample_rate} to #{@sample_rate}; error is #{@error}" # XXX
+        # Zero-order hold and linear interpolator in Ruby.  See #sample.
+        def sample_ruby(count, mode)
+          required = required_for(count)
 
           # FIXME: use a circular buffer if upstreams don't like oscillating
           # between N and N+1 samples
@@ -97,23 +91,53 @@ module MB
             return nil if count == 0
           end
 
-          # TODO: use something smarter than zero-order hold
-          # TODO: have we already implemented usable code in a fractionally
-          # addressed delay line or something?
-          # XXX setup_buffer(length: count)
-
           # TODO: reuse the existing buffer instead of regenerating a
           # "linspace" every time, or maybe keep a buffer for required and
           # required+1
-          Numo::SFloat.linspace(0, required - 1, count).inplace.map { |v|
-            data[v.round]
-          }
+          # XXX setup_buffer(length: count)
+          case mode
+          when :ruby_zoh
+            Numo::SFloat.linspace(0, required - 1, count).inplace.map { |v|
+              data[v.round]
+            }
+
+          when :ruby_linear
+            # TODO: add a fractional lookup helper method somewhere with
+            # varying interpolation modes like nearest, linear, cubic, area
+            # average, etc.
+            Numo::SFloat.linspace(0, required - 1, count).inplace.map { |v|
+              min = v.floor
+              max = v.ceil
+              delta = v - min
+              data[min] * (1.0 - delta) + data[max] * delta
+            }
+
+          else
+            raise "BUG: unsupported mode #{mode}"
+          end
         end
 
         # Libsamplerate resampler.  See #sample.
         def sample_libsamplerate(count)
           raise "call #sample first to initialize libsamplerate" unless @fast_resample
           @fast_resample.read(count).not_inplace! # TODO: can we return inplace?
+        end
+
+        private
+
+        # Returns an integer number of samples to read from the upstream,
+        # storing the leftover fraction in @error.
+        def required_for(count)
+          exact_required = @inv_ratio * count + @error
+          required = exact_required.floor
+          @error = exact_required - required
+
+          # TODO: repeat the previous sample value in this case??
+          raise "Ratio #{@inv_ratio} too low for count #{count} (tried to read zero samples from upstream)" if required == 0
+
+          puts "#{self.__id__} Reading #{required} samples to return #{count}, to go from #{@upstream.sample_rate} to #{@sample_rate}; error is #{@error}" # XXX
+
+          required
         end
       end
     end
