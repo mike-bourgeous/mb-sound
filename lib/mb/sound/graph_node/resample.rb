@@ -101,6 +101,37 @@ module MB
           # indicate how many new samples are needed to fulfill a request.  And
           # again keeping a clock going without numbers growing larger and
           # larger would be a challenge.
+          #
+          # # Rambling thoughts/stream of consciousness:
+          #
+          # Suppose I go a little overboard and request an extra 2 or 4 samples
+          # on the first buffer, then retain that extra for later buffers.
+          # Could something simple like a seek/rewind method on the circular
+          # buffer allow reaching back for those extra past samples when
+          # needed?
+          #
+          # What does the math look like to track where and how much to read in
+          # the circular buffer, and where to pull each sample?  I need a way
+          # to guarantee that I won't exceed the endpoint of a buffer without
+          # dropping samples.  Can the index I want to read ever be negative?
+          # The output clock should be treated as exact -- N samples returned
+          # is N samples returned, so it's the input clock that needs
+          # interpolation.
+          #
+          # If I want 5.4 samples starting at offset 5.4...10.8 or 10.8...16.2,
+          # what do I actually read?  I need sample #10 to interpolate between
+          # 10 and 11.  I need sample 17 to interpolate between 16 and 17.  So
+          # I really need 7 samples in hand to read 5.4, but the clock is only
+          # advancing by 5.4 samples.
+          #
+          # Ok, so how many samples do I ask the upstream for each time? That's
+          # still challenging me. I need a way of mapping "I have samples N
+          # through M, and I want to have access to samples X through Y, so I
+          # need to add Y - M samples and I can get rid of samples N through X
+          # exclusive." I then need some way of kicking old data out of the
+          # buffer / subtracting times I'll never need to revisit, so my
+          # counters don't grow infinitely large (eventually you run into
+          # floating point quantization errors and/or slower bigint math).
           required = (endpoint - @offset).ceil
 
           # TODO: repeat the previous sample value for ZOH or interpolate through further partial fractional steps for linear
