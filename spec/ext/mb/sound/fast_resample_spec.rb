@@ -26,20 +26,39 @@ RSpec.describe(MB::Sound::FastResample, :aggregate_failures) do
 
   describe '#read' do
     it 'raises an error if not given a block' do
-      expect { r_half.read(Numo::SFloat.zeros(100).inplace, 100) }.to raise_error(/block/)
+      expect { r_half.read(100) }.to raise_error(/block/)
     end
 
     it 'can read zeros' do
-      result = r_half.read(Numo::SFloat.zeros(100).inplace, 100) { |s| Numo::SFloat.zeros(s) }
+      result = r_half.read(100) { |s| Numo::SFloat.zeros(s) }
       expect(result.length).to eq(100)
       expect(result.abs.max).to eq(0)
     end
 
     it 'can read ones' do
-      result = r_half.read(Numo::SFloat.zeros(100).inplace, 100) { |s| Numo::SFloat.ones(s) }
+      result = r_half.read(100) { |s| Numo::SFloat.ones(s) }
       expect(result.length).to eq(100)
       expect((result - 1).abs.max).to be_between(1e-30, 0.5)
       expect(result.sum / result.length - 1).to be_between(-1e-2, 1e-2)
+    end
+
+    it 'can handle a subset view from the read block' do
+      result = r_double.read(100) { |s| Numo::SFloat.zeros(s).concatenate(Numo::SFloat.ones(s))[0...s] }
+      expect(result.length).to eq(100)
+      10.times do
+        expect(result.abs.max).to eq(0) # Never reaches the ones after the end
+      end
+    end
+
+    it 'can grow the internal buffer' do
+      result = r_half.read(10) { |s| Numo::SFloat.zeros(s) }
+      expect(result.length).to eq(10)
+
+      result = r_half.read(100000) { |s| Numo::SFloat.zeros(s) }
+      expect(result.length).to eq(100000)
+
+      result = r_half.read(10) { |s| Numo::SFloat.zeros(s) }
+      expect(result.length).to eq(10)
     end
 
     pending 'at end of stream'

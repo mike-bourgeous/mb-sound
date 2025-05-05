@@ -15,6 +15,10 @@
 static VALUE fast_resample_class;
 static VALUE src_state_class;
 
+static ID sym_array_lookup;
+static ID sym_array_assign;
+static ID sym_zeros;
+
 static void deinit_samplerate_state(void *state)
 {
 	if (state) {
@@ -31,40 +35,57 @@ static const rb_data_type_t state_type_info = {
 	},
 };
 
-/*
+static void grow_narray(VALUE self, long min_size)
+{
+	VALUE min_rb = LONG2NUM(min_size);
+	VALUE buf = rb_iv_get(self, "@buf");
+	if (buf == Qnil) {
+		printf("Creating internal buffer with size %ld\n", min_size); // XXX
+		rb_iv_set(self, "@buf", rb_funcall(numo_cSFloat, sym_zeros, 1, min_rb));
+	} else {
+		narray_t *na;
+		GetNArray(buf, na);
+		long bufsize = NA_SIZE(na);
+
+		if (bufsize < min_size) {
+			printf("Growing internal buffer from %ld to %ld\n", bufsize, min_size); // XXX
+
+			VALUE newbuf = rb_funcall(numo_cSFloat, sym_zeros, 1, min_rb);
+			VALUE assign_range = rb_range_new(INT2FIX(0), LONG2NUM(bufsize), 1);
+			rb_funcall(newbuf, sym_array_assign, 2, assign_range, buf);
+
+			rb_iv_set(self, "@buf", newbuf);
+		}
+	}
+}
+
+/**
  * Reads +count+ frames in the new sample rate, writing into the given
  * Numo::SFloat +narray+.  The given block will be called zero or more times
  * with a number of samples to read from the upstream.
  *
  * Returns the internal buffer, or a subset view thereof.
  */
-static VALUE ruby_read(VALUE self, VALUE narray, VALUE count)
+static VALUE ruby_read(VALUE self, VALUE count)
 {
-	VALUE ntype = CLASS_OF(narray);
-	if (ntype != numo_cSFloat) {
-		rb_raise(rb_eArgError, "Expected Numo::SFloat, got %"PRIsVALUE, ntype);
-	}
+	long frames_requested = NUM2LONG(count);
+	grow_narray(self, frames_requested);
 
-	if (!TEST_INPLACE(narray)) {
-		rb_raise(rb_eArgError, "Can only read into an in-place Numo::SFloat instance (call #inplace or #inplace! first)");
-	}
-
-	if (!RTEST(nary_check_contiguous(narray))) {
-		rb_raise(rb_eArgError, "Can only read into a contiguous Numo::SFloat instance");
-	}
+	VALUE buf = rb_iv_get(self, "@buf");
 
 	rb_need_block();
 
 	VALUE state = rb_iv_get(self, "@state");
 	SRC_STATE *src_state = TypedData_Get_Struct(state, SRC_STATE, &state_type_info, src_state);
+
 	double ratio = NUM2DBL(rb_iv_get(self, "@ratio"));
-	long frames_requested = NUM2LONG(count);
-	float *ptr = (float *)(nary_get_pointer_for_write(narray) + nary_get_offset(narray));
+	float *ptr = (float *)(nary_get_pointer_for_write(buf) + nary_get_offset(buf));
 
 	long upstream_frames = lround(frames_requested / ratio);
 	printf("Setting upstream frames_requested to %ld based on frames_requested=%ld and ratio=%f\n", upstream_frames, frames_requested, ratio); // XXX
 	rb_iv_set(self, "@read_size", LONG2NUM(upstream_frames));
 
+	// TODO: pass the block to the initialize method instead so we only need it once
 	VALUE block = rb_block_proc();
 	rb_iv_set(self, "@callback", block);
 
@@ -79,10 +100,10 @@ static VALUE ruby_read(VALUE self, VALUE narray, VALUE count)
 
 	VALUE ruby_frames = LONG2NUM(frames_read);
 	VALUE result_range = rb_range_new(INT2FIX(0), ruby_frames, 1);
-	return rb_funcall(narray, rb_intern("[]"), 1, result_range);
+	return rb_funcall(buf, rb_intern("[]"), 1, result_range);
 }
 
-/*
+/**
  * Called by libsamplerate to read data for conversion within ruby_sample().
  *
  * ----
@@ -127,7 +148,7 @@ static long read_callback(void *data, float **audio)
 	return samples_read;
 }
 
-/*
+/**
  * Initializes a libsamplerate-based resampler with the given conversion
  * +ratio+ (output rate divided by input rate).
  */
@@ -145,7 +166,7 @@ static VALUE ruby_fast_resample_initialize(VALUE self, VALUE ratio)
 
 	rb_iv_set(self, "@ratio", DBL2NUM(r));
 	rb_iv_set(self, "@read_size", INT2NUM(0));
-	rb_iv_set(self, "@buf", rb_funcall(numo_cSFloat, rb_intern("zeros"), 1, INT2NUM(48000)));
+	rb_iv_set(self, "@buf", Qnil);
 
 	// TODO: Allow switching converter type
 	int error = 0;
@@ -167,12 +188,17 @@ void Init_fast_resample(void)
 	VALUE sound = rb_define_module_under(mb, "Sound");
 	fast_resample_class = rb_define_class_under(sound, "FastResample", rb_cObject);
 
-	src_state_class = rb_define_class_under(fast_resample_class, "SrcState", rb_cBasicObject);
+	src_state_class = rb_define_class_under(fast_resample_class, "SrcState", rb_cObject);
 	rb_undef_alloc_func(src_state_class);
 
 	rb_define_method(fast_resample_class, "initialize", ruby_fast_resample_initialize, 1);
-	rb_define_method(fast_resample_class, "read", ruby_read, 2);
+	rb_define_method(fast_resample_class, "read", ruby_read, 1);
 
+	// The ratio can be changed at runtime and libsamplerate will smoothly interpolate
 	rb_attr(fast_resample_class, rb_intern("ratio"), 1, 1, 0);
 	rb_attr(fast_resample_class, rb_intern("read_size"), 1, 1, 0);
+
+	sym_zeros = rb_intern("zeros");
+	sym_array_lookup = rb_intern("[]");
+	sym_array_assign = rb_intern("[]=");
 }
