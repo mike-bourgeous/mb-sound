@@ -337,7 +337,7 @@ RSpec.describe(MB::Sound::GraphNode) do
     end
 
     it 'gives the same concatenated result as a single large sample' do
-      expect(123.hz.multi_sample(5, 7)).to eq(123.hz.sample(35))
+      expect(637.hz.multi_sample(5, 7)).to eq(637.hz.sample(35))
     end
 
     it 'raises an error if count or times are zero' do

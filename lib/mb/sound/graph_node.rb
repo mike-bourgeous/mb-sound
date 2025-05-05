@@ -262,10 +262,20 @@ module MB
         raise "Count must be a positive Integer (got #{count.inspect})" unless count.is_a?(Integer) && count > 0
         raise "Times must be a positive Integer (got #{count.inspect})" unless times.is_a?(Integer) && times > 0
 
-        Array.new(times)
-          .map { sample(count) }
-          .compact
-          .reduce { |a, b| a.concatenate(b) }
+        ret = nil
+
+        for _f in 0...times
+          d = sample(count)
+          break if d.nil? || d.empty?
+
+          if ret
+            ret = ret.concatenate(d)
+          else
+            ret = d.dup
+          end
+        end
+
+        ret
       end
 
       # Adds a resampling filter to the graph with the given new sample rate.
