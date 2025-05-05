@@ -5,6 +5,7 @@
  * Extension references:
  * https://docs.ruby-lang.org/en/2.7.0/extension_rdoc.html
  * https://rubyreferences.github.io/rubyref/advanced/extensions.html
+ * https://silverhammermba.github.io/emberb/c/
  */
 #include <samplerate.h>
 
