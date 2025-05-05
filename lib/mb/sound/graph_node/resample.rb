@@ -64,9 +64,8 @@ module MB
           when :ruby_zoh
             sample_zoh(count)
 
-          when :libsamplerate_best
-            # FIXME: add converter type parameter
-            @fast_resample ||= MB::Sound::FastResample.new(@ratio) do |size|
+          when :libsamplerate_best, :libsamplerate_fastest, :libsamplerate_zoh, :libsamplerate_linear
+            @fast_resample ||= MB::Sound::FastResample.new(@ratio, @mode) do |size|
               @upstream.sample(size)
             end
 
@@ -114,7 +113,7 @@ module MB
         # Libsamplerate resampler.  See #sample.
         def sample_libsamplerate(count)
           raise "call #sample first to initialize libsamplerate" unless @fast_resample
-          @fast_resample.read(count)
+          @fast_resample.read(count).not_inplace! # TODO: can we return inplace?
         end
       end
     end
