@@ -33,9 +33,12 @@ static const rb_data_type_t state_type_info = {
 
 /*
  * Reads +count+ frames in the new sample rate, writing into the given
- * Numo::SFloat.
+ * Numo::SFloat +narray+.  The given block will be called zero or more times
+ * with a number of samples to read from the upstream.
+ *
+ * Returns the internal buffer, or a subset view thereof.
  */
-static VALUE ruby_sample(VALUE self, VALUE narray, VALUE count)
+static VALUE ruby_read(VALUE self, VALUE narray, VALUE count)
 {
 	VALUE ntype = CLASS_OF(narray);
 	if (ntype != numo_cSFloat) {
@@ -50,6 +53,8 @@ static VALUE ruby_sample(VALUE self, VALUE narray, VALUE count)
 		rb_raise(rb_eArgError, "Can only read into a contiguous Numo::SFloat instance");
 	}
 
+	rb_need_block();
+
 	VALUE state = rb_iv_get(self, "@state");
 	SRC_STATE *src_state = TypedData_Get_Struct(state, SRC_STATE, &state_type_info, src_state);
 	double ratio = NUM2DBL(rb_iv_get(self, "@ratio"));
@@ -57,13 +62,18 @@ static VALUE ruby_sample(VALUE self, VALUE narray, VALUE count)
 	float *ptr = (float *)(nary_get_pointer_for_write(narray) + nary_get_offset(narray));
 
 	long upstream_frames = lround(frames_requested / ratio);
-	printf("Setting upstream frames_requested to %ld based on frames_requested=%ld and ratio=%f\n", upstream_frames, frames_requested, ratio);
+	printf("Setting upstream frames_requested to %ld based on frames_requested=%ld and ratio=%f\n", upstream_frames, frames_requested, ratio); // XXX
 	rb_iv_set(self, "@read_size", LONG2NUM(upstream_frames));
+
+	VALUE block = rb_block_proc();
+	rb_iv_set(self, "@callback", block);
 
 	long frames_read = src_callback_read(src_state, ratio, frames_requested, ptr);
 
+	rb_iv_set(self, "@callback", Qnil);
+
 	if (frames_read != frames_requested) {
-		// FIXME: handle end-of-stream condition where less data is returned
+		// FIXME: handle end-of-stream condition where less data is returned by returning a smaller block or Qnil
 		rb_raise(rb_eIOError, "libsamplerate gave us %ld frames instead of the %ld we requested", frames_read, frames_requested);
 	}
 
@@ -86,18 +96,33 @@ static VALUE ruby_sample(VALUE self, VALUE narray, VALUE count)
  * depends on the upstream graph and the app's performance and latency
  * requirements.
  *
- * For the initial implementation I will use the former approach.
+ * For the initial implementation I will use the former approach, passing the
+ * upstream read callback in @block and the upstream read count in @read_size.
+ *
+ * Libsamplerate treats an upstream result size of 0 as end of stream.
  */
 static long read_callback(void *data, float **audio)
 {
 	VALUE self = (VALUE)data;
+	VALUE block = rb_iv_get(self, "@callback");
 	
-	VALUE buf = rb_iv_get(self, "@buf");
+	VALUE samples_requested = rb_iv_get(self, "@read_size");
+	printf("Reading %ld upstream samples for libsamplerate\n", NUM2LONG(samples_requested)); // XXX
+
+	VALUE block_args = rb_ary_new_from_args(1, samples_requested);
+	VALUE buf = rb_proc_call(block, block_args);
+
+	if (buf == Qnil) {
+		*audio = NULL;
+		return 0;
+	}
+
 	*audio = (float *)(nary_get_pointer_for_read(buf) + nary_get_offset(buf));
 
-	long samples_read = NUM2LONG(rb_iv_get(self, "@read_size"));
-
-	printf("Reading %ld upstream samples for libsamplerate\n", samples_read); // XXX
+	narray_t *na;
+	GetNArray(buf, na);
+	long samples_read = NA_SIZE(na);
+	printf("Block gave us %ld samples\n", samples_read); // XXX
 
 	return samples_read;
 }
@@ -106,7 +131,7 @@ static long read_callback(void *data, float **audio)
  * Initializes a libsamplerate-based resampler with the given conversion
  * +ratio+ (output rate divided by input rate).
  */
-static VALUE ruby_fast_resample_init(VALUE self, VALUE ratio)
+static VALUE ruby_fast_resample_initialize(VALUE self, VALUE ratio)
 {
 	double r = NUM2DBL(ratio);
 
@@ -145,9 +170,9 @@ void Init_fast_resample(void)
 	src_state_class = rb_define_class_under(fast_resample_class, "SrcState", rb_cBasicObject);
 	rb_undef_alloc_func(src_state_class);
 
-	rb_define_method(fast_resample_class, "initialize", ruby_fast_resample_init, 1);
-	rb_define_method(fast_resample_class, "sample", ruby_sample, 2);
+	rb_define_method(fast_resample_class, "initialize", ruby_fast_resample_initialize, 1);
+	rb_define_method(fast_resample_class, "read", ruby_read, 2);
 
-	rb_attr(fast_resample_class, rb_intern("ratio"), 1, 0, 0);
+	rb_attr(fast_resample_class, rb_intern("ratio"), 1, 1, 0);
 	rb_attr(fast_resample_class, rb_intern("read_size"), 1, 1, 0);
 }
