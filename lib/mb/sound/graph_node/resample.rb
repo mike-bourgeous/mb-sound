@@ -4,7 +4,7 @@ module MB
       # This graph node converts from one sample rate to another.  The upstream
       # sample rate is detected from the source node.
       #
-      # TODO: what algorithms will this support?
+      # TODO: should this be a Filter, and/or should we add a Filter variant?
       class Resample
         include GraphNode
         include BufferHelper

@@ -9,11 +9,19 @@ require 'mb-sound'
 GRAPHICAL = ARGV.include?('--graphical')
 SPECTRUM = ARGV.include?('--spectrum')
 
-data = MB::Sound::GraphNode::Resample::MODES.map { |m|
-  d = 40.hz.at(1).at_rate(400).resample(16000, mode: m).sample(65000)
+modes = [
+  [:ruby_zoh, :libsamplerate_zoh],
+  [:ruby_linear, :libsamplerate_linear],
+  [:ruby_linear, :libsamplerate_best],
+]
+data = modes.flat_map { |(a, b)|
+  d1 = MB::M.skip_leading(40.hz.at(1).at_rate(400).resample(16000, mode: a).sample(27000), 0)[0...16000]
+  d2 = MB::M.skip_leading(40.hz.at(1).at_rate(400).resample(16000, mode: b).sample(27000), 0)[0...16000]
+  delta = d2.not_inplace! - d1.not_inplace!
   [
-    m,
-    MB::M.skip_leading(d, 0)[0...64000]
+    ["#{a}/#{b} diff", delta],
+#    [a, d1],
+#    [b, d2],
   ]
 }.to_h
 
@@ -34,7 +42,7 @@ loop do
     MB::Sound.time_freq(
       data,
       graphical: GRAPHICAL,
-      time_samples: 1600,
+      time_samples: 3200,
       freq_samples: 16000
     )
   end
