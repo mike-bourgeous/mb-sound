@@ -39,7 +39,7 @@ static void grow_narray(VALUE self, long min_size)
 {
 	VALUE min_rb = LONG2NUM(min_size);
 	VALUE buf = rb_iv_get(self, "@buf");
-	if (buf == Qnil) {
+	if (buf == Qnil || rb_class_of(buf) != numo_cSFloat) {
 		printf("Creating internal buffer with size %ld\n", min_size); // XXX
 		rb_iv_set(self, "@buf", rb_funcall(numo_cSFloat, sym_zeros, 1, min_rb));
 	} else {
@@ -73,8 +73,6 @@ static VALUE ruby_read(VALUE self, VALUE count)
 
 	VALUE buf = rb_iv_get(self, "@buf");
 
-	rb_need_block();
-
 	VALUE state = rb_iv_get(self, "@state");
 	SRC_STATE *src_state = TypedData_Get_Struct(state, SRC_STATE, &state_type_info, src_state);
 
@@ -85,13 +83,7 @@ static VALUE ruby_read(VALUE self, VALUE count)
 	printf("Setting upstream frames_requested to %ld based on frames_requested=%ld and ratio=%f\n", upstream_frames, frames_requested, ratio); // XXX
 	rb_iv_set(self, "@read_size", LONG2NUM(upstream_frames));
 
-	// TODO: pass the block to the initialize method instead so we only need it once
-	VALUE block = rb_block_proc();
-	rb_iv_set(self, "@callback", block);
-
 	long frames_read = src_callback_read(src_state, ratio, frames_requested, ptr);
-
-	rb_iv_set(self, "@callback", Qnil);
 
 	if (frames_read != frames_requested) {
 		// FIXME: handle end-of-stream condition where less data is returned by returning a smaller block or Qnil
@@ -126,6 +118,10 @@ static long read_callback(void *data, float **audio)
 {
 	VALUE self = (VALUE)data;
 	VALUE block = rb_iv_get(self, "@callback");
+	VALUE block_class = rb_class_of(block);
+	if (block_class != rb_cProc) {
+		rb_raise(rb_eTypeError, "Callback is %"PRIsVALUE", not a Proc", block_class);
+	}
 	
 	VALUE samples_requested = rb_iv_get(self, "@read_size");
 	printf("Reading %ld upstream samples for libsamplerate\n", NUM2LONG(samples_requested)); // XXX
@@ -168,7 +164,11 @@ static VALUE ruby_fast_resample_initialize(VALUE self, VALUE ratio)
 	rb_iv_set(self, "@read_size", INT2NUM(0));
 	rb_iv_set(self, "@buf", Qnil);
 
+	rb_need_block();
+	rb_iv_set(self, "@callback", rb_block_proc());
+
 	// TODO: Allow switching converter type
+	// TODO: Add size tracking for Ruby's GC
 	int error = 0;
 	SRC_STATE *src_state = src_callback_new(read_callback, SRC_SINC_BEST_QUALITY, 1, &error, (void *)self);
 
