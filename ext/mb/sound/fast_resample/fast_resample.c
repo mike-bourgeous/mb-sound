@@ -56,29 +56,50 @@ static VALUE ruby_sample(VALUE self, VALUE narray, VALUE count)
 	long frames_requested = NUM2LONG(count);
 	float *ptr = (float *)(nary_get_pointer_for_write(narray) + nary_get_offset(narray));
 
+	long upstream_frames = lround(frames_requested / ratio);
+	printf("Setting upstream frames_requested to %ld based on frames_requested=%ld and ratio=%f\n", upstream_frames, frames_requested, ratio);
+	rb_iv_set(self, "@read_size", LONG2NUM(upstream_frames));
+
 	long frames_read = src_callback_read(src_state, ratio, frames_requested, ptr);
 
 	if (frames_read != frames_requested) {
+		// FIXME: handle end-of-stream condition where less data is returned
 		rb_raise(rb_eIOError, "libsamplerate gave us %ld frames instead of the %ld we requested", frames_read, frames_requested);
 	}
 
-	return narray;
+	VALUE ruby_frames = LONG2NUM(frames_read);
+	VALUE result_range = rb_range_new(INT2FIX(0), ruby_frames, 1);
+	return rb_funcall(narray, rb_intern("[]"), 1, result_range);
 }
 
 /*
  * Called by libsamplerate to read data for conversion within ruby_sample().
+ *
+ * ----
+ *
+ * libsamplerate doesn't tell us anything about how much data it needs -- it
+ * just keeps asking until it either has enough to satisfy the read request, or
+ * we return a count of zero.
+ *
+ * So we can either try to calculate a ratio and return that amount here, or we
+ * can use a small size and let libsamplerate read repeatedly.  Which is best
+ * depends on the upstream graph and the app's performance and latency
+ * requirements.
+ *
+ * For the initial implementation I will use the former approach.
  */
 static long read_callback(void *data, float **audio)
 {
-	// TODO
-	//VALUE self = (VALUE)data;
-	//VALUE state = rb_iv_get(self, "@state");
+	VALUE self = (VALUE)data;
 	
-	printf("Reading some data for libsamplerate\n"); // XXX
+	VALUE buf = rb_iv_get(self, "@buf");
+	*audio = (float *)(nary_get_pointer_for_read(buf) + nary_get_offset(buf));
 
-	*audio = NULL;
+	long samples_read = NUM2LONG(rb_iv_get(self, "@read_size"));
 
-	return 0;
+	printf("Reading %ld upstream samples for libsamplerate\n", samples_read); // XXX
+
+	return samples_read;
 }
 
 /*
@@ -98,6 +119,8 @@ static VALUE ruby_fast_resample_init(VALUE self, VALUE ratio)
 	}
 
 	rb_iv_set(self, "@ratio", DBL2NUM(r));
+	rb_iv_set(self, "@read_size", INT2NUM(0));
+	rb_iv_set(self, "@buf", rb_funcall(numo_cSFloat, rb_intern("zeros"), 1, INT2NUM(48000)));
 
 	// TODO: Allow switching converter type
 	int error = 0;
@@ -118,9 +141,13 @@ void Init_fast_resample(void)
 	VALUE mb = rb_define_module("MB");
 	VALUE sound = rb_define_module_under(mb, "Sound");
 	fast_resample_class = rb_define_class_under(sound, "FastResample", rb_cObject);
+
 	src_state_class = rb_define_class_under(fast_resample_class, "SrcState", rb_cBasicObject);
 	rb_undef_alloc_func(src_state_class);
 
 	rb_define_method(fast_resample_class, "initialize", ruby_fast_resample_init, 1);
 	rb_define_method(fast_resample_class, "sample", ruby_sample, 2);
+
+	rb_attr(fast_resample_class, rb_intern("ratio"), 1, 0, 0);
+	rb_attr(fast_resample_class, rb_intern("read_size"), 1, 1, 0);
 }
