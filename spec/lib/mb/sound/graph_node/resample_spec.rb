@@ -17,8 +17,8 @@ RSpec.describe(MB::Sound::GraphNode::Resample) do
 
       context 'when upsampling' do
         it 'can upsample with a reasonable noise floor' do
-          resampled = 153.hz.at(1).at_rate(12000).resample(96000, mode: resample_mode).sample(24000)
-          reference = 153.hz.at(1).at_rate(96000).sample(24000)
+          resampled = 453.hz.at(1).at_rate(11376).resample(96000, mode: resample_mode).sample(24000)
+          reference = 453.hz.at(1).at_rate(96000).sample(24000)
           resampled, reference = skip_leading_and_truncate(resampled, reference)
 
           delta = resampled - reference
@@ -28,8 +28,8 @@ RSpec.describe(MB::Sound::GraphNode::Resample) do
         end
 
         it 'does not matter what the upsampling chunk size is' do
-          large_window = 40.hz.at(1).forever.at_rate(400).resample(16000, mode: resample_mode).sample(27000)
-          small_window = 40.hz.at(1).forever.at_rate(400).resample(16000, mode: resample_mode).multi_sample(216, 125)
+          large_window = 47.hz.at(1).forever.at_rate(400).resample(17521, mode: resample_mode).sample(27000)
+          small_window = 47.hz.at(1).forever.at_rate(400).resample(17521, mode: resample_mode).multi_sample(216, 125)
           large_window, small_window = skip_leading_and_truncate(large_window, small_window)
           large_window = large_window[0...16000]
           small_window = small_window[0...16000]
@@ -46,8 +46,8 @@ RSpec.describe(MB::Sound::GraphNode::Resample) do
 
       context 'when downsampling' do
         it 'can downsample with a reasonable noise floor' do
-          resampled = 153.hz.at(1).at_rate(96000).resample(9600, mode: resample_mode).sample(9600)
-          reference = 153.hz.at(1).at_rate(9600).sample(9600)
+          resampled = 157.hz.at(1).at_rate(96000).resample(5700, mode: resample_mode).sample(9600)
+          reference = 157.hz.at(1).at_rate(5700).sample(9600)
           resampled, reference = skip_leading_and_truncate(resampled, reference)
 
           delta = resampled - reference
@@ -57,8 +57,8 @@ RSpec.describe(MB::Sound::GraphNode::Resample) do
         end
 
         it 'does not matter what the downsampling chunk size is' do
-          large_window = 40.hz.at(1).forever.at_rate(16000).resample(400, mode: resample_mode).sample(27000)
-          small_window = 40.hz.at(1).forever.at_rate(16000).resample(400, mode: resample_mode).multi_sample(216, 125)
+          large_window = 43.hz.at(1).forever.at_rate(17521).resample(400, mode: resample_mode).sample(27000)
+          small_window = 43.hz.at(1).forever.at_rate(17521).resample(400, mode: resample_mode).multi_sample(216, 125)
           large_window, small_window = skip_leading_and_truncate(large_window, small_window)
           large_window = large_window[0...16000]
           small_window = small_window[0...16000]
