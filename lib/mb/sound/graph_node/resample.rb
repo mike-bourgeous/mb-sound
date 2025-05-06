@@ -141,7 +141,7 @@ module MB
             }
 
           when :ruby_linear
-            ret = Numo::DFloat.linspace(@offset, endpoint - 1, count).inplace.map { |v|
+            ret = Numo::DFloat.linspace(linear_start, linear_end, count).inplace.map { |v|
               min = v.floor
               max = v.ceil
               delta = v - min
