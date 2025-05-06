@@ -13,14 +13,14 @@ GRAPHICAL = ARGV.include?('--graphical')
 SPECTRUM = ARGV.include?('--spectrum')
 
 modes = [
-  :ruby_zoh,
+  #:ruby_zoh,
   :ruby_linear,
-  :libsamplerate_zoh,
-  :libsamplerate_linear,
+  #:libsamplerate_zoh,
+  #:libsamplerate_linear,
 ]
 data = modes.flat_map { |m|
-  d1 = MB::M.skip_leading(40.hz.at(1).at_rate(400).resample(16000, mode: m).sample(27000), 0)[0...16000]
-  d2 = MB::M.skip_leading(40.hz.at(1).at_rate(400).resample(16000, mode: m).multi_sample(216, 125), 0)[0...16000]
+  d1 = MB::M.skip_leading(44.hz.at(1).at_rate(400).resample(16000, mode: m).sample(27000), 0)[0...16000]
+  d2 = MB::M.skip_leading(44.hz.at(1).at_rate(400).resample(16000, mode: m).multi_sample(216, 125), 0)[0...16000]
   delta = d2.not_inplace! - d1.not_inplace!
   [
     ["#{m} large", d1],
@@ -46,7 +46,7 @@ loop do
     MB::Sound.time_freq(
       data,
       graphical: GRAPHICAL,
-      time_samples: 3200,
+      time_samples: 1600,
       freq_samples: 16000
     )
   end
