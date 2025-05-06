@@ -46,10 +46,15 @@ module MB
           @mode = mode
 
           @upstream = upstream
+
           @sample_rate = sample_rate.to_f
           @inv_ratio = upstream.sample_rate.to_f / @sample_rate
           @ratio = @sample_rate / upstream.sample_rate.to_f
+
           @offset = 0.0
+          @samples_consumed = 0.0
+
+          @bufsize = 0
         end
 
         # Returns the upstream as the only source for this node.
@@ -78,80 +83,8 @@ module MB
 
         # Zero-order hold and linear interpolator in Ruby.  See #sample.
         def sample_ruby(count, mode)
-          # FIXME: we probably need to retain prior samples for proper
-          # interpolation; maybe use circular buffer class and add a seek
-          # method or use direct_read or something
-          #
-          # I need something like a clocked circular buffer or a fractional
-          # circular buffer where I can say "give me time t1 to t2 scaled to n
-          # samples"
-          #
-          # The delay filter has some of this, as does the circular buffer.
-          # The delay filter accepts an narray to control delay time but for
-          # downsampling I suspect it wouldn't handle removal of old data, and
-          # in either case the delay times would get unreasonable over time so
-          # there'd need to be some way of resetting the delay reference.
-          #
-          # The circular buffer consumes samples by incrementing the read
-          # pointer for the full requested amount, so it would need some
-          # adaptation or wrapper to retain the extra sample(s) required and
-          # indicate how many new samples are needed to fulfill a request.  And
-          # again keeping a clock going without numbers growing larger and
-          # larger would be a challenge.
-          #
-          # # Rambling thoughts/stream of consciousness:
-          #
-          # Suppose I go a little overboard and request an extra 2 or 4 samples
-          # on the first buffer, then retain that extra for later buffers.
-          # Could something simple like a seek/rewind method on the circular
-          # buffer allow reaching back for those extra past samples when
-          # needed?
-          #
-          # What does the math look like to track where and how much to read in
-          # the circular buffer, and where to pull each sample?  I need a way
-          # to guarantee that I won't exceed the endpoint of a buffer without
-          # dropping samples.  Can the index I want to read ever be negative?
-          # The output clock should be treated as exact -- N samples returned
-          # is N samples returned, so it's the input clock that needs
-          # interpolation.
-          #
-          # If I want 5.4 samples starting at offset 5.4...10.8 or 10.8...16.2,
-          # what do I actually read?  I need sample #10 to interpolate between
-          # 10 and 11.  I need sample 17 to interpolate between 16 and 17.  So
-          # I really need 7 samples in hand to read 5.4, but the clock is only
-          # advancing by 5.4 samples.
-          #
-          # Ok, so how many samples do I ask the upstream for each time? That's
-          # still challenging me. I need a way of mapping "I have samples N
-          # through M, and I want to have access to samples X through Y, so I
-          # need to add Y - M samples and I can get rid of samples N through X
-          # exclusive." I then need some way of kicking old data out of the
-          # buffer / subtracting times I'll never need to revisit, so my
-          # counters don't grow infinitely large (eventually you run into
-          # floating point quantization errors and/or slower bigint math).
-          #
-          # ----
-          #
-          # A few hours later; time to start chipping away at the math.  It
-          # feels like this should be easy but there's a bunch of noise to
-          # filter out.
-          #
-          # I think the answer is indeed to use a circular buffer, and keep
-          # track of the range of samples stored in that buffer.  Then for each
-          # downstream request, if the circular buffer can fulfill it, don't
-          # read from the upstream.
-          #
-          # ----
-          #
-          # New question: is the sample taken at t=x representative of w/2 to
-          # the left and the right?  Or w to the right or left?  In other
-          # words, are samples centered within their time interval?  Does this
-          # affect how the math would work for interpolated reading from the
-          # upstream?
-          #
-          # You know, maybe I don't need to "discard" any samples as long as
-          # the buffer is large enough; I really just need to be able to refer
-          # to samples from t minus 0 to t minus X.
+          STDERR.puts("\n\n\n-----------------------")
+          warn "#{__id__} Starting resampling: count=#{count}, mode=#{mode}\n\n"
 
           exact_required = @inv_ratio * count
           endpoint = @offset + exact_required
@@ -159,43 +92,56 @@ module MB
           first_sample = @offset.floor
           last_sample = endpoint.ceil
           samples_needed = last_sample - first_sample + 1
-          setup_circular_buffer(samples_needed)
 
           linear_start = @offset - samples_needed
           linear_end = endpoint - samples_needed
 
-          data = get_last_samples(samples_needed)
+          setup_circular_buffer(samples_needed)
 
-            ...
+          data = next_samples(samples_needed)
+          return nil if data.nil?
 
-          # after
-
-          data = @upstream.sample(required)
-          return nil if data.nil? || data.empty?
-
-          if data.length < required
+          if data.length != samples_needed
+            raise 'TODO'
             # FIXME: probably missing some fractional error here
             count = count * data.length / required
             endpoint = @offset + data.length
             return nil if count == 0
           end
 
-          # TODO: reuse the existing buffer instead of regenerating a
-          # "linspace" every time, or maybe keep a buffer for each possible required size
-          # XXX setup_buffer(length: count)
+          STDERR.puts
+          warn "#{__id__} Resampling: #{MB::U.highlight({
+            :@ratio => @ratio,
+            :@inv_ratio => @inv_ratio,
+            :@offset => @offset,
+            :@samples_consumed => @samples_consumed,
+            endpoint: endpoint,
+            exact_required: exact_required,
+            first_sample: first_sample,
+            last_sample: last_sample,
+            samples_needed: samples_needed,
+            linear_start: linear_start,
+            linear_end: linear_end,
+            linear_min: linear_start.floor,
+            linear_max: linear_end.ceil,
+            data_length: data.length,
+            mode: mode,
+          })}\n\n" # XXX
+
+          # TODO: reuse the existing buffer instead of regenerating a linspace
+          # every time, or maybe keep a buffer for each possible required size
+          #
+          # TODO: add a fractional lookup helper method somewhere with varying
+          # interpolation modes like nearest, linear, cubic, area average, etc.
+          # or find one if I already wrote it
           case mode
           when :ruby_zoh
-            ret = Numo::DFloat.linspace(@offset - (endpoint + 1), endpoint - (endpoint + 1), count).inplace.map { |v|
-              # FIXME, sometimes passes end
+            ret = Numo::DFloat.linspace(linear_start, linear_end, count).inplace.map { |v|
               data[v.round]
             }
 
           when :ruby_linear
-            # TODO: add a fractional lookup helper method somewhere with
-            # varying interpolation modes like nearest, linear, cubic, area
-            # average, etc.
             ret = Numo::DFloat.linspace(@offset, endpoint - 1, count).inplace.map { |v|
-              # FIXME, sometimes passes end
               min = v.floor
               max = v.ceil
               delta = v - min
@@ -206,9 +152,9 @@ module MB
             raise "BUG: unsupported mode #{mode}"
           end
 
-          samples_consumed += endpoint - offset
-          discard_samples(consumed.floor)
+          @samples_consumed += exact_required
           @offset = endpoint
+          discard_samples(@samples_consumed.floor)
 
           ret
         end
@@ -221,43 +167,53 @@ module MB
 
         private
 
-        # TODO: this might not be the right API for this operation; e.g. maybe
-        # we want keep_at_least(num_samples) or something like that
-        def discard_samples_before(sample_index)
-          raise NotImplementedError
+        # Tells the circular buffer to advance its read pointer by +count+
+        # samples, thus changing where #next_samples will read from.  This is
+        # called only for samples that cannot possibly be referenced by the
+        # playback range.
+        def discard_samples(count)
+          warn "Request to discard #{count} samples; @offset=#{@offset}, circbuf.length=#{@circbuf.length}" # XXX
 
-          # Calculate number of redundant samples (upstream start sample counter minus sample index)
-          # Consume redundant samples from the circular buffer
-          # Set upstream start sample counter to sample index
-          # Reset clocks so sample index stays low???
+          raise "BUG: negative discard count #{count}" if count < 0
+          @circbuf.discard(count) if count > 0
+          @offset -= count
+          @samples_consumed -= count
         end
 
-        def last_samples(count)
-          # TODO: add a peek_last method to the CircularBuffer
-          # TODO: loop on reading from upstream until the buffer has enough data
-          # TODO: What do we do at end of stream??
-        end
+        # Retrieve the oldest +count+ samples from the circular buffer.
+        # Coupled with #discard_samples, this should provide exactly the span
+        # needed for interpolation above.
+        #
+        # Returns a short read if the upstream ends before providing +count+
+        # samples.  Returns nil once the upstream has ended and the buffer is
+        # empty.
+        def next_samples(count)
+          warn "Requested #{count} samples"
 
-        # TODO maybe add a function
-        def add_samples(data)
-          @circbuf.write(data)
-          @buf_end += data.length
-          raise NotImplementedError
+          while @circbuf.length < count
+            warn "Reading #{count} from upstream"
+            d = @upstream.sample(count)
+            break if d.nil? || d.empty?
+            @circbuf.write(d)
+          end
 
-          # Write data to circular buffer
-          # Add data.length to the upstream end sample counter
+          return nil if @circbuf.empty?
+
+          @circbuf.peek(MB::M.min(count, @circbuf.length)).tap { |v|
+            warn "Returning #{v.length} samples"
+          }
         end
 
         # (Re)creates the circular buffer with sufficient capacity to handle
-        # upstream reads of +count+ samples (or larger, if it was previously
-        # larger).
+        # two upstream reads of +count+ samples plus a little wiggle room (or
+        # larger, if it was previously larger).
         def setup_circular_buffer(count)
           capacity = count * 2 + 4
           @bufsize = capacity if @bufsize < capacity
           @circbuf ||= MB::Sound::CircularBuffer.new(buffer_size: @bufsize)
 
           if @bufsize > @circbuf.length
-            @circbuf = @circbuf.dup(@circbuf.length)
+            @circbuf = @circbuf.dup(@bufsize)
           end
         end
       end

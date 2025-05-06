@@ -45,7 +45,7 @@ loop do
     MB::Sound.time_freq(
       data,
       graphical: GRAPHICAL,
-      time_samples: 3200,
+      time_samples: 16000,
       freq_samples: 16000
     )
   end

@@ -79,6 +79,21 @@ module MB
           @cbuf.direct_read(pos: @read_pos, count: count, target: @buf)
         end
 
+        # Discards/consumes the next +count+ samples as if they have been
+        # #read, without paying the cost of extracting or duplicating them.
+        # Useful with #peek for implementing atypical access patterns.
+        #
+        # Returns the number of available samples remaining.
+        def discard(count)
+          if count > @length
+            raise BufferUnderflow, "Discard of size #{count} is greater than #{@length} available samples " \
+              "on #{@index < 0 ? 'default reader' : "reader #{@index}"}"
+          end
+
+          @read_pos = (@read_pos + count) % @cbuf.buffer_size
+          @length -= count
+        end
+
         # For internal use by CircularBuffer.  Increments this reader's internal length value.
         def wrote(count)
           raise "BUG: wrote past read position on reader #{@index}" if (count + @length) >
@@ -196,6 +211,17 @@ module MB
       # Raises BufferUnderflow if +count+ is greater than #length.
       def peek(count)
         default_reader.peek(count)
+      end
+
+      # In single-reader mode, consumes/discards +count+ samples as if they
+      # had been #read.  This is useful with #peek and #peek_last for
+      # implementing more creative access patterns.
+      #
+      # Raises ReaderModeError if the buffer is in multi-reader mode.
+      #
+      # Raises BufferUnderflow if +count+ is greater than #length.
+      def discard(count)
+        default_reader.discard(count)
       end
 
       # For internal use by Reader.  Does a direct circular read from the
