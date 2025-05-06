@@ -51,8 +51,10 @@ module MB
           @inv_ratio = upstream.sample_rate.to_f / @sample_rate
           @ratio = @sample_rate / upstream.sample_rate.to_f
 
-          @offset = 0.0
+          @upstream_sample_index = 0.0
+          @startpoint = 0.0
           @samples_consumed = 0.0
+          @buffer_start = 0
 
           @bufsize = 0
         end
@@ -87,14 +89,18 @@ module MB
           warn "#{__id__} Starting resampling: count=#{count}, mode=#{mode}\n\n"
 
           exact_required = @inv_ratio * count
-          endpoint = @offset + exact_required
+          endpoint = @startpoint + exact_required
 
-          first_sample = @offset.floor
+          first_sample = @startpoint.floor
           last_sample = endpoint.ceil
           samples_needed = last_sample - first_sample + 1
 
-          linear_start = @offset - samples_needed
+          linear_start = @startpoint - samples_needed
           linear_end = endpoint - samples_needed
+          while linear_start >= exact_required
+            linear_start -= exact_required
+            linear_end -= exact_required
+          end
 
           setup_circular_buffer(samples_needed)
 
@@ -102,10 +108,10 @@ module MB
           return nil if data.nil?
 
           if data.length != samples_needed
-            raise 'TODO'
+            raise "TODO: asked for #{samples_needed} got #{data.length}"
             # FIXME: probably missing some fractional error here
             count = count * data.length / required
-            endpoint = @offset + data.length
+            endpoint = @startpoint + data.length
             return nil if count == 0
           end
 
@@ -113,10 +119,14 @@ module MB
           warn "#{__id__} Resampling: #{MB::U.highlight({
             :@ratio => @ratio,
             :@inv_ratio => @inv_ratio,
-            :@offset => @offset,
             :@samples_consumed => @samples_consumed,
+            :@buffer_start => @buffer_start,
+            :@upstream_sample_index => @upstream_sample_index,
+            :@startpoint => @startpoint,
             endpoint: endpoint,
             exact_required: exact_required,
+            global_first: @upstream_sample_index.floor,
+            global_last: (@upstream_sample_index + exact_required).ceil,
             first_sample: first_sample,
             last_sample: last_sample,
             samples_needed: samples_needed,
@@ -136,16 +146,18 @@ module MB
           # or find one if I already wrote it
           case mode
           when :ruby_zoh
-            ret = Numo::DFloat.linspace(linear_start, linear_end, count).inplace.map { |v|
+            ret = Numo::DFloat.linspace(linear_start, linear_end, count + 1)[0...-1].inplace.map { |v|
               data[v.round]
             }
 
           when :ruby_linear
-            ret = Numo::DFloat.linspace(linear_start, linear_end, count).inplace.map { |v|
-              min = v.floor
-              max = v.ceil
-              delta = v - min
-              data[min] * (1.0 - delta) + data[max] * delta
+            ret = Numo::DFloat.linspace(linear_start, linear_end, count + 1)[0...-1].inplace.map { |v|
+              idx1 = v.floor
+              idx2 = v.ceil
+              delta = v - idx1
+              d1 = data[idx1]
+              d2 = data[idx2]
+              d1 * (1.0 - delta) + d2 * delta
             }
 
           else
@@ -153,7 +165,8 @@ module MB
           end
 
           @samples_consumed += exact_required
-          @offset = endpoint
+          @upstream_sample_index += exact_required
+          @startpoint = endpoint
           discard_samples(@samples_consumed.floor)
 
           ret
@@ -172,12 +185,15 @@ module MB
         # called only for samples that cannot possibly be referenced by the
         # playback range.
         def discard_samples(count)
-          warn "Request to discard #{count} samples; @offset=#{@offset}, circbuf.length=#{@circbuf.length}" # XXX
+          warn "Request to discard #{count} samples; @startpoint=#{@startpoint}, circbuf.length=#{@circbuf.length}" # XXX
 
           raise "BUG: negative discard count #{count}" if count < 0
+          # FIXME: discarding an integer number of samples isn't exactly right.
+          # I need a way to refer to samples by index.
           @circbuf.discard(count) if count > 0
-          @offset -= count
+          @startpoint -= count
           @samples_consumed -= count
+          @buffer_start += count
         end
 
         # Retrieve the oldest +count+ samples from the circular buffer.
