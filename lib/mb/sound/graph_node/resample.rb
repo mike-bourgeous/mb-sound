@@ -78,9 +78,6 @@ module MB
 
         # Zero-order hold and linear interpolator in Ruby.  See #sample.
         def sample_ruby(count, mode)
-          exact_required = @inv_ratio * count
-          endpoint = @offset + exact_required
-
           # FIXME: we probably need to retain prior samples for proper
           # interpolation; maybe use circular buffer class and add a seek
           # method or use direct_read or something
@@ -143,15 +140,36 @@ module MB
           # track of the range of samples stored in that buffer.  Then for each
           # downstream request, if the circular buffer can fulfill it, don't
           # read from the upstream.
-          required = (endpoint - @offset).ceil
+          #
+          # ----
+          #
+          # New question: is the sample taken at t=x representative of w/2 to
+          # the left and the right?  Or w to the right or left?  In other
+          # words, are samples centered within their time interval?  Does this
+          # affect how the math would work for interpolated reading from the
+          # upstream?
+          #
+          # You know, maybe I don't need to "discard" any samples as long as
+          # the buffer is large enough; I really just need to be able to refer
+          # to samples from t minus 0 to t minus X.
 
-          # TODO: repeat the previous sample value for ZOH or interpolate through further partial fractional steps for linear
-          raise "Ratio #{@inv_ratio} too low for count #{count} (tried to read zero samples from upstream)" if required == 0
+          exact_required = @inv_ratio * count
+          endpoint = @offset + exact_required
 
-          warn "#{self.__id__} Reading #{required} samples (wanted #{exact_required}) to return #{count}, to go from #{@upstream.sample_rate} to #{@sample_rate}; offset is #{@offset}...#{endpoint}" # XXX
+          first_sample = @offset.floor
+          last_sample = endpoint.ceil
+          samples_needed = last_sample - first_sample + 1
+          setup_circular_buffer(samples_needed)
 
-          # FIXME: use a circular buffer or buffer adapter if upstreams don't
-          # like oscillating between N and N+1 samples
+          linear_start = @offset - samples_needed
+          linear_end = endpoint - samples_needed
+
+          data = get_last_samples(samples_needed)
+
+            ...
+
+          # after
+
           data = @upstream.sample(required)
           return nil if data.nil? || data.empty?
 
@@ -167,7 +185,7 @@ module MB
           # XXX setup_buffer(length: count)
           case mode
           when :ruby_zoh
-            ret = Numo::DFloat.linspace(@offset, endpoint - 1, count).inplace.map { |v|
+            ret = Numo::DFloat.linspace(@offset - (endpoint + 1), endpoint - (endpoint + 1), count).inplace.map { |v|
               # FIXME, sometimes passes end
               data[v.round]
             }
@@ -188,7 +206,9 @@ module MB
             raise "BUG: unsupported mode #{mode}"
           end
 
-          @offset = endpoint - endpoint.floor
+          samples_consumed += endpoint - offset
+          discard_samples(consumed.floor)
+          @offset = endpoint
 
           ret
         end
