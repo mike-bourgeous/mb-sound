@@ -92,31 +92,37 @@ RSpec.describe(MB::Sound::GraphNode::Resample, :aggregate_failures) do
     end
 
     context 'using a sample counter to verify time linearity' do
+      shared_examples_for 'zoh or linear' do
+        it 'has the expected output when sampling all at once' do
+          expect(node.sample(60).real).to all_be_within(1.5e-5).of_array(expected[0...60])
+        end
+
+        it 'has the expected output when sampling in random chunks' do
+          expect(node.multi_sample(7, 3).real).to all_be_within(1.5e-5).of_array(expected[0...21])
+          expect(node.sample(30).real).to all_be_within(1.5e-5).of_array(expected[21...51])
+          expect(node.sample(3).real).to all_be_within(1.5e-5).of_array(expected[51...54])
+        end
+
+        it 'has the expected output when sampling in consistent chunks' do
+          expect(node.multi_sample(11, 5).real).to all_be_within(1.5e-5).of_array(expected[0...55])
+        end
+      end
+
       shared_examples_for 'zoh' do
         let (:expected) { Numo::Int32.linspace(0, output_end, 501) }
-
-        it 'has the expected output for ZOH' do
-          expect(MB::M.round(node.multi_sample(7, 3).real, 6)).to eq(expected[0...21])
-          expect(MB::M.round(node.sample(30).real, 6)).to eq(expected[21...51])
-          expect(MB::M.round(node.sample(3).real, 6)).to eq(expected[51...54])
-        end
+        it_behaves_like 'zoh or linear'
       end
 
       shared_examples_for 'linear' do
         let (:expected) { Numo::SFloat.linspace(0, output_end, 501) }
-
-        it 'has the expected output for linear' do
-          expect(MB::M.round(node.multi_sample(7, 3).real, 6)).to eq(expected[0...21])
-          expect(MB::M.round(node.sample(30).real, 6)).to eq(expected[21...51])
-          expect(MB::M.round(node.sample(3).real, 6)).to eq(expected[51...54])
-        end
+        it_behaves_like 'zoh or linear'
       end
 
       context 'with varying ratios' do
         let (:counter) { MB::Sound::ArrayInput.new(data: Numo::SFloat.linspace(0, 500, 501), sample_rate: from_rate) }
         let (:node) { counter.resample(to_rate, mode: resample_mode) }
 
-        [1, 2, 3, 4, 5].each do |r|
+        [1, 2, 2.345, 3, 3.3217, 4, 5].each do |r|
           [:ruby_linear, :ruby_zoh, :libsamplerate_linear, :libsamplerate_zoh].each do |m|
             context "when ratio is #{r}" do
               let (:ratio) { r }
