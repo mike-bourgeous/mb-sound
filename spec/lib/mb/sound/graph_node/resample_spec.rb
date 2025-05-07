@@ -92,6 +92,59 @@ RSpec.describe(MB::Sound::GraphNode::Resample, :aggregate_failures) do
     end
 
     context 'using a sample counter to verify time linearity' do
+      shared_examples_for 'zoh' do
+        let (:expected) { Numo::Int32.linspace(0, output_end, 501) }
+
+        it 'has the expected output for ZOH' do
+          expect(MB::M.round(node.multi_sample(7, 3).real, 6)).to eq(expected[0...21])
+          expect(MB::M.round(node.sample(30).real, 6)).to eq(expected[21...51])
+          expect(MB::M.round(node.sample(3).real, 6)).to eq(expected[51...54])
+        end
+      end
+
+      shared_examples_for 'linear' do
+        let (:expected) { Numo::SFloat.linspace(0, output_end, 501) }
+
+        it 'has the expected output for linear' do
+          expect(MB::M.round(node.multi_sample(7, 3).real, 6)).to eq(expected[0...21])
+          expect(MB::M.round(node.sample(30).real, 6)).to eq(expected[21...51])
+          expect(MB::M.round(node.sample(3).real, 6)).to eq(expected[51...54])
+        end
+      end
+
+      context 'with varying ratios' do
+        let (:counter) { MB::Sound::ArrayInput.new(data: Numo::SFloat.linspace(0, 500, 501), sample_rate: from_rate) }
+        let (:node) { counter.resample(to_rate, mode: resample_mode) }
+
+        [1, 2, 3, 4, 5].each do |r|
+          [:ruby_linear, :ruby_zoh, :libsamplerate_linear, :libsamplerate_zoh].each do |m|
+            context "when ratio is #{r}" do
+              let (:ratio) { r }
+
+              context "when mode is #{m}" do
+                let(:resample_mode) { m }
+
+                context 'when upsampling' do
+                  let (:from_rate) { 100 }
+                  let (:to_rate) { 100 * r }
+                  let (:output_end) { 500.0 / ratio }
+
+                  it_behaves_like m.to_s.rpartition('_')[-1]
+                end
+
+                context 'when downsampling' do
+                  let (:from_rate) { 100 * r }
+                  let (:to_rate) { 100 }
+                  let (:output_end) { 500.0 * ratio }
+
+                  it_behaves_like m.to_s.rpartition('_')[-1]
+                end
+              end
+            end
+          end
+        end
+      end
+
       it 'can upsample a zoh counter using :ruby_zoh' do
         counter = MB::Sound::ArrayInput.new(data: Numo::SFloat.linspace(0, 100, 101), sample_rate: 100)
 
