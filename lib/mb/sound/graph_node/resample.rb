@@ -146,18 +146,30 @@ module MB
           # or find one if I already wrote it
           case mode
           when :ruby_zoh
-            ret = Numo::DFloat.linspace(linear_start, linear_end, count + 1)[0...-1].inplace.map { |v|
-              data[v.round]
+            ret = Numo::DComplex.linspace(linear_start, linear_end, count + 1)[0...-1].inplace.map_with_index { |v, idx|
+              expected_sample = linear_start + idx * inv_ratio
+              expected_upstream_sample = @upstream_sample_index + idx * inv_ratio
+              actual_upstream_sample = v - linear_start + @upstream_sample_index
+              warn "Sample #{idx}: expected/got #{expected_sample}/#{v}, #{expected_upstream_sample}/#{actual_upstream_sample}" # XXX
+
+              data[v.real.floor] + 1i * v
             }
 
           when :ruby_linear
-            ret = Numo::DFloat.linspace(linear_start, linear_end, count + 1)[0...-1].inplace.map { |v|
-              idx1 = v.floor
-              idx2 = v.ceil
+            ret = Numo::DComplex.linspace(linear_start, linear_end, count + 1)[0...-1].inplace.map_with_index { |v, idx|
+              expected_sample = linear_start + idx * inv_ratio
+              expected_upstream_sample = @upstream_sample_index + idx * inv_ratio
+              actual_upstream_sample = v - linear_start + @upstream_sample_index
+              warn "Sample #{idx}: expected/got #{expected_sample}/#{v}, #{expected_upstream_sample}/#{actual_upstream_sample}" # XXX
+
+              idx1 = v.real.floor
+              idx2 = v.real.ceil
               delta = v - idx1
               d1 = data[idx1]
               d2 = data[idx2]
-              d1 * (1.0 - delta) + d2 * delta
+              d_out = d1 * (1.0 - delta) + d2 * delta
+
+              d_out + 1i * v # XXX remove complex
             }
 
           else
