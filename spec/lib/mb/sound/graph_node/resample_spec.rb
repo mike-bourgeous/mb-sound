@@ -1,4 +1,4 @@
-RSpec.describe(MB::Sound::GraphNode::Resample) do
+RSpec.describe(MB::Sound::GraphNode::Resample, :aggregate_failures) do
   it 'can be created' do
     expect { MB::Sound::GraphNode::Resample.new(upstream: 150.hz.triangle, sample_rate: 12345) }.not_to raise_error
   end
@@ -74,13 +74,6 @@ RSpec.describe(MB::Sound::GraphNode::Resample) do
       end
     end
 
-    it 'gives the same results for different chunk sizes (from plot_resampler_window_delta.rb)' do
-      d1 = MB::M.skip_leading(40.hz.at(1).at_rate(400).resample(16000, mode: :ruby_zoh).sample(27000), 0)[0...16000]
-      d2 = MB::M.skip_leading(40.hz.at(1).at_rate(400).resample(16000, mode: :ruby_zoh).multi_sample(216, 125), 0)[0...16000]
-      delta = d2.not_inplace! - d1.not_inplace!
-      expect(delta.abs.max).to eq(0)
-    end
-
     MB::Sound::GraphNode::Resample::MODES.each do |resample_mode|
       context "when resampling mode is #{resample_mode.inspect}" do
         it_behaves_like 'a working resampler', resample_mode
@@ -89,6 +82,59 @@ RSpec.describe(MB::Sound::GraphNode::Resample) do
 
     context 'with the default mode' do
       it_behaves_like 'a working resampler', MB::Sound::GraphNode::Resample::DEFAULT_MODE
+    end
+
+    it 'gives the same results for different chunk sizes (from plot_resampler_window_delta.rb)' do
+      d1 = MB::M.skip_leading(40.hz.at(1).at_rate(400).resample(16000, mode: :ruby_zoh).sample(27000), 0)[0...16000]
+      d2 = MB::M.skip_leading(40.hz.at(1).at_rate(400).resample(16000, mode: :ruby_zoh).multi_sample(216, 125), 0)[0...16000]
+      delta = d2.not_inplace! - d1.not_inplace!
+      expect(delta.abs.max).to eq(0)
+    end
+
+    context 'using a sample counter to verify time linearity' do
+      it 'can upsample a zoh counter using :ruby_zoh' do
+        counter = MB::Sound::ArrayInput.new(data: Numo::SFloat.linspace(0, 100, 101), sample_rate: 100)
+
+        d1 = counter.resample(400, mode: :ruby_zoh)
+
+        expect(d1.sample(5).real).to eq(Numo::SFloat[0, 0, 0, 0, 1]) # XXX real
+        expect(d1.sample(5).real).to eq(Numo::SFloat[1, 1, 1, 2, 2]) # XXX real)
+        expect(d1.sample(3).real).to eq(Numo::SFloat[2, 2, 3]) # XXX real
+        expect(d1.sample(7).real).to eq(Numo::SFloat[3, 3, 3, 4, 4, 4, 4]) # XXX real
+      end
+
+      it 'can downsample a zoh counter using :ruby_zoh' do
+        counter = MB::Sound::ArrayInput.new(data: Numo::SFloat.linspace(0, 200, 201), sample_rate: 100)
+
+        d1 = counter.resample(25, mode: :ruby_zoh)
+
+        expect(d1.sample(5).real).to eq(Numo::SFloat[0, 4, 8, 12, 16]) # XXX real
+        expect(d1.sample(5).real).to eq(Numo::SFloat[20, 24, 28, 32, 36]) # XXX real)
+        expect(d1.multi_sample(5, 3).real).to eq(Numo::SFloat.linspace(40, 96, 15))
+        expect(d1.sample(7).real).to eq(Numo::SFloat[100, 104, 108, 112, 116, 120, 124]) # XXX real
+      end
+
+      it 'can upsample a linear counter using :ruby_linear' do
+        counter = MB::Sound::ArrayInput.new(data: Numo::SFloat.linspace(0, 100, 101), sample_rate: 100)
+
+        d1 = counter.resample(400, mode: :ruby_linear)
+
+        expect(d1.sample(5).real).to eq(Numo::SFloat[0, 0.25, 0.5, 0.75, 1]) # XXX real
+        expect(d1.sample(5).real).to eq(Numo::SFloat[1.25, 1.5, 1.75, 2, 2.25]) # XXX real)
+        expect(d1.multi_sample(5, 3).real).to eq(Numo::SFloat.linspace(2.5, 6, 15))
+        expect(d1.sample(7).real).to eq(Numo::SFloat[6.25, 6.5, 6.75, 7, 7.25, 7.5, 7.75]) # XXX real
+      end
+
+      it 'can downsample a linear counter using :ruby_linear' do
+        counter = MB::Sound::ArrayInput.new(data: Numo::SFloat.linspace(0, 200, 201), sample_rate: 100)
+
+        d1 = counter.resample(25, mode: :ruby_linear)
+
+        expect(d1.sample(5).real).to eq(Numo::SFloat[0, 4, 8, 12, 16]) # XXX real
+        expect(d1.sample(5).real).to eq(Numo::SFloat[20, 24, 28, 32, 36]) # XXX real)
+        expect(d1.multi_sample(5, 3).real).to eq(Numo::SFloat.linspace(40, 96, 15))
+        expect(d1.sample(7).real).to eq(Numo::SFloat[100, 104, 108, 112, 116, 120, 124]) # XXX real
+      end
     end
 
     pending 'with a more complex upstream graph'
