@@ -151,48 +151,48 @@ RSpec.describe(MB::Sound::GraphNode::Resample, :aggregate_failures) do
         end
       end
 
-      it 'can upsample a zoh counter using :ruby_zoh' do
+      it 'can upsample a sample counter using :ruby_zoh' do
         counter = MB::Sound::ArrayInput.new(data: Numo::SFloat.linspace(0, 100, 101), sample_rate: 100)
 
         d1 = counter.resample(400, mode: :ruby_zoh)
 
-        expect(d1.sample(5).real).to eq(Numo::SFloat[0, 0, 0, 0, 1]) # XXX real
-        expect(d1.sample(5).real).to eq(Numo::SFloat[1, 1, 1, 2, 2]) # XXX real)
-        expect(d1.sample(3).real).to eq(Numo::SFloat[2, 2, 3]) # XXX real
-        expect(d1.sample(7).real).to eq(Numo::SFloat[3, 3, 3, 4, 4, 4, 4]) # XXX real
+        expect(d1.sample(5)).to eq(Numo::SFloat[0, 0, 0, 0, 1])
+        expect(d1.sample(5)).to eq(Numo::SFloat[1, 1, 1, 2, 2])
+        expect(d1.sample(3)).to eq(Numo::SFloat[2, 2, 3])
+        expect(d1.sample(7)).to eq(Numo::SFloat[3, 3, 3, 4, 4, 4, 4])
       end
 
-      it 'can downsample a zoh counter using :ruby_zoh' do
+      it 'can downsample a sample counter using :ruby_zoh' do
         counter = MB::Sound::ArrayInput.new(data: Numo::SFloat.linspace(0, 200, 201), sample_rate: 100)
 
         d1 = counter.resample(25, mode: :ruby_zoh)
 
-        expect(d1.sample(5).real).to eq(Numo::SFloat[0, 4, 8, 12, 16]) # XXX real
-        expect(d1.sample(5).real).to eq(Numo::SFloat[20, 24, 28, 32, 36]) # XXX real)
-        expect(d1.multi_sample(5, 3).real).to eq(Numo::SFloat.linspace(40, 96, 15))
-        expect(d1.sample(7).real).to eq(Numo::SFloat[100, 104, 108, 112, 116, 120, 124]) # XXX real
+        expect(d1.sample(5)).to eq(Numo::SFloat[0, 4, 8, 12, 16])
+        expect(d1.sample(5)).to eq(Numo::SFloat[20, 24, 28, 32, 36])
+        expect(d1.multi_sample(5, 3)).to eq(Numo::SFloat.linspace(40, 96, 15))
+        expect(d1.sample(7)).to eq(Numo::SFloat[100, 104, 108, 112, 116, 120, 124])
       end
 
-      it 'can upsample a linear counter using :ruby_linear' do
+      it 'can upsample a sample counter using :ruby_linear' do
         counter = MB::Sound::ArrayInput.new(data: Numo::SFloat.linspace(0, 100, 101), sample_rate: 100)
 
         d1 = counter.resample(400, mode: :ruby_linear)
 
-        expect(d1.sample(5).real).to eq(Numo::SFloat[0, 0.25, 0.5, 0.75, 1]) # XXX real
-        expect(d1.sample(5).real).to eq(Numo::SFloat[1.25, 1.5, 1.75, 2, 2.25]) # XXX real)
-        expect(d1.multi_sample(5, 3).real).to eq(Numo::SFloat.linspace(2.5, 6, 15))
-        expect(d1.sample(7).real).to eq(Numo::SFloat[6.25, 6.5, 6.75, 7, 7.25, 7.5, 7.75]) # XXX real
+        expect(d1.sample(5)).to eq(Numo::SFloat[0, 0.25, 0.5, 0.75, 1])
+        expect(d1.sample(5)).to eq(Numo::SFloat[1.25, 1.5, 1.75, 2, 2.25])
+        expect(d1.multi_sample(5, 3)).to eq(Numo::SFloat.linspace(2.5, 6, 15))
+        expect(d1.sample(7)).to eq(Numo::SFloat[6.25, 6.5, 6.75, 7, 7.25, 7.5, 7.75])
       end
 
-      it 'can downsample a linear counter using :ruby_linear' do
+      it 'can downsample a sample counter using :ruby_linear' do
         counter = MB::Sound::ArrayInput.new(data: Numo::SFloat.linspace(0, 200, 201), sample_rate: 100)
 
         d1 = counter.resample(25, mode: :ruby_linear)
 
-        expect(d1.sample(5).real).to eq(Numo::SFloat[0, 4, 8, 12, 16]) # XXX real
-        expect(d1.sample(5).real).to eq(Numo::SFloat[20, 24, 28, 32, 36]) # XXX real)
-        expect(d1.multi_sample(5, 3).real).to eq(Numo::SFloat.linspace(40, 96, 15))
-        expect(d1.sample(7).real).to eq(Numo::SFloat[100, 104, 108, 112, 116, 120, 124]) # XXX real
+        expect(d1.sample(5)).to eq(Numo::SFloat[0, 4, 8, 12, 16])
+        expect(d1.sample(5)).to eq(Numo::SFloat[20, 24, 28, 32, 36])
+        expect(d1.multi_sample(5, 3)).to eq(Numo::SFloat.linspace(40, 96, 15))
+        expect(d1.sample(7)).to eq(Numo::SFloat[100, 104, 108, 112, 116, 120, 124])
       end
     end
 

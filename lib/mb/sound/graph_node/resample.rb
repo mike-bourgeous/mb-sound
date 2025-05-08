@@ -85,8 +85,8 @@ module MB
 
         # Zero-order hold and linear interpolator in Ruby.  See #sample.
         def sample_ruby(count, mode)
-          STDERR.puts("\n\n\n-----------------------")
-          warn "#{__id__} Starting resampling: count=#{count}, mode=#{mode}\n\n"
+          STDERR.puts("\n\n\n-----------------------") if $DEBUG # XXX
+          warn "#{__id__} Starting resampling: count=#{count}, mode=#{mode}\n\n" if $DEBUG
 
           exact_required = @inv_ratio * count
           endpoint = @startpoint + exact_required
@@ -115,28 +115,30 @@ module MB
             return nil if count == 0
           end
 
-          STDERR.puts
-          warn "#{__id__} Resampling: #{MB::U.highlight({
-            :@ratio => @ratio,
-            :@inv_ratio => @inv_ratio,
-            :@samples_consumed => @samples_consumed,
-            :@buffer_start => @buffer_start,
-            :@upstream_sample_index => @upstream_sample_index,
-            :@startpoint => @startpoint,
-            endpoint: endpoint,
-            exact_required: exact_required,
-            global_first: @upstream_sample_index.floor,
-            global_last: (@upstream_sample_index + exact_required).ceil,
-            first_sample: first_sample,
-            last_sample: last_sample,
-            samples_needed: samples_needed,
-            linear_start: linear_start,
-            linear_end: linear_end,
-            linear_min: linear_start.floor,
-            linear_max: linear_end.ceil,
-            data_length: data.length,
-            mode: mode,
-          })}\n\n" # XXX
+          if $DEBUG # XXX
+            STDERR.puts
+            warn "#{__id__} Resampling: #{MB::U.highlight({
+              :@ratio => @ratio,
+                :@inv_ratio => @inv_ratio,
+                :@samples_consumed => @samples_consumed,
+                :@buffer_start => @buffer_start,
+                :@upstream_sample_index => @upstream_sample_index,
+                :@startpoint => @startpoint,
+                endpoint: endpoint,
+                exact_required: exact_required,
+                global_first: @upstream_sample_index.floor,
+                global_last: (@upstream_sample_index + exact_required).ceil,
+                first_sample: first_sample,
+                last_sample: last_sample,
+                samples_needed: samples_needed,
+                linear_start: linear_start,
+                linear_end: linear_end,
+                linear_min: linear_start.floor,
+                linear_max: linear_end.ceil,
+                data_length: data.length,
+                mode: mode,
+            })}\n\n" # XXX
+          end
 
           # TODO: reuse the existing buffer instead of regenerating a linspace
           # every time, or maybe keep a buffer for each possible required size
@@ -146,30 +148,20 @@ module MB
           # or find one if I already wrote it
           case mode
           when :ruby_zoh
-            ret = Numo::DComplex.linspace(linear_start, linear_end, count + 1)[0...-1].inplace.map_with_index { |v, idx|
-              expected_sample = linear_start + idx * inv_ratio
-              expected_upstream_sample = @upstream_sample_index + idx * inv_ratio
-              actual_upstream_sample = v - linear_start + @upstream_sample_index
-              warn "Sample #{idx}: expected/got #{expected_sample}/#{v}, #{expected_upstream_sample}/#{actual_upstream_sample}" # XXX
-
-              data[v.real.floor] + 1i * v
+            ret = Numo::SFloat.linspace(linear_start, linear_end, count + 1)[0...-1].inplace.map_with_index { |v, idx|
+              data[v.floor]
             }
 
           when :ruby_linear
-            ret = Numo::DComplex.linspace(linear_start, linear_end, count + 1)[0...-1].inplace.map_with_index { |v, idx|
-              expected_sample = linear_start + idx * inv_ratio
-              expected_upstream_sample = @upstream_sample_index + idx * inv_ratio
-              actual_upstream_sample = v - linear_start + @upstream_sample_index
-              warn "Sample #{idx}: expected/got #{expected_sample}/#{v}, #{expected_upstream_sample}/#{actual_upstream_sample}" # XXX
-
-              idx1 = v.real.floor
-              idx2 = v.real.ceil
+            ret = Numo::SFloat.linspace(linear_start, linear_end, count + 1)[0...-1].inplace.map_with_index { |v, idx|
+              idx1 = v.floor
+              idx2 = v.ceil
               delta = v - idx1
               d1 = data[idx1]
               d2 = data[idx2]
               d_out = d1 * (1.0 - delta) + d2 * delta
 
-              d_out + 1i * v # XXX remove complex
+              d_out
             }
 
           else
@@ -186,6 +178,7 @@ module MB
 
         # Libsamplerate resampler.  See #sample.
         def sample_libsamplerate(count)
+          # TODO: handle complex by resampling real and imaginary separately?
           raise "call #sample first to initialize libsamplerate" unless @fast_resample
           @fast_resample.read(count).not_inplace! # TODO: can we return inplace?
         end
@@ -197,7 +190,7 @@ module MB
         # called only for samples that cannot possibly be referenced by the
         # playback range.
         def discard_samples(count)
-          warn "Request to discard #{count} samples; @startpoint=#{@startpoint}, circbuf.length=#{@circbuf.length}" # XXX
+          warn "Request to discard #{count} samples; @startpoint=#{@startpoint}, circbuf.length=#{@circbuf.length}" if $DEBUG # XXX
 
           raise "BUG: negative discard count #{count}" if count < 0
           # FIXME: discarding an integer number of samples isn't exactly right.
@@ -216,10 +209,10 @@ module MB
         # samples.  Returns nil once the upstream has ended and the buffer is
         # empty.
         def next_samples(count)
-          warn "Requested #{count} samples"
+          warn "Requested #{count} samples" if $DEBUG
 
           while @circbuf.length < count
-            warn "Reading #{count} from upstream"
+            warn "Reading #{count} from upstream" if $DEBUG
             d = @upstream.sample(count)
             break if d.nil? || d.empty?
             @circbuf.write(d)
@@ -228,7 +221,7 @@ module MB
           return nil if @circbuf.empty?
 
           @circbuf.peek(MB::M.min(count, @circbuf.length)).tap { |v|
-            warn "Returning #{v.length} samples"
+            warn "Returning #{v.length} samples" if $DEBUG
           }
         end
 
