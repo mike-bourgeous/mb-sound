@@ -29,10 +29,17 @@ static ID sym_array_lookup;
 static ID sym_array_assign;
 static ID sym_zeros;
 
+#define mbfr_debug(...) { \
+	if (ruby_debug) { \
+		rb_warn("%s: %d (%s)", __FILE__, __LINE__, __func__); \
+		rb_warn(__VA_ARGS__); \
+	} \
+}
+
 static void deinit_samplerate_state(void *state)
 {
 	if (state) {
-		rb_warn("Closing libsamplerate at %p\n", state); // XXX
+		mbfr_debug("Closing libsamplerate at %p\n", state); // XXX
 		SRC_STATE *src_state = state;
 		src_delete(src_state);
 	}
@@ -50,7 +57,7 @@ static void grow_narray(VALUE self, long min_size)
 	VALUE min_rb = LONG2NUM(min_size);
 	VALUE buf = rb_ivar_get(self, sym_atbuf);
 	if (buf == Qnil || rb_class_of(buf) != numo_cSFloat) {
-		rb_warn("Creating internal buffer with size %ld\n", min_size); // XXX
+		mbfr_debug("Creating internal buffer with size %ld\n", min_size); // XXX
 		rb_ivar_set(self, sym_atbuf, rb_funcall(numo_cSFloat, sym_zeros, 1, min_rb));
 	} else {
 		narray_t *na;
@@ -58,7 +65,7 @@ static void grow_narray(VALUE self, long min_size)
 		long bufsize = NA_SIZE(na);
 
 		if (bufsize < min_size) {
-			rb_warn("Growing internal buffer from %ld to %ld\n", bufsize, min_size); // XXX
+			mbfr_debug("Growing internal buffer from %ld to %ld\n", bufsize, min_size); // XXX
 
 			VALUE newbuf = rb_funcall(numo_cSFloat, sym_zeros, 1, min_rb);
 			VALUE assign_range = rb_range_new(INT2FIX(0), LONG2NUM(bufsize), 1);
@@ -93,7 +100,7 @@ static VALUE ruby_read(VALUE self, VALUE count)
 	if (upstream_frames <= 0) {
 		upstream_frames = 1;
 	}
-	rb_warn("Setting upstream frames_requested to %ld based on frames_requested=%ld and ratio=%f\n", upstream_frames, frames_requested, ratio); // XXX
+	mbfr_debug("Setting upstream frames_requested to %ld based on frames_requested=%ld and ratio=%f\n", upstream_frames, frames_requested, ratio); // XXX
 	rb_ivar_set(self, sym_atread_size, LONG2NUM(upstream_frames));
 
 	long frames_read = src_callback_read(src_state, ratio, frames_requested, ptr);
@@ -137,7 +144,7 @@ static long read_callback(void *data, float **audio)
 	}
 
 	VALUE samples_requested = rb_ivar_get(self, sym_atread_size);
-	rb_warn("Reading %ld upstream samples for libsamplerate\n", NUM2LONG(samples_requested)); // XXX
+	mbfr_debug("Reading %ld upstream samples for libsamplerate\n", NUM2LONG(samples_requested)); // XXX
 
 	VALUE block_args = rb_ary_new_from_args(1, samples_requested);
 	VALUE buf = rb_proc_call(block, block_args);
@@ -152,7 +159,7 @@ static long read_callback(void *data, float **audio)
 	narray_t *na;
 	GetNArray(buf, na);
 	long samples_read = NA_SIZE(na);
-	rb_warn("Block gave us %ld samples\n", samples_read); // XXX
+	mbfr_debug("Block gave us %ld samples\n", samples_read); // XXX
 
 	return samples_read;
 }
@@ -167,17 +174,17 @@ static VALUE ruby_lookup_converter(VALUE self, VALUE mode)
 	VALUE libsamplerate_linear = ID2SYM(rb_intern("libsamplerate_linear"));
 	VALUE libsamplerate_zoh = ID2SYM(rb_intern("libsamplerate_zoh"));
 
-	rb_warn("Looking up converter %+"PRIsVALUE, mode); // XXX
+	mbfr_debug("Looking up converter %+"PRIsVALUE, mode); // XXX
 
 	// Convert String to Symbol if needed
 	if (RB_TYPE_P(mode, T_STRING)) {
-		rb_warn("Converting string to symbol"); // XXX
+		mbfr_debug("Converting string to symbol"); // XXX
 		mode = ID2SYM(rb_intern_str(mode));
 	}
 
 	// Look up integer mode IDs
 	if (RB_TYPE_P(mode, T_FIXNUM)) {
-		rb_warn("Looking up integer ID"); // XXX
+		mbfr_debug("Looking up integer ID"); // XXX
 		VALUE mode_name = rb_hash_aref(converter_names, mode);
 		if (NIL_P(mode_name)) {
 			rb_raise(rb_eArgError, "Unsupported mode ID %+"PRIsVALUE, mode);
@@ -230,14 +237,14 @@ static VALUE ruby_fast_resample_initialize(int argc, VALUE *argv, VALUE self)
 {
 	VALUE ratio, mode, callback;
 
-	rb_warn("Starting resampler initialization with %d arguments", argc);
+	mbfr_debug("Starting resampler initialization with %d arguments", argc);
 
 	rb_need_block();
 	if (rb_scan_args(argc, argv, "11&", &ratio, &mode, &callback) < 1) {
 		rb_raise(rb_eArgError, "Too few arguments to constructor");
 	}
 
-	rb_warn("Ratio is %+"PRIsVALUE", mode is %+"PRIsVALUE", callback is %+"PRIsVALUE, ratio, mode, callback); // XXX
+	mbfr_debug("Ratio is %+"PRIsVALUE", mode is %+"PRIsVALUE", callback is %+"PRIsVALUE, ratio, mode, callback); // XXX
 
 	if (NIL_P(mode)) {
 		mode = ID2SYM(rb_intern("libsamplerate_best"));
@@ -259,7 +266,7 @@ static VALUE ruby_fast_resample_initialize(int argc, VALUE *argv, VALUE self)
 
 	rb_funcall(self, rb_intern("setup_converter_type"), 1, mode);
 
-	rb_warn("Creating libsamplerate handle"); // XXX
+	mbfr_debug("Creating libsamplerate handle"); // XXX
 	int error = 0;
 	SRC_STATE *src_state = src_callback_new(read_callback, FIX2INT(rb_iv_get(self, "@mode_id")), 1, &error, (void *)self);
 	if (src_state == NULL) {
@@ -270,7 +277,7 @@ static VALUE ruby_fast_resample_initialize(int argc, VALUE *argv, VALUE self)
 	VALUE state = TypedData_Wrap_Struct(src_state_class, &state_type_info, src_state);
 	rb_ivar_set(self, sym_atstate, state);
 
-	rb_warn("Initialization complete"); // XXX
+	mbfr_debug("Initialization complete"); // XXX
 
 	return self;
 }
