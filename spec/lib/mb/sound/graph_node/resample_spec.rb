@@ -94,32 +94,32 @@ RSpec.describe(MB::Sound::GraphNode::Resample, :aggregate_failures) do
     context 'using a sample counter to verify time linearity' do
       shared_examples_for 'zoh or linear' do
         it 'has the expected output when sampling all at once' do
-          expect(node.sample(60).real).to all_be_within(1.5e-5).of_array(expected[0...60])
+          expect(node.sample(60)).to all_be_within(5).sigfigs.of_array(expected[0...60])
         end
 
         it 'has the expected output when sampling in random chunks' do
-          expect(node.multi_sample(7, 3).real).to all_be_within(1.5e-5).of_array(expected[0...21])
-          expect(node.sample(30).real).to all_be_within(1.5e-5).of_array(expected[21...51])
-          expect(node.sample(3).real).to all_be_within(1.5e-5).of_array(expected[51...54])
+          expect(node.multi_sample(7, 3)).to all_be_within(5).sigfigs.of_array(expected[0...21])
+          expect(node.sample(30)).to all_be_within(5).sigfigs.of_array(expected[21...51])
+          expect(node.sample(3)).to all_be_within(5).sigfigs.of_array(expected[51...54])
         end
 
         it 'has the expected output when sampling in consistent chunks' do
-          expect(node.multi_sample(11, 5).real).to all_be_within(1.5e-5).of_array(expected[0...55])
+          expect(node.multi_sample(11, 5)).to all_be_within(5).sigfigs.of_array(expected[0...55])
         end
       end
 
       shared_examples_for 'zoh' do
-        let (:expected) { Numo::Int32.linspace(0, output_end, 501) }
+        let (:expected) { Numo::Int32.linspace(0, output_end, 50001) }
         it_behaves_like 'zoh or linear'
       end
 
       shared_examples_for 'linear' do
-        let (:expected) { Numo::SFloat.linspace(0, output_end, 501) }
+        let (:expected) { Numo::SFloat.linspace(0, output_end, 50001) }
         it_behaves_like 'zoh or linear'
       end
 
       context 'with varying ratios' do
-        let (:counter) { MB::Sound::ArrayInput.new(data: Numo::SFloat.linspace(0, 500, 501), sample_rate: from_rate) }
+        let (:counter) { MB::Sound::ArrayInput.new(data: Numo::SFloat.linspace(0, 50000, 50001), sample_rate: from_rate) }
         let (:node) { counter.resample(to_rate, mode: resample_mode) }
 
         [1, 2, 2.345, 3, 3.3217, 4, 5].each do |r|
@@ -133,7 +133,7 @@ RSpec.describe(MB::Sound::GraphNode::Resample, :aggregate_failures) do
                 context 'when upsampling' do
                   let (:from_rate) { 100 }
                   let (:to_rate) { 100 * r }
-                  let (:output_end) { 500.0 / ratio }
+                  let (:output_end) { 50000.0 / ratio }
 
                   it_behaves_like m.to_s.rpartition('_')[-1]
                 end
@@ -141,7 +141,7 @@ RSpec.describe(MB::Sound::GraphNode::Resample, :aggregate_failures) do
                 context 'when downsampling' do
                   let (:from_rate) { 100 * r }
                   let (:to_rate) { 100 }
-                  let (:output_end) { 500.0 * ratio }
+                  let (:output_end) { 50000.0 * ratio }
 
                   it_behaves_like m.to_s.rpartition('_')[-1]
                 end
