@@ -194,6 +194,20 @@ RSpec.describe(MB::Sound::GraphNode::Resample, :aggregate_failures) do
         expect(d1.multi_sample(5, 3)).to eq(Numo::SFloat.linspace(40, 96, 15))
         expect(d1.sample(7)).to eq(Numo::SFloat[100, 104, 108, 112, 116, 120, 124])
       end
+
+      it 'can upsample with a weird ratio regardless of chunk size using :ruby_linear' do
+        counter1 = MB::Sound::ArrayInput.new(data: Numo::SFloat.linspace(0, 3719000, 100001), sample_rate: 100)
+        counter2 = MB::Sound::ArrayInput.new(data: Numo::SFloat.linspace(0, 3719000, 100001), sample_rate: 100)
+
+        d1 = counter1.resample(3719, mode: :ruby_linear)
+        d2 = counter2.resample(3719, mode: :ruby_linear)
+
+        # data1 = d1.multi_sample(233, 430)[0...100000]
+        data1 = d1.multi_sample(2, 50001)[0...100000]
+        data2 = d2.sample(100000)
+
+        expect(data1).to all_be_within(5).sigfigs.of_array(data2)
+      end
     end
 
     pending 'with a more complex upstream graph'
