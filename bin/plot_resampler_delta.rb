@@ -29,18 +29,23 @@ modes = [
   #[:ruby_linear, :libsamplerate_best],
 ]
 data = modes.flat_map { |(a, b)|
-  d1 = MB::M.skip_leading(
-    FREQ.hz.triangle.at(1).at_rate(FROM_RATE).forever
+  d1 = MB::M.select_zero_crossings(
+    FREQ.hz.at(1).at_rate(FROM_RATE).forever
       .resample(TO_RATE, mode: a)
       .multi_sample(MULTI_SAMPLES, MULTI_COUNT),
-    0
-  )[-SAMPLES..]
-  d2 = MB::M.skip_leading(
-    FREQ.hz.triangle.at(1).at_rate(FROM_RATE).forever
+    nil
+  )# XXX [-SAMPLES..]
+  d2 = MB::M.select_zero_crossings(
+    FREQ.hz.at(1).at_rate(FROM_RATE).forever
       .resample(TO_RATE, mode: b)
       .multi_sample(MULTI_SAMPLES, MULTI_COUNT),
-    0
-  )[-SAMPLES..]
+    nil
+  )# XXX [-SAMPLES..]
+
+  dlength = [d1.length, d2.length].min
+  d1 = d1[0...dlength]
+  d2 = d2[0...dlength]
+
   delta = d2.not_inplace! - d1.not_inplace!
   [
     ["#{a}/#{b} diff", delta],
@@ -54,6 +59,21 @@ MB::U.sigquit_backtrace {
   pry_next = true
   Thread.new do |t| sleep 0.1 ; Thread.main.wakeup end
 }
+
+puts MB::U.highlight({
+  GRAPHICAL: GRAPHICAL,
+  SPECTRUM: SPECTRUM,
+  SAMPLES: SAMPLES,
+  FROM_RATE: FROM_RATE,
+  TO_RATE: TO_RATE,
+  FREQ: FREQ,
+  MULTI_SAMPLES: MULTI_SAMPLES,
+  MULTI_COUNT: MULTI_COUNT,
+})
+
+data.each do |name, data|
+  MB::Sound.write("tmp/#{"#{$0}_#{name}".gsub(/[^A-Za-z0-9-]+/, '_')}.flac", data, sample_rate: TO_RATE, overwrite: true)
+end
 
 loop do
   if SPECTRUM
