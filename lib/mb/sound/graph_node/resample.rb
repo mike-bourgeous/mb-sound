@@ -142,18 +142,15 @@ module MB
 
           # TODO: reuse the existing buffer instead of regenerating a linspace
           # every time, or maybe keep a buffer for each possible required size
-          #
-          # TODO: add a fractional lookup helper method somewhere with varying
-          # interpolation modes like nearest, linear, cubic, area average, etc.
-          # or find one if I already wrote it
           case mode
           when :ruby_zoh
-            ret = Numo::SFloat.linspace(linear_start, linear_end, count + 1)[0...-1].inplace.map_with_index { |v, idx|
+            ret = Numo::DFloat.linspace(linear_start, linear_end, count + 1)[0...-1].inplace.map_with_index { |v, idx|
               data[v.floor]
             }
 
           when :ruby_linear
-            ret = Numo::SFloat.linspace(linear_start, linear_end, count + 1)[0...-1].inplace.map_with_index { |v, idx|
+            # TODO: Use MB::M.fractional_index()?
+            ret = Numo::DFloat.linspace(linear_start, linear_end, count + 1)[0...-1].inplace.map_with_index { |v, idx|
               idx1 = v.floor
               idx2 = v.ceil
               delta = v - idx1

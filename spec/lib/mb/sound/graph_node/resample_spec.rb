@@ -36,7 +36,7 @@ RSpec.describe(MB::Sound::GraphNode::Resample, :aggregate_failures) do
 
           delta = large_window - small_window
 
-          expect(delta.abs.max).to eq(0)
+          expect(delta).to all_be_within(1e-9).of_array(0)
         end
 
         pending 'upsamples end of stream on buffer boundary'
@@ -65,7 +65,7 @@ RSpec.describe(MB::Sound::GraphNode::Resample, :aggregate_failures) do
 
           delta = large_window - small_window
 
-          expect(delta.abs.max).to eq(0)
+          expect(delta).to all_be_within(1e-9).of_array(0)
         end
 
         pending 'downsamples end of stream on buffer boundary'

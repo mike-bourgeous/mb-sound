@@ -224,6 +224,7 @@ module MB
 
             # TODO: Something better than linear interpolation?
             # TODO: Allow switching off interpolation?
+            # TODO: Use MB::M.fractional_index()?
             ret = data.map_with_index { |_, idx|
               delay = delay_buf[idx] # TODO: does this need to clamp to >= 0 ???
               min = delay.floor
