@@ -79,6 +79,7 @@ RSpec.describe(MB::Sound::GraphNode::Tee) do
 
   it 'returns nil if the source returns nil' do
     source = double(MB::Sound::GraphNode)
+    allow(source).to receive(:sample_rate).and_return(48000)
     allow(source).to receive(:sample).and_return(Numo::SFloat[1,2,3], nil)
 
     t1, t2 = MB::Sound::GraphNode::Tee.new(source).branches
@@ -94,6 +95,7 @@ RSpec.describe(MB::Sound::GraphNode::Tee) do
 
   it 'returns nil if the source returns empty' do
     source = double(MB::Sound::GraphNode)
+    allow(source).to receive(:sample_rate).and_return(48000)
     allow(source).to receive(:sample).and_return(Numo::SFloat[1,2,3], Numo::SFloat[])
 
     t1, t2 = MB::Sound::GraphNode::Tee.new(source).branches

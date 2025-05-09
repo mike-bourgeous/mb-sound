@@ -8,15 +8,27 @@ module MB
       class FilterChain < Filter
         class FilterDuplicationError < RuntimeError; end
         class FilterCycleError < RuntimeError; end
+        class NoFiltersGivenError < RuntimeError; end
+        class FilterSampleRateError < RuntimeError; end
 
-        attr_reader :filters
+        attr_reader :filters, :sample_rate
 
         # Initializes a filter chain with the given filters.  Filters are applied
         # first-to-last/left-to-right, so the first filter at the left receives
         # the original input, and the last filter produces the final output.
         def initialize(*filters)
+          raise NoFiltersGivenError, 'No filters were given' if filters.empty?
           @filters = filters
+
           check_for_cycle
+
+          # TODO: Maybe merge with code in FilterSum (or remove FilterSum), FilterBank
+          @sample_rate = @filters.first.sample_rate
+          @filters[1..-1].each.with_index do |f, idx|
+            if f.sample_rate != @sample_rate
+              raise FilterSampleRateError, "Filter #{f} at index #{idx} has sample rate #{f.sample_rate.inspect}; expected #{@sample_rate.inspect}"
+            end
+          end
         end
 
         # Processes +samples+ through each filter in the chain.  Returns the

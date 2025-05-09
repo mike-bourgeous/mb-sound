@@ -1,7 +1,7 @@
 RSpec.describe(MB::Sound::GraphNode::Multiplier) do
   describe '#initialize' do
     it 'can create a multiplier with no multiplicands' do
-      ss = MB::Sound::GraphNode::Multiplier.new([])
+      ss = MB::Sound::GraphNode::Multiplier.new([], sample_rate: 48000)
       expect(ss.sample(800)).to eq(Numo::SFloat.ones(800))
     end
 
@@ -11,17 +11,19 @@ RSpec.describe(MB::Sound::GraphNode::Multiplier) do
           0.5,
           MB::Sound::ArrayInput.new(data: [Numo::SFloat.ones(600).fill(1.5)], repeat: true),
           MB::Sound::ArrayInput.new(data: [Numo::SFloat.ones(600).fill(-0.75)], repeat: true),
-        ]
+        ],
+        sample_rate: 48000
       )
       expect(ss.sample(800)).to eq(Numo::SFloat.zeros(800).fill(-0.5625))
     end
 
     it 'can create a multiplier from a variable length argument list' do
       ss = MB::Sound::GraphNode::Multiplier.new(
-          0.5,
-          3,
-          MB::Sound::ArrayInput.new(data: [Numo::SFloat.ones(600).fill(1.5)], repeat: true),
-          MB::Sound::ArrayInput.new(data: [Numo::SFloat.ones(600).fill(-0.75)], repeat: true),
+        0.5,
+        3,
+        MB::Sound::ArrayInput.new(data: [Numo::SFloat.ones(600).fill(1.5)], repeat: true),
+        MB::Sound::ArrayInput.new(data: [Numo::SFloat.ones(600).fill(-0.75)], repeat: true),
+        sample_rate: 48000
       )
       expect(ss.sample(800)).to eq(Numo::SFloat.zeros(800).fill(-1.6875))
     end
@@ -29,7 +31,7 @@ RSpec.describe(MB::Sound::GraphNode::Multiplier) do
 
   describe '#sample' do
     it 'can change the buffer size' do
-      ss = MB::Sound::GraphNode::Multiplier.new([1, 0.hz.square.at(1.5).oscillator])
+      ss = MB::Sound::GraphNode::Multiplier.new([1, 0.hz.square.at(1.5).oscillator], sample_rate: 48000)
       expect(ss.sample(100)).to eq(Numo::SFloat.zeros(100).fill(1.5))
       expect(ss.sample(200)).to eq(Numo::SFloat.zeros(200).fill(1.5))
       expect(ss.sample(123)).to eq(Numo::SFloat.zeros(123).fill(1.5))
@@ -41,7 +43,7 @@ RSpec.describe(MB::Sound::GraphNode::Multiplier) do
       allow(inp_a).to receive(:sample).and_return(Numo::SFloat[1,2,3,4])
       allow(inp_b).to receive(:sample).and_return(Numo::SFloat[1,2,3,4,5])
 
-      m = MB::Sound::GraphNode::Multiplier.new(inp_a, inp_b)
+      m = MB::Sound::GraphNode::Multiplier.new(inp_a, inp_b, sample_rate: 48000)
       expect { m.sample(4) }.to raise_error(/Input 1.*asked/)
       expect { m.sample(5) }.to raise_error(/Input 0.*asked/)
     end
@@ -120,7 +122,7 @@ RSpec.describe(MB::Sound::GraphNode::Multiplier) do
 
     it 'returns nil when any input returns nil, if stop_early is true' do
       t1 = 0.hz.square.at(1).for(1).at_rate(50)
-      t2 = 0.hz.square.at(0.5).for(1).at_rate(100)
+      t2 = 0.hz.square.at(0.5).for(2.0).at_rate(50)
       ss = MB::Sound::GraphNode::Multiplier.new(t1, t2)
 
       result = ss.sample(50)
@@ -131,7 +133,7 @@ RSpec.describe(MB::Sound::GraphNode::Multiplier) do
 
     it 'returns nil only when all inputs return nil, if stop_early is false' do
       t1 = 0.hz.square.at(1.5).for(1).at_rate(50)
-      t2 = 0.hz.square.at(0.5).for(1).at_rate(100)
+      t2 = 0.hz.square.at(0.5).for(2.0).at_rate(50)
       ss = MB::Sound::GraphNode::Multiplier.new(t1, t2, stop_early: false)
 
       result = ss.sample(50)

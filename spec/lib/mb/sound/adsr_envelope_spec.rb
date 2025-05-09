@@ -5,7 +5,7 @@ RSpec.describe(MB::Sound::ADSREnvelope, :aggregate_failures) do
       decay_time: 0.2,
       sustain_level: 0.75,
       release_time: 0.5,
-      rate: 48000
+      sample_rate: 48000
     )
   }
 
@@ -172,7 +172,7 @@ RSpec.describe(MB::Sound::ADSREnvelope, :aggregate_failures) do
       expect(dup.object_id).not_to eq(env.object_id)
       expect(filter_dup.object_id).not_to eq(filter.object_id)
 
-      expect(dup.rate).to eq(env.rate)
+      expect(dup.sample_rate).to eq(env.sample_rate)
       expect(filter_dup.sample_rate).to eq(filter.sample_rate)
     end
 
@@ -185,8 +185,8 @@ RSpec.describe(MB::Sound::ADSREnvelope, :aggregate_failures) do
       expect(dup.object_id).not_to eq(env.object_id)
       expect(filter_dup.object_id).not_to eq(filter.object_id)
 
-      expect(dup.rate).to eq(1500)
-      expect(env.rate).to eq(48000)
+      expect(dup.sample_rate).to eq(1500)
+      expect(env.sample_rate).to eq(48000)
       expect(filter_dup.sample_rate).to eq(1500)
       expect(filter.sample_rate).to eq(48000)
     end
@@ -249,13 +249,13 @@ RSpec.describe(MB::Sound::ADSREnvelope, :aggregate_failures) do
     context 'with sustain of 1' do
       it 'remains within the expected range for the envelope' do
         # These parameters were causing bizarre plots on one of my livestreams
-        env = described_class.new(attack_time: 0.1385901240393387, decay_time: 0.9133346228248626, sustain_level: 1, release_time: 1.8523222156741201, rate: 48000)
+        env = described_class.new(attack_time: 0.1385901240393387, decay_time: 0.9133346228248626, sustain_level: 1, release_time: 1.8523222156741201, sample_rate: 48000)
 
         d = env.sample_all
         expect(d[0]).to be_between(0, 0.01)
         expect(d[-1]).to be_between(0, 0.01)
-        expect(d[env.rate * env.attack_time]).to be_between(0.99, 1.0)
-        expect(d[env.rate * (env.attack_time + env.decay_time)]).to be_between(0.99, 1.0)
+        expect(d[env.sample_rate * env.attack_time]).to be_between(0.99, 1.0)
+        expect(d[env.sample_rate * (env.attack_time + env.decay_time)]).to be_between(0.99, 1.0)
         expect(d.min).to be_between(0, 0.0001)
         expect(d.max).to be_between(0.99, 1.0)
       end
@@ -264,13 +264,13 @@ RSpec.describe(MB::Sound::ADSREnvelope, :aggregate_failures) do
     context 'with sustain of 0.5' do
       it 'remains within the expected range for the envelope' do
         # These parameters were causing bizarre plots on one of my livestreams
-        env = described_class.new(attack_time: 0.1385901240393387, decay_time: 0.9133346228248626, sustain_level: 0.5, release_time: 1.8523222156741201, rate: 48000)
+        env = described_class.new(attack_time: 0.1385901240393387, decay_time: 0.9133346228248626, sustain_level: 0.5, release_time: 1.8523222156741201, sample_rate: 48000)
 
         d = env.sample_all
         expect(d[0]).to be_between(0, 0.01)
         expect(d[-1]).to be_between(0, 0.01)
-        expect(d[env.rate * env.attack_time]).to be_between(0.99, 1.0)
-        expect(d[env.rate * (env.attack_time + env.decay_time)]).to be_between(0.49, 0.51)
+        expect(d[env.sample_rate * env.attack_time]).to be_between(0.99, 1.0)
+        expect(d[env.sample_rate * (env.attack_time + env.decay_time)]).to be_between(0.49, 0.51)
         expect(d.min).to be_between(0, 0.0001)
         expect(d.max).to be_between(0.99, 1.0)
       end

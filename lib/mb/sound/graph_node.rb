@@ -83,30 +83,31 @@ module MB
         end
       end
 
-      # Creates a mixer that adds this mixer's output to +other+.  Part of a
-      # DSL experiment for building up a signal graph.
+      # Creates a mixer that adds this node's #sample output to +other+ (a
+      # numeric constant or another GraphNode).
       def +(other)
         fixup_tones(false, self, other)
-        Mixer.new([self, other])
+        Mixer.new([self, other], sample_rate: self.sample_rate)
       end
 
-      # Creates a mixer that subtracts +other+ from this mixer's output.  Part
-      # of a DSL experiment for building up a signal graph.
+      # Creates a mixer that subtracts +other+ (a numeric constant or another
+      # GraphNode) from this node's #sample output.
       def -(other)
         fixup_tones(false, self, other)
-        Mixer.new([self, [other, -1]])
+        Mixer.new([self, [other, -1]], sample_rate: self.sample_rate)
       end
 
-      # Creates a multiplier that multiplies +other+ by this mixer's output.
-      # Part of a DSL experiment for building up a signal graph.
+      # Creates a multiplier that multiplies +other+ (a numeric constant or
+      # another GraphNode) by this node's #sample output.
       def *(other)
         fixup_tones(false, self)
         fixup_tones(true, other)
-        Multiplier.new([self, other])
+        Multiplier.new([self, other], sample_rate: self.sample_rate)
       end
 
       # Divides incoming data by +other+, which may be a Numeric or another
-      # signal graph.
+      # signal graph.  For signal graphs, each numerator value is divided
+      # by the corresponding denominator value at the same index.
       def /(other)
         if other.respond_to?(:sample)
           self.proc { |v|
@@ -255,6 +256,37 @@ module MB
         MB::Sound::GraphNode::NodeSequence.new([self, *sources])
       end
 
+      # Calls #sample with +count+ requested samples +times+ times,
+      # concatenating the results into a single array.
+      def multi_sample(count, times)
+        raise "Count must be a positive Integer (got #{count.inspect})" unless count.is_a?(Integer) && count > 0
+        raise "Times must be a positive Integer (got #{count.inspect})" unless times.is_a?(Integer) && times > 0
+
+        ret = nil
+
+        for _f in 0...times
+          d = sample(count)
+          break if d.nil? || d.empty?
+
+          if ret
+            ret = ret.concatenate(d)
+          else
+            ret = d.dup
+          end
+        end
+
+        ret
+      end
+
+      # Adds a resampling filter to the graph with the given new sample rate.
+      # All nodes added after the resampling node must use the new sample rate.
+      #
+      # The resampling +:mode+ must be one of the supported modes listed in
+      # MB::Sound::GraphNode::Resample::MODES (e.g. :libsamplerate_best).
+      def resample(sample_rate, mode: MB::Sound::GraphNode::Resample::DEFAULT_MODE)
+        MB::Sound::GraphNode::Resample.new(upstream: self, sample_rate: sample_rate, mode: mode)
+      end
+
       # Applies the given filter (creating the filter if given a filter type)
       # to this sample source or sample chain.  If given a filter type, then a
       # dynamically updating filter is created where the cutoff and quality are
@@ -272,7 +304,7 @@ module MB
       #
       #     # High-pass filter controlled by envelopes
       #     MB::Sound.play 500.hz.ramp.filter(:highpass, frequency: adsr() * 1000 + 100, quality: adsr() * -5 + 6)
-      def filter(filter_or_type = :lowpass, cutoff: nil, quality: nil, gain: nil, in_place: true, rate: 48000)
+      def filter(filter_or_type = :lowpass, cutoff: nil, quality: nil, gain: nil, in_place: true)
         f = filter_or_type
         f = f.hz if f.is_a?(Numeric)
         f = f.lowpass if f.is_a?(Tone)
@@ -283,7 +315,7 @@ module MB
 
           quality = quality || 0.5 ** 0.5
           # TODO: Support graph node sources for filter gain
-          f = MB::Sound::Filter::Cookbook.new(filter_or_type, rate, 1, quality: 1, db_gain: gain&.to_db)
+          f = MB::Sound::Filter::Cookbook.new(filter_or_type, sample_rate, 1, quality: 1, db_gain: gain&.to_db)
           MB::Sound::Filter::Cookbook::CookbookWrapper.new(filter: f, audio: self, cutoff: cutoff, quality: quality)
 
         when f.respond_to?(:wrap)
@@ -311,8 +343,8 @@ module MB
       # and produce a Complex-valued analytic signal.
       #
       # See MB::Sound::Filter::HilbertIIR.
-      def hilbert_iir(rate: 48000)
-        filter(MB::Sound::Filter::HilbertIIR.new(rate: rate))
+      def hilbert_iir(sample_rate: 48000)
+        filter(MB::Sound::Filter::HilbertIIR.new(sample_rate: sample_rate))
       end
 
       # Adds a MB::Sound::Filter::Smoothstep filter to the chain, smoothing
@@ -320,8 +352,8 @@ module MB
       #
       # TODO: instead of reacting to step changes in the input, use an FIR
       # filter whose step response is the smoothstep function.
-      def smooth(samples: nil, seconds: nil, rate: 48000)
-        filter(MB::Sound::Filter::Smoothstep.new(rate: rate, samples: samples, seconds: seconds))
+      def smooth(samples: nil, seconds: nil, sample_rate: 48000)
+        filter(MB::Sound::Filter::Smoothstep.new(sample_rate: sample_rate, samples: samples, seconds: seconds))
       end
 
       # Adds a MB::Sound::Filter::Delay to the signal chain with a delay of the
@@ -329,15 +361,15 @@ module MB
       #
       # See MB::Sound::Filter::Delay#initialize for a description of the
       # +:smoothing+ parameter.
-      def delay(seconds: nil, samples: nil, rate: 48000, smoothing: true, max_delay: 1.0)
+      def delay(seconds: nil, samples: nil, sample_rate: 48000, smoothing: true, max_delay: 1.0)
         if samples
           samples = samples.to_f if samples.is_a?(Numeric)
-          seconds = samples / rate
+          seconds = samples / sample_rate
         else
           seconds = seconds.to_f if seconds.is_a?(Numeric)
         end
 
-        filter(MB::Sound::Filter::Delay.new(delay: seconds, rate: rate, smoothing: smoothing, buffer_size: rate * max_delay))
+        filter(MB::Sound::Filter::Delay.new(delay: seconds, sample_rate: sample_rate, smoothing: smoothing, buffer_size: sample_rate.ceil * max_delay))
       end
 
       # Adds a multi-tap delay with the given delay sources, returning an Array
@@ -347,11 +379,11 @@ module MB
       # To smooth delay values, use #clip_rate, #smooth, #filter, or similar
       # methods (unlike the filter used by #delay, the
       # MB::Sound::GraphNode::MultitapDelay does not do built-in smoothing).
-      def multitap(*delays, rate: 48000, name: nil, initial_buffer_seconds: 1)
+      def multitap(*delays, sample_rate: 48000, name: nil, initial_buffer_seconds: 1)
         MB::Sound::GraphNode::MultitapDelay.new(
           self,
           *delays,
-          rate: rate,
+          sample_rate: sample_rate,
           initial_buffer_seconds: initial_buffer_seconds
         ).named(name).taps
       end
@@ -376,10 +408,10 @@ module MB
       # also #smooth and #filter).
       #
       # Uses MB::Sound::Filter::LinearFollower.
-      def clip_rate(max_rise, max_fall = nil, reset: nil, rate: 48000)
+      def clip_rate(max_rise, max_fall = nil, reset: nil, sample_rate: 48000)
         max_fall ||= -max_rise
         max_rise ||= -max_fall
-        f = MB::Sound::Filter::LinearFollower.new(rate: rate, max_rise: max_rise, max_fall: max_fall)
+        f = MB::Sound::Filter::LinearFollower.new(sample_rate: sample_rate, max_rise: max_rise, max_fall: max_fall)
         f.reset(reset) if reset
         self.filter(f)
       end
@@ -617,3 +649,4 @@ require_relative 'graph_node/tee'
 require_relative 'graph_node/multitap_delay'
 require_relative 'graph_node/complex_node'
 require_relative 'graph_node/buffer_adapter'
+require_relative 'graph_node/resample'

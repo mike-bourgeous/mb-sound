@@ -4,17 +4,17 @@ RSpec.describe(MB::Sound::OutputBufferWrapper, :aggregate_failures) do
   let(:c1) { 12000.hz.square.at(1).with_phase(0.0000001).sample(length) }
   let(:c2) { 8000.hz.square.at(-1).with_phase(0.0000001).sample(length) }
   let(:c3) { 6000.hz.square.at(1).with_phase(0.0000001).sample(length) }
-  let(:nulloutput) { MB::Sound::NullOutput.new(channels: 13, buffer_size: buffer_size, rate: 1537) }
+  let(:nulloutput) { MB::Sound::NullOutput.new(channels: 13, buffer_size: buffer_size, sample_rate: 1537) }
   let(:mono) { MB::Sound::NullOutput.new(channels: 1, buffer_size: buffer_size) }
   let(:stereo) { MB::Sound::NullOutput.new(channels: 2, buffer_size: buffer_size) }
   let(:multi) { MB::Sound::NullOutput.new(channels: 3, buffer_size: buffer_size) }
 
   let(:exname) { |ex| ex.metadata[:full_description].inspect.downcase.gsub(/[^a-z0-9_-]+/, '_') }
   let(:filename) { "tmp/output_buffer_wrapper_spec_#{exname}.flac" }
-  let(:file) { MB::Sound::FFMPEGOutput.new(filename, rate: 48000, channels: 2, buffer_size: buffer_size) }
+  let(:file) { MB::Sound::FFMPEGOutput.new(filename, sample_rate: 48000, channels: 2, buffer_size: buffer_size) }
 
   let(:mono_filename) { "tmp/output_buffer_wrapper_spec_mono_#{exname}.flac" }
-  let(:mono_file) { MB::Sound::FFMPEGOutput.new(mono_filename, rate: 48000, channels: 1, buffer_size: buffer_size) }
+  let(:mono_file) { MB::Sound::FFMPEGOutput.new(mono_filename, sample_rate: 48000, channels: 1, buffer_size: buffer_size) }
 
   before do
     File.unlink(filename) if File.exist?(filename)
@@ -28,7 +28,7 @@ RSpec.describe(MB::Sound::OutputBufferWrapper, :aggregate_failures) do
     it 'can wrap an FFMPEGOutput' do
       b = MB::Sound::OutputBufferWrapper.new(file)
       expect(b.channels).to eq(2)
-      expect(b.rate).to eq(48000)
+      expect(b.sample_rate).to eq(48000)
       expect(b.buffer_size).to eq(file.buffer_size)
 
       expect(b.closed?).to eq(false)
@@ -39,7 +39,7 @@ RSpec.describe(MB::Sound::OutputBufferWrapper, :aggregate_failures) do
     it 'can wrap a NullOutput' do
       b = MB::Sound::OutputBufferWrapper.new(nulloutput)
       expect(b.channels).to eq(13)
-      expect(b.rate).to eq(1537)
+      expect(b.sample_rate).to eq(1537)
       expect(b.buffer_size).to eq(buffer_size)
     end
 

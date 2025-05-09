@@ -3,20 +3,21 @@ module MB
     # Base class for IOInput and IOOutput with shared code for setting buffer
     # sizes, etc.  Use IOInput or IOOutput instead of using this directly.
     class IOBase
-      attr_reader :buffer_size, :frame_bytes, :channels
+      attr_reader :buffer_size, :frame_bytes, :channels, :sample_rate
 
       DEFAULT_BUFFER = 1024
 
       # Called from IOInput and IOOutput.  The first parameter is either an IO
       # object, or an array with the arguments to #run.  Buffer size is in
       # samples per channel per buffer.
-      def initialize(io_or_popen_args, channels, buffer_size)
+      def initialize(io_or_popen_args, channels, buffer_size, sample_rate:)
         raise 'Channels must be an int >= 1' unless channels.is_a?(Integer) && channels >= 1
         raise 'Buffer size must be an int >= 1' if buffer_size && (!buffer_size.is_a?(Integer) || buffer_size < 1)
 
         @channels = channels
         @frame_bytes = channels * 4
         @buffer_size = buffer_size || DEFAULT_BUFFER
+        @sample_rate = sample_rate.to_f
 
         if io_or_popen_args.is_a?(Array)
           @io = run(*io_or_popen_args)

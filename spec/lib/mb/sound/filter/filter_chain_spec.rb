@@ -78,6 +78,16 @@ RSpec.describe(MB::Sound::Filter::FilterChain) do
 
       expect { MB::Sound::Filter::FilterChain.new(chain) }.to raise_error(MB::Sound::Filter::FilterChain::FilterCycleError)
     end
+
+    it 'raises an error if not given any filters' do
+      expect { MB::Sound::Filter::FilterChain.new }.to raise_error(MB::Sound::Filter::FilterChain::NoFiltersGivenError)
+    end
+
+    it 'raises an error if given filters with different sample rates' do
+      a = 100.hz.at_rate(1583).lowpass
+      b = 123.hz.at_rate(2802).lowpass
+      expect { MB::Sound::Filter::FilterChain.new(a, b) }.to raise_error(MB::Sound::Filter::FilterChain::FilterSampleRateError, /rate.*2802.*1583/)
+    end
   end
 
   describe '#chain' do

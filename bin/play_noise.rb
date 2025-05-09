@@ -201,7 +201,7 @@ raise "Invalid number of channels #{USAGE}" if channels < 1
 
 gain = ARGV[2]&.to_f || 0
 
-output = MB::Sound.output(rate: 48000, channels: channels)
+output = MB::Sound.output(sample_rate: 48000, channels: channels)
 generator = NoiseGenerator.new(output, gain, noise_type)
 
 puts "\e[1;33m#{USAGE}\e[0m\n\n"

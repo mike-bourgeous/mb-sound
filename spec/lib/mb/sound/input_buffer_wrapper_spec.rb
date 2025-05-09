@@ -4,7 +4,7 @@ RSpec.describe(MB::Sound::InputBufferWrapper, :aggregate_failures) do
   let(:c1) { 12000.hz.square.at(1).with_phase(0.0000001).sample(length) }
   let(:c2) { 8000.hz.square.at(-1).with_phase(0.0000001).sample(length) }
   let(:c3) { 6000.hz.square.at(1).with_phase(0.0000001).sample(length) }
-  let(:nullinput) { MB::Sound::NullInput.new(channels: 13, buffer_size: buffer_size, rate: 1537, length: length) }
+  let(:nullinput) { MB::Sound::NullInput.new(channels: 13, buffer_size: buffer_size, sample_rate: 1537, length: length) }
   let(:mono) { MB::Sound::ArrayInput.new(data: [c1], buffer_size: buffer_size) }
   let(:stereo) { MB::Sound::ArrayInput.new(data: [c1, c2], buffer_size: buffer_size) }
   let(:multi) { MB::Sound::ArrayInput.new(data: [c1, c2, c3], buffer_size: buffer_size) }
@@ -15,7 +15,7 @@ RSpec.describe(MB::Sound::InputBufferWrapper, :aggregate_failures) do
     it 'can wrap an FFMPEGInput' do
       b = MB::Sound::InputBufferWrapper.new(file)
       expect(b.channels).to eq(2)
-      expect(b.rate).to eq(48000)
+      expect(b.sample_rate).to eq(48000)
       expect(b.buffer_size).to eq(file.buffer_size)
 
       expect(b.closed?).to eq(false)
@@ -26,14 +26,14 @@ RSpec.describe(MB::Sound::InputBufferWrapper, :aggregate_failures) do
     it 'can wrap a NullInput' do
       b = MB::Sound::InputBufferWrapper.new(nullinput)
       expect(b.channels).to eq(13)
-      expect(b.rate).to eq(1537)
+      expect(b.sample_rate).to eq(1537)
       expect(b.buffer_size).to eq(buffer_size)
     end
 
     it 'can wrap an ArrayInput' do
       b = MB::Sound::InputBufferWrapper.new(mono)
       expect(b.channels).to eq(1)
-      expect(b.rate).to eq(48000)
+      expect(b.sample_rate).to eq(48000)
       expect(b.buffer_size).to eq(buffer_size)
     end
 

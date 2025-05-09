@@ -18,6 +18,9 @@ module MB
         # The constant value added to the output sum before any summands.
         attr_accessor :constant
 
+        # The sample rate of the graph.
+        attr_reader :sample_rate
+
         # Creates a Mixer with the given inputs, which must be either Numeric
         # values or objects that have a #sample method.  Each input may have an
         # associated gain.  The summands, gains, or numeric constants may all
@@ -33,7 +36,7 @@ module MB
         # or an empty NArray from its #sample method will cause this #sample
         # method to return nil.  Otherwise, the #sample method only returns nil
         # when all summands return nil or empty.
-        def initialize(summands, stop_early: true)
+        def initialize(summands, sample_rate: nil, stop_early: true)
           @constant = 0
           @summands = {}
 
@@ -45,10 +48,19 @@ module MB
           # the different cases of arrays vs hashes vs varargs accurately)
           summands = [summands] unless summands.is_a?(Array) || summands.is_a?(Hash)
 
+          @sample_rate = sample_rate
+
           summands.each_with_index do |(s, gain), idx|
             gain ||= 1.0
 
             @complex = true if gain.is_a?(Complex)
+
+            if s.respond_to?(:sample_rate)
+              @sample_rate ||= s.sample_rate
+              if @sample_rate != s.sample_rate
+                raise "Summand #{idx}/#{s} sample rate #{s.sample_rate} does not match mixer sample rate #{@sample_rate}"
+              end
+            end
 
             case
             when s.is_a?(Numeric)
@@ -65,6 +77,9 @@ module MB
               raise ArgumentError, "Summand #{s.inspect} at index #{idx} is not a Numeric and does not respond to :sample"
             end
           end
+
+          raise 'Sample rate must be a positive numeric' unless @sample_rate.is_a?(Numeric) && @sample_rate > 0
+          @sample_rate = @sample_rate.to_f
 
           @buf = nil
         end

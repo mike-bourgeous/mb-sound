@@ -133,7 +133,8 @@ RSpec.describe MB::Sound::Filter::Cookbook do
         -1.2536869252532505,
         0.6268434626266253,
         -1.10922559150289,
-        0.3981482590036111
+        0.3981482590036111,
+        sample_rate: 48000
       )
 
       cookbook = MB::Sound::Filter::Cookbook.new(:highpass, 48000, 5000, quality: 0.7071)
@@ -233,7 +234,8 @@ RSpec.describe MB::Sound::Filter::Cookbook do
         -1.5211496795535877,
         0.8762465570560869,
         -1.5211496795535877,
-        0.9173672086578509
+        0.9173672086578509,
+        sample_rate: 48000
       )
 
       cookbook = MB::Sound::Filter::Cookbook.new(:peak, 48000, 5000, db_gain: 6, quality: 5)
@@ -268,7 +270,8 @@ RSpec.describe MB::Sound::Filter::Cookbook do
         -1.7768488823989634,
         0.7730275257848368,
         -1.78713360277755,
-        0.8077058851916483
+        0.8077058851916483,
+        sample_rate: 43210
       )
 
       cookbook = MB::Sound::Filter::Cookbook.new(:lowshelf, 43210, 1234, db_gain: 6.02, quality: 0.7071)
@@ -348,7 +351,8 @@ RSpec.describe MB::Sound::Filter::Cookbook do
         -3.420231952756624,
         1.545793526548647,
         -1.7003917748937079,
-        0.7397637707810658
+        0.7397637707810658,
+        sample_rate: 43210
       )
 
       cookbook = MB::Sound::Filter::Cookbook.new(:highshelf, 43210, 1234, db_gain: 6.02, quality: 0.7071)

@@ -45,21 +45,21 @@ else
 end
 
 bufsize = output.buffer_size
-buftime = bufsize.to_f / output.rate
+buftime = bufsize.to_f / output.sample_rate
 
-puts MB::U.highlight(
+puts MB::U.highlight({
   delay: base_delay_s,
   bufsize: bufsize,
   buftime: buftime,
-)
+})
 
 NUM_TAPS = 6
 
 begin
   # TODO: Abstract construction of a filter graph per channel
   paths = inputs.map.with_index { |inp, idx|
-    base = (base_delay_s.constant.named('Delay') - buftime).clip_rate(2, rate: 48000)
-    offset = base_delay_s.constant.named('Tap Offset').clip_rate(2, rate: 48000)
+    base = (base_delay_s.constant.named('Delay') - buftime).clip_rate(2, sample_rate: 48000)
+    offset = base_delay_s.constant.named('Tap Offset').clip_rate(2, sample_rate: 48000)
 
     offsets = offset.tee(NUM_TAPS)
     delays = base.tee(NUM_TAPS).map.with_index { |d, i|

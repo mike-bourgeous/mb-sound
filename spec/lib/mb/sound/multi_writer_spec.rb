@@ -2,7 +2,7 @@ RSpec.describe(MB::Sound::MultiWriter) do
   let(:null_out_1) { MB::Sound::NullOutput.new(channels: 1, sleep: false) }
   let(:null_out_2) { MB::Sound::NullOutput.new(channels: 2, sleep: false) }
   let(:null_out_5) { MB::Sound::NullOutput.new(channels: 5, sleep: false) }
-  let(:null_out_44k) { MB::Sound::NullOutput.new(channels: 1, rate: 44100, sleep: false) }
+  let(:null_out_44k) { MB::Sound::NullOutput.new(channels: 1, sample_rate: 44100, sleep: false) }
   let(:null_out_longbuf) { MB::Sound::NullOutput.new(channels: 1, buffer_size: 1600, sleep: false) }
 
   let(:data5) {
@@ -23,13 +23,13 @@ RSpec.describe(MB::Sound::MultiWriter) do
     it 'can be instantiated with a single 48k output' do
       multi = MB::Sound::MultiWriter.new([null_out_1])
       expect(multi.channels).to eq(1)
-      expect(multi.rate).to eq(48000)
+      expect(multi.sample_rate).to eq(48000)
       expect(multi.buffer_size).to eq(800)
     end
 
     it 'returns 44.1k for sample rate if given an output with a 44.1k rate' do
       multi = MB::Sound::MultiWriter.new([null_out_44k])
-      expect(multi.rate).to eq(44100)
+      expect(multi.sample_rate).to eq(44100)
       expect(multi.buffer_size).to eq(800)
       expect(multi.channels).to eq(1)
     end
@@ -37,7 +37,7 @@ RSpec.describe(MB::Sound::MultiWriter) do
     it 'returns the expected buffer size if given an output with a nonstandard buffer size' do
       multi = MB::Sound::MultiWriter.new([null_out_longbuf])
       expect(multi.buffer_size).to eq(1600)
-      expect(multi.rate).to eq(48000)
+      expect(multi.sample_rate).to eq(48000)
       expect(multi.channels).to eq(1)
     end
 
@@ -47,7 +47,7 @@ RSpec.describe(MB::Sound::MultiWriter) do
 
       multi5 = MB::Sound::MultiWriter.new([null_out_1, null_out_2, null_out_5])
       expect(multi5.channels).to eq(5)
-      expect(multi5.rate).to eq(48000)
+      expect(multi5.sample_rate).to eq(48000)
       expect(multi5.buffer_size).to eq(800)
     end
 

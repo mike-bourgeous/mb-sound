@@ -3,11 +3,23 @@ module MB
     class Filter
       # A parallel set of filters, all fed the same input, with the outputs
       # summed.
+      #
+      # TODO: maybe remove this?  for implementing something like a multiband
+      # compressor we'd just build parallel graph node chains
       class FilterSum < Filter
+        attr_reader :sample_rate
+
         # Initializes a filter sum with the given filters.  All filters receive
         # the original input, and are added to produce the final output.
         def initialize(*filters)
           @filters = filters
+
+          @sample_rate = @filters.first.sample_rate
+          @filters[1..-1].each.with_index do |f, idx|
+            if f.sample_rate != @sample_rate
+              raise "Filter #{f} at index #{idx} has different sample rate #{f.sample_rate.inspect} (expecting #{@sample_rate})"
+            end
+          end
         end
 
         # Processes the given sequence of samples (the array index is time)

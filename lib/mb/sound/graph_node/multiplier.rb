@@ -14,6 +14,12 @@ module MB
         # The constant value by which the output will be multiplied.
         attr_accessor :constant
 
+        # The graph sample rate (irrelevant for a multiplier).
+        #
+        # TODO: should there be a way of indicating a sample-rate-independent
+        # node type?
+        attr_reader :sample_rate
+
         # Creates a Multiplier with the given inputs, which must be either
         # Numeric values or objects that have a #sample method.  The
         # multiplicands or Numeric constants may all have complex values.  At
@@ -29,9 +35,10 @@ module MB
         # nil or an empty NArray from its #sample method will cause this #sample
         # method to return nil.  Otherwise, the #sample method only returns nil
         # when all multiplicands return nil or empty.
-        def initialize(*multiplicands, stop_early: true)
+        def initialize(*multiplicands, stop_early: true, sample_rate: nil)
           @constant = 1
           @multiplicands = {}
+          @sample_rate = sample_rate&.to_f
 
           @complex = false
 
@@ -56,6 +63,19 @@ module MB
             else
               raise ArgumentError, "Multiplicand #{m.inspect} at index #{idx} is not a Numeric and does not respond to :sample"
             end
+          end
+
+          multiplicands.each_with_index do |m, idx|
+            if m.respond_to?(:sample_rate)
+              @sample_rate ||= m.sample_rate
+              if m.sample_rate != @sample_rate
+                raise "Multiplicand #{idx}/#{m} sample rate is #{m.sample_rate}; expected #{@sample_rate}"
+              end
+            end
+          end
+
+          unless @sample_rate
+            raise 'No sample rate given via constructor or multiplicands'
           end
 
           @buf = nil

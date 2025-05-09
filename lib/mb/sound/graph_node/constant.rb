@@ -11,8 +11,8 @@ module MB
           # Converts this numeric value into a MB::Sound::GraphNode::Constant
           # constant-value signal generator.  See the Constant constructor for
           # parameter details.
-          def constant(*args, **kwargs)
-            MB::Sound::GraphNode::Constant.new(self, *args, **kwargs)
+          def constant(*args, sample_rate: 48000, **kwargs)
+            MB::Sound::GraphNode::Constant.new(self, *args, sample_rate: sample_rate, **kwargs)
           end
         end
         Numeric.include(NumericConstantMethods)
@@ -29,13 +29,17 @@ module MB
         # instead of being interpolated).
         attr_accessor :smoothing
 
+        # The sample rate given to the constructor, used for calculating the
+        # constant duration in #for.
+        attr_reader :sample_rate
+
         # Initializes a constant-output signal generator.
         #
         # If +:smoothing+ is true or nil, then when the constant is changed,
         # the output value will change smoothly over the length of one buffer
         # (TODO: use a constant-length FIR filter?  consider using or merging
         # with filter/smoothstep.rb?).
-        def initialize(constant, smoothing: nil, rate: 48000)
+        def initialize(constant, smoothing: nil, sample_rate:)
           raise 'The constant value must be a numeric' unless constant.is_a?(Numeric)
           @constant = constant
           @complex = @constant.is_a?(Complex)
@@ -43,7 +47,7 @@ module MB
           @smoothing = smoothing
           @buf = nil
 
-          @rate = rate.to_f
+          @sample_rate = sample_rate.to_f
           @elapsed_samples = 0.0
           @duration_samples = nil
         end
@@ -90,7 +94,7 @@ module MB
         def for(duration_seconds, recursive: true)
           super(duration_seconds, recursive: recursive)
           @elapsed_samples = 0
-          @duration_samples = duration_seconds && duration_seconds.to_f * @rate
+          @duration_samples = duration_seconds && duration_seconds.to_f * @sample_rate
           self
         end
       end

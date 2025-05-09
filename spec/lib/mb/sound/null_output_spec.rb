@@ -2,7 +2,7 @@ require 'benchmark'
 
 RSpec.describe(MB::Sound::NullOutput) do
   let(:null_sleep) { MB::Sound::NullOutput.new(channels: 1, sleep: true) }
-  let(:null_sleep_44k) { MB::Sound::NullOutput.new(channels: 1, sleep: true, rate: 44100) }
+  let(:null_sleep_44k) { MB::Sound::NullOutput.new(channels: 1, sleep: true, sample_rate: 44100) }
   let(:null_no_sleep) { MB::Sound::NullOutput.new(channels: 1, sleep: false) }
   let(:null_3ch) { MB::Sound::NullOutput.new(channels: 3, sleep: false) }
   let(:short_data) { [Numo::SFloat.zeros(12000)] }

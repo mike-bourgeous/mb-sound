@@ -1,15 +1,15 @@
 RSpec.describe(MB::Sound::Filter::Delay) do
   let(:shortbuf) {
-    MB::Sound::Filter::Delay.new(delay: 5, rate: 1, buffer_size: 10)
+    MB::Sound::Filter::Delay.new(delay: 5, sample_rate: 1, buffer_size: 10)
   }
 
   let(:midbuf) {
-    MB::Sound::Filter::Delay.new(delay: 10, rate: 1, buffer_size: 171)
+    MB::Sound::Filter::Delay.new(delay: 10, sample_rate: 1, buffer_size: 171)
   }
 
   describe '#initialize' do
     it 'can calculate delay in samples based on sample rate' do
-      d = MB::Sound::Filter::Delay.new(delay: 0.75, rate: 4, buffer_size: 17)
+      d = MB::Sound::Filter::Delay.new(delay: 0.75, sample_rate: 4, buffer_size: 17)
       expect(d.delay_samples).to eq(3)
     end
   end
@@ -40,7 +40,7 @@ RSpec.describe(MB::Sound::Filter::Delay) do
     end
 
     it 'accepts a filter directly' do
-      shortbuf.smoothing = MB::Sound::Filter::LinearFollower.new(rate: 1, max_rise: 1, max_fall: 1)
+      shortbuf.smoothing = MB::Sound::Filter::LinearFollower.new(sample_rate: 1, max_rise: 1, max_fall: 1)
       shortbuf.delay = 0
       expect(shortbuf.process(Numo::SFloat[1,2,3,4,5,6,7,8,9])).to eq(Numo::SFloat[0,0,1,3,5,6,7,8,9])
     end

@@ -13,7 +13,7 @@ module MB
     #
     # You should use mb-sound-jackffi instead if you can.
     class JackInput < MB::Sound::IOInput
-      attr_reader :ports, :rate
+      attr_reader :ports, :sample_rate
 
       # Initializes a JACK input stream for the given list of port names (pass
       # `nil` to try to leave a port disconnected; this will give a nonexistent
@@ -44,7 +44,7 @@ module MB
       #     # Will connect to ZynAddSubFX, if it's running
       #     ENV['INPUT_DEVICE'] = 'zynaddsubfx:out_'
       #     MB::Sound::JackInput.new(ports: { device: nil, count: 2 })
-      def initialize(ports:, rate: 48000, buffer_size: 2048)
+      def initialize(ports:, sample_rate: 48000, buffer_size: 2048)
         case ports
         when Integer
           ports = [nil] * ports
@@ -56,7 +56,7 @@ module MB
         end
 
         @ports = ports
-        @rate = rate
+        @sample_rate = sample_rate
         channels = @ports.size
         buffer_size = buffer_size&.to_i || 2048
         ports = @ports.map { |n| (n || "invalid port #{rand(100000)}").shellescape }.join(' ')

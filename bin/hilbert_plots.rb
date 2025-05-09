@@ -29,7 +29,7 @@ filters.each do |group, flist|
     #d = 180 / Math::PI * (MB::Sound.unwrap_phase(f.sine_response(Numo::SFloat.linspace(0, Math::PI, 24000))) - MB::Sound.unwrap_phase(f.cosine_response(Numo::SFloat.linspace(0, Math::PI, 24000))))
     d = 180 / Math::PI * (MB::Sound.unwrap_phase(f.sine_response(linlogspace(Math::PI/1200, Math::PI * 5/6, 24000))) - MB::Sound.unwrap_phase(f.cosine_response(linlogspace(Math::PI/1200, Math::PI * 5/6, 24000))))
     #d = d[20..20000]
-    puts "Filter at index #{idx}: #{MB::U.highlight(first: d[0], last: d[-1], min: d.min, max: d.max, mean: d.mean, dev: d.stddev)}"
+    puts "Filter at index #{idx}: #{MB::U.highlight({first: d[0], last: d[-1], min: d.min, max: d.max, mean: d.mean, dev: d.stddev})}"
     puts "  #{MB::U.highlight((f.instance_variables - [:@filters]).map { |n| [n, f.instance_variable_get(n)] }.to_h)}\n\n"
   end
 
