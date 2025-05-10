@@ -58,6 +58,22 @@ module MB
           @buffer_start = 0 # Upstream integer sample index of first sample in circular buffer
 
           @bufsize = 0 # Desired capacity of circular buffer
+
+          if ENV['RESAMPLER_DEBUG'] == '1'
+            @debug = true
+            @index_out = MB::Sound.file_output(
+              "tmp/#{Process.pid}_#{__id__}_#{upstream.sample_rate}_#{@sample_rate}_#{mode}_index.wav",
+              sample_rate: @sample_rate,
+              channels: 1
+            )
+            @counter_out = MB::Sound.file_output(
+              "tmp/#{Process.pid}_#{__id__}_#{upstream.sample_rate}_#{@sample_rate}_#{mode}_counter.wav",
+              sample_rate: @sample_rate,
+              channels: 1
+            )
+          else
+            @debug = false
+          end
         end
 
         # Returns the upstream as the only source for this node.
@@ -159,6 +175,11 @@ module MB
               data[v.floor]
             }
 
+            if @debug
+              @index_out.write(Numo::DFloat.linspace(@startpoint, endpoint, count + 1)[0...-1].inplace.floor + @buffer_start)
+              @counter_out.write(Numo::DFloat.linspace(@startpoint, endpoint, count + 1)[0...-1].inplace + @buffer_start)
+            end
+
           when :ruby_linear
             # TODO: Use MB::M.fractional_index()?
             ret = Numo::DFloat.linspace(negative_fractional_start, negative_fractional_end, count + 1)[0...-1].inplace.map_with_index { |v, idx|
@@ -171,6 +192,11 @@ module MB
 
               d_out
             }
+
+            if @debug
+              @index_out.write(Numo::DFloat.linspace(@startpoint, endpoint, count + 1)[0...-1].inplace + @buffer_start)
+              @counter_out.write(Numo::DFloat.linspace(@startpoint, endpoint, count + 1)[0...-1].inplace + @buffer_start)
+            end
 
           else
             raise "BUG: unsupported mode #{mode}"
