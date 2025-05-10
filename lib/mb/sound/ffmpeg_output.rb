@@ -39,6 +39,7 @@ module MB
           raise "#{dirname.inspect} isn't a directory" unless File.directory?(dirname)
           raise "Directory #{dirname.inspect} isn't writable" unless File.writable?(dirname)
           @filename = File.join(dirname, File.basename(filename))
+          @extname = File.extname(@filename)
         end
 
         raise "Sample rate must be a positive Numeric" unless sample_rate.is_a?(Numeric) && sample_rate > 0
@@ -50,6 +51,10 @@ module MB
         # so set a smaller pipe size to reduce buffer lag and apply
         # backpressure to playback in that case.
         buffer_size ||= format ? 2048 : 32768
+
+        # Default to 32-bit floating point samples in .wav files if no codec is
+        # specified.
+        codec ||= 'pcm_f32le' if @extname&.downcase == '.wav'
 
         # no shellescape because no shell
         super(
