@@ -26,8 +26,8 @@ MULTI_SAMPLES = ENV['MULTI_SAMPLES']&.to_i || 216
 MULTI_COUNT = (SAMPLES * 1.1 / MULTI_SAMPLES).ceil
 
 modes = [
-  :ruby_zoh,
-  #:ruby_linear,
+  #:ruby_zoh,
+  :ruby_linear,
   #:libsamplerate_zoh,
   #:libsamplerate_linear,
 ]

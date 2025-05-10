@@ -231,16 +231,56 @@ module MB
 
           when :ruby_linear
             # TODO: Use MB::M.fractional_index()?  that's probably slower
-            ret = Numo::DFloat.linspace(negative_fractional_start, negative_fractional_end, count + 1)[0...-1].inplace.map_with_index { |v, idx|
-              idx1 = v.floor
-              idx2 = v.ceil
-              delta = v - idx1
-              d1 = data[idx1]
-              d2 = data[idx2]
-              d_out = d1 * (1.0 - delta) + d2 * delta
+            require 'benchmark'
+            ret = []
+            Benchmark.bmbm do |bmark| # XXX
+              bmark.report('0 linear linspace') {
+                100.times do
+                  ret[0] = Numo::DFloat.linspace(negative_fractional_start, negative_fractional_end, count + 1)[0...-1].inplace.map_with_index { |v, idx|
+                    idx1 = v.floor
+                    idx2 = v.ceil
+                    delta = v - idx1
+                    d1 = data[idx1]
+                    d2 = data[idx2]
+                    d_out = d1 * (1.0 - delta) + d2 * delta
 
-              d_out
-            }
+                    d_out
+                  }
+                end
+              }
+
+              bmark.report('1 indgen startpoint') {
+                100.times do
+                  ret[1] = (Numo::DFloat.zeros(count).inplace.indgen * @inv_ratio + @startpoint).map { |v|
+                    idx1 = v.floor
+                    idx2 = v.ceil
+                    delta = v - idx1
+                    d1 = data[idx1]
+                    d2 = data[idx2]
+                    d_out = d1 * (1.0 - delta) + d2 * delta
+
+                    d_out
+                  }
+                end
+              }
+
+              bmark.report('2 indgen fractional_index') {
+                100.times do
+                  ret[2] = (Numo::DFloat.zeros(count).inplace.indgen * @inv_ratio + @startpoint).map { |v|
+                    MB::M.fractional_index(data, v)
+                  }
+                end
+              }
+            end
+
+            retind = (0...ret.length).to_a
+            puts MB::U.highlight(
+              retind.product(retind).map { |(a, b)|
+                ["#{a} == #{b}", ret[a] == ret[b]]
+              }.to_h
+            )
+
+            ret = ret[1]
 
             if @debug
               @index_out.write(Numo::DFloat.linspace(@startpoint, endpoint, count + 1)[0...-1].inplace + @buffer_start)
