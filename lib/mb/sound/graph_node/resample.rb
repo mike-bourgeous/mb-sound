@@ -51,12 +51,13 @@ module MB
           @inv_ratio = upstream.sample_rate.to_f / @sample_rate
           @ratio = @sample_rate / upstream.sample_rate.to_f
 
-          @upstream_sample_index = 0.0
-          @startpoint = 0.0
-          @samples_consumed = 0.0
-          @buffer_start = 0
+          @upstream_sample_index = 0.0 # Upstream fractional sample index of first sample in output buffer
+          @downstream_sample_index = 0 # Downstream integer sample index of first sample in output buffer
+          @startpoint = 0.0 # Fractional sample index of start of buffer, minus discards
+          @samples_consumed = 0.0 # Cumulative fractional samples retrieved, minus discards
+          @buffer_start = 0 # Upstream integer sample index of first sample in circular buffer
 
-          @bufsize = 0
+          @bufsize = 0 # Desired capacity of circular buffer
         end
 
         # Returns the upstream as the only source for this node.
@@ -95,11 +96,12 @@ module MB
           last_sample = endpoint.ceil
           samples_needed = last_sample - first_sample + 1
 
-          linear_start = @startpoint - samples_needed
-          linear_end = endpoint - samples_needed
-          while linear_start >= exact_required
-            linear_start -= exact_required
-            linear_end -= exact_required
+          negative_fractional_start = @startpoint - samples_needed
+          negative_fractional_end = endpoint - samples_needed
+          while negative_fractional_start >= exact_required
+            puts "Subtracting" # XXX
+            negative_fractional_start -= exact_required
+            negative_fractional_end -= exact_required
           end
 
           setup_circular_buffer(samples_needed)
@@ -115,28 +117,36 @@ module MB
             return nil if count == 0
           end
 
+          effective_negative_start = negative_fractional_start + data.length + @buffer_start
+          effective_negative_end = negative_fractional_end + data.length + @buffer_start
+
           if $DEBUG # XXX
             STDERR.puts
             warn "#{__id__} Resampling: #{MB::U.highlight({
               :@ratio => @ratio,
-                :@inv_ratio => @inv_ratio,
-                :@samples_consumed => @samples_consumed,
-                :@buffer_start => @buffer_start,
-                :@upstream_sample_index => @upstream_sample_index,
-                :@startpoint => @startpoint,
-                endpoint: endpoint,
-                exact_required: exact_required,
-                global_first: @upstream_sample_index.floor,
-                global_last: (@upstream_sample_index + exact_required).ceil,
-                first_sample: first_sample,
-                last_sample: last_sample,
-                samples_needed: samples_needed,
-                linear_start: linear_start,
-                linear_end: linear_end,
-                linear_min: linear_start.floor,
-                linear_max: linear_end.ceil,
-                data_length: data.length,
-                mode: mode,
+              :@inv_ratio => @inv_ratio,
+              :@samples_consumed => @samples_consumed,
+              :@buffer_start => @buffer_start,
+              :@upstream_sample_index => @upstream_sample_index,
+              :@downstream_sample_index => @downstream_sample_index,
+              :@startpoint => @startpoint,
+              endpoint: endpoint,
+              exact_required: exact_required,
+              global_first: @upstream_sample_index.floor,
+              global_last: (@upstream_sample_index + exact_required).ceil,
+              first_sample: first_sample,
+              last_sample: last_sample,
+              samples_needed: samples_needed,
+              negative_fractional_start: negative_fractional_start,
+              negative_fractional_end: negative_fractional_end,
+              negative_fractional_min: negative_fractional_start.floor,
+              negative_fractional_max: negative_fractional_end.ceil,
+              data_length: data.length,
+              mode: mode,
+              effective_negative_start: effective_negative_start,
+              effective_negative_end: effective_negative_end,
+              effective_start_delta: effective_negative_start - @upstream_sample_index,
+              effective_end_delta: effective_negative_end - @upstream_sample_index - exact_required,
             })}\n\n" # XXX
           end
 
@@ -144,13 +154,14 @@ module MB
           # every time, or maybe keep a buffer for each possible required size
           case mode
           when :ruby_zoh
-            ret = Numo::DFloat.linspace(linear_start, linear_end, count + 1)[0...-1].inplace.map_with_index { |v, idx|
+            # XXX require 'pry-byebug'; binding.pry if @downstream_sample_index >= 9999
+            ret = Numo::DFloat.linspace(negative_fractional_start, negative_fractional_end, count + 1)[0...-1].inplace.map_with_index { |v, idx|
               data[v.floor]
             }
 
           when :ruby_linear
             # TODO: Use MB::M.fractional_index()?
-            ret = Numo::DFloat.linspace(linear_start, linear_end, count + 1)[0...-1].inplace.map_with_index { |v, idx|
+            ret = Numo::DFloat.linspace(negative_fractional_start, negative_fractional_end, count + 1)[0...-1].inplace.map_with_index { |v, idx|
               idx1 = v.floor
               idx2 = v.ceil
               delta = v - idx1
@@ -167,6 +178,7 @@ module MB
 
           @samples_consumed += exact_required
           @upstream_sample_index += exact_required
+          @downstream_sample_index += ret.length
           @startpoint = endpoint
           discard_samples(@samples_consumed.floor)
 

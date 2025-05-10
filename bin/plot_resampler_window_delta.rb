@@ -27,18 +27,18 @@ MULTI_COUNT = (SAMPLES * 1.1 / MULTI_SAMPLES).ceil
 
 modes = [
   :ruby_zoh,
-  :ruby_linear,
-  :libsamplerate_zoh,
+  #:ruby_linear,
+  #:libsamplerate_zoh,
   #:libsamplerate_linear,
 ]
 data = modes.flat_map { |m|
-  d1 = MB::M.select_zero_crossings(
+  $d1 = d1 = MB::M.select_zero_crossings(
     FREQ.hz.at(1).at_rate(FROM_RATE).forever
       .resample(TO_RATE, mode: m)
       .sample(SAMPLES),
     nil
   )
-  d2 = MB::M.select_zero_crossings(
+  $d2 = d2 = MB::M.select_zero_crossings(
     FREQ.hz.at(1).at_rate(FROM_RATE).forever
       .resample(TO_RATE, mode: m)
       .multi_sample(MULTI_SAMPLES, MULTI_COUNT),
