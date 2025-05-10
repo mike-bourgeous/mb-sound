@@ -3,6 +3,8 @@
 # linear resamplers.  There shouldn't be a difference (other than possible
 # lag), but at time of writing, there is.
 
+# TODO: dedupe with other plot_resampler* scripts?
+
 require 'bundler/setup'
 
 require 'pry-byebug'
@@ -12,7 +14,7 @@ require 'mb-sound'
 GRAPHICAL = ARGV.include?('--graphical')
 SPECTRUM = ARGV.include?('--spectrum')
 
-SAMPLES = ENV['SAMPLES']&.to_i || 64000
+SAMPLES = ENV['SAMPLES']&.to_i || 108000
 TIME_SAMPLES = ENV['TIME_SAMPLES']&.to_i || SAMPLES / 10
 
 FROM_RATE = ENV['FROM_RATE']&.to_i || 400
@@ -48,9 +50,9 @@ data = modes.flat_map { |(a, b)|
 
   delta = d2.not_inplace! - d1.not_inplace!
   [
-    ["#{a}/#{b} diff", delta],
     [a, d1],
     [b, d2],
+    ["#{a}/#{b} diff", delta],
   ]
 }.to_h
 
