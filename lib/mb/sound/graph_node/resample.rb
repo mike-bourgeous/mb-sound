@@ -170,18 +170,67 @@ module MB
           # every time, or maybe keep a buffer for each possible required size
           case mode
           when :ruby_zoh
-            # XXX require 'pry-byebug'; binding.pry if @downstream_sample_index >= 9999
-            ret = Numo::DFloat.linspace(@startpoint, endpoint, count + 1)[0...-1].inplace.map_with_index { |v, idx|
-              data[v.floor]
-            }
+            require 'benchmark' # XXX
+            ret = []
+            Benchmark.bmbm do |bmark| # XXX
+              bmark.report('0 zoh linspace') {
+                100.times do
+                  ret[0] = Numo::DFloat.linspace(@startpoint, endpoint, count + 1)[0...-1].inplace.map_with_index { |v, idx|
+                    data[v.floor]
+                  }
+                end
+              }
+
+              bmark.report('1 zoh map_with_index') {
+                100.times do
+                  ret[1] = Numo::SFloat.zeros(count).inplace.map_with_index { |_v, idx|
+                    data[(idx * @inv_ratio + @upstream_sample_index - @buffer_start).floor]
+                  }
+                end
+              }
+
+              bmark.report('2 zoh indgen') {
+                100.times do
+                  ret[2] = (Numo::SFloat.zeros(count).inplace.indgen * @inv_ratio + @upstream_sample_index - @buffer_start).floor.map { |v|
+                    data[v]
+                  }
+                end
+              }
+
+              bmark.report('3 zoh indgen no floor') {
+                100.times do
+                  ret[3] = (Numo::SFloat.zeros(count).inplace.indgen * @inv_ratio + (@upstream_sample_index - @buffer_start)).map { |v|
+                    data[v]
+                  }
+                end
+              }
+
+              bmark.report('4 zoh indgen startpoint') {
+                100.times do
+                  ret[4] = (Numo::SFloat.zeros(count).inplace.indgen * @inv_ratio + @startpoint).map { |v|
+                    data[v]
+                  }
+                end
+              }
+            end
+
+            retind = (0...ret.length).to_a
+            puts MB::U.highlight(
+              retind.product(retind).map { |(a, b)|
+                ["#{a} == #{b}", ret[a] == ret[b]]
+              }.to_h
+            )
+
+            ret = ret[4]
 
             if @debug
-              @index_out.write(Numo::DFloat.linspace(@startpoint, endpoint, count + 1)[0...-1].inplace.floor + @buffer_start)
+              # @index_out.write(Numo::DFloat.linspace(@startpoint, endpoint, count + 1)[0...-1].inplace.floor + @buffer_start)
+              @index_out.write(Numo::SFloat.zeros(count).inplace.indgen * @inv_ratio + @startpoint + @buffer_start)
               @counter_out.write(Numo::DFloat.linspace(@startpoint, endpoint, count + 1)[0...-1].inplace + @buffer_start)
             end
 
           when :ruby_linear
-            # TODO: Use MB::M.fractional_index()?
+            # TODO: Use MB::M.fractional_index()?  that's probably slower
             ret = Numo::DFloat.linspace(negative_fractional_start, negative_fractional_end, count + 1)[0...-1].inplace.map_with_index { |v, idx|
               idx1 = v.floor
               idx2 = v.ceil
