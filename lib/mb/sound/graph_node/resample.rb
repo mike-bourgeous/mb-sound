@@ -155,7 +155,7 @@ module MB
           case mode
           when :ruby_zoh
             # XXX require 'pry-byebug'; binding.pry if @downstream_sample_index >= 9999
-            ret = Numo::DFloat.linspace(negative_fractional_start, negative_fractional_end, count + 1)[0...-1].inplace.map_with_index { |v, idx|
+            ret = Numo::DFloat.linspace(@startpoint, endpoint, count + 1)[0...-1].inplace.map_with_index { |v, idx|
               data[v.floor]
             }
 
