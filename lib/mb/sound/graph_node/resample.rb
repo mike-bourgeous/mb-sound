@@ -56,7 +56,8 @@ module MB
           # zero-order hold interpolator could still have output glitches due
           # to a fractional sample index falling just slightly before an
           # integer.
-          @zoh_offset = @inv_ratio * 0.0012345678
+          @zoh_offset = @inv_ratio * 0.00012345678
+
           @startpoint = 0.0 # Fractional sample index of start of buffer, minus discards
           @upstream_sample_index = 0.0 # Upstream fractional sample index of first sample in output buffer
           @downstream_sample_index = 0 # Downstream integer sample index of first sample in output buffer
