@@ -11,6 +11,12 @@ require 'pry-byebug'
 
 require 'mb-sound'
 
+pry_next = false
+MB::U.sigquit_backtrace {
+  pry_next = true
+  Thread.new do |t| sleep 0.1 ; Thread.main.wakeup end
+}
+
 GRAPHICAL = ARGV.include?('--graphical')
 SPECTRUM = ARGV.include?('--spectrum')
 
@@ -35,6 +41,8 @@ modes = [
   #:libsamplerate_linear,
 ]
 data = modes.flat_map { |m|
+  MB::U.headline "Generating data for #{m.inspect}"
+
   $d1 = d1 = MB::M.select_zero_crossings(
     FREQ.hz.at(1).at_rate(FROM_RATE).forever
       .resample(TO_RATE, mode: m)
@@ -59,12 +67,6 @@ data = modes.flat_map { |m|
     ["#{m} diff", delta],
   ]
 }.to_h
-
-pry_next = false
-MB::U.sigquit_backtrace {
-  pry_next = true
-  Thread.new do |t| sleep 0.1 ; Thread.main.wakeup end
-}
 
 puts MB::U.highlight({
   GRAPHICAL: GRAPHICAL,

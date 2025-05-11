@@ -9,6 +9,24 @@ module MB
         include GraphNode
         include BufferHelper
 
+        # XXX
+        def self.parse_resampler_debug(str)
+          case str
+          when nil
+            false
+
+          when '1'
+            true
+
+          when /\[\d+,\s*\d+\]/
+            require 'json'
+            JSON.parse(str)
+
+          else
+            raise "Unknown format for RESAMPLER_DEBUG: #{str.inspect}"
+          end
+        end
+
         # Resampling modes supported by the class (pass to constructor's
         # +:mode+ parameter).
         #
@@ -27,6 +45,14 @@ module MB
 
         # The default mode if no mode is given to the constructor.
         DEFAULT_MODE = :libsamplerate_best
+
+        # Controls debugging dumps based on ENV['RESAMPLER_DEBUG'].  If set to
+        # '1', dumps the entire debugging output for each resampler instance to
+        # files under tmp/.  If set to a String that looks like `[number,
+        # number]`, then dumping will start around when the output sample
+        # counter reaches the first number, and stop some time after the second
+        # number.
+        RESAMPLER_DEBUG = MB::Sound::GraphNode::Resample.parse_resampler_debug(ENV['RESAMPLER_DEBUG'])
 
         # The output sample rate.
         attr_reader :sample_rate
@@ -62,18 +88,30 @@ module MB
 
           @bufsize = 0 # Desired capacity of circular buffer
 
-          if ENV['RESAMPLER_DEBUG'] == '1'
+          if RESAMPLER_DEBUG
             @debug = true
+            @debug_prefix = "tmp/#{__id__}_#{upstream.sample_rate}_#{@sample_rate}_#{mode}"
             @index_out = MB::Sound.file_output(
-              "tmp/#{Process.pid}_#{__id__}_#{upstream.sample_rate}_#{@sample_rate}_#{mode}_index.wav",
+              "#{@debug_prefix}_index.wav",
               sample_rate: @sample_rate,
-              channels: 1
+              channels: 1,
+              overwrite: true
             )
             @counter_out = MB::Sound.file_output(
-              "tmp/#{Process.pid}_#{__id__}_#{upstream.sample_rate}_#{@sample_rate}_#{mode}_counter.wav",
+              "#{@debug_prefix}_counter.wav",
               sample_rate: @sample_rate,
-              channels: 1
+              channels: 1,
+              overwrite: true
             )
+            @csv_out = CSV.new(File.open("#{@debug_prefix}_data.csv", 'wb'))
+
+            if RESAMPLER_DEBUG.is_a?(Array)
+              @debug_start = RESAMPLER_DEBUG[0]
+              @debug_end = RESAMPLER_DEBUG[1]
+            else
+              @debug_start = nil
+              @debug_end = nil
+            end
           else
             @debug = false
           end
@@ -139,6 +177,11 @@ module MB
           effective_negative_start = negative_fractional_start + data.length + @buffer_start
           effective_negative_end = negative_fractional_end + data.length + @buffer_start
 
+          if @debug_start
+            debug_now = true if @debug_start <= @downstream_sample_index || @debug_start < @downstream_sample_index + count
+            debug_now = false if @debug_end <= @downstream_sample_index
+          end
+
           if $DEBUG # XXX
             STDERR.puts
             warn "#{__id__} Resampling: #{MB::U.highlight({
@@ -166,44 +209,83 @@ module MB
               effective_negative_end: effective_negative_end,
               effective_start_delta: effective_negative_start - @upstream_sample_index,
               effective_end_delta: effective_negative_end - @upstream_sample_index - exact_required,
+              :@debug => @debug,
+              debug_now: debug_now,
+              :@debug_start => @debug_start,
+              :@debug_end => @debug_end,
             })}\n\n" # XXX
+          end
+
+          if @debug && debug_now
+            @counter_out.write(Numo::DFloat.linspace(@startpoint, endpoint, count + 1)[0...-1].inplace + @buffer_start)
           end
 
           # TODO: reuse the existing buffer instead of regenerating a linspace
           # every time, or maybe keep a buffer for each possible required size
-          case mode
+          case @mode
           when :ruby_zoh
-            ret = (Numo::SFloat.zeros(count).inplace.indgen * @inv_ratio + @startpoint).map { |v|
+            ret = (Numo::SFloat.zeros(count).inplace.indgen * @inv_ratio + @startpoint).map_with_index { |v, idx|
+              if @debug && debug_now && @debug_start <= idx + @downstream_sample_index && @debug_end >= idx + @downstream_sample_index
+                @csv_out << [@mode, __id__, count, idx + @downstream_sample_index, idx, v + @upstream_sample_index, v.floor, v, nil, data[v.floor], nil, data[v]]
+              end
+
               data[v]
             }.not_inplace!
 
+            if @debug && debug_now
+              @index_out.write(Numo::SFloat.zeros(count).inplace.indgen * @inv_ratio + @startpoint + @buffer_start)
+            end
+
           when :ruby_zoh_dfloat
             # TODO: why on earth does DFloat have the chunk size issue but SFloat does not??
-            ret = (Numo::DFloat.zeros(count).inplace.indgen * @inv_ratio + @startpoint).map { |v|
+            ret = (Numo::DFloat.zeros(count).inplace.indgen * @inv_ratio + @startpoint).map_with_index { |v, idx|
+              if @debug && debug_now && @debug_start <= idx + @downstream_sample_index && @debug_end >= idx + @downstream_sample_index
+                @csv_out << [@mode, __id__, count, idx + @downstream_sample_index, idx, v + @upstream_sample_index, v.floor, v, nil, data[v.floor], nil, data[v.floor]]
+              end
+
               data[v.floor]
             }.not_inplace!
 
-            if @debug
+            if @debug && debug_now
               @index_out.write(Numo::DFloat.zeros(count).inplace.indgen * @inv_ratio + @startpoint + @buffer_start)
-              @counter_out.write(Numo::DFloat.linspace(@startpoint, endpoint, count + 1)[0...-1].inplace + @buffer_start)
             end
 
           when :ruby_zoh_array
             ret = Numo::SFloat.cast(
               Array.new(count) { |idx|
-                data[(idx * @inv_ratio + @startpoint).floor]
+                v = idx * @inv_ratio + @startpoint
+
+                if @debug && debug_now && @debug_start <= idx + @downstream_sample_index && @debug_end >= idx + @downstream_sample_index
+                  @csv_out << [@mode, __id__, count, idx + @downstream_sample_index, idx, v + @upstream_sample_index, v.floor, v, nil, data[v.floor], nil, data[v.floor]]
+                end
+
+                data[v.floor]
               }
             )
+
+            if @debug && debug_now
+              @index_out.write(Numo::DFloat.cast(Array.new(count) { |idx| idx * @inv_ratio + @startpoint + @buffer_start }))
+            end
 
           when :ruby_zoh_dfloat_array
             ret = Numo::DFloat.cast(
               Array.new(count) { |idx|
-                data[(idx * @inv_ratio + @startpoint).floor]
+                v = idx * @inv_ratio + @startpoint
+
+                if @debug && debug_now && @debug_start <= idx + @downstream_sample_index && @debug_end >= idx + @downstream_sample_index
+                  @csv_out << [@mode, __id__, count, idx + @downstream_sample_index, idx, v + @upstream_sample_index, v.floor, v, nil, data[v.floor], nil, data[v.floor]]
+                end
+
+                data[v.floor]
               }
             )
 
+            if @debug && debug_now
+              @index_out.write(Numo::DFloat.cast(Array.new(count) { |idx| idx * @inv_ratio + @startpoint + @buffer_start }))
+            end
+
           when :ruby_linear
-            ret = (Numo::DFloat.zeros(count).inplace.indgen * @inv_ratio + @startpoint).map { |v|
+            ret = (Numo::DFloat.zeros(count).inplace.indgen * @inv_ratio + @startpoint).map_with_index { |v, idx|
               idx1 = v.floor
               idx2 = v.ceil
               delta = v - idx1
@@ -211,12 +293,15 @@ module MB
               d2 = data[idx2]
               d_out = d1 * (1.0 - delta) + d2 * delta
 
+              if @debug && debug_now && @debug_start <= idx + @downstream_sample_index && @debug_end >= idx + @downstream_sample_index
+                @csv_out << [@mode, __id__, count, idx + @downstream_sample_index, idx, v + @upstream_sample_index, idx1, v, idx2, d1, d2, d_out]
+              end
+
               d_out
             }
 
-            if @debug
-              @index_out.write(Numo::DFloat.linspace(@startpoint, endpoint, count + 1)[0...-1].inplace + @buffer_start)
-              @counter_out.write(Numo::DFloat.linspace(@startpoint, endpoint, count + 1)[0...-1].inplace + @buffer_start)
+            if @debug && debug_now
+              @index_out.write(Numo::DFloat.zeros(count).inplace.indgen * @inv_ratio + @startpoint)
             end
 
           else
