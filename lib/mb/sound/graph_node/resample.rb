@@ -80,9 +80,9 @@ module MB
           @inv_ratio = upstream.sample_rate.to_f / @sample_rate
           @ratio = @sample_rate / upstream.sample_rate.to_f
 
-          @upstream_sample_index = 0.0 # Upstream fractional sample index of first sample in output buffer
+          @startpoint = @inv_ratio * 0.12345678 # Fractional sample index of start of buffer, minus discards
+          @upstream_sample_index = @startpoint # Upstream fractional sample index of first sample in output buffer
           @downstream_sample_index = 0 # Downstream integer sample index of first sample in output buffer
-          @startpoint = @inv_ratio / 2 # XXX 0.0 # Fractional sample index of start of buffer, minus discards
           @samples_consumed = 0.0 # Cumulative fractional samples retrieved, minus discards
           @buffer_start = 0 # Upstream integer sample index of first sample in circular buffer
 
