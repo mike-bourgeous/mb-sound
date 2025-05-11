@@ -34,8 +34,8 @@ MULTI_COUNT = (SAMPLES * 1.1 / MULTI_SAMPLES).ceil
 modes = [
   :ruby_zoh,
   :ruby_linear,
-  #:libsamplerate_zoh,
-  #:libsamplerate_linear,
+  :libsamplerate_zoh,
+  :libsamplerate_linear,
 ]
 data = modes.flat_map { |m|
   MB::U.headline "Generating data for #{m.inspect}"

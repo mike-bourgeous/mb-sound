@@ -6,6 +6,7 @@ RSpec.describe(MB::Sound::GraphNode::Resample, :aggregate_failures) do
   describe '#sample' do
     shared_examples_for 'a working resampler' do |resample_mode|
       # Compensate for lag
+      # TODO: replace with select_zero_crossings
       def skip_leading_and_truncate(resampled, reference)
         resampled = MB::M.skip_leading(resampled, 0)
         reference = MB::M.skip_leading(reference, 0)
@@ -202,8 +203,7 @@ RSpec.describe(MB::Sound::GraphNode::Resample, :aggregate_failures) do
         d1 = counter1.resample(3719, mode: :ruby_linear)
         d2 = counter2.resample(3719, mode: :ruby_linear)
 
-        # data1 = d1.multi_sample(233, 430)[0...100000]
-        data1 = d1.multi_sample(2, 50001)[0...100000]
+        data1 = d1.multi_sample(233, 430)[0...100000]
         data2 = d2.sample(100000)
 
         expect(data1).to all_be_within(5).sigfigs.of_array(data2)
