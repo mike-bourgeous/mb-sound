@@ -226,7 +226,7 @@ module MB
           when :ruby_zoh
             ret = (Numo::SFloat.zeros(count).inplace.indgen * @inv_ratio + @startpoint).map_with_index { |v, idx|
               if @debug && debug_now && @debug_start <= idx + @downstream_sample_index && @debug_end >= idx + @downstream_sample_index
-                @csv_out << [@mode, __id__, count, idx + @downstream_sample_index, idx, v + @upstream_sample_index, v.floor, v, nil, data[v.floor], nil, data[v]]
+                @csv_out << [@mode, __id__, count, idx + @downstream_sample_index, idx, v + @buffer_start, v.floor, v, nil, data[v.floor], nil, data[v]]
               end
 
               data[v]
@@ -240,7 +240,7 @@ module MB
             # TODO: why on earth does DFloat have the chunk size issue but SFloat does not??
             ret = (Numo::DFloat.zeros(count).inplace.indgen * @inv_ratio + @startpoint).map_with_index { |v, idx|
               if @debug && debug_now && @debug_start <= idx + @downstream_sample_index && @debug_end >= idx + @downstream_sample_index
-                @csv_out << [@mode, __id__, count, idx + @downstream_sample_index, idx, v + @upstream_sample_index, v.floor, v, nil, data[v.floor], nil, data[v.floor]]
+                @csv_out << [@mode, __id__, count, idx + @downstream_sample_index, idx, v + @buffer_start, v.floor, v, nil, data[v.floor], nil, data[v.floor]]
               end
 
               data[v.floor]
@@ -256,7 +256,7 @@ module MB
                 v = idx * @inv_ratio + @startpoint
 
                 if @debug && debug_now && @debug_start <= idx + @downstream_sample_index && @debug_end >= idx + @downstream_sample_index
-                  @csv_out << [@mode, __id__, count, idx + @downstream_sample_index, idx, v + @upstream_sample_index, v.floor, v, nil, data[v.floor], nil, data[v.floor]]
+                  @csv_out << [@mode, __id__, count, idx + @downstream_sample_index, idx, v + @buffer_start, v.floor, v, nil, data[v.floor], nil, data[v.floor]]
                 end
 
                 data[v.floor]
@@ -273,7 +273,7 @@ module MB
                 v = idx * @inv_ratio + @startpoint
 
                 if @debug && debug_now && @debug_start <= idx + @downstream_sample_index && @debug_end >= idx + @downstream_sample_index
-                  @csv_out << [@mode, __id__, count, idx + @downstream_sample_index, idx, v + @upstream_sample_index, v.floor, v, nil, data[v.floor], nil, data[v.floor]]
+                  @csv_out << [@mode, __id__, count, idx + @downstream_sample_index, idx, v + @buffer_start, v.floor, v, nil, data[v.floor], nil, data[v.floor]]
                 end
 
                 data[v.floor]
@@ -294,7 +294,7 @@ module MB
               d_out = d1 * (1.0 - delta) + d2 * delta
 
               if @debug && debug_now && @debug_start <= idx + @downstream_sample_index && @debug_end >= idx + @downstream_sample_index
-                @csv_out << [@mode, __id__, count, idx + @downstream_sample_index, idx, v + @upstream_sample_index, idx1, v, idx2, d1, d2, d_out]
+                @csv_out << [@mode, __id__, count, idx + @downstream_sample_index, idx, v + @buffer_start, idx1, v, idx2, d1, d2, d_out]
               end
 
               d_out
