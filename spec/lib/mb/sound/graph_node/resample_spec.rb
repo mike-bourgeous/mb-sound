@@ -6,13 +6,17 @@ RSpec.describe(MB::Sound::GraphNode::Resample, :aggregate_failures) do
   describe '#sample' do
     shared_examples_for 'a working resampler' do |resample_mode|
       # Compensate for lag
-      # TODO: replace with select_zero_crossings
-      def skip_leading_and_truncate(resampled, reference)
-        resampled = MB::M.skip_leading(resampled, 0)
-        reference = MB::M.skip_leading(reference, 0)
+      def select_whole_cycles(resampled, reference)
+        resampled = MB::M.skip_leading(resampled) { |v| v.abs < 0.5 }
+        reference = MB::M.skip_leading(reference) { |v| v.abs < 0.5 }
+
+        resampled = MB::M.select_zero_crossings(resampled, nil)
+        reference = MB::M.select_zero_crossings(reference, nil)
+
         min_length = [resampled.length, reference.length].min
         resampled = resampled[0...min_length]
         reference = reference[0...min_length]
+
         return resampled, reference
       end
 
@@ -20,7 +24,7 @@ RSpec.describe(MB::Sound::GraphNode::Resample, :aggregate_failures) do
         it 'can upsample with a reasonable noise floor' do
           resampled = 453.hz.at(1).at_rate(11376).resample(96000, mode: resample_mode).sample(24000)
           reference = 453.hz.at(1).at_rate(96000).sample(24000)
-          resampled, reference = skip_leading_and_truncate(resampled, reference)
+          resampled, reference = select_whole_cycles(resampled, reference)
 
           delta = resampled - reference
 
@@ -31,7 +35,7 @@ RSpec.describe(MB::Sound::GraphNode::Resample, :aggregate_failures) do
         it 'does not matter what the upsampling chunk size is' do
           large_window = 47.hz.at(1).forever.at_rate(400).resample(17521, mode: resample_mode).sample(27000)
           small_window = 47.hz.at(1).forever.at_rate(400).resample(17521, mode: resample_mode).multi_sample(216, 125)
-          large_window, small_window = skip_leading_and_truncate(large_window, small_window)
+          large_window, small_window = select_whole_cycles(large_window, small_window)
           large_window = large_window[0...16000]
           small_window = small_window[0...16000]
 
@@ -49,7 +53,7 @@ RSpec.describe(MB::Sound::GraphNode::Resample, :aggregate_failures) do
         it 'can downsample with a reasonable noise floor' do
           resampled = 157.hz.at(1).at_rate(96000).resample(5700, mode: resample_mode).sample(9600)
           reference = 157.hz.at(1).at_rate(5700).sample(9600)
-          resampled, reference = skip_leading_and_truncate(resampled, reference)
+          resampled, reference = select_whole_cycles(resampled, reference)
 
           delta = resampled - reference
 
@@ -60,7 +64,7 @@ RSpec.describe(MB::Sound::GraphNode::Resample, :aggregate_failures) do
         it 'does not matter what the downsampling chunk size is' do
           large_window = 43.hz.at(1).forever.at_rate(17521).resample(400, mode: resample_mode).sample(27000)
           small_window = 43.hz.at(1).forever.at_rate(17521).resample(400, mode: resample_mode).multi_sample(216, 125)
-          large_window, small_window = skip_leading_and_truncate(large_window, small_window)
+          large_window, small_window = select_whole_cycles(large_window, small_window)
           large_window = large_window[0...16000]
           small_window = small_window[0...16000]
 
