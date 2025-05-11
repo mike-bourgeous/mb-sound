@@ -30,12 +30,9 @@ module MB
         # Resampling modes supported by the class (pass to constructor's
         # +:mode+ parameter).
         #
-        # Note that some modes may add several buffers worth of latency.
+        # Note that some modes may add considerable latency.
         MODES = [
           :ruby_zoh,
-          :ruby_zoh_dfloat, # XXX
-          :ruby_zoh_array, # XXX
-          :ruby_zoh_dfloat_array, # XXX
           :ruby_linear,
           :libsamplerate_zoh,
           :libsamplerate_linear,
@@ -80,8 +77,14 @@ module MB
           @inv_ratio = upstream.sample_rate.to_f / @sample_rate
           @ratio = @sample_rate / upstream.sample_rate.to_f
 
-          @startpoint = @inv_ratio * 0.12345678 # Fractional sample index of start of buffer, minus discards
-          @upstream_sample_index = @startpoint # Upstream fractional sample index of first sample in output buffer
+          # TODO: identify a better fix or workaround for unfortunate integer
+          # alignment than just adding a "random" starting offset.  The
+          # zero-order hold interpolator could still have output glitches due
+          # to a fractional sample index falling just slightly before an
+          # integer.
+          @zoh_offset = @inv_ratio * 0.0012345678
+          @startpoint = 0.0 # Fractional sample index of start of buffer, minus discards
+          @upstream_sample_index = 0.0 # Upstream fractional sample index of first sample in output buffer
           @downstream_sample_index = 0 # Downstream integer sample index of first sample in output buffer
           @samples_consumed = 0.0 # Cumulative fractional samples retrieved, minus discards
           @buffer_start = 0 # Upstream integer sample index of first sample in circular buffer
@@ -126,7 +129,7 @@ module MB
         # sufficient samples from the upstream node to fulfill the request.
         def sample(count)
           case @mode
-          when :ruby_zoh, :ruby_zoh_dfloat, :ruby_zoh_array, :ruby_zoh_dfloat_array, :ruby_linear
+          when :ruby_zoh, :ruby_linear
             sample_ruby(count, @mode)
 
           when :libsamplerate_best, :libsamplerate_fastest, :libsamplerate_zoh, :libsamplerate_linear
@@ -224,64 +227,16 @@ module MB
           # every time, or maybe keep a buffer for each possible required size
           case @mode
           when :ruby_zoh
-            ret = (Numo::SFloat.zeros(count).inplace.indgen * @inv_ratio + @startpoint).map_with_index { |v, idx|
-              if @debug && debug_now && @debug_start <= idx + @downstream_sample_index && @debug_end >= idx + @downstream_sample_index
-                @csv_out << [@mode, __id__, count, idx + @downstream_sample_index, idx, v + @buffer_start, v.floor, v, nil, data[v.floor], nil, data[v]]
-              end
-
-              data[v]
-            }.not_inplace!
-
-            if @debug && debug_now
-              @index_out.write(Numo::SFloat.zeros(count).inplace.indgen * @inv_ratio + @startpoint + @buffer_start)
-            end
-
-          when :ruby_zoh_dfloat
-            # TODO: why on earth does DFloat have the chunk size issue but SFloat does not??
             ret = (Numo::DFloat.zeros(count).inplace.indgen * @inv_ratio + @startpoint).map_with_index { |v, idx|
               if @debug && debug_now && @debug_start <= idx + @downstream_sample_index && @debug_end >= idx + @downstream_sample_index
                 @csv_out << [@mode, __id__, count, idx + @downstream_sample_index, idx, v + @buffer_start, v.floor, v, nil, data[v.floor], nil, data[v.floor]]
               end
 
-              data[v.floor]
+              data[v + @zoh_offset]
             }.not_inplace!
 
             if @debug && debug_now
               @index_out.write(Numo::DFloat.zeros(count).inplace.indgen * @inv_ratio + @startpoint + @buffer_start)
-            end
-
-          when :ruby_zoh_array
-            ret = Numo::SFloat.cast(
-              Array.new(count) { |idx|
-                v = idx * @inv_ratio + @startpoint
-
-                if @debug && debug_now && @debug_start <= idx + @downstream_sample_index && @debug_end >= idx + @downstream_sample_index
-                  @csv_out << [@mode, __id__, count, idx + @downstream_sample_index, idx, v + @buffer_start, v.floor, v, nil, data[v.floor], nil, data[v.floor]]
-                end
-
-                data[v.floor]
-              }
-            )
-
-            if @debug && debug_now
-              @index_out.write(Numo::DFloat.cast(Array.new(count) { |idx| idx * @inv_ratio + @startpoint + @buffer_start }))
-            end
-
-          when :ruby_zoh_dfloat_array
-            ret = Numo::DFloat.cast(
-              Array.new(count) { |idx|
-                v = idx * @inv_ratio + @startpoint
-
-                if @debug && debug_now && @debug_start <= idx + @downstream_sample_index && @debug_end >= idx + @downstream_sample_index
-                  @csv_out << [@mode, __id__, count, idx + @downstream_sample_index, idx, v + @buffer_start, v.floor, v, nil, data[v.floor], nil, data[v.floor]]
-                end
-
-                data[v.floor]
-              }
-            )
-
-            if @debug && debug_now
-              @index_out.write(Numo::DFloat.cast(Array.new(count) { |idx| idx * @inv_ratio + @startpoint + @buffer_start }))
             end
 
           when :ruby_linear
