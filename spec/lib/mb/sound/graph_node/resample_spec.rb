@@ -123,7 +123,7 @@ RSpec.describe(MB::Sound::GraphNode::Resample, :aggregate_failures) do
         let (:counter) { MB::Sound::ArrayInput.new(data: Numo::SFloat.linspace(0, 50000, 50001), sample_rate: from_rate) }
         let (:node) { counter.resample(to_rate, mode: resample_mode) }
 
-        [1, 2, 2.345, 3, 3.3217, 4, 5, 7651.0 / 400.0].each do |r|
+        [1, 1.001, 2, 2.345, 3, 3.3217, 4, 5, 7651.0 / 400.0, 42.5, 255].each do |r|
           [:ruby_linear, :ruby_zoh, :libsamplerate_linear, :libsamplerate_zoh].each do |m|
             context "when ratio is #{r}" do
               let (:ratio) { r }
