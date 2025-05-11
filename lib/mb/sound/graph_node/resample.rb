@@ -56,7 +56,7 @@ module MB
 
           @upstream_sample_index = 0.0 # Upstream fractional sample index of first sample in output buffer
           @downstream_sample_index = 0 # Downstream integer sample index of first sample in output buffer
-          @startpoint = 0.0 # Fractional sample index of start of buffer, minus discards
+          @startpoint = @inv_ratio / 2 # XXX 0.0 # Fractional sample index of start of buffer, minus discards
           @samples_consumed = 0.0 # Cumulative fractional samples retrieved, minus discards
           @buffer_start = 0 # Upstream integer sample index of first sample in circular buffer
 
