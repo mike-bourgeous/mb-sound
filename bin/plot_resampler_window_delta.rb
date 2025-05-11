@@ -26,8 +26,11 @@ MULTI_SAMPLES = ENV['MULTI_SAMPLES']&.to_i || 216
 MULTI_COUNT = (SAMPLES * 1.1 / MULTI_SAMPLES).ceil
 
 modes = [
-  #:ruby_zoh,
-  :ruby_linear,
+  :ruby_zoh,
+  :ruby_zoh_dfloat,
+  :ruby_zoh_array,
+  :ruby_zoh_dfloat_array,
+  #:ruby_linear,
   #:libsamplerate_zoh,
   #:libsamplerate_linear,
 ]
@@ -91,7 +94,7 @@ loop do
       graphical: GRAPHICAL,
       time_samples: TIME_SAMPLES,
       freq_samples: SAMPLES,
-      columns: 2
+      columns: 4
     )
   end
 

@@ -15,6 +15,9 @@ module MB
         # Note that some modes may add several buffers worth of latency.
         MODES = [
           :ruby_zoh,
+          :ruby_zoh_dfloat, # XXX
+          :ruby_zoh_array, # XXX
+          :ruby_zoh_dfloat_array, # XXX
           :ruby_linear,
           :libsamplerate_zoh,
           :libsamplerate_linear,
@@ -85,7 +88,7 @@ module MB
         # sufficient samples from the upstream node to fulfill the request.
         def sample(count)
           case @mode
-          when :ruby_zoh, :ruby_linear
+          when :ruby_zoh, :ruby_zoh_dfloat, :ruby_zoh_array, :ruby_zoh_dfloat_array, :ruby_linear
             sample_ruby(count, @mode)
 
           when :libsamplerate_best, :libsamplerate_fastest, :libsamplerate_zoh, :libsamplerate_linear
@@ -96,7 +99,7 @@ module MB
             sample_libsamplerate(count)
 
           else
-            raise NotImplementedError, "TODO: #{@mode.inspect}"
+            raise NotImplementedError, "Unsupported sample mode: #{@mode.inspect}"
           end
         end
 
@@ -170,117 +173,46 @@ module MB
           # every time, or maybe keep a buffer for each possible required size
           case mode
           when :ruby_zoh
-            require 'benchmark' # XXX
-            ret = []
-            Benchmark.bmbm do |bmark| # XXX
-              bmark.report('0 zoh linspace') {
-                100.times do
-                  ret[0] = Numo::DFloat.linspace(@startpoint, endpoint, count + 1)[0...-1].inplace.map_with_index { |v, idx|
-                    data[v.floor]
-                  }
-                end
-              }
+            ret = (Numo::SFloat.zeros(count).inplace.indgen * @inv_ratio + @startpoint).map { |v|
+              data[v]
+            }.not_inplace!
 
-              bmark.report('1 zoh map_with_index') {
-                100.times do
-                  ret[1] = Numo::SFloat.zeros(count).inplace.map_with_index { |_v, idx|
-                    data[(idx * @inv_ratio + @upstream_sample_index - @buffer_start).floor]
-                  }
-                end
-              }
-
-              bmark.report('2 zoh indgen') {
-                100.times do
-                  ret[2] = (Numo::SFloat.zeros(count).inplace.indgen * @inv_ratio + @upstream_sample_index - @buffer_start).floor.map { |v|
-                    data[v]
-                  }
-                end
-              }
-
-              bmark.report('3 zoh indgen no floor') {
-                100.times do
-                  ret[3] = (Numo::SFloat.zeros(count).inplace.indgen * @inv_ratio + (@upstream_sample_index - @buffer_start)).map { |v|
-                    data[v]
-                  }
-                end
-              }
-
-              bmark.report('4 zoh indgen startpoint') {
-                100.times do
-                  ret[4] = (Numo::SFloat.zeros(count).inplace.indgen * @inv_ratio + @startpoint).map { |v|
-                    data[v]
-                  }
-                end
-              }
-            end
-
-            retind = (0...ret.length).to_a
-            puts MB::U.highlight(
-              retind.product(retind).map { |(a, b)|
-                ["#{a} == #{b}", ret[a] == ret[b]]
-              }.to_h
-            )
-
-            ret = ret[4]
+          when :ruby_zoh_dfloat
+            # TODO: why on earth does DFloat have the chunk size issue but SFloat does not??
+            ret = (Numo::DFloat.zeros(count).inplace.indgen * @inv_ratio + @startpoint).map { |v|
+              data[v.floor]
+            }.not_inplace!
 
             if @debug
-              # @index_out.write(Numo::DFloat.linspace(@startpoint, endpoint, count + 1)[0...-1].inplace.floor + @buffer_start)
-              @index_out.write(Numo::SFloat.zeros(count).inplace.indgen * @inv_ratio + @startpoint + @buffer_start)
+              @index_out.write(Numo::DFloat.zeros(count).inplace.indgen * @inv_ratio + @startpoint + @buffer_start)
               @counter_out.write(Numo::DFloat.linspace(@startpoint, endpoint, count + 1)[0...-1].inplace + @buffer_start)
             end
 
-          when :ruby_linear
-            # TODO: Use MB::M.fractional_index()?  that's probably slower
-            require 'benchmark'
-            ret = []
-            Benchmark.bmbm do |bmark| # XXX
-              bmark.report('0 linear linspace') {
-                100.times do
-                  ret[0] = Numo::DFloat.linspace(negative_fractional_start, negative_fractional_end, count + 1)[0...-1].inplace.map_with_index { |v, idx|
-                    idx1 = v.floor
-                    idx2 = v.ceil
-                    delta = v - idx1
-                    d1 = data[idx1]
-                    d2 = data[idx2]
-                    d_out = d1 * (1.0 - delta) + d2 * delta
-
-                    d_out
-                  }
-                end
+          when :ruby_zoh_array
+            ret = Numo::SFloat.cast(
+              Array.new(count) { |idx|
+                data[(idx * @inv_ratio + @startpoint).floor]
               }
-
-              bmark.report('1 indgen startpoint') {
-                100.times do
-                  ret[1] = (Numo::DFloat.zeros(count).inplace.indgen * @inv_ratio + @startpoint).map { |v|
-                    idx1 = v.floor
-                    idx2 = v.ceil
-                    delta = v - idx1
-                    d1 = data[idx1]
-                    d2 = data[idx2]
-                    d_out = d1 * (1.0 - delta) + d2 * delta
-
-                    d_out
-                  }
-                end
-              }
-
-              bmark.report('2 indgen fractional_index') {
-                100.times do
-                  ret[2] = (Numo::DFloat.zeros(count).inplace.indgen * @inv_ratio + @startpoint).map { |v|
-                    MB::M.fractional_index(data, v)
-                  }
-                end
-              }
-            end
-
-            retind = (0...ret.length).to_a
-            puts MB::U.highlight(
-              retind.product(retind).map { |(a, b)|
-                ["#{a} == #{b}", ret[a] == ret[b]]
-              }.to_h
             )
 
-            ret = ret[1]
+          when :ruby_zoh_dfloat_array
+            ret = Numo::DFloat.cast(
+              Array.new(count) { |idx|
+                data[(idx * @inv_ratio + @startpoint).floor]
+              }
+            )
+
+          when :ruby_linear
+            ret = (Numo::DFloat.zeros(count).inplace.indgen * @inv_ratio + @startpoint).map { |v|
+              idx1 = v.floor
+              idx2 = v.ceil
+              delta = v - idx1
+              d1 = data[idx1]
+              d2 = data[idx2]
+              d_out = d1 * (1.0 - delta) + d2 * delta
+
+              d_out
+            }
 
             if @debug
               @index_out.write(Numo::DFloat.linspace(@startpoint, endpoint, count + 1)[0...-1].inplace + @buffer_start)
