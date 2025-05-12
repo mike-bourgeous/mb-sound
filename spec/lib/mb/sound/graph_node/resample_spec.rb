@@ -21,7 +21,7 @@ RSpec.describe(MB::Sound::GraphNode::Resample, :aggregate_failures) do
   end
 
   describe '#sample' do
-    shared_examples_for 'a working resampler' do |resample_mode|
+    shared_examples_for 'a working resampler' do
       context 'when upsampling' do
         it 'can upsample with a reasonable noise floor' do
           resampled = 453.hz.at(1).at_rate(11376).resample(96000, mode: resample_mode).sample(24000)
@@ -30,8 +30,7 @@ RSpec.describe(MB::Sound::GraphNode::Resample, :aggregate_failures) do
 
           delta = resampled - reference
 
-          # TODO: get max lower by aligning on zero crossings after a few wavelengths
-          expect(delta.abs.max).to be_between(-250.db, 0.11)
+          expect(delta.abs.max).to be_between(-250.db, max_delta)
         end
 
         it 'does not matter what the upsampling chunk size is' do
@@ -59,8 +58,7 @@ RSpec.describe(MB::Sound::GraphNode::Resample, :aggregate_failures) do
 
           delta = resampled - reference
 
-          # TODO: get max lower by aligning on zero crossings after a few wavelengths
-          expect(delta.abs.max).to be_between(-250.db, 0.11)
+          expect(delta.abs.max).to be_between(-250.db, max_delta)
         end
 
         it 'does not matter what the downsampling chunk size is' do
@@ -81,14 +79,23 @@ RSpec.describe(MB::Sound::GraphNode::Resample, :aggregate_failures) do
       end
     end
 
-    MB::Sound::GraphNode::Resample::MODES.each do |resample_mode|
-      context "when resampling mode is #{resample_mode.inspect}" do
-        it_behaves_like 'a working resampler', resample_mode
+    MB::Sound::GraphNode::Resample::MODES.each do |mode|
+      context "when resampling mode is #{mode.inspect}" do
+        let (:resample_mode) { mode }
+        let (:max_delta) {
+          # Zero-order hold is noisy so relax its reference delta limit
+          resample_mode.to_s.downcase.include?('zoh') ? 0.25 : -30.db
+        }
+
+        it_behaves_like 'a working resampler'
       end
     end
 
     context 'with the default mode' do
-      it_behaves_like 'a working resampler', MB::Sound::GraphNode::Resample::DEFAULT_MODE
+      let (:resample_mode) { MB::Sound::GraphNode::Resample::DEFAULT_MODE }
+      let (:max_delta) { -60.db }
+
+      it_behaves_like 'a working resampler'
     end
 
     it 'gives the same results for different chunk sizes (from plot_resampler_window_delta.rb)' do
