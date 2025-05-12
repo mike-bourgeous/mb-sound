@@ -52,6 +52,10 @@ static const rb_data_type_t state_type_info = {
 	},
 };
 
+/**
+ * Creates the internal output buffer if it doesn't exist, grows it if it's
+ * smaller than min_size.
+ */
 static void grow_narray(VALUE self, long min_size)
 {
 	VALUE min_rb = LONG2NUM(min_size);
@@ -105,8 +109,9 @@ static VALUE ruby_read(VALUE self, VALUE count)
 
 	long frames_read = src_callback_read(src_state, ratio, frames_requested, ptr);
 
-	if (frames_read != frames_requested) {
-		// FIXME: handle end-of-stream condition where less data is returned by returning a smaller block or Qnil
+	if (frames_read == 0) {
+		return Qnil;
+	} else if (frames_read > frames_requested) {
 		rb_raise(rb_eIOError, "libsamplerate gave us %ld frames instead of the %ld we requested", frames_read, frames_requested);
 	}
 

@@ -106,10 +106,10 @@ module MB
           return nil if data.nil?
 
           if data.length != samples_needed
-            raise "TODO: asked for #{samples_needed} got #{data.length}"
             # FIXME: probably missing some fractional error here
-            count = count * data.length / required
+            last_sample = first_sample + data.length
             endpoint = @startpoint + data.length
+            count = count * data.length / samples_needed
             return nil if count == 0
           end
 
@@ -150,7 +150,7 @@ module MB
         def sample_libsamplerate(count)
           # TODO: handle complex by resampling real and imaginary separately?
           raise "call #sample first to initialize libsamplerate" unless @fast_resample
-          @fast_resample.read(count).not_inplace! # TODO: can we return inplace?
+          @fast_resample.read(count)&.not_inplace! # TODO: can we return inplace?
         end
 
         private
