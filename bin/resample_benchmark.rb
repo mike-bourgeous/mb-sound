@@ -9,7 +9,7 @@ require 'mb-sound'
 
 MB::U.sigquit_backtrace
 
-SAMPLE_COUNT = 48000 * 180
+SAMPLE_COUNT = ENV['SAMPLES']&.to_i || 48000 * 180
 
 Benchmark.bmbm do |bench|
   [233, 800, 4000].each do |bufsize|
