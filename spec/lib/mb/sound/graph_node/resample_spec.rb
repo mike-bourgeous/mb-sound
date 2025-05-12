@@ -45,9 +45,20 @@ RSpec.describe(MB::Sound::GraphNode::Resample, :aggregate_failures) do
           expect(delta).to all_be_within(1e-9).of_array(0)
         end
 
+        it 'upsamples correctly when chunk sizes change' do
+          node = 43.hz.at(1).forever.at_rate(432).resample(1700, mode: resample_mode)
+          ref = 43.hz.at(1).forever.at_rate(432).resample(1700, mode: resample_mode)
+
+          result = node.sample(129).concatenate(node.multi_sample(242, 30)).concatenate(node.sample(111))
+          expected = ref.sample(7500)
+
+          result, expected = select_whole_cycles(result, expected)
+
+          expect(result).to all_be_within(1e-9).of_array(expected)
+        end
+
         pending 'upsamples end of stream on buffer boundary'
         pending 'upsamples end of stream within a buffer'
-        pending 'upsamples correctly when chunk sizes change'
       end
 
       context 'when downsampling' do
@@ -73,9 +84,20 @@ RSpec.describe(MB::Sound::GraphNode::Resample, :aggregate_failures) do
           expect(delta).to all_be_within(1e-9).of_array(0)
         end
 
+        it 'downsamples correctly when chunk sizes change' do
+          node = 43.hz.at(1).forever.at_rate(4320).resample(1700, mode: resample_mode)
+          ref = 43.hz.at(1).forever.at_rate(4320).resample(1700, mode: resample_mode)
+
+          result = node.sample(129).concatenate(node.multi_sample(242, 30)).concatenate(node.sample(111))
+          expected = ref.sample(7500)
+
+          result, expected = select_whole_cycles(result, expected)
+
+          expect(result).to all_be_within(1e-9).of_array(expected)
+        end
+
         pending 'downsamples end of stream on buffer boundary'
         pending 'downsamples end of stream within a buffer'
-        pending 'downsamples correctly when chunk sizes change'
       end
     end
 
