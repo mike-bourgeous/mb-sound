@@ -1,25 +1,27 @@
 RSpec.describe(MB::Sound::GraphNode::Resample, :aggregate_failures) do
+  # Compensate for lag by skipping leading zeroes and then selecting as many
+  # whole wave cycles as possible.  If there are no zero crossings, then only
+  # zero-skipping is applied.
+  def select_whole_cycles(resampled, reference)
+    resampled = MB::M.skip_leading(resampled) { |v| v.abs < 0.5 }
+    reference = MB::M.skip_leading(reference) { |v| v.abs < 0.5 }
+
+    resampled = MB::M.select_zero_crossings(resampled, nil) || resampled
+    reference = MB::M.select_zero_crossings(reference, nil) || reference
+
+    min_length = [resampled.length, reference.length].min
+    resampled = resampled[0...min_length]
+    reference = reference[0...min_length]
+
+    return resampled, reference
+  end
+
   it 'can be created' do
     expect { MB::Sound::GraphNode::Resample.new(upstream: 150.hz.triangle, sample_rate: 12345) }.not_to raise_error
   end
 
   describe '#sample' do
     shared_examples_for 'a working resampler' do |resample_mode|
-      # Compensate for lag
-      def select_whole_cycles(resampled, reference)
-        resampled = MB::M.skip_leading(resampled) { |v| v.abs < 0.5 }
-        reference = MB::M.skip_leading(reference) { |v| v.abs < 0.5 }
-
-        resampled = MB::M.select_zero_crossings(resampled, nil)
-        reference = MB::M.select_zero_crossings(reference, nil)
-
-        min_length = [resampled.length, reference.length].min
-        resampled = resampled[0...min_length]
-        reference = reference[0...min_length]
-
-        return resampled, reference
-      end
-
       context 'when upsampling' do
         it 'can upsample with a reasonable noise floor' do
           resampled = 453.hz.at(1).at_rate(11376).resample(96000, mode: resample_mode).sample(24000)
@@ -98,33 +100,44 @@ RSpec.describe(MB::Sound::GraphNode::Resample, :aggregate_failures) do
 
     context 'using a sample counter to verify time linearity' do
       shared_examples_for 'zoh or linear' do
+        let (:long_sample) {
+          node.sample(600)
+        }
+        let (:random_sample) {
+          node.multi_sample(7, 30).concatenate(node.sample(30)).concatenate(node.sample(3)).concatenate(node.sample(357))
+        }
+        let (:consistent_sample) {
+          node.multi_sample(12, 50)
+        }
+
         it 'has the expected output when sampling all at once' do
-          expect(node.sample(60)).to all_be_within(5).sigfigs.of_array(expected[0...60])
+          sample, reference = select_whole_cycles(long_sample, expected)
+          expect(sample).to all_be_within(5).sigfigs.of_array(reference)
         end
 
         it 'has the expected output when sampling in random chunks' do
-          expect(node.multi_sample(7, 3)).to all_be_within(5).sigfigs.of_array(expected[0...21])
-          expect(node.sample(30)).to all_be_within(5).sigfigs.of_array(expected[21...51])
-          expect(node.sample(3)).to all_be_within(5).sigfigs.of_array(expected[51...54])
+          sample, reference = select_whole_cycles(random_sample, expected)
+          expect(sample).to all_be_within(5).sigfigs.of_array(reference)
         end
 
         it 'has the expected output when sampling in consistent chunks' do
-          expect(node.multi_sample(11, 5)).to all_be_within(5).sigfigs.of_array(expected[0...55])
+          sample, reference = select_whole_cycles(consistent_sample, expected)
+          expect(sample).to all_be_within(5).sigfigs.of_array(reference)
         end
       end
 
       shared_examples_for 'zoh' do
-        let (:expected) { Numo::Int32.linspace(0, output_end, 50001) }
+        let (:expected) { Numo::Int32.linspace(0, output_end, 200001) }
         it_behaves_like 'zoh or linear'
       end
 
       shared_examples_for 'linear' do
-        let (:expected) { Numo::SFloat.linspace(0, output_end, 50001) }
+        let (:expected) { Numo::SFloat.linspace(0, output_end, 200001) }
         it_behaves_like 'zoh or linear'
       end
 
       context 'with varying ratios' do
-        let (:counter) { MB::Sound::ArrayInput.new(data: Numo::SFloat.linspace(0, 50000, 50001), sample_rate: from_rate) }
+        let (:counter) { MB::Sound::ArrayInput.new(data: Numo::SFloat.linspace(0, 200000, 200001), sample_rate: from_rate) }
         let (:node) { counter.resample(to_rate, mode: resample_mode) }
 
         [1, 1.001, 2, 2.345, 3, 3.3217, 4, 5, 7651.0 / 400.0, 42.5, 255].each do |r|
@@ -133,12 +146,12 @@ RSpec.describe(MB::Sound::GraphNode::Resample, :aggregate_failures) do
               let (:ratio) { r }
 
               context "when mode is #{m}" do
-                let(:resample_mode) { m }
+                let (:resample_mode) { m }
 
                 context 'when upsampling' do
                   let (:from_rate) { 100 }
                   let (:to_rate) { 100 * r }
-                  let (:output_end) { 50000.0 / ratio }
+                  let (:output_end) { 200000.0 / ratio }
 
                   it_behaves_like m.to_s.rpartition('_')[-1]
                 end
@@ -146,7 +159,7 @@ RSpec.describe(MB::Sound::GraphNode::Resample, :aggregate_failures) do
                 context 'when downsampling' do
                   let (:from_rate) { 100 * r }
                   let (:to_rate) { 100 }
-                  let (:output_end) { 50000.0 * ratio }
+                  let (:output_end) { 200000.0 * ratio }
 
                   it_behaves_like m.to_s.rpartition('_')[-1]
                 end
