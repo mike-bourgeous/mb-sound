@@ -49,8 +49,8 @@ RSpec.describe(MB::Sound::GraphNode::Resample, :aggregate_failures) do
           node = 43.hz.at(1).forever.at_rate(432).resample(1700, mode: resample_mode)
           ref = 43.hz.at(1).forever.at_rate(432).resample(1700, mode: resample_mode)
 
-          result = node.sample(129).concatenate(node.multi_sample(242, 30)).concatenate(node.sample(111))
-          expected = ref.sample(7500)
+          result = node.sample(129).dup.concatenate(node.multi_sample(242, 30)).concatenate(node.sample(111))
+          expected = ref.sample(7500).dup
 
           result, expected = select_whole_cycles(result, expected)
 
@@ -109,8 +109,8 @@ RSpec.describe(MB::Sound::GraphNode::Resample, :aggregate_failures) do
           node = 43.hz.at(1).forever.at_rate(4320).resample(1700, mode: resample_mode)
           ref = 43.hz.at(1).forever.at_rate(4320).resample(1700, mode: resample_mode)
 
-          result = node.sample(129).concatenate(node.multi_sample(242, 30)).concatenate(node.sample(111))
-          expected = ref.sample(7500)
+          result = node.sample(129).dup.concatenate(node.multi_sample(242, 30)).concatenate(node.sample(111))
+          expected = ref.sample(7500).dup
 
           result, expected = select_whole_cycles(result, expected)
 
@@ -178,7 +178,7 @@ RSpec.describe(MB::Sound::GraphNode::Resample, :aggregate_failures) do
     context 'using a sample counter to verify time linearity' do
       shared_examples_for 'zoh or linear' do
         let (:long_sample) {
-          node.sample(600)
+          node.sample(600).dup
         }
         let (:random_sample) {
           node.multi_sample(7, 30).concatenate(node.sample(30)).concatenate(node.sample(3)).concatenate(node.sample(357))

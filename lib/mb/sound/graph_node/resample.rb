@@ -59,9 +59,10 @@ module MB
           @zoh_offset = @inv_ratio * 0.00012345678
 
           @startpoint = 0.0 # Fractional sample index of start of buffer, minus discards
-          @buffer_start = 0 # Upstream integer sample index of first sample in circular buffer
 
-          @bufsize = 0 # Desired capacity of circular buffer
+          @circbuf_size = 0 # Desired capacity of circular buffer
+
+          setup_buffer(length: 1024, double: true)
         end
 
         # Returns the upstream as the only source for this node.
@@ -71,6 +72,10 @@ module MB
 
         # Returns +count+ samples at the new sample rate, while requesting
         # sufficient samples from the upstream node to fulfill the request.
+        #
+        # Note that buffers may be reused from call to call, so call #dup on
+        # the returned buffer if you need to keep it outside of a normal node
+        # graph or beyond one cycle of a downstream node.
         def sample(count)
           case @mode
           when :ruby_zoh, :ruby_linear
@@ -115,16 +120,19 @@ module MB
             return nil if count == 0
           end
 
+          expand_buffer(data[0..0], size: count * 2)
+
           # TODO: reuse the existing buffer instead of regenerating a linspace
           # every time, or maybe keep a buffer for each possible required size
           case @mode
           when :ruby_zoh
-            ret = (Numo::DFloat.zeros(count).inplace.indgen * @inv_ratio + @startpoint + @zoh_offset).map_with_index { |v, idx|
-              data[v]
+            ret = (@buf[0...count].inplace.indgen * @inv_ratio + @startpoint + @zoh_offset).map_with_index { |v, idx|
+              data[v.real]
             }.not_inplace!
 
           when :ruby_linear
-            ret = (Numo::DFloat.zeros(count).inplace.indgen * @inv_ratio + @startpoint).map_with_index { |v, idx|
+            ret = (@buf[0...count].inplace.indgen * @inv_ratio + @startpoint).map_with_index { |v, idx|
+              v = v.real
               idx1 = v.floor
               idx2 = v.ceil
               idx2 -= 1 if idx2 >= data.length # XXX
@@ -162,7 +170,6 @@ module MB
           raise "BUG: negative discard count #{count}" if count < 0
           @circbuf.discard(count) if count > 0
           @startpoint -= count
-          @buffer_start += count
         end
 
         # Retrieve the oldest +count+ samples from the circular buffer.
@@ -189,11 +196,11 @@ module MB
         # larger, if it was previously larger).
         def setup_circular_buffer(count)
           capacity = count * 2 + 4
-          @bufsize = capacity if @bufsize < capacity
-          @circbuf ||= MB::Sound::CircularBuffer.new(buffer_size: @bufsize)
+          @circbuf_size = capacity if @circbuf_size < capacity
+          @circbuf ||= MB::Sound::CircularBuffer.new(buffer_size: @circbuf_size)
 
-          if @bufsize > @circbuf.length
-            @circbuf = @circbuf.dup(@bufsize)
+          if @circbuf_size > @circbuf.length
+            @circbuf = @circbuf.dup(@circbuf_size)
           end
         end
       end
