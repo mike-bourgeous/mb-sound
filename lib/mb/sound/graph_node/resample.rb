@@ -59,9 +59,6 @@ module MB
           @zoh_offset = @inv_ratio * 0.00012345678
 
           @startpoint = 0.0 # Fractional sample index of start of buffer, minus discards
-          @upstream_sample_index = 0.0 # Upstream fractional sample index of first sample in output buffer
-          @downstream_sample_index = 0 # Downstream integer sample index of first sample in output buffer
-          @samples_consumed = 0.0 # Cumulative fractional samples retrieved, minus discards
           @buffer_start = 0 # Upstream integer sample index of first sample in circular buffer
 
           @bufsize = 0 # Desired capacity of circular buffer
@@ -93,6 +90,8 @@ module MB
 
         # Zero-order hold and linear interpolator in Ruby.  See #sample.
         def sample_ruby(count, mode)
+          discard_samples(@startpoint.floor)
+
           exact_required = @inv_ratio * count
           endpoint = @startpoint + exact_required
 
@@ -137,11 +136,7 @@ module MB
             raise "BUG: unsupported mode #{mode}"
           end
 
-          @samples_consumed += exact_required
-          @upstream_sample_index += exact_required
-          @downstream_sample_index += ret.length
           @startpoint = endpoint
-          discard_samples(@samples_consumed.floor)
 
           ret
         end
@@ -161,11 +156,8 @@ module MB
         # playback range.
         def discard_samples(count)
           raise "BUG: negative discard count #{count}" if count < 0
-          # FIXME: remove samples consumed counter and calculate discard amount
-          # based on the lowest index required vs. the buffer start index
           @circbuf.discard(count) if count > 0
           @startpoint -= count
-          @samples_consumed -= count
           @buffer_start += count
         end
 
