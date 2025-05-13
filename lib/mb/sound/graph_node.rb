@@ -263,19 +263,21 @@ module MB
         raise "Times must be a positive Integer (got #{count.inspect})" unless times.is_a?(Integer) && times > 0
 
         ret = nil
+        endidx = 0
 
-        for _f in 0...times
+        for i in 0...times
+          idx = endidx
+
           d = sample(count)
           break if d.nil? || d.empty?
 
-          if ret
-            ret = ret.concatenate(d)
-          else
-            ret = d.dup
-          end
+          ret ||= d.class.zeros(count * times)
+
+          endidx = idx + d.length
+          ret[idx...endidx] = d
         end
 
-        ret
+        ret[0...endidx] if ret
       end
 
       # Adds a resampling filter to the graph with the given new sample rate.
