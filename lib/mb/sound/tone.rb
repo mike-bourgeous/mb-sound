@@ -96,6 +96,9 @@ module MB
       end
 
       # Methods to be included in Numeric.
+      #
+      # TODO: many of these are unrelated to Tone itself, so it might make
+      # sense to move some of these methods elsewhere.
       module NumericToneMethods
         # Returns the number of seconds at the given sample rate (default
         # 48kHz).
@@ -127,6 +130,16 @@ module MB
         def to_db
           20.0 * Math.log10(self.abs)
         end
+
+        # Converts this number to the quantization increment of a signed
+        # integer sample with this number of bits.  E.g. 8.bits returns 1.0 /
+        # 128.0.  This works with fractional values as well for e.g. smoothly
+        # varying quantization levels.  It also works with Complex values, but
+        # that's kind of nonsensical.
+        def bits
+          0.5 ** (self - 1)
+        end
+        alias bit bits
 
         # Creates a Feet object with this numeric value.
         def feet

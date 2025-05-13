@@ -428,12 +428,24 @@ module MB
         self.filter(f)
       end
 
-      # Wraps this arithmetic signal graph in a softclip effect.
+      # Adds a soft-clipper to the graph.  Values greater than +threshold+ will
+      # be smoothly compressed downward, with a value of infinity producing an
+      # output of +limit+.
       def softclip(threshold = 0.25, limit = 1.0)
         MB::Sound::Filter::SampleWrapper.new(
           MB::Sound::SoftestClip.new(threshold: threshold, limit: limit),
           self
         )
+      end
+
+      # Adds a quantizer to the node graph.  Values will be rounded to the
+      # nearest multiple of +increment+.  To quantize to a given number of
+      # bits, use e.g. `5.bits`.  An +increment+ of zero means no quantization.
+      #
+      # The +increment+ may be another GraphNode to apply a time-varying
+      # quantization amount.
+      def quantize(increment)
+        MB::Sound::GraphNode::Quantize.new(upstream: self, increment: increment)
       end
 
       # Calls the given block with each sample buffer whenever #sample is
@@ -662,3 +674,4 @@ require_relative 'graph_node/multitap_delay'
 require_relative 'graph_node/complex_node'
 require_relative 'graph_node/buffer_adapter'
 require_relative 'graph_node/resample'
+require_relative 'graph_node/quantize'

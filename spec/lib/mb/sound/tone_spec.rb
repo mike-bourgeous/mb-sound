@@ -132,6 +132,24 @@ RSpec.describe MB::Sound::Tone do
       end
     end
 
+    describe '#bits' do
+      it 'returns the quantization increment for a signed integer sample of the given number of bits' do
+        expect(8.bits).to eq(1.0 / 128.0)
+      end
+
+      it 'returns 1.0 for 1 bit' do
+        expect(1.bits).to eq(1.0)
+      end
+
+      it 'is aliased to #bit' do
+        expect(1.bit).to eq(1.0)
+      end
+
+      it 'works with fractions' do
+        expect(1.5.bits).to eq(Math.sqrt(2))
+      end
+    end
+
     describe '#meter' do
       it 'returns a Meters object' do
         expect(1.meter).to be_a(MB::Sound::Tone::Meters)
