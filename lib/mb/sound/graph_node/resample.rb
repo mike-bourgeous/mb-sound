@@ -110,8 +110,6 @@ module MB
           return nil if data.nil?
 
           if data.length != samples_needed
-            # FIXME: probably missing some fractional error here
-            puts "Got #{data.length} instead of #{samples_needed} from upstream for count of #{count}" # XXX
             missing_ratio = data.length.to_f / samples_needed
             exact_required *= missing_ratio
             last_sample = first_sample + data.length
@@ -133,10 +131,14 @@ module MB
           when :ruby_linear
             ret = (@buf[0...count].inplace.indgen * @inv_ratio + @startpoint).map_with_index { |v, idx|
               v = v.real
+
               idx1 = v.floor
               idx2 = v.ceil
-              idx2 -= 1 if idx2 >= data.length # XXX
               delta = v - idx1
+
+              # TODO: avoid this with better math in data.length != samples_needed above
+              idx2 = data.length - 1 if idx2 >= data.length
+
               d1 = data[idx1]
               d2 = data[idx2]
               d_out = d1 * (1.0 - delta) + d2 * delta
