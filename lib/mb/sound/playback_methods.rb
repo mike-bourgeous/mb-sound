@@ -79,10 +79,6 @@ module MB
             end
           end
 
-        when Tone
-          output = MB::Sound.output(sample_rate: sample_rate, plot: plot, device: device)
-          file_tone_data.write(output)
-
         when GraphNode
           bufsize = file_tone_data.graph_buffer_size # nil is ok here
           output = MB::Sound.output(sample_rate: sample_rate, plot: plot, device: device, buffer_size: bufsize)

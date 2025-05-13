@@ -206,17 +206,6 @@ RSpec.describe MB::Sound::Tone do
       expect(data.abs.mean.round(3)).to eq(0.85)
       expect(data.abs.median.round(3)).to eq(0.85)
     end
-
-    it 'can write tone samples to a file' do
-      name = 'tmp/tonegen.flac'
-      FileUtils.mkdir_p('tmp')
-      output = MB::Sound::FFMPEGOutput.new(name, channels: 1, sample_rate: 48000, buffer_size: 311713)
-      100.hz.for(311713.0 / 48000.0).write(output)
-      output.close
-
-      info = MB::Sound::FFMPEGInput.parse_info(name)
-      expect(info[:streams][0][:duration_ts]).to eq(311713)
-    end
   end
 
   describe '#sample' do

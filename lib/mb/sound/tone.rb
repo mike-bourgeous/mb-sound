@@ -601,36 +601,6 @@ module MB
         )
       end
 
-      # Writes the tone's full duration to the +output+ stream.  The tone will
-      # be written into every channel of the output stream (TODO: support
-      # different channels) at the output stream's sample rate.
-      #
-      # The tone parameters cannot be changed after this method is called.
-      def write(output)
-        # TODO: Fade in and out at the start and end
-        # TODO: Maybe change this to act like an input instead, with a read
-        # method and a frames method?
-        # TODO: Maybe eventually have a way to detect outputs with strict
-        # buffer size requirements, and only pad them, while leaving e.g.
-        # ffmpegoutput unpadded.
-
-        @sample_rate = output.sample_rate
-        @single_sample = 1.0 / @sample_rate
-        buffer_size = output.buffer_size
-        samples_left = @duration * @sample_rate if @duration
-
-        loop do
-          current_samples = [samples_left || buffer_size, buffer_size].min
-          d = [ MB::M.zpad(generate(current_samples), buffer_size) ]
-          output.write(d * output.channels)
-
-          if samples_left
-            samples_left -= current_samples
-            break if samples_left <= 0
-          end
-        end
-      end
-
       def to_s
         inspect
       end
