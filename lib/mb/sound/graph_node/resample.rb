@@ -184,6 +184,11 @@ module MB
         # samples.  Returns nil once the upstream has ended and the buffer is
         # empty.
         def next_samples(count)
+          if @circbuf.length < count
+            d = @upstream.sample(count - @circbuf.length)
+            @circbuf.write(d) if d && !d.empty?
+          end
+
           while @circbuf.length < count
             d = @upstream.sample(count)
             break if d.nil? || d.empty?
