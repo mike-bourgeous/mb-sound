@@ -193,6 +193,14 @@ RSpec.describe(MB::Sound::BufferHelper, :aggregate_failures) do
         bufhelper.expand_buffer(Numo::DComplex[1,2,3,4,5,6,7])
         expect(buf).to be_a(Numo::DComplex).and eq(Numo::DComplex[1,2,3,4,5,-6,0])
       end
+
+      it 'accepts a size override' do
+        expect(buf.length).not_to eq(17)
+        bufhelper.expand_buffer(Numo::DComplex[], size: 17)
+        expect(buf.length).to eq(17)
+        expect(buf).to be_a(Numo::DComplex)
+        expect(buf[0]).to eq(1)
+      end
     end
 
     context 'when :temp is false' do

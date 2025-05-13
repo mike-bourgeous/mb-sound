@@ -66,11 +66,15 @@ module MB
       # implementations that want to maintain a buffer to hold whatever data
       # type comes in from upstream sources.
       #
+      # The +:size+ parameter allows specifying a different minimum size when
+      # +:grow+ is true, in case the +example_buf+ has the type to use for the
+      # buffer but not the size.
+      #
       # If +:grow+ is false, then the buffer will not grow based on the example
       # buffer length -- only types will be promoted.
       #
       # See #setup_buffer.
-      def expand_buffer(example_buf, grow: true)
+      def expand_buffer(example_buf, size: nil, grow: true)
         raise "BUG: Call #setup_buffer before calling #expand_buffer" unless defined?(@bufcomplex)
 
         # Nothing to do if we are already at the highest type (double complex).
@@ -81,7 +85,8 @@ module MB
           example_buf.is_a?(Numo::Int32) || example_buf.is_a?(Numo::Int64)
 
         length = @buflen
-        length = example_buf.length if grow && example_buf.length > @buflen
+        size ||= example_buf.length
+        length = size if grow && size > @buflen
 
         setup_buffer(length: length, complex: complex, temp: @buftemp, double: double)
       end
