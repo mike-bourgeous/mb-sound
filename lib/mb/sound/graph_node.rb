@@ -311,6 +311,16 @@ module MB
         f = f.hz if f.is_a?(Numeric)
         f = f.lowpass if f.is_a?(Tone)
 
+        if f.respond_to?(:sample_rate)
+          if f.sample_rate != self.sample_rate
+            if f.respond_to?(:sample_rate=)
+              f.sample_rate = self.sample_rate
+            else
+              warn "Filter #{f} sample rate is #{f.sample_rate} while node #{self} sample rate is #{self.sample_rate}"
+            end
+          end
+        end
+
         case
         when f.is_a?(Symbol)
           raise 'Cutoff frequency must be given when creating a filter by type' if cutoff.nil?

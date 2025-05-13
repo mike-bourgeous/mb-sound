@@ -30,7 +30,7 @@ module MB
 
           attr_reader :audio, :cutoff, :quality
 
-          def_delegators :@filter, :sample_rate
+          def_delegators :@filter, :sample_rate, :sample_rate=
 
           # Initializes a sample-chain wrapper around a cookbook filter that
           # uses Cookbook#dynamic_process to vary the cutoff frequency

@@ -10,6 +10,8 @@ RSpec.describe(MB::Sound::GraphNode::Resample, :aggregate_failures) do
     reference = MB::M.select_zero_crossings(reference, nil) || reference
 
     min_length = [resampled.length, reference.length].min
+    return resampled.class[], reference.class[] if min_length == 0
+
     resampled = resampled[0...min_length]
     reference = reference[0...min_length]
 
@@ -300,6 +302,17 @@ RSpec.describe(MB::Sound::GraphNode::Resample, :aggregate_failures) do
       end
     end
 
-    pending 'with a more complex upstream graph'
+    it 'can resample a more complex upstream graph' do
+      node = 150.hz.saw.at(4).filter(500.hz.lowpass).resample(12000).resample(15000)
+      ref = 150.hz.saw.at(4).filter(500.hz.lowpass).resample(15000)
+
+      result = node.sample(5000).dup
+      expected = ref.sample(5000).dup
+
+      result, expected = select_whole_cycles(result, expected)
+
+      expect(result.length).to be > 4000
+      expect(result).to all_be_within(-40.db).of_array(expected)
+    end
   end
 end

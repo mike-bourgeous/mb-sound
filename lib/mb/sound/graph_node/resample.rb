@@ -12,7 +12,9 @@ module MB
         # Resampling modes supported by the class (pass to constructor's
         # +:mode+ parameter).
         #
-        # Note that some modes may add considerable latency.
+        # Note that some modes may add considerable latency, and the
+        # :libsamplerate_best mode will not return any data at all for very
+        # short inputs.
         MODES = [
           :ruby_zoh,
           :ruby_linear,
