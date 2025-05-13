@@ -2,7 +2,7 @@ require 'fileutils'
 
 require 'simplecov'
 SimpleCov.start do
-  track_files("bin/*")
+  track_files("bin/**/*.rb")
   enable_coverage :branch
 end
 
