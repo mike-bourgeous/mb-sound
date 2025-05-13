@@ -146,7 +146,7 @@ RSpec.describe MB::Sound::Tone do
       end
 
       it 'works with fractions' do
-        expect(1.5.bits).to eq(Math.sqrt(2))
+        expect(1.5.bits).to eq(Math.sqrt(2) / 2)
       end
     end
 
