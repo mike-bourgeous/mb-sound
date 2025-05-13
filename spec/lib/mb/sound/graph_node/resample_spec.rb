@@ -69,8 +69,17 @@ RSpec.describe(MB::Sound::GraphNode::Resample, :aggregate_failures) do
           expect(result[-1]).to be_within(1e-5).of(1)
         end
 
-        pending 'upsamples end of stream on buffer boundary'
-        pending 'upsamples end of stream within a buffer'
+        it 'upsamples end of stream within a buffer' do
+          node = 0.hz.square.at(1..1).at_rate(100).for(1).resample(280, mode: resample_mode)
+
+          result = MB::M.trim(node.multi_sample(195, 10)) { |v| v.abs < 0.5 }
+
+          require 'pry-byebug'; binding.pry if result[-1] < 0.9 || result.length < 200
+
+          expect(result.length).to be_between(200, 360)
+          expect(result[-10..-1].sum / 10).to be_within(1e-5).of(1)
+          expect(result[-1]).to be_within(1e-5).of(1)
+        end
       end
 
       context 'when downsampling' do
@@ -114,6 +123,8 @@ RSpec.describe(MB::Sound::GraphNode::Resample, :aggregate_failures) do
           sample = node.multi_sample(1, 360)
           result = MB::M.trim(sample) { |v| v.abs < 0.5 }
 
+          require 'pry-byebug'; binding.pry if result[-1] < 0.9 || result.length < 200
+
           # Some resamplers (e.g. best sinc resampler) take a while to get
           # started so the length is shorter
           expect(result.length).to be_between(130, 281)
@@ -121,7 +132,20 @@ RSpec.describe(MB::Sound::GraphNode::Resample, :aggregate_failures) do
           expect(result[-1]).to be_within(1e-5).of(1)
         end
 
-        pending 'downsamples end of stream within a buffer'
+        it 'downsamples end of stream within a buffer' do
+          node = 0.hz.square.at(1..1).at_rate(1000).for(1).resample(280, mode: resample_mode)
+
+          sample = node.multi_sample(195, 10)
+          result = MB::M.trim(sample) { |v| v.abs < 0.5 }
+
+          require 'pry-byebug'; binding.pry if result[-1] < 0.9 || result.length < 200
+
+          # Some resamplers (e.g. best sinc resampler) take a while to get
+          # started so the length is shorter
+          expect(result.length).to be_between(130, 281)
+          expect(result[-10..-1].sum / 10).to be_within(1e-5).of(1)
+          expect(result[-1]).to be_within(1e-5).of(1)
+        end
       end
     end
 

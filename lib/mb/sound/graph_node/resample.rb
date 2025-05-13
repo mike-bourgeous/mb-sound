@@ -106,9 +106,12 @@ module MB
 
           if data.length != samples_needed
             # FIXME: probably missing some fractional error here
+            puts "Got #{data.length} instead of #{samples_needed} from upstream for count of #{count}" # XXX
+            missing_ratio = data.length.to_f / samples_needed
+            exact_required *= missing_ratio
             last_sample = first_sample + data.length
             endpoint = @startpoint + data.length
-            count = count * data.length / samples_needed
+            count = (count * missing_ratio).floor
             return nil if count == 0
           end
 
@@ -124,6 +127,7 @@ module MB
             ret = (Numo::DFloat.zeros(count).inplace.indgen * @inv_ratio + @startpoint).map_with_index { |v, idx|
               idx1 = v.floor
               idx2 = v.ceil
+              idx2 -= 1 if idx2 >= data.length # XXX
               delta = v - idx1
               d1 = data[idx1]
               d2 = data[idx2]
