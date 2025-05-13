@@ -37,8 +37,12 @@ module MB
               buffer_size: bufsize
             )
 
+            nodes = file_tone_data.map { |d|
+              d.resample(sample_rate)
+            }
+
             loop do
-              buf = file_tone_data.map { |d| d.sample(output.buffer_size) }
+              buf = nodes.map { |d| d.sample(output.buffer_size) }
               break if buf.all? { |d| d.nil? || d.empty? }
 
               buf = buf.map { |d|
@@ -82,9 +86,10 @@ module MB
         when GraphNode
           bufsize = file_tone_data.graph_buffer_size # nil is ok here
           output = MB::Sound.output(sample_rate: sample_rate, plot: plot, device: device, buffer_size: bufsize)
+          node = file_tone_data.resample(sample_rate)
           loop do
             # TODO: Consolidate this sample+write loop with other similar or identical loops?
-            d = file_tone_data.sample(output.buffer_size)
+            d = node.sample(output.buffer_size)
             break if d.nil? || d.empty?
             d = MB::M.zpad(d, output.buffer_size) if d.length < output.buffer_size
             output.write([d] * output.channels)
