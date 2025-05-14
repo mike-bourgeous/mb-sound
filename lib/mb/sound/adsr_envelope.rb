@@ -69,6 +69,7 @@ module MB
 
         # Single-pole filter avoids overshoot
         @filter = filter_freq.hz.at_rate(@sample_rate).lowpass1p
+        @filter_ringdown = 7.5 * 1.0 / filter_freq.to_f
         @peak = 0.5
         @value = 0
         @sust = 0
@@ -106,7 +107,7 @@ module MB
 
       # Returns true while the envelope is either sustained or releasing.
       def active?
-        @on || @time < @total
+        @on || @time < @total + @filter_ringdown
       end
 
       # Returns true while the envelope is sustained.
@@ -126,7 +127,10 @@ module MB
         @frame = 0
         @peak = peak
         @value = 0
+
         @auto_release = auto_release
+        @auto_release = @attack_time + @decay_time if @auto_release == true
+
         @on = true
 
         self
@@ -207,7 +211,7 @@ module MB
       def sample_count_c(count, filter: true)
         setup_buffer(length: count)
 
-        MB::FastSound.adsr_narray(
+        retbuf, @frame, @time, @on = MB::FastSound.adsr_narray(
           @buf.inplace!,
           @frame,
           @sample_rate,
@@ -216,30 +220,43 @@ module MB
           @sust,
           @release_time,
           @peak,
-          @on
+          @on,
+          @auto_release,
+          filter ? @filter_ringdown : 0
         )
 
-        @value = @buf[-1]
+        @value = retbuf[-1]
 
         advance(count)
 
         if filter
-          @filter.process(@buf.inplace!)
+          @filter.process(retbuf.inplace!)
         else
-          @filter.process(@buf.not_inplace!)
+          @filter.process(retbuf.not_inplace!)
         end
 
-        return nil if @auto_release && !@on && @time >= @total && @buf.max < -100.db
+        return nil if @auto_release && !@on && @time >= @total && retbuf.max < -100.db
 
-        @buf.not_inplace!
+        retbuf.not_inplace!
       end
 
       def sample_ruby_c(count, filter: true)
         if count
           setup_buffer(length: count)
-          @buf.inplace.map { sample_one_c(filter: filter) }
+
+          maybe_idx = @buf.inplace.map_with_index { |_v, idx|
+            sample_one_c(filter: filter) || break idx
+          }
+
+          if maybe_idx.is_a?(Integer)
+            retbuf = @buf[0...maybe_idx]
+          else
+            retbuf = @buf
+          end
+
           return nil if @auto_release && !@on && @buf.max < -100.db
-          return @buf
+
+          return retbuf
         end
 
         return sample_one_c(filter: filter)
@@ -258,6 +275,8 @@ module MB
 
         advance(1)
 
+        return nil if @auto_release && !@on && @time >= @total + (filter ? @filter_ringdown : 0) && @value == 0
+
         if filter
           @filter.process_one(@value)
         else
@@ -269,9 +288,21 @@ module MB
       def sample_ruby(count = nil, filter: true)
         if count
           setup_buffer(length: count)
-          @buf.inplace.map { sample_ruby(filter: filter) }
+
+          maybe_idx = @buf.inplace.map_with_index { |_v, idx|
+            sample_ruby(filter: filter) || break idx
+          }
+
+          if maybe_idx.is_a?(Integer)
+            retbuf = @buf[0...maybe_idx]
+          else
+            retbuf = @buf
+          end
+
+          # TODO: maybe do this check before spending CPU cycles
           return nil if @auto_release && !@on && @buf.max < -100.db
-          return @buf
+
+          return retbuf
         end
 
         if @on
@@ -304,6 +335,8 @@ module MB
         @value *= @peak
 
         advance(1)
+
+        return nil if @auto_release && !@on && @time >= @total + (filter ? @filter_ringdown : 0) && @value == 0
 
         if filter
           @filter.process_one(@value)
@@ -351,10 +384,7 @@ module MB
         @frame += samples
         @time = @frame / @sample_rate.to_f
 
-        release_time = @attack_time + @decay_time if @auto_release == true
-        release_time ||= @auto_release
-
-        release if @auto_release && @on && @time >= release_time
+        release if @on && @auto_release && @time >= @auto_release
       end
     end
   end

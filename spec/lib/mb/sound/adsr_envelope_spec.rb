@@ -47,9 +47,13 @@ RSpec.describe(MB::Sound::ADSREnvelope, :aggregate_failures) do
     r1 = env.sample(48)
     r1_data = r1.dup
     r2 = env.sample(48)
-    expect(r1.__id__).to eq(r2.__id__)
 
     expect(r2).not_to eq(r1_data)
+
+    # Use modification to verify the same buffer is used even if we receive
+    # different view objects pointing to that buffer.
+    r1[0] = 123.456
+    expect(r2[0]).to be_within(0.00001).of(123.456)
   end
 
   [:sample, :sample_c, :sample_ruby_c].each do |m|
@@ -72,10 +76,7 @@ RSpec.describe(MB::Sound::ADSREnvelope, :aggregate_failures) do
             ruby = a.concatenate(b)
 
             # 32-bit float resolution of 0.5 ** 24 is 5.960464477539063e-08
-            # For some reason rounding to 6 or 8 decimals and then comparing
-            # fails, but rounding the delta works
-            delta = (c - ruby).abs
-            expect(MB::M.round(delta, filt ? 6 : 7).max).to eq(0)
+            expect(c).to all_be_within(1e-6).of_array(ruby)
           end
 
           it 'returns the same curve as the original Ruby for an interrupted cycle' do
@@ -98,14 +99,18 @@ RSpec.describe(MB::Sound::ADSREnvelope, :aggregate_failures) do
             ruby = ruby_rise.concatenate(ruby_fall)
 
             # 32-bit float resolution of 0.5 ** 24 is 5.960464477539063e-08
-            # For some reason rounding to 6 or 8 decimals and then comparing
-            # fails, but rounding the delta works
-            delta = (c - ruby).abs
-            expect(MB::M.round(delta, filt ? 6 : 7).max).to eq(0)
+            require 'pry-byebug'; binding.pry # XXX
+            expect(c).to all_be_within(1e-6).of_array(ruby)
           end
 
           it 'reuses the same buffer' do
-            expect(env.send(m, 500).object_id).to eq(env.send(m, 500).object_id)
+            d1 = env.send(m, 500)
+            d2 = env.send(m, 500)
+
+            # d1 and d2 may have different object IDs if they are views onto
+            # the same buffer, so modify one and then look at the other.
+            d1[0] = 123.456
+            expect(d2[0]).to be_within(0.00001).of(123.456)
           end
         end
       end

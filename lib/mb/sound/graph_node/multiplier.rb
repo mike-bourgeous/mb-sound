@@ -86,9 +86,14 @@ module MB
         #
         # If any multiplicand (or every multiplicand if stop_early was set to
         # false in the constructor) returns nil or an empty buffer, then this
-        # method will return nil.
+        # method will return nil.  Similarly if there is a short read, if
+        # stop_early is true then all inputs will be truncated to the shortest
+        # buffer, or if stop_early is false than all short inputs will be
+        # zero-padded.
         def sample(count)
           @complex ||= @constant.is_a?(Complex)
+
+          min_length = count
 
           inputs = @multiplicands.map.with_index { |(m, _), idx|
             v = m.sample(count)&.not_inplace!
@@ -97,33 +102,46 @@ module MB
             # inputs have a chance to finish (see @stop_early condition below)
             next if v.nil? || v.empty?
 
-            if v.length != count
-              raise "Input #{idx}/#{m} on #{self} gave us #{v.length} samples when we asked for #{count}"
-            end
+            min_length = v.length if v.length < min_length
 
             @complex ||= v.is_a?(Numo::SComplex) || v.is_a?(Numo::DComplex)
-            v = MB::M.opad(v, count) if v && v.length > 0 && v.length < count
+
             v
           }
 
           inputs.compact!
 
-          if @stop_early
-            return nil if inputs.length != @multiplicands.length
-          else
-            return nil if inputs.empty? && !@multiplicands.empty?
-          end
-
           setup_buffer(length: count, complex: @complex)
 
-          @buf.fill(@constant)
+          if @stop_early
+            return nil if inputs.length != @multiplicands.length
+
+            # Truncate if stop_early is true
+            inputs = inputs.map { |v|
+              v[0...min_length]
+            }
+
+            retbuf = @buf[0...min_length]
+          else
+            return nil if inputs.empty? && !@multiplicands.empty?
+
+            # Pad if stop_early is false (using opad because 1 is the
+            # multiplicative identity)
+            inputs = inputs.map { |v|
+              MB::M.opad(v, count) if v.length < count
+            }
+
+            retbuf = @buf
+          end
+
+          retbuf.fill(@constant)
 
           inputs.each.with_index do |v, idx|
             next if v.empty?
-            @buf.inplace * v
+            retbuf.inplace * v
           end
 
-          @buf.not_inplace!
+          retbuf.not_inplace!
         end
 
         # Returns the multiplicand at the given index by insertion order

@@ -42,6 +42,8 @@ struct biquad_coeffs {
 	double omega; // angular frequency
 };
 
+static ID sym_array_lookup;
+
 static ID sym_osc_sine;
 static ID sym_osc_complex_sine;
 static ID sym_osc_triangle;
@@ -1488,7 +1490,29 @@ VALUE ruby_adsr(VALUE self, VALUE time, VALUE attack, VALUE decay, VALUE sustain
 				));
 }
 
-VALUE ruby_adsr_narray(VALUE self, VALUE narray, VALUE frame, VALUE rate, VALUE attack, VALUE decay, VALUE sustain, VALUE release, VALUE peak, VALUE on)
+// Extracted loop from ruby_adsr_narray for both float and double
+#define adsr_loop do { \
+	for(size_t i = 0; i < length; i++) { \
+		double t = current_frame / sample_rate; \
+		if (o && ar >= 0 && t >= ar) { \
+			/* auto-release */ \
+			o = 0; \
+			current_frame = release_start; \
+		} \
+		data[i] = adsr(t, a, d, s, r, p, o); \
+		current_frame += 1; \
+ \
+		if (ar >= 0 && current_frame >= release_end && data[i] == 0) { \
+			rb_warn("Auto-release\n"); /* XXX */ \
+			/* end of release */ \
+			length = i + 1; \
+			break; \
+		} \
+	} \
+} while(0)
+
+
+VALUE ruby_adsr_narray(VALUE self, VALUE narray, VALUE frame, VALUE rate, VALUE attack, VALUE decay, VALUE sustain, VALUE release, VALUE peak, VALUE on, VALUE auto_release, VALUE filter_ringdown)
 {
 	if (CLASS_OF(narray) != numo_cDFloat && CLASS_OF(narray) != numo_cSFloat) {
 		narray = rb_funcall(numo_cDFloat, rb_intern("cast"), 1, narray);
@@ -1511,40 +1535,43 @@ VALUE ruby_adsr_narray(VALUE self, VALUE narray, VALUE frame, VALUE rate, VALUE 
 
 	ssize_t current_frame = NUM2SSIZET(frame);
 	double sample_rate = NUM2DBL(rate);
+
+	// ADSR
 	double a = NUM2DBL(attack);
 	double d = NUM2DBL(decay);
 	double s = NUM2DBL(sustain);
 	double r = NUM2DBL(release);
+
+	// Peak, on, auto-release, filter ringdown
 	double p = NUM2DBL(peak);
 	_Bool o = RTEST(on);
+	double ar = RTEST(auto_release) ? NUM2DBL(auto_release) : -1;
+	double fr = NUM2DBL(filter_ringdown);
+
+	ssize_t release_start = lrint((a + d) * sample_rate);
+	ssize_t release_end = lrint((a + d + r + fr) * sample_rate);
 
 	if (CLASS_OF(narray) == numo_cSFloat) {
 		float *data = (float *)(nary_get_pointer_for_write(narray) + nary_get_offset(narray));
-
-		for(size_t i = 0; i < length; i++) {
-			double t = current_frame / sample_rate;
-			data[i] = adsr(t, a, d, s, r, p, o);
-			current_frame += 1;
-		}
+		adsr_loop;
 	} else if (CLASS_OF(narray) == numo_cDFloat) {
 		double *data = (double *)(nary_get_pointer_for_write(narray) + nary_get_offset(narray));
-
-		for(size_t i = 0; i < length; i++) {
-			double t = current_frame / sample_rate;
-			data[i] = adsr(t, a, d, s, r, p, o);
-			current_frame += 1;
-		}
+		adsr_loop;
 	}
 
 	RB_GC_GUARD(narray);
 
-	return narray;
+	VALUE narray_subset = rb_funcall(narray, sym_array_lookup, 1, rb_range_new(INT2FIX(0), SSIZET2NUM(length), 1));
+
+	return rb_ary_new_from_args(4, narray_subset, SSIZET2NUM(current_frame), DBL2NUM(current_frame / sample_rate), o ? Qtrue : Qfalse);
 }
 
 void Init_fast_sound(void)
 {
 	VALUE mb = rb_define_module("MB");
 	VALUE fast_sound = rb_define_module_under(mb, "FastSound");
+
+	sym_array_lookup = rb_intern("[]");
 
 	sym_osc_sine = rb_intern("sine");
 	sym_osc_complex_sine = rb_intern("complex_sine");
@@ -1570,7 +1597,7 @@ void Init_fast_sound(void)
 
 	// Envelope functions
 	rb_define_module_function(fast_sound, "adsr", ruby_adsr, 7);
-	rb_define_module_function(fast_sound, "adsr_narray", ruby_adsr_narray, 9);
+	rb_define_module_function(fast_sound, "adsr_narray", ruby_adsr_narray, 11);
 
 	// Faster implementations of functions from mb-math
 	rb_define_module_function(fast_sound, "cot_int", ruby_cot_int, 1);
