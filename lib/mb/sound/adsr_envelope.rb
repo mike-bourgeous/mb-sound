@@ -57,7 +57,7 @@ module MB
       # +:sample_rate+ is required to ensure envelope times are accurate.
       #
       # Note that the +:sustain_level+ may be greater than 1.0.
-      def initialize(attack_time:, decay_time:, sustain_level:, release_time:, sample_rate:, filter_freq: 1000)
+      def initialize(attack_time:, decay_time:, sustain_level:, release_time:, sample_rate:, filter_freq: 10000)
         @sample_rate = sample_rate.to_f
         @on = false
 
