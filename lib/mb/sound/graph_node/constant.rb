@@ -89,6 +89,19 @@ module MB
           [@constant]
         end
 
+        # Changes the sample rate of this constant value, used for duration
+        # calculation.
+        def at_rate(sample_rate)
+          new_rate = sample_rate.to_f
+
+          @elapsed_samples = @elapsed_samples * new_rate / @sample_rate
+          @duration_samples = @duration_samples * new_rate / @sample_rate if @duration_samples
+
+          @sample_rate = new_rate
+
+          self
+        end
+
         # Sets the duration for which this constant will run *from now*, or nil
         # to run forever.
         def for(duration_seconds, recursive: true)

@@ -33,8 +33,11 @@ module MB
         # The output sample rate ratio (output rate divided by input rate).
         attr_reader :ratio
 
-        # The input sample rate ratio (input rate divided by output rate)
+        # The input sample rate ratio (input rate divided by output rate).
         attr_reader :inv_ratio
+
+        # The resampling mode given to the constructor.
+        attr_reader :mode
 
         # Creates a resampling graph node with the given +:upstream+ node and
         # +:sample_rate+.  The +:mode+ parameter may be one of the supported

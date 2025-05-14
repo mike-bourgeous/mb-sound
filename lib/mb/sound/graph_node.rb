@@ -207,7 +207,7 @@ module MB
         self.proc { |v| MB::FastSound.narray_log2(v) }
       end
 
-      # Appends a node that calculates the base two logarithm of values passing
+      # Appends a node that calculates the base ten logarithm of values passing
       # through.
       def log10
         self.proc { |v| MB::FastSound.narray_log10(v) }
@@ -219,8 +219,9 @@ module MB
       # (controllable with the +env_range+ parameter).
       def db(env_range = nil)
         if self.is_a?(MB::Sound::ADSREnvelope)
-          # TODO: Do this with polymorphism?
-          # TODO: This interface for converting an envelope to logarithmic doesn't feel quite right
+          # TODO: Do this with polymorphism? (move to ADSREnvelope)
+          # TODO: This interface for converting an envelope to logarithmic doesn't feel quite right; it shouldn't be called db.
+          # TODO: Maybe create an exponential envelope?  Or allow shaping individual phases within the ADSREnvelope?
           env_range ||= 80
           env_range = env_range.abs
           env_min = (-env_range).db
@@ -237,14 +238,14 @@ module MB
       # Wraps the numeric in a MB::Sound::GraphNode::Constant so that numeric values can
       # be listed first in signal graph arithmetic operations.
       def coerce(numeric)
-        [numeric.constant, self]
+        [numeric.constant(sample_rate: self.sample_rate), self]
       end
 
       # Adds a Ruby block to a processing chain.  The block will be called with
       # a Numo::NArray containing samples to be modified.  Note that this can
       # be very slow compared to the built-in algorithms implemented in C.
       def proc(*sources, &block)
-        ProcNode.new(self, sources, &block)
+        ProcNode.new(self, sources, sample_rate: self.sample_rate, &block)
       end
 
       # If this node (or its inputs) have a finite length of audio data
@@ -287,6 +288,39 @@ module MB
       # MB::Sound::GraphNode::Resample::MODES (e.g. :libsamplerate_best).
       def resample(sample_rate, mode: MB::Sound::GraphNode::Resample::DEFAULT_MODE)
         MB::Sound::GraphNode::Resample.new(upstream: self, sample_rate: sample_rate, mode: mode)
+      end
+
+      # Multiplies this envelope by an ADSR envelope with the given +attack+,
+      # +decay+, +sustain+, and +release+ parameters, with times in seconds,
+      # and +sustain+ ranging from 0 to 1 (typically).
+      #
+      # If +:log+ is given, then the envelope will be converted to a
+      # logarithmic envelope ranging from +:log+ decibels (e.g. `-30`) to 1.0.
+      #
+      # If the +:auto_release+ parameter is a number of seconds (defaults to 2x
+      # attack + decay, or 0.25, whichever is longer; set it to false to
+      # disable), then the envelope will release automatically after that time.
+      def adsr(attack, decay, sustain, release, log: nil, auto_release: nil, filter_freq: 10000)
+        if auto_release.nil?
+          auto_release = 2.0 * (attack + decay)
+          auto_release = 0.1 if auto_release < 0.1
+        end
+
+        env = MB::Sound::ADSREnvelope.new(
+          attack_time: attack,
+          decay_time: decay,
+          sustain_level: sustain,
+          release_time: release,
+          sample_rate: self.sample_rate,
+          filter_freq: filter_freq
+        )
+
+        env.trigger(1.0, auto_release: auto_release)
+
+        # TODO: this log parameter still doesn't seem like the right interface
+        env = env.db(log) if log
+
+        self * env
       end
 
       # Applies the given filter (creating the filter if given a filter type)
