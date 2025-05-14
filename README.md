@@ -73,6 +73,9 @@ play 1000.hz.sine.noise.at(-30.db).filter(7000.hz.highpass(quality: 10)).filter(
 
 # Heavily distorted synth kick
 play (2.5.hz.ramp.at(1.85) ** 13).filter(10.hz.highpass).softclip(0.1, 0.6).filter(cutoff: 2.5.hz.ramp.at(1..0) ** 10 * 0.2.hz.sine.at(120..300) + 40, quality: 14).filter(40.hz.highpass).softclip.forever
+
+# Thick bass
+play (((42.5.hz.sine + 85.hz.triangle + 42.5.hz.saw) * adsr(0.01, 0.1, 0.5, 0.1).db(-30)).filter(:lowpass, cutoff: adsr(0.01, 0.1, 0.5, 0.1).db(-30) * 1850 + 85, quality: 3) * 8.db).softclip(0.1, 1)
 ```
 
 ## Examples
