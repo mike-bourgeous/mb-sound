@@ -27,15 +27,6 @@ module MB
       # If +:double+ is true, then double-precision buffers are used.
       # Otherwise the method will create single-precision buffers.
       def setup_buffer(length:, complex: false, temp: false, double: false)
-        # TODO: is this trying too hard to avoid a few conditionals by using
-        # too many conditionals?
-        return unless !defined?(@buf) || @buf.nil? ||
-          !defined?(@buflen) || @buflen != length ||
-          !defined?(@bufcomplex) || @bufcomplex != complex ||
-          !defined?(@buftemp) || @buftemp != temp ||
-          !defined?(@bufdouble) || @bufdouble != double ||
-          (temp && (!defined?(@tmpbuf) || @tmpbuf.nil?))
-
         @buflen = length
         @bufcomplex = complex
         @buftemp = temp
@@ -58,6 +49,22 @@ module MB
         nil
       end
 
+      # Promotes the buffer from real to complex if +:complex+ is true, or from
+      # single- to double-precision if +:double+ is true.  Adds a temporary
+      # buffer if +:temp+ is true.  Grows the buffer to at least +:length+
+      # samples.  Does not demote the buffer or remove a temporary buffer.
+      def promote_buffer(length: nil, complex: false, double: false, temp: false)
+        length ||= @buflen
+        length = @buflen if @buflen > length
+
+        setup_buffer(
+          length: [@buflen, length].compact.max,
+          complex: @bufcomplex || complex,
+          double: @bufdouble || double,
+          temp: @buftemp || temp
+        )
+      end
+
       # Updates the buffer type and length based on the given example buffer,
       # only promoting types and growing -- never demoting or shrinking.  Call
       # #setup_buffer first.
@@ -66,29 +73,27 @@ module MB
       # implementations that want to maintain a buffer to hold whatever data
       # type comes in from upstream sources.
       #
-      # The +:size+ parameter allows specifying a different minimum size when
+      # The +:length+ parameter allows specifying a different minimum size when
       # +:grow+ is true, in case the +example_buf+ has the type to use for the
       # buffer but not the size.
+      #
+      # The +:complex+ and +:double+ parameters allow promotion to complex
+      # and/or double even if the given buffer is float or real.
       #
       # If +:grow+ is false, then the buffer will not grow based on the example
       # buffer length -- only types will be promoted.
       #
       # See #setup_buffer.
-      def expand_buffer(example_buf, size: nil, grow: true)
+      def expand_buffer(example_buf, length: nil, complex: @bufcomplex, double: @bufdouble, grow: true)
         raise "BUG: Call #setup_buffer before calling #expand_buffer" unless defined?(@bufcomplex)
 
-        # Nothing to do if we are already at the highest type (double complex).
-        return if defined?(@bufcomplex) && @bufcomplex && @bufdouble
-
-        complex = @bufcomplex || example_buf.is_a?(Numo::SComplex) || example_buf.is_a?(Numo::DComplex)
-        double = @bufdouble || example_buf.is_a?(Numo::DFloat) || example_buf.is_a?(Numo::DComplex) ||
+        complex ||= example_buf.is_a?(Numo::SComplex) || example_buf.is_a?(Numo::DComplex)
+        double ||= example_buf.is_a?(Numo::DFloat) || example_buf.is_a?(Numo::DComplex) ||
           example_buf.is_a?(Numo::Int32) || example_buf.is_a?(Numo::Int64)
 
-        length = @buflen
-        size ||= example_buf.length
-        length = size if grow && size > @buflen
+        new_length = MB::M.max(length || example_buf.length, @buflen)
 
-        setup_buffer(length: length, complex: complex, temp: @buftemp, double: double)
+        promote_buffer(length: grow ? new_length : nil, complex: complex, double: double)
       end
 
       # Creates or converts the given buffer to the current type and length and
@@ -110,8 +115,8 @@ module MB
           # Buffer is too long; truncate it
           b = b[0...@buflen]
         else
-          # Buffer needs no modification (this could happen for the primary
-          # buffer if temp is changed from false to true)
+          # Buffer needs no modification (e.g. this could happen for the
+          # primary buffer if temp is changed from false to true)
           b
         end
       end

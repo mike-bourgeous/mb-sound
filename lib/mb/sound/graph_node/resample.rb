@@ -123,7 +123,7 @@ module MB
             return nil if count == 0
           end
 
-          expand_buffer(data[0..0], size: count * 2)
+          promote_buffer(length: count * 2)
 
           # TODO: reuse the existing buffer instead of regenerating a linspace
           # every time, or maybe keep a buffer for each possible required size

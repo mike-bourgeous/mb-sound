@@ -12,6 +12,10 @@ RSpec.describe(MB::Sound::BufferHelper, :aggregate_failures) do
       def expand_buffer(*a, **ka)
         super
       end
+
+      def promote_buffer(*a, **ka)
+        super
+      end
     end
 
     c.new
@@ -175,7 +179,7 @@ RSpec.describe(MB::Sound::BufferHelper, :aggregate_failures) do
         expect(buf).to be_a(Numo::SFloat)
         bufhelper.expand_buffer(Numo::DComplex[1,2,3,4,5,6])
         bufhelper.expand_buffer(Numo::DFloat[1,2,3,4,5,6,7])
-        expect(buf).to be_a(Numo::DComplex).and eq(Numo::DComplex[1,2,3,4,5,-6])
+        expect(buf).to be_a(Numo::DComplex).and eq(Numo::DComplex[1,2,3,4,5,-6,0])
       end
 
       it 'does not reduce length' do
@@ -194,12 +198,30 @@ RSpec.describe(MB::Sound::BufferHelper, :aggregate_failures) do
         expect(buf).to be_a(Numo::DComplex).and eq(Numo::DComplex[1,2,3,4,5,-6,0])
       end
 
-      it 'accepts a size override' do
+      it 'grows the buffer even if the type is already Complex Double' do
+        bufhelper.expand_buffer(Numo::DComplex[])
+        expect(buf).to be_a(Numo::DComplex)
+
+        bufhelper.expand_buffer(Numo::SFloat.zeros(123))
+        expect(buf.length).to eq(123)
+      end
+
+      it 'accepts a length override' do
         expect(buf.length).not_to eq(17)
-        bufhelper.expand_buffer(Numo::DComplex[], size: 17)
+        bufhelper.expand_buffer(Numo::DComplex.zeros(200), length: 17)
         expect(buf.length).to eq(17)
         expect(buf).to be_a(Numo::DComplex)
         expect(buf[0]).to eq(1)
+      end
+
+      it 'accepts a complex value override' do
+        bufhelper.expand_buffer(Numo::SFloat[], complex: true)
+        expect(buf).to be_a(Numo::SComplex)
+      end
+
+      it 'accepts a double precision override' do
+        bufhelper.expand_buffer(Numo::SFloat[], double: true)
+        expect(buf).to be_a(Numo::DFloat)
       end
     end
 
@@ -231,9 +253,85 @@ RSpec.describe(MB::Sound::BufferHelper, :aggregate_failures) do
         it_behaves_like :expand_buffer
       end
 
-      it 'does not create a temporary buffer' do
+      it 'creates a temporary buffer' do
         bufhelper.expand_buffer(Numo::DComplex[1,2,3,4,5,6,7,8,9])
         expect(bufhelper.buf).to be_a(Numo::DComplex)
+        expect(bufhelper.tmpbuf).to be_a(Numo::DComplex)
+      end
+    end
+  end
+
+  describe '#promote_buffer' do
+    before do
+      bufhelper.setup_buffer(length: 6, temp: temp, complex: false, double: false)
+      bufhelper.buf[] = Numo::SFloat[1, 2, 3, 4, 5, -6]
+      bufhelper.tmpbuf[] = bufhelper.buf if temp
+    end
+
+    shared_examples_for :promote_buffer do
+      it 'can promote to double' do
+        bufhelper.promote_buffer(double: true)
+        expect(buf).to be_a(Numo::DFloat)
+      end
+
+      it 'can promote to complex' do
+        bufhelper.promote_buffer(complex: true)
+        expect(buf).to be_a(Numo::SComplex)
+      end
+
+      it 'can promote to complex double' do
+        bufhelper.promote_buffer(complex: true, double: true)
+        expect(buf).to be_a(Numo::DComplex)
+      end
+
+      it 'can grow the buffer' do
+        bufhelper.promote_buffer(length: 123)
+        expect(buf.length).to eq(123)
+      end
+
+      it 'cannot shrink the buffer' do
+        expect { bufhelper.promote_buffer(length: 1) }.not_to change { buf.length }
+      end
+    end
+
+    context 'when :temp is false' do
+      let(:temp) { false }
+
+      it 'can add a temporary buffer if requested' do
+        expect(bufhelper.tmpbuf).to eq(nil)
+        bufhelper.promote_buffer(temp: true)
+        expect(bufhelper.tmpbuf).to be_a(Numo::SFloat)
+      end
+
+      it 'does not add a temporary buffer by default' do
+        bufhelper.promote_buffer
+        expect(bufhelper.tmpbuf).to eq(nil)
+      end
+
+      context 'working with @buf' do
+        def buf; bufhelper.buf; end
+        it_behaves_like :promote_buffer
+      end
+    end
+
+    context 'when :temp is true' do
+      let(:temp) { true }
+
+      context 'working with @buf' do
+        def buf; bufhelper.buf; end
+        it_behaves_like :promote_buffer
+      end
+
+      context 'working with @tmpbuf' do
+        def buf; bufhelper.tmpbuf; end
+        it_behaves_like :promote_buffer
+      end
+
+      it 'preserves and promotes the temporary buffer' do
+        expect(bufhelper.tmpbuf).to be_a(Numo::SFloat)
+        bufhelper.promote_buffer(complex: true)
+        expect(bufhelper.tmpbuf).to be_a(Numo::SComplex)
+        bufhelper.promote_buffer(double: true)
         expect(bufhelper.tmpbuf).to be_a(Numo::DComplex)
       end
     end
