@@ -250,7 +250,9 @@ module MB
           setup_buffer(length: count)
 
           maybe_idx = @buf.inplace.map_with_index { |_v, idx|
-            sample_one_c(filter: filter) || break idx
+            v = sample_one_c(filter: filter)
+            break idx unless v
+            v
           }
 
           if maybe_idx.is_a?(Integer)
@@ -295,7 +297,9 @@ module MB
           setup_buffer(length: count)
 
           maybe_idx = @buf.inplace.map_with_index { |_v, idx|
-            sample_ruby(filter: filter) || break idx
+            v = sample_ruby(filter: filter)
+            break idx unless v
+            v
           }
 
           if maybe_idx.is_a?(Integer)
