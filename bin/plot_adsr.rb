@@ -30,7 +30,7 @@ env = MB::Sound::ADSREnvelope.new(
   decay_time: ARGV[1].to_f,
   sustain_level: ARGV[2].to_f,
   release_time: ARGV[3].to_f,
-  rate: 48000,
+  sample_rate: 48000,
   filter_freq: filter || 1000
 )
 

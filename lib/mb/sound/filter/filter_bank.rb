@@ -63,6 +63,10 @@ module MB
         # The raw array of filters (do not modify).
         attr_reader :filters
 
+        # The sample rate of all of the filters (the constructor ensures all
+        # filters' rates match).
+        attr_reader :sample_rate
+
         # Initializes a filter bank with +size+ filters.  Pass a block that
         # constructs the desired filter.  The block will be yielded to with the
         # index of the filter (so a different filter could be created for each
@@ -73,6 +77,13 @@ module MB
           @size = size
           @filters = Array.new(size) do |idx|
             yield idx
+          end
+
+          @sample_rate = @filters.first.sample_rate
+          @filters.each_with_index do |f, idx|
+            if f.sample_rate != @sample_rate
+              raise "Filter #{f} at index #{idx} has sample rate #{f.sample_rate.inspect}; expected #{@sample_rate.inspect}"
+            end
           end
 
           @last_result = Numo::SFloat.zeros(size)

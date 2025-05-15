@@ -5,6 +5,9 @@ require 'bundler/setup'
 
 require 'mb-sound'
 require 'mb-sound-jackffi'
+require 'mb-util'
+
+MB::U.sigquit_backtrace
 
 jack = MB::Sound::JackFFI[]
 manager = MB::Sound::MIDI::Manager.new(jack: jack, connect: ARGV[0] || :physical, channel: 0)

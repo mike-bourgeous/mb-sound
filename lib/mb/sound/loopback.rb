@@ -3,16 +3,16 @@ module MB
     # Acts as both an input stream and an output stream.  Whatever is written
     # can later be read.  Data must be written in #buffer_size chunks.
     class Loopback
-      attr_reader :buffer_size, :rate, :channels
+      attr_reader :buffer_size, :sample_rate, :channels
 
       # Initializes a loopback I/O.  A block may be given to process each
       # buffer as it is read.
-      def initialize(channels:, rate: 48000, buffer_size: 800, &process)
+      def initialize(channels:, sample_rate: 48000, buffer_size: 800, &process)
         raise 'Channels must be an int >= 1' unless channels.is_a?(Integer) && channels >= 1
 
         @buffer_size = buffer_size
         @channels = channels
-        @rate = rate
+        @sample_rate = sample_rate
         @zero = [Numo::SFloat.zeros(@buffer_size).freeze] * @channels
         @buf = []
 

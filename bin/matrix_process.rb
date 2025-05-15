@@ -130,7 +130,7 @@ if input_stream.info[:channels] != p.input_channels
 end
 
 # TODO: Somehow pass channel layout to FFMPEG
-output_stream = MB::Sound::FFMPEGOutput.new(out_file, rate: input_stream.rate, channels: p.output_channels)
+output_stream = MB::Sound::FFMPEGOutput.new(out_file, sample_rate: input_stream.sample_rate, channels: p.output_channels)
 output = p.process(input)
 output = output.map { |v| v.respond_to?(:real) ? v.real : v }
 output = MB::Sound.normalize_max(output, -0.1.db)

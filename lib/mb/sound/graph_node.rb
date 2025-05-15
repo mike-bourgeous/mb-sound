@@ -83,30 +83,31 @@ module MB
         end
       end
 
-      # Creates a mixer that adds this mixer's output to +other+.  Part of a
-      # DSL experiment for building up a signal graph.
+      # Creates a mixer that adds this node's #sample output to +other+ (a
+      # numeric constant or another GraphNode).
       def +(other)
         fixup_tones(false, self, other)
-        Mixer.new([self, other])
+        Mixer.new([self, other], sample_rate: self.sample_rate)
       end
 
-      # Creates a mixer that subtracts +other+ from this mixer's output.  Part
-      # of a DSL experiment for building up a signal graph.
+      # Creates a mixer that subtracts +other+ (a numeric constant or another
+      # GraphNode) from this node's #sample output.
       def -(other)
         fixup_tones(false, self, other)
-        Mixer.new([self, [other, -1]])
+        Mixer.new([self, [other, -1]], sample_rate: self.sample_rate)
       end
 
-      # Creates a multiplier that multiplies +other+ by this mixer's output.
-      # Part of a DSL experiment for building up a signal graph.
+      # Creates a multiplier that multiplies +other+ (a numeric constant or
+      # another GraphNode) by this node's #sample output.
       def *(other)
         fixup_tones(false, self)
         fixup_tones(true, other)
-        Multiplier.new([self, other])
+        Multiplier.new([self, other], sample_rate: self.sample_rate)
       end
 
       # Divides incoming data by +other+, which may be a Numeric or another
-      # signal graph.
+      # signal graph.  For signal graphs, each numerator value is divided
+      # by the corresponding denominator value at the same index.
       def /(other)
         if other.respond_to?(:sample)
           self.proc { |v|
@@ -206,7 +207,7 @@ module MB
         self.proc { |v| MB::FastSound.narray_log2(v) }
       end
 
-      # Appends a node that calculates the base two logarithm of values passing
+      # Appends a node that calculates the base ten logarithm of values passing
       # through.
       def log10
         self.proc { |v| MB::FastSound.narray_log10(v) }
@@ -218,8 +219,9 @@ module MB
       # (controllable with the +env_range+ parameter).
       def db(env_range = nil)
         if self.is_a?(MB::Sound::ADSREnvelope)
-          # TODO: Do this with polymorphism?
-          # TODO: This interface for converting an envelope to logarithmic doesn't feel quite right
+          # TODO: Do this with polymorphism? (move to ADSREnvelope)
+          # TODO: This interface for converting an envelope to logarithmic doesn't feel quite right; it shouldn't be called db.
+          # TODO: Maybe create an exponential envelope?  Or allow shaping individual phases within the ADSREnvelope?
           env_range ||= 80
           env_range = env_range.abs
           env_min = (-env_range).db
@@ -236,14 +238,14 @@ module MB
       # Wraps the numeric in a MB::Sound::GraphNode::Constant so that numeric values can
       # be listed first in signal graph arithmetic operations.
       def coerce(numeric)
-        [numeric.constant, self]
+        [numeric.constant(sample_rate: self.sample_rate), self]
       end
 
       # Adds a Ruby block to a processing chain.  The block will be called with
       # a Numo::NArray containing samples to be modified.  Note that this can
       # be very slow compared to the built-in algorithms implemented in C.
       def proc(*sources, &block)
-        ProcNode.new(self, sources, &block)
+        ProcNode.new(self, sources, sample_rate: self.sample_rate, &block)
       end
 
       # If this node (or its inputs) have a finite length of audio data
@@ -253,6 +255,72 @@ module MB
       def and_then(*sources)
         raise 'No sources were given' if sources.empty?
         MB::Sound::GraphNode::NodeSequence.new([self, *sources])
+      end
+
+      # Calls #sample with +count+ requested samples +times+ times,
+      # concatenating the results into a single array.
+      def multi_sample(count, times)
+        raise "Count must be a positive Integer (got #{count.inspect})" unless count.is_a?(Integer) && count > 0
+        raise "Times must be a positive Integer (got #{count.inspect})" unless times.is_a?(Integer) && times > 0
+
+        ret = nil
+        endidx = 0
+
+        for i in 0...times
+          idx = endidx
+
+          d = sample(count)
+          break if d.nil? || d.empty?
+
+          ret ||= d.class.zeros(count * times)
+
+          endidx = idx + d.length
+          ret[idx...endidx] = d
+        end
+
+        ret[0...endidx] if ret
+      end
+
+      # Adds a resampling filter to the graph with the given new sample rate.
+      # All nodes added after the resampling node must use the new sample rate.
+      #
+      # The resampling +:mode+ must be one of the supported modes listed in
+      # MB::Sound::GraphNode::Resample::MODES (e.g. :libsamplerate_best).
+      def resample(sample_rate, mode: MB::Sound::GraphNode::Resample::DEFAULT_MODE)
+        MB::Sound::GraphNode::Resample.new(upstream: self, sample_rate: sample_rate, mode: mode)
+      end
+
+      # Multiplies this envelope by an ADSR envelope with the given +attack+,
+      # +decay+, +sustain+, and +release+ parameters, with times in seconds,
+      # and +sustain+ ranging from 0 to 1 (typically).
+      #
+      # If +:log+ is given, then the envelope will be converted to a
+      # logarithmic envelope ranging from +:log+ decibels (e.g. `-30`) to 1.0.
+      #
+      # If the +:auto_release+ parameter is a number of seconds (defaults to 2x
+      # attack + decay, or 0.25, whichever is longer; set it to false to
+      # disable), then the envelope will release automatically after that time.
+      def adsr(attack, decay, sustain, release, log: nil, auto_release: nil, filter_freq: 10000)
+        if auto_release.nil?
+          auto_release = 2.0 * (attack + decay)
+          auto_release = 0.1 if auto_release < 0.1
+        end
+
+        env = MB::Sound::ADSREnvelope.new(
+          attack_time: attack,
+          decay_time: decay,
+          sustain_level: sustain,
+          release_time: release,
+          sample_rate: self.sample_rate,
+          filter_freq: filter_freq
+        )
+
+        env.trigger(1.0, auto_release: auto_release)
+
+        # TODO: this log parameter still doesn't seem like the right interface
+        env = env.db(log) if log
+
+        self * env
       end
 
       # Applies the given filter (creating the filter if given a filter type)
@@ -272,10 +340,22 @@ module MB
       #
       #     # High-pass filter controlled by envelopes
       #     MB::Sound.play 500.hz.ramp.filter(:highpass, frequency: adsr() * 1000 + 100, quality: adsr() * -5 + 6)
-      def filter(filter_or_type = :lowpass, cutoff: nil, quality: nil, gain: nil, in_place: true, rate: 48000)
+      def filter(filter_or_type = :lowpass, cutoff: nil, quality: nil, gain: nil, in_place: true)
         f = filter_or_type
         f = f.hz if f.is_a?(Numeric)
         f = f.lowpass if f.is_a?(Tone)
+
+        if f.respond_to?(:sample_rate)
+          if f.sample_rate != self.sample_rate
+            if f.respond_to?(:sample_rate=)
+              f.sample_rate = self.sample_rate
+            elsif f.respond_to?(:at_rate)
+              f = f.at_rate(self.sample_rate)
+            else
+              warn "Filter #{f} sample rate is #{f.sample_rate} while node #{self} sample rate is #{self.sample_rate}"
+            end
+          end
+        end
 
         case
         when f.is_a?(Symbol)
@@ -283,7 +363,7 @@ module MB
 
           quality = quality || 0.5 ** 0.5
           # TODO: Support graph node sources for filter gain
-          f = MB::Sound::Filter::Cookbook.new(filter_or_type, rate, 1, quality: 1, db_gain: gain&.to_db)
+          f = MB::Sound::Filter::Cookbook.new(filter_or_type, sample_rate, 1, quality: 1, db_gain: gain&.to_db)
           MB::Sound::Filter::Cookbook::CookbookWrapper.new(filter: f, audio: self, cutoff: cutoff, quality: quality)
 
         when f.respond_to?(:wrap)
@@ -311,8 +391,8 @@ module MB
       # and produce a Complex-valued analytic signal.
       #
       # See MB::Sound::Filter::HilbertIIR.
-      def hilbert_iir(rate: 48000)
-        filter(MB::Sound::Filter::HilbertIIR.new(rate: rate))
+      def hilbert_iir(sample_rate: 48000)
+        filter(MB::Sound::Filter::HilbertIIR.new(sample_rate: sample_rate))
       end
 
       # Adds a MB::Sound::Filter::Smoothstep filter to the chain, smoothing
@@ -320,8 +400,8 @@ module MB
       #
       # TODO: instead of reacting to step changes in the input, use an FIR
       # filter whose step response is the smoothstep function.
-      def smooth(samples: nil, seconds: nil, rate: 48000)
-        filter(MB::Sound::Filter::Smoothstep.new(rate: rate, samples: samples, seconds: seconds))
+      def smooth(samples: nil, seconds: nil, sample_rate: 48000)
+        filter(MB::Sound::Filter::Smoothstep.new(sample_rate: sample_rate, samples: samples, seconds: seconds))
       end
 
       # Adds a MB::Sound::Filter::Delay to the signal chain with a delay of the
@@ -329,15 +409,15 @@ module MB
       #
       # See MB::Sound::Filter::Delay#initialize for a description of the
       # +:smoothing+ parameter.
-      def delay(seconds: nil, samples: nil, rate: 48000, smoothing: true, max_delay: 1.0)
+      def delay(seconds: nil, samples: nil, sample_rate: 48000, smoothing: true, max_delay: 1.0)
         if samples
           samples = samples.to_f if samples.is_a?(Numeric)
-          seconds = samples / rate
+          seconds = samples / sample_rate
         else
           seconds = seconds.to_f if seconds.is_a?(Numeric)
         end
 
-        filter(MB::Sound::Filter::Delay.new(delay: seconds, rate: rate, smoothing: smoothing, buffer_size: rate * max_delay))
+        filter(MB::Sound::Filter::Delay.new(delay: seconds, sample_rate: sample_rate, smoothing: smoothing, buffer_size: sample_rate.ceil * max_delay))
       end
 
       # Adds a multi-tap delay with the given delay sources, returning an Array
@@ -347,11 +427,11 @@ module MB
       # To smooth delay values, use #clip_rate, #smooth, #filter, or similar
       # methods (unlike the filter used by #delay, the
       # MB::Sound::GraphNode::MultitapDelay does not do built-in smoothing).
-      def multitap(*delays, rate: 48000, name: nil, initial_buffer_seconds: 1)
+      def multitap(*delays, sample_rate: 48000, name: nil, initial_buffer_seconds: 1)
         MB::Sound::GraphNode::MultitapDelay.new(
           self,
           *delays,
-          rate: rate,
+          sample_rate: sample_rate,
           initial_buffer_seconds: initial_buffer_seconds
         ).named(name).taps
       end
@@ -376,20 +456,32 @@ module MB
       # also #smooth and #filter).
       #
       # Uses MB::Sound::Filter::LinearFollower.
-      def clip_rate(max_rise, max_fall = nil, reset: nil, rate: 48000)
+      def clip_rate(max_rise, max_fall = nil, reset: nil, sample_rate: 48000)
         max_fall ||= -max_rise
         max_rise ||= -max_fall
-        f = MB::Sound::Filter::LinearFollower.new(rate: rate, max_rise: max_rise, max_fall: max_fall)
+        f = MB::Sound::Filter::LinearFollower.new(sample_rate: sample_rate, max_rise: max_rise, max_fall: max_fall)
         f.reset(reset) if reset
         self.filter(f)
       end
 
-      # Wraps this arithmetic signal graph in a softclip effect.
+      # Adds a soft-clipper to the graph.  Values greater than +threshold+ will
+      # be smoothly compressed downward, with a value of infinity producing an
+      # output of +limit+.
       def softclip(threshold = 0.25, limit = 1.0)
         MB::Sound::Filter::SampleWrapper.new(
           MB::Sound::SoftestClip.new(threshold: threshold, limit: limit),
           self
         )
+      end
+
+      # Adds a quantizer to the node graph.  Values will be rounded to the
+      # nearest multiple of +increment+.  To quantize to a given number of
+      # bits, use e.g. `5.bits`.  An +increment+ of zero means no quantization.
+      #
+      # The +increment+ may be another GraphNode to apply a time-varying
+      # quantization amount.
+      def quantize(increment)
+        MB::Sound::GraphNode::Quantize.new(upstream: self, increment: increment)
       end
 
       # Calls the given block with each sample buffer whenever #sample is
@@ -606,6 +698,7 @@ module MB
   end
 end
 
+require_relative 'graph_node/arithmetic_node_helper'
 require_relative 'graph_node/constant'
 require_relative 'graph_node/input_channel_split'
 require_relative 'graph_node/io_sample_mixin'
@@ -617,3 +710,5 @@ require_relative 'graph_node/tee'
 require_relative 'graph_node/multitap_delay'
 require_relative 'graph_node/complex_node'
 require_relative 'graph_node/buffer_adapter'
+require_relative 'graph_node/resample'
+require_relative 'graph_node/quantize'

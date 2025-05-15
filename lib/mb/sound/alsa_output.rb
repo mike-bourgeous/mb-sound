@@ -19,16 +19,16 @@ module MB
       #
       # The OUTPUT_DEVICE or DEVICE environment variable may be used to
       # override any device specified by the calling code.
-      def initialize(device:, rate:, channels:, buffer_size: nil)
+      def initialize(device:, sample_rate:, channels:, buffer_size: nil)
         @device = ENV['OUTPUT_DEVICE'] || ENV['DEVICE'] || device
-        @rate = rate.to_i
+        @sample_rate = sample_rate.to_f
 
         super(
           [
             'aplay',
             '-t', 'raw',
             '-f', 'FLOAT_LE',
-            '-r', "#{@rate}",
+            '-r', "#{@sample_rate}",
             '-c', "#{channels.to_i}",
             ->() { "--buffer-size=#{@buffer_size.to_i}" },
             '-D', "#{@device}",
@@ -36,7 +36,7 @@ module MB
           ],
           channels,
           buffer_size,
-          rate: rate
+          sample_rate: @sample_rate
         )
       end
     end

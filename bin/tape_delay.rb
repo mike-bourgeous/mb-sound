@@ -62,7 +62,7 @@ end
 output = MB::Sound.output
 bufsize = output.buffer_size
 
-delay_samples = delay * output.rate
+delay_samples = delay * output.sample_rate
 delay_samples = 0 if delay_samples < 0
 
 if ENV['PITCH'] == '1'
@@ -76,7 +76,7 @@ wet = ENV['WET']&.to_f || 1
 drive = ENV['DRIVE']&.to_f || 1
 smoothing = ENV['SMOOTHING']&.to_f || 2
 
-puts MB::U.highlight(
+puts MB::U.highlight({
   dry: dry,
   wet: wet,
   drive: drive,
@@ -85,10 +85,10 @@ puts MB::U.highlight(
   feedback: feedback,
   extra_time: extra,
   input: input.graph_node_name,
-  rate: output.rate,
+  sample_rate: output.sample_rate,
   buffer: bufsize,
   internal_buffer: internal_bufsize,
-)
+})
 
 # TODO: Make it easy to replicate a signal graph for each of N channels
 # TODO: stereo+, ping-pong

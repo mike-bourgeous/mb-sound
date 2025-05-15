@@ -48,7 +48,7 @@ AMP_TRANSITION = 4800
 
 filename = ARGV[0]
 raise "No or invalid output file given #{USAGE}" unless filename && File.directory?(File.dirname(filename))
-output = MB::Sound::FFMPEGOutput.new(filename, rate: RATE, channels: 2)
+output = MB::Sound::FFMPEGOutput.new(filename, sample_rate: RATE, channels: 2)
 
 freq = ARGV[1]&.to_f
 raise "No or invalid frequency given #{USAGE}" unless freq && freq > 0

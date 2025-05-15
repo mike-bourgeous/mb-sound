@@ -27,7 +27,7 @@ Gem::Specification.new do |spec|
   spec.executables   = spec.files.grep(%r{^bin/}) { |f| File.basename(f) }
   spec.require_paths = ["lib"]
 
-  spec.extensions = ['ext/mb/fast_sound/extconf.rb']
+  spec.extensions = ['ext/mb/fast_sound/extconf.rb', 'ext/mb/sound/fast_resample/extconf.rb']
 
   spec.add_runtime_dependency 'csv', '~> 3.3', '>= 3.3.3'
   spec.add_runtime_dependency 'psych', '~> 5.2.3'
@@ -40,8 +40,8 @@ Gem::Specification.new do |spec|
 
   spec.add_runtime_dependency 'midilib', '~> 4.0.0'
 
-  spec.add_runtime_dependency 'mb-math', '>= 0.2.2.usegit'
-  spec.add_runtime_dependency 'mb-util', '>= 0.1.22.usegit'
+  spec.add_runtime_dependency 'mb-math', '>= 0.2.8.usegit'
+  spec.add_runtime_dependency 'mb-util', '>= 0.1.24.usegit'
 
   spec.add_development_dependency 'rake', '~> 13.0.1'
   spec.add_development_dependency 'bundler', '2.4.22'

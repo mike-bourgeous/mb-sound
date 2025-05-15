@@ -11,7 +11,7 @@ module MB
       attr_reader :buffer_size
 
       # The fake sample rate given to the constructor.
-      attr_reader :rate
+      attr_reader :sample_rate
 
       # The number of sample frames that have been written, independent of the
       # number of channels.
@@ -20,7 +20,7 @@ module MB
       # Whether this null output will sleep to simulate the normal playback
       # speed of audio.  If false, #write will return immediately.  If true,
       # #write will sleep for the normal duration of the audio buffer given,
-      # based on sample #rate.
+      # based on sample #sample_rate.
       attr_reader :sleep
 
       # Whether this output should ask writers to use exactly the specified
@@ -29,16 +29,16 @@ module MB
       alias strict_buffer_size? strict_buffer_size
 
       # Initializes a null output stream for the given number of +:channels+.
-      # The sample +:rate+ controls sleep duration.  The +:buffer_size+ is
+      # The +:sample_rate+ controls sleep duration.  The +:buffer_size+ is
       # stored for compatibility, but otherwise ignored.
       #
       # if +:sleep+ is true (the default), then #write will simulate a normal
       # playback speed by sleeping for the duration of the data given,
       # calculated using the sample rate.
-      def initialize(channels:, rate: 48000, buffer_size: 800, sleep: true, strict_buffer_size: false)
+      def initialize(channels:, sample_rate: 48000, buffer_size: 800, sleep: true, strict_buffer_size: false)
         raise 'Channels must be positive' if channels < 1
         @channels = channels
-        @rate = rate
+        @sample_rate = sample_rate.to_f
         @buffer_size = buffer_size || 800
         @sleep = sleep
         @strict_buffer_size = strict_buffer_size
@@ -56,7 +56,7 @@ module MB
 
         # FIXME: This should sleep relative to the previous call to maintain a
         # rate, rather than sleeping for a fixed duration.
-        Kernel.sleep(data[0].length.to_f / @rate) if @sleep
+        Kernel.sleep(data[0].length.to_f / @sample_rate) if @sleep
       end
 
       # Closes the output, preventing future writing (for compatibility with

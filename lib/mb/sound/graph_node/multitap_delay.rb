@@ -1,3 +1,5 @@
+require 'forwardable'
+
 module MB
   module Sound
     module GraphNode
@@ -8,6 +10,8 @@ module MB
       class MultitapDelay
         # One output tap from the multitap delay.
         class DelayTap
+          extend Forwardable
+
           include GraphNode
 
           # Graph nodes or numeric values that feed into this delay tap for
@@ -17,13 +21,14 @@ module MB
           # The index of this tap in the parent MultitapDelay.
           attr_reader :index
 
+          def_delegators :@mtd, :sample_rate
+
           # Called by MultitapDelay to create an output node for each delay tap.
           #
           # +:mtd+ - The containing MultitapDelay object.
           # +:index+ - The index of this tap.
           # +:delay+ - The delay source for this tap.
-          # +:rate+ - The sample rate at which the node graph is running.
-          def initialize(mtd:, index:, delay_samples:, rate:)
+          def initialize(mtd:, index:, delay_samples:)
             @mtd = mtd
             @index = index
 
@@ -69,18 +74,18 @@ module MB
         attr_reader :graph_node_name
 
         # Sample rate used for converting delay times to delays in samples.
-        attr_reader :rate
+        attr_reader :sample_rate
 
         # Creates a MultitapDelay that samples audio from one +source+ graph
         # node and produces output tap nodes for each source +delay_in_seconds+
         # (Numeric or GraphNode).
-        def initialize(source, *delays_in_seconds, initial_buffer_seconds: 1, rate: 48000)
+        def initialize(source, *delays_in_seconds, initial_buffer_seconds: 1, sample_rate: 48000)
           raise 'Delay audio source must respond to :sample' unless source.respond_to?(:sample)
 
           @graph_node_name = nil
           @named = false
 
-          @rate = rate.to_f
+          @sample_rate = sample_rate.to_f
           @source = source
           @sources = [source].freeze
 
@@ -96,8 +101,7 @@ module MB
             DelayTap.new(
               mtd: self,
               index: idx,
-              delay_samples: d * @rate,
-              rate: @rate
+              delay_samples: d * @sample_rate
             )
           }
 
@@ -105,7 +109,7 @@ module MB
           @read_offset = 0 # Previous write offset, not delay read point
           @buf = Numo::SFloat[0]
           @audio_buf = nil
-          update_buf(Numo::SFloat, (initial_buffer_seconds * rate).ceil)
+          update_buf(Numo::SFloat, (initial_buffer_seconds * sample_rate).ceil)
         end
 
         # Sets the name of the overarching multi-tap delay node (kind of a

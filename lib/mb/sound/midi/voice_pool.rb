@@ -17,6 +17,9 @@ module MB
         # The pitch bend amount, in fractional semitones.
         attr_reader :bend
 
+        # The sample rate used by the voices in the pool.
+        attr_reader :sample_rate
+
         # Initializes an oscillator pool with the given array of oscillators.
         def initialize(manager, voices)
           @voices = voices
@@ -28,6 +31,12 @@ module MB
           @last = voices.last
           @bend = 0
           @released = {}
+
+          @sample_rate = nil
+          @voices.each do |v|
+            @sample_rate ||= v.sample_rate if v.respond_to?(:sample_rate)
+          end
+          raise 'No voices provided a sample rate' unless @sample_rate
 
           manager.on_note(&method(:midi_note))
           manager.on_cc_threshold(64, 64, 64, &method(:sustain))

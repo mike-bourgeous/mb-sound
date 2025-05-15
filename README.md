@@ -73,6 +73,9 @@ play 1000.hz.sine.noise.at(-30.db).filter(7000.hz.highpass(quality: 10)).filter(
 
 # Heavily distorted synth kick
 play (2.5.hz.ramp.at(1.85) ** 13).filter(10.hz.highpass).softclip(0.1, 0.6).filter(cutoff: 2.5.hz.ramp.at(1..0) ** 10 * 0.2.hz.sine.at(120..300) + 40, quality: 14).filter(40.hz.highpass).softclip.forever
+
+# Thick bass
+play (((42.5.hz.sine + 85.hz.triangle + 42.5.hz.saw) * adsr(0.01, 0.1, 0.5, 0.1).db(-30)).filter(:lowpass, cutoff: adsr(0.01, 0.1, 0.5, 0.1).db(-30) * 1850 + 85, quality: 3) * 8.db).softclip(0.1, 1)
 ```
 
 ## Examples
@@ -147,7 +150,7 @@ There are DSL methods for working with distances and wavelengths:
 # @duration=5.0,
 # @frequency=1.0,
 # @oscillator=nil,
-# @rate=48000,
+# @sample_rate=48000,
 # @wave_type=:sine,
 # @wavelength=343.0 meters>
 ```
@@ -231,7 +234,7 @@ play file_input('sounds/synth0.flac').filter(1500.hz.lowpass(quality: 8))
 data = read 'sounds/sine/sine_100_1s_mono.flac'
 # => [Numo::DFloat#shape=[48000]
 # [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1.19209e-07, ...]]
-play data, rate: 48000
+play data, sample_rate: 48000
 ```
 
 ### Plotting sounds
@@ -443,7 +446,8 @@ sudo apt-get install ffmpeg gnuplot-qt
 brew install ffmpeg gnuplot
 ```
 
-Then you'll want to install Ruby 2.7.2 or newer.
+Then you'll want to install Ruby 2.7.8 or newer (Ruby 3.4.3 or newer
+recommended).
 
 If you don't already have a recent version of Ruby installed, and a Ruby version
 manager of your choosing, I highly recommend using [RVM](https://rvm.io).  You
@@ -468,13 +472,14 @@ mkdir sound_code_series
 cd sound_code_series
 
 # Install Ruby
-# (disable-binary is needed on Ubuntu 20.04 to fix "/usr/bin/mkdir not found"
-# error in the binary package of 2.7.2)
-rvm install --disable-binary 2.7.2
+rvm install 3.4.3
 
 # Clone the repo
 git clone git@github.com:mike-bourgeous/mb-sound.git
 cd mb-sound
+
+# Install OS dependencies (Ubuntu/Debian)
+sudo apt install libsamplerate0-dev ffmpeg
 
 # Install Gem dependencies
 cd mb-sound

@@ -13,3 +13,4 @@
 /spec/examples.txt
 .gdb_history
 /lib/**/*.so
+.byebug_history

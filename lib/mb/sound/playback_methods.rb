@@ -13,7 +13,7 @@ module MB
       #
       # If the PLOT environment variable is set to '0', then plotting defaults
       # to false.  Otherwise, plotting defaults to true.
-      def play(file_tone_data, rate: 48000, gain: 1.0, plot: nil, graphical: false, spectrum: false, device: nil)
+      def play(file_tone_data, sample_rate: 48000, gain: 1.0, plot: nil, graphical: false, spectrum: false, device: nil)
         header = MB::U.wrap("\e[H\e[J\e[36mPlaying\e[0m #{playback_info(file_tone_data)}".lines.map(&:strip).join(' ') + "\n\n")
         puts header
 
@@ -30,15 +30,19 @@ module MB
           if file_tone_data.is_a?(Array) && !file_tone_data.empty? && file_tone_data.all?(GraphNode)
             bufsize = file_tone_data.map(&:graph_buffer_size).compact.min # nil is ok here
             output = MB::Sound.output(
-              rate: rate,
+              sample_rate: sample_rate,
               channels: [2, file_tone_data.length].max,
               plot: plot,
               device: device,
               buffer_size: bufsize
             )
 
+            nodes = file_tone_data.map { |d|
+              d.resample(sample_rate)
+            }
+
             loop do
-              buf = file_tone_data.map { |d| d.sample(output.buffer_size) }
+              buf = nodes.map { |d| d.sample(output.buffer_size) }
               break if buf.all? { |d| d.nil? || d.empty? }
 
               buf = buf.map { |d|
@@ -66,7 +70,7 @@ module MB
             # TODO: if this code needs to be modified much in the future, come up
             # with a shared way of chunking data that can work for all play,
             # write, and plot methods.  Maybe convert everything to signal nodes?
-            output = MB::Sound.output(rate: rate, channels: channels, plot: plot, device: device)
+            output = MB::Sound.output(sample_rate: sample_rate, channels: channels, plot: plot, device: device)
             buffer_size = output.buffer_size
             (0...data[0].length).step(buffer_size).each do |offset|
               output.write(data.map { |c|
@@ -75,16 +79,13 @@ module MB
             end
           end
 
-        when Tone
-          output = MB::Sound.output(rate: rate, plot: plot, device: device)
-          file_tone_data.write(output)
-
         when GraphNode
           bufsize = file_tone_data.graph_buffer_size # nil is ok here
-          output = MB::Sound.output(rate: rate, plot: plot, device: device, buffer_size: bufsize)
+          output = MB::Sound.output(sample_rate: sample_rate, plot: plot, device: device, buffer_size: bufsize)
+          node = file_tone_data.resample(sample_rate)
           loop do
             # TODO: Consolidate this sample+write loop with other similar or identical loops?
-            d = file_tone_data.sample(output.buffer_size)
+            d = node.sample(output.buffer_size)
             break if d.nil? || d.empty?
             d = MB::M.zpad(d, output.buffer_size) if d.length < output.buffer_size
             output.write([d] * output.channels)

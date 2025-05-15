@@ -10,9 +10,16 @@ module MB
       class Multiplier
         include GraphNode
         include BufferHelper
+        include ArithmeticNodeHelper
 
         # The constant value by which the output will be multiplied.
         attr_accessor :constant
+
+        # The graph sample rate (irrelevant for a multiplier).
+        #
+        # TODO: should there be a way of indicating a sample-rate-independent
+        # node type?
+        attr_reader :sample_rate
 
         # Creates a Multiplier with the given inputs, which must be either
         # Numeric values or objects that have a #sample method.  The
@@ -29,11 +36,12 @@ module MB
         # nil or an empty NArray from its #sample method will cause this #sample
         # method to return nil.  Otherwise, the #sample method only returns nil
         # when all multiplicands return nil or empty.
-        def initialize(*multiplicands, stop_early: true)
+        def initialize(*multiplicands, stop_early: true, sample_rate: nil)
           @constant = 1
           @multiplicands = {}
+          @sample_rate = sample_rate&.to_f
 
-          @complex = false
+          setup_buffer(length: 1024)
 
           @stop_early = stop_early
 
@@ -58,7 +66,18 @@ module MB
             end
           end
 
-          @buf = nil
+          multiplicands.each_with_index do |m, idx|
+            if m.respond_to?(:sample_rate)
+              @sample_rate ||= m.sample_rate
+              if m.sample_rate != @sample_rate
+                raise "Multiplicand #{idx}/#{m} sample rate is #{m.sample_rate}; expected #{@sample_rate}"
+              end
+            end
+          end
+
+          unless @sample_rate
+            raise 'No sample rate given via constructor or multiplicands'
+          end
         end
 
         # Calls the #sample methods of all multiplicands, multiplies them
@@ -66,44 +85,16 @@ module MB
         #
         # If any multiplicand (or every multiplicand if stop_early was set to
         # false in the constructor) returns nil or an empty buffer, then this
-        # method will return nil.
+        # method will return nil.  Similarly if there is a short read, if
+        # stop_early is true then all inputs will be truncated to the shortest
+        # buffer, or if stop_early is false than all short inputs will be
+        # zero-padded.
         def sample(count)
-          @complex ||= @constant.is_a?(Complex)
-
-          inputs = @multiplicands.map.with_index { |(m, _), idx|
-            v = m.sample(count)&.not_inplace!
-
-            # Continue instead of aborting if one input ends, so that all
-            # inputs have a chance to finish (see @stop_early condition below)
-            next if v.nil? || v.empty?
-
-            if v.length != count
-              raise "Input #{idx}/#{m} on #{self} gave us #{v.length} samples when we asked for #{count}"
+          arithmetic_sample(count, sources: @multiplicands, pad: 1, fill: @constant, stop_early: @stop_early) do |retbuf, inputs|
+            inputs.each.with_index do |(v, _), idx|
+              retbuf.inplace * v
             end
-
-            @complex ||= v.is_a?(Numo::SComplex) || v.is_a?(Numo::DComplex)
-            v = MB::M.opad(v, count) if v && v.length > 0 && v.length < count
-            v
-          }
-
-          inputs.compact!
-
-          if @stop_early
-            return nil if inputs.length != @multiplicands.length
-          else
-            return nil if inputs.empty? && !@multiplicands.empty?
           end
-
-          setup_buffer(length: count, complex: @complex)
-
-          @buf.fill(@constant)
-
-          inputs.each.with_index do |v, idx|
-            next if v.empty?
-            @buf.inplace * v
-          end
-
-          @buf.not_inplace!
         end
 
         # Returns the multiplicand at the given index by insertion order
@@ -156,7 +147,8 @@ module MB
           @multiplicands.keys + [@constant]
         end
 
-        # Adds the given +other+ sample source to this multiplier.
+        # Adds the given +other+ sample source to this multiplier, or
+        # multiplies the constant by +other+ if it is a Numeric.
         def *(other)
           if other.is_a?(Numeric)
             @constant *= other

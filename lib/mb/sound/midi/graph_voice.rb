@@ -1,3 +1,5 @@
+require 'forwardable'
+
 module MB
   module Sound
     module MIDI
@@ -7,6 +9,8 @@ module MB
       # added somewhere in its frequency input, has that constant set to the
       # triggering note frequency.
       class GraphVoice
+        extend Forwardable
+
         include GraphNode
 
         attr_reader :number
@@ -14,6 +18,8 @@ module MB
         # A Hash from CC index to an Array of Hashes describing a controllable
         # parameter.  Used by VoicePool.  See #on_cc.
         attr_reader :cc_map
+
+        def_delegators :@graph, :sample_rate
 
         # Initializes a voice based on the given signal graph.  The
         # +:update_rate+ is passed to internal Parameter objects for parameter

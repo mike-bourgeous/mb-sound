@@ -2,7 +2,7 @@ require 'fileutils'
 
 require 'simplecov'
 SimpleCov.start do
-  track_files("bin/*")
+  track_files("bin/**/*.rb")
   enable_coverage :branch
 end
 
@@ -11,6 +11,7 @@ require 'shellwords'
 ENV['RUBYOPT'] = "-r#{File.join(__dir__, 'simplecov_helper.rb')} #{ENV['RUBYOPT']}".strip
 
 require 'mb/util'
+require 'mb/m/rspec_matchers'
 require 'mb/sound'
 
 MB::U.sigquit_backtrace

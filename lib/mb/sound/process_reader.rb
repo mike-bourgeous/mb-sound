@@ -8,7 +8,7 @@ module MB
     class ProcessReader
       extend Forwardable
 
-      def_delegators :@input_stream, :rate, :channels, :buffer_size
+      def_delegators :@input_stream, :sample_rate, :channels, :buffer_size
 
       def initialize(input_stream, &process)
         raise 'Input stream must respond to #read' unless input_stream.respond_to?(:read)

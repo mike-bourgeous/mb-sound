@@ -17,6 +17,8 @@ module MB
 
         attr_reader :base_filter
 
+        def_delegators :@source, :sample_rate
+
         # Initializes a sample wrapper for the given +filter+ (which must
         # provide a #process method) and +source+ (which must provide a #sample
         # method).

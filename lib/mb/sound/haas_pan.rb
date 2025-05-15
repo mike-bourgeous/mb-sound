@@ -12,18 +12,18 @@ module MB
       attr_reader :delay_samples
 
       # Sample rate given to the constructor.
-      attr_reader :rate
+      attr_reader :sample_rate
 
       # Initializes a HaasPan with the given relative +:delay+ in seconds
-      # (positive delays right, negative delays left), and the given sample
-      # +:rate+.
-      def initialize(delay: 0, rate: 48000, smoothing: true)
-        @rate = rate.to_f
+      # (positive delays right, negative delays left), and the given
+      # +:sample_rate+.
+      def initialize(delay: 0, sample_rate: 48000, smoothing: true)
+        @sample_rate = sample_rate.to_f
 
         # Two separate delays are needed, because of delay smoothing.  Without
         # delay smoothing only one delay object could be used.
-        @left_delay = MB::Sound::Filter::Delay.new(delay: 0, rate: rate, smoothing: smoothing)
-        @right_delay = MB::Sound::Filter::Delay.new(delay: 0, rate: rate, smoothing: smoothing)
+        @left_delay = MB::Sound::Filter::Delay.new(delay: 0, sample_rate: sample_rate, smoothing: smoothing)
+        @right_delay = MB::Sound::Filter::Delay.new(delay: 0, sample_rate: sample_rate, smoothing: smoothing)
 
         self.delay = delay
 
@@ -44,7 +44,7 @@ module MB
       # negative values delay the left channel.
       def delay_samples=(samples)
         @delay_samples = samples.round
-        @delay = @delay_samples.to_f / @rate
+        @delay = @delay_samples.to_f / @sample_rate
 
         if @delay_samples >= 0
           @left_delay.delay_samples = 0
@@ -59,7 +59,7 @@ module MB
       # will be rounded to the nearest sample.  Positive values delay the right
       # channel, negative values delay the left channel.
       def delay=(seconds)
-        self.delay_samples = seconds * @rate
+        self.delay_samples = seconds * @sample_rate
       end
 
       # Returns the delay applied to the left channel, in seconds.

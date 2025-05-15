@@ -14,6 +14,9 @@ require 'forwardable'
 
 require 'mb-sound'
 require 'mb-sound-jackffi'
+require 'mb-util'
+
+MB::U.sigquit_backtrace
 
 puts "#{"\n" * MB::U.height}\e[H\e[J" # move to home, then clear everything
 

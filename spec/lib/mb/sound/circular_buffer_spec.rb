@@ -157,6 +157,42 @@ RSpec.describe(MB::Sound::CircularBuffer, :aggregate_failures) do
     end
   end
 
+  describe '#dup' do
+    it 'raises an error if the new size is too small' do
+      cbuf.write(Numo::SFloat[5,5,5])
+      expect { cbuf.dup(2) }.to raise_error(MB::Sound::CircularBuffer::BufferOverflow, /smaller/)
+    end
+
+    it 'can duplicate at exactly the right size' do
+      cbuf.write(Numo::SFloat[3,2,-1])
+      newbuf = cbuf.dup(3)
+      expect(newbuf.available).to eq(0)
+    end
+
+    it 'can create a larger buffer' do
+      cbuf.write(Numo::SFloat[4,5,6])
+      newbuf = cbuf.dup(32)
+      expect(newbuf.available).to eq(29)
+    end
+
+    it 'does not modify the source buffer' do
+      cbuf.write(Numo::SFloat[4,5,6])
+      newbuf = cbuf.dup(5)
+      expect(newbuf.available).to eq(2)
+      expect(cbuf.available).to eq(4)
+    end
+
+    it 'can duplicate an empty buffer' do
+      newbuf = cbuf.dup(1)
+      expect(newbuf.length).to eq(0)
+      expect(cbuf.length).to eq(0)
+    end
+
+    it 'raises an error if given a size of 0' do
+      expect { cbuf.dup(0) }.to raise_error(ArgumentError, /positive/)
+    end
+  end
+
   describe '#read' do
     it 'raises an error if reading from an empty buffer' do
       expect { cbuf.read(1) }.to raise_error(MB::Sound::CircularBuffer::BufferUnderflow)
@@ -176,6 +212,19 @@ RSpec.describe(MB::Sound::CircularBuffer, :aggregate_failures) do
     it 'raises an error if #reader has been called' do
       cbuf.reader
       expect { cbuf.read(0) }.to raise_error(MB::Sound::CircularBuffer::ReaderModeError)
+    end
+  end
+
+  describe '#peek' do
+    it 'returns the same data over and over until #read is called' do
+      cbuf.write(Numo::SFloat[3,2,1])
+
+      5.times do
+        expect(cbuf.peek(2)).to eq(Numo::SFloat[3,2])
+      end
+
+      expect(cbuf.read(1)).to eq(Numo::SFloat[3])
+      expect(cbuf.peek(2)).to eq(Numo::SFloat[2, 1])
     end
   end
 
