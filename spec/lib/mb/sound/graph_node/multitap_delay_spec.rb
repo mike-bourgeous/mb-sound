@@ -48,7 +48,7 @@ RSpec.describe(MB::Sound::GraphNode::MultitapDelay) do
   end
 
   it 'can delay by a variable amount' do
-    d = 0.constant(smoothing: false)
+    d = 0.constant(smoothing: false).at_rate(1)
     tap = 1.hz.square.forever.at(1).at_rate(2).multitap(d.clip_rate(1, sample_rate: 1), sample_rate: 1)[0]
 
     expect(tap.sample(6)).to eq(Numo::SFloat[1, -1, 1, -1, 1, -1])

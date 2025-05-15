@@ -349,6 +349,8 @@ module MB
           if f.sample_rate != self.sample_rate
             if f.respond_to?(:sample_rate=)
               f.sample_rate = self.sample_rate
+            elsif f.respond_to?(:at_rate)
+              f = f.at_rate(self.sample_rate)
             else
               warn "Filter #{f} sample rate is #{f.sample_rate} while node #{self} sample rate is #{self.sample_rate}"
             end

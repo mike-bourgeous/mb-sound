@@ -101,6 +101,7 @@ module MB
 
           self
         end
+        alias sample_rate= at_rate
 
         # Sets the duration for which this constant will run *from now*, or nil
         # to run forever.
