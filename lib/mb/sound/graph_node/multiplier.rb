@@ -10,6 +10,7 @@ module MB
       class Multiplier
         include GraphNode
         include BufferHelper
+        include ArithmeticNodeHelper
 
         # The constant value by which the output will be multiplied.
         attr_accessor :constant
@@ -40,10 +41,9 @@ module MB
           @multiplicands = {}
           @sample_rate = sample_rate&.to_f
 
-          @complex = false
+          setup_buffer(length: 1024)
 
           @stop_early = stop_early
-          @truncated = false
 
           if multiplicands.is_a?(Array) && multiplicands.length == 1 && multiplicands[0].is_a?(Array)
             multiplicands = multiplicands[0] 
@@ -78,8 +78,6 @@ module MB
           unless @sample_rate
             raise 'No sample rate given via constructor or multiplicands'
           end
-
-          @buf = nil
         end
 
         # Calls the #sample methods of all multiplicands, multiplies them
@@ -92,70 +90,11 @@ module MB
         # buffer, or if stop_early is false than all short inputs will be
         # zero-padded.
         def sample(count)
-          @complex ||= @constant.is_a?(Complex)
-
-          min_length = count
-          max_length = 0
-
-          inputs = @multiplicands.map.with_index { |(m, _), idx|
-            v = m.sample(count)&.not_inplace!
-
-            # Continue instead of aborting if one input ends, so that all
-            # inputs have a chance to finish (see @stop_early condition below)
-            next if v.nil? || v.empty?
-
-            min_length = v.length if v.length < min_length
-            max_length = v.length if v.length > max_length
-
-            # TODO: Use expand_buffer
-            @complex ||= v.is_a?(Numo::SComplex) || v.is_a?(Numo::DComplex)
-            @double ||= v.is_a?(Numo::DFloat) || v.is_a?(Numo::DComplex)
-
-            v
-          }
-
-          inputs.compact!
-
-          setup_buffer(length: count, complex: @complex, double: @double)
-
-          if @stop_early
-            return nil if inputs.length != @multiplicands.length
-
-            if @truncated && max_length > min_length
-              raise "Tried to truncate inputs more than once -- an upstream node gave a short read repeatedly"
+          arithmetic_sample(count, sources: @multiplicands, pad: 1, fill: @constant, stop_early: @stop_early) do |retbuf, inputs|
+            inputs.each.with_index do |(v, _), idx|
+              retbuf.inplace * v
             end
-
-            # Truncate if stop_early is true
-            inputs = inputs.map { |v|
-              if v.length > min_length
-                @truncated = true
-                v[0...min_length]
-              else
-                v
-              end
-            }
-
-            retbuf = @buf[0...min_length]
-          else
-            return nil if inputs.empty? && !@multiplicands.empty?
-
-            # Pad if stop_early is false (using opad because 1 is the
-            # multiplicative identity)
-            inputs = inputs.map { |v|
-              MB::M.opad(v, max_length)
-            }
-
-            retbuf = @buf[0...max_length]
           end
-
-          retbuf.fill(@constant)
-
-          inputs.each.with_index do |v, idx|
-            next if v.empty?
-            retbuf.inplace * v
-          end
-
-          retbuf.not_inplace!
         end
 
         # Returns the multiplicand at the given index by insertion order

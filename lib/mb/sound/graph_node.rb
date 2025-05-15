@@ -696,6 +696,7 @@ module MB
   end
 end
 
+require_relative 'graph_node/arithmetic_node_helper'
 require_relative 'graph_node/constant'
 require_relative 'graph_node/input_channel_split'
 require_relative 'graph_node/io_sample_mixin'

@@ -77,8 +77,10 @@ RSpec.describe(MB::Sound::GraphNode::Mixer) do
       a = ss.sample(100)
       b = ss.sample(100)
       c = ss.sample(100)
-      expect(a.__id__).to eq(b.__id__)
-      expect(b.__id__).to eq(c.__id__)
+
+      a[0] = 123.456
+      expect(b[0]).to be_within(0.0001).of(123.456)
+      expect(c[0]).to be_within(0.0001).of(123.456)
     end
 
     it 'can pass through a single input' do

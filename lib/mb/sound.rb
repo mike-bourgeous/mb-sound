@@ -122,6 +122,9 @@ module MB
       super
     end
   end
+
+  # S is a shortcut for Sound
+  S = Sound
 end
 
 require_relative 'sound/buffer_helper'
