@@ -1494,23 +1494,24 @@ VALUE ruby_adsr(VALUE self, VALUE time, VALUE attack, VALUE decay, VALUE sustain
 #define adsr_loop do { \
 	for(size_t i = 0; i < length; i++) { \
 		double t = current_frame / sample_rate; \
-		if (o && ar >= 0 && t >= ar) { \
-			/* auto-release */ \
-			o = 0; \
-			current_frame = release_start; \
-		} \
 		data[i] = adsr(t, a, d, s, r, p, o); \
 		current_frame += 1; \
- \
+		\
+		if (o && ar >= 0 && current_frame >= auto_release_start) { \
+			/* auto-release (basically what the Ruby release function does) */ \
+			o = 0; \
+			current_frame = release_start; \
+			p = 1.0; \
+			s = (float)data[i]; \
+		} \
 		if (ar >= 0 && current_frame >= release_end && data[i] == 0) { \
-			rb_warn("Auto-release\n"); /* XXX */ \
+			rb_warn("Auto-release short read\n"); /* XXX */ \
 			/* end of release */ \
 			length = i + 1; \
 			break; \
 		} \
 	} \
 } while(0)
-
 
 VALUE ruby_adsr_narray(VALUE self, VALUE narray, VALUE frame, VALUE rate, VALUE attack, VALUE decay, VALUE sustain, VALUE release, VALUE peak, VALUE on, VALUE auto_release, VALUE filter_ringdown)
 {
@@ -1548,6 +1549,7 @@ VALUE ruby_adsr_narray(VALUE self, VALUE narray, VALUE frame, VALUE rate, VALUE 
 	double ar = RTEST(auto_release) ? NUM2DBL(auto_release) : -1;
 	double fr = NUM2DBL(filter_ringdown);
 
+	ssize_t auto_release_start = lrint(ar * sample_rate);
 	ssize_t release_start = lrint((a + d) * sample_rate);
 	ssize_t release_end = lrint((a + d + r + fr) * sample_rate);
 
@@ -1563,7 +1565,7 @@ VALUE ruby_adsr_narray(VALUE self, VALUE narray, VALUE frame, VALUE rate, VALUE 
 
 	VALUE narray_subset = rb_funcall(narray, sym_array_lookup, 1, rb_range_new(INT2FIX(0), SSIZET2NUM(length), 1));
 
-	return rb_ary_new_from_args(4, narray_subset, SSIZET2NUM(current_frame), DBL2NUM(current_frame / sample_rate), o ? Qtrue : Qfalse);
+	return rb_ary_new_from_args(6, narray_subset, SSIZET2NUM(current_frame), DBL2NUM(current_frame / sample_rate), o ? Qtrue : Qfalse, DBL2NUM(p), DBL2NUM(s));
 }
 
 void Init_fast_sound(void)

@@ -51,6 +51,11 @@ module MB
 
       attr_reader :attack_time, :decay_time, :sustain_level, :release_time, :total, :peak, :time, :sample_rate
 
+      # The approximate amount of time in seconds it takes the smoothing filter
+      # to reach equilibrium.  This time is added to the release time when
+      # determining whether the envelope is truly finished.
+      attr_reader :filter_ringdown
+
       # Initializes an ADSR envelope with the given +:attack_time+,
       # +:decay_time+, and +:release_time+ in seconds, and the given
       # +:sustain_level+ relative to the peak parameter given to #trigger.  The
@@ -209,9 +214,10 @@ module MB
       end
 
       def sample_count_c(count, filter: true)
+        # TODO: Use expand_buffer
         setup_buffer(length: count)
 
-        retbuf, @frame, @time, @on = MB::FastSound.adsr_narray(
+        retbuf, @frame, @time, @on, @peak, @sust = MB::FastSound.adsr_narray(
           @buf.inplace!,
           @frame,
           @sample_rate,
@@ -227,11 +233,10 @@ module MB
 
         @value = retbuf[-1]
 
-        advance(count)
-
         if filter
           @filter.process(retbuf.inplace!)
         else
+          # Update filter state without modifying retbuf
           @filter.process(retbuf.not_inplace!)
         end
 
@@ -379,7 +384,8 @@ module MB
         self
       end
 
-      # Advances the internal clock by the given number of +samples+.
+      # Advances the internal clock by the given number of +samples+ (not used
+      # by #sample_count_c as the C code tracks these variables).
       def advance(samples)
         @frame += samples
         @time = @frame / @sample_rate.to_f
