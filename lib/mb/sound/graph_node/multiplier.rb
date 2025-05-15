@@ -121,10 +121,13 @@ module MB
           if @stop_early
             return nil if inputs.length != @multiplicands.length
 
+            if @truncated && max_length > min_length
+              raise "Tried to truncate inputs more than once -- an upstream node gave a short read repeatedly"
+            end
+
             # Truncate if stop_early is true
             inputs = inputs.map { |v|
               if v.length > min_length
-                raise "Tried to truncate inputs more than once -- an upstream node gave a short read repeatedly" if @truncated
                 @truncated = true
                 v[0...min_length]
               else
@@ -205,7 +208,8 @@ module MB
           @multiplicands.keys + [@constant]
         end
 
-        # Adds the given +other+ sample source to this multiplier.
+        # Adds the given +other+ sample source to this multiplier, or
+        # multiplies the constant by +other+ if it is a Numeric.
         def *(other)
           if other.is_a?(Numeric)
             @constant *= other

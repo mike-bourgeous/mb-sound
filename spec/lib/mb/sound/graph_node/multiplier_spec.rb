@@ -139,6 +139,17 @@ RSpec.describe(MB::Sound::GraphNode::Multiplier) do
         expect { m.sample(12) }.to raise_error(/truncate.*short/)
       end
 
+      it 'does not raise an error with several inputs, until the second truncation' do
+        inp_c = double(MB::Sound::GraphNode)
+        expect(inp_c).to receive(:sample).twice.and_return(Numo::SFloat[1,2,3,4,5,6])
+
+        m2 = MB::Sound::GraphNode::Multiplier.new([inp_a, inp_b, inp_c], sample_rate: 48000)
+
+        expect(m2.sample(12)).to eq(Numo::SFloat[1,8,27,64])
+
+        expect { m2.sample(12) }.to raise_error(/truncate.*short/)
+      end
+
       it 'returns nil when any input returns nil' do
         t1 = 0.hz.square.at(1).for(1).at_rate(50)
         t2 = 0.hz.square.at(0.5).for(2.0).at_rate(50)
