@@ -1505,7 +1505,6 @@ VALUE ruby_adsr(VALUE self, VALUE time, VALUE attack, VALUE decay, VALUE sustain
 			s = (float)data[i]; \
 		} \
 		if (ar >= 0 && current_frame >= release_end && data[i] == 0) { \
-			rb_warn("Auto-release short read\n"); /* XXX */ \
 			/* end of release */ \
 			length = i + 1; \
 			break; \
