@@ -165,7 +165,7 @@ begin
     s1, s2 = inp.tee(2)
     s1.named('s1')
     s2.named('s2')
-    s2 = s2.delay(samples: d1, smoothing: delay_smoothing)
+    s2 = s2.delay(samples: d1, smoothing: delay_smoothing, sample_rate: input.sample_rate * oversample)
 
     # Feedback injector and feedback delay (compensating for buffer size)
     # TODO: better way of injecting an NArray into a node chain than
