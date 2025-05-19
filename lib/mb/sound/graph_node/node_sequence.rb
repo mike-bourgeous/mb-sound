@@ -9,12 +9,10 @@ module MB
       # handful of samples longer than expected.
       class NodeSequence
         include GraphNode
+        include SampleRateHelper
 
         # See GraphNode#sources.
         attr_reader :sources
-
-        # The sample rate of all of the sources.
-        attr_reader :sample_rate
 
         # Creates a node sequence with the given sources (either Numo::NArrays
         # or a GraphNodes) to play in order.

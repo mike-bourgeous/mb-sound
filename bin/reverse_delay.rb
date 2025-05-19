@@ -29,9 +29,11 @@ wet_level = ENV['WET']&.to_f || 0.75
 
 filename = others[0]
 if filename && File.readable?(filename)
-  inputs = MB::Sound.file_input(filename).split.map { |d| d.and_then(0.hz.at(0).for(delay * 4)) }
+  input = MB::Sound.file_input(filename)
+  inputs = input.split.map { |d| d.and_then(0.hz.at(0).for(delay * 4)) }
 else
-  inputs = MB::Sound.input(channels: ENV['CHANNELS']&.to_i || 2).split
+  MB::Sound.input(channels: ENV['CHANNELS']&.to_i || 2)
+  inputs = input.split
 end
 
 output = MB::Sound.output(channels: inputs.length)
@@ -64,7 +66,7 @@ puts MB::U.highlight({
 begin
   # TODO: Abstract construction of a filter graph per channel
   paths = inputs.map.with_index { |inp, idx|
-    inp = inp.with_buffer(inp.buffer_size).resample(mode: :libsamplerate_fastest)
+    inp = inp.with_buffer(input.buffer_size).resample(mode: :libsamplerate_fastest)
 
     # Feedback buffers, overwritten by later calls to #spy
     a = Numo::SFloat.zeros(internal_buffer)
