@@ -4,6 +4,7 @@ module MB
     # for tone generation.
     class Tone
       include GraphNode
+      include GraphNode::SampleRateHelper
 
       # Speed of sound for wavelength calculations, in meters per second.
       SPEED_OF_SOUND = 343.0
@@ -161,7 +162,7 @@ module MB
       end
       ::Numeric.include NumericToneMethods
 
-      attr_reader :wave_type, :frequency, :amplitude, :range, :duration, :sample_rate, :wavelength, :phase
+      attr_reader :wave_type, :frequency, :amplitude, :range, :duration, :wavelength, :phase
       attr_reader :duration_set, :amplitude_set
 
       # Shortcut for creating a new tone with the given frequency source, for
@@ -365,12 +366,20 @@ module MB
         self
       end
 
+      # Returns the sample rate of the tone (or its underlying oscillator if it
+      # has been created).
+      def sample_rate
+        @sample_rate
+      end
+
       # Changes the target sample rate of the tone.
-      def at_rate(sample_rate)
-        @sample_rate = sample_rate
+      def sample_rate=(sample_rate)
+        super
         @single_sample = 1.0 / @sample_rate
+        @oscillator&.at_rate(sample_rate)
         self
       end
+      alias at_rate sample_rate=
 
       # Changes the initial phase of the tone, in radians relative to a sine
       # wave.  0 phase starts oscillators at 0 and rising (or at the top half
@@ -408,7 +417,8 @@ module MB
       def fm(tone, index = nil)
         tone = tone.hz if tone.is_a?(Numeric)
         tone = tone.at(1) if index && tone.is_a?(Tone)
-        tone = tone.oscillator if tone.is_a?(Tone)
+        tone = tone.or_for(nil) if tone.respond_to?(:or_for)
+        tone = tone.at_rate(@sample_rate) if tone.respond_to?(:at_rate)
         @frequency = MB::Sound::GraphNode::Mixer.new([@frequency, [tone, index || 1]], sample_rate: @sample_rate)
         self
       end
@@ -425,7 +435,8 @@ module MB
       def log_fm(tone, index = nil)
         tone = tone.hz if tone.is_a?(Numeric)
         tone = tone.at(1) if index && tone.is_a?(Tone)
-        tone = tone.oscillator if tone.is_a?(Tone)
+        tone = tone.or_for(nil) if tone.respond_to?(:or_for)
+        tone.at_rate(self.sample_rate) if tone.respond_to?(:at_rate)
         tone = 2 ** (tone / 12)
         tone = tone * index if index
         @frequency = @frequency * tone
@@ -444,6 +455,8 @@ module MB
             tone.or_at(1)
           end
         end
+        tone = tone.or_for(nil) if tone.respond_to?(:or_for)
+        tone.at_rate(self.sample_rate) if tone.respond_to?(:at_rate)
         tone = tone * index if index
         @phase_mod = tone
         self

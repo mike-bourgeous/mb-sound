@@ -27,6 +27,28 @@ RSpec.describe(MB::Sound::GraphNode::Multiplier) do
       )
       expect(ss.sample(800)).to eq(Numo::SFloat.zeros(800).fill(-1.6875))
     end
+
+    it 'changes sample rates to match where possible' do
+      a = 15.constant.at_rate(1234)
+      b = 25.constant.at_rate(2345)
+      c = 35.constant.at_rate(4567)
+
+      m = MB::Sound::GraphNode::Multiplier.new(a, b, c, sample_rate: 4800)
+      expect(a.sample_rate).to eq(4800)
+      expect(b.sample_rate).to eq(4800)
+      expect(c.sample_rate).to eq(4800)
+    end
+
+    it 'changes sample rates to match when using arithmetic' do
+      a = 15.constant.at_rate(1234)
+      b = 25.constant.at_rate(2345)
+
+      m = a * b
+
+      expect(m.sample_rate).to eq(1234)
+      expect(a.sample_rate).to eq(1234)
+      expect(b.sample_rate).to eq(1234)
+    end
   end
 
   describe '#sample' do
@@ -249,6 +271,43 @@ RSpec.describe(MB::Sound::GraphNode::Multiplier) do
 
       ss.clear
       expect(ss.count).to eq(0)
+    end
+  end
+
+  describe '#at_rate' do
+    it 'changes the sample rate of upstream nodes' do
+      a = 1.constant.at_rate(4321)
+      b = 2.hz.at_rate(4321)
+      c = a * b
+
+      expect(c).to be_a(MB::Sound::GraphNode::Multiplier)
+
+      c.at_rate(5438)
+
+      expect(a.sample_rate).to eq(5438)
+      expect(b.sample_rate).to eq(5438)
+      expect(c.sample_rate).to eq(5438)
+    end
+  end
+
+  describe '#*' do
+    let(:a) { 15.constant.at_rate(1234) }
+    let(:b) { 25.constant.at_rate(2345) }
+    let(:c) { 35.constant.at_rate(5432) }
+
+    it 'appends another multiplicand' do
+      m = MB::Sound::GraphNode::Multiplier.new(a, b)
+      m * c
+      expect(m.graph).to include(c)
+    end
+
+    it 'changes sample rates to match' do
+      m = MB::Sound::GraphNode::Multiplier.new(a, b) * c
+
+      expect(m.sample_rate).to eq(1234)
+      expect(a.sample_rate).to eq(1234)
+      expect(b.sample_rate).to eq(1234)
+      expect(c.sample_rate).to eq(1234)
     end
   end
 end

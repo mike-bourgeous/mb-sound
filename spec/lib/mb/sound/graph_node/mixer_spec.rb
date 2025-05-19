@@ -52,15 +52,25 @@ RSpec.describe(MB::Sound::GraphNode::Mixer) do
       expect(mix.sample_rate).to eq(1500)
     end
 
-    it 'raises an error if given summands with different sample rates' do
-      expect {
-        MB::Sound::GraphNode::Mixer.new(
-          [
-            15.hz.at_rate(1500),
-            30.hz.at_rate(3000)
-          ]
-        )
-      }.to raise_error(/sample rate.*3000.*1500/)
+    it 'changes sample rates to match when possible' do
+      a = 15.hz.at_rate(1500).named('a')
+      b = 30.hz.at_rate(3000).named('b')
+      m = MB::Sound::GraphNode::Mixer.new([a, b], sample_rate: 4500)
+
+      expect(a.sample_rate).to eq(4500)
+      expect(b.sample_rate).to eq(4500)
+      expect(m.sample_rate).to eq(4500)
+    end
+
+    it 'raises an error if given summands with different sample rates that cannot be changed' do
+      a = 15.hz.at_rate(1500).named('a')
+      b = 30.hz.at_rate(3000).named('b')
+      a.singleton_class.undef_method(:sample_rate=)
+      a.singleton_class.undef_method(:at_rate)
+      b.singleton_class.undef_method(:sample_rate=)
+      b.singleton_class.undef_method(:at_rate)
+
+      expect { MB::Sound::GraphNode::Mixer.new([a, b]) }.to raise_error(/sample rate.*3000.*1500/)
     end
   end
 
@@ -265,6 +275,37 @@ RSpec.describe(MB::Sound::GraphNode::Mixer) do
 
       ss.clear
       expect(ss.count).to eq(0)
+    end
+  end
+
+  describe '#+' do
+    it 'adds another source' do
+      m = 1.constant + 2.constant
+      expect(m + 3.constant).to equal(m)
+    end
+
+    it 'changes upstream sample rates' do
+      a = 1.constant.at_rate(123)
+      b = 2.constant.at_rate(456)
+      m = a + b
+
+      expect(a.sample_rate).to eq(123)
+      expect(b.sample_rate).to eq(123)
+      expect(m.sample_rate).to eq(123)
+    end
+  end
+
+  describe '#sample_rate=' do
+    it 'can change sample rate of upstream nodes' do
+      a = 5.hz.square.at_rate(1234)
+      b = 25.hz.square.at_rate(1234)
+      m = MB::Sound::GraphNode::Mixer.new([a, b])
+      expect(m.sample_rate).to eq(1234)
+
+      m.sample_rate = 55443
+
+      expect(a.sample_rate).to eq(55443)
+      expect(b.sample_rate).to eq(55443)
     end
   end
 end

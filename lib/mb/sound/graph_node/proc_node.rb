@@ -6,8 +6,9 @@ module MB
       # from the #sample method.
       class ProcNode
         include GraphNode
+        include SampleRateHelper
 
-        attr_reader :sources, :source, :callers, :sample_rate
+        attr_reader :sources, :source, :callers
 
         # Initializes a graph node that calls the +block+ with the result of the
         # +source+'s sample method when this object's #sample method is called.

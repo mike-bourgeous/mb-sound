@@ -14,13 +14,11 @@ module MB
       class Mixer
         include GraphNode
         include BufferHelper
+        include SampleRateHelper
         include ArithmeticNodeHelper
 
         # The constant value added to the output sum before any summands.
         attr_accessor :constant
-
-        # The sample rate of the graph.
-        attr_reader :sample_rate
 
         # Creates a Mixer with the given inputs, which must be either Numeric
         # values or objects that have a #sample method.  Each input may have an
@@ -54,12 +52,7 @@ module MB
           summands.each_with_index do |(s, gain), idx|
             gain ||= 1.0
 
-            if s.respond_to?(:sample_rate)
-              @sample_rate ||= s.sample_rate
-              if @sample_rate != s.sample_rate
-                raise "Summand #{idx}/#{s} sample rate #{s.sample_rate} does not match mixer sample rate #{@sample_rate}"
-              end
-            end
+            check_rate(s)
 
             case
             when s.is_a?(Numeric)
@@ -164,6 +157,7 @@ module MB
           else
             raise "Summand #{other} is already present on mixer #{self}" if @summands.include?(other)
             other.or_for(nil) if other.respond_to?(:or_for) # Default to playing forever
+            check_rate(other)
             self[other] = 1.0
           end
 

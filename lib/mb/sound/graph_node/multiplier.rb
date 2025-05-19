@@ -10,6 +10,7 @@ module MB
       class Multiplier
         include GraphNode
         include BufferHelper
+        include SampleRateHelper
         include ArithmeticNodeHelper
 
         # The constant value by which the output will be multiplied.
@@ -67,17 +68,10 @@ module MB
           end
 
           multiplicands.each_with_index do |m, idx|
-            if m.respond_to?(:sample_rate)
-              @sample_rate ||= m.sample_rate
-              if m.sample_rate != @sample_rate
-                raise "Multiplicand #{idx}/#{m} sample rate is #{m.sample_rate}; expected #{@sample_rate}"
-              end
-            end
+            check_rate(m, idx) if m.respond_to?(:sample_rate)
           end
 
-          unless @sample_rate
-            raise 'No sample rate given via constructor or multiplicands'
-          end
+          raise 'No sample rate given via constructor or multiplicands' unless @sample_rate
         end
 
         # Calls the #sample methods of all multiplicands, multiplies them
@@ -107,6 +101,8 @@ module MB
         # Adds another multiplicand (e.g. an envelope generator) to the product.
         def <<(multiplicand)
           raise "Multiplicand #{multiplicand} must respond to :sample" unless multiplicand.respond_to?(:sample)
+          raise "Multiplicand may not be an Array" if multiplicand.is_a?(Array)
+          check_rate(multiplicand)
           @multiplicands[multiplicand] = multiplicand
         end
         alias add <<
@@ -156,6 +152,7 @@ module MB
             raise "Multiplicand #{other} is already present on multiplier #{self}" if @multiplicands.include?(other)
             other.or_for(nil) if other.respond_to?(:or_for) # Default to playing forever
             other.or_at(1) if other.respond_to?(:or_at) # Keep amplitude high
+            other.at_rate(@sample_rate) if other.respond_to?(:at_rate) # Match sample rates
             add(other)
           end
 

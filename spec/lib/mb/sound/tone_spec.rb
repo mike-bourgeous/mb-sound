@@ -223,9 +223,45 @@ RSpec.describe MB::Sound::Tone do
     end
   end
 
-  pending '#fm'
-  pending '#log_fm'
-  pending '#pm'
+  shared_examples_for 'modulation sources' do |method|
+    it 'adds another graph node as a source' do
+      a = 300.hz
+      b = 150.hz.send(method, a)
+      expect(b.graph).to include(a)
+    end
+
+    it 'changes the sample rate of the upstream source to match' do
+      a = 300.hz.at_rate(12345)
+      b = 150.hz.at_rate(5432).send(method, a)
+      expect(a.sample_rate).to eq(5432)
+      expect(b.sample_rate).to eq(5432)
+    end
+
+    it 'changes the output' do
+      a = 300.hz.at(100)
+      b = 150.hz.send(method, a).at(1)
+      expect(b.sample(800)).not_to all_be_within(0.2).of_array(150.hz.at(1).sample(800))
+    end
+  end
+
+  describe '#fm' do
+    it_behaves_like 'modulation sources', :fm
+
+    pending
+  end
+
+  describe '#log_fm' do
+    it_behaves_like 'modulation sources', :log_fm
+
+    pending
+  end
+
+  describe '#pm' do
+    it_behaves_like 'modulation sources', :pm
+
+    pending
+  end
+
   describe '#for' do
     pending 'limits duration'
     pending 'resets elapsed timer'
@@ -374,6 +410,26 @@ RSpec.describe MB::Sound::Tone do
       expect(result.note).to eq(50.hz.to_note.number)
       expect(result.velocity).to eq(3)
       expect(result.channel).to eq(4)
+    end
+  end
+
+  describe '#at_rate' do
+    it 'can change the sample rate of upstream sources' do
+      a = 100.hz.at_rate(1234)
+      b = 200.hz.at_rate(5678)
+      c = 300.hz.at_rate(9101)
+      d = 15.constant.at_rate(5151) * c
+      e = 150.hz.at_rate(2324).fm(d)
+      f = 400.hz.at_rate(1500).fm(a).log_fm(b).pm(e)
+
+      f.at_rate(48001)
+
+      expect(a.sample_rate).to eq(48001)
+      expect(b.sample_rate).to eq(48001)
+      expect(c.sample_rate).to eq(48001)
+      expect(d.sample_rate).to eq(48001)
+      expect(e.sample_rate).to eq(48001)
+      expect(f.sample_rate).to eq(48001)
     end
   end
 end

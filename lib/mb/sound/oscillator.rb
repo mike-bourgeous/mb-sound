@@ -101,7 +101,7 @@ module MB
         12.0 * Math.log2(frequency_hz / tune_freq) + tune_note
       end
 
-      attr_accessor :advance, :wave_type, :pre_power, :post_power, :range, :advance, :random_advance
+      attr_accessor :wave_type, :pre_power, :post_power, :range, :advance, :random_advance
       attr_reader :phi, :phase, :frequency, :phase_mod
 
       # An informational marker for classes like MB::Sound::MIDI::GraphVoice
@@ -176,8 +176,16 @@ module MB
         (2.0 * Math::PI / @advance).round(6)
       end
 
+      # Changes the phase advance per sample to match the given +sample_rate+
+      # (see the advance parameter to the constructor).
+      def sample_rate=(sample_rate)
+        @advance = 2 * Math::PI / sample_rate
+        self
+      end
+      alias at_rate sample_rate=
+
       def sources
-        [@frequency]
+        [@frequency, @phase_mod].compact
       end
 
       # Changes the starting phase offset for this oscillator, shifting the

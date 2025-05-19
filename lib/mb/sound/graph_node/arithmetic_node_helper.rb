@@ -96,6 +96,27 @@ module MB
 
           retbuf.not_inplace!
         end
+
+        protected
+
+        # Checks the sample rate of the +other+ node, either setting this
+        # node's sample rate to match, or setting the +other+ node's sample
+        # rate to match.  Raises an error if the +other+ node does not support
+        # changing sample rates and the rate does not match.
+        def check_rate(other, idx = sources.length)
+          if other.respond_to?(:sample_rate)
+            @sample_rate ||= other.sample_rate
+            if other.sample_rate != @sample_rate
+              if other.respond_to?(:sample_rate=)
+                other.sample_rate = @sample_rate
+              elsif other.respond_to?(:at_rate)
+                other.at_rate(@sample_rate)
+              else
+                raise "Source #{idx}/#{other} sample rate is #{other.sample_rate}; expected #{@sample_rate}"
+              end
+            end
+          end
+        end
       end
     end
   end
