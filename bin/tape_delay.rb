@@ -101,7 +101,7 @@ begin
   # Use the input buffer size when reading from the input, so our feedback loop
   # can run with a different buffer size.
   # TODO: maybe this should be automatic
-  inp, inp_dry = input.with_buffer(input_buffer_size).named(filename || 'audio in').tee.map(&:resample)
+  inp, inp_dry = input.with_buffer(input_buffer_size).resample(mode: :libsamplerate_fastest).named(filename || 'audio in').tee
   inp.named('pre-delay input')
   inp_dry.named('dry output')
 
@@ -129,7 +129,7 @@ begin
   result = (dry * inp_dry + wet * feedback_loop)
     .softclip(0.75, 0.95)
     .with_buffer(internal_bufsize)
-    .oversample(oversample)
+    .oversample(oversample, mode: :libsamplerate_fastest)
     .named('mixed output')
 
   File.write('/tmp/tape_delay.dot', result.graphviz)
