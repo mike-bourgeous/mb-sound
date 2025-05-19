@@ -418,7 +418,7 @@ module MB
         tone = tone.hz if tone.is_a?(Numeric)
         tone = tone.at(1) if index && tone.is_a?(Tone)
         tone = tone.or_for(nil) if tone.respond_to?(:or_for)
-        tone = tone.at_rate(@sample_rate) if tone.respond_to?(:at_rate)
+        tone = tone.at_rate(@sample_rate) if tone.respond_to?(:at_rate) && tone.sample_rate != @sample_rate
         @frequency = MB::Sound::GraphNode::Mixer.new([@frequency, [tone, index || 1]], sample_rate: @sample_rate)
         self
       end
@@ -436,7 +436,7 @@ module MB
         tone = tone.hz if tone.is_a?(Numeric)
         tone = tone.at(1) if index && tone.is_a?(Tone)
         tone = tone.or_for(nil) if tone.respond_to?(:or_for)
-        tone.at_rate(self.sample_rate) if tone.respond_to?(:at_rate)
+        tone = tone.at_rate(@sample_rate) if tone.respond_to?(:at_rate) && tone.sample_rate != @sample_rate
         tone = 2 ** (tone / 12)
         tone = tone * index if index
         @frequency = @frequency * tone
@@ -456,7 +456,7 @@ module MB
           end
         end
         tone = tone.or_for(nil) if tone.respond_to?(:or_for)
-        tone.at_rate(self.sample_rate) if tone.respond_to?(:at_rate)
+        tone = tone.at_rate(@sample_rate) if tone.respond_to?(:at_rate) && tone.sample_rate != @sample_rate
         tone = tone * index if index
         @phase_mod = tone
         self
