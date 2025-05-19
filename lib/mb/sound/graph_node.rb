@@ -290,6 +290,15 @@ module MB
         MB::Sound::GraphNode::Resample.new(upstream: self, sample_rate: sample_rate, mode: mode)
       end
 
+      # Tells this node and all upstream nodes to run at +multiplier+ times the
+      # current sample rate, then appends a Resample node to restore the
+      # current sample rate.  The +multiplier+ may also be less than one to
+      # undersample, and may be fractional (for most node types).
+      def oversample(multiplier, mode: MB::Sound::GraphNode::Resample::DEFAULT_MODE)
+        current_rate = self.sample_rate
+        self.at_rate(current_rate * multiplier).resample(current_rate, mode: mode)
+      end
+
       # Multiplies this envelope by an ADSR envelope with the given +attack+,
       # +decay+, +sustain+, and +release+ parameters, with times in seconds,
       # and +sustain+ ranging from 0 to 1 (typically).

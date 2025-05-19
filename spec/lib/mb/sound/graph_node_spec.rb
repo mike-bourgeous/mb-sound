@@ -405,6 +405,23 @@ RSpec.describe(MB::Sound::GraphNode) do
     end
   end
 
+  describe '#oversample' do
+    it 'changes the upstream sample rate without changing the output rate' do
+      a = 15.hz.at_rate(48000)
+
+      b = nil
+      expect { b = a.oversample(4) }.to change { a.sample_rate }.to(192000)
+
+      expect(b).to be_a(MB::Sound::GraphNode::Resample)
+      expect(b.sample_rate).to eq(48000)
+    end
+
+    it 'can change the resampling mode' do
+      expect(15.hz.oversample(4).mode).to eq(:libsamplerate_best)
+      expect(15.hz.oversample(4, mode: :ruby_linear).mode).to eq(:ruby_linear)
+    end
+  end
+
   describe '#spy' do
     it 'calls a block when the sample method is called' do
       b = nil

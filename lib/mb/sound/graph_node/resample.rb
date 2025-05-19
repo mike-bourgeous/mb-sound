@@ -52,9 +52,27 @@ module MB
 
           @upstream = upstream
 
+          self.sample_rate = sample_rate
+
+          @startpoint = 0.0 # Fractional sample index of start of buffer, minus discards
+
+          @circbuf_size = 0 # Desired capacity of circular buffer
+
+          setup_buffer(length: 1024, double: true)
+        end
+
+        # Changes the target sample rate of this resampling node, if possible.
+        #
+        # Raises an error if resampling has started using a mode that cannot
+        # change rates.
+        def sample_rate=(sample_rate)
+          if @fast_resample && sample_rate != @sample_rate
+            raise "Cannot change sample rate when resampling has already started in mode #{@mode}"
+          end
+
           @sample_rate = sample_rate.to_f
-          @inv_ratio = upstream.sample_rate.to_f / @sample_rate
-          @ratio = @sample_rate / upstream.sample_rate.to_f
+          @inv_ratio = @upstream.sample_rate.to_f / @sample_rate
+          @ratio = @sample_rate / @upstream.sample_rate.to_f
 
           # TODO: identify a better fix or workaround for unfortunate integer
           # alignment than just adding a "random" starting offset.  The
@@ -63,12 +81,9 @@ module MB
           # integer.
           @zoh_offset = @inv_ratio * 0.00012345678
 
-          @startpoint = 0.0 # Fractional sample index of start of buffer, minus discards
-
-          @circbuf_size = 0 # Desired capacity of circular buffer
-
-          setup_buffer(length: 1024, double: true)
+          self
         end
+        alias at_rate sample_rate=
 
         # Returns the upstream as the only source for this node.
         def sources
@@ -123,6 +138,7 @@ module MB
             return nil if count == 0
           end
 
+          # TODO: Support promoting to complex values?
           promote_buffer(length: count * 2)
 
           # TODO: reuse the existing buffer instead of regenerating a linspace

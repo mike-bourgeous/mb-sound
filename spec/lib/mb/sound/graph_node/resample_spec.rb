@@ -22,6 +22,23 @@ RSpec.describe(MB::Sound::GraphNode::Resample, :aggregate_failures) do
     expect { MB::Sound::GraphNode::Resample.new(upstream: 150.hz.triangle, sample_rate: 12345) }.not_to raise_error
   end
 
+  describe '#sample_rate=' do
+    it 'does not change upstream sample rates' do
+      a = 15.hz.at_rate(5432)
+      b = a.resample(45678)
+
+      b.sample_rate = 12345
+
+      expect(a.sample_rate).to eq(5432)
+      expect(b.sample_rate).to eq(12345)
+    end
+
+    it 'returns self when using the at_rate alias' do
+      a = 10.hz.at_rate(12345).resample(54321)
+      expect(a.at_rate(5243)).to equal(a)
+    end
+  end
+
   describe '#sample' do
     shared_examples_for 'a working resampler' do
       context 'when upsampling' do
