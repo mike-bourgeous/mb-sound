@@ -96,10 +96,11 @@ else
 end
 
 bufsize = output.buffer_size
-internal_bufsize = 24
+internal_bufsize = 64
 internal_bufsize -= 1 until bufsize % internal_bufsize == 0
 
-delay_samples = delay * output.sample_rate
+oversample = ENV['OVERSAMPLE']&.to_f || 3
+delay_samples = delay * output.sample_rate * oversample
 delay_samples = 0 if delay_samples < 0
 range = depth * delay_samples
 min_delay = delay_samples - range * 0.5
@@ -124,6 +125,7 @@ puts MB::U.highlight({
   depth: depth,
   inputs: inputs.map(&:graph_node_name),
   sample_rate: output.sample_rate,
+  oversample: oversample,
   buffer: bufsize,
   internal_buffer: internal_bufsize,
 })
@@ -135,7 +137,7 @@ begin
   # FIXME: feedback delay includes buffer size
   # TODO: Abstract construction of a filter graph per channel
   paths = inputs.map.with_index { |inp, idx|
-    inp = inp.with_buffer(bufsize)
+    inp = inp.with_buffer(bufsize).resample(mode: :libsamplerate_fastest)
 
     # Feedback buffers, overwritten by later calls to #spy
     a = Numo::SFloat.zeros(internal_bufsize)
@@ -148,7 +150,7 @@ begin
     depthconst = depth.constant.named('Depth')
     delayconst = delay.constant.named('Delay')
     # Need to tee samp (delay in samples) so it doesn't skip when changing the delay via MIDI
-    samp1, samp2 = (delayconst * output.sample_rate).clip(0, nil).named('Delay in samples').tee
+    samp1, samp2 = (delayconst * (output.sample_rate * oversample)).clip(0, nil).named('Delay in samples').tee
     samp1.named('Delay in samples (branch 1)')
     samp2.named('Delay in samples (branch 2)')
 
@@ -166,7 +168,9 @@ begin
     s2 = s2.delay(samples: d1, smoothing: delay_smoothing)
 
     # Feedback injector and feedback delay (compensating for buffer size)
-    # TODO: better way of injecting an NArray into a node chain than constant.proc
+    # TODO: better way of injecting an NArray into a node chain than
+    # constant.proc; e.g. maybe a node that takes a pointer to a buffer and
+    # always returns the buffer
     d_fb = (d2 - internal_bufsize).clip(0, nil)
     b = 0.constant.proc { a }.delay(samples: d_fb, smoothing: delay_smoothing2)
 
@@ -175,7 +179,11 @@ begin
 
     dryconst = dry_level.constant.named('Dry level')
     wetconst = wet_level.constant.named('Wet level')
-    final = (s1 * dryconst + wet * wetconst).softclip(0.85, 0.95).with_buffer(internal_bufsize).named('final_buf')
+    final = (s1 * dryconst + wet * wetconst)
+      .softclip(0.85, 0.95).named('final_softclip')
+      .with_buffer(internal_bufsize).named('final_bufsize')
+      .filter(15000.hz.lowpass)
+      .oversample(oversample, mode: :libsamplerate_fastest).named('final_oversample')
 
     # GraphVoice provides on_cc to generate a cc map for the MIDI manager
     # (TODO: probably a better way to do this, also need on_bend, on_pitch, etc)
