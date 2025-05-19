@@ -403,6 +403,20 @@ RSpec.describe(MB::Sound::GraphNode) do
     it 'can change the resampling mode' do
       expect(1.hz.resample(15000, mode: :ruby_linear).mode).to eq(:ruby_linear)
     end
+
+    it 'defaults to the current frequency' do
+      expect(1.hz.at_rate(1515).resample.sample_rate).to eq(1515)
+    end
+
+    it 'allows changing the downstream rate later' do
+      a = 1.hz.at_rate(1515)
+      b = a.resample
+
+      b.sample_rate = 5432
+
+      expect(a.sample_rate).to eq(1515)
+      expect(b.sample_rate).to eq(5432)
+    end
   end
 
   describe '#oversample' do

@@ -19,7 +19,7 @@ module MB
       # kind of like a low-pass filter plus distortion, where the distortion
       # goes up and the cutoff frequency goes down as a signal gets louder.
       class LinearFollower < Filter
-        # The sample rate given to the constructor, in Hz.
+        # The sample rate given to the constructor or to #sample_rate=, in Hz.
         attr_reader :sample_rate
 
         # The computed maximum fall rate, in units *per sample*.
@@ -68,6 +68,21 @@ module MB
 
           @s = 0.0
         end
+
+        # Changes the sample rate of this filter (used to convert rise and fall
+        # rates from inverse seconds to inverse samples).
+        def sample_rate=(new_rate)
+          new_rate = new_rate.to_f
+          raise "Sample rate must be positive" unless new_rate > 0
+
+          @max_fall = @max_fall.abs.to_f * new_rate / @sample_rate
+          @max_rise = @max_rise.abs.to_f * new_rate / @sample_rate
+
+          @sample_rate = new_rate
+
+          self
+        end
+        alias at_rate sample_rate=
 
         # Resets the output to 0, or to the given value.
         def reset(initial_value = 0.0)

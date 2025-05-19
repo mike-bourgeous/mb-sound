@@ -29,7 +29,11 @@ module MB
         #
         # TODO: Maybe this can be deduplicated with Tee.
         class InputChannelNode
+          extend Forwardable
+
           include GraphNode
+
+          def_delegators :@split, :sample_rate, :sample_rate=, :at_rate, :sources
 
           # For internal use by InputChannelSplit.  Initializes one output
           # channel of the split.
@@ -39,11 +43,6 @@ module MB
             @graph_node_name = name
           end
 
-          # Returns the sample rate of the input stream.
-          def sample_rate
-            @split.sample_rate
-          end
-
           # Retrieves the next +count+ samples for this channel.
           #
           # This method may modify and return the same object multiple times,
@@ -51,12 +50,6 @@ module MB
           # past buffers.
           def sample(count)
             @split.internal_sample(self, @channel, count)
-          end
-
-          # Returns an Array containing the source node feeding into the
-          # InputChannelSplit.
-          def sources
-            @split.sources
           end
         end
 
@@ -111,6 +104,13 @@ module MB
 
           @cbufs[channel].read(MB::M.min(@cbufs[channel].length, count)).not_inplace!
         end
+
+        # Raises an error indicating that inputs split to graph nodes cannot
+        # change sample rate.
+        def sample_rate=(new_rate)
+          raise NotImplementedError, "Cannot change sample rate on an input channel #{self}; try appending a .resample node"
+        end
+        alias at_rate sample_rate=
 
         private
 

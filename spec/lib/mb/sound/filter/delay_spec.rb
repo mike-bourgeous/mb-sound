@@ -1,4 +1,4 @@
-RSpec.describe(MB::Sound::Filter::Delay) do
+RSpec.describe(MB::Sound::Filter::Delay, :aggregate_failures) do
   let(:shortbuf) {
     MB::Sound::Filter::Delay.new(delay: 5, sample_rate: 1, buffer_size: 10)
   }
@@ -152,6 +152,20 @@ RSpec.describe(MB::Sound::Filter::Delay) do
           expect(midbuf.process(Numo::SFloat.zeros(128))).to eq(MB::M.shl(input, 118))
         end
       end
+    end
+  end
+
+  describe '#sample_rate=' do
+    it 'can change sample rate' do
+      a = 2.hz.at(1..2)
+      b = 10.hz.lowpass
+      c = MB::Sound::Filter::Delay.new(delay: a, smoothing: b)
+
+      c.sample_rate = 5432
+
+      expect(a.sample_rate).to eq(5432)
+      expect(b.sample_rate).to eq(5432)
+      expect(c.sample_rate).to eq(5432)
     end
   end
 end

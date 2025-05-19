@@ -73,4 +73,21 @@ RSpec.describe(MB::Sound::Filter::LinearFollower) do
       expect(MB::M.round(lf.process(data), 6)).to eq(expected)
     end
   end
+
+  describe '#sample_rate=' do
+    let(:lf) { MB::Sound::Filter::LinearFollower.new(sample_rate: 1, max_rise: 1, max_fall: 2) }
+    it 'can change sample rates' do
+      lf.sample_rate = 2
+      expect(lf.sample_rate).to eq(2)
+      expect(lf.max_rise).to be_within(1e-6).of(2)
+      expect(lf.max_fall).to be_within(1e-6).of(4)
+    end
+
+    it 'is aliased to at_rate' do
+      expect(lf.at_rate(0.5)).to equal(lf)
+      expect(lf.sample_rate).to eq(0.5)
+      expect(lf.max_rise).to be_within(1e-6).of(0.5)
+      expect(lf.max_fall).to be_within(1e-6).of(1)
+    end
+  end
 end

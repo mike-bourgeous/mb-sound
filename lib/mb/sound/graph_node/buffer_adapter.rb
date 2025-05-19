@@ -17,7 +17,7 @@ module MB
 
         attr_reader :upstream_count
 
-        def_delegators :@upstream, :sample_rate
+        def_delegators :@upstream, :sample_rate, :sample_rate=, :at_rate
 
         # Creates a buffer adapter with the given +:upstream+ node to sample,
         # using the given +:upstream_count+ as the value passed to the upstream

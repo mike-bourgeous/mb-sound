@@ -10,6 +10,11 @@ module MB
       #
       # The ideal way to create a Tee is with the GraphNode#tee method.
       #
+      # Note that if a downstream node tries to change the sample rate for one
+      # branch, it will change it for all branches and upstream nodes.  So add
+      # a .resample node to a branch if you want different branches at
+      # different sample rates.
+      #
       # Example:
       #     # Runnable in bin/sound.rb
       #     a, b, c = 200.hz.forever.tee(3) ; nil
@@ -32,7 +37,7 @@ module MB
 
           attr_reader :index
 
-          def_delegators :@tee, :sample_rate
+          def_delegators :@tee, :sample_rate, :sample_rate=, :at_rate
 
           # For internal use by Tee.  Initializes one parallel branch of the tee.
           def initialize(tee, index)
@@ -71,7 +76,7 @@ module MB
         # The branches from the Tee (see GraphNode#tee).
         attr_reader :branches
 
-        def_delegators :@source, :sample_rate
+        def_delegators :@source, :sample_rate, :sample_rate=, :at_rate
 
         # Creates a Tee from the given +source+, with +n+ branches.  Generally
         # for internal use by GraphNode#tee.

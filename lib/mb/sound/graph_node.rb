@@ -286,7 +286,7 @@ module MB
       #
       # The resampling +:mode+ must be one of the supported modes listed in
       # MB::Sound::GraphNode::Resample::MODES (e.g. :libsamplerate_best).
-      def resample(sample_rate, mode: MB::Sound::GraphNode::Resample::DEFAULT_MODE)
+      def resample(sample_rate = self.sample_rate, mode: MB::Sound::GraphNode::Resample::DEFAULT_MODE)
         MB::Sound::GraphNode::Resample.new(upstream: self, sample_rate: sample_rate, mode: mode)
       end
 

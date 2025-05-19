@@ -108,4 +108,30 @@ RSpec.describe(MB::Sound::GraphNode::Tee) do
     expect(t1.sample(3)).to eq(nil)
     expect(t2.sample(3)).to eq(nil)
   end
+
+  describe '#at_rate' do
+    it 'can change the source sample rate' do
+      source = 100.constant
+      t1, t2 = MB::Sound::GraphNode::Tee.new(source).branches
+
+      t1.at_rate(5432)
+
+      expect(t1.sample_rate).to eq(5432)
+      expect(t2.sample_rate).to eq(5432)
+      expect(source.sample_rate).to eq(5432)
+    end
+  end
+
+  describe '#sample_rate=' do
+    it 'can change the source sample rate' do
+      source = 100.constant
+      t1, t2 = MB::Sound::GraphNode::Tee.new(source).branches
+
+      t1.sample_rate = 5432
+
+      expect(t1.sample_rate).to eq(5432)
+      expect(t2.sample_rate).to eq(5432)
+      expect(source.sample_rate).to eq(5432)
+    end
+  end
 end

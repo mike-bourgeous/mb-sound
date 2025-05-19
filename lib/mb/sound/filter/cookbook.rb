@@ -158,7 +158,9 @@ module MB
           return if @sample_rate.round(3) == rate.round(3)
           @center_frequency = 0.5 * rate if @center_frequency > 0.5 * rate
           set_parameters(@filter_type, rate, @center_frequency, db_gain: @db_gain, quality: @quality, bandwidth_oct: @bandwidth_oct, shelf_slope: @shelf_slope)
+          self
         end
+        alias at_rate sample_rate=
 
         # Sets the filter type.
         def filter_type=(type)
@@ -168,6 +170,7 @@ module MB
 
         def set_parameters(filter_type, f_samp, f_center, db_gain: nil, quality: nil, bandwidth_oct: nil, shelf_slope: nil)
           set_parameters_c(filter_type, f_samp, f_center, db_gain: db_gain, quality: quality, bandwidth_oct: bandwidth_oct, shelf_slope: shelf_slope)
+          self
         end
 
         def set_parameters_c(filter_type, f_samp, f_center, db_gain: nil, quality: nil, bandwidth_oct: nil, shelf_slope: nil)
