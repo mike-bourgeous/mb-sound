@@ -13,7 +13,7 @@ module MB
 
         attr_reader :mode
 
-        def_delegators :@input, :sample_rate
+        def_delegators :@input, :sample_rate, :sample_rate=, :at_rate
 
         # Creates a complex-to-component conversion node from the given +input+
         # node in the given +:mode+.  The +:mode+ may be :real, :imag, :abs, or

@@ -45,6 +45,14 @@ module MB
           reset
         end
 
+        # Sets the filter sample rate.
+        def sample_rate=(sample_rate)
+          @sample_rate = sample_rate
+          @fade_samples = (@fade_seconds * @sample_rate).round if @fade_seconds
+          self
+        end
+        alias at_rate sample_rate=
+
         # Sets the duration of a transition in samples.
         def fade_samples=(samples)
           raise 'Sample duration must be a Numeric' unless samples.is_a?(Numeric)

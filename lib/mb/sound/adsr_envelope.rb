@@ -369,6 +369,15 @@ module MB
         e
       end
 
+      # Changes the sample rate used for calculating durations.
+      def sample_rate=(new_rate)
+        new_rate = new_rate.to_f
+        raise "Sample rate must be positive" unless new_rate > 0
+
+        @frame = @frame * new_rate / @sample_rate
+        @sample_rate = new_rate
+      end
+
       private
 
       # Calculates internal parameters based on the given envelope parameters.

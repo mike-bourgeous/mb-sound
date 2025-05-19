@@ -16,8 +16,6 @@ module MB
         include MB::Sound::GraphNode
         include MB::Sound::GraphNode::SampleRateHelper
 
-        def_delegators :@base_filter, :sample_rate
-
         attr_reader :base_filter
 
         # Initializes a sample wrapper for the given +filter+ (which must
@@ -31,7 +29,7 @@ module MB
           @source = source
           @in_place = in_place
 
-          if @base_filter.sample_rate != source.sample_rate
+          if @base_filter.respond_to?(:sample_rate) && @base_filter.sample_rate != source.sample_rate
             if @base_filter.respond_to?(:sample_rate=)
               @base_filter.sample_rate = source.sample_rate
             else
@@ -75,13 +73,24 @@ module MB
           end
         end
 
+        # Returns the sample rate of the filter if it has one, or the source if
+        # not.
+        def sample_rate
+          if @base_filter.respond_to?(:sample_rate)
+            @base_filter.sample_rate
+          else
+            @source.sample_rate
+          end
+        end
+
         # Changes the sample rate of the source and filter.
         def sample_rate=(new_rate)
-          raise "Filter #{@base_filter} cannot change sample rate on #{self}" unless @base_filter.respond_to?(:sample_rate=)
+          if @base_filter.respond_to?(:sample_rate)
+            raise "Filter #{@base_filter} cannot change sample rate on #{self}" unless @base_filter.respond_to?(:sample_rate=)
+            @base_filter.sample_rate = new_rate
+          end
 
           super
-          @base_filter.sample_rate = new_rate
-          self
         end
         alias at_rate sample_rate=
 

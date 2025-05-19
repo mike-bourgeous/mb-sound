@@ -103,7 +103,9 @@ module MB
 
           when :libsamplerate_best, :libsamplerate_fastest, :libsamplerate_zoh, :libsamplerate_linear
             @fast_resample ||= MB::Sound::FastResample.new(@ratio, @mode) do |size|
-              @upstream.sample(size)
+              d = @upstream.sample(size)
+              d = d.real if d.respond_to?(:real)
+              d
             end
 
             sample_libsamplerate(count)
@@ -146,7 +148,7 @@ module MB
           case @mode
           when :ruby_zoh
             ret = (@buf[0...count].inplace.indgen * @inv_ratio + @startpoint + @zoh_offset).map_with_index { |v, idx|
-              data[v.real]
+              data[v.real].real
             }.not_inplace!
 
           when :ruby_linear
@@ -164,7 +166,7 @@ module MB
               d2 = data[idx2]
               d_out = d1 * (1.0 - delta) + d2 * delta
 
-              d_out
+              d_out.real
             }
 
           else
