@@ -72,6 +72,9 @@ module MB
           end
         end
 
+        # TODO: sample_rate=
+        # TODO: SampleRateHelper
+
         # Enables or disables delay smoothing, and resets the smoothed delay to
         # the current target delay value set by #delay= or #delay_samples=.
         #
@@ -88,6 +91,7 @@ module MB
           @smoothing = !!smoothing
 
           if smoothing.respond_to?(:process) && smoothing.respond_to?(:reset)
+            # XXX TODO check_rate(smoothing)
             @filter = smoothing
             @smooth_limit = nil
           else
@@ -109,6 +113,7 @@ module MB
         # number of +samples+ will be rounded to the closest Integer.
         def delay_samples=(samples)
           if samples.respond_to?(:sample)
+            # XXX TODO check_rate(samples)
             @delay_samples = samples
             @delay = samples / @sample_rate
             @min_delay_samples = 0
@@ -132,6 +137,7 @@ module MB
         # Sets the delay time in +seconds+, which is converted to a number of
         # samples using the sample rate.
         def delay=(seconds)
+          # XXX TODO check_rate(samples)
           self.delay_samples = seconds * @sample_rate
         end
 

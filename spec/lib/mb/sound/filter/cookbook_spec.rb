@@ -1,6 +1,6 @@
 require 'numo/pocketfft'
 
-RSpec.describe MB::Sound::Filter::Cookbook do
+RSpec.describe(MB::Sound::Filter::Cookbook, :aggregate_failures) do
   describe(MB::Sound::Filter::Cookbook::CookbookWrapper) do
     it 'uses changing values and stops when inputs stop' do
       f = 500.hz.lowpass
@@ -57,6 +57,21 @@ RSpec.describe MB::Sound::Filter::Cookbook do
       # Verify end-of-stream behavior
       expect(wrapper.sample(22000)).to be_a(Numo::SFloat)
       expect(wrapper.sample(100)).to eq(nil)
+    end
+
+    describe '#at_rate' do
+      it 'can change sample rate on the fly' do
+        a = 50.hz.square
+        b = 0.2.hz.triangle.lfo.at(100..500)
+        c = 0.33.hz.triangle.lfo.at(1..5)
+        d = a.filter(:lowpass, cutoff: b, quality: c)
+
+        d.at_rate(12345)
+        expect(a.sample_rate).to eq(12345)
+        expect(b.sample_rate).to eq(12345)
+        expect(c.sample_rate).to eq(12345)
+        expect(d.sample_rate).to eq(12345)
+      end
     end
   end
 

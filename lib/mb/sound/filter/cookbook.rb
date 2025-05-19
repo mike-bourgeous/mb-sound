@@ -19,6 +19,7 @@ module MB
         class CookbookWrapper
           extend Forwardable
           include GraphNode
+          include GraphNode::SampleRateHelper
 
           class WrapperArgumentError < ArgumentError
             def initialize(msg = nil, source: nil)
@@ -30,7 +31,7 @@ module MB
 
           attr_reader :audio, :cutoff, :quality
 
-          def_delegators :@filter, :sample_rate, :sample_rate=
+          def_delegators :@filter, :sample_rate
 
           # Initializes a sample-chain wrapper around a cookbook filter that
           # uses Cookbook#dynamic_process to vary the cutoff frequency
@@ -44,8 +45,8 @@ module MB
             @cutoff = sample_or_narray(cutoff)
             @quality = sample_or_narray(quality)
 
-            @cutoff = @cutoff.or_for(nil) if @cutoff.respond_to?(:@cutoff)
-            @quality = @quality.or_for(nil) if @quality.respond_to?(:@quality)
+            @cutoff = @cutoff.or_for(nil) if @cutoff.respond_to?(:@or_for)
+            @quality = @quality.or_for(nil) if @quality.respond_to?(:@or_for)
           end
 
           # Processes +count+ samples from the audio source through the filter,
@@ -66,6 +67,14 @@ module MB
           def sources
             [@audio, @cutoff, @quality]
           end
+
+          # Changes the sample rate of the filter and any upstream sources.
+          def sample_rate=(new_rate)
+            super
+            @filter.sample_rate = new_rate
+            self
+          end
+          alias at_rate sample_rate=
 
           private
 

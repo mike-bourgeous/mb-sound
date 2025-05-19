@@ -294,6 +294,13 @@ module MB
       # current sample rate, then appends a Resample node to restore the
       # current sample rate.  The +multiplier+ may also be less than one to
       # undersample, and may be fractional (for most node types).
+      #
+      # For example, compare the sound of the following (turn volume down):
+      #
+      #     # No oversampling; has prominent lower frequency aliasing
+      #     play 355.hz.pm(630.hz.at(100) * 0.5.hz.drumramp.at(0.9..1).filter(10.hz.lowpass)).forever
+      #     # With oversampling; does not have the same aliasing
+      #     play 355.hz.pm(630.hz.at(100) * 0.5.hz.drumramp.at(0.9..1).filter(10.hz.lowpass)).oversample(16).forever
       def oversample(multiplier, mode: MB::Sound::GraphNode::Resample::DEFAULT_MODE)
         current_rate = self.sample_rate
         self.at_rate(current_rate * multiplier).resample(current_rate, mode: mode)
