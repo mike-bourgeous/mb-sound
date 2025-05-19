@@ -45,26 +45,35 @@ else
   puts "\e[38;5;243mMIDI disabled (jackd not detected)\e[0m"
 end
 
-bufsize = output.buffer_size
-buftime = bufsize.to_f / output.sample_rate
+oversample = ENV['OVERSAMPLE']&.to_f || 2
+processing_sample_rate = output.sample_rate * oversample
+
+internal_buffer = 64
+
+internal_buftime = internal_buffer.to_f / processing_sample_rate
 
 puts MB::U.highlight({
   delay: delay,
-  bufsize: bufsize,
-  buftime: buftime,
+  bufsize: output.buffer_size,
+  internal_bufsize: internal_buffer,
+  sample_rate: output.sample_rate,
+  oversample: oversample,
+  internal_buftime: internal_buftime,
 })
 
 begin
   # TODO: Abstract construction of a filter graph per channel
   paths = inputs.map.with_index { |inp, idx|
+    inp = inp.with_buffer(inp.buffer_size).resample(mode: :libsamplerate_fastest)
+
     # Feedback buffers, overwritten by later calls to #spy
-    a = Numo::SFloat.zeros(bufsize)
+    a = Numo::SFloat.zeros(internal_buffer)
 
     # TODO: Allow base delay and loop length? or mindelay and maxdelay?
     # TODO: Smooth delay over longer than one frame
     # TODO: It would be cool to be able to crossfade the delay time jump; this
     # could be possible with a multi-tap delay
-    delayconst = (delay.constant.named('Delay')).clip(buftime, nil)
+    delayconst = (delay.constant.named('Delay')).clip(internal_buftime, nil)
     lfo_period, delay_delay = delayconst.tee
     lfo_period.named('LFO period')
     delay_delay.named('Delay time')
@@ -95,14 +104,14 @@ begin
     # TODO: create a better way to do feedback in node graphs, ideally while
     # automatically compensating for buffer size
     # TODO: implement cross-channel feedback
-    d_fb1, d_fb2 = (d2 - bufsize.to_f / output.sample_rate).clip(0, nil).named('d_fb').tee
+    d_fb1, d_fb2 = (d2 - internal_buftime).clip(0, nil).named('d_fb').tee
     d_fb_amp = amp2.multitap(d_fb1)[0] # delay the amp lfo to match the feedback delay (FIXME: this seems to be off; it lets through some aliasing noise on each cycle; or maybe it's in both LFOs)
     fb_return = 0.constant.proc { a }.multitap(d_fb2)[0] * d_fb_amp
     wet = (feedback * fb_return + delayed).softclip(0.85, 0.95).spy { |z| a[] = z if z }
 
     dryconst = dry_level.constant.named('Dry level')
     wetconst = wet_level.constant.named('Wet level')
-    final = (s2 * dryconst + wet * wetconst).softclip(0.85, 0.95)
+    final = (s2 * dryconst + wet * wetconst).softclip(0.85, 0.95).with_buffer(internal_buffer).oversample(oversample, mode: :libsamplerate_fastest)
 
     # GraphVoice provides on_cc to generate a cc map for the MIDI manager
     # (TODO: probably a better way to do this, also need on_bend, on_pitch, etc)

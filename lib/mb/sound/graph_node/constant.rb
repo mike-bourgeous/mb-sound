@@ -43,7 +43,7 @@ module MB
           raise 'The constant value must be a numeric' unless constant.is_a?(Numeric)
           @constant = constant
           @complex = @constant.is_a?(Complex)
-          @old_constant = constant
+          @old_constant = nil
           @smoothing = smoothing
           @buf = nil
 
@@ -54,6 +54,7 @@ module MB
 
         # Returns +count+ samples of the constant value.
         def sample(count)
+          @old_constant ||= @constant
           @complex ||= @constant.is_a?(Complex)
 
           if @duration_samples

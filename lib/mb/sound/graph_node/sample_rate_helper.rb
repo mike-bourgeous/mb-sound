@@ -88,7 +88,7 @@ module MB
         # node's sample rate to match, or setting the +other+ node's sample
         # rate to match.  Raises an error if the +other+ node does not support
         # changing sample rates and the rate does not match.
-        def check_rate(other, idx_or_name = sources.length)
+        def check_rate(other, idx_or_name = sources&.length)
           if other.respond_to?(:sample_rate)
             @sample_rate ||= other.sample_rate
             if other.sample_rate != @sample_rate

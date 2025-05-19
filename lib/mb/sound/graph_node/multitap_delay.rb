@@ -8,11 +8,14 @@ module MB
       #
       # Use GraphNode#multitap_delay to create a multi-tap delay in a graph.
       class MultitapDelay
+        include SampleRateHelper
+
         # One output tap from the multitap delay.
         class DelayTap
           extend Forwardable
 
           include GraphNode
+          include SampleRateHelper
 
           # Graph nodes or numeric values that feed into this delay tap for
           # audio or delay time.
@@ -40,6 +43,7 @@ module MB
 
             else
               raise 'Delay must be Numeric or respond to :sample' unless delay_samples.respond_to?(:sample)
+              check_rate(delay_samples, index)
               @delay_samples = delay_samples
             end
 
@@ -57,6 +61,15 @@ module MB
 
             @mtd.internal_sample(self, delay_buf)
           end
+
+          # Changes the sample rate of all taps on this multitap delay and all
+          # upstream nodes.
+          def sample_rate=(new_rate)
+            super
+            @mtd.sample_rate = new_rate
+            self
+          end
+          alias at_rate sample_rate=
         end
 
         # An Array of the individual output nodes.
@@ -86,6 +99,7 @@ module MB
           @named = false
 
           @sample_rate = sample_rate.to_f
+          @sample_rate_node = @sample_rate.constant
           @source = source
           @sources = [source].freeze
 
@@ -101,7 +115,7 @@ module MB
             DelayTap.new(
               mtd: self,
               index: idx,
-              delay_samples: d * @sample_rate
+              delay_samples: d * @sample_rate_node
             )
           }
 
@@ -126,6 +140,15 @@ module MB
         def named?
           @named
         end
+
+        # Changes the sample rate of the delay and all upstream nodes.
+        def sample_rate=(new_rate)
+          super
+          @sample_rate = sample_rate.to_f
+          @sample_rate_node.constant = @sample_rate
+          self
+        end
+        alias at_rate sample_rate=
 
         # Do not use directly.  Called by DelayTap#sample to retrieve the
         # delayed output for a given tap.

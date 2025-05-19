@@ -33,7 +33,7 @@ module MB
 
           include GraphNode
 
-          def_delegators :@split, :sample_rate, :sample_rate=, :at_rate, :sources
+          def_delegators :@split, :sample_rate, :sample_rate=, :at_rate, :sources, :buffer_size
 
           # For internal use by InputChannelSplit.  Initializes one output
           # channel of the split.
@@ -60,7 +60,7 @@ module MB
         # The channels from the InputChannelSplit (see IOSampleMixin#split).
         attr_reader :channels
 
-        def_delegators :@source, :sample_rate
+        def_delegators :@source, :sample_rate, :buffer_size
 
         # Creates a InputChannelSplit from the given +source+, with up to
         # +:max_channels+ channels.  Generally for internal use by
