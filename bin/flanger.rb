@@ -95,11 +95,11 @@ else
   puts "\e[38;5;243mMIDI disabled (jackd not detected)\e[0m"
 end
 
-bufsize = output.buffer_size
-internal_bufsize = 64
-internal_bufsize -= 1 until bufsize % internal_bufsize == 0
+oversample = ENV['OVERSAMPLE']&.to_f || 2
 
-oversample = ENV['OVERSAMPLE']&.to_f || 3
+bufsize = output.buffer_size
+internal_bufsize = (24 * oversample).ceil
+
 delay_samples = delay * output.sample_rate * oversample
 delay_samples = 0 if delay_samples < 0
 range = depth * delay_samples
@@ -172,7 +172,7 @@ begin
     # constant.proc; e.g. maybe a node that takes a pointer to a buffer and
     # always returns the buffer
     d_fb = (d2 - internal_bufsize).clip(0, nil)
-    b = 0.constant.proc { a }.delay(samples: d_fb, smoothing: delay_smoothing2)
+    b = 0.constant.proc { a }.delay(samples: d_fb, smoothing: delay_smoothing2, sample_rate: input.sample_rate * oversample)
 
     # Effected output, with a spy to save feedback buffer
     wet = (feedback * b - s2).softclip(0.85, 0.95).spy { |z| a[] = z if z }
