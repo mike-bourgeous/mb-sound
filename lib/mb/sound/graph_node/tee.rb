@@ -37,7 +37,7 @@ module MB
 
           attr_reader :index
 
-          def_delegators :@tee, :sample_rate, :sample_rate=, :at_rate
+          def_delegators :@tee, :sample_rate, :sample_rate=
 
           # For internal use by Tee.  Initializes one parallel branch of the tee.
           def initialize(tee, index)
@@ -55,6 +55,12 @@ module MB
           # Returns an Array containing the source node feeding into the Tee.
           def sources
             @tee.sources
+          end
+
+          # Wraps upstream #at_rate to return self instead of upstream.
+          def at_rate(new_rate)
+            @tee.at_rate(new_rate)
+            self
           end
 
           # Describes this branch as a String.
@@ -76,7 +82,7 @@ module MB
         # The branches from the Tee (see GraphNode#tee).
         attr_reader :branches
 
-        def_delegators :@source, :sample_rate, :sample_rate=, :at_rate
+        def_delegators :@source, :sample_rate, :sample_rate=
 
         # Creates a Tee from the given +source+, with +n+ branches.  Generally
         # for internal use by GraphNode#tee.
@@ -92,6 +98,12 @@ module MB
           @readers = Array.new(n) { @cbuf.reader }
 
           @done = false
+        end
+
+        # Wraps upstream #at_rate to return self instead of upstream.
+        def at_rate(new_rate)
+          @source.at_rate(new_rate)
+          self
         end
 
         # For internal use by Branch#sample.  Fills the internal circular

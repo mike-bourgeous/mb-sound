@@ -164,6 +164,8 @@ RSpec.describe(MB::Sound::GraphNode::BufferAdapter, :aggregate_failures) do
       a = 10.constant
       b = a.with_buffer(123)
 
+      expect(b).to be_a(MB::Sound::GraphNode::BufferAdapter)
+
       b.sample_rate = 51515
 
       expect(a.sample_rate).to eq(51515)
@@ -172,11 +174,13 @@ RSpec.describe(MB::Sound::GraphNode::BufferAdapter, :aggregate_failures) do
   end
 
   describe '#at_rate' do
-    it 'delegates to the source' do
+    it 'delegates to the source but returns self' do
       a = 10.constant
       b = a.with_buffer(123)
 
-      b.sample_rate = 51515
+      expect(b).to be_a(MB::Sound::GraphNode::BufferAdapter)
+
+      expect(b.at_rate(51515)).to equal(b)
 
       expect(a.sample_rate).to eq(51515)
       expect(b.sample_rate).to eq(51515)

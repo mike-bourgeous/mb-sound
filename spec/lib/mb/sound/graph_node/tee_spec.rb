@@ -114,7 +114,7 @@ RSpec.describe(MB::Sound::GraphNode::Tee) do
       source = 100.constant
       t1, t2 = MB::Sound::GraphNode::Tee.new(source).branches
 
-      t1.at_rate(5432)
+      expect(t1.at_rate(5432)).to equal(t1)
 
       expect(t1.sample_rate).to eq(5432)
       expect(t2.sample_rate).to eq(5432)

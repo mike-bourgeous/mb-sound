@@ -17,7 +17,7 @@ module MB
 
         attr_reader :upstream_count
 
-        def_delegators :@upstream, :sample_rate, :sample_rate=, :at_rate
+        def_delegators :@upstream, :sample_rate, :sample_rate=
 
         # Creates a buffer adapter with the given +:upstream+ node to sample,
         # using the given +:upstream_count+ as the value passed to the upstream
@@ -33,6 +33,12 @@ module MB
         # Returns the upstream as the only source for this node.
         def sources
           [@upstream]
+        end
+
+        # Wraps upstream #at_rate to return self instead of upstream.
+        def at_rate(new_rate)
+          @upstream.at_rate(new_rate)
+          self
         end
 
         # Returns +count+ samples, using as many or as few reads from the
