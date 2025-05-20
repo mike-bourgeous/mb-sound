@@ -58,6 +58,11 @@ module MB
 
             return nil if audio.nil? || cutoff.nil? || quality.nil? || audio.empty? || cutoff.empty? || quality.empty?
 
+            min_length = [audio.length, cutoff.length, quality.length].min
+            audio = audio[0...min_length]
+            cutoff = cutoff[0...min_length]
+            quality = quality[0...min_length]
+
             audio.inplace! if in_place
 
             @filter.dynamic_process(audio, cutoff, quality).not_inplace!

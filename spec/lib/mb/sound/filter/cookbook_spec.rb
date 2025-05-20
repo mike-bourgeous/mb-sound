@@ -59,6 +59,21 @@ RSpec.describe(MB::Sound::Filter::Cookbook, :aggregate_failures) do
       expect(wrapper.sample(100)).to eq(nil)
     end
 
+    it 'truncates to the shortest input length' do
+      a1 = MB::Sound::ArrayInput.new(data: Numo::SFloat[1,2,3,4])
+      a2 = MB::Sound::ArrayInput.new(data: Numo::SFloat[1,2,3,4,5])
+      a3 = MB::Sound::ArrayInput.new(data: Numo::SFloat[1,2,3,4,5,6,7])
+
+      f = a1.dup.filter(:lowpass, cutoff: a2.dup, quality: a3.dup)
+      expect(f.sample(7).length).to eq(4)
+
+      f = a2.dup.filter(:lowpass, cutoff: a1.dup, quality: a3.dup)
+      expect(f.sample(7).length).to eq(4)
+
+      f = a3.dup.filter(:lowpass, cutoff: a2.dup, quality: a1.dup)
+      expect(f.sample(7).length).to eq(4)
+    end
+
     describe '#at_rate' do
       it 'can change sample rate on the fly' do
         a = 50.hz.square
