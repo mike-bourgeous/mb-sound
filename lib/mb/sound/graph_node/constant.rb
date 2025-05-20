@@ -62,7 +62,7 @@ module MB
 
             # Return less than requested if we have nearly reached the duration set by #for
             if @elapsed_samples + count >= @duration_samples
-              count = @duration_samples - @elapsed_samples
+              count = (@duration_samples - @elapsed_samples).round
             end
           end
 

@@ -106,6 +106,11 @@ RSpec.describe(MB::Sound::BufferHelper, :aggregate_failures) do
         bufhelper.setup_buffer(length: 3, complex: true, temp: temp, double: false)
         expect(buf).to be_a(Numo::SComplex).and eq(Numo::SComplex[1,2,3])
       end
+
+      it 'rounds lengths up using .ceil' do
+        bufhelper.setup_buffer(length: 7.1, temp: temp)
+        expect(buf.length).to eq(8)
+      end
     end
 
     context 'when :temp is false' do

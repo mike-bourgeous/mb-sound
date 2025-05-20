@@ -27,7 +27,7 @@ module MB
       # If +:double+ is true, then double-precision buffers are used.
       # Otherwise the method will create single-precision buffers.
       def setup_buffer(length:, complex: false, temp: false, double: false)
-        @buflen = length
+        @buflen = length.ceil
         @bufcomplex = complex
         @buftemp = temp
         @bufdouble = double
@@ -99,7 +99,7 @@ module MB
       # Creates or converts the given buffer to the current type and length and
       # returns the buffer.  For use by #setup_buffer.
       def create_or_convert_buffer(b)
-        if b.nil?
+        if b.nil? || b.length == 0
           # Buffer doesn't exist; create it
           b = @bufclass.zeros(@buflen)
         elsif b.class != @bufclass
