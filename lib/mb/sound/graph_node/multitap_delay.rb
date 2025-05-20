@@ -99,7 +99,7 @@ module MB
           @named = false
 
           @sample_rate = sample_rate.to_f
-          @sample_rate_node = @sample_rate.constant
+          @sample_rate_node = @sample_rate.constant(smoothing: false)
           @source = source
           @sources = [source].freeze
 
