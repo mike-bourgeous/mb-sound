@@ -19,7 +19,6 @@ module MB
         def initialize(*sources, sample_rate: nil)
           @sources = nil
           @current_sources = nil
-          @circbuf = MB::Sound::CircularBuffer.new(buffer_size: 48000, complex: false, double: false)
           @sample_rate = sample_rate
 
           and_then(*sources)
@@ -27,6 +26,8 @@ module MB
           unless @sample_rate
             raise "No sources provided a sample rate.  Provide a sample_rate parameter to the constructor."
           end
+
+          @circbuf = MB::Sound::CircularBuffer.new(buffer_size: @sample_rate.ceil, complex: false, double: false)
         end
 
         # Retrieves the next +count+ samples of audio from the current source, or
@@ -37,7 +38,6 @@ module MB
         def sample(count)
           return nil if @circbuf.empty? && @current_sources.empty?
 
-          # FIXME: handle count larger than the circular buffer size
           # TODO: Preserve depleted sources so node graphs can be reset or looped
           while @circbuf.length < count && @current_sources.any?
             buf = @current_sources[0].sample(count)
@@ -45,6 +45,10 @@ module MB
             if buf.nil? || buf.empty?
               @current_sources.shift
             else
+              if @circbuf.available < buf.length
+                @circbuf = @circbuf.dup(@circbuf.buffer_size + buf.length)
+              end
+
               @circbuf.write(buf)
             end
           end
