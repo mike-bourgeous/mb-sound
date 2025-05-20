@@ -28,10 +28,16 @@ RSpec.describe(MB::Sound::GraphNode::Quantize, :aggregate_failures) do
     expect(complex_data.dup.quantize(0.33).sample(7)).to eq(Numo::DComplex[0.33, 0.66i, 0.66, -0.33i, -0.66, -0.66i, -0.33+0.66i])
   end
 
-  # TODO: fix this when nans and infinities are handled correctly in the input data
+  # TODO: fix this when nans and infinities are handled correctly in the input data (or should we just let nan and infinity do what they do??)
   pending 'nans and infinities'
 
-  it 'raises an error if the upstream rate and the increment rate are different' do
-    expect { 10.hz.at_rate(1000).quantize(10.hz.at_rate(1001)) }.to raise_error(/sample rate/)
+  it 'changes the increment sample rate to match the upstream' do
+    a = 10.hz.at_rate(1000)
+    b = 10.hz.at_rate(1001)
+    q = a.quantize(b)
+
+    expect(a.sample_rate).to eq(1000)
+    expect(b.sample_rate).to eq(1000)
+    expect(q.sample_rate).to eq(1000)
   end
 end

@@ -71,6 +71,7 @@ module MB
             unless mask.all?
               # There are zeros, nans, or infinities, so we need to mask them.
               # FIXME: this only handles zeros, not nans or infinities
+              # TODO: should we just let nan and infinity do what they do??
               inc = inc.dup + ~mask
               result = (data.dup.inplace / inc).round * inc
               return data * ~mask + result * mask
