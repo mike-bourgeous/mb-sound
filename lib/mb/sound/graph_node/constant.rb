@@ -66,6 +66,8 @@ module MB
             end
           end
 
+          return nil if count == 0
+
           @elapsed_samples += count
 
           setup_buffer(length: count, complex: @complex)

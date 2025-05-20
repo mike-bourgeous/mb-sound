@@ -28,6 +28,8 @@ module MB
       # Otherwise the method will create single-precision buffers.
       def setup_buffer(length:, complex: false, temp: false, double: false)
         @buflen = length.ceil
+        raise "Buffer length #{length} (rounded to #{@buflen}) cannot be zero" if @buflen == 0
+
         @bufcomplex = complex
         @buftemp = temp
         @bufdouble = double
