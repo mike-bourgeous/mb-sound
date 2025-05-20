@@ -49,13 +49,14 @@ end
 oversample = ENV['OVERSAMPLE']&.to_f || 2
 processing_sample_rate = output.sample_rate.to_f * oversample
 
-internal_buffer = 64
-buftime = internal_buffer.to_f * processing_sample_rate
+internal_buffer = 128
+buftime = internal_buffer.to_f / processing_sample_rate
 
 puts MB::U.highlight({
   delay: base_delay_s,
   internal_buffer: internal_buffer,
   buftime: buftime,
+  processing_rate: processing_sample_rate,
 })
 
 NUM_TAPS = 6
@@ -86,7 +87,7 @@ begin
 
     mix = MB::Sound::GraphNode::Mixer.new(filtered_taps)
 
-    final = mix.oversample(oversample, mode: :libsamplerate_fastest)
+    final = mix.with_buffer(internal_buffer).oversample(oversample, mode: :libsamplerate_fastest)
 
     # GraphVoice provides on_cc to generate a cc map for the MIDI manager
     # (TODO: probably a better way to do this, also need on_bend, on_pitch, etc)
