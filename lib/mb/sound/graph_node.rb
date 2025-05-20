@@ -109,17 +109,39 @@ module MB
       # signal graph.  For signal graphs, each numerator value is divided
       # by the corresponding denominator value at the same index.
       def /(other)
+        # TODO: can we deduplicate arithmetic proc nodes?
         if other.respond_to?(:sample)
-          self.proc { |v|
-            v.inplace!
-            v / other.sample(v.length)
-            v.not_inplace!
+          self.proc(other) { |v|
+            next nil if v.nil? || v.empty?
+
+            data = other.sample(v.length)
+
+            if data.nil? || data.empty?
+              nil
+            else
+              if data.length != v.length
+                # TODO: allow choosing between zero padding and truncation?
+                min_length = MB::M.min(data.length, v.length)
+                data = data[0...min_length]
+                v = v[0...min_length]
+              end
+
+              # We can't return v in case types differ, as the type promotion
+              # will create a new object.
+              # TODO: should we be operating in place here?  This could modify
+              # the source of an upstream ArrayInput for example.
+              v.inplace!
+              (v / data).not_inplace!
+            end
           }
         else
-          self.proc { |v|
-            v.inplace!
-            v / other
-            v.not_inplace!
+          self.proc(other) { |v|
+            if v.nil? || v.empty?
+              nil
+            else
+              v.inplace!
+              (v / other).not_inplace!
+            end
           }
         end
       end
@@ -127,25 +149,38 @@ module MB
       # Appends a node that raises the incoming values to +other+, which should
       # be either a numeric or another signal graph.
       def **(other)
+        # TODO: can we deduplicate arithmetic proc nodes?
         if other.respond_to?(:sample)
           self.proc(other) { |v|
+            next nil if v.nil? || v.empty?
+
             data = other.sample(v.length)
-            if v.nil? || data.nil?
+
+            if data.nil? || data.empty?
               nil
             else
+              if data.length != v.length
+                # TODO: allow choosing between zero padding and truncation?
+                min_length = MB::M.min(data.length, v.length)
+                data = data[0...min_length]
+                v = v[0...min_length]
+              end
+
+              # We can't return v in case types differ, as the type promotion
+              # will create a new object.
+              # TODO: should we be operating in place here?  This could modify
+              # the source of an upstream ArrayInput for example.
               v.inplace!
-              v ** data
-              v.not_inplace!
+              (v ** data).not_inplace!
             end
           }
         else
           self.proc(other) { |v|
-            if v.nil?
+            if v.nil? || v.empty?
               nil
             else
               v.inplace!
-              v ** other
-              v.not_inplace!
+              (v ** other).not_inplace!
             end
           }
         end

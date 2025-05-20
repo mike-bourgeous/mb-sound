@@ -21,9 +21,8 @@ module MB
           data = read(count)
           return nil if data.nil? || data.empty? || data[0].empty?
 
-          buf = data[0]
-          buf = MB::M.zpad(buf, count) if buf.length < count
-          buf
+          # TODO: should this sum channels?
+          data[0]
         end
 
         # Overrides the default GraphNode#graph_node_name reader to try to

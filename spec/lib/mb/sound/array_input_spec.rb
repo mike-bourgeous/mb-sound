@@ -10,6 +10,11 @@ RSpec.describe(MB::Sound::ArrayInput, :aggregate_failures) do
       expect(arr.channels).to eq(1)
     end
 
+    it 'raises an error if given no data' do
+      expect { MB::Sound::ArrayInput.new(data: nil) }.to raise_error(/No data/)
+      expect { MB::Sound::ArrayInput.new(data: []) }.to raise_error(/No data/)
+    end
+
     shared_examples_for :type_promotion do
       it "returns the correct promoted type for the inputs" do
         result = input.read(data[0].length)
@@ -284,10 +289,10 @@ RSpec.describe(MB::Sound::ArrayInput, :aggregate_failures) do
   end
 
   describe '#sample' do
-    it 'returns the first channel data, with zero padding' do
+    it 'returns the first channel data, without zero padding' do
       input = MB::Sound::ArrayInput.new(data: [[1, 2, 3, 4+4i], [4, 3, 2, 1]], sample_rate: 1)
       expect(input.sample(2)).to eq(Numo::DComplex[1, 2])
-      expect(input.sample(3)).to eq(Numo::DComplex[3, 4+4i, 0])
+      expect(input.sample(3)).to eq(Numo::DComplex[3, 4+4i])
     end
   end
 end

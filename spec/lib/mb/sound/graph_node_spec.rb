@@ -59,36 +59,71 @@ RSpec.describe(MB::Sound::GraphNode) do
     end
   end
 
-  describe '#/' do
-    it 'can divide a graph node by a number' do
-      n = 15.constant / 5
-      expect(n.sample(10)).to eq(Numo::SFloat.zeros(10).fill(3))
+  describe 'proc-based arithmetic' do
+    let(:nilnode) { MB::Sound::ArrayInput.new(data: Numo::SFloat[]) }
+    let(:shortnode) { MB::Sound::ArrayInput.new(data: Numo::SComplex[1, 2, 3]) }
+    let(:longnode) { MB::Sound::ArrayInput.new(data: Numo::DFloat[1,2,3,4,5,6,7,8,9,10]) }
+    let(:emptynode) {
+      nilnode.dup.tap { |n|
+        allow(n).to receive(:sample).and_return(Numo::DFloat[])
+      }
+    }
+
+    shared_examples_for 'an arithmetic operator' do
+      it 'can operate on a graph node and a number' do
+        n = 15.constant.send(operator, 5)
+        expect(n.sample(10)).to eq(expected_graph_number)
+      end
+
+      it 'can operate on two graph nodes' do
+        n = 15.constant.send(operator, longnode)
+        expect(n.sample(10)).to eq(expected_graph_graph)
+      end
+
+      it 'can operate on a number and a graph node' do
+        n = 4.send(operator, 2.constant)
+        expect(n.sample(10)).to eq(expected_number_graph)
+      end
+
+      it 'returns nil for nil' do
+        expect(nilnode.send(operator, shortnode).sample(3)).to eq(nil)
+        expect(shortnode.send(operator, nilnode).sample(3)).to eq(nil)
+      end
+
+      it 'returns nil for empty arrays' do
+        expect(emptynode.send(operator, shortnode).sample(3)).to eq(nil)
+        expect(shortnode.send(operator, emptynode).sample(3)).to eq(nil)
+      end
+
+      it 'truncates short reads from self' do
+        expect(shortnode.send(operator, longnode).sample(10)).to eq(expected_short_long)
+      end
+
+      it 'truncates short reads from other' do
+        expect(longnode.send(operator, shortnode).sample(10)).to eq(expected_long_short)
+      end
     end
 
-    it 'can divide a graph node by another graph node' do
-      n1 = 15.constant
-      n2 = 5.constant
-      n3 = n1 / n2
-      expect(n3.sample(10)).to eq(Numo::SFloat.zeros(10).fill(3))
+    describe '#/' do
+      let(:operator) { :/ }
+      let(:expected_graph_number) { Numo::SFloat[*([3] * 10)] }
+      let(:expected_graph_graph) { Numo::DFloat[15, 7.5, 5, 3.75, 3, 15.0 / 6, 15.0 / 7, 1.875, 15.0 / 9, 1.5] }
+      let(:expected_number_graph) { Numo::SFloat[*([2] * 10)] }
+      let(:expected_short_long) { Numo::SFloat[1,1,1] }
+      let(:expected_long_short) { expected_short_long }
+
+      it_behaves_like 'an arithmetic operator'
     end
 
-    it 'can divide a number by a graph node' do
-      n = 4 / 2.constant
-      expect(n.sample(10)).to eq(Numo::SFloat.zeros(10).fill(2))
-    end
-  end
+    describe '#**' do
+      let(:operator) { :** }
+      let(:expected_graph_number) { Numo::SFloat[*([759375] * 10)] }
+      let(:expected_graph_graph) { 15 ** Numo::DFloat.linspace(1, 10, 10) }
+      let(:expected_number_graph) { Numo::DFloat[*([16] * 10)] }
+      let(:expected_short_long) { Numo::SFloat[1, 4, 27] }
+      let(:expected_long_short) { expected_short_long }
 
-  describe '#**' do
-    it 'can raise a graph node to a numeric power' do
-      n = 4.constant ** 0.5
-      expect(n.sample(10)).to eq(Numo::SFloat.zeros(10).fill(2))
-    end
-
-    it 'can raise a graph node to a graph node' do
-      n1 = 2.constant
-      n2 = 3.constant
-      n3 = n2 ** n1
-      expect(n3.sample(10)).to eq(Numo::SFloat.zeros(10).fill(9))
+      it_behaves_like 'an arithmetic operator'
     end
   end
 

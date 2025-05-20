@@ -13,6 +13,9 @@ module MB
       # until all channels have ended.
       def initialize(data:, sample_rate: 48000, buffer_size: 800, repeat: false)
         data = [data] if data.is_a?(Numo::NArray)
+
+        raise "No data given to ArrayInput (nest two arrays like [[]] if you want to use an empty Array)" if data.nil? || data.empty?
+
         data = data.map { |v| Numo::NArray.cast(v) }
 
         @buffer_size = buffer_size
