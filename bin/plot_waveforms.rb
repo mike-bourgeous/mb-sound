@@ -15,7 +15,7 @@ plots = MB::Sound::Oscillator::WAVE_TYPES.flat_map { |w|
 
   osc = MB::Sound::Oscillator.new(w)
   time = input.map { |v|
-    osc.oscillator(v.real % (2.0 * Math::PI))
+    osc.value_at(v.real % (2.0 * Math::PI))
   }
   freq = MB::Sound.fft(time).abs.map(&:to_db)
 

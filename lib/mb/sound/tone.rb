@@ -411,9 +411,6 @@ module MB
       #     200.hz.fm(600.hz.at(1000)).fm(300.hz.at(1000))
       #     # or
       #     200.hz.fm(600.hz.at(1000) + 300.hz.at(1000))
-      #
-      # TODO: Consider implementing phase modulation to create DX7-like sounds.
-      # Would need to update both the Ruby and C oscillator code.
       def fm(tone, index = nil)
         tone = tone.hz if tone.is_a?(Numeric)
         tone = tone.at(1) if index && tone.is_a?(Tone)

@@ -137,6 +137,9 @@ module MB
       #             to #sample.  This should be (2 * Math::PI / sample_rate)
       #             for audio oscillators.
       # +random_advance+ - The internal phase is incremented by a random value up to this amount on top of +advance+.
+      #
+      # TODO: it probably makes sense to move pre_power/post_power elsewhere if
+      # possible, e.g. a new waveshaper node or something
       def initialize(wave_type, frequency: 1.0, phase: 0.0, phase_mod: nil, range: nil, pre_power: 1.0, post_power: 1.0, advance: Math::PI / 24000.0, random_advance: 0.0, no_trigger: false)
         unless WAVE_TYPES.include?(wave_type)
           raise "Invalid wave type #{wave_type.inspect}; only #{WAVE_TYPES.map(&:inspect).join(', ')} are supported"
@@ -168,6 +171,7 @@ module MB
         @no_trigger = !!no_trigger
 
         @osc_buf = nil
+        @truncated = false
       end
 
       # The sample rate of the oscillator (calculated from the phase advance
@@ -263,7 +267,7 @@ module MB
       # 2pi.  The output value ranges from -1 to 1.  The power, range, and
       # other modifiers to the oscillator are not applied by this method (see
       # #sample).
-      def oscillator_ruby(phi)
+      def value_at_ruby(phi)
         case @wave_type
         when :sine
           s = Math.sin(phi)
@@ -363,8 +367,16 @@ module MB
         s
       end
 
-      def oscillator(phi)
+      # Returns the instantaneous value of the oscillator at the given phase
+      # value +phi+ (C implementation).
+      def value_at_c(phi)
         return MB::FastSound.osc(@wave_type, phi)
+      end
+
+      # Returns the instantaneous value of the oscillator at the given phase
+      # value +phi+.
+      def value_at(phi)
+        value_at_c(phi)
       end
 
       # Returns the next value (or +count+ values in an NArray, if specified)
@@ -373,30 +385,17 @@ module MB
       # Note that future calls to this method may overwrite the buffer returned
       # by previous calls.
       def sample(count = nil)
-        buf = sample_c(count)
-
-        # TODO: Move all waveshaping into a separate class
-        if @pre_power != 1.0
-          buf = MB::M.safe_power(buf, @pre_power)
-          buf = MB::M.clamp(buf * NEGATIVE_POWER_SCALE[@wave_type], -1.0, 1.0) if @pre_power < 0
-          buf = MB::M.scale(buf, -1.0..1.0, @range) if @range
-        end
-
-        buf = MB::M.safe_power(buf, @post_power) if @post_power != 1.0
-
-        buf
+        sample_c(count)
       end
 
+      # Oscillator implementation in C.
       def sample_c(count = nil)
         return sample_c(1)[0] if count.nil?
 
+        count, freq, phase = get_upstream_inputs(count)
+        return nil if freq.nil? || phase.nil?
+
         build_buffer(count)
-
-        freq = @frequency
-        freq = freq.sample(count) if freq.respond_to?(:sample)
-
-        phase = @phase_mod || 0
-        phase = phase.sample(count) if phase.respond_to?(:sample)
 
         if @range && @pre_power == 1.0
           gain = (@range.last - @range.first) / 2.0
@@ -409,7 +408,7 @@ module MB
         state = [@phi]
 
         buf = MB::FastSound.synthesize(
-          @osc_buf.inplace!,
+          @osc_buf[0...count].inplace!,
           wave_type,
           freq,
           phase,
@@ -418,47 +417,49 @@ module MB
           gain,
           offset,
           state
-        )
+        ).inplace!
 
         @phi = state[0]
+
+        buf = add_waveshape_and_range(buf)
 
         buf.not_inplace!
       end
 
+      # Oscillator implementation in Ruby.
       def sample_ruby(count = nil)
         return sample_ruby(1)[0] if count.nil?
 
+        count, freq_table, phase_table = get_upstream_inputs(count)
+        return nil if freq_table.nil? || phase_table.nil?
+
         build_buffer(count)
 
-        freq = @frequency
-        freq_table = freq.sample(count) if freq.respond_to?(:sample)
-
-        phase = @phase_mod || 0
-        phase_table = phase.sample(count) if phase.respond_to?(:sample)
+        if @range && @pre_power == 1.0
+          gain = (@range.last - @range.first) / 2.0
+          offset = (@range.first + @range.last) / 2.0
+        else
+          gain = 1
+          offset = 0
+        end
 
         count.times do |idx|
-          # TODO: this doesn't modulate strongly enough
-          # FM attempt:
-          # fm = Oscillator.new(
-          #   :sine,
-          #   frequency: Oscillator.new(:sine, frequency: 220, range: -970..370, advance: Math::PI / 24000),
-          #   advance: Math::PI / 24000
-          # )
-          freq = freq_table[idx] if freq_table
-          phase = phase_table[idx] if phase_table
+          freq = freq_table.is_a?(Numeric) ? freq_table : freq_table[idx]
+          phase = phase_table.is_a?(Numeric) ? phase_table : phase_table[idx]
 
           advance = @advance
           advance += RAND.rand(@random_advance.to_f) if @random_advance != 0
           delta = freq * advance
 
           # Compensate for sampling offset of some wave types
-          # TODO: Find a way to move this wavetype-specific code out of this function
+          # TODO: Find a way to move this wavetype-specific code out of this
+          # function, e.g into #value_at*
           case @wave_type
           when :complex_square, :complex_ramp
-            result = oscillator(@phi + delta / 2)
+            result = value_at_ruby(@phi + delta / 2) * gain + offset
 
           else
-            result = oscillator(@phi)
+            result = value_at_ruby(@phi) * gain + offset
           end
 
           @phi = (@phi + delta) % (Math::PI * 2)
@@ -467,18 +468,71 @@ module MB
           @osc_buf[idx] = result
         end
 
-        buf = @osc_buf
-        buf = MB::M.scale(buf, -1.0..1.0, @range) if @range && @pre_power == 1.0
+        buf = @osc_buf[0...count].inplace!
+        buf = add_waveshape_and_range(buf)
         buf
       end
 
       private
 
+      # TODO: use BufferHelper?
       def build_buffer(count)
         buf_class = BUFFER_CLASS[@wave_type] || Numo::SFloat
         if @osc_buf.nil? || @osc_buf.class != buf_class || @osc_buf.length != count
-          @osc_buf = buf_class.zeros(count)
+          old_length = @osc_buf&.length || 0
+          @osc_buf = buf_class.zeros(MB::M.max(count, old_length))
         end
+      end
+
+      # This retrieves the upstream frequency and phase modulation buffers,
+      # finds whichever is shortest, truncates to that length, and returns the
+      # new count and buffers.
+      #
+      # Used by #sample
+      #
+      # Raises an error if truncation happens more than once.
+      #
+      # TODO: a lot of classes need this input truncation; it might make sense
+      # to build a shared API around the concept of multiple inputs.
+      def get_upstream_inputs(count)
+        min_length = count
+
+        freq = @frequency
+        if freq.respond_to?(:sample)
+          freq = freq.sample(count)
+          freq = nil if freq&.empty?
+          min_length = freq.length if freq && freq.length < min_length
+        end
+
+        phase = @phase_mod || 0
+        if phase.respond_to?(:sample)
+          phase = phase.sample(count)
+          phase = nil if phase&.empty?
+          min_length = phase.length if phase && phase.length < min_length
+        end
+
+        if min_length != count
+          raise "Truncation happened more than once on oscillator #{self} (try adding .with_buffer to upstreams)" if @truncated
+          @truncated = true
+          freq = freq[0...min_length] if freq&.is_a?(Numo::NArray)
+          phase = phase[0...min_length] if phase&.is_a?(Numo::NArray)
+        end
+
+        return min_length, freq, phase
+      end
+
+      # Applies pre- and post-power waveshaping to the buffer.
+      def add_waveshape_and_range(buf)
+        # TODO: Move all waveshaping into a separate class
+        if @pre_power != 1.0
+          buf = MB::M.safe_power(buf, @pre_power)
+          buf = MB::M.clamp(buf * NEGATIVE_POWER_SCALE[@wave_type], -1.0, 1.0) if @pre_power < 0
+          buf = MB::M.scale(buf, -1.0..1.0, @range) if @range
+        end
+
+        buf = MB::M.safe_power(buf, @post_power) if @post_power != 1.0
+
+        buf
       end
     end
   end

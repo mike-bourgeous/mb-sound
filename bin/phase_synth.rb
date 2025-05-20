@@ -105,8 +105,8 @@ while sample <= phases.last[:start] # XXX <= should be < but testing another con
 
   # phase is divided by 360 for half phase in each channel
   base_phase = sample * freq * 2.0 * Math::PI / RATE
-  data[0][sample] = amp * osc.oscillator((base_phase + phase * Math::PI / 360.0) % (2.0 * Math::PI))
-  data[1][sample] = amp * osc.oscillator((base_phase - phase * Math::PI / 360.0) % (2.0 * Math::PI))
+  data[0][sample] = amp * osc.value_at((base_phase + phase * Math::PI / 360.0) % (2.0 * Math::PI))
+  data[1][sample] = amp * osc.value_at((base_phase - phase * Math::PI / 360.0) % (2.0 * Math::PI))
 
   sample += 1
 
