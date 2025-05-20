@@ -37,6 +37,7 @@ RSpec.describe(MB::Sound::GraphNode::Multiplier) do
       expect(a.sample_rate).to eq(4800)
       expect(b.sample_rate).to eq(4800)
       expect(c.sample_rate).to eq(4800)
+      expect(m.sample_rate).to eq(4800)
     end
 
     it 'changes sample rates to match when using arithmetic' do
@@ -297,8 +298,9 @@ RSpec.describe(MB::Sound::GraphNode::Multiplier) do
 
     it 'appends another multiplicand' do
       m = MB::Sound::GraphNode::Multiplier.new(a, b)
-      m * c
+      q = m * c
       expect(m.graph).to include(c)
+      expect(q).to equal(m)
     end
 
     it 'changes sample rates to match' do
