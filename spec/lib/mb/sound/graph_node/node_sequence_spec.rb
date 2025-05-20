@@ -1,12 +1,9 @@
 RSpec.describe(MB::Sound::GraphNode::NodeSequence) do
   it 'can be constructed by DSL' do
-    # Tones read full buffers always
-    # TODO: prevent Tone from padding lengths when it's used in a sequence like this?
     seq = 0.hz.square.at(5).for(7.0 / 48000).and_then(0.hz.square.at(4).for(4.0 / 48000), Numo::SFloat[-6, -5, -4])
     expect(seq.sample(5)).to eq(Numo::SFloat[5, 5, 5, 5, 5])
-    expect(seq.sample(5)).to eq(Numo::SFloat[5, 5, 5, 5, 5])
-    expect(seq.sample(5)).to eq(Numo::SFloat[4, 4, 4, 4, 4])
-    expect(seq.sample(5)).to eq(Numo::SFloat[-6, -5, -4])
+    expect(seq.sample(5)).to eq(Numo::SFloat[5, 5, 4, 4, 4])
+    expect(seq.sample(5)).to eq(Numo::SFloat[4, -6, -5, -4])
     expect(seq.sample(5)).to eq(nil)
   end
 

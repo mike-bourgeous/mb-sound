@@ -424,9 +424,7 @@ RSpec.describe(MB::Sound::GraphNode) do
 
     it 'handles end of stream part way through concatenation' do
       result = 123.hz.for(5.0 / 48000).multi_sample(2, 10)
-
-      # TODO: have oscillators return short reads and change this from 6 to 5??
-      expect(result.length).to eq(6)
+      expect(result.length).to eq(5)
     end
   end
 

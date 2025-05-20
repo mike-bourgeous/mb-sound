@@ -209,17 +209,38 @@ RSpec.describe MB::Sound::Tone do
   end
 
   describe '#sample' do
-    it 'ends after the expected duration exactly' do
-      # Another test used this pattern of sampling and ended up with 1e-19
-      # seconds remaining, far less than the duration of one sample
-      # Issue was fixed by cutting off at 1e-9 remaining instead of 0.
-      a = 1.hz.square.for(1)
-      expect(a.sample(5000)).to be_a(Numo::SFloat)
-      expect(a.sample(500)).to be_a(Numo::SFloat)
-      expect(a.sample(20000)).to be_a(Numo::SFloat)
-      expect(a.sample(500)).to be_a(Numo::SFloat)
-      expect(a.sample(22000)).to be_a(Numo::SFloat)
-      expect(a.sample(100)).to eq(nil)
+    # TODO: get rid of #generate and move those examples here
+
+    context 'with a duration set' do
+      it 'ends after the expected duration exactly' do
+        a = 1.hz.square.for(1)
+        expect(a.sample(5000)).to be_a(Numo::SFloat)
+        expect(a.sample(500)).to be_a(Numo::SFloat)
+        expect(a.sample(20000)).to be_a(Numo::SFloat)
+        expect(a.sample(500)).to be_a(Numo::SFloat)
+        expect(a.sample(22000)).to be_a(Numo::SFloat)
+        expect(a.sample(100)).to eq(nil)
+      end
+
+      it 'returns a short buffer if the duration does not align with buffer size' do
+        a = 1.hz.square.at(1).for(32.0 / 48000.0)
+        expect(a.sample(30)).to eq(Numo::SFloat.ones(30))
+        expect(a.sample(30)).to eq(Numo::SFloat.ones(2))
+        expect(a.sample(30)).to eq(nil)
+      end
+
+      it 'returns a short buffer if the duration does not align with sample size' do
+        a = 1.hz.square.at(1).for(32.3 / 48000.0)
+        expect(a.sample(30)).to eq(Numo::SFloat.ones(30))
+        expect(a.sample(30)).to eq(Numo::SFloat.ones(2))
+        expect(a.sample(30)).to eq(nil)
+      end
+
+      it 'rounds duration to the nearest sample' do
+        a = 1.hz.square.at(1).for(0.6 / 48000.0)
+        expect(a.sample(30)).to eq(Numo::SFloat.ones(1))
+        expect(a.sample(30)).to eq(nil)
+      end
     end
   end
 
@@ -247,24 +268,35 @@ RSpec.describe MB::Sound::Tone do
   describe '#fm' do
     it_behaves_like 'modulation sources', :fm
 
-    pending
+    pending 'expected output'
   end
 
   describe '#log_fm' do
     it_behaves_like 'modulation sources', :log_fm
 
-    pending
+    pending 'expected output'
   end
 
   describe '#pm' do
     it_behaves_like 'modulation sources', :pm
 
-    pending
+    pending 'expected output'
   end
 
   describe '#for' do
-    pending 'limits duration'
-    pending 'resets elapsed timer'
+    it 'limits duration' do
+      # See also examples for #sample
+      expect(1.hz.square.at(1).for(2.0 / 48000.0).sample(4000)).to eq(Numo::SFloat[1, 1])
+    end
+
+    it 'resets elapsed timer' do
+      t = 1.hz.square.at(1).for(2.0 / 48000.0)
+      expect(t.sample(30)).to eq(Numo::SFloat[1, 1])
+
+      t.for(3.0 / 48000.0)
+
+      expect(t.sample(30)).to eq(Numo::SFloat[1, 1, 1])
+    end
   end
 
   describe '#oscillator' do

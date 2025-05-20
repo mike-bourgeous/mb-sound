@@ -495,7 +495,9 @@ module MB
 
       # Generates +count+ samples of the tone, decrementing the Tone's
       # #duration.  The tone parameters cannot be changed directly after this
-      # method is called; instead Oscillator parameters must be changed.
+      # method is called; instead Oscillator parameters must be changed (TODO:
+      # fix this; maybe combine the two classes or delegate post-creation
+      # updates).
       #
       # This will return nil if the tone has a specified duration and that
       # duration has elapsed.
@@ -503,12 +505,17 @@ module MB
         if @duration
           return nil if @duration <= 0
 
+          # TODO: use a separate elapsed time counter to allow resetting
+          # duration to the beginning
+          remaining = (@duration * @sample_rate).round
+          count = remaining if count > remaining
+
           @duration -= count.to_f / @sample_rate
 
-          if @duration < 0.5 * @single_sample # deal with rounding error
-            @duration = 0
-          end
+          @duration = 0 if remaining == 0 # deal with fraction of a sample
         end
+
+        return nil if count <= 0
 
         oscillator.sample(count.round)
       end

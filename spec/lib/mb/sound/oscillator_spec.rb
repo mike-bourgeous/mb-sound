@@ -289,9 +289,6 @@ RSpec.describe MB::Sound::Oscillator do
 
         expect { osc.sample(10) }.to raise_error(/Truncation/)
       end
-
-      # TODO: duration is currently handled in Tone I think?
-      pending 'generates a short buffer if duration expires'
     end
   end
 
