@@ -76,6 +76,23 @@ play (2.5.hz.ramp.at(1.85) ** 13).filter(10.hz.highpass).softclip(0.1, 0.6).filt
 
 # Thick bass
 play (((42.5.hz.sine + 85.hz.triangle + 42.5.hz.saw) * adsr(0.01, 0.1, 0.5, 0.1).db(-30)).filter(:lowpass, cutoff: adsr(0.01, 0.1, 0.5, 0.1).db(-30) * 1850 + 85, quality: 3) * 8.db).softclip(0.1, 1)
+
+# Oversampling (this tells all graph nodes before .oversample to run at 4x
+# their previous sample rate)
+play 123.hz.ramp.at(1)
+  .pm(61.5.hz.triangle.at(2).adsr(0.05, 1.5, 0.7, 1, log: 10))
+  .adsr(0.2, 0.5, 0.75, 1, log: 20)
+  .filter(:lowpass, cutoff: 100 + 3200 * adsr(0.2, 1.95, 0.05, 1).db(40), quality: 9)
+  .softclip
+  .oversample(4)
+
+# Quantization/decimation
+play 123.hz.ramp.at(1)
+  .pm(61.5.hz.triangle.at(2).adsr(0.05, 1.5, 0.7, 1, log: 10))
+  .adsr(0.2, 0.5, 0.75, 1, log: 20)
+  .filter(:lowpass, cutoff: 100 + 1600 * adsr(0.2, 1.95, 0.05, 1).db(40), quality: 0.7)
+  .softclip
+  .quantize(6.bits).oversample(0.125, mode: :libsamplerate_zoh)
 ```
 
 ## Examples

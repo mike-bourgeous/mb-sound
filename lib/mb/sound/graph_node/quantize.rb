@@ -3,6 +3,7 @@ module MB
     module GraphNode
       class Quantize
         include GraphNode
+        include SampleRateHelper
 
         # Sample rate (does not affect behavior of this node).
         attr_reader :sample_rate
@@ -32,15 +33,18 @@ module MB
             @increment = 0 unless @increment.finite? # clear NaN or Infinity
 
           when GraphNode
-            unless increment.sample_rate == upstream.sample_rate
-              raise "Increment sample rate #{increment.sample_rate} does not match upstream sample rate #{upstream.sample_rate}"
-            end
+            check_rate(increment, 'increment')
 
             @increment = increment
 
           else
             raise "Increment must be a Numeric or a GraphNode (got #{increment.class})"
           end
+        end
+
+        # Returns an Array with the upstream and increment sources.
+        def sources
+          [@upstream, @increment].freeze
         end
 
         # Requests +count+ samples from the upstream node given to the
