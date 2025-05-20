@@ -34,7 +34,7 @@ module MB
         # returns nil if all sources have run out of data.  Sources are
         # stitched together gaplessly unless the source itself zero-pads its
         # output.  If the final source returns too few samples to reach
-        # +count+, then the buffer will be zero-padded to +count+ samples.
+        # +count+, then the short buffer will be returned as-is.
         def sample(count)
           return nil if @circbuf.empty? && @current_sources.empty?
 
@@ -55,8 +55,6 @@ module MB
 
           if @circbuf.length == 0
             nil
-          elsif @circbuf.length < count
-            MB::M.zpad(@circbuf.read(@circbuf.length), count)
           else
             @circbuf.read(MB::M.min(count, @circbuf.length))
           end
