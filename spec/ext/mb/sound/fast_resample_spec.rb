@@ -104,6 +104,13 @@ RSpec.describe(MB::Sound::FastResample, :aggregate_failures) do
         expect(result.sum / result.length - 1).to be_between(-1e-2, 1e-2)
       end
 
+      it 'raises an error if given something other than Numo::SFloat' do
+        # TODO: Better way of changing the callback for tests
+        r_half.instance_variable_set(:@callback, ->(size) { Numo::DFloat.ones(size) })
+
+        expect { r_half.read(100) }.to raise_error(TypeError, /SFloat/)
+      end
+
       it 'can handle a subset view from the read block' do
         # TODO: Better way of changing the callback for tests
         r_double.instance_variable_set(:@callback, ->(size) { Numo::SFloat.zeros(size).concatenate(Numo::SFloat.ones(size))[0...size] })

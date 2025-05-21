@@ -104,7 +104,16 @@ module MB
           when :libsamplerate_best, :libsamplerate_fastest, :libsamplerate_zoh, :libsamplerate_linear
             @fast_resample ||= MB::Sound::FastResample.new(@ratio, @mode) do |size|
               d = @upstream.sample(size)
+
+              # TODO: handle complex by resampling real and imaginary separately?
               d = d.real if d.respond_to?(:real)
+
+              d = Numo::SFloat.cast(d) unless d.is_a?(Numo::SFloat)
+
+              # Ensure GC does not deallocate the buffer (saw a single SIGSEGV
+              # during resampling once, might be due to this)
+              @upstream_buf_gc_guard = d
+
               d
             end
 
