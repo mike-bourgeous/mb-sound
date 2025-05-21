@@ -150,7 +150,7 @@ module MB
       # stored in the buffer.
       #
       # Raises ReaderModeError if the buffer is in multi-reader mode.
-      def dup(new_size)
+      def dup(new_size = @buffer_size)
         len = self.length
         if new_size < len
           raise BufferOverflow, "New buffer size #{new_size} is smaller than data stored in the buffer #{len}"

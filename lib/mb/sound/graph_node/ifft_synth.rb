@@ -36,13 +36,25 @@ module MB
         end
 
         def sample(count)
-          @cbuf ||= MB::Sound::CircularBuffer.new(buffer_size: (@data.length + count) * 2, complex: true)
+          growbuf(count)
 
           while @cbuf.length < count
             @cbuf.write(MB::Sound.real_ifft(@data))
           end
 
-          @cbuf.read(count).not_inplace!.real.dup # XXX
+          @cbuf.read(count)
+        end
+
+        private
+
+        def growbuf(count)
+          size = (@data.length + count) * 2
+
+          @cbuf ||= MB::Sound::CircularBuffer.new(buffer_size: size, complex: true)
+
+          if @cbuf.buffer_size < size
+            @cbuf = @cbuf.dup(size)
+          end
         end
       end
     end
