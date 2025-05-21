@@ -6,8 +6,10 @@ module MB
       # A pool of oscillators managed by MIDI note-on and note-off events,
       # initially based on code from bin/ep2_syn.rb.
       class VoicePool
-        include GraphNode
         extend Forwardable
+
+        include GraphNode
+        include GraphNode::SampleRateHelper
 
         def_delegators :@voices, :each, :map
 
@@ -17,10 +19,11 @@ module MB
         # The pitch bend amount, in fractional semitones.
         attr_reader :bend
 
-        # The sample rate used by the voices in the pool.
-        attr_reader :sample_rate
-
-        # Initializes an oscillator pool with the given array of oscillators.
+        # Initializes a voice pool with the given array of voices.  The
+        # +voices+ may be instances of MB::Sound::Oscillator,
+        # MB::Sound::MIDI::Voice, or MB::Sound::MIDI::GraphVoice.
+        #
+        # TODO: maybe get rid of support for anything but GraphVoice?
         def initialize(manager, voices)
           @voices = voices
           @available = voices.dup
@@ -34,7 +37,7 @@ module MB
 
           @sample_rate = nil
           @voices.each do |v|
-            @sample_rate ||= v.sample_rate if v.respond_to?(:sample_rate)
+            check_rate(v)
           end
           raise 'No voices provided a sample rate' unless @sample_rate
 
@@ -85,7 +88,10 @@ module MB
         def trigger(note, velocity)
           @last = self.next(note)
 
+          # Set inactive voices to the latest note for polyphonic portamento
           @available.each do |voice|
+            next unless voice.respond_to?(:set_note) && voice.respond_to?(:active?)
+
             voice.set_note(note, reset_portamento: true) unless voice.active?
           end
 
@@ -179,6 +185,20 @@ module MB
         def sources
           @voices.select { |v| v.is_a?(GraphNode) }
         end
+
+        # Changes the sample rate of all voices/oscillators/graphs.
+        def sample_rate=(new_rate)
+          super
+          @voices.each do |v|
+            # GraphNodes are handled by SampleRateHelper (super)
+            next if v.is_a?(GraphNode)
+
+            v.sample_rate = @sample_rate
+          end
+
+          self
+        end
+        alias at_rate sample_rate=
       end
     end
   end

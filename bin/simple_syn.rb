@@ -1,6 +1,8 @@
 #!/usr/bin/env ruby
-# Episode 2 of Code Sound & Surround
-# Synthesizahh!!!
+# One-oscillator synthesizer based on MB::Sound::MIDI::Voice (slight upgrade of
+# bin/ep2_syn.rb).
+#
+# GraphVoice is better so use that for building new synths.
 
 require 'bundler/setup'
 
@@ -15,10 +17,13 @@ output = jack.output(port_names: ['Synth', 'Impulse'], channels: 2, connect: :ph
 manager = MB::Sound::MIDI::Manager.new(jack: jack, connect: ARGV[0] || :physical, channel: 0)
 
 OSC_COUNT = 8
+OVERSAMPLE = ENV['OVERSAMPLE']&.to_f || 16
 osc_pool = MB::Sound::MIDI::VoicePool.new(
   manager,
-  OSC_COUNT.times.map { 240.hz.ramp.at(0).oscillator }
-).oversample(16, mode: :libsamplerate_fastest)
+  OSC_COUNT.times.map { MB::Sound::MIDI::Voice.new }
+).real
+  .filter(:lowpass, cutoff: 16000 * MB::M.min(1, OVERSAMPLE))
+  .oversample(OVERSAMPLE, mode: :libsamplerate_fastest)
 
 filter = 1500.hz.lowpass(quality: 4)
 softclip = MB::Sound::SoftestClip.new(threshold: 0.5)
@@ -34,5 +39,5 @@ loop do
   data = osc_pool.sample(output.buffer_size)
   data = filter.process(data)
   data = softclip.process(data * 0.2)
-  output.write([data, filter.impulse_response(output.buffer_size)])
+  output.write([data, data])
 end

@@ -47,6 +47,8 @@ module MB
         # Initializes a synthesizer voice with the given +:wave_type+ (defaulting
         # to sawtooth/ramp wave) and +:filter_type+ (a shortcut on
         # MB::Sound::Tone, defaulting to :lowpass).
+        #
+        # TODO: maybe get rid of this and just use GraphVoice
         def initialize(wave_type: nil, filter_type: :lowpass, amp_envelope: {}, filter_envelope: {}, sample_rate: 48000)
           @filter_intensity = 15.0
           @cutoff = 200.0
@@ -88,6 +90,23 @@ module MB
           @im_filter.reset(@value)
         end
 
+        # Sets the sample rate of the internal oscillator, filters, and
+        # envelopes to the +new_rate+.
+        def sample_rate=(new_rate)
+          new_rate = new_rate.to_f
+
+          @re_filter.sample_rate = new_rate
+          @im_filter.sample_rate = new_rate
+          @oscillator.sample_rate = new_rate
+          @filter_envelope.sample_rate = new_rate
+          @amp_envelope.sample_rate = new_rate
+
+          @sample_rate = new_rate
+
+          self
+        end
+        alias at_rate sample_rate=
+
         # Restarts the amplitude and filter envelopes, and sets the oscillator's
         # pitch to the given note number.
         def trigger(note, velocity)
@@ -126,8 +145,14 @@ module MB
         # Returns +count+ samples of the filtered, amplified oscillator.
         def sample(count)
           buf = @oscillator.sample(count) * @amp_envelope.sample(count) # TODO: per-sample pitch filtering (probably way too slow)
-          re = buf.real
-          im = buf.imag
+
+          if buf.respond_to?(:real)
+            re = buf.real
+            im = buf.imag
+          else
+            re = buf
+            im = Numo::SFloat.zeros(buf.length)
+          end
 
           # TODO: Reduce max quality for higher cutoff and/or oscillator frequencies?
           centers = @cutoff * MB::M.scale(@oscillator.number, 0..127, 0.9..2.0) * @filter_intensity ** @filter_envelope.sample(count)
