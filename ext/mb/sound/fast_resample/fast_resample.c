@@ -159,6 +159,11 @@ static long read_callback(void *data, float **audio)
 		return 0;
 	}
 
+	VALUE buf_class = rb_class_of(buf);
+	if (buf_class != numo_cSFloat) {
+		rb_raise(rb_eTypeError, "Data from read callback is %"PRIsVALUE", not Numo::SFloat", buf_class);
+	}
+
 	*audio = (float *)(nary_get_pointer_for_read(buf) + nary_get_offset(buf));
 
 	narray_t *na;
