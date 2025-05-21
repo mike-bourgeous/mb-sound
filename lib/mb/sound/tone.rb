@@ -4,6 +4,7 @@ module MB
     # for tone generation.
     class Tone
       include GraphNode
+      include GraphNode::SampleRateHelper
 
       # Speed of sound for wavelength calculations, in meters per second.
       SPEED_OF_SOUND = 343.0
@@ -96,6 +97,9 @@ module MB
       end
 
       # Methods to be included in Numeric.
+      #
+      # TODO: many of these are unrelated to Tone itself, so it might make
+      # sense to move some of these methods elsewhere.
       module NumericToneMethods
         # Returns the number of seconds at the given sample rate (default
         # 48kHz).
@@ -128,6 +132,16 @@ module MB
           20.0 * Math.log10(self.abs)
         end
 
+        # Converts this number to the quantization increment of a signed
+        # integer sample with this number of bits.  E.g. 8.bits returns 1.0 /
+        # 128.0.  This works with fractional values as well for e.g. smoothly
+        # varying quantization levels.  It also works with Complex values, but
+        # that's kind of nonsensical.
+        def bits
+          0.5 ** (self - 1)
+        end
+        alias bit bits
+
         # Creates a Feet object with this numeric value.
         def feet
           Feet.new(self)
@@ -148,7 +162,7 @@ module MB
       end
       ::Numeric.include NumericToneMethods
 
-      attr_reader :wave_type, :frequency, :amplitude, :range, :duration, :rate, :wavelength, :phase
+      attr_reader :wave_type, :frequency, :amplitude, :range, :duration, :wavelength, :phase
       attr_reader :duration_set, :amplitude_set
 
       # Shortcut for creating a new tone with the given frequency source, for
@@ -160,14 +174,14 @@ module MB
       # Initializes a representation of a simple generated waveform.
       #
       # +wave_type+ - One of the waveform types supported by MB::Sound::Oscillator (e.g. :sine).
-      # +frequency+ - The frequency of the tone, in Hz at the given +:rate+ (or
-      #               a wavelength as Meters or Feet).
+      # +frequency+ - The frequency of the tone, in Hz at the given
+      #               +:sample_rate+ (or a wavelength as Meters or Feet).
       # +amplitude+ - The linear peak amplitude of the tone, or a Range.
       # +phase+ - The starting phase, in radians relative to a sine wave (0
       #           radians phase starts at 0 and rises).
       # +duration+ - How long the tone should play in seconds (default is 5s).
-      # +rate+ - The sample rate to use to calculate the frequency.
-      def initialize(wave_type: :sine, frequency: 440, amplitude: 0.1, phase: 0, duration: 5, rate: 48000)
+      # +sample_rate+ - The sample rate to use to calculate the frequency.
+      def initialize(wave_type: :sine, frequency: 440, amplitude: 0.1, phase: 0, duration: 5, sample_rate: 48000)
         @wave_type = wave_type
         @oscillator = nil
         @noise = 0
@@ -175,7 +189,7 @@ module MB
         @duration_set = false
         @phase_mod = nil
         @no_trigger = false
-        self.or_at(amplitude).or_for(duration).at_rate(rate).with_phase(phase)
+        self.or_at(amplitude).or_for(duration).at_rate(sample_rate).with_phase(phase)
         set_frequency(frequency)
       end
 
@@ -352,12 +366,20 @@ module MB
         self
       end
 
+      # Returns the sample rate of the tone (or its underlying oscillator if it
+      # has been created).
+      def sample_rate
+        @sample_rate
+      end
+
       # Changes the target sample rate of the tone.
-      def at_rate(rate)
-        @rate = rate
-        @single_sample = 1.0 / @rate
+      def sample_rate=(sample_rate)
+        super
+        @single_sample = 1.0 / @sample_rate
+        @oscillator&.at_rate(sample_rate)
         self
       end
+      alias at_rate sample_rate=
 
       # Changes the initial phase of the tone, in radians relative to a sine
       # wave.  0 phase starts oscillators at 0 and rising (or at the top half
@@ -389,14 +411,12 @@ module MB
       #     200.hz.fm(600.hz.at(1000)).fm(300.hz.at(1000))
       #     # or
       #     200.hz.fm(600.hz.at(1000) + 300.hz.at(1000))
-      #
-      # TODO: Consider implementing phase modulation to create DX7-like sounds.
-      # Would need to update both the Ruby and C oscillator code.
       def fm(tone, index = nil)
         tone = tone.hz if tone.is_a?(Numeric)
         tone = tone.at(1) if index && tone.is_a?(Tone)
-        tone = tone.oscillator if tone.is_a?(Tone)
-        @frequency = MB::Sound::GraphNode::Mixer.new([@frequency, [tone, index || 1]])
+        tone = tone.or_for(nil) if tone.respond_to?(:or_for)
+        tone = tone.at_rate(@sample_rate) if tone.respond_to?(:at_rate) && tone.sample_rate != @sample_rate
+        @frequency = MB::Sound::GraphNode::Mixer.new([@frequency, [tone, index || 1]], sample_rate: @sample_rate)
         self
       end
 
@@ -412,7 +432,8 @@ module MB
       def log_fm(tone, index = nil)
         tone = tone.hz if tone.is_a?(Numeric)
         tone = tone.at(1) if index && tone.is_a?(Tone)
-        tone = tone.oscillator if tone.is_a?(Tone)
+        tone = tone.or_for(nil) if tone.respond_to?(:or_for)
+        tone = tone.at_rate(@sample_rate) if tone.respond_to?(:at_rate) && tone.sample_rate != @sample_rate
         tone = 2 ** (tone / 12)
         tone = tone * index if index
         @frequency = @frequency * tone
@@ -431,6 +452,8 @@ module MB
             tone.or_at(1)
           end
         end
+        tone = tone.or_for(nil) if tone.respond_to?(:or_for)
+        tone = tone.at_rate(@sample_rate) if tone.respond_to?(:at_rate) && tone.sample_rate != @sample_rate
         tone = tone * index if index
         @phase_mod = tone
         self
@@ -466,13 +489,15 @@ module MB
       # the tone, or one second of samples if duration is infinite.  The tone
       # parameters cannot be changed after this method is called.
       def generate(count = nil)
-        count ||= @duration ? @duration * @rate : @rate
+        count ||= @duration ? @duration * @sample_rate : @sample_rate
         oscillator.sample(count.round)
       end
 
       # Generates +count+ samples of the tone, decrementing the Tone's
       # #duration.  The tone parameters cannot be changed directly after this
-      # method is called; instead Oscillator parameters must be changed.
+      # method is called; instead Oscillator parameters must be changed (TODO:
+      # fix this; maybe combine the two classes or delegate post-creation
+      # updates).
       #
       # This will return nil if the tone has a specified duration and that
       # duration has elapsed.
@@ -480,12 +505,17 @@ module MB
         if @duration
           return nil if @duration <= 0
 
-          @duration -= count.to_f / @rate
+          # TODO: use a separate elapsed time counter to allow resetting
+          # duration to the beginning
+          remaining = (@duration * @sample_rate).round
+          count = remaining if count > remaining
 
-          if @duration < 0.5 * @single_sample # deal with rounding error
-            @duration = 0
-          end
+          @duration -= count.to_f / @sample_rate
+
+          @duration = 0 if remaining == 0 # deal with fraction of a sample
         end
+
+        return nil if count <= 0
 
         oscillator.sample(count.round)
       end
@@ -508,7 +538,7 @@ module MB
           @wave_type,
           frequency: @frequency,
           phase: @phase,
-          advance: Math::PI * 2.0 / @rate - 0.5 * rand_adv,
+          advance: Math::PI * 2.0 / @sample_rate - 0.5 * rand_adv,
           random_advance: rand_adv,
           range: @range,
           phase_mod: @phase_mod,
@@ -524,7 +554,7 @@ module MB
       #     1000.hz.lowpass
       #     1000.hz.at_rate(44100).lowpass
       def lowpass(quality: 1)
-        MB::Sound::Filter::Cookbook.new(:lowpass, @rate, @frequency, quality: quality)
+        MB::Sound::Filter::Cookbook.new(:lowpass, @sample_rate, @frequency, quality: quality)
       end
 
       # Returns a first-order single-pole low-pass filter with this Tone's
@@ -535,7 +565,7 @@ module MB
       #     50.hz.lowpass1p
       #     10.hz.at_rate(60).lowpass1p
       def lowpass1p
-        MB::Sound::Filter::FirstOrder.new(:lowpass1p, @rate, @frequency)
+        MB::Sound::Filter::FirstOrder.new(:lowpass1p, @sample_rate, @frequency)
       end
 
       # Returns a second-order high-pass Filter with this Tone's frequency as
@@ -547,7 +577,7 @@ module MB
       #     120.hz.highpass
       #     120.hz.at_rate(96000).highpass
       def highpass(quality: 1)
-        MB::Sound::Filter::Cookbook.new(:highpass, @rate, @frequency, quality: quality)
+        MB::Sound::Filter::Cookbook.new(:highpass, @sample_rate, @frequency, quality: quality)
       end
 
       # Returns a peaking Filter with this Tone's frequency as its center, the
@@ -560,7 +590,7 @@ module MB
       #     500.hz.peak(octaves: 2, gain: -3.db)
       def peak(octaves: 0.5, gain: nil)
         gain ||= @amplitude
-        MB::Sound::Filter::Cookbook.new(:peak, @rate, @frequency, bandwidth_oct: octaves, db_gain: gain.to_db)
+        MB::Sound::Filter::Cookbook.new(:peak, @sample_rate, @frequency, bandwidth_oct: octaves, db_gain: gain.to_db)
       end
 
       # Returns a LinearFollower with its max_rise and max_fall set to allow
@@ -581,41 +611,11 @@ module MB
         #   from -amplitude to +amplitude (so it travels a total of
         #   2*amplitude)
         MB::Sound::Filter::LinearFollower.new(
-          rate: @rate,
+          sample_rate: @sample_rate,
           max_rise: 4 * @frequency * @amplitude,
           max_fall: 4 * @frequency * @amplitude,
           absolute: false
         )
-      end
-
-      # Writes the tone's full duration to the +output+ stream.  The tone will
-      # be written into every channel of the output stream (TODO: support
-      # different channels) at the output stream's sample rate.
-      #
-      # The tone parameters cannot be changed after this method is called.
-      def write(output)
-        # TODO: Fade in and out at the start and end
-        # TODO: Maybe change this to act like an input instead, with a read
-        # method and a frames method?
-        # TODO: Maybe eventually have a way to detect outputs with strict
-        # buffer size requirements, and only pad them, while leaving e.g.
-        # ffmpegoutput unpadded.
-
-        @rate = output.rate
-        @single_sample = 1.0 / @rate
-        buffer_size = output.buffer_size
-        samples_left = @duration * @rate if @duration
-
-        loop do
-          current_samples = [samples_left || buffer_size, buffer_size].min
-          d = [ MB::M.zpad(generate(current_samples), buffer_size) ]
-          output.write(d * output.channels)
-
-          if samples_left
-            samples_left -= current_samples
-            break if samples_left <= 0
-          end
-        end
       end
 
       def to_s

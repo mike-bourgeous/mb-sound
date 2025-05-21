@@ -1,3 +1,5 @@
+require 'forwardable'
+
 module MB
   module Sound
     class Filter
@@ -15,7 +17,9 @@ module MB
         # elsewhere, would be nice to be able to make higher-order butterworth
         # filters or first-order filters available, for example
         class CookbookWrapper
+          extend Forwardable
           include GraphNode
+          include GraphNode::SampleRateHelper
 
           class WrapperArgumentError < ArgumentError
             def initialize(msg = nil, source: nil)
@@ -26,6 +30,8 @@ module MB
           end
 
           attr_reader :audio, :cutoff, :quality
+
+          def_delegators :@filter, :sample_rate
 
           # Initializes a sample-chain wrapper around a cookbook filter that
           # uses Cookbook#dynamic_process to vary the cutoff frequency
@@ -39,8 +45,8 @@ module MB
             @cutoff = sample_or_narray(cutoff)
             @quality = sample_or_narray(quality)
 
-            @cutoff = @cutoff.or_for(nil) if @cutoff.respond_to?(:@cutoff)
-            @quality = @quality.or_for(nil) if @quality.respond_to?(:@quality)
+            @cutoff = @cutoff.or_for(nil) if @cutoff.respond_to?(:@or_for)
+            @quality = @quality.or_for(nil) if @quality.respond_to?(:@or_for)
           end
 
           # Processes +count+ samples from the audio source through the filter,
@@ -52,6 +58,11 @@ module MB
 
             return nil if audio.nil? || cutoff.nil? || quality.nil? || audio.empty? || cutoff.empty? || quality.empty?
 
+            min_length = [audio.length, cutoff.length, quality.length].min
+            audio = audio[0...min_length]
+            cutoff = cutoff[0...min_length]
+            quality = quality[0...min_length]
+
             audio.inplace! if in_place
 
             @filter.dynamic_process(audio, cutoff, quality).not_inplace!
@@ -61,6 +72,14 @@ module MB
           def sources
             [@audio, @cutoff, @quality]
           end
+
+          # Changes the sample rate of the filter and any upstream sources.
+          def sample_rate=(new_rate)
+            super
+            @filter.sample_rate = new_rate
+            self
+          end
+          alias at_rate sample_rate=
 
           private
 
@@ -75,10 +94,10 @@ module MB
               raise WrapperArgumentError.new(source: v)
 
             when Numeric
-              MB::Sound::GraphNode::Constant.new(v)
+              MB::Sound::GraphNode::Constant.new(v, sample_rate: @filter.sample_rate)
 
             when Numo::NArray
-              MB::Sound::ArrayInput.new(data: [v])
+              MB::Sound::ArrayInput.new(data: [v], sample_rate: @filter.sample_rate)
 
             else
               if v.respond_to?(:sample)
@@ -94,6 +113,8 @@ module MB
           end
         end
 
+        # These must match the order in `enum filter_types` in
+        # ext/mb/fast_sound/fast_sound.c
         FILTER_TYPES = [
           :lowpass,
           :highpass,
@@ -118,7 +139,7 @@ module MB
         # overshoot.  See comments on https://www.musicdsp.org/en/latest/Filters/197-rbj-audio-eq-cookbook.html
         def initialize(filter_type, f_samp, f_center, db_gain: nil, quality: nil, bandwidth_oct: nil, shelf_slope: nil)
           set_parameters(filter_type, f_samp, f_center, db_gain: db_gain, quality: quality, bandwidth_oct: bandwidth_oct, shelf_slope: shelf_slope)
-          super(@b0, @b1, @b2, @a1, @a2)
+          super(@b0, @b1, @b2, @a1, @a2, sample_rate: f_samp)
         end
 
         # Sets the center/cutoff frequency of the filter.
@@ -142,20 +163,23 @@ module MB
           return if @sample_rate.round(3) == rate.round(3)
           @center_frequency = 0.5 * rate if @center_frequency > 0.5 * rate
           set_parameters(@filter_type, rate, @center_frequency, db_gain: @db_gain, quality: @quality, bandwidth_oct: @bandwidth_oct, shelf_slope: @shelf_slope)
+          self
         end
+        alias at_rate sample_rate=
 
         # Sets the filter type.
         def filter_type=(type)
-          raise "Invalid filter type #{type.inspect}" unless FILTER_TYPE_IDS.include?(type)
           return if @filter_type == type
           set_parameters(type, @sample_rate, @center_frequency, db_gain: @db_gain, quality: @quality, bandwidth_oct: @bandwidth_oct, shelf_slope: @shelf_slope)
         end
 
         def set_parameters(filter_type, f_samp, f_center, db_gain: nil, quality: nil, bandwidth_oct: nil, shelf_slope: nil)
           set_parameters_c(filter_type, f_samp, f_center, db_gain: db_gain, quality: quality, bandwidth_oct: bandwidth_oct, shelf_slope: shelf_slope)
+          self
         end
 
         def set_parameters_c(filter_type, f_samp, f_center, db_gain: nil, quality: nil, bandwidth_oct: nil, shelf_slope: nil)
+          raise ArgumentError, "Invalid filter type #{filter_type.inspect}" unless FILTER_TYPE_IDS.include?(filter_type)
           type_id = FILTER_TYPE_IDS.fetch(filter_type)
           @filter_type = filter_type
           @sample_rate = f_samp
@@ -174,6 +198,7 @@ module MB
 
         # Recalculates filter coefficients based on the given filter parameters.
         def set_parameters_ruby(filter_type, f_samp, f_center, db_gain: nil, quality: nil, bandwidth_oct: nil, shelf_slope: nil)
+          raise ArgumentError, "Invalid filter type #{filter_type.inspect}" unless FILTER_TYPE_IDS.include?(filter_type)
           @filter_type = filter_type
           @sample_rate = f_samp
           @center_frequency = f_center

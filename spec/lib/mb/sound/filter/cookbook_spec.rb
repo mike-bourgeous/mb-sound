@@ -1,6 +1,6 @@
 require 'numo/pocketfft'
 
-RSpec.describe MB::Sound::Filter::Cookbook do
+RSpec.describe(MB::Sound::Filter::Cookbook, :aggregate_failures) do
   describe(MB::Sound::Filter::Cookbook::CookbookWrapper) do
     it 'uses changing values and stops when inputs stop' do
       f = 500.hz.lowpass
@@ -57,6 +57,36 @@ RSpec.describe MB::Sound::Filter::Cookbook do
       # Verify end-of-stream behavior
       expect(wrapper.sample(22000)).to be_a(Numo::SFloat)
       expect(wrapper.sample(100)).to eq(nil)
+    end
+
+    it 'truncates to the shortest input length' do
+      a1 = MB::Sound::ArrayInput.new(data: Numo::SFloat[1,2,3,4])
+      a2 = MB::Sound::ArrayInput.new(data: Numo::SFloat[1,2,3,4,5])
+      a3 = MB::Sound::ArrayInput.new(data: Numo::SFloat[1,2,3,4,5,6,7])
+
+      f = a1.dup.filter(:lowpass, cutoff: a2.dup, quality: a3.dup)
+      expect(f.sample(7).length).to eq(4)
+
+      f = a2.dup.filter(:lowpass, cutoff: a1.dup, quality: a3.dup)
+      expect(f.sample(7).length).to eq(4)
+
+      f = a3.dup.filter(:lowpass, cutoff: a2.dup, quality: a1.dup)
+      expect(f.sample(7).length).to eq(4)
+    end
+
+    describe '#at_rate' do
+      it 'can change sample rate on the fly' do
+        a = 50.hz.square
+        b = 0.2.hz.triangle.lfo.at(100..500)
+        c = 0.33.hz.triangle.lfo.at(1..5)
+        d = a.filter(:lowpass, cutoff: b, quality: c)
+
+        d.at_rate(12345)
+        expect(a.sample_rate).to eq(12345)
+        expect(b.sample_rate).to eq(12345)
+        expect(c.sample_rate).to eq(12345)
+        expect(d.sample_rate).to eq(12345)
+      end
     end
   end
 
@@ -133,7 +163,8 @@ RSpec.describe MB::Sound::Filter::Cookbook do
         -1.2536869252532505,
         0.6268434626266253,
         -1.10922559150289,
-        0.3981482590036111
+        0.3981482590036111,
+        sample_rate: 48000
       )
 
       cookbook = MB::Sound::Filter::Cookbook.new(:highpass, 48000, 5000, quality: 0.7071)
@@ -233,7 +264,8 @@ RSpec.describe MB::Sound::Filter::Cookbook do
         -1.5211496795535877,
         0.8762465570560869,
         -1.5211496795535877,
-        0.9173672086578509
+        0.9173672086578509,
+        sample_rate: 48000
       )
 
       cookbook = MB::Sound::Filter::Cookbook.new(:peak, 48000, 5000, db_gain: 6, quality: 5)
@@ -268,7 +300,8 @@ RSpec.describe MB::Sound::Filter::Cookbook do
         -1.7768488823989634,
         0.7730275257848368,
         -1.78713360277755,
-        0.8077058851916483
+        0.8077058851916483,
+        sample_rate: 43210
       )
 
       cookbook = MB::Sound::Filter::Cookbook.new(:lowshelf, 43210, 1234, db_gain: 6.02, quality: 0.7071)
@@ -348,7 +381,8 @@ RSpec.describe MB::Sound::Filter::Cookbook do
         -3.420231952756624,
         1.545793526548647,
         -1.7003917748937079,
-        0.7397637707810658
+        0.7397637707810658,
+        sample_rate: 43210
       )
 
       cookbook = MB::Sound::Filter::Cookbook.new(:highshelf, 43210, 1234, db_gain: 6.02, quality: 0.7071)

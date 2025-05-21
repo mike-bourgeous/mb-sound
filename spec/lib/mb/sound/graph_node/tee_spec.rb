@@ -79,6 +79,7 @@ RSpec.describe(MB::Sound::GraphNode::Tee) do
 
   it 'returns nil if the source returns nil' do
     source = double(MB::Sound::GraphNode)
+    allow(source).to receive(:sample_rate).and_return(48000)
     allow(source).to receive(:sample).and_return(Numo::SFloat[1,2,3], nil)
 
     t1, t2 = MB::Sound::GraphNode::Tee.new(source).branches
@@ -94,6 +95,7 @@ RSpec.describe(MB::Sound::GraphNode::Tee) do
 
   it 'returns nil if the source returns empty' do
     source = double(MB::Sound::GraphNode)
+    allow(source).to receive(:sample_rate).and_return(48000)
     allow(source).to receive(:sample).and_return(Numo::SFloat[1,2,3], Numo::SFloat[])
 
     t1, t2 = MB::Sound::GraphNode::Tee.new(source).branches
@@ -105,5 +107,31 @@ RSpec.describe(MB::Sound::GraphNode::Tee) do
     expect(t2.sample(3)).to eq(nil)
     expect(t1.sample(3)).to eq(nil)
     expect(t2.sample(3)).to eq(nil)
+  end
+
+  describe '#at_rate' do
+    it 'can change the source sample rate' do
+      source = 100.constant
+      t1, t2 = MB::Sound::GraphNode::Tee.new(source).branches
+
+      expect(t1.at_rate(5432)).to equal(t1)
+
+      expect(t1.sample_rate).to eq(5432)
+      expect(t2.sample_rate).to eq(5432)
+      expect(source.sample_rate).to eq(5432)
+    end
+  end
+
+  describe '#sample_rate=' do
+    it 'can change the source sample rate' do
+      source = 100.constant
+      t1, t2 = MB::Sound::GraphNode::Tee.new(source).branches
+
+      t1.sample_rate = 5432
+
+      expect(t1.sample_rate).to eq(5432)
+      expect(t2.sample_rate).to eq(5432)
+      expect(source.sample_rate).to eq(5432)
+    end
   end
 end

@@ -5,7 +5,7 @@ RSpec.describe(MB::Sound::ADSREnvelope, :aggregate_failures) do
       decay_time: 0.2,
       sustain_level: 0.75,
       release_time: 0.5,
-      rate: 48000
+      sample_rate: 48000
     )
   }
 
@@ -47,9 +47,13 @@ RSpec.describe(MB::Sound::ADSREnvelope, :aggregate_failures) do
     r1 = env.sample(48)
     r1_data = r1.dup
     r2 = env.sample(48)
-    expect(r1.__id__).to eq(r2.__id__)
 
     expect(r2).not_to eq(r1_data)
+
+    # Use modification to verify the same buffer is used even if we receive
+    # different view objects pointing to that buffer.
+    r1[0] = 123.456
+    expect(r2[0]).to be_within(0.00001).of(123.456)
   end
 
   [:sample, :sample_c, :sample_ruby_c].each do |m|
@@ -72,10 +76,7 @@ RSpec.describe(MB::Sound::ADSREnvelope, :aggregate_failures) do
             ruby = a.concatenate(b)
 
             # 32-bit float resolution of 0.5 ** 24 is 5.960464477539063e-08
-            # For some reason rounding to 6 or 8 decimals and then comparing
-            # fails, but rounding the delta works
-            delta = (c - ruby).abs
-            expect(MB::M.round(delta, filt ? 6 : 7).max).to eq(0)
+            expect(c).to all_be_within(1e-6).of_array(ruby)
           end
 
           it 'returns the same curve as the original Ruby for an interrupted cycle' do
@@ -98,17 +99,64 @@ RSpec.describe(MB::Sound::ADSREnvelope, :aggregate_failures) do
             ruby = ruby_rise.concatenate(ruby_fall)
 
             # 32-bit float resolution of 0.5 ** 24 is 5.960464477539063e-08
-            # For some reason rounding to 6 or 8 decimals and then comparing
-            # fails, but rounding the delta works
-            delta = (c - ruby).abs
-            expect(MB::M.round(delta, filt ? 6 : 7).max).to eq(0)
+            expect(c).to all_be_within(1e-6).of_array(ruby)
           end
 
           it 'reuses the same buffer' do
-            expect(env.send(m, 500).object_id).to eq(env.send(m, 500).object_id)
+            d1 = env.send(m, 500, filter: filt)
+            d2 = env.send(m, 500, filter: filt)
+
+            # d1 and d2 may have different object IDs if they are views onto
+            # the same buffer, so modify one and then look at the other.
+            d1[0] = 123.456
+            expect(d2[0]).to be_within(0.00001).of(123.456)
+          end
+
+          context 'when auto_release is set' do
+            before do
+              env.attack_time = 0
+              env.decay_time = 0
+              env.sustain_level = 1.0
+              env.release_time = 0.1
+              env.reset
+              env.trigger(0.5, auto_release: 0.0)
+            end
+
+            it 'returns a short buffer for a single read' do
+              d = env.send(m, 480000, filter: filt)
+
+              expect(d[5]).to be_within(1e-3).of(0.5)
+              expect(d[-1]).to be_within(1e-6).of(0)
+
+              # Sometimes 1 extra sample for triggering auto-release, 1 extra
+              # sample for the final zero
+              ringdown = filt ? (env.filter_ringdown * env.sample_rate).round : 0
+              expect(d.length).to be_between(4800 + ringdown, 4802 + ringdown)
+            end
           end
         end
       end
+    end
+  end
+
+  describe '#sample' do
+    it 'returns a short buffer when auto_release is set and multi_sample is used' do
+      env.attack_time = 0
+      env.decay_time = 0
+      env.sustain_level = 1.0
+      env.release_time = 0.1
+      env.reset
+      env.trigger(0.5, auto_release: 0.0)
+
+      d = env.multi_sample(273, 1000)
+
+      expect(d[5]).to be_within(1e-3).of(0.5)
+      expect(d[-1]).to be_within(1e-6).of(0)
+
+      # Sometimes 1 extra sample for triggering auto-release, 1 extra sample
+      # for the final zero
+      ringdown = (env.filter_ringdown * env.sample_rate).round
+      expect(d.length).to be_between(4800 + ringdown, 4802 + ringdown)
     end
   end
 
@@ -132,6 +180,7 @@ RSpec.describe(MB::Sound::ADSREnvelope, :aggregate_failures) do
       env.sample(23999)
       expect(env).to be_active
 
+      env.sample((env.filter_ringdown * env.sample_rate).ceil)
       env.sample(1)
       expect(env).not_to be_active
     end
@@ -172,7 +221,7 @@ RSpec.describe(MB::Sound::ADSREnvelope, :aggregate_failures) do
       expect(dup.object_id).not_to eq(env.object_id)
       expect(filter_dup.object_id).not_to eq(filter.object_id)
 
-      expect(dup.rate).to eq(env.rate)
+      expect(dup.sample_rate).to eq(env.sample_rate)
       expect(filter_dup.sample_rate).to eq(filter.sample_rate)
     end
 
@@ -185,8 +234,8 @@ RSpec.describe(MB::Sound::ADSREnvelope, :aggregate_failures) do
       expect(dup.object_id).not_to eq(env.object_id)
       expect(filter_dup.object_id).not_to eq(filter.object_id)
 
-      expect(dup.rate).to eq(1500)
-      expect(env.rate).to eq(48000)
+      expect(dup.sample_rate).to eq(1500)
+      expect(env.sample_rate).to eq(48000)
       expect(filter_dup.sample_rate).to eq(1500)
       expect(filter.sample_rate).to eq(48000)
     end
@@ -215,8 +264,6 @@ RSpec.describe(MB::Sound::ADSREnvelope, :aggregate_failures) do
       # Detect dup overwriting original buffer
       dup.sample_all
       expect(data.minmax).to eq([0, 0])
-
-      expect(cenv2.sample(800).object_id).not_to eq(dup.sample(800).object_id)
     end
   end
 
@@ -229,6 +276,10 @@ RSpec.describe(MB::Sound::ADSREnvelope, :aggregate_failures) do
         expect(env.sample(800)).to be_a(Numo::SFloat)
       end
 
+      # We've sampled 0.1 seconds, but auto-release should jump time to 0.3
+      # when release starts
+      expect(env.time.round(6)).to eq(0.3)
+
       30.times do |t|
         expect(env.on?).to eq(false)
         expect(env.sample(800)).to be_a(Numo::SFloat)
@@ -237,11 +288,16 @@ RSpec.describe(MB::Sound::ADSREnvelope, :aggregate_failures) do
       expect(env.sample(800)).to eq(nil)
     end
 
-    it 'behaves correctly when given an integer peak values' do
+    it 'behaves correctly when given an integer peak value' do
       env.attack_time = 50
       env.reset
       env.trigger(1)
       expect(env.sample(500).max).to be_between(0.0, 0.01)
+    end
+
+    it 'can set a different peak value' do
+      env.trigger(2.5)
+      expect(env.sample(4800)[-1].round(2)).to be_within(0.001).of(2.5)
     end
   end
 
@@ -249,13 +305,14 @@ RSpec.describe(MB::Sound::ADSREnvelope, :aggregate_failures) do
     context 'with sustain of 1' do
       it 'remains within the expected range for the envelope' do
         # These parameters were causing bizarre plots on one of my livestreams
-        env = described_class.new(attack_time: 0.1385901240393387, decay_time: 0.9133346228248626, sustain_level: 1, release_time: 1.8523222156741201, rate: 48000)
+        env = described_class.new(attack_time: 0.1385901240393387, decay_time: 0.9133346228248626, sustain_level: 1, release_time: 1.8523222156741201, sample_rate: 48000)
 
         d = env.sample_all
         expect(d[0]).to be_between(0, 0.01)
         expect(d[-1]).to be_between(0, 0.01)
-        expect(d[env.rate * env.attack_time]).to be_between(0.99, 1.0)
-        expect(d[env.rate * (env.attack_time + env.decay_time)]).to be_between(0.99, 1.0)
+        expect(d[env.sample_rate * env.attack_time]).to be_between(0.99, 1.0)
+        expect(d[env.sample_rate * (env.attack_time + env.decay_time)]).to be_between(0.99, 1.0)
+        expect(d[-1]).to be_within(1e-8).of(0)
         expect(d.min).to be_between(0, 0.0001)
         expect(d.max).to be_between(0.99, 1.0)
       end
@@ -264,13 +321,14 @@ RSpec.describe(MB::Sound::ADSREnvelope, :aggregate_failures) do
     context 'with sustain of 0.5' do
       it 'remains within the expected range for the envelope' do
         # These parameters were causing bizarre plots on one of my livestreams
-        env = described_class.new(attack_time: 0.1385901240393387, decay_time: 0.9133346228248626, sustain_level: 0.5, release_time: 1.8523222156741201, rate: 48000)
+        env = described_class.new(attack_time: 0.1385901240393387, decay_time: 0.9133346228248626, sustain_level: 0.5, release_time: 1.8523222156741201, sample_rate: 48000)
 
         d = env.sample_all
         expect(d[0]).to be_between(0, 0.01)
         expect(d[-1]).to be_between(0, 0.01)
-        expect(d[env.rate * env.attack_time]).to be_between(0.99, 1.0)
-        expect(d[env.rate * (env.attack_time + env.decay_time)]).to be_between(0.49, 0.51)
+        expect(d[env.sample_rate * env.attack_time]).to be_between(0.99, 1.0)
+        expect(d[env.sample_rate * (env.attack_time + env.decay_time)]).to be_between(0.49, 0.51)
+        expect(d[-1]).to be_within(1e-8).of(0)
         expect(d.min).to be_between(0, 0.0001)
         expect(d.max).to be_between(0.99, 1.0)
       end

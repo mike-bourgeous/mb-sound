@@ -42,7 +42,7 @@ module MB
       #     # Or
       #     ENV['OUTPUT_DEVICE'] = 'TimeMachine:in_'
       #     MB::Sound::JackOutput.new(ports: { device: 'whatever', count: 8 })
-      def initialize(ports:, rate: 48000, buffer_size: 2048)
+      def initialize(ports:, sample_rate: 48000, buffer_size: 2048)
         case ports
         when Integer
           ports = [nil] * ports
@@ -54,7 +54,7 @@ module MB
         end
 
         @ports = ports
-        @rate = rate
+        @sample_rate = sample_rate
         channels = @ports.size
         buffer_size = buffer_size&.to_i || 2048
         ports = @ports.map { |n| (n || "invalid port #{rand(100000)}").shellescape }.join(' ')
@@ -66,7 +66,7 @@ module MB
           ],
           channels,
           buffer_size,
-          rate: rate
+          sample_rate: sample_rate
         )
       end
     end

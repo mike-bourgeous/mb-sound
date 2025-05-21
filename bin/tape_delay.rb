@@ -62,33 +62,37 @@ end
 output = MB::Sound.output
 bufsize = output.buffer_size
 
-delay_samples = delay * output.rate
+oversample = ENV['OVERSAMPLE']&.to_f || 2
+
+delay_samples = (delay * output.sample_rate * oversample).round
 delay_samples = 0 if delay_samples < 0
 
-if ENV['PITCH'] == '1'
-  delay_samples = delay_samples + -0.4.hz.ramp.forever.at(0..3250)
-end
-
-internal_bufsize = 16
+internal_bufsize = 32
 
 dry = ENV['DRY']&.to_f || 1
 wet = ENV['WET']&.to_f || 1
 drive = ENV['DRIVE']&.to_f || 1
 smoothing = ENV['SMOOTHING']&.to_f || 2
 
-puts MB::U.highlight(
+puts MB::U.highlight({
   dry: dry,
   wet: wet,
   drive: drive,
   smoothing: smoothing,
   delay: delay,
+  delay_samples: delay_samples,
   feedback: feedback,
   extra_time: extra,
   input: input.graph_node_name,
-  rate: output.rate,
+  sample_rate: output.sample_rate,
+  oversample: oversample,
   buffer: bufsize,
   internal_buffer: internal_bufsize,
-)
+})
+
+if ENV['PITCH'] == '1'
+  delay_samples = delay_samples + -0.4.hz.ramp.forever.at(0..(3250 * oversample))
+end
 
 # TODO: Make it easy to replicate a signal graph for each of N channels
 # TODO: stereo+, ping-pong
@@ -97,7 +101,7 @@ begin
   # Use the input buffer size when reading from the input, so our feedback loop
   # can run with a different buffer size.
   # TODO: maybe this should be automatic
-  inp, inp_dry = input.with_buffer(input_buffer_size).named(filename || 'audio in').tee
+  inp, inp_dry = input.with_buffer(input_buffer_size).resample(mode: :libsamplerate_fastest).named(filename || 'audio in').tee
   inp.named('pre-delay input')
   inp_dry.named('dry output')
 
@@ -106,7 +110,7 @@ begin
 
   # Feedback injector and delay
   adjusted_delay = (delay_samples - internal_bufsize.constant).clip(0, nil)
-  b = (inp * drive + 0.constant.proc { a } * feedback).delay(samples: adjusted_delay, smoothing: smoothing)
+  b = (inp * drive + 0.constant.proc { a } * feedback).delay(samples: adjusted_delay, smoothing: smoothing, sample_rate: input.sample_rate * oversample)
 
   # Tape saturator
   c = b
@@ -125,6 +129,7 @@ begin
   result = (dry * inp_dry + wet * feedback_loop)
     .softclip(0.75, 0.95)
     .with_buffer(internal_bufsize)
+    .oversample(oversample, mode: :libsamplerate_fastest)
     .named('mixed output')
 
   File.write('/tmp/tape_delay.dot', result.graphviz)

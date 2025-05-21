@@ -74,13 +74,13 @@ audio_out = jack.output(
 OSCIL_COUNT = 9
 oscil_bank = Ring.new(
   OSCIL_COUNT.times.map {
-    MB::Sound::Oscillator.new(:ramp, frequency: 440, advance: Math::PI * 2 / audio_out.rate, range: -0.0..0.0)
+    MB::Sound::Oscillator.new(:ramp, frequency: 440, advance: Math::PI * 2 / audio_out.sample_rate, range: -0.0..0.0)
   }
 )
 
 nib = Nibbler.new
 
-filter = MB::Sound::Filter::Cookbook.new(:lowpass, audio_out.rate, 2400, quality: 4)
+filter = MB::Sound::Filter::Cookbook.new(:lowpass, audio_out.sample_rate, 2400, quality: 4)
 
 puts "\e[1;34mMaking \e[33mmusic\e[0m"
 

@@ -59,36 +59,71 @@ RSpec.describe(MB::Sound::GraphNode) do
     end
   end
 
-  describe '#/' do
-    it 'can divide a graph node by a number' do
-      n = 15.constant / 5
-      expect(n.sample(10)).to eq(Numo::SFloat.zeros(10).fill(3))
+  describe 'proc-based arithmetic' do
+    let(:nilnode) { MB::Sound::ArrayInput.new(data: Numo::SFloat[]) }
+    let(:shortnode) { MB::Sound::ArrayInput.new(data: Numo::SComplex[1, 2, 3]) }
+    let(:longnode) { MB::Sound::ArrayInput.new(data: Numo::DFloat[1,2,3,4,5,6,7,8,9,10]) }
+    let(:emptynode) {
+      nilnode.dup.tap { |n|
+        allow(n).to receive(:sample).and_return(Numo::DFloat[])
+      }
+    }
+
+    shared_examples_for 'an arithmetic operator' do
+      it 'can operate on a graph node and a number' do
+        n = 15.constant.send(operator, 5)
+        expect(n.sample(10)).to eq(expected_graph_number)
+      end
+
+      it 'can operate on two graph nodes' do
+        n = 15.constant.send(operator, longnode)
+        expect(n.sample(10)).to eq(expected_graph_graph)
+      end
+
+      it 'can operate on a number and a graph node' do
+        n = 4.send(operator, 2.constant)
+        expect(n.sample(10)).to eq(expected_number_graph)
+      end
+
+      it 'returns nil for nil' do
+        expect(nilnode.send(operator, shortnode).sample(3)).to eq(nil)
+        expect(shortnode.send(operator, nilnode).sample(3)).to eq(nil)
+      end
+
+      it 'returns nil for empty arrays' do
+        expect(emptynode.send(operator, shortnode).sample(3)).to eq(nil)
+        expect(shortnode.send(operator, emptynode).sample(3)).to eq(nil)
+      end
+
+      it 'truncates short reads from self' do
+        expect(shortnode.send(operator, longnode).sample(10)).to eq(expected_short_long)
+      end
+
+      it 'truncates short reads from other' do
+        expect(longnode.send(operator, shortnode).sample(10)).to eq(expected_long_short)
+      end
     end
 
-    it 'can divide a graph node by another graph node' do
-      n1 = 15.constant
-      n2 = 5.constant
-      n3 = n1 / n2
-      expect(n3.sample(10)).to eq(Numo::SFloat.zeros(10).fill(3))
+    describe '#/' do
+      let(:operator) { :/ }
+      let(:expected_graph_number) { Numo::SFloat[*([3] * 10)] }
+      let(:expected_graph_graph) { Numo::DFloat[15, 7.5, 5, 3.75, 3, 15.0 / 6, 15.0 / 7, 1.875, 15.0 / 9, 1.5] }
+      let(:expected_number_graph) { Numo::SFloat[*([2] * 10)] }
+      let(:expected_short_long) { Numo::SFloat[1,1,1] }
+      let(:expected_long_short) { expected_short_long }
+
+      it_behaves_like 'an arithmetic operator'
     end
 
-    it 'can divide a number by a graph node' do
-      n = 4 / 2.constant
-      expect(n.sample(10)).to eq(Numo::SFloat.zeros(10).fill(2))
-    end
-  end
+    describe '#**' do
+      let(:operator) { :** }
+      let(:expected_graph_number) { Numo::SFloat[*([759375] * 10)] }
+      let(:expected_graph_graph) { 15 ** Numo::DFloat.linspace(1, 10, 10) }
+      let(:expected_number_graph) { Numo::DFloat[*([16] * 10)] }
+      let(:expected_short_long) { Numo::SFloat[1, 4, 27] }
+      let(:expected_long_short) { expected_short_long }
 
-  describe '#**' do
-    it 'can raise a graph node to a numeric power' do
-      n = 4.constant ** 0.5
-      expect(n.sample(10)).to eq(Numo::SFloat.zeros(10).fill(2))
-    end
-
-    it 'can raise a graph node to a graph node' do
-      n1 = 2.constant
-      n2 = 3.constant
-      n3 = n2 ** n1
-      expect(n3.sample(10)).to eq(Numo::SFloat.zeros(10).fill(9))
+      it_behaves_like 'an arithmetic operator'
     end
   end
 
@@ -229,6 +264,37 @@ RSpec.describe(MB::Sound::GraphNode) do
     end
   end
 
+  describe '#adsr' do
+    it 'multiplies the node by an envelope' do
+      node = 5.hz.adsr(0.5, 1, 0.25, 2)
+      expect(node).to be_a(MB::Sound::GraphNode::Multiplier)
+      expect(node.sources.any?(MB::Sound::ADSREnvelope)).to eq(true)
+
+      env = node.sources.select { |s| s.is_a?(MB::Sound::ADSREnvelope) }.first
+      expect(env.attack_time).to eq(0.5)
+      expect(env.decay_time).to eq(1.0)
+      expect(env.sustain_level).to eq(0.25)
+      expect(env.release_time).to eq(2)
+    end
+
+    it 'can create a logarithmic envelope' do
+      linear = 1.constant.adsr(0.5, 1, 0.25, 2)
+      log = 1.constant.adsr(0.5, 1, 0.25, 2, log: -30)
+      expect(log.sample(30)[-1]).to be < linear.sample(30)[-1]
+    end
+
+    it 'triggers the envelope' do
+      node = 1.constant.at_rate(12345).adsr(0.00001, 0.00001, 1.0, 0.1)
+      expect(node.sample(100)[-90..]).to eq(Numo::SFloat.ones(90))
+      # TODO: change this from multi_sample to sample when ADSREnvelope can release mid-buffer
+      expect(node.multi_sample(500, 1000)[-1]).to eq(0)
+    end
+
+    it 'copies the sample rate from the source node' do
+      expect(500.hz.at_rate(12345).adsr(1, 1, 1, 1).sample_rate).to eq(12345)
+    end
+  end
+
   describe '#filter' do
     it 'can apply filtering' do
       graph = 400.hz.at(1).filter(400.hz.lowpass(quality: 5))
@@ -327,6 +393,80 @@ RSpec.describe(MB::Sound::GraphNode) do
       graph = 0.hz.square.at(1).proc { |buf| buf * 3 }
       expect(graph.sample(10)).to eq(Numo::SFloat.new(10).fill(3))
     end
+
+    it 'copies the source sample rate' do
+      expect(1.hz.at_rate(51234).proc{}.sample_rate).to eq(51234)
+    end
+  end
+
+  describe '#and_then' do
+    pending 'with full-sized buffers followed by nil'
+    pending 'with a short read'
+  end
+
+  describe '#multi_sample' do
+    it 'does the same thing as sample if times is 1' do
+      expect(123.hz.multi_sample(17, 1)).to eq(123.hz.sample(17))
+    end
+
+    it 'gives the same concatenated result as a single large sample' do
+      expect(637.hz.multi_sample(5, 7)).to eq(637.hz.sample(35))
+    end
+
+    it 'raises an error if count or times are zero' do
+      expect { 123.hz.multi_sample(0, 1) }.to raise_error(/Count.*positive/)
+      expect { 123.hz.multi_sample(1, 0) }.to raise_error(/Times.*positive/)
+    end
+
+    it 'returns nil at end of stream' do
+      expect(123.hz.for(0).multi_sample(100, 1)).to eq(nil)
+    end
+
+    it 'handles end of stream part way through concatenation' do
+      result = 123.hz.for(5.0 / 48000).multi_sample(2, 10)
+      expect(result.length).to eq(5)
+    end
+  end
+
+  describe '#resample' do
+    it 'appends a resample node' do
+      expect(1.hz.resample(12000)).to be_a(MB::Sound::GraphNode::Resample)
+    end
+
+    it 'can change the resampling mode' do
+      expect(1.hz.resample(15000, mode: :ruby_linear).mode).to eq(:ruby_linear)
+    end
+
+    it 'defaults to the current frequency' do
+      expect(1.hz.at_rate(1515).resample.sample_rate).to eq(1515)
+    end
+
+    it 'allows changing the downstream rate later' do
+      a = 1.hz.at_rate(1515)
+      b = a.resample
+
+      b.sample_rate = 5432
+
+      expect(a.sample_rate).to eq(1515)
+      expect(b.sample_rate).to eq(5432)
+    end
+  end
+
+  describe '#oversample' do
+    it 'changes the upstream sample rate without changing the output rate' do
+      a = 15.hz.at_rate(48000)
+
+      b = nil
+      expect { b = a.oversample(4) }.to change { a.sample_rate }.to(192000)
+
+      expect(b).to be_a(MB::Sound::GraphNode::Resample)
+      expect(b.sample_rate).to eq(48000)
+    end
+
+    it 'can change the resampling mode' do
+      expect(15.hz.oversample(4).mode).to eq(:libsamplerate_best)
+      expect(15.hz.oversample(4, mode: :ruby_linear).mode).to eq(:ruby_linear)
+    end
   end
 
   describe '#spy' do
@@ -372,4 +512,14 @@ RSpec.describe(MB::Sound::GraphNode) do
   pending '#forever'
 
   pending '#for'
+
+  context 'implementations' do
+    context 'provide a sample_rate' do
+      ObjectSpace.each_object.select { |o| o.is_a?(Class) && o.ancestors.include?(MB::Sound::GraphNode) }.each do |cl|
+        example "#{cl.name} defines #sample_rate" do
+          expect(cl.public_instance_methods).to include(:sample_rate)
+        end
+      end
+    end
+  end
 end

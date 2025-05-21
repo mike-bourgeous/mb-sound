@@ -1,3 +1,5 @@
+require 'forwardable'
+
 module MB
   module Sound
     module GraphNode
@@ -9,9 +11,13 @@ module MB
       # upstream buffer size is smaller, and by treating the buffer as a
       # circular buffer if the upstream buffer size is larger.
       class BufferAdapter
+        extend Forwardable
+
         include GraphNode
 
         attr_reader :upstream_count
+
+        def_delegators :@upstream, :sample_rate, :sample_rate=
 
         # Creates a buffer adapter with the given +:upstream+ node to sample,
         # using the given +:upstream_count+ as the value passed to the upstream
@@ -27,6 +33,12 @@ module MB
         # Returns the upstream as the only source for this node.
         def sources
           [@upstream]
+        end
+
+        # Wraps upstream #at_rate to return self instead of upstream.
+        def at_rate(new_rate)
+          @upstream.at_rate(new_rate)
+          self
         end
 
         # Returns +count+ samples, using as many or as few reads from the
@@ -60,10 +72,7 @@ module MB
           @circbuf ||= CircularBuffer.new(buffer_size: @bufsize, complex: false)
 
           if @circbuf.buffer_size < @bufsize
-            # TODO: add in-place resizing to CircularBuffer if this is too slow
-            newbuf = CircularBuffer.new(buffer_size: @bufsize, complex: @circbuf.complex)
-            newbuf.write(@circbuf.read(@circbuf.length)) unless @circbuf.empty?
-            @circbuf = newbuf
+            @circbuf = @circbuf.dup(@bufsize)
           end
         end
       end

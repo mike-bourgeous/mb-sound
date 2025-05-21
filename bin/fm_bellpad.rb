@@ -52,7 +52,7 @@ voices = OSC_COUNT.times.map { |i|
   filt_freq = (bfreq.call * 15).clip(5000, 12000)
   g = sum.filter(:lowpass, gain: 1, cutoff: filt_freq) # Try to cut down on aliasing chalkboard noise
 
-  final = g * 0.5
+  final = (g * 0.5).oversample(2)
 
   MB::Sound::MIDI::GraphVoice.new(
     final,

@@ -25,7 +25,7 @@ module MB
         def_delegators :@oscillator, :frequency, :frequency=, :random_advance, :random_advance=, :number, :wave_type, :wave_type=
         def_delegators :amp_envelope, :active?, :on?
 
-        attr_reader :filter_envelope, :amp_envelope, :oscillator, :rate, :re_filter, :im_filter
+        attr_reader :filter_envelope, :amp_envelope, :oscillator, :sample_rate, :re_filter, :im_filter
 
         # The filter's base cutoff frequency.  The envelope multiplies this
         # frequency by a value from 1 to #filter_intensity.
@@ -47,13 +47,15 @@ module MB
         # Initializes a synthesizer voice with the given +:wave_type+ (defaulting
         # to sawtooth/ramp wave) and +:filter_type+ (a shortcut on
         # MB::Sound::Tone, defaulting to :lowpass).
-        def initialize(wave_type: nil, filter_type: :lowpass, amp_envelope: {}, filter_envelope: {}, rate: 48000)
+        #
+        # TODO: maybe get rid of this and just use GraphVoice
+        def initialize(wave_type: nil, filter_type: :lowpass, amp_envelope: {}, filter_envelope: {}, sample_rate: 48000)
           @filter_intensity = 15.0
           @cutoff = 200.0
           @quality = 4.0
           @last_quality = 4.0
           @gain = 1.0
-          @rate = rate.to_f
+          @sample_rate = sample_rate.to_f
           @value = 0.0
           @filter_blend = 1.0
 
@@ -62,8 +64,8 @@ module MB
 
           self.filter_type = filter_type
 
-          @filter_envelope = MB::Sound::ADSREnvelope.new(**DEFAULT_FILTER_ENVELOPE.merge(filter_envelope), rate: @rate)
-          @amp_envelope = MB::Sound::ADSREnvelope.new(**DEFAULT_AMP_ENVELOPE.merge(amp_envelope), rate: @rate)
+          @filter_envelope = MB::Sound::ADSREnvelope.new(**DEFAULT_FILTER_ENVELOPE.merge(filter_envelope), sample_rate: @sample_rate)
+          @amp_envelope = MB::Sound::ADSREnvelope.new(**DEFAULT_AMP_ENVELOPE.merge(amp_envelope), sample_rate: @sample_rate)
 
           # TODO: pitch filter for portamento
           # TODO: get these to run fast enough
@@ -74,8 +76,8 @@ module MB
         # Changes the filter type.  This must be a Symbol that refers to a
         # filter-generating shortcut on MB::Sound::Tone.
         def filter_type=(filter_type)
-          re_filter = @cutoff.hz.at_rate(@rate).send(filter_type, quality: @quality)
-          im_filter = @cutoff.hz.at_rate(@rate).send(filter_type, quality: @quality)
+          re_filter = @cutoff.hz.at_rate(@sample_rate).send(filter_type, quality: @quality)
+          im_filter = @cutoff.hz.at_rate(@sample_rate).send(filter_type, quality: @quality)
 
           raise "Filter #{re_filter.class} should respond to #dynamic_process" unless re_filter.respond_to?(:dynamic_process)
           raise "Filter #{re_filter.class} should respond to #reset" unless re_filter.respond_to?(:reset)
@@ -87,6 +89,23 @@ module MB
           @im_filter = im_filter
           @im_filter.reset(@value)
         end
+
+        # Sets the sample rate of the internal oscillator, filters, and
+        # envelopes to the +new_rate+.
+        def sample_rate=(new_rate)
+          new_rate = new_rate.to_f
+
+          @re_filter.sample_rate = new_rate
+          @im_filter.sample_rate = new_rate
+          @oscillator.sample_rate = new_rate
+          @filter_envelope.sample_rate = new_rate
+          @amp_envelope.sample_rate = new_rate
+
+          @sample_rate = new_rate
+
+          self
+        end
+        alias at_rate sample_rate=
 
         # Restarts the amplitude and filter envelopes, and sets the oscillator's
         # pitch to the given note number.
@@ -126,8 +145,14 @@ module MB
         # Returns +count+ samples of the filtered, amplified oscillator.
         def sample(count)
           buf = @oscillator.sample(count) * @amp_envelope.sample(count) # TODO: per-sample pitch filtering (probably way too slow)
-          re = buf.real
-          im = buf.imag
+
+          if buf.respond_to?(:real)
+            re = buf.real
+            im = buf.imag
+          else
+            re = buf
+            im = Numo::SFloat.zeros(buf.length)
+          end
 
           # TODO: Reduce max quality for higher cutoff and/or oscillator frequencies?
           centers = @cutoff * MB::M.scale(@oscillator.number, 0..127, 0.9..2.0) * @filter_intensity ** @filter_envelope.sample(count)

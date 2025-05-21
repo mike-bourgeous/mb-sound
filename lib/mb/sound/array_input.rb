@@ -5,18 +5,22 @@ module MB
       include GraphNode
       include GraphNode::IOSampleMixin
 
-      attr_reader :channels, :frames, :rate, :offset, :remaining, :buffer_size, :repeat
+      attr_reader :channels, :frames, :sample_rate, :offset, :remaining, :buffer_size, :repeat
 
       # Initializes an audio stream that returns slices from the given +data+ (an
       # Array of Arrays or Numo::NArrays, one for each channel).  If the lengths
       # of each channel do not match, the shorter channels will return zeros
       # until all channels have ended.
-      def initialize(data:, rate: 48000, buffer_size: 800, repeat: false)
+      def initialize(data:, sample_rate: 48000, buffer_size: 800, repeat: false)
+        data = [data] if data.is_a?(Numo::NArray)
+
+        raise "No data given to ArrayInput (nest two arrays like [[]] if you want to use an empty Array)" if data.nil? || data.empty?
+
+        data = data.map { |v| Numo::NArray.cast(v) }
+
         @buffer_size = buffer_size
         @channels = data.length
         @frames = data.map(&:length).max
-
-        data = data.map { |v| Numo::NArray.cast(v) }
 
         case
         when data.any?(Numo::DComplex)
@@ -43,7 +47,7 @@ module MB
           }
         }
 
-        @rate = rate
+        @sample_rate = sample_rate
 
         @remaining = @frames
         @offset = 0

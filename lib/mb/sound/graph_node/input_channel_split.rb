@@ -1,3 +1,5 @@
+require 'forwardable'
+
 module MB
   module Sound
     module GraphNode
@@ -14,6 +16,8 @@ module MB
       #
       # See also the Tee class, which is very similar.
       class InputChannelSplit
+        extend Forwardable
+
         # Raised when any channel's internal buffer overflows.  This would
         # happen if the downstream buffer size is significantly larger than the
         # input's buffer size, or if one channel is being read more than
@@ -25,7 +29,11 @@ module MB
         #
         # TODO: Maybe this can be deduplicated with Tee.
         class InputChannelNode
+          extend Forwardable
+
           include GraphNode
+
+          def_delegators :@split, :sample_rate, :sample_rate=, :at_rate, :sources, :buffer_size
 
           # For internal use by InputChannelSplit.  Initializes one output
           # channel of the split.
@@ -43,12 +51,6 @@ module MB
           def sample(count)
             @split.internal_sample(self, @channel, count)
           end
-
-          # Returns an Array containing the source node feeding into the
-          # InputChannelSplit.
-          def sources
-            @split.sources
-          end
         end
 
         # The source node feeding into this InputChannelSplit, in an array (see
@@ -57,6 +59,8 @@ module MB
 
         # The channels from the InputChannelSplit (see IOSampleMixin#split).
         attr_reader :channels
+
+        def_delegators :@source, :sample_rate, :buffer_size
 
         # Creates a InputChannelSplit from the given +source+, with up to
         # +:max_channels+ channels.  Generally for internal use by
@@ -100,6 +104,13 @@ module MB
 
           @cbufs[channel].read(MB::M.min(@cbufs[channel].length, count)).not_inplace!
         end
+
+        # Raises an error indicating that inputs split to graph nodes cannot
+        # change sample rate.
+        def sample_rate=(new_rate)
+          raise NotImplementedError, "Cannot change sample rate on an input channel #{self}; try appending a .resample node"
+        end
+        alias at_rate sample_rate=
 
         private
 

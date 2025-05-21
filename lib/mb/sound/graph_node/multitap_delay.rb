@@ -1,3 +1,5 @@
+require 'forwardable'
+
 module MB
   module Sound
     module GraphNode
@@ -6,9 +8,14 @@ module MB
       #
       # Use GraphNode#multitap_delay to create a multi-tap delay in a graph.
       class MultitapDelay
+        include SampleRateHelper
+
         # One output tap from the multitap delay.
         class DelayTap
+          extend Forwardable
+
           include GraphNode
+          include SampleRateHelper
 
           # Graph nodes or numeric values that feed into this delay tap for
           # audio or delay time.
@@ -17,13 +24,14 @@ module MB
           # The index of this tap in the parent MultitapDelay.
           attr_reader :index
 
+          def_delegators :@mtd, :sample_rate
+
           # Called by MultitapDelay to create an output node for each delay tap.
           #
           # +:mtd+ - The containing MultitapDelay object.
           # +:index+ - The index of this tap.
           # +:delay+ - The delay source for this tap.
-          # +:rate+ - The sample rate at which the node graph is running.
-          def initialize(mtd:, index:, delay_samples:, rate:)
+          def initialize(mtd:, index:, delay_samples:)
             @mtd = mtd
             @index = index
 
@@ -35,6 +43,7 @@ module MB
 
             else
               raise 'Delay must be Numeric or respond to :sample' unless delay_samples.respond_to?(:sample)
+              check_rate(delay_samples, index)
               @delay_samples = delay_samples
             end
 
@@ -52,6 +61,15 @@ module MB
 
             @mtd.internal_sample(self, delay_buf)
           end
+
+          # Changes the sample rate of all taps on this multitap delay and all
+          # upstream nodes.
+          def sample_rate=(new_rate)
+            super
+            @mtd.sample_rate = new_rate
+            self
+          end
+          alias at_rate sample_rate=
         end
 
         # An Array of the individual output nodes.
@@ -69,18 +87,19 @@ module MB
         attr_reader :graph_node_name
 
         # Sample rate used for converting delay times to delays in samples.
-        attr_reader :rate
+        attr_reader :sample_rate
 
         # Creates a MultitapDelay that samples audio from one +source+ graph
         # node and produces output tap nodes for each source +delay_in_seconds+
         # (Numeric or GraphNode).
-        def initialize(source, *delays_in_seconds, initial_buffer_seconds: 1, rate: 48000)
+        def initialize(source, *delays_in_seconds, initial_buffer_seconds: 1, sample_rate: 48000)
           raise 'Delay audio source must respond to :sample' unless source.respond_to?(:sample)
 
           @graph_node_name = nil
           @named = false
 
-          @rate = rate.to_f
+          @sample_rate = sample_rate.to_f
+          @sample_rate_node = @sample_rate.constant(smoothing: false)
           @source = source
           @sources = [source].freeze
 
@@ -96,8 +115,7 @@ module MB
             DelayTap.new(
               mtd: self,
               index: idx,
-              delay_samples: d * @rate,
-              rate: @rate
+              delay_samples: d * @sample_rate_node
             )
           }
 
@@ -105,7 +123,7 @@ module MB
           @read_offset = 0 # Previous write offset, not delay read point
           @buf = Numo::SFloat[0]
           @audio_buf = nil
-          update_buf(Numo::SFloat, (initial_buffer_seconds * rate).ceil)
+          update_buf(Numo::SFloat, (initial_buffer_seconds * sample_rate).ceil)
         end
 
         # Sets the name of the overarching multi-tap delay node (kind of a
@@ -122,6 +140,15 @@ module MB
         def named?
           @named
         end
+
+        # Changes the sample rate of the delay and all upstream nodes.
+        def sample_rate=(new_rate)
+          super
+          @sample_rate = sample_rate.to_f
+          @sample_rate_node.constant = @sample_rate
+          self
+        end
+        alias at_rate sample_rate=
 
         # Do not use directly.  Called by DelayTap#sample to retrieve the
         # delayed output for a given tap.

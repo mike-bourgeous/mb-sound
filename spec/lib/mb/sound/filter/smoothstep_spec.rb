@@ -6,7 +6,7 @@ RSpec.describe(MB::Sound::Filter::Smoothstep) do
   end
 
   it 'smooths samples' do
-    f = MB::Sound::Filter::Smoothstep.new(rate: 100, samples: 100)
+    f = MB::Sound::Filter::Smoothstep.new(sample_rate: 100, samples: 100)
     f.reset(1)
     d = f.process(Numo::SFloat.zeros(100))
     expect(d.max.round(3)).to eq(1)
@@ -18,7 +18,7 @@ RSpec.describe(MB::Sound::Filter::Smoothstep) do
   end
 
   it "doesn't jump if a new value comes in before the end of a transition" do
-    f = MB::Sound::Filter::Smoothstep.new(rate: 100, samples: 5)
+    f = MB::Sound::Filter::Smoothstep.new(sample_rate: 100, samples: 5)
     d = f.process(Numo::SFloat[1, 1, 2, -1, -1, -1, -1, -1])
 
     p1 = Numo::SFloat.linspace(0, 1, 6)[1..2].map { |v| MB::M.smoothstep(v) }

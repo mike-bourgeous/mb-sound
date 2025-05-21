@@ -1,3 +1,5 @@
+require 'forwardable'
+
 module MB
   module Sound
     module GraphNode
@@ -8,12 +10,19 @@ module MB
       #
       # The ideal way to create a Tee is with the GraphNode#tee method.
       #
+      # Note that if a downstream node tries to change the sample rate for one
+      # branch, it will change it for all branches and upstream nodes.  So add
+      # a .resample node to a branch if you want different branches at
+      # different sample rates.
+      #
       # Example:
       #     # Runnable in bin/sound.rb
       #     a, b, c = 200.hz.forever.tee(3) ; nil
       #     d = a * 100.hz + b * 200.hz + c * 300.hz ; nil
       #     play d
       class Tee
+        extend Forwardable
+
         # Raised when any branch's internal buffer overflows.  This could
         # happen if the downstream buffer size is significantly larger than the
         # Tee's internal buffer size, or if one branch is being read more than
@@ -22,9 +31,13 @@ module MB
 
         # An individual branch of a Tee, returned by Tee#branches.
         class Branch
+          extend Forwardable
+
           include GraphNode
 
           attr_reader :index
+
+          def_delegators :@tee, :sample_rate, :sample_rate=
 
           # For internal use by Tee.  Initializes one parallel branch of the tee.
           def initialize(tee, index)
@@ -42,6 +55,12 @@ module MB
           # Returns an Array containing the source node feeding into the Tee.
           def sources
             @tee.sources
+          end
+
+          # Wraps upstream #at_rate to return self instead of upstream.
+          def at_rate(new_rate)
+            @tee.at_rate(new_rate)
+            self
           end
 
           # Describes this branch as a String.
@@ -63,10 +82,13 @@ module MB
         # The branches from the Tee (see GraphNode#tee).
         attr_reader :branches
 
+        def_delegators :@source, :sample_rate, :sample_rate=
+
         # Creates a Tee from the given +source+, with +n+ branches.  Generally
         # for internal use by GraphNode#tee.
         def initialize(source, n = 2, circular_buffer_size: 48000)
-          raise 'Source for a Tee must respond to #sample (and not a Ruby Array)' unless source.respond_to?(:sample) && !source.is_a?(Array)
+          raise "Source #{source} for a Tee must respond to #sample (and not be a Ruby Array)" unless source.respond_to?(:sample) && !source.is_a?(Array)
+          raise "Source #{source} for a Tee must respond to #sample_rate" unless source.respond_to?(:sample_rate)
 
           @source = source
           @sources = [source].freeze
@@ -76,6 +98,12 @@ module MB
           @readers = Array.new(n) { @cbuf.reader }
 
           @done = false
+        end
+
+        # Wraps upstream #at_rate to return self instead of upstream.
+        def at_rate(new_rate)
+          @source.at_rate(new_rate)
+          self
         end
 
         # For internal use by Branch#sample.  Fills the internal circular

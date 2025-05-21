@@ -14,6 +14,7 @@ module MB
       class SampleWrapper
         extend Forwardable
         include MB::Sound::GraphNode
+        include MB::Sound::GraphNode::SampleRateHelper
 
         attr_reader :base_filter
 
@@ -27,6 +28,14 @@ module MB
           @base_filter = filter
           @source = source
           @in_place = in_place
+
+          if @base_filter.respond_to?(:sample_rate) && @base_filter.sample_rate != source.sample_rate
+            if @base_filter.respond_to?(:sample_rate=)
+              @base_filter.sample_rate = source.sample_rate
+            else
+              raise "Filter sample rate #{@base_filter.sample_rate} differs from source sample rate #{source.sample_rate}"
+            end
+          end
 
           # TODO: Maybe there's a better way to propagate default gains and durations?
           if @source.respond_to?(:or_at)
@@ -63,6 +72,27 @@ module MB
             [@source]
           end
         end
+
+        # Returns the sample rate of the filter if it has one, or the source if
+        # not.
+        def sample_rate
+          if @base_filter.respond_to?(:sample_rate)
+            @base_filter.sample_rate
+          else
+            @source.sample_rate
+          end
+        end
+
+        # Changes the sample rate of the source and filter.
+        def sample_rate=(new_rate)
+          if @base_filter.respond_to?(:sample_rate)
+            raise "Filter #{@base_filter} cannot change sample rate on #{self}" unless @base_filter.respond_to?(:sample_rate=)
+            @base_filter.sample_rate = new_rate
+          end
+
+          super
+        end
+        alias at_rate sample_rate=
 
         # Pass other methods through to the wrapped object.
         def method_missing(m, *a)

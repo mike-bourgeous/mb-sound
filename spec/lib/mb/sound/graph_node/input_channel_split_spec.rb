@@ -11,6 +11,10 @@ RSpec.describe(MB::Sound::GraphNode::InputChannelSplit) do
     expect(r).to eq(nil)
   end
 
+  it 'cannot change sample rates' do
+    expect { MB::Sound.file_input('sounds/synth0.flac').split[0].sample_rate = 5 }.to raise_error(NotImplementedError, /sample rate/)
+  end
+
   describe '::InputChannelNode#sample' do
     it 'returns different data when channels differ' do
       l, r = MB::Sound.file_input('sounds/synth0.flac').split

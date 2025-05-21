@@ -18,7 +18,7 @@ OSC_COUNT = 8
 osc_pool = MB::Sound::MIDI::VoicePool.new(
   manager,
   OSC_COUNT.times.map { 240.hz.ramp.at(0).oscillator }
-)
+).oversample(16, mode: :libsamplerate_fastest)
 
 filter = 1500.hz.lowpass(quality: 4)
 softclip = MB::Sound::SoftestClip.new(threshold: 0.5)

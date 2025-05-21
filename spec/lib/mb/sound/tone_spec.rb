@@ -104,7 +104,7 @@ RSpec.describe MB::Sound::Tone do
         expect(tone).to be_a(MB::Sound::Tone)
         expect(tone.frequency).to eq(5)
         expect(tone.wave_type).to eq(:sine)
-        expect(tone.rate).to eq(48000)
+        expect(tone.sample_rate).to eq(48000)
       end
     end
 
@@ -129,6 +129,24 @@ RSpec.describe MB::Sound::Tone do
 
       it 'converts negative values' do
         expect(-0.1.to_db).to eq(-20)
+      end
+    end
+
+    describe '#bits' do
+      it 'returns the quantization increment for a signed integer sample of the given number of bits' do
+        expect(8.bits).to eq(1.0 / 128.0)
+      end
+
+      it 'returns 1.0 for 1 bit' do
+        expect(1.bits).to eq(1.0)
+      end
+
+      it 'is aliased to #bit' do
+        expect(1.bit).to eq(1.0)
+      end
+
+      it 'works with fractions' do
+        expect(1.5.bits).to eq(Math.sqrt(2) / 2)
       end
     end
 
@@ -188,40 +206,97 @@ RSpec.describe MB::Sound::Tone do
       expect(data.abs.mean.round(3)).to eq(0.85)
       expect(data.abs.median.round(3)).to eq(0.85)
     end
-
-    it 'can write tone samples to a file' do
-      name = 'tmp/tonegen.flac'
-      FileUtils.mkdir_p('tmp')
-      output = MB::Sound::FFMPEGOutput.new(name, channels: 1, rate: 48000, buffer_size: 311713)
-      100.hz.for(311713.0 / 48000.0).write(output)
-      output.close
-
-      info = MB::Sound::FFMPEGInput.parse_info(name)
-      expect(info[:streams][0][:duration_ts]).to eq(311713)
-    end
   end
 
   describe '#sample' do
-    it 'ends after the expected duration exactly' do
-      # Another test used this pattern of sampling and ended up with 1e-19
-      # seconds remaining, far less than the duration of one sample
-      # Issue was fixed by cutting off at 1e-9 remaining instead of 0.
-      a = 1.hz.square.for(1)
-      expect(a.sample(5000)).to be_a(Numo::SFloat)
-      expect(a.sample(500)).to be_a(Numo::SFloat)
-      expect(a.sample(20000)).to be_a(Numo::SFloat)
-      expect(a.sample(500)).to be_a(Numo::SFloat)
-      expect(a.sample(22000)).to be_a(Numo::SFloat)
-      expect(a.sample(100)).to eq(nil)
+    # TODO: get rid of #generate and move those examples here
+
+    context 'with a duration set' do
+      it 'ends after the expected duration exactly' do
+        a = 1.hz.square.for(1)
+        expect(a.sample(5000)).to be_a(Numo::SFloat)
+        expect(a.sample(500)).to be_a(Numo::SFloat)
+        expect(a.sample(20000)).to be_a(Numo::SFloat)
+        expect(a.sample(500)).to be_a(Numo::SFloat)
+        expect(a.sample(22000)).to be_a(Numo::SFloat)
+        expect(a.sample(100)).to eq(nil)
+      end
+
+      it 'returns a short buffer if the duration does not align with buffer size' do
+        a = 1.hz.square.at(1).for(32.0 / 48000.0)
+        expect(a.sample(30)).to eq(Numo::SFloat.ones(30))
+        expect(a.sample(30)).to eq(Numo::SFloat.ones(2))
+        expect(a.sample(30)).to eq(nil)
+      end
+
+      it 'returns a short buffer if the duration does not align with sample size' do
+        a = 1.hz.square.at(1).for(32.3 / 48000.0)
+        expect(a.sample(30)).to eq(Numo::SFloat.ones(30))
+        expect(a.sample(30)).to eq(Numo::SFloat.ones(2))
+        expect(a.sample(30)).to eq(nil)
+      end
+
+      it 'rounds duration to the nearest sample' do
+        a = 1.hz.square.at(1).for(0.6 / 48000.0)
+        expect(a.sample(30)).to eq(Numo::SFloat.ones(1))
+        expect(a.sample(30)).to eq(nil)
+      end
     end
   end
 
-  pending '#fm'
-  pending '#log_fm'
-  pending '#pm'
+  shared_examples_for 'modulation sources' do |method|
+    it 'adds another graph node as a source' do
+      a = 300.hz
+      b = 150.hz.send(method, a)
+      expect(b.graph).to include(a)
+    end
+
+    it 'changes the sample rate of the upstream source to match' do
+      a = 300.hz.at_rate(12345)
+      b = 150.hz.at_rate(5432).send(method, a)
+      expect(a.sample_rate).to eq(5432)
+      expect(b.sample_rate).to eq(5432)
+    end
+
+    it 'changes the output' do
+      a = 300.hz.at(100)
+      b = 150.hz.send(method, a).at(1)
+      expect(b.sample(800)).not_to all_be_within(0.2).of_array(150.hz.at(1).sample(800))
+    end
+  end
+
+  describe '#fm' do
+    it_behaves_like 'modulation sources', :fm
+
+    pending 'expected output'
+  end
+
+  describe '#log_fm' do
+    it_behaves_like 'modulation sources', :log_fm
+
+    pending 'expected output'
+  end
+
+  describe '#pm' do
+    it_behaves_like 'modulation sources', :pm
+
+    pending 'expected output'
+  end
+
   describe '#for' do
-    pending 'limits duration'
-    pending 'resets elapsed timer'
+    it 'limits duration' do
+      # See also examples for #sample
+      expect(1.hz.square.at(1).for(2.0 / 48000.0).sample(4000)).to eq(Numo::SFloat[1, 1])
+    end
+
+    it 'resets elapsed timer' do
+      t = 1.hz.square.at(1).for(2.0 / 48000.0)
+      expect(t.sample(30)).to eq(Numo::SFloat[1, 1])
+
+      t.for(3.0 / 48000.0)
+
+      expect(t.sample(30)).to eq(Numo::SFloat[1, 1, 1])
+    end
   end
 
   describe '#oscillator' do
@@ -314,7 +389,7 @@ RSpec.describe MB::Sound::Tone do
 
     it 'generates a linear velocity-limited signal follower' do
       expect(f).to be_a(MB::Sound::Filter::LinearFollower)
-      expect(f.rate).to eq(48000)
+      expect(f.sample_rate).to eq(48000)
       expect(f.max_rise).to eq(375 * 4 / 48000.0)
       expect(f.max_fall).to eq(375 * 4 / 48000.0)
       expect(f.absolute).to eq(false)
@@ -367,6 +442,26 @@ RSpec.describe MB::Sound::Tone do
       expect(result.note).to eq(50.hz.to_note.number)
       expect(result.velocity).to eq(3)
       expect(result.channel).to eq(4)
+    end
+  end
+
+  describe '#at_rate' do
+    it 'can change the sample rate of upstream sources' do
+      a = 100.hz.at_rate(1234)
+      b = 200.hz.at_rate(5678)
+      c = 300.hz.at_rate(9101)
+      d = 15.constant.at_rate(5151) * c
+      e = 150.hz.at_rate(2324).fm(d)
+      f = 400.hz.at_rate(1500).fm(a).log_fm(b).pm(e)
+
+      f.at_rate(48001)
+
+      expect(a.sample_rate).to eq(48001)
+      expect(b.sample_rate).to eq(48001)
+      expect(c.sample_rate).to eq(48001)
+      expect(d.sample_rate).to eq(48001)
+      expect(e.sample_rate).to eq(48001)
+      expect(f.sample_rate).to eq(48001)
     end
   end
 end

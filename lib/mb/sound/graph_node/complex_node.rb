@@ -1,13 +1,19 @@
+require 'forwardable'
+
 module MB
   module Sound
     module GraphNode
       # Coerces a signal to its real, imaginary, magnitude, or phase component.
       class ComplexNode
+        extend Forwardable
+
         include GraphNode
 
         VALID_MODES = [:real, :imag, :abs, :arg]
 
         attr_reader :mode
+
+        def_delegators :@input, :sample_rate, :sample_rate=
 
         # Creates a complex-to-component conversion node from the given +input+
         # node in the given +:mode+.  The +:mode+ may be :real, :imag, :abs, or
@@ -24,6 +30,12 @@ module MB
         # constructor.
         def sources
           [@input]
+        end
+
+        # Wraps upstream #at_rate to return self instead of upstream.
+        def at_rate(new_rate)
+          @input.at_rate(new_rate)
+          self
         end
 
         # Converts the next +count+ samples from the original input according

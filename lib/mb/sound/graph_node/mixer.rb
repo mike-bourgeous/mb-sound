@@ -14,6 +14,8 @@ module MB
       class Mixer
         include GraphNode
         include BufferHelper
+        include SampleRateHelper
+        include ArithmeticNodeHelper
 
         # The constant value added to the output sum before any summands.
         attr_accessor :constant
@@ -33,11 +35,11 @@ module MB
         # or an empty NArray from its #sample method will cause this #sample
         # method to return nil.  Otherwise, the #sample method only returns nil
         # when all summands return nil or empty.
-        def initialize(summands, stop_early: true)
+        def initialize(summands, sample_rate: nil, stop_early: true)
           @constant = 0
           @summands = {}
 
-          @complex = false
+          setup_buffer(length: 1024, temp: true)
 
           @stop_early = stop_early
 
@@ -45,10 +47,12 @@ module MB
           # the different cases of arrays vs hashes vs varargs accurately)
           summands = [summands] unless summands.is_a?(Array) || summands.is_a?(Hash)
 
+          @sample_rate = sample_rate
+
           summands.each_with_index do |(s, gain), idx|
             gain ||= 1.0
 
-            @complex = true if gain.is_a?(Complex)
+            check_rate(s)
 
             case
             when s.is_a?(Numeric)
@@ -66,7 +70,8 @@ module MB
             end
           end
 
-          @buf = nil
+          raise 'Sample rate must be a positive numeric' unless @sample_rate.is_a?(Numeric) && @sample_rate > 0
+          @sample_rate = @sample_rate.to_f
         end
 
         # Calls the #sample methods of all summands, applies gains, adds them all
@@ -76,35 +81,13 @@ module MB
         # constructor) returns nil or an empty buffer, then this method will
         # return nil.
         def sample(count)
-          @complex ||= @constant.is_a?(Complex)
-
-          inputs = @summands.map { |s, gain|
-            v = s.sample(count)&.not_inplace!
-            next if v.nil? || v.empty?
-            @complex ||= gain.is_a?(Complex) || v.is_a?(Numo::SComplex) || v.is_a?(Numo::DComplex)
-            v = MB::M.zpad(v, count) if v && v.length > 0 && v.length < count
-            [v, gain]
-          }
-
-          inputs.compact!
-
-          if @stop_early
-            return nil if inputs.length != @summands.length
-          else
-            return nil if inputs.empty? && !@summands.empty?
+          arithmetic_sample(count, sources: @summands, pad: 0, fill: @constant, stop_early: @stop_early) do |retbuf, inputs|
+            inputs.each do |v, gain|
+              tmpbuf = @tmpbuf[0...v.length]
+              tmpbuf.fill(gain).inplace * v
+              retbuf.inplace + tmpbuf
+            end
           end
-
-          setup_buffer(length: count, complex: @complex, temp: true)
-
-          @buf.fill(@constant)
-
-          inputs.each do |v, gain|
-            next if v.nil? || v.empty?
-            @tmpbuf.fill(gain).inplace * v
-            @buf.inplace + @tmpbuf
-          end
-
-          @buf.not_inplace!
         end
 
         # Returns the gain value for the given +summand+, or nil if the summand
@@ -122,7 +105,6 @@ module MB
         def []=(summand, gain)
           # TODO: smooth gain changes
           summand = @summands.keys[summand] if summand.is_a?(Integer)
-          @complex = true if gain.is_a?(Complex)
           raise "Summand #{summand} must respond to :sample" unless summand.respond_to?(:sample)
           @summands[summand] = gain
         end
@@ -175,6 +157,7 @@ module MB
           else
             raise "Summand #{other} is already present on mixer #{self}" if @summands.include?(other)
             other.or_for(nil) if other.respond_to?(:or_for) # Default to playing forever
+            check_rate(other)
             self[other] = 1.0
           end
 

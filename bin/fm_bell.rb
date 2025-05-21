@@ -48,9 +48,9 @@ voices = OSC_COUNT.times.map { |i|
 
   sum = a_out + c_out
 
-  g = sum.filter(10000.hz.lowpass) # Try to cut down on aliasing chalkboard noise
+  g = sum.filter(15000.hz.lowpass) # Try to cut down on aliasing chalkboard noise
 
-  final = g * 0.5
+  final = (g * 0.5).real.oversample(2)
 
   MB::Sound::MIDI::GraphVoice.new(
     final,

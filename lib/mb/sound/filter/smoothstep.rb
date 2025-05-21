@@ -10,7 +10,7 @@ module MB
       # TODO: Use an FIR filter instead of triggering on step changes?
       class Smoothstep < Filter
         # The sample rate given to the constructor, in Hz.
-        attr_reader :rate
+        attr_reader :sample_rate
 
         # The duration of a full transition in samples.
         attr_reader :fade_samples
@@ -23,15 +23,15 @@ module MB
         # Initializes a smoothstep signal interpolator (see the class
         # description).
         #
-        # +:rate+ is the sample rate of the system in Hz.
+        # +:sample_rate+ is the sample rate of the system in Hz.
         # +:samples+ is the duration of a full transition in samples.  Only
         #            one of +:samples+ or +:seconds+ may be specified, not
         #            both.
         # +:seconds+ is the duration of a full transition in seconds.  Only one
         #            of +:samples+ or +:seconds+ may be specified, not both.
-        def initialize(rate:, samples: nil, seconds: nil)
-          raise 'Sample rate must be a positive number' unless rate.is_a?(Numeric) && rate > 0
-          @rate = rate.to_f
+        def initialize(sample_rate:, samples: nil, seconds: nil)
+          raise 'Sample rate must be a positive number' unless sample_rate.is_a?(Numeric) && sample_rate > 0
+          @sample_rate = sample_rate.to_f
 
           raise 'Specify a transition duration in either samples or seconds' if samples.nil? && seconds.nil?
           raise 'Specify only one of samples or seconds, not both' unless samples.nil? || seconds.nil?
@@ -45,6 +45,14 @@ module MB
           reset
         end
 
+        # Sets the filter sample rate.
+        def sample_rate=(sample_rate)
+          @sample_rate = sample_rate
+          @fade_samples = (@fade_seconds * @sample_rate).round if @fade_seconds
+          self
+        end
+        alias at_rate sample_rate=
+
         # Sets the duration of a transition in samples.
         def fade_samples=(samples)
           raise 'Sample duration must be a Numeric' unless samples.is_a?(Numeric)
@@ -53,12 +61,12 @@ module MB
           raise 'Sample duration must be >= 1' if samples <= 0
 
           @fade_samples = samples
-          @fade_seconds = @fade_samples / @rate
+          @fade_seconds = @fade_samples / @sample_rate
         end
 
         # Sets the duration of a transition in seconds.
         def fade_seconds=(seconds)
-          @fade_samples = (seconds * @rate).round
+          @fade_samples = (seconds * @sample_rate).round
         end
 
         # Resets the output to 0, or to the given value.

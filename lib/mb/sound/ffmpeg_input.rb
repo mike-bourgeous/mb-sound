@@ -7,7 +7,7 @@ module MB
     # file formats.
     class FFMPEGInput < IOInput
       # Note: number of frames may be approximate
-      attr_reader :filename, :rate, :frames, :info, :raw_info
+      attr_reader :filename, :frames, :info, :raw_info
 
       # A list of metadata keys that should not be parsed numerically.
       EXCLUDED_CONVERSIONS = [
@@ -128,7 +128,7 @@ module MB
           raise "Missing channels from stream info" unless channels
         end
 
-        @rate = info[:sample_rate]
+        @sample_rate = info[:sample_rate]
 
         if @info[:duration_ts]
           @frames = @info[:duration_ts].to_r
@@ -136,13 +136,13 @@ module MB
           @frames *= @info[:sample_rate]
           @frames = @frames.ceil
         else
-          @frames = ((@info[:duration] || 0) * @rate).ceil
+          @frames = ((@info[:duration] || 0) * @sample_rate).ceil
         end
 
         if resample
-          raise "Sampling rate must be an integer greater than 0" unless resample.is_a?(Integer) && resample > 0
-          @rate = resample
-          @frames = @frames * @rate / @info[:sample_rate] if @info.include?(:sample_rate)
+          raise "Sampling rate must be a positive Numeric" unless resample.is_a?(Numeric) && resample > 0
+          @sample_rate = resample.to_f
+          @frames = (@frames * @sample_rate / @info[:sample_rate]).ceil if @info.include?(:sample_rate)
         end
 
         # Usually format is set when ffmpeg is being used for realtime input,
@@ -154,9 +154,9 @@ module MB
         # video where the audio starts after the video
         start = @info[:start_time]
         start = 0 unless start.is_a?(Numeric)
-        @frames += (start * @rate).ceil
+        @frames += (start * @sample_rate).ceil
 
-        resample_opt = resample ? "-ar '#{@rate}'" : ''
+        resample_opt = resample ? "-ar '#{@sample_rate}'" : ''
         channels_opt = channels ? "-ac '#{channels}' -af 'aresample=matrix_encoding=dplii'" : ''
         format_opt = format ? "-f #{format.shellescape}" : ''
         log_opt = "-loglevel #{loglevel&.to_s&.shellescape || 8}"
@@ -168,7 +168,8 @@ module MB
             "#{channels_opt} -map 0:#{@stream_id} -f f32le -"
           ],
           channels,
-          buffer_size
+          buffer_size,
+          sample_rate: @sample_rate
         )
       end
     end

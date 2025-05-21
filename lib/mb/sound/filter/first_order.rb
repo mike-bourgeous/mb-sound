@@ -20,7 +20,7 @@ module MB
         # +filter_type+ is one of the symbols in FILTER_TYPES above.
         def initialize(filter_type, f_samp, f_center)
           set_parameters(filter_type, f_samp, f_center)
-          super(@b0, @b1, @b2, @a1, @a2)
+          super(@b0, @b1, @b2, @a1, @a2, sample_rate: f_samp)
         end
 
         # Recalculates filter coefficients based on the given filter parameters.

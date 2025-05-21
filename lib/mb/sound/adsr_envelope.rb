@@ -37,7 +37,7 @@ module MB
     #       decay_time: 0.1,
     #       sustain_level: 0.7,
     #       release_time: 0.5,
-    #       rate: 48000
+    #       sample_rate: 48000
     #     )
     #     env.trigger(1)
     #     a = env.sample(48000)
@@ -49,26 +49,32 @@ module MB
       include GraphNode
       include BufferHelper
 
-      attr_reader :attack_time, :decay_time, :sustain_level, :release_time, :total, :peak, :time, :rate
+      attr_reader :attack_time, :decay_time, :sustain_level, :release_time, :total, :peak, :time, :sample_rate
+
+      # The approximate amount of time in seconds it takes the smoothing filter
+      # to reach equilibrium.  This time is added to the release time when
+      # determining whether the envelope is truly finished.
+      attr_reader :filter_ringdown
 
       # Initializes an ADSR envelope with the given +:attack_time+,
       # +:decay_time+, and +:release_time+ in seconds, and the given
       # +:sustain_level+ relative to the peak parameter given to #trigger.  The
-      # sample +:rate+ is required to ensure envelope times are accurate.
+      # +:sample_rate+ is required to ensure envelope times are accurate.
       #
       # Note that the +:sustain_level+ may be greater than 1.0.
-      def initialize(attack_time:, decay_time:, sustain_level:, release_time:, rate:, filter_freq: 1000)
-        @rate = rate.to_f
+      def initialize(attack_time:, decay_time:, sustain_level:, release_time:, sample_rate:, filter_freq: 10000)
+        @sample_rate = sample_rate.to_f
         @on = false
 
         update(attack_time, decay_time, sustain_level, release_time)
 
         @auto_release = nil
         @time = @total + 100
-        @frame = @rate * @time
+        @frame = @sample_rate * @time
 
         # Single-pole filter avoids overshoot
-        @filter = filter_freq.hz.at_rate(rate).lowpass1p
+        @filter = filter_freq.hz.at_rate(@sample_rate).lowpass1p
+        @filter_ringdown = 7.5 * 1.0 / filter_freq.to_f
         @peak = 0.5
         @value = 0
         @sust = 0
@@ -106,7 +112,7 @@ module MB
 
       # Returns true while the envelope is either sustained or releasing.
       def active?
-        @on || @time < @total
+        @on || @time < @total + @filter_ringdown
       end
 
       # Returns true while the envelope is sustained.
@@ -126,7 +132,10 @@ module MB
         @frame = 0
         @peak = peak
         @value = 0
+
         @auto_release = auto_release
+        @auto_release = @attack_time + @decay_time if @auto_release == true
+
         @on = true
 
         self
@@ -153,7 +162,7 @@ module MB
       # clicking if used on actual audio.
       def reset
         @time = @total + 100
-        @frame = @rate * @time
+        @frame = @sample_rate * @time
         @on = false
         @auto_release = nil
         @filter.reset(0)
@@ -167,8 +176,8 @@ module MB
       # See #reset if you want to clear the smoothing filter state and jump to
       # time zero.
       def time=(t)
-        @frame = (t * @rate).round
-        @time = @frame / @rate.to_f
+        @frame = (t * @sample_rate).round
+        @time = @frame / @sample_rate.to_f
       end
 
       # Produces one sample (or many samples if +count+ is not nil) of the
@@ -188,10 +197,10 @@ module MB
         reset
 
         trigger(1)
-        d1 = sample(@rate * (@attack_time + @decay_time + sustain_time)).dup.not_inplace!
+        d1 = sample(@sample_rate * (@attack_time + @decay_time + sustain_time)).dup.not_inplace!
 
         release
-        d2 = sample(@rate * @release_time).dup.not_inplace!
+        d2 = sample(@sample_rate * @release_time).dup.not_inplace!
 
         d1.concatenate(d2)
       end
@@ -205,41 +214,56 @@ module MB
       end
 
       def sample_count_c(count, filter: true)
+        # TODO: Use expand_buffer
         setup_buffer(length: count)
 
-        MB::FastSound.adsr_narray(
+        retbuf, @frame, @time, @on, @peak, @sust = MB::FastSound.adsr_narray(
           @buf.inplace!,
           @frame,
-          @rate,
+          @sample_rate,
           @attack_time,
           @decay_time,
           @sust,
           @release_time,
           @peak,
-          @on
+          @on,
+          @auto_release,
+          filter ? @filter_ringdown : 0
         )
 
-        @value = @buf[-1]
-
-        advance(count)
+        @value = retbuf[-1]
 
         if filter
-          @filter.process(@buf.inplace!)
+          @filter.process(retbuf.inplace!)
         else
-          @filter.process(@buf.not_inplace!)
+          # Update filter state without modifying retbuf
+          @filter.process(retbuf.not_inplace!)
         end
 
-        return nil if @auto_release && !@on && @time >= @total && @buf.max < -100.db
+        return nil if @auto_release && !@on && @time >= @total && retbuf.max < -100.db
 
-        @buf.not_inplace!
+        retbuf.not_inplace!
       end
 
       def sample_ruby_c(count, filter: true)
         if count
           setup_buffer(length: count)
-          @buf.inplace.map { sample_one_c(filter: filter) }
+
+          maybe_idx = @buf.inplace.map_with_index { |_v, idx|
+            v = sample_one_c(filter: filter)
+            break idx unless v
+            v
+          }
+
+          if maybe_idx.is_a?(Integer)
+            retbuf = @buf[0...maybe_idx]
+          else
+            retbuf = @buf
+          end
+
           return nil if @auto_release && !@on && @buf.max < -100.db
-          return @buf
+
+          return retbuf
         end
 
         return sample_one_c(filter: filter)
@@ -258,6 +282,8 @@ module MB
 
         advance(1)
 
+        return nil if @auto_release && !@on && @time >= @total + (filter ? @filter_ringdown : 0) && @value == 0
+
         if filter
           @filter.process_one(@value)
         else
@@ -269,9 +295,23 @@ module MB
       def sample_ruby(count = nil, filter: true)
         if count
           setup_buffer(length: count)
-          @buf.inplace.map { sample_ruby(filter: filter) }
+
+          maybe_idx = @buf.inplace.map_with_index { |_v, idx|
+            v = sample_ruby(filter: filter)
+            break idx unless v
+            v
+          }
+
+          if maybe_idx.is_a?(Integer)
+            retbuf = @buf[0...maybe_idx]
+          else
+            retbuf = @buf
+          end
+
+          # TODO: maybe do this check before spending CPU cycles
           return nil if @auto_release && !@on && @buf.max < -100.db
-          return @buf
+
+          return retbuf
         end
 
         if @on
@@ -305,6 +345,8 @@ module MB
 
         advance(1)
 
+        return nil if @auto_release && !@on && @time >= @total + (filter ? @filter_ringdown : 0) && @value == 0
+
         if filter
           @filter.process_one(@value)
         else
@@ -316,15 +358,24 @@ module MB
       # Returns an inactive duplicate copy of the envelope, allowing the
       # duplicate to be sampled (e.g. for plotting) without changing the state
       # of the original envelope.
-      def dup(rate = @rate)
+      def dup(sample_rate = @sample_rate)
         e = super()
         e.instance_variable_set(:@buf, @buf.dup)
         e.named("#{graph_node_name} (dup)")
         e.instance_variable_set(:@peak, 1.0) unless active?
-        e.instance_variable_set(:@rate, rate.to_f)
-        e.instance_variable_set(:@filter, @filter.center_frequency.hz.at_rate(rate).lowpass1p)
+        e.instance_variable_set(:@sample_rate, sample_rate.to_f)
+        e.instance_variable_set(:@filter, @filter.center_frequency.hz.at_rate(sample_rate).lowpass1p)
         e.reset
         e
+      end
+
+      # Changes the sample rate used for calculating durations.
+      def sample_rate=(new_rate)
+        new_rate = new_rate.to_f
+        raise "Sample rate must be positive" unless new_rate > 0
+
+        @frame = @frame * new_rate / @sample_rate
+        @sample_rate = new_rate
       end
 
       private
@@ -346,15 +397,13 @@ module MB
         self
       end
 
-      # Advances the internal clock by the given number of +samples+.
+      # Advances the internal clock by the given number of +samples+ (not used
+      # by #sample_count_c as the C code tracks these variables).
       def advance(samples)
         @frame += samples
-        @time = @frame / @rate.to_f
+        @time = @frame / @sample_rate.to_f
 
-        release_time = @attack_time + @decay_time if @auto_release == true
-        release_time ||= @auto_release
-
-        release if @auto_release && @on && @time >= release_time
+        release if @on && @auto_release && @time >= @auto_release
       end
     end
   end

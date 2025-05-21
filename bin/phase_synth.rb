@@ -48,7 +48,7 @@ AMP_TRANSITION = 4800
 
 filename = ARGV[0]
 raise "No or invalid output file given #{USAGE}" unless filename && File.directory?(File.dirname(filename))
-output = MB::Sound::FFMPEGOutput.new(filename, rate: RATE, channels: 2)
+output = MB::Sound::FFMPEGOutput.new(filename, sample_rate: RATE, channels: 2)
 
 freq = ARGV[1]&.to_f
 raise "No or invalid frequency given #{USAGE}" unless freq && freq > 0
@@ -105,8 +105,8 @@ while sample <= phases.last[:start] # XXX <= should be < but testing another con
 
   # phase is divided by 360 for half phase in each channel
   base_phase = sample * freq * 2.0 * Math::PI / RATE
-  data[0][sample] = amp * osc.oscillator((base_phase + phase * Math::PI / 360.0) % (2.0 * Math::PI))
-  data[1][sample] = amp * osc.oscillator((base_phase - phase * Math::PI / 360.0) % (2.0 * Math::PI))
+  data[0][sample] = amp * osc.value_at((base_phase + phase * Math::PI / 360.0) % (2.0 * Math::PI))
+  data[1][sample] = amp * osc.value_at((base_phase - phase * Math::PI / 360.0) % (2.0 * Math::PI))
 
   sample += 1
 
