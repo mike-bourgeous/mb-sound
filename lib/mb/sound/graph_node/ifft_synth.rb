@@ -11,10 +11,24 @@ module MB
         # TODO: figure out how to synthesize at an arbitrary period e.g. by
         # skipping bins and using a larger size.
         def self.sawtooth(period)
-          buf = Numo::SComplex.new(period / 2).indgen
+          buf = Numo::SComplex.new(period / 2 + 1).indgen
           buf[1..-1] = 1i * (-1) ** buf[1..-1] / buf[1..-1]
+          buf.inplace * (1.69492 / Math::PI) # empirical scaling factor to avoid clipping
           self.new(data: buf)
         end
+
+        # https://en.wikipedia.org/wiki/Square_wave_(waveform)
+        def self.square(period)
+          buf = Numo::SComplex.zeros(period / 2 + 1)
+          bview = buf[(1..-1).step(2)]
+          bview.indgen.inplace + 1
+          1.0 / (bview.inplace * 2 - 1)
+          bview[] = bview
+          buf.inplace * (3.38983i / Math::PI) # empirical scaling
+          self.new(data: buf)
+        end
+
+        attr_reader :data
 
         def initialize(data:, sample_rate: 48000)
           @data = data.dup
