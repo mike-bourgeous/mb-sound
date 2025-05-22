@@ -24,7 +24,7 @@ def kicker
   freq_constants = []
   bfreq = -> { 2 ** base.dup.tap { |z| freq_constants << z }.log2.smooth(seconds: 0.0001) }
 
-  attack_hz = 200.constant.named('Attack Hz')
+  attack_hz = 100.constant.named('Attack Hz')
   attack_env = attack_hz.adsr(0.0005, 0.02, 0, 0.01, log: 60) # fast click at start
   pitch_env = MB::Sound.adsr(0.0005, decay_time, 0, decay_time) # semitone fall over full decay
 
@@ -34,7 +34,12 @@ def kicker
   falling_sine = (attack_env + bfreq.call * (0.059 * pitch_env + 1)).tone.at(1).pm(noise_source)
   falling_sine_amp = falling_sine.adsr(0.0001, decay_time, 0, decay_time, log: 60)
 
-  final = falling_sine_amp
+  final = falling_sine_amp.peq({
+    30.hz => 9.db,
+    95.hz => [6.db, 0.5],
+    600.hz => [-20.db, 1.5],
+    9000.hz => [25.db, 1.5],
+  })
 
   MB::Sound::MIDI::GraphVoice.new(
     final,

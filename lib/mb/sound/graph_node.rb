@@ -438,6 +438,39 @@ module MB
         end
       end
 
+      # Adds a filter chain that applies parametric peaking EQ.  The +pairs+
+      # parameter should be a Hash mapping a frequency in Hz (or a Tone) to a
+      # linear gain, or an Array with gain and bandwith in octaves (the default
+      # bandwidth is 1/3 octave).
+      #
+      # Example:
+      #     # Reduce second harmonic (or first if you count from zero)
+      #     100.hz.ramp.peq(200.hz => -6.db)
+      #
+      #     # Cut mids
+      #     100.hz.ramp.peq(500.hz => [-10.db, 4])
+      def peq(pairs)
+        raise "PEQ frequency/gain pairs must be a Hash from frequency to gain (got #{pairs.class})" unless pairs.is_a?(Hash)
+
+        filters = pairs.map { |freq, gain|
+          freq = freq.frequency if freq.is_a?(Tone)
+          freq = freq.to_f
+
+          if gain.is_a?(Array)
+            gain, bandwidth = gain
+          else
+            bandwidth = 1.0 / 3.0
+          end
+
+          MB::Sound::Filter::Cookbook.new(:peak, self.sample_rate, freq, db_gain: gain.to_db, bandwidth_oct: bandwidth)
+        }
+
+        # TODO: Expose PEQ parameters for MIDI control
+        chain = MB::Sound::Filter::FilterChain.new(filters)
+
+        self.filter(chain)
+      end
+
       # Applies an IIR phase difference network to remove negative frequencies
       # and produce a Complex-valued analytic signal.
       #
