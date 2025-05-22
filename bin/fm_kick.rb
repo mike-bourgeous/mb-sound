@@ -55,8 +55,8 @@ def kicker
     .adsr(0.0001, boom_noise_decay, 0.0, boom_noise_decay, log: 40)
 
   boom_sine = 143.hz.at(1).fm(boom_noise * boom_noise_gain)
-    .adsr(0.008, boom_sine_decay, 0.0, boom_sine_decay, log: 50)
-    .adsr(0.008, boom_sine_decay, 0.0, boom_sine_decay)
+    .adsr(0.01, boom_sine_decay, 0.0, boom_sine_decay, log: 50)
+    .adsr(0.01, boom_sine_decay, 0.0, boom_sine_decay)
 
   boom = boom_sine.peq({
     20.hz => [-20.db, 1],
@@ -75,7 +75,9 @@ def kicker
   ################################################
 
 
-  final = sub * 1 + boom * 0.1
+  final = sub * 1 + boom * 0.05
+
+  # TODO: allow a voice to output more than one channel e.g. for stereo
 
   MB::Sound::MIDI::GraphVoice.new(
     final,
@@ -102,7 +104,7 @@ pool = MB::Sound::MIDI::VoicePool.new(
   voices
 )
 
-output_chain = (pool * -15.db).softclip(0.6, 0.99)
+output_chain = (pool * -10.db).softclip(0.8, 0.99)
 
 if ENV['DEBUG'] == '1'
   puts 'saving before graph'
