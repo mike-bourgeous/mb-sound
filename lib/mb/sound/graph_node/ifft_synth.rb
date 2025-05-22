@@ -32,6 +32,7 @@ module MB
 
         def initialize(data:, sample_rate: 48000)
           @data = data.dup
+          @time_data = MB::Sound.real_ifft(@data)
           @sample_rate = sample_rate.to_f
         end
 
@@ -39,7 +40,7 @@ module MB
           growbuf(count)
 
           while @cbuf.length < count
-            @cbuf.write(MB::Sound.real_ifft(@data))
+            @cbuf.write(@time_data)
           end
 
           @cbuf.read(count)
