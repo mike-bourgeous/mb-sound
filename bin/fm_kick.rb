@@ -13,6 +13,7 @@ end
 
 # Generates a node graph and GraphVoice to synthesize a kick
 def kicker
+  pitch_decay = 0.06
   decay_time = 0.15
 
   # TODO: the node graph and GraphVoice really need some concept of i/o ports
@@ -25,13 +26,13 @@ def kicker
   bfreq = -> { 2 ** base.dup.tap { |z| freq_constants << z }.log2.smooth(seconds: 0.0001) }
 
   attack_hz = 100.constant.named('Attack Hz')
-  attack_env = attack_hz.adsr(0.0005, 0.02, 0, 0.01, log: 60) # fast click at start
+  attack_env = attack_hz.adsr(0.0005, pitch_decay, 0, pitch_decay, log: 60) # fast click at start
   pitch_env = MB::Sound.adsr(0.0005, decay_time, 0, decay_time) # semitone fall over full decay
 
   noise_cutoff = 1500.constant.named('Noise cutoff')
   noise_source = 1000.hz.gauss.noise.at(0.4).filter(:lowpass, cutoff: noise_cutoff).adsr(0.0001, 0.04, 0, 0.04, log: 60)
 
-  falling_sine = (attack_env + bfreq.call * (0.059 * pitch_env + 1)).tone.at(1).pm(noise_source)
+  falling_sine = (attack_env + bfreq.call * (0.06 * pitch_env + 0.97)).tone.at(1).pm(noise_source)
   falling_sine_amp = falling_sine.adsr(0.0001, decay_time, 0, decay_time, log: 60)
 
   final = falling_sine_amp.peq({
