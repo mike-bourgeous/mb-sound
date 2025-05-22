@@ -6,8 +6,15 @@ require 'bundler/setup'
 
 require 'mb-sound'
 
+pry_next = false
+MB::U.sigquit_backtrace do
+  pry_next = true
+end
+
 # Generates a node graph and GraphVoice to synthesize a kick
 def kicker
+  decay_time = 0.15
+
   # TODO: the node graph and GraphVoice really need some concept of i/o ports
   # and configurable parameters.
   #
@@ -15,22 +22,26 @@ def kicker
   # changes.
   base = 440.constant
   freq_constants = []
-  bfreq = -> { 2 ** base.dup.tap { |z| freq_constants << z }.log2.smooth(seconds: 0.1) }
+  bfreq = -> { 2 ** base.dup.tap { |z| freq_constants << z }.log2.smooth(seconds: 0.0001) }
 
-  freq_env = MB::Sound.adsr(0.0005, 0.1, 0, 0.01)
-  freq_env_range = freq_env.db(30) * 400 + 40
+  attack_hz = 200.constant.named('Attack Hz')
+  attack_env = attack_hz.adsr(0.0005, 0.02, 0, 0.01, log: 60) # fast click at start
+  pitch_env = MB::Sound.adsr(0.0005, decay_time, 0, decay_time) # semitone fall over full decay
 
-  falling_sine = (freq_env_range + bfreq.call).tone.at(0.1)
+  noise_cutoff = 1500.constant.named('Noise cutoff')
+  noise_source = 1000.hz.gauss.noise.at(0.4).filter(:lowpass, cutoff: noise_cutoff).adsr(0.0001, 0.04, 0, 0.04, log: 60)
 
-  apply_amp_env = falling_sine.adsr(0.0001, 0.5, 0, 0.5)
+  falling_sine = (attack_env + bfreq.call * (0.059 * pitch_env + 1)).tone.at(1).pm(noise_source)
+  falling_sine_amp = falling_sine.adsr(0.0001, decay_time, 0, decay_time, log: 60)
 
-  final = apply_amp_env
+  final = falling_sine_amp
 
   MB::Sound::MIDI::GraphVoice.new(
     final,
     freq_constants: freq_constants
   ).named('Kick').tap { |v|
-    # v.on_cc(1, ''
+    v.on_cc(1, 'Attack Hz', range: 0..2000, relative: false)
+    #v.on_cc(1, 'Noise cutoff', range: 0..10000, relative: false)
   }
 end
 
@@ -49,7 +60,7 @@ pool = MB::Sound::MIDI::VoicePool.new(
   voices
 )
 
-output_chain = (pool * 0.db).softclip(0.6, 0.99)
+output_chain = (pool * -15.db).softclip(0.6, 0.99)
 
 if ENV['DEBUG'] == '1'
   puts 'saving before graph'
@@ -69,7 +80,16 @@ begin
       pool.all_off
       midi.seek(0) if repeat
     end
-    break if midi&.empty? && !pool.active? && !repeat
+    areak if midi&.empty? && !pool.active? && !repeat
+
+    puts pool.find_by_name('Attack Hz').constant # XXX
+    puts pool.find_by_name('Noise cutoff').constant # XXX
+
+    if pry_next
+      require 'pry-byebug'
+      binding.pry
+      pry_next = false
+    end
   end
 ensure
   if ENV['DEBUG'] == '1'
