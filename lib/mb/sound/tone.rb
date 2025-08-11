@@ -163,6 +163,7 @@ module MB
       ::Numeric.include NumericToneMethods
 
       attr_reader :wave_type, :frequency, :amplitude, :range, :duration, :wavelength, :phase
+      attr_reader :period, :period_samples
       attr_reader :duration_set, :amplitude_set
 
       # Shortcut for creating a new tone with the given frequency source, for
@@ -375,7 +376,7 @@ module MB
       # Changes the target sample rate of the tone.
       def sample_rate=(sample_rate)
         super
-        @single_sample = 1.0 / @sample_rate
+        @period_samples = @period * @sample_rate if @period
         @oscillator&.at_rate(sample_rate)
         self
       end
@@ -629,6 +630,8 @@ module MB
         freq = SPEED_OF_SOUND / freq.meters if freq.is_a?(Feet) || freq.is_a?(Meters)
         freq = freq.to_f if freq.is_a?(Numeric)
         @frequency = freq
+        @period = 1.0 / @frequency
+        @period_samples = @period * @sample_rate
         @wavelength = (SPEED_OF_SOUND / @frequency).meters if @frequency.is_a?(Numeric)
         @oscillator&.frequency = @frequency
       end
