@@ -17,6 +17,8 @@ module MB
         # first-to-last/left-to-right, so the first filter at the left receives
         # the original input, and the last filter produces the final output.
         def initialize(*filters)
+          filters = filters[0] if filters.is_a?(Array) && filters[0].is_a?(Array) && filters.length == 1
+
           raise NoFiltersGivenError, 'No filters were given' if filters.empty?
           @filters = filters
 
