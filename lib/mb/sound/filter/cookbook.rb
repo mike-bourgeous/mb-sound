@@ -81,6 +81,12 @@ module MB
           end
           alias at_rate sample_rate=
 
+          # See Biquad#insert.
+          def insert(&block)
+            @filter.insert(&block)
+            self
+          end
+
           private
 
           # If given an object with :sample, returns the object itself.  If
@@ -319,7 +325,11 @@ module MB
         # works with real data, not complex, and will perform best (no
         # duplication of data) with SFloat.
         def dynamic_process(samples, cutoffs, qualities)
-          dynamic_process_c(samples, cutoffs, qualities)
+          if @proc
+            dynamic_process_ruby_c(samples, cutoffs, qualities)
+          else
+            dynamic_process_c(samples, cutoffs, qualities)
+          end
         end
 
         def dynamic_process_c(samples, cutoffs, qualities)
@@ -354,6 +364,7 @@ module MB
           samples.map_with_index { |x0, idx|
             set_parameters(@filter_type, @sample_rate, cutoffs[idx], db_gain: @db_gain, quality: qualities[idx])
             out = MB::FastSound.biquad(@b0, @b1, @b2, @a1, @a2, x0, x1, x2, y1, y2)
+            out = @proc.call(out) if @proc
             y2 = y1
             y1 = out
             x2 = x1

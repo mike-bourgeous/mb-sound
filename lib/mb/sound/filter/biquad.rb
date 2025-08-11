@@ -87,6 +87,20 @@ module MB
           reset
         end
 
+        # Calls the given block for each sample (disables fast C processing),
+        # saving the result within the feedback loop.
+        #
+        # Returns self to allow method chaining.
+        def insert(&block)
+          unless block_given?
+            raise 'Provide a block to #insert that accepts and returns a single Float or Complex sample value'
+          end
+
+          @proc = block
+
+          self
+        end
+
         # Resets the filter's internal state as if it had received the given
         # value for a very long time.  The filter's output will be this value
         # multiplied by the DC gain (Biquad#response(0)).
@@ -171,12 +185,17 @@ module MB
         # If +samples+ is a Numo::NArray in in-place mode, then the samples will
         # be processed in-place, saving an array allocation.
         def process(samples)
-          process_c(samples)
+          if @proc
+            process_ruby_c(samples)
+          else
+            process_c(samples)
+          end
         end
 
         # Process a single real (not Complex) sample through the filter.
         def process_one(sample)
           out = MB::FastSound.biquad(@b0, @b1, @b2, @a1, @a2, sample, @x1, @x2, @y1, @y2)
+          out = @proc.call(out) if @proc
           @y2 = @y1
           @y1 = out
           @x2 = @x1
@@ -201,6 +220,7 @@ module MB
             # Direct Form I
             samples.map do |x0|
               out = MB::FastSound.biquad_complex(@b0, @b1, @b2, @a1, @a2, x0, @x1, @x2, @y1, @y2)
+              out = @proc.call(out) if @proc
               @y2 = @y1
               @y1 = out
               @x2 = @x1
@@ -210,6 +230,7 @@ module MB
           else
             samples.map do |x0|
               out = MB::FastSound.biquad(@b0, @b1, @b2, @a1, @a2, x0, @x1, @x2, @y1, @y2)
+              out = @proc.call(out) if @proc
               @y2 = @y1
               @y1 = out
               @x2 = @x1
@@ -225,6 +246,7 @@ module MB
           samples.map do |x0|
             out = @b0 * x0 + @b1 * @x1 + @b2 * @x2 - @a1 * @y1 - @a2 * @y2
             out = 0 if out.abs < 1e-18 && @y2.abs < 1e-18 && @y1.abs < 1e-18
+            out = @proc.call(out) if @proc
             @y2 = @y1
             @y1 = out
             @x2 = @x1
@@ -243,6 +265,7 @@ module MB
           out = @b0 * sample + @b1 * @x1 + @b2 * @x2 - @a1 * @y1 - @a2 * @y2
           out = 0 if out.abs < 1e-18 && @y2.abs < 1e-18 && @y1.abs < 1e-18
           out = strength * out + (1.0 - strength) * sample
+          out = @proc.call(out) if @proc
           @y2 = @y1
           @y1 = out
           @x2 = @x1
