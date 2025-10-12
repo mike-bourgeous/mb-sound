@@ -212,14 +212,19 @@ module MB
 
         case file_tone_data
         when Array, Numo::NArray
-          data = file_tone_data.map { |d|
-            if d.respond_to?(:call)
-              # TODO: could this be moved into any_sound_to_array?
-              Numo::SFloat.linspace(-10, 10, samples).map { |v| d.call(v) }
-            else
-              d
-            end
-          }
+          if file_tone_data.is_a?(Array)
+            data = file_tone_data.map { |d|
+              if d.respond_to?(:call)
+                # TODO: could this be moved into any_sound_to_array?
+                Numo::SFloat.linspace(-10, 10, samples).map { |v| d.call(v) }
+              else
+                d
+              end
+            }
+          else
+            data = file_tone_data
+          end
+
           data = any_sound_to_array(data)
 
         when String
@@ -260,8 +265,9 @@ module MB
 
           result = nil
 
-          until offset >= data[0].length
-            STDOUT.write("\e[#{header_lines}H\e[36mPress Ctrl-C to stop  \e[1;35m#{offset} / #{data[0].length}\e[0m\e[K\n")
+          d0len = offset_length(data[0])
+          until offset >= d0len
+            STDOUT.write("\e[#{header_lines}H\e[36mPress Ctrl-C to stop  \e[1;35m#{offset} / #{d0len}\e[0m\e[K\n")
 
             if spectrum
               p.yrange(-80, 0) if p.respond_to?(:yrange)
@@ -282,8 +288,19 @@ module MB
           end
 
           result if p.respond_to?(:print) && !p.print
+
         else
-          data = data.map { |c| c[offset...([offset + samples, c.length].min)] || [] }
+          data = data.map { |c|
+            range = offset...([offset + samples, offset_length(c)].min)
+
+            if c.is_a?(Numo::NArray) && c.ndim == 2
+              c = c[nil, range]
+            else
+              c = c[range]
+            end
+
+            c || []
+          }
 
           if spectrum
             p.logscale if p.respond_to?(:logscale)
@@ -294,16 +311,24 @@ module MB
 
           p.yrange(data.map(&:min).min, data.map(&:max).max) if p.respond_to?(:yrange) && !all.nil?
 
-          @lines = p.plot(data.map.with_index { |c, idx| [idx.to_s, c] }.to_h, print: false)
+          @lines = p.plot(
+            data.map.with_index { |c, idx|
+              yrange = [0, c.shape[0]] if c.is_a?(Numo::NArray) && c.ndim == 2
+              [idx.to_s, {data: c, yrange: yrange}]
+            }.to_h,
+            print: false
+          )
           puts @lines if p.respond_to?(:print) && p.print
 
           @lines if p.respond_to?(:print) && !p.print
         end
+
       ensure
         if all == true
           if graphical
             @pg.close
             @pg = nil
+
           elsif @pt.respond_to?(:height)
             puts "\e[#{@pt.height + (header_lines || 2) + 2}H"
           end
@@ -402,6 +427,17 @@ module MB
 
         else
           index.to_s
+        end
+      end
+
+      # Used for calculating the length of data for subset/offset in #plot.
+      def offset_length(data)
+        case
+        when data.is_a?(Numo::NArray) && data.ndim == 2
+          data.shape[1]
+
+        else
+          data.length
         end
       end
     end
