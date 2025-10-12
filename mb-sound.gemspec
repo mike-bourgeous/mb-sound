@@ -24,7 +24,6 @@ Gem::Specification.new do |spec|
     `git ls-files -z`.split("\x0").reject { |f| f.match(%r{^(test|spec|features|sounds|tmp|coverage)/}) }
   end
   spec.bindir        = "bin"
-  spec.executables   = spec.files.grep(%r{^bin/}) { |f| File.basename(f) }
   spec.require_paths = ["lib"]
 
   spec.extensions = ['ext/mb/fast_sound/extconf.rb', 'ext/mb/sound/fast_resample/extconf.rb']
@@ -40,7 +39,7 @@ Gem::Specification.new do |spec|
 
   spec.add_runtime_dependency 'midilib', '~> 4.0.0'
 
-  spec.add_runtime_dependency 'mb-math', '>= 0.2.8.usegit'
+  spec.add_runtime_dependency 'mb-math', '>= 0.3.0.usegit'
   spec.add_runtime_dependency 'mb-util', '>= 0.1.24.usegit'
 
   spec.add_development_dependency 'rake', '~> 13.0.1'
