@@ -21,6 +21,7 @@ require_relative 'sound/playback_methods'
 require_relative 'sound/fft_methods'
 require_relative 'sound/gain_methods'
 require_relative 'sound/window_methods'
+require_relative 'sound/analysis_methods'
 
 module MB
   # Convenience functions for making quick work of sound.
@@ -37,6 +38,7 @@ module MB
     extend FFTMethods
     extend GainMethods
     extend WindowMethods
+    extend AnalysisMethods
 
     # Filters a sound with the given filter parameters (see
     # MB::Sound::Filter::Cookbook).
