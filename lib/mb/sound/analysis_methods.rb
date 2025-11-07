@@ -4,12 +4,27 @@ module MB
     # cross-correlation, peak autocorrelation/estimated frequency, etc.
     module AnalysisMethods
       # Returns the cross correlation array of the two given arrays using
-      # convolution.
+      # FFT-based convolution.
+      #
+      # TODO: VERIFY The middle value of the output is the zero-shift
+      # correlation amount, values to the left are negative shifts, and values
+      # to the right are positive shifts.
       def crosscorrelate(a, b)
-        MB::M.convolve(a, b.reverse.conj)
+        Numo::Pocketfft.fftconvolve(Numo::NArray.cast(a), Numo::NArray.cast(b).reverse.conj)
+      end
+
+      # Returns the shift of b relative to a that yields the highest
+      # cross-correlation value from #crosscorrelate.
+      #
+      # In other words, for a periodic signal, MB::M.ror(b, peak_correlation(a,
+      # b)) will be the closest rotation to approximating a.
+      def peak_correlation(a, b)
+        v = crosscorrelate(a, b)
+        v.max_index - v.length / 2
       end
 
       def freq_estimate(a, sample_rate: 48000)
+        # TODO: use peak bin from FFT?  use phase around peak bin to estimate?  use cepstrum to estimate?
         q = crosscorrelate(a, a)
         mid = q.length / 2
         q = q[mid..]
@@ -22,11 +37,11 @@ module MB
 
         # TODO: pick largest peak?  pick first peak?  return top N peaks? XXX
         # idx ? sample_rate / idx.to_f : 0
-        plist[0..25].map { |idx, _, _| sample_rate / idx.to_f }
+        plist[0..25].map { |idx, v, _| [idx, sample_rate / idx.to_f, v] }
       end
 
-      # Finds all points in the given narray that are larger or smaller than at
-      # least +min_distance+ of their neighbors on either side.
+      # Finds all points in the given +narray+ that are larger or smaller than
+      # at least +min_distance+ of their neighbors on either side.
       def peaks(narray, min_distance)
         peaks = []
         narray = narray.abs if narray[0].is_a?(Complex)

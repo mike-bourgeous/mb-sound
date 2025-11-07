@@ -1,5 +1,6 @@
 RSpec.describe(MB::Sound::AnalysisMethods) do
   pending '#crosscorrelate'
+  pending '#peak_correlation'
   pending '#freq_estimate'
 
   describe '#fetch_oob' do
