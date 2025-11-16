@@ -37,7 +37,7 @@ module MB
 
           attr_reader :index
 
-          def_delegators :@tee, :sample_rate, :sample_rate=
+          def_delegators :@tee, :sample_rate, :sample_rate=, :get_sampler
 
           # For internal use by Tee.  Initializes one parallel branch of the tee.
           def initialize(tee, index)
@@ -45,9 +45,11 @@ module MB
             @index = index
           end
 
-          # Retrieves the next buffer for this branch.  The Tee will print a
-          # warning if any branch is sampled more than once without all branches
-          # being sampled once.
+          # Retrieves the next buffer for this branch.
+          #
+          # Raises BranchBufferOverflow if the read would not fit in the tee's
+          # internal buffer, or if any of the other tee branches have not been
+          # read for a long time.
           def sample(count)
             @tee.internal_sample(self, count)
           end
@@ -85,19 +87,32 @@ module MB
         def_delegators :@source, :sample_rate, :sample_rate=
 
         # Creates a Tee from the given +source+, with +n+ branches.  Generally
-        # for internal use by GraphNode#tee.
+        # for internal use by GraphNode#tee and GraphNode#get_sampler.
         def initialize(source, n = 2, circular_buffer_size: 48000)
           raise "Source #{source} for a Tee must respond to #sample (and not be a Ruby Array)" unless source.respond_to?(:sample) && !source.is_a?(Array)
           raise "Source #{source} for a Tee must respond to #sample_rate" unless source.respond_to?(:sample_rate)
 
           @source = source
           @sources = [source].freeze
-          @branches = Array.new(n) { |idx| Branch.new(self, idx) }.freeze
+          @branches = Array.new(n) { |idx| Branch.new(self, idx) }
 
           @cbuf = CircularBuffer.new(buffer_size: circular_buffer_size)
           @readers = Array.new(n) { @cbuf.reader }
 
           @done = false
+        end
+
+        # Adds a new branch to the Tee and returns it.  This is part of the
+        # code to allow multiple references to a single graph node without
+        # explicit teeing.
+        def get_sampler
+          branch = Branch.new(self, @branches.length)
+          reader = @cbuf.reader
+
+          @branches << branch
+          @readers << reader
+
+          branch
         end
 
         # Wraps upstream #at_rate to return self instead of upstream.
@@ -128,15 +143,12 @@ module MB
 
           if r.empty?
             nil
-          elsif r.length < count
-            # TODO: allow disabling padding?
-            MB::M.zpad(r.read(r.length), count)
           else
             r.read(MB::M.min(r.length, count))
           end
 
         rescue MB::Sound::CircularBuffer::BufferOverflow
-          raise BranchBufferOverflow, "Read of #{branch} overflowed internal buffer.  Buffers of all branches: #{@readers.map(&:length)}"
+          raise BranchBufferOverflow, "Read of #{branch} overflowed internal buffer.  This may mean a branch is not being read.  Buffers of all branches: #{@readers.map(&:length)}"
         end
 
         # Clears the "done" flag that returns nil if upstreams return nil, in

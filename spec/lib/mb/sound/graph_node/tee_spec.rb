@@ -40,7 +40,7 @@ RSpec.describe(MB::Sound::GraphNode::Tee) do
     expect(samples.uniq(&:to_a).count).to eq(1)
   end
 
-  it 'only zero pads if the source returns less data at the very end' do
+  it 'does not zero pad if the source returns less data at the very end' do
     source = MB::Sound::ArrayInput.new(data: [Numo::SFloat[]])
     expect(source).to receive(:sample).with(5).and_return(Numo::SFloat[1,2,3,4], Numo::SFloat[5,6,7], nil)
     allow(source).to receive(:tee).and_call_original
@@ -50,8 +50,8 @@ RSpec.describe(MB::Sound::GraphNode::Tee) do
     expect(t1.sample(5)).to eq(Numo::SFloat[1,2,3,4,5])
     expect(t2.sample(5)).to eq(Numo::SFloat[1,2,3,4,5])
 
-    expect(t1.sample(5)).to eq(Numo::SFloat[6,7,0,0,0])
-    expect(t2.sample(5)).to eq(Numo::SFloat[6,7,0,0,0])
+    expect(t1.sample(5)).to eq(Numo::SFloat[6,7])
+    expect(t2.sample(5)).to eq(Numo::SFloat[6,7])
   end
 
   it 'allows branches to be sampled more than once with different sample counts' do

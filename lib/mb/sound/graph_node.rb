@@ -65,22 +65,21 @@ module MB
       # modify the resulting buffer without affecting parallel branches of the
       # graph.
       #
-      # If a block is given, then the branches will be yielded to the block,
-      # and whatever the block returns will be returned instead of the
-      # branches.
-      #
       # Example (for bin/sound.rb):
       #     # AM and tremolo added together for some reason
       #     a, b = 120.hz.tee ; nil
       #     c = a * 150.hz.at(0.5..1) + b * 0.5.hz.at(0.25..1) ; nil
       #     play c
       def tee(n = 2)
-        b = Tee.new(self, n).branches
-        if block_given?
-          yield b
-        else
-          b
-        end
+        Tee.new(get_sampler, n).branches
+      end
+
+      # Creates and returns a tee branch from this node.  This is used by
+      # consumers of upstream graph nodes like Tone, CookbookWrapper, etc. to
+      # allow implicit branching of node outputs.
+      def get_sampler
+        @internal_tee ||= Tee.new(self, 0)
+        @internal_tee.get_sampler
       end
 
       # Creates a mixer that adds this node's #sample output to +other+ (a

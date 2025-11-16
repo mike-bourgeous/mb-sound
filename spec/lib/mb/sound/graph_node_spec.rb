@@ -44,10 +44,6 @@ RSpec.describe(MB::Sound::GraphNode, aggregate_failures: true) do
       expect(1.constant.tee(5).count).to eq(5)
     end
 
-    it 'accepts a block and returns the result of the block' do
-      expect(1.constant.tee { |a, b| a + b }.sample(1)[0]).to eq(2)
-    end
-
     it 'produces branches that yield duplicate copies of the incoming data' do
       a, b, c = 5000.hz.ramp.at(2..3).tee(3)
       expect(a.sample(1)[0].round(4)).to eq(2.5)
@@ -58,6 +54,8 @@ RSpec.describe(MB::Sound::GraphNode, aggregate_failures: true) do
       expect(c.sample(1)[0].round(4)).not_to eq(2.5)
     end
   end
+
+  pending '#get_sampler'
 
   describe 'proc-based arithmetic' do
     let(:nilnode) { MB::Sound::ArrayInput.new(data: Numo::SFloat[]) }
