@@ -8,7 +8,8 @@ module MB
       # GraphNode module), using buffer copies to prevent parallel branches
       # from interfering with each other.
       #
-      # The ideal way to create a Tee is with the GraphNode#tee method.
+      # The ideal way to create a Tee is with the GraphNode#tee method or
+      # GraphNode#get_sampler method.
       #
       # Note that if a downstream node tries to change the sample rate for one
       # branch, it will change it for all branches and upstream nodes.  So add

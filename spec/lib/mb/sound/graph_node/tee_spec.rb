@@ -1,7 +1,4 @@
-RSpec.describe(MB::Sound::GraphNode::Tee) do
-  pending '#reset'
-  pending '::Branch#for'
-
+RSpec.describe(MB::Sound::GraphNode::Tee, aggregate_failures: true) do
   it 'can be created' do
     a, b = 123.hz.tee
     expect(a).to be_a(MB::Sound::GraphNode::Tee::Branch)
@@ -132,6 +129,20 @@ RSpec.describe(MB::Sound::GraphNode::Tee) do
       expect(t1.sample_rate).to eq(5432)
       expect(t2.sample_rate).to eq(5432)
       expect(source.sample_rate).to eq(5432)
+    end
+  end
+
+  describe '::Branch#for' do
+    it 'allows resetting time-limited upstream nodes' do
+      a = 0.hz.square.at(1).for(0.0001).get_sampler
+      expect(a).to be_a(MB::Sound::GraphNode::Tee::Branch)
+
+      expect(a.sample(10)).to eq(Numo::SFloat.ones(5))
+      expect(a.sample(10)).to eq(nil)
+
+      a.for(0.0002)
+      expect(a.sample(20)).to eq(Numo::SFloat.ones(10))
+      expect(a.sample(1)).to eq(nil)
     end
   end
 end

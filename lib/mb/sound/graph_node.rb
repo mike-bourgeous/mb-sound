@@ -78,6 +78,7 @@ module MB
       # consumers of upstream graph nodes like Tone, CookbookWrapper, etc. to
       # allow implicit branching of node outputs.
       def get_sampler
+        # TODO: maybe rename to #get_branch to match Tee's naming??
         @internal_tee ||= Tee.new(self, 0)
         @internal_tee.get_sampler
       end
