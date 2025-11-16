@@ -663,19 +663,23 @@ module MB
 
         until source_queue.empty?
           s, from = source_queue.shift
-          puts "Visiting #{s} from #{from}" # XXX
+          puts "\n\e[36mVisiting \e[1m#{s}\e[22m from \e[1m#{from}\e[22m\e[0m" # XXX
           s = s.to_i if s.respond_to?(:round) && s == s.round
 
           if source_history.include?(s)
-            puts "Removing #{s} from list at #{source_history[s]} and adding at #{source_list.length - 1}" # XXX
-            source_list.delete_at(source_history[s])
+            # FIXME: multiple deletions will make the stored indices wrong, so we really need a linked list if we want constant-time deletion
+            puts "  Removing #{s} from list at #{source_history[s]} and adding at #{source_list.length - 1}" # XXX
+            q = source_list.delete_at(source_history[s])
+            puts "    [removed #{q}]" # XXX
             source_history[s] = source_list.length
             source_list << s
             next
           end
 
+          puts "  Placing #{s} at #{source_list.length}" # XXX
           source_history[s] = source_list.length
           source_list << s
+
           source_queue.concat(s.sources.map { |v| [v, s] }) if s.respond_to?(:sources)
         end
 

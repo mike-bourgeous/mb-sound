@@ -620,6 +620,7 @@ module MB
       end
 
       def to_s
+        return super if named?
         inspect
       end
 

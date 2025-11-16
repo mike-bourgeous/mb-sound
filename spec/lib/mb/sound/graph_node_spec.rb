@@ -525,8 +525,8 @@ RSpec.describe(MB::Sound::GraphNode) do
 
   describe '#graph' do
     it 'returns a list of nodes in a graph without duplicates' do
-      a = 50.hz.ramp
-      b = 3.hz.at(120..650)
+      a = 50.hz.ramp.named('a')
+      b = 3.hz.at(120..650).named('b')
       # FIXME: both d and c refer to b, but this will lead to repeated
       # sampling.  Can this be prevented?  Either a graph would need a
       # container to keep track of nodes, or nodes would need to be notified
@@ -535,18 +535,19 @@ RSpec.describe(MB::Sound::GraphNode) do
       # then somehow a directly teed node can be allowed N times?
       # Could add a method that generates a new Tee that all downstream nodes
       # will use when referencing upstream nodes.
-      c = b * 0.01
-      d = a.filter(:lowpass, cutoff: b, quality: c)
-      e = d * 3
+      c = (b * 0.01).named('c')
+      d = a.filter(:lowpass, cutoff: b, quality: c).named('d')
+      e = (d * 3).named('e')
 
       expected = [
         e,
-        d, 3,
-        b, c,
+        d,
         a,
+        c,
         50,
         3,
-        0.01
+        b,
+        0.01,
       ]
 
       require 'pry-byebug'; binding.pry # XXX
