@@ -522,4 +522,38 @@ RSpec.describe(MB::Sound::GraphNode) do
       end
     end
   end
+
+  describe '#graph' do
+    it 'returns a list of nodes in a graph without duplicates' do
+      a = 50.hz.ramp
+      b = 3.hz.at(120..650)
+      # FIXME: both d and c refer to b, but this will lead to repeated
+      # sampling.  Can this be prevented?  Either a graph would need a
+      # container to keep track of nodes, or nodes would need to be notified
+      # when they are connected, or the sample method would need to validate
+      # the graph once before playback.  But then Tee allows duplication, so
+      # then somehow a directly teed node can be allowed N times?
+      # Could add a method that generates a new Tee that all downstream nodes
+      # will use when referencing upstream nodes.
+      c = b * 0.01
+      d = a.filter(:lowpass, cutoff: b, quality: c)
+      e = d * 3
+
+      expected = [
+        e,
+        d, 3,
+        b, c,
+        a,
+        50,
+        3,
+        0.01
+      ]
+
+      require 'pry-byebug'; binding.pry # XXX
+
+      expect(e.graph).to eq(expected)
+    end
+
+    pending 'does not get lost in feedback loops'
+  end
 end

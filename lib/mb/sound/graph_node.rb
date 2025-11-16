@@ -650,20 +650,36 @@ module MB
       end
 
       # Returns a list of all nodes feeding into this node, either directly or
-      # indirectly, plus this node itself.
+      # indirectly, plus this node itself, without duplication.  Also may
+      # include numeric values used as parameters to some of the nodes.
+      #
+      # Entries in the returned list should be in order of increasing distance
+      # from this node, but if there are loops in the graph this is not
+      # guaranteed.
       def graph
-        source_history = Set.new
-        source_queue = [self]
+        source_list = []
+        source_history = {}
+        source_queue = [[self, nil]]
 
         until source_queue.empty?
-          s = source_queue.shift
-          next if source_history.include?(s)
+          s, from = source_queue.shift
+          puts "Visiting #{s} from #{from}" # XXX
+          s = s.to_i if s.respond_to?(:round) && s == s.round
 
-          source_history << s
-          source_queue.concat(s.sources) if s.respond_to?(:sources)
+          if source_history.include?(s)
+            puts "Removing #{s} from list at #{source_history[s]} and adding at #{source_list.length - 1}" # XXX
+            source_list.delete_at(source_history[s])
+            source_history[s] = source_list.length
+            source_list << s
+            next
+          end
+
+          source_history[s] = source_list.length
+          source_list << s
+          source_queue.concat(s.sources.map { |v| [v, s] }) if s.respond_to?(:sources)
         end
 
-        source_history.to_a
+        source_list
       end
 
       # Finds the lowest numeric value greater than zero for any graph nodes
