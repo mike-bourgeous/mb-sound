@@ -315,6 +315,16 @@ module MB
         ret[0...endidx] if ret
       end
 
+      # Appends a BufferAdapter to the graph with this node as its upstream
+      # source, using the given +length+ as the upstream frame size.  When
+      # downstream nodes sample the adapter, the adapter will sample the
+      # upstream node in +length+-sized chunks.  This allows running a node
+      # graph with a shorter internal buffer size than the sound card input or
+      # output buffer size, for example.
+      def with_buffer(length)
+        MB::Sound::GraphNode::BufferAdapter.new(upstream: self, upstream_count: length)
+      end
+
       # Adds a resampling filter to the graph with the given new sample rate.
       # All nodes added after the resampling node must use the new sample rate.
       #
@@ -718,16 +728,6 @@ module MB
         end
 
         size
-      end
-
-      # Appends a BufferAdapter to the graph with this node as its upstream
-      # source, using the given +length+ as the upstream frame size.  When
-      # downstream nodes sample the adapter, the adapter will sample the
-      # upstream node in +length+-sized chunks.  This allows running a node
-      # graph with a shorter internal buffer size than the sound card input or
-      # output buffer size, for example.
-      def with_buffer(length)
-        MB::Sound::GraphNode::BufferAdapter.new(upstream: self, upstream_count: length)
       end
 
       # Looks for the first source node within the graph feeding into this node
