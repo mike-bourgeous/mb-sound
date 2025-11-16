@@ -57,6 +57,51 @@ RSpec.describe(MB::Sound::GraphNode, aggregate_failures: true) do
 
   pending '#get_sampler'
 
+  describe '#+' do
+    it 'returns a mixer' do
+      expect(1.constant + 2.constant).to be_a(MB::Sound::GraphNode::Mixer)
+    end
+
+    it 'can add two elements' do
+      m = 1.constant + 2i.constant
+      expect(m.sample(3)).to eq(Numo::SComplex[1+2i,1+2i,1+2i])
+    end
+
+    it 'can add the same element to itself' do
+      a = 1.constant
+      m = a + a
+      expect(m[a]).to eq(2)
+      expect(m.sample(3)).to eq(Numo::SFloat[2,2,2])
+    end
+
+    it 'can add an element repeatedly' do
+      a = 1.constant
+      m = a + a + a
+      expect(m[a]).to eq(1)
+      expect(m.sample(3)).to eq(Numo::SFloat[3,3,3])
+    end
+  end
+
+  describe '#-' do
+    it 'returns a mixer' do
+      expect(1.constant - 2.constant).to be_a(MB::Sound::GraphNode::Mixer)
+    end
+
+    it 'can subtract the same element from itself' do
+      a = 1.constant
+      m = a - a
+      expect(m[a]).to eq(0)
+      expect(m.sample(3)).to eq(Numo::SFloat.zeros(3))
+    end
+
+    it 'can subtract an element repeatedly' do
+      a = 1.constant
+      m = a - a - a
+      expect(m[a]).to eq(-1)
+      expect(m.sample(3)).to eq(Numo::SFloat[-1,-1,-1])
+    end
+  end
+
   describe 'proc-based arithmetic' do
     let(:nilnode) { MB::Sound::ArrayInput.new(data: Numo::SFloat[]) }
     let(:shortnode) { MB::Sound::ArrayInput.new(data: Numo::SComplex[1, 2, 3]) }

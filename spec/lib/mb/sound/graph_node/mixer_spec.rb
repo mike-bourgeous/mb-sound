@@ -41,6 +41,13 @@ RSpec.describe(MB::Sound::GraphNode::Mixer) do
       expect(ss.sample(800)).to eq(Numo::SFloat.zeros(800).fill(3.75))
     end
 
+    it 'can sum gains when a summand is repeated in an Array' do
+      a = 1.constant
+      ss = MB::Sound::GraphNode::Mixer.new([a, a, a])
+      expect(ss[a]).to eq(3)
+      expect(ss.sample(5)).to eq(Numo::SFloat.ones(5))
+    end
+
     it 'can infer the sample rate from its summands' do
       mix = MB::Sound::GraphNode::Mixer.new(
         [
@@ -250,6 +257,8 @@ RSpec.describe(MB::Sound::GraphNode::Mixer) do
       ss[1] = -0.5
       expect(ss.sample(100)).to eq(Numo::SFloat.zeros(100).fill(4.5))
     end
+
+    pending 'can add a summand'
   end
 
   describe '#delete' do
@@ -275,23 +284,6 @@ RSpec.describe(MB::Sound::GraphNode::Mixer) do
 
       ss.clear
       expect(ss.count).to eq(0)
-    end
-  end
-
-  describe '#+' do
-    it 'adds another source' do
-      m = 1.constant + 2.constant
-      expect(m + 3.constant).to equal(m)
-    end
-
-    it 'changes upstream sample rates' do
-      a = 1.constant.at_rate(123)
-      b = 2.constant.at_rate(456)
-      m = a + b
-
-      expect(a.sample_rate).to eq(123)
-      expect(b.sample_rate).to eq(123)
-      expect(m.sample_rate).to eq(123)
     end
   end
 
