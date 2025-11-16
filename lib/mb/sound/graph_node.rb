@@ -655,7 +655,7 @@ module MB
       # Entries in the returned list should be in order of increasing distance
       # from this node, but if there are loops in the graph this is not
       # guaranteed.
-      def graph
+      def graph(ignore_tees: false)
         source_list = []
         source_history = Set.new
         source_queue = [self]
@@ -677,6 +677,26 @@ module MB
         end
 
         source_list
+      end
+
+      # Returns a Hash from source node to a Set of destination nodes
+      # describing all connections upstream of this graph node.
+      def graph_edges(ignore_tees: false)
+        edges = {}
+
+        graph(ignore_tees: ignore_tees).each do |n|
+          next unless n.respond_to?(:sources)
+
+          # TODO: it would be cool if #sources could give a name to each source
+          n.sources.each do |s|
+            s = s.round if s.respond_to?(:round) && s.round == s
+
+            edges[s] ||= Set.new
+            edges[s] << n
+          end
+        end
+
+        edges
       end
 
       # Finds the lowest numeric value greater than zero for any graph nodes

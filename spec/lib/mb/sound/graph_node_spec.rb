@@ -521,48 +521,65 @@ RSpec.describe(MB::Sound::GraphNode, aggregate_failures: true) do
     end
   end
 
-  describe '#graph' do
-    it 'returns an ordered list of nodes in a graph without duplicates' do
-      a = 50.hz.ramp.named('a')
-      b = 3.hz.at(120..650).named('b')
-      # FIXME: both d and c refer to b, but this will lead to repeated
-      # sampling.  Can this be prevented?  Either a graph would need a
-      # container to keep track of nodes, or nodes would need to be notified
-      # when they are connected, or the sample method would need to validate
-      # the graph once before playback.  But then Tee allows duplication, so
-      # then somehow a directly teed node can be allowed N times?
-      # Could add a method that generates a new Tee that all downstream nodes
-      # will use when referencing upstream nodes.
-      c = (b * 0.01).named('c')
-      d = a.filter(:lowpass, cutoff: b, quality: c).named('d')
-      e = (d * 3).named('e')
+  context 'graph introspection' do
+    let(:a) { 50.hz.ramp.named('a') }
+    let(:b) { 3.hz.at(120..650).named('b') }
+    let(:c) { (b * 0.01).named('c') }
+    let(:d) { a.filter(:lowpass, cutoff: b, quality: c).named('d') }
+    let(:e) { (d * 3).named('e') }
 
-      expected = [
-        e,
-        d,
-        a,
-        c,
-        50,
-        3,
-        b,
-        0.01,
-      ]
+    describe '#graph' do
+      it 'returns an ordered list of nodes in a graph without duplicates' do
+        expected = [
+          e,
+          d,
+          a,
+          c,
+          50,
+          3,
+          b,
+          0.01,
+        ]
 
-      expect(e.graph).to eq(expected)
+        expect(e.graph).to eq(expected)
+      end
+
+      it 'does not get lost in feedback loops' do
+        n1 = 10.hz.named('1')
+        n2 = 20.hz.named('2')
+        n3 = 30.hz.named('3')
+
+        expect(n1).to receive(:sources).exactly(3).times.and_return([n3])
+        expect(n2).to receive(:sources).exactly(3).times.and_return([n1])
+        expect(n3).to receive(:sources).exactly(3).times.and_return([n2])
+
+        expect(n1.graph).to eq([n3, n2, n1])
+        expect(n2.graph).to eq([n1, n3, n2])
+        expect(n3.graph).to eq([n2, n1, n3])
+      end
     end
 
-    it 'does not get lost in feedback loops' do
-      a = 10.hz.named('a')
-      b = 20.hz.named('b')
-      c = 30.hz.named('c')
+    describe '#graph_edges' do
+      it 'returns constant value connections for a single node' do
+        expect(a.graph_edges).to eq({ 50 => Set.new([a]) })
+      end
 
-      expect(a).to receive(:sources).exactly(3).times.and_return([c])
-      expect(b).to receive(:sources).exactly(3).times.and_return([a])
-      expect(c).to receive(:sources).exactly(3).times.and_return([b])
+      it 'returns connections for a simple graph' do
+        expect(c.graph_edges).to eq({ 0.01 => Set.new([c]), 3 => Set.new([b]), b => Set.new([c]) })
+      end
 
-      expect(a.graph).to eq([c, b, a])
-      expect(b.graph).to eq([a, c, b])
-      expect(c.graph).to eq([b, a, c])
+      it 'returns connections for a more complex graph' do
+        expected = {
+          50 => Set.new([a]),
+          a => Set.new([d]),
+          3 => Set.new([b, e]),
+          b => Set.new([c, d]),
+          0.01 => Set.new([c]),
+          c => Set.new([d]),
+          d => Set.new([e]),
+        }
+        expect(e.graph_edges).to eq(expected)
+      end
     end
   end
 end
