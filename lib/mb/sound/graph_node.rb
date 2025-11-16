@@ -659,27 +659,22 @@ module MB
       def graph
         source_list = []
         source_history = Set.new
-        source_queue = [[self, nil]]
+        source_queue = [self]
 
         until source_queue.empty?
           s, from = source_queue.shift
-          puts "\n\e[36mVisiting \e[1m#{s}\e[22m from \e[1m#{from}\e[22m\e[0m" # XXX
           s = s.to_i if s.respond_to?(:round) && s == s.round
 
           if source_history.include?(s)
-            # FIXME: multiple deletions will make the stored indices wrong, so we really need a linked list if we want constant-time deletion
-            puts "  Removing #{s} from list at #{source_list.index(s)} and adding at #{source_list.length - 1}" # XXX
-            q = source_list.delete(s)
-            puts "    [removed #{q}]" # XXX
+            source_list.delete(s)
             source_list << s
             next
           end
 
-          puts "  Placing #{s} at #{source_list.length}" # XXX
           source_history << s
           source_list << s
 
-          source_queue.concat(s.sources.map { |v| [v, s] }) if s.respond_to?(:sources)
+          source_queue.concat(s.sources) if s.respond_to?(:sources)
         end
 
         source_list
