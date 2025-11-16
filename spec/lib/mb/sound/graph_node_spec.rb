@@ -1,5 +1,5 @@
 # Tests for the DSL overall, including Tone, Mixer, Multiplier
-RSpec.describe(MB::Sound::GraphNode) do
+RSpec.describe(MB::Sound::GraphNode, aggregate_failures: true) do
   it 'can create a complex signal graph' do
     graph = (1.hz.square.at_rate(20).at(1) - 2.hz.square.at_rate(20).at(0.5) - 5 + 3 + 2) * 0.5.hz.square.at_rate(20).at(2..1) * 3 + 1
     expect(graph.sample(5)).to eq(Numo::SFloat.zeros(5).fill(2.5))
@@ -524,7 +524,7 @@ RSpec.describe(MB::Sound::GraphNode) do
   end
 
   describe '#graph' do
-    it 'returns a list of nodes in a graph without duplicates' do
+    it 'returns an ordered list of nodes in a graph without duplicates' do
       a = 50.hz.ramp.named('a')
       b = 3.hz.at(120..650).named('b')
       # FIXME: both d and c refer to b, but this will lead to repeated
@@ -550,11 +550,21 @@ RSpec.describe(MB::Sound::GraphNode) do
         0.01,
       ]
 
-      require 'pry-byebug'; binding.pry # XXX
-
       expect(e.graph).to eq(expected)
     end
 
-    pending 'does not get lost in feedback loops'
+    it 'does not get lost in feedback loops' do
+      a = 10.hz.named('a')
+      b = 20.hz.named('b')
+      c = 30.hz.named('c')
+
+      expect(a).to receive(:sources).exactly(3).times.and_return([c])
+      expect(b).to receive(:sources).exactly(3).times.and_return([a])
+      expect(c).to receive(:sources).exactly(3).times.and_return([b])
+
+      expect(a.graph).to eq([c, b, a])
+      expect(b.graph).to eq([a, c, b])
+      expect(c.graph).to eq([b, a, c])
+    end
   end
 end
