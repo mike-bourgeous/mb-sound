@@ -349,9 +349,9 @@ RSpec.describe(MB::Sound::GraphNode, aggregate_failures: true) do
     it 'multiplies the node by an envelope' do
       node = 5.hz.adsr(0.5, 1, 0.25, 2)
       expect(node).to be_a(MB::Sound::GraphNode::Multiplier)
-      expect(node.sources.any?(MB::Sound::ADSREnvelope)).to eq(true)
+      expect(node.graph.any?(MB::Sound::ADSREnvelope)).to eq(true)
 
-      env = node.sources.select { |s| s.is_a?(MB::Sound::ADSREnvelope) }.first
+      env = node.graph.select { |s| s.is_a?(MB::Sound::ADSREnvelope) }.first
       expect(env.attack_time).to eq(0.5)
       expect(env.decay_time).to eq(1.0)
       expect(env.sustain_level).to eq(0.25)
@@ -624,7 +624,9 @@ RSpec.describe(MB::Sound::GraphNode, aggregate_failures: true) do
           0.01,
         ]
 
-        expect(e.graph).to eq(expected)
+        result = e.graph(include_tees: false)
+
+        expect(result).to eq(expected)
       end
 
       it 'does not get lost in feedback loops' do
@@ -640,6 +642,8 @@ RSpec.describe(MB::Sound::GraphNode, aggregate_failures: true) do
         expect(n2.graph).to eq([n1, n3, n2])
         expect(n3.graph).to eq([n2, n1, n3])
       end
+
+      pending 'when include_tees is true'
     end
 
     describe '#graph_edges' do
@@ -648,7 +652,7 @@ RSpec.describe(MB::Sound::GraphNode, aggregate_failures: true) do
       end
 
       it 'returns connections for a simple graph' do
-        expect(c.graph_edges).to eq({ 0.01 => Set.new([c]), 3 => Set.new([b]), b => Set.new([c]) })
+        expect(c.graph_edges(include_tees: false)).to eq({ 0.01 => Set.new([c]), 3 => Set.new([b]), b => Set.new([c]) })
       end
 
       it 'returns connections for a more complex graph' do
@@ -661,8 +665,10 @@ RSpec.describe(MB::Sound::GraphNode, aggregate_failures: true) do
           c => Set.new([d]),
           d => Set.new([e]),
         }
-        expect(e.graph_edges).to eq(expected)
+        expect(e.graph_edges(include_tees: false)).to eq(expected)
       end
+
+      pending 'when include_tees is true'
     end
   end
 end

@@ -670,14 +670,23 @@ module MB
       # Entries in the returned list should be in order of increasing distance
       # from this node, but if there are loops in the graph this is not
       # guaranteed.
-      def graph(ignore_tees: false)
+      def graph(include_tees: true)
+        # TODO: use a linked list for deletion and reinsertion if this method
+        # becomes too slow, or weaken return ordering and memoize in each
+        # instance and call graph instead of sources to get sources?
         source_list = []
         source_history = Set.new
         source_queue = [self]
 
         until source_queue.empty?
-          s, from = source_queue.shift
-          s = s.to_i if s.respond_to?(:round) && s == s.round
+          s = source_queue.shift
+          s = s.round if s.is_a?(Numeric) && s.respond_to?(:round) && s.round == s
+
+          # TODO: have a separate configuration for manual tees and implied
+          # branches from get_sampler, and default to ignoring get_sampler?
+          unless include_tees
+            s = climb_tee_tree(s)
+          end
 
           if source_history.include?(s)
             source_list.delete(s)
@@ -696,15 +705,19 @@ module MB
 
       # Returns a Hash from source node to a Set of destination nodes
       # describing all connections upstream of this graph node.
-      def graph_edges(ignore_tees: false)
+      def graph_edges(include_tees: true)
         edges = {}
 
-        graph(ignore_tees: ignore_tees).each do |n|
+        graph(include_tees: include_tees).each do |n|
           next unless n.respond_to?(:sources)
 
           # TODO: it would be cool if #sources could give a name to each source
           n.sources.each do |s|
-            s = s.round if s.respond_to?(:round) && s.round == s
+            s = s.round if s.is_a?(Numeric) && s.respond_to?(:round) && s.round == s
+
+            unless include_tees
+              s = climb_tee_tree(s)
+            end
 
             edges[s] ||= Set.new
             edges[s] << n
@@ -812,6 +825,14 @@ module MB
           t.or_for(nil) if t.respond_to?(:or_for) # Default to playing forever
           t.or_at(1) if fix_amp && t.respond_to?(:or_at) # Default to full volume
         end
+      end
+
+      # Walk up sources until a non-Tee::Branch node is found.  Used by #graph.
+      def climb_tee_tree(branch)
+        while branch.is_a?(MB::Sound::GraphNode::Tee::Branch)
+          branch = branch.sources[0]
+        end
+        branch
       end
     end
 
