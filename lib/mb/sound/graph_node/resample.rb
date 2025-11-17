@@ -50,7 +50,7 @@ module MB
           raise "Unsupported mode #{mode.inspect}" unless MODES.include?(mode)
           @mode = mode
 
-          @upstream = upstream
+          @upstream = upstream.get_sampler
 
           self.sample_rate = sample_rate
 
