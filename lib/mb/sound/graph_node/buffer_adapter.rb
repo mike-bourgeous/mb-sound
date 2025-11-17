@@ -26,7 +26,7 @@ module MB
           raise 'Upstream must respond to :sample' unless upstream.respond_to?(:sample)
           raise 'Upstream count must be a positive Integer' unless upstream_count.is_a?(Integer) && upstream_count > 0
 
-          @upstream = upstream
+          @upstream = upstream.get_sampler
           @upstream_count = upstream_count
         end
 
