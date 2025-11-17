@@ -204,7 +204,8 @@ begin
     manager&.update
     data = paths.map { |p| p.sample(output.buffer_size) }
     break if data.any?(&:nil?) || data.any?(&:empty?) || input.closed?
-    output.write(data)
+
+    output.write(data.map { |c| MB::M.zpad(c, output.buffer_size) })
   end
 
 rescue => e
