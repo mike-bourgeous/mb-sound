@@ -26,14 +26,14 @@ module MB
         # processing.
         def initialize(filter, source, in_place: true)
           @base_filter = filter
-          @source = source
+          @source = source.get_sampler
           @in_place = in_place
 
-          if @base_filter.respond_to?(:sample_rate) && @base_filter.sample_rate != source.sample_rate
+          if @base_filter.respond_to?(:sample_rate) && @base_filter.sample_rate != @source.sample_rate
             if @base_filter.respond_to?(:sample_rate=)
-              @base_filter.sample_rate = source.sample_rate
+              @base_filter.sample_rate = @source.sample_rate
             else
-              raise "Filter sample rate #{@base_filter.sample_rate} differs from source sample rate #{source.sample_rate}"
+              raise "Filter sample rate #{@base_filter.sample_rate} differs from source sample rate #{@source.sample_rate}"
             end
           end
 
