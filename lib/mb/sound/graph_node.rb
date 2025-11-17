@@ -83,6 +83,7 @@ module MB
       def get_sampler
         # TODO: maybe rename to #get_branch to match Tee's naming??
         # TODO: maybe ignore abandoned branches acquired from get_sampler instead of raising a buffer error in Tee?
+        # TODO: maybe have a method to compact a graph, bypassing single-branch tees
         @internal_tee ||= Tee.new(self, 0)
         @internal_tee.get_sampler
       end

@@ -45,7 +45,7 @@ RSpec.describe(MB::Sound::GraphNode::Mixer) do
       a = 1.constant
       ss = MB::Sound::GraphNode::Mixer.new([a, a, a])
       expect(ss[a]).to eq(3)
-      expect(ss.sample(5)).to eq(Numo::SFloat.ones(5))
+      expect(ss.sample(5)).to eq(Numo::SFloat.ones(5).fill(3))
     end
 
     it 'can infer the sample rate from its summands' do
