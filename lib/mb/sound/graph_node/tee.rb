@@ -130,6 +130,8 @@ module MB
         # +count+ samples from the given branch's circular buffer reader (or
         # fewer if the upstream has stopped).
         def internal_sample(branch, count)
+          return @source.sample(count) if @branches.count == 1
+
           # TODO: maybe dedupe with InputChannelSplit?
           # TODO: should we grow the buffer automatically?
 
