@@ -61,6 +61,11 @@ module MB
             @tee.sources
           end
 
+          # Returns the next upstream node that is not a branch of a Tee.
+          def original_source
+            @tee.original_source
+          end
+
           # Wraps upstream #at_rate to return self instead of upstream.
           def at_rate(new_rate)
             @tee.at_rate(new_rate)
@@ -103,6 +108,13 @@ module MB
           @readers = Array.new(n) { @cbuf.reader }
 
           @done = false
+        end
+
+        # Returns the next upstream source that is not a tee branch.
+        def original_source
+          src = @sources[0]
+          src = src.sources[0] while src.is_a?(MB::Sound::GraphNode::Tee::Branch)
+          src
         end
 
         # Adds a new branch to the Tee and returns it.
@@ -154,8 +166,7 @@ module MB
           end
 
         rescue MB::Sound::CircularBuffer::BufferOverflow
-          src = sources[0]
-          src = src.sources[0] while src.is_a?(MB::Sound::GraphNode::Tee::Branch)
+          src = original_source
 
           raise BranchBufferOverflow, <<~EOF
           Read of #{branch} overflowed internal buffer.  This may mean a branch is not being read.  Buffers of all branches: #{@readers.map(&:length)}

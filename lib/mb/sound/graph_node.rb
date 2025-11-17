@@ -765,9 +765,7 @@ module MB
 
       # Walk up sources until a non-Tee::Branch node is found.  Used by #graph.
       def climb_tee_tree(branch)
-        while branch.is_a?(MB::Sound::GraphNode::Tee::Branch)
-          branch = branch.sources[0]
-        end
+        branch = branch.original_source while branch.is_a?(MB::Sound::GraphNode::Tee::Branch)
         branch
       end
 
