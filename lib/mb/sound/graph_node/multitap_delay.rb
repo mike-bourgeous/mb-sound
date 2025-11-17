@@ -44,7 +44,7 @@ module MB
             else
               raise 'Delay must be Numeric or respond to :sample' unless delay_samples.respond_to?(:sample)
               check_rate(delay_samples, index)
-              @delay_samples = delay_samples
+              @delay_samples = delay_samples.get_sampler
             end
 
             # TODO: Support per-tap feedback into all taps?
@@ -100,8 +100,8 @@ module MB
 
           @sample_rate = sample_rate.to_f
           @sample_rate_node = @sample_rate.constant(smoothing: false)
-          @source = source
-          @sources = [source].freeze
+          @source = source.get_sampler
+          @sources = [@source].freeze
 
           # Keeps track of which delays have already been processed, so we know
           # when a new graph frame has started and don't over-sample the input.
