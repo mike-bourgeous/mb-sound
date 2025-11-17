@@ -505,7 +505,8 @@ module MB
       # Raises an error if truncation happens more than once.
       #
       # TODO: a lot of classes need this input truncation; it might make sense
-      # to build a shared API around the concept of multiple inputs.
+      # to build a shared API around the concept of multiple inputs.  There is
+      # similar code in MB::Sound::GraphNode::ArithmeticNodeHelper.
       def get_upstream_inputs(count)
         min_length = count
 
@@ -524,6 +525,7 @@ module MB
         end
 
         if min_length != count
+          # TODO: this double truncation might be impossible now that we use get_sampler
           raise "Truncation happened more than once on oscillator #{self} (try adding .with_buffer to upstreams)" if @truncated
           @truncated = true
           freq = freq[0...min_length] if freq&.is_a?(Numo::NArray)

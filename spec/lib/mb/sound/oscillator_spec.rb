@@ -281,7 +281,11 @@ RSpec.describe MB::Sound::Oscillator do
 
       it 'raises an error if truncation happens twice' do
         a = 0.constant
-        expect(a).to receive(:sample).with(10).twice.and_return(Numo::SFloat[1,2,3])
+        expect(a).to receive(:sample).with(10).at_least(2).times.and_return(Numo::SFloat[1,2,3])
+
+        # get_sampler/tee effectively act as a buffer adapter, so we need to
+        # break tee wrapping to force direct truncation
+        expect(a).to receive(:get_sampler).at_least(1).time.and_return(a)
 
         osc = 0.hz.pm(a)
         expect(osc.sample(10).length).to eq(3)
