@@ -38,7 +38,7 @@ module MB
 
           attr_reader :index
 
-          def_delegators :@tee, :sample_rate, :sample_rate=, :get_sampler, :reset
+          def_delegators :@tee, :sample_rate, :sample_rate=, :reset
 
           # For internal use by Tee.  Initializes one parallel branch of the tee.
           def initialize(tee, index)
@@ -104,10 +104,11 @@ module MB
           @done = false
         end
 
-        # Adds a new branch to the Tee and returns it.  This is part of the
-        # code to allow multiple references to a single graph node without
-        # explicit teeing.
-        def get_sampler
+        # Adds a new branch to the Tee and returns it.
+        #
+        # This is part of the code to allow multiple references to a single
+        # graph node without explicit teeing.
+        def add_branch
           branch = Branch.new(self, @branches.length)
           reader = @cbuf.reader
 

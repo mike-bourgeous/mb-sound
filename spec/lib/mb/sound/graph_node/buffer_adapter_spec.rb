@@ -135,10 +135,6 @@ RSpec.describe(MB::Sound::GraphNode::BufferAdapter, :aggregate_failures) do
       expect(t1).to receive(:sample).with(17).twice.and_call_original
       expect(t2).to receive(:sample).with(11).exactly(3).times.and_call_original
 
-      # normally get_sampler creates a new branch when called on an existing tee branch
-      expect(t1).to receive(:get_sampler).and_return(t1)
-      expect(t2).to receive(:get_sampler).and_return(t2)
-
       b1 = t1.with_buffer(17)
       b2 = t2.with_buffer(11)
 

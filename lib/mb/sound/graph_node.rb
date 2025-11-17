@@ -85,7 +85,7 @@ module MB
         # TODO: maybe ignore abandoned branches acquired from get_sampler instead of raising a buffer error in Tee?
         # TODO: maybe have a method to compact a graph, bypassing single-branch tees, or otherwise have the first branch cost less e.g. by only creating the full heavyweight tee on the second call
         @internal_tee ||= Tee.new(self, 0)
-        @internal_tee.get_sampler
+        @internal_tee.add_branch
       end
 
       # Creates a mixer that adds this node's #sample output to +other+ (a
