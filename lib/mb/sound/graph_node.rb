@@ -82,7 +82,7 @@ module MB
       # custom GraphNode implementations, that's _probably_ a bug in mb-sound.
       def get_sampler
         # TODO: maybe rename to #get_branch to match Tee's naming??
-        # TODO: maybe ignore abandoned branches acquired from get_sampler instead of raising a buffer error in Tee?
+        # TODO: fix places where branches get abandoned (e.g. bin/flanger.rb) instead of ignoring these late readers in circular_buffer.rb
         @internal_tee ||= Tee.new(self, 0)
         @internal_tee.add_branch
       end

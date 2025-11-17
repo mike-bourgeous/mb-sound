@@ -66,6 +66,8 @@ module MB
         # incrementing the read pointer.  Do not modify the returned buffer as
         # it may be a view into the internal buffer.
         def peek(count)
+          raise BufferOverflow, "Reader #{@index} cannot read due to buffer overflow.  This reader was not keeping up with other readers." if overflowed?
+
           if count > @length
             raise BufferUnderflow, "Read of size #{count} is greater than #{@length} available samples " \
               "on #{@index < 0 ? 'default reader' : "reader #{@index}"}"
@@ -85,6 +87,8 @@ module MB
         #
         # Returns the number of available samples remaining.
         def discard(count)
+          raise BufferOverflow, "Reader #{@index} cannot discard due to buffer overflow.  This reader was not keeping up with other readers." if overflowed?
+
           if count > @length
             raise BufferUnderflow, "Discard of size #{count} is greater than #{@length} available samples " \
               "on #{@index < 0 ? 'default reader' : "reader #{@index}"}"
@@ -98,6 +102,18 @@ module MB
         def wrote(count)
           raise "BUG: wrote past read position on reader #{@index}" if (count + @length) >
           @length += count
+        end
+
+        # For internal use by CircularBuffer.  Marks this reader as too far
+        # behind, resulting in lost data as the circular buffer wraps around.
+        def overflowed!
+          @overflowed = true
+        end
+
+        # Returns true if this reader can no longer be used due to buffer
+        # overflow.
+        def overflowed?
+          @overflowed
         end
 
         # Returns true if there are no samples available for this reader to read.
@@ -252,7 +268,13 @@ module MB
         # have to be inserted somewhere in the middle of the data, rather than
         # at either end.
         if narray.length > available
-          raise BufferOverflow, "Write of size #{narray.length} is greater than #{available} space available"
+          @readers.each do |r|
+            r.overflowed! if narray.length > @buffer_size - r.length
+          end
+
+          if @readers.empty? || @readers.all? { |r| r.overflowed? }
+            raise BufferOverflow, "Write of size #{narray.length} is greater than #{available} space available"
+          end
         end
 
         expand_buffer(narray, grow: false)
@@ -262,7 +284,7 @@ module MB
 
         # Update each reader in multi-reader mode
         @readers&.each do |r|
-          r.wrote(narray.length)
+          r.wrote(narray.length) unless r.overflowed?
         end
 
         # Update default reader in single-reader mode
