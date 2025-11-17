@@ -44,6 +44,7 @@ module MB
           def initialize(tee, index)
             @tee = tee
             @index = index
+            @trace = caller_locations
           end
 
           # Retrieves the next buffer for this branch.
@@ -153,7 +154,19 @@ module MB
           end
 
         rescue MB::Sound::CircularBuffer::BufferOverflow
-          raise BranchBufferOverflow, "Read of #{branch} overflowed internal buffer.  This may mean a branch is not being read.  Buffers of all branches: #{@readers.map(&:length)}"
+          src = sources[0]
+          src = src.sources[0] while src.is_a?(MB::Sound::GraphNode::Tee::Branch)
+
+          raise BranchBufferOverflow, <<~EOF
+          Read of #{branch} overflowed internal buffer.  This may mean a branch is not being read.  Buffers of all branches: #{@readers.map(&:length)}
+
+            Source node: #{src}
+
+            Tee creation traces:
+            #{@branches.map.with_index { |b|
+              "\n\e[1m#{b}\e[0m:\n\t#{MB::U.highlight(b.instance_variable_get(:@trace))}\n\n"
+            }.join}
+          EOF
         end
 
         # Clears the "done" flag that returns nil if upstreams return nil, in
