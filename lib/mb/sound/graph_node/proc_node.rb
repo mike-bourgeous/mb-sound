@@ -17,6 +17,9 @@ module MB
         # methods still work.
         def initialize(source, extra_sources = nil, sample_rate: nil, &block)
           @graph_node_name = block.source_location&.join(':')
+
+          source = source.get_sampler if source.respond_to?(:sample)
+
           @source = source
           @sources = [source, *extra_sources].freeze
 
