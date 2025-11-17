@@ -49,11 +49,12 @@ RSpec.describe(MB::Sound::GraphNode::ComplexNode, :aggregate_failures) do
   end
 
   describe '#sources' do
-    it 'returns the input as its sole source' do
+    it 'returns the input sampler as its sole source' do
       source = 5.constant
       chain = source.real
       expect(chain).to be_a(MB::Sound::GraphNode::ComplexNode)
-      expect(chain.sources).to eq([source])
+      expect(chain.graph(include_tees: false)).to eq([chain, source, 5])
+      expect(chain.sources[0].sources).to eq([source])
     end
   end
 end
