@@ -77,8 +77,12 @@ module MB
       # Creates and returns a tee branch from this node.  This is used by
       # consumers of upstream graph nodes like Tone, CookbookWrapper, etc. to
       # allow implicit branching of node outputs.
+      #
+      # If you need to call this outside of mb-sound internal code or your own
+      # custom GraphNode implementations, that's _probably_ a bug in mb-sound.
       def get_sampler
         # TODO: maybe rename to #get_branch to match Tee's naming??
+        # TODO: maybe ignore abandoned branches acquired from get_sampler instead of raising a buffer error in Tee?
         @internal_tee ||= Tee.new(self, 0)
         @internal_tee.get_sampler
       end

@@ -38,7 +38,7 @@ module MB
 
           attr_reader :index
 
-          def_delegators :@tee, :sample_rate, :sample_rate=, :get_sampler
+          def_delegators :@tee, :sample_rate, :sample_rate=, :get_sampler, :reset
 
           # For internal use by Tee.  Initializes one parallel branch of the tee.
           def initialize(tee, index)
@@ -71,10 +71,11 @@ module MB
             "Branch #{@index + 1} of #{@tee.branches.count}#{graph_node_name && " (#{graph_node_name})"}"
           end
 
-          # Resets the internal done flag to allow this tee to flow data again.
+          # Resets the internal done flag to allow this tee to flow data again,
+          # then passes the given duration to upstream nodes.
           def for(duration, recursive: true)
-            super(duration, recursive: recursive)
             @tee.reset
+            super
           end
         end
 

@@ -65,7 +65,7 @@ module MB
 
             @truncated ||= false
             if @truncated && max_length > min_length
-              raise "Tried to truncate inputs more than once -- an upstream node gave a short read repeatedly"
+              raise 'Tried to truncate inputs more than once -- an upstream node gave a short read repeatedly'
             end
 
             # Truncate if stop_early is true
@@ -95,6 +95,14 @@ module MB
           yield retbuf, inputs
 
           retbuf.not_inplace!
+        end
+
+        # Resets truncation status in case upstream nodes were reset/rewound.
+        def for(duration, recursive: true)
+          # TODO: should a graph just be done when it's done?  No resets, just
+          # make a new graph?
+          @truncated = false
+          super
         end
       end
     end

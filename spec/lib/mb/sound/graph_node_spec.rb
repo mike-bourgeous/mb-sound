@@ -102,6 +102,44 @@ RSpec.describe(MB::Sound::GraphNode, aggregate_failures: true) do
     end
   end
 
+  describe '#*' do
+    let(:a) { 15.constant.at_rate(1234) }
+    let(:b) { 25.constant.at_rate(2345) }
+    let(:c) { 35.constant.at_rate(5432) }
+
+    it 'creates a multiplier' do
+      expect(1.constant * 2.constant).to be_a(MB::Sound::GraphNode::Multiplier)
+    end
+
+    it 'can multiply two inputs' do
+      m = 2.constant * 3.constant
+      expect(m.sample(2)).to eq(Numo::SFloat[6,6])
+    end
+
+    it 'can multiply more nodes without messing up prior nodes' do
+      m = 2.constant * 3.constant
+      m2 = m * -1.constant
+
+      expect(m.sample(2)).to eq(Numo::SFloat[6,6])
+      expect(m2.sample(2)).to eq(Numo::SFloat[-6,-6])
+    end
+
+    it 'can multiply a node by itself' do
+      a = 2.constant
+      m = a * a
+      expect(m.sample(2)).to eq(Numo::SFloat[4,4])
+    end
+
+    it 'changes sample rates to match' do
+      m = MB::Sound::GraphNode::Multiplier.new(a, b) * c
+
+      expect(m.sample_rate).to eq(1234)
+      expect(a.sample_rate).to eq(1234)
+      expect(b.sample_rate).to eq(1234)
+      expect(c.sample_rate).to eq(1234)
+    end
+  end
+
   describe 'proc-based arithmetic' do
     let(:nilnode) { MB::Sound::ArrayInput.new(data: Numo::SFloat[]) }
     let(:shortnode) { MB::Sound::ArrayInput.new(data: Numo::SComplex[1, 2, 3]) }
