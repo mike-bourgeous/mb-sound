@@ -136,6 +136,17 @@ RSpec.describe(MB::Sound::GraphNode::Tee, aggregate_failures: true) do
     it 'adds a new branch to an existing tee' do
       t = MB::Sound::GraphNode::Tee.new(13.constant)
       t1, t2 = t.branches
+
+      t3 = t.add_branch
+
+      expect(t.branches).to eq([t1, t2, t3])
+    end
+
+    it 'creates branches that function normally' do
+      t = MB::Sound::GraphNode::Tee.new(13.constant, 0)
+      t1 = t.add_branch
+
+      expect(t1.sample(5)).to eq(Numo::SFloat[13,13,13,13,13])
     end
   end
 
