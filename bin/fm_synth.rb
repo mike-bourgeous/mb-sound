@@ -9,6 +9,8 @@ require 'bundler/setup'
 
 require 'mb-sound'
 
+MB::U.sigquit_backtrace
+
 class FM
   def initialize(osc_count: 8, jack: MB::Sound::JackFFI[], input: nil, connect: nil, update_rate: 60)
     @manager = MB::Sound::MIDI::Manager.new(jack: jack, input: input, connect: connect, update_rate: update_rate)
@@ -24,18 +26,13 @@ class FM
     @oscillators = osc_count.times.map { |o|
       # Parabola is a little more interesting than sine without being too chaotic
       o = 440.hz.parabola.at(-10.db).oscillator
-      o.frequency = MB::Sound::GraphNode::Mixer.new([440])
+      o.frequency = MB::Sound::GraphNode::Mixer.new([], sample_rate: 48000)
       o
     }
     @oscs_used = 0
     @osc_map = {}
 
     @mod_index = 1000
-
-    # TODO: use the output mixer and fix the double-sampling issue (oscillators
-    # get sampled by both the frequency mixer and output mixer causing
-    # skipping)
-    @output_mixer = MB::Sound::GraphNode::Mixer.new(@oscillators.map { |o| [o, 0] })
   end
 
   def print
@@ -45,19 +42,18 @@ class FM
         [
           o.__id__,
           o.wave_type,
-          @output_mixer[o].to_db.round(3),
           o.frequency.constant.round(3),
           o.frequency.summands.map(&:__id__),
           o.frequency.gains,
         ]
       },
-      header: [:id, :wave_type, :gain_db, :frequency, :modulator, :mod_gain],
+      header: [:id, :wave_type, :frequency, :modulator, :mod_gain],
       variable_width: true
     )
   end
 
-  def note(number, velocity, onoff)
-    if onoff
+  def note(number, velocity, on)
+    if on
       note(number, velocity, false) if @osc_map.include?(number)
 
       if @oscs_used < @oscillators.length
@@ -66,8 +62,6 @@ class FM
 
         osc.frequency.constant = MB::Sound::Oscillator.calc_freq(number)
         osc.frequency.clear
-
-        @output_mixer[osc] = MB::M.scale(velocity, 0..127, -30..-6).db
 
         if @oscs_used > 0
           # Wire this oscillator as FM modulator for the previous oscillator
@@ -82,9 +76,6 @@ class FM
       osc = @osc_map.delete(number)
       if osc
         index = @oscillators.index(osc)
-
-        # Mute the oscillator
-        @output_mixer[osc] = 0
 
         if index > 0
           prev = @oscillators[index - 1]
@@ -109,10 +100,7 @@ class FM
   def sample(count)
     @zero ||= Numo::SFloat.zeros(count)
     @manager.update
-    # TODO: Maybe a sample-and-hold class would be useful that returns the same
-    # value for #sample until an update method is called
-    #@output_mixer.sample(count)
-    @oscs_used > 0 ? @oscillators[0].sample(count) : @zero
+    @oscillators[0].sample(count) * (@oscs_used > 0 ? 1 : 0)
   end
 end
 
