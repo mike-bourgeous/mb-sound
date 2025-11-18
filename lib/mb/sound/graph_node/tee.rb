@@ -24,11 +24,14 @@ module MB
       class Tee
         extend Forwardable
 
-        # Raised when any branch's internal buffer overflows.  This could
-        # happen if the downstream buffer size is significantly larger than the
-        # Tee's internal buffer size, or if one branch is being read more than
-        # another.
+        # Raised when reading from a branch after its internal buffer
+        # overflows.  This could happen if the downstream buffer size is
+        # significantly larger than the Tee's internal buffer size, or if one
+        # branch is being read more often than another.
         class BranchBufferOverflow < MB::Sound::CircularBuffer::BufferOverflow; end
+
+        # Raised when trying to read from a branch that has been destroyed.
+        class BranchDestroyedError < MB::Sound::CircularBuffer::ReaderClosedError; end
 
         # An individual branch of a Tee, returned by Tee#branches.
         class Branch
@@ -36,23 +39,37 @@ module MB
 
           include GraphNode
 
-          attr_reader :index
+          # Values for internal use by Tee.
+          attr_reader :index, :reader
 
           def_delegators :@tee, :sample_rate, :sample_rate=, :reset
+          def_delegators :@reader, :count, :length
 
           # For internal use by Tee.  Initializes one parallel branch of the tee.
-          def initialize(tee, index)
+          def initialize(tee, index, reader)
             @tee = tee
             @index = index
+            @reader = reader
             @trace = caller_locations
+          end
+
+          # Inform the tee that this branch will no longer be used.  This may
+          # be useful for dynamically changing routing (see e.g. how
+          # bin/fm_synth.rb interacts with Mixer).
+          def destroy
+            @tee.remove_branch(self)
+            @reader.close
+            @reader = nil
           end
 
           # Retrieves the next buffer for this branch.
           #
           # Raises BranchBufferOverflow if the read would not fit in the tee's
-          # internal buffer, or if any of the other tee branches have not been
-          # read for a long time.
+          # internal buffer, or if this branch has not been read for a long
+          # time and has fallen too far behind.
           def sample(count)
+            raise BranchDestroyedError, "Branch #{index} has been destroyed." unless @reader
+
             @tee.internal_sample(self, count)
           end
 
@@ -63,7 +80,7 @@ module MB
 
           # Returns the next upstream node that is not a branch of a Tee.
           def original_source
-            @tee.original_source
+            @original_source ||= @tee.original_source
           end
 
           # Wraps upstream #at_rate to return self instead of upstream.
@@ -82,6 +99,11 @@ module MB
           def for(duration, recursive: true)
             @tee.reset
             super
+          end
+
+          # Pass unknown methods through to the upstream node.
+          def method_missing(m, *a, **ka)
+            original_source.send(m, *a, **ka)
           end
         end
 
@@ -102,10 +124,14 @@ module MB
 
           @source = source
           @sources = [source].freeze
-          @branches = Array.new(n) { |idx| Branch.new(self, idx) }
 
           @cbuf = CircularBuffer.new(buffer_size: circular_buffer_size)
-          @readers = Array.new(n) { @cbuf.reader }
+
+          @branch_index = 0
+          @branches = []
+          for i in 0...n
+            add_branch
+          end
 
           @done = false
         end
@@ -122,13 +148,19 @@ module MB
         # This is part of the code to allow multiple references to a single
         # graph node without explicit teeing.
         def add_branch
-          branch = Branch.new(self, @branches.length)
           reader = @cbuf.reader
+          branch = Branch.new(self, @branch_index, reader)
+
+          @branch_index += 1
 
           @branches << branch
-          @readers << reader
 
           branch
+        end
+
+        # For internal use by Branch#destroy.
+        def remove_branch(b)
+          @branches.delete(b)
         end
 
         # Wraps upstream #at_rate to return self instead of upstream.
@@ -148,7 +180,7 @@ module MB
           # TODO: maybe dedupe with InputChannelSplit?
           # TODO: should we grow the buffer automatically?
 
-          r = @readers[branch.index]
+          r = branch.reader
 
           while !@done && r.length < count
             buf = @source.sample(count)
@@ -169,7 +201,7 @@ module MB
           src = original_source
 
           raise BranchBufferOverflow, <<~EOF
-          Read of #{branch} overflowed internal buffer.  This may mean a branch is not being read.  Buffers of all branches: #{@readers.map(&:length)}
+          Read of #{branch} overflowed internal buffer.  This may mean a branch is not being read.  Buffers of all branches: #{@branches.map(&:reader).map(&:length)}
 
             Source node: #{src}
 

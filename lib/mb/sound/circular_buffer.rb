@@ -32,6 +32,9 @@ module MB
       # Thrown when #read is called after #reader, or vice versa.
       class ReaderModeError < RuntimeError; end
 
+      # Thrown when a reader is read after being destroyed.
+      class ReaderClosedError < RuntimeError; end
+
       # Single reader with an independent read pointer as returned by #reader.
       class Reader
         include BufferHelper
@@ -50,6 +53,8 @@ module MB
           @read_pos = read_pos
           @tmpbuf = nil
           @length = length
+          @overflowed = false
+          @closed = false
 
           setup_buffer(length: cbuf.buffer_size, complex: cbuf.complex, double: cbuf.double)
         end
@@ -66,7 +71,7 @@ module MB
         # incrementing the read pointer.  Do not modify the returned buffer as
         # it may be a view into the internal buffer.
         def peek(count)
-          raise BufferOverflow, "Reader #{@index} cannot read due to buffer overflow.  This reader was not keeping up with other readers." if overflowed?
+          check_open
 
           if count > @length
             raise BufferUnderflow, "Read of size #{count} is greater than #{@length} available samples " \
@@ -87,7 +92,7 @@ module MB
         #
         # Returns the number of available samples remaining.
         def discard(count)
-          raise BufferOverflow, "Reader #{@index} cannot discard due to buffer overflow.  This reader was not keeping up with other readers." if overflowed?
+          check_open
 
           if count > @length
             raise BufferUnderflow, "Discard of size #{count} is greater than #{@length} available samples " \
@@ -100,8 +105,18 @@ module MB
 
         # For internal use by CircularBuffer.  Increments this reader's internal length value.
         def wrote(count)
-          raise "BUG: wrote past read position on reader #{@index}" if (count + @length) >
+          raise "BUG: wrote past read position on reader #{@index}" if (count + @length) > @cbuf.buffer_size
+
+          check_open
+
           @length += count
+        end
+
+        # Closes this reader and removes it from the CircularBuffer.
+        def close
+          @closed = true
+          @cbuf.remove_reader(self)
+          @buf = nil
         end
 
         # For internal use by CircularBuffer.  Marks this reader as too far
@@ -116,9 +131,22 @@ module MB
           @overflowed
         end
 
+        # Returns true if the reader has been closed.
+        def closed?
+          @closed
+        end
+
         # Returns true if there are no samples available for this reader to read.
         def empty?
           @length == 0
+        end
+
+        private
+
+        # Raises an error if the reader has been closed or has overflowed.
+        def check_open
+          raise BufferOverflow, "Reader #{@index} cannot read or discard due to buffer overflow.  This reader was not keeping up with other readers." if @overflowed
+          raise ReaderClosedError, "Reader #{@index} has been closed." if @closed
         end
       end
 
@@ -153,6 +181,7 @@ module MB
         # single-reader mode, we store one reader in @r0.
         @readers = []
         @r0 = nil
+        @reader_index = 0
 
         setup_buffer(length: @buffer_size, complex: complex, temp: false, double: double)
       end
@@ -193,17 +222,22 @@ module MB
       # behind the write pointer.
       def reader(delay_samples = 0)
         raise ReaderModeError, 'Buffer is in single-reader mode.  You must call #reader before calling any other methods.' unless @r0.nil?
-
         raise ArgumentError, 'Cannot delay more than the buffer size' if delay_samples > @buffer_size
 
         Reader.new(
           cbuf: self,
-          index: @readers.count,
+          index: @reader_index,
           read_pos: (@write_pos - delay_samples) % @buffer_size,
           length: delay_samples
         ).tap { |r|
+          @reader_index += 1
           @readers << r
         }
+      end
+
+      # For internal use by Branch#destroy.
+      def remove_reader(r)
+        @readers.delete(r)
       end
 
       # Consumes and returns the next +count+ samples of the buffer when in

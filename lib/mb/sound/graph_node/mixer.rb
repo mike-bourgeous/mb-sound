@@ -76,7 +76,7 @@ module MB
             end
           end
 
-          raise 'Sample rate must be a positive numeric' unless @sample_rate.is_a?(Numeric) && @sample_rate > 0
+          raise "Sample rate must be a positive numeric (got #{sample_rate})" unless @sample_rate.is_a?(Numeric) && @sample_rate > 0
           @sample_rate = @sample_rate.to_f
         end
 
@@ -133,7 +133,12 @@ module MB
 
         # Removes all summands, but does not reset the constant, if set.
         def clear
+          @gains.each do |samp, _|
+            samp.destroy
+          end
+
           @gains.clear
+          @orig_to_samp.clear
         end
 
         # Returns the number of summands (excluding a possible constant value).

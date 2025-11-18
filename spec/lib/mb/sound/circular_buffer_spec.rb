@@ -30,6 +30,22 @@ RSpec.describe(MB::Sound::CircularBuffer, :aggregate_failures) do
         cbuf.write(Numo::SComplex[1])
         expect(r1.read(0)).to be_a(Numo::SComplex).and(eq(Numo::SComplex[]))
       end
+
+      it 'raises an error if the reader has fallen too far behind other readers' do
+        r1 = cbuf.reader(6)
+        r2 = cbuf.reader
+
+        cbuf.write(Numo::SFloat[0, 1, 2])
+        expect { r1.read(2) }.to raise_error(MB::Sound::CircularBuffer::BufferOverflow)
+        expect { r2.read(2) }.not_to raise_error
+      end
+
+      it 'raises an error if the reader has been closed' do
+        r1 = cbuf.reader
+        r1.close
+
+        expect { r1.read(2) }.to raise_error(MB::Sound::CircularBuffer::ReaderClosedError)
+      end
     end
 
     describe '#empty?' do
@@ -75,6 +91,16 @@ RSpec.describe(MB::Sound::CircularBuffer, :aggregate_failures) do
 
       it 'starts at the delay if a delay is given' do
         expect(cbuf.reader(4).length).to eq(4)
+      end
+    end
+
+    describe '#overflowed?' do
+      it 'returns true if this reader is too far behind' do
+        r1 = cbuf.reader(6)
+        _r2 = cbuf.reader
+
+        cbuf.write(Numo::SFloat[1,2,3])
+        expect(r1.overflowed?).to eq(true)
       end
     end
   end
@@ -249,11 +275,12 @@ RSpec.describe(MB::Sound::CircularBuffer, :aggregate_failures) do
         expect(r2.read(4)).to eq(Numo::SFloat[0,0,0,1])
       end
 
-      it 'raises an error if the write would pass any of the read positions' do
+      it 'raises an error if the write would pass all of the read positions' do
         _r1 = cbuf.reader
         _r2 = cbuf.reader(3)
 
-        expect { cbuf.write(Numo::SFloat[1,2,3,4,5]) }.to raise_error(MB::Sound::CircularBuffer::BufferOverflow)
+        expect { cbuf.write(Numo::SFloat[1,2,3,4,5,6,7]) }.not_to raise_error
+        expect { cbuf.write(Numo::SFloat[8]) }.to raise_error(MB::Sound::CircularBuffer::BufferOverflow)
       end
     end
   end
