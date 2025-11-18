@@ -65,9 +65,8 @@ module MB
       # modify the resulting buffer without affecting parallel branches of the
       # graph.
       #
-      # If a block is given, then the branches will be yielded to the block,
-      # and whatever the block returns will be returned instead of the
-      # branches.
+      # Note that teeing should not be necessary in most cases, as most graph
+      # nodes will call #get_sampler to get an implicit tee now.
       #
       # Example (for bin/sound.rb):
       #     # AM and tremolo added together for some reason
@@ -75,12 +74,20 @@ module MB
       #     c = a * 150.hz.at(0.5..1) + b * 0.5.hz.at(0.25..1) ; nil
       #     play c
       def tee(n = 2)
-        b = Tee.new(self, n).branches
-        if block_given?
-          yield b
-        else
-          b
-        end
+        Tee.new(get_sampler, n).branches
+      end
+
+      # Creates and returns a tee branch from this node.  This is used by
+      # consumers of upstream graph nodes like Tone, CookbookWrapper, etc. to
+      # allow implicit branching of node outputs.
+      #
+      # If you need to call this outside of mb-sound internal code or your own
+      # custom GraphNode implementations, that's _probably_ a bug in mb-sound.
+      def get_sampler
+        # TODO: maybe rename to #get_branch to match Tee's naming??
+        # TODO: find and fix places where branches get abandoned (e.g. bin/flanger.rb) instead of ignoring these late readers in circular_buffer.rb
+        @internal_tee ||= Tee.new(self, 0)
+        @internal_tee.add_branch
       end
 
       # Creates a mixer that adds this node's #sample output to +other+ (a
@@ -109,80 +116,16 @@ module MB
       # signal graph.  For signal graphs, each numerator value is divided
       # by the corresponding denominator value at the same index.
       def /(other)
-        # TODO: can we deduplicate arithmetic proc nodes?
-        if other.respond_to?(:sample)
-          self.proc(other) { |v|
-            next nil if v.nil? || v.empty?
-
-            data = other.sample(v.length)
-
-            if data.nil? || data.empty?
-              nil
-            else
-              if data.length != v.length
-                # TODO: allow choosing between zero padding and truncation?
-                min_length = MB::M.min(data.length, v.length)
-                data = data[0...min_length]
-                v = v[0...min_length]
-              end
-
-              # We can't return v in case types differ, as the type promotion
-              # will create a new object.
-              # TODO: should we be operating in place here?  This could modify
-              # the source of an upstream ArrayInput for example.
-              v.inplace!
-              (v / data).not_inplace!
-            end
-          }
-        else
-          self.proc(other) { |v|
-            if v.nil? || v.empty?
-              nil
-            else
-              v.inplace!
-              (v / other).not_inplace!
-            end
-          }
+        arithmetic_proc(other) do |d1, d2|
+          d1 / d2
         end
       end
 
       # Appends a node that raises the incoming values to +other+, which should
       # be either a numeric or another signal graph.
       def **(other)
-        # TODO: can we deduplicate arithmetic proc nodes?
-        if other.respond_to?(:sample)
-          self.proc(other) { |v|
-            next nil if v.nil? || v.empty?
-
-            data = other.sample(v.length)
-
-            if data.nil? || data.empty?
-              nil
-            else
-              if data.length != v.length
-                # TODO: allow choosing between zero padding and truncation?
-                min_length = MB::M.min(data.length, v.length)
-                data = data[0...min_length]
-                v = v[0...min_length]
-              end
-
-              # We can't return v in case types differ, as the type promotion
-              # will create a new object.
-              # TODO: should we be operating in place here?  This could modify
-              # the source of an upstream ArrayInput for example.
-              v.inplace!
-              (v ** data).not_inplace!
-            end
-          }
-        else
-          self.proc(other) { |v|
-            if v.nil? || v.empty?
-              nil
-            else
-              v.inplace!
-              (v ** other).not_inplace!
-            end
-          }
+        arithmetic_proc(other) do |d1, d2|
+          d1 ** d2
         end
       end
 
@@ -314,6 +257,16 @@ module MB
         end
 
         ret[0...endidx] if ret
+      end
+
+      # Appends a BufferAdapter to the graph with this node as its upstream
+      # source, using the given +length+ as the upstream frame size.  When
+      # downstream nodes sample the adapter, the adapter will sample the
+      # upstream node in +length+-sized chunks.  This allows running a node
+      # graph with a shorter internal buffer size than the sound card input or
+      # output buffer size, for example.
+      def with_buffer(length)
+        MB::Sound::GraphNode::BufferAdapter.new(upstream: self, upstream_count: length)
       end
 
       # Adds a resampling filter to the graph with the given new sample rate.
@@ -650,20 +603,67 @@ module MB
       end
 
       # Returns a list of all nodes feeding into this node, either directly or
-      # indirectly, plus this node itself.
-      def graph
+      # indirectly, plus this node itself, without duplication.  Also may
+      # include numeric values used as parameters to some of the nodes.
+      #
+      # Entries in the returned list should be in order of increasing distance
+      # from this node, but if there are loops in the graph this is not
+      # guaranteed.
+      def graph(include_tees: true)
+        # TODO: use a linked list for deletion and reinsertion if this method
+        # becomes too slow, or weaken return ordering and memoize in each
+        # instance and call graph instead of sources to get sources?
+        source_list = []
         source_history = Set.new
         source_queue = [self]
 
         until source_queue.empty?
           s = source_queue.shift
-          next if source_history.include?(s)
+          s = s.round if s.is_a?(Numeric) && s.respond_to?(:round) && s.round == s
+
+          # TODO: have a separate configuration for manual tees and implied
+          # branches from get_sampler, and default to ignoring get_sampler?
+          unless include_tees
+            s = climb_tee_tree(s)
+          end
+
+          if source_history.include?(s)
+            source_list.delete(s)
+            source_list << s
+            next
+          end
 
           source_history << s
+          source_list << s
+
           source_queue.concat(s.sources) if s.respond_to?(:sources)
         end
 
-        source_history.to_a
+        source_list
+      end
+
+      # Returns a Hash from source node to a Set of destination nodes
+      # describing all connections upstream of this graph node.
+      def graph_edges(include_tees: true)
+        edges = {}
+
+        graph(include_tees: include_tees).each do |n|
+          next unless n.respond_to?(:sources)
+
+          # TODO: it would be cool if #sources could give a name to each source
+          n.sources.each do |s|
+            s = s.round if s.is_a?(Numeric) && s.respond_to?(:round) && s.round == s
+
+            unless include_tees
+              s = climb_tee_tree(s)
+            end
+
+            edges[s] ||= Set.new
+            edges[s] << n
+          end
+        end
+
+        edges
       end
 
       # Finds the lowest numeric value greater than zero for any graph nodes
@@ -685,16 +685,6 @@ module MB
         end
 
         size
-      end
-
-      # Appends a BufferAdapter to the graph with this node as its upstream
-      # source, using the given +length+ as the upstream frame size.  When
-      # downstream nodes sample the adapter, the adapter will sample the
-      # upstream node in +length+-sized chunks.  This allows running a node
-      # graph with a shorter internal buffer size than the sound card input or
-      # output buffer size, for example.
-      def with_buffer(length)
-        MB::Sound::GraphNode::BufferAdapter.new(upstream: self, upstream_count: length)
       end
 
       # Looks for the first source node within the graph feeding into this node
@@ -773,6 +763,54 @@ module MB
         tones.each do |t|
           t.or_for(nil) if t.respond_to?(:or_for) # Default to playing forever
           t.or_at(1) if fix_amp && t.respond_to?(:or_at) # Default to full volume
+        end
+      end
+
+      # Walk up sources until a non-Tee::Branch node is found.  Used by #graph.
+      def climb_tee_tree(branch)
+        branch = branch.original_source while branch.is_a?(MB::Sound::GraphNode::Tee::Branch)
+        branch
+      end
+
+      # Setup/boilerplate buffer management used by #/ and #**.
+      def arithmetic_proc(other)
+        if other.respond_to?(:sample)
+          other = other.get_sampler
+
+          self.proc(other) { |v|
+            next nil if v.nil? || v.empty?
+
+            data = other.sample(v.length)
+
+            if data.nil? || data.empty?
+              nil
+            else
+              if data.length != v.length
+                # TODO: allow choosing between padding and truncation (e.g. stop_early)?
+                min_length = MB::M.min(data.length, v.length)
+                data = data[0...min_length]
+                v = v[0...min_length]
+              end
+
+              # We can't return v in case types differ, as the type promotion
+              # will create a new object, so we grab the yielded value.
+              # TODO: should we be operating in place here?  This could modify
+              # the source of an upstream ArrayInput for example.
+              v.inplace!
+              ret = yield v, data
+              ret.not_inplace!
+            end
+          }
+        else
+          self.proc(other) { |v|
+            if v.nil? || v.empty?
+              nil
+            else
+              v.inplace!
+              ret = yield v, other
+              ret.not_inplace!
+            end
+          }
         end
       end
     end

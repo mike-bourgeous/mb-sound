@@ -21,7 +21,7 @@ module MB
           raise 'Upstream must respond to :sample' unless upstream.respond_to?(:sample)
           raise 'Upstream must respond to :sample_rate' unless upstream.respond_to?(:sample_rate)
 
-          @upstream = upstream
+          @upstream = upstream.get_sampler
           @sample_rate = upstream.sample_rate
 
           unless increment.is_a?(Numeric) || (increment.respond_to?(:sample) && !increment.is_a?(Array))

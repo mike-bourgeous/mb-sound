@@ -73,6 +73,11 @@ module MB
         @remaining = @frames - @offset
       end
 
+      # Rewinds to the start of the arrays.  Same as calling seek_set(0).
+      def reset
+        seek_set(0)
+      end
+
       # Reads up to +frames+ frames starting from the current read pointer within
       # the internal arrays.  Returns less than +frames+ if near the end and
       # not repeating, or empty arrays if at the end.

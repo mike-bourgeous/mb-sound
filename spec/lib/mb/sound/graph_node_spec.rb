@@ -1,5 +1,5 @@
 # Tests for the DSL overall, including Tone, Mixer, Multiplier
-RSpec.describe(MB::Sound::GraphNode) do
+RSpec.describe(MB::Sound::GraphNode, aggregate_failures: true) do
   it 'can create a complex signal graph' do
     graph = (1.hz.square.at_rate(20).at(1) - 2.hz.square.at_rate(20).at(0.5) - 5 + 3 + 2) * 0.5.hz.square.at_rate(20).at(2..1) * 3 + 1
     expect(graph.sample(5)).to eq(Numo::SFloat.zeros(5).fill(2.5))
@@ -44,10 +44,6 @@ RSpec.describe(MB::Sound::GraphNode) do
       expect(1.constant.tee(5).count).to eq(5)
     end
 
-    it 'accepts a block and returns the result of the block' do
-      expect(1.constant.tee { |a, b| a + b }.sample(1)[0]).to eq(2)
-    end
-
     it 'produces branches that yield duplicate copies of the incoming data' do
       a, b, c = 5000.hz.ramp.at(2..3).tee(3)
       expect(a.sample(1)[0].round(4)).to eq(2.5)
@@ -56,6 +52,91 @@ RSpec.describe(MB::Sound::GraphNode) do
       expect(a.sample(1)[0].round(4)).not_to eq(2.5)
       expect(b.sample(1)[0].round(4)).not_to eq(2.5)
       expect(c.sample(1)[0].round(4)).not_to eq(2.5)
+    end
+  end
+
+  pending '#get_sampler'
+
+  describe '#+' do
+    it 'returns a mixer' do
+      expect(1.constant + 2.constant).to be_a(MB::Sound::GraphNode::Mixer)
+    end
+
+    it 'can add two elements' do
+      m = 1.constant + 2i.constant
+      expect(m.sample(3)).to eq(Numo::SComplex[1+2i,1+2i,1+2i])
+    end
+
+    it 'can add the same element to itself' do
+      a = 1.constant
+      m = a + a
+      expect(m[a]).to eq(2)
+      expect(m.sample(3)).to eq(Numo::SFloat[2,2,2])
+    end
+
+    it 'can add an element repeatedly' do
+      a = 1.constant
+      m = a + a + a
+      expect(m[a]).to eq(1)
+      expect(m.sample(3)).to eq(Numo::SFloat[3,3,3])
+    end
+  end
+
+  describe '#-' do
+    it 'returns a mixer' do
+      expect(1.constant - 2.constant).to be_a(MB::Sound::GraphNode::Mixer)
+    end
+
+    it 'can subtract the same element from itself' do
+      a = 1.constant
+      m = a - a
+      expect(m[a]).to eq(0)
+      expect(m.sample(3)).to eq(Numo::SFloat.zeros(3))
+    end
+
+    it 'can subtract an element repeatedly' do
+      a = 1.constant
+      m = a - a - a
+      expect(m[a]).to eq(-1)
+      expect(m.sample(3)).to eq(Numo::SFloat[-1,-1,-1])
+    end
+  end
+
+  describe '#*' do
+    let(:a) { 15.constant.at_rate(1234) }
+    let(:b) { 25.constant.at_rate(2345) }
+    let(:c) { 35.constant.at_rate(5432) }
+
+    it 'creates a multiplier' do
+      expect(1.constant * 2.constant).to be_a(MB::Sound::GraphNode::Multiplier)
+    end
+
+    it 'can multiply two inputs' do
+      m = 2.constant * 3.constant
+      expect(m.sample(2)).to eq(Numo::SFloat[6,6])
+    end
+
+    it 'can multiply more nodes without messing up prior nodes' do
+      m = 2.constant * 3.constant
+      m2 = m * -1.constant
+
+      expect(m.sample(2)).to eq(Numo::SFloat[6,6])
+      expect(m2.sample(2)).to eq(Numo::SFloat[-6,-6])
+    end
+
+    it 'can multiply a node by itself' do
+      a = 2.constant
+      m = a * a
+      expect(m.sample(2)).to eq(Numo::SFloat[4,4])
+    end
+
+    it 'changes sample rates to match' do
+      m = MB::Sound::GraphNode::Multiplier.new(a, b) * c
+
+      expect(m.sample_rate).to eq(1234)
+      expect(a.sample_rate).to eq(1234)
+      expect(b.sample_rate).to eq(1234)
+      expect(c.sample_rate).to eq(1234)
     end
   end
 
@@ -268,9 +349,9 @@ RSpec.describe(MB::Sound::GraphNode) do
     it 'multiplies the node by an envelope' do
       node = 5.hz.adsr(0.5, 1, 0.25, 2)
       expect(node).to be_a(MB::Sound::GraphNode::Multiplier)
-      expect(node.sources.any?(MB::Sound::ADSREnvelope)).to eq(true)
+      expect(node.graph.any?(MB::Sound::ADSREnvelope)).to eq(true)
 
-      env = node.sources.select { |s| s.is_a?(MB::Sound::ADSREnvelope) }.first
+      env = node.graph.select { |s| s.is_a?(MB::Sound::ADSREnvelope) }.first
       expect(env.attack_time).to eq(0.5)
       expect(env.decay_time).to eq(1.0)
       expect(env.sustain_level).to eq(0.25)
@@ -520,6 +601,74 @@ RSpec.describe(MB::Sound::GraphNode) do
           expect(cl.public_instance_methods).to include(:sample_rate)
         end
       end
+    end
+  end
+
+  context 'graph introspection' do
+    let(:a) { 50.hz.ramp.named('a') }
+    let(:b) { 3.hz.at(120..650).named('b') }
+    let(:c) { (b * 0.01).named('c') }
+    let(:d) { a.filter(:lowpass, cutoff: b, quality: c).named('d') }
+    let(:e) { (d * 3).named('e') }
+
+    describe '#graph' do
+      it 'returns an ordered list of nodes in a graph without duplicates' do
+        expected = [
+          e,
+          d,
+          a,
+          c,
+          50,
+          3,
+          b,
+          0.01,
+        ]
+
+        result = e.graph(include_tees: false)
+
+        expect(result).to eq(expected)
+      end
+
+      it 'does not get lost in feedback loops' do
+        n1 = 10.hz.named('1')
+        n2 = 20.hz.named('2')
+        n3 = 30.hz.named('3')
+
+        expect(n1).to receive(:sources).exactly(3).times.and_return([n3])
+        expect(n2).to receive(:sources).exactly(3).times.and_return([n1])
+        expect(n3).to receive(:sources).exactly(3).times.and_return([n2])
+
+        expect(n1.graph).to eq([n3, n2, n1])
+        expect(n2.graph).to eq([n1, n3, n2])
+        expect(n3.graph).to eq([n2, n1, n3])
+      end
+
+      pending 'when include_tees is true'
+    end
+
+    describe '#graph_edges' do
+      it 'returns constant value connections for a single node' do
+        expect(a.graph_edges).to eq({ 50 => Set.new([a]) })
+      end
+
+      it 'returns connections for a simple graph' do
+        expect(c.graph_edges(include_tees: false)).to eq({ 0.01 => Set.new([c]), 3 => Set.new([b]), b => Set.new([c]) })
+      end
+
+      it 'returns connections for a more complex graph' do
+        expected = {
+          50 => Set.new([a]),
+          a => Set.new([d]),
+          3 => Set.new([b, e]),
+          b => Set.new([c, d]),
+          0.01 => Set.new([c]),
+          c => Set.new([d]),
+          d => Set.new([e]),
+        }
+        expect(e.graph_edges(include_tees: false)).to eq(expected)
+      end
+
+      pending 'when include_tees is true'
     end
   end
 end

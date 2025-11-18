@@ -69,23 +69,17 @@ begin
 
     lfo = hz.hz.with_phase(idx * 2.0 * Math::PI / inputs.length).send(wave_type).forever.at(min_delay..max_delay)
 
-    # Split delay LFO for first-tap and feedback
-    d1, d2 = lfo.tee
-
     # Split input into original and first delay
-    s1, s2 = inp.tee(2)
-    s1.named('s1')
-    s2.named('s2')
-    s2 = s2.delay(samples: d1, smoothing: delay_smoothing)
+    del = inp.delay(samples: lfo, smoothing: delay_smoothing)
 
     # Feedback injector and feedback delay (compensating for buffer size)
-    d_fb = (d2 - bufsize).proc { |v| v.inplace.clip(0, nil).not_inplace! }
+    d_fb = (lfo - bufsize).proc { |v| v.inplace.clip(0, nil).not_inplace! }
     b = 0.hz.forever.proc { a }.delay(samples: d_fb, smoothing: delay_smoothing2)
 
     # Final output, with a spy to save feedback buffer
-    wet = (feedback * b - s2).softclip(0.85, 0.95).spy { |z| a[] = z if z }
+    wet = (feedback * b - del).softclip(0.85, 0.95).spy { |z| a[] = z if z }
 
-    (s1 * dry_level + wet * wet_level).softclip(0.85, 0.95)
+    (inp * dry_level + wet * wet_level).softclip(0.85, 0.95)
   }
 
   loop do

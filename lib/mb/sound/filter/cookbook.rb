@@ -105,7 +105,7 @@ module MB
                 # objects, as opposed to Ruby objects with a sample method that
                 # returns a random sampling.  Or maybe I should rename all of
                 # my sample methods to something else.
-                v
+                v.get_sampler
               else
                 raise WrapperArgumentError.new(source: v)
               end

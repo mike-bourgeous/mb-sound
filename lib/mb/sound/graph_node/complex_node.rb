@@ -22,7 +22,7 @@ module MB
           raise ArgumentError, "Invalid Complex conversion mode: #{mode.inspect}" unless VALID_MODES.include?(mode)
           raise ArgumentError, "Input must respond to #sample" unless input.respond_to?(:sample)
 
-          @input = input
+          @input = input.get_sampler
           @mode = mode
         end
 

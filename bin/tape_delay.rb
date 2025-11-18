@@ -96,14 +96,13 @@ end
 
 # TODO: Make it easy to replicate a signal graph for each of N channels
 # TODO: stereo+, ping-pong
+# TODO: MIDI control
 
 begin
   # Use the input buffer size when reading from the input, so our feedback loop
   # can run with a different buffer size.
   # TODO: maybe this should be automatic
-  inp, inp_dry = input.with_buffer(input_buffer_size).resample(mode: :libsamplerate_fastest).named(filename || 'audio in').tee
-  inp.named('pre-delay input')
-  inp_dry.named('dry output')
+  inp = input.with_buffer(input_buffer_size).resample(mode: :libsamplerate_fastest).named(filename || 'audio in')
 
   # Feedback buffer, overwritten by a later call to #spy
   a = Numo::SFloat.zeros(internal_bufsize)
@@ -126,7 +125,7 @@ begin
     .named('feedback')
 
   # Final output
-  result = (dry * inp_dry + wet * feedback_loop)
+  result = (dry * inp + wet * feedback_loop)
     .softclip(0.75, 0.95)
     .with_buffer(internal_bufsize)
     .oversample(oversample, mode: :libsamplerate_fastest)

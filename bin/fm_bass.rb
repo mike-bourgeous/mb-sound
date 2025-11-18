@@ -31,8 +31,7 @@ voices = OSC_COUNT.times.map { |i|
 
   g = f.real.filter(15000.hz.lowpass).oversample(4, mode: :libsamplerate_fastest) # Try to cut down on aliasing chalkboard noise
 
-  dry, wet = g.tee
-  final = dry + wet.delay(seconds: 0.1) * 0.5
+  final = g + g.delay(seconds: 0.1) * 0.125
 
   MB::Sound::MIDI::GraphVoice.new(
     final,

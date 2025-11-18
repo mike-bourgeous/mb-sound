@@ -272,8 +272,7 @@ RSpec.describe MB::Sound::Oscillator do
       end
 
       it 'truncates output for short reads on frequency' do
-        # FIXME/TODO: don't read one sample from frequency buffer in Oscillator#frequency=
-        expect(0.constant.for(0.0001).tone.oscillator.send(method, 48000)).to eq(Numo::SFloat.zeros(4))
+        expect(0.constant.for(0.0001).tone.oscillator.send(method, 48000)).to eq(Numo::SFloat.zeros(5))
       end
 
       it 'truncates output for short reads on phase' do
@@ -282,13 +281,31 @@ RSpec.describe MB::Sound::Oscillator do
 
       it 'raises an error if truncation happens twice' do
         a = 0.constant
-        expect(a).to receive(:sample).with(10).twice.and_return(Numo::SFloat[1,2,3])
+        expect(a).to receive(:sample).with(10).at_least(2).times.and_return(Numo::SFloat[1,2,3])
+
+        # get_sampler/tee effectively act as a buffer adapter, so we need to
+        # break tee wrapping to force direct truncation
+        expect(a).to receive(:get_sampler).at_least(1).time.and_return(a)
 
         osc = 0.hz.pm(a)
         expect(osc.sample(10).length).to eq(3)
 
         expect { osc.sample(10) }.to raise_error(/Truncation/)
       end
+    end
+  end
+
+  describe '#number' do
+    let (:oscil) {
+      MB::Sound::Oscillator.new(:sine, frequency: 440, range: 0..0)
+    }
+
+    it 'returns a note number for a constant frequency' do
+      expect(oscil.number).to eq(69)
+    end
+
+    it 'raises an error for an FM modulated oscillator' do
+      expect { 50.hz.fm(1.hz).oscillator.number }.to raise_error(/variable oscillator/)
     end
   end
 

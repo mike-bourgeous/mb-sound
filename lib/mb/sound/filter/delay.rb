@@ -132,6 +132,7 @@ module MB
         def delay_samples=(samples)
           @delay_seconds_orig = nil
           if samples.respond_to?(:sample)
+            samples = samples.get_sampler
             check_rate(samples, 'delay_samples')
             @delay_samples = samples
             @delay = samples / @sample_rate

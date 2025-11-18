@@ -32,7 +32,7 @@ if filename && File.readable?(filename)
   input = MB::Sound.file_input(filename)
   inputs = input.split.map { |d| d.and_then(0.hz.at(0).for(delay * 4)) }
 else
-  MB::Sound.input(channels: ENV['CHANNELS']&.to_i || 2)
+  input = MB::Sound.input(channels: ENV['CHANNELS']&.to_i || 2)
   inputs = input.split
 end
 
@@ -72,48 +72,32 @@ begin
     a = Numo::SFloat.zeros(internal_buffer)
 
     # TODO: Allow base delay and loop length? or mindelay and maxdelay?
-    # TODO: Smooth delay over longer than one frame
     # TODO: It would be cool to be able to crossfade the delay time jump; this
-    # could be possible with a multi-tap delay
-    delayconst = (delay.constant.named('Delay')).clip(internal_buftime, nil)
-    lfo_period, delay_delay = delayconst.tee
-    lfo_period.named('LFO period')
-    delay_delay.named('Delay time')
+    # could be possible with a multi-tap delay (e.g. fade out from t1 while
+    # fading in from t2)
+    delay_time = (delay.constant.named('Delay')).filter(:lowpass, cutoff: 10).clip(internal_buftime, nil)
     
-    lfo_freq = 1.0 / lfo_period
-    freq_amp, freq_del = lfo_freq.tee
-    freq_amp.named('Amp LFO Frequency')
-    freq_del.named('Delay LFO Frequency')
+    lfo_freq = (1.0 / delay_time).named('LFO Frequency')
 
     # The amplitude LFO mutes the sound while the delay buffer jumps back to the present
-    amp_lfo = freq_amp.tone.sine.at(0..1000).with_phase((idx + 0.5) * 2.0 * Math::PI / inputs.length).clip(0, 1).named('Amp LFO')
-    amp1, amp2 = amp_lfo.tee
-    amp1.named('amp1')
-    amp2.named('amp2')
+    amp_lfo = lfo_freq.tone.sine.at(0..1000).with_phase((idx + 0.5) * 2.0 * Math::PI / inputs.length).clip(0, 1).named('Amp LFO')
 
     # The delay LFO controls the position in the delay buffer
-    delay_lfo = freq_del.tone.ramp.at(0..2).with_phase(idx * 2.0 * Math::PI / inputs.length).named('Delay LFO') * delay_delay
-    d1, d2 = delay_lfo.tee(2)
-    d1.named('d1')
-    d2.named('d2')
+    delay_lfo = lfo_freq.tone.ramp.at(0..2).with_phase(idx * 2.0 * Math::PI / inputs.length).named('Delay LFO') * delay_time
 
-    s1, s2 = inp.tee(2)
-    s1.named('s1')
-    s2.named('s2')
-
-    delayed = s1.multitap(d1)[0] * amp1
+    delayed = inp.multitap(delay_lfo)[0] * amp_lfo
 
     # TODO: create a better way to do feedback in node graphs, ideally while
     # automatically compensating for buffer size
     # TODO: implement cross-channel feedback
-    d_fb1, d_fb2 = (d2 - internal_buftime).clip(0, nil).named('d_fb').tee
-    d_fb_amp = amp2.multitap(d_fb1)[0] # delay the amp lfo to match the feedback delay (FIXME: this seems to be off; it lets through some aliasing noise on each cycle; or maybe it's in both LFOs)
-    fb_return = 0.constant.proc { a }.multitap(d_fb2)[0] * d_fb_amp
+    d_fb = (delay_lfo - internal_buftime).clip(0, nil).named('d_fb')
+    d_fb_amp = amp_lfo.multitap(d_fb)[0] # delay the amp lfo to match the feedback delay (FIXME: this seems to be off; it lets through some aliasing noise on each cycle; or maybe it's in both LFOs)
+    fb_return = 0.constant.proc { a }.multitap(d_fb)[0] * d_fb_amp
     wet = (feedback * fb_return + delayed).softclip(0.85, 0.95).spy { |z| a[] = z if z }
 
     dryconst = dry_level.constant.named('Dry level')
     wetconst = wet_level.constant.named('Wet level')
-    final = (s2 * dryconst + wet * wetconst).softclip(0.85, 0.95).with_buffer(internal_buffer).oversample(oversample, mode: :libsamplerate_fastest)
+    final = (inp * dryconst + wet * wetconst).softclip(0.85, 0.95).with_buffer(internal_buffer).oversample(oversample, mode: :libsamplerate_fastest)
 
     # GraphVoice provides on_cc to generate a cc map for the MIDI manager
     # (TODO: probably a better way to do this, also need on_bend, on_pitch, etc)

@@ -34,17 +34,16 @@ voices = OSC_COUNT.times.map { |i|
   q_out = (q_osc * q_env).named('Q Out')
   qb_const = 0.15.constant.named('Q into B')
   qa_const = 0.25.constant.named('Q into A')
-  q1, q2, q3 = q_out.tee(3)
 
   # 7 mils detuned up, 3.5 ratio
   b_ratio = 3.5.constant.named('B Ratio')
-  b_osc = (bfreq.call * b_ratio * (2 ** (2.0 / 1000.0))).tone.complex_sine.at(1).pm(q2 * qb_const).named('B')
+  b_osc = (bfreq.call * b_ratio * (2 ** (2.0 / 1000.0))).tone.complex_sine.at(1).pm(q_out * qb_const).named('B')
   b_env = MB::Sound.adsr(0, 5, 0.2, 4).named('B Envelope').db(30) * 0.223.hz.sine.at(0.8..1.1)
   b_out = (b_osc * b_env).named('B Out')
 
   # 7 mils up
   ba_const = 1.6.constant.named('B into A')
-  a_osc = (bfreq.call * (2 ** (2.0 / 1000.0))).tone.complex_sine.at(1).pm(b_out * ba_const + q1 * qa_const).named('A')
+  a_osc = (bfreq.call * (2 ** (2.0 / 1000.0))).tone.complex_sine.at(1).pm(b_out * ba_const + q_out * qa_const).named('A')
   a_env = MB::Sound.adsr(0, 6, 0.5, 5).named('A Envelope').db(30) * 0.111.hz.sine.at(0.9..1.0)
   a_out = (a_osc * a_env).named('A Out')
 
@@ -60,7 +59,7 @@ voices = OSC_COUNT.times.map { |i|
   c_env = MB::Sound.adsr(0, 6, 0.55, 5).named('C Envelope').db(30) * 0.317.hz.sine.at(0.9..1.0)
   c_out = (c_osc * c_env).named('C Out')
 
-  sum = a_out + c_out + (q3 * 0.05)
+  sum = a_out + c_out + (q_out * 0.05)
 
   g = sum.filter(10000.hz.lowpass) # Try to cut down on aliasing chalkboard noise
 
