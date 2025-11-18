@@ -17,7 +17,7 @@ RSpec.describe(MB::Sound::GraphNode::ProcNode) do
       a.sample(1)
 
       b = a.get_sampler
-      p = b.proc { |v| v + 1 }
+      p = a.proc { |v| v + 1 }
 
       expect(b.sample(13)).to eq(Numo::SFloat[1, 1, 1, 1, -1, -1, -1, -1, 1, 1, 1, 1, -1])
       expect(p.sample(14)).to eq(Numo::SFloat[2, 2, 2, 2, 0, 0, 0, 0, 2, 2, 2, 2, 0, 0])

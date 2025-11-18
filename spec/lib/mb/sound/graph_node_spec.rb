@@ -387,9 +387,9 @@ RSpec.describe(MB::Sound::GraphNode, aggregate_failures: true) do
 
       # Ensure the correct types were created and stored
       expect(graph).to be_a(MB::Sound::Filter::Cookbook::CookbookWrapper)
-      expect(graph.audio).to be_a(MB::Sound::Tone)
-      expect(graph.cutoff).to be_a(MB::Sound::GraphNode::Mixer)
-      expect(graph.quality).to be_a(MB::Sound::GraphNode::Mixer)
+      expect(graph.audio.original_source).to be_a(MB::Sound::Tone)
+      expect(graph.cutoff.original_source).to be_a(MB::Sound::GraphNode::Mixer)
+      expect(graph.quality.original_source).to be_a(MB::Sound::GraphNode::Mixer)
 
       # Ensure 500Hz tone gets quieter as filter frequency rises
       attack = graph.sample(2000).abs.max

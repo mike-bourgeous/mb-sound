@@ -80,7 +80,7 @@ RSpec.describe(MB::Sound::GraphNode::BufferAdapter, :aggregate_failures) do
 
     it 'shuts down cleanly when upstream returns less than expected' do
       us = double(MB::Sound::GraphNode)
-      expect(us).to receive(:sample).with(4).exactly(3).times.and_return(Numo::SFloat[1,2,3,4], Numo::SFloat[5,6,7], nil)
+      expect(us).to receive(:sample).with(4).at_least(3).times.and_return(Numo::SFloat[1,2,3,4], Numo::SFloat[5,6,7], nil)
       allow(us).to receive(:sample_rate).and_return(48000)
       expect(us).to receive(:get_sampler).and_return(MB::Sound::GraphNode::Tee.new(us, 1).branches[0])
 

@@ -13,7 +13,7 @@ RSpec.describe(MB::Sound::Filter::Cookbook, :aggregate_failures) do
       )
 
       # Verify types within the wrapper
-      expect(wrapper.cutoff).to be_a(MB::Sound::Tone)
+      expect(wrapper.cutoff.original_source).to be_a(MB::Sound::Tone)
       expect(wrapper.quality).to be_a(MB::Sound::GraphNode::Constant)
 
       # Verify alternating cutoff frequencies
