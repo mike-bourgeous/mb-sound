@@ -129,6 +129,7 @@ module MB
           samp = find_summand(summand)
           @gains.delete(samp)
           @orig_to_samp.delete_if { |_, v| v == samp }
+          samp.destroy
         end
 
         # Removes all summands, but does not reset the constant, if set.

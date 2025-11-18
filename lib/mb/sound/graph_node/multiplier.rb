@@ -123,12 +123,14 @@ module MB
             @multiplicands.delete(samp)
             @multmap[multiplicand].delete(samp)
             @multmap.delete(multiplicand) if @multmap[multiplicand].empty?
+            samp.destroy
           else
             multiplicand = find_multiplicand(multiplicand)
             return unless multiplicand
 
-            @multmap[multiplicand].each do |m|
-              @multiplicands.delete(m)
+            @multmap[multiplicand].each do |samp|
+              @multiplicands.delete(samp)
+              samp.destroy
             end
 
             @multmap.delete(multiplicand)
