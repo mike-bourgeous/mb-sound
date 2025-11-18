@@ -10,4 +10,5 @@ if ARGV.include?('--help') || ARGV.empty?
   exit 1
 end
 
-MB::Sound.play ARGV[0]
+# TODO: gapless playback
+ARGV.each do |f| MB::Sound.play f end

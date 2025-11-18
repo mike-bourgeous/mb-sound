@@ -106,6 +106,7 @@ module MB
       #                 used by IOInput to suggest a pipe buffer size to the
       #                 kernel to reduce latency.
       def initialize(filename, stream_idx: 0, resample: nil, channels: nil, format: nil, loglevel: nil, buffer_size: nil)
+        raise 'No filename given' unless filename
         raise "File #{filename.inspect} is not readable" unless File.readable?(filename) || format
         @filename = filename
         fnesc = filename.shellescape
