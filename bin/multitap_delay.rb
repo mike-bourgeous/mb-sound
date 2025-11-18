@@ -31,7 +31,7 @@ if filename && File.readable?(filename)
   input = MB::Sound.file_input(filename)
   inputs = input.split.map { |d| d.and_then(0.constant.for(base_delay_s * 4)) }
 else
-  MB::Sound.input(channels: ENV['CHANNELS']&.to_i || 2)
+  input = MB::Sound.input(channels: ENV['CHANNELS']&.to_i || 2)
   inputs = input.split
 end
 
