@@ -65,6 +65,9 @@ module MB
       # modify the resulting buffer without affecting parallel branches of the
       # graph.
       #
+      # Note that teeing should not be necessary in most cases, as most graph
+      # nodes will call #get_sampler to get an implicit tee now.
+      #
       # Example (for bin/sound.rb):
       #     # AM and tremolo added together for some reason
       #     a, b = 120.hz.tee ; nil
@@ -82,7 +85,7 @@ module MB
       # custom GraphNode implementations, that's _probably_ a bug in mb-sound.
       def get_sampler
         # TODO: maybe rename to #get_branch to match Tee's naming??
-        # TODO: fix places where branches get abandoned (e.g. bin/flanger.rb) instead of ignoring these late readers in circular_buffer.rb
+        # TODO: find and fix places where branches get abandoned (e.g. bin/flanger.rb) instead of ignoring these late readers in circular_buffer.rb
         @internal_tee ||= Tee.new(self, 0)
         @internal_tee.add_branch
       end
