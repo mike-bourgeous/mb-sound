@@ -1,3 +1,5 @@
+require 'shellwords'
+
 module MB
   module Sound
     # Adds methods to any class that implements a :sample method to build
@@ -32,9 +34,6 @@ module MB
     #
     # TODO: In-line method to create a meter?
     #
-    # TODO: Pass default sample rate through from source nodes or have a
-    # graph-global sample rate
-    #
     # TODO: Document methods that nodes must implement or override
     module GraphNode
       attr_reader :graph_node_name
@@ -51,10 +50,23 @@ module MB
         @named ||= false
       end
 
-      # Returns the class name of the node plus the node's assigned name.
+      # Returns the class name of the node plus the node's assigned name or
+      # object ID.
       def to_s
         @graph_node_name ||= nil
-        "#{self.class.name}/#{@graph_node_name || __id__}"
+        @node_type_name ||= self.class.name.rpartition('::').last
+        "#{@node_type_name}/#{@graph_node_name || "id=#{__id__}"}"
+      end
+
+      # Returns a multiline description of a node suitable for display in a
+      # GraphViz visualization (see #graphviz).
+      def to_s_graphviz
+        to_s
+        <<~EOF
+        #{@node_type_name}
+        #{@graph_node_name || "id=#{__id__}"}
+        #{sample_rate}Hz
+        EOF
       end
 
       # Returns +n+ (default 2) fan-out readers for creating branching signal
@@ -713,10 +725,10 @@ module MB
 
 
         graph_edges(include_tees: include_tees).each do |src, edges|
-          n1 = src.is_a?(Numeric) ? src.to_s : "#{src.class} (#{src.graph_node_name}/#{src.__id__})"
+          n1 = src.respond_to?(:to_s_graphviz) ? src.to_s_graphviz : src.to_s
 
           edges.each do |dest|
-            n2 = dest.is_a?(Numeric) ? dest.to_s : "#{dest.class} (#{dest.graph_node_name}/#{dest.__id__})"
+            n2 = dest.respond_to?(:to_s_graphviz) ? dest.to_s_graphviz : dest.to_s
 
             if src.is_a?(Numeric)
               srcname = "#{src} to #{dest.__id__}"
