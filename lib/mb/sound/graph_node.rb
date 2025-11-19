@@ -746,6 +746,18 @@ module MB
         digraph
       end
 
+      # Saves a GraphViz representation of the graph to a temporary file,
+      # generates a PNG using dot, and opens the PNG using open.  The PNG file
+      # is left behind after the program exits for inspection.
+      def open_graphviz(include_tees: false)
+        Tempfile.create([self.to_s, '.dot']) do |dot|
+          png = "#{dot.path}.png"
+          File.write(dot, self.graphviz(include_tees: include_tees))
+          system("dot -Tpng:cairo #{dot.path.shellescape} -o #{png.shellescape}")
+          system("open #{png.shellescape}")
+        end
+      end
+
       # Sets all Tones in the graph to continue playing forever.
       def for(duration, recursive: true)
         if recursive

@@ -131,8 +131,8 @@ begin
     .oversample(oversample, mode: :libsamplerate_fastest)
     .named('mixed output')
 
-  File.write('/tmp/tape_delay.dot', result.graphviz)
-  `dot -Tpng:cairo /tmp/tape_delay.dot -o /tmp/tape_delay.png`
+
+  result.open_graphviz
 
   loop do
     data = result.sample(output.buffer_size)
