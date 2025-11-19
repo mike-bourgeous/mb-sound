@@ -29,6 +29,8 @@ module MB
           @source = source.get_sampler
           @in_place = in_place
 
+          @node_type_name = "SampleWrapper/#{filter.class.name.rpartition('::').last}"
+
           if @base_filter.respond_to?(:sample_rate) && @base_filter.sample_rate != @source.sample_rate
             if @base_filter.respond_to?(:sample_rate=)
               @base_filter.sample_rate = @source.sample_rate

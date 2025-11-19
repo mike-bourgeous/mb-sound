@@ -50,6 +50,11 @@ module MB
         @named ||= false
       end
 
+      # Returns the assigned node name if present, or the object ID if not.
+      def name_or_id
+        @graph_node_name || "id=#{__id__}"
+      end
+
       # Returns the class name of the node plus the node's assigned name or
       # object ID.
       def to_s
@@ -128,17 +133,17 @@ module MB
       # signal graph.  For signal graphs, each numerator value is divided
       # by the corresponding denominator value at the same index.
       def /(other)
-        arithmetic_proc(other) do |d1, d2|
+        arithmetic_proc(other, '/') { |d1, d2|
           d1 / d2
-        end
+        }
       end
 
       # Appends a node that raises the incoming values to +other+, which should
       # be either a numeric or another signal graph.
       def **(other)
-        arithmetic_proc(other) do |d1, d2|
+        arithmetic_proc(other, '**') { |d1, d2|
           d1 ** d2
-        end
+        }
       end
 
       # Appends a node that returns the real value of a complex signal, or the
@@ -488,7 +493,7 @@ module MB
       # Hard-clips the output of this node to the given min and max, one of
       # which may be nil to disable clipping in that direction.
       def clip(min, max)
-        self.proc { |v| v.clip(min, max) }
+        self.proc { |v| v.clip(min, max) }.named("clamp #{min}..#{max}")
       end
 
       # Hard-clips the slope of the output of this node to the given +max_rise+
@@ -799,8 +804,17 @@ module MB
         branch
       end
 
+      # Returns an Array with the name or object ID (if no name) of all sources
+      # for this node, for use in generating descriptions of the node.
+      def source_names
+        sources.map { |s|
+          s = climb_tee_tree(s)
+          s.respond_to?(:name_or_id) ? s.name_or_id : s.to_s
+        }
+      end
+
       # Setup/boilerplate buffer management used by #/ and #**.
-      def arithmetic_proc(other)
+      def arithmetic_proc(other, name)
         if other.respond_to?(:sample)
           other = other.get_sampler
 
@@ -827,7 +841,7 @@ module MB
               ret = yield v, data
               ret.not_inplace!
             end
-          }
+          }.named("#{climb_tee_tree(self).name_or_id} #{name} #{climb_tee_tree(other).name_or_id}")
         else
           self.proc(other) { |v|
             if v.nil? || v.empty?
@@ -837,7 +851,7 @@ module MB
               ret = yield v, other
               ret.not_inplace!
             end
-          }
+          }.named("#{climb_tee_tree(self).name_or_id} #{name} #{other}")
         end
       end
     end

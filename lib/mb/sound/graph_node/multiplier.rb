@@ -168,7 +168,21 @@ module MB
 
         # See GraphNode#sources
         def sources
-          @multiplicands.keys + [@constant]
+          @constant == 1 ? @multiplicands.keys : @multiplicands.keys + [@constant]
+        end
+
+        # Includes the arithmetic interpretation of the multiplier after GraphNode#to_s.
+        def to_s
+          "#{super} -- #{source_names.join(' * ')}"
+        end
+
+        # Includes the arithmetic interpretation of the multiplier after
+        # GraphNode#to_s_graphviz.
+        def to_s_graphviz
+          <<~EOF
+          #{super}---------------
+          #{source_names.join(" *\n")}
+          EOF
         end
 
         private

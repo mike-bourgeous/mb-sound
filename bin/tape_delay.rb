@@ -108,24 +108,24 @@ begin
   a = Numo::SFloat.zeros(internal_bufsize)
 
   # Feedback injector and delay
-  adjusted_delay = (delay_samples - internal_bufsize.constant).clip(0, nil)
-  b = (inp * drive + 0.constant.proc { a } * feedback).delay(samples: adjusted_delay, smoothing: smoothing, sample_rate: input.sample_rate * oversample)
+  adjusted_delay = (delay_samples.constant.named('delay in samples') - internal_bufsize.constant.named('buffer size')).clip(0, nil)
+  b = (inp * drive.constant.named('drive') + 0.constant.proc { a }.named('feedback') * feedback)
+    .delay(samples: adjusted_delay, smoothing: smoothing, sample_rate: input.sample_rate * oversample)
+    .named('delay')
 
   # Tape saturator
   c = b
-    .filter(200.hz.highpass(quality: 0.5))
-    .filter(3000.hz.lowpass(quality: 0.5))
+    .filter(200.hz.highpass(quality: 0.5)).named('highpass')
+    .filter(3000.hz.lowpass(quality: 0.5)).named('lowpass')
     .softclip(0, 0.5)
     .named('tape sim')
 
   # Feedback, with a spy to save feedback buffer, using a shorter buffer size
   # for the feedback loop, allowing shorter delays
-  feedback_loop = c
-    .spy { |z| a[] = z if z }
-    .named('feedback')
+  feedback_loop = c.spy { |z| a[] = z if z }
 
   # Final output
-  result = (dry * inp + wet * feedback_loop)
+  result = (dry.constant.named('dry') * inp + wet.constant.named('wet') * feedback_loop)
     .softclip(0.75, 0.95)
     .with_buffer(internal_bufsize)
     .oversample(oversample, mode: :libsamplerate_fastest)

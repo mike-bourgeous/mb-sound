@@ -162,7 +162,7 @@ module MB
 
         # See GraphNode#sources
         def sources
-          @gains.keys + [@constant]
+          @constant == 0 ? @gains.keys : @gains.keys + [@constant]
         end
 
         # Returns an Array of the gains in this mixer (without their summands).
@@ -174,6 +174,20 @@ module MB
         # Mixer.
         def include?(other)
           @orig_to_samp.include?(other)
+        end
+
+        # Adds the arithmetic form of the mixer to GraphNode#to_s.
+        def to_s
+          "#{super} -- #{arithmetic_terms.join(' + ').gsub('+ -', '- ')}"
+        end
+
+        # Appends the arithmetic form of the mixer after
+        # GraphNode#to_s_graphviz.
+        def to_s_graphviz
+          <<~EOF
+          #{super}---------------
+          #{arithmetic_terms.join(" +\n").gsub("+\n-", "-\n")}
+          EOF
         end
 
         private
@@ -195,6 +209,27 @@ module MB
               @orig_to_samp.fetch(summand)
             end
           end
+        end
+
+        def arithmetic_terms
+          terms = @gains.map { |src, g|
+            src = climb_tee_tree(src)
+
+            case g
+            when 1
+              src.name_or_id
+
+            when -1
+              "-#{src.name_or_id}"
+
+            else
+              "#{g} * #{src.name_or_id}"
+            end
+          }
+
+          terms << @constant unless @constant == 0
+
+          terms
         end
       end
     end
