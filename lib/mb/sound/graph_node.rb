@@ -701,28 +701,31 @@ module MB
 
       # Returns a String containing a GraphViz representation of the signal
       # graph.
-      def graphviz
+      def graphviz(include_tees: false)
         source_history = Set.new
         source_queue = [self]
 
         digraph = "digraph {\n"
 
-        until source_queue.empty?
-          s = source_queue.shift
-          next if source_history.include?(s)
+        digraph << "  graph [ bgcolor=\"#000000e0\" rankdir=\"LR\" pad=\"0.25\" ];\n"
+        digraph << "  node [ style=\"filled\" fontcolor=\"#ffffff\" color=\"#2266ee\" shape=\"Mrecord\" ];\n"
+        digraph << "  edge [ fontcolor=\"#ffffff\" color=\"#ffffff\" headport=\"w\" tailport=\"e\" ];\n"
 
-          n2 = s.is_a?(Numeric) ? s.to_s : "#{s.class} (#{s.graph_node_name}/#{s.__id__})"
-          digraph << "  #{n2.inspect};\n"
 
-          source_history << s
+        graph_edges(include_tees: include_tees).each do |src, edges|
+          n1 = src.is_a?(Numeric) ? src.to_s : "#{src.class} (#{src.graph_node_name}/#{src.__id__})"
 
-          if s.respond_to?(:sources)
-            s.sources.each do |src|
-              n1 = src.is_a?(Numeric) ? src.to_s : "#{src.class} (#{src.graph_node_name}/#{src.__id__})"
+          edges.each do |dest|
+            n2 = dest.is_a?(Numeric) ? dest.to_s : "#{dest.class} (#{dest.graph_node_name}/#{dest.__id__})"
+
+            if src.is_a?(Numeric)
+              srcname = "#{src} to #{dest.__id__}"
+              # Include a separate numeric source node for each destination
+              digraph << "  #{srcname.inspect} [label=#{n1.inspect}];\n"
+              digraph << "  #{srcname.inspect} -> #{n2.inspect};\n"
+            else
               digraph << "  #{n1.inspect} -> #{n2.inspect};\n"
             end
-
-            source_queue.concat(s.sources) if s.respond_to?(:sources)
           end
         end
 
