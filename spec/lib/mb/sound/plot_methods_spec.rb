@@ -16,21 +16,14 @@ RSpec.describe(MB::Sound::PlotMethods) do
 
   let(:tone) { 357.2.hz.gauss }
 
-  let(:lines) { output.map(&MB::U.method(:remove_ansi)).map(&:rstrip) }
+  let(:lines) { output.map(&MB::U.method(:remove_ansi)).map(&:rstrip).reject(&:empty?) }
   let(:text) { lines.join("\n").lstrip }
 
   # Makes sure the regex matches a full line and isn't accidentally matching a
   # zero-width string and isn't matching across lines
   def check_regex(example, lines, text, regex)
     expect(text).to match(regex)
-
-    if text.match(regex).to_s.include?("\n")
-      File.write("/tmp/with_newline_#{example.description.downcase.gsub(/[^A-Za-z0-9]+/, '-')}.txt", output.map(&:inspect).join("\n") + "\n\n" + lines.map(&:inspect).join("\n"))
-    else
-      File.write("/tmp/no_newline_#{example.description.downcase.gsub(/[^A-Za-z0-9]+/, '-')}.txt", output.map(&:inspect).join("\n") + "\n\n" + lines.map(&:inspect).join("\n"))
-    end
-
-    expect(text.match(regex).to_s).not_to include("\n") # TODO: why sometimes ^\n??
+    expect(text.match(regex).to_s).not_to include("\n")
     expect(text.match(regex).to_s.length).to be_between(75, 81).inclusive
 
   rescue Exception => e
