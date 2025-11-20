@@ -3,7 +3,7 @@ RSpec.describe(MB::Sound::GraphNode::ProcNode) do
     it 'can include extra source nodes' do
       a = 1.constant.named('A')
       b = 2.constant.named('B')
-      pn = MB::Sound::GraphNode::ProcNode.new(a, [b]) do |v|
+      pn = MB::Sound::GraphNode::ProcNode.new(a, {extra: b}) do |v|
         v
       end
 

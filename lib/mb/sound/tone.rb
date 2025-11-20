@@ -531,7 +531,11 @@ module MB
       # source of the tone, which will either be a number or a signal
       # generator.
       def sources
-        [@frequency, @phase_mod].compact
+        {
+          frequency: @frequency,
+          phase: @phase,
+          phase_mod: @phase_mod,
+        }.compact
       end
 
       # Returns an Oscillator that will generate a wave with the wave type,

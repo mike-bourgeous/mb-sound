@@ -150,7 +150,7 @@ RSpec.describe(MB::Sound::GraphNode::BufferAdapter, :aggregate_failures) do
       source = 5.constant
       chain = source.with_buffer(37)
       expect(chain).to be_a(MB::Sound::GraphNode::BufferAdapter)
-      expect(chain.sources[0].sources).to eq([source])
+      expect(chain.sources[:input].sources).to eq({input: source})
     end
   end
 

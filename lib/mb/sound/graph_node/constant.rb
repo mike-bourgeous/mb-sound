@@ -88,7 +88,7 @@ module MB
         end
 
         def sources
-          [@constant]
+          { value: @constant }
         end
 
         # Changes the sample rate of this constant value, used for duration

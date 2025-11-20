@@ -42,7 +42,7 @@ module MB
           # Values for internal use by Tee.
           attr_reader :index, :reader
 
-          def_delegators :@tee, :sample_rate, :sample_rate=, :reset
+          def_delegators :@tee, :sample_rate, :sample_rate=, :reset, :sources, :original_source
           def_delegators :@reader, :count, :length
 
           # For internal use by Tee.  Initializes one parallel branch of the tee.
@@ -73,16 +73,6 @@ module MB
             @tee.internal_sample(self, count)
           end
 
-          # Returns an Array containing the source node feeding into the Tee.
-          def sources
-            @tee.sources
-          end
-
-          # Returns the next upstream node that is not a branch of a Tee.
-          def original_source
-            @original_source ||= @tee.original_source
-          end
-
           # Wraps upstream #at_rate to return self instead of upstream.
           def at_rate(new_rate)
             @tee.at_rate(new_rate)
@@ -111,6 +101,9 @@ module MB
         # GraphNode#sources).
         attr_reader :sources
 
+        # The next upstream source that is not a Tee branch.
+        attr_reader :original_source
+
         # The branches from the Tee (see GraphNode#tee).
         attr_reader :branches
 
@@ -123,7 +116,9 @@ module MB
           raise "Source #{source} for a Tee must respond to #sample_rate" unless source.respond_to?(:sample_rate)
 
           @source = source
-          @sources = [source].freeze
+          @sources = { input: source }.freeze
+          @original_source = @source
+          @original_source = @original_source.original_source while @original_source.is_a?(Branch)
 
           @cbuf = CircularBuffer.new(buffer_size: circular_buffer_size)
 
@@ -134,13 +129,6 @@ module MB
           end
 
           @done = false
-        end
-
-        # Returns the next upstream source that is not a tee branch.
-        def original_source
-          src = @sources[0]
-          src = src.sources[0] while src.is_a?(MB::Sound::GraphNode::Tee::Branch)
-          src
         end
 
         # Adds a new branch to the Tee and returns it.

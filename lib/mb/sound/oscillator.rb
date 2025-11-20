@@ -122,6 +122,8 @@ module MB
       # every oscillator needs its own internal phase if the phase is to be kept
       # within 0..2pi.  Maybe also separate the oscillator from the phase
       # counter?
+      # TODO: maybe pass sample rate instead and have the oscillator calculate
+      # its own phase advance value
 
       # Initializes a low frequency oscillator with the given +wave_type+,
       # +frequency+, and +range+.  The +advance+ parameter makes it easier to
@@ -197,7 +199,11 @@ module MB
       alias at_rate sample_rate=
 
       def sources
-        [@frequency, @phase_mod].compact
+        {
+          frequency: @frequency,
+          phase: @phase,
+          phase_mod: @phase_mod,
+        }.compact
       end
 
       # Changes the starting phase offset for this oscillator, shifting the

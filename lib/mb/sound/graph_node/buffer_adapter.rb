@@ -32,7 +32,7 @@ module MB
 
         # Returns the upstream as the only source for this node.
         def sources
-          [@upstream]
+          { input: @upstream }
         end
 
         # Wraps upstream #at_rate to return self instead of upstream.

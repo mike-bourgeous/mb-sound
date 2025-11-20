@@ -168,20 +168,27 @@ module MB
 
         # See GraphNode#sources
         def sources
-          @constant == 1 ? @multiplicands.keys : @multiplicands.keys + [@constant]
+          {
+            constant: @constant,
+            **@multiplicands.keys.map.with_index { |src, idx|
+              [:"input_#{idx + 1}", src]
+            }.to_h
+          }
         end
 
         # Includes the arithmetic interpretation of the multiplier after GraphNode#to_s.
         def to_s
-          "#{super} -- #{source_names.join(' * ')}"
+          names = @multiplicands.keys.map(&method(:make_source_name))
+          "#{super} -- #{@constant == 1 ? '' : "#{@constant} * "}#{names.join(' * ')}"
         end
 
         # Includes the arithmetic interpretation of the multiplier after
         # GraphNode#to_s_graphviz.
         def to_s_graphviz
+          names = @multiplicands.keys.map(&method(:make_source_name))
           <<~EOF
           #{super}---------------
-          #{source_names.join(" *\n")}
+          #{@constant == 1 ? '' : "#{@constant} *\n"}#{names.join(" *\n")}
           EOF
         end
 

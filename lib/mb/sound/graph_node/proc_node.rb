@@ -12,28 +12,30 @@ module MB
 
         # Initializes a graph node that calls the +block+ with the result of the
         # +source+'s sample method when this object's #sample method is called.
-        # The +extra_sources+ parameter can be used if the +block+ retrieves data
-        # from more graph nodes than just +source+, so that graph searching
-        # methods still work.
+        #
+        # The +extra_sources+ parameter can be used if the +block+ retrieves
+        # data from more graph nodes than just +source+, so that graph
+        # searching methods still work.  Pass a Hash from source name to
+        # source node.
         #
         # +:type_name+ is stored in @node_type_name for display in e.g.
         # GraphViz graphs.  See GraphNode#graphviz.
-        def initialize(source, extra_sources = nil, sample_rate: nil, type_name: nil, &block)
-          @graph_node_name = block.source_location&.join(':').rpartition('mb-sound').last
+        def initialize(source, extra_sources = {}, sample_rate: nil, type_name: nil, &block)
+          @graph_node_name = block.source_location&.join(':')&.rpartition('mb-sound')&.last
           @node_type_name = "ProcNode (#{type_name})"
 
           source = source.get_sampler if source.respond_to?(:sample)
 
           @source = source
-          @sources = [source, *extra_sources].freeze
+          @sources = { input: source }.merge(extra_sources || {}).freeze
 
           @sample_rate = sample_rate
 
-          @sources.each_with_index do |s, idx|
-            if s.respond_to?(:sample_rate)
-              @sample_rate ||= s.sample_rate
-              if s.sample_rate != @sample_rate
-                raise "Source #{idx}/#{s} sample rate #{s.sample_rate} does not match expected rate #{@sample_rate}"
+          @sources.each_with_index do |(name, src), idx|
+            if src.respond_to?(:sample_rate)
+              @sample_rate ||= src.sample_rate
+              if src.sample_rate != @sample_rate
+                raise "Source #{idx}/#{name}/#{src} sample rate #{src.sample_rate} does not match expected rate #{@sample_rate}"
               end
             end
           end

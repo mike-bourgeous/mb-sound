@@ -58,7 +58,7 @@ module MB
           # Check support on all sources first to minimize damage done.
           # Otherwise some sample rates could be changed but not others if
           # there is partial support.
-          sources.each do |src|
+          sources.each do |_, src|
             # Skip any strings or numerics listed as sources
             # TODO: only allow GraphNodes as sources?
             next unless src.respond_to?(:sample_rate)
@@ -68,7 +68,7 @@ module MB
             end
           end
 
-          sources.each do |src|
+          sources.each do |_, src|
             next unless src.respond_to?(:sample_rate)
             src.send(:sample_rate=, new_rate)
           end

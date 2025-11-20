@@ -265,7 +265,7 @@ module MB
         # Returns the direct inputs that feed this graph voice (just the graph
         # given to the constructor).
         def sources
-          [@graph]
+          { input: @graph }
         end
 
         private

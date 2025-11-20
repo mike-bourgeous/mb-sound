@@ -162,7 +162,12 @@ module MB
 
         # See GraphNode#sources
         def sources
-          @constant == 0 ? @gains.keys : @gains.keys + [@constant]
+          {
+            constant: @constant,
+            **@gains.keys.map.with_index { |src, idx|
+              [:"input_#{idx + 1}", src]
+            }.to_h
+          }
         end
 
         # Returns an Array of the gains in this mixer (without their summands).

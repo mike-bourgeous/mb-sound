@@ -50,7 +50,10 @@ module MB
             # TODO: Support per-tap feedback into all taps?
             # TODO: Support per-tap feedback just into that tap?
 
-            @sources = [@delay_samples, @mtd].freeze
+            @sources = {
+              delay_samples: @delay_samples,
+              multitap_delay: @mtd,
+            }.freeze
           end
 
           # Returns +count+ samples from this delay tap, based on the delay
@@ -78,8 +81,8 @@ module MB
         # The input node whose audio is delayed.
         attr_reader :source
 
-        # An Array of sources that feed the parent multi-tap delay (for
-        # GraphNode compatibility; just contains the source node).
+        # A Hash of sources that feed the parent multi-tap delay (for GraphNode
+        # compatibility; just contains the source node).
         attr_reader :sources
 
         # The name of the overall delay parent object (for GraphNode
@@ -101,7 +104,7 @@ module MB
           @sample_rate = sample_rate.to_f
           @sample_rate_node = @sample_rate.constant(smoothing: false)
           @source = source.get_sampler
-          @sources = [@source].freeze
+          @sources = { input: @source }.freeze
 
           # Keeps track of which delays have already been processed, so we know
           # when a new graph frame has started and don't over-sample the input.

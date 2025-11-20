@@ -1,6 +1,8 @@
 module MB
   module Sound
     module GraphNode
+      # This node quantizes the amplitude of incoming audio to a given
+      # increment.
       class Quantize
         include GraphNode
         include SampleRateHelper
@@ -34,7 +36,6 @@ module MB
 
           when GraphNode
             check_rate(increment, 'increment')
-
             @increment = increment
 
           else
@@ -42,9 +43,12 @@ module MB
           end
         end
 
-        # Returns an Array with the upstream and increment sources.
+        # Returns a Hash with the upstream and increment sources.
         def sources
-          [@upstream, @increment].freeze
+          {
+            input: @upstream,
+            increment: @increment,
+          }
         end
 
         # Requests +count+ samples from the upstream node given to the

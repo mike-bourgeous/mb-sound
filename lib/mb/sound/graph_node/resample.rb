@@ -87,7 +87,7 @@ module MB
 
         # Returns the upstream as the only source for this node.
         def sources
-          [@upstream]
+          { input: @upstream }
         end
 
         # Returns +count+ samples at the new sample rate, while requesting

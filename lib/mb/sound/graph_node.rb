@@ -70,7 +70,7 @@ module MB
         <<~EOF
         #{@node_type_name}
         #{@graph_node_name || "id=#{__id__}"}
-        #{sample_rate}Hz
+        #{MB::M.sigformat(sample_rate)}Hz
         EOF
       end
 
@@ -245,14 +245,14 @@ module MB
       # Adds a Ruby block to a processing chain.  The block will be called with
       # a Numo::NArray containing samples to be modified.  Note that this can
       # be very slow compared to the built-in algorithms implemented in C.
-      def proc(*sources, type_name: nil, &block)
+      def proc(sources = {}, type_name: nil, &block)
         ProcNode.new(self, sources, sample_rate: self.sample_rate, type_name: type_name, &block)
       end
 
       # If this node (or its inputs) have a finite length of audio data
-      # available (e.g. a sound file), then when they run out of data then the
-      # given +sources+ (other graph nodes that respond to :sample) will be
-      # played after this node finishes.
+      # available (e.g. a sound file), then when they run out of data the given
+      # +sources+ (other graph nodes that respond to :sample) will be played
+      # after this node finishes.
       def and_then(*sources)
         raise 'No sources were given' if sources.empty?
         MB::Sound::GraphNode::NodeSequence.new([self, *sources])
@@ -624,7 +624,7 @@ module MB
       # See #graph for a method that returns every source feeding into this
       # node.
       def sources
-        []
+        {}
       end
 
       # Returns a list of all nodes feeding into this node, either directly or
@@ -652,6 +652,8 @@ module MB
             s = climb_tee_tree(s)
           end
 
+          # If we encounter a source again, move it to the end of the source
+          # list.
           if source_history.include?(s)
             source_list.delete(s)
             source_list << s
@@ -661,22 +663,27 @@ module MB
           source_history << s
           source_list << s
 
-          source_queue.concat(s.sources) if s.respond_to?(:sources)
+          source_queue.concat(s.sources.values) if s.respond_to?(:sources)
         end
 
         source_list
       end
 
-      # Returns a Hash from source node to a Set of destination nodes
-      # describing all connections upstream of this graph node.
+      # Returns a Hash from source node to a Set of destination node/port name
+      # tuples describing all connections upstream of this graph node.
+      #
+      # Example output shape:
+      #     {
+      #       Constant => Set.new([[Tone, :frequency]])
+      #       Tone => Set.new([[Filter, :cutoff], [Filter, :quality]])
+      #     }
       def graph_edges(include_tees: true)
         edges = {}
 
-        graph(include_tees: include_tees).each do |n|
-          next unless n.respond_to?(:sources)
+        graph(include_tees: include_tees).each do |dest|
+          next unless dest.respond_to?(:sources)
 
-          # TODO: it would be cool if #sources could give a name to each source
-          n.sources.each do |s|
+          dest.sources.each do |name, s|
             s = s.round if s.is_a?(Numeric) && s.respond_to?(:round) && s.round == s
 
             unless include_tees
@@ -684,7 +691,7 @@ module MB
             end
 
             edges[s] ||= Set.new
-            edges[s] << n
+            edges[s] << [dest, name]
           end
         end
 
@@ -736,20 +743,20 @@ module MB
         digraph << "  node [ style=\"filled\" fontcolor=\"#ffffff\" color=\"#2266ee\" shape=\"Mrecord\" ];\n"
         digraph << "  edge [ fontcolor=\"#ffffff\" color=\"#ffffff\" headport=\"w\" tailport=\"e\" ];\n"
 
-
         graph_edges(include_tees: include_tees).each do |src, edges|
           n1 = src.respond_to?(:to_s_graphviz) ? src.to_s_graphviz : src.to_s
 
-          edges.each do |dest|
+          edges.each do |dest, name|
             n2 = dest.respond_to?(:to_s_graphviz) ? dest.to_s_graphviz : dest.to_s
 
+            # TODO: add ports to nodes instead of labeling edges
             if src.is_a?(Numeric)
-              srcname = "#{src} to #{dest.__id__}"
               # Include a separate numeric source node for each destination
+              srcname = "#{src} to #{dest.__id__}/#{name}"
               digraph << "  #{srcname.inspect} [label=#{n1.inspect}];\n"
-              digraph << "  #{srcname.inspect} -> #{n2.inspect};\n"
+              digraph << "  #{srcname.inspect} -> #{n2.inspect} [label=#{name.to_s.inspect}];\n"
             else
-              digraph << "  #{n1.inspect} -> #{n2.inspect};\n"
+              digraph << "  #{n1.inspect} -> #{n2.inspect} [label=#{name.to_s.inspect}];\n"
             end
           end
         end
@@ -768,6 +775,8 @@ module MB
           File.write(dot, self.graphviz(include_tees: include_tees))
           system("dot -Tpng:cairo #{dot.path.shellescape} -o #{png.shellescape}")
           system("open #{png.shellescape}")
+
+          return png
         end
       end
 
@@ -813,16 +822,17 @@ module MB
       end
 
       # Turns a node source, whether Numeric or another node, into a reasonable
-      # String representation.
+      # String representation, skipping Tee branches.
       def make_source_name(numeric_or_node)
         s = climb_tee_tree(numeric_or_node)
         s.respond_to?(:name_or_id) ? s.name_or_id : s.to_s
       end
 
-      # Returns an Array with the name or object ID (if no name) of all sources
-      # for this node, for use in generating descriptions of the node.
+      # Returns an Array with the port name and source name or object ID (if no
+      # name) of all sources for this node, for use in generating descriptions
+      # of the node.
       def source_names
-        sources.map(&method(:make_source_name))
+        sources.map { |name, src| "#{name}: #{make_source_name(src)}" }
       end
 
       # Setup/boilerplate buffer management used by #/ and #**.
@@ -830,7 +840,7 @@ module MB
         if other.respond_to?(:sample)
           other = other.get_sampler
 
-          self.proc(other, type_name: "#{name} (dynamic)") { |v|
+          self.proc({operand: other}, type_name: "#{name} (dynamic)") { |v|
             next nil if v.nil? || v.empty?
 
             data = other.sample(v.length)
@@ -855,7 +865,7 @@ module MB
             end
           }.named("#{climb_tee_tree(self).name_or_id} #{name} #{climb_tee_tree(other).name_or_id}")
         else
-          self.proc(other, type_name: "#{name} (constant)") { |v|
+          self.proc({operand: other}, type_name: "#{name} (constant)") { |v|
             if v.nil? || v.empty?
               nil
             else

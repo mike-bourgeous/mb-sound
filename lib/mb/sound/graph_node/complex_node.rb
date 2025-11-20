@@ -29,7 +29,7 @@ module MB
         # Returns a source list containing the original input given to the
         # constructor.
         def sources
-          [@input]
+          { input: @input }
         end
 
         # Wraps upstream #at_rate to return self instead of upstream.

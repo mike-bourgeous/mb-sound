@@ -620,12 +620,14 @@ RSpec.describe(MB::Sound::GraphNode, aggregate_failures: true) do
           c,
           50,
           3,
-          b,
+          0,
           0.01,
+          b,
         ]
 
         result = e.graph(include_tees: false)
 
+        expect(result.length).to eq(expected.length)
         expect(result).to eq(expected)
       end
 
@@ -634,9 +636,9 @@ RSpec.describe(MB::Sound::GraphNode, aggregate_failures: true) do
         n2 = 20.hz.named('2')
         n3 = 30.hz.named('3')
 
-        expect(n1).to receive(:sources).exactly(3).times.and_return([n3])
-        expect(n2).to receive(:sources).exactly(3).times.and_return([n1])
-        expect(n3).to receive(:sources).exactly(3).times.and_return([n2])
+        expect(n1).to receive(:sources).exactly(3).times.and_return({input: n3})
+        expect(n2).to receive(:sources).exactly(3).times.and_return({input: n1})
+        expect(n3).to receive(:sources).exactly(3).times.and_return({input: n2})
 
         expect(n1.graph).to eq([n3, n2, n1])
         expect(n2.graph).to eq([n1, n3, n2])
@@ -648,22 +650,29 @@ RSpec.describe(MB::Sound::GraphNode, aggregate_failures: true) do
 
     describe '#graph_edges' do
       it 'returns constant value connections for a single node' do
-        expect(a.graph_edges).to eq({ 50 => Set.new([a]) })
+        expect(a.graph_edges).to eq({ 50 => Set.new([[a, :frequency]]), 0 => Set.new([[a, :phase]]) })
       end
 
       it 'returns connections for a simple graph' do
-        expect(c.graph_edges(include_tees: false)).to eq({ 0.01 => Set.new([c]), 3 => Set.new([b]), b => Set.new([c]) })
+        expected = {
+          0.01 => Set.new([[c, :constant]]),
+          3 => Set.new([[b, :frequency]]),
+          0 => Set.new([[b, :phase]]),
+          b => Set.new([[c, :input_1]]),
+        }
+        expect(c.graph_edges(include_tees: false)).to eq(expected)
       end
 
       it 'returns connections for a more complex graph' do
         expected = {
-          50 => Set.new([a]),
-          a => Set.new([d]),
-          3 => Set.new([b, e]),
-          b => Set.new([c, d]),
-          0.01 => Set.new([c]),
-          c => Set.new([d]),
-          d => Set.new([e]),
+          0 => Set.new([[a, :phase], [b, :phase]]),
+          50 => Set.new([[a, :frequency]]),
+          a => Set.new([[d, :input]]),
+          3 => Set.new([[b, :frequency], [e, :constant]]),
+          b => Set.new([[c, :input_1], [d, :cutoff]]),
+          0.01 => Set.new([[c, :constant]]),
+          c => Set.new([[d, :quality]]),
+          d => Set.new([[e, :input_1]]),
         }
         expect(e.graph_edges(include_tees: false)).to eq(expected)
       end

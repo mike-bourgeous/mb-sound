@@ -175,11 +175,6 @@ module MB
         # delay (specifically for a delay this is the value given to
         # #delay_samples=).  See GraphNode#sources.
         def sources
-          [@delay_samples].compact
-        end
-
-        def named_sources
-          # TODO: Make #sources act something like this
           { delay_samples: @delay_samples }
         end
 

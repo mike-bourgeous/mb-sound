@@ -45,7 +45,14 @@ RSpec.describe(MB::Sound::GraphNode::ComplexNode, :aggregate_failures) do
       end
     end
 
-    pending 'returns nil for nil input'
+    it 'returns nil for nil input' do
+      source = 0.constant
+      chain = source.real
+      expect(chain).to be_a(MB::Sound::GraphNode::ComplexNode)
+
+      expect(source).to receive(:sample).and_return(nil)
+      expect(chain.sample(10)).to eq(nil)
+    end
   end
 
   describe '#sources' do
@@ -54,7 +61,7 @@ RSpec.describe(MB::Sound::GraphNode::ComplexNode, :aggregate_failures) do
       chain = source.real
       expect(chain).to be_a(MB::Sound::GraphNode::ComplexNode)
       expect(chain.graph(include_tees: false)).to eq([chain, source, 5])
-      expect(chain.sources[0].sources).to eq([source])
+      expect(chain.sources[:input].sources).to eq({input: source})
     end
   end
 end

@@ -69,7 +69,7 @@ module MB
           raise 'Source for a InputChannelSplit must respond to #read' unless source.respond_to?(:read)
 
           @source = source
-          @sources = [source].freeze
+          @sources = { input: source }.freeze
 
           max_channels = source.channels if max_channels.nil? || source.channels < max_channels
 

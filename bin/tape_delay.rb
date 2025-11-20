@@ -1,6 +1,6 @@
 #!/usr/bin/env ruby
 # A simple, mono, tape-simulator echo with feedback.
-# (C)2022-2024 Mike Bourgeous
+# (C)2022-2025 Mike Bourgeous
 #
 # Usage: [DRY=1.0] [WET=1.0] [DRIVE=1.0] [PITCH=1 [SMOOTHING=2]] $0 [delay_s [feedback [extra_time]]] [filename]
 #
@@ -29,13 +29,15 @@ if ARGV.include?('--help')
   exit 1
 end
 
+graphviz = !!ARGV.delete('--graphviz')
+overwrite = !!ARGV.delete('--overwrite')
 numerics, others = ARGV.partition { |arg| arg.strip =~ /\A\+?[0-9]+(\.[0-9]+)?\z/ }
 
 delay, feedback, extra = numerics.map(&:to_f)
 delay ||= 0.1
 feedback ||= 0.75 # TODO: Allow controlling first delay amplitude separately
 
-filename = others[0]
+filename, outfile, *_ = others
 
 if filename && File.readable?(filename)
   # Extend input duration by a suitable delay decay time, e.g. RT60
@@ -59,7 +61,11 @@ else
   input_buffer_size = input.buffer_size
 end
 
-output = MB::Sound.output
+if outfile
+  output = MB::Sound.file_output(outfile, sample_rate: input.sample_rate, channels: 1, overwrite: overwrite)
+else
+  output = MB::Sound.output
+end
 bufsize = output.buffer_size
 
 oversample = ENV['OVERSAMPLE']&.to_f || 2
@@ -84,6 +90,7 @@ puts MB::U.highlight({
   feedback: feedback,
   extra_time: extra,
   input: input.graph_node_name,
+  output: output,
   sample_rate: output.sample_rate,
   oversample: oversample,
   buffer: bufsize,
@@ -131,8 +138,10 @@ begin
     .oversample(oversample, mode: :libsamplerate_fastest)
     .named('mixed output')
 
-
-  result.open_graphviz
+  if graphviz
+    png = result.open_graphviz
+    puts "Wrote GraphViz image to #{png}"
+  end
 
   loop do
     data = result.sample(output.buffer_size)

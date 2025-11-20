@@ -16,6 +16,8 @@ module MB
         # TODO: This might be mergeable with SampleWrapper or otherwise useful
         # elsewhere, would be nice to be able to make higher-order butterworth
         # filters or first-order filters available, for example
+        #
+        # TODO: support an audio source for filter gain
         class CookbookWrapper
           extend Forwardable
           include GraphNode
@@ -70,7 +72,11 @@ module MB
 
           # See GraphNode#sources.
           def sources
-            [@audio, @cutoff, @quality]
+            {
+              input: @audio,
+              cutoff: @cutoff,
+              quality: @quality,
+            }
           end
 
           # Changes the sample rate of the filter and any upstream sources.

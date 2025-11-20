@@ -68,10 +68,12 @@ module MB
         # See GraphNode#sources.
         def sources
           if @base_filter.respond_to?(:sources)
-            # + instead of | because duplicate connections should be shown
-            [@source] + @base_filter.sources
+            {
+              input: @source,
+              **@base_filter.sources
+            }
           else
-            [@source]
+            { input: @source }
           end
         end
 
