@@ -89,6 +89,19 @@ module MB
             raise "Unsupported datatype: #{data.class}"
           end
         end
+
+        # Single-line description.
+        def to_s
+          "#{super} -- #{@mode}"
+        end
+
+        # Multiline description for GraphViz.
+        def to_s_graphviz
+          <<~EOF
+          #{super}---------------
+          #{@mode}
+          EOF
+        end
       end
     end
   end

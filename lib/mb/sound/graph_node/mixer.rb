@@ -216,6 +216,8 @@ module MB
           end
         end
 
+        # Returns an Array of terms that can be joined with pluses to produce a
+        # mathematical statement, for #to_s and #to_s_graphviz.
         def arithmetic_terms
           terms = @gains.map { |src, g|
             src = climb_tee_tree(src)
