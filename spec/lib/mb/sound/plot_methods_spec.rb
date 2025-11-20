@@ -61,6 +61,8 @@ RSpec.describe(MB::Sound::PlotMethods) do
 
       it 'can plot a Filter' do
         expect(lines.length).to be_between(37, 41).inclusive
+      rescue Exception => e
+        raise e.class, "#{e.message}\n\t\e[1m#{lines.map(&:inspect).join("\n\t")}\e[0m"
       end
     end
 
@@ -69,6 +71,8 @@ RSpec.describe(MB::Sound::PlotMethods) do
 
       it 'can plot a complex-output Filter' do
         expect(lines.length).to be_between(37, 41).inclusive
+      rescue Exception => e
+        raise e.class, "#{e.message}\n\t\e[1m#{lines.map(&:inspect).join("\n\t")}\e[0m"
       end
     end
   end
@@ -86,6 +90,8 @@ RSpec.describe(MB::Sound::PlotMethods) do
 
         check_regex(ex, lines, text, /^\s*0 .*(\*+[^*|]+){12,}.*\|$/) # at least 12 zero crossings
         check_regex(ex, lines, text, /^\s*-40 .*\*{10,}.*\|$/) # lots of frequency plot density
+      rescue Exception => e
+        raise e.class, "#{e.message}\n\t\e[1m#{lines.map(&:inspect).join("\n\t")}\e[0m"
       end
     end
 
@@ -94,6 +100,8 @@ RSpec.describe(MB::Sound::PlotMethods) do
 
       it 'can plot a Filter' do
         expect(lines.length).to be_between(37, 41).inclusive
+      rescue Exception => e
+        raise e.class, "#{e.message}\n\t\e[1m#{lines.map(&:inspect).join("\n\t")}\e[0m"
       end
     end
 
@@ -102,6 +110,8 @@ RSpec.describe(MB::Sound::PlotMethods) do
 
       it 'can plot a complex-output Filter' do
         expect(lines.length).to be_between(37, 41).inclusive
+      rescue Exception => e
+        raise e.class, "#{e.message}\n\t\e[1m#{lines.map(&:inspect).join("\n\t")}\e[0m"
       end
     end
   end
@@ -121,6 +131,8 @@ RSpec.describe(MB::Sound::PlotMethods) do
 
         r2 = /^.*-30 [^*]+(\*+[^*|]+){1,2}[^*|]+\|$/
         check_regex(ex, lines, text, r2)
+      rescue Exception => e
+        raise e.class, "#{e.message}\n\t\e[1m#{lines.map(&:inspect).join("\n\t")}\e[0m"
       end
     end
 
@@ -136,6 +148,8 @@ RSpec.describe(MB::Sound::PlotMethods) do
         check_regex(ex, lines, text, /^.*-30 [^*]+(\*+[^*|]+){1,3}[^*|]+\|$/)
 
         expect(text.match(/^.*-30 [^*]+(\*+[^*|]+){1,3}[^*|]+\|$/).to_s.length).to be_between(75, 81).inclusive
+      rescue Exception => e
+        raise e.class, "#{e.message}\n\t\e[1m#{lines.map(&:inspect).join("\n\t")}\e[0m"
       end
     end
   end
@@ -147,6 +161,8 @@ RSpec.describe(MB::Sound::PlotMethods) do
       it 'can plot a Tone' do
         expect(MB::Sound).to receive(:puts).with(/Plotting.*Tone/m)
         expect(lines.length).to be_between(37, 41).inclusive
+      rescue Exception => e
+        raise e.class, "#{e.message}\n\t\e[1m#{lines.map(&:inspect).join("\n\t")}\e[0m"
       end
     end
 
@@ -174,6 +190,8 @@ RSpec.describe(MB::Sound::PlotMethods) do
         expect(text).to include('0 **')
         expect(text).not_to include('1 **')
         check_regex(ex, lines, text, /^\s*0 .*(\*+[^*|]+){3,5}.*\|$/) # 4 zero crossings
+      rescue Exception => e
+        raise e.class, "#{e.message}\n\t\e[1m#{lines.map(&:inspect).join("\n\t")}\e[0m"
       end
     end
 
@@ -199,24 +217,32 @@ RSpec.describe(MB::Sound::PlotMethods) do
       expect(STDOUT).to receive(:write).at_least(2).times
       lines = MB::Sound.plot(123.hz.sine.generate(3200), all: true, samples: 800)
       expect(lines.length).to be_between(37, 41).inclusive
+    rescue Exception => e
+      raise e.class, "#{e.message}\n\t\e[1m#{lines.map(&:inspect).join("\n\t")}\e[0m"
     end
 
     it 'can plot a Filter' do
       expect(MB::Sound).to receive(:puts).with(/Plotting.*Filter/m)
       lines = MB::Sound.plot(5000.hz.lowpass)
       expect(lines.length).to be_between(37, 41).inclusive
+    rescue Exception => e
+      raise e.class, "#{e.message}\n\t\e[1m#{lines.map(&:inspect).join("\n\t")}\e[0m"
     end
 
     it 'can plot a Hilbert transform filter with a complex output' do
       expect(MB::Sound).to receive(:puts)
       lines = MB::Sound.plot(MB::Sound::Filter::HilbertIIR.new)
       expect(lines.length).to be_between(37, 41).inclusive
+    rescue Exception => e
+      raise e.class, "#{e.message}\n\t\e[1m#{lines.map(&:inspect).join("\n\t")}\e[0m"
     end
 
     it 'can plot complex-valued audio data' do
       expect(MB::Sound).to receive(:puts)
       lines = MB::Sound.plot(123.hz.complex_sine)
       expect(lines.length).to be_between(37, 41).inclusive
+    rescue Exception => e
+      raise e.class, "#{e.message}\n\t\e[1m#{lines.map(&:inspect).join("\n\t")}\e[0m"
     end
   end
 
