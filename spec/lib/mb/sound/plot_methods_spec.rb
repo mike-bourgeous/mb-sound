@@ -18,10 +18,14 @@ RSpec.describe(MB::Sound::PlotMethods) do
 
   # Makes sure the regex matches a full line and isn't accidentally matching a
   # zero-width string and isn't matching across lines
-  def check_regex(text, regex)
+  def check_regex(lines, text, regex)
     expect(text).to match(regex)
     expect(text.match(regex).to_s).not_to include("\n")
     expect(text.match(regex).to_s.length).to be_between(75, 81).inclusive
+
+  rescue Exception => e
+    # Trying to find out why sometimes a line starts with \n
+    raise e.class, "#{e.message}\n\t\e[1m#{lines.map(&:inspect).join("\n\t")}\e[0m"
   end
 
   describe '#hist' do
@@ -30,8 +34,8 @@ RSpec.describe(MB::Sound::PlotMethods) do
       expect(lines.length).to be_between(37, 41).inclusive
 
       text = lines.join("\n")
-      check_regex(text, /^\s*1000 \|-\+\s+\* {5,10}\*.*\|$/)
-      check_regex(text, /^\s*200 \|-\+\s+\* {15,25}\*.*\|$/)
+      check_regex(lines, text, /^\s*1000 \|-\+\s+\* {5,10}\*.*\|$/)
+      check_regex(lines, text, /^\s*200 \|-\+\s+\* {15,25}\*.*\|$/)
     end
   end
 
@@ -65,8 +69,8 @@ RSpec.describe(MB::Sound::PlotMethods) do
       expect(text).to include('time **')
       expect(text).to include('freq **')
       expect(text).not_to match(/^\s*0 .*\*{5,}.*\|$/) # no extended dwell at zero
-      check_regex(text, /^\s*0 .*(\*+[^*|]+){12,}.*\|$/) # at least 12 zero crossings
-      check_regex(text, /^\s*-40 .*\*{10,}.*\|$/) # lots of frequency plot density
+      check_regex(lines, text, /^\s*0 .*(\*+[^*|]+){12,}.*\|$/) # at least 12 zero crossings
+      check_regex(lines, text, /^\s*-40 .*\*{10,}.*\|$/) # lots of frequency plot density
     end
 
     it 'can plot a Filter' do
@@ -90,10 +94,10 @@ RSpec.describe(MB::Sound::PlotMethods) do
       expect(text).to include('0 ***')
 
       r1 = /^.*-70 [^*]+(\*+[^*|]+){2}[^*|]+\|$/
-      check_regex(text, r1)
+      check_regex(lines, text, r1)
 
       r2 = /^.*-30 [^*]+(\*+[^*|]+){1,2}[^*|]+\|$/
-      check_regex(text, r2)
+      check_regex(lines, text, r2)
     end
 
     it 'can plot a spectrogram of a more complex wave' do
@@ -103,8 +107,8 @@ RSpec.describe(MB::Sound::PlotMethods) do
 
       text = lines.join("\n")
       expect(text).to include('0 ***')
-      check_regex(text, /^.*-40 [^*]+(\*+[^*|]+){7,9}[^*|]+\|$/)
-      check_regex(text, /^.*-30 [^*]+(\*+[^*|]+){1,3}[^*|]+\|$/)
+      check_regex(lines, text, /^.*-40 [^*]+(\*+[^*|]+){7,9}[^*|]+\|$/)
+      check_regex(lines, text, /^.*-30 [^*]+(\*+[^*|]+){1,3}[^*|]+\|$/)
 
       expect(text.match(/^.*-30 [^*]+(\*+[^*|]+){1,3}[^*|]+\|$/).to_s.length).to be_between(75, 81).inclusive
     end
@@ -137,7 +141,7 @@ RSpec.describe(MB::Sound::PlotMethods) do
       text = MB::U.remove_ansi(lines.join("\n"))
       expect(text).to include('0 **')
       expect(text).not_to include('1 **')
-      check_regex(text, /^\s*0 .*(\*+[^*|]+){3,5}.*\|$/) # 4 zero crossings
+      check_regex(lines, text, /^\s*0 .*(\*+[^*|]+){3,5}.*\|$/) # 4 zero crossings
     end
 
     it 'can plot an array of different sounds' do
