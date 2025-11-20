@@ -178,6 +178,11 @@ module MB
           [@delay_samples].compact
         end
 
+        def named_sources
+          # TODO: Make #sources act something like this
+          { delay_samples: @delay_samples }
+        end
+
         # Delays the given +data+ by #delay_samples samples.
         #
         # The +:chunk_delay_buf+ parameter is used internally for recursive

@@ -172,17 +172,17 @@ module MB
 
       # Truncates values from the node to the next lower integer.
       def floor
-        self.proc(&:floor)
+        self.proc(type_name: 'floor', &:floor)
       end
 
       # Raises values from the node to the next higher integer.
       def ceil
-        self.proc(&:ceil)
+        self.proc(type_name: 'ceil', &:ceil)
       end
 
       # Rounds values from the node to the nearest integer.
       def round
-        self.proc(&:round)
+        self.proc(type_name: 'round', &:round)
       end
 
       # Uses this node as the frequency value for an oscillator.
@@ -193,19 +193,25 @@ module MB
       # Appends a node that calculates the natural logarithm of values passing
       # through.
       def log
-        self.proc { |v| MB::FastSound.narray_log(v) }
+        self
+          .proc(type_name: 'ln') { |v| MB::FastSound.narray_log(v) }
+          .named("ln(#{make_source_name(self)})")
       end
 
       # Appends a node that calculates the base two logarithm of values passing
       # through.
       def log2
-        self.proc { |v| MB::FastSound.narray_log2(v) }
+        self
+          .proc(type_name: 'log2') { |v| MB::FastSound.narray_log2(v) }
+          .named("log2(#{make_source_name(self)})")
       end
 
       # Appends a node that calculates the base ten logarithm of values passing
       # through.
       def log10
-        self.proc { |v| MB::FastSound.narray_log10(v) }
+        self
+          .proc(type_name: 'log10') { |v| MB::FastSound.narray_log10(v) }
+          .named("log10(#{make_source_name(self)})")
       end
 
       # Interprets incoming samples as a number of decibels, outputting the
@@ -239,8 +245,8 @@ module MB
       # Adds a Ruby block to a processing chain.  The block will be called with
       # a Numo::NArray containing samples to be modified.  Note that this can
       # be very slow compared to the built-in algorithms implemented in C.
-      def proc(*sources, &block)
-        ProcNode.new(self, sources, sample_rate: self.sample_rate, &block)
+      def proc(*sources, type_name: nil, &block)
+        ProcNode.new(self, sources, sample_rate: self.sample_rate, type_name: type_name, &block)
       end
 
       # If this node (or its inputs) have a finite length of audio data
@@ -493,7 +499,9 @@ module MB
       # Hard-clips the output of this node to the given min and max, one of
       # which may be nil to disable clipping in that direction.
       def clip(min, max)
-        self.proc { |v| v.clip(min, max) }.named("clamp #{min}..#{max}")
+        self
+          .proc(type_name: 'clip') { |v| v.clip(min, max) }
+          .named("clamp #{min}..#{max}")
       end
 
       # Hard-clips the slope of the output of this node to the given +max_rise+
@@ -804,13 +812,17 @@ module MB
         branch
       end
 
+      # Turns a node source, whether Numeric or another node, into a reasonable
+      # String representation.
+      def make_source_name(numeric_or_node)
+        s = climb_tee_tree(numeric_or_node)
+        s.respond_to?(:name_or_id) ? s.name_or_id : s.to_s
+      end
+
       # Returns an Array with the name or object ID (if no name) of all sources
       # for this node, for use in generating descriptions of the node.
       def source_names
-        sources.map { |s|
-          s = climb_tee_tree(s)
-          s.respond_to?(:name_or_id) ? s.name_or_id : s.to_s
-        }
+        sources.map(&method(:make_source_name))
       end
 
       # Setup/boilerplate buffer management used by #/ and #**.
@@ -818,7 +830,7 @@ module MB
         if other.respond_to?(:sample)
           other = other.get_sampler
 
-          self.proc(other) { |v|
+          self.proc(other, type_name: "#{name} (dynamic)") { |v|
             next nil if v.nil? || v.empty?
 
             data = other.sample(v.length)
@@ -843,7 +855,7 @@ module MB
             end
           }.named("#{climb_tee_tree(self).name_or_id} #{name} #{climb_tee_tree(other).name_or_id}")
         else
-          self.proc(other) { |v|
+          self.proc(other, type_name: "#{name} (constant)") { |v|
             if v.nil? || v.empty?
               nil
             else

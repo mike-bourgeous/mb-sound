@@ -15,8 +15,12 @@ module MB
         # The +extra_sources+ parameter can be used if the +block+ retrieves data
         # from more graph nodes than just +source+, so that graph searching
         # methods still work.
-        def initialize(source, extra_sources = nil, sample_rate: nil, &block)
-          @graph_node_name = block.source_location&.join(':')
+        #
+        # +:type_name+ is stored in @node_type_name for display in e.g.
+        # GraphViz graphs.  See GraphNode#graphviz.
+        def initialize(source, extra_sources = nil, sample_rate: nil, type_name: nil, &block)
+          @graph_node_name = block.source_location&.join(':').rpartition('mb-sound').last
+          @node_type_name = "ProcNode (#{type_name})"
 
           source = source.get_sampler if source.respond_to?(:sample)
 

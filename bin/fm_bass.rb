@@ -5,6 +5,8 @@
 require 'bundler/setup'
 require 'mb-sound'
 
+MB::U.sigquit_backtrace
+
 OSC_COUNT = ENV['OSC_COUNT']&.to_i || 1
 voices = OSC_COUNT.times.map { |i|
   base = 440.constant
@@ -44,6 +46,8 @@ voices = OSC_COUNT.times.map { |i|
     v.on_cc(1, 'E', range: 1.0..2.0)
   }
 }
+
+voices[0].open_graphviz
 
 repeat = !!ARGV.delete('--loop')
 

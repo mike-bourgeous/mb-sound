@@ -627,8 +627,16 @@ module MB
       end
 
       def to_s
-        return super if named?
-        inspect
+        "#{super} -- #{@wave_type} freq=#{make_source_name(@frequency)} range=#{@range}"
+      end
+
+      def to_s_graphviz
+        <<~EOF
+        #{super}---------------
+        #{@wave_type}
+        freq=#{make_source_name(@frequency)}
+        range=#{@range}
+        EOF
       end
 
       private
