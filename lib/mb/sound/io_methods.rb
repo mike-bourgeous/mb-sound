@@ -200,7 +200,7 @@ module MB
       # See MB::Sound::FFMPEGOutput.
       def file_output(filename, sample_rate: 48000, channels:, overwrite: false, **kwargs)
         if !overwrite && File.exist?(filename)
-          raise FileExistsError, "#{filename.inspect} already exists"
+          MB::U.prevent_overwrite(filename, prompt: true)
         end
 
         MB::Sound::FFMPEGOutput.new(filename, channels: channels, sample_rate: sample_rate, **kwargs)
