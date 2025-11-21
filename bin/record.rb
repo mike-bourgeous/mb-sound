@@ -20,7 +20,7 @@ outfile = ARGV[0]
 raise "No filename given" unless outfile
 
 input = MB::Sound.input
-output = MB::Sound::PlotOutput.new(MB::Sound.file_output(outfile, sample_rate: input.sample_rate, channels: input.channels))
+output = MB::Sound.file_output(outfile, sample_rate: input.sample_rate, channels: input.channels)
 
 pry_next = false
 MB::U.sigquit_backtrace do
@@ -32,6 +32,8 @@ MB::U.headline("Recording to #{outfile}")
 begin
   loop do
     data = input.read(input.buffer_size)
+
+    MB::Sound::Meter.meters(data)
 
     if pry_next
       require 'pry-byebug'; binding.pry
