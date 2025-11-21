@@ -43,6 +43,8 @@ module MB
             raise 'Filter must have a #dynamic_process method' unless filter.respond_to?(:dynamic_process)
             @filter = filter
 
+            @node_type_name = "Cookbook (#{@filter.filter_type})"
+
             @audio = sample_or_narray(audio)
             @cutoff = sample_or_narray(cutoff)
             @quality = sample_or_narray(quality)
@@ -88,6 +90,28 @@ module MB
             self
           end
           alias at_rate sample_rate=
+
+          # See GraphNode#to_s
+          def to_s
+            s = "#{super} -- type: #{@filter.filter_type} #{source_names.join(', ')}"
+            s << " gain: #{@filter.db_gain}dB" if @filter.db_gain
+            s << " slope: #{@filter.shelf_slope}" if @filter.shelf_slope
+            s
+          end
+
+          # See GraphNode#to_s_graphviz
+          def to_s_graphviz
+            s = <<~EOF
+            #{super}---------------
+            type: #{@filter.filter_type}
+            #{source_names.join("\n")}
+            EOF
+
+            s << "gain: #{@filter.db_gain}dB\n" if @filter.db_gain
+            s << "slope: #{@filter.shelf_slope}\n" if @filter.shelf_slope
+
+            s
+          end
 
           private
 
