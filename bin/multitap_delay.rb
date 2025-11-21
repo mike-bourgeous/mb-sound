@@ -100,6 +100,8 @@ begin
       #.on_cc(1, 'Wet level', range: 0.0..1.0, relative: false)
   }
 
+  paths[0].open_graphviz
+
   if manager
     manager.on_cc_map(paths.map(&:cc_map))
     puts MB::U.syntax(manager.to_acid_xml, :xml)
