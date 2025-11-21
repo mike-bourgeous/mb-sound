@@ -98,6 +98,22 @@ module MB
         end
         alias at_rate sample_rate=
 
+        # See GraphNode#to_s
+        def to_s
+          "#{super} -- #{source_names.join(', ')} -- #{@base_filter}"
+        end
+
+        # See GraphNode#to_s_graphviz
+        def to_s_graphviz
+          info = @base_filter.respond_to?(:to_s_graphviz) ? @base_filter.to_s_graphviz : @base_filter.to_s
+          <<~EOF
+          #{super}---------------
+          #{source_names.join("\n")}
+          ---------------
+          #{info}
+          EOF
+        end
+
         # Pass other methods through to the wrapped object.
         def method_missing(m, *a)
           @base_filter.send(m, *a)
