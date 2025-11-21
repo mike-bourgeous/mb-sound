@@ -33,7 +33,7 @@ begin
   loop do
     data = input.read(input.buffer_size)
 
-    MB::Sound::Meter.meters(data)
+    MB::Sound::Meter.linear_meters(data.map { |d| d.abs.max })
 
     if pry_next
       require 'pry-byebug'; binding.pry
