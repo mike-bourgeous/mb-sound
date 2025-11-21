@@ -31,6 +31,8 @@ require 'bundler/setup'
 
 require 'mb/sound'
 
+MB::U.sigquit_backtrace
+
 if ARGV.include?('--help')
   MB::U.print_header_help
   exit 1
@@ -188,6 +190,8 @@ begin
       #.on_cc(1, 'Delay', range: 0.1..4.0)
       #.on_cc(1, 'Wet level', range: 0.0..1.0, relative: false)
   }
+
+  paths[0].open_graphviz
 
   if manager
     manager.on_cc_map(paths.map(&:cc_map))
