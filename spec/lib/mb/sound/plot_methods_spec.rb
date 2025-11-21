@@ -42,6 +42,8 @@ RSpec.describe(MB::Sound::PlotMethods) do
       expect(lines.length).to be_between(37, 41).inclusive
       check_regex(ex, lines, text, /^\s*1000 \|-\+\s+\* {5,10}\*.*\|$/)
       check_regex(ex, lines, text, /^\s*200 \|-\+\s+\* {15,25}\*.*\|$/)
+    rescue Exception => e
+      raise e.class, "#{e.message}\n\t\e[1m#{lines.map(&:inspect).join("\n\t")}\e[0m"
     end
   end
 
@@ -53,6 +55,8 @@ RSpec.describe(MB::Sound::PlotMethods) do
         expect(lines.length).to be_between(37, 41).inclusive
         expect(text).to include('mag **')
         expect(text).to include('phase **')
+      rescue Exception => e
+        raise e.class, "#{e.message}\n\t\e[1m#{lines.map(&:inspect).join("\n\t")}\e[0m"
       end
     end
 
