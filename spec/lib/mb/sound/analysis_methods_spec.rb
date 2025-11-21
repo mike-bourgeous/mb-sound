@@ -1,7 +1,12 @@
 RSpec.describe(MB::Sound::AnalysisMethods) do
   pending '#crosscorrelate'
   pending '#peak_correlation'
-  pending '#freq_estimate'
+  describe '#freq_estimate' do
+    it 'works with complex values' do
+      data = 150.hz.complex_ramp.sample(48000)
+      expect(MB::Sound.freq_estimate(data).round(6)).to eq(150)
+    end
+  end
 
   describe '#fetch_oob' do
     [Array, Numo::SFloat, Numo::DComplex].each do |ctx|

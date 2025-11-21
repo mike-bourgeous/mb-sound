@@ -23,9 +23,12 @@ module MB
         v.max_index - v.length / 2
       end
 
-      def freq_estimate(a, sample_rate: 48000)
+      # Returns an estimate in Hz of the fundamental frequency of the given
+      # audio +data+.  If +:range+ is a Range, then the peak frequency within
+      # that range will be returned.
+      def freq_estimate(data, sample_rate: 48000, range: nil)
         # TODO: use peak bin from FFT?  use phase around peak bin to estimate?  use cepstrum to estimate?
-        q = crosscorrelate(a, a)
+        q = crosscorrelate(data, data)
         mid = q.length / 2
         q = q[mid..]
 
@@ -33,11 +36,11 @@ module MB
           .reject { |idx, v, sign| sign == -1 || idx == 0 }
           .sort_by { |idx, v, sign| -v }
 
+        plist = plist.select { |idx, _, _| range.cover(sample_rate / idx.to_f) } if range
+
         idx = plist[0]&.[](0)
 
-        # TODO: pick largest peak?  pick first peak?  return top N peaks? XXX
-        # idx ? sample_rate / idx.to_f : 0
-        plist[0..25].map { |idx, v, _| [idx, sample_rate / idx.to_f, v] }
+        sample_rate / idx.to_f
       end
 
       # Finds all points in the given +narray+ that are larger or smaller than
