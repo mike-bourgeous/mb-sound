@@ -211,7 +211,8 @@ module MB
       # MB::Sound::JackFFI connection to the Jackd audio server.  Used by
       # #input and #output.
       def jack
-        @jack ||= MB::Sound::JackFFI[].tap { |j| j.logger = Logger.new(STDOUT, level: Logger::ERROR) }
+        log_level = ENV['JACK_DEBUG'] == '1' ? Logger::DEBUG : Logger::ERROR
+        @jack ||= MB::Sound::JackFFI[].tap { |j| j.logger = Logger.new(STDOUT, level: log_level) }
       end
 
       # Tries to auto-detect an input device for recording sound.  Returns a
