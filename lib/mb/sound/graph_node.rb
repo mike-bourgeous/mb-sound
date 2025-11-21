@@ -748,20 +748,22 @@ module MB
         digraph << "  node [ style=\"filled\" fontcolor=\"#ffffff\" color=\"#2266ee\" shape=\"Mrecord\" ];\n"
         digraph << "  edge [ fontcolor=\"#ffffff\" color=\"#ffffff\" headport=\"w\" tailport=\"e\" ];\n"
 
+        graph(include_tees: include_tees).each do |node|
+          next if node.is_a?(Numeric)
+          desc = node.respond_to?(:to_s_graphviz) ? node.to_s_graphviz : node.to_s
+          digraph << "  #{node.__id__.to_s.inspect} [label=#{desc.inspect}]"
+        end
+
         graph_edges(include_tees: include_tees).each do |src, edges|
-          n1 = src.respond_to?(:to_s_graphviz) ? src.to_s_graphviz : src.to_s
-
           edges.each do |dest, name|
-            n2 = dest.respond_to?(:to_s_graphviz) ? dest.to_s_graphviz : dest.to_s
-
             # TODO: add ports to nodes instead of labeling edges
             if src.is_a?(Numeric)
               # Include a separate numeric source node for each destination
-              srcname = "#{src} to #{dest.__id__}/#{name}"
-              digraph << "  #{srcname.inspect} [label=#{n1.inspect}];\n"
-              digraph << "  #{srcname.inspect} -> #{n2.inspect} [label=#{name.to_s.inspect}];\n"
+              srcname = "#{src.inspect} to #{dest.__id__}/#{name}"
+              digraph << "  #{srcname.inspect} [label=#{src.to_s.inspect}];\n"
+              digraph << "  #{srcname.inspect} -> #{dest.__id__.to_s.inspect} [label=#{name.to_s.inspect}];\n"
             else
-              digraph << "  #{n1.inspect} -> #{n2.inspect} [label=#{name.to_s.inspect}];\n"
+              digraph << "  #{src.__id__.to_s.inspect} -> #{dest.__id__.to_s.inspect} [label=#{name.to_s.inspect}];\n"
             end
           end
         end
