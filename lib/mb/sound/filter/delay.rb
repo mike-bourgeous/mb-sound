@@ -283,6 +283,10 @@ module MB
         def response
           raise NotImplementedError, 'TODO: return a phase value based on the delay'
         end
+
+        def to_s_graphviz
+          "Delay\nsmoothing: #{@smoothing}\nsmooth_limit: #{@smooth_limit}"
+        end
       end
     end
   end

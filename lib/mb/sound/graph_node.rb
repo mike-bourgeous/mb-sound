@@ -66,7 +66,8 @@ module MB
       # Returns a multiline description of a node suitable for display in a
       # GraphViz visualization (see #graphviz).
       def to_s_graphviz
-        to_s
+        to_s # populate @node_type_name
+
         <<~EOF
         #{@node_type_name}
         #{@graph_node_name || "id=#{__id__}"}
