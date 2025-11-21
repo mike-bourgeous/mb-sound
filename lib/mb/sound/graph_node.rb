@@ -777,14 +777,14 @@ module MB
       # generates a PNG using dot, and opens the PNG using open.  The PNG file
       # is left behind after the program exits for inspection.
       def open_graphviz(include_tees: false)
-        Tempfile.create([self.to_s, '.dot']) do |dot|
-          png = "#{dot.path}.png"
-          File.write(dot, self.graphviz(include_tees: include_tees))
-          system("dot -Tpng:cairo #{dot.path.shellescape} -o #{png.shellescape}")
-          system("open #{png.shellescape}")
+        dot = Tempfile.create([self.to_s, '.dot'])
 
-          return png
-        end
+        png = "#{dot.path}.png"
+        File.write(dot, self.graphviz(include_tees: include_tees))
+        system("dot -Tpng:cairo #{dot.path.shellescape} -o #{png.shellescape}")
+        system("open #{png.shellescape}")
+
+        png
       end
 
       # Sets all Tones in the graph to continue playing forever.
