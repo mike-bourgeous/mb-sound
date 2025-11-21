@@ -39,7 +39,7 @@ module MB
           # uses Cookbook#dynamic_process to vary the cutoff frequency
           # and quality gradually over time.  Each parameter should have a
           # :sample method that returns an array of audio.
-          def initialize(filter:, audio:, cutoff:, quality: 0.5 ** 0.5)
+          def initialize(filter:, audio:, cutoff:, quality: 0.5 ** 0.5, in_place: true)
             raise 'Filter must have a #dynamic_process method' unless filter.respond_to?(:dynamic_process)
             @filter = filter
 
@@ -49,11 +49,13 @@ module MB
 
             @cutoff = @cutoff.or_for(nil) if @cutoff.respond_to?(:@or_for)
             @quality = @quality.or_for(nil) if @quality.respond_to?(:@or_for)
+
+            @in_place = in_place
           end
 
           # Processes +count+ samples from the audio source through the filter,
           # using the cutoff and quality sources to control filter parameters.
-          def sample(count, in_place: true)
+          def sample(count)
             audio = @audio.sample(count)
             cutoff = @cutoff.sample(count)
             quality = @quality.sample(count)
@@ -65,7 +67,7 @@ module MB
             cutoff = cutoff[0...min_length]
             quality = quality[0...min_length]
 
-            audio.inplace! if in_place
+            audio.inplace! if @in_place
 
             @filter.dynamic_process(audio, cutoff, quality).not_inplace!
           end
@@ -135,7 +137,7 @@ module MB
         FILTER_TYPE_IDS = FILTER_TYPES.map.with_index.to_h.freeze
 
         attr_reader :filter_type, :sample_rate, :center_frequency, :omega, :db_gain
-        attr_reader :quality, :bandwidth_oct, :shelf_slope
+        attr_reader :cutoff, :quality, :bandwidth_oct, :shelf_slope
 
         # Initializes a filter based on Robert Bristow-Johnson's filter cookbook.
         # +filter_type+ is one of :lowpass, :highpass, :bandpass (0dB peak),
@@ -168,6 +170,7 @@ module MB
         def sample_rate=(rate)
           return if @sample_rate.round(3) == rate.round(3)
           @center_frequency = 0.5 * rate if @center_frequency > 0.5 * rate
+          @cutoff = @center_frequency
           set_parameters(@filter_type, rate, @center_frequency, db_gain: @db_gain, quality: @quality, bandwidth_oct: @bandwidth_oct, shelf_slope: @shelf_slope)
           self
         end
@@ -190,6 +193,7 @@ module MB
           @filter_type = filter_type
           @sample_rate = f_samp
           @center_frequency = f_center
+          @cutoff = @center_frequency
           @db_gain = db_gain
 
           @quality = quality
@@ -208,6 +212,7 @@ module MB
           @filter_type = filter_type
           @sample_rate = f_samp
           @center_frequency = f_center
+          @cutoff = @center_frequency
           @db_gain = db_gain
 
           amp = 10.0 ** (db_gain / 40.0) if db_gain
@@ -347,6 +352,7 @@ module MB
           @x1, @x2, @y1, @y2 = state
           @quality = qualities[-1]
           @center_frequency = cutoffs[-1]
+          @cutoff = @center_frequency
 
           result
         end

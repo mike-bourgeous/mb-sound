@@ -393,12 +393,16 @@ module MB
           f = MB::Sound::Filter::Cookbook.new(filter_or_type, sample_rate, 1, quality: 1, db_gain: gain&.to_db)
           MB::Sound::Filter::Cookbook::CookbookWrapper.new(filter: f, audio: self, cutoff: cutoff, quality: quality)
 
+        when f.is_a?(MB::Sound::Filter::Cookbook)
+          # TODO: Support graph node sources for filter gain
+          raise 'Only specify gain when creating a new filter' if gain
+
+          MB::Sound::Filter::Cookbook::CookbookWrapper.new(filter: f, audio: self, cutoff: cutoff || f.cutoff, quality: quality || f.quality)
+
         when f.respond_to?(:wrap)
           if cutoff || quality || gain
             raise 'Cutoff, gain, and quality should only be specified when creating a new filter by type'
           end
-
-          # FIXME: use CookbookWrapper if given a Cookbook filter
 
           f.wrap(self, in_place: in_place)
 
