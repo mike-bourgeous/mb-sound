@@ -65,6 +65,7 @@ if filename && File.readable?(filename)
   inputs = input.split.map { |d| d.and_then(final_tone) }
 else
   input = MB::Sound.input(channels: ENV['CHANNELS']&.to_i || 2)
+  bufsize = input.buffer_size
   inputs = input.split
 end
 
@@ -97,10 +98,11 @@ else
   puts "\e[38;5;243mMIDI disabled (jackd not detected)\e[0m"
 end
 
+# FIXME: does not work (at least on USB audio) with oversample < 1
 oversample = ENV['OVERSAMPLE']&.to_f || 2
 
-bufsize = output.buffer_size
-internal_bufsize = (24 * oversample).ceil
+bufsize ||= output.buffer_size
+internal_bufsize = (24 * [1, oversample].max).ceil
 
 delay_samples = delay * output.sample_rate * oversample
 delay_samples = 0 if delay_samples < 0
@@ -161,14 +163,14 @@ begin
     lfo_mod = (lfo * lfo_scale + lfo_base).clip(0, nil)
 
     # Split input into original and first delay
-    inp_delayed = inp.delay(samples: lfo_mod, smoothing: delay_smoothing, sample_rate: input.sample_rate * oversample)
+    inp_delayed = inp.delay(samples: lfo_mod, smoothing: delay_smoothing)
 
     # Feedback injector and feedback delay (compensating for buffer size)
     # TODO: better way of injecting an NArray into a node chain than
     # constant.proc; e.g. maybe a node that takes a pointer to a buffer and
     # always returns the buffer; or better way of just doing feedback
     d_fb = (lfo_mod - internal_bufsize).clip(0, nil)
-    b = 0.constant.proc { a }.delay(samples: d_fb, smoothing: delay_smoothing2, sample_rate: input.sample_rate * oversample)
+    b = 0.constant.proc { a }.delay(samples: d_fb, smoothing: delay_smoothing2)
 
     # Effected output, with a spy to save feedback buffer
     wet = (feedback * b - inp_delayed).softclip(0.85, 0.95).spy { |z| a[] = z if z }
