@@ -64,6 +64,8 @@ module MB
 
             return nil if audio.nil? || cutoff.nil? || quality.nil? || audio.empty? || cutoff.empty? || quality.empty?
 
+            audio = audio.real if audio.is_a?(Numo::SComplex) || audio.is_a?(Numo::DComplex)
+
             min_length = [audio.length, cutoff.length, quality.length].min
             audio = audio[0...min_length]
             cutoff = cutoff[0...min_length]
