@@ -20,7 +20,7 @@ module MB
         #
         # +:type_name+ is stored in @node_type_name for display in e.g.
         # GraphViz graphs.  See GraphNode#graphviz.
-        def initialize(source, extra_sources = {}, sample_rate: nil, type_name: nil, &block)
+        def initialize(source, extra_sources: {}, sample_rate: nil, type_name: nil, &block)
           @graph_node_name = block.source_location&.join(':')&.rpartition('mb-sound')&.last
           @node_type_name = "ProcNode (#{type_name})"
 

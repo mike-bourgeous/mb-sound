@@ -246,7 +246,7 @@ module MB
       # a Numo::NArray containing samples to be modified.  Note that this can
       # be very slow compared to the built-in algorithms implemented in C.
       def proc(sources = {}, type_name: nil, &block)
-        ProcNode.new(self, sources, sample_rate: self.sample_rate, type_name: type_name, &block)
+        ProcNode.new(self, extra_sources: sources, sample_rate: self.sample_rate, type_name: type_name, &block)
       end
 
       # If this node (or its inputs) have a finite length of audio data
