@@ -28,8 +28,6 @@ module MB
   #
   # Top-level namespace for the mb-sound library.
   module Sound
-    class FileExistsError < IOError; end
-
     # Most of the methods available in the CLI are defined in these separate
     # modules and incorporated here by extension.
     extend IOMethods

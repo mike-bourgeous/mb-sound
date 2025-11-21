@@ -106,9 +106,10 @@ RSpec.describe(MB::Sound::IOMethods) do
       it 'raises an error if the sound already exists' do
         name = 'tmp/sound_write_exists.flac'
         FileUtils.touch(name)
+        allow(STDOUT).to receive(:write).with(/Not overwriting/)
         expect {
           MB::Sound.write(name, [Numo::SFloat[0, 0.1, -0.2, 0.3]], sample_rate: 48000)
-        }.to raise_error(MB::Sound::FileExistsError)
+        }.to raise_error(MB::Util::FileMethods::FileExistsError)
       end
     end
 
@@ -121,6 +122,27 @@ RSpec.describe(MB::Sound::IOMethods) do
 
         MB::Sound.write(name, [Numo::SFloat[0, 0.1, -0.2, 0.3]], sample_rate: 48000, overwrite: true)
         expect(File.size(name)).to be > 0
+      end
+    end
+
+    context 'when overwrite is :prompt' do
+      it 'asks before overwriting' do
+        name = 'tmp/sound_write_exists.flac'
+        FileUtils.touch(name)
+        expect(STDIN).to receive(:readline).and_return('Y')
+        allow(STDOUT).to receive(:write)
+        MB::Sound.write(name, [Numo::SFloat.zeros(4)], overwrite: :prompt)
+        expect(File.size(name)).to be > 0
+      end
+
+      it 'raises an error if told not to overwrite' do
+        name = 'tmp/sound_write_exists.flac'
+        FileUtils.touch(name)
+        expect(STDIN).to receive(:readline).and_return('N')
+        allow(STDOUT).to receive(:write)
+        expect {
+          MB::Sound.write(name, [Numo::SFloat.zeros(4)], overwrite: :prompt)
+        }.to raise_error(MB::Util::FileMethods::FileExistsError)
       end
     end
   end
@@ -212,9 +234,10 @@ RSpec.describe(MB::Sound::IOMethods) do
       it 'raises an error if the sound already exists' do
         name = 'tmp/file_output_exists.flac'
         FileUtils.touch(name)
+        allow(STDOUT).to receive(:write).with(/Not overwriting/)
         expect {
           MB::Sound.file_output(name, channels: 2)
-        }.to raise_error(MB::Sound::FileExistsError)
+        }.to raise_error(MB::Util::FileMethods::FileExistsError)
       end
     end
 

@@ -20,7 +20,7 @@ outfile = ARGV[0]
 raise "No filename given" unless outfile
 
 input = MB::Sound.input
-output = MB::Sound.file_output(outfile, sample_rate: input.sample_rate, channels: input.channels)
+output = MB::Sound.file_output(outfile, sample_rate: input.sample_rate, channels: input.channels, overwrite: :prompt)
 
 pry_next = false
 MB::U.sigquit_backtrace do

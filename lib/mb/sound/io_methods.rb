@@ -194,14 +194,13 @@ module MB
       # Opens the given file as an output stream with a :write method.  The
       # number of +:channels+ must be provided.  Sample rate defaults to 48k.
       # Existing files will not be overwritten, and an error will be raised,
-      # unless +:overwrite+ is true.  Other keyword arguments are passed to
-      # MB::Sound::FFMPEGOutput#initialize.
+      # unless +:overwrite+ is true or :prompt.  Other keyword arguments are
+      # passed to MB::Sound::FFMPEGOutput#initialize.
       #
       # See MB::Sound::FFMPEGOutput.
+      # See MB::Util::FileMethods#prevent_overwrite.
       def file_output(filename, sample_rate: 48000, channels:, overwrite: false, **kwargs)
-        if !overwrite && File.exist?(filename)
-          MB::U.prevent_overwrite(filename, prompt: true)
-        end
+        MB::U.prevent_overwrite(filename, prompt: overwrite == :prompt) unless overwrite == true
 
         MB::Sound::FFMPEGOutput.new(filename, channels: channels, sample_rate: sample_rate, **kwargs)
       end
