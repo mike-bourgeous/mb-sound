@@ -23,6 +23,7 @@ MB::Sound::Oscillator.tune_freq = 480
 
 # A ring/pool of objects (e.g. oscillators) to be used in FIFO order.
 # Error handling and better voice stealing left as an exercise for the reader /s
+# Superseded by VoicePool.
 class Ring
   extend Forwardable
 

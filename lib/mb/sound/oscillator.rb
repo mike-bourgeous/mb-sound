@@ -90,9 +90,7 @@ module MB
       # and tune_note= class methods and using 12 tone equal temperament
       # (defaults to 440Hz A4).
       #
-      # This can be applied to a Numeric or to a GraphNode.  If passing a
-      # GraphNode, make sure it is not referenced elsewhere without using a
-      # Tee.
+      # This can be applied to a Numeric or to a GraphNode.
       def self.calc_freq(note_number, detune_cents = 0)
         tune_freq * 2 ** ((note_number + detune_cents / 100.0 - tune_note) / 12.0)
       end
@@ -100,13 +98,17 @@ module MB
       # Calculates a fractional MIDI note number for the given frequency,
       # assuming equal temperament.
       #
-      # This can be applied to a Numeric or to a GraphNode.  If passing a
-      # GraphNode, make sure it is not referenced elsewhere without using a
-      # Tee.
+      # This can be applied to a Numeric or to a GraphNode.
       def self.calc_number(frequency_hz)
-        frequency_hz = frequency_hz.real
-        frequency_hz = 0 if frequency_hz < 0
-        12.0 * Math.log2(frequency_hz / tune_freq) + tune_note
+        # FIXME: add .real to complex-valued upstream nodes if needed (e.g. a complex_sine oscillator)
+        frequency_hz = frequency_hz.real if frequency_hz.is_a?(Complex)
+        frequency_hz = 0 if frequency_hz.is_a?(Numeric) && frequency_hz < 0
+
+        if frequency_hz.respond_to?(:sample)
+          12.0 * (frequency_hz / tune_freq).log2 + tune_note
+        else
+          12.0 * Math.log2(frequency_hz / tune_freq) + tune_note
+        end
       end
 
       attr_accessor :wave_type, :pre_power, :post_power, :range, :advance, :random_advance
@@ -225,9 +227,6 @@ module MB
 
       # Changes the oscillator's frequency source to the given Numeric value or
       # signal graph (responding to :sample).
-      #
-      # Samples one value from the graph source to set the MIDI note number
-      # (TODO: this may not be ideal).
       def frequency=(frequency)
         raise "Invalid frequency #{frequency.inspect}" unless frequency.is_a?(Numeric) || frequency.respond_to?(:sample) || frequency.respond_to?(:get_sampler)
 

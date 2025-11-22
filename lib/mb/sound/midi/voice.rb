@@ -22,7 +22,7 @@ module MB
           release_time: 0.4,
         }
 
-        def_delegators :@oscillator, :frequency, :frequency=, :random_advance, :random_advance=, :number, :wave_type, :wave_type=
+        def_delegators :@oscillator, :random_advance, :random_advance=, :wave_type, :wave_type=
         def_delegators :amp_envelope, :active?, :on?
 
         attr_reader :filter_envelope, :amp_envelope, :oscillator, :sample_rate, :re_filter, :im_filter
@@ -59,7 +59,14 @@ module MB
           @value = 0.0
           @filter_blend = 1.0
 
-          @oscillator = MB::Sound::A4.at(1).at_rate(48000).ramp.oscillator
+          @number_constant = MB::Sound::Oscillator.tune_note.constant.named('Voice note number')
+          @freq_mod = 7.hz.sine.at(0).oscillator.named('Voice vibrato')
+          @osc_freq = MB::Sound::Oscillator.calc_freq(@number_constant + @freq_mod)
+
+          # not quite detuning; unison detuning gives phasing of harmonics
+          # @phase_mod = 100.hz.sine.noise.at(20).filter(:lowpass, cutoff: 2).filter(:highpass, cutoff: 0.25).forever
+
+          @oscillator = MB::Sound::Oscillator.new(:ramp, frequency: @osc_freq).named('Voice oscillator')
           @oscillator.wave_type = wave_type if wave_type
 
           self.filter_type = filter_type
@@ -100,12 +107,31 @@ module MB
           @oscillator.sample_rate = new_rate
           @filter_envelope.sample_rate = new_rate
           @amp_envelope.sample_rate = new_rate
+          @osc_freq.sample_rate = new_rate
 
           @sample_rate = new_rate
 
           self
         end
         alias at_rate sample_rate=
+
+        # Returns the base frequency of this voice's oscillator before modulation.
+        def frequency
+          MB::Sound::Oscillator.calc_freq(@number_constant.constant)
+        end
+
+        # Sets the base frequency of this voice's oscillator before modulation.
+        def frequency=(f_hz)
+          @number_constant.constant = MB::Sound::Oscillator.calc_number(f_hz)
+        end
+
+        def vibrato_frequency=(f_hz)
+          @freq_mod.frequency = f_hz
+        end
+
+        def vibrato_intensity=(gain)
+          @freq_mod.range = -gain..gain
+        end
 
         # Restarts the amplitude and filter envelopes, and sets the oscillator's
         # pitch to the given note number.
@@ -114,15 +140,19 @@ module MB
           # is more interesting, but that would make consistent plotting more
           # challenging
           @oscillator.reset unless @oscillator.no_trigger
-          @oscillator.number = note
+          self.number = note
           @filter_envelope.trigger(velocity / 256.0 + 0.5)
           @amp_envelope.trigger(MB::M.scale(velocity, 0..127, -20..-6).db)
+        end
+
+        def number
+          @number_constant.constant
         end
 
         # Sets the oscillator's pitch to the given note number without
         # resetting any envelopes.
         def number=(note)
-          @oscillator.number = note
+          @number_constant.constant = note
         end
 
         # Same as #number=, but with an ignored keyword argument for VoicePool
@@ -155,7 +185,7 @@ module MB
           end
 
           # TODO: Reduce max quality for higher cutoff and/or oscillator frequencies?
-          centers = @cutoff * MB::M.scale(@oscillator.number, 0..127, 0.9..2.0) * @filter_intensity ** @filter_envelope.sample(count)
+          centers = @cutoff * MB::M.scale(self.number, 0..127, 0.9..2.0) * @filter_intensity ** @filter_envelope.sample(count)
           centers.inplace.clip(20, [@cutoff, 18000].max)
 
           if @last_quality != @quality
