@@ -1,6 +1,6 @@
 GIT
   remote: https://github.com/mike-bourgeous/mb-math.git
-  revision: 9b69a64bc92ba69a6a2bb3065f099b8005c8e83e
+  revision: a22c7e49947abd3c250cd756f9943d8ca996f772
   branch: wavetable
   specs:
     mb-math (0.3.1.usegit)
