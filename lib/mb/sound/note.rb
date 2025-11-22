@@ -98,6 +98,12 @@ module MB
         @black_key
       end
 
+      # Allow iteration of notes in Ranges.
+      # TODO: find a way to iterate over scales instead of chromatically?
+      def succ
+        Note.new(@number + 1)
+      end
+
       private
 
       # Calculates the frequency based on the note's MIDI note number.

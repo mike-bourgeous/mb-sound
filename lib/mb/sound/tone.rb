@@ -643,6 +643,16 @@ module MB
         EOF
       end
 
+      # Allow comparison of tones by frequency for use in Range.
+      def <=>(other)
+        f1 = @frequency
+        f2 = other.frequency
+
+        raise "Cannot compare dynamic frequencies" unless f1.is_a?(Numeric) && f2.is_a?(Numeric)
+
+        f1 <=> f2
+      end
+
       private
 
       # Allows subclasses (e.g. Note) to change the frequency after construction.
