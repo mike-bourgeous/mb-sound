@@ -45,7 +45,8 @@ jump = (data.length - length_samples - xfade_samples) / (table_size - 1)
 
 note_name = MB::Sound::Tone.new(frequency: freq).to_note.name
 
-outname = File.join(File.dirname(outname), "#{length_samples}_#{note_name}_#{File.basename(outname)}")
+# TODO: add info to output filename?
+# outname = File.join(File.dirname(outname), "#{length_samples}_#{note_name}_#{File.basename(outname)}")
 
 MB::U.headline("Writing to #{outname}")
 outfile = MB::Sound.file_output(outname, overwrite: :prompt, channels: 1)
@@ -83,7 +84,7 @@ begin
       lead_in = Numo::SFloat[0]
     end
 
-    # Copy oopable segment 
+    # Copy loopable segment
     middle = data[start_samples...end_samples].dup
 
     # Take lead-out from after the loop (mixed in at the start of the loop)
