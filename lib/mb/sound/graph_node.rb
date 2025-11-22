@@ -703,6 +703,37 @@ module MB
         edges
       end
 
+      # Separates the graph into ranks (in GraphViz terms) based on distance
+      # from this node.  Ignores Numeric sources in the graph.  Returns an
+      # Array of Arrays of nodes.
+      def graph_ranks(include_tees: true)
+        rank_map = {}
+
+        graph(include_tees: include_tees).each do |dest|
+          next if dest.is_a?(Numeric)
+
+          rank_map[dest] ||= 0
+          next_rank = rank_map[dest] + 1
+
+          dest.sources.each do |_name, src|
+            next if src.is_a?(Numeric)
+
+            src = climb_tee_tree(src) unless include_tees
+
+            rank_map[src] ||= next_rank
+            rank_map[src] = MB::M.max(rank_map[src], next_rank)
+          end
+        end
+
+        ranks = []
+        rank_map.each do |n, rank|
+          ranks[rank] ||= []
+          ranks[rank] << n
+        end
+
+        ranks.compact.reverse
+      end
+
       # Finds the lowest numeric value greater than zero for any graph nodes
       # that have a #buffer_size method.  The idea is that sound card inputs
       # will have the smallest buffer size of any input.

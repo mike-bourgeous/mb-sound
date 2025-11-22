@@ -679,5 +679,23 @@ RSpec.describe(MB::Sound::GraphNode, aggregate_failures: true) do
 
       pending 'when include_tees is true'
     end
+
+    describe '#graph_ranks' do
+      it 'returns expected ordering for a simple graph' do
+        a = 300.hz
+        m = a.adsr(0.1, 0.1, 0.6, 0.5)
+        b = m.multiplicands[1]
+        c = 100.hz.fm(m)
+        d = c.filter(:lowpass, cutoff: 5)
+
+        ranks = d.graph_ranks(include_tees: false)
+
+        expect(ranks[0]).to match_array([a, b])
+        expect(ranks[1]).to match_array([m])
+        expect(ranks[2]).to match_array([be_a(MB::Sound::GraphNode::Mixer)])
+        expect(ranks[3]).to match_array([c, be_a(MB::Sound::GraphNode::Constant), be_a(MB::Sound::GraphNode::Constant)])
+        expect(ranks[4]).to match_array([d])
+      end
+    end
   end
 end
