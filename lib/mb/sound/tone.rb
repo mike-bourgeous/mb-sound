@@ -646,7 +646,17 @@ module MB
       # Allow comparison of tones by frequency for use in Range.
       def <=>(other)
         f1 = @frequency
-        f2 = other.frequency
+
+        case other
+        when Numeric
+          f2 = other
+
+        when Tone
+          f2 = other.frequency
+
+        else
+          raise TypeError, "Cannot convert #{other.class} to Tone or Numeric"
+        end
 
         raise "Cannot compare dynamic frequencies" unless f1.is_a?(Numeric) && f2.is_a?(Numeric)
 
