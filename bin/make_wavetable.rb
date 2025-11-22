@@ -2,7 +2,7 @@
 # Experiment to chop a sound into a wavetable.
 #
 # Usage:
-#     $0 in_filename out_filename [table_size]
+#     $0 in_filename out_filename [table_size] [--quiet]
 #
 #     table_size defaults to 100
 
@@ -14,6 +14,8 @@ if ARGV.include?('--help') || ARGV.empty?
   MB::U.print_header_help
   exit 1
 end
+
+quiet = !!ARGV.delete('--quiet')
 
 inname = ARGV[0]
 raise 'No input file given' unless inname
@@ -63,7 +65,7 @@ total = 0
 begin
   data.not_inplace!
 
-  puts "\e[H\e[2J"
+  puts "\e[H\e[2J" unless quiet
 
   for start_samples in (0...(data.length - (length_samples + xfade_samples))).step(jump) do
     start_samples = start_samples.floor
@@ -109,9 +111,11 @@ begin
     #fade(looped[0...30].inplace, true)
     #fade(looped[-30..-1].inplace, false)
 
-    puts "\e[H"
-    MB::Sound.plot(looped, samples: looped.length)
-    sleep 0.01
+    unless quiet
+      puts "\e[H"
+      MB::Sound.plot(looped, samples: looped.length)
+      sleep 0.01
+    end
 
     total += looped.length
 
