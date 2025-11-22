@@ -113,6 +113,19 @@ module MB
           @duration_samples = duration_seconds && duration_seconds.to_f * @sample_rate
           self
         end
+
+        # See GraphNode#to_s
+        def to_s
+          "#{super} -- value=#{@constant}"
+        end
+
+        # See GraphNode#to_s_graphviz
+        def to_s_graphviz
+          <<~EOF
+          #{super}---------------
+          value: #{@constant}
+          EOF
+        end
       end
     end
   end
