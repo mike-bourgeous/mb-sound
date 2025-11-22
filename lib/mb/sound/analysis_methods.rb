@@ -6,9 +6,9 @@ module MB
       # Returns the cross correlation array of the two given arrays using
       # FFT-based convolution.
       #
-      # TODO: VERIFY The middle value of the output is the zero-shift
-      # correlation amount, values to the left are negative shifts, and values
-      # to the right are positive shifts.
+      # The middle value of the output is the zero-shift correlation amount,
+      # values to the left are negative shifts, and values to the right are
+      # positive shifts.
       def crosscorrelate(a, b)
         Numo::Pocketfft.fftconvolve(Numo::NArray.cast(a), Numo::NArray.cast(b).reverse.conj)
       end
@@ -23,24 +23,45 @@ module MB
         v.max_index - v.length / 2
       end
 
+      # Returns the positive-time-shift section of the cross-correlation of
+      # +data+ with itself.
+      def autocorrelate(data)
+        q = crosscorrelate(data, data)
+        mid = q.length / 2
+        q[mid..]
+      end
+
       # Returns an estimate in Hz of the fundamental frequency of the given
       # audio +data+.  If +:range+ is a Range, then the peak frequency within
       # that range will be returned.
-      def freq_estimate(data, sample_rate: 48000, range: nil)
-        # TODO: use peak bin from FFT?  use phase around peak bin to estimate?  use cepstrum to estimate?
-        q = crosscorrelate(data, data)
-        mid = q.length / 2
-        q = q[mid..]
+      def freq_estimate(data, sample_rate: 48000, range: nil, cepstrum: false)
+        data = data.sample(48000) if data.is_a?(GraphNode)
+
+        # TODO: decide what method(s) to use.  autocorrelation gives better
+        # values for some files (e.g. sounds/piano0.flac), while cepstrum gives
+        # better values for others (e.g. sounds/transient_synth.flac).
+        #
+        # Why does the cepstrum return very bad estimates for
+        # piano_120hz_b2.flac while the plot looks very good?
+        if cepstrum
+          q = ifft(fft(data).map { |v| Math.log(v.abs) }).abs
+          #q = ifft(fft(data).map { |v| CMath.log(v ** 2) }).real
+          mid = q.length / 2
+          q = q[0...mid]
+          q[0] = 0
+        else
+          q = autocorrelate(data)
+        end
 
         plist = peaks(q, 2)
           .reject { |idx, v, sign| sign == -1 || idx == 0 }
           .sort_by { |idx, v, sign| -v }
 
-        plist = plist.select { |idx, _, _| range.cover(sample_rate / idx.to_f) } if range
+        plist = plist.select { |idx, _, _| range.cover?(sample_rate / idx.to_f) } if range
 
         idx = plist[0]&.[](0)
 
-        sample_rate / idx.to_f
+        idx ? sample_rate / idx.to_f : nil
       end
 
       # Finds all points in the given +narray+ that are larger or smaller than
