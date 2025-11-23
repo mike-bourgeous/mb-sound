@@ -863,7 +863,16 @@ module MB
       # String representation, skipping Tee branches.
       def make_source_name(numeric_or_node)
         s = climb_tee_tree(numeric_or_node)
-        s.respond_to?(:name_or_id) ? s.name_or_id : s.to_s
+        case
+        when s.respond_to?(:name_or_id)
+          s.name_or_id
+
+        when s.is_a?(Numeric)
+          MB::M.sigformat(s, 4)
+
+        else
+          s.to_s
+        end
       end
 
       # Returns an Array with the port name and source name or object ID (if no
