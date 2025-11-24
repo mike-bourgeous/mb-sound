@@ -619,10 +619,10 @@ RSpec.describe(MB::Sound::GraphNode, aggregate_failures: true) do
           a,
           c,
           50,
-          3,
-          0,
           0.01,
           b,
+          3,
+          0,
         ]
 
         result = e.graph(include_tees: false)
@@ -636,13 +636,14 @@ RSpec.describe(MB::Sound::GraphNode, aggregate_failures: true) do
         n2 = 20.hz.named('2')
         n3 = 30.hz.named('3')
 
-        expect(n1).to receive(:sources).exactly(3).times.and_return({input: n3})
-        expect(n2).to receive(:sources).exactly(3).times.and_return({input: n1})
-        expect(n3).to receive(:sources).exactly(3).times.and_return({input: n2})
+        expect(n1).to receive(:sources).at_least(3).times.and_return({input: n3})
+        expect(n2).to receive(:sources).at_least(3).times.and_return({input: n1})
+        expect(n3).to receive(:sources).at_least(3).times.and_return({input: n2})
 
-        expect(n1.graph).to eq([n3, n2, n1])
-        expect(n2.graph).to eq([n1, n3, n2])
-        expect(n3.graph).to eq([n2, n1, n3])
+        expect(n1.graph[0]).to equal(n3)
+        expect(n1.graph.map(&:to_s)).to eq([n3, n2, n1].map(&:to_s))
+        expect(n2.graph.map(&:to_s)).to eq([n1, n3, n2].map(&:to_s))
+        expect(n3.graph.map(&:to_s)).to eq([n2, n1, n3].map(&:to_s))
       end
 
       pending 'when include_tees is true'

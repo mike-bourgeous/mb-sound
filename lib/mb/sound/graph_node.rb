@@ -643,9 +643,12 @@ module MB
         # TODO: use a linked list for deletion and reinsertion if this method
         # becomes too slow, or weaken return ordering and memoize in each
         # instance and call graph instead of sources to get sources?
-        source_list = []
-        source_history = Set.new
+        #
+        # Start self at -1 visits to preserve ordering when breaking feedback
+        # loops
+        source_history = { self => -1 }
         source_queue = [self]
+        source_list = []
 
         until source_queue.empty?
           s = source_queue.shift
@@ -666,14 +669,22 @@ module MB
           end
 
           # If we encounter a source again, move it to the end of the source
-          # list.
+          # list and look at its sources again.
           if source_history.include?(s)
+            # TODO: only look at a source if all paths from it have been traveled
+            # TODO: this would all be easier if source/dest links were bidirectional
+            # TODO: is 50 a reasonable number?
+            if source_history[s] > (50 + source_list.length)
+              warn "Possible infinite loop on #{s} (started from #{self})"
+              next
+            end
+
             source_list.delete(s)
-            source_list << s
-            next
+          else
+            source_history[s] = 0
           end
 
-          source_history << s
+          source_history[s] += 1
           source_list << s
 
           source_queue.concat(s.sources.values) if s.respond_to?(:sources)
@@ -715,7 +726,7 @@ module MB
       # from this node.  Ignores Numeric sources in the graph.  Returns an
       # Array of Arrays of nodes.
       def graph_ranks(include_tees: true)
-        rank_map = {}
+        rank_map = { self => 0 }
 
         graph(include_tees: include_tees).each do |dest|
           next if dest.is_a?(Numeric)
