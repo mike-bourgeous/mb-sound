@@ -39,7 +39,7 @@ module MB
 
             case delay_samples
             when Numeric
-              @delay_samples = delay_samples.constant
+              @delay_samples = delay_samples.constant(unit: ' samples', si: false)
 
             else
               raise 'Delay must be Numeric or respond to :sample' unless delay_samples.respond_to?(:sample)
@@ -101,8 +101,9 @@ module MB
           @graph_node_name = nil
           @named = false
 
+          # TODO: is the sample_rate_node needed?
           @sample_rate = sample_rate.to_f
-          @sample_rate_node = @sample_rate.constant(smoothing: false)
+          @sample_rate_node = @sample_rate.constant(smoothing: false, unit: 'Hz')
           @source = source.get_sampler
           @sources = { input: @source }.freeze
 

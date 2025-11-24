@@ -59,7 +59,7 @@ module MB
           @value = 0.0
           @filter_blend = 1.0
 
-          @number_constant = MB::Sound::Oscillator.tune_note.constant.named('Voice note number')
+          @number_constant = MB::Sound::Oscillator.tune_note.constant(si: false, range: 0..127).named('Voice note number')
           @freq_mod = 7.hz.sine.at(0).oscillator.named('Voice vibrato')
           @osc_freq = MB::Sound::Oscillator.calc_freq(@number_constant + @freq_mod)
 

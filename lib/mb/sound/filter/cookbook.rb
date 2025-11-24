@@ -45,9 +45,9 @@ module MB
 
             @node_type_name = "Cookbook (#{@filter.filter_type})"
 
-            @audio = sample_or_narray(audio)
-            @cutoff = sample_or_narray(cutoff)
-            @quality = sample_or_narray(quality)
+            @audio = sample_or_narray(audio, si: false, unit: nil, range: -2..2)
+            @cutoff = sample_or_narray(cutoff, si: true, unit: 'Hz', range: 0..(filter.sample_rate * 0.5))
+            @quality = sample_or_narray(quality, si: false, unit: ' Q', range: 0..100)
 
             @cutoff = @cutoff.or_for(nil) if @cutoff.respond_to?(:@or_for)
             @quality = @quality.or_for(nil) if @quality.respond_to?(:@or_for)
@@ -122,13 +122,13 @@ module MB
           # returns that value as a constant indefinitely.  If given a
           # Numo::NArray, returns an ArrayInput that wraps it, without looping.
           # Otherwise, raises an error.
-          def sample_or_narray(v)
+          def sample_or_narray(v, unit:, si:, range:)
             case v
             when Array
               raise WrapperArgumentError.new(source: v)
 
             when Numeric
-              MB::Sound::GraphNode::Constant.new(v, sample_rate: @filter.sample_rate)
+              MB::Sound::GraphNode::Constant.new(v, sample_rate: @filter.sample_rate, unit: unit, si: si, range: range)
 
             when Numo::NArray
               MB::Sound::ArrayInput.new(data: [v], sample_rate: @filter.sample_rate)

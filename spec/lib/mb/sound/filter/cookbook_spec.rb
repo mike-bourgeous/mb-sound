@@ -74,6 +74,20 @@ RSpec.describe(MB::Sound::Filter::Cookbook, :aggregate_failures) do
       expect(f.sample(7).length).to eq(4)
     end
 
+    it 'sets units on created constants' do
+      f = 1510.hz.lowpass
+      wrap = MB::Sound::Filter::Cookbook::CookbookWrapper.new(
+        filter: f,
+        audio: 0,
+        cutoff: 1510,
+        quality: 0.70711
+      )
+
+      expect(wrap.quality.value_string).to eq('0.7071 Q')
+      expect(wrap.cutoff.value_string).to eq('1.5100kHz')
+      expect(wrap.cutoff.range).to eq(0..24000)
+    end
+
     describe '#at_rate' do
       it 'can change sample rate on the fly' do
         a = 50.hz.square
