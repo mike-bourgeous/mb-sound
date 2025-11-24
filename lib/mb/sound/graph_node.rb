@@ -653,6 +653,14 @@ module MB
 
           # TODO: have a separate configuration for manual tees and implied
           # branches from get_sampler, and default to ignoring get_sampler?
+          # TODO: allow climbing past nodes of any type or based on any
+          # condition, e.g. to skip mixers and multipliers that were created by
+          # an internal arithmetic step inside or for another node.  e.g. #adsr
+          # creates a multiplier to icombine the input with the envelope.
+          # TODO: automatically differentiate between nodes created directly by
+          # the user and nodes created implicitly by other nodes?  e.g. could
+          # wrap internal node creation within a block that marks those nodes
+          # as invisible by default?
           unless include_tees
             s = climb_tee_tree(s)
           end

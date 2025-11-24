@@ -116,14 +116,14 @@ module MB
 
         # See GraphNode#to_s
         def to_s
-          "#{super} -- value=#{@constant}"
+          "#{super} -- value=#{@constant.is_a?(Complex) ? @constant : '%.4f' % @constant}"
         end
 
         # See GraphNode#to_s_graphviz
         def to_s_graphviz
           <<~EOF
           #{super}---------------
-          value: #{@constant}
+          value: #{@constant.is_a?(Complex) ? @constant : '%.4f' % @constant}
           EOF
         end
       end
