@@ -40,7 +40,6 @@ module MB
 
           @buf = Numo::SFloat.zeros(buffer_size)
           @out_buf = Numo::SFloat.zeros(1) # For wrap-around reads
-          @chunk_buf = Numo::SFloat.zeros(1)
           @delay = 0
           @delay_samples = 0
           @read_offset = 0
@@ -191,8 +190,6 @@ module MB
         # The +:chunk_delay_buf+ parameter is used internally for recursive
         # calls to process chunks of data longer than the delay buffer.
         def process(data, chunk_delay_buf: nil)
-          return nil if data.nil?
-
           raise 'Cannot process a zero-length array' if data.length == 0
 
           if @buf.is_a?(Numo::SFloat) && (data.is_a?(Numo::SComplex) || data.is_a?(Numo::DComplex) || @feedback.is_a?(Complex))
@@ -246,9 +243,7 @@ module MB
           # Switch to chunked processing if there's not enough room in the
           # delay buffer for the entire incoming data, given the maximum delay.
           if data.length > max_length
-            @chunk_buf = @buf.class.zeros(data.length) if @chunk_buf.nil? || @chunk_buf.length < data.length
-            chunk_buf = @chunk_buf[0...data.length]
-            chunk_buf[] = data
+            chunk_buf = data.inplace? ? data : data.dup.inplace
 
             for idx in (0...data.length).step(max_length)
               end_idx = idx + max_length
@@ -265,21 +260,11 @@ module MB
             delay_buf = delay_buf[0...data.length] if delay_buf.length < data.length
           end
 
-          # FIXME: this breaks chunked processing but prevents screwing up incoming data
-          data.not_inplace!
-          delay_buf&.not_inplace!
-
-          @out_buf = @buf.class.zeros(data.length) if @out_buf.length < data.length
-
           # TODO: feedback amount from dynamic source
           # TODO: feedback in-line cookbook filter
           if @feedback && @feedback != 0
             if delay_buf
-              # Time-varying delay
-              @min_delay_samples, @max_delay_samples = delay_buf.minmax
-              @last_delay_samples = delay_buf[-1]
-
-              ret = @out_buf.map_with_index { |_, idx|
+              ret = data.map_with_index { |v_in, idx|
                 delay_idx = MB::M.min(idx, delay_buf.length - 1)
                 delay = delay_buf[idx]
 
@@ -291,8 +276,6 @@ module MB
                 off2 = (@write_offset - max + idx) % @buf.length
                 write_idx = (@write_offset + idx) % @buf.length
 
-                v_in = data[idx]
-
                 @buf[write_idx] = v_in
                 v_out = @buf[off1] * (1.0 - delta) + @buf[off2] * delta
                 @buf[write_idx] += @feedback * v_out
@@ -300,11 +283,9 @@ module MB
                 v_in * @dry + v_out * @wet
               }
             else
-              ret = @out_buf.map_with_index { |_n, idx|
+              ret = data.map_with_index { |v_in, idx|
                 read_idx = (@read_offset + idx) % @buf.length
                 write_idx = (@write_offset + idx) % @buf.length
-
-                v_in = data[idx]
 
                 @buf[write_idx] = v_in
                 v_out = @buf[read_idx]
@@ -326,29 +307,24 @@ module MB
               # TODO: Something better than linear interpolation?
               # TODO: Allow switching off interpolation?
               # TODO: Use MB::M.fractional_index()?
-              ret = @out_buf[0...data.length].map_with_index { |_, idx|
+              ret = data.map_with_index { |_, idx|
                 delay = delay_buf[idx] # TODO: does this need to clamp to >= 0 ???
                 min = delay.floor
                 max = delay.ceil
                 delta = delay - min
                 @read_offset = (@write_offset - min + idx) % @buf.length
                 off2 = (@write_offset - max + idx) % @buf.length
-                v_out = @buf[@read_offset] * (1.0 - delta) + @buf[off2] * delta
-
-                v_in = data[idx]
-
-                v_in * @dry + v_out * @wet
+                @buf[@read_offset] * (1.0 - delta) + @buf[off2] * delta
               }
             else
               # Constant delay
+              @out_buf = Numo::SFloat.zeros(data.length) if @out_buf.length < data.length
               ret = @wet * MB::M.circular_read(@buf, @read_offset, data.length, target: @out_buf[0...data.length]) + @dry * data
             end
           end
 
           @read_offset = (@read_offset + data.length) % @buf.length
           @write_offset = (@write_offset + data.length) % @buf.length
-
-          #data[0...ret.length] = ret if data.inplace
 
           ret
         end

@@ -22,7 +22,7 @@ module MB
           return nil if data.nil? || data.empty? || data[0].empty?
 
           # TODO: should this sum channels?
-          data[0].not_inplace!
+          data[0]
         end
 
         # Overrides the default GraphNode#graph_node_name reader to try to
