@@ -574,6 +574,23 @@ RSpec.describe(MB::Sound::GraphNode, aggregate_failures: true) do
       expect(b).to eq(ref)
       expect(absmax).to eq(ref.abs.max)
     end
+
+    context 'with handled spies' do
+      let(:b1) { [] }
+      let(:b2) { [] }
+      let(:sp1) { ->(buf) { b1 << buf.dup } }
+      let(:sp2) { ->(buf) { b2 << buf.dup } }
+      let(:graph) { 1i.constant.spy(handle: :a, &sp1).spy(handle: :b, &sp2) }
+      let(:more_spies) { graph.spy(handle: :a, &sp2) }
+
+      it 'can notify spies with different handles' do
+        expect { graph.sample(5) }.to change { b1.count }.by(1).and change { b2.count }.by(1)
+      end
+
+      it 'can notify longer lists of spies' do
+        expect { more_spies.sample(5) }.to change { b1.count }.by(1).and change { b2.count }.by(2)
+      end
+    end
   end
 
   describe '#clear_spies' do
@@ -587,6 +604,28 @@ RSpec.describe(MB::Sound::GraphNode, aggregate_failures: true) do
 
       456.hz.spy(&p).clear_spies.sample(100)
       expect(b).to eq(nil)
+    end
+
+    context 'with handled spies' do
+      let(:b1) { [] }
+      let(:b2) { [] }
+      let(:sp1) { ->(buf) { b1 << buf.dup } }
+      let(:sp2) { ->(buf) { b2 << buf.dup } }
+      let(:graph) { 42.constant.spy(handle: :a, &sp1).spy(handle: :b, &sp2) }
+
+      it 'can remove spies with a specific handle' do
+        graph.clear_spies(handle: :a)
+        expect { graph.sample(10) }.to change { b2.count }.by(1).and(not_change { b1.count })
+        expect(b1).to eq([])
+        expect(b2).to eq([Numo::SFloat.zeros(10).fill(42)])
+      end
+
+      it 'can remove all handled spies' do
+        graph.clear_spies
+        expect { graph.sample(10) }.to not_change { b2.count }.and(not_change { b1.count })
+        expect(b1).to eq([])
+        expect(b2).to eq([])
+      end
     end
   end
 

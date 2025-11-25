@@ -575,12 +575,19 @@ module MB
       #
       #     block_buf[] = spy_buf
       #
+      # If you'll need to remove specific spies later, pass a +:handle+.  This
+      # may be an object instance, a Symbol, etc.
+      #
+      # See #clear_spies.
+      #
       # TODO: accomplish this without monkey patching
-      def spy(&block)
+      def spy(handle: nil, &block)
         @graph_spies ||= nil
+        @handled_spies ||= nil
 
         if @graph_spies.nil?
           @graph_spies = []
+          @handled_spies = {}
 
           class << self
             def sample(count)
@@ -593,13 +600,28 @@ module MB
                       warn "Spy #{idx}/#{s} raised #{MB::U.highlight(e)}"
                     end
                   end
+
+                  @handled_spies.each do |origin, spies|
+                    spies.each_with_index do |s, idx|
+                      begin
+                        s.call(b)
+                      rescue => e
+                        warn "Handled spy #{idx}/#{s} from #{origin} raised #{MB::U.highlight(e)}"
+                      end
+                    end
+                  end
                 end
               }
             end
           end
         end
 
-        @graph_spies << block
+        if handle
+          @handled_spies[handle] ||= []
+          @handled_spies[handle] << block
+        else
+          @graph_spies << block
+        end
 
         self
       end
@@ -623,10 +645,21 @@ module MB
         }
       end
 
-      # Clears any spies attached to this graph node (see #spy).
-      def clear_spies
+      # Clears any spies attached to this graph node (see #spy), or just spies
+      # associated with the given +:handle+.
+      def clear_spies(handle: nil)
         @graph_spies ||= nil
-        @graph_spies&.clear
+        @handled_spies ||= nil
+
+        if handle
+          if @handled_spies && @handled_spies.include?(handle)
+            @handled_spies[handle].clear
+            @handled_spies.delete(handle)
+          end
+        else
+          @graph_spies&.clear
+          @handled_spies&.clear
+        end
 
         self
       end
