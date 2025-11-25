@@ -185,6 +185,9 @@ module MB
             r.read(MB::M.min(r.length, count))
           end
 
+        rescue BranchBufferOverflow
+          raise
+
         rescue MB::Sound::CircularBuffer::BufferOverflow
           src = original_source
 
