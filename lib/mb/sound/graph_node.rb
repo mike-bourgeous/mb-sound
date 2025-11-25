@@ -474,7 +474,7 @@ module MB
       #
       # See MB::Sound::Filter::Delay#initialize for a description of the
       # +:smoothing+ parameter.
-      def delay(seconds: nil, samples: nil, sample_rate: 48000, smoothing: true, max_delay: 1.0)
+      def delay(seconds: nil, samples: nil, sample_rate: 48000, smoothing: true, max_delay: 1.0, feedback: false)
         if samples
           samples = samples.to_f if samples.is_a?(Numeric)
           seconds = samples / sample_rate
@@ -482,7 +482,9 @@ module MB
           seconds = seconds.to_f if seconds.is_a?(Numeric)
         end
 
-        filter(MB::Sound::Filter::Delay.new(delay: seconds, sample_rate: sample_rate, smoothing: smoothing, buffer_size: sample_rate.ceil * max_delay))
+        seconds = seconds.or_for(nil) if seconds.respond_to?(:or_for)
+
+        filter(MB::Sound::Filter::Delay.new(delay: seconds, sample_rate: sample_rate, smoothing: smoothing, buffer_size: sample_rate.ceil * max_delay, feedback: feedback))
       end
 
       # Adds a multi-tap delay with the given delay sources, returning an Array
@@ -837,12 +839,25 @@ module MB
         png
       end
 
-      # Sets all Tones in the graph to continue playing forever.
+      # Sets all Tones in the graph to continue playing for +duration+.
       def for(duration, recursive: true)
         if recursive
           graph.each do |n|
             next if n == self
             n.for(duration, recursive: false) if n.respond_to?(:for)
+          end
+        end
+
+        self
+      end
+
+      # Sets all Tones in the graph to play for +duration+ by default unless
+      # the tone was specifically given a duration.
+      def or_for(duration, recursive: true)
+        if recursive
+          graph.each do |n|
+            next if n == self
+            n.or_for(duration, recursive: false) if n.respond_to?(:or_for)
           end
         end
 

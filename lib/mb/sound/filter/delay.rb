@@ -19,6 +19,9 @@ module MB
         # to #process.  May not be an integer.
         attr_reader :min_delay_samples, :max_delay_samples, :last_delay_samples
 
+        # Feedback amount
+        attr_accessor :feedback
+
         # Initializes a single-channel delay with a given +:delay+ in seconds,
         # based on the +:sample_rate+..  The +:buffer_size+ sets the maximum
         # possible delay.
@@ -28,7 +31,7 @@ module MB
         # +:smoothing+ is a numeric value, then that is the maximum delay
         # change in seconds allowed per second.  The default smoothing rate is
         # MB::Sound::Filter::Delay::DEFAULT_SMOOTHING_RATE.
-        def initialize(delay: 0, sample_rate: 48000, buffer_size: 48000, smoothing: true)
+        def initialize(delay: 0, sample_rate: 48000, buffer_size: 48000, smoothing: true, feedback: false, wet: 1, dry: 0)
           @sample_rate = sample_rate.to_f
 
           if delay.is_a?(Numeric)
@@ -44,6 +47,10 @@ module MB
           @smooth_limit = nil
 
           @filter_buf = Numo::SFloat.zeros(buffer_size)
+
+          @feedback = feedback
+          @dry = dry.to_f
+          @wet = wet.to_f
 
           self.delay = delay
           self.smoothing = smoothing
@@ -185,8 +192,9 @@ module MB
         def process(data, chunk_delay_buf: nil)
           raise 'Cannot process a zero-length array' if data.length == 0
 
-          if @buf.is_a?(Numo::SFloat) && (data.is_a?(Numo::SComplex) || data.is_a?(Numo::DComplex))
+          if @buf.is_a?(Numo::SFloat) && (data.is_a?(Numo::SComplex) || data.is_a?(Numo::DComplex) || @feedback.is_a?(Complex))
             @buf = Numo::SComplex.cast(@buf)
+            @out_buf = Numo::SComplex.cast(@out_buf)
           end
 
           # Fill a buffer with the intended delay at each sample (if
@@ -246,36 +254,77 @@ module MB
             return chunk_buf
           end
 
-          # Copy the new data into the delay buffer
-          MB::M.circular_write(@buf, data, @write_offset)
-
+          # Clamp lengths to shortest input
           if delay_buf
-            # Time-varying delay
-            @min_delay_samples, @max_delay_samples = delay_buf.minmax
-            @last_delay_samples = delay_buf[-1]
+            data = data[0...delay_buf.length] if data.length < delay_buf.length
+            delay_buf = delay_buf[0...data.length] if delay_buf.length < data.length
+          end
 
-            # TODO: Something better than linear interpolation?
-            # TODO: Allow switching off interpolation?
-            # TODO: Use MB::M.fractional_index()?
-            ret = data.map_with_index { |_, idx|
-              delay = delay_buf[idx] # TODO: does this need to clamp to >= 0 ???
-              min = delay.floor
-              max = delay.ceil
-              delta = delay - min
-              @read_offset = (@write_offset - min + idx) % @buf.length
-              off2 = (@write_offset - max + idx) % @buf.length
-              @buf[@read_offset] * (1.0 - delta) + @buf[off2] * delta
-            }
+          # TODO: feedback amount from dynamic source
+          # TODO: feedback in-line cookbook filter
+          if @feedback && @feedback != 0
+            if delay_buf
+              ret = data.map_with_index { |v_in, idx|
+                delay_idx = MB::M.min(idx, delay_buf.length - 1)
+                delay = delay_buf[idx]
+
+                min = delay.floor
+                max = delay.ceil
+                delta = delay - min
+
+                off1 = (@write_offset - min + idx) % @buf.length
+                off2 = (@write_offset - max + idx) % @buf.length
+                write_idx = (@write_offset + idx) % @buf.length
+
+                @buf[write_idx] = v_in
+                v_out = @buf[off1] * (1.0 - delta) + @buf[off2] * delta
+                @buf[write_idx] += @feedback * v_out
+
+                v_in * @dry + v_out * @wet
+              }
+            else
+              ret = data.map_with_index { |v_in, idx|
+                read_idx = (@read_offset + idx) % @buf.length
+                write_idx = (@write_offset + idx) % @buf.length
+
+                @buf[write_idx] = v_in
+                v_out = @buf[read_idx]
+                @buf[write_idx] += @feedback * v_out
+
+                v_in * @dry + v_out * @wet
+              }
+            end
+
           else
-            # Constant delay
-            @out_buf = Numo::SFloat.zeros(data.length) if @out_buf.length < data.length
-            ret = MB::M.circular_read(@buf, @read_offset, data.length, target: @out_buf[0...data.length])
+            # Copy the new data into the delay buffer
+            MB::M.circular_write(@buf, data, @write_offset)
+
+            if delay_buf
+              # Time-varying delay
+              @min_delay_samples, @max_delay_samples = delay_buf.minmax
+              @last_delay_samples = delay_buf[-1]
+
+              # TODO: Something better than linear interpolation?
+              # TODO: Allow switching off interpolation?
+              # TODO: Use MB::M.fractional_index()?
+              ret = data.map_with_index { |_, idx|
+                delay = delay_buf[idx] # TODO: does this need to clamp to >= 0 ???
+                min = delay.floor
+                max = delay.ceil
+                delta = delay - min
+                @read_offset = (@write_offset - min + idx) % @buf.length
+                off2 = (@write_offset - max + idx) % @buf.length
+                @buf[@read_offset] * (1.0 - delta) + @buf[off2] * delta
+              }
+            else
+              # Constant delay
+              @out_buf = Numo::SFloat.zeros(data.length) if @out_buf.length < data.length
+              ret = @wet * MB::M.circular_read(@buf, @read_offset, data.length, target: @out_buf[0...data.length]) + @dry * data
+            end
           end
 
           @read_offset = (@read_offset + data.length) % @buf.length
           @write_offset = (@write_offset + data.length) % @buf.length
-
-          data[0..-1] = ret if data.inplace? && data.object_id != ret.object_id
 
           ret
         end
@@ -284,8 +333,12 @@ module MB
           raise NotImplementedError, 'TODO: return a phase value based on the delay'
         end
 
+        def to_s
+          "Delay -- smoothing=#{@smoothing} smooth_limit=#{@smooth_limit} feedback=#{@feedback} dry=#{@dry.to_db} wet=#{@wet.to_db}"
+        end
+
         def to_s_graphviz
-          "Delay\nsmoothing: #{@smoothing}\nsmooth_limit: #{@smooth_limit}"
+          "Delay\nsmoothing: #{@smoothing}\nsmooth_limit: #{@smooth_limit}\nfeedback: #{@feedback}\ndry: #{@dry.to_db}\nwet: #{@wet.to_db}"
         end
       end
     end

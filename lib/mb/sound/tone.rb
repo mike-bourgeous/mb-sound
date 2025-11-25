@@ -324,7 +324,7 @@ module MB
 
       # Sets the default duration in seconds, if #for and #forever have not
       # been called.  Pass nil to default to playing forever.
-      def or_for(duration)
+      def or_for(duration, recursive: :ignored)
         unless @duration_set
           @duration = duration&.to_f
         end
