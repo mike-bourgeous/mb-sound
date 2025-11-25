@@ -45,7 +45,7 @@ module MB
           v = @input.read(@input.buffer_size)
 
           # End of input; return whatever we can from the buffer, or nil
-          if v.nil? || v.empty? || v.any?(&:empty?)
+          if v.nil? || v.compact.empty? || v.compact.any?(&:empty?)
             break
           end
 

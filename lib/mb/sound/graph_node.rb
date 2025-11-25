@@ -75,6 +75,14 @@ module MB
         EOF
       end
 
+      # Creates and returns an input object that reads from this node's #sample
+      # method whenever the I/O's #read method is called.
+      #
+      # TODO: allow combining multiple graphs together for multiple channels
+      def as_input(num_channels = 1)
+        MB::Sound::GraphNodeInput.new(self, channels: num_channels)
+      end
+
       # Returns +n+ (default 2) fan-out readers for creating branching signal
       # graphs.  This is useful because the #sample method can only be called
       # once per frame because it updates the internal state of signal nodes.

@@ -130,6 +130,7 @@ end
 require_relative 'sound/buffer_helper'
 require_relative 'sound/circular_buffer'
 require_relative 'sound/graph_node'
+require_relative 'sound/graph_node_input'
 
 require_relative 'sound/io_base'
 require_relative 'sound/io_input'
