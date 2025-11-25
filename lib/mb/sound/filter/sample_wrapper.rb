@@ -24,7 +24,7 @@ module MB
         #
         # Set +:in_place+ to false if problems occur due to in-place filter
         # processing.
-        def initialize(filter, source, in_place: true)
+        def initialize(filter, source, in_place: false)
           @base_filter = filter
           @source = source.get_sampler
           @in_place = in_place

@@ -39,7 +39,7 @@ module MB
           # uses Cookbook#dynamic_process to vary the cutoff frequency
           # and quality gradually over time.  Each parameter should have a
           # :sample method that returns an array of audio.
-          def initialize(filter:, audio:, cutoff:, quality: 0.5 ** 0.5, in_place: true)
+          def initialize(filter:, audio:, cutoff:, quality: 0.5 ** 0.5, in_place: false)
             raise 'Filter must have a #dynamic_process method' unless filter.respond_to?(:dynamic_process)
             @filter = filter
 
