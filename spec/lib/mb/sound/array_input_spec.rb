@@ -295,4 +295,42 @@ RSpec.describe(MB::Sound::ArrayInput, :aggregate_failures) do
       expect(input.sample(3)).to eq(Numo::DComplex[3, 4+4i])
     end
   end
+
+  describe '#progress' do
+    it 'returns the percentage of playback progress' do
+      input = MB::Sound::ArrayInput.new(data: [Numo::SFloat.zeros(10)])
+      expect(input.progress).to eq(0)
+
+      input.read(5)
+      expect(input.progress).to eq(50)
+    end
+  end
+
+  describe '#elapsed' do
+    it 'returns the time played in seconds' do
+      input = MB::Sound::ArrayInput.new(data: [Numo::SFloat.zeros(64000)], sample_rate: 32000)
+      expect(input.elapsed).to eq(0)
+      input.read(16000)
+      expect(input.elapsed).to eq(0.5)
+    end
+
+    it 'supports different sample rates' do
+      input = MB::Sound::ArrayInput.new(data: [Numo::SFloat.zeros(96000)], sample_rate: 48000)
+      expect(input.elapsed).to eq(0)
+      input.read(24000)
+      expect(input.elapsed).to eq(0.5)
+    end
+  end
+
+  describe '#duration' do
+    it 'returns the total length of data in seconds' do
+      input = MB::Sound::ArrayInput.new(data: [Numo::SFloat.zeros(64000)], sample_rate: 32000)
+      expect(input.duration).to eq(2)
+    end
+
+    it 'supports different sample rates' do
+      input = MB::Sound::ArrayInput.new(data: [Numo::SFloat.zeros(48000)], sample_rate: 48000)
+      expect(input.duration).to eq(1)
+    end
+  end
 end

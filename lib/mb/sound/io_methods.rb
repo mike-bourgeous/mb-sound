@@ -168,6 +168,7 @@ module MB
           output = file_output(filename, sample_rate: sample_rate, channels: data.length, overwrite: overwrite)
           output.write(data)
         end
+
       ensure
         output&.close
       end
