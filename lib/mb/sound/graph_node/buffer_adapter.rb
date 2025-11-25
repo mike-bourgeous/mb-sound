@@ -15,19 +15,31 @@ module MB
 
         include GraphNode
 
+        # The size of the buffer that will be used upstream.
         attr_reader :upstream_count
+
+        # The buffer size to suggest to downstream nodes.
+        attr_reader :buffer_size
 
         def_delegators :@upstream, :sample_rate, :sample_rate=
 
         # Creates a buffer adapter with the given +:upstream+ node to sample,
         # using the given +:upstream_count+ as the value passed to the upstream
         # sample method.
-        def initialize(upstream:, upstream_count:)
+        #
+        # The :buffer_size may be given if no upstream nodes report a buffer
+        # size and you want to override the suggested size for downstream
+        # nodes.  If no upstream nodes report a buffer size and no buffer size
+        # is given, then the reported buffer size will be set to the upstream
+        # count.  This should give the correct result if a pair of buffer
+        # adapters are used to bracket a lower-latency section of a graph.
+        def initialize(upstream:, upstream_count:, buffer_size: nil)
           raise 'Upstream must respond to :sample' unless upstream.respond_to?(:sample)
           raise 'Upstream count must be a positive Integer' unless upstream_count.is_a?(Integer) && upstream_count > 0
 
           @upstream = upstream.get_sampler
           @upstream_count = upstream_count
+          @buffer_size = buffer_size || upstream.graph_buffer_size || upstream_count
         end
 
         # Returns the upstream as the only source for this node.

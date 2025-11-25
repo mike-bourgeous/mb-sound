@@ -72,6 +72,7 @@ RSpec.describe(MB::Sound::GraphNode::BufferAdapter, :aggregate_failures) do
       expect(us).to receive(:sample).with(4).twice.and_return(Numo::SFloat[1,2,3,4], Numo::SFloat[])
       allow(us).to receive(:sample_rate).and_return(48000)
       expect(us).to receive(:get_sampler).and_return(MB::Sound::GraphNode::Tee.new(us, 1).branches[0])
+      expect(us).to receive(:graph_buffer_size).and_return(800)
 
       b = MB::Sound::GraphNode::BufferAdapter.new(upstream: us, upstream_count: 4)
       expect(b.sample(4)).to eq(Numo::SFloat[1,2,3,4])
@@ -83,6 +84,7 @@ RSpec.describe(MB::Sound::GraphNode::BufferAdapter, :aggregate_failures) do
       expect(us).to receive(:sample).with(4).at_least(3).times.and_return(Numo::SFloat[1,2,3,4], Numo::SFloat[5,6,7], nil)
       allow(us).to receive(:sample_rate).and_return(48000)
       expect(us).to receive(:get_sampler).and_return(MB::Sound::GraphNode::Tee.new(us, 1).branches[0])
+      expect(us).to receive(:graph_buffer_size).and_return(800)
 
       b = MB::Sound::GraphNode::BufferAdapter.new(upstream: us, upstream_count: 4)
       expect(b.sample(3)).to eq(Numo::SFloat[1,2,3])
