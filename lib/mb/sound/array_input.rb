@@ -5,7 +5,7 @@ module MB
       include GraphNode
       include GraphNode::IOSampleMixin
 
-      attr_reader :channels, :frames, :sample_rate, :offset, :remaining, :buffer_size, :repeat
+      attr_reader :channels, :frames, :sample_rate, :offset, :remaining, :buffer_size, :repeat, :duration
 
       # Initializes an audio stream that returns slices from the given +data+ (an
       # Array of Arrays or Numo::NArrays, one for each channel).  If the lengths
@@ -18,9 +18,11 @@ module MB
 
         data = data.map { |v| Numo::NArray.cast(v) }
 
+        @sample_rate = sample_rate
         @buffer_size = buffer_size
         @channels = data.length
         @frames = data.map(&:length).max
+        @duration = @frames.to_f / @sample_rate
 
         case
         when data.any?(Numo::DComplex)
@@ -46,8 +48,6 @@ module MB
             c[0...v.length] = v if @frames > 0 && v.length > 0
           }
         }
-
-        @sample_rate = sample_rate
 
         @remaining = @frames
         @offset = 0
@@ -76,6 +76,17 @@ module MB
       # Rewinds to the start of the arrays.  Same as calling seek_set(0).
       def reset
         seek_set(0)
+      end
+
+      # Returns a playback progress as a percentage of the total length from 0
+      # to 100.
+      def progress
+        @offset * 100.0 / @frames
+      end
+
+      # Returns the number of seconds played so far.
+      def elapsed
+        @offset.to_f / @sample_rate
       end
 
       # Reads up to +frames+ frames starting from the current read pointer within

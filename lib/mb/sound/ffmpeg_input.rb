@@ -7,7 +7,7 @@ module MB
     # file formats.
     class FFMPEGInput < IOInput
       # Note: number of frames may be approximate
-      attr_reader :filename, :frames, :info, :raw_info
+      attr_reader :filename, :frames, :info, :raw_info, :duration
 
       # A list of metadata keys that should not be parsed numerically.
       EXCLUDED_CONVERSIONS = [
@@ -146,6 +146,8 @@ module MB
           @frames = (@frames * @sample_rate / @info[:sample_rate]).ceil if @info.include?(:sample_rate)
         end
 
+        @duration = @frames.to_f / @sample_rate
+
         # Usually format is set when ffmpeg is being used for realtime input,
         # so set a smaller pipe size to reduce buffer lag and drop frames to
         # keep live sync in that case.
@@ -172,6 +174,17 @@ module MB
           buffer_size,
           sample_rate: @sample_rate
         )
+      end
+
+      # Returns a playback progress as a percentage of the total length from 0
+      # to 100.
+      def progress
+        @frames_read * 100.0 / @frames
+      end
+
+      # Returns the number of seconds played so far.
+      def elapsed
+        @frames_read.to_f / @sample_rate
       end
     end
   end
