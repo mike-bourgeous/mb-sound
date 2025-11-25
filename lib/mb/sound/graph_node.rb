@@ -79,8 +79,8 @@ module MB
       # method whenever the I/O's #read method is called.
       #
       # TODO: allow combining multiple graphs together for multiple channels
-      def as_input(num_channels = 1)
-        MB::Sound::GraphNodeInput.new(self, channels: num_channels)
+      def as_input(num_channels = 1, buffer_size: nil)
+        MB::Sound::GraphNodeInput.new(self, channels: num_channels, buffer_size: buffer_size)
       end
 
       # Returns +n+ (default 2) fan-out readers for creating branching signal
