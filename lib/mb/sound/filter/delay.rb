@@ -258,6 +258,9 @@ module MB
           if delay_buf
             data = data[0...delay_buf.length] if data.length < delay_buf.length
             delay_buf = delay_buf[0...data.length] if delay_buf.length < data.length
+
+            @min_delay_samples, @max_delay_samples = delay_buf.minmax
+            @last_delay_samples = delay_buf[-1]
           end
 
           # TODO: feedback amount from dynamic source
@@ -301,9 +304,6 @@ module MB
 
             if delay_buf
               # Time-varying delay
-              @min_delay_samples, @max_delay_samples = delay_buf.minmax
-              @last_delay_samples = delay_buf[-1]
-
               # TODO: Something better than linear interpolation?
               # TODO: Allow switching off interpolation?
               # TODO: Use MB::M.fractional_index()?
