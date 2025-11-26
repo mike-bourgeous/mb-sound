@@ -55,12 +55,17 @@ module MB
         @graph_node_name || "id=#{__id__}"
       end
 
+      # Returns the class name, or a custom name set by the subclass (e.g. '/'
+      # for a division proc node).
+      def node_type_name
+        @node_type_name ||= self.class.name.rpartition('::').last
+      end
+
       # Returns the class name of the node plus the node's assigned name or
       # object ID.
       def to_s
         @graph_node_name ||= nil
-        @node_type_name ||= self.class.name.rpartition('::').last
-        "#{@node_type_name}/#{@graph_node_name || "id=#{__id__}"}"
+        "#{node_type_name}/#{@graph_node_name || "id=#{__id__}"}"
       end
 
       # Returns a multiline description of a node suitable for display in a
