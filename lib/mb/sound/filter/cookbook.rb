@@ -33,7 +33,7 @@ module MB
 
           # These return the most recent response, cutoff, quality, etc. from
           # the underlying filter.
-          def_delegators :@base_filter, :sample_rate, :response, :cutoff, :quality, :omega
+          def_delegators :@base_filter, :sample_rate, :response, :cutoff, :quality, :omega, :filter_type
 
           attr_reader :base_filter
 
