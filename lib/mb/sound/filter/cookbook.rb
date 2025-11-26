@@ -31,9 +31,11 @@ module MB
             end
           end
 
-          attr_reader :audio, :cutoff, :quality
+          # These return the most recent response, cutoff, quality, etc. from
+          # the underlying filter.
+          def_delegators :@base_filter, :sample_rate, :response, :cutoff, :quality, :omega
 
-          def_delegators :@filter, :sample_rate
+          attr_reader :base_filter
 
           # Initializes a sample-chain wrapper around a cookbook filter that
           # uses Cookbook#dynamic_process to vary the cutoff frequency
@@ -41,9 +43,9 @@ module MB
           # :sample method that returns an array of audio.
           def initialize(filter:, audio:, cutoff:, quality: 0.5 ** 0.5, in_place: false)
             raise 'Filter must have a #dynamic_process method' unless filter.respond_to?(:dynamic_process)
-            @filter = filter
+            @base_filter = filter
 
-            @node_type_name = "Cookbook (#{@filter.filter_type})"
+            @node_type_name = "Cookbook (#{@base_filter.filter_type})"
 
             @audio = sample_or_narray(audio, si: false, unit: nil, range: -2..2)
             @cutoff = sample_or_narray(cutoff, si: true, unit: 'Hz', range: 0..(filter.sample_rate * 0.5))
@@ -73,7 +75,7 @@ module MB
 
             audio.inplace! if @in_place
 
-            @filter.dynamic_process(audio, cutoff, quality).not_inplace!
+            @base_filter.dynamic_process(audio, cutoff, quality).not_inplace!
           end
 
           # See GraphNode#sources.
@@ -88,16 +90,16 @@ module MB
           # Changes the sample rate of the filter and any upstream sources.
           def sample_rate=(new_rate)
             super
-            @filter.sample_rate = new_rate
+            @base_filter.sample_rate = new_rate
             self
           end
           alias at_rate sample_rate=
 
           # See GraphNode#to_s
           def to_s
-            s = "#{super} -- type: #{@filter.filter_type} #{source_names.join(', ')}"
-            s << " gain: #{@filter.db_gain}dB" if @filter.db_gain
-            s << " slope: #{@filter.shelf_slope}" if @filter.shelf_slope
+            s = "#{super} -- type: #{@base_filter.filter_type} #{source_names.join(', ')}"
+            s << " gain: #{@base_filter.db_gain}dB" if @base_filter.db_gain
+            s << " slope: #{@base_filter.shelf_slope}" if @base_filter.shelf_slope
             s
           end
 
@@ -105,12 +107,12 @@ module MB
           def to_s_graphviz
             s = <<~EOF
             #{super}---------------
-            type: #{@filter.filter_type}
+            type: #{@base_filter.filter_type}
             #{source_names.join("\n")}
             EOF
 
-            s << "gain: #{@filter.db_gain}dB\n" if @filter.db_gain
-            s << "slope: #{@filter.shelf_slope}\n" if @filter.shelf_slope
+            s << "gain: #{@base_filter.db_gain}dB\n" if @base_filter.db_gain
+            s << "slope: #{@base_filter.shelf_slope}\n" if @base_filter.shelf_slope
 
             s
           end
@@ -128,10 +130,10 @@ module MB
               raise WrapperArgumentError.new(source: v)
 
             when Numeric
-              MB::Sound::GraphNode::Constant.new(v, sample_rate: @filter.sample_rate, unit: unit, si: si, range: range)
+              MB::Sound::GraphNode::Constant.new(v, sample_rate: @base_filter.sample_rate, unit: unit, si: si, range: range)
 
             when Numo::NArray
-              MB::Sound::ArrayInput.new(data: [v], sample_rate: @filter.sample_rate)
+              MB::Sound::ArrayInput.new(data: [v], sample_rate: @base_filter.sample_rate)
 
             else
               if v.respond_to?(:sample)
