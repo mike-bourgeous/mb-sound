@@ -56,9 +56,8 @@ module MB
           # but FFMPEGInput -> Mixer -> SampleWrapper is fine.
 
           # TODO: Maybe this nil/empty/short handling could be consolidated?
-          # TODO: Drain FIR filters and delays after a source returns nil
+          # TODO: Drain ring-out from filters and delays after a source returns nil
           return nil if buf.nil? || buf.empty?
-          buf = MB::M.zpad(buf, count) if buf.length < count
 
           buf.inplace! if @in_place
           buf = @base_filter.process(buf)
