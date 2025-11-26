@@ -923,6 +923,12 @@ module MB
         self
       end
 
+      # Walk up sources until a non-Tee::Branch node is found.  Used by #graph.
+      def self.climb_tee_tree(branch)
+        branch = branch.original_source while branch.is_a?(MB::Sound::GraphNode::Tee::Branch)
+        branch
+      end
+
       private
 
       # Sets tones to play forever at full volume, if they don't have a fixed
@@ -934,10 +940,9 @@ module MB
         end
       end
 
-      # Walk up sources until a non-Tee::Branch node is found.  Used by #graph.
+      # Instance-method alias for the class method of the same name.
       def climb_tee_tree(branch)
-        branch = branch.original_source while branch.is_a?(MB::Sound::GraphNode::Tee::Branch)
-        branch
+        MB::Sound::GraphNode.climb_tee_tree(branch)
       end
 
       # Turns a node source, whether Numeric or another node, into a reasonable
@@ -960,11 +965,7 @@ module MB
           s.to_s
 
         when s.is_a?(Numeric)
-          if s.is_a?(Integer) || s.respond_to?(:round) && s.round == s
-            s.round.to_s
-          else
-            MB::M.sigformat(s, 4)
-          end
+          s.to_nice_s(4)
 
         else
           s.to_s

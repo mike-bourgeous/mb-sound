@@ -92,5 +92,9 @@ RSpec.describe(MB::Sound::GraphNode::Constant) do
       expect(0.0125.constant(si: true).to_s).to include('12.500m')
       expect(0.0125.constant(si: false).to_s).to include('0.0125')
     end
+
+    it 'removes trailing zeros' do
+      expect(5.5.constant(si: false).to_s).to end_with('5.5')
+    end
   end
 end

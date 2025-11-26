@@ -1,6 +1,6 @@
 GIT
   remote: https://github.com/mike-bourgeous/mb-math.git
-  revision: bfca39fb566a250b1fa0434d4021b280b28d7d15
+  revision: f85974f09ea62fe82101716763d4c66186aaf221
   branch: wavetable
   specs:
     mb-math (0.4.0.usegit)
@@ -32,7 +32,7 @@ PATH
     mb-sound (0.9.0.1.usegit)
       cmath (~> 1.0.0)
       csv (~> 3.3, >= 3.3.3)
-      mb-math (>= 0.3.0.usegit)
+      mb-math (>= 0.4.0.usegit)
       mb-util (>= 0.1.24.usegit)
       midi-nibbler (~> 0.2.4)
       midilib (~> 4.0.0)

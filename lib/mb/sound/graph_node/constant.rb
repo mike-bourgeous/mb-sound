@@ -150,7 +150,7 @@ module MB
           elsif @si
             s = MB::M.sigformat(@constant, 5)
           else
-            s = '%.4f' % @constant
+            s = @constant.to_nice_s(4)
           end
 
           "#{s}#{unit}"
