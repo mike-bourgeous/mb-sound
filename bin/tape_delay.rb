@@ -129,7 +129,7 @@ begin
 
   # Feedback, with a spy to save feedback buffer, using a shorter buffer size
   # for the feedback loop, allowing shorter delays
-  feedback_loop = c.spy { |z| a[] = z if z }
+  feedback_loop = c.spy { |z| a[] = z if z && z.length == a.length }
 
   # Final output
   result = (dry.constant.named('dry') * inp + wet.constant.named('wet') * feedback_loop)

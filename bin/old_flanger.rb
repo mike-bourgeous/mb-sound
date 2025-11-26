@@ -77,7 +77,7 @@ begin
     b = 0.hz.forever.proc { a }.delay(samples: d_fb, smoothing: delay_smoothing2)
 
     # Final output, with a spy to save feedback buffer
-    wet = (feedback * b - del).softclip(0.85, 0.95).spy { |z| a[] = z if z }
+    wet = (feedback * b - del).softclip(0.85, 0.95).spy { |z| a[] = z if z && z.length == a.length }
 
     (inp * dry_level + wet * wet_level).softclip(0.85, 0.95)
   }

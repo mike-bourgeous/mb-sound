@@ -173,7 +173,7 @@ begin
     b = 0.constant.proc { a }.delay(samples: d_fb, smoothing: delay_smoothing2)
 
     # Effected output, with a spy to save feedback buffer
-    wet = (feedback * b - inp_delayed).softclip(0.85, 0.95).spy { |z| a[] = z if z }
+    wet = (feedback * b - inp_delayed).softclip(0.85, 0.95).spy { |z| a[] = z if z && z.length == a.length }
 
     dryconst = dry_level.constant.named('Dry level')
     wetconst = wet_level.constant.named('Wet level')
