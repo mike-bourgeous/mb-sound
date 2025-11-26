@@ -155,6 +155,14 @@ module MB
 
           "#{s}#{unit}"
         end
+
+        # Same as #value_string for compatibility with other arithmetic nodes.
+        #
+        # Named nodes will show up as their names, so you can name this node to
+        # show that instead of the value.
+        def arithmetic_string(_separator = ' ')
+          value_string
+        end
       end
     end
   end

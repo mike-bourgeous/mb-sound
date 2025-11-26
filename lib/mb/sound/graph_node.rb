@@ -202,6 +202,7 @@ module MB
       # Appends a node that calculates the natural logarithm of values passing
       # through.
       def log
+        # TODO: arithmetic_string for unary functions
         self
           .proc(type_name: 'ln') { |v| MB::FastSound.narray_log(v) }
           .named("ln(#{make_source_name(self)})")
@@ -936,14 +937,29 @@ module MB
 
       # Turns a node source, whether Numeric or another node, into a reasonable
       # String representation, skipping Tee branches.
-      def make_source_name(numeric_or_node)
+      #
+      # The +:separator+ is used for joining terms in arithmetic nodes.
+      def make_source_name(numeric_or_node, separator: ' ')
         s = climb_tee_tree(numeric_or_node)
         case
+        when s.respond_to?(:graph_node_name) && s.named?
+          s.graph_node_name
+
+        when s.respond_to?(:arithmetic_string)
+          parenthesize(s.arithmetic_string(separator))
+
         when s.respond_to?(:name_or_id)
           s.name_or_id
 
+        when s.is_a?(Complex)
+          s.to_s
+
         when s.is_a?(Numeric)
-          MB::M.sigformat(s, 4)
+          if s.is_a?(Integer) || s.respond_to?(:round) && s.round == s
+            s.round.to_s
+          else
+            MB::M.sigformat(s, 4)
+          end
 
         else
           s.to_s
@@ -962,7 +978,7 @@ module MB
         if other.respond_to?(:sample)
           other = other.get_sampler
 
-          self.proc({operand: other}, type_name: "#{name} (dynamic)") { |v|
+          pr = self.proc({operand: other}, type_name: "#{name} (dynamic)") { |v|
             next nil if v.nil? || v.empty?
 
             data = other.sample(v.length)
@@ -987,7 +1003,7 @@ module MB
             end
           }.named("#{climb_tee_tree(self).name_or_id} #{name} #{climb_tee_tree(other).name_or_id}")
         else
-          self.proc({operand: other}, type_name: "#{name} (constant)") { |v|
+          pr = self.proc({operand: other}, type_name: "#{name} (constant)") { |v|
             if v.nil? || v.empty?
               nil
             else
@@ -996,6 +1012,30 @@ module MB
               ret.not_inplace!
             end
           }.named("#{climb_tee_tree(self).name_or_id} #{name} #{other}")
+        end
+
+        pr.tap { |pr|
+          pr.instance_variable_set(:@operator, name)
+          def pr.arithmetic_string(separator = ' ')
+            src = climb_tee_tree(@sources.values[0])
+            dest = climb_tee_tree(@sources.values[1])
+            a = make_source_name(src)
+            b = make_source_name(dest)
+
+            "#{a} #{@operator}#{separator}#{b}"
+          end
+        }
+      end
+
+      # Adds parentheses around a mathematical statement if it contains any
+      # operators or spaces.
+      def parenthesize(str)
+        if str.match?(/[[:space:][:punct:]]/)
+          # TODO: maybe count parenthetical nestings to see if there's already
+          # a global parenthesis
+          "(#{str})"
+        else
+          str
         end
       end
     end

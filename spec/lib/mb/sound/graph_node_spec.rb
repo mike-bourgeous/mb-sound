@@ -641,6 +641,15 @@ RSpec.describe(MB::Sound::GraphNode, aggregate_failures: true) do
         end
       end
     end
+
+    context 'with #arithmetic_string' do
+      it 'can return a coalesced mathematical statement' do
+        q = ((1.constant + 3 + 5 + 7) * 11) / 13
+        expect(q.arithmetic_string).to eq("(11 * (((1 + 3) + 5) + 7)) / 13")
+      end
+
+      pending 'unary functions when implemented'
+    end
   end
 
   context 'graph introspection' do

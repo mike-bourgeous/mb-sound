@@ -179,17 +179,31 @@ module MB
         # Includes the arithmetic interpretation of the multiplier after GraphNode#to_s.
         def to_s
           names = @multiplicands.keys.map(&method(:make_source_name))
-          "#{super} -- #{@constant == 1 ? '' : "#{@constant} * "}#{names.join(' * ')}"
+          "#{super} -- #{arithmetic_string}"
         end
 
         # Includes the arithmetic interpretation of the multiplier after
         # GraphNode#to_s_graphviz.
         def to_s_graphviz
-          names = @multiplicands.keys.map(&method(:make_source_name))
           <<~EOF
           #{super}---------------
-          #{@constant == 1 ? '' : "#{@constant} *\n"}#{names.join(" *\n")}
+          #{arithmetic_string("\n")}
           EOF
+        end
+
+        # Returns a String showing the math performed by this Multiplier and
+        # any upstream connected arithmetic nodes.
+        #
+        # Named nodes will show up as their names, so you can name an
+        # arithmetic node to prevent joining the arithmetic terms past that
+        # node.
+        def arithmetic_string(separator = ' ')
+          names = @multiplicands.keys.map { |n|
+            n = climb_tee_tree(n)
+            make_source_name(n, separator: separator)
+          }
+
+          "#{@constant == 1 ? '' : "#{@constant} *#{separator}"}#{names.join(" *#{separator}")}"
         end
 
         private

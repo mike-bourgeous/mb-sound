@@ -183,7 +183,7 @@ module MB
 
         # Adds the arithmetic form of the mixer to GraphNode#to_s.
         def to_s
-          "#{super} -- #{arithmetic_terms.join(' + ').gsub('+ -', '- ')}"
+          "#{super} -- #{arithmetic_string}"
         end
 
         # Appends the arithmetic form of the mixer after
@@ -191,8 +191,43 @@ module MB
         def to_s_graphviz
           <<~EOF
           #{super}---------------
-          #{arithmetic_terms.join(" +\n").gsub("+\n-", "-\n")}
+          #{arithmetic_string("\n")}
           EOF
+        end
+
+        # Returns a String showing the math under the hood of this Mixer.
+        #
+        # Named nodes will show up as their names, so you can name an
+        # arithmetic node to prevent joining the arithmetic terms past that
+        # node.
+        def arithmetic_string(separator = ' ')
+          arithmetic_terms(separator).join(" +#{separator}").gsub("+#{separator}-", "-#{separator}")
+        end
+
+        # Returns an Array of terms that can be joined with pluses to produce a
+        # mathematical statement, for #to_s and #to_s_graphviz.
+        #
+        # See #arithmetic_string.
+        def arithmetic_terms(separator)
+          terms = @gains.map { |src, g|
+            src = climb_tee_tree(src)
+            str = make_source_name(src, separator: separator)
+
+            case g
+            when 1
+              str
+
+            when -1
+              "-#{str}"
+
+            else
+              "#{make_source_name(g)} * #{str}"
+            end
+          }
+
+          terms << make_source_name(@constant) unless @constant == 0
+
+          terms
         end
 
         private
@@ -214,29 +249,6 @@ module MB
               @orig_to_samp.fetch(summand)
             end
           end
-        end
-
-        # Returns an Array of terms that can be joined with pluses to produce a
-        # mathematical statement, for #to_s and #to_s_graphviz.
-        def arithmetic_terms
-          terms = @gains.map { |src, g|
-            src = climb_tee_tree(src)
-
-            case g
-            when 1
-              src.name_or_id
-
-            when -1
-              "-#{src.name_or_id}"
-
-            else
-              "#{g} * #{src.name_or_id}"
-            end
-          }
-
-          terms << @constant unless @constant == 0
-
-          terms
         end
       end
     end
