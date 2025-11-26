@@ -11,7 +11,14 @@ module MB
 
         VALID_MODES = [:real, :imag, :abs, :arg]
 
-        attr_reader :mode
+        MODE_NAMES = {
+          real: 'Real',
+          imag: 'Imaginary',
+          abs: 'Absolute',
+          arg: 'Argument',
+        }
+
+        attr_reader :mode, :mode_name
 
         def_delegators :@input, :sample_rate, :sample_rate=
 
@@ -24,6 +31,7 @@ module MB
 
           @input = input.get_sampler
           @mode = mode
+          @mode_name = MODE_NAMES[mode]
         end
 
         # Returns a source list containing the original input given to the
@@ -92,14 +100,14 @@ module MB
 
         # Single-line description.
         def to_s
-          "#{super} -- #{@mode}"
+          "#{super} -- #{@mode_name}"
         end
 
         # Multiline description for GraphViz.
         def to_s_graphviz
           <<~EOF
           #{super}---------------
-          #{@mode}
+          #{@mode_name}
           EOF
         end
       end
