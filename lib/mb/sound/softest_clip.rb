@@ -15,6 +15,7 @@ module MB
       # Initializes a soft clipper that is linear between +/- +:threshold+, and
       # hyperbolically approaches +:limit+ above that.
       def initialize(threshold:, limit: 1)
+        # TODO: support dynamic threshold and limit from narrays or graph nodes
         update(threshold.abs, limit.abs)
       end
 
@@ -61,6 +62,14 @@ module MB
             end
           }
         end
+      end
+
+      def to_s
+        "SoftestClip -- threshold: #{@threshold}, limit: #{@limit}"
+      end
+
+      def to_s_graphviz
+        "SoftestClip\nthreshold: #{@threshold}\nlimit: #{@limit}"
       end
 
       private

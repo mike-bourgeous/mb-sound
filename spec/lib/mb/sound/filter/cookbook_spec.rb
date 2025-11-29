@@ -13,8 +13,8 @@ RSpec.describe(MB::Sound::Filter::Cookbook, :aggregate_failures) do
       )
 
       # Verify types within the wrapper
-      expect(wrapper.cutoff).to be_a(MB::Sound::Tone)
-      expect(wrapper.quality).to be_a(MB::Sound::GraphNode::Constant)
+      expect(wrapper.sources[:cutoff].original_source).to be_a(MB::Sound::Tone)
+      expect(wrapper.sources[:quality]).to be_a(MB::Sound::GraphNode::Constant)
 
       # Verify alternating cutoff frequencies
       expect(wrapper.sample(5000)).to be_a(Numo::SFloat)
@@ -39,8 +39,8 @@ RSpec.describe(MB::Sound::Filter::Cookbook, :aggregate_failures) do
       )
 
       # Verify types within the wrapper
-      expect(wrapper.cutoff).to be_a(MB::Sound::ArrayInput)
-      expect(wrapper.quality).to be_a(MB::Sound::GraphNode::Constant)
+      expect(wrapper.sources[:cutoff]).to be_a(MB::Sound::ArrayInput)
+      expect(wrapper.sources[:quality]).to be_a(MB::Sound::GraphNode::Constant)
 
       # Verify cutoff array generation
       expect(cutoff[0].round(3)).to eq(500)
@@ -72,6 +72,20 @@ RSpec.describe(MB::Sound::Filter::Cookbook, :aggregate_failures) do
 
       f = a3.dup.filter(:lowpass, cutoff: a2.dup, quality: a1.dup)
       expect(f.sample(7).length).to eq(4)
+    end
+
+    it 'sets units on created constants' do
+      f = 1510.hz.lowpass
+      wrap = MB::Sound::Filter::Cookbook::CookbookWrapper.new(
+        filter: f,
+        audio: 0,
+        cutoff: 1510,
+        quality: 0.70711
+      )
+
+      expect(wrap.sources[:quality].value_string).to eq('0.7071 Q')
+      expect(wrap.sources[:cutoff].value_string).to eq('1.5100kHz')
+      expect(wrap.sources[:cutoff].range).to eq(0..24000)
     end
 
     describe '#at_rate' do

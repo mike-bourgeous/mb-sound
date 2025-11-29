@@ -215,4 +215,68 @@ RSpec.describe MB::Sound::FFMPEGInput do
       expect { input.read(1) }.to raise_exception(IOError)
     end
   end
+
+  context 'progress and time functions' do
+    let(:filename) { |ex| "tmp/file_io_time_funcs_#{ex.description.downcase.gsub(/[^a-z0-9]+/, '_')}.flac" }
+    let(:sample_rate) { 48000 }
+    let(:input) { |ex|
+      FileUtils.mkdir_p('tmp')
+      File.unlink(filename) rescue nil
+      MB::Sound.write(filename, [Numo::SFloat.zeros(sample_rate * 2)], sample_rate: sample_rate)
+      MB::Sound::FFMPEGInput.new(filename)
+    }
+
+    describe '#progress' do
+      it 'returns the percentage of playback progress' do
+        expect(input.progress).to eq(0)
+
+        input.read(48000)
+        expect(input.progress).to eq(50)
+      end
+
+      context 'with sample rate at 32k' do
+        let(:sample_rate) { 32000 }
+
+        it 'works with different sample rates' do
+        expect(input.progress).to eq(0)
+
+        input.read(32000)
+        expect(input.progress).to eq(50)
+        end
+      end
+    end
+
+    describe '#elapsed' do
+      it 'returns the time played in seconds' do
+        expect(input.elapsed).to eq(0)
+        input.read(24000)
+        expect(input.elapsed).to eq(0.5)
+      end
+
+      context 'with sample rate at 32k' do
+        let(:sample_rate) { 32000 }
+
+        it 'supports different sample rates' do
+          expect(input.elapsed).to eq(0)
+          input.read(16000)
+          expect(input.elapsed).to eq(0.5)
+        end
+      end
+    end
+
+    describe '#duration' do
+      it 'returns the total length of data in seconds' do
+        expect(input.duration).to eq(2)
+      end
+
+      context 'with sample rate at 32k' do
+        let(:sample_rate) { 32000 }
+
+        it 'supports different sample rates' do
+          expect(input.duration).to eq(2)
+          expect(input.sample_rate).to eq(sample_rate)
+        end
+      end
+    end
+  end
 end

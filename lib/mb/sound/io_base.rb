@@ -20,8 +20,10 @@ module MB
         @sample_rate = sample_rate.to_f
 
         if io_or_popen_args.is_a?(Array)
+          @popen = true
           @io = run(*io_or_popen_args)
         else
+          @popen = false
           @io = io_or_popen_args
         end
       end
@@ -36,12 +38,14 @@ module MB
       def close
         return unless @io
 
-        old_result = $?
         @io.close
         @io = nil
-        new_result = $?
 
-        new_result.equal?(old_result) ? nil : new_result
+        if @popen
+          $?
+        else
+          nil
+        end
       end
 
       private

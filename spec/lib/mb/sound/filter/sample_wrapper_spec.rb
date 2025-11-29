@@ -1,9 +1,9 @@
 RSpec.describe(MB::Sound::Filter::SampleWrapper, :aggregate_failures) do
   describe '#sample' do
-    it 'pads short inputs' do
+    it 'does not pad short inputs' do
       i = 1000.hz.lowpass.wrap(0.hz.square.at(0).at_rate(50).for(1))
       expect(i.sample(10)).to eq(Numo::SFloat.zeros(10))
-      expect(i.sample(80)).to eq(Numo::SFloat.zeros(80))
+      expect(i.sample(80)).to eq(Numo::SFloat.zeros(40))
       expect(i.sample(50)).to eq(nil)
     end
 
@@ -19,7 +19,7 @@ RSpec.describe(MB::Sound::Filter::SampleWrapper, :aggregate_failures) do
       a = 2.constant
       b = 15.hz
       c = a * b
-      d = c.filter(100.hz.lowpass)
+      d = c.delay(samples: 1)
 
       expect(d).to be_a(MB::Sound::Filter::SampleWrapper)
       d.at_rate(1234)

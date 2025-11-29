@@ -191,7 +191,7 @@ module MB
         @phase_mod = nil
         @no_trigger = false
         self.or_at(amplitude).or_for(duration).at_rate(sample_rate).with_phase(phase)
-        set_frequency(frequency)
+        set_frequency(fixup_source(frequency))
       end
 
       # Changes the waveform type to sine.
@@ -324,7 +324,7 @@ module MB
 
       # Sets the default duration in seconds, if #for and #forever have not
       # been called.  Pass nil to default to playing forever.
-      def or_for(duration)
+      def or_for(duration, recursive: :ignored)
         unless @duration_set
           @duration = duration&.to_f
         end
@@ -415,8 +415,8 @@ module MB
       def fm(tone, index = nil)
         tone = tone.hz if tone.is_a?(Numeric)
         tone = tone.at(1) if index && tone.is_a?(Tone)
-        tone = tone.or_for(nil) if tone.respond_to?(:or_for)
-        tone = tone.at_rate(@sample_rate) if tone.respond_to?(:at_rate) && tone.sample_rate != @sample_rate
+        tone = fixup_source(tone)
+        index = fixup_source(index)
         @frequency = MB::Sound::GraphNode::Mixer.new([@frequency, [tone, index || 1]], sample_rate: @sample_rate)
         self
       end
@@ -433,11 +433,14 @@ module MB
       def log_fm(tone, index = nil)
         tone = tone.hz if tone.is_a?(Numeric)
         tone = tone.at(1) if index && tone.is_a?(Tone)
-        tone = tone.or_for(nil) if tone.respond_to?(:or_for)
-        tone = tone.at_rate(@sample_rate) if tone.respond_to?(:at_rate) && tone.sample_rate != @sample_rate
+
+        tone = fixup_source(tone)
+        index = fixup_source(index)
+
         tone = 2 ** (tone / 12)
         tone = tone * index if index
         @frequency = @frequency * tone
+
         self
       end
 
@@ -453,10 +456,13 @@ module MB
             tone.or_at(1)
           end
         end
-        tone = tone.or_for(nil) if tone.respond_to?(:or_for)
-        tone = tone.at_rate(@sample_rate) if tone.respond_to?(:at_rate) && tone.sample_rate != @sample_rate
+
+        tone = fixup_source(tone)
+        index = fixup_source(index)
+
         tone = tone * index if index
         @phase_mod = tone
+
         self
       end
 
@@ -521,10 +527,15 @@ module MB
         oscillator.sample(count.round)
       end
 
-      # See GraphNode#sources.  Returns the frequency source of the tone,
-      # which will either be a number or a signal generator.
+      # See GraphNode#sources.  Returns the frequency and phase modulation
+      # source of the tone, which will either be a number or a signal
+      # generator.
       def sources
-        [@frequency, @phase_mod].compact
+        {
+          frequency: @frequency,
+          phase: @phase,
+          phase_mod: @phase_mod,
+        }.compact
       end
 
       # Returns an Oscillator that will generate a wave with the wave type,
@@ -620,7 +631,36 @@ module MB
       end
 
       def to_s
-        inspect
+        "#{super} -- #{@wave_type} freq=#{make_source_name(@frequency)} range=#{@range}"
+      end
+
+      def to_s_graphviz
+        <<~EOF
+        #{super}---------------
+        #{@wave_type}
+        freq=#{make_source_name(@frequency)}
+        range=#{@range}
+        EOF
+      end
+
+      # Allow comparison of tones by frequency for use in Range.
+      def <=>(other)
+        f1 = @frequency
+
+        case other
+        when Numeric
+          f2 = other
+
+        when Tone
+          f2 = other.frequency
+
+        else
+          raise TypeError, "Cannot convert #{other.class} to Tone or Numeric"
+        end
+
+        raise "Cannot compare dynamic frequencies" unless f1.is_a?(Numeric) && f2.is_a?(Numeric)
+
+        f1 <=> f2
       end
 
       private
@@ -628,12 +668,35 @@ module MB
       # Allows subclasses (e.g. Note) to change the frequency after construction.
       def set_frequency(freq)
         freq = SPEED_OF_SOUND / freq.meters if freq.is_a?(Feet) || freq.is_a?(Meters)
-        freq = freq.to_f if freq.is_a?(Numeric)
+
+        if freq.is_a?(Numeric)
+          freq = freq.to_f if freq.is_a?(Numeric)
+          @period = 1.0 / freq
+          @period_samples = @period * @sample_rate
+        else
+          @period = nil
+          @period_samples = nil
+        end
+
         @frequency = freq
-        @period = 1.0 / @frequency
-        @period_samples = @period * @sample_rate
         @wavelength = (SPEED_OF_SOUND / @frequency).meters if @frequency.is_a?(Numeric)
         @oscillator&.frequency = @frequency
+      end
+
+      # Configures the source given as the frequency, FM amount, PM amount,
+      # etc. for indefinite playback and for this node's sample rate.  Returns
+      # a tee'd sampler from the source if it responds to :get_sampler, or the
+      # source itself.
+      #
+      # Returns nil if the source is nil.
+      def fixup_source(src)
+        return nil if src.nil?
+
+        src = src.or_at(1) if src.is_a?(Tone)
+        src = src.or_for(nil) if src.respond_to?(:or_for)
+        src = src.at_rate(@sample_rate) if src.respond_to?(:at_rate) && src.sample_rate != @sample_rate
+        src = src.get_sampler if src.respond_to?(:get_sampler)
+        src
       end
     end
   end

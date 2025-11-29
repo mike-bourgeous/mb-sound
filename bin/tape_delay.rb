@@ -1,6 +1,6 @@
 #!/usr/bin/env ruby
 # A simple, mono, tape-simulator echo with feedback.
-# (C)2022-2024 Mike Bourgeous
+# (C)2022-2025 Mike Bourgeous
 #
 # Usage: [DRY=1.0] [WET=1.0] [DRIVE=1.0] [PITCH=1 [SMOOTHING=2]] $0 [delay_s [feedback [extra_time]]] [filename]
 #
@@ -29,13 +29,15 @@ if ARGV.include?('--help')
   exit 1
 end
 
+graphviz = !!ARGV.delete('--graphviz')
+overwrite = !!ARGV.delete('--overwrite')
 numerics, others = ARGV.partition { |arg| arg.strip =~ /\A\+?[0-9]+(\.[0-9]+)?\z/ }
 
 delay, feedback, extra = numerics.map(&:to_f)
 delay ||= 0.1
 feedback ||= 0.75 # TODO: Allow controlling first delay amplitude separately
 
-filename = others[0]
+filename, outfile, *_ = others
 
 if filename && File.readable?(filename)
   # Extend input duration by a suitable delay decay time, e.g. RT60
@@ -59,7 +61,11 @@ else
   input_buffer_size = input.buffer_size
 end
 
-output = MB::Sound.output
+if outfile
+  output = MB::Sound.file_output(outfile, sample_rate: input.sample_rate, channels: 1, overwrite: overwrite)
+else
+  output = MB::Sound.output
+end
 bufsize = output.buffer_size
 
 oversample = ENV['OVERSAMPLE']&.to_f || 2
@@ -84,6 +90,7 @@ puts MB::U.highlight({
   feedback: feedback,
   extra_time: extra,
   input: input.graph_node_name,
+  output: output, # TODO: more concise output
   sample_rate: output.sample_rate,
   oversample: oversample,
   buffer: bufsize,
@@ -96,44 +103,45 @@ end
 
 # TODO: Make it easy to replicate a signal graph for each of N channels
 # TODO: stereo+, ping-pong
+# TODO: MIDI control
 
 begin
   # Use the input buffer size when reading from the input, so our feedback loop
   # can run with a different buffer size.
   # TODO: maybe this should be automatic
-  inp, inp_dry = input.with_buffer(input_buffer_size).resample(mode: :libsamplerate_fastest).named(filename || 'audio in').tee
-  inp.named('pre-delay input')
-  inp_dry.named('dry output')
+  inp = input.with_buffer(input_buffer_size).resample(mode: :libsamplerate_fastest).named(filename || 'audio in')
 
   # Feedback buffer, overwritten by a later call to #spy
   a = Numo::SFloat.zeros(internal_bufsize)
 
   # Feedback injector and delay
-  adjusted_delay = (delay_samples - internal_bufsize.constant).clip(0, nil)
-  b = (inp * drive + 0.constant.proc { a } * feedback).delay(samples: adjusted_delay, smoothing: smoothing, sample_rate: input.sample_rate * oversample)
+  adjusted_delay = (delay_samples.constant.named('delay in samples') - internal_bufsize.constant.named('buffer size')).clip(0, nil)
+  b = (inp * drive.constant.named('drive') + 0.constant.proc { a }.named('feedback') * feedback)
+    .delay(samples: adjusted_delay, smoothing: smoothing, sample_rate: input.sample_rate * oversample)
+    .named('delay')
 
   # Tape saturator
   c = b
-    .filter(200.hz.highpass(quality: 0.5))
-    .filter(3000.hz.lowpass(quality: 0.5))
+    .filter(200.hz.highpass(quality: 0.5)).named('highpass')
+    .filter(3000.hz.lowpass(quality: 0.5)).named('lowpass')
     .softclip(0, 0.5)
     .named('tape sim')
 
   # Feedback, with a spy to save feedback buffer, using a shorter buffer size
   # for the feedback loop, allowing shorter delays
-  feedback_loop = c
-    .spy { |z| a[] = z if z }
-    .named('feedback')
+  feedback_loop = c.spy { |z| a[] = z if z && z.length == a.length }
 
   # Final output
-  result = (dry * inp_dry + wet * feedback_loop)
+  result = (dry.constant.named('dry') * inp + wet.constant.named('wet') * feedback_loop)
     .softclip(0.75, 0.95)
     .with_buffer(internal_bufsize)
     .oversample(oversample, mode: :libsamplerate_fastest)
     .named('mixed output')
 
-  File.write('/tmp/tape_delay.dot', result.graphviz)
-  `dot -Tpng:cairo /tmp/tape_delay.dot -o /tmp/tape_delay.png`
+  if graphviz
+    png = result.open_graphviz
+    puts "Wrote GraphViz image to #{png}"
+  end
 
   loop do
     data = result.sample(output.buffer_size)

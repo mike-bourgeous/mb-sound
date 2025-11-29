@@ -168,6 +168,7 @@ module MB
           output = file_output(filename, sample_rate: sample_rate, channels: data.length, overwrite: overwrite)
           output.write(data)
         end
+
       ensure
         output&.close
       end
@@ -194,14 +195,13 @@ module MB
       # Opens the given file as an output stream with a :write method.  The
       # number of +:channels+ must be provided.  Sample rate defaults to 48k.
       # Existing files will not be overwritten, and an error will be raised,
-      # unless +:overwrite+ is true.  Other keyword arguments are passed to
-      # MB::Sound::FFMPEGOutput#initialize.
+      # unless +:overwrite+ is true or :prompt.  Other keyword arguments are
+      # passed to MB::Sound::FFMPEGOutput#initialize.
       #
       # See MB::Sound::FFMPEGOutput.
+      # See MB::Util::FileMethods#prevent_overwrite.
       def file_output(filename, sample_rate: 48000, channels:, overwrite: false, **kwargs)
-        if !overwrite && File.exist?(filename)
-          raise FileExistsError, "#{filename.inspect} already exists"
-        end
+        MB::U.prevent_overwrite(filename, prompt: overwrite == :prompt) unless overwrite == true
 
         MB::Sound::FFMPEGOutput.new(filename, channels: channels, sample_rate: sample_rate, **kwargs)
       end
@@ -211,7 +211,8 @@ module MB
       # MB::Sound::JackFFI connection to the Jackd audio server.  Used by
       # #input and #output.
       def jack
-        @jack ||= MB::Sound::JackFFI[].tap { |j| j.logger = Logger.new(STDOUT, level: Logger::ERROR) }
+        log_level = ENV['JACK_DEBUG'] == '1' ? Logger::DEBUG : Logger::ERROR
+        @jack ||= MB::Sound::JackFFI[].tap { |j| j.logger = Logger.new(STDOUT, level: log_level) }
       end
 
       # Tries to auto-detect an input device for recording sound.  Returns a

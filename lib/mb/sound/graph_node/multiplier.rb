@@ -40,6 +40,7 @@ module MB
         def initialize(*multiplicands, stop_early: true, sample_rate: nil)
           @constant = 1
           @multiplicands = {}
+          @multmap = {}
           @sample_rate = sample_rate&.to_f
 
           setup_buffer(length: 1024)
@@ -59,8 +60,7 @@ module MB
               raise "Multiplicand cannot be an Array, even though it responds to :sample"
 
             when m.respond_to?(:sample)
-              raise "Duplicate multiplicand #{m} at index #{idx}" if @multiplicands.include?(m)
-              @multiplicands[m] = m
+              add(m)
 
             else
               raise ArgumentError, "Multiplicand #{m.inspect} at index #{idx} is not a Numeric and does not respond to :sample"
@@ -94,26 +94,49 @@ module MB
         # Returns the multiplicand at the given index by insertion order
         # (starting at 0), or the given multiplicand by identity if present.
         def [](multiplicand)
-          multiplicand = @multiplicands.keys[multiplicand] if multiplicand.is_a?(Integer)
-          @multiplicands[multiplicand]
+          find_multiplicand(multiplicand)
         end
 
         # Adds another multiplicand (e.g. an envelope generator) to the product.
-        def <<(multiplicand)
+        def add(multiplicand)
           raise "Multiplicand #{multiplicand} must respond to :sample" unless multiplicand.respond_to?(:sample)
-          raise "Multiplicand may not be an Array" if multiplicand.is_a?(Array)
+          raise "Multiplicand must not be an Array" if multiplicand.is_a?(Array)
           check_rate(multiplicand)
-          @multiplicands[multiplicand] = multiplicand
+
+          samp = multiplicand.get_sampler
+          @multiplicands[samp] = multiplicand
+          @multmap[multiplicand] ||= Set.new()
+          @multmap[multiplicand] << samp
+
+          multiplicand
         end
-        alias add <<
 
         # Removes the given +multiplicand+ from the product.  The +multiplicand+
         # may be an Integer to refer to a multiplicand by insertion order
         # (starting at 0), in which case multiplicands added after this one will
-        # have their index decremented by one.
+        # have their index decremented by one.  If a +multiplicand+ reference
+        # is given, all instances of the multiplicand will be removed.
         def delete(multiplicand)
-          multiplicand = @multiplicands.keys[multiplicand] if multiplicand.is_a?(Integer)
-          @multiplicands.delete(multiplicand)
+          if multiplicand.is_a?(Integer)
+            samp = @multiplicands.keys.fetch(multiplicand)
+            multiplicand = @multiplicands[samp]
+            @multiplicands.delete(samp)
+            @multmap[multiplicand].delete(samp)
+            @multmap.delete(multiplicand) if @multmap[multiplicand].empty?
+            samp.destroy
+          else
+            multiplicand = find_multiplicand(multiplicand)
+            return unless multiplicand
+
+            @multmap[multiplicand].each do |samp|
+              @multiplicands.delete(samp)
+              samp.destroy
+            end
+
+            @multmap.delete(multiplicand)
+          end
+
+          multiplicand
         end
 
         # Removes all multiplicands, but does not reset the constant, if set.
@@ -132,31 +155,66 @@ module MB
           @multiplicands.empty?
         end
 
+        # Returns true if the given multiplicand exists on this multiplier.
+        def include?(other)
+          @multmap.include?(other)
+        end
+
         # Returns an Array of the multiplicands in this product (exclusive of
         # constant).
         def multiplicands
-          @multiplicands.keys
+          @multmap.keys
         end
 
         # See GraphNode#sources
         def sources
-          @multiplicands.keys + [@constant]
+          {
+            constant: @constant,
+            **@multiplicands.keys.map.with_index { |src, idx|
+              [:"input_#{idx + 1}", src]
+            }.to_h
+          }
         end
 
-        # Adds the given +other+ sample source to this multiplier, or
-        # multiplies the constant by +other+ if it is a Numeric.
-        def *(other)
-          if other.is_a?(Numeric)
-            @constant *= other
-          else
-            raise "Multiplicand #{other} is already present on multiplier #{self}" if @multiplicands.include?(other)
-            other.or_for(nil) if other.respond_to?(:or_for) # Default to playing forever
-            other.or_at(1) if other.respond_to?(:or_at) # Keep amplitude high
-            other.at_rate(@sample_rate) if other.respond_to?(:at_rate) # Match sample rates
-            add(other)
+        # Includes the arithmetic interpretation of the multiplier after GraphNode#to_s.
+        def to_s
+          names = @multiplicands.keys.map(&method(:make_source_name))
+          "#{super} -- #{arithmetic_string}"
+        end
+
+        # Includes the arithmetic interpretation of the multiplier after
+        # GraphNode#to_s_graphviz.
+        def to_s_graphviz
+          <<~EOF
+          #{super}---------------
+          #{arithmetic_string("\n")}
+          EOF
+        end
+
+        # Returns a String showing the math performed by this Multiplier and
+        # any upstream connected arithmetic nodes.
+        #
+        # Named nodes will show up as their names, so you can name an
+        # arithmetic node to prevent joining the arithmetic terms past that
+        # node.
+        def arithmetic_string(separator = ' ')
+          names = @multiplicands.keys.map { |n|
+            n = climb_tee_tree(n)
+            make_source_name(n, separator: separator)
+          }
+
+          "#{@constant == 1 ? '' : "#{@constant} *#{separator}"}#{names.join(" *#{separator}")}"
+        end
+
+        private
+
+        def find_multiplicand(multiplicand)
+          if multiplicand.is_a?(Integer)
+            samp = @multiplicands.keys.fetch(multiplicand)
+            multiplicand = @multiplicands[samp]
           end
 
-          self
+          @multmap.include?(multiplicand) ? multiplicand : nil
         end
       end
     end

@@ -1,3 +1,5 @@
+require 'shellwords'
+
 module MB
   module Sound
     # Adds methods to any class that implements a :sample method to build
@@ -32,9 +34,6 @@ module MB
     #
     # TODO: In-line method to create a meter?
     #
-    # TODO: Pass default sample rate through from source nodes or have a
-    # graph-global sample rate
-    #
     # TODO: Document methods that nodes must implement or override
     module GraphNode
       attr_reader :graph_node_name
@@ -51,10 +50,42 @@ module MB
         @named ||= false
       end
 
-      # Returns the class name of the node plus the node's assigned name.
+      # Returns the assigned node name if present, or the object ID if not.
+      def name_or_id
+        @graph_node_name || "id=#{__id__}"
+      end
+
+      # Returns the class name, or a custom name set by the subclass (e.g. '/'
+      # for a division proc node).
+      def node_type_name
+        @node_type_name ||= self.class.name.rpartition('::').last
+      end
+
+      # Returns the class name of the node plus the node's assigned name or
+      # object ID.
       def to_s
         @graph_node_name ||= nil
-        "#{self.class.name}/#{@graph_node_name || __id__}"
+        "#{node_type_name}/#{@graph_node_name || "id=#{__id__}"}"
+      end
+
+      # Returns a multiline description of a node suitable for display in a
+      # GraphViz visualization (see #graphviz).
+      def to_s_graphviz
+        to_s # populate @node_type_name
+
+        <<~EOF
+        #{@node_type_name}
+        #{@graph_node_name || "id=#{__id__}"}
+        #{MB::M.sigformat(sample_rate)}Hz
+        EOF
+      end
+
+      # Creates and returns an input object that reads from this node's #sample
+      # method whenever the I/O's #read method is called.
+      #
+      # TODO: allow combining multiple graphs together for multiple channels
+      def as_input(num_channels = 1, buffer_size: nil)
+        MB::Sound::GraphNodeInput.new(self, channels: num_channels, buffer_size: buffer_size)
       end
 
       # Returns +n+ (default 2) fan-out readers for creating branching signal
@@ -65,9 +96,8 @@ module MB
       # modify the resulting buffer without affecting parallel branches of the
       # graph.
       #
-      # If a block is given, then the branches will be yielded to the block,
-      # and whatever the block returns will be returned instead of the
-      # branches.
+      # Note that teeing should not be necessary in most cases, as most graph
+      # nodes will call #get_sampler to get an implicit tee now.
       #
       # Example (for bin/sound.rb):
       #     # AM and tremolo added together for some reason
@@ -75,12 +105,20 @@ module MB
       #     c = a * 150.hz.at(0.5..1) + b * 0.5.hz.at(0.25..1) ; nil
       #     play c
       def tee(n = 2)
-        b = Tee.new(self, n).branches
-        if block_given?
-          yield b
-        else
-          b
-        end
+        Tee.new(get_sampler, n).branches
+      end
+
+      # Creates and returns a tee branch from this node.  This is used by
+      # consumers of upstream graph nodes like Tone, CookbookWrapper, etc. to
+      # allow implicit branching of node outputs.
+      #
+      # If you need to call this outside of mb-sound internal code or your own
+      # custom GraphNode implementations, that's _probably_ a bug in mb-sound.
+      def get_sampler
+        # TODO: maybe rename to #get_branch to match Tee's naming??
+        # TODO: find and fix places where branches get abandoned (e.g. bin/flanger.rb) instead of ignoring these late readers in circular_buffer.rb
+        @internal_tee ||= Tee.new(self, 0)
+        @internal_tee.add_branch
       end
 
       # Creates a mixer that adds this node's #sample output to +other+ (a
@@ -109,81 +147,17 @@ module MB
       # signal graph.  For signal graphs, each numerator value is divided
       # by the corresponding denominator value at the same index.
       def /(other)
-        # TODO: can we deduplicate arithmetic proc nodes?
-        if other.respond_to?(:sample)
-          self.proc(other) { |v|
-            next nil if v.nil? || v.empty?
-
-            data = other.sample(v.length)
-
-            if data.nil? || data.empty?
-              nil
-            else
-              if data.length != v.length
-                # TODO: allow choosing between zero padding and truncation?
-                min_length = MB::M.min(data.length, v.length)
-                data = data[0...min_length]
-                v = v[0...min_length]
-              end
-
-              # We can't return v in case types differ, as the type promotion
-              # will create a new object.
-              # TODO: should we be operating in place here?  This could modify
-              # the source of an upstream ArrayInput for example.
-              v.inplace!
-              (v / data).not_inplace!
-            end
-          }
-        else
-          self.proc(other) { |v|
-            if v.nil? || v.empty?
-              nil
-            else
-              v.inplace!
-              (v / other).not_inplace!
-            end
-          }
-        end
+        arithmetic_proc(other, '/') { |d1, d2|
+          d1 / d2
+        }
       end
 
       # Appends a node that raises the incoming values to +other+, which should
       # be either a numeric or another signal graph.
       def **(other)
-        # TODO: can we deduplicate arithmetic proc nodes?
-        if other.respond_to?(:sample)
-          self.proc(other) { |v|
-            next nil if v.nil? || v.empty?
-
-            data = other.sample(v.length)
-
-            if data.nil? || data.empty?
-              nil
-            else
-              if data.length != v.length
-                # TODO: allow choosing between zero padding and truncation?
-                min_length = MB::M.min(data.length, v.length)
-                data = data[0...min_length]
-                v = v[0...min_length]
-              end
-
-              # We can't return v in case types differ, as the type promotion
-              # will create a new object.
-              # TODO: should we be operating in place here?  This could modify
-              # the source of an upstream ArrayInput for example.
-              v.inplace!
-              (v ** data).not_inplace!
-            end
-          }
-        else
-          self.proc(other) { |v|
-            if v.nil? || v.empty?
-              nil
-            else
-              v.inplace!
-              (v ** other).not_inplace!
-            end
-          }
-        end
+        arithmetic_proc(other, '**') { |d1, d2|
+          d1 ** d2
+        }
       end
 
       # Appends a node that returns the real value of a complex signal, or the
@@ -212,17 +186,17 @@ module MB
 
       # Truncates values from the node to the next lower integer.
       def floor
-        self.proc(&:floor)
+        self.proc(type_name: 'floor', &:floor)
       end
 
       # Raises values from the node to the next higher integer.
       def ceil
-        self.proc(&:ceil)
+        self.proc(type_name: 'ceil', &:ceil)
       end
 
       # Rounds values from the node to the nearest integer.
       def round
-        self.proc(&:round)
+        self.proc(type_name: 'round', &:round)
       end
 
       # Uses this node as the frequency value for an oscillator.
@@ -233,19 +207,26 @@ module MB
       # Appends a node that calculates the natural logarithm of values passing
       # through.
       def log
-        self.proc { |v| MB::FastSound.narray_log(v) }
+        # TODO: arithmetic_string for unary functions
+        self
+          .proc(type_name: 'ln') { |v| MB::FastSound.narray_log(v) }
+          .named("ln(#{make_source_name(self)})")
       end
 
       # Appends a node that calculates the base two logarithm of values passing
       # through.
       def log2
-        self.proc { |v| MB::FastSound.narray_log2(v) }
+        self
+          .proc(type_name: 'log2') { |v| MB::FastSound.narray_log2(v) }
+          .named("log2(#{make_source_name(self)})")
       end
 
       # Appends a node that calculates the base ten logarithm of values passing
       # through.
       def log10
-        self.proc { |v| MB::FastSound.narray_log10(v) }
+        self
+          .proc(type_name: 'log10') { |v| MB::FastSound.narray_log10(v) }
+          .named("log10(#{make_source_name(self)})")
       end
 
       # Interprets incoming samples as a number of decibels, outputting the
@@ -279,14 +260,14 @@ module MB
       # Adds a Ruby block to a processing chain.  The block will be called with
       # a Numo::NArray containing samples to be modified.  Note that this can
       # be very slow compared to the built-in algorithms implemented in C.
-      def proc(*sources, &block)
-        ProcNode.new(self, sources, sample_rate: self.sample_rate, &block)
+      def proc(sources = {}, type_name: nil, &block)
+        ProcNode.new(self, extra_sources: sources, sample_rate: self.sample_rate, type_name: type_name, &block)
       end
 
       # If this node (or its inputs) have a finite length of audio data
-      # available (e.g. a sound file), then when they run out of data then the
-      # given +sources+ (other graph nodes that respond to :sample) will be
-      # played after this node finishes.
+      # available (e.g. a sound file), then when they run out of data the given
+      # +sources+ (other graph nodes that respond to :sample) will be played
+      # after this node finishes.
       def and_then(*sources)
         raise 'No sources were given' if sources.empty?
         MB::Sound::GraphNode::NodeSequence.new([self, *sources])
@@ -314,6 +295,16 @@ module MB
         end
 
         ret[0...endidx] if ret
+      end
+
+      # Appends a BufferAdapter to the graph with this node as its upstream
+      # source, using the given +length+ as the upstream frame size.  When
+      # downstream nodes sample the adapter, the adapter will sample the
+      # upstream node in +length+-sized chunks.  This allows running a node
+      # graph with a shorter internal buffer size than the sound card input or
+      # output buffer size, for example.
+      def with_buffer(length)
+        MB::Sound::GraphNode::BufferAdapter.new(upstream: self, upstream_count: length)
       end
 
       # Adds a resampling filter to the graph with the given new sample rate.
@@ -391,7 +382,7 @@ module MB
       #
       #     # High-pass filter controlled by envelopes
       #     MB::Sound.play 500.hz.ramp.filter(:highpass, frequency: adsr() * 1000 + 100, quality: adsr() * -5 + 6)
-      def filter(filter_or_type = :lowpass, cutoff: nil, quality: nil, gain: nil, in_place: true)
+      def filter(filter_or_type = :lowpass, cutoff: nil, quality: nil, gain: nil, in_place: false)
         f = filter_or_type
         f = f.hz if f.is_a?(Numeric)
         f = f.lowpass if f.is_a?(Tone)
@@ -417,12 +408,16 @@ module MB
           f = MB::Sound::Filter::Cookbook.new(filter_or_type, sample_rate, 1, quality: 1, db_gain: gain&.to_db)
           MB::Sound::Filter::Cookbook::CookbookWrapper.new(filter: f, audio: self, cutoff: cutoff, quality: quality)
 
+        when f.is_a?(MB::Sound::Filter::Cookbook)
+          # TODO: Support graph node sources for filter gain
+          raise 'Only specify gain when creating a new filter' if gain
+
+          MB::Sound::Filter::Cookbook::CookbookWrapper.new(filter: f, audio: self, cutoff: cutoff || f.cutoff, quality: quality || f.quality)
+
         when f.respond_to?(:wrap)
           if cutoff || quality || gain
             raise 'Cutoff, gain, and quality should only be specified when creating a new filter by type'
           end
-
-          # FIXME: use CookbookWrapper if given a Cookbook filter
 
           f.wrap(self, in_place: in_place)
 
@@ -493,7 +488,7 @@ module MB
       #
       # See MB::Sound::Filter::Delay#initialize for a description of the
       # +:smoothing+ parameter.
-      def delay(seconds: nil, samples: nil, sample_rate: 48000, smoothing: true, max_delay: 1.0)
+      def delay(seconds: nil, samples: nil, sample_rate: 48000, smoothing: true, max_delay: 1.0, feedback: false)
         if samples
           samples = samples.to_f if samples.is_a?(Numeric)
           seconds = samples / sample_rate
@@ -501,7 +496,9 @@ module MB
           seconds = seconds.to_f if seconds.is_a?(Numeric)
         end
 
-        filter(MB::Sound::Filter::Delay.new(delay: seconds, sample_rate: sample_rate, smoothing: smoothing, buffer_size: sample_rate.ceil * max_delay))
+        seconds = seconds.or_for(nil) if seconds.respond_to?(:or_for)
+
+        filter(MB::Sound::Filter::Delay.new(delay: seconds, sample_rate: sample_rate, smoothing: smoothing, buffer_size: sample_rate.ceil * max_delay, feedback: feedback))
       end
 
       # Adds a multi-tap delay with the given delay sources, returning an Array
@@ -523,7 +520,9 @@ module MB
       # Hard-clips the output of this node to the given min and max, one of
       # which may be nil to disable clipping in that direction.
       def clip(min, max)
-        self.proc { |v| v.clip(min, max) }
+        self
+          .proc(type_name: 'clip') { |v| v.clip(min, max) }
+          .named("clamp #{min}..#{max}")
       end
 
       # Hard-clips the slope of the output of this node to the given +max_rise+
@@ -582,12 +581,19 @@ module MB
       #
       #     block_buf[] = spy_buf
       #
+      # If you'll need to remove specific spies later, pass a +:handle+.  This
+      # may be an object instance, a Symbol, etc.
+      #
+      # See #clear_spies.
+      #
       # TODO: accomplish this without monkey patching
-      def spy(&block)
+      def spy(handle: nil, &block)
         @graph_spies ||= nil
+        @handled_spies ||= nil
 
         if @graph_spies.nil?
           @graph_spies = []
+          @handled_spies = {}
 
           class << self
             def sample(count)
@@ -600,13 +606,28 @@ module MB
                       warn "Spy #{idx}/#{s} raised #{MB::U.highlight(e)}"
                     end
                   end
+
+                  @handled_spies.each do |origin, spies|
+                    spies.each_with_index do |s, idx|
+                      begin
+                        s.call(b)
+                      rescue => e
+                        warn "Handled spy #{idx}/#{s} from #{origin} raised #{MB::U.highlight(e)}"
+                      end
+                    end
+                  end
                 end
               }
             end
           end
         end
 
-        @graph_spies << block
+        if handle
+          @handled_spies[handle] ||= []
+          @handled_spies[handle] << block
+        else
+          @graph_spies << block
+        end
 
         self
       end
@@ -630,10 +651,21 @@ module MB
         }
       end
 
-      # Clears any spies attached to this graph node (see #spy).
-      def clear_spies
+      # Clears any spies attached to this graph node (see #spy), or just spies
+      # associated with the given +:handle+.
+      def clear_spies(handle: nil)
         @graph_spies ||= nil
-        @graph_spies&.clear
+        @handled_spies ||= nil
+
+        if handle
+          if @handled_spies && @handled_spies.include?(handle)
+            @handled_spies[handle].clear
+            @handled_spies.delete(handle)
+          end
+        else
+          @graph_spies&.clear
+          @handled_spies&.clear
+        end
 
         self
       end
@@ -646,24 +678,128 @@ module MB
       # See #graph for a method that returns every source feeding into this
       # node.
       def sources
-        []
+        {}
       end
 
       # Returns a list of all nodes feeding into this node, either directly or
-      # indirectly, plus this node itself.
-      def graph
-        source_history = Set.new
+      # indirectly, plus this node itself, without duplication.  Also may
+      # include numeric values used as parameters to some of the nodes.
+      #
+      # Entries in the returned list should be in order of increasing distance
+      # from this node, but if there are loops in the graph this is not
+      # guaranteed.
+      def graph(include_tees: true)
+        # TODO: use a linked list for deletion and reinsertion if this method
+        # becomes too slow, or weaken return ordering and memoize in each
+        # instance and call graph instead of sources to get sources?
+        #
+        # Start self at -1 visits to preserve ordering when breaking feedback
+        # loops
+        source_history = { self => -1 }
         source_queue = [self]
+        source_list = []
 
         until source_queue.empty?
           s = source_queue.shift
-          next if source_history.include?(s)
+          s = s.round if s.is_a?(Numeric) && s.respond_to?(:round) && s.round == s
 
-          source_history << s
-          source_queue.concat(s.sources) if s.respond_to?(:sources)
+          # TODO: have a separate configuration for manual tees and implied
+          # branches from get_sampler, and default to ignoring get_sampler?
+          # TODO: allow climbing past nodes of any type or based on any
+          # condition, e.g. to skip mixers and multipliers that were created by
+          # an internal arithmetic step inside or for another node.  e.g. #adsr
+          # creates a multiplier to icombine the input with the envelope.
+          # TODO: automatically differentiate between nodes created directly by
+          # the user and nodes created implicitly by other nodes?  e.g. could
+          # wrap internal node creation within a block that marks those nodes
+          # as invisible by default?
+          unless include_tees
+            s = climb_tee_tree(s)
+          end
+
+          # If we encounter a source again, move it to the end of the source
+          # list and look at its sources again.
+          if source_history.include?(s)
+            # TODO: only look at a source if all paths from it have been traveled
+            # TODO: this would all be easier if source/dest links were bidirectional
+            # TODO: is 50 a reasonable number?
+            if source_history[s] > (50 + source_list.length)
+              warn "Possible infinite loop on #{s} (started from #{self})"
+              next
+            end
+
+            source_list.delete(s)
+          else
+            source_history[s] = 0
+          end
+
+          source_history[s] += 1
+          source_list << s
+
+          source_queue.concat(s.sources.values) if s.respond_to?(:sources)
         end
 
-        source_history.to_a
+        source_list
+      end
+
+      # Returns a Hash from source node to a Set of destination node/port name
+      # tuples describing all connections upstream of this graph node.
+      #
+      # Example output shape:
+      #     {
+      #       Constant => Set.new([[Tone, :frequency]])
+      #       Tone => Set.new([[Filter, :cutoff], [Filter, :quality]])
+      #     }
+      def graph_edges(include_tees: true)
+        edges = {}
+
+        graph(include_tees: include_tees).each do |dest|
+          next unless dest.respond_to?(:sources)
+
+          dest.sources.each do |name, s|
+            s = s.round if s.is_a?(Numeric) && s.respond_to?(:round) && s.round == s
+
+            unless include_tees
+              s = climb_tee_tree(s)
+            end
+
+            edges[s] ||= Set.new
+            edges[s] << [dest, name]
+          end
+        end
+
+        edges
+      end
+
+      # Separates the graph into ranks (in GraphViz terms) based on distance
+      # from this node.  Ignores Numeric sources in the graph.  Returns an
+      # Array of Arrays of nodes.
+      def graph_ranks(include_tees: true)
+        rank_map = { self => 0 }
+
+        graph(include_tees: include_tees).each do |dest|
+          next if dest.is_a?(Numeric)
+
+          rank_map[dest] ||= 0
+          next_rank = rank_map[dest] + 1
+
+          dest.sources.each do |_name, src|
+            next if src.is_a?(Numeric)
+
+            src = climb_tee_tree(src) unless include_tees
+
+            rank_map[src] ||= next_rank
+            rank_map[src] = MB::M.max(rank_map[src], next_rank)
+          end
+        end
+
+        ranks = []
+        rank_map.each do |n, rank|
+          ranks[rank] ||= []
+          ranks[rank] << n
+        end
+
+        ranks.compact.reverse
       end
 
       # Finds the lowest numeric value greater than zero for any graph nodes
@@ -687,16 +823,6 @@ module MB
         size
       end
 
-      # Appends a BufferAdapter to the graph with this node as its upstream
-      # source, using the given +length+ as the upstream frame size.  When
-      # downstream nodes sample the adapter, the adapter will sample the
-      # upstream node in +length+-sized chunks.  This allows running a node
-      # graph with a shorter internal buffer size than the sound card input or
-      # output buffer size, for example.
-      def with_buffer(length)
-        MB::Sound::GraphNode::BufferAdapter.new(upstream: self, upstream_count: length)
-      end
-
       # Looks for the first source node within the graph feeding into this node
       # with the given name.
       def find_by_name(name)
@@ -711,28 +837,33 @@ module MB
 
       # Returns a String containing a GraphViz representation of the signal
       # graph.
-      def graphviz
+      def graphviz(include_tees: false)
         source_history = Set.new
         source_queue = [self]
 
         digraph = "digraph {\n"
 
-        until source_queue.empty?
-          s = source_queue.shift
-          next if source_history.include?(s)
+        digraph << "  graph [ bgcolor=\"#000000e0\" rankdir=\"LR\" pad=\"0.25\" ];\n"
+        digraph << "  node [ style=\"filled\" fontcolor=\"#ffffff\" color=\"#2266ee\" shape=\"Mrecord\" ];\n"
+        digraph << "  edge [ fontcolor=\"#ffffff\" color=\"#ffffff\" headport=\"w\" tailport=\"e\" ];\n"
 
-          n2 = s.is_a?(Numeric) ? s.to_s : "#{s.class} (#{s.graph_node_name}/#{s.__id__})"
-          digraph << "  #{n2.inspect};\n"
+        graph(include_tees: include_tees).each do |node|
+          next if node.is_a?(Numeric)
+          desc = node.respond_to?(:to_s_graphviz) ? node.to_s_graphviz : node.to_s
+          digraph << "  #{node.__id__.to_s.inspect} [label=#{desc.inspect}]"
+        end
 
-          source_history << s
-
-          if s.respond_to?(:sources)
-            s.sources.each do |src|
-              n1 = src.is_a?(Numeric) ? src.to_s : "#{src.class} (#{src.graph_node_name}/#{src.__id__})"
-              digraph << "  #{n1.inspect} -> #{n2.inspect};\n"
+        graph_edges(include_tees: include_tees).each do |src, edges|
+          edges.each do |dest, name|
+            # TODO: add ports to nodes instead of labeling edges
+            if src.is_a?(Numeric)
+              # Include a separate numeric source node for each destination
+              srcname = "#{src.inspect} to #{dest.__id__}/#{name}"
+              digraph << "  #{srcname.inspect} [label=#{src.to_s.inspect}];\n"
+              digraph << "  #{srcname.inspect} -> #{dest.__id__.to_s.inspect} [label=#{name.to_s.inspect}];\n"
+            else
+              digraph << "  #{src.__id__.to_s.inspect} -> #{dest.__id__.to_s.inspect} [label=#{name.to_s.inspect}];\n"
             end
-
-            source_queue.concat(s.sources) if s.respond_to?(:sources)
           end
         end
 
@@ -741,12 +872,39 @@ module MB
         digraph
       end
 
-      # Sets all Tones in the graph to continue playing forever.
+      # Saves a GraphViz representation of the graph to a temporary file,
+      # generates a PNG using dot, and opens the PNG using open.  The PNG file
+      # is left behind after the program exits for inspection.
+      def open_graphviz(include_tees: false)
+        dot = Tempfile.create([self.to_s, '.dot'])
+
+        png = "#{dot.path}.png"
+        File.write(dot, self.graphviz(include_tees: include_tees))
+        system("dot -Tpng:cairo #{dot.path.shellescape} -o #{png.shellescape}")
+        system("open #{png.shellescape}")
+
+        png
+      end
+
+      # Sets all Tones in the graph to continue playing for +duration+.
       def for(duration, recursive: true)
         if recursive
           graph.each do |n|
             next if n == self
             n.for(duration, recursive: false) if n.respond_to?(:for)
+          end
+        end
+
+        self
+      end
+
+      # Sets all Tones in the graph to play for +duration+ by default unless
+      # the tone was specifically given a duration.
+      def or_for(duration, recursive: true)
+        if recursive
+          graph.each do |n|
+            next if n == self
+            n.or_for(duration, recursive: false) if n.respond_to?(:or_for)
           end
         end
 
@@ -765,6 +923,12 @@ module MB
         self
       end
 
+      # Walk up sources until a non-Tee::Branch node is found.  Used by #graph.
+      def self.climb_tee_tree(branch)
+        branch = branch.original_source while branch.is_a?(MB::Sound::GraphNode::Tee::Branch)
+        branch
+      end
+
       private
 
       # Sets tones to play forever at full volume, if they don't have a fixed
@@ -773,6 +937,111 @@ module MB
         tones.each do |t|
           t.or_for(nil) if t.respond_to?(:or_for) # Default to playing forever
           t.or_at(1) if fix_amp && t.respond_to?(:or_at) # Default to full volume
+        end
+      end
+
+      # Instance-method alias for the class method of the same name.
+      def climb_tee_tree(branch)
+        MB::Sound::GraphNode.climb_tee_tree(branch)
+      end
+
+      # Turns a node source, whether Numeric or another node, into a reasonable
+      # String representation, skipping Tee branches.
+      #
+      # The +:separator+ is used for joining terms in arithmetic nodes.
+      def make_source_name(numeric_or_node, separator: ' ')
+        s = climb_tee_tree(numeric_or_node)
+        case
+        when s.respond_to?(:graph_node_name) && s.named?
+          s.graph_node_name
+
+        when s.respond_to?(:arithmetic_string)
+          parenthesize(s.arithmetic_string(separator))
+
+        when s.respond_to?(:name_or_id)
+          s.name_or_id
+
+        when s.is_a?(Complex)
+          s.to_s
+
+        when s.is_a?(Numeric)
+          s.to_nice_s(4)
+
+        else
+          s.to_s
+        end
+      end
+
+      # Returns an Array with the port name and source name or object ID (if no
+      # name) of all sources for this node, for use in generating descriptions
+      # of the node.
+      def source_names
+        sources.map { |name, src| "#{name}: #{make_source_name(src)}" }
+      end
+
+      # Setup/boilerplate buffer management used by #/ and #**.
+      def arithmetic_proc(other, name)
+        if other.respond_to?(:sample)
+          other = other.get_sampler
+
+          pr = self.proc({operand: other}, type_name: "#{name} (dynamic)") { |v|
+            next nil if v.nil? || v.empty?
+
+            data = other.sample(v.length)
+
+            if data.nil? || data.empty?
+              nil
+            else
+              if data.length != v.length
+                # TODO: allow choosing between padding and truncation (e.g. stop_early)?
+                min_length = MB::M.min(data.length, v.length)
+                data = data[0...min_length]
+                v = v[0...min_length]
+              end
+
+              # We can't return v in case types differ, as the type promotion
+              # will create a new object, so we grab the yielded value.
+              # TODO: should we be operating in place here?  This could modify
+              # the source of an upstream ArrayInput for example.
+              v.inplace!
+              ret = yield v, data
+              ret.not_inplace!
+            end
+          }.named("#{climb_tee_tree(self).name_or_id} #{name} #{climb_tee_tree(other).name_or_id}")
+        else
+          pr = self.proc({operand: other}, type_name: "#{name} (constant)") { |v|
+            if v.nil? || v.empty?
+              nil
+            else
+              v.inplace!
+              ret = yield v, other
+              ret.not_inplace!
+            end
+          }.named("#{climb_tee_tree(self).name_or_id} #{name} #{other}")
+        end
+
+        pr.tap { |pr|
+          pr.instance_variable_set(:@operator, name)
+          def pr.arithmetic_string(separator = ' ')
+            src = climb_tee_tree(@sources.values[0])
+            dest = climb_tee_tree(@sources.values[1])
+            a = make_source_name(src)
+            b = make_source_name(dest)
+
+            "#{a} #{@operator}#{separator}#{b}"
+          end
+        }
+      end
+
+      # Adds parentheses around a mathematical statement if it contains any
+      # operators or spaces.
+      def parenthesize(str)
+        if str.match?(/[[:space:][:punct:]]/)
+          # TODO: maybe count parenthetical nestings to see if there's already
+          # a global parenthesis
+          "(#{str})"
+        else
+          str
         end
       end
     end

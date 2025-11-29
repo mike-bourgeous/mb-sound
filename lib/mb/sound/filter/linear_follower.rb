@@ -113,6 +113,10 @@ module MB
         def peek
           @s
         end
+
+        def to_s_graphviz
+          "LinearFollower\nmax_rise: #{@max_rise}\nmax_fall: #{@max_fall}\nabs?: #{@absolute}"
+        end
       end
     end
   end

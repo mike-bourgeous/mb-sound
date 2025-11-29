@@ -24,16 +24,18 @@ module MB
         #
         # Set +:in_place+ to false if problems occur due to in-place filter
         # processing.
-        def initialize(filter, source, in_place: true)
+        def initialize(filter, source, in_place: false)
           @base_filter = filter
-          @source = source
+          @source = source.get_sampler
           @in_place = in_place
 
-          if @base_filter.respond_to?(:sample_rate) && @base_filter.sample_rate != source.sample_rate
+          @node_type_name = "SampleWrapper/#{filter.class.name.rpartition('::').last}"
+
+          if @base_filter.respond_to?(:sample_rate) && @base_filter.sample_rate != @source.sample_rate
             if @base_filter.respond_to?(:sample_rate=)
-              @base_filter.sample_rate = source.sample_rate
+              @base_filter.sample_rate = @source.sample_rate
             else
-              raise "Filter sample rate #{@base_filter.sample_rate} differs from source sample rate #{source.sample_rate}"
+              raise "Filter sample rate #{@base_filter.sample_rate} differs from source sample rate #{@source.sample_rate}"
             end
           end
 
@@ -54,9 +56,8 @@ module MB
           # but FFMPEGInput -> Mixer -> SampleWrapper is fine.
 
           # TODO: Maybe this nil/empty/short handling could be consolidated?
-          # TODO: Drain FIR filters and delays after a source returns nil
+          # TODO: Drain ring-out from filters and delays after a source returns nil
           return nil if buf.nil? || buf.empty?
-          buf = MB::M.zpad(buf, count) if buf.length < count
 
           buf.inplace! if @in_place
           buf = @base_filter.process(buf)
@@ -66,10 +67,12 @@ module MB
         # See GraphNode#sources.
         def sources
           if @base_filter.respond_to?(:sources)
-            # + instead of | because duplicate connections should be shown
-            [@source] + @base_filter.sources
+            {
+              input: @source,
+              **@base_filter.sources
+            }
           else
-            [@source]
+            { input: @source }
           end
         end
 
@@ -93,6 +96,22 @@ module MB
           super
         end
         alias at_rate sample_rate=
+
+        # See GraphNode#to_s
+        def to_s
+          "#{super} -- #{source_names.join(', ')} -- #{@base_filter}"
+        end
+
+        # See GraphNode#to_s_graphviz
+        def to_s_graphviz
+          info = @base_filter.respond_to?(:to_s_graphviz) ? @base_filter.to_s_graphviz : @base_filter.to_s
+          <<~EOF
+          #{super}---------------
+          #{source_names.join("\n")}
+          ---------------
+          #{info}
+          EOF
+        end
 
         # Pass other methods through to the wrapped object.
         def method_missing(m, *a)

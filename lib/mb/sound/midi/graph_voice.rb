@@ -74,6 +74,7 @@ module MB
               # FIXME: this won't handle chained multi-op FM correctly
               g = o.respond_to?(:graph) ? o.graph : [o.frequency]
               mixer = g.select { |s|
+                # TODO: use Constant#unit accessor
                 (s.is_a?(MB::Sound::GraphNode::Mixer) || s.is_a?(MB::Sound::GraphNode::Constant)) &&
                   s.constant >= 20 # Haxx to try to separate frequency values from other values; might help to have some kind of units or roles for detecting these things
               }.first
@@ -265,7 +266,7 @@ module MB
         # Returns the direct inputs that feed this graph voice (just the graph
         # given to the constructor).
         def sources
-          [@graph]
+          { input: @graph }
         end
 
         private

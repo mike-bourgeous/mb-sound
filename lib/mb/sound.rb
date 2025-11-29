@@ -21,14 +21,13 @@ require_relative 'sound/playback_methods'
 require_relative 'sound/fft_methods'
 require_relative 'sound/gain_methods'
 require_relative 'sound/window_methods'
+require_relative 'sound/analysis_methods'
 
 module MB
   # Convenience functions for making quick work of sound.
   #
   # Top-level namespace for the mb-sound library.
   module Sound
-    class FileExistsError < IOError; end
-
     # Most of the methods available in the CLI are defined in these separate
     # modules and incorporated here by extension.
     extend IOMethods
@@ -37,6 +36,7 @@ module MB
     extend FFTMethods
     extend GainMethods
     extend WindowMethods
+    extend AnalysisMethods
 
     # Filters a sound with the given filter parameters (see
     # MB::Sound::Filter::Cookbook).
@@ -130,6 +130,7 @@ end
 require_relative 'sound/buffer_helper'
 require_relative 'sound/circular_buffer'
 require_relative 'sound/graph_node'
+require_relative 'sound/graph_node_input'
 
 require_relative 'sound/io_base'
 require_relative 'sound/io_input'

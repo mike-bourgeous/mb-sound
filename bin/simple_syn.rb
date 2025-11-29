@@ -21,23 +21,26 @@ OVERSAMPLE = ENV['OVERSAMPLE']&.to_f || 16
 osc_pool = MB::Sound::MIDI::VoicePool.new(
   manager,
   OSC_COUNT.times.map { MB::Sound::MIDI::Voice.new }
-).real
+)
+
+graph = osc_pool
+  .real
   .filter(:lowpass, cutoff: 16000 * MB::M.min(1, OVERSAMPLE))
   .oversample(OVERSAMPLE, mode: :libsamplerate_fastest)
 
-filter = 1500.hz.lowpass(quality: 4)
-softclip = MB::Sound::SoftestClip.new(threshold: 0.5)
+graph = (graph * 0.4).softclip(0.5)
 
-manager.on_cc(1, default: 1.8, range: 0..3) do |decade|
+manager.on_cc(1, default: 1.8, range: 1..3) do |decade|
   freq = 20.0 * 10.0 ** decade
-  filter.center_frequency = freq
+
+  osc_pool.each do |v|
+    v.cutoff = freq
+    v.vibrato_intensity = (decade - 1) / 2
+  end
 end
 
 loop do
   manager.update
-
-  data = osc_pool.sample(output.buffer_size)
-  data = filter.process(data)
-  data = softclip.process(data * 0.2)
+  data = graph.sample(output.buffer_size)
   output.write([data, data])
 end

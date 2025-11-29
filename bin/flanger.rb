@@ -31,6 +31,8 @@ require 'bundler/setup'
 
 require 'mb/sound'
 
+MB::U.sigquit_backtrace
+
 if ARGV.include?('--help')
   MB::U.print_header_help
   exit 1
@@ -63,6 +65,7 @@ if filename && File.readable?(filename)
   inputs = input.split.map { |d| d.and_then(final_tone) }
 else
   input = MB::Sound.input(channels: ENV['CHANNELS']&.to_i || 2)
+  bufsize = input.buffer_size
   inputs = input.split
 end
 
@@ -95,10 +98,11 @@ else
   puts "\e[38;5;243mMIDI disabled (jackd not detected)\e[0m"
 end
 
+# FIXME: does not work (at least on USB audio) with oversample < 1
 oversample = ENV['OVERSAMPLE']&.to_f || 2
 
-bufsize = output.buffer_size
-internal_bufsize = (24 * oversample).ceil
+bufsize ||= output.buffer_size
+internal_bufsize = (24 * [1, oversample].max).ceil
 
 delay_samples = delay * output.sample_rate * oversample
 delay_samples = 0 if delay_samples < 0
@@ -149,37 +153,31 @@ begin
     # Set up LFO depth control
     depthconst = depth.constant.named('Depth')
     delayconst = delay.constant.named('Delay')
-    # Need to tee samp (delay in samples) so it doesn't skip when changing the delay via MIDI
-    samp1, samp2 = (delayconst * (output.sample_rate * oversample)).clip(0, nil).named('Delay in samples').tee
-    samp1.named('Delay in samples (branch 1)')
-    samp2.named('Delay in samples (branch 2)')
 
-    lfo_scale1, lfo_scale2 = (depthconst * samp1).tee
-    lfo_base = samp2 - lfo_scale1 * 0.5
-    lfo_mod = (lfo * lfo_scale2 + lfo_base).clip(0, nil)
+    # Delay in samples
+    samples = (delayconst * (output.sample_rate * oversample)).clip(0, nil).named('Delay in samples')
 
-    # Split delay LFO for first-tap and feedback
-    d1, d2 = lfo_mod.tee
+    # Delay LFO
+    lfo_scale = depthconst * samples
+    lfo_base = samples - lfo_scale * 0.5
+    lfo_mod = (lfo * lfo_scale + lfo_base).clip(0, nil)
 
     # Split input into original and first delay
-    s1, s2 = inp.tee(2)
-    s1.named('s1')
-    s2.named('s2')
-    s2 = s2.delay(samples: d1, smoothing: delay_smoothing, sample_rate: input.sample_rate * oversample)
+    inp_delayed = inp.delay(samples: lfo_mod, smoothing: delay_smoothing)
 
     # Feedback injector and feedback delay (compensating for buffer size)
     # TODO: better way of injecting an NArray into a node chain than
     # constant.proc; e.g. maybe a node that takes a pointer to a buffer and
-    # always returns the buffer
-    d_fb = (d2 - internal_bufsize).clip(0, nil)
-    b = 0.constant.proc { a }.delay(samples: d_fb, smoothing: delay_smoothing2, sample_rate: input.sample_rate * oversample)
+    # always returns the buffer; or better way of just doing feedback
+    d_fb = (lfo_mod - internal_bufsize).clip(0, nil)
+    b = 0.constant.proc { a }.delay(samples: d_fb, smoothing: delay_smoothing2)
 
     # Effected output, with a spy to save feedback buffer
-    wet = (feedback * b - s2).softclip(0.85, 0.95).spy { |z| a[] = z if z }
+    wet = (feedback * b - inp_delayed).softclip(0.85, 0.95).spy { |z| a[] = z if z && z.length == a.length }
 
     dryconst = dry_level.constant.named('Dry level')
     wetconst = wet_level.constant.named('Wet level')
-    final = (s1 * dryconst + wet * wetconst)
+    final = (inp * dryconst + wet * wetconst)
       .softclip(0.85, 0.95).named('final_softclip')
       .with_buffer(internal_bufsize).named('final_bufsize')
       .filter(15000.hz.lowpass)
@@ -195,6 +193,8 @@ begin
       #.on_cc(1, 'Wet level', range: 0.0..1.0, relative: false)
   }
 
+  paths[0].open_graphviz
+
   if manager
     manager.on_cc_map(paths.map(&:cc_map))
     puts MB::U.syntax(manager.to_acid_xml, :xml)
@@ -204,7 +204,8 @@ begin
     manager&.update
     data = paths.map { |p| p.sample(output.buffer_size) }
     break if data.any?(&:nil?) || data.any?(&:empty?) || input.closed?
-    output.write(data)
+
+    output.write(data.map { |c| MB::M.zpad(c, output.buffer_size) })
   end
 
 rescue => e

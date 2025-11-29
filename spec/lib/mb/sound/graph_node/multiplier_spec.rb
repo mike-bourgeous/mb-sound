@@ -1,4 +1,4 @@
-RSpec.describe(MB::Sound::GraphNode::Multiplier) do
+RSpec.describe(MB::Sound::GraphNode::Multiplier, aggregate_failures: true) do
   describe '#initialize' do
     it 'can create a multiplier with no multiplicands' do
       ss = MB::Sound::GraphNode::Multiplier.new([], sample_rate: 48000)
@@ -28,6 +28,12 @@ RSpec.describe(MB::Sound::GraphNode::Multiplier) do
       expect(ss.sample(800)).to eq(Numo::SFloat.zeros(800).fill(-1.6875))
     end
 
+    it 'can include a multiplicand more than once' do
+      a = 2.constant
+      m = MB::Sound::GraphNode::Multiplier.new(a, a)
+      expect(m.sample(3)).to eq(Numo::SFloat[4, 4, 4])
+    end
+
     it 'changes sample rates to match where possible' do
       a = 15.constant.at_rate(1234)
       b = 25.constant.at_rate(2345)
@@ -54,14 +60,10 @@ RSpec.describe(MB::Sound::GraphNode::Multiplier) do
 
   describe '#sample' do
     let(:inp_a) {
-      double(MB::Sound::GraphNode).tap { |inp_a|
-        allow(inp_a).to receive(:sample).and_return(Numo::SFloat[1,2,3,4])
-      }
+      MB::Sound::ArrayInput.new(data: Numo::SFloat[1,2,3,4])
     }
     let(:inp_b) {
-      double(MB::Sound::GraphNode).tap { |inp_b|
-        allow(inp_b).to receive(:sample).and_return(Numo::SFloat[1,2,3,4,5])
-      }
+      MB::Sound::ArrayInput.new(data: Numo::SFloat[1,2,3,4,5])
     }
     let(:m) {
       MB::Sound::GraphNode::Multiplier.new(inp_a, inp_b, sample_rate: 48000, stop_early: stop_early)
@@ -152,25 +154,16 @@ RSpec.describe(MB::Sound::GraphNode::Multiplier) do
     context 'when stop_early is true' do
       it 'truncates all inputs to the shortest buffer then returns nil' do
         expect(m.sample(12)).to eq(Numo::SFloat[1, 4, 9, 16])
-
-        allow(inp_a).to receive(:sample).and_return(nil)
         expect(m.sample(12)).to eq(nil)
       end
 
-      it 'raises an error if truncation happens more than once' do
-        expect(m.sample(12)).to eq(Numo::SFloat[1, 4, 9, 16])
-        expect { m.sample(12) }.to raise_error(/truncate.*short/)
-      end
-
-      it 'does not raise an error with several inputs, until the second truncation' do
-        inp_c = double(MB::Sound::GraphNode)
-        expect(inp_c).to receive(:sample).twice.and_return(Numo::SFloat[1,2,3,4,5,6])
+      it 'does not raise an error with several inputs that end at different times' do
+        inp_c = MB::Sound::ArrayInput.new(data: Numo::SFloat[1,2,3,4,5,6,1,2,3,4,5,6])
 
         m2 = MB::Sound::GraphNode::Multiplier.new([inp_a, inp_b, inp_c], sample_rate: 48000)
 
         expect(m2.sample(12)).to eq(Numo::SFloat[1,8,27,64])
-
-        expect { m2.sample(12) }.to raise_error(/truncate.*short/)
+        expect(m2.sample(12)).to eq(nil)
       end
 
       it 'returns nil when any input returns nil' do
@@ -190,12 +183,11 @@ RSpec.describe(MB::Sound::GraphNode::Multiplier) do
 
       it 'pads any short inputs to the maximum length' do
         expect(m.sample(12)).to eq(Numo::SFloat[1, 4, 9, 16, 5])
-
-        allow(inp_b).to receive(:sample).and_return(nil)
-        expect(m.sample(12)).to eq(Numo::SFloat[1, 2, 3, 4])
-
-        allow(inp_a).to receive(:sample).and_return(nil)
         expect(m.sample(12)).to eq(nil)
+
+        inp_a.reset
+        m.for(nil)
+        expect(m.sample(12)).to eq(Numo::SFloat[1, 2, 3, 4])
       end
 
       it 'returns nil only when all inputs return nil' do
@@ -288,28 +280,6 @@ RSpec.describe(MB::Sound::GraphNode::Multiplier) do
       expect(a.sample_rate).to eq(5438)
       expect(b.sample_rate).to eq(5438)
       expect(c.sample_rate).to eq(5438)
-    end
-  end
-
-  describe '#*' do
-    let(:a) { 15.constant.at_rate(1234) }
-    let(:b) { 25.constant.at_rate(2345) }
-    let(:c) { 35.constant.at_rate(5432) }
-
-    it 'appends another multiplicand' do
-      m = MB::Sound::GraphNode::Multiplier.new(a, b)
-      q = m * c
-      expect(m.graph).to include(c)
-      expect(q).to equal(m)
-    end
-
-    it 'changes sample rates to match' do
-      m = MB::Sound::GraphNode::Multiplier.new(a, b) * c
-
-      expect(m.sample_rate).to eq(1234)
-      expect(a.sample_rate).to eq(1234)
-      expect(b.sample_rate).to eq(1234)
-      expect(c.sample_rate).to eq(1234)
     end
   end
 end

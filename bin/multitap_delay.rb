@@ -4,11 +4,12 @@
 #
 # This is inspired by a module I saw on Andrew Huang's YouTube channel.
 #
-# Usage: $0 [base_delay_seconds] [filename]
+# Usage: $0 [base_delay_seconds] [filter_frequency] [filter_quality] [reverse_odd_taps] [filename]
 #
 # Examples:
 #     Resonant widener: $0 0.001 sounds/transient_synth.flac
 #     Pinged filter drums: $0 0.2 sounds/drums.flac
+#     Filter pinging: $0 0.5 150 30 1 sounds/drums.flac
 
 require 'bundler/setup'
 
@@ -23,15 +24,18 @@ end
 
 numerics, others = ARGV.partition { |arg| arg.strip =~ /\A[+-]?[0-9]+(\.[0-9]+)?\z/ }
 
-base_delay_s, _ = numerics.map(&:to_f)
+base_delay_s, cutoff, quality, reverse_odd_taps, _ = numerics.map(&:to_f)
 base_delay_s ||= 0.1
+cutoff ||= 250
+quality ||= 3
+reverse_odd_taps = reverse_odd_taps == 1
 
 filename = others[0]
 if filename && File.readable?(filename)
   input = MB::Sound.file_input(filename)
   inputs = input.split.map { |d| d.and_then(0.constant.for(base_delay_s * 4)) }
 else
-  MB::Sound.input(channels: ENV['CHANNELS']&.to_i || 2)
+  input = MB::Sound.input(channels: ENV['CHANNELS']&.to_i || 2)
   inputs = input.split
 end
 
@@ -71,18 +75,17 @@ begin
     base = (base_delay_s.constant.named('Delay') - buftime).clip_rate(2, sample_rate: processing_sample_rate)
     offset = base_delay_s.constant.named('Tap Offset').clip_rate(2, sample_rate: processing_sample_rate)
 
-    offsets = offset.tee(NUM_TAPS)
-    delays = base.tee(NUM_TAPS).map.with_index { |d, i|
-      d + offsets[i] * (i + (idx.odd? ? 0.5 : 0))
+    delays = Array.new(NUM_TAPS) { |i|
+      base + offset * (i + (idx.odd? ? 0.5 : 0))
     }
 
     taps = inp.multitap(*delays).shuffle
-    # XXX taps = taps.reverse if idx.odd?
+    taps = taps.reverse if idx.odd? && reverse_odd_taps
 
-    filter_freqs = 250.constant.named('Filter Frequency').tee(NUM_TAPS)
+    filter_freq = cutoff.constant.named('Filter Frequency')
     filtered_taps = taps.map.with_index { |t, i|
-      freq = (i + 1 + (idx.odd? ? 0.5 : 0)) * filter_freqs[i]
-      t.filter(:peak, cutoff: freq, quality: 3, gain: 40.db) * -40.db
+      freq = (i + 1 + (idx.odd? ? 0.5 : 0)) * filter_freq
+      t.filter(:peak, cutoff: freq, quality: quality, gain: 40.db) * -40.db
     }
 
     mix = MB::Sound::GraphNode::Mixer.new(filtered_taps)
@@ -96,6 +99,8 @@ begin
       #.on_cc(1, 'Delay', range: 0.1..4.0)
       #.on_cc(1, 'Wet level', range: 0.0..1.0, relative: false)
   }
+
+  paths[0].open_graphviz
 
   if manager
     manager.on_cc_map(paths.map(&:cc_map))

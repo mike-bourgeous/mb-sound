@@ -70,6 +70,9 @@ RSpec.describe(MB::Sound::GraphNode::BufferAdapter, :aggregate_failures) do
     it 'shuts down cleanly when the upstream returns empty' do
       us = double(MB::Sound::GraphNode)
       expect(us).to receive(:sample).with(4).twice.and_return(Numo::SFloat[1,2,3,4], Numo::SFloat[])
+      allow(us).to receive(:sample_rate).and_return(48000)
+      expect(us).to receive(:get_sampler).and_return(MB::Sound::GraphNode::Tee.new(us, 1).branches[0])
+      expect(us).to receive(:graph_buffer_size).and_return(800)
 
       b = MB::Sound::GraphNode::BufferAdapter.new(upstream: us, upstream_count: 4)
       expect(b.sample(4)).to eq(Numo::SFloat[1,2,3,4])
@@ -78,7 +81,10 @@ RSpec.describe(MB::Sound::GraphNode::BufferAdapter, :aggregate_failures) do
 
     it 'shuts down cleanly when upstream returns less than expected' do
       us = double(MB::Sound::GraphNode)
-      expect(us).to receive(:sample).with(4).exactly(4).times.and_return(Numo::SFloat[1,2,3,4], Numo::SFloat[5,6,7], nil)
+      expect(us).to receive(:sample).with(4).at_least(3).times.and_return(Numo::SFloat[1,2,3,4], Numo::SFloat[5,6,7], nil)
+      allow(us).to receive(:sample_rate).and_return(48000)
+      expect(us).to receive(:get_sampler).and_return(MB::Sound::GraphNode::Tee.new(us, 1).branches[0])
+      expect(us).to receive(:graph_buffer_size).and_return(800)
 
       b = MB::Sound::GraphNode::BufferAdapter.new(upstream: us, upstream_count: 4)
       expect(b.sample(3)).to eq(Numo::SFloat[1,2,3])
@@ -126,15 +132,6 @@ RSpec.describe(MB::Sound::GraphNode::BufferAdapter, :aggregate_failures) do
       expect(r.sample(5)).to eq(Numo::SFloat[4,3,2,1,0])
     end
 
-    # FIXME: right now any internal buffer size must be an exact factor of the
-    # upstream Tee's buffer size, or else the tee will sample the upstream
-    # twice and discard data for the other branches
-    # TODO: Tee could use a circular buffer for each channel like
-    # IOSampleMixin (or CircularBuffer could be given a multi-reader
-    # interface), so that the extra channels are just written to their buffer
-    # when one channel is sampled twice in a row.  Funnily enough, this fix for
-    # Tee (already applied to IOSampleMixin) kind of makes BufferAdapter
-    # unnecessary.
     it 'can use different buffers on different branches of a tee' do
       t1, t2 = 1.constant.tee
       expect(t1).to receive(:sample).with(17).twice.and_call_original
@@ -151,11 +148,11 @@ RSpec.describe(MB::Sound::GraphNode::BufferAdapter, :aggregate_failures) do
   end
 
   describe '#sources' do
-    it 'returns the upstream as its sole source' do
+    it 'returns the upstream tee/sampler as its sole source' do
       source = 5.constant
       chain = source.with_buffer(37)
       expect(chain).to be_a(MB::Sound::GraphNode::BufferAdapter)
-      expect(chain.sources).to eq([source])
+      expect(chain.sources[:input].sources).to eq({input: source})
     end
   end
 

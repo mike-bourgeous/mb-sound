@@ -168,4 +168,6 @@ RSpec.describe(MB::Sound::Filter::Delay, :aggregate_failures) do
       expect(c.sample_rate).to eq(5432)
     end
   end
+
+  pending 'when feedback is nonzero'
 end

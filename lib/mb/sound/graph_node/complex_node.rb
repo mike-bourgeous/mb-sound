@@ -11,7 +11,14 @@ module MB
 
         VALID_MODES = [:real, :imag, :abs, :arg]
 
-        attr_reader :mode
+        MODE_NAMES = {
+          real: 'Real',
+          imag: 'Imaginary',
+          abs: 'Absolute',
+          arg: 'Argument',
+        }
+
+        attr_reader :mode, :mode_name
 
         def_delegators :@input, :sample_rate, :sample_rate=
 
@@ -22,14 +29,15 @@ module MB
           raise ArgumentError, "Invalid Complex conversion mode: #{mode.inspect}" unless VALID_MODES.include?(mode)
           raise ArgumentError, "Input must respond to #sample" unless input.respond_to?(:sample)
 
-          @input = input
+          @input = input.get_sampler
           @mode = mode
+          @mode_name = MODE_NAMES[mode]
         end
 
         # Returns a source list containing the original input given to the
         # constructor.
         def sources
-          [@input]
+          { input: @input }
         end
 
         # Wraps upstream #at_rate to return self instead of upstream.
@@ -88,6 +96,19 @@ module MB
           else
             raise "Unsupported datatype: #{data.class}"
           end
+        end
+
+        # Single-line description.
+        def to_s
+          "#{super} -- #{@mode_name}"
+        end
+
+        # Multiline description for GraphViz.
+        def to_s_graphviz
+          <<~EOF
+          #{super}---------------
+          #{@mode_name}
+          EOF
         end
       end
     end

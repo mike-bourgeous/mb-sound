@@ -75,7 +75,7 @@ module MB
       end
 
       # Wraps a +source+ providing a :sample method with this filter.
-      def wrap(source, in_place: true)
+      def wrap(source, in_place: false)
         SampleWrapper.new(self, source, in_place: in_place)
       end
     end

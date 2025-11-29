@@ -35,16 +35,19 @@ module MB
         # or an empty NArray from its #sample method will cause this #sample
         # method to return nil.  Otherwise, the #sample method only returns nil
         # when all summands return nil or empty.
+        #
+        # Numeric summands are rolled into the constant value.  Duplicated
+        # GraphNode summands will have their gains summed and only a single
+        # copy of the summand added.
         def initialize(summands, sample_rate: nil, stop_early: true)
           @constant = 0
-          @summands = {}
+          @gains = {}
+          @orig_to_samp = {}
 
           setup_buffer(length: 1024, temp: true)
 
           @stop_early = stop_early
 
-          # TODO: Allow variable length argument lists (kind of tricky to detect
-          # the different cases of arrays vs hashes vs varargs accurately)
           summands = [summands] unless summands.is_a?(Array) || summands.is_a?(Hash)
 
           @sample_rate = sample_rate
@@ -62,15 +65,18 @@ module MB
               raise "Multiplicand cannot be an Array, even though it responds to :sample"
 
             when s.respond_to?(:sample)
-              raise "Duplicate summand #{s} at index #{idx}" if @summands.include?(s)
-              @summands[s] = gain
+              if @orig_to_samp.include?(s)
+                self[s] += gain
+              else
+                self[s] = gain
+              end
 
             else
               raise ArgumentError, "Summand #{s.inspect} at index #{idx} is not a Numeric and does not respond to :sample"
             end
           end
 
-          raise 'Sample rate must be a positive numeric' unless @sample_rate.is_a?(Numeric) && @sample_rate > 0
+          raise "Sample rate must be a positive numeric (got #{sample_rate})" unless @sample_rate.is_a?(Numeric) && @sample_rate > 0
           @sample_rate = @sample_rate.to_f
         end
 
@@ -81,7 +87,7 @@ module MB
         # constructor) returns nil or an empty buffer, then this method will
         # return nil.
         def sample(count)
-          arithmetic_sample(count, sources: @summands, pad: 0, fill: @constant, stop_early: @stop_early) do |retbuf, inputs|
+          arithmetic_sample(count, sources: @gains, pad: 0, fill: @constant, stop_early: @stop_early) do |retbuf, inputs|
             inputs.each do |v, gain|
               tmpbuf = @tmpbuf[0...v.length]
               tmpbuf.fill(gain).inplace * v
@@ -94,87 +100,155 @@ module MB
         # is not present.  The +summand+ may be an Integer to refer to a summand
         # by insertion order (starting at 0).
         def [](summand)
-          summand = @summands.keys[summand] if summand.is_a?(Integer)
-          @summands[summand]
+          @gains[find_summand(summand)]
         end
 
         # Sets the gain value for the given +summand+ (which must respond to the
         # :sample method), adding it to the mixer if it is not already present.
         # The +summand+ may be an Integer to refer to a summand by insertion
         # order (starting at 0).
+        #
+        # Note that it's only possible to change the gain of the last instance
+        # of a summand by reference if it was added more than once.  Use
+        # indices instead, or use standalone addition and multiplication.
         def []=(summand, gain)
           # TODO: smooth gain changes
-          summand = @summands.keys[summand] if summand.is_a?(Integer)
-          raise "Summand #{summand} must respond to :sample" unless summand.respond_to?(:sample)
-          @summands[summand] = gain
+          samp = find_summand(summand, create: true)
+          @gains[samp] = gain
         end
 
         # Removes the given +summand+ from the mixer.  The +summand+ may be an
         # Integer to refer to a summand by insertion order (starting at 0), in
         # which case summands added after this one will have their index
         # decremented by one.
+        #
+        # Note that it's only possible to remove the last instance of a summand
+        # bu reference if it was added more than once.  Use indices instead in
+        # that case.
         def delete(summand)
-          summand = @summands.keys[summand] if summand.is_a?(Integer)
-          @summands.delete(summand)
+          samp = find_summand(summand)
+          @gains.delete(samp)
+          @orig_to_samp.delete_if { |_, v| v == samp }
+          samp.destroy
         end
 
         # Removes all summands, but does not reset the constant, if set.
         def clear
-          @summands.clear
+          @gains.each do |samp, _|
+            samp.destroy
+          end
+
+          @gains.clear
+          @orig_to_samp.clear
         end
 
         # Returns the number of summands (excluding a possible constant value).
         def count
-          @summands.length
+          @gains.length
         end
         alias length count
 
         # Returns true if there are no summands (apart from a possible constant
         # value).
         def empty?
-          @summands.empty?
+          @gains.empty?
         end
 
-        # Returns an Array of the summands in this mixer (without their gains).
+        # Returns an Array of the original summands in this mixer (without
+        # their gains).
         def summands
-          @summands.keys
+          @orig_to_samp.keys
         end
 
         # See GraphNode#sources
         def sources
-          @summands.keys + [@constant]
+          {
+            constant: @constant,
+            **@gains.keys.map.with_index { |src, idx|
+              [:"input_#{idx + 1}", src]
+            }.to_h
+          }
         end
 
         # Returns an Array of the gains in this mixer (without their summands).
         def gains
-          @summands.values
+          @gains.values
         end
 
-        # Adds the given +other+ sample source to this mixer with a gain of 1.0.
-        def +(other)
-          if other.is_a?(Numeric)
-            @constant += other
-          else
-            raise "Summand #{other} is already present on mixer #{self}" if @summands.include?(other)
-            other.or_for(nil) if other.respond_to?(:or_for) # Default to playing forever
-            check_rate(other)
-            self[other] = 1.0
-          end
-
-          self
+        # Returns true if the +other+ summand is already an input to this
+        # Mixer.
+        def include?(other)
+          @orig_to_samp.include?(other)
         end
 
-        # Adds the given +other+ sample source to this mixer with a gain of -1.0.
-        def -(other)
-          if other.is_a?(Numeric)
-            @constant -= other
-          else
-            raise "Summand #{other} is already present on mixer #{self}" if @summands.include?(other)
-            other.or_for(nil) if other.respond_to?(:or_for) # Default to playing forever
-            self[other] = -1.0
-          end
+        # Adds the arithmetic form of the mixer to GraphNode#to_s.
+        def to_s
+          "#{super} -- #{arithmetic_string}"
+        end
 
-          self
+        # Appends the arithmetic form of the mixer after
+        # GraphNode#to_s_graphviz.
+        def to_s_graphviz
+          <<~EOF
+          #{super}---------------
+          #{arithmetic_string("\n")}
+          EOF
+        end
+
+        # Returns a String showing the math under the hood of this Mixer.
+        #
+        # Named nodes will show up as their names, so you can name an
+        # arithmetic node to prevent joining the arithmetic terms past that
+        # node.
+        def arithmetic_string(separator = ' ')
+          arithmetic_terms(separator).join(" +#{separator}").gsub("+#{separator}-", "-#{separator}")
+        end
+
+        # Returns an Array of terms that can be joined with pluses to produce a
+        # mathematical statement, for #to_s and #to_s_graphviz.
+        #
+        # See #arithmetic_string.
+        def arithmetic_terms(separator)
+          terms = @gains.map { |src, g|
+            src = climb_tee_tree(src)
+            str = make_source_name(src, separator: separator)
+
+            case g
+            when 1
+              str
+
+            when -1
+              "-#{str}"
+
+            else
+              "#{make_source_name(g)} * #{str}"
+            end
+          }
+
+          terms << make_source_name(@constant) unless @constant == 0
+
+          terms
+        end
+
+        private
+
+        # Looks for a summand by identity or index.  This is needed because the
+        # @gains map uses GraphNode#get_sampler rather than the original
+        # summand.
+        #
+        # Returns the internal get_sampler summand reference.
+        def find_summand(summand, create: false)
+          if summand.is_a?(Integer)
+            @gains.keys[summand]
+          else
+            raise 'Summand must respond to :sample' unless summand.respond_to?(:sample)
+
+            if create
+              @orig_to_samp[summand] ||= summand.get_sampler
+            else
+              @orig_to_samp.fetch(summand)
+            end
+          end
         end
       end
     end

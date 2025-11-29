@@ -183,7 +183,9 @@ module MB
 
         # Returns all of the voices in the pool that include GraphNode.
         def sources
-          @voices.select { |v| v.is_a?(GraphNode) }
+          @voices
+            .select { |v| v.is_a?(GraphNode) }
+            .map.with_index { |v, idx| [:"voice_#{idx + 1}", v] }.to_h
         end
 
         # Changes the sample rate of all voices/oscillators/graphs.

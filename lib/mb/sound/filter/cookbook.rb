@@ -16,6 +16,8 @@ module MB
         # TODO: This might be mergeable with SampleWrapper or otherwise useful
         # elsewhere, would be nice to be able to make higher-order butterworth
         # filters or first-order filters available, for example
+        #
+        # TODO: support an audio source for filter gain
         class CookbookWrapper
           extend Forwardable
           include GraphNode
@@ -29,57 +31,91 @@ module MB
             end
           end
 
-          attr_reader :audio, :cutoff, :quality
+          # These return the most recent response, cutoff, quality, etc. from
+          # the underlying filter.
+          def_delegators :@base_filter, :sample_rate, :response, :cutoff, :quality, :omega, :filter_type
 
-          def_delegators :@filter, :sample_rate
+          attr_reader :base_filter
 
           # Initializes a sample-chain wrapper around a cookbook filter that
           # uses Cookbook#dynamic_process to vary the cutoff frequency
           # and quality gradually over time.  Each parameter should have a
           # :sample method that returns an array of audio.
-          def initialize(filter:, audio:, cutoff:, quality: 0.5 ** 0.5)
+          def initialize(filter:, audio:, cutoff:, quality: 0.5 ** 0.5, in_place: false)
             raise 'Filter must have a #dynamic_process method' unless filter.respond_to?(:dynamic_process)
-            @filter = filter
+            @base_filter = filter
 
-            @audio = sample_or_narray(audio)
-            @cutoff = sample_or_narray(cutoff)
-            @quality = sample_or_narray(quality)
+            @node_type_name = "Cookbook (#{@base_filter.filter_type})"
+
+            @audio = sample_or_narray(audio, si: false, unit: nil, range: -2..2)
+            @cutoff = sample_or_narray(cutoff, si: true, unit: 'Hz', range: 0..(filter.sample_rate * 0.5))
+            @quality = sample_or_narray(quality, si: false, unit: ' Q', range: 0..100)
 
             @cutoff = @cutoff.or_for(nil) if @cutoff.respond_to?(:@or_for)
             @quality = @quality.or_for(nil) if @quality.respond_to?(:@or_for)
+
+            @in_place = in_place
           end
 
           # Processes +count+ samples from the audio source through the filter,
           # using the cutoff and quality sources to control filter parameters.
-          def sample(count, in_place: true)
+          def sample(count)
             audio = @audio.sample(count)
             cutoff = @cutoff.sample(count)
             quality = @quality.sample(count)
 
             return nil if audio.nil? || cutoff.nil? || quality.nil? || audio.empty? || cutoff.empty? || quality.empty?
 
+            audio = audio.real if audio.is_a?(Numo::SComplex) || audio.is_a?(Numo::DComplex)
+
             min_length = [audio.length, cutoff.length, quality.length].min
             audio = audio[0...min_length]
             cutoff = cutoff[0...min_length]
             quality = quality[0...min_length]
 
-            audio.inplace! if in_place
+            audio.inplace! if @in_place
 
-            @filter.dynamic_process(audio, cutoff, quality).not_inplace!
+            @base_filter.dynamic_process(audio, cutoff, quality).not_inplace!
           end
 
           # See GraphNode#sources.
           def sources
-            [@audio, @cutoff, @quality]
+            {
+              input: @audio,
+              cutoff: @cutoff,
+              quality: @quality,
+            }
           end
 
           # Changes the sample rate of the filter and any upstream sources.
           def sample_rate=(new_rate)
             super
-            @filter.sample_rate = new_rate
+            @base_filter.sample_rate = new_rate
             self
           end
           alias at_rate sample_rate=
+
+          # See GraphNode#to_s
+          def to_s
+            s = "#{super} -- type: #{@base_filter.filter_type} #{source_names.join(', ')}"
+            s << " gain: #{@base_filter.db_gain}dB" if @base_filter.db_gain
+            s << " slope: #{@base_filter.shelf_slope}" if @base_filter.shelf_slope
+            s
+          end
+
+          # See GraphNode#to_s_graphviz
+          def to_s_graphviz
+            s = <<~EOF
+            #{super}---------------
+            type: #{@base_filter.filter_type}
+            #{source_names.join("\n")}
+            EOF
+
+            s << "gain: #{@base_filter.db_gain}dB\n" if @base_filter.db_gain
+            s << "slope: #{@base_filter.shelf_slope}\n" if @base_filter.shelf_slope
+
+            s
+          end
 
           private
 
@@ -88,16 +124,16 @@ module MB
           # returns that value as a constant indefinitely.  If given a
           # Numo::NArray, returns an ArrayInput that wraps it, without looping.
           # Otherwise, raises an error.
-          def sample_or_narray(v)
+          def sample_or_narray(v, unit:, si:, range:)
             case v
             when Array
               raise WrapperArgumentError.new(source: v)
 
             when Numeric
-              MB::Sound::GraphNode::Constant.new(v, sample_rate: @filter.sample_rate)
+              MB::Sound::GraphNode::Constant.new(v, sample_rate: @base_filter.sample_rate, unit: unit, si: si, range: range)
 
             when Numo::NArray
-              MB::Sound::ArrayInput.new(data: [v], sample_rate: @filter.sample_rate)
+              MB::Sound::ArrayInput.new(data: [v], sample_rate: @base_filter.sample_rate)
 
             else
               if v.respond_to?(:sample)
@@ -105,7 +141,7 @@ module MB
                 # objects, as opposed to Ruby objects with a sample method that
                 # returns a random sampling.  Or maybe I should rename all of
                 # my sample methods to something else.
-                v
+                v.get_sampler
               else
                 raise WrapperArgumentError.new(source: v)
               end
@@ -129,7 +165,7 @@ module MB
         FILTER_TYPE_IDS = FILTER_TYPES.map.with_index.to_h.freeze
 
         attr_reader :filter_type, :sample_rate, :center_frequency, :omega, :db_gain
-        attr_reader :quality, :bandwidth_oct, :shelf_slope
+        attr_reader :cutoff, :quality, :bandwidth_oct, :shelf_slope
 
         # Initializes a filter based on Robert Bristow-Johnson's filter cookbook.
         # +filter_type+ is one of :lowpass, :highpass, :bandpass (0dB peak),
@@ -162,6 +198,7 @@ module MB
         def sample_rate=(rate)
           return if @sample_rate.round(3) == rate.round(3)
           @center_frequency = 0.5 * rate if @center_frequency > 0.5 * rate
+          @cutoff = @center_frequency
           set_parameters(@filter_type, rate, @center_frequency, db_gain: @db_gain, quality: @quality, bandwidth_oct: @bandwidth_oct, shelf_slope: @shelf_slope)
           self
         end
@@ -184,6 +221,7 @@ module MB
           @filter_type = filter_type
           @sample_rate = f_samp
           @center_frequency = f_center
+          @cutoff = @center_frequency
           @db_gain = db_gain
 
           @quality = quality
@@ -202,6 +240,7 @@ module MB
           @filter_type = filter_type
           @sample_rate = f_samp
           @center_frequency = f_center
+          @cutoff = @center_frequency
           @db_gain = db_gain
 
           amp = 10.0 ** (db_gain / 40.0) if db_gain
@@ -341,6 +380,7 @@ module MB
           @x1, @x2, @y1, @y2 = state
           @quality = qualities[-1]
           @center_frequency = cutoffs[-1]
+          @cutoff = @center_frequency
 
           result
         end

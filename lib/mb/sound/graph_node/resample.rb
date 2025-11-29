@@ -50,7 +50,7 @@ module MB
           raise "Unsupported mode #{mode.inspect}" unless MODES.include?(mode)
           @mode = mode
 
-          @upstream = upstream
+          @upstream = upstream.get_sampler
 
           self.sample_rate = sample_rate
 
@@ -87,7 +87,7 @@ module MB
 
         # Returns the upstream as the only source for this node.
         def sources
-          [@upstream]
+          { input: @upstream }
         end
 
         # Returns +count+ samples at the new sample rate, while requesting

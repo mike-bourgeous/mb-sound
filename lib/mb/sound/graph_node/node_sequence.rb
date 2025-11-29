@@ -11,9 +11,6 @@ module MB
         include GraphNode
         include SampleRateHelper
 
-        # See GraphNode#sources.
-        attr_reader :sources
-
         # Creates a node sequence with the given sources (either Numo::NArrays
         # or a GraphNodes) to play in order.
         def initialize(*sources, sample_rate: nil)
@@ -97,6 +94,13 @@ module MB
           end
 
           self
+        end
+
+        # See GraphNode#sources.
+        def sources
+          @sources.map.with_index { |src, idx|
+            [:"input_#{idx + 1}", src]
+          }.to_h
         end
       end
     end

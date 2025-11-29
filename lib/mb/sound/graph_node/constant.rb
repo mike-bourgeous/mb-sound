@@ -33,19 +33,34 @@ module MB
         # constant duration in #for.
         attr_reader :sample_rate
 
+        # An optional allowed range for this constant.  May be used for
+        # limiting input ranges or controlling display ranges.
+        attr_reader :range
+
+        # An optional unit string for this constant.  Used in to_s and other
+        # display settings.
+        attr_reader :unit
+
+        # Whether the to_s method will include an SI prefix when showing the
+        # value.
+        attr_reader :si
+
         # Initializes a constant-output signal generator.
         #
         # If +:smoothing+ is true or nil, then when the constant is changed,
         # the output value will change smoothly over the length of one buffer
         # (TODO: use a constant-length FIR filter?  consider using or merging
         # with filter/smoothstep.rb?).
-        def initialize(constant, smoothing: nil, sample_rate:)
+        def initialize(constant, smoothing: nil, sample_rate:, unit: nil, range: nil, si: true)
           raise 'The constant value must be a numeric' unless constant.is_a?(Numeric)
           @constant = constant
           @complex = @constant.is_a?(Complex)
           @old_constant = @constant
           @smoothing = smoothing
           @buf = nil
+          @unit = unit
+          @range = range
+          @si = si
 
           @sample_rate = sample_rate.to_f
           @elapsed_samples = 0.0
@@ -88,7 +103,7 @@ module MB
         end
 
         def sources
-          [@constant]
+          { value: @constant }
         end
 
         # Changes the sample rate of this constant value, used for duration
@@ -112,6 +127,41 @@ module MB
           @elapsed_samples = 0
           @duration_samples = duration_seconds && duration_seconds.to_f * @sample_rate
           self
+        end
+
+        # See GraphNode#to_s
+        def to_s
+          "#{super} -- value=#{value_string}"
+        end
+
+        # See GraphNode#to_s_graphviz
+        def to_s_graphviz
+          <<~EOF
+          #{super}---------------
+          value: #{value_string}
+          EOF
+        end
+
+        # Returns a String display of the constant value, with unit and SI
+        # prefixes if specified.
+        def value_string
+          if @constant.is_a?(Complex)
+            s = @constant.to_s
+          elsif @si
+            s = MB::M.sigformat(@constant, 5)
+          else
+            s = @constant.to_nice_s(4)
+          end
+
+          "#{s}#{unit}"
+        end
+
+        # Same as #value_string for compatibility with other arithmetic nodes.
+        #
+        # Named nodes will show up as their names, so you can name this node to
+        # show that instead of the value.
+        def arithmetic_string(_separator = ' ')
+          value_string
         end
       end
     end

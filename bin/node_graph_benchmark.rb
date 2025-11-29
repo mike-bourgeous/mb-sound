@@ -49,22 +49,17 @@ graph = ((drums + ab + c + d) * -6.db).softclip(0.25, 0.99)
 
 envelopes = graph.graph.select { |n| n.is_a?(MB::Sound::ADSREnvelope) }
 
-m, s = graph.for(180).tee
+m = graph.for(180).real
+s = graph.imag
 
-m1, m2 = m.real.tee
-s1, s2 = s.imag.tee
+l = m + -6.db * s
+r = m - -6.db * s
 
-l = m1 + -6.db * s1
-r = m2 - -6.db * s2
+flanger_l = -4.db * l - -5.db * l.delay(seconds: 0.1.hz.triangle.lfo.at(0.001..0.008))
+final_l = flanger_l.softclip(0.5, 0.99)
 
-final_l = l.tee.yield_self { |(x, y)|
-  flanger = -4.db * x - -5.db * y.delay(seconds: 0.1.hz.triangle.lfo.at(0.001..0.008))
-  flanger.softclip(0.5, 0.99)
-}
-final_r = r.tee.yield_self { |(x, y)|
-  flanger = -4.db * x - -5.db * y.delay(seconds: 0.1.hz.triangle.lfo.with_phase(Math::PI).at(0.001..0.008))
-  flanger.softclip(0.5, 0.99)
-}
+flanger_r = -4.db * r - -5.db * r.delay(seconds: 0.1.hz.triangle.lfo.with_phase(Math::PI).at(0.001..0.008))
+final_r = flanger_r.softclip(0.5, 0.99)
 
 envelopes.each do |e|
   e.trigger(1, auto_release: true)

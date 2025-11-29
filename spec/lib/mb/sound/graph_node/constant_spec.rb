@@ -78,4 +78,23 @@ RSpec.describe(MB::Sound::GraphNode::Constant) do
       end
     end
   end
+
+  describe '#to_s' do
+    it 'includes units if given' do
+      expect(500.constant(unit: 'Hz').to_s).to include('500Hz')
+    end
+
+    it 'uses si formatting by default' do
+      expect(5000.constant.to_s).to include('5k')
+    end
+
+    it 'can remove si formatting' do
+      expect(0.0125.constant(si: true).to_s).to include('12.500m')
+      expect(0.0125.constant(si: false).to_s).to include('0.0125')
+    end
+
+    it 'removes trailing zeros' do
+      expect(5.5.constant(si: false).to_s).to end_with('5.5')
+    end
+  end
 end
