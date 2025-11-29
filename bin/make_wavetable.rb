@@ -2,9 +2,11 @@
 # Experiment to chop a sound into a wavetable.
 #
 # Usage:
-#     $0 in_filename out_filename [table_size] [--quiet]
+#     $0 in_filename out_filename [[table_size] ratio] [--quiet]
 #
 #     table_size defaults to 100
+#     ratio is a multiple of the fundamental period for each wave; defaults to 1
+#       ideally should be integer multiples
 
 require 'bundler/setup'
 
@@ -24,6 +26,7 @@ outname = ARGV[1]
 raise 'No output file given' unless outname
 
 table_size = Integer(ARGV[2] || 100)
+ratio = Float(ARGV[3] || 1)
 
 # TODO: Support stereo wavetable generation?
 data = MB::Sound.read(ARGV[0])
@@ -36,7 +39,7 @@ end
 MB::U.headline("Estimating frequency of #{inname}", color: '1;34')
 
 freq = MB::Sound.freq_estimate(data, range: 30..120)
-period = 1.0 / freq
+period = ratio.to_f / freq
 xfade = period * 0.25
 
 rate = 48000
@@ -128,11 +131,12 @@ end
 
 MB::U.table(
   {
+    Root: note_name,
     Frequency: freq,
     Period: period,
-    Jump: jump,
+    Ratio: ratio,
     Samples: length_samples,
-    Root: note_name,
+    Jump: jump,
   },
   variable_width: true
 )
