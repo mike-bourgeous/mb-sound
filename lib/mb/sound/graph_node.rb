@@ -701,7 +701,7 @@ module MB
 
         until source_queue.empty?
           s = source_queue.shift
-          s = s.round if s.is_a?(Numeric) && s.respond_to?(:round) && s.round == s
+          s = s.round if s.is_a?(Numeric) && s.respond_to?(:round) && s.finite? && s.round == s
 
           # TODO: have a separate configuration for manual tees and implied
           # branches from get_sampler, and default to ignoring get_sampler?
