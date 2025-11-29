@@ -9,5 +9,5 @@ gemspec
 # install FFI.
 gem 'mb-sound-jackffi', '>= 0.1.0.usegit', github: 'mike-bourgeous/mb-sound-jackffi.git'
 
-gem 'mb-math', github: 'mike-bourgeous/mb-math.git', branch: 'wavetable' # XXX do not merge without removing branch
+gem 'mb-math', github: 'mike-bourgeous/mb-math.git'
 gem 'mb-util', github: 'mike-bourgeous/mb-util.git'
