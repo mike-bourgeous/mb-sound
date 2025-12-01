@@ -591,6 +591,28 @@ RSpec.describe(MB::Sound::GraphNode, aggregate_failures: true) do
         expect { more_spies.sample(5) }.to change { b1.count }.by(1).and change { b2.count }.by(2)
       end
     end
+
+    context 'with an interval' do
+      it 'calls the spy once, then waits for the interval to pass' do
+        expect(Time).to receive(:now).and_return(0, 1, 2, 3, 4, 5, 6)
+
+        spycount = 0
+
+        # Time.now == 0 ; last_time == -5
+        node = 5.constant.spy(interval: 5) { spycount += 1 }
+
+        # Time.now == 1 ; last_time == 1
+        expect { node.sample(10) }.to change { spycount }.by(1)
+
+        # Time.now == 2..5
+        4.times do
+          expect { node.sample(10) }.not_to change { spycount }
+        end
+
+        # Time.now == 6
+        expect { node.sample(10) }.to change { spycount }.by(1)
+      end
+    end
   end
 
   describe '#clear_spies' do

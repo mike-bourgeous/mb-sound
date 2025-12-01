@@ -581,40 +581,29 @@ module MB
       #
       #     block_buf[] = spy_buf
       #
+      # You can specify a minimum +:interval+ in seconds to reduce CPU load, and your spy won't be called until at least that amount of time has elapsed.
+      #
       # If you'll need to remove specific spies later, pass a +:handle+.  This
       # may be an object instance, a Symbol, etc.
       #
       # See #clear_spies.
       #
-      # TODO: accomplish this without monkey patching
-      def spy(handle: nil, &block)
-        @graph_spies ||= nil
+      # TODO: accomplish this without monkey patching, and maybe use a module
+      # interface rather than a proc (for better rubyprof traces)
+      def spy(handle: nil, interval: false, &block)
         @handled_spies ||= nil
 
-        if @graph_spies.nil?
-          @graph_spies = []
+        if @handled_spies.nil?
           @handled_spies = {}
 
           class << self
             def sample(count)
               super(count).tap { |buf|
-                MB::M.with_inplace(buf, false) do |b|
-                  @graph_spies.each_with_index do |s, idx|
-                    begin
-                      s.call(b)
-                    rescue => e
-                      warn "Spy #{idx}/#{s} raised #{MB::U.highlight(e)}"
-                    end
-                  end
+                MB::M.with_inplace(buf, false) do |data|
+                  now = Time.now
 
                   @handled_spies.each do |origin, spies|
-                    spies.each_with_index do |s, idx|
-                      begin
-                        s.call(b)
-                      rescue => e
-                        warn "Handled spy #{idx}/#{s} from #{origin} raised #{MB::U.highlight(e)}"
-                      end
-                    end
+                    call_spies(spies, data, origin ? " from #{origin}" : '', now)
                   end
                 end
               }
@@ -622,14 +611,26 @@ module MB
           end
         end
 
-        if handle
-          @handled_spies[handle] ||= []
-          @handled_spies[handle] << block
-        else
-          @graph_spies << block
-        end
+        @handled_spies[handle] ||= []
+        @handled_spies[handle] << [block, interval, Time.now - (interval || 1)]
 
         self
+      end
+
+      # Used by #spy.
+      private def call_spies(spies, data, info, now)
+        spies.each_with_index do |spy_info, idx|
+          s, interval, last_time = spy_info
+
+          begin
+            if !interval || (now - last_time) >= interval
+              s.call(data)
+              spy_info[-1] = now
+            end
+          rescue => e
+            warn "Spy #{idx}/#{s}#{info} raised #{MB::U.highlight(e)}"
+          end
+        end
       end
 
       # Prints changes to the first sample of each buffer to STDOUT, or yields
@@ -654,7 +655,6 @@ module MB
       # Clears any spies attached to this graph node (see #spy), or just spies
       # associated with the given +:handle+.
       def clear_spies(handle: nil)
-        @graph_spies ||= nil
         @handled_spies ||= nil
 
         if handle
@@ -663,7 +663,6 @@ module MB
             @handled_spies.delete(handle)
           end
         else
-          @graph_spies&.clear
           @handled_spies&.clear
         end
 
