@@ -233,7 +233,13 @@ module MB
       # See FFMPEGInput, mb-sound-jackffi, JackInput, and AlsaInput for more
       # flexible recording.
       def input(sample_rate: 48000, channels: 2, device: nil, buffer_size: nil)
-        input_type = detect_input
+        @inputs ||= {}
+
+        input_type = detect_input(device)
+        info = {input_type: input_type, sample_rate: sample_rate, channels: channels, device: device, buffer_size: buffer_size}
+
+        inp = @inputs[info]
+        return inp if inp && !(inp.respond_to?(:closed?) && inp.closed?)
 
         case input_type
         when :jack_ffi
@@ -263,14 +269,18 @@ module MB
         inp.extend(GraphNode) unless inp.is_a?(GraphNode)
         inp.extend(GraphNode::IOSampleMixin) unless inp.is_a?(GraphNode::IOSampleMixin)
 
+        @inputs[info] = inp
+
         inp
       end
 
       # Returns a Symbol describing the type of input that should be used,
       # based on operating system-specific detection and the INPUT_TYPE
       # environment variable.  See #input.
-      def detect_input
+      def detect_input(device)
         return ENV['INPUT_TYPE'].gsub(/^:/, '').to_sym if ENV['INPUT_TYPE']
+
+        return :null if device == 'null' || device == ':null' || device == :null
 
         case RUBY_PLATFORM
         when /linux/
