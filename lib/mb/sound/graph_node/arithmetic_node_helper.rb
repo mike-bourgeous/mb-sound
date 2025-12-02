@@ -43,12 +43,12 @@ module MB
             v = s.sample(count)&.not_inplace!
             next if v.nil? || v.empty?
 
-            if v.length > count
-              warn("Source #{idx} gave #{self} more data than requested: #{min_length}/#{max_length} vs #{count}")
-            end
-
             min_length = v.length if v.length < min_length
             max_length = v.length if v.length > max_length
+
+            if v.length > count
+              warn("Source #{idx} gave #{self} more data than requested: #{min_length}/#{max_length}/#{v.length} vs #{count}")
+            end
 
             expand_buffer(v)
 

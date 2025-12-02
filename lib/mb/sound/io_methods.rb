@@ -269,6 +269,7 @@ module MB
         inp.extend(GraphNode) unless inp.is_a?(GraphNode)
         inp.extend(GraphNode::IOSampleMixin) unless inp.is_a?(GraphNode::IOSampleMixin)
 
+        inp = MB::Sound::InputBufferWrapper.new(inp)
         @inputs[info] = inp
 
         inp
