@@ -488,7 +488,14 @@ module MB
       #
       # See MB::Sound::Filter::Delay#initialize for a description of the
       # +:smoothing+ parameter.
-      def delay(seconds: nil, samples: nil, sample_rate: 48000, smoothing: true, max_delay: 1.0, feedback: false)
+      #
+      # This can be used for spectral distortion:
+      #
+      #     graph = (60.hz * 0.5.hz.ramp.at(1..0).with_phase(-Math::PI))
+      #       .proc { |v| MB::Sound.real_fft(v) }
+      #       .delay(samples: 3208.4, feedback: 0.9, dry: 1, wet: 1)
+      #       .proc { |v| MB::Sound.real_ifft(MB::M.shl(v, 0)) }
+      def delay(seconds: nil, samples: nil, sample_rate: 48000, smoothing: true, max_delay: 1.0, feedback: false, dry: 0, wet: 1)
         if samples
           samples = samples.to_f if samples.is_a?(Numeric)
           seconds = samples / sample_rate
@@ -498,7 +505,11 @@ module MB
 
         seconds = seconds.or_for(nil) if seconds.respond_to?(:or_for)
 
-        filter(MB::Sound::Filter::Delay.new(delay: seconds, sample_rate: sample_rate, smoothing: smoothing, buffer_size: sample_rate.ceil * max_delay, feedback: feedback))
+        filter(MB::Sound::Filter::Delay.new(
+          delay: seconds, sample_rate: sample_rate, smoothing: smoothing,
+          buffer_size: sample_rate.ceil * max_delay, feedback: feedback,
+          dry: dry, wet: wet
+        ))
       end
 
       # Adds a multi-tap delay with the given delay sources, returning an Array
