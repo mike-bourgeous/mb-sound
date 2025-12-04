@@ -21,17 +21,22 @@ module MB
         plot = { header_lines: header.lines.count, graphical: graphical } if plot.nil? || plot == true
         plot[:spectrum] = spectrum if plot.is_a?(Hash) && !plot.include?(:spectrum)
 
+        if file_tone_data.is_a?(Numo::NArray) || (file_tone_data.is_a?(MB::Sound::GraphNode) && !file_tone_data.respond_to?(:read))
+          file_tone_data = [file_tone_data]
+        end
+
         case file_tone_data
         when String
           return play_file(file_tone_data, gain: gain, plot: plot, device: device)
 
-        when Array, Numo::NArray
-          # TODO: Handle the signal graph DSL better in convert_sound_to_narray and consolidate with IOMethods#write
-          if file_tone_data.is_a?(Array) && !file_tone_data.empty? && file_tone_data.all?(GraphNode)
+        when Array
+          if !file_tone_data.empty? && file_tone_data.all?(GraphNode)
+            # TODO: what happens with inputs?
             bufsize = file_tone_data.map(&:graph_buffer_size).compact.min # nil is ok here
+
             output ||= MB::Sound.output(
               sample_rate: sample_rate,
-              channels: [2, file_tone_data.length].max,
+              channels: MB::M.max(2, file_tone_data.length),
               plot: plot,
               device: device,
               buffer_size: bufsize
@@ -45,25 +50,13 @@ module MB
               end
             }
 
+            input = nodes.as_input(output.channels)
+
             loop do
-              buf = nodes.map { |d| d.sample(output.buffer_size) }
-              break if buf.all? { |d| d.nil? || d.empty? }
+              buf = input.read(output.buffer_size)
+              break if buf.nil? || buf.empty? || buf.any? { |d| d.nil? || d.empty? }
 
-              buf = buf.map { |d|
-                if d.nil? || d.empty?
-                  Numo::SFloat.zeros(output.buffer_size)
-                elsif d.length < output.buffer_size
-                  MB::M.zpad(d, output.buffer_size)
-                else
-                  d
-                end
-              }
-
-              if buf.length == 1
-                output.write(buf * output.channels)
-              else
-                output.write(buf)
-              end
+              output.write(buf)
             end
 
           else
@@ -71,11 +64,14 @@ module MB
             data = data * 2 if data.length < 2
             channels = data.length
 
+            output ||= MB::Sound.output(sample_rate: sample_rate, channels: channels, plot: plot, device: device)
+            buffer_size = output.buffer_size
+
             # TODO: if this code needs to be modified much in the future, come up
             # with a shared way of chunking data that can work for all play,
             # write, and plot methods.  Maybe convert everything to signal nodes?
-            output ||= MB::Sound.output(sample_rate: sample_rate, channels: channels, plot: plot, device: device)
-            buffer_size = output.buffer_size
+            #
+            # TODO: maybe use ArrayInput
             (0...data[0].length).step(buffer_size).each do |offset|
               output.write(data.map { |c|
                 MB::M.zpad(c[offset...([offset + buffer_size, c.length].min)], buffer_size)
@@ -83,23 +79,6 @@ module MB
             end
           end
 
-        when GraphNode
-          bufsize = file_tone_data.graph_buffer_size # nil is ok here
-          output ||= MB::Sound.output(sample_rate: sample_rate, plot: plot, device: device, buffer_size: bufsize)
-
-          if file_tone_data.sample_rate != sample_rate
-            node = file_tone_data.resample(sample_rate)
-          else
-            node = file_tone_data
-          end
-
-          loop do
-            # TODO: Consolidate this sample+write loop with other similar or identical loops?
-            d = node.sample(output.buffer_size)
-            break if d.nil? || d.empty?
-            d = MB::M.zpad(d, output.buffer_size) if d.length < output.buffer_size
-            output.write([d] * output.channels)
-          end
         else
           raise "Unsupported type #{file_tone_data.class.name} for playback"
 

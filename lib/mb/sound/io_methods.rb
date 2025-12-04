@@ -45,6 +45,7 @@ module MB
 
         when GraphNode
           # TODO: this could be improved for plotting or saving signal chains/graphs
+          # TODO: what happens for inputs with the InputSampleWrapper?
           sound.sample(960)
 
         else
@@ -112,27 +113,9 @@ module MB
       #
       # See MB::Sound::FFMPEGOutput for more flexible sound output.
       def write(filename, data, sample_rate: 48000, overwrite: false, max_length: nil)
-        # TODO: Handle the signal graph DSL better in convert_sound_to_narray
-        if data.is_a?(GraphNode) && !data.is_a?(Tone)
-          buffer_size = data.graph_buffer_size || 800
-          output = file_output(
-            filename,
-            sample_rate: sample_rate,
-            channels: 1,
-            overwrite: overwrite,
-            buffer_size: buffer_size
-          )
+        data = [data] if data.is_a?(GraphNode)
 
-          t = 0
-          loop do
-            buf = data.sample(output.buffer_size)
-            break if buf.nil? || buf.empty?
-            output.write([buf])
-
-            t += output.buffer_size.to_f / sample_rate
-            break if max_length && t >= max_length
-          end
-        elsif data.is_a?(Array) && data.all?(GraphNode)
+        if data.is_a?(Array) && data.all?(GraphNode)
           buffer_size = data.map(&:graph_buffer_size).compact.min || 800
 
           output = file_output(
@@ -143,24 +126,16 @@ module MB
             buffer_size: buffer_size
           )
 
+          input = data.as_input
+
           t = 0
           loop do
-            buf = data.map { |d| d.sample(output.buffer_size) }
-            break if buf.all? { |d| d.nil? || d.empty? }
-
-            buf = buf.map { |d|
-              if d.nil? || d.empty?
-                Numo::SFloat.zeros(output.buffer_size)
-              elsif d.length < output.buffer_size
-                MB::M.zpad(d, output.buffer_size)
-              else
-                d
-              end
-            }
+            buf = input.read(buffer_size)
+            break if buf.nil? || buf.empty? || buf.any? { |d| d.nil? || d.empty? }
 
             output.write(buf)
 
-            t += output.buffer_size.to_f / sample_rate
+            t += buffer_size.to_f / sample_rate
             break if max_length && t >= max_length
           end
         else
