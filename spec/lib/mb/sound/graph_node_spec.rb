@@ -29,6 +29,23 @@ RSpec.describe(MB::Sound::GraphNode, aggregate_failures: true) do
     expect(graph.sample(100)).to eq(Numo::SFloat.zeros(100).fill(2))
   end
 
+  describe '#as_input' do
+    # More tests in the GraphNodeInput and GraphNodeArrayMixin specs
+    it 'wraps a graph in an Input with a #read method' do
+      inp = 1.constant.as_input(buffer_size: 348)
+      expect(inp).to respond_to(:read)
+      expect(inp.buffer_size).to eq(348)
+      expect(inp.read(12)).to eq([Numo::SFloat.ones(12)])
+    end
+
+    it 'can duplicate node output to fill a given number of channels' do
+      inp = 1.constant.as_input(2, buffer_size: 348)
+      expect(inp).to respond_to(:read)
+      expect(inp.buffer_size).to eq(348)
+      expect(inp.read(12)).to eq([Numo::SFloat.ones(12)] * 2)
+    end
+  end
+
   describe '#tone' do
     it 'creates tones using graph nodes as frequency value' do
       ref = 1000.hz

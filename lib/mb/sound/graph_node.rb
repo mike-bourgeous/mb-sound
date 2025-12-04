@@ -83,7 +83,8 @@ module MB
       # Creates and returns an input object that reads from this node's #sample
       # method whenever the I/O's #read method is called.
       #
-      # TODO: allow combining multiple graphs together for multiple channels
+      # See MB::Sound::GraphNode::GraphNodeArrayMixin#as_input for a method of
+      # combining multiple nodes into a readable input.
       def as_input(num_channels = 1, buffer_size: nil)
         MB::Sound::GraphNodeInput.new(self, channels: num_channels, buffer_size: buffer_size)
       end
@@ -691,6 +692,10 @@ module MB
         {}
       end
 
+      # TODO: add another method to return rightward-pointing sources AKA
+      # feedback, that will be drawn on visualizations but not used in
+      # determining node order?
+
       # Returns a list of all nodes feeding into this node, either directly or
       # indirectly, plus this node itself, without duplication.  Also may
       # include numeric values used as parameters to some of the nodes.
@@ -1063,6 +1068,7 @@ end
 
 require_relative 'graph_node/arithmetic_node_helper'
 require_relative 'graph_node/sample_rate_helper'
+require_relative 'graph_node/graph_node_array_mixin'
 
 require_relative 'graph_node/constant'
 require_relative 'graph_node/input_channel_split'
