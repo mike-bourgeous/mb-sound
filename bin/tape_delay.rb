@@ -31,7 +31,7 @@ end
 
 graphviz = !!ARGV.delete('--graphviz')
 overwrite = !!ARGV.delete('--overwrite')
-numerics, others = ARGV.partition { |arg| arg.strip =~ /\A\+?[0-9]+(\.[0-9]+)?\z/ }
+numerics, others = ARGV.partition { |arg| arg.strip =~ /\A[+-]?[0-9]+(\.[0-9]+)?\z/ }
 
 delay, feedback, extra = numerics.map(&:to_f)
 delay ||= 0.1

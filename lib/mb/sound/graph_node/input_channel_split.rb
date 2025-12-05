@@ -108,6 +108,7 @@ module MB
         # Raises an error indicating that inputs split to graph nodes cannot
         # change sample rate.
         def sample_rate=(new_rate)
+          return if @source.sample_rate == new_rate
           raise NotImplementedError, "Cannot change sample rate on an input channel #{self}; try appending a .resample node"
         end
         alias at_rate sample_rate=
