@@ -687,57 +687,7 @@ module MB
       # from this node, but if there are loops in the graph this is not
       # guaranteed.
       def graph(include_tees: true)
-        # TODO: use a linked list for deletion and reinsertion if this method
-        # becomes too slow, or weaken return ordering and memoize in each
-        # instance and call graph instead of sources to get sources?
-        #
-        # Start self at -1 visits to preserve ordering when breaking feedback
-        # loops
-        source_history = { self => -1 }
-        source_queue = [self]
-        source_list = []
-
-        until source_queue.empty?
-          s = source_queue.shift
-          s = s.round if s.is_a?(Numeric) && s.respond_to?(:round) && s.finite? && s.round == s
-
-          # TODO: have a separate configuration for manual tees and implied
-          # branches from get_sampler, and default to ignoring get_sampler?
-          # TODO: allow climbing past nodes of any type or based on any
-          # condition, e.g. to skip mixers and multipliers that were created by
-          # an internal arithmetic step inside or for another node.  e.g. #adsr
-          # creates a multiplier to icombine the input with the envelope.
-          # TODO: automatically differentiate between nodes created directly by
-          # the user and nodes created implicitly by other nodes?  e.g. could
-          # wrap internal node creation within a block that marks those nodes
-          # as invisible by default?
-          unless include_tees
-            s = climb_tee_tree(s)
-          end
-
-          # If we encounter a source again, move it to the end of the source
-          # list and look at its sources again.
-          if source_history.include?(s)
-            # TODO: only look at a source if all paths from it have been traveled
-            # TODO: this would all be easier if source/dest links were bidirectional
-            # TODO: is 50 a reasonable number?
-            if source_history[s] > (50 + source_list.length)
-              warn "Possible infinite loop on #{s} (started from #{self})"
-              next
-            end
-
-            source_list.delete(s)
-          else
-            source_history[s] = 0
-          end
-
-          source_history[s] += 1
-          source_list << s
-
-          source_queue.concat(s.sources.values) if s.respond_to?(:sources)
-        end
-
-        source_list
+        MB::Sound::GraphNode.graph(self, include_tees: include_tees)
       end
 
       # Returns a Hash from source node to a Set of destination node/port name
@@ -773,31 +723,7 @@ module MB
       # from this node.  Ignores Numeric sources in the graph.  Returns an
       # Array of Arrays of nodes.
       def graph_ranks(include_tees: true)
-        rank_map = { self => 0 }
-
-        graph(include_tees: include_tees).each do |dest|
-          next if dest.is_a?(Numeric)
-
-          rank_map[dest] ||= 0
-          next_rank = rank_map[dest] + 1
-
-          dest.sources.each do |_name, src|
-            next if src.is_a?(Numeric)
-
-            src = climb_tee_tree(src) unless include_tees
-
-            rank_map[src] ||= next_rank
-            rank_map[src] = MB::M.max(rank_map[src], next_rank)
-          end
-        end
-
-        ranks = []
-        rank_map.each do |n, rank|
-          ranks[rank] ||= []
-          ranks[rank] << n
-        end
-
-        ranks.compact.reverse
+        MB::Sound::GraphNode.graph_ranks(self, include_tees: include_tees)
       end
 
       # Finds the lowest numeric value greater than zero for any graph nodes
@@ -925,6 +851,91 @@ module MB
       def self.climb_tee_tree(branch)
         branch = branch.original_source while branch.is_a?(MB::Sound::GraphNode::Tee::Branch)
         branch
+      end
+
+      # Create a list of upstream nodes from the given graph node.  See #graph.
+      def self.graph(node, include_tees: true)
+        # TODO: use a linked list for deletion and reinsertion if this method
+        # becomes too slow, or weaken return ordering and memoize in each
+        # instance and call graph instead of sources to get sources?
+        #
+        # Start self at -1 visits to preserve ordering when breaking feedback
+        # loops
+        source_history = { node => -1 }
+        source_queue = [node]
+        source_list = []
+
+        until source_queue.empty?
+          s = source_queue.shift
+          s = s.round if s.is_a?(Numeric) && s.respond_to?(:round) && s.finite? && s.round == s
+
+          # TODO: have a separate configuration for manual tees and implied
+          # branches from get_sampler, and default to ignoring get_sampler?
+          # TODO: allow climbing past nodes of any type or based on any
+          # condition, e.g. to skip mixers and multipliers that were created by
+          # an internal arithmetic step inside or for another node.  e.g. #adsr
+          # creates a multiplier to icombine the input with the envelope.
+          # TODO: automatically differentiate between nodes created directly by
+          # the user and nodes created implicitly by other nodes?  e.g. could
+          # wrap internal node creation within a block that marks those nodes
+          # as invisible by default?
+          unless include_tees
+            s = climb_tee_tree(s)
+          end
+
+          # If we encounter a source again, move it to the end of the source
+          # list and look at its sources again.
+          if source_history.include?(s)
+            # TODO: only look at a source if all paths from it have been traveled
+            # TODO: this would all be easier if source/dest links were bidirectional
+            # TODO: is 50 a reasonable number?
+            if source_history[s] > (50 + source_list.length)
+              warn "Possible infinite loop on #{s} (started from #{self})"
+              next
+            end
+
+            source_list.delete(s)
+          else
+            source_history[s] = 0
+          end
+
+          source_history[s] += 1
+          source_list << s
+
+          source_queue.concat(s.sources.values) if s.respond_to?(:sources)
+        end
+
+        source_list
+      end
+
+      # Create a rank list for the given graph node (or similar object that
+      # responds to #graph).  See #graph_ranks.
+      def self.graph_ranks(node, include_tees: true)
+        rank_map = { node => 0 }
+
+        (node.graph(include_tees: include_tees) | [node]).each do |dest|
+          next if dest.is_a?(Numeric)
+
+          rank_map[dest] ||= 0
+          next_rank = rank_map[dest] + 1
+
+          dest.sources.each do |_name, src|
+            next if src.is_a?(Numeric)
+
+            src = climb_tee_tree(src) unless include_tees
+
+            rank_map[src] ||= next_rank
+            rank_map[src] = MB::M.max(rank_map[src], next_rank)
+          end
+        end
+
+        ranks = []
+        rank_map.each do |n, rank|
+          ranks[rank] ||= []
+          ranks[rank] << n
+        end
+
+        ranks.compact.reverse
       end
 
       private

@@ -96,14 +96,14 @@ RSpec.describe(MB::Sound::GraphNodeInput, :aggregate_failures) do
       a = 1.constant
       b = 2.constant
       inp = [a, b].as_input
-      expect(inp.graph).to include(a, b)
+      expect(inp.graph).to include(a, b, inp)
     end
 
     it 'can skip tees' do
       a = 1.constant
       b = 2.constant
       inp = [a, b].as_input
-      expect(inp.graph(include_tees: false)).to eq([a, 1, b, 2])
+      expect(inp.graph(include_tees: false)).to eq([inp, a, b, 1, 2])
     end
   end
 
@@ -118,8 +118,6 @@ RSpec.describe(MB::Sound::GraphNodeInput, :aggregate_failures) do
       expect(graph.length).to eq(2)
       expect(graph).to all(be_a(MB::Sound::GraphNode::Constant))
     end
-
-    pending 'more tests'
   end
 
   describe '#graph_edges' do

@@ -41,34 +41,25 @@ module MB
       end
 
       # Returns the full list of nodes in the entire graph upstream of this
-      # input across all branches.  Does not include the input itself, since
-      # this is not a GraphNode.
+      # input across all branches.
       #
       # See GraphNode#graph.
       def graph(include_tees: true)
-        @nodes.map { |n| n.graph(include_tees: include_tees) }.reduce(&:|)
+        MB::Sound::GraphNode.graph(self, include_tees: include_tees)
       end
 
       # Merges the rank-grouped graph of each source node into a single list.
-      # This *does* include this input itself as the final rank.
+      # Ranks will be right-aligned so that all sources to this input end up in
+      # the same column.
+      #
+      # See GraphNode#graph_ranks.
       def graph_ranks(include_tees: true)
-        ranks = []
-
-        @nodes.each_with_index do |n, idx|
-          n = MB::Sound::GraphNode.climb_tee_tree(n) unless include_tees
-
-          n.graph_ranks(include_tees: include_tees).each_with_index do |nr, idx|
-            ranks[idx] ||= []
-            ranks[idx] |= nr
-          end
-        end
-
-        ranks << [self]
-
-        ranks
+        MB::Sound::GraphNode.graph_ranks(self, include_tees: include_tees)
       end
 
       # Returns all of the upstream edges leading into this input.
+      #
+      # See GraphNode#graph_edges.
       def graph_edges(include_tees: true)
         edges = {}
 
