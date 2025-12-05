@@ -612,11 +612,7 @@ module MB
             def sample(count)
               super(count).tap { |buf|
                 MB::M.with_inplace(buf, false) do |data|
-                  now = Time.now
-
-                  @handled_spies.each do |origin, spies|
-                    call_spies(spies, data, origin ? " from #{origin}" : '', now)
-                  end
+                  call_spies(data)
                 end
               }
             end
@@ -630,17 +626,23 @@ module MB
       end
 
       # Used by #spy.
-      private def call_spies(spies, data, info, now)
-        spies.each_with_index do |spy_info, idx|
-          s, interval, last_time = spy_info
+      private def call_spies(data)
+        now = Time.now
 
-          begin
-            if !interval || (now - last_time) >= interval
-              s.call(data)
-              spy_info[-1] = now
+        @handled_spies.each do |origin, spies|
+          info = origin ? " from #{origin}" : ''
+
+          spies.each_with_index do |spy_info, idx|
+            s, interval, last_time = spy_info
+
+            begin
+              if !interval || (now - last_time) >= interval
+                s.call(data)
+                spy_info[-1] = now
+              end
+            rescue => e
+              warn "Spy #{idx}/#{s}#{info} raised #{MB::U.highlight(e)}"
             end
-          rescue => e
-            warn "Spy #{idx}/#{s}#{info} raised #{MB::U.highlight(e)}"
           end
         end
       end

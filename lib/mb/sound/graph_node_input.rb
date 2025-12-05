@@ -24,19 +24,120 @@ module MB
         @nodes = nodes.map { |n| n.get_sampler }.freeze
 
         @output = Array.new(@channels)
+
+        @handled_spies = {}
+      end
+
+      # Just describes the number of channels.
+      def to_s
+        "#{@nodes.length} Channels"
       end
 
       # Returns the list of nodes that directly feed this input.
       def sources
-        @nodes
+        @nodes.map.with_index { |n, idx|
+          [:"channel_#{idx + 1}", n]
+        }.to_h
       end
 
       # Returns the full list of nodes in the entire graph upstream of this
-      # input across all branches.
+      # input across all branches.  Does not include the input itself, since
+      # this is not a GraphNode.
       #
       # See GraphNode#graph.
       def graph(include_tees: true)
         @nodes.map { |n| n.graph(include_tees: include_tees) }.reduce(&:|)
+      end
+
+      # Merges the rank-grouped graph of each source node into a single list.
+      # This *does* include this input itself as the final rank.
+      def graph_ranks(include_tees: true)
+        ranks = []
+
+        @nodes.each_with_index do |n, idx|
+          n = MB::Sound::GraphNode.climb_tee_tree(n) unless include_tees
+
+          n.graph_ranks(include_tees: include_tees).each_with_index do |nr, idx|
+            ranks[idx] ||= []
+            ranks[idx] |= nr
+          end
+        end
+
+        ranks << [self]
+
+        ranks
+      end
+
+      # Returns all of the upstream edges leading into this input.
+      def graph_edges(include_tees: true)
+        edges = {}
+
+        @nodes.each_with_index do |n, idx|
+          n = n.climb_tee_tree(n) unless include_tees
+
+          # TODO: use named channels?  allow passing a hash to the constructor to name the channels?
+          edges[n] ||= Set.new
+          edges[n] << [self, :"channel_#{idx + 1}"]
+
+          n.graph_edges(include_tees: include_tees).each do |src, edge_set|
+            edges[src] ||= Set.new
+            edges[src].merge(edge_set)
+          end
+        end
+
+        edges
+      end
+
+      # Adds the given block as a callback to receive the return value from
+      # #read as splatted arguments.
+      #
+      # TODO: combine with GraphNode#spy somehow
+      def spy(handle: nil, interval: false, &block)
+        @handled_spies[handle] ||= []
+        @handled_spies[handle] << [block, interval, Time.now - (interval || 1)]
+
+        self
+      end
+
+      # Used by #spy.
+      # TODO: combine with GraphNode#call_spies somehow
+      private def call_spies(data)
+        now = Time.now
+
+        @handled_spies.each do |origin, spies|
+          info = origin ? " from #{origin}" : ''
+
+          spies.each_with_index do |spy_info, idx|
+            s, interval, last_time = spy_info
+
+            begin
+              if !interval || (now - last_time) >= interval
+                s.call(*data)
+                spy_info[-1] = now
+              end
+            rescue => e
+              warn "GraphNodeInput spy #{idx}/#{s}#{info} raised #{MB::U.highlight(e)}"
+            end
+          end
+        end
+      end
+
+      # Clears any spies attached to this graph node (see #spy), or just spies
+      # associated with the given +:handle+.
+      # TODO: combine with GraphNode#clear_spies somehow
+      def clear_spies(handle: nil)
+        @handled_spies ||= nil
+
+        if handle
+          if @handled_spies && @handled_spies.include?(handle)
+            @handled_spies[handle].clear
+            @handled_spies.delete(handle)
+          end
+        else
+          @handled_spies&.clear
+        end
+
+        self
       end
 
       # Returns the nodes' outputs duplicated as needed to fill all channels.
@@ -64,6 +165,8 @@ module MB
         for idx in 0...@channels
           @output[idx] = data[idx % data.length]
         end
+
+        call_spies(@output)
 
         @output
       end
