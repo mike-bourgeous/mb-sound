@@ -19,7 +19,7 @@ module MB
         # parameter.  Used by VoicePool.  See #on_cc.
         attr_reader :cc_map
 
-        def_delegators :@graph, :sample_rate
+        def_delegators :@graph, :sample_rate, :sample_rate=
 
         # Initializes a voice based on the given signal graph.  The
         # +:update_rate+ is passed to internal Parameter objects for parameter

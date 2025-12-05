@@ -64,6 +64,14 @@ puts MB::U.highlight({
 })
 
 begin
+  # TODO: Allow base delay and loop length? or mindelay and maxdelay?
+  # TODO: It would be cool to be able to crossfade the delay time jump; this
+  # could be possible with a multi-tap delay (e.g. fade out from t1 while
+  # fading in from t2)
+  delay_time = (delay.constant.named('Delay')).filter(:lowpass, cutoff: 10).clip(internal_buftime, nil)
+
+  lfo_freq = (1.0 / delay_time).named('LFO Frequency')
+
   # TODO: Abstract construction of a filter graph per channel
   paths = inputs.map.with_index { |inp, idx|
     inp = inp.with_buffer(input.buffer_size).resample(mode: :libsamplerate_fastest)
@@ -71,21 +79,13 @@ begin
     # Feedback buffers, overwritten by later calls to #spy
     a = Numo::SFloat.zeros(internal_buffer)
 
-    # TODO: Allow base delay and loop length? or mindelay and maxdelay?
-    # TODO: It would be cool to be able to crossfade the delay time jump; this
-    # could be possible with a multi-tap delay (e.g. fade out from t1 while
-    # fading in from t2)
-    delay_time = (delay.constant.named('Delay')).filter(:lowpass, cutoff: 10).clip(internal_buftime, nil)
-    
-    lfo_freq = (1.0 / delay_time).named('LFO Frequency')
-
     # The amplitude LFO mutes the sound while the delay buffer jumps back to the present
     amp_lfo = lfo_freq.tone.sine.at(0..1000).with_phase((idx + 0.5) * 2.0 * Math::PI / inputs.length).clip(0, 1).named('Amp LFO')
 
     # The delay LFO controls the position in the delay buffer
     delay_lfo = lfo_freq.tone.ramp.at(0..2).with_phase(idx * 2.0 * Math::PI / inputs.length).named('Delay LFO') * delay_time
 
-    delayed = inp.multitap(delay_lfo)[0] * amp_lfo
+    delayed = inp.delay(seconds: delay_lfo, smoothing: false) * amp_lfo
 
     # TODO: create a better way to do feedback in node graphs, ideally while
     # automatically compensating for buffer size
@@ -110,14 +110,14 @@ begin
   if manager
     manager.on_cc_map(paths.map(&:cc_map))
     puts MB::U.syntax(manager.to_acid_xml, :xml)
+
+    mg_thread = Thread.new do
+      manager.update
+      sleep output.buffer_size.to_f / output.sample_rate
+    end
   end
 
-  loop do
-    manager&.update
-    data = paths.map { |p| p.sample(output.buffer_size) }
-    break if data.any?(&:nil?)
-    output.write(data)
-  end
+  MB::Sound.play(paths, output: output)
 
 rescue => e
   puts MB::U.highlight(e)
