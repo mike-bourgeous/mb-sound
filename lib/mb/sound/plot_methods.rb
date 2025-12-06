@@ -205,7 +205,11 @@ module MB
         STDOUT.write("\e[H\e[2J") if all == true
 
         if all == true || all == false
-          header = "\e[36mPlotting #{MB::U.highlight(file_tone_data)}\e[0m"
+          if file_tone_data.is_a?(GraphNode)
+            header = "\e[36mPlotting #{file_tone_data}\e[0m"
+          else
+            header = "\e[36mPlotting #{MB::U.highlight(file_tone_data)}\e[0m"
+          end
           header_lines = header.lines.count
           puts header
         end
@@ -309,11 +313,15 @@ module MB
             p.logscale(false) if p.respond_to?(:logscale)
           end
 
-          p.yrange(data.map(&:min).min, data.map(&:max).max) if p.respond_to?(:yrange) && !all.nil?
+          ymin = data.map(&:min).min
+          ymax = data.map(&:max).max
+          ymax = ymin + 1 if ymax == ymin
+          p.yrange(ymin, ymax) if p.respond_to?(:yrange) && !all.nil?
 
           @lines = p.plot(
             data.map.with_index { |c, idx|
               yrange = [0, c.shape[0]] if c.is_a?(Numo::NArray) && c.ndim == 2
+              yrange = [0, 1] if yrange == [0, 0]
               [idx.to_s, {data: c, yrange: yrange}]
             }.to_h,
             print: false

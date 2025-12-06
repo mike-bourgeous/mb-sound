@@ -151,7 +151,7 @@ module MB
         # Usually format is set when ffmpeg is being used for realtime input,
         # so set a smaller pipe size to reduce buffer lag and drop frames to
         # keep live sync in that case.
-        buffer_size ||= format ? 2048 : 32768
+        buffer_size ||= format ? 1024 : 2048
 
         # Compensate for possible delay at the start of a stream e.g. in a
         # video where the audio starts after the video

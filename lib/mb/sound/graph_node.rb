@@ -83,7 +83,8 @@ module MB
       # Creates and returns an input object that reads from this node's #sample
       # method whenever the I/O's #read method is called.
       #
-      # TODO: allow combining multiple graphs together for multiple channels
+      # See MB::Sound::GraphNode::GraphNodeArrayMixin#as_input for a method of
+      # combining multiple nodes into a readable input.
       def as_input(num_channels = 1, buffer_size: nil)
         MB::Sound::GraphNodeInput.new(self, channels: num_channels, buffer_size: buffer_size)
       end
@@ -488,7 +489,14 @@ module MB
       #
       # See MB::Sound::Filter::Delay#initialize for a description of the
       # +:smoothing+ parameter.
-      def delay(seconds: nil, samples: nil, sample_rate: 48000, smoothing: true, max_delay: 1.0, feedback: false)
+      #
+      # This can be used for spectral distortion:
+      #
+      #     graph = (60.hz * 0.5.hz.ramp.at(1..0).with_phase(-Math::PI))
+      #       .proc { |v| MB::Sound.real_fft(v) }
+      #       .delay(samples: 3208.4, feedback: 0.9, dry: 1, wet: 1)
+      #       .proc { |v| MB::Sound.real_ifft(MB::M.shl(v, 0)) }
+      def delay(seconds: nil, samples: nil, sample_rate: 48000, smoothing: true, max_delay: 1.0, feedback: false, dry: 0, wet: 1)
         if samples
           samples = samples.to_f if samples.is_a?(Numeric)
           seconds = samples / sample_rate
@@ -498,7 +506,11 @@ module MB
 
         seconds = seconds.or_for(nil) if seconds.respond_to?(:or_for)
 
-        filter(MB::Sound::Filter::Delay.new(delay: seconds, sample_rate: sample_rate, smoothing: smoothing, buffer_size: sample_rate.ceil * max_delay, feedback: feedback))
+        filter(MB::Sound::Filter::Delay.new(
+          delay: seconds, sample_rate: sample_rate, smoothing: smoothing,
+          buffer_size: sample_rate.ceil * max_delay, feedback: feedback,
+          dry: dry, wet: wet
+        ))
       end
 
       # Adds a multi-tap delay with the given delay sources, returning an Array
@@ -581,80 +593,63 @@ module MB
       #
       #     block_buf[] = spy_buf
       #
+      # You can specify a minimum +:interval+ in seconds to reduce CPU load, and your spy won't be called until at least that amount of time has elapsed.
+      #
       # If you'll need to remove specific spies later, pass a +:handle+.  This
       # may be an object instance, a Symbol, etc.
       #
       # See #clear_spies.
       #
-      # TODO: accomplish this without monkey patching
-      def spy(handle: nil, &block)
-        @graph_spies ||= nil
+      # TODO: accomplish this without monkey patching, and maybe use a module
+      # interface rather than a proc (for better rubyprof traces)
+      def spy(handle: nil, interval: false, &block)
         @handled_spies ||= nil
 
-        if @graph_spies.nil?
-          @graph_spies = []
+        if @handled_spies.nil?
           @handled_spies = {}
 
           class << self
             def sample(count)
               super(count).tap { |buf|
-                MB::M.with_inplace(buf, false) do |b|
-                  @graph_spies.each_with_index do |s, idx|
-                    begin
-                      s.call(b)
-                    rescue => e
-                      warn "Spy #{idx}/#{s} raised #{MB::U.highlight(e)}"
-                    end
-                  end
-
-                  @handled_spies.each do |origin, spies|
-                    spies.each_with_index do |s, idx|
-                      begin
-                        s.call(b)
-                      rescue => e
-                        warn "Handled spy #{idx}/#{s} from #{origin} raised #{MB::U.highlight(e)}"
-                      end
-                    end
-                  end
+                MB::M.with_inplace(buf, false) do |data|
+                  call_spies(data)
                 end
               }
             end
           end
         end
 
-        if handle
-          @handled_spies[handle] ||= []
-          @handled_spies[handle] << block
-        else
-          @graph_spies << block
-        end
+        @handled_spies[handle] ||= []
+        @handled_spies[handle] << [block, interval, Time.now - (interval || 1)]
 
         self
       end
 
-      # Prints changes to the first sample of each buffer to STDOUT, or yields
-      # the new value to the block if given.  This is mostly useful for
-      # debugging control values, not so useful for oscillators or sound
-      # signals.
-      def spy_changes
-        current_value = nil
-        self.spy { |buf|
-          if current_value != buf[0]
-            current_value = buf[0]
+      # Used by #spy.
+      private def call_spies(data)
+        now = Time.now
 
-            if block_given?
-              yield current_value
-            else
-              puts "#{graph_node_name} value is now #{current_value}"
+        @handled_spies.each do |origin, spies|
+          info = origin ? " from #{origin}" : ''
+
+          spies.each_with_index do |spy_info, idx|
+            s, interval, last_time = spy_info
+
+            begin
+              if !interval || (now - last_time) >= interval
+                s.call(data)
+                spy_info[-1] = now
+              end
+            rescue => e
+              warn "Spy #{idx}/#{s}#{info} raised #{MB::U.highlight(e)}"
             end
           end
-        }
+        end
       end
 
       # Clears any spies attached to this graph node (see #spy), or just spies
       # associated with the given +:handle+.
       def clear_spies(handle: nil)
-        @graph_spies ||= nil
         @handled_spies ||= nil
 
         if handle
@@ -663,7 +658,6 @@ module MB
             @handled_spies.delete(handle)
           end
         else
-          @graph_spies&.clear
           @handled_spies&.clear
         end
 
@@ -681,6 +675,10 @@ module MB
         {}
       end
 
+      # TODO: add another method to return rightward-pointing sources AKA
+      # feedback, that will be drawn on visualizations but not used in
+      # determining node order?
+
       # Returns a list of all nodes feeding into this node, either directly or
       # indirectly, plus this node itself, without duplication.  Also may
       # include numeric values used as parameters to some of the nodes.
@@ -689,57 +687,7 @@ module MB
       # from this node, but if there are loops in the graph this is not
       # guaranteed.
       def graph(include_tees: true)
-        # TODO: use a linked list for deletion and reinsertion if this method
-        # becomes too slow, or weaken return ordering and memoize in each
-        # instance and call graph instead of sources to get sources?
-        #
-        # Start self at -1 visits to preserve ordering when breaking feedback
-        # loops
-        source_history = { self => -1 }
-        source_queue = [self]
-        source_list = []
-
-        until source_queue.empty?
-          s = source_queue.shift
-          s = s.round if s.is_a?(Numeric) && s.respond_to?(:round) && s.finite? && s.round == s
-
-          # TODO: have a separate configuration for manual tees and implied
-          # branches from get_sampler, and default to ignoring get_sampler?
-          # TODO: allow climbing past nodes of any type or based on any
-          # condition, e.g. to skip mixers and multipliers that were created by
-          # an internal arithmetic step inside or for another node.  e.g. #adsr
-          # creates a multiplier to icombine the input with the envelope.
-          # TODO: automatically differentiate between nodes created directly by
-          # the user and nodes created implicitly by other nodes?  e.g. could
-          # wrap internal node creation within a block that marks those nodes
-          # as invisible by default?
-          unless include_tees
-            s = climb_tee_tree(s)
-          end
-
-          # If we encounter a source again, move it to the end of the source
-          # list and look at its sources again.
-          if source_history.include?(s)
-            # TODO: only look at a source if all paths from it have been traveled
-            # TODO: this would all be easier if source/dest links were bidirectional
-            # TODO: is 50 a reasonable number?
-            if source_history[s] > (50 + source_list.length)
-              warn "Possible infinite loop on #{s} (started from #{self})"
-              next
-            end
-
-            source_list.delete(s)
-          else
-            source_history[s] = 0
-          end
-
-          source_history[s] += 1
-          source_list << s
-
-          source_queue.concat(s.sources.values) if s.respond_to?(:sources)
-        end
-
-        source_list
+        MB::Sound::GraphNode.graph(self, include_tees: include_tees)
       end
 
       # Returns a Hash from source node to a Set of destination node/port name
@@ -775,31 +723,7 @@ module MB
       # from this node.  Ignores Numeric sources in the graph.  Returns an
       # Array of Arrays of nodes.
       def graph_ranks(include_tees: true)
-        rank_map = { self => 0 }
-
-        graph(include_tees: include_tees).each do |dest|
-          next if dest.is_a?(Numeric)
-
-          rank_map[dest] ||= 0
-          next_rank = rank_map[dest] + 1
-
-          dest.sources.each do |_name, src|
-            next if src.is_a?(Numeric)
-
-            src = climb_tee_tree(src) unless include_tees
-
-            rank_map[src] ||= next_rank
-            rank_map[src] = MB::M.max(rank_map[src], next_rank)
-          end
-        end
-
-        ranks = []
-        rank_map.each do |n, rank|
-          ranks[rank] ||= []
-          ranks[rank] << n
-        end
-
-        ranks.compact.reverse
+        MB::Sound::GraphNode.graph_ranks(self, include_tees: include_tees)
       end
 
       # Finds the lowest numeric value greater than zero for any graph nodes
@@ -929,6 +853,91 @@ module MB
         branch
       end
 
+      # Create a list of upstream nodes from the given graph node.  See #graph.
+      def self.graph(node, include_tees: true)
+        # TODO: use a linked list for deletion and reinsertion if this method
+        # becomes too slow, or weaken return ordering and memoize in each
+        # instance and call graph instead of sources to get sources?
+        #
+        # Start self at -1 visits to preserve ordering when breaking feedback
+        # loops
+        source_history = { node => -1 }
+        source_queue = [node]
+        source_list = []
+
+        until source_queue.empty?
+          s = source_queue.shift
+          s = s.round if s.is_a?(Numeric) && s.respond_to?(:round) && s.finite? && s.round == s
+
+          # TODO: have a separate configuration for manual tees and implied
+          # branches from get_sampler, and default to ignoring get_sampler?
+          # TODO: allow climbing past nodes of any type or based on any
+          # condition, e.g. to skip mixers and multipliers that were created by
+          # an internal arithmetic step inside or for another node.  e.g. #adsr
+          # creates a multiplier to icombine the input with the envelope.
+          # TODO: automatically differentiate between nodes created directly by
+          # the user and nodes created implicitly by other nodes?  e.g. could
+          # wrap internal node creation within a block that marks those nodes
+          # as invisible by default?
+          unless include_tees
+            s = climb_tee_tree(s)
+          end
+
+          # If we encounter a source again, move it to the end of the source
+          # list and look at its sources again.
+          if source_history.include?(s)
+            # TODO: only look at a source if all paths from it have been traveled
+            # TODO: this would all be easier if source/dest links were bidirectional
+            # TODO: is 50 a reasonable number?
+            if source_history[s] > (50 + source_list.length)
+              warn "Possible infinite loop on #{s} (started from #{self})"
+              next
+            end
+
+            source_list.delete(s)
+          else
+            source_history[s] = 0
+          end
+
+          source_history[s] += 1
+          source_list << s
+
+          source_queue.concat(s.sources.values) if s.respond_to?(:sources)
+        end
+
+        source_list
+      end
+
+      # Create a rank list for the given graph node (or similar object that
+      # responds to #graph).  See #graph_ranks.
+      def self.graph_ranks(node, include_tees: true)
+        rank_map = { node => 0 }
+
+        (node.graph(include_tees: include_tees) | [node]).each do |dest|
+          next if dest.is_a?(Numeric)
+
+          rank_map[dest] ||= 0
+          next_rank = rank_map[dest] + 1
+
+          dest.sources.each do |_name, src|
+            next if src.is_a?(Numeric)
+
+            src = climb_tee_tree(src) unless include_tees
+
+            rank_map[src] ||= next_rank
+            rank_map[src] = MB::M.max(rank_map[src], next_rank)
+          end
+        end
+
+        ranks = []
+        rank_map.each do |n, rank|
+          ranks[rank] ||= []
+          ranks[rank] << n
+        end
+
+        ranks.compact.reverse
+      end
+
       private
 
       # Sets tones to play forever at full volume, if they don't have a fixed
@@ -1053,6 +1062,7 @@ end
 
 require_relative 'graph_node/arithmetic_node_helper'
 require_relative 'graph_node/sample_rate_helper'
+require_relative 'graph_node/graph_node_array_mixin'
 
 require_relative 'graph_node/constant'
 require_relative 'graph_node/input_channel_split'

@@ -1,4 +1,18 @@
 RSpec.describe(MB::Sound::IOMethods) do
+  describe '#input' do
+    it 'returns the same input when called twice with the same options' do
+      o1 = MB::Sound.input(device: :null)
+      o2 = MB::Sound.input(device: :null)
+      expect(o1).to equal(o2)
+    end
+
+    it 'returns a different input when called with different options' do
+      o1 = MB::Sound.input(channels: 7, device: :null)
+      o2 = MB::Sound.input(channels: 6, device: :null)
+      expect(o1).not_to equal(o2)
+    end
+  end
+
   describe '#output' do
     before(:each) {
       ENV['OUTPUT_TYPE'] = ':null'

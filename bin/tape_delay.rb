@@ -31,7 +31,7 @@ end
 
 graphviz = !!ARGV.delete('--graphviz')
 overwrite = !!ARGV.delete('--overwrite')
-numerics, others = ARGV.partition { |arg| arg.strip =~ /\A\+?[0-9]+(\.[0-9]+)?\z/ }
+numerics, others = ARGV.partition { |arg| arg.strip =~ /\A[+-]?[0-9]+(\.[0-9]+)?\z/ }
 
 delay, feedback, extra = numerics.map(&:to_f)
 delay ||= 0.1
@@ -63,14 +63,13 @@ end
 
 if outfile
   output = MB::Sound.file_output(outfile, sample_rate: input.sample_rate, channels: 1, overwrite: overwrite)
-else
-  output = MB::Sound.output
 end
-bufsize = output.buffer_size
+bufsize = output&.buffer_size || 800
+sample_rate = output&.sample_rate || 48000
 
 oversample = ENV['OVERSAMPLE']&.to_f || 2
 
-delay_samples = (delay * output.sample_rate * oversample).round
+delay_samples = (delay * sample_rate * oversample).round
 delay_samples = 0 if delay_samples < 0
 
 internal_bufsize = 32
@@ -91,7 +90,7 @@ puts MB::U.highlight({
   extra_time: extra,
   input: input.graph_node_name,
   output: output, # TODO: more concise output
-  sample_rate: output.sample_rate,
+  sample_rate: sample_rate,
   oversample: oversample,
   buffer: bufsize,
   internal_buffer: internal_bufsize,
@@ -143,12 +142,7 @@ begin
     puts "Wrote GraphViz image to #{png}"
   end
 
-  loop do
-    data = result.sample(output.buffer_size)
-    break if data.nil?
-    data = MB::M.zpad(data, output.buffer_size) if data.length < output.buffer_size
-    output.write([data] * output.channels)
-  end
+  MB::Sound.play(result, output: output)
 
 rescue => e
   puts MB::U.highlight(e)

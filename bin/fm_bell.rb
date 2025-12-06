@@ -4,6 +4,9 @@
 
 require 'bundler/setup'
 require 'mb-sound'
+require 'mb-util'
+
+MB::U.sigquit_backtrace
 
 repeat = !!ARGV.delete('--loop')
 
@@ -80,6 +83,8 @@ puts MB::U.syntax(manager.to_acid_xml, :xml)
 
 begin
   puts 'starting loop'
+  MB::Sound.plot(output_chain)
+
   loop do
     manager.update
     output.write([output_chain.sample(output.buffer_size)])

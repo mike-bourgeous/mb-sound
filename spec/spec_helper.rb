@@ -8,7 +8,9 @@ end
 
 # Ensure subprocesses load simplecov
 require 'shellwords'
-ENV['RUBYOPT'] = "-r#{File.join(__dir__, 'simplecov_helper.rb')} #{ENV['RUBYOPT']}".strip
+ENV['RUBYOPT'] = "-r#{File.join(__dir__, 'simplecov_helper.rb')}".strip
+
+ENV['GLHTUI'] = '0' # FIXME: still can't run rspec when injecting plotter
 
 require 'mb/util'
 require 'mb/m/rspec_matchers'
