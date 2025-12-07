@@ -30,7 +30,7 @@ module MB
 
       # Just describes the number of channels.
       def to_s
-        "#{@nodes.length} Channels"
+        "#{@nodes.length} Channel#{@nodes.length != 1 ? 's' : ''}"
       end
 
       # Returns the list of nodes that directly feed this input.

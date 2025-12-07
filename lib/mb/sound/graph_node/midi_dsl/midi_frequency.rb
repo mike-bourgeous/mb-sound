@@ -13,6 +13,8 @@ module MB
             range = MB::Sound::Note.new(0).frequency..MB::Sound::Note.new(127).frequency
             super(default: MB::Sound::Oscillator.tune_freq, manager: manager, mode: :cc, range: range, unit: 'Hz', si: true, sample_rate: sample_rate)
 
+            @node_type_name = "Note Frequency"
+
             @manager.on_note(&method(:note_cb))
             @manager.on_bend(range: bend_range, default: (bend_range.begin + bend_range.end) / 2.0, &method(:bend_cb))
 

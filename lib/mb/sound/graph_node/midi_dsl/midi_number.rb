@@ -11,6 +11,8 @@ module MB
           def initialize(manager:, sample_rate:, bend_range:, range: 0..127, unit:, si:)
             super(default: MB::Sound::Oscillator.tune_freq, manager: manager, mode: :cc, range: range, unit: unit, si: si, sample_rate: sample_rate)
 
+            @node_type_name = "Note Number"
+
             @manager.on_note(&method(:note_cb))
 
             if bend_range

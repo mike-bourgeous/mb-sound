@@ -10,7 +10,8 @@ module MB
           def initialize(manager:, number:, range:, unit:, si:, sample_rate:)
             super(default: range.begin, manager: manager, mode: :cc, range: range, unit: unit, si: si, sample_rate: sample_rate)
 
-            @number = number
+            @number = Integer(number)
+            @node_type_name = "MIDI CC #{@number}"
 
             @manager.on_cc(number, range: range, default: range.begin, &method(:constant=))
           end
