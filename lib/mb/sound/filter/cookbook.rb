@@ -17,7 +17,7 @@ module MB
         # elsewhere, would be nice to be able to make higher-order butterworth
         # filters or first-order filters available, for example
         #
-        # TODO: support an audio source for filter gain
+        # TODO: support an audio or MIDI source for filter gain
         class CookbookWrapper
           extend Forwardable
           include GraphNode
@@ -220,10 +220,14 @@ module MB
           type_id = FILTER_TYPE_IDS.fetch(filter_type)
           @filter_type = filter_type
           @sample_rate = f_samp
+          @f0_max = 0.49 * @sample_rate
+          f_center = 1e-10 if f_center < 1e-10 || !f_center.finite?
+          f_center = @f0_max if f_center > @f0_max
           @center_frequency = f_center
           @cutoff = @center_frequency
           @db_gain = db_gain
 
+          quality = 1e-10 if quality && quality < 1e-10
           @quality = quality
           @bandwidth_oct = bandwidth_oct
           @shelf_slope = shelf_slope
@@ -239,6 +243,9 @@ module MB
           raise ArgumentError, "Invalid filter type #{filter_type.inspect}" unless FILTER_TYPE_IDS.include?(filter_type)
           @filter_type = filter_type
           @sample_rate = f_samp
+          @f0_max = 0.49 * @sample_rate
+          f_center = 1e-10 if f_center < 1e-10 || !f_center.finite?
+          f_center = @f0_max if f_center > @f0_max
           @center_frequency = f_center
           @cutoff = @center_frequency
           @db_gain = db_gain
@@ -251,6 +258,7 @@ module MB
           sine = Math.sin(omega)
 
           if quality
+            quality = 1e-10 if quality < 1e-10
             @quality = quality
             @bandwidth_oct = nil
             @shelf_slope = nil
@@ -378,8 +386,14 @@ module MB
 
           @omega, @b0, @b1, @b2, @a1, @a2 = coeffs
           @x1, @x2, @y1, @y2 = state
+
           @quality = qualities[-1]
-          @center_frequency = cutoffs[-1]
+          @quality = 1e-10 if @quality < 1e-10
+
+          f0 = cutoffs[-1]
+          f0 = 1e-10 if f0 < 1e-10 || !f0.finite?
+          f0 = @f0_max if f0 > @f0_max
+          @center_frequency = f0
           @cutoff = @center_frequency
 
           result

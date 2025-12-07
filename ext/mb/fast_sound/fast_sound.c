@@ -1422,9 +1422,10 @@ static VALUE ruby_dynamic_biquad(VALUE self, VALUE samples, VALUE cutoffs, VALUE
 		rb_raise(rb_eArgError, "Length of quality factor array did not match length of sample array");
 	}
 
-	enum filter_types ftype = NUM2INT(type_id);
-	double g = RTEST(db_gain) ? NUM2DBL(db_gain) : NAN;
-	double rate = NUM2DBL(sample_rate);
+	const enum filter_types ftype = NUM2INT(type_id);
+	const double g = RTEST(db_gain) ? NUM2DBL(db_gain) : NAN;
+	const double rate = NUM2DBL(sample_rate);
+	const double f0_max = 0.49 * rate;
 
 	// nary_get_offset / na_get_offset returns a byte offset, so add it before the cast
 	float *samp = (float *)(nary_get_pointer_for_write(samples) + nary_get_offset(samples));
@@ -1444,7 +1445,10 @@ static VALUE ruby_dynamic_biquad(VALUE self, VALUE samples, VALUE cutoffs, VALUE
 	double y1 = NUM2DBL(rb_ary_entry(state, 2));
 	double y2 = NUM2DBL(rb_ary_entry(state, 3));
 	for (size_t i = 0; i < length; i++) {
-		bq = cookbook(ftype, rate, cut[i], g, q[i], NAN, NAN);
+		double f0 = fmax(1e-10, fmin(cut[i], f0_max));
+		double quality = fmax(q[i], 1e-10);
+
+		bq = cookbook(ftype, rate, f0, g, quality, NAN, NAN);
 		x0 = samp[i];
 		y0 = biquad_filter(bq.b0, bq.b1, bq.b2, bq.a1, bq.a2, x0, x1, x2, y1, y2);
 		samp[i] = y0;
