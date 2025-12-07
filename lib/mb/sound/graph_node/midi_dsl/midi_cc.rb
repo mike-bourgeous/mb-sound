@@ -8,7 +8,7 @@ module MB
           #
           # See MidiDsl#cc.
           def initialize(manager:, number:, range:, unit:, si:, sample_rate:)
-            super(default: range.begin, manager: manager, mode: :cc, range: range, unit: unit, si: si, sample_rate: sample_rate)
+            super(default: range.begin, manager: manager, range: range, unit: unit, si: si, sample_rate: sample_rate)
 
             @number = Integer(number)
             @node_type_name = "MIDI CC #{@number}"

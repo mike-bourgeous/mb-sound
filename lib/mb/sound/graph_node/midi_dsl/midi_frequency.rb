@@ -11,7 +11,7 @@ module MB
           # See MidiDsl#cc.
           def initialize(manager:, sample_rate:, bend_range:)
             range = MB::Sound::Note.new(0).frequency..MB::Sound::Note.new(127).frequency
-            super(default: MB::Sound::Oscillator.tune_freq, manager: manager, mode: :cc, range: range, unit: 'Hz', si: true, sample_rate: sample_rate)
+            super(default: MB::Sound::Oscillator.tune_freq, manager: manager, range: range, unit: 'Hz', si: true, sample_rate: sample_rate)
 
             @node_type_name = "Note Frequency"
 

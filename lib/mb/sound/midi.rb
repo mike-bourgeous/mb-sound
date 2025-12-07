@@ -1,3 +1,5 @@
+require 'midi-message'
+
 module MB
   module Sound
     # Namespace for MIDI-related classes/modules/methods.

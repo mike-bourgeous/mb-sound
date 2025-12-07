@@ -1078,5 +1078,3 @@ require_relative 'graph_node/buffer_adapter'
 require_relative 'graph_node/resample'
 require_relative 'graph_node/quantize'
 require_relative 'graph_node/data_shuffler'
-
-require_relative 'graph_node/midi_dsl'

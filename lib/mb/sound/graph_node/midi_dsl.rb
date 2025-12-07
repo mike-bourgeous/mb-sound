@@ -2,6 +2,7 @@ require_relative 'midi_dsl/midi_value'
 require_relative 'midi_dsl/midi_cc'
 require_relative 'midi_dsl/midi_frequency'
 require_relative 'midi_dsl/midi_number'
+require_relative 'midi_dsl/midi_envelope'
 
 module MB
   module Sound
@@ -44,6 +45,13 @@ module MB
           raise NotImplementedError, 'TODO: implement channel filtering without opening a new input'
         end
 
+        # Returns a graph node that produces scaled values from MIDI control
+        # change events.
+        #
+        # +number+ - Control change number (e.g. 1 for modwheel).
+        # +:range+ - Output range
+        # +:unit+ - Display unit (e.g. Hz if scaling to a frequency)
+        # +:si+ - Whether to display 24000 as 24k.
         def cc(number, range: 0..1, unit: nil, si: false)
           # TODO: MSB/LSB?  NRPN?
           MidiCc.new(manager: @manager, number: number, range: range, unit: unit, si: si, sample_rate: 48000)
@@ -59,6 +67,9 @@ module MB
         #
         # See #hz.
         def frequency(bend_range: DEFAULT_BEND_RANGE)
+          # TODO: cache but invalidate cache if sample rate changes
+          #@freqs ||= {}
+          #@freqs[bend_range] ||=
           MidiFrequency.new(manager: @manager, bend_range: bend_range, sample_rate: 48000)
         end
 
@@ -68,6 +79,9 @@ module MB
         # +:bend_range+ - The pitch bend range to add to the base note number,
         #                 in semitones.  E.g. pass -12..12 for a full octave.
         def hz(bend_range: DEFAULT_BEND_RANGE)
+          # TODO: cache but invalidate cache if sample rate changes
+          # @tones ||= {}
+          # @tones[bend_range] ||=
           self.frequency(bend_range: bend_range).tone.or_for(nil)
         end
         alias tone hz
@@ -94,6 +108,7 @@ module MB
           number = number.to_note if number.is_a?(MB::Sound::Tone)
           number = number.number if number.is_a?(MB::Sound::Note)
 
+          raise NotImplementedError, 'TODO'
           MidiVelocity.new(manager: @manager, number: number, range: range)
         end
 
@@ -110,8 +125,20 @@ module MB
           sustain_l ||= -10.db
           release_s ||= 0.1
 
-          # TODO: sustain pedal!!!
+          MB::Sound::GraphNode::MidiDsl::MidiEnvelope.new(
+            manager: @manager,
+            attack: attack_s,
+            decay: decay_s,
+            sustain: sustain_l,
+            release: release_s,
+            sample_rate: 48000
+          )
+        end
 
+        def gate
+          # TODO: start gate at correct offset within frame?  would need to get event timestamps out of mb-sound-jackffi
+
+          raise NotImplementedError, 'TODO'
         end
       end
     end
