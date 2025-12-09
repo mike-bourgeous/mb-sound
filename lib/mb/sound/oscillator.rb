@@ -18,6 +18,8 @@ module MB
       include GraphNode
 
       RAND = Random.new
+      TWOPI = Math::PI * 2.0
+
       WAVE_TYPES = [
         :sine,
         :complex_sine,
@@ -293,6 +295,8 @@ module MB
           s = CMath.exp(1i * (phi - Math::PI / 2))
 
         when :triangle
+          phi %= TWOPI
+
           if phi < 0.5 * Math::PI
             # Initial rise from 0..1 in 0..pi/2
             s = phi * 2.0 / Math::PI
@@ -317,6 +321,8 @@ module MB
           s = MB::M.csc_int_int(phi + Math::PI / 2) * 1i / 2.46740110027234
 
         when :square
+          phi %= TWOPI
+
           if phi < Math::PI
             s = 1.0
           else
@@ -336,6 +342,8 @@ module MB
           s = Complex(s.real, 3.8) if s.imag > 3.8
 
         when :ramp
+          phi %= TWOPI
+
           if phi < Math::PI
             # Initial rise from 0..1 in 0..pi
             s = phi / Math::PI
@@ -352,6 +360,8 @@ module MB
           s = Complex(s.real, 3.5) if s.imag > 3.5
 
         when :gauss
+          phi %= TWOPI
+
           # Sideways Gaussian attempt 2
           # This has an approximately Gaussian distribution, but the crest
           # factor when generating noise is 16dB instead of the expected 14dB,
@@ -371,6 +381,8 @@ module MB
           s = 3 if s > 3
 
         when :parabola
+          phi %= TWOPI
+
           if phi < Math::PI
             s = 1.0 - (1.0 - phi * 2.0 / Math::PI) ** 2
           else

@@ -359,6 +359,7 @@ static double complex osc_sample(enum wave_types wave_type, complex double phi)
 			return cexp(I * (phi - M_PI / 2));
 
 		case OSC_TRIANGLE:
+			phi = wrap(creal(phi), 2*M_PI);
 			if (creal(phi) < M_PI_2) {
 				// Rise from 0..1 in 0..pi/2
 				return phi * M_2_PI;
@@ -377,6 +378,7 @@ static double complex osc_sample(enum wave_types wave_type, complex double phi)
 
 		case OSC_SQUARE:
 			// TODO: Normalize for RMS instead of peak?
+			phi = wrap(creal(phi), 2*M_PI);
 			if (creal(phi) < M_PI) {
 				return 1.0;
 			} else {
@@ -399,6 +401,7 @@ static double complex osc_sample(enum wave_types wave_type, complex double phi)
 			return z;
 
 		case OSC_RAMP:
+			phi = wrap(creal(phi), 2*M_PI);
 			if (creal(phi) < M_PI) {
 				// Initial rise from 0..1 in 0..pi
 				return phi / M_PI;
@@ -420,6 +423,7 @@ static double complex osc_sample(enum wave_types wave_type, complex double phi)
 			return z;
 
 		case OSC_GAUSS:
+			phi = wrap(creal(phi), 2*M_PI);
 			x = creal(phi) / M_PI;
 			if (x < 1.0) {
 				x = (sqrt(2.0 * log(1.6487212707 / (1.0 - x))) - 1) * 0.7071067811865476;
@@ -436,6 +440,7 @@ static double complex osc_sample(enum wave_types wave_type, complex double phi)
 			return x;
 
 		case OSC_PARABOLA:
+			phi = wrap(creal(phi), 2*M_PI);
 			if (creal(phi) < M_PI) {
 				x = 1.0 - phi * M_2_PI;
 				return 1.0 - x * x;

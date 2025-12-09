@@ -81,6 +81,30 @@ RSpec.describe MB::Sound::Oscillator do
         expect(MB::M.round(o.send(method, 315.degrees), 6).imag).to be < -0.25
       end
 
+      it 'wraps around phase for triangle' do
+        o = MB::Sound::Oscillator.new(:triangle)
+        expect(MB::M.round(o.send(method, 0.1), 6)).to eq(MB::M.round(o.send(method, 2*Math::PI + 0.1), 6))
+        expect(MB::M.round(o.send(method, -0.1), 6)).to eq(MB::M.round(o.send(method, 2*Math::PI - 0.1), 6))
+      end
+
+      it 'wraps around phase for gauss' do
+        o = MB::Sound::Oscillator.new(:gauss)
+        expect(MB::M.round(o.send(method, 0.1), 6)).to eq(MB::M.round(o.send(method, 2*Math::PI + 0.1), 6))
+        expect(MB::M.round(o.send(method, -0.1), 6)).to eq(MB::M.round(o.send(method, 2*Math::PI - 0.1), 6))
+      end
+
+      it 'wraps around phase for square' do
+        o = MB::Sound::Oscillator.new(:square)
+        expect(o.send(method, 0.1)).to eq(o.value_at(2*Math::PI + 0.1))
+        expect(o.send(method, -0.1)).to eq(o.value_at(2*Math::PI - 0.1))
+      end
+
+      it 'wraps around phase for parabola' do
+        o = MB::Sound::Oscillator.new(:parabola)
+        expect(MB::M.round(o.send(method, 0.1), 6)).to eq(MB::M.round(o.send(method, 2*Math::PI + 0.1), 6))
+        expect(MB::M.round(o.send(method, -0.1), 6)).to eq(MB::M.round(o.send(method, 2*Math::PI - 0.1), 6))
+      end
+
       pending 'returns expected gauss values'
       pending 'returns expected parabolic values'
     end
