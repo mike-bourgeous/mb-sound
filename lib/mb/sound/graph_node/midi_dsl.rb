@@ -1,3 +1,4 @@
+require_relative 'midi_dsl/rate_decacher'
 require_relative 'midi_dsl/midi_value'
 require_relative 'midi_dsl/midi_cc'
 require_relative 'midi_dsl/midi_frequency'
@@ -19,10 +20,20 @@ module MB
         # TODO: maybe allow specifying a different default bend range?
         DEFAULT_BEND_RANGE = -1..1
 
+        # Creates a DSL instance with the given MIDI manager, filtering to the
+        # given channel, and receiving from the given parent MidiDsl.  The
+        # initial DSL has channel and parent nil, while filtered DSLs will set
+        # them accordingly.
         def initialize(manager:, channel: nil, parent: nil)
           @manager = manager
           @channel = channel
           @parent = parent
+
+          @freqs = {}
+          @tones = {}
+          @ccs = {}
+          @numbers = {}
+          @reverse_cache = {}
 
           # TODO: make manager support nested managers for channel filtering
           # TODO: efficient branching of MIDI input and timestamp without creating an input for every object
@@ -54,7 +65,9 @@ module MB
         # +:si+ - Whether to display 24000 as 24k.
         def cc(number, range: 0..1, unit: nil, si: false)
           # TODO: MSB/LSB?  NRPN?
-          MidiCc.new(manager: @manager, number: number, range: range, unit: unit, si: si, sample_rate: 48000)
+          cache(@ccs, [number, range, unit, si, 48000]) do
+            MidiCc.new(manager: @manager, number: number, range: range, unit: unit, si: si, sample_rate: 48000)
+          end
         end
 
         # Returns a new graph node that will output a frequency value set by
@@ -67,10 +80,9 @@ module MB
         #
         # See #hz.
         def frequency(bend_range: DEFAULT_BEND_RANGE)
-          # TODO: cache but invalidate cache if sample rate changes
-          #@freqs ||= {}
-          #@freqs[bend_range] ||=
-          MidiFrequency.new(manager: @manager, bend_range: bend_range, sample_rate: 48000)
+          cache(@freqs, [bend_range, 48000]) do
+            MidiFrequency.new(manager: @manager, bend_range: bend_range, sample_rate: 48000)
+          end
         end
 
         # Returns a new Tone that will play at the frequency of incoming MIDI
@@ -79,10 +91,9 @@ module MB
         # +:bend_range+ - The pitch bend range to add to the base note number,
         #                 in semitones.  E.g. pass -12..12 for a full octave.
         def hz(bend_range: DEFAULT_BEND_RANGE)
-          # TODO: cache but invalidate cache if sample rate changes
-          # @tones ||= {}
-          # @tones[bend_range] ||=
-          self.frequency(bend_range: bend_range).tone.or_for(nil)
+          cache(@tones, [bend_range, 48000]) do
+            self.frequency(bend_range: bend_range).tone.or_for(nil)
+          end
         end
         alias tone hz
 
@@ -94,7 +105,9 @@ module MB
         # +:bend_range+ - The pitch bend range in semitones, or nil to ignore
         #                 pitch bend.
         def number(range: nil, bend_range: DEFAULT_BEND_RANGE, unit: nil, si: false)
-          MidiNumber.new(manager: @manager, range: range, bend_range: bend_range, unit: unit, si: si, sample_rate: 48000)
+          cache(@numbers, [range, bend_range, unit, si, 48000]) do
+            MidiNumber.new(manager: @manager, range: range, bend_range: bend_range, unit: unit, si: si, sample_rate: 48000)
+          end
         end
 
         # Returns a new graph node that will output the MIDI attack velocity of
@@ -112,6 +125,7 @@ module MB
           MidiVelocity.new(manager: @manager, number: number, range: range)
         end
 
+        # TODO: pitch bend
         def bend
           raise NotImplementedError, 'TODO'
         end
@@ -140,11 +154,44 @@ module MB
 
           raise NotImplementedError, 'TODO'
         end
+
+        # For internal use.  Called by MIDI nodes when their sample rate changes.
+        def rate_changed(node)
+          collection, key = @reverse_cache[node]
+
+          unless collection && key
+            warn "BUG: Got a sample rate change notification for an unknown node: #{node}"
+            return
+          end
+
+          key[-1] = node.sample_rate
+        end
+
+        private
+
+        # Used internally to save a bidirectional cache for the given MIDI
+        # node.  Yields to create a new object if the key is not in the
+        # collection.  The +key+ must be mutable to allow sample rate changes,
+        # and the last element in the key must be the starting sample rate.
+        #
+        # TODO: maybe instead of re-caching based on sample rate, we should
+        # just reset the sample rate?  This might work better with graphs with
+        # .oversample().
+        def cache(collection, key)
+          collection[key] ||= yield.tap { |node|
+            @reverse_cache[node] = [collection, key]
+            node.singleton_class.include(RateDecacher) unless node.is_a?(RateDecacher)
+            node.instance_variable_set(:@midi_dsl, self) # this is rude
+          }
+        end
       end
     end
 
-    # Returns a handle for connecting MIDI events to GraphNode networks.
+    # Returns a handle for connecting MIDI events to GraphNode networks.  See
+    # MidiDsl for details.
     def self.midi
+      # TODO: allow specifying an input/connection by name and then caching the DSL for that input?
+      # TODO: maybe move this method into sound.rb?
       @midi_manager ||= MB::Sound::MIDI::Manager.new
       @midi_dsl ||= MB::Sound::GraphNode::MidiDsl.new(manager: @midi_manager)
     end
