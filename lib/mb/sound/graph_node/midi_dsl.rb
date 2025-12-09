@@ -1,4 +1,3 @@
-require_relative 'midi_dsl/rate_decacher'
 require_relative 'midi_dsl/midi_value'
 require_relative 'midi_dsl/midi_cc'
 require_relative 'midi_dsl/midi_frequency'
@@ -33,13 +32,13 @@ module MB
           @tones = {}
           @ccs = {}
           @numbers = {}
-          @reverse_cache = {}
 
           # TODO: make manager support nested managers for channel filtering
           # TODO: efficient branching of MIDI input and timestamp without creating an input for every object
           # TODO: means for GraphVoice to take over controls
           # TODO: maybe a DSL for wrapping a subset of a graph in a GraphVoice
           # TODO: maybe cache returned values so fewer nodes are created
+          # TODO: maybe a true MIDI graph that processes, delays, etc. MIDI events on the wires
         end
 
         # TODO: returns a MIDI DSL handle that filters to the given channel (by
@@ -65,7 +64,7 @@ module MB
         # +:si+ - Whether to display 24000 as 24k.
         def cc(number, range: 0..1, unit: nil, si: false)
           # TODO: MSB/LSB?  NRPN?
-          cache(@ccs, [number, range, unit, si, 48000]) do
+          cache(@ccs, [number, range, unit, si]) do
             MidiCc.new(manager: @manager, number: number, range: range, unit: unit, si: si, sample_rate: 48000)
           end
         end
@@ -80,7 +79,7 @@ module MB
         #
         # See #hz.
         def frequency(bend_range: DEFAULT_BEND_RANGE)
-          cache(@freqs, [bend_range, 48000]) do
+          cache(@freqs, [bend_range]) do
             MidiFrequency.new(manager: @manager, bend_range: bend_range, sample_rate: 48000)
           end
         end
@@ -91,7 +90,7 @@ module MB
         # +:bend_range+ - The pitch bend range to add to the base note number,
         #                 in semitones.  E.g. pass -12..12 for a full octave.
         def hz(bend_range: DEFAULT_BEND_RANGE)
-          cache(@tones, [bend_range, 48000]) do
+          cache(@tones, [bend_range]) do
             self.frequency(bend_range: bend_range).tone.or_for(nil)
           end
         end
@@ -105,7 +104,7 @@ module MB
         # +:bend_range+ - The pitch bend range in semitones, or nil to ignore
         #                 pitch bend.
         def number(range: nil, bend_range: DEFAULT_BEND_RANGE, unit: nil, si: false)
-          cache(@numbers, [range, bend_range, unit, si, 48000]) do
+          cache(@numbers, [range, bend_range, unit, si]) do
             MidiNumber.new(manager: @manager, range: range, bend_range: bend_range, unit: unit, si: si, sample_rate: 48000)
           end
         end
@@ -155,34 +154,34 @@ module MB
           raise NotImplementedError, 'TODO'
         end
 
-        # For internal use.  Called by MIDI nodes when their sample rate changes.
-        def rate_changed(node)
-          collection, key = @reverse_cache[node]
-
-          unless collection && key
-            warn "BUG: Got a sample rate change notification for an unknown node: #{node}"
-            return
-          end
-
-          key[-1] = node.sample_rate
-        end
-
         private
 
         # Used internally to save a bidirectional cache for the given MIDI
         # node.  Yields to create a new object if the key is not in the
-        # collection.  The +key+ must be mutable to allow sample rate changes,
-        # and the last element in the key must be the starting sample rate.
+        # collection.
         #
-        # TODO: maybe instead of re-caching based on sample rate, we should
-        # just reset the sample rate?  This might work better with graphs with
-        # .oversample().
+        # Resets the node's sample rate to 48000 in case there were prior
+        # sample rate changes to the node in a previous graph.  This means that
+        # .oversample is not fool-proof and can break graphs with parallel
+        # paths at different sample rates.
         def cache(collection, key)
-          collection[key] ||= yield.tap { |node|
-            @reverse_cache[node] = [collection, key]
-            node.singleton_class.include(RateDecacher) unless node.is_a?(RateDecacher)
-            node.instance_variable_set(:@midi_dsl, self) # this is rude
-          }
+          # TODO: changing the sample rate back to 48k breaks if an old graph
+          # is played after creating a new graph that incorporates a cached
+          # node.  Maybe remove a node from the cache the first time its
+          # #sample method is called instead?  In which case we'd bring back
+          # the decacher.
+          # TODO: maybe #at_rate should behave differently for nodes with
+          # multiple output branches, inserting a resampling step instead if
+          # there are mismatched rates?
+          # TODO: maybe change .oversample to return an object that always
+          # maintains a sample rate multiple and always call #at_rate when
+          # playing a graph?  yeah, fixing up sample rates each time playback
+          # starts seems reasonable, but then what about a node that is
+          # referenced in graphs that run at different rates?  Is having the
+          # invisible graph tees more efficient than duplicating nodes?  Can we
+          # deduplicate at the display stage instead?
+          collection.fetch(key) { collection[key] = yield }
+            .tap { |node| node.sample_rate = 48000 }
         end
       end
     end
