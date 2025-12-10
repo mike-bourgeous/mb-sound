@@ -10,14 +10,18 @@ module MB
           # +:default+ - The initial value
           #
           # See MB::Sound::GraphNode::Constant
-          def initialize(manager:, range:, default:, sample_rate:, si:, unit:)
+          def initialize(dsl:, range:, default:, sample_rate:, si:, unit:)
             super(default, sample_rate: sample_rate, range: range, si: si, unit: unit)
 
-            @manager = manager
+            @dsl = dsl
+            @manager = dsl.manager
+            @cache_invalidated = false
           end
 
           # Intercepts audio generation to trigger reading MIDI input.
           def sample(count)
+            @dsl.invalidate_cache(self) unless @cache_invalidated
+            @cache_invalidated = true
             # FIXME: this will totally screw up parameter smoothing because it gets called N times per frame for N MIDI nodes
             @manager.update
             super

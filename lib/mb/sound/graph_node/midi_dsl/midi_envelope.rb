@@ -5,10 +5,16 @@ module MB
         # A MIDI-controlled envelope triggered by note on/off events and
         # sustain pedal (TODO).
         class MidiEnvelope < MB::Sound::ADSREnvelope
-          def initialize(manager:, attack:, decay:, sustain:, release:, sample_rate:)
+          def initialize(dsl:, attack:, decay:, sustain:, release:, sample_rate:, range:)
             super(attack_time: attack, decay_time: decay, sustain_level: sustain, release_time: release, sample_rate: sample_rate, filter_freq: 200)
 
-            @manager = manager
+            @dsl = dsl
+            @manager = @dsl.manager
+            @cache_invalidated = false
+
+            @range = range
+
+            @node_type_name = 'MIDI Envelope'
 
             # TODO: sustain pedal
 
@@ -24,6 +30,16 @@ module MB
             elsif number == @number
               release
             end
+          end
+
+          def sample(count)
+            @dsl.invalidate_cache(self) unless @cache_invalidated
+            @cache_invalidated = true
+            MB::M.scale(super, 0..1, @range)
+          end
+
+          def sources
+            super.merge({ trigger: @dsl })
           end
         end
       end

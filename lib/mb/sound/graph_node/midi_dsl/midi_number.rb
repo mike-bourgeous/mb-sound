@@ -8,8 +8,8 @@ module MB
           # Initializes a MIDI-control-change graph node.
           #
           # See MidiDsl#cc.
-          def initialize(manager:, sample_rate:, bend_range:, range: 0..127, unit:, si:)
-            super(default: MB::Sound::Oscillator.tune_freq, manager: manager, range: range, unit: unit, si: si, sample_rate: sample_rate)
+          def initialize(dsl:, sample_rate:, bend_range:, range: 0..127, unit:, si:)
+            super(default: MB::Sound::Oscillator.tune_freq, dsl: dsl, range: range, unit: unit, si: si, sample_rate: sample_rate)
 
             @node_type_name = "Note Number"
 
@@ -49,6 +49,10 @@ module MB
             # should probably update it to use a low-pass filter or linear
             # follower.
             self.constant = MB::M.scale(@number + @bend, @from_range, @to_range)
+          end
+
+          def sources
+            super.merge({ note_number: @dsl })
           end
         end
       end

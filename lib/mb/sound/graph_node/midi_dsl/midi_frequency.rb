@@ -9,9 +9,9 @@ module MB
           # Initializes a MIDI node frequency graph node.
           #
           # See MidiDsl#cc.
-          def initialize(manager:, sample_rate:, bend_range:)
+          def initialize(dsl:, sample_rate:, bend_range:)
             range = MB::Sound::Note.new(0).frequency..MB::Sound::Note.new(127).frequency
-            super(default: MB::Sound::Oscillator.tune_freq, manager: manager, range: range, unit: 'Hz', si: true, sample_rate: sample_rate)
+            super(dsl: dsl, default: MB::Sound::Oscillator.tune_freq, range: range, unit: 'Hz', si: true, sample_rate: sample_rate)
 
             @node_type_name = "Note Frequency"
 
@@ -45,6 +45,10 @@ module MB
             # should probably update it to use a low-pass filter or linear
             # follower.
             self.constant = MB::Sound::Oscillator.calc_freq(@number + @bend)
+          end
+
+          def sources
+            super.merge({ frequency: @dsl })
           end
         end
       end

@@ -3,6 +3,7 @@ require_relative 'midi_dsl/midi_cc'
 require_relative 'midi_dsl/midi_frequency'
 require_relative 'midi_dsl/midi_number'
 require_relative 'midi_dsl/midi_envelope'
+require_relative 'midi_dsl/midi_tone'
 
 module MB
   module Sound
@@ -19,6 +20,10 @@ module MB
         # TODO: maybe allow specifying a different default bend range?
         DEFAULT_BEND_RANGE = -1..1
 
+        # The MIDI manager used by this DSL for receiving MIDI events from
+        # files or MIDI interfaces.
+        attr_reader :manager
+
         # Creates a DSL instance with the given MIDI manager, filtering to the
         # given channel, and receiving from the given parent MidiDsl.  The
         # initial DSL has channel and parent nil, while filtered DSLs will set
@@ -32,6 +37,8 @@ module MB
           @tones = {}
           @ccs = {}
           @numbers = {}
+          @envelopes = {}
+          @reverse_cache = {}
 
           # TODO: make manager support nested managers for channel filtering
           # TODO: efficient branching of MIDI input and timestamp without creating an input for every object
@@ -50,7 +57,7 @@ module MB
           return parent.channel(ch) if @parent
 
           @channels ||= []
-          @channels[ch] ||= MidiDsl.new(channel: ch, parent: self)
+          @channels[ch] ||= MidiDsl.new(manager: @manager, channel: ch, parent: self) # FIXME: need new manager
 
           raise NotImplementedError, 'TODO: implement channel filtering without opening a new input'
         end
@@ -65,7 +72,7 @@ module MB
         def cc(number, range: 0..1, unit: nil, si: false)
           # TODO: MSB/LSB?  NRPN?
           cache(@ccs, [number, range, unit, si]) do
-            MidiCc.new(manager: @manager, number: number, range: range, unit: unit, si: si, sample_rate: 48000)
+            MidiCc.new(dsl: self, number: number, range: range, unit: unit, si: si, sample_rate: 48000)
           end
         end
 
@@ -80,7 +87,7 @@ module MB
         # See #hz.
         def frequency(bend_range: DEFAULT_BEND_RANGE)
           cache(@freqs, [bend_range]) do
-            MidiFrequency.new(manager: @manager, bend_range: bend_range, sample_rate: 48000)
+            MidiFrequency.new(dsl: self, bend_range: bend_range, sample_rate: 48000)
           end
         end
 
@@ -91,7 +98,7 @@ module MB
         #                 in semitones.  E.g. pass -12..12 for a full octave.
         def hz(bend_range: DEFAULT_BEND_RANGE)
           cache(@tones, [bend_range]) do
-            self.frequency(bend_range: bend_range).tone.or_for(nil)
+            MidiTone.new(dsl: self, frequency: self.frequency(bend_range: bend_range))
           end
         end
         alias tone hz
@@ -105,7 +112,7 @@ module MB
         #                 pitch bend.
         def number(range: nil, bend_range: DEFAULT_BEND_RANGE, unit: nil, si: false)
           cache(@numbers, [range, bend_range, unit, si]) do
-            MidiNumber.new(manager: @manager, range: range, bend_range: bend_range, unit: unit, si: si, sample_rate: 48000)
+            MidiNumber.new(dsl: self, range: range, bend_range: bend_range, unit: unit, si: si, sample_rate: 48000)
           end
         end
 
@@ -116,12 +123,14 @@ module MB
         #
         # TODO: should this output zero or something based on release velocity when the note is released?
         # TODO: allow selecting just release velocity?
-        def velocity(number = nil, range: 0..1)
+        def velocity(number = nil, range: 0..1, unit: nil, si: false)
           number = number.to_note if number.is_a?(MB::Sound::Tone)
           number = number.number if number.is_a?(MB::Sound::Note)
 
           raise NotImplementedError, 'TODO'
-          MidiVelocity.new(manager: @manager, number: number, range: range)
+          cache(@velocities, [number, range, unit, si]) do
+            MidiVelocity.new(dsl: self, number: number, range: range, unit: unit, si: si, sample_rate: 48000)
+          end
         end
 
         # TODO: pitch bend
@@ -132,20 +141,25 @@ module MB
         # Returns a new ADSR envelope that will trigger based on velocity when
         # a note is pressed, and release when the note or sustain pedal are
         # released.
-        def env(attack_s = nil, decay_s = nil, sustain_l = nil, release_s = nil)
-          attack_s ||= 0.005
-          decay_s ||= 0.02
+        def env(attack_s = nil, decay_s = nil, sustain_l = nil, release_s = nil, range: 0..1)
+          attack_s ||= 0.002
+          decay_s ||= 0.05
           sustain_l ||= -10.db
           release_s ||= 0.1
 
-          MB::Sound::GraphNode::MidiDsl::MidiEnvelope.new(
-            manager: @manager,
-            attack: attack_s,
-            decay: decay_s,
-            sustain: sustain_l,
-            release: release_s,
-            sample_rate: 48000
-          )
+          key = [attack_s, decay_s, sustain_l, release_s, range]
+
+          cache(@envelopes, key) do
+            MB::Sound::GraphNode::MidiDsl::MidiEnvelope.new(
+              dsl: self,
+              attack: attack_s,
+              decay: decay_s,
+              sustain: sustain_l,
+              release: release_s,
+              sample_rate: 48000,
+              range: range
+            )
+          end
         end
 
         def gate
@@ -153,6 +167,27 @@ module MB
 
           raise NotImplementedError, 'TODO'
         end
+
+        # Called by MIDI audio nodes to invalidate the cache e.g. when sampling
+        # begins, so that new graphs at a possibly different sample rate get
+        # new instances.
+        #
+        # TODO: this is still not the ideal approach, and it breaks if we just
+        # send the graph to graphviz instead of playing it.
+        def invalidate_cache(obj)
+          collection, key = @reverse_cache[obj]
+          return unless collection && key
+
+          @reverse_cache.delete(collection)
+          collection.delete(key)
+        end
+
+        # XXX FIXME hack for graph display
+        def sources; {} end
+        def spy(*a, **ka); end
+        def clear_spies(*a, **ka); end
+        def node_type_name; 'MIDI' end
+        def to_s_graphviz; "MIDI #{@channel && "channel #{@channel}"}".strip end
 
         private
 
@@ -165,11 +200,6 @@ module MB
         # .oversample is not fool-proof and can break graphs with parallel
         # paths at different sample rates.
         def cache(collection, key)
-          # TODO: changing the sample rate back to 48k breaks if an old graph
-          # is played after creating a new graph that incorporates a cached
-          # node.  Maybe remove a node from the cache the first time its
-          # #sample method is called instead?  In which case we'd bring back
-          # the decacher.
           # TODO: maybe #at_rate should behave differently for nodes with
           # multiple output branches, inserting a resampling step instead if
           # there are mismatched rates?
@@ -180,8 +210,10 @@ module MB
           # referenced in graphs that run at different rates?  Is having the
           # invisible graph tees more efficient than duplicating nodes?  Can we
           # deduplicate at the display stage instead?
-          collection.fetch(key) { collection[key] = yield }
-            .tap { |node| node.sample_rate = 48000 }
+          collection.fetch(key) {
+            collection[key] = yield
+              .tap { |node| @reverse_cache[node] = [collection, key] }
+          }
         end
       end
     end
