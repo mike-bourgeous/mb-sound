@@ -41,6 +41,9 @@ module MB
           def sources
             super.merge({ trigger: @dsl })
           end
+
+          # TODO to_s and to_s_graphviz that include the output range
+          # TODO: allow setting velocity sensitivity
         end
       end
     end
