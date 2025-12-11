@@ -66,7 +66,8 @@ module MB
 
         # Sets the duration of a transition in seconds.
         def fade_seconds=(seconds)
-          @fade_samples = (seconds * @sample_rate).round
+          @fade_seconds = seconds.to_f
+          @fade_samples = (@fade_seconds * @sample_rate).round
         end
 
         # Resets the output to 0, or to the given value.

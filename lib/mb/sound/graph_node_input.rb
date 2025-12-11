@@ -15,7 +15,9 @@ module MB
         raise 'All sources must be GraphNodes' unless nodes.length >= 1 && nodes.all?(MB::Sound::GraphNode)
 
         @sample_rate = nodes.map(&:sample_rate).max
-        nodes.each do |n| n.sample_rate = @sample_rate end
+        nodes.each do |n|
+          n.sample_rate = @sample_rate unless n.sample_rate == @sample_rate
+        end
 
         @buffer_size = buffer_size || nodes[0].graph_buffer_size || 800
 
