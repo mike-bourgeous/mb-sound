@@ -6,6 +6,7 @@ require_relative 'midi_dsl/midi_envelope'
 require_relative 'midi_dsl/midi_tone'
 require_relative 'midi_dsl/midi_velocity'
 require_relative 'midi_dsl/midi_bend'
+require_relative 'midi_dsl/midi_gate'
 
 module MB
   module Sound
@@ -42,6 +43,7 @@ module MB
           @envelopes = {}
           @velocities = {}
           @bends = {}
+          @gates = {}
           @reverse_cache = {}
 
           # TODO: make manager support nested managers for channel filtering
@@ -155,7 +157,7 @@ module MB
           key = [attack_s, decay_s, sustain_l, release_s, range]
 
           cache(@envelopes, key) do
-            MB::Sound::GraphNode::MidiDsl::MidiEnvelope.new(
+            MidiEnvelope.new(
               dsl: self,
               attack: attack_s,
               decay: decay_s,
@@ -167,10 +169,13 @@ module MB
           end
         end
 
-        def gate
-          # TODO: start gate at correct offset within frame?  would need to get event timestamps out of mb-sound-jackffi
-
-          raise NotImplementedError, 'TODO'
+        # Returns a graph node that outputs a value in the given +:range+ based
+        # on note attack velocity and half-pedal/sustain pedal decay.
+        def gate(range: 0..1, unit: nil, si: false)
+          key = [range, unit, si]
+          cache(@gates, key) do
+            MidiGate.new(dsl: self, range: range, unit: unit, si: si, sample_rate: 48000)
+          end
         end
 
         # Called by MIDI audio nodes to invalidate the cache e.g. when sampling
