@@ -247,7 +247,7 @@ module MB
       # TODO: end graph execution when the MIDI file has completely finished
 
       mfile = MB::Sound::MIDI::MIDIFile.new(filename)
-      mgr = MB::Sound::MIDI::Manager.new(input: mfile)
+      mgr = MB::Sound::MIDI::Manager.new(input: mfile, jack: nil)
       dsl = MB::Sound::GraphNode::MidiDsl.new(manager: mgr)
 
       if block_given?

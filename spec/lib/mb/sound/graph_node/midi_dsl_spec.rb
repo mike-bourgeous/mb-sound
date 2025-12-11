@@ -1,5 +1,5 @@
 RSpec.describe(MB::Sound::GraphNode::MidiDsl, aggregate_failures: true) do
-  let(:midi) { MB::Sound.midi }
+  let(:midi) { MB::Sound.midi_file('spec/test_data/all_notes.mid') }
   let(:cc) { midi.cc(1) }
   let(:number) { midi.number }
   let(:note) { midi.tone }
