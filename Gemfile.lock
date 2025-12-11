@@ -32,6 +32,7 @@ PATH
       cmath (~> 1.0.0)
       csv (~> 3.3, >= 3.3.3)
       mb-math (>= 0.4.2.usegit)
+      mb-sound-jackffi (>= 0.1.0.usegit)
       mb-util (>= 0.1.24.usegit)
       midi-nibbler (~> 0.2.4)
       midilib (~> 4.0.0)
@@ -115,7 +116,7 @@ DEPENDENCIES
   getoptlong (~> 0.2.1)
   mb-math!
   mb-sound!
-  mb-sound-jackffi (>= 0.1.0.usegit)!
+  mb-sound-jackffi!
   mb-util!
   pry (~> 0.14.0)
   pry-byebug (~> 3.10.0)
