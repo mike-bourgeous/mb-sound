@@ -4,6 +4,7 @@ require_relative 'midi_dsl/midi_frequency'
 require_relative 'midi_dsl/midi_number'
 require_relative 'midi_dsl/midi_envelope'
 require_relative 'midi_dsl/midi_tone'
+require_relative 'midi_dsl/midi_velocity'
 
 module MB
   module Sound
@@ -38,6 +39,7 @@ module MB
           @ccs = {}
           @numbers = {}
           @envelopes = {}
+          @velocities = {}
           @reverse_cache = {}
 
           # TODO: make manager support nested managers for channel filtering
@@ -122,14 +124,10 @@ module MB
         # the last-pressed note scaled to 0..1 (or to the given +:range+).  If
         # the note +number+ is specified, then only the velocity of that note
         # is used and other notes are ignored.
-        #
-        # TODO: should this output zero or something based on release velocity when the note is released?
-        # TODO: allow selecting just release velocity?
         def velocity(number = nil, range: 0..1, unit: nil, si: false)
           number = number.to_note if number.is_a?(MB::Sound::Tone)
           number = number.number if number.is_a?(MB::Sound::Note)
 
-          raise NotImplementedError, 'TODO'
           cache(@velocities, [number, range, unit, si]) do
             MidiVelocity.new(dsl: self, number: number, range: range, unit: unit, si: si, sample_rate: 48000)
           end

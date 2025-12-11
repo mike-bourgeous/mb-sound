@@ -2,13 +2,13 @@ module MB
   module Sound
     module GraphNode
       class MidiDsl
-        # A graph node that produces MIDI note number, with optional pitch
+        # A graph node that produces a MIDI note number, with optional pitch
         # bend, in the original logarithmic scale of MIDI semitones.
         class MidiNumber < MidiValue
-          # Initializes a MIDI-control-change graph node.
+          # Initializes a MIDI number graph node.
           #
-          # See MidiDsl#cc.
-          def initialize(dsl:, sample_rate:, bend_range:, range: 0..127, unit:, si:)
+          # See MidiDsl#number.
+          def initialize(dsl:, sample_rate:, bend_range:, range:, unit:, si:)
             super(default: MB::Sound::Oscillator.tune_freq, dsl: dsl, range: range, unit: unit, si: si, sample_rate: sample_rate)
 
             @node_type_name = "Note Number"
