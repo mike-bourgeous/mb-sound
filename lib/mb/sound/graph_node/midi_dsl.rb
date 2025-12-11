@@ -168,6 +168,7 @@ module MB
             )
           end
         end
+        alias envelope env
 
         # Returns a graph node that outputs a value in the given +:range+ based
         # on note attack velocity and half-pedal/sustain pedal decay.
@@ -226,6 +227,24 @@ module MB
           }
         end
       end
+    end
+
+    # Calls a block with a MIDI file to build a node graph.
+    #
+    # Example (bin/sound.rb):
+    #     graph = midi_file('spec/test_data/all_notes.mid') { |midi|
+    #       midi.tone.ramp.filter(:lowpass, cutoff: midi.frequency + 100) * midi.gate
+    #     }
+    #     play graph
+    def self.midi_file(filename)
+      # TODO: Allow returning the DSL instead of passing it to a block?
+      raise 'No block given for constructing node graph' unless block_given?
+
+      mfile = MB::Sound::MIDI::MIDIFile.new(filename)
+      mgr = MB::Sound::MIDI::Manager.new(input: mfile)
+      dsl = MB::Sound::GraphNode::MidiDsl.new(manager: mgr)
+
+      yield dsl
     end
 
     # Returns a handle for connecting MIDI events to GraphNode networks.  See
