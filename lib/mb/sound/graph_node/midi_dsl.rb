@@ -229,7 +229,8 @@ module MB
       end
     end
 
-    # Calls a block with a MIDI file to build a node graph.
+    # Calls a block with a MIDI file to build a node graph, or returns a MIDI
+    # DSL based on a MIDI file.
     #
     # Example (bin/sound.rb):
     #     graph = midi_file('spec/test_data/all_notes.mid') { |midi|
@@ -237,14 +238,17 @@ module MB
     #     }
     #     play graph
     def self.midi_file(filename)
-      # TODO: Allow returning the DSL instead of passing it to a block?
-      raise 'No block given for constructing node graph' unless block_given?
+      # TODO: end graph execution when the MIDI file has completely finished
 
       mfile = MB::Sound::MIDI::MIDIFile.new(filename)
       mgr = MB::Sound::MIDI::Manager.new(input: mfile)
       dsl = MB::Sound::GraphNode::MidiDsl.new(manager: mgr)
 
-      yield dsl
+      if block_given?
+        yield dsl
+      else
+        dsl
+      end
     end
 
     # Returns a handle for connecting MIDI events to GraphNode networks.  See
