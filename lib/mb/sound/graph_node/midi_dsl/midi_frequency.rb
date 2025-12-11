@@ -9,17 +9,22 @@ module MB
           # Initializes a MIDI node frequency graph node.
           #
           # See MidiDsl#cc.
-          def initialize(dsl:, sample_rate:, bend_range:)
+          def initialize(dsl:, sample_rate:, bend_range:, ratio:, offset:)
             range = MB::Sound::Note.new(0).frequency..MB::Sound::Note.new(127).frequency
             super(dsl: dsl, default: MB::Sound::Oscillator.tune_freq, range: range, unit: 'Hz', si: true, sample_rate: sample_rate)
-
-            @node_type_name = "Note Frequency"
 
             @manager.on_note(&method(:note_cb))
             @manager.on_bend(range: bend_range, default: (bend_range.begin + bend_range.end) / 2.0, &method(:bend_cb))
 
             @number = 69
             @bend = 0
+            @ratio = ratio
+            @offset = offset
+
+            # TODO some of this should go into #to_s and whatnot
+            @node_type_name = "Note Frequency"
+            @node_type_name = "#{'%.1f' % @ratio} * #{@node_type_name}" if @ratio != 1
+            @node_type_name = "#{'%.1f' % @offset} + #{@node_type_name}" if @offset != 0
           end
 
           # Called by the MIDI manager for note on/off events.  Sets the base
@@ -44,7 +49,7 @@ module MB
             # FIXME: default constant smoothing interpolates over a full block;
             # should probably update it to use a low-pass filter or linear
             # follower.
-            self.constant = MB::Sound::Oscillator.calc_freq(@number + @bend)
+            self.constant = MB::Sound::Oscillator.calc_freq(@number + @bend) * @ratio + @offset
           end
 
           def sources

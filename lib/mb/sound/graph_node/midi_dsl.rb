@@ -88,29 +88,35 @@ module MB
         # same after the note is released, so use .env to create an ADSR
         # envelope based on MIDI note-on/note-off events.
         #
+        # +ratio+ - A ratio to multiply the output by, e.g. to help with FM or
+        #           additive synthesis.
+        # +offset+ - An offset in Hz to add to the output, e.g. for creating
+        #           detuning effects.
         # +:bend_range+ - The pitch bend range to add to the base note number,
         #                 in semitones.  E.g. pass -12..12 for a full octave.
         #
         # See #hz.
-        def frequency(bend_range: DEFAULT_BEND_RANGE)
-          # TODO: maybe a parameter for setting a ratio?
-          cache(@freqs, [bend_range]) do
-            MidiFrequency.new(dsl: self, bend_range: bend_range, sample_rate: 48000)
+        def frequency(ratio = 1, offset = 0, bend_range: DEFAULT_BEND_RANGE)
+          offset = offset.frequency if offset.is_a?(MB::Sound::Tone)
+          cache(@freqs, [ratio, offset, bend_range]) do
+            MidiFrequency.new(dsl: self, bend_range: bend_range, ratio: ratio, offset: offset, sample_rate: 48000)
           end
         end
+        alias freq frequency
 
         # Returns a new Tone that will play at the frequency of incoming MIDI
         # notes, incorporating pitch bend.
         #
         # +:bend_range+ - The pitch bend range to add to the base note number,
         #                 in semitones.  E.g. pass -12..12 for a full octave.
-        def hz(bend_range: DEFAULT_BEND_RANGE)
+        def hz(ratio = 1, offset = 0, bend_range: DEFAULT_BEND_RANGE)
           # TODO: maybe a parameter for setting a ratio for easier PM/FM?
           cache(@tones, [bend_range]) do
-            MidiTone.new(dsl: self, frequency: self.frequency(bend_range: bend_range))
+            MidiTone.new(dsl: self, frequency: self.frequency(ratio, offset, bend_range: bend_range))
           end
         end
         alias tone hz
+        alias note hz
 
         # Returns a new graph node that will generate the MIDI note number on
         # its output, optionally scaled to a given new range.  Pitch bend is
