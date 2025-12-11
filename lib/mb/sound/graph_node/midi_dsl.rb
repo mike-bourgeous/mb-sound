@@ -5,6 +5,7 @@ require_relative 'midi_dsl/midi_number'
 require_relative 'midi_dsl/midi_envelope'
 require_relative 'midi_dsl/midi_tone'
 require_relative 'midi_dsl/midi_velocity'
+require_relative 'midi_dsl/midi_bend'
 
 module MB
   module Sound
@@ -40,6 +41,7 @@ module MB
           @numbers = {}
           @envelopes = {}
           @velocities = {}
+          @bends = {}
           @reverse_cache = {}
 
           # TODO: make manager support nested managers for channel filtering
@@ -48,6 +50,7 @@ module MB
           # TODO: maybe a DSL for wrapping a subset of a graph in a GraphVoice
           # TODO: maybe cache returned values so fewer nodes are created
           # TODO: maybe a true MIDI graph that processes, delays, etc. MIDI events on the wires
+          # TODO: invalidate entire cache instead of one node at a time?
         end
 
         # TODO: returns a MIDI DSL handle that filters to the given channel (by
@@ -134,8 +137,10 @@ module MB
         end
 
         # TODO: pitch bend
-        def bend
-          raise NotImplementedError, 'TODO'
+        def bend(range: DEFAULT_BEND_RANGE, unit: 'st', si: false)
+          cache(@bends, [range, unit, si]) do
+            MidiBend.new(dsl: self, range: range, unit: unit, si: si, sample_rate: 48000)
+          end
         end
 
         # Returns a new ADSR envelope that will trigger based on velocity when
