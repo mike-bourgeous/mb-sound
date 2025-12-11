@@ -77,6 +77,9 @@ play (2.5.hz.ramp.at(1.85) ** 13).filter(10.hz.highpass).softclip(0.1, 0.6).filt
 # Thick bass
 play (((42.5.hz.sine + 85.hz.triangle + 42.5.hz.saw) * adsr(0.01, 0.1, 0.5, 0.1).db(-30)).filter(:lowpass, cutoff: adsr(0.01, 0.1, 0.5, 0.1).db(-30) * 1850 + 85, quality: 3) * 8.db).softclip(0.1, 1)
 
+# MIDI control
+play (((midi.hz.sine + midi.hz(2).triangle + midi.hz.saw) * midi.env(0.01, 0.1, 0.5, 0.1).db(-30)).filter(:lowpass, cutoff: midi.env(0.01, 0.1, 0.5, 0.1).db(-30) * 1850 + 85, quality: 3) * 8.db).softclip(0.1, 1)
+
 # Oversampling (this tells all graph nodes before .oversample to run at 4x
 # their previous sample rate)
 play 123.hz.ramp.at(1)
@@ -160,6 +163,9 @@ The graph DSL makes it very easy to incorporate MIDI into sound generation:
 ```ruby
 play midi.hz.ramp.at(-6.db).filter(:lowpass, cutoff: (midi.frequency * midi.cc(1, range: 1.3..16)), quality: 4).forever.oversample(16).softclip.oversample(2)
 ```
+
+See the `MidiDsl` class in `lib/mb/sound/graph_node/midi_dsl.rb` for more info
+about the MIDI DSL.
 
 ### Calculating wavelength and frequency
 

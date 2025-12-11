@@ -110,10 +110,8 @@ module MB
         # +:bend_range+ - The pitch bend range to add to the base note number,
         #                 in semitones.  E.g. pass -12..12 for a full octave.
         def hz(ratio = 1, offset = 0, bend_range: DEFAULT_BEND_RANGE)
-          # TODO: maybe a parameter for setting a ratio for easier PM/FM?
-          cache(@tones, [bend_range]) do
-            MidiTone.new(dsl: self, frequency: self.frequency(ratio, offset, bend_range: bend_range))
-          end
+          # TODO: if caching, need to have all methods that modify the tone invalidate the cache
+          MidiTone.new(dsl: self, frequency: self.frequency(ratio, offset, bend_range: bend_range))
         end
         alias tone hz
         alias note hz

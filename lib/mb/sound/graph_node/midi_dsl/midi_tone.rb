@@ -16,12 +16,6 @@ module MB
             # Default to playing forever
             or_for(nil)
           end
-
-          def sample(count)
-            @dsl&.invalidate_cache(self)
-            @dsl = nil
-            super
-          end
         end
       end
     end
