@@ -83,6 +83,11 @@ module MB
         set_frequency(get_freq)
       end
 
+      # Returns the effective fractional note number including detuning.
+      def detuned_number
+        @number + @detune * 0.01
+      end
+
       # Converts this Tone to a MIDI NoteOn message from the midi-message gem.
       def to_midi(velocity: 64, channel: -1)
         MIDIMessage::NoteOn.new(channel, number.round, velocity)

@@ -458,14 +458,14 @@ RSpec.describe(MB::Sound::Filter::Cookbook, :aggregate_failures) do
     end
   end
 
-  describe '#dynamic_process' do
+  shared_examples_for '#dynamic_process' do |process_method|
     it 'can sweep cutoff and quality' do
       filter = 100.hz.lowpass(quality: 0.7)
       samples = 1000.hz.at(1).generate(48000)
       cutoffs = Numo::SFloat.linspace(100, 3100, 48000)
       qualities = Numo::SFloat.linspace(5, 1, 48000)
 
-      result = filter.dynamic_process(samples, cutoffs, qualities)
+      result = filter.send(process_method, samples, cutoffs, qualities)
 
       # Ensure samples were not modified in place
       expect(result.__id__).not_to eq(samples.__id__)
@@ -491,7 +491,7 @@ RSpec.describe(MB::Sound::Filter::Cookbook, :aggregate_failures) do
       cutoffs = Numo::SFloat.linspace(100, 3100, 48000)
       qualities = Numo::SFloat.linspace(5, 1, 48000)
 
-      result = filter.dynamic_process(samples.inplace!, cutoffs, qualities)
+      result = filter.send(process_method, samples.inplace!, cutoffs, qualities)
 
       # Ensure the samples were modified in place
       expect(result.__id__).to eq(samples.__id__)
@@ -520,7 +520,7 @@ RSpec.describe(MB::Sound::Filter::Cookbook, :aggregate_failures) do
       cutoffs = Numo::SFloat.linspace(100, 3100, 96000)[48000..-1]
       qualities = Numo::SFloat.linspace(5, 1, 96000)[48000..-1]
 
-      result = filter.dynamic_process(samples.inplace!, cutoffs, qualities)
+      result = filter.send(process_method, samples.inplace!, cutoffs, qualities)
 
       expect(result.__id__).to eq(samples.__id__)
       expect(samples.abs.max.round(1)).to be > 1
@@ -528,5 +528,38 @@ RSpec.describe(MB::Sound::Filter::Cookbook, :aggregate_failures) do
       expect(samp_orig[0...48000]).to eq(samp_whole[0...48000])
       expect(samp_orig[48000..-1]).not_to eq(samp_whole[48000..-1])
     end
+
+    it 'clamps frequency to valid range' do
+      filter = 120.hz.lowpass
+      cutoffs = Numo::SFloat.zeros(100)
+      samples = Numo::SFloat.zeros(100)
+      qualities = Numo::SFloat.ones(100)
+      result = filter.send(process_method, samples.inplace!, cutoffs, qualities)
+
+      expect(filter.cutoff).to eq(1e-10)
+
+      cutoffs = Numo::SFloat.zeros(100).fill(100000)
+      result = filter.send(process_method, samples.inplace!, cutoffs, qualities)
+      expect(filter.cutoff).to eq(0.49 * 48000)
+    end
+
+    it 'clamps quality to valid range' do
+      filter = 120.hz.lowpass
+      cutoffs = Numo::SFloat.zeros(100)
+      samples = Numo::SFloat.zeros(100)
+      qualities = -Numo::SFloat.ones(100)
+      result = filter.send(process_method, samples.inplace!, cutoffs, qualities)
+
+      expect(filter.quality).to eq(1e-10)
+    end
   end
+
+  [:dynamic_process, :dynamic_process_ruby_c].each do |m|
+    describe "##{m}" do
+      it_behaves_like('#dynamic_process', m)
+    end
+  end
+
+  pending '#set_parameters_c'
+  pending '#set_parameters_ruby'
 end

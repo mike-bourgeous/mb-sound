@@ -3,7 +3,12 @@
 require 'bundler/setup'
 require 'mb-sound'
 
-midi = MB::Sound.midi
+if ARGV[0]&.downcase&.end_with?('.mid') && File.readable?(ARGV[0])
+  # FIXME: exit when the MIDI file has ended
+  midi = MB::Sound.midi_file(ARGV[0])
+else
+  midi = MB::Sound.midi
+end
 
 q = (midi.frequency * 2.001).tone.at(1).with_phase(Math::PI/3) + 0.1.hz.lfo.at(1) * (midi.frequency * 1.001).tone.at(Math::PI)
 a = (

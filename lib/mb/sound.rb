@@ -132,6 +132,12 @@ require_relative 'sound/circular_buffer'
 require_relative 'sound/graph_node'
 require_relative 'sound/graph_node_input'
 
+require_relative 'sound/midi'
+require_relative 'sound/adsr_envelope'
+require_relative 'sound/timeline_interpolator'
+
+require_relative 'sound/graph_node/midi_dsl'
+
 require_relative 'sound/io_base'
 require_relative 'sound/io_input'
 require_relative 'sound/io_output'
@@ -166,9 +172,5 @@ require_relative 'sound/window_writer'
 require_relative 'sound/fft_writer'
 require_relative 'sound/multi_writer'
 require_relative 'sound/process_reader'
-
-require_relative 'sound/midi'
-require_relative 'sound/adsr_envelope'
-require_relative 'sound/timeline_interpolator'
 
 require_relative 'sound/io_logger'

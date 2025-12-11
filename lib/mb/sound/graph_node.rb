@@ -329,6 +329,7 @@ module MB
       #     # With oversampling; does not have the same aliasing
       #     play 355.hz.pm(630.hz.at(100) * 0.5.hz.drumramp.at(0.9..1).filter(10.hz.lowpass)).oversample(16).forever
       def oversample(multiplier, mode: MB::Sound::GraphNode::Resample::DEFAULT_MODE)
+        # FIXME: calling oversample twice on the same node causes the upstream rate to keep multiplying.  Should we assume a 48kHz output rate?  Maybe add a sample_rate parameter to this method?
         current_rate = self.sample_rate
         self.at_rate(current_rate * multiplier).resample(current_rate, mode: mode)
       end

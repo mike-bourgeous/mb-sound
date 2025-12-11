@@ -2,9 +2,9 @@
 
 [![Tests](https://github.com/mike-bourgeous/mb-sound/actions/workflows/test.yml/badge.svg)](https://github.com/mike-bourgeous/mb-sound/actions/workflows/test.yml)
 
-A library of simple Ruby tools for processing sound, and a DSL for building
-signal processing chains.  This is a companion library to an [educational video
-series I'm making about sound][0].
+A library of simple Ruby tools for processing sound, and a DSL (Domain-Specific
+Language) for building signal processing chains.  This is a companion library
+to an [educational video series I'm making about sound][0].
 
 You'll find functions for loading and saving audio files, playing and recording
 sound in realtime (on Linux, and only for really simple algorithms), generating
@@ -151,6 +151,14 @@ Frequency modulation is also possible:
 
 ```ruby
 play 123.hz.fm(369.hz.at(1000))
+```
+
+#### MIDI input
+
+The graph DSL makes it very easy to incorporate MIDI into sound generation:
+
+```ruby
+play midi.hz.ramp.at(-6.db).filter(:lowpass, cutoff: (midi.frequency * midi.cc(1, range: 1.3..16)), quality: 4).forever.oversample(16).softclip.oversample(2)
 ```
 
 ### Calculating wavelength and frequency
