@@ -52,7 +52,7 @@ module MB
           end
 
           def sources
-            super.merge({ note_number: @dsl })
+            super.merge({ note_number: @dsl, pitch_bend: @dsl })
           end
         end
       end
