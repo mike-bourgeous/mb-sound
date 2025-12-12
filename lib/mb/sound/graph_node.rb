@@ -580,6 +580,18 @@ module MB
         MB::Sound::GraphNode::Quantize.new(upstream: self, increment: increment)
       end
 
+      # Uses this node as the phase of a wavetable, with the given +:wavetable+
+      # 2D NArray and +:number+.
+      #
+      # +:wavetable+ - A 2D NArray to use as the wavetable.
+      # +:number+ - A GraphNode or Numeric to control wave number.
+      def wavetable(wavetable:, number:)
+        number = number.constant if number.is_a?(Numeric)
+        phase = self
+        phase = self.or_at(1) if self.respond_to?(:or_at)
+        Wavetable.new(wavetable: wavetable, number: number, phase: phase, sample_rate: 48000)
+      end
+
       # Calls the given block with each sample buffer whenever #sample is
       # called.  Returns self to allow chaining, but this method is also useful
       # after a chain has been constructed for spying on a specific object's
