@@ -157,7 +157,6 @@ require_relative 'sound/output_buffer_wrapper'
 require_relative 'sound/oscillator'
 require_relative 'sound/tone'
 require_relative 'sound/note'
-require_relative 'sound/wavetable'
 
 require_relative 'sound/plot_output'
 require_relative 'sound/filter'
