@@ -94,9 +94,13 @@ module MB
       # channel.  Resamples to 48kHz unless a different +:sample_rate+ is
       # specified.  Pass nil for +:sample_rate+ to disable resampling.
       #
+      # If +:metadata_out+ is an unfrozen Hash, then metadata from the file
+      # will be written into the Hash.
+      #
       # See MB::Sound::FFMPEGInput for more flexible sound input.
-      def read(filename, max_frames: nil, sample_rate: 48000)
+      def read(filename, max_frames: nil, sample_rate: 48000, metadata_out: nil)
         input = file_input(filename, resample: sample_rate)
+        metadata_out.merge!(input.metadata) if metadata_out.is_a?(Hash)
         input.read(max_frames || input.frames)
       ensure
         input&.close
@@ -112,7 +116,7 @@ module MB
       # #read, and the default sample rate of #input and #output.
       #
       # See MB::Sound::FFMPEGOutput for more flexible sound output.
-      def write(filename, data, sample_rate: 48000, overwrite: false, max_length: nil)
+      def write(filename, data, sample_rate: 48000, overwrite: false, max_length: nil, metadata: nil)
         data = [data] if data.is_a?(GraphNode)
 
         if data.is_a?(Array) && data.all?(GraphNode)
@@ -123,7 +127,8 @@ module MB
             sample_rate: sample_rate,
             channels: data.length,
             overwrite: overwrite,
-            buffer_size: buffer_size
+            buffer_size: buffer_size,
+            metadata: metadata
           )
 
           input = data.as_input
@@ -140,7 +145,7 @@ module MB
           end
         else
           data = any_sound_to_array(data)
-          output = file_output(filename, sample_rate: sample_rate, channels: data.length, overwrite: overwrite)
+          output = file_output(filename, sample_rate: sample_rate, channels: data.length, overwrite: overwrite, metadata: metadata)
           output.write(data)
         end
 

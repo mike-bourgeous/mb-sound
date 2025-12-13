@@ -27,7 +27,7 @@ module MB
 
         case file_tone_data
         when String
-          return play_file(file_tone_data, gain: gain, plot: plot, device: device)
+          return play_file(file_tone_data, gain: gain, plot: plot, device: device) if file_tone_data.is_a?(String)
 
         when Array
           if !file_tone_data.empty? && file_tone_data.all?(GraphNode)
@@ -129,6 +129,9 @@ module MB
 
         when GraphNode
           file_tone_data.graph.select { |n| n.is_a?(MB::Sound::GraphNode) }.map { |n| n.graph_node_name || n.class.name }.join(', ')
+
+        when String
+          "\e[1m#{file_tone_data}\e[22m: #{MB::U.highlight(FFMPEGInput.parse_info(file_tone_data).dig(:format, :tags))}"
 
         else
           MB::U.highlight(file_tone_data)

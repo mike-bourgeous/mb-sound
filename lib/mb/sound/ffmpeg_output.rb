@@ -31,7 +31,7 @@ module MB
       #                 minimum quantity of writable data, and on Linux is also
       #                 used by IOInput to suggest a pipe buffer size to the
       #                 kernel to reduce latency.
-      def initialize(filename, sample_rate:, channels:, codec: nil, bitrate: nil, format: nil, loglevel: nil, buffer_size: nil)
+      def initialize(filename, sample_rate:, channels:, codec: nil, bitrate: nil, format: nil, loglevel: nil, buffer_size: nil, metadata: nil)
         if format
           @filename = filename
         else
@@ -70,6 +70,7 @@ module MB
             *(format ? ['-f', format.to_s] : []),
             *(codec ? ['-acodec', codec.to_s] : []),
             *(bitrate ? ['-b:a', bitrate.to_s] : []),
+            *(metadata ? make_metadata(metadata) : []),
             @filename
           ],
           channels,
@@ -86,6 +87,20 @@ module MB
         false
       end
       alias strict_buffer_size strict_buffer_size?
+
+      private
+
+      # Used by the constructor to create metadata-related command-line
+      # arguments to ffmpeg.
+      def make_metadata(h)
+        raise 'Metadata must be a Hash' unless h.is_a?(Hash)
+        raise 'Metadata keys must not contain equals signs' if h.keys.any? { |k| k.to_s.include?('=') }
+        raise 'Metadata keys must not be blank' if h.keys.any? { |k| k.to_s.strip.empty? }
+
+        h.flat_map { |k, v|
+          ['-metadata', "#{k.to_s.strip}=#{v.to_s}"]
+        }
+      end
     end
   end
 end

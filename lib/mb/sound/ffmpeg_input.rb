@@ -7,7 +7,7 @@ module MB
     # file formats.
     class FFMPEGInput < IOInput
       # Note: number of frames may be approximate
-      attr_reader :filename, :frames, :info, :raw_info, :duration
+      attr_reader :filename, :frames, :info, :raw_info, :duration, :metadata
 
       # A list of metadata keys that should not be parsed numerically.
       EXCLUDED_CONVERSIONS = [
@@ -113,6 +113,7 @@ module MB
 
         # Get info for all streams from ffprobe so we know stream IDs, etc.
         @raw_info = FFMPEGInput.parse_info(@filename, format: format)
+        @metadata = @raw_info.dig(:format, :tags) || {}
 
         raise "Stream index must be an integer" unless stream_idx.is_a?(Integer)
         unless @raw_info[:streams][stream_idx]
