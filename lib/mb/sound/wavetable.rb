@@ -1,8 +1,10 @@
 module MB
   module Sound
-    # Methods related to generating and sampling from wavetables.
+    # Methods related to saving, loading, generating, and sampling from
+    # wavetables.
     #
     # See MB::Sound::GraphNode::Wavetable.
+    # See bin/make_wavetable.rb.
     module Wavetable
       # Loads an existing wavetable from the given +filename+, using the
       # mb_sound_wavetable_period metadata tag to slice the file.
@@ -37,9 +39,16 @@ module MB
         MB::Sound.write(filename, data.reshape(total), sample_rate: sample_rate, metadata: { mb_sound_wavetable_period: period })
       end
 
-      # Performs a fractional wavetable lookup with wraparound
-      # :number - A 1D Numo::NArray with the wave number over time
-      # :phase - A 1D Numo::NArray with the wave phase over time
+      # TODO: functions to sort wavetables by brightness, etc.?
+      # TODO: functions to shuffle wavetables?
+      # TODO: move make_wavetable.rb functionality into a function here
+      # TODO: optimized C version?
+
+      # Performs a fractional wavetable lookup with wraparound.
+      # :number - A 1D Numo::NArray with the wave number (from 0..1) over time
+      # :phase - A 1D Numo::NArray with the wave phase (from 0..1)over time
+      #
+      # TODO: bouncing or zero-extending?
       def self.wavetable_lookup(wavetable:, number:, phase:)
         raise 'Number and phase must be the same size array' unless number.length == phase.length
 
@@ -51,10 +60,10 @@ module MB
 
       # Blends two columns within a single row of the wavetable.
       #
-      # :number - The wave number, which should be an integer.
+      # :number - The wave number index, which should be an integer.
       # :phase - Time index from 0 to 1.
       #
-      # TODO: wrapping or bouncing?
+      # TODO: bouncing or zero-extending?
       def self.inner_lookup(wavetable:, number:, phase:)
         row = number.floor
 
@@ -74,14 +83,15 @@ module MB
 
       # Blends two waves using #inner_lookup.
       #
-      # :number - Fractional wave number
-      # :phase - Time index from 0 to 1
+      # :number - Fractional wave number from 0 to 1.
+      # :phase - Time index from 0 to 1.
       def self.outer_lookup(wavetable:, number:, phase:)
-        frow = number % wavetable.shape[0]
+        wave_count = wavetable.shape[0]
+        frow = (number * wave_count) % wave_count
         row1 = frow.floor
         row2 = frow.ceil
-        row1 %= wavetable.shape[0]
-        row2 %= wavetable.shape[0]
+        row1 %= wave_count
+        row2 %= wave_count
 
         ratio = frow - row1
 
