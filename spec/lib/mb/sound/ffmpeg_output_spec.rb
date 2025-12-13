@@ -122,5 +122,16 @@ RSpec.describe MB::Sound::FFMPEGOutput do
       expect(info[:streams][0][:bits_per_sample]).to eq(16)
       expect(info[:streams][0][:codec_name]).to eq('pcm_s16le')
     end
+
+    it 'can store metadata in a .flac file' do
+      name = 'tmp/test_out.flac'
+      output = MB::Sound.file_output(name, channels: 1, metadata: { rspec: 'Was here', title: 'Headline' })
+      output.write(Numo::SFloat.zeros(4800))
+      expect(output.close.success?).to eq(true)
+
+      metadata = {}
+      _data = MB::Sound.read(name, metadata_out: metadata)
+      expect(metadata).to include({ rspec: 'Was here', title: 'Headline' })
+    end
   end
 end

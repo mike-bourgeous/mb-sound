@@ -71,6 +71,7 @@ RSpec.describe MB::Sound::FFMPEGInput do
       expect(input.sample_rate).to eq(48000)
       expect(input.channels).to eq(1)
       expect(input.info[:tags][:title]).to eq('Sine 100Hz 1s mono')
+      expect(input.metadata[:title]).to eq('Sine 100Hz 1s mono')
 
       input.read(100000) # allow ffmpeg to empty its buffer
       expect(input.close.success?).to eq(true)

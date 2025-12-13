@@ -50,15 +50,17 @@ jump = (data.length - length_samples - xfade_samples) / (table_size - 1)
 
 note_name = MB::Sound::Tone.new(frequency: freq).to_note.name
 
-# TODO: add info to output filename?
-# outname = File.join(File.dirname(outname), "#{length_samples}_#{note_name}_#{File.basename(outname)}")
-
+# TODO: Add all metadata to the file including root note, etc.
 MB::U.headline("Writing to #{outname}")
-outfile = MB::Sound.file_output(outname, overwrite: :prompt, channels: 1)
+outfile = MB::Sound.file_output(outname, overwrite: :prompt, channels: 1, metadata: { mb_sound_wavetable_period: length_samples })
+
+# TODO: maybe chop off leading and trailing silence/near-silence
+# TODO: guard against amplifying very high frequency noises e.g. 20k+ dithering noise?
 
 # In-place fades the fade_in and fade_out clips.
 def fade(clip, fade_in)
   # TODO: use a decibel fade?
+  # TODO: use smoothstep_buf from FastSound?
   fade = Numo::SFloat.linspace(fade_in ? 0 : 1, fade_in ? 1 : 0, clip.length).map { |v| MB::M.smootherstep(v) }
   clip.inplace * fade
 end
@@ -143,4 +145,5 @@ MB::U.table(
 
 MB::U.headline "Code to load this wavetable in bin/sound.rb:", color: 36
 puts "\n#{MB::U.syntax("data = MB::Sound.read(#{outname.inspect})[0].reshape(#{total / length_samples}, #{length_samples})")}"
+puts "or\n#{MB::U.syntax("data = MB::Sound::Wavetable.load_wavetable(#{outname.inspect})")}"
 puts "#{MB::U.syntax("plot data, graphical: true")}\n\n"
