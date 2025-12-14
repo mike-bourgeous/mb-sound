@@ -24,7 +24,7 @@ module MB
           count = data.length / period
           data[0...(count * period)].reshape(count, period)
         else
-          raise NotImplementedError, "#{filename.inspect} is not an mb-sound wavetable.  TODO: implement on-the-fly wavetable conversion"
+          make_wavetable(data)
         end
       end
 
@@ -32,12 +32,89 @@ module MB
       # +filename+, using the mb_sound_wavetable_period tag to record the
       # correct shape of the wavetable.  The rows of the NArray are the entries
       # in the table, and the columns are the audio samples over time.
-      def self.save_wavetable(filename, data, sample_rate: 48000)
+      def self.save_wavetable(filename, data, sample_rate: 48000, overwrite: false)
         raise 'Data must be a 2D Numo::NArray' unless data.is_a?(Numo::NArray) && data.ndim == 2
 
         period = data.shape[1]
         total = data.length
-        MB::Sound.write(filename, data.reshape(total), sample_rate: sample_rate, metadata: { mb_sound_wavetable_period: period })
+        # TODO: Add all metadata to the file including root note, etc.
+        MB::Sound.write(filename, data.reshape(total), sample_rate: sample_rate, overwrite: overwrite, metadata: { mb_sound_wavetable_period: period })
+      end
+
+      # Slices the given 1D NArray to return a wavetable as a 2D NArray.
+      def self.make_wavetable(data, freq_range: 30..120, slices: 100, sample_rate: 48000, ratio: 1.0)
+        # TODO: maybe chop off leading and trailing silence/near-silence
+        # TODO: maybe skip or interpolate over silent slices
+        # TODO: guard against amplifying very high frequency noises e.g. 20k+ dithering noise?
+
+        # Estimate frequency and wave period
+        # TODO: return this extra info somehow
+        freq = MB::Sound.freq_estimate(data, sample_rate: sample_rate, range: freq_range)
+        period = ratio.to_f / freq
+        xfade = period * 0.25
+        period_samples = (period * sample_rate).round
+        xfade_samples = (xfade * sample_rate).round
+        note_name = MB::Sound::Tone.new(frequency: freq).to_note.name
+
+        jump = (data.length - period_samples - xfade_samples) / (slices - 1)
+
+        total_samples = slices * period_samples
+        buf = data.class.zeros(total_samples)
+        offset = 0
+
+        for start_samples in (0...(data.length - (period_samples + xfade_samples))).step(jump) do
+          start_samples = start_samples.floor
+          end_samples = start_samples + period_samples
+          lead_in_start = MB::M.max(0, start_samples - xfade_samples)
+          lead_out_end = end_samples + xfade_samples
+
+          if data.length < start_samples + period_samples + xfade_samples
+            # TODO: Allow shortening the lead-out somewhat?
+            raise "Sound is too short (must be #{start_samples + period_samples + xfade_samples} samples; got #{data.length} samples)"
+          end
+
+          # TODO: try windowing instead of cross-fading as an option?
+
+          # Take lead-in from before the loop (mixed in at the end of the loop)
+          if start_samples > 0
+            lead_in = data[lead_in_start...start_samples].dup
+            lead_in = fade(lead_in, true)
+          else
+            lead_in = Numo::SFloat[0]
+          end
+
+          # Copy loopable segment
+          middle = data[start_samples...end_samples].dup
+
+          # Take lead-out from after the loop (mixed in at the start of the loop)
+          lead_out = data[end_samples...lead_out_end].dup
+          lead_out = fade(lead_out, false)
+
+          # Add lead-in and lead-out to segment
+          middle[0...lead_out.length].inplace + lead_out
+          middle[-lead_in.length...].inplace + lead_in
+
+          # Normalize and remove DC offset
+          middle -= (middle.sum / middle.length)
+          max = MB::M.max(middle.abs.max, -60.db)
+          middle = (middle / max) * -2.db
+
+          # Rotate phase to put positive zero crossing at beginning/end
+          zc_index = MB::M.find_zero_crossing(middle)
+          looped = MB::M.rol(middle, zc_index) if zc_index
+
+          buf[offset...(offset + period_samples)] = looped
+          offset += period_samples
+        end
+
+        buf.reshape(slices, period_samples)
+      end
+
+      # Fades +clip+ in or out in-place.  For .make_wavetable.
+      def self.fade(clip, fade_in)
+        fade = MB::FastSound.smootherstep_buf(Numo::SFloat.zeros(clip.length))
+        fade = 1 - fade.inplace unless fade_in
+        clip.inplace * fade.not_inplace!
       end
 
       # TODO: functions to sort wavetables by brightness, etc.?
