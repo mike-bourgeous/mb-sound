@@ -10,6 +10,7 @@ MB::U.sigquit_backtrace
 DETUNE_CENTS = 5
 DETUNE_SEMIS = 0.01 * DETUNE_CENTS
 DETUNE_RANGE = (2 ** -DETUNE_SEMIS)..(2 ** DETUNE_SEMIS)
+PORTAMENTO_TIME = 0.1
 
 midi = MB::Sound.midi
 
@@ -26,16 +27,16 @@ voices = Array.new(4) do
   (
     midi.env(0.003, 0.05, 0.5, 0.3) * cc2 *
     (
-      midi.hz(rand(DETUNE_RANGE)).ramp.wavetable(wavetable: synth, number: cc1) +
-        midi.hz(rand(DETUNE_RANGE)).triangle.at(0.5)
+      midi.frequency(rand(DETUNE_RANGE)).filter(:lowpass, cutoff: 1.0 / PORTAMENTO_TIME, quality: 0.5).tone.ramp.wavetable(wavetable: synth, number: cc1).filter(:lowpass, cutoff: 5000, quality: 0.4) +
+        midi.frequency(rand(DETUNE_RANGE)).filter(:lowpass, cutoff: 1.0 / PORTAMENTO_TIME, quality: 0.5).tone.triangle.at(0.5)
     )
   ).softclip
     .wavetable(wavetable: shaper, number: cc4)
     .filter(:highpass, cutoff: 10, quality: 0.7)
 end
 
-l = (0.5 * voices[0] + voices[1]).softclip.oversample(2)
-r = (0.5 * voices[2] + voices[3]).softclip.oversample(2)
+l = (0.5 * voices[0] + voices[1]).filter(:lowpass, cutoff: 15000, quality: 0.25).softclip.oversample(2)
+r = (0.5 * voices[2] + voices[3]).filter(:lowpass, cutoff: 15000, quality: 0.25).softclip.oversample(2)
 
 MB::U.headline('Begin play!')
 
