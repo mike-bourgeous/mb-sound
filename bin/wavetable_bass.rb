@@ -1,0 +1,42 @@
+#!/usr/bin/env ruby
+# Wavetable- and waveshaping-based monophonic bass synth.
+
+require 'bundler/setup'
+require 'mb-util'
+require 'mb-sound'
+
+MB::U.sigquit_backtrace
+
+DETUNE_CENTS = 5
+DETUNE_SEMIS = 0.01 * DETUNE_CENTS
+DETUNE_RANGE = (2 ** -DETUNE_SEMIS)..(2 ** DETUNE_SEMIS)
+
+midi = MB::Sound.midi
+
+cc1 = midi.cc(1).filter(:lowpass, cutoff: 10, quality: 0.5)
+cc2 = midi.cc(2, range: 1..10).filter(:lowpass, cutoff: 10, quality: 0.5)
+cc4 = midi.cc(4).filter(:lowpass, cutoff: 10, quality: 0.5)
+
+MB::U.headline('Loading wavetables...')
+
+synth = MB::Sound::Wavetable.load_wavetable('sounds/drums.flac', slices: 10)
+shaper = MB::Sound::Wavetable.load_wavetable('sounds/synth0.flac', slices: 10)
+
+voices = Array.new(4) do
+  (
+    midi.env(0.003, 0.05, 0.5, 0.3) * cc2 *
+    (
+      midi.hz(rand(DETUNE_RANGE)).ramp.wavetable(wavetable: synth, number: cc1) +
+        midi.hz(rand(DETUNE_RANGE)).triangle.at(0.5)
+    )
+  ).softclip
+    .wavetable(wavetable: shaper, number: cc4)
+    .filter(:highpass, cutoff: 10, quality: 0.7)
+end
+
+l = (0.5 * voices[0] + voices[1]).softclip.oversample(2)
+r = (0.5 * voices[2] + voices[3]).softclip.oversample(2)
+
+MB::U.headline('Begin play!')
+
+MB::Sound.play([l, r], plot: false)

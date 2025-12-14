@@ -9,10 +9,11 @@ module MB
       # Loads an existing wavetable from the given +filename+, using the
       # mb_sound_wavetable_period metadata tag to slice the file.
       #
-      # TODO: If the file does not have the mb_sound_wavetable_period tag, then
-      # the audio is passed into Wavetable.make_wavetable to create a wavetable
-      # from a normal sound file.
-      def self.load_wavetable(filename)
+      # If the file does not have the mb_sound_wavetable_period tag, then the
+      # audio is passed into Wavetable.make_wavetable to create a wavetable
+      # from a normal sound file.  The +:slices+ parameter controls how many
+      # slices to ask make_wavetable to provide.
+      def self.load_wavetable(filename, slices: 10)
         metadata = {}
         data = MB::Sound.read(filename, metadata_out: metadata)
         data = data.sum / data.length
@@ -24,7 +25,7 @@ module MB
           count = data.length / period
           data[0...(count * period)].reshape(count, period)
         else
-          make_wavetable(data)
+          make_wavetable(data, slices: slices)
         end
       end
 
@@ -42,7 +43,7 @@ module MB
       end
 
       # Slices the given 1D NArray to return a wavetable as a 2D NArray.
-      def self.make_wavetable(data, freq_range: 30..120, slices: 100, sample_rate: 48000, ratio: 1.0)
+      def self.make_wavetable(data, freq_range: 30..120, slices: 10, sample_rate: 48000, ratio: 1.0)
         # TODO: maybe chop off leading and trailing silence/near-silence
         # TODO: maybe skip or interpolate over silent slices
         # TODO: guard against amplifying very high frequency noises e.g. 20k+ dithering noise?
