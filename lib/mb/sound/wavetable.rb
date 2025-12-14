@@ -9,8 +9,8 @@ module MB
       # Loads an existing wavetable from the given +filename+, using the
       # mb_sound_wavetable_period metadata tag to slice the file.
       #
-      # If the file does not have the mb_sound_wavetable_period tag, then the
-      # audio is passed into Wavetable.make_wavetable to create a wavetable
+      # TODO: If the file does not have the mb_sound_wavetable_period tag, then
+      # the audio is passed into Wavetable.make_wavetable to create a wavetable
       # from a normal sound file.
       def self.load_wavetable(filename)
         metadata = {}
@@ -30,7 +30,8 @@ module MB
 
       # Saves 2D NArray +data+ containing a wavetable to the given sound
       # +filename+, using the mb_sound_wavetable_period tag to record the
-      # correct shape of the wavetable.
+      # correct shape of the wavetable.  The rows of the NArray are the entries
+      # in the table, and the columns are the audio samples over time.
       def self.save_wavetable(filename, data, sample_rate: 48000)
         raise 'Data must be a 2D Numo::NArray' unless data.is_a?(Numo::NArray) && data.ndim == 2
 
@@ -45,10 +46,13 @@ module MB
       # TODO: optimized C version?
 
       # Performs a fractional wavetable lookup with wraparound.
+      #
       # :number - A 1D Numo::NArray with the wave number (from 0..1) over time
       # :phase - A 1D Numo::NArray with the wave phase (from 0..1)over time
       #
       # TODO: bouncing or zero-extending?
+      #
+      # See MB::Sound::GraphNode#wavetable.
       def self.wavetable_lookup(wavetable:, number:, phase:)
         raise 'Number and phase must be the same size array' unless number.length == phase.length
 
@@ -58,7 +62,8 @@ module MB
         end
       end
 
-      # Blends two columns within a single row of the wavetable.
+      # Blends two columns within a single row of the wavetable.  You should
+      # probably use .wavetable_lookup or .outer_lookup.
       #
       # :number - The wave number index, which should be an integer.
       # :phase - Time index from 0 to 1.
@@ -81,7 +86,7 @@ module MB
         val2 * ratio + val1 * (1.0 - ratio)
       end
 
-      # Blends two waves using #inner_lookup.
+      # Blends two waves using #inner_lookup.  See also #wavetable_lookup.
       #
       # :number - Fractional wave number from 0 to 1.
       # :phase - Time index from 0 to 1.
