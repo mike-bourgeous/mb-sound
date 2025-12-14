@@ -119,6 +119,7 @@ module MB
 
       # TODO: functions to sort wavetables by brightness, etc.?
       # TODO: functions to shuffle wavetables?
+      # TODO: generate a whole bunch of table entries and use k-means clustering to select a few?
       # TODO: move make_wavetable.rb functionality into a function here
       # TODO: optimized C version?
 

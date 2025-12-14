@@ -588,7 +588,8 @@ module MB
       def wavetable(wavetable:, number:)
         number = number.constant if number.is_a?(Numeric)
         phase = self
-        phase = self.or_at(1) if self.respond_to?(:or_at)
+        phase = self.or_at(0..1) if self.respond_to?(:or_at)
+        number = number.or_at(0..1) if number.respond_to?(:or_at)
         Wavetable.new(wavetable: wavetable, number: number, phase: phase, sample_rate: 48000)
       end
 
