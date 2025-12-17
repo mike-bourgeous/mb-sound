@@ -21,7 +21,7 @@ module MB
       #  - https://www.cs.cmu.edu/~music/cmsip/readings/Standard-MIDI-file-format-updated.pdf
       class MIDIFile
         # A clock that may be passed to the constructor that returns whatever
-        # value was last assigned to #clock_now=.
+        # value was last assigned to #clock_now=.  Useful for testing.
         class ConstantClock
           # The constant value assigned to the clock.
           attr_reader :clock_now
@@ -73,13 +73,16 @@ module MB
         #
         # The +:clock+ parameter accepts any object that responds to
         # :clock_now.  This allows playing a MIDI file at a speed other than
-        # monotonic real time.
+        # monotonic real time.  Additionally the +:speed+ parameter allows
+        # specifying a playback speed ratio.
         #
         # If +:merge_tracks+ is false, then events will not be merged across
         # tracks, and #read will only return events from track +:read_track+.
-        def initialize(filename, clock: MB::U, merge_tracks: true, read_track: 0)
-          raise "Clock must respond to :clock_now" unless clock.respond_to?(:clock_now)
-          @clock = clock
+        def initialize(filename, clock: MB::U, merge_tracks: true, read_track: 0, speed: 1.0)
+          self.clock = clock
+
+          raise 'Speed must be greater than zero' unless speed > 0
+          @speed = 1.0 / speed
 
           @filename = filename
 
@@ -98,7 +101,8 @@ module MB
             end
           end
 
-          @duration = @seq.pulses_to_seconds(@seq.tracks.map(&:events).map(&:last).map(&:time_from_start).max)
+          last_event_pulses = @seq.tracks.map(&:events).map(&:last).map(&:time_from_start).max
+          @duration = pulse_time(last_event_pulses)
 
           @events = track.events.freeze
           @count = @events.count
@@ -129,7 +133,7 @@ module MB
               min_note: stats[0],
               mid_note: stats[1],
               max_note: stats[2],
-              duration: @seq.pulses_to_seconds(t.events.last.time_from_start),
+              duration: pulse_time(t.events.last.time_from_start),
             }
           }
         end
@@ -231,7 +235,7 @@ module MB
         # event, returns the number of events (corresponding to an index just
         # past the end of the list of events).
         def find_index(time)
-          @events.bsearch_index { |ev| @seq.pulses_to_seconds(ev.time_from_start) >= time } || @events.length
+          @events.bsearch_index { |ev| pulse_time(ev.time_from_start) >= time } || @events.length
         end
 
         # Returns a fractional index based on the given number of seconds,
@@ -259,11 +263,11 @@ module MB
 
           ts1 = @events[idx1]&.time_from_start
           ts1 ||= 0
-          time1 = @seq.pulses_to_seconds(ts1)
+          time1 = pulse_time(ts1)
 
           ts2 = @events[idx2]&.time_from_start
           ts2 ||= ts1
-          time2 = @seq.pulses_to_seconds(ts2)
+          time2 = pulse_time(ts2)
 
           if time < time1
             # Extrapolating before start
@@ -279,6 +283,13 @@ module MB
           else
             idx1 + (time - time1).to_f / (time2 - time1)
           end
+        end
+
+        # Changes the clock used by this MIDI file for tracking time.
+        def clock=(clock)
+          raise "Clock must respond to :clock_now" unless clock.respond_to?(:clock_now)
+          @clock = clock
+          @start = @clock.clock_now - @elapsed if @start
         end
 
         # Sets the current time used by #read to +time+ (in seconds).  Negative
@@ -309,7 +320,7 @@ module MB
           if blocking
             # Sleep until the scheduled time of the next event
             ev = @events[@index]
-            delay = @clock.clock_now - (@start + @seq.pulses_to_seconds(ev.time_from_start))
+            delay = @clock.clock_now - (@start + pulse_time(ev.time_from_start))
             sleep delay if delay > 0
           end
 
@@ -320,7 +331,7 @@ module MB
             ev = @events[@index]
 
             # Stop the loop when we see an event from the future
-            t = @seq.pulses_to_seconds(ev.time_from_start)
+            t = pulse_time(ev.time_from_start)
             break if t > @elapsed
 
             unless ev.is_a?(::MIDI::MetaEvent)
@@ -354,7 +365,7 @@ module MB
           events.each do |e|
             next unless e.respond_to?(:channel)
 
-            event_time = @seq.pulses_to_seconds(e.time_from_start)
+            event_time = pulse_time(e.time_from_start)
             ch_info = channels[e.channel]
             ch_notes = ch_info[:active_notes]
 
@@ -451,6 +462,13 @@ module MB
             numbers[numbers.length / 2] || 64,
             numbers[-1] || 64,
           ]
+        end
+
+        # Calculates the time in seconds at the given number of elapsed MIDI
+        # pulses (specified by the file, commonly 960 pulses per quarter note).
+        # Does not handle variable tempo MIDI files.
+        def pulse_time(pulses)
+          @seq.pulses_to_seconds(pulses) * @speed
         end
       end
     end

@@ -10,9 +10,14 @@ MB::U.sigquit_backtrace
 DETUNE_CENTS = 5
 DETUNE_SEMIS = 0.01 * DETUNE_CENTS
 DETUNE_RANGE = (2 ** -DETUNE_SEMIS)..(2 ** DETUNE_SEMIS)
-PORTAMENTO_TIME = 0.1
+PORTAMENTO_TIME = 0.1 # TODO: control with midi CC for portamento
 
-midi = MB::Sound.midi
+if ARGV[0]&.downcase&.end_with?('.mid') && File.readable?(ARGV[0])
+  # FIXME: exit when the MIDI file has ended
+  midi = MB::Sound.midi_file(ARGV[0], speed: ENV['MIDI_SPEED']&.to_f || 1)
+else
+  midi = MB::Sound.midi
+end
 
 cc1 = midi.cc(1).filter(:lowpass, cutoff: 10, quality: 0.5)
 cc2 = midi.cc(2, range: 1..10).filter(:lowpass, cutoff: 10, quality: 0.5)

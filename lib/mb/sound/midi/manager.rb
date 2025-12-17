@@ -9,7 +9,7 @@ module MB
       # callbacks.  The #update method should be called 60 times per second, or
       # whatever value was given to the update_rate constructor parameter.
       class Manager
-        attr_reader :update_rate, :channel, :cc
+        attr_reader :update_rate, :channel, :cc, :midi_in
 
         # Transposes note events received via #on_note (but not raw events via
         # #on_event).  This may be fractional for use with VoicePool.
