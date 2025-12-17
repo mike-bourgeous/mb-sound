@@ -197,6 +197,12 @@ module MB
           collection.delete(key)
         end
 
+        # Returns true if the MIDI source is a MIDI file and the file has
+        # ended.
+        def done?
+          @manager.midi_in.respond_to?(:done?) && @manager.midi_in.done?
+        end
+
         # XXX FIXME hack for graph display
         def sources; {} end
         def spy(*a, **ka); end

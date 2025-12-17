@@ -103,6 +103,7 @@ module MB
 
           last_event_pulses = @seq.tracks.map(&:events).map(&:last).map(&:time_from_start).max
           @duration = pulse_time(last_event_pulses)
+          @extra_duration = 5
 
           @events = track.events.freeze
           @count = @events.count
@@ -228,6 +229,18 @@ module MB
         # Returns true if there are no more events available to #read.
         def empty?
           @events.empty? || @index >= @events.length
+        end
+
+        # Returns true if the current time is 5 seconds past the last event in
+        # the MIDI file.
+        #
+        # TODO: allow specifying the amount of extra time, or find some way to
+        # sync with envelopes/delays/etc. to allow ringdown
+        def done?
+          return false unless @start
+          now = @clock.clock_now
+          @elapsed = now - @start
+          @elapsed > @duration + @extra_duration
         end
 
         # Returns the index of the first event with a timestamp greater than or

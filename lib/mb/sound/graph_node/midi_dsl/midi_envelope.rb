@@ -33,6 +33,8 @@ module MB
           end
 
           def sample(count)
+            return nil if @dsl.done?
+
             @dsl.invalidate_cache(self) unless @cache_invalidated
             @cache_invalidated = true
             MB::M.scale(super, 0..1, @range)
