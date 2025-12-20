@@ -13,7 +13,7 @@ module MB
       # audio is passed into Wavetable.make_wavetable to create a wavetable
       # from a normal sound file.  The +:slices+ parameter controls how many
       # slices to ask make_wavetable to provide.
-      def self.load_wavetable(filename, slices: 10)
+      def self.load_wavetable(filename, slices: 10, ratio: 1.0)
         metadata = {}
         data = MB::Sound.read(filename, metadata_out: metadata)
         data = data.sum / data.length
@@ -25,7 +25,7 @@ module MB
           count = data.length / period
           data[0...(count * period)].reshape(count, period)
         else
-          make_wavetable(data, slices: slices)
+          make_wavetable(data, slices: slices, ratio: ratio)
         end
       end
 

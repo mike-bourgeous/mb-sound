@@ -1,8 +1,31 @@
 RSpec.describe(MB::Sound::GraphNode::Wavetable) do
   let(:data) { Numo::SFloat[[1, -1, 1, 1, -1, -1], [0, 1, -1, 1, 0, -1]] }
 
-  it 'can be created' do
-    expect(120.hz.ramp.wavetable(wavetable: data, number: 0.constant)).to be_a(MB::Sound::GraphNode::Wavetable)
+  describe '#initialize' do
+    it 'can create a wavetable node from an NArray' do
+      expect(120.hz.ramp.wavetable(wavetable: data, number: 0.constant)).to be_a(MB::Sound::GraphNode::Wavetable)
+    end
+
+    it 'can create a wavetable node from a saved wavetable' do
+      wt = 120.hz.ramp.wavetable(wavetable: 'spec/test_data/short_wavetable.flac', number: 0.constant)
+      expect(wt).to be_a(MB::Sound::GraphNode::Wavetable)
+      expect(wt.table).to be_a(Numo::NArray)
+      expect(wt.table.shape).to eq([3, 5])
+    end
+
+    it 'can create a wavetable node from an existing sound file by name' do
+      wt = 120.hz.ramp.wavetable(wavetable: 'sounds/sine/sine_100_1s_mono.flac', number: 0.constant)
+      expect(wt).to be_a(MB::Sound::GraphNode::Wavetable)
+      expect(wt.table).to be_a(Numo::NArray)
+      expect(wt.table.shape).to eq([10, 480])
+    end
+
+    it 'can create a wavetable node from an existing sound by Hash' do
+      wt = 120.hz.ramp.wavetable(wavetable: { wavetable: 'sounds/sine/sine_100_1s_mono.flac', slices: 3, ratio: 0.5 }, number: 0.constant)
+      expect(wt).to be_a(MB::Sound::GraphNode::Wavetable)
+      expect(wt.table).to be_a(Numo::NArray)
+      expect(wt.table.shape).to eq([3, 240])
+    end
   end
 
   describe '#sample' do
