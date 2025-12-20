@@ -194,6 +194,8 @@ module MB
       # This will change the internal state of the envelope, so do not call
       # this on an envelope that is processing audio.
       def sample_all(sustain_time: (attack_time + decay_time + release_time) / 3.0)
+        # TODO: handle case where #sample returns nil because playback/auto_release has stopped
+
         reset
 
         trigger(1)
@@ -376,7 +378,10 @@ module MB
 
         @frame = @frame * new_rate / @sample_rate
         @sample_rate = new_rate
+
+        self
       end
+      alias at_rate sample_rate=
 
       private
 

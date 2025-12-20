@@ -238,6 +238,7 @@ module MB
         # sync with envelopes/delays/etc. to allow ringdown
         def done?
           return false unless @start
+
           now = @clock.clock_now
           @elapsed = now - @start
           @elapsed > @duration + @extra_duration

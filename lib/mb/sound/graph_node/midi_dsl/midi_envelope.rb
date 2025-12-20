@@ -33,15 +33,28 @@ module MB
           end
 
           def sample(count)
-            return nil if @dsl.done?
+            # TODO: return one extra block after the MIDI source is done?
+            return nil if @dsl&.done?
 
-            @dsl.invalidate_cache(self) unless @cache_invalidated
+            @dsl&.invalidate_cache(self) unless @cache_invalidated
             @cache_invalidated = true
+
+            # FIXME: this will totally screw up parameter smoothing because it gets called N times per frame for N MIDI nodes
+            @dsl&.manager&.update
+
             MB::M.scale(super, 0..1, @range)
           end
 
           def sources
             super.merge({ trigger: @dsl })
+          end
+
+          # Overrides the superclass to clear the DSL, as duplicated envelopes
+          # are typically used for plotting an overal envelope curve.
+          def dup
+            super.tap { |other|
+              other.instance_variable_set(:@dsl, nil)
+            }
           end
 
           # TODO to_s and to_s_graphviz that include the output range
