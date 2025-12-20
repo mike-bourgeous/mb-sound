@@ -55,12 +55,52 @@ static VALUE ruby_outer_lookup(VALUE self, VALUE wavetable, VALUE number, VALUE 
 
 	float *ptr = (float *)(nary_get_pointer_for_read(wavetable) + nary_get_offset(wavetable));
 
-	return DBL2NUM(outer_lookup(ptr, RNARRAY_SHAPE(wavetable)[0], RNARRAY_SHAPE(wavetable)[1], rho, phi));
+	VALUE ret = DBL2NUM(outer_lookup(ptr, RNARRAY_SHAPE(wavetable)[0], RNARRAY_SHAPE(wavetable)[1], rho, phi));
+	RB_GC_GUARD(wavetable);
+	return ret;
 }
 
+// Overwrites phase with the result of wavetable lookup in the given table,
+// using the given number array.
+//
+// wavetable - a 2D Numo::SFloat
+// number - a 1D Numo::SFloat from 0..1 (with wrapping)
+// phase - a 1D Numo::SFloat from 0..1 (with wrapping)
 static VALUE ruby_wavetable_lookup(VALUE self, VALUE wavetable, VALUE number, VALUE phase)
 {
-	rb_raise(rb_eNotImpError, "TODO: implement wavetable lookup loop");
+	wavetable = rb_funcall(numo_cSFloat, sym_cast, 1, wavetable);
+	number = rb_funcall(numo_cSFloat, sym_cast, 1, number);
+	phase = rb_funcall(numo_cSFloat, sym_cast, 1, phase);
+
+	if (RNARRAY_NDIM(wavetable) != 2 || !RTEST(nary_check_contiguous(wavetable))) {
+		rb_raise(rb_eArgError, "Wavetable must be a contiguous 2D Numo::SFloat");
+	}
+
+	if (RNARRAY_NDIM(number) != 1 || !RTEST(nary_check_contiguous(number)) ||
+			RNARRAY_NDIM(phase) != 1 || !RTEST(nary_check_contiguous(phase))) {
+		rb_raise(rb_eArgError, "Number and phase must be continuous 1D Numo::SFloat");
+	}
+
+	float *table_ptr = (float *)(nary_get_pointer_for_read(wavetable) + nary_get_offset(wavetable));
+	float *rho_ptr = (float *)(nary_get_pointer_for_read(number) + nary_get_offset(number));
+	float *phi_ptr = (float *)(nary_get_pointer_for_read_write(phase) + nary_get_offset(phase));
+
+	size_t length = RNARRAY_SHAPE(phase)[0];
+	if (RNARRAY_SHAPE(number)[0] != length) {
+		rb_raise(rb_eArgError, "Number and phase must be the same length");
+	}
+
+	size_t rows = RNARRAY_SHAPE(wavetable)[0];
+	size_t cols = RNARRAY_SHAPE(wavetable)[1];
+	for (size_t i = 0; i < length; i++) {
+		phi_ptr[i] = outer_lookup(table_ptr, rows, cols, rho_ptr[i], phi_ptr[i]);
+	}
+
+	RB_GC_GUARD(number);
+	RB_GC_GUARD(phase);
+	RB_GC_GUARD(wavetable);
+
+	return phase;
 }
 
 void Init_fast_wavetable(void)
