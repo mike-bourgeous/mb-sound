@@ -13,7 +13,7 @@ GIT
 
 GIT
   remote: https://github.com/mike-bourgeous/mb-sound-jackffi.git
-  revision: 7a7b48362dbe498a62609c2eb9fae162762c6a01
+  revision: 7a5ffd9ded2629b6ab8f616b6c7051df2a915c97
   specs:
     mb-sound-jackffi (0.1.0.usegit)
       ffi (~> 1.13.0)
@@ -49,7 +49,7 @@ GEM
     cmath (1.0.0)
     coderay (1.1.3)
     csv (3.3.5)
-    date (3.5.0)
+    date (3.5.1)
     diff-lcs (1.6.2)
     docile (1.4.1)
     ffi (1.13.1)
@@ -102,9 +102,9 @@ GEM
     simplecov-html (0.13.2)
     simplecov_json_formatter (0.1.4)
     singleton (0.3.0)
-    stringio (3.1.8)
+    stringio (3.2.0)
     word_wrap (1.0.0)
-    yard (0.9.37)
+    yard (0.9.38)
 
 PLATFORMS
   ruby
