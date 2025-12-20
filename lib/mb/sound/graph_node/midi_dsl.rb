@@ -197,6 +197,12 @@ module MB
           collection.delete(key)
         end
 
+        # Returns true if the MIDI source is a MIDI file and the file has
+        # ended.
+        def done?
+          @manager.midi_in.respond_to?(:done?) && @manager.midi_in.done?
+        end
+
         # XXX FIXME hack for graph display
         def sources; {} end
         def spy(*a, **ka); end
@@ -241,10 +247,11 @@ module MB
     #       midi.tone.ramp.filter(:lowpass, cutoff: midi.frequency + 100) * midi.gate
     #     }
     #     play graph
-    def self.midi_file(filename)
+    def self.midi_file(filename, speed: 1.0, clock: MB::U)
       # TODO: end graph execution when the MIDI file has completely finished
+      # TODO: maybe move this method into sound.rb?  or a new midi_methods.rb?
 
-      mfile = MB::Sound::MIDI::MIDIFile.new(filename)
+      mfile = MB::Sound::MIDI::MIDIFile.new(filename, speed: speed, clock: clock)
       mgr = MB::Sound::MIDI::Manager.new(input: mfile, jack: nil)
       dsl = MB::Sound::GraphNode::MidiDsl.new(manager: mgr)
 
@@ -259,7 +266,8 @@ module MB
     # MidiDsl for details.
     def self.midi
       # TODO: allow specifying an input/connection by name and then caching the DSL for that input?
-      # TODO: maybe move this method into sound.rb?
+      # TODO: maybe move this method into sound.rb?  or a new midi_methods.rb?
+
       @midi_manager ||= MB::Sound::MIDI::Manager.new
       @midi_dsl ||= MB::Sound::GraphNode::MidiDsl.new(manager: @midi_manager)
     end

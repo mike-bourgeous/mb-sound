@@ -18,10 +18,15 @@ module MB
             @cache_invalidated = false
           end
 
-          # Intercepts audio generation to trigger reading MIDI input.
+          # Intercepts audio generation to trigger reading MIDI input.  Returns
+          # nil to stop the node graph if reading from a MIDI file and the file
+          # has ended (see MB::Sound::MIDI::MIDIFile#done?).
           def sample(count)
+            return nil if @dsl.nil?
+
             @dsl.invalidate_cache(self) unless @cache_invalidated
             @cache_invalidated = true
+
             # FIXME: this will totally screw up parameter smoothing because it gets called N times per frame for N MIDI nodes
             @manager.update
             super
