@@ -14,3 +14,9 @@ Rake::ExtensionTask.new 'mb-sound-fast_resample' do |ext|
   ext.ext_dir = 'ext/mb/sound/fast_resample'
   ext.lib_dir = 'lib/mb/sound'
 end
+
+Rake::ExtensionTask.new 'mb-sound-fast_wavetable' do |ext|
+  ext.name = 'fast_wavetable'
+  ext.ext_dir = 'ext/mb/sound/fast_wavetable'
+  ext.lib_dir = 'lib/mb/sound'
+end
