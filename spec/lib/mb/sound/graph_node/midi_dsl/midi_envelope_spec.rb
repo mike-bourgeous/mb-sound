@@ -10,7 +10,7 @@ RSpec.describe(MB::Sound::GraphNode::MidiDsl::MidiEnvelope) do
 
       expect(env.sample(10)).to eq(nil)
 
-      expect(env.dup.sample(10)).to be_a(Numo::NArray)
+      expect(env.dup(10).sample(10)).to be_a(Numo::NArray)
       expect(env.dup.at_rate(10).sample_all).to be_a(Numo::NArray)
     end
   end

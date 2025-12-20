@@ -51,7 +51,7 @@ module MB
 
           # Overrides the superclass to clear the DSL, as duplicated envelopes
           # are typically used for plotting an overal envelope curve.
-          def dup
+          def dup(sample_rate = @sample_rate)
             super.tap { |other|
               other.instance_variable_set(:@dsl, nil)
             }

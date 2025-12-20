@@ -133,12 +133,23 @@ module MB
       #
       # See MB::Sound::GraphNode#wavetable.
       def self.wavetable_lookup(wavetable:, number:, phase:)
+        wavetable_lookup_c(wavetable: wavetable, number: number, phase: phase)
+      end
+
+      # Ruby implementation of .wavetable_lookup.
+      def self.wavetable_lookup_ruby(wavetable:, number:, phase:)
         raise 'Number and phase must be the same size array' unless number.length == phase.length
 
         number.map_with_index do |num, idx|
           phi = phase[idx]
-          outer_lookup(wavetable: wavetable, number: num, phase: phi)
+          outer_lookup_ruby(wavetable: wavetable, number: num, phase: phi)
         end
+      end
+
+      # C extension implementation of .wavetable_lookup.
+      def self.wavetable_lookup_c(wavetable:, number:, phase:)
+        #phase = phase.dup.inplace! unless phase.inplace?
+        MB::Sound::FastWavetable.wavetable_lookup(wavetable, number, phase)
       end
 
       # Blends two columns within a single row of the wavetable.  You should
@@ -170,6 +181,11 @@ module MB
       # :number - Fractional wave number from 0 to 1.
       # :phase - Time index from 0 to 1.
       def self.outer_lookup(wavetable:, number:, phase:)
+        outer_lookup_c(wavetable: wavetable, number: number, phase: phase)
+      end
+
+      # Ruby implementation of .outer_lookup.
+      def self.outer_lookup_ruby(wavetable:, number:, phase:)
         wave_count = wavetable.shape[0]
         frow = (number * wave_count) % wave_count
         row1 = frow.floor
@@ -183,6 +199,11 @@ module MB
         val2 = inner_lookup(wavetable: wavetable, number: row2, phase: phase)
 
         val2 * ratio + val1 * (1.0 - ratio)
+      end
+
+      # C extension implementation of .outer_lookup.
+      def self.outer_lookup_c(wavetable:, number:, phase:)
+        MB::Sound::FastWavetable.outer_lookup(wavetable, number, phase)
       end
     end
   end

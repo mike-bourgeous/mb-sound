@@ -30,11 +30,11 @@ for version in $VERSION_LIST; do
 		printf "\n\e[1mRunning node graph benchmark\e[0m\n\n"
 
 		printf "\n\e[1mbenchmark \e[36m$version \e[31mwithout jit\e[0m\n"
-		rvm ${version}@mb-sound do bin/node_graph_benchmark.rb --bench
+		rvm ${version}@mb-sound do bin/songs/node_graph_benchmark.rb --bench
 
 		printf "\n\e[1mbenchmark \e[36m$version \e[32mwith jit\e[0m\n"
-		RUBYOPT=--jit rvm ${version}@mb-sound do bin/node_graph_benchmark.rb --bench
-	else
+		RUBYOPT=--jit rvm ${version}@mb-sound do bin/songs/node_graph_benchmark.rb --bench
+	elif false; then
 		printf "\n\e[1mRunning resampling benchmark\e[0m\n\n"
 
 		printf "\n\e[1mbenchmark \e[36m$version \e[31mwithout jit\e[0m\n"
@@ -42,5 +42,13 @@ for version in $VERSION_LIST; do
 
 		printf "\n\e[1mbenchmark \e[36m$version \e[32mwith jit\e[0m\n"
 		RUBYOPT=--jit rvm ${version}@mb-sound do bin/resample_benchmark.rb
+	else
+		printf "\n\e[1mRunning wavetable benchmark\e[0m\n\n"
+
+		printf "\n\e[1mbenchmark \e[36m$version \e[31mwithout jit\e[0m\n"
+		rvm ${version}@mb-sound do bin/wavetable_benchmark.rb
+
+		printf "\n\e[1mbenchmark \e[36m$version \e[32mwith jit\e[0m\n"
+		RUBYOPT=--jit rvm ${version}@mb-sound do bin/wavetable_benchmark.rb
 	fi
 done
