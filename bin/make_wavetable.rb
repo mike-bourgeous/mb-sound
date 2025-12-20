@@ -32,7 +32,7 @@ ratio = Float(ARGV[3] || 1)
 data = MB::Sound.read(ARGV[0])
 if data.length == 2
   # Blend channels with some phase rotation so side info isn't completely canceled
-  # FIXME: This introduces some stupidly high frequency oscillation
+  # FIXME: This introduces some very loud high frequency oscillation so just using L for now
   #mid = data.sum
   #side = (MB::Sound.analytic_signal(data[0] - data[1]) * 1i).real
   #data = mid + side
