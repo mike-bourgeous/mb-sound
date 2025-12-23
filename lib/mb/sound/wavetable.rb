@@ -133,16 +133,23 @@ module MB
       #
       # See MB::Sound::GraphNode#wavetable.
       def self.wavetable_lookup(wavetable:, number:, phase:)
-        wavetable_lookup_c(wavetable: wavetable, number: number, phase: phase)
+        wavetable_lookup_ruby(wavetable: wavetable, number: number, phase: phase)
       end
 
       # Ruby implementation of .wavetable_lookup.
       def self.wavetable_lookup_ruby(wavetable:, number:, phase:)
         raise 'Number and phase must be the same size array' unless number.length == phase.length
 
-        number.map_with_index do |num, idx|
-          phi = phase[idx]
-          outer_lookup_ruby(wavetable: wavetable, number: num, phase: phi)
+        if $wavetable_mode == :cubic
+          number.map_with_index do |num, idx|
+            phi = phase[idx]
+            outer_cubic_ruby(wavetable: wavetable, number: num, phase: phi)
+          end
+        else
+          number.map_with_index do |num, idx|
+            phi = phase[idx]
+            outer_linear_ruby(wavetable: wavetable, number: num, phase: phi)
+          end
         end
       end
 
@@ -157,13 +164,40 @@ module MB
       #
       # :number - Fractional wave number from 0 to 1.
       # :phase - Time index from 0 to 1.
-      def self.outer_lookup(wavetable:, number:, phase:)
-        outer_lookup_c(wavetable: wavetable, number: number, phase: phase)
+      def self.outer_linear(wavetable:, number:, phase:)
+        outer_linear_ruby(wavetable: wavetable, number: number, phase: phase)
       end
 
-      # Ruby implementation of .outer_lookup.
-      def self.outer_lookup_ruby(wavetable:, number:, phase:)
+      # Uses cubic interpolation to blend across samples and waves in the given
+      # +:wavetable+, as opposed to linear interpolation used by
+      # #outer_linear_ruby.
+      #
+      # TODO: cubic across waves; currently linear; probably requires 16
+      # lookups instead of linear's 4
+      def self.outer_cubic_ruby(wavetable:, number:, phase:)
+        rows = wavetable.shape[0].to_f
+        cols = wavetable.shape[1].to_f
+
+        frow = (number * rows) % rows
+        row1 = frow.floor
+        row2 = frow.ceil
+        row1 %= rows
+        row2 %= rows
+        rowratio = frow - row1
+
+        fcol = phase * cols
+
+        # TODO: allow choosing oob mode
+        vtop = MB::M.cubic_lookup(wavetable[row1, nil], fcol)
+        vbot = MB::M.cubic_lookup(wavetable[row2, nil], fcol)
+
+        vbot * rowratio + vtop * (1.0 - rowratio)
+      end
+
+      # Ruby implementation of .outer_linear.
+      def self.outer_linear_ruby(wavetable:, number:, phase:)
         wave_count = wavetable.shape[0]
+        sample_count = wavetable.shape[1]
 
         frow = (number * wave_count) % wave_count
         row1 = frow.floor
@@ -172,11 +206,11 @@ module MB
         row2 %= wave_count
         rowratio = frow - row1
 
-        fcol = (phase % 1.0) * wavetable.shape[1]
+        fcol = (phase % 1.0) * sample_count
         col1 = fcol.floor
         col2 = fcol.ceil
-        col1 %= wavetable.shape[1]
-        col2 %= wavetable.shape[1]
+        col1 %= sample_count
+        col2 %= sample_count
         colratio = fcol - col1
 
         val1l = wavetable[row1, col1]
@@ -190,8 +224,8 @@ module MB
         valbot * rowratio + valtop * (1.0 - rowratio)
       end
 
-      # C extension implementation of .outer_lookup.
-      def self.outer_lookup_c(wavetable:, number:, phase:)
+      # C extension implementation of .outer_linear.
+      def self.outer_linear_c(wavetable:, number:, phase:)
         MB::Sound::FastWavetable.outer_lookup(wavetable, number, phase)
       end
     end

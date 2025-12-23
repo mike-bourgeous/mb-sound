@@ -10,23 +10,25 @@ number = nil
 number_arr = nil
 phase_arr = nil
 
+SAMPLES = ENV['SAMPLES']&.to_i || 48000 * 60
+
 Benchmark.bmbm do |bench|
   bench.report('build wavetable') do
     phase = 100.hz.ramp.at(0..1).forever
-    phase_arr = phase.sample(48000 * 60)
+    phase_arr = phase.sample(SAMPLES)
 
     number = 1.hz.ramp.at(0..1).forever
-    number_arr = number_arr = number.sample(48000 * 60)
+    number_arr = number_arr = number.sample(SAMPLES)
 
     wt = phase.wavetable(wavetable: 'sounds/piano0.flac', number: number)
   end
 
   bench.report('sample wavetable once') do
-    wt.sample(48000 * 60)
+    wt.sample(SAMPLES)
   end
 
   bench.report('sample wavetable in loop') do
-    wt.multi_sample(800, 60 * 60)
+    wt.multi_sample(800, SAMPLES / 800)
   end
 
   bench.report('pure ruby once') do

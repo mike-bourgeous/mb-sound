@@ -40,9 +40,12 @@ voices = Array.new(4) do
     .filter(:highpass, cutoff: 10, quality: 0.7)
 end
 
-l = (0.5 * voices[0] + voices[1]).filter(:lowpass, cutoff: 15000, quality: 0.25).softclip.oversample(2)
-r = (0.5 * voices[2] + voices[3]).filter(:lowpass, cutoff: 15000, quality: 0.25).softclip.oversample(2)
+l = (0.5 * voices[0] + voices[1]).filter(:lowpass, cutoff: 15000, quality: 0.25).softclip #XXX .oversample(2)
+r = (0.5 * voices[2] + voices[3]).filter(:lowpass, cutoff: 15000, quality: 0.25).softclip #XXX .oversample(2)
 
 MB::U.headline('Begin play!')
+
+# XXX
+$wavetable_mode = :cubic
 
 MB::Sound.play([l, r], plot: false)

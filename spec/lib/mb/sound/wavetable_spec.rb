@@ -48,7 +48,7 @@ RSpec.describe(MB::Sound::Wavetable, aggregate_failures: true) do
     end
   end
 
-  [:outer_lookup, :outer_lookup_c, :outer_lookup_ruby].each do |m|
+  [:outer_linear, :outer_linear_c, :outer_linear_ruby].each do |m|
     describe "##{m}" do
       it 'can retrieve exact rows in the wavetable' do
         expect(MB::Sound::Wavetable.send(m, wavetable: table, number: 0, phase: 0).round(6)).to eq(1)
