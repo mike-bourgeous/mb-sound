@@ -152,31 +152,8 @@ module MB
         MB::Sound::FastWavetable.wavetable_lookup(wavetable, number, phase)
       end
 
-      # Blends two columns within a single row of the wavetable.  You should
-      # probably use .wavetable_lookup or .outer_lookup.
-      #
-      # :number - The wave number index, which should be an integer.
-      # :phase - Time index from 0 to 1.
-      #
-      # TODO: bouncing or zero-extending?
-      def self.inner_lookup(wavetable:, number:, phase:)
-        row = number.floor
-
-        fcol = (phase % 1.0) * wavetable.shape[1]
-        col1 = fcol.floor
-        col2 = fcol.ceil
-        col1 %= wavetable.shape[1]
-        col2 %= wavetable.shape[1]
-
-        ratio = fcol - col1
-
-        val1 = wavetable[row, col1]
-        val2 = wavetable[row, col2]
-
-        val2 * ratio + val1 * (1.0 - ratio)
-      end
-
-      # Blends two waves using #inner_lookup.  See also #wavetable_lookup.
+      # Interpolates waves and samples from the wavetable.  See also
+      # #wavetable_lookup.
       #
       # :number - Fractional wave number from 0 to 1.
       # :phase - Time index from 0 to 1.
@@ -187,18 +164,30 @@ module MB
       # Ruby implementation of .outer_lookup.
       def self.outer_lookup_ruby(wavetable:, number:, phase:)
         wave_count = wavetable.shape[0]
+
         frow = (number * wave_count) % wave_count
         row1 = frow.floor
         row2 = frow.ceil
         row1 %= wave_count
         row2 %= wave_count
+        rowratio = frow - row1
 
-        ratio = frow - row1
+        fcol = (phase % 1.0) * wavetable.shape[1]
+        col1 = fcol.floor
+        col2 = fcol.ceil
+        col1 %= wavetable.shape[1]
+        col2 %= wavetable.shape[1]
+        colratio = fcol - col1
 
-        val1 = inner_lookup(wavetable: wavetable, number: row1, phase: phase)
-        val2 = inner_lookup(wavetable: wavetable, number: row2, phase: phase)
+        val1l = wavetable[row1, col1]
+        val1r = wavetable[row1, col2]
+        val2l = wavetable[row2, col1]
+        val2r = wavetable[row2, col2]
 
-        val2 * ratio + val1 * (1.0 - ratio)
+        valtop = val1r * colratio + val1l * (1.0 - colratio)
+        valbot = val2r * colratio + val2l * (1.0 - colratio)
+
+        valbot * rowratio + valtop * (1.0 - rowratio)
       end
 
       # C extension implementation of .outer_lookup.
