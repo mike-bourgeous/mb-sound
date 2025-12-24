@@ -166,7 +166,7 @@ module MB
       def self.wavetable_lookup_ruby(wavetable:, number:, phase:)
         raise 'Number and phase must be the same size array' unless number.length == phase.length
 
-        if $wavetable_mode == :cubic
+        if $wavetable_mode.nil? || $wavetable_mode == :cubic
           number.map_with_index do |num, idx|
             phi = phase[idx]
             outer_cubic_ruby(wavetable: wavetable, number: num, phase: phi)
@@ -214,8 +214,8 @@ module MB
         fcol = phase * cols
 
         # TODO: allow choosing oob mode
-        vtop = MB::M.cubic_lookup(wavetable[row1, nil], fcol)
-        vbot = MB::M.cubic_lookup(wavetable[row2, nil], fcol)
+        vtop = MB::M.cubic_lookup(wavetable[row1, nil], fcol, mode: $wavetable_wrap || :bounce)
+        vbot = MB::M.cubic_lookup(wavetable[row2, nil], fcol, mode: $wavetable_wrap || :bounce)
 
         vbot * rowratio + vtop * (1.0 - rowratio)
       end
