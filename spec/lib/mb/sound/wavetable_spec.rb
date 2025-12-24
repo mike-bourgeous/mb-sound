@@ -10,7 +10,7 @@ RSpec.describe(MB::Sound::Wavetable, aggregate_failures: true) do
   describe '.load_wavetable' do
     it 'can load an existing wavetable' do
       data = MB::Sound::Wavetable.load_wavetable('spec/test_data/short_wavetable.flac')
-      expect(MB::M.round(data, 5)).to eq(MB::M.round(table / 5, 6))
+      expect(data).to all_be_within(1e-6).of_array(table/5)
     end
   end
 
@@ -31,7 +31,7 @@ RSpec.describe(MB::Sound::Wavetable, aggregate_failures: true) do
 
       metadata = {}
       result = MB::Sound.read(name, metadata_out: metadata)[0]
-      expect(MB::M.round(result, 6)).to eq(Numo::SFloat[0.5, -0.5, 0, 0.1, 0.2, -0.3, -0.75, 0.25, 0.75])
+      expect(result).to all_be_within(1e-6).of_array(Numo::SFloat[0.5, -0.5, 0, 0.1, 0.2, -0.3, -0.75, 0.25, 0.75])
       expect(metadata[:mb_sound_wavetable_period]&.to_i).to eq(3)
     end
   end
@@ -42,8 +42,9 @@ RSpec.describe(MB::Sound::Wavetable, aggregate_failures: true) do
         number = Numo::SFloat[0, 1.0 / 3.0, 2.0 / 3.0, -2.0 / 3.0, 1.0 / 6.0]
         phase = Numo::SFloat[0, 0.4, 0.6, 1.2, 0.1]
 
+        # FIXME: cubic interpolation changes last value
         result = MB::Sound::Wavetable.send(m, wavetable: table, number: number, phase: phase)
-        expect(MB::M.round(result, 5)).to eq(MB::M.round(Numo::SFloat[1, 3, 3, -3, 1.25], 5))
+        expect(result).to all_be_within(1e-5).of_array(Numo::SFloat[1, 3, 3, -3, 1.25])
       end
     end
   end
