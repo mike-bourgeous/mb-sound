@@ -87,6 +87,7 @@ module MB
           xfade_samples: xfade_samples,
         })
 
+        # FIXME: only print this in bin/sound.rb or something; not in rspec
         puts MB::U.highlight(metadata_out) if metadata_out
 
         for start_samples in (0...(data.length - (period_samples + xfade_samples))).step(jump) do
@@ -166,7 +167,8 @@ module MB
       def self.wavetable_lookup_ruby(wavetable:, number:, phase:)
         raise 'Number and phase must be the same size array' unless number.length == phase.length
 
-        if $wavetable_mode.nil? || $wavetable_mode == :cubic
+        $wavetable_mode ||= :cubic
+        if $wavetable_mode == :cubic
           number.map_with_index do |num, idx|
             phi = phase[idx]
             outer_cubic_ruby(wavetable: wavetable, number: num, phase: phi)
@@ -213,7 +215,8 @@ module MB
 
         fcol = phase * cols
 
-        # TODO: allow choosing oob mode
+        # TODO: allow choosing oob mode from parameters
+        $wavetable_wrap ||= :wrap
         vtop = MB::M.cubic_lookup(wavetable[row1, nil], fcol, mode: $wavetable_wrap || :bounce)
         vbot = MB::M.cubic_lookup(wavetable[row2, nil], fcol, mode: $wavetable_wrap || :bounce)
 
