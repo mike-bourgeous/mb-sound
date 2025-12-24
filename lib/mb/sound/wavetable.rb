@@ -14,9 +14,12 @@ module MB
       # from a normal sound file.  The +:slices+ parameter controls how many
       # slices to ask make_wavetable to provide.
       def self.load_wavetable(filename, slices: 10, ratio: 1.0)
+        # Using weighted mixing for now; TODO: find a safe way to combine
+        # channels with minimal cancellation of reverb or introduction of high
+        # frequency oscillation when normalizing
         metadata = {}
         data = MB::Sound.read(filename, metadata_out: metadata)
-        data = data.sum / data.length
+        data = data.map.with_index { |c, idx| c / (idx + 1) }.sum
 
         period = metadata[:mb_sound_wavetable_period]&.to_i
         raise 'Wavetable period must be greater than 1' if period.is_a?(Integer) && period <= 1
@@ -43,25 +46,48 @@ module MB
       end
 
       # Slices the given 1D NArray to return a wavetable as a 2D NArray.
-      def self.make_wavetable(data, freq_range: 30..120, slices: 10, sample_rate: 48000, ratio: 1.0)
-        # TODO: maybe chop off leading and trailing silence/near-silence
-        # TODO: maybe skip or interpolate over silent slices
+      #
+      # +:metadata_out+ - An optional unfrozen Hash into which to write
+      # information about the wavetable.  Set to nil to disable printing of
+      # this info.
+      #
+      # See bin/make_wavetable.rb.
+      def self.make_wavetable(data, freq_range: 30..120, slices: 10, sample_rate: 48000, ratio: 1.0, metadata_out: {})
+        # TODO: maybe skip or interpolate over silent slices in the middle of the file
         # TODO: guard against amplifying very high frequency noises e.g. 20k+ dithering noise?
 
+        # Chop off leading and trailing silence/near-silence
+        original_length = data.length
+        data = MB::M.trim(data) { |v| v.abs < -85.db }
+
         # Estimate frequency and wave period
-        # TODO: return this extra info somehow
         freq = MB::Sound.freq_estimate(data, sample_rate: sample_rate, range: freq_range)
         period = ratio.to_f / freq
         xfade = period * 0.25
         period_samples = (period * sample_rate).round
         xfade_samples = (xfade * sample_rate).round
-        note_name = MB::Sound::Tone.new(frequency: freq).to_note.name
+        note = MB::Sound::Tone.new(frequency: freq).to_note
 
         jump = (data.length - period_samples - xfade_samples) / (slices - 1)
 
         total_samples = slices * period_samples
         buf = data.class.zeros(total_samples)
         offset = 0
+
+        metadata_out&.merge!({
+          original_length: original_length,
+          trimmed_silence: original_length - data.length,
+          frequency: freq,
+          note_name: note.name,
+          note_number: note.detuned_number,
+          ratio: ratio,
+          period: period,
+          period_samples: period_samples,
+          xfade: xfade,
+          xfade_samples: xfade_samples,
+        })
+
+        puts MB::U.highlight(metadata_out) if metadata_out
 
         for start_samples in (0...(data.length - (period_samples + xfade_samples))).step(jump) do
           start_samples = start_samples.floor
@@ -97,14 +123,14 @@ module MB
 
           # Normalize and remove DC offset
           middle -= (middle.sum / middle.length)
-          max = MB::M.max(middle.abs.max, -60.db)
+          max = MB::M.max(middle.abs.max, -80.db)
           middle = (middle / max) * -2.db
 
           # Rotate phase to put positive zero crossing at beginning/end
           zc_index = MB::M.find_zero_crossing(middle)
-          looped = MB::M.rol(middle, zc_index) if zc_index
+          middle = MB::M.rol(middle, zc_index) if zc_index
 
-          buf[offset...(offset + period_samples)] = looped
+          buf[offset...(offset + period_samples)] = middle
           offset += period_samples
         end
 
