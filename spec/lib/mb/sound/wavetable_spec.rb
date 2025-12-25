@@ -41,6 +41,45 @@ RSpec.describe(MB::Sound::Wavetable, aggregate_failures: true) do
     end
   end
 
+  pending '.make_wavetable'
+
+  describe '.blur' do
+    it 'blends adjacent rows' do
+      blurred = MB::Sound::Wavetable.blur(table, 1)
+      expect(blurred).to all_be_within(1e-6).of_array(Numo::SFloat[
+        *([[5.0 / 3.0, 0, 2, 2, 1]] * 3)
+      ])
+    end
+
+    it 'can blend partially' do
+      blurred = MB::Sound::Wavetable.blur(table, 0.5)
+      expect(blurred).to all_be_within(1e-6).of_array(Numo::SFloat[
+        [1.5, 0.5, 2.25, 2.5, 2],
+        [2.5, -0.75, 2.25, 1.25, 1.25],
+        [1, 0.25, 1.5, 2.25, -0.25]
+      ])
+    end
+
+    it 'can subtract instead of adding' do
+      blurred = MB::Sound::Wavetable.blur(table, -1)
+      expect(blurred).to all_be_within(1e-5).of_array(Numo::SFloat[
+        [-1, 1.33333, 0, 0.666667, 2.33333],
+        [1.66667, -2, 0, -2.66667, 0.333333],
+        [-2.33333, 0.666667, -2, 0, -3.66667]
+      ])
+    end
+  end
+
+  describe '.normailze' do
+    it 'removes DC from and normalizes a wavetable to +/-1 by default' do
+      expect(MB::Sound::Wavetable.normalize(Numo::SFloat[[1, 0], [1, 2]])).to all_be_within(1e-6).of_array(Numo::SFloat[[1, -1], [-1, 1]])
+    end
+
+    it 'can normalize to a different max value' do
+      expect(MB::Sound::Wavetable.normalize(Numo::SFloat[[1, 0], [1, 2]], 0.5)).to all_be_within(1e-6).of_array(Numo::SFloat[[0.5, -0.5], [-0.5, 0.5]])
+    end
+  end
+
   context 'wavetable lookup' do
     [:wavetable_lookup, :wavetable_lookup_c, :wavetable_lookup_ruby].each do |m|
       describe "##{m}" do

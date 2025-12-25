@@ -123,9 +123,9 @@ module MB
           middle[-lead_in.length...].inplace + lead_in
 
           # Normalize and remove DC offset
-          middle -= (middle.sum / middle.length)
+          middle -= middle.mean
           max = MB::M.max(middle.abs.max, -80.db)
-          middle = (middle / max) * -2.db
+          middle = middle / max
 
           # Rotate phase to put positive zero crossing at beginning/end
           zc_index = MB::M.find_zero_crossing(middle)
@@ -143,6 +143,49 @@ module MB
         fade = MB::FastSound.smootherstep_buf(Numo::SFloat.zeros(clip.length))
         fade = 1 - fade.inplace unless fade_in
         clip.inplace * fade.not_inplace!
+      end
+
+      # Creates a new wavetable that blends each row in the given +wavetable+
+      # with adjacent rows.  A strength of 1.0 means an equal blend of the
+      # three rows.  As strength approaches infinity the original row fades
+      # away.
+      def self.blur(wavetable, strength)
+        raise 'Wavetable must be a 2D Numo::NArray' unless wavetable.is_a?(Numo::NArray) && wavetable.ndim == 2
+
+        new_table = wavetable.dup
+
+        w_other = strength
+        w_self = 1.0
+        w_total = w_self + 2 * w_other.abs
+        w_self /= w_total
+        w_other /= w_total
+
+        rows = wavetable.shape[0]
+
+        for row in 0...rows
+          r1 = wavetable[row - 1, nil]
+          r2 = wavetable[row, nil]
+          r3 = wavetable[row == rows - 1 ? 0 : row + 1, nil]
+
+          new_table[row, nil] = (r1 + r3) * w_other + r2 * w_self
+        end
+
+        new_table
+      end
+
+      # Removes DC offset and rescales each row of the given +wavetable+ to the
+      # given +max+ amplitude.  Modifies the wavetable in place and returns it.
+      def self.normalize(wavetable, max = 1.0)
+        raise 'Wavetable must be a 2D Numo::NArray' unless wavetable.is_a?(Numo::NArray) && wavetable.ndim == 2
+
+        for row in 0...wavetable.shape[0]
+          data = wavetable[row, nil]
+          data -= data.mean
+          rowmax = MB::M.max(-80.db, data.abs.max)
+          wavetable[row, nil] = data * (max / rowmax)
+        end
+
+        wavetable
       end
 
       # TODO: functions to sort wavetables by brightness, etc.?
