@@ -41,7 +41,7 @@ Gem::Specification.new do |spec|
   spec.add_runtime_dependency 'midilib', '~> 4.0.0'
 
   spec.add_runtime_dependency 'mb-math', '>= 0.4.2.usegit'
-  spec.add_runtime_dependency 'mb-util', '>= 0.1.24.usegit'
+  spec.add_runtime_dependency 'mb-util', '>= 0.1.25.usegit'
   spec.add_runtime_dependency 'mb-sound-jackffi', '>= 0.1.0.usegit'
 
   spec.add_development_dependency 'rake', '~> 13.0.1'

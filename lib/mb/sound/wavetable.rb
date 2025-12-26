@@ -55,6 +55,7 @@ module MB
       def self.make_wavetable(data, freq_range: 30..120, slices: 10, sample_rate: 48000, ratio: 1.0, metadata_out: {})
         # TODO: maybe skip or interpolate over silent slices in the middle of the file
         # TODO: guard against amplifying very high frequency noises e.g. 20k+ dithering noise?
+        # TODO: generate a whole bunch of table entries and use k-means clustering to select a few?
 
         # Chop off leading and trailing silence/near-silence
         original_length = data.length
@@ -149,6 +150,9 @@ module MB
       # with adjacent rows.  A strength of 1.0 means an equal blend of the
       # three rows.  As strength approaches infinity the original row fades
       # away.
+      #
+      # You should probably use .normalize after this method to ensure the
+      # wavetable maintains a consistent peak amplitude.
       def self.blur(wavetable, strength)
         raise 'Wavetable must be a 2D Numo::NArray' unless wavetable.is_a?(Numo::NArray) && wavetable.ndim == 2
 
@@ -175,6 +179,8 @@ module MB
 
       # Removes DC offset and rescales each row of the given +wavetable+ to the
       # given +max+ amplitude.  Modifies the wavetable in place and returns it.
+      #
+      # TODO: allow normalizing RMS with waveshaping?
       def self.normalize(wavetable, max = 1.0)
         raise 'Wavetable must be a 2D Numo::NArray' unless wavetable.is_a?(Numo::NArray) && wavetable.ndim == 2
 
@@ -189,17 +195,16 @@ module MB
       end
 
       # TODO: functions to sort wavetables by brightness, etc.?
-      # TODO: functions to shuffle wavetables?
-      # TODO: generate a whole bunch of table entries and use k-means clustering to select a few?
-      # TODO: move make_wavetable.rb functionality into a function here
-      # TODO: optimized C version?
+      # TODO: functions to shuffle and stretch wavetables?
+      # TODO: functions for spectral changes to wavetables?
+      # TODO: optimized C version for cubic lookup
 
       # Performs a fractional wavetable lookup with wraparound.
       #
       # :number - A 1D Numo::NArray with the wave number (from 0..1) over time
       # :phase - A 1D Numo::NArray with the wave phase (from 0..1)over time
       #
-      # TODO: bouncing or zero-extending?
+      # TODO: bouncing or zero-extending parameter?
       #
       # See MB::Sound::GraphNode#wavetable.
       def self.wavetable_lookup(wavetable:, number:, phase:)
