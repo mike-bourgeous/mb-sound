@@ -398,9 +398,11 @@ module MB
             @bandwidth_oct = 2 * Math.sin(@omega) * Math.asinh(0.5 / @quality) / (@omega * Math.log(2.0))
 
             # "solve s/(2*q)=s*0.5*sqrt((a+1/a)*(1/l-1)+2) for l"
-            a2 = @amp * @amp
-            q2 = @quality * @quality
-            @shelf_slope = (a2 * q2 + q2) / (a2 * q2 - 2 * @amp * q2 + @amp + q2)
+            if @amp
+              a2 = @amp * @amp
+              q2 = @quality * @quality
+              @shelf_slope = (a2 * q2 + q2) / (a2 * q2 - 2 * @amp * q2 + @amp + q2)
+            end
           end
         end
 
