@@ -28,10 +28,29 @@ module MB
           @sample_rate = @filters.first.sample_rate
           @filters[1..-1].each.with_index do |f, idx|
             if f.sample_rate != @sample_rate
-              raise FilterSampleRateError, "Filter #{f} at index #{idx} has sample rate #{f.sample_rate.inspect}; expected #{@sample_rate.inspect}"
+              if f.respond_to?(:sample_rate=)
+                f.sample_rate = @sample_rate
+              else
+                raise FilterSampleRateError, "Filter #{f} at index #{idx} has sample rate #{f.sample_rate.inspect}; expected #{@sample_rate.inspect}"
+              end
             end
           end
         end
+
+        # Changes the sample rate of all filters in this chain to the given new
+        # +rate+, if they support changing sample rates.
+        def sample_rate=(rate)
+          if @filters.all?() { |f| f.respond_to?(:sample_rate=) }
+            @filters.each do |f|
+              f.sample_rate = rate
+            end
+          else
+            raise "Cannot change sample rate on one or more of #{@filters.map(&:class).uniq.join(', ')}"
+          end
+
+          @sample_rate = rate.to_f
+        end
+        alias at_rate sample_rate=
 
         # Processes +samples+ through each filter in the chain.  Returns the
         # final sample buffer.

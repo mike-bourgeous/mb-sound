@@ -24,9 +24,10 @@ module MB
           include GraphNode::SampleRateHelper
 
           class WrapperArgumentError < ArgumentError
-            def initialize(msg = nil, source: nil)
+            def initialize(msg = nil, field: nil, source: nil)
               msg ||= 'Pass a Numeric, a Numo::NArray, or a non-Array object that responds to :sample, such as Tone, Oscillator, or IOInput'
-              msg << "(got #{source})" if source
+              msg << " for #{field}" if field
+              msg << " (got #{source})" if source
               super(msg)
             end
           end
@@ -47,9 +48,9 @@ module MB
 
             @node_type_name = "Cookbook (#{@base_filter.filter_type})"
 
-            @audio = sample_or_narray(audio, si: false, unit: nil, range: -2..2)
-            @cutoff = sample_or_narray(cutoff, si: true, unit: 'Hz', range: 0..(filter.sample_rate * 0.5))
-            @quality = sample_or_narray(quality, si: false, unit: ' Q', range: 0..100)
+            @audio = sample_or_narray(audio, field: :audio, si: false, unit: nil, range: -2..2)
+            @cutoff = sample_or_narray(cutoff, field: :cutoff, si: true, unit: 'Hz', range: 0..(filter.sample_rate * 0.5))
+            @quality = sample_or_narray(quality, field: :quality, si: false, unit: ' Q', range: 0..100)
 
             @cutoff = @cutoff.or_for(nil) if @cutoff.respond_to?(:@or_for)
             @quality = @quality.or_for(nil) if @quality.respond_to?(:@or_for)
@@ -124,10 +125,10 @@ module MB
           # returns that value as a constant indefinitely.  If given a
           # Numo::NArray, returns an ArrayInput that wraps it, without looping.
           # Otherwise, raises an error.
-          def sample_or_narray(v, unit:, si:, range:)
+          def sample_or_narray(v, field:, unit:, si:, range:)
             case v
             when Array
-              raise WrapperArgumentError.new(source: v)
+              raise WrapperArgumentError.new(field: field, source: v)
 
             when Numeric
               MB::Sound::GraphNode::Constant.new(v, sample_rate: @base_filter.sample_rate, unit: unit, si: si, range: range)
@@ -143,7 +144,7 @@ module MB
                 # my sample methods to something else.
                 v.get_sampler
               else
-                raise WrapperArgumentError.new(source: v)
+                raise WrapperArgumentError.new(field: field, source: v)
               end
             end
           end
@@ -194,6 +195,21 @@ module MB
           set_parameters(@filter_type, @sample_rate, @center_frequency, db_gain: @db_gain, quality: q)
         end
 
+        # Sets the bandwidth in octaves of the filter, if this is a peaking or
+        # bandpass filter.
+        def bandwidth_oct=(oct)
+          return if @bandwidth_oct&.round(3) == oct.round(3)
+          set_parameters(@filter_type, @sample_rate, @center_frequency, db_gain: @db_gain, bandwidth_oct: oct)
+        end
+        alias width= bandwidth_oct=
+
+        # Sets the shelf slope in dB/octave of the filter, if this is a
+        # shelving filter.
+        def shelf_slope=(dboct)
+          return if @shelf_slope&.round(3) == dboct.round(3)
+          set_parameters(@filter_type, @sample_rate, @center_frequency, db_gain: @db_gain, shelf_slope: dboct)
+        end
+
         # Sets the sample rate of the filter.
         def sample_rate=(rate)
           return if @sample_rate.round(3) == rate.round(3)
@@ -226,6 +242,7 @@ module MB
           @center_frequency = f_center
           @cutoff = @center_frequency
           @db_gain = db_gain
+          @amp = 10.0 ** (db_gain / 40.0) if db_gain
 
           quality = 1e-10 if quality && quality < 1e-10
           @quality = quality
@@ -236,12 +253,15 @@ module MB
             type_id, f_samp, f_center,
             db_gain, quality, bandwidth_oct, shelf_slope
           )
+
+          calc_quality
         end
 
         # Recalculates filter coefficients based on the given filter parameters.
         def set_parameters_ruby(filter_type, f_samp, f_center, db_gain: nil, quality: nil, bandwidth_oct: nil, shelf_slope: nil)
           raise ArgumentError, "Invalid filter type #{filter_type.inspect}" unless FILTER_TYPE_IDS.include?(filter_type)
           @filter_type = filter_type
+
           @sample_rate = f_samp
           @f0_max = 0.49 * @sample_rate
           f_center = 1e-10 if f_center < 1e-10 || !f_center.finite?
@@ -252,6 +272,7 @@ module MB
 
           amp = 10.0 ** (db_gain / 40.0) if db_gain
           omega = 2.0 * Math::PI * f_center / f_samp
+          @amp = amp
           @omega = omega
 
           cosine = Math.cos(omega)
@@ -358,6 +379,28 @@ module MB
 
           else
             raise "Invalid filter type #{filter_type.inspect}"
+          end
+
+          calc_quality
+        end
+
+        # Updates @quality/@bandwidth_oct/@shelf_slope from each other
+        private def calc_quality
+          if @shelf_slope
+            # "solve s/(2*q)=s*0.5*sqrt((a+1/a)*(1/l-1)+2) for q"
+            @quality = 1.0 / Math.sqrt((@amp + 1.0 / @amp) * (1.0 / @shelf_slope - 1) + 2)
+            @bandwidth_oct = 2 * Math.sin(@omega) * Math.asinh(0.5 / @quality) / (@omega * Math.log(2.0))
+          elsif @bandwidth_oct
+            # WolframAlpha "solve s/(2*q)=s*sinh(ln(2)/2*b*o/s) for q"
+            @quality = 0.5 / Math.sinh(bandwidth_oct * @omega * Math.log(2.0) / (2 * Math.sin(@omega)))
+          elsif @quality
+            # "solve s/(2*q)=s*sinh(ln(2)/2*b*o/s) for b"
+            @bandwidth_oct = 2 * Math.sin(@omega) * Math.asinh(0.5 / @quality) / (@omega * Math.log(2.0))
+
+            # "solve s/(2*q)=s*0.5*sqrt((a+1/a)*(1/l-1)+2) for l"
+            a2 = @amp * @amp
+            q2 = @quality * @quality
+            @shelf_slope = (a2 * q2 + q2) / (a2 * q2 - 2 * @amp * q2 + @amp + q2)
           end
         end
 

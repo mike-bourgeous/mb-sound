@@ -12,6 +12,7 @@ module MB
         # Initializes a filter sum with the given filters.  All filters receive
         # the original input, and are added to produce the final output.
         def initialize(*filters)
+          filters = filters[0] if filters.length == 1 && filters[0].is_a?(Array)
           @filters = filters
 
           @sample_rate = @filters.first.sample_rate
