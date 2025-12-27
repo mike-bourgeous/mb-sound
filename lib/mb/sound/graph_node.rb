@@ -498,10 +498,16 @@ module MB
       # +:ratio+ - The increment between harmonics (1.0 for integer harmonics).
       # +:gain+ - The gain of the peaking filters.
       # +:width+ - The bandwidth of the filters in octaves.
+      #
+      # Example:
+      #     # Filter pinging bell ringing
+      #     play 0.5.hz.ramp.at(50).filter(:lowpass, cutoff: 1000, quality: 0.5).bandpass_series(440, width: 0.001, count: 20, ratio: 1.7).softclip(0.9).forever
       def bandpass_series(fundamental_hz, count: 5, ratio: 1.0, width: 0.1)
         fs = MB::Sound::Filter::FilterSum.new(
           Array.new(count) do |idx|
             freq = fundamental_hz * (1 + ratio * idx)
+            # TODO: add a bpf variant with gain
+            # TODO: support procs and nodes for variable width/ratio/gain
             MB::Sound::Filter::Cookbook.new(:bandpass, self.sample_rate, freq, bandwidth_oct: width)
           end
         )

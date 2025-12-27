@@ -534,12 +534,12 @@ RSpec.describe(MB::Sound::Filter::Cookbook, :aggregate_failures) do
       cutoffs = Numo::SFloat.zeros(100)
       samples = Numo::SFloat.zeros(100)
       qualities = Numo::SFloat.ones(100)
-      result = filter.send(process_method, samples.inplace!, cutoffs, qualities)
+      filter.send(process_method, samples.inplace!, cutoffs, qualities)
 
       expect(filter.cutoff).to eq(1e-10)
 
       cutoffs = Numo::SFloat.zeros(100).fill(100000)
-      result = filter.send(process_method, samples.inplace!, cutoffs, qualities)
+      filter.send(process_method, samples.inplace!, cutoffs, qualities)
       expect(filter.cutoff).to eq(0.49 * 48000)
     end
 

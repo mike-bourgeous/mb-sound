@@ -421,6 +421,10 @@ RSpec.describe(MB::Sound::GraphNode, aggregate_failures: true) do
     end
   end
 
+  pending '#peq'
+  pending '#peq_series'
+  pending '#bandpass_series'
+
   describe '#hilbert_iir' do
     it 'removes negative frequencies' do
       # Validation of indices for positive and negative frequencies
