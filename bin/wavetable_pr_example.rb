@@ -12,6 +12,9 @@ nzlfo = 1.hz.gauss.noise.at(100).filter(:highpass, cutoff: 0.02, quality: 0.5).f
 porta = MB::Sound.midi.frequency(0.1114).filter(:lowpass, cutoff: 2, quality: 0.5)
 
 # Synth
-graph = (porta.tone.at(1).wavetable(wavetable: {wavetable: 'sounds/drums.flac', slices: 30, ratio: 2}, number: nzlfo).forever * 0.5 + porta.tone.triangle).filter(:lowpass, cutoff: 5000, quality: 0.25).softclip
+graph = (MB::Sound.midi.gate * (porta.tone.at(1).wavetable(wavetable: {wavetable: 'sounds/drums.flac', slices: 30, ratio: 2}, number: nzlfo).forever * 0.5 + porta.tone.triangle)).filter(:lowpass, cutoff: 5000, quality: 0.25).softclip
+
+# XXX
+$wavetable_mode = :cubic
 
 MB::Sound.play graph
