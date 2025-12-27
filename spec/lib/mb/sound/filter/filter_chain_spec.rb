@@ -86,6 +86,7 @@ RSpec.describe(MB::Sound::Filter::FilterChain) do
     it 'raises an error if given filters with different sample rates' do
       a = 100.hz.at_rate(1583).lowpass
       b = 123.hz.at_rate(2802).lowpass
+      b.singleton_class.undef_method(:sample_rate=)
       expect { MB::Sound::Filter::FilterChain.new(a, b) }.to raise_error(MB::Sound::Filter::FilterChain::FilterSampleRateError, /rate.*2802.*1583/)
     end
   end

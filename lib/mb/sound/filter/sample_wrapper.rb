@@ -97,6 +97,16 @@ module MB
         end
         alias at_rate sample_rate=
 
+        # Resets the underlying filter to behave as if it has received the
+        # given +value+ for a very long time, if it supports #reset.
+        def reset(value = 0)
+          if @base_filter.respond_to?(:reset)
+            @base_filter.reset(value)
+          else
+            raise NotImplementedError, "Filter #{@base_filter} does not implement #reset"
+          end
+        end
+
         # See GraphNode#to_s
         def to_s
           "#{super} -- #{source_names.join(', ')} -- #{@base_filter}"
