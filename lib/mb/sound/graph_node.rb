@@ -453,8 +453,14 @@ module MB
           freq = freq.frequency if freq.is_a?(Tone)
           freq = freq.to_f
 
-          if gain.is_a?(Array)
+          case gain
+          when Array
             gain, bandwidth = gain
+
+          when Hash
+            bandwidth = gain[:width] || 1.0 / 3.0
+            gain = gain[:gain] || 1.0
+
           else
             bandwidth = 1.0 / 3.0
           end
@@ -466,6 +472,41 @@ module MB
         chain = MB::Sound::Filter::FilterChain.new(filters)
 
         self.filter(chain)
+      end
+
+      # Creates a harmonic series of peaking filters starting at the given
+      # +fundamental_hz+, arranged in series.
+      #
+      # +:count+ - The number of filters to create.
+      # +:ratio+ - The increment between harmonics (1.0 for integer harmonics).
+      # +:gain+ - The gain of the peaking filters.
+      # +:width+ - The bandwidth of the filters in octaves.
+      def peq_series(fundamental_hz, count: 5, ratio: 1.0, gain: 0.db, width: 0.1)
+        pairs = Array.new(count) do |idx|
+          g = gain.respond_to?(:call) ? gain.call(idx) : gain
+          w = width.respond_to?(:call) ? width.call(idx) : width
+          [fundamental_hz * (1 + ratio * idx), { gain: g, width: w }]
+        end
+
+        peq(pairs.to_h)
+      end
+
+      # Creates a harmonic series of bandpass filters starting at the given
+      # +fundamental_hz+, arranged in parallel.
+      #
+      # +:count+ - The number of filters to create.
+      # +:ratio+ - The increment between harmonics (1.0 for integer harmonics).
+      # +:gain+ - The gain of the peaking filters.
+      # +:width+ - The bandwidth of the filters in octaves.
+      def bandpass_series(fundamental_hz, count: 5, ratio: 1.0, width: 0.1)
+        fs = MB::Sound::Filter::FilterSum.new(
+          Array.new(count) do |idx|
+            freq = fundamental_hz * (1 + ratio * idx)
+            MB::Sound::Filter::Cookbook.new(:bandpass, self.sample_rate, freq, bandwidth_oct: width)
+          end
+        )
+
+        self.filter(fs)
       end
 
       # Applies an IIR phase difference network to remove negative frequencies
