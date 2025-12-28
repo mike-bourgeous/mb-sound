@@ -29,15 +29,20 @@ module MB
           # to the given +rate+.
           def sample_rate=(rate)
             @matrix.sample_rate = rate
+            self
           end
 
           def sources
             # TODO: show the matrix as the upstream node
             {}
           end
+
+          def to_s
+            "Matrix output #{@index} of #{@matrix.count}"
+          end
         end
 
-        attr_reader :outputs, :sample_rate
+        attr_reader :outputs, :sample_rate, :count
 
         def initialize(matrix:, inputs:, sample_rate:)
           matrix = Matrix[*matrix.to_a]
@@ -49,35 +54,46 @@ module MB
 
           # TODO: abstract or consolidate with the code in Tee that tracks
           # which branches have been read
-          @inputs = inputs
+          @inputs = inputs#XXX.map(&:get_sampler)
           @sampled_set = Set.new
-          @data = nil
+          @input_data = nil
+          @output_data = nil
           @sample_rate = sample_rate.to_f
 
           @outputs = Array.new(@procmatrix.output_channels) do |idx|
             MatrixOutput.new(matrix: self, index: idx)
           end.freeze
 
+          @count = @outputs.count
+
           @inputs.each do |inp|
-            inp.sample_rate = @sample_rate
+            # FIXME: ArrayInput and FFMPEGInput need sample_rate= methods
+            inp.sample_rate = @sample_rate unless inp.sample_rate == @sample_rate
           end
         end
 
         # Called by MatrixOutput#sample to update the upstream data and
         # retrieve the sample data for that output.
         def sample_internal(count, index)
-          if @sampled_set.include?(index) || @data.nil?
+          # puts "Sampling #{index} #{@inputs[index]}" # XXX
+          # XXX return @inputs[index].sample(count) # XXX .dup.tap { |buf| puts "    Got #{buf.class}/#{buf.__id__}/#{buf.length}" } # XXX
+
+          if @sampled_set.include?(index) || @input_data.nil?
+            puts "Resetting matrix at index #{index} for count #{count}"
             if @sampled_set.length != 0 && @sampled_set.length != @inputs.length
               warn "Matrix output #{index} sampled again before other outputs"
             end
 
             @sampled_set.clear
 
-            @input_data = @inputs.map { |c| c.sample(count) }
+            @input_data = @inputs.map { |c| c.sample(count).dup }
             @output_data = @procmatrix.process(@input_data)
           end
 
-          @output_data[index]
+          @sampled_set << index
+
+          puts "Sampling matrix at index #{index}/count #{count} with #{@inputs.length} inputs and #{@outputs.length} outputs" # XXX
+          @output_data[index].dup
         end
 
         # Sets the sample rate of all inputs to the matrix to the given +rate+.

@@ -40,27 +40,24 @@ module MB
             delay_end = delay_begin + delay_span
             delay_time = rand(delay_begin..delay_end)
 
+            puts "Delay: #{delay_time}" # XXX
+
             if input.is_a?(Array)
               source = input[idx]
             else
-              source = input
+              source = input.get_sampler
             end
 
-            # Delay step
-            node = source.delay(seconds: delay_time, smoothing: false, max_delay: delay_range.end)
+            wet_gain = rand > 0.5 ? 1 : -1
 
-            # Inversion step
-            node = -1 * node if rand > 0.5
-
-            node
+            # Delay and inversion step (wet gain 1 or -1)
+            source.delay(seconds: delay_time, wet: wet_gain, smoothing: true, max_delay: MB::M.max(delay_range.end, 1.0))
           end
 
           # Hadamard mixing step
           # FIXME: glitches when channel count is greater than 1
-          #matrix = MB::Sound::GraphNode::MatrixMixer.new(matrix: hadamard, inputs: nodes, sample_rate: @sample_rate)
-          #matrix.outputs
-
-          nodes # FIXME
+          matrix = MB::Sound::GraphNode::MatrixMixer.new(matrix: hadamard, inputs: nodes, sample_rate: @sample_rate)
+          matrix.outputs
         end
 
         def sources
@@ -68,18 +65,22 @@ module MB
         end
 
         def sample_rate=(rate)
+          @sample_rate = rate.to_f
+
           @diffusers.each do |stage|
             stage.each do |c|
-              c.sample_rate = rate
+              c.sample_rate = rate unless c.sample_rate == @sample_rate
             end
           end
+
+          self
         end
 
         def sample(count)
           # Just add the channels from the last diffuser for now
           @diffusers.last.map.with_index { |c, idx|
-            puts "Sampling #{c.class} at index #{idx}" # XXX
-            c.sample(count)
+            # puts "Sampling diffuser #{idx} #{c}" # XXX
+            c.sample(count) # XXX .tap { |buf| puts "    Got #{buf.class}/#{buf.__id__}/#{buf.length}" } # XXX tap
           }.sum
         end
       end
