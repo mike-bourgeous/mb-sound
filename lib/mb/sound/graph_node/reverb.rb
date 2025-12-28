@@ -15,7 +15,11 @@ module MB
           @sample_rate = sample_rate.to_f
           @wet = wet.to_f
           @dry = dry.to_f
-          @feedback_gain = 0.5 # FIXME: adjust gain or use compression or something based on feedback gain
+          @feedback_gain = 0.5
+
+          # FIXME: adjust gain or use compression or something based on feedback gain
+          # FIXME: gain based on number of stages is wrong
+          # FIXME: stupid amounts of predelay
 
           # Create diffusers with delays evenly spaced across the range
           #
@@ -23,9 +27,8 @@ module MB
           delay_span = @diffusion_range.end - @diffusion_range.begin
           last_stage = nil
           @diffusers = Array.new(@stages) do |idx|
-            delay_begin = @diffusion_range.begin + delay_span * idx
-            delay_end = delay_begin + delay_span
-            delay_range = delay_begin..delay_end
+            delay_end = @diffusion_range.begin + delay_span * (idx + 1)
+            delay_range = 0..delay_end
             last_stage = make_diffuser(
               channels: @channels,
               delay_range: delay_range,
