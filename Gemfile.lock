@@ -21,9 +21,9 @@ GIT
 
 GIT
   remote: https://github.com/mike-bourgeous/mb-util.git
-  revision: 4ea465459a246798134df064ac60296c692e3d1f
+  revision: ba6c7d6a2386d211a4cc7389905804c67af7dbc6
   specs:
-    mb-util (0.1.24.usegit)
+    mb-util (0.1.26.usegit)
 
 PATH
   remote: .
