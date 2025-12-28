@@ -533,13 +533,14 @@ module MB
       # Appends a reverb to this node.
       #
       # TODO: more documentation and examples
-      def reverb(channels: 8, stages: 4, diffusion_range: 0.0..0.01, feedback_range: 0.01..0.1, wet: 1, dry: 1)
+      def reverb(channels: 8, stages: 4, diffusion_range: 0.0..0.01, feedback_range: 0.01..0.1, feedback_gain: -6.db, wet: 1, dry: 1)
         MB::Sound::GraphNode::Reverb.new(
           upstream: self,
           diffusion_channels: channels,
           stages: stages,
           diffusion_range: diffusion_range,
           feedback_range: feedback_range,
+          feedback_gain: feedback_gain,
           sample_rate: self.sample_rate,
           wet: wet,
           dry: dry

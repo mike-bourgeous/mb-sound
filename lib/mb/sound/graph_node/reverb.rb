@@ -5,7 +5,7 @@ module MB
         include GraphNode
         include GraphNode::SampleRateHelper
 
-        def initialize(upstream:, diffusion_channels:, stages:, diffusion_range:, feedback_range:, sample_rate:, wet:, dry:)
+        def initialize(upstream:, diffusion_channels:, stages:, diffusion_range:, feedback_range:, feedback_gain:, sample_rate:, wet:, dry:)
           @upstream = upstream
           @upstream_sampler = upstream.get_sampler
           @channels = Integer(diffusion_channels)
@@ -15,11 +15,14 @@ module MB
           @sample_rate = sample_rate.to_f
           @wet = wet.to_f
           @dry = dry.to_f
-          @feedback_gain = 0.5
+          @feedback_gain = feedback_gain.to_f
 
           # FIXME: adjust gain or use compression or something based on feedback gain
           # FIXME: gain based on number of stages is wrong
           # FIXME: stupid amounts of predelay
+          # TODO: stereo or multichannel output based on channel subset mixing
+          # TODO: infinite reverb where feedback loop is normalized and
+          # feedback gain is proportional to input volume from diffusion stage
 
           # Create diffusers with delays evenly spaced across the range
           #
@@ -38,7 +41,7 @@ module MB
 
           # Normal for reflection plane for Householder matrix, making sure
           # each dimension is nonzero
-          @normal = Vector[*Array.new(@channels) { rand(0.01..1) * (rand > 0.5 ? 1 : -1) }].normalize
+          @normal = Vector[*Array.new(@channels) { |c| rand((c * 0.5 / @channels)..1) * (rand > 0.5 ? 1 : -1) }].normalize
 
           @feedback = Array.new(@channels) { Numo::SFloat.zeros(48000) }
           @feedback_network = make_fdn(@diffusers.last)
