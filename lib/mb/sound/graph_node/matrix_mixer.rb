@@ -54,7 +54,7 @@ module MB
 
           # TODO: abstract or consolidate with the code in Tee that tracks
           # which branches have been read
-          @inputs = inputs#XXX.map(&:get_sampler)
+          @inputs = inputs.map(&:get_sampler)
           @sampled_set = Set.new
           @input_data = nil
           @output_data = nil
@@ -75,11 +75,7 @@ module MB
         # Called by MatrixOutput#sample to update the upstream data and
         # retrieve the sample data for that output.
         def sample_internal(count, index)
-          # puts "Sampling #{index} #{@inputs[index]}" # XXX
-          # XXX return @inputs[index].sample(count) # XXX .dup.tap { |buf| puts "    Got #{buf.class}/#{buf.__id__}/#{buf.length}" } # XXX
-
           if @sampled_set.include?(index) || @input_data.nil?
-            puts "Resetting matrix at index #{index} for count #{count}"
             if @sampled_set.length != 0 && @sampled_set.length != @inputs.length
               warn "Matrix output #{index} sampled again before other outputs"
             end
@@ -92,7 +88,6 @@ module MB
 
           @sampled_set << index
 
-          puts "Sampling matrix at index #{index}/count #{count} with #{@inputs.length} inputs and #{@outputs.length} outputs" # XXX
           @output_data[index].dup
         end
 

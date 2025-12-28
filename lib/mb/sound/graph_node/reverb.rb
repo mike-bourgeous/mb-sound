@@ -5,20 +5,23 @@ module MB
         include GraphNode
         include GraphNode::SampleRateHelper
 
-        def initialize(upstream:, diffusion_channels:, stages:, diffusion_range:, feedback_range:, sample_rate:)
+        def initialize(upstream:, diffusion_channels:, stages:, diffusion_range:, feedback_range:, sample_rate:, wet:, dry:)
           @upstream = upstream
+          @upstream_sampler = upstream.get_sampler
           @channels = Integer(diffusion_channels)
           @stages = Integer(stages)
           @diffusion_range = diffusion_range
           @feedback_range = feedback_range
           @sample_rate = sample_rate.to_f
+          @wet = wet.to_f
+          @dry = dry.to_f
 
           # Create diffusers with delays evenly spaced across the range
           #
           # TODO: consider uneven spacing e.g. placing more near the start
           delay_span = @diffusion_range.end - @diffusion_range.begin
           last_stage = nil
-          @diffusers = Array.new(stages) do |idx|
+          @diffusers = Array.new(@stages) do |idx|
             delay_begin = @diffusion_range.begin + delay_span * idx
             delay_end = delay_begin + delay_span
             delay_range = delay_begin..delay_end
@@ -33,14 +36,12 @@ module MB
         def make_diffuser(channels:, delay_range:, input:)
           delay_span = (delay_range.end - delay_range.begin).to_f / channels
 
-          hadamard = MB::M.hadamard(channels).transpose.shuffle.transpose.shuffle
+          hadamard = MB::M.hadamard(channels) # .transpose.shuffle.transpose.shuffle
 
           nodes = Array.new(channels) do |idx|
             delay_begin = delay_range.begin + delay_span * idx
             delay_end = delay_begin + delay_span
             delay_time = rand(delay_begin..delay_end)
-
-            puts "Delay: #{delay_time}" # XXX
 
             if input.is_a?(Array)
               source = input[idx]
@@ -55,9 +56,8 @@ module MB
           end
 
           # Hadamard mixing step
-          # FIXME: glitches when channel count is greater than 1
           matrix = MB::Sound::GraphNode::MatrixMixer.new(matrix: hadamard, inputs: nodes, sample_rate: @sample_rate)
-          matrix.outputs
+          matrix.outputs.shuffle
         end
 
         def sources
@@ -78,10 +78,13 @@ module MB
 
         def sample(count)
           # Just add the channels from the last diffuser for now
-          @diffusers.last.map.with_index { |c, idx|
-            # puts "Sampling diffuser #{idx} #{c}" # XXX
-            c.sample(count) # XXX .tap { |buf| puts "    Got #{buf.class}/#{buf.__id__}/#{buf.length}" } # XXX tap
-          }.sum
+          wet = @diffusers.last.map.with_index { |c, idx|
+            c.sample(count)
+          }.sum / (@stages * @channels * @channels)
+
+          dry = @upstream_sampler.sample(count)
+
+          wet * @wet + dry * @dry
         end
       end
     end
