@@ -83,8 +83,12 @@ module MB
             @sampled_set.clear
 
             @input_data = @inputs.map { |c| c.sample(count).dup }
+            return nil if @input_data.any?(&:nil?)
+
             @output_data = @procmatrix.process(@input_data)
           end
+
+          return nil if @input_data.any?(&:nil?)
 
           @sampled_set << index
 

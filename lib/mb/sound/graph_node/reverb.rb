@@ -15,6 +15,7 @@ module MB
           @sample_rate = sample_rate.to_f
           @wet = wet.to_f
           @dry = dry.to_f
+          @feedback_gain = 0.5 # FIXME: adjust gain or use compression or something based on feedback gain
 
           # Create diffusers with delays evenly spaced across the range
           #
@@ -31,8 +32,17 @@ module MB
               input: last_stage || @upstream
             )
           end
+
+          # Normal for reflection plane for Householder matrix, making sure
+          # each dimension is nonzero
+          @normal = Vector[*Array.new(@channels) { rand(0.01..1) * (rand > 0.5 ? 1 : -1) }].normalize
+
+          @feedback = Array.new(@channels) { Numo::SFloat.zeros(48000) }
+          @feedback_network = make_fdn(@diffusers.last)
         end
 
+        # Creates and returns a single diffuser stage as an Array of GraphNodes
+        # that will delay, shuffle, and remix the input(s).
         def make_diffuser(channels:, delay_range:, input:)
           delay_span = (delay_range.end - delay_range.begin).to_f / channels
 
@@ -52,12 +62,23 @@ module MB
             wet_gain = rand > 0.5 ? 1 : -1
 
             # Delay and inversion step (wet gain 1 or -1)
-            source.delay(seconds: delay_time, wet: wet_gain, smoothing: true, max_delay: MB::M.max(delay_range.end, 1.0))
+            source.delay(seconds: delay_time, wet: wet_gain, smoothing: false, max_delay: MB::M.max(delay_range.end, 1.0))
           end
 
           # Hadamard mixing step
           matrix = MB::Sound::GraphNode::MatrixMixer.new(matrix: hadamard, inputs: nodes, sample_rate: @sample_rate)
           matrix.outputs.shuffle
+        end
+
+        # Creates the feedback delay network, except for the mixing stage
+        # (implemented in #sample).
+        def make_fdn(inputs)
+          inputs.map.with_index { |inp, idx|
+            inp
+              .proc { |v| v + @feedback[idx][0...v.length] }
+              .delay(seconds: rand(@feedback_range), smoothing: false, max_delay: MB::M.max(@feedback_range.end, 1.0))
+              .*(@feedback_gain)
+          }
         end
 
         def sources
@@ -77,14 +98,21 @@ module MB
         end
 
         def sample(count)
-          # Just add the channels from the last diffuser for now
-          wet = @diffusers.last.map.with_index { |c, idx|
-            c.sample(count)
-          }.sum / (@stages * @channels * @channels)
-
           dry = @upstream_sampler.sample(count)
 
-          wet * @wet + dry * @dry
+          fdn = @feedback_network.map { |c| c.sample(count) }
+
+          return nil if dry.nil? || fdn.any?(&:nil?)
+
+          # Householder matrix (reflection across a plane)
+          MB::M.reflect(Vector[*fdn], @normal)
+
+          fdn.each_with_index do |v, idx|
+            @feedback[idx][0...v.length] = v
+          end
+
+          diffusion_gain = @stages * @channels * @channels
+          fdn.sum * (@wet / diffusion_gain) + dry * @dry
         end
       end
     end
