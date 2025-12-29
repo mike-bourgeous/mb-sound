@@ -57,7 +57,9 @@ module MB
 
           # TODO: abstract or consolidate with the code in Tee that tracks
           # which branches have been read
-          @inputs = inputs.map(&:get_sampler)
+          @inputs = inputs.map.with_index { |c, idx|
+            c.get_sampler.named("Matrix input #{idx + 1}")
+          }
           @sampled_set = Set.new
           @input_data = nil
           @output_data = nil
@@ -76,8 +78,9 @@ module MB
         end
 
         def sources
+          # FIXME: node graph iteration is reporting possible infinite loops on large graphs
           @inputs.map.with_index { |inp, idx|
-            ["input_#{idx}", inp]
+            [:"input_#{idx + 1}", inp]
           }.to_h
         end
 

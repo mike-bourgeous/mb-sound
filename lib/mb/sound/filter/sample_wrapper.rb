@@ -25,11 +25,10 @@ module MB
         # Set +:in_place+ to false if problems occur due to in-place filter
         # processing.
         def initialize(filter, source, in_place: false)
-          @base_filter = filter
-          @source = source.get_sampler
-          @in_place = in_place
-
           @node_type_name = "SampleWrapper/#{filter.class.name.rpartition('::').last}"
+          @base_filter = filter
+          @source = source.get_sampler.named("#{@node_type_name} input")
+          @in_place = in_place
 
           if @base_filter.respond_to?(:sample_rate) && @base_filter.sample_rate != @source.sample_rate
             if @base_filter.respond_to?(:sample_rate=)

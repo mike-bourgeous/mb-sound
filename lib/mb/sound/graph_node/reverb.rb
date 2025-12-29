@@ -6,13 +6,15 @@ module MB
         include GraphNode::SampleRateHelper
 
         def initialize(upstream:, diffusion_channels:, stages:, diffusion_range:, feedback_range:, feedback_gain:, sample_rate:, wet:, dry:)
+          @sample_rate = sample_rate.to_f
           @upstream = upstream
-          @upstream_sampler = upstream.get_sampler
+          check_rate(@upstream, 'upstream')
+
+          @upstream_sampler = upstream.get_sampler.named('Reverb upstream')
           @channels = Integer(diffusion_channels)
           @stages = Integer(stages)
           @diffusion_range = diffusion_range
           @feedback_range = feedback_range
-          @sample_rate = sample_rate.to_f
           @wet = wet.to_f
           @dry = dry.to_f
           @feedback_gain = feedback_gain.to_f
@@ -62,7 +64,7 @@ module MB
             if input.is_a?(Array)
               source = input[idx]
             else
-              source = input.get_sampler
+              source = input.get_sampler.named("Reverb diffusion #{idx + 1}")
             end
 
             wet_gain = rand > 0.5 ? 1 : -1
@@ -88,7 +90,11 @@ module MB
         end
 
         def sources
-          { input: @upstream }
+          {
+            input: @upstream_sampler,
+            # FIXME: remove the feedback network from the source list by default
+            **@feedback_network.map.with_index { |v, idx| [:"channel_#{idx + 1}", v] }.to_h
+          }
         end
 
         def sample_rate=(rate)
@@ -108,6 +114,7 @@ module MB
 
           fdn = @feedback_network.map { |c| c.sample(count) }
 
+          # TODO: automatic ringdown time?
           return nil if dry.nil? || fdn.any?(&:nil?)
 
           # Householder matrix (reflection across a plane)
@@ -118,7 +125,10 @@ module MB
           end
 
           diffusion_gain = @stages * @channels * @channels
-          fdn.sum * (@wet / diffusion_gain) + dry * @dry
+
+          wet = fdn.sum * (@wet / diffusion_gain)
+
+          wet + dry * @dry
         end
       end
     end

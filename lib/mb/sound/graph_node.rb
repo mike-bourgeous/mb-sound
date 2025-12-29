@@ -921,6 +921,7 @@ module MB
             # TODO: this would all be easier if source/dest links were bidirectional
             # TODO: is 50 a reasonable number?
             if source_history[s] > (50 + source_list.length)
+              # FIXME: node graph iteration is reporting possible infinite loops on reverb which shouldn't have any loops
               warn "Possible infinite loop on #{s} (started from #{self})"
               next
             end

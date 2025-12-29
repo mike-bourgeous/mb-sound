@@ -9,6 +9,8 @@ require 'bundler/setup'
 require 'optionparser'
 require 'mb-sound'
 
+MB::U.sigquit_backtrace
+
 options = {
   channels: 4,
   stages: 4,
@@ -70,6 +72,8 @@ reverb = input.reverb(
   wet: options[:wet].db,
   dry: options[:dry].db
 ).softclip(0.9)
+
+reverb.open_graphviz unless options[:quiet]
 
 unless options[:quiet]
   MB::U.headline("Playing #{input} to #{output}")
