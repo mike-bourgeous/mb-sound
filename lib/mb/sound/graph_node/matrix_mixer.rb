@@ -44,14 +44,15 @@ module MB
         attr_reader :outputs, :sample_rate, :count
 
         # Initializes a matrix mixer with the given +:matrix+, list of
-        # +:inputs+, and +:sample_rate+.  Raises an error if the input list
+        # +:inputs+, and +:sample_rate+.  The +:matrix+ may be a Matrix, Array
+        # of Arrays, or 2D Numo::NArray.  Raises an error if the input list
         # length does not equal the number of columns in the matrix.
         def initialize(matrix:, inputs:, sample_rate:)
           matrix = Matrix[*matrix.to_a]
-          @procmatrix = ::MB::Sound::ProcessingMatrix.new(matrix, inputs: inputs.map(&:to_s))
+          @procmatrix = ::MB::Sound::ProcessingMatrix.new(matrix)
 
           unless @procmatrix.input_channels == inputs.length
-            raise "Matrix column count must equal the number of inputs (got #{matrix.length} rows and #{inputs.length} inputs)"
+            raise "Matrix column count must equal the number of inputs (got #{@procmatrix.input_channels} columns and #{inputs.length} inputs)"
           end
 
           # TODO: abstract or consolidate with the code in Tee that tracks
