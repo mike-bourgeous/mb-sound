@@ -33,8 +33,7 @@ module MB
           end
 
           def sources
-            # TODO: show the matrix as the upstream node
-            {}
+            { matrix: @matrix }
           end
 
           def to_s
@@ -44,6 +43,9 @@ module MB
 
         attr_reader :outputs, :sample_rate, :count
 
+        # Initializes a matrix mixer with the given +:matrix+, list of
+        # +:inputs+, and +:sample_rate+.  Raises an error if the input list
+        # length does not equal the number of columns in the matrix.
         def initialize(matrix:, inputs:, sample_rate:)
           matrix = Matrix[*matrix.to_a]
           @procmatrix = ::MB::Sound::ProcessingMatrix.new(matrix, inputs: inputs.map(&:to_s))
@@ -70,6 +72,12 @@ module MB
             # FIXME: ArrayInput and FFMPEGInput need sample_rate= methods
             inp.sample_rate = @sample_rate unless inp.sample_rate == @sample_rate
           end
+        end
+
+        def sources
+          @inputs.map.with_index { |inp, idx|
+            ["input_#{idx}", inp]
+          }.to_h
         end
 
         # Called by MatrixOutput#sample to update the upstream data and

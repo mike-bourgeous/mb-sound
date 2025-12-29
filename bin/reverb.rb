@@ -50,7 +50,7 @@ if infile = ARGV.shift
 end
 
 if options[:input]
-  input = MB::Sound.file_input(options[:input]).and_then(0.hz.at(0).for(10))
+  input = MB::Sound.file_input(options[:input]).and_then(0.constant.for(10))
 else
   input = MB::Sound.input
 end
