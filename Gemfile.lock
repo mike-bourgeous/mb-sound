@@ -1,7 +1,6 @@
 GIT
   remote: https://github.com/mike-bourgeous/mb-math.git
-  revision: 441d01bb1cea962e59403b1403ec3daf6708318c
-  branch: reverb
+  revision: f98318dd585adb977fbc96a71f6400a5b62dd4df
   specs:
     mb-math (0.4.3.usegit)
       bigdecimal (~> 3.1.8)
