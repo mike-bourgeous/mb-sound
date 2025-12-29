@@ -1,7 +1,6 @@
 GIT
   remote: https://github.com/mike-bourgeous/mb-math.git
-  revision: 21bb6a2c1d49380e058ab8c547833f94660e3ea7
-  branch: reverb
+  revision: f98318dd585adb977fbc96a71f6400a5b62dd4df
   specs:
     mb-math (0.4.3.usegit)
       bigdecimal (~> 3.1.8)
@@ -22,9 +21,9 @@ GIT
 
 GIT
   remote: https://github.com/mike-bourgeous/mb-util.git
-  revision: 29b40791d76fc95266fbb265f7e804f4ee0e3373
+  revision: ba6c7d6a2386d211a4cc7389905804c67af7dbc6
   specs:
-    mb-util (0.1.25.usegit)
+    mb-util (0.1.26.usegit)
 
 PATH
   remote: .
