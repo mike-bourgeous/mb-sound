@@ -43,6 +43,7 @@ require 'mb/sound'
 # - Number of repeats
 # - Stereo spread?
 
+# TODO: Use OptionParser instead
 opts = GetoptLong.new(
   [ '--help', '-h', GetoptLong::NO_ARGUMENT ],
   [ '--delay', '-d', GetoptLong::REQUIRED_ARGUMENT ],

@@ -31,6 +31,8 @@ Gem::Specification.new do |spec|
 
   spec.add_runtime_dependency 'csv', '~> 3.3', '>= 3.3.3'
   spec.add_runtime_dependency 'psych', '~> 5.2.3'
+  spec.add_runtime_dependency 'ostruct', '~> 0.6.3'
+  spec.add_runtime_dependency 'logger', '~> 1.7.0'
 
   spec.add_runtime_dependency 'cmath', '~> 1.0.0'
   spec.add_runtime_dependency 'numo-narray', '~> 0.9.2'
@@ -51,6 +53,7 @@ Gem::Specification.new do |spec|
   spec.add_development_dependency 'builder', '~> 3.2.4'
 
   # Interactive command line gems
+  spec.add_development_dependency 'irb', '~> 1.16.0'
   spec.add_development_dependency 'pry', '~> 0.14.0'
   spec.add_development_dependency 'pry-byebug', '~> 3.10.0'
   spec.add_development_dependency 'pry-doc'
@@ -58,6 +61,7 @@ Gem::Specification.new do |spec|
   # Testing gems
   spec.add_development_dependency 'rspec'
   spec.add_development_dependency 'simplecov', '~> 0.22.0'
+  spec.add_development_dependency 'benchmark', '~> 0.5.0'
 
   spec.add_development_dependency 'rake-compiler', '~> 1.1.1'
 
