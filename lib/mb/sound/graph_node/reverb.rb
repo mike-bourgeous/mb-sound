@@ -111,7 +111,7 @@ module MB
             wet_gain = rand > 0.5 ? 1 : -1
 
             # Delay and inversion step (wet gain 1 or -1)
-            source.delay(seconds: delay_time + rand(0.2..0.6).hz.lfo.at(0..0.004), wet: wet_gain, smoothing: false, max_delay: MB::M.max(delay_range.end, 1.0))
+            source.delay(seconds: delay_time, wet: wet_gain, smoothing: false, max_delay: MB::M.max(delay_range.end, 1.0))
           end
 
           # Hadamard mixing step
@@ -125,7 +125,7 @@ module MB
           inputs.map.with_index { |inp, idx|
             inp
               .proc { |v| v + @feedback[idx][0...v.length] }
-              .delay(seconds: rand(@feedback_range) + rand(0.2..0.6).hz.lfo.at(0.0..0.003), smoothing: false, max_delay: MB::M.max(@feedback_range.end, 1.0), wet: @feedback_gain)
+              .delay(seconds: rand(@feedback_range), smoothing: false, max_delay: MB::M.max(@feedback_range.end, 1.0), wet: @feedback_gain)
           }
         end
 
