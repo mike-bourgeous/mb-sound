@@ -20,9 +20,9 @@ module MB
         #
         # +:sample_rate+ - Sample rate, or nil to use the first filter's rate.
         # +:filters+ - The Array of Filters or filter-describing Hashes.
-        # +:inputs+ - An Array or Hash from filter index to named GraphNode,
-        #             Numo::NArray, or Numeric sources for dynamic control of
-        #             filter parameters.
+        # +:inputs+ - An Array with indices matching the filter list,
+        #             containing Hashes with named GraphNode, Numo::NArray, or
+        #             Numeric sources for dynamic control of filter parameters.
         def initialize(sample_rate:, filters:, inputs:)
           filters = filters[0] if filters.is_a?(Array) && filters.length == 1 && filters[0].is_a?(Array)
           inputs ||= []
@@ -39,10 +39,6 @@ module MB
 
               @filters << f.fetch(:filter)
               @inputs[idx] = f.fetch(:inputs)
-              @inputs[idx].transform_values! { |v|
-                # TODO: share sample_or_narray method from CookbookWrapper
-                v.is_a?(Numeric) ? v.constant : v
-              }
 
             else
               @filters << f
@@ -72,6 +68,12 @@ module MB
           end
 
           check_for_cycle
+
+          @inputs.map! { |inp|
+            inp.map { |k, v|
+              [k, SampleWrapper.sample_or_narray(v, field: k, unit: nil, si: nil, range: nil, sample_rate: @sample_rate)]
+            }.to_h
+          }
 
           @filters.freeze
         end
@@ -125,10 +127,24 @@ module MB
 
         # For internal use.  Processes +data+ through the filter at index
         # +idx+, sampling data from extra inputs if given.
+        #
+        # Returns nil if any of the extra inputs returned nil.
         def call_filter(idx, data)
           f = @filters[idx]
-          if inps = @inputs[idx]
-            f.dynamic_process(data, **inps.transform_values { |inp| inp.sample(data.length) })
+          if @inputs[idx]
+            inputs = @inputs[idx].transform_values { |inp| inp.sample(data.length) }
+
+            # Handle end-of-stream from inputs
+            return nil if inputs.any?(&:nil?)
+
+            # Handle short reads from inputs
+            len = [data.length, *inputs.values.map(&:length)].min
+            if len < data.length
+              data = data[0...len]
+              inputs = inputs.transform_values { |v| v.length < len ? v[0...len] : v }
+            end
+
+            f.dynamic_process(data, **inputs)
           else
             f.process(data)
           end

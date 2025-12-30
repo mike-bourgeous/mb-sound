@@ -19,7 +19,8 @@ module MB
 
         # Processes the given sequence of samples (the array index is time)
         # through all filters, adding the output of each filter at each time
-        # index.
+        # index.  Returns nil if any filters returned nil or their extra inputs
+        # returned nil.
         def process(data)
           data.not_inplace!
 
@@ -31,7 +32,9 @@ module MB
           end
 
           for idx in 0...@filters.length
-            @acc = @acc.inplace + call_filter(idx, data).not_inplace!
+            result = call_filter(idx, data).not_inplace!
+            return nil if result.nil?
+            @acc = @acc.inplace + result
           end
 
           @acc.not_inplace!

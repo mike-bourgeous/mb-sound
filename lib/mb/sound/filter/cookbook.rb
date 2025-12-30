@@ -24,18 +24,9 @@ module MB
           include GraphNode
           include GraphNode::SampleRateHelper
 
-          class WrapperArgumentError < ArgumentError
-            def initialize(msg = nil, field: nil, source: nil)
-              msg ||= 'Pass a Numeric, a Numo::NArray, or a non-Array object that responds to :sample, such as Tone, Oscillator, or IOInput'
-              msg << " for #{field}" if field
-              msg << " (got #{source})" if source
-              super(msg)
-            end
-          end
-
           # These return the most recent response, cutoff, quality, etc. from
           # the underlying filter.
-          def_delegators :@base_filter, :sample_rate, :response, :cutoff, :quality, :omega, :filter_type
+          def_delegators :@base_filter, :response, :cutoff, :quality, :omega, :filter_type
 
           attr_reader :base_filter
 
@@ -49,9 +40,14 @@ module MB
 
             @node_type_name = "Cookbook (#{@base_filter.filter_type})"
 
-            @audio = sample_or_narray(audio, field: :audio, si: false, unit: nil, range: -2..2)
-            @cutoff = sample_or_narray(cutoff, field: :cutoff, si: true, unit: 'Hz', range: 0..(filter.sample_rate * 0.5))
-            @quality = sample_or_narray(quality, field: :quality, si: false, unit: ' Q', range: 0..100)
+            @sample_rate = filter.sample_rate
+            @sample_rate ||= audio.sample_rate if audio.respond_to?(:sample_rate)
+            @sample_rate ||= cutoff.sample_rate if cutoff.respond_to?(:sample_rate)
+            @sample_rate ||= quality.sample_rate if quality.respond_to?(:sample_rate)
+
+            @audio = SampleWrapper.sample_or_narray(audio, field: :audio, si: false, unit: nil, range: -2..2, sample_rate: @sample_rate)
+            @cutoff = SampleWrapper.sample_or_narray(cutoff, field: :cutoff, si: true, unit: 'Hz', range: 0..(filter.sample_rate * 0.5), sample_rate: @sample_rate)
+            @quality = SampleWrapper.sample_or_narray(quality, field: :quality, si: false, unit: ' Q', range: 0..100, sample_rate: @sample_rate)
 
             @cutoff = @cutoff.or_for(nil) if @cutoff.respond_to?(:@or_for)
             @quality = @quality.or_for(nil) if @quality.respond_to?(:@or_for)
@@ -121,34 +117,6 @@ module MB
 
           private
 
-          # If given an object with :sample, returns the object itself.  If
-          # given a numeric value, returns an object with a :sample method that
-          # returns that value as a constant indefinitely.  If given a
-          # Numo::NArray, returns an ArrayInput that wraps it, without looping.
-          # Otherwise, raises an error.
-          def sample_or_narray(v, field:, unit:, si:, range:)
-            case v
-            when Array
-              raise WrapperArgumentError.new(field: field, source: v)
-
-            when Numeric
-              MB::Sound::GraphNode::Constant.new(v, sample_rate: @base_filter.sample_rate, unit: unit, si: si, range: range)
-
-            when Numo::NArray
-              MB::Sound::ArrayInput.new(data: [v], sample_rate: @base_filter.sample_rate)
-
-            else
-              if v.respond_to?(:sample)
-                # TODO: Might need a better way to detect sampleable audio
-                # objects, as opposed to Ruby objects with a sample method that
-                # returns a random sampling.  Or maybe I should rename all of
-                # my sample methods to something else.
-                v.get_sampler
-              else
-                raise WrapperArgumentError.new(field: field, source: v)
-              end
-            end
-          end
         end
 
         # These must match the order in `enum filter_types` in

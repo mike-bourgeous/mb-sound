@@ -1004,6 +1004,9 @@ module MB
             # TODO: is this a reasonable number?
             if source_history[s] > 50 + source_list.length
               # FIXME: node graph iteration is reporting possible infinite loops on reverb which shouldn't have any loops
+              # FIXME: only re-traverse a node if doing so would change its
+              # depth; I suspect we're doing an exponential traversal of all
+              # possible edge combinations in the reverb graph.
               warn "Possible infinite loop on #{s} (started from #{self}; seen #{source_history[s]} times of #{source_list.length})"
               next
             end

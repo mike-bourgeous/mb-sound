@@ -20,11 +20,12 @@ module MB
         end
 
         # Processes +data+ through each filter in the chain.  Returns the final
-        # sample buffer.
+        # sample buffer, or nil if any filters returned nil.
         def process(data)
           acc = call_filter(0, data)
           for idx in 1...@filters.length
             acc = call_filter(idx, acc)
+            return nil if acc.nil?
           end
           acc
         end

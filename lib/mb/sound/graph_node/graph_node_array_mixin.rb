@@ -13,6 +13,7 @@ module MB
         #
         # See MB::Sound::GraphNodeInput#initialize.
         def as_input(num_channels = 1, buffer_size: nil)
+          # TODO: support NArrays for creating an ArrayInput
           unless self.length >= 1 && self.all?(MB::Sound::GraphNode)
             raise 'All Array elements must be GraphNodes to turn them into an input'
           end
