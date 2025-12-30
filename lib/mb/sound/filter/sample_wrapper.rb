@@ -52,7 +52,7 @@ module MB
           end
 
           @inputs = inputs.map { |k, v|
-            [k, SampleWrapper.sample_or_narray(v, field: k, si: nil, unit: nil, range: nil, sample_rate: @sample_rate)]
+            [k, SampleWrapper.sample_or_narray(v, filter: @base_filter, field: k, si: nil, unit: nil, range: nil, sample_rate: @sample_rate)]
           }.to_h
 
           # TODO: detect and provide defaults for omitted inputs?
@@ -159,10 +159,25 @@ module MB
         # returns that value as a constant indefinitely.  If given a
         # Numo::NArray, returns an ArrayInput that wraps it, without looping.
         # Otherwise, raises an error.
-        def self.sample_or_narray(v, field:, unit:, si:, range:, sample_rate:)
+        def self.sample_or_narray(v, filter:, field:, sample_rate:)
           case v
           when Numeric
-            MB::Sound::GraphNode::Constant.new(v, sample_rate: sample_rate, unit: unit, si: si, range: range)
+            info = { unit: nil, si: nil, range: nil }
+
+            # Retrieve parameter info from the filter class, if available
+            if filter && filter.class.constants.include?(:DYNAMIC_INPUTS)
+              parameter = filter.class.const_get(:DYNAMIC_INPUTS)[field]
+              info = info.compact.merge(parameter) if parameter
+            end
+
+            # Call Procs for dynamic parameter attribute definitions
+            # TODO: update these if sample rates change, etc.?
+            info = info.transform_values { |v|
+              v = v.call(filter) if v.respond_to?(:call)
+              v
+            }
+
+            MB::Sound::GraphNode::Constant.new(v, sample_rate: sample_rate, **info)
 
           when Numo::NArray
             MB::Sound::ArrayInput.new(data: [v], sample_rate: sample_rate)

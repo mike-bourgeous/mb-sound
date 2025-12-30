@@ -69,9 +69,9 @@ module MB
 
           check_for_cycle
 
-          @inputs.map! { |inp|
+          @inputs.map!.with_index { |inp, idx|
             inp.map { |k, v|
-              [k, SampleWrapper.sample_or_narray(v, field: k, unit: nil, si: nil, range: nil, sample_rate: @sample_rate)]
+              [k, SampleWrapper.sample_or_narray(v, filter: @filters[idx], field: k, sample_rate: @sample_rate)]
             }.to_h
           }
 

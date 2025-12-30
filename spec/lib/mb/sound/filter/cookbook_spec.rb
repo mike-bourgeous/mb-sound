@@ -85,7 +85,7 @@ RSpec.describe(MB::Sound::Filter::Cookbook, :aggregate_failures) do
 
       expect(wrap.sources[:quality].value_string).to eq('0.7071 Q')
       expect(wrap.sources[:cutoff].value_string).to eq('1.5100kHz')
-      expect(wrap.sources[:cutoff].range).to eq(0..24000)
+      expect(wrap.sources[:cutoff].range).to eq(0..23520)
     end
 
     describe '#at_rate' do

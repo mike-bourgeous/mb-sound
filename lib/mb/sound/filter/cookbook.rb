@@ -45,9 +45,9 @@ module MB
             @sample_rate ||= cutoff.sample_rate if cutoff.respond_to?(:sample_rate)
             @sample_rate ||= quality.sample_rate if quality.respond_to?(:sample_rate)
 
-            @audio = SampleWrapper.sample_or_narray(audio, field: :audio, si: false, unit: nil, range: -2..2, sample_rate: @sample_rate)
-            @cutoff = SampleWrapper.sample_or_narray(cutoff, field: :cutoff, si: true, unit: 'Hz', range: 0..(filter.sample_rate * 0.5), sample_rate: @sample_rate)
-            @quality = SampleWrapper.sample_or_narray(quality, field: :quality, si: false, unit: ' Q', range: 0..100, sample_rate: @sample_rate)
+            @audio = SampleWrapper.sample_or_narray(audio, filter: @base_filter, field: :audio, sample_rate: @sample_rate)
+            @cutoff = SampleWrapper.sample_or_narray(cutoff, filter: @base_filter, field: :cutoff, sample_rate: @sample_rate)
+            @quality = SampleWrapper.sample_or_narray(quality, filter: @base_filter, field: :quality, sample_rate: @sample_rate)
 
             @cutoff = @cutoff.or_for(nil) if @cutoff.respond_to?(:@or_for)
             @quality = @quality.or_for(nil) if @quality.respond_to?(:@or_for)
@@ -133,6 +133,13 @@ module MB
         ].freeze
 
         FILTER_TYPE_IDS = FILTER_TYPES.map.with_index.to_h.freeze
+
+        # Information like units, SI formatting, etc. about extra parameters to
+        # #dynamic_process, used by SampleWrapper.sample_or_narray.
+        DYNAMIC_INPUTS = {
+          cutoff: { si: true, unit: 'Hz', range: ->(filter) { 0..(filter.sample_rate * 0.49) } },
+          quality: { si: false, unit: ' Q', range: 0..100 },
+        }.freeze
 
         attr_reader :filter_type, :sample_rate, :center_frequency, :omega, :db_gain
         attr_reader :cutoff, :quality, :bandwidth_oct, :shelf_slope
