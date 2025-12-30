@@ -223,7 +223,7 @@ module MB
 
         # TODO: There's got to be a way to abstract this common buffer
         # management that occurs in a lot of different classes
-        # 
+        #
         # TODO: maybe use BufferHelper
         def update_buf(type, min_length)
           length = min_length

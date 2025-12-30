@@ -3,7 +3,7 @@
 require 'bundler/setup'
 require 'benchmark'
 require 'mb-sound'
-    
+
 wt = nil
 phase = nil
 number = nil
