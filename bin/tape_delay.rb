@@ -23,6 +23,9 @@
 require 'bundler/setup'
 
 require 'mb/sound'
+require 'mb-util'
+
+MB::U.sigquit_backtrace
 
 if ARGV.include?('--help')
   MB::U.print_header_help

@@ -37,7 +37,7 @@ module MB
         # The +:inputs+ Hash gives extra nodes to sample from for extra
         # parameters to a filter's #dynamic_process method.
         def initialize(filter, source, in_place: false, inputs: {})
-          @node_type_name = "SampleWrapper/#{filter.class.name.rpartition('::').last}"
+          @node_type_name = "SampleWrapper/#{filter.class.name.rpartition('::').last}: #{filter}"
           @base_filter = filter
           @source = source.get_sampler.named("#{@node_type_name} input")
           @in_place = in_place
@@ -52,7 +52,7 @@ module MB
           end
 
           @inputs = inputs.map { |k, v|
-            [k, SampleWrapper.sample_or_narray(v, filter: @base_filter, field: k, si: nil, unit: nil, range: nil, sample_rate: @sample_rate)]
+            [k, SampleWrapper.sample_or_narray(v, filter: @base_filter, field: k, sample_rate: @sample_rate)]
           }.to_h
 
           # TODO: detect and provide defaults for omitted inputs?
@@ -81,11 +81,7 @@ module MB
           return nil if buf.nil? || buf.empty?
 
           buf.inplace! if @in_place
-          if @inputs.any?
-            @base_filter.dynamic_process(buf, **@inputs.transform_values { |v| v.sample(buf.length) })
-          else
-            buf = @base_filter.process(buf)
-          end
+          buf = SampleWrapper.call_filter(@base_filter, buf, @inputs)
           buf&.not_inplace!
         end
 
@@ -149,6 +145,11 @@ module MB
           EOF
         end
 
+        # Claim to support methods the base filter supports as well as our own.
+        def respond_to?(m)
+          super || @base_filter.respond_to?(m)
+        end
+
         # Pass other methods through to the wrapped object.
         def method_missing(m, *a)
           @base_filter.send(m, *a)
@@ -194,6 +195,32 @@ module MB
             else
               raise WrapperArgumentError.new(field: field, source: v)
             end
+          end
+        end
+
+        # Calls #process (if no inputs are given) or #dynamic_process (if
+        # there are extra inputs) on the given +filter+ with the given +data+
+        # and extra +inputs+, handling nil and short reads.
+        def self.call_filter(filter, data, inputs)
+          return nil if data.nil? || data.empty?
+
+          if inputs && inputs.any?
+            inputs = inputs.transform_values { |inp| inp.sample(data.length) }
+
+            # Handle end-of-stream from inputs
+            return nil if inputs.values.any? { |i| i.nil? || i.empty? }
+
+            # Handle short reads from inputs
+            minlen, maxlen = [data.length, *inputs.values.map(&:length)].minmax
+            if minlen != maxlen
+              data = data[0...minlen]
+              inputs = inputs.transform_values { |v| v.length != minlen ? v[0...minlen] : v }
+            end
+
+            filter.dynamic_process(data, **inputs)
+
+          else
+            filter.process(data)
           end
         end
       end

@@ -1,15 +1,17 @@
 require 'numo/pocketfft'
 
 RSpec.describe(MB::Sound::Filter::Cookbook, :aggregate_failures) do
-  describe(MB::Sound::Filter::Cookbook::CookbookWrapper) do
+  context 'when wrapped in MB::Sound::Filter::SampleWrapper' do
     it 'uses changing values and stops when inputs stop' do
       f = 500.hz.lowpass
 
-      wrapper = MB::Sound::Filter::Cookbook::CookbookWrapper.new(
-        filter: f,
-        audio: 500.hz.at(1),
-        cutoff: 1.hz.square.at(20000..500).for(1),
-        quality: 4
+      wrapper = MB::Sound::Filter::SampleWrapper.new(
+        f,
+        500.hz.at(1),
+        inputs: {
+          cutoff: 1.hz.square.at(20000..500).for(1),
+          quality: 4
+        }
       )
 
       # Verify types within the wrapper
@@ -31,11 +33,13 @@ RSpec.describe(MB::Sound::Filter::Cookbook, :aggregate_failures) do
     it 'can use an narray to control filter parameters' do
       f = 20000.hz.lowpass
       cutoff = 1.hz.square.at(20000..500).for(1).generate(48000)
-      wrapper = MB::Sound::Filter::Cookbook::CookbookWrapper.new(
-        filter: f,
-        audio: 500.hz.at(1),
-        cutoff: cutoff,
-        quality: 4
+      wrapper = MB::Sound::Filter::SampleWrapper.new(
+        f,
+        500.hz.at(1),
+        inputs: {
+          cutoff: cutoff,
+          quality: 4,
+        }
       )
 
       # Verify types within the wrapper
@@ -76,11 +80,13 @@ RSpec.describe(MB::Sound::Filter::Cookbook, :aggregate_failures) do
 
     it 'sets units on created constants' do
       f = 1510.hz.lowpass
-      wrap = MB::Sound::Filter::Cookbook::CookbookWrapper.new(
-        filter: f,
-        audio: 0,
-        cutoff: 1510,
-        quality: 0.70711
+      wrap = MB::Sound::Filter::Cookbook::SampleWrapper.new(
+        f,
+        0.constant,
+        inputs: {
+          cutoff: 1510,
+          quality: 0.70711,
+        }
       )
 
       expect(wrap.sources[:quality].value_string).to eq('0.7071 Q')
@@ -564,6 +570,7 @@ RSpec.describe(MB::Sound::Filter::Cookbook, :aggregate_failures) do
       result = filter.send(process_method, samples.inplace!, cutoff: cutoff, quality: quality)
 
       expect(filter.quality).to eq(1e-10)
+      expect(result.isfinite.all?).to eq(true)
     end
   end
 

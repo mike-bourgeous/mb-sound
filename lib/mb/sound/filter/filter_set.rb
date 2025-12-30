@@ -130,24 +130,7 @@ module MB
         #
         # Returns nil if any of the extra inputs returned nil.
         def call_filter(idx, data)
-          f = @filters[idx]
-          if @inputs[idx]
-            inputs = @inputs[idx].transform_values { |inp| inp.sample(data.length) }
-
-            # Handle end-of-stream from inputs
-            return nil if inputs.any?(&:nil?)
-
-            # Handle short reads from inputs
-            len = [data.length, *inputs.values.map(&:length)].min
-            if len < data.length
-              data = data[0...len]
-              inputs = inputs.transform_values { |v| v.length < len ? v[0...len] : v }
-            end
-
-            f.dynamic_process(data, **inputs)
-          else
-            f.process(data)
-          end
+          SampleWrapper.call_filter(@filters[idx], data, @inputs[idx])
         end
 
         # Raises an error if this filter set has a cycle or duplicated filters.

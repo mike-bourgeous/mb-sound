@@ -9,116 +9,6 @@ module MB
       # See https://shepazu.github.io/Audio-EQ-Cookbook/audio-eq-cookbook.html
       # Or see https://webaudio.github.io/Audio-EQ-Cookbook/audio-eq-cookbook.html
       class Cookbook < Biquad
-        # Wrapper around a cookbook filter that uses separate :sample or
-        # numeric sources for audio input, cutoff frequency, and filter
-        # quality.
-        #
-        # TODO: This might be mergeable with SampleWrapper or otherwise useful
-        # elsewhere, would be nice to be able to make higher-order butterworth
-        # filters or first-order filters available, for example
-        #
-        # TODO: support an audio or MIDI source for filter gain
-        # TODO: merge with SampleWrapper now that SampleWrapper supports dynamic_process
-        class CookbookWrapper
-          extend Forwardable
-          include GraphNode
-          include GraphNode::SampleRateHelper
-
-          # These return the most recent response, cutoff, quality, etc. from
-          # the underlying filter.
-          def_delegators :@base_filter, :response, :cutoff, :quality, :omega, :filter_type
-
-          attr_reader :base_filter
-
-          # Initializes a sample-chain wrapper around a cookbook filter that
-          # uses Cookbook#dynamic_process to vary the cutoff frequency
-          # and quality gradually over time.  Each parameter should have a
-          # :sample method that returns an array of audio.
-          def initialize(filter:, audio:, cutoff:, quality: 0.5 ** 0.5, in_place: false)
-            raise 'Filter must have a #dynamic_process method' unless filter.respond_to?(:dynamic_process)
-            @base_filter = filter
-
-            @node_type_name = "Cookbook (#{@base_filter.filter_type})"
-
-            @sample_rate = filter.sample_rate
-            @sample_rate ||= audio.sample_rate if audio.respond_to?(:sample_rate)
-            @sample_rate ||= cutoff.sample_rate if cutoff.respond_to?(:sample_rate)
-            @sample_rate ||= quality.sample_rate if quality.respond_to?(:sample_rate)
-
-            @audio = SampleWrapper.sample_or_narray(audio, filter: @base_filter, field: :audio, sample_rate: @sample_rate)
-            @cutoff = SampleWrapper.sample_or_narray(cutoff, filter: @base_filter, field: :cutoff, sample_rate: @sample_rate)
-            @quality = SampleWrapper.sample_or_narray(quality, filter: @base_filter, field: :quality, sample_rate: @sample_rate)
-
-            @cutoff = @cutoff.or_for(nil) if @cutoff.respond_to?(:@or_for)
-            @quality = @quality.or_for(nil) if @quality.respond_to?(:@or_for)
-
-            @in_place = in_place
-          end
-
-          # Processes +count+ samples from the audio source through the filter,
-          # using the cutoff and quality sources to control filter parameters.
-          def sample(count)
-            audio = @audio.sample(count)
-            cutoff = @cutoff.sample(count)
-            quality = @quality.sample(count)
-
-            return nil if audio.nil? || cutoff.nil? || quality.nil? || audio.empty? || cutoff.empty? || quality.empty?
-
-            audio = audio.real if audio.is_a?(Numo::SComplex) || audio.is_a?(Numo::DComplex)
-
-            min_length = [audio.length, cutoff.length, quality.length].min
-            audio = audio[0...min_length]
-            cutoff = cutoff[0...min_length]
-            quality = quality[0...min_length]
-
-            audio.inplace! if @in_place
-
-            @base_filter.dynamic_process(audio, cutoff: cutoff, quality: quality).not_inplace!
-          end
-
-          # See GraphNode#sources.
-          def sources
-            {
-              input: @audio,
-              cutoff: @cutoff,
-              quality: @quality,
-            }
-          end
-
-          # Changes the sample rate of the filter and any upstream sources.
-          def sample_rate=(new_rate)
-            super
-            @base_filter.sample_rate = new_rate
-            self
-          end
-          alias at_rate sample_rate=
-
-          # See GraphNode#to_s
-          def to_s
-            s = "#{super} -- type: #{@base_filter.filter_type} #{source_names.join(', ')}"
-            s << " gain: #{@base_filter.db_gain}dB" if @base_filter.db_gain
-            s << " slope: #{@base_filter.shelf_slope}" if @base_filter.shelf_slope
-            s
-          end
-
-          # See GraphNode#to_s_graphviz
-          def to_s_graphviz
-            s = <<~EOF
-            #{super}---------------
-            type: #{@base_filter.filter_type}
-            #{source_names.join("\n")}
-            EOF
-
-            s << "gain: #{@base_filter.db_gain}dB\n" if @base_filter.db_gain
-            s << "slope: #{@base_filter.shelf_slope}\n" if @base_filter.shelf_slope
-
-            s
-          end
-
-          private
-
-        end
-
         # These must match the order in `enum filter_types` in
         # ext/mb/fast_sound/fast_sound.c
         FILTER_TYPES = [
@@ -153,6 +43,28 @@ module MB
         def initialize(filter_type, f_samp, f_center, db_gain: nil, quality: nil, bandwidth_oct: nil, shelf_slope: nil)
           set_parameters(filter_type, f_samp, f_center, db_gain: db_gain, quality: quality, bandwidth_oct: bandwidth_oct, shelf_slope: shelf_slope)
           super(@b0, @b1, @b2, @a1, @a2, sample_rate: f_samp)
+        end
+
+        # See GraphNode#to_s
+        def to_s
+          s = "type: #{self.filter_type}"
+          s << " quality: #{self.quality}" if self.quality
+          s << " gain: #{self.db_gain}dB" if self.db_gain
+          s << " slope: #{self.shelf_slope}" if self.shelf_slope
+          s
+        end
+
+        # See GraphNode#to_s_graphviz
+        def to_s_graphviz
+          s = <<~EOF
+          type: #{self.filter_type}
+          EOF
+
+          s << "quality: #{self.quality}\n" if self.quality
+          s << "gain: #{self.db_gain}dB\n" if self.db_gain
+          s << "slope: #{self.shelf_slope}\n" if self.shelf_slope
+
+          s
         end
 
         # Sets the center/cutoff frequency of the filter.
@@ -392,6 +304,13 @@ module MB
         end
 
         def dynamic_process_c(samples, cutoff:, quality:)
+          raise 'Missing cutoff array' if cutoff.nil?
+          raise 'Missing quality array' if quality.nil?
+
+          samples = samples.real if samples.is_a?(Numo::SComplex) || samples.is_a?(Numo::DComplex)
+          cutoff = cutoff.real if cutoff.is_a?(Numo::SComplex) || cutoff.is_a?(Numo::DComplex)
+          quality = quality.real if quality.is_a?(Numo::SComplex) || quality.is_a?(Numo::DComplex)
+
           coeffs = [@omega, @b0, @b1, @b2, @a1, @a2]
           state = [@x1, @x2, @y1, @y2]
 
@@ -422,6 +341,13 @@ module MB
         end
 
         def dynamic_process_ruby_c(samples, cutoff:, quality:)
+          raise 'Missing cutoff array' if cutoff.nil?
+          raise 'Missing quality array' if quality.nil?
+
+          samples = samples.real if samples.is_a?(Numo::SComplex) || samples.is_a?(Numo::DComplex)
+          cutoff = cutoff.real if cutoff.is_a?(Numo::SComplex) || cutoff.is_a?(Numo::DComplex)
+          quality = quality.real if quality.is_a?(Numo::SComplex) || quality.is_a?(Numo::DComplex)
+
           y1 = @y1
           y2 = @y2
           x1 = @x1

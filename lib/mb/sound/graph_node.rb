@@ -110,7 +110,7 @@ module MB
       end
 
       # Creates and returns a tee branch from this node.  This is used by
-      # consumers of upstream graph nodes like Tone, CookbookWrapper, etc. to
+      # consumers of upstream graph nodes like Tone, SampleWrapper, etc. to
       # allow implicit branching of node outputs.
       #
       # If you need to call this outside of mb-sound internal code or your own
@@ -410,13 +410,13 @@ module MB
           quality = quality || 0.5 ** 0.5
           # TODO: Support graph node sources for filter gain
           f = MB::Sound::Filter::Cookbook.new(filter_or_type, sample_rate, 1, quality: 1, db_gain: gain&.to_db)
-          MB::Sound::Filter::Cookbook::CookbookWrapper.new(filter: f, audio: self, cutoff: cutoff, quality: quality)
+          MB::Sound::Filter::SampleWrapper.new(f, self, inputs: { cutoff: cutoff, quality: quality })
 
         when f.is_a?(MB::Sound::Filter::Cookbook)
           # TODO: Support graph node sources for filter gain
           raise 'Only specify gain when creating a new filter' if gain
 
-          MB::Sound::Filter::Cookbook::CookbookWrapper.new(filter: f, audio: self, cutoff: cutoff || f.cutoff, quality: quality || f.quality)
+          MB::Sound::Filter::SampleWrapper.new(f, self, inputs: { cutoff: cutoff || f.cutoff, quality: quality || f.quality })
 
         when f.respond_to?(:wrap)
           if cutoff || quality || gain
