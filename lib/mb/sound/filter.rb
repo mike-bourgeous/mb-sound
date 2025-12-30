@@ -51,7 +51,7 @@ module MB
       end
 
       # Most filters cannot contain other filters, so return false unless this
-      # is the same exact filter.  See FilterChain#has_filter?.
+      # is the same exact filter.  See FilterSet#has_filter?.
       def has_filter?(filter)
         self.equal?(filter)
       end
@@ -83,6 +83,7 @@ module MB
 end
 
 require_relative 'filter/sample_wrapper'
+require_relative 'filter/filter_set'
 require_relative 'filter/gain'
 require_relative 'filter/biquad'
 require_relative 'filter/first_order'

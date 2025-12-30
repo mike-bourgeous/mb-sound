@@ -48,7 +48,7 @@ module MB
           @stop_early = stop_early
 
           if multiplicands.is_a?(Array) && multiplicands.length == 1 && multiplicands[0].is_a?(Array)
-            multiplicands = multiplicands[0] 
+            multiplicands = multiplicands[0]
           end
 
           multiplicands.each_with_index do |m, idx|

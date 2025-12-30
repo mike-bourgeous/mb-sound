@@ -139,6 +139,7 @@ module MB
         def delay_samples=(samples)
           @delay_seconds_orig = nil
           if samples.respond_to?(:sample)
+            # TODO: use dynamic_process instead of managing the upstream source here
             samples = samples.get_sampler
             check_rate(samples, 'delay_samples')
             @delay_samples = samples
@@ -204,6 +205,9 @@ module MB
             delay_buf = chunk_delay_buf
           else
             if @delay_samples.respond_to?(:sample)
+              # TODO: maybe upstream sampling should be moved to SampleWrapper
+              # and we should use a dynamic_process method for processing with
+              # multiple inputs
               delay_buf = @delay_samples.sample(data.length)
               return nil if delay_buf.nil? # end of input
             elsif @smoothing
@@ -265,6 +269,7 @@ module MB
 
           # TODO: feedback amount from dynamic source
           # TODO: feedback in-line cookbook filter
+          # TODO: simplify this method and write a C version
           if @feedback && @feedback != 0
             if delay_buf
               ret = data.map_with_index { |v_in, idx|

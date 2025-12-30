@@ -6,11 +6,14 @@ module MB
       # Uses an MxN matrix (provided as an Array of Arrays, a Matrix, or a 2D
       # Numo::NArray) to combine N inputs to M outputs.
       class MatrixMixer
+        include MultiOutput
+
         # Represents a single output node of the matrix's N outputs.
         class MatrixOutput
           extend Forwardable
           include GraphNode
           include GraphNode::SampleRateHelper
+          include GraphNode::NodeOutput
 
           def_delegators :@matrix, :sample_rate
 

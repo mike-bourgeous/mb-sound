@@ -509,6 +509,12 @@ static struct biquad_coeffs cookbook(enum filter_types ftype, double rate, doubl
 		amp = pow(10.0, db_gain / 40.0);
 	}
 
+	// Used by bandpass filters
+	double linear_gain = 1;
+	if (!isnan(db_gain)) {
+		linear_gain = pow(10.0, db_gain / 20.0);
+	}
+
 	coeffs.omega = 2.0 * M_PI * center / rate;
 	double cosine = cos(coeffs.omega);
 	double sine = sin(coeffs.omega);
@@ -548,9 +554,9 @@ static struct biquad_coeffs cookbook(enum filter_types ftype, double rate, doubl
 			a0_inv = 1.0 / (1.0 + alpha);
 			coeffs.a1 = -2.0 * cosine * a0_inv;
 			coeffs.a2 = (1.0 - alpha) * a0_inv;
-			coeffs.b0 = alpha * a0_inv;
+			coeffs.b0 = alpha * a0_inv * linear_gain;
 			coeffs.b1 = 0;
-			coeffs.b2 = -alpha * a0_inv;
+			coeffs.b2 = -alpha * a0_inv * linear_gain;
 			break;
 
 		case FILT_NOTCH:
