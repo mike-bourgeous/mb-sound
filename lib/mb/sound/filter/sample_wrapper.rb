@@ -24,11 +24,15 @@ module MB
         #
         # Set +:in_place+ to false if problems occur due to in-place filter
         # processing.
-        def initialize(filter, source, in_place: false)
+        #
+        # The +:inputs+ Hash gives extra nodes to sample from for extra
+        # parameters to a filter's #dynamic_process method.
+        def initialize(filter, source, in_place: false, inputs: {})
           @node_type_name = "SampleWrapper/#{filter.class.name.rpartition('::').last}"
           @base_filter = filter
           @source = source.get_sampler.named("#{@node_type_name} input")
           @in_place = in_place
+          @inputs = inputs.transform_values(&:get_sampler)
 
           if @base_filter.respond_to?(:sample_rate) && @base_filter.sample_rate != @source.sample_rate
             if @base_filter.respond_to?(:sample_rate=)
@@ -36,6 +40,11 @@ module MB
             else
               raise "Filter sample rate #{@base_filter.sample_rate} differs from source sample rate #{@source.sample_rate}"
             end
+          end
+
+          # TODO: detect and provide defaults for omitted inputs?
+          unless @inputs.empty? || @base_filter.respond_to?(:dynamic_process)
+            raise 'Cannot provide extra inputs to a filter that does not respond to #dynamic_process'
           end
 
           # TODO: Maybe there's a better way to propagate default gains and durations?
@@ -59,7 +68,11 @@ module MB
           return nil if buf.nil? || buf.empty?
 
           buf.inplace! if @in_place
-          buf = @base_filter.process(buf)
+          if @inputs.any?
+            @base_filter.dynamic_process(buf, **@inputs.transform_values { |v| v.sample(buf.length) })
+          else
+            buf = @base_filter.process(buf)
+          end
           buf&.not_inplace!
         end
 
@@ -68,10 +81,11 @@ module MB
           if @base_filter.respond_to?(:sources)
             {
               input: @source,
+              **@inputs,
               **@base_filter.sources
             }
           else
-            { input: @source }
+            { input: @source, **@inputs }
           end
         end
 

@@ -18,6 +18,7 @@ module MB
         # filters or first-order filters available, for example
         #
         # TODO: support an audio or MIDI source for filter gain
+        # TODO: merge with SampleWrapper now that SampleWrapper supports dynamic_process
         class CookbookWrapper
           extend Forwardable
           include GraphNode
@@ -76,7 +77,7 @@ module MB
 
             audio.inplace! if @in_place
 
-            @base_filter.dynamic_process(audio, cutoff, quality).not_inplace!
+            @base_filter.dynamic_process(audio, cutoff: cutoff, quality: quality).not_inplace!
           end
 
           # See GraphNode#sources.
@@ -410,18 +411,18 @@ module MB
         # and quality to the values given for each sample processed.  Only
         # works with real data, not complex, and will perform best (no
         # duplication of data) with SFloat.
-        def dynamic_process(samples, cutoffs, qualities)
-          dynamic_process_c(samples, cutoffs, qualities)
+        def dynamic_process(samples, cutoff:, quality:)
+          dynamic_process_c(samples, cutoff: cutoff, quality: quality)
         end
 
-        def dynamic_process_c(samples, cutoffs, qualities)
+        def dynamic_process_c(samples, cutoff:, quality:)
           coeffs = [@omega, @b0, @b1, @b2, @a1, @a2]
           state = [@x1, @x2, @y1, @y2]
 
           result = MB::FastSound.dynamic_biquad(
             samples,
-            cutoffs,
-            qualities,
+            cutoff,
+            quality,
             FILTER_TYPE_IDS.fetch(filter_type),
             @sample_rate,
             @db_gain,
@@ -432,10 +433,10 @@ module MB
           @omega, @b0, @b1, @b2, @a1, @a2 = coeffs
           @x1, @x2, @y1, @y2 = state
 
-          @quality = qualities[-1]
+          @quality = quality[-1]
           @quality = 1e-10 if @quality < 1e-10
 
-          f0 = cutoffs[-1]
+          f0 = cutoff[-1]
           f0 = 1e-10 if f0 < 1e-10 || !f0.finite?
           f0 = @f0_max if f0 > @f0_max
           @center_frequency = f0
@@ -444,14 +445,14 @@ module MB
           result
         end
 
-        def dynamic_process_ruby_c(samples, cutoffs, qualities)
+        def dynamic_process_ruby_c(samples, cutoff:, quality:)
           y1 = @y1
           y2 = @y2
           x1 = @x1
           x2 = @x2
 
           samples.map_with_index { |x0, idx|
-            set_parameters(@filter_type, @sample_rate, cutoffs[idx], db_gain: @db_gain, quality: qualities[idx])
+            set_parameters(@filter_type, @sample_rate, cutoff[idx], db_gain: @db_gain, quality: quality[idx])
             out = MB::FastSound.biquad(@b0, @b1, @b2, @a1, @a2, x0, x1, x2, y1, y2)
             y2 = y1
             y1 = out

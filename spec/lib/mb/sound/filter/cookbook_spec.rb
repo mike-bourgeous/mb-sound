@@ -462,10 +462,10 @@ RSpec.describe(MB::Sound::Filter::Cookbook, :aggregate_failures) do
     it 'can sweep cutoff and quality' do
       filter = 100.hz.lowpass(quality: 0.7)
       samples = 1000.hz.at(1).generate(48000)
-      cutoffs = Numo::SFloat.linspace(100, 3100, 48000)
-      qualities = Numo::SFloat.linspace(5, 1, 48000)
+      cutoff = Numo::SFloat.linspace(100, 3100, 48000)
+      quality = Numo::SFloat.linspace(5, 1, 48000)
 
-      result = filter.send(process_method, samples, cutoffs, qualities)
+      result = filter.send(process_method, samples, cutoff: cutoff, quality: quality)
 
       # Ensure samples were not modified in place
       expect(result.__id__).not_to eq(samples.__id__)
@@ -488,10 +488,10 @@ RSpec.describe(MB::Sound::Filter::Cookbook, :aggregate_failures) do
     it 'can process samples in place' do
       filter = 100.hz.lowpass(quality: 0.7)
       samples = 1000.hz.at(1).generate(48000)
-      cutoffs = Numo::SFloat.linspace(100, 3100, 48000)
-      qualities = Numo::SFloat.linspace(5, 1, 48000)
+      cutoff = Numo::SFloat.linspace(100, 3100, 48000)
+      quality = Numo::SFloat.linspace(5, 1, 48000)
 
-      result = filter.send(process_method, samples.inplace!, cutoffs, qualities)
+      result = filter.send(process_method, samples.inplace!, cutoff: cutoff, quality: quality)
 
       # Ensure the samples were modified in place
       expect(result.__id__).to eq(samples.__id__)
@@ -517,10 +517,10 @@ RSpec.describe(MB::Sound::Filter::Cookbook, :aggregate_failures) do
       samp_whole = 1000.hz.at(1).generate(96000)
       samp_orig = samp_whole.dup
       samples = samp_whole[48000..-1]
-      cutoffs = Numo::SFloat.linspace(100, 3100, 96000)[48000..-1]
-      qualities = Numo::SFloat.linspace(5, 1, 96000)[48000..-1]
+      cutoff = Numo::SFloat.linspace(100, 3100, 96000)[48000..-1]
+      quality = Numo::SFloat.linspace(5, 1, 96000)[48000..-1]
 
-      result = filter.send(process_method, samples.inplace!, cutoffs, qualities)
+      result = filter.send(process_method, samples.inplace!, cutoff: cutoff, quality: quality)
 
       expect(result.__id__).to eq(samples.__id__)
       expect(samples.abs.max.round(1)).to be > 1
@@ -531,24 +531,24 @@ RSpec.describe(MB::Sound::Filter::Cookbook, :aggregate_failures) do
 
     it 'clamps frequency to valid range' do
       filter = 120.hz.lowpass
-      cutoffs = Numo::SFloat.zeros(100)
+      cutoff = Numo::SFloat.zeros(100)
       samples = Numo::SFloat.zeros(100)
-      qualities = Numo::SFloat.ones(100)
-      filter.send(process_method, samples.inplace!, cutoffs, qualities)
+      quality = Numo::SFloat.ones(100)
+      filter.send(process_method, samples.inplace!, cutoff: cutoff, quality: quality)
 
       expect(filter.cutoff).to eq(1e-10)
 
-      cutoffs = Numo::SFloat.zeros(100).fill(100000)
-      filter.send(process_method, samples.inplace!, cutoffs, qualities)
+      cutoff = Numo::SFloat.zeros(100).fill(100000)
+      filter.send(process_method, samples.inplace!, cutoff: cutoff, quality: quality)
       expect(filter.cutoff).to eq(0.49 * 48000)
     end
 
     it 'clamps quality to valid range' do
       filter = 120.hz.lowpass
-      cutoffs = Numo::SFloat.zeros(100)
+      cutoff = Numo::SFloat.zeros(100)
       samples = Numo::SFloat.zeros(100)
-      qualities = -Numo::SFloat.ones(100)
-      result = filter.send(process_method, samples.inplace!, cutoffs, qualities)
+      quality = -Numo::SFloat.ones(100)
+      result = filter.send(process_method, samples.inplace!, cutoff: cutoff, quality: quality)
 
       expect(filter.quality).to eq(1e-10)
     end

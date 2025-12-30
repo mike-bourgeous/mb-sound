@@ -204,6 +204,9 @@ module MB
             delay_buf = chunk_delay_buf
           else
             if @delay_samples.respond_to?(:sample)
+              # TODO: maybe upstream sampling should be moved to SampleWrapper
+              # and we should use a dynamic_process method for processing with
+              # multiple inputs
               delay_buf = @delay_samples.sample(data.length)
               return nil if delay_buf.nil? # end of input
             elsif @smoothing
