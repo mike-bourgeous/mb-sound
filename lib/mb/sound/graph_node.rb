@@ -484,6 +484,7 @@ module MB
       # +:gain+ - The gain of the peaking filters.
       # +:width+ - The bandwidth of the filters in octaves.
       def peq_series(fundamental_hz, count: 5, ratio: 1.0, gain: 0.db, width: 0.1)
+        # TODO: support GraphNode inputs like in #bandpass_series
         pairs = Array.new(count) do |idx|
           g = gain.respond_to?(:call) ? gain.call(idx) : gain
           w = width.respond_to?(:call) ? width.call(idx) : width
@@ -496,10 +497,14 @@ module MB
       # Creates a harmonic series of bandpass filters starting at the given
       # +fundamental_hz+, arranged in parallel.
       #
-      # +:count+ - The number of filters to create.
-      # +:ratio+ - The increment between harmonics (1.0 for integer harmonics).
-      # +:gain+ - The gain of the peaking filters.
-      # +:quality+ - The Q factor (higher is narrower; 0.001 octaves => Q~=1414; 1 octave => Q~=1.414)
+      # +fundamental_hz+ - The first filter frequency (Proc, GraphNode, or Numeric).
+      # +:count+ - The number of filters to create (Integer).
+      # +:ratio+ - The increment between harmonics (1.0 for integer harmonics)
+      #            (Proc, GraphNode, or Numeric).
+      # +:gain+ - The linear gain for the bandpass filters (Proc or Numeric).
+      # +:quality+ - The Q factor (higher is narrower; 0.001 octaves =>
+      #              Q~=1414; 1 octave => Q~=1.414) (Proc, GraphNode, or
+      #              Numeric).
       #
       # Example:
       #     # Filter pinging bell ringing
@@ -507,7 +512,7 @@ module MB
       #
       #     # MIDI controlled
       #     play (midi.env(0.0, 0.00005, 0, 0.00005) * 100).bandpass_series(midi.frequency, quality: 500, count: 16, ratio: midi.cc(1, range: 1..4)).softclip(0.9).oversample(4)
-      def bandpass_series(fundamental_hz, count: 5, ratio: 1.0, quality: 14.14)
+      def bandpass_series(fundamental_hz, count: 5, ratio: 1.0, quality: 14.14, gain: 0.db)
         fs = MB::Sound::Filter::FilterSum.new(
           Array.new(count) do |idx|
             f_hz = fundamental_hz
@@ -519,11 +524,13 @@ module MB
             q = quality
             q = q.call(idx) if q.respond_to?(:call)
 
+            g = gain
+            g = g.call(idx) if g.respond_to?(:call)
+
             freq = f_hz * (1 + r * idx)
 
             if freq.respond_to?(:sample) || q.respond_to?(:sample)
-              # TODO: add a bpf variant with gain
-              f = MB::Sound::Filter::Cookbook.new(:bandpass, self.sample_rate, 1000, quality: 1)
+              f = MB::Sound::Filter::Cookbook.new(:bandpass, self.sample_rate, 1000, quality: 1, db_gain: g.to_db)
               {
                 filter: f,
                 inputs: {
@@ -532,7 +539,7 @@ module MB
                 },
               }
             else
-              MB::Sound::Filter::Cookbook.new(:bandpass, self.sample_rate, freq, quality: q)
+              MB::Sound::Filter::Cookbook.new(:bandpass, self.sample_rate, freq, quality: q, db_gain: g.to_db)
             end
           end
         )

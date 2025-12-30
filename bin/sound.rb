@@ -13,6 +13,8 @@ require 'pry-byebug'
 
 Bundler.require
 
+MB::U.sigquit_backtrace
+
 $LOAD_PATH << File.expand_path('../lib', __dir__)
 
 require 'mb/sound'

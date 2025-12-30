@@ -233,6 +233,19 @@ RSpec.describe(MB::Sound::Filter::Cookbook, :aggregate_failures) do
 
       expect(ratios).to eq([1] * 5)
     end
+
+    it 'can apply a gain factor to the zeros' do
+      coeff = [
+        5 * 0.006050779478467919,
+        0,
+        5 * -0.006050779478467919,
+        -1.577105868361254,
+        0.9878984410430642
+      ]
+
+      result = MB::Sound::Filter::Cookbook.new(:bandpass, 48000, 5000, quality: 50, db_gain: 5.to_db)
+      expect(result.coefficients).to all_be_within(6).sigfigs.of_array(coeff)
+    end
   end
 
   context 'notch' do

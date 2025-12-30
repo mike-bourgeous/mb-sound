@@ -170,7 +170,7 @@ module MB
         attr_reader :cutoff, :quality, :bandwidth_oct, :shelf_slope
 
         # Initializes a filter based on Robert Bristow-Johnson's filter cookbook.
-        # +filter_type+ is one of :lowpass, :highpass, :bandpass (0dB peak),
+        # +filter_type+ is one of :lowpass, :highpass, :bandpass (peak at db_gain or 0dB),
         # :notch, :allpass, :peak, :lowshelf, or :highshelf.
         #
         # The +:shelf_slope+ should be 1.0 to have maximum slope without
@@ -272,6 +272,7 @@ module MB
           @db_gain = db_gain
 
           amp = 10.0 ** (db_gain / 40.0) if db_gain
+          linear_gain = db_gain&.db || 1.0
           omega = 2.0 * Math::PI * f_center / f_samp
           @amp = amp
           @omega = omega
@@ -320,9 +321,9 @@ module MB
             a0_inv = 1.0 / (1.0 + alpha)
             @a1 = -2.0 * cosine * a0_inv
             @a2 = (1.0 - alpha) * a0_inv
-            @b0 = alpha * a0_inv
+            @b0 = alpha * a0_inv * linear_gain
             @b1 = 0
-            @b2 = -alpha * a0_inv
+            @b2 = -alpha * a0_inv * linear_gain
 
           when :notch
             a0_inv = 1.0 / (1.0 + alpha)
