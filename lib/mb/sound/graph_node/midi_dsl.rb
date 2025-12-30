@@ -53,6 +53,7 @@ module MB
           # TODO: maybe cache returned values so fewer nodes are created
           # TODO: maybe a true MIDI graph that processes, delays, etc. MIDI events on the wires
           # TODO: invalidate entire cache instead of one node at a time?
+          # TODO: a node type that produces a single sample click for each keypress
         end
 
         # TODO: returns a MIDI DSL handle that filters to the given channel (by

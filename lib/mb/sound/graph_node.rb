@@ -577,6 +577,26 @@ module MB
         ).named(name).taps
       end
 
+      # Appends a reverb to this node.
+      # TODO: friendlier parameters like decay time
+      #
+      # See MB::Sound::GraphNode::Reverb#initialize for parameter descriptions.
+      # Example (bin/sound.rb):
+      #     play file_input('sounds/drums.flac').reverb
+      def reverb(channels: 8, stages: 4, diffusion_range: 0.0005..0.01, feedback_range: 0.0..0.1, feedback_gain: -6.db, wet: 1, dry: 1)
+        MB::Sound::GraphNode::Reverb.new(
+          upstream: self,
+          channels: channels,
+          stages: stages,
+          diffusion_range: diffusion_range,
+          feedback_range: feedback_range,
+          feedback_gain: feedback_gain,
+          sample_rate: self.sample_rate,
+          wet: wet,
+          dry: dry
+        )
+      end
+
       # Hard-clips the output of this node to the given min and max, one of
       # which may be nil to disable clipping in that direction.
       def clip(min, max)
@@ -949,9 +969,10 @@ module MB
           if source_history.include?(s)
             # TODO: only look at a source if all paths from it have been traveled
             # TODO: this would all be easier if source/dest links were bidirectional
-            # TODO: is 50 a reasonable number?
-            if source_history[s] > (50 + source_list.length)
-              warn "Possible infinite loop on #{s} (started from #{self})"
+            # TODO: is this a reasonable number?
+            if source_history[s] > 50 + source_list.length
+              # FIXME: node graph iteration is reporting possible infinite loops on reverb which shouldn't have any loops
+              warn "Possible infinite loop on #{s} (started from #{self}; seen #{source_history[s]} times of #{source_list.length})"
               next
             end
 
@@ -1140,3 +1161,5 @@ require_relative 'graph_node/resample'
 require_relative 'graph_node/quantize'
 require_relative 'graph_node/data_shuffler'
 require_relative 'graph_node/wavetable'
+require_relative 'graph_node/matrix_mixer'
+require_relative 'graph_node/reverb'

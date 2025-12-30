@@ -169,5 +169,7 @@ RSpec.describe(MB::Sound::Filter::Delay, :aggregate_failures) do
     end
   end
 
+  pending 'applies dry and wet gain in various modes'
+
   pending 'when feedback is nonzero'
 end

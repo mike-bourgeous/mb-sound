@@ -475,6 +475,8 @@ RSpec.describe(MB::Sound::GraphNode, aggregate_failures: true) do
   pending '#smooth'
   pending '#clip_rate'
   pending '#multitap'
+  pending '#delay'
+  pending '#reverb'
 
   describe '#coerce' do
     it 'allows signal nodes to be preceded by numeric values in multiplication' do

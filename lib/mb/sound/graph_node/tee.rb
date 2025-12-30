@@ -40,7 +40,7 @@ module MB
           include GraphNode
 
           # Values for internal use by Tee.
-          attr_reader :index, :reader
+          attr_reader :index, :reader, :tee
 
           def_delegators :@tee, :sample_rate, :sample_rate=, :reset, :sources, :original_source
           def_delegators :@reader, :count, :length
