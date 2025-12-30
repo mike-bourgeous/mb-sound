@@ -5,6 +5,8 @@ module MB
       # Geraint Luff at ADC21.  The basic algorithm is a number of
       # delay-and-mix diffusion steps followed by a feedback delay network.
       #
+      # Reference video: https://www.youtube.com/watch?v=6ZK2Goiyotk
+      #
       # See MB::Sound::GraphNode#reverb for a starting point for parameters, as
       # it's easy to make something that sounds bad.
       #
@@ -60,6 +62,10 @@ module MB
           # TODO: stereo or multichannel input
           # TODO: infinite reverb where feedback loop is normalized and
           # feedback gain is proportional to input volume from diffusion stage
+          # TODO: filters in line with feedback to create variable decay times
+          # TODO: modulate delay times for richer sound
+          # TODO: better spacing of feedback delay times to avoid flattening to
+          # an echo (might also be choice of reflection normal?)
 
           # Create diffusers with delays evenly spaced across the range
           #
@@ -89,7 +95,7 @@ module MB
         def make_diffuser(channels:, delay_range:, input:)
           delay_span = (delay_range.end - delay_range.begin).to_f / channels
 
-          hadamard = MB::M.hadamard(channels) # .transpose.shuffle.transpose.shuffle
+          hadamard = MB::M.hadamard(channels)
 
           nodes = Array.new(channels) do |idx|
             delay_begin = delay_range.begin + delay_span * idx
