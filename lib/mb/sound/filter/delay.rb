@@ -139,6 +139,7 @@ module MB
         def delay_samples=(samples)
           @delay_seconds_orig = nil
           if samples.respond_to?(:sample)
+            # TODO: use dynamic_process instead of managing the upstream source here
             samples = samples.get_sampler
             check_rate(samples, 'delay_samples')
             @delay_samples = samples
@@ -268,6 +269,7 @@ module MB
 
           # TODO: feedback amount from dynamic source
           # TODO: feedback in-line cookbook filter
+          # TODO: simplify this method and write a C version
           if @feedback && @feedback != 0
             if delay_buf
               ret = data.map_with_index { |v_in, idx|

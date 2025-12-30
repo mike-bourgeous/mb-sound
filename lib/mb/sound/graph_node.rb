@@ -513,6 +513,8 @@ module MB
       #     # MIDI controlled
       #     play (midi.env(0.0, 0.00005, 0, 0.00005) * 100).bandpass_series(midi.frequency, quality: 500, count: 16, ratio: midi.cc(1, range: 1..4)).softclip(0.9).oversample(4)
       def bandpass_series(fundamental_hz, count: 5, ratio: 1.0, quality: 14.14, gain: 0.db)
+        # TODO: figure out why lower frequencies ping softer with a single impulse
+
         fs = MB::Sound::Filter::FilterSum.new(
           Array.new(count) do |idx|
             f_hz = fundamental_hz

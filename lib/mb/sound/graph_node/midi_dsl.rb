@@ -7,6 +7,7 @@ require_relative 'midi_dsl/midi_tone'
 require_relative 'midi_dsl/midi_velocity'
 require_relative 'midi_dsl/midi_bend'
 require_relative 'midi_dsl/midi_gate'
+require_relative 'midi_dsl/midi_click'
 
 module MB
   module Sound
@@ -44,6 +45,7 @@ module MB
           @velocities = {}
           @bends = {}
           @gates = {}
+          @clicks = {}
           @reverse_cache = {}
 
           # TODO: make manager support nested managers for channel filtering
@@ -181,6 +183,15 @@ module MB
           key = [range, unit, si]
           cache(@gates, key) do
             MidiGate.new(dsl: self, range: range, unit: unit, si: si, sample_rate: 48000)
+          end
+        end
+
+        # Returns a node that outputs a single sample impulse whenever a note
+        # is pressed.  Use this for pinging filters, for example.
+        def click(range: 0..1)
+          key = [range]
+          cache(@clicks, key) do
+            MidiClick.new(dsl: self, range: range, sample_rate: 48000)
           end
         end
 
