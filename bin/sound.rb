@@ -13,6 +13,8 @@ require 'pry-byebug'
 
 Bundler.require
 
+MB::U.sigquit_backtrace
+
 $LOAD_PATH << File.expand_path('../lib', __dir__)
 
 require 'mb/sound'
@@ -66,6 +68,7 @@ show_intro
 
 Pry.config.commands.rename_command('pry-play', 'play')
 Pry.config.commands.rename_command('pry-reset', 'reset')
+Pry.config.commands.rename_command('pry-hist', 'hist')
 
 # Work around issue introduced in pry-byebug 3.10.x that breaks Pry when
 # launched from a console script like this one.

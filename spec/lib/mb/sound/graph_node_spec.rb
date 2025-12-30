@@ -403,7 +403,7 @@ RSpec.describe(MB::Sound::GraphNode, aggregate_failures: true) do
       graph = 500.hz.filter(:highpass, cutoff: MB::Sound.adsr(0.2, 0.0, 1.0, 0.75, auto_release: 0.5) * 1000 + 100, quality: MB::Sound.adsr(0.3, 0.3, 1.0, 1.0, auto_release: 0.7) * -5 + 6)
 
       # Ensure the correct types were created and stored
-      expect(graph).to be_a(MB::Sound::Filter::Cookbook::CookbookWrapper)
+      expect(graph).to be_a(MB::Sound::Filter::SampleWrapper)
       expect(graph.sources[:input].original_source).to be_a(MB::Sound::Tone)
       expect(graph.sources[:cutoff].original_source).to be_a(MB::Sound::GraphNode::Mixer)
       expect(graph.sources[:quality].original_source).to be_a(MB::Sound::GraphNode::Mixer)
@@ -420,6 +420,10 @@ RSpec.describe(MB::Sound::GraphNode, aggregate_failures: true) do
       expect(release).to be > (1.5 * sustain)
     end
   end
+
+  pending '#peq'
+  pending '#peq_series'
+  pending '#bandpass_series'
 
   describe '#hilbert_iir' do
     it 'removes negative frequencies' do

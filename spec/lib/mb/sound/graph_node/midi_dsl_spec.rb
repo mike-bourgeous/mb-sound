@@ -8,6 +8,7 @@ RSpec.describe(MB::Sound::GraphNode::MidiDsl, aggregate_failures: true) do
   let(:velocity) { midi.velocity }
   let(:env) { midi.env }
   let(:gate) { midi.gate }
+  let(:click) { midi.click }
 
   it 'can be created' do
     expect(midi).to be_a(MB::Sound::GraphNode::MidiDsl)
@@ -51,6 +52,13 @@ RSpec.describe(MB::Sound::GraphNode::MidiDsl, aggregate_failures: true) do
   it 'can create a gate node' do
     expect(gate).to be_a(MB::Sound::GraphNode::MidiDsl::MidiGate)
     expect(gate.sample(1)).to eq(Numo::SFloat[0])
+  end
+
+  it 'can create a click node' do
+    expect(click).to be_a(MB::Sound::GraphNode::MidiDsl::MidiClick)
+    expect(click.sample(1)).to eq(Numo::SFloat[0])
+    click.note_cb(127, 127, true)
+    expect(click.sample(1)).to eq(Numo::SFloat[1])
   end
 
   it 'can operate on a MIDI file' do

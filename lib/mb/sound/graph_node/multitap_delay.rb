@@ -9,6 +9,7 @@ module MB
       # Use GraphNode#multitap_delay to create a multi-tap delay in a graph.
       class MultitapDelay
         include SampleRateHelper
+        include MultiOutput
 
         # One output tap from the multitap delay.
         class DelayTap
@@ -16,6 +17,7 @@ module MB
 
           include GraphNode
           include SampleRateHelper
+          include NodeOutput
 
           # Graph nodes or numeric values that feed into this delay tap for
           # audio or delay time.
@@ -221,7 +223,7 @@ module MB
 
         # TODO: There's got to be a way to abstract this common buffer
         # management that occurs in a lot of different classes
-        # 
+        #
         # TODO: maybe use BufferHelper
         def update_buf(type, min_length)
           length = min_length

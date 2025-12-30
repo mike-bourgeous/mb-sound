@@ -110,7 +110,7 @@ module MB
       end
 
       # Creates and returns a tee branch from this node.  This is used by
-      # consumers of upstream graph nodes like Tone, CookbookWrapper, etc. to
+      # consumers of upstream graph nodes like Tone, SampleWrapper, etc. to
       # allow implicit branching of node outputs.
       #
       # If you need to call this outside of mb-sound internal code or your own
@@ -384,6 +384,8 @@ module MB
       #
       #     # High-pass filter controlled by envelopes
       #     MB::Sound.play 500.hz.ramp.filter(:highpass, frequency: adsr() * 1000 + 100, quality: adsr() * -5 + 6)
+      #
+      # TODO: support SampleWrapper inputs argument
       def filter(filter_or_type = :lowpass, cutoff: nil, quality: nil, gain: nil, in_place: false)
         f = filter_or_type
         f = f.hz if f.is_a?(Numeric)
@@ -408,13 +410,13 @@ module MB
           quality = quality || 0.5 ** 0.5
           # TODO: Support graph node sources for filter gain
           f = MB::Sound::Filter::Cookbook.new(filter_or_type, sample_rate, 1, quality: 1, db_gain: gain&.to_db)
-          MB::Sound::Filter::Cookbook::CookbookWrapper.new(filter: f, audio: self, cutoff: cutoff, quality: quality)
+          MB::Sound::Filter::SampleWrapper.new(f, self, inputs: { cutoff: cutoff, quality: quality })
 
         when f.is_a?(MB::Sound::Filter::Cookbook)
           # TODO: Support graph node sources for filter gain
           raise 'Only specify gain when creating a new filter' if gain
 
-          MB::Sound::Filter::Cookbook::CookbookWrapper.new(filter: f, audio: self, cutoff: cutoff || f.cutoff, quality: quality || f.quality)
+          MB::Sound::Filter::SampleWrapper.new(f, self, inputs: { cutoff: cutoff || f.cutoff, quality: quality || f.quality })
 
         when f.respond_to?(:wrap)
           if cutoff || quality || gain
@@ -453,8 +455,14 @@ module MB
           freq = freq.frequency if freq.is_a?(Tone)
           freq = freq.to_f
 
-          if gain.is_a?(Array)
+          case gain
+          when Array
             gain, bandwidth = gain
+
+          when Hash
+            bandwidth = gain[:width] || 1.0 / 3.0
+            gain = gain[:gain] || 1.0
+
           else
             bandwidth = 1.0 / 3.0
           end
@@ -466,6 +474,79 @@ module MB
         chain = MB::Sound::Filter::FilterChain.new(filters)
 
         self.filter(chain)
+      end
+
+      # Creates a harmonic series of peaking filters starting at the given
+      # +fundamental_hz+, arranged in series.
+      #
+      # +:count+ - The number of filters to create.
+      # +:ratio+ - The increment between harmonics (1.0 for integer harmonics).
+      # +:gain+ - The gain of the peaking filters.
+      # +:width+ - The bandwidth of the filters in octaves.
+      def peq_series(fundamental_hz, count: 5, ratio: 1.0, gain: 0.db, width: 0.1)
+        # TODO: support GraphNode inputs like in #bandpass_series
+        pairs = Array.new(count) do |idx|
+          g = gain.respond_to?(:call) ? gain.call(idx) : gain
+          w = width.respond_to?(:call) ? width.call(idx) : width
+          [fundamental_hz * (1 + ratio * idx), { gain: g, width: w }]
+        end
+
+        peq(pairs.to_h)
+      end
+
+      # Creates a harmonic series of bandpass filters starting at the given
+      # +fundamental_hz+, arranged in parallel.
+      #
+      # +fundamental_hz+ - The first filter frequency (Proc, GraphNode, or Numeric).
+      # +:count+ - The number of filters to create (Integer).
+      # +:ratio+ - The increment between harmonics (1.0 for integer harmonics)
+      #            (Proc, GraphNode, or Numeric).
+      # +:gain+ - The linear gain for the bandpass filters (Proc or Numeric).
+      # +:quality+ - The Q factor (higher is narrower; 0.001 octaves =>
+      #              Q~=1414; 1 octave => Q~=1.414) (Proc, GraphNode, or
+      #              Numeric).
+      #
+      # Example:
+      #     # Filter pinging bell ringing
+      #     play 0.5.hz.ramp.at(50).filter(:lowpass, cutoff: 1000, quality: 0.5).bandpass_series(440, quality: 1414, count: 20, ratio: 1.7).softclip(0.9).forever
+      #
+      #     # MIDI controlled
+      #     play (midi.env(0.0, 0.00005, 0, 0.00005) * 100).bandpass_series(midi.frequency, quality: 500, count: 16, ratio: midi.cc(1, range: 1..4)).softclip(0.9).oversample(4)
+      def bandpass_series(fundamental_hz, count: 5, ratio: 1.0, quality: 14.14, gain: 0.db)
+        # TODO: figure out why lower frequencies ping softer with a single impulse
+
+        fs = MB::Sound::Filter::FilterSum.new(
+          Array.new(count) do |idx|
+            f_hz = fundamental_hz
+            f_hz = f_hz.call(idx) if f_hz.respond_to?(:call)
+
+            r = ratio
+            r = r.call(idx) if r.respond_to?(:call)
+
+            q = quality
+            q = q.call(idx) if q.respond_to?(:call)
+
+            g = gain
+            g = g.call(idx) if g.respond_to?(:call)
+
+            freq = f_hz * (1 + r * idx)
+
+            if freq.respond_to?(:sample) || q.respond_to?(:sample)
+              f = MB::Sound::Filter::Cookbook.new(:bandpass, self.sample_rate, 1000, quality: 1, db_gain: g.to_db)
+              {
+                filter: f,
+                inputs: {
+                  cutoff: freq,
+                  quality: q,
+                },
+              }
+            else
+              MB::Sound::Filter::Cookbook.new(:bandpass, self.sample_rate, freq, quality: q, db_gain: g.to_db)
+            end
+          end
+        )
+
+        self.filter(fs)
       end
 
       # Applies an IIR phase difference network to remove negative frequencies
@@ -925,6 +1006,9 @@ module MB
             # TODO: is this a reasonable number?
             if source_history[s] > 50 + source_list.length
               # FIXME: node graph iteration is reporting possible infinite loops on reverb which shouldn't have any loops
+              # FIXME: only re-traverse a node if doing so would change its
+              # depth; I suspect we're doing an exponential traversal of all
+              # possible edge combinations in the reverb graph.
               warn "Possible infinite loop on #{s} (started from #{self}; seen #{source_history[s]} times of #{source_list.length})"
               next
             end
@@ -1097,6 +1181,8 @@ end
 
 require_relative 'graph_node/arithmetic_node_helper'
 require_relative 'graph_node/sample_rate_helper'
+require_relative 'graph_node/node_output'
+require_relative 'graph_node/multi_output'
 require_relative 'graph_node/graph_node_array_mixin'
 
 require_relative 'graph_node/constant'

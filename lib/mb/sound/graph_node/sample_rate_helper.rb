@@ -46,13 +46,12 @@ module MB
         def sample_rate=(new_rate)
           case new_rate
           when Rational, Integer, Float
-            raise SampleRateRangeError unless new_rate.finite? && new_rate > 0
+            raise SampleRateRangeError, "got #{new_rate.inspect}" unless new_rate.finite? && new_rate > 0
 
-            # TODO: support using rationals directly as sample rates for precise timekeeping?
             new_rate = new_rate.to_f
 
           else
-            raise SampleRateRangeError
+            raise SampleRateRangeError, "got #{new_rate.inspect}"
           end
 
           # Check support on all sources first to minimize damage done.
