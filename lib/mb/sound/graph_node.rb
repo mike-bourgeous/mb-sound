@@ -531,10 +531,12 @@ module MB
       end
 
       # Appends a reverb to this node.
+      # TODO: friendlier parameters like decay time
       #
       # See MB::Sound::GraphNode::Reverb#initialize for parameter descriptions.
-      # TODO: friendlier parameters
-      def reverb(channels: 8, stages: 4, diffusion_range: 0.0..0.01, feedback_range: 0.01..0.1, feedback_gain: -6.db, wet: 1, dry: 1)
+      # Example (bin/sound.rb):
+      #     play file_input('sounds/drums.flac').reverb
+      def reverb(channels: 8, stages: 4, diffusion_range: 0.0005..0.01, feedback_range: 0.0..0.1, feedback_gain: -6.db, wet: 1, dry: 1)
         MB::Sound::GraphNode::Reverb.new(
           upstream: self,
           diffusion_channels: channels,
