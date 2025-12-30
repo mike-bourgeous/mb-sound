@@ -1,6 +1,12 @@
 module MB
   module Sound
     module GraphNode
+      # An artificial reverberation algorithm based on a presentation by
+      # Geraint Luff at ADC21.  The basic algorithm is a number of
+      # delay-and-mix diffusion steps followed by a feedback delay network.
+      #
+      # See MB::Sound::GraphNode#reverb for a starting point for parameters, as
+      # it's easy to make something that sounds bad.
       class Reverb
         include GraphNode
         include GraphNode::SampleRateHelper
@@ -84,16 +90,16 @@ module MB
           inputs.map.with_index { |inp, idx|
             inp
               .proc { |v| v + @feedback[idx][0...v.length] }
-              .delay(seconds: rand(@feedback_range), smoothing: false, max_delay: MB::M.max(@feedback_range.end, 1.0))
-              .*(@feedback_gain)
+              .delay(seconds: rand(@feedback_range), smoothing: false, max_delay: MB::M.max(@feedback_range.end, 1.0), wet: @feedback_gain)
           }
         end
 
-        def sources
+        # Returns the input source, and if +:internal+ is true, the feedback
+        # and diffusion network.
+        def sources(internal: false)
           {
             input: @upstream_sampler,
-            # FIXME: remove the feedback network from the source list by default
-            **@feedback_network.map.with_index { |v, idx| [:"channel_#{idx + 1}", v] }.to_h
+            **(internal ? @feedback_network.map.with_index { |v, idx| [:"channel_#{idx + 1}", v] }.to_h : {})
           }
         end
 
