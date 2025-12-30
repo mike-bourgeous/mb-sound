@@ -384,6 +384,8 @@ module MB
       #
       #     # High-pass filter controlled by envelopes
       #     MB::Sound.play 500.hz.ramp.filter(:highpass, frequency: adsr() * 1000 + 100, quality: adsr() * -5 + 6)
+      #
+      # TODO: support SampleWrapper inputs argument
       def filter(filter_or_type = :lowpass, cutoff: nil, quality: nil, gain: nil, in_place: false)
         f = filter_or_type
         f = f.hz if f.is_a?(Numeric)
@@ -497,18 +499,41 @@ module MB
       # +:count+ - The number of filters to create.
       # +:ratio+ - The increment between harmonics (1.0 for integer harmonics).
       # +:gain+ - The gain of the peaking filters.
-      # +:width+ - The bandwidth of the filters in octaves.
+      # +:quality+ - The Q factor (higher is narrower; 0.001 octaves => Q~=1414; 1 octave => Q~=1.414)
       #
       # Example:
       #     # Filter pinging bell ringing
-      #     play 0.5.hz.ramp.at(50).filter(:lowpass, cutoff: 1000, quality: 0.5).bandpass_series(440, width: 0.001, count: 20, ratio: 1.7).softclip(0.9).forever
-      def bandpass_series(fundamental_hz, count: 5, ratio: 1.0, width: 0.1)
+      #     play 0.5.hz.ramp.at(50).filter(:lowpass, cutoff: 1000, quality: 0.5).bandpass_series(440, quality: 1414, count: 20, ratio: 1.7).softclip(0.9).forever
+      #
+      #     # MIDI controlled
+      #     play (midi.env(0.0, 0.00005, 0, 0.00005) * 100).bandpass_series(midi.frequency, quality: 500, count: 16, ratio: midi.cc(1, range: 1..4)).softclip(0.9).oversample(4)
+      def bandpass_series(fundamental_hz, count: 5, ratio: 1.0, quality: 14.14)
         fs = MB::Sound::Filter::FilterSum.new(
           Array.new(count) do |idx|
-            freq = fundamental_hz * (1 + ratio * idx)
-            # TODO: add a bpf variant with gain
-            # TODO: support procs and nodes for variable width/ratio/gain
-            MB::Sound::Filter::Cookbook.new(:bandpass, self.sample_rate, freq, bandwidth_oct: width)
+            f_hz = fundamental_hz
+            f_hz = f_hz.call(idx) if f_hz.respond_to?(:call)
+
+            r = ratio
+            r = r.call(idx) if r.respond_to?(:call)
+
+            q = quality
+            q = q.call(idx) if q.respond_to?(:call)
+
+            freq = f_hz * (1 + r * idx)
+
+            if freq.respond_to?(:sample) || q.respond_to?(:sample)
+              # TODO: add a bpf variant with gain
+              f = MB::Sound::Filter::Cookbook.new(:bandpass, self.sample_rate, 1000, quality: 1)
+              {
+                filter: f,
+                inputs: {
+                  cutoff: freq,
+                  quality: q,
+                },
+              }
+            else
+              MB::Sound::Filter::Cookbook.new(:bandpass, self.sample_rate, freq, quality: q)
+            end
           end
         )
 
