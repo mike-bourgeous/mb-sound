@@ -18,6 +18,8 @@ module MB
       class InputChannelSplit
         extend Forwardable
 
+        include MultiOutput
+
         # Raised when any channel's internal buffer overflows.  This would
         # happen if the downstream buffer size is significantly larger than the
         # input's buffer size, or if one channel is being read more than
@@ -32,6 +34,7 @@ module MB
           extend Forwardable
 
           include GraphNode
+          include NodeOutput
 
           def_delegators :@split, :sample_rate, :sample_rate=, :at_rate, :sources, :buffer_size
 
@@ -59,6 +62,7 @@ module MB
 
         # The channels from the InputChannelSplit (see IOSampleMixin#split).
         attr_reader :channels
+        alias outputs channels
 
         def_delegators :@source, :sample_rate, :buffer_size
 

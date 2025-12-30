@@ -23,6 +23,7 @@ module MB
       #     play d
       class Tee
         extend Forwardable
+        include MultiOutput
 
         # Raised when reading from a branch after its internal buffer
         # overflows.  This could happen if the downstream buffer size is
@@ -38,6 +39,7 @@ module MB
           extend Forwardable
 
           include GraphNode
+          include NodeOutput
 
           # Values for internal use by Tee.
           attr_reader :index, :reader, :tee
@@ -106,6 +108,7 @@ module MB
 
         # The branches from the Tee (see GraphNode#tee).
         attr_reader :branches
+        alias outputs branches
 
         def_delegators :@source, :sample_rate, :sample_rate=
 

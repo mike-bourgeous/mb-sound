@@ -9,6 +9,7 @@ module MB
       # Use GraphNode#multitap_delay to create a multi-tap delay in a graph.
       class MultitapDelay
         include SampleRateHelper
+        include MultiOutput
 
         # One output tap from the multitap delay.
         class DelayTap
@@ -16,6 +17,7 @@ module MB
 
           include GraphNode
           include SampleRateHelper
+          include NodeOutput
 
           # Graph nodes or numeric values that feed into this delay tap for
           # audio or delay time.
