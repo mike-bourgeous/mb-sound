@@ -18,10 +18,9 @@ module MB
         # MB::Sound::GraphNode#reverb for some example defaults.
         #
         # +:upstream+ - The source node to which to apply reverb.
-        # +:diffusion_channels+ - The number of parallel paths for diffusion
-        #                         and feedback.  Higher means more diffusion
-        #                         but more CPU usage.  Must be a power of two,
-        #                         with 4 to 16 being good values.
+        # +:channels+ - The number of parallel paths for diffusion and
+        #               feedback.  Higher means more diffusion but more CPU
+        #               usage.  Must be a power of two; try 4 to 16.
         # +:stages+ - The number of diffusion stages.  4 is a good default.
         # +:diffusion_range+ - The diffusion delay range in seconds.  May be a
         #                      Range or a Numeric upper bound.  0.01 (10ms) is
@@ -35,13 +34,13 @@ module MB
         #                    loop.  Must be less than 1.0 to avoid overload.
         # +:wet+ - The reverberated signal output level.  Usually 1.0.
         # +:dry+ - The original signal output level.  Usually 1.0.
-        def initialize(upstream:, diffusion_channels:, stages:, diffusion_range:, feedback_range:, feedback_gain:, sample_rate:, wet:, dry:)
+        def initialize(upstream:, channels:, stages:, diffusion_range:, feedback_range:, feedback_gain:, sample_rate:, wet:, dry:)
           @sample_rate = sample_rate.to_f
           @upstream = upstream
           check_rate(@upstream, 'upstream')
 
           @upstream_sampler = upstream.get_sampler.named('Reverb upstream')
-          @channels = Integer(diffusion_channels)
+          @channels = Integer(channels)
           @stages = Integer(stages)
 
           diffusion_range = 0..diffusion_range.to_f if diffusion_range.is_a?(Numeric)

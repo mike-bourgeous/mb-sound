@@ -539,7 +539,7 @@ module MB
       def reverb(channels: 8, stages: 4, diffusion_range: 0.0005..0.01, feedback_range: 0.0..0.1, feedback_gain: -6.db, wet: 1, dry: 1)
         MB::Sound::GraphNode::Reverb.new(
           upstream: self,
-          diffusion_channels: channels,
+          channels: channels,
           stages: stages,
           diffusion_range: diffusion_range,
           feedback_range: feedback_range,
