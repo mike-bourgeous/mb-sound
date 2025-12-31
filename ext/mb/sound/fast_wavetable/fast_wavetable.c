@@ -13,8 +13,8 @@ static VALUE fast_wavetable_module;
 static ID sym_cast;
 
 // Interpolated 2D lookup.
-// Port of Ruby outer_lookup and inner_lookup.
-static double outer_lookup(float *wavetable, size_t rows, size_t columns, double number, double phase)
+// Port of Ruby outer_linear and inner_lookup.
+static double outer_linear(float *wavetable, size_t rows, size_t columns, double number, double phase)
 {
 	double frow = (number >= 0 ? fmod(number, 1) : fmod(number, 1) + 1) * rows;
 	size_t row1 = (size_t)floor(frow) % rows;
@@ -42,7 +42,7 @@ static double outer_lookup(float *wavetable, size_t rows, size_t columns, double
 // wavetable - a 2D Numo::SFloat (TODO: other types)
 // number - a numeric from 0..1 (with wrapping)
 // phase - a numeric from 0..1 (with wrapping)
-static VALUE ruby_outer_lookup(VALUE self, VALUE wavetable, VALUE number, VALUE phase)
+static VALUE ruby_outer_linear(VALUE self, VALUE wavetable, VALUE number, VALUE phase)
 {
 	double rho = NUM2DBL(number);
 	double phi = NUM2DBL(phase);
@@ -55,7 +55,7 @@ static VALUE ruby_outer_lookup(VALUE self, VALUE wavetable, VALUE number, VALUE 
 
 	float *ptr = (float *)(nary_get_pointer_for_read(wavetable) + nary_get_offset(wavetable));
 
-	VALUE ret = DBL2NUM(outer_lookup(ptr, RNARRAY_SHAPE(wavetable)[0], RNARRAY_SHAPE(wavetable)[1], rho, phi));
+	VALUE ret = DBL2NUM(outer_linear(ptr, RNARRAY_SHAPE(wavetable)[0], RNARRAY_SHAPE(wavetable)[1], rho, phi));
 	RB_GC_GUARD(wavetable);
 	return ret;
 }
@@ -93,7 +93,7 @@ static VALUE ruby_wavetable_lookup(VALUE self, VALUE wavetable, VALUE number, VA
 	size_t rows = RNARRAY_SHAPE(wavetable)[0];
 	size_t cols = RNARRAY_SHAPE(wavetable)[1];
 	for (size_t i = 0; i < length; i++) {
-		phi_ptr[i] = outer_lookup(table_ptr, rows, cols, rho_ptr[i], phi_ptr[i]);
+		phi_ptr[i] = outer_linear(table_ptr, rows, cols, rho_ptr[i], phi_ptr[i]);
 	}
 
 	RB_GC_GUARD(number);
@@ -109,7 +109,7 @@ void Init_fast_wavetable(void)
 	VALUE sound = rb_define_module_under(mb, "Sound");
 	fast_wavetable_module = rb_define_module_under(sound, "FastWavetable");
 
-	rb_define_module_function(fast_wavetable_module, "outer_lookup", ruby_outer_lookup, 3);
+	rb_define_module_function(fast_wavetable_module, "outer_linear", ruby_outer_linear, 3);
 	rb_define_module_function(fast_wavetable_module, "wavetable_lookup", ruby_wavetable_lookup, 3);
 
 	sym_cast = rb_intern("cast");

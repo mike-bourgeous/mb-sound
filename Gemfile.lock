@@ -1,8 +1,8 @@
 GIT
   remote: https://github.com/mike-bourgeous/mb-math.git
-  revision: f98318dd585adb977fbc96a71f6400a5b62dd4df
+  revision: c353d0939e28b8bb289409def6a0d4c0f24a1c67
   specs:
-    mb-math (0.4.3.usegit)
+    mb-math (0.4.4.1.usegit)
       bigdecimal (~> 3.1.8)
       cmath (~> 1.0.0)
       matrix (~> 0.4.2)
@@ -32,7 +32,7 @@ PATH
       cmath (~> 1.0.0)
       csv (~> 3.3, >= 3.3.3)
       logger (~> 1.7.0)
-      mb-math (>= 0.4.3.usegit)
+      mb-math (>= 0.4.4.1.usegit)
       mb-sound-jackffi (>= 0.1.0.usegit)
       mb-util (>= 0.1.26.usegit)
       midi-nibbler (~> 0.2.4)

@@ -64,7 +64,8 @@ module MB
           rho = MB::M.zpad(rho, count) if rho.length < count
           phi = MB::M.zpad(phi, count) if phi.length < count
 
-          ::MB::Sound::Wavetable.wavetable_lookup(wavetable: @table, number: rho, phase: phi)
+          # TODO: parameters for lookup mode and wrapping mode
+          ::MB::Sound::Wavetable.wavetable_lookup(wavetable: @table, number: rho, phase: phi, lookup: :linear, wrap: :wrap)
         end
       end
     end
