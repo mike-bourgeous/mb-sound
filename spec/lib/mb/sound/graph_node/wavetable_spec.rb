@@ -58,4 +58,33 @@ RSpec.describe(MB::Sound::GraphNode::Wavetable) do
       )
     end
   end
+
+  describe '#wrap=' do
+    let(:phase) { MB::Sound::ArrayInput.new(data: [ Numo::SFloat[0, 1.0 / 4.0, 1, 5.0 / 4.0, -1.0 / 4.0] ]) }
+    let(:table) { Numo::SFloat[[1, -2, 3, -4]] }
+
+    it 'can change the wrapping mode to :wrap' do
+      expect(phase.wavetable(wavetable: table, number: 0, wrap: :wrap).sample(phase.length)).to all_be_within(1e-6).of_array(
+        Numo::SFloat[1, -2, 1, -2, -4]
+      )
+    end
+
+    it 'can change the wrapping mode to :bounce' do
+      expect(phase.wavetable(wavetable: table, number: 0, wrap: :bounce).sample(phase.length)).to all_be_within(1e-6).of_array(
+        Numo::SFloat[1, -2, 3, -2, -2]
+      )
+    end
+
+    it 'can change the wrapping mode to :clamp' do
+      expect(phase.wavetable(wavetable: table, number: 0, wrap: :clamp).sample(phase.length)).to all_be_within(1e-6).of_array(
+        Numo::SFloat[1, -2, -4, -4, 1]
+      )
+    end
+
+    it 'can change the wrapping mode to :zero' do
+      expect(phase.wavetable(wavetable: table, number: 0, wrap: :zero).sample(phase.length)).to all_be_within(1e-6).of_array(
+        Numo::SFloat[1, -2, 0, 0, 0]
+      )
+    end
+  end
 end

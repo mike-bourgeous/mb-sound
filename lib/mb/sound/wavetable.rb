@@ -208,31 +208,36 @@ module MB
       # TODO: bouncing or zero-extending parameter?
       #
       # See MB::Sound::GraphNode#wavetable.
-      def self.wavetable_lookup(wavetable:, number:, phase:, lookup: :cubic, wrap: :wrap)
+      def self.wavetable_lookup(wavetable:, number:, phase:, lookup:, wrap:)
         #wavetable_lookup_c(wavetable: wavetable, number: number, phase: phase, lookup: lookup, wrap: wrap)
         wavetable_lookup_ruby(wavetable: wavetable, number: number, phase: phase, lookup: lookup, wrap: wrap)
       end
 
       # Ruby implementation of .wavetable_lookup.
-      def self.wavetable_lookup_ruby(wavetable:, number:, phase:, lookup: :cubic, wrap: :wrap)
+      def self.wavetable_lookup_ruby(wavetable:, number:, phase:, lookup:, wrap:)
         raise 'Number and phase must be the same size array' unless number.length == phase.length
 
-        if lookup == :cubic
+        case lookup
+        when :cubic
           number.map_with_index do |num, idx|
             phi = phase[idx]
-            outer_cubic_ruby(wavetable: wavetable, number: num, phase: phi, wrap: :wrap)
+            outer_cubic_ruby(wavetable: wavetable, number: num, phase: phi, wrap: wrap)
           end
+
+        when :linear
+          number.map_with_index do |num, idx|
+            phi = phase[idx]
+            outer_linear_ruby(wavetable: wavetable, number: num, phase: phi, wrap: wrap)
+          end
+
         else
-          number.map_with_index do |num, idx|
-            phi = phase[idx]
-            outer_linear_ruby(wavetable: wavetable, number: num, phase: phi, wrap: :wrap)
-          end
+          raise ArgumentError, "Invalid wavetable lookup mode: #{lookup.inspect}"
         end
       end
 
       # C extension implementation of .wavetable_lookup.
       def self.wavetable_lookup_c(wavetable:, number:, phase:, lookup:, wrap:)
-        MB::Sound::FastWavetable.wavetable_lookup(wavetable, number, phase) # FIXME TODO wrap
+        MB::Sound::FastWavetable.wavetable_lookup(wavetable, number, phase, lookup, wrap)
       end
 
       # Interpolates waves and samples from the wavetable.  See also
@@ -247,9 +252,6 @@ module MB
       # Uses cubic interpolation to blend across samples and waves in the given
       # +:wavetable+, as opposed to linear interpolation used by
       # #outer_linear_ruby.
-      #
-      # TODO: cubic across waves; currently linear; probably requires 16
-      # lookups instead of linear's 4
       def self.outer_cubic_ruby(wavetable:, number:, phase:, wrap:)
         rows = wavetable.shape[0].to_f
         cols = wavetable.shape[1].to_f
@@ -266,6 +268,7 @@ module MB
         vtop = MB::M.cubic_lookup(wavetable[row1, nil], fcol, mode: wrap)
         vbot = MB::M.cubic_lookup(wavetable[row2, nil], fcol, mode: wrap)
 
+        # TODO: smoothstep between waves?
         vbot * rowratio + vtop * (1.0 - rowratio)
       end
 
@@ -296,12 +299,13 @@ module MB
         valtop = val1r * colratio + val1l * (1.0 - colratio)
         valbot = val2r * colratio + val2l * (1.0 - colratio)
 
+        # TODO: smoothstep between waves?
         valbot * rowratio + valtop * (1.0 - rowratio)
       end
 
       # C extension implementation of .outer_linear.
       def self.outer_linear_c(wavetable:, number:, phase:, wrap:)
-        MB::Sound::FastWavetable.outer_linear(wavetable, number, phase) # TODO: wrap
+        MB::Sound::FastWavetable.outer_linear(wavetable, number, phase, wrap) # TODO: wrap
       end
     end
   end

@@ -686,12 +686,12 @@ module MB
       #
       # +:wavetable+ - A 2D NArray to use as the wavetable.
       # +:number+ - A GraphNode or Numeric to control wave number.
-      def wavetable(wavetable:, number:)
+      def wavetable(wavetable:, number:, lookup: :cubic, wrap: :wrap)
         number = number.constant if number.is_a?(Numeric)
         phase = self
         phase = self.or_at(0..1) if self.respond_to?(:or_at)
         number = number.or_at(0..1) if number.respond_to?(:or_at)
-        Wavetable.new(wavetable: wavetable, number: number, phase: phase, sample_rate: 48000)
+        Wavetable.new(wavetable: wavetable, number: number, phase: phase, lookup: lookup, wrap: wrap, sample_rate: 48000)
       end
 
       # Calls the given block with each sample buffer whenever #sample is

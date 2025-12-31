@@ -6,6 +6,7 @@ module MB
       include GraphNode::IOSampleMixin
 
       attr_reader :channels, :frames, :sample_rate, :offset, :remaining, :buffer_size, :repeat, :duration
+      alias length frames
 
       # Initializes an audio stream that returns slices from the given +data+ (an
       # Array of Arrays or Numo::NArrays, one for each channel).  If the lengths
