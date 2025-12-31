@@ -267,7 +267,7 @@ module MB
 
         frow = (number * rows) % rows
         row1 = frow.floor
-        row2 = frow.ceil
+        row2 = row1 + 1
         row1 %= rows
         row2 %= rows
         rowratio = frow - row1
@@ -288,16 +288,14 @@ module MB
 
         frow = (number * wave_count) % wave_count
         row1 = frow.floor
-        row2 = frow.ceil
+        row2 = row1 + 1
         row1 %= wave_count
         row2 %= wave_count
         rowratio = frow - row1
 
-        fcol = (phase % 1.0) * sample_count
+        fcol = phase * sample_count
         col1 = fcol.floor
-        col2 = fcol.ceil
-        col1 %= sample_count
-        col2 %= sample_count
+        col2 = col1 + 1
         colratio = fcol - col1
 
         val1l = MB::M.fetch_oob(wavetable[row1, nil], col1, mode: wrap)
