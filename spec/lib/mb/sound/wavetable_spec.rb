@@ -212,6 +212,53 @@ RSpec.describe(MB::Sound::Wavetable, aggregate_failures: true) do
       end
     end
 
+    shared_examples_for 'cubic lookup' do |m|
+      # Values computed manually using previously tested cubic interpolation function
+      it 'can interpolate between columns' do
+        expect(MB::Sound::Wavetable.send(m, wavetable: table, number: 0, phase: 0.1, wrap: :wrap).round(6)).to eq(1.1875)
+        expect(MB::Sound::Wavetable.send(m, wavetable: table, number: 1.0 / 3.0, phase: 0.1, wrap: :wrap).round(6)).to eq(0.8125)
+      end
+
+      it 'can interpolate between rows and columns' do
+        expect(MB::Sound::Wavetable.send(m, wavetable: table, number: 1.0 / 6.0, phase: 0.7, wrap: :wrap).round(6)).to eq(2.4375)
+        expect(MB::Sound::Wavetable.send(m, wavetable: table, number: 3.0 / 6.0, phase: 0.3, wrap: :wrap).round(6)).to eq(0.09375)
+      end
+
+      it 'can wrap between columns with :wrap' do
+        expect(MB::Sound::Wavetable.send(m, wavetable: table, number: 0, phase: -0.3, wrap: :wrap).round(6)).to eq(4.8125)
+        expect(MB::Sound::Wavetable.send(m, wavetable: table, number: 0, phase: -0.1, wrap: :wrap).round(6)).to eq(3)
+        expect(MB::Sound::Wavetable.send(m, wavetable: table, number: 1.0 / 3.0, phase: 0.9, wrap: :wrap).round(6)).to eq(4.1875)
+        expect(MB::Sound::Wavetable.send(m, wavetable: table, number: 1.0 / 3.0, phase: 1.1, wrap: :wrap).round(6)).to eq(0.8125)
+      end
+
+      it 'can reflect between columns with :bounce' do
+        expect(MB::Sound::Wavetable.send(m, wavetable: table, number: 1.0 / 3.0, phase: -0.3, wrap: :bounce).round(6)).to eq(-0.25)
+        expect(MB::Sound::Wavetable.send(m, wavetable: table, number: 1.0 / 3.0, phase: -0.1, wrap: :bounce).round(6)).to eq(1.125)
+        expect(MB::Sound::Wavetable.send(m, wavetable: table, number: 1.0 / 3.0, phase: 0.9, wrap: :bounce).round(6)).to eq(0.4375)
+        expect(MB::Sound::Wavetable.send(m, wavetable: table, number: 1.0 / 3.0, phase: 1.1, wrap: :bounce).round(6)).to eq(1.1875)
+      end
+
+      it 'can interpolate to zero with :zero' do
+        expect(MB::Sound::Wavetable.send(m, wavetable: table, number: 1.0 / 3.0, phase: -0.3, wrap: :zero).round(6)).to eq(-0.3125)
+        expect(MB::Sound::Wavetable.send(m, wavetable: table, number: 1.0 / 3.0, phase: -0.1, wrap: :zero).round(6)).to eq(3)
+        expect(MB::Sound::Wavetable.send(m, wavetable: table, number: 1.0 / 3.0, phase: 0.1, wrap: :zero).round(6)).to eq(0.9375)
+        expect(MB::Sound::Wavetable.send(m, wavetable: table, number: 2.0 / 3.0, phase: 0.7, wrap: :zero).round(6)).to eq(-0.5625)
+        expect(MB::Sound::Wavetable.send(m, wavetable: table, number: 2.0 / 3.0, phase: 0.9, wrap: :zero).round(6)).to eq(-2.4375)
+        expect(MB::Sound::Wavetable.send(m, wavetable: table, number: 2.0 / 3.0, phase: 1.05, wrap: :zero).round(6)).to eq(0.28125)
+        expect(MB::Sound::Wavetable.send(m, wavetable: table, number: 2.0 / 3.0, phase: 1.1, wrap: :zero).round(6)).to eq(0.25)
+      end
+
+      it 'can clamp between columns with :clamp' do
+        expect(MB::Sound::Wavetable.send(m, wavetable: table, number: 0, phase: -0.1, wrap: :clamp).round(6)).to eq(0.9375)
+        expect(MB::Sound::Wavetable.send(m, wavetable: table, number: 0, phase: -0.05, wrap: :clamp).round(6)).to eq(0.9296875.round(6))
+        expect(MB::Sound::Wavetable.send(m, wavetable: table, number: 1.0 / 3.0, phase: 0.1, wrap: :clamp).round(6)).to eq(0.625)
+        expect(MB::Sound::Wavetable.send(m, wavetable: table, number: 0, phase: 0.7, wrap: :clamp).round(6)).to eq(4.5625)
+        expect(MB::Sound::Wavetable.send(m, wavetable: table, number: 0, phase: 0.85, wrap: :clamp).round(6)).to eq(5.0703125.round(6))
+        expect(MB::Sound::Wavetable.send(m, wavetable: table, number: 0, phase: 0.9, wrap: :clamp).round(6)).to eq(5.0625)
+        expect(MB::Sound::Wavetable.send(m, wavetable: table, number: 0, phase: 1.1, wrap: :clamp).round(6)).to eq(5)
+      end
+    end
+
     describe '.outer_linear' do
       it_behaves_like 'exact lookup', :outer_linear
       it_behaves_like 'linear lookup', :outer_linear
@@ -225,6 +272,21 @@ RSpec.describe(MB::Sound::Wavetable, aggregate_failures: true) do
     describe '.outer_linear_ruby' do
       it_behaves_like 'exact lookup', :outer_linear_ruby
       it_behaves_like 'linear lookup', :outer_linear_ruby
+    end
+
+    describe '.outer_cubic' do
+      it_behaves_like 'exact lookup', :outer_cubic
+      it_behaves_like 'cubic lookup', :outer_cubic
+    end
+
+    describe '.outer_cubic_c' do
+      it_behaves_like 'exact lookup', :outer_cubic_c
+      it_behaves_like 'cubic lookup', :outer_cubic_c
+    end
+
+    describe '.outer_cubic_ruby' do
+      it_behaves_like 'exact lookup', :outer_cubic_ruby
+      it_behaves_like 'cubic lookup', :outer_cubic_ruby
     end
   end
 end
