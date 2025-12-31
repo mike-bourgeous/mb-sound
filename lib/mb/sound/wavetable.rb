@@ -198,6 +198,9 @@ module MB
       # TODO: functions to shuffle and stretch wavetables?
       # TODO: functions for spectral changes to wavetables?
       # TODO: mip-mapped or note-range wavetables
+      # TODO: midi/realtime control of wavetable wrapping mode?
+      # TODO: blend between wrapping modes by output
+      # TODO: warp between wrapping modes by blending lookup indices?
 
       # Performs a fractional wavetable lookup with wraparound.
       #
