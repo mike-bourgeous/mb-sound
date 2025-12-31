@@ -76,17 +76,31 @@ RSpec.describe(MB::Sound::Wavetable, aggregate_failures: true) do
   end
 
   context 'wavetable lookup' do
-    [:wavetable_lookup, :wavetable_lookup_c, :wavetable_lookup_ruby].each do |m|
-      describe "##{m}" do
-        it 'can perform lookups based on arrays' do
-          number = Numo::SFloat[0, 1.0 / 3.0, 2.0 / 3.0, -2.0 / 3.0, 1.0 / 6.0]
-          phase = Numo::SFloat[0, 0.4, 0.6, 1.2, 0.1]
+    shared_examples_for 'wavetable lookup' do |m|
+      let(:number) { Numo::SFloat[0, 1.0 / 3.0, 2.0 / 3.0, -2.0 / 3.0, 1.0 / 6.0] }
+      let(:phase) { Numo::SFloat[0, 0.4, 0.6, 1.2, 0.1] }
 
-          # FIXME: cubic interpolation changes last value
-          result = MB::Sound::Wavetable.send(m, wavetable: table, number: number, phase: phase, lookup: :linear, wrap: :wrap)
-          expect(result).to all_be_within(1e-5).of_array(Numo::SFloat[1, 3, 3, -3, 1.25])
-        end
+      it 'can perform lookups based on arrays with linear interpolation' do
+        result = MB::Sound::Wavetable.send(m, wavetable: table, number: number, phase: phase, lookup: :linear, wrap: :wrap)
+        expect(result).to all_be_within(1e-5).of_array(Numo::SFloat[1, 3, 3, -3, 1.25])
       end
+
+      it 'can perform lookups based on arrays with cubic interpolation' do
+        result = MB::Sound::Wavetable.send(m, wavetable: table, number: number, phase: phase, lookup: :cubic, wrap: :wrap)
+        expect(result).to all_be_within(1e-5).of_array(Numo::SFloat[1, 3, 3, -3, 1])
+      end
+    end
+
+    describe '#wavetable_lookup' do
+      it_behaves_like 'wavetable lookup', :wavetable_lookup
+    end
+
+    describe '#wavetable_lookup_c' do
+      it_behaves_like 'wavetable lookup', :wavetable_lookup_c
+    end
+
+    describe '#wavetable_lookup_ruby' do
+      it_behaves_like 'wavetable lookup', :wavetable_lookup_ruby
     end
   end
 
@@ -115,11 +129,11 @@ RSpec.describe(MB::Sound::Wavetable, aggregate_failures: true) do
         end
 
         it 'wraps around columns' do
-          expect(MB::Sound::Wavetable.send(m, wavetable: table, number: 0, phase: 1, wrap: :wrap).round(6).round(6)).to eq(1)
-          expect(MB::Sound::Wavetable.send(m, wavetable: table, number: 0, phase: 2, wrap: :wrap).round(6).round(6)).to eq(1)
-          expect(MB::Sound::Wavetable.send(m, wavetable: table, number: 0, phase: -1, wrap: :wrap).round(6).round(6)).to eq(1)
-          expect(MB::Sound::Wavetable.send(m, wavetable: table, number: 0, phase: 1.2, wrap: :wrap).round(6).round(6)).to eq(2)
-          expect(MB::Sound::Wavetable.send(m, wavetable: table, number: 0, phase: -0.2, wrap: :wrap).round(6).round(6)).to eq(5)
+          expect(MB::Sound::Wavetable.send(m, wavetable: table, number: 0, phase: 1, wrap: :wrap).round(6)).to eq(1)
+          expect(MB::Sound::Wavetable.send(m, wavetable: table, number: 0, phase: 2, wrap: :wrap).round(6)).to eq(1)
+          expect(MB::Sound::Wavetable.send(m, wavetable: table, number: 0, phase: -1, wrap: :wrap).round(6)).to eq(1)
+          expect(MB::Sound::Wavetable.send(m, wavetable: table, number: 0, phase: 1.2, wrap: :wrap).round(6)).to eq(2)
+          expect(MB::Sound::Wavetable.send(m, wavetable: table, number: 0, phase: -0.2, wrap: :wrap).round(6)).to eq(5)
         end
 
         it 'can interpolate between rows' do

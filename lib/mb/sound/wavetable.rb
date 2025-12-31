@@ -197,20 +197,18 @@ module MB
       # TODO: functions to sort wavetables by brightness, etc.?
       # TODO: functions to shuffle and stretch wavetables?
       # TODO: functions for spectral changes to wavetables?
-      # TODO: optimized C version for cubic lookup
       # TODO: mip-mapped or note-range wavetables
 
       # Performs a fractional wavetable lookup with wraparound.
       #
       # :number - A 1D Numo::NArray with the wave number (from 0..1) over time
-      # :phase - A 1D Numo::NArray with the wave phase (from 0..1)over time
-      #
-      # TODO: bouncing or zero-extending parameter?
+      # :phase - A 1D Numo::NArray with the wave phase (from 0..1) over time
+      # :lookup - Interpolation method (:linear or :cubic)
+      # :wrap - Wrapping method (:wrap, :bounce, :clamp, or :zero)
       #
       # See MB::Sound::GraphNode#wavetable.
       def self.wavetable_lookup(wavetable:, number:, phase:, lookup:, wrap:)
-        #wavetable_lookup_c(wavetable: wavetable, number: number, phase: phase, lookup: lookup, wrap: wrap)
-        wavetable_lookup_ruby(wavetable: wavetable, number: number, phase: phase, lookup: lookup, wrap: wrap)
+        wavetable_lookup_c(wavetable: wavetable, number: number, phase: phase, lookup: lookup, wrap: wrap)
       end
 
       # Ruby implementation of .wavetable_lookup.
@@ -245,8 +243,19 @@ module MB
       #
       # :number - Fractional wave number from 0 to 1.
       # :phase - Time index from 0 to 1.
+      # :wrap - Wrapping mode (:wrap, :clamp, :bounce, :zero)
       def self.outer_linear(wavetable:, number:, phase:, wrap:)
-        outer_linear_ruby(wavetable: wavetable, number: number, phase: phase, wrap: wrap)
+        outer_linear_c(wavetable: wavetable, number: number, phase: phase, wrap: wrap)
+      end
+
+      # Interpolates waves and samples from the wavetable using cubic
+      # interpolation.  See also #wavetable_lookup.
+      #
+      # :number - Fractional wave number from 0 to 1.
+      # :phase - Time index from 0 to 1.
+      # :wrap - Wrapping mode (:wrap, :clamp, :bounce, :zero)
+      def self.outer_cubic(wavetable:, number:, phase:, wrap:)
+        outer_cubic_c(wavetable: wavetable, number: number, phase: phase, wrap: wrap)
       end
 
       # Uses cubic interpolation to blend across samples and waves in the given
@@ -305,7 +314,12 @@ module MB
 
       # C extension implementation of .outer_linear.
       def self.outer_linear_c(wavetable:, number:, phase:, wrap:)
-        MB::Sound::FastWavetable.outer_linear(wavetable, number, phase, wrap) # TODO: wrap
+        MB::Sound::FastWavetable.outer_linear(wavetable, number, phase, wrap)
+      end
+
+      # C extension implementation of .outer_cubic.
+      def self.outer_cubic_c(wavetable:, number:, phase:, wrap:)
+        MB::Sound::FastWavetable.outer_cubic(wavetable, number, phase, wrap)
       end
     end
   end

@@ -31,11 +31,19 @@ Benchmark.bmbm do |bench|
     wt.multi_sample(800, SAMPLES / 800)
   end
 
-  bench.report('pure ruby once') do
-    MB::Sound::Wavetable.wavetable_lookup_ruby(wavetable: wt.table, number: number_arr, phase: phase_arr.dup)
+  bench.report('pure ruby linear') do
+    MB::Sound::Wavetable.wavetable_lookup_ruby(wavetable: wt.table, number: number_arr, phase: phase_arr.dup, lookup: :linear, wrap: :wrap)
   end
 
-  bench.report('pure C once') do
-    MB::Sound::Wavetable.wavetable_lookup_c(wavetable: wt.table, number: number_arr, phase: phase_arr.dup)
+  bench.report('pure C linear') do
+    MB::Sound::Wavetable.wavetable_lookup_c(wavetable: wt.table, number: number_arr, phase: phase_arr.dup, lookup: :linear, wrap: :wrap)
+  end
+
+  bench.report('pure ruby cubic') do
+    MB::Sound::Wavetable.wavetable_lookup_ruby(wavetable: wt.table, number: number_arr, phase: phase_arr.dup, lookup: :cubic, wrap: :wrap)
+  end
+
+  bench.report('pure C cubic') do
+    MB::Sound::Wavetable.wavetable_lookup_c(wavetable: wt.table, number: number_arr, phase: phase_arr.dup, lookup: :cubic, wrap: :wrap)
   end
 end
