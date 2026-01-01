@@ -177,6 +177,32 @@ module MB
         new_table
       end
 
+      # Sorts a +wavetable+ by spectral slope and returns the sorted copy.  In
+      # this case spectral slope is the slope component of a linear regression
+      # on the frequency spectrum of the wave.  This should, roughly, place
+      # brighter and noisier waves at the end of the table (or at the start if
+      # +:reverse+ is true).
+      def self.sort(wavetable, reverse: false)
+        indices = (0...wavetable.shape[0]).to_a
+
+        # TODO: debug this; it doesn't put drums in the order I would expect.
+        # It might be better to define a crossover point and sort by the ratio
+        # between the areas above and below that point.
+        indices.sort_by! { |row|
+          fft = MB::Sound.real_fft(wavetable[row, nil]).abs
+          slope, _ = MB::M.linear_regression(fft)
+          slope
+        }
+
+        indices.reverse! if reverse
+
+        Numo::SFloat.cast(
+          indices.map { |row|
+            wavetable[row, nil].dup
+          }
+        )
+      end
+
       # Removes DC offset and rescales each row of the given +wavetable+ to the
       # given +max+ amplitude.  Modifies the wavetable in place and returns it.
       #
@@ -201,6 +227,22 @@ module MB
       # TODO: midi/realtime control of wavetable wrapping mode?
       # TODO: blend between wrapping modes by output
       # TODO: warp between wrapping modes by blending lookup indices?
+      # FIXME: having wave 1.0 wrap fully around to the start makes control
+      # difficult; it would be more musically playable if 1.0 was the last wave
+      # in the table
+      # FIXME: make it super easy to play the full cycle including cubic
+      # overshoot, and make the areas around that more musical somehow (getting
+      # clicking and very sharp waves if the phase is off just a tiny bit); it
+      # might be better to create a true wavetable oscillator that knows when
+      # it's wrapping around early and feeds the wrapped samples into the cubic
+      # interpolator instead of feeding in samples beyond where the phase will
+      # actually wrap
+      # FIXME: glitch at the bottom CC range of play
+      # ((midi.hz.ramp.at(1)).wavetable(wavetable: wt2, number:
+      # midi.cc(1).spy{|v|puts v.minmax}, wrap: :wrap) *
+      # midi.gate).softclip.filter(:highpass, cutoff: 20, quality:
+      # 0.7).oversample(2) -- it seems to be wrapping around partially when it
+      # should be on the first wave; might be caused by wrapping around blur
 
       # Performs a fractional wavetable lookup with wraparound.
       #
