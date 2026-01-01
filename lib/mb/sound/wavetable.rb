@@ -14,9 +14,12 @@ module MB
       # from a normal sound file.  The +:slices+ parameter controls how many
       # slices to ask make_wavetable to provide.
       def self.load_wavetable(filename, slices: 10, ratio: 1.0)
+        # Using weighted mixing for now; TODO: find a safe way to combine
+        # channels with minimal cancellation of reverb or introduction of high
+        # frequency oscillation when normalizing
         metadata = {}
         data = MB::Sound.read(filename, metadata_out: metadata)
-        data = data.sum / data.length
+        data = data.map.with_index { |c, idx| c / (idx + 1) }.sum
 
         period = metadata[:mb_sound_wavetable_period]&.to_i
         raise 'Wavetable period must be greater than 1' if period.is_a?(Integer) && period <= 1
@@ -43,25 +46,50 @@ module MB
       end
 
       # Slices the given 1D NArray to return a wavetable as a 2D NArray.
-      def self.make_wavetable(data, freq_range: 30..120, slices: 10, sample_rate: 48000, ratio: 1.0)
-        # TODO: maybe chop off leading and trailing silence/near-silence
-        # TODO: maybe skip or interpolate over silent slices
+      #
+      # +:metadata_out+ - An optional unfrozen Hash into which to write
+      # information about the wavetable.  Set to nil to disable printing of
+      # this info.
+      #
+      # See bin/make_wavetable.rb.
+      def self.make_wavetable(data, freq_range: 30..120, slices: 10, sample_rate: 48000, ratio: 1.0, metadata_out: {})
+        # TODO: maybe skip or interpolate over silent slices in the middle of the file
         # TODO: guard against amplifying very high frequency noises e.g. 20k+ dithering noise?
+        # TODO: generate a whole bunch of table entries and use k-means clustering to select a few?
+
+        # Chop off leading and trailing silence/near-silence
+        original_length = data.length
+        data = MB::M.trim(data) { |v| v.abs < -85.db }
 
         # Estimate frequency and wave period
-        # TODO: return this extra info somehow
         freq = MB::Sound.freq_estimate(data, sample_rate: sample_rate, range: freq_range)
         period = ratio.to_f / freq
         xfade = period * 0.25
         period_samples = (period * sample_rate).round
         xfade_samples = (xfade * sample_rate).round
-        note_name = MB::Sound::Tone.new(frequency: freq).to_note.name
+        note = MB::Sound::Tone.new(frequency: freq).to_note
 
         jump = (data.length - period_samples - xfade_samples) / (slices - 1)
 
         total_samples = slices * period_samples
         buf = data.class.zeros(total_samples)
         offset = 0
+
+        metadata_out&.merge!({
+          original_length: original_length,
+          trimmed_silence: original_length - data.length,
+          frequency: freq,
+          note_name: note.name,
+          note_number: note.detuned_number,
+          ratio: ratio,
+          period: period,
+          period_samples: period_samples,
+          xfade: xfade,
+          xfade_samples: xfade_samples,
+        })
+
+        # FIXME: only print this in bin/sound.rb or something; not in rspec
+        puts MB::U.highlight(metadata_out) if metadata_out
 
         for start_samples in (0...(data.length - (period_samples + xfade_samples))).step(jump) do
           start_samples = start_samples.floor
@@ -96,15 +124,15 @@ module MB
           middle[-lead_in.length...].inplace + lead_in
 
           # Normalize and remove DC offset
-          middle -= (middle.sum / middle.length)
-          max = MB::M.max(middle.abs.max, -60.db)
-          middle = (middle / max) * -2.db
+          middle -= middle.mean
+          max = MB::M.max(middle.abs.max, -80.db)
+          middle = middle / max
 
-          # Rotate phase to put positive zero crossing at beginning/end
+          # Rotate phase to put positive zero crossing at center
           zc_index = MB::M.find_zero_crossing(middle)
-          looped = MB::M.rol(middle, zc_index) if zc_index
+          middle = MB::M.rol(middle, zc_index - middle.length / 2) if zc_index
 
-          buf[offset...(offset + period_samples)] = looped
+          buf[offset...(offset + period_samples)] = middle
           offset += period_samples
         end
 
@@ -118,92 +146,223 @@ module MB
         clip.inplace * fade.not_inplace!
       end
 
+      # Creates a new wavetable that blends each row in the given +wavetable+
+      # with adjacent rows.  A strength of 1.0 means an equal blend of the
+      # three rows.  As strength approaches infinity the original row fades
+      # away.
+      #
+      # You should probably use .normalize after this method to ensure the
+      # wavetable maintains a consistent peak amplitude.
+      def self.blur(wavetable, strength)
+        raise 'Wavetable must be a 2D Numo::NArray' unless wavetable.is_a?(Numo::NArray) && wavetable.ndim == 2
+
+        new_table = wavetable.dup
+
+        w_other = strength
+        w_self = 1.0
+        w_total = w_self + 2 * w_other.abs
+        w_self /= w_total
+        w_other /= w_total
+
+        rows = wavetable.shape[0]
+
+        for row in 0...rows
+          r1 = wavetable[row - 1, nil]
+          r2 = wavetable[row, nil]
+          r3 = wavetable[row == rows - 1 ? 0 : row + 1, nil]
+
+          new_table[row, nil] = (r1 + r3) * w_other + r2 * w_self
+        end
+
+        new_table
+      end
+
+      # Sorts a +wavetable+ by spectral slope and returns the sorted copy.  In
+      # this case spectral slope is the slope component of a linear regression
+      # on the frequency spectrum of the wave.  This should, roughly, place
+      # brighter and noisier waves at the end of the table (or at the start if
+      # +:reverse+ is true).
+      def self.sort(wavetable, reverse: false)
+        indices = (0...wavetable.shape[0]).to_a
+
+        # TODO: debug this; it doesn't put drums in the order I would expect.
+        # It might be better to define a crossover point and sort by the ratio
+        # between the areas above and below that point.
+        indices.sort_by! { |row|
+          fft = MB::Sound.real_fft(wavetable[row, nil]).abs
+          slope, _ = MB::M.linear_regression(fft)
+          slope
+        }
+
+        indices.reverse! if reverse
+
+        Numo::SFloat.cast(
+          indices.map { |row|
+            wavetable[row, nil].dup
+          }
+        )
+      end
+
+      # Removes DC offset and rescales each row of the given +wavetable+ to the
+      # given +max+ amplitude.  Modifies the wavetable in place and returns it.
+      #
+      # TODO: allow normalizing RMS with waveshaping?
+      def self.normalize(wavetable, max = 1.0)
+        raise 'Wavetable must be a 2D Numo::NArray' unless wavetable.is_a?(Numo::NArray) && wavetable.ndim == 2
+
+        for row in 0...wavetable.shape[0]
+          data = wavetable[row, nil]
+          data -= data.mean
+          rowmax = MB::M.max(-80.db, data.abs.max)
+          wavetable[row, nil] = data * (max / rowmax)
+        end
+
+        wavetable
+      end
+
       # TODO: functions to sort wavetables by brightness, etc.?
-      # TODO: functions to shuffle wavetables?
-      # TODO: generate a whole bunch of table entries and use k-means clustering to select a few?
-      # TODO: move make_wavetable.rb functionality into a function here
-      # TODO: optimized C version?
+      # TODO: functions to shuffle and stretch wavetables?
+      # TODO: functions for spectral changes to wavetables?
+      # TODO: mip-mapped or note-range wavetables
+      # TODO: midi/realtime control of wavetable wrapping mode?
+      # TODO: blend between wrapping modes by output
+      # TODO: warp between wrapping modes by blending lookup indices?
+      # FIXME: having wave 1.0 wrap fully around to the start makes control
+      # difficult; it would be more musically playable if 1.0 was the last wave
+      # in the table
+      # FIXME: make it super easy to play the full cycle including cubic
+      # overshoot, and make the areas around that more musical somehow (getting
+      # clicking and very sharp waves if the phase is off just a tiny bit); it
+      # might be better to create a true wavetable oscillator that knows when
+      # it's wrapping around early and feeds the wrapped samples into the cubic
+      # interpolator instead of feeding in samples beyond where the phase will
+      # actually wrap
+      # FIXME: glitch at the bottom CC range of play
+      # ((midi.hz.ramp.at(1)).wavetable(wavetable: wt2, number:
+      # midi.cc(1).spy{|v|puts v.minmax}, wrap: :wrap) *
+      # midi.gate).softclip.filter(:highpass, cutoff: 20, quality:
+      # 0.7).oversample(2) -- it seems to be wrapping around partially when it
+      # should be on the first wave; might be caused by wrapping around blur
 
       # Performs a fractional wavetable lookup with wraparound.
       #
       # :number - A 1D Numo::NArray with the wave number (from 0..1) over time
-      # :phase - A 1D Numo::NArray with the wave phase (from 0..1)over time
-      #
-      # TODO: bouncing or zero-extending?
+      # :phase - A 1D Numo::NArray with the wave phase (from 0..1) over time
+      # :lookup - Interpolation method (:linear or :cubic)
+      # :wrap - Wrapping method (:wrap, :bounce, :clamp, or :zero)
       #
       # See MB::Sound::GraphNode#wavetable.
-      def self.wavetable_lookup(wavetable:, number:, phase:)
-        wavetable_lookup_c(wavetable: wavetable, number: number, phase: phase)
+      def self.wavetable_lookup(wavetable:, number:, phase:, lookup:, wrap:)
+        wavetable_lookup_c(wavetable: wavetable, number: number, phase: phase, lookup: lookup, wrap: wrap)
       end
 
       # Ruby implementation of .wavetable_lookup.
-      def self.wavetable_lookup_ruby(wavetable:, number:, phase:)
+      def self.wavetable_lookup_ruby(wavetable:, number:, phase:, lookup:, wrap:)
         raise 'Number and phase must be the same size array' unless number.length == phase.length
 
-        number.map_with_index do |num, idx|
-          phi = phase[idx]
-          outer_lookup_ruby(wavetable: wavetable, number: num, phase: phi)
+        case lookup
+        when :cubic
+          number.map_with_index do |num, idx|
+            phi = phase[idx]
+            outer_cubic_ruby(wavetable: wavetable, number: num, phase: phi, wrap: wrap)
+          end
+
+        when :linear
+          number.map_with_index do |num, idx|
+            phi = phase[idx]
+            outer_linear_ruby(wavetable: wavetable, number: num, phase: phi, wrap: wrap)
+          end
+
+        else
+          raise ArgumentError, "Invalid wavetable lookup mode: #{lookup.inspect}"
         end
       end
 
       # C extension implementation of .wavetable_lookup.
-      def self.wavetable_lookup_c(wavetable:, number:, phase:)
-        #phase = phase.dup.inplace! unless phase.inplace?
-        MB::Sound::FastWavetable.wavetable_lookup(wavetable, number, phase)
+      def self.wavetable_lookup_c(wavetable:, number:, phase:, lookup:, wrap:)
+        MB::Sound::FastWavetable.wavetable_lookup(wavetable, number, phase, lookup, wrap)
       end
 
-      # Blends two columns within a single row of the wavetable.  You should
-      # probably use .wavetable_lookup or .outer_lookup.
-      #
-      # :number - The wave number index, which should be an integer.
-      # :phase - Time index from 0 to 1.
-      #
-      # TODO: bouncing or zero-extending?
-      def self.inner_lookup(wavetable:, number:, phase:)
-        row = number.floor
-
-        fcol = (phase % 1.0) * wavetable.shape[1]
-        col1 = fcol.floor
-        col2 = fcol.ceil
-        col1 %= wavetable.shape[1]
-        col2 %= wavetable.shape[1]
-
-        ratio = fcol - col1
-
-        val1 = wavetable[row, col1]
-        val2 = wavetable[row, col2]
-
-        val2 * ratio + val1 * (1.0 - ratio)
-      end
-
-      # Blends two waves using #inner_lookup.  See also #wavetable_lookup.
+      # Interpolates waves and samples from the wavetable.  See also
+      # #wavetable_lookup.
       #
       # :number - Fractional wave number from 0 to 1.
       # :phase - Time index from 0 to 1.
-      def self.outer_lookup(wavetable:, number:, phase:)
-        outer_lookup_c(wavetable: wavetable, number: number, phase: phase)
+      # :wrap - Wrapping mode (:wrap, :clamp, :bounce, :zero)
+      def self.outer_linear(wavetable:, number:, phase:, wrap:)
+        outer_linear_c(wavetable: wavetable, number: number, phase: phase, wrap: wrap)
       end
 
-      # Ruby implementation of .outer_lookup.
-      def self.outer_lookup_ruby(wavetable:, number:, phase:)
+      # Interpolates waves and samples from the wavetable using cubic
+      # interpolation.  See also #wavetable_lookup.
+      #
+      # :number - Fractional wave number from 0 to 1.
+      # :phase - Time index from 0 to 1.
+      # :wrap - Wrapping mode (:wrap, :clamp, :bounce, :zero)
+      def self.outer_cubic(wavetable:, number:, phase:, wrap:)
+        outer_cubic_c(wavetable: wavetable, number: number, phase: phase, wrap: wrap)
+      end
+
+      # Uses cubic interpolation to blend across samples and waves in the given
+      # +:wavetable+, as opposed to linear interpolation used by
+      # #outer_linear_ruby.
+      def self.outer_cubic_ruby(wavetable:, number:, phase:, wrap:)
+        rows = wavetable.shape[0].to_f
+        cols = wavetable.shape[1].to_f
+
+        frow = (number * rows) % rows
+        row1 = frow.floor
+        row2 = row1 + 1
+        row1 %= rows
+        row2 %= rows
+        rowratio = frow - row1
+
+        fcol = (phase + 1) / 2 * cols
+
+        vtop = MB::M.cubic_lookup(wavetable[row1, nil], fcol, mode: wrap)
+        vbot = MB::M.cubic_lookup(wavetable[row2, nil], fcol, mode: wrap)
+
+        # TODO: smoothstep between waves?
+        vbot * rowratio + vtop * (1.0 - rowratio)
+      end
+
+      # Ruby implementation of .outer_linear.
+      def self.outer_linear_ruby(wavetable:, number:, phase:, wrap:)
         wave_count = wavetable.shape[0]
+        sample_count = wavetable.shape[1]
+
         frow = (number * wave_count) % wave_count
         row1 = frow.floor
-        row2 = frow.ceil
+        row2 = row1 + 1
         row1 %= wave_count
         row2 %= wave_count
+        rowratio = frow - row1
 
-        ratio = frow - row1
+        fcol = (phase + 1) / 2 * sample_count
+        col1 = fcol.floor
+        col2 = col1 + 1
+        colratio = fcol - col1
 
-        val1 = inner_lookup(wavetable: wavetable, number: row1, phase: phase)
-        val2 = inner_lookup(wavetable: wavetable, number: row2, phase: phase)
+        val1l = MB::M.fetch_oob(wavetable[row1, nil], col1, mode: wrap)
+        val1r = MB::M.fetch_oob(wavetable[row1, nil], col2, mode: wrap)
+        val2l = MB::M.fetch_oob(wavetable[row2, nil], col1, mode: wrap)
+        val2r = MB::M.fetch_oob(wavetable[row2, nil], col2, mode: wrap)
 
-        val2 * ratio + val1 * (1.0 - ratio)
+        valtop = val1r * colratio + val1l * (1.0 - colratio)
+        valbot = val2r * colratio + val2l * (1.0 - colratio)
+
+        # TODO: smoothstep between waves?
+        valbot * rowratio + valtop * (1.0 - rowratio)
       end
 
-      # C extension implementation of .outer_lookup.
-      def self.outer_lookup_c(wavetable:, number:, phase:)
-        MB::Sound::FastWavetable.outer_lookup(wavetable, number, phase)
+      # C extension implementation of .outer_linear.
+      def self.outer_linear_c(wavetable:, number:, phase:, wrap:)
+        MB::Sound::FastWavetable.outer_linear(wavetable, number, phase, wrap)
+      end
+
+      # C extension implementation of .outer_cubic.
+      def self.outer_cubic_c(wavetable:, number:, phase:, wrap:)
+        MB::Sound::FastWavetable.outer_cubic(wavetable, number, phase, wrap)
       end
     end
   end

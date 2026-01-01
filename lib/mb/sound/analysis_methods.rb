@@ -70,7 +70,7 @@ module MB
         peaks = []
         narray = narray.abs if narray[0].is_a?(Complex)
         narray.each_with_index do |v, idx|
-          neighbors = fetch_oob(narray, (idx - min_distance)..(idx + min_distance))
+          neighbors = MB::M.fetch_clamp(narray, (idx - min_distance)..(idx + min_distance))
 
           if neighbors.all? { |n| n == v }
             next
@@ -81,33 +81,6 @@ module MB
           end
         end
         peaks
-      end
-
-      # Retrieves the value at +idx+ from the given +array+.  If +idx+ is below the
-      # array start (i.e. less than 0), returns +before+ if not nil, or the first
-      # array value if +before+ is nil.  Likewise, if +idx+ is above the array end
-      # (i.e. greater than array.size - 1), +after+ will be returned if +after+ is
-      # not nil, or the last array value if +after+ is nil.
-      #
-      # If +idx+ is a Range, then each index value covered by the Range will be
-      # handled as if passed individually to this function.  Reverse ranges as
-      # passed to the normal array lookup (e.g. 1..-1) will return an empty array.
-      def fetch_oob(array, idx, before: nil, after: nil)
-        # TODO: rename to fetch_clamp and split out fetch_fill?
-        # TODO: move to mb-math or something
-        case idx
-        when Range
-          idx.map { |n| fetch_oob(array, n, before: before, after: after) }
-
-        else
-          if idx < 0
-            before || array[0]
-          elsif idx >= array.size
-            after || array[array.size - 1]
-          else
-            array[idx]
-          end
-        end
       end
     end
   end
