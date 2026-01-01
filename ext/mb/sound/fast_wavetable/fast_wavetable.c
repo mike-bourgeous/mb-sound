@@ -141,10 +141,7 @@ static VALUE ruby_fetch_oob(VALUE self, VALUE narray, VALUE idx, VALUE mode)
 	return result;
 }
 
-// Uses the slope from y_1 to y1, the slope from y0 to y2, y0, and y1, to fit a
-// cubic to the given points.  Returns the value of the cubic at x=blend.
-//
-// Ported from mb-math (but taking four points instead of two slopes & points)
+// See ruby_cubic_interp
 static double cubic_interp(double y_1, double y0, double y1, double y2, double blend)
 {
 	double d0 = (y1 - y_1) / 2; // divide by 2 because they are 2 units apart in X
@@ -157,6 +154,10 @@ static double cubic_interp(double y_1, double y0, double y1, double y2, double b
 	return a * blend*blend*blend + b * blend*blend + c * blend + d;
 }
 
+// Uses the slope from y_1 to y1, the slope from y0 to y2, y0, and y1, to fit a
+// cubic to the given points.  Returns the coefficients of the cubic as an Array.
+//
+// Ported from mb-math (but taking four points instead of two slopes & points)
 static VALUE ruby_cubic_coeffs(VALUE self, VALUE y_1r, VALUE y0r, VALUE y1r, VALUE y2r)
 {
 	double y_1 = NUM2DBL(y_1r);
@@ -173,6 +174,10 @@ static VALUE ruby_cubic_coeffs(VALUE self, VALUE y_1r, VALUE y0r, VALUE y1r, VAL
 	return rb_ary_new_from_args(4, DBL2NUM(a), DBL2NUM(b), DBL2NUM(c), DBL2NUM(d));
 }
 
+// Uses the slope from y_1 to y1, the slope from y0 to y2, y0, and y1, to fit a
+// cubic to the given points.  Returns the value of the cubic at x=blend.
+//
+// Ported from mb-math (but taking four points instead of two slopes & points)
 static VALUE ruby_cubic_interp(VALUE self, VALUE y_1, VALUE y0, VALUE y1, VALUE y2, VALUE blend)
 {
 	return DBL2NUM(cubic_interp(
@@ -195,7 +200,7 @@ static double outer_linear(float *wavetable, size_t rows, size_t columns, double
 	ssize_t offset2 = columns * row2;
 	double rowratio = frow - row1;
 
-	double fcol = phase * columns;
+	double fcol = (phase + 1) / 2 * columns;
 	ssize_t col1 = (ssize_t)floor(fcol);
 	ssize_t col2 = col1 + 1;
 	double colratio = fcol - col1;
@@ -245,7 +250,7 @@ static double outer_cubic(float *wavetable, size_t rows, size_t columns, double 
 	ssize_t offset2 = columns * row2;
 	double rowratio = frow - row1;
 
-	double fcol = phase * columns;
+	double fcol = (phase + 1) / 2 * columns;
 	ssize_t col1 = floor(fcol);
 	double colratio = fcol - col1;
 
@@ -269,7 +274,7 @@ static double outer_cubic(float *wavetable, size_t rows, size_t columns, double 
 
 // wavetable - a 2D Numo::SFloat (TODO: other types)
 // number - a numeric from 0..1 (with wrapping)
-// phase - a numeric from 0..1 (with wrapping)
+// phase - a numeric from -1..1 (with optional wrapping)
 // wrap - :wrap, :bounce, :clamp, or :zero
 static VALUE ruby_outer_cubic(VALUE self, VALUE wavetable, VALUE number, VALUE phase, VALUE wrap)
 {
@@ -296,7 +301,8 @@ static VALUE ruby_outer_cubic(VALUE self, VALUE wavetable, VALUE number, VALUE p
 //
 // wavetable - a 2D Numo::SFloat
 // number - a 1D Numo::SFloat from 0..1 (with wrapping)
-// phase - a 1D Numo::SFloat from 0..1 (with wrapping)
+// phase - a 1D Numo::SFloat from -1..1 (with optional wrapping)
+// wrap - :wrap, :bounce, :clamp, or :zero
 static VALUE ruby_wavetable_lookup(VALUE self, VALUE wavetable, VALUE number, VALUE phase, VALUE lookup, VALUE wrap)
 {
 	ID symlookup = SYM2ID(lookup);

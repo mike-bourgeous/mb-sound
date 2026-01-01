@@ -128,9 +128,9 @@ module MB
           max = MB::M.max(middle.abs.max, -80.db)
           middle = middle / max
 
-          # Rotate phase to put positive zero crossing at beginning/end
+          # Rotate phase to put positive zero crossing at center
           zc_index = MB::M.find_zero_crossing(middle)
-          middle = MB::M.rol(middle, zc_index) if zc_index
+          middle = MB::M.rol(middle, zc_index - middle.length / 2) if zc_index
 
           buf[offset...(offset + period_samples)] = middle
           offset += period_samples
@@ -275,7 +275,7 @@ module MB
         row2 %= rows
         rowratio = frow - row1
 
-        fcol = phase * cols
+        fcol = (phase + 1) / 2 * cols
 
         vtop = MB::M.cubic_lookup(wavetable[row1, nil], fcol, mode: wrap)
         vbot = MB::M.cubic_lookup(wavetable[row2, nil], fcol, mode: wrap)
@@ -296,7 +296,7 @@ module MB
         row2 %= wave_count
         rowratio = frow - row1
 
-        fcol = phase * sample_count
+        fcol = (phase + 1) / 2 * sample_count
         col1 = fcol.floor
         col2 = col1 + 1
         colratio = fcol - col1

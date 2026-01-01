@@ -32,10 +32,11 @@ voices = Array.new(4) do
   (
     midi.env(0.003, 0.05, 0.5, 0.3) * cc2 *
     (
-      midi.frequency(rand(DETUNE_RANGE)).filter(:lowpass, cutoff: 1.0 / PORTAMENTO_TIME, quality: 0.5).tone.ramp.wavetable(wavetable: synth, number: cc1).filter(:lowpass, cutoff: 5000, quality: 0.4) +
+      midi.frequency(rand(DETUNE_RANGE)).filter(:lowpass, cutoff: 1.0 / PORTAMENTO_TIME, quality: 0.5).tone.ramp.at(2).wavetable(wavetable: synth, number: cc1).filter(:lowpass, cutoff: 5000, quality: 0.4) +
         midi.frequency(rand(DETUNE_RANGE)).filter(:lowpass, cutoff: 1.0 / PORTAMENTO_TIME, quality: 0.5).tone.triangle.at(0.5)
     )
   ).softclip
+    .*(2)
     .wavetable(wavetable: shaper, number: cc4)
     .filter(:highpass, cutoff: 10, quality: 0.7)
 end
@@ -44,8 +45,5 @@ l = (0.5 * voices[0] + voices[1]).filter(:lowpass, cutoff: 15000, quality: 0.25)
 r = (0.5 * voices[2] + voices[3]).filter(:lowpass, cutoff: 15000, quality: 0.25).softclip #XXX .oversample(2)
 
 MB::U.headline('Begin play!')
-
-# XXX
-$wavetable_mode = :cubic
 
 MB::Sound.play([l, r], plot: false)

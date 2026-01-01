@@ -14,7 +14,7 @@ SAMPLES = ENV['SAMPLES']&.to_i || 48000 * 60
 
 Benchmark.bmbm do |bench|
   bench.report('build wavetable') do
-    phase = 100.hz.ramp.at(0..1).forever
+    phase = 100.hz.ramp.at(1).forever
     phase_arr = phase.sample(SAMPLES)
 
     number = 1.hz.ramp.at(0..1).forever
