@@ -16,6 +16,10 @@ require 'mb-sound'
 
 MB::U.sigquit_backtrace
 
+quiet = !!ARGV.delete('--quiet')
+quiet ||= !!ARGV.delete('-q')
+
+duration = ENV['DURATION']&.to_f || 30
 
 abenv = MB::Sound::ADSREnvelope.new(attack_time: 60, decay_time: 30, sustain_level: 0.125, release_time: 90, sample_rate: 48000)
 
@@ -78,16 +82,16 @@ if ARGV.include?('--bench')
       end
 
       # Reset oscillators and constants
-      bench.report("for(180) @ #{bufsize}") do
-        final_l.for(180)
-        final_r.for(180)
+      bench.report("for(#{duration}) @ #{bufsize}") do
+        final_l.for(duration).with_buffer(bufsize)
+        final_r.for(duration).with_buffer(bufsize)
       end
 
       bench.report("bufsize=#{bufsize}") do
         i = 0
         loop do
-          x = final_l.with_buffer(bufsize).sample(bufsize)
-          y = final_r.with_buffer(bufsize).sample(bufsize)
+          x = final_l.sample(bufsize)
+          y = final_r.sample(bufsize)
 
           break if x.nil? || y.nil?
 
@@ -101,7 +105,7 @@ elsif ARGV[0]
   overwrite = ARGV.delete('--overwrite')
   MB::U.prevent_overwrite(ARGV[0], prompt: true) unless overwrite
 
-  MB::U.headline("Saving benchmark song to #{ARGV[0].inspect}")
+  MB::U.headline("Saving benchmark song to #{ARGV[0].inspect}") unless quiet
 
   if loop_count
     # FIXME: MB::Sound::GraphNode::Tee has a buffer size of 48000
@@ -110,5 +114,5 @@ elsif ARGV[0]
     MB::Sound.write(ARGV[0], [final_l.with_buffer(800), final_r.with_buffer(800)], overwrite: true)
   end
 else
-  MB::Sound.play [final_l.with_buffer(800), final_r.with_buffer(800)]
+  MB::Sound.play [final_l.with_buffer(800), final_r.with_buffer(800)], quiet: quiet
 end

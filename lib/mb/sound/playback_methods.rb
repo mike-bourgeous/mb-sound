@@ -15,11 +15,12 @@ module MB
       # to false.  Otherwise, plotting defaults to true.
       #
       # +:clear+ - Whether to clear the screen before beginning playback.
-      def play(file_tone_data, output: nil, sample_rate: 48000, gain: 1.0, plot: nil, graphical: false, spectrum: false, device: nil, clear: true)
+      def play(file_tone_data, output: nil, sample_rate: 48000, gain: 1.0, plot: nil, graphical: false, spectrum: false, device: nil, clear: true, quiet: false)
         clear_esc = clear ? "\e[H\e[J" : ''
         header = MB::U.wrap("#{clear_esc}\e[36mPlaying\e[0m #{playback_info(file_tone_data)}".lines.map(&:strip).join(' ') + "\n\n")
-        puts header
+        $stderr.puts header unless quiet
 
+        plot = false if quiet && plot.nil?
         plot = false if ENV['PLOT'] == '0' && plot.nil?
         plot = { header_lines: header.lines.count, graphical: graphical } if plot.nil? || plot == true
         plot[:spectrum] = spectrum if plot.is_a?(Hash) && !plot.include?(:spectrum)
@@ -87,7 +88,7 @@ module MB
 
         end
 
-        puts "\n\n"
+        $stderr.puts "\n\n" unless quiet
       end
 
       private
