@@ -68,7 +68,7 @@ end
 loop_count = ENV['LOOP_COUNT']&.to_i
 
 if ARGV.include?('--bench')
-  Benchmark.bmbm do |bench|
+  MB::U.bench_csv(prefix: MB::U.ruby_info) do |bench|
     [100, 800, 4000].each do |bufsize|
       # Reset envelopes
       bench.report("envs @ #{bufsize}") do

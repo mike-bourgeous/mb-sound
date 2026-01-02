@@ -11,7 +11,7 @@ MB::U.sigquit_backtrace
 
 SAMPLE_COUNT = ENV['SAMPLES']&.to_i || 48000 * 180
 
-Benchmark.bmbm do |bench|
+MB::U.bench_csv(prefix: MB::U.ruby_info) do |bench|
   bench.report("ruby_zoh single sample") do
     100.hz.forever.at_rate(441)
       .resample(17000, mode: :ruby_zoh)
