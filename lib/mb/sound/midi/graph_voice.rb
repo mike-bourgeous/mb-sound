@@ -26,7 +26,13 @@ module MB
         # smoothing.  If the automatic detection of envelopes and oscillators
         # doesn't work, then the +:amp_envelopes+, +:envelopes+, and
         # +:freq_constants+ parameters may be used to override detection.
-        def initialize(graph, update_rate: 60, amp_envelopes: nil, envelopes: nil, freq_constants: nil)
+        def initialize(graph = nil, update_rate: 60, amp_envelopes: nil, envelopes: nil, freq_constants: nil)
+          if block_given?
+            graph = yield MidiProxy.new(self)
+          else
+            raise 'No graph was given' unless graph
+          end
+
           @graph = graph
           @update_rate = update_rate
 
