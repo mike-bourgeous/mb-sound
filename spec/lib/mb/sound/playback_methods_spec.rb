@@ -11,7 +11,7 @@ RSpec.describe(MB::Sound::PlaybackMethods) do
     it 'can play a sound file' do
       expect(Kernel).to receive(:sleep).at_least(10).times
       expect_any_instance_of(MB::Sound::NullOutput).to receive(:write).at_least(10).times.and_call_original
-      expect(MB::Sound).to receive(:puts).with(/Playing/)
+      expect($stderr).to receive(:puts).with(/Playing/)
 
       MB::Sound.play('sounds/synth0.flac', plot: false)
     end

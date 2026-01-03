@@ -15,6 +15,7 @@ RSpec.describe(MB::Sound::GraphNode::Wavetable) do
     end
 
     it 'can create a wavetable node from an existing sound file by name' do
+      allow($stderr).to receive(:puts)
       wt = 120.hz.ramp.wavetable(wavetable: 'sounds/sine/sine_100_1s_mono.flac', number: 0.constant)
       expect(wt).to be_a(MB::Sound::GraphNode::Wavetable)
       expect(wt.table).to be_a(Numo::NArray)
@@ -22,6 +23,7 @@ RSpec.describe(MB::Sound::GraphNode::Wavetable) do
     end
 
     it 'can create a wavetable node from an existing sound by Hash' do
+      allow($stderr).to receive(:puts)
       wt = 120.hz.ramp.wavetable(wavetable: { wavetable: 'sounds/sine/sine_100_1s_mono.flac', slices: 3, ratio: 0.5 }, number: 0.constant)
       expect(wt).to be_a(MB::Sound::GraphNode::Wavetable)
       expect(wt.table).to be_a(Numo::NArray)
