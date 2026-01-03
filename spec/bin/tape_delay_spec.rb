@@ -19,7 +19,7 @@ RSpec.describe('bin/tape_delay.rb') do
     output = `DISPLAY= bin/tape_delay.rb --quiet sounds/piano0.flac #{outfile} --graphviz 2>&1`
     expect($?).to be_success
 
-    png_line = output.lines.find { |l| l.include?('.png') }
+    png_line = output.lines.find { |l| l.include?('.png') && l.include?(' image to ') }
     png_file = png_line.strip.rpartition(' image to ').last
 
     info = MB::Sound::FFMPEGInput.parse_info(png_file)
