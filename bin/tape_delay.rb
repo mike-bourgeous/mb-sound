@@ -34,6 +34,7 @@ end
 
 graphviz = !!ARGV.delete('--graphviz')
 overwrite = !!ARGV.delete('--overwrite')
+quiet = !!ARGV.delete('--quiet')
 numerics, others = ARGV.partition { |arg| arg.strip =~ /\A[+-]?[0-9]+(\.[0-9]+)?\z/ }
 
 delay, feedback, extra = numerics.map(&:to_f)
@@ -145,7 +146,7 @@ begin
     puts "Wrote GraphViz image to #{png}"
   end
 
-  MB::Sound.play(result, output: output)
+  MB::Sound.play(result, output: output, quiet: quiet)
 
 rescue => e
   puts MB::U.highlight(e)

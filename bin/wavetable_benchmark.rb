@@ -12,7 +12,7 @@ phase_arr = nil
 
 SAMPLES = ENV['SAMPLES']&.to_i || 48000 * 60
 
-Benchmark.bmbm do |bench|
+MB::U.bench_csv(prefix: MB::U.ruby_info) do |bench|
   bench.report('build wavetable') do
     phase = 100.hz.ramp.at(1).forever
     phase_arr = phase.sample(SAMPLES)

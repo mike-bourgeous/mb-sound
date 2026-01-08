@@ -89,7 +89,7 @@ module MB
         })
 
         # FIXME: only print this in bin/sound.rb or something; not in rspec
-        puts MB::U.highlight(metadata_out) if metadata_out
+        $stderr.puts MB::U.highlight(metadata_out) if metadata_out
 
         for start_samples in (0...(data.length - (period_samples + xfade_samples))).step(jump) do
           start_samples = start_samples.floor
