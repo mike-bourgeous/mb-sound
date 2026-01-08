@@ -78,7 +78,8 @@ module MB
             last_stage = make_diffuser(
               channels: @channels,
               delay_range: delay_range,
-              input: last_stage || @upstream
+              input: last_stage || @upstream,
+              stage: idx
             )
           end
 
@@ -92,7 +93,7 @@ module MB
 
         # For internal use.  Creates and returns a single diffuser stage as an
         # Array of GraphNodes that will delay, shuffle, and remix the input(s).
-        def make_diffuser(channels:, delay_range:, input:)
+        def make_diffuser(stage:, channels:, delay_range:, input:)
           delay_span = (delay_range.end - delay_range.begin).to_f / channels
 
           hadamard = MB::M.hadamard(channels)
@@ -101,17 +102,18 @@ module MB
             delay_begin = delay_range.begin + delay_span * idx
             delay_end = delay_begin + delay_span
             delay_time = rand(delay_begin..delay_end)
+            puts "Diffusion stage #{stage} channel #{idx} delay = #{delay_time}"
 
             if input.is_a?(Array)
               source = input[idx]
             else
-              source = input.get_sampler.named("Reverb diffusion #{idx + 1}")
+              source = input.get_sampler.named("Reverb diffusion stage #{stage + 1} #{idx + 1}")
             end
 
             wet_gain = rand > 0.5 ? 1 : -1
 
             # Delay and inversion step (wet gain 1 or -1)
-            source.delay(seconds: delay_time, wet: wet_gain, smoothing: false, max_delay: MB::M.max(delay_range.end, 1.0))
+            source.delay(seconds: delay_time, wet: wet_gain, smoothing: false, max_delay: MB::M.max(delay_range.end + 0.2, 1.0))
           end
 
           # Hadamard mixing step
@@ -123,9 +125,13 @@ module MB
         # mixing stage (implemented in #sample).
         def make_fdn(inputs)
           inputs.map.with_index { |inp, idx|
+            delay_time = rand(@feedback_range)
+
+            puts "Feedback #{idx} delay = #{delay_time}" # XXX
+            # TODO: adding a dry: to the .delay would basically be an early return
             inp
               .proc { |v| v + @feedback[idx][0...v.length].inplace * @feedback_gain }
-              .delay(seconds: rand(@feedback_range), smoothing: false, max_delay: MB::M.max(@feedback_range.end, 1.0))
+              .delay(seconds: delay_time, smoothing: false, max_delay: MB::M.max(@feedback_range.end + 0.2, 1.0))
           }
         end
 
