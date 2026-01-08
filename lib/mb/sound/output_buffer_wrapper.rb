@@ -40,6 +40,11 @@ module MB
         @buffer_size || @output.buffer_size
       end
 
+      # Indicates that this class can accept writes of any size.
+      def strict_buffer_size?
+        false
+      end
+
       # Writes the given +data+ (an Array of Numo::NArray, with one Numo::NArray
       # per output channel) to the output.
       def write(data)
@@ -72,17 +77,12 @@ module MB
         end
       end
 
-      # If the output has a close method, then this will write any remaining
-      # data (with zero padding to match the output buffer size if needed) and
-      # then close the output.
+      # Calls #flush, then closes the output if it has a #close method.
       #
       # See #flush.
       def close
-        raise 'Output does not respond to :close' unless @output.respond_to?(:close)
-
         flush
-
-        @output.close
+        @output.close if @output.respond_to?(:close)
       end
 
       private

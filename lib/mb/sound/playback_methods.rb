@@ -31,7 +31,10 @@ module MB
 
         case file_tone_data
         when String
-          return play_file(file_tone_data, gain: gain, plot: plot, device: device) if file_tone_data.is_a?(String)
+          return play_file(file_tone_data, gain: gain, plot: plot, device: device, output: output)
+
+        when IOInput, InputBufferWrapper
+          return play_input(file_tone_data, gain: gain, plot: plot, device: device, output: output)
 
         when Array
           if !file_tone_data.empty? && file_tone_data.all?(GraphNode)
@@ -97,9 +100,15 @@ module MB
       # MB::Sound.output.  The +:channels+ parameter may be used to force mono
       # playback (mono sound is converted to stereo by default), or to ask ffmpeg
       # to upmix or downmix audio to a different number of channels.
-      def play_file(filename, channels: nil, gain: 1.0, plot: true, device: nil)
+      def play_file(filename, channels: nil, gain: 1.0, plot: true, device: nil, output:)
         input = MB::Sound::FFMPEGInput.new(filename, channels: channels, resample: 48000)
-        output = MB::Sound.output(channels: channels || (input.channels < 2 ? 2 : input.channels), plot: plot, device: device)
+        play_input(input, gain: gain, plot: plot, device: device, output: output)
+      end
+
+      # Plays the given audio input object (e.g. MB::Sound::FFMPEGInput) to
+      # either a given output, or the system default output.
+      def play_input(input, channels: nil, gain:, plot:, device:, output:)
+        output ||= MB::Sound.output(channels: channels || (input.channels < 2 ? 2 : input.channels), plot: plot, device: device)
 
         buffer_size = output.buffer_size
 
@@ -115,7 +124,7 @@ module MB
 
           # Ensure the output is at least stereo (Pulseaudio plays nothing for
           # mono output on my system)
-          data = data * 2 if data.length == 1 && channels.nil?
+          data = data * output.channels if data.length == 1 && output.channels > 1
 
           output.write(data)
         end

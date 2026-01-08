@@ -143,6 +143,13 @@ module MB
             t += buffer_size.to_f / sample_rate
             break if max_length && t >= max_length
           end
+        elsif data.is_a?(MB::Sound::IOInput) || data.is_a?(MB::Sound::InputBufferWrapper)
+          output = file_output(filename, sample_rate: sample_rate, channels: data.channels, overwrite: overwrite, metadata: metadata)
+          loop do
+            d = input.read(data.buffer_size)
+            break if d.nil? || d.empty? || d[0].nil? || d[0].empty?
+            output.write(d)
+          end
         else
           data = any_sound_to_array(data)
           output = file_output(filename, sample_rate: sample_rate, channels: data.length, overwrite: overwrite, metadata: metadata)
