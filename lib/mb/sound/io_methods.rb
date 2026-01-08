@@ -1,5 +1,8 @@
 require 'logger'
 
+# YARD provides File.relative_path
+require 'yard'
+
 module MB
   module Sound
     # IO-related methods to include in the sound command-line interface.
@@ -163,6 +166,7 @@ module MB
       # Lists all files under the given directory, or under a 'sounds' directory
       # if no path is given.
       def list(dir=nil)
+        # TODO: use Pathname instead of relying on YARD's core extension to File
         path = dir || File.join(Dir.pwd, 'sounds')
         files = Dir[File.join(path, '**', '*.*')].map { |f|
           File.relative_path(dir || Dir.pwd, f)

@@ -154,6 +154,7 @@ DEPENDENCIES
   rspec
   simplecov (~> 0.22.0)
   word_wrap (~> 1.0.0)
+  yard
 
 BUNDLED WITH
    2.4.22
