@@ -48,7 +48,6 @@ module MB
 
         when GraphNode
           # TODO: this could be improved for plotting or saving signal chains/graphs
-          # TODO: what happens for inputs with the InputSampleWrapper?
           sound.sample(960)
 
         else

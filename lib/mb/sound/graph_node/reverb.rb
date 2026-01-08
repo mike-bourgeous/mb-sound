@@ -124,8 +124,8 @@ module MB
         def make_fdn(inputs)
           inputs.map.with_index { |inp, idx|
             inp
-              .proc { |v| v + @feedback[idx][0...v.length] }
-              .delay(seconds: rand(@feedback_range), smoothing: false, max_delay: MB::M.max(@feedback_range.end, 1.0), wet: @feedback_gain)
+              .proc { |v| v + @feedback[idx][0...v.length].inplace * @feedback_gain }
+              .delay(seconds: rand(@feedback_range), smoothing: false, max_delay: MB::M.max(@feedback_range.end, 1.0))
           }
         end
 

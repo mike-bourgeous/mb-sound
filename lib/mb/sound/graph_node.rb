@@ -618,17 +618,33 @@ module MB
       # Example (bin/sound.rb):
       #     play file_input('sounds/drums.flac').reverb
       def reverb(channels: 8, stages: 4, diffusion_range: 0.0005..0.01, feedback_range: 0.0..0.1, feedback_gain: -6.db, wet: 1, dry: 1)
-        MB::Sound::GraphNode::Reverb.new(
-          upstream: self,
-          channels: channels,
-          stages: stages,
-          diffusion_range: diffusion_range,
-          feedback_range: feedback_range,
-          feedback_gain: feedback_gain,
-          sample_rate: self.sample_rate,
-          wet: wet,
-          dry: dry
-        )
+        # Normally polymorphism is a better way to override behavior, but in
+        # this specific case, the code is easier to maintain when all the logic
+        # for these node DSL helper methods is in one place.
+        if self.is_a?(MB::Sound::GraphNode::IOSampleMixin)
+          # Pad inputs with extra silence for ringdown
+          self.and_then(0.constant.for(5)).reverb(
+            channels: channels,
+            stages: stages,
+            diffusion_range: diffusion_range,
+            feedback_range: feedback_range,
+            feedback_gain: feedback_gain,
+            wet: wet,
+            dry: dry
+          )
+        else
+          MB::Sound::GraphNode::Reverb.new(
+            upstream: self,
+            channels: channels,
+            stages: stages,
+            diffusion_range: diffusion_range,
+            feedback_range: feedback_range,
+            feedback_gain: feedback_gain,
+            sample_rate: self.sample_rate,
+            wet: wet,
+            dry: dry
+          )
+        end
       end
 
       # Hard-clips the output of this node to the given min and max, one of
