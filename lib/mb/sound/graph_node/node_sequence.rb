@@ -11,12 +11,17 @@ module MB
         include GraphNode
         include SampleRateHelper
 
+        # The 0-based index of the active node in the sequence.
+        attr_reader :current_node
+
         # Creates a node sequence with the given sources (either Numo::NArrays
         # or a GraphNodes) to play in order.
         def initialize(*sources, sample_rate: nil)
           @sources = nil
           @current_sources = nil
           @sample_rate = sample_rate
+          @current_node = 0
+          @node_type_name = "NodeSequence(node=0)"
 
           and_then(*sources)
 
@@ -40,7 +45,9 @@ module MB
             buf = @current_sources[0].sample(count)
 
             if buf.nil? || buf.empty?
+              @current_node += 1
               @current_sources.shift
+              @node_type_name = "NodeSequence(node=#{@current_node})"
             else
               if @circbuf.available < buf.length
                 @circbuf = @circbuf.dup(@circbuf.buffer_size + buf.length)
