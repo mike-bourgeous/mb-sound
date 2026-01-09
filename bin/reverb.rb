@@ -3,7 +3,12 @@
 #
 # Input and output file can be specified using flags or positional arguments.
 #
+# Presets are a good way to get good sounds quickly.
+#
 # Usage: $0 [options] [input_file [output_file]]
+#
+# Example:
+#     $0 -i sounds/piano0.flac -p space
 
 require 'bundler/setup'
 require 'optionparser'
@@ -12,17 +17,19 @@ require 'mb-sound'
 MB::U.sigquit_backtrace
 
 options = {
-  channels: 4,
-  stages: 4,
-  'diffusion-time': 0.01,
-  'feedback-time': 0.1,
-  'feedback-gain': -6,
-  wet: 0,
-  dry: 0,
+  channels: nil,
+  stages: nil,
+  'diffusion-time': nil,
+  'feedback-time': nil,
+  'feedback-gain': nil,
+  wet: nil,
+  dry: nil,
+  preset: nil,
   input: nil,
   output: nil,
+  graphviz: false,
   force: false,
-  quiet: false
+  quiet: false,
 }
 
 optp = OptionParser.new { |p|
@@ -35,8 +42,10 @@ optp = OptionParser.new { |p|
   p.on('-g', '--feedback-gain DB', Float, 'The feedback gain in decibels (default -6dB, range -120..0)')
   p.on('-w', '--wet DB', Float, 'The wet gain in decibels (default 0dB, range -120..)')
   p.on('-d', '--dry DB', Float, 'The dry gain in decibels (default 0dB, range -120..)')
+  p.on('-p', '--preset PRESET', String, 'A named preset (room, hall, stadium, space, or default)')
   p.on('-i', '--input FILE', String, 'A sound file to process (default is soundcard input)')
   p.on('-o', '--output FILE', String, 'An output sound file (default is soundcard output)')
+  p.on('--graphviz', TrueClass, 'Open a graphical visualization of the signal flow')
   p.on('-f', '--force', TrueClass, 'Whether to overwrite the output file if it exists')
   p.on('-q', '--quiet', TrueClass, 'Whether to disable plotting the output')
 }.parse!(into: options)
@@ -52,7 +61,7 @@ if infile = ARGV.shift
 end
 
 if options[:input]
-  input = MB::Sound.file_input(options[:input]).and_then(0.constant.for(10))
+  input = MB::Sound.file_input(options[:input])
 else
   input = MB::Sound.input
 end
@@ -64,16 +73,17 @@ else
 end
 
 reverb = input.reverb(
+  options[:preset]&.sub(':', '')&.to_sym,
   channels: options[:channels],
   stages: options[:stages],
-  diffusion_range: 0.0..options[:'diffusion-time'],
-  feedback_range: 0.0..options[:'feedback-time'],
-  feedback_gain: options[:'feedback-gain'].db,
-  wet: options[:wet].db,
-  dry: options[:dry].db
+  diffusion_range: options[:'diffusion-time'],
+  feedback_range: options[:'feedback-time'],
+  feedback_gain: options[:'feedback-gain']&.db,
+  wet: options[:wet]&.db,
+  dry: options[:dry]&.db
 ).softclip(0.9)
 
-reverb.open_graphviz unless options[:quiet]
+reverb.open_graphviz if options[:graphviz]
 
 unless options[:quiet]
   MB::U.headline("Playing #{input} to #{output}")
