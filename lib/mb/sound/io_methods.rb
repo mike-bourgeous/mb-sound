@@ -353,6 +353,10 @@ module MB
           raise "Unsupported output type: #{output_type.inspect}"
         end
 
+        # Make sure the cache key corresponds to the actual buffer size, as
+        # sometimes an input will not accept a requested buffer size.
+        info[:buffer_size] = o.buffer_size
+
         @outputs[info] = o
 
         o

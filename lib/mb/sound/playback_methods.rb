@@ -38,7 +38,6 @@ module MB
 
         when Array
           if !file_tone_data.empty? && file_tone_data.all?(GraphNode)
-            # TODO: what happens with inputs?
             bufsize = file_tone_data.map(&:graph_buffer_size).compact.min # nil is ok here
 
             output ||= MB::Sound.output(
