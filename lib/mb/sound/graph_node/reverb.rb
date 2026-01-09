@@ -80,13 +80,11 @@ module MB
           # TODO: consider uneven spacing e.g. placing more near the start
           delay_span = @diffusion_range.end - @diffusion_range.begin
           last_stage = nil
-          puts "\e[1mOverall diffuser delay series\e[0m"
           delays = delay_series(count: @stages, max: delay_span)
 
           pre_delayed = @upstream.delay(seconds: @predelay)
 
           @diffusers = Array.new(@stages) do |idx|
-            puts "\e[1m  Diffuser #{idx}\e[0m"
             delay_end = @diffusion_range.begin + delay_span * (idx + 1)
             delay_range = 0..delay_end
             last_stage = make_diffuser(
@@ -101,7 +99,6 @@ module MB
           # each dimension is nonzero
           @normal = Vector[*Array.new(@channels) { |c| @random.rand((c * 0.5 / @channels)..1) * (@random.rand > 0.5 ? 1 : -1) }].normalize
 
-          puts "\e[1mFDN delay series\e[0m"
           @feedback = Array.new(@channels) { Numo::SFloat.zeros(48000) }
           @feedback_network = make_fdn(@diffusers.last)
         end
@@ -109,7 +106,6 @@ module MB
         # For internal use.  Creates and returns a single diffuser stage as an
         # Array of GraphNodes that will delay, shuffle, and remix the input(s).
         def make_diffuser(stage:, channels:, delay_range:, input:)
-          puts "  Dif #{stage} range #{delay_range}" # XXX
           delay_span = (delay_range.end - delay_range.begin).to_f
           delays = delay_series(count: channels, max: delay_span).shuffle
 
@@ -117,7 +113,6 @@ module MB
 
           nodes = Array.new(channels) do |idx|
             delay_time = delays[idx] + delay_range.begin
-            puts "Diffusion stage #{stage} channel #{idx} delay = #{delay_time}"
 
             if input.is_a?(Array)
               source = input[idx]
@@ -145,7 +140,6 @@ module MB
           inputs.map.with_index { |inp, idx|
             delay_time = delays[idx] + @feedback_range.begin
 
-            puts "Feedback #{idx} delay = #{delay_time}" # XXX
             # TODO: adding a dry: to the .delay would basically be an early return
             inp
               .proc { |v| v + @feedback[idx][0...v.length].inplace * @feedback_gain }
@@ -208,13 +202,10 @@ module MB
 
           Array.new(count) do |i|
             @random.rand(chunk_min..chunk_max).tap { |v|
-              puts "DLY #{v} min=#{chunk_min} max=#{chunk_max}" # XXX
               chunk_min = v
               chunk_max += chunk_size
             }
-          end.tap { |series| # XXX
-            puts "Delay series: count=#{count} max=#{max} delays=#{series.join(', ')}" # XXX
-          }
+          end
         end
       end
     end
