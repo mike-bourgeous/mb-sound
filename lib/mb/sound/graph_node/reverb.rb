@@ -36,7 +36,9 @@ module MB
         #                    loop.  Must be less than 1.0 to avoid overload.
         # +:wet+ - The reverberated signal output level.  Usually 1.0.
         # +:dry+ - The original signal output level.  Usually 1.0.
-        def initialize(upstream:, channels:, stages:, diffusion_range:, feedback_range:, feedback_gain:, sample_rate:, wet:, dry:)
+        # +:seed+ - Random seed Integer for reproducibility of random delays.
+        #           Try different seeds if you get unwanted ringing or echo.
+        def initialize(upstream:, channels:, stages:, diffusion_range:, feedback_range:, feedback_gain:, sample_rate:, wet:, dry:, seed:)
           @sample_rate = sample_rate.to_f
           @upstream = upstream
           check_rate(@upstream, 'upstream')
@@ -57,27 +59,33 @@ module MB
 
           # FIXME: adjust gain or use compression or something based on feedback gain
           # FIXME: gain based on number of stages is wrong
-          # FIXME: stupid amounts of predelay
+          # FIXME: must be a memory leak or very excessive allocation or something as the reverb eventually starts skipping
           # TODO: stereo or multichannel output based on channel subset mixing
+          # stereo/mchannel reverb could just take every nth output and ignore or share the remainders, or could use a downmix matrix
           # TODO: stereo or multichannel input
           # TODO: infinite reverb where feedback loop is normalized and
           # feedback gain is proportional to input volume from diffusion stage
           # TODO: filters in line with feedback to create variable decay times
           # TODO: modulate delay times for richer sound
-          # TODO: better spacing of feedback delay times to avoid flattening to
-          # an echo (might also be choice of reflection normal?)
+          # TODO: realtime/MIDI parameter control
+          # FIXME: risk of very low or high frequency oscillation ; put
+          # high/low pass filter on output or feedback path
+
+          @random = Random.new(seed)
 
           # Create diffusers with delays evenly spaced across the range
-          #
           # TODO: consider uneven spacing e.g. placing more near the start
           delay_span = @diffusion_range.end - @diffusion_range.begin
           last_stage = nil
+          puts "\e[1mOverall diffuser delay series\e[0m"
+          delays = delay_series(count: @stages, max: delay_span)
           @diffusers = Array.new(@stages) do |idx|
+          puts "\e[1m  Diffuser #{idx}\e[0m"
             delay_end = @diffusion_range.begin + delay_span * (idx + 1)
             delay_range = 0..delay_end
             last_stage = make_diffuser(
               channels: @channels,
-              delay_range: delay_range,
+              delay_range: @diffusion_range.begin..(delays[idx] + delay_span),
               input: last_stage || @upstream,
               stage: idx
             )
@@ -85,8 +93,9 @@ module MB
 
           # Normal for reflection plane for Householder matrix, making sure
           # each dimension is nonzero
-          @normal = Vector[*Array.new(@channels) { |c| rand((c * 0.5 / @channels)..1) * (rand > 0.5 ? 1 : -1) }].normalize
+          @normal = Vector[*Array.new(@channels) { |c| @random.rand((c * 0.5 / @channels)..1) * (@random.rand > 0.5 ? 1 : -1) }].normalize
 
+          puts "\e[1mFDN delay series\e[0m"
           @feedback = Array.new(@channels) { Numo::SFloat.zeros(48000) }
           @feedback_network = make_fdn(@diffusers.last)
         end
@@ -94,14 +103,14 @@ module MB
         # For internal use.  Creates and returns a single diffuser stage as an
         # Array of GraphNodes that will delay, shuffle, and remix the input(s).
         def make_diffuser(stage:, channels:, delay_range:, input:)
-          delay_span = (delay_range.end - delay_range.begin).to_f / channels
+          puts "  Dif #{stage} range #{delay_range}" # XXX
+          delay_span = (delay_range.end - delay_range.begin).to_f
+          delays = delay_series(count: channels, max: delay_span).shuffle
 
           hadamard = MB::M.hadamard(channels)
 
           nodes = Array.new(channels) do |idx|
-            delay_begin = delay_range.begin + delay_span * idx
-            delay_end = delay_begin + delay_span
-            delay_time = rand(delay_begin..delay_end)
+            delay_time = delays[idx] + delay_range.begin
             puts "Diffusion stage #{stage} channel #{idx} delay = #{delay_time}"
 
             if input.is_a?(Array)
@@ -110,7 +119,7 @@ module MB
               source = input.get_sampler.named("Reverb diffusion stage #{stage + 1} #{idx + 1}")
             end
 
-            wet_gain = rand > 0.5 ? 1 : -1
+            wet_gain = @random.rand > 0.5 ? 1 : -1
 
             # Delay and inversion step (wet gain 1 or -1)
             source.delay(seconds: delay_time, wet: wet_gain, smoothing: false, max_delay: MB::M.max(delay_range.end + 0.2, 1.0))
@@ -124,8 +133,11 @@ module MB
         # For internal use.  Creates the feedback delay network, minus the
         # mixing stage (implemented in #sample).
         def make_fdn(inputs)
+          delay_span = @feedback_range.end - @feedback_range.begin
+          delays = delay_series(count: inputs.length, max: delay_span).shuffle
+
           inputs.map.with_index { |inp, idx|
-            delay_time = rand(@feedback_range)
+            delay_time = delays[idx] + @feedback_range.begin
 
             puts "Feedback #{idx} delay = #{delay_time}" # XXX
             # TODO: adding a dry: to the .delay would basically be an early return
@@ -179,6 +191,24 @@ module MB
           wet = fdn.sum * (@wet / diffusion_gain)
 
           wet + dry * @dry
+        end
+
+        # Returns a series of randomly spaced delay times, ensuring a
+        # relatively even spread.
+        def delay_series(count:, max:)
+          chunk_min = 0
+          chunk_size = max.to_f / count
+          chunk_max = chunk_size
+
+          Array.new(count) do |i|
+            @random.rand(chunk_min..chunk_max).tap { |v|
+              puts "DLY #{v} min=#{chunk_min} max=#{chunk_max}" # XXX
+              chunk_min = v
+              chunk_max += chunk_size
+            }
+          end.tap { |series| # XXX
+            puts "Delay series: count=#{count} max=#{max} delays=#{series.join(', ')}" # XXX
+          }
         end
       end
     end

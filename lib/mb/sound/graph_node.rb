@@ -611,40 +611,108 @@ module MB
         ).named(name).taps
       end
 
-      # Appends a reverb to this node.
-      # TODO: friendlier parameters like decay time
+      # Appends a reverb to this node.  Named presets change default
+      # parameters, but you can override any of the preset's parameters.
+      #
+      # Presets: :room, :hall, :stadium, :space, :default.
       #
       # See MB::Sound::GraphNode::Reverb#initialize for parameter descriptions.
+      #
+      # The +:extra_time+ parameter controls how much time to add to input
+      # objects to allow the reverb to decay.
+      #
       # Example (bin/sound.rb):
       #     play file_input('sounds/drums.flac').reverb
-      def reverb(channels: 8, stages: 4, diffusion_range: 0.0005..0.01, feedback_range: 0.0..0.1, feedback_gain: -6.db, wet: 1, dry: 1)
+      #     play file_input('sounds/piano0.flac').reverb(:space)
+      def reverb(preset = :default, extra_time: nil, channels: nil, stages: nil, diffusion_range: nil, feedback_range: nil, feedback_gain: nil, wet: nil, dry: nil, seed: nil)
+        # TODO: Store presets in a Hash or something
+        case preset
+        when :room
+          # Subtle in-room reverb
+          channels ||= 8
+          stages ||= 4
+          diffusion_range ||= 0.01
+          feedback_range ||= 0.003..0.016
+          feedback_gain ||= 0.45
+          dry ||= 1
+          wet ||= -16.db
+          seed ||= 0
+          extra_time ||= 1
+
+        when :hall
+          # Something like a symphony hall
+          channels ||= 8
+          stages ||= 4
+          diffusion_range ||= 0.05
+          feedback_range ||= 0.03..0.14
+          feedback_gain ||= 0.9
+          dry ||= 1
+          wet ||= -20.db
+          seed ||= 5
+          extra_time ||= 6
+
+        when :stadium
+          # Stadium PA echo
+          channels ||= 4
+          stages ||= 3
+          diffusion_range ||= 0.05
+          feedback_range ||= 0.3..0.45
+          feedback_gain ||= -4.db
+          dry ||= 1
+          wet ||= -6.db
+          seed ||= 13
+          extra_time ||= 8
+
+        when :space
+          # Outer space, dreaming
+          channels ||= 16
+          stages ||= 4
+          diffusion_range ||= 0.06
+          feedback_range ||= 0.2
+          feedback_gain ||= 0.97
+          dry ||= 1
+          wet ||= -4.5.db
+          seed ||= 0
+          extra_time ||= 36
+
+        when :default, nil
+          # The best parameters I got during the live stream that sounded okay
+          channels ||= 8
+          stages ||= 4
+          diffusion_range ||= 0.0005..0.01
+          feedback_range ||= 0.0..0.1
+          feedback_gain ||= -6.db
+          wet ||= 1
+          dry ||= 1
+          seed ||= 0
+          extra_time ||= 2
+
+        else
+          raise "Unknown reverb preset: #{preset.inspect}"
+        end
+
         # Normally polymorphism is a better way to override behavior, but in
         # this specific case, the code is easier to maintain when all the logic
         # for these node DSL helper methods is in one place.
-        if self.is_a?(MB::Sound::GraphNode::IOSampleMixin)
+        if self.is_a?(IOSampleMixin) || self.is_a?(InputChannelSplit::InputChannelNode)
           # Pad inputs with extra silence for ringdown
-          self.and_then(0.constant.for(5)).reverb(
-            channels: channels,
-            stages: stages,
-            diffusion_range: diffusion_range,
-            feedback_range: feedback_range,
-            feedback_gain: feedback_gain,
-            wet: wet,
-            dry: dry
-          )
+          upstream = self.and_then(0.constant.for(extra_time))
         else
-          MB::Sound::GraphNode::Reverb.new(
-            upstream: self,
-            channels: channels,
-            stages: stages,
-            diffusion_range: diffusion_range,
-            feedback_range: feedback_range,
-            feedback_gain: feedback_gain,
-            sample_rate: self.sample_rate,
-            wet: wet,
-            dry: dry
-          )
+          upstream = self
         end
+
+        MB::Sound::GraphNode::Reverb.new(
+          upstream: upstream,
+          channels: channels,
+          stages: stages,
+          diffusion_range: diffusion_range,
+          feedback_range: feedback_range,
+          feedback_gain: feedback_gain,
+          sample_rate: self.sample_rate,
+          wet: wet,
+          dry: dry,
+          seed: seed
+        )
       end
 
       # Hard-clips the output of this node to the given min and max, one of
