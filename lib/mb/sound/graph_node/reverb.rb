@@ -16,6 +16,10 @@ module MB
         include GraphNode
         include GraphNode::SampleRateHelper
 
+        # A Hash with the parameters of this Reverb.
+        # TODO: somehow incorporate MIDI-controllable or realtime-controllable parameters
+        attr_reader :parameters
+
         # Initializes a reverb node with the given parameters.  See
         # MB::Sound::GraphNode#reverb for some example defaults.
         #
@@ -61,6 +65,17 @@ module MB
           @feedback_gain = feedback_gain.to_f
 
           @predelay = predelay.to_f
+
+          @parameters = {
+            channels: channels,
+            stages: stages,
+            diffusion_range: @diffusion_range,
+            feedback_range: @feedback_range,
+            feedback_gain: @feedback_gain.to_db,
+            wet: @wet.to_db,
+            dry: @dry.to_db,
+            seed: seed,
+          }.freeze
 
           # FIXME: adjust gain or use compression or something based on feedback gain
           # FIXME: gain based on number of stages is wrong
