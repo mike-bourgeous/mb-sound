@@ -624,7 +624,7 @@ module MB
       # Example (bin/sound.rb):
       #     play file_input('sounds/drums.flac').reverb
       #     play file_input('sounds/piano0.flac').reverb(:space)
-      def reverb(preset = :default, extra_time: nil, channels: nil, stages: nil, diffusion_range: nil, feedback_range: nil, feedback_gain: nil, wet: nil, dry: nil, seed: nil)
+      def reverb(preset = :default, extra_time: nil, channels: nil, stages: nil, diffusion_range: nil, feedback_range: nil, feedback_gain: nil, predelay: nil, wet: nil, dry: nil, seed: nil)
         # TODO: Store presets in a Hash or something
         case preset
         when :room
@@ -634,6 +634,7 @@ module MB
           diffusion_range ||= 0.01
           feedback_range ||= 0.003..0.016
           feedback_gain ||= 0.45
+          predelay ||= 0
           dry ||= 1
           wet ||= -16.db
           seed ||= 0
@@ -646,6 +647,7 @@ module MB
           diffusion_range ||= 0.05
           feedback_range ||= 0.03..0.14
           feedback_gain ||= 0.9
+          predelay ||= 0
           dry ||= 1
           wet ||= -20.db
           seed ||= 5
@@ -658,6 +660,7 @@ module MB
           diffusion_range ||= 0.05
           feedback_range ||= 0.3..0.45
           feedback_gain ||= -4.db
+          predelay ||= 0
           dry ||= 1
           wet ||= -6.db
           seed ||= 13
@@ -670,6 +673,7 @@ module MB
           diffusion_range ||= 0.06
           feedback_range ||= 0.2
           feedback_gain ||= 0.97
+          predelay ||= 0.01
           dry ||= 1
           wet ||= -4.5.db
           seed ||= 0
@@ -682,6 +686,7 @@ module MB
           diffusion_range ||= 0.0005..0.01
           feedback_range ||= 0.0..0.1
           feedback_gain ||= -6.db
+          predelay ||= 0
           wet ||= 1
           dry ||= 1
           seed ||= 0
@@ -708,10 +713,11 @@ module MB
           diffusion_range: diffusion_range,
           feedback_range: feedback_range,
           feedback_gain: feedback_gain,
-          sample_rate: self.sample_rate,
+          predelay: predelay,
           wet: wet,
           dry: dry,
-          seed: seed
+          seed: seed,
+          sample_rate: self.sample_rate
         )
       end
 

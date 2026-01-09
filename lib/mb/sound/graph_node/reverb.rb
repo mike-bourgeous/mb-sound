@@ -34,11 +34,14 @@ module MB
         #                     audible frequencies, so at least 0.1s.
         # +:feedback_gain+ - The linear volume of feedback in the feedback
         #                    loop.  Must be less than 1.0 to avoid overload.
+        # +:predelay+ - The wet signal is delayed by this amount.  Default 0.
         # +:wet+ - The reverberated signal output level.  Usually 1.0.
         # +:dry+ - The original signal output level.  Usually 1.0.
         # +:seed+ - Random seed Integer for reproducibility of random delays.
         #           Try different seeds if you get unwanted ringing or echo.
-        def initialize(upstream:, channels:, stages:, diffusion_range:, feedback_range:, feedback_gain:, sample_rate:, wet:, dry:, seed:)
+        def initialize(upstream:, channels:, stages:, diffusion_range:, feedback_range:, feedback_gain:, predelay:, wet:, dry:, seed:, sample_rate:)
+          @random = Random.new(seed)
+
           @sample_rate = sample_rate.to_f
           @upstream = upstream
           check_rate(@upstream, 'upstream')
@@ -57,6 +60,8 @@ module MB
           @dry = dry.to_f
           @feedback_gain = feedback_gain.to_f
 
+          @predelay = predelay.to_f
+
           # FIXME: adjust gain or use compression or something based on feedback gain
           # FIXME: gain based on number of stages is wrong
           # FIXME: must be a memory leak or very excessive allocation or something as the reverb eventually starts skipping
@@ -71,22 +76,23 @@ module MB
           # FIXME: risk of very low or high frequency oscillation ; put
           # high/low pass filter on output or feedback path
 
-          @random = Random.new(seed)
-
           # Create diffusers with delays evenly spaced across the range
           # TODO: consider uneven spacing e.g. placing more near the start
           delay_span = @diffusion_range.end - @diffusion_range.begin
           last_stage = nil
           puts "\e[1mOverall diffuser delay series\e[0m"
           delays = delay_series(count: @stages, max: delay_span)
+
+          pre_delayed = @upstream.delay(seconds: @predelay)
+
           @diffusers = Array.new(@stages) do |idx|
-          puts "\e[1m  Diffuser #{idx}\e[0m"
+            puts "\e[1m  Diffuser #{idx}\e[0m"
             delay_end = @diffusion_range.begin + delay_span * (idx + 1)
             delay_range = 0..delay_end
             last_stage = make_diffuser(
               channels: @channels,
               delay_range: @diffusion_range.begin..(delays[idx] + delay_span),
-              input: last_stage || @upstream,
+              input: last_stage || pre_delayed,
               stage: idx
             )
           end

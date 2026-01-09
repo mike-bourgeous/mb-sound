@@ -22,6 +22,7 @@ options = {
   'diffusion-time': nil,
   'feedback-time': nil,
   'feedback-gain': nil,
+  predelay: nil,
   wet: nil,
   dry: nil,
   preset: nil,
@@ -40,6 +41,7 @@ optp = OptionParser.new { |p|
   p.on('-t', '--diffusion-time SECONDS', Float, 'The maximum diffusion delay in seconds; controls smearing (default 0.01, range 0..)')
   p.on('-b', '--feedback-time SECONDS', Float, 'The maximum feedback delay in seconds; controls room size (default 0.1, range 0..)')
   p.on('-g', '--feedback-gain DB', Float, 'The feedback gain in decibels (default -6dB, range -120..0)')
+  p.on('--predelay SECONDS', Float, 'Pre-delay for the reverb.')
   p.on('-w', '--wet DB', Float, 'The wet gain in decibels (default 0dB, range -120..)')
   p.on('-d', '--dry DB', Float, 'The dry gain in decibels (default 0dB, range -120..)')
   p.on('-p', '--preset PRESET', String, 'A named preset (room, hall, stadium, space, or default)')
@@ -79,9 +81,10 @@ reverb = input.reverb(
   diffusion_range: options[:'diffusion-time'],
   feedback_range: options[:'feedback-time'],
   feedback_gain: options[:'feedback-gain']&.db,
+  predelay: options[:predelay],
   wet: options[:wet]&.db,
   dry: options[:dry]&.db
-).softclip(0.9)
+)
 
 reverb.open_graphviz if options[:graphviz]
 
