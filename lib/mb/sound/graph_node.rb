@@ -798,7 +798,9 @@ module MB
       #
       #     block_buf[] = spy_buf
       #
-      # You can specify a minimum +:interval+ in seconds to reduce CPU load, and your spy won't be called until at least that amount of time has elapsed.
+      # You can specify a minimum +:interval+ in seconds to reduce CPU load,
+      # and your spy won't be called until at least that amount of time has
+      # elapsed, or the value spied changes to/from nil.
       #
       # If you'll need to remove specific spies later, pass a +:handle+.  This
       # may be an object instance, a Symbol, etc.
@@ -825,7 +827,7 @@ module MB
         end
 
         @handled_spies[handle] ||= []
-        @handled_spies[handle] << [block, interval, Time.now - (interval || 1)]
+        @handled_spies[handle] << [block, interval, Time.now - (interval || 1), false]
 
         self
       end
@@ -833,17 +835,19 @@ module MB
       # Used by #spy.
       private def call_spies(data)
         now = Time.now
+        now_nil = data.nil?
 
         @handled_spies.each do |origin, spies|
           info = origin ? " from #{origin}" : ''
 
           spies.each_with_index do |spy_info, idx|
-            s, interval, last_time = spy_info
+            s, interval, last_time, was_nil = spy_info
 
             begin
-              if !interval || (now - last_time) >= interval
+              if !interval || (now - last_time) >= interval || was_nil != now_nil
                 s.call(data)
-                spy_info[-1] = now
+                spy_info[-2] = now
+                spy_info[-1] = now_nil
               end
             rescue => e
               warn "Spy #{idx}/#{s}#{info} raised #{MB::U.highlight(e)}"
