@@ -701,7 +701,7 @@ module MB
         # for these node DSL helper methods is in one place.
         if self.is_a?(IOSampleMixin) || self.is_a?(InputChannelSplit::InputChannelNode)
           # Pad inputs with extra silence for ringdown
-          upstream = self.and_then(0.constant.for(extra_time))
+          upstream = self.and_then(0.constant.for(extra_time).named('Silence')).named('Extend for reverb tail')
         else
           upstream = self
         end
@@ -718,7 +718,7 @@ module MB
           dry: dry,
           seed: seed,
           sample_rate: self.sample_rate
-        )
+        ).tap { |n| n.named(preset.to_s) if preset }
       end
 
       # Hard-clips the output of this node to the given min and max, one of
