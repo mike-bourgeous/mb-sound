@@ -709,6 +709,7 @@ module MB
         MB::Sound::GraphNode::Reverb.new(
           upstream: upstream,
           channels: channels,
+          output_channels: 1,
           stages: stages,
           diffusion_range: diffusion_range,
           feedback_range: feedback_range,

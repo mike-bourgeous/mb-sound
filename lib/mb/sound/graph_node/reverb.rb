@@ -15,10 +15,46 @@ module MB
       class Reverb
         include GraphNode
         include GraphNode::SampleRateHelper
+        include MultiOutput
+
+        # For internal use by Reverb.  Represents a single output on a stereo
+        # or multi-channel reverb.
+        # TODO: consolidate supporting code for multi-output graph nodes.
+        class ReverbOutput
+          extend Forwardable
+          include GraphNode
+          include NodeOutput
+
+          def_delegators :@matrix, :sample_rate, :sample_rate=, :at_rate
+
+          # Creates an output handle for channel +:index+ (0-based) on the
+          # given +:reverb+.
+          def initialize(reverb:, index:)
+            @reverb = reverb
+            @index = index
+          end
+
+          # Returns the next +count+ samples for this output channel.  Call
+          # each channel only once per graph iteration.  GraphNode#get_sampler
+          # helps here.
+          def sample(count)
+            @reverb.sample_internal(count, index: @index)
+          end
+
+          def sources
+            { reverb: @reverb }
+          end
+
+          def to_s
+            "Reverb output #{@index} of #{@reverb.output_channels}"
+          end
+        end
 
         # A Hash with the parameters of this Reverb.
         # TODO: somehow incorporate MIDI-controllable or realtime-controllable parameters
         attr_reader :parameters
+
+        attr_reader :output_channels, :outputs
 
         # Initializes a reverb node with the given parameters.  See
         # MB::Sound::GraphNode#reverb for some example defaults.
@@ -27,6 +63,7 @@ module MB
         # +:channels+ - The number of parallel paths for diffusion and
         #               feedback.  Higher means more diffusion but more CPU
         #               usage.  Must be a power of two; try 4 to 16.
+        # +:output_channels+ - The number of output channels to create.
         # +:stages+ - The number of diffusion stages.  4 is a good default.
         # +:diffusion_range+ - The diffusion delay range in seconds.  May be a
         #                      Range or a Numeric upper bound.  0.01 (10ms) is
@@ -43,7 +80,7 @@ module MB
         # +:dry+ - The original signal output level.  Usually 1.0.
         # +:seed+ - Random seed Integer for reproducibility of random delays.
         #           Try different seeds if you get unwanted ringing or echo.
-        def initialize(upstream:, channels:, stages:, diffusion_range:, feedback_range:, feedback_gain:, predelay:, wet:, dry:, seed:, sample_rate:)
+        def initialize(upstream:, channels:, output_channels:, stages:, diffusion_range:, feedback_range:, feedback_gain:, predelay:, wet:, dry:, seed:, sample_rate:)
           @random = Random.new(seed)
 
           @sample_rate = sample_rate.to_f
@@ -52,6 +89,7 @@ module MB
 
           @upstream_sampler = upstream.get_sampler.named('Reverb upstream')
           @channels = Integer(channels)
+          @output_channels = Integer(output_channels)
           @stages = Integer(stages)
 
           diffusion_range = 0..diffusion_range.to_f if diffusion_range.is_a?(Numeric)
@@ -66,9 +104,18 @@ module MB
 
           @predelay = predelay.to_f
 
+          if @output_channels > 1
+            @outputs = Array.new(@output_channels) do |idx|
+              ReverbOutput.new(reverb: self, index: idx)
+            end.freeze
+          else
+            @outputs = [self].freeze
+          end
+
           @parameters = {
-            channels: channels,
-            stages: stages,
+            channels: @channels,
+            output_channels: @output_channels,
+            stages: @stages,
             diffusion_range: @diffusion_range,
             feedback_range: @feedback_range,
             feedback_gain: @feedback_gain.to_db,
@@ -77,11 +124,7 @@ module MB
             seed: seed,
           }.freeze
 
-          # FIXME: adjust gain or use compression or something based on feedback gain
-          # FIXME: gain based on number of stages is wrong
           # FIXME: must be a memory leak or very excessive allocation or something as the reverb eventually starts skipping
-          # TODO: stereo or multichannel output based on channel subset mixing
-          # stereo/mchannel reverb could just take every nth output and ignore or share the remainders, or could use a downmix matrix
           # TODO: stereo or multichannel input
           # TODO: infinite reverb where feedback loop is normalized and
           # feedback gain is proportional to input volume from diffusion stage
@@ -90,6 +133,7 @@ module MB
           # TODO: realtime/MIDI parameter control
           # FIXME: risk of very low or high frequency oscillation ; put
           # high/low pass filter on output or feedback path
+          # TODO: downmix matrix for multichannel outputs?
 
           # Create diffusers with delays evenly spaced across the range
           # TODO: consider uneven spacing e.g. placing more near the start
@@ -116,6 +160,13 @@ module MB
 
           @feedback = Array.new(@channels) { Numo::SFloat.zeros(48000) }
           @feedback_network = make_fdn(@diffusers.last)
+
+          # This gets overwritten on every call to #update
+          @fdn_groups = partition_outputs(Array.new(@channels), @output_channels)
+
+          # FIXME: adjust gain or use compression or something based on feedback gain
+          # FIXME: gain based on number of stages is wrong
+          @diffusion_gain = @stages * @channels * @fdn_groups[0].length
         end
 
         # For internal use.  Creates and returns a single diffuser stage as an
@@ -135,10 +186,10 @@ module MB
               source = input.get_sampler.named("Reverb diffusion stage #{stage + 1} #{idx + 1}")
             end
 
-            wet_gain = @random.rand > 0.5 ? 1 : -1
+            diffuser_polarity = @random.rand > 0.5 ? 1 : -1
 
             # Delay and inversion step (wet gain 1 or -1)
-            source.delay(seconds: delay_time, wet: wet_gain, smoothing: false, max_delay: MB::M.max(delay_range.end + 0.2, 1.0))
+            source.delay(seconds: delay_time, wet: diffuser_polarity, smoothing: false, max_delay: MB::M.max(delay_range.end + 0.2, 1.0))
           end
 
           # Hadamard mixing step
@@ -147,7 +198,7 @@ module MB
         end
 
         # For internal use.  Creates the feedback delay network, minus the
-        # mixing stage (implemented in #sample).
+        # mixing and reflection stage (implemented in #sample).
         def make_fdn(inputs)
           delay_span = @feedback_range.end - @feedback_range.begin
           delays = delay_series(count: inputs.length, max: delay_span).shuffle
@@ -177,45 +228,70 @@ module MB
 
           @diffusers.each do |stage|
             stage.each do |c|
-              c.sample_rate = rate unless c.sample_rate == @sample_rate
+              c.sample_rate = @sample_rate unless c.sample_rate == @sample_rate
             end
+          end
+
+          @feedback_network.each do |c|
+            c.sample_rate = @sample_rate unless c.sample_rate == @sample_rate
           end
 
           self
         end
 
         # For internal use.  Generates the next +count+ samples without
-        # downmixing.
+        # downmixing and updates the feedback buffer.
         def update(count)
-          @fdn_output = @feedback_network.map { |c| c.sample(count) }
-          return if @fdn_output.any?(&:nil?)
+          @dry_output = @dry * @upstream_sampler.sample(count)
+
+          fdn = @feedback_network.map { |c| c.sample(count) }
+          if fdn.any?(&:nil?)
+            @fdn_output = fdn
+            return
+          end
 
           # Householder matrix (reflection across a plane)
-          # FIXME: the reflection step hasn't been working this whole darn time
-          # XXX refl = MB::M.reflect(Vector[*@fdn_output], @normal)
-          # XXX MB::Sound.plot([refl[0], @fdn_output[0]], graphical: true)
-          # XXX require 'pry-byebug'; binding.pry if refl.map(&:max).max > 1 # XXX
-          refl = @fdn_output # XXX
+          refl = MB::M.reflect(Vector[*fdn], @normal)
 
           # Store feedback for next iteration
           refl.each_with_index do |v, idx|
             @feedback[idx][0...v.length] = v if v
           end
+
+          @fdn_output = refl
+          @fdn_groups = partition_outputs(@fdn_output, @output_channels)
+        end
+
+        # For internal use by ReverbOutput#sample.
+        def sample_internal(count, index:)
+          if @sampled_set.include?(index)
+            if @sampled_set.length != @output_channels
+              warn "Output #{index} sampled again before all others sampled.  Sampled so far: #{@sampled_set}"
+            end
+            @sampled_set.clear
+            update(count)
+          end
+
+          @sampled_set << index
+
+          return nil if @dry_output.nil? || @fdn_output.any?(&:nil?)
+
+          wet = @fdn_groups[index].sum * (@wet * @diffusion_gain)
+          (wet.inplace + @dry_output).not_inplace!
         end
 
         # Generates and returns +count+ samples of the mixed dry and
         # reverberated signal.
         def sample(count)
+          raise 'This is a multi-output Reverb.  Call #sample on one of the output objects.' if @output_channels != 1
+
           update(count)
 
-          dry = @upstream_sampler.sample(count)
-
           # TODO: automatic ringdown time?
-          return nil if dry.nil? || @fdn_output.any?(&:nil?)
+          return nil if @dry_output.nil? || @fdn_output.any?(&:nil?)
 
-          diffusion_gain = @stages * @channels * @channels
-          wet = @fdn_output.sum * (@wet / diffusion_gain)
-          wet + dry * @dry
+          wet = @fdn_output.sum * (@wet * @diffusion_gain)
+          (wet.inplace + @dry_output).not_inplace!
         end
 
         # Returns a series of randomly spaced delay times, ensuring a
@@ -231,6 +307,30 @@ module MB
               chunk_max += chunk_size
             }
           end
+        end
+
+        private
+
+        # Partitions the +list+ of objects into +count+ groups of equal size,
+        # with leftovers shared across all list members.
+        #
+        # Example:
+        #     partition_outputs([1, 2, 3, 4, 5], 2)
+        #     # => [[1, 3, 5], [2, 4, 5]]
+        def partition_outputs(list, count)
+          sliced = list.each_slice(count).to_a
+          if sliced.last.length != count
+            leftovers = sliced.pop
+          end
+
+          groups = sliced.transpose
+          leftovers&.each do |l|
+            groups.each do |g|
+              g << l
+            end
+          end
+
+          groups
         end
       end
     end
