@@ -3,7 +3,8 @@
 #
 # Input and output file can be specified using flags or positional arguments.
 #
-# Presets are a good way to get good sounds quickly.
+# Presets are a good way to get good sounds quickly.  You can override preset
+# defaults by passing options like -w and -g.
 #
 # Usage: $0 [options] [input_file [output_file]]
 #
@@ -17,6 +18,7 @@ require 'mb-sound'
 MB::U.sigquit_backtrace
 
 options = {
+  input_channels: 2,
   channels: nil,
   stages: nil,
   'diffusion-time': nil,
@@ -36,6 +38,8 @@ options = {
 optp = OptionParser.new { |p|
   MB::U.opt_header_help(p)
 
+  p.on('--input-channels N', Integer, 'The number of input channels (default 2; ignored if given an input file)')
+  p.on('-p', '--preset PRESET', String, 'A named preset to change default parameters (room, hall, stadium, space, or default)')
   p.on('-c', '--channels N', Integer, 'The number of parallel diffusion and feedback channels (default 4; powers of two: 1, 2, 4, 8, ...)')
   p.on('-s', '--stages N', Integer, 'The number of diffusion stages (default 4, range 1..N)')
   p.on('-t', '--diffusion-time SECONDS', Float, 'The maximum diffusion delay in seconds; controls smearing (default 0.01, range 0..)')
@@ -44,7 +48,6 @@ optp = OptionParser.new { |p|
   p.on('--predelay SECONDS', Float, 'Pre-delay for the reverb.')
   p.on('-w', '--wet DB', Float, 'The wet gain in decibels (default 0dB, range -120..)')
   p.on('-d', '--dry DB', Float, 'The dry gain in decibels (default 0dB, range -120..)')
-  p.on('-p', '--preset PRESET', String, 'A named preset (room, hall, stadium, space, or default)')
   p.on('-i', '--input FILE', String, 'A sound file to process (default is soundcard input)')
   p.on('-o', '--output FILE', String, 'An output sound file (default is soundcard output)')
   p.on('--graphviz', TrueClass, 'Open a graphical visualization of the signal flow')
@@ -65,17 +68,18 @@ end
 if options[:input]
   input = MB::Sound.file_input(options[:input])
 else
-  input = MB::Sound.input
+  input = MB::Sound.input(channels: options[:input_channels])
 end
 
 if options[:output]
-  output = MB::Sound.file_output(options[:output], overwrite: options[:force] || :prompt, channels: 2)
+  output = MB::Sound.file_output(options[:output], overwrite: options[:force] || :prompt, channels: MB::M.max(2, input.channels))
 else
-  output = MB::Sound.output(plot: !options[:quiet])
+  output = MB::Sound.output(plot: !options[:quiet], channels: MB::M.max(2, input.channels))
 end
 
 reverb = input.reverb(
   options[:preset]&.sub(':', '')&.to_sym,
+  output_channels: output.channels,
   channels: options[:channels],
   stages: options[:stages],
   diffusion_range: options[:'diffusion-time'],
@@ -86,7 +90,10 @@ reverb = input.reverb(
   dry: options[:dry]&.db
 )
 
-reverb.open_graphviz if options[:graphviz]
+if options[:graphviz]
+  node = reverb.is_a?(Array) ? reverb[0] : reverb
+  node.open_graphviz
+end
 
 unless options[:quiet]
   MB::U.headline("Playing #{input} to #{output}")

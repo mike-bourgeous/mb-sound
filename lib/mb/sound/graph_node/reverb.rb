@@ -1,3 +1,5 @@
+require 'set'
+
 module MB
   module Sound
     module GraphNode
@@ -6,6 +8,10 @@ module MB
       # delay-and-mix diffusion steps followed by a feedback delay network.
       #
       # Reference video: https://www.youtube.com/watch?v=6ZK2Goiyotk
+      #
+      # This is structurally similar to, but notably different from, a
+      # Schroeder reverb (see
+      # https://ccrma.stanford.edu/~jos/pasp/Schroeder_Reverberators.html).
       #
       # See MB::Sound::GraphNode#reverb for a starting point for parameters, as
       # it's easy to make something that sounds bad.
@@ -17,6 +23,76 @@ module MB
         include GraphNode::SampleRateHelper
         include MultiOutput
 
+        # Some known-reasonable parameters for the reverb algorithm (plus an
+        # extra_time value for roughly how long it takes for the reverb to ring
+        # out).
+        PRESETS = {
+          room: {
+            description: 'Subtle in-room reverb',
+            channels: 8,
+            stages: 4,
+            diffusion_range: 0.01,
+            feedback_range: 0.003..0.016,
+            feedback_gain: 0.45,
+            predelay: 0,
+            dry: 1,
+            wet: -16.db,
+            seed: 0,
+            extra_time: 1,
+          },
+          hall: {
+            description: 'Something like a symphony hall',
+            channels: 8,
+            stages: 4,
+            diffusion_range: 0.05,
+            feedback_range: 0.03..0.14,
+            feedback_gain: 0.9,
+            predelay: 0,
+            dry: 1,
+            wet: -20.db,
+            seed: 5,
+            extra_time: 6,
+          },
+          stadium: {
+            description: 'Stadium PA echo',
+            channels: 4,
+            stages: 3,
+            diffusion_range: 0.05,
+            feedback_range: 0.3..0.45,
+            feedback_gain: -4.db,
+            predelay: 0,
+            dry: 1,
+            wet: -6.db,
+            seed: 13,
+            extra_time: 8,
+          },
+          space: {
+            description: 'Outer space, dreaming',
+            chanels: 16,
+            stages: 4,
+            diffusion_range: 0.06,
+            feedback_range: 0.2,
+            feedback_gain: 0.97,
+            predelay: 0.01,
+            dry: 1,
+            wet: -4.5.db,
+            seed: 0,
+            extra_time: 36,
+          },
+          default: {
+            channels: 8,
+            stages: 4,
+            diffusion_range: 0.0005..0.01,
+            feedback_range: 0.1,
+            feedback_gain: -6.db,
+            predelay: 0,
+            dry: 1,
+            wet: 1,
+            seed: 0,
+            extra_time: 2,
+          },
+        }
+
         # For internal use by Reverb.  Represents a single output on a stereo
         # or multi-channel reverb.
         # TODO: consolidate supporting code for multi-output graph nodes.
@@ -25,7 +101,7 @@ module MB
           include GraphNode
           include NodeOutput
 
-          def_delegators :@matrix, :sample_rate, :sample_rate=, :at_rate
+          def_delegators :@reverb, :sample_rate, :sample_rate=, :at_rate
 
           # Creates an output handle for channel +:index+ (0-based) on the
           # given +:reverb+.
@@ -87,10 +163,15 @@ module MB
           @upstream = upstream
           check_rate(@upstream, 'upstream')
 
-          @upstream_sampler = upstream.get_sampler.named('Reverb upstream')
+          @upstream_sampler = upstream.get_sampler.named("Reverb #{__id__} upstream")
           @channels = Integer(channels)
           @output_channels = Integer(output_channels)
           @stages = Integer(stages)
+
+          raise 'Channels must be positive' unless @channels >= 1
+          raise 'Channels must be a power of two' unless @channels == (2 ** Math.log2(@channels).floor).round
+          raise 'Stages must be positive' unless @stages >= 1
+          raise 'Output channels must be positive' unless @output_channels >= 1
 
           diffusion_range = 0..diffusion_range.to_f if diffusion_range.is_a?(Numeric)
           @diffusion_range = diffusion_range
@@ -167,6 +248,10 @@ module MB
           # FIXME: adjust gain or use compression or something based on feedback gain
           # FIXME: gain based on number of stages is wrong
           @diffusion_gain = 1.0 / (@stages * @channels * @fdn_groups[0].length)
+
+          @sampled_set = Set.new(0...@output_channels)
+          @dry_output = nil
+          @fdn_output = nil
         end
 
         # For internal use.  Creates and returns a single diffuser stage as an
@@ -183,13 +268,15 @@ module MB
             if input.is_a?(Array)
               source = input[idx]
             else
-              source = input.get_sampler.named("Reverb diffusion stage #{stage + 1} #{idx + 1}")
+              source = input.get_sampler.named("Reverb #{__id__} diffusion stage upstream #{stage + 1} #{idx + 1}")
             end
 
             diffuser_polarity = @random.rand > 0.5 ? 1 : -1
 
             # Delay and inversion step (wet gain 1 or -1)
-            source.delay(seconds: delay_time, wet: diffuser_polarity, smoothing: false, max_delay: MB::M.max(delay_range.end + 0.2, 1.0))
+            source
+              .delay(seconds: delay_time, wet: diffuser_polarity, smoothing: false, max_delay: MB::M.max(delay_range.end + 0.2, 1.0))
+              .named("Reverb #{__id__} diffusion delay #{stage + 1} #{idx + 1}")
           end
 
           # Hadamard mixing step
@@ -208,8 +295,9 @@ module MB
 
             # TODO: adding a dry: to the .delay would basically be an early return
             inp
-              .proc { |v| @feedback[idx][0...v.length].inplace * @feedback_gain + v}
+              .proc { |v| (@feedback[idx][0...v.length].inplace * @feedback_gain + v).not_inplace! }
               .delay(seconds: delay_time, smoothing: false, max_delay: MB::M.max(@feedback_range.end + 0.2, 1.0))
+              .named("Reverb #{__id__} feedback delay #{idx + 1}")
           }
         end
 
@@ -242,11 +330,12 @@ module MB
         # For internal use.  Generates the next +count+ samples without
         # downmixing and updates the feedback buffer.
         def update(count)
-          @dry_output = @dry * @upstream_sampler.sample(count)
+          dry = @upstream_sampler.sample(count)
 
           fdn = @feedback_network.map { |c| c.sample(count) }
-          if fdn.any?(&:nil?)
+          if dry.nil? || fdn.any?(&:nil?)
             @fdn_output = fdn
+            @dry_output = nil
             return
           end
 
@@ -260,6 +349,8 @@ module MB
 
           @fdn_output = refl
           @fdn_groups = partition_outputs(@fdn_output, @output_channels)
+
+          @dry_output = dry * @dry
         end
 
         # For internal use by ReverbOutput#sample.
