@@ -166,7 +166,7 @@ module MB
 
           # FIXME: adjust gain or use compression or something based on feedback gain
           # FIXME: gain based on number of stages is wrong
-          @diffusion_gain = @stages * @channels * @fdn_groups[0].length
+          @diffusion_gain = 1.0 / (@stages * @channels * @fdn_groups[0].length)
         end
 
         # For internal use.  Creates and returns a single diffuser stage as an
