@@ -157,7 +157,7 @@ module MB
 
             # TODO: adding a dry: to the .delay would basically be an early return
             inp
-              .proc { |v| v + @feedback[idx][0...v.length].inplace * @feedback_gain }
+              .proc { |v| @feedback[idx][0...v.length].inplace * @feedback_gain + v}
               .delay(seconds: delay_time, smoothing: false, max_delay: MB::M.max(@feedback_range.end + 0.2, 1.0))
           }
         end
@@ -184,27 +184,37 @@ module MB
           self
         end
 
+        # For internal use.  Generates the next +count+ samples without
+        # downmixing.
+        def update(count)
+          @fdn_output = @feedback_network.map { |c| c.sample(count) }
+          return if @fdn_output.any?(&:nil?)
+
+          # Householder matrix (reflection across a plane)
+          # FIXME: the reflection step hasn't been working this whole darn time
+          # XXX refl = MB::M.reflect(Vector[*@fdn_output], @normal)
+          # XXX MB::Sound.plot([refl[0], @fdn_output[0]], graphical: true)
+          # XXX require 'pry-byebug'; binding.pry if refl.map(&:max).max > 1 # XXX
+          refl = @fdn_output # XXX
+
+          # Store feedback for next iteration
+          refl.each_with_index do |v, idx|
+            @feedback[idx][0...v.length] = v if v
+          end
+        end
+
         # Generates and returns +count+ samples of the mixed dry and
         # reverberated signal.
         def sample(count)
+          update(count)
+
           dry = @upstream_sampler.sample(count)
 
-          fdn = @feedback_network.map { |c| c.sample(count) }
-
           # TODO: automatic ringdown time?
-          return nil if dry.nil? || fdn.any?(&:nil?)
-
-          # Householder matrix (reflection across a plane)
-          MB::M.reflect(Vector[*fdn], @normal)
-
-          fdn.each_with_index do |v, idx|
-            @feedback[idx][0...v.length] = v
-          end
+          return nil if dry.nil? || @fdn_output.any?(&:nil?)
 
           diffusion_gain = @stages * @channels * @channels
-
-          wet = fdn.sum * (@wet / diffusion_gain)
-
+          wet = @fdn_output.sum * (@wet / diffusion_gain)
           wet + dry * @dry
         end
 
