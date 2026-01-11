@@ -18,7 +18,8 @@ require 'mb-sound'
 MB::U.sigquit_backtrace
 
 options = {
-  input_channels: 2,
+  'input-channels': 2,
+  'output-channels': nil,
   channels: nil,
   stages: nil,
   'diffusion-time': nil,
@@ -39,6 +40,7 @@ optp = OptionParser.new { |p|
   MB::U.opt_header_help(p)
 
   p.on('--input-channels N', Integer, 'The number of input channels (default 2; ignored if given an input file)')
+  p.on('--output-channels N', Integer, 'The number of output channels (default: number of input channels)')
   p.on('-p', '--preset PRESET', String, 'A named preset to change default parameters (room, hall, stadium, space, or default)')
   p.on('-c', '--channels N', Integer, 'The number of parallel diffusion and feedback channels (default 4; powers of two: 1, 2, 4, 8, ...)')
   p.on('-s', '--stages N', Integer, 'The number of diffusion stages (default 4, range 1..N)')
@@ -68,13 +70,14 @@ end
 if options[:input]
   input = MB::Sound.file_input(options[:input])
 else
-  input = MB::Sound.input(channels: options[:input_channels])
+  input = MB::Sound.input(channels: options[:'input-channels'])
 end
 
+output_channels = options[:'output-channels'] || MB::M.max(2, input.channels)
 if options[:output]
-  output = MB::Sound.file_output(options[:output], overwrite: options[:force] || :prompt, channels: MB::M.max(2, input.channels))
+  output = MB::Sound.file_output(options[:output], overwrite: options[:force] || :prompt, channels: output_channels)
 else
-  output = MB::Sound.output(plot: !options[:quiet], channels: MB::M.max(2, input.channels))
+  output = MB::Sound.output(plot: !options[:quiet], channels: output_channels)
 end
 
 reverb = input.reverb(
