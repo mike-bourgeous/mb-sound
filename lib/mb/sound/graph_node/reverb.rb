@@ -173,9 +173,6 @@ module MB
           @upstreams.each_with_index do |u, idx|
             check_rate(@upstreams, "upstream #{idx}")
           end
-          @upstream_samplers = @upstreams.map.with_index { |u, idx|
-            u.get_sampler.named("Reverb #{__id__} upstream #{idx}")
-          }
 
           @channels = Integer(channels)
           @output_channels = Integer(output_channels)
@@ -237,8 +234,14 @@ module MB
           last_stage = nil
           delays = delay_series(count: @stages, max: delay_span)
 
-          @upstream_groups = partition_outputs(@upstreams, @channels)
-          pre_delayed = @upstream_groups.map { |u|
+          @upstream_dry_groups = partition_outputs(@upstreams, @output_channels)
+          @upstream_samplers = @upstream_dry_groups.map.with_index { |u, idx|
+            u = u.length > 1 ? u.sum : u[0]
+            u.get_sampler.named("Reverb #{__id__} upstream #{idx}")
+          }
+
+          @upstream_diffusion_groups = partition_outputs(@upstreams, @channels)
+          pre_delayed = @upstream_diffusion_groups.map { |u|
             u = u.length > 1 ? u.sum : u[0]
             u.delay(seconds: @predelay)
           }
