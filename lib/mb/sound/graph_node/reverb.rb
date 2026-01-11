@@ -7,13 +7,14 @@ module MB
       # Geraint Luff at ADC21.  The basic algorithm is a number of
       # delay-and-mix diffusion steps followed by a feedback delay network.
       #
-      # Reference video: https://www.youtube.com/watch?v=6ZK2Goiyotk
-      #
-      # This is structurally similar to a Schroeder reverb (see
-      # https://ccrma.stanford.edu/~jos/pasp/Schroeder_Reverberators.html).
-      #
       # See MB::Sound::GraphNode#reverb for a starting point for parameters, as
       # it's easy to make something that sounds bad.
+      #
+      # Reference video: https://www.youtube.com/watch?v=6ZK2Goiyotk
+      #
+      # Excellent reference on artificial reverb I only found after
+      # implementing all of this:
+      # https://ccrma.stanford.edu/~jos/pasp/Artificial_Reverberation.html
       #
       # Example (bin/sound.rb):
       #     play file_input('sounds/drums.flac').reverb
