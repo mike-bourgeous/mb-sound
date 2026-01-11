@@ -7,10 +7,19 @@ module MB
       # You'll generally also want to include GraphNode in any class that
       # includes this module.
       module IOSampleMixin
+        include MultiOutput
+
         # Returns an Array of graph source nodes for each of the channels (up to
         # +:max_channels+) on this input.  Similar to GraphNode#tee.
         def split(max_channels: nil)
-          InputChannelSplit.new(self, max_channels: max_channels).channels
+          @split ||= InputChannelSplit.new(self, max_channels: max_channels)
+          @split.channels
+        end
+
+        # Returns a GraphNode output for each input channel by wrapping #split.
+        # For MultiOutput compatibility.
+        def outputs
+          split && @split.outputs
         end
 
         # Reads +count+ frames (which should match the preferred buffer size of
@@ -18,6 +27,8 @@ module MB
         # This is for interoperability with the arithmetic DSL in MB::Sound that
         # allows combining Tones, Mixers, Multipliers, and inputs.
         def sample(count)
+          raise 'Input has been split; cannot sample directly' if @split
+
           data = read(count)
           return nil if data.nil? || data.empty? || data[0].empty?
 

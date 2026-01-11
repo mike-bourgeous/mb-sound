@@ -659,9 +659,6 @@ module MB
         # inputs and outputs.
         silence = 0.constant.for(extra_time).named('Silence')
         case self
-        when IOSampleMixin
-          upstream = self.split.map { |o| o.and_then(silence) }
-
         when MultiOutput
           upstream = self.outputs.map { |o| o.and_then(silence) }
 

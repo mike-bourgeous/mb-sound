@@ -9,6 +9,16 @@ module MB
         def outputs
           raise NotImplementedError, 'Multi-output graph nodes must implement #outputs to return NodeOutputs'
         end
+
+        # Notifies spies on the core node when the first output is sampled.
+        #
+        # TODO: give more useful data than just the first output, e.g. sum,
+        # multiple channels, etc.
+        def spy(handle: nil, interval: false)
+          outputs[0].spy(handle: handle, interval: interval) do |v|
+            yield v
+          end
+        end
       end
     end
   end
