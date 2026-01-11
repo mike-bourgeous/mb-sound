@@ -1,12 +1,7 @@
 require 'cmath'
 require 'numo/narray'
 
-begin
-  require 'mb-sound-jackffi'
-rescue LoadError
-  # JackFFI is unavailable
-end
-
+require 'mb-sound-jackffi'
 require 'mb-math'
 require 'mb-util'
 
