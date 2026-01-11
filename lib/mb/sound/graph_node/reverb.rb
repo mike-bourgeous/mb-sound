@@ -234,6 +234,11 @@ module MB
           last_stage = nil
           delays = delay_series(count: @stages, max: delay_span)
 
+          # TODO: maybe just put N dry inputs on the first N output channels
+          # without downmixing for the extra channels.  This would allow the
+          # reverb to be used as a stereo-to-surround upmixing reverb.
+          #
+          # Example: bin/reverb.rb -p hall --input-channels 2 --output-channels 5
           @upstream_dry_groups = partition_outputs(@upstreams, @output_channels)
           @upstream_samplers = @upstream_dry_groups.map.with_index { |u, idx|
             u = u.length > 1 ? u.sum : u[0]
@@ -241,9 +246,10 @@ module MB
           }
 
           @upstream_diffusion_groups = partition_outputs(@upstreams, @channels)
-          pre_delayed = @upstream_diffusion_groups.map { |u|
+          pre_delayed = @upstream_diffusion_groups.map.with_index { |u, idx|
+            # TODO: just add predelay to first diffusion stage?
             u = u.length > 1 ? u.sum : u[0]
-            u.delay(seconds: @predelay)
+            u.delay(seconds: @predelay).named("Reverb #{__id__} predelay #{idx}")
           }
 
           @diffusers = Array.new(@stages) do |idx|
@@ -327,7 +333,7 @@ module MB
         # and diffusion network.
         def sources(internal: false)
           {
-            **@upstream_samplers.map.with_index { |u, idx|
+            **@upstreams.map.with_index { |u, idx|
               ["input_#{idx + 1}", u]
             }.to_h,
             **(internal ? @feedback_network.map.with_index { |v, idx| [:"channel_#{idx + 1}", v] }.to_h : {})
