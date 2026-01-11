@@ -276,7 +276,7 @@ module MB
 
           # FIXME: adjust gain or use compression or something based on feedback gain
           # FIXME: gain based on number of stages is wrong
-          @diffusion_gain = 1.0 / (@stages * @channels * @fdn_groups[0].length)
+          @diffusion_gain = 1.0 / (@stages * @channels * @channels)
 
           @sampled_set = Set.new(0...@output_channels)
           @dry_output = nil
