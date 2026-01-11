@@ -657,7 +657,7 @@ module MB
         #
         # TODO: find a way to tidy up the flow graph with these multichannel
         # inputs and outputs.
-        silence = 0.constant.for(extra_time).named('Silence').named('Extend for reverb tail')
+        silence = 0.constant.for(extra_time).named('Silence')
         case self
         when IOSampleMixin
           upstream = self.split.map { |o| o.and_then(silence) }

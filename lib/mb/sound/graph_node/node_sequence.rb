@@ -85,7 +85,7 @@ module MB
             if s.is_a?(Numo::NArray)
               ArrayInput.new(data: [s])
             else
-              s
+              s.get_sampler
             end
           }.freeze
 
