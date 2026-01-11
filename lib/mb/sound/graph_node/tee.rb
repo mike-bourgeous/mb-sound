@@ -49,6 +49,7 @@ module MB
 
           # For internal use by Tee.  Initializes one parallel branch of the tee.
           def initialize(tee, index, reader)
+            @owner = tee
             @tee = tee
             @index = index
             @reader = reader

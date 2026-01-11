@@ -20,6 +20,7 @@ module MB
           # Creates an output node with the given +:matrix+ that owns it, and
           # the given +:index+.
           def initialize(matrix:, index:)
+            @owner = matrix
             @matrix = matrix
             @index = index
           end

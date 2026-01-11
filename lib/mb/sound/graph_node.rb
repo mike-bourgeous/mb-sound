@@ -1014,10 +1014,18 @@ module MB
         self
       end
 
-      # Walk up sources until a non-Tee::Branch node is found.  Used by #graph.
+      # Walk up sources until a "real" node is found, skipping over
+      # housekeeping nodes like Tee::Branch.  Used by #graph.
       def self.climb_tee_tree(branch)
-        branch = branch.original_source while branch.is_a?(MB::Sound::GraphNode::Tee::Branch)
+        branch = branch.original_source while climb_over?(branch)
         branch
+      end
+
+      # Returns true if the given branch should be skipped normally when doing
+      # a non-verbose traversal of a node graph.  This e.g. skips tees,
+      # branches, adapters, etc.  See .climb_tee_tree and NodeOutput.
+      def self.climb_over?(branch)
+        branch.is_a?(MB::Sound::GraphNode::NodeOutput)
       end
 
       # Create a list of upstream nodes from the given graph node.  See #graph.

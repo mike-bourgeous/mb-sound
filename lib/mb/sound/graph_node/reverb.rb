@@ -105,6 +105,7 @@ module MB
           # Creates an output handle for channel +:index+ (0-based) on the
           # given +:reverb+.
           def initialize(reverb:, index:)
+            @owner = reverb
             @reverb = reverb
             @index = index
           end
