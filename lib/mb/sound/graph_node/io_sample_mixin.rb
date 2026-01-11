@@ -11,15 +11,19 @@ module MB
 
         # Returns an Array of graph source nodes for each of the channels (up to
         # +:max_channels+) on this input.  Similar to GraphNode#tee.
+        #
+        # Returns the same objects each time, so use GraphNode#get_sampler if
+        # they need to be branched (most nodes already use get_sampler
+        # internally).
         def split(max_channels: nil)
           @split ||= InputChannelSplit.new(self, max_channels: max_channels)
-          @split.channels
+          @split.outputs
         end
 
         # Returns a GraphNode output for each input channel by wrapping #split.
         # For MultiOutput compatibility.
         def outputs
-          split && @split.outputs
+          split
         end
 
         # Reads +count+ frames (which should match the preferred buffer size of
