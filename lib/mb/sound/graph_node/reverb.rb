@@ -9,8 +9,7 @@ module MB
       #
       # Reference video: https://www.youtube.com/watch?v=6ZK2Goiyotk
       #
-      # This is structurally similar to, but notably different from, a
-      # Schroeder reverb (see
+      # This is structurally similar to a Schroeder reverb (see
       # https://ccrma.stanford.edu/~jos/pasp/Schroeder_Reverberators.html).
       #
       # See MB::Sound::GraphNode#reverb for a starting point for parameters, as
@@ -133,9 +132,14 @@ module MB
         attr_reader :output_channels, :outputs
 
         # Initializes a reverb node with the given parameters.  See
-        # MB::Sound::GraphNode#reverb for some example defaults.
+        # PRESETS for some example defaults.  Generally one would use
+        # GraphNode#reverb to create a reverb.
         #
-        # +:upstream+ - The source node to which to apply reverb.
+        # If +:upstream+ is a MultiOutput node, then it will split out all of
+        # the outputs from that node as a multichannel input.
+        #
+        # +:upstream+ - The source node to which to apply reverb, or an Array
+        #               of source nodes.
         # +:channels+ - The number of parallel paths for diffusion and
         #               feedback.  Higher means more diffusion but more CPU
         #               usage.  Must be a power of two; try 4 to 16.
@@ -160,10 +164,18 @@ module MB
           @random = Random.new(seed)
 
           @sample_rate = sample_rate.to_f
-          @upstream = upstream
-          check_rate(@upstream, 'upstream')
 
-          @upstream_sampler = upstream.get_sampler.named("Reverb #{__id__} upstream")
+          @upstreams = upstream
+          @upstreams = @upstreams.outputs if @upstreams.is_a?(MB::Sound::GraphNode::MultiOutput)
+          @upstreams = [@upstreams] unless @upstreams.is_a?(Array)
+
+          @upstreams.each_with_index do |u, idx|
+            check_rate(@upstreams, "upstream #{idx}")
+          end
+          @upstream_samplers = @upstreams.map.with_index { |u, idx|
+            u.get_sampler.named("Reverb #{__id__} upstream #{idx}")
+          }
+
           @channels = Integer(channels)
           @output_channels = Integer(output_channels)
           @stages = Integer(stages)
@@ -206,7 +218,6 @@ module MB
           }.freeze
 
           # FIXME: must be a memory leak or very excessive allocation or something as the reverb eventually starts skipping
-          # TODO: stereo or multichannel input
           # TODO: infinite reverb where feedback loop is normalized and
           # feedback gain is proportional to input volume from diffusion stage
           # TODO: filters in line with feedback to create variable decay times
@@ -215,6 +226,9 @@ module MB
           # FIXME: risk of very low or high frequency oscillation ; put
           # high/low pass filter on output or feedback path
           # TODO: downmix matrix for multichannel outputs?
+          # TODO: could do more complex designs for multichannel input with
+          # independent or semi-independent diffusion stages, as the current
+          # diffusion stage pretty fully mixes all input channels
 
           # Create diffusers with delays evenly spaced across the range
           # TODO: consider uneven spacing e.g. placing more near the start
@@ -222,7 +236,11 @@ module MB
           last_stage = nil
           delays = delay_series(count: @stages, max: delay_span)
 
-          pre_delayed = @upstream.delay(seconds: @predelay)
+          @upstream_groups = partition_outputs(@upstreams, @channels)
+          pre_delayed = @upstream_groups.map { |u|
+            u = u.length > 1 ? u.sum : u[0]
+            u.delay(seconds: @predelay)
+          }
 
           @diffusers = Array.new(@stages) do |idx|
             delay_end = @diffusion_range.begin + delay_span * (idx + 1)
@@ -305,7 +323,9 @@ module MB
         # and diffusion network.
         def sources(internal: false)
           {
-            input: @upstream_sampler,
+            **@upstream_samplers.map.with_index { |u, idx|
+              ["input_#{idx + 1}", u]
+            }.to_h,
             **(internal ? @feedback_network.map.with_index { |v, idx| [:"channel_#{idx + 1}", v] }.to_h : {})
           }
         end
@@ -330,7 +350,7 @@ module MB
         # For internal use.  Generates the next +count+ samples without
         # downmixing and updates the feedback buffer.
         def update(count)
-          dry = @upstream_sampler.sample(count)
+          dry = @upstream_samplers.map { |u| u.sample(count) }
 
           fdn = @feedback_network.map { |c| c.sample(count) }
           if dry.nil? || fdn.any?(&:nil?)
@@ -340,7 +360,7 @@ module MB
           end
 
           # Householder matrix (reflection across a plane)
-          refl = MB::M.reflect(Vector[*fdn], @normal)
+          refl = MB::M.reflect(Vector[*fdn], @normal).to_a
 
           # Store feedback for next iteration
           refl.each_with_index do |v, idx|
@@ -350,7 +370,8 @@ module MB
           @fdn_output = refl
           @fdn_groups = partition_outputs(@fdn_output, @output_channels)
 
-          @dry_output = dry * @dry
+          @dry_output = dry.map { |c| (c.inplace * @dry).not_inplace! }
+          @dry_groups = partition_outputs(@dry_output, @output_channels)
         end
 
         # For internal use by ReverbOutput#sample.
@@ -368,7 +389,7 @@ module MB
           return nil if @dry_output.nil? || @fdn_output.any?(&:nil?)
 
           wet = @fdn_groups[index].sum * (@wet * @diffusion_gain)
-          (wet.inplace + @dry_output).not_inplace!
+          (wet.inplace + @dry_groups[index].sum).not_inplace!
         end
 
         # Generates and returns +count+ samples of the mixed dry and
@@ -382,7 +403,7 @@ module MB
           return nil if @dry_output.nil? || @fdn_output.any?(&:nil?)
 
           wet = @fdn_output.sum * (@wet * @diffusion_gain)
-          (wet.inplace + @dry_output).not_inplace!
+          (wet.inplace + @dry_output.sum).not_inplace!
         end
 
         # Returns a series of randomly spaced delay times, ensuring a
@@ -405,11 +426,38 @@ module MB
         # Partitions the +list+ of objects into +count+ groups of equal size,
         # with leftovers shared across all list members.
         #
+        # If +count+ is greater than the list length, then the operation is
+        # basically inverted.  The list will be repeated until +count+ - 1
+        # elements are reached, with the last group taking the remainder of the
+        # list.  This ensures that all list elements appear the same number of
+        # times.
+        #
+        # TODO: more complex / spatial aware mixing matrices?
+        #
         # Example:
         #     partition_outputs([1, 2, 3, 4, 5], 2)
         #     # => [[1, 3, 5], [2, 4, 5]]
+        #
+        #     partition_outputs([1, 2], 3)
+        #     # => [[1], [2], [1, 2]]
+        #
+        #     partition_outputs([1, 2, 3], 5)
+        #     # => [[1], [2], [3], [1], [2, 3]]
         def partition_outputs(list, count)
+          if count > list.length
+            return Array.new(count) { |idx|
+              if idx == count - 1
+                # Take the remaining list elements to make sure every list
+                # element occurs the same number of times
+                list[(idx % list.length)..]
+              else
+                [list[idx % list.length]]
+              end
+            }
+          end
+
           sliced = list.each_slice(count).to_a
+
           if sliced.last.length != count
             leftovers = sliced.pop
           end

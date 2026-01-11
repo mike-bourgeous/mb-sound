@@ -615,6 +615,9 @@ module MB
       # Appends a reverb to this node.  Named presets change default
       # parameters, but you can override any of the preset's parameters.
       #
+      # If this is a multi-output node (e.g. a splittable input object), then
+      # the outputs are broken out as a multichannel input to the Reverb.
+      #
       # Presets: :room, :hall, :stadium, :space, :default.  See
       # Reverb::PRESETS.
       #
@@ -646,12 +649,25 @@ module MB
         extra_time = params.delete(:extra_time)
         _description = params.delete(:description)
 
+        # Pad inputs with extra silence for ringdown
+        #
         # Normally polymorphism is a better way to override behavior, but in
         # this specific case, the code is easier to maintain when all the logic
         # for these node DSL helper methods is in one place.
-        if self.is_a?(IOSampleMixin) || self.is_a?(InputChannelSplit::InputChannelNode)
-          # Pad inputs with extra silence for ringdown
-          upstream = self.and_then(0.constant.for(extra_time).named('Silence')).named('Extend for reverb tail')
+        #
+        # TODO: find a way to tidy up the flow graph with these multichannel
+        # inputs and outputs.
+        silence = 0.constant.for(extra_time).named('Silence').named('Extend for reverb tail')
+        case self
+        when IOSampleMixin
+          upstream = self.split.map { |o| o.and_then(silence) }
+
+        when MultiOutput
+          upstream = self.outputs.map { |o| o.and_then(silence) }
+
+        when InputChannelSplit::InputChannelNode
+          upstream = self.and_then(silence)
+
         else
           upstream = self
         end
