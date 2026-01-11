@@ -53,6 +53,7 @@ module MB
             extra_time: 6,
           },
           stadium: {
+            # TODO: it would be cool if the echoes panned around more
             description: 'Stadium PA echo',
             channels: 4,
             stages: 3,
@@ -67,7 +68,7 @@ module MB
           },
           space: {
             description: 'Outer space, dreaming',
-            chanels: 16,
+            channels: 16,
             stages: 4,
             diffusion_range: 0.06,
             feedback_range: 0.2,
