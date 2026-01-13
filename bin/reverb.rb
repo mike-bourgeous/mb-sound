@@ -6,6 +6,9 @@
 # Presets are a good way to get good sounds quickly.  You can override preset
 # defaults by passing options like -w and -g.
 #
+# Note: the --diffusion-time and --feedback-time options also accept ranges
+# like "0.2..0.5".
+#
 # Usage: $0 [options] [input_file [output_file]]
 #
 # Example:
@@ -30,32 +33,54 @@ options = {
   wet: nil,
   dry: nil,
   preset: nil,
+  seed: nil,
+  'extra-time': nil,
   input: nil,
   output: nil,
-  'extra-time': nil,
   graphviz: false,
   force: false,
   quiet: false,
 }
 
+# Representation of a numeric value or numeric range for OptionParser.
+module FloatOrRange
+  def self.parse(str)
+    if str.include?('..')
+      range_start, _, range_end = str.partition('..')
+      range_start = Float(range_start)
+      range_end = Float(range_end)
+      range_start..range_end
+    else
+      Float(str)
+    end
+  rescue => e
+    raise "Error parsing numeric or range value #{str.inspect}: #{e}"
+  end
+end
+
 optp = OptionParser.new { |p|
   MB::U.opt_header_help(p)
+
+  p.accept(FloatOrRange) do |str|
+    FloatOrRange.parse(str)
+  end
 
   p.on('--input-channels N', Integer, 'The number of input channels (default 2; ignored if given an input file)')
   p.on('--output-channels N', Integer, 'The number of output channels (default: number of input channels)')
   p.on('-p', '--preset PRESET', String, 'A named preset to change default parameters (room, hall, stadium, space, or default)')
   p.on('-c', '--channels N', Integer, 'The number of parallel diffusion and feedback channels (default 4; powers of two: 1, 2, 4, 8, ...)')
   p.on('-s', '--stages N', Integer, 'The number of diffusion stages (default 4, range 1..N)')
-  p.on('-t', '--diffusion-time SECONDS', Float, 'The maximum diffusion delay in seconds; controls smearing (default 0.01, range 0..)')
-  p.on('-b', '--feedback-time SECONDS', Float, 'The maximum feedback delay in seconds; controls room size (default 0.1, range 0..)')
+  p.on('-t', '--diffusion-time SECONDS', FloatOrRange, 'The maximum diffusion delay in seconds; controls smearing (default 0.01, range 0..)')
+  p.on('-b', '--feedback-time SECONDS', FloatOrRange, 'The maximum feedback delay in seconds; controls room size (default 0.1, range 0..)')
   p.on('-g', '--feedback-gain DB', Float, 'The feedback gain in decibels (default -6dB, range -120..0)')
   p.on('-x', '--disable-feedback', 'If true, the feedback stage of the reverb will be bypassed.')
   p.on('--predelay SECONDS', Float, 'Pre-delay for the reverb.')
   p.on('-w', '--wet DB', Float, 'The wet gain in decibels (default 0dB, range -120..)')
   p.on('-d', '--dry DB', Float, 'The dry gain in decibels (default 0dB, range -120..)')
+  p.on('--seed INT', Integer, 'Random seed for the reverb generator (default varies by preset, often 0)')
+  p.on('--extra-time SECONDS', Float, 'Amount of silence to add after an input file')
   p.on('-i', '--input FILE', String, 'A sound file to process (default is soundcard input)')
   p.on('-o', '--output FILE', String, 'An output sound file (default is soundcard output)')
-  p.on('--extra-time SECONDS', Float, 'Amount of silence to add after an input file')
   p.on('--graphviz', TrueClass, 'Open a graphical visualization of the signal flow')
   p.on('-f', '--force', TrueClass, 'Whether to overwrite the output file if it exists')
   p.on('-q', '--quiet', TrueClass, 'Whether to disable plotting the output')
@@ -96,6 +121,7 @@ reverb = input.reverb(
   predelay: options[:predelay],
   wet: options[:wet]&.db,
   dry: options[:dry]&.db,
+  seed: options[:seed],
   extra_time: options[:'extra-time']
 )
 
