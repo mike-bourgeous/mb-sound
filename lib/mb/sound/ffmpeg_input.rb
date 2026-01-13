@@ -177,6 +177,15 @@ module MB
         )
       end
 
+      # Closes the input stream and raises an error if ffmpeg returned an
+      # error.
+      def close
+        super.tap { |result|
+          # TODO: capture ffmpeg output for the error message
+          raise "Reading from #{@filename} failed" unless result.success?
+        }
+      end
+
       # Returns a playback progress as a percentage of the total length from 0
       # to 100.
       def progress
