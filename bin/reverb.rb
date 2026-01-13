@@ -25,12 +25,14 @@ options = {
   'diffusion-time': nil,
   'feedback-time': nil,
   'feedback-gain': nil,
+  'disable-feedback': nil,
   predelay: nil,
   wet: nil,
   dry: nil,
   preset: nil,
   input: nil,
   output: nil,
+  'extra-time': nil,
   graphviz: false,
   force: false,
   quiet: false,
@@ -47,11 +49,13 @@ optp = OptionParser.new { |p|
   p.on('-t', '--diffusion-time SECONDS', Float, 'The maximum diffusion delay in seconds; controls smearing (default 0.01, range 0..)')
   p.on('-b', '--feedback-time SECONDS', Float, 'The maximum feedback delay in seconds; controls room size (default 0.1, range 0..)')
   p.on('-g', '--feedback-gain DB', Float, 'The feedback gain in decibels (default -6dB, range -120..0)')
+  p.on('-x', '--disable-feedback', 'If true, the feedback stage of the reverb will be bypassed.')
   p.on('--predelay SECONDS', Float, 'Pre-delay for the reverb.')
   p.on('-w', '--wet DB', Float, 'The wet gain in decibels (default 0dB, range -120..)')
   p.on('-d', '--dry DB', Float, 'The dry gain in decibels (default 0dB, range -120..)')
   p.on('-i', '--input FILE', String, 'A sound file to process (default is soundcard input)')
   p.on('-o', '--output FILE', String, 'An output sound file (default is soundcard output)')
+  p.on('--extra-time SECONDS', Float, 'Amount of silence to add after an input file')
   p.on('--graphviz', TrueClass, 'Open a graphical visualization of the signal flow')
   p.on('-f', '--force', TrueClass, 'Whether to overwrite the output file if it exists')
   p.on('-q', '--quiet', TrueClass, 'Whether to disable plotting the output')
@@ -88,9 +92,11 @@ reverb = input.reverb(
   diffusion_range: options[:'diffusion-time'],
   feedback_range: options[:'feedback-time'],
   feedback_gain: options[:'feedback-gain']&.db,
+  feedback_enabled: options[:'disable-feedback'].nil? ? nil : !options[:'disable-feedback'],
   predelay: options[:predelay],
   wet: options[:wet]&.db,
-  dry: options[:dry]&.db
+  dry: options[:dry]&.db,
+  extra_time: options[:'extra-time']
 )
 
 if options[:graphviz]

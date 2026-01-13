@@ -34,6 +34,7 @@ module MB
             diffusion_range: 0.01,
             feedback_range: 0.003..0.016,
             feedback_gain: 0.45,
+            feedback_enabled: true,
             predelay: 0,
             dry: 1,
             wet: -16.db,
@@ -47,6 +48,7 @@ module MB
             diffusion_range: 0.05,
             feedback_range: 0.03..0.14,
             feedback_gain: 0.9,
+            feedback_enabled: true,
             predelay: 0,
             dry: 1,
             wet: -20.db,
@@ -61,6 +63,7 @@ module MB
             diffusion_range: 0.05,
             feedback_range: 0.3..0.45,
             feedback_gain: -4.db,
+            feedback_enabled: true,
             predelay: 0,
             dry: 1,
             wet: -6.db,
@@ -74,6 +77,7 @@ module MB
             diffusion_range: 0.06,
             feedback_range: 0.2,
             feedback_gain: 0.97,
+            feedback_enabled: true,
             predelay: 0.01,
             dry: 1,
             wet: -4.5.db,
@@ -86,6 +90,7 @@ module MB
             diffusion_range: 0.0005..0.01,
             feedback_range: 0.1,
             feedback_gain: -6.db,
+            feedback_enabled: true,
             predelay: 0,
             dry: 1,
             wet: 1,
@@ -154,16 +159,22 @@ module MB
         #                      Larger values blur the sound more but cause more
         #                      predelay.
         # +:feedback_range+ - The feedback delay range in seconds.  This should
-        #                     be high enough that feedback doesn't amplify
-        #                     audible frequencies, so at least 0.1s.
+        #                     usually be high enough that feedback doesn't amplify
+        #                     audible frequencies, so at least 0.1s, but
+        #                     smaller values can effectively simulate small
+        #                     reverberant rooms.  The buffer size is implicitly
+        #                     added to this delay time because of the buffered
+        #                     processing structure.
         # +:feedback_gain+ - The linear volume of feedback in the feedback
         #                    loop.  Must be less than 1.0 to avoid overload.
+        # +:feedback_enabled+ - If true, feedback is included after diffusion.
+        #                       If false, the feedback network is bypassed.
         # +:predelay+ - The wet signal is delayed by this amount.  Default 0.
         # +:wet+ - The reverberated signal output level.  Usually 1.0.
         # +:dry+ - The original signal output level.  Usually 1.0.
         # +:seed+ - Random seed Integer for reproducibility of random delays.
         #           Try different seeds if you get unwanted ringing or echo.
-        def initialize(upstream:, channels:, output_channels:, stages:, diffusion_range:, feedback_range:, feedback_gain:, predelay:, wet:, dry:, seed:, sample_rate:)
+        def initialize(upstream:, channels:, output_channels:, stages:, diffusion_range:, feedback_range:, feedback_gain:, feedback_enabled:, predelay:, wet:, dry:, seed:, sample_rate:)
           @random = Random.new(seed)
 
           @sample_rate = sample_rate.to_f
@@ -182,7 +193,7 @@ module MB
 
           raise 'Channels must be positive' unless @channels >= 1
           raise 'Channels must be a power of two' unless @channels == (2 ** Math.log2(@channels).floor).round
-          raise 'Stages must be positive' unless @stages >= 1
+          raise 'Stages must be non-negative' unless @stages >= 0
           raise 'Output channels must be positive' unless @output_channels >= 1
 
           diffusion_range = 0..diffusion_range.to_f if diffusion_range.is_a?(Numeric)
@@ -190,10 +201,11 @@ module MB
 
           feedback_range = 0..feedback_range.to_f if feedback_range.is_a?(Numeric)
           @feedback_range = feedback_range
+          @feedback_gain = feedback_gain.to_f
+          @feedback_enabled = !!feedback_enabled
 
           @wet = wet.to_f
           @dry = dry.to_f
-          @feedback_gain = feedback_gain.to_f
 
           @predelay = predelay.to_f
 
@@ -230,12 +242,8 @@ module MB
           # independent or semi-independent diffusion stages, as the current
           # diffusion stage pretty fully mixes all input channels
 
-          # Create diffusers with delays evenly spaced across the range
-          # TODO: consider uneven spacing e.g. placing more near the start
-          delay_span = @diffusion_range.end - @diffusion_range.begin
-          last_stage = nil
-          delays = delay_series(count: @stages, max: delay_span)
-
+          # Assign inputs to dry output channels.
+          #
           # TODO: maybe just put N dry inputs on the first N output channels
           # without downmixing for the extra channels.  This would allow the
           # reverb to be used as a stereo-to-surround upmixing reverb.
@@ -247,20 +255,25 @@ module MB
             u.get_sampler.named("Reverb #{__id__} upstream #{idx}")
           }
 
+          # Assign inputs to pipeline channels.
           @upstream_diffusion_groups = partition_outputs(@upstreams, @channels)
-          pre_delayed = @upstream_diffusion_groups.map.with_index { |u, idx|
+          @last_stage = @upstream_diffusion_groups.map.with_index { |u, idx|
             # TODO: just add predelay to first diffusion stage?
             u = u.length > 1 ? u.sum : u[0]
             u.delay(seconds: @predelay).named("Reverb #{__id__} predelay #{idx}")
           }
 
+          # Create diffusers with delays evenly spaced across the range
+          # TODO: consider uneven spacing e.g. placing more near the start
+          delay_span = @diffusion_range.end - @diffusion_range.begin
+          delays = delay_series(count: @stages, max: delay_span)
           @diffusers = Array.new(@stages) do |idx|
             delay_end = @diffusion_range.begin + delay_span * (idx + 1)
             delay_range = 0..delay_end
-            last_stage = make_diffuser(
+            @last_stage = make_diffuser(
               channels: @channels,
               delay_range: @diffusion_range.begin..(delays[idx] + delay_span),
-              input: last_stage || pre_delayed,
+              input: @last_stage,
               stage: idx
             )
           end
@@ -269,19 +282,27 @@ module MB
           # each dimension is nonzero
           @normal = Vector[*Array.new(@channels) { |c| @random.rand((c * 0.5 / @channels)..1) * (@random.rand > 0.5 ? 1 : -1) }].normalize
 
-          @feedback = Array.new(@channels) { Numo::SFloat.zeros(48000) }
-          @feedback_network = make_fdn(@diffusers.last)
+          if @feedback_enabled
+            @feedback = Array.new(@channels) { Numo::SFloat.zeros(48000) }
+            @feedback_network = make_fdn(@last_stage)
+            @last_stage = @feedback_network
+          end
 
           # This gets overwritten on every call to #update
-          @fdn_groups = partition_outputs(Array.new(@channels), @output_channels)
+          @output_groups = partition_outputs(Array.new(@channels), @output_channels)
 
           # FIXME: adjust gain or use compression or something based on feedback gain
           # FIXME: gain based on number of stages is wrong
-          @diffusion_gain = 1.0 / (@stages * @channels * @channels)
+          # FIXME: extra wrong when diffusion or feedback are bypassed.  Need
+          # to do a combined structural (input channels -> internal channels ;
+          # diffusion stage(s) ; feedback stage ; internal channels -> output
+          # channels) and empirical analysis (record and plot gain across
+          # channel/stage parameter space) of the gain structure
+          @diffusion_gain = @stages == 0 ? 1.0 / @channels : 1.0 / (@stages * @channels * @channels)
 
           @sampled_set = Set.new(0...@output_channels)
           @dry_output = nil
-          @fdn_output = nil
+          @pipeline_output = nil
         end
 
         # For internal use.  Creates and returns a single diffuser stage as an
@@ -290,26 +311,20 @@ module MB
           delay_span = (delay_range.end - delay_range.begin).to_f
           delays = delay_series(count: channels, max: delay_span).shuffle
 
-          hadamard = MB::M.hadamard(channels)
-
           nodes = Array.new(channels) do |idx|
             delay_time = delays[idx] + delay_range.begin
 
-            if input.is_a?(Array)
-              source = input[idx]
-            else
-              source = input.get_sampler.named("Reverb #{__id__} diffusion stage upstream #{stage + 1} #{idx + 1}")
-            end
-
-            diffuser_polarity = @random.rand > 0.5 ? 1 : -1
+            source = input[idx]
 
             # Delay and inversion step (wet gain 1 or -1)
+            diffuser_polarity = @random.rand > 0.5 ? 1 : -1
             source
               .delay(seconds: delay_time, wet: diffuser_polarity, smoothing: false, max_delay: MB::M.max(delay_range.end + 0.2, 1.0))
               .named("Reverb #{__id__} diffusion delay #{stage + 1} #{idx + 1}")
           end
 
           # Hadamard mixing step
+          hadamard = MB::M.hadamard(channels)
           matrix = MB::Sound::GraphNode::MatrixMixer.new(matrix: hadamard, inputs: nodes, sample_rate: @sample_rate)
           matrix.outputs.shuffle
         end
@@ -364,23 +379,28 @@ module MB
         def update(count)
           dry = @upstream_samplers.map { |u| u.sample(count) }
 
-          fdn = @feedback_network.map { |c| c.sample(count) }
-          if dry.nil? || fdn.any?(&:nil?)
-            @fdn_output = fdn
+          wet = @last_stage.map { |c| c.sample(count) }
+          if dry.nil? || wet.any?(&:nil?)
+            @pipeline_output = wet
             @dry_output = nil
             return
           end
 
-          # Householder matrix (reflection across a plane)
-          refl = MB::M.reflect(Vector[*fdn], @normal).to_a
+          if @feedback_enabled
+            # Householder matrix (reflection across a plane)
+            refl = MB::M.reflect(Vector[*wet], @normal).to_a
 
-          # Store feedback for next iteration
-          refl.each_with_index do |v, idx|
-            @feedback[idx][0...v.length] = v if v
+            # Store feedback for next iteration
+            refl.each_with_index do |v, idx|
+              @feedback[idx][0...v.length] = v if v
+            end
+
+            @pipeline_output = refl
+          else
+            @pipeline_output = wet
           end
 
-          @fdn_output = refl
-          @fdn_groups = partition_outputs(@fdn_output, @output_channels)
+          @output_groups = partition_outputs(@pipeline_output, @output_channels)
 
           @dry_output = dry.map { |c| (c.inplace * @dry).not_inplace! }
           @dry_groups = partition_outputs(@dry_output, @output_channels)
@@ -398,9 +418,9 @@ module MB
 
           @sampled_set << index
 
-          return nil if @dry_output.nil? || @fdn_output.any?(&:nil?)
+          return nil if @dry_output.nil? || @pipeline_output.any?(&:nil?)
 
-          wet = @fdn_groups[index].sum * (@wet * @diffusion_gain)
+          wet = @output_groups[index].sum * (@wet * @diffusion_gain)
           (wet.inplace + @dry_groups[index].sum).not_inplace!
         end
 
@@ -412,9 +432,9 @@ module MB
           update(count)
 
           # TODO: automatic ringdown time?
-          return nil if @dry_output.nil? || @fdn_output.any?(&:nil?)
+          return nil if @dry_output.nil? || @pipeline_output.any?(&:nil?)
 
-          wet = @fdn_output.sum * (@wet * @diffusion_gain)
+          wet = @pipeline_output.sum * (@wet * @diffusion_gain)
           (wet.inplace + @dry_output.sum).not_inplace!
         end
 
