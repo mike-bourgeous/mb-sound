@@ -174,8 +174,10 @@ module MB
         # +:dry+ - The original signal output level.  Usually 1.0.
         # +:seed+ - Random seed Integer for reproducibility of random delays.
         #           Try different seeds if you get unwanted ringing or echo.
-        def initialize(upstream:, channels:, output_channels:, stages:, diffusion_range:, feedback_range:, feedback_gain:, feedback_enabled:, predelay:, wet:, dry:, seed:, sample_rate:)
+        # +:show_internals+ - If true, #sources will include reverb internals.
+        def initialize(upstream:, channels:, output_channels:, stages:, diffusion_range:, feedback_range:, feedback_gain:, feedback_enabled:, predelay:, wet:, dry:, seed:, sample_rate:, show_internals:)
           @random = Random.new(seed)
+          @show_internals = !!show_internals
 
           @sample_rate = sample_rate.to_f
 
@@ -348,7 +350,8 @@ module MB
 
         # Returns the input source, and if +:internal+ is true, the feedback
         # and diffusion network.
-        def sources(internal: false)
+        def sources(internal: @show_internals)
+          # TODO: allow showing just a single diffusion stage
           {
             **@upstreams.map.with_index { |u, idx|
               ["input_#{idx + 1}", u]

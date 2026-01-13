@@ -631,7 +631,7 @@ module MB
       # Example (bin/sound.rb):
       #     play file_input('sounds/drums.flac').reverb
       #     play file_input('sounds/piano0.flac').reverb(:space)
-      def reverb(preset = :default, extra_time: nil, output_channels: 1, channels: nil, stages: nil, diffusion_range: nil, feedback_range: nil, feedback_gain: nil, feedback_enabled: nil, predelay: nil, wet: nil, dry: nil, seed: nil)
+      def reverb(preset = :default, extra_time: nil, output_channels: 1, channels: nil, stages: nil, diffusion_range: nil, feedback_range: nil, feedback_gain: nil, feedback_enabled: nil, predelay: nil, wet: nil, dry: nil, seed: nil, show_internals: false)
         params = Reverb::PRESETS[preset] || Reverb::PRESETS[:default]
         params = params.merge({
           extra_time: extra_time,
@@ -674,6 +674,7 @@ module MB
           upstream: upstream,
           output_channels: output_channels,
           sample_rate: self.sample_rate,
+          show_internals: show_internals,
           **params
         )
           .tap { |n| n.named(preset.to_s) if preset }
