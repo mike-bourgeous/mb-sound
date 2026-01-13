@@ -444,6 +444,8 @@ module MB
           (wet.inplace + @dry_output.sum).not_inplace!
         end
 
+        private
+
         # Returns a series of randomly spaced delay times, ensuring a
         # relatively even spread.
         def delay_series(count:, max:)
@@ -458,8 +460,6 @@ module MB
             }
           end
         end
-
-        private
 
         # Partitions the +list+ of objects into +count+ groups of equal size,
         # with leftovers shared across all list members.
