@@ -311,7 +311,10 @@ module MB
         # Array of GraphNodes that will delay, shuffle, and remix the input(s).
         def make_diffuser(stage:, channels:, delay_range:, input:)
           delay_span = (delay_range.end - delay_range.begin).to_f
-          delays = delay_series(count: channels, max: delay_span).shuffle(random: @random)
+          delays = [
+            0,
+            *delay_series(count: channels - 1, max: delay_span)
+          ].shuffle(random: @random)
 
           nodes = Array.new(channels) do |idx|
             delay_time = delays[idx] + delay_range.begin
