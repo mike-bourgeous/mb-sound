@@ -9,6 +9,9 @@ module MB
       # Note: number of frames may be approximate
       attr_reader :filename, :frames, :info, :raw_info, :duration, :metadata
 
+      # ffmpeg seems to return this code when its output is closed
+      EMPIRICAL_EPIPE_STATUS = 224
+
       # A list of metadata keys that should not be parsed numerically.
       EXCLUDED_CONVERSIONS = [
         # Channel layout of e.g. '7.1' should stay as a String
@@ -182,7 +185,9 @@ module MB
       def close
         super.tap { |result|
           # TODO: capture ffmpeg output for the error message
-          raise "Reading from #{@filename} failed" unless result.success?
+          unless result.success? || result.exitstatus == EMPIRICAL_EPIPE_STATUS
+            raise "Reading from #{@filename} failed with status #{result.exitstatus}: #{result}"
+          end
         }
       end
 

@@ -84,7 +84,7 @@ module MB
       def close
         super.tap { |result|
           # TODO: capture ffmpeg output for the error message
-          raise "Writing to #{@filename} failed" unless result.success?
+          raise "Writing to #{@filename} failed with result #{result.exitstatus}: #{result}" unless result.success?
         }
       end
 
