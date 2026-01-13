@@ -309,7 +309,7 @@ module MB
         # Array of GraphNodes that will delay, shuffle, and remix the input(s).
         def make_diffuser(stage:, channels:, delay_range:, input:)
           delay_span = (delay_range.end - delay_range.begin).to_f
-          delays = delay_series(count: channels, max: delay_span).shuffle
+          delays = delay_series(count: channels, max: delay_span).shuffle(random: @random)
 
           nodes = Array.new(channels) do |idx|
             delay_time = delays[idx] + delay_range.begin
@@ -326,14 +326,14 @@ module MB
           # Hadamard mixing step
           hadamard = MB::M.hadamard(channels)
           matrix = MB::Sound::GraphNode::MatrixMixer.new(matrix: hadamard, inputs: nodes, sample_rate: @sample_rate)
-          matrix.outputs.shuffle
+          matrix.outputs.shuffle(random: @random)
         end
 
         # For internal use.  Creates the feedback delay network, minus the
         # mixing and reflection stage (implemented in #sample).
         def make_fdn(inputs)
           delay_span = @feedback_range.end - @feedback_range.begin
-          delays = delay_series(count: inputs.length, max: delay_span).shuffle
+          delays = delay_series(count: inputs.length, max: delay_span).shuffle(random: @random)
 
           inputs.map.with_index { |inp, idx|
             delay_time = delays[idx] + @feedback_range.begin
