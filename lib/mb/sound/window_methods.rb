@@ -431,6 +431,32 @@ module MB
 
         fft_writer.drain
       end
+
+      # Quick-fades the +audio+ (a Numo::NArray or an Array of Numo::NArrays),
+      # using +:rise+ samples at the start and +:fall+ samples at the end.
+      # Rise and fall times may overlap, in which case the audio never reaches
+      # full volume.
+      def quick_fade(audio, rise: 100, fall: rise)
+        return audio.map { |c| quick_fade(c, rise: rise, fall: fall) } if audio.is_a?(Array)
+        raise 'Audio must be a Numo::NArray' unless audio.is_a?(Numo::NArray)
+
+        raise 'Rise time is longer than the audio clip' if rise > audio.length
+        raise 'Fall time is longer than the audio clip' if fall > audio.length
+
+        audio = audio.dup.inplace! unless audio.inplace?
+
+        if rise > 0
+          rise_buf = MB::FastSound.smootherstep_buf(Numo::DFloat.zeros(rise).inplace!)
+          audio[0...rise].inplace * rise_buf.not_inplace!
+        end
+
+        if fall > 0
+          fall_buf = 1.0 - MB::FastSound.smootherstep_buf(Numo::DFloat.zeros(fall).inplace!)
+          audio[-fall..-1].inplace * fall_buf.not_inplace!
+        end
+
+        audio.not_inplace!
+      end
     end
   end
 end
