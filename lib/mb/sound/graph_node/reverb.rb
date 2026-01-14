@@ -139,6 +139,10 @@ module MB
 
         attr_reader :output_channels, :outputs
 
+        # Feedback gain amount (linear) -- dangerous to modify
+        # TODO: interpolate gain within frames to support faster changes
+        attr_accessor :feedback_gain
+
         # Initializes a reverb node with the given parameters.  See
         # PRESETS for some example defaults.  Generally one would use
         # GraphNode#reverb to create a reverb.
