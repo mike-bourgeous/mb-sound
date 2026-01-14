@@ -268,7 +268,7 @@ module MB
           # Apply predelay to input signal after dry/wet split but before
           # internal splitting/grouping
           predelayed = @upstreams.map.with_index { |u, idx|
-            @predelay == 0 ? u : u.delay(seconds: @predelay).named("Reverb #{__id__} predelay #{idx}")
+            @predelay == 0 ? u : u.delay(seconds: @predelay).named("Predelay #{idx}")
           }
 
           # Assign inputs to pipeline channels.
@@ -343,7 +343,7 @@ module MB
             diffuser_polarity = @random.rand > 0.5 ? 1 : -1
             source
               .delay(seconds: delay_time, wet: diffuser_polarity, smoothing: false, max_delay: MB::M.max(delay_range.end + 0.2, 1.0))
-              .named("Reverb #{__id__} diffusion delay #{stage + 1} #{idx + 1}")
+              .named("Diffuse #{stage + 1} #{idx + 1}")
           end
 
           # Hadamard mixing step
@@ -362,7 +362,7 @@ module MB
           feedback = inputs.map.with_index { |inp, idx|
             inp
               .proc { |v| (@feedback[idx][0...v.length].inplace * @feedback_gain + v).not_inplace! }
-              .named("Reverb #{__id__} feedback #{idx + 1}")
+              .named("Feedback return #{idx + 1}")
           }
 
           # TODO: reify feedback as a concept so we can put the matrix and some of the delay in the feedback path only
@@ -373,7 +373,7 @@ module MB
             delay_time = delays[idx] + @feedback_range.begin
             inp
               .delay(seconds: delay_time, smoothing: false, max_delay: MB::M.max(@feedback_range.end + 0.2, 1.0))
-              .named("Reverb #{__id__} feedback delay #{idx + 1}")
+              .named("Feedback delay #{idx + 1}")
           }
 
           # Add feedback annotation
