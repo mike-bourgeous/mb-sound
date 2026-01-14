@@ -35,6 +35,7 @@ options = {
   preset: nil,
   seed: nil,
   'extra-time': nil,
+  repeat: false,
   input: nil,
   output: nil,
   'show-internals': nil,
@@ -80,6 +81,9 @@ optp = OptionParser.new { |p|
   p.on('-d', '--dry DB', Float, 'The dry gain in decibels (default 0dB, range -120..)')
   p.on('--seed INT', Integer, 'Random seed for the reverb generator (default varies by preset, often 0)')
   p.on('--extra-time SECONDS', Float, 'Amount of silence to add after an input file')
+  p.on('--repeat [COUNT]', Integer, 'Repeat the input file a number of times, or omit the count for indefinitely') do |r|
+    options[:repeat] = r || -1
+  end
   p.on('-i', '--input FILE', String, 'A sound file to process (default is soundcard input)')
   p.on('-o', '--output FILE', String, 'An output sound file (default is soundcard output)')
   p.on('--show-internals', TrueClass, 'Whether to show the insides of the reverb object in graphviz')
@@ -99,7 +103,19 @@ if infile = ARGV.shift
 end
 
 if options[:input]
-  input = MB::Sound.file_input(options[:input])
+  # TODO: support ffmpeg -stream_loop option
+  if options[:repeat]
+    unless options[:quiet]
+      if options[:repeat] < 0
+        puts "Repeating forever" unless options[:quiet]
+      else
+        puts "Repeating #{options[:repeat] > 0 ? options[:repeat] : 1} time(s)"
+      end
+    end
+    input = MB::Sound::ArrayInput.new(data: MB::Sound.read(options[:input]), repeat: options[:repeat])
+  else
+    input = MB::Sound.file_input(options[:input])
+  end
 else
   input = MB::Sound.input(channels: options[:'input-channels'])
 end

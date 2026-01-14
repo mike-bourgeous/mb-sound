@@ -333,4 +333,6 @@ RSpec.describe(MB::Sound::ArrayInput, :aggregate_failures) do
       expect(input.duration).to eq(1)
     end
   end
+
+  pending 'repeat'
 end
