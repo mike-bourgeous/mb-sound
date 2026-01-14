@@ -1,5 +1,7 @@
 require 'shellwords'
 
+require_relative 'graph_node/nameable'
+
 module MB
   module Sound
     # Adds methods to any class that implements a :sample method to build
@@ -36,25 +38,7 @@ module MB
     #
     # TODO: Document methods that nodes must implement or override
     module GraphNode
-      attr_reader :graph_node_name
-
-      # Gives a name to this graph node to make it easier to retrieve later and
-      # identify it in visualizations of the node graph (see #graphviz).
-      def named(n)
-        @graph_node_name = n&.to_s
-        @named = !!@graph_node_name
-        self
-      end
-
-      # Returns true if the graph node has been given a custom name.
-      def named?
-        @named ||= false
-      end
-
-      # Returns the assigned node name if present, or the object ID if not.
-      def name_or_id
-        @graph_node_name || "id=#{__id__}"
-      end
+      include Nameable
 
       # Returns the class name, or a custom name set by the subclass (e.g. '/'
       # for a division proc node).
