@@ -37,6 +37,7 @@ options = {
   'extra-time': nil,
   input: nil,
   output: nil,
+  'show-internals': nil,
   graphviz: false,
   force: false,
   quiet: false,
@@ -81,6 +82,7 @@ optp = OptionParser.new { |p|
   p.on('--extra-time SECONDS', Float, 'Amount of silence to add after an input file')
   p.on('-i', '--input FILE', String, 'A sound file to process (default is soundcard input)')
   p.on('-o', '--output FILE', String, 'An output sound file (default is soundcard output)')
+  p.on('--show-internals', TrueClass, 'Whether to show the insides of the reverb object in graphviz')
   p.on('--graphviz', TrueClass, 'Open a graphical visualization of the signal flow')
   p.on('-f', '--force', TrueClass, 'Whether to overwrite the output file if it exists')
   p.on('-q', '--quiet', TrueClass, 'Whether to disable plotting the output')
@@ -122,7 +124,8 @@ reverb = input.reverb(
   wet: options[:wet]&.db,
   dry: options[:dry]&.db,
   seed: options[:seed],
-  extra_time: options[:'extra-time']
+  extra_time: options[:'extra-time'],
+  show_internals: options[:'show-internals'],
 )
 
 if options[:graphviz]

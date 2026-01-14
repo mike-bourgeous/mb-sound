@@ -257,12 +257,16 @@ module MB
             u.get_sampler.named("Reverb #{__id__} upstream #{idx}")
           }
 
+          # Apply predelay to input signal after dry/wet split but before splitting/grouping
+          predelayed = @upstreams.map.with_index { |u, idx|
+            u.delay(seconds: @predelay).named("Reverb #{__id__} predelay #{idx}")
+          }
+
           # Assign inputs to pipeline channels.
-          @upstream_diffusion_groups = partition_outputs(@upstreams, @channels)
+          @upstream_diffusion_groups = partition_outputs(predelayed, @channels)
           @last_stage = @upstream_diffusion_groups.map.with_index { |u, idx|
             # TODO: just add predelay to first diffusion stage?
-            u = u.length > 1 ? u.sum : u[0]
-            u.delay(seconds: @predelay).named("Reverb #{__id__} predelay #{idx}")
+            u.length > 1 ? u.sum : u[0]
           }
 
           # Create diffusers with delays evenly spaced across the range
@@ -346,6 +350,7 @@ module MB
             # TODO: adding a dry: to the .delay would basically be an early return
             inp
               .proc { |v| (@feedback[idx][0...v.length].inplace * @feedback_gain + v).not_inplace! }
+              .named("Reverb #{__id__} feedback #{idx + 1}")
               .delay(seconds: delay_time, smoothing: false, max_delay: MB::M.max(@feedback_range.end + 0.2, 1.0))
               .named("Reverb #{__id__} feedback delay #{idx + 1}")
           }
@@ -359,7 +364,7 @@ module MB
             **@upstreams.map.with_index { |u, idx|
               ["input_#{idx + 1}", u]
             }.to_h,
-            **(internal ? @feedback_network.map.with_index { |v, idx| [:"channel_#{idx + 1}", v] }.to_h : {})
+            **(internal ? @last_stage.map.with_index { |v, idx| [:"channel_#{idx + 1}", v] }.to_h : {})
           }
         end
 
@@ -373,7 +378,7 @@ module MB
             end
           end
 
-          @feedback_network.each do |c|
+          @last_stage.each do |c|
             c.sample_rate = @sample_rate unless c.sample_rate == @sample_rate
           end
 

@@ -45,7 +45,7 @@ module MB
           end
         end
 
-        attr_reader :outputs, :sample_rate, :count
+        attr_reader :outputs, :sample_rate, :count, :matrix
 
         # Initializes a matrix mixer with the given +:matrix+, list of
         # +:inputs+, and +:sample_rate+.  The +:matrix+ may be a Matrix, Array
@@ -53,6 +53,7 @@ module MB
         # length does not equal the number of columns in the matrix.
         def initialize(matrix:, inputs:, sample_rate:)
           matrix = Matrix[*matrix.to_a]
+          @matrix = matrix.freeze
           @procmatrix = ::MB::Sound::ProcessingMatrix.new(matrix)
 
           unless @procmatrix.input_channels == inputs.length
