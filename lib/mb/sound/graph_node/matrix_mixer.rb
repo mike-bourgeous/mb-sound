@@ -7,6 +7,7 @@ module MB
       # Numo::NArray) to combine N inputs to M outputs.
       class MatrixMixer
         include MultiOutput
+        include Nameable
 
         # Represents a single output node of the matrix's N outputs.
         class MatrixOutput

@@ -257,9 +257,10 @@ module MB
             u.get_sampler.named("Reverb #{__id__} upstream #{idx}")
           }
 
-          # Apply predelay to input signal after dry/wet split but before splitting/grouping
+          # Apply predelay to input signal after dry/wet split but before
+          # internal splitting/grouping
           predelayed = @upstreams.map.with_index { |u, idx|
-            u.delay(seconds: @predelay).named("Reverb #{__id__} predelay #{idx}")
+            @predelay == 0 ? u : u.delay(seconds: @predelay).named("Reverb #{__id__} predelay #{idx}")
           }
 
           # Assign inputs to pipeline channels.
@@ -340,6 +341,7 @@ module MB
           # Hadamard mixing step
           hadamard = MB::M.hadamard(channels)
           matrix = MB::Sound::GraphNode::MatrixMixer.new(matrix: hadamard, inputs: nodes, sample_rate: @sample_rate)
+            .named("Hadamard #{stage + 1}")
           matrix.outputs.shuffle(random: @random)
         end
 
@@ -349,13 +351,19 @@ module MB
           delay_span = @feedback_range.end - @feedback_range.begin
           delays = delay_series(count: inputs.length, max: delay_span).shuffle(random: @random)
 
-          inputs.map.with_index { |inp, idx|
-            delay_time = delays[idx] + @feedback_range.begin
-
-            # TODO: adding a dry: to the .delay would basically be an early return
+          feedback = inputs.map.with_index { |inp, idx|
             inp
               .proc { |v| (@feedback[idx][0...v.length].inplace * @feedback_gain + v).not_inplace! }
               .named("Reverb #{__id__} feedback #{idx + 1}")
+          }
+
+          # TODO: reify feedback as a concept so we can put the matrix and some of the delay in the feedback path only
+          hhmx = MB::Sound::GraphNode::MatrixMixer.new(matrix: @householder, inputs: feedback, sample_rate: @sample_rate)
+            .named("Householder matrix")
+
+          hhmx.outputs.shuffle(random: @random).map.with_index { |inp, idx|
+            delay_time = delays[idx] + @feedback_range.begin
+            inp
               .delay(seconds: delay_time, smoothing: false, max_delay: MB::M.max(@feedback_range.end + 0.2, 1.0))
               .named("Reverb #{__id__} feedback delay #{idx + 1}")
           }
@@ -403,18 +411,13 @@ module MB
           end
 
           if @feedback_enabled
-            # Householder matrix (reflection across a plane)
-            refl = MB::M.reflect(Vector[*wet], @normal).to_a
-
             # Store feedback for next iteration
-            refl.each_with_index do |v, idx|
+            wet.each_with_index do |v, idx|
               @feedback[idx][0...v.length] = v if v
             end
-
-            @pipeline_output = refl
-          else
-            @pipeline_output = wet
           end
+
+          @pipeline_output = wet
 
           @output_groups = partition_outputs(@pipeline_output, @output_channels)
 

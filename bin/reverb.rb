@@ -139,3 +139,4 @@ unless options[:quiet]
 end
 
 MB::Sound.play(reverb, output: output, clear: false)
+puts "\n" * 10
