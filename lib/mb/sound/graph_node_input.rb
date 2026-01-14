@@ -66,7 +66,7 @@ module MB
       # Returns all of the upstream edges leading into this input.
       #
       # See GraphNode#graph_edges.
-      def graph_edges(include_tees: true)
+      def graph_edges(include_tees: true, feedback: false)
         edges = {}
 
         @nodes.each_with_index do |n, idx|
@@ -74,9 +74,9 @@ module MB
 
           # TODO: use named channels?  allow passing a hash to the constructor to name the channels?
           edges[n] ||= Set.new
-          edges[n] << [self, :"channel_#{idx + 1}"]
+          edges[n] << [self, :"channel_#{idx + 1}"] unless feedback
 
-          n.graph_edges(include_tees: include_tees).each do |src, edge_set|
+          n.graph_edges(include_tees: include_tees, feedback: feedback).each do |src, edge_set|
             edges[src] ||= Set.new
             edges[src].merge(edge_set)
           end

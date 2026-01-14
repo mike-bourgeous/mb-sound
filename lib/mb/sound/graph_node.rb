@@ -861,18 +861,27 @@ module MB
       # Returns a Hash from source node to a Set of destination node/port name
       # tuples describing all connections upstream of this graph node.
       #
+      # If +:feedback+ is true, then only backward-pointing feedback edges are
+      # returned.  If false, then only normal edges are returned.
+      #
       # Example output shape:
       #     {
       #       Constant => Set.new([[Tone, :frequency]])
       #       Tone => Set.new([[Filter, :cutoff], [Filter, :quality]])
       #     }
-      def graph_edges(include_tees: true)
+      def graph_edges(include_tees: true, feedback: false)
         edges = {}
 
         graph(include_tees: include_tees).each do |dest|
-          next unless dest.respond_to?(:sources)
+          if feedback
+            next unless dest.respond_to?(:feedback_sources)
+          else
+            next unless dest.respond_to?(:sources)
+          end
 
-          dest.sources.each do |name, s|
+          list = feedback ? dest.feedback_sources : dest.sources
+
+          list.each do |name, s|
             s = s.round if s.is_a?(Numeric) && s.respond_to?(:round) && s.round == s
 
             unless include_tees
@@ -962,10 +971,8 @@ module MB
         end
 
         # Add feedback edges
-        graph(include_tees: include_tees).each do |dest|
-          next unless dest.respond_to?(:feedback_sources)
-
-          dest.feedback_sources.each do |name, src|
+        graph_edges(include_tees: include_tees, feedback: true).each do |src, edges|
+          edges.each do |dest, name|
             digraph << "  #{src.__id__.to_s.inspect} -> #{dest.__id__.to_s.inspect} [label=#{name.to_s.inspect}, color=red, constraint=false];\n"
           end
         end

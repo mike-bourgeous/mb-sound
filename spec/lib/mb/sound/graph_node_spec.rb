@@ -791,5 +791,20 @@ RSpec.describe(MB::Sound::GraphNode, aggregate_failures: true) do
         expect(ranks[4]).to match_array([d])
       end
     end
+
+    describe '#graphviz' do
+      pending
+
+      it 'can include feedback edges' do
+        a = Numo::SFloat.zeros(100)
+
+        g1 = 100.hz.proc { |v| v + a }
+        g2 = g1.delay(seconds: 0.1).proc { |v| a[] = v }
+
+        g1.with_feedback({ feedback_spec: g2 })
+
+        expect(g2.graphviz).to match(/feedback_spec.*constraint/)
+      end
+    end
   end
 end
