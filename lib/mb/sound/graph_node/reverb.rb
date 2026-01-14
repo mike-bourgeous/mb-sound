@@ -143,6 +143,10 @@ module MB
         # TODO: interpolate gain within frames to support faster changes
         attr_accessor :feedback_gain
 
+        # Wet/dry amount; large changes will cause discontinuity in audio
+        # TODO: interpolate gain
+        attr_accessor :wet, :dry
+
         # Initializes a reverb node with the given parameters.  See
         # PRESETS for some example defaults.  Generally one would use
         # GraphNode#reverb to create a reverb.
