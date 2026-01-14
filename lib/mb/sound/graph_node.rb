@@ -828,9 +828,24 @@ module MB
         {}
       end
 
-      # TODO: add another method to return rightward-pointing sources AKA
-      # feedback, that will be drawn on visualizations but not used in
-      # determining node order?
+      # Returns a Hash with backward-pointing sources.  Keys are source names,
+      # values are source nodes.  These sources are not used when building or
+      # ordering the node #graph or #graph_ranks.
+      #
+      # TODO: this is progress, but we still need a better way of representing
+      # feedback in a node graph.
+      def feedback_sources
+        @feedback_sources ||= {}.freeze
+      end
+
+      # Merges the Hash of +sources+ to the feedback source list, replacing any
+      # sources of the same name.  Keys are source names, values are source
+      # nodes.
+      def with_feedback(sources)
+        @feedback_sources ||= {}
+        @feedback_sources = @feedback_sources.merge(sources).freeze
+        self
+      end
 
       # Returns a list of all nodes feeding into this node, either directly or
       # indirectly, plus this node itself, without duplication.  Also may
@@ -924,12 +939,14 @@ module MB
         digraph << "  node [ style=\"filled\" fontcolor=\"#ffffff\" color=\"#2266ee\" shape=\"Mrecord\" ];\n"
         digraph << "  edge [ fontcolor=\"#ffffff\" color=\"#ffffff\" headport=\"w\" tailport=\"e\" ];\n"
 
+        # Add nodes
         graph(include_tees: include_tees).each do |node|
           next if node.is_a?(Numeric)
           desc = node.respond_to?(:to_s_graphviz) ? node.to_s_graphviz : node.to_s
           digraph << "  #{node.__id__.to_s.inspect} [label=#{desc.inspect}]"
         end
 
+        # Add forward edges
         graph_edges(include_tees: include_tees).each do |src, edges|
           edges.each do |dest, name|
             # TODO: add ports to nodes instead of labeling edges
@@ -941,6 +958,15 @@ module MB
             else
               digraph << "  #{src.__id__.to_s.inspect} -> #{dest.__id__.to_s.inspect} [label=#{name.to_s.inspect}];\n"
             end
+          end
+        end
+
+        # Add feedback edges
+        graph(include_tees: include_tees).each do |dest|
+          next unless dest.respond_to?(:feedback_sources)
+
+          dest.feedback_sources.each do |name, src|
+            digraph << "  #{src.__id__.to_s.inspect} -> #{dest.__id__.to_s.inspect} [label=#{name.to_s.inspect}, color=red, constraint=false];\n"
           end
         end
 

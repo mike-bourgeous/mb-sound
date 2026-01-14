@@ -361,12 +361,19 @@ module MB
           hhmx = MB::Sound::GraphNode::MatrixMixer.new(matrix: @householder, inputs: feedback, sample_rate: @sample_rate)
             .named("Householder matrix")
 
-          hhmx.outputs.shuffle(random: @random).map.with_index { |inp, idx|
+          delays = hhmx.outputs.shuffle(random: @random).map.with_index { |inp, idx|
             delay_time = delays[idx] + @feedback_range.begin
             inp
               .delay(seconds: delay_time, smoothing: false, max_delay: MB::M.max(@feedback_range.end + 0.2, 1.0))
               .named("Reverb #{__id__} feedback delay #{idx + 1}")
           }
+
+          # Add feedback annotation
+          delays.each_with_index do |d, idx|
+            feedback[idx].with_feedback(feedback: d)
+          end
+
+          delays
         end
 
         # Returns the input source, and if +:internal+ is true, the feedback
