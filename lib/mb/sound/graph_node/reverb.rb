@@ -287,6 +287,11 @@ module MB
           # Normal for reflection plane for Householder matrix, making sure
           # each dimension is nonzero
           @normal = Vector[*Array.new(@channels) { |c| @random.rand((c * 0.5 / @channels)..1) * (@random.rand > 0.5 ? 1 : -1) }].normalize
+          @householder = Matrix[*Array.new(@normal.count) { |idx|
+            vec = [0] * @normal.count
+            vec[idx] = 1
+            MB::M.reflect(vec, @normal).to_a
+          }.transpose]
 
           if @feedback_enabled
             @feedback = Array.new(@channels) { Numo::SFloat.zeros(48000) }
