@@ -239,7 +239,8 @@ module MB
             seed: seed,
           }.freeze
 
-          # FIXME: must be a memory leak or very excessive allocation or something as the reverb eventually starts skipping
+          # FIXME: must be a memory leak or very excessive allocation or
+          # something as the reverb eventually starts skipping
           # TODO: infinite reverb where feedback loop is normalized and
           # feedback gain is proportional to input volume from diffusion stage
           # TODO: filters in line with feedback to create variable decay times
@@ -295,7 +296,12 @@ module MB
 
           # Normal for reflection plane for Householder matrix, making sure
           # each dimension is nonzero
-          @normal = Vector[*Array.new(@channels) { |c| @random.rand((c * 0.5 / @channels)..1) * (@random.rand > 0.5 ? 1 : -1) }].normalize
+          # TODO: all 1s is the traditional matrix to reduce operations required
+          # TODO: experiment with other operations with longer repeat periods
+          # like relatively prime rotations
+          @normal = Vector[*Array.new(@channels) { |c|
+            @random.rand((c * 0.5 / @channels)..1) * (@random.rand > 0.5 ? 1 : -1)
+          }].normalize
           @householder = Matrix[*Array.new(@normal.count) { |idx|
             vec = [0] * @normal.count
             vec[idx] = 1
@@ -334,19 +340,21 @@ module MB
             *delay_series(count: channels - 1, max: delay_span)
           ].shuffle(random: @random)
 
+          buffer_time = MB::M.max(delays.max + 0.2, 1.0)
+
           # Delay and inversion step (wet gain 1 or -1)
           nodes = Array.new(channels) do |idx|
             delay_time = delays[idx] + delay_range.begin
 
             diffuser_polarity = @random.rand > 0.5 ? 1 : -1
             input[idx]
-              .delay(seconds: delay_time, wet: diffuser_polarity, smoothing: false, max_delay: MB::M.max(delay_range.end + 0.2, 1.0))
+              .delay(seconds: delay_time, wet: diffuser_polarity, smoothing: false, max_delay: buffer_time)
               .named("Diffuse #{stage + 1} #{idx + 1}")
           end
 
           # Hadamard mixing step
           hadamard = MB::M.hadamard(channels)
-          matrix = MB::Sound::GraphNode::MatrixMixer.new(matrix: hadamard, inputs: nodes, sample_rate: @sample_rate)
+          matrix = MatrixMixer.new(matrix: hadamard, inputs: nodes, sample_rate: @sample_rate)
             .named("Hadamard #{stage + 1}")
           matrix.outputs.shuffle(random: @random)
         end
@@ -360,6 +368,8 @@ module MB
           delay_span = @feedback_range.end - @feedback_range.begin
           delays = delay_series(count: inputs.length, max: delay_span).shuffle(random: @random)
 
+          buffer_time = MB::M.max(delays.max + 0.2, 1.0)
+
           # Add feedback from the feedback buffer
           feedback = inputs.map.with_index { |inp, idx|
             inp
@@ -368,14 +378,14 @@ module MB
           }
 
           # Matrix mixing step
-          hhmx = MB::Sound::GraphNode::MatrixMixer.new(matrix: @householder, inputs: feedback, sample_rate: @sample_rate)
+          hhmx = MatrixMixer.new(matrix: @householder, inputs: feedback, sample_rate: @sample_rate)
             .named("Householder matrix")
 
           # Delay step
           delays = hhmx.outputs.shuffle(random: @random).map.with_index { |inp, idx|
             delay_time = delays[idx] + @feedback_range.begin
             inp
-              .delay(seconds: delay_time, smoothing: false, max_delay: MB::M.max(@feedback_range.end + 0.2, 1.0))
+              .delay(seconds: delay_time, smoothing: false, max_delay: buffer_time)
               .named("Feedback delay #{idx + 1}")
           }
 
