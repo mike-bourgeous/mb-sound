@@ -334,14 +334,12 @@ module MB
             *delay_series(count: channels - 1, max: delay_span)
           ].shuffle(random: @random)
 
+          # Delay and inversion step (wet gain 1 or -1)
           nodes = Array.new(channels) do |idx|
             delay_time = delays[idx] + delay_range.begin
 
-            source = input[idx]
-
-            # Delay and inversion step (wet gain 1 or -1)
             diffuser_polarity = @random.rand > 0.5 ? 1 : -1
-            source
+            input[idx]
               .delay(seconds: delay_time, wet: diffuser_polarity, smoothing: false, max_delay: MB::M.max(delay_range.end + 0.2, 1.0))
               .named("Diffuse #{stage + 1} #{idx + 1}")
           end
@@ -355,20 +353,25 @@ module MB
 
         # For internal use.  Creates the feedback delay network, minus the
         # mixing and reflection stage (implemented in #sample).
+        #
+        # TODO: reify feedback as a concept so we can put the matrix and some
+        # of the delay in the feedback path only
         def make_fdn(inputs)
           delay_span = @feedback_range.end - @feedback_range.begin
           delays = delay_series(count: inputs.length, max: delay_span).shuffle(random: @random)
 
+          # Add feedback from the feedback buffer
           feedback = inputs.map.with_index { |inp, idx|
             inp
               .proc { |v| (@feedback[idx][0...v.length].inplace * @feedback_gain + v).not_inplace! }
               .named("Feedback return #{idx + 1}")
           }
 
-          # TODO: reify feedback as a concept so we can put the matrix and some of the delay in the feedback path only
+          # Matrix mixing step
           hhmx = MB::Sound::GraphNode::MatrixMixer.new(matrix: @householder, inputs: feedback, sample_rate: @sample_rate)
             .named("Householder matrix")
 
+          # Delay step
           delays = hhmx.outputs.shuffle(random: @random).map.with_index { |inp, idx|
             delay_time = delays[idx] + @feedback_range.begin
             inp
@@ -376,7 +379,7 @@ module MB
               .named("Feedback delay #{idx + 1}")
           }
 
-          # Add feedback annotation
+          # Add feedback annotation for visualization
           delays.each_with_index do |d, idx|
             feedback[idx].with_feedback(feedback: d)
           end
@@ -387,7 +390,6 @@ module MB
         # Returns the input source, and if +:internal+ is true, the feedback
         # and diffusion network.
         def sources(internal: @show_internals)
-          # TODO: allow showing just a single diffusion stage
           {
             **@upstreams.map.with_index { |u, idx|
               ["input_#{idx + 1}", u]
