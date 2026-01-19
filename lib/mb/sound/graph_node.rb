@@ -11,7 +11,8 @@ module MB
     #
     # Examples (run in the bin/sound.rb environment):
     #     # FM organ bass
-    #     play F1.at(-6.db).fm(F2.at(300) * adsr(0, 0.1, 0.0, 0.5, auto_release: false)) * adsr(0, 0, 1, 0, auto_release: 0.25)
+    #     mod = F2.at(300) * adsr(0, 0.1, 0.0, 0.5, auto_release: false)
+    #     play F1.at(-6.db).fm(mod) * adsr(0, 0, 1, 0, auto_release: 0.25)
     #
     #     # FM classic synth bass
     #     cenv = adsr(0, 0.005, 0.5, 2.5).db(30)
@@ -102,7 +103,9 @@ module MB
       # custom GraphNode implementations, that's _probably_ a bug in mb-sound.
       def get_sampler
         # TODO: maybe rename to #get_branch to match Tee's naming??
-        # TODO: find and fix places where branches get abandoned (e.g. bin/flanger.rb) instead of ignoring these late readers in circular_buffer.rb
+        # TODO: find and fix places where branches get abandoned (e.g.
+        # bin/flanger.rb) instead of ignoring late readers in
+        # circular_buffer.rb
         @internal_tee ||= Tee.new(self, 0)
         @internal_tee.add_branch
       end

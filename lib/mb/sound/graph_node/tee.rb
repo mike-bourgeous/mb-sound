@@ -3,10 +3,9 @@ require 'forwardable'
 module MB
   module Sound
     module GraphNode
-      # Creates fan-out branches from a signal node (any object that responds to
-      # #sample and returns a single audio buffer, and ideally includes the
-      # GraphNode module), using buffer copies to prevent parallel branches
-      # from interfering with each other.
+      # Creates fan-out branches from a signal node (any object that responds
+      # to #sample and returns a single audio buffer), using buffer copies to
+      # prevent parallel branches from interfering with each other.
       #
       # The ideal way to create a Tee is with the GraphNode#tee method or
       # GraphNode#get_sampler method.

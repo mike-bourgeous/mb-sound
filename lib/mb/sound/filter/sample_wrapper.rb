@@ -75,6 +75,7 @@ module MB
 
           # FIXME: FFMPEGInput -> SampleWrapper crackles and doesn't filter,
           # but FFMPEGInput -> Mixer -> SampleWrapper is fine.
+          # FIXME: maybe related to resampling issues from ffmpeginput??
 
           # TODO: Maybe this nil/empty/short handling could be consolidated?
           # TODO: Drain ring-out from filters and delays after a source returns nil
