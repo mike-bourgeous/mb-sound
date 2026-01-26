@@ -64,7 +64,7 @@ module MB
           # TODO: abstract or consolidate with the code in Tee that tracks
           # which branches have been read
           @inputs = inputs.map.with_index { |c, idx|
-            c.get_sampler.named("Matrix input #{idx + 1}")
+            c.get_sampler
           }
           @sampled_set = Set.new
           @input_data = nil

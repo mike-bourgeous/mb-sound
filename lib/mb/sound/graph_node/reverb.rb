@@ -263,7 +263,7 @@ module MB
           @upstream_dry_groups = partition_outputs(@upstreams, @output_channels)
           @upstream_samplers = @upstream_dry_groups.map.with_index { |u, idx|
             u = u.length > 1 ? u.sum : u[0]
-            u.get_sampler.named("Reverb #{__id__} upstream #{idx}")
+            u.get_sampler
           }
 
           # Apply predelay to input signal after dry/wet split but before
