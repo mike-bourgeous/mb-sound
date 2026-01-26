@@ -39,7 +39,7 @@ module MB
         def initialize(filter, source, in_place: false, inputs: {})
           @node_type_name = "SampleWrapper/#{filter.class.name.rpartition('::').last}: #{filter}"
           @base_filter = filter
-          @source = source.get_sampler.named("#{@node_type_name} input")
+          @source = source.get_sampler
           @in_place = in_place
 
           @sample_rate = source.sample_rate

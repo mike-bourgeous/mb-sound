@@ -22,6 +22,8 @@ module MB
       #     play d
       class Tee
         extend Forwardable
+
+        include Nameable
         include MultiOutput
 
         # Raised when reading from a branch after its internal buffer
@@ -43,8 +45,10 @@ module MB
           # Values for internal use by Tee.
           attr_reader :index, :reader, :tee
 
-          def_delegators :@tee, :sample_rate, :sample_rate=, :reset, :sources, :original_source
+          def_delegators :@tee, :sample_rate, :sample_rate=, :reset, :original_source
           def_delegators :@reader, :count, :length
+
+          attr_reader :sources
 
           # For internal use by Tee.  Initializes one parallel branch of the tee.
           def initialize(tee, index, reader)
@@ -53,6 +57,8 @@ module MB
             @index = index
             @reader = reader
             @trace = caller_locations
+            @sources = { tee: @tee }
+            @node_type_name = 'Branch'
           end
 
           # Inform the tee that this branch will no longer be used.  This may
