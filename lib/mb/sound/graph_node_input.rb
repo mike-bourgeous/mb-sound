@@ -27,7 +27,7 @@ module MB
 
         @channels = MB::M.max(nodes.length, channels)
 
-        @nodes = nodes.map { |n| n.get_sampler }.freeze
+        @nodes = nodes.freeze
 
         @output = Array.new(@channels)
 
