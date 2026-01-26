@@ -100,8 +100,8 @@ module MB
       # will be written into the Hash.
       #
       # See MB::Sound::FFMPEGInput for more flexible sound input.
-      def read(filename, max_frames: nil, sample_rate: 48000, metadata_out: nil)
-        input = file_input(filename, resample: sample_rate)
+      def read(filename, max_frames: nil, sample_rate: 48000, metadata_out: nil, channels: nil)
+        input = file_input(filename, resample: sample_rate, channels: channels)
         metadata_out.merge!(input.metadata) if metadata_out.is_a?(Hash)
         input.read(max_frames || input.frames)
       ensure

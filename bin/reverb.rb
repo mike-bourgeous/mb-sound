@@ -102,6 +102,7 @@ if infile = ARGV.shift
   end
 end
 
+input_channels = options[:'input-channels']
 if options[:input]
   # TODO: support ffmpeg -stream_loop option
   if options[:repeat]
@@ -112,12 +113,12 @@ if options[:input]
         puts "Repeating #{options[:repeat] > 0 ? options[:repeat] : 1} time(s)"
       end
     end
-    input = MB::Sound::ArrayInput.new(data: MB::Sound.read(options[:input]), repeat: options[:repeat])
+    input = MB::Sound::ArrayInput.new(data: MB::Sound.read(options[:input], channels: input_channels), repeat: options[:repeat])
   else
-    input = MB::Sound.file_input(options[:input])
+    input = MB::Sound.file_input(options[:input], channels: input_channels)
   end
 else
-  input = MB::Sound.input(channels: options[:'input-channels'])
+  input = MB::Sound.input(channels: input_channels)
 end
 
 output_channels = options[:'output-channels'] || MB::M.max(2, input.channels)
