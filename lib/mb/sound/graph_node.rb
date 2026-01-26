@@ -645,14 +645,18 @@ module MB
         #
         # TODO: find a way to tidy up the flow graph with these multichannel
         # inputs and outputs.
-        silence = 0.constant.for(extra_time).named('Silence')
-        case self
-        when MultiOutput
-          upstream = self.outputs.map { |o| o.and_then(silence) }
+        if extra_time > 0
+          silence = 0.constant.for(extra_time).named('Silence')
+          case self
+          when MultiOutput
+            upstream = self.outputs.map { |o| o.and_then(silence) }
 
-        when InputChannelSplit::InputChannelNode
-          upstream = self.and_then(silence)
+          when InputChannelSplit::InputChannelNode
+            upstream = self.and_then(silence)
 
+          else
+            upstream = self
+          end
         else
           upstream = self
         end
