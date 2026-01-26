@@ -109,6 +109,8 @@ module MB
 
           def_delegators :@reverb, :sample_rate, :sample_rate=, :at_rate
 
+          attr_reader :reverb, :index
+
           # Creates an output handle for channel +:index+ (0-based) on the
           # given +:reverb+.
           def initialize(reverb:, index:)
