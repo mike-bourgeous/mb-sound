@@ -383,6 +383,13 @@ module MB
           hhmx = MatrixMixer.new(matrix: @householder, inputs: feedback, sample_rate: @sample_rate)
             .named("Householder matrix")
 
+          # Hack to help with visualization
+          # TODO: some way of marking nodes as being "inside" other nodes for optional hiding
+          if @show_internals
+            hhmx.singleton_class.define_method(:reverb) do @reverb end
+            hhmx.instance_variable_set(:@reverb, self)
+          end
+
           # Delay step
           delays = hhmx.outputs.shuffle(random: @random).map.with_index { |inp, idx|
             delay_time = delays[idx] + @feedback_range.begin
