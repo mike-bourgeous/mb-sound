@@ -123,7 +123,7 @@ end
 
 output_channels = options[:'output-channels'] || MB::M.max(2, input.channels)
 if options[:output]
-  output = MB::Sound.file_output(options[:output], overwrite: options[:force] || :prompt, channels: output_channels)
+  output = MB::Sound.file_output(options[:output], overwrite: options[:force] || :prompt, channels: output_channels, buffer_size: 800)
 else
   output = MB::Sound.output(plot: !options[:quiet], channels: output_channels)
 end
