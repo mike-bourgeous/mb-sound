@@ -756,11 +756,15 @@ module MB
       # If you'll need to remove specific spies later, pass a +:handle+.  This
       # may be an object instance, a Symbol, etc.
       #
+      # The +:phase+ argument may be :pre to receive the number of samples
+      # before a node executes, or :post to receive a copy of the data the node
+      # returns.
+      #
       # See #clear_spies.
       #
       # TODO: accomplish this without monkey patching, and maybe use a module
       # interface rather than a proc (for better rubyprof traces)
-      def spy(handle: nil, interval: false, &block)
+      def spy(handle: nil, interval: false, phase: :post, &block)
         @handled_spies ||= nil
 
         if @handled_spies.nil?
@@ -768,9 +772,11 @@ module MB
 
           class << self
             def sample(count)
+              call_spies(count, :pre)
+
               super(count).tap { |buf|
                 MB::M.with_inplace(buf, false) do |data|
-                  call_spies(data)
+                  call_spies(data, :post)
                 end
               }
             end
@@ -778,13 +784,13 @@ module MB
         end
 
         @handled_spies[handle] ||= []
-        @handled_spies[handle] << [block, interval, Time.now - (interval || 1), false]
+        @handled_spies[handle] << [block, interval, phase, Time.now - (interval || 1), false]
 
         self
       end
 
       # Used by #spy.
-      private def call_spies(data)
+      private def call_spies(data, phase)
         now = Time.now
         now_nil = data.nil?
 
@@ -792,7 +798,8 @@ module MB
           info = origin ? " from #{origin}" : ''
 
           spies.each_with_index do |spy_info, idx|
-            s, interval, last_time, was_nil = spy_info
+            s, interval, spy_phase, last_time, was_nil = spy_info
+            next unless spy_phase == phase
 
             begin
               if !interval || (now - last_time) >= interval || was_nil != now_nil
