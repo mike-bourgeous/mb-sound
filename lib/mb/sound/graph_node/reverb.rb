@@ -149,6 +149,67 @@ module MB
         # TODO: interpolate gain
         attr_accessor :wet, :dry
 
+        # See GraphNode#reverb -- this method just allows passing an input array or node.
+        def self.reverb(preset = :default, input:, extra_time: nil, output_channels: 1, channels: nil, stages: nil, diffusion_range: nil, feedback_range: nil, feedback_gain: nil, feedback_enabled: nil, predelay: nil, wet: nil, dry: nil, seed: nil, show_internals: false)
+          unless input.is_a?(GraphNode) || (input.is_a?(Array) && input.all?(GraphNode))
+            raise 'Input must be a GraphNode or an Array of GraphNodes'
+          end
+
+          params = Reverb::PRESETS[preset] || Reverb::PRESETS[:default]
+          params = params.merge({
+            extra_time: extra_time,
+            channels: channels,
+            stages: stages,
+            diffusion_range: diffusion_range,
+            feedback_range: feedback_range,
+            feedback_gain: feedback_gain,
+            feedback_enabled: feedback_enabled,
+            predelay: predelay,
+            wet: wet,
+            dry: dry,
+            seed: seed,
+          }.compact)
+
+          extra_time = params.delete(:extra_time)
+          _description = params.delete(:description)
+
+          # Pad inputs with extra silence for ringdown
+          #
+          # Normally polymorphism is a better way to override behavior, but in
+          # this specific case, the code is easier to maintain when all the logic
+          # for these node DSL helper methods is in one place.
+          #
+          # TODO: find a way to tidy up the flow graph with these multichannel
+          # inputs and outputs.
+          if extra_time > 0
+            silence = 0.constant.for(extra_time).named('Silence')
+            case input
+            when MultiOutput
+              upstream = input.outputs.map { |o| o.and_then(silence) }
+
+            when InputChannelSplit::InputChannelNode
+              upstream = input.and_then(silence)
+
+            else
+              upstream = input
+            end
+          else
+            upstream = input
+          end
+
+          rate = input.is_a?(GraphNode) ? input.sample_rate : input[0].sample_rate
+
+          MB::Sound::GraphNode::Reverb.new(
+            upstream: upstream,
+            output_channels: output_channels,
+            sample_rate: rate,
+            show_internals: show_internals,
+            **params
+          )
+            .tap { |n| n.named(preset.to_s) if preset }
+            .yield_self { |n| output_channels > 1 ? n.outputs : n }
+        end
+
         # Initializes a reverb node with the given parameters.  See
         # PRESETS for some example defaults.  Generally one would use
         # GraphNode#reverb to create a reverb.

@@ -619,9 +619,11 @@ module MB
       #     play file_input('sounds/drums.flac').reverb
       #     play file_input('sounds/piano0.flac').reverb(:space)
       def reverb(preset = :default, extra_time: nil, output_channels: 1, channels: nil, stages: nil, diffusion_range: nil, feedback_range: nil, feedback_gain: nil, feedback_enabled: nil, predelay: nil, wet: nil, dry: nil, seed: nil, show_internals: false)
-        params = Reverb::PRESETS[preset] || Reverb::PRESETS[:default]
-        params = params.merge({
+        MB::Sound::GraphNode::Reverb.reverb(
+          preset,
+          input: self,
           extra_time: extra_time,
+          output_channels: output_channels,
           channels: channels,
           stages: stages,
           diffusion_range: diffusion_range,
@@ -632,44 +634,8 @@ module MB
           wet: wet,
           dry: dry,
           seed: seed,
-        }.compact)
-
-        extra_time = params.delete(:extra_time)
-        _description = params.delete(:description)
-
-        # Pad inputs with extra silence for ringdown
-        #
-        # Normally polymorphism is a better way to override behavior, but in
-        # this specific case, the code is easier to maintain when all the logic
-        # for these node DSL helper methods is in one place.
-        #
-        # TODO: find a way to tidy up the flow graph with these multichannel
-        # inputs and outputs.
-        if extra_time > 0
-          silence = 0.constant.for(extra_time).named('Silence')
-          case self
-          when MultiOutput
-            upstream = self.outputs.map { |o| o.and_then(silence) }
-
-          when InputChannelSplit::InputChannelNode
-            upstream = self.and_then(silence)
-
-          else
-            upstream = self
-          end
-        else
-          upstream = self
-        end
-
-        MB::Sound::GraphNode::Reverb.new(
-          upstream: upstream,
-          output_channels: output_channels,
-          sample_rate: self.sample_rate,
-          show_internals: show_internals,
-          **params
+          show_internals: show_internals
         )
-          .tap { |n| n.named(preset.to_s) if preset }
-          .yield_self { |n| output_channels > 1 ? n.outputs : n }
       end
 
       # Hard-clips the output of this node to the given min and max, one of
