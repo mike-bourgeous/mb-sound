@@ -9,6 +9,8 @@ module MB
       # Speed of sound for wavelength calculations, in meters per second.
       SPEED_OF_SOUND = 343.0
 
+      # Nocommit
+
       # Represents a distance in meters.  A simple trick inspired by the Scalar
       # class in ActiveSupport::Duration.
       #
