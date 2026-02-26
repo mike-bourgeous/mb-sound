@@ -1,5 +1,8 @@
 require 'logger'
 
+# YARD provides File.relative_path
+require 'yard'
+
 module MB
   module Sound
     # IO-related methods to include in the sound command-line interface.
@@ -45,7 +48,6 @@ module MB
 
         when GraphNode
           # TODO: this could be improved for plotting or saving signal chains/graphs
-          # TODO: what happens for inputs with the InputSampleWrapper?
           sound.sample(960)
 
         else
@@ -98,8 +100,8 @@ module MB
       # will be written into the Hash.
       #
       # See MB::Sound::FFMPEGInput for more flexible sound input.
-      def read(filename, max_frames: nil, sample_rate: 48000, metadata_out: nil)
-        input = file_input(filename, resample: sample_rate)
+      def read(filename, max_frames: nil, sample_rate: 48000, metadata_out: nil, channels: nil)
+        input = file_input(filename, resample: sample_rate, channels: channels)
         metadata_out.merge!(input.metadata) if metadata_out.is_a?(Hash)
         input.read(max_frames || input.frames)
       ensure
@@ -143,6 +145,13 @@ module MB
             t += buffer_size.to_f / sample_rate
             break if max_length && t >= max_length
           end
+        elsif data.is_a?(MB::Sound::IOInput) || data.is_a?(MB::Sound::InputBufferWrapper)
+          output = file_output(filename, sample_rate: sample_rate, channels: data.channels, overwrite: overwrite, metadata: metadata)
+          loop do
+            d = input.read(data.buffer_size)
+            break if d.nil? || d.empty? || d[0].nil? || d[0].empty?
+            output.write(d)
+          end
         else
           data = any_sound_to_array(data)
           output = file_output(filename, sample_rate: sample_rate, channels: data.length, overwrite: overwrite, metadata: metadata)
@@ -156,6 +165,7 @@ module MB
       # Lists all files under the given directory, or under a 'sounds' directory
       # if no path is given.
       def list(dir=nil)
+        # TODO: use Pathname instead of relying on YARD's core extension to File
         path = dir || File.join(Dir.pwd, 'sounds')
         files = Dir[File.join(path, '**', '*.*')].map { |f|
           File.relative_path(dir || Dir.pwd, f)
@@ -342,6 +352,10 @@ module MB
         else
           raise "Unsupported output type: #{output_type.inspect}"
         end
+
+        # Make sure the cache key corresponds to the actual buffer size, as
+        # sometimes an input will not accept a requested buffer size.
+        info[:buffer_size] = o.buffer_size
 
         @outputs[info] = o
 

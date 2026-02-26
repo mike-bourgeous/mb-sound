@@ -5,13 +5,16 @@ module MB
       include GraphNode
       include GraphNode::IOSampleMixin
 
-      attr_reader :channels, :frames, :sample_rate, :offset, :remaining, :buffer_size, :repeat, :duration
+      attr_reader :channels, :frames, :sample_rate, :offset, :remaining, :buffer_size, :repeat, :repeat_count, :duration
       alias length frames
 
       # Initializes an audio stream that returns slices from the given +data+ (an
       # Array of Arrays or Numo::NArrays, one for each channel).  If the lengths
       # of each channel do not match, the shorter channels will return zeros
       # until all channels have ended.
+      #
+      # +:repeat+ is true, false, or the number of times to play the sound.  -1
+      # also repeats forever.
       def initialize(data:, sample_rate: 48000, buffer_size: 800, repeat: false)
         data = [data] if data.is_a?(Numo::NArray)
 
@@ -52,7 +55,20 @@ module MB
 
         @remaining = @frames
         @offset = 0
-        @repeat = !!repeat
+
+        case repeat
+        when true
+          @repeat = true
+          @repeat_count = -1
+
+        when false
+          @repeat = false
+          @repeat_count = 1
+
+        when Integer
+          @repeat = true
+          @repeat_count = repeat > 0 ? repeat - 1 : repeat
+        end
       end
 
       # Causes the next call to #read to start at the given frame +offset+ from
@@ -102,12 +118,19 @@ module MB
           if @repeat
             extra = frames - @remaining
 
+            if @repeat_count > 0
+              @repeat_count -= 1
+            elsif @repeat_count == 0
+              return [ Numo::SFloat[] ] * @channels
+            end
+
             # TODO: Handle the case where frames is more than twice the length
             # of the total loop, or is more than the length of the loop plus
-            # the remaining frames
+            # the remaining frames; just use circularbuffer probably
             if extra == frames
               # TODO: this case should never execute because of the outermost if statement
               ret = @data.map { |c| c[0...frames] }
+              raise 'BUG: Unexpected code path; fix array input read repeat handling'
             else
               ret = @data.map { |c| c[start...@frames].concatenate(c[0...extra]) }
             end

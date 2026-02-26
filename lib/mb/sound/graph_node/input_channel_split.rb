@@ -36,11 +36,12 @@ module MB
           include GraphNode
           include NodeOutput
 
-          def_delegators :@split, :sample_rate, :sample_rate=, :at_rate, :sources, :buffer_size
+          def_delegators :@split, :sample_rate, :sample_rate=, :at_rate, :sources, :buffer_size, :original_source
 
           # For internal use by InputChannelSplit.  Initializes one output
           # channel of the split.
           def initialize(split, channel, name)
+            @owner = split
             @split = split
             @channel = channel
             @graph_node_name = name
@@ -56,9 +57,12 @@ module MB
           end
         end
 
-        # The source node feeding into this InputChannelSplit, in an array (see
+        # The source input feeding into this InputChannelSplit, in a Hash (see
         # GraphNode#sources).
         attr_reader :sources
+
+        # The source input feeding this split.
+        attr_reader :original_source
 
         # The channels from the InputChannelSplit (see IOSampleMixin#split).
         attr_reader :channels
@@ -73,6 +77,7 @@ module MB
           raise 'Source for a InputChannelSplit must respond to #read' unless source.respond_to?(:read)
 
           @source = source
+          @original_source = source
           @sources = { input: source }.freeze
 
           max_channels = source.channels if max_channels.nil? || source.channels < max_channels

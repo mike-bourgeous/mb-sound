@@ -59,4 +59,31 @@ RSpec.describe(MB::Sound::WindowMethods) do
   pending '#synthesize_window'
   pending '#process_time_window'
   pending '#process_window'
+
+  describe '#quick_fade' do
+    it 'raises an error if the rise time is too long' do
+      expect { MB::Sound.quick_fade(Numo::SFloat.zeros(3), rise: 4) }.to raise_error(/Rise.*longer/)
+    end
+
+    it 'raises an error if the fall time is too long' do
+      expect { MB::Sound.quick_fade(Numo::SFloat.zeros(3), rise: 3, fall: 4) }.to raise_error(/Fall.*longer/)
+    end
+
+    it 'can process an array of NArrays' do
+      result = MB::Sound.quick_fade([Numo::SFloat.ones(3), 2 * Numo::SFloat.ones(3)], rise: 3, fall: 0)
+      expect(result[0]).to all_be_within(0.1).of_array(Numo::SFloat[0, 0.5, 1])
+      expect(result[1]).to all_be_within(0.1).of_array(Numo::SFloat[0, 1, 2])
+    end
+
+    it 'can overlap rise and fall' do
+      result = MB::Sound.quick_fade([Numo::SFloat.ones(4), 2 * Numo::SFloat.ones(4)], rise: 3)
+      expect(result[0]).to all_be_within(0.1).of_array(Numo::SFloat[0, 0.5, 0.5, 0])
+      expect(result[1]).to all_be_within(0.1).of_array(Numo::SFloat[0, 1, 1, 0])
+    end
+
+    it 'can process an NArray directly' do
+      result = MB::Sound.quick_fade(Numo::SFloat.ones(7), rise: 3, fall: 3)
+      expect(result).to all_be_within(0.1).of_array(Numo::SFloat[0, 0.5, 1, 1, 1, 0.5, 0])
+    end
+  end
 end

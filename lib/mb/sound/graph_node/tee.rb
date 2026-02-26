@@ -3,10 +3,9 @@ require 'forwardable'
 module MB
   module Sound
     module GraphNode
-      # Creates fan-out branches from a signal node (any object that responds to
-      # #sample and returns a single audio buffer, and ideally includes the
-      # GraphNode module), using buffer copies to prevent parallel branches
-      # from interfering with each other.
+      # Creates fan-out branches from a signal node (any object that responds
+      # to #sample and returns a single audio buffer), using buffer copies to
+      # prevent parallel branches from interfering with each other.
       #
       # The ideal way to create a Tee is with the GraphNode#tee method or
       # GraphNode#get_sampler method.
@@ -23,6 +22,9 @@ module MB
       #     play d
       class Tee
         extend Forwardable
+
+        include Nameable
+        include Traversable
         include MultiOutput
 
         # Raised when reading from a branch after its internal buffer
@@ -44,15 +46,20 @@ module MB
           # Values for internal use by Tee.
           attr_reader :index, :reader, :tee
 
-          def_delegators :@tee, :sample_rate, :sample_rate=, :reset, :sources, :original_source
+          def_delegators :@tee, :sample_rate, :sample_rate=, :reset, :original_source
           def_delegators :@reader, :count, :length
+
+          attr_reader :sources
 
           # For internal use by Tee.  Initializes one parallel branch of the tee.
           def initialize(tee, index, reader)
+            @owner = tee
             @tee = tee
             @index = index
             @reader = reader
             @trace = caller_locations
+            @sources = { tee: @tee }
+            @node_type_name = 'Branch'
           end
 
           # Inform the tee that this branch will no longer be used.  This may

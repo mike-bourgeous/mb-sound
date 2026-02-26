@@ -11,12 +11,18 @@ module MB
         include GraphNode
         include SampleRateHelper
 
+        # The 0-based index of the active node in the sequence.
+        attr_reader :current_node
+
         # Creates a node sequence with the given sources (either Numo::NArrays
         # or a GraphNodes) to play in order.
         def initialize(*sources, sample_rate: nil)
           @sources = nil
           @current_sources = nil
           @sample_rate = sample_rate
+          @current_node = 0
+          @node_count = 0
+          @node_type_name = "NodeSequence(node=0)"
 
           and_then(*sources)
 
@@ -36,11 +42,18 @@ module MB
           return nil if @circbuf.empty? && @current_sources.empty?
 
           # TODO: Preserve depleted sources so node graphs can be reset or looped
+          # TODO: Allow shuffling sources on each loop
           while @circbuf.length < count && @current_sources.any?
             buf = @current_sources[0].sample(count)
 
             if buf.nil? || buf.empty?
+              @current_node += 1
               @current_sources.shift
+              if @current_node < @node_count
+                @node_type_name = "NodeSequence(node=#{@current_node})"
+              else
+                @node_type_name = "NodeSequence(end)"
+              end
             else
               if @circbuf.available < buf.length
                 @circbuf = @circbuf.dup(@circbuf.buffer_size + buf.length)
@@ -72,7 +85,7 @@ module MB
             if s.is_a?(Numo::NArray)
               ArrayInput.new(data: [s])
             else
-              s
+              s.get_sampler
             end
           }.freeze
 
@@ -92,6 +105,8 @@ module MB
             @sources = source_list
             @current_sources = @sources.dup
           end
+
+          @node_count += sources.length
 
           self
         end

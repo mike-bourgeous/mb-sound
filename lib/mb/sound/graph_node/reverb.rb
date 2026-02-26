@@ -1,3 +1,5 @@
+require 'set'
+
 module MB
   module Sound
     module GraphNode
@@ -5,24 +7,222 @@ module MB
       # Geraint Luff at ADC21.  The basic algorithm is a number of
       # delay-and-mix diffusion steps followed by a feedback delay network.
       #
-      # Reference video: https://www.youtube.com/watch?v=6ZK2Goiyotk
-      #
       # See MB::Sound::GraphNode#reverb for a starting point for parameters, as
       # it's easy to make something that sounds bad.
+      #
+      # Reference video: https://www.youtube.com/watch?v=6ZK2Goiyotk
+      #
+      # Excellent reference on artificial reverb I only found after
+      # implementing all of this:
+      # https://ccrma.stanford.edu/~jos/pasp/Artificial_Reverberation.html
       #
       # Example (bin/sound.rb):
       #     play file_input('sounds/drums.flac').reverb
       class Reverb
         include GraphNode
         include GraphNode::SampleRateHelper
+        include MultiOutput
+
+        # Some known-reasonable parameters for the reverb algorithm (plus an
+        # extra_time value for roughly how long it takes for the reverb to ring
+        # out).
+        PRESETS = {
+          room: {
+            description: 'Subtle in-room reverb',
+            channels: 8,
+            stages: 4,
+            diffusion_range: 0.01,
+            feedback_range: 0.003..0.016,
+            feedback_gain: 0.45,
+            feedback_enabled: true,
+            predelay: 0,
+            dry: 1,
+            wet: -16.db,
+            seed: 0,
+            extra_time: 1,
+          },
+          hall: {
+            description: 'Something like a symphony hall',
+            channels: 8,
+            stages: 4,
+            diffusion_range: 0.05,
+            feedback_range: 0.03..0.14,
+            feedback_gain: 0.9,
+            feedback_enabled: true,
+            predelay: 0,
+            dry: 1,
+            wet: -20.db,
+            seed: 5,
+            extra_time: 6,
+          },
+          stadium: {
+            # TODO: it would be cool if the echoes panned around more
+            description: 'Stadium PA echo',
+            channels: 4,
+            stages: 3,
+            diffusion_range: 0.05,
+            feedback_range: 0.3..0.45,
+            feedback_gain: -4.db,
+            feedback_enabled: true,
+            predelay: 0,
+            dry: 1,
+            wet: -6.db,
+            seed: 13,
+            extra_time: 8,
+          },
+          space: {
+            description: 'Outer space, dreaming',
+            channels: 16,
+            stages: 4,
+            diffusion_range: 0.06,
+            feedback_range: 0.2,
+            feedback_gain: 0.97,
+            feedback_enabled: true,
+            predelay: 0.01,
+            dry: 1,
+            wet: -4.5.db,
+            seed: 0,
+            extra_time: 36,
+          },
+          default: {
+            channels: 8,
+            stages: 4,
+            diffusion_range: 0.0005..0.01,
+            feedback_range: 0.1,
+            feedback_gain: -6.db,
+            feedback_enabled: true,
+            predelay: 0,
+            dry: 1,
+            wet: 1,
+            seed: 0,
+            extra_time: 2,
+          },
+        }
+
+        # For internal use by Reverb.  Represents a single output on a stereo
+        # or multi-channel reverb.
+        # TODO: consolidate supporting code for multi-output graph nodes.
+        class ReverbOutput
+          extend Forwardable
+          include GraphNode
+          include NodeOutput
+
+          def_delegators :@reverb, :sample_rate, :sample_rate=, :at_rate
+
+          attr_reader :reverb, :index
+
+          # Creates an output handle for channel +:index+ (0-based) on the
+          # given +:reverb+.
+          def initialize(reverb:, index:)
+            @owner = reverb
+            @reverb = reverb
+            @index = index
+          end
+
+          # Returns the next +count+ samples for this output channel.  Call
+          # each channel only once per graph iteration.  GraphNode#get_sampler
+          # helps here.
+          def sample(count)
+            @reverb.sample_internal(count, index: @index)
+          end
+
+          def sources
+            { reverb: @reverb }
+          end
+
+          def to_s
+            "Reverb output #{@index} of #{@reverb.output_channels}"
+          end
+        end
+
+        # A Hash with the parameters of this Reverb.
+        # TODO: somehow incorporate MIDI-controllable or realtime-controllable parameters
+        attr_reader :parameters
+
+        attr_reader :output_channels, :outputs
+
+        # Feedback gain amount (linear) -- dangerous to modify
+        # TODO: interpolate gain within frames to support faster changes
+        attr_accessor :feedback_gain
+
+        # Wet/dry amount; large changes will cause discontinuity in audio
+        # TODO: interpolate gain
+        attr_accessor :wet, :dry
+
+        # See GraphNode#reverb -- this method just allows passing an input array or node.
+        def self.reverb(preset = :default, input:, extra_time: nil, output_channels: 1, channels: nil, stages: nil, diffusion_range: nil, feedback_range: nil, feedback_gain: nil, feedback_enabled: nil, predelay: nil, wet: nil, dry: nil, seed: nil, show_internals: false)
+          unless input.is_a?(GraphNode) || (input.is_a?(Array) && input.all?(GraphNode))
+            raise 'Input must be a GraphNode or an Array of GraphNodes'
+          end
+
+          params = Reverb::PRESETS[preset] || Reverb::PRESETS[:default]
+          params = params.merge({
+            extra_time: extra_time,
+            channels: channels,
+            stages: stages,
+            diffusion_range: diffusion_range,
+            feedback_range: feedback_range,
+            feedback_gain: feedback_gain,
+            feedback_enabled: feedback_enabled,
+            predelay: predelay,
+            wet: wet,
+            dry: dry,
+            seed: seed,
+          }.compact)
+
+          extra_time = params.delete(:extra_time)
+          _description = params.delete(:description)
+
+          # Pad inputs with extra silence for ringdown
+          #
+          # Normally polymorphism is a better way to override behavior, but in
+          # this specific case, the code is easier to maintain when all the logic
+          # for these node DSL helper methods is in one place.
+          #
+          # TODO: find a way to tidy up the flow graph with these multichannel
+          # inputs and outputs.
+          if extra_time > 0
+            silence = 0.constant.for(extra_time).named('Silence')
+            case input
+            when MultiOutput
+              upstream = input.outputs.map { |o| o.and_then(silence) }
+
+            when InputChannelSplit::InputChannelNode
+              upstream = input.and_then(silence)
+
+            else
+              upstream = input
+            end
+          else
+            upstream = input
+          end
+
+          rate = input.is_a?(GraphNode) ? input.sample_rate : input[0].sample_rate
+
+          MB::Sound::GraphNode::Reverb.new(
+            upstream: upstream,
+            output_channels: output_channels,
+            sample_rate: rate,
+            show_internals: show_internals,
+            **params
+          )
+            .tap { |n| n.named(preset.to_s) if preset }
+            .yield_self { |n| output_channels > 1 ? n.outputs : n }
+        end
 
         # Initializes a reverb node with the given parameters.  See
-        # MB::Sound::GraphNode#reverb for some example defaults.
+        # PRESETS for some example defaults.  Generally one would use
+        # GraphNode#reverb to create a reverb.
         #
-        # +:upstream+ - The source node to which to apply reverb.
+        # If +:upstream+ is a MultiOutput node, then it will split out all of
+        # the outputs from that node as a multichannel input.
+        #
+        # +:upstream+ - The source node to which to apply reverb, or an Array
+        #               of source nodes.
         # +:channels+ - The number of parallel paths for diffusion and
         #               feedback.  Higher means more diffusion but more CPU
         #               usage.  Must be a power of two; try 4 to 16.
+        # +:output_channels+ - The number of output channels to create.
         # +:stages+ - The number of diffusion stages.  4 is a good default.
         # +:diffusion_range+ - The diffusion delay range in seconds.  May be a
         #                      Range or a Numeric upper bound.  0.01 (10ms) is
@@ -30,111 +230,251 @@ module MB
         #                      Larger values blur the sound more but cause more
         #                      predelay.
         # +:feedback_range+ - The feedback delay range in seconds.  This should
-        #                     be high enough that feedback doesn't amplify
-        #                     audible frequencies, so at least 0.1s.
+        #                     usually be high enough that feedback doesn't amplify
+        #                     audible frequencies, so at least 0.1s, but
+        #                     smaller values can effectively simulate small
+        #                     reverberant rooms.  The buffer size is implicitly
+        #                     added to this delay time because of the buffered
+        #                     processing structure.
         # +:feedback_gain+ - The linear volume of feedback in the feedback
         #                    loop.  Must be less than 1.0 to avoid overload.
+        # +:feedback_enabled+ - If true, feedback is included after diffusion.
+        #                       If false, the feedback network is bypassed.
+        # +:predelay+ - The wet signal is delayed by this amount.  Default 0.
         # +:wet+ - The reverberated signal output level.  Usually 1.0.
         # +:dry+ - The original signal output level.  Usually 1.0.
-        def initialize(upstream:, channels:, stages:, diffusion_range:, feedback_range:, feedback_gain:, sample_rate:, wet:, dry:)
-          @sample_rate = sample_rate.to_f
-          @upstream = upstream
-          check_rate(@upstream, 'upstream')
+        # +:seed+ - Random seed Integer for reproducibility of random delays.
+        #           Try different seeds if you get unwanted ringing or echo.
+        # +:show_internals+ - If true, #sources will include reverb internals.
+        def initialize(upstream:, channels:, output_channels:, stages:, diffusion_range:, feedback_range:, feedback_gain:, feedback_enabled:, predelay:, wet:, dry:, seed:, sample_rate:, show_internals:)
+          @random = Random.new(seed)
+          @show_internals = !!show_internals
 
-          @upstream_sampler = upstream.get_sampler.named('Reverb upstream')
+          @sample_rate = sample_rate.to_f
+
+          @upstreams = upstream
+          @upstreams = @upstreams.outputs if @upstreams.is_a?(MB::Sound::GraphNode::MultiOutput)
+          @upstreams = [@upstreams] unless @upstreams.is_a?(Array)
+
+          @upstreams.each_with_index do |u, idx|
+            check_rate(@upstreams, "upstream #{idx}")
+          end
+
           @channels = Integer(channels)
+          @output_channels = Integer(output_channels)
           @stages = Integer(stages)
+
+          raise 'Channels must be positive' unless @channels >= 1
+          raise 'Channels must be a power of two' unless @channels == (2 ** Math.log2(@channels).floor).round
+          raise 'Stages must be non-negative' unless @stages >= 0
+          raise 'Output channels must be positive' unless @output_channels >= 1
 
           diffusion_range = 0..diffusion_range.to_f if diffusion_range.is_a?(Numeric)
           @diffusion_range = diffusion_range
 
           feedback_range = 0..feedback_range.to_f if feedback_range.is_a?(Numeric)
           @feedback_range = feedback_range
+          @feedback_gain = feedback_gain.to_f
+          @feedback_enabled = !!feedback_enabled
 
           @wet = wet.to_f
           @dry = dry.to_f
-          @feedback_gain = feedback_gain.to_f
 
-          # FIXME: adjust gain or use compression or something based on feedback gain
-          # FIXME: gain based on number of stages is wrong
-          # FIXME: stupid amounts of predelay
-          # TODO: stereo or multichannel output based on channel subset mixing
-          # TODO: stereo or multichannel input
+          @predelay = predelay.to_f
+
+          if @output_channels > 1
+            @outputs = Array.new(@output_channels) do |idx|
+              ReverbOutput.new(reverb: self, index: idx)
+            end.freeze
+          else
+            @outputs = [self].freeze
+          end
+
+          @parameters = {
+            channels: @channels,
+            output_channels: @output_channels,
+            stages: @stages,
+            diffusion_range: @diffusion_range,
+            feedback_range: @feedback_range,
+            feedback_gain: @feedback_gain.to_db,
+            wet: @wet.to_db,
+            dry: @dry.to_db,
+            seed: seed,
+          }.freeze
+
+          # FIXME: must be a memory leak or very excessive allocation or
+          # something as the reverb eventually starts skipping
           # TODO: infinite reverb where feedback loop is normalized and
           # feedback gain is proportional to input volume from diffusion stage
           # TODO: filters in line with feedback to create variable decay times
           # TODO: modulate delay times for richer sound
-          # TODO: better spacing of feedback delay times to avoid flattening to
-          # an echo (might also be choice of reflection normal?)
+          # TODO: realtime/MIDI parameter control
+          # FIXME: risk of very low or high frequency oscillation ; put
+          # high/low pass filter on output or feedback path
+          # TODO: downmix matrix for multichannel outputs?
+          # TODO: could do more complex designs for multichannel input with
+          # independent or semi-independent diffusion stages, as the current
+          # diffusion stage pretty fully mixes all input channels
+
+          # Assign inputs to dry output channels.
+          #
+          # TODO: maybe just put N dry inputs on the first N output channels
+          # without downmixing for the extra channels.  This would allow the
+          # reverb to be used as a stereo-to-surround upmixing reverb.
+          #
+          # Example: bin/reverb.rb -p hall --input-channels 2 --output-channels 5
+          @upstream_dry_groups = partition_outputs(@upstreams, @output_channels)
+          @upstream_samplers = @upstream_dry_groups.map.with_index { |u, idx|
+            u = u.length > 1 ? u.sum : u[0]
+            u.get_sampler
+          }
+
+          # Apply predelay to input signal after dry/wet split but before
+          # internal splitting/grouping
+          predelayed = @upstreams.map.with_index { |u, idx|
+            @predelay == 0 ? u : u.delay(seconds: @predelay).named("Predelay #{idx}")
+          }
+
+          # Assign inputs to pipeline channels.
+          @upstream_diffusion_groups = partition_outputs(predelayed, @channels)
+          @last_stage = @upstream_diffusion_groups.map.with_index { |u, idx|
+            # TODO: just add predelay to first diffusion stage?
+            u.length > 1 ? u.sum : u[0]
+          }
 
           # Create diffusers with delays evenly spaced across the range
-          #
           # TODO: consider uneven spacing e.g. placing more near the start
           delay_span = @diffusion_range.end - @diffusion_range.begin
-          last_stage = nil
+          delays = delay_series(count: @stages, max: delay_span)
           @diffusers = Array.new(@stages) do |idx|
             delay_end = @diffusion_range.begin + delay_span * (idx + 1)
             delay_range = 0..delay_end
-            last_stage = make_diffuser(
+            @last_stage = make_diffuser(
               channels: @channels,
-              delay_range: delay_range,
-              input: last_stage || @upstream
+              delay_range: @diffusion_range.begin..(delays[idx] + delay_span),
+              input: @last_stage,
+              stage: idx
             )
           end
 
           # Normal for reflection plane for Householder matrix, making sure
           # each dimension is nonzero
-          @normal = Vector[*Array.new(@channels) { |c| rand((c * 0.5 / @channels)..1) * (rand > 0.5 ? 1 : -1) }].normalize
+          # TODO: all 1s is the traditional matrix to reduce operations required
+          # TODO: experiment with other operations with longer repeat periods
+          # like relatively prime rotations
+          @normal = Vector[*Array.new(@channels) { |c|
+            @random.rand((c * 0.5 / @channels)..1) * (@random.rand > 0.5 ? 1 : -1)
+          }].normalize
+          @householder = Matrix[*Array.new(@normal.count) { |idx|
+            vec = [0] * @normal.count
+            vec[idx] = 1
+            MB::M.reflect(vec, @normal).to_a
+          }.transpose]
 
-          @feedback = Array.new(@channels) { Numo::SFloat.zeros(48000) }
-          @feedback_network = make_fdn(@diffusers.last)
+          if @feedback_enabled
+            @feedback = Array.new(@channels) { Numo::SFloat.zeros(48000) }
+            @feedback_network = make_fdn(@last_stage)
+            @last_stage = @feedback_network
+          end
+
+          # This gets overwritten on every call to #update
+          @output_groups = partition_outputs(Array.new(@channels), @output_channels)
+
+          # FIXME: adjust gain or use compression or something based on feedback gain
+          # FIXME: gain based on number of stages is wrong
+          # FIXME: extra wrong when diffusion or feedback are bypassed.  Need
+          # to do a combined structural (input channels -> internal channels ;
+          # diffusion stage(s) ; feedback stage ; internal channels -> output
+          # channels) and empirical analysis (record and plot gain across
+          # channel/stage parameter space) of the gain structure
+          @diffusion_gain = @stages == 0 ? 1.0 / @channels : 1.0 / (@stages * @channels * @channels)
+
+          @sampled_set = Set.new(0...@output_channels)
+          @dry_output = nil
+          @pipeline_output = nil
         end
 
         # For internal use.  Creates and returns a single diffuser stage as an
         # Array of GraphNodes that will delay, shuffle, and remix the input(s).
-        def make_diffuser(channels:, delay_range:, input:)
-          delay_span = (delay_range.end - delay_range.begin).to_f / channels
+        def make_diffuser(stage:, channels:, delay_range:, input:)
+          delay_span = (delay_range.end - delay_range.begin).to_f
+          delays = [
+            0,
+            *delay_series(count: channels - 1, max: delay_span)
+          ].shuffle(random: @random)
 
-          hadamard = MB::M.hadamard(channels)
+          buffer_time = MB::M.max(delays.max + 0.2, 1.0)
 
+          # Delay and inversion step (wet gain 1 or -1)
           nodes = Array.new(channels) do |idx|
-            delay_begin = delay_range.begin + delay_span * idx
-            delay_end = delay_begin + delay_span
-            delay_time = rand(delay_begin..delay_end)
+            delay_time = delays[idx] + delay_range.begin
 
-            if input.is_a?(Array)
-              source = input[idx]
-            else
-              source = input.get_sampler.named("Reverb diffusion #{idx + 1}")
-            end
-
-            wet_gain = rand > 0.5 ? 1 : -1
-
-            # Delay and inversion step (wet gain 1 or -1)
-            source.delay(seconds: delay_time, wet: wet_gain, smoothing: false, max_delay: MB::M.max(delay_range.end, 1.0))
+            diffuser_polarity = @random.rand > 0.5 ? 1 : -1
+            input[idx]
+              .delay(seconds: delay_time, wet: diffuser_polarity, smoothing: false, max_delay: buffer_time)
+              .named("Diffuse #{stage + 1} #{idx + 1}")
           end
 
           # Hadamard mixing step
-          matrix = MB::Sound::GraphNode::MatrixMixer.new(matrix: hadamard, inputs: nodes, sample_rate: @sample_rate)
-          matrix.outputs.shuffle
+          hadamard = MB::M.hadamard(channels)
+          matrix = MatrixMixer.new(matrix: hadamard, inputs: nodes, sample_rate: @sample_rate)
+            .named("Hadamard #{stage + 1}")
+          matrix.outputs.shuffle(random: @random)
         end
 
         # For internal use.  Creates the feedback delay network, minus the
-        # mixing stage (implemented in #sample).
+        # mixing and reflection stage (implemented in #sample).
+        #
+        # TODO: reify feedback as a concept so we can put the matrix and some
+        # of the delay in the feedback path only
         def make_fdn(inputs)
-          inputs.map.with_index { |inp, idx|
+          delay_span = @feedback_range.end - @feedback_range.begin
+          delays = delay_series(count: inputs.length, max: delay_span).shuffle(random: @random)
+
+          buffer_time = MB::M.max(delays.max + 0.2, 1.0)
+
+          # Add feedback from the feedback buffer
+          feedback = inputs.map.with_index { |inp, idx|
             inp
-              .proc { |v| v + @feedback[idx][0...v.length] }
-              .delay(seconds: rand(@feedback_range), smoothing: false, max_delay: MB::M.max(@feedback_range.end, 1.0), wet: @feedback_gain)
+              .proc { |v| (@feedback[idx][0...v.length].inplace * @feedback_gain + v).not_inplace! }
+              .named("Feedback return #{idx + 1}")
           }
+
+          # Matrix mixing step
+          hhmx = MatrixMixer.new(matrix: @householder, inputs: feedback, sample_rate: @sample_rate)
+            .named("Householder matrix")
+
+          # Hack to help with visualization
+          # TODO: some way of marking nodes as being "inside" other nodes for optional hiding
+          if @show_internals
+            hhmx.singleton_class.define_method(:reverb) do @reverb end
+            hhmx.instance_variable_set(:@reverb, self)
+          end
+
+          # Delay step
+          delays = hhmx.outputs.shuffle(random: @random).map.with_index { |inp, idx|
+            delay_time = delays[idx] + @feedback_range.begin
+            inp
+              .delay(seconds: delay_time, smoothing: false, max_delay: buffer_time)
+              .named("Feedback delay #{idx + 1}")
+          }
+
+          # Add feedback annotation for visualization
+          delays.each_with_index do |d, idx|
+            feedback[idx].with_feedback(feedback: d)
+          end
+
+          delays
         end
 
         # Returns the input source, and if +:internal+ is true, the feedback
         # and diffusion network.
-        def sources(internal: false)
+        def sources(internal: @show_internals)
           {
-            input: @upstream_sampler,
-            **(internal ? @feedback_network.map.with_index { |v, idx| [:"channel_#{idx + 1}", v] }.to_h : {})
+            **@upstreams.map.with_index { |u, idx|
+              ["input_#{idx + 1}", u]
+            }.to_h,
+            **(internal ? @last_stage.map.with_index { |v, idx| [:"channel_#{idx + 1}", v] }.to_h : {})
           }
         end
 
@@ -144,35 +484,140 @@ module MB
 
           @diffusers.each do |stage|
             stage.each do |c|
-              c.sample_rate = rate unless c.sample_rate == @sample_rate
+              c.sample_rate = @sample_rate unless c.sample_rate == @sample_rate
             end
+          end
+
+          @last_stage.each do |c|
+            c.sample_rate = @sample_rate unless c.sample_rate == @sample_rate
           end
 
           self
         end
 
+        # For internal use.  Generates the next +count+ samples without
+        # downmixing and updates the feedback buffer.
+        def update(count)
+          dry = @upstream_samplers.map { |u| u.sample(count) }
+
+          wet = @last_stage.map { |c| c.sample(count) }
+          if dry.nil? || wet.any?(&:nil?)
+            @pipeline_output = wet
+            @dry_output = nil
+            return
+          end
+
+          if @feedback_enabled
+            # Store feedback for next iteration
+            wet.each_with_index do |v, idx|
+              @feedback[idx][0...v.length] = v if v
+            end
+          end
+
+          @pipeline_output = wet
+
+          @output_groups = partition_outputs(@pipeline_output, @output_channels)
+
+          @dry_output = dry.map { |c| (c.inplace * @dry).not_inplace! }
+          @dry_groups = partition_outputs(@dry_output, @output_channels)
+        end
+
+        # For internal use by ReverbOutput#sample.
+        def sample_internal(count, index:)
+          if @sampled_set.include?(index)
+            if @sampled_set.length != @output_channels
+              warn "Output #{index} sampled again before all others sampled.  Sampled so far: #{@sampled_set}"
+            end
+            @sampled_set.clear
+            update(count)
+          end
+
+          @sampled_set << index
+
+          return nil if @dry_output.nil? || @pipeline_output.any?(&:nil?)
+
+          wet = @output_groups[index].sum * (@wet * @diffusion_gain)
+          (wet.inplace + @dry_groups[index].sum).not_inplace!
+        end
+
         # Generates and returns +count+ samples of the mixed dry and
         # reverberated signal.
         def sample(count)
-          dry = @upstream_sampler.sample(count)
+          raise 'This is a multi-output Reverb.  Call #sample on one of the output objects.' if @output_channels != 1
 
-          fdn = @feedback_network.map { |c| c.sample(count) }
+          update(count)
 
           # TODO: automatic ringdown time?
-          return nil if dry.nil? || fdn.any?(&:nil?)
+          return nil if @dry_output.nil? || @pipeline_output.any?(&:nil?)
 
-          # Householder matrix (reflection across a plane)
-          MB::M.reflect(Vector[*fdn], @normal)
+          wet = @pipeline_output.sum * (@wet * @diffusion_gain)
+          (wet.inplace + @dry_output.sum).not_inplace!
+        end
 
-          fdn.each_with_index do |v, idx|
-            @feedback[idx][0...v.length] = v
+        private
+
+        # Returns a series of randomly spaced delay times, ensuring a
+        # relatively even spread.
+        def delay_series(count:, max:)
+          chunk_min = 0
+          chunk_size = max.to_f / count
+          chunk_max = chunk_size
+
+          Array.new(count) do |i|
+            @random.rand(chunk_min..chunk_max).tap { |v|
+              chunk_min = v
+              chunk_max += chunk_size
+            }
+          end
+        end
+
+        # Partitions the +list+ of objects into +count+ groups of equal size,
+        # with leftovers shared across all list members.
+        #
+        # If +count+ is greater than the list length, then the operation is
+        # basically inverted.  The list will be repeated until +count+ - 1
+        # elements are reached, with the last group taking the remainder of the
+        # list.  This ensures that all list elements appear the same number of
+        # times.
+        #
+        # TODO: more complex / spatial aware mixing matrices?
+        #
+        # Example:
+        #     partition_outputs([1, 2, 3, 4, 5], 2)
+        #     # => [[1, 3, 5], [2, 4, 5]]
+        #
+        #     partition_outputs([1, 2], 3)
+        #     # => [[1], [2], [1, 2]]
+        #
+        #     partition_outputs([1, 2, 3], 5)
+        #     # => [[1], [2], [3], [1], [2, 3]]
+        def partition_outputs(list, count)
+          if count > list.length
+            return Array.new(count) { |idx|
+              if idx == count - 1
+                # Take the remaining list elements to make sure every list
+                # element occurs the same number of times
+                list[(idx % list.length)..]
+              else
+                [list[idx % list.length]]
+              end
+            }
           end
 
-          diffusion_gain = @stages * @channels * @channels
+          sliced = list.each_slice(count).to_a
 
-          wet = fdn.sum * (@wet / diffusion_gain)
+          if sliced.last.length != count
+            leftovers = sliced.pop
+          end
 
-          wet + dry * @dry
+          groups = sliced.transpose
+          leftovers&.each do |l|
+            groups.each do |g|
+              g << l
+            end
+          end
+
+          groups
         end
       end
     end

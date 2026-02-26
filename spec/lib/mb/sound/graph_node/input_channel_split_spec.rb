@@ -7,7 +7,7 @@ RSpec.describe(MB::Sound::GraphNode::InputChannelSplit) do
 
   it 'can limit the number of channels' do
     l, r = MB::Sound.file_input('sounds/synth0.flac').split(max_channels: 1)
-    expect(l).to be_a(MB::Sound::GraphNode::InputChannelSplit::InputChannelNode)
+    expect(l).to be_a(MB::Sound::GraphNode::IOSampleMixin)
     expect(r).to eq(nil)
   end
 

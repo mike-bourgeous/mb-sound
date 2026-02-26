@@ -103,7 +103,7 @@ module MB
           raise "Multiplicand must not be an Array" if multiplicand.is_a?(Array)
           check_rate(multiplicand)
 
-          samp = multiplicand.get_sampler.named("Multiplier input #{@multiplicands.length + 1}")
+          samp = multiplicand.get_sampler
           @multiplicands[samp] = multiplicand
           @multmap[multiplicand] ||= Set.new()
           @multmap[multiplicand] << samp

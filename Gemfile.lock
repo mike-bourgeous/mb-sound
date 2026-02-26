@@ -1,8 +1,8 @@
 GIT
   remote: https://github.com/mike-bourgeous/mb-math.git
-  revision: ab31281fe2b73976fd7a9d0d64c998a2370a1221
+  revision: f4faaefac0790e1751da00cc86163011bf8aaf89
   specs:
-    mb-math (0.4.4.2.usegit)
+    mb-math (0.4.4.3.usegit)
       bigdecimal (~> 3.1.8)
       cmath (~> 1.0.0)
       matrix (~> 0.4.2)
@@ -28,7 +28,7 @@ GIT
 PATH
   remote: .
   specs:
-    mb-sound (0.10.0.usegit)
+    mb-sound (0.10.1.usegit)
       cmath (~> 1.0.0)
       csv (~> 3.3, >= 3.3.3)
       logger (~> 1.7.0)
@@ -154,6 +154,7 @@ DEPENDENCIES
   rspec
   simplecov (~> 0.22.0)
   word_wrap (~> 1.0.0)
+  yard
 
 BUNDLED WITH
    2.4.22

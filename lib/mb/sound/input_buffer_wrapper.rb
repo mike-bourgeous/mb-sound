@@ -13,6 +13,9 @@ module MB
 
       def_delegators :@input, :sample_rate, :channels, :closed?
 
+      # The input object read by this buffer adapter.
+      attr_reader :input
+
       # Creates a buffer wrapper with the given +input+ instance (e.g.
       # MB::Sound::FFMPEGInput or MB::Sound::JackFFI::Input).
       #

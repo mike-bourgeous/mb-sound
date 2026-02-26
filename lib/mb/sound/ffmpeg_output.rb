@@ -79,6 +79,15 @@ module MB
         )
       end
 
+      # Closes the output stream and raises an error if ffmpeg returned an
+      # error.
+      def close
+        super.tap { |result|
+          # TODO: capture ffmpeg output for the error message
+          raise "Writing to #{@filename} failed with result #{result.exitstatus}: #{result}" unless result.success?
+        }
+      end
+
       # Tell other classes that this output can accept writes of any size, not
       # just the specified buffer size.
       def strict_buffer_size?

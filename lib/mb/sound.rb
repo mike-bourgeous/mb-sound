@@ -1,14 +1,11 @@
 require 'cmath'
 require 'numo/narray'
 
-begin
-  require 'mb-sound-jackffi'
-rescue LoadError
-  # JackFFI is unavailable
-end
-
+require 'mb-sound-jackffi'
 require 'mb-math'
 require 'mb-util'
+
+require_relative 'sound/numeric_sound_mixins'
 
 # Load C extensions
 require_relative 'fast_sound'
@@ -38,6 +35,9 @@ module MB
     extend GainMethods
     extend WindowMethods
     extend AnalysisMethods
+
+    # Speed of sound for wavelength calculations, in meters per second.
+    SPEED_OF_SOUND = 343.0
 
     # Filters a sound with the given filter parameters (see
     # MB::Sound::Filter::Cookbook).

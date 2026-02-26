@@ -1,5 +1,10 @@
 require 'shellwords'
 
+require_relative 'graph_node/nameable'
+require_relative 'graph_node/traversable'
+require_relative 'graph_node/node_output'
+require_relative 'graph_node/multi_output'
+
 module MB
   module Sound
     # Adds methods to any class that implements a :sample method to build
@@ -9,7 +14,8 @@ module MB
     #
     # Examples (run in the bin/sound.rb environment):
     #     # FM organ bass
-    #     play F1.at(-6.db).fm(F2.at(300) * adsr(0, 0.1, 0.0, 0.5, auto_release: false)) * adsr(0, 0, 1, 0, auto_release: 0.25)
+    #     mod = F2.at(300) * adsr(0, 0.1, 0.0, 0.5, auto_release: false)
+    #     play F1.at(-6.db).fm(mod) * adsr(0, 0, 1, 0, auto_release: 0.25)
     #
     #     # FM classic synth bass
     #     cenv = adsr(0, 0.005, 0.5, 2.5).db(30)
@@ -36,24 +42,8 @@ module MB
     #
     # TODO: Document methods that nodes must implement or override
     module GraphNode
-      attr_reader :graph_node_name
-
-      # Gives a name to this graph node to make it easier to retrieve later.
-      def named(n)
-        @graph_node_name = n&.to_s
-        @named = true
-        self
-      end
-
-      # Returns true if the graph node has been given a custom name.
-      def named?
-        @named ||= false
-      end
-
-      # Returns the assigned node name if present, or the object ID if not.
-      def name_or_id
-        @graph_node_name || "id=#{__id__}"
-      end
+      include Nameable
+      include Traversable
 
       # Returns the class name, or a custom name set by the subclass (e.g. '/'
       # for a division proc node).
@@ -117,7 +107,9 @@ module MB
       # custom GraphNode implementations, that's _probably_ a bug in mb-sound.
       def get_sampler
         # TODO: maybe rename to #get_branch to match Tee's naming??
-        # TODO: find and fix places where branches get abandoned (e.g. bin/flanger.rb) instead of ignoring these late readers in circular_buffer.rb
+        # TODO: find and fix places where branches get abandoned (e.g.
+        # bin/flanger.rb) instead of ignoring late readers in
+        # circular_buffer.rb
         @internal_tee ||= Tee.new(self, 0)
         @internal_tee.add_branch
       end
@@ -611,23 +603,42 @@ module MB
         ).named(name).taps
       end
 
-      # Appends a reverb to this node.
-      # TODO: friendlier parameters like decay time
+      # Appends a reverb to this node.  Named presets change default
+      # parameters, but you can override any of the preset's parameters.
+      #
+      # If this is a multi-output node (e.g. a splittable input object), then
+      # the outputs are broken out as a multichannel input to the Reverb.
+      #
+      # Presets: :room, :hall, :stadium, :space, :default.  See
+      # Reverb::PRESETS.
       #
       # See MB::Sound::GraphNode::Reverb#initialize for parameter descriptions.
+      #
+      # The +:extra_time+ parameter controls how much time to add to input
+      # objects to allow the reverb to decay.
+      #
+      # If +:output_channels+ is 
+      #
       # Example (bin/sound.rb):
       #     play file_input('sounds/drums.flac').reverb
-      def reverb(channels: 8, stages: 4, diffusion_range: 0.0005..0.01, feedback_range: 0.0..0.1, feedback_gain: -6.db, wet: 1, dry: 1)
-        MB::Sound::GraphNode::Reverb.new(
-          upstream: self,
+      #     play file_input('sounds/piano0.flac').reverb(:space)
+      def reverb(preset = :default, extra_time: nil, output_channels: 1, channels: nil, stages: nil, diffusion_range: nil, feedback_range: nil, feedback_gain: nil, feedback_enabled: nil, predelay: nil, wet: nil, dry: nil, seed: nil, show_internals: false)
+        MB::Sound::GraphNode::Reverb.reverb(
+          preset,
+          input: self,
+          extra_time: extra_time,
+          output_channels: output_channels,
           channels: channels,
           stages: stages,
           diffusion_range: diffusion_range,
           feedback_range: feedback_range,
           feedback_gain: feedback_gain,
-          sample_rate: self.sample_rate,
+          feedback_enabled: feedback_enabled,
+          predelay: predelay,
           wet: wet,
-          dry: dry
+          dry: dry,
+          seed: seed,
+          show_internals: show_internals
         )
       end
 
@@ -708,16 +719,22 @@ module MB
       #
       #     block_buf[] = spy_buf
       #
-      # You can specify a minimum +:interval+ in seconds to reduce CPU load, and your spy won't be called until at least that amount of time has elapsed.
+      # You can specify a minimum +:interval+ in seconds to reduce CPU load,
+      # and your spy won't be called until at least that amount of time has
+      # elapsed, or the value spied changes to/from nil.
       #
       # If you'll need to remove specific spies later, pass a +:handle+.  This
       # may be an object instance, a Symbol, etc.
+      #
+      # The +:phase+ argument may be :pre to receive the number of samples
+      # before a node executes, or :post to receive a copy of the data the node
+      # returns.
       #
       # See #clear_spies.
       #
       # TODO: accomplish this without monkey patching, and maybe use a module
       # interface rather than a proc (for better rubyprof traces)
-      def spy(handle: nil, interval: false, &block)
+      def spy(handle: nil, interval: false, phase: :post, &block)
         @handled_spies ||= nil
 
         if @handled_spies.nil?
@@ -725,9 +742,11 @@ module MB
 
           class << self
             def sample(count)
+              call_spies(count, :pre)
+
               super(count).tap { |buf|
                 MB::M.with_inplace(buf, false) do |data|
-                  call_spies(data)
+                  call_spies(data, :post)
                 end
               }
             end
@@ -735,25 +754,28 @@ module MB
         end
 
         @handled_spies[handle] ||= []
-        @handled_spies[handle] << [block, interval, Time.now - (interval || 1)]
+        @handled_spies[handle] << [block, interval, phase, Time.now - (interval || 1), false]
 
         self
       end
 
       # Used by #spy.
-      private def call_spies(data)
+      private def call_spies(data, phase)
         now = Time.now
+        now_nil = data.nil?
 
         @handled_spies.each do |origin, spies|
           info = origin ? " from #{origin}" : ''
 
           spies.each_with_index do |spy_info, idx|
-            s, interval, last_time = spy_info
+            s, interval, spy_phase, last_time, was_nil = spy_info
+            next unless spy_phase == phase
 
             begin
-              if !interval || (now - last_time) >= interval
+              if !interval || (now - last_time) >= interval || was_nil != now_nil
                 s.call(data)
-                spy_info[-1] = now
+                spy_info[-2] = now
+                spy_info[-1] = now_nil
               end
             rescue => e
               warn "Spy #{idx}/#{s}#{info} raised #{MB::U.highlight(e)}"
@@ -779,68 +801,6 @@ module MB
         self
       end
 
-      # Overridden by users of this mixin to return the inputs to the current
-      # object.  For example, a Mixer will return a list of objects that are
-      # added together by that mixer, as well as any constant DC offset
-      # applied.
-      #
-      # See #graph for a method that returns every source feeding into this
-      # node.
-      def sources
-        {}
-      end
-
-      # TODO: add another method to return rightward-pointing sources AKA
-      # feedback, that will be drawn on visualizations but not used in
-      # determining node order?
-
-      # Returns a list of all nodes feeding into this node, either directly or
-      # indirectly, plus this node itself, without duplication.  Also may
-      # include numeric values used as parameters to some of the nodes.
-      #
-      # Entries in the returned list should be in order of increasing distance
-      # from this node, but if there are loops in the graph this is not
-      # guaranteed.
-      def graph(include_tees: true)
-        MB::Sound::GraphNode.graph(self, include_tees: include_tees)
-      end
-
-      # Returns a Hash from source node to a Set of destination node/port name
-      # tuples describing all connections upstream of this graph node.
-      #
-      # Example output shape:
-      #     {
-      #       Constant => Set.new([[Tone, :frequency]])
-      #       Tone => Set.new([[Filter, :cutoff], [Filter, :quality]])
-      #     }
-      def graph_edges(include_tees: true)
-        edges = {}
-
-        graph(include_tees: include_tees).each do |dest|
-          next unless dest.respond_to?(:sources)
-
-          dest.sources.each do |name, s|
-            s = s.round if s.is_a?(Numeric) && s.respond_to?(:round) && s.round == s
-
-            unless include_tees
-              s = climb_tee_tree(s)
-            end
-
-            edges[s] ||= Set.new
-            edges[s] << [dest, name]
-          end
-        end
-
-        edges
-      end
-
-      # Separates the graph into ranks (in GraphViz terms) based on distance
-      # from this node.  Ignores Numeric sources in the graph.  Returns an
-      # Array of Arrays of nodes.
-      def graph_ranks(include_tees: true)
-        MB::Sound::GraphNode.graph_ranks(self, include_tees: include_tees)
-      end
-
       # Finds the lowest numeric value greater than zero for any graph nodes
       # that have a #buffer_size method.  The idea is that sound card inputs
       # will have the smallest buffer size of any input.
@@ -860,69 +820,6 @@ module MB
         end
 
         size
-      end
-
-      # Looks for the first source node within the graph feeding into this node
-      # with the given name.
-      def find_by_name(name)
-        graph.find { |s| s.respond_to?(:graph_node_name) && s.graph_node_name == name }
-      end
-
-      # Returns all nodes within this nodes input graph matching the given
-      # name.
-      def find_all_by_name(name)
-        graph.select { |s| s.respond_to?(:graph_node_name) && s.graph_node_name == name }
-      end
-
-      # Returns a String containing a GraphViz representation of the signal
-      # graph.
-      def graphviz(include_tees: false)
-        source_history = Set.new
-        source_queue = [self]
-
-        digraph = "digraph {\n"
-
-        digraph << "  graph [ bgcolor=\"#000000e0\" rankdir=\"LR\" pad=\"0.25\" ];\n"
-        digraph << "  node [ style=\"filled\" fontcolor=\"#ffffff\" color=\"#2266ee\" shape=\"Mrecord\" ];\n"
-        digraph << "  edge [ fontcolor=\"#ffffff\" color=\"#ffffff\" headport=\"w\" tailport=\"e\" ];\n"
-
-        graph(include_tees: include_tees).each do |node|
-          next if node.is_a?(Numeric)
-          desc = node.respond_to?(:to_s_graphviz) ? node.to_s_graphviz : node.to_s
-          digraph << "  #{node.__id__.to_s.inspect} [label=#{desc.inspect}]"
-        end
-
-        graph_edges(include_tees: include_tees).each do |src, edges|
-          edges.each do |dest, name|
-            # TODO: add ports to nodes instead of labeling edges
-            if src.is_a?(Numeric)
-              # Include a separate numeric source node for each destination
-              srcname = "#{src.inspect} to #{dest.__id__}/#{name}"
-              digraph << "  #{srcname.inspect} [label=#{src.to_s.inspect}];\n"
-              digraph << "  #{srcname.inspect} -> #{dest.__id__.to_s.inspect} [label=#{name.to_s.inspect}];\n"
-            else
-              digraph << "  #{src.__id__.to_s.inspect} -> #{dest.__id__.to_s.inspect} [label=#{name.to_s.inspect}];\n"
-            end
-          end
-        end
-
-        digraph << "}\n"
-
-        digraph
-      end
-
-      # Saves a GraphViz representation of the graph to a temporary file,
-      # generates a PNG using dot, and opens the PNG using open.  The PNG file
-      # is left behind after the program exits for inspection.
-      def open_graphviz(include_tees: false)
-        dot = Tempfile.create([self.to_s, '.dot'])
-
-        png = "#{dot.path}.png"
-        File.write(dot, self.graphviz(include_tees: include_tees))
-        system("dot -Tpng:cairo #{dot.path.shellescape} -o #{png.shellescape}")
-        system("open #{png.shellescape}")
-
-        png
       end
 
       # Sets all Tones in the graph to continue playing for +duration+.
@@ -962,10 +859,18 @@ module MB
         self
       end
 
-      # Walk up sources until a non-Tee::Branch node is found.  Used by #graph.
+      # Walk up sources until a "real" node is found, skipping over
+      # housekeeping nodes like Tee::Branch.  Used by #graph.
       def self.climb_tee_tree(branch)
-        branch = branch.original_source while branch.is_a?(MB::Sound::GraphNode::Tee::Branch)
+        branch = branch.original_source while climb_over?(branch)
         branch
+      end
+
+      # Returns true if the given branch should be skipped normally when doing
+      # a non-verbose traversal of a node graph.  This e.g. skips tees,
+      # branches, adapters, etc.  See .climb_tee_tree and NodeOutput.
+      def self.climb_over?(branch)
+        branch.is_a?(MB::Sound::GraphNode::NodeOutput)
       end
 
       # Create a list of upstream nodes from the given graph node.  See #graph.
@@ -1181,8 +1086,6 @@ end
 
 require_relative 'graph_node/arithmetic_node_helper'
 require_relative 'graph_node/sample_rate_helper'
-require_relative 'graph_node/node_output'
-require_relative 'graph_node/multi_output'
 require_relative 'graph_node/graph_node_array_mixin'
 
 require_relative 'graph_node/constant'

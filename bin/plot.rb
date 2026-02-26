@@ -20,5 +20,5 @@ loop do
   # TODO: there's got to be a better way to respond to window size changes
   MB::Sound.plot(data, samples: data[0].length, graphical: graphical)
   break unless graphical
-  sleep 2
+  sleep
 end

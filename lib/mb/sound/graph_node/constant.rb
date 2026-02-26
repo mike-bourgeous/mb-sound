@@ -129,6 +129,28 @@ module MB
           self
         end
 
+        # Returns the duration of the constant in seconds, or nil if there is
+        # no duration.
+        def duration
+          return nil unless @duration_samples
+          @duration_samples / @sample_rate
+        end
+
+        # Returns the amount of time the constant has been playing since the
+        # start of playback, or since #for was last called.
+        def elapsed
+          @elapsed_samples / @sample_rate
+        end
+
+        # Returns the progress as a percentage through playback (from 0 to 100)
+        # if there is a duration set, or nil if there is no duration.
+        #
+        # TODO: abstract progress reporting as a mixin for Tone, inputs, etc.?
+        def progress
+          return nil unless @duration_samples
+          @elapsed_samples * 100.0 / @duration_samples
+        end
+
         # See GraphNode#to_s
         def to_s
           "#{super} -- value=#{value_string}"

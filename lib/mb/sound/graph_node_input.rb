@@ -14,6 +14,10 @@ module MB
         nodes = nodes[0] if nodes.length == 1 && nodes[0].is_a?(Array)
         raise 'All sources must be GraphNodes' unless nodes.length >= 1 && nodes.all?(MB::Sound::GraphNode)
 
+        nodes = nodes.flat_map { |n|
+          n.is_a?(MB::Sound::GraphNode::MultiOutput) ? n.outputs.map(&:get_sampler) : n.get_sampler
+        }
+
         @sample_rate = nodes.map(&:sample_rate).max
         nodes.each do |n|
           n.sample_rate = @sample_rate unless n.sample_rate == @sample_rate
@@ -23,7 +27,7 @@ module MB
 
         @channels = MB::M.max(nodes.length, channels)
 
-        @nodes = nodes.map { |n| n.get_sampler }.freeze
+        @nodes = nodes.freeze
 
         @output = Array.new(@channels)
 
@@ -62,7 +66,7 @@ module MB
       # Returns all of the upstream edges leading into this input.
       #
       # See GraphNode#graph_edges.
-      def graph_edges(include_tees: true)
+      def graph_edges(include_tees: true, feedback: false)
         edges = {}
 
         @nodes.each_with_index do |n, idx|
@@ -70,9 +74,9 @@ module MB
 
           # TODO: use named channels?  allow passing a hash to the constructor to name the channels?
           edges[n] ||= Set.new
-          edges[n] << [self, :"channel_#{idx + 1}"]
+          edges[n] << [self, :"channel_#{idx + 1}"] unless feedback
 
-          n.graph_edges(include_tees: include_tees).each do |src, edge_set|
+          n.graph_edges(include_tees: include_tees, feedback: feedback).each do |src, edge_set|
             edges[src] ||= Set.new
             edges[src].merge(edge_set)
           end
@@ -85,23 +89,24 @@ module MB
       # #read as splatted arguments.
       #
       # TODO: combine with GraphNode#spy somehow
-      def spy(handle: nil, interval: false, &block)
+      def spy(handle: nil, interval: false, phase: :post, &block)
         @handled_spies[handle] ||= []
-        @handled_spies[handle] << [block, interval, Time.now - (interval || 1)]
+        @handled_spies[handle] << [block, interval, phase, Time.now - (interval || 1)]
 
         self
       end
 
       # Used by #spy.
       # TODO: combine with GraphNode#call_spies somehow
-      private def call_spies(data)
+      private def call_spies(data, phase)
         now = Time.now
 
         @handled_spies.each do |origin, spies|
           info = origin ? " from #{origin}" : ''
 
           spies.each_with_index do |spy_info, idx|
-            s, interval, last_time = spy_info
+            s, interval, spy_phase, last_time, was_nil = spy_info
+            next unless spy_phase == phase
 
             begin
               if !interval || (now - last_time) >= interval
@@ -135,6 +140,8 @@ module MB
 
       # Returns the nodes' outputs duplicated as needed to fill all channels.
       def read(count)
+        call_spies(count, :pre)
+
         min_length = count
         max_length = count
         data = @nodes.map { |n|
@@ -159,7 +166,7 @@ module MB
           @output[idx] = data[idx % data.length]
         end
 
-        call_spies(@output)
+        call_spies(@output, :post)
 
         @output
       end

@@ -34,6 +34,7 @@ module MB
           # +:index+ - The index of this tap.
           # +:delay+ - The delay source for this tap.
           def initialize(mtd:, index:, delay_samples:)
+            @owner = mtd
             @mtd = mtd
             @index = index
 

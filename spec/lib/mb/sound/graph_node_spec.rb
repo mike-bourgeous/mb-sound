@@ -617,7 +617,8 @@ RSpec.describe(MB::Sound::GraphNode, aggregate_failures: true) do
 
     context 'with an interval' do
       it 'calls the spy once, then waits for the interval to pass' do
-        expect(Time).to receive(:now).and_return(0, 1, 2, 3, 4, 5, 6)
+        # Time.now is called once for :pre spies and once for :post spies so double the numbers
+        expect(Time).to receive(:now).and_return(0, 1, 1, 2, 2, 3, 3, 4, 4, 5, 5, 6, 6)
 
         spycount = 0
 
@@ -634,6 +635,15 @@ RSpec.describe(MB::Sound::GraphNode, aggregate_failures: true) do
 
         # Time.now == 6
         expect { node.sample(10) }.to change { spycount }.by(1)
+      end
+    end
+
+    context 'with phase' do
+      it 'calls a :pre spy with the sample count' do
+        spyval = nil
+        node = 42.constant.spy(phase: :pre) { |c| spyval = c }
+
+        expect { node.sample(13) }.to change { spyval }.to(13)
       end
     end
   end
@@ -789,6 +799,21 @@ RSpec.describe(MB::Sound::GraphNode, aggregate_failures: true) do
         expect(ranks[2]).to match_array([be_a(MB::Sound::GraphNode::Mixer)])
         expect(ranks[3]).to match_array([c, be_a(MB::Sound::GraphNode::Constant), be_a(MB::Sound::GraphNode::Constant)])
         expect(ranks[4]).to match_array([d])
+      end
+    end
+
+    describe '#graphviz' do
+      pending
+
+      it 'can include feedback edges' do
+        a = Numo::SFloat.zeros(100)
+
+        g1 = 100.hz.proc { |v| v + a }
+        g2 = g1.delay(seconds: 0.1).proc { |v| a[] = v }
+
+        g1.with_feedback({ feedback_spec: g2 })
+
+        expect(g2.graphviz).to match(/feedback_spec.*constraint/)
       end
     end
   end

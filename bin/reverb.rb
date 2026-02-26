@@ -3,7 +3,16 @@
 #
 # Input and output file can be specified using flags or positional arguments.
 #
+# Presets are a good way to get good sounds quickly.  You can override preset
+# defaults by passing options like -w and -g.
+#
+# Note: the --diffusion-time and --feedback-time options also accept ranges
+# like "0.2..0.5".
+#
 # Usage: $0 [options] [input_file [output_file]]
+#
+# Example:
+#     $0 -i sounds/piano0.flac -p space
 
 require 'bundler/setup'
 require 'optionparser'
@@ -12,31 +21,73 @@ require 'mb-sound'
 MB::U.sigquit_backtrace
 
 options = {
-  channels: 4,
-  stages: 4,
-  'diffusion-time': 0.01,
-  'feedback-time': 0.1,
-  'feedback-gain': -6,
-  wet: 0,
-  dry: 0,
+  'input-channels': 2,
+  'output-channels': nil,
+  channels: nil,
+  stages: nil,
+  'diffusion-time': nil,
+  'feedback-time': nil,
+  'feedback-gain': nil,
+  'disable-feedback': nil,
+  predelay: nil,
+  wet: nil,
+  dry: nil,
+  preset: nil,
+  seed: nil,
+  'extra-time': nil,
+  repeat: false,
   input: nil,
   output: nil,
+  'show-internals': nil,
+  graphviz: false,
   force: false,
-  quiet: false
+  quiet: false,
 }
+
+# Representation of a numeric value or numeric range for OptionParser.
+module FloatOrRange
+  def self.parse(str)
+    if str.include?('..')
+      range_start, _, range_end = str.partition('..')
+      range_start = Float(range_start)
+      range_end = Float(range_end)
+      range_start..range_end
+    else
+      Float(str)
+    end
+  rescue => e
+    raise "Error parsing numeric or range value #{str.inspect}: #{e}"
+  end
+end
 
 optp = OptionParser.new { |p|
   MB::U.opt_header_help(p)
 
+  p.accept(FloatOrRange) do |str|
+    FloatOrRange.parse(str)
+  end
+
+  p.on('--input-channels N', Integer, 'The number of input channels (default 2; ignored if given an input file)')
+  p.on('--output-channels N', Integer, 'The number of output channels (default: number of input channels)')
+  p.on('-p', '--preset PRESET', String, 'A named preset to change default parameters (room, hall, stadium, space, or default)')
   p.on('-c', '--channels N', Integer, 'The number of parallel diffusion and feedback channels (default 4; powers of two: 1, 2, 4, 8, ...)')
   p.on('-s', '--stages N', Integer, 'The number of diffusion stages (default 4, range 1..N)')
-  p.on('-t', '--diffusion-time SECONDS', Float, 'The maximum diffusion delay in seconds; controls smearing (default 0.01, range 0..)')
-  p.on('-b', '--feedback-time SECONDS', Float, 'The maximum feedback delay in seconds; controls room size (default 0.1, range 0..)')
+  p.on('-t', '--diffusion-time SECONDS', FloatOrRange, 'The maximum diffusion delay in seconds; controls smearing (default 0.01, range 0..)')
+  p.on('-b', '--feedback-time SECONDS', FloatOrRange, 'The maximum feedback delay in seconds; controls room size (default 0.1, range 0..)')
   p.on('-g', '--feedback-gain DB', Float, 'The feedback gain in decibels (default -6dB, range -120..0)')
+  p.on('-x', '--disable-feedback', 'If true, the feedback stage of the reverb will be bypassed.')
+  p.on('--predelay SECONDS', Float, 'Pre-delay for the reverb.')
   p.on('-w', '--wet DB', Float, 'The wet gain in decibels (default 0dB, range -120..)')
   p.on('-d', '--dry DB', Float, 'The dry gain in decibels (default 0dB, range -120..)')
+  p.on('--seed INT', Integer, 'Random seed for the reverb generator (default varies by preset, often 0)')
+  p.on('--extra-time SECONDS', Float, 'Amount of silence to add after an input file')
+  p.on('--repeat [COUNT]', Integer, 'Repeat the input file a number of times, or omit the count for indefinitely') do |r|
+    options[:repeat] = r || -1
+  end
   p.on('-i', '--input FILE', String, 'A sound file to process (default is soundcard input)')
   p.on('-o', '--output FILE', String, 'An output sound file (default is soundcard output)')
+  p.on('--show-internals', TrueClass, 'Whether to show the insides of the reverb object in graphviz')
+  p.on('--graphviz', TrueClass, 'Open a graphical visualization of the signal flow')
   p.on('-f', '--force', TrueClass, 'Whether to overwrite the output file if it exists')
   p.on('-q', '--quiet', TrueClass, 'Whether to disable plotting the output')
 }.parse!(into: options)
@@ -51,29 +102,53 @@ if infile = ARGV.shift
   end
 end
 
+input_channels = options[:'input-channels']
 if options[:input]
-  input = MB::Sound.file_input(options[:input]).and_then(0.constant.for(10))
+  # TODO: support ffmpeg -stream_loop option
+  if options[:repeat]
+    unless options[:quiet]
+      if options[:repeat] < 0
+        puts "Repeating forever" unless options[:quiet]
+      else
+        puts "Repeating #{options[:repeat] > 0 ? options[:repeat] : 1} time(s)"
+      end
+    end
+    input = MB::Sound::ArrayInput.new(data: MB::Sound.read(options[:input], channels: input_channels), repeat: options[:repeat])
+  else
+    input = MB::Sound.file_input(options[:input], channels: input_channels)
+  end
 else
-  input = MB::Sound.input
+  input = MB::Sound.input(channels: input_channels)
 end
 
+output_channels = options[:'output-channels'] || MB::M.max(2, input.channels)
 if options[:output]
-  output = MB::Sound.file_output(options[:output], overwrite: options[:force] || :prompt, channels: 2)
+  output = MB::Sound.file_output(options[:output], overwrite: options[:force] || :prompt, channels: output_channels, buffer_size: 800)
 else
-  output = MB::Sound.output(plot: !options[:quiet])
+  output = MB::Sound.output(plot: !options[:quiet], channels: output_channels)
 end
 
 reverb = input.reverb(
+  options[:preset]&.sub(':', '')&.to_sym,
+  output_channels: output.channels,
   channels: options[:channels],
   stages: options[:stages],
-  diffusion_range: 0.0..options[:'diffusion-time'],
-  feedback_range: 0.0..options[:'feedback-time'],
-  feedback_gain: options[:'feedback-gain'].db,
-  wet: options[:wet].db,
-  dry: options[:dry].db
-).softclip(0.9)
+  diffusion_range: options[:'diffusion-time'],
+  feedback_range: options[:'feedback-time'],
+  feedback_gain: options[:'feedback-gain']&.db,
+  feedback_enabled: options[:'disable-feedback'].nil? ? nil : !options[:'disable-feedback'],
+  predelay: options[:predelay],
+  wet: options[:wet]&.db,
+  dry: options[:dry]&.db,
+  seed: options[:seed],
+  extra_time: options[:'extra-time'],
+  show_internals: options[:'show-internals'],
+)
 
-reverb.open_graphviz unless options[:quiet]
+if options[:graphviz]
+  node = reverb.is_a?(Array) ? reverb[0] : reverb
+  node.open_graphviz
+end
 
 unless options[:quiet]
   MB::U.headline("Playing #{input} to #{output}")
@@ -81,3 +156,4 @@ unless options[:quiet]
 end
 
 MB::Sound.play(reverb, output: output, clear: false)
+puts "\n" * 10

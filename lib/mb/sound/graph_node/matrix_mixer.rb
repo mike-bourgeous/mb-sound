@@ -7,6 +7,7 @@ module MB
       # Numo::NArray) to combine N inputs to M outputs.
       class MatrixMixer
         include MultiOutput
+        include Nameable
 
         # Represents a single output node of the matrix's N outputs.
         class MatrixOutput
@@ -20,6 +21,7 @@ module MB
           # Creates an output node with the given +:matrix+ that owns it, and
           # the given +:index+.
           def initialize(matrix:, index:)
+            @owner = matrix
             @matrix = matrix
             @index = index
           end
@@ -44,7 +46,7 @@ module MB
           end
         end
 
-        attr_reader :outputs, :sample_rate, :count
+        attr_reader :outputs, :sample_rate, :count, :matrix
 
         # Initializes a matrix mixer with the given +:matrix+, list of
         # +:inputs+, and +:sample_rate+.  The +:matrix+ may be a Matrix, Array
@@ -52,6 +54,7 @@ module MB
         # length does not equal the number of columns in the matrix.
         def initialize(matrix:, inputs:, sample_rate:)
           matrix = Matrix[*matrix.to_a]
+          @matrix = matrix.freeze
           @procmatrix = ::MB::Sound::ProcessingMatrix.new(matrix)
 
           unless @procmatrix.input_channels == inputs.length
@@ -61,7 +64,7 @@ module MB
           # TODO: abstract or consolidate with the code in Tee that tracks
           # which branches have been read
           @inputs = inputs.map.with_index { |c, idx|
-            c.get_sampler.named("Matrix input #{idx + 1}")
+            c.get_sampler
           }
           @sampled_set = Set.new
           @input_data = nil
