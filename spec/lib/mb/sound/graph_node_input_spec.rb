@@ -126,7 +126,7 @@ RSpec.describe(MB::Sound::GraphNodeInput, :aggregate_failures) do
       b = 2.constant
       inp = [a, b].as_input
 
-      expect(inp.graph_edges.keys).to all(be_a(MB::Sound::GraphNode).or be_a(Numeric))
+      expect(inp.graph_edges.keys).to all(be_a(MB::Sound::GraphNode::Traversable).or(be_a(Numeric)))
       expect(inp.graph_edges.values).to all(be_a(Set).and all(be_a(Array).and match([respond_to(:graph), be_a(Symbol)])))
     end
 

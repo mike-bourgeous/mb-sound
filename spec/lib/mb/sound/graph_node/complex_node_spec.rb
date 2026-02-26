@@ -61,7 +61,7 @@ RSpec.describe(MB::Sound::GraphNode::ComplexNode, :aggregate_failures) do
       chain = source.real
       expect(chain).to be_a(MB::Sound::GraphNode::ComplexNode)
       expect(chain.graph(include_tees: false)).to eq([chain, source, 5])
-      expect(chain.sources[:input].sources).to eq({input: source})
+      expect(chain.sources[:input].original_source).to eq(source)
     end
   end
 end
