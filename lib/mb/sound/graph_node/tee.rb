@@ -24,6 +24,7 @@ module MB
         extend Forwardable
 
         include Nameable
+        include Traversable
         include MultiOutput
 
         # Raised when reading from a branch after its internal buffer
