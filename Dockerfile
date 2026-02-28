@@ -12,6 +12,7 @@ RUN --mount=type=bind,source=.,destination=/mb-sound cd /mb-sound && bundle inst
 VOLUME /mb-sound
 
 WORKDIR /
+ENV IS_DEMO=1
 RUN curl -fsSL https://claude.ai/install.sh | bash
 
 WORKDIR /mb-sound
