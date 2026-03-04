@@ -6,6 +6,13 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 mb-sound is a Ruby library for sound processing with a fluent DSL for building signal processing chains. It is a companion to an educational YouTube video series about sound. It uses Numo::NArray for numeric operations and includes C extensions for performance-critical paths.
 
+### Folders
+
+- `bin/` - user-facing scripts and experiments
+- `ext/` - C extensions for performance-critical functions
+- `lib/` - Ruby code (most functionality lives here)
+- `spec/` - Test suite
+
 ## Build & Development Commands
 
 ```bash
@@ -66,9 +73,16 @@ Graph nodes maintain input/output relationships and support traversal via the `T
 - `mb-util` - General utilities (GitHub dependency)
 - `mb-sound-jackffi` - JACK audio FFI bindings (GitHub dependency)
 
+## Source Control
+
+- Use branches for feature development
+- Use non-fast-forward merge commits when features are complete
+- Provide step-by-step commits with detailed commit messages for easy review
+
 ## Key Conventions
 
 - Ruby 3.4 target (supports 2.7+)
 - Tests use RSpec (configured in `.rspec`)
 - The `bin/` directory contains ~57 example/utility scripts demonstrating synthesis, effects, MIDI, and plotting
 - Docker support via `Dockerfile` and `dock.sh` for containerized development
+- `Numo::NArray` for all sound data handling
