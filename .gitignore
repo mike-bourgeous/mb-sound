@@ -19,3 +19,8 @@
 /*.c
 /a.out
 /bench.csv
+
+# Claude Code local files
+.claude/settings.local.json
+.claude/todos.json
+.claude/worktrees/
