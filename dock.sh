@@ -9,5 +9,5 @@ elif docker ps -a 2>&1 | grep -q mb-sound; then
 	docker attach mb-sound
 else
 	echo "Creating"
-	docker run --name mb-sound -it mb-sound /bin/bash
+	docker run --name mb-sound -it -v .:/mb-sound mb-sound /bin/bash
 fi

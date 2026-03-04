@@ -15,7 +15,7 @@ docker build . -t mb-sound
 ## Create
 
 ```bash
-docker run --name mb-sound -it --rm -v .:/mb-sound
+docker run --name mb-sound -it --rm -v .:/mb-sound mb-sound /bin/bash
 ```
 
 ## Attach extra terminal
