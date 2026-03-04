@@ -64,3 +64,5 @@ cdgem()
 {
 	cd "$(gem open "$1" -e echo)"
 }
+
+alias ls='ls --color'
