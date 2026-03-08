@@ -617,7 +617,8 @@ module MB
       # The +:extra_time+ parameter controls how much time to add to input
       # objects to allow the reverb to decay.
       #
-      # If +:output_channels+ is 
+      # If +:output_channels+ is greater than one, then this method returns an
+      # Array of output nodes.  Otherwise it returns a single output node.
       #
       # Example (bin/sound.rb):
       #     play file_input('sounds/drums.flac').reverb
