@@ -603,6 +603,25 @@ module MB
         ).named(name).taps
       end
 
+      # Adds a reverb effect to this node using diffusion stages and a
+      # feedback delay network.  See GraphNode::Reverb for details.
+      #
+      # Example:
+      #     play 440.hz.sine.for(0.5).reverb(room_size: 0.8, decay: 3.0)
+      def reverb(room_size: 0.5, decay: 2.0, damping: 0.5, diffusion_steps: 4, channels: 4, wet: 0.3, dry: 0.7, sample_rate: 48000)
+        MB::Sound::GraphNode::Reverb.new(
+          self,
+          room_size: room_size,
+          decay: decay,
+          damping: damping,
+          diffusion_steps: diffusion_steps,
+          channels: channels,
+          wet: wet,
+          dry: dry,
+          sample_rate: sample_rate
+        )
+      end
+
       # Hard-clips the output of this node to the given min and max, one of
       # which may be nil to disable clipping in that direction.
       def clip(min, max)
@@ -1065,3 +1084,4 @@ require_relative 'graph_node/quantize'
 require_relative 'graph_node/data_shuffler'
 require_relative 'graph_node/wavetable'
 require_relative 'graph_node/matrix_mixer'
+require_relative 'graph_node/reverb'
