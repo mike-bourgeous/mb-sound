@@ -172,7 +172,7 @@ module MB
           # and the Hadamard mixing matrix.  Returns an Array of N NArrays.
           def process(channels)
             delayed = channels.each_with_index.map { |ch, i|
-              @delays[i].process(ch)
+              @delays[i].process(ch).not_inplace!
             }
             @matrix.process(delayed)
           end
@@ -281,7 +281,7 @@ module MB
             # Add input + feedback -> delay -> lowpass -> gain
             delayed = @n.times.map { |i|
               mixed = channels[i] + @feedback[i]
-              d = @delays[i].process(mixed)
+              d = @delays[i].process(mixed).not_inplace!
               d = @lowpasses[i].process(d)
               d * @gains[i]
             }
