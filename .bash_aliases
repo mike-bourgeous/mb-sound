@@ -62,7 +62,7 @@ alias rhts="ruby -rwebrick -e'trap(:INT){Process.kill(9, 0)};WEBrick::HTTPServer
 
 cdgem()
 {
-	cd "$(gem open "$1" -e echo)"
+	cd "$(bundle exec gem open "$1" -e echo)"
 }
 
 alias ls='ls --color'

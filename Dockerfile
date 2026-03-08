@@ -1,7 +1,7 @@
 FROM docker.io/library/ruby:3.4
 
 ARG DEBIAN_FRONTEND=none
-RUN apt-get -y update && apt-get -y upgrade && apt-get -y --no-install-recommends install libsamplerate-dev libjack-dev build-essential gnuplot bash-completion git pkgconf vim ffmpeg graphviz
+RUN apt-get -y update && apt-get -y upgrade && apt-get -y --no-install-recommends install libsamplerate-dev libjack-dev build-essential gnuplot bash-completion git pkgconf vim ffmpeg graphviz less
 
 COPY .bash_aliases /root/.bash_aliases
 COPY .bashrc /root/.bashrc
