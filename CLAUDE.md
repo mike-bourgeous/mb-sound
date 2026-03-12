@@ -77,10 +77,12 @@ Graph nodes maintain input/output relationships and support traversal via the `T
 
 ## Source Control
 
-- Use branches for feature development
-- Use non-fast-forward merge commits when features are complete
+- Use worktrees (and branches) for feature development
+- Commit progress and experimentation incrementally as you work
 - Provide step-by-step commits with detailed commit messages for easy review
+- Use non-fast-forward merge commits when features are complete
 - The primary/trunk branch is called `master`
+- Local development; no push to remote
 
 ## Key Conventions
 
