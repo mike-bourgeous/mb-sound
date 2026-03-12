@@ -137,6 +137,11 @@ module MB
           @wet = wet.to_f
           @dry = dry.to_f
 
+          # Pre-compute round-robin loop bounds (constant across calls)
+          @total_in = input_count * (channels.to_f / input_count).ceil
+          @total_out = @output_channel_count * (channels.to_f / @output_channel_count).ceil
+          @output_scale = 1.0 / Math.sqrt((channels.to_f / @output_channel_count).ceil)
+
           @graph_node_name = 'Reverb'
 
           if @inputs.length == 1
@@ -224,11 +229,7 @@ module MB
             p = @output_channel_count
 
             # Distribute M inputs to N channels (wrapped round-robin)
-            channels = Array.new(n) { Numo::SFloat.zeros(actual_count) }
-            total_in = m * (n.to_f / m).ceil
-            total_in.times do |k|
-              channels[k % n] = channels[k % n] + inputs_data[k % m]
-            end
+            channels = round_robin_mix(inputs_data, n, @total_in, actual_count)
 
             # Process through diffusion stages in series
             @diffusion_steps.each do |step|
@@ -239,13 +240,8 @@ module MB
             delayed = @fdn.process(channels)
 
             # Extract P outputs from N channels (wrapped round-robin)
-            wet_outputs = Array.new(p) { Numo::SFloat.zeros(actual_count) }
-            total_out = p * (n.to_f / p).ceil
-            total_out.times do |k|
-              wet_outputs[k % p] = wet_outputs[k % p] + delayed[k % n]
-            end
-            scale = 1.0 / Math.sqrt((n.to_f / p).ceil)
-            wet_outputs.map! { |o| o * scale }
+            wet_outputs = round_robin_mix(delayed, p, @total_out, actual_count)
+            wet_outputs.map! { |o| o * @output_scale }
 
             # Wet/dry mix per output
             @output_data = Array.new(p) { |k|
@@ -322,6 +318,17 @@ module MB
         end
 
         private
+
+        # Distributes +sources+ into +dest_count+ bins using wrapped
+        # round-robin over +total+ iterations, each bin starting as a
+        # zero NArray of +sample_count+ length.
+        def round_robin_mix(sources, dest_count, total, sample_count)
+          dest = Array.new(dest_count) { Numo::SFloat.zeros(sample_count) }
+          total.times do |k|
+            dest[k % dest_count] = dest[k % dest_count] + sources[k % sources.length]
+          end
+          dest
+        end
 
         # Returns the next power of 2 >= n.
         def next_power_of_2(n)
