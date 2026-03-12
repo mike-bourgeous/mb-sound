@@ -207,16 +207,16 @@ module MB
         # all inputs and return the data for a specific output index.
         def sample_internal(count, index)
           if @sampled_set.include?(index) || @output_data.nil?
-            if @sampled_set.length != 0 && @sampled_set.length != @output_channel_count
-              warn "Reverb output #{index} sampled again before other outputs"
-            end
-
             @sampled_set.clear
 
             # Sample all inputs
             inputs_data = @inputs.map { |inp| inp.sample(count) }
-            return nil if inputs_data.any?(&:nil?)
+            if inputs_data.any?(&:nil?)
+              @output_data = nil
+              return nil
+            end
 
+            actual_count = inputs_data[0].length
             expand_buffer(inputs_data[0], grow: true)
 
             m = @inputs.length
@@ -224,7 +224,7 @@ module MB
             p = @output_channel_count
 
             # Distribute M inputs to N channels (wrapped round-robin)
-            channels = Array.new(n) { Numo::SFloat.zeros(count) }
+            channels = Array.new(n) { Numo::SFloat.zeros(actual_count) }
             total_in = m * (n.to_f / m).ceil
             total_in.times do |k|
               channels[k % n] = channels[k % n] + inputs_data[k % m]
@@ -239,7 +239,7 @@ module MB
             delayed = @fdn.process(channels)
 
             # Extract P outputs from N channels (wrapped round-robin)
-            wet_outputs = Array.new(p) { Numo::SFloat.zeros(count) }
+            wet_outputs = Array.new(p) { Numo::SFloat.zeros(actual_count) }
             total_out = p * (n.to_f / p).ceil
             total_out.times do |k|
               wet_outputs[k % p] = wet_outputs[k % p] + delayed[k % n]
