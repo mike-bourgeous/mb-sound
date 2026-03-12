@@ -34,7 +34,7 @@ options = {
   wet: 0.3,
   dry: 0.7,
   diffusion_steps: 4,
-  channels: 4,
+  channels: 8,
   seed: 0,
 }
 OptionParser.new { |p|
@@ -46,7 +46,7 @@ OptionParser.new { |p|
   p.on('--wet GAIN', Float, 'Wet signal gain (default 0.3)')
   p.on('--dry GAIN', Float, 'Dry signal gain (default 0.7)')
   p.on('--diffusion-steps N', Integer, 'Number of diffusion steps (default 4)')
-  p.on('--channels N', Integer, 'Parallel delay channels, power of 2 (default 4)')
+  p.on('--channels N', Integer, 'Parallel delay channels, power of 2 (default 8)')
   p.on('--seed N', Integer, 'Random seed for delay times (default 0)')
   p.on('--overwrite', 'Overwrite output file if it exists')
   p.on('--graphviz', 'Print signal graph in graphviz format')
