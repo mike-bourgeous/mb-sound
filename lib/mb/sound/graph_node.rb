@@ -610,17 +610,27 @@ module MB
       # the individual outputs are automatically used as separate input
       # channels to the reverb.
       #
+      # When +tail+ is given (in seconds), the reverb continues processing
+      # silence after the inputs end, allowing the reverb tail to decay.
+      # Defaults to +decay + 0.5+.  Set +tail: 0+ or +tail: false+ to
+      # disable.
+      #
       # Example:
       #     play 440.hz.sine.for(0.5).reverb(room_size: 0.8, decay: 3.0)
       #
       #     # Stereo file input -> stereo reverb
-      #     l, r = file_input('sounds/synth0.flac').split
-      #     play [l, r].reverb
-      def reverb(room_size: 0.5, decay: 2.0, damping: 0.5, diffusion_steps: 4, channels: 4, output_channels: nil, wet: 0.3, dry: 0.7, seed: 0, sample_rate: 48000)
+      #     play file_input('sounds/synth0.flac').reverb
+      def reverb(room_size: 0.5, decay: 2.0, damping: 0.5, diffusion_steps: 4, channels: 4, output_channels: nil, wet: 0.3, dry: 0.7, seed: 0, sample_rate: 48000, tail: nil)
+        tail = decay + 0.5 if tail.nil?
+        tail = 0 if tail == false
+
         input = if self.is_a?(MultiOutput)
-          self.outputs.map(&:get_sampler)
+          self.outputs.map { |out|
+            node = out.get_sampler
+            tail > 0 ? node.and_then(0.constant.for(tail)) : node
+          }
         else
-          self
+          tail > 0 ? self.and_then(0.constant.for(tail)) : self
         end
 
         MB::Sound::GraphNode::Reverb.new(
