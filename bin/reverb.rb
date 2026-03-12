@@ -35,6 +35,7 @@ options = {
   dry: 0.7,
   diffusion_steps: 4,
   channels: 4,
+  seed: 0,
 }
 OptionParser.new { |p|
   p.banner = "Usage: \e[1m#{$0}\e[0m [options] [input_file [output_file]]"
@@ -46,6 +47,7 @@ OptionParser.new { |p|
   p.on('--dry GAIN', Float, 'Dry signal gain (default 0.7)')
   p.on('--diffusion-steps N', Integer, 'Number of diffusion steps (default 4)')
   p.on('--channels N', Integer, 'Parallel delay channels, power of 2 (default 4)')
+  p.on('--seed N', Integer, 'Random seed for delay times (default 0)')
   p.on('--overwrite', 'Overwrite output file if it exists')
   p.on('--graphviz', 'Print signal graph in graphviz format')
   p.on('--quiet', 'Suppress progress output')
@@ -62,6 +64,7 @@ wet = options[:wet]
 dry = options[:dry]
 diffusion_steps = options[:'diffusion-steps'] || options[:diffusion_steps]
 channels = options[:channels]
+seed = options[:seed]
 
 filename = ARGV[0]
 outfile = ARGV[1]
@@ -90,6 +93,7 @@ puts MB::U.highlight({
   dry: dry,
   diffusion_steps: diffusion_steps,
   channels: channels,
+  seed: seed,
   input: input.graph_node_name,
   output: output,
   sample_rate: sample_rate,
@@ -105,6 +109,7 @@ begin
       channels: channels,
       wet: wet,
       dry: dry,
+      seed: seed,
       sample_rate: sample_rate
     )
     .softclip(0.85, 0.95)
