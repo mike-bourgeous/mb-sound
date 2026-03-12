@@ -79,20 +79,20 @@ module MB
           # Build the Hadamard matrix for diffusion (shared by all diffusion steps)
           hadamard = self.class.hadamard_matrix(channels)
 
-          # Build diffusion steps with random delay times per step and channel
-          diff_range = DIFFUSION_DELAY_RANGE
+          # Build diffusion steps with random delay times per step and channel,
+          # sorted short-to-long within each step for natural build-up
           @diffusion_steps = diffusion_steps.times.map {
-            delays = channels.times.map {
-              rng.rand(diff_range) * room_scale
-            }
+            delays = self.class.random_delays(
+              channels, DIFFUSION_DELAY_RANGE, room_scale, rng
+            ).sort
             DiffusionStep.new(delays, hadamard, sample_rate: @sample_rate)
           }
 
-          # Build FDN with random delay times
-          fdn_range = FDN_DELAY_RANGE
-          fdn_delays = channels.times.map {
-            rng.rand(fdn_range) * room_scale
-          }
+          # Build FDN with log-spaced random delay times for even
+          # multiplicative spread across the range
+          fdn_delays = self.class.log_random_delays(
+            channels, FDN_DELAY_RANGE, room_scale, rng
+          )
           @fdn = FDN.new(
             fdn_delays,
             decay: decay,
@@ -145,6 +145,35 @@ module MB
         def self.householder_matrix(n)
           m = Matrix.identity(n) - Matrix.build(n, n) { 2.0 / n }
           MB::Sound::ProcessingMatrix.new(m)
+        end
+
+        # Generates +n+ random delay times (in seconds) using stratified
+        # linear spacing within +range+, scaled by +room_scale+.  The range
+        # is divided into +n+ equal sub-intervals and one random value is
+        # picked from each, guaranteeing spread across the full range.
+        def self.random_delays(n, range, room_scale, rng)
+          step = (range.end - range.begin) / n.to_f
+          n.times.map { |i|
+            lo = range.begin + i * step
+            hi = lo + step
+            rng.rand(lo..hi) * room_scale
+          }
+        end
+
+        # Generates +n+ random delay times (in seconds) using stratified
+        # log-spacing within +range+, scaled by +room_scale+.  The log range
+        # is divided into +n+ equal sub-intervals and one random value is
+        # picked from each, guaranteeing even multiplicative spread and
+        # avoiding the clustering that causes comb-filter artifacts.
+        def self.log_random_delays(n, range, room_scale, rng)
+          log_min = Math.log(range.begin)
+          log_max = Math.log(range.end)
+          step = (log_max - log_min) / n.to_f
+          n.times.map { |i|
+            lo = log_min + i * step
+            hi = lo + step
+            Math.exp(rng.rand(lo..hi)) * room_scale
+          }
         end
 
         # One stage of the diffusion chain.  Takes N channels in, delays each
