@@ -12,11 +12,14 @@
 #     # File input to speaker output
 #     $0 sounds/piano0.flac
 #
-#     # File input to file output
+#     # File input to file output (preserves channel count)
 #     $0 sounds/piano0.flac tmp/reverb_out.flac
 #
 #     # Large room with long decay
 #     $0 --room-size 0.8 --decay 4.0 sounds/piano0.flac
+#
+#     # Force stereo output from mono input
+#     $0 --output-channels 2 sounds/mono.flac tmp/stereo_reverb.flac
 
 require 'bundler/setup'
 
@@ -47,6 +50,7 @@ OptionParser.new { |p|
   p.on('--dry GAIN', Float, 'Dry signal gain (default 0.7)')
   p.on('--diffusion-steps N', Integer, 'Number of diffusion steps (default 4)')
   p.on('--channels N', Integer, 'Parallel delay channels, power of 2 (default 8)')
+  p.on('--output-channels N', Integer, 'Number of output channels (default: match input)')
   p.on('--seed N', Integer, 'Random seed for delay times (default 0)')
   p.on('--overwrite', 'Overwrite output file if it exists')
   p.on('--graphviz', 'Print signal graph in graphviz format')
@@ -64,25 +68,25 @@ wet = options[:wet]
 dry = options[:dry]
 diffusion_steps = options[:'diffusion-steps'] || options[:diffusion_steps]
 channels = options[:channels]
+output_channels = options[:'output-channels'] || options[:output_channels]
 seed = options[:seed]
 
 filename = ARGV[0]
 outfile = ARGV[1]
 
 if filename && File.readable?(filename)
-  # Calculate extra time for reverb tail based on RT60 decay
-  extra = [decay * 1.5, 10].min
-
   input = MB::Sound.file_input(filename)
-  input = input.and_then(0.hz.at(0).for(extra)).named(filename)
+  input_channels = input.channels
 else
   input = MB::Sound.input(channels: 1).named('audio input')
+  input_channels = 1
 end
 
 sample_rate = input.sample_rate
+output_channels ||= input_channels
 
 if outfile
-  output = MB::Sound.file_output(outfile, sample_rate: sample_rate, channels: 1, overwrite: overwrite)
+  output = MB::Sound.file_output(outfile, sample_rate: sample_rate, channels: output_channels, overwrite: overwrite)
 end
 
 puts MB::U.highlight({
@@ -93,31 +97,42 @@ puts MB::U.highlight({
   dry: dry,
   diffusion_steps: diffusion_steps,
   channels: channels,
+  output_channels: output_channels,
   seed: seed,
   input: input.graph_node_name,
+  input_channels: input_channels,
   output: output,
   sample_rate: sample_rate,
 })
 
 begin
-  result = input
-    .reverb(
-      room_size: room_size,
-      decay: decay,
-      damping: damping,
-      diffusion_steps: diffusion_steps,
-      channels: channels,
-      wet: wet,
-      dry: dry,
-      seed: seed,
-      sample_rate: sample_rate
-    )
-    .softclip(0.85, 0.95)
-    .named('reverb output')
-    .with_buffer(800)
+  reverb = input.reverb(
+    room_size: room_size,
+    decay: decay,
+    damping: damping,
+    diffusion_steps: diffusion_steps,
+    channels: channels,
+    output_channels: output_channels,
+    wet: wet,
+    dry: dry,
+    seed: seed,
+    sample_rate: sample_rate
+  )
+
+  if output_channels > 1
+    result = reverb.outputs.map { |out|
+      out.softclip(0.85, 0.95).named('reverb output').with_buffer(800)
+    }
+  else
+    result = reverb
+      .softclip(0.85, 0.95)
+      .named('reverb output')
+      .with_buffer(800)
+  end
 
   if graphviz
-    png = result.open_graphviz
+    target = output_channels > 1 ? result[0] : result
+    png = target.open_graphviz
     puts "Wrote GraphViz image to #{png}"
   end
 
