@@ -88,7 +88,7 @@ module MB
           @diffusion_steps = diffusion_steps.times.map { |step|
             step_max = diff_min + (diff_max - diff_min) * (step + 1).to_f / diffusion_steps
             step_range = (diff_min..step_max)
-            delays = self.class.random_delays(
+            delays = self.class.log_random_delays(
               channels, step_range, room_scale, rng
             ).sort
             DiffusionStep.new(delays, hadamard, sample_rate: @sample_rate)
@@ -154,47 +154,32 @@ module MB
         end
 
         # Generates +n+ random delay times (in seconds) using stratified
-        # linear spacing within +range+, scaled by +room_scale+.  The range
-        # is divided into +n+ equal sub-intervals and one random value is
-        # picked from each, guaranteeing spread across the full range.
-        def self.random_delays(n, range, room_scale, rng)
-          step = (range.end - range.begin) / n.to_f
-          n.times.map { |i|
-            lo = range.begin + i * step
-            hi = lo + step
-            rng.rand(lo..hi) * room_scale
-          }
-        end
-
-        # Generates +n+ random delay times (in seconds) using stratified
         # log-spacing within +range+, scaled by +room_scale+.  The log range
         # is divided into +n+ equal sub-intervals and one random value is
         # picked from each, guaranteeing even multiplicative spread and
         # avoiding the clustering that causes comb-filter artifacts.
         #
-        # Delay sets where any pair of delays has a ratio within +tolerance+
-        # of a small integer (2, 3, or 4) are rejected and re-rolled, up to
-        # +max_attempts+ times.  This prevents the comb-filter reinforcement
-        # that causes audible flutter echo in the reverb tail.
+        # Delay sets where any pair has a ratio within +tolerance+ of a
+        # small integer (2, 3, or 4) are rejected and re-rolled up to
+        # +max_attempts+ times.  This prevents the comb-filter
+        # reinforcement that causes audible flutter echo.
         def self.log_random_delays(n, range, room_scale, rng, tolerance: 0.05, max_attempts: 50)
           log_min = Math.log(range.begin)
           log_max = Math.log(range.end)
           step = (log_max - log_min) / n.to_f
 
-          generate = -> {
-            n.times.map { |i|
+          delays = nil
+          max_attempts.times do
+            delays = n.times.map { |i|
               lo = log_min + i * step
               hi = lo + step
               Math.exp(rng.rand(lo..hi)) * room_scale
             }
-          }
 
-          max_attempts.times do
-            delays = generate.call
-            return delays if delays_non_harmonic?(delays, tolerance)
+            break if delays_non_harmonic?(delays, tolerance)
           end
 
-          generate.call
+          delays
         end
 
         # Returns true if no pair of +delays+ has a ratio within +tolerance+
