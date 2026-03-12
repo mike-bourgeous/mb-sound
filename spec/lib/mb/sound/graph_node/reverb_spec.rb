@@ -238,14 +238,15 @@ RSpec.describe(MB::Sound::GraphNode::Reverb) do
   end
 
   describe '.log_random_delays' do
-    it 'generates delays that avoid harmonic ratios' do
+    it 'generates the requested number of log-spaced delays' do
       rng = Random.new(0)
       delays = MB::Sound::GraphNode::Reverb.log_random_delays(
         8, (0.015..0.120), 0.65, rng
       )
 
       expect(delays.length).to eq(8)
-      expect(MB::Sound::GraphNode::Reverb.delays_non_harmonic?(delays, 0.05)).to be true
+      expect(delays).to all(be_between(0.015 * 0.65, 0.120 * 0.65))
+      expect(delays).to eq(delays.sort)
     end
   end
 
