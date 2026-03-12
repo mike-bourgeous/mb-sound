@@ -181,31 +181,27 @@ module MB
           log_max = Math.log(range.end)
           step = (log_max - log_min) / n.to_f
 
-          max_attempts.times do
-            delays = n.times.map { |i|
+          generate = -> {
+            n.times.map { |i|
               lo = log_min + i * step
               hi = lo + step
               Math.exp(rng.rand(lo..hi)) * room_scale
             }
+          }
 
-            next unless delays_non_harmonic?(delays, tolerance)
-
-            return delays
+          max_attempts.times do
+            delays = generate.call
+            return delays if delays_non_harmonic?(delays, tolerance)
           end
 
-          # Fallback: return the last generated set even if not ideal
-          n.times.map { |i|
-            lo = log_min + i * step
-            hi = lo + step
-            Math.exp(rng.rand(lo..hi)) * room_scale
-          }
+          generate.call
         end
 
         # Returns true if no pair of +delays+ has a ratio within +tolerance+
         # of a small integer (2, 3, or 4).
         def self.delays_non_harmonic?(delays, tolerance)
           delays.combination(2).all? { |a, b|
-            ratio = [a, b].max / [a, b].min.to_f
+            ratio = a > b ? a / b : b / a
             (2..4).none? { |int| (ratio - int).abs < tolerance }
           }
         end
@@ -302,20 +298,6 @@ module MB
           # the buffer size, so callers should keep buffers reasonably short
           # (e.g. 480-960 samples) for best results.
           def process(channels)
-            process_block(channels)
-          end
-
-          # Resets all delay lines, filters, and feedback buffers.
-          def reset
-            @delays.each { |d| d.reset }
-            @lowpasses.each { |lp| lp.reset }
-            @feedback = @n.times.map { Numo::SFloat.zeros(1) }
-          end
-
-          private
-
-          # Processes a single block of N channels through the FDN.
-          def process_block(channels)
             count = channels[0].length
 
             # Resize feedback buffers if needed
@@ -340,6 +322,13 @@ module MB
             mono = Numo::SFloat.zeros(count)
             delayed.each { |ch| mono = mono + ch }
             mono * @output_scale
+          end
+
+          # Resets all delay lines, filters, and feedback buffers.
+          def reset
+            @delays.each { |d| d.reset }
+            @lowpasses.each { |lp| lp.reset }
+            @feedback = @n.times.map { Numo::SFloat.zeros(1) }
           end
         end
       end
