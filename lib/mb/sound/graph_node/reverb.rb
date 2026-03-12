@@ -79,11 +79,17 @@ module MB
           # Build the Hadamard matrix for diffusion (shared by all diffusion steps)
           hadamard = self.class.hadamard_matrix(channels)
 
-          # Build diffusion steps with random delay times per step and channel,
-          # sorted short-to-long within each step for natural build-up
-          @diffusion_steps = diffusion_steps.times.map {
+          # Build diffusion steps with progressively longer delay ranges.
+          # Step 1 uses 0..max/N, step 2 uses 0..2*max/N, etc., so earlier
+          # steps create short, tight reflections and later steps spread
+          # energy across a wider time range.
+          diff_max = DIFFUSION_DELAY_RANGE.end
+          diff_min = DIFFUSION_DELAY_RANGE.begin
+          @diffusion_steps = diffusion_steps.times.map { |step|
+            step_max = diff_min + (diff_max - diff_min) * (step + 1).to_f / diffusion_steps
+            step_range = (diff_min..step_max)
             delays = self.class.random_delays(
-              channels, DIFFUSION_DELAY_RANGE, room_scale, rng
+              channels, step_range, room_scale, rng
             ).sort
             DiffusionStep.new(delays, hadamard, sample_rate: @sample_rate)
           }
