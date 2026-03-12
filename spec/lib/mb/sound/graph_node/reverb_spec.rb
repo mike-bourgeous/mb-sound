@@ -101,8 +101,7 @@ RSpec.describe(MB::Sound::GraphNode::Reverb) do
       expect(later_energy).to be < early_energy
     end
 
-    it 'handles sub-block processing when buffer exceeds min delay' do
-      # Create FDN with short delays, then process a large buffer
+    it 'processes buffers larger than the shortest delay' do
       short_fdn = MB::Sound::GraphNode::Reverb::FDN.new(
         [0.005, 0.007, 0.009, 0.011],
         decay: 1.0,
