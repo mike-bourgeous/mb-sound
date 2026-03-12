@@ -25,6 +25,8 @@ bundle exec rake                  # Default task (runs spec)
 bin/sound.rb                      # Launch interactive Pry console with MB::Sound context
 ```
 
+Note: run the test suite ONCE per change and save its output for processing, rather than running the test suite repeatedly with different `grep` pipes or options.
+
 System dependencies (apt): `ffmpeg gnuplot-qt libsamplerate0-dev graphviz`
 
 ## Architecture
