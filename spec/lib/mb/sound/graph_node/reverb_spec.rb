@@ -101,8 +101,7 @@ RSpec.describe(MB::Sound::GraphNode::Reverb) do
       expect(later_energy).to be < early_energy
     end
 
-    it 'handles sub-block processing when buffer exceeds min delay' do
-      # Create FDN with short delays, then process a large buffer
+    it 'processes buffers larger than the shortest delay' do
       short_fdn = MB::Sound::GraphNode::Reverb::FDN.new(
         [0.005, 0.007, 0.009, 0.011],
         decay: 1.0,
@@ -221,6 +220,33 @@ RSpec.describe(MB::Sound::GraphNode::Reverb) do
       out1 = r1.sample(4800)
       out2 = r2.sample(4800)
       expect(out1).not_to eq(out2)
+    end
+  end
+
+  describe '.delays_non_harmonic?' do
+    it 'rejects delays with a ratio close to 2' do
+      expect(MB::Sound::GraphNode::Reverb.delays_non_harmonic?([0.01, 0.02], 0.05)).to be false
+    end
+
+    it 'rejects delays with a ratio close to 3' do
+      expect(MB::Sound::GraphNode::Reverb.delays_non_harmonic?([0.01, 0.0298], 0.05)).to be false
+    end
+
+    it 'accepts delays with non-harmonic ratios' do
+      expect(MB::Sound::GraphNode::Reverb.delays_non_harmonic?([0.01, 0.017, 0.026], 0.05)).to be true
+    end
+  end
+
+  describe '.log_random_delays' do
+    it 'generates the requested number of log-spaced delays' do
+      rng = Random.new(0)
+      delays = MB::Sound::GraphNode::Reverb.log_random_delays(
+        8, (0.015..0.120), 0.65, rng
+      )
+
+      expect(delays.length).to eq(8)
+      expect(delays).to all(be_between(0.015 * 0.65, 0.120 * 0.65))
+      expect(delays).to eq(delays.sort)
     end
   end
 
