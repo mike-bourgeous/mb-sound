@@ -1,25 +1,39 @@
 require 'matrix'
+require 'forwardable'
 
 module MB
   module Sound
     module GraphNode
       # A reverb effect built from diffusion stages and a feedback delay network
-      # (FDN).  Processes mono input through multiple parallel delay channels
-      # to create a dense, natural-sounding reverb tail.
+      # (FDN).  Processes one or more input channels through shared diffusion
+      # and FDN infrastructure, producing one or more output channels.
       #
-      # Signal flow: input -> Diffusion (M steps) -> FDN -> wet/dry mix -> output
+      # Signal flow:
+      #   M inputs → [distribute to N channels] → Diffusion → FDN → [extract P outputs] → wet/dry mix → P outputs
       #
-      # The diffusion stages use Hadamard matrices to spread energy across
-      # channels, while the FDN uses a Householder reflection matrix for
-      # feedback mixing.
+      # - N = internal delay channels (power of 2, the +channels+ parameter)
+      # - M = number of input nodes
+      # - P = number of output channels (+output_channels+ parameter, defaults to M)
+      #
+      # Input distribution uses wrapped round-robin: inputs are assigned to
+      # internal channels sequentially, wrapping when N is exceeded.  Output
+      # extraction uses the same pattern in reverse.
+      #
+      # When P > 1, includes MultiOutput and provides a ReverbOutput inner
+      # class for each output.  When P == 1, behaves as a simple mono node.
       #
       # Examples (in bin/sound.rb):
       #     play 440.hz.sine.for(0.5).reverb
       #     play 440.hz.sine.for(0.5).reverb(room_size: 0.8, decay: 3.0, damping: 0.7)
       #
+      #     # Stereo input from a file
+      #     l, r = file_input('sounds/synth0.flac').split
+      #     play [l, r].reverb
+      #
       # See also bin/reverb.rb for a command-line demo script.
       class Reverb
         include GraphNode
+        include MultiOutput
         include BufferHelper
         include SampleRateHelper
 
@@ -32,15 +46,58 @@ module MB
         # The input source node.
         attr_reader :sources
 
+        # The output nodes (Array of ReverbOutput or [self] for mono).
+        attr_reader :outputs
+
+        # Represents a single output channel of a multichannel reverb.
+        # Delegates to the parent Reverb via sample_internal.
+        class ReverbOutput
+          extend Forwardable
+          include GraphNode
+          include GraphNode::SampleRateHelper
+          include GraphNode::NodeOutput
+
+          def_delegators :@reverb, :sample_rate
+
+          # Creates an output node for the given +reverb+ at the given +index+.
+          def initialize(reverb:, index:)
+            @owner = reverb
+            @reverb = reverb
+            @index = index
+            @graph_node_name = "Reverb output #{index}"
+          end
+
+          def sample(count)
+            @reverb.sample_internal(count, @index)
+          end
+
+          def sample_rate=(rate)
+            @reverb.sample_rate = rate
+            self
+          end
+
+          def sources
+            { reverb: @reverb }
+          end
+
+          def to_s
+            "Reverb output #{@index} of #{@reverb.output_channel_count}"
+          end
+        end
+
+        # The number of output channels.
+        attr_reader :output_channel_count
+
         # Creates a new Reverb node that processes audio from the given +input+.
         #
         # Parameters:
-        # - +input+ - Upstream graph node providing mono audio
+        # - +input+ - Upstream graph node or Array of graph nodes providing audio
         # - +room_size+ - 0.0..1.0, scales delay times (default: 0.5)
         # - +decay+ - Target RT60 decay time in seconds (default: 2.0)
         # - +damping+ - 0.0..1.0, higher = more HF absorption (default: 0.5)
         # - +diffusion_steps+ - Number of serial diffusion stages (default: 4)
         # - +channels+ - Number of parallel delay channels, must be power of 2 (default: 8)
+        # - +output_channels+ - Number of output channels (default: nil, match input count)
         # - +wet+ - Wet signal gain (default: 0.3)
         # - +dry+ - Dry signal gain (default: 0.7)
         # - +seed+ - Random seed for delay time generation (default: 0)
@@ -52,26 +109,48 @@ module MB
           damping: 0.5,
           diffusion_steps: 4,
           channels: 8,
+          output_channels: nil,
           wet: 0.3,
           dry: 0.7,
           seed: 0,
           sample_rate: 48000
         )
-          raise 'Input must respond to :sample' unless input.respond_to?(:sample)
-          raise 'Channels must be a power of 2' unless channels > 0 && (channels & (channels - 1)) == 0
+          @inputs = Array(input)
+          raise 'At least one input is required' if @inputs.empty?
+          @inputs.each { |inp|
+            raise 'Input must respond to :sample' unless inp.respond_to?(:sample)
+          }
+
+          input_count = @inputs.length
+          @output_channel_count = output_channels || input_count
+
+          # Auto-bump channels to accommodate inputs and outputs, then next power of 2
+          channels = [channels, input_count, @output_channel_count].max
+          channels = next_power_of_2(channels)
+
           raise 'Room size must be between 0.0 and 1.0' unless room_size >= 0.0 && room_size <= 1.0
           raise 'Damping must be between 0.0 and 1.0' unless damping >= 0.0 && damping <= 1.0
           raise 'Decay must be positive' unless decay > 0
 
-          @input = input
           @sample_rate = sample_rate.to_f
           @channels = channels
           @wet = wet.to_f
           @dry = dry.to_f
 
+          # Pre-compute round-robin loop bounds (constant across calls)
+          @total_in = input_count * (channels.to_f / input_count).ceil
+          @total_out = @output_channel_count * (channels.to_f / @output_channel_count).ceil
+          @output_scale = 1.0 / Math.sqrt((channels.to_f / @output_channel_count).ceil)
+
           @graph_node_name = 'Reverb'
 
-          @sources = { input: @input }.freeze
+          if @inputs.length == 1
+            @sources = { input: @inputs[0] }.freeze
+          else
+            @sources = @inputs.each_with_index.map { |inp, idx|
+              [:"input_#{idx}", inp]
+            }.to_h.freeze
+          end
 
           rng = Random.new(seed)
           room_scale = 0.3 + room_size * 0.7
@@ -106,36 +185,83 @@ module MB
             sample_rate: @sample_rate
           )
 
+          # Build output nodes
+          if @output_channel_count > 1
+            @outputs = Array.new(@output_channel_count) { |idx|
+              ReverbOutput.new(reverb: self, index: idx)
+            }.freeze
+          else
+            @outputs = [self].freeze
+          end
+
+          # Tracking set for multi-output sampling (like MatrixMixer)
+          @sampled_set = Set.new
+          @output_data = nil
+
           setup_buffer(length: 1)
         end
 
         # Processes +count+ samples from the upstream source through diffusion
-        # and FDN, then applies wet/dry mix.
+        # and FDN, then applies wet/dry mix.  For multichannel reverb, returns
+        # output channel 0.
         def sample(count)
-          data = @input.sample(count)
-          return nil if data.nil?
+          sample_internal(count, 0)
+        end
 
-          expand_buffer(data, grow: true)
+        # Called by ReverbOutput#sample (or #sample for output 0) to process
+        # all inputs and return the data for a specific output index.
+        def sample_internal(count, index)
+          if @sampled_set.include?(index) || @output_data.nil?
+            @sampled_set.clear
 
-          # Replicate mono input to N channels for diffusion input
-          channels = @channels.times.map { data.dup }
+            # Sample all inputs
+            inputs_data = @inputs.map { |inp| inp.sample(count) }
+            if inputs_data.any?(&:nil?)
+              @output_data = nil
+              return nil
+            end
 
-          # Process through diffusion stages in series
-          @diffusion_steps.each do |step|
-            channels = step.process(channels)
+            actual_count = inputs_data[0].length
+            expand_buffer(inputs_data[0], grow: true)
+
+            m = @inputs.length
+            n = @channels
+            p = @output_channel_count
+
+            # Distribute M inputs to N channels (wrapped round-robin)
+            channels = round_robin_mix(inputs_data, n, @total_in, actual_count)
+
+            # Process through diffusion stages in series
+            @diffusion_steps.each do |step|
+              channels = step.process(channels)
+            end
+
+            # Process through FDN -> array of N delayed channels
+            delayed = @fdn.process(channels)
+
+            # Extract P outputs from N channels (wrapped round-robin)
+            wet_outputs = round_robin_mix(delayed, p, @total_out, actual_count)
+            wet_outputs.map! { |o| o * @output_scale }
+
+            # Wet/dry mix per output
+            @output_data = Array.new(p) { |k|
+              @dry * inputs_data[k % m] + @wet * wet_outputs[k]
+            }
           end
 
-          # Process through FDN -> mono output
-          wet_signal = @fdn.process(channels)
+          return nil if @output_data.nil?
 
-          # Wet/dry mix
-          @dry * data + @wet * wet_signal
+          @sampled_set << index
+
+          @output_data[index]
         end
 
         # Resets all internal state (delay lines, filters, feedback buffers).
         def reset
           @diffusion_steps.each(&:reset)
           @fdn.reset
+          @sampled_set.clear
+          @output_data = nil
         end
 
         # Constructs a normalized Hadamard matrix wrapped in a ProcessingMatrix.
@@ -189,6 +315,31 @@ module MB
             ratio = a > b ? a / b : b / a
             (2..4).none? { |int| (ratio - int).abs < tolerance }
           }
+        end
+
+        private
+
+        # Distributes +sources+ into +dest_count+ bins using wrapped
+        # round-robin over +total+ iterations, each bin starting as a
+        # zero NArray of +sample_count+ length.
+        def round_robin_mix(sources, dest_count, total, sample_count)
+          dest = Array.new(dest_count) { Numo::SFloat.zeros(sample_count) }
+          total.times do |k|
+            dest[k % dest_count] = dest[k % dest_count] + sources[k % sources.length]
+          end
+          dest
+        end
+
+        # Returns the next power of 2 >= n.
+        def next_power_of_2(n)
+          return 1 if n <= 1
+          v = n - 1
+          v |= v >> 1
+          v |= v >> 2
+          v |= v >> 4
+          v |= v >> 8
+          v |= v >> 16
+          v + 1
         end
 
         # One stage of the diffusion chain.  Takes N channels in, delays each
@@ -270,12 +421,10 @@ module MB
 
             # Feedback buffers (N channels, initially zeros)
             @feedback = @n.times.map { Numo::SFloat.zeros(1) }
-
-            @output_scale = 1.0 / Math.sqrt(@n)
           end
 
-          # Processes N input channels through the FDN and returns a mono
-          # NArray (sum of delayed outputs scaled by 1/sqrt(N)).
+          # Processes N input channels through the FDN and returns an Array
+          # of N delayed NArrays.
           #
           # Feedback is applied once per buffer: the previous block's mixed
           # output is added to the current input before entering the delay
@@ -303,10 +452,7 @@ module MB
             # Mix through Householder matrix -> feedback for next block
             @feedback = @matrix.process(delayed)
 
-            # Sum to mono
-            mono = Numo::SFloat.zeros(count)
-            delayed.each { |ch| mono = mono + ch }
-            mono * @output_scale
+            delayed
           end
 
           # Resets all delay lines, filters, and feedback buffers.
