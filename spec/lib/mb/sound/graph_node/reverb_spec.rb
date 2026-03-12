@@ -135,7 +135,7 @@ RSpec.describe(MB::Sound::GraphNode::Reverb) do
     end
 
     it 'returns nil when input is exhausted' do
-      reverb = 0.constant(smoothing: false).for(0.001).reverb(sample_rate: 48000)
+      reverb = 0.constant(smoothing: false).for(0.001).reverb(sample_rate: 48000, tail: 0)
       reverb.sample(48)
       result = reverb.sample(48)
       expect(result).to be_nil
