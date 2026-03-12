@@ -23,18 +23,11 @@ module MB
         include BufferHelper
         include SampleRateHelper
 
-        # Base delay times in seconds for diffusion steps (short, 1-12ms range).
-        # These are scaled by room_size and offset per step.
-        DIFFUSION_BASE_DELAYS = [
-          0.0037, 0.0051, 0.0071, 0.0097,
-        ].freeze
+        # Range for randomized diffusion delay times in seconds (short, 1-15ms).
+        DIFFUSION_DELAY_RANGE = (0.001..0.015)
 
-        # Base delay times in seconds for FDN delay lines (longer, 20-90ms range).
-        # Chosen to be mutually prime-ish to avoid modal resonance.
-        FDN_BASE_DELAYS = [
-          0.0293, 0.0371, 0.0411, 0.0461,
-          0.0533, 0.0587, 0.0699, 0.0893,
-        ].freeze
+        # Range for randomized FDN delay times in seconds (longer, 20-100ms).
+        FDN_DELAY_RANGE = (0.020..0.100)
 
         # The input source node.
         attr_reader :sources
@@ -50,6 +43,7 @@ module MB
         # - +channels+ - Number of parallel delay channels, must be power of 2 (default: 4)
         # - +wet+ - Wet signal gain (default: 0.3)
         # - +dry+ - Dry signal gain (default: 0.7)
+        # - +seed+ - Random seed for delay time generation (default: 0)
         # - +sample_rate+ - Sample rate in Hz (default: 48000)
         def initialize(
           input,
@@ -60,6 +54,7 @@ module MB
           channels: 4,
           wet: 0.3,
           dry: 0.7,
+          seed: 0,
           sample_rate: 48000
         )
           raise 'Input must respond to :sample' unless input.respond_to?(:sample)
@@ -78,23 +73,25 @@ module MB
 
           @sources = { input: @input }.freeze
 
+          rng = Random.new(seed)
+          room_scale = 0.3 + room_size * 0.7
+
           # Build the Hadamard matrix for diffusion (shared by all diffusion steps)
           hadamard = self.class.hadamard_matrix(channels)
 
-          # Build diffusion steps
-          @diffusion_steps = diffusion_steps.times.map { |step|
-            delays = channels.times.map { |ch|
-              base = DIFFUSION_BASE_DELAYS[ch % DIFFUSION_BASE_DELAYS.length]
-              offset = (step * 0.0013) + (ch * 0.0007)
-              (base + offset) * (0.3 + room_size * 0.7)
+          # Build diffusion steps with random delay times per step and channel
+          diff_range = DIFFUSION_DELAY_RANGE
+          @diffusion_steps = diffusion_steps.times.map {
+            delays = channels.times.map {
+              rng.rand(diff_range) * room_scale
             }
             DiffusionStep.new(delays, hadamard, sample_rate: @sample_rate)
           }
 
-          # Build FDN
-          fdn_delays = channels.times.map { |ch|
-            base = FDN_BASE_DELAYS[ch % FDN_BASE_DELAYS.length]
-            base * (0.3 + room_size * 0.7)
+          # Build FDN with random delay times
+          fdn_range = FDN_DELAY_RANGE
+          fdn_delays = channels.times.map {
+            rng.rand(fdn_range) * room_scale
           }
           @fdn = FDN.new(
             fdn_delays,

@@ -608,7 +608,7 @@ module MB
       #
       # Example:
       #     play 440.hz.sine.for(0.5).reverb(room_size: 0.8, decay: 3.0)
-      def reverb(room_size: 0.5, decay: 2.0, damping: 0.5, diffusion_steps: 4, channels: 4, wet: 0.3, dry: 0.7, sample_rate: 48000)
+      def reverb(room_size: 0.5, decay: 2.0, damping: 0.5, diffusion_steps: 4, channels: 4, wet: 0.3, dry: 0.7, seed: 0, sample_rate: 48000)
         MB::Sound::GraphNode::Reverb.new(
           self,
           room_size: room_size,
@@ -618,6 +618,7 @@ module MB
           channels: channels,
           wet: wet,
           dry: dry,
+          seed: seed,
           sample_rate: sample_rate
         )
       end
