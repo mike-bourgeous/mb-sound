@@ -278,4 +278,107 @@ RSpec.describe(MB::Sound::GraphNode::Reverb) do
       }.to raise_error(/decay/i)
     end
   end
+
+  describe 'multichannel' do
+    it 'accepts an array of inputs' do
+      inputs = [440.hz.sine.forever, 880.hz.sine.forever]
+      reverb = MB::Sound::GraphNode::Reverb.new(inputs, sample_rate: 48000)
+      expect(reverb.output_channel_count).to eq(2)
+    end
+
+    it 'defaults output_channels to input count' do
+      inputs = [440.hz.sine.forever, 880.hz.sine.forever, 330.hz.sine.forever]
+      reverb = MB::Sound::GraphNode::Reverb.new(inputs, sample_rate: 48000)
+      expect(reverb.output_channel_count).to eq(3)
+    end
+
+    it 'allows explicit output_channels parameter' do
+      reverb = MB::Sound::GraphNode::Reverb.new(
+        440.hz.sine.forever, output_channels: 4, sample_rate: 48000
+      )
+      expect(reverb.output_channel_count).to eq(4)
+    end
+
+    it 'returns the correct number of output nodes' do
+      inputs = [440.hz.sine.forever, 880.hz.sine.forever]
+      reverb = MB::Sound::GraphNode::Reverb.new(inputs, sample_rate: 48000)
+      expect(reverb.outputs.length).to eq(2)
+    end
+
+    it 'returns ReverbOutput nodes for multi-output' do
+      inputs = [440.hz.sine.forever, 880.hz.sine.forever]
+      reverb = MB::Sound::GraphNode::Reverb.new(inputs, sample_rate: 48000)
+      reverb.outputs.each do |out|
+        expect(out).to be_a(MB::Sound::GraphNode::Reverb::ReverbOutput)
+      end
+    end
+
+    it 'returns [self] for single-output' do
+      reverb = MB::Sound::GraphNode::Reverb.new(440.hz.sine.forever, sample_rate: 48000)
+      expect(reverb.outputs).to eq([reverb])
+    end
+
+    it 'produces NArray data of correct length from each output' do
+      inputs = [440.hz.sine.forever, 880.hz.sine.forever]
+      reverb = MB::Sound::GraphNode::Reverb.new(inputs, sample_rate: 48000)
+      reverb.outputs.each do |out|
+        result = out.sample(800)
+        expect(result).to be_a(Numo::SFloat)
+        expect(result.length).to eq(800)
+      end
+    end
+
+    it 'produces decorrelated outputs' do
+      inputs = [440.hz.sine.forever, 880.hz.sine.forever]
+      reverb = MB::Sound::GraphNode::Reverb.new(
+        inputs, wet: 1.0, dry: 0.0, sample_rate: 48000
+      )
+      out0 = reverb.outputs[0].sample(4800)
+      out1 = reverb.outputs[1].sample(4800)
+      expect(out0).not_to eq(out1)
+    end
+
+    it 'returns output 0 from #sample on multi-output reverb' do
+      inputs = [440.hz.sine.forever, 880.hz.sine.forever]
+      reverb = MB::Sound::GraphNode::Reverb.new(inputs, sample_rate: 48000)
+
+      # Sample from output 0 via #sample
+      result0 = reverb.sample(800)
+      expect(result0).to be_a(Numo::SFloat)
+      expect(result0.length).to eq(800)
+    end
+
+    it 'uses sources hash with indexed keys for multiple inputs' do
+      inputs = [440.hz.sine.forever, 880.hz.sine.forever]
+      reverb = MB::Sound::GraphNode::Reverb.new(inputs, sample_rate: 48000)
+      expect(reverb.sources.keys).to eq([:input_0, :input_1])
+    end
+
+    it 'uses single :input key for single input' do
+      reverb = MB::Sound::GraphNode::Reverb.new(440.hz.sine.forever, sample_rate: 48000)
+      expect(reverb.sources.keys).to eq([:input])
+    end
+
+    it 'auto-detects MultiOutput upstream via .reverb DSL' do
+      # Create a multi-output reverb used as upstream for a second reverb.
+      # The first reverb has 2 outputs and includes MultiOutput + GraphNode.
+      inputs = [440.hz.sine.forever, 880.hz.sine.forever]
+      reverb1 = MB::Sound::GraphNode::Reverb.new(inputs, sample_rate: 48000)
+      expect(reverb1).to be_a(MB::Sound::GraphNode::MultiOutput)
+
+      # Calling .reverb on a MultiOutput GraphNode auto-detects outputs
+      reverb2 = reverb1.reverb(sample_rate: 48000)
+      expect(reverb2).to be_a(MB::Sound::GraphNode::Reverb)
+      expect(reverb2.output_channel_count).to eq(2)
+      expect(reverb2.outputs.length).to eq(2)
+    end
+
+    it 'bumps internal channels to accommodate input and output counts' do
+      # 5 inputs should bump channels from default 4 to at least 8 (next power of 2)
+      inputs = 5.times.map { 440.hz.sine.forever }
+      reverb = MB::Sound::GraphNode::Reverb.new(inputs, sample_rate: 48000)
+      result = reverb.outputs[0].sample(480)
+      expect(result).to be_a(Numo::SFloat)
+    end
+  end
 end
