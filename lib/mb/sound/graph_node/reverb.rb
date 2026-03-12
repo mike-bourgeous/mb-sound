@@ -26,8 +26,8 @@ module MB
         # Range for randomized diffusion delay times in seconds (short, 1-15ms).
         DIFFUSION_DELAY_RANGE = (0.001..0.015)
 
-        # Range for randomized FDN delay times in seconds (longer, 20-100ms).
-        FDN_DELAY_RANGE = (0.020..0.100)
+        # Range for randomized FDN delay times in seconds (longer, 15-120ms).
+        FDN_DELAY_RANGE = (0.015..0.120)
 
         # The input source node.
         attr_reader :sources
@@ -40,7 +40,7 @@ module MB
         # - +decay+ - Target RT60 decay time in seconds (default: 2.0)
         # - +damping+ - 0.0..1.0, higher = more HF absorption (default: 0.5)
         # - +diffusion_steps+ - Number of serial diffusion stages (default: 4)
-        # - +channels+ - Number of parallel delay channels, must be power of 2 (default: 4)
+        # - +channels+ - Number of parallel delay channels, must be power of 2 (default: 8)
         # - +wet+ - Wet signal gain (default: 0.3)
         # - +dry+ - Dry signal gain (default: 0.7)
         # - +seed+ - Random seed for delay time generation (default: 0)
@@ -51,7 +51,7 @@ module MB
           decay: 2.0,
           damping: 0.5,
           diffusion_steps: 4,
-          channels: 4,
+          channels: 8,
           wet: 0.3,
           dry: 0.7,
           seed: 0,
@@ -88,7 +88,7 @@ module MB
           @diffusion_steps = diffusion_steps.times.map { |step|
             step_max = diff_min + (diff_max - diff_min) * (step + 1).to_f / diffusion_steps
             step_range = (diff_min..step_max)
-            delays = self.class.random_delays(
+            delays = self.class.log_random_delays(
               channels, step_range, room_scale, rng
             ).sort
             DiffusionStep.new(delays, hadamard, sample_rate: @sample_rate)
@@ -154,31 +154,40 @@ module MB
         end
 
         # Generates +n+ random delay times (in seconds) using stratified
-        # linear spacing within +range+, scaled by +room_scale+.  The range
-        # is divided into +n+ equal sub-intervals and one random value is
-        # picked from each, guaranteeing spread across the full range.
-        def self.random_delays(n, range, room_scale, rng)
-          step = (range.end - range.begin) / n.to_f
-          n.times.map { |i|
-            lo = range.begin + i * step
-            hi = lo + step
-            rng.rand(lo..hi) * room_scale
-          }
-        end
-
-        # Generates +n+ random delay times (in seconds) using stratified
         # log-spacing within +range+, scaled by +room_scale+.  The log range
         # is divided into +n+ equal sub-intervals and one random value is
         # picked from each, guaranteeing even multiplicative spread and
         # avoiding the clustering that causes comb-filter artifacts.
-        def self.log_random_delays(n, range, room_scale, rng)
+        #
+        # Delay sets where any pair has a ratio within +tolerance+ of a
+        # small integer (2, 3, or 4) are rejected and re-rolled up to
+        # +max_attempts+ times.  This prevents the comb-filter
+        # reinforcement that causes audible flutter echo.
+        def self.log_random_delays(n, range, room_scale, rng, tolerance: 0.08, max_attempts: 50)
           log_min = Math.log(range.begin)
           log_max = Math.log(range.end)
           step = (log_max - log_min) / n.to_f
-          n.times.map { |i|
-            lo = log_min + i * step
-            hi = lo + step
-            Math.exp(rng.rand(lo..hi)) * room_scale
+
+          delays = nil
+          max_attempts.times do
+            delays = n.times.map { |i|
+              lo = log_min + i * step
+              hi = lo + step
+              Math.exp(rng.rand(lo..hi)) * room_scale
+            }
+
+            break if delays_non_harmonic?(delays, tolerance)
+          end
+
+          delays
+        end
+
+        # Returns true if no pair of +delays+ has a ratio within +tolerance+
+        # of a small integer (2, 3, or 4).
+        def self.delays_non_harmonic?(delays, tolerance)
+          delays.combination(2).all? { |a, b|
+            ratio = a > b ? a / b : b / a
+            (2..4).none? { |int| (ratio - int).abs < tolerance }
           }
         end
 
@@ -241,7 +250,6 @@ module MB
             }
 
             @delay_samples = delay_times.map { |dt| (dt * @sample_rate).round }
-            @min_delay_samples = @delay_samples.min
 
             # Per-channel feedback gain for RT60-consistent decay
             # g_i = 10^(-3 * d_i / (decay * sample_rate))
@@ -269,38 +277,12 @@ module MB
           # Processes N input channels through the FDN and returns a mono
           # NArray (sum of delayed outputs scaled by 1/sqrt(N)).
           #
-          # If the buffer size exceeds the shortest delay, processing is
-          # done in sub-blocks to avoid feedback timing issues.
+          # Feedback is applied once per buffer: the previous block's mixed
+          # output is added to the current input before entering the delay
+          # lines.  This means the effective minimum feedback period equals
+          # the buffer size, so callers should keep buffers reasonably short
+          # (e.g. 480-960 samples) for best results.
           def process(channels)
-            count = channels[0].length
-
-            if count > @min_delay_samples && @min_delay_samples > 0
-              # Sub-block processing
-              result = Numo::SFloat.zeros(count)
-              offset = 0
-              while offset < count
-                block_size = [count - offset, @min_delay_samples].min
-                sub_channels = channels.map { |ch| ch[offset...(offset + block_size)] }
-                result[offset...(offset + block_size)] = process_block(sub_channels)
-                offset += block_size
-              end
-              result
-            else
-              process_block(channels)
-            end
-          end
-
-          # Resets all delay lines, filters, and feedback buffers.
-          def reset
-            @delays.each { |d| d.reset }
-            @lowpasses.each { |lp| lp.reset }
-            @feedback = @n.times.map { Numo::SFloat.zeros(1) }
-          end
-
-          private
-
-          # Processes a single block of N channels through the FDN.
-          def process_block(channels)
             count = channels[0].length
 
             # Resize feedback buffers if needed
@@ -325,6 +307,13 @@ module MB
             mono = Numo::SFloat.zeros(count)
             delayed.each { |ch| mono = mono + ch }
             mono * @output_scale
+          end
+
+          # Resets all delay lines, filters, and feedback buffers.
+          def reset
+            @delays.each { |d| d.reset }
+            @lowpasses.each { |lp| lp.reset }
+            @feedback = @n.times.map { Numo::SFloat.zeros(1) }
           end
         end
       end
