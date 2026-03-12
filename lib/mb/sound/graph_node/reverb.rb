@@ -163,7 +163,7 @@ module MB
         # small integer (2, 3, or 4) are rejected and re-rolled up to
         # +max_attempts+ times.  This prevents the comb-filter
         # reinforcement that causes audible flutter echo.
-        def self.log_random_delays(n, range, room_scale, rng, tolerance: 0.05, max_attempts: 50)
+        def self.log_random_delays(n, range, room_scale, rng, tolerance: 0.08, max_attempts: 50)
           log_min = Math.log(range.begin)
           log_max = Math.log(range.end)
           step = (log_max - log_min) / n.to_f
