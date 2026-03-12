@@ -269,7 +269,6 @@ module MB
             }
 
             @delay_samples = delay_times.map { |dt| (dt * @sample_rate).round }
-            @min_delay_samples = @delay_samples.min
 
             # Per-channel feedback gain for RT60-consistent decay
             # g_i = 10^(-3 * d_i / (decay * sample_rate))
@@ -297,25 +296,13 @@ module MB
           # Processes N input channels through the FDN and returns a mono
           # NArray (sum of delayed outputs scaled by 1/sqrt(N)).
           #
-          # If the buffer size exceeds the shortest delay, processing is
-          # done in sub-blocks to avoid feedback timing issues.
+          # Feedback is applied once per buffer: the previous block's mixed
+          # output is added to the current input before entering the delay
+          # lines.  This means the effective minimum feedback period equals
+          # the buffer size, so callers should keep buffers reasonably short
+          # (e.g. 480-960 samples) for best results.
           def process(channels)
-            count = channels[0].length
-
-            if count > @min_delay_samples && @min_delay_samples > 0
-              # Sub-block processing
-              result = Numo::SFloat.zeros(count)
-              offset = 0
-              while offset < count
-                block_size = [count - offset, @min_delay_samples].min
-                sub_channels = channels.map { |ch| ch[offset...(offset + block_size)] }
-                result[offset...(offset + block_size)] = process_block(sub_channels)
-                offset += block_size
-              end
-              result
-            else
-              process_block(channels)
-            end
+            process_block(channels)
           end
 
           # Resets all delay lines, filters, and feedback buffers.
