@@ -72,13 +72,17 @@ RSpec.describe(MB::Sound::GraphNode::Reverb) do
       )
     }
 
-    it 'returns a mono NArray from N-channel input' do
+    it 'returns an Array of N NArrays from N-channel input' do
       channels = 4.times.map { Numo::SFloat.zeros(480) }
       channels[0][0] = 1.0  # impulse
 
       result = fdn.process(channels)
-      expect(result).to be_a(Numo::SFloat)
-      expect(result.length).to eq(480)
+      expect(result).to be_an(Array)
+      expect(result.length).to eq(4)
+      result.each do |ch|
+        expect(ch).to be_a(Numo::SFloat)
+        expect(ch.length).to eq(480)
+      end
     end
 
     it 'decays an impulse over time' do
@@ -95,8 +99,8 @@ RSpec.describe(MB::Sound::GraphNode::Reverb) do
       8.times { later_block = fdn.process(silence) }
 
       # Later blocks should have lower energy than early blocks
-      early_energy = (early_block ** 2).sum
-      later_energy = (later_block ** 2).sum
+      early_energy = early_block.sum { |ch| (ch ** 2).sum }
+      later_energy = later_block.sum { |ch| (ch ** 2).sum }
       expect(early_energy).to be > 0
       expect(later_energy).to be < early_energy
     end
@@ -113,8 +117,12 @@ RSpec.describe(MB::Sound::GraphNode::Reverb) do
       channels[0][0] = 1.0
 
       result = short_fdn.process(channels)
-      expect(result).to be_a(Numo::SFloat)
-      expect(result.length).to eq(4800)
+      expect(result).to be_an(Array)
+      expect(result.length).to eq(4)
+      result.each do |ch|
+        expect(ch).to be_a(Numo::SFloat)
+        expect(ch.length).to eq(4800)
+      end
     end
   end
 
@@ -251,10 +259,11 @@ RSpec.describe(MB::Sound::GraphNode::Reverb) do
   end
 
   describe 'parameter validation' do
-    it 'rejects non-power-of-2 channels' do
-      expect {
-        MB::Sound::GraphNode::Reverb.new(0.constant, channels: 3)
-      }.to raise_error(/power of 2/)
+    it 'rounds channels up to the next power of 2' do
+      reverb = MB::Sound::GraphNode::Reverb.new(0.constant, channels: 3)
+      result = reverb.sample(480)
+      expect(result).to be_a(Numo::SFloat)
+      expect(result.length).to eq(480)
     end
 
     it 'rejects room_size out of range' do
