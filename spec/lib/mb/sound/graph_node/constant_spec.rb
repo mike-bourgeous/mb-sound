@@ -79,6 +79,18 @@ RSpec.describe(MB::Sound::GraphNode::Constant) do
     end
   end
 
+  describe '#or_for' do
+    it 'changes the default duration' do
+      n = 0.constant
+      expect { n.or_for(1.5) }.to change { n.duration }.to(1.5)
+    end
+
+    it 'does not change the duration if set with #for' do
+      n = 0.constant.for(3)
+      expect { n.or_for(1.5) }.not_to change { n.duration }
+    end
+  end
+
   describe '#to_s' do
     it 'includes units if given' do
       expect(500.constant(unit: 'Hz').to_s).to include('500Hz')

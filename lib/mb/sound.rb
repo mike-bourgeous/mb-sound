@@ -20,6 +20,7 @@ require_relative 'sound/fft_methods'
 require_relative 'sound/gain_methods'
 require_relative 'sound/window_methods'
 require_relative 'sound/analysis_methods'
+require_relative 'sound/generation_methods'
 
 module MB
   # Convenience functions for making quick work of sound.
@@ -35,6 +36,7 @@ module MB
     extend GainMethods
     extend WindowMethods
     extend AnalysisMethods
+    extend GenerationMethods
 
     # Speed of sound for wavelength calculations, in meters per second.
     SPEED_OF_SOUND = 343.0
@@ -98,19 +100,6 @@ module MB
       )
       env.trigger(1.0, auto_release: auto_release)
       env
-    end
-
-    # Creates a uniformly distributed white noise generator that can be
-    # combined with other tones, filters, etc.  See MB::Sound::GraphNode
-    # and MB::Sound::Tone.
-    def self.noise
-      2000.hz.ramp.noise
-    end
-
-    # Shortcut/DSL method for creating a tone with a given dynamic frequency
-    # source, for full control over the FM signal graph.
-    def self.tone(frequency)
-      MB::Sound::Tone[frequency]
     end
 
     # Allows retrieving a Note by name using e.g. MB::Sound::A4 (or just A4 in

@@ -65,6 +65,7 @@ module MB
           @sample_rate = sample_rate.to_f
           @elapsed_samples = 0.0
           @duration_samples = nil
+          @duration_set = false
         end
 
         # Returns +count+ samples of the constant value.
@@ -125,7 +126,17 @@ module MB
         def for(duration_seconds, recursive: true)
           super(duration_seconds, recursive: recursive)
           @elapsed_samples = 0
-          @duration_samples = duration_seconds && duration_seconds.to_f * @sample_rate
+          @duration_samples = duration_seconds ? duration_seconds.to_f * @sample_rate : nil
+          @duration_set = true
+          self
+        end
+
+        # Sets the default duration for this constant
+        def or_for(duration_seconds, recursive: true)
+          # TODO: deduplicate duration management code
+          super(duration_seconds, recursive: false)
+          return if @duration_set
+          @duration_samples = duration_seconds ? duration_seconds.to_f * @sample_rate : nil
           self
         end
 
