@@ -119,20 +119,12 @@ begin
     sample_rate: sample_rate
   )
 
-  if output_channels > 1
-    result = reverb.outputs.map { |out|
-      out.softclip(0.85, 0.95).named('reverb output').with_buffer(800)
-    }
-  else
-    result = reverb
-      .softclip(0.85, 0.95)
-      .named('reverb output')
-      .with_buffer(800)
-  end
+  result = reverb.outputs.map { |out|
+    out.softclip(0.85, 0.95).named('reverb output').with_buffer(800)
+  }
 
   if graphviz
-    target = output_channels > 1 ? result[0] : result
-    png = target.open_graphviz
+    png = result[0].open_graphviz
     puts "Wrote GraphViz image to #{png}"
   end
 
