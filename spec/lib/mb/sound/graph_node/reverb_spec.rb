@@ -224,6 +224,32 @@ RSpec.describe(MB::Sound::GraphNode::Reverb) do
     end
   end
 
+  describe '.delays_non_harmonic?' do
+    it 'rejects delays with a ratio close to 2' do
+      expect(MB::Sound::GraphNode::Reverb.delays_non_harmonic?([0.01, 0.02], 0.05)).to be false
+    end
+
+    it 'rejects delays with a ratio close to 3' do
+      expect(MB::Sound::GraphNode::Reverb.delays_non_harmonic?([0.01, 0.0298], 0.05)).to be false
+    end
+
+    it 'accepts delays with non-harmonic ratios' do
+      expect(MB::Sound::GraphNode::Reverb.delays_non_harmonic?([0.01, 0.017, 0.026], 0.05)).to be true
+    end
+  end
+
+  describe '.log_random_delays' do
+    it 'generates delays that avoid harmonic ratios' do
+      rng = Random.new(0)
+      delays = MB::Sound::GraphNode::Reverb.log_random_delays(
+        8, (0.015..0.120), 0.65, rng
+      )
+
+      expect(delays.length).to eq(8)
+      expect(MB::Sound::GraphNode::Reverb.delays_non_harmonic?(delays, 0.05)).to be true
+    end
+  end
+
   describe 'parameter validation' do
     it 'rejects non-power-of-2 channels' do
       expect {
