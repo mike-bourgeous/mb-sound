@@ -200,6 +200,30 @@ RSpec.describe(MB::Sound::GraphNode::Reverb) do
     end
   end
 
+  describe 'seed parameter' do
+    it 'produces identical output for the same seed' do
+      input1 = 440.hz.sine.forever
+      input2 = 440.hz.sine.forever
+      r1 = input1.reverb(seed: 42, sample_rate: 48000)
+      r2 = input2.reverb(seed: 42, sample_rate: 48000)
+
+      out1 = r1.sample(4800)
+      out2 = r2.sample(4800)
+      expect(out1).to eq(out2)
+    end
+
+    it 'produces different output for different seeds' do
+      input1 = 440.hz.sine.forever
+      input2 = 440.hz.sine.forever
+      r1 = input1.reverb(seed: 0, wet: 1.0, dry: 0.0, sample_rate: 48000)
+      r2 = input2.reverb(seed: 99, wet: 1.0, dry: 0.0, sample_rate: 48000)
+
+      out1 = r1.sample(4800)
+      out2 = r2.sample(4800)
+      expect(out1).not_to eq(out2)
+    end
+  end
+
   describe 'parameter validation' do
     it 'rejects non-power-of-2 channels' do
       expect {
