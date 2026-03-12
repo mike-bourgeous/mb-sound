@@ -380,5 +380,37 @@ RSpec.describe(MB::Sound::GraphNode::Reverb) do
       result = reverb.outputs[0].sample(480)
       expect(result).to be_a(Numo::SFloat)
     end
+
+    it 'auto-detects stereo IOInput via .reverb DSL' do
+      # IOInput includes both GraphNode and IOSampleMixin (which includes
+      # MultiOutput), so calling .reverb on a stereo input should
+      # automatically split channels and create a stereo reverb.
+      input = MB::Sound::ArrayInput.new(
+        data: [Numo::SFloat.zeros(4800).rand(-1, 1), Numo::SFloat.zeros(4800).rand(-1, 1)],
+        sample_rate: 48000
+      )
+      reverb = input.reverb(sample_rate: 48000)
+      expect(reverb).to be_a(MB::Sound::GraphNode::Reverb)
+      expect(reverb.output_channel_count).to eq(2)
+      expect(reverb.outputs.length).to eq(2)
+
+      # Each output should produce data
+      reverb.outputs.each do |out|
+        result = out.sample(800)
+        expect(result).to be_a(Numo::SFloat)
+        expect(result.length).to eq(800)
+      end
+    end
+
+    it 'treats mono IOInput as single input via .reverb DSL' do
+      input = MB::Sound::ArrayInput.new(
+        data: [Numo::SFloat.zeros(4800).rand(-1, 1)],
+        sample_rate: 48000
+      )
+      reverb = input.reverb(sample_rate: 48000)
+      expect(reverb).to be_a(MB::Sound::GraphNode::Reverb)
+      expect(reverb.output_channel_count).to eq(1)
+      expect(reverb.outputs).to eq([reverb])
+    end
   end
 end
