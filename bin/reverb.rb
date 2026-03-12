@@ -114,6 +114,7 @@ begin
     )
     .softclip(0.85, 0.95)
     .named('reverb output')
+    .with_buffer(800)
 
   if graphviz
     png = result.open_graphviz
