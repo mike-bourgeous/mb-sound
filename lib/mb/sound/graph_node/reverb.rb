@@ -26,8 +26,8 @@ module MB
         # Range for randomized diffusion delay times in seconds (short, 1-15ms).
         DIFFUSION_DELAY_RANGE = (0.001..0.015)
 
-        # Range for randomized FDN delay times in seconds (longer, 20-100ms).
-        FDN_DELAY_RANGE = (0.020..0.100)
+        # Range for randomized FDN delay times in seconds (longer, 15-120ms).
+        FDN_DELAY_RANGE = (0.015..0.120)
 
         # The input source node.
         attr_reader :sources
@@ -40,7 +40,7 @@ module MB
         # - +decay+ - Target RT60 decay time in seconds (default: 2.0)
         # - +damping+ - 0.0..1.0, higher = more HF absorption (default: 0.5)
         # - +diffusion_steps+ - Number of serial diffusion stages (default: 4)
-        # - +channels+ - Number of parallel delay channels, must be power of 2 (default: 4)
+        # - +channels+ - Number of parallel delay channels, must be power of 2 (default: 8)
         # - +wet+ - Wet signal gain (default: 0.3)
         # - +dry+ - Dry signal gain (default: 0.7)
         # - +seed+ - Random seed for delay time generation (default: 0)
@@ -51,7 +51,7 @@ module MB
           decay: 2.0,
           damping: 0.5,
           diffusion_steps: 4,
-          channels: 4,
+          channels: 8,
           wet: 0.3,
           dry: 0.7,
           seed: 0,
@@ -171,14 +171,42 @@ module MB
         # is divided into +n+ equal sub-intervals and one random value is
         # picked from each, guaranteeing even multiplicative spread and
         # avoiding the clustering that causes comb-filter artifacts.
-        def self.log_random_delays(n, range, room_scale, rng)
+        #
+        # Delay sets where any pair of delays has a ratio within +tolerance+
+        # of a small integer (2, 3, or 4) are rejected and re-rolled, up to
+        # +max_attempts+ times.  This prevents the comb-filter reinforcement
+        # that causes audible flutter echo in the reverb tail.
+        def self.log_random_delays(n, range, room_scale, rng, tolerance: 0.05, max_attempts: 50)
           log_min = Math.log(range.begin)
           log_max = Math.log(range.end)
           step = (log_max - log_min) / n.to_f
+
+          max_attempts.times do
+            delays = n.times.map { |i|
+              lo = log_min + i * step
+              hi = lo + step
+              Math.exp(rng.rand(lo..hi)) * room_scale
+            }
+
+            next unless delays_non_harmonic?(delays, tolerance)
+
+            return delays
+          end
+
+          # Fallback: return the last generated set even if not ideal
           n.times.map { |i|
             lo = log_min + i * step
             hi = lo + step
             Math.exp(rng.rand(lo..hi)) * room_scale
+          }
+        end
+
+        # Returns true if no pair of +delays+ has a ratio within +tolerance+
+        # of a small integer (2, 3, or 4).
+        def self.delays_non_harmonic?(delays, tolerance)
+          delays.combination(2).all? { |a, b|
+            ratio = [a, b].max / [a, b].min.to_f
+            (2..4).none? { |int| (ratio - int).abs < tolerance }
           }
         end
 
