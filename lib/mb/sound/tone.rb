@@ -477,16 +477,20 @@ module MB
       end
 
       # Creates and returns +count+ copies of this tone (including the
-      # original) and spaces the frequencies of all tones within a band of the
-      # given number of +semitones+ around the original frequency (0.5 means
-      # +/- 0.25).
+      # original) and semi-randomly spaces the frequencies of all tones within
+      # a band of the given number of +semitones+ around the original frequency
+      # (0.5 means +/- 0.25).
       #
       # Call .sum on the result to create a mono output for feeding into later
       # nodes, or use the Array as-is for different routing per duplicate,
       # stereo, etc.
       #
       # Call this after setting all other tone parameters.
-      def unison(semitones = 0.1, count = 2)
+      #
+      # Example:
+      #     play 125.hz.ramp.unison
+      def unison(semitones = 0.1, count_pos = 2, count: nil)
+        count ||= count_pos
         raise 'Semitones must be non-negative' unless semitones >= 0
         raise 'Count must be >= 2' unless count >= 2
 
@@ -497,7 +501,7 @@ module MB
           self,
           *Array.new(count - 1) { |idx| self.dup }
         ].each_with_index do |t, idx|
-          ratio = 2.0 ** ((start + idx * increment) / 12.0)
+          ratio = 2.0 ** ((start + idx * increment + rand(-(increment / 3)..(increment / 3))) / 12.0)
           t.set_frequency(t.frequency * ratio)
         end
       end

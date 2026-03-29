@@ -65,6 +65,14 @@ module MB
           }
         end
 
+        # Creates +count+ total copies of this Wavetable and its upstream phase
+        # source, with the upstream phase source detuned as in Tone#unison.
+        # The phase source must respond to #unison.
+        #
+        # See Tone#unison.
+        #
+        # Example:
+        #     play 50.hz.wavetable(wavetable: 'sounds/synth0.flac', number: 0).unison(0.2, 8).each_slice(2).to_a.transpose.map(&:sum).map(&:softclip)
         def unison(semitones = 0.1, count = 2)
           orig_phase = climb_tee_tree(@phase)
           raise 'Wavetable phase must respond to #unison' unless orig_phase.respond_to?(:unison)
