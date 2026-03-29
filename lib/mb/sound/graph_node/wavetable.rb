@@ -46,6 +46,9 @@ module MB
             end
           end
 
+          number = number.get_sampler if number.respond_to?(:get_sampler)
+          phase = phase.get_sampler if phase.respond_to?(:get_sampler)
+
           @table = wavetable
           @number = number
           @phase = phase
@@ -62,6 +65,19 @@ module MB
           }
         end
 
+        def unison(semitones = 0.1, count = 2)
+          orig_phase = climb_tee_tree(@phase)
+          raise 'Wavetable phase must respond to #unison' unless orig_phase.respond_to?(:unison)
+
+          phases = orig_phase.unison(semitones, count)
+
+          Array.new(count) { |idx|
+            (idx == 0 ? self : self.dup).tap { |w|
+              w.instance_variable_set(:@phase, phases[idx])
+            }
+          }
+        end
+
         # Returns +count+ samples based on a wavetable lookup using the wave
         # number and phase from upstream graph sources given to the constructor.
         def sample(count)
@@ -72,7 +88,7 @@ module MB
           rho = MB::M.zpad(rho, count) if rho.length < count
           phi = MB::M.zpad(phi, count) if phi.length < count
 
-          # TODO: parameters for lookup mode and wrapping mode
+          # TODO: dynamic parameters for lookup mode and wrapping mode
           ::MB::Sound::Wavetable.wavetable_lookup(wavetable: @table, number: rho, phase: phi, lookup: @lookup, wrap: @wrap)
         end
       end

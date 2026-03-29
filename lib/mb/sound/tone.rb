@@ -12,6 +12,8 @@ module MB
 
       # Shortcut for creating a new tone with the given frequency source, for
       # building more complex FM signal graphs.
+      #
+      # See GraphNode#tone for another way to do this.
       def self.[](frequency)
         MB::Sound::Tone.new(frequency: frequency)
       end
@@ -125,7 +127,7 @@ module MB
       # Changes the oscillator to generate white noise using the distribution
       # of the current waveform.  For uniform noise, use the ramp wave type.
       # For approximately Gaussian noise, use the gauss wave type.  The
-      # frequency should probably be 1Hz, but definitely needs to be nonzero.
+      # frequency should probably be 1Hz, but definitely needs to be nonzero (TODO: is this true?).
       #
       # This sets the oscillator's +advance+ to 0, and +random_advance+ to
       # 2*pi, or if +blend+ is used, to values between those and the original
@@ -474,6 +476,38 @@ module MB
         )
       end
 
+      # Creates and returns +count+ copies of this tone (including the
+      # original) and spaces the frequencies of all tones within a band of the
+      # given number of +semitones+ around the original frequency (0.5 means
+      # +/- 0.25).
+      #
+      # Call .sum on the result to create a mono output for feeding into later
+      # nodes, or use the Array as-is for different routing per duplicate,
+      # stereo, etc.
+      #
+      # Call this after setting all other tone parameters.
+      def unison(semitones = 0.1, count = 2)
+        raise 'Semitones must be non-negative' unless semitones >= 0
+        raise 'Count must be >= 2' unless count >= 2
+
+        start = -0.5 * semitones
+        increment = semitones / (count - 1.0)
+
+        [
+          self,
+          *Array.new(count - 1) { |idx| self.dup }
+        ].each_with_index do |t, idx|
+          ratio = 2.0 ** ((start + idx * increment) / 12.0)
+          t.set_frequency(t.frequency * ratio)
+        end
+      end
+
+      def dup
+        super.tap { |o|
+          o.instance_variable_set(:@oscillator, nil)
+        }
+      end
+
       def to_s
         "#{super} -- #{@wave_type} freq=#{make_source_name(@frequency)} range=#{@range}"
       end
@@ -507,7 +541,7 @@ module MB
         f1 <=> f2
       end
 
-      private
+      protected
 
       # Allows subclasses (e.g. Note) to change the frequency after construction.
       def set_frequency(freq)
@@ -516,16 +550,17 @@ module MB
         end
 
         if freq.is_a?(Numeric)
-          freq = freq.to_f if freq.is_a?(Numeric)
+          freq = freq.to_f
           @period = 1.0 / freq
           @period_samples = @period * @sample_rate
+          @wavelength = (SPEED_OF_SOUND / freq).meters
         else
           @period = nil
           @period_samples = nil
+          @wavelength = nil
         end
 
         @frequency = freq
-        @wavelength = (SPEED_OF_SOUND / @frequency).meters if @frequency.is_a?(Numeric)
         @oscillator&.frequency = @frequency
       end
 
