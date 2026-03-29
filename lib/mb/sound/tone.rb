@@ -235,6 +235,7 @@ module MB
       # Example: 123.hz.with_phase(90.degrees)
       def with_phase(phase)
         @phase = phase
+        @oscillator&.phase = phase
         self
       end
 
@@ -481,6 +482,9 @@ module MB
       # a band of the given number of +semitones+ around the original frequency
       # (0.5 means +/- 0.25).
       #
+      # The starting phase of each oscillator is randomized according to
+      # +:random_phase+ (1.0 is fully random).
+      #
       # Call .sum on the result to create a mono output for feeding into later
       # nodes, or use the Array as-is for different routing per duplicate,
       # stereo, etc.
@@ -489,7 +493,8 @@ module MB
       #
       # Example:
       #     play 125.hz.ramp.unison
-      def unison(semitones = 0.1, count_pos = 2, count: nil)
+      #     play 125.hz.ramp.unison(count: 10).each_slice(2).to_a.transpose.map(&:sum).map(&:softclip)
+      def unison(semitones = 0.3, count_pos = 2, count: nil, random: 0.33333, random_phase: 1.0)
         count ||= count_pos
         raise 'Semitones must be non-negative' unless semitones >= 0
         raise 'Count must be >= 2' unless count >= 2
@@ -501,7 +506,8 @@ module MB
           self,
           *Array.new(count - 1) { |idx| self.dup }
         ].each_with_index do |t, idx|
-          ratio = 2.0 ** ((start + idx * increment + rand(-(increment / 3)..(increment / 3))) / 12.0)
+          ratio = 2.0 ** ((start + idx * increment + random * rand(-increment..increment)) / 12.0)
+          t.with_phase(@phase + random_phase * rand(0..(2*Math::PI)))
           t.set_frequency(t.frequency * ratio)
         end
       end
