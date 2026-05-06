@@ -135,8 +135,11 @@ module MB
         def or_for(duration_seconds, recursive: true)
           # TODO: deduplicate duration management code
           super(duration_seconds, recursive: false)
-          return if @duration_set
-          @duration_samples = duration_seconds ? duration_seconds.to_f * @sample_rate : nil
+
+          unless @duration_set
+            @duration_samples = duration_seconds ? duration_seconds.to_f * @sample_rate : nil
+          end
+
           self
         end
 

@@ -22,7 +22,7 @@ module MB
       # followed by silence.
       def impulse
         tapped = false
-        0.constant.or_for(5).spy { |d|
+        0.constant.named('Single-sample impluse').or_for(5).spy { |d|
           unless tapped
             d[0] = 1
             tapped = true
