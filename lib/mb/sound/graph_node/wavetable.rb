@@ -46,6 +46,9 @@ module MB
             end
           end
 
+          number = number.get_sampler if number.respond_to?(:get_sampler)
+          phase = phase.get_sampler if phase.respond_to?(:get_sampler)
+
           @table = wavetable
           @number = number
           @phase = phase
@@ -62,6 +65,27 @@ module MB
           }
         end
 
+        # Creates +count+ total copies of this Wavetable and its upstream phase
+        # source, with the upstream phase source detuned as in Tone#unison.
+        # The phase source must respond to #unison.
+        #
+        # See Tone#unison.
+        #
+        # Example:
+        #     play 50.hz.wavetable(wavetable: 'sounds/synth0.flac', number: 0).unison(0.2, 8).each_slice(2).to_a.transpose.map(&:sum).map(&:softclip)
+        def unison(semitones = 0.1, count = 2)
+          orig_phase = climb_tee_tree(@phase)
+          raise 'Wavetable phase must respond to #unison' unless orig_phase.respond_to?(:unison)
+
+          phases = orig_phase.unison(semitones, count)
+
+          Array.new(count) { |idx|
+            (idx == 0 ? self : self.dup).tap { |w|
+              w.instance_variable_set(:@phase, phases[idx])
+            }
+          }
+        end
+
         # Returns +count+ samples based on a wavetable lookup using the wave
         # number and phase from upstream graph sources given to the constructor.
         def sample(count)
@@ -72,7 +96,7 @@ module MB
           rho = MB::M.zpad(rho, count) if rho.length < count
           phi = MB::M.zpad(phi, count) if phi.length < count
 
-          # TODO: parameters for lookup mode and wrapping mode
+          # TODO: dynamic parameters for lookup mode and wrapping mode
           ::MB::Sound::Wavetable.wavetable_lookup(wavetable: @table, number: rho, phase: phi, lookup: @lookup, wrap: @wrap)
         end
       end
