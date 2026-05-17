@@ -1,10 +1,11 @@
 RSpec.describe('bin/midi_roll.rb', :aggregate_failures) do
   def run(cmd, success = true)
     `#{cmd}`.tap { |text|
+      @text = text
       result = $?
       if success != result.success?
-        MB::U.headline("failing text from #{result}")
-        puts text
+        MB::U.headline("failing text from #{result}", print: $stderr)
+        $stderr.puts text
       end
       expect(result.success?).to eq(success)
     }
