@@ -13,6 +13,57 @@ module MB
 
         include GraphNode
 
+        # TODO: maybe GraphVoice should be abandoned, and instead a new mechanism for round-robining MIDI events?  nah probbalbybbyoi notnoooot
+        class MidiProxy
+          def initialize(voice)
+            @gv = voice
+          end
+
+          def channel(ch)
+            raise NotImplementedError, 'MIDI manager handles channel filtering for GraphVoice'
+          end
+
+          def cc(number, range: 0..1, unit: nil, si: false)
+            raise NotImplementedError
+          end
+
+          def frequency(ratio = 1, offset = 0, bend_range: DEFAULT_BEND_RANGE)
+            raise NotImplementedError
+          end
+          alias freq frequency
+
+          def hz(ratio = 1, offset = 0, bend_range: DEFAULT_BEND_RANGE)
+            raise NotImplementedError
+          end
+          alias tone hz
+          alias note hz
+
+          def number(range: nil, bend_range: DEFAULT_BEND_RANGE, unit: nil, si: false)
+            raise NotImplementedError
+          end
+
+          def velocity(number = nil, range: 0..1, unit: nil, si: false)
+            raise NotImplementedError
+          end
+
+          def bend(range: DEFAULT_BEND_RANGE, unit: 'st', si: false)
+            raise NotImplementedError
+          end
+
+          def env(attack_s = nil, decay_s = nil, sustain_l = nil, release_s = nil, range: 0..1)
+            raise NotImplementedError
+          end
+          alias envelope env
+
+          def gate(range: 0..1, unit: nil, si: false)
+            raise NotImplementedError
+          end
+
+          def click(range: 0..1)
+            raise NotImplementedError
+          end
+        end
+
         attr_reader :number
 
         # A Hash from CC index to an Array of Hashes describing a controllable
@@ -28,6 +79,7 @@ module MB
         # +:freq_constants+ parameters may be used to override detection.
         def initialize(graph = nil, update_rate: 60, amp_envelopes: nil, envelopes: nil, freq_constants: nil)
           if block_given?
+            raise 'Both block and graph parameter were given; only pass one or the other' if graph
             graph = yield MidiProxy.new(self)
           else
             raise 'No graph was given' unless graph
