@@ -1,14 +1,31 @@
-RSpec.describe('bin/midi_roll.rb', :aggregate_failures) do
+RSpec.describe('bin/midi_roll.rb') do
   def run(cmd, success = true)
     `#{cmd}`.tap { |text|
       @text = text
-      result = $?
-      if success != result.success?
-        MB::U.headline("failing text from #{result}", print: $stderr)
+      @result = $?
+      if success != @result.success?
+        MB::U.headline("failing text from #{@result}", print: $stderr)
         $stderr.puts text
       end
-      expect(result.success?).to eq(success)
+      expect(@result.success?).to eq(success)
     }
+  end
+
+  around(:each) do |ex|
+    begin
+      aggregate_failures do
+        @result = nil
+        @text = nil
+        ex.run
+      end
+
+    rescue RSpec::Expectations::MultipleExpectationsNotMetError => e
+      if @result && @text
+        MB::U.headline("Failed text from \e[1;33m#{ex.description}", print: $stderr, color: '31')
+        $stderr.puts @text
+        $stderr.puts
+      end
+    end
   end
 
   it 'can display a MIDI roll' do
