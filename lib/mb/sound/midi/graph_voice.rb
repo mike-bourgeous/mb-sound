@@ -77,10 +77,18 @@ module MB
         # smoothing.  If the automatic detection of envelopes and oscillators
         # doesn't work, then the +:amp_envelopes+, +:envelopes+, and
         # +:freq_constants+ parameters may be used to override detection.
+        #
+        # TODO: can we calculate the update rate from graph sample rate and
+        # buffer size, or on first call to sample?
         def initialize(graph = nil, update_rate: 60, amp_envelopes: nil, envelopes: nil, freq_constants: nil)
           if block_given?
             raise 'Both block and graph parameter were given; only pass one or the other' if graph
-            graph = yield MidiProxy.new(self)
+            raise 'Do not supply a list of envelopes when giving a block' if amp_envelopes || envelopes
+            raise 'Do not supply a list of frequency constants when giving a block' if freq_constants
+
+            @midi_proxy = MidiProxy.new(self)
+            graph = yield @midi_proxy
+
           else
             raise 'No graph was given' unless graph
           end

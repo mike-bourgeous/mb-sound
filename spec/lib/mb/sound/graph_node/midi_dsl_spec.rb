@@ -68,7 +68,18 @@ RSpec.describe(MB::Sound::GraphNode::MidiDsl, aggregate_failures: true) do
     expect(graph.sample(1)).to be_a(Numo::SFloat)
   end
 
-  pending 'can filter events by channel'
+  describe '#channel' do
+    # TODO: move detailed tests into separate spec file
+    it 'includes events from the target channel' do
+      graph = midi.click # channel(0).gate
+      expect(graph.sample(48000).sum).to be > 1
+    end
+
+    it 'rejects events from other channels' do
+      graph = midi.channel(1).gate
+      expect(graph.sample(48000).sum).to eq(0)
+    end
+  end
 
   pending 'cache invalidation'
 

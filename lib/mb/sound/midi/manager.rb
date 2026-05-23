@@ -13,7 +13,7 @@ module MB
 
         # Transposes note events received via #on_note (but not raw events via
         # #on_event).  This may be fractional for use with VoicePool.
-        attr_accessor :transpose
+        attr_reader :transpose
 
         # Initializes a MIDI manager that parses MIDI data from jackd and sends
         # smoothed control values to callbacks when #update is called.
@@ -22,7 +22,8 @@ module MB
         #         client name)
         # :input - An optional JackFFI (or compatible) MIDI input object.
         #          +:port_name+ and +:connect+ will be ignored if +:input+ is
-        #          specified.
+        #          specified.  May also be another manager for doing channel
+        #          filtering on an unfiltered manager (see #for_channel).
         # :port_name - The name of the input port to create (e.g. if multiple
         #              MIDI managers will be used in one program)
         # :connect - The name or type of MIDI port to which to try to connect,
@@ -39,6 +40,7 @@ module MB
           @event_callbacks = []
           @note_callbacks = []
           @update_callbacks = []
+          @nested_managers = []
 
           if update_rate.nil?
             if jack
@@ -78,10 +80,29 @@ module MB
           end
         end
 
-        # Closes the MIDI input port created for this MIDI manager.
+        # Closes the MIDI input port created for this MIDI manager, and all
+        # nested managers.
         def close
-          @midi_in.close
+          @nested_managers.each(&:close)
+
+          @midi_in.close unless @midi_in.is_a?(MB::Sound::MIDI::Manager)
           @midi_in = nil
+        end
+
+        # Creates a nested manager that filters messages to the given channel.
+        # This allows using a single MIDI Manager to split MIDI events from
+        # different channels (see MB::Sound::GraphNode::MidiDsl#channel).
+        def for_channel(channel)
+          self.class.new(jack: @jack, input: self, update_rate: @update_rate, channel: channel).tap { |m|
+            @nested_managers << m
+          }
+        end
+
+        # Sets note transposition in fractional semitones
+        def transpose=(semitones)
+          @nested_managers.each do |nm|
+            nm.transpose = semitones
+          end
         end
 
         # Sets all parameters (such as created by #on_cc or #on_bend) having
@@ -293,25 +314,14 @@ module MB
         # Reads MIDI data, updates parameters, and sends current parameter
         # values to all callbacks.
         def update(blocking: false)
-          @m.clear_buffer
+          unless @midi_in.is_a?(::MB::Sound::MIDI::Manager)
+            @m.clear_buffer
 
-          while data = @midi_in.read(blocking: blocking)&.[](0)
-            events = [@m.parse(data.bytes)].flatten.compact rescue []
+            while data = @midi_in.read(blocking: blocking)&.[](0)
+              events = [@m.parse(data.bytes)].flatten.compact rescue []
 
-            events.each do |e|
-              next if @channel && e.respond_to?(:channel) && e.channel != @channel
-
-              notify_event_cbs(e)
-
-              params = @parameters[e.class]
-              if params
-                keys = MB::Sound::MIDI::Parameter.generate_message_keys(e, ignore_channel: @channel.nil?)
-                keys.each do |k|
-                  params[k]&.each do |p, _cb|
-                    p.notify(e)
-                  end
-                end
-              end
+              process_event_list(events)
+              @nested_managers.each { |m| m.process_event_list(events) }
             end
           end
 
@@ -327,6 +337,7 @@ module MB
           end
 
           @update_callbacks.each(&:call)
+          @nested_managers.each(&:update)
 
           nil
         end
@@ -336,10 +347,7 @@ module MB
         def to_acid_xml(name: File.basename($0))
           require 'builder'
 
-          params = @parameters.values.flat_map(&:values).flat_map { |l| l.map(&:first) }
-          param_groups = params.group_by(&:hash_key)
-
-          thresholds = @cc_thresholds.keys
+          params, param_groups, thresholds = acid_parameter_data
 
           xml = Builder::XmlMarkup.new(indent: 2)
           xml.instruct!
@@ -374,6 +382,45 @@ module MB
           end
 
           params.to_h
+        end
+
+        protected
+
+        # Called by #update in the root-level Manager for itself and any nested
+        # Managers.  See #for_channel.
+        def process_event_list(events)
+          events.each do |e|
+            next if @channel && e.respond_to?(:channel) && e.channel != @channel
+
+            notify_event_cbs(e)
+
+            params = @parameters[e.class]
+            if params
+              keys = MB::Sound::MIDI::Parameter.generate_message_keys(e, ignore_channel: @channel.nil?)
+              keys.each do |k|
+                params[k]&.each do |p, _cb|
+                  p.notify(e)
+                end
+              end
+            end
+          end
+        end
+
+        # Returns parameter and threshold info for this manager and nested
+        # managers.  Called by #to_acid_xml.
+        def acid_parameter_data
+          params = @parameters.values.flat_map(&:values).flat_map { |l| l.map(&:first) }
+          param_groups = params.group_by(&:hash_key)
+          thresholds = @cc_thresholds.keys
+
+          @nested_managers.each do |nm|
+            np, ng, nt = nm.acid_parameter_data
+            params.concat(np)
+            param_groups.concat(ng)
+            thresholds.concat(nt)
+          end
+
+          return params, param_groups, thresholds
         end
 
         private
