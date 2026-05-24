@@ -20,6 +20,37 @@ module MB
       # Example:
       #     play midi.hz.at(-6.db).ramp.filter(:lowpass, cutoff: (midi.frequency * midi.cc(1, range: 1.3..16)), quality: 4).oversample(16).softclip.oversample(2)
       class MidiDsl
+        # Clock for MIDI files fed into graph nodes, keeping MIDI playback in
+        # sync with graph updates (quantized to the buffer size).  Used by
+        # MB::Sound#midi_file.
+        #
+        # TODO: would this be useful outside of MidiDsl?
+        class DslClock
+          attr_reader :graph
+
+          # Creates a graph-driven clock for MIDI files.  The graph must be set
+          # after creation since this clock needs to exist before the MIDI file
+          # reader, and the reader must exist before the graph.
+          def initialize
+            @now = 0.0
+          end
+
+          # Sets the graph for this clock, since the clock must exist prior to
+          # graph creation.
+          def graph=(g)
+            raise 'BUG: Clock graph already set' if @graph
+            @graph = g
+            @graph.spy do |b|
+              @now += b.length / sample_rate if b
+            end
+          end
+
+          # Returns the current sample time for the graph.
+          def clock_now
+            @now
+          end
+        end
+
         # The default pitch bend range for #hz, #frequency, and #number.
         # TODO: maybe allow specifying a different default bend range?
         DEFAULT_BEND_RANGE = -1..1
@@ -32,9 +63,9 @@ module MB
         # given channel, and receiving from the given parent MidiDsl.  The
         # initial DSL has channel and parent nil, while filtered DSLs will set
         # them accordingly.
-        def initialize(manager:, channel: nil, parent: nil)
+        def initialize(manager:, parent: nil)
           @manager = manager
-          @channel = channel
+          @channel = manager.channel
           @parent = parent
 
           @freqs = {}
@@ -67,7 +98,7 @@ module MB
           return parent.channel(ch) if @parent
 
           @channels ||= []
-          @channels[ch] ||= MidiDsl.new(manager: @manager.for_channel(ch), channel: ch, parent: self)
+          @channels[ch] ||= MidiDsl.new(manager: @manager.for_channel(ch), parent: self)
         end
 
         # Returns a graph node that produces scaled values from MIDI control
@@ -259,8 +290,9 @@ module MB
     #       midi.tone.ramp.filter(:lowpass, cutoff: midi.frequency + 100) * midi.gate
     #     }
     #     play graph
-    def self.midi_file(filename, speed: 1.0, clock: MB::U)
+    def self.midi_file(filename, speed: 1.0, clock: nil)
       # TODO: end graph execution when the MIDI file has completely finished
+      clock ||= MB::Sound::GraphNode::MidiDsl::DslClock.new
       mfile = MB::Sound::MIDI::MIDIFile.new(filename, speed: speed, clock: clock)
       mgr = MB::Sound::MIDI::Manager.new(input: mfile, jack: nil)
       dsl = MB::Sound::GraphNode::MidiDsl.new(manager: mgr)
