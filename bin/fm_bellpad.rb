@@ -58,7 +58,8 @@ voices = OSC_COUNT.times.map { |i|
     final,
     update_rate: manager.update_rate,
     amp_envelopes: ['A Envelope', 'C Envelope'],
-    freq_constants: freq_constants
+    freq_constants: freq_constants,
+    manager: manager
   ).named('FM Tubular Bell').tap { |v|
     v.on_velocity(['B into A', 'D into C'], range: 0.5..1.5, relative: true)
     v.on_velocity(['A Out', 'C Out'], range: 0.5..1.0, relative: true)

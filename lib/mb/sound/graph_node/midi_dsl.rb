@@ -301,6 +301,9 @@ module MB
       mgr = MB::Sound::MIDI::Manager.new(input: mfile, jack: nil)
       dsl = MB::Sound::GraphNode::MidiDsl.new(manager: mgr)
 
+      # FIXME: the graph doesn't exist until the first node is created
+      clock.graph = nil
+
       if block_given?
         yield dsl
       else

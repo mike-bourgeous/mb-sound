@@ -80,7 +80,7 @@ module MB
         #
         # TODO: can we calculate the update rate from graph sample rate and
         # buffer size, or on first call to sample?
-        def initialize(graph = nil, update_rate: 60, amp_envelopes: nil, envelopes: nil, freq_constants: nil)
+        def initialize(graph = nil, update_rate: 60, amp_envelopes: nil, envelopes: nil, freq_constants: nil, manager:)
           if block_given?
             raise 'Both block and graph parameter were given; only pass one or the other' if graph
             raise 'Do not supply a list of envelopes when giving a block' if amp_envelopes || envelopes

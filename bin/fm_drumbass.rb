@@ -4,6 +4,11 @@ require 'bundler/setup'
 require 'mb-sound'
 
 OSC_COUNT = ENV['OSC_COUNT']&.to_i || 1
+
+jack = MB::Sound::JackFFI[]
+output = jack.output(channels: 1, connect: [['system:playback_1', 'system:playback_2']])
+manager = MB::Sound::MIDI::Manager.new(jack: jack, connect: ARGV[0])
+
 voices = OSC_COUNT.times.map { |i|
   note = MB::Sound::Note.new(36 + i * 16)
   note2 = MB::Sound::Note.new(note.number + 12)
@@ -22,12 +27,9 @@ voices = OSC_COUNT.times.map { |i|
   f = fenv.db * note.dup.at(1).fm(e * 250)
 
   # FIXME: This is using a Mixer as a frequency constant
-  MB::Sound::MIDI::GraphVoice.new(f, amp_envelopes: [fenv])
+  MB::Sound::MIDI::GraphVoice.new(f, amp_envelopes: [fenv], manager: manager)
 }
 
-jack = MB::Sound::JackFFI[]
-output = jack.output(channels: 1, connect: [['system:playback_1', 'system:playback_2']])
-manager = MB::Sound::MIDI::Manager.new(jack: jack, connect: ARGV[0])
 pool = MB::Sound::MIDI::VoicePool.new(
   manager,
   voices

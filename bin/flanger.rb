@@ -185,7 +185,7 @@ begin
 
     # GraphVoice provides on_cc to generate a cc map for the MIDI manager
     # (TODO: probably a better way to do this, also need on_bend, on_pitch, etc)
-    MB::Sound::MIDI::GraphVoice.new(final)
+    MB::Sound::MIDI::GraphVoice.new(final, manager: manager)
       .on_cc(1, 'LFO Hz', range: 0.0..6.0)
       .on_cc(1, 'Depth', range: 0.0..2.0)
       .on_cc(1, 'Dry level', range: 1.0..0.0)

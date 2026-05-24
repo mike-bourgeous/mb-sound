@@ -29,6 +29,7 @@ module MB
 
           # Records the need for a click for the next call to #sample.
           def note_cb(number, velocity, onoff)
+            # TODO: support MIDI event timestamps and multiple clicks per buffer
             @click = MB::M.scale(velocity, 0..127, @range) if onoff
           end
 

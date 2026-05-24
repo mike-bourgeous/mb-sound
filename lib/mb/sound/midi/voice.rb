@@ -49,7 +49,9 @@ module MB
         # MB::Sound::Tone, defaulting to :lowpass).
         #
         # TODO: maybe get rid of this and just use GraphVoice
-        def initialize(wave_type: nil, filter_type: :lowpass, amp_envelope: {}, filter_envelope: {}, sample_rate: 48000)
+        def initialize(wave_type: nil, filter_type: :lowpass, amp_envelope: {}, filter_envelope: {}, sample_rate: 48000, manager:)
+          @manager = manager
+
           @filter_intensity = 15.0
           @cutoff = 200.0
           @quality = 4.0
