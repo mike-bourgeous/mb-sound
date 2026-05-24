@@ -83,10 +83,13 @@ module MB
         # Closes the MIDI input port created for this MIDI manager, and all
         # nested managers.
         def close
-          @nested_managers.each(&:close)
+          if @midi_in
+            @midi_in.close unless @midi_in.is_a?(MB::Sound::MIDI::Manager)
+            @midi_in = nil
 
-          @midi_in.close unless @midi_in.is_a?(MB::Sound::MIDI::Manager)
-          @midi_in = nil
+            @nested_managers.each(&:close)
+            @nested_managers.clear
+          end
         end
 
         # Creates a nested manager that filters messages to the given channel.

@@ -13,54 +13,54 @@ module MB
 
         include GraphNode
 
-        # TODO: maybe GraphVoice should be abandoned, and instead a new mechanism for round-robining MIDI events?  nah probbalbybbyoi notnoooot
-        class MidiProxy
-          def initialize(voice)
+        # Provides GraphVoice-specific behavior for MidiDsl nodes used within a
+        # GraphVoice, such as per-voice note events (vs. all note events).
+        class ManagerProxy
+          extend Forwardable
+
+          def_delegators :@manager, :on_cc, :on_bend
+
+          def initialize(voice:, manager:)
+            @gv = voice
+            @manager = manager
+            @graph_voice_callbacks = []
+          end
+
+          # Overrides the manager's default #on_note method to notify callbacks
+          # only when this specific voice is triggered, rather than when any
+          # note is received.
+          def on_note(&callback)
+            @graph_voice_callbacks << callback
+          end
+
+          # Called by GraphVoice to trigger note events on note-related nodes
+          # like MidiTone, MidiNumber, etc.
+          def graph_voice_trigger(number, velocity)
+            @graph_voice_callbacks.each do |cb|
+              cb.call(number, velocity, true)
+            end
+          end
+
+          # Called by GraphVoice to trigger release events on note-related
+          # nodes like MidiGate, MidiEnvelope, etc.
+          def graph_voice_release(number, velocity)
+            @graph_voice_callbacks.each do |cb|
+              cb.call(number, velocity, false)
+            end
+          end
+        end
+
+        # TODO: maybe GraphVoice should be abandoned, and instead a new
+        # mechanism for round-robining MIDI events?  nah probbalbybbyoi
+        # notnoooot
+        class DslProxy < MB::Sound::GraphNode::MidiDsl
+          def initialize(voice:, manager:)
+            super(manager: manager)
             @gv = voice
           end
 
           def channel(ch)
-            raise NotImplementedError, 'MIDI manager handles channel filtering for GraphVoice'
-          end
-
-          def cc(number, range: 0..1, unit: nil, si: false)
-            raise NotImplementedError
-          end
-
-          def frequency(ratio = 1, offset = 0, bend_range: DEFAULT_BEND_RANGE)
-            raise NotImplementedError
-          end
-          alias freq frequency
-
-          def hz(ratio = 1, offset = 0, bend_range: DEFAULT_BEND_RANGE)
-            raise NotImplementedError
-          end
-          alias tone hz
-          alias note hz
-
-          def number(range: nil, bend_range: DEFAULT_BEND_RANGE, unit: nil, si: false)
-            raise NotImplementedError
-          end
-
-          def velocity(number = nil, range: 0..1, unit: nil, si: false)
-            raise NotImplementedError
-          end
-
-          def bend(range: DEFAULT_BEND_RANGE, unit: 'st', si: false)
-            raise NotImplementedError
-          end
-
-          def env(attack_s = nil, decay_s = nil, sustain_l = nil, release_s = nil, range: 0..1)
-            raise NotImplementedError
-          end
-          alias envelope env
-
-          def gate(range: 0..1, unit: nil, si: false)
-            raise NotImplementedError
-          end
-
-          def click(range: 0..1)
-            raise NotImplementedError
+            raise 'MIDI manager handles channel filtering for GraphVoice'
           end
         end
 
@@ -86,8 +86,9 @@ module MB
             raise 'Do not supply a list of envelopes when giving a block' if amp_envelopes || envelopes
             raise 'Do not supply a list of frequency constants when giving a block' if freq_constants
 
-            @midi_proxy = MidiProxy.new(self)
-            graph = yield @midi_proxy
+            @manager_proxy = ManagerProxy.new(voice: self, manager: manager)
+            @dsl_proxy = DslProxy.new(voice: self, manager: @manager_proxy)
+            graph = yield @dsl_proxy
 
           else
             raise 'No graph was given' unless graph
