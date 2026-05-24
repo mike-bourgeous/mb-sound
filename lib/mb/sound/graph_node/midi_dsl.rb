@@ -177,7 +177,8 @@ module MB
           end
         end
 
-        # TODO: pitch bend
+        # Returns a node that outputs MIDI pitch bend values, defaulting to a
+        # linear map of semitones within DEFAULT_BEND_RANGE.
         def bend(range: DEFAULT_BEND_RANGE, unit: 'st', si: false)
           cache(@bends, [range, unit, si]) do
             MidiBend.new(dsl: self, range: range, unit: unit, si: si, sample_rate: 48000)
