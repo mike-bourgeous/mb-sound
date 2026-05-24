@@ -71,6 +71,7 @@ module MB
           @freqs = {}
           @tones = {}
           @ccs = {}
+          @tones = {}
           @numbers = {}
           @envelopes = {}
           @velocities = {}
@@ -143,7 +144,9 @@ module MB
         #                 in semitones.  E.g. pass -12..12 for a full octave.
         def hz(ratio = 1, offset = 0, bend_range: DEFAULT_BEND_RANGE)
           # TODO: if caching, need to have all methods that modify the tone invalidate the cache
-          MidiTone.new(dsl: self, frequency: self.frequency(ratio, offset, bend_range: bend_range))
+          cache(@tones, [Random.rand, @tones.length]) do
+            MidiTone.new(dsl: self, frequency: self.frequency(ratio, offset, bend_range: bend_range))
+          end
         end
         alias tone hz
         alias note hz
