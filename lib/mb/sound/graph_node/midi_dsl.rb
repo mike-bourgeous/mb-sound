@@ -33,20 +33,26 @@ module MB
           # reader, and the reader must exist before the graph.
           def initialize
             @now = 0.0
+            @dsl = nil
+            @node = nil
           end
 
-          # Sets the graph for this clock, since the clock must exist prior to
-          # graph creation.
-          def graph=(g)
-            raise 'BUG: Clock graph already set' if @graph
-            @graph = g
-            @graph.spy do |b|
-              @now += b.length / sample_rate if b
-            end
+          # Sets the MidiDsl for this clock, since the clock must exist prior to
+          # MidiDsl creation.
+          def dsl=(dsl)
+            raise 'BUG: Clock DSL already set' if @dsl
+            @dsl = dsl
           end
 
-          # Returns the current sample time for the graph.
+          # Returns the current sample time for the node graph.
           def clock_now
+            unless @node
+              @node = @dsl.last_node
+              @node&.spy do |b|
+                @now += b.length / @node.sample_rate if b
+              end
+            end
+
             @now
           end
         end
@@ -248,6 +254,11 @@ module MB
           @manager.midi_in.respond_to?(:done?) && @manager.midi_in.done?
         end
 
+        # Returns the last graph node created, or nil if there are no nodes.
+        def last_node
+          @reverse_cache.keys.last
+        end
+
         # XXX FIXME hack for graph display
         def sources; {} end
         def spy(*a, **ka); end
@@ -301,8 +312,7 @@ module MB
       mgr = MB::Sound::MIDI::Manager.new(input: mfile, jack: nil)
       dsl = MB::Sound::GraphNode::MidiDsl.new(manager: mgr)
 
-      # FIXME: the graph doesn't exist until the first node is created
-      clock.graph = nil
+      clock.dsl = dsl if clock.is_a?(MB::Sound::GraphNode::MidiDsl::DslClock)
 
       if block_given?
         yield dsl
