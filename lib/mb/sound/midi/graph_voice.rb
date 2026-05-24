@@ -18,7 +18,7 @@ module MB
         class ManagerProxy
           extend Forwardable
 
-          def_delegators :@manager, :on_cc, :on_bend
+          def_delegators :@manager, :on_cc, :on_bend, :channel, :update
 
           def initialize(voice:, manager:)
             @gv = voice
@@ -190,6 +190,8 @@ module MB
           @velocity_listeners.each do |vl|
             vl[:parameter].raw_value = velocity
           end
+
+          @manager_proxy&.graph_voice_trigger(note, velocity)
         end
 
         # Sets the note number without triggering the envelope generators (e.g.
@@ -216,6 +218,8 @@ module MB
               f.reset(Math.log2(freq))
             end
           end
+
+          # TODO: MidiDsl notification
         end
 
         # Sends values of internal parameters to graph nodes (e.g. those from
@@ -317,6 +321,8 @@ module MB
         # Tells all envelopes to start their release phase.
         def release(note, velocity)
           @envelopes.each(&:release)
+
+          @manager_proxy&.graph_voice_release(note, velocity)
         end
 
         # Returns true if any envelopes have not reached the end of their
