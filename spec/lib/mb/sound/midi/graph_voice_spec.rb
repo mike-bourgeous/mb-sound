@@ -153,6 +153,24 @@ RSpec.describe(MB::Sound::MIDI::GraphVoice, aggregate_failures: true) do
       pending 'responds only to notes targeted at each voice'
     end
 
-    pending '#env'
+    describe '#env' do
+      let (:filename) { 'spec/test_data/note_velocity.mid' }
+
+      let (:voice) {
+        proc {
+          MB::Sound::MIDI::GraphVoice.new(manager: manager) { |midi|
+            midi.env(0.1, 0.1, 0, 0)
+          }
+        }
+      }
+
+      it 'returns envelope values' do
+        data = pool.multi_sample(800, 360)
+        expect(data.max).to be > 0.9
+        expect(data.min).to be < 0.1
+      end
+
+      pending 'responds only to notes targeted at each voice'
+    end
   end
 end
