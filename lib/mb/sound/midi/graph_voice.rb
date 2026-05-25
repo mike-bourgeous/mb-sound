@@ -8,6 +8,13 @@ module MB
       # and every oscillator with a constant frequency, or a constant value
       # added somewhere in its frequency input, has that constant set to the
       # triggering note frequency.
+      #
+      # TODO: It should be *way* easier to create a synthesizer.  Something
+      # like this:
+      #
+      #     synth('midi filename or jack midi input', 8) { |midi|
+      #       midi.hz.ramp.at(1) * midi.env
+      #     }
       class GraphVoice
         extend Forwardable
 
