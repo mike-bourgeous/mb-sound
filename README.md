@@ -102,7 +102,8 @@ play 123.hz.ramp.at(1)
 
 These examples can be run in the `bin/sound.rb` interactive environment.  There
 are other examples in the scripts under the `bin/` directory, such as an FM
-synthesizer in `bin/fm_synth.rb` and a flanger effect in `bin/flanger.rb`.
+synthesizer in `bin/synths/fm_synth.rb` and a flanger effect in
+`bin/effects/flanger.rb`.
 
 ### Generating tones
 
@@ -329,14 +330,14 @@ loopback(plot: { spectrum: true })
 Look under the `lib/mb/sound/midi/` directory, or refer to the example scripts
 below.
 
-#### `bin/midi_info.rb`
+#### `bin/midi/midi_info.rb`
 
 This script displays information about a MIDI file, including the song title,
 track names, and number of events on each track.  Uses the midilib gem for
 parsing MIDI files.
 
 ```bash
-bin/midi_info.rb spec/test_data/midi.mid
+bin/midi/midi_info.rb spec/test_data/midi.mid
 ```
 
 ```
@@ -349,15 +350,15 @@ midi.mid: Unnamed
  1 | Unnamed |       | [0]      | [0]       | 32     | 26
 ```
 
-#### `bin/midi_roll.rb`
+#### `bin/midi/midi_roll.rb`
 
 This draws a MIDI piano roll to the terminal, with each channel getting its own
 color.
 
 ```bash
-bin/midi_roll.rb --help
+bin/midi/midi_roll.rb --help
 
-bin/midi_roll.rb -r 15 -c 80 spec/test_data/midi.mid
+bin/midi/midi_roll.rb -r 15 -c 80 spec/test_data/midi.mid
 ```
 
 ```
@@ -379,13 +380,13 @@ spec/test_data/midi.mid -- 0.0..6.857136/6.86s
  68 G♯4  ┊                                                   ┗━━━━━━━━━━━━━━━━━┛
 ```
 
-#### `bin/midi_cc_chart.rb`
+#### `bin/midi/midi_cc_chart.rb`
 
 This displays a table with MIDI Control Change (CC) values, either from a MIDI
 input or a MIDI file, in real time.
 
 ```bash
-bin/midi_cc_chart.rb spec/test_data/midi.mid
+bin/midi/midi_cc_chart.rb spec/test_data/midi.mid
 ```
 
 ```
@@ -418,13 +419,13 @@ bin/midi_cc_chart.rb spec/test_data/midi.mid
  120 |     |     |     |     |     |     |     |     |     |
 ```
 
-#### `bin/midi_note_chart.rb`
+#### `bin/midi/midi_note_chart.rb`
 
 This displays the attack and release velocities of MIDI Note On and Note Off
 events in a grid, either from a MIDI input or a MIDI file, in real time.
 
 ```bash
-bin/midi_note_chart.rb spec/test_data/midi.mid
+bin/midi/midi_note_chart.rb spec/test_data/midi.mid
 ```
 
 ```
@@ -453,13 +454,13 @@ bin/midi_note_chart.rb spec/test_data/midi.mid
  9   |     |     |     |     |     |     |     |     |     |     |     |
 ```
 
-#### `bin/ep2_syn.rb`
+#### `bin/synths/ep2_syn.rb`
 
 This is the synthesizer I wrote for [episode 2][7] of my [Code, Sound &
 Surround video series][0].
 
 ```bash
-bin/ep2_syn.rb
+bin/synths/ep2_syn.rb
 ```
 
 ## Installation and usage
