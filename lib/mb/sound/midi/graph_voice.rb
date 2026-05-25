@@ -25,7 +25,7 @@ module MB
         class ManagerProxy
           extend Forwardable
 
-          def_delegators :@manager, :on_cc, :on_bend, :channel, :update
+          def_delegators :@manager, :on_cc, :on_bend, :channel, :update, :midi_in
 
           def initialize(voice:, manager:)
             @gv = voice
