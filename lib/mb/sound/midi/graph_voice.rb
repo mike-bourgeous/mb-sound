@@ -64,7 +64,7 @@ module MB
           end
         end
 
-        attr_reader :number
+        attr_reader :number, :dsl_proxy
 
         # A Hash from CC index to an Array of Hashes describing a controllable
         # parameter.  Used by VoicePool.  See #on_cc.

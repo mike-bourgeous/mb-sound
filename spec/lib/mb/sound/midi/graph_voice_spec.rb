@@ -1,7 +1,16 @@
 RSpec.describe(MB::Sound::MIDI::GraphVoice) do
-  let (:clock) { MB::Sound::MIDI::MIDIFile::ConstantClock.new }
-  let (:midi_file) { MB::Sound::MIDI::MIDIFile.new('spec/test_data/midi.mid') }
+  let (:filename) { 'spec/test_data/midi.mid' }
+  let (:clock) { MB::Sound::GraphNode::MidiDsl::DslClock.new }
+  let (:midi_file) { MB::Sound::MIDI::MIDIFile.new(filename, clock: clock) }
   let (:manager) { MB::Sound::MIDI::Manager.new(jack: nil, input: midi_file) }
+  let (:voice_count) { 1 }
+  let (:voice) { proc { MB::Sound::MIDI::GraphVoice.new(manager: manager) { 0.constant } } }
+  let (:voices) { Array.new(voice_count, &voice) }
+  let (:pool) { MB::Sound::MIDI::VoicePool.new(manager, voices) }
+
+  before do
+    clock.dsl = voices.first.dsl_proxy
+  end
 
   context 'with a block given to the constructor' do
     it 'passes a GraphNode DSL to the block' do
@@ -22,9 +31,65 @@ RSpec.describe(MB::Sound::MIDI::GraphVoice) do
       end
     end
 
-    pending '#cc'
-    pending '#frequency'
-    pending '#hz'
+    describe '#cc' do
+      let (:filename) { 'spec/test_data/mod_wheel.mid' }
+
+      let (:voice) {
+        proc {
+          MB::Sound::MIDI::GraphVoice.new(manager: manager) { |midi|
+            midi.cc(1)
+          }
+        }
+      }
+
+      it 'responds to control changes' do
+        expect(pool.sample(800).sum).to eq(0)
+        expect(pool.multi_sample(800, 600).sum).to be > 0
+      end
+    end
+
+    describe '#frequency' do
+      let (:filename) { 'spec/test_data/all_notes.mid' }
+
+      let (:voice) {
+        proc {
+          MB::Sound::MIDI::GraphVoice.new(manager: manager) { |midi|
+            midi.frequency
+          }
+        }
+      }
+
+      it 'produces the frequency of notes' do
+        data = pool.multi_sample(800, 600)
+        expect(data.min).to be < 440
+        expect(data.max).to be > 440
+      end
+
+      pending 'responds only to notes targeted at each voice'
+    end
+
+    describe '#hz' do
+      let (:filename) { 'spec/test_data/all_notes.mid' }
+
+      let (:voice) {
+        proc {
+          MB::Sound::MIDI::GraphVoice.new(manager: manager) { |midi|
+            midi.hz
+          }
+        }
+      }
+
+      it 'creates an oscillator' do
+        spectra = Array.new(300) { MB::Sound.real_fft(pool.sample(800)) }
+        indices = spectra.map { |s| s.abs.max_index }
+        expect(indices.min).to be < 10
+        expect(indices.max).to be > 100
+        expect(indices.last).to be > 100
+      end
+
+      pending 'responds only to notes targeted at each voice'
+    end
+
     pending '#number'
     pending '#velocity'
     pending '#bend'
