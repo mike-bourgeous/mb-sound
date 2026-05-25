@@ -1,4 +1,4 @@
-RSpec.describe(MB::Sound::MIDI::GraphVoice) do
+RSpec.describe(MB::Sound::MIDI::GraphVoice, aggregate_failures: true) do
   let (:filename) { 'spec/test_data/midi.mid' }
   let (:clock) { MB::Sound::GraphNode::MidiDsl::DslClock.new }
   let (:midi_file) { MB::Sound::MIDI::MIDIFile.new(filename, clock: clock) }
@@ -90,11 +90,69 @@ RSpec.describe(MB::Sound::MIDI::GraphVoice) do
       pending 'responds only to notes targeted at each voice'
     end
 
-    pending '#number'
-    pending '#velocity'
-    pending '#bend'
-    pending '#env'
+    describe '#number' do
+      let (:filename) { 'spec/test_data/all_notes.mid' }
+
+      let (:voice) {
+        proc {
+          MB::Sound::MIDI::GraphVoice.new(manager: manager) { |midi|
+            midi.number
+          }
+        }
+      }
+
+      it 'returns note number' do
+        data = pool.multi_sample(800, 360)
+        expect(data.min).to eq(0)
+        expect(data.max).to eq(127)
+      end
+
+      pending 'responds only to notes targeted at each voice'
+    end
+
+    describe '#velocity' do
+      let (:filename) { 'spec/test_data/note_velocity.mid' }
+
+      let (:voice) {
+        proc {
+          MB::Sound::MIDI::GraphVoice.new(manager: manager) { |midi|
+            midi.velocity(range: 0..127)
+          }
+        }
+      }
+
+      it 'returns note velocity' do
+        data = pool.multi_sample(800, 360)
+        expect(data.min).to be < 5
+        expect(data.max).to be > 100
+      end
+
+      pending 'responds only to notes targeted at each voice'
+    end
+
     pending '#gate'
     pending '#click'
+
+    describe '#bend' do
+      let (:filename) { 'spec/test_data/pitch_bend.mid' }
+
+      let (:voice) {
+        proc {
+          MB::Sound::MIDI::GraphVoice.new(manager: manager) { |midi|
+            midi.bend(range: -1..1)
+          }
+        }
+      }
+
+      it 'returns pitch bend' do
+        data = pool.multi_sample(800, 360)
+        expect(data.min).to be < -0.9
+        expect(data.max).to be > 0.9
+      end
+
+      pending 'responds only to notes targeted at each voice'
+    end
+
+    pending '#env'
   end
 end
