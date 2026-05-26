@@ -1006,13 +1006,6 @@ module MB
         end
       end
 
-      # Returns an Array with the port name and source name or object ID (if no
-      # name) of all sources for this node, for use in generating descriptions
-      # of the node.
-      def source_names
-        sources.map { |name, src| "#{name}: #{make_source_name(src)}" }
-      end
-
       # Setup/boilerplate buffer management used by #/ and #**.
       def arithmetic_proc(other, name)
         if other.respond_to?(:sample)

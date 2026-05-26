@@ -261,6 +261,7 @@ module MB
         tone = tone.at(1) if index && tone.is_a?(Tone)
         tone = fixup_source(tone)
         index = fixup_source(index)
+
         @frequency = MB::Sound::GraphNode::Mixer.new([@frequency, [tone, index || 1]], sample_rate: @sample_rate)
         self
       end
