@@ -539,6 +539,13 @@ module MB
       def fixup_source(src)
         return nil if src.nil?
 
+        if src.respond_to?(:sources)
+          # O(n^2)ish if building a complex network of modulation?
+          if src == self || src.graph(include_tees: true).include?(self) || self.graph(include_tees: true).include?(src)
+            raise 'Cyclic modulation detected'
+          end
+        end
+
         src = src.or_at(1) if src.is_a?(Tone)
         src = src.or_for(nil) if src.respond_to?(:or_for)
         src = src.at_rate(@sample_rate) if src.respond_to?(:at_rate) && src.sample_rate != @sample_rate
