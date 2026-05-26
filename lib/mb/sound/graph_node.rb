@@ -117,6 +117,7 @@ module MB
       # Creates a mixer that adds this node's #sample output to +other+ (a
       # numeric constant or another GraphNode).
       def +(other)
+        # FIXME: this fails to set up the tee correctly when adding a node on the left; see bin/songs/stereo_drone.rb
         fixup_tones(false, self, other)
         Mixer.new([self, other], sample_rate: self.sample_rate)
       end
