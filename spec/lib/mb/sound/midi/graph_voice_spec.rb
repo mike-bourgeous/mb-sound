@@ -130,8 +130,46 @@ RSpec.describe(MB::Sound::MIDI::GraphVoice, aggregate_failures: true) do
       pending 'responds only to notes targeted at each voice'
     end
 
-    pending '#gate'
-    pending '#click'
+    describe '#gate' do
+      let (:filename) { 'spec/test_data/note_velocity.mid' }
+
+      let (:voice) {
+        proc {
+          MB::Sound::MIDI::GraphVoice.new(manager: manager) { |midi|
+            midi.gate
+          }
+        }
+      }
+
+      it 'returns 1 when a note is held' do
+        data = pool.multi_sample(800, 360)
+        expect(data.min).to be_between(0.0, 0.05)
+        expect(data.max).to be_between(0.95, 1.0)
+      end
+
+      pending 'responds only to notes targeted at each voice'
+    end
+
+    describe '#click' do
+      let (:filename) { 'spec/test_data/all_notes.mid' }
+
+      let (:voice) {
+        proc {
+          MB::Sound::MIDI::GraphVoice.new(manager: manager) { |midi|
+            midi.click
+          }
+        }
+      }
+
+      it 'produces a velocity-scaled impulse when a note starts' do
+        data = pool.multi_sample(800, 30)
+        expect(data.max).to be > 0.45
+        expect(data.min).to eq(0)
+        expect(data.mean).to be_between(0, 0.1)
+      end
+
+      pending 'responds only to notes targeted at each voice'
+    end
 
     describe '#bend' do
       let (:filename) { 'spec/test_data/pitch_bend.mid' }
