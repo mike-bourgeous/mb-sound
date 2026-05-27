@@ -321,8 +321,19 @@ module MB
         # Returns events from the MIDI file whose timestamps are less than or
         # equal to the elapsed time since this method was first called.
         #
-        # Returns an Array containing a single String, or nil if there are no
-        # events left to read.
+        # Returns events in the same form as mb-sound-jackffi, with an Array of
+        # Arrays wrapped in an Array:
+        #
+        #     [ # Array for input ports (files have one port only)
+        #       [ # Array for events
+        #         [timestamp, bytestring],
+        #         ...
+        #       ]
+        #     ]
+        #
+        # Returns nil if there are no events left to read, or an empty inner
+        # Array if +:blocking+ is false and no events occur within the elapsed
+        # time.
         #
         # If :blocking is true, then this method will sleep to keep time with
         # the MIDI file.  This will not work correctly if a non-realtime clock
@@ -360,7 +371,7 @@ module MB
             @index += 1
           end
 
-          current_events
+          [current_events]
         end
 
         private
