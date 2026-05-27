@@ -30,7 +30,7 @@ module MB
 
               # TODO: support multiple events per buffer
               # FIXME: timestamp will be in base sample rate; need to account for oversampling
-              self.time = -timestamp.to_f / @sample_rate
+              self.time = -timestamp
               puts "Set envelope time to #{self.time}" # XXX
             elsif number == @number
               release
