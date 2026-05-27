@@ -18,7 +18,7 @@ module MB
         Numeric.include(NumericConstantMethods)
 
         # The steady-state value this graph node will output.
-        attr_accessor :constant
+        attr_reader :constant
 
         # If nil (the default) or truthy, then changes to the constant value
         # will be interpolated over the duration one output sampling frame,
@@ -48,7 +48,8 @@ module MB
         # Initializes a constant-output signal generator.
         #
         # If +:smoothing+ is true or nil, then when the constant is changed,
-        # the output value will change smoothly over the length of one buffer
+        # the output value will change smoothly over the interval to the next
+        # update (see #timed_change), or until the end of the buffer.
         # (TODO: use a constant-length FIR filter?  consider using or merging
         # with filter/smoothstep.rb?).
         def initialize(constant, smoothing: nil, sample_rate:, unit: nil, range: nil, si: true)
@@ -66,12 +67,33 @@ module MB
           @elapsed_samples = 0.0
           @duration_samples = nil
           @duration_set = false
+
+          @changes = []
+        end
+
+        # Sets the constant value at the start of the next sample buffer.
+        def constant=(value)
+          timed_change(value, 0)
+        end
+
+        # Allows queuing multiple changes at specific sample indices within a
+        # single buffer.  Each call to this method queues a change to the
+        # constant value at the given sample index within the buffer.  The
+        # #sample method will apply these changes to the next buffer.
+        #
+        # Raises an error if +index+ is out of range for a single buffer.
+        def timed_change(value, index)
+          # FIXME: oversampling???
+          @complex = true if value.is_a?(Complex)
+          setup_buffer(length: index + 1, complex: @complex) unless @buf # TODO: better option for initial creation?
+
+          raise RangeError, "Index #{index} out of buffer range #{@buf&.length.inspect} for timed constant" if @buf.nil? || index >= @buf.length
+
+          @changes << [index, value]
         end
 
         # Returns +count+ samples of the constant value.
         def sample(count)
-          @complex ||= @constant.is_a?(Complex)
-
           if @duration_samples
             # Return nil if we have reached the duration set by #for
             return nil if @elapsed_samples >= @duration_samples
@@ -89,11 +111,42 @@ module MB
           setup_buffer(length: count, complex: @complex)
 
           smoothing = @smoothing || @smoothing.nil?
-          if @constant != @old_constant && smoothing
+
+          if @changes.any?
+            # Per-sample updates
             @buf.inplace!
-            @buf = MB::FastSound.smoothstep_buf(@buf)
-            @buf * (@constant - @old_constant)
-            @buf + @old_constant
+
+            @changes.sort_by!(&:first)
+
+            first_sample = @changes[0][0]
+            if first_sample > 0
+              @buf[0...first_sample].fill(@old_constant)
+            end
+
+            # Per-sample updates
+            @changes.each_with_index do |(sample, value), idx|
+              next_sample = @changes[idx + 1]&.first || count
+
+              @constant = value
+
+              # Coalesce multiple updates at the same time
+              next if next_sample == sample
+
+              local_buf = @buf[sample...next_sample]
+
+              if smoothing && @constant != @old_constant
+                local_buf[] = MB::FastSound.smoothstep_buf(local_buf)
+                local_buf.inplace! * (@constant - @old_constant)
+                local_buf.inplace! + @old_constant
+              else
+                local_buf.fill(@constant)
+              end
+
+              @old_constant = value
+            end
+
+            @changes.clear
+
           else
             @buf.fill(@constant)
           end
