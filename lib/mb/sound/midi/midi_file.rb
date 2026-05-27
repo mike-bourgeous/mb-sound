@@ -110,6 +110,8 @@ module MB
 
           @index = 0
           @elapsed = 0
+          @start = nil
+          @last_time = 0
 
           @notes = nil
           @note_stats = nil
@@ -309,7 +311,9 @@ module MB
         # Sets the current time used by #read to +time+ (in seconds).  Negative
         # values delay the start of playback.
         def seek(time)
+          delta = @elapsed - @last_time
           @elasped = time.to_f
+          @last_time = @elapsed - delta
           @start = @clock.clock_now - @elapsed
           @index = find_index(time)
         end
@@ -329,7 +333,7 @@ module MB
 
           @start ||= @clock.clock_now
 
-          current_events = ''
+          current_events = []
 
           if blocking
             # Sleep until the scheduled time of the next event
@@ -339,6 +343,7 @@ module MB
           end
 
           now = @clock.clock_now
+          @last_time = @elapsed
           @elapsed = now - @start
 
           while @index < @events.length
@@ -349,17 +354,13 @@ module MB
             break if t > @elapsed
 
             unless ev.is_a?(::MIDI::MetaEvent)
-              current_events << ev.data_as_bytes.pack('C*')
+              current_events << [t - @last_time, ev.data_as_bytes.pack('C*')]
             end
 
             @index += 1
           end
 
-          if current_events.empty?
-            [nil]
-          else
-            [current_events]
-          end
+          current_events
         end
 
         private

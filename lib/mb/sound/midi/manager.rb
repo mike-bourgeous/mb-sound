@@ -325,9 +325,7 @@ module MB
             while event = @midi_in.read(blocking: blocking)&.[](0)
               time, data = event
 
-              unless @jack
-                raise 'FIXME: midi files with timestamps'
-              end
+              # FIXME: event timestamps from jack are in samples; need to convert to time
 
               events = [@m.parse(data.bytes)].flatten.compact rescue []
               events.map! { |e| [time, e] }

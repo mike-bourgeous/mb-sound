@@ -58,8 +58,11 @@ loop do
     data = midi_in.read(blocking: false)
     return if data.nil?
     break if data[0].nil?
+
+    data.each do |t, e|
     # TODO: Somehow show realtime messages without them overwhelming other messages
-    events = [midi.parse(data[0]&.bytes)].flatten.compact.reject { |e| e.is_a?(MIDIMessage::SystemRealtime) }
+      events.concat([midi.parse(e.bytes)].flatten.compact.reject { |e| e.is_a?(MIDIMessage::SystemRealtime) })
+    end
   end
 
   events.each_with_index do |e, idx|
