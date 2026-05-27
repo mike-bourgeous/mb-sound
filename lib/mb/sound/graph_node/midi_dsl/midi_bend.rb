@@ -15,7 +15,7 @@ module MB
 
             @node_type_name = "Pitch Bend"
 
-            @manager.on_bend(range: range, default: default, &method(:constant=))
+            @manager.on_bend(range: range, default: default, &method(:timed_change))
 
             # TODO: provide a convenient way to output a value in Hz based on a semitone range?
           end

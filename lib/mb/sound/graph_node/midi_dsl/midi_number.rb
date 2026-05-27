@@ -28,27 +28,24 @@ module MB
 
           # Called by the MIDI manager for note on/off events.  Sets the base
           # note number independent of pitch bend.
-          def note_cb(number, _velocity, onoff)
+          def note_cb(number, _velocity, onoff, timestamp)
             return unless onoff
 
             @number = number
-            update_value
+            update_value(timestamp)
           end
 
           # Called by the MIDI manager to set the pitch bend value in
           # semitones.
-          def bend_cb(bend)
+          def bend_cb(bend, timestamp)
             @bend = bend
-            update_value
+            update_value(timestamp)
           end
 
           # Called by #note_cb and #bend_cb to recalculate the output value
           # using both note number and bend amount.
-          def update_value
-            # FIXME: default constant smoothing interpolates over a full block;
-            # should probably update it to use a low-pass filter or linear
-            # follower.
-            self.constant = MB::M.scale(@number + @bend, @from_range, @to_range)
+          def update_value(timestamp)
+            timed_change(MB::M.scale(@number + @bend, @from_range, @to_range), timestamp)
           end
 
           def sources
