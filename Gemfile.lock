@@ -13,9 +13,10 @@ GIT
 
 GIT
   remote: https://github.com/mike-bourgeous/mb-sound-jackffi.git
-  revision: 7a5ffd9ded2629b6ab8f616b6c7051df2a915c97
+  revision: 70165d655c89273c5fee0325844728b4514ab5fb
+  branch: midi-event-timestamps
   specs:
-    mb-sound-jackffi (0.1.0.usegit)
+    mb-sound-jackffi (0.2.0.usegit)
       ffi (~> 1.13.0)
       numo-narray (~> 0.9.1)
 

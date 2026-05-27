@@ -25,6 +25,7 @@ module MB
         #
         # TODO: maybe get rid of support for anything but GraphVoice?
         def initialize(manager, voices)
+          @manager = manager
           @voices = voices
           @available = voices.dup
           @used = []
@@ -56,15 +57,15 @@ module MB
         end
 
         # Called by the MIDI manager when a note on or off event is received.
-        def midi_note(note, velocity, onoff)
+        def midi_note(note, velocity, onoff, timestamp)
           if onoff
             @released.delete(note)
-            trigger(note, velocity)
+            trigger(note, velocity, timestamp)
 
           else
             # TODO: Move sustain handling into Manager?
             if !@sustain
-              release(note)&.release(note, velocity)
+              release(note)&.release(note, velocity, timestamp)
             else
               @released[note] = velocity
             end
@@ -85,7 +86,7 @@ module MB
 
         # Finds and triggers the next available voice, reusing a voice if
         # needed.  Called by #midi_note.
-        def trigger(note, velocity)
+        def trigger(note, velocity, timestamp)
           @last = self.next(note)
 
           # Set inactive voices to the latest note for polyphonic portamento
@@ -95,7 +96,7 @@ module MB
             voice.set_note(note, reset_portamento: true) unless voice.active?
           end
 
-          @last.trigger(note + @bend, velocity)
+          @last.trigger(note + @bend, velocity, timestamp)
         end
 
         # Bends all playing and future notes by the given number of semitones.

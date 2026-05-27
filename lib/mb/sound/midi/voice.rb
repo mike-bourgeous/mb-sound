@@ -137,7 +137,7 @@ module MB
 
         # Restarts the amplitude and filter envelopes, and sets the oscillator's
         # pitch to the given note number.
-        def trigger(note, velocity)
+        def trigger(note, velocity, _timestamp)
           # TODO: maybe don't reset oscillators, or randomize phase, so phase
           # is more interesting, but that would make consistent plotting more
           # challenging

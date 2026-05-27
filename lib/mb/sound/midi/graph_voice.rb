@@ -42,17 +42,17 @@ module MB
 
           # Called by GraphVoice to trigger note events on note-related nodes
           # like MidiTone, MidiNumber, etc.
-          def graph_voice_trigger(number, velocity)
+          def graph_voice_trigger(number, velocity, timestamp)
             @graph_voice_callbacks.each do |cb|
-              cb.call(number, velocity, true)
+              cb.call(number, velocity, true, timestamp)
             end
           end
 
           # Called by GraphVoice to trigger release events on note-related
           # nodes like MidiGate, MidiEnvelope, etc.
-          def graph_voice_release(number, velocity)
+          def graph_voice_release(number, velocity, timestamp)
             @graph_voice_callbacks.each do |cb|
-              cb.call(number, velocity, false)
+              cb.call(number, velocity, false, timestamp)
             end
           end
         end
@@ -173,8 +173,8 @@ module MB
 
         # Tells all envelopes to start their attack phase based on the given
         # velocity, and sets all frequency constants based on the given note.
-        def trigger(note, velocity)
-          puts "Trigger #{note}@#{velocity} (#{MB::Sound::Note.new(note).name})" # XXX
+        def trigger(note, velocity, timestamp)
+          puts "#{__id__}: #{timestamp} Trigger #{note}@#{velocity} (#{MB::Sound::Note.new(note).name})" # XXX
 
           set_note(note, reset_portamento: false)
 
@@ -198,7 +198,7 @@ module MB
             vl[:parameter].raw_value = velocity
           end
 
-          @manager_proxy&.graph_voice_trigger(note, velocity)
+          @manager_proxy&.graph_voice_trigger(note, velocity, timestamp)
         end
 
         # Sets the note number without triggering the envelope generators (e.g.
@@ -326,10 +326,10 @@ module MB
         end
 
         # Tells all envelopes to start their release phase.
-        def release(note, velocity)
+        def release(note, velocity, timestamp)
           @envelopes.each(&:release)
 
-          @manager_proxy&.graph_voice_release(note, velocity)
+          @manager_proxy&.graph_voice_release(note, velocity, timestamp)
         end
 
         # Returns true if any envelopes have not reached the end of their

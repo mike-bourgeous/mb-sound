@@ -61,6 +61,8 @@ module MB
           @m = Nibbler.new
 
           @transpose = ENV['TRANSPOSE']&.to_i || 0
+
+          @last_time = -1
         end
 
         # If the input is a JackFFI MIDI input, returns an Array of Strings
@@ -277,6 +279,8 @@ module MB
 
           # TODO: Allow sampling parameters in chunks at audio rate, e.g. for
           # smoothing oscillator parameters per-sample instead of per-block
+          #
+          # TODO: replace parameter smoothing with the MIDI DSL objects or something
           new_parameter = MB::Sound::MIDI::Parameter.new(
             message: message_template,
             range: range,
@@ -320,8 +324,15 @@ module MB
           unless @midi_in.is_a?(::MB::Sound::MIDI::Manager)
             @m.clear_buffer
 
-            while data = @midi_in.read(blocking: blocking)&.[](0)
+            while event = @midi_in.read(blocking: blocking)&.[](0)
+              time, data = event
+
+              unless @jack
+                raise 'FIXME: midi files with timestamps'
+              end
+
               events = [@m.parse(data.bytes)].flatten.compact rescue []
+              events.map! { |e| [time, e] }
 
               process_event_list(events)
               @nested_managers.each { |m| m.process_event_list(events) }
@@ -334,7 +345,7 @@ module MB
           @parameters.each do |_msg_class, params|
             params.each do |_hash_key, plist|
               plist.each do |p, cb|
-                notify_parameter_cb(p, cb)
+                notify_parameter_cb(p, cb, 0) # FIXME: timestamp
               end
             end
           end
@@ -392,17 +403,19 @@ module MB
         # Called by #update in the root-level Manager for itself and any nested
         # Managers.  See #for_channel.
         def process_event_list(events)
-          events.each do |e|
+          events.each do |t, e|
             next if @channel && e.respond_to?(:channel) && e.channel != @channel
 
-            notify_event_cbs(e)
+            puts "#{__id__} time #{t} event #{e}" # XXX
+
+            notify_event_cbs(e, t)
 
             params = @parameters[e.class]
             if params
               keys = MB::Sound::MIDI::Parameter.generate_message_keys(e, ignore_channel: @channel.nil?)
               keys.each do |k|
                 params[k]&.each do |p, _cb|
-                  p.notify(e)
+                  p.notify(e, t)
                 end
               end
             end
@@ -428,10 +441,16 @@ module MB
 
         private
 
-        def notify_event_cbs(event)
+        def notify_event_cbs(event, timestamp)
           @event_callbacks.each do |cb|
             begin
-              cb.call(event)
+              if cb.arity == 2
+                cb.call(event, timestamp)
+              else
+                puts "Legacy MIDI event callback at #{MB::U.highlight(caller_locations(1, 1))}" # XXX
+                cb.call(event)
+              end
+
             rescue => e
               # TODO: use a logging facility
               STDERR.puts "Error in MIDI event callback #{cb}: #{e}\n\t#{e.backtrace.join("\n\t")}"
@@ -442,23 +461,30 @@ module MB
           when MIDIMessage::NoteOn, MIDIMessage::NoteOff
             @note_callbacks.each do |cb|
               begin
-                cb.call(event.note + @transpose, event.velocity, event.is_a?(MIDIMessage::NoteOn))
+                if cb.arity == 4
+                  cb.call(event.note + @transpose, event.velocity, event.is_a?(MIDIMessage::NoteOn), timestamp)
+                else
+                  warn "Legacy MIDI note callback at #{MB::U.highlight(caller_locations(1, 1))}" # XXX
+                  cb.call(event.note + @transpose, event.velocity, event.is_a?(MIDIMessage::NoteOn))
+                end
+
               rescue => e
                 STDERR.puts "Error in MIDI note callback #{cb}: #{e}\n\t#{e.backtrace.join("\n\t")}"
               end
             end
 
           when MIDIMessage::ControlChange
-            @cc_thresholds[event.index]&.each do |cb|
+            @cc_thresholds[event.index]&.each do |cct|
               begin
-                if !cb[:active] && event.value >= (cb[:rising_threshold] || cb[:falling_threshold])
-                  cb[:active] = true
-                  cb[:callback].call(event.index, event.value, true) if cb[:rising_threshold]
+                if !cct[:active] && event.value >= (cct[:rising_threshold] || cct[:falling_threshold])
+                  cct[:active] = true
+                  cct[:callback].call(event.index, event.value, true, timestamp) if cct[:rising_threshold]
 
-                elsif cb[:active] && event.value < (cb[:falling_threshold] || cb[:rising_threshold])
-                  cb[:active] = false
-                  cb[:callback].call(event.index, event.value, false) if cb[:falling_threshold]
+                elsif cct[:active] && event.value < (cct[:falling_threshold] || cct[:rising_threshold])
+                  cct[:active] = false
+                  cct[:callback].call(event.index, event.value, false, timestamp) if cct[:falling_threshold]
                 end
+
               rescue => e
                 STDERR.puts "Error in MIDI CC threshold callback #{cb}: #{e}\n\t#{e.backtrace.join("\n\t")}"
               end
@@ -466,11 +492,11 @@ module MB
           end
         end
 
-        def notify_parameter_cb(parameter, cb)
+        def notify_parameter_cb(parameter, cb, timestamp)
           value = parameter.value
 
           begin
-            cb.call(value)
+            cb.call(value, timestamp)
           rescue => e
             # TODO: use a logging facility
             STDERR.puts "Error in MIDI parameter callback #{cb} for #{parameter.message}: #{e}\n\t#{e.backtrace.join("\n\t")}"
