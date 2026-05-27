@@ -330,6 +330,9 @@ module MB
 
               puts "#{Time.now.to_f} #{evlist.length} #{evlist}"# XXX
               evlist.each do |time, data|
+                # FIXME: MIDIFile#read should take a time argument instead of
+                # using a clock so we don't have to clamp timestamps in
+                # Constant and MidiClick
                 parsed = [@m.parse(data.bytes)].flatten.compact rescue []
                 parsed.map! { |e| [time, e] }
 

@@ -47,9 +47,11 @@ module MB
             if @click.any?
               @click.each do |t, e|
                 i = (t * @sample_rate).floor
+                i = @buf.length - 1 if i >= @buf.length
                 puts "click #{e} at offset #{i}" # XXX
                 @buf[i] = e
               end
+
               @click.clear
             elsif
               @buf.fill(0)

@@ -85,15 +85,12 @@ module MB
         # Allows queuing multiple changes at specific sample indices within a
         # single buffer.  Each call to this method queues a change to the
         # constant value at the given sample index within the buffer.  The
-        # #sample method will apply these changes to the next buffer.
-        #
-        # Raises an error if +index+ is out of range for a single buffer.
+        # #sample method will apply these changes to the next buffer, with
+        # indices clamped to the end of the buffer.
         def indexed_change(value, index)
           # FIXME: oversampling???
           @complex = true if value.is_a?(Complex)
           setup_buffer(length: index + 1, complex: @complex) unless @buf # TODO: better option for initial creation?
-
-          raise RangeError, "Index #{index} out of buffer range #{@buf&.length.inspect} for timed constant" if @buf.nil? || index >= @buf.length
 
           @changes << [index, value]
         end
@@ -125,6 +122,10 @@ module MB
             @changes.sort_by!(&:first)
 
             first_sample = @changes[0][0]
+
+            # Compensate for buffer size change at end of timed playback
+            first_sample = count - 1 if first_sample >= count
+
             if first_sample > 0
               @buf[0...first_sample].fill(@old_constant)
             end
@@ -132,6 +133,10 @@ module MB
             # Per-sample updates
             @changes.each_with_index do |(sample, value), idx|
               next_sample = @changes[idx + 1]&.first || count
+
+              # Clamp sample index in case buffer size changed (e.g. at end of duration)
+              next_sample = count if next_sample > count
+              sample = count - 1 if sample >= count - 1
 
               @constant = value
 

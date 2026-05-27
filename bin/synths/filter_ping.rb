@@ -31,7 +31,7 @@ pool = MB::Sound::MIDI::VoicePool.new(
   voices
 )
 
-output_chain = pool.softclip(0.8, 0.95)
+output_chain = pool.softclip(0.8, 0.95).oversample(3)
 
 if ENV['DEBUG'] == '1'
   puts 'saving before graph'
