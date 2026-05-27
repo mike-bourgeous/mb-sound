@@ -33,6 +33,14 @@ module MB
             @graph_voice_callbacks = []
           end
 
+          # MIDI DSL nodes normally call the manager update function from their
+          # sample method, which can result in multiple updates per sample
+          # buffer.  To avoid this, we ignore update calls here and instead
+          # call Manager#update in the VoicePool.
+          def update
+            #puts "Ignoring manager update from #{MB::U.highlight(caller_locations(0, 4))}" # XXX
+          end
+
           # Overrides the manager's default #on_note method to notify callbacks
           # only when this specific voice is triggered, rather than when any
           # note is received.
@@ -109,7 +117,7 @@ module MB
           @number = nil
 
           sources = graph.graph
-          puts "Found #{sources.length} total graph nodes" # XXX
+          #puts "Found #{sources.length} total graph nodes" # XXX
 
           @oscillators = sources.select { |s|
             s.is_a?(MB::Sound::Tone) || s.is_a?(MB::Sound::Oscillator)
@@ -121,7 +129,7 @@ module MB
               o
             end
           }
-          puts "Found #{@oscillators.length} oscillators" # XXX
+          #puts "Found #{@oscillators.length} oscillators" # XXX
 
           @amp_envelopes = amp_envelopes || []
           @envelopes = envelopes || sources.select { |s|
@@ -132,12 +140,12 @@ module MB
           @envelopes.map! { |env| find_node(env) }
 
           @envelopes.each(&:reset) # disable auto-release on envelopes
-          puts "Found #{@envelopes.length} envelopes" # XXX
+          #puts "Found #{@envelopes.length} envelopes" # XXX
 
           @array_inputs = sources.select { |s|
             s.is_a?(ArrayInput)
           }
-          puts "Found #{@array_inputs.length} array inputs" # XXX
+          #puts "Found #{@array_inputs.length} array inputs" # XXX
 
           if freq_constants
             @freq_constants = freq_constants
@@ -168,7 +176,7 @@ module MB
             f.smoothing = false if f.respond_to?(:smoothing) && f.smoothing.nil?
           end
 
-          puts "Found #{@freq_constants.length} frequency constants: #{@freq_constants.map(&:__id__)}" # XXX
+          #puts "Found #{@freq_constants.length} frequency constants: #{@freq_constants.map(&:__id__)}" # XXX
         end
 
         # Tells all envelopes to start their attack phase based on the given

@@ -23,10 +23,15 @@ module MB
 
           # Triggers and releases the envelope based on note press/release,
           # only releasing for the note number that triggered the envelope.
-          def note_cb(number, velocity, onoff)
+          def note_cb(number, velocity, onoff, timestamp)
             if onoff
               @number = number
               trigger(velocity / 127.0)
+
+              # TODO: support multiple events per buffer
+              # FIXME: timestamp will be in base sample rate; need to account for oversampling
+              self.time = -timestamp.to_f / @sample_rate
+              puts "Set envelope time to #{self.time}" # XXX
             elsif number == @number
               release
             end

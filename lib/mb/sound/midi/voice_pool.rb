@@ -135,7 +135,13 @@ module MB
         # Samples and sums the current output of all voices/oscillators.
         # Assumes all voices given to the constructor have a #sample method.
         def sample(count)
-          @voices.map { |v| v.sample(count) }.sum
+          sample_individual(count).sum
+        end
+
+        # Samples all voices, returning an Array of the output of each voice.
+        def sample_individual(count)
+          @manager.update
+          @voices.map { |v| v.sample(count) }
         end
 
         # Called internally.  Retrieves the next available (or stolen)

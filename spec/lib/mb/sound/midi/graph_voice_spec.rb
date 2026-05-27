@@ -25,6 +25,32 @@ RSpec.describe(MB::Sound::MIDI::GraphVoice, aggregate_failures: true) do
   end
 
   describe(MB::Sound::MIDI::GraphVoice::DslProxy) do
+    # Tests for per-voice/note-specific events
+    shared_examples_for :a_single_voice do
+      let(:voice_count) { 16 }
+
+      it 'responds only to notes targeted at each voice' do
+        data = Array.new(60) {
+          pool.sample_individual(800)
+        }.transpose.reduce(&:concat)
+
+        expect(data.map(&:to_a).uniq.length).to eq(voice_count)
+      end
+    end
+
+    # Tests for channel-wide events (CC, pitch bend)
+    shared_examples_for :channel_wide_controls do
+      let(:voice_count) { 16 }
+
+      it 'responds regardless of voice allocation' do
+        data = Array.new(60) {
+          pool.sample_individual(800)
+        }.transpose.reduce(&:concat)
+
+        expect(data.map(&:to_a).uniq.length).to eq(1)
+      end
+    end
+
     describe '#channel' do
       it 'raises an error' do
         expect { MB::Sound::MIDI::GraphVoice.new(manager: manager) { |m| m.channel(3) } }.to raise_error(/channel filter/)
@@ -46,6 +72,28 @@ RSpec.describe(MB::Sound::MIDI::GraphVoice, aggregate_failures: true) do
         expect(pool.sample(800).sum).to eq(0)
         expect(pool.multi_sample(800, 600).sum).to be > 0
       end
+
+      it_behaves_like :channel_wide_controls
+    end
+
+    describe '#bend' do
+      let (:filename) { 'spec/test_data/pitch_bend.mid' }
+
+      let (:voice) {
+        proc {
+          MB::Sound::MIDI::GraphVoice.new(manager: manager) { |midi|
+            midi.bend(range: -1..1)
+          }
+        }
+      }
+
+      it 'returns pitch bend' do
+        data = pool.multi_sample(800, 360)
+        expect(data.min).to be < -0.9
+        expect(data.max).to be > 0.9
+      end
+
+      it_behaves_like :channel_wide_controls
     end
 
     describe '#frequency' do
@@ -65,7 +113,7 @@ RSpec.describe(MB::Sound::MIDI::GraphVoice, aggregate_failures: true) do
         expect(data.max).to be > 440
       end
 
-      pending 'responds only to notes targeted at each voice'
+      it_behaves_like :a_single_voice
     end
 
     describe '#hz' do
@@ -87,7 +135,7 @@ RSpec.describe(MB::Sound::MIDI::GraphVoice, aggregate_failures: true) do
         expect(indices.last).to be > 100
       end
 
-      pending 'responds only to notes targeted at each voice'
+      it_behaves_like :a_single_voice
     end
 
     describe '#number' do
@@ -107,7 +155,7 @@ RSpec.describe(MB::Sound::MIDI::GraphVoice, aggregate_failures: true) do
         expect(data.max).to eq(127)
       end
 
-      pending 'responds only to notes targeted at each voice'
+      it_behaves_like :a_single_voice
     end
 
     describe '#velocity' do
@@ -127,7 +175,7 @@ RSpec.describe(MB::Sound::MIDI::GraphVoice, aggregate_failures: true) do
         expect(data.max).to be > 100
       end
 
-      pending 'responds only to notes targeted at each voice'
+      it_behaves_like :a_single_voice
     end
 
     describe '#gate' do
@@ -147,7 +195,7 @@ RSpec.describe(MB::Sound::MIDI::GraphVoice, aggregate_failures: true) do
         expect(data.max).to be_between(0.95, 1.0)
       end
 
-      pending 'responds only to notes targeted at each voice'
+      it_behaves_like :a_single_voice
     end
 
     describe '#click' do
@@ -168,27 +216,7 @@ RSpec.describe(MB::Sound::MIDI::GraphVoice, aggregate_failures: true) do
         expect(data.mean).to be_between(0, 0.1)
       end
 
-      pending 'responds only to notes targeted at each voice'
-    end
-
-    describe '#bend' do
-      let (:filename) { 'spec/test_data/pitch_bend.mid' }
-
-      let (:voice) {
-        proc {
-          MB::Sound::MIDI::GraphVoice.new(manager: manager) { |midi|
-            midi.bend(range: -1..1)
-          }
-        }
-      }
-
-      it 'returns pitch bend' do
-        data = pool.multi_sample(800, 360)
-        expect(data.min).to be < -0.9
-        expect(data.max).to be > 0.9
-      end
-
-      pending 'responds only to notes targeted at each voice'
+      it_behaves_like :a_single_voice
     end
 
     describe '#env' do
@@ -208,7 +236,7 @@ RSpec.describe(MB::Sound::MIDI::GraphVoice, aggregate_failures: true) do
         expect(data.min).to be < 0.1
       end
 
-      pending 'responds only to notes targeted at each voice'
+      it_behaves_like :a_single_voice
     end
   end
 end

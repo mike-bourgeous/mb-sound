@@ -13,7 +13,7 @@ module MB
             @number = Integer(number)
             @node_type_name = "MIDI CC #{@number}"
 
-            @manager.on_cc(number, range: range, default: range.begin, &method(:constant=))
+            @manager.on_cc(number, range: range, default: range.begin, &method(:timed_change))
           end
 
           def sources

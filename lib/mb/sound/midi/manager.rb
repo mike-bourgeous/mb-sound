@@ -61,8 +61,6 @@ module MB
           @m = Nibbler.new
 
           @transpose = ENV['TRANSPOSE']&.to_i || 0
-
-          @last_time = -1
         end
 
         # If the input is a JackFFI MIDI input, returns an Array of Strings
@@ -406,7 +404,7 @@ module MB
           events.each do |t, e|
             next if @channel && e.respond_to?(:channel) && e.channel != @channel
 
-            puts "#{__id__} time #{t} event #{e}" # XXX
+            puts "#{__id__} time #{t} event #{e}"
 
             notify_event_cbs(e, t)
 
@@ -447,7 +445,7 @@ module MB
               if cb.arity == 2
                 cb.call(event, timestamp)
               else
-                puts "Legacy MIDI event callback at #{MB::U.highlight(caller_locations(1, 1))}" # XXX
+                warn "Legacy MIDI event callback at #{MB::U.highlight(caller_locations(1, 1))}" # XXX
                 cb.call(event)
               end
 

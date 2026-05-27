@@ -173,6 +173,9 @@ module MB
       # smoothing filter, so the transition of the output will not be
       # instantaneous.
       #
+      # Setting a negative time delays the start of the envelope, e.g. if a
+      # note-on event occurs later within a sample buffer.
+      #
       # See #reset if you want to clear the smoothing filter state and jump to
       # time zero.
       def time=(t)

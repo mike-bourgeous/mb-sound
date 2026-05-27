@@ -53,6 +53,8 @@ module MB
               end
             end
 
+            puts "#{__id__} Time is #{@now}"
+
             @now
           end
         end
