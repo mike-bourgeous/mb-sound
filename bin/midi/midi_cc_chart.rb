@@ -50,7 +50,7 @@ loop do
     return if data.nil?
     # TODO: Somehow show realtime messages without clearing the other received messages
 
-    data.each do |t, e|
+    data[0].each do |t, e|
       events.concat([midi.parse(e.bytes)].flatten.compact.reject { |e| e.is_a?(MIDIMessage::SystemRealtime) })
     end
   end

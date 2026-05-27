@@ -36,13 +36,13 @@ RSpec.describe(MB::Sound::GraphNode::Constant) do
         expect((result[239] + result[240]).round(2)).to eq(0)
       end
 
-      describe '#timed_change' do
+      describe '#indexed_change' do
         it 'interpolates values starting at the specified time' do
           c = 0.constant(smoothing: v)
           c.sample(800) # set buffer size
 
-          c.timed_change(20.5, 150)
-          c.timed_change(-20.5, 275)
+          c.indexed_change(20.5, 150)
+          c.indexed_change(-20.5, 275)
 
           data = c.sample(800)
           expect(data[0...150].minmax).to eq([0, 0])
@@ -56,9 +56,9 @@ RSpec.describe(MB::Sound::GraphNode::Constant) do
           c = 0.constant(smoothing: v)
           c.sample(800) # set buffer size
 
-          c.timed_change(20, 50)
-          c.timed_change(25, 50)
-          c.timed_change(30, 250)
+          c.indexed_change(20, 50)
+          c.indexed_change(25, 50)
+          c.indexed_change(30, 250)
 
           data = c.sample(800)
           expect(data[0...50].minmax).to eq([0, 0])
@@ -72,7 +72,7 @@ RSpec.describe(MB::Sound::GraphNode::Constant) do
           c = 0.constant(smoothing: v)
           c.sample(800) # set buffer size
 
-          c.timed_change(30, 250)
+          c.indexed_change(30, 250)
 
           data = c.sample(800)
           expect(data[0...50].minmax).to eq([0, 0])
@@ -85,10 +85,10 @@ RSpec.describe(MB::Sound::GraphNode::Constant) do
           c = 0.constant(smoothing: v)
           c.sample(800) # set buffer size
 
-          c.timed_change(-20.5, 275)
-          c.timed_change(20.5, 150)
-          c.timed_change(10, 360)
-          c.timed_change(5, 10)
+          c.indexed_change(-20.5, 275)
+          c.indexed_change(20.5, 150)
+          c.indexed_change(10, 360)
+          c.indexed_change(5, 10)
 
           data = c.sample(800)
           expect(data[0...10].minmax).to eq([0, 0])
@@ -113,13 +113,13 @@ RSpec.describe(MB::Sound::GraphNode::Constant) do
       expect(c.sample(480)).to eq(Numo::SComplex.zeros(480).fill(1+1i))
     end
 
-    describe '#timed_change' do
+    describe '#indexed_change' do
       it 'jumps instantly at each specified change' do
         c = 30.constant(smoothing: false)
         c.sample(800) # set buffer size
 
-        c.timed_change(10, 50)
-        c.timed_change(-5, 105)
+        c.indexed_change(10, 50)
+        c.indexed_change(-5, 105)
 
         data = c.sample(800)
         expect(data[0...50].mean).to eq(30)
@@ -131,7 +131,7 @@ RSpec.describe(MB::Sound::GraphNode::Constant) do
         c = 30.constant(smoothing: false)
         c.sample(200) # set buffer size
 
-        c.timed_change(-5, 105)
+        c.indexed_change(-5, 105)
 
         data = c.sample(200)
         expect(data[0...105].mean).to eq(30)
@@ -141,11 +141,26 @@ RSpec.describe(MB::Sound::GraphNode::Constant) do
       it 'works with no changes' do
         c = 30.constant(smoothing: false)
         c.sample(200) # set buffer size
-        c.timed_change(-5, 105)
+        c.indexed_change(-5, 105)
         c.sample(200)
 
         expect(c.sample(200).minmax).to eq([-5, -5])
       end
+    end
+  end
+
+  describe '#timed_change' do
+    it 'calls #indexed_change with sample count derived from sample rate' do
+      c = 10.constant(sample_rate: 12345)
+      c.sample(800)
+
+      expect(c).to receive(:indexed_change).with(42, 256).and_call_original
+      c.timed_change(42.0, 256.1 / 12345.0)
+
+      data = c.sample(800)
+      expect(data[255]).to eq(10)
+      expect(data[257]).to be_within(0.1).of(10)
+      expect(data[799]).to be_within(0.01).of(42)
     end
   end
 

@@ -13,7 +13,7 @@ GIT
 
 GIT
   remote: https://github.com/mike-bourgeous/mb-sound-jackffi.git
-  revision: 70165d655c89273c5fee0325844728b4514ab5fb
+  revision: cdc793a29aaeab7568b4c312c67a2488b6c42ec0
   branch: midi-event-timestamps
   specs:
     mb-sound-jackffi (0.2.0.usegit)

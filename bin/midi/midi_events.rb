@@ -59,7 +59,7 @@ loop do
     return if data.nil?
     break if data[0].nil?
 
-    data.each do |t, e|
+    data[0].each do |t, e|
     # TODO: Somehow show realtime messages without them overwhelming other messages
       events.concat([midi.parse(e.bytes)].flatten.compact.reject { |e| e.is_a?(MIDIMessage::SystemRealtime) })
     end

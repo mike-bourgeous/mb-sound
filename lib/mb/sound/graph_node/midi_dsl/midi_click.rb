@@ -46,8 +46,9 @@ module MB
 
             if @click.any?
               @click.each do |t, e|
-                puts "click #{e} at offset #{t}" # XXX
-                @buf[t] = e
+                i = (t * @sample_rate).floor
+                puts "click #{e} at offset #{i}" # XXX
+                @buf[i] = e
               end
               @click.clear
             elsif

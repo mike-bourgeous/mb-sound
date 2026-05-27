@@ -322,13 +322,19 @@ module MB
           unless @midi_in.is_a?(::MB::Sound::MIDI::Manager)
             @m.clear_buffer
 
-            while event = @midi_in.read(blocking: blocking)&.[](0)
-              time, data = event
+            loop do
+              evlist = @midi_in.read(blocking: blocking)&.[](0)
+              break if evlist.nil? || evlist.empty?
 
-              # FIXME: event timestamps from jack are in samples; need to convert to time
+              events = []
 
-              events = [@m.parse(data.bytes)].flatten.compact rescue []
-              events.map! { |e| [time, e] }
+              puts "#{Time.now.to_f} #{evlist.length} #{evlist}"# XXX
+              evlist.each do |time, data|
+                parsed = [@m.parse(data.bytes)].flatten.compact rescue []
+                parsed.map! { |e| [time, e] }
+
+                events.concat(parsed)
+              end
 
               process_event_list(events)
               @nested_managers.each { |m| m.process_event_list(events) }

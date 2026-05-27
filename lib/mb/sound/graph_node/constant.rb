@@ -76,13 +76,19 @@ module MB
           timed_change(value, 0)
         end
 
+        # Allows queuing changes at specific time offsets within a buffer,
+        # regardless of sample rate.  See #indexed_change.
+        def timed_change(value, timestamp)
+          indexed_change(value, (timestamp * @sample_rate).floor)
+        end
+
         # Allows queuing multiple changes at specific sample indices within a
         # single buffer.  Each call to this method queues a change to the
         # constant value at the given sample index within the buffer.  The
         # #sample method will apply these changes to the next buffer.
         #
         # Raises an error if +index+ is out of range for a single buffer.
-        def timed_change(value, index)
+        def indexed_change(value, index)
           # FIXME: oversampling???
           @complex = true if value.is_a?(Complex)
           setup_buffer(length: index + 1, complex: @complex) unless @buf # TODO: better option for initial creation?
