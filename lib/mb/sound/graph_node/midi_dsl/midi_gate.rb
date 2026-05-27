@@ -59,7 +59,7 @@ module MB
               # TODO: take sample count and sample rate into account for consistent decay
               # TODO: could add half-pedal functionality to envelopes by scaling time rate by (1 - sustain).
               # TODO: better sub-frame accuracy
-              @val *= @sustain ** (count / @sample_rate)
+              @val *= @sustain ** (@buf.length.to_f / @sample_rate)
             else
               @val = 0
             end
