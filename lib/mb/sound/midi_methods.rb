@@ -59,8 +59,8 @@ module MB
 
         manager = MB::Sound::MIDI::Manager.new(jack: jack, input: midi_in, update_rate: update_rate)
 
-        voices = Array.new(osc_count) {
-          MB::Sound::MIDI::GraphVoice.new(manager: manager) do |midi|
+        voices = Array.new(osc_count) { |idx|
+          MB::Sound::MIDI::GraphVoice.new(manager: manager, label: idx) do |midi|
             yield midi
           end
         }

@@ -92,9 +92,12 @@ module MB
         # doesn't work, then the +:amp_envelopes+, +:envelopes+, and
         # +:freq_constants+ parameters may be used to override detection.
         #
+        # The +:label+ option allows prefixing all named nodes in the node
+        # graph with a given label, e.g. to show the voice index.
+        #
         # TODO: can we calculate the update rate from graph sample rate and
         # buffer size, or on first call to sample?
-        def initialize(graph = nil, update_rate: 60, amp_envelopes: nil, envelopes: nil, freq_constants: nil, manager:)
+        def initialize(graph = nil, update_rate: 60, amp_envelopes: nil, envelopes: nil, freq_constants: nil, label: nil, manager:)
           if block_given?
             raise 'Both block and graph parameter were given; only pass one or the other' if graph
             raise 'Do not supply a list of envelopes when giving a block' if amp_envelopes || envelopes
@@ -106,6 +109,15 @@ module MB
 
           else
             raise 'No graph was given' unless graph
+          end
+
+          if label
+            graph.graph.each do |n|
+              next unless n.respond_to?(:named)
+              name = n.graph_node_name
+              name ||= n.node_type_name if n.respond_to?(:node_type_name)
+              n.named("#{label} #{name}".strip)
+            end
           end
 
           @graph = graph
