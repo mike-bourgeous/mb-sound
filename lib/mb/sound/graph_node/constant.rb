@@ -82,7 +82,6 @@ module MB
 
         # Sets the constant value at the start of the next sample buffer.
         def constant=(value)
-          puts "#{__id__}/#{self} got value #{value} the old way" unless self.to_s.downcase.match?(/ratio|into/) # XXX
           timed_change(value, 0)
         end
 
@@ -98,17 +97,12 @@ module MB
         # #sample method will apply these changes to the next buffer, with
         # indices clamped to the end of the buffer.
         def indexed_change(value, index)
-          # FIXME: oversampling???
           @complex = true if value.is_a?(Complex)
-          setup_buffer(length: index + 1, complex: @complex) unless @buf # TODO: better option for initial creation?
-
           @changes << [index, value]
         end
 
         # Returns +count+ samples of the constant value.
         def sample(count)
-          puts "#{__id__}/#{self} sampling #{count}" unless self.to_s.downcase.match?(/ratio|into/) # XXX
-
           if @duration_samples
             # Return nil if we have reached the duration set by #for
             return nil if @elapsed_samples >= @duration_samples
@@ -135,8 +129,6 @@ module MB
 
             first_sample = @changes[0][0]
 
-            puts "#{__id__}/#{self} Change queue: #{MB::U.highlight(@changes)}" unless self.to_s.downcase.match?(/ratio|into/) # XXX
-
             # Compensate for buffer size change at end of timed playback
             first_sample = count - 1 if first_sample >= count
 
@@ -156,8 +148,6 @@ module MB
 
               # Coalesce multiple updates at the same time
               next if next_sample == sample
-
-              puts "#{__id__}/#{self}   update: #{sample}...#{next_sample} ~= #{@constant}" unless self.to_s.downcase.match?(/ratio|into/) # XXX
 
               local_buf = @buf[sample...next_sample]
 
