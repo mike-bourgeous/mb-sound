@@ -129,7 +129,8 @@ module MB
 
             first_sample = @changes[0][0]
 
-            # Compensate for buffer size change at end of timed playback
+            # Compensate for buffer size change at end of timed playback and MIDI clock jitter
+            first_sample = 0 if first_sample < 0
             first_sample = count - 1 if first_sample >= count
 
             if first_sample > 0
@@ -141,7 +142,9 @@ module MB
               next_sample = @changes[idx + 1]&.first || count
 
               # Clamp sample index in case buffer size changed (e.g. at end of duration)
+              next_sample = 0 if next_sample < 0
               next_sample = count if next_sample > count
+              sample = 0 if sample < 0
               sample = count - 1 if sample >= count - 1
 
               @constant = value
