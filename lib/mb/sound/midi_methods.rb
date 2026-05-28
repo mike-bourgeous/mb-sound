@@ -67,7 +67,7 @@ module MB
 
         # TODO: Create a stereo pool or multi-channel pool or something?
         pool = MB::Sound::MIDI::VoicePool.new(manager, voices)
-        clock.node = pool
+        clock&.node = pool
 
         # TODO: Write the parameter map to a file if requested.
         puts MB::U.syntax(manager.to_acid_xml, :xml)
