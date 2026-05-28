@@ -38,7 +38,6 @@ module MB
           # buffer.  To avoid this, we ignore update calls here and instead
           # call Manager#update in the VoicePool.
           def update
-            #puts "Ignoring manager update from #{MB::U.highlight(caller_locations(0, 4))}" # XXX
           end
 
           # Overrides the manager's default #on_note method to notify callbacks
@@ -117,7 +116,6 @@ module MB
           @number = nil
 
           sources = graph.graph
-          puts "Found #{sources.length} total graph nodes" # XXX
 
           @oscillators = sources.select { |s|
             s.is_a?(MB::Sound::Tone) || s.is_a?(MB::Sound::Oscillator)
@@ -129,7 +127,6 @@ module MB
               o
             end
           }
-          puts "Found #{@oscillators.length} oscillators" # XXX
 
           @amp_envelopes = amp_envelopes || []
           @envelopes = envelopes || sources.select { |s|
@@ -140,12 +137,10 @@ module MB
           @envelopes.map! { |env| find_node(env) }
 
           @envelopes.each(&:reset) # disable auto-release on envelopes
-          puts "Found #{@envelopes.length} envelopes" # XXX
 
           @array_inputs = sources.select { |s|
             s.is_a?(ArrayInput)
           }
-          puts "Found #{@array_inputs.length} array inputs" # XXX
 
           if freq_constants
             @freq_constants = freq_constants
@@ -175,15 +170,11 @@ module MB
           @freq_constants.each do |f|
             f.smoothing = false if f.respond_to?(:smoothing) && f.smoothing.nil?
           end
-
-          puts "Found #{@freq_constants.length} frequency constants: #{@freq_constants.map(&:__id__)}" # XXX
         end
 
         # Tells all envelopes to start their attack phase based on the given
         # velocity, and sets all frequency constants based on the given note.
         def trigger(note, velocity, timestamp)
-          puts "#{__id__}: #{timestamp} Trigger #{note}@#{velocity} (#{MB::Sound::Note.new(note).name})" # XXX
-
           set_note(note, reset_portamento: false)
 
           @oscillators.each do |o|
@@ -222,7 +213,6 @@ module MB
 
           freq = MB::Sound::Oscillator.calc_freq(note)
           @freq_constants.each do |fc|
-            puts "Setting #{fc.__id__} freq #{freq}" # XXX
             # TODO: Have a way of setting the note number instead, to allow
             # for logarithmic portamento by filtering through a follower
             fc.constant = freq

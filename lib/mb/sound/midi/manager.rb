@@ -328,7 +328,6 @@ module MB
 
               events = []
 
-              puts "#{Time.now.to_f} #{evlist.length} #{evlist}"# XXX
               evlist.each do |time, data|
                 # FIXME: MIDIFile#read should take a time argument instead of
                 # using a clock so we don't have to clamp timestamps in
@@ -411,8 +410,6 @@ module MB
           events.each do |t, e|
             next if @channel && e.respond_to?(:channel) && e.channel != @channel
 
-            puts "#{__id__} time #{t} event #{e}"
-
             notify_event_cbs(e, t)
 
             params = @parameters[e.class]
@@ -420,6 +417,7 @@ module MB
               keys = MB::Sound::MIDI::Parameter.generate_message_keys(e, ignore_channel: @channel.nil?)
               keys.each do |k|
                 params[k]&.each do |p, _cb|
+                  # TODO: sub-frame handling of parameter changes
                   p.notify(e, t)
                 end
               end
