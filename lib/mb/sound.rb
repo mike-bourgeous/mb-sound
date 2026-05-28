@@ -22,6 +22,7 @@ require_relative 'sound/window_methods'
 require_relative 'sound/analysis_methods'
 require_relative 'sound/generation_methods'
 require_relative 'sound/midi_methods'
+require_relative 'sound/scripting_methods'
 
 module MB
   # Convenience functions for making quick work of sound.
@@ -39,6 +40,7 @@ module MB
     extend AnalysisMethods
     extend GenerationMethods
     extend MidiMethods
+    extend ScriptingMethods
 
     # Speed of sound for wavelength calculations, in meters per second.
     SPEED_OF_SOUND = 343.0
