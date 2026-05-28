@@ -12,7 +12,6 @@ module MB
       #     }
       #     play graph
       def midi_file(filename, speed: 1.0, clock: nil)
-        # TODO: end graph execution when the MIDI file has completely finished
         clock ||= MB::Sound::GraphNode::MidiDsl::DslClock.new
         mfile = MB::Sound::MIDI::MIDIFile.new(filename, speed: speed, clock: clock)
         mgr = MB::Sound::MIDI::Manager.new(input: mfile, jack: nil)
@@ -47,8 +46,6 @@ module MB
         # TODO: further automate connecting to an output, parsing command-line
         # options, repeating MIDI files, etc.
 
-        # TODO: automate end-of-file behavior (stopping, looping)
-
         if input_name && input_name.downcase.end_with?('.mid') && File.readable?(input_name)
           midi_in = MB::Sound::MIDI::MIDIFile.new(input_name)
         end
@@ -70,7 +67,9 @@ module MB
         # TODO: Create a stereo pool or multi-channel pool or something?
         pool = MB::Sound::MIDI::VoicePool.new(manager, voices)
 
+        # TODO: Write the parameter map to a file if requested.
         puts MB::U.syntax(manager.to_acid_xml, :xml)
+        puts "\n" * MB::U.height
 
         pool
       end

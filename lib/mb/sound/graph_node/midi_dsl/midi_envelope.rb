@@ -5,6 +5,8 @@ module MB
         # A MIDI-controlled envelope triggered by note on/off events and
         # sustain pedal (TODO).
         class MidiEnvelope < MB::Sound::ADSREnvelope
+          prepend MidiEof
+
           def initialize(dsl:, attack:, decay:, sustain:, release:, sample_rate:, range:)
             super(attack_time: attack, decay_time: decay, sustain_level: sustain, release_time: release, sample_rate: sample_rate, filter_freq: 200)
 
@@ -38,15 +40,6 @@ module MB
           end
 
           def sample(count)
-            # TODO: return one extra block after the MIDI source is done?
-            return nil if @dsl&.done?
-
-            @dsl&.invalidate_cache(self) unless @cache_invalidated
-            @cache_invalidated = true
-
-            # FIXME: this will totally screw up parameter smoothing because it gets called N times per frame for N MIDI nodes
-            @dsl&.manager&.update
-
             MB::M.scale(super, 0..1, @range)
           end
 

@@ -135,13 +135,15 @@ module MB
         # Samples and sums the current output of all voices/oscillators.
         # Assumes all voices given to the constructor have a #sample method.
         def sample(count)
-          sample_individual(count).sum
+          sample_individual(count)&.sum
         end
 
         # Samples all voices, returning an Array of the output of each voice.
         def sample_individual(count)
           @manager.update
-          @voices.map { |v| v.sample(count) }
+          data = @voices.map { |v| v.sample(count) }
+          return nil if (@manager.midi_in.respond_to?(:done?) && @manager.midi_in.done?) || @voices.any?(&:nil?)
+          data
         end
 
         # Like GraphNode#multi_sample, but returns a separate buffer for each

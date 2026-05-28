@@ -1,3 +1,4 @@
+require_relative 'midi_dsl/midi_eof'
 require_relative 'midi_dsl/midi_value'
 require_relative 'midi_dsl/midi_cc'
 require_relative 'midi_dsl/midi_frequency'
