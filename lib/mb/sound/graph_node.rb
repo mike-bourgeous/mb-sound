@@ -1100,3 +1100,5 @@ require_relative 'graph_node/data_shuffler'
 require_relative 'graph_node/wavetable'
 require_relative 'graph_node/matrix_mixer'
 require_relative 'graph_node/reverb'
+
+require_relative 'graph_node/graph_clock'

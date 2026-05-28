@@ -47,7 +47,8 @@ module MB
         # options, repeating MIDI files, etc.
 
         if input_name && input_name.downcase.end_with?('.mid') && File.readable?(input_name)
-          midi_in = MB::Sound::MIDI::MIDIFile.new(input_name)
+          clock = MB::Sound::GraphNode::GraphClock.new
+          midi_in = MB::Sound::MIDI::MIDIFile.new(input_name, clock: clock)
         end
 
         unless midi_in
@@ -66,6 +67,7 @@ module MB
 
         # TODO: Create a stereo pool or multi-channel pool or something?
         pool = MB::Sound::MIDI::VoicePool.new(manager, voices)
+        clock.node = pool
 
         # TODO: Write the parameter map to a file if requested.
         puts MB::U.syntax(manager.to_acid_xml, :xml)
