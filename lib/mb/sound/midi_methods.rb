@@ -35,6 +35,45 @@ module MB
         @midi_manager ||= MB::Sound::MIDI::Manager.new
         @midi_dsl ||= MB::Sound::GraphNode::MidiDsl.new(manager: @midi_manager)
       end
+
+      # Creates a voice pool with voices defined using the GraphNode::MidiDsl
+      # API yielded to the block given.
+      #
+      # TODO: it could make sense to have a synth or pool method on the MIDI
+      # DSL as well
+      def synth(input_name = nil, osc_count: ENV['OSC_COUNT']&.to_i || 4, channel: ENV['CHANNEL']&.to_i&.-(1))
+        raise 'Pass a block to define individual voices' unless block_given?
+
+        # TODO: further automate connecting to an output, parsing command-line
+        # options, repeating MIDI files, etc.
+
+        # TODO: automate end-of-file behavior (stopping, looping)
+
+        if input_name && input_name.downcase.end_with?('.mid') && File.readable?(input_name)
+          midi_in = MB::Sound::MIDI::MIDIFile.new(input_name)
+        end
+
+        unless midi_in
+          jack = MB::Sound::JackFFI[]
+          midi_in = jack.input(port_type: :midi, port_names: ['synth_midi'], connect: input_name)
+          update_rate = jack.buffer_size.to_f / jack.sample_rate
+        end
+
+        manager = MB::Sound::MIDI::Manager.new(jack: jack, input: midi_in, update_rate: update_rate)
+
+        voices = Array.new(osc_count) {
+          MB::Sound::MIDI::GraphVoice.new(manager: manager) do |midi|
+            yield midi
+          end
+        }
+
+        # TODO: Create a stereo pool or multi-channel pool or something?
+        pool = MB::Sound::MIDI::VoicePool.new(manager, voices)
+
+        puts MB::U.syntax(manager.to_acid_xml, :xml)
+
+        pool
+      end
     end
   end
 end
