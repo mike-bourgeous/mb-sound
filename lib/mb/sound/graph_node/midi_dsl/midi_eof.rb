@@ -14,13 +14,13 @@ module MB
           def sample(count)
             # TODO: Allow for ringdown time of filters/envelopes/etc.
             # TODO: support looping MIDI files
-            return nil if @dsl.nil? || @dsl.done?
+            return nil if @dsl&.done?
 
-            @dsl.invalidate_cache(self) unless @cache_invalidated
+            @dsl&.invalidate_cache(self) unless @cache_invalidated
             @cache_invalidated = true
 
             # FIXME: this will totally screw up parameter smoothing because it gets called N times per frame for N MIDI nodes
-            @dsl.manager.update
+            @dsl&.manager&.update
 
             super
           end
