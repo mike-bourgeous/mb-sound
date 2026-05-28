@@ -58,7 +58,7 @@ module MB
               # TODO: use release velocity as well?
               # TODO: take sample count and sample rate into account for consistent decay
               # TODO: could add half-pedal functionality to envelopes by scaling time rate by (1 - sustain).
-              # TODO: better sub-frame accuracy
+              # TODO: better sub-frame accuracy (need per-sample value for sustain pedal)
               @val *= @sustain ** (@buf.length.to_f / @sample_rate)
             else
               @val = 0

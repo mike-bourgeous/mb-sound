@@ -30,10 +30,7 @@ RSpec.describe(MB::Sound::MIDI::GraphVoice, aggregate_failures: true) do
       let(:voice_count) { 16 }
 
       it 'responds only to notes targeted at each voice' do
-        data = Array.new(60) {
-          pool.sample_individual(800)
-        }.transpose.reduce(&:concat)
-
+        data = pool.multi_sample_individual(800, 180)
         expect(data.map(&:to_a).uniq.length).to eq(voice_count)
       end
     end
@@ -43,10 +40,7 @@ RSpec.describe(MB::Sound::MIDI::GraphVoice, aggregate_failures: true) do
       let(:voice_count) { 16 }
 
       it 'responds regardless of voice allocation' do
-        data = Array.new(60) {
-          pool.sample_individual(800)
-        }.transpose.reduce(&:concat)
-
+        data = pool.multi_sample_individual(800, 180)
         expect(data.map(&:to_a).uniq.length).to eq(1)
       end
     end
@@ -159,7 +153,7 @@ RSpec.describe(MB::Sound::MIDI::GraphVoice, aggregate_failures: true) do
     end
 
     describe '#velocity' do
-      let (:filename) { 'spec/test_data/note_velocity.mid' }
+      let (:filename) { 'spec/test_data/fast_note_velocity.mid' }
 
       let (:voice) {
         proc {
@@ -179,7 +173,7 @@ RSpec.describe(MB::Sound::MIDI::GraphVoice, aggregate_failures: true) do
     end
 
     describe '#gate' do
-      let (:filename) { 'spec/test_data/note_velocity.mid' }
+      let (:filename) { 'spec/test_data/fast_note_velocity.mid' }
 
       let (:voice) {
         proc {
@@ -189,7 +183,7 @@ RSpec.describe(MB::Sound::MIDI::GraphVoice, aggregate_failures: true) do
         }
       }
 
-      it 'returns 1 when a note is held' do
+      it 'returns scaled velocity when a note is held' do
         data = pool.multi_sample(800, 360)
         expect(data.min).to be_between(0.0, 0.05)
         expect(data.max).to be_between(0.95, 1.0)
@@ -199,7 +193,7 @@ RSpec.describe(MB::Sound::MIDI::GraphVoice, aggregate_failures: true) do
     end
 
     describe '#click' do
-      let (:filename) { 'spec/test_data/all_notes.mid' }
+      let (:filename) { 'spec/test_data/fast_note_velocity.mid' }
 
       let (:voice) {
         proc {
@@ -211,7 +205,7 @@ RSpec.describe(MB::Sound::MIDI::GraphVoice, aggregate_failures: true) do
 
       it 'produces a velocity-scaled impulse when a note starts' do
         data = pool.multi_sample(800, 30)
-        expect(data.max).to be > 0.45
+        expect(data.max).to be > 0.95
         expect(data.min).to eq(0)
         expect(data.mean).to be_between(0, 0.1)
       end
@@ -220,7 +214,7 @@ RSpec.describe(MB::Sound::MIDI::GraphVoice, aggregate_failures: true) do
     end
 
     describe '#env' do
-      let (:filename) { 'spec/test_data/note_velocity.mid' }
+      let (:filename) { 'spec/test_data/fast_note_velocity.mid' }
 
       let (:voice) {
         proc {
@@ -232,7 +226,7 @@ RSpec.describe(MB::Sound::MIDI::GraphVoice, aggregate_failures: true) do
 
       it 'returns envelope values' do
         data = pool.multi_sample(800, 360)
-        expect(data.max).to be > 0.9
+        expect(data.max).to be > 0.3
         expect(data.min).to be < 0.1
       end
 

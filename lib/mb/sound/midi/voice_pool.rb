@@ -144,6 +144,13 @@ module MB
           @voices.map { |v| v.sample(count) }
         end
 
+        # Like GraphNode#multi_sample, but returns a separate buffer for each
+        # voice.  See #sample_individual.
+        def multi_sample_individual(buffer_size, buffer_count)
+          data = Array.new(buffer_count) { sample_individual(buffer_size).map(&:dup) }
+          data.transpose.map { |v| v.reduce(&:concatenate) }
+        end
+
         # Called internally.  Retrieves the next available (or stolen)
         # oscillator to play +key+.
         def next(key)
