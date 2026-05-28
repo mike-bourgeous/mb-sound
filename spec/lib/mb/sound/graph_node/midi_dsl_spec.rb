@@ -57,7 +57,7 @@ RSpec.describe(MB::Sound::GraphNode::MidiDsl, aggregate_failures: true) do
   it 'can create a click node' do
     expect(click).to be_a(MB::Sound::GraphNode::MidiDsl::MidiClick)
     expect(click.sample(1)).to eq(Numo::SFloat[0])
-    click.note_cb(127, 127, true)
+    click.note_cb(127, 127, true, 0)
     expect(click.sample(1)).to eq(Numo::SFloat[1])
   end
 
