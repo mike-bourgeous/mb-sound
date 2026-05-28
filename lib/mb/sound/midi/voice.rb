@@ -137,14 +137,14 @@ module MB
 
         # Restarts the amplitude and filter envelopes, and sets the oscillator's
         # pitch to the given note number.
-        def trigger(note, velocity, _timestamp)
+        def trigger(note, velocity, timestamp)
           # TODO: maybe don't reset oscillators, or randomize phase, so phase
           # is more interesting, but that would make consistent plotting more
           # challenging
           @oscillator.reset unless @oscillator.no_trigger
           self.number = note
-          @filter_envelope.trigger(velocity / 256.0 + 0.5)
-          @amp_envelope.trigger(MB::M.scale(velocity, 0..127, -20..-6).db)
+          @filter_envelope.trigger(velocity / 256.0 + 0.5, delay: timestamp)
+          @amp_envelope.trigger(MB::M.scale(velocity, 0..127, -20..-6).db, delay: timestamp)
         end
 
         def number
@@ -169,7 +169,7 @@ module MB
         end
 
         # Starts the release phase of the filter and amplitude envelopes.
-        def release(note, velocity)
+        def release(note, velocity, _timestamp)
           @filter_envelope.release
           @amp_envelope.release
         end
@@ -201,15 +201,15 @@ module MB
           # complex values.
           case @filter_blend
           when 1.0
-            @re_filter.dynamic_process(re.inplace, centers, @qualities)
-            @im_filter.dynamic_process(im.inplace, centers, @qualities)
+            @re_filter.dynamic_process(re.inplace, cutoff: centers, quality: @qualities)
+            @im_filter.dynamic_process(im.inplace, cutoff: centers, quality: @qualities)
 
           when 0.0
             # Do nothing
 
           else
-            re2 = @re_filter.dynamic_process(re, centers, @qualities)
-            im2 = @im_filter.dynamic_process(im, centers, @qualities)
+            re2 = @re_filter.dynamic_process(re, cutoff: centers, quality: @qualities)
+            im2 = @im_filter.dynamic_process(im, cutoff: centers, quality: @qualities)
 
             re = MB::M.interp(re, re2, @filter_blend)
             im = MB::M.interp(im, im2, @filter_blend)

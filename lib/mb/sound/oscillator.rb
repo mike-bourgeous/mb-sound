@@ -267,8 +267,11 @@ module MB
       end
 
       # Restarts the oscillator at the given note number and velocity.
-      def trigger(note_number, velocity)
+      #
+      # TODO: remove this API and use GraphVoice or Voice exclusively.
+      def trigger(note_number, velocity, timestamp)
         reset
+        @phi -= (2.0 * Math::PI * @frequency) * timestamp
         self.number = note_number
         amplitude = MB::M.scale(velocity, 0..127, -30..-6).db
         self.range = -amplitude..amplitude
@@ -276,7 +279,7 @@ module MB
 
       # Stops the oscillator at the given release velocity (which may be
       # ignored), if its note number matches the given note number.
-      def release(note_number, velocity)
+      def release(note_number, velocity, timestamp)
         if note_number == @note_number || (note_number.round == @note_number.round rescue nil)
           self.range = 0..0
         end
