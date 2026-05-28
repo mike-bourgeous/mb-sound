@@ -449,12 +449,7 @@ module MB
         def notify_event_cbs(event, timestamp)
           @event_callbacks.each do |cb|
             begin
-              if cb.arity == 2
-                cb.call(event, timestamp)
-              else
-                warn "Legacy MIDI event callback at #{MB::U.highlight(caller_locations(1, 1))}" # XXX
-                cb.call(event)
-              end
+              cb.call(event, timestamp)
 
             rescue => e
               # TODO: use a logging facility
@@ -466,12 +461,7 @@ module MB
           when MIDIMessage::NoteOn, MIDIMessage::NoteOff
             @note_callbacks.each do |cb|
               begin
-                if cb.arity == 4
-                  cb.call(event.note + @transpose, event.velocity, event.is_a?(MIDIMessage::NoteOn), timestamp)
-                else
-                  warn "Legacy MIDI note callback at #{MB::U.highlight(caller_locations(1, 1))}" # XXX
-                  cb.call(event.note + @transpose, event.velocity, event.is_a?(MIDIMessage::NoteOn))
-                end
+                cb.call(event.note + @transpose, event.velocity, event.is_a?(MIDIMessage::NoteOn), timestamp)
 
               rescue => e
                 STDERR.puts "Error in MIDI note callback #{cb}: #{e}\n\t#{e.backtrace.join("\n\t")}"
