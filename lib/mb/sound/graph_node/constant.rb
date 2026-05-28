@@ -71,8 +71,18 @@ module MB
           @changes = []
         end
 
+        # Prevent @changes or @buf from causing problems due to duplicated
+        # copies of one node.
+        def dup
+          super.tap { |o|
+            o.instance_variable_set(:@changes, [])
+            o.instance_variable_set(:@buf, nil)
+          }
+        end
+
         # Sets the constant value at the start of the next sample buffer.
         def constant=(value)
+          puts "#{__id__}/#{self} got value #{value} the old way" unless self.to_s.downcase.match?(/ratio|into/) # XXX
           timed_change(value, 0)
         end
 
@@ -97,6 +107,8 @@ module MB
 
         # Returns +count+ samples of the constant value.
         def sample(count)
+          puts "#{__id__}/#{self} sampling #{count}" unless self.to_s.downcase.match?(/ratio|into/) # XXX
+
           if @duration_samples
             # Return nil if we have reached the duration set by #for
             return nil if @elapsed_samples >= @duration_samples
@@ -123,6 +135,8 @@ module MB
 
             first_sample = @changes[0][0]
 
+            puts "#{__id__}/#{self} Change queue: #{MB::U.highlight(@changes)}" unless self.to_s.downcase.match?(/ratio|into/) # XXX
+
             # Compensate for buffer size change at end of timed playback
             first_sample = count - 1 if first_sample >= count
 
@@ -142,6 +156,8 @@ module MB
 
               # Coalesce multiple updates at the same time
               next if next_sample == sample
+
+              puts "#{__id__}/#{self}   update: #{sample}...#{next_sample} ~= #{@constant}" unless self.to_s.downcase.match?(/ratio|into/) # XXX
 
               local_buf = @buf[sample...next_sample]
 
