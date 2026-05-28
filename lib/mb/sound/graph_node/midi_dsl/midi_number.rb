@@ -20,7 +20,8 @@ module MB
             end
 
             @from_range = 0..127
-            @to_range = range || 0..127
+            @to_range = range
+            @to_range ||= 0..127
 
             @number = 69
             @bend = 0
