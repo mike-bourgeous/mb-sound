@@ -6,8 +6,6 @@ require 'bundler/setup'
 require 'mb-sound'
 require 'mb-util'
 
-MB::U.sigquit_backtrace
-
 MB::Sound.synth_script { |input|
   s = MB::Sound.synth(input) { |midi|
     ba_dc_mod = midi.velocity(range: 1.6..3.2).named('B into A, D into C')

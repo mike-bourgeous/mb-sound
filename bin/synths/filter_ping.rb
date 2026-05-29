@@ -4,8 +4,6 @@
 require 'bundler/setup'
 require 'mb-sound'
 
-MB::U.sigquit_backtrace
-
 MB::Sound.synth_script { |input|
   MB::Sound.synth(input) { |midi|
     (

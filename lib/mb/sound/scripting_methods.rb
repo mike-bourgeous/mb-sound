@@ -10,6 +10,9 @@ module MB
       def synth_script
         raise 'Provide a block to accept a MIDI name and return a node graph' unless block_given?
 
+        # TODO: support dropping into pry within the playback loop
+        MB::U.sigquit_backtrace
+
         options = {
           input: nil,
           output: nil,

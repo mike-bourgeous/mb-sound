@@ -4,8 +4,6 @@
 require 'bundler/setup'
 require 'mb-sound'
 
-MB::U.sigquit_backtrace
-
 MB::Sound.synth_script { |input|
   s = MB::Sound.synth(input) { |midi|
     # TODO: remove smoothing from midi.frequency
