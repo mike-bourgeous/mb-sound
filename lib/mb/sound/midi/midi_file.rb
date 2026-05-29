@@ -68,6 +68,9 @@ module MB
         # The track index given to the constructor.
         attr_reader :read_track
 
+        # The source clock that governs when #read will return events.
+        attr_reader :clock
+
         # Reads MIDI data from the given +filename+.  Call #read repeatedly to
         # receive MIDI events based on elapsed time.
         #

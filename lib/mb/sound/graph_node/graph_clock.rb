@@ -5,6 +5,8 @@ module MB
       # syncing MIDI playback with realtime sound card output or super-realtime
       # file output.
       class GraphClock
+        attr_reader :node
+
         # Creates a graph-driven clock driven by the given node +n+, which may
         # be nil (see #node=).
         def initialize(n = nil)
