@@ -116,6 +116,10 @@ module MB
       attr_accessor :wave_type, :pre_power, :post_power, :range, :advance, :random_advance
       attr_reader :phi, :phase, :frequency, :phase_mod
 
+      # The most recent true frequency on an FM-modulated (not PM-modulated)
+      # oscillator.  Starts at zero before #sample is called
+      attr_reader :last_freq
+
       # An informational marker for classes like MB::Sound::MIDI::GraphVoice
       # indicating that the oscillator should not be reset when a note is
       # played.  Has no effect within the oscillator itself.
@@ -186,6 +190,8 @@ module MB
 
         @osc_buf = nil
         @truncated = false
+
+        @last_freq = 0.0
       end
 
       # The sample rate of the oscillator (calculated from the phase advance
@@ -451,6 +457,8 @@ module MB
           state
         ).inplace!
 
+        @last_freq = freq.is_a?(Numeric) ? freq : freq[-1]
+
         @phi = state[0]
 
         buf = add_waveshape_and_range(buf)
@@ -500,9 +508,11 @@ module MB
           @osc_buf[idx] = result
         end
 
+        @last_freq = freq_table.is_a?(Numeric) ? freq_table : freq_table[-1]
+
         buf = @osc_buf[0...count].inplace!
         buf = add_waveshape_and_range(buf)
-        buf
+        buf.not_inplace!
       end
 
       private

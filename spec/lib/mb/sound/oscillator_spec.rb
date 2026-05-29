@@ -316,6 +316,15 @@ RSpec.describe MB::Sound::Oscillator do
 
         expect { osc.sample(10) }.to raise_error(/Truncation/)
       end
+
+      it 'updates the last_freq value' do
+        a = 50.constant(smoothing: false)
+        osc = 100.hz.fm(a)
+        expect { osc.sample(10) }.to change { osc.last_freq }.to(150)
+
+        a.constant = 15
+        expect { osc.sample(10) }.to change { osc.last_freq }.to(115)
+      end
     end
   end
 

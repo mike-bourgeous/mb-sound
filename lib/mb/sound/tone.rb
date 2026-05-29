@@ -1,8 +1,12 @@
+require 'forwardable'
+
 module MB
   module Sound
     # Representation of a tone to generate or play.  Uses MB::Sound::Oscillator
     # for tone generation.
     class Tone
+      extend Forwardable
+
       include GraphNode
       include GraphNode::SampleRateHelper
 
@@ -335,6 +339,11 @@ module MB
       # Converts this Tone to a MIDI note-on message from the midi-message gem.
       def to_midi(velocity: 64, channel: -1)
         to_note.to_midi(velocity: velocity, channel: channel)
+      end
+
+      # The last frequency value used by the oscillator for synthesis.
+      def last_freq
+        oscillator.last_freq
       end
 
       # Generates +count+ samples of the tone, defaulting to the duration of
