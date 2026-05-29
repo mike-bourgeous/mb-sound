@@ -74,11 +74,11 @@ module MB
 
         # Called by the MIDI manager when the sustain CC rises above or below
         # the sustain threshold.
-        def sustain(_, value, onoff)
+        def sustain(_, value, onoff, timestamp)
           # TODO: it would be cool to support variable sustain by decreasing
           # the envelope release time or something
           if (!onoff && @sustain) || value == 0
-            release_sustain
+            release_sustain(timestamp)
           end
 
           @sustain = onoff
@@ -120,9 +120,9 @@ module MB
 
         # Starts the release phase of notes not currently held (On but no Off),
         # for when the sustain pedal is released.
-        def release_sustain
+        def release_sustain(timestamp)
           @released.each do |note, velocity|
-            self.release(note)&.release(note, velocity)
+            self.release(note)&.release(note, velocity, timestamp)
           end
           @released.clear
         end

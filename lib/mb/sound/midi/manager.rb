@@ -479,7 +479,7 @@ module MB
                 end
 
               rescue => e
-                STDERR.puts "Error in MIDI CC threshold callback #{cb}: #{e}\n\t#{e.backtrace.join("\n\t")}"
+                STDERR.puts "Error in MIDI CC threshold callback #{cct}: #{e}\n\t#{e.backtrace.join("\n\t")}"
               end
             end
           end
