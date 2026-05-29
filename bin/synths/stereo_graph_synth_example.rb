@@ -4,7 +4,7 @@ require 'bundler/setup'
 require 'mb-sound'
 
 MB::Sound.synth_script { |input|
-  s = MB::Sound.synth { |midi|
+  s = MB::Sound.synth(input) { |midi|
     q = (midi.frequency * 2.001).tone.at(1).with_phase(Math::PI/3) + 0.1.hz.lfo.at(1) * (midi.frequency * 1.001).tone.at(Math::PI)
     a = (
       (
