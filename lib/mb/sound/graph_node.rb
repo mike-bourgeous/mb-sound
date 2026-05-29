@@ -195,6 +195,7 @@ module MB
 
       # Uses this node as the frequency value for an oscillator.
       def tone
+        # TODO: add .or_at(1) and go fix all the affected synths and effects
         MB::Sound::Tone[self]
       end
 

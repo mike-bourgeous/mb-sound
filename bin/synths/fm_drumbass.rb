@@ -3,52 +3,30 @@
 require 'bundler/setup'
 require 'mb-sound'
 
-OSC_COUNT = ENV['OSC_COUNT']&.to_i || 1
+MB::Sound.synth_script { |input|
+  s = MB::Sound.synth(input, osc_count: 1) { |midi, idx|
+    # A note about the original code: the old drumbass incremented each voice
+    # by 16 semitones, but voice 0 was normal and there was only one voice.
+    # But, GraphVoice resets oscillator frequencies, except one note that
+    # remained a constant frequency.
 
-jack = MB::Sound::JackFFI[]
-output = jack.output(channels: 1, connect: [['system:playback_1', 'system:playback_2']])
-manager = MB::Sound::MIDI::Manager.new(jack: jack, connect: ARGV[0])
+    # FIXME: the new version behaves differently on every event while the old
+    # one sounds the same every time.  This does not appear to be caused by
+    # oscillator sync.
 
-voices = OSC_COUNT.times.map { |i|
-  note = MB::Sound::Note.new(36 + i * 16)
-  note2 = MB::Sound::Note.new(note.number + 12)
+    cenv = midi.env(0, 0.005, 0.5, 0.005).named('C Envelope').db(30)
+    cenv2 = midi.env(0, 0.01, 0.5, 0.01).named('C Mod Envelope').db(60)
+    c = cenv * midi.tone.at(1).fm(cenv2 * MB::Sound::C3.at(1)).named('C')
 
-  cenv = MB::Sound.adsr(0, 0.005, 0.5, 0.005, auto_release: false).db(30)
-  cenv2 = MB::Sound.adsr(0, 0.01, 0.5, 0.01, auto_release: false).db(60)
-  c = cenv * note2.dup.at(1).fm(cenv2 * note2.dup.at(1)).forever
+    denv = midi.env(0, 0.005, 0.0, 0.005).named('D Envelope').db(50)
+    d = denv * (midi.frequency * 0.9996 - 0.22).tone.at(1).named('D')
 
-  denv = MB::Sound.adsr(0, 0.005, 0.0, 0.005, auto_release: false).db(50)
-  d = denv * MB::Sound::Tone.new(frequency: note2.dup.frequency.constant * 0.9996 - 0.22).at(1).forever
+    eenv = midi.env(0, 2, 0, 2).named('E Envelope').db
+    e = eenv * midi.tone.at(1).fm(c * 4810 + d * 500).named('E')
 
-  eenv = MB::Sound.adsr(0, 2, 0, 2, auto_release: false)
-  e = eenv.db * note.dup.at(1).fm(c * 4810 + d * 500).forever
+    fenv = midi.env(0, 2, 0, 2).named('F Envelope').db
+    f = fenv * midi.tone.at(1).fm(e * 250).named('F')
+  }
 
-  fenv = MB::Sound.adsr(0, 2, 0, 2, auto_release: false)
-  f = fenv.db * note.dup.at(1).fm(e * 250)
-
-  # FIXME: This is using a Mixer as a frequency constant
-  MB::Sound::MIDI::GraphVoice.new(f, amp_envelopes: [fenv], manager: manager)
+  s.softclip(0.8, 0.95)
 }
-
-pool = MB::Sound::MIDI::VoicePool.new(
-  manager,
-  voices
-)
-
-output_chain = (pool * 20).softclip(0.8, 0.95)
-
-puts 'saving before graph'
-File.write('/tmp/fm_bass_before.dot', output_chain.graphviz)
-`dot -Tpng /tmp/fm_bass_before.dot -o /tmp/fm_bass_before.png`
-
-begin
-  puts 'starting loop'
-  loop do
-    manager.update
-    output.write([output_chain.sample(output.buffer_size)])
-  end
-ensure
-  puts 'saving after graph'
-  File.write('/tmp/fm_bass_after.dot', output_chain.graphviz)
-  `dot -Tpng /tmp/fm_bass_after.dot -o /tmp/fm_bass_after.png`
-end

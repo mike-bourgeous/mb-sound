@@ -61,7 +61,7 @@ module MB
 
         voices = Array.new(osc_count) { |idx|
           MB::Sound::MIDI::GraphVoice.new(manager: manager, label: idx) do |midi|
-            yield midi
+            yield midi, idx
           end
         }
 
