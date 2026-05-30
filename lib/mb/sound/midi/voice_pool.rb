@@ -87,16 +87,12 @@ module MB
         # Finds and triggers the next available voice, reusing a voice if
         # needed.  Called by #midi_note.
         def trigger(note, velocity, timestamp)
-          puts "\n\n\n\n\n\e[80H#{"\n" * 60}\n\nPOOL TRIGGER #{note}" # XXX
-
           @last = self.next(note)
 
           # Set inactive voices to the latest note for polyphonic portamento
           @available.each do |voice|
-            next unless voice.respond_to?(:set_note) && voice.respond_to?(:active?)
-
             # FIXME: store the portamento start frequency to apply after notes release
-            puts "INACTIVE SET NOTE #{voice}" unless voice.active? # XXX
+            next unless voice.respond_to?(:set_note) && voice.respond_to?(:active?)
             voice.set_note(note, timestamp, reset_portamento: true) unless voice.active?
           end
 

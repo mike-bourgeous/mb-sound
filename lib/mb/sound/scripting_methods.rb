@@ -39,9 +39,6 @@ module MB
           when /.(flac|wav|mp3|ogg|mp4|m4a|opus)$/i
             options[:output] ||= a
 
-          when /^-/
-            puts "Option parser left a flag??? #{a.inspect}" # XXX
-
           else
             options[:input] ||= a
           end

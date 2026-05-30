@@ -7,8 +7,8 @@ require 'mb-sound'
 
 MB::Sound.synth_script { |input|
   s = MB::Sound.synth(input) { |midi|
-    base = midi.number.named('Note number').debug.smooth(seconds: 0.1).debug.freq.named('Base freq').debug
-    base2x = (base * 2).named('Base 2x').debug
+    base = midi.number.named('Note number').smooth(seconds: 0.1).freq.named('Base freq')
+    base2x = (base * 2).named('Base 2x')
     mod = midi.cc(1, range: 1.0..2.0)
 
     # TODO: True FM/PM feedback instead of a duplicate copy of the oscillator
