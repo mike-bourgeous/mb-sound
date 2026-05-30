@@ -38,6 +38,11 @@ module MB
         @duration_set = false
         @phase_mod = nil
         @no_trigger = false
+
+        @frequency = nil
+        @phase = nil
+        @priod = nil
+
         self.or_at(amplitude).or_for(duration).at_rate(sample_rate).with_phase(phase)
         set_frequency(fixup_source(frequency))
       end
