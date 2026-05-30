@@ -4,6 +4,10 @@ module MB
   module Sound
     # Helpers for standalone scripts/synths/effects/etc.
     module ScriptingMethods
+      # TODO: for an effect script, we'd want audio input, audio output, and
+      # possibly midi input for control, all of which should be selectable
+      # between files and realtime i/o.
+
       # Parses options and arguments from ARGV to set up MIDI input and audio
       # output for a synthesizer script.  Yields input name to the block.  The
       # block should return a node graph.

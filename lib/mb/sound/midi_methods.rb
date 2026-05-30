@@ -30,10 +30,7 @@ module MB
       # MidiDsl for details.  Mostly useful in bin/sound.rb.  Use #midi_manager
       # and #synth for scripts.
       def midi
-        # TODO: allow specifying an input/connection by name and then caching the DSL for that input?
-
-        @midi_manager ||= MB::Sound::MIDI::Manager.new
-        @midi_dsl ||= MB::Sound::GraphNode::MidiDsl.new(manager: @midi_manager)
+        @midi_dsl ||= MB::Sound::GraphNode::MidiDsl.new(manager: midi_manager)
       end
 
       # Creates and caches a MIDI manager for the given +input_name+, which may
