@@ -116,10 +116,10 @@ module MB
         # +:range+ - Output range
         # +:unit+ - Display unit (e.g. Hz if scaling to a frequency)
         # +:si+ - Whether to display 24000 as 24k.
-        def cc(number, range: 0..1, unit: nil, si: false)
+        def cc(number, range: 0..1, unit: nil, si: false, smoothing: true)
           # TODO: MSB/LSB?  NRPN?
-          cache(@ccs, [number, range, unit, si]) do
-            MidiCc.new(dsl: self, number: number, range: range, unit: unit, si: si, sample_rate: 48000)
+          cache(@ccs, [number, range, unit, si, smoothing]) do
+            MidiCc.new(dsl: self, number: number, range: range, unit: unit, si: si, sample_rate: 48000, smoothing: smoothing)
           end
         end
 
@@ -136,10 +136,10 @@ module MB
         #                 in semitones.  E.g. pass -12..12 for a full octave.
         #
         # See #hz.
-        def frequency(ratio = 1, offset = 0, bend_range: DEFAULT_BEND_RANGE)
+        def frequency(ratio = 1, offset = 0, bend_range: DEFAULT_BEND_RANGE, smoothing: false)
           offset = offset.frequency if offset.is_a?(MB::Sound::Tone)
-          cache(@freqs, [ratio, offset, bend_range]) do
-            MidiFrequency.new(dsl: self, bend_range: bend_range, ratio: ratio, offset: offset, sample_rate: 48000)
+          cache(@freqs, [ratio, offset, bend_range, smoothing]) do
+            MidiFrequency.new(dsl: self, bend_range: bend_range, ratio: ratio, offset: offset, sample_rate: 48000, smoothing: smoothing)
           end
         end
         alias freq frequency
@@ -149,14 +149,13 @@ module MB
         #
         # +:bend_range+ - The pitch bend range to add to the base note number,
         #                 in semitones.  E.g. pass -12..12 for a full octave.
-        def hz(ratio = 1, offset = 0, bend_range: DEFAULT_BEND_RANGE)
+        def hz(ratio = 1, offset = 0, bend_range: DEFAULT_BEND_RANGE, smoothing: false)
           # TODO: if caching, need to have all methods that modify the tone invalidate the cache
           cache(@tones, [Random.rand, @tones.length]) do
-            MidiTone.new(dsl: self, frequency: self.frequency(ratio, offset, bend_range: bend_range))
+            MidiTone.new(dsl: self, frequency: self.frequency(ratio, offset, bend_range: bend_range, smoothing: smoothing))
           end
         end
         alias tone hz
-        alias note hz
 
         # Returns a new graph node that will generate the MIDI note number on
         # its output, optionally scaled to a given new range.  Pitch bend is
@@ -165,9 +164,9 @@ module MB
         # +:range+ - The range to output, or nil for the raw 0..127 number.
         # +:bend_range+ - The pitch bend range in semitones, or nil to ignore
         #                 pitch bend.
-        def number(range: nil, bend_range: DEFAULT_BEND_RANGE, unit: nil, si: false)
+        def number(range: nil, bend_range: DEFAULT_BEND_RANGE, unit: nil, si: false, smoothing: false)
           cache(@numbers, [range, bend_range, unit, si]) do
-            MidiNumber.new(dsl: self, range: range, bend_range: bend_range, unit: unit, si: si, sample_rate: 48000)
+            MidiNumber.new(dsl: self, range: range, bend_range: bend_range, unit: unit, si: si, sample_rate: 48000, smoothing: smoothing)
           end
         end
 
@@ -175,20 +174,20 @@ module MB
         # the last-pressed note scaled to 0..1 (or to the given +:range+).  If
         # the note +number+ is specified, then only the velocity of that note
         # is used and other notes are ignored.
-        def velocity(number = nil, range: 0..1, unit: nil, si: false)
+        def velocity(number = nil, range: 0..1, unit: nil, si: false, smoothing: false)
           number = number.to_note if number.is_a?(MB::Sound::Tone)
           number = number.number if number.is_a?(MB::Sound::Note)
 
           cache(@velocities, [number, range, unit, si]) do
-            MidiVelocity.new(dsl: self, number: number, range: range, unit: unit, si: si, sample_rate: 48000)
+            MidiVelocity.new(dsl: self, number: number, range: range, unit: unit, si: si, sample_rate: 48000, smoothing: smoothing)
           end
         end
 
         # Returns a node that outputs MIDI pitch bend values, defaulting to a
         # linear map of semitones within DEFAULT_BEND_RANGE.
-        def bend(range: DEFAULT_BEND_RANGE, unit: 'st', si: false)
+        def bend(range: DEFAULT_BEND_RANGE, unit: 'st', si: false, smoothing: true)
           cache(@bends, [range, unit, si]) do
-            MidiBend.new(dsl: self, range: range, unit: unit, si: si, sample_rate: 48000)
+            MidiBend.new(dsl: self, range: range, unit: unit, si: si, sample_rate: 48000, smoothing: smoothing)
           end
         end
 
@@ -219,10 +218,10 @@ module MB
 
         # Returns a graph node that outputs a value in the given +:range+ based
         # on note attack velocity and half-pedal/sustain pedal decay.
-        def gate(range: 0..1, unit: nil, si: false)
+        def gate(range: 0..1, unit: nil, si: false, smoothing: true)
           key = [range, unit, si]
           cache(@gates, key) do
-            MidiGate.new(dsl: self, range: range, unit: unit, si: si, sample_rate: 48000)
+            MidiGate.new(dsl: self, range: range, unit: unit, si: si, sample_rate: 48000, smoothing: true)
           end
         end
 

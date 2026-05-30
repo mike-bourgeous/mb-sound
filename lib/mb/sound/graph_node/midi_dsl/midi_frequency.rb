@@ -9,9 +9,9 @@ module MB
           # Initializes a MIDI node frequency graph node.
           #
           # See MidiDsl#cc.
-          def initialize(dsl:, sample_rate:, bend_range:, ratio:, offset:)
+          def initialize(dsl:, sample_rate:, bend_range:, ratio:, offset:, smoothing:)
             range = MB::Sound::Note.new(0).frequency..MB::Sound::Note.new(127).frequency
-            super(dsl: dsl, default: MB::Sound::Oscillator.tune_freq, range: range, unit: 'Hz', si: true, sample_rate: sample_rate)
+            super(dsl: dsl, default: MB::Sound::Oscillator.tune_freq, range: range, unit: 'Hz', si: true, sample_rate: sample_rate, smoothing: smoothing)
 
             @manager.on_note(&method(:note_cb))
             @manager.on_bend(range: bend_range, default: (bend_range.begin + bend_range.end) / 2.0, &method(:bend_cb))

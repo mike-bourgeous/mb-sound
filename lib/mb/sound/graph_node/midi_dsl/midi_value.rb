@@ -12,8 +12,8 @@ module MB
           # +:default+ - The initial value
           #
           # See MB::Sound::GraphNode::Constant
-          def initialize(dsl:, range:, default:, sample_rate:, si:, unit:)
-            super(default, sample_rate: sample_rate, range: range, si: si, unit: unit)
+          def initialize(dsl:, range:, default:, sample_rate:, si:, unit:, smoothing:)
+            super(default, sample_rate: sample_rate, range: range, si: si, unit: unit, smoothing: smoothing)
 
             @dsl = dsl
             @manager = dsl.manager

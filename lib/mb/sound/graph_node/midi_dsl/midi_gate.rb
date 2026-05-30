@@ -8,10 +8,9 @@ module MB
         # This class uses velocity to set the initial gate level and half-pedal
         # amount to control the decay rate.
         class MidiGate < MidiValue
-          def initialize(dsl:, range:, unit:, si:, sample_rate:)
-            super(dsl: dsl, range: range, default: range.begin, unit: unit, si: si, sample_rate: sample_rate)
+          def initialize(dsl:, range:, unit:, si:, sample_rate:, smoothing:)
+            super(dsl: dsl, range: range, default: range.begin, unit: unit, si: si, sample_rate: sample_rate, smoothing: smoothing)
 
-            # TODO: start gate at correct offset within frame?  would need to get event timestamps out of mb-sound-jackffi
             @node_type_name = 'Note Sustain'
 
             @number = nil

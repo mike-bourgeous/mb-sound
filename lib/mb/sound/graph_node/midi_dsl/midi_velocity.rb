@@ -8,8 +8,8 @@ module MB
           # Initializes a MIDI velocity graph node.
           #
           # See MidiDsl#velocity.
-          def initialize(dsl:, sample_rate:, number:, range:, unit:, si:)
-            super(default: 0, dsl: dsl, range: range, unit: unit, si: si, sample_rate: sample_rate)
+          def initialize(dsl:, sample_rate:, number:, range:, unit:, si:, smoothing:)
+            super(default: 0, dsl: dsl, range: range, unit: unit, si: si, sample_rate: sample_rate, smoothing: smoothing)
 
             @node_type_name = "Note Velocity"
 

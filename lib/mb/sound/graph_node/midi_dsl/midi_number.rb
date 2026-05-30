@@ -5,11 +5,11 @@ module MB
         # A graph node that produces a MIDI note number, with optional pitch
         # bend, in the original logarithmic scale of MIDI semitones.
         class MidiNumber < MidiValue
-          # Initializes a MIDI number graph node.
+          # Initializes a MIDI note number graph node.
           #
           # See MidiDsl#number.
-          def initialize(dsl:, sample_rate:, bend_range:, range:, unit:, si:)
-            super(default: MB::Sound::Oscillator.tune_note, dsl: dsl, range: range, unit: unit, si: si, sample_rate: sample_rate)
+          def initialize(dsl:, sample_rate:, bend_range:, range:, unit:, si:, smoothing:)
+            super(default: MB::Sound::Oscillator.tune_note, dsl: dsl, range: range, unit: unit, si: si, sample_rate: sample_rate, smoothing: smoothing)
 
             @node_type_name = "Note Number"
 
