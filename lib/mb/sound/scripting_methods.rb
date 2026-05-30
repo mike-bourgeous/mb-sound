@@ -22,6 +22,7 @@ module MB
           output: nil,
           force: false,
           graphviz: false,
+          quiet: false,
         }
 
         OptionParser.new { |p|
@@ -30,6 +31,7 @@ module MB
           p.on('-o', '--output AUDIO_FILE', String, 'An audio file to write output to (default is soundcard output)')
           p.on('-f', '--force', TrueClass, 'Whether to overwrite an existing output file')
           p.on('--graphviz', TrueClass, 'If true, opens a visualization of the node graph')
+          p.on('-q', '--quiet', TrueClass, 'Disable waveform plotting')
         }.parse!(into: options)
 
         ARGV.each do |a|
@@ -55,7 +57,7 @@ module MB
           MB::Sound.write(options[:output], graph, overwrite: options[:force] || :prompt)
         else
           # FIXME: text console plots constantly scroll
-          MB::Sound.play(graph)
+          MB::Sound.play(graph, plot: !options[:quiet])
         end
       end
     end
