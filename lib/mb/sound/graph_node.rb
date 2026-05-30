@@ -804,6 +804,23 @@ module MB
         self
       end
 
+      # Logs the first, last, min, max, and mean values for each buffer from
+      # this node.
+      def debug
+        debug_iter = 0
+        spy { |v|
+          if v
+            s = "f/l: #{v[0]}/#{v[-1]} m/m: #{v.minmax} avg: #{v.mean}"
+          else
+            s = 'nil'
+          end
+
+          puts "DEBUG: #{__id__}/#{self} frame #{debug_iter}: #{s}"
+
+          debug_iter += 1
+        }
+      end
+
       # Finds the lowest numeric value greater than zero for any graph nodes
       # that have a #buffer_size method.  The idea is that sound card inputs
       # will have the smallest buffer size of any input.
