@@ -193,6 +193,13 @@ module MB
         self.proc(type_name: 'round', &:round)
       end
 
+      # Converts a fractional MIDI note number to a frequency in Hz.
+      def freq
+        self.proc(type_name: 'Number to frequency') { |v|
+          MB::FastSound.number_to_freq(v, MB::Sound::Oscillator.tune_note, MB::Sound::Oscillator.tune_freq)
+        }
+      end
+
       # Uses this node as the frequency value for an oscillator.
       def tone
         # TODO: add .or_at(1) and go fix all the affected synths and effects

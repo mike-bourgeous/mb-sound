@@ -6,7 +6,6 @@ require 'mb-sound'
 
 MB::Sound.synth_script { |input|
   s = MB::Sound.synth(input) { |midi|
-    # TODO: remove smoothing from midi.frequency
     noise_lfo = 1.hz.ramp.noise.at(48.db).filter(0.05.hz.highpass).filter(0.15.hz.lowpass(quality: 0.4)).softclip(0.1, 1) * -30.dB + 1
 
     # FIXME: envelope velocity scaling is too quiet at moderate velocity

@@ -7,9 +7,8 @@ require 'mb-sound'
 
 MB::Sound.synth_script { |input|
   s = MB::Sound.synth(input) { |midi|
-    # TODO: simpler way to convert MIDI number to frequency or tone
-    base = MB::Sound::Oscillator.calc_freq(midi.number.smooth(seconds: 0.1))
-    base2x = base * 2
+    base = midi.number.named('Note number').debug.smooth(seconds: 0.1).debug.freq.named('Base freq').debug
+    base2x = (base * 2).named('Base 2x').debug
     mod = midi.cc(1, range: 1.0..2.0)
 
     # TODO: True FM/PM feedback instead of a duplicate copy of the oscillator
