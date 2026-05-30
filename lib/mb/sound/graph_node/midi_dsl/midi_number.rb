@@ -43,6 +43,13 @@ module MB
             update_value(timestamp)
           end
 
+          # Called by a GraphVoice when an inactive note needs to change
+          # frequency for polyphonic portamento.
+          def set_note(number, timestamp)
+            @number = number
+            update_value(timestamp)
+          end
+
           # Called by #note_cb and #bend_cb to recalculate the output value
           # using both note number and bend amount.
           def update_value(timestamp)

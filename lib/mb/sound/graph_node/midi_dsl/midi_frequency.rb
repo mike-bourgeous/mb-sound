@@ -27,6 +27,8 @@ module MB
             @node_type_name = "#{'%.1f' % @offset} + #{@node_type_name}" if @offset != 0
           end
 
+          # TODO: dedupe with MidiNumber
+
           # Called by the MIDI manager for note on/off events.  Sets the base
           # note number independent of pitch bend.
           def note_cb(number, _velocity, onoff, timestamp)
@@ -40,6 +42,13 @@ module MB
           # semitones.
           def bend_cb(bend, timestamp)
             @bend = bend
+            update_value(timestamp)
+          end
+
+          # Called by a GraphVoice when an inactive note needs to change
+          # frequency for polyphonic portamento.
+          def set_note(number, timestamp)
+            @number = number
             update_value(timestamp)
           end
 

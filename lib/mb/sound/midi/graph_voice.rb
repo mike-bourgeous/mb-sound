@@ -31,6 +31,7 @@ module MB
             @gv = voice
             @manager = manager
             @graph_voice_callbacks = []
+            @gv_number_callbacks = []
           end
 
           # MIDI DSL nodes normally call the manager update function from their
@@ -45,6 +46,12 @@ module MB
           # note is received.
           def on_note(&callback)
             @graph_voice_callbacks << callback
+          end
+
+          # New method for use by DslProxy for managing polyphonic portamento
+          # (see GraphVoice#set_note).
+          def gv_on_number(&callback)
+            @gv_number_callbacks << callback
           end
 
           # Called by GraphVoice to trigger note events on note-related nodes
@@ -62,6 +69,14 @@ module MB
               cb.call(number, velocity, false, timestamp)
             end
           end
+
+          def graph_voice_set_note(number, timestamp, reset_portamento: :todo)
+            puts "ManagerProxy SET NOTE with #{@gv_number_callbacks.length} ncbs" # XXX
+
+            @gv_number_callbacks.each do |ncb|
+              ncb.call(number, timestamp)
+            end
+          end
         end
 
         # TODO: maybe GraphVoice should be abandoned, and instead a new
@@ -75,6 +90,26 @@ module MB
 
           def channel(ch)
             raise 'MIDI manager handles channel filtering for GraphVoice'
+          end
+
+          def frequency(ratio = 1, offset = 0, bend_range: DEFAULT_BEND_RANGE, smoothing: false)
+            # TODO: maybe there's a way to move this up to MidiDsl itself
+            super.tap { |n|
+              @manager.gv_on_number { |number, timestamp|
+                puts "SET FREQ ON #{n}" # XXX
+                n.set_note(number, timestamp)
+              }
+            }
+          end
+          alias freq frequency
+
+          def number(range: nil, bend_range: DEFAULT_BEND_RANGE, unit: nil, si: false, smoothing: false)
+            super.tap { |n|
+              @manager.gv_on_number { |number, timestamp|
+                puts "SET NOTE ON #{n}" # XXX
+                n.set_note(number, timestamp)
+              }
+            }
           end
         end
 
@@ -187,7 +222,8 @@ module MB
         # Tells all envelopes to start their attack phase based on the given
         # velocity, and sets all frequency constants based on the given note.
         def trigger(note, velocity, timestamp)
-          set_note(note, reset_portamento: false)
+          puts "#{self.__id__} TRIGGER #{note}" # XXX
+          set_note(note, timestamp, reset_portamento: false)
 
           @oscillators.each do |o|
             o.reset unless o.no_trigger
@@ -214,7 +250,9 @@ module MB
 
         # Sets the note number without triggering the envelope generators (e.g.
         # for polyphonic portamento).
-        def set_note(note, reset_portamento: true)
+        def set_note(note, timestamp, reset_portamento: true)
+          puts "#{self.__id__} SET NOTE #{note}" # XXX
+
           @number = note
 
           @oscillators.each do |o|
@@ -237,7 +275,7 @@ module MB
             end
           end
 
-          # TODO: MidiDsl notification
+          @manager_proxy&.graph_voice_set_note(note, timestamp)
         end
 
         # Sends values of internal parameters to graph nodes (e.g. those from
