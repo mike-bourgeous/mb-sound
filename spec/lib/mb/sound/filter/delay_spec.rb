@@ -97,7 +97,7 @@ RSpec.describe(MB::Sound::Filter::Delay, :aggregate_failures) do
           shortbuf.process(Numo::SFloat.zeros(1))
 
           expect(shortbuf.write_offset).to be < shortbuf.read_offset
-          expect((shortbuf.write_offset - shortbuf.read_offset) % shortbuf.buffer_size).to eq(25)
+          expect((shortbuf.write_offset - shortbuf.read_offset) % shortbuf.delay_buffer_size).to eq(25)
         end
 
         it 'accepts a sample source/graph node' do
