@@ -46,6 +46,7 @@ module MB
 
         graph = yield options[:input]
 
+        # FIXME: this will break with an Array of nodes
         if options[:graphviz]
           graph.open_graphviz
         end

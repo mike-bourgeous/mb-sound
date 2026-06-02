@@ -591,7 +591,7 @@ module MB
 
         filter(MB::Sound::Filter::Delay.new(
           delay: seconds, sample_rate: sample_rate, smoothing: smoothing,
-          buffer_size: sample_rate.ceil * max_delay, feedback: feedback,
+          delay_buffer_size: sample_rate.ceil * max_delay, feedback: feedback,
           dry: dry, wet: wet
         ))
       end
