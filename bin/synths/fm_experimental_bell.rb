@@ -48,7 +48,7 @@ MB::Sound.synth_script { |input|
     a_out + c_out + (q_out * 0.05)
   }
 
-  (s * 0.5)
+  (s * 0.25)
     .filter(10000.hz.lowpass)
     .softclip(0.8, 0.95)
 }
