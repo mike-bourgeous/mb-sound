@@ -37,7 +37,7 @@ MB::Sound.synth_script { |input|
     sum.filter(:lowpass, cutoff: filt_freq) # Try to cut down on aliasing chalkboard noise
   }
 
-  (s * 0.5)
+  (s * 0.2)
     .softclip(0.8, 0.95)
     .oversample(2)
 }
