@@ -69,6 +69,6 @@ MB::Sound.synth_script { |input|
     sub + boom * 0.05
   }
 
-  (s * -10.db)
+  (s * -5.db)
     .softclip(0.8, 0.95)
 }
