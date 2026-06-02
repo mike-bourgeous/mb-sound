@@ -20,6 +20,10 @@ module MB
       #
       # Example:
       #     play midi.hz.at(-6.db).ramp.filter(:lowpass, cutoff: (midi.frequency * midi.cc(1, range: 1.3..16)), quality: 4).oversample(16).softclip.oversample(2)
+      #
+      # TODO: Built-in portamento (should apply to midi.frequency/midi.number/midi.hz automatically; could just be a filter with cutoff 1/portamento_time)
+      # - Portamento time CC 5 (LSB 37)
+      # - Portamento on/off CC 65
       class MidiDsl
         # Clock for MIDI files fed into graph nodes, keeping MIDI playback in
         # sync with graph updates (quantized to the buffer size).  Used by
