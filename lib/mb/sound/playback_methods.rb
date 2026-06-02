@@ -140,7 +140,8 @@ module MB
           file_tone_data.map { |ftd| playback_info(ftd) }
 
         when GraphNode
-          file_tone_data.graph.select { |n| n.is_a?(MB::Sound::GraphNode) }.map { |n| n.graph_node_name || n.class.name }.join(', ')
+          filename = file_tone_data.graph.detect { |n| n.respond_to?(:filename) }&.filename
+          filename || file_tone_data.to_s
 
         when String
           "\e[1m#{file_tone_data}\e[22m: #{MB::U.highlight(FFMPEGInput.parse_info(file_tone_data).dig(:format, :tags))}"

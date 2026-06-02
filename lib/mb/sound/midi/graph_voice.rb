@@ -99,6 +99,10 @@ module MB
           def number(range: nil, bend_range: DEFAULT_BEND_RANGE, unit: nil, si: false, smoothing: false)
             super.tap { |n| @manager.gv_on_number(&n.method(:set_note)) }
           end
+
+          def filename
+            @manager.midi_in.respond_to?(:filename) ? @manager.midi_in.filename : nil
+          end
         end
 
         attr_reader :number, :dsl_proxy
