@@ -16,12 +16,14 @@ module MB
 
             @range = range
             @velocity = velocity
+            @sustain = false
 
             @node_type_name = 'MIDI Envelope'
 
             # TODO: sustain pedal
 
             @manager.on_note(&method(:note_cb))
+            @manager.on_cc(64, range: 0..127, default: 0, &method(:sustain_cb))
           end
 
           # Triggers and releases the envelope based on note press/release,
@@ -34,8 +36,14 @@ module MB
               # TODO: support multiple events per buffer
               self.time = -timestamp if timestamp > 0
             elsif number == @number
-              release
+              @number = nil
+              release unless @sustain
             end
+          end
+
+          def sustain_cb(value, timestamp)
+            release if @number.nil? && @sustain && value < 64
+            @sustain = value >= 64
           end
 
           def sample(count)
