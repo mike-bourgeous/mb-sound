@@ -195,13 +195,13 @@ module MB
         # Returns a new ADSR envelope that will trigger based on velocity when
         # a note is pressed, and release when the note or sustain pedal are
         # released.
-        def env(attack_s = nil, decay_s = nil, sustain_l = nil, release_s = nil, range: 0..1)
+        def env(attack_s = nil, decay_s = nil, sustain_l = nil, release_s = nil, range: 0..1, velocity: 0.5..1)
           attack_s ||= 0.002
           decay_s ||= 0.05
           sustain_l ||= -10.db
           release_s ||= 0.1
 
-          key = [attack_s, decay_s, sustain_l, release_s, range]
+          key = [attack_s, decay_s, sustain_l, release_s, range, velocity]
 
           cache(@envelopes, key) do
             MidiEnvelope.new(
@@ -211,11 +211,19 @@ module MB
               sustain: sustain_l,
               release: release_s,
               sample_rate: 48000,
-              range: range
+              range: range,
+              velocity: velocity
             )
           end
         end
         alias envelope env
+
+        # Creates an envelope with default ranges suitable for amplification
+        # envelopes.
+        def amp_env(attack_s = nil, decay_s = nil, sustain_l = nil, release_s = nil, range: 0..1, velocity: -10.db..-2.db)
+          # TODO: add .db?
+          env(attack_s, decay_s, sustain_l, release_s, range: range, velocity: velocity)
+        end
 
         # Returns a graph node that outputs a value in the given +:range+ based
         # on note attack velocity and half-pedal/sustain pedal decay.

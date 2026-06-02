@@ -19,13 +19,13 @@ MB::Sound.synth_script { |input|
     d = denv * (base2x * 0.9996 - 0.22).tone.complex_sine.at(1).named('d')
 
     # FIXME: sounds are too quiet below ~80 velocity
-    eenv = midi.env(0, 2, 0.7, 0.5).named('eenv').db
+    eenv = midi.env(0, 2, 0.7, 0.5).named('eenv').db(10)
     e = eenv * base.tone.complex_sine.at(1).pm(mod * (c + d)).named('e')
 
-    fenv = midi.env(0, 2, 0.8, 0.5).named('fenv').db
+    fenv = midi.amp_env(0, 2, 0.8, 0.5).named('fenv').db(10)
     f = fenv * base.tone.complex_sine.at(1).pm(e * mod).named('f')
 
-    f.real
+    f.real * 0.125
   }
 
   # Reduce aliasing noise
@@ -33,7 +33,7 @@ MB::Sound.synth_script { |input|
     .filter(15000.hz.lowpass)
     .oversample(4, mode: :libsamplerate_fastest)
 
-  s + s.delay(seconds: 0.1) * 0.125
+  s + s.delay(seconds: 0.1)
 }
 
 voices[0].open_graphviz

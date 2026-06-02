@@ -7,7 +7,7 @@ module MB
         class MidiEnvelope < MB::Sound::ADSREnvelope
           prepend MidiEof
 
-          def initialize(dsl:, attack:, decay:, sustain:, release:, sample_rate:, range:)
+          def initialize(dsl:, attack:, decay:, sustain:, release:, sample_rate:, range:, velocity:)
             super(attack_time: attack, decay_time: decay, sustain_level: sustain, release_time: release, sample_rate: sample_rate, filter_freq: 200)
 
             @dsl = dsl
@@ -15,6 +15,7 @@ module MB
             @cache_invalidated = false
 
             @range = range
+            @velocity = velocity
 
             @node_type_name = 'MIDI Envelope'
 
@@ -28,10 +29,9 @@ module MB
           def note_cb(number, velocity, onoff, timestamp)
             if onoff
               @number = number
-              trigger(velocity / 127.0)
+              trigger(MB::M.scale(velocity, 0..127, @velocity))
 
               # TODO: support multiple events per buffer
-              # FIXME: timestamp will be in base sample rate; need to account for oversampling
               self.time = -timestamp if timestamp > 0
             elsif number == @number
               release
