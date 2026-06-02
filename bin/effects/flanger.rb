@@ -99,6 +99,7 @@ else
 end
 
 # FIXME: does not work (at least on USB audio) with oversample < 1
+# FIXME: oversampling changes delay-time smoothing and/or other behavior
 oversample = ENV['OVERSAMPLE']&.to_f || 2
 
 bufsize ||= output.buffer_size
