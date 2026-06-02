@@ -89,11 +89,11 @@ x = 0
 loop do
   nib.clear_buffer
   while event = midi_in.read(blocking: false)[0]
-    event = nib.parse(event.bytes)
+    event = event.map { |t, e| [t, nib.parse(e.bytes)] }
     event = [event] unless event.is_a?(Array)
 
     # TODO: Allow changing waveform
-    event.each do |e|
+    event.each do |t, e|
       puts MB::U.highlight(e) unless e.is_a?(MIDIMessage::SystemRealtime)
 
       case e
@@ -105,10 +105,10 @@ loop do
         end
 
       when MIDIMessage::NoteOn
-        oscil_bank.next(e.note).trigger(e.note, e.velocity)
+        oscil_bank.next(e.note).trigger(e.note, e.velocity, t)
 
       when MIDIMessage::NoteOff
-        oscil_bank[e.note]&.release(e.note, e.velocity)
+        oscil_bank[e.note]&.release(e.note, e.velocity, t)
 
       when MIDIMessage::ControlChange
         case e.index
