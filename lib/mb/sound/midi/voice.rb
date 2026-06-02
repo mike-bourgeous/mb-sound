@@ -159,7 +159,7 @@ module MB
 
         # Same as #number=, but with an ignored keyword argument for VoicePool
         # compatibility.  TODO: implement portamento?
-        def set_note(note, reset_portamento: :ignored)
+        def set_note(note, _timestamp, reset_portamento: :ignored)
           self.number = note
         end
 
