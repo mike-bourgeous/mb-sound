@@ -34,7 +34,7 @@ MB::Sound.synth_script { |input|
       .filter(:lowpass, cutoff: 1.0 / PORTAMENTO_TIME, quality: 0.5).named('B Portamento')
       .tone.triangle.at(0.5).named('B')
 
-    env = midi.env(0.003, 0.05, 0.5, 0.3)
+    env = midi.env(0.003, 0.05, 0.5, 0.3, velocity: -20.db..0.db)
 
     sum = (a + b) * cc2 * env
 
@@ -59,7 +59,7 @@ MB::Sound.synth_script { |input|
       .filter(:lowpass, cutoff: 1.0 / PORTAMENTO_TIME, quality: 0.5).named('B Portamento')
       .tone.triangle.at(0.5).named('B')
 
-    env = midi.env(0.003, 0.05, 0.5, 0.3)
+    env = midi.env(0.003, 0.05, 0.5, 0.3, velocity: -20.db..0.db)
 
     sum = (a + b) * cc2 * env
 
