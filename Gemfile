@@ -9,4 +9,4 @@ gem 'readline', require: true
 
 gem 'mb-math', github: 'mike-bourgeous/mb-math.git'
 gem 'mb-util', github: 'mike-bourgeous/mb-util.git'
-gem 'mb-sound-jackffi', github: 'mike-bourgeous/mb-sound-jackffi.git', branch: 'midi-event-timestamps' # XXX return to master before merging
+gem 'mb-sound-jackffi', github: 'mike-bourgeous/mb-sound-jackffi.git'

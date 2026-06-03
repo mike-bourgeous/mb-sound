@@ -1,8 +1,8 @@
 GIT
   remote: https://github.com/mike-bourgeous/mb-math.git
-  revision: 131fc4d1d5ee7b0a6e15a53b118184b0529ede8b
+  revision: 22516a59e75dc706d1584e2f20550568224e9283
   specs:
-    mb-math (0.4.5.usegit)
+    mb-math (0.4.7.usegit)
       bigdecimal (~> 3.1.8)
       cmath (~> 1.0.0)
       matrix (~> 0.4.2)
@@ -13,8 +13,7 @@ GIT
 
 GIT
   remote: https://github.com/mike-bourgeous/mb-sound-jackffi.git
-  revision: cdc793a29aaeab7568b4c312c67a2488b6c42ec0
-  branch: midi-event-timestamps
+  revision: 2e6a2a9e698996fae3d9404a1ff76ac92266d7d2
   specs:
     mb-sound-jackffi (0.2.0.usegit)
       ffi (~> 1.13.0)
@@ -33,8 +32,8 @@ PATH
       cmath (~> 1.0.0)
       csv (~> 3.3, >= 3.3.3)
       logger (~> 1.7.0)
-      mb-math (>= 0.4.4.1.usegit)
-      mb-sound-jackffi (>= 0.1.0.usegit)
+      mb-math (>= 0.4.7.usegit)
+      mb-sound-jackffi (>= 0.2.0.usegit)
       mb-util (>= 0.1.29.usegit)
       midi-nibbler (~> 0.2.4)
       midilib (~> 4.0.0)
