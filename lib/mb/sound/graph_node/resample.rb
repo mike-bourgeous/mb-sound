@@ -52,12 +52,12 @@ module MB
 
           @upstream = upstream.get_sampler
 
+          @fast_resample = nil
+
           self.sample_rate = sample_rate
 
           @startpoint = 0.0 # Fractional sample index of start of buffer, minus discards
           @circbuf_size = 0 # Desired capacity of circular buffer
-
-          @fast_resample = nil
 
           setup_buffer(length: 1024, double: true)
         end
