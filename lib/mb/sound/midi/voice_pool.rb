@@ -25,6 +25,7 @@ module MB
         #
         # TODO: maybe get rid of support for anything but GraphVoice?
         def initialize(manager, voices)
+          @manager = manager
           @voices = voices
           @available = voices.dup
           @used = []
@@ -56,15 +57,15 @@ module MB
         end
 
         # Called by the MIDI manager when a note on or off event is received.
-        def midi_note(note, velocity, onoff)
+        def midi_note(note, velocity, onoff, timestamp)
           if onoff
             @released.delete(note)
-            trigger(note, velocity)
+            trigger(note, velocity, timestamp)
 
           else
             # TODO: Move sustain handling into Manager?
             if !@sustain
-              release(note)&.release(note, velocity)
+              release(note)&.release(note, velocity, timestamp)
             else
               @released[note] = velocity
             end
@@ -73,11 +74,11 @@ module MB
 
         # Called by the MIDI manager when the sustain CC rises above or below
         # the sustain threshold.
-        def sustain(_, value, onoff)
+        def sustain(_, value, onoff, timestamp)
           # TODO: it would be cool to support variable sustain by decreasing
           # the envelope release time or something
           if (!onoff && @sustain) || value == 0
-            release_sustain
+            release_sustain(timestamp)
           end
 
           @sustain = onoff
@@ -85,17 +86,17 @@ module MB
 
         # Finds and triggers the next available voice, reusing a voice if
         # needed.  Called by #midi_note.
-        def trigger(note, velocity)
+        def trigger(note, velocity, timestamp)
           @last = self.next(note)
 
           # Set inactive voices to the latest note for polyphonic portamento
           @available.each do |voice|
+            # FIXME: store the portamento start frequency to apply after notes release
             next unless voice.respond_to?(:set_note) && voice.respond_to?(:active?)
-
-            voice.set_note(note, reset_portamento: true) unless voice.active?
+            voice.set_note(note, timestamp, reset_portamento: true) unless voice.active?
           end
 
-          @last.trigger(note + @bend, velocity)
+          @last.trigger(note + @bend, velocity, timestamp)
         end
 
         # Bends all playing and future notes by the given number of semitones.
@@ -119,9 +120,9 @@ module MB
 
         # Starts the release phase of notes not currently held (On but no Off),
         # for when the sustain pedal is released.
-        def release_sustain
+        def release_sustain(timestamp)
           @released.each do |note, velocity|
-            self.release(note)&.release(note, velocity)
+            self.release(note)&.release(note, velocity, timestamp)
           end
           @released.clear
         end
@@ -134,7 +135,22 @@ module MB
         # Samples and sums the current output of all voices/oscillators.
         # Assumes all voices given to the constructor have a #sample method.
         def sample(count)
-          @voices.map { |v| v.sample(count) }.sum
+          sample_individual(count)&.sum
+        end
+
+        # Samples all voices, returning an Array of the output of each voice.
+        def sample_individual(count)
+          @manager.update
+          data = @voices.map { |v| v.sample(count) }
+          return nil if (@manager.midi_in.respond_to?(:done?) && @manager.midi_in.done?) || @voices.any?(&:nil?)
+          data
+        end
+
+        # Like GraphNode#multi_sample, but returns a separate buffer for each
+        # voice.  See #sample_individual.
+        def multi_sample_individual(buffer_size, buffer_count)
+          data = Array.new(buffer_count) { sample_individual(buffer_size).map(&:dup) }
+          data.transpose.map { |v| v.reduce(&:concatenate) }
         end
 
         # Called internally.  Retrieves the next available (or stolen)

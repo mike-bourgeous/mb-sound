@@ -20,7 +20,7 @@ OSC_COUNT = 8
 OVERSAMPLE = ENV['OVERSAMPLE']&.to_f || 16
 osc_pool = MB::Sound::MIDI::VoicePool.new(
   manager,
-  OSC_COUNT.times.map { MB::Sound::MIDI::Voice.new }
+  OSC_COUNT.times.map { MB::Sound::MIDI::Voice.new(manager: manager) }
 )
 
 graph = osc_pool

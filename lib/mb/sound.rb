@@ -21,6 +21,8 @@ require_relative 'sound/gain_methods'
 require_relative 'sound/window_methods'
 require_relative 'sound/analysis_methods'
 require_relative 'sound/generation_methods'
+require_relative 'sound/midi_methods'
+require_relative 'sound/scripting_methods'
 
 module MB
   # Convenience functions for making quick work of sound.
@@ -37,6 +39,8 @@ module MB
     extend WindowMethods
     extend AnalysisMethods
     extend GenerationMethods
+    extend MidiMethods
+    extend ScriptingMethods
 
     # Speed of sound for wavelength calculations, in meters per second.
     SPEED_OF_SOUND = 343.0
@@ -121,13 +125,12 @@ require_relative 'sound/buffer_helper'
 require_relative 'sound/circular_buffer'
 require_relative 'sound/wavetable'
 require_relative 'sound/graph_node'
+require_relative 'sound/adsr_envelope'
 require_relative 'sound/graph_node_input'
+require_relative 'sound/graph_node/midi_dsl'
 
 require_relative 'sound/midi'
-require_relative 'sound/adsr_envelope'
 require_relative 'sound/timeline_interpolator'
-
-require_relative 'sound/graph_node/midi_dsl'
 
 require_relative 'sound/io_base'
 require_relative 'sound/io_input'

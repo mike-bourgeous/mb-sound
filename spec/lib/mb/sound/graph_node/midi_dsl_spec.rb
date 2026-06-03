@@ -57,7 +57,7 @@ RSpec.describe(MB::Sound::GraphNode::MidiDsl, aggregate_failures: true) do
   it 'can create a click node' do
     expect(click).to be_a(MB::Sound::GraphNode::MidiDsl::MidiClick)
     expect(click.sample(1)).to eq(Numo::SFloat[0])
-    click.note_cb(127, 127, true)
+    click.note_cb(127, 127, true, 0)
     expect(click.sample(1)).to eq(Numo::SFloat[1])
   end
 
@@ -68,7 +68,17 @@ RSpec.describe(MB::Sound::GraphNode::MidiDsl, aggregate_failures: true) do
     expect(graph.sample(1)).to be_a(Numo::SFloat)
   end
 
-  pending 'can filter events by channel'
+  describe '#channel' do
+    it 'includes events from the target channel' do
+      graph = midi.click # channel(0).gate
+      expect(graph.multi_sample(800, 60).sum).to be > 1
+    end
+
+    it 'rejects events from other channels' do
+      graph = midi.channel(1).gate
+      expect(graph.multi_sample(800, 60).sum).to eq(0)
+    end
+  end
 
   pending 'cache invalidation'
 

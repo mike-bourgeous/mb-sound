@@ -1,8 +1,12 @@
+require 'forwardable'
+
 module MB
   module Sound
     # Representation of a tone to generate or play.  Uses MB::Sound::Oscillator
     # for tone generation.
     class Tone
+      extend Forwardable
+
       include GraphNode
       include GraphNode::SampleRateHelper
 
@@ -34,6 +38,11 @@ module MB
         @duration_set = false
         @phase_mod = nil
         @no_trigger = false
+
+        @frequency = nil
+        @phase = nil
+        @period = nil
+
         self.or_at(amplitude).or_for(duration).at_rate(sample_rate).with_phase(phase)
         set_frequency(fixup_source(frequency))
       end
@@ -261,6 +270,7 @@ module MB
         tone = tone.at(1) if index && tone.is_a?(Tone)
         tone = fixup_source(tone)
         index = fixup_source(index)
+
         @frequency = MB::Sound::GraphNode::Mixer.new([@frequency, [tone, index || 1]], sample_rate: @sample_rate)
         self
       end
@@ -334,6 +344,11 @@ module MB
       # Converts this Tone to a MIDI note-on message from the midi-message gem.
       def to_midi(velocity: 64, channel: -1)
         to_note.to_midi(velocity: velocity, channel: channel)
+      end
+
+      # The last frequency value used by the oscillator for synthesis.
+      def last_freq
+        oscillator.last_freq
       end
 
       # Generates +count+ samples of the tone, defaulting to the duration of
@@ -537,6 +552,13 @@ module MB
       # Returns nil if the source is nil.
       def fixup_source(src)
         return nil if src.nil?
+
+        if src.respond_to?(:sources)
+          # O(n^2)ish if building a complex network of modulation?
+          if src == self || src.graph(include_tees: true).include?(self) || self.graph(include_tees: true).include?(src)
+            raise 'Cyclic modulation detected'
+          end
+        end
 
         src = src.or_at(1) if src.is_a?(Tone)
         src = src.or_for(nil) if src.respond_to?(:or_for)

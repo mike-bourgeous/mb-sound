@@ -24,7 +24,7 @@ RSpec.describe(MB::Sound::MIDI::VoicePool) do
     end
 
     it 'passes sample rate through to MB::Sound::MIDI::Voice' do
-      voices = Array.new(3) { MB::Sound::MIDI::Voice.new }
+      voices = Array.new(3) { MB::Sound::MIDI::Voice.new(manager: manager) }
 
       pool = MB::Sound::MIDI::VoicePool.new(manager, voices)
 

@@ -85,4 +85,23 @@ RSpec.describe(MB::Sound::MIDI::Manager) do
       })
     end
   end
+
+  describe '#transpose=' do
+    pending 'forwards transposition to nested managers'
+  end
+
+  describe '#for_channel' do
+    it 'creates and returns a new manager' do
+      nested = manager.for_channel(13)
+      expect(nested).to be_a(MB::Sound::MIDI::Manager)
+      expect(nested).not_to eql(manager)
+      expect(nested.channel).to eq(13)
+    end
+  end
+
+  describe '#to_acid_xml' do
+    pending 'generates XML parameter spec for parameters'
+
+    pending 'includes parameters from nested managers'
+  end
 end

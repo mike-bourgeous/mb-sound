@@ -1,15 +1,15 @@
 RSpec.describe(MB::Sound::Filter::Delay, :aggregate_failures) do
   let(:shortbuf) {
-    MB::Sound::Filter::Delay.new(delay: 5, sample_rate: 1, buffer_size: 10)
+    MB::Sound::Filter::Delay.new(delay: 5, sample_rate: 1, delay_buffer_size: 10)
   }
 
   let(:midbuf) {
-    MB::Sound::Filter::Delay.new(delay: 10, sample_rate: 1, buffer_size: 171)
+    MB::Sound::Filter::Delay.new(delay: 10, sample_rate: 1, delay_buffer_size: 171)
   }
 
   describe '#initialize' do
     it 'can calculate delay in samples based on sample rate' do
-      d = MB::Sound::Filter::Delay.new(delay: 0.75, sample_rate: 4, buffer_size: 17)
+      d = MB::Sound::Filter::Delay.new(delay: 0.75, sample_rate: 4, delay_buffer_size: 17)
       expect(d.delay_samples).to eq(3)
     end
   end
@@ -97,7 +97,7 @@ RSpec.describe(MB::Sound::Filter::Delay, :aggregate_failures) do
           shortbuf.process(Numo::SFloat.zeros(1))
 
           expect(shortbuf.write_offset).to be < shortbuf.read_offset
-          expect((shortbuf.write_offset - shortbuf.read_offset) % shortbuf.buffer_size).to eq(25)
+          expect((shortbuf.write_offset - shortbuf.read_offset) % shortbuf.delay_buffer_size).to eq(25)
         end
 
         it 'accepts a sample source/graph node' do

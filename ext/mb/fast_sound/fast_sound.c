@@ -1582,6 +1582,43 @@ VALUE ruby_adsr_narray(VALUE self, VALUE narray, VALUE frame, VALUE rate, VALUE 
 	return rb_ary_new_from_args(6, narray_subset, SSIZET2NUM(current_frame), DBL2NUM(current_frame / sample_rate), o ? Qtrue : Qfalse, DBL2NUM(p), DBL2NUM(s));
 }
 
+// C conversion from MIDI note number to frequency.
+static double num2freq(double number, double tune_note, double tune_freq)
+{
+	return tune_freq * pow(2.0, (number - tune_note) / 12.0);
+}
+
+/*
+ * Converts a Numeric or Numo::SFloat/Numo::DFloat from MIDI note number to
+ * oscillator frequency.  Modifies in-place narrays directly.
+ *
+ * +number+ - The fractional MIDI note number.
+ * +tune_note+ - The root note number used for tuning (e.g. 69 for A4).
+ * +tune_freq+ - The root frequency used for tuning (e.g. 440).
+ */
+VALUE ruby_number_to_freq(VALUE self, VALUE number, VALUE tune_note, VALUE tune_freq)
+{
+	double tnum = NUM2DBL(tune_note);
+	double tfrq = NUM2DBL(tune_freq);
+
+	if (rb_obj_is_kind_of(number, rb_cNumeric)) {
+		double n = NUM2DBL(number);
+		return DBL2NUM(num2freq(n, tnum, tfrq));
+	}
+
+	ensure_inplace_sfloat(&number, NULL);
+	size_t length = RNARRAY_SHAPE(number)[0];
+	float *float_ptr = (float *)(nary_get_pointer_for_write(number) + nary_get_offset(number));
+
+	for (size_t i = 0; i < length; i++) {
+		float_ptr[i] = num2freq(float_ptr[i], tnum, tfrq);
+	}
+
+	UNSET_INPLACE(number);
+
+	return number;
+}
+
 void Init_fast_sound(void)
 {
 	VALUE mb = rb_define_module("MB");
@@ -1648,6 +1685,6 @@ void Init_fast_sound(void)
 	rb_define_module_function(fast_sound, "complex", ruby_complex, 1);
 	rb_define_module_function(fast_sound, "narray_to_array", ruby_narray_to_array, 1);
 
-	// Sampling/resampling functions
-	// TODO
+	// Functions for converting between frequency and note number
+	rb_define_module_function(fast_sound, "number_to_freq", ruby_number_to_freq, 3);
 }

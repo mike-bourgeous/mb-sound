@@ -8,10 +8,9 @@ module MB
         # This class uses velocity to set the initial gate level and half-pedal
         # amount to control the decay rate.
         class MidiGate < MidiValue
-          def initialize(dsl:, range:, unit:, si:, sample_rate:)
-            super(dsl: dsl, range: range, default: range.begin, unit: unit, si: si, sample_rate: sample_rate)
+          def initialize(dsl:, range:, unit:, si:, sample_rate:, smoothing:)
+            super(dsl: dsl, range: range, default: range.begin, unit: unit, si: si, sample_rate: sample_rate, smoothing: smoothing)
 
-            # TODO: start gate at correct offset within frame?  would need to get event timestamps out of mb-sound-jackffi
             @node_type_name = 'Note Sustain'
 
             @number = nil
@@ -29,7 +28,7 @@ module MB
 
           # Stores note attack velocity in @velocity from 0..1 and note on/off
           # state in @on.
-          def note_cb(number, velocity, onoff)
+          def note_cb(number, velocity, onoff, timestamp)
             if onoff
               @on = true
               @number = number
@@ -38,30 +37,33 @@ module MB
               @on = false
               @number = nil
             end
+
+            update_value(timestamp)
           end
 
           # Stores the half-pedal amount in @sustain from 0..1.
-          def pedal_cb(value)
+          def pedal_cb(value, timestamp)
             @sustain = value
+
+            update_value(timestamp)
           end
 
           # Calculates a new target output value based on note and pedal state,
           # then passes control to the superclass.
-          def sample(count)
+          def update_value(timestamp)
             if @on
               @val = @velocity
             elsif self.constant > 1e-4
               # TODO: use release velocity as well?
               # TODO: take sample count and sample rate into account for consistent decay
               # TODO: could add half-pedal functionality to envelopes by scaling time rate by (1 - sustain).
-              @val *= @sustain ** (count / @sample_rate)
+              # TODO: better sub-frame accuracy (need per-sample value for sustain pedal)
+              @val *= @sustain ** (@buf.length.to_f / @sample_rate)
             else
               @val = 0
             end
 
-            self.constant = MB::M.scale(@val, @from_range, @to_range)
-
-            super
+            timed_change(MB::M.scale(@val, @from_range, @to_range), timestamp)
           end
 
           def sources

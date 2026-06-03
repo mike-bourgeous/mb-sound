@@ -117,6 +117,7 @@ module MB
       # Creates a mixer that adds this node's #sample output to +other+ (a
       # numeric constant or another GraphNode).
       def +(other)
+        # FIXME: this fails to set up the tee correctly when adding a node on the left; see bin/songs/stereo_drone.rb
         fixup_tones(false, self, other)
         Mixer.new([self, other], sample_rate: self.sample_rate)
       end
@@ -192,8 +193,16 @@ module MB
         self.proc(type_name: 'round', &:round)
       end
 
+      # Converts a fractional MIDI note number to a frequency in Hz.
+      def freq
+        self.proc(type_name: 'Number to frequency') { |v|
+          MB::FastSound.number_to_freq(v, MB::Sound::Oscillator.tune_note, MB::Sound::Oscillator.tune_freq)
+        }
+      end
+
       # Uses this node as the frequency value for an oscillator.
       def tone
+        # TODO: add .or_at(1) and go fix all the affected synths and effects
         MB::Sound::Tone[self]
       end
 
@@ -582,7 +591,7 @@ module MB
 
         filter(MB::Sound::Filter::Delay.new(
           delay: seconds, sample_rate: sample_rate, smoothing: smoothing,
-          buffer_size: sample_rate.ceil * max_delay, feedback: feedback,
+          delay_buffer_size: sample_rate.ceil * max_delay, feedback: feedback,
           dry: dry, wet: wet
         ))
       end
@@ -802,6 +811,23 @@ module MB
         self
       end
 
+      # Logs the first, last, min, max, and mean values for each buffer from
+      # this node.
+      def debug
+        debug_iter = 0
+        spy { |v|
+          if v
+            s = "f/l: #{v[0]}/#{v[-1]} m/m: #{v.minmax} avg: #{v.mean}"
+          else
+            s = 'nil'
+          end
+
+          puts "DEBUG: #{__id__}/#{self} frame #{debug_iter}: #{s}"
+
+          debug_iter += 1
+        }
+      end
+
       # Finds the lowest numeric value greater than zero for any graph nodes
       # that have a #buffer_size method.  The idea is that sound card inputs
       # will have the smallest buffer size of any input.
@@ -1006,13 +1032,6 @@ module MB
         end
       end
 
-      # Returns an Array with the port name and source name or object ID (if no
-      # name) of all sources for this node, for use in generating descriptions
-      # of the node.
-      def source_names
-        sources.map { |name, src| "#{name}: #{make_source_name(src)}" }
-      end
-
       # Setup/boilerplate buffer management used by #/ and #**.
       def arithmetic_proc(other, name)
         if other.respond_to?(:sample)
@@ -1106,3 +1125,5 @@ require_relative 'graph_node/data_shuffler'
 require_relative 'graph_node/wavetable'
 require_relative 'graph_node/matrix_mixer'
 require_relative 'graph_node/reverb'
+
+require_relative 'graph_node/graph_clock'
