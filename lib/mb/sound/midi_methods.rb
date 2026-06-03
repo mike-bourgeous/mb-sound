@@ -63,7 +63,7 @@ module MB
       # DSL as well
       #
       # See ScriptingMethods#synth_script.
-      def synth(input_name, osc_count: ENV['OSC_COUNT']&.to_i || 4, channel: ENV['CHANNEL']&.to_i&.-(1))
+      def synth(input_name = nil, osc_count: ENV['OSC_COUNT']&.to_i || 4, channel: ENV['CHANNEL']&.to_i&.-(1))
         raise 'Pass a block to define individual voices' unless block_given?
 
         # TODO: further automate connecting to an output, parsing command-line
