@@ -41,7 +41,7 @@ module MB
 
         @frequency = nil
         @phase = nil
-        @priod = nil
+        @period = nil
 
         self.or_at(amplitude).or_for(duration).at_rate(sample_rate).with_phase(phase)
         set_frequency(fixup_source(frequency))

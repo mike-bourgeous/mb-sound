@@ -82,6 +82,11 @@ module MB
         # If +:merge_tracks+ is false, then events will not be merged across
         # tracks, and #read will only return events from track +:read_track+.
         def initialize(filename, clock: MB::U, merge_tracks: true, read_track: 0, speed: 1.0)
+          @index = 0
+          @elapsed = 0
+          @last_time = 0
+          @start = nil
+
           self.clock = clock
 
           raise 'Speed must be greater than zero' unless speed > 0
@@ -110,11 +115,6 @@ module MB
 
           @events = track.events.freeze
           @count = @events.count
-
-          @index = 0
-          @elapsed = 0
-          @start = nil
-          @last_time = 0
 
           @notes = nil
           @note_stats = nil

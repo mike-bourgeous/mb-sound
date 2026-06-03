@@ -3,7 +3,7 @@ module MB
     module GraphNode
       class MidiDsl
         # A MIDI-controlled envelope triggered by note on/off events and
-        # sustain pedal (TODO).
+        # sustain pedal.
         class MidiEnvelope < MB::Sound::ADSREnvelope
           prepend MidiEof
 
@@ -20,7 +20,7 @@ module MB
 
             @node_type_name = 'MIDI Envelope'
 
-            # TODO: sustain pedal
+            @number = nil
 
             @manager.on_note(&method(:note_cb))
             @manager.on_cc(64, range: 0..127, default: 0, &method(:sustain_cb))
@@ -62,8 +62,7 @@ module MB
             }
           end
 
-          # TODO to_s and to_s_graphviz that include the output range
-          # TODO: allow setting velocity sensitivity
+          # TODO to_s and to_s_graphviz that include the output range and velocity range
         end
       end
     end

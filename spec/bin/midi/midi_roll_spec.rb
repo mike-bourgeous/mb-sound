@@ -21,7 +21,7 @@ RSpec.describe('bin/midi/midi_roll.rb') do
 
     rescue RSpec::Expectations::MultipleExpectationsNotMetError => e
       if @result && @text
-        MB::U.headline("Failed text from \e[1;33m#{ex.description}", print: $stderr, color: '31')
+        MB::U.headline("Failed text from \e[1;33m#{ex.description} (#{e})", print: $stderr, color: '31')
         $stderr.puts @text
         $stderr.puts
       end
