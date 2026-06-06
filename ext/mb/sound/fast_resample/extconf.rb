@@ -13,6 +13,6 @@ raise 'Could not find narray.h' unless find_header('numo/narray.h', File.join(na
 # Find libsamplerate
 raise 'libsamplerate not found; please install libsamplerate0-dev' unless have_library("samplerate", "src_callback_new")
 
-with_cflags("#{$CFLAGS} -O3 -ggdb3 -Wall -Wextra -Werror -Wno-unused-parameter #{ENV['EXTRACFLAGS']} -std=c99 -D_XOPEN_SOURCE=700 -D_ISOC99_SOURCE -D_GNU_SOURCE") do
+with_cflags("#{$CFLAGS} -O3 -ggdb3 -Wall -Wextra -Werror -Wno-unused-parameter #{ENV['EXTRACFLAGS']} -std=c99 -D_XOPEN_SOURCE -D_ISOC99_SOURCE -D_GNU_SOURCE") do
   create_makefile('mb/sound/fast_resample')
 end

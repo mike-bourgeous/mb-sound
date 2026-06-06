@@ -273,6 +273,7 @@ module MB
 
         return :null if device == 'null' || device == ':null' || device == :null
 
+        # TODO: Dedupe with detect_output
         case RUBY_PLATFORM
         when /linux/
           if `pgrep jackd`.strip.length > 0
@@ -285,6 +286,17 @@ module MB
             :alsa_pulse
           else
             :alsa
+          end
+
+        when /darwin/
+          if `pgrep jackd`.strip.length > 0
+            if defined?(JackFFI)
+              :jack_ffi
+            else
+              :jack
+            end
+          else
+            raise NotImplementedError, 'JackD is currently required on macOS'
           end
 
         else
@@ -380,6 +392,19 @@ module MB
             :alsa_pulse
           else
             :alsa
+          end
+
+        when /darwin/
+          # TODO: mac output is flaky, has glitches when plotting to terminal, and MIDI input crashes when RUBYOPT=--jit
+          # jackd -R -X coremidi -d coreaudio
+          if `pgrep jackd`.strip.length > 0
+            if defined?(JackFFI)
+              :jack_ffi
+            else
+              :jack
+            end
+          else
+            raise NotImplementedError, 'JackD is currently required on macOS'
           end
 
         else
