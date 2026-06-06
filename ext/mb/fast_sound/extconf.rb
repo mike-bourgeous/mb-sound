@@ -10,7 +10,9 @@ require 'numo/narray'
 # Documented here: https://stackoverflow.com/questions/45924206/ruby-native-extension-use-other-c-extension-gem/79952482#79952482
 na = Gem.loaded_specs['numo-narray']
 raise "Could not find the numo-narray Gem; try running with Bundler" if na.nil?
-raise 'Could not find narray.h' unless find_header('numo/narray.h', File.join(na.extension_dir, 'numo'))
+
+extdir = na.extension_dir
+raise "Could not find narray.h under #{extdir}" unless find_header('numo/narray.h', File.join(extdir, 'numo'))
 
 with_cflags("#{$CFLAGS} -O3 -ggdb3 -Wall -Wextra -Werror -Wno-unused-parameter #{ENV['EXTRACFLAGS']} -std=c99 -D_XOPEN_SOURCE -D_ISOC99_SOURCE -D_GNU_SOURCE") do
   create_makefile('mb/fast_sound')

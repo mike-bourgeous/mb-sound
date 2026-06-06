@@ -7,6 +7,9 @@ gemspec
 
 gem 'readline', require: true
 
+gem 'numo-narray', github: 'mike-bourgeous/numo-narray-compat.git', branch: 'compat-9-2-x'
+gem 'numo-narray-alt', '~> 0.10.4'
+
 gem 'mb-math', github: 'mike-bourgeous/mb-math.git'
 gem 'mb-util', github: 'mike-bourgeous/mb-util.git'
 gem 'mb-sound-jackffi', github: 'mike-bourgeous/mb-sound-jackffi.git'

@@ -12,7 +12,7 @@ Gem::Specification.new do |spec|
     to an educational video series about sound.
   }
   spec.homepage      = "https://github.com/mike-bourgeous/mb-sound"
-  spec.required_ruby_version = Gem::Requirement.new(">= 2.7.1")
+  spec.required_ruby_version = Gem::Requirement.new(">= 3.2.0")
 
   spec.metadata["homepage_uri"] = spec.homepage
   spec.metadata["source_code_uri"] = "https://github.com/mike-bourgeous/mb-sound"
