@@ -26,6 +26,13 @@ GIT
     mb-util (0.1.29.usegit)
 
 GIT
+  remote: https://github.com/mike-bourgeous/numo-narray-alt-fork.git
+  revision: 22995a4b81ffb692fc27d7146f8037c7d7a65f3a
+  branch: fix-double-macro-argument-reference
+  specs:
+    numo-narray-alt (0.10.4)
+
+GIT
   remote: https://github.com/mike-bourgeous/numo-narray-compat.git
   revision: 070b8fdc048666f7ac975955e1e9b2fa24bf78e9
   branch: compat-9-2-x
@@ -83,7 +90,6 @@ GEM
     midi-nibbler (0.2.4)
       midi-message (~> 0.4, >= 0.4.4)
     midilib (4.0.2)
-    numo-narray-alt (0.10.4)
     numo-pocketfft (0.4.1)
       numo-narray (>= 0.9.1)
     ostruct (0.6.3)
@@ -143,6 +149,7 @@ GEM
 
 PLATFORMS
   x86_64-darwin-25
+  x86_64-linux
 
 DEPENDENCIES
   benchmark (~> 0.5.0)
@@ -156,7 +163,7 @@ DEPENDENCIES
   mb-sound-jackffi!
   mb-util!
   numo-narray!
-  numo-narray-alt (~> 0.10.4)
+  numo-narray-alt (~> 0.10.4)!
   pry (~> 0.14.0)
   pry-byebug (~> 3.10.0)
   pry-doc

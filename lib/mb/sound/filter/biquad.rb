@@ -197,10 +197,15 @@ module MB
 
         # Ruby outer loop, C math (slightly faster than pure Ruby)
         def process_ruby_c(samples)
+          puts "Ruby/C biquad loop: #{samples.class}"
+
           if samples.is_a?(Numo::DComplex) || samples.is_a?(Numo::SComplex) || samples[0].is_a?(Complex)
             # Direct Form I
-            samples.map do |x0|
+            idx = 0
+            samples.not_inplace!.map do |x0|
+              puts "   #{x0}" # XXX
               out = MB::FastSound.biquad_complex(@b0, @b1, @b2, @a1, @a2, x0, @x1, @x2, @y1, @y2)
+              puts "  ruby_c cplx bqloop iter=#{idx}/#{samples.length} in=#{x0} out=#{out}" #if idx < 100 # XXX remove idx
               @y2 = @y1
               @y1 = out
               @x2 = @x1
@@ -208,8 +213,12 @@ module MB
               out
             end
           else
-            samples.map do |x0|
+            idx = 0
+            samples.not_inplace!.map do |x0|
+              puts "   #{x0}" # XXX
               out = MB::FastSound.biquad(@b0, @b1, @b2, @a1, @a2, x0, @x1, @x2, @y1, @y2)
+              puts "  ruby_c bqloop iter=#{idx}/#{samples.length} in=#{x0} out=#{out}" #if idx < 100 # XXX remove idx
+              idx += 1 # XXX
               @y2 = @y1
               @y1 = out
               @x2 = @x1
@@ -221,9 +230,14 @@ module MB
 
         # Ruby outer loop, Ruby math
         def process_ruby(samples)
+          puts "Pure Ruby biquad loop: #{samples.class}" # XXX
+
           # Direct Form I
-          samples.map do |x0|
+          idx = 0
+          samples.not_inplace!.map do |x0|
             out = @b0 * x0 + @b1 * @x1 + @b2 * @x2 - @a1 * @y1 - @a2 * @y2
+            puts "  ruby_orig bqloop iter=#{idx}/#{samples.length} in=#{x0} out=#{out}" if idx < 100 # XXX remove idx
+            idx += 1 # XXX
             out = 0 if out.abs < 1e-18 && @y2.abs < 1e-18 && @y1.abs < 1e-18
             @y2 = @y1
             @y1 = out
