@@ -1263,7 +1263,6 @@ static VALUE ruby_biquad_complex(VALUE self, VALUE b0, VALUE b1, VALUE b2, VALUE
 
 #define BIQUAD_LOOP(buf_type, coeff_type, conv_from_rb, conv_to_rb, filter_func) do { \
 	buf_type *data = (buf_type *)(nary_get_pointer_for_read_write(buf) + nary_get_offset(buf)); \
-	fprintf(stderr, "Biquad loop buf=" #buf_type " coeff=" #coeff_type "ptr=%p, offset=%zd\n", nary_get_pointer_for_read_write(buf), nary_get_offset(buf)); /* XXX */ \
 \
 	coeff_type x0 = 0; \
 	coeff_type x1 = conv_from_rb(rb_ary_entry(state, 1)); \
@@ -1281,9 +1280,6 @@ static VALUE ruby_biquad_complex(VALUE self, VALUE b0, VALUE b1, VALUE b2, VALUE
 	for (size_t i = 0; i < length; i++) { \
 		x0 = data[i]; \
 		y0 = filter_func(b0, b1, b2, a1, a2, x0, x1, x2, y1, y2); \
-		if (i < 30) { \
-			fprintf(stderr, "  bqloop iter %zu in=%f out=%f\n", i, creal(x0), creal(y0)); /* XXX */ \
-		} \
 		data[i] = y0; \
 		y2 = y1; \
 		y1 = y0; \
@@ -1353,16 +1349,12 @@ static VALUE ruby_biquad_narray(VALUE self, VALUE rb0, VALUE rb1, VALUE rb2, VAL
 	size_t length = RNARRAY_SHAPE(buf)[0];
 
 	if (buf_type == numo_cSFloat) {
-		puts("Biquad sfloat"); // XXX
 		BIQUAD_LOOP(float, double, NUM2DBL, DBL2NUM, biquad_filter);
 	} else if (buf_type == numo_cDFloat) {
-		puts("Biquad dfloat"); // XXX
 		BIQUAD_LOOP(double, double, NUM2DBL, DBL2NUM, biquad_filter);
 	} else if (buf_type == numo_cSComplex) {
-		puts("Biquad scomplex"); // XXX
 		BIQUAD_LOOP(float complex, double complex, num_to_complex, complex_to_num, biquad_complex);
 	} else if (buf_type == numo_cDComplex) {
-		puts("Biquad dcomplex"); // XXX
 		BIQUAD_LOOP(double complex, double complex, num_to_complex, complex_to_num, biquad_complex);
 	} else {
 		rb_raise(rb_eException, "BUG: Buffer was not SFloat, DFloat, SComplex, or DComplex");
