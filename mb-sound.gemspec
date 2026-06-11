@@ -23,9 +23,10 @@ Gem::Specification.new do |spec|
   spec.files         = Dir.chdir(File.expand_path('..', __FILE__)) do
     `git ls-files -z`.split("\x0").reject { |f| f.match(%r{^(test|spec|features|sounds|tmp|coverage)/}) }
   end
-  spec.bindir        = "bin"
-  spec.executables   = spec.files.grep(%r{^bin/}) { |f| File.basename(f) }
   spec.require_paths = ["lib"]
+  spec.bindir        = "bin"
+  # TODO: decide what tools should be exposed when the gem is installed
+  #spec.executables   = spec.files.grep(%r{^bin/}) { |f| File.basename(f) }
 
   spec.extensions = ['ext/mb/fast_sound/extconf.rb', 'ext/mb/sound/fast_resample/extconf.rb']
 
