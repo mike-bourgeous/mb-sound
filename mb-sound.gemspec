@@ -35,22 +35,22 @@ Gem::Specification.new do |spec|
   spec.add_runtime_dependency 'logger', '~> 1.7.0'
 
   spec.add_runtime_dependency 'cmath', '~> 1.0.0'
-  spec.add_runtime_dependency 'numo-narray', '~> 0.9.2'
-  spec.add_runtime_dependency 'numo-pocketfft', '~> 0.4.1'
+  spec.add_runtime_dependency 'numo-narray-alt', '~> 0.10.5'
+  spec.add_runtime_dependency 'numo-pocketfft', '~> 0.6.0'
 
   spec.add_runtime_dependency 'midi-nibbler', '~> 0.2.4'
-
   spec.add_runtime_dependency 'midilib', '~> 4.0.0'
 
-  spec.add_runtime_dependency 'mb-math', '>= 0.4.7.usegit'
+  spec.add_runtime_dependency 'mb-math', '>= 0.5.0.usegit'
   spec.add_runtime_dependency 'mb-util', '>= 0.1.29.usegit'
-  spec.add_runtime_dependency 'mb-sound-jackffi', '>= 0.2.0.usegit'
+  spec.add_runtime_dependency 'mb-sound-jackffi', '>= 0.3.0.usegit'
+
+  # For generating MIDI controller templates for ACID
+  spec.add_runtime_dependency 'builder', '~> 3.2.4'
 
   spec.add_development_dependency 'rake', '~> 13.0.1'
   spec.add_development_dependency 'bundler', '2.4.22'
-
-  # For generating MIDI controller templates for ACID
-  spec.add_development_dependency 'builder', '~> 3.2.4'
+  spec.add_development_dependency 'rake-compiler', '~> 1.1.1'
 
   # Interactive command line gems
   spec.add_development_dependency 'irb', '~> 1.16.0'
@@ -63,8 +63,6 @@ Gem::Specification.new do |spec|
   spec.add_development_dependency 'rspec'
   spec.add_development_dependency 'simplecov', '~> 0.22.0'
   spec.add_development_dependency 'benchmark', '~> 0.5.0'
-
-  spec.add_development_dependency 'rake-compiler', '~> 1.1.1'
 
   spec.add_development_dependency 'getoptlong', '~> 0.2.1'
   spec.add_development_dependency 'forwardable', '~> 1.3.3'
