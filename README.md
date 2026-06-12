@@ -478,8 +478,7 @@ sudo apt-get install ffmpeg gnuplot-qt
 brew install ffmpeg gnuplot
 ```
 
-Then you'll want to install Ruby 2.7.8 or newer (Ruby 3.4.3 or newer
-recommended).
+Then you'll want to install Ruby 3.2 or newer (Ruby 3.4 or newer recommended).
 
 If you don't already have a recent version of Ruby installed, and a Ruby version
 manager of your choosing, I highly recommend using [RVM](https://rvm.io).  You
