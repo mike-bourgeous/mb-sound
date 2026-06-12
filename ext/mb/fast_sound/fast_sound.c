@@ -1325,7 +1325,8 @@ static VALUE ruby_biquad_narray(VALUE self, VALUE rb0, VALUE rb1, VALUE rb2, VAL
 		buf_type = CLASS_OF(buf);
 	}
 
-	// If that's still not a float or complex type, force conversion to float
+	// If that's still not a float or complex type (e.g. we had an Array of
+	// Integers), force conversion to float
 	buf_type = CLASS_OF(buf);
 	if (buf_type != numo_cDComplex && buf_type != numo_cSComplex && buf_type != numo_cSFloat && buf_type != numo_cDFloat) {
 		buf = rb_funcall(numo_cDFloat, rb_intern("cast"), 1, buf);
