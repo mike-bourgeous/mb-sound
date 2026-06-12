@@ -504,7 +504,7 @@ mkdir sound_code_series
 cd sound_code_series
 
 # Install Ruby
-rvm install 3.4.3
+rvm install 3.4
 
 # Clone the repo
 git clone git@github.com:mike-bourgeous/mb-sound.git
