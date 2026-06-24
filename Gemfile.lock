@@ -38,7 +38,7 @@ GIT
 PATH
   remote: .
   specs:
-    mb-sound (0.11.1.usegit)
+    mb-sound (0.11.2.usegit)
       builder (~> 3.2.4)
       cmath (~> 1.0.0)
       csv (~> 3.3, >= 3.3.3)

@@ -1,8 +1,5 @@
 require 'logger'
 
-# YARD provides File.relative_path
-require 'yard'
-
 module MB
   module Sound
     # IO-related methods to include in the sound command-line interface.
@@ -168,7 +165,7 @@ module MB
         # TODO: use Pathname instead of relying on YARD's core extension to File
         path = dir || File.join(Dir.pwd, 'sounds')
         files = Dir[File.join(path, '**', '*.*')].map { |f|
-          File.relative_path(dir || Dir.pwd, f)
+          Pathname(f).relative_path_from(dir || Dir.pwd)
         }
         puts files
       end
