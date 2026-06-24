@@ -8,7 +8,7 @@ require 'numo/narray'
 # https://stackoverflow.com/questions/9322078/programmatically-determine-gems-path-using-bundler
 #
 # Documented here: https://stackoverflow.com/questions/45924206/ruby-native-extension-use-other-c-extension-gem/79952482#79952482
-na = Gem.loaded_specs['numo-narray']
+na = Gem.loaded_specs['numo-narray-alt'] || Gem.loaded_specs['numo-narray']
 raise "Could not find the numo-narray Gem; try running with Bundler" if na.nil?
 
 extdir = na.extension_dir

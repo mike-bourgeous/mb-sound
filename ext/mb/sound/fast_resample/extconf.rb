@@ -6,7 +6,7 @@ require 'numo/narray'
 # Used numo-pocketfft as a reference for finding narray.h
 # https://github.com/yoshoku/numo-pocketfft/blob/1ab489b165d4cde06b6d3a443ed9bfbc8e5c69d0/ext/numo/pocketfft/extconf.rb
 # https://stackoverflow.com/questions/9322078/programmatically-determine-gems-path-using-bundler
-na = Gem.loaded_specs['numo-narray']
+na = Gem.loaded_specs['numo-narray-alt'] || Gem.loaded_specs['numo-narray']
 raise "Could not find the numo-narray Gem; try running with Bundler" if na.nil?
 raise 'Could not find narray.h' unless find_header('numo/narray.h', File.join(na.extension_dir, 'numo'))
 
