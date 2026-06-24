@@ -28,7 +28,7 @@ Gem::Specification.new do |spec|
   # TODO: decide what tools should be exposed when the gem is installed
   #spec.executables   = spec.files.grep(%r{^bin/}) { |f| File.basename(f) }
 
-  spec.extensions = ['ext/mb/fast_sound/extconf.rb', 'ext/mb/sound/fast_resample/extconf.rb']
+  spec.extensions = Dir['ext/**/extconf.rb']
 
   spec.add_runtime_dependency 'csv', '~> 3.3', '>= 3.3.3'
   spec.add_runtime_dependency 'psych', '~> 5.2.3'
