@@ -2,6 +2,9 @@ module MB
   module Sound
     # An input object that reads from a node graph.
     class GraphNodeInput
+      include GraphNode
+      include GraphNode::IOSampleMixin
+
       attr_reader :channels, :sample_rate, :buffer_size
 
       # Creates a graph node input that returns the nodes' output across at
