@@ -220,16 +220,12 @@ module MB
         wavetable
       end
 
-      # TODO: functions to sort wavetables by brightness, etc.?
-      # TODO: functions to shuffle and stretch wavetables?
+      # TODO: functions to shuffle and stretch/interpolate wavetables?
       # TODO: functions for spectral changes to wavetables?
       # TODO: mip-mapped or note-range wavetables
       # TODO: midi/realtime control of wavetable wrapping mode?
       # TODO: blend between wrapping modes by output
       # TODO: warp between wrapping modes by blending lookup indices?
-      # FIXME: having wave 1.0 wrap fully around to the start makes control
-      # difficult; it would be more musically playable if 1.0 was the last wave
-      # in the table
       # FIXME: make it super easy to play the full cycle including cubic
       # overshoot, and make the areas around that more musical somehow (getting
       # clicking and very sharp waves if the phase is off just a tiny bit); it
@@ -307,10 +303,10 @@ module MB
       # +:wavetable+, as opposed to linear interpolation used by
       # #outer_linear_ruby.
       def self.outer_cubic_ruby(wavetable:, number:, phase:, wrap:)
-        rows = wavetable.shape[0].to_f
-        cols = wavetable.shape[1].to_f
+        rows = wavetable.shape[0]
+        cols = wavetable.shape[1]
 
-        frow = (number * rows) % rows
+        frow = (number * (rows - 1)) % rows
         row1 = frow.floor
         row2 = row1 + 1
         row1 %= rows
@@ -322,7 +318,7 @@ module MB
         vtop = MB::M.cubic_lookup(wavetable[row1, nil], fcol, mode: wrap)
         vbot = MB::M.cubic_lookup(wavetable[row2, nil], fcol, mode: wrap)
 
-        # TODO: smoothstep between waves?
+        # TODO: smoothstep or cubic between waves?
         vbot * rowratio + vtop * (1.0 - rowratio)
       end
 
@@ -331,7 +327,7 @@ module MB
         wave_count = wavetable.shape[0]
         sample_count = wavetable.shape[1]
 
-        frow = (number * wave_count) % wave_count
+        frow = (number * (wave_count - 1)) % wave_count
         row1 = frow.floor
         row2 = row1 + 1
         row1 %= wave_count
