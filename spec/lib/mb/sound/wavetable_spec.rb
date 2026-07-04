@@ -75,6 +75,62 @@ RSpec.describe(MB::Sound::Wavetable, aggregate_failures: true) do
     end
   end
 
+  describe '.center' do
+    let (:zc_table) {
+      Numo::SFloat[
+        [2, 3, -1, -2, -3, 1],
+        [0, 1, 2, 3, 4, -1],
+      ]
+    }
+
+    let (:zc_expected) {
+      Numo::SFloat[
+        [-1, -2, -3, 1, 2, 3],
+        [3, 4, -1, 0, 1, 2],
+      ]
+    }
+
+    let (:zc_odd) {
+      Numo::SFloat[
+        [2, 3, -1, -2, -3, 1, 1],
+        [0, 1, 2, 3, 4, -1, -2],
+      ]
+    }
+
+    let (:odd_expected) {
+      Numo::SFloat[
+        [-1, -2, -3, 1, 1, 2, 3],
+        [4, -1, -2, 0, 1, 2, 3],
+      ]
+    }
+
+    it 'centers a wavetable that has zero crossings' do
+      expect(MB::Sound::Wavetable.center(zc_table)).to eq(zc_expected)
+    end
+
+    it 'works with odd lengths' do
+      expect(MB::Sound::Wavetable.center(zc_odd)).to eq(odd_expected)
+    end
+
+    it 'raises an error if there is no zero crossing' do
+      expect { MB::Sound::Wavetable.center(table) }.to raise_error(/crossing.*row 0/)
+      expect { MB::Sound::Wavetable.center(zc_table + 2) }.to raise_error(/crossing.*row 1/)
+    end
+
+    it 'does not modify the table if it is not in place' do
+      expect { MB::Sound::Wavetable.center(zc_table) }.not_to change { zc_table }
+    end
+
+    it 'can work in place' do
+      zc_odd.inplace!
+      expect(MB::Sound::Wavetable.center(zc_odd)).to eql(zc_odd)
+
+      expect { MB::Sound::Wavetable.center(zc_table) }.not_to change { zc_table.to_a }
+      zc_table.inplace!
+      expect { MB::Sound::Wavetable.center(zc_table) }.to change { zc_table.to_a }
+    end
+  end
+
   context 'array lookup' do
     shared_examples_for 'wavetable lookup' do |m|
       let(:number) { Numo::SFloat[0, 1.0 / 2.0, 2.0 / 2.0, -2.0 / 2.0, 1.0 / 4.0] }

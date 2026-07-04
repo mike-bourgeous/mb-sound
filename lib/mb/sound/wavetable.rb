@@ -128,15 +128,11 @@ module MB
           max = MB::M.max(middle.abs.max, -80.db)
           middle = middle / max
 
-          # Rotate phase to put positive zero crossing at center
-          zc_index = MB::M.find_zero_crossing(middle)
-          middle = MB::M.rol(middle, zc_index - middle.length / 2) if zc_index
-
           buf[offset...(offset + period_samples)] = middle
           offset += period_samples
         end
 
-        buf.reshape(slices, period_samples)
+        center(buf.reshape(slices, period_samples).inplace!).not_inplace!
       end
 
       # Fades +clip+ in or out in-place.  For .make_wavetable.
@@ -215,6 +211,32 @@ module MB
           data -= data.mean
           rowmax = MB::M.max(-80.db, data.abs.max)
           wavetable[row, nil] = data * (max / rowmax)
+        end
+
+        wavetable
+      end
+
+      # Performs per-row centering to place each wave's first zero crossing in
+      # the middle of the buffer.  Returns the existing wavetable if it was
+      # marked as in-place, or a copy if it wasn't.  Raises an error if there
+      # is no zero crossing (could be caused by silence, DC offset).
+      def self.center(wavetable)
+        raise 'Wavetable must be a 2D Numo::NArray' unless wavetable.is_a?(Numo::NArray) && wavetable.ndim == 2
+
+        wavetable = wavetable.dup unless wavetable.inplace?
+
+        for row in 0...wavetable.shape[0]
+          wave = wavetable[row, nil]
+
+          zc_index = MB::M.find_zero_crossing(wave)
+          if zc_index.nil? && wave[-1] < 0 && wave[0] >= 0
+            # TODO: should find_zero_crossing wrap around like this?
+            zc_index = 0
+          end
+
+          raise "No zero crossing found for row #{row}" unless zc_index
+
+          wavetable[row, nil] = MB::M.rol(wave, zc_index - wave.length / 2)
         end
 
         wavetable
