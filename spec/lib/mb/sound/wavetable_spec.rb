@@ -38,6 +38,8 @@ RSpec.describe(MB::Sound::Wavetable, aggregate_failures: true) do
 
   pending '.make_wavetable'
 
+  pending '.generate'
+
   describe '.blur' do
     it 'blends adjacent rows' do
       blurred = MB::Sound::Wavetable.blur(table, 1)

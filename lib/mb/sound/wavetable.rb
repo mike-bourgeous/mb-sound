@@ -135,6 +135,52 @@ module MB
         center(buf.reshape(slices, period_samples).inplace!).not_inplace!
       end
 
+      # Calls a block +:steps+ times to generate a wavetable by passing
+      # interpolating parameters to the block.  Sample rate is assumed to be
+      # 48kHz.
+      #
+      # The +:from+ and +:to+ parameters may be anything that MB::M.interp can
+      # interpolate.  The interpolated value and a base Tone with period
+      # +:length+ samples will be yielded to the block.
+      #
+      # If the block returns a Numo::NArray, then that will be appended to the
+      # wavetable.
+      #
+      # If the block returns a Graph, then it will be sampled for +:length+
+      # samples 3 times (to allow for filter stabilization) with the last tone
+      # cycle appended to the wavetable (-(length*3/2)...-(length/2)).
+      def self.generate(steps: 10, from: 0, to: 1, length: 2048, center: false, sort: false, normalize: true)
+        table = Array.new(steps) { |i|
+          tone = (48000.0 / length).hz.at(1).with_phase(Math::PI)
+          val = MB::M.interp(from, to, i.to_f / (steps - 1), func: MB::M.method(:smoothstep))
+
+          ret = yield val, tone
+          case ret
+          when Numo::NArray
+            raise "Wave length must be #{length} samples" unless ret.shape == [2048]
+            ret
+
+          when GraphNode
+            ret.sample(length)
+            ret.sample(length)
+            ret.sample(length)
+
+          else
+            raise "Unsupported wavetable entry: #{ret.inspect}"
+          end
+        }
+
+        table = Numo::SFloat.cast(table).inplace!
+
+        table = normalize(table) if normalize
+        table = sort(table) if sort
+        table = center(table) if center
+
+        # TODO: crossfade edges?
+
+        table.not_inplace!
+      end
+
       # Fades +clip+ in or out in-place.  For .make_wavetable.
       def self.fade(clip, fade_in)
         fade = MB::FastSound.smootherstep_buf(Numo::SFloat.zeros(clip.length))
@@ -220,6 +266,9 @@ module MB
       # the middle of the buffer.  Returns the existing wavetable if it was
       # marked as in-place, or a copy if it wasn't.  Raises an error if there
       # is no zero crossing (could be caused by silence, DC offset).
+      #
+      # TODO: find the closest zero crossing to the existing center in either
+      # direction?
       def self.center(wavetable)
         raise 'Wavetable must be a 2D Numo::NArray' unless wavetable.is_a?(Numo::NArray) && wavetable.ndim == 2
 
@@ -234,7 +283,7 @@ module MB
             zc_index = 0
           end
 
-          raise "No zero crossing found for row #{row}" unless zc_index
+          raise "No zero crossing found for row #{row} (min/max: #{wave.minmax})" unless zc_index
 
           wavetable[row, nil] = MB::M.rol(wave, zc_index - wave.length / 2)
         end
