@@ -141,7 +141,7 @@ module MB
       #
       # The +:from+ and +:to+ parameters may be anything that MB::M.interp can
       # interpolate.  Interpolation uses the smoothstep curve; use the :curve
-      # parameter to change this.
+      # parameter to change this (nil or ->{it} will be linear).
       #
       # The block will receive the interpolated value for the current step and
       # a Tone object with a period of +:length+ samples.
@@ -155,6 +155,13 @@ module MB
       #
       # The :center, :sort, and :normalize parameters enable or disable
       # post-processing by the method of the same name.
+      #
+      # Examples:
+      #     # Square to saw
+      #     MB::Sound::Wavetable.generate(fade_edges: false) { |v, _t| MB::M.safe_power(Numo::SFloat.linspace(-1, 1, 2048), v) }
+      #
+      #     # Harmonics
+      #     MB::Sound::Wavetable.generate(from: 2, to: 11, curve: nil) { |v, t| t + (t.frequency * v).hz }
       def self.generate(steps: 10, from: 0, to: 1, length: 2048, center: false, sort: false, normalize: true, fade_edges: true, curve: MB::M.method(:smoothstep))
         table = Array.new(steps) { |i|
           tone = (48000.0 / length).hz.at(1).with_phase(Math::PI)
