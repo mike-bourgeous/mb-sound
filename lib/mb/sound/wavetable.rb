@@ -140,8 +140,11 @@ module MB
       # 48kHz.
       #
       # The +:from+ and +:to+ parameters may be anything that MB::M.interp can
-      # interpolate.  The interpolated value and a base Tone with period
-      # +:length+ samples will be yielded to the block.
+      # interpolate.  Interpolation uses the smoothstep curve; use the :curve
+      # parameter to change this.
+      #
+      # The block will receive the interpolated value for the current step and
+      # a Tone object with a period of +:length+ samples.
       #
       # If the block returns a Numo::NArray, then that will be appended to the
       # wavetable.
@@ -149,10 +152,13 @@ module MB
       # If the block returns a Graph, then it will be sampled for +:length+
       # samples 3 times (to allow for filter stabilization) with the last tone
       # cycle appended to the wavetable (-(length*3/2)...-(length/2)).
-      def self.generate(steps: 10, from: 0, to: 1, length: 2048, center: false, sort: false, normalize: true)
+      #
+      # The :center, :sort, and :normalize parameters enable or disable
+      # post-processing by the method of the same name.
+      def self.generate(steps: 10, from: 0, to: 1, length: 2048, center: false, sort: false, normalize: true, fade_edges: true, curve: MB::M.method(:smoothstep))
         table = Array.new(steps) { |i|
           tone = (48000.0 / length).hz.at(1).with_phase(Math::PI)
-          val = MB::M.interp(from, to, i.to_f / (steps - 1), func: MB::M.method(:smoothstep))
+          val = MB::M.interp(from, to, i.to_f / (steps - 1), func: curve)
 
           ret = yield val, tone
           case ret
@@ -174,9 +180,10 @@ module MB
 
         table = normalize(table) if normalize
         table = sort(table) if sort
-        table = center(table) if center
 
-        # TODO: crossfade edges?
+        table = fade_edges(table) if fade_edges && center
+        table = center(table) if center
+        table = fade_edges(table) if fade_edges
 
         table.not_inplace!
       end
@@ -186,6 +193,42 @@ module MB
         fade = MB::FastSound.smootherstep_buf(Numo::SFloat.zeros(clip.length))
         fade = 1 - fade.inplace unless fade_in
         clip.inplace * fade.not_inplace!
+      end
+
+      # Blends the edges of each entry in +table+ to temper clicks for waves
+      # that aren't perfectly periodic or have discontinuities at the edge.
+      #
+      # Fades the first and last 1/64th of the buffer, with a minimum fade of 4
+      # samples.  Doesn't modify tables shorter than 8 samples.
+      def self.fade_edges(table)
+        raise 'Wavetable must be a 2D Numo::NArray' unless table.is_a?(Numo::NArray) && table.ndim == 2
+
+        rows, cols = table.shape
+
+        return table if cols < 8
+
+        table = table.dup unless table.inplace?
+
+        fade_cols = cols / 64
+        fade_cols = 4 if fade_cols < 4
+
+        fade_buf = MB::FastSound.smootherstep_buf(Numo::SFloat.zeros(fade_cols * 2))
+        fade_in_buf = (fade_buf[fade_cols..-1].inplace! * 2 - 1).not_inplace!
+        fade_out_buf = (1 - fade_buf[0...fade_cols].inplace! * 2).not_inplace!
+
+        rows.times do |row|
+          wave = table[row, nil]
+
+          intro = wave[0...fade_cols].inplace!
+          outro = wave[-fade_cols..-1].inplace!
+
+          mid = intro[0] + outro[-1]
+
+          intro * fade_in_buf + Numo::SFloat.linspace(0, mid, fade_cols + 2)[1..-2]
+          outro * fade_out_buf + Numo::SFloat.linspace(mid, 0, fade_cols)
+        end
+
+        table
       end
 
       # Creates a new wavetable that blends each row in the given +wavetable+

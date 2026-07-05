@@ -38,7 +38,31 @@ RSpec.describe(MB::Sound::Wavetable, aggregate_failures: true) do
 
   pending '.make_wavetable'
 
-  pending '.generate'
+  describe '.generate' do
+    let (:fm_table) { MB::Sound::Wavetable.generate { |v, t| t.fm(t.frequency * (1 + v)) } }
+
+    it 'defaults to 10x2048' do
+      expect(fm_table.shape).to eq([10, 2048])
+      expect(fm_table.min.round(6)).to eq(-1)
+      expect(fm_table.max.round(6)).to eq(1)
+    end
+
+    it 'can generate different sizes' do
+      expect(MB::Sound::Wavetable.generate(steps: 71, length: 147) { |_v, t| t }.shape).to eq([71, 147])
+    end
+
+    it 'can assemble NArrays' do
+      table = MB::Sound::Wavetable.generate(normalize: false, fade_edges: false) { |v, _t| Numo::SFloat.linspace(-v, v, 2048) }
+      expect(table[-1, nil].min.round(6)).to eq(-1)
+      expect(table[-1, nil].max.round(6)).to eq(1)
+      expect(table[1, nil].min.round(6)).to eq(-MB::M.smoothstep(1.0 / 9.0).round(6))
+      expect(table[1, nil].max.round(6)).to eq(MB::M.smoothstep(1.0 / 9.0).round(6))
+    end
+
+    pending ':curve'
+
+    pending 'post-processing parameters'
+  end
 
   describe '.blur' do
     it 'blends adjacent rows' do
