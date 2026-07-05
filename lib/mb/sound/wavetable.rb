@@ -210,6 +210,10 @@ module MB
       def self.fade_edges(table)
         raise 'Wavetable must be a 2D Numo::NArray' unless table.is_a?(Numo::NArray) && table.ndim == 2
 
+        # FIXME: make this look right for all of these:
+        # t = MB::Sound::Wavetable.generate { |v, t| t.fm(v.constant) }
+        # t = MB::Sound::Wavetable.generate(steps: 100, normalize: false) { |v, t| Numo::SFloat.zeros(2048).fill(v) }
+
         rows, cols = table.shape
 
         return table if cols < 8
@@ -229,10 +233,10 @@ module MB
           intro = wave[0...fade_cols].inplace!
           outro = wave[-fade_cols..-1].inplace!
 
-          mid = intro[0] + outro[-1]
+          mid = 0.5 * (intro[0] + outro[-1])
 
-          intro * fade_in_buf + Numo::SFloat.linspace(0, mid, fade_cols + 2)[1..-2]
-          outro * fade_out_buf + Numo::SFloat.linspace(mid, 0, fade_cols)
+          intro * fade_in_buf + mid * (1 - fade_in_buf)
+          outro * fade_out_buf + mid * (1 - fade_out_buf)
         end
 
         table
