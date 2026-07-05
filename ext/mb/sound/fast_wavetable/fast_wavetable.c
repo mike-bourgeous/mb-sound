@@ -202,8 +202,7 @@ static VALUE ruby_cubic_interp(VALUE self, VALUE y_1, VALUE y0, VALUE y1, VALUE 
 // Port of Ruby outer_linear and inner_lookup.
 static double outer_linear(float *wavetable, size_t rows, size_t columns, double number, double phase, enum wrapping_mode wrap)
 {
-	double maxnum = (double)rows / (double)(rows - 1);
-	double frow = fwrap(number, maxnum) * (rows - 1);
+	double frow = fwrap(number * (rows - 1), rows);
 	ssize_t row1 = (ssize_t)floor(frow) % rows;
 	ssize_t row2 = (row1 + 1) % rows;
 	ssize_t offset1 = columns * row1;
@@ -253,8 +252,7 @@ static VALUE ruby_outer_linear(VALUE self, VALUE wavetable, VALUE number, VALUE 
 // Cubic interpolated 2D lookup.
 static double outer_cubic(float *wavetable, size_t rows, size_t columns, double number, double phase, enum wrapping_mode wrap)
 {
-	double maxnum = (double)rows / (double)(rows - 1);
-	double frow = fwrap(number, maxnum) * (rows - 1);
+	double frow = fwrap(number * (rows - 1), rows);
 	ssize_t row1 = (ssize_t)floor(frow) % rows;
 	ssize_t row2 = (row1 + 1) % rows;
 	ssize_t offset1 = columns * row1;

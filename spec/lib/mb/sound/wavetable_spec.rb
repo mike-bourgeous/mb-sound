@@ -1,5 +1,9 @@
 RSpec.describe(MB::Sound::Wavetable, aggregate_failures: true) do
-  let(:table) {
+  let (:one_table) {
+    Numo::SFloat[[5, -3, 3, -1, 2]]
+  }
+
+  let (:table) {
     Numo::SFloat[
       [1, 2, 3, 4, 5],
       [5, -3, 3, -1, 2],
@@ -33,6 +37,19 @@ RSpec.describe(MB::Sound::Wavetable, aggregate_failures: true) do
       result = MB::Sound.read(name, metadata_out: metadata)[0]
       expect(result).to all_be_within(1e-6).of_array(Numo::SFloat[0.5, -0.5, 0, 0.1, 0.2, -0.3, -0.75, 0.25, 0.75])
       expect(metadata[:mb_sound_wavetable_period]&.to_i).to eq(3)
+    end
+
+    it 'can write a single-row wavetable to disk' do
+      name = 'tmp/single_wavetable_save.flac'
+      FileUtils.mkdir_p('tmp/')
+      File.unlink(name) if File.exist?(name)
+
+      MB::Sound::Wavetable.save_wavetable(name, one_table / 5)
+
+      metadata = {}
+      result = MB::Sound.read(name, metadata_out: metadata)[0]
+      expect(result).to all_be_within(1e-6).of_array(one_table.reshape(5) / 5)
+      expect(metadata[:mb_sound_wavetable_period]&.to_i).to eq(5)
     end
   end
 
@@ -89,6 +106,8 @@ RSpec.describe(MB::Sound::Wavetable, aggregate_failures: true) do
         [-2.33333, 0.666667, -2, 0, -3.66667]
       ])
     end
+
+    pending 'works with steps set to 1'
   end
 
   describe '.normailze' do
@@ -155,6 +174,8 @@ RSpec.describe(MB::Sound::Wavetable, aggregate_failures: true) do
       zc_table.inplace!
       expect { MB::Sound::Wavetable.center(zc_table) }.to change { zc_table.to_a }
     end
+
+    pending 'works with a single-row wavetable'
   end
 
   context 'array lookup' do
@@ -203,6 +224,45 @@ RSpec.describe(MB::Sound::Wavetable, aggregate_failures: true) do
       it 'can zero cubic oob' do
         result = MB::Sound::Wavetable.send(m, wavetable: table, number: oob_number, phase: oob_phase, lookup: :cubic, wrap: :zero)
         expect(result).to all_be_within(1e-5).of_array(Numo::SFloat[1.5, -1, -0.625, 1.1875, -0.24609375, 0.0703125])
+      end
+
+      context 'with a single-row wavetable' do
+        #XXX
+      let(:number) { Numo::SFloat[0, 1.0 / 2.0, 2.0 / 2.0, -2.0 / 2.0, 1.0 / 4.0] }
+      let(:phase) { Numo::SFloat[0, 0.4, 0.6, 1.2, 0.1] * 2 - 1 }
+      let(:oob_number) { Numo::SFloat[0, 1.0 / 2.0, 2.0 / 2.0, -2.0 / 2.0, 1.0 / 4.0, 5.0 / 2.0] }
+      let(:oob_phase) { Numo::SFloat[0.1, 0.6, -0.1, 0.9, 1.05, -0.25] * 2 - 1 }
+
+        it 'can wrap linear oob' do
+          result = MB::Sound::Wavetable.send(m, wavetable: one_table, number: number, phase: phase, lookup: :linear, wrap: :wrap)
+          expect(result).to all_be_within(1e-5).of_array(Numo::SFloat[5, 3, -1, -3, 1])
+        end
+
+        it 'can wrap cubic oob' do
+          result = MB::Sound::Wavetable.send(m, wavetable: one_table, number: number, phase: phase, lookup: :cubic, wrap: :wrap)
+          expect(result).to all_be_within(1e-5).of_array(Numo::SFloat[5, 3, -1, -3, 0.8125])
+        end
+
+        it 'can bounce linear oob' do
+          result = MB::Sound::Wavetable.send(m, wavetable: one_table, number: oob_number, phase: oob_phase, lookup: :linear, wrap: :bounce)
+          expect(result).to all_be_within(1e-5).of_array(Numo::SFloat[1, -1, 1, 0.5, 0, -1.5])
+        end
+
+        it 'can bounce cubic oob' do
+          result = MB::Sound::Wavetable.send(m, wavetable: one_table, number: oob_number, phase: oob_phase, lookup: :cubic, wrap: :bounce)
+          expect(result).to all_be_within(1e-5).of_array(Numo::SFloat[1.125, -1, 1.125, 0.437501, -0.257814, -2.25])
+        end
+
+        it 'ignores number' do
+          result = MB::Sound::Wavetable.send(m, wavetable: one_table, number: Numo::SFloat.linspace(-2.72, 3.14, 6), phase: oob_phase.dup, lookup: :cubic, wrap: :bounce)
+          expect(result).to all_be_within(1e-5).of_array(Numo::SFloat[1.125, -1, 1.125, 0.437501, -0.257814, -2.25])
+
+          result = MB::Sound::Wavetable.send(m, wavetable: one_table, number: Numo::SFloat.zeros(6), phase: oob_phase.dup, lookup: :cubic, wrap: :bounce)
+          expect(result).to all_be_within(1e-5).of_array(Numo::SFloat[1.125, -1, 1.125, 0.437501, -0.257814, -2.25])
+
+          result = MB::Sound::Wavetable.send(m, wavetable: one_table, number: Numo::SFloat.ones(6), phase: oob_phase.dup, lookup: :cubic, wrap: :bounce)
+          expect(result).to all_be_within(1e-5).of_array(Numo::SFloat[1.125, -1, 1.125, 0.437501, -0.257814, -2.25])
+        end
       end
     end
 
