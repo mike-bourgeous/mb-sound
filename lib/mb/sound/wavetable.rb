@@ -213,6 +213,13 @@ module MB
         # FIXME: make this look right for all of these:
         # t = MB::Sound::Wavetable.generate { |v, t| t.fm(v.constant) }
         # t = MB::Sound::Wavetable.generate(steps: 100, normalize: false) { |v, t| Numo::SFloat.zeros(2048).fill(v) }
+        #
+        # Idea: subtract a smoothstep or linear element across the fade range,
+        # preserving some higher frequencies but ending at the same value as
+        # the beginning.  This might be made idempotent(?)
+        #
+        # Idea 2: ignore the midpoint value and just blend between the end
+        # values
 
         rows, cols = table.shape
 
