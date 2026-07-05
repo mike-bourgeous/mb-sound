@@ -11,6 +11,20 @@ module MB
         include GraphNode
         include GraphNode::SampleRateHelper
 
+        # Valid values for the constructor's :wrap parameter.
+        WRAP_MODES = [
+          :wrap,
+          :bounce,
+          :clamp,
+          :zero
+        ]
+
+        # Valid values for the constructor's :lookup parameter.
+        LOOKUP_MODES = [
+          :linear,
+          :cubic
+        ]
+
         # The 2D Numo::NArray wavetable data used for sampling.
         attr_reader :table
 
@@ -22,14 +36,25 @@ module MB
 
         # Creates a new wavetable node.
         #
+        # The output of the MIDI value node for +:wrap+ will be scaled from its
+        # original range to cover the range of wrapping modes, without
+        # blending.
+        #
         # +:wavetable+ - A 2D Numo::NArray with time as columns and waves as
         #                rows, the filename of a previously saved wavetable, or
         #                a Hash of args to MB::Sound::Wavetable.load_wavetable.
         # +:number+ - A GraphNode to control the wave number (e.g. `3.constant`).
         # +:phase+ - A GraphNode to control the wave phase (e.g. `120.hz.ramp.at(1)`).
+        # +:lookup+ - Interpolation mode (:cubic or :linear).
+        # +:wrap+ - Wrapping mode (:wrap, :clamp, :bounce, :zero).  This can
+        #           also be a MIDI value node to allow changing modes on the fly.
         def initialize(wavetable:, number:, phase:, sample_rate:, lookup:, wrap:)
           raise 'Number must be a GraphNode' unless number.is_a?(GraphNode)
           raise 'Phase must be a GraphNode' unless phase.is_a?(GraphNode)
+          raise 'Lookup mode must be :linear or :cubic' unless LOOKUP_MODES.include?(lookup)
+          unless WRAP_MODES.include?(wrap) || wrap.is_a?(MB::Sound::GraphNode::MidiDsl::MidiValue)
+            raise 'Wrapping mode must be a symbol or a MIDI node'
+          end
 
           case wavetable
           when Hash
@@ -42,7 +67,7 @@ module MB
 
           else
             unless wavetable.is_a?(Numo::NArray) && wavetable.ndim == 2
-              raise 'Wavetable must be a 2D NArray or a wavetable filename' unless wavetable.ndim == 2
+              raise 'Wavetable must be a 2D NArray, Hash of load_wavetable arguments, or a wavetable filename'
             end
           end
 
@@ -72,8 +97,22 @@ module MB
           rho = MB::M.zpad(rho, count) if rho.length < count
           phi = MB::M.zpad(phi, count) if phi.length < count
 
-          # TODO: parameters for lookup mode and wrapping mode
-          ::MB::Sound::Wavetable.wavetable_lookup(wavetable: @table, number: rho, phase: phi, lookup: @lookup, wrap: @wrap)
+          case @wrap
+          when Symbol
+            wrap = @wrap
+
+          else
+            # MIDI-controlled wrapping mode
+            # TODO: allow the value range to select a subset of wrapping modes?
+            # TODO: allow any graph node and treat a range of 0..1 as the index range, with wrapping?
+            data = @wrap.sample(count)
+            return nil if data.nil? || data.empty?
+            index = MB::M.scale(data[-1], @wrap.range || (0..1), 0..WRAP_MODES.length).floor
+            index = WRAP_MODES.length - 1 if index >= WRAP_MODES.length
+            wrap = WRAP_MODES[index]
+          end
+
+          ::MB::Sound::Wavetable.wavetable_lookup(wavetable: @table, number: rho, phase: phi, lookup: @lookup, wrap: wrap)
         end
       end
     end
