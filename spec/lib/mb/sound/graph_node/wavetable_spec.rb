@@ -31,7 +31,7 @@ RSpec.describe(MB::Sound::GraphNode::Wavetable) do
     end
 
     describe ':wrap parameter' do
-      let(:phase) { MB::Sound::ArrayInput.new(data: [ Numo::SFloat[0, 1.0 / 4.0, 1, 5.0 / 4.0, -1.0 / 4.0] * 2 - 1 ]) }
+      let(:phase) { MB::Sound::ArrayInput.new(data: [ Numo::SFloat[0, 1.0 / 3.0, 4.0 / 3.0, 5.0 / 3.0, -1.0 / 3.0] * 2 - 1 ]) }
       let(:table) { Numo::SFloat[[1, -2, 3, -4]] }
 
       it 'defaults to :wrap' do
@@ -66,7 +66,7 @@ RSpec.describe(MB::Sound::GraphNode::Wavetable) do
     end
 
     describe ':lookup parameter' do
-      let(:interp_phase) { MB::Sound::ArrayInput.new(data: [ Numo::SFloat[0, 1.0 / 8.0, 7.0 / 8.0, 9.0 / 8.0, -1.0 / 4.0] * 2 - 1 ]) }
+      let(:interp_phase) { MB::Sound::ArrayInput.new(data: [ Numo::SFloat[0, 1.0 / 6.0, 7.0 / 6.0, 9.0 / 6.0, -1.0 / 3.0] * 2 - 1 ]) }
       let(:table) { Numo::SFloat[[1, -2, 3, -4]] }
 
       it 'defaults to cubic' do
@@ -91,7 +91,7 @@ RSpec.describe(MB::Sound::GraphNode::Wavetable) do
 
   describe '#sample' do
     it 'treats the upstream data as the phase source' do
-      phase = MB::Sound::ArrayInput.new(data: [Numo::SFloat.linspace(0, 2, 13) * 2 - 1])
+      phase = MB::Sound::ArrayInput.new(data: [Numo::SFloat.linspace(0, 12.0/5.0, 13) * 2 - 1])
       number = 0.constant
       expect(phase.wavetable(wavetable: data, number: number).sample(12)).to all_be_within(1e-6).of_array(
         Numo::SFloat[1, -1, 1, 1, -1, -1, 1, -1, 1, 1, -1, -1]
@@ -99,7 +99,7 @@ RSpec.describe(MB::Sound::GraphNode::Wavetable) do
     end
 
     it 'changes wave number based on the number source' do
-      phase = MB::Sound::ArrayInput.new(data: [Numo::SFloat[0, 0, 1.0 / 6.0, 1.0 / 6.0] * 2 - 1], repeat: true)
+      phase = MB::Sound::ArrayInput.new(data: [Numo::SFloat[0, 0, 1.0 / 5.0, 1.0 / 5.0] * 2 - 1], repeat: true)
       number = MB::Sound::ArrayInput.new(data: [Numo::SFloat[0, 1, 2, 2.5]], repeat: true)
       expect(phase.wavetable(wavetable: data, number: number).sample(8)).to all_be_within(1e-6).of_array(
         Numo::SFloat[1, 0, -1, 0, 1, 0, -1, 0]
@@ -107,7 +107,7 @@ RSpec.describe(MB::Sound::GraphNode::Wavetable) do
     end
 
     it 'changes wave number based on the number source using linspace' do
-      phase = MB::Sound::ArrayInput.new(data: [Numo::SFloat[0, 0, 1.0 / 6.0, 1.0 / 6.0] * 2 - 1], repeat: true)
+      phase = MB::Sound::ArrayInput.new(data: [Numo::SFloat[0, 0, 1.0 / 5.0, 1.0 / 5.0] * 2 - 1], repeat: true)
       number = MB::Sound::ArrayInput.new(data: [Numo::SFloat.linspace(0, 8, 9)])
       expect(phase.wavetable(wavetable: data, number: number).sample(8)).to all_be_within(1e-6).of_array(
         Numo::SFloat[1, 0, -1, 1, 1, 0, -1, 1]
