@@ -445,7 +445,7 @@ module MB
         row2 %= rows
         rowratio = frow - row1
 
-        fcol = (phase + 1) / 2 * cols
+        fcol = (phase + 1) / 2 * (cols - 1)
 
         vtop = MB::M.cubic_lookup(wavetable[row1, nil], fcol, mode: wrap)
         vbot = MB::M.cubic_lookup(wavetable[row2, nil], fcol, mode: wrap)
@@ -466,7 +466,7 @@ module MB
         row2 %= wave_count
         rowratio = frow - row1
 
-        fcol = (phase + 1) / 2 * sample_count
+        fcol = (phase + 1) / 2 * (sample_count - 1)
         col1 = fcol.floor
         col2 = col1 + 1
         colratio = fcol - col1

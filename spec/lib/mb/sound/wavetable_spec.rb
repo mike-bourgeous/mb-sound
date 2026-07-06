@@ -346,6 +346,16 @@ RSpec.describe(MB::Sound::Wavetable, aggregate_failures: true) do
         expect(MB::Sound::Wavetable.send(m, wavetable: table, number: 0, phase: 1.2 * 2 - 1, wrap: :zero).round(6)).to eq(0)
         expect(MB::Sound::Wavetable.send(m, wavetable: table, number: 0, phase: 1.21 * 2 - 1, wrap: :zero).round(6)).to eq(0)
       end
+
+      MB::Sound::GraphNode::Wavetable::WRAP_MODES.each do |w|
+        it "returns the original wave value for phase -1 with #{w}" do
+          expect(MB::Sound::Wavetable.send(m, wavetable: table, number: 0, phase: -1, wrap: w).round(6)).to eq(1)
+        end
+
+        it "returns the original wave value for phase 1 with #{w}" do
+          expect(MB::Sound::Wavetable.send(m, wavetable: table, number: 0, phase: 1, wrap: w).round(6)).to eq(5)
+        end
+      end
     end
 
     shared_examples_for 'linear lookup' do |m|

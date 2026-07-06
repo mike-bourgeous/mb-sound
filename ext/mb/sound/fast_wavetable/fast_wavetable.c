@@ -200,6 +200,7 @@ static VALUE ruby_cubic_interp(VALUE self, VALUE y_1, VALUE y0, VALUE y1, VALUE 
 
 // Interpolated 2D lookup.
 // Port of Ruby outer_linear and inner_lookup.
+// Phase ranges from -1..1 for a full single wave cycle.
 static double outer_linear(float *wavetable, size_t rows, size_t columns, double number, double phase, enum wrapping_mode wrap)
 {
 	double frow = fwrap(number * (rows - 1), rows);
@@ -209,7 +210,7 @@ static double outer_linear(float *wavetable, size_t rows, size_t columns, double
 	ssize_t offset2 = columns * row2;
 	double rowratio = frow - row1;
 
-	double fcol = (phase + 1) / 2 * columns;
+	double fcol = (phase + 1) / 2 * (columns - 1);
 	ssize_t col1 = (ssize_t)floor(fcol);
 	ssize_t col2 = col1 + 1;
 	double colratio = fcol - col1;
@@ -250,6 +251,7 @@ static VALUE ruby_outer_linear(VALUE self, VALUE wavetable, VALUE number, VALUE 
 }
 
 // Cubic interpolated 2D lookup.
+// Phase ranges from -1..1 for a full single wave cycle.
 static double outer_cubic(float *wavetable, size_t rows, size_t columns, double number, double phase, enum wrapping_mode wrap)
 {
 	double frow = fwrap(number * (rows - 1), rows);
@@ -259,7 +261,7 @@ static double outer_cubic(float *wavetable, size_t rows, size_t columns, double 
 	ssize_t offset2 = columns * row2;
 	double rowratio = frow - row1;
 
-	double fcol = (phase + 1) / 2 * columns;
+	double fcol = (phase + 1) / 2 * (columns - 1);
 	ssize_t col1 = floor(fcol);
 	double colratio = fcol - col1;
 
