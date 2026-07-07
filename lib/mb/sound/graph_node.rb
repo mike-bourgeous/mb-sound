@@ -41,6 +41,9 @@ module MB
     # TODO: In-line method to create a meter?
     #
     # TODO: Document methods that nodes must implement or override
+    #
+    # TODO: Split methods in this module into groups and/or related classes
+    # (e.g. #wavetable could go into GraphNode::Wavetable)
     module GraphNode
       include Nameable
       include Traversable
@@ -707,6 +710,14 @@ module MB
       #
       # +:wavetable+ - A 2D NArray to use as the wavetable.
       # +:number+ - A GraphNode or Numeric to control wave number.
+      # +:lookup+ - Interpolation mode (noisy :linear or cleaner :cubic).
+      # +:wrap+ - A wrapping mode constant, or a MIDI value.
+      #
+      # See Wavetable#initialize.
+      #
+      # Example:
+      #     # Wavetable oscillator
+      #     midi.tone.ramp.wavetable(wavetable: t, number: midi.cc(1))
       def wavetable(wavetable:, number:, lookup: :cubic, wrap: :wrap)
         number = number.constant if number.is_a?(Numeric)
         phase = self
