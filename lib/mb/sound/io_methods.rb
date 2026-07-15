@@ -355,6 +355,9 @@ module MB
         when :alsa
           o = MB::Sound::AlsaOutput.new(device: device || 'default', sample_rate: sample_rate, channels: channels, buffer_size: buffer_size)
 
+        when :ffmpeg
+          o = MB::Sound::FFMPEGOutput.new('default', sample_rate: sample_rate, channels: channels, buffer_size: buffer_size, format: 'audiotoolbox')
+
         when :null
           o = MB::Sound::NullOutput.new(channels: channels, sample_rate: sample_rate, buffer_size: buffer_size)
 
@@ -397,7 +400,7 @@ module MB
               :jack
             end
           else
-            raise NotImplementedError, 'JackD is currently required on macOS'
+            :ffmpeg
           end
 
         else
