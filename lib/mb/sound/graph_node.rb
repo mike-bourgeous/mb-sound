@@ -603,45 +603,6 @@ module MB
         ).named(name).taps
       end
 
-      # Appends a reverb to this node.  Named presets change default
-      # parameters, but you can override any of the preset's parameters.
-      #
-      # If this is a multi-output node (e.g. a splittable input object), then
-      # the outputs are broken out as a multichannel input to the Reverb.
-      #
-      # Presets: :room, :hall, :stadium, :space, :default.  See
-      # Reverb::PRESETS.
-      #
-      # See MB::Sound::GraphNode::Reverb#initialize for parameter descriptions.
-      #
-      # The +:extra_time+ parameter controls how much time to add to input
-      # objects to allow the reverb to decay.
-      #
-      # If +:output_channels+ is 
-      #
-      # Example (bin/sound.rb):
-      #     play file_input('sounds/drums.flac').reverb
-      #     play file_input('sounds/piano0.flac').reverb(:space)
-      def reverb(preset = :default, extra_time: nil, output_channels: 1, channels: nil, stages: nil, diffusion_range: nil, feedback_range: nil, feedback_gain: nil, feedback_enabled: nil, predelay: nil, wet: nil, dry: nil, seed: nil, show_internals: false)
-        MB::Sound::GraphNode::Reverb.reverb(
-          preset,
-          input: self,
-          extra_time: extra_time,
-          output_channels: output_channels,
-          channels: channels,
-          stages: stages,
-          diffusion_range: diffusion_range,
-          feedback_range: feedback_range,
-          feedback_gain: feedback_gain,
-          feedback_enabled: feedback_enabled,
-          predelay: predelay,
-          wet: wet,
-          dry: dry,
-          seed: seed,
-          show_internals: show_internals
-        )
-      end
-
       # Hard-clips the output of this node to the given min and max, one of
       # which may be nil to disable clipping in that direction.
       def clip(min, max)
@@ -910,10 +871,10 @@ module MB
             # TODO: this would all be easier if source/dest links were bidirectional
             # TODO: is this a reasonable number?
             if source_history[s] > 50 + source_list.length
-              # FIXME: node graph iteration is reporting possible infinite loops on reverb which shouldn't have any loops
+              # FIXME: node graph iteration is reporting possible infinite loops on code which shouldn't have any loops
               # FIXME: only re-traverse a node if doing so would change its
               # depth; I suspect we're doing an exponential traversal of all
-              # possible edge combinations in the reverb graph.
+              # possible edge combinations in complex graphs.
               warn "Possible infinite loop on #{s} (started from #{self}; seen #{source_history[s]} times of #{source_list.length})"
               next
             end
@@ -1104,4 +1065,3 @@ require_relative 'graph_node/quantize'
 require_relative 'graph_node/data_shuffler'
 require_relative 'graph_node/wavetable'
 require_relative 'graph_node/matrix_mixer'
-require_relative 'graph_node/reverb'

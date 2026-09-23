@@ -10,7 +10,12 @@
 .*.swo
 /*.flac
 /*.wav
+/*.mp3
 /spec/examples.txt
 .gdb_history
 /lib/**/*.so
 .byebug_history
+
+/*.c
+/a.out
+/bench.csv
