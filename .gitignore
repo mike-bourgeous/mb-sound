@@ -25,3 +25,5 @@
 .claude/settings.local.json
 .claude/todos.json
 .claude/worktrees/
+.claude-user
+.gh-user
