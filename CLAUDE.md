@@ -90,7 +90,7 @@ Two reverb implementations coexist:
 - Commit progress and experimentation incrementally as you work
 - Provide step-by-step commits with detailed commit messages for easy review
 - Use non-fast-forward merge commits when features are complete
-- The primary/trunk branch is called `master`
+- The primary/trunk branch is called `master-ai` (upstream GitHub trunk is `master`; the old unconnected local history is tagged `local-master-pre-reconcile`)
 - Local development; no push to remote
 
 ## Key Conventions
