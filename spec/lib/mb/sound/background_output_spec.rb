@@ -103,6 +103,21 @@ RSpec.describe(MB::Sound::BackgroundOutput) do
     expect(elapsed).to be > 0.8
   end
 
+  it 'keeps a realtime ffmpeg output in step with the caller' do
+    # Mirrors the macOS output: a realtime FFMPEGOutput behind
+    # BackgroundOutput.  Writing 2 seconds of audio should take about 2
+    # seconds, not return early because of buffering inside ffmpeg.
+    ffmpeg = MB::Sound::FFMPEGOutput.new('/dev/null', sample_rate: 48000, channels: 2, format: 'f32le', realtime: true)
+    bg = MB::Sound::BackgroundOutput.new(ffmpeg)
+
+    t = MB::U.clock_now
+    (2 * 48000 / 800).times { bg.write([Numo::SFloat.zeros(800)] * 2) }
+    elapsed = MB::U.clock_now - t
+    bg.close
+
+    expect(elapsed).to be_between(1.5, 3)
+  end
+
   it 're-raises errors from the background thread' do
     out.write([Numo::SFloat.zeros(480)] * 2)
     recorder.fail = true
