@@ -293,7 +293,7 @@ module MB
               :jack
             end
           else
-            raise NotImplementedError, 'JackD is currently required on macOS'
+            raise NotImplementedError, 'JackD is currently required for audio input on macOS'
           end
 
         else
@@ -308,12 +308,14 @@ module MB
       # environment variable, the DEVICE environment variable or +:device+
       # parameter may be used to override the default.  Environment variables
       # take precedence.  For JackD, the device is a prefix for port names, with
-      # the default being 'system:playback_'.
+      # the default being 'system:playback_'.  For :ffmpeg on macOS, the device
+      # is an audiotoolbox device index.
       #
       # The output type may be changed using the OUTPUT_TYPE environment
       # variable.  Supported output types are :jack_ffi, :jack, :alsa_pulse,
-      # :alsa, and :null.  The +:output_type+ parameter overrides both the
-      # environment variable and automatic detection.
+      # :alsa, :ffmpeg (macOS only), and :null.  On macOS, :ffmpeg is used
+      # automatically if JackD is not running.  The +:output_type+ parameter
+      # overrides both the environment variable and automatic detection.
       #
       # See FFMPEGOutput, mb-sound-jackffi, JackOutput, and AlsaOutput for more
       # flexible playback.
@@ -356,6 +358,17 @@ module MB
         when :alsa
           o = MB::Sound::AlsaOutput.new(device: device || 'default', sample_rate: sample_rate, channels: channels, buffer_size: buffer_size)
 
+        when :ffmpeg
+          raise NotImplementedError, 'The :ffmpeg output type is currently only supported on macOS' unless RUBY_PLATFORM =~ /darwin/
+
+          # ffmpeg's audiotoolbox device parses the output name as a device
+          # index (list them with `ffmpeg -f lavfi -i sine=d=0.5 -f audiotoolbox
+          # -list_devices true -`); a non-numeric name selects the system
+          # default output.  The codec keeps samples as float instead of
+          # ffmpeg's default of 16-bit integer.
+          at_device = ENV['OUTPUT_DEVICE'] || ENV['DEVICE'] || device || 'default'
+          o = MB::Sound::FFMPEGOutput.new(at_device.to_s, sample_rate: sample_rate, channels: channels, buffer_size: buffer_size, format: 'audiotoolbox', codec: 'pcm_f32le')
+
         when :null
           o = MB::Sound::NullOutput.new(channels: channels, sample_rate: sample_rate, buffer_size: buffer_size)
 
@@ -390,7 +403,7 @@ module MB
 
         when /darwin/
           # TODO: mac output is flaky, has glitches when plotting to terminal, and MIDI input crashes when RUBYOPT=--jit
-          # jackd -R -X coremidi -d coreaudio
+          # To use JackD instead of ffmpeg: jackd -R -X coremidi -d coreaudio
           if `pgrep jackd`.strip.length > 0
             if defined?(JackFFI)
               :jack_ffi
@@ -398,7 +411,7 @@ module MB
               :jack
             end
           else
-            raise NotImplementedError, 'JackD is currently required on macOS'
+            :ffmpeg
           end
 
         else
