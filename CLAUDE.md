@@ -4,11 +4,11 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-mb-sound is a Ruby library for sound processing with a fluent DSL for building signal processing chains. It is a companion to an educational YouTube video series about sound. It uses Numo::NArray for numeric operations and includes C extensions for performance-critical paths.
+mb-sound is a Ruby library for sound processing with a fluent DSL for building signal processing chains. It is a companion to an educational YouTube video series about sound. It uses Numo::NArray (via the `numo-narray-alt` fork) for numeric operations and includes C extensions for performance-critical paths.
 
 ### Folders
 
-- `bin/` - user-facing scripts and experiments
+- `bin/` - user-facing scripts and experiments (`bin/effects/`, `bin/synths/`, `bin/midi/`, `bin/songs/`, plus general utilities at the top level)
 - `ext/` - C extensions for performance-critical functions
 - `lib/` - Ruby code (most functionality lives here)
 - `spec/` - Test suite
@@ -27,7 +27,9 @@ bin/sound.rb                      # Launch interactive Pry console with MB::Soun
 
 Note: run the test suite ONCE per change and save its output for processing, rather than running the test suite repeatedly with different `grep` pipes or options.
 
-System dependencies (apt): `ffmpeg gnuplot-qt libsamplerate0-dev graphviz`
+System dependencies (apt): `ffmpeg gnuplot-qt libsamplerate0-dev libjack-dev graphviz`
+
+In the container, `OUTPUT_TYPE=null` is set in the Dockerfile so playback uses `NullOutput`.
 
 ## Architecture
 
@@ -65,6 +67,13 @@ Graph nodes maintain input/output relationships and support traversal via the `T
 
 `lib/mb/sound/filter/` contains 16+ filter types (Biquad, FIR, Butterworth, Hilbert, Delay, etc.). Filters implement `#process` / `#reset`. `Filter::Cookbook` provides standard designs (lowpass, highpass, bandpass, etc.).
 
+### Reverbs
+
+Two reverb implementations coexist:
+
+- `GraphNode::Reverb` / `#reverb` (`lib/mb/sound/graph_node/reverb.rb`, `bin/effects/reverb.rb`) - the original from the reverb video; preset-based (`:room`, `:hall`, `:space`, ...), with visualizable internals.
+- `GraphNode::FdnReverb` / `#fdn_reverb` (`lib/mb/sound/graph_node/fdn_reverb.rb`, `bin/effects/fdn_reverb.rb`) - a clean-room implementation written with Claude Code; parameterized by `room_size`, `decay`, and `damping`, with seeded non-harmonic delays.
+
 ### MIDI
 
 `lib/mb/sound/midi/` handles MIDI file parsing, real-time input, voice management, and controller mapping. Integrates with the GraphNode DSL for synthesizer control.
@@ -86,8 +95,8 @@ Graph nodes maintain input/output relationships and support traversal via the `T
 
 ## Key Conventions
 
-- Ruby 3.4 target (supports 2.7+)
+- Ruby 3.4+ recommended (gemspec requires 3.2+); the container uses Ruby 4.0
 - Tests use RSpec (configured in `.rspec`)
-- The `bin/` directory contains ~57 example/utility scripts demonstrating synthesis, effects, MIDI, and plotting
+- The `bin/` directory contains ~65 example/utility scripts demonstrating synthesis, effects, MIDI, and plotting
 - Docker support via `Dockerfile` and `dock.sh` for containerized development
 - `Numo::NArray` for all sound data handling (choose numeric precision and real/complex as needed)
