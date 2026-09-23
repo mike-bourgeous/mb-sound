@@ -147,6 +147,7 @@ require_relative 'sound/loopback'
 require_relative 'sound/array_input'
 require_relative 'sound/input_buffer_wrapper'
 require_relative 'sound/output_buffer_wrapper'
+require_relative 'sound/background_output'
 
 require_relative 'sound/oscillator'
 require_relative 'sound/tone'
