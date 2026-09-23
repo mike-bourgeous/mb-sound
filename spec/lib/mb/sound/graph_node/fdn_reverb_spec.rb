@@ -1,7 +1,7 @@
-RSpec.describe(MB::Sound::GraphNode::Reverb) do
+RSpec.describe(MB::Sound::GraphNode::FdnReverb) do
   describe '.hadamard_matrix' do
     it 'returns an orthogonal matrix for size 4' do
-      pm = MB::Sound::GraphNode::Reverb.hadamard_matrix(4)
+      pm = MB::Sound::GraphNode::FdnReverb.hadamard_matrix(4)
       m = Matrix[*pm.to_a]
 
       # H * H^T should equal identity for an orthogonal matrix
@@ -17,7 +17,7 @@ RSpec.describe(MB::Sound::GraphNode::Reverb) do
 
   describe '.householder_matrix' do
     it 'returns an orthogonal matrix for size 4' do
-      pm = MB::Sound::GraphNode::Reverb.householder_matrix(4)
+      pm = MB::Sound::GraphNode::FdnReverb.householder_matrix(4)
       m = Matrix[*pm.to_a]
 
       product = m * m.transpose
@@ -30,16 +30,16 @@ RSpec.describe(MB::Sound::GraphNode::Reverb) do
     end
 
     it 'returns a symmetric matrix' do
-      pm = MB::Sound::GraphNode::Reverb.householder_matrix(4)
+      pm = MB::Sound::GraphNode::FdnReverb.householder_matrix(4)
       m = Matrix[*pm.to_a]
       expect(m).to eq(m.transpose)
     end
   end
 
-  describe MB::Sound::GraphNode::Reverb::DiffusionStep do
+  describe MB::Sound::GraphNode::FdnReverb::DiffusionStep do
     let(:step) {
-      hadamard = MB::Sound::GraphNode::Reverb.hadamard_matrix(4)
-      MB::Sound::GraphNode::Reverb::DiffusionStep.new(
+      hadamard = MB::Sound::GraphNode::FdnReverb.hadamard_matrix(4)
+      MB::Sound::GraphNode::FdnReverb::DiffusionStep.new(
         [0.005, 0.007, 0.009, 0.011], hadamard, sample_rate: 48000
       )
     }
@@ -62,9 +62,9 @@ RSpec.describe(MB::Sound::GraphNode::Reverb) do
     end
   end
 
-  describe MB::Sound::GraphNode::Reverb::FDN do
+  describe MB::Sound::GraphNode::FdnReverb::FDN do
     let(:fdn) {
-      MB::Sound::GraphNode::Reverb::FDN.new(
+      MB::Sound::GraphNode::FdnReverb::FDN.new(
         [0.03, 0.037, 0.041, 0.046],
         decay: 2.0,
         damping: 0.5,
@@ -106,7 +106,7 @@ RSpec.describe(MB::Sound::GraphNode::Reverb) do
     end
 
     it 'processes buffers larger than the shortest delay' do
-      short_fdn = MB::Sound::GraphNode::Reverb::FDN.new(
+      short_fdn = MB::Sound::GraphNode::FdnReverb::FDN.new(
         [0.005, 0.007, 0.009, 0.011],
         decay: 1.0,
         damping: 0.5,
@@ -128,14 +128,14 @@ RSpec.describe(MB::Sound::GraphNode::Reverb) do
 
   describe '#sample' do
     it 'returns a NArray of the requested length' do
-      reverb = 440.hz.sine.forever.reverb(sample_rate: 48000)
+      reverb = 440.hz.sine.forever.fdn_reverb(sample_rate: 48000)
       result = reverb.sample(800)
       expect(result).to be_a(Numo::SFloat)
       expect(result.length).to eq(800)
     end
 
     it 'returns nil when input is exhausted' do
-      reverb = 0.constant(smoothing: false).for(0.001).reverb(sample_rate: 48000, tail: 0)
+      reverb = 0.constant(smoothing: false).for(0.001).fdn_reverb(sample_rate: 48000, tail: 0)
       reverb.sample(48)
       result = reverb.sample(48)
       expect(result).to be_nil
@@ -143,7 +143,7 @@ RSpec.describe(MB::Sound::GraphNode::Reverb) do
 
     it 'passes through dry signal when wet=0' do
       input = 1.constant(smoothing: false)
-      reverb = MB::Sound::GraphNode::Reverb.new(
+      reverb = MB::Sound::GraphNode::FdnReverb.new(
         input, wet: 0.0, dry: 1.0, sample_rate: 48000
       )
 
@@ -154,7 +154,7 @@ RSpec.describe(MB::Sound::GraphNode::Reverb) do
 
     it 'adds reverb energy when wet > 0' do
       input_node = 0.constant(smoothing: false)
-      reverb = MB::Sound::GraphNode::Reverb.new(
+      reverb = MB::Sound::GraphNode::FdnReverb.new(
         input_node, wet: 0.5, dry: 0.5, sample_rate: 48000
       )
 
@@ -171,12 +171,12 @@ RSpec.describe(MB::Sound::GraphNode::Reverb) do
 
   describe '#reset' do
     it 'clears internal state' do
-      reverb = 440.hz.sine.forever.reverb(sample_rate: 48000)
+      reverb = 440.hz.sine.forever.fdn_reverb(sample_rate: 48000)
       reverb.sample(4800)
       reverb.reset
 
       # After reset, processing silence should produce near-zero output
-      silence_reverb = MB::Sound::GraphNode::Reverb.new(
+      silence_reverb = MB::Sound::GraphNode::FdnReverb.new(
         0.constant(smoothing: false),
         wet: 1.0, dry: 0.0, sample_rate: 48000
       )
@@ -187,10 +187,10 @@ RSpec.describe(MB::Sound::GraphNode::Reverb) do
   end
 
   describe 'DSL method' do
-    it 'is available on graph nodes via .reverb()' do
+    it 'is available on graph nodes via .fdn_reverb()' do
       node = 440.hz.sine.forever
-      reverb = node.reverb(room_size: 0.8, decay: 3.0, damping: 0.6)
-      expect(reverb).to be_a(MB::Sound::GraphNode::Reverb)
+      reverb = node.fdn_reverb(room_size: 0.8, decay: 3.0, damping: 0.6)
+      expect(reverb).to be_a(MB::Sound::GraphNode::FdnReverb)
 
       result = reverb.sample(800)
       expect(result).to be_a(Numo::SFloat)
@@ -199,8 +199,8 @@ RSpec.describe(MB::Sound::GraphNode::Reverb) do
 
     it 'passes custom parameters through' do
       node = 440.hz.sine.forever
-      reverb = node.reverb(channels: 8, diffusion_steps: 2)
-      expect(reverb).to be_a(MB::Sound::GraphNode::Reverb)
+      reverb = node.fdn_reverb(channels: 8, diffusion_steps: 2)
+      expect(reverb).to be_a(MB::Sound::GraphNode::FdnReverb)
 
       result = reverb.sample(800)
       expect(result.length).to eq(800)
@@ -211,8 +211,8 @@ RSpec.describe(MB::Sound::GraphNode::Reverb) do
     it 'produces identical output for the same seed' do
       input1 = 440.hz.sine.forever
       input2 = 440.hz.sine.forever
-      r1 = input1.reverb(seed: 42, sample_rate: 48000)
-      r2 = input2.reverb(seed: 42, sample_rate: 48000)
+      r1 = input1.fdn_reverb(seed: 42, sample_rate: 48000)
+      r2 = input2.fdn_reverb(seed: 42, sample_rate: 48000)
 
       out1 = r1.sample(4800)
       out2 = r2.sample(4800)
@@ -222,8 +222,8 @@ RSpec.describe(MB::Sound::GraphNode::Reverb) do
     it 'produces different output for different seeds' do
       input1 = 440.hz.sine.forever
       input2 = 440.hz.sine.forever
-      r1 = input1.reverb(seed: 0, wet: 1.0, dry: 0.0, sample_rate: 48000)
-      r2 = input2.reverb(seed: 99, wet: 1.0, dry: 0.0, sample_rate: 48000)
+      r1 = input1.fdn_reverb(seed: 0, wet: 1.0, dry: 0.0, sample_rate: 48000)
+      r2 = input2.fdn_reverb(seed: 99, wet: 1.0, dry: 0.0, sample_rate: 48000)
 
       out1 = r1.sample(4800)
       out2 = r2.sample(4800)
@@ -233,22 +233,22 @@ RSpec.describe(MB::Sound::GraphNode::Reverb) do
 
   describe '.delays_non_harmonic?' do
     it 'rejects delays with a ratio close to 2' do
-      expect(MB::Sound::GraphNode::Reverb.delays_non_harmonic?([0.01, 0.02], 0.05)).to be false
+      expect(MB::Sound::GraphNode::FdnReverb.delays_non_harmonic?([0.01, 0.02], 0.05)).to be false
     end
 
     it 'rejects delays with a ratio close to 3' do
-      expect(MB::Sound::GraphNode::Reverb.delays_non_harmonic?([0.01, 0.0298], 0.05)).to be false
+      expect(MB::Sound::GraphNode::FdnReverb.delays_non_harmonic?([0.01, 0.0298], 0.05)).to be false
     end
 
     it 'accepts delays with non-harmonic ratios' do
-      expect(MB::Sound::GraphNode::Reverb.delays_non_harmonic?([0.01, 0.017, 0.026], 0.05)).to be true
+      expect(MB::Sound::GraphNode::FdnReverb.delays_non_harmonic?([0.01, 0.017, 0.026], 0.05)).to be true
     end
   end
 
   describe '.log_random_delays' do
     it 'generates the requested number of log-spaced delays' do
       rng = Random.new(0)
-      delays = MB::Sound::GraphNode::Reverb.log_random_delays(
+      delays = MB::Sound::GraphNode::FdnReverb.log_random_delays(
         8, (0.015..0.120), 0.65, rng
       )
 
@@ -260,7 +260,7 @@ RSpec.describe(MB::Sound::GraphNode::Reverb) do
 
   describe 'parameter validation' do
     it 'rounds channels up to the next power of 2' do
-      reverb = MB::Sound::GraphNode::Reverb.new(0.constant, channels: 3)
+      reverb = MB::Sound::GraphNode::FdnReverb.new(0.constant, channels: 3)
       result = reverb.sample(480)
       expect(result).to be_a(Numo::SFloat)
       expect(result.length).to eq(480)
@@ -268,13 +268,13 @@ RSpec.describe(MB::Sound::GraphNode::Reverb) do
 
     it 'rejects room_size out of range' do
       expect {
-        MB::Sound::GraphNode::Reverb.new(0.constant, room_size: 1.5)
+        MB::Sound::GraphNode::FdnReverb.new(0.constant, room_size: 1.5)
       }.to raise_error(/room size/i)
     end
 
     it 'rejects negative decay' do
       expect {
-        MB::Sound::GraphNode::Reverb.new(0.constant, decay: -1.0)
+        MB::Sound::GraphNode::FdnReverb.new(0.constant, decay: -1.0)
       }.to raise_error(/decay/i)
     end
   end
@@ -282,18 +282,18 @@ RSpec.describe(MB::Sound::GraphNode::Reverb) do
   describe 'multichannel' do
     it 'accepts an array of inputs' do
       inputs = [440.hz.sine.forever, 880.hz.sine.forever]
-      reverb = MB::Sound::GraphNode::Reverb.new(inputs, sample_rate: 48000)
+      reverb = MB::Sound::GraphNode::FdnReverb.new(inputs, sample_rate: 48000)
       expect(reverb.output_channel_count).to eq(2)
     end
 
     it 'defaults output_channels to input count' do
       inputs = [440.hz.sine.forever, 880.hz.sine.forever, 330.hz.sine.forever]
-      reverb = MB::Sound::GraphNode::Reverb.new(inputs, sample_rate: 48000)
+      reverb = MB::Sound::GraphNode::FdnReverb.new(inputs, sample_rate: 48000)
       expect(reverb.output_channel_count).to eq(3)
     end
 
     it 'allows explicit output_channels parameter' do
-      reverb = MB::Sound::GraphNode::Reverb.new(
+      reverb = MB::Sound::GraphNode::FdnReverb.new(
         440.hz.sine.forever, output_channels: 4, sample_rate: 48000
       )
       expect(reverb.output_channel_count).to eq(4)
@@ -301,26 +301,26 @@ RSpec.describe(MB::Sound::GraphNode::Reverb) do
 
     it 'returns the correct number of output nodes' do
       inputs = [440.hz.sine.forever, 880.hz.sine.forever]
-      reverb = MB::Sound::GraphNode::Reverb.new(inputs, sample_rate: 48000)
+      reverb = MB::Sound::GraphNode::FdnReverb.new(inputs, sample_rate: 48000)
       expect(reverb.outputs.length).to eq(2)
     end
 
-    it 'returns ReverbOutput nodes for multi-output' do
+    it 'returns FdnReverbOutput nodes for multi-output' do
       inputs = [440.hz.sine.forever, 880.hz.sine.forever]
-      reverb = MB::Sound::GraphNode::Reverb.new(inputs, sample_rate: 48000)
+      reverb = MB::Sound::GraphNode::FdnReverb.new(inputs, sample_rate: 48000)
       reverb.outputs.each do |out|
-        expect(out).to be_a(MB::Sound::GraphNode::Reverb::ReverbOutput)
+        expect(out).to be_a(MB::Sound::GraphNode::FdnReverb::FdnReverbOutput)
       end
     end
 
     it 'returns [self] for single-output' do
-      reverb = MB::Sound::GraphNode::Reverb.new(440.hz.sine.forever, sample_rate: 48000)
+      reverb = MB::Sound::GraphNode::FdnReverb.new(440.hz.sine.forever, sample_rate: 48000)
       expect(reverb.outputs).to eq([reverb])
     end
 
     it 'produces NArray data of correct length from each output' do
       inputs = [440.hz.sine.forever, 880.hz.sine.forever]
-      reverb = MB::Sound::GraphNode::Reverb.new(inputs, sample_rate: 48000)
+      reverb = MB::Sound::GraphNode::FdnReverb.new(inputs, sample_rate: 48000)
       reverb.outputs.each do |out|
         result = out.sample(800)
         expect(result).to be_a(Numo::SFloat)
@@ -330,7 +330,7 @@ RSpec.describe(MB::Sound::GraphNode::Reverb) do
 
     it 'produces decorrelated outputs' do
       inputs = [440.hz.sine.forever, 880.hz.sine.forever]
-      reverb = MB::Sound::GraphNode::Reverb.new(
+      reverb = MB::Sound::GraphNode::FdnReverb.new(
         inputs, wet: 1.0, dry: 0.0, sample_rate: 48000
       )
       out0 = reverb.outputs[0].sample(4800)
@@ -340,7 +340,7 @@ RSpec.describe(MB::Sound::GraphNode::Reverb) do
 
     it 'returns output 0 from #sample on multi-output reverb' do
       inputs = [440.hz.sine.forever, 880.hz.sine.forever]
-      reverb = MB::Sound::GraphNode::Reverb.new(inputs, sample_rate: 48000)
+      reverb = MB::Sound::GraphNode::FdnReverb.new(inputs, sample_rate: 48000)
 
       # Sample from output 0 via #sample
       result0 = reverb.sample(800)
@@ -350,25 +350,25 @@ RSpec.describe(MB::Sound::GraphNode::Reverb) do
 
     it 'uses sources hash with indexed keys for multiple inputs' do
       inputs = [440.hz.sine.forever, 880.hz.sine.forever]
-      reverb = MB::Sound::GraphNode::Reverb.new(inputs, sample_rate: 48000)
+      reverb = MB::Sound::GraphNode::FdnReverb.new(inputs, sample_rate: 48000)
       expect(reverb.sources.keys).to eq([:input_0, :input_1])
     end
 
     it 'uses single :input key for single input' do
-      reverb = MB::Sound::GraphNode::Reverb.new(440.hz.sine.forever, sample_rate: 48000)
+      reverb = MB::Sound::GraphNode::FdnReverb.new(440.hz.sine.forever, sample_rate: 48000)
       expect(reverb.sources.keys).to eq([:input])
     end
 
-    it 'auto-detects MultiOutput upstream via .reverb DSL' do
+    it 'auto-detects MultiOutput upstream via .fdn_reverb DSL' do
       # Create a multi-output reverb used as upstream for a second reverb.
       # The first reverb has 2 outputs and includes MultiOutput + GraphNode.
       inputs = [440.hz.sine.forever, 880.hz.sine.forever]
-      reverb1 = MB::Sound::GraphNode::Reverb.new(inputs, sample_rate: 48000)
+      reverb1 = MB::Sound::GraphNode::FdnReverb.new(inputs, sample_rate: 48000)
       expect(reverb1).to be_a(MB::Sound::GraphNode::MultiOutput)
 
-      # Calling .reverb on a MultiOutput GraphNode auto-detects outputs
-      reverb2 = reverb1.reverb(sample_rate: 48000)
-      expect(reverb2).to be_a(MB::Sound::GraphNode::Reverb)
+      # Calling .fdn_reverb on a MultiOutput GraphNode auto-detects outputs
+      reverb2 = reverb1.fdn_reverb(sample_rate: 48000)
+      expect(reverb2).to be_a(MB::Sound::GraphNode::FdnReverb)
       expect(reverb2.output_channel_count).to eq(2)
       expect(reverb2.outputs.length).to eq(2)
     end
@@ -376,21 +376,21 @@ RSpec.describe(MB::Sound::GraphNode::Reverb) do
     it 'bumps internal channels to accommodate input and output counts' do
       # 5 inputs should bump channels from default 4 to at least 8 (next power of 2)
       inputs = 5.times.map { 440.hz.sine.forever }
-      reverb = MB::Sound::GraphNode::Reverb.new(inputs, sample_rate: 48000)
+      reverb = MB::Sound::GraphNode::FdnReverb.new(inputs, sample_rate: 48000)
       result = reverb.outputs[0].sample(480)
       expect(result).to be_a(Numo::SFloat)
     end
 
-    it 'auto-detects stereo IOInput via .reverb DSL' do
+    it 'auto-detects stereo IOInput via .fdn_reverb DSL' do
       # IOInput includes both GraphNode and IOSampleMixin (which includes
-      # MultiOutput), so calling .reverb on a stereo input should
+      # MultiOutput), so calling .fdn_reverb on a stereo input should
       # automatically split channels and create a stereo reverb.
       input = MB::Sound::ArrayInput.new(
         data: [Numo::SFloat.zeros(4800).rand(-1, 1), Numo::SFloat.zeros(4800).rand(-1, 1)],
         sample_rate: 48000
       )
-      reverb = input.reverb(sample_rate: 48000)
-      expect(reverb).to be_a(MB::Sound::GraphNode::Reverb)
+      reverb = input.fdn_reverb(sample_rate: 48000)
+      expect(reverb).to be_a(MB::Sound::GraphNode::FdnReverb)
       expect(reverb.output_channel_count).to eq(2)
       expect(reverb.outputs.length).to eq(2)
 
@@ -402,13 +402,13 @@ RSpec.describe(MB::Sound::GraphNode::Reverb) do
       end
     end
 
-    it 'treats mono IOInput as single input via .reverb DSL' do
+    it 'treats mono IOInput as single input via .fdn_reverb DSL' do
       input = MB::Sound::ArrayInput.new(
         data: [Numo::SFloat.zeros(4800).rand(-1, 1)],
         sample_rate: 48000
       )
-      reverb = input.reverb(sample_rate: 48000)
-      expect(reverb).to be_a(MB::Sound::GraphNode::Reverb)
+      reverb = input.fdn_reverb(sample_rate: 48000)
+      expect(reverb).to be_a(MB::Sound::GraphNode::FdnReverb)
       expect(reverb.output_channel_count).to eq(1)
       expect(reverb.outputs).to eq([reverb])
     end

@@ -19,19 +19,19 @@ module MB
       # internal channels sequentially, wrapping when N is exceeded.  Output
       # extraction uses the same pattern in reverse.
       #
-      # When P > 1, includes MultiOutput and provides a ReverbOutput inner
+      # When P > 1, includes MultiOutput and provides an FdnReverbOutput inner
       # class for each output.  When P == 1, behaves as a simple mono node.
       #
       # Examples (in bin/sound.rb):
-      #     play 440.hz.sine.for(0.5).reverb
-      #     play 440.hz.sine.for(0.5).reverb(room_size: 0.8, decay: 3.0, damping: 0.7)
+      #     play 440.hz.sine.for(0.5).fdn_reverb
+      #     play 440.hz.sine.for(0.5).fdn_reverb(room_size: 0.8, decay: 3.0, damping: 0.7)
       #
       #     # Stereo input from a file
       #     l, r = file_input('sounds/synth0.flac').split
-      #     play [l, r].reverb
+      #     play [l, r].fdn_reverb
       #
-      # See also bin/reverb.rb for a command-line demo script.
-      class Reverb
+      # See also bin/effects/fdn_reverb.rb for a command-line demo script.
+      class FdnReverb
         include GraphNode
         include MultiOutput
         include BufferHelper
@@ -46,12 +46,12 @@ module MB
         # The input source node.
         attr_reader :sources
 
-        # The output nodes (Array of ReverbOutput or [self] for mono).
+        # The output nodes (Array of FdnReverbOutput or [self] for mono).
         attr_reader :outputs
 
         # Represents a single output channel of a multichannel reverb.
-        # Delegates to the parent Reverb via sample_internal.
-        class ReverbOutput
+        # Delegates to the parent FdnReverb via sample_internal.
+        class FdnReverbOutput
           extend Forwardable
           include GraphNode
           include GraphNode::SampleRateHelper
@@ -64,7 +64,7 @@ module MB
             @owner = reverb
             @reverb = reverb
             @index = index
-            @graph_node_name = "Reverb output #{index}"
+            @graph_node_name = "FDN reverb output #{index}"
           end
 
           def sample(count)
@@ -81,14 +81,14 @@ module MB
           end
 
           def to_s
-            "Reverb output #{@index} of #{@reverb.output_channel_count}"
+            "FDN reverb output #{@index} of #{@reverb.output_channel_count}"
           end
         end
 
         # The number of output channels.
         attr_reader :output_channel_count
 
-        # Creates a new Reverb node that processes audio from the given +input+.
+        # Creates a new FdnReverb node that processes audio from the given +input+.
         #
         # Parameters:
         # - +input+ - Upstream graph node or Array of graph nodes providing audio
@@ -142,7 +142,7 @@ module MB
           @total_out = @output_channel_count * (channels.to_f / @output_channel_count).ceil
           @output_scale = 1.0 / Math.sqrt((channels.to_f / @output_channel_count).ceil)
 
-          @graph_node_name = 'Reverb'
+          @graph_node_name = 'FDN reverb'
 
           if @inputs.length == 1
             @sources = { input: @inputs[0] }.freeze
@@ -188,7 +188,7 @@ module MB
           # Build output nodes
           if @output_channel_count > 1
             @outputs = Array.new(@output_channel_count) { |idx|
-              ReverbOutput.new(reverb: self, index: idx)
+              FdnReverbOutput.new(reverb: self, index: idx)
             }.freeze
           else
             @outputs = [self].freeze
@@ -208,7 +208,7 @@ module MB
           sample_internal(count, 0)
         end
 
-        # Called by ReverbOutput#sample (or #sample for output 0) to process
+        # Called by FdnReverbOutput#sample (or #sample for output 0) to process
         # all inputs and return the data for a specific output index.
         def sample_internal(count, index)
           if @sampled_set.include?(index) || @output_data.nil?
@@ -417,7 +417,7 @@ module MB
             }
 
             # Householder feedback matrix
-            @matrix = Reverb.householder_matrix(@n)
+            @matrix = FdnReverb.householder_matrix(@n)
 
             # Feedback buffers (N channels, initially zeros)
             @feedback = @n.times.map { Numo::SFloat.zeros(1) }
