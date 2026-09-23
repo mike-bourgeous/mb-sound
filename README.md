@@ -478,6 +478,11 @@ sudo apt-get install ffmpeg gnuplot-qt
 brew install ffmpeg gnuplot
 ```
 
+On macOS, audio playback uses ffmpeg's `audiotoolbox` output unless JackD is
+running.  Set `OUTPUT_DEVICE` to a device index to choose a different output
+(list devices with `ffmpeg -f lavfi -i sine=d=0.5 -f audiotoolbox -list_devices true -`).
+Audio input on macOS still requires JackD.
+
 Then you'll want to install Ruby 3.2 or newer (Ruby 3.4 or newer recommended).
 
 If you don't already have a recent version of Ruby installed, and a Ruby version
