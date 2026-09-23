@@ -63,10 +63,14 @@ RSpec.describe(MB::Sound::IOMethods) do
 
       it 'plays float samples to the default audiotoolbox device' do
         expect(MB::Sound::FFMPEGOutput).to receive(:new)
-          .with('default', sample_rate: 48000, channels: 2, buffer_size: nil, format: 'audiotoolbox', codec: 'pcm_f32le')
+          .with('default', sample_rate: 48000, channels: 2, buffer_size: nil, format: 'audiotoolbox', codec: 'pcm_f32le', realtime: true)
           .and_return(MB::Sound::NullOutput.new(channels: 2))
 
-        MB::Sound.output(output_type: :ffmpeg)
+        o = MB::Sound.output(output_type: :ffmpeg)
+        expect(o).to be_a(MB::Sound::BackgroundOutput)
+        expect(o.output).to be_a(MB::Sound::NullOutput)
+      ensure
+        o&.close
       end
 
       it 'passes the device through as an audiotoolbox device index' do
@@ -74,7 +78,9 @@ RSpec.describe(MB::Sound::IOMethods) do
           .with('3', hash_including(format: 'audiotoolbox'))
           .and_return(MB::Sound::NullOutput.new(channels: 2))
 
-        MB::Sound.output(output_type: :ffmpeg, device: 3)
+        o = MB::Sound.output(output_type: :ffmpeg, device: 3)
+      ensure
+        o&.close
       end
 
       it 'raises an error on other platforms' do

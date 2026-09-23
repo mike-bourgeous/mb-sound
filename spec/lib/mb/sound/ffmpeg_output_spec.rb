@@ -45,6 +45,30 @@ RSpec.describe MB::Sound::FFMPEGOutput do
       end
     end
 
+    context 'when realtime is true' do
+      # Writes +seconds+ of silence in small buffers and returns the elapsed
+      # time.  Output goes to /dev/null, which never blocks, so any waiting
+      # comes from ffmpeg's input pacing.
+      def time_writes(output, seconds)
+        buf = [Numo::SFloat.zeros(2048)] * 2
+        t = MB::U.clock_now
+        (seconds * 48000 / 2048).ceil.times { output.write(buf) }
+        MB::U.clock_now - t
+      ensure
+        output.close
+      end
+
+      it 'blocks writes at roughly playback speed' do
+        output = MB::Sound::FFMPEGOutput.new('/dev/null', sample_rate: 48000, channels: 2, format: 'f32le', realtime: true)
+        expect(time_writes(output, 2)).to be_between(1.5, 3)
+      end
+
+      it 'does not affect writes when false' do
+        output = MB::Sound::FFMPEGOutput.new('/dev/null', sample_rate: 48000, channels: 2, format: 'f32le')
+        expect(time_writes(output, 2)).to be < 1
+      end
+    end
+
     it 'can write a bare Numo::NArray if channel count is 1' do
       output = MB::Sound::FFMPEGOutput.new('tmp/test_out.flac', sample_rate: 48000, channels: 1)
       expect { output.write(Numo::SFloat.zeros(100)) }.not_to raise_error
