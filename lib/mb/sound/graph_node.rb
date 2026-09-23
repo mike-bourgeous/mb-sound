@@ -604,7 +604,7 @@ module MB
       end
 
       # Adds a reverb effect to this node using diffusion stages and a
-      # feedback delay network.  See GraphNode::Reverb for details.
+      # feedback delay network.  See GraphNode::FdnReverb for details.
       #
       # When called on a MultiOutput node (e.g. from InputChannelSplit),
       # the individual outputs are automatically used as separate input
@@ -616,11 +616,11 @@ module MB
       # disable.
       #
       # Example:
-      #     play 440.hz.sine.for(0.5).reverb(room_size: 0.8, decay: 3.0)
+      #     play 440.hz.sine.for(0.5).fdn_reverb(room_size: 0.8, decay: 3.0)
       #
       #     # Stereo file input -> stereo reverb
-      #     play file_input('sounds/synth0.flac').reverb
-      def reverb(room_size: 0.5, decay: 2.0, damping: 0.5, diffusion_steps: 4, channels: 8, output_channels: nil, wet: 0.3, dry: 0.7, seed: 0, sample_rate: 48000, tail: nil)
+      #     play file_input('sounds/synth0.flac').fdn_reverb
+      def fdn_reverb(room_size: 0.5, decay: 2.0, damping: 0.5, diffusion_steps: 4, channels: 8, output_channels: nil, wet: 0.3, dry: 0.7, seed: 0, sample_rate: 48000, tail: nil)
         tail = decay + 0.5 if tail.nil?
         tail = 0 if tail == false
 
@@ -633,7 +633,7 @@ module MB
           tail > 0 ? self.and_then(0.constant.for(tail)) : self
         end
 
-        MB::Sound::GraphNode::Reverb.new(
+        MB::Sound::GraphNode::FdnReverb.new(
           input,
           room_size: room_size,
           decay: decay,
@@ -1110,4 +1110,4 @@ require_relative 'graph_node/quantize'
 require_relative 'graph_node/data_shuffler'
 require_relative 'graph_node/wavetable'
 require_relative 'graph_node/matrix_mixer'
-require_relative 'graph_node/reverb'
+require_relative 'graph_node/fdn_reverb'

@@ -13,13 +13,13 @@
 #     $0 sounds/piano0.flac
 #
 #     # File input to file output (preserves channel count)
-#     $0 sounds/piano0.flac tmp/reverb_out.flac
+#     $0 sounds/piano0.flac tmp/fdn_reverb_out.flac
 #
 #     # Large room with long decay
 #     $0 --room-size 0.8 --decay 4.0 sounds/piano0.flac
 #
 #     # Force stereo output from mono input
-#     $0 --output-channels 2 sounds/mono.flac tmp/stereo_reverb.flac
+#     $0 --output-channels 2 sounds/mono.flac tmp/stereo_fdn_reverb.flac
 
 require 'bundler/setup'
 
@@ -106,7 +106,7 @@ puts MB::U.highlight({
 })
 
 begin
-  reverb = input.reverb(
+  reverb = input.fdn_reverb(
     room_size: room_size,
     decay: decay,
     damping: damping,
