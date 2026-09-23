@@ -74,6 +74,17 @@ RSpec.describe MB::Sound::Tone do
       b = 150.hz.send(method, a).at(1)
       expect(b.sample(800)).not_to all_be_within(0.2).of_array(150.hz.at(1).sample(800))
     end
+
+    it 'rejects the node itself' do
+      a = 300.hz
+      expect { a.send(method, a) }.to raise_error(/Cyclic modulation/)
+    end
+
+    it 'rejects loops with the node' do
+      a = 300.hz
+      b = a + 150.hz
+      expect { a.send(method, b) }.to raise_error(/Cyclic modulation/)
+    end
   end
 
   describe '#fm' do

@@ -130,7 +130,8 @@ module MB
           @center_frequency = f_center
           @cutoff = @center_frequency
           @db_gain = db_gain
-          @amp = 10.0 ** (db_gain / 40.0) if db_gain
+          amp = 10.0 ** (db_gain / 40.0) if db_gain
+          @amp = amp
 
           quality = 1e-10 if quality && quality < 1e-10
           @quality = quality

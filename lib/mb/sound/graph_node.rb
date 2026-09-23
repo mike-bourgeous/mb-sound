@@ -41,6 +41,9 @@ module MB
     # TODO: In-line method to create a meter?
     #
     # TODO: Document methods that nodes must implement or override
+    #
+    # TODO: Split methods in this module into groups and/or related classes
+    # (e.g. #wavetable could go into GraphNode::Wavetable)
     module GraphNode
       include Nameable
       include Traversable
@@ -117,6 +120,7 @@ module MB
       # Creates a mixer that adds this node's #sample output to +other+ (a
       # numeric constant or another GraphNode).
       def +(other)
+        # FIXME: this fails to set up the tee correctly when adding a node on the left; see bin/songs/stereo_drone.rb
         fixup_tones(false, self, other)
         Mixer.new([self, other], sample_rate: self.sample_rate)
       end
@@ -192,8 +196,16 @@ module MB
         self.proc(type_name: 'round', &:round)
       end
 
+      # Converts a fractional MIDI note number to a frequency in Hz.
+      def freq
+        self.proc(type_name: 'Number to frequency') { |v|
+          MB::FastSound.number_to_freq(v, MB::Sound::Oscillator.tune_note, MB::Sound::Oscillator.tune_freq)
+        }
+      end
+
       # Uses this node as the frequency value for an oscillator.
       def tone
+        # TODO: add .or_at(1) and go fix all the affected synths and effects
         MB::Sound::Tone[self]
       end
 
@@ -582,7 +594,7 @@ module MB
 
         filter(MB::Sound::Filter::Delay.new(
           delay: seconds, sample_rate: sample_rate, smoothing: smoothing,
-          buffer_size: sample_rate.ceil * max_delay, feedback: feedback,
+          delay_buffer_size: sample_rate.ceil * max_delay, feedback: feedback,
           dry: dry, wet: wet
         ))
       end
@@ -601,6 +613,46 @@ module MB
           sample_rate: sample_rate,
           initial_buffer_seconds: initial_buffer_seconds
         ).named(name).taps
+      end
+
+      # Appends a reverb to this node.  Named presets change default
+      # parameters, but you can override any of the preset's parameters.
+      #
+      # If this is a multi-output node (e.g. a splittable input object), then
+      # the outputs are broken out as a multichannel input to the Reverb.
+      #
+      # Presets: :room, :hall, :stadium, :space, :default.  See
+      # Reverb::PRESETS.
+      #
+      # See MB::Sound::GraphNode::Reverb#initialize for parameter descriptions.
+      #
+      # The +:extra_time+ parameter controls how much time to add to input
+      # objects to allow the reverb to decay.
+      #
+      # If +:output_channels+ is greater than one, then this method returns an
+      # Array of output nodes.  Otherwise it returns a single output node.
+      #
+      # Example (bin/sound.rb):
+      #     play file_input('sounds/drums.flac').reverb
+      #     play file_input('sounds/piano0.flac').reverb(:space)
+      def reverb(preset = :default, extra_time: nil, output_channels: 1, channels: nil, stages: nil, diffusion_range: nil, feedback_range: nil, feedback_gain: nil, feedback_enabled: nil, predelay: nil, wet: nil, dry: nil, seed: nil, show_internals: false)
+        MB::Sound::GraphNode::Reverb.reverb(
+          preset,
+          input: self,
+          extra_time: extra_time,
+          output_channels: output_channels,
+          channels: channels,
+          stages: stages,
+          diffusion_range: diffusion_range,
+          feedback_range: feedback_range,
+          feedback_gain: feedback_gain,
+          feedback_enabled: feedback_enabled,
+          predelay: predelay,
+          wet: wet,
+          dry: dry,
+          seed: seed,
+          show_internals: show_internals
+        )
       end
 
       # Adds a reverb effect to this node using diffusion stages and a
@@ -703,6 +755,14 @@ module MB
       #
       # +:wavetable+ - A 2D NArray to use as the wavetable.
       # +:number+ - A GraphNode or Numeric to control wave number.
+      # +:lookup+ - Interpolation mode (noisy :linear or cleaner :cubic).
+      # +:wrap+ - A wrapping mode constant, or a MIDI value.
+      #
+      # See Wavetable#initialize.
+      #
+      # Example:
+      #     # Wavetable oscillator
+      #     midi.tone.ramp.wavetable(wavetable: t, number: midi.cc(1))
       def wavetable(wavetable:, number:, lookup: :cubic, wrap: :wrap)
         number = number.constant if number.is_a?(Numeric)
         phase = self
@@ -805,6 +865,23 @@ module MB
         end
 
         self
+      end
+
+      # Logs the first, last, min, max, and mean values for each buffer from
+      # this node.
+      def debug
+        debug_iter = 0
+        spy { |v|
+          if v
+            s = "f/l: #{v[0]}/#{v[-1]} m/m: #{v.minmax} avg: #{v.mean}"
+          else
+            s = 'nil'
+          end
+
+          puts "DEBUG: #{__id__}/#{self} frame #{debug_iter}: #{s}"
+
+          debug_iter += 1
+        }
       end
 
       # Finds the lowest numeric value greater than zero for any graph nodes
@@ -916,10 +993,10 @@ module MB
             # TODO: this would all be easier if source/dest links were bidirectional
             # TODO: is this a reasonable number?
             if source_history[s] > 50 + source_list.length
-              # FIXME: node graph iteration is reporting possible infinite loops on code which shouldn't have any loops
+              # FIXME: node graph iteration is reporting possible infinite loops on reverb which shouldn't have any loops
               # FIXME: only re-traverse a node if doing so would change its
               # depth; I suspect we're doing an exponential traversal of all
-              # possible edge combinations in complex graphs.
+              # possible edge combinations in the reverb graph.
               warn "Possible infinite loop on #{s} (started from #{self}; seen #{source_history[s]} times of #{source_list.length})"
               next
             end
@@ -1009,13 +1086,6 @@ module MB
         else
           s.to_s
         end
-      end
-
-      # Returns an Array with the port name and source name or object ID (if no
-      # name) of all sources for this node, for use in generating descriptions
-      # of the node.
-      def source_names
-        sources.map { |name, src| "#{name}: #{make_source_name(src)}" }
       end
 
       # Setup/boilerplate buffer management used by #/ and #**.
@@ -1110,4 +1180,7 @@ require_relative 'graph_node/quantize'
 require_relative 'graph_node/data_shuffler'
 require_relative 'graph_node/wavetable'
 require_relative 'graph_node/matrix_mixer'
+require_relative 'graph_node/reverb'
 require_relative 'graph_node/fdn_reverb'
+
+require_relative 'graph_node/graph_clock'

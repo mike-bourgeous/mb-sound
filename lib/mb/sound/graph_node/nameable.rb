@@ -22,6 +22,7 @@ module MB
 
         # Returns the assigned node name if present, or the object ID if not.
         def name_or_id
+          @graph_node_name ||= nil
           @graph_node_name || "id=#{__id__}"
         end
       end

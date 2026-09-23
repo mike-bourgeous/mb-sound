@@ -4,34 +4,34 @@ RSpec.describe(MB::Sound::FastWavetable, aggregate_failures: true) do
   describe '.outer_linear' do
     it 'can retrieve a value from a wavetable' do
       expect(MB::Sound::FastWavetable.outer_linear(Numo::SFloat[[0, 1], [-1, 2]], 0, 0 * 2 - 1, :wrap)).to eq(0)
-      expect(MB::Sound::FastWavetable.outer_linear(Numo::SFloat[[0, 1], [-1, 2]], 0.5, 0.5 * 2 - 1, :wrap)).to eq(2)
-      expect(MB::Sound::FastWavetable.outer_linear(Numo::SFloat[[0, 1], [-1, 2]], 0.5, 0 * 2 - 1, :wrap)).to eq(-1)
+      expect(MB::Sound::FastWavetable.outer_linear(Numo::SFloat[[0, 1], [-1, 2]], 1, 1 * 2 - 1, :wrap)).to eq(2)
+      expect(MB::Sound::FastWavetable.outer_linear(Numo::SFloat[[0, 1], [-1, 2]], 1, 0 * 2 - 1, :wrap)).to eq(-1)
     end
   end
 
   describe '.outer_cubic' do
     it 'can retrieve a value from a wavetable' do
       expect(MB::Sound::FastWavetable.outer_cubic(Numo::SFloat[[0, 1], [-1, 2]], 0, 0 * 2 - 1, :wrap)).to eq(0)
-      expect(MB::Sound::FastWavetable.outer_cubic(Numo::SFloat[[0, 1], [-1, 2]], 0.5, 0.5 * 2 - 1, :wrap)).to eq(2)
-      expect(MB::Sound::FastWavetable.outer_cubic(Numo::SFloat[[0, 1], [-1, 2]], 0.5, 0 * 2 - 1, :wrap)).to eq(-1)
+      expect(MB::Sound::FastWavetable.outer_cubic(Numo::SFloat[[0, 1], [-1, 2]], 1, 1 * 2 - 1, :wrap)).to eq(2)
+      expect(MB::Sound::FastWavetable.outer_cubic(Numo::SFloat[[0, 1], [-1, 2]], 1, 0 * 2 - 1, :wrap)).to eq(-1)
     end
   end
 
   describe '.wavetable_lookup' do
     let(:table) { Numo::SFloat[[0, 1, -2], [-1, 2, -3]] }
-    let(:number) { Numo::SFloat[0, 0.5, 0.5] }
-    let(:phase) { Numo::SFloat[0, 1.0 / 3.0, 1] * 2 - 1 }
+    let(:number) { Numo::SFloat[0, 0.5, 1] }
+    let(:phase) { Numo::SFloat[0, 1.0 / 2.0, 3.0 / 2.0] * 2 - 1 }
 
     it 'can retrieve values from a wavetable using narrays and linear interpolation' do
-      expect(MB::Sound::FastWavetable.wavetable_lookup(table, number, phase, :linear, :wrap)).to all_be_within(1e-6).of_array(Numo::SFloat[0, 2, -1])
+      expect(MB::Sound::FastWavetable.wavetable_lookup(table, number, phase, :linear, :wrap)).to all_be_within(1e-6).of_array(Numo::SFloat[0, 1.5, -1])
     end
 
     it 'can retrieve values from a wavetable using narrays and cubic interpolation' do
-      expect(MB::Sound::FastWavetable.wavetable_lookup(table, number, phase, :cubic, :wrap)).to all_be_within(1e-6).of_array(Numo::SFloat[0, 2, -1])
+      expect(MB::Sound::FastWavetable.wavetable_lookup(table, number, phase, :cubic, :wrap)).to all_be_within(1e-6).of_array(Numo::SFloat[0, 1.5, -1])
     end
 
     it 'can bounce oob' do
-      expect(MB::Sound::FastWavetable.wavetable_lookup(table, number, phase, :cubic, :bounce)).to all_be_within(1e-6).of_array(Numo::SFloat[0, 2, 2])
+      expect(MB::Sound::FastWavetable.wavetable_lookup(table, number, phase, :cubic, :bounce)).to all_be_within(1e-6).of_array(Numo::SFloat[0, 1.5, 2])
     end
   end
 

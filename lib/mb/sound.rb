@@ -20,6 +20,9 @@ require_relative 'sound/fft_methods'
 require_relative 'sound/gain_methods'
 require_relative 'sound/window_methods'
 require_relative 'sound/analysis_methods'
+require_relative 'sound/generation_methods'
+require_relative 'sound/midi_methods'
+require_relative 'sound/scripting_methods'
 
 module MB
   # Convenience functions for making quick work of sound.
@@ -35,6 +38,9 @@ module MB
     extend GainMethods
     extend WindowMethods
     extend AnalysisMethods
+    extend GenerationMethods
+    extend MidiMethods
+    extend ScriptingMethods
 
     # Speed of sound for wavelength calculations, in meters per second.
     SPEED_OF_SOUND = 343.0
@@ -100,19 +106,6 @@ module MB
       env
     end
 
-    # Creates a uniformly distributed white noise generator that can be
-    # combined with other tones, filters, etc.  See MB::Sound::GraphNode
-    # and MB::Sound::Tone.
-    def self.noise
-      2000.hz.ramp.noise
-    end
-
-    # Shortcut/DSL method for creating a tone with a given dynamic frequency
-    # source, for full control over the FM signal graph.
-    def self.tone(frequency)
-      MB::Sound::Tone[frequency]
-    end
-
     # Allows retrieving a Note by name using e.g. MB::Sound::A4 (or just A4 in
     # the interactive CLI).  A new Note object is created each time to allow
     # for modifications to old Notes and changes in global tuning.
@@ -132,13 +125,12 @@ require_relative 'sound/buffer_helper'
 require_relative 'sound/circular_buffer'
 require_relative 'sound/wavetable'
 require_relative 'sound/graph_node'
+require_relative 'sound/adsr_envelope'
 require_relative 'sound/graph_node_input'
+require_relative 'sound/graph_node/midi_dsl'
 
 require_relative 'sound/midi'
-require_relative 'sound/adsr_envelope'
 require_relative 'sound/timeline_interpolator'
-
-require_relative 'sound/graph_node/midi_dsl'
 
 require_relative 'sound/io_base'
 require_relative 'sound/io_input'

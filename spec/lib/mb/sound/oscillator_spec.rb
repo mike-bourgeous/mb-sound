@@ -316,6 +316,15 @@ RSpec.describe MB::Sound::Oscillator do
 
         expect { osc.sample(10) }.to raise_error(/Truncation/)
       end
+
+      it 'updates the last_freq value' do
+        a = 50.constant(smoothing: false)
+        osc = 100.hz.fm(a)
+        expect { osc.sample(10) }.to change { osc.last_freq }.to(150)
+
+        a.constant = 15
+        expect { osc.sample(10) }.to change { osc.last_freq }.to(115)
+      end
     end
   end
 
@@ -341,18 +350,18 @@ RSpec.describe MB::Sound::Oscillator do
     it 'changes frequency' do
       expect(oscil.frequency).to eq(0)
 
-      oscil.trigger(25, 0)
+      oscil.trigger(25, 0, 0)
       expect(oscil.frequency).to eq(MB::Sound::Note.new(25).frequency)
       expect(oscil.number).to eq(25)
 
-      oscil.trigger(75, 0)
+      oscil.trigger(75, 0, 0)
       expect(oscil.frequency).to eq(MB::Sound::Note.new(75).frequency)
       expect(oscil.number).to eq(75)
     end
 
     it 'changes amplitude' do
       expect(oscil.range).to eq(0..0)
-      oscil.trigger(25, 127)
+      oscil.trigger(25, 127, 0)
       expect(oscil.range.min.round(3)).to eq(-1 * -6.db.round(3))
       expect(oscil.range.max.round(3)).to eq(-6.db.round(3))
     end
@@ -365,18 +374,18 @@ RSpec.describe MB::Sound::Oscillator do
       }
 
       it 'uses custom tuning references but only after triggering' do
-        oscil.trigger(69, 127)
+        oscil.trigger(69, 127, 0)
         expect(oscil.frequency.round(5)).to eq(440)
 
         MB::Sound::Oscillator.tune_freq = 460
         expect(oscil.frequency.round(5)).to eq(440)
-        oscil.trigger(69, 127)
+        oscil.trigger(69, 127, 0)
         expect(oscil.frequency.round(5)).to eq(460)
 
         MB::Sound::Oscillator.tune_note = 72
         MB::Sound::Oscillator.tune_freq = 512
         expect(oscil.frequency.round(5)).to eq(460)
-        oscil.trigger(60, 127)
+        oscil.trigger(60, 127, 0)
         expect(oscil.frequency.round(5)).to eq(256)
       end
     end
@@ -389,24 +398,24 @@ RSpec.describe MB::Sound::Oscillator do
 
     it 'can handle out-of-range note numbers' do
       expect(oscil.number).not_to be_finite
-      expect { oscil.release(oscil.number, 0) }.not_to raise_error
+      expect { oscil.release(oscil.number, 0, 0) }.not_to raise_error
       expect(oscil.range).to eq(0..0)
     end
 
     it 'does not change frequency' do
-      oscil.release(25, 0)
+      oscil.release(25, 0, 0)
       expect(oscil.frequency).to eq(0)
     end
 
     it 'silences the oscillator for a matching event' do
-      oscil.trigger(25, 0)
-      oscil.release(25, 0)
+      oscil.trigger(25, 0, 0)
+      oscil.release(25, 0, 0)
       expect(oscil.range).to eq(0..0)
     end
 
     it 'does not silence the oscillator for a non-matching event' do
-      oscil.trigger(25, 0)
-      oscil.release(24, 0)
+      oscil.trigger(25, 0, 0)
+      oscil.release(24, 0, 0)
       expect(oscil.range.min.round(3)).to eq(-1 * -30.db.round(3))
       expect(oscil.range.max.round(3)).to eq(-30.db.round(3))
     end

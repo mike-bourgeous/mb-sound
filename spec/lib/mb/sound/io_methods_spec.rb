@@ -1,4 +1,14 @@
 RSpec.describe(MB::Sound::IOMethods) do
+  describe '#list' do
+    it 'does not depend on yard' do
+      if File.respond_to?(:relative_path)
+        expect(File).not_to receive(:relative_path)
+      end
+
+      expect { MB::Sound.list }.to output(/synth0.flac/).to_stdout
+    end
+  end
+
   describe '#input' do
     it 'returns the same input when called twice with the same options' do
       o1 = MB::Sound.input(device: :null)

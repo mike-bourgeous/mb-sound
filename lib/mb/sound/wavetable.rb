@@ -128,15 +128,71 @@ module MB
           max = MB::M.max(middle.abs.max, -80.db)
           middle = middle / max
 
-          # Rotate phase to put positive zero crossing at center
-          zc_index = MB::M.find_zero_crossing(middle)
-          middle = MB::M.rol(middle, zc_index - middle.length / 2) if zc_index
-
           buf[offset...(offset + period_samples)] = middle
           offset += period_samples
         end
 
-        buf.reshape(slices, period_samples)
+        center(buf.reshape(slices, period_samples).inplace!).not_inplace!
+      end
+
+      # Calls a block +:steps+ times to generate a wavetable by passing
+      # interpolating parameters to the block.  Sample rate is assumed to be
+      # 48kHz.
+      #
+      # The +:from+ and +:to+ parameters may be anything that MB::M.interp can
+      # interpolate.  Interpolation uses the smoothstep curve; use the :curve
+      # parameter to change this (nil or ->{it} will be linear).
+      #
+      # The block will receive the interpolated value for the current step and
+      # a Tone object with a period of +:length+ samples.
+      #
+      # If the block returns a Numo::NArray, then that will be appended to the
+      # wavetable.
+      #
+      # If the block returns a Graph, then it will be sampled for +:length+
+      # samples 3 times (to allow for filter stabilization) with the last tone
+      # cycle appended to the wavetable (-(length*3/2)...-(length/2)).
+      #
+      # The :center, :sort, and :normalize parameters enable or disable
+      # post-processing by the method of the same name.
+      #
+      # Examples:
+      #     # Square to saw
+      #     MB::Sound::Wavetable.generate(fade_edges: false) { |v, _t| MB::M.safe_power(Numo::SFloat.linspace(-1, 1, 2048), v) }
+      #
+      #     # Harmonics
+      #     MB::Sound::Wavetable.generate(from: 2, to: 11, curve: nil) { |v, t| t + (t.frequency * v).hz }
+      def self.generate(steps: 10, from: 0, to: 1, length: 2048, center: false, sort: false, normalize: true, fade_edges: true, curve: MB::M.method(:smoothstep))
+        table = Array.new(steps) { |i|
+          tone = (48000.0 / length).hz.at(1).with_phase(Math::PI)
+          val = MB::M.interp(from, to, i.to_f / (steps - 1), func: curve)
+
+          ret = yield val, tone
+          case ret
+          when Numo::NArray
+            raise "Wave length must be #{length} samples" unless ret.shape == [2048]
+            ret
+
+          when GraphNode
+            ret.sample(length)
+            ret.sample(length)
+            ret.sample(length)
+
+          else
+            raise "Unsupported wavetable entry: #{ret.inspect}"
+          end
+        }
+
+        table = Numo::SFloat.cast(table).inplace!
+
+        table = normalize(table) if normalize
+        table = sort(table) if sort
+
+        table = fade_edges(table) if fade_edges && center
+        table = center(table) if center
+        table = fade_edges(table) if fade_edges
+
+        table.not_inplace!
       end
 
       # Fades +clip+ in or out in-place.  For .make_wavetable.
@@ -144,6 +200,53 @@ module MB
         fade = MB::FastSound.smootherstep_buf(Numo::SFloat.zeros(clip.length))
         fade = 1 - fade.inplace unless fade_in
         clip.inplace * fade.not_inplace!
+      end
+
+      # Blends the edges of each entry in +table+ to temper clicks for waves
+      # that aren't perfectly periodic or have discontinuities at the edge.
+      #
+      # Fades the first and last 1/64th of the buffer, with a minimum fade of 4
+      # samples.  Doesn't modify tables shorter than 8 samples.
+      def self.fade_edges(table)
+        raise 'Wavetable must be a 2D Numo::NArray' unless table.is_a?(Numo::NArray) && table.ndim == 2
+
+        # FIXME: make this look right for all of these:
+        # t = MB::Sound::Wavetable.generate { |v, t| t.fm(v.constant) }
+        # t = MB::Sound::Wavetable.generate(steps: 100, normalize: false) { |v, t| Numo::SFloat.zeros(2048).fill(v) }
+        #
+        # Idea: subtract a smoothstep or linear element across the fade range,
+        # preserving some higher frequencies but ending at the same value as
+        # the beginning.  This might be made idempotent(?)
+        #
+        # Idea 2: ignore the midpoint value and just blend between the end
+        # values
+
+        rows, cols = table.shape
+
+        return table if cols < 8
+
+        table = table.dup unless table.inplace?
+
+        fade_cols = cols / 64
+        fade_cols = 4 if fade_cols < 4
+
+        fade_buf = MB::FastSound.smootherstep_buf(Numo::SFloat.zeros(fade_cols * 2))
+        fade_in_buf = (fade_buf[fade_cols..-1].inplace! * 2 - 1).not_inplace!
+        fade_out_buf = (1 - fade_buf[0...fade_cols].inplace! * 2).not_inplace!
+
+        rows.times do |row|
+          wave = table[row, nil]
+
+          intro = wave[0...fade_cols].inplace!
+          outro = wave[-fade_cols..-1].inplace!
+
+          mid = 0.5 * (intro[0] + outro[-1])
+
+          intro * fade_in_buf + mid * (1 - fade_in_buf)
+          outro * fade_out_buf + mid * (1 - fade_out_buf)
+        end
+
+        table
       end
 
       # Creates a new wavetable that blends each row in the given +wavetable+
@@ -220,16 +323,41 @@ module MB
         wavetable
       end
 
-      # TODO: functions to sort wavetables by brightness, etc.?
-      # TODO: functions to shuffle and stretch wavetables?
+      # Performs per-row centering to place each wave's first zero crossing in
+      # the middle of the buffer.  Returns the existing wavetable if it was
+      # marked as in-place, or a copy if it wasn't.  Raises an error if there
+      # is no zero crossing (could be caused by silence, DC offset).
+      #
+      # TODO: find the closest zero crossing to the existing center in either
+      # direction?
+      def self.center(wavetable)
+        raise 'Wavetable must be a 2D Numo::NArray' unless wavetable.is_a?(Numo::NArray) && wavetable.ndim == 2
+
+        wavetable = wavetable.dup unless wavetable.inplace?
+
+        for row in 0...wavetable.shape[0]
+          wave = wavetable[row, nil]
+
+          zc_index = MB::M.find_zero_crossing(wave)
+          if zc_index.nil? && wave[-1] < 0 && wave[0] >= 0
+            # TODO: should find_zero_crossing wrap around like this?
+            zc_index = 0
+          end
+
+          raise "No zero crossing found for row #{row} (min/max: #{wave.minmax})" unless zc_index
+
+          wavetable[row, nil] = MB::M.rol(wave, zc_index - wave.length / 2)
+        end
+
+        wavetable
+      end
+
+      # TODO: functions to shuffle and stretch/interpolate wavetables?
       # TODO: functions for spectral changes to wavetables?
       # TODO: mip-mapped or note-range wavetables
       # TODO: midi/realtime control of wavetable wrapping mode?
       # TODO: blend between wrapping modes by output
       # TODO: warp between wrapping modes by blending lookup indices?
-      # FIXME: having wave 1.0 wrap fully around to the start makes control
-      # difficult; it would be more musically playable if 1.0 was the last wave
-      # in the table
       # FIXME: make it super easy to play the full cycle including cubic
       # overshoot, and make the areas around that more musical somehow (getting
       # clicking and very sharp waves if the phase is off just a tiny bit); it
@@ -307,22 +435,22 @@ module MB
       # +:wavetable+, as opposed to linear interpolation used by
       # #outer_linear_ruby.
       def self.outer_cubic_ruby(wavetable:, number:, phase:, wrap:)
-        rows = wavetable.shape[0].to_f
-        cols = wavetable.shape[1].to_f
+        rows = wavetable.shape[0]
+        cols = wavetable.shape[1]
 
-        frow = (number * rows) % rows
+        frow = (number * (rows - 1)) % rows
         row1 = frow.floor
         row2 = row1 + 1
         row1 %= rows
         row2 %= rows
         rowratio = frow - row1
 
-        fcol = (phase + 1) / 2 * cols
+        fcol = (phase + 1) / 2 * (cols - 1)
 
         vtop = MB::M.cubic_lookup(wavetable[row1, nil], fcol, mode: wrap)
         vbot = MB::M.cubic_lookup(wavetable[row2, nil], fcol, mode: wrap)
 
-        # TODO: smoothstep between waves?
+        # TODO: smoothstep or cubic between waves?
         vbot * rowratio + vtop * (1.0 - rowratio)
       end
 
@@ -331,14 +459,14 @@ module MB
         wave_count = wavetable.shape[0]
         sample_count = wavetable.shape[1]
 
-        frow = (number * wave_count) % wave_count
+        frow = (number * (wave_count - 1)) % wave_count
         row1 = frow.floor
         row2 = row1 + 1
         row1 %= wave_count
         row2 %= wave_count
         rowratio = frow - row1
 
-        fcol = (phase + 1) / 2 * sample_count
+        fcol = (phase + 1) / 2 * (sample_count - 1)
         col1 = fcol.floor
         col2 = col1 + 1
         colratio = fcol - col1

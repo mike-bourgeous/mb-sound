@@ -175,7 +175,7 @@ module MB
 
           # Call #notify to validate the message type
           @message = message
-          notify(message)
+          notify(message, 0)
 
           unless description.nil?
             @description = description.to_s
@@ -207,7 +207,7 @@ module MB
         # Checks if the given +message+ matches the template that was given to
         # the constructor, and if so, updates the pre-filtered value
         # accordingly.
-        def notify(message)
+        def notify(message, timestamp)
           return if message.class != @message.class
           return if @message.respond_to?(:channel) && @message.channel && @message.channel >= 0 && @message.channel != message.channel
 

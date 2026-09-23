@@ -4,6 +4,8 @@ module MB
   module Sound
     module GraphNode
       class MidiDsl
+        prepend MidiEof
+
         # Wraps MB::Sound::Tone with a #sample method that helps MidiDsl manage
         # its internal node cache.
         class MidiTone < ::MB::Sound::Tone
@@ -11,6 +13,8 @@ module MB
             super(frequency: frequency)
 
             @dsl = dsl
+            @manager = dsl.manager
+            @cache_invalidated = false
             @node_type_name = 'MIDI Oscillator'
 
             # Default to playing forever

@@ -31,7 +31,7 @@ end.parse!
 if ARGV.any?
   VERSION_LIST=ARGV
 else
-  VERSION_LIST=%w{2.7 3.0 3.1 3.2 3.3 3.4 4.0}
+  VERSION_LIST=%w{3.2 3.3 3.4 4.0}
 end
 
 def check_success(*msg)

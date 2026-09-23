@@ -96,16 +96,16 @@ midi = Nibbler.new
 loop do
   midi.clear_buffer
   while event = midi_in.read(blocking: false)[0]
-    event = midi.parse(event.bytes)
+    event = event.map { |t, e| [t, midi.parse(e.bytes)] }
     event = [event] unless event.is_a?(Array)
 
-    event.each do |e|
+    event.each do |(timestamp, e)|
       case e
       when MIDIMessage::NoteOn
-        osc_bank.next(e.note).trigger(e.note, e.velocity)
+        osc_bank.next(e.note).trigger(e.note, e.velocity, timestamp)
 
       when MIDIMessage::NoteOff
-        osc_bank.release(e.note)&.release(e.note, e.velocity)
+        osc_bank.release(e.note)&.release(e.note, e.velocity, timestamp)
 
       when MIDIMessage::ControlChange
         case e.index

@@ -3,9 +3,11 @@ module MB
     module GraphNode
       class MidiDsl
         # A MIDI-controlled envelope triggered by note on/off events and
-        # sustain pedal (TODO).
+        # sustain pedal.
         class MidiEnvelope < MB::Sound::ADSREnvelope
-          def initialize(dsl:, attack:, decay:, sustain:, release:, sample_rate:, range:)
+          prepend MidiEof
+
+          def initialize(dsl:, attack:, decay:, sustain:, release:, sample_rate:, range:, velocity:)
             super(attack_time: attack, decay_time: decay, sustain_level: sustain, release_time: release, sample_rate: sample_rate, filter_freq: 200)
 
             @dsl = dsl
@@ -13,35 +15,38 @@ module MB
             @cache_invalidated = false
 
             @range = range
+            @velocity = velocity
+            @sustain = false
 
             @node_type_name = 'MIDI Envelope'
 
-            # TODO: sustain pedal
+            @number = nil
 
             @manager.on_note(&method(:note_cb))
+            @manager.on_cc(64, range: 0..127, default: 0, &method(:sustain_cb))
           end
 
           # Triggers and releases the envelope based on note press/release,
           # only releasing for the note number that triggered the envelope.
-          def note_cb(number, velocity, onoff)
+          def note_cb(number, velocity, onoff, timestamp)
             if onoff
               @number = number
-              trigger(velocity / 127.0)
+              trigger(MB::M.scale(velocity, 0..127, @velocity))
+
+              # TODO: support multiple events per buffer
+              self.time = -timestamp if timestamp > 0
             elsif number == @number
-              release
+              @number = nil
+              release unless @sustain
             end
           end
 
+          def sustain_cb(value, timestamp)
+            release if @number.nil? && @sustain && value < 64
+            @sustain = value >= 64
+          end
+
           def sample(count)
-            # TODO: return one extra block after the MIDI source is done?
-            return nil if @dsl&.done?
-
-            @dsl&.invalidate_cache(self) unless @cache_invalidated
-            @cache_invalidated = true
-
-            # FIXME: this will totally screw up parameter smoothing because it gets called N times per frame for N MIDI nodes
-            @dsl&.manager&.update
-
             MB::M.scale(super, 0..1, @range)
           end
 
@@ -57,8 +62,7 @@ module MB
             }
           end
 
-          # TODO to_s and to_s_graphviz that include the output range
-          # TODO: allow setting velocity sensitivity
+          # TODO to_s and to_s_graphviz that include the output range and velocity range
         end
       end
     end

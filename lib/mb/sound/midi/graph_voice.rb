@@ -8,12 +8,104 @@ module MB
       # and every oscillator with a constant frequency, or a constant value
       # added somewhere in its frequency input, has that constant set to the
       # triggering note frequency.
+      #
+      # TODO: It should be *way* easier to create a synthesizer.  Something
+      # like this:
+      #
+      #     synth('midi filename or jack midi input', 8) { |midi|
+      #       midi.hz.ramp.at(1) * midi.env
+      #     }
       class GraphVoice
         extend Forwardable
 
         include GraphNode
 
-        attr_reader :number
+        # Provides GraphVoice-specific behavior for MidiDsl nodes used within a
+        # GraphVoice, such as per-voice note events (vs. all note events).
+        class ManagerProxy
+          extend Forwardable
+
+          def_delegators :@manager, :on_cc, :on_bend, :channel, :update, :midi_in
+
+          def initialize(voice:, manager:)
+            @gv = voice
+            @manager = manager
+            @graph_voice_callbacks = []
+            @gv_number_callbacks = []
+          end
+
+          # MIDI DSL nodes normally call the manager update function from their
+          # sample method, which can result in multiple updates per sample
+          # buffer.  To avoid this, we ignore update calls here and instead
+          # call Manager#update in the VoicePool.
+          def update
+          end
+
+          # Overrides the manager's default #on_note method to notify callbacks
+          # only when this specific voice is triggered, rather than when any
+          # note is received.
+          def on_note(&callback)
+            @graph_voice_callbacks << callback
+          end
+
+          # New method for use by DslProxy for managing polyphonic portamento
+          # (see GraphVoice#set_note).
+          def gv_on_number(&callback)
+            @gv_number_callbacks << callback
+          end
+
+          # Called by GraphVoice to trigger note events on note-related nodes
+          # like MidiTone, MidiNumber, etc.
+          def graph_voice_trigger(number, velocity, timestamp)
+            @graph_voice_callbacks.each do |cb|
+              cb.call(number, velocity, true, timestamp)
+            end
+          end
+
+          # Called by GraphVoice to trigger release events on note-related
+          # nodes like MidiGate, MidiEnvelope, etc.
+          def graph_voice_release(number, velocity, timestamp)
+            @graph_voice_callbacks.each do |cb|
+              cb.call(number, velocity, false, timestamp)
+            end
+          end
+
+          def graph_voice_set_note(number, timestamp, reset_portamento: :todo)
+            @gv_number_callbacks.each do |ncb|
+              ncb.call(number, timestamp)
+            end
+          end
+        end
+
+        # TODO: maybe GraphVoice should be abandoned, and instead a new
+        # mechanism for round-robining MIDI events?  nah probbalbybbyoi
+        # notnoooot
+        class DslProxy < MB::Sound::GraphNode::MidiDsl
+          def initialize(voice:, manager:)
+            super(manager: manager)
+            @gv = voice
+          end
+
+          def channel(ch)
+            raise 'MIDI manager handles channel filtering for GraphVoice'
+          end
+
+          def frequency(ratio = 1, offset = 0, bend_range: DEFAULT_BEND_RANGE, smoothing: false)
+            # TODO: maybe there's a way to move this up to MidiDsl itself
+            super.tap { |n| @manager.gv_on_number(&n.method(:set_note)) }
+          end
+          alias freq frequency
+
+          def number(range: nil, bend_range: DEFAULT_BEND_RANGE, unit: nil, si: false, smoothing: false)
+            super.tap { |n| @manager.gv_on_number(&n.method(:set_note)) }
+          end
+
+          def filename
+            @manager.midi_in.respond_to?(:filename) ? @manager.midi_in.filename : nil
+          end
+        end
+
+        attr_reader :number, :dsl_proxy
 
         # A Hash from CC index to an Array of Hashes describing a controllable
         # parameter.  Used by VoicePool.  See #on_cc.
@@ -26,7 +118,35 @@ module MB
         # smoothing.  If the automatic detection of envelopes and oscillators
         # doesn't work, then the +:amp_envelopes+, +:envelopes+, and
         # +:freq_constants+ parameters may be used to override detection.
-        def initialize(graph, update_rate: 60, amp_envelopes: nil, envelopes: nil, freq_constants: nil)
+        #
+        # The +:label+ option allows prefixing all named nodes in the node
+        # graph with a given label, e.g. to show the voice index.
+        #
+        # TODO: can we calculate the update rate from graph sample rate and
+        # buffer size, or on first call to sample?
+        def initialize(graph = nil, update_rate: 60, amp_envelopes: nil, envelopes: nil, freq_constants: nil, label: nil, manager:)
+          if block_given?
+            raise 'Both block and graph parameter were given; only pass one or the other' if graph
+            raise 'Do not supply a list of envelopes when giving a block' if amp_envelopes || envelopes
+            raise 'Do not supply a list of frequency constants when giving a block' if freq_constants
+
+            @manager_proxy = ManagerProxy.new(voice: self, manager: manager)
+            @dsl_proxy = DslProxy.new(voice: self, manager: @manager_proxy)
+            graph = yield @dsl_proxy
+
+          else
+            raise 'No graph was given' unless graph
+          end
+
+          if label
+            graph.graph.each do |n|
+              next unless n.respond_to?(:named)
+              name = n.graph_node_name
+              name ||= n.node_type_name if n.respond_to?(:node_type_name)
+              n.named("#{label} #{name}".strip)
+            end
+          end
+
           @graph = graph
           @update_rate = update_rate
 
@@ -35,7 +155,6 @@ module MB
           @number = nil
 
           sources = graph.graph
-          puts "Found #{sources.length} total graph nodes" # XXX
 
           @oscillators = sources.select { |s|
             s.is_a?(MB::Sound::Tone) || s.is_a?(MB::Sound::Oscillator)
@@ -47,7 +166,6 @@ module MB
               o
             end
           }
-          puts "Found #{@oscillators.length} oscillators" # XXX
 
           @amp_envelopes = amp_envelopes || []
           @envelopes = envelopes || sources.select { |s|
@@ -58,12 +176,10 @@ module MB
           @envelopes.map! { |env| find_node(env) }
 
           @envelopes.each(&:reset) # disable auto-release on envelopes
-          puts "Found #{@envelopes.length} envelopes" # XXX
 
           @array_inputs = sources.select { |s|
             s.is_a?(ArrayInput)
           }
-          puts "Found #{@array_inputs.length} array inputs" # XXX
 
           if freq_constants
             @freq_constants = freq_constants
@@ -93,16 +209,12 @@ module MB
           @freq_constants.each do |f|
             f.smoothing = false if f.respond_to?(:smoothing) && f.smoothing.nil?
           end
-
-          puts "Found #{@freq_constants.length} frequency constants: #{@freq_constants.map(&:__id__)}" # XXX
         end
 
         # Tells all envelopes to start their attack phase based on the given
         # velocity, and sets all frequency constants based on the given note.
-        def trigger(note, velocity)
-          puts "Trigger #{note}@#{velocity} (#{MB::Sound::Note.new(note).name})" # XXX
-
-          set_note(note, reset_portamento: false)
+        def trigger(note, velocity, timestamp)
+          set_note(note, timestamp, reset_portamento: false)
 
           @oscillators.each do |o|
             o.reset unless o.no_trigger
@@ -123,11 +235,13 @@ module MB
           @velocity_listeners.each do |vl|
             vl[:parameter].raw_value = velocity
           end
+
+          @manager_proxy&.graph_voice_trigger(note, velocity, timestamp)
         end
 
         # Sets the note number without triggering the envelope generators (e.g.
         # for polyphonic portamento).
-        def set_note(note, reset_portamento: true)
+        def set_note(note, timestamp, reset_portamento: true)
           @number = note
 
           @oscillators.each do |o|
@@ -149,6 +263,8 @@ module MB
               f.reset(Math.log2(freq))
             end
           end
+
+          @manager_proxy&.graph_voice_set_note(note, timestamp)
         end
 
         # Sends values of internal parameters to graph nodes (e.g. those from
@@ -248,8 +364,10 @@ module MB
         end
 
         # Tells all envelopes to start their release phase.
-        def release(note, velocity)
+        def release(note, velocity, timestamp)
           @envelopes.each(&:release)
+
+          @manager_proxy&.graph_voice_release(note, velocity, timestamp)
         end
 
         # Returns true if any envelopes have not reached the end of their

@@ -147,8 +147,8 @@ module MB
         end
 
         # Claim to support methods the base filter supports as well as our own.
-        def respond_to?(m)
-          super || @base_filter.respond_to?(m)
+        def respond_to?(m, include_all = false)
+          super || @base_filter.respond_to?(m, include_all)
         end
 
         # Pass other methods through to the wrapped object.

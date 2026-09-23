@@ -8,8 +8,8 @@ module MB
           # Initializes a MIDI velocity graph node.
           #
           # See MidiDsl#velocity.
-          def initialize(dsl:, sample_rate:, number:, range:, unit:, si:)
-            super(default: 0, dsl: dsl, range: range, unit: unit, si: si, sample_rate: sample_rate)
+          def initialize(dsl:, sample_rate:, number:, range:, unit:, si:, smoothing:)
+            super(default: 0, dsl: dsl, range: range, unit: unit, si: si, sample_rate: sample_rate, smoothing: smoothing)
 
             @node_type_name = "Note Velocity"
 
@@ -22,14 +22,14 @@ module MB
 
           # Called by the MIDI manager for note on/off events, from which we
           # take the attack velocity.
-          def note_cb(number, velocity, onoff)
+          def note_cb(number, velocity, onoff, timestamp)
             return unless onoff && (@number.nil? || number == @number)
 
             # TODO: should this output zero or something based on release
             # velocity when the note is released?
             # TODO: allow selecting release velocity?
 
-            self.constant = MB::M.scale(velocity, @from_range, @to_range)
+            timed_change(MB::M.scale(velocity, @from_range, @to_range), timestamp)
           end
 
           def sources

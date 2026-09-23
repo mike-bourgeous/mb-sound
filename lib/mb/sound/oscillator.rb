@@ -116,6 +116,10 @@ module MB
       attr_accessor :wave_type, :pre_power, :post_power, :range, :advance, :random_advance
       attr_reader :phi, :phase, :frequency, :phase_mod
 
+      # The most recent true frequency on an FM-modulated (not PM-modulated)
+      # oscillator.  Starts at zero before #sample is called
+      attr_reader :last_freq
+
       # An informational marker for classes like MB::Sound::MIDI::GraphVoice
       # indicating that the oscillator should not be reset when a note is
       # played.  Has no effect within the oscillator itself.
@@ -186,6 +190,8 @@ module MB
 
         @osc_buf = nil
         @truncated = false
+
+        @last_freq = 0.0
       end
 
       # The sample rate of the oscillator (calculated from the phase advance
@@ -267,8 +273,11 @@ module MB
       end
 
       # Restarts the oscillator at the given note number and velocity.
-      def trigger(note_number, velocity)
+      #
+      # TODO: remove this API and use GraphVoice or Voice exclusively.
+      def trigger(note_number, velocity, timestamp)
         reset
+        @phi -= (2.0 * Math::PI * @frequency) * timestamp
         self.number = note_number
         amplitude = MB::M.scale(velocity, 0..127, -30..-6).db
         self.range = -amplitude..amplitude
@@ -276,7 +285,7 @@ module MB
 
       # Stops the oscillator at the given release velocity (which may be
       # ignored), if its note number matches the given note number.
-      def release(note_number, velocity)
+      def release(note_number, velocity, timestamp)
         if note_number == @note_number || (note_number.round == @note_number.round rescue nil)
           self.range = 0..0
         end
@@ -448,6 +457,8 @@ module MB
           state
         ).inplace!
 
+        @last_freq = freq.is_a?(Numeric) ? freq : freq[-1]
+
         @phi = state[0]
 
         buf = add_waveshape_and_range(buf)
@@ -497,9 +508,11 @@ module MB
           @osc_buf[idx] = result
         end
 
+        @last_freq = freq_table.is_a?(Numeric) ? freq_table : freq_table[-1]
+
         buf = @osc_buf[0...count].inplace!
         buf = add_waveshape_and_range(buf)
-        buf
+        buf.not_inplace!
       end
 
       private

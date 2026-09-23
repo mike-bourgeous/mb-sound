@@ -68,6 +68,9 @@ module MB
         # The track index given to the constructor.
         attr_reader :read_track
 
+        # The source clock that governs when #read will return events.
+        attr_reader :clock
+
         # Reads MIDI data from the given +filename+.  Call #read repeatedly to
         # receive MIDI events based on elapsed time.
         #
@@ -79,6 +82,11 @@ module MB
         # If +:merge_tracks+ is false, then events will not be merged across
         # tracks, and #read will only return events from track +:read_track+.
         def initialize(filename, clock: MB::U, merge_tracks: true, read_track: 0, speed: 1.0)
+          @index = 0
+          @elapsed = 0
+          @last_time = 0
+          @start = nil
+
           self.clock = clock
 
           raise 'Speed must be greater than zero' unless speed > 0
@@ -107,9 +115,6 @@ module MB
 
           @events = track.events.freeze
           @count = @events.count
-
-          @index = 0
-          @elapsed = 0
 
           @notes = nil
           @note_stats = nil
@@ -309,7 +314,9 @@ module MB
         # Sets the current time used by #read to +time+ (in seconds).  Negative
         # values delay the start of playback.
         def seek(time)
+          delta = @elapsed - @last_time
           @elasped = time.to_f
+          @last_time = @elapsed - delta
           @start = @clock.clock_now - @elapsed
           @index = find_index(time)
         end
@@ -317,8 +324,19 @@ module MB
         # Returns events from the MIDI file whose timestamps are less than or
         # equal to the elapsed time since this method was first called.
         #
-        # Returns an Array containing a single String, or nil if there are no
-        # events left to read.
+        # Returns events in the same form as mb-sound-jackffi, with an Array of
+        # Arrays wrapped in an Array:
+        #
+        #     [ # Array for input ports (files have one port only)
+        #       [ # Array for events
+        #         [timestamp, bytestring],
+        #         ...
+        #       ]
+        #     ]
+        #
+        # Returns nil if there are no events left to read, or an empty inner
+        # Array if +:blocking+ is false and no events occur within the elapsed
+        # time.
         #
         # If :blocking is true, then this method will sleep to keep time with
         # the MIDI file.  This will not work correctly if a non-realtime clock
@@ -329,7 +347,7 @@ module MB
 
           @start ||= @clock.clock_now
 
-          current_events = ''
+          current_events = []
 
           if blocking
             # Sleep until the scheduled time of the next event
@@ -339,6 +357,7 @@ module MB
           end
 
           now = @clock.clock_now
+          @last_time = @elapsed
           @elapsed = now - @start
 
           while @index < @events.length
@@ -349,17 +368,13 @@ module MB
             break if t > @elapsed
 
             unless ev.is_a?(::MIDI::MetaEvent)
-              current_events << ev.data_as_bytes.pack('C*')
+              current_events << [t - @last_time, ev.data_as_bytes.pack('C*')]
             end
 
             @index += 1
           end
 
-          if current_events.empty?
-            [nil]
-          else
-            [current_events]
-          end
+          [current_events]
         end
 
         private
