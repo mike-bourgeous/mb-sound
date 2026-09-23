@@ -1,6 +1,18 @@
 module MB
   module Sound
     class FFMPEGOutput < IOOutput
+      # Input options for realtime output (see the +:realtime+ parameter to
+      # #initialize).  By default ffmpeg reads ahead several seconds of input
+      # to analyze it, and its internal thread queues hold a few more seconds
+      # of 4096-frame packets, so without these a writer can get over two
+      # seconds ahead of the sound card.
+      REALTIME_INPUT_ARGS = [
+        '-probesize', '32',
+        '-analyzeduration', '0',
+        '-readrate', '1',
+        '-readrate_initial_burst', '0.1',
+      ].freeze
+
       attr_reader :filename
 
       # Starts an FFMPEG process to write audio to the given +filename+.  The
@@ -31,7 +43,13 @@ module MB
       #                 minimum quantity of writable data, and on Linux is also
       #                 used by IOInput to suggest a pipe buffer size to the
       #                 kernel to reduce latency.
-      def initialize(filename, sample_rate:, channels:, codec: nil, bitrate: nil, format: nil, loglevel: nil, buffer_size: nil, metadata: nil)
+      # +realtime+ - If true, ffmpeg reads its input no faster than realtime
+      #              and skips its initial input analysis, so writes block at
+      #              playback speed instead of running seconds ahead.  Use
+      #              this for sound card outputs (e.g. audiotoolbox) whose
+      #              own backpressure is hidden behind ffmpeg's internal
+      #              queues.  Requires ffmpeg 6.1 or newer.
+      def initialize(filename, sample_rate:, channels:, codec: nil, bitrate: nil, format: nil, loglevel: nil, buffer_size: nil, metadata: nil, realtime: false)
         if format
           @filename = filename
         else
@@ -66,6 +84,7 @@ module MB
             '-ar', @sample_rate.to_s,
             '-ac', channels.to_s,
             '-f', 'f32le',
+            *(realtime ? REALTIME_INPUT_ARGS : []),
             '-i', 'pipe:',
             *(format ? ['-f', format.to_s] : []),
             *(codec ? ['-acodec', codec.to_s] : []),

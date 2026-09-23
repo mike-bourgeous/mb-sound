@@ -366,8 +366,14 @@ module MB
           # -list_devices true -`); a non-numeric name selects the system
           # default output.  The codec keeps samples as float instead of
           # ffmpeg's default of 16-bit integer.
+          #
+          # realtime: true keeps ffmpeg from buffering seconds of audio ahead
+          # of the sound card, and BackgroundOutput keeps audiotoolbox fed
+          # with silence between sounds so it never runs dry.
           at_device = ENV['OUTPUT_DEVICE'] || ENV['DEVICE'] || device || 'default'
-          o = MB::Sound::FFMPEGOutput.new(at_device.to_s, sample_rate: sample_rate, channels: channels, buffer_size: buffer_size, format: 'audiotoolbox', codec: 'pcm_f32le')
+          o = MB::Sound::BackgroundOutput.new(
+            MB::Sound::FFMPEGOutput.new(at_device.to_s, sample_rate: sample_rate, channels: channels, buffer_size: buffer_size, format: 'audiotoolbox', codec: 'pcm_f32le', realtime: true)
+          )
 
         when :null
           o = MB::Sound::NullOutput.new(channels: channels, sample_rate: sample_rate, buffer_size: buffer_size)
