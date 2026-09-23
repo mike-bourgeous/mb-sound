@@ -615,17 +615,6 @@ module MB
         ).named(name).taps
       end
 
-      # Appends a reverb to this node.  Named presets change default
-      # parameters, but you can override any of the preset's parameters.
-      #
-      # If this is a multi-output node (e.g. a splittable input object), then
-      # the outputs are broken out as a multichannel input to the Reverb.
-      #
-      # Presets: :room, :hall, :stadium, :space, :default.  See
-      # Reverb::PRESETS.
-      #
-      # See MB::Sound::GraphNode::Reverb#initialize for parameter descriptions.
-      #
       # The +:extra_time+ parameter controls how much time to add to input
       # objects to allow the reverb to decay.
       #
@@ -640,18 +629,56 @@ module MB
           preset,
           input: self,
           extra_time: extra_time,
-          output_channels: output_channels,
           channels: channels,
-          stages: stages,
-          diffusion_range: diffusion_range,
-          feedback_range: feedback_range,
-          feedback_gain: feedback_gain,
-          feedback_enabled: feedback_enabled,
-          predelay: predelay,
+          output_channels: output_channels,
+          wet: wet,
+          dry: dry,
+          seed: seed
+        )
+      end
+
+      # Adds a reverb effect to this node using diffusion stages and a
+      # feedback delay network.  See GraphNode::FdnReverb for details.
+      #
+      # When called on a MultiOutput node (e.g. from InputChannelSplit),
+      # the individual outputs are automatically used as separate input
+      # channels to the reverb.
+      #
+      # When +tail+ is given (in seconds), the reverb continues processing
+      # silence after the inputs end, allowing the reverb tail to decay.
+      # Defaults to +decay + 0.5+.  Set +tail: 0+ or +tail: false+ to
+      # disable.
+      #
+      # Example:
+      #     play 440.hz.sine.for(0.5).fdn_reverb(room_size: 0.8, decay: 3.0)
+      #
+      #     # Stereo file input -> stereo reverb
+      #     play file_input('sounds/synth0.flac').fdn_reverb
+      def fdn_reverb(room_size: 0.5, decay: 2.0, damping: 0.5, diffusion_steps: 4, channels: 8, output_channels: nil, wet: 0.3, dry: 0.7, seed: 0, sample_rate: 48000, tail: nil)
+        tail = decay + 0.5 if tail.nil?
+        tail = 0 if tail == false
+
+        input = if self.is_a?(MultiOutput)
+          self.outputs.map { |out|
+            node = out.get_sampler
+            tail > 0 ? node.and_then(0.constant.for(tail)) : node
+          }
+        else
+          tail > 0 ? self.and_then(0.constant.for(tail)) : self
+        end
+
+        MB::Sound::GraphNode::FdnReverb.new(
+          input,
+          room_size: room_size,
+          decay: decay,
+          damping: damping,
+          diffusion_steps: diffusion_steps,
+          channels: channels,
+          output_channels: output_channels,
           wet: wet,
           dry: dry,
           seed: seed,
-          show_internals: show_internals
+          sample_rate: sample_rate
         )
       end
 
@@ -948,10 +975,10 @@ module MB
             # TODO: this would all be easier if source/dest links were bidirectional
             # TODO: is this a reasonable number?
             if source_history[s] > 50 + source_list.length
-              # FIXME: node graph iteration is reporting possible infinite loops on reverb which shouldn't have any loops
+              # FIXME: node graph iteration is reporting possible infinite loops on code which shouldn't have any loops
               # FIXME: only re-traverse a node if doing so would change its
               # depth; I suspect we're doing an exponential traversal of all
-              # possible edge combinations in the reverb graph.
+              # possible edge combinations in complex graphs.
               warn "Possible infinite loop on #{s} (started from #{self}; seen #{source_history[s]} times of #{source_list.length})"
               next
             end
@@ -1135,6 +1162,7 @@ require_relative 'graph_node/quantize'
 require_relative 'graph_node/data_shuffler'
 require_relative 'graph_node/wavetable'
 require_relative 'graph_node/matrix_mixer'
+require_relative 'graph_node/fdn_reverb'
 require_relative 'graph_node/reverb'
 
 require_relative 'graph_node/graph_clock'
