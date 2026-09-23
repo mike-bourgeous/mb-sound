@@ -63,7 +63,7 @@ RSpec.describe(MB::Sound::IOMethods) do
 
       it 'plays float samples to the default audiotoolbox device' do
         expect(MB::Sound::FFMPEGOutput).to receive(:new)
-          .with('default', sample_rate: 48000, channels: 2, buffer_size: nil, format: 'audiotoolbox', codec: 'pcm_f32le')
+          .with('default', sample_rate: 48000, channels: 2, buffer_size: nil, format: 'audiotoolbox', codec: 'pcm_f32le', realtime: true)
           .and_return(MB::Sound::NullOutput.new(channels: 2))
 
         o = MB::Sound.output(output_type: :ffmpeg)
