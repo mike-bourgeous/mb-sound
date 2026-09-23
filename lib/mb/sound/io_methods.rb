@@ -312,15 +312,16 @@ module MB
       #
       # The output type may be changed using the OUTPUT_TYPE environment
       # variable.  Supported output types are :jack_ffi, :jack, :alsa_pulse,
-      # :alsa, and :null.
+      # :alsa, and :null.  The +:output_type+ parameter overrides both the
+      # environment variable and automatic detection.
       #
       # See FFMPEGOutput, mb-sound-jackffi, JackOutput, and AlsaOutput for more
       # flexible playback.
       #
       # Pass either true or a Hash of options for MB::Sound::PlotOutput in
       # +:plot+ to enable live plotting.
-      def output(sample_rate: 48000, channels: 2, device: nil, buffer_size: nil, plot: nil, output_type: ENV['OUTPUT_TYPE']&.to_sym || :null)
-        info = {sample_rate: sample_rate, channels: channels, device: device, buffer_size: buffer_size, plot: plot}
+      def output(sample_rate: 48000, channels: 2, device: nil, buffer_size: nil, plot: nil, output_type: nil)
+        info = {sample_rate: sample_rate, channels: channels, device: device, buffer_size: buffer_size, plot: plot, output_type: output_type}
 
         if plot
           graphical = plot.is_a?(Hash) && plot[:graphical] || false
