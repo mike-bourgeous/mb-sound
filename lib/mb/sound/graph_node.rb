@@ -655,6 +655,51 @@ module MB
         )
       end
 
+      # Adds a reverb effect to this node using diffusion stages and a
+      # feedback delay network.  See GraphNode::FdnReverb for details.
+      #
+      # When called on a MultiOutput node (e.g. from InputChannelSplit),
+      # the individual outputs are automatically used as separate input
+      # channels to the reverb.
+      #
+      # When +tail+ is given (in seconds), the reverb continues processing
+      # silence after the inputs end, allowing the reverb tail to decay.
+      # Defaults to +decay + 0.5+.  Set +tail: 0+ or +tail: false+ to
+      # disable.
+      #
+      # Example:
+      #     play 440.hz.sine.for(0.5).fdn_reverb(room_size: 0.8, decay: 3.0)
+      #
+      #     # Stereo file input -> stereo reverb
+      #     play file_input('sounds/synth0.flac').fdn_reverb
+      def fdn_reverb(room_size: 0.5, decay: 2.0, damping: 0.5, diffusion_steps: 4, channels: 8, output_channels: nil, wet: 0.3, dry: 0.7, seed: 0, sample_rate: 48000, tail: nil)
+        tail = decay + 0.5 if tail.nil?
+        tail = 0 if tail == false
+
+        input = if self.is_a?(MultiOutput)
+          self.outputs.map { |out|
+            node = out.get_sampler
+            tail > 0 ? node.and_then(0.constant.for(tail)) : node
+          }
+        else
+          tail > 0 ? self.and_then(0.constant.for(tail)) : self
+        end
+
+        MB::Sound::GraphNode::FdnReverb.new(
+          input,
+          room_size: room_size,
+          decay: decay,
+          damping: damping,
+          diffusion_steps: diffusion_steps,
+          channels: channels,
+          output_channels: output_channels,
+          wet: wet,
+          dry: dry,
+          seed: seed,
+          sample_rate: sample_rate
+        )
+      end
+
       # Hard-clips the output of this node to the given min and max, one of
       # which may be nil to disable clipping in that direction.
       def clip(min, max)
@@ -1136,5 +1181,6 @@ require_relative 'graph_node/data_shuffler'
 require_relative 'graph_node/wavetable'
 require_relative 'graph_node/matrix_mixer'
 require_relative 'graph_node/reverb'
+require_relative 'graph_node/fdn_reverb'
 
 require_relative 'graph_node/graph_clock'
