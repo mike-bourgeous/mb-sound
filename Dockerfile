@@ -2,8 +2,7 @@ FROM docker.io/library/ruby:4.0.3
 
 ARG DEBIAN_FRONTEND=none
 RUN apt-get -y update && apt-get -y upgrade && apt-get -y --no-install-recommends install \
-	build-essential bash-completion git pkgconf vim less ripgrep jq sqlite3 chromium \
-	chromium-driver fonts-liberation postgresql-17 libpq-dev \
+	build-essential bash-completion git pkgconf vim less ripgrep jq \
 	libsamplerate0-dev libjack-dev gnuplot ffmpeg graphviz
 
 COPY .bash_aliases /root/.bash_aliases
