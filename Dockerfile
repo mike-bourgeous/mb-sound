@@ -15,6 +15,9 @@ RUN cd /app && bundle install
 VOLUME /app
 WORKDIR /
 
+# mb-sound: no audio devices in the container
+ENV OUTPUT_TYPE=null
+
 # Claude
 ENV IS_DEMO=1
 ENV CLAUDE_CONFIG_DIR=/app/.claude-user
