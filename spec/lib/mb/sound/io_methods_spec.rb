@@ -54,6 +54,55 @@ RSpec.describe(MB::Sound::IOMethods) do
         o&.close
       end
     end
+
+    context 'with the :ffmpeg output type' do
+      before(:each) {
+        ENV.delete('OUTPUT_TYPE')
+        stub_const('RUBY_PLATFORM', 'arm64-darwin24')
+      }
+
+      it 'plays float samples to the default audiotoolbox device' do
+        expect(MB::Sound::FFMPEGOutput).to receive(:new)
+          .with('default', sample_rate: 48000, channels: 2, buffer_size: nil, format: 'audiotoolbox', codec: 'pcm_f32le')
+          .and_return(MB::Sound::NullOutput.new(channels: 2))
+
+        MB::Sound.output(output_type: :ffmpeg)
+      end
+
+      it 'passes the device through as an audiotoolbox device index' do
+        expect(MB::Sound::FFMPEGOutput).to receive(:new)
+          .with('3', hash_including(format: 'audiotoolbox'))
+          .and_return(MB::Sound::NullOutput.new(channels: 2))
+
+        MB::Sound.output(output_type: :ffmpeg, device: 3)
+      end
+
+      it 'raises an error on other platforms' do
+        stub_const('RUBY_PLATFORM', 'x86_64-linux')
+        expect { MB::Sound.output(output_type: :ffmpeg, device: 'ffmpeg-spec-linux') }.to raise_error(NotImplementedError, /macOS/)
+      end
+    end
+  end
+
+  describe '#detect_output' do
+    around(:each) do |ex|
+      orig = ENV.delete('OUTPUT_TYPE')
+      ex.run
+    ensure
+      ENV['OUTPUT_TYPE'] = orig if orig
+    end
+
+    it 'uses ffmpeg on macOS when JackD is not running' do
+      stub_const('RUBY_PLATFORM', 'arm64-darwin24')
+      allow(MB::Sound).to receive(:`).with('pgrep jackd').and_return('')
+      expect(MB::Sound.detect_output).to eq(:ffmpeg)
+    end
+
+    it 'uses JackD on macOS when it is running' do
+      stub_const('RUBY_PLATFORM', 'arm64-darwin24')
+      allow(MB::Sound).to receive(:`).with('pgrep jackd').and_return("1234\n")
+      expect([:jack, :jack_ffi]).to include(MB::Sound.detect_output)
+    end
   end
 
   describe '#read' do
