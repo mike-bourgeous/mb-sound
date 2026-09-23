@@ -10,8 +10,20 @@
 .*.swo
 /*.flac
 /*.wav
+/*.mp3
 /spec/examples.txt
 .gdb_history
 /lib/**/*.so
 /lib/**/*.bundle
 .byebug_history
+
+/*.c
+/a.out
+/bench.csv
+
+# Claude Code local files
+.claude/settings.local.json
+.claude/todos.json
+.claude/worktrees/
+.claude-user
+.gh-user
