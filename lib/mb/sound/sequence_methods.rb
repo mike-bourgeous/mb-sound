@@ -41,6 +41,20 @@ module MB
           })
         end
       end
+
+      # Returns the default Sequence::Transport, which sets the tempo for
+      # clips played in node graphs.
+      def transport
+        Sequence.transport
+      end
+
+      # Sets the default tempo in quarter notes per minute, or returns it if
+      # +beats_per_minute+ is nil.  Clips that are already playing change
+      # speed right away.
+      def bpm(beats_per_minute = nil)
+        Sequence.transport.bpm = beats_per_minute if beats_per_minute
+        Sequence.transport.bpm
+      end
     end
   end
 end
