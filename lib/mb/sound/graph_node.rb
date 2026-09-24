@@ -10,6 +10,7 @@ require_relative 'graph_node/synthesis_methods'
 require_relative 'graph_node/resample_methods'
 require_relative 'graph_node/filter_methods'
 require_relative 'graph_node/delay_methods'
+require_relative 'graph_node/distortion_methods'
 
 module MB
   module Sound
@@ -59,6 +60,7 @@ module MB
       include ResampleMethods
       include FilterMethods
       include DelayMethods
+      include DistortionMethods
 
       # Returns the class name, or a custom name set by the subclass (e.g. '/'
       # for a division proc node).
@@ -83,34 +85,6 @@ module MB
         #{@graph_node_name || "id=#{__id__}"}
         #{MB::M.sigformat(sample_rate)}Hz
         EOF
-      end
-
-      # Hard-clips the output of this node to the given min and max, one of
-      # which may be nil to disable clipping in that direction.
-      def clip(min, max)
-        self
-          .proc(type_name: 'clip') { |v| v.clip(min, max) }
-          .named("clamp #{min}..#{max}")
-      end
-
-      # Adds a soft-clipper to the graph.  Values greater than +threshold+ will
-      # be smoothly compressed downward, with a value of infinity producing an
-      # output of +limit+.
-      def softclip(threshold = 0.25, limit = 1.0)
-        MB::Sound::Filter::SampleWrapper.new(
-          MB::Sound::SoftestClip.new(threshold: threshold, limit: limit),
-          self
-        )
-      end
-
-      # Adds a quantizer to the node graph.  Values will be rounded to the
-      # nearest multiple of +increment+.  To quantize to a given number of
-      # bits, use e.g. `5.bits`.  An +increment+ of zero means no quantization.
-      #
-      # The +increment+ may be another GraphNode to apply a time-varying
-      # quantization amount.
-      def quantize(increment)
-        MB::Sound::GraphNode::Quantize.new(upstream: self, increment: increment)
       end
 
       # Calls the given block with each sample buffer whenever #sample is
