@@ -40,6 +40,13 @@ module MB
     #
     # There are more examples in the bin/ directory, such as bin/flanger.rb
     #
+    # The DSL methods are grouped into modules that GraphNode includes:
+    # RoutingMethods, ArithmeticMethods, SynthesisMethods, ResampleMethods,
+    # FilterMethods, DelayMethods, DistortionMethods, DebugMethods, and
+    # DurationMethods (in lib/mb/sound/graph_node/*_methods.rb).  Add new DSL
+    # methods to the matching module, or create a new module and include it
+    # here after Nameable and Traversable.
+    #
     # TODO: Standardize a way to modify an existing graph, e.g. to inject a
     # tee, filter, or tap.
     #
@@ -50,9 +57,6 @@ module MB
     # TODO: In-line method to create a meter?
     #
     # TODO: Document methods that nodes must implement or override
-    #
-    # TODO: Split methods in this module into groups and/or related classes
-    # (e.g. #wavetable could go into GraphNode::Wavetable)
     module GraphNode
       include Nameable
       include Traversable
