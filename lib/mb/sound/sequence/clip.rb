@@ -8,8 +8,13 @@ module MB
       # Clips are usually built with MB::Sound#seq or MB::Sound#grid rather
       # than created directly.
       #
+      # Playback into a node graph uses the output methods (#trigger, #gate,
+      # #velocity, #number, #hz, #tone, and #env), which create ClipNodes that
+      # read the clip in sync with a Transport.
+      #
       # Example (bin/sound.rb):
       #     riff = seq(C3, Ds3, G3, As3).n8 | seq(G3.n4, rest.n4)
+      #     play riff.loop.tone.ramp.at(1) * riff.loop.env(0.005, 0.1, 0.5, 0.1)
       class Clip
         include Enumerable
 
@@ -191,6 +196,8 @@ module MB
         # (exclusive) whole notes from the start of playback, as an Array of
         # [time, :on/:off, event, cycle] sorted by time.  Note-offs sort before
         # note-ons at the same time so repeated notes retrigger.
+        #
+        # Used by ClipNode.
         def edges(from, to)
           return [] if @length <= 0 && @events.empty?
 
@@ -224,6 +231,56 @@ module MB
         def plays?(event, cycle, index)
           return true if event.probability.nil? || event.probability >= 1
           Random.new((@seed * 1_000_003 + cycle) * 1_000_003 + index).rand < event.probability
+        end
+
+        # Creates a graph node that outputs a single-sample impulse at the
+        # start of each event, scaled from velocity to +:range+.  Useful for
+        # pinging filters or driving other trigger-based nodes.
+        def trigger(range: 0.0..1.0, transport: nil)
+          ClipNode::Trigger.new(self, range: range, transport: transport)
+        end
+
+        # Creates a graph node that outputs 1.0 while any event is playing and
+        # 0.0 otherwise.
+        def gate(transport: nil)
+          ClipNode::Gate.new(self, transport: transport)
+        end
+
+        # Creates a graph node that outputs the velocity of the most recent
+        # event, scaled to +:range+.
+        def velocity(range: 0.0..1.0, transport: nil)
+          ClipNode::Velocity.new(self, range: range, transport: transport)
+        end
+
+        # Creates a graph node that outputs the value (e.g. MIDI note number)
+        # of the most recent event, starting with the first event's value.
+        def number(transport: nil)
+          ClipNode::Number.new(self, transport: transport)
+        end
+        alias value number
+
+        # Creates a graph node that outputs the frequency in Hz of the most
+        # recent event's note number.
+        def hz(transport: nil)
+          number(transport: transport).freq
+        end
+        alias frequency hz
+
+        # Creates an oscillator (a Tone) whose frequency follows this clip's
+        # notes.  Chain a wave type, e.g. `clip.tone.ramp`.
+        def tone(transport: nil)
+          hz(transport: transport).tone
+        end
+
+        # Creates an ADSR envelope node that triggers at the start of each
+        # event and releases at its end.  Envelope peak follows velocity,
+        # scaled to +:velocity+.  Times are in seconds.
+        def env(attack = 0.005, decay = 0.1, sustain = 0.5, release = 0.1, velocity: 0.5..1.0, transport: nil)
+          ClipNode::Envelope.new(
+            self,
+            attack: attack, decay: decay, sustain: sustain, release: release,
+            velocity: velocity, transport: transport
+          )
         end
 
         def to_s
