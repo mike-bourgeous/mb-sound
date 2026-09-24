@@ -76,6 +76,10 @@ Two reverb implementations coexist:
 - `GraphNode::Reverb` / `#reverb` (`lib/mb/sound/graph_node/reverb.rb`, `bin/effects/reverb.rb`) - the original from the reverb video; preset-based (`:room`, `:hall`, `:space`, ...), with visualizable internals.
 - `GraphNode::FdnReverb` / `#fdn_reverb` (`lib/mb/sound/graph_node/fdn_reverb.rb`, `bin/effects/fdn_reverb.rb`) - a clean-room implementation written with Claude Code; parameterized by `room_size`, `decay`, and `damping`, with seeded non-harmonic delays.
 
+### Sequences
+
+`lib/mb/sound/sequence/` (`MB::Sound::Sequence`) holds musical sequences: immutable `Clip`s of `Event`s timed in exact Rational whole notes, built with `seq` (e.g. `seq(C4, E4, G4.n4).n8`), `grid` (drum step strings like `'x...x...'`), and note length methods on `Note` (`n1`-`n8`, `n12`-`n128`, `.d`, `.t`, long names). Clips play in node graphs through `ClipNode` outputs (`clip.env`, `clip.tone`, `clip.gate`, `clip.trigger`, `clip.number`) that land edges on exact samples, at the tempo of a shared `Transport` (`bpm 120`). See `bin/songs/sequence_demo.rb`.
+
 ### MIDI
 
 `lib/mb/sound/midi/` handles MIDI file parsing, real-time input, voice management, and controller mapping. Integrates with the GraphNode DSL for synthesizer control.
