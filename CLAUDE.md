@@ -42,6 +42,8 @@ play 123.hz.triangle.at(-20.db).for(0.5)
 play 123.hz.fm(369.hz.at(1000)).softclip.filter(150.hz.highpass(quality: 4))
 ```
 
+The DSL methods themselves (`#filter`, `#delay`, `#softclip`, arithmetic operators, etc.) live in topic modules included by `GraphNode`, in `lib/mb/sound/graph_node/*_methods.rb` (`RoutingMethods`, `ArithmeticMethods`, `SynthesisMethods`, `ResampleMethods`, `FilterMethods`, `DelayMethods`, `DistortionMethods`, `DebugMethods`, `DurationMethods`); `graph_node.rb` keeps naming, graph traversal, and shared private helpers.
+
 Graph nodes maintain input/output relationships and support traversal via the `Traversable` mixin. Key node types live in `lib/mb/sound/graph_node/` (tone, noise, filter, resample, quantize, MIDI, etc.).
 
 ### Numeric Mixins
