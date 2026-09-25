@@ -331,6 +331,57 @@ module MB
           )
         end
 
+        # Splits this clip into +voices+ clips and yields each one (and its
+        # index) to the block, which returns a graph that plays that voice
+        # (e.g. using voice.tone and voice.env).  Returns the voices' graphs
+        # mixed together, or an Array of mixed channels if the block returns
+        # Arrays (e.g. stereo pairs).  Modeled on MidiMethods#synth.
+        #
+        # Notes are given to voices round-robin in start order, so notes that
+        # start together (chords) play on different voices, and a note's
+        # release can ring on one voice while the next note starts on
+        # another.  Voices that get no notes are skipped.
+        #
+        # Example (bin/sound.rb):
+        #     chords = seq(A2, F2, C3, G2).n1.legato(0.95).loop
+        #     bg :pad, chords.synth(voices: 3) { |v|
+        #       (v.tone.ramp.at(1) + v.transpose(7).tone.ramp.at(0.7)) * v.env(0.6, 1.0, 0.8, 2.5) * 0.3
+        #     }
+        def synth(voices: 2)
+          raise ArgumentError, 'Pass a block that builds a graph for one voice' unless block_given?
+          raise ArgumentError, "Voice count must be a positive Integer (got #{voices.inspect})" unless voices.is_a?(Integer) && voices > 0
+
+          graphs = voice_clips(voices).each_with_index.filter_map { |v, idx|
+            yield v, idx unless v.events.empty?
+          }
+          raise ArgumentError, 'Cannot build a synth from a clip with no notes' if graphs.empty?
+
+          if graphs.any?(Array)
+            graphs = graphs.map { |g| Array(g) }
+            channels = graphs.map(&:length).max
+            Array.new(channels) { |c| graphs.map { |g| g[c % g.length] }.reduce(:+) }
+          else
+            graphs.reduce(:+)
+          end
+        end
+
+        # Splits this clip into +count+ clips with notes assigned round-robin
+        # in start order (see #synth).  A looping clip whose note count
+        # doesn't divide evenly among the voices is repeated first, so the
+        # round-robin order continues across loops.
+        def voice_clips(count)
+          clip = self
+          if @loop && !@events.empty?
+            cycles = count / @events.length.gcd(count)
+            clip = repeat(cycles).loop(seed: @seed) if cycles > 1
+          end
+
+          Array.new(count) { |v|
+            events = clip.events.select.with_index { |_, idx| idx % count == v }
+            Clip.new(events, length: clip.length, loop: @loop, seed: @seed)
+          }
+        end
+
         def to_s
           "#{self.class.name.rpartition('::').last}(#{Duration.format(@length)}#{' loop' if @loop}: #{@events.map(&:to_s).join(', ')})"
         end
