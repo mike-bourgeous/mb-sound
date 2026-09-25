@@ -31,7 +31,7 @@ module MB
         def bars_or_nil(bars)
           return nil if bars.nil? || bars == false || bars == 0
           raise ArgumentError, "Fade must be a positive number of bars (got #{bars.inspect})" unless bars.is_a?(Numeric) && bars.finite? && bars > 0
-          bars.is_a?(Float) ? bars.rationalize(Rational(1, 10_000)) : bars.to_r
+          Sequence::Duration.rational(bars)
         end
 
         # The gain change per frame for a fade lasting +bars+ at the current

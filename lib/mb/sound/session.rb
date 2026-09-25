@@ -334,10 +334,13 @@ module MB
       end
 
       # Returns a Hash from player name to a description, noting players
-      # that are waiting for their start time or fading out.
+      # that are waiting for their start time, stopping, or fading out.  If a
+      # name has both a current player and one being replaced, the current
+      # player is shown.
       def players
         @mutex.synchronize {
-          @players.values.sort_by { |p| p.current? ? 1 : 0 }.to_h { |p|
+          @players.values.group_by(&:name).transform_values { |list|
+            p = list.find(&:current?) || list.first
             status = if !p.current? && p.stop_at > @transport.position
                        " (stops at bar #{bar_of(p.stop_at)})"
                      elsif !p.current?
@@ -345,7 +348,7 @@ module MB
                      elsif !p.started
                        " (starts at bar #{bar_of(p.start)})"
                      end
-            [p.name, "#{p.description}#{status}"]
+            "#{p.description}#{status}"
           }
         }
       end

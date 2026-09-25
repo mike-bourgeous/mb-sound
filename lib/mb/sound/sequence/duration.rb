@@ -45,11 +45,19 @@ module MB
 
           when Float
             raise ArgumentError, "Duration must be positive and finite (got #{duration})" unless duration.finite? && duration > 0
-            duration.rationalize(Rational(1, 1_000_000))
+            rational(duration)
 
           else
             raise ArgumentError, "Duration must be an Integer note division or a Rational/Float fraction of a whole note (got #{duration.inspect})"
           end
+        end
+
+        # Converts a Numeric to an exact Rational, turning Floats into the
+        # simplest Rational within one millionth (e.g. 0.85 becomes 17/20).
+        # Used wherever Floats are accepted for musical amounts (durations,
+        # legato fractions, fade lengths).
+        def self.rational(value)
+          value.is_a?(Float) ? value.rationalize(Rational(1, 1_000_000)) : value.to_r
         end
 
         # Formats a duration in whole notes for display, e.g. "n4" for 1/4r
