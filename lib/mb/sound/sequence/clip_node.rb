@@ -35,6 +35,25 @@ module MB
         # Restarts playback from the beginning of the clip.
         def restart
           @position = 0r
+          reset_notes
+          self
+        end
+
+        # Starts playback at timeline position +time+ (in whole notes) for a
+        # graph launched at timeline position +origin+.  Looping clips play in
+        # phase with the timeline (clip position = +time+), so clips launched
+        # at different times stay in sync; non-looping clips play from their
+        # start at +origin+.
+        #
+        # Notes in progress are not started partway through, but held values
+        # (e.g. note numbers) jump to the note at the new position.
+        #
+        # Used by Session when a graph starts or the timeline jumps.  If a
+        # +transport+ is given, this node follows it from now on.
+        def start_at(time, origin: time, transport: nil)
+          @transport = transport if transport
+          @position = @clip.looping? ? time.to_r : time.to_r - origin.to_r
+          reset_notes
           self
         end
 
@@ -85,6 +104,11 @@ module MB
         # Fills +buf+ given +edges+ as [sample offset, :on/:off, event, cycle].
         def render(buf, edges)
           raise NotImplementedError
+        end
+
+        # Called when playback jumps (see #start_at and #restart) to forget
+        # notes in progress.
+        def reset_notes
         end
 
         # Outputs a single-sample impulse at the start of each event, scaled
@@ -138,6 +162,12 @@ module MB
           def next_level(type, event, cycle, level)
             raise NotImplementedError
           end
+
+          # Jumps the held level to the note at the current position.
+          def reset_notes
+            event = @clip.event_at(@position)
+            @level = next_level(:on, event, 0, @level).to_f if event
+          end
         end
 
         # Outputs 1.0 while any event is playing and 0.0 otherwise.
@@ -159,6 +189,12 @@ module MB
             key = [event.object_id, cycle]
             type == :on ? @active[key] = true : @active.delete(key)
             @active.empty? ? 0 : 1
+          end
+
+          # Closes the gate; notes in progress are not chased.
+          def reset_notes
+            @active.clear
+            @level = 0.0
           end
         end
 
@@ -240,6 +276,12 @@ module MB
               end
             end
             buf[start...buf.length] = @env.sample(buf.length - start) if start < buf.length
+          end
+
+          # Releases any note in progress; notes are not chased.
+          def reset_notes
+            @env.release
+            @current = nil
           end
         end
       end
