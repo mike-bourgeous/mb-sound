@@ -170,11 +170,12 @@ module MB
       end
 
       # Ends everything playing in the background, fading out over four bars
-      # by default (+:fade+ sets the number of bars).  See #stop, and #panic
-      # to stop everything right away.
+      # by default (+:fade+ sets the number of bars).  Also available as
+      # #fadeout.  See #stop, and #panic to stop everything right away.
       def outro(fade: nil)
         stop(:all, fade: fade)
       end
+      alias fadeout outro
 
       # Stops every background player immediately, with no fade, including
       # players that are fading out or waiting to start.  Audio already sent
