@@ -32,7 +32,7 @@ module MB::Sound
   bass_synth = bass.tone.ramp.at(1)
     .filter(:lowpass, cutoff: 300 + 2500 * bass.env(0.001, 0.12, 0.1, 0.05), quality: 5) * bass_env * 0.5
 
-  kick = (40.hz + 90 * beat[:kick].env(0, 0.04, 0, 0.01)).tone.sine.at(1) * beat[:kick].env(0, 0.3, 0, 0.05)
+  kick = (40.constant + 90 * beat[:kick].env(0, 0.04, 0, 0.01)).tone.sine.at(1) * beat[:kick].env(0, 0.3, 0, 0.05)
   snare = noise.filter(:bandpass, cutoff: 1900, quality: 1.5) * beat[:snare].env(0, 0.12, 0, 0.05) * 2
   hats = noise.filter(:highpass, cutoff: 7500) * hat.env(0, 0.025, 0, 0.02, velocity: 0.1..1) * 0.6
 
