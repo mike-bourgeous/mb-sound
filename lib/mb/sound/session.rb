@@ -1,3 +1,6 @@
+require_relative 'session/fades'
+require_relative 'session/scheduler'
+
 module MB
   module Sound
     # Plays any number of graphs at once through one output, rendering them
@@ -29,6 +32,8 @@ module MB
     # An error in one graph removes that graph and prints the error; other
     # graphs keep playing.
     class Session
+      include Fades
+
       # A graph being played by the session.  +serial+ is unique; +name+ is
       # shared by a graph and the graph replacing it until the switch.
       #
@@ -47,10 +52,6 @@ module MB
           stop_at.nil?
         end
       end
-
-      # A block scheduled by #schedule to run at +time+ (whole notes on the
-      # timeline), repeating every +period+ whole notes if +period+ is set.
-      Scheduled = Struct.new(:id, :time, :period, :block, :description, keyword_init: true)
 
       # Launch points for #add's +:at+ parameter (see #launch_time).
       LAUNCH_POINTS = [:now, :beat, :bar, :clip].freeze
@@ -100,25 +101,6 @@ module MB
       # The number of output channels.  Mono graphs play on every channel.
       attr_reader :channels
 
-      # Bars to fade in new graphs when #add isn't given a +:fade+ (nil for
-      # no fade).  Graphs replacing a named graph switch over without a
-      # fade unless #add is given one.
-      attr_reader :fade_in
-
-      # Bars to fade out graphs when #remove isn't given a +:fade+ (nil to
-      # stop right away).
-      attr_reader :fade_out
-
-      # Sets the default fade-in length in bars (nil, 0, or false for none).
-      def fade_in=(bars)
-        @fade_in = bars_or_nil(bars)
-      end
-
-      # Sets the default fade-out length in bars (nil, 0, or false for none).
-      def fade_out=(bars)
-        @fade_out = bars_or_nil(bars)
-      end
-
       # Creates a session.  If +:output+ is nil, a new (unshared) output from
       # MB::Sound.output is opened when the first graph is added.
       #
@@ -141,9 +123,6 @@ module MB
 
         @players = {}
         @stopped = {}
-        @schedule = {}
-        @next_schedule_id = 0
-        @tempo_changes = []
         @taps = []
         @order = []
         @next_serial = 0
@@ -151,6 +130,7 @@ module MB
         @thread = nil
         @closed = false
         @generation = @transport.generation
+        @scheduler = Scheduler.new(self, realtime: realtime, raise_errors: raise_errors)
       end
 
       # Adds a graph to play: a GraphNode, an Array of GraphNodes (one per
@@ -326,59 +306,31 @@ module MB
       # Changes the tempo to +bpm+ when the timeline reaches +time+ (whole
       # notes), at the start of the buffer that contains it.
       def change_tempo(bpm, time:)
-        raise ArgumentError, "BPM must be a positive number (got #{bpm.inspect})" unless bpm.is_a?(Numeric) && bpm.finite? && bpm > 0
-        @mutex.synchronize { @tempo_changes << [time.to_r, bpm] }
-        bpm
+        @scheduler.change_tempo(bpm, time: time)
       end
 
       # Schedules the block to run at +time+ (whole notes on the timeline),
       # and then every +period+ whole notes if given.  Returns an id for
-      # #cancel.
-      #
-      # Blocks run a little ahead of their time (on a scheduler thread for a
-      # realtime session), inside a context (see .with_context) where the
-      # #bg, #stop, #resume, and #bpm commands take effect exactly at the
-      # scheduled time.  If a block takes so long that its time has already
-      # passed, its commands are skipped with a warning.
-      #
-      # Schedules follow the timeline, which only moves while something is
-      # playing.  A block whose time has already come runs as soon as
-      # possible.
+      # #cancel.  See Scheduler for how and when blocks run.
       def schedule(time, period: nil, description: nil, &block)
-        raise ArgumentError, 'Pass a block to schedule' unless block
-        raise ArgumentError, "Period must be positive (got #{period.inspect})" if period && period <= 0
-
-        @mutex.synchronize {
-          @next_schedule_id += 1
-          @schedule[@next_schedule_id] = Scheduled.new(
-            id: @next_schedule_id,
-            time: time.to_r,
-            period: period&.to_r,
-            block: block,
-            description: description || "bar #{bar_of(time.to_r)}"
-          )
-          @next_schedule_id
-        }
+        @scheduler.schedule(time, period: period, description: description, &block)
       end
 
       # Removes scheduled blocks (all of them if no ids are given).  Returns
       # the ids that were removed.
       def cancel(*ids)
-        @mutex.synchronize {
-          ids = @schedule.keys if ids.empty?
-          ids.select { |id| @schedule.delete(id) }
-        }
+        @scheduler.cancel(*ids)
       end
 
       # Returns a Hash from schedule id to a description of when it runs.
       def scheduled
-        @mutex.synchronize { @schedule.transform_values(&:description) }
+        @scheduler.scheduled
       end
 
       # Returns true if a scheduled block's time has come (so it will run on
       # the next buffer even if nothing is playing).
       def schedule_due?
-        @mutex.synchronize { @schedule.each_value.any? { |e| e.time <= @transport.position } }
+        @scheduler.due?
       end
 
       # Returns a Hash from player name to a description, noting players
@@ -439,7 +391,7 @@ module MB
       # to the output, and advances the timeline (unless idle).  Returns the
       # mix (an Array of Numo::SFloat, one per channel).
       def process_buffer(count = buffer_size)
-        apply_tempo_changes
+        @scheduler.apply_tempo_changes
 
         per_sample = @transport.whole_notes_per_second / output.sample_rate.to_r
         from = @transport.position
@@ -452,14 +404,10 @@ module MB
           @mutex.synchronize { @players.values }.each do |p|
             p.clip_nodes.each { |n| n.start_at(from, origin: p.start, transport: @transport) } if p.started
           end
-          @mutex.synchronize {
-            @schedule.each_value do |e|
-              e.time = from + (e.time - from) % e.period if e.period
-            end
-          }
+          @scheduler.seeked(from)
         end
 
-        dispatch_schedule(from, to)
+        @scheduler.dispatch(from, to, playing: !idle?)
 
         players = @mutex.synchronize { @players.values }
 
@@ -479,8 +427,7 @@ module MB
         return if @closed
         @closed = true
         @thread&.join(5)
-        @schedule_queue&.close
-        @scheduler&.join(5)
+        @scheduler.close
         @output&.close
       end
 
@@ -491,95 +438,9 @@ module MB
 
       private
 
-      # Applies tempo changes from #change_tempo whose time has come.
-      def apply_tempo_changes
-        due = @mutex.synchronize {
-          now, @tempo_changes = @tempo_changes.partition { |time, _| time <= @transport.position }
-          now
-        }
-        due.sort_by(&:first).each { |_, bpm| @transport.bpm = bpm }
-      end
-
-      # Starts scheduled blocks whose time is before +to+ plus half a bar of
-      # lookahead while playing, or whose time has come while idle.
-      def dispatch_schedule(from, to)
-        playing = !idle?
-        horizon = playing ? to + @transport.bar_length / 2 : from
-
-        due = @mutex.synchronize {
-          list = []
-          @schedule.values.each do |e|
-            while e.time <= horizon
-              list << [e, e.time]
-              break @schedule.delete(e.id) unless e.period
-              e.time += e.period
-            end
-          end
-          list
-        }
-
-        due.sort_by(&:last).each do |e, time|
-          # Blocks for times still ahead must finish in time; blocks whose
-          # time has already come run as soon as possible
-          deadline = time > from ? time : nil
-          if @realtime
-            start_scheduler
-            @schedule_queue << [e, time, deadline]
-          else
-            run_scheduled(e, time, deadline)
-          end
-        end
-      end
-
-      # Runs a scheduled block, collecting its commands and then applying
-      # them if the block finished before +deadline+ (see #schedule).
-      def run_scheduled(entry, time, deadline)
-        batch = []
-        Session.with_context(session: self, time: time, batch: batch) do
-          entry.block.call
-        end
-
-        if deadline && @transport.position >= deadline
-          warn "Skipped the commands scheduled for #{entry.description}: the block finished after its time"
-        else
-          batch.each(&:call)
-        end
-
-      rescue => e
-        raise if @raise_errors
-        warn "Scheduled block for #{entry.description} raised #{e.class}: #{e.message}\n\t#{e.backtrace&.first(5)&.join("\n\t")}"
-      end
-
-      # Starts the thread that runs scheduled blocks for a realtime session.
-      def start_scheduler
-        return if @scheduler&.alive?
-
-        @schedule_queue ||= Queue.new
-        @scheduler = Thread.new do
-          while (item = @schedule_queue.pop)
-            run_scheduled(*item)
-          end
-        end
-        @scheduler.name = 'MB::Sound::Session scheduler'
-      end
-
       # Shortens a graph description for #players.
       def shorten(text, max = 60)
         text.length > max ? "#{text[0, max - 3]}..." : text
-      end
-
-      # Converts a fade length to a positive Rational number of bars, or nil
-      # for no fade (nil, false, or 0).
-      def bars_or_nil(bars)
-        return nil if bars.nil? || bars == false || bars == 0
-        raise ArgumentError, "Fade must be a positive number of bars (got #{bars.inspect})" unless bars.is_a?(Numeric) && bars.finite? && bars > 0
-        bars.is_a?(Float) ? bars.rationalize(Rational(1, 10_000)) : bars.to_r
-      end
-
-      # The gain change per frame for a fade lasting +bars+ at the current
-      # tempo.
-      def fade_step(bars, rate)
-        1.0 / (@transport.seconds(bars * @transport.bar_length) * rate)
       end
 
       # Creates and registers a Player.  Called with @mutex held.  Returns
@@ -757,17 +618,6 @@ module MB
           remove_tap(t)
           warn "Removed a mix tap that raised #{e.class}: #{e.message}"
         end
-      end
-
-      # Returns a Numo::SFloat of per-frame gains for a fading player (and
-      # advances its fade), or nil if the player is at full volume.
-      def fade_ramp(p, frames)
-        return nil if p.gain >= 1 && p.gain_step >= 0
-
-        ramp = Numo::SFloat.new(frames).seq(p.gain, p.gain_step).clip(0, 1)
-        p.gain = MB::M.clamp(p.gain + p.gain_step * frames, 0.0, 1.0)
-        p.gain_step = 0.0 if p.gain >= 1 && p.gain_step > 0
-        ramp
       end
 
       # Warns once if a player takes most of the time available for its

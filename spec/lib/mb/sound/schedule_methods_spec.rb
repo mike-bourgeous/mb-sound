@@ -142,7 +142,7 @@ RSpec.describe(MB::Sound::ScheduleMethods) do
         transport.advance(1) # simulate the block taking longer than a bar
       end
     end
-    expect(session).to receive(:warn).with(/Skipped the commands scheduled for bar 2/)
+    expect_any_instance_of(MB::Sound::Session::Scheduler).to receive(:warn).with(/Skipped the commands scheduled for bar 2/)
     run(96000)
     expect(session.players.keys).to eq([:a])
   end
@@ -152,7 +152,7 @@ RSpec.describe(MB::Sound::ScheduleMethods) do
       MB::Sound.bg(:a, 1.constant)
       MB::Sound.at_bar(1, beat: 2) { raise 'oops' }
     end
-    expect(session).to receive(:warn).with(/beat 2 raised RuntimeError: oops/)
+    expect_any_instance_of(MB::Sound::Session::Scheduler).to receive(:warn).with(/beat 2 raised RuntimeError: oops/)
     expect(run(96000).to_a.uniq).to eq([1])
   end
 
