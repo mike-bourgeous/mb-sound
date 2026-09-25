@@ -106,14 +106,26 @@ RSpec.describe(MB::Sound::PlaybackMethods) do
         expect(MB::Sound.players.keys).to eq([:b])
       end
 
-      it 'stops everything with :all or #hush' do
+      it 'stops everything with :all or #outro' do
         MB::Sound.bg(220.hz.sine.forever)
         MB::Sound.bg(330.hz.sine.forever)
         expect(MB::Sound.stop(:all, fade: 0)).to eq([1, 2])
 
         MB::Sound.bg(220.hz.sine.forever)
-        expect(MB::Sound.hush(fade: 0)).to eq([1])
+        expect(MB::Sound.outro(fade: 0)).to eq([1])
         expect(MB::Sound.players).to be_empty
+      end
+
+      it 'fades everything out over four bars with #outro' do
+        MB::Sound.bg(:a, 220.hz.sine.forever)
+        MB::Sound.bg(:b, 330.hz.sine.forever, at: :now)
+        sleep 0.05
+        expect(MB::Sound.outro).to contain_exactly(:a, :b)
+        expect(MB::Sound.players.values).to all(end_with('(fading out)'))
+      end
+
+      it 'no longer has #hush' do
+        expect(MB::Sound).not_to respond_to(:hush)
       end
 
       it 'fades out over four bars by default' do

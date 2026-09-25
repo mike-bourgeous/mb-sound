@@ -141,7 +141,8 @@ module MB
       #     bg bass.transpose(12).tone.triangle.at(0.3) * bass.env    # player 1, joins on the next bar
       #     bpm 140
       #     stop       # stops the last one started (player 1)
-      #     hush fade: 0    # stops everything right away
+      #     outro      # fades everything out over four bars
+      #     panic      # stops everything right away
       def bg(name_or_sound, sound = nil, at: nil, fade: nil)
         name, sound = sound.nil? ? [nil, name_or_sound] : [name_or_sound, sound]
         raise ArgumentError, ':all is reserved for stop(:all)' if name == :all
@@ -151,11 +152,11 @@ module MB
 
       # Stops background players (see #bg): with no arguments, the most
       # recently started one; with names or numbers, those players; with
-      # :all, every player (see also #hush).  Players fade out over four
-      # bars by default; pass +:fade+ for a different number of bars, or 0 to
-      # stop right away.  Returns the names of the players that were stopped.  When nothing is left
-      # playing, the timeline pauses where it is (see SequenceMethods#seek and
-      # #rewind).
+      # :all, every player (see also #outro and #panic).  Players fade out
+      # over four bars by default; pass +:fade+ for a different number of
+      # bars, or 0 to stop right away.  Returns the names of the players that
+      # were stopped.  When nothing is left playing, the timeline pauses where
+      # it is (see SequenceMethods#seek and #rewind).
       def stop(*names, fade: nil)
         session = Session.default
         return [session.remove_last(fade: fade)].compact if names.empty?
@@ -168,9 +169,10 @@ module MB
         stopped
       end
 
-      # Stops every background player, fading out over four bars by default
-      # (+:fade+ sets the number of bars; 0 stops right away).  See #stop.
-      def hush(fade: nil)
+      # Ends everything playing in the background, fading out over four bars
+      # by default (+:fade+ sets the number of bars).  See #stop, and #panic
+      # to stop everything right away.
+      def outro(fade: nil)
         stop(:all, fade: fade)
       end
 

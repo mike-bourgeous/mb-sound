@@ -54,7 +54,7 @@ Graph nodes maintain input/output relationships and support traversal via the `T
 
 `MB::Sound` extends several method modules that provide the top-level API available in `bin/sound.rb`:
 - `IOMethods` - File read/write via ffmpeg
-- `PlaybackMethods` - `play`, `input`, real-time audio; `bg` / `stop` / `hush` / `panic` / `players` play sounds in the background through one shared `Session` (`lib/mb/sound/session.rb`) that mixes every player in a single render loop locked to the sequence timeline; `render` runs a `Session` into a file
+- `PlaybackMethods` - `play`, `input`, real-time audio; `bg` / `stop` / `outro` / `panic` / `players` play sounds in the background through one shared `Session` (`lib/mb/sound/session.rb`) that mixes every player in a single render loop locked to the sequence timeline; `render` runs a `Session` into a file
 - `PlotMethods` - Terminal/gnuplot visualization
 - `FFTMethods` - Spectral analysis
 - `GainMethods`, `WindowMethods`, `AnalysisMethods`
