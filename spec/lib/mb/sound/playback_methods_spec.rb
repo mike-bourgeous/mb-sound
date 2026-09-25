@@ -60,7 +60,7 @@ RSpec.describe(MB::Sound::PlaybackMethods) do
         expect([a, b]).to eq([1, 2])
         expect(MB::Sound.players.keys).to eq([1, 2])
 
-        MB::Sound.stop(1)
+        MB::Sound.stop(1, fade: 0)
         expect(MB::Sound.bg(440.hz.sine.forever)).to eq(1)
       end
 
@@ -94,32 +94,40 @@ RSpec.describe(MB::Sound::PlaybackMethods) do
       it 'stops the most recently started player with no arguments' do
         MB::Sound.bg(:a, 220.hz.sine.forever)
         MB::Sound.bg(:b, 330.hz.sine.forever)
-        expect(MB::Sound.stop).to eq([:b])
-        expect(MB::Sound.stop).to eq([:a])
+        expect(MB::Sound.stop(fade: 0)).to eq([:b])
+        expect(MB::Sound.stop(fade: 0)).to eq([:a])
         expect(MB::Sound.stop).to eq([])
       end
 
       it 'stops named players' do
         MB::Sound.bg(:a, 220.hz.sine.forever)
         MB::Sound.bg(:b, 330.hz.sine.forever)
-        expect(MB::Sound.stop(:a)).to eq([:a])
+        expect(MB::Sound.stop(:a, fade: 0)).to eq([:a])
         expect(MB::Sound.players.keys).to eq([:b])
       end
 
       it 'stops everything with :all or #hush' do
         MB::Sound.bg(220.hz.sine.forever)
         MB::Sound.bg(330.hz.sine.forever)
-        expect(MB::Sound.stop(:all)).to eq([1, 2])
+        expect(MB::Sound.stop(:all, fade: 0)).to eq([1, 2])
 
         MB::Sound.bg(220.hz.sine.forever)
-        expect(MB::Sound.hush).to eq([1])
+        expect(MB::Sound.hush(fade: 0)).to eq([1])
         expect(MB::Sound.players).to be_empty
       end
 
-      it 'can fade out' do
+      it 'fades out over four bars by default' do
         MB::Sound.bg(:a, 220.hz.sine.forever)
         sleep 0.05
-        expect(MB::Sound.stop(:a, fade: 0.2)).to eq([:a])
+        MB::Sound.stop(:a)
+        expect(MB::Sound.players[:a]).to end_with('(fading out)')
+        expect(MB::Sound::Session.default.fade_out).to eq(4)
+      end
+
+      it 'can fade out over a given number of bars' do
+        MB::Sound.bg(:a, 220.hz.sine.forever)
+        sleep 0.05
+        expect(MB::Sound.stop(:a, fade: 1/10r)).to eq([:a])
         expect(MB::Sound.players[:a]).to end_with('(fading out)')
         deadline = MB::U.clock_now + 5
         sleep 0.05 until MB::Sound.players.empty? || MB::U.clock_now > deadline

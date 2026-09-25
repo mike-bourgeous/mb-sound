@@ -24,7 +24,7 @@ module MB
       # shared by a graph and the graph replacing it until the switch.
       #
       # +gain+ is the current fade level (0..1), changing by +gain_step+ per
-      # frame.  +fade_in+ and +fade_out+ are fade times in seconds; a player
+      # frame.  +fade_in+ and +fade_out+ are fade lengths in bars; a player
       # with a +stop_at+ time and a +fade_out+ fades out from +stop_at+
       # instead of stopping there.
       Player = Struct.new(
@@ -44,10 +44,16 @@ module MB
       # The longest :clip launch wait, in bars, before falling back to :bar.
       MAX_CLIP_LAUNCH_BARS = 8
 
-      # The session used by PlaybackMethods#bg, created when first needed.
+      # Default fade lengths in bars for the session used by
+      # PlaybackMethods#bg (see #fade_in and #fade_out).
+      DEFAULT_FADE_IN = 1/2r
+      DEFAULT_FADE_OUT = 4
+
+      # The session used by PlaybackMethods#bg, created when first needed,
+      # with DEFAULT_FADE_IN and DEFAULT_FADE_OUT.
       def self.default
         @default = nil if @default&.closed?
-        @default ||= new
+        @default ||= new(fade_in: DEFAULT_FADE_IN, fade_out: DEFAULT_FADE_OUT)
       end
 
       # The Sequence::Transport whose timeline this session advances.
@@ -55,6 +61,25 @@ module MB
 
       # The number of output channels.  Mono graphs play on every channel.
       attr_reader :channels
+
+      # Bars to fade in new graphs when #add isn't given a +:fade+ (nil for
+      # no fade).  Graphs replacing a named graph switch over without a
+      # fade unless #add is given one.
+      attr_reader :fade_in
+
+      # Bars to fade out graphs when #remove isn't given a +:fade+ (nil to
+      # stop right away).
+      attr_reader :fade_out
+
+      # Sets the default fade-in length in bars (nil, 0, or false for none).
+      def fade_in=(bars)
+        @fade_in = bars_or_nil(bars)
+      end
+
+      # Sets the default fade-out length in bars (nil, 0, or false for none).
+      def fade_out=(bars)
+        @fade_out = bars_or_nil(bars)
+      end
 
       # Creates a session.  If +:output+ is nil, a new (unshared) output from
       # MB::Sound.output is opened when the first graph is added.
@@ -64,7 +89,11 @@ module MB
       #               output fed).  If false, call #process_buffer yourself.
       # +:raise_errors+ - If true, errors in graphs are raised from
       #                   #process_buffer instead of printed.
-      def initialize(output: nil, transport: Sequence.transport, channels: 2, buffer_size: nil, realtime: true, raise_errors: false)
+      # +:fade_in+, +:fade_out+ - Default fade lengths in bars (see #fade_in
+      #                           and #fade_out).
+      def initialize(output: nil, transport: Sequence.transport, channels: 2, buffer_size: nil, realtime: true, raise_errors: false, fade_in: nil, fade_out: nil)
+        self.fade_in = fade_in
+        self.fade_out = fade_out
         @output = output
         @transport = transport
         @channels = channels
@@ -87,9 +116,11 @@ module MB
       #
       # If a graph is already playing under +:name+, it keeps playing until
       # the new graph starts, then stops on that exact sample, or crossfades
-      # over +:fade+ seconds if given.
+      # over +:fade+ bars if given.
       #
-      # +:fade+ also fades the new graph in over that many seconds.
+      # +:fade+ also fades the new graph in over that many bars.  If not
+      # given, new graphs fade in over #fade_in bars, and replacements switch
+      # without a fade.  Pass 0 or false for no fade.
       #
       # +:at+ sets when the graph starts on the timeline: :now, :beat (next
       # quarter note), :bar (next bar), :clip (next time every looping clip
@@ -99,7 +130,8 @@ module MB
       def add(sound, at: nil, name: nil, fade: nil, description: nil)
         raise IOError, 'Session is closed' if @closed
         raise ArgumentError, "Player names must be Symbols or Integers (got #{name.inspect})" unless name.nil? || name.is_a?(Symbol) || name.is_a?(Integer)
-        check_fade(fade)
+        explicit_fade = !fade.nil?
+        fade = bars_or_nil(fade)
 
         nodes = to_nodes(sound)
         input = MB::Sound::GraphNodeInput.new(nodes)
@@ -108,6 +140,9 @@ module MB
         name = @mutex.synchronize {
           name ||= (1..).find { |i| !names_in_use.include?(i) }
           start = launch_time(at, clip_nodes)
+
+          replacing = @players.each_value.any? { |p| p.name == name && p.current? && p.started }
+          fade = @fade_in unless explicit_fade || replacing
 
           # Hand over from the graph being replaced at the new start time
           @players.each_value do |p|
@@ -148,11 +183,11 @@ module MB
       end
 
       # Removes the players with the given names (all players if no names are
-      # given), including graphs they were replacing.  If +:fade+ is given,
-      # players that have started fade out over that many seconds first.
-      # Returns the names that were removed.
+      # given), including graphs they were replacing.  Players that have
+      # started fade out over +:fade+ bars first (#fade_out bars if not given;
+      # 0 or false to stop right away).  Returns the names that were removed.
       def remove(*names, fade: nil)
-        check_fade(fade)
+        fade = fade.nil? ? @fade_out : bars_or_nil(fade)
 
         @mutex.synchronize {
           names = names_in_use if names.empty?
@@ -261,10 +296,18 @@ module MB
         text.length > max ? "#{text[0, max - 3]}..." : text
       end
 
-      # Raises an error unless +fade+ is nil or a positive number of seconds.
-      def check_fade(fade)
-        return if fade.nil?
-        raise ArgumentError, "Fade must be a positive number of seconds (got #{fade.inspect})" unless fade.is_a?(Numeric) && fade.finite? && fade > 0
+      # Converts a fade length to a positive Rational number of bars, or nil
+      # for no fade (nil, false, or 0).
+      def bars_or_nil(bars)
+        return nil if bars.nil? || bars == false || bars == 0
+        raise ArgumentError, "Fade must be a positive number of bars (got #{bars.inspect})" unless bars.is_a?(Numeric) && bars.finite? && bars > 0
+        bars.is_a?(Float) ? bars.rationalize(Rational(1, 10_000)) : bars.to_r
+      end
+
+      # The gain change per frame for a fade lasting +bars+ at the current
+      # tempo.
+      def fade_step(bars, rate)
+        1.0 / (@transport.seconds(bars * @transport.bar_length) * rate)
       end
 
       # Names of players that are playing, waiting to start, or fading out.
@@ -344,7 +387,7 @@ module MB
         rate = output.sample_rate.to_f
         if p.stop_at && p.stop_at <= from
           return retire(p) unless p.fade_out
-          p.gain_step = -1.0 / (p.fade_out * rate) if p.gain_step >= 0
+          p.gain_step = -fade_step(p.fade_out, rate) if p.gain_step >= 0
         end
 
         offset = 0
@@ -354,7 +397,7 @@ module MB
           p.clip_nodes.each { |n| n.start_at(start, origin: start, transport: @transport) }
           p.start = start
           p.started = true
-          p.gain_step = 1.0 / (p.fade_in * rate) if p.fade_in
+          p.gain_step = fade_step(p.fade_in, rate) if p.fade_in
         end
 
         frames = count - offset

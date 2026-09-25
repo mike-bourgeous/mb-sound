@@ -105,7 +105,7 @@ RSpec.describe(MB::Sound::Session) do
 
   describe 'fading' do
     it 'fades in' do
-      session.add(1.constant, fade: 0.1)
+      session.add(1.constant, fade: 1/20r)
       data = run(9600)
       expect(data[0]).to eq(0)
       expect(data[2400]).to be_within(0.01).of(0.5)
@@ -115,7 +115,7 @@ RSpec.describe(MB::Sound::Session) do
     it 'fades out and then removes the player' do
       session.add(1.constant, name: :drone)
       run(800)
-      session.remove(:drone, fade: 0.1)
+      session.remove(:drone, fade: 1/20r)
       data = run(9600)
       expect(data[0]).to be_within(0.001).of(1)
       expect(data[2400]).to be_within(0.01).of(0.5)
@@ -126,7 +126,7 @@ RSpec.describe(MB::Sound::Session) do
     it 'crossfades when replacing with a fade' do
       session.add(1.constant, name: :pad)
       run(4000)
-      session.add(3.constant, name: :pad, fade: 0.1)
+      session.add(3.constant, name: :pad, fade: 1/20r)
       data = run(96000 + 9600)
       switch = 96000 - 4000
       expect(data[switch - 1]).to eq(1)
@@ -138,12 +138,64 @@ RSpec.describe(MB::Sound::Session) do
     it 'shows fading players' do
       session.add(1.constant, name: :drone)
       run(800)
-      session.remove(fade: 1)
+      session.remove(fade: 1/2r)
       expect(session.players[:drone]).to end_with('(fading out)')
     end
 
-    it 'rejects invalid fade times' do
-      expect { session.add(1.constant, fade: 0) }.to raise_error(ArgumentError, /Fade/)
+    it 'treats 0 and false as no fade and rejects invalid fades' do
+      session.add(1.constant, fade: 0)
+      expect(session.process_buffer[0][0]).to eq(1)
+      session.remove(fade: false)
+      expect(session).to be_idle
+      expect { session.add(1.constant, fade: -1) }.to raise_error(ArgumentError, /Fade/)
+    end
+
+    it 'follows the tempo' do
+      transport.bpm = 240
+      session.add(1.constant, fade: 1/20r) # 0.05 seconds at 240 BPM
+      data = run(4800)
+      expect(data[1200]).to be_within(0.01).of(0.5)
+      expect(data[2400..].to_a.uniq).to eq([1])
+    end
+
+    context 'with default fades' do
+      let(:session) { MB::Sound::Session.new(output: output, transport: transport, buffer_size: 800, realtime: false, raise_errors: true, fade_in: 1/20r, fade_out: 1/10r) }
+
+      it 'fades new graphs in and removed graphs out' do
+        session.add(1.constant, name: :a)
+        data = run(9600)
+        expect(data[0]).to eq(0)
+        expect(data[2400]).to be_within(0.01).of(0.5)
+
+        session.remove(:a)
+        expect(session.players[:a]).to end_with('(fading out)')
+        data = run(9600)
+        expect(data[4800]).to be_within(0.01).of(0.5)
+        expect(session).to be_idle
+      end
+
+      it 'switches replacements without a fade unless one is given' do
+        session.add(1.constant, name: :pad)
+        run(4000)
+        session.add(2.constant, name: :pad)
+        data = run(96000)
+        expect(data[96000 - 4000 - 1]).to eq(1)
+        expect(data[96000 - 4000]).to eq(2)
+      end
+
+      it 'can be changed or turned off' do
+        session.fade_in = 0
+        session.fade_out = nil
+        session.add(1.constant)
+        expect(session.process_buffer[0][0]).to eq(1)
+        session.remove
+        expect(session).to be_idle
+      end
+    end
+
+    it 'uses a half bar fade in and a four bar fade out for the default session' do
+      expect(MB::Sound::Session::DEFAULT_FADE_IN).to eq(1/2r)
+      expect(MB::Sound::Session::DEFAULT_FADE_OUT).to eq(4)
     end
   end
 

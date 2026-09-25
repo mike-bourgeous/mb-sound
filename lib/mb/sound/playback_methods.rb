@@ -119,8 +119,11 @@ module MB
       # starts, so you can edit a line and re-run it to iterate.  Without a
       # name, the sound gets the lowest unused number.
       #
-      # +:fade+ fades the sound in over that many seconds, and crossfades
-      # from a sound it replaces.
+      # New sounds fade in over half a bar by default; pass +:fade+ to choose
+      # the number of bars, or 0 for no fade.  Replacing a named sound
+      # switches over without a fade unless +:fade+ is given, in which case
+      # it crossfades.  Change the defaults with Session.default.fade_in= and
+      # fade_out= (in bars).
       #
       # Accepts a GraphNode, an Array of GraphNodes (one per channel), or a
       # sound filename.  Everything played with #bg is mixed in one shared
@@ -138,7 +141,7 @@ module MB
       #     bg bass.transpose(12).tone.triangle.at(0.3) * bass.env    # player 1, joins on the next bar
       #     bpm 140
       #     stop       # stops the last one started (player 1)
-      #     hush fade: 4    # fades everything out over 4 seconds
+      #     hush fade: 0    # stops everything right away
       def bg(name_or_sound, sound = nil, at: nil, fade: nil)
         name, sound = sound.nil? ? [nil, name_or_sound] : [name_or_sound, sound]
         raise ArgumentError, ':all is reserved for stop(:all)' if name == :all
@@ -148,9 +151,9 @@ module MB
 
       # Stops background players (see #bg): with no arguments, the most
       # recently started one; with names or numbers, those players; with
-      # :all, every player (see also #hush).  With +:fade+, players fade out
-      # over that many seconds instead of stopping abruptly.  Returns the
-      # names of the players that were stopped.  When nothing is left
+      # :all, every player (see also #hush).  Players fade out over four
+      # bars by default; pass +:fade+ for a different number of bars, or 0 to
+      # stop right away.  Returns the names of the players that were stopped.  When nothing is left
       # playing, the timeline pauses where it is (see SequenceMethods#seek and
       # #rewind).
       def stop(*names, fade: nil)
@@ -165,8 +168,8 @@ module MB
         stopped
       end
 
-      # Stops every background player, fading out over +:fade+ seconds if
-      # given.  See #stop.
+      # Stops every background player, fading out over four bars by default
+      # (+:fade+ sets the number of bars; 0 stops right away).  See #stop.
       def hush(fade: nil)
         stop(:all, fade: fade)
       end
