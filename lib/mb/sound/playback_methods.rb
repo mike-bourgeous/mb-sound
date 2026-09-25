@@ -147,7 +147,9 @@ module MB
         name, sound = sound.nil? ? [nil, name_or_sound] : [name_or_sound, sound]
         raise ArgumentError, ':all is reserved for stop(:all)' if name == :all
 
-        Session.default.add(sound, at: at, name: name, fade: fade)
+        session_command(name) { |session, time|
+          session.add(sound, at: at, name: name, fade: fade, start_time: at ? nil : time)
+        }
       end
 
       # Stops background players (see #bg): with no arguments, the most
@@ -158,15 +160,19 @@ module MB
       # were stopped.  When nothing is left playing, the timeline pauses where
       # it is (see SequenceMethods#seek and #rewind).
       def stop(*names, fade: nil)
-        session = Session.default
-        return [session.remove_last(fade: fade)].compact if names.empty?
-        return session.remove(fade: fade) if names == [:all]
-
-        stopped = session.remove(*names, fade: fade)
-        (names - stopped).each do |name|
-          warn "No background player #{name.inspect} is playing"
-        end
-        stopped
+        session_command(names) { |session, time|
+          if names.empty?
+            [session.remove_last(fade: fade, time: time)].compact
+          elsif names == [:all]
+            session.remove(fade: fade, time: time)
+          else
+            session.remove(*names, fade: fade, time: time).tap { |stopped|
+              (names - stopped).each do |name|
+                warn "No background player #{name.inspect} is playing"
+              end
+            }
+          end
+        }
       end
 
       # Ends everything playing in the background, fading out over four bars
@@ -182,7 +188,7 @@ module MB
       # to the sound card may play for a moment longer.  Returns the names of
       # the players that were stopped.
       def panic
-        Session.default.remove(fade: 0)
+        session_command([]) { |session, time| session.remove(fade: 0, time: time) }
       end
 
       # Brings back a named background player that was stopped (see #bg and
@@ -200,24 +206,26 @@ module MB
       #     stop :pad      # fades out over four bars
       #     resume :pad    # fades the same graph back in on the next bar
       def resume(name = nil, at: nil, fade: nil)
-        resumed = Session.default.resume(name, at: at, fade: fade)
-        if resumed.nil?
-          what = name ? "#{name.inspect} (not stopped, or already playing)" : '(nothing has been stopped)'
-          warn "No background player to resume #{what}"
-        end
-        resumed
+        session_command(name) { |session, time|
+          session.resume(name, at: at, fade: fade, start_time: at ? nil : time).tap { |resumed|
+            if resumed.nil?
+              what = name ? "#{name.inspect} (not stopped, or already playing)" : '(nothing has been stopped)'
+              warn "No background player to resume #{what}"
+            end
+          }
+        }
       end
 
       # Returns a Hash from name to description of stopped background
       # players that can be resumed (see #resume).
       def stopped
-        Session.default.stopped
+        Session.current.stopped
       end
 
       # Discards stopped background players so they can't be resumed (all of
       # them if no names are given).  Returns the names discarded.
       def forget(*names)
-        Session.default.forget(*names)
+        Session.current.forget(*names)
       end
 
       # Plots the background mix (see #bg) live until you press Ctrl-C, then
@@ -281,7 +289,7 @@ module MB
       # Returns a Hash from background player name (see #bg) to a
       # description of what it is playing.
       def players
-        Session.default.players
+        Session.current.players
       end
 
       # Renders +sounds+ (GraphNodes, Arrays of GraphNodes, or filenames) to
@@ -290,14 +298,24 @@ module MB
       # given.  Rendering stops after +:bars+ or +:seconds+, or when every
       # sound has ended.  Returns the number of seconds rendered.
       #
+      # If a block is given, it runs first with the rendering session as the
+      # current session, so #bg, #at_bar, #every, #bpm, etc. inside it
+      # arrange a song on the file's timeline (see ScheduleMethods).
+      #
+      #     render 'song.flac', bars: 32 do
+      #       bg :pad, pad_graph
+      #       at_bar(9) { bg :drums, drum_graph }
+      #       at_bar(25) { outro }
+      #     end
+      #
       # Build fresh graphs to render, rather than rendering graphs that are
       # playing in the background, because graphs keep their playback state.
       #
       # Example (bin/sound.rb):
       #     bass = seq(C2, C2, rest, C3).n16.loop
       #     render '/tmp/bass.flac', bass.tone.ramp.at(1) * bass.env * 0.5, bars: 4
-      def render(filename, *sounds, bars: nil, seconds: nil, bpm: nil, channels: 2, overwrite: false, buffer_size: 800)
-        raise ArgumentError, 'Pass one or more sounds to render' if sounds.empty?
+      def render(filename, *sounds, bars: nil, seconds: nil, bpm: nil, channels: 2, overwrite: false, buffer_size: 800, &block)
+        raise ArgumentError, 'Pass one or more sounds or a block to render' if sounds.empty? && block.nil?
         raise ArgumentError, 'Pass bars: or seconds:, not both' if bars && seconds
 
         transport = Sequence::Transport.new(bpm: bpm || Sequence.transport.bpm, bar_length: Sequence.transport.bar_length)
@@ -309,9 +327,10 @@ module MB
         limit = ((seconds || MAX_RENDER_SECONDS) * rate).round
 
         sounds.each { |s| session.add(s, at: :now) }
+        Session.with_context(session: session) { block.call } if block
 
         frames = 0
-        until frames >= limit || session.idle?
+        until frames >= limit || (session.idle? && !session.schedule_due?)
           count = MB::M.min(buffer_size, limit - frames)
           session.process_buffer(count)
           frames += count
@@ -328,6 +347,23 @@ module MB
       end
 
       private
+
+      # Runs a background playback command with the current session (see
+      # Session.current) and the scheduled time, if any.  Inside a scheduled
+      # block (see ScheduleMethods), the command is queued to take effect at
+      # the block's time instead, and +result+ is returned.
+      def session_command(result, &command)
+        context = Session.context
+        session = Session.current
+        time = context&.[](:time)
+
+        if context&.[](:batch)
+          context[:batch] << -> { command.call(session, time) }
+          result
+        else
+          command.call(session, time)
+        end
+      end
 
       # Plays the given filename using the default audio output returned by
       # MB::Sound.output.  The +:channels+ parameter may be used to force mono

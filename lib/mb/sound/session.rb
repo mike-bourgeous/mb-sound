@@ -21,6 +21,11 @@ module MB
     # so they can be brought back unchanged with #resume, e.g. to fade a
     # track out and back in.
     #
+    # Blocks can be scheduled to run at a time on the timeline (see
+    # #schedule and ScheduleMethods).  They run a little ahead of time on a
+    # scheduler thread, and the #bg, #stop, #resume, and #bpm calls inside
+    # them take effect exactly at the scheduled time.
+    #
     # An error in one graph removes that graph and prints the error; other
     # graphs keep playing.
     class Session
@@ -43,6 +48,10 @@ module MB
         end
       end
 
+      # A block scheduled by #schedule to run at +time+ (whole notes on the
+      # timeline), repeating every +period+ whole notes if +period+ is set.
+      Scheduled = Struct.new(:id, :time, :period, :block, :description, keyword_init: true)
+
       # Launch points for #add's +:at+ parameter (see #launch_time).
       LAUNCH_POINTS = [:now, :beat, :bar, :clip].freeze
 
@@ -59,6 +68,30 @@ module MB
       def self.default
         @default = nil if @default&.closed?
         @default ||= new(fade_in: DEFAULT_FADE_IN, fade_out: DEFAULT_FADE_OUT)
+      end
+
+      # The playback context of the current thread, set by #with_context: a
+      # Hash with the +:session+ that commands like PlaybackMethods#bg should
+      # use, and while a scheduled block runs, its +:time+ and a +:batch+
+      # Array that collects the block's actions.  Nil outside any context.
+      def self.context
+        Thread.current[:mb_sound_session_context]
+      end
+
+      # Sets the current thread's playback context (see .context) while the
+      # block runs.
+      def self.with_context(**context)
+        old = Thread.current[:mb_sound_session_context]
+        Thread.current[:mb_sound_session_context] = context
+        yield
+      ensure
+        Thread.current[:mb_sound_session_context] = old
+      end
+
+      # The session that commands like PlaybackMethods#bg use in the current
+      # thread: the context's session, or the default session.
+      def self.current
+        context&.[](:session) || default
       end
 
       # The Sequence::Transport whose timeline this session advances.
@@ -108,6 +141,9 @@ module MB
 
         @players = {}
         @stopped = {}
+        @schedule = {}
+        @next_schedule_id = 0
+        @tempo_changes = []
         @taps = []
         @order = []
         @next_serial = 0
@@ -134,7 +170,9 @@ module MB
       # in the graph is back at its start), or a note length grid (an Integer
       # note division or Rational whole notes, e.g. 2r for every two bars).
       # Defaults to :now if nothing else is playing, :bar otherwise.
-      def add(sound, at: nil, name: nil, fade: nil, description: nil)
+      # +:start_time+ instead gives an exact timeline position in whole notes
+      # (used for scheduled actions).
+      def add(sound, at: nil, name: nil, fade: nil, description: nil, start_time: nil)
         raise IOError, 'Session is closed' if @closed
         raise ArgumentError, "Player names must be Symbols or Integers (got #{name.inspect})" unless name.nil? || name.is_a?(Symbol) || name.is_a?(Integer)
         explicit_fade = !fade.nil?
@@ -146,7 +184,7 @@ module MB
 
         name = @mutex.synchronize {
           name ||= (1..).find { |i| !names_in_use.include?(i) }
-          start = launch_time(at, clip_nodes)
+          start = start_time ? start_time.to_r : launch_time(at, clip_nodes)
           @stopped.delete(name)
 
           replacing = @players.each_value.any? { |p| p.name == name && p.current? && p.started }
@@ -186,8 +224,13 @@ module MB
       # 0 or false to stop right away).  Returns the names that were removed.
       #
       # Players with Symbol names are kept once they stop, for #resume.
-      def remove(*names, fade: nil)
+      #
+      # +:time+ stops (or starts fading) at that timeline position in whole
+      # notes instead of now (used for scheduled actions).
+      def remove(*names, fade: nil, time: nil)
         fade = fade.nil? ? @fade_out : bars_or_nil(fade)
+        time = time&.to_r
+        time = nil if time && time <= @transport.position
 
         @mutex.synchronize {
           names = names_in_use if names.empty?
@@ -196,7 +239,16 @@ module MB
             matches.each do |p|
               p.keep = true if p.current? && p.name.is_a?(Symbol)
 
-              if fade && p.started
+              if time
+                if !p.started && p.start >= time
+                  # It would never have played
+                  @players.delete(p.serial)
+                  keep_stopped(p)
+                else
+                  p.stop_at = MB::M.min(p.stop_at || time, time)
+                  p.fade_out = fade
+                end
+              elsif fade && p.started
                 # Fade from wherever the player is now, even if it was already
                 # being replaced or faded
                 p.stop_at = MB::M.min(p.stop_at || @transport.position, @transport.position)
@@ -222,7 +274,7 @@ module MB
       # Looping clips come back in phase with the timeline.  Other nodes
       # keep their state from when they stopped, so e.g. a delay or reverb
       # may replay the start of an old tail.
-      def resume(name = nil, at: nil, fade: nil)
+      def resume(name = nil, at: nil, fade: nil, start_time: nil)
         fade = fade.nil? ? @fade_in : bars_or_nil(fade)
 
         name = @mutex.synchronize {
@@ -236,7 +288,7 @@ module MB
             input: p.input,
             description: p.description,
             clip_nodes: p.clip_nodes,
-            start: launch_time(at, p.clip_nodes),
+            start: start_time ? start_time.to_r : launch_time(at, p.clip_nodes),
             fade: fade
           )
         }
@@ -266,9 +318,67 @@ module MB
 
       # Removes the most recently added player that is still playing (see
       # #remove for +:fade+).  Returns its name, or nil if nothing is playing.
-      def remove_last(fade: nil)
+      def remove_last(fade: nil, time: nil)
         name = @mutex.synchronize { @order.last }
-        name && remove(name, fade: fade).first
+        name && remove(name, fade: fade, time: time).first
+      end
+
+      # Changes the tempo to +bpm+ when the timeline reaches +time+ (whole
+      # notes), at the start of the buffer that contains it.
+      def change_tempo(bpm, time:)
+        raise ArgumentError, "BPM must be a positive number (got #{bpm.inspect})" unless bpm.is_a?(Numeric) && bpm.finite? && bpm > 0
+        @mutex.synchronize { @tempo_changes << [time.to_r, bpm] }
+        bpm
+      end
+
+      # Schedules the block to run at +time+ (whole notes on the timeline),
+      # and then every +period+ whole notes if given.  Returns an id for
+      # #cancel.
+      #
+      # Blocks run a little ahead of their time (on a scheduler thread for a
+      # realtime session), inside a context (see .with_context) where the
+      # #bg, #stop, #resume, and #bpm commands take effect exactly at the
+      # scheduled time.  If a block takes so long that its time has already
+      # passed, its commands are skipped with a warning.
+      #
+      # Schedules follow the timeline, which only moves while something is
+      # playing.  A block whose time has already come runs as soon as
+      # possible.
+      def schedule(time, period: nil, description: nil, &block)
+        raise ArgumentError, 'Pass a block to schedule' unless block
+        raise ArgumentError, "Period must be positive (got #{period.inspect})" if period && period <= 0
+
+        @mutex.synchronize {
+          @next_schedule_id += 1
+          @schedule[@next_schedule_id] = Scheduled.new(
+            id: @next_schedule_id,
+            time: time.to_r,
+            period: period&.to_r,
+            block: block,
+            description: description || "bar #{bar_of(time.to_r)}"
+          )
+          @next_schedule_id
+        }
+      end
+
+      # Removes scheduled blocks (all of them if no ids are given).  Returns
+      # the ids that were removed.
+      def cancel(*ids)
+        @mutex.synchronize {
+          ids = @schedule.keys if ids.empty?
+          ids.select { |id| @schedule.delete(id) }
+        }
+      end
+
+      # Returns a Hash from schedule id to a description of when it runs.
+      def scheduled
+        @mutex.synchronize { @schedule.transform_values(&:description) }
+      end
+
+      # Returns true if a scheduled block's time has come (so it will run on
+      # the next buffer even if nothing is playing).
+      def schedule_due?
+        @mutex.synchronize { @schedule.each_value.any? { |e| e.time <= @transport.position } }
       end
 
       # Returns a Hash from player name to a description, noting players
@@ -276,7 +386,9 @@ module MB
       def players
         @mutex.synchronize {
           @players.values.sort_by { |p| p.current? ? 1 : 0 }.to_h { |p|
-            status = if !p.current?
+            status = if !p.current? && p.stop_at > @transport.position
+                       " (stops at bar #{bar_of(p.stop_at)})"
+                     elsif !p.current?
                        ' (fading out)'
                      elsif !p.started
                        " (starts at bar #{bar_of(p.start)})"
@@ -327,19 +439,29 @@ module MB
       # to the output, and advances the timeline (unless idle).  Returns the
       # mix (an Array of Numo::SFloat, one per channel).
       def process_buffer(count = buffer_size)
+        apply_tempo_changes
+
         per_sample = @transport.whole_notes_per_second / output.sample_rate.to_r
         from = @transport.position
         to = from + count * per_sample
 
-        players = @mutex.synchronize { @players.values }
-
-        # If the timeline was seeked, move every running graph's clips there
+        # If the timeline was seeked, move every running graph's clips there,
+        # and move repeating schedules to their next time
         if @generation != @transport.generation
           @generation = @transport.generation
-          players.each do |p|
+          @mutex.synchronize { @players.values }.each do |p|
             p.clip_nodes.each { |n| n.start_at(from, origin: p.start, transport: @transport) } if p.started
           end
+          @mutex.synchronize {
+            @schedule.each_value do |e|
+              e.time = from + (e.time - from) % e.period if e.period
+            end
+          }
         end
+
+        dispatch_schedule(from, to)
+
+        players = @mutex.synchronize { @players.values }
 
         mix = Array.new(@channels) { Numo::SFloat.zeros(count) }
         players.each do |p|
@@ -352,11 +474,13 @@ module MB
         mix
       end
 
-      # Stops the background thread and closes the output.
+      # Stops the background and scheduler threads and closes the output.
       def close
         return if @closed
         @closed = true
         @thread&.join(5)
+        @schedule_queue&.close
+        @scheduler&.join(5)
         @output&.close
       end
 
@@ -366,6 +490,78 @@ module MB
       end
 
       private
+
+      # Applies tempo changes from #change_tempo whose time has come.
+      def apply_tempo_changes
+        due = @mutex.synchronize {
+          now, @tempo_changes = @tempo_changes.partition { |time, _| time <= @transport.position }
+          now
+        }
+        due.sort_by(&:first).each { |_, bpm| @transport.bpm = bpm }
+      end
+
+      # Starts scheduled blocks whose time is before +to+ plus half a bar of
+      # lookahead while playing, or whose time has come while idle.
+      def dispatch_schedule(from, to)
+        playing = !idle?
+        horizon = playing ? to + @transport.bar_length / 2 : from
+
+        due = @mutex.synchronize {
+          list = []
+          @schedule.values.each do |e|
+            while e.time <= horizon
+              list << [e, e.time]
+              break @schedule.delete(e.id) unless e.period
+              e.time += e.period
+            end
+          end
+          list
+        }
+
+        due.sort_by(&:last).each do |e, time|
+          # Blocks for times still ahead must finish in time; blocks whose
+          # time has already come run as soon as possible
+          deadline = time > from ? time : nil
+          if @realtime
+            start_scheduler
+            @schedule_queue << [e, time, deadline]
+          else
+            run_scheduled(e, time, deadline)
+          end
+        end
+      end
+
+      # Runs a scheduled block, collecting its commands and then applying
+      # them if the block finished before +deadline+ (see #schedule).
+      def run_scheduled(entry, time, deadline)
+        batch = []
+        Session.with_context(session: self, time: time, batch: batch) do
+          entry.block.call
+        end
+
+        if deadline && @transport.position >= deadline
+          warn "Skipped the commands scheduled for #{entry.description}: the block finished after its time"
+        else
+          batch.each(&:call)
+        end
+
+      rescue => e
+        raise if @raise_errors
+        warn "Scheduled block for #{entry.description} raised #{e.class}: #{e.message}\n\t#{e.backtrace&.first(5)&.join("\n\t")}"
+      end
+
+      # Starts the thread that runs scheduled blocks for a realtime session.
+      def start_scheduler
+        return if @scheduler&.alive?
+
+        @schedule_queue ||= Queue.new
+        @scheduler = Thread.new do
+          while (item = @schedule_queue.pop)
+            run_scheduled(*item)
+          end
+        end
+        @scheduler.name = 'MB::Sound::Session scheduler'
+      end
 
       # Shortens a graph description for #players.
       def shorten(text, max = 60)
@@ -496,7 +692,7 @@ module MB
 
         rate = output.sample_rate.to_f
         if p.stop_at && p.stop_at <= from
-          return retire(p) unless p.fade_out
+          return retire(p, keep: p.keep) unless p.fade_out
           p.gain_step = -fade_step(p.fade_out, rate) if p.gain_step >= 0
         end
 
@@ -538,8 +734,10 @@ module MB
         ended = data.any? { |d| d.nil? || d.length < frames }
         cut = p.stop_at && p.stop_at < to && !p.fade_out
         faded = p.gain <= 0 && p.gain_step < 0
-        if ended || cut
+        if ended
           retire(p)
+        elsif cut
+          retire(p, keep: p.keep)
         elsif faded
           retire(p, keep: true)
         end
