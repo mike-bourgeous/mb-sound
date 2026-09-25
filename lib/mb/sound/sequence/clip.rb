@@ -224,6 +224,17 @@ module MB
           out.sort_by { |time, type, _e, _c| [time, type == :off ? 0 : 1] }
         end
 
+        # Returns the event that most recently started at or before +position+
+        # whole notes (wrapping around for looping clips), or nil if none has.
+        # Used to set held values when playback jumps.  Probability is
+        # ignored.
+        def event_at(position)
+          return nil if @events.empty? || position < 0
+
+          phase = @loop ? position % @length : position
+          @events.reverse_each.find { |e| e.start <= phase } || (@loop ? @events.last : nil)
+        end
+
         # Returns true if the event at +index+ plays in the given loop
         # +cycle+.  Events with a probability are decided by a random number
         # generator seeded from the clip's seed, the cycle, and the index, so
