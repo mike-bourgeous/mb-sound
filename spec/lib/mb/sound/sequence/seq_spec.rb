@@ -80,6 +80,37 @@ RSpec.describe(MB::Sound::Sequence::Seq) do
     end
   end
 
+  describe '#legato' do
+    it 'shortens notes without changing the rhythm, keeping unset lengths settable' do
+      s = MB::Sound.seq(MB::Sound::C4, MB::Sound::E4).legato(0.75).n8
+      expect(times(s)).to eq([[60, 0, 3/32r], [64, 1/8r, 3/32r]])
+      expect(s.length).to eq(1/4r)
+    end
+
+    it 'converts float fractions to exact Rationals' do
+      expect(MB::Sound::C4.n4.legato(0.85).events[0].length).to eq(17/80r)
+    end
+
+    it 'can make notes overlap' do
+      expect(MB::Sound::C4.n8.legato(2).events[0].length).to eq(1/4r)
+    end
+
+    it 'has a staccato shortcut' do
+      expect(MB::Sound::C4.n4.staccato.events[0].length).to eq(1/8r)
+    end
+
+    it 'works on combined clips and grid kits' do
+      c = (MB::Sound::C4.n4 | MB::Sound::E4.n4).legato(0.5)
+      expect(c.events.map(&:length)).to eq([1/8r, 1/8r])
+      kit = MB::Sound.grid(8, kick: 'xx').legato(0.5)
+      expect(kit[:kick].events.map(&:length)).to eq([1/16r, 1/16r])
+    end
+
+    it 'rejects invalid fractions' do
+      expect { MB::Sound::C4.n4.legato(0) }.to raise_error(ArgumentError, /Legato/)
+    end
+  end
+
   it 'plays nested clips in place' do
     s = MB::Sound.seq(MB::Sound::C4.n8, MB::Sound.seq(MB::Sound::E4, MB::Sound::G4).n16, MB::Sound::C5.n8)
     expect(times(s)).to eq([[60, 0, 1/8r], [64, 1/8r, 1/16r], [67, 3/16r, 1/16r], [72, 1/4r, 1/8r]])
