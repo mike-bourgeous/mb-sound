@@ -98,6 +98,17 @@ module MB
           len(count.to_r / 4)
         end
 
+        # Returns a Seq that plays this sequence's steps +count+ times.  Unlike
+        # Clip#repeat, the result is still a Seq, so unset lengths can be set
+        # afterward:
+        #
+        #     seq(C4, E4).repeat(4).n8    # eight eighth notes
+        def repeat(count)
+          raise ArgumentError, "Repeat count must be a positive Integer (got #{count.inspect})" unless count.is_a?(Integer) && count > 0
+          Seq.new(@steps * count, seed: @seed)
+        end
+        alias * repeat
+
         # Returns a Seq with every step's length (resolving unset steps to
         # quarter notes) multiplied by +factor+.
         def stretch(factor)

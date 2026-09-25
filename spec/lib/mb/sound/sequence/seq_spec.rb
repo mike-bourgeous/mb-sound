@@ -63,6 +63,23 @@ RSpec.describe(MB::Sound::Sequence::Seq) do
     end
   end
 
+  describe '#repeat' do
+    it 'repeats the steps and keeps unset lengths settable' do
+      s = MB::Sound.seq(MB::Sound::C4, MB::Sound::E4).repeat(3).n8
+      expect(s).to be_a(described_class)
+      expect(s.events.map(&:value)).to eq([60, 64] * 3)
+      expect(s.length).to eq(3/4r)
+    end
+
+    it 'is aliased to *' do
+      expect((MB::Sound.seq(MB::Sound::C4) * 2).n16.length).to eq(1/8r)
+    end
+
+    it 'rejects non-positive counts' do
+      expect { MB::Sound.seq(MB::Sound::C4).repeat(0) }.to raise_error(ArgumentError)
+    end
+  end
+
   it 'plays nested clips in place' do
     s = MB::Sound.seq(MB::Sound::C4.n8, MB::Sound.seq(MB::Sound::E4, MB::Sound::G4).n16, MB::Sound::C5.n8)
     expect(times(s)).to eq([[60, 0, 1/8r], [64, 1/8r, 1/16r], [67, 3/16r, 1/16r], [72, 1/4r, 1/8r]])
