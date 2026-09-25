@@ -174,6 +174,14 @@ module MB
         stop(:all, fade: fade)
       end
 
+      # Stops every background player immediately, with no fade, including
+      # players that are fading out or waiting to start.  Audio already sent
+      # to the sound card may play for a moment longer.  Returns the names of
+      # the players that were stopped.
+      def panic
+        Session.default.remove(fade: 0)
+      end
+
       # Returns a Hash from background player name (see #bg) to a
       # description of what it is playing.
       def players

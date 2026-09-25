@@ -134,6 +134,18 @@ RSpec.describe(MB::Sound::PlaybackMethods) do
         expect(MB::Sound.players).to be_empty
       end
 
+      it 'stops everything right away with #panic, including fading and waiting players' do
+        MB::Sound.bg(:a, 220.hz.sine.forever)
+        MB::Sound.bg(:b, 330.hz.sine.forever)   # waits for the next bar
+        sleep 0.05
+        MB::Sound.stop(:a)                       # fading out over four bars
+        expect(MB::Sound.players.keys).to contain_exactly(:a, :b)
+
+        expect(MB::Sound.panic).to contain_exactly(:a, :b)
+        expect(MB::Sound.players).to be_empty
+        expect(MB::Sound::Session.default).to be_idle
+      end
+
       it 'warns about unknown players' do
         expect(MB::Sound).to receive(:warn).with(/No background player 12345/)
         expect(MB::Sound.stop(12345)).to eq([])
