@@ -42,10 +42,11 @@ module MB
         end
       end
 
-      # Returns the default Sequence::Transport, which sets the tempo for
-      # clips played in node graphs.
+      # Returns the Sequence::Transport that sets the tempo for clips played
+      # in node graphs: the default transport, or the rendering session's
+      # transport inside a PlaybackMethods#render block.
       def transport
-        Sequence.transport
+        MB::Sound::Session.context&.[](:session)&.transport || Sequence.transport
       end
 
       # Moves the background playback timeline (see PlaybackMethods#bg) to the
@@ -54,7 +55,7 @@ module MB
       # transport.
       def seek(bar)
         raise ArgumentError, "Bar must be a number of at least 1 (got #{bar.inspect})" unless bar.is_a?(Numeric) && bar >= 1
-        Sequence.transport.seek((bar.to_r - 1) * Sequence.transport.bar_length)
+        transport.seek((bar.to_r - 1) * transport.bar_length)
       end
 
       # Moves the background playback timeline back to the start (see #seek).
@@ -63,12 +64,20 @@ module MB
         seek(1)
       end
 
-      # Sets the default tempo in quarter notes per minute, or returns it if
+      # Sets the tempo in quarter notes per minute, or returns it if
       # +beats_per_minute+ is nil.  Clips that are already playing change
-      # speed right away.
+      # speed right away.  Inside a scheduled block (see ScheduleMethods), the
+      # change happens at the block's scheduled time instead.
       def bpm(beats_per_minute = nil)
-        Sequence.transport.bpm = beats_per_minute if beats_per_minute
-        Sequence.transport.bpm
+        context = MB::Sound::Session.context
+        if beats_per_minute && context&.[](:batch)
+          session, time = context[:session], context[:time]
+          context[:batch] << -> { session.change_tempo(beats_per_minute, time: time) }
+          return beats_per_minute
+        end
+
+        transport.bpm = beats_per_minute if beats_per_minute
+        transport.bpm
       end
     end
   end

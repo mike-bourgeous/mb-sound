@@ -247,6 +247,19 @@ RSpec.describe(MB::Sound::PlaybackMethods) do
       expect(data[0].abs.max).to be_between(0.1, 1)
     end
 
+    it 'arranges a song on the file timeline with a block' do
+      seconds = MB::Sound.render(filename, bars: 2, bpm: 120) do
+        MB::Sound.bg(:a, 0.25.constant)
+        MB::Sound.at_bar(2) { MB::Sound.bg(:b, 0.5.constant); MB::Sound.stop(:a, fade: 0) }
+      end
+      expect(seconds).to eq(4)
+
+      data = MB::Sound.read(filename)[0]
+      expect(data[96000 - 10]).to be_within(0.01).of(0.25)
+      expect(data[96000 + 10]).to be_within(0.01).of(0.5)
+      expect(MB::Sound::Session.default.scheduled).to be_empty # the live session is untouched
+    end
+
     it 'stops when every sound ends' do
       seconds = MB::Sound.render(filename, 440.hz.sine.for(0.5), bpm: 90)
       expect(seconds).to be_within(0.02).of(0.5)
