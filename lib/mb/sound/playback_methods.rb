@@ -15,17 +15,7 @@ module MB
       # to false.  Otherwise, plotting defaults to true.
       #
       # +:clear+ - Whether to clear the screen before beginning playback.
-      # +:shared_output+ - If false (and no +:output+ is given), plays to a new
-      #                    output that is closed when playback ends, instead
-      #                    of the cached default output.  See #bg.
-      def play(file_tone_data, output: nil, sample_rate: 48000, gain: 1.0, plot: nil, graphical: false, spectrum: false, device: nil, clear: true, quiet: false, shared_output: true)
-        # Outputs created here for unshared playback, closed by the ensure
-        # block below (also when a background player is killed)
-        owned_outputs = []
-        new_output = ->(**kwargs) {
-          MB::Sound.output(**kwargs, shared: shared_output).tap { |o| owned_outputs << o unless shared_output }
-        }
-
+      def play(file_tone_data, output: nil, sample_rate: 48000, gain: 1.0, plot: nil, graphical: false, spectrum: false, device: nil, clear: true, quiet: false)
         clear_esc = clear ? "\e[H\e[J" : ''
         header = MB::U.wrap("#{clear_esc}\e[36mPlaying\e[0m #{playback_info(file_tone_data)}".lines.map(&:strip).join(' ') + "\n\n")
         $stderr.puts header unless quiet
@@ -41,16 +31,16 @@ module MB
 
         case file_tone_data
         when String
-          return play_file(file_tone_data, gain: gain, plot: plot, device: device, output: output, new_output: new_output)
+          return play_file(file_tone_data, gain: gain, plot: plot, device: device, output: output)
 
         when IOInput, InputBufferWrapper
-          return play_input(file_tone_data, gain: gain, plot: plot, device: device, output: output, new_output: new_output)
+          return play_input(file_tone_data, gain: gain, plot: plot, device: device, output: output)
 
         when Array
           if !file_tone_data.empty? && file_tone_data.all?(GraphNode)
             bufsize = file_tone_data.map(&:graph_buffer_size).compact.min # nil is ok here
 
-            output ||= new_output.call(
+            output ||= MB::Sound.output(
               sample_rate: sample_rate,
               channels: MB::M.max(2, file_tone_data.length),
               plot: plot,
@@ -80,7 +70,7 @@ module MB
             data = data * 2 if data.length < 2
             channels = data.length
 
-            output ||= new_output.call(sample_rate: sample_rate, channels: channels, plot: plot, device: device)
+            output ||= MB::Sound.output(sample_rate: sample_rate, channels: channels, plot: plot, device: device)
             buffer_size = output.buffer_size
 
             # TODO: if this code needs to be modified much in the future, come up
@@ -101,9 +91,6 @@ module MB
         end
 
         $stderr.puts "\n\n" unless quiet
-
-      ensure
-        owned_outputs&.each(&:close)
       end
 
       # The longest #render will run when no length is given and the sounds
@@ -369,16 +356,15 @@ module MB
       # MB::Sound.output.  The +:channels+ parameter may be used to force mono
       # playback (mono sound is converted to stereo by default), or to ask ffmpeg
       # to upmix or downmix audio to a different number of channels.
-      def play_file(filename, channels: nil, gain: 1.0, plot: true, device: nil, output:, new_output: MB::Sound.method(:output))
+      def play_file(filename, channels: nil, gain: 1.0, plot: true, device: nil, output:)
         input = MB::Sound::FFMPEGInput.new(filename, channels: channels, resample: 48000)
-        play_input(input, gain: gain, plot: plot, device: device, output: output, new_output: new_output)
+        play_input(input, gain: gain, plot: plot, device: device, output: output)
       end
 
       # Plays the given audio input object (e.g. MB::Sound::FFMPEGInput) to
-      # either a given output, or the system default output (or another output
-      # from the +:new_output+ callable; see #play).
-      def play_input(input, channels: nil, gain:, plot:, device:, output:, new_output: MB::Sound.method(:output))
-        output ||= new_output.call(channels: channels || (input.channels < 2 ? 2 : input.channels), plot: plot, device: device)
+      # either a given output, or the system default output.
+      def play_input(input, channels: nil, gain:, plot:, device:, output:)
+        output ||= MB::Sound.output(channels: channels || (input.channels < 2 ? 2 : input.channels), plot: plot, device: device)
 
         buffer_size = output.buffer_size
 
