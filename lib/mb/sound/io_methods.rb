@@ -322,13 +322,20 @@ module MB
       #
       # Pass either true or a Hash of options for MB::Sound::PlotOutput in
       # +:plot+ to enable live plotting.
-      def output(sample_rate: 48000, channels: 2, device: nil, buffer_size: nil, plot: nil, output_type: nil)
+      #
+      # Outputs are cached and reused by later calls with the same parameters,
+      # unless +:shared+ is false.  An unshared output is always new and is
+      # never returned to other callers, so the caller should close it (e.g.
+      # for playing several sounds at once; see PlaybackMethods#bg).
+      def output(sample_rate: 48000, channels: 2, device: nil, buffer_size: nil, plot: nil, output_type: nil, shared: true)
         info = {sample_rate: sample_rate, channels: channels, device: device, buffer_size: buffer_size, plot: plot, output_type: output_type}
 
         if plot
           graphical = plot.is_a?(Hash) && plot[:graphical] || false
           p = { plot: plotter(graphical: graphical) }
           p.merge!(plot) if plot.is_a?(Hash)
+
+          return MB::Sound::PlotOutput.new(output(**info.merge(plot: nil), shared: false), **p) unless shared
 
           @plot_outputs ||= {}
           o = @plot_outputs[[plot, info]]
@@ -340,8 +347,10 @@ module MB
         end
 
         @outputs ||= {}
-        o = @outputs[info]
-        return o if o && !(o.respond_to?(:closed?) && o.closed?)
+        if shared
+          o = @outputs[info]
+          return o if o && !(o.respond_to?(:closed?) && o.closed?)
+        end
 
         o = nil
         output_type ||= detect_output
@@ -382,7 +391,7 @@ module MB
           raise "Unsupported output type: #{output_type.inspect}"
         end
 
-        @outputs[info] = o
+        @outputs[info] = o if shared
 
         o
       end

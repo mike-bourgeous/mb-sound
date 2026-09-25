@@ -107,8 +107,9 @@ module MB
         @closed || @p.closed?
       end
 
-      private
-
+      # Plots one buffer of +data+ (an Array of Numo::NArrays, one per
+      # channel) right away, with level meters, without writing it to the
+      # output.  Used by #write and by PlaybackMethods#visualize.
       def plot(data)
         puts "\e[#{@header_lines + 1}H\e[36mPress Ctrl-C to stop\e[0m\e[K" if !@p.respond_to?(:print) || @p.print
         Meter.linear_meters(data.map { |v| v.abs.max }, 3)

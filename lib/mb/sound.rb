@@ -23,6 +23,8 @@ require_relative 'sound/analysis_methods'
 require_relative 'sound/generation_methods'
 require_relative 'sound/midi_methods'
 require_relative 'sound/scripting_methods'
+require_relative 'sound/sequence_methods'
+require_relative 'sound/schedule_methods'
 
 module MB
   # Convenience functions for making quick work of sound.
@@ -41,6 +43,8 @@ module MB
     extend GenerationMethods
     extend MidiMethods
     extend ScriptingMethods
+    extend SequenceMethods
+    extend ScheduleMethods
 
     # Speed of sound for wavelength calculations, in meters per second.
     SPEED_OF_SOUND = 343.0
@@ -152,6 +156,8 @@ require_relative 'sound/background_output'
 require_relative 'sound/oscillator'
 require_relative 'sound/tone'
 require_relative 'sound/note'
+require_relative 'sound/sequence'
+require_relative 'sound/session'
 
 require_relative 'sound/plot_output'
 require_relative 'sound/filter'
