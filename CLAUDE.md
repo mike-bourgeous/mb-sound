@@ -54,7 +54,7 @@ Graph nodes maintain input/output relationships and support traversal via the `T
 
 `MB::Sound` extends several method modules that provide the top-level API available in `bin/sound.rb`:
 - `IOMethods` - File read/write via ffmpeg
-- `PlaybackMethods` - `play`, `input`, real-time audio
+- `PlaybackMethods` - `play`, `input`, real-time audio; `bg` plays in a background thread (own output) and returns a player number for `stop`
 - `PlotMethods` - Terminal/gnuplot visualization
 - `FFTMethods` - Spectral analysis
 - `GainMethods`, `WindowMethods`, `AnalysisMethods`
