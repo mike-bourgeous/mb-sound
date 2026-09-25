@@ -124,6 +124,13 @@ RSpec.describe(MB::Sound::PlaybackMethods) do
         expect(MB::Sound.players.values).to all(end_with('(fading out)'))
       end
 
+      it 'has #fadeout as an alias for #outro' do
+        MB::Sound.bg(:a, 220.hz.sine.forever)
+        sleep 0.05
+        expect(MB::Sound.fadeout(fade: 0)).to eq([:a])
+        expect(MB::Sound.players).to be_empty
+      end
+
       it 'no longer has #hush' do
         expect(MB::Sound).not_to respond_to(:hush)
       end
