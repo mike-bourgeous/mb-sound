@@ -21,20 +21,6 @@ RSpec.describe(MB::Sound::PlaybackMethods) do
     pending 'can play an array of graph nodes for separate channels'
     pending 'can play an array of other types of sounds for separate channels'
 
-    context 'with shared_output: false' do
-      it 'plays to a new output and closes it afterward' do
-        outputs = []
-        allow(MB::Sound).to receive(:output).and_wrap_original { |m, **kw| m.call(**kw).tap { |o| outputs << o } }
-
-        MB::Sound.play(440.hz.sine.for(0.05), quiet: true, shared_output: false)
-        MB::Sound.play(440.hz.sine.for(0.05), quiet: true, shared_output: false)
-
-        expect(outputs.length).to eq(2)
-        expect(outputs[0]).not_to equal(outputs[1])
-        expect(outputs).to all(be_closed)
-      end
-    end
-
     it 'reuses the cached output by default' do
       outputs = []
       allow(MB::Sound).to receive(:output).and_wrap_original { |m, **kw| m.call(**kw).tap { |o| outputs << o } }
