@@ -48,69 +48,81 @@ RSpec.describe(MB::Sound::PlaybackMethods) do
   end
 
   describe 'background playback' do
-    # Waits up to +timeout+ seconds for the block to return true.
-    def wait_for(timeout = 5)
-      deadline = MB::U.clock_now + timeout
-      sleep 0.01 until yield || MB::U.clock_now > deadline
-      yield
-    end
-
     after(:each) do
-      MB::Sound.stop
+      MB::Sound::Session.default.close
+      MB::Sound.rewind
     end
 
     describe '#bg' do
-      it 'returns increasing player numbers and lists players' do
+      it 'returns reused player numbers and lists players' do
         a = MB::Sound.bg(220.hz.sine.forever)
         b = MB::Sound.bg(330.hz.sine.forever)
+        expect([a, b]).to eq([1, 2])
+        expect(MB::Sound.players.keys).to eq([1, 2])
 
-        expect(a).to be_a(Integer)
-        expect(b).to eq(a + 1)
-        expect(MB::Sound.players.keys).to eq([a, b])
-        expect(MB::Sound.players[a]).to be_a(String)
+        MB::Sound.stop(1)
+        expect(MB::Sound.bg(440.hz.sine.forever)).to eq(1)
       end
 
-      it 'returns right away and removes the player when the sound ends' do
+      it 'accepts a name and replaces the player with the same name' do
+        expect(MB::Sound.bg(:bass, 220.hz.sine.forever)).to eq(:bass)
+        expect(MB::Sound.bg(:bass, 110.hz.sine.forever)).to eq(:bass)
+        expect(MB::Sound.players.keys).to eq([:bass])
+      end
+
+      it 'returns right away' do
         t = MB::U.clock_now
-        id = MB::Sound.bg(440.hz.sine.for(0.2))
-        expect(MB::U.clock_now - t).to be < 0.1
-
-        expect(MB::Sound.players).to include(id)
-        expect(wait_for { !MB::Sound.players.include?(id) }).to eq(true)
+        MB::Sound.bg(440.hz.sine.forever)
+        expect(MB::U.clock_now - t).to be < 0.5
       end
 
-      it 'gives each player its own output and closes it' do
+      it 'mixes all players into one output' do
         outputs = []
         allow(MB::Sound).to receive(:output).and_wrap_original { |m, **kw| m.call(**kw).tap { |o| outputs << o } }
 
-        MB::Sound.bg(220.hz.sine.for(0.1))
-        MB::Sound.bg(330.hz.sine.for(0.1))
-        expect(wait_for { MB::Sound.players.empty? }).to eq(true)
-
-        expect(outputs.length).to eq(2)
-        expect(outputs[0]).not_to equal(outputs[1])
-        expect(outputs).to all(be_closed)
+        MB::Sound.bg(220.hz.sine.forever)
+        MB::Sound.bg(330.hz.sine.forever)
+        expect(outputs.length).to eq(1)
       end
 
-      it 'does not print the playing header' do
-        expect($stderr).not_to receive(:puts)
-        id = MB::Sound.bg(440.hz.sine.for(0.05))
-        wait_for { !MB::Sound.players.include?(id) }
+      it 'rejects :all as a name' do
+        expect { MB::Sound.bg(:all, 220.hz.sine) }.to raise_error(ArgumentError, /reserved/)
       end
     end
 
     describe '#stop' do
-      it 'stops one player and returns its number' do
-        a = MB::Sound.bg(220.hz.sine.forever)
-        b = MB::Sound.bg(330.hz.sine.forever)
-
-        expect(MB::Sound.stop(a)).to eq([a])
-        expect(MB::Sound.players.keys).to eq([b])
+      it 'stops the most recently started player with no arguments' do
+        MB::Sound.bg(:a, 220.hz.sine.forever)
+        MB::Sound.bg(:b, 330.hz.sine.forever)
+        expect(MB::Sound.stop).to eq([:b])
+        expect(MB::Sound.stop).to eq([:a])
+        expect(MB::Sound.stop).to eq([])
       end
 
-      it 'stops all players when given no numbers' do
-        ids = [MB::Sound.bg(220.hz.sine.forever), MB::Sound.bg(330.hz.sine.forever)]
-        expect(MB::Sound.stop).to eq(ids)
+      it 'stops named players' do
+        MB::Sound.bg(:a, 220.hz.sine.forever)
+        MB::Sound.bg(:b, 330.hz.sine.forever)
+        expect(MB::Sound.stop(:a)).to eq([:a])
+        expect(MB::Sound.players.keys).to eq([:b])
+      end
+
+      it 'stops everything with :all or #hush' do
+        MB::Sound.bg(220.hz.sine.forever)
+        MB::Sound.bg(330.hz.sine.forever)
+        expect(MB::Sound.stop(:all)).to eq([1, 2])
+
+        MB::Sound.bg(220.hz.sine.forever)
+        expect(MB::Sound.hush).to eq([1])
+        expect(MB::Sound.players).to be_empty
+      end
+
+      it 'can fade out' do
+        MB::Sound.bg(:a, 220.hz.sine.forever)
+        sleep 0.05
+        expect(MB::Sound.stop(:a, fade: 0.2)).to eq([:a])
+        expect(MB::Sound.players[:a]).to end_with('(fading out)')
+        deadline = MB::U.clock_now + 5
+        sleep 0.05 until MB::Sound.players.empty? || MB::U.clock_now > deadline
         expect(MB::Sound.players).to be_empty
       end
 
@@ -118,6 +130,58 @@ RSpec.describe(MB::Sound::PlaybackMethods) do
         expect(MB::Sound).to receive(:warn).with(/No background player 12345/)
         expect(MB::Sound.stop(12345)).to eq([])
       end
+    end
+  end
+
+  describe '#render' do
+    let(:filename) { 'tmp/render_spec.flac' }
+
+    before(:each) do
+      FileUtils.mkdir_p('tmp')
+      File.unlink(filename) rescue nil
+    end
+
+    it 'renders a sequence for a number of bars at the current tempo' do
+      bass = MB::Sound.seq(MB::Sound::C2, MB::Sound::G1).n8.loop
+      seconds = MB::Sound.render(filename, bass.tone.ramp.at(1) * bass.env * 0.5, bars: 2)
+      expect(seconds).to eq(4)
+
+      data = MB::Sound.read(filename)
+      expect(data.length).to eq(2)
+      expect(data[0].length).to eq(4 * 48000)
+      expect(data[0].abs.max).to be_between(0.1, 1)
+    end
+
+    it 'stops when every sound ends' do
+      seconds = MB::Sound.render(filename, 440.hz.sine.for(0.5), bpm: 90)
+      expect(seconds).to be_within(0.02).of(0.5)
+    end
+
+    it 'does not overwrite files unless asked' do
+      MB::Sound.render(filename, 440.hz.sine.for(0.1))
+      expect { MB::Sound.render(filename, 440.hz.sine.for(0.1)) }.to raise_error(/exists/i)
+      expect { MB::Sound.render(filename, 440.hz.sine.for(0.1), overwrite: true) }.not_to raise_error
+    end
+
+    it 'does not move the live timeline' do
+      MB::Sound.render(filename, 440.hz.sine.for(0.1))
+      expect(MB::Sound.transport.position).to eq(0)
+    end
+  end
+
+  describe '#seek and #rewind' do
+    after(:each) { MB::Sound.rewind }
+
+    it 'moves the timeline to the start of a bar' do
+      MB::Sound.seek(3)
+      expect(MB::Sound.transport.position).to eq(2)
+      expect(MB::Sound.transport.bar).to eq(3)
+      MB::Sound.rewind
+      expect(MB::Sound.transport.position).to eq(0)
+    end
+
+    it 'rejects bars before the first' do
+      expect { MB::Sound.seek(0) }.to raise_error(ArgumentError)
     end
   end
 end

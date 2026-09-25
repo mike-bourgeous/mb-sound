@@ -48,6 +48,21 @@ module MB
         Sequence.transport
       end
 
+      # Moves the background playback timeline (see PlaybackMethods#bg) to the
+      # start of +bar+, counting from 1 (fractions are allowed, e.g. 2.5).
+      # Sounds already playing jump there on their next buffer.  Returns the
+      # transport.
+      def seek(bar)
+        raise ArgumentError, "Bar must be a number of at least 1 (got #{bar.inspect})" unless bar.is_a?(Numeric) && bar >= 1
+        Sequence.transport.seek((bar.to_r - 1) * Sequence.transport.bar_length)
+      end
+
+      # Moves the background playback timeline back to the start (see #seek).
+      # (Named rewind because bin/sound.rb uses Pry's reset command.)
+      def rewind
+        seek(1)
+      end
+
       # Sets the default tempo in quarter notes per minute, or returns it if
       # +beats_per_minute+ is nil.  Clips that are already playing change
       # speed right away.
