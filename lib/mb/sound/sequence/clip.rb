@@ -124,13 +124,16 @@ module MB
 
         # Splits every event into repeated hits of length +sub+ (an Integer
         # note division or Rational whole notes), keeping the original event
-        # lengths.  The last hit of each event is shortened if needed.
+        # lengths.  The last hit of each event is shortened if needed.  Like
+        # #ratchet, this applies to every note in the clip, and ordering
+        # with #legato matters in the same way.
         #
         # +:velocity+ may be a Range to ramp velocity from the first hit to
         # the last (e.g. 0.3..1.0 for a crescendo).
         #
-        # Example:
+        # Examples:
         #     C4.n4.roll(32)   # eight 32nd notes filling a quarter note
+        #     bass.roll(16)    # re-strike every note of bass on each 16th
         def roll(sub, velocity: nil)
           sub = Duration.whole_notes(sub)
           subdivide(velocity) { |e|
@@ -144,11 +147,23 @@ module MB
           }
         end
 
-        # Splits every event into +count+ equal hits.  See #roll for
-        # +:velocity+.
+        # Splits every event into +count+ equal hits, so each note is struck
+        # +count+ times within its original length while the rhythm of the
+        # clip stays the same.  See #roll for +:velocity+, and for splitting
+        # by hit length instead of count.
         #
-        # Example:
-        #     C4.n4.ratchet(3)   # a quarter note triplet
+        # This applies to every note in the clip, so it can double up a whole
+        # sequence.  Set step lengths first: on a Seq, ratchet resolves unset
+        # lengths to quarter notes and returns a plain Clip.
+        #
+        # Ordering with #legato matters: legato before ratchet squeezes all
+        # the hits into the shortened note, while legato after ratchet
+        # shortens each hit, leaving a gap after every hit.
+        #
+        # Examples:
+        #     C4.n4.ratchet(3)           # a quarter note triplet
+        #     bass.stretch(4).ratchet(4) # half notes, each struck four times
+        #     bass.ratchet(2).legato(0.5)  # every note doubled, each hit staccato
         def ratchet(count, velocity: nil)
           raise ArgumentError, "Ratchet count must be a positive Integer (got #{count.inspect})" unless count.is_a?(Integer) && count > 0
           subdivide(velocity) { |e|
