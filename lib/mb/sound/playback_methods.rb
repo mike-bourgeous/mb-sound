@@ -93,7 +93,264 @@ module MB
         $stderr.puts "\n\n" unless quiet
       end
 
+      # The longest #render will run when no length is given and the sounds
+      # never end.
+      MAX_RENDER_SECONDS = 600
+
+      # Plays a sound in the background and returns its player name for
+      # #stop.  The prompt stays available, so you can keep working while it
+      # plays (e.g. change #bpm or start more sounds).
+      #
+      # Give a Symbol +name+ first to play in a named slot.  Running #bg again
+      # with the same name replaces the old sound in sync when the new one
+      # starts, so you can edit a line and re-run it to iterate.  Without a
+      # name, the sound gets the lowest unused number.
+      #
+      # New sounds fade in over half a bar by default; pass +:fade+ to choose
+      # the number of bars, or 0 for no fade.  Replacing a named sound
+      # switches over without a fade unless +:fade+ is given, in which case
+      # it crossfades.  Change the defaults with Session.default.fade_in= and
+      # fade_out= (in bars).
+      #
+      # Accepts a GraphNode, an Array of GraphNodes (one per channel), or a
+      # sound filename.  Everything played with #bg is mixed in one shared
+      # Session, locked to one timeline, so sequences stay in sync.  If
+      # something is already playing, the new sound starts on the next bar;
+      # pass +:at+ to change that (:now, :beat, :bar, :clip, or a note length
+      # grid; see Session#add).
+      #
+      # Errors during playback are printed and remove only the sound that
+      # failed.
+      #
+      # Example (bin/sound.rb):
+      #     bass = seq(C2, C2, rest, C3, C2, rest, As1, G1).n16.loop
+      #     bg :bass, bass.tone.ramp.at(1).filter(:lowpass, cutoff: 250 + bass.env(0.001, 0.012, 0, 0.012) * 4000, quality: 4).softclip(0.1, 0.5)
+      #     bg bass.transpose(12).tone.triangle.at(0.3) * bass.env    # player 1, joins on the next bar
+      #     bpm 140
+      #     stop       # stops the last one started (player 1)
+      #     outro      # fades everything out over four bars
+      #     panic      # stops everything right away
+      def bg(name_or_sound, sound = nil, at: nil, fade: nil)
+        name, sound = sound.nil? ? [nil, name_or_sound] : [name_or_sound, sound]
+        raise ArgumentError, ':all is reserved for stop(:all)' if name == :all
+
+        session_command(name) { |session, time|
+          session.add(sound, at: at, name: name, fade: fade, start_time: at ? nil : time)
+        }
+      end
+
+      # Stops background players (see #bg): with no arguments, the most
+      # recently started one; with names or numbers, those players; with
+      # :all, every player (see also #outro and #panic).  Players fade out
+      # over four bars by default; pass +:fade+ for a different number of
+      # bars, or 0 to stop right away.  Returns the names of the players that
+      # were stopped.  When nothing is left playing, the timeline pauses where
+      # it is (see SequenceMethods#seek and #rewind).
+      def stop(*names, fade: nil)
+        session_command(names) { |session, time|
+          if names.empty?
+            [session.remove_last(fade: fade, time: time)].compact
+          elsif names == [:all]
+            session.remove(fade: fade, time: time)
+          else
+            session.remove(*names, fade: fade, time: time).tap { |stopped|
+              (names - stopped).each do |name|
+                warn "No background player #{name.inspect} is playing"
+              end
+            }
+          end
+        }
+      end
+
+      # Ends everything playing in the background, fading out over four bars
+      # by default (+:fade+ sets the number of bars).  Also available as
+      # #fadeout.  See #stop, and #panic to stop everything right away.
+      def outro(fade: nil)
+        stop(:all, fade: fade)
+      end
+      alias fadeout outro
+
+      # Stops every background player immediately, with no fade, including
+      # players that are fading out or waiting to start.  Audio already sent
+      # to the sound card may play for a moment longer.  Returns the names of
+      # the players that were stopped.
+      def panic
+        session_command([]) { |session, time| session.remove(fade: 0, time: time) }
+      end
+
+      # Brings back a named background player that was stopped (see #bg and
+      # #stop), unchanged, e.g. to fade a track back in.  With no name,
+      # resumes the most recently stopped player.  Like #bg, it starts on the
+      # next bar and fades in over half a bar by default (+:at+ and +:fade+
+      # work the same way).  Returns the name, or nil if there was nothing to
+      # resume.
+      #
+      # Only players with Symbol names are kept after stopping; see
+      # #stopped and #forget.
+      #
+      # Example (bin/sound.rb):
+      #     bg :pad, pad_graph
+      #     stop :pad      # fades out over four bars
+      #     resume :pad    # fades the same graph back in on the next bar
+      def resume(name = nil, at: nil, fade: nil)
+        session_command(name) { |session, time|
+          session.resume(name, at: at, fade: fade, start_time: at ? nil : time).tap { |resumed|
+            if resumed.nil?
+              what = name ? "#{name.inspect} (not stopped, or already playing)" : '(nothing has been stopped)'
+              warn "No background player to resume #{what}"
+            end
+          }
+        }
+      end
+
+      # Returns a Hash from name to description of stopped background
+      # players that can be resumed (see #resume).
+      def stopped
+        Session.current.stopped
+      end
+
+      # Discards stopped background players so they can't be resumed (all of
+      # them if no names are given).  Returns the names discarded.
+      def forget(*names)
+        Session.current.forget(*names)
+      end
+
+      # Plots the background mix (see #bg) live until you press Ctrl-C, then
+      # returns to the prompt while playback continues.  Each frame plots
+      # the newest buffer of the mix with level meters, as fast as the
+      # plotter can draw; buffers that arrive while a frame is drawing are
+      # skipped.  Also available as #vis.
+      #
+      # +:graphical+ plots in a gnuplot window instead of the terminal, and
+      # +:spectrum+ plots the frequency spectrum instead of the waveform.
+      #
+      # The mix is rendered a little ahead of what you hear (by the output's
+      # buffering), so the plot may lead the sound slightly.
+      #
+      # Returns a Hash with the number of frames drawn and the frame rate.
+      def visualize(graphical: false, spectrum: false)
+        session = Session.default
+        unless session.running?
+          warn 'Nothing is playing in the background; start something with bg first'
+          return nil
+        end
+
+        latest = nil
+        tap = session.add_tap { |mix| latest = mix }
+
+        header = "\e[H\e[J\e[36mVisualizing the background mix\e[0m\n\n"
+        $stdout.write header
+        plot_output = PlotOutput.new(
+          session.output,
+          plot: plotter(graphical: graphical),
+          graphical: graphical,
+          spectrum: spectrum,
+          header_lines: header.lines.count,
+          window_size: 1 << 20 # plot the whole buffer, whatever its size
+        )
+
+        frames = 0
+        start = MB::U.clock_now
+        shown = nil
+        loop do
+          data = latest
+          if data.nil? || data.equal?(shown)
+            sleep 0.001
+            next
+          end
+
+          shown = data
+          plot_output.plot(data)
+          frames += 1
+        end
+
+      rescue Interrupt
+        elapsed = MB::U.clock_now - start if start
+        { frames: frames, fps: elapsed && elapsed > 0 ? (frames / elapsed).round(1) : 0 }
+
+      ensure
+        session.remove_tap(tap) if tap
+      end
+      alias vis visualize
+
+      # Returns a Hash from background player name (see #bg) to a
+      # description of what it is playing.
+      def players
+        Session.current.players
+      end
+
+      # Renders +sounds+ (GraphNodes, Arrays of GraphNodes, or filenames) to
+      # an audio file as fast as possible.  All sounds start together at the
+      # beginning of a fresh timeline, at the current tempo unless +:bpm+ is
+      # given.  Rendering stops after +:bars+ or +:seconds+, or when every
+      # sound has ended.  Returns the number of seconds rendered.
+      #
+      # If a block is given, it runs first with the rendering session as the
+      # current session, so #bg, #at_bar, #every, #bpm, etc. inside it
+      # arrange a song on the file's timeline (see ScheduleMethods).
+      #
+      #     render 'song.flac', bars: 32 do
+      #       bg :pad, pad_graph
+      #       at_bar(9) { bg :drums, drum_graph }
+      #       at_bar(25) { outro }
+      #     end
+      #
+      # Build fresh graphs to render, rather than rendering graphs that are
+      # playing in the background, because graphs keep their playback state.
+      #
+      # Example (bin/sound.rb):
+      #     bass = seq(C2, C2, rest, C3).n16.loop
+      #     render '/tmp/bass.flac', bass.tone.ramp.at(1) * bass.env * 0.5, bars: 4
+      def render(filename, *sounds, bars: nil, seconds: nil, bpm: nil, channels: 2, overwrite: false, buffer_size: 800, &block)
+        raise ArgumentError, 'Pass one or more sounds or a block to render' if sounds.empty? && block.nil?
+        raise ArgumentError, 'Pass bars: or seconds:, not both' if bars && seconds
+
+        transport = Sequence::Transport.new(bpm: bpm || Sequence.transport.bpm, bar_length: Sequence.transport.bar_length)
+        output = file_output(filename, channels: channels, overwrite: overwrite)
+        session = Session.new(output: output, transport: transport, channels: channels, buffer_size: buffer_size, realtime: false, raise_errors: true)
+
+        rate = output.sample_rate
+        seconds = transport.seconds(bars.to_r * transport.bar_length) if bars
+        limit = ((seconds || MAX_RENDER_SECONDS) * rate).round
+
+        sounds.each { |s| session.add(s, at: :now) }
+        Session.with_context(session: session) { block.call } if block
+
+        frames = 0
+        until frames >= limit || (session.idle? && !session.schedule_due?)
+          count = MB::M.min(buffer_size, limit - frames)
+          session.process_buffer(count)
+          frames += count
+        end
+
+        if seconds.nil? && !session.idle?
+          warn "Stopped rendering #{filename} after #{MAX_RENDER_SECONDS} seconds; pass bars: or seconds: for sounds that never end"
+        end
+
+        frames.to_f / rate
+
+      ensure
+        session&.close
+      end
+
       private
+
+      # Runs a background playback command with the current session (see
+      # Session.current) and the scheduled time, if any.  Inside a scheduled
+      # block (see ScheduleMethods), the command is queued to take effect at
+      # the block's time instead, and +result+ is returned.
+      def session_command(result, &command)
+        context = Session.context
+        session = Session.current
+        time = context&.[](:time)
+
+        if context&.[](:batch)
+          context[:batch] << -> { command.call(session, time) }
+          result
+        else
+          command.call(session, time)
+        end
+      end
 
       # Plays the given filename using the default audio output returned by
       # MB::Sound.output.  The +:channels+ parameter may be used to force mono
