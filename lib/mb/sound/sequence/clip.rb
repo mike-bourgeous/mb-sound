@@ -182,6 +182,28 @@ module MB
         end
         alias triplet t
 
+        # Returns a clip where every note sounds for +fraction+ of its length,
+        # leaving the rest of each step silent (or overlapping the next note
+        # if +fraction+ is more than 1).  Note start times don't change.
+        #
+        # Example:
+        #     seq(C4, E4, G4).n8.legato(0.85)   # a little breathing room
+        def legato(fraction)
+          fraction = Clip.check_legato(fraction)
+          map_clip { |e| e.with(length: e.length * fraction) }
+        end
+
+        # Short notes: legato(0.5).
+        def staccato
+          legato(1/2r)
+        end
+
+        # Validates a #legato fraction and returns it as a Rational.
+        def self.check_legato(fraction)
+          raise ArgumentError, "Legato must be a positive number (got #{fraction.inspect})" unless fraction.is_a?(Numeric) && fraction.finite? && fraction > 0
+          fraction.is_a?(Float) ? fraction.rationalize(Rational(1, 10_000)) : fraction.to_r
+        end
+
         # Returns a clip with every event's value shifted by +semitones+.
         def transpose(semitones)
           map_clip { |e| e.with(value: e.value + semitones) }

@@ -15,9 +15,10 @@ module MB
       # is a plain Clip with every length resolved.
       class Seq < Clip
         # One step of a Seq.  +value+ is nil for a rest.  +length+ is nil if
-        # unset.  +clip+ is set for a nested Clip that plays in place of a
-        # single note.
-        Step = Struct.new(:value, :length, :velocity, :probability, :clip, keyword_init: true) do
+        # unset.  +legato+ is the fraction of the step the note sounds for (nil
+        # for all of it).  +clip+ is set for a nested Clip that plays in place
+        # of a single note.
+        Step = Struct.new(:value, :length, :velocity, :probability, :legato, :clip, keyword_init: true) do
           def rest?
             value.nil? && clip.nil?
           end
@@ -64,7 +65,7 @@ module MB
             if s.clip
               events.concat(s.clip.events.map { |e| e.with(start: e.start + t) })
             elsif !s.rest?
-              events << Event.new(start: t, length: len, value: s.value, velocity: s.velocity, probability: s.probability)
+              events << Event.new(start: t, length: len * (s.legato || 1), value: s.value, velocity: s.velocity, probability: s.probability)
             end
             t += len
           end
@@ -118,6 +119,13 @@ module MB
             len = (s.length || Duration::DEFAULT) * factor
             s.to_h.merge(length: len, clip: s.clip&.stretch(factor))
           }
+        end
+
+        # Returns a Seq where every note sounds for +fraction+ of its step (see
+        # Clip#legato), keeping unset lengths settable.
+        def legato(fraction)
+          fraction = Clip.check_legato(fraction)
+          map_steps { |s| s.to_h.merge(legato: fraction, clip: s.clip&.legato(fraction)) }
         end
 
         # Returns a Seq with every note's value shifted by +semitones+.

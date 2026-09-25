@@ -105,6 +105,11 @@ module MB
           Kit.new(@rows.transform_values { |c| seed ? c.loop(seed: seed) : c.loop })
         end
 
+        # Returns a Kit with every row's notes shortened (see Clip#legato).
+        def legato(fraction)
+          Kit.new(@rows.transform_values { |c| c.legato(fraction) })
+        end
+
         # Returns a single Clip with all rows stacked (see Clip#&).
         def to_clip
           @rows.values.reduce(:&)
