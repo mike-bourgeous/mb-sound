@@ -172,6 +172,39 @@ RSpec.describe(MB::Sound::PlaybackMethods) do
     end
   end
 
+  describe '#visualize' do
+    after(:each) do
+      MB::Sound::Session.default.close
+      MB::Sound.rewind
+    end
+
+    it 'plots the newest mix buffers until interrupted, then removes its tap' do
+      MB::Sound.bg(220.hz.sine.forever)
+      plotted = []
+      allow_any_instance_of(MB::Sound::PlotOutput).to receive(:plot) { |_, data|
+        plotted << data
+        raise Interrupt if plotted.length == 3
+      }
+      allow($stdout).to receive(:write)
+
+      result = MB::Sound.visualize
+      expect(result[:frames]).to eq(2)
+      expect(result[:fps]).to be > 0
+      expect(plotted.map(&:length).uniq).to eq([2])
+      expect(plotted.uniq(&:object_id).length).to eq(3) # never the same buffer twice
+      expect(MB::Sound::Session.default.instance_variable_get(:@taps)).to be_empty
+    end
+
+    it 'is also called vis' do
+      expect(MB::Sound.method(:vis)).to eq(MB::Sound.method(:visualize))
+    end
+
+    it 'warns and returns if nothing has been played in the background' do
+      expect(MB::Sound).to receive(:warn).with(/Nothing is playing/)
+      expect(MB::Sound.visualize).to be_nil
+    end
+  end
+
   describe '#render' do
     let(:filename) { 'tmp/render_spec.flac' }
 

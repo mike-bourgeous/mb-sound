@@ -102,6 +102,7 @@ module MB
         @raise_errors = raise_errors
 
         @players = {}
+        @taps = []
         @order = []
         @next_serial = 0
         @mutex = Mutex.new
@@ -233,6 +234,28 @@ module MB
         }
       end
 
+      # Calls the block with every buffer of the mix (an Array of
+      # Numo::SFloat, one per channel) after it is written to the output,
+      # e.g. for plotting.  The arrays are new for each buffer, so the block
+      # may keep them.  The block runs on the rendering thread, so it must
+      # return quickly.  Returns the block, for #remove_tap.
+      def add_tap(&block)
+        raise ArgumentError, 'Pass a block to tap the mix' unless block
+        @mutex.synchronize { @taps << block }
+        block
+      end
+
+      # Stops calling a block given to #add_tap.
+      def remove_tap(block)
+        @mutex.synchronize { @taps.delete(block) }
+      end
+
+      # Returns true if the background rendering thread is running (see
+      # #add).
+      def running?
+        !!@thread&.alive?
+      end
+
       # Returns true if no players are playing or waiting to start.
       def idle?
         @mutex.synchronize { @players.empty? }
@@ -273,6 +296,7 @@ module MB
 
         @transport.advance(to - from) unless players.empty?
         output.write(mix)
+        call_taps(mix)
         mix
       end
 
@@ -434,6 +458,17 @@ module MB
         retire(p)
         raise if @raise_errors
         warn "Player #{p.name.inspect} (#{p.description}) stopped with an error: #{e.class}: #{e.message}\n\t#{e.backtrace&.first(5)&.join("\n\t")}"
+      end
+
+      # Calls each #add_tap block with the mix, removing blocks that raise.
+      def call_taps(mix)
+        taps = @mutex.synchronize { @taps.dup }
+        taps.each do |t|
+          t.call(mix)
+        rescue => e
+          remove_tap(t)
+          warn "Removed a mix tap that raised #{e.class}: #{e.message}"
+        end
       end
 
       # Returns a Numo::SFloat of per-frame gains for a fading player (and

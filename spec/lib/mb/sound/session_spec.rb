@@ -251,6 +251,29 @@ RSpec.describe(MB::Sound::Session) do
     expect(quiet.players.keys).to eq([1])
   end
 
+  describe 'taps' do
+    it 'calls taps with each new mix buffer until removed' do
+      seen = []
+      tap = session.add_tap { |mix| seen << mix }
+      session.add(1.constant)
+      2.times { session.process_buffer }
+      session.remove_tap(tap)
+      session.process_buffer
+
+      expect(seen.length).to eq(2)
+      expect(seen[0]).not_to equal(seen[1])
+      expect(seen[0].map { |c| c[0] }).to eq([1, 1])
+    end
+
+    it 'removes taps that raise errors' do
+      calls = 0
+      session.add_tap { calls += 1; raise 'bad tap' }
+      expect(session).to receive(:warn).with(/bad tap/)
+      2.times { session.process_buffer }
+      expect(calls).to eq(1)
+    end
+  end
+
   it 'mixes mono graphs to every channel and arrays to separate channels' do
     session.add([1.constant, 2.constant])
     session.add(4.constant, at: :now)
