@@ -185,6 +185,64 @@ module MB
         Session.default.remove(fade: 0)
       end
 
+      # Plots the background mix (see #bg) live until you press Ctrl-C, then
+      # returns to the prompt while playback continues.  Each frame plots
+      # the newest buffer of the mix with level meters, as fast as the
+      # plotter can draw; buffers that arrive while a frame is drawing are
+      # skipped.  Also available as #vis.
+      #
+      # +:graphical+ plots in a gnuplot window instead of the terminal, and
+      # +:spectrum+ plots the frequency spectrum instead of the waveform.
+      #
+      # The mix is rendered a little ahead of what you hear (by the output's
+      # buffering), so the plot may lead the sound slightly.
+      #
+      # Returns a Hash with the number of frames drawn and the frame rate.
+      def visualize(graphical: false, spectrum: false)
+        session = Session.default
+        unless session.running?
+          warn 'Nothing is playing in the background; start something with bg first'
+          return nil
+        end
+
+        latest = nil
+        tap = session.add_tap { |mix| latest = mix }
+
+        header = "\e[H\e[J\e[36mVisualizing the background mix\e[0m\n\n"
+        $stdout.write header
+        plot_output = PlotOutput.new(
+          session.output,
+          plot: plotter(graphical: graphical),
+          graphical: graphical,
+          spectrum: spectrum,
+          header_lines: header.lines.count,
+          window_size: 1 << 20 # plot the whole buffer, whatever its size
+        )
+
+        frames = 0
+        start = MB::U.clock_now
+        shown = nil
+        loop do
+          data = latest
+          if data.nil? || data.equal?(shown)
+            sleep 0.001
+            next
+          end
+
+          shown = data
+          plot_output.plot(data)
+          frames += 1
+        end
+
+      rescue Interrupt
+        elapsed = MB::U.clock_now - start if start
+        { frames: frames, fps: elapsed && elapsed > 0 ? (frames / elapsed).round(1) : 0 }
+
+      ensure
+        session.remove_tap(tap) if tap
+      end
+      alias vis visualize
+
       # Returns a Hash from background player name (see #bg) to a
       # description of what it is playing.
       def players
