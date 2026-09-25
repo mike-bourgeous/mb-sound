@@ -45,7 +45,8 @@ module MB
         # end of the last event.
         def initialize(events, length: nil, loop: false, seed: 0)
           @events = events.sort_by(&:start).freeze
-          @length = (length || @events.map(&:end_time).max || 0).to_r
+          max_end = @events.map(&:end_time).max || 0
+          @length = (length || max_end).to_r
           @loop = !!loop
           @seed = Integer(seed)
 
@@ -53,7 +54,6 @@ module MB
 
           # How many loop cycles an event can span, for finding note-off events
           # that belong to earlier cycles.
-          max_end = @events.map(&:end_time).max || 0
           @lookback = @length > 0 ? (max_end / @length).ceil : 0
         end
 
@@ -70,7 +70,7 @@ module MB
         # Returns a copy of this clip that repeats forever.  Pass a +:seed+ to
         # change which probabilistic events play in each cycle.
         def loop(seed: @seed)
-          self.class.base_new(@events, length: @length, loop: true, seed: seed)
+          Clip.new(@events, length: @length, loop: true, seed: seed)
         end
 
         # Returns a non-looping clip that plays this clip followed by +other+
@@ -88,14 +88,12 @@ module MB
           Clip.new(@events + other.events, length: MB::M.max(@length, other.length), seed: @seed)
         end
 
-        # Returns a clip that plays this clip +count+ times in a row.
+        # Returns a non-looping clip that plays this clip +count+ times in a
+        # row.  Repeating a looping clip warns, since the result is finite;
+        # call #loop on the result to keep it looping.
         def repeat(count)
-          raise ArgumentError, "Repeat count must be a positive Integer (got #{count.inspect})" unless count.is_a?(Integer) && count > 0
-          Clip.new(
-            Array.new(count) { |c| @events.map { |e| e.with(start: e.start + c * @length) } }.flatten,
-            length: @length * count,
-            seed: @seed
-          )
+          warn "repeat makes a finite clip, so #{self} will stop looping; call .loop on the result to keep looping" if @loop
+          repeated(count)
         end
         alias * repeat
 
@@ -119,7 +117,7 @@ module MB
           events = @events.select { |e| e.start < span }.map { |e|
             e.end_time > span ? e.with(length: span - e.start) : e
           }
-          Clip.new(events, length: span, loop: @loop, seed: @seed)
+          with_events(events, length: span)
         end
 
         # Splits every event into repeated hits of length +sub+ (an Integer
@@ -216,7 +214,7 @@ module MB
         # Validates a #legato fraction and returns it as a Rational.
         def self.check_legato(fraction)
           raise ArgumentError, "Legato must be a positive number (got #{fraction.inspect})" unless fraction.is_a?(Numeric) && fraction.finite? && fraction > 0
-          fraction.is_a?(Float) ? fraction.rationalize(Rational(1, 10_000)) : fraction.to_r
+          Duration.rational(fraction)
         end
 
         # Returns a clip with every event's value shifted by +semitones+.
@@ -373,12 +371,11 @@ module MB
           clip = self
           if @loop && !@events.empty?
             cycles = count / @events.length.gcd(count)
-            clip = repeat(cycles).loop(seed: @seed) if cycles > 1
+            clip = repeated(cycles).loop(seed: @seed) if cycles > 1
           end
 
           Array.new(count) { |v|
-            events = clip.events.select.with_index { |_, idx| idx % count == v }
-            Clip.new(events, length: clip.length, loop: @loop, seed: @seed)
+            clip.with_events(clip.events.select.with_index { |_, idx| idx % count == v })
           }
         end
 
@@ -390,19 +387,31 @@ module MB
           "#<#{to_s}>"
         end
 
-        # Creates a plain Clip, even from a subclass like Seq.
-        def self.base_new(*args, **kwargs)
-          Clip.new(*args, **kwargs)
-        end
-
         protected
+
+        # Returns a Clip with the given +events+ that keeps this clip's
+        # looping and seed.
+        def with_events(events, length: @length)
+          Clip.new(events, length: length, loop: @loop, seed: @seed)
+        end
 
         # Returns a Clip with each event transformed by the block.
         def map_clip(length: @length)
-          Clip.new(@events.map { |e| yield e }, length: length, loop: @loop, seed: @seed)
+          with_events(@events.map { |e| yield e }, length: length)
         end
 
         private
+
+        # Returns a non-looping clip that plays this clip +count+ times in a
+        # row, without #repeat's warning for looping clips.
+        def repeated(count)
+          raise ArgumentError, "Repeat count must be a positive Integer (got #{count.inspect})" unless count.is_a?(Integer) && count > 0
+          Clip.new(
+            Array.new(count) { |c| @events.map { |e| e.with(start: e.start + c * @length) } }.flatten,
+            length: @length * count,
+            seed: @seed
+          )
+        end
 
         # Used by #roll and #ratchet.  The block returns [offset, length]
         # pairs for the hits of each event.
@@ -422,7 +431,7 @@ module MB
             }
           }
 
-          Clip.new(map_events, length: @length, loop: @loop, seed: @seed)
+          with_events(map_events)
         end
       end
     end

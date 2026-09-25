@@ -20,6 +20,15 @@ RSpec.describe(MB::Sound::Sequence::Duration) do
     end
   end
 
+  describe '.rational' do
+    it 'converts Floats to the simplest nearby Rational and leaves other numbers exact' do
+      expect(described_class.rational(0.85)).to eq(17/20r)
+      expect(described_class.rational(0.1)).to eq(1/10r)
+      expect(described_class.rational(3)).to eq(3r)
+      expect(described_class.rational(3/7r)).to eq(3/7r)
+    end
+  end
+
   describe '.format' do
     it 'formats unit fractions as note divisions' do
       expect(described_class.format(1/16r)).to eq('n16')

@@ -36,6 +36,20 @@ RSpec.describe(MB::Sound::Sequence::Clip) do
       expect { c4.n8 * 0 }.to raise_error(ArgumentError)
       expect { c4.n8 * 1.5 }.to raise_error(ArgumentError)
     end
+
+    it 'warns that a repeated looping clip stops looping' do
+      clip = (c4.n8 | e4.n8).loop
+      expect(clip).to receive(:warn).with(/stop looping/).twice
+      expect(clip.repeat(2)).not_to be_looping
+      expect(clip * 2).not_to be_looping
+    end
+
+    it 'does not warn for non-looping clips or when splitting voices' do
+      clip = (c4.n8 | e4.n8 | c4.n8).loop
+      expect_any_instance_of(described_class).not_to receive(:warn)
+      (c4.n8 | e4.n8).repeat(2)
+      clip.synth(voices: 2) { 1.constant }
+    end
   end
 
   describe '#fill' do
