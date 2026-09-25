@@ -106,81 +106,121 @@ module MB
         owned_outputs&.each(&:close)
       end
 
-      # Plays a sound in the background (see #play for what can be played and
-      # for options) and returns a player number for #stop.  The prompt stays
-      # available, so you can keep working while it plays (e.g. change #bpm).
+      # The longest #render will run when no length is given and the sounds
+      # never end.
+      MAX_RENDER_SECONDS = 600
+
+      # Plays a sound in the background and returns its player name for
+      # #stop.  The prompt stays available, so you can keep working while it
+      # plays (e.g. change #bpm or start more sounds).
       #
-      # Each background player gets its own output, so several can play at
-      # once (on macOS, each is a separate ffmpeg process mixed by the
-      # system).  Plotting and the "Playing" header are off by default.
+      # Give a Symbol +name+ first to play in a named slot.  Running #bg again
+      # with the same name replaces the old sound in sync when the new one
+      # starts, so you can edit a line and re-run it to iterate.  Without a
+      # name, the sound gets the lowest unused number.
       #
-      # Errors during playback are printed when they happen.
+      # +:fade+ fades the sound in over that many seconds, and crossfades
+      # from a sound it replaces.
+      #
+      # Accepts a GraphNode, an Array of GraphNodes (one per channel), or a
+      # sound filename.  Everything played with #bg is mixed in one shared
+      # Session, locked to one timeline, so sequences stay in sync.  If
+      # something is already playing, the new sound starts on the next bar;
+      # pass +:at+ to change that (:now, :beat, :bar, :clip, or a note length
+      # grid; see Session#add).
+      #
+      # Errors during playback are printed and remove only the sound that
+      # failed.
       #
       # Example (bin/sound.rb):
-      #     n = bg 220.hz.ramp.at(-20.db).forever
+      #     bass = seq(C2, C2, rest, C3, C2, rest, As1, G1).n16.loop
+      #     bg :bass, bass.tone.ramp.at(1).filter(:lowpass, cutoff: 250 + bass.env(0.001, 0.012, 0, 0.012) * 4000, quality: 4).softclip(0.1, 0.5)
+      #     bg bass.transpose(12).tone.triangle.at(0.3) * bass.env    # player 1, joins on the next bar
       #     bpm 140
-      #     stop n
-      def bg(file_tone_data, **kwargs)
-        bg_mutex.synchronize do
-          @bg_players ||= {}
-          @bg_next_player = (@bg_next_player || 0) + 1
-          id = @bg_next_player
+      #     stop       # stops the last one started (player 1)
+      #     hush fade: 4    # fades everything out over 4 seconds
+      def bg(name_or_sound, sound = nil, at: nil, fade: nil)
+        name, sound = sound.nil? ? [nil, name_or_sound] : [name_or_sound, sound]
+        raise ArgumentError, ':all is reserved for stop(:all)' if name == :all
 
-          # The thread can't remove itself before it's registered, because
-          # its ensure block waits for this synchronize block to finish.
-          thread = Thread.new do
-            play(file_tone_data, quiet: true, plot: false, clear: false, **kwargs, shared_output: false)
-          ensure
-            bg_mutex.synchronize { @bg_players.delete(id) }
-          end
-          thread.name = "bg player #{id}"
-
-          @bg_players[id] = { thread: thread, description: playback_info(file_tone_data) }
-
-          id
-        end
+        Session.default.add(sound, at: at, name: name, fade: fade)
       end
 
-      # Stops the given background players (see #bg), or all background
-      # players if none are given.  Returns the numbers of players that were
-      # stopped.  Audio already sent to the sound card may play for a moment
-      # longer.
-      def stop(*ids)
-        targets = bg_mutex.synchronize {
-          players = @bg_players || {}
-          ids.empty? ? players.dup : players.slice(*ids)
-        }
+      # Stops background players (see #bg): with no arguments, the most
+      # recently started one; with names or numbers, those players; with
+      # :all, every player (see also #hush).  With +:fade+, players fade out
+      # over that many seconds instead of stopping abruptly.  Returns the
+      # names of the players that were stopped.  When nothing is left
+      # playing, the timeline pauses where it is (see SequenceMethods#seek and
+      # #rewind).
+      def stop(*names, fade: nil)
+        session = Session.default
+        return [session.remove_last(fade: fade)].compact if names.empty?
+        return session.remove(fade: fade) if names == [:all]
 
-        (ids - targets.keys).each do |id|
-          warn "No background player #{id.inspect} is playing"
+        stopped = session.remove(*names, fade: fade)
+        (names - stopped).each do |name|
+          warn "No background player #{name.inspect} is playing"
         end
-
-        targets.each_value do |p|
-          p[:thread].kill
-          p[:thread].join(5)
-        end
-
-        # A thread killed before it starts running never runs its ensure
-        # block, so remove stopped players here too.
-        bg_mutex.synchronize { targets.each_key { |id| @bg_players.delete(id) } }
-
-        targets.keys
+        stopped
       end
 
-      # Returns a Hash from background player number (see #bg) to a
+      # Stops every background player, fading out over +:fade+ seconds if
+      # given.  See #stop.
+      def hush(fade: nil)
+        stop(:all, fade: fade)
+      end
+
+      # Returns a Hash from background player name (see #bg) to a
       # description of what it is playing.
       def players
-        bg_mutex.synchronize {
-          (@bg_players || {}).transform_values { |p| p[:description] }
-        }
+        Session.default.players
+      end
+
+      # Renders +sounds+ (GraphNodes, Arrays of GraphNodes, or filenames) to
+      # an audio file as fast as possible.  All sounds start together at the
+      # beginning of a fresh timeline, at the current tempo unless +:bpm+ is
+      # given.  Rendering stops after +:bars+ or +:seconds+, or when every
+      # sound has ended.  Returns the number of seconds rendered.
+      #
+      # Build fresh graphs to render, rather than rendering graphs that are
+      # playing in the background, because graphs keep their playback state.
+      #
+      # Example (bin/sound.rb):
+      #     bass = seq(C2, C2, rest, C3).n16.loop
+      #     render '/tmp/bass.flac', bass.tone.ramp.at(1) * bass.env * 0.5, bars: 4
+      def render(filename, *sounds, bars: nil, seconds: nil, bpm: nil, channels: 2, overwrite: false, buffer_size: 800)
+        raise ArgumentError, 'Pass one or more sounds to render' if sounds.empty?
+        raise ArgumentError, 'Pass bars: or seconds:, not both' if bars && seconds
+
+        transport = Sequence::Transport.new(bpm: bpm || Sequence.transport.bpm, bar_length: Sequence.transport.bar_length)
+        output = file_output(filename, channels: channels, overwrite: overwrite)
+        session = Session.new(output: output, transport: transport, channels: channels, buffer_size: buffer_size, realtime: false, raise_errors: true)
+
+        rate = output.sample_rate
+        seconds = transport.seconds(bars.to_r * transport.bar_length) if bars
+        limit = ((seconds || MAX_RENDER_SECONDS) * rate).round
+
+        sounds.each { |s| session.add(s, at: :now) }
+
+        frames = 0
+        until frames >= limit || session.idle?
+          count = MB::M.min(buffer_size, limit - frames)
+          session.process_buffer(count)
+          frames += count
+        end
+
+        if seconds.nil? && !session.idle?
+          warn "Stopped rendering #{filename} after #{MAX_RENDER_SECONDS} seconds; pass bars: or seconds: for sounds that never end"
+        end
+
+        frames.to_f / rate
+
+      ensure
+        session&.close
       end
 
       private
-
-      # Guards the background player list for #bg, #stop, and #players.
-      def bg_mutex
-        @bg_mutex ||= Mutex.new
-      end
 
       # Plays the given filename using the default audio output returned by
       # MB::Sound.output.  The +:channels+ parameter may be used to force mono
