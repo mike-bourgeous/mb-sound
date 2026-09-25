@@ -251,6 +251,111 @@ RSpec.describe(MB::Sound::Session) do
     expect(quiet.players.keys).to eq([1])
   end
 
+  describe '#resume' do
+    it 'keeps stopped named graphs and plays the same graph again' do
+      graph = 1.constant
+      session.add(graph, name: :pad)
+      run(800)
+      session.remove(:pad)
+      expect(session.stopped.keys).to eq([:pad])
+      expect(session).to be_idle
+
+      expect(session.resume(:pad, at: :now)).to eq(:pad)
+      expect(session.stopped).to be_empty
+      expect(session.players.keys).to eq([:pad])
+      expect(run(800)[0]).to eq(1)
+    end
+
+    it 'does not keep numbered players' do
+      session.add(1.constant)
+      session.remove(1)
+      expect(session.stopped).to be_empty
+      expect(session.resume(1)).to be_nil
+    end
+
+    it 'keeps a fading graph only once the fade finishes' do
+      session.add(1.constant, name: :pad)
+      run(800)
+      session.remove(:pad, fade: 1/20r)
+      expect(session.stopped).to be_empty
+      run(9600)
+      expect(session.stopped.keys).to eq([:pad])
+    end
+
+    it 'starts on the next bar when something else is playing, and can fade in' do
+      session.add(0.constant)
+      session.add(1.constant, name: :pad)
+      run(4000)
+      session.remove(:pad)
+
+      session.resume(:pad, fade: 1/20r)
+      data = run(96000 + 4800)
+      start = 96000 - 4000
+      expect(data[start - 1]).to eq(0)
+      expect(data[start + 2400]).to be_within(0.01).of(0.5)
+      expect(data[start + 4799]).to be_within(0.01).of(1)
+    end
+
+    it 'brings looping clips back in phase with the timeline' do
+      clip = MB::Sound.grid(4, 'x...').loop # one hit per bar
+      session.add(0.constant)
+      session.add(clip.trigger, name: :click)
+      run(40000)
+      session.remove(:click)
+      run(80000)                            # stopped through the next bar line
+      session.resume(:click, at: :now)      # mid-bar
+      data = run(96000)
+      expect(nonzero(data)).to eq([96000 * 2 - 120000])
+    end
+
+    it 'resumes the most recently stopped graph with no name' do
+      session.add(1.constant, name: :a)
+      session.add(2.constant, name: :b, at: :now)
+      session.remove(:a)
+      session.remove(:b)
+      expect(session.resume).to eq(:b)
+      expect(session.resume).to eq(:a)
+      expect(session.resume).to be_nil
+    end
+
+    it 'does nothing if the graph is already playing' do
+      session.add(1.constant, name: :pad)
+      session.remove(:pad)
+      session.resume(:pad)
+      expect(session.resume(:pad)).to be_nil
+    end
+
+    it 'does not keep graphs that end or versions that were replaced' do
+      session.add(MB::Sound.grid(16, 'x').trigger, name: :hit)
+      run(9600)
+      expect(session.stopped).to be_empty
+
+      session.add(1.constant, name: :pad)
+      run(800)
+      session.add(2.constant, name: :pad, at: :now)
+      run(800)
+      session.remove(:pad)
+      session.resume(:pad, at: :now)
+      expect(run(800)[0]).to eq(2)
+    end
+
+    it 'drops a stopped graph when a new graph is added under its name' do
+      session.add(1.constant, name: :pad)
+      session.remove(:pad)
+      session.add(2.constant, name: :pad)
+      expect(session.stopped).to be_empty
+    end
+
+    it 'can forget stopped graphs' do
+      session.add(1.constant, name: :a)
+      session.add(1.constant, name: :b, at: :now)
+      session.remove
+      expect(session.forget(:a, :nope)).to eq([:a])
+      expect(session.forget).to eq([:b])
+      expect(session.stopped).to be_empty
+    end
+  end
+
   describe 'taps' do
     it 'calls taps with each new mix buffer until removed' do
       seen = []
