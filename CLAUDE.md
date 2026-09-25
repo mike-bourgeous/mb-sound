@@ -99,6 +99,8 @@ Two reverb implementations coexist:
 - Use non-fast-forward merge commits when features are complete
 - The primary/trunk branch is called `master-ai` (upstream GitHub trunk is `master`; the old unconnected local history is tagged `local-master-pre-reconcile`)
 - Local development; no push to remote
+- New worktrees go in `.claude/worktrees/` and need `bundle exec rake compile` before specs run
+- Before merging, check which branch the main checkout (`/app`) is on; the user switches branches there
 
 ## Key Conventions
 
@@ -107,3 +109,25 @@ Two reverb implementations coexist:
 - The `bin/` directory contains ~65 example/utility scripts demonstrating synthesis, effects, MIDI, and plotting
 - Docker support via `Dockerfile` and `dock.sh` for containerized development
 - `Numo::NArray` for all sound data handling (choose numeric precision and real/complex as needed)
+
+## Working Notes (lessons learned)
+
+### Verifying audio without speakers
+
+The container has no audio device, so check sound-producing code by rendering it: `MB::Sound.render('file.flac', graph, bars: 4)` or loops of `node.sample(800)`, then look at peak levels, silent stretches, and exact sample offsets of note edges.  Use `NullOutput.new(..., sleep: false)` and `Session.new(realtime: false)` with `#process_buffer` for fast, deterministic tests.  Leave listening tests to the user (they test on a Mac) and give them copy-pasteable snippets with expected results.
+
+### Gotchas
+
+- `#sample` usually returns a reused buffer; `.dup` each buffer before collecting several of them (several false "bugs" came from forgetting this).
+- Oscillators (`Tone`, `noise`) default to amplitude 0.1, and `*` only raises its right operand to full level, so `tone * env` is 10x quieter than `env * tone`.  Use `.at(...)` explicitly in examples and check levels by rendering.
+- `40.hz` is an oscillator, not a constant; use `40.constant` for fixed values in arithmetic.
+- Before adding `bin/sound.rb` commands, check for collisions with `MB::Sound` methods and Pry commands (`Pry::Commands`; e.g. `reset` and `watch` are taken).
+- macOS playback goes through ffmpeg's audiotoolbox output with `FFMPEGOutput realtime: true` and `BackgroundOutput`; expect about 0.4s latency.
+
+### Process
+
+- In multi-step shell scripts, use `set -euo pipefail` and don't pipe away exit codes; a batch loop that kept going after a failure once produced broken commits.
+- Keep command output small (grep/head/tail, Read with offsets); large tool output fills the context quickly.
+- Measure before explaining a failure; the first theory for the macOS latency problem was wrong, and a small experiment found the real cause.
+- The user often says "note for later": record those in memory and the issue #64 backlog, and implement them only after an explicit go-ahead.
+- Run the full suite once per change unless the user asks for affected specs only.
