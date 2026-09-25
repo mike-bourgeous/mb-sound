@@ -17,6 +17,10 @@ module MB
     # replaces the old graph, switching over exactly at the new graph's start
     # time, so re-running the same line swaps in a new version in sync.
     #
+    # Graphs with Symbol names are kept after they are stopped (see #remove),
+    # so they can be brought back unchanged with #resume, e.g. to fade a
+    # track out and back in.
+    #
     # An error in one graph removes that graph and prints the error; other
     # graphs keep playing.
     class Session
@@ -26,10 +30,11 @@ module MB
       # +gain+ is the current fade level (0..1), changing by +gain_step+ per
       # frame.  +fade_in+ and +fade_out+ are fade lengths in bars; a player
       # with a +stop_at+ time and a +fade_out+ fades out from +stop_at+
-      # instead of stopping there.
+      # instead of stopping there.  +keep+ is true if the player should be
+      # kept for #resume once it stops.
       Player = Struct.new(
         :serial, :name, :input, :description, :start, :stop_at, :clip_nodes,
-        :started, :slow_warned, :gain, :gain_step, :fade_in, :fade_out,
+        :started, :slow_warned, :gain, :gain_step, :fade_in, :fade_out, :keep,
         keyword_init: true
       ) do
         # True unless this player is being replaced or stopped.
@@ -102,6 +107,7 @@ module MB
         @raise_errors = raise_errors
 
         @players = {}
+        @stopped = {}
         @taps = []
         @order = []
         @next_serial = 0
@@ -141,6 +147,7 @@ module MB
         name = @mutex.synchronize {
           name ||= (1..).find { |i| !names_in_use.include?(i) }
           start = launch_time(at, clip_nodes)
+          @stopped.delete(name)
 
           replacing = @players.each_value.any? { |p| p.name == name && p.current? && p.started }
           fade = @fade_in unless explicit_fade || replacing
@@ -156,24 +163,14 @@ module MB
             end
           end
 
-          @next_serial += 1
-          @players[@next_serial] = Player.new(
-            serial: @next_serial,
+          start_player(
             name: name,
             input: input,
             description: shorten(description || MB::Sound.send(:playback_info, sound).to_s),
-            start: start,
             clip_nodes: clip_nodes,
-            started: false,
-            slow_warned: false,
-            gain: fade ? 0.0 : 1.0,
-            gain_step: 0.0,
-            fade_in: fade
+            start: start,
+            fade: fade
           )
-
-          @order.delete(name)
-          @order << name
-          name
         }
 
         if @realtime
@@ -187,6 +184,8 @@ module MB
       # given), including graphs they were replacing.  Players that have
       # started fade out over +:fade+ bars first (#fade_out bars if not given;
       # 0 or false to stop right away).  Returns the names that were removed.
+      #
+      # Players with Symbol names are kept once they stop, for #resume.
       def remove(*names, fade: nil)
         fade = fade.nil? ? @fade_out : bars_or_nil(fade)
 
@@ -195,6 +194,8 @@ module MB
           removed = names.select { |n|
             matches = @players.values.select { |p| p.name == n }
             matches.each do |p|
+              p.keep = true if p.current? && p.name.is_a?(Symbol)
+
               if fade && p.started
                 # Fade from wherever the player is now, even if it was already
                 # being replaced or faded
@@ -203,12 +204,63 @@ module MB
                 p.gain_step = 0 if p.gain_step > 0
               else
                 @players.delete(p.serial)
+                keep_stopped(p)
               end
             end
             matches.any?
           }
           @order -= removed
           removed
+        }
+      end
+
+      # Plays a stopped graph again (see #remove), with the same launch and
+      # fade options as #add.  With no +name+, resumes the most recently
+      # stopped graph.  Returns the name, or nil if there is nothing to
+      # resume under that name (or it is already playing).
+      #
+      # Looping clips come back in phase with the timeline.  Other nodes
+      # keep their state from when they stopped, so e.g. a delay or reverb
+      # may replay the start of an old tail.
+      def resume(name = nil, at: nil, fade: nil)
+        fade = fade.nil? ? @fade_in : bars_or_nil(fade)
+
+        name = @mutex.synchronize {
+          name ||= @stopped.keys.last
+          p = @stopped[name]
+          next nil if p.nil? || @players.each_value.any? { |o| o.name == name && o.current? }
+
+          @stopped.delete(name)
+          start_player(
+            name: name,
+            input: p.input,
+            description: p.description,
+            clip_nodes: p.clip_nodes,
+            start: launch_time(at, p.clip_nodes),
+            fade: fade
+          )
+        }
+
+        if name && @realtime
+          output
+          start_thread
+        end
+        name
+      end
+
+      # Returns a Hash from name to description of stopped graphs that can be
+      # resumed (see #resume), most recently stopped last.
+      def stopped
+        @mutex.synchronize { @stopped.transform_values(&:description) }
+      end
+
+      # Discards the named stopped graphs (all of them if no names are
+      # given), so they can no longer be resumed.  Returns the names that
+      # were discarded.
+      def forget(*names)
+        @mutex.synchronize {
+          names = @stopped.keys if names.empty?
+          names.select { |n| @stopped.delete(n) }
         }
       end
 
@@ -334,16 +386,50 @@ module MB
         1.0 / (@transport.seconds(bars * @transport.bar_length) * rate)
       end
 
+      # Creates and registers a Player.  Called with @mutex held.  Returns
+      # the name.
+      def start_player(name:, input:, description:, clip_nodes:, start:, fade:)
+        @next_serial += 1
+        @players[@next_serial] = Player.new(
+          serial: @next_serial,
+          name: name,
+          input: input,
+          description: description,
+          start: start,
+          clip_nodes: clip_nodes,
+          started: false,
+          slow_warned: false,
+          gain: fade ? 0.0 : 1.0,
+          gain_step: 0.0,
+          fade_in: fade,
+          keep: false
+        )
+
+        @order.delete(name)
+        @order << name
+        name
+      end
+
+      # Keeps a stopped player for #resume if it was marked to be kept.
+      # Called with @mutex held.
+      def keep_stopped(p)
+        return unless p.keep
+        @stopped.delete(p.name)
+        @stopped[p.name] = p
+      end
+
       # Names of players that are playing, waiting to start, or fading out.
       # Called with @mutex held.
       def names_in_use
         @players.each_value.map(&:name).uniq
       end
 
-      # Removes one player by serial number, e.g. when it ends.
-      def retire(p)
+      # Removes one player by serial number, e.g. when it ends.  If +keep+ is
+      # true and the player was stopped with #remove, it is kept for #resume.
+      def retire(p, keep: false)
         @mutex.synchronize {
           @players.delete(p.serial)
+          keep_stopped(p) if keep
           @order.delete(p.name) unless @players.each_value.any? { |o| o.name == p.name }
         }
       end
@@ -452,7 +538,11 @@ module MB
         ended = data.any? { |d| d.nil? || d.length < frames }
         cut = p.stop_at && p.stop_at < to && !p.fade_out
         faded = p.gain <= 0 && p.gain_step < 0
-        retire(p) if ended || cut || faded
+        if ended || cut
+          retire(p)
+        elsif faded
+          retire(p, keep: true)
+        end
 
       rescue => e
         retire(p)

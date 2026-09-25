@@ -185,6 +185,41 @@ module MB
         Session.default.remove(fade: 0)
       end
 
+      # Brings back a named background player that was stopped (see #bg and
+      # #stop), unchanged, e.g. to fade a track back in.  With no name,
+      # resumes the most recently stopped player.  Like #bg, it starts on the
+      # next bar and fades in over half a bar by default (+:at+ and +:fade+
+      # work the same way).  Returns the name, or nil if there was nothing to
+      # resume.
+      #
+      # Only players with Symbol names are kept after stopping; see
+      # #stopped and #forget.
+      #
+      # Example (bin/sound.rb):
+      #     bg :pad, pad_graph
+      #     stop :pad      # fades out over four bars
+      #     resume :pad    # fades the same graph back in on the next bar
+      def resume(name = nil, at: nil, fade: nil)
+        resumed = Session.default.resume(name, at: at, fade: fade)
+        if resumed.nil?
+          what = name ? "#{name.inspect} (not stopped, or already playing)" : '(nothing has been stopped)'
+          warn "No background player to resume #{what}"
+        end
+        resumed
+      end
+
+      # Returns a Hash from name to description of stopped background
+      # players that can be resumed (see #resume).
+      def stopped
+        Session.default.stopped
+      end
+
+      # Discards stopped background players so they can't be resumed (all of
+      # them if no names are given).  Returns the names discarded.
+      def forget(*names)
+        Session.default.forget(*names)
+      end
+
       # Plots the background mix (see #bg) live until you press Ctrl-C, then
       # returns to the prompt while playback continues.  Each frame plots
       # the newest buffer of the mix with level meters, as fast as the

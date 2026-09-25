@@ -172,6 +172,29 @@ RSpec.describe(MB::Sound::PlaybackMethods) do
     end
   end
 
+  describe '#resume, #stopped, and #forget' do
+    after(:each) do
+      MB::Sound::Session.default.close
+      MB::Sound.rewind
+    end
+
+    it 'resumes a stopped named player' do
+      MB::Sound.bg(:pad, 220.hz.sine.forever)
+      MB::Sound.stop(:pad, fade: 0)
+      expect(MB::Sound.stopped.keys).to eq([:pad])
+      expect(MB::Sound.resume(:pad)).to eq(:pad)
+      expect(MB::Sound.players.keys).to eq([:pad])
+      expect(MB::Sound.forget).to eq([])
+    end
+
+    it 'warns when there is nothing to resume' do
+      expect(MB::Sound).to receive(:warn).with(/nothing has been stopped/)
+      expect(MB::Sound.resume).to be_nil
+      expect(MB::Sound).to receive(:warn).with(/:nope/)
+      expect(MB::Sound.resume(:nope)).to be_nil
+    end
+  end
+
   describe '#visualize' do
     after(:each) do
       MB::Sound::Session.default.close
