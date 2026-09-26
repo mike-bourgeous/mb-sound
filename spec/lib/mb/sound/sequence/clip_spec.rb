@@ -226,4 +226,52 @@ RSpec.describe(MB::Sound::Sequence::Clip) do
       expect(other).not_to eq(a)
     end
   end
+
+  describe '#source, #lineage, and #rederive' do
+    let(:bass) { MB::Sound.seq(MB::Sound::C2, MB::Sound::E2).n8.loop }
+    let(:other) { MB::Sound.seq(MB::Sound::D2).n4.loop }
+
+    it 'remembers the clip a transform was made from' do
+      up = bass.transpose(12)
+      expect(up.source).to equal(bass)
+      lineage = up.transpose(1).lineage
+      expect(lineage[1]).to equal(up)
+      expect(lineage[2]).to equal(bass)
+    end
+
+    it 'repeats a transform on another clip' do
+      up = bass.transpose(12).legato(0.5)
+      steps = up.lineage.take_while { |c| !c.equal?(bass) }.reverse
+      result = steps.reduce(other) { |c, step| step.rederive(c) }
+      expect(times(result)).to eq([[MB::Sound::D3.number, 0, 1/8r]])
+      expect(result).to be_looping
+    end
+
+    it 'tracks transforms and their aliases on Clips and Seqs' do
+      clip = bass | c4.n4 # a plain Clip
+      [clip, c4.n4].each do |c|
+        expect((c * 2).source).to equal(c)
+        expect(c.dotted.source).to equal(c)
+        expect(c.vel(0.5).source).to equal(c)
+        expect(c.stretch(2).source).to equal(c)
+      end
+      expect((clip & c4.n4).source).to equal(clip)
+      expect(clip.loop.source).to equal(clip)
+    end
+
+    it 'rebuilds synth voices from another clip' do
+      chords = MB::Sound.seq(MB::Sound::A2, MB::Sound::F2, MB::Sound::C3).n1.loop
+      voices = chords.voice_clips(2)
+      expect(voices.map(&:source)).to all(equal(chords))
+
+      four = MB::Sound.seq(MB::Sound::A2, MB::Sound::C3, MB::Sound::E3, MB::Sound::G3).n1.loop
+      expect(voices[1].rederive(four).events.map(&:value)).to eq([MB::Sound::C3.number, MB::Sound::G3.number])
+    end
+
+    it 'has no source for clips made directly' do
+      expect(bass.source).not_to be_nil # made by .loop
+      expect(c4.n4.source).to be_nil
+      expect { c4.n4.rederive(bass) }.to raise_error(ArgumentError, /wasn't made from another clip/)
+    end
+  end
 end

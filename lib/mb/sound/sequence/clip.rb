@@ -35,6 +35,35 @@ module MB
         # play in each loop cycle.
         attr_reader :seed
 
+        # The clip this clip was made from by a transform like #transpose,
+        # #legato, or #loop (or a voice of #synth), or nil.  Session#swap uses
+        # this to rebuild derived clips (e.g. a transposed layer) from a
+        # replacement clip (see #rederive).
+        attr_reader :source
+
+        # Transforms whose results remember their #source (see
+        # .track_derivations).
+        DERIVATIONS = [
+          :loop, :|, :&, :repeat, :*, :fill, :truncate, :roll, :ratchet, :stretch,
+          :d, :dotted, :dd, :double_dotted, :t, :triplet,
+          :legato, :staccato, :transpose, :vel,
+        ].freeze
+
+        # Wraps the named transform methods of this class so the clips they
+        # return remember the clip and transform they came from (see #source
+        # and #rederive).
+        def self.track_derivations(*names)
+          prepend(Module.new {
+            names.each do |name|
+              define_method(name) do |*args, **kwargs, &block|
+                super(*args, **kwargs, &block).tap { |c|
+                  c.derive_from(self, name, args, kwargs) if c.is_a?(Clip) && !c.equal?(self)
+                }
+              end
+            end
+          })
+        end
+
         # Converts +obj+ to a Clip: Clips are returned as-is, Notes, Numerics,
         # and nil (a rest) become one-step Seqs.
         def self.from(obj)
@@ -376,7 +405,30 @@ module MB
 
           Array.new(count) { |v|
             clip.with_events(clip.events.select.with_index { |_, idx| idx % count == v })
+              .derive_from(self, :voice_clips, [count, v], {})
           }
+        end
+
+        # Returns this clip, the clip it was made from (see #source), that
+        # clip's source, and so on.
+        def lineage
+          list = [self]
+          list << list.last.source while list.last.source
+          list
+        end
+
+        # Applies the transform that made this clip from its #source to
+        # +clip+ instead, e.g. returning clip.transpose(12) for a clip made
+        # with transpose(12).  Raises an error for clips without a source.
+        def rederive(clip)
+          raise ArgumentError, "#{self} wasn't made from another clip" unless @derivation
+          name, args, kwargs = @derivation
+
+          if name == :voice_clips
+            clip.voice_clips(args[0])[args[1]]
+          else
+            clip.public_send(name, *args, **kwargs)
+          end
         end
 
         def to_s
@@ -388,6 +440,14 @@ module MB
         end
 
         protected
+
+        # Records that this clip was made by calling +name+ on +source+ with
+        # +args+ and +kwargs+ (see #source).  Returns self.
+        def derive_from(source, name, args, kwargs)
+          @source = source
+          @derivation = [name, args.freeze, kwargs.freeze].freeze
+          self
+        end
 
         # Returns a Clip with the given +events+ that keeps this clip's
         # looping and seed.
@@ -433,6 +493,8 @@ module MB
 
           with_events(map_events)
         end
+
+        track_derivations(*DERIVATIONS)
       end
     end
   end

@@ -149,6 +149,9 @@ module MB
         def map_steps
           Seq.new(@steps.map { |s| r = yield s; r.is_a?(Hash) ? Step.new(**r) : r }, seed: @seed)
         end
+
+        # Seq's own versions of Clip transforms also remember their source.
+        track_derivations(:repeat, :*, :stretch, :legato, :transpose, :vel)
       end
     end
   end
