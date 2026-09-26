@@ -18,4 +18,40 @@ RSpec.describe(MB::Sound::GraphNode::GraphNodeArrayMixin) do
       expect([-1.constant, -2.constant].as_input.read(3)).to eq([Numo::SFloat[-1,-1,-1], Numo::SFloat[-2,-2,-2]])
     end
   end
+
+  describe '#reverb' do
+    it 'raises an error for empty arrays or elements that are not graph nodes' do
+      expect { [].reverb }.to raise_error(ArgumentError, /GraphNodes/)
+      expect { [1.constant, 2].reverb }.to raise_error(ArgumentError, /GraphNodes/)
+    end
+
+    it 'returns one output per input by default' do
+      out = [1.constant.for(0.1), -1.constant.for(0.1)].reverb(:hall)
+      expect(out.length).to eq(2)
+      expect(out).to all(be_a(MB::Sound::GraphNode))
+    end
+
+    it 'accepts a different number of output channels' do
+      expect([1.constant, 1.constant].reverb(:room, output_channels: 3).length).to eq(3)
+      expect([1.constant, 1.constant].reverb(:room, output_channels: 1).length).to eq(1)
+    end
+
+    it 'mixes every input into each output' do
+      l, r = [0.5.constant.for(0.05), 0.constant.for(0.05)].reverb(:hall, dry: 0)
+      data = [l, r].map { |c| Array.new(20) { c.sample(800)&.dup }.compact.reduce(:concatenate) }
+      expect(data[1].abs.max).to be > 0.001
+    end
+
+    it 'lets the tail ring out after finite inputs end' do
+      l, r = [0.5.constant.for(0.05), 0.5.constant.for(0.05)].reverb(:hall)
+      frames = [0, 0]
+      200.times do
+        data = [l, r].map { |c| c.sample(800) }
+        break if data.any? { |d| d.nil? || d.empty? }
+        data.each_with_index { |d, i| frames[i] += d.length }
+      end
+      expect(frames).to all(be > 48000)
+      expect(frames[0]).to eq(frames[1])
+    end
+  end
 end

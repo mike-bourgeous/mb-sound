@@ -76,14 +76,11 @@ module MB::Sound
     end
 
     # Breakdown: drums drop out, the bass fades, the pad carries on in a
-    # big reverb (mono in, stereo out, added to the dry stereo mix)
+    # big stereo reverb
     at_bar(17) do
       stop :kick, :snare, :hats, fade: 0
       stop :bass, fade: 2
-      master do |l, r|
-        wet = (l + r).reverb(:hall, output_channels: 2, dry: 0, wet: -6.db)
-        [l + wet[0], r + wet[1]].map(&glue)
-      end
+      master { |l, r| [l, r].reverb(:hall, wet: -6.db).map(&glue) }
     end
 
     # Everything comes back dry, while the reverb's tail rings out
