@@ -112,6 +112,60 @@ RSpec.describe(MB::Sound::Sequence::Clip) do
     end
   end
 
+  describe '#reverse' do
+    it 'plays events backward, mirroring the rhythm' do
+      c = MB::Sound.seq(c4, e4, MB::Sound::G4.n4, nil).n8.reverse
+      expect(times(c)).to eq([[67, 1/8r, 1/4r], [64, 3/8r, 1/8r], [60, 1/2r, 1/8r]])
+      expect(c.length).to eq(5/8r)
+    end
+
+    it 'keeps chords together, looping, and events that hang over the end inside the clip' do
+      c = (MB::Sound.seq(c4.n4) & MB::Sound.seq(e4.n4)).loop.reverse
+      expect(times(c)).to contain_exactly([60, 0, 1/4r], [64, 0, 1/4r])
+      expect(c).to be_looping
+      long = MB::Sound::Sequence::Event.new(start: 0r, length: 1/4r, value: 60, velocity: 0.75)
+      expect(times(MB::Sound::Sequence::Clip.new([long], length: 1/8r).reverse)).to eq([[60, 0, 1/4r]])
+    end
+
+    it 'is also available as retrograde' do
+      expect(times(MB::Sound.seq(c4, e4).n8.retrograde)).to eq([[64, 0, 1/8r], [60, 1/8r, 1/8r]])
+    end
+  end
+
+  describe '#permute' do
+    let(:notes) { MB::Sound.seq(c4, e4.n4, MB::Sound::G4, MB::Sound::B4.n8.vel(1)).n8 }
+
+    it 'moves notes to other events in a given order, keeping the rhythm' do
+      c = notes.permute([3, 2, 0, 1])
+      expect(times(c)).to eq([[71, 0, 1/8r], [67, 1/8r, 1/4r], [60, 3/8r, 1/8r], [64, 1/2r, 1/8r]])
+      expect(c.events.map(&:velocity)).to eq([1, 0.75, 0.75, 0.75])
+    end
+
+    it 'shuffles repeatably from the seed' do
+      a = notes.permute.events.map(&:value)
+      expect(notes.permute.events.map(&:value)).to eq(a)
+      expect(a.sort).to eq([60, 64, 67, 71])
+      others = (1..10).map { |s| notes.permute(seed: s).events.map(&:value) }
+      expect(others.uniq.length).to be > 1
+      expect(notes.shuffle(seed: 3).events.map(&:value)).to eq(notes.permute(seed: 3).events.map(&:value))
+    end
+
+    it 'rejects orders that are not permutations' do
+      expect { notes.permute([0, 0, 1, 2]) }.to raise_error(ArgumentError, /indices 0 to 3/)
+      expect { notes.permute([0, 1]) }.to raise_error(ArgumentError, /indices/)
+    end
+
+    it 'remembers its source, and replays on another clip' do
+      c = notes.loop
+      expect(c.reverse.source).to equal(c)
+      p = c.permute([1, 0, 2, 3])
+      expect(p.source).to equal(c)
+      other = MB::Sound.seq(MB::Sound::D4, MB::Sound::F4, MB::Sound::A4, MB::Sound::C5).n8.loop
+      expect(p.rederive(other).events.map(&:value)).to eq([65, 62, 69, 72])
+      expect(c.reverse.rederive(other).events.map(&:value)).to eq([72, 69, 65, 62])
+    end
+  end
+
   describe '#loop' do
     it 'returns a looping copy' do
       c = c4.n8.loop

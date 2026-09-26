@@ -47,6 +47,7 @@ module MB
           :loop, :|, :&, :repeat, :*, :fill, :truncate, :roll, :ratchet, :stretch,
           :d, :dotted, :dd, :double_dotted, :t, :triplet,
           :legato, :staccato, :transpose, :vel,
+          :reverse, :retrograde, :permute, :shuffle,
         ].freeze
 
         # Wraps the named transform methods of this class so the clips they
@@ -246,10 +247,54 @@ module MB
           Duration.rational(fraction)
         end
 
+        # Returns +order+ if it is a permutation of 0...+count+ (raising an
+        # error if not), or a random permutation from +seed+ if +order+ is
+        # nil.  Used by #permute.
+        def self.check_permutation(order, count, seed)
+          return (0...count).to_a.shuffle(random: Random.new(seed)) if order.nil?
+
+          unless order.is_a?(Array) && order.sort == (0...count).to_a
+            raise ArgumentError, "Order must be an Array of the indices 0 to #{count - 1}, each once (got #{order.inspect})"
+          end
+          order
+        end
+
         # Returns a clip with every event's value shifted by +semitones+.
         def transpose(semitones)
           map_clip { |e| e.with(value: e.value + semitones) }
         end
+
+        # Returns a clip that plays this clip backward: each event ends where
+        # it used to start, measured from the end of the clip, so the rhythm
+        # is mirrored too (a rest at the end moves to the start).  Also
+        # available as #retrograde.
+        #
+        #     seq(C4, E4, G4.n4).n8.reverse   # G4 (quarter), E4, C4
+        def reverse
+          map_clip { |e| e.with(start: MB::M.max(@length - e.end_time, 0r)) }
+        end
+        alias retrograde reverse
+
+        # Returns a clip with the same rhythm but its notes (values,
+        # velocities, and probabilities) moved to other events.  Also
+        # available as #shuffle.
+        #
+        # Pass an Array with the index of the note to play at each event
+        # (in start order), e.g. [2, 0, 1], or nothing to shuffle randomly.
+        # Random orders are repeatable: they come from +:seed+, which
+        # defaults to the clip's seed, so pass different seeds to try other
+        # orders.
+        #
+        #     seq(C4, E4, G4, B4).n8.permute([3, 2, 0, 1])   # B4, G4, C4, E4
+        #     seq(C4, E4, G4, B4).n8.permute(seed: 3)
+        def permute(order = nil, seed: @seed)
+          order = Clip.check_permutation(order, @events.length, seed)
+          with_events(@events.each_with_index.map { |slot, idx|
+            note = @events[order[idx]]
+            slot.with(value: note.value, velocity: note.velocity, probability: note.probability)
+          })
+        end
+        alias shuffle permute
 
         # Returns a clip with every event's velocity set to +velocity+ (0..1).
         def vel(velocity)
