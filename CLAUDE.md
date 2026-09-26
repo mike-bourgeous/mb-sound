@@ -25,7 +25,7 @@ bundle exec rake                  # Default task (runs spec)
 bin/sound.rb                      # Launch interactive Pry console with MB::Sound context
 ```
 
-Note: run the test suite ONCE per change and save its output for processing, rather than running the test suite repeatedly with different `grep` pipes or options.
+Testing: run affected specs while working, and the full suite (about 6-7 minutes) before and after each merge, or more often for good reason.  Save suite output to a file and grep it instead of rerunning.  Run one spec process at a time; concurrent runs cause spurious failures (maybe SimpleCov or fixed-name tmp files).
 
 System dependencies (apt): `ffmpeg gnuplot-qt libsamplerate0-dev libjack-dev graphviz`
 
@@ -42,7 +42,7 @@ play 123.hz.triangle.at(-20.db).for(0.5)
 play 123.hz.fm(369.hz.at(1000)).softclip.filter(150.hz.highpass(quality: 4))
 ```
 
-The DSL methods themselves (`#filter`, `#delay`, `#softclip`, arithmetic operators, etc.) live in topic modules included by `GraphNode`, in `lib/mb/sound/graph_node/*_methods.rb` (`RoutingMethods`, `ArithmeticMethods`, `SynthesisMethods`, `ResampleMethods`, `FilterMethods`, `DelayMethods`, `DistortionMethods`, `DebugMethods`, `DurationMethods`); `graph_node.rb` keeps naming, graph traversal, and shared private helpers.
+The DSL methods (`#filter`, `#delay`, `#softclip`, arithmetic operators, etc.) live in topic modules included by `GraphNode`, in `lib/mb/sound/graph_node/*_methods.rb`; `graph_node.rb` keeps naming, graph traversal, and shared private helpers.
 
 Graph nodes maintain input/output relationships and support traversal via the `Traversable` mixin. Key node types live in `lib/mb/sound/graph_node/` (tone, noise, filter, resample, quantize, MIDI, etc.).
 
@@ -54,7 +54,10 @@ Graph nodes maintain input/output relationships and support traversal via the `T
 
 `MB::Sound` extends several method modules that provide the top-level API available in `bin/sound.rb`:
 - `IOMethods` - File read/write via ffmpeg
-- `PlaybackMethods` - `play`, `input`, real-time audio; `bg` / `stop` / `outro` (alias `fadeout`) / `panic` / `players` / `resume` / `stopped` / `forget` / `visualize` (alias `vis`) play and plot sounds in the background through one shared `Session` (`lib/mb/sound/session.rb`) that mixes every player in a single render loop locked to the sequence timeline; `render` runs a `Session` into a file; `swap` changes the clips a player plays without rebuilding its graph; `master` (alias `master_fx`) sets master effects on the session mix (see Master effects below)
+- `PlaybackMethods` - `play`, `input`, real-time audio, plus the background session:
+  - `bg` / `stop` / `outro` (alias `fadeout`) / `panic` / `players` / `resume` / `stopped` / `forget` play sounds in the background through one shared `Session` (`lib/mb/sound/session.rb`) that mixes every player in a single render loop locked to the sequence timeline
+  - `swap` changes the clips a player plays without rebuilding its graph; `master` (alias `master_fx`) sets master effects on the mix (see Sequences and Master effects below)
+  - `visualize` (alias `vis`) plots the mix live; `render` runs a `Session` into a file
 - `ScheduleMethods` - `at_bar` (alias `on_bar`) / `after` / `every` / `scheduled` / `cancel` run blocks at bars on the `Session` timeline; `bg`/`stop`/`resume`/`bpm` inside them take effect exactly at the scheduled time (see `bin/songs/scheduled_song.rb`)
 - `PlotMethods` - Terminal/gnuplot visualization
 - `FFTMethods` - Spectral analysis
@@ -72,10 +75,10 @@ Graph nodes maintain input/output relationships and support traversal via the `T
 
 ### Reverbs
 
-Two reverb implementations coexist:
+Two reverb implementations coexist; use `#reverb` in most cases:
 
-- `GraphNode::Reverb` / `#reverb` (`lib/mb/sound/graph_node/reverb.rb`, `bin/effects/reverb.rb`) - the original from the reverb video; preset-based (`:room`, `:hall`, `:space`, ...), with visualizable internals.
-- `GraphNode::FdnReverb` / `#fdn_reverb` (`lib/mb/sound/graph_node/fdn_reverb.rb`, `bin/effects/fdn_reverb.rb`) - a clean-room implementation written with Claude Code; parameterized by `room_size`, `decay`, and `damping`, with seeded non-harmonic delays.
+- `GraphNode::Reverb` / `#reverb` (`lib/mb/sound/graph_node/reverb.rb`) - the original from the reverb video; presets (`:room`, `:hall`, `:space`, ...).  `[l, r].reverb(:hall)` takes one input per Array element.  Stereo cost: `:hall` ~18% of realtime, `:space` ~55% (too heavy live on the user's laptop).
+- `GraphNode::FdnReverb` / `#fdn_reverb` - an experiment (clean-room, by Claude Code) with `room_size`/`decay`/`damping`; ~70% of realtime each, too slow live; may be removed once `#reverb` gets similar parameters.
 
 ### Sequences
 
@@ -85,7 +88,7 @@ Two reverb implementations coexist:
 
 ### Master effects
 
-`Session#master` (`lib/mb/sound/session/master.rb`, console `master { |mix| mix.softclip }`) runs the whole mix through a chain built on `GraphNode::MixSource` channels (one param = per channel, N params = all channels; `master nil` bypasses). New chains start at `bg`-style launch points; by default the old chain "spills over" (fed silence from the switch sample so tails ring out, dropped after 1s below -90dB or 10s), `fade:` crossfades, `fade: 0` cuts (also used when the render load is over 60%). Chains keep processing while idle, `panic` rebuilds the chain to clear tails, and `render` adds the tail after the last player (10s cap). Nodes that change the sample count (`resample`, `oversample`) can't be used in a master chain yet. `fdn_reverb` is too slow for a live master chain (about 70% of realtime per instance); a stereo-in `[l, r].reverb(:hall)` (`GraphNodeArrayMixin#reverb`: one reverb input per Array element, same number of outputs by default) costs about 18%, and `:space` about 55% (too heavy live on the user's laptop).
+`Session#master` (`lib/mb/sound/session/master.rb`, console `master { |mix| mix.softclip }`) runs the whole mix through a chain built on `GraphNode::MixSource` channels (one param = per channel, N params = all channels; `master nil` bypasses). New chains start at `bg`-style launch points; by default the old chain "spills over" (fed silence from the switch sample so tails ring out, dropped after 1s below -90dB or 10s), `fade:` crossfades, `fade: 0` cuts (also used when the render load is over 60%). Chains keep processing while idle, `panic` rebuilds the chain to clear tails, and `render` adds the tail after the last player (10s cap). Nodes that change the sample count (`resample`, `oversample`) can't be used in a master chain yet. See Reverbs above for which reverbs are light enough for a live master chain.
 
 ### MIDI
 
@@ -106,13 +109,12 @@ Two reverb implementations coexist:
 - The primary/trunk branch is called `master-ai` (upstream GitHub trunk is `master`; the old unconnected local history is tagged `local-master-pre-reconcile`)
 - Local development; no push to remote
 - New worktrees go in `.claude/worktrees/` and need `bundle exec rake compile` before specs run
-- Before merging, check which branch the main checkout (`/app`) is on; the user switches branches there
+- Before merging, check which branch the main checkout (`/app`) is on; the user switches branches there.  If `/app` isn't on `master-ai`, merge in the feature's worktree (`git checkout master-ai` there) instead of switching `/app`.  Write merge messages to a file for `git merge -F file` (`-F -` doesn't read stdin).
 
 ## Key Conventions
 
 - Ruby 3.4+ recommended (gemspec requires 3.2+); the container uses Ruby 4.0
 - Tests use RSpec (configured in `.rspec`)
-- The `bin/` directory contains ~65 example/utility scripts demonstrating synthesis, effects, MIDI, and plotting
 - Docker support via `Dockerfile` and `dock.sh` for containerized development
 - `Numo::NArray` for all sound data handling (choose numeric precision and real/complex as needed)
 
@@ -120,20 +122,22 @@ Two reverb implementations coexist:
 
 ### Verifying audio without speakers
 
-The container has no audio device, so check sound-producing code by rendering it: `MB::Sound.render('file.flac', graph, bars: 4)` or loops of `node.sample(800)`, then look at peak levels, silent stretches, and exact sample offsets of note edges.  Use `NullOutput.new(..., sleep: false)` and `Session.new(realtime: false)` with `#process_buffer` for fast, deterministic tests.  Leave listening tests to the user (they test on a Mac) and give them copy-pasteable snippets with expected results.
+The container has no audio device, so check sound-producing code by rendering it: `MB::Sound.render('file.flac', graph, bars: 4)` or loops of `node.sample(800)`, then look at peak levels, silent stretches, and exact sample offsets of note edges.  Use `NullOutput.new(..., sleep: false)` and `Session.new(realtime: false)` with `#process_buffer` for fast, deterministic tests.  To check that events happened (e.g. a swap landed on its bar), trace internal state from a scheduled block; spectral checks of the mix are easily fooled by other parts.  Leave listening to the user (on a Mac) with copy-pasteable snippets and expected results, and keep good snippets in demo script header comments.
 
 ### Gotchas
 
 - `#sample` usually returns a reused buffer; `.dup` each buffer before collecting several of them (several false "bugs" came from forgetting this).
 - Oscillators (`Tone`, `noise`) default to amplitude 0.1, and `*` only raises its right operand to full level, so `tone * env` is 10x quieter than `env * tone`.  Use `.at(...)` explicitly in examples and check levels by rendering.
 - `40.hz` is an oscillator, not a constant; use `40.constant` for fixed values in arithmetic.
+- C4 = 60 (C3 = 48).  Derive expected values in specs from note constants or a quick script; hand-computed notes and offsets caused several wrong assertions.
+- A realtime Session's render thread runs until `close`; close sessions in spec `after` blocks.  `kill -QUIT <pid>` prints every thread's backtrace (`MB::U.sigquit_backtrace`, set up in spec_helper).
 - Before adding `bin/sound.rb` commands, check for collisions with `MB::Sound` methods and Pry commands (`Pry::Commands`; e.g. `reset` and `watch` are taken).
 - macOS playback goes through ffmpeg's audiotoolbox output with `FFMPEGOutput realtime: true` and `BackgroundOutput`; expect about 0.4s latency.
 
 ### Process
 
-- In multi-step shell scripts, use `set -euo pipefail` and don't pipe away exit codes; a batch loop that kept going after a failure once produced broken commits.
+- In multi-step shell scripts, use `set -euo pipefail`, don't pipe away exit codes, and put commands on separate lines (a failure inside `a && b` doesn't stop the script).  A batch loop that kept going after a failure once produced broken commits.
+- Use the Edit tool for multi-line code changes; ad hoc Python/sed replacements often failed on indentation or escaping.
 - Keep command output small (grep/head/tail, Read with offsets); large tool output fills the context quickly.
 - Measure before explaining a failure; the first theory for the macOS latency problem was wrong, and a small experiment found the real cause.
-- The user often says "note for later": record those in memory and the issue #64 backlog, and implement them only after an explicit go-ahead.
-- Run the full suite once per change unless the user asks for affected specs only.
+- The user often says "note for later": record those in local memory (themed idea files), not GitHub, and implement them only after an explicit go-ahead.
