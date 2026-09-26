@@ -304,6 +304,10 @@ RSpec.describe(MB::Sound::PlaybackMethods) do
       expect(MB::Sound::Session.default.scheduled).to be_empty # the live session is untouched
     end
 
+    it 'accepts a Duration for bars' do
+      expect(MB::Sound.render(filename, 1.constant, bars: 2.beats, bpm: 120)).to eq(1)
+    end
+
     it 'stops when every sound ends' do
       seconds = MB::Sound.render(filename, 440.hz.sine.for(0.5), bpm: 90)
       expect(seconds).to be_within(0.02).of(0.5)

@@ -120,10 +120,10 @@ module MB
       # +:fade_in+, +:fade_out+ - Default fade lengths in bars (see #fade_in
       #                           and #fade_out).
       def initialize(output: nil, transport: Sequence.transport, channels: 2, buffer_size: nil, realtime: true, raise_errors: false, fade_in: nil, fade_out: nil)
+        @transport = transport
         self.fade_in = fade_in
         self.fade_out = fade_out
         @output = output
-        @transport = transport
         @channels = channels
         @buffer_size = buffer_size
         @realtime = realtime

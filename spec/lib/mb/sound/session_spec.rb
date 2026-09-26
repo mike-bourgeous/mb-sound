@@ -51,6 +51,15 @@ RSpec.describe(MB::Sound::Session) do
       expect(nonzero(data).first).to eq(18000 - 4000)
     end
 
+    it 'accepts Durations for launch points and fades' do
+      session.add(0.constant)
+      run(4000)
+      session.add(1.constant, at: 1.beat, fade: 1.n16)
+      data = run(24000)
+      expect(nonzero(data).first).to eq(24000 - 4000 + 1) # the fade starts from 0
+      expect(data[24000 - 4000 + 3000]).to be_within(0.001).of(0.5) # halfway through a sixteenth-note fade
+    end
+
     it 'rejects unknown launch points' do
       session.add(0.constant)
       expect { session.add(1.constant, at: :later) }.to raise_error(ArgumentError, /Unknown launch point/)

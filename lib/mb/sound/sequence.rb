@@ -1,4 +1,5 @@
 require_relative 'sequence/duration'
+require_relative 'sequence/numeric_durations'
 require_relative 'sequence/event'
 require_relative 'sequence/clip'
 require_relative 'sequence/seq'
