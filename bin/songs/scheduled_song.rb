@@ -1,7 +1,9 @@
 #!/usr/bin/env ruby
 # A 60 second demo song arranged with the scheduling commands (at_bar,
 # every, resume, outro): a two-voice fifth pad, a bass line, and synth
-# drums, at 120 BPM (30 bars).
+# drums, at 120 BPM (30 bars).  Master effects glue the mix with a soft
+# clipper and wash the breakdown in a stereo reverb, whose tail spills
+# over into the drop.
 #
 # Usage:
 #     bin/songs/scheduled_song.rb             # plays live in the background session
@@ -52,6 +54,10 @@ module MB::Sound
       noise.at(1).filter(:highpass, cutoff: 6000) * roll.env(0, 0.02, 0, 0.01, velocity: 0.1..0.8) * 0.2
     }
 
+    # Master effects: a soft clipper keeps peaks under full scale
+    glue = ->(c) { c.softclip(0.6, 0.98) }
+    master { |mix| glue.call(mix) }
+
     # Intro: the pad swells in
     bg :pad, pad, fade: 2
 
@@ -69,14 +75,17 @@ module MB::Sound
       bg :fill, fill.call, fade: 0 if (13..24).cover?(MB::Sound.transport.bar + 1)
     end
 
-    # Breakdown: drums drop out, the bass fades, the pad carries on
+    # Breakdown: drums drop out, the bass fades, the pad carries on in a
+    # big stereo reverb
     at_bar(17) do
       stop :kick, :snare, :hats, fade: 0
       stop :bass, fade: 2
+      master { |l, r| [l, r].reverb(:hall, wet: -6.db).map(&glue) }
     end
 
-    # Everything comes back
+    # Everything comes back dry, while the reverb's tail rings out
     at_bar(21) do
+      master { |mix| glue.call(mix) }
       resume :kick, fade: 0
       resume :snare, fade: 0
       resume :hats, fade: 0

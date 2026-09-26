@@ -1,4 +1,5 @@
 require_relative 'session/fades'
+require_relative 'session/master'
 require_relative 'session/scheduler'
 
 module MB
@@ -31,8 +32,12 @@ module MB
     #
     # An error in one graph removes that graph and prints the error; other
     # graphs keep playing.
+    #
+    # The mix of every graph can run through master effects (see #master)
+    # before it reaches the output.
     class Session
       include Fades
+      include Master
 
       # A graph being played by the session.  +serial+ is unique; +name+ is
       # shared by a graph and the graph replacing it until the switch.
@@ -124,6 +129,7 @@ module MB
         @players = {}
         @stopped = {}
         @taps = []
+        @master_chains = []
         @order = []
         @next_serial = 0
         @mutex = Mutex.new
@@ -390,10 +396,12 @@ module MB
         @buffer_size || output.buffer_size
       end
 
-      # Renders +count+ frames from every player, mixes them, writes the mix
-      # to the output, and advances the timeline (unless idle).  Returns the
-      # mix (an Array of Numo::SFloat, one per channel).
+      # Renders +count+ frames from every player, mixes them, runs the mix
+      # through the master effects (see #master), writes it to the output,
+      # and advances the timeline (unless idle).  Returns the mix (an Array
+      # of Numo::SFloat, one per channel).
       def process_buffer(count = buffer_size)
+        started = MB::U.clock_now
         @scheduler.apply_tempo_changes
 
         per_sample = @transport.whole_notes_per_second / output.sample_rate.to_r
@@ -402,7 +410,8 @@ module MB
 
         # If the timeline was seeked, move every running graph's clips there,
         # and move repeating schedules to their next time
-        if @generation != @transport.generation
+        seeked = @generation != @transport.generation
+        if seeked
           @generation = @transport.generation
           @mutex.synchronize { @players.values }.each do |p|
             p.clip_nodes.each { |n| n.start_at(from, origin: p.start, transport: @transport) } if p.started
@@ -420,6 +429,12 @@ module MB
         end
 
         @transport.advance(to - from) unless players.empty?
+        mix = process_master(mix, from, to, per_sample, count, playing: !players.empty?, seeked: seeked)
+
+        # How busy rendering is (before the output blocks), for deciding
+        # whether master chains can crossfade
+        @load = (MB::U.clock_now - started) * output.sample_rate / count
+
         output.write(mix)
         call_taps(mix)
         mix

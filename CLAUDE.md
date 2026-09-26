@@ -54,7 +54,7 @@ Graph nodes maintain input/output relationships and support traversal via the `T
 
 `MB::Sound` extends several method modules that provide the top-level API available in `bin/sound.rb`:
 - `IOMethods` - File read/write via ffmpeg
-- `PlaybackMethods` - `play`, `input`, real-time audio; `bg` / `stop` / `outro` (alias `fadeout`) / `panic` / `players` / `resume` / `stopped` / `forget` / `visualize` (alias `vis`) play and plot sounds in the background through one shared `Session` (`lib/mb/sound/session.rb`) that mixes every player in a single render loop locked to the sequence timeline; `render` runs a `Session` into a file
+- `PlaybackMethods` - `play`, `input`, real-time audio; `bg` / `stop` / `outro` (alias `fadeout`) / `panic` / `players` / `resume` / `stopped` / `forget` / `visualize` (alias `vis`) play and plot sounds in the background through one shared `Session` (`lib/mb/sound/session.rb`) that mixes every player in a single render loop locked to the sequence timeline; `render` runs a `Session` into a file; `master` (alias `master_fx`) sets master effects on the session mix (see Master effects below)
 - `ScheduleMethods` - `at_bar` (alias `on_bar`) / `after` / `every` / `scheduled` / `cancel` run blocks at bars on the `Session` timeline; `bg`/`stop`/`resume`/`bpm` inside them take effect exactly at the scheduled time (see `bin/songs/scheduled_song.rb`)
 - `PlotMethods` - Terminal/gnuplot visualization
 - `FFTMethods` - Spectral analysis
@@ -80,6 +80,10 @@ Two reverb implementations coexist:
 ### Sequences
 
 `lib/mb/sound/sequence/` (`MB::Sound::Sequence`) holds musical sequences: immutable `Clip`s of `Event`s timed in exact Rational whole notes, built with `seq` (e.g. `seq(C4, E4, G4.n4).n8`), `grid` (drum step strings like `'x...x...'`), and note length methods on `Note` (`n1`-`n8`, `n12`-`n128`, `.d`, `.t`, long names). Clips play in node graphs through `ClipNode` outputs (`clip.env`, `clip.tone`, `clip.gate`, `clip.trigger`, `clip.number`) that land edges on exact samples, at the tempo of a shared `Transport` (`bpm 120`). `legato(0.85)` shortens notes without changing the rhythm. In a `Session`, looping clips play in phase with the transport timeline (`seek`, `rewind`), so graphs started at different times stay in sync. See `bin/songs/sequence_demo.rb`.
+
+### Master effects
+
+`Session#master` (`lib/mb/sound/session/master.rb`, console `master { |mix| mix.softclip }`) runs the whole mix through a chain built on `GraphNode::MixSource` channels (one param = per channel, N params = all channels; `master nil` bypasses). New chains start at `bg`-style launch points; by default the old chain "spills over" (fed silence from the switch sample so tails ring out, dropped after 1s below -90dB or 10s), `fade:` crossfades, `fade: 0` cuts (also used when the render load is over 60%). Chains keep processing while idle, `panic` rebuilds the chain to clear tails, and `render` adds the tail after the last player (10s cap). Nodes that change the sample count (`resample`, `oversample`) can't be used in a master chain yet. `fdn_reverb` is too slow for a live master chain (about 70% of realtime per instance); a stereo-in `[l, r].reverb(:hall)` (`GraphNodeArrayMixin#reverb`: one reverb input per Array element, same number of outputs by default) costs about 18%, and `:space` about 55% (too heavy live on the user's laptop).
 
 ### MIDI
 

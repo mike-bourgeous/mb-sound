@@ -151,10 +151,47 @@ RSpec.describe(MB::Sound::PlaybackMethods) do
         expect(MB::Sound::Session.default).to be_idle
       end
 
+      it 'keeps master effects but clears their tails with #panic' do
+        MB::Sound.bg(:a, 220.hz.sine.forever)
+        MB::Sound.master(at: :now) { |mix| mix.delay(seconds: 0.5) }
+        sleep 0.05 until MB::Sound.master.start_with?('master:')
+
+        MB::Sound.panic
+        expect(MB::Sound.master).to start_with('master:')
+        expect(MB::Sound::Session.default.instance_variable_get(:@master_chains).length).to be <= 2
+      end
+
       it 'warns about unknown players' do
         expect(MB::Sound).to receive(:warn).with(/No background player 12345/)
         expect(MB::Sound.stop(12345)).to eq([])
       end
+    end
+  end
+
+  describe '#master' do
+    after(:each) do
+      MB::Sound::Session.default.close
+      MB::Sound.rewind
+    end
+
+    it 'sets, shows, and removes master effects' do
+      expect(MB::Sound.master).to eq('bypass')
+      expect(MB::Sound.master { |mix| mix.softclip }).to start_with('master:')
+      expect(MB::Sound.master).to start_with('master:')
+      expect(MB::Sound::Session.default.master_active?).to eq(true)
+      MB::Sound.master(nil)
+      deadline = MB::U.clock_now + 2
+      sleep 0.01 until MB::Sound.master == 'bypass' || MB::U.clock_now > deadline
+      expect(MB::Sound.master).to eq('bypass')
+    end
+
+    it 'is also available as master_fx' do
+      expect(MB::Sound.master_fx(false)).to eq('bypass')
+    end
+
+    it 'rejects a block and a value together, or other values' do
+      expect { MB::Sound.master(nil) { |m| m } }.to raise_error(ArgumentError, /not both/)
+      expect { MB::Sound.master(5) }.to raise_error(ArgumentError, /got 5/)
     end
   end
 
@@ -249,6 +286,27 @@ RSpec.describe(MB::Sound::PlaybackMethods) do
     it 'stops when every sound ends' do
       seconds = MB::Sound.render(filename, 440.hz.sine.for(0.5), bpm: 90)
       expect(seconds).to be_within(0.02).of(0.5)
+    end
+
+    it 'renders the tail of master effects after the last sound ends' do
+      seconds = MB::Sound.render(filename, bpm: 120) do
+        MB::Sound.bg(0.5.constant.for(0.1))
+        MB::Sound.master { |mix| mix.delay(seconds: 0.2) }
+      end
+
+      # The delay ends at 0.3 seconds, followed by a second of silence
+      expect(seconds).to be_within(0.02).of(1.3)
+      data = MB::Sound.read(filename)[0]
+      expect(data[(0.25 * 48000).round]).to be_within(0.01).of(0.5)
+    end
+
+    it 'limits master tails to ten seconds and the length given' do
+      infinite = proc do
+        MB::Sound.bg(0.5.constant.for(0.1))
+        MB::Sound.master { |mix| mix.delay(seconds: 0.1, feedback: 1, dry: 1, wet: 1) }
+      end
+      expect(MB::Sound.render(filename, &infinite)).to be_within(0.02).of(10.1)
+      expect(MB::Sound.render(filename, seconds: 1, overwrite: true, &infinite)).to eq(1)
     end
 
     it 'does not overwrite files unless asked' do

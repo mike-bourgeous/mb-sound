@@ -190,6 +190,10 @@ module MB
             when InputChannelSplit::InputChannelNode
               upstream = input.and_then(silence)
 
+            when Array
+              # A separate silence node for each input so each gets the full time
+              upstream = input.map { |i| i.and_then(0.constant.for(extra_time).named('Silence')) }
+
             else
               upstream = input
             end

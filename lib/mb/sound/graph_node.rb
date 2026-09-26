@@ -277,6 +277,7 @@ require_relative 'graph_node/graph_node_array_mixin'
 
 require_relative 'graph_node/constant'
 require_relative 'graph_node/input_channel_split'
+require_relative 'graph_node/mix_source'
 require_relative 'graph_node/io_sample_mixin'
 require_relative 'graph_node/mixer'
 require_relative 'graph_node/multiplier'
