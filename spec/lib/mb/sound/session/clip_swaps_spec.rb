@@ -15,7 +15,7 @@ RSpec.describe(MB::Sound::Session::ClipSwaps) do
   end
 
   def clips(name)
-    session.instance_variable_get(:@players).values.find { |p| p.name == name }.clip_nodes.map { |n| n.pending_clip || n.clip }
+    session.instance_variable_get(:@players).values.find { |p| p.name == name }.timeline_nodes.map { |n| n.pending_clip || n.clip }
   end
 
   it 'swaps a clip and clips made from it on the next bar, keeping the graph' do

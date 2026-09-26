@@ -6,6 +6,7 @@ require_relative 'sequence/seq'
 require_relative 'sequence/note_methods'
 require_relative 'sequence/grid'
 require_relative 'sequence/transport'
+require_relative 'sequence/timeline_node'
 require_relative 'sequence/clip_node'
 
 module MB

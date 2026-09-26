@@ -60,6 +60,30 @@ RSpec.describe(MB::Sound::Session) do
       expect(data[24000 - 4000 + 3000]).to be_within(0.001).of(0.5) # halfway through a sixteenth-note fade
     end
 
+    it 'starts every TimelineNode in a graph on the session transport' do
+      node_class = Class.new do
+        include MB::Sound::GraphNode
+        include MB::Sound::Sequence::TimelineNode
+        attr_reader :starts
+        def sample_rate = 48000
+        def sources = {}
+        def sample(count) = Numo::SFloat.ones(count)
+        def timeline_start(time, origin) = (@starts ||= []) << [time, origin]
+      end
+      node = node_class.new
+
+      session.add(0.constant)
+      run(4000)
+      session.add(node * 1, at: :beat)
+      run(24000)
+      expect(node.starts).to eq([[1/4r, 1/4r]])
+      expect(node.transport).to equal(transport)
+
+      transport.seek(2)
+      run(800)
+      expect(node.starts.last).to eq([2r, 1/4r])
+    end
+
     it 'rejects unknown launch points' do
       session.add(0.constant)
       expect { session.add(1.constant, at: :later) }.to raise_error(ArgumentError, /Unknown launch point/)

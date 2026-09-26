@@ -39,7 +39,7 @@ module MB
         # are the frames where the chain's input starts and stops, and
         # +ramp_from+ is the frame where its gain starts changing.
         Chain = Struct.new(
-          :block, :source, :nodes, :clip_nodes, :description,
+          :block, :source, :nodes, :timeline_nodes, :description,
           :start, :started, :mode, :fade, :feeding, :gain, :gain_step,
           :tail_frames, :quiet_frames, :slow_warned,
           :input_from, :input_until, :ramp_from,
@@ -84,7 +84,7 @@ module MB
             end
 
             @master_chains.reject! { |c| !c.started }
-            chain.start = start_time ? start_time.to_r : launch_time(at, chain.clip_nodes)
+            chain.start = start_time ? start_time.to_r : launch_time(at, chain.timeline_nodes)
             @master_chains << chain
           }
 
@@ -139,7 +139,7 @@ module MB
           chain = Chain.new(
             block: block,
             source: source,
-            clip_nodes: [],
+            timeline_nodes: [],
             started: false,
             feeding: true,
             gain: 1.0,
@@ -175,7 +175,7 @@ module MB
             raise ArgumentError, "Give the master block one parameter (called per channel) or #{@channels} (all channels at once); got #{arity}"
           end
 
-          chain.clip_nodes = chain.nodes.uniq.flat_map { |n| [n, *n.graph] }.grep(Sequence::ClipNode).uniq
+          chain.timeline_nodes = chain.nodes.uniq.flat_map { |n| [n, *n.graph] }.grep(Sequence::TimelineNode).uniq
           chain.description = description || shorten("master: #{chain.nodes.uniq.map { |n| MB::Sound.send(:playback_info, n) }.uniq.join(', ')}")
           chain
         end
@@ -225,7 +225,7 @@ module MB
 
           out = Array.new(@channels) { Numo::SFloat.zeros(count) }
           chains.each do |c|
-            c.clip_nodes.each { |n| n.start_at(from, transport: @transport) } if resync && c.feeding
+            c.timeline_nodes.each { |n| n.start_at(from, transport: @transport) } if resync && c.feeding
             render_master_chain(c, mix, out, count, rate)
           end
 
@@ -249,7 +249,7 @@ module MB
             # While idle the timeline doesn't advance, so start right away
             offset = chain.start >= to ? 0 : MB::M.max(((chain.start - from) / per_sample).ceil, 0)
             start_master_chain(chain, from + offset * per_sample)
-            chain.clip_nodes.each { |n| n.start_at(from, transport: @transport) }
+            chain.timeline_nodes.each { |n| n.start_at(from, transport: @transport) }
 
             mode = chain.mode
             if mode != :cut && @realtime && (@load || 0) > OVERLOAD
@@ -329,7 +329,7 @@ module MB
           raise if @raise_errors
           warn "The master chain (#{c.description}) stopped with an error, so it is bypassed: #{e.class}: #{e.message}\n\t#{e.backtrace&.first(5)&.join("\n\t")}"
           c.nodes = nil
-          c.clip_nodes = []
+          c.timeline_nodes = []
           c.description = 'bypass (the master chain stopped with an error)'
           input
         end

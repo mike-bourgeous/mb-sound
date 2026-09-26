@@ -14,12 +14,10 @@ module MB
       class ClipNode
         include GraphNode
         include GraphNode::SampleRateHelper
+        include TimelineNode
 
         # The Clip being played.
         attr_reader :clip
-
-        # The Transport that sets the tempo.
-        attr_reader :transport
 
         # The current playback position, in whole notes (a Rational).
         attr_reader :position
@@ -51,14 +49,14 @@ module MB
         # (e.g. note numbers) jump to the note at the new position.
         #
         # Used by Session when a graph starts or the timeline jumps.  If a
-        # +transport+ is given, this node follows it from now on.
-        def start_at(time, origin: time, transport: nil)
-          @transport = transport if transport
-          @origin = @clip.looping? ? 0r : origin.to_r
-          @position = time.to_r - @origin
+        # +transport+ is given, this node follows it from now on.  See
+        # TimelineNode#start_at.
+        def timeline_start(time, origin)
+          @origin = @clip.looping? ? 0r : origin
+          @position = time - @origin
           reset_notes
-          self
         end
+        private :timeline_start
 
         # Switches to playing +clip+ when the timeline reaches +time+ (whole
         # notes; at the start of the next buffer if nil), on the exact sample,
