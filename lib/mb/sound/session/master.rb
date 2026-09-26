@@ -88,6 +88,7 @@ module MB
             @master_chains << chain
           }
 
+          start_thread if @realtime
           chain.description
         end
 
@@ -98,6 +99,7 @@ module MB
             chain = @master_chains&.last
             next 'bypass' if chain.nil?
             next chain.description if chain.started
+            next "#{chain.description} (starting)" if chain.start <= @transport.position
             "#{chain.description} (starts at bar #{bar_of(chain.start)})"
           }
         end

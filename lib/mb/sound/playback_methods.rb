@@ -171,12 +171,57 @@ module MB
       alias fadeout outro
 
       # Stops every background player immediately, with no fade, including
-      # players that are fading out or waiting to start.  Audio already sent
-      # to the sound card may play for a moment longer.  Returns the names of
-      # the players that were stopped.
+      # players that are fading out or waiting to start.  The master effects
+      # (see #master) stay, but their reverb and delay tails are cleared.
+      # Audio already sent to the sound card may play for a moment longer.
+      # Returns the names of the players that were stopped.
       def panic
-        session_command([]) { |session, time| session.remove(fade: 0, time: time) }
+        session_command([]) { |session, time|
+          session.remove(fade: 0, time: time).tap { session.reset_master(time: time) }
+        }
       end
+
+      # Sets master effects that the whole background mix (see #bg) runs
+      # through, e.g. to tame levels or add a shared reverb.  The block gets
+      # the mix and returns the processed mix.  Also available as
+      # #master_fx.
+      #
+      # A block with one parameter is called once per channel, with that
+      # channel of the mix as a GraphNode.  A block with one parameter per
+      # channel gets them all at once and returns an Array of nodes (one per
+      # channel).  Call with nil (or false) to remove the effects, and with
+      # no arguments to see what is set.
+      #
+      # Like #bg, new effects start on the next bar while anything is
+      # playing (+:at+ picks another launch point).  By default the old
+      # effects get no more sound from that point but finish what they were
+      # doing, so reverb and delay tails ring out ("spillover").  Pass
+      # +:fade+ to crossfade over a number of bars instead, or 0 to cut over.
+      # Master effects keep processing while nothing is playing, so tails
+      # ring out at the end, and #render adds up to ten seconds of tail
+      # after the last player stops.
+      #
+      # Example (bin/sound.rb):
+      #     master { |mix| mix.softclip(0.5, 0.95) }
+      #     master { |mix| mix.filter(:highpass, cutoff: 30).reverb(:room).softclip(0.5, 0.95) }
+      #     master { |l, r| [l, r.delay(seconds: 0.012)] }   # Haas widening
+      #     master          # shows the current effects
+      #     master nil      # removes them on the next bar
+      def master(effects = :show, at: nil, fade: nil, &block)
+        session = Session.current
+        if block.nil? && effects == :show
+          return session.master_info
+        elsif !block.nil? && effects != :show
+          raise ArgumentError, 'Pass a block for master effects, or nil to remove them, not both'
+        elsif block.nil? && effects
+          raise ArgumentError, "Pass a block for master effects, or nil to remove them (got #{effects.inspect})"
+        end
+
+        session_command(nil) { |s, time|
+          s.master(at: at, fade: fade, start_time: at ? nil : time, &block)
+        }
+      end
+      alias master_fx master
 
       # Brings back a named background player that was stopped (see #bg and
       # #stop), unchanged, e.g. to fade a track back in.  With no name,
@@ -295,6 +340,10 @@ module MB
       #       at_bar(25) { outro }
       #     end
       #
+      # If master effects are set inside the block (see #master), up to ten
+      # seconds of their tail are added after the last sound stops, until a
+      # second of silence (within the +:bars+ or +:seconds+ limit, if given).
+      #
       # Build fresh graphs to render, rather than rendering graphs that are
       # playing in the background, because graphs keep their playback state.
       #
@@ -323,6 +372,8 @@ module MB
           frames += count
         end
 
+        frames += render_tail(session, limit - frames, buffer_size) if frames < limit
+
         if seconds.nil? && !session.idle?
           warn "Stopped rendering #{filename} after #{MAX_RENDER_SECONDS} seconds; pass bars: or seconds: for sounds that never end"
         end
@@ -334,6 +385,28 @@ module MB
       end
 
       private
+
+      # Renders the tail of a session's master effects after the last player
+      # stops (see #render), for up to +max_frames+.  Returns the number of
+      # frames rendered.
+      def render_tail(session, max_frames, buffer_size)
+        return 0 unless session.master_active?
+
+        rate = session.output.sample_rate
+        max_frames = MB::M.min(max_frames, (Session::MAX_TAIL_SECONDS * rate).round)
+        quiet_frames = Session::TAIL_QUIET_SECONDS * rate
+
+        frames = 0
+        quiet = 0
+        while frames < max_frames && quiet < quiet_frames
+          count = MB::M.min(buffer_size, max_frames - frames)
+          mix = session.process_buffer(count)
+          frames += count
+          quiet = session.quiet?(mix) ? quiet + count : 0
+        end
+
+        frames
+      end
 
       # Runs a background playback command with the current session (see
       # Session.current) and the scheduled time, if any.  Inside a scheduled

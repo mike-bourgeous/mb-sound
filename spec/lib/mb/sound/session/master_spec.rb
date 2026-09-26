@@ -5,6 +5,8 @@ RSpec.describe(MB::Sound::Session::Master) do
   let(:raise_errors) { true }
   let(:session) { MB::Sound::Session.new(output: output, transport: transport, buffer_size: 800, realtime: false, raise_errors: raise_errors) }
 
+  after { session.close }
+
   # Renders +frames+ frames (in 800-frame buffers) and returns both channels.
   def run(frames)
     Array.new(frames / 800) { session.process_buffer.map(&:dup) }.transpose.map { |c| c.reduce(:concatenate) }
@@ -150,6 +152,7 @@ RSpec.describe(MB::Sound::Session::Master) do
 
     it 'cuts over when processing is overloaded' do
       session.instance_variable_set(:@realtime, true)
+      allow(session).to receive(:start_thread) # render here, not in a thread
       allow(session).to receive(:process_master).and_wrap_original do |m, *args, **kw|
         session.instance_variable_set(:@load, 0.9)
         m.call(*args, **kw)
