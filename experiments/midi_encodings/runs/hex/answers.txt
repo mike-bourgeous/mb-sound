@@ -1,0 +1,19 @@
+TASK1
+15368 35 89 547
+16080 35 90 498
+16800 35 93 463
+17280 28 85 548
+17993 28 92 497
+18713 28 91 462
+23040 35 92 548
+23743 35 93 497
+24488 35 96 462
+25673 35 60 120
+25913 28 88 547
+26625 28 95 498
+TASK2
+notes=28 lowest=57 highest=66
+NOTES
+All decoding done by hand from the hex dump (only Read/Write used). Bass track is on channel 2 (0x91/0x81) and uses running status in places (e.g. "81 7a 1e 58" = running note-on), which I tracked by hand. The Bass track also holds long CC streams (0xB1 running status, controllers 0x04/0x47/0x4a/0x48); I checked their triples line by line to find the two embedded note-offs of pitch 23 (0x17) at offsets 0xB15 and 0xE9F. Edit: changed only the pitch bytes of Bass note-on/off events (+2), keeping delta bytes that look like pitches (e.g. "84 23", "81 25", "88 1f") unchanged; no lengths change because the byte count stays the same. Saxophone (channel 3, 0x92/0x82) note-ons counted: 28, with pitches from 57 to 66.
+Confidence: Task1 90%, Task2 85%, Task3 80% (a hand edit of about 150 bytes, so one slip is possible).
+Environment note: the harness refused writes to /app/.claude-user/... and required the worktree copy under /app/.claude/worktrees/midi-encoding-experiment/, so the files are there.

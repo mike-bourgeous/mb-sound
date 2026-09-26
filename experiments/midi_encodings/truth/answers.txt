@@ -1,0 +1,17 @@
+bass first 12 (start_tick pitch vel dur_ticks):
+15368 35 89 547
+16080 35 90 498
+16800 35 93 463
+17280 28 85 548
+17993 28 92 497
+18713 28 91 462
+23040 35 92 548
+23743 35 93 497
+24488 35 96 462
+25673 35 60 120
+25913 28 88 547
+26625 28 95 498
+sax notes: 28  lowest 57  highest 66
+note totals per track: [0, 72, 54, 28]
+note-off styles: {"90" => 154, "80" => 154}
+running status used: true

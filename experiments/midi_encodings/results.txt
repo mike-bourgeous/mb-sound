@@ -1,0 +1,24 @@
+== hex
+  task1: 12/12 notes fully right, 48/48 fields
+  task2: 3/3 (got [28, 57, 66], want [28, 57, 66])
+  task3: len 4411 (want 4411), exact=true, needed changes made 108/108, collateral byte changes 0, first mismatch @nil
+== braille
+  task1: 8/12 notes fully right, 44/48 fields
+  task2: 3/3 (got [28, 57, 66], want [28, 57, 66])
+  task3: len 4411 (want 4411), exact=true, needed changes made 108/108, collateral byte changes 0, first mismatch @nil
+== emoji
+  task1: 12/12 notes fully right, 48/48 fields
+  task2: 3/3 (got [28, 57, 66], want [28, 57, 66])
+  task3: len 4411 (want 4411), exact=true, needed changes made 108/108, collateral byte changes 0, first mismatch @nil
+== base64
+  task1: 0/12 notes fully right, 36/48 fields
+  task2: 3/3 (got [28, 57, 66], want [28, 57, 66])
+  task3: len 4411 (want 4411), exact=true, needed changes made 108/108, collateral byte changes 0, first mismatch @nil
+== events
+  task1: 12/12 notes fully right, 48/48 fields
+  task2: 3/3 (got [28, 57, 66], want [28, 57, 66])
+  task3: lines 1248 (want 1248), exact=true, needed changes 108/108, collateral line diffs 0
+== notes
+  task1: 12/12 notes fully right, 48/48 fields
+  task2: 3/3 (got [28, 57, 66], want [28, 57, 66])
+  task3: lines 158 (want 158), exact=true, needed changes 54/54, collateral line diffs 0

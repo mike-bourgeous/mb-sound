@@ -1,0 +1,19 @@
+TASK1
+15368 35 89 547
+16080 35 90 498
+16800 35 93 463
+17280 28 85 548
+17993 28 92 497
+18713 28 91 462
+23040 35 92 548
+23743 35 93 497
+24488 35 96 462
+25673 35 60 120
+25913 28 88 547
+26625 28 95 498
+TASK2
+notes=28 lowest=57 highest=66
+NOTES
+Bass lines were already in time order in the input; converted beats to ticks by multiplying by 960 (all results were integers). Sax: 28 note lines, pitches A3(57) through F#4(66).
+Task 3: every Bass pitch name moved up 2 semitones (B1->C#2, E1->F#1, B0->C#1, F#1->G#1, F1->G1, G1->A1, G#1->A#1, A1->B1, A#1->C2); all other lines copied unchanged.
+Confidence: Task1 95%, Task2 97%, Task3 93% (risk is transcription errors while copying by hand). Nothing skipped or guessed.
