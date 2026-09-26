@@ -1,0 +1,20 @@
+TASK1
+15355 35 89 547
+16067 35 90 498
+16787 35 93 463
+17267 28 85 548
+17980 28 92 497
+18700 28 91 462
+23027 35 92 548
+23730 35 93 497
+24475 35 96 462
+25660 35 60 120
+25900 28 88 547
+26612 28 95 498
+TASK2
+notes=28 lowest=57 highest=66
+NOTES
+Decoded base64 by hand, group by group (4 chars -> 3 bytes); lines are 60 chars = 45 bytes, so every line starts on a group boundary. Bass = channel 2 (0x91/0x81), with running status in places; most of the track is CC data (CC74/71/4/72/76) plus pitch bends. Sax = channel 3 (0x92/0x82), 28 note-ons; its last note (59) seems to have no note-off before end of track (not relevant to the count).
+Edit: only the base64 groups holding bass note pitch bytes were re-encoded (lines 52-54, 64, 67-75, 84 of the file); I took care not to change delta-time bytes that happen to equal a pitch value (e.g. 84 23, 81 25, 1E deltas). File length and all other bytes are unchanged. By my count there are 54 bass notes: 14 in the first section and 40 in the second, which is a more varied bass line.
+Confidence: Task1 90%, Task2 85%, Task3 75% (a single hand-encoding slip would break it).
+Note: the harness blocked writing to /app/.claude-user/... because the session is isolated in a worktree, so these files were written under /app/.claude/worktrees/midi-encoding-experiment/.claude-user/jobs/977d49ab/tmp/enc/base64/.

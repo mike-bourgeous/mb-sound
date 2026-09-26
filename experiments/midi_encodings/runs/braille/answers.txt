@@ -1,0 +1,21 @@
+TASK1
+15368 35 89 547
+16080 35 90 498
+16800 35 93 463
+17280 28 85 548
+17993 28 92 497
+18713 28 91 462
+23040 35 92 548
+23743 35 93 497
+24424 35 96 462
+25609 35 60 120
+25849 28 88 547
+26561 28 95 498
+TASK2
+notes=28 lowest=57 highest=66
+NOTES
+All decoding done by hand (no code). Located tracks via MTrk length fields (track 3 at byte 2190, len 1596; track 4 at byte 3794, len 609), which lined up exactly with the character positions, a good consistency check.
+Bass: channel 2 (0x91 note-on / 0x81 note-off, with running status in places). First note time = delta 13 (after initial CCs) + delta F7 7B (15355) = 15368.
+Edit: changed only note pitch bytes after 91/81 statuses (including running-status note events) in the Bass track; left alone delta bytes that happen to equal pitch values and all CC data. No lengths change. About 110 byte edits across lines 36-38, 45, 47-53 and 59, made by hand.
+Tempo-track time-signature bytes looked slightly odd to me but that doesn't matter here; copied verbatim.
+Confidence: Task1 85%, Task2 85%, Task3 75% (risk of a transcription slip when copying lines).

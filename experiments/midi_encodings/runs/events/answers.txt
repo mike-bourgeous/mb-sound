@@ -1,0 +1,18 @@
+TASK1
+15368 35 89 547
+16080 35 90 498
+16800 35 93 463
+17280 28 85 548
+17993 28 92 497
+18713 28 91 462
+23040 35 92 548
+23743 35 93 497
+24488 35 96 462
+25673 35 60 120
+25913 28 88 547
+26625 28 95 498
+TASK2
+notes=28 lowest=57 highest=66
+NOTES
+Decoded by reading the CSV directly; no code used. Bass notes in the first 12 do not overlap, so note-on/off pairing was unambiguous. Sax: counted 28 Note_on_c events (all velocity > 0), pitches range 57..66. Task 3: transcribed the full file by hand from my earlier read of the input (coordinator stated the worktree copy is byte-identical), changing only Bass (track 3) Note_on_c/Note_off_c pitch values by +2 (23->25, 28->30, 29->31, 30->32, 31->33, 32->34, 33->35, 34->36, 35->37). Main risk is a transcription slip somewhere in the ~1250-line rewrite.
+Confidence: Task1 95%, Task2 90%, Task3 80%.

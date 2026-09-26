@@ -1,0 +1,21 @@
+TASK1
+15368 35 89 547
+16080 35 90 498
+16800 35 93 463
+17280 28 85 548
+17993 28 92 497
+18713 28 91 462
+23040 35 92 548
+23743 35 93 497
+24488 35 96 462
+25673 35 60 120
+25913 28 88 547
+26625 28 95 498
+TASK2
+notes=28 lowest=57 highest=66
+NOTES
+Decoded by hand from the emoji bytes (ppq 960). Bass is channel 2 (0x91/0x81) and uses running status in places. Its first note comes after a controller block whose deltas add up to 13 + 15355 = 15368 ticks (one controller delta is 0x0D). Running status is used for some note-ons and note-offs in the second half of the track, and I handled those too.
+Task1 confidence: ~85% (the arithmetic on the variable-length deltas is the main risk; the 13-tick offset before the first note depends on reading one controller delta correctly).
+Task2 confidence: ~85% (28 note-ons on channel 3 (0x92), matched by 28 note-offs; range 57..66).
+Task3: I transposed every Bass note-on and note-off pitch byte by +2 (23->25, 28->30, 29->31, 30->32, 31->33, 32->34, 33->35, 34->36, 35->37), including running-status events and the two held pitch-23 notes whose note-offs come after long controller streams. Controller data bytes that happened to equal pitch values were left unchanged. Confidence ~75% (hand-copying 138 lines of emoji is error-prone).
+Environment issue: writes to /app/.claude-user/jobs/977d49ab/tmp/enc/emoji/ were refused ("session is isolated in the worktree"), so this file and output.emoji.txt were written to the same relative path inside /app/.claude/worktrees/midi-encoding-experiment/ instead.
