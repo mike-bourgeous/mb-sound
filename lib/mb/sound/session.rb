@@ -1,5 +1,6 @@
 require_relative 'session/fades'
 require_relative 'session/master'
+require_relative 'session/clip_swaps'
 require_relative 'session/scheduler'
 
 module MB
@@ -34,10 +35,12 @@ module MB
     # graphs keep playing.
     #
     # The mix of every graph can run through master effects (see #master)
-    # before it reaches the output.
+    # before it reaches the output.  The clips a graph plays can be changed
+    # without replacing the graph (see #swap).
     class Session
       include Fades
       include Master
+      include ClipSwaps
 
       # A graph being played by the session.  +serial+ is unique; +name+ is
       # shared by a graph and the graph replacing it until the switch.

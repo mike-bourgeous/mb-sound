@@ -135,6 +135,34 @@ module MB
           }
         end
 
+        # Returns a Seq with the steps in reverse order (nested clips are
+        # reversed too; see Clip#reverse), keeping unset lengths settable.
+        #
+        #     seq(C4, E4, G4).reverse.n8    # G4, E4, C4
+        def reverse
+          Seq.new(@steps.reverse.map { |s| s.clip ? Step.new(**s.to_h.merge(clip: s.clip.reverse)) : s }, seed: @seed)
+        end
+        alias retrograde reverse
+
+        # Returns a Seq with its notes (values, velocities, and probabilities)
+        # moved among the note steps, keeping each step's length, so unset
+        # lengths stay settable.  Rests and nested clips stay where they are.
+        # See Clip#permute for +order+ and +:seed+; +order+ indexes the note
+        # steps only.
+        def permute(order = nil, seed: @seed)
+          notes = @steps.each_index.select { |i| @steps[i].value }
+          order = Clip.check_permutation(order, notes.length, seed)
+
+          steps = @steps.dup
+          notes.each_with_index do |slot, idx|
+            src = @steps[notes[order[idx]]]
+            steps[slot] = Step.new(**@steps[slot].to_h.merge(value: src.value, velocity: src.velocity, probability: src.probability))
+          end
+
+          Seq.new(steps, seed: @seed)
+        end
+        alias shuffle permute
+
         # Returns a Seq with every note's velocity set to +velocity+ (0..1).
         def vel(velocity)
           map_steps { |s|
@@ -149,6 +177,9 @@ module MB
         def map_steps
           Seq.new(@steps.map { |s| r = yield s; r.is_a?(Hash) ? Step.new(**r) : r }, seed: @seed)
         end
+
+        # Seq's own versions of Clip transforms also remember their source.
+        track_derivations(:repeat, :*, :stretch, :legato, :transpose, :vel, :reverse, :retrograde, :permute, :shuffle)
       end
     end
   end

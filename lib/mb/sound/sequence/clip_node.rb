@@ -29,7 +29,9 @@ module MB
           @transport = transport || Sequence.transport
           @sample_rate = sample_rate.to_f
           @position = 0r
+          @origin = 0r
           @buf = nil
+          @pending_swap = nil
         end
 
         # Restarts playback from the beginning of the clip.
@@ -52,9 +54,27 @@ module MB
         # +transport+ is given, this node follows it from now on.
         def start_at(time, origin: time, transport: nil)
           @transport = transport if transport
-          @position = @clip.looping? ? time.to_r : time.to_r - origin.to_r
+          @origin = @clip.looping? ? 0r : origin.to_r
+          @position = time.to_r - @origin
           reset_notes
           self
+        end
+
+        # Switches to playing +clip+ when the timeline reaches +time+ (whole
+        # notes; at the start of the next buffer if nil), on the exact sample,
+        # keeping this node and everything downstream of it.  A looping clip
+        # plays in phase with the timeline; a non-looping clip plays from its
+        # start.  Notes in progress are handled as in #start_at.  Replaces any
+        # earlier swap that hasn't happened yet.  Used by Session#swap.
+        def swap_clip(clip, time: nil)
+          raise ArgumentError, "Expected a Clip (got #{clip.class})" unless clip.is_a?(Clip)
+          @pending_swap = [clip, time&.to_r].freeze
+          self
+        end
+
+        # The clip waiting to be swapped in by #swap_clip, or nil.
+        def pending_clip
+          @pending_swap&.first
         end
 
         # Returns +count+ samples of output, or nil once a non-looping clip has
@@ -65,17 +85,29 @@ module MB
           # Rational math keeps note edges on exact samples no matter how
           # long the clip has been playing.
           per_sample = @transport.whole_notes_per_second / @sample_rate.to_r
-          from = @position
-          to = from + count * per_sample
-          @position = to
-
-          edges = @clip.edges(from, to).map { |time, type, event, cycle|
-            offset = ((time - from) / per_sample).floor
-            [MB::M.clamp(offset, 0, count - 1), type, event, cycle]
-          }
-
           @buf = Numo::SFloat.zeros(count) if @buf.nil? || @buf.length != count
-          render(@buf, edges)
+
+          swap = @pending_swap
+          if swap
+            clip, time = swap
+            from = timeline_position
+            time ||= from
+            offset = MB::M.max(((time - from) / per_sample).ceil, 0)
+
+            if offset < count
+              advance(@buf[0...offset], offset, per_sample) if offset > 0
+              @pending_swap = nil if @pending_swap.equal?(swap)
+
+              # Edges exactly at the swap time play even if it falls between
+              # samples
+              start = timeline_position
+              switch_clip(clip, start)
+              advance(@buf[offset..], count - offset, per_sample, edge_from: time > from ? time - @origin : nil)
+              return @buf.not_inplace!
+            end
+          end
+
+          advance(@buf, count, per_sample)
           @buf.not_inplace!
         end
 
@@ -100,6 +132,36 @@ module MB
         end
 
         private
+
+        # The current position on the timeline (see #start_at).
+        def timeline_position
+          @position + @origin
+        end
+
+        # Renders +count+ samples of the clip into +buf+ (which may be a view
+        # of part of a larger buffer) and advances the position.  Edges are
+        # found from +:edge_from+ if given (which may be slightly before the
+        # position), but land no earlier than the first sample.
+        def advance(buf, count, per_sample, edge_from: nil)
+          from = @position
+          to = from + count * per_sample
+          @position = to
+
+          edges = @clip.edges(MB::M.min(edge_from || from, from), to).map { |time, type, event, cycle|
+            offset = ((time - from) / per_sample).floor
+            [MB::M.clamp(offset, 0, count - 1), type, event, cycle]
+          }
+
+          render(buf, edges)
+        end
+
+        # Starts playing +clip+ at timeline position +time+ (see #swap_clip).
+        def switch_clip(clip, time)
+          @clip = clip
+          @origin = clip.looping? ? 0r : time
+          @position = time - @origin
+          reset_notes
+        end
 
         # Fills +buf+ given +edges+ as [sample offset, :on/:off, event, cycle].
         def render(buf, edges)

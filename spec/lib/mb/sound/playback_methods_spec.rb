@@ -195,6 +195,27 @@ RSpec.describe(MB::Sound::PlaybackMethods) do
     end
   end
 
+  describe '#swap' do
+    after(:each) do
+      MB::Sound::Session.default.close
+      MB::Sound.rewind
+    end
+
+    let(:bass) { MB::Sound.seq(MB::Sound::C2).n4.loop }
+
+    it 'swaps a clip in a background player' do
+      MB::Sound.bg(:bass, bass.tone)
+      expect(MB::Sound.swap(:bass, MB::Sound.seq(MB::Sound::D2).n4.loop)).to eq(:bass)
+      expect(MB::Sound.swap(:bass, bass => MB::Sound.seq(MB::Sound::E2).n4.loop, at: :now)).to eq(:bass)
+    end
+
+    it 'rejects missing or doubled arguments' do
+      expect { MB::Sound.swap(:bass) }.to raise_error(ArgumentError, /Pass a new clip/)
+      expect { MB::Sound.swap(:bass, bass, bass => bass) }.to raise_error(ArgumentError, /not both/)
+      expect { MB::Sound.swap(:nope, bass) }.to raise_error(ArgumentError, /No background player/)
+    end
+  end
+
   describe '#resume, #stopped, and #forget' do
     after(:each) do
       MB::Sound::Session.default.close
@@ -307,6 +328,19 @@ RSpec.describe(MB::Sound::PlaybackMethods) do
       end
       expect(MB::Sound.render(filename, &infinite)).to be_within(0.02).of(10.1)
       expect(MB::Sound.render(filename, seconds: 1, overwrite: true, &infinite)).to eq(1)
+    end
+
+    it 'swaps clips at scheduled times, keeping the graph' do
+      bass = MB::Sound.seq(MB::Sound::C3).n4.loop
+      bass2 = MB::Sound.seq(MB::Sound::G3).n4.loop
+      MB::Sound.render(filename, bars: 2, bpm: 120) do
+        MB::Sound.bg(:bass, bass.number / 100.0, fade: 0)
+        MB::Sound.at_bar(2) { MB::Sound.swap :bass, bass => bass2 }
+      end
+
+      data = MB::Sound.read(filename)[0]
+      expect(data[96000 - 1]).to be_within(0.001).of(0.48) # C3
+      expect(data[96000]).to be_within(0.001).of(0.55) # G3
     end
 
     it 'does not overwrite files unless asked' do

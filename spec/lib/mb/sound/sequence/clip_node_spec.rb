@@ -134,6 +134,71 @@ RSpec.describe(MB::Sound::Sequence::ClipNode) do
     expect(data.length).to eq(48000)
     expect(data.abs.max).to be_between(0.1, 2)
   end
+
+  describe '#swap_clip' do
+    let(:sixteenths) { MB::Sound.grid(16, 'x').loop }
+
+    it 'switches clips on the exact sample, across buffer sizes' do
+      [1, 441, 800, 1000].each do |buffer|
+        node = two_notes.loop.trigger(transport: transport)
+        node.swap_clip(sixteenths, time: 1/4r)
+        data = render(node, buffer: buffer, max: 48000)[0...48000]
+        expect(nonzero_indices(data)).to eq([0, 12000, 24000, 30000, 36000, 42000]), "failed with buffer size #{buffer}"
+      end
+    end
+
+    it 'plays a looping clip in phase with the timeline' do
+      node = two_notes.loop.trigger(transport: transport)
+      node.swap_clip(MB::Sound.grid(4, '.x').loop, time: 1/8r) # a hit on the second beat of every half note
+      data = render(node, max: 96000)
+      expect(nonzero_indices(data)).to eq([0, 24000, 72000])
+    end
+
+    it 'plays a non-looping clip from its start, then ends' do
+      node = two_notes.loop.gate(transport: transport)
+      node.swap_clip(MB::Sound::C3.n8, time: 24000.5r / 96000)
+      data = render(node)
+      expect(data.length).to eq(36800)
+
+      # The old loop's next note starts on sample 24000, half a sample before
+      # the swap, and the new clip's note plays from sample 24001 to 36000
+      expect(nonzero_indices(data)).to eq((0...36001).to_a)
+      expect(node.clip).to be_a(MB::Sound::Sequence::Clip).and(satisfy { |c| !c.looping? })
+    end
+
+    it 'jumps held values to the new clip at the swap, even mid-note' do
+      node = two_notes.loop.number(transport: transport)
+      node.swap_clip(MB::Sound.seq(MB::Sound::G3).n4.loop, time: 1/16r)
+      data = render(node, max: 12000)
+      expect(data[5999]).to eq(MB::Sound::C3.number)
+      expect(data[6000]).to eq(MB::Sound::G3.number)
+    end
+
+    it 'releases envelopes at the swap' do
+      node = MB::Sound::C3.n1.loop.env(0, 0, 1, 0.01, velocity: 1..1, transport: transport)
+      node.swap_clip(MB::Sound.seq(nil).n1.loop, time: 1/8r)
+      data = render(node, max: 24000)
+      expect(data[11999]).to eq(1)
+      expect(data[12000 + 1000].abs).to be < 0.01
+    end
+
+    it 'swaps at the next buffer without a time, and replaces a pending swap' do
+      node = two_notes.loop.trigger(transport: transport)
+      node.swap_clip(sixteenths, time: 1)
+      expect(node.pending_clip).to equal(sixteenths)
+
+      other = MB::Sound.grid(4, 'x').loop
+      node.swap_clip(other)
+      data = render(node, max: 48000)
+      expect(node.pending_clip).to be_nil
+      expect(node.clip).to equal(other)
+      expect(nonzero_indices(data)).to eq([0, 24000])
+    end
+
+    it 'rejects things that are not clips' do
+      expect { two_notes.gate.swap_clip(5) }.to raise_error(ArgumentError, /Clip/)
+    end
+  end
 end
 
 RSpec.describe(MB::Sound::SequenceMethods) do

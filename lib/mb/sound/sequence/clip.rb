@@ -35,6 +35,36 @@ module MB
         # play in each loop cycle.
         attr_reader :seed
 
+        # The clip this clip was made from by a transform like #transpose,
+        # #legato, or #loop (or a voice of #synth), or nil.  Session#swap uses
+        # this to rebuild derived clips (e.g. a transposed layer) from a
+        # replacement clip (see #rederive).
+        attr_reader :source
+
+        # Transforms whose results remember their #source (see
+        # .track_derivations).
+        DERIVATIONS = [
+          :loop, :|, :&, :repeat, :*, :fill, :truncate, :roll, :ratchet, :stretch,
+          :d, :dotted, :dd, :double_dotted, :t, :triplet,
+          :legato, :staccato, :transpose, :vel,
+          :reverse, :retrograde, :permute, :shuffle,
+        ].freeze
+
+        # Wraps the named transform methods of this class so the clips they
+        # return remember the clip and transform they came from (see #source
+        # and #rederive).
+        def self.track_derivations(*names)
+          prepend(Module.new {
+            names.each do |name|
+              define_method(name) do |*args, **kwargs, &block|
+                super(*args, **kwargs, &block).tap { |c|
+                  c.derive_from(self, name, args, kwargs) if c.is_a?(Clip) && !c.equal?(self)
+                }
+              end
+            end
+          })
+        end
+
         # Converts +obj+ to a Clip: Clips are returned as-is, Notes, Numerics,
         # and nil (a rest) become one-step Seqs.
         def self.from(obj)
@@ -217,10 +247,54 @@ module MB
           Duration.rational(fraction)
         end
 
+        # Returns +order+ if it is a permutation of 0...+count+ (raising an
+        # error if not), or a random permutation from +seed+ if +order+ is
+        # nil.  Used by #permute.
+        def self.check_permutation(order, count, seed)
+          return (0...count).to_a.shuffle(random: Random.new(seed)) if order.nil?
+
+          unless order.is_a?(Array) && order.sort == (0...count).to_a
+            raise ArgumentError, "Order must be an Array of the indices 0 to #{count - 1}, each once (got #{order.inspect})"
+          end
+          order
+        end
+
         # Returns a clip with every event's value shifted by +semitones+.
         def transpose(semitones)
           map_clip { |e| e.with(value: e.value + semitones) }
         end
+
+        # Returns a clip that plays this clip backward: each event ends where
+        # it used to start, measured from the end of the clip, so the rhythm
+        # is mirrored too (a rest at the end moves to the start).  Also
+        # available as #retrograde.
+        #
+        #     seq(C4, E4, G4.n4).n8.reverse   # G4 (quarter), E4, C4
+        def reverse
+          map_clip { |e| e.with(start: MB::M.max(@length - e.end_time, 0r)) }
+        end
+        alias retrograde reverse
+
+        # Returns a clip with the same rhythm but its notes (values,
+        # velocities, and probabilities) moved to other events.  Also
+        # available as #shuffle.
+        #
+        # Pass an Array with the index of the note to play at each event
+        # (in start order), e.g. [2, 0, 1], or nothing to shuffle randomly.
+        # Random orders are repeatable: they come from +:seed+, which
+        # defaults to the clip's seed, so pass different seeds to try other
+        # orders.
+        #
+        #     seq(C4, E4, G4, B4).n8.permute([3, 2, 0, 1])   # B4, G4, C4, E4
+        #     seq(C4, E4, G4, B4).n8.permute(seed: 3)
+        def permute(order = nil, seed: @seed)
+          order = Clip.check_permutation(order, @events.length, seed)
+          with_events(@events.each_with_index.map { |slot, idx|
+            note = @events[order[idx]]
+            slot.with(value: note.value, velocity: note.velocity, probability: note.probability)
+          })
+        end
+        alias shuffle permute
 
         # Returns a clip with every event's velocity set to +velocity+ (0..1).
         def vel(velocity)
@@ -376,7 +450,30 @@ module MB
 
           Array.new(count) { |v|
             clip.with_events(clip.events.select.with_index { |_, idx| idx % count == v })
+              .derive_from(self, :voice_clips, [count, v], {})
           }
+        end
+
+        # Returns this clip, the clip it was made from (see #source), that
+        # clip's source, and so on.
+        def lineage
+          list = [self]
+          list << list.last.source while list.last.source
+          list
+        end
+
+        # Applies the transform that made this clip from its #source to
+        # +clip+ instead, e.g. returning clip.transpose(12) for a clip made
+        # with transpose(12).  Raises an error for clips without a source.
+        def rederive(clip)
+          raise ArgumentError, "#{self} wasn't made from another clip" unless @derivation
+          name, args, kwargs = @derivation
+
+          if name == :voice_clips
+            clip.voice_clips(args[0])[args[1]]
+          else
+            clip.public_send(name, *args, **kwargs)
+          end
         end
 
         def to_s
@@ -388,6 +485,14 @@ module MB
         end
 
         protected
+
+        # Records that this clip was made by calling +name+ on +source+ with
+        # +args+ and +kwargs+ (see #source).  Returns self.
+        def derive_from(source, name, args, kwargs)
+          @source = source
+          @derivation = [name, args.freeze, kwargs.freeze].freeze
+          self
+        end
 
         # Returns a Clip with the given +events+ that keeps this clip's
         # looping and seed.
@@ -433,6 +538,8 @@ module MB
 
           with_events(map_events)
         end
+
+        track_derivations(*DERIVATIONS)
       end
     end
   end

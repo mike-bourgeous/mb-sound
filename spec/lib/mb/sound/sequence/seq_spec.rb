@@ -127,4 +127,36 @@ RSpec.describe(MB::Sound::Sequence::Seq) do
   it 'can be displayed' do
     expect(MB::Sound.seq(MB::Sound::C4, nil).n8.inspect).to eq('#<Seq(n4: 60@0+n8)>')
   end
+
+  describe '#reverse and #permute' do
+    let(:c4) { MB::Sound::C4 }
+    let(:e4) { MB::Sound::E4 }
+    let(:g4) { MB::Sound::G4 }
+
+    it 'reverses steps, keeping unset lengths settable' do
+      s = MB::Sound.seq(c4, e4.n4, nil, g4).reverse
+      expect(s).to be_a(MB::Sound::Sequence::Seq)
+      expect(s.n8.events.map { |e| [e.value, e.start, e.length] }).to eq([[67, 0, 1/8r], [64, 1/4r, 1/4r], [60, 1/2r, 1/8r]])
+      expect(MB::Sound.seq(c4, e4).retrograde.n8.events.map(&:value)).to eq([64, 60])
+    end
+
+    it 'reverses nested clips' do
+      s = MB::Sound.seq(c4, MB::Sound.seq(e4, g4).n16).n8.reverse
+      expect(s.events.map(&:value)).to eq([67, 64, 60])
+    end
+
+    it 'permutes notes among note steps, keeping rests, lengths, and settable lengths' do
+      s = MB::Sound.seq(c4, nil, e4.n4, g4).permute([2, 0, 1])
+      expect(s).to be_a(MB::Sound::Sequence::Seq)
+      expect(s.n8.events.map { |e| [e.value, e.start, e.length] }).to eq([[67, 0, 1/8r], [60, 1/4r, 1/4r], [64, 1/2r, 1/8r]])
+      expect(MB::Sound.seq(c4, e4, g4).shuffle(seed: 2).events.map(&:value).sort).to eq([60, 64, 67])
+      expect { MB::Sound.seq(c4, e4).permute([0]) }.to raise_error(ArgumentError, /indices 0 to 1/)
+    end
+
+    it 'remembers the source' do
+      s = MB::Sound.seq(c4, e4).n8
+      expect(s.reverse.source).to equal(s)
+      expect(s.permute.source).to equal(s)
+    end
+  end
 end

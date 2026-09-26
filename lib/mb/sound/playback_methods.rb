@@ -223,6 +223,38 @@ module MB
       end
       alias master_fx master
 
+      # Changes the sequence a background player (see #bg) plays, keeping
+      # its synth and effects as they are, e.g. to try a new bass line
+      # through the same filter and reverb.  Like #bg, the change happens
+      # on the next bar (+:at+ picks another launch point), exactly on the
+      # sample.  Returns the name.
+      #
+      # Pass the new clip to replace the clip that every clip in the graph
+      # was made from, or old => new pairs to choose.  Clips made from the
+      # old clip (e.g. bass.transpose(12), or the voices of Clip#synth) are
+      # rebuilt from the new one the same way.  Stopped players can be
+      # swapped too, and play the new clip when resumed.  See Session#swap.
+      #
+      # Example (bin/sound.rb):
+      #     bass = seq(C2, C2, rest, C3).n16.loop
+      #     bg :bass, bass.tone.ramp.at(1).filter(:lowpass, cutoff: 400 + bass.env * 3000, quality: 4) * bass.env
+      #     swap :bass, seq(C2, Eb2, G2, Bb2).n16.loop
+      #     swap :bass, bass                         # back to the first bass line
+      #
+      #     beat = grid(16, kick: 'x...x...', snare: '....x...')
+      #     beat2 = grid(16, kick: 'x..x..x.', snare: '....x..x')
+      #     swap :drums, beat => beat2               # swaps each matching row
+      def swap(name, clips = nil, at: nil, **pairs)
+        raise ArgumentError, 'Pass a new clip or old => new pairs, not both' if clips && !pairs.empty?
+        clips ||= pairs
+        raise ArgumentError, 'Pass a new clip or old => new pairs to swap' if clips.is_a?(Hash) && clips.empty?
+
+        session_command(name) { |session, time|
+          session.swap(name, clips, at: at, start_time: at ? nil : time)
+          name
+        }
+      end
+
       # Brings back a named background player that was stopped (see #bg and
       # #stop), unchanged, e.g. to fade a track back in.  With no name,
       # resumes the most recently stopped player.  Like #bg, it starts on the

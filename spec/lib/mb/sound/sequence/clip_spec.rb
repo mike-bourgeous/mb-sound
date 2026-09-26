@@ -112,6 +112,60 @@ RSpec.describe(MB::Sound::Sequence::Clip) do
     end
   end
 
+  describe '#reverse' do
+    it 'plays events backward, mirroring the rhythm' do
+      c = MB::Sound.seq(c4, e4, MB::Sound::G4.n4, nil).n8.reverse
+      expect(times(c)).to eq([[67, 1/8r, 1/4r], [64, 3/8r, 1/8r], [60, 1/2r, 1/8r]])
+      expect(c.length).to eq(5/8r)
+    end
+
+    it 'keeps chords together, looping, and events that hang over the end inside the clip' do
+      c = (MB::Sound.seq(c4.n4) & MB::Sound.seq(e4.n4)).loop.reverse
+      expect(times(c)).to contain_exactly([60, 0, 1/4r], [64, 0, 1/4r])
+      expect(c).to be_looping
+      long = MB::Sound::Sequence::Event.new(start: 0r, length: 1/4r, value: 60, velocity: 0.75)
+      expect(times(MB::Sound::Sequence::Clip.new([long], length: 1/8r).reverse)).to eq([[60, 0, 1/4r]])
+    end
+
+    it 'is also available as retrograde' do
+      expect(times(MB::Sound.seq(c4, e4).n8.retrograde)).to eq([[64, 0, 1/8r], [60, 1/8r, 1/8r]])
+    end
+  end
+
+  describe '#permute' do
+    let(:notes) { MB::Sound.seq(c4, e4.n4, MB::Sound::G4, MB::Sound::B4.n8.vel(1)).n8 }
+
+    it 'moves notes to other events in a given order, keeping the rhythm' do
+      c = notes.permute([3, 2, 0, 1])
+      expect(times(c)).to eq([[71, 0, 1/8r], [67, 1/8r, 1/4r], [60, 3/8r, 1/8r], [64, 1/2r, 1/8r]])
+      expect(c.events.map(&:velocity)).to eq([1, 0.75, 0.75, 0.75])
+    end
+
+    it 'shuffles repeatably from the seed' do
+      a = notes.permute.events.map(&:value)
+      expect(notes.permute.events.map(&:value)).to eq(a)
+      expect(a.sort).to eq([60, 64, 67, 71])
+      others = (1..10).map { |s| notes.permute(seed: s).events.map(&:value) }
+      expect(others.uniq.length).to be > 1
+      expect(notes.shuffle(seed: 3).events.map(&:value)).to eq(notes.permute(seed: 3).events.map(&:value))
+    end
+
+    it 'rejects orders that are not permutations' do
+      expect { notes.permute([0, 0, 1, 2]) }.to raise_error(ArgumentError, /indices 0 to 3/)
+      expect { notes.permute([0, 1]) }.to raise_error(ArgumentError, /indices/)
+    end
+
+    it 'remembers its source, and replays on another clip' do
+      c = notes.loop
+      expect(c.reverse.source).to equal(c)
+      p = c.permute([1, 0, 2, 3])
+      expect(p.source).to equal(c)
+      other = MB::Sound.seq(MB::Sound::D4, MB::Sound::F4, MB::Sound::A4, MB::Sound::C5).n8.loop
+      expect(p.rederive(other).events.map(&:value)).to eq([65, 62, 69, 72])
+      expect(c.reverse.rederive(other).events.map(&:value)).to eq([72, 69, 65, 62])
+    end
+  end
+
   describe '#loop' do
     it 'returns a looping copy' do
       c = c4.n8.loop
@@ -224,6 +278,54 @@ RSpec.describe(MB::Sound::Sequence::Clip) do
 
       other = c.loop(seed: 5).edges(0, 4).map(&:first)
       expect(other).not_to eq(a)
+    end
+  end
+
+  describe '#source, #lineage, and #rederive' do
+    let(:bass) { MB::Sound.seq(MB::Sound::C2, MB::Sound::E2).n8.loop }
+    let(:other) { MB::Sound.seq(MB::Sound::D2).n4.loop }
+
+    it 'remembers the clip a transform was made from' do
+      up = bass.transpose(12)
+      expect(up.source).to equal(bass)
+      lineage = up.transpose(1).lineage
+      expect(lineage[1]).to equal(up)
+      expect(lineage[2]).to equal(bass)
+    end
+
+    it 'repeats a transform on another clip' do
+      up = bass.transpose(12).legato(0.5)
+      steps = up.lineage.take_while { |c| !c.equal?(bass) }.reverse
+      result = steps.reduce(other) { |c, step| step.rederive(c) }
+      expect(times(result)).to eq([[MB::Sound::D3.number, 0, 1/8r]])
+      expect(result).to be_looping
+    end
+
+    it 'tracks transforms and their aliases on Clips and Seqs' do
+      clip = bass | c4.n4 # a plain Clip
+      [clip, c4.n4].each do |c|
+        expect((c * 2).source).to equal(c)
+        expect(c.dotted.source).to equal(c)
+        expect(c.vel(0.5).source).to equal(c)
+        expect(c.stretch(2).source).to equal(c)
+      end
+      expect((clip & c4.n4).source).to equal(clip)
+      expect(clip.loop.source).to equal(clip)
+    end
+
+    it 'rebuilds synth voices from another clip' do
+      chords = MB::Sound.seq(MB::Sound::A2, MB::Sound::F2, MB::Sound::C3).n1.loop
+      voices = chords.voice_clips(2)
+      expect(voices.map(&:source)).to all(equal(chords))
+
+      four = MB::Sound.seq(MB::Sound::A2, MB::Sound::C3, MB::Sound::E3, MB::Sound::G3).n1.loop
+      expect(voices[1].rederive(four).events.map(&:value)).to eq([MB::Sound::C3.number, MB::Sound::G3.number])
+    end
+
+    it 'has no source for clips made directly' do
+      expect(bass.source).not_to be_nil # made by .loop
+      expect(c4.n4.source).to be_nil
+      expect { c4.n4.rederive(bass) }.to raise_error(ArgumentError, /wasn't made from another clip/)
     end
   end
 end
