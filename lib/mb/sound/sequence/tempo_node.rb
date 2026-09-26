@@ -26,6 +26,41 @@ module MB
 
         MODES = [:hz, :seconds].freeze
 
+        # The slowest tempo that delay buffers are sized for when given
+        # Durations (see .max_seconds).  Delays grow their buffers if needed
+        # at slower tempos.
+        SLOWEST_BPM = 40
+
+        # Converts a delay time for delay methods: a Duration becomes a
+        # :seconds TempoNode, a graph node that outputs musical time (e.g.
+        # `2.bars.lfo.at(3.n16..5.n16)`; see Tone#musical_time?) is scaled
+        # from whole notes to seconds at the current tempo, and anything else
+        # (a number of seconds or a node that outputs seconds) is returned
+        # unchanged.
+        def self.seconds_source(time)
+          case
+          when time.is_a?(Duration)
+            TempoNode.new(time, mode: :seconds)
+          when time.respond_to?(:musical_time?) && time.musical_time?
+            time * TempoNode.new(1.whole, mode: :seconds)
+          else
+            time
+          end
+        end
+
+        # Returns the longest a delay +time+ (as for .seconds_source) could
+        # be in seconds at SLOWEST_BPM, or nil if it isn't musical time.
+        def self.max_seconds(time)
+          whole_notes = case
+                        when time.is_a?(Duration)
+                          time.whole_notes
+                        when time.respond_to?(:musical_time?) && time.musical_time?
+                          [time.range.begin.abs, time.range.end.abs].max
+                        end
+
+          whole_notes && whole_notes.to_f * 240.0 / SLOWEST_BPM
+        end
+
         # The Duration this node's output is based on.
         attr_reader :duration
 
@@ -69,6 +104,14 @@ module MB
           @mode == :hz ? (wnps / @duration.whole_notes).to_f : (@duration.whole_notes / wnps).to_f
         end
 
+        # Calls the block with this node whenever it lines up with the
+        # timeline (see TimelineNode#start_at), e.g. so a delay can jump to
+        # its tempo-synced time instead of gliding from zero.  Returns self.
+        def on_start(&block)
+          (@start_callbacks ||= []) << block
+          self
+        end
+
         # Returns +count+ samples of the current value (see #value), or zeros
         # in :hz mode while the timeline is paused (unless freewheeling).
         def sample(count)
@@ -88,6 +131,8 @@ module MB
 
         # Locks the tone's phase to the timeline (see the class description).
         def timeline_start(time, _origin)
+          @start_callbacks&.each { |c| c.call(self) }
+
           return if @freewheel || @mode != :hz || @tone.nil?
           cycles = time / @duration.whole_notes
           @tone.sync_phase(2 * Math::PI * (cycles - cycles.floor).to_f)

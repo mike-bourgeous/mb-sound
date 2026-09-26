@@ -152,6 +152,15 @@ module MB
           hz.lfo
         end
 
+        # Returns a delay Filter with this length as its delay time, following
+        # the tempo, to apply with GraphNode#filter (e.g.
+        # `sig.filter(3.n16.delay(feedback: -6.db, dry: 1))`).  Takes the
+        # same options as GraphNode#delay, which is usually simpler:
+        # `sig.delay(3.n16, feedback: -6.db, dry: 1)`.
+        def delay(**options)
+          GraphNode::DelayMethods.delay_filter(self, **options)
+        end
+
         # Returns the length in seconds at the tempo of +transport+ right
         # now.  The result doesn't follow later tempo changes.
         def seconds(transport = Sequence.transport)

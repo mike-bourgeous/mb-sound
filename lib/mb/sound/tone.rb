@@ -200,7 +200,18 @@ module MB
 
       # Changes the linear gain of the tone.  This may be negative to invert
       # the phase of the tone, or may be a Range to add a DC offset.
+      #
+      # A Range of Sequence::Durations (e.g. `3.n16..5.n16`) makes the tone
+      # output a musical length in whole notes (see #musical_time?), which
+      # delay methods convert to seconds at the current tempo:
+      #
+      #     sig.delay(2.bars.lfo.square.at(3.n16..5.n16))   # alternates each bar
       def at(amplitude)
+        durations = amplitude.is_a?(Range) ? [amplitude.begin, amplitude.end].count { |v| v.is_a?(Sequence::Duration) } : 0
+        raise ArgumentError, 'Use a Range of Durations (e.g. 3.n16..5.n16), not a single Duration' if amplitude.is_a?(Sequence::Duration)
+        raise ArgumentError, 'Both ends of a Range must be Durations, or neither' if durations == 1
+        @musical_time = durations == 2
+
         if amplitude.is_a?(Range)
           @range = amplitude.begin.to_f..amplitude.end.to_f
           @amplitude = (@range.end - @range.begin) / 2
@@ -212,6 +223,12 @@ module MB
         @amplitude_set = true
 
         self
+      end
+
+      # True if #at was given a Range of Durations, so this tone outputs a
+      # musical length in whole notes rather than a plain number.
+      def musical_time?
+        !!@musical_time
       end
 
       # Sets the default linear +amplitude+ of the tone, which may be a Numeric
