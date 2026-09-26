@@ -20,8 +20,21 @@ module MB
         # self.
         def start_at(time, origin: time, transport: nil)
           @transport = transport if transport
+          @timeline_paused = false
           timeline_start(time.to_r, origin.to_r)
           self
+        end
+
+        # Called by Session for each buffer rendered while the timeline is
+        # paused (nothing is playing, but e.g. master effects keep running).
+        # #start_at ends the pause.
+        def pause_timeline
+          @timeline_paused = true
+        end
+
+        # True if the timeline is paused (see #pause_timeline).
+        def timeline_paused?
+          !!@timeline_paused
         end
 
         # The Transport this node follows for tempo and position.

@@ -125,6 +125,33 @@ module MB
         end
         alias t triplet
 
+        # Returns a Tone (like Numeric#hz) that completes one cycle per this
+        # duration, following the tempo of the Session playing it (or
+        # Sequence.transport), with its phase locked to the timeline (see
+        # TempoNode).  Waveform methods like #triangle and #ramp work as on
+        # any Tone; see #lfo for modulation.
+        #
+        # Example (bin/sound.rb):
+        #     bg 110.hz.ramp.at(1).fm(1.beat.hz.at(20)).forever
+        def hz
+          node = TempoNode.new(self, mode: :hz)
+          Tone.new(frequency: node).tap { |t| node.tone = t }
+        end
+
+        # Returns a tempo-synced LFO (see #hz and Tone#lfo) that completes one
+        # cycle per this duration, locked to the timeline: a 4-bar LFO starts
+        # each cycle every 4 bars from the start of the timeline.  It swings
+        # over -1..1 unless #at is called, plays forever, and freezes while
+        # the timeline is paused.  Call #freewheel to let it run free of the
+        # timeline (it still follows the tempo).
+        #
+        # Example (bin/sound.rb):
+        #     cutoff = 4.bars.lfo.triangle.at(200..2000)
+        #     bg :pad, 110.hz.ramp.at(1).filter(:lowpass, cutoff: cutoff, quality: 4).forever
+        def lfo
+          hz.lfo
+        end
+
         # Returns the length in seconds at the tempo of +transport+ right
         # now.  The result doesn't follow later tempo changes.
         def seconds(transport = Sequence.transport)

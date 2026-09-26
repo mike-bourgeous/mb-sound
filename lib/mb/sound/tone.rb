@@ -185,6 +185,11 @@ module MB
         self
       end
 
+      # Plays forever unless #for was called (see #or_for).
+      def or_forever(recursive: :ignored)
+        or_for(nil)
+      end
+
       # Sets the tone to play forever, as well as any tones in its frequency or
       # phase sources.
       def forever(recursive: true)
@@ -327,7 +332,42 @@ module MB
         @no_trigger = trig
         self
       end
-      alias lfo no_trigger
+
+      # Makes this Tone a low-frequency oscillator for modulation: it won't
+      # be retriggered by MIDI voices (see #no_trigger), swings over the full
+      # -1..1 range unless #at was called, and plays forever unless a
+      # duration was set with #for.  Call #at afterward to set the range.
+      #
+      # Durations have their own #lfo for tempo-synced LFOs (see
+      # Sequence::Duration#lfo).
+      #
+      # Example:
+      #     play 220.hz.ramp.at(1).filter(:lowpass, cutoff: 0.25.hz.triangle.lfo.at(200..2000), quality: 4).forever
+      def lfo
+        no_trigger
+        or_at(1)
+        or_forever
+      end
+
+      # Sets this Tone's current phase to +radians+ plus its phase offset
+      # (see #with_phase).  Used by Sequence::TempoNode to lock tempo-synced
+      # tones to the timeline.
+      def sync_phase(radians)
+        oscillator.phi = radians + @phase.to_f
+        self
+      end
+
+      # For a Tone whose frequency follows the tempo (see
+      # Sequence::Duration#hz), lets its phase run free of the timeline and
+      # keeps it running while the timeline is paused.  Its frequency still
+      # follows the tempo.  See Sequence::TempoNode#freewheel.
+      def freewheel(free = true)
+        node = graph.find { |n| n.is_a?(Sequence::TempoNode) && n.tone.equal?(self) }
+        raise ArgumentError, 'Only tempo-synced tones (e.g. 4.bars.lfo) can freewheel' if node.nil?
+
+        node.freewheel(free)
+        self
+      end
 
       # Returns true if this Tone is not intended to be retriggered when a note
       # is played.

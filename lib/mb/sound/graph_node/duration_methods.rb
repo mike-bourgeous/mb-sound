@@ -29,6 +29,12 @@ module MB
           self
         end
 
+        # Sets all Tones in the graph to play forever unless they were
+        # specifically given a duration (see #or_for).
+        def or_forever(recursive: true)
+          or_for(nil, recursive: recursive)
+        end
+
         # Sets all Tones in the graph (or anything else with a #forever method
         # that takes a :recursive parameter) to continue playing forever.
         def forever(recursive: true)

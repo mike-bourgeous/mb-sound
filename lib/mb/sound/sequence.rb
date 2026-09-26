@@ -8,6 +8,7 @@ require_relative 'sequence/grid'
 require_relative 'sequence/transport'
 require_relative 'sequence/timeline_node'
 require_relative 'sequence/clip_node'
+require_relative 'sequence/tempo_node'
 
 module MB
   module Sound

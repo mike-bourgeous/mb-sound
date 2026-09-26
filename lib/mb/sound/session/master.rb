@@ -226,6 +226,10 @@ module MB
           out = Array.new(@channels) { Numo::SFloat.zeros(count) }
           chains.each do |c|
             c.timeline_nodes.each { |n| n.start_at(from, transport: @transport) } if resync && c.feeding
+
+            # Tempo-synced LFOs freeze while the timeline is paused
+            c.timeline_nodes.each(&:pause_timeline) unless playing
+
             render_master_chain(c, mix, out, count, rate)
           end
 
