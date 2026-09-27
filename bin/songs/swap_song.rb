@@ -19,6 +19,14 @@
 #     load 'bin/songs/swap_song.rb'
 #     swap_song                          # live
 #     render('song.flac', bars: 16) { swap_song }
+#
+# A riff to try swapping in bin/sound.rb (from a live test; the FM pitch,
+# filter, and ratcheted amp envelopes, and the delay, all follow the swaps):
+#     s = seq(A3, C3, G3, D3).n1.loop
+#     master { |*c| c.reverb(:hall) }
+#     bg :riff, s.then { |riff| (riff.tone.triangle.log_fm(2 * riff.env(0.0, 0.5, 0, 0.5)).at(1).filter(:lowpass, quality: 4, cutoff: 250 + riff.env(0.001, 0.5, 0, 0.5) * 4000).softclip(0.1, 0.5).forever * riff.ratchet(4).env(0.001, 0.5, 0, 0.5)).delay(seconds: 0.375, feedback: -2.db, dry: 1, wet: -5.db) }
+#     swap :riff, s.stretch(2).transpose(5)
+#     swap :riff, s.stretch(4).transpose(7)
 
 require 'bundler/setup'
 require 'mb-sound'

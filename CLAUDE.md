@@ -48,7 +48,7 @@ Graph nodes maintain input/output relationships and support traversal via the `T
 
 ### Numeric Mixins
 
-`lib/mb/sound/numeric_sound_mixins.rb` adds methods like `.hz`, `.db`, `.meters`, `.bits` to Ruby's Numeric class, enabling the fluent DSL (e.g. `440.hz.sine.forever`, `-20.db`).
+`lib/mb/sound/numeric_sound_mixins.rb` adds methods like `.hz`, `.db`, `.meters`, `.bits` to Ruby's Numeric class, enabling the fluent DSL (e.g. `440.hz.sine.forever`, `-20.db`).  `Sequence::NumericDurations` adds musical lengths (`2.bars`, `3.beats`, `3.n16`, `3.sixteenths`, `1.n8.dotted`) returning `Sequence::Duration`s; see Tempo sync below.
 
 ### Method Modules
 
@@ -85,6 +85,10 @@ Two reverb implementations coexist; use `#reverb` in most cases:
 `lib/mb/sound/sequence/` (`MB::Sound::Sequence`) holds musical sequences: immutable `Clip`s of `Event`s timed in exact Rational whole notes, built with `seq` (e.g. `seq(C4, E4, G4.n4).n8`), `grid` (drum step strings like `'x...x...'`), and note length methods on `Note` (`n1`-`n8`, `n12`-`n128`, `.d`, `.t`, long names). Clips play in node graphs through `ClipNode` outputs (`clip.env`, `clip.tone`, `clip.gate`, `clip.trigger`, `clip.number`) that land edges on exact samples, at the tempo of a shared `Transport` (`bpm 120`). `legato(0.85)` shortens notes without changing the rhythm. `reverse` (alias `retrograde`) mirrors a clip or reverses a Seq's steps; `permute([2, 0, 1])` / `permute(seed: 3)` (alias `shuffle`) moves notes among the same rhythm, repeatably from the clip's seed. In a `Session`, looping clips play in phase with the transport timeline (`seek`, `rewind`), so graphs started at different times stay in sync. See `bin/songs/sequence_demo.rb`.
 
 `swap :bass, bass2` (`Session#swap`, `lib/mb/sound/session/clip_swaps.rb`) changes a player's clips on the next bar via `ClipNode#swap_clip` (exact sample, graph and effect state kept). Transformed clips remember their `source` and transform (`Clip#lineage` / `#rederive`), so clips derived from the old one (`bass.transpose(12)`, `synth` voices) are rebuilt from the new one; pass `old => new` pairs (or `kit => kit2` for `grid` rows) when a player has unrelated clips. See `bin/songs/swap_song.rb`.
+
+### Tempo sync
+
+`Sequence::Duration` (`lib/mb/sound/sequence/duration.rb`) is an exact musical length in whole notes (comparable, `+`/`-`, scaled by numbers, friendly `to_s` like "3 × n16"), accepted wherever lengths are (`at:`, `fade:`, `every`, `after`, `render(bars:)`, `.len`).  `4.bars.lfo` / `1.beat.hz` are Tones driven by a `Sequence::TempoNode` that follows the tempo, with phase locked to the timeline on jumps (start, seeks, resume) plus `with_phase`; they freeze while the timeline is paused unless `.freewheel`.  `sig.delay(1.n8.dotted)` (or `sig.filter(3.n16.delay(...))`, `seconds: 3.n16`, `multitap(1.n8.d, ...)`) follows the tempo; `2.bars.lfo.square.at(3.n16..5.n16)` gives an alternating delay time (`Tone#musical_time?`).  Plain numbers in `delay` are seconds.  Tempo-following nodes include `Sequence::TimelineNode` (shared with `ClipNode`), which `Session` finds in every graph (`timeline_nodes`).  `Tone#lfo` means full range and forever (`or_forever`) plus no MIDI retrigger.  `render(bars:)` counts bars on the timeline, so tempo changes during a render are followed.  See `bin/songs/tempo_song.rb`.
 
 ### Master effects
 
@@ -128,7 +132,7 @@ The container has no audio device, so check sound-producing code by rendering it
 
 - `#sample` usually returns a reused buffer; `.dup` each buffer before collecting several of them (several false "bugs" came from forgetting this).
 - Oscillators (`Tone`, `noise`) default to amplitude 0.1, and `*` only raises its right operand to full level, so `tone * env` is 10x quieter than `env * tone`.  Use `.at(...)` explicitly in examples and check levels by rendering.
-- `40.hz` is an oscillator, not a constant; use `40.constant` for fixed values in arithmetic.
+- `Tone.new` (and `Numeric#hz`) defaults to a 5-second duration, so graphs driven by clips or LFOs need `.forever` (`Tone#lfo` now plays forever by default).- `40.hz` is an oscillator, not a constant; use `40.constant` for fixed values in arithmetic.
 - C4 = 60 (C3 = 48).  Derive expected values in specs from note constants or a quick script; hand-computed notes and offsets caused several wrong assertions.
 - A realtime Session's render thread runs until `close`; close sessions in spec `after` blocks.  `kill -QUIT <pid>` prints every thread's backtrace (`MB::U.sigquit_backtrace`, set up in spec_helper).
 - Before adding `bin/sound.rb` commands, check for collisions with `MB::Sound` methods and Pry commands (`Pry::Commands`; e.g. `reset` and `watch` are taken).
