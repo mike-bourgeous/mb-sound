@@ -11,7 +11,7 @@
 # Or in bin/sound.rb:
 #     load 'bin/songs/stereo_song.rb'
 #     stereo_song                          # live
-#     render('song.flac', bars: 8) { stereo_song }
+#     render('song.flac', bars: 8, tail: true) { stereo_song }
 #
 # Snippets to try in bin/sound.rb:
 #     bg :saw, 110.hz.ramp.at(0.2).forever.stereo.filter(:lowpass, cutoff: channels(500, 1500))   # a different filter per side
@@ -72,7 +72,7 @@ module MB::Sound
 
   if $0 == __FILE__
     if ARGV[0]
-      seconds = render(ARGV[0], bars: STEREO_SONG_BARS, overwrite: true) { stereo_song }
+      seconds = render(ARGV[0], bars: STEREO_SONG_BARS, tail: true, overwrite: true) { stereo_song }
       puts "Rendered #{seconds.round(1)} seconds to #{ARGV[0]}"
     else
       stereo_song

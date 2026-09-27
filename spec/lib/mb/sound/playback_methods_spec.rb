@@ -363,6 +363,20 @@ RSpec.describe(MB::Sound::PlaybackMethods) do
       expect(seconds).to eq(2 * 2 + 2 * 4) # two bars at 120 BPM, two at 60
     end
 
+    it 'adds the master tail after the bars limit with tail: true' do
+      song = proc do
+        MB::Sound.bg(0.5.constant)
+        MB::Sound.master { |mix| mix.delay(seconds: 0.2) }
+      end
+      expect(MB::Sound.render(filename, bars: 1, bpm: 120, &song)).to eq(2)
+
+      seconds = MB::Sound.render(filename, bars: 1, bpm: 120, tail: true, overwrite: true, &song)
+      expect(seconds).to be_within(0.02).of(2 + 0.2 + 1) # the delay rings 0.2 s past the end, then a second of quiet
+      data = MB::Sound.read(filename)[0]
+      expect(data[(2.1 * 48000).round]).to be_within(0.01).of(0.5)
+      expect(data[(2.3 * 48000).round].abs).to be < 0.001
+    end
+
     it 'accepts a Duration for bars' do
       expect(MB::Sound.render(filename, 1.constant, bars: 2.beats, bpm: 120)).to eq(1)
     end

@@ -426,6 +426,10 @@ module MB
       # If master effects are set inside the block (see #master), up to ten
       # seconds of their tail are added after the last sound stops, until a
       # second of silence (within the +:bars+ or +:seconds+ limit, if given).
+      # With +tail: true+, the tail is also added after the +:bars+ or
+      # +:seconds+ limit: any sounds still playing stop there, and the
+      # master effects ring out, e.g. `render('song.flac', bars: 16, tail:
+      # true) { my_song }`.
       #
       # Build fresh graphs to render, rather than rendering graphs that are
       # playing in the background, because graphs keep their playback state.
@@ -433,7 +437,7 @@ module MB
       # Example (bin/sound.rb):
       #     bass = seq(C2, C2, rest, C3).n16.loop
       #     render '/tmp/bass.flac', bass.tone.ramp.at(1) * bass.env * 0.5, bars: 4
-      def render(filename, *sounds, bars: nil, seconds: nil, bpm: nil, channels: 2, overwrite: false, buffer_size: 800, &block)
+      def render(filename, *sounds, bars: nil, seconds: nil, tail: false, bpm: nil, channels: 2, overwrite: false, buffer_size: 800, &block)
         raise ArgumentError, 'Pass one or more sounds or a block to render' if sounds.empty? && block.nil?
         raise ArgumentError, 'Pass bars: or seconds:, not both' if bars && seconds
 
@@ -467,7 +471,14 @@ module MB
           frames += count
         end
 
-        frames += render_tail(session, frames_left.call, buffer_size) if frames_left.call > 0
+        if frames_left.call > 0
+          frames += render_tail(session, frames_left.call, buffer_size)
+        elsif tail && (bars || seconds)
+          # The song reached its end; stop anything still playing and let the
+          # master effects ring out
+          session.remove(fade: 0)
+          frames += render_tail(session, (MAX_RENDER_SECONDS * rate).round - frames, buffer_size)
+        end
 
         if bars.nil? && seconds.nil? && !session.idle?
           warn "Stopped rendering #{filename} after #{MAX_RENDER_SECONDS} seconds; pass bars: or seconds: for sounds that never end"

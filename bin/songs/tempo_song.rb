@@ -81,7 +81,7 @@ module MB::Sound
 
   if $0 == __FILE__
     if ARGV[0]
-      seconds = render(ARGV[0], bars: TEMPO_SONG_BARS, overwrite: true) { tempo_song }
+      seconds = render(ARGV[0], bars: TEMPO_SONG_BARS, tail: true, overwrite: true) { tempo_song }
       puts "Rendered #{seconds.round(1)} seconds to #{ARGV[0]}"
     else
       tempo_song
