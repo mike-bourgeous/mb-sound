@@ -66,7 +66,7 @@ module MB
       attr_reader :kind
 
       # Parsed common options (:input, :output, :force, :graphviz, :plot,
-      # :quiet, plus :channels for effects).
+      # :quiet, plus :channels for effects and :bars for songs).
       attr_reader :options
 
       # The parameter values (see Values).
@@ -123,14 +123,15 @@ module MB
       # Runs a song: the block arranges it on the current session (with #bg,
       # #at_bar, etc.), then it plays live until it ends (see
       # PlaybackMethods#wait), or renders +bars+ bars plus the master tail to
-      # the output file.  --graphviz draws the graph as it is at the start
-      # (players started later by #at_bar are missing).
+      # the output file (--bars overrides +bars+; with neither, it renders
+      # until the song ends).  --graphviz draws the graph as it is at the
+      # start (players started later by #at_bar are missing).
       def run_song(bars:, &block)
         print_params
         open_song_graphviz(&block) if @options[:graphviz]
 
         if @options[:output]
-          seconds = MB::Sound.render(@options[:output], bars: bars, tail: true, overwrite: overwrite) { block.call(@params) }
+          seconds = MB::Sound.render(@options[:output], bars: @options[:bars] || bars, tail: true, overwrite: overwrite) { block.call(@params) }
           puts "Rendered #{seconds.round(1)} seconds to #{@options[:output]}"
         else
           block.call(@params)
@@ -159,6 +160,8 @@ module MB
             o.on('-c', '--channels N', Integer, 'Input channels (live input, or to up/downmix a file)') { |v| @options[:channels] = v }
           when :synth
             o.on('-i', '--input MIDI', 'A MIDI file, or a MIDI port name (default: live MIDI)') { |v| @options[:input] = v }
+          when :song
+            o.on('-b', '--bars N', Float, 'Bars to render to a file (default: the whole song)') { |v| @options[:bars] = v.rationalize }
           end
 
           @declared.each do |p|

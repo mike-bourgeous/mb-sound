@@ -44,13 +44,24 @@ module MB
       # session (#bg, #at_bar, #master, ...) with the declared parameters.
       # It plays live until it has ended (including master effects tails),
       # or with an audio file argument (or --output) renders +bars+ bars
-      # plus the tail.
+      # (or --bars; nil until everything ends) plus the tail.
       #
       # Example:
       #     MB::Sound.song_script(bars: 8) { |p| my_song }
-      def song_script(bars:, **params, &block)
+      def song_script(bars: nil, **params, &block)
         raise ArgumentError, 'Pass a block that arranges the song' unless block
         runner(:song, params).run_song(bars: bars, &block)
+      end
+
+      # Returns true if +file+ (pass __FILE__) is the script being run, rather
+      # than loaded by another script or bin/sound.rb.  Unlike
+      # `$0 == __FILE__`, it matches however the path was written (e.g. when
+      # the test coverage helper requires the script by its full path).
+      #
+      # Example:
+      #     song_script(bars: 8) { my_song } if main_script?(__FILE__)
+      def main_script?(file)
+        File.expand_path($0) == File.expand_path(file)
       end
 
       private
