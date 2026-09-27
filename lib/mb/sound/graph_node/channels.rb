@@ -69,6 +69,11 @@ module MB
         end
         alias at_rate sample_rate=
 
+        # Allows numbers first in arithmetic with bundles (e.g. `2 * bundle`).
+        def coerce(numeric)
+          [numeric.constant(sample_rate: sample_rate), self]
+        end
+
         # Channel bundles have no single output buffer; sample their channels.
         def sample(count)
           raise NotImplementedError, "A #{channel_count}-channel bundle has no single output; sample its channels (e.g. bundle[0].sample(count)) or play it"

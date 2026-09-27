@@ -19,7 +19,8 @@ RSpec.describe(MB::Sound::GraphNode::Channels) do
     end
 
     it 'rejects things that are not nodes and empty bundles' do
-      expect { MB::Sound.channels(left, 5) }.to raise_error(ArgumentError, /graph nodes.*constant/)
+      expect { MB::Sound::GraphNode::Channels.new([left, 5]) }.to raise_error(ArgumentError, /graph nodes.*constant/)
+      expect { MB::Sound.channels(left, 5) }.to raise_error(ArgumentError, /not both/)
       expect { MB::Sound.channels }.to raise_error(ArgumentError, /at least one/)
     end
   end
