@@ -412,6 +412,38 @@ RSpec.describe(MB::Sound::Session) do
     end
   end
 
+  describe 'slow player warnings' do
+    before do
+      session.instance_variable_set(:@realtime, true)
+      allow(session).to receive(:start_thread)
+    end
+
+    # A node that sleeps for +seconds+ on each call to #sample for which the
+    # block returns true.
+    def sleepy(seconds, &when_slow)
+      calls = 0
+      1.constant.proc { |d| sleep(seconds) if when_slow.call(calls += 1); d }
+    end
+
+    it 'ignores a slow start' do
+      session.add(sleepy(0.1) { |call| call == 1 })
+      expect(session).not_to receive(:warn)
+      16.times { session.process_buffer }
+    end
+
+    it 'ignores a single spike just after the warm-up' do
+      session.add(sleepy(0.1) { |call| call == 7 })
+      expect(session).not_to receive(:warn)
+      16.times { session.process_buffer }
+    end
+
+    it 'warns once about a player that stays slow' do
+      session.add(sleepy(0.02) { true }) # 800 frames are 16.7 ms
+      expect(session).to receive(:warn).with(/is taking \d+% of its audio buffer time/).once
+      16.times { session.process_buffer }
+    end
+  end
+
   it 'mixes mono graphs to every channel and arrays to separate channels' do
     session.add([1.constant, 2.constant])
     session.add(4.constant, at: :now)
