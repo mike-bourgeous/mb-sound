@@ -517,13 +517,15 @@ module MB
         case sound
         when String
           [MB::Sound.file_input(sound)]
-        when MB::Sound::GraphNode
-          [sound]
+        when MB::Sound::GraphNode, MB::Sound::GraphNode::MultiOutput
+          sound.outputs
         when Array
-          raise ArgumentError, 'Pass an Array of GraphNodes, one per channel' unless !sound.empty? && sound.all?(MB::Sound::GraphNode)
-          sound
+          unless !sound.empty? && sound.all? { |s| s.is_a?(MB::Sound::GraphNode) || s.is_a?(MB::Sound::GraphNode::MultiOutput) }
+            raise ArgumentError, 'Pass an Array of GraphNodes, one per channel'
+          end
+          sound.flat_map(&:outputs)
         else
-          raise ArgumentError, "Cannot play #{sound.class} in the background; use a GraphNode, an Array of GraphNodes, or a filename"
+          raise ArgumentError, "Cannot play #{sound.class} in the background; use a GraphNode, a channel bundle, an Array of GraphNodes, or a filename"
         end
       end
 

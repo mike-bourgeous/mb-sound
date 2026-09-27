@@ -25,8 +25,14 @@ module MB
         plot = { header_lines: header.lines.count, graphical: graphical } if plot.nil? || plot == true
         plot[:spectrum] = spectrum if plot.is_a?(Hash) && !plot.include?(:spectrum)
 
-        if file_tone_data.is_a?(Numo::NArray) || (file_tone_data.is_a?(MB::Sound::GraphNode) && !file_tone_data.respond_to?(:read))
+        if file_tone_data.is_a?(Numo::NArray) || (file_tone_data.is_a?(MB::Sound::GraphNode) && !file_tone_data.respond_to?(:read)) ||
+            file_tone_data.is_a?(MB::Sound::GraphNode::MultiOutput)
           file_tone_data = [file_tone_data]
+        end
+
+        # Expand multi-output nodes (e.g. stereo bundles) into their channels
+        if file_tone_data.is_a?(Array) && !file_tone_data.empty? && file_tone_data.all? { |d| d.is_a?(GraphNode) || d.is_a?(GraphNode::MultiOutput) }
+          file_tone_data = file_tone_data.flat_map(&:outputs)
         end
 
         case file_tone_data

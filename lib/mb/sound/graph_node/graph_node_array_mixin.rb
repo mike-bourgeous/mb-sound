@@ -21,6 +21,15 @@ module MB
           MB::Sound::GraphNodeInput.new(self, channels: num_channels, buffer_size: buffer_size)
         end
 
+        # Returns a bundle with the GraphNodes in this Array as separate
+        # channels (see GraphNode::Channels).
+        #
+        # Example:
+        #     [left, right].channels.softclip
+        def channels
+          MB::Sound::GraphNode::Channels.new(self)
+        end
+
         # Runs the GraphNodes in this Array through one multichannel reverb
         # (see GraphNode#reverb), one reverb input per element, and returns an
         # Array of the reverb's output channels: one per input unless

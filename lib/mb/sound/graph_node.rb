@@ -13,6 +13,7 @@ require_relative 'graph_node/delay_methods'
 require_relative 'graph_node/distortion_methods'
 require_relative 'graph_node/debug_methods'
 require_relative 'graph_node/duration_methods'
+require_relative 'graph_node/channel_methods'
 
 module MB
   module Sound
@@ -69,6 +70,7 @@ module MB
       include DistortionMethods
       include DebugMethods
       include DurationMethods
+      include ChannelMethods
 
       # The nodes that carry this node's output channels.  Every node has
       # outputs: a single-channel node is its own only output, and nodes with
@@ -292,6 +294,7 @@ require_relative 'graph_node/graph_node_array_mixin'
 require_relative 'graph_node/constant'
 require_relative 'graph_node/input_channel_split'
 require_relative 'graph_node/mix_source'
+require_relative 'graph_node/channels'
 require_relative 'graph_node/io_sample_mixin'
 require_relative 'graph_node/mixer'
 require_relative 'graph_node/multiplier'

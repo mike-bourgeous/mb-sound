@@ -134,7 +134,8 @@ The container has no audio device, so check sound-producing code by rendering it
 
 - `#sample` usually returns a reused buffer; `.dup` each buffer before collecting several of them (several false "bugs" came from forgetting this).
 - Oscillators (`Tone`, `noise`) default to amplitude 0.1, and `*` only raises its right operand to full level, so `tone * env` is 10x quieter than `env * tone`.  Use `.at(...)` explicitly in examples and check levels by rendering.
-- `Tone.new` (and `Numeric#hz`) defaults to a 5-second duration, so graphs driven by clips or LFOs need `.forever` (`Tone#lfo` now plays forever by default).- `40.hz` is an oscillator, not a constant; use `40.constant` for fixed values in arithmetic.
+- `Tone.new` (and `Numeric#hz`) defaults to a 5-second duration, so graphs driven by clips or LFOs need `.forever` (`Tone#lfo` now plays forever by default).
+- `40.hz` is an oscillator, not a constant; use `40.constant` for fixed values in arithmetic.
 - C4 = 60 (C3 = 48).  Derive expected values in specs from note constants or a quick script; hand-computed notes and offsets caused several wrong assertions.
 - A realtime Session's render thread runs until `close`; close sessions in spec `after` blocks.  `kill -QUIT <pid>` prints every thread's backtrace (`MB::U.sigquit_backtrace`, set up in spec_helper).
 - Before adding `bin/sound.rb` commands, check for collisions with `MB::Sound` methods and Pry commands (`Pry::Commands`; e.g. `reset` and `watch` are taken).
