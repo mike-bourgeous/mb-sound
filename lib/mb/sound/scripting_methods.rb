@@ -1,62 +1,59 @@
-require 'optionparser'
+require_relative 'script_runner'
 
 module MB
   module Sound
-    # Helpers for standalone scripts/synths/effects/etc.
+    # Helpers for standalone scripts in bin/: effects, synths, and songs.
+    # Each parses the common options and declared parameters (see
+    # ScriptRunner), then plays through the background Session or renders
+    # to a file.  Run any script with --help to see its options.
     module ScriptingMethods
-      # TODO: for an effect script, we'd want audio input, audio output, and
-      # possibly midi input for control, all of which should be selectable
-      # between files and realtime i/o.
+      # Runs an effect script: the block gets the input (an audio file given
+      # as the first audio argument or --input, rung out after it ends, or
+      # live input) and the parameters, and returns the processed graph.
+      # Multichannel inputs are bundles, so effects run on every channel.
+      # A second audio argument or --output writes a file.
+      #
+      # Example:
+      #     MB::Sound.effect_script(delay: [0.25, 'Delay seconds'], feedback: 0.5) { |input, p|
+      #       input.delay(p.delay, feedback: p.feedback, dry: 1)
+      #     }
+      def effect_script(**params, &block)
+        raise ArgumentError, 'Pass a block that turns the input into a graph' unless block
+        ScriptRunner.new(:effect, params, script: script_path).run_effect(&block)
+      end
 
-      # Parses options and arguments from ARGV to set up MIDI input and audio
-      # output for a synthesizer script.  Yields input name to the block.  The
-      # block should return a node graph.
-      def synth_script
-        raise 'Provide a block to accept a MIDI name and return a node graph' unless block_given?
+      # Runs a synthesizer script: the block gets the MIDI input name (a
+      # MIDI file or port, or nil for live MIDI; pass it to #synth) and,
+      # with two block parameters, the declared parameters, and returns the
+      # graph.  An audio file argument or --output writes a file.
+      #
+      # Example:
+      #     MB::Sound.synth_script { |input|
+      #       MB::Sound.synth(input) { |midi| midi.hz.tone.ramp.at(1) * midi.env }
+      #     }
+      def synth_script(**params, &block)
+        raise ArgumentError, 'Provide a block to accept a MIDI name and return a node graph' unless block
+        ScriptRunner.new(:synth, params, script: script_path).run_synth(&block)
+      end
 
-        # TODO: support dropping into pry within the playback loop
-        MB::U.sigquit_backtrace
+      # Runs a song script: the block arranges the song on the current
+      # session (#bg, #at_bar, #master, ...) with the declared parameters.
+      # It plays live until it has ended (including master effects tails),
+      # or with an audio file argument (or --output) renders +bars+ bars
+      # plus the tail.
+      #
+      # Example:
+      #     MB::Sound.song_script(bars: 8) { |p| my_song }
+      def song_script(bars:, **params, &block)
+        raise ArgumentError, 'Pass a block that arranges the song' unless block
+        ScriptRunner.new(:song, params, script: script_path).run_song(bars: bars, &block)
+      end
 
-        options = {
-          input: nil,
-          output: nil,
-          force: false,
-          graphviz: false,
-          quiet: false,
-        }
+      private
 
-        OptionParser.new { |p|
-          # TODO: allow the script to add more options
-          p.on('-i', '--input MIDI_FILE_OR_JACK_PORT', String, 'A MIDI file to process, or a Jack port to connect for MIDI events')
-          p.on('-o', '--output AUDIO_FILE', String, 'An audio file to write output to (default is soundcard output)')
-          p.on('-f', '--force', TrueClass, 'Whether to overwrite an existing output file')
-          p.on('--graphviz', TrueClass, 'If true, opens a visualization of the node graph')
-          p.on('-q', '--quiet', TrueClass, 'Disable waveform plotting')
-        }.parse!(into: options)
-
-        ARGV.each do |a|
-          case a
-          when /.(flac|wav|mp3|ogg|mp4|m4a|opus)$/i
-            options[:output] ||= a
-
-          else
-            options[:input] ||= a
-          end
-        end
-
-        graph = yield options[:input]
-
-        # FIXME: this will break with an Array of nodes
-        if options[:graphviz]
-          graph.open_graphviz
-        end
-
-        if options[:output]
-          MB::Sound.write(options[:output], graph, overwrite: options[:force] || :prompt)
-        else
-          # FIXME: text console plots constantly scroll
-          MB::Sound.play(graph, plot: !options[:quiet])
-        end
+      # The script calling a *_script method, for --help.
+      def script_path
+        caller_locations(2, 1)[0]&.absolute_path || $0
       end
     end
   end

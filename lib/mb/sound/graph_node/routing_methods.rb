@@ -64,6 +64,13 @@ module MB
           MB::Sound::GraphNode::NodeSequence.new([self, *sources])
         end
 
+        # Returns a node that plays this node, then silence forever once it
+        # ends, so effects after it can ring out (see Ringdown).  On a
+        # multichannel node, each channel gets its own Ringdown.
+        def ringdown
+          MB::Sound::GraphNode::Ringdown.new(self)
+        end
+
         # Calls #sample with +count+ requested samples +times+ times,
         # concatenating the results into a single array.
         def multi_sample(count, times)
