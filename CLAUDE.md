@@ -44,6 +44,8 @@ play 123.hz.fm(369.hz.at(1000)).softclip.filter(150.hz.highpass(quality: 4))
 
 The DSL methods (`#filter`, `#delay`, `#softclip`, arithmetic operators, etc.) live in topic modules included by `GraphNode`, in `lib/mb/sound/graph_node/*_methods.rb`; `graph_node.rb` keeps naming, graph traversal, and shared private helpers.
 
+Every consumer of GraphNodes must call `get_sampler` on the node(s) it stores in its constructor (e.g. `Tone#fixup_source`, `ProcNode`, `Filter::Delay` for delay-time nodes).  That branches a node used in several places through a `Tee`, so each use gets the same samples instead of advancing it twice (verified: one LFO multiplied into two branches gives both the same values).  The user is open to an alternate design later, perhaps with the stereo/multichannel wiring work.
+
 Graph nodes maintain input/output relationships and support traversal via the `Traversable` mixin. Key node types live in `lib/mb/sound/graph_node/` (tone, noise, filter, resample, quantize, MIDI, etc.).
 
 ### Numeric Mixins
