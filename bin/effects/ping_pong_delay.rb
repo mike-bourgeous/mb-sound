@@ -2,8 +2,7 @@
 # A left/right ping-pong delay
 # (C)2025 Mike Bourgeous
 #
-# Usage: $0 [delay_s [feedback [dry [wet]]]] [input_filename [output_filename]]
-#        $0 --delay 0.25 --feedback 0.8 --dry 1 --wet 1 [input_filename [output_filename]]
+# Usage: $0 [--delay 0.25] [--feedback 0.8] [--dry 1] [--wet 1] [input_filename [output_filename]]
 #
 # Plays a sound file (or live input) through the delay, letting the echoes
 # ring out after the file ends.  Run with --help for all options.
@@ -13,10 +12,10 @@
 #     $0 sounds/transient_synth.flac
 #
 #     # Weak room slap-back echo simulation
-#     $0 sounds/drums.flac 0.01 0.3
+#     $0 --delay 0.01 --feedback 0.3 sounds/drums.flac
 #
 #     # Acceptable room ambience simulation
-#     $0 --wet -1 0.006 -0.3 sounds/drums.flac
+#     $0 --wet -1 --delay 0.006 --feedback -0.3 sounds/drums.flac
 
 require 'bundler/setup'
 require 'mb-sound'

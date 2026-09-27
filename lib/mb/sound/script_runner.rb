@@ -20,10 +20,9 @@ module MB
     #
     #     effect_script(delay: 0.25, feedback: [0.5, 'Feedback gain']) { |input, p| ... }
     #
-    # Each becomes a --name option (--delay 0.3; true/false defaults become
-    # --name/--no-name switches), and numeric parameters can also be given as
-    # bare numbers in declaration order (e.g. `script.rb 0.3 0.6`).  The
-    # block's +p+ has a method per parameter (p.delay).
+    # Each becomes a --name option (--delay 0.3 or --delay=-0.3; true/false
+    # defaults become --name/--no-name switches).  The block's +p+ has a
+    # method per parameter (p.delay).
     class ScriptRunner
       # Audio file extensions recognized in positional arguments.
       AUDIO_EXTENSIONS = /\.(flac|wav|mp3|ogg|mp4|m4a|opus|aiff?)\z/i
@@ -163,56 +162,23 @@ module MB
           end
         }
 
-        # Bare negative numbers look like options to OptionParser, so take
-        # numbers out first (unless they're the value of the previous option)
-        numbers = []
-        others = []
-        takes_value = value_options(parser)
-        argv.each_with_index do |a, idx|
-          previous = idx > 0 ? argv[idx - 1] : nil
-          if a.strip.match?(NUMBER) && !takes_value.include?(previous)
-            numbers << a
-          else
-            others << a
-          end
-        end
-
-        rest = parser.parse(others)
-        positional(numbers + rest, values)
+        rest = parser.parse(argv)
+        positional(rest)
         @params = Values.new(values)
       end
 
-      # A bare number argument.
-      NUMBER = /\A[+-]?(\d+(\.\d*)?|\.\d+)([eE][+-]?\d+)?\z/
-
-      # The option switches (e.g. "--delay", "-o") that take a value.
-      def value_options(parser)
-        list = []
-        parser.top.list.each do |sw|
-          next unless sw.respond_to?(:arg) && sw.arg && !sw.arg.start_with?('[')
-          list.concat(sw.long).concat(sw.short)
-        end
-        list
-      end
-
-      # Assigns positional arguments: bare numbers to numeric parameters in
-      # declaration order, and filenames to input and output by script kind.
-      def positional(args, values)
-        numeric_params = @declared.select { |p| p.default.is_a?(Numeric) }
-
+      # Assigns positional filenames to input and output by script kind.
+      def positional(args)
         args.each do |a|
-          if a.strip.match?(NUMBER)
-            param = numeric_params.shift
-            raise ArgumentError, "Too many numbers (#{a.inspect}); #{File.basename(@script)} takes #{@declared.count { |p| p.default.is_a?(Numeric) }}" if param.nil?
-            values[param.name] = convert(param, a)
-          elsif @kind == :effect && a.match?(AUDIO_EXTENSIONS)
+          if @kind == :effect && a.match?(AUDIO_EXTENSIONS)
             @options[:input] ? (@options[:output] ||= a) : (@options[:input] = a)
           elsif a.match?(AUDIO_EXTENSIONS)
             @options[:output] ||= a
           elsif @kind == :synth
             @options[:input] ||= a
           else
-            raise ArgumentError, "Unexpected argument #{a.inspect} (see --help)"
+            hint = @declared.empty? ? '' : "; parameters are options, e.g. --#{option_name(@declared.first)} #{a}"
+            raise ArgumentError, "Unexpected argument #{a.inspect} (see --help#{hint})"
           end
         end
       end

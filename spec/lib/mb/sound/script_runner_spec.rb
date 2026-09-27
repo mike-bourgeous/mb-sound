@@ -4,14 +4,14 @@ RSpec.describe(MB::Sound::ScriptRunner) do
   end
 
   describe 'parameters' do
-    it 'uses defaults, --name options, and bare numbers in declaration order' do
+    it 'uses defaults and --name options' do
       r = runner(:effect, [], delay: 0.25, feedback: [0.5, 'Feedback gain'], mode: :sine, wet: true)
       expect(r.params.to_h).to eq(delay: 0.25, feedback: 0.5, mode: :sine, wet: true)
 
       r = runner(:effect, ['--feedback', '0.7', '--mode', 'ramp', '--no-wet'], delay: 0.25, feedback: 0.5, mode: :sine, wet: true)
       expect([r.params.delay, r.params.feedback, r.params.mode, r.params.wet]).to eq([0.25, 0.7, :ramp, false])
 
-      r = runner(:effect, ['0.1', '-0.3'], delay: 0.25, feedback: 0.5)
+      r = runner(:effect, ['--delay', '0.1', '--feedback', '-0.3'], delay: 0.25, feedback: 0.5)
       expect(r.params.to_h).to eq(delay: 0.1, feedback: -0.3)
       expect(r.params[:delay]).to eq(0.1)
     end
@@ -19,13 +19,10 @@ RSpec.describe(MB::Sound::ScriptRunner) do
     it 'converts underscores to dashes and keeps Integer types' do
       r = runner(:effect, ['--tap-count', '3'], tap_count: 2)
       expect(r.params.tap_count).to eq(3)
-
-      r = runner(:effect, ['--feedback', '-0.3', '0.1'], delay: 0.25, feedback: 0.5)
-      expect(r.params.to_h).to eq(delay: 0.1, feedback: -0.3)
     end
 
-    it 'rejects extra numbers and unknown arguments' do
-      expect { runner(:effect, ['1', '2'], delay: 0.25) }.to raise_error(ArgumentError, /Too many numbers/)
+    it 'rejects bare numbers and unknown arguments, suggesting options' do
+      expect { runner(:effect, ['0.3'], delay: 0.25) }.to raise_error(ArgumentError, /Unexpected argument "0.3".*--delay 0.3/)
       expect { runner(:song, ['bogus']) }.to raise_error(ArgumentError, /Unexpected argument/)
     end
   end
