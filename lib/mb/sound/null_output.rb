@@ -54,10 +54,25 @@ module MB
         raise "Expected #{@channels} channels, got #{data.length}" unless @channels == data.length
         @frames_written += data[0].length
 
-        # FIXME: This should sleep relative to the previous call to maintain a
-        # rate, rather than sleeping for a fixed duration.
-        Kernel.sleep(data[0].length.to_f / @sample_rate) if @sleep
+        pace(data[0].length.to_f / @sample_rate) if @sleep
       end
+
+      # How far behind the playback rate writing may fall (e.g. after a pause
+      # between writes) before #write stops trying to catch up.
+      MAX_LAG = 0.5
+
+      # Sleeps until the audio written so far would have finished playing, so
+      # writes keep the playback rate even when the caller takes time between
+      # them (sleeping a fixed duration per call would add that time on top).
+      def pace(duration)
+        now = MB::U.clock_now
+        @next_time = now if @next_time.nil? || now - @next_time > MAX_LAG
+        @next_time += duration
+
+        delay = @next_time - now
+        Kernel.sleep(delay) if delay > 0
+      end
+      private :pace
 
       # Closes the output, preventing future writing (for compatibility with
       # other output types).
