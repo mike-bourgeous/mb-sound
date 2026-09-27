@@ -59,8 +59,8 @@ Graph nodes maintain input/output relationships and support traversal via the `T
 - `PlaybackMethods` - `play`, `input`, real-time audio, plus the background session:
   - `bg` / `stop` / `outro` (alias `fadeout`) / `panic` / `players` / `resume` / `stopped` / `forget` play sounds in the background through one shared `Session` (`lib/mb/sound/session.rb`) that mixes every player in a single render loop locked to the sequence timeline
   - `swap` changes the clips a player plays without rebuilding its graph; `master` (alias `master_fx`) sets master effects on the mix (see Sequences and Master effects below)
-- `MultichannelMethods` - `channels`, `stereo`, `spread` build multichannel signals and per-channel arguments (see Multichannel below)
   - `visualize` (alias `vis`) plots the mix live; `render` runs a `Session` into a file
+- `MultichannelMethods` - `channels`, `stereo`, `spread` build multichannel signals and per-channel arguments (see Multichannel below)
 - `ScheduleMethods` - `at_bar` (alias `on_bar`) / `after` / `every` / `scheduled` / `cancel` run blocks at bars on the `Session` timeline; `bg`/`stop`/`resume`/`bpm` inside them take effect exactly at the scheduled time (see `bin/songs/scheduled_song.rb`)
 - `PlotMethods` - Terminal/gnuplot visualization
 - `FFTMethods` - Spectral analysis
