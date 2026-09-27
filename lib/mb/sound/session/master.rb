@@ -55,12 +55,12 @@ module MB
         # With no block, the mix passes through unchanged (bypass).  Returns
         # a description of the chain.
         #
-        # A block with one parameter is called once for each channel, with
-        # that channel of the mix as a GraphNode, and returns the processed
-        # channel.  A block with one parameter per channel (or a splat) gets
-        # every channel at once and returns an Array with one node per
-        # channel, or a single node for every channel.  Nodes may also be
-        # MultiOutput nodes such as multichannel reverbs.
+        # A block with one parameter gets the whole mix as a channel bundle
+        # (GraphNode::Channels), so most methods run on every channel (e.g.
+        # `mix.softclip`) while multichannel methods like #reverb take all of
+        # them.  A block with one parameter per channel (or a splat) gets each
+        # channel separately.  Either returns a bundle, an Array with one node
+        # per channel, or a single node for every channel.
         #
         # +:fade+ - nil (default) to let the old chain's tails spill over,
         #           a number of bars to crossfade, or 0 to cut over.
@@ -156,24 +156,20 @@ module MB
 
           chans = source.outputs
           arity = block.arity
-          if arity == 0 || arity == 1
-            chain.nodes = chans.map { |c|
-              list = master_nodes(block.call(c))
-              unless list.length == 1
-                raise ArgumentError, "A one-parameter master block runs once per channel and must return one node (got #{list.length}); use a block with #{@channels} parameters for multichannel effects"
-              end
-              list[0]
-            }
-          elsif arity < 0 || arity == @channels
-            list = master_nodes(block.call(*chans))
-            list *= @channels if list.length == 1
-            unless list.length == @channels
-              raise ArgumentError, "The master block returned #{list.length} channels for a #{@channels}-channel session"
-            end
-            chain.nodes = list
-          else
-            raise ArgumentError, "Give the master block one parameter (called per channel) or #{@channels} (all channels at once); got #{arity}"
+          result = if arity == 0 || arity == 1
+                     block.call(GraphNode::Channels.new(chans))
+                   elsif arity < 0 || arity == @channels
+                     block.call(*chans)
+                   else
+                     raise ArgumentError, "Give the master block one parameter (the whole mix) or #{@channels} (one per channel); got #{arity}"
+                   end
+
+          list = master_nodes(result)
+          list *= @channels if list.length == 1
+          unless list.length == @channels
+            raise ArgumentError, "The master block returned #{list.length} channels for a #{@channels}-channel session"
           end
+          chain.nodes = list
 
           chain.timeline_nodes = chain.nodes.uniq.flat_map { |n| [n, *n.graph] }.grep(Sequence::TimelineNode).uniq
           chain.description = description || shorten("master: #{chain.nodes.uniq.map { |n| MB::Sound.send(:playback_info, n) }.uniq.join(', ')}")

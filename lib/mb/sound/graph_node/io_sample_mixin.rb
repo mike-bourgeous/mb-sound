@@ -9,9 +9,11 @@ module MB
       module IOSampleMixin
         include MultiOutput
 
-        # Returns an Array of graph source nodes for each of the channels (up
-        # to +:max_channels+) on this input.  If the channel count would be 1,
-        # then the input itself is returned.  Similar to GraphNode#tee.
+        # Returns a channel bundle (Channels) of graph source nodes for each of
+        # the channels (up to +:max_channels+) on this input, which acts like
+        # an Array (e.g. `l, r = input.split`).  If the channel count would be
+        # 1, then an Array with the input itself is returned.  Similar to
+        # GraphNode#tee.
         #
         # Returns the same objects each time, so use GraphNode#get_sampler if
         # they need to be branched (most nodes already use get_sampler
@@ -22,13 +24,13 @@ module MB
           return [self] if ch == 1
 
           @split ||= InputChannelSplit.new(self, max_channels: max_channels)
-          @split.outputs
+          Channels.new(@split.outputs)
         end
 
         # Returns a GraphNode output for each input channel by wrapping #split.
         # For MultiOutput compatibility.
         def outputs
-          split
+          split.to_a
         end
 
         # Reads +count+ frames (which should match the preferred buffer size of

@@ -129,6 +129,29 @@ module MB
           Channels.new([mid, side * amount]).from_mid_side
         end
 
+        # Runs every channel into one multichannel reverb (one reverb input
+        # per channel), returning a bundle of its outputs: as many as there
+        # are channels unless +:output_channels+ is given (a single output
+        # node for one).  Unlike most methods, this doesn't run separately on
+        # each channel: mixing the channels inside the reverb gives a more
+        # spacious, decorrelated sound.  Other parameters are the same as
+        # GraphNode#reverb.
+        #
+        # Example (bin/sound.rb):
+        #     master { |mix| mix.reverb(:hall, wet: -6.db).softclip(0.6, 0.98) }
+        def reverb(preset = :default, output_channels: channel_count, **kwargs)
+          Reverb.reverb(preset, input: self, output_channels: output_channels, **kwargs)
+        end
+
+        # Runs every channel into one feedback delay network reverb (see
+        # GraphNode#fdn_reverb, which takes the same parameters), returning a
+        # multi-output reverb node with one output per channel unless
+        # +:output_channels+ is given.
+        def fdn_reverb(**kwargs)
+          return @outputs[0].fdn_reverb(**kwargs) if channel_count == 1
+          DelayMethods.instance_method(:fdn_reverb).bind_call(self, **kwargs)
+        end
+
         # Panning a bundle (balance) will come with more pan laws.
         def pan(*)
           raise NotImplementedError, 'Panning a multichannel bundle (balance) is not supported yet; pan single-channel nodes (e.g. node.pan(-0.5)) or use .width'

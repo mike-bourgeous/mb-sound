@@ -59,7 +59,8 @@ if filename && File.readable?(filename)
   input = MB::Sound.file_input(filename)
   input_buffer_size = input.buffer_size
 
-  input = input.and_then(0.hz.at(0).for(extra)).named(filename)
+  # This effect is mono-only, so mix stereo files down
+  input = input.mono.and_then(0.hz.at(0).for(extra)).named(filename)
 else
   input = MB::Sound.input(channels: 1).named('audio input')
   input_buffer_size = input.buffer_size

@@ -200,7 +200,7 @@ module MB
             **params
           )
             .tap { |n| n.named(preset.to_s) if preset }
-            .yield_self { |n| output_channels > 1 ? n.outputs : n }
+            .yield_self { |n| output_channels > 1 ? Channels.new(n.outputs) : n }
         end
 
         # Initializes a reverb node with the given parameters.  See

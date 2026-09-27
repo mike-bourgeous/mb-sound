@@ -86,6 +86,33 @@ RSpec.describe(MB::Sound::GraphNode::Channels) do
     end
   end
 
+  describe 'methods that return bundles' do
+    it 'returns bundles from reverbs, multitap delays, split inputs, and stereo synth voices' do
+      expect(bundle.reverb(:room)).to be_a(described_class).and(have_attributes(channel_count: 2))
+      expect(1.constant.reverb(:room, output_channels: 2)).to be_a(described_class)
+      expect(1.constant.reverb(:room)).to be_a(MB::Sound::GraphNode::Reverb)
+
+      taps = 1.constant.multitap(0.1, 0.2)
+      expect(taps).to be_a(described_class)
+      l, r = taps
+      expect(l).to be_a(MB::Sound::GraphNode::MultitapDelay::DelayTap)
+
+      input = MB::Sound::ArrayInput.new(data: [Numo::SFloat.ones(10), Numo::SFloat.zeros(10)])
+      expect(input.split).to be_a(described_class)
+      expect(input.outputs).to be_a(Array)
+
+      chords = MB::Sound.seq(MB::Sound::A2, MB::Sound::C3).n1.loop
+      expect(chords.synth(voices: 2) { |v| v.tone.at(1).stereo }).to be_a(described_class)
+      expect(chords.synth(voices: 2) { |v| v.tone.at(1) }).not_to be_a(described_class)
+    end
+
+    it 'runs a bundle through one reverb with an input per channel' do
+      reverb = bundle.reverb(:room)[0].graph.grep(MB::Sound::GraphNode::Reverb).first
+      expect(reverb.sources.length).to eq(2) # one input per channel (padded with silence for the tail)
+      expect(reverb.graph).to include(left, right)
+    end
+  end
+
   it 'is a multi-output node with its channels as sources' do
     expect(bundle).to be_a(MB::Sound::GraphNode::MultiOutput)
     expect(bundle.channel_count).to eq(2)

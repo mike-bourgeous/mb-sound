@@ -192,11 +192,13 @@ module MB
       # the mix and returns the processed mix.  Also available as
       # #master_fx.
       #
-      # A block with one parameter is called once per channel, with that
-      # channel of the mix as a GraphNode.  A block with one parameter per
-      # channel gets them all at once and returns an Array of nodes (one per
-      # channel).  Call with nil (or false) to remove the effects, and with
-      # no arguments to see what is set.
+      # A block with one parameter gets the whole mix as a stereo bundle
+      # (GraphNode::Channels): most methods run on each channel (e.g.
+      # `mix.softclip`), and #reverb takes both channels as inputs.  A block
+      # with one parameter per channel (`|l, r|`) gets them separately.
+      # Return a bundle, an Array of nodes (one per channel), or one node for
+      # every channel.  Call with nil (or false) to remove the effects, and
+      # with no arguments to see what is set.
       #
       # Like #bg, new effects start on the next bar while anything is
       # playing (+:at+ picks another launch point).  By default the old

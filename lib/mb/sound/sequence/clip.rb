@@ -444,10 +444,10 @@ module MB
           }
           raise ArgumentError, 'Cannot build a synth from a clip with no notes' if graphs.empty?
 
-          if graphs.any?(Array)
-            graphs = graphs.map { |g| Array(g) }
+          if graphs.any? { |g| g.is_a?(Array) || g.channel_count > 1 }
+            graphs = graphs.map { |g| g.is_a?(Array) ? g : g.outputs }
             channels = graphs.map(&:length).max
-            Array.new(channels) { |c| graphs.map { |g| g[c % g.length] }.reduce(:+) }
+            GraphNode::Channels.new(Array.new(channels) { |c| graphs.map { |g| g[c % g.length] }.reduce(:+) })
           else
             graphs.reduce(:+)
           end
