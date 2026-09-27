@@ -23,7 +23,7 @@ module MB
       # down-mixed to it.
       def effect_script(input_channels: nil, **params, &block)
         raise ArgumentError, 'Pass a block that turns the input into a graph' unless block
-        ScriptRunner.new(:effect, params, script: script_path, input_channels: input_channels).run_effect(&block)
+        runner(:effect, params, input_channels: input_channels).run_effect(&block)
       end
 
       # Runs a synthesizer script: the block gets the MIDI input name (a
@@ -37,7 +37,7 @@ module MB
       #     }
       def synth_script(**params, &block)
         raise ArgumentError, 'Provide a block to accept a MIDI name and return a node graph' unless block
-        ScriptRunner.new(:synth, params, script: script_path).run_synth(&block)
+        runner(:synth, params).run_synth(&block)
       end
 
       # Runs a song script: the block arranges the song on the current
@@ -50,14 +50,21 @@ module MB
       #     MB::Sound.song_script(bars: 8) { |p| my_song }
       def song_script(bars:, **params, &block)
         raise ArgumentError, 'Pass a block that arranges the song' unless block
-        ScriptRunner.new(:song, params, script: script_path).run_song(bars: bars, &block)
+        runner(:song, params).run_song(bars: bars, &block)
       end
 
       private
 
-      # The script calling a *_script method, for --help.
-      def script_path
-        caller_locations(2, 1)[0]&.absolute_path || $0
+      # Creates a ScriptRunner for the script calling a *_script method,
+      # printing the error and option help and exiting for invalid
+      # arguments.
+      def runner(kind, params, **options)
+        script = caller_locations(2, 1)[0]&.absolute_path || $0
+        ScriptRunner.new(kind, params, script: script, **options)
+      rescue ScriptRunner::UsageError => e
+        $stderr.puts "#{File.basename(script.to_s)}: #{e.message}\n\n"
+        $stderr.puts e.help
+        exit 1
       end
     end
   end

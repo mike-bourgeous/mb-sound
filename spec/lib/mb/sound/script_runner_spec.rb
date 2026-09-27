@@ -22,8 +22,9 @@ RSpec.describe(MB::Sound::ScriptRunner) do
     end
 
     it 'rejects bare numbers and unknown arguments, suggesting options' do
-      expect { runner(:effect, ['0.3'], delay: 0.25) }.to raise_error(ArgumentError, /Unexpected argument "0.3".*--delay 0.3/)
-      expect { runner(:song, ['bogus']) }.to raise_error(ArgumentError, /Unexpected argument/)
+      expect { runner(:effect, ['0.3'], delay: 0.25) }.to raise_error(described_class::UsageError, /Unexpected argument "0.3".*--delay 0.3/)
+      expect { runner(:song, ['bogus']) }.to raise_error(described_class::UsageError, /Unexpected argument/)
+      expect { runner(:effect, ['--bogus']) }.to raise_error(described_class::UsageError, /invalid option: --bogus/) { |e| expect(e.help).to include('--output FILE') }
     end
   end
 

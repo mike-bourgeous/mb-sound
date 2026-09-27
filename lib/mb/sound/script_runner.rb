@@ -30,6 +30,18 @@ module MB
       # A declared parameter.
       Param = Struct.new(:name, :default, :description)
 
+      # Raised for invalid command-line arguments.  #help has the option
+      # list, which ScriptingMethods prints before exiting.
+      class UsageError < ArgumentError
+        # The option help text.
+        attr_reader :help
+
+        def initialize(message, help)
+          super(message)
+          @help = help
+        end
+      end
+
       # Parameter values given to script blocks, with a method per parameter.
       class Values
         def initialize(values)
@@ -130,7 +142,7 @@ module MB
         @options = { input: nil, output: nil, force: false, graphviz: false, plot: false, quiet: false, channels: @input_channels }
         values = @declared.to_h { |p| [p.name, p.default] }
 
-        parser = OptionParser.new { |o|
+        @parser = parser = OptionParser.new { |o|
           o.banner = "Options for #{File.basename(@script)}:"
           o.on('-o', '--output FILE', 'Write to an audio file instead of playing') { |v| @options[:output] = v }
           o.on('-f', '--force', '--overwrite', 'Overwrite the output file') { @options[:force] = true }
@@ -162,7 +174,11 @@ module MB
           end
         }
 
-        rest = parser.parse(argv)
+        begin
+          rest = parser.parse(argv)
+        rescue OptionParser::ParseError => e
+          raise UsageError.new(e.message, parser.to_s)
+        end
         positional(rest)
         @params = Values.new(values)
       end
@@ -178,7 +194,7 @@ module MB
             @options[:input] ||= a
           else
             hint = @declared.empty? ? '' : "; parameters are options, e.g. --#{option_name(@declared.first)} #{a}"
-            raise ArgumentError, "Unexpected argument #{a.inspect} (see --help#{hint})"
+            raise UsageError.new("Unexpected argument #{a.inspect}#{hint}", @parser.to_s)
           end
         end
       end
