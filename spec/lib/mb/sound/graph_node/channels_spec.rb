@@ -54,10 +54,20 @@ RSpec.describe(MB::Sound::GraphNode::Channels) do
       expect(firsts(1.constant.pan(MB::Sound::GraphNode::Constant.new(1, sample_rate: 48000)))).to eq([0, 1])
     end
 
-    it 'rejects unknown pan laws, out-of-range positions, and bundle panning' do
+    it 'rejects unknown pan laws and out-of-range positions' do
       expect { 1.constant.pan(0, law: :linear) }.to raise_error(ArgumentError, /pan law/)
       expect { 1.constant.pan(2) }.to raise_error(ArgumentError, /-1 to 1/)
-      expect { bundle.pan(0) }.to raise_error(NotImplementedError, /balance/)
+      expect { bundle.pan(2) }.to raise_error(ArgumentError, /-1 to 1/)
+    end
+
+    it 'balances stereo bundles and pans one-channel bundles' do
+      even = MB::Sound.stereo(1.constant, 1.constant)
+      expect(firsts(even.pan(-1))).to eq([1, 0])
+      expect(firsts(even.pan(0))).to eq([1, 1])
+      expect(firsts(even.pan(0.5))).to eq([0.5412, 1])
+      expect(firsts(even.pan(MB::Sound::GraphNode::Constant.new(-0.5, sample_rate: 48000)))).to eq([1, 0.5412])
+      expect(firsts(MB::Sound.channels(1.constant).pan(1))).to eq([0, 1])
+      expect { MB::Sound.channels(left, right, 3.constant).pan(0) }.to raise_error(ArgumentError, /1 or 2 channels/)
     end
 
     it 'mixes down, swaps, and picks channels' do
