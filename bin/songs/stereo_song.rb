@@ -6,7 +6,8 @@
 #
 # Usage:
 #     bin/songs/stereo_song.rb             # plays live in the background session
-#     bin/songs/stereo_song.rb song.flac   # renders to a file instead
+#     bin/songs/stereo_song.rb song.flac   # renders to a file instead (-f to overwrite)
+#     bin/songs/stereo_song.rb --help      # all options
 #
 # Or in bin/sound.rb:
 #     load 'bin/songs/stereo_song.rb'
@@ -70,14 +71,5 @@ module MB::Sound
     at_bar(7) { outro fade: 2 }
   end
 
-  if $0 == __FILE__
-    if ARGV[0]
-      seconds = render(ARGV[0], bars: STEREO_SONG_BARS, tail: true, overwrite: true) { stereo_song }
-      puts "Rendered #{seconds.round(1)} seconds to #{ARGV[0]}"
-    else
-      stereo_song
-      puts 'Playing (Ctrl-C to stop)'
-      wait # until the song and its reverb tails have ended
-    end
-  end
+  song_script(bars: STEREO_SONG_BARS) { stereo_song } if $0 == __FILE__
 end

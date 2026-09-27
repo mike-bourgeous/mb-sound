@@ -64,11 +64,12 @@ module MB
       # Creates a runner for a script of +kind+ with +params+ declared as
       # {name => default} or {name => [default, 'description']}, parsing
       # +argv+ (which is modified) and printing help for +script+.
-      def initialize(kind, params = {}, argv: ARGV, script: $0)
+      def initialize(kind, params = {}, argv: ARGV, script: $0, input_channels: nil)
         raise ArgumentError, "Unknown script kind #{kind.inspect}" unless [:effect, :synth, :song].include?(kind)
 
         @kind = kind
         @script = script
+        @input_channels = input_channels
         @declared = params.map { |name, spec|
           default, description = spec.is_a?(Array) ? spec : [spec, nil]
           Param.new(name.to_sym, default, description)
@@ -93,7 +94,7 @@ module MB
         announce(graph)
 
         ringdowns = graph_nodes(graph).grep(GraphNode::Ringdown)
-        play_or_render(graph, channels: [2, graph.channel_count].max) do |session|
+        play_or_render(graph) do |session|
           stop_after_ringdown(session, ringdowns) unless ringdowns.empty?
         end
       end
@@ -105,7 +106,7 @@ module MB
       def run_synth(&block)
         graph = block.arity == 1 ? block.call(@options[:input]) : block.call(@options[:input], @params)
         announce(graph)
-        play_or_render(graph, channels: [2, graph.channel_count].max)
+        play_or_render(graph)
       end
 
       # Runs a song: the block arranges it on the current session (with #bg,
@@ -127,14 +128,14 @@ module MB
 
       # Parses +argv+ into @options and @params.
       def parse(argv)
-        @options = { input: nil, output: nil, force: false, graphviz: false, plot: false, quiet: false, channels: nil }
+        @options = { input: nil, output: nil, force: false, graphviz: false, plot: false, quiet: false, channels: @input_channels }
         values = @declared.to_h { |p| [p.name, p.default] }
 
         parser = OptionParser.new { |o|
           o.banner = "Options for #{File.basename(@script)}:"
           o.on('-o', '--output FILE', 'Write to an audio file instead of playing') { |v| @options[:output] = v }
           o.on('-f', '--force', '--overwrite', 'Overwrite the output file') { @options[:force] = true }
-          o.on('-g', '--graphviz', 'Open a visualization of the node graph') { @options[:graphviz] = true }
+          o.on('-g', '--graphviz', 'Open a visualization of the node graph') { @options[:graphviz] = true } unless @kind == :song
           o.on('-p', '--plot', 'Plot the output while playing live') { @options[:plot] = true }
           o.on('-q', '--quiet', "Don't print the parameters") { @options[:quiet] = true }
 
@@ -240,7 +241,10 @@ module MB
       # visualization (with --graphviz).
       def announce(graph)
         print_params
-        graph.open_graphviz if @options[:graphviz]
+        if @options[:graphviz]
+          png = graph.open_graphviz
+          puts "Wrote GraphViz image to #{png}"
+        end
       end
 
       def print_params
@@ -256,11 +260,12 @@ module MB
         [graph, *graph.outputs, *graph.graph]
       end
 
-      # Plays +graph+ live, or renders it to the output file, calling the
-      # block with the session after the graph is added.
-      def play_or_render(graph, channels:)
+      # Plays +graph+ live, or renders it to the output file (with as many
+      # channels as the graph), calling the block with the session after the
+      # graph is added.
+      def play_or_render(graph)
         if @options[:output]
-          seconds = MB::Sound.render(@options[:output], channels: channels, overwrite: overwrite) do
+          seconds = MB::Sound.render(@options[:output], channels: graph.channel_count, overwrite: overwrite) do
             MB::Sound.bg(:script, graph, fade: 0)
             yield Session.current if block_given?
           end
@@ -282,8 +287,9 @@ module MB
       end
 
       # Stops the script's player once every Ringdown in the graph has ended
-      # and the mix has been quiet for Session::TAIL_QUIET_SECONDS (or after
-      # Session::MAX_TAIL_SECONDS of tail).
+      # and the mix has been quiet for Session::TAIL_QUIET_SECONDS, or fades
+      # it out over Session::TAIL_FADE_SECONDS after Session::MAX_TAIL_SECONDS
+      # of tail.
       def stop_after_ringdown(session, ringdowns)
         rate = session.output.sample_rate
         quiet = 0
@@ -293,8 +299,12 @@ module MB
           next unless ringdowns.all?(&:ended?)
           tail += mix[0].length
           quiet = session.quiet?(mix) ? quiet + mix[0].length : 0
-          if quiet >= Session::TAIL_QUIET_SECONDS * rate || tail >= Session::MAX_TAIL_SECONDS * rate
+          if quiet >= Session::TAIL_QUIET_SECONDS * rate
             session.remove(:script, fade: 0)
+            session.remove_tap(tap)
+          elsif tail >= Session::MAX_TAIL_SECONDS * rate
+            t = session.transport
+            session.remove(:script, fade: Session::TAIL_FADE_SECONDS / t.seconds(t.bar_length))
             session.remove_tap(tap)
           end
         }

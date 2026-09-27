@@ -17,9 +17,13 @@ module MB
       #     MB::Sound.effect_script(delay: [0.25, 'Delay seconds'], feedback: 0.5) { |input, p|
       #       input.delay(p.delay, feedback: p.feedback, dry: 1)
       #     }
-      def effect_script(**params, &block)
+      #
+      # +input_channels+ sets the default input channel count (e.g. 2 for a
+      # stereo effect; the -c option overrides it); files are up- or
+      # down-mixed to it.
+      def effect_script(input_channels: nil, **params, &block)
         raise ArgumentError, 'Pass a block that turns the input into a graph' unless block
-        ScriptRunner.new(:effect, params, script: script_path).run_effect(&block)
+        ScriptRunner.new(:effect, params, script: script_path, input_channels: input_channels).run_effect(&block)
       end
 
       # Runs a synthesizer script: the block gets the MIDI input name (a
