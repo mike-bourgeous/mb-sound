@@ -380,11 +380,27 @@ module MB
         alias value number
 
         # Creates a graph node that outputs the frequency in Hz of the most
-        # recent event's note number.
+        # recent event's note number.  See also #period.
         def hz(transport: nil)
           number(transport: transport).freq
         end
         alias frequency hz
+
+        # Creates a graph node that outputs the period in seconds (one cycle,
+        # 1 / #hz) of the most recent event's note, e.g. for a delay that
+        # resonates at each note's pitch.  Use `smoothing: false` so the
+        # delay jumps to each new note instead of gliding.
+        #
+        # Example (bin/sound.rb), a comb resonator plucked by noise bursts:
+        #     notes = seq(A2, E3, C3).n4.loop
+        #     excite = noise.at(1).forever * notes.env(0, 0.004, 0, 0.001)
+        #     bg :string, excite.delay(notes.period, feedback: 0.98, dry: 1, wet: 1, smoothing: false) * 0.3
+        #
+        # The delay's feedback is a plain gain, so this rings brightly like
+        # a comb filter rather than a damped Karplus-Strong string.
+        def period(transport: nil)
+          1 / hz(transport: transport)
+        end
 
         # Creates an oscillator (a Tone) whose frequency follows this clip's
         # notes.  Chain a wave type, e.g. `clip.tone.ramp`.

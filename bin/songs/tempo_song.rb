@@ -24,6 +24,8 @@
 #     bg :alt, (s.tone.at(1) * s.env(0.001, 0.1, 0, 0.1)).delay(2.bars.lfo.square.at(3.n16..5.n16), dry: 1, wet: -4.db) * 0.3
 #     master { |mix| mix.filter(:lowpass, cutoff: 8.bars.lfo.at(800..8000)) }   # a master sweep that freezes while stopped
 #     master { |mix| mix.filter(:lowpass, cutoff: 8.bars.lfo.freewheel.at(800..8000)) }   # keeps moving while stopped
+#     notes = seq(A2, E3, C3).n4.loop        # a comb resonator tuned to each note (Clip#period)
+#     bg :string, (noise.at(1).forever * notes.env(0, 0.004, 0, 0.001)).delay(notes.period, feedback: 0.98, dry: 1, wet: 1, smoothing: false) * 0.3
 
 require 'bundler/setup'
 require 'mb-sound'
