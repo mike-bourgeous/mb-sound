@@ -185,10 +185,8 @@ module MB
           case result
           when Array
             result.flat_map { |r| master_nodes(r) }
-          when GraphNode::MultiOutput
+          when GraphNode, GraphNode::MultiOutput
             result.outputs
-          when GraphNode
-            [result]
           else
             raise ArgumentError, "The master block must return a GraphNode or an Array of them (got #{result.class})"
           end

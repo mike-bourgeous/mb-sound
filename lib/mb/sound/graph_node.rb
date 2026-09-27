@@ -70,6 +70,20 @@ module MB
       include DebugMethods
       include DurationMethods
 
+      # The nodes that carry this node's output channels.  Every node has
+      # outputs: a single-channel node is its own only output, and nodes with
+      # several outputs (MultiOutput, e.g. a stereo reverb or a channel
+      # bundle) return one node per channel.  Consumers can use #outputs
+      # without checking which kind of node they have.
+      def outputs
+        [self]
+      end
+
+      # The number of output channels (see #outputs).
+      def channel_count
+        outputs.length
+      end
+
       # Returns the class name, or a custom name set by the subclass (e.g. '/'
       # for a division proc node).
       def node_type_name

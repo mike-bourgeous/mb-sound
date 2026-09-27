@@ -156,7 +156,7 @@ module MB
           tail = decay + 0.5 if tail.nil?
           tail = 0 if tail == false
 
-          input = if self.is_a?(MultiOutput)
+          input = if channel_count > 1
             self.outputs.map { |out|
               node = out.get_sampler
               tail > 0 ? node.and_then(0.constant.for(tail)) : node

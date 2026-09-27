@@ -10,6 +10,11 @@ module MB
           raise NotImplementedError, 'Multi-output graph nodes must implement #outputs to return NodeOutputs'
         end
 
+        # The number of output channels (see #outputs).
+        def channel_count
+          outputs.length
+        end
+
         # Notifies spies on the core node when the first output is sampled.
         #
         # TODO: give more useful data than just the first output, e.g. sum,

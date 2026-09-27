@@ -12,11 +12,11 @@ module MB
       # found, will default to 800.
       def initialize(*nodes, channels: 1, buffer_size: nil)
         nodes = nodes[0] if nodes.length == 1 && nodes[0].is_a?(Array)
-        raise 'All sources must be GraphNodes' unless nodes.length >= 1 && nodes.all?(MB::Sound::GraphNode)
+        unless nodes.length >= 1 && nodes.all? { |n| n.is_a?(MB::Sound::GraphNode) || n.is_a?(MB::Sound::GraphNode::MultiOutput) }
+          raise 'All sources must be GraphNodes'
+        end
 
-        nodes = nodes.flat_map { |n|
-          n.is_a?(MB::Sound::GraphNode::MultiOutput) ? n.outputs.map(&:get_sampler) : n.get_sampler
-        }
+        nodes = nodes.flat_map { |n| n.outputs.map(&:get_sampler) }
 
         @sample_rate = nodes.map(&:sample_rate).max
         nodes.each do |n|
