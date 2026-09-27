@@ -26,10 +26,12 @@ RSpec.describe(MB::Sound::Session::Master) do
   describe 'blocks' do
     before { session.add([1.constant, 2.constant]) }
 
-    it 'calls a one-parameter block once per channel' do
-      calls = 0
-      session.master { |mix| calls += 1; mix * 10 }
-      expect(calls).to eq(2)
+    it 'gives a one-parameter block the whole mix as a bundle' do
+      given = []
+      session.master { |mix| given << mix; mix * 10 }
+      expect(given.length).to eq(1)
+      expect(given[0]).to be_a(MB::Sound::GraphNode::Channels)
+      expect(given[0].channel_count).to eq(2)
       expect(run(800).map { |c| c[0] }).to eq([10, 20])
       expect(session.master_active?).to eq(true)
     end
@@ -60,8 +62,14 @@ RSpec.describe(MB::Sound::Session::Master) do
       expect { session.master { |a, b, c| a } }.to raise_error(ArgumentError, /one parameter.*or 2/)
     end
 
-    it 'rejects per-channel blocks that return several channels' do
-      expect { session.master { |m| [m, m] } }.to raise_error(ArgumentError, /must return one node.*2 parameters/)
+    it 'rejects blocks that return the wrong number of channels' do
+      expect { session.master { |m| [m[0], m[1], m[0]] } }.to raise_error(ArgumentError, /3 channels for a 2-channel/)
+    end
+
+    it 'runs a stereo reverb on the whole mix' do
+      session.master { |mix| mix.reverb(:room) }
+      expect(run(800).map { |c| c[0] }).to all(be_a(Float))
+      expect(session.master_info).to include('Reverb')
     end
 
     it 'rejects the wrong number of channels and things that are not nodes' do

@@ -195,6 +195,57 @@ RSpec.describe(MB::Sound::PlaybackMethods) do
     end
   end
 
+  describe '#wait' do
+    let(:session) { MB::Sound::Session.new(output: MB::Sound::NullOutput.new(channels: 2, sleep: false), buffer_size: 800, realtime: true) }
+
+    after { session.close }
+
+    def within(&block)
+      MB::Sound::Session.with_context(session: session, &block)
+    end
+
+    it 'returns right away if nothing is playing' do
+      within { expect(MB::Sound.wait).to eq(true) }
+    end
+
+    it 'waits for sounds to end and the mix to be quiet for a second' do
+      frames = 0
+      session.add_tap { |mix| frames += mix[0].length }
+      within do
+        MB::Sound.bg(1.constant.for(0.1))
+        expect(MB::Sound.wait).to eq(true)
+      end
+      expect(session).to be_idle
+      expect(frames).to be >= 48000 * (0.1 + MB::Sound::Session::TAIL_QUIET_SECONDS)
+    end
+
+    it 'stops waiting for a tail that never ends after the tail limit' do
+      within do
+        MB::Sound.bg(1.constant.for(0.05))
+        MB::Sound.master(at: :now) { |mix| mix.delay(seconds: 0.1, feedback: 1, dry: 1, wet: 1) }
+        expect(MB::Sound.wait(timeout: 30)).to eq(true)
+      end
+    end
+
+    it 'gives up after a timeout' do
+      paced = MB::Sound::Session.new(output: MB::Sound::NullOutput.new(channels: 2), buffer_size: 800, realtime: true)
+      MB::Sound::Session.with_context(session: paced) do
+        MB::Sound.bg(1.constant)
+        t = MB::U.clock_now
+        expect(MB::Sound.wait(timeout: 0.2)).to eq(false)
+        expect(MB::U.clock_now - t).to be_between(0.2, 1)
+      end
+    ensure
+      paced&.close
+    end
+
+    it 'refuses to wait inside a scheduled block' do
+      MB::Sound::Session.with_context(session: session, batch: []) do
+        expect { MB::Sound.wait }.to raise_error(/scheduled block/)
+      end
+    end
+  end
+
   describe '#swap' do
     after(:each) do
       MB::Sound::Session.default.close
@@ -310,6 +361,20 @@ RSpec.describe(MB::Sound::PlaybackMethods) do
         MB::Sound.at_bar(3) { MB::Sound.bpm(60) }
       end
       expect(seconds).to eq(2 * 2 + 2 * 4) # two bars at 120 BPM, two at 60
+    end
+
+    it 'adds the master tail after the bars limit with tail: true' do
+      song = proc do
+        MB::Sound.bg(0.5.constant)
+        MB::Sound.master { |mix| mix.delay(seconds: 0.2) }
+      end
+      expect(MB::Sound.render(filename, bars: 1, bpm: 120, &song)).to eq(2)
+
+      seconds = MB::Sound.render(filename, bars: 1, bpm: 120, tail: true, overwrite: true, &song)
+      expect(seconds).to be_within(0.02).of(2 + 0.2 + 1) # the delay rings 0.2 s past the end, then a second of quiet
+      data = MB::Sound.read(filename)[0]
+      expect(data[(2.1 * 48000).round]).to be_within(0.01).of(0.5)
+      expect(data[(2.3 * 48000).round].abs).to be < 0.001
     end
 
     it 'accepts a Duration for bars' do

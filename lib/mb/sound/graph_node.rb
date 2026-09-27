@@ -13,6 +13,7 @@ require_relative 'graph_node/delay_methods'
 require_relative 'graph_node/distortion_methods'
 require_relative 'graph_node/debug_methods'
 require_relative 'graph_node/duration_methods'
+require_relative 'graph_node/channel_methods'
 
 module MB
   module Sound
@@ -69,6 +70,25 @@ module MB
       include DistortionMethods
       include DebugMethods
       include DurationMethods
+      include ChannelMethods
+
+      # The per-channel DSL call that made this node, if any (see
+      # ChannelDispatch and ChannelGroup).  Used by #graphviz.
+      attr_accessor :channel_group
+
+      # The nodes that carry this node's output channels.  Every node has
+      # outputs: a single-channel node is its own only output, and nodes with
+      # several outputs (MultiOutput, e.g. a stereo reverb or a channel
+      # bundle) return one node per channel.  Consumers can use #outputs
+      # without checking which kind of node they have.
+      def outputs
+        [self]
+      end
+
+      # The number of output channels (see #outputs).
+      def channel_count
+        outputs.length
+      end
 
       # Returns the class name, or a custom name set by the subclass (e.g. '/'
       # for a division proc node).
@@ -278,6 +298,7 @@ require_relative 'graph_node/graph_node_array_mixin'
 require_relative 'graph_node/constant'
 require_relative 'graph_node/input_channel_split'
 require_relative 'graph_node/mix_source'
+require_relative 'graph_node/channels'
 require_relative 'graph_node/io_sample_mixin'
 require_relative 'graph_node/mixer'
 require_relative 'graph_node/multiplier'
@@ -296,3 +317,6 @@ require_relative 'graph_node/fdn_reverb'
 require_relative 'graph_node/reverb'
 
 require_relative 'graph_node/graph_clock'
+
+# Generates per-channel DSL methods, so it must load after every *Methods module
+require_relative 'graph_node/channel_dispatch'

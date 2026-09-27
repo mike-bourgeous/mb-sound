@@ -146,8 +146,7 @@ reverb = input.reverb(
 )
 
 if options[:graphviz]
-  node = reverb.is_a?(Array) ? reverb[0] : reverb
-  node.open_graphviz
+  reverb.open_graphviz # a single node or a channel bundle
 end
 
 unless options[:quiet]

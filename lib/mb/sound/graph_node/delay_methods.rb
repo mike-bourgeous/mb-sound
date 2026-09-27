@@ -70,7 +70,8 @@ module MB
         end
 
         # Adds a multi-tap delay with the given delay sources, returning an Array
-        # of nodes representing the taps.  Also available as #multitap_delay.
+        # of nodes representing the taps, as a channel bundle (e.g.
+        # `l, r = sig.multitap(...)`).  Also available as #multitap_delay.
         # The +delays+ may be numeric values in seconds, graph nodes that
         # produce a number of seconds as output, or musical lengths that
         # follow the tempo, as for #delay (e.g. `1.n8.dotted`).
@@ -91,7 +92,7 @@ module MB
             *delays.map { |d| MB::Sound::Sequence::TempoNode.seconds_source(d) },
             sample_rate: sample_rate,
             initial_buffer_seconds: initial_buffer_seconds
-          ).named(name).taps
+          ).named(name).taps.then { |taps| Channels.new(taps) }
         end
         alias multitap_delay multitap
 
@@ -109,8 +110,10 @@ module MB
         # The +:extra_time+ parameter controls how much time to add to input
         # objects to allow the reverb to decay.
         #
-        # If +:output_channels+ is greater than one, then this method returns an
-        # Array of output nodes.  Otherwise it returns a single output node.
+        # If +:output_channels+ is greater than one, then this method returns a
+        # channel bundle (GraphNode::Channels).  Otherwise it returns a single
+        # output node.  Channel bundles have their own #reverb, which takes
+        # every channel as a reverb input.
         #
         # Example (bin/sound.rb):
         #     play file_input('sounds/drums.flac').reverb
@@ -156,7 +159,7 @@ module MB
           tail = decay + 0.5 if tail.nil?
           tail = 0 if tail == false
 
-          input = if self.is_a?(MultiOutput)
+          input = if channel_count > 1
             self.outputs.map { |out|
               node = out.get_sampler
               tail > 0 ? node.and_then(0.constant.for(tail)) : node

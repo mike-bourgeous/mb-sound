@@ -33,7 +33,8 @@ RSpec.describe(MB::Sound::GraphNode::GraphNodeArrayMixin) do
 
     it 'accepts a different number of output channels' do
       expect([1.constant, 1.constant].reverb(:room, output_channels: 3).length).to eq(3)
-      expect([1.constant, 1.constant].reverb(:room, output_channels: 1).length).to eq(1)
+      expect([1.constant, 1.constant].reverb(:room, output_channels: 1)).to be_a(MB::Sound::GraphNode::Reverb)
+      expect([1.constant, 1.constant].reverb(:room)).to be_a(MB::Sound::GraphNode::Channels)
     end
 
     it 'mixes every input into each output' do

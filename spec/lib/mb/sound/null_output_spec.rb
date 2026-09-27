@@ -34,15 +34,34 @@ RSpec.describe(MB::Sound::NullOutput) do
 
   describe '#write' do
     context 'when sleep is true' do
+      # Makes MB::U.clock_now return +times+ in order.
+      def clock(*times)
+        allow(MB::U).to receive(:clock_now).and_return(*times)
+      end
+
       it 'waits for the length of the buffer' do
+        clock(100.0)
         expect(Kernel).to receive(:sleep).with(0.25)
         null_sleep.write(short_data)
+      end
 
-        expect(Kernel).to receive(:sleep).with(2.0)
+      it 'keeps a steady rate, subtracting time spent between writes' do
+        clock(100.0, 100.35)
+        expect(Kernel).to receive(:sleep).with(0.25).ordered
+        expect(Kernel).to receive(:sleep).with(be_within(1e-9).of(1.9)).ordered # 2.0 due at 102.25
+        null_sleep.write(short_data)
         null_sleep.write(long_data)
       end
 
+      it 'restarts the rate instead of catching up after falling far behind' do
+        clock(100.0, 110.0)
+        expect(Kernel).to receive(:sleep).with(0.25).twice
+        null_sleep.write(short_data)
+        null_sleep.write(short_data)
+      end
+
       it 'waits based on sample rate' do
+        clock(100.0)
         expect(Kernel).to receive(:sleep).with(1.0)
         null_sleep_44k.write([Numo::SFloat.zeros(44100)])
       end

@@ -81,12 +81,12 @@ module MB::Sound
 
   if $0 == __FILE__
     if ARGV[0]
-      seconds = render(ARGV[0], bars: TEMPO_SONG_BARS, overwrite: true) { tempo_song }
+      seconds = render(ARGV[0], bars: TEMPO_SONG_BARS, tail: true, overwrite: true) { tempo_song }
       puts "Rendered #{seconds.round(1)} seconds to #{ARGV[0]}"
     else
       tempo_song
       puts 'Playing (Ctrl-C to stop)'
-      sleep 0.5 until transport.bar > TEMPO_SONG_BARS - 2 && players.empty?
+      wait # until the song and its reverb tails have ended
     end
   end
 end

@@ -21,10 +21,20 @@ module MB
           MB::Sound::GraphNodeInput.new(self, channels: num_channels, buffer_size: buffer_size)
         end
 
+        # Returns a bundle with the GraphNodes in this Array as separate
+        # channels (see GraphNode::Channels).
+        #
+        # Example:
+        #     [left, right].channels.softclip
+        def channels
+          MB::Sound::GraphNode::Channels.new(self)
+        end
+
         # Runs the GraphNodes in this Array through one multichannel reverb
-        # (see GraphNode#reverb), one reverb input per element, and returns an
-        # Array of the reverb's output channels: one per input unless
-        # +:output_channels+ is given.  Other parameters are the same as
+        # (see GraphNode#reverb), one reverb input per element, and returns a
+        # channel bundle of the reverb's outputs: one per input unless
+        # +:output_channels+ is given (a single output node for one).  Same as
+        # `array.channels.reverb`; other parameters are the same as
         # GraphNode#reverb.
         #
         # Example:
@@ -35,8 +45,7 @@ module MB
             raise ArgumentError, 'All Array elements must be GraphNodes to run them through a reverb'
           end
 
-          result = MB::Sound::GraphNode::Reverb.reverb(preset, input: self, output_channels: output_channels, **kwargs)
-          result.is_a?(Array) ? result : [result]
+          channels.reverb(preset, output_channels: output_channels, **kwargs)
         end
       end
 

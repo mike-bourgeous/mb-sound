@@ -151,8 +151,8 @@ module MB
 
         # See GraphNode#reverb -- this method just allows passing an input array or node.
         def self.reverb(preset = :default, input:, extra_time: nil, output_channels: 1, channels: nil, stages: nil, diffusion_range: nil, feedback_range: nil, feedback_gain: nil, feedback_enabled: nil, predelay: nil, wet: nil, dry: nil, seed: nil, show_internals: false)
-          unless input.is_a?(GraphNode) || (input.is_a?(Array) && input.all?(GraphNode))
-            raise 'Input must be a GraphNode or an Array of GraphNodes'
+          unless input.is_a?(GraphNode) || input.is_a?(MultiOutput) || (input.is_a?(Array) && input.all?(GraphNode))
+            raise 'Input must be a GraphNode, a multi-output node, or an Array of GraphNodes'
           end
 
           params = Reverb::PRESETS[preset] || Reverb::PRESETS[:default]
@@ -181,27 +181,16 @@ module MB
           #
           # TODO: find a way to tidy up the flow graph with these multichannel
           # inputs and outputs.
-          if extra_time > 0
-            silence = 0.constant.for(extra_time).named('Silence')
-            case input
-            when MultiOutput
-              upstream = input.outputs.map { |o| o.and_then(silence) }
-
-            when InputChannelSplit::InputChannelNode
-              upstream = input.and_then(silence)
-
-            when Array
-              # A separate silence node for each input so each gets the full time
-              upstream = input.map { |i| i.and_then(0.constant.for(extra_time).named('Silence')) }
-
-            else
-              upstream = input
-            end
+          inputs = input.is_a?(Array) ? input : input.outputs
+          if extra_time > 0 && (inputs.length > 1 || input.is_a?(Array) || input.is_a?(InputChannelSplit::InputChannelNode))
+            # A separate silence node for each input so each gets the full time
+            upstream = inputs.map { |i| i.and_then(0.constant.for(extra_time).named('Silence')) }
+            upstream = upstream[0] if input.is_a?(InputChannelSplit::InputChannelNode)
           else
             upstream = input
           end
 
-          rate = input.is_a?(GraphNode) ? input.sample_rate : input[0].sample_rate
+          rate = inputs[0].sample_rate
 
           MB::Sound::GraphNode::Reverb.new(
             upstream: upstream,
@@ -211,7 +200,7 @@ module MB
             **params
           )
             .tap { |n| n.named(preset.to_s) if preset }
-            .yield_self { |n| output_channels > 1 ? n.outputs : n }
+            .yield_self { |n| output_channels > 1 ? Channels.new(n.outputs) : n }
         end
 
         # Initializes a reverb node with the given parameters.  See
@@ -257,7 +246,7 @@ module MB
           @sample_rate = sample_rate.to_f
 
           @upstreams = upstream
-          @upstreams = @upstreams.outputs if @upstreams.is_a?(MB::Sound::GraphNode::MultiOutput)
+          @upstreams = @upstreams.outputs if @upstreams.respond_to?(:outputs)
           @upstreams = [@upstreams] unless @upstreams.is_a?(Array)
 
           @upstreams.each_with_index do |u, idx|

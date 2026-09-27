@@ -29,6 +29,21 @@ RSpec.describe(MB::Sound::GraphNode, aggregate_failures: true) do
     expect(graph.sample(100)).to eq(Numo::SFloat.zeros(100).fill(2))
   end
 
+  describe '#outputs and #channel_count' do
+    it 'treats a single-output node as its own only output' do
+      n = 1.constant
+      expect(n.outputs).to eq([n])
+      expect(n.channel_count).to eq(1)
+    end
+
+    it 'lists the outputs of a multi-output node' do
+      l, r = [1.constant, 2.constant].reverb(:room)
+      reverb = l.graph.grep(MB::Sound::GraphNode::Reverb).first
+      expect(reverb.outputs).to eq([l, r])
+      expect(reverb.channel_count).to eq(2)
+    end
+  end
+
   describe '#as_input' do
     # More tests in the GraphNodeInput and GraphNodeArrayMixin specs
     it 'wraps a graph in an Input with a #read method' do

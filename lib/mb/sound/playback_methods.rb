@@ -25,8 +25,14 @@ module MB
         plot = { header_lines: header.lines.count, graphical: graphical } if plot.nil? || plot == true
         plot[:spectrum] = spectrum if plot.is_a?(Hash) && !plot.include?(:spectrum)
 
-        if file_tone_data.is_a?(Numo::NArray) || (file_tone_data.is_a?(MB::Sound::GraphNode) && !file_tone_data.respond_to?(:read))
+        if file_tone_data.is_a?(Numo::NArray) || (file_tone_data.is_a?(MB::Sound::GraphNode) && !file_tone_data.respond_to?(:read)) ||
+            file_tone_data.is_a?(MB::Sound::GraphNode::MultiOutput)
           file_tone_data = [file_tone_data]
+        end
+
+        # Expand multi-output nodes (e.g. stereo bundles) into their channels
+        if file_tone_data.is_a?(Array) && !file_tone_data.empty? && file_tone_data.all? { |d| d.is_a?(GraphNode) || d.is_a?(GraphNode::MultiOutput) }
+          file_tone_data = file_tone_data.flat_map(&:outputs)
         end
 
         case file_tone_data
@@ -186,11 +192,13 @@ module MB
       # the mix and returns the processed mix.  Also available as
       # #master_fx.
       #
-      # A block with one parameter is called once per channel, with that
-      # channel of the mix as a GraphNode.  A block with one parameter per
-      # channel gets them all at once and returns an Array of nodes (one per
-      # channel).  Call with nil (or false) to remove the effects, and with
-      # no arguments to see what is set.
+      # A block with one parameter gets the whole mix as a stereo bundle
+      # (GraphNode::Channels): most methods run on each channel (e.g.
+      # `mix.softclip`), and #reverb takes both channels as inputs.  A block
+      # with one parameter per channel (`|l, r|`) gets them separately.
+      # Return a bundle, an Array of nodes (one per channel), or one node for
+      # every channel.  Call with nil (or false) to remove the effects, and
+      # with no arguments to see what is set.
       #
       # Like #bg, new effects start on the next bar while anything is
       # playing (+:at+ picks another launch point).  By default the old
@@ -350,6 +358,48 @@ module MB
       end
       alias vis visualize
 
+      # Waits until everything playing in the background (see #bg) has ended,
+      # including master effects tails: nothing is playing or waiting to
+      # start, and the mix has been quiet for Session::TAIL_QUIET_SECONDS
+      # (after at most Session::MAX_TAIL_SECONDS of tail).  Returns true, or
+      # false if +:timeout+ seconds pass first.  Returns right away if the
+      # background session isn't running.
+      #
+      # Use it at the end of scripts so they don't exit (and cut off reverb
+      # tails) while the song is still ringing:
+      #
+      #     my_song
+      #     wait
+      def wait(timeout: nil)
+        raise 'Cannot wait inside a scheduled block (it would block the scheduler)' if Session.context&.[](:batch)
+
+        session = Session.current
+        return true unless session.running?
+
+        rate = session.output.sample_rate
+        quiet = 0
+        tail = 0
+        tap = session.add_tap { |mix|
+          if session.idle? && !session.schedule_due?
+            tail += mix[0].length
+            quiet = session.quiet?(mix) ? quiet + mix[0].length : 0
+          else
+            tail = quiet = 0
+          end
+        }
+
+        deadline = timeout && MB::U.clock_now + timeout
+        until quiet >= Session::TAIL_QUIET_SECONDS * rate || tail >= Session::MAX_TAIL_SECONDS * rate
+          return false if deadline && MB::U.clock_now > deadline
+          return true unless session.running?
+          sleep 0.05
+        end
+
+        true
+      ensure
+        session&.remove_tap(tap) if tap
+      end
+
       # Returns a Hash from background player name (see #bg) to a
       # description of what it is playing.
       def players
@@ -376,6 +426,10 @@ module MB
       # If master effects are set inside the block (see #master), up to ten
       # seconds of their tail are added after the last sound stops, until a
       # second of silence (within the +:bars+ or +:seconds+ limit, if given).
+      # With +tail: true+, the tail is also added after the +:bars+ or
+      # +:seconds+ limit: any sounds still playing stop there, and the
+      # master effects ring out, e.g. `render('song.flac', bars: 16, tail:
+      # true) { my_song }`.
       #
       # Build fresh graphs to render, rather than rendering graphs that are
       # playing in the background, because graphs keep their playback state.
@@ -383,7 +437,7 @@ module MB
       # Example (bin/sound.rb):
       #     bass = seq(C2, C2, rest, C3).n16.loop
       #     render '/tmp/bass.flac', bass.tone.ramp.at(1) * bass.env * 0.5, bars: 4
-      def render(filename, *sounds, bars: nil, seconds: nil, bpm: nil, channels: 2, overwrite: false, buffer_size: 800, &block)
+      def render(filename, *sounds, bars: nil, seconds: nil, tail: false, bpm: nil, channels: 2, overwrite: false, buffer_size: 800, &block)
         raise ArgumentError, 'Pass one or more sounds or a block to render' if sounds.empty? && block.nil?
         raise ArgumentError, 'Pass bars: or seconds:, not both' if bars && seconds
 
@@ -417,7 +471,14 @@ module MB
           frames += count
         end
 
-        frames += render_tail(session, frames_left.call, buffer_size) if frames_left.call > 0
+        if frames_left.call > 0
+          frames += render_tail(session, frames_left.call, buffer_size)
+        elsif tail && (bars || seconds)
+          # The song reached its end; stop anything still playing and let the
+          # master effects ring out
+          session.remove(fade: 0)
+          frames += render_tail(session, (MAX_RENDER_SECONDS * rate).round - frames, buffer_size)
+        end
 
         if bars.nil? && seconds.nil? && !session.idle?
           warn "Stopped rendering #{filename} after #{MAX_RENDER_SECONDS} seconds; pass bars: or seconds: for sounds that never end"
