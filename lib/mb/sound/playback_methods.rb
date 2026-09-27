@@ -359,8 +359,9 @@ module MB
       # Renders +sounds+ (GraphNodes, Arrays of GraphNodes, or filenames) to
       # an audio file as fast as possible.  All sounds start together at the
       # beginning of a fresh timeline, at the current tempo unless +:bpm+ is
-      # given.  Rendering stops after +:bars+ or +:seconds+, or when every
-      # sound has ended.  Returns the number of seconds rendered.
+      # given.  Rendering stops after +:bars+ (counted on the timeline, so
+      # tempo changes during the render are followed) or +:seconds+, or when
+      # every sound has ended.  Returns the number of seconds rendered.
       #
       # If a block is given, it runs first with the rendering session as the
       # current session, so #bg, #at_bar, #every, #bpm, etc. inside it
@@ -391,22 +392,34 @@ module MB
         session = Session.new(output: output, transport: transport, channels: channels, buffer_size: buffer_size, realtime: false, raise_errors: true)
 
         rate = output.sample_rate
-        seconds = transport.seconds(bars.to_r * transport.bar_length) if bars
-        limit = ((seconds || MAX_RENDER_SECONDS) * rate).round
+        bars = Sequence::Duration.bars(bars, transport.bar_length)
+        end_time = bars && bars.to_r * transport.bar_length
+        max_frames = ((seconds || MAX_RENDER_SECONDS) * rate).round
 
         sounds.each { |s| session.add(s, at: :now) }
         Session.with_context(session: session) { block.call } if block
 
+        # Frames left to render: up to the end bar at the current tempo (so
+        # tempo changes during the render count), or up to the time limit
         frames = 0
-        until frames >= limit || (session.idle? && !session.schedule_due?)
-          count = MB::M.min(buffer_size, limit - frames)
+        frames_left = -> {
+          left = max_frames - frames
+          if end_time
+            to_go = end_time - transport.position
+            left = MB::M.min(left, to_go <= 0 ? 0 : (to_go / transport.whole_notes_per_second * rate).ceil)
+          end
+          left
+        }
+
+        until frames_left.call <= 0 || (session.idle? && !session.schedule_due?)
+          count = MB::M.min(buffer_size, frames_left.call)
           session.process_buffer(count)
           frames += count
         end
 
-        frames += render_tail(session, limit - frames, buffer_size) if frames < limit
+        frames += render_tail(session, frames_left.call, buffer_size) if frames_left.call > 0
 
-        if seconds.nil? && !session.idle?
+        if bars.nil? && seconds.nil? && !session.idle?
           warn "Stopped rendering #{filename} after #{MAX_RENDER_SECONDS} seconds; pass bars: or seconds: for sounds that never end"
         end
 

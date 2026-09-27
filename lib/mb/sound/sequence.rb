@@ -1,11 +1,14 @@
 require_relative 'sequence/duration'
+require_relative 'sequence/numeric_durations'
 require_relative 'sequence/event'
 require_relative 'sequence/clip'
 require_relative 'sequence/seq'
 require_relative 'sequence/note_methods'
 require_relative 'sequence/grid'
 require_relative 'sequence/transport'
+require_relative 'sequence/timeline_node'
 require_relative 'sequence/clip_node'
+require_relative 'sequence/tempo_node'
 
 module MB
   module Sound

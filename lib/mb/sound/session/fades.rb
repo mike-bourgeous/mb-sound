@@ -26,9 +26,11 @@ module MB
 
         private
 
-        # Converts a fade length to a positive Rational number of bars, or nil
-        # for no fade (nil, false, or 0).
+        # Converts a fade length (a number of bars or a Duration like
+        # 2.beats) to a positive Rational number of bars, or nil for no fade
+        # (nil, false, or 0).
         def bars_or_nil(bars)
+          bars = Sequence::Duration.bars(bars, @transport.bar_length)
           return nil if bars.nil? || bars == false || bars == 0
           raise ArgumentError, "Fade must be a positive number of bars (got #{bars.inspect})" unless bars.is_a?(Numeric) && bars.finite? && bars > 0
           Sequence::Duration.rational(bars)

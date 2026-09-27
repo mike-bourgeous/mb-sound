@@ -32,7 +32,7 @@ module MB
             player ||= @stopped[name]
             raise ArgumentError, "No background player #{name.inspect} is playing or stopped" if player.nil?
 
-            nodes = player.clip_nodes
+            nodes = player.timeline_nodes.grep(Sequence::ClipNode)
             raise ArgumentError, "Player #{name.inspect} doesn't play any clips" if nodes.empty?
 
             mapping = clips.is_a?(Sequence::Clip) ? auto_swap_mapping(name, nodes, clips) : swap_mapping(clips)

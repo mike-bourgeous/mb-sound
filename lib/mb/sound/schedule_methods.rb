@@ -40,26 +40,31 @@ module MB
       end
       alias on_bar at_bar
 
-      # Runs the block +bars+ bars from the next bar line (so `after 1` runs
-      # at the next bar).  Returns a schedule id for #cancel.
+      # Runs the block +bars+ bars (a number, or a Duration like 2.bars) from
+      # the next bar line (so `after 1` runs at the next bar).  Returns a
+      # schedule id for #cancel.
       def after(bars, &block)
-        raise ArgumentError, "Bars must be a number of at least 1 (got #{bars.inspect})" unless bars.is_a?(Numeric) && bars >= 1
-
         session = Session.current
         t = session.transport
+        bars = Sequence::Duration.bars(bars, t.bar_length)
+        raise ArgumentError, "Bars must be a number of at least 1 (got #{bars.inspect})" unless bars.is_a?(Numeric) && bars >= 1
+
         time = t.next_boundary(t.bar_length) + (bars.to_r - 1) * t.bar_length
         session.schedule(time, description: "bar #{(time / t.bar_length).floor + 1}", &block)
       end
 
       # Runs the block every +bars+ bars, on bar +:offset+ + 1 of each group
       # (e.g. `every 4, offset: 3` runs on bars 4, 8, 12, ... for fills),
-      # starting with the next such bar.  Returns a schedule id for #cancel.
+      # starting with the next such bar.  +bars+ and +:offset+ may also be
+      # Durations (e.g. `every 2.beats`).  Returns a schedule id for #cancel.
       def every(bars, offset: 0, &block)
+        session = Session.current
+        t = session.transport
+        bars = Sequence::Duration.bars(bars, t.bar_length)
+        offset = Sequence::Duration.bars(offset, t.bar_length)
         raise ArgumentError, "Bars must be a positive number (got #{bars.inspect})" unless bars.is_a?(Numeric) && bars > 0
         raise ArgumentError, "Offset must be a number from 0 up to the bar count (got #{offset.inspect})" unless offset.is_a?(Numeric) && offset >= 0 && offset < bars
 
-        session = Session.current
-        t = session.transport
         period = bars.to_r * t.bar_length
         base = offset.to_r * t.bar_length
         time = base + ((t.position - base) / period).ceil * period

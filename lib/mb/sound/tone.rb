@@ -185,6 +185,11 @@ module MB
         self
       end
 
+      # Plays forever unless #for was called (see #or_for).
+      def or_forever(recursive: :ignored)
+        or_for(nil)
+      end
+
       # Sets the tone to play forever, as well as any tones in its frequency or
       # phase sources.
       def forever(recursive: true)
@@ -195,7 +200,18 @@ module MB
 
       # Changes the linear gain of the tone.  This may be negative to invert
       # the phase of the tone, or may be a Range to add a DC offset.
+      #
+      # A Range of Sequence::Durations (e.g. `3.n16..5.n16`) makes the tone
+      # output a musical length in whole notes (see #musical_time?), which
+      # delay methods convert to seconds at the current tempo:
+      #
+      #     sig.delay(2.bars.lfo.square.at(3.n16..5.n16))   # alternates each bar
       def at(amplitude)
+        durations = amplitude.is_a?(Range) ? [amplitude.begin, amplitude.end].count { |v| v.is_a?(Sequence::Duration) } : 0
+        raise ArgumentError, 'Use a Range of Durations (e.g. 3.n16..5.n16), not a single Duration' if amplitude.is_a?(Sequence::Duration)
+        raise ArgumentError, 'Both ends of a Range must be Durations, or neither' if durations == 1
+        @musical_time = durations == 2
+
         if amplitude.is_a?(Range)
           @range = amplitude.begin.to_f..amplitude.end.to_f
           @amplitude = (@range.end - @range.begin) / 2
@@ -207,6 +223,12 @@ module MB
         @amplitude_set = true
 
         self
+      end
+
+      # True if #at was given a Range of Durations, so this tone outputs a
+      # musical length in whole notes rather than a plain number.
+      def musical_time?
+        !!@musical_time
       end
 
       # Sets the default linear +amplitude+ of the tone, which may be a Numeric
@@ -327,7 +349,42 @@ module MB
         @no_trigger = trig
         self
       end
-      alias lfo no_trigger
+
+      # Makes this Tone a low-frequency oscillator for modulation: it won't
+      # be retriggered by MIDI voices (see #no_trigger), swings over the full
+      # -1..1 range unless #at was called, and plays forever unless a
+      # duration was set with #for.  Call #at afterward to set the range.
+      #
+      # Durations have their own #lfo for tempo-synced LFOs (see
+      # Sequence::Duration#lfo).
+      #
+      # Example:
+      #     play 220.hz.ramp.at(1).filter(:lowpass, cutoff: 0.25.hz.triangle.lfo.at(200..2000), quality: 4).forever
+      def lfo
+        no_trigger
+        or_at(1)
+        or_forever
+      end
+
+      # Sets this Tone's current phase to +radians+ plus its phase offset
+      # (see #with_phase).  Used by Sequence::TempoNode to lock tempo-synced
+      # tones to the timeline.
+      def sync_phase(radians)
+        oscillator.phi = radians + @phase.to_f
+        self
+      end
+
+      # For a Tone whose frequency follows the tempo (see
+      # Sequence::Duration#hz), lets its phase run free of the timeline and
+      # keeps it running while the timeline is paused.  Its frequency still
+      # follows the tempo.  See Sequence::TempoNode#freewheel.
+      def freewheel(free = true)
+        node = graph.find { |n| n.is_a?(Sequence::TempoNode) && n.tone.equal?(self) }
+        raise ArgumentError, 'Only tempo-synced tones (e.g. 4.bars.lfo) can freewheel' if node.nil?
+
+        node.freewheel(free)
+        self
+      end
 
       # Returns true if this Tone is not intended to be retriggered when a note
       # is played.

@@ -69,16 +69,16 @@ module MB
           reset_delay
         end
 
-        # Immediately sets the smoothed internal delay to the last value set by
-        # #delay= or #delay_samples=.  Has no effect if the delay was set to a
-        # signal node with a :sample method (see GraphNode and #delay=).
-        def reset_delay
+        # Immediately sets the smoothed internal delay to +samples+, or to the
+        # last value set by #delay= or #delay_samples=.  Without +samples+,
+        # this has no effect if the delay was set to a signal node with a
+        # :sample method (see GraphNode and #delay=).
+        def reset_delay(samples = nil)
           # TODO: Support resetting with a signal node without consuming a
           # sample from the signal node?  Maybe set a flag that triggers a
           # reset in #sample?
-          if @delay_samples.is_a?(Numeric)
-            @filter.reset(@delay_samples)
-          end
+          samples ||= @delay_samples if @delay_samples.is_a?(Numeric)
+          @filter.reset(samples) if samples
         end
 
         # Changes the sample rate of the delay, cascading the rate change to

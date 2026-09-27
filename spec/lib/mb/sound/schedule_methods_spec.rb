@@ -83,6 +83,16 @@ RSpec.describe(MB::Sound::ScheduleMethods) do
       run(96000 * 2)
       expect(times).to eq([0, 1, 1])
     end
+
+    it 'accepts Durations' do
+      times = []
+      within do
+        MB::Sound.bg(0.constant)
+        MB::Sound.after(2.bars) { times << MB::Sound::Session.context[:time] }
+      end
+      run(96000 * 2)
+      expect(times).to eq([1])
+    end
   end
 
   describe '#every' do
@@ -95,6 +105,16 @@ RSpec.describe(MB::Sound::ScheduleMethods) do
       run(96000 * 9)
       expect(times).to eq([3, 7])
       expect(session.scheduled.values).to eq(['every 4 bars from bar 4'])
+    end
+
+    it 'accepts Durations' do
+      times = []
+      within do
+        MB::Sound.bg(0.constant)
+        MB::Sound.every(2.beats, offset: 1.beat) { times << MB::Sound::Session.context[:time] }
+      end
+      run(96000)
+      expect(times.first(3)).to eq([1/4r, 3/4r, 5/4r]) # blocks run up to half a bar ahead
     end
 
     it 'moves to the next matching bar when the timeline is seeked' do

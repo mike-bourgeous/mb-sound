@@ -70,6 +70,23 @@ RSpec.describe(MB::Sound::Sequence::ClipNode) do
       data = render(two_notes.hz(transport: transport), max: 800)
       expect(data[0]).to be_within(0.01).of(MB::Sound::C3.frequency)
     end
+
+    it 'converts to seconds per cycle with Clip#period' do
+      data = render(two_notes.loop.period(transport: transport), max: 24000)
+      expect(data[0]).to be_within(1e-6).of(1.0 / MB::Sound::C3.frequency)
+      expect(data[12000]).to be_within(1e-6).of(1.0 / MB::Sound::E3.frequency)
+    end
+
+    it 'drives a delay that resonates at each note with Clip#period' do
+      notes = MB::Sound.seq(MB::Sound::A2, MB::Sound::E3).n4.loop
+      excite = MB::Sound.noise.at(1).forever * notes.env(0, 0.004, 0, 0.001, transport: transport)
+      string = excite.delay(notes.period(transport: transport), feedback: 0.98, dry: 1, wet: 1, smoothing: false)
+      data = render(string, max: 24000).to_a[4000...20000]
+
+      # The strongest repetition matches A2's period (48000 / 110 = 436.4 samples)
+      best = (300..600).max_by { |lag| (0...(data.length - lag)).sum { |i| data[i] * data[i + lag] } }
+      expect(best).to eq(436)
+    end
   end
 
   describe MB::Sound::Sequence::ClipNode::Velocity do

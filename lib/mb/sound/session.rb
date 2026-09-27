@@ -51,7 +51,7 @@ module MB
       # instead of stopping there.  +keep+ is true if the player should be
       # kept for #resume once it stops.
       Player = Struct.new(
-        :serial, :name, :input, :description, :start, :stop_at, :clip_nodes,
+        :serial, :name, :input, :description, :start, :stop_at, :timeline_nodes,
         :started, :slow_warned, :gain, :gain_step, :fade_in, :fade_out, :keep,
         keyword_init: true
       ) do
@@ -120,10 +120,10 @@ module MB
       # +:fade_in+, +:fade_out+ - Default fade lengths in bars (see #fade_in
       #                           and #fade_out).
       def initialize(output: nil, transport: Sequence.transport, channels: 2, buffer_size: nil, realtime: true, raise_errors: false, fade_in: nil, fade_out: nil)
+        @transport = transport
         self.fade_in = fade_in
         self.fade_out = fade_out
         @output = output
-        @transport = transport
         @channels = channels
         @buffer_size = buffer_size
         @realtime = realtime
@@ -169,11 +169,11 @@ module MB
 
         nodes = to_nodes(sound)
         input = MB::Sound::GraphNodeInput.new(nodes)
-        clip_nodes = nodes.flat_map { |n| [n, *n.graph] }.grep(Sequence::ClipNode).uniq
+        timeline_nodes = nodes.flat_map { |n| [n, *n.graph] }.grep(Sequence::TimelineNode).uniq
 
         name = @mutex.synchronize {
           name ||= (1..).find { |i| !names_in_use.include?(i) }
-          start = start_time ? start_time.to_r : launch_time(at, clip_nodes)
+          start = start_time ? start_time.to_r : launch_time(at, timeline_nodes)
           @stopped.delete(name)
 
           replacing = @players.each_value.any? { |p| p.name == name && p.current? && p.started }
@@ -194,7 +194,7 @@ module MB
             name: name,
             input: input,
             description: shorten(description || MB::Sound.send(:playback_info, sound).to_s),
-            clip_nodes: clip_nodes,
+            timeline_nodes: timeline_nodes,
             start: start,
             fade: fade
           )
@@ -276,8 +276,8 @@ module MB
             name: name,
             input: p.input,
             description: p.description,
-            clip_nodes: p.clip_nodes,
-            start: start_time ? start_time.to_r : launch_time(at, p.clip_nodes),
+            timeline_nodes: p.timeline_nodes,
+            start: start_time ? start_time.to_r : launch_time(at, p.timeline_nodes),
             fade: fade
           )
         }
@@ -417,7 +417,7 @@ module MB
         if seeked
           @generation = @transport.generation
           @mutex.synchronize { @players.values }.each do |p|
-            p.clip_nodes.each { |n| n.start_at(from, origin: p.start, transport: @transport) } if p.started
+            p.timeline_nodes.each { |n| n.start_at(from, origin: p.start, transport: @transport) } if p.started
           end
           @scheduler.seeked(from)
         end
@@ -466,7 +466,7 @@ module MB
 
       # Creates and registers a Player.  Called with @mutex held.  Returns
       # the name.
-      def start_player(name:, input:, description:, clip_nodes:, start:, fade:)
+      def start_player(name:, input:, description:, timeline_nodes:, start:, fade:)
         @next_serial += 1
         @players[@next_serial] = Player.new(
           serial: @next_serial,
@@ -474,7 +474,7 @@ module MB
           input: input,
           description: description,
           start: start,
-          clip_nodes: clip_nodes,
+          timeline_nodes: timeline_nodes,
           started: false,
           slow_warned: false,
           gain: fade ? 0.0 : 1.0,
@@ -529,7 +529,7 @@ module MB
 
       # Returns the timeline position where a new graph should start.  See
       # #add.  Called with @mutex held.
-      def launch_time(at, clip_nodes)
+      def launch_time(at, timeline_nodes)
         at ||= @players.empty? ? :now : :bar
 
         grid = case at
@@ -540,7 +540,7 @@ module MB
                when :bar
                  @transport.bar_length
                when :clip
-                 clip_grid(clip_nodes)
+                 clip_grid(timeline_nodes)
                when Symbol
                  raise ArgumentError, "Unknown launch point #{at.inspect} (use #{LAUNCH_POINTS.map(&:inspect).join(', ')}, or a note length)"
                else
@@ -553,8 +553,8 @@ module MB
       # The time between moments when every looping clip is at its start
       # (the least common multiple of their lengths), or a bar if that is
       # too long or there are no looping clips.
-      def clip_grid(clip_nodes)
-        lengths = clip_nodes.map(&:clip).select(&:looping?).map(&:length).uniq
+      def clip_grid(timeline_nodes)
+        lengths = timeline_nodes.grep(Sequence::ClipNode).map(&:clip).select(&:looping?).map(&:length).uniq
         return @transport.bar_length if lengths.empty?
 
         lcm = lengths.reduce { |a, b| Rational(a.numerator.lcm(b.numerator), a.denominator.gcd(b.denominator)) }
@@ -582,7 +582,7 @@ module MB
         unless p.started
           offset = MB::M.max(((p.start - from) / per_sample).ceil, 0)
           start = from + offset * per_sample
-          p.clip_nodes.each { |n| n.start_at(start, origin: start, transport: @transport) }
+          p.timeline_nodes.each { |n| n.start_at(start, origin: start, transport: @transport) }
           p.start = start
           p.started = true
           p.gain_step = fade_step(p.fade_in, rate) if p.fade_in
