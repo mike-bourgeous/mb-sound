@@ -66,4 +66,28 @@ RSpec.describe(MB::Sound::ScriptRunner) do
       expect(l[(0.25 * 48000).round]).to be_within(0.01).of(0.5) # the delayed copy after the input ended
     end
   end
+
+  describe '#run_song' do
+    let(:outfile) { 'tmp/script_runner_song.flac' }
+
+    before do
+      FileUtils.mkdir_p('tmp')
+      File.unlink(outfile) if File.exist?(outfile)
+    end
+
+    it 'draws the graph at the start of the song with --graphviz, then renders' do
+      dot = nil
+      allow_any_instance_of(MB::Sound::Session::GraphView::Box).to receive(:open_graphviz) { |box| dot = box.graphviz; 'song.png' }
+
+      r = runner(:song, [outfile, '-q', '--graphviz'])
+      song = -> {
+        MB::Sound.bg(:tone, 220.hz.sine.at(0.5).forever.named('song tone'))
+        MB::Sound.master { |mix| mix.softclip }
+      }
+      expect { r.run_song(bars: 1) { song.call } }.to output(/Wrote GraphViz image to song.png.*Rendered/m).to_stdout
+
+      expect(dot).to include('song tone', 'softclip ×2', 'label="tone"', 'label="master input"')
+      expect(MB::Sound.read(outfile)[0].abs.max).to be > 0.1
+    end
+  end
 end

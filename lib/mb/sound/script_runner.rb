@@ -123,9 +123,12 @@ module MB
       # Runs a song: the block arranges it on the current session (with #bg,
       # #at_bar, etc.), then it plays live until it ends (see
       # PlaybackMethods#wait), or renders +bars+ bars plus the master tail to
-      # the output file.
+      # the output file.  --graphviz draws the graph as it is at the start
+      # (players started later by #at_bar are missing).
       def run_song(bars:, &block)
         print_params
+        open_song_graphviz(&block) if @options[:graphviz]
+
         if @options[:output]
           seconds = MB::Sound.render(@options[:output], bars: bars, tail: true, overwrite: overwrite) { block.call(@params) }
           puts "Rendered #{seconds.round(1)} seconds to #{@options[:output]}"
@@ -146,7 +149,7 @@ module MB
           o.banner = "Options for #{File.basename(@script)}:"
           o.on('-o', '--output FILE', 'Write to an audio file instead of playing') { |v| @options[:output] = v }
           o.on('-f', '--force', '--overwrite', 'Overwrite the output file') { @options[:force] = true }
-          o.on('-g', '--graphviz', 'Open a visualization of the node graph') { @options[:graphviz] = true } unless @kind == :song
+          o.on('-g', '--graphviz', 'Open a visualization of the node graph') { @options[:graphviz] = true }
           o.on('-p', '--plot', 'Plot the output while playing live') { @options[:plot] = true }
           o.on('-q', '--quiet', "Don't print the parameters") { @options[:quiet] = true }
 
@@ -227,6 +230,20 @@ module MB
           png = graph.open_graphviz
           puts "Wrote GraphViz image to #{png}"
         end
+      end
+
+      # Arranges the song with +block+ on a silent session that never plays,
+      # and opens a drawing of the graph as it is at the start (see
+      # Session#graph_view).
+      def open_song_graphviz(&block)
+        output = NullOutput.new(channels: 2, sleep: false)
+        transport = Sequence::Transport.new(bpm: Sequence.transport.bpm, bar_length: Sequence.transport.bar_length)
+        session = Session.new(output: output, transport: transport, realtime: false)
+        Session.with_context(session: session) { block.call(@params) }
+        png = session.graph_view.open_graphviz
+        puts "Wrote GraphViz image to #{png}"
+      ensure
+        session&.close
       end
 
       def print_params

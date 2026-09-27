@@ -2,6 +2,7 @@ require_relative 'session/fades'
 require_relative 'session/master'
 require_relative 'session/clip_swaps'
 require_relative 'session/scheduler'
+require_relative 'session/graph_view'
 
 module MB
   module Sound
@@ -41,6 +42,7 @@ module MB
       include Fades
       include Master
       include ClipSwaps
+      include GraphView
 
       # A graph being played by the session.  +serial+ is unique; +name+ is
       # shared by a graph and the graph replacing it until the switch.
