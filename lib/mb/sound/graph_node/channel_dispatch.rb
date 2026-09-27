@@ -57,6 +57,19 @@ module MB
         end
       end
 
+      # The nodes made by one per-channel DSL call (see ChannelDispatch), so
+      # graph visualizations can show them as one box (see
+      # Traversable#graphviz).  +inputs+ are the channels the method ran on,
+      # +members+ the resulting nodes, +params+ descriptions of the
+      # arguments that differed per channel, and +arg_nodes+ graph nodes
+      # passed as arguments (which stay visible outside the box).
+      ChannelGroup = Struct.new(:method_name, :inputs, :members, :params, :arg_nodes) do
+        # A label like "filter ×2\ncutoff: 800, 1200".
+        def label
+          ["#{method_name} ×#{members.length}", *params].join("\n")
+        end
+      end
+
       # Runs DSL methods once per channel when they are called on a
       # multichannel node (e.g. a stereo bundle) or given per-channel
       # arguments (bundles, ChannelValues, or ChannelSpread), returning a
@@ -110,12 +123,51 @@ module MB
           end
 
           inputs = receiver.outputs
+          channel_inputs = []
+          picked = []
           results = Array.new(count) { |i|
             channel = inputs.length == 1 ? inputs[0] : inputs[i]
-            channel.public_send(name, *args.map { |a| pick(a, i, count) }, **kwargs.transform_values { |v| pick(v, i, count) }, &block)
+            channel_args = args.map { |a| pick(a, i, count) }
+            channel_kwargs = kwargs.transform_values { |v| pick(v, i, count) }
+            channel_inputs << channel
+            picked << [channel_args, channel_kwargs]
+            channel.public_send(name, *channel_args, **channel_kwargs, &block)
           }
 
+          arg_nodes = picked.flat_map { |(pa, pk)| (pa + pk.values).grep(GraphNode) }
+          group = ChannelGroup.new(name, channel_inputs, results, per_channel_params(args, kwargs, picked), arg_nodes)
+          results.each { |r| r.channel_group = group if r.respond_to?(:channel_group=) }
+
           Channels.new(results)
+        end
+
+        # Describes the arguments that differ per channel, e.g.
+        # "cutoff: 800, 1200", for graph visualizations (| would split the
+        # record-shaped GraphViz nodes).
+        def self.per_channel_params(args, kwargs, picked)
+          described = args.each_with_index.filter_map { |a, idx|
+            next unless per_channel?(a)
+            "arg #{idx + 1}: #{picked.map { |(pa, _)| describe(pa[idx]) }.join(', ')}"
+          }
+          described + kwargs.filter_map { |k, v|
+            next unless per_channel?(v)
+            "#{k}: #{picked.map { |(_, pk)| describe(pk[k]) }.join(', ')}"
+          }
+        end
+
+        # True if +value+ is a per-channel argument.
+        def self.per_channel?(value)
+          value.is_a?(ChannelSpread) || !size_of(value).nil?
+        end
+
+        # A short description of an argument value.
+        def self.describe(value)
+          case value
+          when Float then MB::M.sigfigs(value, 4).to_s
+          when Numeric, Sequence::Duration then value.to_s
+          when GraphNode then value.graph_node_name || value.node_type_name
+          else value.class.name.rpartition('::').last
+          end
         end
 
         # Returns the channel count for running a method on +receiver+ with

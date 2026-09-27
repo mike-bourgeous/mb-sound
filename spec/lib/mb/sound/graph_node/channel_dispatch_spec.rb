@@ -75,6 +75,37 @@ RSpec.describe(MB::Sound::GraphNode::ChannelDispatch) do
     end
   end
 
+  describe 'graph visualization' do
+    # Labels of the (non-edge) nodes in a GraphViz string.
+    def labels(dot)
+      dot.lines.reject { |l| l.include?('->') }.grep(/label=/).map { |l| l[/label="(.*?)"[,\]]/, 1] }
+    end
+
+    let(:graph) { 220.hz.ramp.at(1).forever.stereo.filter(:lowpass, cutoff: MB::Sound.channels(800, 1200), quality: 2).softclip }
+
+    it 'draws each per-channel call as one box listing per-channel arguments' do
+      dot = graph.graphviz
+      expect(labels(dot)).to include("filter ×2\\ncutoff: 800, 1200", 'softclip ×2')
+      expect(labels(dot).grep(/SampleWrapper/)).to be_empty
+      expect(dot.lines.grep(/-> .*channels.*-> /)).to be_empty
+    end
+
+    it 'shows every node with expand_channels' do
+      expect(labels(graph.graphviz(expand_channels: true)).length).to be > labels(graph.graphviz).length
+      expect(labels(graph.graphviz(expand_channels: true)).grep(/×2/)).to be_empty
+    end
+
+    it 'keeps nodes passed as per-channel arguments visible' do
+      lfos = MB::Sound.channels(0.5.hz.lfo.named('slow'), 0.7.hz.lfo.named('fast'))
+      dot = 220.hz.ramp.at(1).forever.stereo.filter(:lowpass, cutoff: lfos * 500 + 1000).graphviz
+      expect(labels(dot).join).to include('slow', 'fast')
+    end
+
+    it 'names channel inputs of a bundle' do
+      expect(labels(graph.graphviz).grep(/Channels/)).to eq(["Channels\\n2 channels"])
+    end
+  end
+
   describe '.refresh!' do
     it 'adds per-channel versions of methods from modules included later' do
       mod = Module.new do

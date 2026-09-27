@@ -175,6 +175,11 @@ module MB
           "#<#{self.class.name.rpartition('::').last} #{channel_count} channels>"
         end
 
+        # A short label for graph visualizations (see Traversable#graphviz).
+        def to_s_graphviz
+          "#{graph_node_name || 'Channels'}\n#{channel_count} channels"
+        end
+
         private
 
         def require_stereo(method)

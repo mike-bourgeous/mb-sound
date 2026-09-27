@@ -72,6 +72,10 @@ module MB
       include DurationMethods
       include ChannelMethods
 
+      # The per-channel DSL call that made this node, if any (see
+      # ChannelDispatch and ChannelGroup).  Used by #graphviz.
+      attr_accessor :channel_group
+
       # The nodes that carry this node's output channels.  Every node has
       # outputs: a single-channel node is its own only output, and nodes with
       # several outputs (MultiOutput, e.g. a stereo reverb or a channel
