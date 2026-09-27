@@ -41,6 +41,51 @@ RSpec.describe(MB::Sound::GraphNode::Channels) do
     end
   end
 
+  describe 'conversions' do
+    # The first sample of each channel of +node+.
+    def firsts(node)
+      node.outputs.map { |o| o.sample(4)[0].round(4) }
+    end
+
+    it 'pans single-channel nodes with equal power' do
+      expect(firsts(1.constant.pan(-1))).to eq([1, 0])
+      expect(firsts(1.constant.pan(0))).to eq([0.7071, 0.7071])
+      expect(firsts(1.constant.pan(1))).to eq([0, 1])
+      expect(firsts(1.constant.pan(MB::Sound::GraphNode::Constant.new(1, sample_rate: 48000)))).to eq([0, 1])
+    end
+
+    it 'rejects unknown pan laws, out-of-range positions, and bundle panning' do
+      expect { 1.constant.pan(0, law: :linear) }.to raise_error(ArgumentError, /pan law/)
+      expect { 1.constant.pan(2) }.to raise_error(ArgumentError, /-1 to 1/)
+      expect { bundle.pan(0) }.to raise_error(NotImplementedError, /balance/)
+    end
+
+    it 'mixes down, swaps, and picks channels' do
+      expect(bundle.mono.sample(4)[0]).to eq(1.5)
+      expect(bundle.mixdown.sample(4)[0]).to eq(1.5)
+      expect(1.constant.mono.constant).to eq(1)
+      expect(firsts(bundle.swap)).to eq([2, 1])
+      expect(bundle.left).to equal(left)
+      expect(bundle.right).to equal(right)
+      expect(bundle.stereo).to equal(bundle)
+      expect(firsts(MB::Sound.channels(left).stereo)).to eq([1, 1])
+    end
+
+    it 'converts to and from mid/side and changes width' do
+      expect(firsts(bundle.mid_side)).to eq([1.5, -0.5])
+      expect(firsts(bundle.mid_side.from_mid_side)).to eq([1, 2])
+      expect(firsts(bundle.width(0))).to eq([1.5, 1.5])
+      expect(firsts(bundle.width(2))).to eq([0.5, 2.5])
+    end
+
+    it 'requires stereo for stereo-only conversions' do
+      three = MB::Sound.channels(left, right, 3.constant)
+      expect { three.swap }.to raise_error(ArgumentError, /stereo/)
+      expect { three.stereo }.to raise_error(ArgumentError, /mix down/)
+      expect { MB::Sound.channels(left).right }.to raise_error(ArgumentError, /no right/)
+    end
+  end
+
   it 'is a multi-output node with its channels as sources' do
     expect(bundle).to be_a(MB::Sound::GraphNode::MultiOutput)
     expect(bundle.channel_count).to eq(2)

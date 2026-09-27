@@ -69,6 +69,71 @@ module MB
         end
         alias at_rate sample_rate=
 
+        # Returns a stereo bundle: this bundle if it has two channels, or its
+        # single channel on both sides.
+        def stereo
+          case channel_count
+          when 2 then self
+          when 1 then Channels.new([@outputs[0], @outputs[0]])
+          else raise ArgumentError, "Can't make #{channel_count} channels stereo automatically; pick channels (e.g. channels(b[0], b[1])) or mix down with .mono"
+          end
+        end
+
+        # Mixes the channels into one node, averaging them so levels stay the
+        # same for correlated channels.  Also available as #mixdown.
+        def mono
+          return @outputs[0] if channel_count == 1
+          @outputs.reduce(:+) * (1.0 / channel_count)
+        end
+        alias mixdown mono
+
+        # The first (left) channel.
+        def left
+          @outputs[0]
+        end
+
+        # The second (right) channel.
+        def right
+          raise ArgumentError, "A #{channel_count}-channel bundle has no right channel" if channel_count < 2
+          @outputs[1]
+        end
+
+        # Returns a stereo bundle with the left and right channels swapped.
+        def swap
+          require_stereo('swap')
+          Channels.new([right, left])
+        end
+
+        # Converts left/right stereo to mid/side: mid is (L + R) / 2 and side
+        # is (L - R) / 2.  See #from_mid_side.
+        def mid_side
+          require_stereo('mid_side')
+          Channels.new([(left + right) * 0.5, (left - right) * 0.5])
+        end
+
+        # Converts mid/side back to left/right stereo: left is M + S and
+        # right is M - S.  See #mid_side.
+        def from_mid_side
+          require_stereo('from_mid_side')
+          Channels.new([left + right, left - right])
+        end
+
+        # Changes the stereo width by scaling the side (L - R) signal: 0 is
+        # mono, 1 is unchanged, and larger values are wider.  +amount+ may be
+        # a graph node.
+        #
+        # Example (bin/sound.rb):
+        #     bg stereo(220.hz.ramp.at(0.2), 221.hz.ramp.at(0.2)).forever.width(1.5)
+        def width(amount)
+          mid, side = mid_side
+          Channels.new([mid, side * amount]).from_mid_side
+        end
+
+        # Panning a bundle (balance) will come with more pan laws.
+        def pan(*)
+          raise NotImplementedError, 'Panning a multichannel bundle (balance) is not supported yet; pan single-channel nodes (e.g. node.pan(-0.5)) or use .width'
+        end
+
         # Allows numbers first in arithmetic with bundles (e.g. `2 * bundle`).
         def coerce(numeric)
           [numeric.constant(sample_rate: sample_rate), self]
@@ -85,6 +150,12 @@ module MB
 
         def inspect
           "#<#{self.class.name.rpartition('::').last} #{channel_count} channels>"
+        end
+
+        private
+
+        def require_stereo(method)
+          raise ArgumentError, "#{method} needs a stereo bundle (got #{channel_count} channels)" unless channel_count == 2
         end
       end
     end
