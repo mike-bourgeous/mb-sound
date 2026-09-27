@@ -97,7 +97,7 @@ module MB::Sound
     else
       swap_song
       puts 'Playing (Ctrl-C to stop)'
-      sleep 0.5 until transport.bar > SWAP_SONG_BARS - 2 && players.empty?
+      wait # until the song and its reverb tails have ended
     end
   end
 end

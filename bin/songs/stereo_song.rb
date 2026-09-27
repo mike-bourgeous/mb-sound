@@ -77,7 +77,7 @@ module MB::Sound
     else
       stereo_song
       puts 'Playing (Ctrl-C to stop)'
-      sleep 0.5 until transport.bar > STEREO_SONG_BARS - 1 && players.empty?
+      wait # until the song and its reverb tails have ended
     end
   end
 end

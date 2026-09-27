@@ -103,7 +103,7 @@ module MB::Sound
     else
       scheduled_song
       puts 'Playing (Ctrl-C to stop)'
-      sleep 0.5 until transport.bar > SCHEDULED_SONG_BARS - 4 && players.empty?
+      wait # until the song and its reverb tails have ended
     end
   end
 end

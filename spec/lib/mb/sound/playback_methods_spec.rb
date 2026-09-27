@@ -195,6 +195,57 @@ RSpec.describe(MB::Sound::PlaybackMethods) do
     end
   end
 
+  describe '#wait' do
+    let(:session) { MB::Sound::Session.new(output: MB::Sound::NullOutput.new(channels: 2, sleep: false), buffer_size: 800, realtime: true) }
+
+    after { session.close }
+
+    def within(&block)
+      MB::Sound::Session.with_context(session: session, &block)
+    end
+
+    it 'returns right away if nothing is playing' do
+      within { expect(MB::Sound.wait).to eq(true) }
+    end
+
+    it 'waits for sounds to end and the mix to be quiet for a second' do
+      frames = 0
+      session.add_tap { |mix| frames += mix[0].length }
+      within do
+        MB::Sound.bg(1.constant.for(0.1))
+        expect(MB::Sound.wait).to eq(true)
+      end
+      expect(session).to be_idle
+      expect(frames).to be >= 48000 * (0.1 + MB::Sound::Session::TAIL_QUIET_SECONDS)
+    end
+
+    it 'stops waiting for a tail that never ends after the tail limit' do
+      within do
+        MB::Sound.bg(1.constant.for(0.05))
+        MB::Sound.master(at: :now) { |mix| mix.delay(seconds: 0.1, feedback: 1, dry: 1, wet: 1) }
+        expect(MB::Sound.wait(timeout: 30)).to eq(true)
+      end
+    end
+
+    it 'gives up after a timeout' do
+      paced = MB::Sound::Session.new(output: MB::Sound::NullOutput.new(channels: 2), buffer_size: 800, realtime: true)
+      MB::Sound::Session.with_context(session: paced) do
+        MB::Sound.bg(1.constant)
+        t = MB::U.clock_now
+        expect(MB::Sound.wait(timeout: 0.2)).to eq(false)
+        expect(MB::U.clock_now - t).to be_between(0.2, 1)
+      end
+    ensure
+      paced&.close
+    end
+
+    it 'refuses to wait inside a scheduled block' do
+      MB::Sound::Session.with_context(session: session, batch: []) do
+        expect { MB::Sound.wait }.to raise_error(/scheduled block/)
+      end
+    end
+  end
+
   describe '#swap' do
     after(:each) do
       MB::Sound::Session.default.close

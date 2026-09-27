@@ -358,6 +358,48 @@ module MB
       end
       alias vis visualize
 
+      # Waits until everything playing in the background (see #bg) has ended,
+      # including master effects tails: nothing is playing or waiting to
+      # start, and the mix has been quiet for Session::TAIL_QUIET_SECONDS
+      # (after at most Session::MAX_TAIL_SECONDS of tail).  Returns true, or
+      # false if +:timeout+ seconds pass first.  Returns right away if the
+      # background session isn't running.
+      #
+      # Use it at the end of scripts so they don't exit (and cut off reverb
+      # tails) while the song is still ringing:
+      #
+      #     my_song
+      #     wait
+      def wait(timeout: nil)
+        raise 'Cannot wait inside a scheduled block (it would block the scheduler)' if Session.context&.[](:batch)
+
+        session = Session.current
+        return true unless session.running?
+
+        rate = session.output.sample_rate
+        quiet = 0
+        tail = 0
+        tap = session.add_tap { |mix|
+          if session.idle? && !session.schedule_due?
+            tail += mix[0].length
+            quiet = session.quiet?(mix) ? quiet + mix[0].length : 0
+          else
+            tail = quiet = 0
+          end
+        }
+
+        deadline = timeout && MB::U.clock_now + timeout
+        until quiet >= Session::TAIL_QUIET_SECONDS * rate || tail >= Session::MAX_TAIL_SECONDS * rate
+          return false if deadline && MB::U.clock_now > deadline
+          return true unless session.running?
+          sleep 0.05
+        end
+
+        true
+      ensure
+        session&.remove_tap(tap) if tap
+      end
+
       # Returns a Hash from background player name (see #bg) to a
       # description of what it is playing.
       def players
