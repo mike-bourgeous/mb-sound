@@ -60,6 +60,7 @@ module MB
       # arguments.
       def runner(kind, params, **options)
         script = caller_locations(2, 1)[0]&.absolute_path || $0
+        MB::U.sigquit_backtrace # Ctrl-\ prints every thread's backtrace
         ScriptRunner.new(kind, params, script: script, **options)
       rescue ScriptRunner::UsageError => e
         $stderr.puts "#{File.basename(script.to_s)}: #{e.message}\n\n"

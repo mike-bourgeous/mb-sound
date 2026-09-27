@@ -38,10 +38,16 @@ MB::Sound.effect_script(
   oversample: [2.0, 'Oversampling factor'],
 ) { |input, p|
   sample_rate = 48000
-  internal_bufsize = 32
 
   delay_samples = MB::M.max((p.delay * sample_rate * p.oversample).round, 0)
-  delay_samples = delay_samples + -0.4.hz.ramp.forever.at(0..(3250 * p.oversample)) if p.pitch
+  wobble = p.pitch ? 3250 * p.oversample : 0
+
+  # The feedback comes back one internal buffer later, so the buffer must
+  # fit inside the shortest delay; larger buffers are much faster (measured
+  # in stereo: 32 samples ~180% of realtime, 256 ~45%)
+  internal_bufsize = [512, 256, 128, 64, 32].find { |n| n <= delay_samples - wobble } || 32
+
+  delay_samples = delay_samples + -0.4.hz.ramp.forever.at(0..wobble) if p.pitch
   delay_samples = delay_samples.constant if delay_samples.is_a?(Numeric)
 
   # TODO: ping-pong
@@ -57,9 +63,12 @@ MB::Sound.effect_script(
     # Feedback buffer, overwritten by a later call to #spy
     a = Numo::SFloat.zeros(internal_bufsize)
 
-    # Feedback injector and delay
+    # Feedback injector and delay.  The feedback comes back one internal
+    # buffer late, so the delay line is that much shorter; the input is
+    # delayed by the same amount so the first echo isn't early.
     adjusted_delay = (delay_samples.named('delay in samples') - internal_bufsize.constant.named('buffer size')).clip(0, nil)
-    b = (inp * p.drive.constant.named('drive') + 0.constant.proc { a }.named('feedback') * p.feedback)
+    tape_in = inp.delay(samples: internal_bufsize, smoothing: false, sample_rate: sample_rate * p.oversample).named('loop latency')
+    b = (tape_in * p.drive.constant.named('drive') + 0.constant.proc { a }.named('feedback') * p.feedback)
       .delay(samples: adjusted_delay, smoothing: p.smoothing, sample_rate: sample_rate * p.oversample)
       .named('delay')
 
