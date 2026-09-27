@@ -4,8 +4,9 @@
 # with each chord, and a little Haas stereo width.  Returns a stereo pair of
 # graph nodes.
 #
-# Run directly to hear a demo:
-#     bin/synths/fifth_pad.rb [bpm]
+# Run directly to hear a demo (--help for all options):
+#     bin/synths/fifth_pad.rb                    # plays live until Ctrl-C
+#     bin/synths/fifth_pad.rb --bpm 70 pad.flac  # renders 8 bars at 70 BPM
 #
 # Or load it in bin/sound.rb and apply it to your own sequences:
 #     load 'bin/synths/fifth_pad.rb'
@@ -37,8 +38,10 @@ module MB::Sound
     [pad, pad.delay(seconds: width)]
   end
 
-  if $0 == __FILE__
-    bpm(Float(ARGV[0] || 90))
-    play fifth_pad(seq(A2, F2, C3, G2).n1.legato(0.95).loop)
+  if main_script?(__FILE__)
+    song_script(bars: 8, bpm: [90.0, 'Tempo in beats per minute']) { |p|
+      bpm(p.bpm)
+      bg :pad, fifth_pad(seq(A2, F2, C3, G2).n1.legato(0.95).loop), fade: 0
+    }
   end
 end

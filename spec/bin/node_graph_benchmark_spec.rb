@@ -7,7 +7,7 @@ RSpec.describe('bin/songs/node_graph_benchmark.rb') do
   it 'can save the song to a file' do
     FileUtils.mkdir_p(File.dirname(outfile))
 
-    output = `LOOP_COUNT=60 bin/songs/node_graph_benchmark.rb #{outfile.shellescape} --overwrite`
+    output = `bin/songs/node_graph_benchmark.rb --bars 0.5 #{outfile.shellescape} --overwrite` # 1 second at 120 BPM
     expect($?).to be_success
 
     expect(output).to include(outfile)

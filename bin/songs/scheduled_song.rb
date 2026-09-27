@@ -7,7 +7,9 @@
 #
 # Usage:
 #     bin/songs/scheduled_song.rb             # plays live in the background session
-#     bin/songs/scheduled_song.rb song.flac   # renders to a file instead
+#     bin/songs/scheduled_song.rb song.flac   # renders to a file instead (-f to overwrite)
+#     bin/songs/scheduled_song.rb --graphviz  # draws the graph at the start of the song
+#     bin/songs/scheduled_song.rb --help      # all options
 #
 # Or in bin/sound.rb:
 #     load 'bin/songs/scheduled_song.rb'
@@ -96,14 +98,5 @@ module MB::Sound
     at_bar(26) { outro fade: 5 }
   end
 
-  if $0 == __FILE__
-    if ARGV[0]
-      seconds = render(ARGV[0], bars: SCHEDULED_SONG_BARS, tail: true, overwrite: true) { scheduled_song }
-      puts "Rendered #{seconds.round(1)} seconds to #{ARGV[0]}"
-    else
-      scheduled_song
-      puts 'Playing (Ctrl-C to stop)'
-      wait # until the song and its reverb tails have ended
-    end
-  end
+  song_script(bars: SCHEDULED_SONG_BARS) { scheduled_song } if main_script?(__FILE__)
 end

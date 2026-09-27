@@ -7,6 +7,7 @@
 # Usage:
 #     bin/songs/stereo_song.rb             # plays live in the background session
 #     bin/songs/stereo_song.rb song.flac   # renders to a file instead (-f to overwrite)
+#     bin/songs/stereo_song.rb --graphviz  # draws the graph at the start of the song
 #     bin/songs/stereo_song.rb --help      # all options
 #
 # Or in bin/sound.rb:
@@ -71,5 +72,5 @@ module MB::Sound
     at_bar(7) { outro fade: 2 }
   end
 
-  song_script(bars: STEREO_SONG_BARS) { stereo_song } if $0 == __FILE__
+  song_script(bars: STEREO_SONG_BARS) { stereo_song } if main_script?(__FILE__)
 end
