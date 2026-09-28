@@ -9,9 +9,6 @@ require 'mb/util'
 
 require 'mb/sound'
 
-if ARGV.length != 1 || ARGV.include?('--help')
-  MB::U.print_header_help
-  exit 1
-end
-
-puts MB::U.highlight(MB::Sound::FFMPEGInput.parse_info(ARGV[0]))
+MB::Sound.script(args: 1) { |(filename)|
+  puts MB::U.highlight(MB::Sound::FFMPEGInput.parse_info(filename))
+}
