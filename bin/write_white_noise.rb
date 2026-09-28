@@ -2,6 +2,12 @@
 # Generates white noise in a file.  The output will have a roughly Gaussian
 # distribution.
 
+#
+# Usage: $0 [options] output_filename
+#
+# Example:
+#     $0 --channels 2 --seconds 30 /tmp/white.flac
+
 require 'bundler/setup'
 
 require 'pry'
@@ -13,31 +19,30 @@ require 'mb-sound'
 
 PROGRESS_FORMAT = "\e[36m%a \e[35m%e\e[0m \e[34m[\e[1m%B\e[0;34m] %p%%\e[0m"
 RATE = 48000
-USAGE = "(usage #{$0} output_filename channels bins seconds)"
 
-outfile = ARGV[0]
-raise "No output filename given #{USAGE}" unless outfile.is_a?(String)
+MB::Sound.script(
+  args: 1,
+  channels: [1, '-c', 'Number of channels', 1..],
+  bins: [2401, '-b', 'Spectrum bins per block', 10..],
+  seconds: [10.0, '-s', 'Length in seconds', 0.001..],
+  force: [false, '-f', 'Overwrite the output file'],
+) { |(outfile), p|
+  channels = p.channels
+  bins = p.bins
+  seconds = p.seconds
+  framesize = (bins - 1) * 2
+  frametime = framesize.to_f / RATE
 
-channels = ARGV[1].to_i rescue 0
-raise "Invalid number of channels (must be >= 1) #{USAGE}" unless channels >= 1
+  output = MB::Sound.file_output(outfile, sample_rate: 48000, channels: channels, overwrite: p.force || :prompt)
 
-bins = ARGV[2].to_i rescue 0
-raise "Invald number of bins given (must be >= 10) #{USAGE}" unless bins >= 10
-framesize = (bins - 1) * 2
-frametime = framesize.to_f / RATE
-
-seconds = ARGV[3].to_f rescue 0
-raise "Invalid number of seconds given (must be > 0) #{USAGE}" unless seconds > 0
-
-output = MB::Sound::FFMPEGOutput.new(outfile, sample_rate: 48000, channels: channels)
-
-begin
-  loops = (seconds / frametime).ceil
-  loops.times do
-    # FIXME there's a clear comb filtering effect based on the number of bins
-    noise = channels.times.map { MB::Sound::Noise.spectral_white_noise(bins) }
-    output.write(MB::Sound.real_ifft(noise, odd_length: false))
+  begin
+    loops = (seconds / frametime).ceil
+    loops.times do
+      # FIXME there's a clear comb filtering effect based on the number of bins
+      noise = channels.times.map { MB::Sound::Noise.spectral_white_noise(bins) }
+      output.write(MB::Sound.real_ifft(noise, odd_length: false))
+    end
+  ensure
+    output.close
   end
-ensure
-  output.close
-end
+}

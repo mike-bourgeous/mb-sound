@@ -31,7 +31,7 @@ RSpec.describe('bin/play_noise.rb') do
   it 'can play each type of noise via simulated keyboard input' do
     text = nil
     elapsed = Benchmark.realtime do
-      text = `OUTPUT_TYPE=null bin/play_noise.rb white 7 < tmp/play_noise_test.txt 2>&1`
+      text = `OUTPUT_TYPE=null bin/play_noise.rb white -c 7 < tmp/play_noise_test.txt 2>&1`
     end
     result = ($?)
     text.gsub!("\r", "\n")

@@ -1,5 +1,11 @@
 #!/usr/bin/env ruby
-# Plays realtime noise of different colors.
+# Plays realtime noise of different colors, with keyboard controls for the
+# color, slope, and gain.
+#
+# Usage: $0 [options] [white|pink|brown|power|wave]
+#
+# Example:
+#     $0 pink --channels 1 --gain -12
 
 require 'rubygems'
 require 'bundler/setup'
@@ -10,8 +16,6 @@ require 'pry-byebug'
 $LOAD_PATH << File.expand_path('../lib', __dir__)
 
 require 'mb-sound'
-
-USAGE = "(usage: #{$0} (white|pink|brown|power|wave) [channels default 2] [db_gain default 0])"
 
 class NoiseGenerator
   BINS = 1201
@@ -193,16 +197,17 @@ class NoiseGenerator
   end
 end
 
-noise_type = ARGV[0] || 'brown'
-raise "Missing noise type #{USAGE}" unless noise_type.is_a?(String) && !noise_type.empty?
+MB::Sound.script(
+  args: 0..1,
+  channels: [2, '-c', 'Number of channels', 1..],
+  gain: [0.0, '-g', 'Output gain in dB'],
+) { |(noise_type), p|
+  noise_type ||= 'brown'
+  unless NoiseGenerator::NOISE_COLORS.include?(noise_type.to_sym)
+    abort "Unknown noise type #{noise_type.inspect} (#{NoiseGenerator::NOISE_COLORS.keys.join(', ')}; see --help)"
+  end
 
-channels = ARGV[1]&.to_i || 2
-raise "Invalid number of channels #{USAGE}" if channels < 1
-
-gain = ARGV[2]&.to_f || 0
-
-output = MB::Sound.output(sample_rate: 48000, channels: channels)
-generator = NoiseGenerator.new(output, gain, noise_type)
-
-puts "\e[1;33m#{USAGE}\e[0m\n\n"
-generator.run
+  output = MB::Sound.output(sample_rate: 48000, channels: p.channels)
+  generator = NoiseGenerator.new(output, p.gain, noise_type)
+  generator.run
+}
