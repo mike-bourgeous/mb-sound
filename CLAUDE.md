@@ -27,6 +27,8 @@ bin/sound.rb                      # Launch interactive Pry console with MB::Soun
 
 Testing: run affected specs while working, and the full suite (about 6-7 minutes) before and after each merge, or more often for good reason.  Save suite output to a file and grep it instead of rerunning.  Run one spec process at a time; concurrent runs cause spurious failures (maybe SimpleCov or fixed-name tmp files).
 
+The bin/ script smoke tests (`spec/bin/script_smoke_spec.rb`, tagged `:smoke`) run every script with `--help` and a short render; plain `rspec` skips them (they take several minutes) and CI runs them as a separate job.  Run them with `bundle exec rspec --tag smoke` before merging changes to bin/ scripts or the script runner, and add new scripts to their tables.
+
 System dependencies (apt): `ffmpeg gnuplot-qt libsamplerate0-dev libjack-dev graphviz`
 
 In the container, `OUTPUT_TYPE=null` is set in the Dockerfile so playback uses `NullOutput`.

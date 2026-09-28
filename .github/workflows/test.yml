@@ -29,3 +29,25 @@ jobs:
         run: bundle exec rake compile
       - name: Run tests
         run: bundle exec rspec
+
+  # Runs every bin/ script with --help and a short render
+  # (spec/bin/script_smoke_spec.rb), which plain `rspec` skips because it
+  # takes several minutes.
+  smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - name: Install Ruby
+        uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: '3.4'
+      - name: Install apt deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install ffmpeg gnuplot-qt libsamplerate0-dev graphviz
+      - name: Install gem deps
+        run: bundle install
+      - name: Compile native extension
+        run: bundle exec rake compile
+      - name: Run script smoke tests
+        run: bundle exec rspec --tag smoke

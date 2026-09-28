@@ -4,7 +4,7 @@ require 'shellwords'
 # Runs every script converted to the script runner (see
 # MB::Sound::ScriptRunner) with --help and with a short render, checking that
 # each one starts, parses its options, and writes a file.
-RSpec.describe('script runner scripts') do
+RSpec.describe('script runner scripts', :smoke) do
   # Script => extra arguments for a short render
   songs = {
     'bin/songs/node_graph_benchmark.rb' => ['--bars', '0.5'],
