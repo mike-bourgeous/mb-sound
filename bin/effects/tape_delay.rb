@@ -4,7 +4,7 @@
 #
 # Usage: $0 [options] [input_filename [output_filename]]
 #
-# Plays a sound file (or live input, stereo unless -c/--input-channels says otherwise) through
+# Plays a sound file (or live input, stereo unless -c says otherwise) through
 # the echo, letting it ring out after the file ends.  Files keep their
 # channel count.  Run with --help for all options.
 #

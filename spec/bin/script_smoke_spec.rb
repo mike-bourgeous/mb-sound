@@ -19,6 +19,47 @@ RSpec.describe('script runner scripts') do
     'bin/synths/fifth_pad.rb' => ['--bars', '0.5'],
   }.freeze
 
+  # Effect script => extra arguments; each processes a short test file
+  effects = {
+    'bin/effects/fdn_reverb.rb' => ['--decay', '0.3'],
+    'bin/effects/flanger.rb' => ['--oversample', '1'],
+    'bin/effects/grain_repeater.rb' => ['--delay', '0.05', '-n', '4'],
+    'bin/effects/ping_pong_delay.rb' => ['--delay', '0.05', '--feedback', '0.3'],
+    'bin/effects/reverb.rb' => ['--preset', 'room', '-w', '-6'],
+    'bin/effects/reverse_delay.rb' => ['--delay', '0.1', '--oversample', '1'],
+    'bin/effects/tape_delay.rb' => ['--feedback', '0.3', '--oversample', '1'],
+  }.freeze
+
+  let(:infile) { 'tmp/smoke_effect_input.flac' }
+
+  effects.each do |script, args|
+    describe script do
+      let(:outfile) { "tmp/smoke_#{File.basename(script, '.rb')}.flac" }
+
+      it 'prints its header and options with --help' do
+        text = `#{script.shellescape} --help 2>&1`
+        expect($?).to be_success
+        header = File.readlines(script)[1].delete_prefix('#').strip
+        expect(text).to include(header, '--output', '--input-channels', '--repeat')
+      end
+
+      it 'processes a short file, ringing out after it ends' do
+        FileUtils.mkdir_p('tmp')
+        File.unlink(outfile) if File.exist?(outfile)
+        MB::Sound.write(infile, [220.hz.ramp.at(0.5).sample(4800), 330.hz.ramp.at(0.5).sample(4800)], sample_rate: 48000, overwrite: true)
+
+        text = `#{script.shellescape} -q -f #{args.shelljoin} #{infile.shellescape} #{outfile.shellescape} 2>&1`
+        expect($?).to be_success, text
+        expect(text).to include("to #{outfile}")
+
+        data = MB::Sound.read(outfile)
+        expect(data.length).to be >= 2
+        expect(data[0].length).to be > 4800 # longer than the input
+        expect(data.map { |c| c.abs.max }.max).to be > 0.01
+      end
+    end
+  end
+
   songs.each do |script, args|
     describe script do
       let(:outfile) { "tmp/smoke_#{File.basename(script, '.rb')}.flac" }

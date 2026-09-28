@@ -2,161 +2,86 @@
 # A simple flanger effect, to demonstrate using a signal node as a delay time.
 # (C)2022 Mike Bourgeous
 #
-# Usage: $0 [delay_s [feedback [hz [depth0..1]]]] [filename [output_filename]] [--silent]
-#    Or: $0 [filename [output_filename]] [--silent]
+# Usage: $0 [options] [input_filename [output_filename]]
 #
-# Environment variables:
-#    WAVE_TYPE - oscillator waveform name (e.g. sine, ramp, triangle, square)
-#    SMOOTHING - max delay change rate in seconds per second
-#    DRY - dry output level (default 1)
-#    WET - wet output level (default 1)
-#    SPREAD - LFO phase spread across channels (default 180)
+# Plays a sound file (or live input, stereo unless -c says otherwise) through
+# the flanger, letting it ring out after the file ends.  With live MIDI
+# (JACK), CC 1 (the mod wheel) sweeps the LFO rate, depth, and dry level
+# together.  Run with --help for all options.
+#
+# Delay smoothing (--smoothing) behaves differently with oversampling; use
+# --oversample 1 for the pitch effects of the retired old_flanger.rb.
 #
 # Examples:
-#    DRY=0.5 $0 sounds/drums.flac 0.002 0.85 0.2 0.5
+#     $0 --dry 0.5 --delay 0.002 --feedback 0.85 --hz 0.2 --depth 0.5 sounds/drums.flac
 #
-# Cool effects (omit filename for realtime processing from Jack):
-#    Arpeggio: SMOOTHING=0.5 $0 sounds/transient_synth.flac 0.035 0 3 2
-#    Slow arp: SMOOTHING=1.5 $0 sounds/transient_synth.flac 0.15 0 3 2
-#    Metal drums: SMOOTHING=12.1 WET=1 DRY=0 $0 sounds/drums.flac 0.02 -0.3 343 -6
-#    Water drums: SMOOTHING=4 WET=1 DRY=0 $0 sounds/drums.flac 0.02 -0.3 46 6
-#    Space warp: SMOOTHING=10 WET=1 DRY=0 $0 sounds/drums.flac 0.2 -0.8 15 6
-#    Time warp: WET=1 DRY=0 $0 sounds/drums.flac 0.2 -0.8 0.3 6
-#    Bass comb: SMOOTHING=0.7 DRY=0 $0 sounds/drums.flac 0.04 0.95 150 1
-#    Bass beat: SPREAD=10 $0 sounds/drums.flac 0.006 -0.98 0.4 2
-#    Gritty overtone: DRY=0.5 $0 sounds/synth0.flac 0.0029 0.85 60 0.1
-#    Decimation: DRY=0 $0 sounds/synth0.flac 0.0058 -0.85 3300 0.2
+# Cool effects (omit the filename for live input):
+#     # Arpeggio (--oversample 1 keeps the pitch effects of the old flanger)
+#     $0 --oversample 1 --smoothing 0.5 --delay 0.035 --feedback 0 --hz 3 --depth 2 sounds/transient_synth.flac
+#     # Slow arp
+#     $0 --oversample 1 --smoothing 1.5 --delay 0.15 --feedback 0 --hz 3 --depth 2 sounds/transient_synth.flac
+#     # Metal drums
+#     $0 --smoothing 12.1 --wet 1 --dry 0 --delay 0.02 --feedback -0.3 --hz 343 --depth -6 sounds/drums.flac
+#     # Water drums
+#     $0 --smoothing 4 --wet 1 --dry 0 --delay 0.02 --feedback -0.3 --hz 46 --depth 6 sounds/drums.flac
+#     # Space warp
+#     $0 --smoothing 10 --wet 1 --dry 0 --delay 0.2 --feedback -0.8 --hz 15 --depth 6 sounds/drums.flac
+#     # Time warp
+#     $0 --wet 1 --dry 0 --delay 0.2 --feedback -0.8 --hz 0.3 --depth 6 sounds/drums.flac
+#     # Bass comb
+#     $0 --smoothing 0.7 --dry 0 --delay 0.04 --feedback 0.95 --hz 150 --depth 1 sounds/drums.flac
+#     # Bass beat
+#     $0 --spread 10 --delay 0.006 --feedback -0.98 --hz 0.4 --depth 2 sounds/drums.flac
+#     # Gritty overtone
+#     $0 --dry 0.5 --delay 0.0029 --feedback 0.85 --hz 60 --depth 0.1 sounds/synth0.flac
+#     # Decimation
+#     $0 --dry 0 --delay 0.0058 --feedback -0.85 --hz 3300 --depth 0.2 sounds/synth0.flac
 
 require 'bundler/setup'
+require 'mb-sound'
 
-require 'mb/sound'
+MB::Sound.effect_script(
+  delay: [0.02193, 'Center delay in seconds'],
+  feedback: [-0.3, 'Feedback gain'],
+  hz: [-0.7, 'LFO frequency (negative runs the waveform backward)'],
+  depth: [0.35, 'LFO depth as a fraction of the delay'],
+  wave: [:sine, 'LFO waveform', MB::Sound::Oscillator::WAVE_TYPES],
+  smoothing: [nil, Float, 'Max delay change rate in seconds per second (default: none)'],
+  dry: [1.0, 'Dry (input) level'],
+  wet: [1.0, 'Wet (flanged) level'],
+  spread: [180.0, 'LFO phase spread across channels in degrees'],
+  oversample: [2.0, 'Oversampling factor'], # FIXME: oversampling changes delay-time smoothing and/or other behavior
+) { |input, p|
+  sample_rate = 48000
+  internal_bufsize = (24 * [1, p.oversample].max).ceil
+  channels = input.channel_count
 
-MB::U.sigquit_backtrace
+  # FIXME: This doesn't work with a filter like 1000.hz.lowpass1p; maybe there's overshoot or something?
+  delay_smoothing = p.smoothing
+  delay_smoothing2 = delay_smoothing
 
-if ARGV.include?('--help')
-  MB::U.print_header_help
-  exit 1
-end
+  # CC 1 sweeps the LFO rate, depth, and dry level together
+  lfo_freq = p.midi_cc(1, :hz, range: 0.0..6.0)
+  depthconst = p.midi_cc(1, :depth, range: 0.0..2.0)
+  dryconst = p.midi_cc(1, :dry, range: 1.0..0.0)
+  delayconst = p.delay.constant.named('delay')
+  wetconst = p.wet.constant.named('wet')
 
-numerics, others = ARGV.partition { |arg| arg.strip =~ /\A[+-]?[0-9]+(\.[0-9]+)?\z/ }
+  # TODO: Maybe want a graph-wide spy function that either prints stats, draws
+  # meters, or plots graphs of multiple nodes by name or reference
 
-delay, feedback, hz, depth = numerics.map(&:to_f)
-delay ||= 0.02193
-feedback ||= -0.3
-hz ||= -0.7
-depth ||= 0.35
-
-wave_type = ENV['WAVE_TYPE']&.to_sym || :sine
-raise 'Invalid wave type' unless MB::Sound::Oscillator::WAVE_TYPES.include?(wave_type)
-
-# Optionally read from a file
-filename = others[0]
-if filename && File.readable?(filename)
-  input = MB::Sound.file_input(filename)
-
-  # Can't use 0.hz.for(...) because GraphVoice changes all Tones to play forever.  FIXME: make GraphVoice smarter?
-  # Feedback will decay by N dB after |log_[|feedback|](-N dB)| max delay periods
-  # Always extend by at least one delay period, or at least one second
-  # TODO: detect actual decay by monitoring audio level; that might be a useful graph node to add
-  max_delay = delay.abs * (1 + depth.abs)
-  decay_periods = 1 + Math.log(-36.dB, MB::M.clamp(feedback.abs, 0.1, 0.99))
-  delay_time = MB::M.max(max_delay * decay_periods, 1)
-  final_tone = 0.constant.for(max_delay * decay_periods)
-  inputs = input.split.map { |d| d.and_then(final_tone) }
-else
-  input = MB::Sound.input(channels: ENV['CHANNELS']&.to_i || 2)
-  bufsize = input.buffer_size
-  inputs = input.split
-end
-
-if others.delete('--silent')
-  puts "\e[1;34mNot playing realtime output\e[0m"
-else
-  output = MB::Sound.output(channels: inputs.length)
-end
-
-# Optionally write to a file
-output_filename = others[1]
-if output_filename && !output_filename.start_with?('-') && !MB::U.prevent_overwrite(output_filename, prompt: true)
-  puts "\e[33mWriting to \e[1m#{output_filename}\e[0m"
-  output = MB::Sound::MultiWriter.new([
-    output,
-    MB::Sound.file_output(
-      output_filename,
-      channels: inputs.count,
-      buffer_size: output&.buffer_size || input.buffer_size,
-      overwrite: true
-    )
-  ].compact)
-end
-
-if defined?(MB::Sound::JackFFI) && output.is_a?(MB::Sound::JackFFI::Output)
-  # MIDI control is possible since Jack is running
-  puts "\e[1mMIDI control enabled (jackd detected)\e[0m"
-  manager = MB::Sound::MIDI::Manager.new(jack: output.jack_ffi)
-else
-  puts "\e[38;5;243mMIDI disabled (jackd not detected)\e[0m"
-end
-
-# FIXME: does not work (at least on USB audio) with oversample < 1
-# FIXME: oversampling changes delay-time smoothing and/or other behavior
-oversample = ENV['OVERSAMPLE']&.to_f || 2
-
-bufsize ||= output.buffer_size
-internal_bufsize = (24 * [1, oversample].max).ceil
-
-delay_samples = delay * output.sample_rate * oversample
-delay_samples = 0 if delay_samples < 0
-range = depth * delay_samples
-min_delay = delay_samples - range * 0.5
-max_delay = delay_samples + range * 0.5
-
-# FIXME: This doesn't work with a filter like 1000.hz.lowpass1p; maybe there's overshoot or something?
-delay_smoothing = ENV['SMOOTHING']&.to_f
-delay_smoothing2 = delay_smoothing
-
-dry_level = ENV['DRY']&.to_f || 1
-wet_level = ENV['WET']&.to_f || 1
-
-phase_spread = ENV['SPREAD']&.to_f || 180.0
-
-puts MB::U.highlight({
-  args: ARGV,
-  other_args: others,
-  wave_type: wave_type,
-  delay: delay,
-  feedback: feedback,
-  lfo_hz: hz,
-  depth: depth,
-  inputs: inputs.map(&:graph_node_name),
-  sample_rate: output.sample_rate,
-  oversample: oversample,
-  buffer: bufsize,
-  internal_buffer: internal_bufsize,
-})
-
-# TODO: Maybe want a graph-wide spy function that either prints stats, draws
-# meters, or plots graphs of multiple nodes by name or reference
-
-begin
   # FIXME: feedback delay includes buffer size
-  # TODO: Abstract construction of a filter graph per channel
-  paths = inputs.map.with_index { |inp, idx|
-    inp = inp.with_buffer(bufsize).resample(mode: :libsamplerate_fastest)
+  input.outputs.map.with_index { |inp, idx|
+    inp = inp.with_buffer(800).resample(mode: :libsamplerate_fastest)
 
     # Feedback buffers, overwritten by later calls to #spy
     a = Numo::SFloat.zeros(internal_bufsize)
 
-    lfo_freq = hz.constant.named('LFO Hz')
-
-    lfo = lfo_freq.tone.with_phase(idx * phase_spread * Math::PI / (180.0 * (inputs.length - 1))).send(wave_type).forever.at(0..1)
-
-    # Set up LFO depth control
-    depthconst = depth.constant.named('Depth')
-    delayconst = delay.constant.named('Delay')
+    phase = channels > 1 ? idx * p.spread * Math::PI / (180.0 * (channels - 1)) : 0
+    lfo = lfo_freq.tone.with_phase(phase).send(p.wave).forever.at(0..1)
 
     # Delay in samples
-    samples = (delayconst * (output.sample_rate * oversample)).clip(0, nil).named('Delay in samples')
+    samples = (delayconst * (sample_rate * p.oversample)).clip(0, nil).named('Delay in samples')
 
     # Delay LFO
     lfo_scale = depthconst * samples
@@ -174,42 +99,12 @@ begin
     b = 0.constant.proc { a }.delay(samples: d_fb, smoothing: delay_smoothing2)
 
     # Effected output, with a spy to save feedback buffer
-    wet = (feedback * b - inp_delayed).softclip(0.85, 0.95).spy { |z| a[] = z if z && z.length == a.length }
+    wet = (p.feedback * b - inp_delayed).softclip(0.85, 0.95).spy { |z| a[] = z if z && z.length == a.length }
 
-    dryconst = dry_level.constant.named('Dry level')
-    wetconst = wet_level.constant.named('Wet level')
-    final = (inp * dryconst + wet * wetconst)
+    (inp * dryconst + wet * wetconst)
       .softclip(0.85, 0.95).named('final_softclip')
       .with_buffer(internal_bufsize).named('final_bufsize')
       .filter(15000.hz.lowpass)
-      .oversample(oversample, mode: :libsamplerate_fastest).named('final_oversample')
-
-    # GraphVoice provides on_cc to generate a cc map for the MIDI manager
-    # (TODO: probably a better way to do this, also need on_bend, on_pitch, etc)
-    MB::Sound::MIDI::GraphVoice.new(final, manager: manager)
-      .on_cc(1, 'LFO Hz', range: 0.0..6.0)
-      .on_cc(1, 'Depth', range: 0.0..2.0)
-      .on_cc(1, 'Dry level', range: 1.0..0.0)
-      #.on_cc(1, 'Delay', range: 0.1..4.0)
-      #.on_cc(1, 'Wet level', range: 0.0..1.0, relative: false)
-  }
-
-  paths[0].open_graphviz
-
-  if manager
-    manager.on_cc_map(paths.map(&:cc_map))
-    puts MB::U.syntax(manager.to_acid_xml, :xml)
-  end
-
-  loop do
-    manager&.update
-    data = paths.map { |p| p.sample(output.buffer_size) }
-    break if data.any?(&:nil?) || data.any?(&:empty?) || input.closed?
-
-    output.write(data.map { |c| MB::M.zpad(c, output.buffer_size) })
-  end
-
-rescue => e
-  puts MB::U.highlight(e)
-  exit 1
-end
+      .oversample(p.oversample, mode: :libsamplerate_fastest).named('final_oversample')
+  }.channels
+}

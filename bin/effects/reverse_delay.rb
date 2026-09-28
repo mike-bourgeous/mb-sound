@@ -2,88 +2,50 @@
 # A reverse delay effect.  This works by playing a delay buffer in reverse.
 # (C)2022 Mike Bourgeous
 #
-# Usage: $0 [delay_s [feedback]] [filename]
+# Usage: $0 [options] [input_filename [output_filename]]
+#
+# Plays a sound file (or live input, stereo unless -c says otherwise) through
+# the delay, letting it ring out after the file ends.  With live MIDI (JACK),
+# CC 1 (the mod wheel) controls the delay time.  Run with --help for all
+# options.
 #
 # Examples:
-#     DRY=0 $0 0.2 0 sounds/drums.flac
+#     $0 --dry 0 --delay 0.2 --feedback 0 sounds/drums.flac
 
 require 'bundler/setup'
+require 'mb-sound'
 
-require 'mb/sound'
+MB::Sound.effect_script(
+  delay: [0.6, 'Delay (and reverse loop) length in seconds'],
+  feedback: [-0.25, 'Feedback gain'],
+  dry: [0.25, 'Dry (input) level'],
+  wet: [0.75, 'Wet (reversed) level'],
+  oversample: [2.0, 'Oversampling factor'],
+) { |input, p|
+  processing_sample_rate = 48000 * p.oversample
+  internal_buffer = 64
+  internal_buftime = internal_buffer.to_f / processing_sample_rate
 
-if ARGV.include?('--help')
-  MB::U.print_header_help
-  exit 1
-end
-
-# TODO: Abstract filename and numeric parameter handling and .flac vs. JACK switching?
-
-numerics, others = ARGV.partition { |arg| arg.strip =~ /\A[+-]?[0-9]+(\.[0-9]+)?\z/ }
-
-delay, feedback = numerics.map(&:to_f)
-delay ||= 0.6
-feedback ||= -0.25
-
-dry_level = ENV['DRY']&.to_f || 0.25
-wet_level = ENV['WET']&.to_f || 0.75
-
-filename = others[0]
-if filename && File.readable?(filename)
-  input = MB::Sound.file_input(filename)
-  inputs = input.split.map { |d| d.and_then(0.hz.at(0).for(delay * 4)) }
-else
-  input = MB::Sound.input(channels: ENV['CHANNELS']&.to_i || 2)
-  inputs = input.split
-end
-
-output = MB::Sound.output(channels: inputs.length)
-
-# TODO: dedupe some kind of init code or shell or wrapper for effect processing with flanger.rb
-if defined?(MB::Sound::JackFFI) && output.is_a?(MB::Sound::JackFFI::Output)
-  # MIDI control is possible since Jack is running
-  puts "\e[1mMIDI control enabled (jackd detected)\e[0m"
-  manager = MB::Sound::MIDI::Manager.new(jack: output.jack_ffi)
-else
-  puts "\e[38;5;243mMIDI disabled (jackd not detected)\e[0m"
-end
-
-oversample = ENV['OVERSAMPLE']&.to_f || 2
-processing_sample_rate = output.sample_rate * oversample
-
-internal_buffer = 64
-
-internal_buftime = internal_buffer.to_f / processing_sample_rate
-
-puts MB::U.highlight({
-  delay: delay,
-  bufsize: output.buffer_size,
-  internal_bufsize: internal_buffer,
-  sample_rate: output.sample_rate,
-  oversample: oversample,
-  internal_buftime: internal_buftime,
-})
-
-begin
   # TODO: Allow base delay and loop length? or mindelay and maxdelay?
   # TODO: It would be cool to be able to crossfade the delay time jump; this
   # could be possible with a multi-tap delay (e.g. fade out from t1 while
   # fading in from t2)
-  delay_time = (delay.constant.named('Delay')).filter(:lowpass, cutoff: 10).clip(internal_buftime, nil)
+  delay_time = p.midi_cc(1, :delay, range: 0.0..2.0).filter(:lowpass, cutoff: 10).clip(internal_buftime, nil)
 
   lfo_freq = (1.0 / delay_time).named('LFO Frequency')
 
-  # TODO: Abstract construction of a filter graph per channel
-  paths = inputs.map.with_index { |inp, idx|
-    inp = inp.with_buffer(input.buffer_size).resample(mode: :libsamplerate_fastest)
+  channels = input.channel_count
+  input.outputs.map.with_index { |inp, idx|
+    inp = inp.with_buffer(800).resample(mode: :libsamplerate_fastest)
 
     # Feedback buffers, overwritten by later calls to #spy
     a = Numo::SFloat.zeros(internal_buffer)
 
     # The amplitude LFO mutes the sound while the delay buffer jumps back to the present
-    amp_lfo = lfo_freq.tone.sine.at(0..1000).with_phase((idx + 0.5) * 2.0 * Math::PI / inputs.length).clip(0, 1).named('Amp LFO')
+    amp_lfo = lfo_freq.tone.sine.at(0..1000).with_phase((idx + 0.5) * 2.0 * Math::PI / channels).clip(0, 1).named('Amp LFO')
 
     # The delay LFO controls the position in the delay buffer
-    delay_lfo = lfo_freq.tone.ramp.at(0..2).with_phase(idx * 2.0 * Math::PI / inputs.length).named('Delay LFO') * delay_time
+    delay_lfo = lfo_freq.tone.ramp.at(0..2).with_phase(idx * 2.0 * Math::PI / channels).named('Delay LFO') * delay_time
 
     delayed = inp.delay(seconds: delay_lfo, smoothing: false) * amp_lfo
 
@@ -93,34 +55,10 @@ begin
     d_fb = (delay_lfo - internal_buftime).clip(0, nil).named('d_fb')
     d_fb_amp = amp_lfo.multitap(d_fb)[0] # delay the amp lfo to match the feedback delay (FIXME: this seems to be off; it lets through some aliasing noise on each cycle; or maybe it's in both LFOs)
     fb_return = 0.constant.proc { a }.multitap(d_fb)[0] * d_fb_amp
-    wet = (feedback * fb_return + delayed).softclip(0.85, 0.95).spy { |z| a[] = z if z }
+    wet = (p.feedback * fb_return + delayed).softclip(0.85, 0.95).spy { |z| a[] = z if z }
 
-    dryconst = dry_level.constant.named('Dry level')
-    wetconst = wet_level.constant.named('Wet level')
-    final = (inp * dryconst + wet * wetconst).softclip(0.85, 0.95).with_buffer(internal_buffer).oversample(oversample, mode: :libsamplerate_fastest)
-
-    # GraphVoice provides on_cc to generate a cc map for the MIDI manager
-    # (TODO: probably a better way to do this, also need on_bend, on_pitch, etc)
-    MB::Sound::MIDI::GraphVoice.new(final, manager: manager)
-      .on_cc(1, 'Delay', range: 0.0..2.0)
-      #.on_cc(1, 'Delay', range: 0.1..4.0)
-      #.on_cc(1, 'Wet level', range: 0.0..1.0, relative: false)
-  }
-
-  if manager
-    manager.on_cc_map(paths.map(&:cc_map))
-    puts MB::U.syntax(manager.to_acid_xml, :xml)
-
-    mg_thread = Thread.new do
-      manager.update
-      sleep output.buffer_size.to_f / output.sample_rate
-    end
-  end
-
-  MB::Sound.play(paths, output: output)
-
-rescue => e
-  puts MB::U.highlight(e)
-  exit 1
-end
-
+    dryconst = p.dry.constant.named('Dry level')
+    wetconst = p.wet.constant.named('Wet level')
+    (inp * dryconst + wet * wetconst).softclip(0.85, 0.95).with_buffer(internal_buffer).oversample(p.oversample, mode: :libsamplerate_fastest)
+  }.channels
+}
