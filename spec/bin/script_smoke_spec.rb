@@ -106,6 +106,20 @@ RSpec.describe('script runner scripts', :smoke) do
     end
   end
 
+  # Every general script (MB::Sound.script) prints its header and options
+  general = Dir['bin/**/*.rb'].select { |f| File.read(f).match?(/MB::Sound\.script\b/) }.sort
+
+  general.each do |script|
+    describe script do
+      it 'prints its header and options with --help' do
+        text = `#{script.shellescape} --help 2>&1`
+        expect($?).to be_success, text
+        header = File.readlines(script)[1].delete_prefix('#').strip
+        expect(text).to include(header, "Options for #{File.basename(script)}", '--help')
+      end
+    end
+  end
+
   songs.each do |script, args|
     describe script do
       let(:outfile) { "tmp/smoke_#{File.basename(script, '.rb')}.flac" }
