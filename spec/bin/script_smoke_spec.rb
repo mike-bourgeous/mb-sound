@@ -3,7 +3,9 @@ require 'shellwords'
 
 # Runs every script converted to the script runner (see
 # MB::Sound::ScriptRunner) with --help and with a short render, checking that
-# each one starts, parses its options, and writes a file.
+# each one starts, parses its options, and writes a file.  Renders run as
+# real processes; --help runs in a fork of the spec process (see ForkScript)
+# for scripts that also render here, saving ~0.7 s of startup each.
 RSpec.describe('script runner scripts', :smoke) do
   # Script => extra arguments for a short render
   songs = {
@@ -39,8 +41,9 @@ RSpec.describe('script runner scripts', :smoke) do
       let(:outfile) { tmp_path("smoke_#{File.basename(script, '.rb')}.flac") }
 
       it 'prints its header and options with --help' do
-        text = `#{script.shellescape} --help 2>&1`
-        expect($?).to be_success
+        # Forked (see ForkScript); the render below is a real process run
+        text, status = fork_script(script, '--help')
+        expect(status).to be_success, text
         header = File.readlines(script)[1].delete_prefix('#').strip
         expect(text).to include(header, '--output', '--input-channels', '--repeat')
       end
@@ -83,14 +86,14 @@ RSpec.describe('script runner scripts', :smoke) do
       let(:outfile) { tmp_path("smoke_#{File.basename(script, '.rb')}.flac") }
 
       it 'prints its header and options with --help' do
-        text = `#{script.shellescape} --help 2>&1`
-        expect($?).to be_success
+        # Forked (see ForkScript); the render below is a real process run
+        text, status = fork_script(script, '--help')
+        expect(status).to be_success, text
         header = File.readlines(script)[1].delete_prefix('#').strip
         expect(text).to include(header, '--output', '--input MIDI')
       end
 
       it 'plays a MIDI file into an audio file' do
-
         text = `#{script.shellescape} -q -f #{args.shelljoin} spec/test_data/c2_sustain.mid #{outfile.shellescape} 2>&1`
         expect($?).to be_success, text
         expect(text).to include("to #{outfile}")
@@ -112,6 +115,7 @@ RSpec.describe('script runner scripts', :smoke) do
   general.each do |script|
     describe script do
       it 'prints its header and options with --help' do
+        # A real process run: this is the only run of general scripts here
         text = `#{script.shellescape} --help 2>&1`
         expect($?).to be_success, text
         header = File.readlines(script)[1].delete_prefix('#').strip
@@ -125,14 +129,14 @@ RSpec.describe('script runner scripts', :smoke) do
       let(:outfile) { tmp_path("smoke_#{File.basename(script, '.rb')}.flac") }
 
       it 'prints its header and options with --help' do
-        text = `#{script.shellescape} --help 2>&1`
-        expect($?).to be_success
+        # Forked (see ForkScript); the render below is a real process run
+        text, status = fork_script(script, '--help')
+        expect(status).to be_success, text
         header = File.readlines(script)[1].delete_prefix('#').strip
         expect(text).to include(header, '--output', '--bars')
       end
 
       it 'renders a short file' do
-
         text = `#{script.shellescape} -q -f #{args.shelljoin} #{outfile.shellescape} 2>&1`
         expect($?).to be_success, text
         expect(text).to include("to #{outfile}")
