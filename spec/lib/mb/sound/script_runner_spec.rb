@@ -79,6 +79,12 @@ RSpec.describe(MB::Sound::ScriptRunner) do
       expect(r.params.gain).to eq(-3.5)
     end
 
+    it 'removes options from argv, leaving positional arguments' do
+      argv = ['a.flac', '--count', '3', '-100']
+      described_class.new(:script, { count: 1 }, argv: argv, script: 'bin/example.rb')
+      expect(argv).to eq(['a.flac', '-100'])
+    end
+
     it 'requires parameters marked :required' do
       params = { start: [nil, Float, :required, 'Loop start'], xfade: 0.1 }
       expect(runner(:script, ['--start', '1.5'], **params).params.to_h).to eq(start: 1.5, xfade: 0.1)

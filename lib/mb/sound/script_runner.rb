@@ -297,6 +297,8 @@ module MB
         rescue OptionParser::ParseError => e
           raise UsageError.new(e.message, parser.to_s)
         end
+        rest = rest.map { |a| a.delete_prefix(NEGATIVE_MARK) }
+        argv.replace(rest) # leave only positional arguments (e.g. for Kernel#gets)
         positional(rest)
 
         missing = @declared.select { |p| p.required && values[p.name].nil? }
@@ -310,7 +312,7 @@ module MB
       # Assigns positional filenames to input and output by script kind.
       def positional(args)
         if @kind == :script
-          @args = args.map { |a| a.delete_prefix(NEGATIVE_MARK) }
+          @args = args
           check_arg_count
           return
         end
