@@ -139,7 +139,7 @@ module MB
                 c.write(buf[idx])
               rescue MB::Sound::CircularBuffer::BufferOverflow => e
                 raise ChannelBufferOverflow, "Channel #{idx + 1} of #{@channels.count} buffer is full; " \
-                  "is one channel being sampled more than others?  Buffers: #{@cbufs.map(&:length)}"
+                  "is one channel being sampled more than others?  Buffers: #{@cbufs.map(&:length)} - #{e}"
               end
             end
           end

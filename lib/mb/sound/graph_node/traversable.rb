@@ -35,6 +35,13 @@ module MB
           self
         end
 
+        # Returns an Array with the port name and source name or object ID (if
+        # no name) of all sources for this node, for use in generating
+        # descriptions of the node.
+        def source_names
+          sources.map { |name, src| "#{name}: #{make_source_name(src)}" }
+        end
+
         # Returns a list of all nodes feeding into this node, either directly or
         # indirectly, plus this node itself, without duplication.  Also may
         # include numeric values used as parameters to some of the nodes.

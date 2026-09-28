@@ -123,8 +123,9 @@ module MB
       # Starts (or restarts) the envelope at the beginning, multiplying the
       # entire envelope by +peak+.  The +:auto_release+ parameter may be an
       # approximate number of seconds after which to release the envelope
-      # automatically.
-      def trigger(peak, auto_release: nil)
+      # automatically.  The +:delay+ parameter delays the envelope by a number
+      # of seconds.
+      def trigger(peak, auto_release: nil, delay: 0)
         # @sust is a copy of the sustain level that will be changed if the
         # envelope is released before attack+decay finish
         @sust = @sustain_level
@@ -132,6 +133,8 @@ module MB
         @frame = 0
         @peak = peak
         @value = 0
+
+        self.time = -delay
 
         @auto_release = auto_release
         @auto_release = @attack_time + @decay_time if @auto_release == true
@@ -172,6 +175,9 @@ module MB
       # Jump the envelope to the given time.  This does not reset the internal
       # smoothing filter, so the transition of the output will not be
       # instantaneous.
+      #
+      # Setting a negative time delays the start of the envelope, e.g. if a
+      # note-on event occurs later within a sample buffer.
       #
       # See #reset if you want to clear the smoothing filter state and jump to
       # time zero.

@@ -76,4 +76,19 @@ RSpec.describe(MB::FastSound) do
       expect(MB::M.round(MB::FastSound.narray_log10(data), 12)).to eq(MB::M.round(expected, 12))
     end
   end
+
+  describe '#number_to_freq' do
+    it 'converts note numbers to frequencies' do
+      expect(MB::FastSound.number_to_freq(69, 69, 420)).to eq(420)
+      expect(MB::FastSound.number_to_freq(57, 69, 420)).to eq(210)
+    end
+
+    it 'respects tune_note' do
+      expect(MB::FastSound.number_to_freq(69, 57, 420)).to eq(840)
+    end
+
+    it 'respects tune_freq' do
+      expect(MB::FastSound.number_to_freq(69, 69, 440)).to eq(440)
+    end
+  end
 end

@@ -23,7 +23,7 @@ module MB
         attr_accessor :feedback
 
         # Initializes a single-channel delay with a given +:delay+ in seconds,
-        # based on the +:sample_rate+..  The +:buffer_size+ sets the maximum
+        # based on the +:sample_rate+..  The +:delay_buffer_size+ sets the maximum
         # possible delay.
         #
         # If +:smoothing+ is true (the default), then the delay time will be
@@ -31,14 +31,14 @@ module MB
         # +:smoothing+ is a numeric value, then that is the maximum delay
         # change in seconds allowed per second.  The default smoothing rate is
         # MB::Sound::Filter::Delay::DEFAULT_SMOOTHING_RATE.
-        def initialize(delay: 0, sample_rate: 48000, buffer_size: 48000, smoothing: true, feedback: false, wet: 1, dry: 0)
+        def initialize(delay: 0, sample_rate: 48000, delay_buffer_size: 48000, smoothing: true, feedback: false, wet: 1, dry: 0)
           @sample_rate = sample_rate.to_f
 
           if delay.is_a?(Numeric)
-            buffer_size = 1.1 * delay * @sample_rate if buffer_size < 1.1 * delay * @sample_rate
+            delay_buffer_size = 1.1 * delay * @sample_rate if delay_buffer_size < 1.1 * delay * @sample_rate
           end
 
-          @buf = Numo::SFloat.zeros(buffer_size)
+          @buf = Numo::SFloat.zeros(delay_buffer_size)
           @out_buf = Numo::SFloat.zeros(1) # For wrap-around reads
           @delay = 0
           @delay_samples = 0
@@ -46,7 +46,7 @@ module MB
           @write_offset = 0
           @smooth_limit = nil
 
-          @filter_buf = Numo::SFloat.zeros(buffer_size)
+          @filter_buf = Numo::SFloat.zeros(delay_buffer_size)
 
           @feedback = feedback
           @dry = dry.to_f
@@ -56,7 +56,7 @@ module MB
           self.smoothing = smoothing
         end
 
-        def buffer_size
+        def delay_buffer_size
           @buf.length
         end
 

@@ -9,9 +9,9 @@ module MB
           # Initializes a MIDI node frequency graph node.
           #
           # See MidiDsl#cc.
-          def initialize(dsl:, sample_rate:, bend_range:, ratio:, offset:)
+          def initialize(dsl:, sample_rate:, bend_range:, ratio:, offset:, smoothing:)
             range = MB::Sound::Note.new(0).frequency..MB::Sound::Note.new(127).frequency
-            super(dsl: dsl, default: MB::Sound::Oscillator.tune_freq, range: range, unit: 'Hz', si: true, sample_rate: sample_rate)
+            super(dsl: dsl, default: MB::Sound::Oscillator.tune_freq, range: range, unit: 'Hz', si: true, sample_rate: sample_rate, smoothing: smoothing)
 
             @manager.on_note(&method(:note_cb))
             @manager.on_bend(range: bend_range, default: (bend_range.begin + bend_range.end) / 2.0, &method(:bend_cb))
@@ -27,29 +27,36 @@ module MB
             @node_type_name = "#{'%.1f' % @offset} + #{@node_type_name}" if @offset != 0
           end
 
+          # TODO: dedupe with MidiNumber
+
           # Called by the MIDI manager for note on/off events.  Sets the base
           # note number independent of pitch bend.
-          def note_cb(number, _velocity, onoff)
+          def note_cb(number, _velocity, onoff, timestamp)
             return unless onoff
 
             @number = number
-            update_value
+            update_value(timestamp)
           end
 
           # Called by the MIDI manager to set the pitch bend value in
           # semitones.
-          def bend_cb(bend)
+          def bend_cb(bend, timestamp)
             @bend = bend
-            update_value
+            update_value(timestamp)
+          end
+
+          # Called by a GraphVoice when an inactive note needs to change
+          # frequency for polyphonic portamento.
+          def set_note(number, timestamp)
+            @number = number
+            update_value(timestamp)
           end
 
           # Called by #note_cb and #bend_cb to recalculate the output value
           # using both note number and bend amount.
-          def update_value
-            # FIXME: default constant smoothing interpolates over a full block;
-            # should probably update it to use a low-pass filter or linear
-            # follower.
-            self.constant = MB::Sound::Oscillator.calc_freq(@number + @bend) * @ratio + @offset
+          def update_value(timestamp)
+            # FIXME: update constant to use a filter or linear follower instead of block-based interpolation
+            timed_change(MB::Sound::Oscillator.calc_freq(@number + @bend) * @ratio + @offset, timestamp)
           end
 
           def sources

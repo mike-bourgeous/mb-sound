@@ -1,3 +1,4 @@
+require_relative 'midi_dsl/midi_eof'
 require_relative 'midi_dsl/midi_value'
 require_relative 'midi_dsl/midi_cc'
 require_relative 'midi_dsl/midi_frequency'
@@ -19,7 +20,48 @@ module MB
       #
       # Example:
       #     play midi.hz.at(-6.db).ramp.filter(:lowpass, cutoff: (midi.frequency * midi.cc(1, range: 1.3..16)), quality: 4).oversample(16).softclip.oversample(2)
+      #
+      # TODO: Built-in portamento (should apply to midi.frequency/midi.number/midi.hz automatically; could just be a filter with cutoff 1/portamento_time)
+      # - Portamento time CC 5 (LSB 37)
+      # - Portamento on/off CC 65
       class MidiDsl
+        # Clock for MIDI files fed into graph nodes, keeping MIDI playback in
+        # sync with graph updates (quantized to the buffer size).  Used by
+        # MB::Sound#midi_file.
+        #
+        # TODO: would this be useful outside of MidiDsl?
+        class DslClock
+          attr_reader :graph
+
+          # Creates a graph-driven clock for MIDI files.  The graph must be set
+          # after creation since this clock needs to exist before the MIDI file
+          # reader, and the reader must exist before the graph.
+          def initialize
+            @now = 0.0
+            @dsl = nil
+            @node = nil
+          end
+
+          # Sets the MidiDsl for this clock, since the clock must exist prior to
+          # MidiDsl creation.
+          def dsl=(dsl)
+            raise 'BUG: Clock DSL already set' if @dsl
+            @dsl = dsl
+          end
+
+          # Returns the current sample time for the node graph.
+          def clock_now
+            unless @node
+              @node = @dsl.last_node
+              @node&.spy do |b|
+                @now += b.length / @node.sample_rate if b
+              end
+            end
+
+            @now
+          end
+        end
+
         # The default pitch bend range for #hz, #frequency, and #number.
         # TODO: maybe allow specifying a different default bend range?
         DEFAULT_BEND_RANGE = -1..1
@@ -32,14 +74,15 @@ module MB
         # given channel, and receiving from the given parent MidiDsl.  The
         # initial DSL has channel and parent nil, while filtered DSLs will set
         # them accordingly.
-        def initialize(manager:, channel: nil, parent: nil)
+        def initialize(manager:, parent: nil)
           @manager = manager
-          @channel = channel
+          @channel = manager.channel
           @parent = parent
 
           @freqs = {}
           @tones = {}
           @ccs = {}
+          @tones = {}
           @numbers = {}
           @envelopes = {}
           @velocities = {}
@@ -67,9 +110,7 @@ module MB
           return parent.channel(ch) if @parent
 
           @channels ||= []
-          @channels[ch] ||= MidiDsl.new(manager: @manager, channel: ch, parent: self) # FIXME: need new manager
-
-          raise NotImplementedError, 'TODO: implement channel filtering without opening a new input'
+          @channels[ch] ||= MidiDsl.new(manager: @manager.for_channel(ch), parent: self)
         end
 
         # Returns a graph node that produces scaled values from MIDI control
@@ -79,10 +120,10 @@ module MB
         # +:range+ - Output range
         # +:unit+ - Display unit (e.g. Hz if scaling to a frequency)
         # +:si+ - Whether to display 24000 as 24k.
-        def cc(number, range: 0..1, unit: nil, si: false)
+        def cc(number, range: 0..1, unit: nil, si: false, smoothing: true)
           # TODO: MSB/LSB?  NRPN?
-          cache(@ccs, [number, range, unit, si]) do
-            MidiCc.new(dsl: self, number: number, range: range, unit: unit, si: si, sample_rate: 48000)
+          cache(@ccs, [number, range, unit, si, smoothing]) do
+            MidiCc.new(dsl: self, number: number, range: range, unit: unit, si: si, sample_rate: 48000, smoothing: smoothing)
           end
         end
 
@@ -99,10 +140,10 @@ module MB
         #                 in semitones.  E.g. pass -12..12 for a full octave.
         #
         # See #hz.
-        def frequency(ratio = 1, offset = 0, bend_range: DEFAULT_BEND_RANGE)
+        def frequency(ratio = 1, offset = 0, bend_range: DEFAULT_BEND_RANGE, smoothing: false)
           offset = offset.frequency if offset.is_a?(MB::Sound::Tone)
-          cache(@freqs, [ratio, offset, bend_range]) do
-            MidiFrequency.new(dsl: self, bend_range: bend_range, ratio: ratio, offset: offset, sample_rate: 48000)
+          cache(@freqs, [ratio, offset, bend_range, smoothing]) do
+            MidiFrequency.new(dsl: self, bend_range: bend_range, ratio: ratio, offset: offset, sample_rate: 48000, smoothing: smoothing)
           end
         end
         alias freq frequency
@@ -112,12 +153,14 @@ module MB
         #
         # +:bend_range+ - The pitch bend range to add to the base note number,
         #                 in semitones.  E.g. pass -12..12 for a full octave.
-        def hz(ratio = 1, offset = 0, bend_range: DEFAULT_BEND_RANGE)
+        def hz(ratio = 1, offset = 0, bend_range: DEFAULT_BEND_RANGE, smoothing: false)
           # TODO: if caching, need to have all methods that modify the tone invalidate the cache
-          MidiTone.new(dsl: self, frequency: self.frequency(ratio, offset, bend_range: bend_range))
+          # TODO: oscillator keysync (maybe add a reset input connected to a midi click??)
+          cache(@tones, [Random.rand, @tones.length]) do
+            MidiTone.new(dsl: self, frequency: self.frequency(ratio, offset, bend_range: bend_range, smoothing: smoothing))
+          end
         end
         alias tone hz
-        alias note hz
 
         # Returns a new graph node that will generate the MIDI note number on
         # its output, optionally scaled to a given new range.  Pitch bend is
@@ -126,9 +169,9 @@ module MB
         # +:range+ - The range to output, or nil for the raw 0..127 number.
         # +:bend_range+ - The pitch bend range in semitones, or nil to ignore
         #                 pitch bend.
-        def number(range: nil, bend_range: DEFAULT_BEND_RANGE, unit: nil, si: false)
+        def number(range: nil, bend_range: DEFAULT_BEND_RANGE, unit: nil, si: false, smoothing: false)
           cache(@numbers, [range, bend_range, unit, si]) do
-            MidiNumber.new(dsl: self, range: range, bend_range: bend_range, unit: unit, si: si, sample_rate: 48000)
+            MidiNumber.new(dsl: self, range: range, bend_range: bend_range, unit: unit, si: si, sample_rate: 48000, smoothing: smoothing)
           end
         end
 
@@ -136,32 +179,33 @@ module MB
         # the last-pressed note scaled to 0..1 (or to the given +:range+).  If
         # the note +number+ is specified, then only the velocity of that note
         # is used and other notes are ignored.
-        def velocity(number = nil, range: 0..1, unit: nil, si: false)
+        def velocity(number = nil, range: 0..1, unit: nil, si: false, smoothing: false)
           number = number.to_note if number.is_a?(MB::Sound::Tone)
           number = number.number if number.is_a?(MB::Sound::Note)
 
           cache(@velocities, [number, range, unit, si]) do
-            MidiVelocity.new(dsl: self, number: number, range: range, unit: unit, si: si, sample_rate: 48000)
+            MidiVelocity.new(dsl: self, number: number, range: range, unit: unit, si: si, sample_rate: 48000, smoothing: smoothing)
           end
         end
 
-        # TODO: pitch bend
-        def bend(range: DEFAULT_BEND_RANGE, unit: 'st', si: false)
+        # Returns a node that outputs MIDI pitch bend values, defaulting to a
+        # linear map of semitones within DEFAULT_BEND_RANGE.
+        def bend(range: DEFAULT_BEND_RANGE, unit: 'st', si: false, smoothing: true)
           cache(@bends, [range, unit, si]) do
-            MidiBend.new(dsl: self, range: range, unit: unit, si: si, sample_rate: 48000)
+            MidiBend.new(dsl: self, range: range, unit: unit, si: si, sample_rate: 48000, smoothing: smoothing)
           end
         end
 
         # Returns a new ADSR envelope that will trigger based on velocity when
         # a note is pressed, and release when the note or sustain pedal are
         # released.
-        def env(attack_s = nil, decay_s = nil, sustain_l = nil, release_s = nil, range: 0..1)
+        def env(attack_s = nil, decay_s = nil, sustain_l = nil, release_s = nil, range: 0..1, velocity: 0.5..1)
           attack_s ||= 0.002
           decay_s ||= 0.05
           sustain_l ||= -10.db
           release_s ||= 0.1
 
-          key = [attack_s, decay_s, sustain_l, release_s, range]
+          key = [attack_s, decay_s, sustain_l, release_s, range, velocity]
 
           cache(@envelopes, key) do
             MidiEnvelope.new(
@@ -171,18 +215,26 @@ module MB
               sustain: sustain_l,
               release: release_s,
               sample_rate: 48000,
-              range: range
+              range: range,
+              velocity: velocity
             )
           end
         end
         alias envelope env
 
+        # Creates an envelope with default ranges suitable for amplification
+        # envelopes.
+        def amp_env(attack_s = nil, decay_s = nil, sustain_l = nil, release_s = nil, range: 0..1, velocity: -10.db..-2.db)
+          # TODO: add .db?
+          env(attack_s, decay_s, sustain_l, release_s, range: range, velocity: velocity)
+        end
+
         # Returns a graph node that outputs a value in the given +:range+ based
         # on note attack velocity and half-pedal/sustain pedal decay.
-        def gate(range: 0..1, unit: nil, si: false)
+        def gate(range: 0..1, unit: nil, si: false, smoothing: true)
           key = [range, unit, si]
           cache(@gates, key) do
-            MidiGate.new(dsl: self, range: range, unit: unit, si: si, sample_rate: 48000)
+            MidiGate.new(dsl: self, range: range, unit: unit, si: si, sample_rate: 48000, smoothing: true)
           end
         end
 
@@ -213,6 +265,11 @@ module MB
         # ended.
         def done?
           @manager.midi_in.respond_to?(:done?) && @manager.midi_in.done?
+        end
+
+        # Returns the last graph node created, or nil if there are no nodes.
+        def last_node
+          @reverse_cache.keys.last
         end
 
         # XXX FIXME hack for graph display
@@ -249,39 +306,6 @@ module MB
           }
         end
       end
-    end
-
-    # Calls a block with a MIDI file to build a node graph, or returns a MIDI
-    # DSL based on a MIDI file.
-    #
-    # Example (bin/sound.rb):
-    #     graph = midi_file('spec/test_data/all_notes.mid') { |midi|
-    #       midi.tone.ramp.filter(:lowpass, cutoff: midi.frequency + 100) * midi.gate
-    #     }
-    #     play graph
-    def self.midi_file(filename, speed: 1.0, clock: MB::U)
-      # TODO: end graph execution when the MIDI file has completely finished
-      # TODO: maybe move this method into sound.rb?  or a new midi_methods.rb?
-
-      mfile = MB::Sound::MIDI::MIDIFile.new(filename, speed: speed, clock: clock)
-      mgr = MB::Sound::MIDI::Manager.new(input: mfile, jack: nil)
-      dsl = MB::Sound::GraphNode::MidiDsl.new(manager: mgr)
-
-      if block_given?
-        yield dsl
-      else
-        dsl
-      end
-    end
-
-    # Returns a handle for connecting MIDI events to GraphNode networks.  See
-    # MidiDsl for details.
-    def self.midi
-      # TODO: allow specifying an input/connection by name and then caching the DSL for that input?
-      # TODO: maybe move this method into sound.rb?  or a new midi_methods.rb?
-
-      @midi_manager ||= MB::Sound::MIDI::Manager.new
-      @midi_dsl ||= MB::Sound::GraphNode::MidiDsl.new(manager: @midi_manager)
     end
   end
 end

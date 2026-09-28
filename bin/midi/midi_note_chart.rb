@@ -49,8 +49,11 @@ loop do
   while events.empty?
     data = midi_in.read
     return if data.nil?
+
     # TODO: Somehow show realtime messages without clearing the other received messages
-    events = [midi.parse(data[0]&.bytes)].flatten.compact.reject { |e| e.is_a?(MIDIMessage::SystemRealtime) }
+    data[0].each do |t, e|
+      events.concat([midi.parse(e.bytes)].flatten.compact.reject { |e| e.is_a?(MIDIMessage::SystemRealtime) })
+    end
   end
 
   events.each_with_index do |e, idx|

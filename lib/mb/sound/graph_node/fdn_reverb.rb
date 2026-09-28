@@ -352,7 +352,7 @@ module MB
               MB::Sound::Filter::Delay.new(
                 delay: dt,
                 sample_rate: sample_rate,
-                buffer_size: (dt * sample_rate * 1.5).ceil + 1,
+                delay_buffer_size: (dt * sample_rate * 1.5).ceil + 1,
                 smoothing: false,
                 feedback: false
               )
@@ -394,7 +394,7 @@ module MB
               MB::Sound::Filter::Delay.new(
                 delay: dt,
                 sample_rate: sample_rate,
-                buffer_size: (dt * sample_rate * 1.5).ceil + 1,
+                delay_buffer_size: (dt * sample_rate * 1.5).ceil + 1,
                 smoothing: false,
                 feedback: false
               )

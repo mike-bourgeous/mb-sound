@@ -7,15 +7,15 @@ module MB
           # Initializes a MIDI pitch bend graph node.
           #
           # See MidiDsl#bend.
-          def initialize(dsl:, range:, unit:, si:, sample_rate:)
+          def initialize(dsl:, range:, unit:, si:, sample_rate:, smoothing:)
             # TODO: have 0 raw bend equal exactly 0.0 for symmetric range
             default = 0.5 * (range.begin + range.end)
 
-            super(dsl: dsl, default: default, range: range, unit: unit, si: si, sample_rate: sample_rate)
+            super(dsl: dsl, default: default, range: range, unit: unit, si: si, sample_rate: sample_rate, smoothing: smoothing)
 
             @node_type_name = "Pitch Bend"
 
-            @manager.on_bend(range: range, default: default, &method(:constant=))
+            @manager.on_bend(range: range, default: default, &method(:timed_change))
 
             # TODO: provide a convenient way to output a value in Hz based on a semitone range?
           end

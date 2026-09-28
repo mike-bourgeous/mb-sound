@@ -52,7 +52,7 @@ class FM
     )
   end
 
-  def note(number, velocity, on)
+  def note(number, velocity, on, timestamp)
     if on
       note(number, velocity, false) if @osc_map.include?(number)
 

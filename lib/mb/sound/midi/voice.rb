@@ -49,7 +49,9 @@ module MB
         # MB::Sound::Tone, defaulting to :lowpass).
         #
         # TODO: maybe get rid of this and just use GraphVoice
-        def initialize(wave_type: nil, filter_type: :lowpass, amp_envelope: {}, filter_envelope: {}, sample_rate: 48000)
+        def initialize(wave_type: nil, filter_type: :lowpass, amp_envelope: {}, filter_envelope: {}, sample_rate: 48000, manager:)
+          @manager = manager
+
           @filter_intensity = 15.0
           @cutoff = 200.0
           @quality = 4.0
@@ -135,14 +137,14 @@ module MB
 
         # Restarts the amplitude and filter envelopes, and sets the oscillator's
         # pitch to the given note number.
-        def trigger(note, velocity)
+        def trigger(note, velocity, timestamp)
           # TODO: maybe don't reset oscillators, or randomize phase, so phase
           # is more interesting, but that would make consistent plotting more
           # challenging
           @oscillator.reset unless @oscillator.no_trigger
           self.number = note
-          @filter_envelope.trigger(velocity / 256.0 + 0.5)
-          @amp_envelope.trigger(MB::M.scale(velocity, 0..127, -20..-6).db)
+          @filter_envelope.trigger(velocity / 256.0 + 0.5, delay: timestamp)
+          @amp_envelope.trigger(MB::M.scale(velocity, 0..127, -20..-6).db, delay: timestamp)
         end
 
         def number
@@ -157,7 +159,7 @@ module MB
 
         # Same as #number=, but with an ignored keyword argument for VoicePool
         # compatibility.  TODO: implement portamento?
-        def set_note(note, reset_portamento: :ignored)
+        def set_note(note, _timestamp, reset_portamento: :ignored)
           self.number = note
         end
 
@@ -167,7 +169,7 @@ module MB
         end
 
         # Starts the release phase of the filter and amplitude envelopes.
-        def release(note, velocity)
+        def release(note, velocity, _timestamp)
           @filter_envelope.release
           @amp_envelope.release
         end
@@ -199,15 +201,15 @@ module MB
           # complex values.
           case @filter_blend
           when 1.0
-            @re_filter.dynamic_process(re.inplace, centers, @qualities)
-            @im_filter.dynamic_process(im.inplace, centers, @qualities)
+            @re_filter.dynamic_process(re.inplace, cutoff: centers, quality: @qualities)
+            @im_filter.dynamic_process(im.inplace, cutoff: centers, quality: @qualities)
 
           when 0.0
             # Do nothing
 
           else
-            re2 = @re_filter.dynamic_process(re, centers, @qualities)
-            im2 = @im_filter.dynamic_process(im, centers, @qualities)
+            re2 = @re_filter.dynamic_process(re, cutoff: centers, quality: @qualities)
+            im2 = @im_filter.dynamic_process(im, cutoff: centers, quality: @qualities)
 
             re = MB::M.interp(re, re2, @filter_blend)
             im = MB::M.interp(im, im2, @filter_blend)

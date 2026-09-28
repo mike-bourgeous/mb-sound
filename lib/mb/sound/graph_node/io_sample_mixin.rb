@@ -36,6 +36,7 @@ module MB
         # This is for interoperability with the arithmetic DSL in MB::Sound that
         # allows combining Tones, Mixers, Multipliers, and inputs.
         def sample(count)
+          @split ||= nil
           raise 'Input has been split; cannot sample directly' if @split
 
           data = read(count)
