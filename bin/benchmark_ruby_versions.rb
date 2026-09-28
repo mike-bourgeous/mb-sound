@@ -6,7 +6,7 @@
 # Usage: $0 [options] [ruby_version ...]
 #
 # Example:
-#     $0 --all -o /tmp/results.csv 3.4 4.0
+#     $0 --all -o /tmp/results.csv 4.0 ruby-head
 
 require 'bundler/setup'
 require 'csv'
@@ -14,7 +14,7 @@ require 'mb-util'
 require 'mb-sound'
 
 AVAILABLE_BENCHMARKS = [:node_graph, :resampling, :wavetable]
-DEFAULT_VERSIONS = %w{3.2 3.3 3.4 4.0}
+DEFAULT_VERSIONS = %w{4.0}
 
 def check_success(*msg)
   raise "#{msg} failed: #{$?}" unless $?.success?

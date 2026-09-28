@@ -138,7 +138,7 @@ Effects, synths, and songs share `-o/--output` (or a positional audio file) to r
 
 ## Key Conventions
 
-- Ruby 3.4+ recommended (gemspec requires 3.2+); the container uses Ruby 4.0
+- Ruby 4.0+ required (gemspec, CI, `.ruby-version`); Bundler 4 (the lockfile's `BUNDLED WITH`)
 - Tests use RSpec (configured in `.rspec`)
 - Docker support via `Dockerfile` and `dock.sh` for containerized development
 - `Numo::NArray` for all sound data handling (choose numeric precision and real/complex as needed)
