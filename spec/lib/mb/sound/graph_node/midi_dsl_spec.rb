@@ -19,6 +19,11 @@ RSpec.describe(MB::Sound::GraphNode::MidiDsl, aggregate_failures: true) do
     expect(cc.sample(1)).to eq(Numo::SFloat[0])
   end
 
+  it 'can start a CC node at a default value' do
+    expect(midi.cc(1, range: 0.0..6.0, default: 0.7).sample(1)[0]).to be_within(1e-6).of(0.7)
+    expect(midi.cc(1, range: 1.0..0.0, default: 1.0).sample(1)[0]).to eq(1)
+  end
+
   it 'can create a note number node' do
     expect(number).to be_a(MB::Sound::GraphNode::MidiDsl::MidiNumber)
     expect(number.sample(1)).to eq(Numo::SFloat[69])

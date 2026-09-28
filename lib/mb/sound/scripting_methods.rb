@@ -19,7 +19,7 @@ module MB
       #     }
       #
       # +input_channels+ sets the default input channel count (e.g. 2 for a
-      # stereo effect; the -c option overrides it); files are up- or
+      # stereo effect; -c/--input-channels overrides it); files are up- or
       # down-mixed to it.
       def effect_script(input_channels: nil, **params, &block)
         raise ArgumentError, 'Pass a block that turns the input into a graph' unless block

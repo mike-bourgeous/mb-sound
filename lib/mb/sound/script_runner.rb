@@ -16,6 +16,9 @@ module MB
     #     -p, --plot               plot the output while playing live
     #     -q, --quiet              don't print the parameters
     #
+    # Effects add -i/--input FILE, -c/--input-channels N, and --repeat
+    # [COUNT]; synths add -i/--input MIDI; songs add -b/--bars N.
+    #
     # Parameters are declared with defaults (and optional descriptions):
     #
     #     effect_script(delay: 0.25, feedback: [0.5, 'Feedback gain']) { |input, p| ... }
@@ -23,12 +26,31 @@ module MB
     # Each becomes a --name option (--delay 0.3 or --delay=-0.3; true/false
     # defaults become --name/--no-name switches).  The block's +p+ has a
     # method per parameter (p.delay).
+    #
+    # After the default, a parameter's Array may also list, in any order:
+    # - a description String
+    # - a short option like '-w' (not one of the common options above)
+    # - a type (Integer, Float, String, Symbol, or a Proc that converts the
+    #   String), needed for nil defaults; otherwise the default's type
+    # - allowed values: a Range or an Array, checked after conversion
+    #
+    #     count: [2, 'Repeats per grain', 2.., '-n'],
+    #     wave: [:sine, 'LFO waveform', MB::Sound::Oscillator::WAVE_TYPES],
+    #     preset: [nil, 'Reverb preset', Symbol],
     class ScriptRunner
       # Audio file extensions recognized in positional arguments.
       AUDIO_EXTENSIONS = /\.(flac|wav|mp3|ogg|mp4|m4a|opus|aiff?)\z/i
 
-      # A declared parameter.
-      Param = Struct.new(:name, :default, :description)
+      # A declared parameter (see the class comment).
+      Param = Struct.new(:name, :default, :description, :short, :type, :allowed)
+
+      # Short options used by every script of a kind, which parameters can't
+      # use.
+      COMMON_SHORT_OPTIONS = {
+        effect: %w[-o -f -g -p -q -h -i -c],
+        synth: %w[-o -f -g -p -q -h -i],
+        song: %w[-o -f -g -p -q -h -b],
+      }.freeze
 
       # Raised for invalid command-line arguments.  #help has the option
       # list, which ScriptingMethods prints before exiting.
@@ -60,6 +82,26 @@ module MB
         def to_h
           @values.dup
         end
+
+        # Returns a node for parameter +name+ that MIDI CC +number+ controls
+        # over +range+, starting at the parameter's value: a MidiDsl CC node
+        # when live MIDI is available (JACK is running) and the script isn't
+        # writing a file, otherwise a constant.  Both are named after the
+        # parameter.
+        #
+        # Example:
+        #     lfo_hz = p.midi_cc(1, :hz, range: 0.0..6.0)
+        def midi_cc(number, name, range:)
+          value = self[name]
+          node = @midi&.call&.cc(number, range: range, default: value) || value.constant
+          node.named(name.to_s)
+        end
+
+        # For internal use by ScriptRunner: sets a Proc that returns a
+        # MidiDsl, or nil when MIDI isn't available.
+        def midi_source=(source)
+          @midi = source
+        end
       end
 
       # The kind of script: :effect, :synth, or :song.
@@ -81,26 +123,29 @@ module MB
         @kind = kind
         @script = script
         @input_channels = input_channels
-        @declared = params.map { |name, spec|
-          default, description = spec.is_a?(Array) ? spec : [spec, nil]
-          Param.new(name.to_sym, default, description)
-        }
+        @declared = params.map { |name, spec| declare(name, spec) }
         parse(argv)
       end
 
       # Runs an effect: builds the graph with the block from the input (a
       # file given as the first audio argument or --input, or live audio
-      # with --channels channels) and the parameters, then plays or renders
-      # it.  A file input rings out: after it ends, the effect keeps playing
-      # until its output has been quiet for Session::TAIL_QUIET_SECONDS.
+      # with --input-channels channels) and the parameters, then plays or
+      # renders it.  A file input rings out: after it ends (and repeats, with
+      # --repeat), the effect keeps playing until its output has been quiet
+      # for Session::TAIL_QUIET_SECONDS.
       def run_effect(&block)
         path = @options[:input]
-        input = if path
-                  MB::Sound.file_input(path, channels: @options[:channels]).ringdown
+        channels = @options[:channels]
+        input = if path && @options[:repeat]
+                  data = MB::Sound.read(path, channels: channels)
+                  ArrayInput.new(data: data, repeat: @options[:repeat]).ringdown
+                elsif path
+                  MB::Sound.file_input(path, channels: channels).ringdown
                 else
-                  MB::Sound.input(channels: @options[:channels] || 2)
+                  MB::Sound.input(channels: channels || 2)
                 end
 
+        @params.midi_source = method(:midi)
         graph = block.call(input, @params)
         announce(graph)
 
@@ -115,6 +160,7 @@ module MB
       # nil for the default live input) and the parameters, then plays or
       # renders it.
       def run_synth(&block)
+        @params.midi_source = method(:midi)
         graph = block.arity == 1 ? block.call(@options[:input]) : block.call(@options[:input], @params)
         announce(graph)
         play_or_render(graph)
@@ -143,6 +189,22 @@ module MB
 
       private
 
+      # Returns the MidiDsl for live MIDI control (see Values#midi_cc), or
+      # nil when writing a file or when MIDI isn't available.  Tries once.
+      def midi
+        return @midi if defined?(@midi)
+
+        @midi = nil
+        return if @options[:output]
+
+        @midi = MB::Sound.midi
+        puts "\e[1mMIDI control enabled\e[0m" unless @options[:quiet]
+        @midi
+      rescue => e
+        puts "\e[38;5;243mMIDI control disabled (#{e.message})\e[0m" unless @options[:quiet]
+        @midi = nil
+      end
+
       # Stops the song at the end of bar +bars+ on the current session's
       # timeline (like a render with --bars): cancels anything still
       # scheduled and stops every player, letting master effects ring out.
@@ -156,7 +218,7 @@ module MB
 
       # Parses +argv+ into @options and @params.
       def parse(argv)
-        @options = { input: nil, output: nil, force: false, graphviz: false, plot: false, quiet: false, channels: @input_channels }
+        @options = { input: nil, output: nil, force: false, graphviz: false, plot: false, quiet: false, channels: @input_channels, repeat: nil }
         values = @declared.to_h { |p| [p.name, p.default] }
 
         @parser = parser = OptionParser.new { |o|
@@ -170,7 +232,8 @@ module MB
           case @kind
           when :effect
             o.on('-i', '--input FILE', 'An audio file to process (default: live input)') { |v| @options[:input] = v }
-            o.on('-c', '--channels N', Integer, 'Input channels (live input, or to up/downmix a file)') { |v| @options[:channels] = v }
+            o.on('-c', '--input-channels N', Integer, 'Input channels (live input, or to up/downmix a file)') { |v| @options[:channels] = v }
+            o.on('--repeat [COUNT]', Integer, 'Loop the input file COUNT times (forever without COUNT)') { |v| @options[:repeat] = v || -1 }
           when :synth
             o.on('-i', '--input MIDI', 'A MIDI file, or a MIDI port name (default: live MIDI)') { |v| @options[:input] = v }
           when :song
@@ -178,11 +241,11 @@ module MB
           end
 
           @declared.each do |p|
-            desc = [p.description, "(default #{p.default.inspect})"].compact.join(' ')
+            names = [p.short].compact
             if p.default == true || p.default == false
-              o.on("--[no-]#{option_name(p)}", desc) { |v| values[p.name] = v }
+              o.on(*names, "--[no-]#{option_name(p)}", help_text(p)) { |v| values[p.name] = v }
             else
-              o.on("--#{option_name(p)} VALUE", desc) { |v| values[p.name] = convert(p, v) }
+              o.on(*names, "--#{option_name(p)} VALUE", help_text(p)) { |v| values[p.name] = convert(p, v) }
             end
           end
 
@@ -218,19 +281,70 @@ module MB
         end
       end
 
+      # Creates a Param from a +spec+ given to #initialize.
+      def declare(name, spec)
+        default, *extras = spec.is_a?(Array) ? spec : [spec]
+        param = Param.new(name.to_sym, default)
+
+        extras.each do |e|
+          case e
+          when /\A-[A-Za-z]\z/ then param.short = e
+          when String then param.description = e
+          when Class, Proc then param.type = e
+          when Range, Array then param.allowed = e
+          else raise ArgumentError, "Unknown #{e.inspect} in the declaration of parameter #{name}"
+          end
+        end
+
+        if param.short && COMMON_SHORT_OPTIONS[@kind].include?(param.short)
+          raise ArgumentError, "Parameter #{name} can't use #{param.short}, a common option for #{@kind} scripts"
+        end
+
+        param
+      end
+
       # The --option name of a parameter (underscores become dashes).
       def option_name(param)
         param.name.to_s.tr('_', '-')
       end
 
-      # Converts a command-line String to the type of +param+'s default.
+      # The option help for +param+: its description, allowed values, and
+      # default.
+      def help_text(param)
+        allowed = "(#{allowed_text(param)})" if param.allowed
+        default = "(default #{param.default.inspect})" unless param.default.nil?
+        [param.description, allowed, default].compact.join(' ')
+      end
+
+      # Describes +param+'s allowed values.
+      def allowed_text(param)
+        param.allowed.is_a?(Range) ? "in #{param.allowed}" : "one of #{param.allowed.join(', ')}"
+      end
+
+      # Converts a command-line String to +param+'s type (or its default's
+      # type), raising UsageError for invalid or disallowed values.
       def convert(param, str)
-        case param.default
-        when Integer then str.include?('.') ? Float(str) : Integer(str)
-        when Float, Rational then Float(str)
-        when Symbol then str.to_sym
-        else str
+        value = case param.type || param.default
+                when Proc then param.type.call(str)
+                when Integer then str.include?('.') ? Float(str) : Integer(str)
+                when Float, Rational then Float(str)
+                when Symbol then str.to_sym
+                else
+                  if param.type == Integer then Integer(str)
+                  elsif param.type == Float then Float(str)
+                  elsif param.type == Symbol then str.to_sym
+                  else str
+                  end
+                end
+
+        if param.allowed && !(param.allowed.is_a?(Range) ? param.allowed.cover?(value) : param.allowed.include?(value))
+          raise UsageError.new("--#{option_name(param)} must be #{allowed_text(param)} (got #{str})", @parser.to_s)
         end
+
+        value
+      rescue ArgumentError, TypeError => e
+        raise if e.is_a?(UsageError)
+        raise UsageError.new("Invalid value for --#{option_name(param)}: #{str.inspect} (#{e.message})", @parser.to_s)
       end
 
       # The overwrite setting for output files.

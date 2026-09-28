@@ -26,6 +26,55 @@ RSpec.describe(MB::Sound::ScriptRunner) do
       expect { runner(:song, ['bogus']) }.to raise_error(described_class::UsageError, /Unexpected argument/)
       expect { runner(:effect, ['--bogus']) }.to raise_error(described_class::UsageError, /invalid option: --bogus/) { |e| expect(e.help).to include('--output FILE') }
     end
+
+    it 'accepts short options, types, and allowed values after the default' do
+      params = {
+        count: [2, 'Repeats', 2.., '-n'],
+        wave: [:sine, 'Waveform', [:sine, :ramp]],
+        preset: [nil, Symbol, 'Preset'],
+        time: [nil, 'Seconds or a range', ->(s) { s.include?('..') ? Range.new(*s.split('..').map { Float(_1) }) : Float(s) }],
+      }
+      r = runner(:effect, ['-n', '4', '--wave', 'ramp', '--preset', 'hall', '--time', '0.1..0.5'], **params)
+      expect(r.params.to_h).to eq(count: 4, wave: :ramp, preset: :hall, time: 0.1..0.5)
+      expect(runner(:effect, [], **params).params.to_h).to eq(count: 2, wave: :sine, preset: nil, time: nil)
+
+      expect { runner(:effect, ['-n', '1'], **params) }.to raise_error(described_class::UsageError, /--count must be in 2\.\. \(got 1\)/)
+      expect { runner(:effect, ['--wave', 'square'], **params) }.to raise_error(described_class::UsageError, /--wave must be one of sine, ramp/)
+      expect { runner(:effect, ['--count', 'many'], **params) }.to raise_error(described_class::UsageError, /Invalid value for --count: "many"/)
+      expect { runner(:effect, ['--time', 'x..y'], **params) }.to raise_error(described_class::UsageError, /Invalid value for --time/)
+    end
+
+    it 'shows short options, allowed values, and defaults in the help' do
+      help = runner(:effect, [], count: [2, 'Repeats', 2.., '-n'], preset: [nil, Symbol, 'Preset']).instance_variable_get(:@parser).to_s
+      expect(help).to match(/-n, --count VALUE\s+Repeats \(in 2\.\.\) \(default 2\)/)
+      expect(help).to match(/--preset VALUE\s+Preset$/)
+    end
+
+    it 'rejects short options used by the common options' do
+      expect { runner(:effect, [], wet: [1.0, '-c']) }.to raise_error(ArgumentError, /can't use -c/)
+      expect { runner(:song, [], bpm: [120, '-b']) }.to raise_error(ArgumentError, /can't use -b/)
+      expect(runner(:synth, [], bpm: [120, '-b']).params.bpm).to eq(120)
+      expect { runner(:effect, [], wet: [1.0, :bogus]) }.to raise_error(ArgumentError, /Unknown :bogus/)
+    end
+  end
+
+  describe 'Values#midi_cc' do
+    it 'is a named constant at the parameter value when writing a file' do
+      r = runner(:effect, ['in.flac', 'out.flac', '-q'], hz: 0.7)
+      r.params.midi_source = r.method(:midi)
+      expect(MB::Sound).not_to receive(:midi)
+      node = r.params.midi_cc(1, :hz, range: 0.0..6.0)
+      expect(node.graph_node_name).to eq('hz')
+      expect(node.sample(4).to_a).to all(be_within(1e-6).of(0.7))
+    end
+
+    it 'is a constant when MIDI is not available' do
+      r = runner(:effect, [], hz: 0.7)
+      r.params.midi_source = r.method(:midi)
+      allow(MB::Sound).to receive(:midi).and_raise(RuntimeError, 'Failed to open JACK client')
+      expect { r.params.midi_cc(1, :hz, range: 0.0..6.0) }.to output(/MIDI control disabled \(Failed to open JACK client\)/).to_stdout
+      expect(r.params.midi_cc(2, :hz, range: 0.0..6.0).sample(2).to_a).to all(be_within(1e-6).of(0.7))
+    end
   end
 
   describe 'files and options' do
@@ -37,6 +86,11 @@ RSpec.describe(MB::Sound::ScriptRunner) do
     it 'takes a synth MIDI input and an audio output' do
       r = runner(:synth, ['song.mid', 'out.flac', '--graphviz'])
       expect(r.options).to include(input: 'song.mid', output: 'out.flac', graphviz: true)
+    end
+
+    it 'takes effect input channels and --repeat' do
+      expect(runner(:effect, ['-c', '1', '--repeat']).options).to include(channels: 1, repeat: -1)
+      expect(runner(:effect, ['--input-channels', '3', '--repeat', '2']).options).to include(channels: 3, repeat: 2)
     end
 
     it 'takes a song output file and --overwrite' do
@@ -91,9 +145,14 @@ RSpec.describe(MB::Sound::ScriptRunner) do
     end
 
     context 'when playing live' do
+      before(:each) do
+        ENV['OUTPUT_TYPE'] = 'null'
+      end
+
       after(:each) do
         MB::Sound::Session.default.close
         MB::Sound.rewind
+        ENV.delete('OUTPUT_TYPE')
       end
 
       it 'stops an endless song after --bars, cancelling later schedules' do

@@ -120,10 +120,12 @@ module MB
         # +:range+ - Output range
         # +:unit+ - Display unit (e.g. Hz if scaling to a frequency)
         # +:si+ - Whether to display 24000 as 24k.
-        def cc(number, range: 0..1, unit: nil, si: false, smoothing: true)
+        # +:default+ - The value before the first CC message (default:
+        #              the start of the range).
+        def cc(number, range: 0..1, unit: nil, si: false, smoothing: true, default: nil)
           # TODO: MSB/LSB?  NRPN?
-          cache(@ccs, [number, range, unit, si, smoothing]) do
-            MidiCc.new(dsl: self, number: number, range: range, unit: unit, si: si, sample_rate: 48000, smoothing: smoothing)
+          cache(@ccs, [number, range, unit, si, smoothing, default]) do
+            MidiCc.new(dsl: self, number: number, range: range, unit: unit, si: si, sample_rate: 48000, smoothing: smoothing, default: default)
           end
         end
 
