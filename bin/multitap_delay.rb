@@ -4,121 +4,64 @@
 #
 # This is inspired by a module I saw on Andrew Huang's YouTube channel.
 #
-# Usage: $0 [base_delay_seconds] [filter_frequency] [filter_quality] [reverse_odd_taps] [filename]
+# Usage: $0 [options] [input_filename [output_filename]]
+#
+# Plays a sound file (or live input, stereo unless -c says otherwise) through
+# the delay, letting it ring out after the file ends.  With live MIDI (JACK),
+# CC 1 (the mod wheel) scales the delay, tap offset, and filter frequency
+# together (0 to 2 times).  Run with --help for all options.
 #
 # Examples:
-#     Resonant widener: $0 0.001 sounds/transient_synth.flac
-#     Pinged filter drums: $0 0.2 sounds/drums.flac
-#     Filter pinging: $0 0.5 150 30 1 sounds/drums.flac
+#     # Resonant widener
+#     $0 --delay 0.001 sounds/transient_synth.flac
+#     # Pinged filter drums
+#     $0 --delay 0.2 sounds/drums.flac
+#     # Filter pinging
+#     $0 --delay 0.5 --cutoff 150 --quality 30 --reverse-odd-taps sounds/drums.flac
 
 require 'bundler/setup'
-
-require 'mb/sound'
-
-if ARGV.include?('--help')
-  MB::U.print_header_help
-  exit 1
-end
-
-# TODO: Abstract filename and numeric parameter handling and .flac vs. JACK switching?
-
-numerics, others = ARGV.partition { |arg| arg.strip =~ /\A[+-]?[0-9]+(\.[0-9]+)?\z/ }
-
-base_delay_s, cutoff, quality, reverse_odd_taps, _ = numerics.map(&:to_f)
-base_delay_s ||= 0.1
-cutoff ||= 250
-quality ||= 3
-reverse_odd_taps = reverse_odd_taps == 1
-
-filename = others[0]
-if filename && File.readable?(filename)
-  input = MB::Sound.file_input(filename)
-  inputs = input.split.map { |d| d.and_then(0.constant.for(base_delay_s * 4)) }
-else
-  input = MB::Sound.input(channels: ENV['CHANNELS']&.to_i || 2)
-  inputs = input.split
-end
-
-output = MB::Sound.output(channels: inputs.length)
-
-# TODO: dedupe some kind of init code or shell or wrapper for effect processing with flanger.rb
-if defined?(MB::Sound::JackFFI) && output.is_a?(MB::Sound::JackFFI::Output)
-  # MIDI control is possible since Jack is running
-  puts "\e[1mMIDI control enabled (jackd detected)\e[0m"
-  manager = MB::Sound::MIDI::Manager.new(jack: output.jack_ffi)
-else
-  puts "\e[38;5;243mMIDI disabled (jackd not detected)\e[0m"
-end
-
-oversample = ENV['OVERSAMPLE']&.to_f || 2
-processing_sample_rate = output.sample_rate.to_f * oversample
-
-internal_buffer = 128
-buftime = internal_buffer.to_f / processing_sample_rate
-
-puts MB::U.highlight({
-  delay: base_delay_s,
-  internal_buffer: internal_buffer,
-  buftime: buftime,
-  processing_rate: processing_sample_rate,
-})
+require 'mb-sound'
 
 NUM_TAPS = 6
 
-begin
-  # TODO: Abstract construction of a filter graph per channel
+MB::Sound.effect_script(
+  delay: [0.1, 'Base delay and tap spacing in seconds'],
+  cutoff: [250.0, 'Base filter frequency in Hz (tap N gets N times this)'],
+  quality: [3.0, 'Filter quality (resonance)'],
+  reverse_odd_taps: [false, 'Reverse the tap order on odd channels'],
+  oversample: [2.0, 'Oversampling factor'],
+) { |input, p|
+  processing_sample_rate = 48000.0 * p.oversample
+
+  internal_buffer = 128
+  buftime = internal_buffer.to_f / processing_sample_rate
+
+  # CC 1 scales the delay, tap offset, and filter frequency together
+  delay = p.midi_cc(1, :delay, range: 0.0..2.0)
+  filter_freq = p.midi_cc(1, :cutoff, range: 0.0..2.0)
+
   # TODO: Add a speed option for playing input files faster or slower (some
   # files sound cool at 0.5x)
-  paths = inputs.map.with_index { |inp, idx|
-    inp = inp.with_buffer(input.buffer_size).resample(mode: :libsamplerate_fastest)
+  input.outputs.map.with_index { |inp, idx|
+    inp = inp.with_buffer(800).resample(mode: :libsamplerate_fastest)
 
-    base = (base_delay_s.constant.named('Delay') - buftime).clip_rate(2, sample_rate: processing_sample_rate)
-    offset = base_delay_s.constant.named('Tap Offset').clip_rate(2, sample_rate: processing_sample_rate)
+    base = (delay - buftime).clip_rate(2, sample_rate: processing_sample_rate)
+    offset = delay.clip_rate(2, sample_rate: processing_sample_rate)
 
     delays = Array.new(NUM_TAPS) { |i|
       base + offset * (i + (idx.odd? ? 0.5 : 0))
     }
 
-    taps = inp.multitap(*delays).shuffle
-    taps = taps.reverse if idx.odd? && reverse_odd_taps
+    taps = inp.multitap(*delays).to_a.shuffle
+    taps = taps.reverse if idx.odd? && p.reverse_odd_taps
 
-    filter_freq = cutoff.constant.named('Filter Frequency')
     filtered_taps = taps.map.with_index { |t, i|
       freq = (i + 1 + (idx.odd? ? 0.5 : 0)) * filter_freq
-      t.filter(:peak, cutoff: freq, quality: quality, gain: 40.db) * -40.db
+      t.filter(:peak, cutoff: freq, quality: p.quality, gain: 40.db) * -40.db
     }
 
-    mix = MB::Sound::GraphNode::Mixer.new(filtered_taps)
-
-    final = mix.with_buffer(internal_buffer).oversample(oversample, mode: :libsamplerate_fastest)
-
-    # GraphVoice provides on_cc to generate a cc map for the MIDI manager
-    # (TODO: probably a better way to do this, also need on_bend, on_pitch, etc)
-    MB::Sound::MIDI::GraphVoice.new(final, manager: manager)
-      .on_cc(1, ['Delay', 'Tap Offset', 'Filter Frequency'], range: 0.0..2.0)
-      #.on_cc(1, 'Delay', range: 0.1..4.0)
-      #.on_cc(1, 'Wet level', range: 0.0..1.0, relative: false)
-  }
-
-  paths[0].open_graphviz
-
-  if manager
-    manager.on_cc_map(paths.map(&:cc_map))
-    puts MB::U.syntax(manager.to_acid_xml, :xml)
-  end
-
-  loop do
-    manager&.update
-    data = paths.map { |p|
-      d = p.sample(output.buffer_size)
-      d && MB::M.zpad(d, output.buffer_size)
-    }
-    break if data.any?(&:nil?)
-    output.write(data)
-  end
-
-rescue => e
-  puts MB::U.highlight(e)
-  exit 1
-end
-
+    MB::Sound::GraphNode::Mixer.new(filtered_taps)
+      .with_buffer(internal_buffer)
+      .oversample(p.oversample, mode: :libsamplerate_fastest)
+  }.channels
+}
