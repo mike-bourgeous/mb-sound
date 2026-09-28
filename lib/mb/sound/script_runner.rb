@@ -123,10 +123,11 @@ module MB
       # Runs a song: the block arranges it on the current session (with #bg,
       # #at_bar, etc.), then it plays live until it ends (see
       # PlaybackMethods#wait), or renders +bars+ bars plus the master tail to
-      # the output file (--bars overrides +bars+; with neither, it renders
-      # until the song ends).  --graphviz draws the graph as it is at the
-      # start (players started later by #at_bar are missing).
-      def run_song(bars:, &block)
+      # the output file.  --bars N plays or renders N bars plus the tail
+      # (without --bars, live songs play until they end, and renders stop
+      # after +bars+ or when the song ends).  --graphviz draws the graph as
+      # it is at the start (players started later by #at_bar are missing).
+      def run_song(bars: nil, &block)
         print_params
         open_song_graphviz(&block) if @options[:graphviz]
 
@@ -135,11 +136,23 @@ module MB
           puts "Rendered #{seconds.round(1)} seconds to #{@options[:output]}"
         else
           block.call(@params)
+          stop_after_bars(@options[:bars]) if @options[:bars]
           live
         end
       end
 
       private
+
+      # Stops the song at the end of bar +bars+ on the current session's
+      # timeline (like a render with --bars): cancels anything still
+      # scheduled and stops every player, letting master effects ring out.
+      def stop_after_bars(bars)
+        session = Session.current
+        session.schedule(bars * session.transport.bar_length, description: "end of --bars #{bars}") do
+          MB::Sound.cancel
+          MB::Sound.stop(:all, fade: 0)
+        end
+      end
 
       # Parses +argv+ into @options and @params.
       def parse(argv)
@@ -161,7 +174,7 @@ module MB
           when :synth
             o.on('-i', '--input MIDI', 'A MIDI file, or a MIDI port name (default: live MIDI)') { |v| @options[:input] = v }
           when :song
-            o.on('-b', '--bars N', Float, 'Bars to render to a file (default: the whole song)') { |v| @options[:bars] = v.rationalize }
+            o.on('-b', '--bars N', Float, 'Bars to play or render (default: the whole song)') { |v| @options[:bars] = v.rationalize }
           end
 
           @declared.each do |p|

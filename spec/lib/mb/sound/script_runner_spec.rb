@@ -89,5 +89,27 @@ RSpec.describe(MB::Sound::ScriptRunner) do
       expect(dot).to include('song tone', 'softclip ×2', 'label="tone"', 'label="master input"')
       expect(MB::Sound.read(outfile)[0].abs.max).to be > 0.1
     end
+
+    context 'when playing live' do
+      after(:each) do
+        MB::Sound::Session.default.close
+        MB::Sound.rewind
+      end
+
+      it 'stops an endless song after --bars, cancelling later schedules' do
+        later = false
+        r = runner(:song, ['-q', '--bars', '0.25']) # half a second at 120 BPM
+        t = MB::U.clock_now
+        r.run_song {
+          MB::Sound.bpm 120
+          MB::Sound.bg(:tone, 220.hz.sine.forever, fade: 0)
+          MB::Sound.at_bar(2) { later = true }
+        }
+
+        expect(MB::U.clock_now - t).to be_between(0.4, 3)
+        expect(MB::Sound.scheduled).to be_empty
+        expect(later).to eq(false)
+      end
+    end
   end
 end
