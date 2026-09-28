@@ -38,8 +38,11 @@ class NoiseGenerator
 
   attr_reader :db_gain, :noise_type, :power_slope, :wave_slope
 
-  def initialize(outstream, db_gain, noise_type)
+  # Generates +channels+ channels of noise (default: one per output channel)
+  # for +outstream+.  Mono noise plays on every output channel.
+  def initialize(outstream, db_gain, noise_type, channels: outstream.channels)
     @outstream = outstream
+    @channels = channels
 
     @window = MB::Sound::Window::DoubleHann.new(WINDOW_SIZE)
     @window.force_hop(HOP_SIZE)
@@ -50,7 +53,7 @@ class NoiseGenerator
     set_noise_type(noise_type)
 
     @wave_slopes = []
-    @lfos = outstream.channels.times.map { make_lfos }
+    @lfos = channels.times.map { make_lfos }
 
     @target_gain = db_gain
     set_gain(db_gain - 60)
@@ -186,9 +189,14 @@ class NoiseGenerator
         break
       end
 
-      @outstream.channels.times.map { |c|
+      data = @channels.times.map { |c|
         generate_noise(c) * @linear_gain
       }
+
+      # Upmix mono noise to every output channel
+      data = Array.new(@outstream.channels) { |c| c == 0 ? data[0] : data[0].dup } if @channels == 1
+
+      data
     end
 
     puts "\n\e[1mGoodbye\e[0m\e[K\n"
@@ -199,7 +207,7 @@ end
 
 MB::Sound.script(
   args: 0..1,
-  channels: [2, '-c', 'Number of channels', 1..],
+  channels: [2, '-c', 'Number of channels (1 plays the same noise on both speakers)', 1..],
   gain: [0.0, '-g', 'Output gain in dB'],
 ) { |(noise_type), p|
   noise_type ||= 'brown'
@@ -207,7 +215,9 @@ MB::Sound.script(
     abort "Unknown noise type #{noise_type.inspect} (#{NoiseGenerator::NOISE_COLORS.keys.join(', ')}; see --help)"
   end
 
-  output = MB::Sound.output(sample_rate: 48000, channels: p.channels)
-  generator = NoiseGenerator.new(output, p.gain, noise_type)
+  # A mono output would play only on the left with JACK, which connects
+  # output ports to speakers one to one
+  output = MB::Sound.output(sample_rate: 48000, channels: MB::M.max(p.channels, 2))
+  generator = NoiseGenerator.new(output, p.gain, noise_type, channels: p.channels)
   generator.run
 }
