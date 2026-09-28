@@ -73,6 +73,20 @@ RSpec.describe(MB::Sound::ScriptRunner) do
       expect(make.(%w[a b c d], 1..).args.length).to eq(4)
     end
 
+    it 'passes negative numbers through as positional arguments' do
+      r = runner(:script, ['in.flac', '0', '100', '1', '-100', '--gain', '-12', '-g', '-3.5'], gain: [0.0, '-g'])
+      expect(r.args).to eq(['in.flac', '0', '100', '1', '-100'])
+      expect(r.params.gain).to eq(-3.5)
+    end
+
+    it 'requires parameters marked :required' do
+      params = { start: [nil, Float, :required, 'Loop start'], xfade: 0.1 }
+      expect(runner(:script, ['--start', '1.5'], **params).params.to_h).to eq(start: 1.5, xfade: 0.1)
+      expect { runner(:script, [], **params) }.to raise_error(described_class::UsageError, /Missing --start/) { |e|
+        expect(e.help).to match(/--start VALUE\s+Loop start \(required\)/)
+      }
+    end
+
     it 'only has --help among the common options' do
       help = runner(:script, [], wet: [1.0, '-w']).instance_variable_get(:@parser).to_s
       expect(help).to include('--help', '-w, --wet')

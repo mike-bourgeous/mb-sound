@@ -37,6 +37,7 @@ module MB
     # - a type (Integer, Float, String, Symbol, or a Proc that converts the
     #   String), needed for nil defaults; otherwise the default's type
     # - allowed values: a Range or an Array, checked after conversion
+    # - :required for a parameter that must be given (with a nil default)
     #
     #     count: [2, 'Repeats per grain', 2.., '-n'],
     #     wave: [:sine, 'LFO waveform', MB::Sound::Oscillator::WAVE_TYPES],
@@ -46,7 +47,7 @@ module MB
       AUDIO_EXTENSIONS = /\.(flac|wav|mp3|ogg|mp4|m4a|opus|aiff?)\z/i
 
       # A declared parameter (see the class comment).
-      Param = Struct.new(:name, :default, :description, :short, :type, :allowed)
+      Param = Struct.new(:name, :default, :description, :short, :type, :allowed, :required)
 
       # Short options used by every script of a kind, which parameters can't
       # use.
@@ -292,18 +293,24 @@ module MB
         }
 
         begin
-          rest = parser.parse(argv)
+          rest = parser.parse(@kind == :script ? protect_negative_numbers(argv) : argv)
         rescue OptionParser::ParseError => e
           raise UsageError.new(e.message, parser.to_s)
         end
         positional(rest)
+
+        missing = @declared.select { |p| p.required && values[p.name].nil? }
+        unless missing.empty?
+          raise UsageError.new("Missing #{missing.map { |p| "--#{option_name(p)}" }.join(', ')}", parser.to_s)
+        end
+
         @params = Values.new(values)
       end
 
       # Assigns positional filenames to input and output by script kind.
       def positional(args)
         if @kind == :script
-          @args = args
+          @args = args.map { |a| a.delete_prefix(NEGATIVE_MARK) }
           check_arg_count
           return
         end
@@ -333,6 +340,7 @@ module MB
           when String then param.description = e
           when Class, Proc then param.type = e
           when Range, Array then param.allowed = e
+          when :required then param.required = true
           else raise ArgumentError, "Unknown #{e.inspect} in the declaration of parameter #{name}"
           end
         end
@@ -354,6 +362,27 @@ module MB
       # (a comment line right after the #! line).
       def header_comment?
         File.exist?(@script.to_s) && File.foreach(@script.to_s).first(2)[1].to_s.start_with?('#')
+      end
+
+      # Marks negative numbers given as positional arguments to general scripts
+      # (e.g. timestamp/delay pairs like `1 -100`) so OptionParser doesn't
+      # read them as short options.
+      NEGATIVE_MARK = "\0"
+
+      # Returns +argv+ with negative numbers marked (see NEGATIVE_MARK),
+      # except those following an option that takes a value (e.g.
+      # `--gain -12`), which OptionParser reads correctly.
+      def protect_negative_numbers(argv)
+        takes_value = @declared.reject { |p| p.default == true || p.default == false }
+          .flat_map { |p| ["--#{option_name(p)}", p.short].compact }
+
+        argv.each_with_index.map { |a, idx|
+          if a.match?(/\A-\d/) && !(idx > 0 && takes_value.include?(argv[idx - 1]))
+            NEGATIVE_MARK + a
+          else
+            a
+          end
+        }
       end
 
       # Raises UsageError unless a general script got the allowed number of
@@ -382,6 +411,7 @@ module MB
       def help_text(param)
         allowed = "(#{allowed_text(param)})" if param.allowed
         default = "(default #{param.default.inspect})" unless param.default.nil?
+        default = '(required)' if param.required
         [param.description, allowed, default].compact.join(' ')
       end
 
