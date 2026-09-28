@@ -8,7 +8,7 @@ mb-sound is a Ruby library for sound processing with a fluent DSL for building s
 
 ### Folders
 
-- `bin/` - user-facing scripts and experiments (`bin/effects/`, `bin/synths/`, `bin/midi/`, `bin/songs/`, plus general utilities at the top level)
+- `bin/` - user-facing scripts and experiments (`bin/effects/`, `bin/synths/`, `bin/midi/`, `bin/songs/`, plus general utilities at the top level); all but `bin/sound.rb` use the script helpers (see Scripts below)
 - `ext/` - C extensions for performance-critical functions
 - `lib/` - Ruby code (most functionality lives here)
 - `spec/` - Test suite
@@ -66,6 +66,7 @@ Graph nodes maintain input/output relationships and support traversal via the `T
 - `ScheduleMethods` - `at_bar` (alias `on_bar`) / `after` / `every` / `scheduled` / `cancel` run blocks at bars on the `Session` timeline; `bg`/`stop`/`resume`/`bpm` inside them take effect exactly at the scheduled time (see `bin/songs/scheduled_song.rb`)
 - `PlotMethods` - Terminal/gnuplot visualization
 - `FFTMethods` - Spectral analysis
+- `ScriptingMethods` - `effect_script` / `synth_script` / `song_script` / `script` for standalone scripts in bin/ (see Scripts below)
 - `GainMethods`, `WindowMethods`, `AnalysisMethods`
 
 ### C Extensions (3 native extensions, compiled via rake-compiler)
@@ -102,6 +103,17 @@ Every GraphNode has `outputs` (`[self]` for one channel) and `channel_count`; no
 ### Master effects
 
 `Session#master` (`lib/mb/sound/session/master.rb`, console `master { |mix| mix.softclip }`) runs the whole mix through a chain built on `GraphNode::MixSource` channels (one param = the mix as a stereo bundle, N params = one per channel; `master nil` bypasses). New chains start at `bg`-style launch points; by default the old chain "spills over" (fed silence from the switch sample so tails ring out, dropped after 1s below -90dB or 10s), `fade:` crossfades, `fade: 0` cuts (also used when the render load is over 60%). Chains keep processing while idle, `panic` rebuilds the chain to clear tails, and `render` adds the tail after the last player (10s cap). Nodes that change the sample count (`resample`, `oversample`) can't be used in a master chain yet. See Reverbs above for which reverbs are light enough for a live master chain.
+
+### Scripts
+
+Every bin/ script except `bin/sound.rb` is built on one of four helpers in `ScriptingMethods`, backed by `ScriptRunner` (`lib/mb/sound/script_runner.rb`, OptionParser):
+
+- `effect_script(input_channels:, live_channels:, **params) { |input, p| graph }` - the input is an audio file (first audio argument or `-i`, rung out with a `Ringdown` node until 1 s of quiet, 10 s cap) or live input (`-c/--input-channels`); `--repeat [COUNT]` loops the file.
+- `synth_script(**params) { |midi_input, p| graph }` - `midi_input` is a MIDI file or JACK port name (or nil for live MIDI); pass it to `MB::Sound.synth` / `midi_manager` / `midi_file`.
+- `song_script(bars:, **params) { |p| ... }` - the block arranges the song on the current session (`bg`, `at_bar`, `master`); `-b/--bars N` plays or renders N bars (live too), `--bpm` sets the starting tempo and scales the song's tempo changes (`Transport#override_bpm`), `--graphviz` draws the session at the start (`Session#graph_view`).
+- `script(args:, **params) { |args, p| ... }` - general scripts (utilities, plots, file processors, benchmarks, MIDI tools): only `-h/--help` is common, positional arguments go to the block (`args:` Integer/Range checks their count; negative numbers stay positional).
+
+Effects, synths, and songs share `-o/--output` (or a positional audio file) to render instead of playing, `-f/--force`, `-g/--graphviz`, `-p/--plot`, `-q/--quiet`, and play through the background `Session`.  Parameters are options only (no positional numbers): `name: default` or `name: [default, 'description', '-x', Type, allowed_range_or_array, :required]` in any order after the default; bad values print the option help.  `p.midi_cc(1, :hz, range: 0.0..6.0)` gives a MidiDsl CC node starting at the parameter value (range relative to it, like `GraphVoice#on_cc`) with live JACK MIDI, else a constant.  Graph-building code belongs inside the block (`--graphviz` runs song blocks twice).  Guard scripts that can also be `load`ed with `if main_script?(__FILE__)`.  Smoke tests: `spec/bin/script_smoke_spec.rb` (see Testing).
 
 ### MIDI
 
@@ -143,6 +155,8 @@ The container has no audio device, so check sound-producing code by rendering it
 - Oscillators (`Tone`, `noise`) default to amplitude 0.1, and `*` only raises its right operand to full level, so `tone * env` is 10x quieter than `env * tone`.  Use `.at(...)` explicitly in examples and check levels by rendering.
 - `Tone.new` (and `Numeric#hz`) defaults to a 5-second duration, so graphs driven by clips or LFOs need `.forever` (`Tone#lfo` now plays forever by default).
 - `40.hz` is an oscillator, not a constant; use `40.constant` for fixed values in arithmetic.
+- `node.filter(cookbook_filter)` re-applies the filter's original cutoff and quality every buffer, so changing `center_frequency` from outside (e.g. a MIDI callback) does nothing; pass `cutoff:` a node and change the node.
+- `multitap` and other multi-output results are `Channels` bundles, which are deliberately not Enumerable (`.to_a` for `shuffle`, `reverse`, etc.).
 - C4 = 60 (C3 = 48).  Derive expected values in specs from note constants or a quick script; hand-computed notes and offsets caused several wrong assertions.
 - A realtime Session's render thread runs until `close`; close sessions in spec `after` blocks.  `kill -QUIT <pid>` prints every thread's backtrace (`MB::U.sigquit_backtrace`, set up in spec_helper).
 - Before adding `bin/sound.rb` commands, check for collisions with `MB::Sound` methods and Pry commands (`Pry::Commands`; e.g. `reset` and `watch` are taken).
