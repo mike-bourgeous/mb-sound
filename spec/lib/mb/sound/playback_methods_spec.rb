@@ -198,7 +198,10 @@ RSpec.describe(MB::Sound::PlaybackMethods) do
   describe '#wait' do
     let(:session) { MB::Sound::Session.new(output: MB::Sound::NullOutput.new(channels: 2, sleep: false), buffer_size: 800, realtime: true) }
 
-    after { session.close }
+    after do
+      session.close
+      MB::Sound.rewind
+    end
 
     def within(&block)
       MB::Sound::Session.with_context(session: session, &block)
@@ -422,8 +425,7 @@ RSpec.describe(MB::Sound::PlaybackMethods) do
     end
 
     it 'does not move the live timeline' do
-      MB::Sound.render(filename, 440.hz.sine.for(0.1))
-      expect(MB::Sound.transport.position).to eq(0)
+      expect { MB::Sound.render(filename, 440.hz.sine.for(0.1)) }.not_to change { MB::Sound.transport.position }
     end
   end
 
