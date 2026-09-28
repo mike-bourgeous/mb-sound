@@ -144,6 +144,22 @@ RSpec.describe(MB::Sound::ScriptRunner) do
       expect(MB::Sound.read(outfile)[0].abs.max).to be > 0.1
     end
 
+    it 'plays at the --bpm tempo, scaling the song tempo changes' do
+      seen = []
+      r = runner(:song, [outfile, '-q', '--bpm', '60'])
+      expect {
+        r.run_song(bars: 3) {
+          MB::Sound.bpm 120
+          MB::Sound.bg(:tone, 220.hz.sine.at(0.5).forever, fade: 0)
+          MB::Sound.at_bar(2) { MB::Sound.bpm 90 }
+          MB::Sound.at_bar(3) { seen << MB::Sound.transport.bpm }
+        }
+      }.to output(/Rendered/).to_stdout
+
+      expect(seen).to eq([45.0])
+      expect(MB::Sound.read(outfile)[0].length / 48000.0).to be_within(0.05).of(4 + 16 / 3.0 * 2)
+    end
+
     context 'when playing live' do
       before(:each) do
         ENV['OUTPUT_TYPE'] = 'null'

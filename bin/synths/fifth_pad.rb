@@ -39,8 +39,8 @@ module MB::Sound
   end
 
   if main_script?(__FILE__)
-    song_script(bars: 8, bpm: [90.0, 'Tempo in beats per minute']) { |p|
-      bpm(p.bpm)
+    song_script(bars: 8) {
+      bpm 90
       bg :pad, fifth_pad(seq(A2, F2, C3, G2).n1.legato(0.95).loop), fade: 0
     }
   end

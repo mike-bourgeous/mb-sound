@@ -14,8 +14,8 @@ require 'mb-sound'
 # Running inside MB::Sound makes #seq, #grid, #bpm, etc. and note names like C2
 # available just like in bin/sound.rb.
 module MB::Sound
-  song_script(bars: 8, bpm: [124.0, 'Tempo in beats per minute']) { |p|
-    bpm(p.bpm)
+  song_script(bars: 8) {
+    bpm 124
 
     # Two bars of bass: sixteenths by default, with a dotted-eighth and a
     # ratcheted note for variety

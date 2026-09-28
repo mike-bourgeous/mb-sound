@@ -38,6 +38,25 @@ module MB
           @bpm = bpm
         end
 
+        # Plays songs at +bpm+ instead of their own tempo (for a script's
+        # --bpm option): sets the tempo now, and #scaled_bpm turns the first
+        # tempo a song asks for into +bpm+ and scales later ones by the same
+        # ratio, so tempo changes keep their proportions.
+        def override_bpm(bpm)
+          self.bpm = bpm
+          @bpm_override = bpm
+          @bpm_scale = nil
+        end
+
+        # Returns +bpm+ adjusted for #override_bpm (unchanged without an
+        # override).  Used by SequenceMethods#bpm.
+        def scaled_bpm(bpm)
+          return bpm unless @bpm_override
+
+          @bpm_scale ||= @bpm_override.to_f / bpm
+          bpm * @bpm_scale
+        end
+
         # Changes the bar length in whole notes (e.g. 3/4r for 3/4 time).
         def bar_length=(length)
           length = length.to_r

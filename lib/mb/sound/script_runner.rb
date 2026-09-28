@@ -17,7 +17,8 @@ module MB
     #     -q, --quiet              don't print the parameters
     #
     # Effects add -i/--input FILE, -c/--input-channels N, and --repeat
-    # [COUNT]; synths add -i/--input MIDI; songs add -b/--bars N.
+    # [COUNT]; synths add -i/--input MIDI; songs add -b/--bars N and
+    # --bpm BPM.
     #
     # Parameters are declared with defaults (and optional descriptions):
     #
@@ -181,16 +182,23 @@ module MB
         open_song_graphviz(&block) if @options[:graphviz]
 
         if @options[:output]
-          seconds = MB::Sound.render(@options[:output], bars: @options[:bars] || bars, tail: true, overwrite: overwrite) { block.call(@params) }
+          seconds = MB::Sound.render(@options[:output], bars: @options[:bars] || bars, tail: true, overwrite: overwrite) { arrange_song(&block) }
           puts "Rendered #{seconds.round(1)} seconds to #{@options[:output]}"
         else
-          block.call(@params)
+          arrange_song(&block)
           stop_after_bars(@options[:bars]) if @options[:bars]
           live
         end
       end
 
       private
+
+      # Arranges a song with +block+ on the current session, at the --bpm
+      # tempo if given.
+      def arrange_song(&block)
+        MB::Sound.transport.override_bpm(@options[:bpm]) if @options[:bpm]
+        block.call(@params)
+      end
 
       # Returns the MidiDsl for live MIDI control (see Values#midi_cc), or
       # nil when writing a file or when MIDI isn't available.  Tries once.
@@ -241,6 +249,7 @@ module MB
             o.on('-i', '--input MIDI', 'A MIDI file, or a MIDI port name (default: live MIDI)') { |v| @options[:input] = v }
           when :song
             o.on('-b', '--bars N', Float, 'Bars to play or render (default: the whole song)') { |v| @options[:bars] = v.rationalize }
+            o.on('--bpm BPM', Float, "Starting tempo (the song's tempo changes scale with it)") { |v| @options[:bpm] = v }
           end
 
           @declared.each do |p|
@@ -372,7 +381,7 @@ module MB
         output = NullOutput.new(channels: 2, sleep: false)
         transport = Sequence::Transport.new(bpm: Sequence.transport.bpm, bar_length: Sequence.transport.bar_length)
         session = Session.new(output: output, transport: transport, realtime: false)
-        Session.with_context(session: session) { block.call(@params) }
+        Session.with_context(session: session) { arrange_song(&block) }
         png = session.graph_view.open_graphviz
         puts "Wrote GraphViz image to #{png}"
       ensure
