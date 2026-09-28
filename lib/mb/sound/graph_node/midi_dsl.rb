@@ -54,7 +54,7 @@ module MB
             unless @node
               @node = @dsl.last_node
               @node&.spy do |b|
-                @now += b.length / @node.sample_rate if b
+                @now += b.length.to_f / @node.sample_rate if b # to_f: some nodes have Integer rates
               end
             end
 

@@ -154,7 +154,7 @@ module MB
                 end
 
         @params.midi_source = method(:midi)
-        graph = block.call(input, @params)
+        graph = to_graph(block.call(input, @params))
         announce(graph)
 
         ringdowns = graph_nodes(graph).grep(GraphNode::Ringdown)
@@ -169,7 +169,7 @@ module MB
       # renders it.
       def run_synth(&block)
         @params.midi_source = method(:midi)
-        graph = block.arity == 1 ? block.call(@options[:input]) : block.call(@options[:input], @params)
+        graph = to_graph(block.arity == 1 ? block.call(@options[:input]) : block.call(@options[:input], @params))
         announce(graph)
         play_or_render(graph)
       end
@@ -266,7 +266,7 @@ module MB
           end
 
           o.on('-h', '--help', 'Show this help') do
-            MB::U.print_header_help(@script) if File.exist?(@script.to_s)
+            MB::U.print_header_help(@script) if header_comment?
             puts o
             exit 0
           end
@@ -317,6 +317,18 @@ module MB
         end
 
         param
+      end
+
+      # Returns +result+ from a script block as a graph node or bundle: an
+      # Array of nodes (one per channel) becomes a GraphNode::Channels.
+      def to_graph(result)
+        result.is_a?(Array) ? GraphNode::Channels.new(result) : result
+      end
+
+      # True if the script file starts with a header comment for --help
+      # (a comment line right after the #! line).
+      def header_comment?
+        File.exist?(@script.to_s) && File.foreach(@script.to_s).first(2)[1].to_s.start_with?('#')
       end
 
       # The --option name of a parameter (underscores become dashes).
