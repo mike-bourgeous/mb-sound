@@ -16,6 +16,7 @@ RSpec.describe('script runner scripts', :smoke) do
     'bin/songs/stereo_song.rb' => ['--bars', '0.5'],
     'bin/songs/swap_song.rb' => ['--bars', '0.5'],
     'bin/songs/tempo_song.rb' => ['--bars', '0.5'],
+    'bin/stereo_graph_example.rb' => ['--bars', '0.5'],
     'bin/synths/fifth_pad.rb' => ['--bars', '0.5'],
   }.freeze
 
@@ -76,6 +77,7 @@ RSpec.describe('script runner scripts', :smoke) do
     'bin/synths/sinewave.rb' => [],
     'bin/synths/stereo_graph_synth_example.rb' => [],
     'bin/synths/wavetable_bass.rb' => [],
+    'bin/wavetable_pr_example.rb' => [],
   }.freeze
 
   synths.each do |script, args|
