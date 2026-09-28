@@ -61,6 +61,49 @@ RSpec.describe('script runner scripts') do
     end
   end
 
+  # Synth script => extra arguments; each plays a short MIDI file
+  synths = {
+    'bin/synths/ep2_syn.rb' => [],
+    'bin/synths/filter_ping.rb' => [],
+    'bin/synths/fm_bass.rb' => [],
+    'bin/synths/fm_bell.rb' => [],
+    'bin/synths/fm_bellpad.rb' => [],
+    'bin/synths/fm_drumbass.rb' => [],
+    'bin/synths/fm_experimental_bell.rb' => [],
+    'bin/synths/fm_kick.rb' => [],
+    'bin/synths/fm_synth.rb' => ['--no-table'],
+    'bin/synths/simple_syn.rb' => ['--oversample', '2'],
+    'bin/synths/sinewave.rb' => [],
+    'bin/synths/stereo_graph_synth_example.rb' => [],
+    'bin/synths/wavetable_bass.rb' => [],
+  }.freeze
+
+  synths.each do |script, args|
+    describe script do
+      let(:outfile) { "tmp/smoke_#{File.basename(script, '.rb')}.flac" }
+
+      it 'prints its header and options with --help' do
+        text = `#{script.shellescape} --help 2>&1`
+        expect($?).to be_success
+        header = File.readlines(script)[1].delete_prefix('#').strip
+        expect(text).to include(header, '--output', '--input MIDI')
+      end
+
+      it 'plays a MIDI file into an audio file' do
+        FileUtils.mkdir_p('tmp')
+        File.unlink(outfile) if File.exist?(outfile)
+
+        text = `#{script.shellescape} -q -f #{args.shelljoin} spec/test_data/c2_sustain.mid #{outfile.shellescape} 2>&1`
+        expect($?).to be_success, text
+        expect(text).to include("to #{outfile}")
+
+        data = MB::Sound.read(outfile)
+        expect(data[0].length).to be_between(48000 * 2, 48000 * 20)
+        expect(data.map { |c| c.abs.max }.max).to be > 0.001
+      end
+    end
+  end
+
   songs.each do |script, args|
     describe script do
       let(:outfile) { "tmp/smoke_#{File.basename(script, '.rb')}.flac" }

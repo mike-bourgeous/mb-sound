@@ -4,16 +4,28 @@
 # note modulates the note that came before it.  The modulation wheel controls
 # the intensity of modulation.
 # (C)2021 Mike Bourgeous
+#
+# Usage: $0 [options] [midi_file_or_port [output_file]]
+#
+# Plays live MIDI (JACK), or a MIDI file, showing a table of the oscillators
+# while it plays (--no-table to hide it).  Run with --help for all options.
+#
+# Examples:
+#     $0                                    # live MIDI
+#     $0 spec/test_data/c_major.mid         # a MIDI file
+#     $0 --no-table spec/test_data/c_major.mid fm.flac
 
 require 'bundler/setup'
-
 require 'mb-sound'
 
-MB::U.sigquit_backtrace
-
 class FM
-  def initialize(osc_count: 8, jack: MB::Sound::JackFFI[], input: nil, connect: nil, update_rate: 60)
-    @manager = MB::Sound::MIDI::Manager.new(jack: jack, input: input, connect: connect, update_rate: update_rate)
+  include MB::Sound::GraphNode
+
+  attr_reader :sample_rate
+
+  def initialize(manager:, osc_count: 8)
+    @sample_rate = 48000
+    @manager = manager
     @manager.on_note(&method(:note))
 
     @manager.on_cc(1, range: 0.0..10000) do |mod|
@@ -98,37 +110,31 @@ class FM
   end
 
   def sample(count)
-    @zero ||= Numo::SFloat.zeros(count)
     @manager.update
+    return nil if @manager.midi_in.respond_to?(:done?) && @manager.midi_in.done?
+
     @oscillators[0].sample(count) * (@oscs_used > 0 ? 1 : 0)
   end
 end
 
-output = MB::Sound::JackFFI[].output(channels: 1, connect: [['system:playback_1', 'system:playback_2']])
-synth = FM.new(update_rate: output.sample_rate.to_f / output.buffer_size, connect: ARGV[0])
+MB::Sound.synth_script(
+  table: [true, 'Show the oscillator table while playing'],
+) { |input, p|
+  manager = MB::Sound.midi_manager(input)
+  synth = FM.new(manager: manager)
+  manager.midi_in.clock.node ||= synth if manager.midi_in.respond_to?(:clock)
 
-puts "\n" * MB::U.height
+  next synth unless p.table
 
-PLOT = ENV['PLOT'] != '0'
+  puts "\n" * MB::U.height
+  at_exit { puts "\n" * MB::U.height }
 
-begin
-  t = 0
-  loop do
-    data = synth.sample(output.buffer_size)
-
-    if t % 20 == 0
+  buffers = 0
+  synth.spy { |data|
+    if buffers % 20 == 0
       puts "\e[H"
       synth.print
-
-      if PLOT
-        MB::Sound.plot([data, MB::Sound.real_fft(data).abs], graphical: true)
-      end
     end
-
-    t += 1
-
-    output.write([data])
-  end
-ensure
-  puts "\n" * MB::U.height
-end
+    buffers += 1
+  }
+}

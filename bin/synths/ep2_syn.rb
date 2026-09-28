@@ -1,38 +1,47 @@
 #!/usr/bin/env ruby
 # Episode 2 of Code Sound & Surround
 # Synthesizahh!!!
+#
+# Usage: $0 [options] [midi_file_or_port [output_file]]
+#
+# Plays live MIDI (JACK), or a MIDI file, through eight sawtooth voices and a
+# resonant lowpass filter; CC 1 (the mod wheel) sweeps the filter.  The
+# second output channel is the filter's impulse response, for scopes.  Run
+# with --help for all options.
+#
+# Examples:
+#     $0                                    # live MIDI
+#     $0 spec/test_data/c_major.mid         # a MIDI file
+#     $0 spec/test_data/mod_wheel.mid ep2.flac
 
 require 'bundler/setup'
-
 require 'mb-sound'
-require 'mb-sound-jackffi'
 
 MB::Sound::Oscillator.tune_freq = 480
 MB::Sound::Oscillator.tune_note = 71
 
-jack = MB::Sound::JackFFI['EP2Synth']
-output = jack.output(port_names: ['Synth', 'Impulse'], channels: 2, connect: :physical)
-manager = MB::Sound::MIDI::Manager.new(jack: jack, connect: ARGV[0] || :physical, channel: 0)
-
 OSC_COUNT = 8
-osc_pool = MB::Sound::MIDI::VoicePool.new(
-  manager,
-  OSC_COUNT.times.map { 240.hz.ramp.at(0).oscillator }
-).oversample(16, mode: :libsamplerate_fastest)
 
-filter = 1500.hz.lowpass(quality: 4)
-softclip = MB::Sound::SoftestClip.new(threshold: 0.5)
+MB::Sound.synth_script { |input|
+  manager = MB::Sound.midi_manager(input)
 
-manager.on_cc(1, default: 1.8, range: 0..3) do |decade|
-  freq = 20.0 * 10.0 ** decade
-  filter.center_frequency = freq
-end
+  osc_pool = MB::Sound::MIDI::VoicePool.new(
+    manager,
+    OSC_COUNT.times.map { 240.hz.ramp.at(0).oscillator }
+  )
+  manager.midi_in.clock.node ||= osc_pool if manager.midi_in.respond_to?(:clock)
 
-loop do
-  manager.update
+  filter = 1500.hz.lowpass(quality: 4)
 
-  data = osc_pool.sample(output.buffer_size)
-  data = filter.process(data)
-  data = softclip.process(data * 0.2)
-  output.write([data, filter.impulse_response(output.buffer_size)])
-end
+  # The graph sets the filter's cutoff from this node on every buffer
+  cutoff = 1500.constant.named('Cutoff')
+  manager.on_cc(1, default: 1.8, range: 0..3) do |decade|
+    cutoff.constant = 20.0 * 10.0 ** decade
+  end
+
+  synth = (osc_pool.oversample(16, mode: :libsamplerate_fastest).filter(filter, cutoff: cutoff) * 0.2).softclip(0.5)
+  # Built from the synth's output so it ends when the synth does
+  impulse = synth.proc { |d| filter.impulse_response(d.length) }.named('Impulse')
+
+  [synth, impulse].channels
+}

@@ -1,4 +1,7 @@
 #!/usr/bin/env ruby
+# A one-voice FM drum/bass synthesizer: a chain of FM operators with
+# fast-decaying modulation envelopes.  Plays live MIDI (JACK) or a MIDI file;
+# run with --help for all options.
 
 require 'bundler/setup'
 require 'mb-sound'

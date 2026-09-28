@@ -1,4 +1,7 @@
 #!/usr/bin/env ruby
+# A stereo synthesizer example: phase-modulated voices with a drifting
+# filter, widened by a different modulated delay on each side.  Plays live
+# MIDI (JACK) or a MIDI file; run with --help for all options.
 
 require 'bundler/setup'
 require 'mb-sound'
