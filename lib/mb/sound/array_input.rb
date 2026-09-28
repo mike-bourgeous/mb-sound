@@ -112,46 +112,32 @@ module MB
       def read(frames = @buffer_size)
         raise 'Must read at least one frame' if frames < 1
 
-        start = @offset
+        # Copy [offset, count] pieces, wrapping to the start of the arrays as
+        # many times as needed while repeating
+        pieces = []
+        needed = frames
+        while needed > 0
+          if @remaining == 0
+            break unless @repeat && @repeat_count != 0
 
-        if @remaining < frames
-          if @repeat
-            extra = frames - @remaining
-
-            if @repeat_count > 0
-              @repeat_count -= 1
-            elsif @repeat_count == 0
-              return [ Numo::SFloat[] ] * @channels
-            end
-
-            # TODO: Handle the case where frames is more than twice the length
-            # of the total loop, or is more than the length of the loop plus
-            # the remaining frames; just use circularbuffer probably
-            if extra == frames
-              # TODO: this case should never execute because of the outermost if statement
-              ret = @data.map { |c| c[0...frames] }
-              raise 'BUG: Unexpected code path; fix array input read repeat handling'
-            else
-              ret = @data.map { |c| c[start...@frames].concatenate(c[0...extra]) }
-            end
-
-            @remaining = @frames - extra
-            @offset = extra
-
-            return ret
+            @repeat_count -= 1 if @repeat_count > 0
+            @offset = 0
+            @remaining = @frames
           end
 
-          frames = @remaining
+          count = MB::M.min(needed, @remaining)
+          pieces << [@offset, count]
+          @offset += count
+          @remaining -= count
+          needed -= count
         end
 
-        @remaining -= frames
-        @offset += frames
+        return [ Numo::SFloat[] ] * @channels if pieces.empty?
 
-        if frames > 0
-          @data.map { |c| c[start...(start + frames)] }
-        else
-          [ Numo::SFloat[] ] * @channels
-        end
+        @data.map { |c|
+          chunks = pieces.map { |start, count| c[start...(start + count)] }
+          chunks.length == 1 ? chunks[0] : chunks.reduce { |a, b| a.concatenate(b) }
+        }
       end
     end
   end
