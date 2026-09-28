@@ -15,6 +15,10 @@ require 'coverage'
 # loaded code and global state (e.g. MB::Sound's transport and tempo), and
 # only the forking thread exists in the child.  Use backticks for scripts
 # where that matters.
+#
+# A spec that uses fork_script must also run its script at least once as a
+# real process doing real work (not just --help), so load-order problems and
+# implicit dependencies masked by the spec process's loaded code still show.
 module ForkScript
   # Runs +script+ with +args+ in a forked child, returning the combined
   # stdout/stderr text and the Process::Status.  +env+ is merged into ENV
