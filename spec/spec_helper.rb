@@ -6,9 +6,7 @@ SimpleCov.start do
   enable_coverage :branch
 end
 
-# Ensure subprocesses load simplecov
 require 'shellwords'
-ENV['RUBYOPT'] = "-r#{File.join(__dir__, 'simplecov_helper.rb')}"
 
 ENV['GLHTUI'] = '0' # FIXME: still can't run rspec when injecting plotter
 
@@ -17,6 +15,7 @@ require 'mb/m/rspec_matchers'
 require 'mb/sound'
 
 require_relative 'support/spec_tmp'
+require_relative 'support/subprocess_coverage' # after spec_tmp
 
 MB::U.sigquit_backtrace
 
