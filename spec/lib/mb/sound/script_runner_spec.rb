@@ -68,6 +68,16 @@ RSpec.describe(MB::Sound::ScriptRunner) do
       expect(node.sample(4).to_a).to all(be_within(1e-6).of(0.7))
     end
 
+    it 'gives MIDI a range relative to the parameter value unless relative: false' do
+      r = runner(:effect, [], hz: 0.5)
+      midi = double('MidiDsl')
+      r.params.midi_source = -> { midi }
+      expect(midi).to receive(:cc).with(1, range: 0.0..3.0, default: 0.5).and_return(0.5.constant)
+      expect(midi).to receive(:cc).with(2, range: 0.0..6.0, default: 0.5).and_return(0.5.constant)
+      r.params.midi_cc(1, :hz, range: 0.0..6.0)
+      r.params.midi_cc(2, :hz, range: 0.0..6.0, relative: false)
+    end
+
     it 'is a constant when MIDI is not available' do
       r = runner(:effect, [], hz: 0.7)
       r.params.midi_source = r.method(:midi)

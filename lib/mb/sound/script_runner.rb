@@ -90,10 +90,14 @@ module MB
         # writing a file, otherwise a constant.  Both are named after the
         # parameter.
         #
+        # Like MIDI::GraphVoice#on_cc, the +range+ multiplies the parameter's
+        # value unless +:relative+ is false (then it's an absolute range).
+        #
         # Example:
-        #     lfo_hz = p.midi_cc(1, :hz, range: 0.0..6.0)
-        def midi_cc(number, name, range:)
+        #     lfo_hz = p.midi_cc(1, :hz, range: 0.0..6.0) # 0 to 6 times --hz
+        def midi_cc(number, name, range:, relative: true)
           value = self[name]
+          range = (value * range.begin)..(value * range.end) if relative
           node = @midi&.call&.cc(number, range: range, default: value) || value.constant
           node.named(name.to_s)
         end
