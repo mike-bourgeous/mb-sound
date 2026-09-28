@@ -36,6 +36,11 @@ RSpec::Matchers.define_negated_matcher :not_change, :change
 #
 # See http://rubydoc.info/gems/rspec-core/RSpec/Core/Configuration
 RSpec.configure do |config|
+  # The bin/ script smoke tests (spec/bin/script_smoke_spec.rb) run every
+  # script and take several minutes, so plain `rspec` skips them; run them
+  # with `bundle exec rspec --tag smoke` (CI runs them as a separate job).
+  config.filter_run_excluding smoke: true
+
   # rspec-expectations config goes here. You can use an alternate
   # assertion/expectation library such as wrong or the stdlib/minitest
   # assertions if you prefer.

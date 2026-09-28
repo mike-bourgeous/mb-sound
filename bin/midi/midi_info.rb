@@ -8,15 +8,6 @@ require 'bundler/setup'
 
 require 'mb-sound'
 
-if ARGV.include?('--help') || ARGV.length != 1
-  puts MB::U.read_header_comment.join.gsub('$0', $0)
-  exit 1
-end
-
-f = MB::Sound::MIDI::MIDIFile.new(ARGV[0], merge_tracks: false)
-
-title = f.seq.name
-
 NAME_MAP = {
   index: '#',
   name: 'Name',
@@ -32,16 +23,22 @@ NAME_MAP = {
   max_note: "Max \u2669",
 }.freeze
 
-track_info = f.tracks.reduce({}) { |h, t|
-  t.each do |k, v|
-    kname = NAME_MAP[k] || k.to_s
-    h[kname] ||= []
-    h[kname] << v
-  end
+MB::Sound.script(args: 1) { |(filename)|
+  f = MB::Sound::MIDI::MIDIFile.new(filename, merge_tracks: false)
 
-  h
+  title = f.seq.name
+
+  track_info = f.tracks.reduce({}) { |h, t|
+    t.each do |k, v|
+      kname = NAME_MAP[k] || k.to_s
+      h[kname] ||= []
+      h[kname] << v
+    end
+
+    h
+  }
+
+  MB::U.headline("#{File.basename(f.filename)}: \e[1m#{title}\e[0m")
+  puts
+  MB::U.table(track_info, variable_width: true)
 }
-
-MB::U.headline("#{File.basename(f.filename)}: \e[1m#{title}\e[0m")
-puts
-MB::U.table(track_info, variable_width: true)

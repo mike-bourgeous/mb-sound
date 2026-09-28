@@ -412,6 +412,60 @@ RSpec.describe(MB::Sound::Session) do
     end
   end
 
+  describe 'slow player warnings' do
+    before do
+      session.instance_variable_set(:@realtime, true)
+      allow(session).to receive(:start_thread)
+    end
+
+    # A node that sleeps for +seconds+ on each call to #sample for which the
+    # block returns true.
+    def sleepy(seconds, &when_slow)
+      calls = 0
+      1.constant.proc { |d| sleep(seconds) if when_slow.call(calls += 1); d }
+    end
+
+    it 'ignores a slow start' do
+      session.add(sleepy(0.1) { |call| call == 1 })
+      expect(session).not_to receive(:warn)
+      16.times { session.process_buffer }
+    end
+
+    it 'ignores a single spike just after the warm-up' do
+      session.add(sleepy(0.1) { |call| call == 7 })
+      expect(session).not_to receive(:warn)
+      16.times { session.process_buffer }
+    end
+
+    it 'warns once about a player that stays slow' do
+      session.add(sleepy(0.02) { true }) # 800 frames are 16.7 ms
+      expect(session).to receive(:warn).with(/is taking \d+% of its audio buffer time/).once
+      16.times { session.process_buffer }
+    end
+  end
+
+  describe '#graph_view' do
+    it 'draws each player feeding the output' do
+      session.add(440.hz.sine.named('lead'), name: :lead)
+      session.add(MB::Sound.stereo(1.constant, 2.constant), name: :pair)
+      dot = session.graph_view.graphviz
+
+      expect(dot).to include('label="session output"', 'label="players"', 'lead')
+      expect(dot).to include('label="lead"', 'label="pair[0]"', 'label="pair[1]"', 'label="mix"')
+    end
+
+    it 'draws the players feeding the master chain' do
+      session.add(440.hz.sine.named('lead'), name: :lead)
+      session.master { |mix| mix.softclip }
+      dot = session.graph_view.graphviz
+
+      expect(dot).to include('label="players"', 'label="master input"', 'softclip ×2', 'label="master[1]"')
+      players = dot[/"(\d+)" \[label="players"\]/, 1]
+      input = dot[/"(\d+)" \[label="master input"\]/, 1]
+      expect(dot).to include("\"#{players}\" -> \"#{input}\" [label=\"mix\"]")
+    end
+  end
+
   it 'mixes mono graphs to every channel and arrays to separate channels' do
     session.add([1.constant, 2.constant])
     session.add(4.constant, at: :now)

@@ -7,13 +7,14 @@ module MB
           # Initializes a MIDI-control-change graph node.
           #
           # See MidiDsl#cc.
-          def initialize(dsl:, number:, range:, unit:, si:, sample_rate:, smoothing:)
-            super(dsl: dsl, default: range.begin, range: range, unit: unit, si: si, sample_rate: sample_rate, smoothing: smoothing)
+          def initialize(dsl:, number:, range:, unit:, si:, sample_rate:, smoothing:, default: nil)
+            default = range.begin if default.nil?
+            super(dsl: dsl, default: default, range: range, unit: unit, si: si, sample_rate: sample_rate, smoothing: smoothing)
 
             @number = Integer(number)
             @node_type_name = "MIDI CC #{@number}"
 
-            @manager.on_cc(number, range: range, default: range.begin, &method(:timed_change))
+            @manager.on_cc(number, range: range, default: default, &method(:timed_change))
           end
 
           def sources

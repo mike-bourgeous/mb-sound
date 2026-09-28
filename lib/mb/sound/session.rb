@@ -2,6 +2,7 @@ require_relative 'session/fades'
 require_relative 'session/master'
 require_relative 'session/clip_swaps'
 require_relative 'session/scheduler'
+require_relative 'session/graph_view'
 
 module MB
   module Sound
@@ -41,6 +42,7 @@ module MB
       include Fades
       include Master
       include ClipSwaps
+      include GraphView
 
       # A graph being played by the session.  +serial+ is unique; +name+ is
       # shared by a graph and the graph replacing it until the switch.
@@ -52,7 +54,7 @@ module MB
       # kept for #resume once it stops.
       Player = Struct.new(
         :serial, :name, :input, :description, :start, :stop_at, :timeline_nodes,
-        :started, :slow_warned, :gain, :gain_step, :fade_in, :fade_out, :keep,
+        :started, :slow_warned, :loads, :gain, :gain_step, :fade_in, :fade_out, :keep,
         keyword_init: true
       ) do
         # True unless this player is being replaced or stopped.
@@ -648,11 +650,36 @@ module MB
       def check_speed(p, elapsed, frames)
         return unless @realtime && !p.slow_warned
 
-        budget = frames.to_f / output.sample_rate
-        if elapsed > 0.75 * budget
+        load = sustained_load(p, elapsed, frames)
+        if load
           p.slow_warned = true
-          warn "Player #{p.name.inspect} (#{p.description}) took #{(100 * elapsed / budget).round}% of its audio buffer time; it may cause dropouts"
+          warn "Player #{p.name.inspect} (#{p.description}) is taking #{(100 * load).round}% of its audio buffer time; it may cause dropouts"
         end
+      end
+
+      # Buffers to ignore when a player or chain starts (resamplers and other
+      # nodes are much slower on their first buffers).
+      SLOW_WARMUP_BUFFERS = 5
+
+      # Buffers to average when deciding whether a player is too slow.
+      SLOW_WINDOW = 10
+
+      # Records how long +record+ (a player or master chain with a +loads+
+      # field) took for a buffer of +frames+, returning its average fraction
+      # of the buffer time over the last SLOW_WINDOW buffers if that is over
+      # 75% after SLOW_WARMUP_BUFFERS and a full window, or nil.
+      def sustained_load(record, elapsed, frames)
+        record.loads ||= { buffers: 0, recent: [] }
+        record.loads[:buffers] += 1
+        return nil if record.loads[:buffers] <= SLOW_WARMUP_BUFFERS
+
+        recent = record.loads[:recent]
+        recent << elapsed * output.sample_rate / frames
+        recent.shift if recent.length > SLOW_WINDOW
+        return nil if recent.length < SLOW_WINDOW # one spike isn't sustained
+
+        average = recent.sum / recent.length
+        average > 0.75 ? average : nil
       end
 
       # Starts the background rendering thread if it isn't running.

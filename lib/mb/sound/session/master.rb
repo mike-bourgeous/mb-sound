@@ -41,7 +41,7 @@ module MB
         Chain = Struct.new(
           :block, :source, :nodes, :timeline_nodes, :description,
           :start, :started, :mode, :fade, :feeding, :gain, :gain_step,
-          :tail_frames, :quiet_frames, :slow_warned,
+          :tail_frames, :quiet_frames, :slow_warned, :loads,
           :input_from, :input_until, :ramp_from,
           keyword_init: true
         ) do
@@ -374,10 +374,10 @@ module MB
         def check_master_speed(c, elapsed, frames)
           return unless @realtime && !c.slow_warned
 
-          budget = frames.to_f / output.sample_rate
-          if elapsed > 0.75 * budget
+          load = sustained_load(c, elapsed, frames)
+          if load
             c.slow_warned = true
-            warn "The master chain (#{c.description}) took #{(100 * elapsed / budget).round}% of its audio buffer time; it may cause dropouts"
+            warn "The master chain (#{c.description}) is taking #{(100 * load).round}% of its audio buffer time; it may cause dropouts"
           end
         end
       end

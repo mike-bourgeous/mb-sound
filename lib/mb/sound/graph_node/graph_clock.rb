@@ -21,7 +21,7 @@ module MB
         def node=(node)
           @node = node
           @node.spy { |d|
-            @now += d.length / @node.sample_rate if d
+            @now += d.length.to_f / @node.sample_rate if d # to_f: some nodes have Integer rates
           }
         end
 

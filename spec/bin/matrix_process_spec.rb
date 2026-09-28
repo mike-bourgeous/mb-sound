@@ -43,7 +43,7 @@ RSpec.describe('bin/matrix_process.rb') do
 
   it 'lists included matrices when given the --list flag' do
     text = `bin/matrix_process.rb --list 2>&1`
-    expect($?).not_to be_success
+    expect($?).to be_success
     expect(text).to include('Built-in matrices')
     expect(text).to include('hafler.yml')
     expect(text).to include('qs.yml')

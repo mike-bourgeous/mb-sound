@@ -1,155 +1,95 @@
 #!/usr/bin/env ruby
-# A simple, mono, tape-simulator echo with feedback.
+# A simple tape-simulator echo with feedback, one tape per channel.
 # (C)2022-2025 Mike Bourgeous
 #
-# Usage: [DRY=1.0] [WET=1.0] [DRIVE=1.0] [PITCH=1 [SMOOTHING=2]] $0 [delay_s [feedback [extra_time]]] [filename]
+# Usage: $0 [options] [input_filename [output_filename]]
+#
+# Plays a sound file (or live input, stereo unless -c says otherwise) through
+# the echo, letting it ring out after the file ends.  Files keep their
+# channel count.  Run with --help for all options.
 #
 # Examples:
 #     # synth groove
-#     DRY=1.75 DRIVE=2 WET=1.5 $0 0.25 1 sounds/transient_synth.flac
+#     $0 --dry 1.75 --drive 2 --wet 1.5 --delay 0.25 --feedback 1 sounds/transient_synth.flac
 #
 #     # space ship
-#     DRY=0.4 WET=1.2 $0 0.25 1.06 sounds/sine/log_sweep_20_20k.flac
+#     $0 --dry 0.4 --wet 1.2 --delay 0.25 --feedback 1.06 sounds/sine/log_sweep_20_20k.flac
 #
 #     # lo-fi crunch
-#     DRY=0 DRIVE=100 $0 0 0 sounds/drums.flac
+#     $0 --dry 0 --drive 100 --delay 0 --feedback 0 sounds/drums.flac
 #
 #     # broken time machine
-#     DRY=0 SMOOTHING=0.1 PITCH=1 $0 0.3333333 1.15 sounds/drums.flac
+#     $0 --dry 0 --smoothing 0.1 --pitch --delay 0.3333333 --feedback 1.15 sounds/drums.flac
 #
 #     # dub drums
-#     DRIVE=10 $0 0.166667 1.14 sounds/drums.flac
+#     $0 --drive 10 --delay 0.166667 --feedback 1.14 sounds/drums.flac
 
 require 'bundler/setup'
+require 'mb-sound'
 
-require 'mb/sound'
-require 'mb-util'
+MB::Sound.effect_script(
+  delay: [0.1, 'Delay in seconds'],
+  feedback: [0.75, 'Feedback gain'], # TODO: Allow controlling first delay amplitude separately
+  dry: [1.0, 'Dry (input) level'],
+  wet: [1.0, 'Wet (echo) level'],
+  drive: [1.0, 'Input gain into the tape'],
+  smoothing: [2.0, 'Delay time smoothing rate'],
+  pitch: [false, 'Wobble the delay time for pitch effects'],
+  oversample: [2.0, 'Oversampling factor'],
+) { |input, p|
+  sample_rate = 48000
 
-MB::U.sigquit_backtrace
+  delay_samples = MB::M.max((p.delay * sample_rate * p.oversample).round, 0)
+  wobble = p.pitch ? 3250 * p.oversample : 0
 
-if ARGV.include?('--help')
-  MB::U.print_header_help
-  exit 1
-end
+  # The feedback comes back one internal buffer later, so the buffer must
+  # fit inside the shortest delay; larger buffers are much faster (measured
+  # in stereo: 32 samples ~180% of realtime, 256 ~45%)
+  internal_bufsize = [512, 256, 128, 64, 32].find { |n| n <= delay_samples - wobble } || 32
 
-graphviz = !!ARGV.delete('--graphviz')
-overwrite = !!ARGV.delete('--overwrite')
-quiet = !!ARGV.delete('--quiet')
-numerics, others = ARGV.partition { |arg| arg.strip =~ /\A[+-]?[0-9]+(\.[0-9]+)?\z/ }
+  delay_samples = delay_samples + -0.4.hz.ramp.forever.at(0..wobble) if p.pitch
+  delay_samples = delay_samples.constant if delay_samples.is_a?(Numeric)
 
-delay, feedback, extra = numerics.map(&:to_f)
-delay ||= 0.1
-feedback ||= 0.75 # TODO: Allow controlling first delay amplitude separately
+  # TODO: ping-pong
+  # TODO: MIDI control
 
-filename, outfile, *_ = others
+  # One tape echo per channel; the feedback loop keeps its own buffer, so it
+  # is built separately for each channel rather than per channel by the DSL
+  tape_echo = ->(channel) {
+    # Read the input in full buffers, so the feedback loop can run with a
+    # smaller buffer size.
+    inp = channel.with_buffer(800).resample(mode: :libsamplerate_fastest).named('input')
 
-if filename && File.readable?(filename)
-  # Extend input duration by a suitable delay decay time, e.g. RT60
-  # feedback ** N == 0.001
-  # N = log(0.001) / log(feedback)
-  # padding = N * delay
-  if feedback >= 1
-    extra ||= 10
-  else
-    extra ||= delay * (Math.log(0.01) / Math.log(feedback))
-    extra = 1.0 if extra <= 0
-    extra = 10 if extra > 10
-  end
+    # Feedback buffer, overwritten by a later call to #spy
+    a = Numo::SFloat.zeros(internal_bufsize)
 
-  input = MB::Sound.file_input(filename)
-  input_buffer_size = input.buffer_size
+    # Feedback injector and delay.  The feedback comes back one internal
+    # buffer late, so the delay line is that much shorter; the input is
+    # delayed by the same amount so the first echo isn't early.
+    adjusted_delay = (delay_samples.named('delay in samples') - internal_bufsize.constant.named('buffer size')).clip(0, nil)
+    tape_in = inp.delay(samples: internal_bufsize, smoothing: false, sample_rate: sample_rate * p.oversample).named('loop latency')
+    b = (tape_in * p.drive.constant.named('drive') + 0.constant.proc { a }.named('feedback') * p.feedback)
+      .delay(samples: adjusted_delay, smoothing: p.smoothing, sample_rate: sample_rate * p.oversample)
+      .named('delay')
 
-  # This effect is mono-only, so mix stereo files down
-  input = input.mono.and_then(0.hz.at(0).for(extra)).named(filename)
-else
-  input = MB::Sound.input(channels: 1).named('audio input')
-  input_buffer_size = input.buffer_size
-end
+    # Tape saturator
+    c = b
+      .filter(200.hz.highpass(quality: 0.5)).named('highpass')
+      .filter(3000.hz.lowpass(quality: 0.5)).named('lowpass')
+      .softclip(0, 0.5)
+      .named('tape sim')
 
-if outfile
-  output = MB::Sound.file_output(outfile, sample_rate: input.sample_rate, channels: 1, overwrite: overwrite)
-end
-bufsize = output&.buffer_size || 800
-sample_rate = output&.sample_rate || 48000
+    # Feedback, with a spy to save feedback buffer, using a shorter buffer
+    # size for the feedback loop, allowing shorter delays
+    feedback_loop = c.spy { |z| a[] = z if z && z.length == a.length }
 
-oversample = ENV['OVERSAMPLE']&.to_f || 2
+    # Final output
+    (p.dry.constant.named('dry') * inp + p.wet.constant.named('wet') * feedback_loop)
+      .softclip(0.75, 0.95)
+      .with_buffer(internal_bufsize)
+      .oversample(p.oversample, mode: :libsamplerate_fastest)
+      .named('mixed output')
+  }
 
-delay_samples = (delay * sample_rate * oversample).round
-delay_samples = 0 if delay_samples < 0
-
-internal_bufsize = 32
-
-dry = ENV['DRY']&.to_f || 1
-wet = ENV['WET']&.to_f || 1
-drive = ENV['DRIVE']&.to_f || 1
-smoothing = ENV['SMOOTHING']&.to_f || 2
-
-puts MB::U.highlight({
-  dry: dry,
-  wet: wet,
-  drive: drive,
-  smoothing: smoothing,
-  delay: delay,
-  delay_samples: delay_samples,
-  feedback: feedback,
-  extra_time: extra,
-  input: input.graph_node_name,
-  output: output, # TODO: more concise output
-  sample_rate: sample_rate,
-  oversample: oversample,
-  buffer: bufsize,
-  internal_buffer: internal_bufsize,
-})
-
-if ENV['PITCH'] == '1'
-  delay_samples = delay_samples + -0.4.hz.ramp.forever.at(0..(3250 * oversample))
-end
-
-# TODO: Make it easy to replicate a signal graph for each of N channels
-# TODO: stereo+, ping-pong
-# TODO: MIDI control
-
-begin
-  # Use the input buffer size when reading from the input, so our feedback loop
-  # can run with a different buffer size.
-  # TODO: maybe this should be automatic
-  inp = input.with_buffer(input_buffer_size).resample(mode: :libsamplerate_fastest).named(filename || 'audio in')
-
-  # Feedback buffer, overwritten by a later call to #spy
-  a = Numo::SFloat.zeros(internal_bufsize)
-
-  # Feedback injector and delay
-  adjusted_delay = (delay_samples.constant.named('delay in samples') - internal_bufsize.constant.named('buffer size')).clip(0, nil)
-  b = (inp * drive.constant.named('drive') + 0.constant.proc { a }.named('feedback') * feedback)
-    .delay(samples: adjusted_delay, smoothing: smoothing, sample_rate: input.sample_rate * oversample)
-    .named('delay')
-
-  # Tape saturator
-  c = b
-    .filter(200.hz.highpass(quality: 0.5)).named('highpass')
-    .filter(3000.hz.lowpass(quality: 0.5)).named('lowpass')
-    .softclip(0, 0.5)
-    .named('tape sim')
-
-  # Feedback, with a spy to save feedback buffer, using a shorter buffer size
-  # for the feedback loop, allowing shorter delays
-  feedback_loop = c.spy { |z| a[] = z if z && z.length == a.length }
-
-  # Final output
-  result = (dry.constant.named('dry') * inp + wet.constant.named('wet') * feedback_loop)
-    .softclip(0.75, 0.95)
-    .with_buffer(internal_bufsize)
-    .oversample(oversample, mode: :libsamplerate_fastest)
-    .named('mixed output')
-
-  if graphviz
-    png = result.open_graphviz
-    puts "Wrote GraphViz image to #{png}"
-  end
-
-  MB::Sound.play(result, output: output, quiet: quiet)
-
-rescue => e
-  puts MB::U.highlight(e)
-  exit 1
-end
+  input.outputs.map(&tape_echo).channels
+}

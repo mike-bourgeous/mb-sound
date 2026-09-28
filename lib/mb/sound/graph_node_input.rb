@@ -4,6 +4,9 @@ module MB
     class GraphNodeInput
       attr_reader :channels, :sample_rate, :buffer_size
 
+      # The graph nodes (one per channel) this input reads from.
+      attr_reader :nodes
+
       # Creates a graph node input that returns the nodes' output across at
       # least +:channels+ channels.  If +:channels+ is greater than the number
       # of nodes, then nodes will be repeated to fill the requested number of

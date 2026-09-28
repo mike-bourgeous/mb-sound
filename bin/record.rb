@@ -11,37 +11,31 @@ require 'bundler/setup'
 
 require 'mb-sound'
 
-if ARGV.include?('--help')
-  MB::U.print_header_help
-  exit 1
-end
+MB::Sound.script(args: 1) { |(outfile)|
+  input = MB::Sound.input
+  output = MB::Sound.file_output(outfile, sample_rate: input.sample_rate, channels: input.channels, overwrite: :prompt)
 
-outfile = ARGV[0]
-raise "No filename given" unless outfile
-
-input = MB::Sound.input
-output = MB::Sound.file_output(outfile, sample_rate: input.sample_rate, channels: input.channels, overwrite: :prompt)
-
-pry_next = false
-MB::U.sigquit_backtrace do
-  pry_next = true
-end
-
-MB::U.headline("Recording to #{outfile}")
-
-begin
-  loop do
-    data = input.read(input.buffer_size)
-
-    MB::Sound::Meter.linear_meters(data.map { |d| d.abs.max })
-
-    if pry_next
-      require 'pry-byebug'; binding.pry
-      pry_next = false
-    end
-
-    output.write(data)
+  pry_next = false
+  MB::U.sigquit_backtrace do
+    pry_next = true
   end
-ensure
-  output.close
-end
+
+  MB::U.headline("Recording to #{outfile}")
+
+  begin
+    loop do
+      data = input.read(input.buffer_size)
+
+      MB::Sound::Meter.linear_meters(data.map { |d| d.abs.max })
+
+      if pry_next
+        require 'pry-byebug'; binding.pry
+        pry_next = false
+      end
+
+      output.write(data)
+    end
+  ensure
+    output.close
+  end
+}

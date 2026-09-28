@@ -334,5 +334,38 @@ RSpec.describe(MB::Sound::ArrayInput, :aggregate_failures) do
     end
   end
 
-  pending 'repeat'
+  describe 'repeat' do
+    let(:data) { [Numo::SFloat[1, 2, 3, 4], Numo::SFloat[-1, -2, -3, -4]] }
+
+    def reads(input, count, frames)
+      Array.new(count) { input.read(frames).map(&:to_a) }
+    end
+
+    it 'wraps when a read ends exactly at the end of the data' do
+      input = MB::Sound::ArrayInput.new(data: data, repeat: true)
+      expect(reads(input, 3, 2).map(&:first)).to eq([[1, 2], [3, 4], [1, 2]])
+      expect(reads(input, 3, 4).map(&:first)).to eq([[3, 4, 1, 2], [3, 4, 1, 2], [3, 4, 1, 2]])
+    end
+
+    it 'wraps in the middle of a read, on every channel' do
+      input = MB::Sound::ArrayInput.new(data: data, repeat: true)
+      expect(reads(input, 2, 3)).to eq([[[1, 2, 3], [-1, -2, -3]], [[4, 1, 2], [-4, -1, -2]]])
+    end
+
+    it 'handles reads longer than the whole loop' do
+      input = MB::Sound::ArrayInput.new(data: data, repeat: true)
+      expect(input.read(10)[0].to_a).to eq([1, 2, 3, 4, 1, 2, 3, 4, 1, 2])
+      expect(input.read(3)[0].to_a).to eq([3, 4, 1])
+    end
+
+    it 'plays a given number of times in total, including the last partial read' do
+      input = MB::Sound::ArrayInput.new(data: data, repeat: 2)
+      expect(reads(input, 4, 3).map(&:first)).to eq([[1, 2, 3], [4, 1, 2], [3, 4], []])
+    end
+
+    it 'plays once without repeat' do
+      input = MB::Sound::ArrayInput.new(data: data)
+      expect(reads(input, 3, 3).map(&:first)).to eq([[1, 2, 3], [4], []])
+    end
+  end
 end

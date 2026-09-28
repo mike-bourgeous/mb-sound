@@ -1,14 +1,15 @@
 #!/usr/bin/env ruby
-# Plays an audio file while showing meters.
+# Plays audio files, one after another, while showing meters.
+#
+# Usage: $0 sound_filename [...]
 
 require 'bundler/setup'
 require 'pry-byebug'
 require 'mb-sound'
 
-if ARGV.include?('--help') || ARGV.empty?
-  puts "Usage: \e[1m#{$0}\e[0m sound_filename"
-  exit 1
-end
-
-# TODO: gapless playback
-ARGV.each do |f| MB::Sound.play f end
+MB::Sound.script(args: 1..) { |files|
+  # TODO: gapless playback
+  files.each do |f|
+    MB::Sound.play f
+  end
+}

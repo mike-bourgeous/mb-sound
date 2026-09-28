@@ -17,94 +17,102 @@ MB::U.sigquit_backtrace {
   Thread.new do |t| sleep 0.1 ; Thread.main.wakeup end
 }
 
-GRAPHICAL = ARGV.include?('--graphical')
-SPECTRUM = ARGV.include?('--spectrum')
+MB::Sound.script(
+  args: 0,
+  graphical: [false, 'Plot in a graphical window (and redraw every 2 seconds)'],
+  spectrum: [false, 'Plot magnitude and phase spectra instead of time and frequency'],
+  samples: [108000, 'Samples to analyze', 1..],
+  time_samples: [nil, Integer, 'Samples in the time plot (default: a tenth of --samples)'],
+  from_rate: [400, 'Original sample rate', 1..],
+  to_rate: [17000, 'Resampled rate', 1..],
+  freq: [40.0, 'Test tone frequency in Hz'],
+  multi_samples: [216, 'Samples per multi_sample call', 1..],
+) { |_, p|
+  graphical = p.graphical
+  spectrum = p.spectrum
+  samples = p.samples
+  time_samples = p.time_samples || samples / 10
+  from_rate = p.from_rate
+  to_rate = p.to_rate
+  freq = p.freq
+  multi_samples = p.multi_samples || samples
+  multi_count = (samples * 1.1 / multi_samples).ceil
 
-SAMPLES = ENV['SAMPLES']&.to_i || 108000
-TIME_SAMPLES = ENV['TIME_SAMPLES']&.to_i || SAMPLES / 10
-
-FROM_RATE = ENV['FROM_RATE']&.to_i || 400
-TO_RATE = ENV['TO_RATE']&.to_i || 17000
-
-FREQ = ENV['FREQ']&.to_f || 40
-
-MULTI_SAMPLES = ENV['MULTI_SAMPLES']&.to_i || 216
-MULTI_COUNT = (SAMPLES * 1.1 / MULTI_SAMPLES).ceil
-
-modes = [
-  :ruby_zoh,
-  :ruby_linear,
-  :libsamplerate_zoh,
-  :libsamplerate_linear,
-]
-data = modes.flat_map { |m|
-  MB::U.headline "Generating data for #{m.inspect}"
-
-  $d1 = d1 = MB::M.select_zero_crossings(
-    FREQ.hz.at(1).at_rate(FROM_RATE).forever
-      .resample(TO_RATE, mode: m)
-      .sample(SAMPLES),
-    nil
-  )
-  $d2 = d2 = MB::M.select_zero_crossings(
-    FREQ.hz.at(1).at_rate(FROM_RATE).forever
-      .resample(TO_RATE, mode: m)
-      .multi_sample(MULTI_SAMPLES, MULTI_COUNT),
-    nil
-  )
-
-  dlength = [d1.length, d2.length].min
-  d1 = d1[0...dlength]
-  d2 = d2[0...dlength]
-
-  delta = d2.not_inplace! - d1.not_inplace!
-  [
-    ["#{m} large", d1],
-    ["#{m} small", d2],
-    ["#{m} diff", delta],
+  modes = [
+    :ruby_zoh,
+    :ruby_linear,
+    :libsamplerate_zoh,
+    :libsamplerate_linear,
   ]
-}.to_h
+  data = modes.flat_map { |m|
+    MB::U.headline "Generating data for #{m.inspect}"
 
-puts MB::U.highlight({
-  GRAPHICAL: GRAPHICAL,
-  SPECTRUM: SPECTRUM,
-  SAMPLES: SAMPLES,
-  FROM_RATE: FROM_RATE,
-  TO_RATE: TO_RATE,
-  FREQ: FREQ,
-  MULTI_SAMPLES: MULTI_SAMPLES,
-  MULTI_COUNT: MULTI_COUNT,
-})
-
-data.each do |name, data|
-  MB::Sound.write("tmp/#{"#{$0}_#{name}".gsub(/[^A-Za-z0-9-]+/, '_')}.flac", data, sample_rate: TO_RATE, overwrite: true)
-end
-
-loop do
-  if SPECTRUM
-    MB::Sound.mag_phase(
-      data,
-      graphical: GRAPHICAL,
-      freq_samples: SAMPLES
+    $d1 = d1 = MB::M.select_zero_crossings(
+      freq.hz.at(1).at_rate(from_rate).forever
+        .resample(to_rate, mode: m)
+        .sample(samples),
+      nil
     )
-  else
-    MB::Sound.time_freq(
-      data,
-      graphical: GRAPHICAL,
-      time_samples: TIME_SAMPLES,
-      freq_samples: SAMPLES,
-      columns: 4
+    $d2 = d2 = MB::M.select_zero_crossings(
+      freq.hz.at(1).at_rate(from_rate).forever
+        .resample(to_rate, mode: m)
+        .multi_sample(multi_samples, multi_count),
+      nil
     )
+
+    dlength = [d1.length, d2.length].min
+    d1 = d1[0...dlength]
+    d2 = d2[0...dlength]
+
+    delta = d2.not_inplace! - d1.not_inplace!
+    [
+      ["#{m} large", d1],
+      ["#{m} small", d2],
+      ["#{m} diff", delta],
+    ]
+  }.to_h
+
+  puts MB::U.highlight({
+    graphical: graphical,
+    spectrum: spectrum,
+    samples: samples,
+    from_rate: from_rate,
+    to_rate: to_rate,
+    freq: freq,
+    multi_samples: multi_samples,
+    multi_count: multi_count,
+  })
+
+  data.each do |name, data|
+    MB::Sound.write("tmp/#{"#{$0}_#{name}".gsub(/[^A-Za-z0-9-]+/, '_')}.flac", data, sample_rate: to_rate, overwrite: true)
   end
 
-  sleep 2
+  loop do
+    if spectrum
+      MB::Sound.mag_phase(
+        data,
+        graphical: graphical,
+        freq_samples: samples
+      )
+    else
+      MB::Sound.time_freq(
+        data,
+        graphical: graphical,
+        time_samples: time_samples,
+        freq_samples: samples,
+        columns: 4
+      )
+    end
 
-  if pry_next
-    binding.pry
-    pry_next = false
+    sleep 2
+
+    if pry_next
+      binding.pry
+      pry_next = false
+    end
+
+    # Loop in graphical mode to allow window resizing (TODO: figure out why
+    # gnuplot doesn't resize plots when the window is resized)
+    break unless graphical
   end
-
-  # Loop in graphical mode to allow window resizing (TODO: figure out why
-  # gnuplot doesn't resize plots when the window is resized)
-  break unless GRAPHICAL
-end
+}

@@ -67,9 +67,12 @@ module MB
       # Sets the tempo in quarter notes per minute, or returns it if
       # +beats_per_minute+ is nil.  Clips that are already playing change
       # speed right away.  Inside a scheduled block (see ScheduleMethods), the
-      # change happens at the block's scheduled time instead.
+      # change happens at the block's scheduled time instead.  A script's
+      # --bpm option scales the tempos a song sets (see
+      # Sequence::Transport#override_bpm).
       def bpm(beats_per_minute = nil)
         context = MB::Sound::Session.context
+        beats_per_minute = transport.scaled_bpm(beats_per_minute) if beats_per_minute
         if beats_per_minute && context&.[](:batch)
           session, time = context[:session], context[:time]
           context[:batch] << -> { session.change_tempo(beats_per_minute, time: time) }
