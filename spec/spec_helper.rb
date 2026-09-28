@@ -16,6 +16,7 @@ require 'mb/sound'
 
 require_relative 'support/spec_tmp'
 require_relative 'support/subprocess_coverage' # after spec_tmp
+require_relative 'support/fork_script' # after subprocess_coverage
 
 MB::U.sigquit_backtrace
 
