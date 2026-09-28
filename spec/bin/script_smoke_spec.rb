@@ -28,7 +28,7 @@ RSpec.describe('script runner scripts') do
     'bin/effects/reverb.rb' => ['--preset', 'room', '-w', '-6'],
     'bin/effects/reverse_delay.rb' => ['--delay', '0.1', '--oversample', '1'],
     'bin/effects/tape_delay.rb' => ['--feedback', '0.3', '--oversample', '1'],
-    'bin/multitap_delay.rb' => ['--delay', '0.05', '--oversample', '1'],
+    'bin/effects/multitap_delay.rb' => ['--delay', '0.05', '--oversample', '1'],
   }.freeze
 
   let(:infile) { 'tmp/smoke_effect_input.flac' }
