@@ -2,7 +2,7 @@ RSpec.describe('bin/effects/tape_delay.rb') do
   let(:outfile) { tmp_path('tape_delay_output.flac') }
 
   it 'can generate an output file' do
-    output = `bin/effects/tape_delay.rb --quiet sounds/piano0.flac #{outfile.shellescape} 2>&1`
+    output = `bin/effects/tape_delay.rb --quiet spec/test_data/arp_a7.flac #{outfile.shellescape} 2>&1`
     expect($?).to be_success
     expect(output).to include(outfile)
 
@@ -11,7 +11,7 @@ RSpec.describe('bin/effects/tape_delay.rb') do
   end
 
   it 'can generate a graphviz image' do
-    output = `DISPLAY= bin/effects/tape_delay.rb --quiet sounds/piano0.flac #{outfile.shellescape} --graphviz 2>&1`
+    output = `DISPLAY= bin/effects/tape_delay.rb --quiet spec/test_data/arp_a7.flac #{outfile.shellescape} --graphviz 2>&1`
     expect($?).to be_success
 
     png_line = output.lines.find { |l| l.include?('.png') && l.include?(' image to ') }

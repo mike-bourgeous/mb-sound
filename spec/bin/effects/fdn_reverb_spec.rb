@@ -2,7 +2,7 @@ RSpec.describe('bin/effects/fdn_reverb.rb') do
   let(:outfile) { tmp_path('fdn_reverb_output.flac') }
 
   it 'can generate an output file' do
-    output = `bin/effects/fdn_reverb.rb --quiet sounds/piano0.flac #{outfile.shellescape} 2>&1`
+    output = `bin/effects/fdn_reverb.rb --quiet spec/test_data/arp_a7.flac #{outfile.shellescape} 2>&1`
     expect($?).to be_success
     expect(output).to include(outfile)
 
@@ -11,7 +11,7 @@ RSpec.describe('bin/effects/fdn_reverb.rb') do
   end
 
   it 'can generate an output file with custom parameters' do
-    output = `bin/effects/fdn_reverb.rb --quiet --room-size 0.8 --decay 1.0 --damping 0.7 sounds/piano0.flac #{outfile.shellescape} 2>&1`
+    output = `bin/effects/fdn_reverb.rb --quiet --room-size 0.8 --decay 1.0 --damping 0.7 spec/test_data/arp_a7.flac #{outfile.shellescape} 2>&1`
     expect($?).to be_success
 
     info = MB::Sound::FFMPEGInput.parse_info(outfile)
@@ -19,7 +19,7 @@ RSpec.describe('bin/effects/fdn_reverb.rb') do
   end
 
   it 'can generate a graphviz image' do
-    output = `DISPLAY= bin/effects/fdn_reverb.rb --quiet sounds/piano0.flac #{outfile.shellescape} --graphviz 2>&1`
+    output = `DISPLAY= bin/effects/fdn_reverb.rb --quiet spec/test_data/arp_a7.flac #{outfile.shellescape} --graphviz 2>&1`
     expect($?).to be_success
 
     png_line = output.lines.find { |l| l.include?('.png') && l.include?(' image to ') }

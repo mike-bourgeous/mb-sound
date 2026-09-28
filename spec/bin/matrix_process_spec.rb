@@ -4,11 +4,11 @@ RSpec.describe('bin/matrix_process.rb') do
   let(:qs_enc_out) { tmp_path('matrix_process_qs_enc.flac') }
 
   it 'can convert a 2ch file to a 4ch file' do
-    text = `bin/matrix_process.rb sounds/synth0.flac matrices/hafler.yml #{test_out.shellescape}`
+    text = `bin/matrix_process.rb spec/test_data/arp_a7.flac matrices/hafler.yml #{test_out.shellescape}`
     expect($?).to be_success
     expect(text).to include('Success')
 
-    in_info = MB::Sound::FFMPEGInput.parse_info('sounds/synth0.flac')
+    in_info = MB::Sound::FFMPEGInput.parse_info('spec/test_data/arp_a7.flac')
     out_info = MB::Sound::FFMPEGInput.parse_info(test_out)
 
     expect(out_info[:streams][0][:channels]).to eq(4)
@@ -16,12 +16,12 @@ RSpec.describe('bin/matrix_process.rb') do
   end
 
   it 'can decode and re-encode using an included complex-valued matrix' do
-    text = `bin/matrix_process.rb --decode sounds/synth0.flac qs.yml #{qs_out.shellescape}`
+    text = `bin/matrix_process.rb --decode spec/test_data/arp_a7.flac qs.yml #{qs_out.shellescape}`
     expect($?).to be_success
     expect(text).to include('included matrix')
     expect(text).to include('Success')
 
-    in_info = MB::Sound::FFMPEGInput.parse_info('sounds/synth0.flac')
+    in_info = MB::Sound::FFMPEGInput.parse_info('spec/test_data/arp_a7.flac')
     out_info = MB::Sound::FFMPEGInput.parse_info(qs_out)
 
     expect(out_info[:streams][0][:channels]).to eq(4)
