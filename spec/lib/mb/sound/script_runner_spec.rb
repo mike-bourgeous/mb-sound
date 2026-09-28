@@ -58,6 +58,29 @@ RSpec.describe(MB::Sound::ScriptRunner) do
     end
   end
 
+  describe 'general scripts' do
+    it 'passes positional arguments and parameters to the block' do
+      r = runner(:script, ['a.flac', '--count', '3', 'b.txt'], count: 1)
+      expect(r.run_script { |args, p| [args, p.count] }).to eq([['a.flac', 'b.txt'], 3])
+    end
+
+    it 'checks the number of positional arguments' do
+      make = ->(argv, args) { described_class.new(:script, {}, argv: argv, script: 'bin/example.rb', args: args) }
+      expect(make.(['a'], 1).args).to eq(['a'])
+      expect { make.([], 1) }.to raise_error(described_class::UsageError, /Expected 1 argument \(got 0\)/)
+      expect { make.(['a', 'b', 'c'], 1..2) }.to raise_error(described_class::UsageError, /Expected 1 to 2 arguments \(got 3\)/)
+      expect { make.([], 1..) }.to raise_error(described_class::UsageError, /Expected at least 1 argument/)
+      expect(make.(%w[a b c d], 1..).args.length).to eq(4)
+    end
+
+    it 'only has --help among the common options' do
+      help = runner(:script, [], wet: [1.0, '-w']).instance_variable_get(:@parser).to_s
+      expect(help).to include('--help', '-w, --wet')
+      expect(help).not_to include('--output', '--plot', '--quiet')
+      expect { runner(:script, ['-q']) }.to raise_error(described_class::UsageError, /invalid option: -q/)
+    end
+  end
+
   describe 'Values#midi_cc' do
     it 'is a named constant at the parameter value when writing a file' do
       r = runner(:effect, ['in.flac', 'out.flac', '-q'], hz: 0.7)

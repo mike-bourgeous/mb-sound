@@ -16,6 +16,9 @@ module MB
     #     -p, --plot               plot the output while playing live
     #     -q, --quiet              don't print the parameters
     #
+    # General scripts (kind :script; utilities, plots, file processors) have
+    # only -h/--help: their positional arguments go to the block.
+    #
     # Effects add -i/--input FILE, -c/--input-channels N, and --repeat
     # [COUNT]; synths add -i/--input MIDI; songs add -b/--bars N and
     # --bpm BPM.
@@ -49,6 +52,7 @@ module MB
       # use.
       COMMON_SHORT_OPTIONS = {
         effect: %w[-o -f -g -p -q -h -i -c],
+        script: %w[-h],
         synth: %w[-o -f -g -p -q -h -i],
         song: %w[-o -f -g -p -q -h -b],
       }.freeze
@@ -109,8 +113,11 @@ module MB
         end
       end
 
-      # The kind of script: :effect, :synth, or :song.
+      # The kind of script: :effect, :synth, :song, or :script.
       attr_reader :kind
+
+      # Positional arguments for a general script (kind :script).
+      attr_reader :args
 
       # Parsed common options (:input, :output, :force, :graphviz, :plot,
       # :quiet, plus :channels for effects and :bars for songs).
@@ -123,16 +130,26 @@ module MB
       # {name => default} or {name => [default, 'description']}, parsing
       # +argv+ (which is modified) and printing help for +script+.  For
       # effects, +input_channels+ is the default input channel count for
-      # files and live input, and +live_channels+ for live input only.
-      def initialize(kind, params = {}, argv: ARGV, script: $0, input_channels: nil, live_channels: nil)
-        raise ArgumentError, "Unknown script kind #{kind.inspect}" unless [:effect, :synth, :song].include?(kind)
+      # files and live input, and +live_channels+ for live input only.  For
+      # general scripts, +args+ is the number of positional arguments
+      # allowed (an Integer or Range; nil for any number).
+      def initialize(kind, params = {}, argv: ARGV, script: $0, input_channels: nil, live_channels: nil, args: nil)
+        raise ArgumentError, "Unknown script kind #{kind.inspect}" unless [:effect, :synth, :song, :script].include?(kind)
 
         @kind = kind
         @script = script
         @input_channels = input_channels
         @live_channels = live_channels
+        @arg_count = args
         @declared = params.map { |name, spec| declare(name, spec) }
         parse(argv)
+      end
+
+      # Runs a general script: calls the block with the positional arguments
+      # (an Array of Strings) and the parameters.  Returns the block's
+      # result.
+      def run_script(&block)
+        block.call(@args, @params)
       end
 
       # Runs an effect: builds the graph with the block from the input (a
@@ -238,11 +255,13 @@ module MB
 
         @parser = parser = OptionParser.new { |o|
           o.banner = "Options for #{File.basename(@script)}:"
-          o.on('-o', '--output FILE', 'Write to an audio file instead of playing') { |v| @options[:output] = v }
-          o.on('-f', '--force', '--overwrite', 'Overwrite the output file') { @options[:force] = true }
-          o.on('-g', '--graphviz', 'Open a visualization of the node graph') { @options[:graphviz] = true }
-          o.on('-p', '--plot', 'Plot the output while playing live') { @options[:plot] = true }
-          o.on('-q', '--quiet', "Don't print the parameters") { @options[:quiet] = true }
+          unless @kind == :script
+            o.on('-o', '--output FILE', 'Write to an audio file instead of playing') { |v| @options[:output] = v }
+            o.on('-f', '--force', '--overwrite', 'Overwrite the output file') { @options[:force] = true }
+            o.on('-g', '--graphviz', 'Open a visualization of the node graph') { @options[:graphviz] = true }
+            o.on('-p', '--plot', 'Plot the output while playing live') { @options[:plot] = true }
+            o.on('-q', '--quiet', "Don't print the parameters") { @options[:quiet] = true }
+          end
 
           case @kind
           when :effect
@@ -283,6 +302,12 @@ module MB
 
       # Assigns positional filenames to input and output by script kind.
       def positional(args)
+        if @kind == :script
+          @args = args
+          check_arg_count
+          return
+        end
+
         args.each do |a|
           if @kind == :effect && a.match?(AUDIO_EXTENSIONS)
             @options[:input] ? (@options[:output] ||= a) : (@options[:input] = a)
@@ -329,6 +354,22 @@ module MB
       # (a comment line right after the #! line).
       def header_comment?
         File.exist?(@script.to_s) && File.foreach(@script.to_s).first(2)[1].to_s.start_with?('#')
+      end
+
+      # Raises UsageError unless a general script got the allowed number of
+      # positional arguments.
+      def check_arg_count
+        return if @arg_count.nil?
+
+        allowed = @arg_count.is_a?(Range) ? @arg_count : (@arg_count..@arg_count)
+        return if allowed.cover?(@args.length)
+
+        expected = case
+                   when allowed.end.nil? then "at least #{allowed.begin}"
+                   when allowed.begin == allowed.end then allowed.begin.to_s
+                   else "#{allowed.begin} to #{allowed.end}"
+                   end
+        raise UsageError.new("Expected #{expected} argument#{expected == '1' ? '' : 's'} (got #{@args.length})", @parser.to_s)
       end
 
       # The --option name of a parameter (underscores become dashes).

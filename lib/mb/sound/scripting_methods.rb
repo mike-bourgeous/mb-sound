@@ -2,10 +2,11 @@ require_relative 'script_runner'
 
 module MB
   module Sound
-    # Helpers for standalone scripts in bin/: effects, synths, and songs.
-    # Each parses the common options and declared parameters (see
-    # ScriptRunner), then plays through the background Session or renders
-    # to a file.  Run any script with --help to see its options.
+    # Helpers for standalone scripts in bin/: effects, synths, songs, and
+    # general scripts.  Each parses the common options and declared
+    # parameters (see ScriptRunner); effects, synths, and songs then play
+    # through the background Session or render to a file.  Run any script
+    # with --help to see its options.
     module ScriptingMethods
       # Runs an effect script: the block gets the input (an audio file given
       # as the first audio argument or --input, rung out after it ends, or
@@ -64,6 +65,22 @@ module MB
       #     song_script(bars: 8) { my_song } if main_script?(__FILE__)
       def main_script?(file)
         File.expand_path($0) == File.expand_path(file)
+      end
+
+      # Runs a general script (a utility, plot, file processor, benchmark,
+      # etc.): parses -h/--help and the declared parameters (see
+      # ScriptRunner), then calls the block with the positional arguments (an
+      # Array of Strings) and the parameters.  +args+ is the number of
+      # positional arguments allowed (an Integer or Range; nil for any), and
+      # a different count prints the option help.
+      #
+      # Example:
+      #     MB::Sound.script(args: 1.., channels: [nil, Integer, 'Channels to read']) { |files, p|
+      #       files.each { |f| puts MB::Sound.read(f, channels: p.channels).map(&:length).inspect }
+      #     }
+      def script(args: nil, **params, &block)
+        raise ArgumentError, 'Pass a block that runs the script' unless block
+        runner(:script, params, args: args).run_script(&block)
       end
 
       private
