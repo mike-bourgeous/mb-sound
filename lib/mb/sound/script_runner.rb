@@ -116,13 +116,16 @@ module MB
 
       # Creates a runner for a script of +kind+ with +params+ declared as
       # {name => default} or {name => [default, 'description']}, parsing
-      # +argv+ (which is modified) and printing help for +script+.
-      def initialize(kind, params = {}, argv: ARGV, script: $0, input_channels: nil)
+      # +argv+ (which is modified) and printing help for +script+.  For
+      # effects, +input_channels+ is the default input channel count for
+      # files and live input, and +live_channels+ for live input only.
+      def initialize(kind, params = {}, argv: ARGV, script: $0, input_channels: nil, live_channels: nil)
         raise ArgumentError, "Unknown script kind #{kind.inspect}" unless [:effect, :synth, :song].include?(kind)
 
         @kind = kind
         @script = script
         @input_channels = input_channels
+        @live_channels = live_channels
         @declared = params.map { |name, spec| declare(name, spec) }
         parse(argv)
       end
@@ -142,7 +145,7 @@ module MB
                 elsif path
                   MB::Sound.file_input(path, channels: channels).ringdown
                 else
-                  MB::Sound.input(channels: channels || 2)
+                  MB::Sound.input(channels: channels || @live_channels || 2)
                 end
 
         @params.midi_source = method(:midi)

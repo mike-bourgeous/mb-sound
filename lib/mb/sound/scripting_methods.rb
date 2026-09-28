@@ -20,10 +20,12 @@ module MB
       #
       # +input_channels+ sets the default input channel count (e.g. 2 for a
       # stereo effect; -c/--input-channels overrides it); files are up- or
-      # down-mixed to it.
-      def effect_script(input_channels: nil, **params, &block)
+      # down-mixed to it.  +live_channels+ sets only the live input's
+      # default channel count (2 if neither is given), so files keep their
+      # channels.
+      def effect_script(input_channels: nil, live_channels: nil, **params, &block)
         raise ArgumentError, 'Pass a block that turns the input into a graph' unless block
-        runner(:effect, params, input_channels: input_channels).run_effect(&block)
+        runner(:effect, params, input_channels: input_channels, live_channels: live_channels).run_effect(&block)
       end
 
       # Runs a synthesizer script: the block gets the MIDI input name (a
