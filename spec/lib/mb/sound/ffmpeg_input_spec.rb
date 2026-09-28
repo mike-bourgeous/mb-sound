@@ -218,11 +218,9 @@ RSpec.describe MB::Sound::FFMPEGInput do
   end
 
   context 'progress and time functions' do
-    let(:filename) { |ex| "tmp/file_io_time_funcs_#{ex.description.downcase.gsub(/[^a-z0-9]+/, '_')}.flac" }
+    let(:filename) { |ex| tmp_path("file_io_time_funcs_#{ex.description.downcase.gsub(/[^a-z0-9]+/, '_')}.flac") }
     let(:sample_rate) { 48000 }
     let(:input) { |ex|
-      FileUtils.mkdir_p('tmp')
-      File.unlink(filename) rescue nil
       MB::Sound.write(filename, [Numo::SFloat.zeros(sample_rate * 2)], sample_rate: sample_rate)
       MB::Sound::FFMPEGInput.new(filename)
     }

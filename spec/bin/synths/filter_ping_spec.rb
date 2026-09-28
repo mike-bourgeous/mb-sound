@@ -1,13 +1,8 @@
 require 'shellwords'
 
 RSpec.describe('bin/synths/filter_ping.rb') do
-  let (:audio_file) { 'tmp/filter_ping.flac' }
+  let (:audio_file) { tmp_path('filter_ping.flac') }
   let (:midi_file) { 'spec/test_data/fast_note_velocity.mid' }
-
-  before do
-    FileUtils.mkdir_p('tmp/')
-    File.unlink(audio_file) if File.exist?(audio_file)
-  end
 
   shared_examples_for :synthesizers do
     it 'generates an audio file from a MIDI file' do

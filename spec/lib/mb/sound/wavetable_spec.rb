@@ -26,10 +26,7 @@ RSpec.describe(MB::Sound::Wavetable, aggregate_failures: true) do
         [-0.75, 0.25, 0.75],
       ]
 
-      name = 'tmp/wavetable_save.flac'
-
-      FileUtils.mkdir_p('tmp/')
-      File.unlink(name) rescue nil
+      name = tmp_path('wavetable_save.flac')
 
       MB::Sound::Wavetable.save_wavetable(name, data)
 
@@ -40,9 +37,7 @@ RSpec.describe(MB::Sound::Wavetable, aggregate_failures: true) do
     end
 
     it 'can write a single-row wavetable to disk' do
-      name = 'tmp/single_wavetable_save.flac'
-      FileUtils.mkdir_p('tmp/')
-      File.unlink(name) if File.exist?(name)
+      name = tmp_path('single_wavetable_save.flac')
 
       MB::Sound::Wavetable.save_wavetable(name, one_table / 5)
 

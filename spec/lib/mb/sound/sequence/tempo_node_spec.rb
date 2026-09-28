@@ -73,9 +73,8 @@ RSpec.describe(MB::Sound::Sequence::TempoNode) do
     end
 
     it 'follows the render transport' do
-      FileUtils.mkdir_p('tmp')
-      MB::Sound.render('tmp/tempo_lfo_spec.flac', 1.bar.lfo.ramp, seconds: 1, bpm: 240, overwrite: true)
-      data = MB::Sound.read('tmp/tempo_lfo_spec.flac')[0]
+      MB::Sound.render(tmp_path('tempo_lfo_spec.flac'), 1.bar.lfo.ramp, seconds: 1, bpm: 240, overwrite: true)
+      data = MB::Sound.read(tmp_path('tempo_lfo_spec.flac'))[0]
       expect(data[12000]).to be_within(0.01).of(0.5) # a bar is one second at 240 BPM
     end
   end

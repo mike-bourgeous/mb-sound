@@ -10,19 +10,11 @@ RSpec.describe(MB::Sound::OutputBufferWrapper, :aggregate_failures) do
   let(:multi) { MB::Sound::NullOutput.new(channels: 3, buffer_size: buffer_size) }
 
   let(:exname) { |ex| ex.metadata[:full_description].inspect.downcase.gsub(/[^a-z0-9_-]+/, '_') }
-  let(:filename) { "tmp/output_buffer_wrapper_spec_#{exname}.flac" }
+  let(:filename) { tmp_path("output_buffer_wrapper_spec_#{exname}.flac") }
   let(:file) { MB::Sound::FFMPEGOutput.new(filename, sample_rate: 48000, channels: 2, buffer_size: buffer_size) }
 
-  let(:mono_filename) { "tmp/output_buffer_wrapper_spec_mono_#{exname}.flac" }
+  let(:mono_filename) { tmp_path("output_buffer_wrapper_spec_mono_#{exname}.flac") }
   let(:mono_file) { MB::Sound::FFMPEGOutput.new(mono_filename, sample_rate: 48000, channels: 1, buffer_size: buffer_size) }
-
-  before do
-    File.unlink(filename) if File.exist?(filename)
-  end
-
-  after do
-    File.unlink(filename) if File.exist?(filename)
-  end
 
   describe '#initialize' do
     it 'can wrap an FFMPEGOutput' do

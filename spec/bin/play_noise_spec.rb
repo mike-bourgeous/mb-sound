@@ -22,16 +22,16 @@ RSpec.describe('bin/play_noise.rb') do
     EOF
   }
 
+  let(:input_file) { tmp_path('play_noise_test.txt') }
+
   before(:each) {
-    FileUtils.mkdir_p('tmp')
-    File.unlink('tmp/play_noise_test.txt') rescue nil
-    File.write('tmp/play_noise_test.txt', test_sequence)
+    File.write(input_file, test_sequence)
   }
 
   it 'can play each type of noise via simulated keyboard input' do
     text = nil
     elapsed = Benchmark.realtime do
-      text = `OUTPUT_TYPE=null bin/play_noise.rb white -c 7 < tmp/play_noise_test.txt 2>&1`
+      text = `OUTPUT_TYPE=null bin/play_noise.rb white -c 7 < #{input_file.shellescape} 2>&1`
     end
     result = ($?)
     text.gsub!("\r", "\n")

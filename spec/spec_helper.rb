@@ -16,6 +16,8 @@ require 'mb/util'
 require 'mb/m/rspec_matchers'
 require 'mb/sound'
 
+require_relative 'support/spec_tmp'
+
 MB::U.sigquit_backtrace
 
 RSpec::Matchers.define_negated_matcher :not_change, :change

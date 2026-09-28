@@ -324,12 +324,7 @@ RSpec.describe(MB::Sound::PlaybackMethods) do
   end
 
   describe '#render' do
-    let(:filename) { 'tmp/render_spec.flac' }
-
-    before(:each) do
-      FileUtils.mkdir_p('tmp')
-      File.unlink(filename) rescue nil
-    end
+    let(:filename) { tmp_path('render_spec.flac') }
 
     it 'renders a sequence for a number of bars at the current tempo' do
       bass = MB::Sound.seq(MB::Sound::C2, MB::Sound::G1).n8.loop

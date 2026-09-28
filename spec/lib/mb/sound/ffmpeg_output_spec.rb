@@ -9,18 +9,11 @@ RSpec.describe MB::Sound::FFMPEGOutput do
     ]
   }
 
-  before(:each) do
-    FileUtils.mkdir_p('./tmp')
-    File.unlink('./tmp/test_out.flac') rescue nil
-    File.unlink('./tmp/test_out.wav') rescue nil
-    File.unlink('./tmp/test_out.ogg') rescue nil
-  end
-
   describe '#write' do
     ['flac', 'wav'].each do |format|
       context "when writing .#{format}" do
         it 'can write a file that can be read by FFMPEGInput' do
-          name = "tmp/test_out.#{format}"
+          name = tmp_path("test_out.#{format}")
           output = MB::Sound::FFMPEGOutput.new(name, sample_rate: 44100, channels: 3)
           expect(output.filename).to include(name)
           output.write(test_data)
@@ -70,13 +63,13 @@ RSpec.describe MB::Sound::FFMPEGOutput do
     end
 
     it 'can write a bare Numo::NArray if channel count is 1' do
-      output = MB::Sound::FFMPEGOutput.new('tmp/test_out.flac', sample_rate: 48000, channels: 1)
+      output = MB::Sound::FFMPEGOutput.new(tmp_path('test_out.flac'), sample_rate: 48000, channels: 1)
       expect { output.write(Numo::SFloat.zeros(100)) }.not_to raise_error
       expect(output.close.success?).to eq(true)
     end
 
     it 'raises an error if the wrong number of channels are given' do
-      name = "tmp/test_out.flac"
+      name = tmp_path("test_out.flac")
       output = MB::Sound::FFMPEGOutput.new(name, sample_rate: 44100, channels: 2)
       expect {
         output.write(test_data)
@@ -86,7 +79,7 @@ RSpec.describe MB::Sound::FFMPEGOutput do
     end
 
     it 'raises an error if given a bare Numo::NArray for 2 channels' do
-      name = "tmp/test_out.flac"
+      name = tmp_path("test_out.flac")
       output = MB::Sound::FFMPEGOutput.new(name, sample_rate: 44100, channels: 2)
       expect {
         output.write(Numo::SFloat.zeros(100))
@@ -98,7 +91,7 @@ RSpec.describe MB::Sound::FFMPEGOutput do
 
   describe '#initialize' do
     it 'can override the default format for an extension' do
-      name = 'tmp/test_out.wav'
+      name = tmp_path('test_out.wav')
       output = MB::Sound::FFMPEGOutput.new(name, sample_rate: 48000, channels: 1, format: 'flac')
       output.write(test_data[0..0])
       expect(output.close.success?).to eq(true)
@@ -108,7 +101,7 @@ RSpec.describe MB::Sound::FFMPEGOutput do
     end
 
     it 'can specify a bitrate' do
-      name = 'tmp/test_out.ogg'
+      name = tmp_path('test_out.ogg')
       data = [Numo::SFloat.zeros(48000).rand]
       output = MB::Sound::FFMPEGOutput.new(name, sample_rate: 48000, channels: 1, bitrate: '32k')
       output.write(data)
@@ -126,7 +119,7 @@ RSpec.describe MB::Sound::FFMPEGOutput do
     end
 
     it 'defaults .wav files to 32-bit float' do
-      name = 'tmp/test_out.wav'
+      name = tmp_path('test_out.wav')
       output = MB::Sound::FFMPEGOutput.new(name, sample_rate: 48000, channels: 1)
       output.write(Numo::SFloat.zeros(48000))
       expect(output.close.success?).to eq(true)
@@ -137,7 +130,7 @@ RSpec.describe MB::Sound::FFMPEGOutput do
     end
 
     it 'accepts a different codec for .wav files' do
-      name = 'tmp/test_out.wav'
+      name = tmp_path('test_out.wav')
       output = MB::Sound::FFMPEGOutput.new(name, sample_rate: 48000, channels: 1, codec: 'pcm_s16le')
       output.write(Numo::SFloat.zeros(48000))
       expect(output.close.success?).to eq(true)
@@ -148,7 +141,7 @@ RSpec.describe MB::Sound::FFMPEGOutput do
     end
 
     it 'can store metadata in a .flac file' do
-      name = 'tmp/test_out.flac'
+      name = tmp_path('test_out.flac')
       output = MB::Sound.file_output(name, channels: 1, metadata: { rspec: 'Was here', title: 'Headline' })
       output.write(Numo::SFloat.zeros(4800))
       expect(output.close.success?).to eq(true)

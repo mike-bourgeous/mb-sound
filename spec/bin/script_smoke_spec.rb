@@ -32,11 +32,11 @@ RSpec.describe('script runner scripts', :smoke) do
     'bin/effects/multitap_delay.rb' => ['--delay', '0.05', '--oversample', '1'],
   }.freeze
 
-  let(:infile) { 'tmp/smoke_effect_input.flac' }
+  let(:infile) { tmp_path('smoke_effect_input.flac') }
 
   effects.each do |script, args|
     describe script do
-      let(:outfile) { "tmp/smoke_#{File.basename(script, '.rb')}.flac" }
+      let(:outfile) { tmp_path("smoke_#{File.basename(script, '.rb')}.flac") }
 
       it 'prints its header and options with --help' do
         text = `#{script.shellescape} --help 2>&1`
@@ -46,8 +46,6 @@ RSpec.describe('script runner scripts', :smoke) do
       end
 
       it 'processes a short file, ringing out after it ends' do
-        FileUtils.mkdir_p('tmp')
-        File.unlink(outfile) if File.exist?(outfile)
         MB::Sound.write(infile, [220.hz.ramp.at(0.5).sample(4800), 330.hz.ramp.at(0.5).sample(4800)], sample_rate: 48000, overwrite: true)
 
         text = `#{script.shellescape} -q -f #{args.shelljoin} #{infile.shellescape} #{outfile.shellescape} 2>&1`
@@ -82,7 +80,7 @@ RSpec.describe('script runner scripts', :smoke) do
 
   synths.each do |script, args|
     describe script do
-      let(:outfile) { "tmp/smoke_#{File.basename(script, '.rb')}.flac" }
+      let(:outfile) { tmp_path("smoke_#{File.basename(script, '.rb')}.flac") }
 
       it 'prints its header and options with --help' do
         text = `#{script.shellescape} --help 2>&1`
@@ -92,8 +90,6 @@ RSpec.describe('script runner scripts', :smoke) do
       end
 
       it 'plays a MIDI file into an audio file' do
-        FileUtils.mkdir_p('tmp')
-        File.unlink(outfile) if File.exist?(outfile)
 
         text = `#{script.shellescape} -q -f #{args.shelljoin} spec/test_data/c2_sustain.mid #{outfile.shellescape} 2>&1`
         expect($?).to be_success, text
@@ -122,7 +118,7 @@ RSpec.describe('script runner scripts', :smoke) do
 
   songs.each do |script, args|
     describe script do
-      let(:outfile) { "tmp/smoke_#{File.basename(script, '.rb')}.flac" }
+      let(:outfile) { tmp_path("smoke_#{File.basename(script, '.rb')}.flac") }
 
       it 'prints its header and options with --help' do
         text = `#{script.shellescape} --help 2>&1`
@@ -132,8 +128,6 @@ RSpec.describe('script runner scripts', :smoke) do
       end
 
       it 'renders a short file' do
-        FileUtils.mkdir_p('tmp')
-        File.unlink(outfile) if File.exist?(outfile)
 
         text = `#{script.shellescape} -q -f #{args.shelljoin} #{outfile.shellescape} 2>&1`
         expect($?).to be_success, text
