@@ -20,7 +20,7 @@ MB::Sound.synth_script { |input|
   porta = midi.frequency(0.1114).filter(:lowpass, cutoff: 2, quality: 0.5)
 
   # Synth
-  graph = (midi.gate * (porta.tone.at(2).wavetable(wavetable: {wavetable: 'sounds/drums.flac', slices: 30, ratio: 2}, number: nzlfo).forever * 0.5 + porta.tone.triangle)).filter(:lowpass, cutoff: 5000, quality: 0.25).softclip
+  graph = (midi.gate * (porta.tone.at(2).wavetable(wavetable: 'sounds/drums_wavetable.flac', number: nzlfo).forever * 0.5 + porta.tone.triangle)).filter(:lowpass, cutoff: 5000, quality: 0.25).softclip
 
   graph
 }
