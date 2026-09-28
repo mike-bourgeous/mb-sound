@@ -95,8 +95,12 @@ RSpec.describe('script runner scripts', :smoke) do
         expect($?).to be_success, text
         expect(text).to include("to #{outfile}")
 
+        # Notes ring out after the last MIDI event, then the runner stops after
+        # a second of quiet (counted in whole buffers, so allow a little less),
+        # or fades out after at most 10 s of tail
+        music_end = MB::Sound::MIDI::MIDIFile.new('spec/test_data/c2_sustain.mid').music_end
         data = MB::Sound.read(outfile)
-        expect(data[0].length).to be_between(48000 * 2, 48000 * 20)
+        expect(data[0].length).to be_between(48000 * (music_end + 0.9), 48000 * (music_end + 11))
         expect(data.map { |c| c.abs.max }.max).to be > 0.001
       end
     end

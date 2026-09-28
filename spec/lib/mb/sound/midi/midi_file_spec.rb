@@ -13,6 +13,36 @@ RSpec.describe(MB::Sound::MIDI::MIDIFile) do
     end
   end
 
+  describe '#music_end' do
+    it 'returns the time of the last channel event, before trailing meta events' do
+      m = MB::Sound::MIDI::MIDIFile.new('spec/test_data/c_major.mid')
+      notes_end = m.notes.map { |n| n[:sustain_time] || n[:off_time] }.compact.max
+
+      expect(m.music_end).to be >= notes_end
+      expect(m.music_end).to be < m.duration
+    end
+  end
+
+  describe '#ended? and #done?' do
+    it 'ends after the last event, and is done TAIL_SECONDS later' do
+      seq.read(blocking: false) # starts playback at clock time 0
+      expect(seq.ended?).to eq(false)
+
+      clock.clock_now = seq.music_end + 0.01
+      expect(seq.ended?).to eq(true)
+      expect(seq.done?).to eq(false)
+
+      clock.clock_now = seq.music_end + MB::Sound::MIDI::MIDIFile::TAIL_SECONDS + 0.01
+      expect(seq.done?).to eq(true)
+    end
+
+    it 'is neither ended nor done before playback starts' do
+      clock.clock_now = 1000
+      expect(seq.ended?).to eq(false)
+      expect(seq.done?).to eq(false)
+    end
+  end
+
   describe '#seek' do
     it 'can seek to the end of the file' do
       expect(seq.index).to eq(0)

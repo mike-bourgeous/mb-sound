@@ -11,8 +11,9 @@ RSpec.describe('bin/synths/filter_ping.rb') do
 
       info = MB::Sound::FFMPEGInput.parse_info(audio_file)
 
-      # Input MIDI is 1.2 seconds, MIDIFile adds 5 seconds
-      expect(info[:streams][0][:duration]).to be_between(6, 7)
+      # Input MIDI is 1.2 seconds, the pings ring until ~1.85 seconds, and
+      # the runner stops after a second of quiet
+      expect(info[:streams][0][:duration]).to be_between(2.5, 4)
     end
   end
 

@@ -175,21 +175,24 @@ module MB
         graph = to_graph(block.call(input, @params))
         announce(graph)
 
-        ringdowns = graph_nodes(graph).grep(GraphNode::Ringdown)
         play_or_render(graph) do |session|
-          stop_after_ringdown(session, ringdowns) unless ringdowns.empty?
+          stop_after_ringdown(session, ending_nodes(graph))
         end
       end
 
       # Runs a synth: builds the graph with the block from the MIDI input
       # name (a MIDI file or port given as a non-audio argument or --input;
       # nil for the default live input) and the parameters, then plays or
-      # renders it.
+      # renders it.  A MIDI file rings out: after its last event, the synth
+      # keeps playing until its output has been quiet for
+      # Session::TAIL_QUIET_SECONDS (see MIDI::MIDIFile#ended?).
       def run_synth(&block)
         @params.midi_source = method(:midi)
         graph = to_graph(block.arity == 1 ? block.call(@options[:input]) : block.call(@options[:input], @params))
         announce(graph)
-        play_or_render(graph)
+        play_or_render(graph) do |session|
+          stop_after_ringdown(session, ending_nodes(graph))
+        end
       end
 
       # Runs a song: the block arranges it on the current session (with #bg,
@@ -516,11 +519,21 @@ module MB
         puts
       end
 
-      # Stops the script's player once every Ringdown in the graph has ended
-      # and the mix has been quiet for Session::TAIL_QUIET_SECONDS, or fades
-      # it out over Session::TAIL_FADE_SECONDS after Session::MAX_TAIL_SECONDS
-      # of tail.
+      # Returns the nodes in +graph+ whose sources can end while the graph
+      # keeps sounding (they respond to #ended?): GraphNode::Ringdown for
+      # file inputs, and MIDI::VoicePool and MIDI DSL nodes for MIDI files.
+      def ending_nodes(graph)
+        graph_nodes(graph).select { |n| n.respond_to?(:ended?) }
+      end
+
+      # Stops the script's player once every node in +ringdowns+ has ended
+      # (see #ending_nodes) and the mix has been quiet for
+      # Session::TAIL_QUIET_SECONDS, or fades it out over
+      # Session::TAIL_FADE_SECONDS after Session::MAX_TAIL_SECONDS of tail.
+      # Does nothing if +ringdowns+ is empty (e.g. live input).
       def stop_after_ringdown(session, ringdowns)
+        return if ringdowns.empty?
+
         rate = session.output.sample_rate
         quiet = 0
         tail = 0

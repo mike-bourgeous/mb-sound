@@ -132,6 +132,14 @@ module MB
           @voices.any?(&:active?)
         end
 
+        # Returns true once a MIDI file input has passed its last event (see
+        # MIDIFile#ended?).  Voices may still be ringing; the pool keeps
+        # playing until the file is #done?, and the script runner stops once
+        # the output is quiet (like GraphNode::Ringdown#ended?).
+        def ended?
+          @manager.midi_in.respond_to?(:ended?) && @manager.midi_in.ended?
+        end
+
         # Samples and sums the current output of all voices/oscillators.
         # Assumes all voices given to the constructor have a #sample method.
         def sample(count)

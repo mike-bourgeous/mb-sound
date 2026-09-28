@@ -7,12 +7,19 @@ module MB
         #
         # Prepend this in MIDI DSL nodes' base classes.
         module MidiEof
+          # True once a MIDI file has passed its last event, while sounds may
+          # still be ringing (like GraphNode::Ringdown#ended?), so the script
+          # runner can stop once the output is quiet.  The node returns nil
+          # later, when the file is done (see MIDIFile#done?).
+          def ended?
+            !!@dsl&.ended?
+          end
+
           # Intercepts audio generation to trigger reading MIDI input and
           # invalidate the DSL cache.  Returns nil to stop the node graph if
           # reading from a MIDI file and the file has ended (see
           # MB::Sound::MIDI::MIDIFile#done?).
           def sample(count)
-            # TODO: Allow for ringdown time of filters/envelopes/etc.
             # TODO: support looping MIDI files
             return nil if @dsl&.done?
 
