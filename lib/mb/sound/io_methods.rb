@@ -396,6 +396,20 @@ module MB
         o
       end
 
+      # Closes and forgets the outputs cached by #output (including plot
+      # outputs), so later calls create new ones (e.g. after changing
+      # OUTPUT_TYPE or devices).  The specs call this before each example so
+      # one example's output state (like NullOutput's pacing) can't slow down
+      # or change another.
+      def close_outputs
+        [*@plot_outputs&.values, *@outputs&.values].each do |o|
+          o.close if o.respond_to?(:close) && !(o.respond_to?(:closed?) && o.closed?)
+        end
+        @plot_outputs = {}
+        @outputs = {}
+        nil
+      end
+
       # Returns a Symbol describing the type of output that should be used,
       # based on operating system-specific detection and the OUTPUT_TYPE
       # environment variable.  See #output.

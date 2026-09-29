@@ -43,6 +43,14 @@ RSpec.configure do |config|
   # with `bundle exec rspec --tag smoke` (CI runs them as a separate job).
   config.filter_run_excluding smoke: true
 
+  # Each example gets new outputs from MB::Sound.output.  A cached
+  # NullOutput paces writes to real time, so an example that stubs sleep
+  # while playing a long sound left the next example using that output
+  # sleeping for the sound's length.
+  config.before(:each) do
+    MB::Sound.close_outputs
+  end
+
   # rspec-expectations config goes here. You can use an alternate
   # assertion/expectation library such as wrong or the stdlib/minitest
   # assertions if you prefer.

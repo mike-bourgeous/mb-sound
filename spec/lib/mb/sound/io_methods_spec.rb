@@ -23,6 +23,24 @@ RSpec.describe(MB::Sound::IOMethods) do
     end
   end
 
+  describe '#close_outputs' do
+    around(:each) do |ex|
+      ENV['OUTPUT_TYPE'] = ':null'
+      ex.run
+    ensure
+      ENV.delete('OUTPUT_TYPE')
+    end
+
+    it 'closes cached outputs so #output returns new ones' do
+      o = MB::Sound.output
+      expect(MB::Sound.output).to equal(o)
+
+      MB::Sound.close_outputs
+      expect(o).to be_closed
+      expect(MB::Sound.output).not_to equal(o)
+    end
+  end
+
   describe '#output' do
     before(:each) {
       ENV['OUTPUT_TYPE'] = ':null'
