@@ -8,8 +8,6 @@
 
 #include "numo/narray.h"
 
-static VALUE fast_wavetable_module;
-
 static ID sym_cast;
 
 static ID sym_cubic;
@@ -366,7 +364,7 @@ void Init_fast_wavetable(void)
 {
 	VALUE mb = rb_define_module("MB");
 	VALUE sound = rb_define_module_under(mb, "Sound");
-	fast_wavetable_module = rb_define_module_under(sound, "FastWavetable");
+	VALUE fast_wavetable_module = rb_define_module_under(sound, "FastWavetable");
 
 	rb_define_module_function(fast_wavetable_module, "fetch_oob", ruby_fetch_oob, 3);
 	rb_define_module_function(fast_wavetable_module, "cubic_coeffs", ruby_cubic_coeffs, 4);
