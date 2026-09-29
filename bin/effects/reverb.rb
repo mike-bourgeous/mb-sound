@@ -15,6 +15,7 @@
 #     $0 --preset space sounds/piano0.flac
 #     $0 --preset hall --repeat sounds/drums.flac              # loops until Ctrl-C
 #     $0 --output-channels 5 sounds/piano0.flac surround.flac  # upmixes to 5 channels
+#     $0 --preset hall spec/test_data/arp_a7.flac   # a 0.4 s Am7/Amaj7 arp, ~7 s of hall
 
 require 'bundler/setup'
 require 'mb-sound'

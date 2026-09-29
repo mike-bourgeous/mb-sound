@@ -21,6 +21,9 @@
 #     # broken time machine
 #     $0 --dry 0 --smoothing 0.1 --pitch --delay 0.3333333 --feedback 1.15 sounds/drums.flac
 #
+#     # arp echoes: a 0.4 s Am7/Amaj7 arp repeating in time, fading over ~7 s
+#     $0 --delay 0.4 --feedback 0.7 spec/test_data/arp_a7.flac
+#
 #     # dub drums
 #     $0 --drive 10 --delay 0.166667 --feedback 1.14 sounds/drums.flac
 

@@ -18,6 +18,9 @@
 #     # File input to file output (preserves channel count)
 #     $0 sounds/piano0.flac tmp/fdn_reverb_out.flac
 #
+#     # A 0.4 s Am7/Amaj7 arp (the specs' test sound); rings ~4.5 s
+#     $0 spec/test_data/arp_a7.flac
+#
 #     # Large room with long decay
 #     $0 --room-size 0.8 --decay 4.0 sounds/piano0.flac
 #
