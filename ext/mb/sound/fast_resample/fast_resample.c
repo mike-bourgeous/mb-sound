@@ -13,13 +13,10 @@
 
 #include "numo/narray.h"
 
-static VALUE fast_resample_class;
-static VALUE src_state_class;
-
-static VALUE converter_ids;
-static VALUE converter_names;
-static VALUE converter_descriptions;
-
+// Ruby objects are not kept in C static variables: the GC doesn't see them
+// there unless registered, and could free a hash while Init_fast_resample
+// was still filling it (an intermittent segfault on load).  Functions look up
+// the class's constants instead (see class_const).  IDs are not GC-managed.
 static ID sym_atbuf;
 static ID sym_atratio;
 static ID sym_atcallback;
@@ -174,6 +171,14 @@ static long read_callback(void *data, float **audio)
 	return samples_read;
 }
 
+// Returns the constant +name+ from the class of +self+ (e.g. CONVERTER_IDS or
+// SrcState, defined by Init_fast_resample).  Only used while setting up a
+// resampler, not per sample.
+static VALUE class_const(VALUE self, const char *name)
+{
+	return rb_const_get(rb_obj_class(self), rb_intern(name));
+}
+
 // mode can either be one of the libsamplerate keys from
 // MB::Sound::GraphNode::Resample::MODES, or one of the resampler names (as a
 // String or Symbol) provided by libsamplerate at runtime.
@@ -195,7 +200,7 @@ static VALUE ruby_lookup_converter(VALUE self, VALUE mode)
 	// Look up integer mode IDs
 	if (RB_TYPE_P(mode, T_FIXNUM)) {
 		mbfr_debug("Looking up integer ID");
-		VALUE mode_name = rb_hash_aref(converter_names, mode);
+		VALUE mode_name = rb_hash_aref(class_const(self, "CONVERTER_NAMES"), mode);
 		if (NIL_P(mode_name)) {
 			rb_raise(rb_eArgError, "Unsupported mode ID %+"PRIsVALUE, mode);
 		}
@@ -215,7 +220,7 @@ static VALUE ruby_lookup_converter(VALUE self, VALUE mode)
 		return INT2FIX(SRC_ZERO_ORDER_HOLD);
 	}
 
-	VALUE mapped_mode = rb_hash_aref(converter_ids, mode);
+	VALUE mapped_mode = rb_hash_aref(class_const(self, "CONVERTER_IDS"), mode);
 	if (NIL_P(mapped_mode)) {
 		rb_raise(rb_eArgError, "Unsupported converter mode %+"PRIsVALUE, mode);
 	}
@@ -230,8 +235,8 @@ static VALUE ruby_lookup_converter(VALUE self, VALUE mode)
 static VALUE ruby_setup_converter_type(VALUE self, VALUE mode)
 {
 	VALUE converter_id = rb_funcall(self, rb_intern("lookup_converter"), 1, mode);
-	VALUE converter_name = rb_hash_fetch(converter_names, converter_id);
-	VALUE converter_desc = rb_hash_fetch(converter_descriptions, converter_name);
+	VALUE converter_name = rb_hash_fetch(class_const(self, "CONVERTER_NAMES"), converter_id);
+	VALUE converter_desc = rb_hash_fetch(class_const(self, "CONVERTER_DESCRIPTIONS"), converter_name);
 	rb_iv_set(self, "@mode_id", converter_id);
 	rb_iv_set(self, "@mode_name", converter_name);
 	rb_iv_set(self, "@mode_description", converter_desc);
@@ -284,7 +289,7 @@ static VALUE ruby_fast_resample_initialize(int argc, VALUE *argv, VALUE self)
 	}
 
 	// TODO: Add size tracking for Ruby's GC
-	VALUE state = TypedData_Wrap_Struct(src_state_class, &state_type_info, src_state);
+	VALUE state = TypedData_Wrap_Struct(class_const(self, "SrcState"), &state_type_info, src_state);
 	rb_ivar_set(self, sym_atstate, state);
 
 	mbfr_debug("Initialization complete");
@@ -296,9 +301,9 @@ void Init_fast_resample(void)
 {
 	VALUE mb = rb_define_module("MB");
 	VALUE sound = rb_define_module_under(mb, "Sound");
-	fast_resample_class = rb_define_class_under(sound, "FastResample", rb_cObject);
+	VALUE fast_resample_class = rb_define_class_under(sound, "FastResample", rb_cObject);
 
-	src_state_class = rb_define_class_under(fast_resample_class, "SrcState", rb_cObject);
+	VALUE src_state_class = rb_define_class_under(fast_resample_class, "SrcState", rb_cObject);
 	rb_undef_alloc_func(src_state_class);
 
 	rb_define_method(fast_resample_class, "initialize", ruby_fast_resample_initialize, -1);
@@ -322,8 +327,9 @@ void Init_fast_resample(void)
 	sym_array_lookup = rb_intern("[]");
 	sym_array_assign = rb_intern("[]=");
 
-	converter_ids = rb_hash_new();
-	converter_descriptions = rb_hash_new();
+	// Locals, so the GC sees them on the C stack while they are filled
+	VALUE converter_ids = rb_hash_new();
+	VALUE converter_descriptions = rb_hash_new();
 	for (int index = 0; index < 1000000; index++) {
 		const char *name = src_get_name(index);
 		const char *desc = src_get_description(index);
@@ -336,7 +342,7 @@ void Init_fast_resample(void)
 		rb_hash_aset(converter_descriptions, converter_name, rb_str_new_cstr(desc));
 	}
 
-	converter_names = rb_funcall(converter_ids, rb_intern("invert"), 0);
+	VALUE converter_names = rb_funcall(converter_ids, rb_intern("invert"), 0);
 
 	rb_define_const(fast_resample_class, "CONVERTER_IDS", rb_hash_freeze(converter_ids));
 	rb_define_const(fast_resample_class, "CONVERTER_NAMES", rb_hash_freeze(converter_names));

@@ -4,6 +4,18 @@ RSpec.describe(MB::Sound::FastResample, :aggregate_failures) do
   let(:r_half) { MB::Sound::FastResample.new(0.5, converter_mode) { |s| Numo::SFloat.zeros(s) } }
   let(:r_double) { MB::Sound::FastResample.new(2, converter_mode) { |s| Numo::SFloat.zeros(s) } }
 
+  it 'loads when the GC runs at every allocation' do
+    # Init_fast_resample once kept its converter hashes in C statics the GC
+    # didn't know about, so a GC while filling them crashed on load
+    # (intermittently in normal runs, every time under GC.stress).
+    so = File.expand_path('../../../../lib/mb/sound/fast_resample.so', __dir__)
+    code = 'require "bundler/setup"; require "numo/narray"; GC.stress = true; require ARGV[0]; GC.stress = false; p MB::Sound::FastResample::CONVERTER_IDS.size'
+    out = `ruby -e #{code.shellescape} #{so.shellescape} 2>&1`
+
+    expect($?).to be_success, out
+    expect(out.to_i).to be > 0
+  end
+
   describe '#initialize' do
     it 'raises an error if the rate ratio is too small' do
       expect { MB::Sound::FastResample.new(257) { } }.to raise_error(ArgumentError, /ratio.*<= 256/)
