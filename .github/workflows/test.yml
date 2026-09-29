@@ -10,6 +10,8 @@ on:
 jobs:
   test:
     runs-on: ubuntu-latest
+    env:
+      SIMPLECOV: '1' # coverage is opt-in locally (see spec/spec_helper.rb)
     strategy:
       matrix:
         ruby-version: ['4.0']
@@ -35,6 +37,8 @@ jobs:
   # takes several minutes.
   smoke:
     runs-on: ubuntu-latest
+    env:
+      SIMPLECOV: '1'
     steps:
       - uses: actions/checkout@v3
       - name: Install Ruby

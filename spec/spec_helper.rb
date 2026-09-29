@@ -1,9 +1,16 @@
 require 'fileutils'
 
-require 'simplecov'
-SimpleCov.start do
-  track_files("bin/**/*.rb")
-  enable_coverage :branch
+# Code coverage is opt-in, since it slows the suite: SIMPLECOV=1 (CI sets it)
+# measures the spec process and the Ruby subprocesses it starts (see
+# support/subprocess_coverage.rb), reporting to coverage/.
+SPEC_COVERAGE = %w[1 true yes].include?(ENV['SIMPLECOV'].to_s.downcase)
+
+if SPEC_COVERAGE
+  require 'simplecov'
+  SimpleCov.start do
+    track_files("bin/**/*.rb")
+    enable_coverage :branch
+  end
 end
 
 require 'shellwords'
@@ -15,7 +22,7 @@ require 'mb/m/rspec_matchers'
 require 'mb/sound'
 
 require_relative 'support/spec_tmp'
-require_relative 'support/subprocess_coverage' # after spec_tmp
+require_relative 'support/subprocess_coverage' if SPEC_COVERAGE # after spec_tmp
 require_relative 'support/fork_script' # after subprocess_coverage
 
 MB::U.sigquit_backtrace

@@ -59,7 +59,7 @@ module SubprocessCoverage
     # the parent and, at exit, saves only what the child added, in the same
     # format as spec/subprocess_coverage_helper.rb.
     def save_fork_coverage_at_exit
-      return unless Coverage.running?
+      return unless Coverage.running? && const_defined?(:DIR) # SIMPLECOV=1 (see spec_helper)
 
       before = project_coverage(Coverage.peek_result)
       owner = Process.pid
