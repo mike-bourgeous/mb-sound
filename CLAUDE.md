@@ -25,17 +25,17 @@ bundle exec rake                  # Default task (runs spec)
 bin/sound.rb                      # Launch interactive Pry console with MB::Sound context
 ```
 
-Testing: run affected specs while working, and the full suite (about 3 minutes) before and after each merge, or more often for good reason.  Save suite output to a file and grep it instead of rerunning.  Concurrent spec processes work (per-process temp dirs and coverage files); parallelizing the suite is deliberately postponed, since slow or leaky specs are better fixed than hidden.
+Testing: run affected specs while working, and the full suite (about 2 minutes) before and after each merge, or more often for good reason.  Save suite output to a file and grep it instead of rerunning.  Concurrent spec processes work (per-process temp dirs and coverage files); parallelizing the suite is deliberately postponed, since slow or leaky specs are better fixed than hidden.
 
 Spec conventions (`spec/support/`):
 - Temp files: `tmp_path('name.flac')` gives a path in an empty directory per example, inside a random per-process `Dir.mktmpdir` removed at exit (`KEEP_SPEC_TMP=1` keeps it); never write fixed names under `tmp/`.
-- Coverage of bin/ scripts run by specs: `spec/subprocess_coverage_helper.rb` (via RUBYOPT) writes plain Ruby Coverage per process, merged into the SimpleCov report after the suite.  If specs of scripts are slow, check `coverage/.resultset.json` isn't huge (old SimpleCov-per-subprocess growth); `rm -rf coverage` is safe.
+- Coverage is opt-in: `SIMPLECOV=1 bundle exec rspec` (CI sets it) reports to `coverage/`; it adds ~20% to the suite and ~30% to the smoke specs.  With it, bin/ scripts run by specs get `spec/subprocess_coverage_helper.rb` (via RUBYOPT), which writes plain Ruby Coverage per process, merged into the SimpleCov report after the suite.  If specs of scripts are slow, check `coverage/.resultset.json` isn't huge (old SimpleCov-per-subprocess growth); `rm -rf coverage` is safe.
 - `fork_script(script, *args)` runs a bin/ script in a fork of the spec process (skips ~0.7 s of startup); a spec using it must also run its script once as a real process doing real work, so load-order problems still show.
 - Before each example spec_helper calls `MB::Sound.close_outputs`, so cached outputs (and NullOutput pacing) don't leak between examples.  Specs that run a Session on the shared transport must `MB::Sound.rewind` afterwards.
 - For limits like `Session::MAX_TAIL_SECONDS`, `stub_const` the constant where it's defined (`Session::Master::MAX_TAIL_SECONDS`) instead of rendering 10 s of tail.
 - Short inputs: `spec/test_data/arp_a7.flac` is a 0.4 s stereo Am7/Amaj7 triangle arp (made by `make_arp_a7.rb`) for effect and script specs; test MIDI files start within 0.2 s.
 
-The bin/ script smoke tests (`spec/bin/script_smoke_spec.rb`, tagged `:smoke`) run every script with `--help` and a short render; plain `rspec` skips them (they take about 2 minutes) and CI runs them as a separate job.  Renders run as real processes; `--help` runs in forks for scripts that also render.  Run them with `bundle exec rspec --tag smoke` before merging changes to bin/ scripts or the script runner, and add new scripts to their tables.
+The bin/ script smoke tests (`spec/bin/script_smoke_spec.rb`, tagged `:smoke`) run every script with `--help` and a short render; plain `rspec` skips them (they take about 1.5 minutes) and CI runs them as a separate job.  Renders run as real processes; `--help` runs in forks for scripts that also render.  Run them with `bundle exec rspec --tag smoke` before merging changes to bin/ scripts or the script runner, and add new scripts to their tables.
 
 System dependencies (apt): `ffmpeg gnuplot-qt libsamplerate0-dev libjack-dev graphviz`
 
