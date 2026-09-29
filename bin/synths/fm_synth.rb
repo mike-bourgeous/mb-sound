@@ -109,6 +109,12 @@ class FM
     end
   end
 
+  # True once a MIDI file input has passed its last event, so the script
+  # runner can stop when the output is quiet (see MIDI::MIDIFile#ended?).
+  def ended?
+    @manager.midi_in.respond_to?(:ended?) && @manager.midi_in.ended?
+  end
+
   def sample(count)
     @manager.update
     return nil if @manager.midi_in.respond_to?(:done?) && @manager.midi_in.done?

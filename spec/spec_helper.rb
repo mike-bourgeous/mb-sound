@@ -6,15 +6,17 @@ SimpleCov.start do
   enable_coverage :branch
 end
 
-# Ensure subprocesses load simplecov
 require 'shellwords'
-ENV['RUBYOPT'] = "-r#{File.join(__dir__, 'simplecov_helper.rb')}"
 
 ENV['GLHTUI'] = '0' # FIXME: still can't run rspec when injecting plotter
 
 require 'mb/util'
 require 'mb/m/rspec_matchers'
 require 'mb/sound'
+
+require_relative 'support/spec_tmp'
+require_relative 'support/subprocess_coverage' # after spec_tmp
+require_relative 'support/fork_script' # after subprocess_coverage
 
 MB::U.sigquit_backtrace
 
@@ -40,6 +42,14 @@ RSpec.configure do |config|
   # script and take several minutes, so plain `rspec` skips them; run them
   # with `bundle exec rspec --tag smoke` (CI runs them as a separate job).
   config.filter_run_excluding smoke: true
+
+  # Each example gets new outputs from MB::Sound.output.  A cached
+  # NullOutput paces writes to real time, so an example that stubs sleep
+  # while playing a long sound left the next example using that output
+  # sleeping for the sound's length.
+  config.before(:each) do
+    MB::Sound.close_outputs
+  end
 
   # rspec-expectations config goes here. You can use an alternate
   # assertion/expectation library such as wrong or the stdlib/minitest

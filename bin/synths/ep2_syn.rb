@@ -6,13 +6,15 @@
 #
 # Plays live MIDI (JACK), or a MIDI file, through eight sawtooth voices and a
 # resonant lowpass filter; CC 1 (the mod wheel) sweeps the filter.  The
-# second output channel is the filter's impulse response, for scopes.  Run
-# with --help for all options.
+# output is stereo; --impulse puts the filter's impulse response on the
+# second channel instead, for scopes (it never goes quiet, so MIDI files play
+# on for the 10 s tail limit).  Run with --help for all options.
 #
 # Examples:
 #     $0                                    # live MIDI
 #     $0 spec/test_data/c_major.mid         # a MIDI file
 #     $0 spec/test_data/mod_wheel.mid ep2.flac
+#     $0 --impulse                          # impulse response on the right
 
 require 'bundler/setup'
 require 'mb-sound'
@@ -22,7 +24,9 @@ MB::Sound::Oscillator.tune_note = 71
 
 OSC_COUNT = 8
 
-MB::Sound.synth_script { |input|
+MB::Sound.synth_script(
+  impulse: [false, "Play the filter's impulse response on the second channel instead of the synth"],
+) { |input, p|
   manager = MB::Sound.midi_manager(input)
 
   osc_pool = MB::Sound::MIDI::VoicePool.new(
@@ -40,8 +44,9 @@ MB::Sound.synth_script { |input|
   end
 
   synth = (osc_pool.oversample(16, mode: :libsamplerate_fastest).filter(filter, cutoff: cutoff) * 0.2).softclip(0.5)
+  next synth.stereo unless p.impulse
+
   # Built from the synth's output so it ends when the synth does
   impulse = synth.proc { |d| filter.impulse_response(d.length) }.named('Impulse')
-
   [synth, impulse].channels
 }

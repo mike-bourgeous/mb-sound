@@ -23,6 +23,24 @@ RSpec.describe(MB::Sound::IOMethods) do
     end
   end
 
+  describe '#close_outputs' do
+    around(:each) do |ex|
+      ENV['OUTPUT_TYPE'] = ':null'
+      ex.run
+    ensure
+      ENV.delete('OUTPUT_TYPE')
+    end
+
+    it 'closes cached outputs so #output returns new ones' do
+      o = MB::Sound.output
+      expect(MB::Sound.output).to equal(o)
+
+      MB::Sound.close_outputs
+      expect(o).to be_closed
+      expect(MB::Sound.output).not_to equal(o)
+    end
+  end
+
   describe '#output' do
     before(:each) {
       ENV['OUTPUT_TYPE'] = ':null'
@@ -141,14 +159,9 @@ RSpec.describe(MB::Sound::IOMethods) do
   end
 
   describe '#write' do
-    before(:each) do
-      FileUtils.mkdir_p('tmp')
-      File.unlink('tmp/sound_write_test.flac') rescue nil
-      File.unlink('tmp/sound_write_exists.flac') rescue nil
-    end
 
     context 'when writing to a file that does not yet exist' do
-      let(:name) { 'tmp/sound_write_test.flac' }
+      let(:name) { tmp_path('sound_write_test.flac') }
       let(:data) { Numo::SFloat[0, 0.5, -0.5, 0] }
 
       it 'can write an array of NArrays to a sound file' do
@@ -183,7 +196,7 @@ RSpec.describe(MB::Sound::IOMethods) do
 
     context 'when overwrite is false (by default)' do
       it 'raises an error if the sound already exists' do
-        name = 'tmp/sound_write_exists.flac'
+        name = tmp_path('sound_write_exists.flac')
         FileUtils.touch(name)
         allow(STDOUT).to receive(:write).with(/Not overwriting/)
         expect {
@@ -194,7 +207,7 @@ RSpec.describe(MB::Sound::IOMethods) do
 
     context 'when overwrite is true' do
       it 'overwrites an existing file' do
-        name = 'tmp/sound_write_exists.flac'
+        name = tmp_path('sound_write_exists.flac')
 
         FileUtils.touch(name)
         expect(File.size(name)).to eq(0)
@@ -206,7 +219,7 @@ RSpec.describe(MB::Sound::IOMethods) do
 
     context 'when overwrite is :prompt' do
       it 'asks before overwriting' do
-        name = 'tmp/sound_write_exists.flac'
+        name = tmp_path('sound_write_exists.flac')
         FileUtils.touch(name)
         expect(STDIN).to receive(:readline).and_return('Y')
         allow(STDOUT).to receive(:write)
@@ -215,7 +228,7 @@ RSpec.describe(MB::Sound::IOMethods) do
       end
 
       it 'raises an error if told not to overwrite' do
-        name = 'tmp/sound_write_exists.flac'
+        name = tmp_path('sound_write_exists.flac')
         FileUtils.touch(name)
         expect(STDIN).to receive(:readline).and_return('N')
         allow(STDOUT).to receive(:write)
@@ -275,14 +288,9 @@ RSpec.describe(MB::Sound::IOMethods) do
   end
 
   describe '#file_output' do
-    before(:each) do
-      FileUtils.mkdir_p('tmp')
-      File.unlink('tmp/file_output_test.flac') rescue nil
-      File.unlink('tmp/file_output_exists.flac') rescue nil
-    end
 
     it 'can generate an audio file' do
-      name = 'tmp/file_output_test.flac'
+      name = tmp_path('file_output_test.flac')
 
       begin
         output = MB::Sound.file_output(name, sample_rate: 32000, channels: 3)
@@ -311,7 +319,7 @@ RSpec.describe(MB::Sound::IOMethods) do
 
     context 'when overwrite is false (by default)' do
       it 'raises an error if the sound already exists' do
-        name = 'tmp/file_output_exists.flac'
+        name = tmp_path('file_output_exists.flac')
         FileUtils.touch(name)
         allow(STDOUT).to receive(:write).with(/Not overwriting/)
         expect {
@@ -322,7 +330,7 @@ RSpec.describe(MB::Sound::IOMethods) do
 
     context 'when overwrite is true' do
       it 'overwrites an existing file' do
-        name = 'tmp/file_output_exists.flac'
+        name = tmp_path('file_output_exists.flac')
 
         FileUtils.touch(name)
         expect(File.size(name)).to eq(0)

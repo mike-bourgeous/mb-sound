@@ -1,14 +1,23 @@
 RSpec.describe('bin/midi/midi_roll.rb') do
-  def run(cmd, success = true)
-    `#{cmd}`.tap { |text|
-      @text = text
+  # Runs the command in a fork (see ForkScript) unless +process+ is true;
+  # stdout and stderr are always combined, so a trailing 2>&1 is ignored in
+  # a fork.
+  def run(cmd, success = true, process: false)
+    if process
+      text = `#{cmd}`
       @result = $?
-      if success != @result.success?
-        MB::U.headline("failing text from #{@result}", print: $stderr)
-        $stderr.puts text
-      end
-      expect(@result.success?).to eq(success)
-    }
+    else
+      script, *args = cmd.shellsplit - ['2>&1']
+      text, @result = fork_script(script, *args)
+    end
+    @text = text
+    if success != @result.success?
+      MB::U.headline("failing text from #{@result}", print: $stderr)
+      $stderr.puts text
+    end
+    expect(@result.success?).to eq(success)
+
+    text
   end
 
   around(:each) do |ex|
@@ -29,7 +38,9 @@ RSpec.describe('bin/midi/midi_roll.rb') do
   end
 
   it 'can display a MIDI roll' do
-    text = run("bin/midi/midi_roll.rb -r 2 -c 100 -n C3 spec/test_data/all_notes.mid 2>&1")
+    # A real process run, so load order and implicit dependencies are tested
+    # (forked runs start with everything the specs have loaded).
+    text = run("bin/midi/midi_roll.rb -r 2 -c 100 -n C3 spec/test_data/all_notes.mid 2>&1", process: true)
 
     lines = MB::U.remove_ansi(text.strip).lines
 

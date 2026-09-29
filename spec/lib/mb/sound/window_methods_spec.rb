@@ -3,14 +3,9 @@ require 'fileutils'
 RSpec.describe(MB::Sound::WindowMethods) do
   describe '#process' do
     let(:input) { 'sounds/synth0.flac' }
-    let(:output) { 'tmp/process_test.flac' }
+    let(:output) { tmp_path('process_test.flac') }
     let(:in_sound) { MB::Sound.read(input) }
     let(:out_sound) { MB::Sound.read(output) }
-
-    before(:each) do
-      FileUtils.mkdir_p('tmp')
-      File.unlink(output) rescue nil
-    end
 
     it 'can amplify sound' do
       MB::Sound.process(input, output) do |dfts|

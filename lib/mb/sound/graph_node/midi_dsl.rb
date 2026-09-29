@@ -263,8 +263,14 @@ module MB
           collection.delete(key)
         end
 
+        # Returns true if the MIDI source is a MIDI file that has passed its
+        # last event (see MIDIFile#ended?).  Sounds may still be ringing.
+        def ended?
+          @manager.midi_in.respond_to?(:ended?) && @manager.midi_in.ended?
+        end
+
         # Returns true if the MIDI source is a MIDI file and the file has
-        # ended.
+        # ended and had time for sounds to decay (see MIDIFile#done?).
         def done?
           @manager.midi_in.respond_to?(:done?) && @manager.midi_in.done?
         end

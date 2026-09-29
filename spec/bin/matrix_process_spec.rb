@@ -1,41 +1,38 @@
 RSpec.describe('bin/matrix_process.rb') do
-  before(:each) do
-    FileUtils.mkdir_p('tmp')
-    File.unlink('tmp/matrix_process_test.flac') rescue nil
-    File.unlink('tmp/matrix_process_qs.flac') rescue nil
-    File.unlink('tmp/matrix_process_qs_enc.flac') rescue nil
-  end
+  let(:test_out) { tmp_path('matrix_process_test.flac') }
+  let(:qs_out) { tmp_path('matrix_process_qs.flac') }
+  let(:qs_enc_out) { tmp_path('matrix_process_qs_enc.flac') }
 
   it 'can convert a 2ch file to a 4ch file' do
-    text = `bin/matrix_process.rb sounds/synth0.flac matrices/hafler.yml tmp/matrix_process_test.flac`
+    text = `bin/matrix_process.rb spec/test_data/arp_a7.flac matrices/hafler.yml #{test_out.shellescape}`
     expect($?).to be_success
     expect(text).to include('Success')
 
-    in_info = MB::Sound::FFMPEGInput.parse_info('sounds/synth0.flac')
-    out_info = MB::Sound::FFMPEGInput.parse_info('tmp/matrix_process_test.flac')
+    in_info = MB::Sound::FFMPEGInput.parse_info('spec/test_data/arp_a7.flac')
+    out_info = MB::Sound::FFMPEGInput.parse_info(test_out)
 
     expect(out_info[:streams][0][:channels]).to eq(4)
     expect(out_info[:streams][0][:duration_ts]).to eq(in_info[:streams][0][:duration_ts])
   end
 
   it 'can decode and re-encode using an included complex-valued matrix' do
-    text = `bin/matrix_process.rb --decode sounds/synth0.flac qs.yml tmp/matrix_process_qs.flac`
+    text = `bin/matrix_process.rb --decode spec/test_data/arp_a7.flac qs.yml #{qs_out.shellescape}`
     expect($?).to be_success
     expect(text).to include('included matrix')
     expect(text).to include('Success')
 
-    in_info = MB::Sound::FFMPEGInput.parse_info('sounds/synth0.flac')
-    out_info = MB::Sound::FFMPEGInput.parse_info('tmp/matrix_process_qs.flac')
+    in_info = MB::Sound::FFMPEGInput.parse_info('spec/test_data/arp_a7.flac')
+    out_info = MB::Sound::FFMPEGInput.parse_info(qs_out)
 
     expect(out_info[:streams][0][:channels]).to eq(4)
     expect(out_info[:streams][0][:duration_ts]).to eq(in_info[:streams][0][:duration_ts])
 
-    text = `bin/matrix_process.rb tmp/matrix_process_qs.flac qs.yml tmp/matrix_process_qs_enc.flac`
+    text = `bin/matrix_process.rb #{qs_out.shellescape} qs.yml #{qs_enc_out.shellescape}`
     expect($?).to be_success
     expect(text).to include('included matrix')
     expect(text).to include('Success')
 
-    enc_info = MB::Sound::FFMPEGInput.parse_info('tmp/matrix_process_qs_enc.flac')
+    enc_info = MB::Sound::FFMPEGInput.parse_info(qs_enc_out)
 
     expect(enc_info[:streams][0][:channels]).to eq(2)
     expect(enc_info[:streams][0][:duration_ts]).to eq(in_info[:streams][0][:duration_ts])

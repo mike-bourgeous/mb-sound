@@ -10,19 +10,21 @@ DETUNE_SEMIS = 0.01 * DETUNE_CENTS
 DETUNE_RANGE = (2 ** -DETUNE_SEMIS)..(2 ** DETUNE_SEMIS)
 PORTAMENTO_TIME = 0.1 # TODO: control with midi CC for portamento
 
-MB::U.headline('Loading wavetables...')
-synthwave = MB::Sound::Wavetable.sort(
-  MB::Sound::Wavetable.normalize(
-    MB::Sound::Wavetable.load_wavetable('sounds/drums.flac', slices: 10)
-  )
-)
-shaperwave = MB::Sound::Wavetable.sort(
-  MB::Sound::Wavetable.normalize(
-    MB::Sound::Wavetable.load_wavetable('sounds/synth0.flac', slices: 10)
-  )
-)
-
 MB::Sound.synth_script { |input|
+  # Tables saved from MB::Sound::Wavetable.load_wavetable('sounds/drums.flac',
+  # slices: 10) (and synth0.flac), which takes several seconds to analyze.
+  MB::U.headline('Loading wavetables...')
+  synthwave = MB::Sound::Wavetable.sort(
+    MB::Sound::Wavetable.normalize(
+      MB::Sound::Wavetable.load_wavetable('sounds/drums_wavetable_10.flac')
+    )
+  )
+  shaperwave = MB::Sound::Wavetable.sort(
+    MB::Sound::Wavetable.normalize(
+      MB::Sound::Wavetable.load_wavetable('sounds/synth0_wavetable_10.flac')
+    )
+  )
+
   MB::U.headline('Building synth...')
 
   s1 = MB::Sound.synth(input, osc_count: 1) { |midi|

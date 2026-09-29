@@ -153,13 +153,11 @@ RSpec.describe(MB::Sound::ScriptRunner) do
   end
 
   describe '#run_effect' do
-    let(:infile) { 'tmp/script_runner_in.flac' }
-    let(:outfile) { 'tmp/script_runner_out.flac' }
+    let(:infile) { tmp_path('script_runner_in.flac') }
+    let(:outfile) { tmp_path('script_runner_out.flac') }
 
     before do
-      FileUtils.mkdir_p('tmp')
       MB::Sound.write(infile, [Numo::SFloat.ones(4800) * 0.5, Numo::SFloat.ones(4800) * 0.25], sample_rate: 48000, overwrite: true)
-      File.unlink(outfile) if File.exist?(outfile)
     end
 
     it 'renders a file through the effect and lets it ring out' do
@@ -174,13 +172,26 @@ RSpec.describe(MB::Sound::ScriptRunner) do
     end
   end
 
-  describe '#run_song' do
-    let(:outfile) { 'tmp/script_runner_song.flac' }
+  describe '#run_synth' do
+    let(:outfile) { tmp_path('script_runner_synth.flac') }
 
-    before do
-      FileUtils.mkdir_p('tmp')
-      File.unlink(outfile) if File.exist?(outfile)
+    it 'renders a MIDI file, letting notes ring out and stopping after a second of quiet' do
+      midi_file = 'spec/test_data/c2_sustain.mid'
+      music_end = MB::Sound::MIDI::MIDIFile.new(midi_file).music_end
+
+      r = runner(:synth, [midi_file, outfile, '-q'])
+      expect { r.run_synth { |input| MB::Sound.synth(input) { |midi| midi.hz * midi.env } } }.to output(/Rendered/).to_stdout
+
+      data = MB::Sound.read(outfile)[0]
+      last_sound = (0...data.length).select { |i| data[i].abs > 1e-4 }.last / 48000.0
+
+      expect(last_sound).to be > music_end # the release rings past the last MIDI event
+      expect(data.length / 48000.0 - last_sound).to be_within(0.1).of(1) # a second of quiet (it was 5 s after the last event)
     end
+  end
+
+  describe '#run_song' do
+    let(:outfile) { tmp_path('script_runner_song.flac') }
 
     it 'draws the graph at the start of the song with --graphviz, then renders' do
       dot = nil

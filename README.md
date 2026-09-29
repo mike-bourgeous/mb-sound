@@ -483,7 +483,7 @@ running.  Set `OUTPUT_DEVICE` to a device index to choose a different output
 (list devices with `ffmpeg -f lavfi -i sine=d=0.5 -f audiotoolbox -list_devices true -`).
 Audio input on macOS still requires JackD.
 
-Then you'll want to install Ruby 3.2 or newer (Ruby 3.4 or newer recommended).
+Then you'll want to install Ruby 4.0 or newer.
 
 If you don't already have a recent version of Ruby installed, and a Ruby version
 manager of your choosing, I highly recommend using [RVM](https://rvm.io).  You
@@ -508,7 +508,7 @@ mkdir sound_code_series
 cd sound_code_series
 
 # Install Ruby
-rvm install 3.4
+rvm install 4.0
 
 # Clone the repo
 git clone git@github.com:mike-bourgeous/mb-sound.git

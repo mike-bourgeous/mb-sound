@@ -217,10 +217,13 @@ RSpec.describe(MB::Sound::PlotMethods) do
     end
 
     it 'can plot an entire sound in a loop when :all is true' do
+      # The loop advances by elapsed time, capped at 0.1s (4800 samples) per
+      # frame, so the sound must be longer than 2 * 4800 samples to take at
+      # least 3 frames when frames are slow (e.g. under full-suite load).
       expect(MB::Sound).to receive(:sleep).at_least(3).times
       expect(MB::Sound).to receive(:puts).at_least(2).times
       expect(STDOUT).to receive(:write).at_least(2).times
-      lines = MB::Sound.plot(123.hz.sine.generate(3200), all: true, samples: 800)
+      lines = MB::Sound.plot(123.hz.sine.generate(14400), all: true, samples: 800)
       expect(lines.length).to eq(40)
     rescue Exception => e
       raise e.class, "#{e.message}\n\t\e[1m#{lines.map(&:inspect).join("\n\t")}\e[0m"

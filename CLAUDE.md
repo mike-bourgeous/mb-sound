@@ -25,9 +25,17 @@ bundle exec rake                  # Default task (runs spec)
 bin/sound.rb                      # Launch interactive Pry console with MB::Sound context
 ```
 
-Testing: run affected specs while working, and the full suite (about 6-7 minutes) before and after each merge, or more often for good reason.  Save suite output to a file and grep it instead of rerunning.  Run one spec process at a time; concurrent runs cause spurious failures (maybe SimpleCov or fixed-name tmp files).
+Testing: run affected specs while working, and the full suite (about 3 minutes) before and after each merge, or more often for good reason.  Save suite output to a file and grep it instead of rerunning.  Concurrent spec processes work (per-process temp dirs and coverage files); parallelizing the suite is deliberately postponed, since slow or leaky specs are better fixed than hidden.
 
-The bin/ script smoke tests (`spec/bin/script_smoke_spec.rb`, tagged `:smoke`) run every script with `--help` and a short render; plain `rspec` skips them (they take several minutes) and CI runs them as a separate job.  Run them with `bundle exec rspec --tag smoke` before merging changes to bin/ scripts or the script runner, and add new scripts to their tables.
+Spec conventions (`spec/support/`):
+- Temp files: `tmp_path('name.flac')` gives a path in an empty directory per example, inside a random per-process `Dir.mktmpdir` removed at exit (`KEEP_SPEC_TMP=1` keeps it); never write fixed names under `tmp/`.
+- Coverage of bin/ scripts run by specs: `spec/subprocess_coverage_helper.rb` (via RUBYOPT) writes plain Ruby Coverage per process, merged into the SimpleCov report after the suite.  If specs of scripts are slow, check `coverage/.resultset.json` isn't huge (old SimpleCov-per-subprocess growth); `rm -rf coverage` is safe.
+- `fork_script(script, *args)` runs a bin/ script in a fork of the spec process (skips ~0.7 s of startup); a spec using it must also run its script once as a real process doing real work, so load-order problems still show.
+- Before each example spec_helper calls `MB::Sound.close_outputs`, so cached outputs (and NullOutput pacing) don't leak between examples.  Specs that run a Session on the shared transport must `MB::Sound.rewind` afterwards.
+- For limits like `Session::MAX_TAIL_SECONDS`, `stub_const` the constant where it's defined (`Session::Master::MAX_TAIL_SECONDS`) instead of rendering 10 s of tail.
+- Short inputs: `spec/test_data/arp_a7.flac` is a 0.4 s stereo Am7/Amaj7 triangle arp (made by `make_arp_a7.rb`) for effect and script specs; test MIDI files start within 0.2 s.
+
+The bin/ script smoke tests (`spec/bin/script_smoke_spec.rb`, tagged `:smoke`) run every script with `--help` and a short render; plain `rspec` skips them (they take about 2 minutes) and CI runs them as a separate job.  Renders run as real processes; `--help` runs in forks for scripts that also render.  Run them with `bundle exec rspec --tag smoke` before merging changes to bin/ scripts or the script runner, and add new scripts to their tables.
 
 System dependencies (apt): `ffmpeg gnuplot-qt libsamplerate0-dev libjack-dev graphviz`
 
@@ -109,7 +117,7 @@ Every GraphNode has `outputs` (`[self]` for one channel) and `channel_count`; no
 Every bin/ script except `bin/sound.rb` is built on one of four helpers in `ScriptingMethods`, backed by `ScriptRunner` (`lib/mb/sound/script_runner.rb`, OptionParser):
 
 - `effect_script(input_channels:, live_channels:, **params) { |input, p| graph }` - the input is an audio file (first audio argument or `-i`, rung out with a `Ringdown` node until 1 s of quiet, 10 s cap) or live input (`-c/--input-channels`); `--repeat [COUNT]` loops the file.
-- `synth_script(**params) { |midi_input, p| graph }` - `midi_input` is a MIDI file or JACK port name (or nil for live MIDI); pass it to `MB::Sound.synth` / `midi_manager` / `midi_file`.
+- `synth_script(**params) { |midi_input, p| graph }` - `midi_input` is a MIDI file or JACK port name (or nil for live MIDI); pass it to `MB::Sound.synth` / `midi_manager` / `midi_file`.  A MIDI file rings out: after its last channel event (`MIDIFile#music_end`), nodes driven by it (`VoicePool`, MIDI DSL nodes) report `#ended?` and the runner stops after a second of quiet (10 s tail limit), like effect file inputs (`Ringdown#ended?`); the nodes themselves return nil only `MIDIFile::TAIL_SECONDS` later, for players without tail detection.
 - `song_script(bars:, **params) { |p| ... }` - the block arranges the song on the current session (`bg`, `at_bar`, `master`); `-b/--bars N` plays or renders N bars (live too), `--bpm` sets the starting tempo and scales the song's tempo changes (`Transport#override_bpm`), `--graphviz` draws the session at the start (`Session#graph_view`).
 - `script(args:, **params) { |args, p| ... }` - general scripts (utilities, plots, file processors, benchmarks, MIDI tools): only `-h/--help` is common, positional arguments go to the block (`args:` Integer/Range checks their count; negative numbers stay positional).
 
@@ -138,7 +146,7 @@ Effects, synths, and songs share `-o/--output` (or a positional audio file) to r
 
 ## Key Conventions
 
-- Ruby 3.4+ recommended (gemspec requires 3.2+); the container uses Ruby 4.0
+- Ruby 4.0+ required (gemspec, CI, `.ruby-version`); Bundler 4 (the lockfile's `BUNDLED WITH`)
 - Tests use RSpec (configured in `.rspec`)
 - Docker support via `Dockerfile` and `dock.sh` for containerized development
 - `Numo::NArray` for all sound data handling (choose numeric precision and real/complex as needed)

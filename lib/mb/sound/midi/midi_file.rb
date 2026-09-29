@@ -20,6 +20,13 @@ module MB
       # Useful references:
       #  - https://www.cs.cmu.edu/~music/cmsip/readings/Standard-MIDI-file-format-updated.pdf
       class MIDIFile
+        # How long #done? waits after #ended? for sounds to decay, for players
+        # that don't detect the end of the tail themselves.  The script
+        # runner stops sooner, once the output has been quiet for a second
+        # (see ScriptRunner#stop_after_ringdown); this is longer than its
+        # 10-second tail limit and fade so that it never cuts the runner off.
+        TAIL_SECONDS = 11
+
         # A clock that may be passed to the constructor that returns whatever
         # value was last assigned to #clock_now=.  Useful for testing.
         class ConstantClock
@@ -58,6 +65,11 @@ module MB
         # This is just the time of the last event in the file, and doesn't
         # account for sounds' decay times.
         attr_reader :duration
+
+        # The time in seconds of the last channel (non-meta) event in the file:
+        # when the music ends, not counting sounds' decay or trailing meta
+        # events like the end of a track.  See #ended?.
+        attr_reader :music_end
 
         # The sequence object from the midilib gem that contains MIDI data from the file.
         attr_reader :seq
@@ -111,7 +123,9 @@ module MB
 
           last_event_pulses = @seq.tracks.map(&:events).map(&:last).map(&:time_from_start).max
           @duration = pulse_time(last_event_pulses)
-          @extra_duration = 5
+
+          channel_events = @seq.tracks.flat_map(&:events).reject { |e| e.is_a?(::MIDI::MetaEvent) }
+          @music_end = channel_events.empty? ? 0 : pulse_time(channel_events.map(&:time_from_start).max)
 
           @events = track.events.freeze
           @count = @events.count
@@ -236,17 +250,25 @@ module MB
           @events.empty? || @index >= @events.length
         end
 
-        # Returns true if the current time is 5 seconds past the last event in
-        # the MIDI file.
-        #
-        # TODO: allow specifying the amount of extra time, or find some way to
-        # sync with envelopes/delays/etc. to allow ringdown
+        # Returns true once playback has passed the last note or controller
+        # event (see #music_end).  Sounds may still be decaying; graph nodes
+        # driven by the file keep playing until #done?, and pass this on with
+        # their own #ended? methods so the script runner can stop once the
+        # output is quiet.
+        def ended?
+          return false unless @start
+
+          @elapsed = @clock.clock_now - @start
+          @elapsed > @music_end
+        end
+
+        # Returns true TAIL_SECONDS after #ended?, when graph nodes driven by
+        # the file stop (return nil).
         def done?
           return false unless @start
 
-          now = @clock.clock_now
-          @elapsed = now - @start
-          @elapsed > @duration + @extra_duration
+          @elapsed = @clock.clock_now - @start
+          @elapsed > @music_end + TAIL_SECONDS
         end
 
         # Returns the index of the first event with a timestamp greater than or

@@ -1,16 +1,11 @@
 RSpec.describe('Noise generation scripts') do
-  let(:output) { 'tmp/write_noise_test.flac' }
+  let(:output) { tmp_path('write_noise_test.flac') }
   let(:out_sound) { MB::Sound.read(output) }
-
-  before(:each) do
-    FileUtils.mkdir_p('tmp')
-    File.unlink(output) rescue nil
-  end
 
   ['brown', 'pink', 'white'].each do |n|
     describe "bin/write_#{n}_noise.rb" do
       it 'generates a non-silent file' do
-        text = `RANDOM_SEED=0 bin/write_#{n}_noise.rb -c 1 -b 2401 -s 0.1 #{output} 2>&1`
+        text = `RANDOM_SEED=0 bin/write_#{n}_noise.rb -c 1 -b 2401 -s 0.1 #{output.shellescape} 2>&1`
         result = ($?)
         expect(result).to be_success
         expect(out_sound.length).to eq(1)
@@ -26,7 +21,7 @@ RSpec.describe('Noise generation scripts') do
       end
 
       it 'can generate multiple channels' do
-        text = `RANDOM_SEED=0 bin/write_#{n}_noise.rb --channels 4 --bins 2401 --seconds 0.1 #{output} 2>&1`
+        text = `RANDOM_SEED=0 bin/write_#{n}_noise.rb --channels 4 --bins 2401 --seconds 0.1 #{output.shellescape} 2>&1`
         result = ($?)
         expect(result).to be_success
         expect(out_sound.length).to eq(4)

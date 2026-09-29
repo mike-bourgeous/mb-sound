@@ -143,6 +143,7 @@ RSpec.describe(MB::Sound::GraphNode::Channels) do
     expect(session.process_buffer.map { |c| c[0] }).to eq([4, 6])
   ensure
     session&.close
+    MB::Sound.rewind
   end
 
   it 'plays with MB::Sound.play' do

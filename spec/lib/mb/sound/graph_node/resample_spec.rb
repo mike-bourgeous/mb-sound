@@ -214,13 +214,19 @@ RSpec.describe(MB::Sound::GraphNode::Resample, :aggregate_failures) do
         end
       end
 
+      # The expected counter values, as long as the input counter (200001
+      # samples) but trimmed to what the comparisons can use: at most 600
+      # output samples after up to ~128 leading values under 0.5 (at 255x
+      # upsampling).  select_whole_cycles scans the whole reference for zero
+      # crossings (a counter has none), which took most of each example's
+      # time at 200001 values.
       shared_examples_for 'zoh' do
-        let (:expected) { Numo::Int32.linspace(0, output_end, 200001) }
+        let (:expected) { Numo::Int32.linspace(0, output_end, 200001)[0...2000] }
         it_behaves_like 'zoh or linear'
       end
 
       shared_examples_for 'linear' do
-        let (:expected) { Numo::SFloat.linspace(0, output_end, 200001) }
+        let (:expected) { Numo::SFloat.linspace(0, output_end, 200001)[0...2000] }
         it_behaves_like 'zoh or linear'
       end
 

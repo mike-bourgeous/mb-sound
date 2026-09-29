@@ -19,23 +19,19 @@ RSpec.describe(MB::Sound::ProcessingMatrix) do
       [ [1+1i, 0], [0-1i, 1], ['0 + 1i', '2i'] ]
     }
 
-    before(:all) {
-      FileUtils.mkdir_p('tmp')
-    }
-
     def save_matrix(ext, matrix)
       case ext
       when :csv
-        File.write('tmp/matrix_test.csv', matrix.map { |row| Array(row).join(',') }.join("\n") + "\n")
+        File.write(tmp_path('matrix_test.csv'), matrix.map { |row| Array(row).join(',') }.join("\n") + "\n")
 
       when :tsv
-        File.write('tmp/matrix_test.tsv', matrix.map { |row| Array(row).join("\t") }.join("\n") + "\n")
+        File.write(tmp_path('matrix_test.tsv'), matrix.map { |row| Array(row).join("\t") }.join("\n") + "\n")
 
       when :yml
-        File.write('tmp/matrix_test.yml', matrix.to_yaml)
+        File.write(tmp_path('matrix_test.yml'), matrix.to_yaml)
 
       when :json
-        File.write('tmp/matrix_test.json', matrix.to_json)
+        File.write(tmp_path('matrix_test.json'), matrix.to_json)
 
       else
         raise ArgumentError
@@ -44,34 +40,31 @@ RSpec.describe(MB::Sound::ProcessingMatrix) do
 
     [:csv, :tsv, :yml, :json].each do |ext|
       context "when reading from .#{ext}" do
-        before(:each) {
-          File.unlink("tmp/matrix_test.#{ext}") rescue nil
-        }
 
         it 'can load a one-row matrix' do
           save_matrix(ext, matrix_1_5)
-          p = MB::Sound::ProcessingMatrix.from_file("tmp/matrix_test.#{ext}")
+          p = MB::Sound::ProcessingMatrix.from_file(tmp_path("matrix_test.#{ext}"))
           expect(p.input_channels).to eq(5)
           expect(p.output_channels).to eq(1)
         end
 
         it 'can load a one-column matrix' do
           save_matrix(ext, matrix_5_1)
-          p = MB::Sound::ProcessingMatrix.from_file("tmp/matrix_test.#{ext}")
+          p = MB::Sound::ProcessingMatrix.from_file(tmp_path("matrix_test.#{ext}"))
           expect(p.input_channels).to eq(1)
           expect(p.output_channels).to eq(5)
         end
 
         it 'can load a flat 1D array of numbers' do
           save_matrix(ext, matrix_flat)
-          p = MB::Sound::ProcessingMatrix.from_file("tmp/matrix_test.#{ext}")
+          p = MB::Sound::ProcessingMatrix.from_file(tmp_path("matrix_test.#{ext}"))
           expect(p.input_channels).to eq(1)
           expect(p.output_channels).to eq(4)
         end
 
         it 'can load complex numbers' do
           save_matrix(ext, matrix_complex_3_2)
-          p = MB::Sound::ProcessingMatrix.from_file("tmp/matrix_test.#{ext}")
+          p = MB::Sound::ProcessingMatrix.from_file(tmp_path("matrix_test.#{ext}"))
           expect(p.input_channels).to eq(2)
           expect(p.output_channels).to eq(3)
         end
@@ -79,14 +72,14 @@ RSpec.describe(MB::Sound::ProcessingMatrix) do
         it 'raises an error if the data contains non-numeric entries' do
           save_matrix(ext, [[1, 2, 3], ['d', 'e', 'f']])
           expect {
-            MB::Sound::ProcessingMatrix.from_file("tmp/matrix_test.#{ext}")
+            MB::Sound::ProcessingMatrix.from_file(tmp_path("matrix_test.#{ext}"))
           }.to raise_error(MB::Sound::ProcessingMatrix::MatrixTypeError)
         end
 
         it 'raises an error if the data is not an Array' do
           save_matrix(ext, {a: 1, b: 2})
           expect {
-            MB::Sound::ProcessingMatrix.from_file("tmp/matrix_test.#{ext}")
+            MB::Sound::ProcessingMatrix.from_file(tmp_path("matrix_test.#{ext}"))
           }.to raise_error(MB::Sound::ProcessingMatrix::MatrixTypeError)
         end
       end

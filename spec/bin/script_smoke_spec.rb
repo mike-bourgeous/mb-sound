@@ -3,7 +3,9 @@ require 'shellwords'
 
 # Runs every script converted to the script runner (see
 # MB::Sound::ScriptRunner) with --help and with a short render, checking that
-# each one starts, parses its options, and writes a file.
+# each one starts, parses its options, and writes a file.  Renders run as
+# real processes; --help runs in a fork of the spec process (see ForkScript)
+# for scripts that also render here, saving ~0.7 s of startup each.
 RSpec.describe('script runner scripts', :smoke) do
   # Script => extra arguments for a short render
   songs = {
@@ -32,22 +34,21 @@ RSpec.describe('script runner scripts', :smoke) do
     'bin/effects/multitap_delay.rb' => ['--delay', '0.05', '--oversample', '1'],
   }.freeze
 
-  let(:infile) { 'tmp/smoke_effect_input.flac' }
+  let(:infile) { tmp_path('smoke_effect_input.flac') }
 
   effects.each do |script, args|
     describe script do
-      let(:outfile) { "tmp/smoke_#{File.basename(script, '.rb')}.flac" }
+      let(:outfile) { tmp_path("smoke_#{File.basename(script, '.rb')}.flac") }
 
       it 'prints its header and options with --help' do
-        text = `#{script.shellescape} --help 2>&1`
-        expect($?).to be_success
+        # Forked (see ForkScript); the render below is a real process run
+        text, status = fork_script(script, '--help')
+        expect(status).to be_success, text
         header = File.readlines(script)[1].delete_prefix('#').strip
         expect(text).to include(header, '--output', '--input-channels', '--repeat')
       end
 
       it 'processes a short file, ringing out after it ends' do
-        FileUtils.mkdir_p('tmp')
-        File.unlink(outfile) if File.exist?(outfile)
         MB::Sound.write(infile, [220.hz.ramp.at(0.5).sample(4800), 330.hz.ramp.at(0.5).sample(4800)], sample_rate: 48000, overwrite: true)
 
         text = `#{script.shellescape} -q -f #{args.shelljoin} #{infile.shellescape} #{outfile.shellescape} 2>&1`
@@ -82,25 +83,27 @@ RSpec.describe('script runner scripts', :smoke) do
 
   synths.each do |script, args|
     describe script do
-      let(:outfile) { "tmp/smoke_#{File.basename(script, '.rb')}.flac" }
+      let(:outfile) { tmp_path("smoke_#{File.basename(script, '.rb')}.flac") }
 
       it 'prints its header and options with --help' do
-        text = `#{script.shellescape} --help 2>&1`
-        expect($?).to be_success
+        # Forked (see ForkScript); the render below is a real process run
+        text, status = fork_script(script, '--help')
+        expect(status).to be_success, text
         header = File.readlines(script)[1].delete_prefix('#').strip
         expect(text).to include(header, '--output', '--input MIDI')
       end
 
       it 'plays a MIDI file into an audio file' do
-        FileUtils.mkdir_p('tmp')
-        File.unlink(outfile) if File.exist?(outfile)
-
         text = `#{script.shellescape} -q -f #{args.shelljoin} spec/test_data/c2_sustain.mid #{outfile.shellescape} 2>&1`
         expect($?).to be_success, text
         expect(text).to include("to #{outfile}")
 
+        # Notes ring out after the last MIDI event, then the runner stops after
+        # a second of quiet (counted in whole buffers, so allow a little less),
+        # or fades out after at most 10 s of tail
+        music_end = MB::Sound::MIDI::MIDIFile.new('spec/test_data/c2_sustain.mid').music_end
         data = MB::Sound.read(outfile)
-        expect(data[0].length).to be_between(48000 * 2, 48000 * 20)
+        expect(data[0].length).to be_between(48000 * (music_end + 0.9), 48000 * (music_end + 11))
         expect(data.map { |c| c.abs.max }.max).to be > 0.001
       end
     end
@@ -112,6 +115,7 @@ RSpec.describe('script runner scripts', :smoke) do
   general.each do |script|
     describe script do
       it 'prints its header and options with --help' do
+        # A real process run: this is the only run of general scripts here
         text = `#{script.shellescape} --help 2>&1`
         expect($?).to be_success, text
         header = File.readlines(script)[1].delete_prefix('#').strip
@@ -122,19 +126,17 @@ RSpec.describe('script runner scripts', :smoke) do
 
   songs.each do |script, args|
     describe script do
-      let(:outfile) { "tmp/smoke_#{File.basename(script, '.rb')}.flac" }
+      let(:outfile) { tmp_path("smoke_#{File.basename(script, '.rb')}.flac") }
 
       it 'prints its header and options with --help' do
-        text = `#{script.shellescape} --help 2>&1`
-        expect($?).to be_success
+        # Forked (see ForkScript); the render below is a real process run
+        text, status = fork_script(script, '--help')
+        expect(status).to be_success, text
         header = File.readlines(script)[1].delete_prefix('#').strip
         expect(text).to include(header, '--output', '--bars')
       end
 
       it 'renders a short file' do
-        FileUtils.mkdir_p('tmp')
-        File.unlink(outfile) if File.exist?(outfile)
-
         text = `#{script.shellescape} -q -f #{args.shelljoin} #{outfile.shellescape} 2>&1`
         expect($?).to be_success, text
         expect(text).to include("to #{outfile}")

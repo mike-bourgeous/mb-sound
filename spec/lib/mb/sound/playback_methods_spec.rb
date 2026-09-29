@@ -198,7 +198,10 @@ RSpec.describe(MB::Sound::PlaybackMethods) do
   describe '#wait' do
     let(:session) { MB::Sound::Session.new(output: MB::Sound::NullOutput.new(channels: 2, sleep: false), buffer_size: 800, realtime: true) }
 
-    after { session.close }
+    after do
+      session.close
+      MB::Sound.rewind
+    end
 
     def within(&block)
       MB::Sound::Session.with_context(session: session, &block)
@@ -220,6 +223,7 @@ RSpec.describe(MB::Sound::PlaybackMethods) do
     end
 
     it 'stops waiting for a tail that never ends after the tail limit' do
+      stub_const('MB::Sound::Session::Master::MAX_TAIL_SECONDS', 1) # instead of 10 s of rendering
       within do
         MB::Sound.bg(1.constant.for(0.05))
         MB::Sound.master(at: :now) { |mix| mix.delay(seconds: 0.1, feedback: 1, dry: 1, wet: 1) }
@@ -324,12 +328,7 @@ RSpec.describe(MB::Sound::PlaybackMethods) do
   end
 
   describe '#render' do
-    let(:filename) { 'tmp/render_spec.flac' }
-
-    before(:each) do
-      FileUtils.mkdir_p('tmp')
-      File.unlink(filename) rescue nil
-    end
+    let(:filename) { tmp_path('render_spec.flac') }
 
     it 'renders a sequence for a number of bars at the current tempo' do
       bass = MB::Sound.seq(MB::Sound::C2, MB::Sound::G1).n8.loop
@@ -399,12 +398,15 @@ RSpec.describe(MB::Sound::PlaybackMethods) do
     end
 
     it 'limits master tails to ten seconds and the length given' do
+      expect(MB::Sound::Session::MAX_TAIL_SECONDS).to eq(10)
+      stub_const('MB::Sound::Session::Master::MAX_TAIL_SECONDS', 1) # instead of 10 s of rendering
+
       infinite = proc do
         MB::Sound.bg(0.5.constant.for(0.1))
         MB::Sound.master { |mix| mix.delay(seconds: 0.1, feedback: 1, dry: 1, wet: 1) }
       end
-      expect(MB::Sound.render(filename, &infinite)).to be_within(0.02).of(10.1)
-      expect(MB::Sound.render(filename, seconds: 1, overwrite: true, &infinite)).to eq(1)
+      expect(MB::Sound.render(filename, &infinite)).to be_within(0.02).of(1.1)
+      expect(MB::Sound.render(filename, seconds: 0.5, overwrite: true, &infinite)).to eq(0.5)
     end
 
     it 'swaps clips at scheduled times, keeping the graph' do
@@ -427,8 +429,7 @@ RSpec.describe(MB::Sound::PlaybackMethods) do
     end
 
     it 'does not move the live timeline' do
-      MB::Sound.render(filename, 440.hz.sine.for(0.1))
-      expect(MB::Sound.transport.position).to eq(0)
+      expect { MB::Sound.render(filename, 440.hz.sine.for(0.1)) }.not_to change { MB::Sound.transport.position }
     end
   end
 
