@@ -223,6 +223,7 @@ RSpec.describe(MB::Sound::PlaybackMethods) do
     end
 
     it 'stops waiting for a tail that never ends after the tail limit' do
+      stub_const('MB::Sound::Session::Master::MAX_TAIL_SECONDS', 1) # instead of 10 s of rendering
       within do
         MB::Sound.bg(1.constant.for(0.05))
         MB::Sound.master(at: :now) { |mix| mix.delay(seconds: 0.1, feedback: 1, dry: 1, wet: 1) }
@@ -397,12 +398,15 @@ RSpec.describe(MB::Sound::PlaybackMethods) do
     end
 
     it 'limits master tails to ten seconds and the length given' do
+      expect(MB::Sound::Session::MAX_TAIL_SECONDS).to eq(10)
+      stub_const('MB::Sound::Session::Master::MAX_TAIL_SECONDS', 1) # instead of 10 s of rendering
+
       infinite = proc do
         MB::Sound.bg(0.5.constant.for(0.1))
         MB::Sound.master { |mix| mix.delay(seconds: 0.1, feedback: 1, dry: 1, wet: 1) }
       end
-      expect(MB::Sound.render(filename, &infinite)).to be_within(0.02).of(10.1)
-      expect(MB::Sound.render(filename, seconds: 1, overwrite: true, &infinite)).to eq(1)
+      expect(MB::Sound.render(filename, &infinite)).to be_within(0.02).of(1.1)
+      expect(MB::Sound.render(filename, seconds: 0.5, overwrite: true, &infinite)).to eq(0.5)
     end
 
     it 'swaps clips at scheduled times, keeping the graph' do
