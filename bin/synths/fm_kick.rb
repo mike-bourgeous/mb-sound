@@ -41,7 +41,7 @@ MB::Sound.synth_script { |input|
 
     boom_noise_cutoff = 10000.constant.named('Noise cutoff')
     boom_noise_gain = 2500.constant.named('Noise gain')
-    boom_noise = 10000.hz.ramp.noise
+    boom_noise = 10000.hz.ramp.noise.at(0.1)
       .at(1)
       .filter(:lowpass, cutoff: boom_noise_cutoff)
 

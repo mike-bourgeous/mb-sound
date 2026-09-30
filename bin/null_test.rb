@@ -11,8 +11,10 @@
 #
 # The comparison reports the raw residual and the residual after matching
 # the overall gain (so intended level changes don't fail), both in dB
-# relative to the reference's RMS.  A case fails if the gain-matched
-# residual is above --limit (default -80 dB) or its length differs.
+# relative to the reference's RMS, and the gain-matched residual in dBFS.
+# A case fails if its length differs, or if the gain-matched residual is
+# above --limit (default -80 dB) and also above --floor (default -120 dBFS,
+# near 24-bit FLAC quantization: very quiet renders can't null further).
 #
 # Usage:
 #     $0 record [--ref COMMIT] DIR       # render references into DIR
@@ -112,6 +114,7 @@ def compare_file(ref_path, new_path)
 
   raw = ref.zip(new).sum { |r, n| ((r - n)**2).sum }
   aligned = ref.zip(new).sum { |r, n| ((r - n * gain)**2).sum }
+  samples = ref.sum(&:length)
 
   {
     frames: frames,
@@ -119,6 +122,7 @@ def compare_file(ref_path, new_path)
     gain_db: db(gain.abs),
     raw_db: ref_energy > 0 ? db(Math.sqrt(raw / ref_energy)) : db(Math.sqrt(raw)),
     aligned_db: ref_energy > 0 ? db(Math.sqrt(aligned / ref_energy)) : db(Math.sqrt(aligned)),
+    aligned_dbfs: db(Math.sqrt(aligned / samples)),
   }
 end
 
@@ -126,7 +130,8 @@ MB::Sound.script(
   args: 0..3,
   ref: [nil, String, 'Commit to render references from (record)'],
   only: [nil, String, 'Comma-separated substrings; only matching cases'],
-  limit: [-80.0, Float, 'Maximum gain-matched residual in dB'],
+  limit: [-80.0, Float, 'Maximum gain-matched residual in dB relative to the reference'],
+  floor: [-120.0, Float, 'Gain-matched residuals below this dBFS always pass'],
   list: [false, '-l', 'List case names and exit'],
 ) { |(command, dir1, dir2), p|
   if p.list
@@ -162,7 +167,7 @@ MB::Sound.script(
     render_all(ROOT, new_dir, only)
 
     failures = 0
-    puts format('%-40s %8s %6s %9s %9s %11s', 'case', 'frames', 'len±', 'gain dB', 'raw dB', 'matched dB')
+    puts format('%-40s %8s %6s %9s %9s %11s %9s', 'case', 'frames', 'len±', 'gain dB', 'raw dB', 'matched dB', 'dBFS')
     CASES.each_key do |name|
       next if only && only.none? { |o| name.include?(o) }
 
@@ -182,9 +187,9 @@ MB::Sound.script(
           next
         end
 
-        ok = r[:aligned_db] <= p.limit && r[:length_diff] == 0
+        ok = (r[:aligned_db] <= p.limit || r[:aligned_dbfs] <= p.floor) && r[:length_diff] == 0
         failures += 1 unless ok
-        puts format('%-40s %8d %6d %9.2f %9.1f %11.1f %s', label, r[:frames], r[:length_diff], r[:gain_db], r[:raw_db], r[:aligned_db], ok ? '' : 'FAIL')
+        puts format('%-40s %8d %6d %9.2f %9.1f %11.1f %9.1f %s', label, r[:frames], r[:length_diff], r[:gain_db], r[:raw_db], r[:aligned_db], r[:aligned_dbfs], ok ? '' : 'FAIL')
       end
     end
 

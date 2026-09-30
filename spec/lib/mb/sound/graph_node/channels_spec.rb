@@ -136,7 +136,7 @@ RSpec.describe(MB::Sound::GraphNode::Channels) do
   end
 
   it 'plays each channel on its own output channel in a Session' do
-    session = MB::Sound::Session.new(output: MB::Sound::NullOutput.new(channels: 2, sleep: false), buffer_size: 800, realtime: false, raise_errors: true)
+    session = MB::Sound::Session.new(master_gain: 1, output: MB::Sound::NullOutput.new(channels: 2, sleep: false), buffer_size: 800, realtime: false, raise_errors: true)
     session.add(bundle)
     expect(session.process_buffer.map { |c| c[0] }).to eq([1, 2])
     session.add([MB::Sound.stereo(3.constant, 4.constant)], at: :now)

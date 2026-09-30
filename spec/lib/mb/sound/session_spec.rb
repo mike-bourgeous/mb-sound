@@ -3,7 +3,7 @@ RSpec.describe(MB::Sound::Session) do
   # quarter note is 24000 frames, a sixteenth is 6000 frames.
   let(:transport) { MB::Sound::Sequence::Transport.new(bpm: 120) }
   let(:output) { MB::Sound::NullOutput.new(channels: 2, sleep: false) }
-  let(:session) { MB::Sound::Session.new(output: output, transport: transport, buffer_size: 800, realtime: false, raise_errors: true) }
+  let(:session) { MB::Sound::Session.new(master_gain: 1, output: output, transport: transport, buffer_size: 800, realtime: false, raise_errors: true) }
 
   # Renders +frames+ frames (in 800-frame buffers) and returns channel 0.
   def run(frames)
@@ -33,7 +33,7 @@ RSpec.describe(MB::Sound::Session) do
     it 'supports other launch points' do
       { now: 0, beat: 24000 - 4000, 16 => 6000 - 4000, 2r => 192000 - 4000 }.each do |at, expected|
         t = MB::Sound::Sequence::Transport.new(bpm: 120)
-        s = MB::Sound::Session.new(output: output, transport: t, buffer_size: 800, realtime: false, raise_errors: true)
+        s = MB::Sound::Session.new(master_gain: 1, output: output, transport: t, buffer_size: 800, realtime: false, raise_errors: true)
         s.add(0.constant)
         5.times { s.process_buffer }
         s.add(10.constant, at: at)
@@ -192,7 +192,7 @@ RSpec.describe(MB::Sound::Session) do
     end
 
     context 'with default fades' do
-      let(:session) { MB::Sound::Session.new(output: output, transport: transport, buffer_size: 800, realtime: false, raise_errors: true, fade_in: 1/20r, fade_out: 1/10r) }
+      let(:session) { MB::Sound::Session.new(master_gain: 1, output: output, transport: transport, buffer_size: 800, realtime: false, raise_errors: true, fade_in: 1/20r, fade_out: 1/10r) }
 
       it 'fades new graphs in and removed graphs out' do
         session.add(1.constant, name: :a)
@@ -275,7 +275,7 @@ RSpec.describe(MB::Sound::Session) do
   end
 
   it 'removes a graph that raises an error and keeps playing the rest' do
-    quiet = MB::Sound::Session.new(output: output, transport: transport, buffer_size: 800, realtime: false)
+    quiet = MB::Sound::Session.new(master_gain: 1, output: output, transport: transport, buffer_size: 800, realtime: false)
     bad = 1.constant.proc { |_v| raise 'broken graph' }
     quiet.add(1.constant)
     quiet.add(bad, at: :now)

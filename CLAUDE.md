@@ -160,7 +160,7 @@ The container has no audio device, so check sound-producing code by rendering it
 ### Gotchas
 
 - `#sample` usually returns a reused buffer; `.dup` each buffer before collecting several of them (several false "bugs" came from forgetting this).
-- Oscillators (`Tone`, `noise`) default to amplitude 0.1, and `*` only raises its right operand to full level, so `tone * env` is 10x quieter than `env * tone`.  Use `.at(...)` explicitly in examples and check levels by rendering.
+- Oscillators (`Tone`, `noise`) are full scale (-1..1) by default, and the master bus (`Session#master_gain`, `master_gain -6.db`, `render(gain:)`) is -10 dB by default, live and in renders (including effect scripts), so mixes of full-scale parts have headroom.  Check levels by rendering.
 - `Tone.new` (and `Numeric#hz`) defaults to a 5-second duration, so graphs driven by clips or LFOs need `.forever` (`Tone#lfo` now plays forever by default).
 - `40.hz` is an oscillator, not a constant; use `40.constant` for fixed values in arithmetic.
 - `node.filter(cookbook_filter)` re-applies the filter's original cutoff and quality every buffer, so changing `center_frequency` from outside (e.g. a MIDI callback) does nothing; pass `cutoff:` a node and change the node.

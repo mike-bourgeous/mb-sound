@@ -10,9 +10,8 @@ module MB
           MB::Sound.tuning.freq(self)
         end
 
-        # Uses this node as the frequency value for an oscillator.
+        # Uses this node as the frequency value for a full-scale oscillator.
         def tone
-          # TODO: add .or_at(1) and go fix all the affected synths and effects
           MB::Sound::Tone[self]
         end
 

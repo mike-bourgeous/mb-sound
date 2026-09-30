@@ -22,11 +22,14 @@ RSpec.describe(MB::Sound::GraphNode, aggregate_failures: true) do
     expect(graph.sample(4800)).to eq(nil)
   end
 
-  it 'resets default amplitudes on tones multiplied to a graph' do
-    graph = 0.hz.square.at(2) * 0.hz.square.or_at(0) * 0.hz.square.or_at(0)
-
-    # If the amplitude was not reset this would return 0
+  it 'multiplies full-scale tones without changing their amplitudes' do
+    # Oscillators default to full scale (-1..1) on either side of *
+    graph = 0.hz.square.at(2) * 0.hz.square * 0.hz.square
     expect(graph.sample(100)).to eq(Numo::SFloat.zeros(100).fill(2))
+
+    # An explicit default amplitude is kept (the old * reset it to 1)
+    quiet = 0.hz.square * 0.hz.square.or_at(0.5)
+    expect(quiet.sample(100)).to eq(Numo::SFloat.zeros(100).fill(0.5))
   end
 
   describe '#outputs and #channel_count' do

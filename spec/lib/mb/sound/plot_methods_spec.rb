@@ -142,7 +142,7 @@ RSpec.describe(MB::Sound::PlotMethods) do
     end
 
     context 'with a gauss wave' do
-      let(:output) { MB::Sound.spectrum(480.hz.gauss, samples: 800) }
+      let(:output) { MB::Sound.spectrum(480.hz.gauss.at(0.1), samples: 800) }
 
       it 'can plot a spectrogram of a more complex wave' do |ex|
         expect(MB::Sound).to receive(:puts).with(/Plotting/)

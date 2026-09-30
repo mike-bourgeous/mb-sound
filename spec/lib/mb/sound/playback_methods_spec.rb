@@ -21,6 +21,20 @@ RSpec.describe(MB::Sound::PlaybackMethods) do
     pending 'can play an array of graph nodes for separate channels'
     pending 'can play an array of other types of sounds for separate channels'
 
+    it 'applies the master bus gain like the session does' do
+      written = []
+      out = MB::Sound::NullOutput.new(channels: 2, sleep: false)
+      allow(out).to receive(:write) { |data| written << data.map(&:dup) }
+
+      MB::Sound.play(1.constant.for(0.01), output: out, quiet: true)
+      expect(written.flat_map { |d| d[0].to_a }.max).to be_within(1e-6).of(-10.db)
+
+      written.clear
+      MB::Sound.master_gain(1)
+      MB::Sound.play(1.constant.for(0.01), output: out, quiet: true)
+      expect(written.flat_map { |d| d[0].to_a }.max).to be_within(1e-6).of(1)
+    end
+
     it 'reuses the cached output by default' do
       outputs = []
       allow(MB::Sound).to receive(:output).and_wrap_original { |m, **kw| m.call(**kw).tap { |o| outputs << o } }
@@ -329,6 +343,23 @@ RSpec.describe(MB::Sound::PlaybackMethods) do
 
   describe '#render' do
     let(:filename) { tmp_path('render_spec.flac') }
+
+    # These check render's timing and mixing at unity gain; the master bus
+    # gain (reset before each example by spec_helper) is checked below.
+    before { MB::Sound.master_gain(1) }
+
+    it 'applies the master bus gain: -10 dB by default, or gain:' do
+      MB::Sound.master_gain(MB::Sound::Session::DEFAULT_MASTER_GAIN)
+      MB::Sound.render(filename, 1.constant, seconds: 0.1)
+      expect(MB::Sound.read(filename)[0].max).to be_within(1e-6).of(-10.db)
+
+      MB::Sound.render(filename, 1.constant, seconds: 0.1, gain: -6.db, overwrite: true)
+      expect(MB::Sound.read(filename)[0].max).to be_within(1e-6).of(-6.db)
+
+      MB::Sound.master_gain(-3.db)
+      MB::Sound.render(filename, 1.constant, seconds: 0.1, overwrite: true)
+      expect(MB::Sound.read(filename)[0].max).to be_within(1e-6).of(-3.db)
+    end
 
     it 'renders a sequence for a number of bars at the current tempo' do
       bass = MB::Sound.seq(MB::Sound::C2, MB::Sound::G1).n8.loop

@@ -2,7 +2,7 @@ RSpec.describe(MB::Sound::Sequence::TempoNode) do
   # 120 BPM at 48kHz: a bar is 96000 frames.
   let(:transport) { MB::Sound::Sequence::Transport.new(bpm: 120) }
   let(:output) { MB::Sound::NullOutput.new(channels: 2, sleep: false) }
-  let(:session) { MB::Sound::Session.new(output: output, transport: transport, buffer_size: 800, realtime: false, raise_errors: true) }
+  let(:session) { MB::Sound::Session.new(master_gain: 1, output: output, transport: transport, buffer_size: 800, realtime: false, raise_errors: true) }
 
   after { session.close }
 
@@ -73,7 +73,7 @@ RSpec.describe(MB::Sound::Sequence::TempoNode) do
     end
 
     it 'follows the render transport' do
-      MB::Sound.render(tmp_path('tempo_lfo_spec.flac'), 1.bar.lfo.ramp, seconds: 1, bpm: 240, overwrite: true)
+      MB::Sound.render(tmp_path('tempo_lfo_spec.flac'), 1.bar.lfo.ramp, seconds: 1, bpm: 240, overwrite: true, gain: 1)
       data = MB::Sound.read(tmp_path('tempo_lfo_spec.flac'))[0]
       expect(data[12000]).to be_within(0.01).of(0.5) # a bar is one second at 240 BPM
     end

@@ -2,7 +2,7 @@ RSpec.describe(MB::Sound::ScheduleMethods) do
   # 120 BPM at 48kHz: one bar is 96000 frames
   let(:transport) { MB::Sound::Sequence::Transport.new(bpm: 120) }
   let(:output) { MB::Sound::NullOutput.new(channels: 2, sleep: false) }
-  let(:session) { MB::Sound::Session.new(output: output, transport: transport, buffer_size: 800, realtime: false) }
+  let(:session) { MB::Sound::Session.new(master_gain: 1, output: output, transport: transport, buffer_size: 800, realtime: false) }
 
   # Runs the block with +session+ as the current session.
   def within(&block)

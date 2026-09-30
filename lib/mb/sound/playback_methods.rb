@@ -64,15 +64,16 @@ module MB
 
             input = nodes.as_input(output.channels)
 
+            gain = master_gain
             loop do
               buf = input.read(output.buffer_size)
               break if buf.nil? || buf.empty? || buf.any? { |d| d.nil? || d.empty? }
 
-              output.write(buf)
+              output.write(buf.map { |c| c * gain })
             end
 
           else
-            data = any_sound_to_array(file_tone_data)
+            data = any_sound_to_array(file_tone_data).map { |c| c * master_gain }
             data = data * 2 if data.length < 2
             channels = data.length
 
@@ -230,6 +231,25 @@ module MB
         }
       end
       alias master_fx master
+
+      # Returns the master bus gain of the current session (linear, -10 dB by
+      # default), applied to the whole mix after master effects, live and in
+      # renders alike (renders start with the current session's gain, or
+      # pass +gain:+ to #render).  With a +gain+, changes it first.
+      #
+      # Example (bin/sound.rb):
+      #     master_gain -6.db
+      #     master_gain.to_db   # => -6.0
+      def master_gain(gain = nil)
+        session = Session.current
+        session.master_gain = gain if gain
+        session.master_gain
+      end
+
+      # Sets the master bus gain of the current session (see #master_gain).
+      def master_gain=(gain)
+        master_gain(gain)
+      end
 
       # Changes the sequence a background player (see #bg) plays, keeping
       # its synth and effects as they are, e.g. to try a new bass line
@@ -437,13 +457,13 @@ module MB
       # Example (bin/sound.rb):
       #     bass = seq(C2, C2, rest, C3).n16.loop
       #     render '/tmp/bass.flac', bass.tone.ramp.at(1) * bass.env * 0.5, bars: 4
-      def render(filename, *sounds, bars: nil, seconds: nil, tail: false, bpm: nil, channels: 2, overwrite: false, buffer_size: 800, &block)
+      def render(filename, *sounds, bars: nil, seconds: nil, tail: false, bpm: nil, channels: 2, overwrite: false, buffer_size: 800, gain: nil, &block)
         raise ArgumentError, 'Pass one or more sounds or a block to render' if sounds.empty? && block.nil?
         raise ArgumentError, 'Pass bars: or seconds:, not both' if bars && seconds
 
         transport = Sequence::Transport.new(bpm: bpm || Sequence.transport.bpm, bar_length: Sequence.transport.bar_length)
         output = file_output(filename, channels: channels, overwrite: overwrite)
-        session = Session.new(output: output, transport: transport, channels: channels, buffer_size: buffer_size, realtime: false, raise_errors: true)
+        session = Session.new(output: output, transport: transport, master_gain: gain || master_gain, channels: channels, buffer_size: buffer_size, realtime: false, raise_errors: true)
 
         rate = output.sample_rate
         bars = Sequence::Duration.bars(bars, transport.bar_length)
@@ -543,6 +563,7 @@ module MB
       # Plays the given audio input object (e.g. MB::Sound::FFMPEGInput) to
       # either a given output, or the system default output.
       def play_input(input, channels: nil, gain:, plot:, device:, output:)
+        gain *= master_gain
         output ||= MB::Sound.output(channels: channels || (input.channels < 2 ? 2 : input.channels), plot: plot, device: device)
 
         buffer_size = output.buffer_size

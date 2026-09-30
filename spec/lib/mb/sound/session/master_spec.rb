@@ -3,7 +3,7 @@ RSpec.describe(MB::Sound::Session::Master) do
   let(:transport) { MB::Sound::Sequence::Transport.new(bpm: 120) }
   let(:output) { MB::Sound::NullOutput.new(channels: 2, sleep: false) }
   let(:raise_errors) { true }
-  let(:session) { MB::Sound::Session.new(output: output, transport: transport, buffer_size: 800, realtime: false, raise_errors: raise_errors) }
+  let(:session) { MB::Sound::Session.new(master_gain: 1, output: output, transport: transport, buffer_size: 800, realtime: false, raise_errors: raise_errors) }
 
   after { session.close }
 

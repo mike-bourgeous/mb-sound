@@ -25,12 +25,14 @@ module MB
       # +wave_type+ - One of the waveform types supported by MB::Sound::Oscillator (e.g. :sine).
       # +frequency+ - The frequency of the tone, in Hz at the given
       #               +:sample_rate+ (or a wavelength as Meters or Feet).
-      # +amplitude+ - The linear peak amplitude of the tone, or a Range.
+      # +amplitude+ - The linear peak amplitude of the tone, or a Range
+      #               (default 1: full scale, -1..1; the master bus is
+      #               -10 dB by default, see Session#master_gain).
       # +phase+ - The starting phase, in radians relative to a sine wave (0
       #           radians phase starts at 0 and rises).
       # +duration+ - How long the tone should play in seconds (default is 5s).
       # +sample_rate+ - The sample rate to use to calculate the frequency.
-      def initialize(wave_type: :sine, frequency: 440, amplitude: 0.1, phase: 0, duration: 5, sample_rate: 48000)
+      def initialize(wave_type: :sine, frequency: 440, amplitude: 1.0, phase: 0, duration: 5, sample_rate: 48000)
         @wave_type = wave_type
         @oscillator = nil
         @noise = 0

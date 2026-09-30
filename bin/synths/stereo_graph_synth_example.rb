@@ -11,7 +11,7 @@ MB::Sound.synth_script { |input|
     q = (midi.frequency * 2.001).tone.at(1).with_phase(Math::PI/3) + 0.1.hz.lfo.at(1) * (midi.frequency * 1.001).tone.at(Math::PI)
     a = (
       (
-        ((midi.frequency * 6.001).tone.pm(q) + (midi.frequency * 8.001).tone.pm(q)) + (midi.frequency * 0.501).tone.ramp.at(0.3).filter(:lowpass, cutoff: 0.23.hz.lfo.at(130..2500))
+        ((midi.frequency * 6.001).tone.at(0.1).pm(q) + (midi.frequency * 8.001).tone.at(0.1).pm(q)) + (midi.frequency * 0.501).tone.ramp.at(0.3).filter(:lowpass, cutoff: 0.23.hz.lfo.at(130..2500))
       ) * midi.env
     )
 

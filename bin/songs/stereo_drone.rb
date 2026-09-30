@@ -27,7 +27,7 @@ MB::Sound.song_script(bars: 30) {
 
   tones = toneseq(32, MB::Sound::Fs3, MB::Sound::Ds3, MB::Sound::Fs3, MB::Sound::E3, MB::Sound::Fs4, MB::Sound::Ds4, MB::Sound::Fs4, MB::Sound::E4).each_slice(2).to_a.transpose
 
-  noise = (1.hz.noise * 0.056.hz.lfo.at(-20..-10).db * MB::Sound::B1.at(-2..1)).filter(:lowpass, cutoff: 0.082.hz.lfo.at(300..2200), quality: 2)
+  noise = (1.hz.noise.at(0.1) * 0.056.hz.lfo.at(-20..-10).db * MB::Sound::B1.at(-2..1)).filter(:lowpass, cutoff: 0.082.hz.lfo.at(300..2200), quality: 2)
 
   a = (0.3 * tones[0].sum + q + noise)
     .softclip(0.6)

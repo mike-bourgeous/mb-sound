@@ -139,12 +139,12 @@ module MB
 
         private
 
-        # Sets tones to play forever at full volume, if they don't have a fixed
-        # volume and duration set.
+        # Sets tones to play forever, if they don't have a duration set.
+        # (Oscillators are full scale by default, so +fix_amp+ no longer
+        # changes anything.)
         def fixup_tones(fix_amp, *tones)
           tones.each do |t|
             t.or_for(nil) if t.respond_to?(:or_for) # Default to playing forever
-            t.or_at(1) if fix_amp && t.respond_to?(:or_at) # Default to full volume
           end
         end
 
