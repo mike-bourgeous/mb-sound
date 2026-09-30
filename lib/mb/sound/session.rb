@@ -340,6 +340,14 @@ module MB
         @scheduler.change_tempo(bpm, time: time)
       end
 
+      # Runs the block when the timeline reaches +time+ (whole notes), at the
+      # start of the buffer that contains it, on the render thread (so keep
+      # it short).  Used for live changes from scheduled blocks, like
+      # TuningMethods#tuning.
+      def at_time(time, &action)
+        @scheduler.at_time(time, &action)
+      end
+
       # Schedules the block to run at +time+ (whole notes on the timeline),
       # and then every +period+ whole notes if given.  Returns an id for
       # #cancel.  See Scheduler for how and when blocks run.
@@ -427,7 +435,7 @@ module MB
       # of Numo::SFloat, one per channel).
       def process_buffer(count = buffer_size)
         started = MB::U.clock_now
-        @scheduler.apply_tempo_changes
+        @scheduler.apply_timed_changes
 
         per_sample = @transport.whole_notes_per_second / output.sample_rate.to_r
         from = @transport.position

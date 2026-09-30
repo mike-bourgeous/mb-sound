@@ -92,12 +92,26 @@ module MB
       # Tuning.default).  With a note name and frequency (e.g. `tuning b4:
       # 480`) or +note:+ and +frequency:+, changes it first.
       #
+      # Inside a scheduled block (see ScheduleMethods), the change takes
+      # effect at the block's time, at the start of the buffer that contains
+      # it.
+      #
       # Example (bin/sound.rb):
       #     tuning b4: 480
       #     play B4.tone.at(0.5) # exactly 480 Hz
+      #     at_bar(9) { tuning a4: 432 }
       def tuning(**reference)
-        current = MB::Sound::Session.context&.[](:session)&.tuning || Tuning.default
-        current.set(**reference) if reference.any?
+        context = MB::Sound::Session.context
+        current = context&.[](:session)&.tuning || Tuning.default
+
+        if reference.any? && context&.[](:batch)
+          Tuning.new.set(**reference) # raises for invalid references now
+          session, time = context[:session], context[:time]
+          context[:batch] << -> { session.at_time(time) { current.set(**reference) } }
+        elsif reference.any?
+          current.set(**reference)
+        end
+
         current
       end
     end

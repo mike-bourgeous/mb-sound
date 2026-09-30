@@ -154,6 +154,16 @@ RSpec.describe(MB::Sound::ScheduleMethods) do
     expect(transport.bpm).to eq(240)
   end
 
+  it 'changes the tuning at the scheduled time' do
+    within do
+      MB::Sound.bg(MB::Sound::A4.freq)
+      MB::Sound.at_bar(2) { MB::Sound.tuning a4: 432 }
+    end
+    data = run(96000 + 1600)
+    expect(changes(data)).to eq([[0, 440], [96000, 432]])
+    expect(session.tuning.frequency_of(69)).to eq(432)
+  end
+
   it 'skips the commands of a block that finishes after its time' do
     within do
       MB::Sound.bg(:a, 1.constant)
