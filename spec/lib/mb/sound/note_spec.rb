@@ -106,8 +106,8 @@ RSpec.describe MB::Sound::Note do
     end
 
     context 'when given a Tone object' do
-      let!(:hz) { MB::Sound::Oscillator::DEFAULT_TUNE_FREQ }
-      let!(:n) { MB::Sound::Oscillator::DEFAULT_TUNE_NOTE }
+      let!(:hz) { MB::Sound::Tuning::DEFAULT_FREQUENCY }
+      let!(:n) { MB::Sound::Tuning::DEFAULT_NOTE }
 
       it 'finds octaves of the tuning reference' do
         expect(MB::Sound::Note.new(hz.hz).number).to eq(n)
@@ -214,8 +214,7 @@ RSpec.describe MB::Sound::Note do
 
     context 'when the tuning reference is changed' do
       after(:each) {
-        MB::Sound::Oscillator.tune_note = nil
-        MB::Sound::Oscillator.tune_freq = nil
+        MB::Sound.tuning.reset
         expect(MB::Sound::A4.frequency.round(5)).to eq(440)
       }
 
@@ -223,15 +222,14 @@ RSpec.describe MB::Sound::Note do
         a4 = MB::Sound::A4
         expect(a4.frequency.round(5)).to eq(440)
 
-        MB::Sound::Oscillator.tune_freq = 432 # it's got bad frequencies!
+        MB::Sound.tuning a4: 432 # it's got bad frequencies!
         a4_lower = MB::Sound::A4
         expect(a4.frequency.round(5)).to eq(440)
         expect(a4_lower.frequency.round(5)).to eq(432)
       end
 
       it 'can use a different tuning note' do
-        MB::Sound::Oscillator.tune_note = 47 # B2
-        MB::Sound::Oscillator.tune_freq = 120 # 49.36 cents flat from A440 tuning to get exactly 120Hz
+        MB::Sound.tuning b2: 120 # 49.36 cents flat from A440 tuning to get exactly 120Hz
 
         a4 = MB::Sound::A4
         b4 = MB::Sound::B4

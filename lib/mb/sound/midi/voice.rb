@@ -61,9 +61,9 @@ module MB
           @value = 0.0
           @filter_blend = 1.0
 
-          @number_constant = MB::Sound::Oscillator.tune_note.constant(si: false, range: 0..127).named('Voice note number')
+          @number_constant = MB::Sound.tuning.note.constant(si: false, range: 0..127).named('Voice note number')
           @freq_mod = 7.hz.sine.at(0).oscillator.named('Voice vibrato')
-          @osc_freq = MB::Sound::Oscillator.calc_freq(@number_constant + @freq_mod)
+          @osc_freq = (@number_constant + @freq_mod).freq
 
           # not quite detuning; unison detuning gives phasing of harmonics
           # @phase_mod = 100.hz.sine.noise.at(20).filter(:lowpass, cutoff: 2).filter(:highpass, cutoff: 0.25).forever
@@ -119,12 +119,12 @@ module MB
 
         # Returns the base frequency of this voice's oscillator before modulation.
         def frequency
-          MB::Sound::Oscillator.calc_freq(@number_constant.constant)
+          MB::Sound.tuning.frequency_of(@number_constant.constant)
         end
 
         # Sets the base frequency of this voice's oscillator before modulation.
         def frequency=(f_hz)
-          @number_constant.constant = MB::Sound::Oscillator.calc_number(f_hz)
+          @number_constant.constant = MB::Sound.tuning.number_of(f_hz)
         end
 
         def vibrato_frequency=(f_hz)

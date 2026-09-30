@@ -9,7 +9,7 @@ module MB
           #
           # See MidiDsl#number.
           def initialize(dsl:, sample_rate:, bend_range:, range:, unit:, si:, smoothing:)
-            super(default: MB::Sound::Oscillator.tune_note, dsl: dsl, range: range, unit: unit, si: si, sample_rate: sample_rate, smoothing: smoothing)
+            super(default: MB::Sound.tuning.note, dsl: dsl, range: range, unit: unit, si: si, sample_rate: sample_rate, smoothing: smoothing)
 
             @node_type_name = "Note Number"
 

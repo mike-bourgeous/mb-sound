@@ -65,7 +65,7 @@ module MB
         when Tone
           tone = tone_name_number
           freq = tone.frequency
-          set_number(Oscillator.calc_number(freq))
+          set_number(MB::Sound.tuning.number_of(freq))
           super(frequency: get_freq, wave_type: tone.wave_type, amplitude: tone.amplitude, duration: tone.duration, sample_rate: tone.sample_rate)
 
         else
@@ -111,9 +111,10 @@ module MB
 
       private
 
-      # Calculates the frequency based on the note's MIDI note number.
+      # Calculates the frequency based on the note's MIDI note number in the
+      # current tuning (see MB::Sound.tuning).
       def get_freq
-        Oscillator.calc_freq(@number, @detune)
+        MB::Sound.tuning.frequency_of(@number, @detune)
       end
 
       # Sets note name, number, and detuning from a note name string.

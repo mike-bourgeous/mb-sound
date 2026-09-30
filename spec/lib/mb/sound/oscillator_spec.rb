@@ -370,8 +370,7 @@ RSpec.describe MB::Sound::Oscillator do
 
     context 'with custom tuning' do
       after(:each) {
-        MB::Sound::Oscillator.tune_note = nil
-        MB::Sound::Oscillator.tune_freq = nil
+        MB::Sound.tuning.reset
         expect(MB::Sound::A3.frequency.round(5)).to eq(220)
       }
 
@@ -379,13 +378,12 @@ RSpec.describe MB::Sound::Oscillator do
         oscil.trigger(69, 127, 0)
         expect(oscil.frequency.round(5)).to eq(440)
 
-        MB::Sound::Oscillator.tune_freq = 460
+        MB::Sound.tuning a4: 460
         expect(oscil.frequency.round(5)).to eq(440)
         oscil.trigger(69, 127, 0)
         expect(oscil.frequency.round(5)).to eq(460)
 
-        MB::Sound::Oscillator.tune_note = 72
-        MB::Sound::Oscillator.tune_freq = 512
+        MB::Sound.tuning c5: 512
         expect(oscil.frequency.round(5)).to eq(460)
         oscil.trigger(60, 127, 0)
         expect(oscil.frequency.round(5)).to eq(256)

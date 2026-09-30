@@ -17,6 +17,7 @@ require_relative 'sound/fast_resample'
 require_relative 'sound/fast_wavetable'
 
 require_relative 'sound/version'
+require_relative 'sound/tuning'
 require_relative 'sound/io_methods'
 require_relative 'sound/plot_methods'
 require_relative 'sound/playback_methods'
@@ -51,6 +52,7 @@ module MB
     extend SequenceMethods
     extend ScheduleMethods
     extend MultichannelMethods
+    extend TuningMethods
 
     # Speed of sound for wavelength calculations, in meters per second.
     SPEED_OF_SOUND = 343.0

@@ -46,12 +46,10 @@ CASES.merge!(
   note_cs5_square: -> { MB::Sound::Cs5.square.at(0.3) },
   tuning_b4_480: -> {
     begin
-      MB::Sound::Oscillator.tune_note = MB::Sound::B4.number
-      MB::Sound::Oscillator.tune_freq = 480
+      MB::Sound.tuning b4: 480
       MB::Sound::B4.sine.at(0.5)
     ensure
-      MB::Sound::Oscillator.tune_note = 69
-      MB::Sound::Oscillator.tune_freq = 440
+      MB::Sound.tuning.reset
     end
   },
   oscillator_direct: -> { MB::Sound::Oscillator.new(:triangle, frequency: 330, range: -0.5..0.5) },

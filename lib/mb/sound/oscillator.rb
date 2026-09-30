@@ -52,67 +52,6 @@ module MB
         parabola: 0.01,
       }
 
-      # Default note that is used as tuning reference
-      DEFAULT_TUNE_NOTE = 69 # A4
-
-      # Default frequency that the tuning reference should be
-      DEFAULT_TUNE_FREQ = 440
-
-      # Sets the MIDI note number to use as tuning reference.  C4 (middle C) is
-      # note 60, A4 is note 69.  This only affects future frequency changes;
-      # existing Tones, Notes, or Oscillators will not be modified.  The
-      # default is DEFAULT_TUNE_NOTE (A4, note number 69).
-      def self.tune_note=(note_number)
-        @tune_note = note_number
-      end
-
-      # Returns the MIDI note number used as tuning reference.  This note will
-      # be tuned to the tune_freq.  See also the calc_freq method.  The default
-      # is DEFAULT_TUNE_NOTE (note 69, A4).
-      def self.tune_note
-        @tune_note ||= DEFAULT_TUNE_NOTE
-      end
-
-      # Sets the frequency in Hz of the tune_note.  This only affects future
-      # frequency changes.  Existing Tones, Notes, or Oscillators will not be
-      # changed.  The default is DEFAULT_TUNE_FREQ (440Hz).  Set to nil to
-      # restore the default.
-      def self.tune_freq=(freq_hz)
-        @tune_freq = freq_hz
-      end
-
-      # Returns the frequency in Hz that the tune_note should be.  The default
-      # is DEFAULT_TUNE_FREQ (440Hz).
-      def self.tune_freq
-        @tune_freq ||= DEFAULT_TUNE_FREQ
-      end
-
-      # Calculates a frequency in Hz for the given MIDI note number and
-      # detuning in cents, based on the tuning parameters set by the tune_freq=
-      # and tune_note= class methods and using 12 tone equal temperament
-      # (defaults to 440Hz A4).
-      #
-      # This can be applied to a Numeric or to a GraphNode.
-      def self.calc_freq(note_number, detune_cents = 0)
-        tune_freq * 2 ** ((note_number + detune_cents / 100.0 - tune_note) / 12.0)
-      end
-
-      # Calculates a fractional MIDI note number for the given frequency,
-      # assuming equal temperament.
-      #
-      # This can be applied to a Numeric or to a GraphNode.
-      def self.calc_number(frequency_hz)
-        # FIXME: add .real to complex-valued upstream nodes if needed (e.g. a complex_sine oscillator)
-        frequency_hz = frequency_hz.real if frequency_hz.is_a?(Complex)
-        frequency_hz = 0 if frequency_hz.is_a?(Numeric) && frequency_hz < 0
-
-        if frequency_hz.respond_to?(:sample)
-          12.0 * (frequency_hz / tune_freq).log2 + tune_note
-        else
-          12.0 * Math.log2(frequency_hz / tune_freq) + tune_note
-        end
-      end
-
       attr_accessor :wave_type, :pre_power, :post_power, :range
       attr_reader :frequency, :phase_mod
 
@@ -278,7 +217,7 @@ module MB
         frequency = frequency.get_sampler if frequency.respond_to?(:get_sampler)
 
         @frequency = frequency
-        @note_number = frequency.respond_to?(:sample) ? nil : Oscillator.calc_number(frequency)
+        @note_number = frequency.respond_to?(:sample) ? nil : MB::Sound.tuning.number_of(frequency)
       end
 
       # Sets a phase modulation source.  Frequency modulation is added to the
@@ -295,7 +234,7 @@ module MB
       end
 
       # Returns an approximate MIDI note number for the oscillators frequency,
-      # assuming equal temperament.  This value may be fractional, and may be
+      # in the current tuning (see MB::Sound.tuning).  This value may be fractional, and may be
       # outside of the MIDI range of 0..127.
       def number
         raise 'Cannot calculate a note number for a variable oscillator' if @frequency.respond_to?(:sample)
@@ -303,9 +242,9 @@ module MB
       end
 
       # Sets the oscillator's frequency to the given MIDI note number, using
-      # equal temperament.
+      # the current tuning (see MB::Sound.tuning).
       def number=(note_number)
-        self.frequency = Oscillator.calc_freq(note_number)
+        self.frequency = MB::Sound.tuning.frequency_of(note_number)
         @note_number = note_number
       end
 

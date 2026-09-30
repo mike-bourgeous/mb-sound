@@ -246,11 +246,11 @@ module MB
 
           @oscillators.each do |o|
             if o.frequency.is_a?(Numeric) && @freq_constants.empty?
-              o.frequency = MB::Sound::Oscillator.calc_freq(note)
+              o.frequency = MB::Sound.tuning.frequency_of(note)
             end
           end
 
-          freq = MB::Sound::Oscillator.calc_freq(note)
+          freq = MB::Sound.tuning.frequency_of(note)
           @freq_constants.each do |fc|
             # TODO: Have a way of setting the note number instead, to allow
             # for logarithmic portamento by filtering through a follower

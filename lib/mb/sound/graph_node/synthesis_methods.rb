@@ -4,11 +4,10 @@ module MB
       # Methods that use a node to control an oscillator, wavetable, or
       # envelope.  Included in GraphNode.
       module SynthesisMethods
-        # Converts a fractional MIDI note number to a frequency in Hz.
+        # Converts a fractional MIDI note number to a frequency in Hz with the
+        # current tuning, following tuning changes (see MB::Sound.tuning).
         def freq
-          self.proc(type_name: 'Number to frequency') { |v|
-            MB::FastSound.number_to_freq(v, MB::Sound::Oscillator.tune_note, MB::Sound::Oscillator.tune_freq)
-          }
+          MB::Sound.tuning.freq(self)
         end
 
         # Uses this node as the frequency value for an oscillator.

@@ -56,6 +56,7 @@ RSpec.configure do |config|
   # sleeping for the sound's length.
   config.before(:each) do
     MB::Sound.close_outputs
+    MB::Sound::Tuning.default.reset
   end
 
   # rspec-expectations config goes here. You can use an alternate

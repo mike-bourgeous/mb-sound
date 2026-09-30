@@ -108,6 +108,9 @@ module MB
       # The Sequence::Transport whose timeline this session advances.
       attr_reader :transport
 
+      # The Tuning for notes played in this session (MB::Sound.tuning).
+      attr_reader :tuning
+
       # The number of output channels.  Mono graphs play on every channel.
       attr_reader :channels
 
@@ -121,8 +124,9 @@ module MB
       #                   #process_buffer instead of printed.
       # +:fade_in+, +:fade_out+ - Default fade lengths in bars (see #fade_in
       #                           and #fade_out).
-      def initialize(output: nil, transport: Sequence.transport, channels: 2, buffer_size: nil, realtime: true, raise_errors: false, fade_in: nil, fade_out: nil)
+      def initialize(output: nil, transport: Sequence.transport, tuning: Tuning.default, channels: 2, buffer_size: nil, realtime: true, raise_errors: false, fade_in: nil, fade_out: nil)
         @transport = transport
+        @tuning = tuning
         self.fade_in = fade_in
         self.fade_out = fade_out
         @output = output
