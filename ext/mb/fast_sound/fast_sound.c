@@ -1128,7 +1128,6 @@ static VALUE ruby_osc(VALUE self, VALUE wave_type, VALUE phi)
 	}
 }
 
-// state contains [phi] and will be modified in place
 // Phasor and waveform shaping (MB::Sound::Phasor and MB::Sound::Oscillator;
 // the Ruby versions are Phasor#sample_ruby and Oscillator.shape_ruby).
 //
