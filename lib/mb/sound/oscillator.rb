@@ -113,8 +113,13 @@ module MB
         end
       end
 
-      attr_accessor :wave_type, :pre_power, :post_power, :range, :advance, :random_advance
-      attr_reader :phi, :phase, :frequency, :phase_mod
+      attr_accessor :wave_type, :pre_power, :post_power, :range
+      attr_reader :frequency, :phase_mod
+
+      # The Phasor that holds this oscillator's phase (in cycles).  The
+      # oscillator samples its own frequency and phase modulation inputs and
+      # runs the phasor and waveform in one C loop (#sample_c).
+      attr_reader :phasor
 
       # The most recent true frequency on an FM-modulated (not PM-modulated)
       # oscillator.  Starts at zero before #sample is called
@@ -168,8 +173,17 @@ module MB
         self.phase_mod = phase_mod
 
         raise "Invalid phase #{phase.inspect}" unless phase.is_a?(Numeric)
-        @phase = phase % (2.0 * Math::PI)
-        @phi = @phase
+        raise "Invalid advance #{advance.inspect}" unless advance.is_a?(Numeric)
+        raise "Invalid random advance #{random_advance.inspect}" unless random_advance.is_a?(Numeric)
+
+        # The phasor's frequency is unused: #sample reads the frequency input
+        # and hands it to the phasor's math directly.
+        @phasor = Phasor.new(
+          frequency: 0.0,
+          phase: phase / TWOPI,
+          advance: advance / TWOPI,
+          random_advance: random_advance / TWOPI
+        )
 
         raise "Invalid range #{range.inspect}" unless range.nil? || range.first.is_a?(Numeric)
         @range = range
@@ -179,12 +193,6 @@ module MB
 
         raise "Invalid post_power #{post_power.inspect}" unless post_power.is_a?(Numeric)
         @post_power = post_power.to_f
-
-        raise "Invalid advance #{advance.inspect}" unless advance.is_a?(Numeric)
-        @advance = advance.to_f
-
-        raise "Invalid random advance #{random_advance.inspect}" unless random_advance.is_a?(Numeric)
-        @random_advance = random_advance
 
         @no_trigger = !!no_trigger
 
@@ -197,40 +205,69 @@ module MB
       # The sample rate of the oscillator (calculated from the phase advance
       # value given to the constructor).
       def sample_rate
-        (2.0 * Math::PI / @advance).round(6)
+        (1.0 / @phasor.advance).round(6)
       end
 
       # Changes the phase advance per sample to match the given +sample_rate+
       # (see the advance parameter to the constructor).
       def sample_rate=(sample_rate)
-        @advance = 2 * Math::PI / sample_rate
+        @phasor.sample_rate = sample_rate
         self
       end
       alias at_rate sample_rate=
 
+      # The phase advance per sample per Hz, in radians (see #initialize).
+      def advance
+        @phasor.advance * TWOPI
+      end
+
+      # Sets the phase advance per sample per Hz, in radians.
+      def advance=(advance)
+        @phasor.advance = advance / TWOPI
+      end
+
+      # The maximum random addition to the phase advance, in radians.
+      def random_advance
+        @phasor.random_advance * TWOPI
+      end
+
+      # Sets the maximum random addition to the phase advance, in radians.
+      def random_advance=(random_advance)
+        @phasor.random_advance = random_advance / TWOPI
+      end
+
       def sources
         {
           frequency: @frequency,
-          phase: @phase,
+          phase: phase,
           phase_mod: @phase_mod,
         }.compact
+      end
+
+      # The starting phase offset in radians (0 to 2pi).
+      def phase
+        @phasor.phase * TWOPI
       end
 
       # Changes the starting phase offset for this oscillator, shifting the
       # oscillator's current phase accordingly.
       def phase=(phase)
-        @phi = (@phi + phase - @phase) % (Math::PI * 2)
-        @phase = phase % (Math::PI * 2)
+        @phasor.phase = phase / TWOPI
+      end
+
+      # The current phase in radians (0 to 2pi).
+      def phi
+        @phasor.phi * TWOPI
       end
 
       # Directly sets the current phase offset for this oscillator.
       def phi=(phi)
-        @phi = phi % (Math::PI * 2)
+        @phasor.phi = phi / TWOPI
       end
 
       # Resets the oscillator phase to its starting phase (see #phase).
       def reset
-        @phi = @phase
+        @phasor.reset
       end
 
       # Changes the oscillator's frequency source to the given Numeric value or
@@ -277,7 +314,7 @@ module MB
       # TODO: remove this API and use GraphVoice or Voice exclusively.
       def trigger(note_number, velocity, timestamp)
         reset
-        @phi -= (2.0 * Math::PI * @frequency) * timestamp
+        @phasor.phi -= @frequency * timestamp
         self.number = note_number
         amplitude = MB::M.scale(velocity, 0..127, -30..-6).db
         self.range = -amplitude..amplitude
@@ -443,23 +480,19 @@ module MB
           offset = 0
         end
 
-        state = [@phi]
-
-        buf = MB::FastSound.synthesize(
+        buf = MB::FastSound.oscillate(
           @osc_buf[0...count].inplace!,
           wave_type,
           freq,
           phase,
-          advance,
-          random_advance,
+          @phasor.advance,
+          @phasor.random_advance,
           gain,
           offset,
-          state
+          @phasor.state
         ).inplace!
 
         @last_freq = freq.is_a?(Numeric) ? freq : freq[-1]
-
-        @phi = state[0]
 
         buf = add_waveshape_and_range(buf)
 
@@ -483,36 +516,88 @@ module MB
           offset = 0
         end
 
-        count.times do |idx|
-          freq = freq_table.is_a?(Numeric) ? freq_table : freq_table[idx]
-          phase = phase_table.is_a?(Numeric) ? phase_table : phase_table[idx]
-
-          advance = @advance
-          advance += RAND.rand(@random_advance.to_f) if @random_advance != 0
-          delta = freq * advance
-
-          # Compensate for sampling offset of some wave types
-          # TODO: Find a way to move this wavetype-specific code out of this
-          # function, e.g into #value_at*
-          case @wave_type
-          when :complex_square, :complex_ramp
-            result = value_at_ruby(@phi + delta / 2) * gain + offset
-
-          else
-            result = value_at_ruby(@phi) * gain + offset
-          end
-
-          @phi = (@phi + delta) % (Math::PI * 2)
-
-          result = result.real unless @osc_buf[0].is_a?(Complex)
-          @osc_buf[idx] = result
-        end
+        phases, increments = @phasor.phases_ruby(freq_table, count)
+        values = Oscillator.shape_ruby(@wave_type, phases, increments, phase_table) * gain + offset
 
         @last_freq = freq_table.is_a?(Numeric) ? freq_table : freq_table[-1]
 
+        values = values.real if !@osc_buf.is_a?(Numo::SComplex) && values.is_a?(Numo::DComplex)
+        @osc_buf[0...count] = values
         buf = @osc_buf[0...count].inplace!
         buf = add_waveshape_and_range(buf)
         buf.not_inplace!
+      end
+
+      # Wraps an NArray of radians to 0...2pi like Ruby's % (Numo's % keeps
+      # the sign of negative values, like C's fmod).  Same as wrap() in
+      # fast_sound.c.
+      def self.wrap_radians(radians)
+        radians - (radians / TWOPI).floor * TWOPI
+      end
+
+      # Returns +wave_type+ at +phases+ (cycles, a DFloat NArray) plus
+      # +phase_mod+ (radians; Numeric or NArray), as a DFloat or DComplex
+      # NArray.  +increments+ (cycles; Numeric or NArray) offset complex
+      # square and ramp waves by half an increment.  Ruby version of
+      # MB::FastSound.shape (fast_sound.c), vectorized with Numo where the
+      # formula allows; see #value_at_ruby for the formulas.
+      def self.shape_ruby(wave_type, phases, increments, phase_mod)
+        radians = phases * TWOPI
+        radians = radians + increments * Math::PI if wave_type == :complex_square || wave_type == :complex_ramp
+        radians = radians + phase_mod if phase_mod
+
+        case wave_type
+        when :sine
+          Numo::NMath.sin(radians)
+
+        when :complex_sine
+          # exp(i * (phi - pi / 2)) = sin(phi) - i * cos(phi)
+          Numo::NMath.sin(radians) - Numo::NMath.cos(radians) * 1i
+
+        when :triangle
+          phi = Oscillator.wrap_radians(radians)
+          s = phi * (2.0 / Math::PI)
+          falling = phi.ge(0.5 * Math::PI) & phi.lt(1.5 * Math::PI)
+          s[falling] = 2.0 - s[falling]
+          s[phi.ge(1.5 * Math::PI)] -= 4.0
+          s
+
+        when :square
+          phi = Oscillator.wrap_radians(radians)
+          s = Numo::DFloat.ones(phi.length)
+          s[phi.ge(Math::PI)] = -1.0
+          s
+
+        when :ramp
+          phi = Oscillator.wrap_radians(radians)
+          s = phi / Math::PI
+          s[phi.ge(Math::PI)] -= 2.0
+          s
+
+        when :parabola
+          t = Oscillator.wrap_radians(radians) * (2.0 / Math::PI)
+          s = 1.0 - (1.0 - t)**2
+          upper = t.ge(2.0)
+          s[upper] = (t[upper] - 3.0)**2 - 1.0
+          s
+
+        when :gauss
+          x = Oscillator.wrap_radians(radians) / Math::PI
+          s = Numo::DFloat.zeros(x.length)
+          lower = x.lt(1.0)
+          upper = ~lower
+          s[lower] = (Numo::NMath.sqrt(Numo::NMath.log(1.6487212707 / (1.0 - x[lower])) * 2) - 1) * 0.7071067811865476 if lower.count_true > 0
+          s[upper] = (-Numo::NMath.sqrt(Numo::NMath.log(1.6487212707 / (x[upper] - 1.0)) * 2) + 1) * 0.7071067811865476 if upper.count_true > 0
+          s.clip(-3, 3)
+
+        when :complex_triangle, :complex_square, :complex_ramp
+          # These use complex integrals per sample (see #value_at_ruby)
+          osc = Oscillator.new(wave_type)
+          Numo::DComplex.cast(radians.to_a.map { |phi| osc.value_at_ruby(phi) })
+
+        else
+          raise "Invalid wave type #{wave_type.inspect}"
+        end
       end
 
       private

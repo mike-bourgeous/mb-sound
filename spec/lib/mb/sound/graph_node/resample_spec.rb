@@ -183,7 +183,9 @@ RSpec.describe(MB::Sound::GraphNode::Resample, :aggregate_failures) do
       d1 = MB::M.skip_leading(40.hz.at(1).at_rate(400).resample(16000, mode: :ruby_zoh).sample(27000), 0)[0...16000]
       d2 = MB::M.skip_leading(40.hz.at(1).at_rate(400).resample(16000, mode: :ruby_zoh).multi_sample(216, 125), 0)[0...16000]
       delta = d2.not_inplace! - d1.not_inplace!
-      expect(delta.abs.max).to eq(0)
+      # The oscillator's phasor rounds by chunk (i * increment within each
+      # chunk), which can move single-precision values near zero by ~1e-14
+      expect(delta.abs.max).to be < 1e-9
     end
 
     context 'using a sample counter to verify time linearity' do

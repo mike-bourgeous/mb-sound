@@ -257,7 +257,9 @@ RSpec.describe MB::Sound::Oscillator do
       it 'matches the analytic signal for a complex square wave (approximately)' do
         oscil = 240.hz.complex_square.at(1).oscillator
         result = oscil.send(method, 1600)
-        target = Numo::SComplex.cast(MB::Sound.analytic_signal(240.hz.square.at(1).generate(16000))[6401...8001])
+        # 240Hz at 48kHz puts square wave transitions exactly on samples, so
+        # sample 6400 + i of the reference has the same phase as sample i
+        target = Numo::SComplex.cast(MB::Sound.analytic_signal(240.hz.square.at(1).generate(16000))[6400...8000])
 
         expect(MB::M.round(result.real, 5)).to eq(MB::M.round(target.real, 5))
 
@@ -461,14 +463,15 @@ RSpec.describe MB::Sound::Oscillator do
     }
 
     it 'shifts the current phase by the difference in starting phases' do
+      # The phase is kept in cycles (see Phasor), so radians round slightly
       oscil.phi = 1
       oscil.phase = 1
-      expect(oscil.phi).to eq(2)
+      expect(oscil.phi).to be_within(1e-12).of(2)
 
       oscil.phase = 0
       oscil.phi = 0
       oscil.phase = -10
-      expect(oscil.phi).to eq(-10 % (Math::PI * 2))
+      expect(oscil.phi).to be_within(1e-12).of(-10 % (Math::PI * 2))
     end
   end
 

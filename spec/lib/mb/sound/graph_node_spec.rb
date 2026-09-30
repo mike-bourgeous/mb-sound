@@ -66,7 +66,9 @@ RSpec.describe(MB::Sound::GraphNode, aggregate_failures: true) do
       ref = 1000.hz
       test = 1000.constant.tone
 
-      expect(ref.sample(480)).to eq(test.sample(480))
+      # A constant frequency advances by i * increment, a frequency node by
+      # a running sum, so they round slightly differently
+      expect(ref.sample(480)).to all_be_within(1e-6).of_array(test.sample(480))
     end
   end
 

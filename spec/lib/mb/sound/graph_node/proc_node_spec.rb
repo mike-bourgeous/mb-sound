@@ -13,8 +13,6 @@ RSpec.describe(MB::Sound::GraphNode::ProcNode) do
 
     it 'allows parallel branching' do
       a = 6000.hz.square.at(1)
-      # FIXME: need to discard first sample from square wave oscillators because of rounding on phase
-      a.sample(1)
 
       b = a.get_sampler
       p = a.proc { |v| v + 1 }
