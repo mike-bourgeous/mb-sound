@@ -235,7 +235,7 @@ module MB
           # TODO: Read speaker names
           data = read(file_tone_data, max_frames: all ? nil : samples + offset)
 
-        when Tone
+        when Tone, Pitch
           data = [file_tone_data.generate(all ? nil : samples + offset)]
 
         when Filter

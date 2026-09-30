@@ -76,12 +76,12 @@ RSpec.describe MB::Sound::Tone do
     end
 
     it 'rejects the node itself' do
-      a = 300.hz
+      a = 300.hz.sine
       expect { a.send(method, a) }.to raise_error(/Cyclic modulation/)
     end
 
     it 'rejects loops with the node' do
-      a = 300.hz
+      a = 300.hz.sine
       b = a + 150.hz
       expect { a.send(method, b) }.to raise_error(/Cyclic modulation/)
     end

@@ -36,7 +36,12 @@ module MB
             Step.new(clip: item, length: item.length)
 
           when MB::Sound::Note
-            Step.new(value: item.number, velocity: DEFAULT_VELOCITY)
+            # detuned_number keeps cents (e.g. 'A4+20'); whole notes stay Integers
+            Step.new(value: item.detune == 0 ? item.number : item.detuned_number, velocity: DEFAULT_VELOCITY)
+
+          when MB::Sound::Pitch
+            # A fixed frequency (e.g. 440.hz), kept as a Pitch (see ClipNode::Number)
+            Step.new(value: item, velocity: DEFAULT_VELOCITY)
 
           when Numeric
             Step.new(value: item, velocity: DEFAULT_VELOCITY)
@@ -131,7 +136,7 @@ module MB
         # Returns a Seq with every note's value shifted by +semitones+.
         def transpose(semitones)
           map_steps { |s|
-            s.to_h.merge(value: s.value && s.value + semitones, clip: s.clip&.transpose(semitones))
+            s.to_h.merge(value: s.value && Sequence.transpose_value(s.value, semitones), clip: s.clip&.transpose(semitones))
           }
         end
 

@@ -110,6 +110,7 @@ module MB
         self.phi = @phase + cycles
         self
       end
+      alias sync_cycles sync
 
       def sources
         { frequency: @frequency }

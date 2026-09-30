@@ -368,11 +368,11 @@ module MB
         or_forever
       end
 
-      # Sets this Tone's current phase to +radians+ plus its phase offset
-      # (see #with_phase).  Used by Sequence::TempoNode to lock tempo-synced
-      # tones to the timeline.
-      def sync_phase(radians)
-        oscillator.phi = radians + @phase.to_f
+      # Sets this Tone's current phase to +cycles+ past its phase offset (see
+      # #with_phase).  Used by Sequence::TempoNode to lock tempo-synced tones
+      # to the timeline.
+      def sync_cycles(cycles)
+        oscillator.phasor.sync(cycles)
         self
       end
 
@@ -381,7 +381,7 @@ module MB
       # keeps it running while the timeline is paused.  Its frequency still
       # follows the tempo.  See Sequence::TempoNode#freewheel.
       def freewheel(free = true)
-        node = graph.find { |n| n.is_a?(Sequence::TempoNode) && n.tone.equal?(self) }
+        node = graph.find { |n| n.is_a?(Sequence::TempoNode) && n.follows?(self) }
         raise ArgumentError, 'Only tempo-synced tones (e.g. 4.bars.lfo) can freewheel' if node.nil?
 
         node.freewheel(free)

@@ -276,17 +276,25 @@ module MB
 
         # Outputs the value (e.g. note number) of the most recent event,
         # starting with the first event's value so oscillators don't start at
-        # 0Hz.
+        # 0Hz.  A Pitch value (a fixed frequency like `440.hz` in a sequence)
+        # becomes the note number of its frequency in the current tuning when
+        # its event starts, so converting back (Clip#hz) gives its frequency
+        # in any tuning.
         class Number < Held
+          # Returns +value+ as a note number (see the class description).
+          def self.number_of(value)
+            value.is_a?(MB::Sound::Pitch) ? MB::Sound.tuning.number_of(value.frequency) : value
+          end
+
           def initialize(clip, transport: nil, sample_rate: 48000)
-            super(clip, initial: clip.events.first&.value || 0, transport: transport, sample_rate: sample_rate)
+            super(clip, initial: Number.number_of(clip.events.first&.value || 0), transport: transport, sample_rate: sample_rate)
             @node_type_name = 'Clip Number'
           end
 
           private
 
           def next_level(type, event, _cycle, level)
-            type == :on ? event.value : level
+            type == :on ? Number.number_of(event.value) : level
           end
         end
 

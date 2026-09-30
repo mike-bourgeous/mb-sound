@@ -21,8 +21,9 @@ MB::Sound.song_script(bars: 30) {
   # TODO: a way to play a sequence of notes without having to sample them first; kind of need a node graph for MIDI?
   chords = Array.new(4) { |idx|
     nd = [MB::Sound::As2, MB::Sound::Cs3, MB::Sound::Ds3, MB::Sound::Fs3, MB::Sound::Gs3].map { |n|
-      n = MB::Sound::Note.new((2 - idx) * 12 + n.number).at(1).ramp.forever
-      n2 = MB::Sound::Note.new(n.number).triangle.at(1).forever
+      note = MB::Sound::Note.new((2 - idx) * 12 + n.number)
+      n = note.ramp.at(1).forever
+      n2 = note.triangle.at(1).forever
       if idx > 1
         env = MB::Sound.adsr(0.01, 0.5, 0.5, 2 + idx, auto_release: 2 + (6 - idx * 2))
       else

@@ -192,11 +192,16 @@ module MB
               mixer = g.select { |s|
                 # TODO: use Constant#unit accessor
                 (s.is_a?(MB::Sound::GraphNode::Mixer) || s.is_a?(MB::Sound::GraphNode::Constant)) &&
+                  !note_number?(s) &&
                   s.constant >= 20 # Haxx to try to separate frequency values from other values; might help to have some kind of units or roles for detecting these things
               }.first
               @freq_constants << mixer if mixer
             end
           end
+
+          # Note number Constants of oscillators made from Notes (see
+          # Note#freq), retuned like fixed-frequency oscillators
+          @note_constants = @oscillators.flat_map { |o| o.respond_to?(:graph) ? o.graph : [o.frequency] }.select { |s| note_number?(s) }.uniq
 
           @portamento_filters = []
           @portamento_filters = graph.find_all_by_name('portamento')
@@ -249,6 +254,7 @@ module MB
               o.frequency = MB::Sound.tuning.frequency_of(note)
             end
           end
+          @note_constants.each { |nc| nc.constant = note } if @freq_constants.empty?
 
           freq = MB::Sound.tuning.frequency_of(note)
           @freq_constants.each do |fc|
@@ -391,6 +397,12 @@ module MB
 
         # If +node+ is a String, finds and returns a graph node of the given
         # name within the signal graph.  Otherwise, returns +node+ as is.
+        # True if +node+ is the note number Constant of an oscillator made from
+        # a Note (see Note::NUMBER_UNIT).
+        def note_number?(node)
+          node.is_a?(MB::Sound::GraphNode::Constant) && node.unit == MB::Sound::Note::NUMBER_UNIT
+        end
+
         def find_node(node)
           if node.is_a?(String)
             n = @graph.find_by_name(node)

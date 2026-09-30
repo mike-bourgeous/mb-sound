@@ -169,7 +169,7 @@ module MB
           raise "Gain map must contain at least two elements" if gain_map.length < 2
 
           gain_map = gain_map.map { |freq, gain|
-            freq = freq.frequency if freq.is_a?(Tone)
+            freq = freq.frequency if freq.is_a?(Tone) || freq.is_a?(Pitch)
 
             raise "Frequencies must be Numeric (got #{freq.class.name})" unless freq.is_a?(Numeric)
             raise "Frequency #{freq} must be real" if freq.imag != 0

@@ -424,7 +424,7 @@ RSpec.describe(MB::Sound::GraphNode, aggregate_failures: true) do
 
       # Ensure the correct types were created and stored
       expect(graph).to be_a(MB::Sound::Filter::SampleWrapper)
-      expect(graph.sources[:input].original_source).to be_a(MB::Sound::Tone)
+      expect(graph.sources[:input].original_source).to be_a(MB::Sound::Pitch)
       expect(graph.sources[:cutoff].original_source).to be_a(MB::Sound::GraphNode::Mixer)
       expect(graph.sources[:quality].original_source).to be_a(MB::Sound::GraphNode::Mixer)
 
@@ -806,7 +806,7 @@ RSpec.describe(MB::Sound::GraphNode, aggregate_failures: true) do
 
     describe '#graph_ranks' do
       it 'returns expected ordering for a simple graph' do
-        a = 300.hz
+        a = 300.hz.sine
         m = a.adsr(0.1, 0.1, 0.6, 0.5)
         b = m.multiplicands[1]
         c = 100.hz.fm(m)

@@ -25,11 +25,11 @@ module MB
         end
       end
 
-      # Converts a single Tone or Numeric Array to NArray.  If given an Array
-      # of Tones or Numeric Arrays, returns an Array of NArray.
+      # Converts a single Tone, Pitch, or Numeric Array to NArray.  If given
+      # an Array of these, returns an Array of NArray.
       def convert_sound_to_narray(sound, depth = 0)
         case sound
-        when Tone
+        when Tone, Pitch
           sound.generate
 
         when String
@@ -64,6 +64,9 @@ module MB
 
             when Tone
               k = "#{idx}: #{v.frequency.round(2)}Hz #{v.wave_type}"
+
+            when Pitch
+              k = "#{idx}: #{v.frequency.round(2)}Hz"
 
             else
               k = idx

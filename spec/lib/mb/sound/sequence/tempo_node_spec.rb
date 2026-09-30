@@ -121,8 +121,8 @@ RSpec.describe(MB::Sound::Tone) do
 
   describe '#or_forever' do
     it 'plays forever unless a duration was set' do
-      expect(2.hz.or_forever.duration).to be_nil
-      expect(2.hz.for(1).or_forever.duration).to eq(1)
+      expect(2.hz.sine.or_forever.duration).to be_nil
+      expect(2.hz.sine.for(1).or_forever.duration).to eq(1)
       expect((2.hz * 3.hz.for(1)).or_forever.graph.grep(MB::Sound::Tone).map(&:duration)).to contain_exactly(nil, 1)
     end
   end

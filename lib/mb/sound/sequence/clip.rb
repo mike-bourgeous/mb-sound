@@ -261,7 +261,7 @@ module MB
 
         # Returns a clip with every event's value shifted by +semitones+.
         def transpose(semitones)
-          map_clip { |e| e.with(value: e.value + semitones) }
+          map_clip { |e| e.with(value: Sequence.transpose_value(e.value, semitones)) }
         end
 
         # Returns a clip that plays this clip backward: each event ends where

@@ -120,12 +120,11 @@ RSpec.describe MB::Sound::Note do
         expect(MB::Sound::Note.new((hz * 1.5).hz).number).to eq(n + 7)
       end
 
-      it 'preserves attributes of the Tone' do
-        n = MB::Sound::Note.new(hz.hz.ramp.at(-3.db).for(2.123))
-        expect(n.wave_type).to eq(:ramp)
+      it 'takes the frequency (only) of a Tone or Pitch' do
+        n = MB::Sound::Note.new(hz.hz.ramp.at(-3.db))
+        expect(n).to be_a(MB::Sound::Pitch)
         expect(n.frequency.round(4)).to eq(hz.round(4))
-        expect(n.duration).to eq(2.123)
-        expect(n.amplitude).to eq(-3.db)
+        expect(MB::Sound::Note.new(hz.hz).frequency.round(4)).to eq(hz.round(4))
       end
 
       it 'produces a Tone that can be played' do
@@ -218,14 +217,16 @@ RSpec.describe MB::Sound::Note do
         expect(MB::Sound::A4.frequency.round(5)).to eq(440)
       }
 
-      it 'changes new notes but leaves existing notes alone' do
+      it 'changes existing notes and their oscillators (tuning is live)' do
         a4 = MB::Sound::A4
+        tone = a4.tone
         expect(a4.frequency.round(5)).to eq(440)
+        expect(a4.freq.sample(1)[0].round(3)).to eq(440)
 
         MB::Sound.tuning a4: 432 # it's got bad frequencies!
-        a4_lower = MB::Sound::A4
-        expect(a4.frequency.round(5)).to eq(440)
-        expect(a4_lower.frequency.round(5)).to eq(432)
+        expect(a4.frequency.round(5)).to eq(432)
+        expect(MB::Sound::A4.frequency.round(5)).to eq(432)
+        expect(tone.oscillator.frequency.sample(1)[0].round(3)).to eq(432)
       end
 
       it 'can use a different tuning note' do

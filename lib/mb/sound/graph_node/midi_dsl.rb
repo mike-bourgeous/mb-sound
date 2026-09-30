@@ -143,7 +143,7 @@ module MB
         #
         # See #hz.
         def frequency(ratio = 1, offset = 0, bend_range: DEFAULT_BEND_RANGE, smoothing: false)
-          offset = offset.frequency if offset.is_a?(MB::Sound::Tone)
+          offset = offset.frequency if offset.is_a?(MB::Sound::Tone) || offset.is_a?(MB::Sound::Pitch)
           cache(@freqs, [ratio, offset, bend_range, smoothing]) do
             MidiFrequency.new(dsl: self, bend_range: bend_range, ratio: ratio, offset: offset, sample_rate: 48000, smoothing: smoothing)
           end
@@ -182,7 +182,7 @@ module MB
         # the note +number+ is specified, then only the velocity of that note
         # is used and other notes are ignored.
         def velocity(number = nil, range: 0..1, unit: nil, si: false, smoothing: false)
-          number = number.to_note if number.is_a?(MB::Sound::Tone)
+          number = number.to_note if number.is_a?(MB::Sound::Tone) || (number.is_a?(MB::Sound::Pitch) && !number.is_a?(MB::Sound::Note))
           number = number.number if number.is_a?(MB::Sound::Note)
 
           cache(@velocities, [number, range, unit, si]) do

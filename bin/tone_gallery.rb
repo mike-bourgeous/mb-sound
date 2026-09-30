@@ -45,12 +45,8 @@ CASES.merge!(
   note_a4: -> { MB::Sound::A4.triangle.at(0.5) },
   note_cs5_square: -> { MB::Sound::Cs5.square.at(0.3) },
   tuning_b4_480: -> {
-    begin
-      MB::Sound.tuning b4: 480
-      MB::Sound::B4.sine.at(0.5)
-    ensure
-      MB::Sound.tuning.reset
-    end
+    MB::Sound.tuning b4: 480 # reset after each case
+    MB::Sound::B4.sine.at(0.5)
   },
   oscillator_direct: -> { MB::Sound::Oscillator.new(:triangle, frequency: 330, range: -0.5..0.5) },
   tone_lowpass: -> { 440.hz.ramp.at(0.5).filter(880.hz.lowpass(quality: 2)) },
@@ -85,6 +81,7 @@ MB::Sound.script(
     channels = sound.is_a?(Array) ? sound.length : 1
     path = File.join(outdir, "#{name}.flac")
     MB::Sound.render(path, sound, seconds: p.seconds, bpm: 120, channels: channels, overwrite: true)
+    MB::Sound.tuning.reset
     puts "#{name}: #{path}"
   end
 }
