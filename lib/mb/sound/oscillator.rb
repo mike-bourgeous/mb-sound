@@ -17,7 +17,7 @@ module MB
     class Oscillator
       include GraphNode
 
-      RAND = Random.new
+      RAND = ENV['RANDOM_SEED'] ? Random.new(Integer(ENV['RANDOM_SEED'])) : Random.new
       TWOPI = Math::PI * 2.0
 
       WAVE_TYPES = [

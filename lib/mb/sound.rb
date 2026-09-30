@@ -5,6 +5,10 @@ require 'mb-sound-jackffi'
 require 'mb-math'
 require 'mb-util'
 
+# RANDOM_SEED makes random sounds repeatable (e.g. for bin/null_test.rb):
+# Kernel#rand here, and Oscillator::RAND and Noise::RAND below.
+srand(Integer(ENV['RANDOM_SEED'])) if ENV['RANDOM_SEED']
+
 require_relative 'sound/numeric_sound_mixins'
 
 # Load C extensions
