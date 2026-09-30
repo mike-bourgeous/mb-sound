@@ -86,7 +86,7 @@ RSpec.describe MB::Sound::Note do
       end
 
       it 'produces a Tone that can be played' do
-        expect(MB::Sound::Note.new(56).generate(1000).max).not_to eq(0)
+        expect(MB::Sound::Note.new(56).sample(1000).max).not_to eq(0)
       end
 
       it 'can parse an Integer note number from a String' do
@@ -128,7 +128,7 @@ RSpec.describe MB::Sound::Note do
       end
 
       it 'produces a Tone that can be played' do
-        expect(MB::Sound::Note.new(144.hz).generate(1000).max).not_to eq(0)
+        expect(MB::Sound::Note.new(144.hz).sample(1000).max).not_to eq(0)
       end
     end
 
@@ -207,7 +207,7 @@ RSpec.describe MB::Sound::Note do
       end
 
       it 'produces a Tone that can be played' do
-        expect(MB::Sound::Note.new('C4').generate(1000).max).not_to eq(0)
+        expect(MB::Sound::Note.new('C4').sample(1000).max).not_to eq(0)
       end
     end
 

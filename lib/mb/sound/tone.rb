@@ -375,13 +375,6 @@ module MB
         oscillator.last_freq
       end
 
-      # Generates +count+ samples of the tone (one second by default).  The
-      # tone parameters cannot be changed after this method is called.
-      def generate(count = nil)
-        count ||= @sample_rate
-        oscillator.sample(count.round)
-      end
-
       # Generates +count+ samples of the tone.  The tone parameters cannot be
       # changed directly after this method is called; instead Oscillator
       # parameters must be changed (TODO: fix this; maybe combine the two

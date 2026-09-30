@@ -34,7 +34,7 @@ RSpec.describe(MB::Sound::FFTMethods) do
       }
 
       let(:sine_input_small) {
-        tone = Numo::DFloat.cast(12000.hz.at(1).generate(24))
+        tone = Numo::DFloat.cast(12000.hz.at(1).sample(24))
         n.times do
           tone = Numo::DFloat.cast([tone] * 24)
         end
@@ -42,7 +42,7 @@ RSpec.describe(MB::Sound::FFTMethods) do
       }
 
       let(:sine_input_large) {
-        tone = Numo::DFloat.cast(4000.hz.at(1).generate(48))
+        tone = Numo::DFloat.cast(4000.hz.at(1).sample(48))
         n.times do
           tone = Numo::DFloat.cast([tone] * 48)
         end
@@ -58,7 +58,7 @@ RSpec.describe(MB::Sound::FFTMethods) do
       }
 
       let(:cosine_input) {
-        tone = Numo::DFloat.cast(12000.hz.with_phase(90.degrees).at(1).generate(24))
+        tone = Numo::DFloat.cast(12000.hz.with_phase(90.degrees).at(1).sample(24))
         n.times do
           tone = Numo::DFloat.cast([tone] * 24)
         end
@@ -66,7 +66,7 @@ RSpec.describe(MB::Sound::FFTMethods) do
       }
 
       let(:ramp_input) {
-        tone = Numo::DFloat.cast(4000.hz.ramp.at(1).generate(48))
+        tone = Numo::DFloat.cast(4000.hz.ramp.at(1).sample(48))
         n.times do
           tone = Numo::DFloat.cast([tone] * 48)
         end

@@ -236,7 +236,7 @@ module MB
           data = read(file_tone_data, max_frames: all ? nil : samples + offset)
 
         when Tone, Pitch
-          data = [file_tone_data.generate(all ? nil : samples + offset)]
+          data = [file_tone_data.sample(all ? file_tone_data.sample_rate.round : samples + offset)]
 
         when Filter
           impulse = file_tone_data.impulse_response(samples)

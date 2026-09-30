@@ -16,7 +16,7 @@ RSpec.describe(MB::Sound::GenerationMethods) do
 
       expect(histogram.values.max.to_f / histogram.values.min).to be_between(0.75, 1.33)
 
-      diff = 2000.hz.ramp.generate(48000).diff
+      diff = 2000.hz.ramp.sample(48000).diff
       expect(diff.mean).to be_within(0.01).of(0)
 
       diff_hist = {}

@@ -1,7 +1,7 @@
 RSpec.describe MB::Sound::Tone do
   describe '#generate' do
     it 'can generate triangle wave samples in an NArray' do
-      data = 500.hz.triangle.at(0.85).generate(48000)
+      data = 500.hz.triangle.at(0.85).sample(48000)
       expect(data.length).to eq(48000)
       expect(data.max.round(3)).to eq(0.85)
       expect(data.min.round(3)).to eq(-0.85)
@@ -10,7 +10,7 @@ RSpec.describe MB::Sound::Tone do
     end
 
     it 'can generate square wave samples in an NArray' do
-      data = 500.hz.square.at(0.85).generate(48000)
+      data = 500.hz.square.at(0.85).sample(48000)
       expect(data.length).to eq(48000)
       expect(data.max.round(3)).to eq(0.85)
       expect(data.min.round(3)).to eq(-0.85)
@@ -189,17 +189,17 @@ RSpec.describe MB::Sound::Tone do
     end
 
     it 'passes a lower-frequency triangle wave unmodified' do
-      data = 50.hz.triangle.at(1).generate(1024)
+      data = 50.hz.triangle.at(1).sample(1024)
       expect(MB::M.round(f.process(data), 6)).to eq(MB::M.round(data, 6))
     end
 
     it 'passes an equal-frequency triangle wave unmodified' do
-      data = 375.hz.triangle.at(1).generate(1024)
+      data = 375.hz.triangle.at(1).sample(1024)
       expect(MB::M.round(f.process(data), 6)).to eq(MB::M.round(data, 6))
     end
 
     it 'does not pass an equal-frequency sine wave unmodified' do
-      data = 375.hz.sine.at(1).generate(1024)
+      data = 375.hz.sine.at(1).sample(1024)
       expect(MB::M.round(f.process(data), 6)).not_to eq(MB::M.round(data, 6))
     end
   end

@@ -132,11 +132,6 @@ module MB
         signal.sample(count)
       end
 
-      # Returns +count+ samples of #signal (see Tone#generate).
-      def generate(count = nil)
-        signal.generate(count)
-      end
-
       def sources
         { signal: signal }
       end

@@ -30,7 +30,8 @@ module MB
       def convert_sound_to_narray(sound, depth = 0)
         case sound
         when Tone, Pitch
-          sound.generate
+          # One second, so FFT bins are 1 Hz apart
+          sound.sample(sound.sample_rate.round)
 
         when String
           # If the filename is within an array, only return the first channel
