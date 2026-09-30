@@ -16,10 +16,10 @@
 #     render('song.flac', bars: 8, tail: true) { stereo_song }
 #
 # Snippets to try in bin/sound.rb:
-#     bg :saw, 110.hz.ramp.at(0.2).forever.stereo.filter(:lowpass, cutoff: channels(500, 1500))   # a different filter per side
-#     bg :sweep, 110.hz.ramp.at(0.2).forever.stereo.filter(:lowpass, cutoff: 4.bars.lfo.at(300..2000).with_phase(0))
-#     bg :pan, 330.hz.triangle.at(0.2).forever.pan(1.bar.lfo)                  # pans left and right every bar
-#     bg :wide, stereo(220.hz.ramp.at(0.2), 220.7.hz.ramp.at(0.2)).forever.width(1.5)
+#     bg :saw, 110.hz.ramp.at(0.2).stereo.filter(:lowpass, cutoff: channels(500, 1500))   # a different filter per side
+#     bg :sweep, 110.hz.ramp.at(0.2).stereo.filter(:lowpass, cutoff: 4.bars.lfo.at(300..2000).with_phase(0))
+#     bg :pan, 330.hz.triangle.at(0.2).pan(1.bar.lfo)                  # pans left and right every bar
+#     bg :wide, stereo(220.hz.ramp.at(0.2), 220.7.hz.ramp.at(0.2)).width(1.5)
 #     bg :echo, (seq(C4, E4, G4).n8.loop.then { |c| c.tone.at(0.3) * c.env(0, 0.1, 0, 0.1) }).delay(channels(3.n16, 1.n4), feedback: -6.db, dry: 1)
 #     master { |mix| mix.reverb(:hall, wet: -8.db).softclip(0.6, 0.98) }     # the whole mix through one stereo reverb
 #     l, r = stereo(1.constant, 2.constant)                                   # bundles destructure like Arrays

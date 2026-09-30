@@ -200,7 +200,7 @@ RSpec.describe(MB::Sound::ScriptRunner) do
 
       r = runner(:song, [outfile, '-q', '--graphviz'])
       song = -> {
-        MB::Sound.bg(:tone, 220.hz.sine.at(0.5).forever.named('song tone'))
+        MB::Sound.bg(:tone, 220.hz.sine.at(0.5).named('song tone'))
         MB::Sound.master { |mix| mix.softclip }
       }
       expect { r.run_song(bars: 1) { song.call } }.to output(/Wrote GraphViz image to song.png.*Rendered/m).to_stdout
@@ -215,7 +215,7 @@ RSpec.describe(MB::Sound::ScriptRunner) do
       expect {
         r.run_song(bars: 3) {
           MB::Sound.bpm 120
-          MB::Sound.bg(:tone, 220.hz.sine.at(0.5).forever, fade: 0)
+          MB::Sound.bg(:tone, 220.hz.sine.at(0.5), fade: 0)
           MB::Sound.at_bar(2) { MB::Sound.bpm 90 }
           MB::Sound.at_bar(3) { seen << MB::Sound.transport.bpm }
         }
@@ -242,7 +242,7 @@ RSpec.describe(MB::Sound::ScriptRunner) do
         t = MB::U.clock_now
         r.run_song {
           MB::Sound.bpm 120
-          MB::Sound.bg(:tone, 220.hz.sine.forever, fade: 0)
+          MB::Sound.bg(:tone, 220.hz.sine, fade: 0)
           MB::Sound.at_bar(2) { later = true }
         }
 

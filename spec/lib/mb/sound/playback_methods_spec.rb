@@ -26,21 +26,27 @@ RSpec.describe(MB::Sound::PlaybackMethods) do
       out = MB::Sound::NullOutput.new(channels: 2, sleep: false)
       allow(out).to receive(:write) { |data| written << data.map(&:dup) }
 
-      MB::Sound.play(1.constant.for(0.01), output: out, quiet: true)
+      MB::Sound.play(finite(1.constant, 0.01), output: out, quiet: true)
       expect(written.flat_map { |d| d[0].to_a }.max).to be_within(1e-6).of(-10.db)
 
       written.clear
       MB::Sound.master_gain(1)
-      MB::Sound.play(1.constant.for(0.01), output: out, quiet: true)
+      MB::Sound.play(finite(1.constant, 0.01), output: out, quiet: true)
       expect(written.flat_map { |d| d[0].to_a }.max).to be_within(1e-6).of(1)
+    end
+
+    it 'tells how to stop node graphs, which may play forever' do
+      out = MB::Sound::NullOutput.new(channels: 2, sleep: false)
+      expect { MB::Sound.play(finite(1.constant, 0.01), output: out, plot: false, clear: false) }.to output(/Ctrl-C/).to_stderr
+      expect { MB::Sound.play(Numo::SFloat.zeros(10), output: out, plot: false, clear: false) }.not_to output(/Ctrl-C/).to_stderr
     end
 
     it 'reuses the cached output by default' do
       outputs = []
       allow(MB::Sound).to receive(:output).and_wrap_original { |m, **kw| m.call(**kw).tap { |o| outputs << o } }
 
-      MB::Sound.play(440.hz.sine.for(0.05), quiet: true)
-      MB::Sound.play(440.hz.sine.for(0.05), quiet: true)
+      MB::Sound.play(finite(440.hz.sine, 0.05), quiet: true)
+      MB::Sound.play(finite(440.hz.sine, 0.05), quiet: true)
 
       expect(outputs[0]).to equal(outputs[1])
       expect(outputs[0]).not_to be_closed
@@ -55,24 +61,24 @@ RSpec.describe(MB::Sound::PlaybackMethods) do
 
     describe '#bg' do
       it 'returns reused player numbers and lists players' do
-        a = MB::Sound.bg(220.hz.sine.forever)
-        b = MB::Sound.bg(330.hz.sine.forever)
+        a = MB::Sound.bg(220.hz.sine)
+        b = MB::Sound.bg(330.hz.sine)
         expect([a, b]).to eq([1, 2])
         expect(MB::Sound.players.keys).to eq([1, 2])
 
         MB::Sound.stop(1, fade: 0)
-        expect(MB::Sound.bg(440.hz.sine.forever)).to eq(1)
+        expect(MB::Sound.bg(440.hz.sine)).to eq(1)
       end
 
       it 'accepts a name and replaces the player with the same name' do
-        expect(MB::Sound.bg(:bass, 220.hz.sine.forever)).to eq(:bass)
-        expect(MB::Sound.bg(:bass, 110.hz.sine.forever)).to eq(:bass)
+        expect(MB::Sound.bg(:bass, 220.hz.sine)).to eq(:bass)
+        expect(MB::Sound.bg(:bass, 110.hz.sine)).to eq(:bass)
         expect(MB::Sound.players.keys).to eq([:bass])
       end
 
       it 'returns right away' do
         t = MB::U.clock_now
-        MB::Sound.bg(440.hz.sine.forever)
+        MB::Sound.bg(440.hz.sine)
         expect(MB::U.clock_now - t).to be < 0.5
       end
 
@@ -80,8 +86,8 @@ RSpec.describe(MB::Sound::PlaybackMethods) do
         outputs = []
         allow(MB::Sound).to receive(:output).and_wrap_original { |m, **kw| m.call(**kw).tap { |o| outputs << o } }
 
-        MB::Sound.bg(220.hz.sine.forever)
-        MB::Sound.bg(330.hz.sine.forever)
+        MB::Sound.bg(220.hz.sine)
+        MB::Sound.bg(330.hz.sine)
         expect(outputs.length).to eq(1)
       end
 
@@ -92,40 +98,40 @@ RSpec.describe(MB::Sound::PlaybackMethods) do
 
     describe '#stop' do
       it 'stops the most recently started player with no arguments' do
-        MB::Sound.bg(:a, 220.hz.sine.forever)
-        MB::Sound.bg(:b, 330.hz.sine.forever)
+        MB::Sound.bg(:a, 220.hz.sine)
+        MB::Sound.bg(:b, 330.hz.sine)
         expect(MB::Sound.stop(fade: 0)).to eq([:b])
         expect(MB::Sound.stop(fade: 0)).to eq([:a])
         expect(MB::Sound.stop).to eq([])
       end
 
       it 'stops named players' do
-        MB::Sound.bg(:a, 220.hz.sine.forever)
-        MB::Sound.bg(:b, 330.hz.sine.forever)
+        MB::Sound.bg(:a, 220.hz.sine)
+        MB::Sound.bg(:b, 330.hz.sine)
         expect(MB::Sound.stop(:a, fade: 0)).to eq([:a])
         expect(MB::Sound.players.keys).to eq([:b])
       end
 
       it 'stops everything with :all or #outro' do
-        MB::Sound.bg(220.hz.sine.forever)
-        MB::Sound.bg(330.hz.sine.forever)
+        MB::Sound.bg(220.hz.sine)
+        MB::Sound.bg(330.hz.sine)
         expect(MB::Sound.stop(:all, fade: 0)).to eq([1, 2])
 
-        MB::Sound.bg(220.hz.sine.forever)
+        MB::Sound.bg(220.hz.sine)
         expect(MB::Sound.outro(fade: 0)).to eq([1])
         expect(MB::Sound.players).to be_empty
       end
 
       it 'fades everything out over four bars with #outro' do
-        MB::Sound.bg(:a, 220.hz.sine.forever)
-        MB::Sound.bg(:b, 330.hz.sine.forever, at: :now)
+        MB::Sound.bg(:a, 220.hz.sine)
+        MB::Sound.bg(:b, 330.hz.sine, at: :now)
         sleep 0.05
         expect(MB::Sound.outro).to contain_exactly(:a, :b)
         expect(MB::Sound.players.values).to all(end_with('(fading out)'))
       end
 
       it 'has #fadeout as an alias for #outro' do
-        MB::Sound.bg(:a, 220.hz.sine.forever)
+        MB::Sound.bg(:a, 220.hz.sine)
         sleep 0.05
         expect(MB::Sound.fadeout(fade: 0)).to eq([:a])
         expect(MB::Sound.players).to be_empty
@@ -136,7 +142,7 @@ RSpec.describe(MB::Sound::PlaybackMethods) do
       end
 
       it 'fades out over four bars by default' do
-        MB::Sound.bg(:a, 220.hz.sine.forever)
+        MB::Sound.bg(:a, 220.hz.sine)
         sleep 0.05
         MB::Sound.stop(:a)
         expect(MB::Sound.players[:a]).to end_with('(fading out)')
@@ -144,7 +150,7 @@ RSpec.describe(MB::Sound::PlaybackMethods) do
       end
 
       it 'can fade out over a given number of bars' do
-        MB::Sound.bg(:a, 220.hz.sine.forever)
+        MB::Sound.bg(:a, 220.hz.sine)
         sleep 0.05
         expect(MB::Sound.stop(:a, fade: 1/10r)).to eq([:a])
         expect(MB::Sound.players[:a]).to end_with('(fading out)')
@@ -154,8 +160,8 @@ RSpec.describe(MB::Sound::PlaybackMethods) do
       end
 
       it 'stops everything right away with #panic, including fading and waiting players' do
-        MB::Sound.bg(:a, 220.hz.sine.forever)
-        MB::Sound.bg(:b, 330.hz.sine.forever)   # waits for the next bar
+        MB::Sound.bg(:a, 220.hz.sine)
+        MB::Sound.bg(:b, 330.hz.sine)   # waits for the next bar
         sleep 0.05
         MB::Sound.stop(:a)                       # fading out over four bars
         expect(MB::Sound.players.keys).to contain_exactly(:a, :b)
@@ -166,7 +172,7 @@ RSpec.describe(MB::Sound::PlaybackMethods) do
       end
 
       it 'keeps master effects but clears their tails with #panic' do
-        MB::Sound.bg(:a, 220.hz.sine.forever)
+        MB::Sound.bg(:a, 220.hz.sine)
         MB::Sound.master(at: :now) { |mix| mix.delay(seconds: 0.5) }
         sleep 0.05 until MB::Sound.master.start_with?('master:')
 
@@ -229,7 +235,7 @@ RSpec.describe(MB::Sound::PlaybackMethods) do
       frames = 0
       session.add_tap { |mix| frames += mix[0].length }
       within do
-        MB::Sound.bg(1.constant.for(0.1))
+        MB::Sound.bg(finite(1.constant, 0.1))
         expect(MB::Sound.wait).to eq(true)
       end
       expect(session).to be_idle
@@ -239,7 +245,7 @@ RSpec.describe(MB::Sound::PlaybackMethods) do
     it 'stops waiting for a tail that never ends after the tail limit' do
       stub_const('MB::Sound::Session::Master::MAX_TAIL_SECONDS', 1) # instead of 10 s of rendering
       within do
-        MB::Sound.bg(1.constant.for(0.05))
+        MB::Sound.bg(finite(1.constant, 0.05))
         MB::Sound.master(at: :now) { |mix| mix.delay(seconds: 0.1, feedback: 1, dry: 1, wet: 1) }
         expect(MB::Sound.wait(timeout: 30)).to eq(true)
       end
@@ -292,7 +298,7 @@ RSpec.describe(MB::Sound::PlaybackMethods) do
     end
 
     it 'resumes a stopped named player' do
-      MB::Sound.bg(:pad, 220.hz.sine.forever)
+      MB::Sound.bg(:pad, 220.hz.sine)
       MB::Sound.stop(:pad, fade: 0)
       expect(MB::Sound.stopped.keys).to eq([:pad])
       expect(MB::Sound.resume(:pad)).to eq(:pad)
@@ -315,7 +321,7 @@ RSpec.describe(MB::Sound::PlaybackMethods) do
     end
 
     it 'plots the newest mix buffers until interrupted, then removes its tap' do
-      MB::Sound.bg(220.hz.sine.forever)
+      MB::Sound.bg(220.hz.sine)
       plotted = []
       allow_any_instance_of(MB::Sound::PlotOutput).to receive(:plot) { |_, data|
         plotted << data
@@ -412,13 +418,13 @@ RSpec.describe(MB::Sound::PlaybackMethods) do
     end
 
     it 'stops when every sound ends' do
-      seconds = MB::Sound.render(filename, 440.hz.sine.for(0.5), bpm: 90)
+      seconds = MB::Sound.render(filename, finite(440.hz.sine, 0.5), bpm: 90)
       expect(seconds).to be_within(0.02).of(0.5)
     end
 
     it 'renders the tail of master effects after the last sound ends' do
       seconds = MB::Sound.render(filename, bpm: 120) do
-        MB::Sound.bg(0.5.constant.for(0.1))
+        MB::Sound.bg(finite(0.5.constant, 0.1))
         MB::Sound.master { |mix| mix.delay(seconds: 0.2) }
       end
 
@@ -433,7 +439,7 @@ RSpec.describe(MB::Sound::PlaybackMethods) do
       stub_const('MB::Sound::Session::Master::MAX_TAIL_SECONDS', 1) # instead of 10 s of rendering
 
       infinite = proc do
-        MB::Sound.bg(0.5.constant.for(0.1))
+        MB::Sound.bg(finite(0.5.constant, 0.1))
         MB::Sound.master { |mix| mix.delay(seconds: 0.1, feedback: 1, dry: 1, wet: 1) }
       end
       expect(MB::Sound.render(filename, &infinite)).to be_within(0.02).of(1.1)
@@ -454,13 +460,13 @@ RSpec.describe(MB::Sound::PlaybackMethods) do
     end
 
     it 'does not overwrite files unless asked' do
-      MB::Sound.render(filename, 440.hz.sine.for(0.1))
-      expect { MB::Sound.render(filename, 440.hz.sine.for(0.1)) }.to raise_error(/exists/i)
-      expect { MB::Sound.render(filename, 440.hz.sine.for(0.1), overwrite: true) }.not_to raise_error
+      MB::Sound.render(filename, finite(440.hz.sine, 0.1))
+      expect { MB::Sound.render(filename, finite(440.hz.sine, 0.1)) }.to raise_error(/exists/i)
+      expect { MB::Sound.render(filename, finite(440.hz.sine, 0.1), overwrite: true) }.not_to raise_error
     end
 
     it 'does not move the live timeline' do
-      expect { MB::Sound.render(filename, 440.hz.sine.for(0.1)) }.not_to change { MB::Sound.transport.position }
+      expect { MB::Sound.render(filename, finite(440.hz.sine, 0.1)) }.not_to change { MB::Sound.transport.position }
     end
   end
 

@@ -22,8 +22,8 @@ MB::Sound.song_script(bars: 30) {
   chords = Array.new(4) { |idx|
     nd = [MB::Sound::As2, MB::Sound::Cs3, MB::Sound::Ds3, MB::Sound::Fs3, MB::Sound::Gs3].map { |n|
       note = MB::Sound::Note.new((2 - idx) * 12 + n.number)
-      n = note.ramp.at(1).forever
-      n2 = note.triangle.at(1).forever
+      n = note.ramp.at(1)
+      n2 = note.triangle.at(1)
       if idx > 1
         env = MB::Sound.adsr(0.01, 0.5, 0.5, 2 + idx, auto_release: 2 + (6 - idx * 2))
       else
@@ -43,7 +43,7 @@ MB::Sound.song_script(bars: 30) {
   }.reduce(&:+)
 
   delay_lfo = 0.0897.hz.sine.at(0..250)
-  filter_lfo = (1.0 / 12.0).hz.sine.at(3500..7500).forever
+  filter_lfo = (1.0 / 12.0).hz.sine.at(3500..7500)
 
   flange1 = chords + chords.delay(samples: delay_lfo).softclip(0.1) + chords.delay(seconds: 0.5).delay(seconds: 1.01, feedback: 0.7) + chords.delay(seconds: 0.51)
   flange2 = chords + chords.delay(samples: (250 - delay_lfo)).softclip(0.1) + chords.delay(seconds: 0.99, feedback: 0.6)

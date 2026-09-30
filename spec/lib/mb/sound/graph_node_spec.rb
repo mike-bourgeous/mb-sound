@@ -12,16 +12,6 @@ RSpec.describe(MB::Sound::GraphNode, aggregate_failures: true) do
     expect(graph.sample(5)).to eq(Numo::SFloat.zeros(5).fill(-2))
   end
 
-  it 'resets default durations on tones added or multiplied to a graph' do
-    graph = (100.hz.for(2) + 33.hz.or_for(0.1) + 25.hz.or_for(0.1) - 11.hz.or_for(0.1)) * 10.hz.or_for(0.1) * 15.hz.or_for(0.1) - 5.hz.or_for(0.1)
-
-    # Expect exactly two full seconds of audio despite potentially shorter tones mixed in
-    20.times do
-      expect(graph.sample(4800)).to be_a(Numo::SFloat)
-    end
-    expect(graph.sample(4800)).to eq(nil)
-  end
-
   it 'multiplies full-scale tones without changing their amplitudes' do
     # Oscillators default to full scale (-1..1) on either side of *
     graph = 0.hz.square.at(2) * 0.hz.square * 0.hz.square
@@ -543,11 +533,11 @@ RSpec.describe(MB::Sound::GraphNode, aggregate_failures: true) do
     end
 
     it 'returns nil at end of stream' do
-      expect(123.hz.for(0).multi_sample(100, 1)).to eq(nil)
+      expect(finite(123.hz, 0).multi_sample(100, 1)).to eq(nil)
     end
 
     it 'handles end of stream part way through concatenation' do
-      result = 123.hz.for(5.0 / 48000).multi_sample(2, 10)
+      result = finite(123.hz, 5.0 / 48000).multi_sample(2, 10)
       expect(result.length).to eq(5)
     end
   end
@@ -703,10 +693,6 @@ RSpec.describe(MB::Sound::GraphNode, aggregate_failures: true) do
       end
     end
   end
-
-  pending '#forever'
-
-  pending '#for'
 
   context 'implementations' do
     context 'provide a sample_rate' do

@@ -17,7 +17,7 @@ module MB
       #
       # Example:
       #     # Runnable in bin/sound.rb
-      #     a, b, c = 200.hz.forever.tee(3) ; nil
+      #     a, b, c = 200.hz.tee(3) ; nil
       #     d = a * 100.hz + b * 200.hz + c * 300.hz ; nil
       #     play d
       class Tee
@@ -91,13 +91,6 @@ module MB
           # Describes this branch as a String.
           def to_s
             "Branch #{@index + 1} of #{@tee.branches.count}#{graph_node_name && " (#{graph_node_name})"}"
-          end
-
-          # Resets the internal done flag to allow this tee to flow data again,
-          # then passes the given duration to upstream nodes.
-          def for(duration, recursive: true)
-            @tee.reset
-            super
           end
 
           # Pass unknown methods through to the upstream node.

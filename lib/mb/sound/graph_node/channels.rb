@@ -123,7 +123,7 @@ module MB
         # a graph node.
         #
         # Example (bin/sound.rb):
-        #     bg stereo(220.hz.ramp.at(0.2), 221.hz.ramp.at(0.2)).forever.width(1.5)
+        #     bg stereo(220.hz.ramp.at(0.2), 221.hz.ramp.at(0.2)).width(1.5)
         def width(amount)
           mid, side = mid_side
           Channels.new([mid, side * amount]).from_mid_side
@@ -161,7 +161,7 @@ module MB
         # Bundles with more channels raise an error.
         #
         # Example (bin/sound.rb):
-        #     bg stereo(220.hz.ramp.at(0.2), 330.hz.ramp.at(0.2)).forever.pan(2.bars.lfo)
+        #     bg stereo(220.hz.ramp.at(0.2), 330.hz.ramp.at(0.2)).pan(2.bars.lfo)
         def pan(position = 0, law: :equal_power)
           return @outputs[0].pan(position, law: law) if channel_count == 1
           raise ArgumentError, "Can only pan bundles with 1 or 2 channels (got #{channel_count})" unless channel_count == 2

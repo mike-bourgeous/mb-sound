@@ -23,10 +23,10 @@ MB::Sound.script(
 
   MB::U.bench_csv(prefix: MB::U.ruby_info) do |bench|
     bench.report('build wavetable') do
-      phase = 100.hz.ramp.at(1).forever
+      phase = 100.hz.ramp.at(1)
       phase_arr = phase.sample(samples)
 
-      number = 1.hz.ramp.at(0..1).forever
+      number = 1.hz.ramp.at(0..1)
       number_arr = number_arr = number.sample(samples)
 
       wt = phase.wavetable(wavetable: 'sounds/piano0.flac', number: number)

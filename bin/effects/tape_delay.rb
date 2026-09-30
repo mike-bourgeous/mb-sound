@@ -50,7 +50,7 @@ MB::Sound.effect_script(
   # in stereo: 32 samples ~180% of realtime, 256 ~45%)
   internal_bufsize = [512, 256, 128, 64, 32].find { |n| n <= delay_samples - wobble } || 32
 
-  delay_samples = delay_samples + -0.4.hz.ramp.forever.at(0..wobble) if p.pitch
+  delay_samples = delay_samples + -0.4.hz.ramp.at(0..wobble) if p.pitch
   delay_samples = delay_samples.constant if delay_samples.is_a?(Numeric)
 
   # TODO: ping-pong

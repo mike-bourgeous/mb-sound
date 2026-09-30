@@ -66,7 +66,7 @@ module MB
           @osc_freq = (@number_constant + @freq_mod).freq
 
           # not quite detuning; unison detuning gives phasing of harmonics
-          # @phase_mod = 100.hz.sine.noise.at(20).filter(:lowpass, cutoff: 2).filter(:highpass, cutoff: 0.25).forever
+          # @phase_mod = 100.hz.sine.noise.at(20).filter(:lowpass, cutoff: 2).filter(:highpass, cutoff: 0.25)
 
           @oscillator = MB::Sound::Oscillator.new(:ramp, frequency: @osc_freq).named('Voice oscillator')
           @oscillator.wave_type = wave_type if wave_type

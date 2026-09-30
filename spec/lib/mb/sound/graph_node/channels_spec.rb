@@ -148,7 +148,7 @@ RSpec.describe(MB::Sound::GraphNode::Channels) do
 
   it 'plays with MB::Sound.play' do
     ENV['OUTPUT_TYPE'] = 'null'
-    expect { MB::Sound.play(bundle.map { |c| c.for(0.01) }.channels, quiet: true) }.not_to raise_error
+    expect { MB::Sound.play(bundle.map { |c| finite(c, 0.01) }.channels, quiet: true) }.not_to raise_error
   ensure
     ENV.delete('OUTPUT_TYPE')
   end

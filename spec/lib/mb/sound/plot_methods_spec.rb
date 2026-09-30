@@ -37,7 +37,7 @@ RSpec.describe(MB::Sound::PlotMethods) do
   end
 
   describe '#hist' do
-    let(:output) { MB::Sound.hist(tone) }
+    let(:output) { MB::Sound.hist(tone.generate(5 * 48000)) }
 
     it 'can draw a histogram' do |ex|
       expect(lines.length).to eq(40)

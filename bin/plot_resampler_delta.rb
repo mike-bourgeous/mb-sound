@@ -39,13 +39,13 @@ MB::Sound.script(
   ]
   data = modes.flat_map { |(a, b)|
     d1 = MB::M.select_zero_crossings(
-      freq.hz.at(1).at_rate(from_rate).forever
+      freq.hz.at(1).at_rate(from_rate)
         .resample(to_rate, mode: a)
         .multi_sample(multi_samples, multi_count),
       nil
     )
     d2 = MB::M.select_zero_crossings(
-      freq.hz.at(1).at_rate(from_rate).forever
+      freq.hz.at(1).at_rate(from_rate)
         .resample(to_rate, mode: b)
         .multi_sample(multi_samples, multi_count),
       nil

@@ -132,7 +132,7 @@ module MB
         # #triangle and #ramp work as on any Pitch; see #lfo for modulation.
         #
         # Example (bin/sound.rb):
-        #     bg 110.hz.ramp.at(1).fm(1.beat.hz.at(20)).forever
+        #     bg 110.hz.ramp.at(1).fm(1.beat.hz.at(20))
         def hz
           Pitch.new(TempoNode.new(self, mode: :hz))
         end
@@ -146,7 +146,7 @@ module MB
         #
         # Example (bin/sound.rb):
         #     cutoff = 4.bars.lfo.triangle.at(200..2000)
-        #     bg :pad, 110.hz.ramp.at(1).filter(:lowpass, cutoff: cutoff, quality: 4).forever
+        #     bg :pad, 110.hz.ramp.at(1).filter(:lowpass, cutoff: cutoff, quality: 4)
         def lfo
           hz.lfo
         end

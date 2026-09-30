@@ -16,27 +16,27 @@ BUFFER = 800
 RATE = 48000
 
 WORKLOADS = {
-  'sine x1' => -> { 220.hz.sine.at(0.5).forever },
-  'ramp x1' => -> { 220.hz.ramp.at(0.5).forever },
-  'complex_sine x1' => -> { 220.hz.complex_sine.at(0.5).forever.real },
+  'sine x1' => -> { 220.hz.sine.at(0.5) },
+  'ramp x1' => -> { 220.hz.ramp.at(0.5) },
+  'complex_sine x1' => -> { 220.hz.complex_sine.at(0.5).real },
   'fm 6-op x8 voices' => -> {
     voices = 8.times.map { |v|
       f = 110 * 2**(v / 12.0)
       # op6 -> op5 -> ... -> op1, each modulating the next one's phase
       mod = nil
       [7, 5, 3, 2, 1].each_with_index do |ratio, idx|
-        op = (f * ratio).hz.sine.at(1).forever
+        op = (f * ratio).hz.sine.at(1)
         op = op.pm(mod) if mod
         mod = op * (1.5 - idx * 0.2)
       end
-      f.hz.sine.at(0.1).forever.pm(mod)
+      f.hz.sine.at(0.1).pm(mod)
     }
     voices.sum
   },
   'supersaw 7 x8 voices' => -> {
     voices = 8.times.map { |v|
       f = 110 * 2**(v / 12.0)
-      7.times.map { |i| (f * 2**((i - 3) * 0.1 / 12)).hz.ramp.at(0.02).forever.with_phase(i) }.sum
+      7.times.map { |i| (f * 2**((i - 3) * 0.1 / 12)).hz.ramp.at(0.02).with_phase(i) }.sum
     }
     voices.sum
   },

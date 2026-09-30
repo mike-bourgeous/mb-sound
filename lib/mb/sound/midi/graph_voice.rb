@@ -160,7 +160,6 @@ module MB
             s.is_a?(MB::Sound::Tone) || s.is_a?(MB::Sound::Oscillator)
           }.map { |o|
             if o.is_a?(MB::Sound::Tone)
-              o.forever
               o.oscillator
             else
               o

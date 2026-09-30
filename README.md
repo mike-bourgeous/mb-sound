@@ -45,14 +45,14 @@ play (input * 400.hz.at(0.5..1.0) * 10).softclip(0, 1).filter(250.hz.highpass(qu
 play (
   (
     (
-      D4.triangle.forever *
+      D4.triangle *
       4.hz.ramp.at(1..0).filter(100.hz.lowpass) *
       0.125.hz.triangle
     ) + (
-      (D2.triangle.forever + noise.at(-46.db)) *
+      (D2.triangle + noise.at(-46.db)) *
       2.hz.ramp.at(1..0).filter(100.hz.lowpass)
     ) + (
-      D1.square.forever.filter(1000.hz.lowpass(quality: 4)) *
+      D1.square.filter(1000.hz.lowpass(quality: 4)) *
       0.5.hz.ramp.at(1..0).filter(100.hz.lowpass) *
       (1/32.0).hz.triangle
     )
@@ -69,10 +69,10 @@ play '/tmp/ramp.flac'
 
 # Some hi-hat rhythms
 play 1000.hz.sine.noise.at(-30.db).filter(7000.hz.highpass(quality: 10)).filter(12345.hz.lowpass(quality: 4)) * (1.25.hz.ramp.with_phase(Math::PI).at(0..-60).db + 2.5.hz.ramp.at(-10..-70).db)
-play 1000.hz.sine.noise.at(-30.db).filter(7000.hz.highpass(quality: 10)).filter(12345.hz.lowpass(quality: 4)) * (5.hz.ramp.with_phase(Math::PI).at(0..-60).db + 5.hz.ramp.at(-10..-70).db).forever
+play 1000.hz.sine.noise.at(-30.db).filter(7000.hz.highpass(quality: 10)).filter(12345.hz.lowpass(quality: 4)) * (5.hz.ramp.with_phase(Math::PI).at(0..-60).db + 5.hz.ramp.at(-10..-70).db)
 
 # Heavily distorted synth kick
-play (2.5.hz.ramp.at(1.85) ** 13).filter(10.hz.highpass).softclip(0.1, 0.6).filter(cutoff: 2.5.hz.ramp.at(1..0) ** 10 * 0.2.hz.sine.at(120..300) + 40, quality: 14).filter(40.hz.highpass).softclip.forever
+play (2.5.hz.ramp.at(1.85) ** 13).filter(10.hz.highpass).softclip(0.1, 0.6).filter(cutoff: 2.5.hz.ramp.at(1..0) ** 10 * 0.2.hz.sine.at(120..300) + 40, quality: 14).filter(40.hz.highpass).softclip
 
 # Thick bass
 play (((42.5.hz.sine + 85.hz.triangle + 42.5.hz.saw) * adsr(0.01, 0.1, 0.5, 0.1).db(-30)).filter(:lowpass, cutoff: adsr(0.01, 0.1, 0.5, 0.1).db(-30) * 1850 + 85, quality: 3) * 8.db).softclip(0.1, 1)
@@ -108,12 +108,16 @@ synthesizer in `bin/synths/fm_synth.rb` and a flanger effect in
 ### Generating tones
 
 ```ruby
+# Oscillators play until stopped (Ctrl-C); an envelope with auto_release
+# ends a note after that many seconds
+def note(tone, seconds) = tone.adsr(0.005, 0.05, 0.8, 0.05, auto_release: seconds)
+
 5.times do
-  play 100.hz.triangle.at(-20.db).for(0.25)
-  play 133.hz.triangle.at(-20.db).for(0.25)
-  play 150.hz.triangle.at(-20.db).for(0.25)
-  play 100.hz.triangle.at(-20.db).for(0.25)
-  play 200.hz.ramp.at(-23.db).for(1.6)
+  play note(100.hz.triangle.at(-6.db), 0.25)
+  play note(133.hz.triangle.at(-6.db), 0.25)
+  play note(150.hz.triangle.at(-6.db), 0.25)
+  play note(100.hz.triangle.at(-6.db), 0.25)
+  play note(200.hz.ramp.at(-9.db), 1.6)
 end
 ```
 
@@ -162,7 +166,7 @@ play 123.hz.fm(369.hz.at(1000))
 The graph DSL makes it very easy to incorporate MIDI into sound generation:
 
 ```ruby
-play midi.hz.ramp.at(-6.db).filter(:lowpass, cutoff: (midi.frequency * midi.cc(1, range: 1.3..16)), quality: 4).forever.oversample(16).softclip.oversample(2)
+play midi.hz.ramp.at(-6.db).filter(:lowpass, cutoff: (midi.frequency * midi.cc(1, range: 1.3..16)), quality: 4).oversample(16).softclip.oversample(2)
 ```
 
 See the `MidiDsl` class in `lib/mb/sound/graph_node/midi_dsl.rb` for more info

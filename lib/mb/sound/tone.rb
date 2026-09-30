@@ -10,9 +10,9 @@ module MB
       include GraphNode
       include GraphNode::SampleRateHelper
 
-      attr_reader :wave_type, :frequency, :amplitude, :range, :duration, :wavelength, :phase
+      attr_reader :wave_type, :frequency, :amplitude, :range, :wavelength, :phase
       attr_reader :period, :period_samples
-      attr_reader :duration_set, :amplitude_set
+      attr_reader :amplitude_set
 
       # Shortcut for creating a new tone with the given frequency source, for
       # building more complex FM signal graphs.
@@ -20,7 +20,9 @@ module MB
         MB::Sound::Tone.new(frequency: frequency)
       end
 
-      # Initializes a representation of a simple generated waveform.
+      # Initializes an oscillator node with a simple generated waveform,
+      # which plays forever (see Session and PlaybackMethods for ending
+      # playback, or use a finite source such as an envelope or a file).
       #
       # +wave_type+ - One of the waveform types supported by MB::Sound::Oscillator (e.g. :sine).
       # +frequency+ - The frequency of the tone, in Hz at the given
@@ -30,14 +32,12 @@ module MB
       #               -10 dB by default, see Session#master_gain).
       # +phase+ - The starting phase, in radians relative to a sine wave (0
       #           radians phase starts at 0 and rises).
-      # +duration+ - How long the tone should play in seconds (default is 5s).
       # +sample_rate+ - The sample rate to use to calculate the frequency.
-      def initialize(wave_type: :sine, frequency: 440, amplitude: 1.0, phase: 0, duration: 5, sample_rate: 48000)
+      def initialize(wave_type: :sine, frequency: 440, amplitude: 1.0, phase: 0, sample_rate: 48000)
         @wave_type = wave_type
         @oscillator = nil
         @noise = 0
         @amplitude_set = false
-        @duration_set = false
         @phase_mod = nil
         @no_trigger = false
 
@@ -45,7 +45,7 @@ module MB
         @phase = nil
         @period = nil
 
-        self.or_at(amplitude).or_for(duration).at_rate(sample_rate).with_phase(phase)
+        self.or_at(amplitude).at_rate(sample_rate).with_phase(phase)
         set_frequency(fixup_source(frequency))
       end
 
@@ -163,40 +163,6 @@ module MB
           @noise = blend.to_f
         end
 
-        self
-      end
-
-      # Sets the duration to the given number of seconds, starting from now (in
-      # sample time).
-      def for(duration, recursive: true)
-        super(duration, recursive: recursive)
-
-        @duration_set = true
-        @duration = duration&.to_f
-
-        self
-      end
-
-      # Sets the default duration in seconds, if #for and #forever have not
-      # been called.  Pass nil to default to playing forever.
-      def or_for(duration, recursive: :ignored)
-        unless @duration_set
-          @duration = duration&.to_f
-        end
-
-        self
-      end
-
-      # Plays forever unless #for was called (see #or_for).
-      def or_forever(recursive: :ignored)
-        or_for(nil)
-      end
-
-      # Sets the tone to play forever, as well as any tones in its frequency or
-      # phase sources.
-      def forever(recursive: true)
-        super(recursive: recursive)
-        @duration = nil
         self
       end
 
@@ -353,19 +319,18 @@ module MB
       end
 
       # Makes this Tone a low-frequency oscillator for modulation: it won't
-      # be retriggered by MIDI voices (see #no_trigger), swings over the full
-      # -1..1 range unless #at was called, and plays forever unless a
-      # duration was set with #for.  Call #at afterward to set the range.
+      # be retriggered by MIDI voices (see #no_trigger) and swings over the
+      # full -1..1 range unless #at was called.  Call #at afterward to set the
+      # range.
       #
       # Durations have their own #lfo for tempo-synced LFOs (see
       # Sequence::Duration#lfo).
       #
       # Example:
-      #     play 220.hz.ramp.at(1).filter(:lowpass, cutoff: 0.25.hz.triangle.lfo.at(200..2000), quality: 4).forever
+      #     play 220.hz.ramp.at(1).filter(:lowpass, cutoff: 0.25.hz.triangle.lfo.at(200..2000), quality: 4)
       def lfo
         no_trigger
         or_at(1)
-        or_forever
       end
 
       # Sets this Tone's current phase to +cycles+ past its phase offset (see
@@ -410,36 +375,20 @@ module MB
         oscillator.last_freq
       end
 
-      # Generates +count+ samples of the tone, defaulting to the duration of
-      # the tone, or one second of samples if duration is infinite.  The tone
-      # parameters cannot be changed after this method is called.
+      # Generates +count+ samples of the tone (one second by default).  The
+      # tone parameters cannot be changed after this method is called.
       def generate(count = nil)
-        count ||= @duration ? @duration * @sample_rate : @sample_rate
+        count ||= @sample_rate
         oscillator.sample(count.round)
       end
 
-      # Generates +count+ samples of the tone, decrementing the Tone's
-      # #duration.  The tone parameters cannot be changed directly after this
-      # method is called; instead Oscillator parameters must be changed (TODO:
-      # fix this; maybe combine the two classes or delegate post-creation
-      # updates).
+      # Generates +count+ samples of the tone.  The tone parameters cannot be
+      # changed directly after this method is called; instead Oscillator
+      # parameters must be changed (TODO: fix this; maybe combine the two
+      # classes or delegate post-creation updates).
       #
-      # This will return nil if the tone has a specified duration and that
-      # duration has elapsed.
+      # Returns nil only if a frequency or phase modulation source ends.
       def sample(count)
-        if @duration
-          return nil if @duration <= 0
-
-          # TODO: use a separate elapsed time counter to allow resetting
-          # duration to the beginning
-          remaining = (@duration * @sample_rate).round
-          count = remaining if count > remaining
-
-          @duration -= count.to_f / @sample_rate
-
-          @duration = 0 if remaining == 0 # deal with fraction of a sample
-        end
-
         return nil if count <= 0
 
         oscillator.sample(count.round)
@@ -620,7 +569,6 @@ module MB
         end
 
         src = src.or_at(1) if src.is_a?(Tone)
-        src = src.or_for(nil) if src.respond_to?(:or_for)
         src = src.at_rate(@sample_rate) if src.respond_to?(:at_rate) && src.sample_rate != @sample_rate
         src = src.get_sampler if src.respond_to?(:get_sampler)
         src

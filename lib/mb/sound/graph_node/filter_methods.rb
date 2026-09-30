@@ -145,7 +145,7 @@ module MB
         #
         # Example:
         #     # Filter pinging bell ringing
-        #     play 0.5.hz.ramp.at(50).filter(:lowpass, cutoff: 1000, quality: 0.5).bandpass_series(440, quality: 1414, count: 20, ratio: 1.7).softclip(0.9).forever
+        #     play 0.5.hz.ramp.at(50).filter(:lowpass, cutoff: 1000, quality: 0.5).bandpass_series(440, quality: 1414, count: 20, ratio: 1.7).softclip(0.9)
         #
         #     # MIDI controlled
         #     play (midi.env(0.0, 0.00005, 0, 0.00005) * 100).bandpass_series(midi.frequency, quality: 500, count: 16, ratio: midi.cc(1, range: 1..4)).softclip(0.9).oversample(4)

@@ -112,7 +112,8 @@ module MB
       # file already exists and +:overwrite+ is false, an error will be raised.
       #
       # Writes at most +:max_length+ seconds if +data+ is a Tone or a signal
-      # graph.
+      # graph (PlaybackMethods::MAX_RENDER_SECONDS by default, since
+      # oscillators never end).  See also PlaybackMethods#render.
       #
       # The +:sample_rate+ defaults to 48kHz to match the default resampling of
       # #read, and the default sample rate of #input and #output.
@@ -122,6 +123,7 @@ module MB
         data = [data] if data.is_a?(GraphNode)
 
         if data.is_a?(Array) && data.all?(GraphNode)
+          max_length ||= PlaybackMethods::MAX_RENDER_SECONDS
           buffer_size = data.map(&:graph_buffer_size).compact.min || 800
 
           output = file_output(

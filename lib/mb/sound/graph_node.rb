@@ -12,7 +12,6 @@ require_relative 'graph_node/filter_methods'
 require_relative 'graph_node/delay_methods'
 require_relative 'graph_node/distortion_methods'
 require_relative 'graph_node/debug_methods'
-require_relative 'graph_node/duration_methods'
 require_relative 'graph_node/channel_methods'
 
 module MB
@@ -30,11 +29,11 @@ module MB
     #     # FM classic synth bass
     #     cenv = adsr(0, 0.005, 0.5, 2.5).db(30)
     #     cenv2 = adsr(0, 0.01, 0.5, 2.5).db(60)
-    #     c = cenv * C3.at(1).fm(cenv2 * C3.at(1)).forever; nil
+    #     c = cenv * C3.at(1).fm(cenv2 * C3.at(1)); nil
     #     denv = adsr(0, 0.005, 0, 2).db(50)
-    #     d = denv * Tone.new(frequency: C3.frequency.constant * 0.9996 - 0.22).at(1).forever; nil
+    #     d = denv * Tone.new(frequency: C3.frequency.constant * 0.9996 - 0.22).at(1); nil
     #     eenv = adsr(0, 3, 0.0, 2).db
-    #     e = eenv * C2.at(1).fm(c * 4810 + d * 500).forever; nil
+    #     e = eenv * C2.at(1).fm(c * 4810 + d * 500); nil
     #     fenv = adsr(0, 2, 0, 2).db
     #     f = C2.at(-10.db).fm(e * 250) * fenv; nil
     #     play f
@@ -43,8 +42,8 @@ module MB
     #
     # The DSL methods are grouped into modules that GraphNode includes:
     # RoutingMethods, ArithmeticMethods, SynthesisMethods, ResampleMethods,
-    # FilterMethods, DelayMethods, DistortionMethods, DebugMethods, and
-    # DurationMethods (in lib/mb/sound/graph_node/*_methods.rb).  Add new DSL
+    # FilterMethods, DelayMethods, DistortionMethods, and DebugMethods (in
+    # lib/mb/sound/graph_node/*_methods.rb).  Add new DSL
     # methods to the matching module, or create a new module and include it
     # here after Nameable and Traversable.
     #
@@ -69,7 +68,6 @@ module MB
       include DelayMethods
       include DistortionMethods
       include DebugMethods
-      include DurationMethods
       include ChannelMethods
 
       # The per-channel DSL call that made this node, if any (see
@@ -296,6 +294,7 @@ require_relative 'graph_node/sample_rate_helper'
 require_relative 'graph_node/graph_node_array_mixin'
 
 require_relative 'graph_node/constant'
+require_relative 'graph_node/silence'
 require_relative 'graph_node/input_channel_split'
 require_relative 'graph_node/mix_source'
 require_relative 'graph_node/channels'

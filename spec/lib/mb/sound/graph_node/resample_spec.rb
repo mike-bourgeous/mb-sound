@@ -53,8 +53,8 @@ RSpec.describe(MB::Sound::GraphNode::Resample, :aggregate_failures) do
         end
 
         it 'does not matter what the upsampling chunk size is' do
-          large_window = 47.hz.at(1).forever.at_rate(400).resample(17521, mode: resample_mode).sample(27000)
-          small_window = 47.hz.at(1).forever.at_rate(400).resample(17521, mode: resample_mode).multi_sample(216, 125)
+          large_window = 47.hz.at(1).at_rate(400).resample(17521, mode: resample_mode).sample(27000)
+          small_window = 47.hz.at(1).at_rate(400).resample(17521, mode: resample_mode).multi_sample(216, 125)
           large_window, small_window = select_whole_cycles(large_window, small_window)
           large_window = large_window[0...16000]
           small_window = small_window[0...16000]
@@ -65,8 +65,8 @@ RSpec.describe(MB::Sound::GraphNode::Resample, :aggregate_failures) do
         end
 
         it 'upsamples correctly when chunk sizes change' do
-          node = 43.hz.at(1).forever.at_rate(432).resample(1700, mode: resample_mode)
-          ref = 43.hz.at(1).forever.at_rate(432).resample(1700, mode: resample_mode)
+          node = 43.hz.at(1).at_rate(432).resample(1700, mode: resample_mode)
+          ref = 43.hz.at(1).at_rate(432).resample(1700, mode: resample_mode)
 
           result = node.sample(129).dup.concatenate(node.multi_sample(242, 30)).concatenate(node.sample(111))
           expected = ref.sample(7500).dup
@@ -77,7 +77,7 @@ RSpec.describe(MB::Sound::GraphNode::Resample, :aggregate_failures) do
         end
 
         it 'upsamples until the upstream returns nil' do
-          node = 0.hz.square.at(1..1).at_rate(100).for(10).with_buffer(1).resample(280, mode: resample_mode)
+          node = finite(0.hz.square.at(1..1).at_rate(100), 10).with_buffer(1).resample(280, mode: resample_mode)
 
           result = MB::M.trim(node.multi_sample(1, 3600)) { |v| v.abs < 0.5 }
 
@@ -87,7 +87,7 @@ RSpec.describe(MB::Sound::GraphNode::Resample, :aggregate_failures) do
         end
 
         it 'upsamples end of stream within a buffer' do
-          node = 0.hz.square.at(1..1).at_rate(100).for(10).with_buffer(10).resample(280, mode: resample_mode)
+          node = finite(0.hz.square.at(1..1).at_rate(100), 10).with_buffer(10).resample(280, mode: resample_mode)
 
           result = MB::M.trim(node.multi_sample(195, 200)) { |v| v.abs < 0.5 }
 
@@ -109,8 +109,8 @@ RSpec.describe(MB::Sound::GraphNode::Resample, :aggregate_failures) do
         end
 
         it 'does not matter what the downsampling chunk size is' do
-          large_window = 43.hz.at(1).forever.at_rate(17521).resample(400, mode: resample_mode).sample(27000)
-          small_window = 43.hz.at(1).forever.at_rate(17521).resample(400, mode: resample_mode).multi_sample(216, 125)
+          large_window = 43.hz.at(1).at_rate(17521).resample(400, mode: resample_mode).sample(27000)
+          small_window = 43.hz.at(1).at_rate(17521).resample(400, mode: resample_mode).multi_sample(216, 125)
           large_window, small_window = select_whole_cycles(large_window, small_window)
           large_window = large_window[0...16000]
           small_window = small_window[0...16000]
@@ -121,8 +121,8 @@ RSpec.describe(MB::Sound::GraphNode::Resample, :aggregate_failures) do
         end
 
         it 'downsamples correctly when chunk sizes change' do
-          node = 43.hz.at(1).forever.at_rate(4320).resample(1700, mode: resample_mode)
-          ref = 43.hz.at(1).forever.at_rate(4320).resample(1700, mode: resample_mode)
+          node = 43.hz.at(1).at_rate(4320).resample(1700, mode: resample_mode)
+          ref = 43.hz.at(1).at_rate(4320).resample(1700, mode: resample_mode)
 
           result = node.sample(129).dup.concatenate(node.multi_sample(242, 30)).concatenate(node.sample(111))
           expected = ref.sample(7500).dup
@@ -133,7 +133,7 @@ RSpec.describe(MB::Sound::GraphNode::Resample, :aggregate_failures) do
         end
 
         it 'downsamples until the upstream returns nil' do
-          node = 0.hz.square.at(1..1).at_rate(1000).for(1).with_buffer(1).resample(280, mode: resample_mode)
+          node = finite(0.hz.square.at(1..1).at_rate(1000), 1).with_buffer(1).resample(280, mode: resample_mode)
 
           sample = node.multi_sample(1, 360)
           result = MB::M.trim(sample) { |v| v.abs < 0.5 }
@@ -146,7 +146,7 @@ RSpec.describe(MB::Sound::GraphNode::Resample, :aggregate_failures) do
         end
 
         it 'downsamples end of stream within a buffer' do
-          node = 0.hz.square.at(1..1).at_rate(1000).for(1).with_buffer(100).resample(280, mode: resample_mode)
+          node = finite(0.hz.square.at(1..1).at_rate(1000), 1).with_buffer(100).resample(280, mode: resample_mode)
 
           sample = node.multi_sample(195, 10)
           result = MB::M.trim(sample) { |v| v.abs < 0.5 }

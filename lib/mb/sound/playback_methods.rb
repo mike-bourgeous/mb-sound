@@ -17,7 +17,10 @@ module MB
       # +:clear+ - Whether to clear the screen before beginning playback.
       def play(file_tone_data, output: nil, sample_rate: 48000, gain: 1.0, plot: nil, graphical: false, spectrum: false, device: nil, clear: true, quiet: false)
         clear_esc = clear ? "\e[H\e[J" : ''
-        header = MB::U.wrap("#{clear_esc}\e[36mPlaying\e[0m #{playback_info(file_tone_data)}".lines.map(&:strip).join(' ') + "\n\n")
+        header = MB::U.wrap("#{clear_esc}\e[36mPlaying\e[0m #{playback_info(file_tone_data)}".lines.map(&:strip).join(' ') + "\n")
+        # Oscillators play forever, so graphs usually play until interrupted
+        header += "\e[33mPress Ctrl-C to stop\e[0m\n" if graph_playback?(file_tone_data)
+        header += "\n"
         $stderr.puts header unless quiet
 
         plot = false if quiet && plot.nil?
@@ -98,6 +101,14 @@ module MB
         end
 
         $stderr.puts "\n\n" unless quiet
+      end
+
+      # True if +data+ given to #play is a node graph (which may never end,
+      # since oscillators play forever) rather than a file or audio buffer.
+      private def graph_playback?(data)
+        data = [data] unless data.is_a?(Array)
+        !data.empty? && data.all? { |d| d.is_a?(GraphNode) || d.is_a?(GraphNode::MultiOutput) } &&
+          !data.any? { |d| d.respond_to?(:read) }
       end
 
       # The longest #render will run when no length is given and the sounds

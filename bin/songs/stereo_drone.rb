@@ -32,11 +32,11 @@ MB::Sound.song_script(bars: 30) {
   a = (0.3 * tones[0].sum + q + noise)
     .softclip(0.6)
     .oversample(2)
-    .forever
+    
   b = (0.3 * tones[1].sum + q - noise)
     .softclip(0.6)
     .oversample(2)
-    .forever
+    
 
   left = a.delay(seconds: 0.4.hz.lfo.at(0..0.013), feedback: -0.5, dry: 1, smoothing: false).softclip(0.8)
   right = b.delay(seconds: 0.3.hz.lfo.at(0..0.02), feedback: -0.5, dry: 1, smoothing: false).softclip(0.8)

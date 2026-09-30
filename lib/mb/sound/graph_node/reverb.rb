@@ -184,7 +184,7 @@ module MB
           inputs = input.is_a?(Array) ? input : input.outputs
           if extra_time > 0 && (inputs.length > 1 || input.is_a?(Array) || input.is_a?(InputChannelSplit::InputChannelNode))
             # A separate silence node for each input so each gets the full time
-            upstream = inputs.map { |i| i.and_then(0.constant.for(extra_time).named('Silence')) }
+            upstream = inputs.map { |i| i.and_then(MB::Sound.silence(extra_time)) }
             upstream = upstream[0] if input.is_a?(InputChannelSplit::InputChannelNode)
           else
             upstream = input

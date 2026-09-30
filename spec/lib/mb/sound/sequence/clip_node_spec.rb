@@ -79,7 +79,7 @@ RSpec.describe(MB::Sound::Sequence::ClipNode) do
 
     it 'drives a delay that resonates at each note with Clip#period' do
       notes = MB::Sound.seq(MB::Sound::A2, MB::Sound::E3).n4.loop
-      excite = MB::Sound.noise.at(1).forever * notes.env(0, 0.004, 0, 0.001, transport: transport)
+      excite = MB::Sound.noise.at(1) * notes.env(0, 0.004, 0, 0.001, transport: transport)
       string = excite.delay(notes.period(transport: transport), feedback: 0.98, dry: 1, wet: 1, smoothing: false)
       data = render(string, max: 24000).to_a[4000...20000]
 

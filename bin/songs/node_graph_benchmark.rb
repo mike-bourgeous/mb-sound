@@ -23,22 +23,22 @@ require 'mb-sound'
 def benchmark_song
   abenv = MB::Sound::ADSREnvelope.new(attack_time: 60, decay_time: 30, sustain_level: 0.125, release_time: 90, sample_rate: 48000)
 
-  a = 100.hz.complex_square.forever.at(-13.db).filter(1500.hz.lowpass(quality: 0.5))
-  b = 150.hz.ramp.forever.at(-15.db).filter(2600.hz.lowpass(quality: 0.5))
+  a = 100.hz.complex_square.at(-13.db).filter(1500.hz.lowpass(quality: 0.5))
+  b = 150.hz.ramp.at(-15.db).filter(2600.hz.lowpass(quality: 0.5))
 
   ab = (a + b).softclip(0.05, 0.2) * 3.db * 1.hz.drumramp.lfo.at(2..0.1).filter(30.hz.lowpass) * abenv
 
   cenv = MB::Sound::ADSREnvelope.new(attack_time: 90, decay_time: 60, sustain_level: 1, release_time: 30, sample_rate: 48000)
 
   c = (
-    266.66667.hz.triangle.forever.at(-4.db).softclip(0.05, 0.5).filter(1900.hz.lowpass1p) * 0.1.hz.lfo.at(0..1) +
-    250.hz.complex_triangle.forever.at(-3.db).softclip(0.05, 0.5).filter(1900.hz.lowpass1p) * 0.1.hz.lfo.at(0..1).with_phase(Math::PI)
+    266.66667.hz.triangle.at(-4.db).softclip(0.05, 0.5).filter(1900.hz.lowpass1p) * 0.1.hz.lfo.at(0..1) +
+    250.hz.complex_triangle.at(-3.db).softclip(0.05, 0.5).filter(1900.hz.lowpass1p) * 0.1.hz.lfo.at(0..1).with_phase(Math::PI)
   ).softclip(0.05, 0.25) * 10.db * cenv
 
   denv = MB::Sound::ADSREnvelope.new(attack_time: 4, decay_time: 170, sustain_level: 1, release_time: 6, sample_rate: 48000)
 
   d = (
-    50.hz.triangle.at(-3.db).forever.filter(150.hz.lowpass1p) *
+    50.hz.triangle.at(-3.db).filter(150.hz.lowpass1p) *
     4.hz.drumramp.lfo.at(0..-30).db.filter(50.hz.lowpass)
   ).softclip(0.005, 0.25) * 10.db * denv
 
@@ -53,7 +53,7 @@ def benchmark_song
 
   envelopes = graph.graph.select { |n| n.is_a?(MB::Sound::ADSREnvelope) }
 
-  m = graph.for(180).real
+  m = graph.real
   s = graph.imag
 
   l = m + -6.db * s
@@ -77,24 +77,20 @@ if ARGV.include?('--bench')
 
   duration = ENV['DURATION']&.to_f || 30
   loop_count = ENV['LOOP_COUNT']&.to_i
-  final_l, final_r, envelopes = benchmark_song
 
   MB::U.bench_csv(prefix: MB::U.ruby_info) do |bench|
     [100, 800, 4000].each do |bufsize|
-      # Reset envelopes
-      bench.report("envs @ #{bufsize}") do
-        envelopes.each do |e|
-          e.trigger(1, auto_release: true)
-        end
-      end
+      final_l = final_r = nil
 
-      # Reset oscillators and constants
-      bench.report("for(#{duration}) @ #{bufsize}") do
-        final_l.for(duration).with_buffer(bufsize)
-        final_r.for(duration).with_buffer(bufsize)
+      # Oscillators play forever, so each run builds a new graph
+      bench.report("build @ #{bufsize}") do
+        final_l, final_r, _ = benchmark_song
+        final_l = final_l.with_buffer(bufsize)
+        final_r = final_r.with_buffer(bufsize)
       end
 
       bench.report("bufsize=#{bufsize}") do
+        buffers = (duration * 48000 / bufsize).ceil
         i = 0
         loop do
           x = final_l.sample(bufsize)
@@ -103,13 +99,13 @@ if ARGV.include?('--bench')
           break if x.nil? || y.nil?
 
           i += 1
-          break if loop_count && i == loop_count
+          break if i == buffers || (loop_count && i == loop_count)
         end
       end
     end
   end
 else
-  MB::Sound.song_script {
+  MB::Sound.song_script(bars: 90) { # 3 minutes at 120 BPM
     final_l, final_r, _ = benchmark_song
     MB::Sound.bg(:song, [final_l.with_buffer(800), final_r.with_buffer(800)], fade: 0)
   }

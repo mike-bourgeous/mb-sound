@@ -162,18 +162,5 @@ RSpec.describe(MB::Sound::GraphNode::Tee, aggregate_failures: true) do
       end
     end
 
-    describe '#for' do
-      it 'allows resetting time-limited upstream nodes' do
-        a = 0.hz.square.at(1).for(0.0001).get_sampler
-        expect(a).to be_a(MB::Sound::GraphNode::Tee::Branch)
-
-        expect(a.sample(10)).to eq(Numo::SFloat.ones(5))
-        expect(a.sample(10)).to eq(nil)
-
-        a.for(0.0002)
-        expect(a.sample(20)).to eq(Numo::SFloat.ones(10))
-        expect(a.sample(1)).to eq(nil)
-      end
-    end
   end
 end

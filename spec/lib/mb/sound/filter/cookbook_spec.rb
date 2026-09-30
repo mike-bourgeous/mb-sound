@@ -9,13 +9,13 @@ RSpec.describe(MB::Sound::Filter::Cookbook, :aggregate_failures) do
         f,
         500.hz.at(1),
         inputs: {
-          cutoff: 1.hz.square.at(20000..500).for(1),
+          cutoff: finite(1.hz.square.at(20000..500), 1),
           quality: 4
         }
       )
 
       # Verify types within the wrapper
-      expect(wrapper.sources[:cutoff].original_source).to be_a(MB::Sound::Tone)
+      expect(wrapper.sources[:cutoff].original_source.sources[:input]).to be_a(MB::Sound::Tone)
       expect(wrapper.sources[:quality]).to be_a(MB::Sound::GraphNode::Constant)
 
       # Verify alternating cutoff frequencies
@@ -32,7 +32,7 @@ RSpec.describe(MB::Sound::Filter::Cookbook, :aggregate_failures) do
 
     it 'can use an narray to control filter parameters' do
       f = 20000.hz.lowpass
-      cutoff = 1.hz.square.at(20000..500).for(1).generate(48000)
+      cutoff = 1.hz.square.at(20000..500).generate(48000)
       wrapper = MB::Sound::Filter::SampleWrapper.new(
         f,
         500.hz.at(1),

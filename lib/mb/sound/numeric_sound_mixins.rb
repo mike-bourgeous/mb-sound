@@ -107,7 +107,7 @@ module MB
       # using the distance represented as the wavelength.
       #
       # Example:
-      #     MB::Sound.play(100.hz.sine.at(-12.db).forever)
+      #     MB::Sound.play(100.hz.sine.at(-12.db))
       #     343.meters.hz # => 1.0 Hz pitch
       def hz
         Pitch.new(self)

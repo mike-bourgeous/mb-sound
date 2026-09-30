@@ -146,8 +146,8 @@ RSpec.describe(MB::Sound::Oscillator, :aggregate_failures) do
         make = -> {
           MB::Sound::Oscillator.new(
             wave,
-            frequency: 220.hz.sine.at(100..600).forever,
-            phase_mod: 3.hz.triangle.at(0..2).forever,
+            frequency: 220.hz.sine.at(100..600),
+            phase_mod: 3.hz.triangle.at(0..2),
             advance: 2 * Math::PI / 48000
           )
         }

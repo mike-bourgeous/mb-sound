@@ -35,7 +35,6 @@ RSpec.describe(MB::Sound::Sequence::TempoNode) do
       lfo = 1.bar.lfo
       expect(lfo).to be_a(MB::Sound::Tone)
       expect(lfo.lfo?).to eq(true)
-      expect(lfo.duration).to be_nil
       expect(lfo.range).to eq(-1.0..1.0)
     end
 
@@ -81,7 +80,7 @@ RSpec.describe(MB::Sound::Sequence::TempoNode) do
 
   describe 'pauses' do
     it 'freezes an LFO in a master chain while the timeline is paused, then resyncs' do
-      session.add(0.constant.for(800 / 48000.0))
+      session.add(finite(0.constant, 800 / 48000.0))
       session.master { |mix| mix + 1.bar.lfo.ramp }
       run(1600) # the player ends and the timeline pauses at 800 frames
       frozen = run(4800)
@@ -105,25 +104,15 @@ end
 
 RSpec.describe(MB::Sound::Tone) do
   describe '#lfo' do
-    it 'defaults to full range and forever without overriding explicit settings' do
+    it 'defaults to full range without overriding explicit settings' do
       t = 2.hz.lfo
       expect(t.lfo?).to eq(true)
       expect(t.range).to eq(-1.0..1.0)
-      expect(t.duration).to be_nil
 
-      t = 2.hz.at(0..3).for(2).lfo
+      t = 2.hz.at(0..3).lfo
       expect(t.range).to eq(0.0..3.0)
-      expect(t.duration).to eq(2)
 
       expect(2.hz.lfo.at(5..6).range).to eq(5.0..6.0)
-    end
-  end
-
-  describe '#or_forever' do
-    it 'plays forever unless a duration was set' do
-      expect(2.hz.sine.or_forever.duration).to be_nil
-      expect(2.hz.sine.for(1).or_forever.duration).to eq(1)
-      expect((2.hz * 3.hz.for(1)).or_forever.graph.grep(MB::Sound::Tone).map(&:duration)).to contain_exactly(nil, 1)
     end
   end
 end

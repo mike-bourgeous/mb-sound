@@ -393,7 +393,7 @@ module MB
         #
         # Example (bin/sound.rb), a comb resonator plucked by noise bursts:
         #     notes = seq(A2, E3, C3).n4.loop
-        #     excite = noise.at(1).forever * notes.env(0, 0.004, 0, 0.001)
+        #     excite = noise.at(1) * notes.env(0, 0.004, 0, 0.001)
         #     bg :string, excite.delay(notes.period, feedback: 0.98, dry: 1, wet: 1, smoothing: false) * 0.3
         #
         # The delay's feedback is a plain gain, so this rings brightly like

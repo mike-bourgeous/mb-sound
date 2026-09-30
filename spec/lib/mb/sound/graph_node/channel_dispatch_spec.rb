@@ -81,7 +81,7 @@ RSpec.describe(MB::Sound::GraphNode::ChannelDispatch) do
       dot.lines.reject { |l| l.include?('->') }.grep(/label=/).map { |l| l[/label="(.*?)"[,\]]/, 1] }
     end
 
-    let(:graph) { 220.hz.ramp.at(1).forever.stereo.filter(:lowpass, cutoff: MB::Sound.channels(800, 1200), quality: 2).softclip }
+    let(:graph) { 220.hz.ramp.at(1).stereo.filter(:lowpass, cutoff: MB::Sound.channels(800, 1200), quality: 2).softclip }
 
     it 'draws each per-channel call as one box listing per-channel arguments' do
       dot = graph.graphviz
@@ -97,7 +97,7 @@ RSpec.describe(MB::Sound::GraphNode::ChannelDispatch) do
 
     it 'keeps nodes passed as per-channel arguments visible' do
       lfos = MB::Sound.channels(0.5.hz.lfo.named('slow'), 0.7.hz.lfo.named('fast'))
-      dot = 220.hz.ramp.at(1).forever.stereo.filter(:lowpass, cutoff: lfos * 500 + 1000).graphviz
+      dot = 220.hz.ramp.at(1).stereo.filter(:lowpass, cutoff: lfos * 500 + 1000).graphviz
       expect(labels(dot).join).to include('slow', 'fast')
     end
 

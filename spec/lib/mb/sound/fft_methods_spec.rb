@@ -3,13 +3,13 @@ RSpec.describe(MB::Sound::FFTMethods) do
   [:fft, :real_fft].each do |m|
     describe "##{m}" do
       it 'can process a Tone object' do
-        fft = MB::Sound.send(m, 4000.hz.at(1).for(1))
+        fft = MB::Sound.send(m, 4000.hz.at(1))
         expect(fft.abs.max_index).to eq(4000)
         expect(fft[4000].abs.round(3)).to eq(1)
       end
 
       it 'can process an Array of Tone objects' do
-        fft = MB::Sound.send(m, [4000.hz.at(1).for(1), 8000.hz.at(1).for(1)])
+        fft = MB::Sound.send(m, [4000.hz.at(1), 8000.hz.at(1)])
         expect(fft).to be_a(Array)
         expect(fft[0].abs.max_index).to eq(4000)
         expect(fft[1].abs.max_index).to eq(8000)

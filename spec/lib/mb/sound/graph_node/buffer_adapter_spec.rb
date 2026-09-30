@@ -47,7 +47,7 @@ RSpec.describe(MB::Sound::GraphNode::BufferAdapter, :aggregate_failures) do
     end
 
     it 'can switch from real to complex' do
-      cplx = 10.constant.for(0.001).and_then(-5i.constant.for(0.002))
+      cplx = finite(10.constant, 0.001).and_then(finite(-5i.constant, 0.002))
       b = cplx.with_buffer(46)
       expect(b.sample(44)).to eq(Numo::SFloat.zeros(44).fill(10))
       expect(b.sample(8)).to eq(Numo::SComplex[10, 10, 10, 10, -5i, -5i, -5i, -5i])
@@ -62,7 +62,7 @@ RSpec.describe(MB::Sound::GraphNode::BufferAdapter, :aggregate_failures) do
     end
 
     it 'shuts down cleanly when the upstream returns nil' do
-      b = upstream.for(4.0 / 48000).with_buffer(4)
+      b = finite(upstream, 4.0 / 48000).with_buffer(4)
       expect(b.sample(4)).to eq(Numo::SFloat[42, 42, 42, 42])
       expect(b.sample(4)).to eq(nil)
     end
@@ -97,10 +97,10 @@ RSpec.describe(MB::Sound::GraphNode::BufferAdapter, :aggregate_failures) do
       # TODO: it would be nice if node sequences could repeat but they would
       # have to know how to reset their upstream node graph
       # FIXME: 120.hz.square has its phase off by one sample after the first half wave
-      seq = 1.constant.for(200.0 / 48000)
-        .and_then(-1.constant.for(200.0 / 48000))
-        .and_then(1.constant.for(200.0 / 48000))
-        .and_then(-1.constant.for(200.0 / 48000))
+      seq = finite(1.constant, 200.0 / 48000)
+        .and_then(finite(-1.constant, 200.0 / 48000))
+        .and_then(finite(1.constant, 200.0 / 48000))
+        .and_then(finite(-1.constant, 200.0 / 48000))
 
       b = seq.with_buffer(17)
 
