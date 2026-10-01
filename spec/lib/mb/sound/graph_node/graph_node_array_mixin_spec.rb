@@ -26,7 +26,7 @@ RSpec.describe(MB::Sound::GraphNode::GraphNodeArrayMixin) do
     end
 
     it 'returns one output per input by default' do
-      out = [finite(1.constant, 0.1), finite(-1.constant, 0.1)].reverb(:hall)
+      out = [1.constant.until(0.1), (-1.constant).until(0.1)].reverb(:hall)
       expect(out.length).to eq(2)
       expect(out).to all(be_a(MB::Sound::GraphNode))
     end
@@ -38,13 +38,13 @@ RSpec.describe(MB::Sound::GraphNode::GraphNodeArrayMixin) do
     end
 
     it 'mixes every input into each output' do
-      l, r = [finite(0.5.constant, 0.05), finite(0.constant, 0.05)].reverb(:hall, dry: 0)
+      l, r = [0.5.constant.until(0.05), 0.constant.until(0.05)].reverb(:hall, dry: 0)
       data = [l, r].map { |c| Array.new(20) { c.sample(800)&.dup }.compact.reduce(:concatenate) }
       expect(data[1].abs.max).to be > 0.001
     end
 
     it 'lets the tail ring out after finite inputs end' do
-      l, r = [finite(0.5.constant, 0.05), finite(0.5.constant, 0.05)].reverb(:hall)
+      l, r = [0.5.constant.until(0.05), 0.5.constant.until(0.05)].reverb(:hall)
       frames = [0, 0]
       200.times do
         data = [l, r].map { |c| c.sample(800) }

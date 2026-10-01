@@ -177,14 +177,14 @@ RSpec.describe(MB::Sound::IOMethods) do
       end
 
       it 'can write a Tone to a sound file' do
-        MB::Sound.write(name, finite(100.hz, 1), sample_rate: 48000)
+        MB::Sound.write(name, 100.hz.until(1), sample_rate: 48000)
         info = MB::Sound::FFMPEGInput.parse_info(name)
         expect(info[:streams][0][:duration_ts]).to eq(48000)
         expect(info[:streams][0][:channels]).to eq(1)
       end
 
       it 'can write multiple tones to a sound file' do
-        MB::Sound.write(name, [finite(100.hz, 1), finite(200.hz, 1)], sample_rate: 48000)
+        MB::Sound.write(name, [100.hz.until(1), 200.hz.until(1)], sample_rate: 48000)
         info = MB::Sound::FFMPEGInput.parse_info(name)
         expect(info[:streams][0][:duration_ts]).to eq(48000)
         expect(info[:streams][0][:channels]).to eq(2)

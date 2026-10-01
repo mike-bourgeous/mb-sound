@@ -29,12 +29,10 @@ MB::Sound.song_script {
       .each_slice(2).map(&:sum)
       .map(&:softclip)
       .map.with_index { |v, idx|
-        # Oscillators play forever; adding silence(seconds) ends a sum after
-        # that long (a sum ends with its shortest input)
         v.quantize(
-          (0.05.hz.drumramp.at(0..1) + MB::Sound.silence(20)) ** 4
+          0.05.hz.drumramp.at(0..1).until(20) ** 4
         ).and_then(
-          (50.hz.triangle.at(2.5) + MB::Sound.silence(3))
+          50.hz.triangle.at(2.5).until(3)
           .and_then(MB::Sound.silence(0.2)).softclip.filter(:lowpass, cutoff: 390 + idx * 20, quality: 25)
         )
       }

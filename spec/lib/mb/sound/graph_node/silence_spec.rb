@@ -13,12 +13,6 @@ RSpec.describe(MB::Sound::GraphNode::Silence, :aggregate_failures) do
     expect(s.sample(1000).length).to eq(100)
   end
 
-  it 'ends a sum after its length' do
-    sum = 1.constant + MB::Sound.silence(3.0 / 48000)
-    expect(sum.sample(10)).to eq(Numo::SFloat.ones(3))
-    expect(sum.sample(10)).to eq(nil)
-  end
-
   it 'rejects negative lengths' do
     expect { MB::Sound.silence(-1) }.to raise_error(ArgumentError, /seconds/)
   end

@@ -167,8 +167,8 @@ RSpec.describe(MB::Sound::GraphNode::Multiplier, aggregate_failures: true) do
       end
 
       it 'returns nil when any input returns nil' do
-        t1 = finite(0.hz.square.at(1), 1).at_rate(50)
-        t2 = finite(0.hz.square.at(0.5), 2.0).at_rate(50)
+        t1 = 0.hz.square.at(1).until(1).at_rate(50)
+        t2 = 0.hz.square.at(0.5).until(2.0).at_rate(50)
         ss = MB::Sound::GraphNode::Multiplier.new(t1, t2)
 
         result = ss.sample(50)
@@ -187,8 +187,8 @@ RSpec.describe(MB::Sound::GraphNode::Multiplier, aggregate_failures: true) do
       end
 
       it 'returns nil only when all inputs return nil' do
-        t1 = finite(0.hz.square.at(1.5), 1).at_rate(50)
-        t2 = finite(0.hz.square.at(0.5), 2.0).at_rate(50)
+        t1 = 0.hz.square.at(1.5).until(1).at_rate(50)
+        t2 = 0.hz.square.at(0.5).until(2.0).at_rate(50)
         ss = MB::Sound::GraphNode::Multiplier.new(t1, t2, stop_early: false)
 
         result = ss.sample(50)

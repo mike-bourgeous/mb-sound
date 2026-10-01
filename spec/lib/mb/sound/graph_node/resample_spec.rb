@@ -77,7 +77,7 @@ RSpec.describe(MB::Sound::GraphNode::Resample, :aggregate_failures) do
         end
 
         it 'upsamples until the upstream returns nil' do
-          node = finite(0.hz.square.at(1..1).at_rate(100), 10).with_buffer(1).resample(280, mode: resample_mode)
+          node = 0.hz.square.at(1..1).at_rate(100).until(10).with_buffer(1).resample(280, mode: resample_mode)
 
           result = MB::M.trim(node.multi_sample(1, 3600)) { |v| v.abs < 0.5 }
 
@@ -87,7 +87,7 @@ RSpec.describe(MB::Sound::GraphNode::Resample, :aggregate_failures) do
         end
 
         it 'upsamples end of stream within a buffer' do
-          node = finite(0.hz.square.at(1..1).at_rate(100), 10).with_buffer(10).resample(280, mode: resample_mode)
+          node = 0.hz.square.at(1..1).at_rate(100).until(10).with_buffer(10).resample(280, mode: resample_mode)
 
           result = MB::M.trim(node.multi_sample(195, 200)) { |v| v.abs < 0.5 }
 
@@ -133,7 +133,7 @@ RSpec.describe(MB::Sound::GraphNode::Resample, :aggregate_failures) do
         end
 
         it 'downsamples until the upstream returns nil' do
-          node = finite(0.hz.square.at(1..1).at_rate(1000), 1).with_buffer(1).resample(280, mode: resample_mode)
+          node = 0.hz.square.at(1..1).at_rate(1000).until(1).with_buffer(1).resample(280, mode: resample_mode)
 
           sample = node.multi_sample(1, 360)
           result = MB::M.trim(sample) { |v| v.abs < 0.5 }
@@ -146,7 +146,7 @@ RSpec.describe(MB::Sound::GraphNode::Resample, :aggregate_failures) do
         end
 
         it 'downsamples end of stream within a buffer' do
-          node = finite(0.hz.square.at(1..1).at_rate(1000), 1).with_buffer(100).resample(280, mode: resample_mode)
+          node = 0.hz.square.at(1..1).at_rate(1000).until(1).with_buffer(100).resample(280, mode: resample_mode)
 
           sample = node.multi_sample(195, 10)
           result = MB::M.trim(sample) { |v| v.abs < 0.5 }

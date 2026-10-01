@@ -80,7 +80,7 @@ RSpec.describe(MB::Sound::Sequence::TempoNode) do
 
   describe 'pauses' do
     it 'freezes an LFO in a master chain while the timeline is paused, then resyncs' do
-      session.add(finite(0.constant, 800 / 48000.0))
+      session.add(0.constant.until(800 / 48000.0))
       session.master { |mix| mix + 1.bar.lfo.ramp }
       run(1600) # the player ends and the timeline pauses at 800 frames
       frozen = run(4800)

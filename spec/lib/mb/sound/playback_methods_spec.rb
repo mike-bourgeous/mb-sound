@@ -26,18 +26,18 @@ RSpec.describe(MB::Sound::PlaybackMethods) do
       out = MB::Sound::NullOutput.new(channels: 2, sleep: false)
       allow(out).to receive(:write) { |data| written << data.map(&:dup) }
 
-      MB::Sound.play(finite(1.constant, 0.01), output: out, quiet: true)
+      MB::Sound.play(1.constant.until(0.01), output: out, quiet: true)
       expect(written.flat_map { |d| d[0].to_a }.max).to be_within(1e-6).of(-10.db)
 
       written.clear
       MB::Sound.master_gain(1)
-      MB::Sound.play(finite(1.constant, 0.01), output: out, quiet: true)
+      MB::Sound.play(1.constant.until(0.01), output: out, quiet: true)
       expect(written.flat_map { |d| d[0].to_a }.max).to be_within(1e-6).of(1)
     end
 
     it 'tells how to stop node graphs, which may play forever' do
       out = MB::Sound::NullOutput.new(channels: 2, sleep: false)
-      expect { MB::Sound.play(finite(1.constant, 0.01), output: out, plot: false, clear: false) }.to output(/Ctrl-C/).to_stderr
+      expect { MB::Sound.play(1.constant.until(0.01), output: out, plot: false, clear: false) }.to output(/Ctrl-C/).to_stderr
       expect { MB::Sound.play(Numo::SFloat.zeros(10), output: out, plot: false, clear: false) }.not_to output(/Ctrl-C/).to_stderr
     end
 
@@ -45,8 +45,8 @@ RSpec.describe(MB::Sound::PlaybackMethods) do
       outputs = []
       allow(MB::Sound).to receive(:output).and_wrap_original { |m, **kw| m.call(**kw).tap { |o| outputs << o } }
 
-      MB::Sound.play(finite(440.hz.sine, 0.05), quiet: true)
-      MB::Sound.play(finite(440.hz.sine, 0.05), quiet: true)
+      MB::Sound.play(440.hz.sine.until(0.05), quiet: true)
+      MB::Sound.play(440.hz.sine.until(0.05), quiet: true)
 
       expect(outputs[0]).to equal(outputs[1])
       expect(outputs[0]).not_to be_closed
@@ -235,7 +235,7 @@ RSpec.describe(MB::Sound::PlaybackMethods) do
       frames = 0
       session.add_tap { |mix| frames += mix[0].length }
       within do
-        MB::Sound.bg(finite(1.constant, 0.1))
+        MB::Sound.bg(1.constant.until(0.1))
         expect(MB::Sound.wait).to eq(true)
       end
       expect(session).to be_idle
@@ -245,7 +245,7 @@ RSpec.describe(MB::Sound::PlaybackMethods) do
     it 'stops waiting for a tail that never ends after the tail limit' do
       stub_const('MB::Sound::Session::Master::MAX_TAIL_SECONDS', 1) # instead of 10 s of rendering
       within do
-        MB::Sound.bg(finite(1.constant, 0.05))
+        MB::Sound.bg(1.constant.until(0.05))
         MB::Sound.master(at: :now) { |mix| mix.delay(seconds: 0.1, feedback: 1, dry: 1, wet: 1) }
         expect(MB::Sound.wait(timeout: 30)).to eq(true)
       end
@@ -418,13 +418,13 @@ RSpec.describe(MB::Sound::PlaybackMethods) do
     end
 
     it 'stops when every sound ends' do
-      seconds = MB::Sound.render(filename, finite(440.hz.sine, 0.5), bpm: 90)
+      seconds = MB::Sound.render(filename, 440.hz.sine.until(0.5), bpm: 90)
       expect(seconds).to be_within(0.02).of(0.5)
     end
 
     it 'renders the tail of master effects after the last sound ends' do
       seconds = MB::Sound.render(filename, bpm: 120) do
-        MB::Sound.bg(finite(0.5.constant, 0.1))
+        MB::Sound.bg(0.5.constant.until(0.1))
         MB::Sound.master { |mix| mix.delay(seconds: 0.2) }
       end
 
@@ -439,7 +439,7 @@ RSpec.describe(MB::Sound::PlaybackMethods) do
       stub_const('MB::Sound::Session::Master::MAX_TAIL_SECONDS', 1) # instead of 10 s of rendering
 
       infinite = proc do
-        MB::Sound.bg(finite(0.5.constant, 0.1))
+        MB::Sound.bg(0.5.constant.until(0.1))
         MB::Sound.master { |mix| mix.delay(seconds: 0.1, feedback: 1, dry: 1, wet: 1) }
       end
       expect(MB::Sound.render(filename, &infinite)).to be_within(0.02).of(1.1)
@@ -460,13 +460,13 @@ RSpec.describe(MB::Sound::PlaybackMethods) do
     end
 
     it 'does not overwrite files unless asked' do
-      MB::Sound.render(filename, finite(440.hz.sine, 0.1))
-      expect { MB::Sound.render(filename, finite(440.hz.sine, 0.1)) }.to raise_error(/exists/i)
-      expect { MB::Sound.render(filename, finite(440.hz.sine, 0.1), overwrite: true) }.not_to raise_error
+      MB::Sound.render(filename, 440.hz.sine.until(0.1))
+      expect { MB::Sound.render(filename, 440.hz.sine.until(0.1)) }.to raise_error(/exists/i)
+      expect { MB::Sound.render(filename, 440.hz.sine.until(0.1), overwrite: true) }.not_to raise_error
     end
 
     it 'does not move the live timeline' do
-      expect { MB::Sound.render(filename, finite(440.hz.sine, 0.1)) }.not_to change { MB::Sound.transport.position }
+      expect { MB::Sound.render(filename, 440.hz.sine.until(0.1)) }.not_to change { MB::Sound.transport.position }
     end
   end
 

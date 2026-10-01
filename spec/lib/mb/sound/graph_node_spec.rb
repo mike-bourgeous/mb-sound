@@ -533,11 +533,11 @@ RSpec.describe(MB::Sound::GraphNode, aggregate_failures: true) do
     end
 
     it 'returns nil at end of stream' do
-      expect(finite(123.hz, 0).multi_sample(100, 1)).to eq(nil)
+      expect(123.hz.until(0).multi_sample(100, 1)).to eq(nil)
     end
 
     it 'handles end of stream part way through concatenation' do
-      result = finite(123.hz, 5.0 / 48000).multi_sample(2, 10)
+      result = 123.hz.until(5.0 / 48000).multi_sample(2, 10)
       expect(result.length).to eq(5)
     end
   end

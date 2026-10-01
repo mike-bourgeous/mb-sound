@@ -34,7 +34,7 @@ RSpec.describe(MB::Sound::GenerationMethods) do
 
   describe '#impulse' do
     it 'generates an impulse response node' do
-      expect(finite(MB::Sound.impulse, 0.1).sample(8000)).to eq(Numo::SFloat.zeros(4800).tap { |d| d[0] = 1 })
+      expect(MB::Sound.impulse.until(0.1).sample(8000)).to eq(Numo::SFloat.zeros(4800).tap { |d| d[0] = 1 })
     end
   end
 end

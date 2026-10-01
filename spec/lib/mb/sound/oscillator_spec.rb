@@ -298,11 +298,11 @@ RSpec.describe MB::Sound::Oscillator do
       end
 
       it 'truncates output for short reads on frequency' do
-        expect(finite(0.constant, 0.0001).tone.oscillator.send(method, 48000)).to eq(Numo::SFloat.zeros(5))
+        expect(0.constant.until(0.0001).tone.oscillator.send(method, 48000)).to eq(Numo::SFloat.zeros(5))
       end
 
       it 'truncates output for short reads on phase' do
-        expect(0.hz.pm(finite(0.constant, 0.0001)).oscillator.send(method, 48000)).to eq(Numo::SFloat.zeros(5))
+        expect(0.hz.pm(0.constant.until(0.0001)).oscillator.send(method, 48000)).to eq(Numo::SFloat.zeros(5))
       end
 
       it 'raises an error if truncation happens twice' do

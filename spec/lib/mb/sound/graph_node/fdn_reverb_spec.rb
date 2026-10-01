@@ -135,7 +135,7 @@ RSpec.describe(MB::Sound::GraphNode::FdnReverb) do
     end
 
     it 'returns nil when input is exhausted' do
-      reverb = finite(0.constant(smoothing: false), 0.001).fdn_reverb(sample_rate: 48000, tail: 0)
+      reverb = 0.constant(smoothing: false).until(0.001).fdn_reverb(sample_rate: 48000, tail: 0)
       reverb.sample(48)
       result = reverb.sample(48)
       expect(result).to be_nil

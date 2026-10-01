@@ -9,13 +9,13 @@ RSpec.describe(MB::Sound::Filter::Cookbook, :aggregate_failures) do
         f,
         500.hz.at(1),
         inputs: {
-          cutoff: finite(1.hz.square.at(20000..500), 1),
+          cutoff: 1.hz.square.at(20000..500).until(1),
           quality: 4
         }
       )
 
       # Verify types within the wrapper
-      expect(wrapper.sources[:cutoff].original_source.sources[:input]).to be_a(MB::Sound::Tone)
+      expect(wrapper.sources[:cutoff].original_source.source.original_source).to be_a(MB::Sound::Tone)
       expect(wrapper.sources[:quality]).to be_a(MB::Sound::GraphNode::Constant)
 
       # Verify alternating cutoff frequencies

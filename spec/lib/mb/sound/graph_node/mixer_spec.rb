@@ -176,8 +176,8 @@ RSpec.describe(MB::Sound::GraphNode::Mixer) do
     end
 
     it 'returns nil when any input returns nil, if stop_early is true' do
-      t1 = finite(0.hz.square.at(1), 1).at_rate(50)
-      t2 = finite(0.hz.square.at(0.5), 2).at_rate(50)
+      t1 = 0.hz.square.at(1).until(1).at_rate(50)
+      t2 = 0.hz.square.at(0.5).until(2).at_rate(50)
       ss = MB::Sound::GraphNode::Mixer.new([t1, t2], sample_rate: 50)
 
       result = ss.sample(50)
@@ -187,8 +187,8 @@ RSpec.describe(MB::Sound::GraphNode::Mixer) do
     end
 
     it 'returns nil only when all inputs return nil, if stop_early is false' do
-      t1 = finite(0.hz.square.at(1), 1).at_rate(50)
-      t2 = finite(0.hz.square.at(0.5), 2).at_rate(50)
+      t1 = 0.hz.square.at(1).until(1).at_rate(50)
+      t2 = 0.hz.square.at(0.5).until(2).at_rate(50)
       ss = MB::Sound::GraphNode::Mixer.new([t1, t2], stop_early: false, sample_rate: 50)
 
       result = ss.sample(50)
