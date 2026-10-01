@@ -64,15 +64,17 @@ module MB
           MB::Sound::GraphNode::NodeSequence.new([self, *sources])
         end
 
-        # Returns a node that plays this node for +seconds+, then ends,
+        # Returns a node that plays this node for +length+ (seconds, or a
+        # musical Duration like `2.bars` that follows the tempo), then ends,
         # cutting it off (see TimeLimit).  Oscillators play forever, so this
         # gives a sound a fixed length; for a musical ending, multiply by an
         # envelope instead (see #adsr).
         #
         # Example (bin/sound.rb):
         #     play 220.hz.ramp.at(-6.db).until(2)
-        def until(seconds)
-          MB::Sound::GraphNode::TimeLimit.new(self, seconds)
+        #     bg 220.hz.ramp.at(-6.db).until(2.bars)
+        def until(length)
+          MB::Sound::GraphNode::TimeLimit.new(self, length)
         end
 
         # Returns a node that plays this node, then silence forever once it
