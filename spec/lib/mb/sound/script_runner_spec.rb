@@ -165,11 +165,11 @@ RSpec.describe(MB::Sound::ScriptRunner) do
       expect { r.run_effect { |input, p| input.delay(p.delay, dry: 1, wet: 1, smoothing: false) } }.to output(/Rendered/).to_stdout
 
       l, rt = MB::Sound.read(outfile)
-      gain = MB::Sound::Session::DEFAULT_MASTER_GAIN # the master bus applies to effects too
       expect(l.length / 48000.0).to be_within(0.05).of(0.1 + 0.2 + 1) # input, delay tail, then a second of quiet
-      expect(l[2400]).to be_within(0.01).of(0.5 * gain)
-      expect(rt[2400]).to be_within(0.01).of(0.25 * gain) # channels stay separate
-      expect(l[(0.25 * 48000).round]).to be_within(0.01).of(0.5 * gain) # the delayed copy after the input ended
+      expect(l[2400]).to be_within(0.01).of(0.5) # effects run at unity master gain
+      expect(rt[2400]).to be_within(0.01).of(0.25) # channels stay separate
+      expect(l[(0.25 * 48000).round]).to be_within(0.01).of(0.5) # the delayed copy after the input ended
+      expect(MB::Sound.master_gain).to eq(1)
     end
   end
 
