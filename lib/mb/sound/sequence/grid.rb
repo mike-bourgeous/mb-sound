@@ -79,7 +79,7 @@ module MB
       #
       # Example (bin/sound.rb):
       #     beat = grid(16, kick: 'x...x...', hat: 'x.x.X.x.').loop
-      #     play 50.hz.sine.forever * beat[:kick].env(0, 0.2, 0, 0.05) + noise.filter(:highpass, cutoff: 8000) * beat[:hat].env(0, 0.03, 0, 0.02)
+      #     play 50.hz.sine * beat[:kick].env(0, 0.2, 0, 0.05) + noise.filter(:highpass, cutoff: 8000) * beat[:hat].env(0, 0.03, 0, 0.02)
       class Kit
         include Enumerable
 

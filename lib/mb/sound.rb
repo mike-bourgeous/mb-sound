@@ -5,6 +5,10 @@ require 'mb-sound-jackffi'
 require 'mb-math'
 require 'mb-util'
 
+# RANDOM_SEED makes random sounds repeatable (e.g. for bin/null_test.rb):
+# Kernel#rand here, and Oscillator::RAND and Noise::RAND below.
+srand(Integer(ENV['RANDOM_SEED'])) if ENV['RANDOM_SEED']
+
 require_relative 'sound/numeric_sound_mixins'
 
 # Load C extensions
@@ -13,6 +17,7 @@ require_relative 'sound/fast_resample'
 require_relative 'sound/fast_wavetable'
 
 require_relative 'sound/version'
+require_relative 'sound/tuning'
 require_relative 'sound/io_methods'
 require_relative 'sound/plot_methods'
 require_relative 'sound/playback_methods'
@@ -47,6 +52,7 @@ module MB
     extend SequenceMethods
     extend ScheduleMethods
     extend MultichannelMethods
+    extend TuningMethods
 
     # Speed of sound for wavelength calculations, in meters per second.
     SPEED_OF_SOUND = 343.0
@@ -95,10 +101,7 @@ module MB
     # For DSL use in combination with tones, inputs, etc.  See
     # MB::Sound::GraphNode.
     def self.adsr(attack = 0.01, decay = 0.1, sustain = -12.db, release = 0.4, auto_release: nil, sample_rate: 48000, filter_freq: 10000)
-      if auto_release.nil?
-        auto_release = 2.0 * (attack + decay)
-        auto_release = 0.1 if auto_release < 0.1
-      end
+      auto_release = MB::Sound::ADSREnvelope.default_auto_release(attack, decay) if auto_release.nil?
 
       env = MB::Sound::ADSREnvelope.new(
         attack_time: attack,
@@ -155,8 +158,10 @@ require_relative 'sound/input_buffer_wrapper'
 require_relative 'sound/output_buffer_wrapper'
 require_relative 'sound/background_output'
 
+require_relative 'sound/phasor'
 require_relative 'sound/oscillator'
 require_relative 'sound/tone'
+require_relative 'sound/pitch'
 require_relative 'sound/note'
 require_relative 'sound/sequence'
 require_relative 'sound/session'

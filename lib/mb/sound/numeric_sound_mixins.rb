@@ -101,15 +101,16 @@ module MB
         self.to_f / rate
       end
 
-      # Creates a Tone object with this frequency.  If this is a Meters or
-      # Feet object, then the frequency is calculated using the distance
-      # represented as the wavelength.
+      # Returns a Pitch at this frequency in Hz, which makes oscillators
+      # (`100.hz.sine.at(-12.db)`) and plays as a sine when used as a signal.
+      # If this is a Meters or Feet object, then the frequency is calculated
+      # using the distance represented as the wavelength.
       #
       # Example:
-      #     MB::Sound.play(100.hz.sine.at(-12.db).forever)
-      #     343.meters.hz # => 1.0 Hz tone
+      #     MB::Sound.play(100.hz.sine.at(-12.db))
+      #     343.meters.hz # => 1.0 Hz pitch
       def hz
-        Tone.new(frequency: self)
+        Pitch.new(self)
       end
 
       # Converts this number as a decibel value to a linear gain value.

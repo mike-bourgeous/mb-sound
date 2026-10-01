@@ -2,7 +2,7 @@ RSpec.describe('Tempo-synced delays') do
   # 120 BPM at 48kHz: a bar is 96000 frames, a sixteenth note 6000.
   let(:transport) { MB::Sound::Sequence::Transport.new(bpm: 120) }
   let(:output) { MB::Sound::NullOutput.new(channels: 2, sleep: false) }
-  let(:session) { MB::Sound::Session.new(output: output, transport: transport, buffer_size: 800, realtime: false, raise_errors: true) }
+  let(:session) { MB::Sound::Session.new(master_gain: 1, output: output, transport: transport, buffer_size: 800, realtime: false, raise_errors: true) }
 
   # An impulse at the start of every bar.
   let(:bar_clicks) { MB::Sound.grid(1, 'x').loop.trigger }

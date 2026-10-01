@@ -72,7 +72,7 @@ class FM
         osc = @oscillators[@oscs_used]
         @osc_map[number] = osc
 
-        osc.frequency.constant = MB::Sound::Oscillator.calc_freq(number)
+        osc.frequency.constant = MB::Sound.tuning.frequency_of(number)
         osc.frequency.clear
 
         if @oscs_used > 0

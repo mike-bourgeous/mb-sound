@@ -23,13 +23,19 @@ module MB
     #     beat = grid(16, kick: 'x...x...x...x...', hat: '..x...x...x...xX').loop
     #     play(
     #       bass.tone.ramp.at(1).filter(:lowpass, cutoff: 400 + 2000 * bass.env(0.001, 0.15, 0.1, 0.05), quality: 4) * bass.env(0.005, 0.1, 0.7, 0.05) * 0.4 +
-    #       50.hz.sine.forever * beat[:kick].env(0, 0.25, 0, 0.05) +
+    #       50.hz.sine * beat[:kick].env(0, 0.25, 0, 0.05) +
     #       noise.filter(:highpass, cutoff: 8000) * beat[:hat].env(0, 0.03, 0, 0.02) * 0.5
     #     ).softclip
     module Sequence
       # The default Transport used by ClipNodes (see MB::Sound#bpm).
       def self.transport
         @transport ||= Transport.new
+      end
+
+      # Returns an event value (a note number, or a Pitch for a fixed
+      # frequency) moved by +semitones+.
+      def self.transpose_value(value, semitones)
+        value.is_a?(MB::Sound::Pitch) ? value.transpose(semitones) : value + semitones
       end
     end
 

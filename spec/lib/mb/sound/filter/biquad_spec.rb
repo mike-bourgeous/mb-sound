@@ -90,7 +90,7 @@ RSpec.describe(MB::Sound::Filter::Biquad, :aggregate_failures) do
       [Numo::SFloat, Numo::DFloat].each do |c|
         context "with #{c}" do
           it 'can process a real sine wave through a unity gain filter' do
-            d = c.cast(1000.hz.sine.generate(4800))
+            d = c.cast(1000.hz.sine.sample(4800))
 
             result = f_unity.send(m, d)
 
@@ -100,7 +100,7 @@ RSpec.describe(MB::Sound::Filter::Biquad, :aggregate_failures) do
 
           it 'returns the same values as the pure Ruby code' do
             f = 500.hz.lowpass
-            d = c.cast(1000.hz.sine.generate(4800))
+            d = c.cast(1000.hz.sine.sample(4800))
 
             f.reset
             expected = f.process_ruby(d)
@@ -128,7 +128,7 @@ RSpec.describe(MB::Sound::Filter::Biquad, :aggregate_failures) do
           end
 
           it 'can process a real sine wave through a unity gain filter' do
-            d = c.cast(1000.hz.sine.generate(4800))
+            d = c.cast(1000.hz.sine.sample(4800))
 
             result = f_unity.send(m, d)
 
@@ -137,7 +137,7 @@ RSpec.describe(MB::Sound::Filter::Biquad, :aggregate_failures) do
           end
 
           it 'can process a complex sine wave through a unity gain filter' do
-            d = c.cast(1000.hz.complex_sine.generate(4800))
+            d = c.cast(1000.hz.complex_sine.sample(4800))
 
             result = f_unity.send(m, d)
 
@@ -147,7 +147,7 @@ RSpec.describe(MB::Sound::Filter::Biquad, :aggregate_failures) do
 
           it 'returns the same values as the pure Ruby code' do
             f = 500.hz.lowpass
-            d = c.cast(1000.hz.complex_sine.generate(4800))
+            d = c.cast(1000.hz.complex_sine.sample(4800))
 
             f.reset
             expected = f.process_ruby(d)

@@ -67,8 +67,9 @@ module MB
         # :hz or :seconds (see the class description).
         attr_reader :mode
 
-        # The Tone whose phase is locked to the timeline (:hz mode only).
-        attr_accessor :tone
+        # The oscillators (Tones or Phasors) whose phases are locked to the
+        # timeline (:hz mode only); see #add_follower.
+        attr_reader :followers
 
         def initialize(duration, mode:, transport: nil, sample_rate: 48000)
           raise ArgumentError, "Mode must be one of #{MODES.inspect} (got #{mode.inspect})" unless MODES.include?(mode)
@@ -80,6 +81,7 @@ module MB
           @transport = transport
           @sample_rate = sample_rate.to_f
           @freewheel = false
+          @followers = []
           @buf = nil
           @node_type_name = "Tempo #{mode == :hz ? 'Hz' : 'seconds'}"
           @graph_node_name = duration.to_s
@@ -95,6 +97,19 @@ module MB
         # True if this node ignores the timeline (see #freewheel).
         def freewheel?
           @freewheel
+        end
+
+        # Locks the phase of +oscillator+ (a Tone or Phasor driven by this
+        # node, responding to #sync_cycles) to the timeline.  Called by Pitch
+        # for oscillators made from a tempo-synced pitch (Duration#hz).
+        def add_follower(oscillator)
+          @followers << oscillator unless @followers.any? { |f| f.equal?(oscillator) }
+          self
+        end
+
+        # True if +oscillator+ is locked to the timeline by this node.
+        def follows?(oscillator)
+          @followers.any? { |f| f.equal?(oscillator) }
         end
 
         # The current output value: Hz (:hz) or seconds (:seconds) at the
@@ -129,13 +144,14 @@ module MB
 
         private
 
-        # Locks the tone's phase to the timeline (see the class description).
+        # Locks the followers' phases to the timeline (see the class
+        # description).
         def timeline_start(time, _origin)
           @start_callbacks&.each { |c| c.call(self) }
 
-          return if @freewheel || @mode != :hz || @tone.nil?
+          return if @freewheel || @mode != :hz || @followers.empty?
           cycles = time / @duration.whole_notes
-          @tone.sync_phase(2 * Math::PI * (cycles - cycles.floor).to_f)
+          @followers.each { |f| f.sync_cycles((cycles - cycles.floor).to_f) }
         end
       end
     end

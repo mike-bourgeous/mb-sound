@@ -78,7 +78,7 @@ MB::Sound.effect_script(
     a = Numo::SFloat.zeros(internal_bufsize)
 
     phase = channels > 1 ? idx * p.spread * Math::PI / (180.0 * (channels - 1)) : 0
-    lfo = lfo_freq.tone.with_phase(phase).send(p.wave).forever.at(0..1)
+    lfo = lfo_freq.tone.with_phase(phase).send(p.wave).at(0..1)
 
     # Delay in samples
     samples = (delayconst * (sample_rate * p.oversample)).clip(0, nil).named('Delay in samples')

@@ -18,8 +18,8 @@
 #
 # Snippets to try in bin/sound.rb:
 #     3.n16                                  # => 3 × n16 (also 3.sixteenths, 1.n8.dotted, 2.bars, 3.beats)
-#     bg :sweep, 55.hz.ramp.at(1).filter(:lowpass, cutoff: 4.bars.lfo.triangle.at(200..3000), quality: 6).forever * 0.3
-#     bg :wob, 55.hz.square.at(1).filter(:lowpass, cutoff: 1.n8.lfo.at(150..900), quality: 4).forever * 0.2
+#     bg :sweep, 55.hz.ramp.at(1).filter(:lowpass, cutoff: 4.bars.lfo.triangle.at(200..3000), quality: 6) * 0.3
+#     bg :wob, 55.hz.square.at(1).filter(:lowpass, cutoff: 1.n8.lfo.at(150..900), quality: 4) * 0.2
 #     bpm 90                                 # both LFOs follow, still on the bar grid
 #     s = seq(C4, Eb4, G4, Bb4).n16.loop
 #     bg :pluck, (s.tone.triangle.at(1) * s.env(0.001, 0.15, 0, 0.1)).delay(1.n8.dotted, feedback: -6.db, dry: 1, wet: -6.db) * 0.3
@@ -27,7 +27,7 @@
 #     master { |mix| mix.filter(:lowpass, cutoff: 8.bars.lfo.at(800..8000)) }   # a master sweep that freezes while stopped
 #     master { |mix| mix.filter(:lowpass, cutoff: 8.bars.lfo.freewheel.at(800..8000)) }   # keeps moving while stopped
 #     notes = seq(A2, E3, C3).n4.loop        # a comb resonator tuned to each note (Clip#period)
-#     bg :string, (noise.at(1).forever * notes.env(0, 0.004, 0, 0.001)).delay(notes.period, feedback: 0.98, dry: 1, wet: 1, smoothing: false) * 0.3
+#     bg :string, (noise.at(1) * notes.env(0, 0.004, 0, 0.001)).delay(notes.period, feedback: 0.98, dry: 1, wet: 1, smoothing: false) * 0.3
 
 require 'bundler/setup'
 require 'mb-sound'

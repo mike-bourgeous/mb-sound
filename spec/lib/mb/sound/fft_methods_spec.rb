@@ -3,13 +3,13 @@ RSpec.describe(MB::Sound::FFTMethods) do
   [:fft, :real_fft].each do |m|
     describe "##{m}" do
       it 'can process a Tone object' do
-        fft = MB::Sound.send(m, 4000.hz.at(1).for(1))
+        fft = MB::Sound.send(m, 4000.hz.at(1))
         expect(fft.abs.max_index).to eq(4000)
         expect(fft[4000].abs.round(3)).to eq(1)
       end
 
       it 'can process an Array of Tone objects' do
-        fft = MB::Sound.send(m, [4000.hz.at(1).for(1), 8000.hz.at(1).for(1)])
+        fft = MB::Sound.send(m, [4000.hz.at(1), 8000.hz.at(1)])
         expect(fft).to be_a(Array)
         expect(fft[0].abs.max_index).to eq(4000)
         expect(fft[1].abs.max_index).to eq(8000)
@@ -34,7 +34,7 @@ RSpec.describe(MB::Sound::FFTMethods) do
       }
 
       let(:sine_input_small) {
-        tone = Numo::DFloat.cast(12000.hz.at(1).generate(24))
+        tone = Numo::DFloat.cast(12000.hz.at(1).sample(24))
         n.times do
           tone = Numo::DFloat.cast([tone] * 24)
         end
@@ -42,7 +42,7 @@ RSpec.describe(MB::Sound::FFTMethods) do
       }
 
       let(:sine_input_large) {
-        tone = Numo::DFloat.cast(4000.hz.at(1).generate(48))
+        tone = Numo::DFloat.cast(4000.hz.at(1).sample(48))
         n.times do
           tone = Numo::DFloat.cast([tone] * 48)
         end
@@ -58,7 +58,7 @@ RSpec.describe(MB::Sound::FFTMethods) do
       }
 
       let(:cosine_input) {
-        tone = Numo::DFloat.cast(12000.hz.with_phase(90.degrees).at(1).generate(24))
+        tone = Numo::DFloat.cast(12000.hz.with_phase(90.degrees).at(1).sample(24))
         n.times do
           tone = Numo::DFloat.cast([tone] * 24)
         end
@@ -66,7 +66,7 @@ RSpec.describe(MB::Sound::FFTMethods) do
       }
 
       let(:ramp_input) {
-        tone = Numo::DFloat.cast(4000.hz.ramp.at(1).generate(48))
+        tone = Numo::DFloat.cast(4000.hz.ramp.at(1).sample(48))
         n.times do
           tone = Numo::DFloat.cast([tone] * 48)
         end

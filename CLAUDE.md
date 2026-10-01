@@ -48,7 +48,7 @@ In the container, `OUTPUT_TYPE=null` is set in the Dockerfile so playback uses `
 The central pattern is `GraphNode` (`lib/mb/sound/graph_node.rb`), a module mixed into any class that implements `#sample`. It enables fluent chaining to build signal processing graphs:
 
 ```ruby
-play 123.hz.triangle.at(-20.db).for(0.5)
+play 123.hz.triangle.at(-20.db)   # oscillators play until Ctrl-C
 play 123.hz.fm(369.hz.at(1000)).softclip.filter(150.hz.highpass(quality: 4))
 ```
 
@@ -60,7 +60,7 @@ Graph nodes maintain input/output relationships and support traversal via the `T
 
 ### Numeric Mixins
 
-`lib/mb/sound/numeric_sound_mixins.rb` adds methods like `.hz`, `.db`, `.meters`, `.bits` to Ruby's Numeric class, enabling the fluent DSL (e.g. `440.hz.sine.forever`, `-20.db`).  `Sequence::NumericDurations` adds musical lengths (`2.bars`, `3.beats`, `3.n16`, `3.sixteenths`, `1.n8.dotted`) returning `Sequence::Duration`s; see Tempo sync below.
+`lib/mb/sound/numeric_sound_mixins.rb` adds methods like `.hz`, `.db`, `.meters`, `.bits` to Ruby's Numeric class, enabling the fluent DSL (e.g. `440.hz.sine`, `-20.db`).  `440.hz` is a `Pitch` (`lib/mb/sound/pitch.rb`): a light frequency source whose oscillator methods (`sine`, `ramp`, `at`, `fm`, `pm`, `lfo`, `tone`/`hz`, `phasor`) make a new `Tone` each call, which plays as a full-scale sine when used directly as a signal, and which sequences can hold as a fixed frequency (`seq(C4, 440.hz)`).  `Note < Pitch` (C4 = 60) gets its frequency from the session `Tuning` (`tuning b4: 480`, live).  Oscillators run from a `Phasor` (phase in cycles; `lib/mb/sound/phasor.rb`).  `tuning` in a scheduled block changes on the block's time (`Session#at_time`).  `Sequence::NumericDurations` adds musical lengths (`2.bars`, `3.beats`, `3.n16`, `3.sixteenths`, `1.n8.dotted`) returning `Sequence::Duration`s; see Tempo sync below.
 
 ### Method Modules
 
@@ -102,7 +102,7 @@ Two reverb implementations coexist; use `#reverb` in most cases:
 
 ### Tempo sync
 
-`Sequence::Duration` (`lib/mb/sound/sequence/duration.rb`) is an exact musical length in whole notes (comparable, `+`/`-`, scaled by numbers, friendly `to_s` like "3 × n16"), accepted wherever lengths are (`at:`, `fade:`, `every`, `after`, `render(bars:)`, `.len`).  `4.bars.lfo` / `1.beat.hz` are Tones driven by a `Sequence::TempoNode` that follows the tempo, with phase locked to the timeline on jumps (start, seeks, resume) plus `with_phase`; they freeze while the timeline is paused unless `.freewheel`.  `sig.delay(1.n8.dotted)` (or `sig.filter(3.n16.delay(...))`, `seconds: 3.n16`, `multitap(1.n8.d, ...)`) follows the tempo; `2.bars.lfo.square.at(3.n16..5.n16)` gives an alternating delay time (`Tone#musical_time?`).  Plain numbers in `delay` are seconds.  Tempo-following nodes include `Sequence::TimelineNode` (shared with `ClipNode`), which `Session` finds in every graph (`timeline_nodes`).  `Tone#lfo` means full range and forever (`or_forever`) plus no MIDI retrigger.  `render(bars:)` counts bars on the timeline, so tempo changes during a render are followed; `tail: true` adds the master effects tail after the limit.  See `bin/songs/tempo_song.rb`.
+`Sequence::Duration` (`lib/mb/sound/sequence/duration.rb`) is an exact musical length in whole notes (comparable, `+`/`-`, scaled by numbers, friendly `to_s` like "3 × n16"), accepted wherever lengths are (`at:`, `fade:`, `every`, `after`, `render(bars:)`, `.len`, `until`).  `1.beat.hz` is a Pitch whose frequency comes from a `Sequence::TempoNode` following the tempo, and `4.bars.lfo` a Tone from it; the TempoNode locks the phase of every oscillator made from the pitch (its followers) to the timeline on jumps (start, seeks, resume) plus `with_phase`; they freeze while the timeline is paused unless `.freewheel`.  `sig.delay(1.n8.dotted)` (or `sig.filter(3.n16.delay(...))`, `seconds: 3.n16`, `multitap(1.n8.d, ...)`) follows the tempo; `2.bars.lfo.square.at(3.n16..5.n16)` gives an alternating delay time (`Tone#musical_time?`).  Plain numbers in `delay` are seconds.  Tempo-following nodes include `Sequence::TimelineNode` (shared with `ClipNode`), which `Session` finds in every graph (`timeline_nodes`).  `Tone#lfo` means full range plus no MIDI retrigger.  `render(bars:)` counts bars on the timeline, so tempo changes during a render are followed; `tail: true` adds the master effects tail after the limit.  See `bin/songs/tempo_song.rb`.
 
 ### Multichannel
 
@@ -160,9 +160,9 @@ The container has no audio device, so check sound-producing code by rendering it
 ### Gotchas
 
 - `#sample` usually returns a reused buffer; `.dup` each buffer before collecting several of them (several false "bugs" came from forgetting this).
-- Oscillators (`Tone`, `noise`) default to amplitude 0.1, and `*` only raises its right operand to full level, so `tone * env` is 10x quieter than `env * tone`.  Use `.at(...)` explicitly in examples and check levels by rendering.
-- `Tone.new` (and `Numeric#hz`) defaults to a 5-second duration, so graphs driven by clips or LFOs need `.forever` (`Tone#lfo` now plays forever by default).
-- `40.hz` is an oscillator, not a constant; use `40.constant` for fixed values in arithmetic.
+- Oscillators (`Tone`, `noise`) are full scale (-1..1) by default, and the master bus (`Session#master_gain`, `master_gain -6.db`, `render(gain:)`) is -10 dB by default, live and in renders, so mixes of full-scale parts have headroom; effect scripts set it to 0 dB, since they process recordings with their own levels.  Check levels by rendering.
+- Oscillators and constants play forever (there is no `.for`/`.forever`); sounds end through envelopes (an envelope nothing triggers is a one-shot that ends; voices and clips mark theirs `retriggerable!`), clips, files, `x.until(seconds)` or `x.until(2.bars)` (`GraphNode::TimeLimit`, a hard cut; musical lengths follow the tempo, counted from the node's first sample), `and_then`, or `MB::Sound.silence(s)` (zeros, then the end; e.g. tails via `and_then(silence(s))`).  `play` of a graph says to press Ctrl-C, `write` caps graphs at `MAX_RENDER_SECONDS`, and `fft`/`plot`/`write` given a bare Tone or Pitch take one second of it.
+- `40.hz` is a Pitch that plays as a sine when used as a signal, not a constant; use `40.constant` for fixed values in arithmetic, and `pitch.transpose(n)` or `(f * 2).hz` to change frequencies (`440.hz * 2` doubles the sine's amplitude).
 - `node.filter(cookbook_filter)` re-applies the filter's original cutoff and quality every buffer, so changing `center_frequency` from outside (e.g. a MIDI callback) does nothing; pass `cutoff:` a node and change the node.
 - `multitap` and other multi-output results are `Channels` bundles, which are deliberately not Enumerable (`.to_a` for `shuffle`, `reverse`, etc.).
 - C4 = 60 (C3 = 48).  Derive expected values in specs from note constants or a quick script; hand-computed notes and offsets caused several wrong assertions.

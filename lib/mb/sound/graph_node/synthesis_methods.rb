@@ -4,16 +4,14 @@ module MB
       # Methods that use a node to control an oscillator, wavetable, or
       # envelope.  Included in GraphNode.
       module SynthesisMethods
-        # Converts a fractional MIDI note number to a frequency in Hz.
+        # Converts a fractional MIDI note number to a frequency in Hz with the
+        # current tuning, following tuning changes (see MB::Sound.tuning).
         def freq
-          self.proc(type_name: 'Number to frequency') { |v|
-            MB::FastSound.number_to_freq(v, MB::Sound::Oscillator.tune_note, MB::Sound::Oscillator.tune_freq)
-          }
+          MB::Sound.tuning.freq(self)
         end
 
-        # Uses this node as the frequency value for an oscillator.
+        # Uses this node as the frequency value for a full-scale oscillator.
         def tone
-          # TODO: add .or_at(1) and go fix all the affected synths and effects
           MB::Sound::Tone[self]
         end
 
@@ -28,10 +26,7 @@ module MB
         # attack + decay, or 0.25, whichever is longer; set it to false to
         # disable), then the envelope will release automatically after that time.
         def adsr(attack, decay, sustain, release, log: nil, auto_release: nil, filter_freq: 10000)
-          if auto_release.nil?
-            auto_release = 2.0 * (attack + decay)
-            auto_release = 0.1 if auto_release < 0.1
-          end
+          auto_release = MB::Sound::ADSREnvelope.default_auto_release(attack, decay) if auto_release.nil?
 
           env = MB::Sound::ADSREnvelope.new(
             attack_time: attack,

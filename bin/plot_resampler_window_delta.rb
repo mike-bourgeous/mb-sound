@@ -48,13 +48,13 @@ MB::Sound.script(
     MB::U.headline "Generating data for #{m.inspect}"
 
     $d1 = d1 = MB::M.select_zero_crossings(
-      freq.hz.at(1).at_rate(from_rate).forever
+      freq.hz.at(1).at_rate(from_rate)
         .resample(to_rate, mode: m)
         .sample(samples),
       nil
     )
     $d2 = d2 = MB::M.select_zero_crossings(
-      freq.hz.at(1).at_rate(from_rate).forever
+      freq.hz.at(1).at_rate(from_rate)
         .resample(to_rate, mode: m)
         .multi_sample(multi_samples, multi_count),
       nil

@@ -96,14 +96,6 @@ module MB
 
           retbuf.not_inplace!
         end
-
-        # Resets truncation status in case upstream nodes were reset/rewound.
-        def for(duration, recursive: true)
-          # TODO: should a graph just be done when it's done?  No resets, just
-          # make a new graph?
-          @truncated = false
-          super
-        end
       end
     end
   end

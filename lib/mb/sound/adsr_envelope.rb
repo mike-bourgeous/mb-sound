@@ -45,9 +45,23 @@ module MB
     #     b = env.sample(48000)
     #     total = a.concatenate(b)
     #     plotter.plot(envelope: total)
+    #
+    # Envelopes that something will trigger (MIDI voices, GraphVoice, clip
+    # envelopes, MIDI DSL envelopes) are #retriggerable!: they output zero
+    # while idle and never end by themselves.  Any other envelope that is
+    # sampled before it was ever triggered is a one-shot: it triggers itself,
+    # releases after .default_auto_release seconds, and ends (returns nil)
+    # once released, so `play 100.hz * env` ends.
     class ADSREnvelope
       include GraphNode
       include BufferHelper
+
+      # The number of seconds after which one-shot envelopes (and
+      # MB::Sound.adsr / GraphNode#adsr by default) release: twice the
+      # attack plus decay, at least 0.1 seconds.
+      def self.default_auto_release(attack_time, decay_time)
+        [2.0 * (attack_time + decay_time), 0.1].max
+      end
 
       attr_reader :attack_time, :decay_time, :sustain_level, :release_time, :total, :peak, :time, :sample_rate
 
@@ -71,6 +85,8 @@ module MB
         @auto_release = nil
         @time = @total + 100
         @frame = @sample_rate * @time
+        @triggered = false
+        @retriggerable = false
 
         # Single-pole filter avoids overshoot
         @filter = filter_freq.hz.at_rate(@sample_rate).lowpass1p
@@ -120,6 +136,19 @@ module MB
         @on
       end
 
+      # Marks this envelope as triggered by something else (e.g. a MIDI
+      # voice or a clip), so it waits for #trigger instead of firing once by
+      # itself when first sampled (see the class description).  Returns self.
+      def retriggerable!
+        @retriggerable = true
+        self
+      end
+
+      # True if this envelope waits to be triggered (see #retriggerable!).
+      def retriggerable?
+        @retriggerable
+      end
+
       # Starts (or restarts) the envelope at the beginning, multiplying the
       # entire envelope by +peak+.  The +:auto_release+ parameter may be an
       # approximate number of seconds after which to release the envelope
@@ -140,6 +169,7 @@ module MB
         @auto_release = @attack_time + @decay_time if @auto_release == true
 
         @on = true
+        @triggered = true
 
         self
       end
@@ -190,6 +220,7 @@ module MB
       # envelope.  Call repeatedly to get envelope values over time.  Returns
       # nil if auto_release was set and the envelope has fully released.
       def sample(count = nil, filter: true)
+        fire_one_shot unless @triggered || @retriggerable
         sample_c(count&.round, filter: filter)
       end
 
@@ -415,6 +446,12 @@ module MB
         @time = @frame / @sample_rate.to_f
 
         release if @on && @auto_release && @time >= @auto_release
+      end
+
+      # Triggers an envelope that nothing else will trigger (see the class
+      # description) as a one-shot.
+      def fire_one_shot
+        trigger(1.0, auto_release: self.class.default_auto_release(@attack_time, @decay_time))
       end
     end
   end

@@ -16,9 +16,6 @@ module MB
             @manager = dsl.manager
             @cache_invalidated = false
             @node_type_name = 'MIDI Oscillator'
-
-            # Default to playing forever
-            or_for(nil)
           end
         end
       end

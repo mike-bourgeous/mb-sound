@@ -26,7 +26,7 @@ module MB
         def filter(filter_or_type = :lowpass, cutoff: nil, quality: nil, gain: nil, in_place: false)
           f = filter_or_type
           f = f.hz if f.is_a?(Numeric)
-          f = f.lowpass if f.is_a?(Tone)
+          f = f.lowpass if f.is_a?(Tone) || f.is_a?(Pitch)
 
           if f.respond_to?(:sample_rate)
             if f.sample_rate != self.sample_rate
@@ -89,7 +89,7 @@ module MB
           raise "PEQ frequency/gain pairs must be a Hash from frequency to gain (got #{pairs.class})" unless pairs.is_a?(Hash)
 
           filters = pairs.map { |freq, gain|
-            freq = freq.frequency if freq.is_a?(Tone)
+            freq = freq.frequency if freq.is_a?(Tone) || freq.is_a?(Pitch)
             freq = freq.to_f
 
             case gain
@@ -145,7 +145,7 @@ module MB
         #
         # Example:
         #     # Filter pinging bell ringing
-        #     play 0.5.hz.ramp.at(50).filter(:lowpass, cutoff: 1000, quality: 0.5).bandpass_series(440, quality: 1414, count: 20, ratio: 1.7).softclip(0.9).forever
+        #     play 0.5.hz.ramp.at(50).filter(:lowpass, cutoff: 1000, quality: 0.5).bandpass_series(440, quality: 1414, count: 20, ratio: 1.7).softclip(0.9)
         #
         #     # MIDI controlled
         #     play (midi.env(0.0, 0.00005, 0, 0.00005) * 100).bandpass_series(midi.frequency, quality: 500, count: 16, ratio: midi.cc(1, range: 1..4)).softclip(0.9).oversample(4)

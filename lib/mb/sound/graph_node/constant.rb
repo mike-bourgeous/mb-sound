@@ -29,8 +29,7 @@ module MB
         # instead of being interpolated).
         attr_accessor :smoothing
 
-        # The sample rate given to the constructor, used for calculating the
-        # constant duration in #for.
+        # The sample rate given to the constructor, used for timed changes.
         attr_reader :sample_rate
 
         # An optional allowed range for this constant.  May be used for
@@ -65,8 +64,6 @@ module MB
 
           @sample_rate = sample_rate.to_f
           @elapsed_samples = 0.0
-          @duration_samples = nil
-          @duration_set = false
 
           @changes = []
         end
@@ -103,16 +100,6 @@ module MB
 
         # Returns +count+ samples of the constant value.
         def sample(count)
-          if @duration_samples
-            # Return nil if we have reached the duration set by #for
-            return nil if @elapsed_samples >= @duration_samples
-
-            # Return less than requested if we have nearly reached the duration set by #for
-            if @elapsed_samples + count >= @duration_samples
-              count = (@duration_samples - @elapsed_samples).round
-            end
-          end
-
           return nil if count == 0
 
           @elapsed_samples += count
@@ -180,13 +167,12 @@ module MB
           { value: @constant }
         end
 
-        # Changes the sample rate of this constant value, used for duration
-        # calculation.
+        # Changes the sample rate of this constant value, used for timed
+        # changes.
         def at_rate(sample_rate)
           new_rate = sample_rate.to_f
 
           @elapsed_samples = @elapsed_samples * new_rate / @sample_rate
-          @duration_samples = @duration_samples * new_rate / @sample_rate if @duration_samples
 
           @sample_rate = new_rate
 
@@ -194,48 +180,10 @@ module MB
         end
         alias sample_rate= at_rate
 
-        # Sets the duration for which this constant will run *from now*, or nil
-        # to run forever.
-        def for(duration_seconds, recursive: true)
-          super(duration_seconds, recursive: recursive)
-          @elapsed_samples = 0
-          @duration_samples = duration_seconds ? duration_seconds.to_f * @sample_rate : nil
-          @duration_set = true
-          self
-        end
-
-        # Sets the default duration for this constant
-        def or_for(duration_seconds, recursive: true)
-          # TODO: deduplicate duration management code
-          super(duration_seconds, recursive: false)
-
-          unless @duration_set
-            @duration_samples = duration_seconds ? duration_seconds.to_f * @sample_rate : nil
-          end
-
-          self
-        end
-
-        # Returns the duration of the constant in seconds, or nil if there is
-        # no duration.
-        def duration
-          return nil unless @duration_samples
-          @duration_samples / @sample_rate
-        end
-
         # Returns the amount of time the constant has been playing since the
-        # start of playback, or since #for was last called.
+        # start of playback.
         def elapsed
           @elapsed_samples / @sample_rate
-        end
-
-        # Returns the progress as a percentage through playback (from 0 to 100)
-        # if there is a duration set, or nil if there is no duration.
-        #
-        # TODO: abstract progress reporting as a mixin for Tone, inputs, etc.?
-        def progress
-          return nil unless @duration_samples
-          @elapsed_samples * 100.0 / @duration_samples
         end
 
         # See GraphNode#to_s

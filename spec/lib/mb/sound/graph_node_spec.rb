@@ -12,21 +12,14 @@ RSpec.describe(MB::Sound::GraphNode, aggregate_failures: true) do
     expect(graph.sample(5)).to eq(Numo::SFloat.zeros(5).fill(-2))
   end
 
-  it 'resets default durations on tones added or multiplied to a graph' do
-    graph = (100.hz.for(2) + 33.hz.or_for(0.1) + 25.hz.or_for(0.1) - 11.hz.or_for(0.1)) * 10.hz.or_for(0.1) * 15.hz.or_for(0.1) - 5.hz.or_for(0.1)
-
-    # Expect exactly two full seconds of audio despite potentially shorter tones mixed in
-    20.times do
-      expect(graph.sample(4800)).to be_a(Numo::SFloat)
-    end
-    expect(graph.sample(4800)).to eq(nil)
-  end
-
-  it 'resets default amplitudes on tones multiplied to a graph' do
-    graph = 0.hz.square.at(2) * 0.hz.square.or_at(0) * 0.hz.square.or_at(0)
-
-    # If the amplitude was not reset this would return 0
+  it 'multiplies full-scale tones without changing their amplitudes' do
+    # Oscillators default to full scale (-1..1) on either side of *
+    graph = 0.hz.square.at(2) * 0.hz.square * 0.hz.square
     expect(graph.sample(100)).to eq(Numo::SFloat.zeros(100).fill(2))
+
+    # An explicit default amplitude is kept (the old * reset it to 1)
+    quiet = 0.hz.square * 0.hz.square.or_at(0.5)
+    expect(quiet.sample(100)).to eq(Numo::SFloat.zeros(100).fill(0.5))
   end
 
   describe '#outputs and #channel_count' do
@@ -66,7 +59,9 @@ RSpec.describe(MB::Sound::GraphNode, aggregate_failures: true) do
       ref = 1000.hz
       test = 1000.constant.tone
 
-      expect(ref.sample(480)).to eq(test.sample(480))
+      # A constant frequency advances by i * increment, a frequency node by
+      # a running sum, so they round slightly differently
+      expect(ref.sample(480)).to all_be_within(1e-6).of_array(test.sample(480))
     end
   end
 
@@ -419,7 +414,7 @@ RSpec.describe(MB::Sound::GraphNode, aggregate_failures: true) do
 
       # Ensure the correct types were created and stored
       expect(graph).to be_a(MB::Sound::Filter::SampleWrapper)
-      expect(graph.sources[:input].original_source).to be_a(MB::Sound::Tone)
+      expect(graph.sources[:input].original_source).to be_a(MB::Sound::Pitch)
       expect(graph.sources[:cutoff].original_source).to be_a(MB::Sound::GraphNode::Mixer)
       expect(graph.sources[:quality].original_source).to be_a(MB::Sound::GraphNode::Mixer)
 
@@ -538,11 +533,11 @@ RSpec.describe(MB::Sound::GraphNode, aggregate_failures: true) do
     end
 
     it 'returns nil at end of stream' do
-      expect(123.hz.for(0).multi_sample(100, 1)).to eq(nil)
+      expect(123.hz.until(0).multi_sample(100, 1)).to eq(nil)
     end
 
     it 'handles end of stream part way through concatenation' do
-      result = 123.hz.for(5.0 / 48000).multi_sample(2, 10)
+      result = 123.hz.until(5.0 / 48000).multi_sample(2, 10)
       expect(result.length).to eq(5)
     end
   end
@@ -699,10 +694,6 @@ RSpec.describe(MB::Sound::GraphNode, aggregate_failures: true) do
     end
   end
 
-  pending '#forever'
-
-  pending '#for'
-
   context 'implementations' do
     context 'provide a sample_rate' do
       ObjectSpace.each_object.select { |o| o.is_a?(Class) && o.ancestors.include?(MB::Sound::GraphNode) }.each do |cl|
@@ -801,7 +792,7 @@ RSpec.describe(MB::Sound::GraphNode, aggregate_failures: true) do
 
     describe '#graph_ranks' do
       it 'returns expected ordering for a simple graph' do
-        a = 300.hz
+        a = 300.hz.sine
         m = a.adsr(0.1, 0.1, 0.6, 0.5)
         b = m.multiplicands[1]
         c = 100.hz.fm(m)

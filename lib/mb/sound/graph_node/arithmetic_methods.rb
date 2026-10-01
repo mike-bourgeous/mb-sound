@@ -9,22 +9,18 @@ module MB
         # numeric constant or another GraphNode).
         def +(other)
           # FIXME: this fails to set up the tee correctly when adding a node on the left; see bin/songs/stereo_drone.rb
-          fixup_tones(false, self, other)
           Mixer.new([self, other], sample_rate: self.sample_rate)
         end
 
         # Creates a mixer that subtracts +other+ (a numeric constant or another
         # GraphNode) from this node's #sample output.
         def -(other)
-          fixup_tones(false, self, other)
           Mixer.new([self, [other, -1]], sample_rate: self.sample_rate)
         end
 
         # Creates a multiplier that multiplies +other+ (a numeric constant or
         # another GraphNode) by this node's #sample output.
         def *(other)
-          fixup_tones(false, self)
-          fixup_tones(true, other)
           Multiplier.new([self, other], sample_rate: self.sample_rate)
         end
 
@@ -138,15 +134,6 @@ module MB
         end
 
         private
-
-        # Sets tones to play forever at full volume, if they don't have a fixed
-        # volume and duration set.
-        def fixup_tones(fix_amp, *tones)
-          tones.each do |t|
-            t.or_for(nil) if t.respond_to?(:or_for) # Default to playing forever
-            t.or_at(1) if fix_amp && t.respond_to?(:or_at) # Default to full volume
-          end
-        end
 
         # Setup/boilerplate buffer management used by #/ and #**.
         def arithmetic_proc(other, name)

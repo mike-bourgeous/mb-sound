@@ -1,7 +1,7 @@
 RSpec.describe MB::Sound::Tone do
   describe '#generate' do
     it 'can generate triangle wave samples in an NArray' do
-      data = 500.hz.triangle.at(0.85).generate(48000)
+      data = 500.hz.triangle.at(0.85).sample(48000)
       expect(data.length).to eq(48000)
       expect(data.max.round(3)).to eq(0.85)
       expect(data.min.round(3)).to eq(-0.85)
@@ -10,7 +10,7 @@ RSpec.describe MB::Sound::Tone do
     end
 
     it 'can generate square wave samples in an NArray' do
-      data = 500.hz.square.at(0.85).generate(48000)
+      data = 500.hz.square.at(0.85).sample(48000)
       expect(data.length).to eq(48000)
       expect(data.max.round(3)).to eq(0.85)
       expect(data.min.round(3)).to eq(-0.85)
@@ -22,36 +22,13 @@ RSpec.describe MB::Sound::Tone do
   describe '#sample' do
     # TODO: get rid of #generate and move those examples here
 
-    context 'with a duration set' do
-      it 'ends after the expected duration exactly' do
-        a = 1.hz.square.for(1)
-        expect(a.sample(5000)).to be_a(Numo::SFloat)
-        expect(a.sample(500)).to be_a(Numo::SFloat)
-        expect(a.sample(20000)).to be_a(Numo::SFloat)
-        expect(a.sample(500)).to be_a(Numo::SFloat)
-        expect(a.sample(22000)).to be_a(Numo::SFloat)
-        expect(a.sample(100)).to eq(nil)
-      end
+    it 'plays forever' do
+      a = 1.hz.square.at(1)
+      10.times { expect(a.sample(24000)).to be_a(Numo::SFloat).and have_attributes(length: 24000) }
+    end
 
-      it 'returns a short buffer if the duration does not align with buffer size' do
-        a = 1.hz.square.at(1).for(32.0 / 48000.0)
-        expect(a.sample(30)).to eq(Numo::SFloat.ones(30))
-        expect(a.sample(30)).to eq(Numo::SFloat.ones(2))
-        expect(a.sample(30)).to eq(nil)
-      end
-
-      it 'returns a short buffer if the duration does not align with sample size' do
-        a = 1.hz.square.at(1).for(32.3 / 48000.0)
-        expect(a.sample(30)).to eq(Numo::SFloat.ones(30))
-        expect(a.sample(30)).to eq(Numo::SFloat.ones(2))
-        expect(a.sample(30)).to eq(nil)
-      end
-
-      it 'rounds duration to the nearest sample' do
-        a = 1.hz.square.at(1).for(0.6 / 48000.0)
-        expect(a.sample(30)).to eq(Numo::SFloat.ones(1))
-        expect(a.sample(30)).to eq(nil)
-      end
+    it 'returns nil for an empty request' do
+      expect(1.hz.sample(0)).to eq(nil)
     end
   end
 
@@ -76,12 +53,12 @@ RSpec.describe MB::Sound::Tone do
     end
 
     it 'rejects the node itself' do
-      a = 300.hz
+      a = 300.hz.sine
       expect { a.send(method, a) }.to raise_error(/Cyclic modulation/)
     end
 
     it 'rejects loops with the node' do
-      a = 300.hz
+      a = 300.hz.sine
       b = a + 150.hz
       expect { a.send(method, b) }.to raise_error(/Cyclic modulation/)
     end
@@ -103,22 +80,6 @@ RSpec.describe MB::Sound::Tone do
     it_behaves_like 'modulation sources', :pm
 
     pending 'expected output'
-  end
-
-  describe '#for' do
-    it 'limits duration' do
-      # See also examples for #sample
-      expect(1.hz.square.at(1).for(2.0 / 48000.0).sample(4000)).to eq(Numo::SFloat[1, 1])
-    end
-
-    it 'resets elapsed timer' do
-      t = 1.hz.square.at(1).for(2.0 / 48000.0)
-      expect(t.sample(30)).to eq(Numo::SFloat[1, 1])
-
-      t.for(3.0 / 48000.0)
-
-      expect(t.sample(30)).to eq(Numo::SFloat[1, 1, 1])
-    end
   end
 
   describe '#oscillator' do
@@ -228,17 +189,17 @@ RSpec.describe MB::Sound::Tone do
     end
 
     it 'passes a lower-frequency triangle wave unmodified' do
-      data = 50.hz.triangle.at(1).generate(1024)
+      data = 50.hz.triangle.at(1).sample(1024)
       expect(MB::M.round(f.process(data), 6)).to eq(MB::M.round(data, 6))
     end
 
     it 'passes an equal-frequency triangle wave unmodified' do
-      data = 375.hz.triangle.at(1).generate(1024)
+      data = 375.hz.triangle.at(1).sample(1024)
       expect(MB::M.round(f.process(data), 6)).to eq(MB::M.round(data, 6))
     end
 
     it 'does not pass an equal-frequency sine wave unmodified' do
-      data = 375.hz.sine.at(1).generate(1024)
+      data = 375.hz.sine.at(1).sample(1024)
       expect(MB::M.round(f.process(data), 6)).not_to eq(MB::M.round(data, 6))
     end
   end

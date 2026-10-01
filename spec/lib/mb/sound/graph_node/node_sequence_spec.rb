@@ -1,6 +1,6 @@
 RSpec.describe(MB::Sound::GraphNode::NodeSequence) do
   it 'can be constructed by DSL' do
-    seq = 0.hz.square.at(5).for(7.0 / 48000).and_then(0.hz.square.at(4).for(4.0 / 48000), Numo::SFloat[-6, -5, -4])
+    seq = 0.hz.square.at(5).until(7.0 / 48000).and_then(0.hz.square.at(4).until(4.0 / 48000), Numo::SFloat[-6, -5, -4])
     expect(seq.sample(5)).to eq(Numo::SFloat[5, 5, 5, 5, 5])
     expect(seq.sample(5)).to eq(Numo::SFloat[5, 5, 4, 4, 4])
     expect(seq.sample(5)).to eq(Numo::SFloat[4, -6, -5, -4])
@@ -29,7 +29,7 @@ RSpec.describe(MB::Sound::GraphNode::NodeSequence) do
     end
 
     it 'does not zero pad sources that return short reads' do
-      seq = 5.constant.for(3.0 / 48000).and_then(2.constant.for(7.0 / 48000), 1.constant.for(4.0 / 48000.0))
+      seq = 5.constant.until(3.0 / 48000).and_then(2.constant.until(7.0 / 48000), 1.constant.until(4.0 / 48000.0))
       expect(seq.sample(4)).to eq(Numo::SFloat[5, 5, 5, 2])
       expect(seq.sample(4)).to eq(Numo::SFloat[2, 2, 2, 2])
       expect(seq.sample(4)).to eq(Numo::SFloat[2, 2, 1, 1])
@@ -38,8 +38,8 @@ RSpec.describe(MB::Sound::GraphNode::NodeSequence) do
     end
 
     it 'can return complex data' do
-      seq = -0.5.constant.for(3.0 / 48000)
-        .and_then((-1 + 1.5i).constant.for(4.0 / 48000))
+      seq = (-0.5.constant).until(3.0 / 48000)
+        .and_then(((-1 + 1.5i).constant).until(4.0 / 48000))
 
       expect(seq.sample(2)).to be_a(Numo::SFloat).and eq(Numo::SFloat[-0.5, -0.5])
       expect(seq.sample(2)).to be_a(Numo::SComplex).and eq(Numo::SComplex[-0.5, -1+1.5i])
@@ -51,10 +51,10 @@ RSpec.describe(MB::Sound::GraphNode::NodeSequence) do
 
   describe '#and_then' do
     it 'just adds another source to the sequence' do
-      seq = MB::Sound::GraphNode::NodeSequence.new(3.constant.for(3.0 / 48000))
+      seq = MB::Sound::GraphNode::NodeSequence.new(3.constant.until(3.0 / 48000))
       expect(seq.sources.length).to eq(1)
 
-      seq2 = seq.and_then(5.constant.for(2.0 / 48000))
+      seq2 = seq.and_then(5.constant.until(2.0 / 48000))
       expect(seq2).to equal(seq)
       expect(seq.sources.length).to eq(2)
 
@@ -62,12 +62,12 @@ RSpec.describe(MB::Sound::GraphNode::NodeSequence) do
     end
 
     it 'resumes sample output even if sources were previously exhausted' do
-      seq = MB::Sound::GraphNode::NodeSequence.new(1.constant.for(2.0 / 48000))
+      seq = MB::Sound::GraphNode::NodeSequence.new(1.constant.until(2.0 / 48000))
 
       expect(seq.sample(3)).to eq(Numo::SFloat[1, 1])
       expect(seq.sample(3)).to eq(nil)
 
-      seq.and_then(2.constant.for(1.0 / 48000))
+      seq.and_then(2.constant.until(1.0 / 48000))
       expect(seq.sample(3)).to eq(Numo::SFloat[2])
       expect(seq.sample(3)).to eq(nil)
     end

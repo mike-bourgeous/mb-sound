@@ -29,7 +29,7 @@ module MB
 
           @entries = {}
           @next_id = 0
-          @tempo_changes = []
+          @timed_changes = []
           @mutex = Mutex.new
           @queue = nil
           @thread = nil
@@ -75,18 +75,26 @@ module MB
         # See Session#change_tempo.
         def change_tempo(bpm, time:)
           raise ArgumentError, "BPM must be a positive number (got #{bpm.inspect})" unless bpm.is_a?(Numeric) && bpm.finite? && bpm > 0
-          @mutex.synchronize { @tempo_changes << [time.to_r, bpm] }
+          at_time(time) { @transport.bpm = bpm }
           bpm
         end
 
-        # Applies tempo changes whose time has come.  Called by Session at
-        # the start of each buffer.
-        def apply_tempo_changes
+        # See Session#at_time.
+        def at_time(time, &action)
+          raise ArgumentError, 'Pass a block to run at the time' unless action
+          @mutex.synchronize { @timed_changes << [time.to_r, action] }
+          nil
+        end
+
+        # Applies tempo changes and other timed changes (see #at_time) whose
+        # time has come, in time order.  Called by Session at the start of
+        # each buffer.
+        def apply_timed_changes
           due = @mutex.synchronize {
-            now, @tempo_changes = @tempo_changes.partition { |time, _| time <= @transport.position }
+            now, @timed_changes = @timed_changes.partition { |time, _| time <= @transport.position }
             now
           }
-          due.sort_by(&:first).each { |_, bpm| @transport.bpm = bpm }
+          due.sort_by(&:first).each { |_, action| action.call }
         end
 
         # Moves repeating entries to their next time at or after +from+ after

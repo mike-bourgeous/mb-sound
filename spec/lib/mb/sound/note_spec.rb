@@ -86,7 +86,7 @@ RSpec.describe MB::Sound::Note do
       end
 
       it 'produces a Tone that can be played' do
-        expect(MB::Sound::Note.new(56).generate(1000).max).not_to eq(0)
+        expect(MB::Sound::Note.new(56).sample(1000).max).not_to eq(0)
       end
 
       it 'can parse an Integer note number from a String' do
@@ -106,8 +106,8 @@ RSpec.describe MB::Sound::Note do
     end
 
     context 'when given a Tone object' do
-      let!(:hz) { MB::Sound::Oscillator::DEFAULT_TUNE_FREQ }
-      let!(:n) { MB::Sound::Oscillator::DEFAULT_TUNE_NOTE }
+      let!(:hz) { MB::Sound::Tuning::DEFAULT_FREQUENCY }
+      let!(:n) { MB::Sound::Tuning::DEFAULT_NOTE }
 
       it 'finds octaves of the tuning reference' do
         expect(MB::Sound::Note.new(hz.hz).number).to eq(n)
@@ -120,16 +120,15 @@ RSpec.describe MB::Sound::Note do
         expect(MB::Sound::Note.new((hz * 1.5).hz).number).to eq(n + 7)
       end
 
-      it 'preserves attributes of the Tone' do
-        n = MB::Sound::Note.new(hz.hz.ramp.at(-3.db).for(2.123))
-        expect(n.wave_type).to eq(:ramp)
+      it 'takes the frequency (only) of a Tone or Pitch' do
+        n = MB::Sound::Note.new(hz.hz.ramp.at(-3.db))
+        expect(n).to be_a(MB::Sound::Pitch)
         expect(n.frequency.round(4)).to eq(hz.round(4))
-        expect(n.duration).to eq(2.123)
-        expect(n.amplitude).to eq(-3.db)
+        expect(MB::Sound::Note.new(hz.hz).frequency.round(4)).to eq(hz.round(4))
       end
 
       it 'produces a Tone that can be played' do
-        expect(MB::Sound::Note.new(144.hz).generate(1000).max).not_to eq(0)
+        expect(MB::Sound::Note.new(144.hz).sample(1000).max).not_to eq(0)
       end
     end
 
@@ -208,30 +207,30 @@ RSpec.describe MB::Sound::Note do
       end
 
       it 'produces a Tone that can be played' do
-        expect(MB::Sound::Note.new('C4').generate(1000).max).not_to eq(0)
+        expect(MB::Sound::Note.new('C4').sample(1000).max).not_to eq(0)
       end
     end
 
     context 'when the tuning reference is changed' do
       after(:each) {
-        MB::Sound::Oscillator.tune_note = nil
-        MB::Sound::Oscillator.tune_freq = nil
+        MB::Sound.tuning.reset
         expect(MB::Sound::A4.frequency.round(5)).to eq(440)
       }
 
-      it 'changes new notes but leaves existing notes alone' do
+      it 'changes existing notes and their oscillators (tuning is live)' do
         a4 = MB::Sound::A4
+        tone = a4.tone
         expect(a4.frequency.round(5)).to eq(440)
+        expect(a4.freq.sample(1)[0].round(3)).to eq(440)
 
-        MB::Sound::Oscillator.tune_freq = 432 # it's got bad frequencies!
-        a4_lower = MB::Sound::A4
-        expect(a4.frequency.round(5)).to eq(440)
-        expect(a4_lower.frequency.round(5)).to eq(432)
+        MB::Sound.tuning a4: 432 # it's got bad frequencies!
+        expect(a4.frequency.round(5)).to eq(432)
+        expect(MB::Sound::A4.frequency.round(5)).to eq(432)
+        expect(tone.oscillator.frequency.sample(1)[0].round(3)).to eq(432)
       end
 
       it 'can use a different tuning note' do
-        MB::Sound::Oscillator.tune_note = 47 # B2
-        MB::Sound::Oscillator.tune_freq = 120 # 49.36 cents flat from A440 tuning to get exactly 120Hz
+        MB::Sound.tuning b2: 120 # 49.36 cents flat from A440 tuning to get exactly 120Hz
 
         a4 = MB::Sound::A4
         b4 = MB::Sound::B4

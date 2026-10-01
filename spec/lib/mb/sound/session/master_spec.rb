@@ -3,7 +3,7 @@ RSpec.describe(MB::Sound::Session::Master) do
   let(:transport) { MB::Sound::Sequence::Transport.new(bpm: 120) }
   let(:output) { MB::Sound::NullOutput.new(channels: 2, sleep: false) }
   let(:raise_errors) { true }
-  let(:session) { MB::Sound::Session.new(output: output, transport: transport, buffer_size: 800, realtime: false, raise_errors: raise_errors) }
+  let(:session) { MB::Sound::Session.new(master_gain: 1, output: output, transport: transport, buffer_size: 800, realtime: false, raise_errors: raise_errors) }
 
   after { session.close }
 
@@ -176,7 +176,7 @@ RSpec.describe(MB::Sound::Session::Master) do
 
   describe 'tails' do
     it 'keeps processing while idle so tails ring out' do
-      session.add(1.constant.for(800 / 48000.0))
+      session.add(1.constant.until(800 / 48000.0))
       session.master(at: :now) { |m| m.delay(samples: 1600) }
       data = run(4000)[0]
       expect(data[1600...2400].to_a.uniq).to eq([1])
@@ -209,7 +209,7 @@ RSpec.describe(MB::Sound::Session::Master) do
 
     it 'bypasses a chain that ends' do
       session.add(1.constant)
-      session.master { |m| m * 2.constant.for(800 / 48000.0) }
+      session.master { |m| m * 2.constant.until(800 / 48000.0) }
       expect(session).to receive(:warn).with(/master chain ended/)
       expect(run(1600)[0].to_a.values_at(0, 800)).to eq([2, 1])
     end
@@ -217,7 +217,7 @@ RSpec.describe(MB::Sound::Session::Master) do
 
   describe '#reset_master' do
     it 'rebuilds the chain, clearing tails' do
-      session.add(1.constant.for(800 / 48000.0))
+      session.add(1.constant.until(800 / 48000.0))
       session.master(at: :now) { |m| m.delay(samples: 1600) * 2 }
       run(800)
       session.reset_master

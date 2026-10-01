@@ -21,7 +21,7 @@ module MB
 
         def to_s
           t = start.denominator == 1 ? start.numerator : start
-          s = "#{value.is_a?(Numeric) ? MB::M.sigfigs(value, 6) : value.inspect}@#{t}+#{Duration.format(length)}"
+          s = "#{value.is_a?(Numeric) ? MB::M.sigfigs(value, 6) : (value.is_a?(MB::Sound::Pitch) ? value.to_s : value.inspect)}@#{t}+#{Duration.format(length)}"
           s << " v#{MB::M.sigfigs(velocity, 3)}" if velocity != Clip::DEFAULT_VELOCITY
           s << " p#{probability}" if probability
           s

@@ -13,7 +13,7 @@ module MB
         # Channels#stereo for multichannel nodes).
         #
         # Example (bin/sound.rb):
-        #     bg 220.hz.ramp.at(0.3).forever.stereo
+        #     bg 220.hz.ramp.at(0.3).stereo
         def stereo
           return channels_bundle.stereo if channel_count > 1
           Channels.new([self, self])
@@ -26,8 +26,8 @@ module MB
         # as the signal moves.
         #
         # Examples (bin/sound.rb):
-        #     bg 330.hz.triangle.at(0.3).forever.pan(-0.5)
-        #     bg 330.hz.triangle.at(0.3).forever.pan(4.bars.lfo)
+        #     bg 330.hz.triangle.at(0.3).pan(-0.5)
+        #     bg 330.hz.triangle.at(0.3).pan(4.bars.lfo)
         def pan(position = 0, law: :equal_power)
           return channels_bundle.pan(position, law: law) if channel_count > 1
           raise ArgumentError, "Unknown pan law #{law.inspect} (supported: #{PAN_LAWS.map(&:inspect).join(', ')})" unless PAN_LAWS.include?(law)

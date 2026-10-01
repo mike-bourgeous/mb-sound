@@ -156,9 +156,10 @@ module MB
       # Runs an effect: builds the graph with the block from the input (a
       # file given as the first audio argument or --input, or live audio
       # with --input-channels channels) and the parameters, then plays or
-      # renders it.  A file input rings out: after it ends (and repeats, with
-      # --repeat), the effect keeps playing until its output has been quiet
-      # for Session::TAIL_QUIET_SECONDS.
+      # renders it at unity master gain (0 dB, not the -10 dB session
+      # default).  File inputs ring out, so after the file ends (and
+      # repeats, with --repeat), the effect keeps playing until its output
+      # has been quiet for Session::TAIL_QUIET_SECONDS.
       def run_effect(&block)
         path = @options[:input]
         channels = @options[:channels]
@@ -175,6 +176,11 @@ module MB
         graph = to_graph(block.call(input, @params))
         announce(graph)
 
+        # Effects process recordings that already have their own levels, so
+        # they skip the master bus headroom that mixes of full-scale
+        # oscillators need
+        MB::Sound.master_gain(1)
+
         play_or_render(graph) do |session|
           stop_after_ringdown(session, ending_nodes(graph))
         end
@@ -183,7 +189,7 @@ module MB
       # Runs a synth: builds the graph with the block from the MIDI input
       # name (a MIDI file or port given as a non-audio argument or --input;
       # nil for the default live input) and the parameters, then plays or
-      # renders it.  A MIDI file rings out: after its last event, the synth
+      # renders it.  MIDI files ring out, so after the last event, the synth
       # keeps playing until its output has been quiet for
       # Session::TAIL_QUIET_SECONDS (see MIDI::MIDIFile#ended?).
       def run_synth(&block)

@@ -125,17 +125,16 @@ module MB
         end
         alias t triplet
 
-        # Returns a Tone (like Numeric#hz) that completes one cycle per this
+        # Returns a Pitch (like Numeric#hz) that completes one cycle per this
         # duration, following the tempo of the Session playing it (or
-        # Sequence.transport), with its phase locked to the timeline (see
-        # TempoNode).  Waveform methods like #triangle and #ramp work as on
-        # any Tone; see #lfo for modulation.
+        # Sequence.transport); oscillators made from it have their phases
+        # locked to the timeline (see TempoNode).  Waveform methods like
+        # #triangle and #ramp work as on any Pitch; see #lfo for modulation.
         #
         # Example (bin/sound.rb):
-        #     bg 110.hz.ramp.at(1).fm(1.beat.hz.at(20)).forever
+        #     bg 110.hz.ramp.at(1).fm(1.beat.hz.at(20))
         def hz
-          node = TempoNode.new(self, mode: :hz)
-          Tone.new(frequency: node).tap { |t| node.tone = t }
+          Pitch.new(TempoNode.new(self, mode: :hz))
         end
 
         # Returns a tempo-synced LFO (see #hz and Tone#lfo) that completes one
@@ -147,7 +146,7 @@ module MB
         #
         # Example (bin/sound.rb):
         #     cutoff = 4.bars.lfo.triangle.at(200..2000)
-        #     bg :pad, 110.hz.ramp.at(1).filter(:lowpass, cutoff: cutoff, quality: 4).forever
+        #     bg :pad, 110.hz.ramp.at(1).filter(:lowpass, cutoff: cutoff, quality: 4)
         def lfo
           hz.lfo
         end

@@ -160,7 +160,6 @@ module MB
             s.is_a?(MB::Sound::Tone) || s.is_a?(MB::Sound::Oscillator)
           }.map { |o|
             if o.is_a?(MB::Sound::Tone)
-              o.forever
               o.oscillator
             else
               o
@@ -177,6 +176,9 @@ module MB
 
           @envelopes.each(&:reset) # disable auto-release on envelopes
 
+          # The voice triggers its envelopes, so they aren't one-shots
+          (@envelopes + @amp_envelopes).each(&:retriggerable!)
+
           @array_inputs = sources.select { |s|
             s.is_a?(ArrayInput)
           }
@@ -192,11 +194,16 @@ module MB
               mixer = g.select { |s|
                 # TODO: use Constant#unit accessor
                 (s.is_a?(MB::Sound::GraphNode::Mixer) || s.is_a?(MB::Sound::GraphNode::Constant)) &&
+                  !note_number?(s) &&
                   s.constant >= 20 # Haxx to try to separate frequency values from other values; might help to have some kind of units or roles for detecting these things
               }.first
               @freq_constants << mixer if mixer
             end
           end
+
+          # Note number Constants of oscillators made from Notes (see
+          # Note#freq), retuned like fixed-frequency oscillators
+          @note_constants = @oscillators.flat_map { |o| o.respond_to?(:graph) ? o.graph : [o.frequency] }.select { |s| note_number?(s) }.uniq
 
           @portamento_filters = []
           @portamento_filters = graph.find_all_by_name('portamento')
@@ -246,11 +253,12 @@ module MB
 
           @oscillators.each do |o|
             if o.frequency.is_a?(Numeric) && @freq_constants.empty?
-              o.frequency = MB::Sound::Oscillator.calc_freq(note)
+              o.frequency = MB::Sound.tuning.frequency_of(note)
             end
           end
+          @note_constants.each { |nc| nc.constant = note } if @freq_constants.empty?
 
-          freq = MB::Sound::Oscillator.calc_freq(note)
+          freq = MB::Sound.tuning.frequency_of(note)
           @freq_constants.each do |fc|
             # TODO: Have a way of setting the note number instead, to allow
             # for logarithmic portamento by filtering through a follower
@@ -391,6 +399,12 @@ module MB
 
         # If +node+ is a String, finds and returns a graph node of the given
         # name within the signal graph.  Otherwise, returns +node+ as is.
+        # True if +node+ is the note number Constant of an oscillator made from
+        # a Note (see Note::NUMBER_UNIT).
+        def note_number?(node)
+          node.is_a?(MB::Sound::GraphNode::Constant) && node.unit == MB::Sound::Note::NUMBER_UNIT
+        end
+
         def find_node(node)
           if node.is_a?(String)
             n = @graph.find_by_name(node)

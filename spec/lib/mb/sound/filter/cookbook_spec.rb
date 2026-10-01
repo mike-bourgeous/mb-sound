@@ -9,13 +9,13 @@ RSpec.describe(MB::Sound::Filter::Cookbook, :aggregate_failures) do
         f,
         500.hz.at(1),
         inputs: {
-          cutoff: 1.hz.square.at(20000..500).for(1),
+          cutoff: 1.hz.square.at(20000..500).until(1),
           quality: 4
         }
       )
 
       # Verify types within the wrapper
-      expect(wrapper.sources[:cutoff].original_source).to be_a(MB::Sound::Tone)
+      expect(wrapper.sources[:cutoff].original_source.source.original_source).to be_a(MB::Sound::Tone)
       expect(wrapper.sources[:quality]).to be_a(MB::Sound::GraphNode::Constant)
 
       # Verify alternating cutoff frequencies
@@ -32,7 +32,7 @@ RSpec.describe(MB::Sound::Filter::Cookbook, :aggregate_failures) do
 
     it 'can use an narray to control filter parameters' do
       f = 20000.hz.lowpass
-      cutoff = 1.hz.square.at(20000..500).for(1).generate(48000)
+      cutoff = 1.hz.square.at(20000..500).sample(48000)
       wrapper = MB::Sound::Filter::SampleWrapper.new(
         f,
         500.hz.at(1),
@@ -480,7 +480,7 @@ RSpec.describe(MB::Sound::Filter::Cookbook, :aggregate_failures) do
   shared_examples_for '#dynamic_process' do |process_method|
     it 'can sweep cutoff and quality' do
       filter = 100.hz.lowpass(quality: 0.7)
-      samples = 1000.hz.at(1).generate(48000)
+      samples = 1000.hz.at(1).sample(48000)
       cutoff = Numo::SFloat.linspace(100, 3100, 48000)
       quality = Numo::SFloat.linspace(5, 1, 48000)
 
@@ -506,7 +506,7 @@ RSpec.describe(MB::Sound::Filter::Cookbook, :aggregate_failures) do
 
     it 'can process samples in place' do
       filter = 100.hz.lowpass(quality: 0.7)
-      samples = 1000.hz.at(1).generate(48000)
+      samples = 1000.hz.at(1).sample(48000)
       cutoff = Numo::SFloat.linspace(100, 3100, 48000)
       quality = Numo::SFloat.linspace(5, 1, 48000)
 
@@ -533,7 +533,7 @@ RSpec.describe(MB::Sound::Filter::Cookbook, :aggregate_failures) do
     it 'can work with NArray views' do
       filter = 100.hz.lowpass
 
-      samp_whole = 1000.hz.at(1).generate(96000)
+      samp_whole = 1000.hz.at(1).sample(96000)
       samp_orig = samp_whole.dup
       samples = samp_whole[48000..-1]
       cutoff = Numo::SFloat.linspace(100, 3100, 96000)[48000..-1]

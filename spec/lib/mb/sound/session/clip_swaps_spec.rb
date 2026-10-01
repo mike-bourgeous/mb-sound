@@ -2,7 +2,7 @@ RSpec.describe(MB::Sound::Session::ClipSwaps) do
   # 120 BPM at 48kHz: a bar is 96000 frames, an eighth note 12000.
   let(:transport) { MB::Sound::Sequence::Transport.new(bpm: 120) }
   let(:output) { MB::Sound::NullOutput.new(channels: 2, sleep: false) }
-  let(:session) { MB::Sound::Session.new(output: output, transport: transport, buffer_size: 800, realtime: false, raise_errors: true) }
+  let(:session) { MB::Sound::Session.new(master_gain: 1, output: output, transport: transport, buffer_size: 800, realtime: false, raise_errors: true) }
 
   let(:bass) { MB::Sound.seq(MB::Sound::C2, MB::Sound::E2).n8.loop }
   let(:bass2) { MB::Sound.seq(MB::Sound::D2).n4.loop }

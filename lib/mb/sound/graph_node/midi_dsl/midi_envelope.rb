@@ -20,6 +20,8 @@ module MB
 
             @node_type_name = 'MIDI Envelope'
 
+            retriggerable!
+
             @number = nil
 
             @manager.on_note(&method(:note_cb))

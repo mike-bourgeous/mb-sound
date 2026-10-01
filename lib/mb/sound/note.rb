@@ -1,8 +1,14 @@
 module MB
   module Sound
-    # Represents a musical note in the 12-tone equal temperament scale, using
-    # MIDI note numbers.
-    class Note < Tone
+    # A musical note: a MIDI note number with a name (C4 is 60, A4 is 69)
+    # and detuning in cents.  Its frequency comes from the session's Tuning
+    # (see MB::Sound.tuning) when it's used, and oscillators made from it
+    # follow tuning changes while they play (see Pitch for the oscillator
+    # methods: `C4.triangle.at(0.5)`, `play C4`).
+    #
+    # Notes are values: the note constants (MB::Sound::C4, etc.) make a new
+    # Note each time, and sequences store their note numbers.
+    class Note < Pitch
       # Major scale intervals (for calculating note name offsets).
       SCALE_INTERVAL = [
         200,
@@ -49,38 +55,69 @@ module MB
       attr_reader :key_in_octave
 
       # Initializes a note of the given MIDI note number, the note name with
-      # octave, or a Tone object.  Note names look like 'C0', 'As2', 'Gb3'.
-      # Flats are denoted with 'b' or U+266D, sharps with 's', '#', or U+266F.
-      def initialize(tone_name_number)
+      # octave, or the nearest note to a Pitch or Tone's frequency (with
+      # detuning) in the current tuning.  Note names look like 'C0', 'As2',
+      # 'Gb3'.  Flats are denoted with 'b' or U+266D, sharps with 's', '#', or
+      # U+266F.
+      def initialize(tone_name_number, sample_rate: 48000)
         case tone_name_number
         when Numeric, /\A\d+(\.\d+)?\z/
           # Note number
           set_number(tone_name_number.to_f)
-          super(frequency: get_freq)
 
         when String, Symbol
           set_name(tone_name_number.to_s)
-          super(frequency: get_freq)
 
-        when Tone
-          tone = tone_name_number
-          freq = tone.frequency
-          set_number(Oscillator.calc_number(freq))
-          super(frequency: get_freq, wave_type: tone.wave_type, amplitude: tone.amplitude, duration: tone.duration, sample_rate: tone.sample_rate)
+        when Pitch, Tone
+          set_number(MB::Sound.tuning.number_of(tone_name_number.frequency))
+          sample_rate = tone_name_number.sample_rate
 
         else
           raise ArgumentError, "Cannot construct a Note from #{tone_name_number}"
         end
+
+        super(nil, sample_rate: sample_rate)
       end
 
+      # Changes the detuning in cents (for oscillators made from now on).
       def detune=(detune)
         @detune = detune
-        set_frequency(get_freq)
       end
 
+      # Changes the note number (for oscillators made from now on).
       def number=(number)
         set_number(number)
-        set_frequency(get_freq)
+      end
+
+      # The note's frequency in Hz in the current tuning (see
+      # MB::Sound.tuning).
+      def frequency
+        MB::Sound.tuning.frequency_of(@number, @detune)
+      end
+
+      # The unit of the note number Constant inside #freq, which lets
+      # MIDI::GraphVoice tell it from frequencies in Hz.
+      NUMBER_UNIT = ' note'
+
+      # A node producing the note's frequency in Hz in the current tuning,
+      # following tuning changes (see Tuning#freq).
+      def freq
+        MB::Sound.tuning.freq(detuned_number.constant(sample_rate: @sample_rate, unit: NUMBER_UNIT, si: false))
+      end
+      alias oscillator_frequency freq
+
+      # A Note is never a constant frequency: it follows the tuning.
+      def constant?
+        false
+      end
+
+      # Returns the Note +semitones+ higher (lower if negative).
+      def transpose(semitones)
+        Note.new(detuned_number + semitones, sample_rate: @sample_rate)
+      end
+
+      def to_s
+        @detune == 0 ? @name : format('%s%+g', @name, @detune)
       end
 
       # Returns the effective fractional note number including detuning.
@@ -110,11 +147,6 @@ module MB
       end
 
       private
-
-      # Calculates the frequency based on the note's MIDI note number.
-      def get_freq
-        Oscillator.calc_freq(@number, @detune)
-      end
 
       # Sets note name, number, and detuning from a note name string.
       def set_name(name)

@@ -1128,8 +1128,67 @@ static VALUE ruby_osc(VALUE self, VALUE wave_type, VALUE phi)
 	}
 }
 
-// state contains [phi] and will be modified in place
-static VALUE ruby_synthesize(VALUE self, VALUE buffer, VALUE wave_type, VALUE frequency, VALUE phase_mod, VALUE advance, VALUE random_advance, VALUE gain, VALUE offset, VALUE state)
+// Phasor and waveform shaping (MB::Sound::Phasor and MB::Sound::Oscillator;
+// the Ruby versions are Phasor#sample_ruby and Oscillator.shape_ruby).
+//
+// A phasor's phase is in cycles (0 <= phi < 1).  Each sample it advances by
+// frequency * (advance + random * random_advance), where advance and
+// random_advance are in cycles per Hz (advance is 1 / sample_rate) and
+// random is uniform in 0..1 (drand48, so the sequence repeats per process).
+//
+// Within a buffer, the phase of sample i is phi + (the sum of increments
+// 0...i), wrapped once, rather than wrapping after every sample: i *
+// increment for a constant frequency, a running sum otherwise.  That keeps
+// rounding from drifting within a buffer and matches the Ruby version
+// (Phasor#phases_ruby), which does the same with Numo.
+
+// Returns the phase increment in cycles for one sample at +freq+ Hz.
+static inline double phasor_increment(double freq, double adv, double rndadv)
+{
+	if (rndadv != 0) {
+		return freq * (adv + drand48() * rndadv);
+	}
+
+	return freq * adv;
+}
+
+// Returns the waveform value at phase +phi+ (cycles) plus phase modulation
+// +pm+ (radians).  Complex square and ramp waves are sampled half an
+// increment (+inc+, cycles) later so their imaginary parts are symmetric.
+static inline double complex shape_sample(enum wave_types wt, double phi, double inc, double pm)
+{
+	double radians = phi * (2.0 * M_PI);
+
+	if (wt == OSC_COMPLEX_SQUARE || wt == OSC_COMPLEX_RAMP) {
+		radians += inc * M_PI;
+	}
+
+	return osc_sample(wt, radians + pm);
+}
+
+// Reads a Numeric (into *scalar) or an NArray of +length+ values (cast to
+// SComplex, real parts used; pointer into *ptr) from *value.  nil is 0.
+static void read_signal_input(VALUE *value, size_t length, const char *name, double *scalar, complex float **ptr)
+{
+	*ptr = NULL;
+
+	if (CLASS_OF(*value) == numo_cDFloat || CLASS_OF(*value) == numo_cSFloat || CLASS_OF(*value) == numo_cSComplex || CLASS_OF(*value) == numo_cDComplex) {
+		if (RNARRAY_SHAPE(*value)[0] != length) {
+			rb_raise(rb_eArgError, "%s array length does not match sample buffer length", name);
+		}
+
+		ensure_scomplex(value);
+		*ptr = (float complex *)(nary_get_pointer_for_read(*value) + nary_get_offset(*value));
+		*scalar = crealf((*ptr)[0]);
+	} else if (RTEST(*value)) {
+		*scalar = NUM2DBL(*value);
+	} else {
+		*scalar = 0;
+	}
+}
+
+// Reads and checks the [phi] state array of a phasor.
+static double read_phasor_state(VALUE state)
 {
 	Check_Type(state, T_ARRAY);
 
@@ -1137,101 +1196,206 @@ static VALUE ruby_synthesize(VALUE self, VALUE buffer, VALUE wave_type, VALUE fr
 		rb_raise(rb_eArgError, "State array must have exactly one numeric element");
 	}
 
-	enum wave_types wt = find_wave_type(SYM2ID(wave_type));
+	return NUM2DBL(rb_ary_entry(state, 0));
+}
 
-	double freq;
-	double phase;
+/*
+ * Fills the SFloat +buffer+ with the phase in cycles of a phasor, starting
+ * from state[0] and storing the next phase back into state[0].  If
+ * +increments+ is an SFloat NArray of the same length, the increment for
+ * each sample is written there too.  See Phasor#sample_c.
+ */
+static VALUE ruby_phasor(VALUE self, VALUE buffer, VALUE frequency, VALUE advance, VALUE random_advance, VALUE state, VALUE increments)
+{
+	double phi = read_phasor_state(state);
 	double adv = NUM2DBL(advance);
 	double rndadv = NUM2DBL(random_advance);
-	double g = NUM2DBL(gain);
-	double off = NUM2DBL(offset);
-	double phi = NUM2DBL(rb_ary_entry(state, 0));
 
 	_Bool was_inplace;
-	ensure_inplace_sfloat_or_scomplex(&buffer, &was_inplace);
-
-	_Bool complex_buffer = CLASS_OF(buffer) == numo_cSComplex || CLASS_OF(buffer) == numo_cDComplex;
-	complex float *complex_ptr;
-	float *float_ptr;
-
+	ensure_inplace_sfloat(&buffer, &was_inplace);
 	size_t length = RNARRAY_SHAPE(buffer)[0];
+	float *out = (float *)(nary_get_pointer_for_write(buffer) + nary_get_offset(buffer));
 
-	complex float *freqptr = NULL;
-	if (CLASS_OF(frequency) == numo_cDFloat || CLASS_OF(frequency) == numo_cSFloat || CLASS_OF(frequency) == numo_cSComplex || CLASS_OF(frequency) == numo_cDComplex) {
-		if (RNARRAY_SHAPE(frequency)[0] != length) {
-			rb_raise(rb_eArgError, "Frequency array length does not match sample buffer length");
+	double freq;
+	complex float *freqptr;
+	read_signal_input(&frequency, length, "Frequency", &freq, &freqptr);
+
+	float *incptr = NULL;
+	if (RTEST(increments)) {
+		if (CLASS_OF(increments) != numo_cSFloat || RNARRAY_SHAPE(increments)[0] != length || !RTEST(nary_check_contiguous(increments))) {
+			rb_raise(rb_eArgError, "Increments must be a contiguous SFloat NArray as long as the buffer");
 		}
-
-		ensure_scomplex(&frequency);
-		freqptr = (float complex *)(nary_get_pointer_for_read(frequency) + nary_get_offset(frequency));
-		freq = freqptr[0];
-	} else {
-		freq = NUM2DBL(frequency);
+		incptr = (float *)(nary_get_pointer_for_write(increments) + nary_get_offset(increments));
 	}
 
-	complex float *phaseptr = NULL;
-	if (CLASS_OF(phase_mod) == numo_cDFloat || CLASS_OF(phase_mod) == numo_cSFloat || CLASS_OF(phase_mod) == numo_cSComplex || CLASS_OF(phase_mod) == numo_cDComplex) {
-		if (RNARRAY_SHAPE(phase_mod)[0] != length) {
-			rb_raise(rb_eArgError, "Phase modulation array length does not match sample buffer length");
-		}
-
-		ensure_scomplex(&phase_mod);
-		phaseptr = (float complex *)(nary_get_pointer_for_read(phase_mod) + nary_get_offset(phase_mod));
-		phase = phaseptr[0];
-	} else if (RTEST(phase_mod)) {
-		phase = NUM2DBL(phase_mod);
-	} else {
-		phase = 0;
-	}
-
-	if (complex_buffer) {
-		complex_ptr = (float complex *)(nary_get_pointer_for_write(buffer) + nary_get_offset(buffer));
-	} else {
-		float_ptr = (float *)(nary_get_pointer_for_write(buffer) + nary_get_offset(buffer));
-	}
-
-	double complex delta;
-	double complex v;
+	_Bool constant = !freqptr && rndadv == 0;
+	double steps = 0;
 	for (size_t i = 0; i < length; i++) {
 		if (freqptr) {
-			freq = freqptr[i];
+			freq = crealf(freqptr[i]);
 		}
 
-		if (phaseptr) {
-			phase = phaseptr[i];
+		double inc = phasor_increment(freq, adv, rndadv);
+		if (constant) {
+			steps = inc * i;
 		}
 
-		if (rndadv != 0) {
-			delta = freq * (adv + drand48() * rndadv);
-		} else {
-			delta = freq * adv;
+		out[i] = wrap(phi + steps, 1.0);
+		if (incptr) {
+			incptr[i] = inc;
 		}
 
-		if (wt == OSC_COMPLEX_SQUARE || wt == OSC_COMPLEX_RAMP) {
-			// Ensure symmetric imaginary components when sampled exactly on period
-			v = osc_sample(wt, phi + delta / 2.0 + phase);
-		} else {
-			v = osc_sample(wt, phi + phase);
+		if (!constant) {
+			steps += inc;
 		}
-
-		v = v * g + off;
-
-		if (complex_buffer) {
-			complex_ptr[i] = v;
-		} else {
-			float_ptr[i] = creal(v);
-		}
-
-		phi = wrap(creal(phi + delta), M_PI * 2.0) + I * wrap(cimag(phi + delta), M_PI * 2.0);
 	}
 
-	rb_ary_store(state, 0, rb_float_new(phi));
+	if (constant) {
+		steps = phasor_increment(freq, adv, 0) * length;
+	}
+	rb_ary_store(state, 0, rb_float_new(wrap(phi + steps, 1.0)));
 
 	if (!was_inplace) {
 		UNSET_INPLACE(buffer);
 	}
 
 	RB_GC_GUARD(frequency);
+	RB_GC_GUARD(increments);
+	RB_GC_GUARD(buffer);
+
+	return buffer;
+}
+
+/*
+ * Fills +buffer+ (SFloat, or SComplex for complex waves) with +wave_type+
+ * shaped from +phases+ (cycles), plus +phase_mod+ (radians; Numeric, NArray,
+ * or nil), scaled by +gain+ and moved by +offset+.  +increments+ (cycles, or
+ * nil for zero) matter only for complex square and ramp waves.  See
+ * Oscillator.shape_c.
+ */
+static VALUE ruby_shape(VALUE self, VALUE buffer, VALUE wave_type, VALUE phases, VALUE increments, VALUE phase_mod, VALUE gain, VALUE offset)
+{
+	enum wave_types wt = find_wave_type(SYM2ID(wave_type));
+	double g = NUM2DBL(gain);
+	double off = NUM2DBL(offset);
+
+	_Bool was_inplace;
+	ensure_inplace_sfloat_or_scomplex(&buffer, &was_inplace);
+	_Bool complex_buffer = CLASS_OF(buffer) == numo_cSComplex;
+	size_t length = RNARRAY_SHAPE(buffer)[0];
+	void *out = nary_get_pointer_for_write(buffer) + nary_get_offset(buffer);
+
+	if (RNARRAY_SHAPE(phases)[0] != length) {
+		rb_raise(rb_eArgError, "Phase array length does not match sample buffer length");
+	}
+	ensure_sfloat(&phases);
+	float *phaseptr = (float *)(nary_get_pointer_for_read(phases) + nary_get_offset(phases));
+
+	double inc;
+	complex float *incptr;
+	read_signal_input(&increments, length, "Increment", &inc, &incptr);
+
+	double pm;
+	complex float *pmptr;
+	read_signal_input(&phase_mod, length, "Phase modulation", &pm, &pmptr);
+
+	for (size_t i = 0; i < length; i++) {
+		if (incptr) {
+			inc = crealf(incptr[i]);
+		}
+		if (pmptr) {
+			pm = crealf(pmptr[i]);
+		}
+
+		double complex v = shape_sample(wt, phaseptr[i], inc, pm) * g + off;
+
+		if (complex_buffer) {
+			((complex float *)out)[i] = v;
+		} else {
+			((float *)out)[i] = creal(v);
+		}
+	}
+
+	if (!was_inplace) {
+		UNSET_INPLACE(buffer);
+	}
+
+	RB_GC_GUARD(phases);
+	RB_GC_GUARD(increments);
+	RB_GC_GUARD(phase_mod);
+	RB_GC_GUARD(buffer);
+
+	return buffer;
+}
+
+/*
+ * A phasor and shaper in one loop (the usual oscillator path, avoiding a
+ * phase buffer): fills +buffer+ with +wave_type+ at +frequency+ (Hz; Numeric
+ * or NArray) plus +phase_mod+, advancing the phase in state[0] (cycles).
+ * Same math as ruby_phasor followed by ruby_shape.  See Oscillator#sample_c.
+ */
+static VALUE ruby_oscillate(VALUE self, VALUE buffer, VALUE wave_type, VALUE frequency, VALUE phase_mod, VALUE advance, VALUE random_advance, VALUE gain, VALUE offset, VALUE state)
+{
+	enum wave_types wt = find_wave_type(SYM2ID(wave_type));
+	double phi = read_phasor_state(state);
+	double adv = NUM2DBL(advance);
+	double rndadv = NUM2DBL(random_advance);
+	double g = NUM2DBL(gain);
+	double off = NUM2DBL(offset);
+
+	_Bool was_inplace;
+	ensure_inplace_sfloat_or_scomplex(&buffer, &was_inplace);
+	_Bool complex_buffer = CLASS_OF(buffer) == numo_cSComplex;
+	size_t length = RNARRAY_SHAPE(buffer)[0];
+	void *out = nary_get_pointer_for_write(buffer) + nary_get_offset(buffer);
+
+	double freq;
+	complex float *freqptr;
+	read_signal_input(&frequency, length, "Frequency", &freq, &freqptr);
+
+	double pm;
+	complex float *pmptr;
+	read_signal_input(&phase_mod, length, "Phase modulation", &pm, &pmptr);
+
+	_Bool constant = !freqptr && rndadv == 0;
+	double steps = 0;
+	for (size_t i = 0; i < length; i++) {
+		if (freqptr) {
+			freq = crealf(freqptr[i]);
+		}
+		if (pmptr) {
+			pm = crealf(pmptr[i]);
+		}
+
+		double inc = phasor_increment(freq, adv, rndadv);
+		if (constant) {
+			steps = inc * i;
+		}
+
+		double complex v = shape_sample(wt, wrap(phi + steps, 1.0), inc, pm) * g + off;
+
+		if (complex_buffer) {
+			((complex float *)out)[i] = v;
+		} else {
+			((float *)out)[i] = creal(v);
+		}
+
+		if (!constant) {
+			steps += inc;
+		}
+	}
+
+	if (constant) {
+		steps = phasor_increment(freq, adv, 0) * length;
+	}
+	rb_ary_store(state, 0, rb_float_new(wrap(phi + steps, 1.0)));
+
+	if (!was_inplace) {
+		UNSET_INPLACE(buffer);
+	}
+
+	RB_GC_GUARD(frequency);
+	RB_GC_GUARD(phase_mod);
 	RB_GC_GUARD(buffer);
 
 	return buffer;
@@ -1640,7 +1804,9 @@ void Init_fast_sound(void)
 
 	// Oscillator functions
 	rb_define_module_function(fast_sound, "osc", ruby_osc, 2);
-	rb_define_module_function(fast_sound, "synthesize", ruby_synthesize, 9);
+	rb_define_module_function(fast_sound, "phasor", ruby_phasor, 6);
+	rb_define_module_function(fast_sound, "shape", ruby_shape, 7);
+	rb_define_module_function(fast_sound, "oscillate", ruby_oscillate, 9);
 
 	// Filtering functions
 	rb_define_module_function(fast_sound, "biquad", ruby_biquad, 10);

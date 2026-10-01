@@ -25,12 +25,13 @@ module MB
         end
       end
 
-      # Converts a single Tone or Numeric Array to NArray.  If given an Array
-      # of Tones or Numeric Arrays, returns an Array of NArray.
+      # Converts a single Tone, Pitch, or Numeric Array to NArray.  If given
+      # an Array of these, returns an Array of NArray.
       def convert_sound_to_narray(sound, depth = 0)
         case sound
-        when Tone
-          sound.generate
+        when Tone, Pitch
+          # One second, so FFT bins are 1 Hz apart
+          sound.sample(sound.sample_rate.round)
 
         when String
           # If the filename is within an array, only return the first channel
@@ -64,6 +65,9 @@ module MB
 
             when Tone
               k = "#{idx}: #{v.frequency.round(2)}Hz #{v.wave_type}"
+
+            when Pitch
+              k = "#{idx}: #{v.frequency.round(2)}Hz"
 
             else
               k = idx
@@ -109,7 +113,8 @@ module MB
       # file already exists and +:overwrite+ is false, an error will be raised.
       #
       # Writes at most +:max_length+ seconds if +data+ is a Tone or a signal
-      # graph.
+      # graph (PlaybackMethods::MAX_RENDER_SECONDS by default, since
+      # oscillators never end).  See also PlaybackMethods#render.
       #
       # The +:sample_rate+ defaults to 48kHz to match the default resampling of
       # #read, and the default sample rate of #input and #output.
@@ -119,6 +124,7 @@ module MB
         data = [data] if data.is_a?(GraphNode)
 
         if data.is_a?(Array) && data.all?(GraphNode)
+          max_length ||= PlaybackMethods::MAX_RENDER_SECONDS
           buffer_size = data.map(&:graph_buffer_size).compact.min || 800
 
           output = file_output(

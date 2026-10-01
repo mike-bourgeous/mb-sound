@@ -98,12 +98,14 @@ RSpec.describe(MB::Sound::NumericSoundMixins) do
   end
 
   describe '#hz' do
-    it 'creates a Tone object' do
-      tone = 5.hz
-      expect(tone).to be_a(MB::Sound::Tone)
-      expect(tone.frequency).to eq(5)
-      expect(tone.wave_type).to eq(:sine)
-      expect(tone.sample_rate).to eq(48000)
+    it 'creates a Pitch that makes sine tones' do
+      pitch = 5.hz
+      expect(pitch).to be_a(MB::Sound::Pitch)
+      expect(pitch.frequency).to eq(5)
+      expect(pitch.sample_rate).to eq(48000)
+      expect(pitch.tone).to be_a(MB::Sound::Tone)
+      expect(pitch.tone.wave_type).to eq(:sine)
+      expect(pitch.tone.frequency).to eq(5)
     end
   end
 

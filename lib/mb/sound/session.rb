@@ -108,6 +108,24 @@ module MB
       # The Sequence::Transport whose timeline this session advances.
       attr_reader :transport
 
+      # The Tuning for notes played in this session (MB::Sound.tuning).
+      attr_reader :tuning
+
+      # The default master bus gain (-10 dB), leaving headroom for mixes of
+      # full-scale oscillators.
+      DEFAULT_MASTER_GAIN = 10 ** (-10 / 20.0)
+
+      # The linear gain applied to the whole mix after master effects, before
+      # it's written to the output (and seen by taps).  See
+      # PlaybackMethods#master_gain.
+      attr_reader :master_gain
+
+      # Sets the master bus gain (linear; e.g. `-6.db`).
+      def master_gain=(gain)
+        raise ArgumentError, "Master gain must be a Numeric (got #{gain.inspect})" unless gain.is_a?(Numeric)
+        @master_gain = gain.to_f
+      end
+
       # The number of output channels.  Mono graphs play on every channel.
       attr_reader :channels
 
@@ -121,8 +139,10 @@ module MB
       #                   #process_buffer instead of printed.
       # +:fade_in+, +:fade_out+ - Default fade lengths in bars (see #fade_in
       #                           and #fade_out).
-      def initialize(output: nil, transport: Sequence.transport, channels: 2, buffer_size: nil, realtime: true, raise_errors: false, fade_in: nil, fade_out: nil)
+      def initialize(output: nil, transport: Sequence.transport, tuning: Tuning.default, master_gain: DEFAULT_MASTER_GAIN, channels: 2, buffer_size: nil, realtime: true, raise_errors: false, fade_in: nil, fade_out: nil)
         @transport = transport
+        @tuning = tuning
+        self.master_gain = master_gain
         self.fade_in = fade_in
         self.fade_out = fade_out
         @output = output
@@ -320,6 +340,14 @@ module MB
         @scheduler.change_tempo(bpm, time: time)
       end
 
+      # Runs the block when the timeline reaches +time+ (whole notes), at the
+      # start of the buffer that contains it, on the render thread (so keep
+      # it short).  Used for live changes from scheduled blocks, like
+      # TuningMethods#tuning.
+      def at_time(time, &action)
+        @scheduler.at_time(time, &action)
+      end
+
       # Schedules the block to run at +time+ (whole notes on the timeline),
       # and then every +period+ whole notes if given.  Returns an id for
       # #cancel.  See Scheduler for how and when blocks run.
@@ -407,7 +435,7 @@ module MB
       # of Numo::SFloat, one per channel).
       def process_buffer(count = buffer_size)
         started = MB::U.clock_now
-        @scheduler.apply_tempo_changes
+        @scheduler.apply_timed_changes
 
         per_sample = @transport.whole_notes_per_second / output.sample_rate.to_r
         from = @transport.position
@@ -439,6 +467,8 @@ module MB
         # How busy rendering is (before the output blocks), for deciding
         # whether master chains can crossfade
         @load = (MB::U.clock_now - started) * output.sample_rate / count
+
+        mix = mix.map { |c| c * @master_gain } if @master_gain != 1
 
         output.write(mix)
         call_taps(mix)

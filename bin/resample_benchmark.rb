@@ -21,13 +21,13 @@ MB::Sound.script(
 
   MB::U.bench_csv(prefix: MB::U.ruby_info) do |bench|
     bench.report("ruby_zoh single sample") do
-      100.hz.forever.at_rate(441)
+      100.hz.at_rate(441)
         .resample(17000, mode: :ruby_zoh)
         .sample(sample_count)
     end
 
     bench.report("ruby_zoh sample loop") do
-      node = 100.hz.forever.at_rate(441)
+      node = 100.hz.at_rate(441)
         .resample(17000, mode: :ruby_zoh)
 
       (sample_count.to_f / 716).ceil.times do
@@ -36,15 +36,15 @@ MB::Sound.script(
     end
 
     bench.report("ruby_zoh multi_sample()") do
-      100.hz.forever.at_rate(441)
+      100.hz.at_rate(441)
         .resample(17000, mode: :ruby_zoh)
         .multi_sample(716, (sample_count.to_f / 716).ceil)
     end
 
     [233, 800, 4000].each do |bufsize|
       MB::Sound::GraphNode::Resample::MODES.each do |mode|
-        upsample = 100.hz.forever.at_rate(1234).resample(5432, mode: mode)
-        downsample = 100.hz.forever.at_rate(17000).resample(5432, mode: mode)
+        upsample = 100.hz.at_rate(1234).resample(5432, mode: mode)
+        downsample = 100.hz.at_rate(17000).resample(5432, mode: mode)
 
         bench.report("#{mode.inspect}@#{bufsize} upsampling") do
           (sample_count.to_f / bufsize).ceil.times do

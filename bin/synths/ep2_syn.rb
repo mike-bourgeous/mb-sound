@@ -19,8 +19,7 @@
 require 'bundler/setup'
 require 'mb-sound'
 
-MB::Sound::Oscillator.tune_freq = 480
-MB::Sound::Oscillator.tune_note = 71
+MB::Sound.tuning b4: 480
 
 OSC_COUNT = 8
 

@@ -2,7 +2,7 @@ RSpec.describe(MB::Sound::ScheduleMethods) do
   # 120 BPM at 48kHz: one bar is 96000 frames
   let(:transport) { MB::Sound::Sequence::Transport.new(bpm: 120) }
   let(:output) { MB::Sound::NullOutput.new(channels: 2, sleep: false) }
-  let(:session) { MB::Sound::Session.new(output: output, transport: transport, buffer_size: 800, realtime: false) }
+  let(:session) { MB::Sound::Session.new(master_gain: 1, output: output, transport: transport, buffer_size: 800, realtime: false) }
 
   # Runs the block with +session+ as the current session.
   def within(&block)
@@ -152,6 +152,16 @@ RSpec.describe(MB::Sound::ScheduleMethods) do
     expect(transport.bpm).to eq(120)
     run(1600)
     expect(transport.bpm).to eq(240)
+  end
+
+  it 'changes the tuning at the scheduled time' do
+    within do
+      MB::Sound.bg(MB::Sound::A4.freq)
+      MB::Sound.at_bar(2) { MB::Sound.tuning a4: 432 }
+    end
+    data = run(96000 + 1600)
+    expect(changes(data)).to eq([[0, 440], [96000, 432]])
+    expect(session.tuning.frequency_of(69)).to eq(432)
   end
 
   it 'skips the commands of a block that finishes after its time' do

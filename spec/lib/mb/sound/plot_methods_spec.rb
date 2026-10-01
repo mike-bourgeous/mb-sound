@@ -37,7 +37,7 @@ RSpec.describe(MB::Sound::PlotMethods) do
   end
 
   describe '#hist' do
-    let(:output) { MB::Sound.hist(tone) }
+    let(:output) { MB::Sound.hist(tone.sample(5 * 48000)) }
 
     it 'can draw a histogram' do |ex|
       expect(lines.length).to eq(40)
@@ -142,7 +142,7 @@ RSpec.describe(MB::Sound::PlotMethods) do
     end
 
     context 'with a gauss wave' do
-      let(:output) { MB::Sound.spectrum(480.hz.gauss, samples: 800) }
+      let(:output) { MB::Sound.spectrum(480.hz.gauss.at(0.1), samples: 800) }
 
       it 'can plot a spectrogram of a more complex wave' do |ex|
         expect(MB::Sound).to receive(:puts).with(/Plotting/)
@@ -186,7 +186,7 @@ RSpec.describe(MB::Sound::PlotMethods) do
     end
 
     context 'with a Numo::NArray' do
-      let(:output) { MB::Sound.plot(tone.generate(800)) }
+      let(:output) { MB::Sound.plot(tone.sample(800)) }
 
       it 'can plot a Numo::NArray' do |ex|
         expect(MB::Sound).to receive(:puts).with(/Plotting.*Numo/m)
@@ -223,7 +223,7 @@ RSpec.describe(MB::Sound::PlotMethods) do
       expect(MB::Sound).to receive(:sleep).at_least(3).times
       expect(MB::Sound).to receive(:puts).at_least(2).times
       expect(STDOUT).to receive(:write).at_least(2).times
-      lines = MB::Sound.plot(123.hz.sine.generate(14400), all: true, samples: 800)
+      lines = MB::Sound.plot(123.hz.sine.sample(14400), all: true, samples: 800)
       expect(lines.length).to eq(40)
     rescue Exception => e
       raise e.class, "#{e.message}\n\t\e[1m#{lines.map(&:inspect).join("\n\t")}\e[0m"

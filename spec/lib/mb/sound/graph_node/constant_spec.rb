@@ -171,40 +171,9 @@ RSpec.describe(MB::Sound::GraphNode::Constant) do
     end
   end
 
-  describe '#for' do
-    it 'resets the elapsed timer' do
-      c = 1.constant.for(0)
-      expect(c.sample(100)).to eq(nil)
-
-      c.for(5.0 / 48000)
-      expect(c.sample(100)).to eq(Numo::SFloat.ones(5))
-    end
-
-    context 'with a duration' do
-      it 'returns only the requested length of data' do
-        c = 1.constant(sample_rate: 1).for(10)
-        expect(c.sample(6).length).to eq(6)
-        expect(c.sample(6).length).to eq(4)
-        expect(c.sample(1)).to eq(nil)
-      end
-
-      it 'handles fractional sample values' do
-        c = 1.constant.for(0.00015)
-        expect(c.sample(100).length).to eq(7)
-      end
-    end
-  end
-
-  describe '#or_for' do
-    it 'changes the default duration' do
-      n = 0.constant
-      expect { n.or_for(1.5) }.to change { n.duration }.to(1.5)
-    end
-
-    it 'does not change the duration if set with #for' do
-      n = 0.constant.for(3)
-      expect { n.or_for(1.5) }.not_to change { n.duration }
-    end
+  it 'never ends' do
+    c = 1.constant(sample_rate: 1)
+    3.times { expect(c.sample(6)).to eq(Numo::SFloat.ones(6)) }
   end
 
   describe '#to_s' do

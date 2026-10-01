@@ -18,11 +18,18 @@ module MB
         MB::Sound::Tone[frequency]
       end
 
-      # Returns a node sequence that will generate a single sample impulse
-      # followed by silence.
-      def impulse
+      # Returns a source of zeros for +seconds+, then the end of the stream
+      # (see GraphNode::Silence), e.g. for appending a tail with
+      # RoutingMethods#and_then.
+      def silence(seconds, sample_rate: 48000)
+        MB::Sound::GraphNode::Silence.new(seconds, sample_rate: sample_rate)
+      end
+
+      # Returns a node that generates a single sample impulse followed by
+      # silence, for +seconds+ in all (5 by default).
+      def impulse(seconds = 5)
         tapped = false
-        0.constant.named('Single-sample impluse').or_for(5).spy { |d|
+        silence(seconds).named('Single-sample impulse').spy { |d|
           unless tapped
             d[0] = 1
             tapped = true

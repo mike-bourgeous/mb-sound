@@ -51,7 +51,6 @@ module MB
             seconds = seconds.to_f if seconds.is_a?(Numeric)
           end
 
-          seconds = seconds.or_for(nil) if seconds.respond_to?(:or_for)
 
           filter = MB::Sound::Filter::Delay.new(
             delay: seconds, sample_rate: sample_rate, smoothing: smoothing,
@@ -151,7 +150,7 @@ module MB
         # disable.
         #
         # Example:
-        #     play 440.hz.sine.for(0.5).fdn_reverb(room_size: 0.8, decay: 3.0)
+        #     play 440.hz.sine.adsr(0.005, 0.05, 1, 0.05, auto_release: 0.5).fdn_reverb(room_size: 0.8, decay: 3.0)
         #
         #     # Stereo file input -> stereo reverb
         #     play file_input('sounds/synth0.flac').fdn_reverb
@@ -162,10 +161,10 @@ module MB
           input = if channel_count > 1
             self.outputs.map { |out|
               node = out.get_sampler
-              tail > 0 ? node.and_then(0.constant.for(tail)) : node
+              tail > 0 ? node.and_then(MB::Sound.silence(tail)) : node
             }
           else
-            tail > 0 ? self.and_then(0.constant.for(tail)) : self
+            tail > 0 ? self.and_then(MB::Sound.silence(tail)) : self
           end
 
           MB::Sound::GraphNode::FdnReverb.new(
