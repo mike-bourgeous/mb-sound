@@ -26,10 +26,7 @@ module MB
         # attack + decay, or 0.25, whichever is longer; set it to false to
         # disable), then the envelope will release automatically after that time.
         def adsr(attack, decay, sustain, release, log: nil, auto_release: nil, filter_freq: 10000)
-          if auto_release.nil?
-            auto_release = 2.0 * (attack + decay)
-            auto_release = 0.1 if auto_release < 0.1
-          end
+          auto_release = MB::Sound::ADSREnvelope.default_auto_release(attack, decay) if auto_release.nil?
 
           env = MB::Sound::ADSREnvelope.new(
             attack_time: attack,

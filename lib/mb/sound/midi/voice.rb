@@ -73,8 +73,8 @@ module MB
 
           self.filter_type = filter_type
 
-          @filter_envelope = MB::Sound::ADSREnvelope.new(**DEFAULT_FILTER_ENVELOPE.merge(filter_envelope), sample_rate: @sample_rate)
-          @amp_envelope = MB::Sound::ADSREnvelope.new(**DEFAULT_AMP_ENVELOPE.merge(amp_envelope), sample_rate: @sample_rate)
+          @filter_envelope = MB::Sound::ADSREnvelope.new(**DEFAULT_FILTER_ENVELOPE.merge(filter_envelope), sample_rate: @sample_rate).retriggerable!
+          @amp_envelope = MB::Sound::ADSREnvelope.new(**DEFAULT_AMP_ENVELOPE.merge(amp_envelope), sample_rate: @sample_rate).retriggerable!
 
           # TODO: pitch filter for portamento
           # TODO: get these to run fast enough

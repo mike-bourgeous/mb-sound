@@ -311,7 +311,7 @@ module MB
               sustain_level: sustain,
               release_time: release,
               sample_rate: @sample_rate
-            )
+            ).retriggerable!
             @current = nil
             @node_type_name = 'Clip Envelope'
           end

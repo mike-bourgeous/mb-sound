@@ -176,6 +176,9 @@ module MB
 
           @envelopes.each(&:reset) # disable auto-release on envelopes
 
+          # The voice triggers its envelopes, so they aren't one-shots
+          (@envelopes + @amp_envelopes).each(&:retriggerable!)
+
           @array_inputs = sources.select { |s|
             s.is_a?(ArrayInput)
           }

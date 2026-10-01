@@ -211,6 +211,56 @@ RSpec.describe(MB::Sound::ADSREnvelope, :aggregate_failures) do
     end
   end
 
+  describe 'one-shots and #retriggerable!' do
+    let(:one_shot) {
+      MB::Sound::ADSREnvelope.new(attack_time: 0.01, decay_time: 0.01, sustain_level: 0.5, release_time: 0.01, sample_rate: 48000)
+    }
+
+    it 'fires once by itself when sampled untriggered, then ends' do
+      data = one_shot.sample(4800)
+      expect(data.max).to be_within(0.05).of(1)
+
+      # Releases after .default_auto_release (0.1 s here), then returns nil
+      expect(described_class.default_auto_release(0.01, 0.01)).to eq(0.1)
+      result = nil
+      10.times { result = one_shot.sample(4800); break if result.nil? }
+      expect(result).to eq(nil)
+    end
+
+    it 'outputs zero while idle and never ends when retriggerable' do
+      one_shot.retriggerable!
+      expect(one_shot).to be_retriggerable
+      5.times { expect(one_shot.sample(4800)).to eq(Numo::SFloat.zeros(4800)) }
+
+      one_shot.trigger(1)
+      expect(one_shot.sample(4800).max).to be > 0.4
+      one_shot.release
+      5.times { expect(one_shot.sample(4800)).not_to eq(nil) }
+      expect(one_shot.sample(4800).abs.max).to be < 1e-6
+    end
+
+    it 'does not fire when triggered before sampling' do
+      one_shot.trigger(0.5)
+      expect(one_shot.sample(4800).max).to be_within(0.05).of(0.5)
+      expect(one_shot.sample(48000)).not_to eq(nil) # sustains until released
+    end
+
+    it 'ends a tone multiplied by it' do
+      graph = 100.hz * one_shot
+      lengths = []
+      while (buf = graph.sample(4800))
+        lengths << buf.length
+        break if lengths.length > 20
+      end
+      expect(lengths.sum / 48000.0).to be_between(0.1, 0.2)
+    end
+
+    it 'marks clip envelopes as retriggerable' do
+      clip_env = MB::Sound.seq(MB::Sound::C4).n4.env.instance_variable_get(:@env)
+      expect(clip_env).to be_a(described_class).and be_retriggerable
+    end
+  end
+
   describe '#dup' do
     it 'returns a new envelope with a new filter' do
       dup = env.dup
@@ -241,6 +291,7 @@ RSpec.describe(MB::Sound::ADSREnvelope, :aggregate_failures) do
     end
 
     it 'does not use the same buffer as the original' do
+      env.retriggerable! # idle (zero) until triggered
       env.sample(800)
       dup = env.dup(1000)
       expect(env.sample(800).object_id).not_to eq(dup.sample(800).object_id)
