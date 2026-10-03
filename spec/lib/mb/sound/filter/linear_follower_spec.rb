@@ -76,18 +76,33 @@ RSpec.describe(MB::Sound::Filter::LinearFollower) do
 
   describe '#sample_rate=' do
     let(:lf) { MB::Sound::Filter::LinearFollower.new(sample_rate: 1, max_rise: 1, max_fall: 2) }
-    it 'can change sample rates' do
+    it 'keeps the rates per second, so rates per sample shrink at higher sample rates' do
       lf.sample_rate = 2
       expect(lf.sample_rate).to eq(2)
-      expect(lf.max_rise).to be_within(1e-6).of(2)
-      expect(lf.max_fall).to be_within(1e-6).of(4)
+      expect(lf.max_rise).to be_within(1e-6).of(0.5)
+      expect(lf.max_fall).to be_within(1e-6).of(1)
     end
 
     it 'is aliased to at_rate' do
       expect(lf.at_rate(0.5)).to equal(lf)
       expect(lf.sample_rate).to eq(0.5)
-      expect(lf.max_rise).to be_within(1e-6).of(0.5)
-      expect(lf.max_fall).to be_within(1e-6).of(1)
+      expect(lf.max_rise).to be_within(1e-6).of(2)
+      expect(lf.max_fall).to be_within(1e-6).of(4)
+    end
+
+    it 'allows unlimited directions' do
+      f = MB::Sound::Filter::LinearFollower.new(sample_rate: 10, max_rise: nil, max_fall: 1)
+      f.sample_rate = 20
+      expect(f.max_rise).to eq(nil)
+      expect(f.max_fall).to be_within(1e-6).of(0.05)
+    end
+
+    it 'takes the same time to rise in an oversampled graph' do
+      [1, 2, 4].each do |os|
+        node = 1.constant.clip_rate(2).oversample(os)
+        out = node.sample(4800)
+        expect(out[-1]).to be_within(1e-3).of(0.2)
+      end
     end
   end
 end

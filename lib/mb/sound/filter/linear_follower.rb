@@ -70,13 +70,15 @@ module MB
         end
 
         # Changes the sample rate of this filter (used to convert rise and fall
-        # rates from inverse seconds to inverse samples).
+        # rates from inverse seconds to inverse samples).  The rates per second
+        # stay the same, so the rates per sample shrink as the sample rate
+        # grows.
         def sample_rate=(new_rate)
           new_rate = new_rate.to_f
           raise "Sample rate must be positive" unless new_rate > 0
 
-          @max_fall = @max_fall.abs.to_f * new_rate / @sample_rate
-          @max_rise = @max_rise.abs.to_f * new_rate / @sample_rate
+          @max_fall = @max_fall && @max_fall * @sample_rate / new_rate
+          @max_rise = @max_rise && @max_rise * @sample_rate / new_rate
 
           @sample_rate = new_rate
 

@@ -111,6 +111,31 @@ module MB
         MB::Sound::Filter::LinearFollower.new(sample_rate: sample_rate, max_rise: limit, max_fall: limit)
       end
 
+      # Returns the smoother for a +smoothing+ setting (as for .smoother)
+      # after a sample rate change from +old_rate+ to +new_rate+, given the
+      # current smoother +filter+.
+      #
+      # The delays being smoothed are in samples, so a rate in seconds per
+      # second is the same number of delay samples per sample at any sample
+      # rate.  A LinearFollower built by .smoother is therefore rebuilt for
+      # the new rate (moving it with #at_rate would keep its limit in delay
+      # samples per second, slowing the glide in seconds per second), with
+      # its output moved to the same delay in seconds.  A Filter given as
+      # +smoothing+ is moved with #at_rate (right for linear filters such as
+      # a lowpass, whose cutoff is in Hz).
+      def self.rescale_smoother(filter, smoothing, old_rate, new_rate)
+        return nil unless filter
+
+        if smoothing.respond_to?(:process) && smoothing.respond_to?(:reset)
+          raise "Filter #{filter} does not support changing sample rate" unless filter.respond_to?(:at_rate)
+          return filter.at_rate(new_rate)
+        end
+
+        new_filter = smoother(smoothing || true, new_rate)
+        new_filter.reset(filter.peek * new_rate / old_rate) if filter.respond_to?(:peek)
+        new_filter
+      end
+
       # Smooths +delays+ (an NArray of delays in samples) with +filter+ (from
       # .smoother), skipping a LinearFollower that has settled on a constant
       # delay (it would output the delay unchanged).  Returns the smoothed
