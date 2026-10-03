@@ -181,6 +181,17 @@ module MB
           mixed(ChannelMixer::Balance.new(@outputs, position: position))
         end
 
+        # Mixes the channels into new channels with +matrix+ (see
+        # ChannelMethods#matrix): one row per output and one column per
+        # channel.  Returns a bundle, or one node for a one-row matrix.
+        #
+        # Example (bin/sound.rb):
+        #     bg stereo(a, b).matrix([[1, 0.3], [0.3, 1]])   # crossfeed
+        def matrix(matrix, complex: false)
+          mixer = ChannelMixer::Matrix.new(@outputs, matrix: matrix, complex: complex)
+          mixer.outputs.length == 1 ? mixer.outputs[0] : Channels.new(mixer.outputs)
+        end
+
         # Places a one-channel bundle's channel (see ChannelMethods#place);
         # other bundles raise an error.  Also available as #position.
         def place(x: 0, y: 1, law: :equal_power)

@@ -158,4 +158,18 @@ RSpec.describe(MB::Sound::GraphNode::Channels) do
   ensure
     ENV.delete('OUTPUT_TYPE')
   end
+
+  it 'has every channel conversion that single nodes have' do
+    missing = MB::Sound::GraphNode::ChannelMethods.public_instance_methods(false).reject { |m|
+      MB::Sound::GraphNode::Channels.public_method_defined?(m)
+    }
+    expect(missing).to eq([])
+  end
+
+  it 'mixes a bundle with a matrix' do
+    b = MB::Sound.stereo(1.constant, 2.constant)
+    l, r = b.matrix([[1, 0.5], [0.5, 1]]).outputs.map { |o| o.sample(2)[0] }
+    expect([l, r]).to eq([2, 2.5])
+    expect(b.matrix([[1, 1]]).sample(2).to_a).to eq([3, 3])
+  end
 end
