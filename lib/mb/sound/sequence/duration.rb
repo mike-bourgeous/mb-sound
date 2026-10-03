@@ -63,17 +63,28 @@ module MB
             raise ArgumentError, "Duration must be positive and finite (got #{duration})" unless duration.finite? && duration > 0
             rational(duration)
 
+          when Length
+            # Seconds and samples, at the current tempo
+            wn = duration.to_whole_notes(transport: Sequence.transport)
+            raise ArgumentError, "Duration must be positive (got #{duration})" unless wn > 0
+            wn
+
           else
-            raise ArgumentError, "Duration must be a Duration (e.g. 3.n16 or 2.bars), an Integer note division, or a Rational/Float fraction of a whole note (got #{duration.inspect})"
+            raise ArgumentError, "Duration must be a Duration (e.g. 3.n16 or 2.bars), a Length (e.g. 0.5.seconds), an Integer note division, or a Rational/Float fraction of a whole note (got #{duration.inspect})"
           end
         end
 
-        # Converts a number of bars, or a Duration, to a number of bars with
-        # +bar_length+ whole notes per bar.  Other values (e.g. nil) are
-        # returned unchanged.  Used by methods that count in bars, like fades
-        # and ScheduleMethods#every.
-        def self.bars(value, bar_length)
-          value.is_a?(Duration) ? value.whole_notes / bar_length.to_r : value
+        # Converts a number of bars, a Duration, or another Length (seconds or
+        # samples, converted at +transport+'s current tempo and
+        # +sample_rate+) to a number of bars with +bar_length+ whole notes per
+        # bar.  Other values (e.g. nil) are returned unchanged.  Used by
+        # methods that count in bars, like fades and ScheduleMethods#every.
+        def self.bars(value, bar_length, transport: Sequence.transport, sample_rate: 48000)
+          case value
+          when Duration then value.whole_notes / bar_length.to_r
+          when Length then value.to_whole_notes(transport: transport, sample_rate: sample_rate) / bar_length.to_r
+          else value
+          end
         end
 
         # Converts a Numeric to an exact Rational, turning Floats into the

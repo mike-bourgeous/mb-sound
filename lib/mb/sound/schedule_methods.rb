@@ -46,7 +46,7 @@ module MB
       def after(bars, &block)
         session = Session.current
         t = session.transport
-        bars = Sequence::Duration.bars(bars, t.bar_length)
+        bars = Sequence::Duration.bars(bars, t.bar_length, transport: t)
         raise ArgumentError, "Bars must be a number of at least 1 (got #{bars.inspect})" unless bars.is_a?(Numeric) && bars >= 1
 
         time = t.next_boundary(t.bar_length) + (bars.to_r - 1) * t.bar_length
@@ -60,8 +60,8 @@ module MB
       def every(bars, offset: 0, &block)
         session = Session.current
         t = session.transport
-        bars = Sequence::Duration.bars(bars, t.bar_length)
-        offset = Sequence::Duration.bars(offset, t.bar_length)
+        bars = Sequence::Duration.bars(bars, t.bar_length, transport: t)
+        offset = Sequence::Duration.bars(offset, t.bar_length, transport: t)
         raise ArgumentError, "Bars must be a positive number (got #{bars.inspect})" unless bars.is_a?(Numeric) && bars > 0
         raise ArgumentError, "Offset must be a number from 0 up to the bar count (got #{offset.inspect})" unless offset.is_a?(Numeric) && offset >= 0 && offset < bars
 

@@ -130,6 +130,7 @@ module MB
 
           raise 'Room size must be between 0.0 and 1.0' unless room_size >= 0.0 && room_size <= 1.0
           raise 'Damping must be between 0.0 and 1.0' unless damping >= 0.0 && damping <= 1.0
+          decay = MB::Sound::Length.seconds(decay, sample_rate: sample_rate)
           raise 'Decay must be positive' unless decay > 0
 
           @sample_rate = sample_rate.to_f

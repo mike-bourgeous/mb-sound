@@ -170,7 +170,6 @@ module MB
             seed: seed,
           }.compact)
 
-          extra_time = params.delete(:extra_time)
           _description = params.delete(:description)
 
           # Pad inputs with extra silence for ringdown
@@ -182,6 +181,7 @@ module MB
           # TODO: find a way to tidy up the flow graph with these multichannel
           # inputs and outputs.
           inputs = input.is_a?(Array) ? input : input.outputs
+          extra_time = MB::Sound::Length.seconds(params.delete(:extra_time), sample_rate: inputs[0].sample_rate)
           if extra_time > 0 && (inputs.length > 1 || input.is_a?(Array) || input.is_a?(InputChannelSplit::InputChannelNode))
             # A separate silence node for each input so each gets the full time
             upstream = inputs.map { |i| i.and_then(MB::Sound.silence(extra_time)) }
@@ -273,7 +273,7 @@ module MB
           @wet = wet.to_f
           @dry = dry.to_f
 
-          @predelay = predelay.to_f
+          @predelay = predelay # seconds or any length
 
           if @output_channels > 1
             @outputs = Array.new(@output_channels) do |idx|
@@ -325,7 +325,7 @@ module MB
           # Apply predelay to input signal after dry/wet split but before
           # internal splitting/grouping
           predelayed = @upstreams.map.with_index { |u, idx|
-            @predelay == 0 ? u : u.delay(seconds: @predelay).named("Predelay #{idx}")
+            MB::Sound::Length.seconds(@predelay, sample_rate: @sample_rate) == 0 ? u : u.delay(@predelay).named("Predelay #{idx}")
           }
 
           # Assign inputs to pipeline channels.

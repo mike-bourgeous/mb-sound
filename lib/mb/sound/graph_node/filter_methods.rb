@@ -195,12 +195,21 @@ module MB
         end
 
         # Adds a MB::Sound::Filter::Smoothstep filter to the chain, smoothing
-        # over the given number of samples or seconds.
+        # over +length+: seconds or any length (e.g. `60.samples`, `100.ms`,
+        # `1.n16` at the current tempo).
+        #
+        # Examples:
+        #     midi.number.smooth(0.1)
+        #     120.hz.square.smooth(60.samples)
         #
         # TODO: instead of reacting to step changes in the input, use an FIR
         # filter whose step response is the smoothstep function.
-        def smooth(samples: nil, seconds: nil, sample_rate: 48000)
-          filter(MB::Sound::Filter::Smoothstep.new(sample_rate: sample_rate, samples: samples, seconds: seconds))
+        def smooth(length)
+          if length.is_a?(MB::Sound::Length::Samples)
+            filter(MB::Sound::Filter::Smoothstep.new(sample_rate: sample_rate, samples: length.value))
+          else
+            filter(MB::Sound::Filter::Smoothstep.new(sample_rate: sample_rate, seconds: MB::Sound::Length.seconds(length, sample_rate: sample_rate)))
+          end
         end
 
         # Hard-clips the slope of the output of this node to the given +max_rise+

@@ -126,8 +126,10 @@ module MB
         # downstream nodes sample the adapter, the adapter will sample the
         # upstream node in +length+-sized chunks.  This allows running a node
         # graph with a shorter internal buffer size than the sound card input or
-        # output buffer size, for example.
+        # output buffer size, for example.  Plain numbers are samples; other
+        # lengths (e.g. `5.ms`) are rounded to samples at this node's rate.
         def with_buffer(length)
+          length = MB::Sound::Length.samples(length, sample_rate: sample_rate).round if length.is_a?(MB::Sound::Length)
           MB::Sound::GraphNode::BufferAdapter.new(upstream: self, upstream_count: length)
         end
       end

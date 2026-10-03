@@ -1,6 +1,6 @@
 RSpec.describe(MB::Sound::Filter::Smoothstep) do
   it 'can be created' do
-    f = 120.hz.square.smooth(samples: 60)
+    f = 120.hz.square.smooth(60.samples)
     expect(f).to be_a(MB::Sound::Filter::SampleWrapper)
     expect(f.base_filter).to be_a(MB::Sound::Filter::Smoothstep)
   end

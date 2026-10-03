@@ -95,4 +95,62 @@ RSpec.describe(MB::Sound::Length, :aggregate_failures) do
       expect(src.max_samples(48000)).to be > 24000
     end
   end
+
+  describe 'everywhere a length of time is taken' do
+    after { MB::Sound.rewind }
+
+    # Total samples a node gives in +buffer+-sized reads until it ends
+    def total(node, buffer = 100)
+      n = 0
+      while (d = node.sample(buffer))
+        n += d.length
+      end
+      n
+    end
+
+    it 'until and silence' do
+      expect(total(1.constant.until(480.samples))).to eq(480)
+      expect(total(1.constant.until(10.ms))).to eq(480)
+      expect(total(MB::Sound.silence(480.samples))).to eq(480)
+      expect(total(MB::Sound.silence(10.ms))).to eq(480)
+      expect(total(MB::Sound.silence(5.samples).tap { |s| s.sample_rate = 96000 })).to eq(5)
+      expect(total(MB::Sound.silence(0.01).tap { |s| s.sample_rate = 96000 })).to eq(960)
+    end
+
+    it 'envelopes' do
+      env = MB::Sound.adsr(20.ms, 480.samples, 0.5, 1.n16)
+      expect(env.attack_time).to be_within(1e-12).of(0.02)
+      expect(env.decay_time).to be_within(1e-12).of(0.01)
+      expect(env.release_time).to be_within(1e-12).of(MB::Sound::Sequence.transport.seconds(1/16r))
+    end
+
+    it 'render seconds and bars, write lengths' do
+      file = tmp_path('lengths.flac')
+      MB::Sound.render(file, 1.constant, seconds: 4800.samples, gain: 1)
+      expect(MB::Sound.read(file)[0].length).to eq(4800)
+      MB::Sound.render(file, 1.constant, bars: 0.5.seconds, gain: 1, overwrite: true)
+      expect(MB::Sound.read(file)[0].length).to eq(24000)
+      MB::Sound.write(file, 1.constant, overwrite: true, max_length: 800.samples)
+      expect(MB::Sound.read(file)[0].length).to eq(800)
+    end
+
+    it 'bar-counted and musical arguments' do
+      t = MB::Sound::Sequence::Transport.new(bpm: 120)
+      expect(MB::Sound::Sequence::Duration.bars(1.second, t.bar_length, transport: t)).to eq(1/2r)
+      expect(MB::Sound::Sequence::Duration.whole_notes(0.5.seconds)).to eq(MB::Sound::Sequence.transport.whole_notes_per_second / 2)
+    end
+
+    it 'with_buffer, smooth, reverb predelay, and fdn_reverb decay' do
+      expect(1.constant.with_buffer(1.ms).instance_variable_get(:@upstream_count)).to eq(48)
+      expect(1.constant.smooth(60.samples)).to be_a(MB::Sound::GraphNode)
+      expect(1.constant.smooth(100.ms)).to be_a(MB::Sound::GraphNode)
+      expect { 1.constant.reverb(:hall, predelay: 10.ms).sample(10) }.not_to raise_error
+      expect { 1.constant.fdn_reverb(decay: 1.second, tail: 100.ms).sample(10) }.not_to raise_error
+    end
+
+    it 'HaasPan delays' do
+      expect(MB::Sound::HaasPan.new(delay: -24.samples).left_delay_samples).to eq(24)
+      expect(MB::Sound::HaasPan.new(delay: 1.ms).right_delay_samples).to eq(48)
+    end
+  end
 end
