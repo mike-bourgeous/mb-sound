@@ -105,29 +105,39 @@ begin
   end
   RubyMemcheck::ValgrindError.prepend(MemcheckUndefFilter)
 
-  memcheck_config = RubyMemcheck::Configuration.new(
-    valgrind_options: [
-      *RubyMemcheck::Configuration::DEFAULT_VALGRIND_OPTIONS,
-      *(ENV['MEMCHECK_UNDEF'] == '1' ? ['--undef-value-errors=yes', '--track-origins=yes'] : []),
-      # --trace-children=yes (a default) keeps the GC.stress `ruby -e` load
-      # specs under Valgrind; ffmpeg and other tools run natively.  A
-      # process that execs a skipped program leaves truncated XML, which
-      # MemcheckTruncatedXml below cleans up.
-      '--trace-children-skip=*ffmpeg*,*ffprobe*,*gnuplot*,*/dot,*/git',
-      # Forked children that don't exec (fork_script) would repeat the
-      # parent's leak report, so only exec'd programs report.
-      '--child-silent-after-fork=yes',
-    ],
-    valgrind_suppressions_dir: 'spec/valgrind',
-    valgrind_generate_suppressions: ENV['MEMCHECK_GEN_SUPPRESSIONS'] == '1',
-  )
+  # Built when the task runs: RubyMemcheck::Configuration creates a temp
+  # directory, which would otherwise be left behind by every rake command.
+  memcheck_config = lambda do
+    RubyMemcheck::Configuration.new(
+      valgrind_options: [
+        *RubyMemcheck::Configuration::DEFAULT_VALGRIND_OPTIONS,
+        *(ENV['MEMCHECK_UNDEF'] == '1' ? ['--undef-value-errors=yes', '--track-origins=yes'] : []),
+        # --trace-children=yes (a default) keeps the GC.stress `ruby -e` load
+        # specs under Valgrind; ffmpeg and other tools run natively.  A
+        # process that execs a skipped program leaves truncated XML, which
+        # MemcheckTruncatedXml above cleans up.
+        '--trace-children-skip=*ffmpeg*,*ffprobe*,*gnuplot*,*/dot,*/git',
+        # Forked children that don't exec (fork_script) would repeat the
+        # parent's leak report, so only exec'd programs report.
+        '--child-silent-after-fork=yes',
+      ],
+      valgrind_suppressions_dir: 'spec/valgrind',
+      valgrind_generate_suppressions: ENV['MEMCHECK_GEN_SUPPRESSIONS'] == '1',
+    )
+  end
 
   desc 'Run the C extension specs under Valgrind memcheck (MEMCHECK_SPECS=... for others)'
-  RubyMemcheck::RSpec::RakeTask.new(memcheck_config, memcheck: :compile) do |t|
-    specs = ENV['MEMCHECK_SPECS'].to_s.split
-    t.pattern = specs.empty? ? MEMCHECK_SPECS : specs
-    t.rspec_opts = ['--format', 'progress']
-    t.rspec_opts += ['--require', './spec/valgrind/gc_stress_calls.rb'] if ENV['MEMCHECK_GC_STRESS'] == '1'
+  task memcheck: :compile do
+    config = memcheck_config.call
+    RubyMemcheck::RSpec::RakeTask.new(config, :memcheck_rspec) do |t|
+      specs = ENV['MEMCHECK_SPECS'].to_s.split
+      t.pattern = specs.empty? ? MEMCHECK_SPECS : specs
+      t.rspec_opts = ['--format', 'progress']
+      t.rspec_opts += ['--require', './spec/valgrind/gc_stress_calls.rb'] if ENV['MEMCHECK_GC_STRESS'] == '1'
+    end
+    Rake::Task[:memcheck_rspec].invoke
+  ensure
+    FileUtils.rm_rf(config.temp_dir) if config
   end
 
   namespace :memcheck do
