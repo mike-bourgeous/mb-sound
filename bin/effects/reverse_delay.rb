@@ -30,7 +30,14 @@ MB::Sound.effect_script(
   # TODO: It would be cool to be able to crossfade the delay time jump; this
   # could be possible with a multi-tap delay (e.g. fade out from t1 while
   # fading in from t2)
-  delay_time = p.midi_cc(1, :delay, range: 0.0..2.0).filter(:lowpass, cutoff: 10).clip(internal_buftime, nil)
+  # The smoothing filter starts at the delay time instead of rising from zero.
+  # The LFOs below integrate 1 / delay_time, so a rise from zero would race
+  # through thousands of cycles (faster with more oversampling, as the clip
+  # floor is one internal buffer) and leave the reverse loop at an arbitrary
+  # phase.
+  delay_time = p.midi_cc(1, :delay, range: 0.0..2.0)
+    .filter(:lowpass, cutoff: 10).tap { |f| f.reset(p.delay) }
+    .clip(internal_buftime, nil)
 
   lfo_freq = (1.0 / delay_time).named('LFO Frequency')
 
