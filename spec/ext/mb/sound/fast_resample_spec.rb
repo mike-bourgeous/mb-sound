@@ -13,7 +13,9 @@ RSpec.describe(MB::Sound::FastResample, :aggregate_failures) do
     out = `ruby -e #{code.shellescape} #{so.shellescape} 2>&1`
 
     expect($?).to be_success, out
-    expect(out.to_i).to be > 0
+    # Last line only: under `rake memcheck` (RUBY_FREE_AT_EXIT=1) Ruby
+    # first warns "Free at exit is experimental".
+    expect(out.lines.last.to_i).to be > 0, out
   end
 
   describe '#initialize' do
