@@ -13,7 +13,7 @@ RSpec.describe(MB::Sound::GraphNode::MultitapDelay) do
   it 'interpolates values when delayed by a fractional sample' do
     c = 0.constant(smoothing: false)
     d = 0.5.constant(smoothing: false)
-    dly = MB::Sound::GraphNode::MultitapDelay.new(c, d, sample_rate: 1)
+    dly = MB::Sound::GraphNode::MultitapDelay.new(c, d, sample_rate: 1, interpolation: :linear)
     tap = dly.taps[0]
 
     expect(tap.sample(5)).to eq(Numo::SFloat[0, 0, 0, 0, 0])
@@ -42,7 +42,7 @@ RSpec.describe(MB::Sound::GraphNode::MultitapDelay) do
   end
 
   it 'can delay multiple taps by differing constant amounts' do
-    dly = MB::Sound::GraphNode::MultitapDelay.new(-2.constant, 2.5, 4.5, 0, sample_rate: 1)
+    dly = MB::Sound::GraphNode::MultitapDelay.new(-2.constant, 2.5, 4.5, 0, sample_rate: 1, interpolation: :linear)
     two, five, zero = dly.taps
 
     expect(two.sample(6)).to eq(Numo::SFloat[0, 0, -1, -2, -2, -2])

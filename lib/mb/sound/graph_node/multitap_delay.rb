@@ -108,7 +108,7 @@ module MB
         #
         # +:interpolation+ chooses how fractional delays are read: :linear,
         # :cubic, or :sinc (see MB::Sound::DelayLine).
-        def initialize(source, *delays_in_seconds, initial_buffer_seconds: 1, sample_rate: 48000, interpolation: :linear)
+        def initialize(source, *delays_in_seconds, initial_buffer_seconds: 1, sample_rate: 48000, interpolation: MB::Sound::DelayLine::DEFAULT_INTERPOLATION)
           unless MB::Sound::DelayLine::INTERPOLATION.include?(interpolation)
             raise ArgumentError, "Unknown interpolation #{interpolation.inspect} (use one of #{MB::Sound::DelayLine::INTERPOLATION.keys.join(', ')})"
           end

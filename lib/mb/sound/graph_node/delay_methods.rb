@@ -23,7 +23,9 @@ module MB
         # or graph nodes (e.g. an LFO or a MIDI CC), read every sample.
         #
         # +:interpolation+ chooses how fractional and moving delays are read:
-        # :linear, :cubic, or :sinc (band-limited; see MB::Sound::DelayLine).
+        # :sinc (the default; band-limited, so sweeping delays don't dull
+        # high frequencies or alias), :cubic, or :linear (cheapest, and the
+        # lo-fi sound of older delays).  See MB::Sound::DelayLine.
         #
         # Examples (bin/sound.rb):
         #     sig.delay(0.25, feedback: -6.db, dry: 1)           # seconds
@@ -36,7 +38,7 @@ module MB
         #       .proc { |v| MB::Sound.real_fft(v) }
         #       .delay(samples: 3208.4, feedback: 0.9, dry: 1, wet: 1)
         #       .proc { |v| MB::Sound.real_ifft(MB::M.shl(v, 0)) }
-        def delay(time = nil, seconds: nil, samples: nil, sample_rate: 48000, smoothing: true, max_delay: 1.0, feedback: false, dry: 0, wet: 1, interpolation: :linear)
+        def delay(time = nil, seconds: nil, samples: nil, sample_rate: 48000, smoothing: true, max_delay: 1.0, feedback: false, dry: 0, wet: 1, interpolation: MB::Sound::DelayLine::DEFAULT_INTERPOLATION)
           filter(MB::Sound::GraphNode::DelayMethods.delay_filter(
             time, seconds: seconds, samples: samples, sample_rate: sample_rate, smoothing: smoothing,
             max_delay: max_delay, feedback: feedback, dry: dry, wet: wet, interpolation: interpolation
@@ -45,7 +47,7 @@ module MB
 
         # Builds the MB::Sound::Filter::Delay for #delay and
         # Sequence::Duration#delay (see #delay for parameters).
-        def self.delay_filter(time = nil, seconds: nil, samples: nil, sample_rate: 48000, smoothing: true, max_delay: 1.0, feedback: false, dry: 0, wet: 1, interpolation: :linear)
+        def self.delay_filter(time = nil, seconds: nil, samples: nil, sample_rate: 48000, smoothing: true, max_delay: 1.0, feedback: false, dry: 0, wet: 1, interpolation: MB::Sound::DelayLine::DEFAULT_INTERPOLATION)
           raise ArgumentError, 'Pass a delay time, seconds:, or samples:, not more than one' if [time, seconds, samples].compact.length > 1
           seconds ||= time
 
@@ -91,7 +93,7 @@ module MB
         #
         # Example (bin/sound.rb):
         #     l, r = sig.multitap(1.n8.dotted, 1.n4)
-        def multitap(*delays, sample_rate: 48000, name: nil, initial_buffer_seconds: 1, interpolation: :linear)
+        def multitap(*delays, sample_rate: 48000, name: nil, initial_buffer_seconds: 1, interpolation: MB::Sound::DelayLine::DEFAULT_INTERPOLATION)
           longest = delays.filter_map { |d| MB::Sound::Sequence::TempoNode.max_seconds(d) }.max
           initial_buffer_seconds = MB::M.max(initial_buffer_seconds, 1.1 * longest) if longest
 

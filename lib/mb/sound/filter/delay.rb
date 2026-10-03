@@ -45,7 +45,7 @@ module MB
         #
         # +:interpolation+ chooses how fractional delays are read: :linear,
         # :cubic, or :sinc (see MB::Sound::DelayLine).
-        def initialize(delay: 0, sample_rate: 48000, delay_buffer_size: 48000, smoothing: true, feedback: false, wet: 1, dry: 0, interpolation: :linear)
+        def initialize(delay: 0, sample_rate: 48000, delay_buffer_size: 48000, smoothing: true, feedback: false, wet: 1, dry: 0, interpolation: MB::Sound::DelayLine::DEFAULT_INTERPOLATION)
           @sample_rate = sample_rate.to_f
 
           if delay.is_a?(Numeric)

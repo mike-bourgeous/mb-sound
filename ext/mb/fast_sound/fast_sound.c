@@ -2025,11 +2025,12 @@ static void read_interpolation(VALUE mode, VALUE kernel, VALUE state, int *m, st
 	}
 }
 
-// Returns the read speed for delay +d+ after delay +*prev+ (1 for a constant
-// delay), and remembers +d+.
-static inline double delay_rate(double d, double *prev, _Bool *have_prev)
+// Returns the read speed for delay +d+ after delay +*prev+, and remembers
+// +d+.  A constant delay (+moving+ false) reads at 1x: changing it between
+// buffers is a jump, not a speed.
+static inline double delay_rate(double d, double *prev, _Bool *have_prev, _Bool moving)
 {
-	double rate = *have_prev ? fabs(1.0 - (d - *prev)) : 1.0;
+	double rate = *have_prev && moving ? fabs(1.0 - (d - *prev)) : 1.0;
 	*prev = d;
 	*have_prev = 1;
 	return rate;
@@ -2072,7 +2073,7 @@ static VALUE ruby_delay_read(VALUE self, VALUE buffer, VALUE target, VALUE block
 
 	for (size_t i = 0; i < count; i++) {
 		double d = delay_value(&ctl, i, max);
-		double rate = delay_rate(d, &prev, &have_prev);
+		double rate = delay_rate(d, &prev, &have_prev, ctl.f || ctl.d || ctl.c);
 		long base = start + (long)i;
 
 		if (complex_buffer) {
@@ -2143,7 +2144,7 @@ static VALUE ruby_delay_feedback(VALUE self, VALUE buffer, VALUE write_offset, V
 
 	for (size_t i = 0; i < count; i++) {
 		double d = delay_value(&delays, i, max);
-		double rate = delay_rate(d, &prev, &have_prev);
+		double rate = delay_rate(d, &prev, &have_prev, delays.f || delays.d || delays.c);
 		long w = wrap_index(offset + (long)i, capacity);
 		_Bool whole = d == floor(d) && m != DELAY_SINC;
 

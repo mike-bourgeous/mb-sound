@@ -41,6 +41,11 @@ module MB
       # description), as numbered by the C kernels.
       INTERPOLATION = { linear: 0, cubic: 1, sinc: 2 }.freeze
 
+      # The interpolation mode delays use unless given one: :sinc, which
+      # costs about 1.5-2% of realtime per moving or fractional mono delay
+      # at 48 kHz (constant whole-sample delays cost the same as :linear).
+      DEFAULT_INTERPOLATION = :sinc
+
       # Taps on each side of the sinc kernel's center at full bandwidth.
       SINC_HALF = 12
 
@@ -145,7 +150,10 @@ module MB
       # by +delay+ samples: a Numeric for all samples, or an NArray with one
       # delay per sample.  Returns a new NArray of the buffer's type.
       #
-      # +interpolation+ is one of INTERPOLATION's keys.  For :sinc, +state+
+      # +interpolation+ is one of INTERPOLATION's keys (this low-level
+      # method defaults to :linear; delays default to DEFAULT_INTERPOLATION).
+      # A Numeric delay reads at 1x (changing it between calls is a jump);
+      # per-sample delays read at the speed their changes give.  For :sinc, +state+
       # should be an Array kept by each reader between calls (state[0] is
       # its previous delay, for the read speed).
       def read(count, delay, interpolation: :linear, state: nil)
@@ -174,7 +182,7 @@ module MB
           prev = state&.[](0)
           count.times do |i|
             d = clamp(delay.is_a?(Numeric) ? delay : delay[i], m)
-            rate = prev ? (1.0 - (d - prev)).abs : 1.0
+            rate = prev && !delay.is_a?(Numeric) ? (1.0 - (d - prev)).abs : 1.0
             prev = d
             out[i] = interpolate(@block_start + i, d, m, rate)
           end
@@ -207,7 +215,7 @@ module MB
 
         data.length.times do |i|
           d = clamp(delay.is_a?(Numeric) ? delay : delay[i], m)
-          rate = prev ? (1.0 - (d - prev)).abs : 1.0
+          rate = prev && !delay.is_a?(Numeric) ? (1.0 - (d - prev)).abs : 1.0
           prev = d
 
           w = (@write_offset + i) % cap

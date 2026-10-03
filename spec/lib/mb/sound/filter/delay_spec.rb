@@ -1,10 +1,11 @@
 RSpec.describe(MB::Sound::Filter::Delay, :aggregate_failures) do
+  # Linear interpolation, so smoothing glides give round numbers
   let(:shortbuf) {
-    MB::Sound::Filter::Delay.new(delay: 5, sample_rate: 1, delay_buffer_size: 10)
+    MB::Sound::Filter::Delay.new(delay: 5, sample_rate: 1, delay_buffer_size: 10, interpolation: :linear)
   }
 
   let(:midbuf) {
-    MB::Sound::Filter::Delay.new(delay: 10, sample_rate: 1, delay_buffer_size: 171)
+    MB::Sound::Filter::Delay.new(delay: 10, sample_rate: 1, delay_buffer_size: 171, interpolation: :linear)
   }
 
   describe '#initialize' do
@@ -164,6 +165,25 @@ RSpec.describe(MB::Sound::Filter::Delay, :aggregate_failures) do
       expect(a.sample_rate).to eq(5432)
       expect(b.sample_rate).to eq(5432)
       expect(c.sample_rate).to eq(5432)
+    end
+  end
+
+  describe 'interpolation' do
+    it 'defaults to band-limited sinc' do
+      expect(MB::Sound::Filter::Delay.new.interpolation).to eq(:sinc)
+      expect(100.hz.delay(0.01).base_filter.interpolation).to eq(:sinc)
+      expect(100.hz.delay(0.01, interpolation: :cubic).base_filter.interpolation).to eq(:cubic)
+      expect { MB::Sound::Filter::Delay.new(interpolation: :fancy) }.to raise_error(ArgumentError, /interpolation/)
+    end
+
+    MB::Sound::DelayLine::INTERPOLATION.each_key do |mode|
+      it "reads whole-sample delays exactly, including jumps (#{mode})" do
+        d = MB::Sound::Filter::Delay.new(delay: 0, sample_rate: 1, smoothing: false, interpolation: mode)
+        expect(d.process(Numo::SFloat[1, 2, 3])).to eq(Numo::SFloat[1, 2, 3])
+        d.delay = 3
+        expect(d.process(Numo::SFloat[4, 5, 6])).to eq(Numo::SFloat[1, 2, 3])
+        expect(d.process(Numo::SFloat[-2, 1, 2])).to eq(Numo::SFloat[4, 5, 6])
+      end
     end
   end
 
