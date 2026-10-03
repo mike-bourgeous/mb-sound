@@ -72,8 +72,8 @@ module MB
           end
 
           @table = wavetable
-          @number = number
-          @phase = phase
+          @number = number.get_sampler
+          @phase = phase.get_sampler
           @sample_rate = sample_rate
           @lookup = lookup
           @wrap = wrap

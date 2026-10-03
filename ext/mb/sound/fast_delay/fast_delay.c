@@ -127,11 +127,12 @@ static inline double complex control_value(const struct control_input *ctl, size
 	return ctl->scalar;
 }
 
-// Returns the delay for sample +i+, clamped to 0..max.
+// Returns the delay for sample +i+, clamped to 0..max (NaN reads as 0, so
+// it can't become an out-of-range table or buffer index).
 static inline double delay_value(const struct control_input *ctl, size_t i, double max)
 {
 	double d = creal(control_value(ctl, i));
-	if (d < 0) {
+	if (!(d >= 0)) {
 		return 0;
 	}
 	return d > max ? max : d;
