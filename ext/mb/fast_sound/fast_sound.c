@@ -4,6 +4,7 @@
  * (C)2021 Mike Bourgeous
  */
 #include <stdlib.h>
+#include <string.h>
 #include <math.h>
 #include <complex.h>
 
@@ -1880,26 +1881,188 @@ static _Bool check_delay_buffer(VALUE buffer, const char *name)
 	return cls == numo_cSComplex;
 }
 
+// Interpolation modes for fractional delays (DelayLine::INTERPOLATION).
+enum delay_interpolation {
+	DELAY_LINEAR = 0, // between the samples at floor(delay) and floor(delay) + 1
+	DELAY_CUBIC = 1, // 4-point Catmull-Rom (Hermite) spline
+	DELAY_SINC = 2, // windowed sinc, low-passed by 1/rate when reading faster than 1x
+};
+
+// The windowed-sinc kernel from DelayLine::SINC_KERNEL: table[j] is the
+// kernel at j / resolution samples from its center (0 past +half+), and
+// the kernel widens by up to +max_rate+ times when reading faster than 1x.
+struct sinc_kernel {
+	const double *table;
+	long table_length;
+	double half;
+	double resolution;
+	double max_rate;
+};
+
+// Reads a sinc kernel ([table DFloat, half, resolution, max_rate]) for the
+// sinc interpolation mode (+kernel+ must stay alive while it is used).
+static void read_sinc_kernel(VALUE kernel, struct sinc_kernel *k)
+{
+	if (!RB_TYPE_P(kernel, T_ARRAY) || RARRAY_LEN(kernel) != 4) {
+		rb_raise(rb_eArgError, "Sinc interpolation needs a kernel Array of [table, half, resolution, max_rate]");
+	}
+
+	VALUE table = rb_ary_entry(kernel, 0);
+	if (CLASS_OF(table) != numo_cDFloat || RNARRAY_NDIM(table) != 1 || !RTEST(nary_check_contiguous(table))) {
+		rb_raise(rb_eArgError, "The sinc kernel table must be a contiguous 1D DFloat NArray");
+	}
+
+	k->table = (const double *)(nary_get_pointer_for_read(table) + nary_get_offset(table));
+	k->table_length = RNARRAY_SHAPE(table)[0];
+	k->half = NUM2DBL(rb_ary_entry(kernel, 1));
+	k->resolution = NUM2DBL(rb_ary_entry(kernel, 2));
+	k->max_rate = NUM2DBL(rb_ary_entry(kernel, 3));
+}
+
+// The number of samples older than floor(delay) that a mode reads (delays
+// are clamped so these stay inside the buffer).
+static double delay_margin(int mode, const struct sinc_kernel *k)
+{
+	switch (mode) {
+		case DELAY_CUBIC:
+			return 2;
+		case DELAY_SINC:
+			return ceil(k->half * k->max_rate) + 1;
+		default:
+			return 1;
+	}
+}
+
+// The sinc kernel weight at +x+ samples from its center (scaled by the
+// cutoff), interpolated linearly in the table.
+static inline double sinc_weight(const struct sinc_kernel *k, double x)
+{
+	double u = x * k->resolution;
+	long j = (long)u;
+	if (j + 1 >= k->table_length) {
+		return 0;
+	}
+	double f = u - j;
+	return k->table[j] + (k->table[j + 1] - k->table[j]) * f;
+}
+
+// Interpolates the delay line +buf+ at +d+ samples before position +base+
+// (+rate+ is the read speed for sinc).  Samples newer than +base+ are never
+// read: taps at negative delays read the sample at +base+ instead.
+#define DELAY_INTERP(NAME, STORE, CALC) \
+static CALC NAME(const STORE *buf, long cap, long base, double d, int mode, const struct sinc_kernel *k, double rate) \
+{ \
+	double dmin = floor(d); \
+	double t = d - dmin; \
+	long di = (long)dmin; \
+	\
+	switch (mode) { \
+		case DELAY_CUBIC: { \
+			CALC ym1 = buf[wrap_index(base - (di > 0 ? di - 1 : 0), cap)]; \
+			CALC y0 = buf[wrap_index(base - di, cap)]; \
+			CALC y1 = buf[wrap_index(base - di - 1, cap)]; \
+			CALC y2 = buf[wrap_index(base - di - 2, cap)]; \
+			CALC c0 = y0; \
+			CALC c1 = 0.5 * (y1 - ym1); \
+			CALC c2 = ym1 - 2.5 * y0 + 2.0 * y1 - 0.5 * y2; \
+			CALC c3 = 0.5 * (y2 - ym1) + 1.5 * (y0 - y1); \
+			return ((c3 * t + c2) * t + c1) * t + c0; \
+		} \
+		\
+		case DELAY_SINC: { \
+			if (t == 0 && rate <= 1) { \
+				/* The kernel is zero at other whole samples */ \
+				return buf[wrap_index(base - di, cap)]; \
+			} \
+			double fc = rate > 1 ? 1.0 / (rate < k->max_rate ? rate : k->max_rate) : 1.0; \
+			double support = k->half / fc; \
+			long kmin = (long)ceil(d - support); \
+			long kmax = (long)floor(d + support); \
+			CALC sum = 0; \
+			double wsum = 0; \
+			for (long kk = kmin; kk <= kmax; kk++) { \
+				double w = sinc_weight(k, fabs((double)kk - d) * fc); \
+				sum += w * (CALC)buf[wrap_index(base - (kk > 0 ? kk : 0), cap)]; \
+				wsum += w; \
+			} \
+			return wsum != 0 ? sum / wsum : 0; \
+		} \
+		\
+		default: { \
+			CALC a = buf[wrap_index(base - di, cap)]; \
+			CALC b = buf[wrap_index(base - di - 1, cap)]; \
+			return a * (1.0 - t) + b * t; \
+		} \
+	} \
+}
+
+DELAY_INTERP(delay_interp_real, float, double)
+DELAY_INTERP(delay_interp_complex, float complex, double complex)
+
+// Reads the interpolation mode, kernel, and previous delay (state[0], for
+// the read rate) shared by the delay kernels.
+static void read_interpolation(VALUE mode, VALUE kernel, VALUE state, int *m, struct sinc_kernel *k, double *prev, _Bool *have_prev)
+{
+	*m = NUM2INT(mode);
+	if (*m < DELAY_LINEAR || *m > DELAY_SINC) {
+		rb_raise(rb_eArgError, "Unknown delay interpolation mode %d", *m);
+	}
+
+	memset(k, 0, sizeof(*k));
+	if (*m == DELAY_SINC) {
+		read_sinc_kernel(kernel, k);
+	}
+
+	*have_prev = 0;
+	*prev = 0;
+	if (RTEST(state)) {
+		Check_Type(state, T_ARRAY);
+		VALUE p = rb_ary_entry(state, 0);
+		if (RTEST(p)) {
+			*prev = NUM2DBL(p);
+			*have_prev = 1;
+		}
+	}
+}
+
+// Returns the read speed for delay +d+ after delay +*prev+ (1 for a constant
+// delay), and remembers +d+.
+static inline double delay_rate(double d, double *prev, _Bool *have_prev)
+{
+	double rate = *have_prev ? fabs(1.0 - (d - *prev)) : 1.0;
+	*prev = d;
+	*have_prev = 1;
+	return rate;
+}
+
 /*
  * Reads RNARRAY_SHAPE(target)[0] samples from the delay line +buffer+ into
  * +target+ (the same type), for a block written at +block_start+, delayed
- * by +delay+ samples (a number or a per-sample NArray).  Returns +target+.
- * See DelayLine#read.
+ * by +delay+ samples (a number or a per-sample NArray), interpolating with
+ * +mode+ (DelayLine::INTERPOLATION; +kernel+ is DelayLine::SINC_KERNEL for
+ * sinc).  The previous delay is read from and stored in state[0] if
+ * +state+ is an Array.  Returns +target+.  See DelayLine#read.
  */
-static VALUE ruby_delay_read(VALUE self, VALUE buffer, VALUE target, VALUE block_start, VALUE delay)
+static VALUE ruby_delay_read(VALUE self, VALUE buffer, VALUE target, VALUE block_start, VALUE delay, VALUE mode, VALUE kernel, VALUE state)
 {
 	_Bool complex_buffer = check_delay_buffer(buffer, "Buffer");
 	if (CLASS_OF(target) != CLASS_OF(buffer) || RNARRAY_NDIM(target) != 1 || !RTEST(nary_check_contiguous(target))) {
 		rb_raise(rb_eArgError, "Target must be a contiguous 1D NArray of the buffer's type");
 	}
 
+	int m;
+	struct sinc_kernel k;
+	double prev;
+	_Bool have_prev;
+	read_interpolation(mode, kernel, state, &m, &k, &prev, &have_prev);
+
 	long capacity = RNARRAY_SHAPE(buffer)[0];
-	if (capacity < 2) {
-		rb_raise(rb_eArgError, "The delay buffer must hold at least 2 samples");
+	double max = capacity - 1 - delay_margin(m, &k);
+	if (max < 0) {
+		rb_raise(rb_eArgError, "The delay buffer is too small for this interpolation mode");
 	}
 	size_t count = RNARRAY_SHAPE(target)[0];
 	long start = NUM2LONG(block_start);
-	double max = capacity - 2;
 
 	struct control_input ctl;
 	read_control_input(&delay, count, "Delay", &ctl);
@@ -1909,25 +2072,22 @@ static VALUE ruby_delay_read(VALUE self, VALUE buffer, VALUE target, VALUE block
 
 	for (size_t i = 0; i < count; i++) {
 		double d = delay_value(&ctl, i, max);
-		double dmin = floor(d);
-		double delta = d - dmin;
-		long idx1 = wrap_index(start + (long)i - (long)dmin, capacity);
-		long idx2 = wrap_index(start + (long)i - (long)dmin - 1, capacity);
+		double rate = delay_rate(d, &prev, &have_prev);
+		long base = start + (long)i;
 
 		if (complex_buffer) {
-			const float complex *buf = in;
-			double complex a = buf[idx1];
-			double complex b = buf[idx2];
-			((float complex *)out)[i] = a * (1.0 - delta) + b * delta;
+			((float complex *)out)[i] = delay_interp_complex(in, capacity, base, d, m, &k, rate);
 		} else {
-			const float *buf = in;
-			double a = buf[idx1];
-			double b = buf[idx2];
-			((float *)out)[i] = a * (1.0 - delta) + b * delta;
+			((float *)out)[i] = delay_interp_real(in, capacity, base, d, m, &k, rate);
 		}
 	}
 
+	if (RTEST(state) && have_prev) {
+		rb_ary_store(state, 0, DBL2NUM(prev));
+	}
+
 	RB_GC_GUARD(delay);
+	RB_GC_GUARD(kernel);
 
 	return target;
 }
@@ -1935,25 +2095,31 @@ static VALUE ruby_delay_read(VALUE self, VALUE buffer, VALUE target, VALUE block
 /*
  * Runs +input+ through a feedback loop one sample at a time: writes each
  * input sample into the delay line +buffer+ at +write_offset+, reads the
- * delayed sample (+delay+, a number or a per-sample NArray), adds
- * +feedback+ (a number or a per-sample NArray) times the delayed sample to
- * the written sample, and stores the delayed sample in +out+.  Returns the
- * new write offset.  See DelayLine#feedback.
+ * delayed sample (+delay+, a number or a per-sample NArray, interpolated
+ * as for delay_read), adds +feedback+ (a number or a per-sample NArray)
+ * times the delayed sample to the written sample, and stores the delayed
+ * sample in +out+.  Returns the new write offset.  See DelayLine#feedback.
  */
-static VALUE ruby_delay_feedback(VALUE self, VALUE buffer, VALUE write_offset, VALUE input, VALUE out, VALUE delay, VALUE feedback)
+static VALUE ruby_delay_feedback(VALUE self, VALUE buffer, VALUE write_offset, VALUE input, VALUE out, VALUE delay, VALUE feedback, VALUE mode, VALUE kernel, VALUE state)
 {
 	_Bool complex_buffer = check_delay_buffer(buffer, "Buffer");
 	if (CLASS_OF(out) != CLASS_OF(buffer) || RNARRAY_NDIM(out) != 1 || !RTEST(nary_check_contiguous(out))) {
 		rb_raise(rb_eArgError, "Output must be a contiguous 1D NArray of the buffer's type");
 	}
 
+	int m;
+	struct sinc_kernel k;
+	double prev;
+	_Bool have_prev;
+	read_interpolation(mode, kernel, state, &m, &k, &prev, &have_prev);
+
 	long capacity = RNARRAY_SHAPE(buffer)[0];
-	if (capacity < 2) {
-		rb_raise(rb_eArgError, "The delay buffer must hold at least 2 samples");
+	double max = capacity - 1 - delay_margin(m, &k);
+	if (max < 0) {
+		rb_raise(rb_eArgError, "The delay buffer is too small for this interpolation mode");
 	}
 	size_t count = RNARRAY_SHAPE(out)[0];
 	long offset = NUM2LONG(write_offset);
-	double max = capacity - 2;
 
 	if (complex_buffer) {
 		ensure_scomplex(&input);
@@ -1977,36 +2143,33 @@ static VALUE ruby_delay_feedback(VALUE self, VALUE buffer, VALUE write_offset, V
 
 	for (size_t i = 0; i < count; i++) {
 		double d = delay_value(&delays, i, max);
+		double rate = delay_rate(d, &prev, &have_prev);
 		long w = wrap_index(offset + (long)i, capacity);
-		double dmin = floor(d);
-		long idx1 = wrap_index(w - (long)dmin, capacity);
+		_Bool whole = d == floor(d) && m != DELAY_SINC;
 
 		if (complex_buffer) {
 			float complex *b = buf;
 			b[w] = ((const float complex *)in)[i];
-			double complex v = b[idx1];
-			if (d != dmin) {
-				double delta = d - dmin;
-				v = v * (1.0 - delta) + (double complex)b[wrap_index(w - (long)dmin - 1, capacity)] * delta;
-			}
+			double complex v = whole ? (double complex)b[wrap_index(w - (long)d, capacity)] : delay_interp_complex(b, capacity, w, d, m, &k, rate);
 			b[w] = (double complex)b[w] + control_value(&gains, i) * v;
 			((float complex *)outp)[i] = v;
 		} else {
 			float *b = buf;
 			b[w] = ((const float *)in)[i];
-			double v = b[idx1];
-			if (d != dmin) {
-				double delta = d - dmin;
-				v = v * (1.0 - delta) + (double)b[wrap_index(w - (long)dmin - 1, capacity)] * delta;
-			}
+			double v = whole ? (double)b[wrap_index(w - (long)d, capacity)] : delay_interp_real(b, capacity, w, d, m, &k, rate);
 			b[w] = (double)b[w] + creal(control_value(&gains, i)) * v;
 			((float *)outp)[i] = v;
 		}
 	}
 
+	if (RTEST(state) && have_prev) {
+		rb_ary_store(state, 0, DBL2NUM(prev));
+	}
+
 	RB_GC_GUARD(input);
 	RB_GC_GUARD(delay);
 	RB_GC_GUARD(feedback);
+	RB_GC_GUARD(kernel);
 
 	return LONG2NUM(wrap_index(offset + (long)count, capacity));
 }
@@ -2034,8 +2197,8 @@ void Init_fast_sound(void)
 	rb_define_module_function(fast_sound, "phasor", ruby_phasor, 6);
 	rb_define_module_function(fast_sound, "shape", ruby_shape, 7);
 	rb_define_module_function(fast_sound, "oscillate", ruby_oscillate, 9);
-	rb_define_module_function(fast_sound, "delay_read", ruby_delay_read, 4);
-	rb_define_module_function(fast_sound, "delay_feedback", ruby_delay_feedback, 6);
+	rb_define_module_function(fast_sound, "delay_read", ruby_delay_read, 7);
+	rb_define_module_function(fast_sound, "delay_feedback", ruby_delay_feedback, 9);
 
 	// Filtering functions
 	rb_define_module_function(fast_sound, "biquad", ruby_biquad, 10);

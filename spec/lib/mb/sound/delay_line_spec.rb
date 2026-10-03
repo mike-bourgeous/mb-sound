@@ -20,10 +20,10 @@ RSpec.describe(MB::Sound::DelayLine, :aggregate_failures) do
     end
 
     it 'clamps delays to the buffer' do
-      line = described_class.new(12)
+      line = described_class.new(60)
       line.write(ramp)
       expect(line.read(10, -3)).to eq(ramp)
-      expect(line.read(10, 100)).to eq(line.read(10, 10))
+      expect(line.read(10, 100)).to eq(line.read(10, line.capacity - 2))
     end
   end
 
@@ -35,17 +35,51 @@ RSpec.describe(MB::Sound::DelayLine, :aggregate_failures) do
     end
 
     it 'grows the buffer, keeping the stored audio in place' do
-      line = described_class.new(16)
-      line.prepare(10, 4).write(ramp)       # 1..10
-      line.prepare(10, 4).write(ramp + 10)  # 11..20; the 16 newest are 5..20
-      expect(line.capacity).to eq(16)
+      block = Numo::SFloat.new(100).seq + 1
+      line = described_class.new(200)
+      line.prepare(100, 4).write(block)        # 1..100
+      line.prepare(100, 4).write(block + 100)  # 101..200
+      expect(line.capacity).to eq(200)
 
-      line.prepare(10, 15)
-      expect(line.capacity).to be >= 27
-      line.write(ramp + 20)                 # 21..30
-      expect(line.read(10, 15).to_a).to eq((6..15).to_a)
-      expect(line.read(10, 16).to_a).to eq((5..14).to_a)
-      expect(line.read(10, 17).to_a).to eq([0] + (5..13).to_a) # 4 was overwritten before growing
+      line.prepare(100, 250)
+      expect(line.capacity).to be >= 100 + 250 + described_class::MARGIN
+      line.write(block + 200)                  # 201..300
+      expect(line.read(100, 150).to_a).to eq((51..150).to_a)
+      expect(line.read(100, 250).to_a).to eq([0] * 50 + (1..50).to_a) # written before growing
+    end
+  end
+
+  describe 'interpolation modes' do
+    let(:sine) { Numo::SFloat.cast(Numo::NMath.sin(Numo::DFloat.new(400).seq * 0.3)) }
+
+    it 'read whole-sample delays exactly (cubic) or nearly (sinc)' do
+      line = described_class.new(500)
+      line.write(sine)
+      expected = line.read(400, 37)
+      expect(line.read(400, 37, interpolation: :cubic)).to eq(expected)
+      expect(line.read(400, 37, interpolation: :sinc)).to all_be_within(1e-5).of_array(expected)
+    end
+
+    it 'interpolate high frequencies more accurately than linear' do
+      # 0.3 rad/sample is ~2.3 kHz at 48 kHz, 2.0 is ~15 kHz
+      errors = [0.3, 2.0].to_h { |w|
+        tone = Numo::SFloat.cast(Numo::NMath.sin(Numo::DFloat.new(400).seq * w))
+        ideal = Numo::NMath.sin((Numo::DFloat.new(400).seq - 37.4) * w)
+        line = described_class.new(500)
+        line.write(tone)
+        [w, described_class::INTERPOLATION.keys.to_h { |mode|
+          [mode, (Numo::DFloat.cast(line.read(400, 37.4, interpolation: mode)) - ideal)[100..].abs.max]
+        }]
+      }
+
+      expect(errors[0.3][:cubic]).to be < errors[0.3][:linear] / 20
+      expect(errors[0.3][:sinc]).to be < errors[0.3][:linear] / 10
+      expect(errors[2.0][:cubic]).to be < errors[2.0][:linear]
+      expect(errors[2.0][:sinc]).to be < errors[2.0][:cubic] / 100
+    end
+
+    it 'rejects unknown modes' do
+      expect { described_class.new(100).read(10, 1, interpolation: :magic) }.to raise_error(ArgumentError, /interpolation/)
     end
   end
 
@@ -85,19 +119,31 @@ RSpec.describe(MB::Sound::DelayLine, :aggregate_failures) do
           'per-sample SFloat delays' => Numo::SFloat.new(160).rand(-5, 1100),
           'per-sample DFloat delays' => Numo::DFloat.new(160).rand(0, 300),
         }.each do |desc, delay|
-          it "read the same for #{desc}" do
-            c, r = lines(1000, type)
-            c.write(block)
-            r.write(block)
-            expect(c.read(160, delay)).to eq(r.read_ruby(160, delay))
-          end
+          described_class::INTERPOLATION.each_key do |mode|
+            it "read the same for #{desc} (#{mode})" do
+              c, r = lines(1000, type)
+              cs = [3.0]
+              rs = [3.0]
+              2.times do
+                c.write(block)
+                r.write(block)
+                expect(c.read(160, delay, interpolation: mode, state: cs)).to eq(r.read_ruby(160, delay, interpolation: mode, state: rs))
+                expect(cs).to eq(rs)
+              end
+            end
 
-          it "feed back the same for #{desc}" do
-            c, r = lines(1000, type)
-            gain = type == Numo::SComplex ? 0.3 - 0.4i : -0.7
-            expect(c.feedback(block, delay, gain)).to eq(r.feedback_ruby(block, delay, gain))
-            expect(c.buffer).to eq(r.buffer)
-            expect(c.write_offset).to eq(r.write_offset)
+            it "feed back the same for #{desc} (#{mode})" do
+              c, r = lines(1000, type)
+              gain = type == Numo::SComplex ? 0.3 - 0.4i : -0.7
+              cs = []
+              rs = []
+              2.times do
+                expect(c.feedback(block, delay, gain, interpolation: mode, state: cs)).to eq(r.feedback_ruby(block, delay, gain, interpolation: mode, state: rs))
+                expect(c.buffer).to eq(r.buffer)
+                expect(c.write_offset).to eq(r.write_offset)
+                expect(cs).to eq(rs)
+              end
+            end
           end
         end
 

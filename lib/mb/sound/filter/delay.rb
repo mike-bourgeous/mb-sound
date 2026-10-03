@@ -23,6 +23,10 @@ module MB
         # (see #feedback=, #wet=, #dry=).
         attr_reader :feedback, :wet, :dry
 
+        # How fractional delays are interpolated (see
+        # MB::Sound::DelayLine::INTERPOLATION).
+        attr_reader :interpolation
+
         # Initializes a single-channel delay with a given +:delay+ in seconds,
         # based on the +:sample_rate+..  The +:delay_buffer_size+ sets the
         # initial buffer size in samples; the buffer grows (keeping its
@@ -38,7 +42,10 @@ module MB
         # input.  A +:feedback+ gain feeds the delayed signal back into the
         # delay.  Each may be a number or a graph node (e.g. an LFO or a MIDI
         # CC) giving a value per sample.
-        def initialize(delay: 0, sample_rate: 48000, delay_buffer_size: 48000, smoothing: true, feedback: false, wet: 1, dry: 0)
+        #
+        # +:interpolation+ chooses how fractional delays are read: :linear,
+        # :cubic, or :sinc (see MB::Sound::DelayLine).
+        def initialize(delay: 0, sample_rate: 48000, delay_buffer_size: 48000, smoothing: true, feedback: false, wet: 1, dry: 0, interpolation: :linear)
           @sample_rate = sample_rate.to_f
 
           if delay.is_a?(Numeric)
@@ -46,6 +53,8 @@ module MB
           end
 
           @line = MB::Sound::DelayLine.new(delay_buffer_size)
+          self.interpolation = interpolation
+          @read_state = []
           @delay = 0
           @delay_samples = 0
           @smooth_limit = nil
@@ -181,6 +190,15 @@ module MB
           @delay_seconds_orig = seconds
         end
 
+        # Sets the interpolation mode for fractional delays (:linear, :cubic,
+        # or :sinc; see MB::Sound::DelayLine).
+        def interpolation=(mode)
+          unless MB::Sound::DelayLine::INTERPOLATION.include?(mode)
+            raise ArgumentError, "Unknown interpolation #{mode.inspect} (use one of #{MB::Sound::DelayLine::INTERPOLATION.keys.join(', ')})"
+          end
+          @interpolation = mode
+        end
+
         # Sets the feedback gain: a number (false or nil for none) or a graph
         # node giving a gain per sample.
         def feedback=(gain)
@@ -250,10 +268,10 @@ module MB
           @line.prepare(data.length, max_delay, complex ? Numo::SComplex : data.class)
 
           if feedback && feedback != 0
-            delayed = @line.feedback(data, delays || @delay_samples, feedback.is_a?(Numo::NArray) ? feedback[0...length] : feedback)
+            delayed = @line.feedback(data, delays || @delay_samples, feedback.is_a?(Numo::NArray) ? feedback[0...length] : feedback, interpolation: @interpolation, state: @read_state)
           else
             @line.write(data)
-            delayed = @line.read(data.length, delays || @delay_samples)
+            delayed = @line.read(data.length, delays || @delay_samples, interpolation: @interpolation, state: @read_state)
           end
 
           result = wet.is_a?(Numo::NArray) ? delayed * wet[0...length] : wet * delayed
@@ -276,11 +294,11 @@ module MB
         end
 
         def to_s
-          "Delay -- smoothing=#{@smoothing} smooth_limit=#{@smooth_limit} feedback=#{level(@feedback, false)} dry=#{level(@dry)} wet=#{level(@wet)}"
+          "Delay -- interpolation=#{@interpolation} smoothing=#{@smoothing} smooth_limit=#{@smooth_limit} feedback=#{level(@feedback, false)} dry=#{level(@dry)} wet=#{level(@wet)}"
         end
 
         def to_s_graphviz
-          "Delay\nsmoothing: #{@smoothing}\nsmooth_limit: #{@smooth_limit}\nfeedback: #{level(@feedback, false)}\ndry: #{level(@dry)}\nwet: #{level(@wet)}"
+          "Delay\ninterpolation: #{@interpolation}\nsmoothing: #{@smoothing}\nsmooth_limit: #{@smooth_limit}\nfeedback: #{level(@feedback, false)}\ndry: #{level(@dry)}\nwet: #{level(@wet)}"
         end
 
         private

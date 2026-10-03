@@ -22,6 +22,9 @@ module MB
         # The +:feedback+ gain and the +:wet+ and +:dry+ levels may be numbers
         # or graph nodes (e.g. an LFO or a MIDI CC), read every sample.
         #
+        # +:interpolation+ chooses how fractional and moving delays are read:
+        # :linear, :cubic, or :sinc (band-limited; see MB::Sound::DelayLine).
+        #
         # Examples (bin/sound.rb):
         #     sig.delay(0.25, feedback: -6.db, dry: 1)           # seconds
         #     sig.delay(1.n8.dotted, feedback: -6.db, dry: 1)    # follows the tempo
@@ -33,16 +36,16 @@ module MB
         #       .proc { |v| MB::Sound.real_fft(v) }
         #       .delay(samples: 3208.4, feedback: 0.9, dry: 1, wet: 1)
         #       .proc { |v| MB::Sound.real_ifft(MB::M.shl(v, 0)) }
-        def delay(time = nil, seconds: nil, samples: nil, sample_rate: 48000, smoothing: true, max_delay: 1.0, feedback: false, dry: 0, wet: 1)
+        def delay(time = nil, seconds: nil, samples: nil, sample_rate: 48000, smoothing: true, max_delay: 1.0, feedback: false, dry: 0, wet: 1, interpolation: :linear)
           filter(MB::Sound::GraphNode::DelayMethods.delay_filter(
             time, seconds: seconds, samples: samples, sample_rate: sample_rate, smoothing: smoothing,
-            max_delay: max_delay, feedback: feedback, dry: dry, wet: wet
+            max_delay: max_delay, feedback: feedback, dry: dry, wet: wet, interpolation: interpolation
           ))
         end
 
         # Builds the MB::Sound::Filter::Delay for #delay and
         # Sequence::Duration#delay (see #delay for parameters).
-        def self.delay_filter(time = nil, seconds: nil, samples: nil, sample_rate: 48000, smoothing: true, max_delay: 1.0, feedback: false, dry: 0, wet: 1)
+        def self.delay_filter(time = nil, seconds: nil, samples: nil, sample_rate: 48000, smoothing: true, max_delay: 1.0, feedback: false, dry: 0, wet: 1, interpolation: :linear)
           raise ArgumentError, 'Pass a delay time, seconds:, or samples:, not more than one' if [time, seconds, samples].compact.length > 1
           seconds ||= time
 
@@ -59,7 +62,7 @@ module MB
           filter = MB::Sound::Filter::Delay.new(
             delay: seconds, sample_rate: sample_rate, smoothing: smoothing,
             delay_buffer_size: (sample_rate * max_delay).ceil, feedback: feedback,
-            dry: dry, wet: wet
+            dry: dry, wet: wet, interpolation: interpolation
           )
 
           # Start a tempo-synced delay at its time (at the current tempo, and
@@ -84,9 +87,11 @@ module MB
         # MB::Sound::GraphNode::MultitapDelay does not do built-in smoothing,
         # so tempo changes jump).
         #
+        # +:interpolation+ is as for #delay.
+        #
         # Example (bin/sound.rb):
         #     l, r = sig.multitap(1.n8.dotted, 1.n4)
-        def multitap(*delays, sample_rate: 48000, name: nil, initial_buffer_seconds: 1)
+        def multitap(*delays, sample_rate: 48000, name: nil, initial_buffer_seconds: 1, interpolation: :linear)
           longest = delays.filter_map { |d| MB::Sound::Sequence::TempoNode.max_seconds(d) }.max
           initial_buffer_seconds = MB::M.max(initial_buffer_seconds, 1.1 * longest) if longest
 
@@ -94,7 +99,8 @@ module MB
             self,
             *delays.map { |d| MB::Sound::Sequence::TempoNode.seconds_source(d) },
             sample_rate: sample_rate,
-            initial_buffer_seconds: initial_buffer_seconds
+            initial_buffer_seconds: initial_buffer_seconds,
+            interpolation: interpolation
           ).named(name).taps.then { |taps| Channels.new(taps) }
         end
         alias multitap_delay multitap

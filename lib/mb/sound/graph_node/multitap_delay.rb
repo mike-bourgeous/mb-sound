@@ -57,6 +57,9 @@ module MB
               delay_samples: @delay_samples,
               multitap_delay: @mtd,
             }.freeze
+
+            # This tap's previous delay, for the read speed (sinc)
+            @read_state = []
           end
 
           # Returns +count+ samples from this delay tap, based on the delay
@@ -65,7 +68,7 @@ module MB
             delay_buf = @delay_samples.sample(count)
             return nil if delay_buf.nil?
 
-            @mtd.internal_sample(self, delay_buf)
+            @mtd.internal_sample(self, delay_buf, @read_state)
           end
 
           # Changes the sample rate of all taps on this multitap delay and all
@@ -95,10 +98,22 @@ module MB
         # Sample rate used for converting delay times to delays in samples.
         attr_reader :sample_rate
 
+        # How fractional delays are interpolated (see
+        # MB::Sound::DelayLine::INTERPOLATION).
+        attr_reader :interpolation
+
         # Creates a MultitapDelay that samples audio from one +source+ graph
         # node and produces output tap nodes for each source +delay_in_seconds+
         # (Numeric or GraphNode).
-        def initialize(source, *delays_in_seconds, initial_buffer_seconds: 1, sample_rate: 48000)
+        #
+        # +:interpolation+ chooses how fractional delays are read: :linear,
+        # :cubic, or :sinc (see MB::Sound::DelayLine).
+        def initialize(source, *delays_in_seconds, initial_buffer_seconds: 1, sample_rate: 48000, interpolation: :linear)
+          unless MB::Sound::DelayLine::INTERPOLATION.include?(interpolation)
+            raise ArgumentError, "Unknown interpolation #{interpolation.inspect} (use one of #{MB::Sound::DelayLine::INTERPOLATION.keys.join(', ')})"
+          end
+          @interpolation = interpolation
+
           raise 'Delay audio source must respond to :sample' unless source.respond_to?(:sample)
 
           @graph_node_name = nil
@@ -158,7 +173,7 @@ module MB
         # delayed output for a given tap.  The first tap sampled in each graph
         # frame reads the input and writes it to the shared delay line; every
         # tap then reads the line at its own delays.
-        def internal_sample(tap, delay_buf)
+        def internal_sample(tap, delay_buf, state = nil)
           if @sampled.include?(tap.index)
             if @sampled.length < @taps.length
               warn "Delay tap #{tap} on #{self} sampled again with #{@sampled.length} of #{@taps.length} sampled"
@@ -183,7 +198,7 @@ module MB
 
           @sampled << tap.index
 
-          @line.read(MB::M.min(delay_buf.length, @audio_buf.length), delay_buf)
+          @line.read(MB::M.min(delay_buf.length, @audio_buf.length), delay_buf, interpolation: @interpolation, state: state)
         end
       end
     end

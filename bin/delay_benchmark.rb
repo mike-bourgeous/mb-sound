@@ -20,18 +20,25 @@ def source
   MB::Sound.noise.at(0.5)
 end
 
+# Interpolation mode for the delay workloads (see --interpolation)
+$interpolation = :linear
+
+def interp
+  { interpolation: $interpolation }
+end
+
 WORKLOADS = {
   'source only' => -> { source },
-  'constant 480 samples' => -> { source.delay(0.01, smoothing: false) },
-  'constant, smoothing on (default)' => -> { source.delay(0.01) },
-  'constant fractional (node)' => -> { source.delay(seconds: (480.4 / RATE).constant(smoothing: false), smoothing: false) },
-  'tempo 3.n32 + feedback' => -> { source.delay(3.n32, feedback: 0.5, dry: 1) },
-  'feedback, 0.25 s' => -> { source.delay(0.25, feedback: 0.5, smoothing: false, dry: 1) },
-  'feedback, 96 samples' => -> { source.delay(96.0 / RATE, feedback: 0.5, smoothing: false, dry: 1) },
-  'modulated (flanger LFO)' => -> { source.delay(seconds: 0.3.hz.lfo.at(0.001..0.008), smoothing: false, dry: 1) },
-  'modulated + feedback' => -> { source.delay(seconds: 0.3.hz.lfo.at(0.001..0.008), feedback: 0.5, smoothing: false, dry: 1) },
-  'multitap, 3 constant taps' => -> { source.multitap(0.1, 0.2, 0.3).to_a.sum },
-  'multitap, 2 modulated taps' => -> { source.multitap(0.5.hz.lfo.at(0.001..0.005), 0.7.hz.lfo.at(0.002..0.006)).to_a.sum },
+  'constant 480 samples' => -> { source.delay(0.01, smoothing: false, **interp) },
+  'constant, smoothing on (default)' => -> { source.delay(0.01, **interp) },
+  'constant fractional (node)' => -> { source.delay(seconds: (480.4 / RATE).constant(smoothing: false), smoothing: false, **interp) },
+  'tempo 3.n32 + feedback' => -> { source.delay(3.n32, feedback: 0.5, dry: 1, **interp) },
+  'feedback, 0.25 s' => -> { source.delay(0.25, feedback: 0.5, smoothing: false, dry: 1, **interp) },
+  'feedback, 96 samples' => -> { source.delay(96.0 / RATE, feedback: 0.5, smoothing: false, dry: 1, **interp) },
+  'modulated (flanger LFO)' => -> { source.delay(seconds: 0.3.hz.lfo.at(0.001..0.008), smoothing: false, dry: 1, **interp) },
+  'modulated + feedback' => -> { source.delay(seconds: 0.3.hz.lfo.at(0.001..0.008), feedback: 0.5, smoothing: false, dry: 1, **interp) },
+  'multitap, 3 constant taps' => -> { source.multitap(0.1, 0.2, 0.3, **interp).to_a.sum },
+  'multitap, 2 modulated taps' => -> { source.multitap(0.5.hz.lfo.at(0.001..0.005), 0.7.hz.lfo.at(0.002..0.006), **interp).to_a.sum },
   'reverb :hall' => -> { source.reverb(:hall) },
 }.freeze
 
@@ -39,7 +46,9 @@ MB::Sound.script(
   seconds: [5.0, '-s', 'Seconds of audio per workload', 0.1..],
   buffer: [800, '-b', Integer, 'Buffer size in samples', 1..],
   only: [nil, String, 'Comma-separated substrings; only matching workloads'],
+  interpolation: ['linear', String, 'Delay interpolation: linear, cubic, or sinc'],
 ) { |_, p|
+  $interpolation = p.interpolation.to_sym
   buffers = (p.seconds * RATE / p.buffer).ceil
   puts format('%-34s %10s %10s', 'workload', 'realtime %', 'µs/buffer')
 
