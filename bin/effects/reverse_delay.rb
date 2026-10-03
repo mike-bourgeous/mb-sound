@@ -23,7 +23,10 @@ MB::Sound.effect_script(
   oversample: [2.0, 'Oversampling factor'],
 ) { |input, p|
   processing_sample_rate = 48000 * p.oversample
-  internal_buffer = 64
+  # The feedback comes back one internal buffer late; scaling the buffer with
+  # oversampling keeps that latency (1.3 ms) the same, so every oversampling
+  # factor sounds alike, and keeps the per-buffer overhead from growing.
+  internal_buffer = [(64 * p.oversample).round, 16].max
   internal_buftime = internal_buffer.to_f / processing_sample_rate
 
   # TODO: Allow base delay and loop length? or mindelay and maxdelay?

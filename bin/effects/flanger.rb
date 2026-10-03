@@ -51,7 +51,15 @@ MB::Sound.effect_script(
 ) { |input, p|
   # Delays below are in samples at the oversampled processing rate
   sample_rate = 48000 * p.oversample
-  internal_bufsize = (24 * [1, p.oversample].max).ceil
+
+  # The feedback comes back one internal buffer late (compensated below), so
+  # the buffer must fit inside the shortest delay (the MIDI mod wheel can
+  # double the depth); larger buffers are much faster (~45% of realtime with
+  # 512 samples vs. ~250% with 24, both at 1x).
+  shortest_delay = p.delay * sample_rate * (1 - p.depth.abs)
+  scale = [1, p.oversample].max
+  internal_bufsize = [512, 256, 128, 64, 32].map { |n| (n * scale).ceil }.find { |n| n <= shortest_delay } ||
+    (24 * scale).ceil
   channels = input.channel_count
 
   # FIXME: This doesn't work with a filter like 1000.hz.lowpass1p; maybe there's overshoot or something?
