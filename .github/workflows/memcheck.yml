@@ -9,6 +9,14 @@ on:
         description: 'Build the extensions at -O0 (exact line numbers in reports)'
         type: boolean
         default: false
+      undef:
+        description: 'Also report uninitialized values used in the extensions (about 2x slower)'
+        type: boolean
+        default: false
+      gc_stress:
+        description: 'GC.stress during each extension call (pair with a short spec list)'
+        type: boolean
+        default: false
       specs:
         description: 'Spec files to run instead of the curated list (space separated)'
         type: string
@@ -50,9 +58,40 @@ jobs:
       - name: Run specs under Valgrind
         env:
           MEMCHECK_SPECS: ${{ inputs.specs }}
+          # Scheduled runs (no inputs) also check uninitialized values
+          MEMCHECK_UNDEF: ${{ (github.event_name == 'schedule' || inputs.undef) && '1' || '' }}
+          MEMCHECK_GC_STRESS: ${{ inputs.gc_stress && '1' || '' }}
         run: |
           if [ "${{ inputs.debug_build }}" = "true" ]; then
             bundle exec rake memcheck:debug
           else
             bundle exec rake memcheck
           fi
+
+  # GC.stress during every extension call, on the direct extension specs
+  # (about 10 min under Valgrind locally).  Weekly; on demand, use the
+  # gc_stress and specs inputs of the job above.
+  memcheck-gc-stress:
+    if: github.event_name == 'schedule'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Ruby
+        uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: '4.0'
+      - name: Install apt deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install ffmpeg libsamplerate0-dev valgrind
+      - name: Install gem deps
+        run: bundle install
+      - name: Run extension specs under Valgrind with GC.stress per call
+        env:
+          MEMCHECK_GC_STRESS: '1'
+          MEMCHECK_SPECS: >-
+            spec/ext/mb/fast_sound_spec.rb spec/ext/mb/sound/fast_delay_spec.rb
+            spec/ext/mb/sound/fast_resample_spec.rb spec/ext/mb/sound/fast_wavetable_spec.rb
+            spec/lib/mb/fast_sound_spec.rb spec/lib/mb/sound/delay_line_spec.rb
+        run: bundle exec rake memcheck:debug

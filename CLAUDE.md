@@ -23,6 +23,7 @@ bundle exec rspec spec/some_spec.rb        # Run a single test file
 bundle exec rspec spec/some_spec.rb:42     # Run a specific test line
 bundle exec rake                  # Default task (runs spec)
 bin/sound.rb                      # Launch interactive Pry console with MB::Sound context
+bundle exec rake memcheck         # C extension specs under Valgrind (~6 min; options in Rakefile)
 ```
 
 Testing: run affected specs while working, and the full suite (about 2 minutes) before and after each merge, or more often for good reason.  Save suite output to a file and grep it instead of rerunning.  Concurrent spec processes work (per-process temp dirs and coverage files); parallelizing the suite is deliberately postponed, since slow or leaky specs are better fixed than hidden.
