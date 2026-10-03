@@ -19,9 +19,13 @@ module MB
         # tempo changes) glide like a tape delay; pass `smoothing: false` to
         # jump instead.
         #
+        # The +:feedback+ gain and the +:wet+ and +:dry+ levels may be numbers
+        # or graph nodes (e.g. an LFO or a MIDI CC), read every sample.
+        #
         # Examples (bin/sound.rb):
         #     sig.delay(0.25, feedback: -6.db, dry: 1)           # seconds
         #     sig.delay(1.n8.dotted, feedback: -6.db, dry: 1)    # follows the tempo
+        #     sig.delay(0.3, feedback: 0.2.hz.lfo.at(0.2..0.8), dry: 1)  # swelling repeats
         #
         # This can be used for spectral distortion:
         #

@@ -167,7 +167,51 @@ RSpec.describe(MB::Sound::Filter::Delay, :aggregate_failures) do
     end
   end
 
-  pending 'applies dry and wet gain in various modes'
+  describe 'wet, dry, and feedback' do
+    let(:impulse) { Numo::SFloat.zeros(12).tap { |d| d[0] = 1 } }
 
-  pending 'when feedback is nonzero'
+    it 'applies dry and wet levels on every path' do
+      [
+        { smoothing: false },
+        { smoothing: true },
+        { smoothing: false, feedback: 0.5 },
+      ].each do |opts|
+        d = MB::Sound::Filter::Delay.new(delay: 4, sample_rate: 1, delay_buffer_size: 20, wet: 0.5, dry: 0.25, **opts)
+        out = d.process(impulse.dup).to_a
+        expect(out[0]).to eq(0.25), opts.inspect
+        expect(out[4]).to eq(0.5), opts.inspect
+        expect(out[8]).to eq(opts[:feedback] ? 0.25 : 0), opts.inspect
+      end
+    end
+
+    it 'feeds back the delayed signal' do
+      d = MB::Sound::Filter::Delay.new(delay: 4, sample_rate: 1, delay_buffer_size: 20, smoothing: false, feedback: -0.5)
+      expect(d.process(impulse).to_a).to eq([0, 0, 0, 0, 1, 0, 0, 0, -0.5, 0, 0, 0])
+    end
+
+    it 'reads feedback, wet, and dry from graph nodes' do
+      fb = MB::Sound::ArrayInput.new(data: [Numo::SFloat[0, 0, 0, 0, 0.5, 0, 0, 0, 0, 0, 0, 0]], sample_rate: 1)
+      wet = MB::Sound::ArrayInput.new(data: [Numo::SFloat.ones(12) * 2], sample_rate: 1)
+      dry = MB::Sound::ArrayInput.new(data: [Numo::SFloat.new(12).seq / 10], sample_rate: 1)
+      d = MB::Sound::Filter::Delay.new(delay: 4, sample_rate: 1, delay_buffer_size: 20, smoothing: false, feedback: fb, wet: wet, dry: dry)
+
+      expect(d.sources.keys).to include(:feedback, :wet, :dry)
+      # The echo at 4 is fed back at 0.5 (the gain at sample 4), so it
+      # repeats at 8; wet doubles both, and dry is 0 at the impulse
+      expect(d.process(impulse).to_a).to eq([0, 0, 0, 0, 2, 0, 0, 0, 1, 0, 0, 0])
+    end
+
+    it 'ends when a level node ends' do
+      wet = MB::Sound::ArrayInput.new(data: [Numo::SFloat.ones(5)], sample_rate: 1)
+      d = MB::Sound::Filter::Delay.new(delay: 1, sample_rate: 1, smoothing: false, wet: wet)
+      expect(d.process(impulse).length).to eq(5)
+      expect(d.process(impulse)).to eq(nil)
+    end
+
+    it 'follows a graph DSL LFO for feedback' do
+      graph = 100.hz.delay(0.01, feedback: 0.2.hz.lfo.at(0.2..0.8), dry: 1)
+      expect(graph.graph).to include(an_instance_of(MB::Sound::Tone).and(have_attributes(frequency: 0.2)))
+      expect(graph.sample(4800).abs.max).to be > 0.5
+    end
+  end
 end

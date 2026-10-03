@@ -19,8 +19,9 @@ module MB
         # to #process.  May not be an integer.
         attr_reader :min_delay_samples, :max_delay_samples, :last_delay_samples
 
-        # Feedback amount
-        attr_accessor :feedback
+        # The feedback gain, wet level, and dry level: numbers or graph nodes
+        # (see #feedback=, #wet=, #dry=).
+        attr_reader :feedback, :wet, :dry
 
         # Initializes a single-channel delay with a given +:delay+ in seconds,
         # based on the +:sample_rate+..  The +:delay_buffer_size+ sets the
@@ -35,7 +36,8 @@ module MB
         #
         # The output is +:wet+ times the delayed signal plus +:dry+ times the
         # input.  A +:feedback+ gain feeds the delayed signal back into the
-        # delay.
+        # delay.  Each may be a number or a graph node (e.g. an LFO or a MIDI
+        # CC) giving a value per sample.
         def initialize(delay: 0, sample_rate: 48000, delay_buffer_size: 48000, smoothing: true, feedback: false, wet: 1, dry: 0)
           @sample_rate = sample_rate.to_f
 
@@ -50,9 +52,9 @@ module MB
 
           @filter_buf = Numo::SFloat.zeros(1)
 
-          @feedback = feedback
-          @dry = dry.to_f
-          @wet = wet.to_f
+          self.feedback = feedback
+          self.dry = dry
+          self.wet = wet
 
           self.delay = delay
           self.smoothing = smoothing
@@ -179,6 +181,22 @@ module MB
           @delay_seconds_orig = seconds
         end
 
+        # Sets the feedback gain: a number (false or nil for none) or a graph
+        # node giving a gain per sample.
+        def feedback=(gain)
+          @feedback = control(gain, 'feedback') || false
+        end
+
+        # Sets the wet (delayed signal) level: a number or a graph node.
+        def wet=(level)
+          @wet = control(level, 'wet')
+        end
+
+        # Sets the dry (input) level: a number or a graph node.
+        def dry=(level)
+          @dry = control(level, 'dry')
+        end
+
         # Returns a copy of the current delay buffer, rotated so that the write
         # pointer is always at the start of the returned buffer copy, for
         # visualization use.
@@ -190,7 +208,9 @@ module MB
         # delay (specifically for a delay this is the value given to
         # #delay_samples=).  See GraphNode#sources.
         def sources
-          { delay_samples: @delay_samples }
+          { delay_samples: @delay_samples }.merge(
+            { feedback: @feedback, wet: @wet, dry: @dry }.select { |_, v| v.respond_to?(:sample) }
+          )
         end
 
         # Delays the given +data+ by #delay_samples samples, returning +wet+
@@ -215,18 +235,33 @@ module MB
             max_delay = @delay_samples
           end
 
-          complex = data.is_a?(Numo::SComplex) || data.is_a?(Numo::DComplex) || @feedback.is_a?(Complex)
+          feedback = control_values(@feedback, data.length)
+          wet = control_values(@wet, data.length)
+          dry = control_values(@dry, data.length)
+          return nil if feedback.nil? || wet.nil? || dry.nil?
+
+          length = [data, feedback, wet, dry].map { |v| v.respond_to?(:length) ? v.length : data.length }.min
+          if length < data.length
+            data = data[0...length]
+            delays = delays[0...length] if delays.respond_to?(:length)
+          end
+
+          complex = [data, feedback].any? { |v| v.is_a?(Numo::SComplex) || v.is_a?(Numo::DComplex) || v.is_a?(Complex) }
           @line.prepare(data.length, max_delay, complex ? Numo::SComplex : data.class)
 
-          if @feedback && @feedback != 0
-            delayed = @line.feedback(data, delays || @delay_samples, @feedback)
+          if feedback && feedback != 0
+            delayed = @line.feedback(data, delays || @delay_samples, feedback.is_a?(Numo::NArray) ? feedback[0...length] : feedback)
           else
             @line.write(data)
             delayed = @line.read(data.length, delays || @delay_samples)
           end
 
-          result = @wet * delayed
-          result = result + @dry * data if @dry != 0
+          result = wet.is_a?(Numo::NArray) ? delayed * wet[0...length] : wet * delayed
+          if dry.is_a?(Numo::NArray)
+            result = result + data * dry[0...length]
+          elsif dry != 0
+            result = result + dry * data
+          end
 
           if data.inplace?
             data[true] = result
@@ -241,14 +276,42 @@ module MB
         end
 
         def to_s
-          "Delay -- smoothing=#{@smoothing} smooth_limit=#{@smooth_limit} feedback=#{@feedback} dry=#{@dry.to_db} wet=#{@wet.to_db}"
+          "Delay -- smoothing=#{@smoothing} smooth_limit=#{@smooth_limit} feedback=#{level(@feedback, false)} dry=#{level(@dry)} wet=#{level(@wet)}"
         end
 
         def to_s_graphviz
-          "Delay\nsmoothing: #{@smoothing}\nsmooth_limit: #{@smooth_limit}\nfeedback: #{@feedback}\ndry: #{@dry.to_db}\nwet: #{@wet.to_db}"
+          "Delay\nsmoothing: #{@smoothing}\nsmooth_limit: #{@smooth_limit}\nfeedback: #{level(@feedback, false)}\ndry: #{level(@dry)}\nwet: #{level(@wet)}"
         end
 
         private
+
+        # Checks a feedback/wet/dry value: a graph node (sampled per buffer,
+        # through get_sampler) or a number (false/nil allowed for feedback).
+        def control(value, name)
+          if value.respond_to?(:sample)
+            value = value.get_sampler
+            check_rate(value, name)
+            value
+          elsif value.nil? || value == false
+            name == 'feedback' ? false : raise(ArgumentError, "#{name} must be a number or a graph node")
+          elsif value.is_a?(Numeric)
+            value.is_a?(Complex) ? value : value.to_f
+          else
+            raise ArgumentError, "#{name} must be a number or a graph node (got #{value.inspect})"
+          end
+        end
+
+        # Returns +count+ values of a control (one per sample) for a node,
+        # nil if the node ended, or the number itself.
+        def control_values(value, count)
+          value.respond_to?(:sample) ? value.sample(count) : value
+        end
+
+        # Describes a level for #to_s (dB for numbers).
+        def level(value, db = true)
+          return value.to_s if value.respond_to?(:sample) || !value.is_a?(Numeric) || !db
+          value.to_db
+        end
 
         # Returns the delay in samples for each of +count+ samples (smoothed
         # if smoothing is on), a Numeric delay for every sample (nil for the
