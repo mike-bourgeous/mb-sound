@@ -12,6 +12,10 @@ module MB
     # of 0 returns the block itself).  Delays are clamped to 0 and to the
     # buffer's capacity.
     #
+    # #read and #feedback run in C (MB::FastSound.delay_read and
+    # .delay_feedback); #read_ruby and #feedback_ruby are the same math in
+    # Ruby, and specs check that both give exactly the same values.
+    #
     # The buffer grows when a block plus the longest delay doesn't fit
     # (see #prepare), keeping the stored audio: growing unwraps it oldest
     # first, so delays read the same samples afterwards.  Growing allocates
@@ -69,6 +73,11 @@ module MB
       # by +delay+ samples: a Numeric for all samples, or an NArray with one
       # delay per sample.  Returns a new NArray of the buffer's type.
       def read(count, delay)
+        MB::FastSound.delay_read(@buffer, @buffer.class.zeros(count), @block_start, real_delay(delay))
+      end
+
+      # The Ruby version of #read.
+      def read_ruby(count, delay)
         if delay.is_a?(Numeric)
           read_constant(count, clamp(delay))
         else
@@ -79,8 +88,17 @@ module MB
       # Runs +data+ through a feedback loop one sample at a time: writes
       # each input sample plus +feedback+ times the delayed output, and
       # returns the delayed output (without the input).  The +delay+ is a
-      # Numeric or an NArray with one delay per sample, as for #read.
+      # Numeric or an NArray with one delay per sample, as for #read, and
+      # +feedback+ is a Numeric or an NArray with one gain per sample.
       def feedback(data, delay, feedback)
+        @block_start = @write_offset
+        out = @buffer.class.zeros(data.length)
+        @write_offset = MB::FastSound.delay_feedback(@buffer, @write_offset, data, out, real_delay(delay), feedback)
+        out
+      end
+
+      # The Ruby version of #feedback.
+      def feedback_ruby(data, delay, feedback)
         @block_start = @write_offset
         cap = capacity
         buf = @buffer
@@ -100,7 +118,7 @@ module MB
             v = v * (1.0 - delta) + buf[(w - dmin - 1) % cap] * delta
           end
 
-          buf[w] += feedback * v
+          buf[w] += (feedback.is_a?(Numeric) ? feedback : feedback[i]) * v
           out[i] = v
         end
 
@@ -157,7 +175,7 @@ module MB
 
         delta = delay - dmin
         b = MB::M.circular_read(@buffer, (@block_start - dmin - 1) % capacity, count)
-        @buffer.class.cast(a * (1.0 - delta) + b * delta)
+        @buffer.class.cast(double(a) * (1.0 - delta) + double(b) * delta)
       end
 
       # Reads at a delay per sample with linear interpolation (vectorized).
@@ -172,12 +190,22 @@ module MB
         idx1 = (base - dmin_i) % capacity
         idx2 = (base - dmin_i - 1) % capacity
 
-        a = @buffer[idx1]
-        b = @buffer[idx2]
+        @buffer.class.cast(double(@buffer[idx1]) * (1.0 - delta) + double(@buffer[idx2]) * delta)
+      end
+
+      # Casts +data+ to DFloat, or DComplex for a complex buffer.
+      def double(data)
         complex = @buffer.is_a?(Numo::SComplex) || @buffer.is_a?(Numo::DComplex)
-        a = complex ? Numo::DComplex.cast(a) : Numo::DFloat.cast(a)
-        b = complex ? Numo::DComplex.cast(b) : Numo::DFloat.cast(b)
-        @buffer.class.cast(a * (1.0 - delta) + b * delta)
+        complex ? Numo::DComplex.cast(data) : Numo::DFloat.cast(data)
+      end
+
+      # Returns the real part of complex delays (a delay is a time).
+      def real_delay(delay)
+        if delay.is_a?(Numo::SComplex) || delay.is_a?(Numo::DComplex) || delay.is_a?(Complex)
+          delay.real
+        else
+          delay
+        end
       end
     end
   end

@@ -1784,6 +1784,233 @@ VALUE ruby_number_to_freq(VALUE self, VALUE number, VALUE tune_note, VALUE tune_
 	return number;
 }
 
+// Delay lines (MB::Sound::DelayLine; the Ruby versions are
+// DelayLine#read_ruby and #feedback_ruby, and specs check that both give
+// exactly the same values).
+//
+// A delay line is a circular SFloat or SComplex buffer.  Delays are in
+// samples, counted back from each output sample's own input sample, and
+// clamped to 0..capacity - 2.  Fractional delays interpolate linearly
+// between the samples at floor(delay) and floor(delay) + 1, computed in
+// double precision and stored in single precision.
+
+// A per-sample control input (delay times, gains): a number, or an SFloat,
+// DFloat, or SComplex NArray with one value per sample.
+struct control_input {
+	double complex scalar;
+	const float *f;
+	const double *d;
+	const float complex *c;
+};
+
+// Reads a control input from *value (see struct control_input), raising an
+// error if an NArray is shorter than +length+.  Other NArray types are cast
+// to DFloat (stored back into *value, which the caller keeps alive).
+static void read_control_input(VALUE *value, size_t length, const char *name, struct control_input *ctl)
+{
+	ctl->scalar = 0;
+	ctl->f = NULL;
+	ctl->d = NULL;
+	ctl->c = NULL;
+
+	if (!rb_obj_is_kind_of(*value, numo_cNArray)) {
+		ctl->scalar = num_to_complex(*value);
+		return;
+	}
+
+	if (RNARRAY_NDIM(*value) != 1 || RNARRAY_SHAPE(*value)[0] < length) {
+		rb_raise(rb_eArgError, "%s must be a number or a 1D NArray at least as long as the buffer", name);
+	}
+
+	VALUE cls = CLASS_OF(*value);
+	if (cls != numo_cSFloat && cls != numo_cDFloat && cls != numo_cSComplex) {
+		*value = rb_funcall(numo_cDFloat, rb_intern("cast"), 1, *value);
+		cls = numo_cDFloat;
+	}
+	if (!RTEST(nary_check_contiguous(*value))) {
+		*value = nary_dup(*value);
+	}
+
+	void *ptr = nary_get_pointer_for_read(*value) + nary_get_offset(*value);
+	if (cls == numo_cSFloat) {
+		ctl->f = ptr;
+	} else if (cls == numo_cDFloat) {
+		ctl->d = ptr;
+	} else {
+		ctl->c = ptr;
+	}
+}
+
+static inline double complex control_value(const struct control_input *ctl, size_t i)
+{
+	if (ctl->f) {
+		return ctl->f[i];
+	} else if (ctl->d) {
+		return ctl->d[i];
+	} else if (ctl->c) {
+		return ctl->c[i];
+	}
+	return ctl->scalar;
+}
+
+// Returns the delay for sample +i+, clamped to 0..max.
+static inline double delay_value(const struct control_input *ctl, size_t i, double max)
+{
+	double d = creal(control_value(ctl, i));
+	if (d < 0) {
+		return 0;
+	}
+	return d > max ? max : d;
+}
+
+static inline long wrap_index(long i, long capacity)
+{
+	long r = i % capacity;
+	return r < 0 ? r + capacity : r;
+}
+
+// Checks that +buffer+ is a contiguous 1D SFloat or SComplex NArray long
+// enough to delay, returning true if it is complex.
+static _Bool check_delay_buffer(VALUE buffer, const char *name)
+{
+	VALUE cls = CLASS_OF(buffer);
+	if ((cls != numo_cSFloat && cls != numo_cSComplex) || RNARRAY_NDIM(buffer) != 1 || !RTEST(nary_check_contiguous(buffer))) {
+		rb_raise(rb_eArgError, "%s must be a contiguous 1D SFloat or SComplex NArray", name);
+	}
+	return cls == numo_cSComplex;
+}
+
+/*
+ * Reads RNARRAY_SHAPE(target)[0] samples from the delay line +buffer+ into
+ * +target+ (the same type), for a block written at +block_start+, delayed
+ * by +delay+ samples (a number or a per-sample NArray).  Returns +target+.
+ * See DelayLine#read.
+ */
+static VALUE ruby_delay_read(VALUE self, VALUE buffer, VALUE target, VALUE block_start, VALUE delay)
+{
+	_Bool complex_buffer = check_delay_buffer(buffer, "Buffer");
+	if (CLASS_OF(target) != CLASS_OF(buffer) || RNARRAY_NDIM(target) != 1 || !RTEST(nary_check_contiguous(target))) {
+		rb_raise(rb_eArgError, "Target must be a contiguous 1D NArray of the buffer's type");
+	}
+
+	long capacity = RNARRAY_SHAPE(buffer)[0];
+	if (capacity < 2) {
+		rb_raise(rb_eArgError, "The delay buffer must hold at least 2 samples");
+	}
+	size_t count = RNARRAY_SHAPE(target)[0];
+	long start = NUM2LONG(block_start);
+	double max = capacity - 2;
+
+	struct control_input ctl;
+	read_control_input(&delay, count, "Delay", &ctl);
+
+	void *in = nary_get_pointer_for_read(buffer) + nary_get_offset(buffer);
+	void *out = nary_get_pointer_for_write(target) + nary_get_offset(target);
+
+	for (size_t i = 0; i < count; i++) {
+		double d = delay_value(&ctl, i, max);
+		double dmin = floor(d);
+		double delta = d - dmin;
+		long idx1 = wrap_index(start + (long)i - (long)dmin, capacity);
+		long idx2 = wrap_index(start + (long)i - (long)dmin - 1, capacity);
+
+		if (complex_buffer) {
+			const float complex *buf = in;
+			double complex a = buf[idx1];
+			double complex b = buf[idx2];
+			((float complex *)out)[i] = a * (1.0 - delta) + b * delta;
+		} else {
+			const float *buf = in;
+			double a = buf[idx1];
+			double b = buf[idx2];
+			((float *)out)[i] = a * (1.0 - delta) + b * delta;
+		}
+	}
+
+	RB_GC_GUARD(delay);
+
+	return target;
+}
+
+/*
+ * Runs +input+ through a feedback loop one sample at a time: writes each
+ * input sample into the delay line +buffer+ at +write_offset+, reads the
+ * delayed sample (+delay+, a number or a per-sample NArray), adds
+ * +feedback+ (a number or a per-sample NArray) times the delayed sample to
+ * the written sample, and stores the delayed sample in +out+.  Returns the
+ * new write offset.  See DelayLine#feedback.
+ */
+static VALUE ruby_delay_feedback(VALUE self, VALUE buffer, VALUE write_offset, VALUE input, VALUE out, VALUE delay, VALUE feedback)
+{
+	_Bool complex_buffer = check_delay_buffer(buffer, "Buffer");
+	if (CLASS_OF(out) != CLASS_OF(buffer) || RNARRAY_NDIM(out) != 1 || !RTEST(nary_check_contiguous(out))) {
+		rb_raise(rb_eArgError, "Output must be a contiguous 1D NArray of the buffer's type");
+	}
+
+	long capacity = RNARRAY_SHAPE(buffer)[0];
+	if (capacity < 2) {
+		rb_raise(rb_eArgError, "The delay buffer must hold at least 2 samples");
+	}
+	size_t count = RNARRAY_SHAPE(out)[0];
+	long offset = NUM2LONG(write_offset);
+	double max = capacity - 2;
+
+	if (complex_buffer) {
+		ensure_scomplex(&input);
+	} else {
+		ensure_sfloat(&input);
+	}
+	if (RNARRAY_SHAPE(input)[0] < count) {
+		rb_raise(rb_eArgError, "Input must be at least as long as the output");
+	}
+
+	struct control_input delays, gains;
+	read_control_input(&delay, count, "Delay", &delays);
+	read_control_input(&feedback, count, "Feedback", &gains);
+	if (!complex_buffer && (gains.c || cimag(gains.scalar) != 0)) {
+		rb_raise(rb_eArgError, "Complex feedback needs a complex buffer");
+	}
+
+	void *in = nary_get_pointer_for_read(input) + nary_get_offset(input);
+	void *buf = nary_get_pointer_for_write(buffer) + nary_get_offset(buffer);
+	void *outp = nary_get_pointer_for_write(out) + nary_get_offset(out);
+
+	for (size_t i = 0; i < count; i++) {
+		double d = delay_value(&delays, i, max);
+		long w = wrap_index(offset + (long)i, capacity);
+		double dmin = floor(d);
+		long idx1 = wrap_index(w - (long)dmin, capacity);
+
+		if (complex_buffer) {
+			float complex *b = buf;
+			b[w] = ((const float complex *)in)[i];
+			double complex v = b[idx1];
+			if (d != dmin) {
+				double delta = d - dmin;
+				v = v * (1.0 - delta) + (double complex)b[wrap_index(w - (long)dmin - 1, capacity)] * delta;
+			}
+			b[w] = (double complex)b[w] + control_value(&gains, i) * v;
+			((float complex *)outp)[i] = v;
+		} else {
+			float *b = buf;
+			b[w] = ((const float *)in)[i];
+			double v = b[idx1];
+			if (d != dmin) {
+				double delta = d - dmin;
+				v = v * (1.0 - delta) + (double)b[wrap_index(w - (long)dmin - 1, capacity)] * delta;
+			}
+			b[w] = (double)b[w] + creal(control_value(&gains, i)) * v;
+			((float *)outp)[i] = v;
+		}
+	}
+
+	RB_GC_GUARD(input);
+	RB_GC_GUARD(delay);
+	RB_GC_GUARD(feedback);
+
+	return LONG2NUM(wrap_index(offset + (long)count, capacity));
+}
+
 void Init_fast_sound(void)
 {
 	VALUE mb = rb_define_module("MB");
@@ -1807,6 +2034,8 @@ void Init_fast_sound(void)
 	rb_define_module_function(fast_sound, "phasor", ruby_phasor, 6);
 	rb_define_module_function(fast_sound, "shape", ruby_shape, 7);
 	rb_define_module_function(fast_sound, "oscillate", ruby_oscillate, 9);
+	rb_define_module_function(fast_sound, "delay_read", ruby_delay_read, 4);
+	rb_define_module_function(fast_sound, "delay_feedback", ruby_delay_feedback, 6);
 
 	// Filtering functions
 	rb_define_module_function(fast_sound, "biquad", ruby_biquad, 10);

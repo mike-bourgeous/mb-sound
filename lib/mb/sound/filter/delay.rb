@@ -202,7 +202,10 @@ module MB
           delays = delay_buffer(data.length)
           return nil if delays.equal?(:end)
 
-          if delays
+          if delays.is_a?(Numeric)
+            @min_delay_samples = @max_delay_samples = @last_delay_samples = delays
+            max_delay = delays
+          elsif delays
             data = data[0...delays.length] if data.length > delays.length
             delays = delays[0...data.length] if delays.length > data.length
             @min_delay_samples, @max_delay_samples = delays.minmax
@@ -248,15 +251,28 @@ module MB
         private
 
         # Returns the delay in samples for each of +count+ samples (smoothed
-        # if smoothing is on), nil for a constant unsmoothed delay, or :end if
-        # the delay time node ended.
+        # if smoothing is on), a Numeric delay for every sample (nil for the
+        # constant #delay_samples), or :end if the delay time node ended.
+        #
+        # Once the default smoothing (a LinearFollower) has reached a
+        # constant target, the filter is skipped (it would output the
+        # target unchanged), so settled delays read as constant delays.
         def delay_buffer(count)
+          settled = @smoothing && @filter.is_a?(MB::Sound::Filter::LinearFollower)
+
           if @delay_samples.respond_to?(:sample)
             # TODO: maybe upstream sampling should be moved to SampleWrapper
             # and we should use a dynamic_process method for processing with
             # multiple inputs
             delays = @delay_samples.sample(count)
             return :end if delays.nil?
+
+            if settled
+              min, max = delays.minmax
+              return min.to_f if min == max && min == @filter.peek
+            end
+          elsif settled && @filter.peek == @delay_samples
+            return nil
           elsif @smoothing
             @filter_buf = Numo::SFloat.zeros(count) if @filter_buf.length < count
             delays = @filter_buf[0...count].fill(@delay_samples)
