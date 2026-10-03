@@ -15,6 +15,7 @@ require_relative 'sound/numeric_sound_mixins'
 require_relative 'fast_sound'
 require_relative 'sound/fast_resample'
 require_relative 'sound/fast_wavetable'
+require_relative 'sound/fast_delay'
 
 require_relative 'sound/version'
 require_relative 'sound/tuning'
@@ -132,6 +133,7 @@ end
 
 require_relative 'sound/buffer_helper'
 require_relative 'sound/circular_buffer'
+require_relative 'sound/delay_line'
 require_relative 'sound/wavetable'
 require_relative 'sound/graph_node'
 require_relative 'sound/adsr_envelope'
