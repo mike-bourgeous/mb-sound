@@ -11,7 +11,11 @@ module MB
         # The default delay-time smoothing rate in seconds per second.
         DEFAULT_SMOOTHING_RATE = 0.5
 
-        attr_reader :delay, :delay_samples, :smoothing, :smooth_limit
+        # The delay time as given (seconds, a Length such as 5.samples, a
+        # Duration, or a graph node; see #delay=).
+        attr_reader :delay
+
+        attr_reader :smoothing, :smooth_limit
 
         attr_reader :write_offset, :read_offset
 
@@ -27,10 +31,14 @@ module MB
         # MB::Sound::DelayLine::INTERPOLATION).
         attr_reader :interpolation
 
-        # Initializes a single-channel delay with a given +:delay+ in seconds,
-        # based on the +:sample_rate+..  The +:delay_buffer_size+ sets the
-        # initial buffer size in samples; the buffer grows (keeping its
-        # audio) if a longer delay is needed, but growing allocates memory.
+        # Initializes a single-channel delay with a +:delay+ time: a number of
+        # seconds, a length (`5.samples`, `250.ms`, `3.n16`), or a graph node
+        # (see #delay=).  The time keeps its unit when the sample rate
+        # changes (e.g. inside GraphNode#oversample, 5.samples stays 5
+        # samples at the new rate and 0.01 seconds stays 0.01 seconds).  The
+        # +:delay_buffer_size+ sets the initial buffer size in samples; the
+        # buffer grows (keeping its audio) if a longer delay is needed, but
+        # growing allocates memory.
         #
         # If +:smoothing+ is true (the default), then the delay time will be
         # adjusted slowly to prevent sudden jumps or clicks in the output.  If
@@ -47,17 +55,17 @@ module MB
         # :cubic, or :sinc (see MB::Sound::DelayLine).
         def initialize(delay: 0, sample_rate: 48000, delay_buffer_size: 48000, smoothing: true, feedback: false, wet: 1, dry: 0, interpolation: MB::Sound::DelayLine::DEFAULT_INTERPOLATION)
           @sample_rate = sample_rate.to_f
+          @smooth_limit = nil
+          @filter = nil
 
-          if delay.is_a?(Numeric)
-            delay_buffer_size = 1.1 * delay * @sample_rate if delay_buffer_size < 1.1 * delay * @sample_rate
-          end
+          self.delay = delay
+
+          longest = @time.max_samples(@sample_rate)
+          delay_buffer_size = 1.1 * longest if longest && delay_buffer_size < 1.1 * longest
 
           @line = MB::Sound::DelayLine.new(delay_buffer_size)
           self.interpolation = interpolation
           @read_state = []
-          @delay = 0
-          @delay_samples = 0
-          @smooth_limit = nil
 
           @filter_buf = Numo::SFloat.zeros(1)
 
@@ -65,7 +73,6 @@ module MB
           self.dry = dry
           self.wet = wet
 
-          self.delay = delay
           self.smoothing = smoothing
         end
 
@@ -82,8 +89,13 @@ module MB
         # Where a constant delay reads its next output sample in the delay
         # buffer.
         def read_offset
-          delay = @delay_samples.is_a?(Numeric) ? @delay_samples : @last_delay_samples.to_f.round
-          (@line.write_offset - delay) % @line.capacity
+          (@line.write_offset - @last_delay_samples.to_f.round) % @line.capacity
+        end
+
+        # The delay in samples at the current sample rate: a number, or the
+        # graph node for a delay that changes every sample.
+        def delay_samples
+          @time.node? ? @time.node : @time.constant_samples(@sample_rate)
         end
 
         # Fills the entire delay line with the given value.  Future calls to
@@ -102,24 +114,22 @@ module MB
           # TODO: Support resetting with a signal node without consuming a
           # sample from the signal node?  Maybe set a flag that triggers a
           # reset in #sample?
-          samples ||= @delay_samples if @delay_samples.is_a?(Numeric)
-          @filter.reset(samples) if samples
+          samples ||= @time.constant_samples(@sample_rate) unless @time.node?
+          @filter.reset(samples) if samples && @filter
         end
 
         # Changes the sample rate of the delay, cascading the rate change to
-        # any upstream sources and recomputing delay values in samples.
+        # any upstream sources.  The delay time keeps its unit (see #delay=),
+        # so nothing needs rebuilding.
         def sample_rate=(new_rate)
-          raise "Filter #{@filter} does not support changing sample rate" if @filter && !@filter.respond_to?(:at_rate)
+          raise "Filter #{@filter} does not support changing sample rate" if @filter && @smoothing_setting.respond_to?(:process) && !@filter.respond_to?(:at_rate)
+
+          old_rate = @sample_rate
 
           super
 
-          @filter = @filter&.at_rate(new_rate)
-
-          if @delay_seconds_orig
-            self.delay = @delay_seconds_orig
-          elsif @delay_samples
-            self.delay_samples = @delay_samples
-          end
+          @filter = MB::Sound::DelayLine.rescale_smoother(@filter, @smoothing_setting, old_rate, @sample_rate)
+          @smooth_limit = @sample_rate * (@smoothing_setting.is_a?(Numeric) ? @smoothing_setting : DEFAULT_SMOOTHING_RATE) if @smooth_limit
 
           self
         end
@@ -139,6 +149,7 @@ module MB
         # See #reset_delay.
         def smoothing=(smoothing)
           @smoothing = !!smoothing
+          @smoothing_setting = smoothing
 
           if smoothing.respond_to?(:process) && smoothing.respond_to?(:reset)
             check_rate(smoothing, 'smoothing')
@@ -155,35 +166,38 @@ module MB
           reset_delay
         end
 
-        # Sets the delay time in +samples+, regardless of sample rate.  The
-        # number of +samples+ will be rounded to the closest Integer.
-        def delay_samples=(samples)
-          @delay_seconds_orig = nil
-          if samples.respond_to?(:sample)
-            # TODO: use dynamic_process instead of managing the upstream source here
-            samples = samples.get_sampler
-            check_rate(samples, 'delay_samples')
-            @delay_samples = samples
-            @delay = samples / @sample_rate
-            @min_delay_samples = 0
-            @max_delay_samples = 0
-            @last_delay_samples = 0
+        # Sets the delay time: a number of seconds, a length (`5.samples`,
+        # `250.ms`, `0.01.seconds`), a Duration that follows the tempo
+        # (`3.n16`), or a graph node giving the time every sample (seconds,
+        # or samples with `node.samples`; musical-time nodes such as
+        # `2.bars.lfo.at(3.n16..5.n16)` follow the tempo).  The time keeps
+        # its unit and converts to samples as the delay runs, at the sample
+        # rate of that moment.  Fractional sample counts are kept (and
+        # interpolated); counts within a billionth of a whole sample snap to
+        # it (see MB::Sound::Length.snap).  Smoothing glides to the new time.
+        def delay=(time)
+          @delay = time
+          @time = MB::Sound::Length::Source.new(time)
+          check_rate(@time.node, 'delay') if @time.node?
+
+          if @time.node?
+            @min_delay_samples = @max_delay_samples = @last_delay_samples = 0
           else
-            samples = samples.round
-            @delay_samples = samples
-            @min_delay_samples = @delay_samples
-            @max_delay_samples = @delay_samples
-            @last_delay_samples = @delay_samples
-            @delay = samples.to_f / @sample_rate
+            @min_delay_samples = @max_delay_samples = @last_delay_samples = @time.constant_samples(@sample_rate)
+          end
+
+          # Start a tempo-synced delay at its time (at the current tempo, and
+          # again when a Session starts it) instead of gliding up from zero
+          if (tempo = @time.tempo_node)
+            reset_delay(tempo.value * @sample_rate)
+            tempo.on_start { |n| reset_delay(n.value * @sample_rate) }
           end
         end
 
-        # Sets the delay time in +seconds+, which is converted to a number of
-        # samples using the sample rate.
-        def delay=(seconds)
-          check_rate(seconds, 'delay_seconds')
-          self.delay_samples = seconds * @sample_rate
-          @delay_seconds_orig = seconds
+        # Sets the delay time in samples at the delay's sample rate (a number
+        # or a graph node); the same as `delay = samples.samples`.
+        def delay_samples=(samples)
+          self.delay = samples.is_a?(MB::Sound::Length) ? samples : MB::Sound::Length::Samples.new(samples)
         end
 
         # Sets the interpolation mode for fractional delays (:linear, :cubic,
@@ -222,7 +236,7 @@ module MB
         # delay (specifically for a delay this is the value given to
         # #delay_samples=).  See GraphNode#sources.
         def sources
-          { delay_samples: @delay_samples }.merge(
+          (@time.node? ? { delay: @time.node } : {}).merge(
             { feedback: @feedback, wet: @wet, dry: @dry }.select { |_, v| v.respond_to?(:sample) }
           )
         end
@@ -239,14 +253,12 @@ module MB
           if delays.is_a?(Numeric)
             @min_delay_samples = @max_delay_samples = @last_delay_samples = delays
             max_delay = delays
-          elsif delays
+          else
             data = data[0...delays.length] if data.length > delays.length
             delays = delays[0...data.length] if delays.length > data.length
             @min_delay_samples, @max_delay_samples = delays.minmax
             @last_delay_samples = delays[-1]
             max_delay = @max_delay_samples
-          else
-            max_delay = @delay_samples
           end
 
           feedback = control_values(@feedback, data.length)
@@ -264,10 +276,10 @@ module MB
           @line.prepare(data.length, max_delay, complex ? Numo::SComplex : data.class)
 
           if feedback && feedback != 0
-            delayed = @line.feedback(data, delays || @delay_samples, feedback.is_a?(Numo::NArray) ? feedback[0...length] : feedback, interpolation: @interpolation, state: @read_state)
+            delayed = @line.feedback(data, delays, feedback.is_a?(Numo::NArray) ? feedback[0...length] : feedback, interpolation: @interpolation, state: @read_state)
           else
             @line.write(data)
-            delayed = @line.read(data.length, delays || @delay_samples, interpolation: @interpolation, state: @read_state)
+            delayed = @line.read(data.length, delays, interpolation: @interpolation, state: @read_state)
           end
 
           result = wet.is_a?(Numo::NArray) ? delayed * wet[0...length] : wet * delayed
@@ -328,8 +340,8 @@ module MB
         end
 
         # Returns the delay in samples for each of +count+ samples (smoothed
-        # if smoothing is on), a Numeric delay for every sample (nil for the
-        # constant #delay_samples), or :end if the delay time node ended.
+        # if smoothing is on), a Numeric delay for every sample, or :end if
+        # the delay time node ended.
         #
         # Once the default smoothing (a LinearFollower) has reached a
         # constant target, the filter is skipped (it would output the
@@ -337,24 +349,23 @@ module MB
         def delay_buffer(count)
           settled = @smoothing && @filter.is_a?(MB::Sound::Filter::LinearFollower)
 
-          if @delay_samples.respond_to?(:sample)
+          if @time.node?
             # TODO: maybe upstream sampling should be moved to SampleWrapper
             # and we should use a dynamic_process method for processing with
             # multiple inputs
-            delays = @delay_samples.sample(count)
+            delays = @time.samples(count, @sample_rate)
             return :end if delays.nil?
 
             if settled
               min, max = delays.minmax
               return min.to_f if min == max && min == @filter.peek
             end
-          elsif settled && @filter.peek == @delay_samples
-            return nil
-          elsif @smoothing
-            @filter_buf = Numo::SFloat.zeros(count) if @filter_buf.length < count
-            delays = @filter_buf[0...count].fill(@delay_samples)
           else
-            return nil
+            target = @time.constant_samples(@sample_rate)
+            return target if !@smoothing || (settled && @filter.peek == target)
+
+            @filter_buf = Numo::SFloat.zeros(count) if @filter_buf.length < count
+            delays = @filter_buf[0...count].fill(target)
           end
 
           delays = @filter.process(delays.inplace).not_inplace! if @smoothing

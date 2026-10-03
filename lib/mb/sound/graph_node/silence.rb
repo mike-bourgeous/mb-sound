@@ -13,15 +13,18 @@ module MB
         include GraphNode
         include SampleRateHelper
 
-        # The length in seconds.
-        attr_reader :seconds
+        # The length as given: seconds (Numeric), a Length (e.g. 480.samples),
+        # or a Duration (converted at the current tempo).
+        attr_reader :length
 
-        def initialize(seconds, sample_rate: 48000)
-          raise ArgumentError, "Silence needs a length in seconds >= 0 (got #{seconds.inspect})" unless seconds.is_a?(Numeric) && seconds >= 0
+        def initialize(length, sample_rate: 48000)
+          fixed = length.is_a?(Numeric) || (length.is_a?(MB::Sound::Length) && length.fixed?)
+          raise ArgumentError, "Silence needs a length >= 0: seconds or a Length (got #{length.inspect})" unless fixed && length.to_r >= 0
 
-          @seconds = seconds
+          @length = length
+          @samples_unit = length.is_a?(MB::Sound::Length::Samples)
           @sample_rate = sample_rate.to_f
-          @remaining = (seconds * @sample_rate).round
+          @remaining = MB::Sound::Length.samples(length, sample_rate: @sample_rate).round
           @buf = nil
           @node_type_name = 'Silence'
         end
@@ -35,9 +38,15 @@ module MB
           @buf.fill(0)
         end
 
-        # Changes the sample rate, keeping the remaining length in seconds.
+        # The length in seconds at the current sample rate.
+        def seconds
+          MB::Sound::Length.seconds(@length, sample_rate: @sample_rate)
+        end
+
+        # Changes the sample rate, keeping the remaining length in seconds (a
+        # length in samples keeps its sample count).
         def sample_rate=(rate)
-          @remaining = (@remaining * rate.to_f / @sample_rate).round
+          @remaining = (@remaining * rate.to_f / @sample_rate).round unless @samples_unit
           super
         end
 

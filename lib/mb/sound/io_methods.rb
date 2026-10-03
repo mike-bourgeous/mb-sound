@@ -124,7 +124,7 @@ module MB
         data = [data] if data.is_a?(GraphNode)
 
         if data.is_a?(Array) && data.all?(GraphNode)
-          max_length ||= PlaybackMethods::MAX_RENDER_SECONDS
+          max_length = max_length ? Length.seconds(max_length, sample_rate: sample_rate) : PlaybackMethods::MAX_RENDER_SECONDS
           buffer_size = data.map(&:graph_buffer_size).compact.min || 800
 
           output = file_output(

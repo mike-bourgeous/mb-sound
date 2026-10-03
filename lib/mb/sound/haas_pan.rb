@@ -39,10 +39,12 @@ module MB
         @right_delay.reset_delay
       end
 
-      # Sets the delay time in +samples+, rounded to the nearest Integer,
-      # regardless of sample rate.  Positive values delay the right channel,
-      # negative values delay the left channel.
+      # Sets the delay time in +samples+ (a number or a Length::Samples),
+      # rounded to the nearest Integer, regardless of sample rate.  Positive
+      # values delay the right channel, negative values delay the left
+      # channel.
       def delay_samples=(samples)
+        samples = samples.value if samples.is_a?(MB::Sound::Length::Samples)
         @delay_samples = samples.round
         @delay = @delay_samples.to_f / @sample_rate
 
@@ -55,16 +57,16 @@ module MB
         end
       end
 
-      # Sets the delay time in +seconds+, based on sample rate.  Delay time
-      # will be rounded to the nearest sample.  Positive values delay the right
-      # channel, negative values delay the left channel.
-      def delay=(seconds)
-        self.delay_samples = seconds * @sample_rate
+      # Sets the delay time: seconds or any length (e.g. `-0.5.ms`,
+      # `-24.samples`), rounded to the nearest sample.  Positive values delay
+      # the right channel, negative values delay the left channel.
+      def delay=(time)
+        self.delay_samples = MB::Sound::Length.samples(time, sample_rate: @sample_rate)
       end
 
       # Returns the delay applied to the left channel, in seconds.
       def left_delay
-        @left_delay.delay
+        @left_delay.delay_samples / @sample_rate
       end
 
       # Returns the delay applied to the left channel, in samples.
@@ -74,7 +76,7 @@ module MB
 
       # Returns the delay applied to the right channel, in seconds.
       def right_delay
-        @right_delay.delay
+        @right_delay.delay_samples / @sample_rate
       end
 
       # Returns the delay applied to the right channel, in samples.

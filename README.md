@@ -60,7 +60,7 @@ play (
 ).softclip(0, 0.8)
 
 # Simulating a PWM oscillator with a clipped triangle wave
-square_lfo = 0.6.hz.square.at(0.5..6.5).smooth(seconds: 0.15)
+square_lfo = 0.6.hz.square.at(0.5..6.5).smooth(0.15)
 play 0.5 * (400.hz.triangle.at(10) + square_lfo).clip(-0.2, 0.2).filter(50.hz.highpass)
 
 # Saving a tone to an audio file

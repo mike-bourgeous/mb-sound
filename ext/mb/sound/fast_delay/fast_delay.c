@@ -127,11 +127,12 @@ static inline double complex control_value(const struct control_input *ctl, size
 	return ctl->scalar;
 }
 
-// Returns the delay for sample +i+, clamped to 0..max.
+// Returns the delay for sample +i+, clamped to 0..max (NaN reads as 0, so
+// it can't become an out-of-range table or buffer index).
 static inline double delay_value(const struct control_input *ctl, size_t i, double max)
 {
 	double d = creal(control_value(ctl, i));
-	if (d < 0) {
+	if (!(d >= 0)) {
 		return 0;
 	}
 	return d > max ? max : d;
@@ -343,6 +344,35 @@ static VALUE ruby_delay_read(VALUE self, VALUE buffer, VALUE target, VALUE block
 
 	void *in = nary_get_pointer_for_read(buffer) + nary_get_offset(buffer);
 	void *out = nary_get_pointer_for_write(target) + nary_get_offset(target);
+
+	// A constant whole-sample delay reads stored samples exactly in every
+	// mode (sinc reads at 1x for a constant delay), so copy them in at most
+	// two runs around the end of the buffer
+	if (count > 0 && !(ctl.f || ctl.d || ctl.c)) {
+		double d = delay_value(&ctl, 0, max);
+		if (d == floor(d)) {
+			size_t elem = complex_buffer ? sizeof(float complex) : sizeof(float);
+			long src = wrap_index(start - (long)d, capacity);
+			size_t done = 0;
+			while (done < count) {
+				size_t run = (size_t)(capacity - src);
+				if (run > count - done) {
+					run = count - done;
+				}
+				memcpy((char *)out + done * elem, (const char *)in + (size_t)src * elem, run * elem);
+				done += run;
+				src = 0;
+			}
+
+			if (RTEST(state)) {
+				rb_ary_store(state, 0, DBL2NUM(d));
+			}
+
+			RB_GC_GUARD(delay);
+			RB_GC_GUARD(kernel);
+			return target;
+		}
+	}
 
 	for (size_t i = 0; i < count; i++) {
 		double d = delay_value(&ctl, i, max);

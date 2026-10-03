@@ -21,6 +21,23 @@ RSpec.describe('MB::Sound::FastDelay', :aggregate_failures) do
       expect(target.to_a).to eq([8, 9, 10, 11])
     end
 
+    it 'copies constant whole-sample delays exactly around the end of the buffer in every mode' do
+      [Numo::SFloat, Numo::SComplex].each do |cls|
+        buf = cls.new(128).seq # big enough for sinc margins
+        buf = buf * Complex(1, -2) if cls == Numo::SComplex
+        { 0 => nil, 1 => nil, 2 => MB::Sound::DelayLine::SINC_KERNEL }.each do |mode, kernel|
+          [0, 3, 30].each do |delay|
+            target = cls.zeros(40)
+            state = [nil]
+            MB::Sound::FastDelay.read(buf, target, 110, delay, mode, kernel, state)
+            expected = Array.new(40) { |i| buf[(110 + i - delay) % 128] }
+            expect(target.to_a).to eq(expected), "#{cls} mode #{mode} delay #{delay}"
+            expect(state[0]).to eq(delay.to_f)
+          end
+        end
+      end
+    end
+
     it 'rejects buffers and targets of the wrong type' do
       expect { MB::Sound::FastDelay.read(Numo::DFloat.zeros(64), Numo::DFloat.zeros(4), 0, 1, 0, nil, nil) }.to raise_error(ArgumentError, /SFloat or SComplex/)
       expect { MB::Sound::FastDelay.read(buffer, Numo::SComplex.zeros(4), 0, 1, 0, nil, nil) }.to raise_error(ArgumentError, /buffer's type/)

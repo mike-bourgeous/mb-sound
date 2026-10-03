@@ -110,7 +110,7 @@ RSpec.describe(MB::Sound::Session::Master) do
     end
 
     it 'lets the old chain spill over its tail by default' do
-      session.master(at: :now) { |m| m.delay(samples: 4000) }
+      session.master(at: :now) { |m| m.delay(4000.samples) }
       run(8000)
 
       session.master(at: 2400r / 96000 + transport.position) { |m| m * 1 }
@@ -137,7 +137,7 @@ RSpec.describe(MB::Sound::Session::Master) do
     end
 
     it 'cuts over without a tail given a zero fade' do
-      session.master(at: :now) { |m| m.delay(samples: 4000) }
+      session.master(at: :now) { |m| m.delay(4000.samples) }
       run(8000)
       session.master(at: :now, fade: 0) { |m| m * 1 }
       expect(run(8000)[0].to_a.uniq).to eq([1])
@@ -165,7 +165,7 @@ RSpec.describe(MB::Sound::Session::Master) do
         session.instance_variable_set(:@load, 0.9)
         m.call(*args, **kw)
       end
-      session.master(at: :now) { |m| m.delay(samples: 4000) }
+      session.master(at: :now) { |m| m.delay(4000.samples) }
       run(8000)
 
       expect(session).to receive(:warn).with(/busy \(90%\).*without spillover/)
@@ -177,7 +177,7 @@ RSpec.describe(MB::Sound::Session::Master) do
   describe 'tails' do
     it 'keeps processing while idle so tails ring out' do
       session.add(1.constant.until(800 / 48000.0))
-      session.master(at: :now) { |m| m.delay(samples: 1600) }
+      session.master(at: :now) { |m| m.delay(1600.samples) }
       data = run(4000)[0]
       expect(data[1600...2400].to_a.uniq).to eq([1])
       expect(transport.position).to eq(1600r / 96000)
@@ -185,7 +185,7 @@ RSpec.describe(MB::Sound::Session::Master) do
 
     it 'caps a spillover tail that never goes quiet' do
       session.add(1.constant)
-      session.master(at: :now) { |m| m.delay(samples: 800, feedback: 0.9999, wet: 0.001) }
+      session.master(at: :now) { |m| m.delay(800.samples, feedback: 0.9999, wet: 0.001) }
       run(1600)
       session.master(at: :now) { |m| m * 1 }
       run(48000 * 10)
@@ -218,7 +218,7 @@ RSpec.describe(MB::Sound::Session::Master) do
   describe '#reset_master' do
     it 'rebuilds the chain, clearing tails' do
       session.add(1.constant.until(800 / 48000.0))
-      session.master(at: :now) { |m| m.delay(samples: 1600) * 2 }
+      session.master(at: :now) { |m| m.delay(1600.samples) * 2 }
       run(800)
       session.reset_master
       expect(run(4000)[0].to_a.uniq).to eq([0])

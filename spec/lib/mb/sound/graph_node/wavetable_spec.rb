@@ -90,6 +90,19 @@ RSpec.describe(MB::Sound::GraphNode::Wavetable) do
   end
 
   describe '#sample' do
+    it 'shares its phase and number sources with other consumers (get_sampler)' do
+      ramp = Numo::SFloat.linspace(-1, 1, 3200)
+      phase = MB::Sound::ArrayInput.new(data: [ramp])
+      wt = MB::Sound::GraphNode::Wavetable.new(wavetable: data, number: 0.constant, phase: phase, sample_rate: 48000, lookup: :linear, wrap: :wrap)
+
+      # The phase also feeds another part of the graph; each buffer should
+      # advance it once, not once per consumer
+      graph = wt * 0.0 + phase * 1.0
+      4.times do |i|
+        expect(graph.sample(800)).to all_be_within(1e-6).of_array(ramp[(i * 800)...((i + 1) * 800)])
+      end
+    end
+
     it 'treats the upstream data as the phase source' do
       phase = MB::Sound::ArrayInput.new(data: [Numo::SFloat.linspace(0, 12.0/5.0, 13) * 2 - 1])
       number = 0.constant

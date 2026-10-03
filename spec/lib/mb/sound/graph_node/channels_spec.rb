@@ -55,9 +55,15 @@ RSpec.describe(MB::Sound::GraphNode::Channels) do
     end
 
     it 'rejects unknown pan laws and out-of-range positions' do
-      expect { 1.constant.pan(0, law: :linear) }.to raise_error(ArgumentError, /pan law/)
-      expect { 1.constant.pan(2) }.to raise_error(ArgumentError, /-1 to 1/)
-      expect { bundle.pan(2) }.to raise_error(ArgumentError, /-1 to 1/)
+      expect { 1.constant.pan(0, law: :sideways) }.to raise_error(ArgumentError, /law/)
+      expect { 1.constant.pan(2) }.to raise_error(ArgumentError, /position must be in -1..1/)
+      expect { bundle.pan(2) }.to raise_error(ArgumentError, /position must be in -1..1/)
+    end
+
+    it 'pans with the linear and -4.5 dB laws' do
+      expect(firsts(1.constant.pan(0, law: :linear))).to eq([0.5, 0.5])
+      expect(firsts(1.constant.pan(0, law: :minus_4_5db))).to eq([0.5 ** 0.75, 0.5 ** 0.75].map { |v| v.round(4) })
+      expect(firsts(1.constant.pan(-0.5, law: :linear))).to eq([0.75, 0.25])
     end
 
     it 'balances stereo bundles and pans one-channel bundles' do
@@ -151,5 +157,19 @@ RSpec.describe(MB::Sound::GraphNode::Channels) do
     expect { MB::Sound.play(bundle.map { |c| c.until(0.01) }.channels, quiet: true) }.not_to raise_error
   ensure
     ENV.delete('OUTPUT_TYPE')
+  end
+
+  it 'has every channel conversion that single nodes have' do
+    missing = MB::Sound::GraphNode::ChannelMethods.public_instance_methods(false).reject { |m|
+      MB::Sound::GraphNode::Channels.public_method_defined?(m)
+    }
+    expect(missing).to eq([])
+  end
+
+  it 'mixes a bundle with a matrix' do
+    b = MB::Sound.stereo(1.constant, 2.constant)
+    l, r = b.matrix([[1, 0.5], [0.5, 1]]).outputs.map { |o| o.sample(2)[0] }
+    expect([l, r]).to eq([2, 2.5])
+    expect(b.matrix([[1, 1]]).sample(2).to_a).to eq([3, 3])
   end
 end

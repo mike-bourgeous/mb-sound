@@ -9,17 +9,14 @@
 # (JACK), CC 1 (the mod wheel) sweeps the LFO rate, depth, and dry level
 # together.  Run with --help for all options.
 #
-# Delay smoothing (--smoothing) behaves differently with oversampling; use
-# --oversample 1 for the pitch effects of the retired old_flanger.rb.
-#
 # Examples:
 #     $0 --dry 0.5 --delay 0.002 --feedback 0.85 --hz 0.2 --depth 0.5 sounds/drums.flac
 #
 # Cool effects (omit the filename for live input):
-#     # Arpeggio (--oversample 1 keeps the pitch effects of the old flanger)
-#     $0 --oversample 1 --smoothing 0.5 --delay 0.035 --feedback 0 --hz 3 --depth 2 sounds/transient_synth.flac
+#     # Arpeggio
+#     $0 --smoothing 0.5 --delay 0.035 --feedback 0 --hz 3 --depth 2 sounds/transient_synth.flac
 #     # Slow arp
-#     $0 --oversample 1 --smoothing 1.5 --delay 0.15 --feedback 0 --hz 3 --depth 2 sounds/transient_synth.flac
+#     $0 --smoothing 1.5 --delay 0.15 --feedback 0 --hz 3 --depth 2 sounds/transient_synth.flac
 #     # Metal drums
 #     $0 --smoothing 12.1 --wet 1 --dry 0 --delay 0.02 --feedback -0.3 --hz 343 --depth -6 sounds/drums.flac
 #     # Water drums
@@ -50,10 +47,19 @@ MB::Sound.effect_script(
   dry: [1.0, 'Dry (input) level'],
   wet: [1.0, 'Wet (flanged) level'],
   spread: [180.0, 'LFO phase spread across channels in degrees'],
-  oversample: [2.0, 'Oversampling factor'], # FIXME: oversampling changes delay-time smoothing and/or other behavior
+  oversample: [2.0, 'Oversampling factor'],
 ) { |input, p|
-  sample_rate = 48000
-  internal_bufsize = (24 * [1, p.oversample].max).ceil
+  # Delays below are in samples at the oversampled processing rate
+  sample_rate = 48000 * p.oversample
+
+  # The feedback comes back one internal buffer late (compensated below), so
+  # the buffer must fit inside the shortest delay (the MIDI mod wheel can
+  # double the depth); larger buffers are much faster (~45% of realtime with
+  # 512 samples vs. ~250% with 24, both at 1x).
+  shortest_delay = p.delay * sample_rate * (1 - p.depth.abs)
+  scale = [1, p.oversample].max
+  internal_bufsize = [512, 256, 128, 64, 32].map { |n| (n * scale).ceil }.find { |n| n <= shortest_delay } ||
+    (24 * scale).ceil
   channels = input.channel_count
 
   # FIXME: This doesn't work with a filter like 1000.hz.lowpass1p; maybe there's overshoot or something?
@@ -81,7 +87,7 @@ MB::Sound.effect_script(
     lfo = lfo_freq.tone.with_phase(phase).send(p.wave).at(0..1)
 
     # Delay in samples
-    samples = (delayconst * (sample_rate * p.oversample)).clip(0, nil).named('Delay in samples')
+    samples = (delayconst * sample_rate).clip(0, nil).named('Delay in samples')
 
     # Delay LFO
     lfo_scale = depthconst * samples
@@ -89,14 +95,14 @@ MB::Sound.effect_script(
     lfo_mod = (lfo * lfo_scale + lfo_base).clip(0, nil)
 
     # Split input into original and first delay
-    inp_delayed = inp.delay(samples: lfo_mod, smoothing: delay_smoothing)
+    inp_delayed = inp.delay(lfo_mod.samples, smoothing: delay_smoothing)
 
     # Feedback injector and feedback delay (compensating for buffer size)
     # TODO: better way of injecting an NArray into a node chain than
     # constant.proc; e.g. maybe a node that takes a pointer to a buffer and
     # always returns the buffer; or better way of just doing feedback
     d_fb = (lfo_mod - internal_bufsize).clip(0, nil)
-    b = 0.constant.proc { a }.delay(samples: d_fb, smoothing: delay_smoothing2)
+    b = 0.constant.proc { a }.delay(d_fb.samples, smoothing: delay_smoothing2)
 
     # Effected output, with a spy to save feedback buffer
     wet = (p.feedback * b - inp_delayed).softclip(0.85, 0.95).spy { |z| a[] = z if z && z.length == a.length }

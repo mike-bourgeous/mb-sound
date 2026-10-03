@@ -17,7 +17,7 @@ RSpec.describe(MB::Sound::Filter::Delay, :aggregate_failures) do
 
   it 'can be created by DSL methods' do
     expect(100.hz.delay(seconds: 0.01).base_filter).to be_a(MB::Sound::Filter::Delay)
-    expect(100.hz.delay(samples: 5).base_filter).to be_a(MB::Sound::Filter::Delay)
+    expect(100.hz.delay(5.samples).base_filter).to be_a(MB::Sound::Filter::Delay)
   end
 
   it 'smooths the delay when smoothing is enabled' do
@@ -55,7 +55,7 @@ RSpec.describe(MB::Sound::Filter::Delay, :aggregate_failures) do
 
   describe 'min_, max_, and last_delay_samples' do
     it 'returns the correct range of values from a delay buffer' do
-      n = 100.hz.delay(samples: 81.hz.triangle.at(10..20), smoothing: false)
+      n = 100.hz.delay(81.hz.triangle.at(10..20).samples, smoothing: false)
       n.sample(1000)
       d = n.base_filter
       expect(d.min_delay_samples.round(1)).to eq(10)
@@ -165,6 +165,89 @@ RSpec.describe(MB::Sound::Filter::Delay, :aggregate_failures) do
       expect(a.sample_rate).to eq(5432)
       expect(b.sample_rate).to eq(5432)
       expect(c.sample_rate).to eq(5432)
+    end
+
+    # A ramp input reads back as the delay in seconds: t - output
+    def glide(delay, os, smoothing:)
+      sig = MB::Sound::ArrayInput.new(data: [Numo::SFloat.new(48000).seq / 48000.0]).with_buffer(800).resample(mode: :libsamplerate_fastest)
+      node = sig.delay(seconds: delay, smoothing: smoothing, interpolation: :linear).oversample(os)
+      out = Numo::SFloat.zeros(0).concatenate(*Array.new(30) { node.sample(800).dup })
+      Numo::SFloat.new(out.length).seq / 48000.0 - out
+    end
+
+    it 'keeps the smoothing rate in seconds per second when oversampled' do
+      [1, 2, 4].each do |os|
+        jump = MB::Sound::ArrayInput.new(data: [Numo::SFloat.zeros(48000).fill(0.03).tap { |d| d[0...4800] = 0.01 }])
+          .with_buffer(800).resample(mode: :libsamplerate_fastest)
+
+        # 0.1 s/s smoothing glides 0.02 s in 0.2 s
+        d = glide(jump, os, smoothing: 0.1)
+        expect(d[4800 + 4800]).to be_within(2e-4).of(0.02), "at #{os}x"
+        expect(d[4800 + 9600 + 480]).to be_within(2e-4).of(0.03), "at #{os}x"
+      end
+    end
+
+    it 'starts a numeric delay at its time when oversampled' do
+      [1, 2, 4].each do |os|
+        d = glide(0.02, os, smoothing: 0.01)
+        expect(d[2400..4800].to_a).to all(be_within(2e-4).of(0.02)), "at #{os}x"
+      end
+    end
+  end
+
+  describe 'delay time units' do
+    it 'keeps seconds as seconds and samples as samples when the sample rate changes' do
+      secs = MB::Sound::Filter::Delay.new(delay: 0.01, sample_rate: 48000)
+      samps = MB::Sound::Filter::Delay.new(delay: 5.samples, sample_rate: 48000)
+      ms = MB::Sound::Filter::Delay.new(delay: 2.ms, sample_rate: 48000)
+      [secs, samps, ms].each { |d| d.sample_rate = 96000 }
+      expect(secs.delay_samples).to eq(960)
+      expect(samps.delay_samples).to eq(5)
+      expect(ms.delay_samples).to eq(192)
+    end
+
+    it 'follows the running rate inside #oversample' do
+      seconds = 100.hz.delay(0.01, smoothing: false)
+      samples = 100.hz.delay(5.samples, smoothing: false)
+      seconds.oversample(2)
+      samples.oversample(2)
+      expect(seconds.base_filter.delay_samples).to eq(960)
+      expect(samples.base_filter.delay_samples).to eq(5)
+    end
+
+    it 'converts node delays in their unit every buffer' do
+      secs = MB::Sound::ArrayInput.new(data: [Numo::SFloat[0.001] * Numo::SFloat.ones(4)], sample_rate: 1000)
+      d = MB::Sound::Filter::Delay.new(delay: secs, sample_rate: 1000, smoothing: false)
+      d.process(Numo::SFloat.zeros(4))
+      expect(d.last_delay_samples).to be_within(1e-4).of(1)
+
+      samps = MB::Sound::ArrayInput.new(data: [Numo::SFloat[3, 3, 3, 3]], sample_rate: 1000)
+      d = MB::Sound::Filter::Delay.new(delay: samps.samples, sample_rate: 1000, smoothing: false)
+      d.process(Numo::SFloat.zeros(4))
+      expect(d.last_delay_samples).to eq(3)
+    end
+
+    it 'adds no graph branches to a delay time node when the sample rate changes' do
+      lfo = 2.hz.lfo.at(0.001..0.002)
+      node = 100.hz.delay(lfo)
+      branches = -> { lfo.instance_variable_get(:@internal_tee)&.branches&.length }
+      before = branches.()
+      node.at_rate(96000)
+      node.at_rate(44100)
+      expect(branches.()).to eq(before)
+      expect(node.base_filter.sources[:delay].original_source).to equal(lfo)
+    end
+
+    it 'keeps fractional constant delays, snapping near-whole counts' do
+      expect(MB::Sound::Filter::Delay.new(delay: 3208.4.samples).delay_samples).to eq(3208.4)
+      expect(MB::Sound::Filter::Delay.new(delay: 0.1, sample_rate: 48000).delay_samples).to eq(4800)
+    end
+
+    it 'accepts every length in #delay' do
+      expect(100.hz.delay(250.ms).base_filter.delay_samples).to eq(12000)
+      expect(100.hz.delay(0.25.seconds).base_filter.delay_samples).to eq(12000)
+      expect(100.hz.delay(seconds: 0.25).base_filter.delay_samples).to eq(12000)
+      expect { 100.hz.delay(samples: 5) }.to raise_error(ArgumentError, /samples/)
     end
   end
 

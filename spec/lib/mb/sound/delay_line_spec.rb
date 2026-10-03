@@ -78,6 +78,15 @@ RSpec.describe(MB::Sound::DelayLine, :aggregate_failures) do
       expect(errors[2.0][:sinc]).to be < errors[2.0][:cubic] / 100
     end
 
+    it 'reads NaN delays as zero in every mode' do
+      line = described_class.new(500)
+      line.write(sine)
+      described_class::INTERPOLATION.each_key do |mode|
+        out = line.read(400, Float::NAN, interpolation: mode)
+        expect(out).to eq(line.read(400, 0, interpolation: mode)), mode.to_s
+      end
+    end
+
     it 'rejects unknown modes' do
       expect { described_class.new(100).read(10, 1, interpolation: :magic) }.to raise_error(ArgumentError, /interpolation/)
     end
@@ -118,6 +127,8 @@ RSpec.describe(MB::Sound::DelayLine, :aggregate_failures) do
           'a delay past the buffer (clamped)' => 5000,
           'per-sample SFloat delays' => Numo::SFloat.new(160).rand(-5, 1100),
           'per-sample DFloat delays' => Numo::DFloat.new(160).rand(0, 300),
+          'NaN delays (read as 0)' => Numo::DFloat.new(160).rand(0, 300).tap { |d| d[[3, 50, 51, 159]] = Float::NAN },
+          'a NaN delay (read as 0)' => Float::NAN,
         }.each do |desc, delay|
           described_class::INTERPOLATION.each_key do |mode|
             it "read the same for #{desc} (#{mode})" do

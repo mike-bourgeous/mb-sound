@@ -130,6 +130,7 @@ module MB
 
           raise 'Room size must be between 0.0 and 1.0' unless room_size >= 0.0 && room_size <= 1.0
           raise 'Damping must be between 0.0 and 1.0' unless damping >= 0.0 && damping <= 1.0
+          decay = MB::Sound::Length.seconds(decay, sample_rate: sample_rate)
           raise 'Decay must be positive' unless decay > 0
 
           @sample_rate = sample_rate.to_f
@@ -194,7 +195,7 @@ module MB
             @outputs = [self].freeze
           end
 
-          # Tracking set for multi-output sampling (like MatrixMixer)
+          # Tracking set for multi-output sampling (like ChannelMixer)
           @sampled_set = Set.new
           @output_data = nil
 
@@ -350,7 +351,7 @@ module MB
           def initialize(delay_times, mixing_matrix, sample_rate: 48000)
             @delays = delay_times.map { |dt|
               MB::Sound::Filter::Delay.new(
-                delay: dt,
+                delay: (dt * sample_rate).round.samples, # whole samples, like the gains below
                 sample_rate: sample_rate,
                 delay_buffer_size: (dt * sample_rate * 1.5).ceil + 1,
                 smoothing: false,
@@ -392,7 +393,7 @@ module MB
 
             @delays = delay_times.map { |dt|
               MB::Sound::Filter::Delay.new(
-                delay: dt,
+                delay: (dt * sample_rate).round.samples, # whole samples, like the gains below
                 sample_rate: sample_rate,
                 delay_buffer_size: (dt * sample_rate * 1.5).ceil + 1,
                 smoothing: false,
