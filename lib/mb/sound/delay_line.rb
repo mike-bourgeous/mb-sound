@@ -315,7 +315,7 @@ module MB
       # inside the buffer), as a Float.
       def clamp(delay, m = INTERPOLATION[:linear])
         delay = delay.real if delay.respond_to?(:real)
-        return 0.0 if delay < 0
+        return 0.0 unless delay >= 0 # also NaN
 
         max = (capacity - 1 - margin(m)).to_f
         delay > max ? max : delay.to_f
@@ -392,7 +392,7 @@ module MB
 
       # Reads at a delay per sample with linear interpolation (vectorized).
       def read_varying(count, delay)
-        d = Numo::DFloat.cast(delay)[0...count].clip(0, capacity - 2)
+        d = without_nan(Numo::DFloat.cast(delay)[0...count]).clip(0, capacity - 2)
 
         dmin = d.floor
         delta = d - dmin
@@ -407,7 +407,7 @@ module MB
       # Reads with cubic interpolation (vectorized, the same math as C).
       def read_cubic(count, delay, state)
         max = capacity - 1 - margin(INTERPOLATION[:cubic])
-        d = delay.is_a?(Numeric) ? Numo::DFloat.new(count).fill(clamp(delay, INTERPOLATION[:cubic])) : Numo::DFloat.cast(delay)[0...count].clip(0, max)
+        d = delay.is_a?(Numeric) ? Numo::DFloat.new(count).fill(clamp(delay, INTERPOLATION[:cubic])) : without_nan(Numo::DFloat.cast(delay)[0...count]).clip(0, max)
 
         dmin = d.floor
         t = d - dmin
@@ -427,6 +427,17 @@ module MB
 
         state[0] = d[-1] if state
         @buffer.class.cast(((c3 * t + c2) * t + c1) * t + c0)
+      end
+
+      # Returns a copy of +delays+ (a DFloat) with NaNs replaced by 0, as
+      # the C code reads them.
+      def without_nan(delays)
+        nan = delays.isnan
+        return delays unless nan.any?
+
+        delays = delays.dup
+        delays[nan] = 0
+        delays
       end
 
       # Casts +data+ to DFloat, or DComplex for a complex buffer.
