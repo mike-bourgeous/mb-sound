@@ -410,7 +410,7 @@ module MB
 
           # Hadamard mixing step
           hadamard = MB::M.hadamard(channels)
-          matrix = MatrixMixer.new(matrix: hadamard, inputs: nodes, sample_rate: @sample_rate)
+          matrix = ChannelMixer::Matrix.new(nodes, matrix: hadamard, sample_rate: @sample_rate)
             .named("Hadamard #{stage + 1}")
           matrix.outputs.shuffle(random: @random)
         end
@@ -434,7 +434,7 @@ module MB
           }
 
           # Matrix mixing step
-          hhmx = MatrixMixer.new(matrix: @householder, inputs: feedback, sample_rate: @sample_rate)
+          hhmx = ChannelMixer::Matrix.new(feedback, matrix: @householder, sample_rate: @sample_rate)
             .named("Householder matrix")
 
           # Hack to help with visualization

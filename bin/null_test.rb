@@ -41,6 +41,7 @@ ARP = 'spec/test_data/arp_a7.flac'
 CASES = {
   'gallery/' => 'bin/tone_gallery.rb %{out}',
   'delays/' => 'bin/delay_gallery.rb %{out}',
+  'channels/' => 'bin/channel_gallery.rb %{out}',
 
   'song_stereo_drone' => 'bin/songs/stereo_drone.rb -q -f -b 4 %{out}',
   'song_sequence_demo' => 'bin/songs/sequence_demo.rb -q -f -b 2 %{out}',

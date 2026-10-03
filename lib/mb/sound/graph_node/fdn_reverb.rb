@@ -194,7 +194,7 @@ module MB
             @outputs = [self].freeze
           end
 
-          # Tracking set for multi-output sampling (like MatrixMixer)
+          # Tracking set for multi-output sampling (like ChannelMixer)
           @sampled_set = Set.new
           @output_data = nil
 

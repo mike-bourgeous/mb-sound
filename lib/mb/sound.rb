@@ -173,7 +173,6 @@ require_relative 'sound/filter'
 require_relative 'sound/noise'
 require_relative 'sound/processing_matrix'
 require_relative 'sound/softest_clip'
-require_relative 'sound/complex_pan'
 require_relative 'sound/haas_pan'
 require_relative 'sound/meter'
 

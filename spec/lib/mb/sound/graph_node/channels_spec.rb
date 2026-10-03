@@ -55,9 +55,15 @@ RSpec.describe(MB::Sound::GraphNode::Channels) do
     end
 
     it 'rejects unknown pan laws and out-of-range positions' do
-      expect { 1.constant.pan(0, law: :linear) }.to raise_error(ArgumentError, /pan law/)
-      expect { 1.constant.pan(2) }.to raise_error(ArgumentError, /-1 to 1/)
-      expect { bundle.pan(2) }.to raise_error(ArgumentError, /-1 to 1/)
+      expect { 1.constant.pan(0, law: :sideways) }.to raise_error(ArgumentError, /law/)
+      expect { 1.constant.pan(2) }.to raise_error(ArgumentError, /position must be in -1..1/)
+      expect { bundle.pan(2) }.to raise_error(ArgumentError, /position must be in -1..1/)
+    end
+
+    it 'pans with the linear and -4.5 dB laws' do
+      expect(firsts(1.constant.pan(0, law: :linear))).to eq([0.5, 0.5])
+      expect(firsts(1.constant.pan(0, law: :minus_4_5db))).to eq([0.5 ** 0.75, 0.5 ** 0.75].map { |v| v.round(4) })
+      expect(firsts(1.constant.pan(-0.5, law: :linear))).to eq([0.75, 0.25])
     end
 
     it 'balances stereo bundles and pans one-channel bundles' do
