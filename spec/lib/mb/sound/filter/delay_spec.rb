@@ -166,6 +166,33 @@ RSpec.describe(MB::Sound::Filter::Delay, :aggregate_failures) do
       expect(b.sample_rate).to eq(5432)
       expect(c.sample_rate).to eq(5432)
     end
+
+    # A ramp input reads back as the delay in seconds: t - output
+    def glide(delay, os, smoothing:)
+      sig = MB::Sound::ArrayInput.new(data: [Numo::SFloat.new(48000).seq / 48000.0]).with_buffer(800).resample(mode: :libsamplerate_fastest)
+      node = sig.delay(seconds: delay, smoothing: smoothing, interpolation: :linear).oversample(os)
+      out = Numo::SFloat.zeros(0).concatenate(*Array.new(30) { node.sample(800).dup })
+      Numo::SFloat.new(out.length).seq / 48000.0 - out
+    end
+
+    it 'keeps the smoothing rate in seconds per second when oversampled' do
+      [1, 2, 4].each do |os|
+        jump = MB::Sound::ArrayInput.new(data: [Numo::SFloat.zeros(48000).fill(0.03).tap { |d| d[0...4800] = 0.01 }])
+          .with_buffer(800).resample(mode: :libsamplerate_fastest)
+
+        # 0.1 s/s smoothing glides 0.02 s in 0.2 s
+        d = glide(jump, os, smoothing: 0.1)
+        expect(d[4800 + 4800]).to be_within(2e-4).of(0.02), "at #{os}x"
+        expect(d[4800 + 9600 + 480]).to be_within(2e-4).of(0.03), "at #{os}x"
+      end
+    end
+
+    it 'starts a numeric delay at its time when oversampled' do
+      [1, 2, 4].each do |os|
+        d = glide(0.02, os, smoothing: 0.01)
+        expect(d[2400..4800].to_a).to all(be_within(2e-4).of(0.02)), "at #{os}x"
+      end
+    end
   end
 
   describe 'interpolation' do

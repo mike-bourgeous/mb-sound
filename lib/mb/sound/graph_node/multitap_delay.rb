@@ -64,6 +64,7 @@ module MB
             @read_state = []
 
             # Starts at the first delay instead of gliding up from zero
+            @smoothing = smoothing
             @smoother = MB::Sound::DelayLine.smoother(smoothing, mtd.sample_rate)
             @smoother_started = false
           end
@@ -89,9 +90,10 @@ module MB
           # Changes the sample rate of all taps on this multitap delay and all
           # upstream nodes.
           def sample_rate=(new_rate)
+            old_rate = @mtd.sample_rate
             super
             @mtd.sample_rate = new_rate
-            @smoother = @smoother&.at_rate(new_rate)
+            @smoother = MB::Sound::DelayLine.rescale_smoother(@smoother, @smoothing, old_rate, @mtd.sample_rate)
             self
           end
           alias at_rate sample_rate=

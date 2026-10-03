@@ -109,11 +109,14 @@ module MB
         # Changes the sample rate of the delay, cascading the rate change to
         # any upstream sources and recomputing delay values in samples.
         def sample_rate=(new_rate)
-          raise "Filter #{@filter} does not support changing sample rate" if @filter && !@filter.respond_to?(:at_rate)
+          raise "Filter #{@filter} does not support changing sample rate" if @filter && @smoothing_setting.respond_to?(:process) && !@filter.respond_to?(:at_rate)
+
+          old_rate = @sample_rate
 
           super
 
-          @filter = @filter&.at_rate(new_rate)
+          @filter = MB::Sound::DelayLine.rescale_smoother(@filter, @smoothing_setting, old_rate, @sample_rate)
+          @smooth_limit = @sample_rate * (@smoothing_setting.is_a?(Numeric) ? @smoothing_setting : DEFAULT_SMOOTHING_RATE) if @smooth_limit
 
           if @delay_seconds_orig
             self.delay = @delay_seconds_orig
@@ -139,6 +142,7 @@ module MB
         # See #reset_delay.
         def smoothing=(smoothing)
           @smoothing = !!smoothing
+          @smoothing_setting = smoothing
 
           if smoothing.respond_to?(:process) && smoothing.respond_to?(:reset)
             check_rate(smoothing, 'smoothing')
