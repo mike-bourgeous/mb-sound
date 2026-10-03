@@ -1784,6 +1784,104 @@ VALUE ruby_number_to_freq(VALUE self, VALUE number, VALUE tune_note, VALUE tune_
 	return number;
 }
 
+// Returns a pointer to the float data of +v+, which must be a contiguous 1D
+// SFloat with at least +count+ elements (+name+ and +idx+ are for errors).
+static float *matrix_mix_buffer(VALUE v, size_t count, const char *name, long idx, _Bool write)
+{
+	if (CLASS_OF(v) != numo_cSFloat || RNARRAY_NDIM(v) != 1 || !RTEST(nary_check_contiguous(v))) {
+		rb_raise(rb_eArgError, "%s %ld must be a contiguous 1D SFloat", name, idx);
+	}
+	if (RNARRAY_SHAPE(v)[0] < count) {
+		rb_raise(rb_eArgError, "%s %ld is shorter than the outputs (%zu < %zu)", name, idx, (size_t)RNARRAY_SHAPE(v)[0], count);
+	}
+
+	char *p = write ? nary_get_pointer_for_write(v) : nary_get_pointer_for_read(v);
+	return (float *)(p + nary_get_offset(v));
+}
+
+/*
+ * Multiplies the column of channels +inputs+ (an Array of N contiguous 1D
+ * SFloat NArrays) by the M-by-N +matrix+ (a contiguous 2D DFloat NArray),
+ * writing output channel i to +outputs+[i] (an Array of M contiguous 1D
+ * SFloats, all the same length; the inputs may be longer).  Outputs must not
+ * be inputs.  Zero coefficients are skipped and +/-1 coefficients add or
+ * subtract without multiplying.  Returns +outputs+.
+ *
+ * MB::FastSound.matrix_mix; see ProcessingMatrix#process.
+ */
+static VALUE ruby_matrix_mix(VALUE self, VALUE matrix, VALUE inputs, VALUE outputs)
+{
+	Check_Type(inputs, T_ARRAY);
+	Check_Type(outputs, T_ARRAY);
+
+	if (CLASS_OF(matrix) != numo_cDFloat || RNARRAY_NDIM(matrix) != 2 || !RTEST(nary_check_contiguous(matrix))) {
+		rb_raise(rb_eArgError, "The matrix must be a contiguous 2D DFloat");
+	}
+
+	long rows = RNARRAY_SHAPE(matrix)[0];
+	long cols = RNARRAY_SHAPE(matrix)[1];
+	if (RARRAY_LEN(inputs) != cols) {
+		rb_raise(rb_eArgError, "Expected %ld inputs for the matrix, got %ld", cols, RARRAY_LEN(inputs));
+	}
+	if (RARRAY_LEN(outputs) != rows) {
+		rb_raise(rb_eArgError, "Expected %ld outputs for the matrix, got %ld", rows, RARRAY_LEN(outputs));
+	}
+	if (rows == 0 || cols == 0) {
+		return outputs;
+	}
+
+	size_t count = RNARRAY_SHAPE(rb_ary_entry(outputs, 0))[0];
+	const double *m = (const double *)(nary_get_pointer_for_read(matrix) + nary_get_offset(matrix));
+
+	const float **in = ALLOCA_N(const float *, cols);
+	for (long j = 0; j < cols; j++) {
+		in[j] = matrix_mix_buffer(rb_ary_entry(inputs, j), count, "Input", j, 0);
+	}
+
+	for (long i = 0; i < rows; i++) {
+		VALUE outv = rb_ary_entry(outputs, i);
+		if ((size_t)RNARRAY_SHAPE(outv)[0] != count) {
+			rb_raise(rb_eArgError, "Output %ld has a different length than output 0", i);
+		}
+		float *out = matrix_mix_buffer(outv, count, "Output", i, 1);
+		for (long j = 0; j < cols; j++) {
+			if ((const float *)out == in[j]) {
+				rb_raise(rb_eArgError, "Output %ld is also input %ld", i, j);
+			}
+		}
+
+		memset(out, 0, count * sizeof(float));
+
+		for (long j = 0; j < cols; j++) {
+			double c = m[i * cols + j];
+			const float *x = in[j];
+
+			if (c == 0) {
+				continue;
+			} else if (c == 1) {
+				for (size_t k = 0; k < count; k++) {
+					out[k] += x[k];
+				}
+			} else if (c == -1) {
+				for (size_t k = 0; k < count; k++) {
+					out[k] -= x[k];
+				}
+			} else {
+				float cf = (float)c;
+				for (size_t k = 0; k < count; k++) {
+					out[k] += cf * x[k];
+				}
+			}
+		}
+	}
+
+	RB_GC_GUARD(matrix);
+	RB_GC_GUARD(inputs);
+	RB_GC_GUARD(outputs);
+
+	return outputs;
+}
+
 void Init_fast_sound(void)
 {
 	VALUE mb = rb_define_module("MB");
@@ -1814,6 +1912,9 @@ void Init_fast_sound(void)
 	rb_define_module_function(fast_sound, "biquad_narray", ruby_biquad_narray, 6);
 	rb_define_module_function(fast_sound, "dynamic_biquad", ruby_dynamic_biquad, 8);
 	rb_define_module_function(fast_sound, "cookbook", ruby_cookbook, 7);
+
+	// Mixing functions
+	rb_define_module_function(fast_sound, "matrix_mix", ruby_matrix_mix, 3);
 
 	// Envelope functions
 	rb_define_module_function(fast_sound, "adsr", ruby_adsr, 7);

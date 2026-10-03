@@ -252,14 +252,34 @@ module MB
         outputs ||= 1.upto(@output_channels).to_a
         raise "Expected #{@output_channels} output names, but received #{outputs.length}" if outputs.length != @output_channels
         @outputs = outputs.freeze
+
+        # Real matrices with SFloat data use a C kernel (MB::FastSound.matrix_mix)
+        if matrix.all? { |v| v.is_a?(Numeric) && v.real? }
+          @fast_matrix = Numo::DFloat.cast(matrix.to_a)
+        end
       end
 
       # Multiplies the list of channels by the processing matrix and returns
       # the result.  The +data+ should be given as an Array of Numo::NArray,
       # which should not be set to in-place modification (call
       # `Numo::NArray#not_inplace!` on the data before passing).
-      def process(data)
+      #
+      # If +:into+ is given (an Array of one Numo::SFloat per output channel,
+      # none of them in +data+), real matrices with SFloat data write the
+      # result into those buffers instead of allocating new ones (other data
+      # returns new arrays).  The outputs are as long as the shortest input.
+      def process(data, into: nil)
         raise ArgumentError, "Expected #{@input_channels} channels, got #{data.length}" unless data.length == @input_channels
+
+        if @fast_matrix && data.all?(Numo::SFloat) && data.all? { |d| d.ndim == 1 }
+          length = data.map(&:length).min
+          data = data.map { |d| d.contiguous? ? d : d.dup }
+          if into.nil? || into.length != @output_channels || into.any? { |o| o.length != length || !o.is_a?(Numo::SFloat) || !o.contiguous? }
+            into = Array.new(@output_channels) { Numo::SFloat.zeros(length) }
+          end
+          return MB::FastSound.matrix_mix(@fast_matrix, data, into)
+        end
+
         (@matrix * Vector[*data]).to_a
       end
 

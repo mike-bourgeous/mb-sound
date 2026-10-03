@@ -100,17 +100,26 @@ module MB
 
             @sampled_set.clear
 
-            @input_data = @inputs.map { |c| c.sample(count).dup }
+            # Outputs are written into the previous output buffers, so an
+            # input that is one of them (e.g. a direct feedback loop) is
+            # copied first
+            @input_data = @inputs.map { |c|
+              d = c.sample(count)
+              d = d.dup if d && @output_data&.any? { |o| o.equal?(d) }
+              d
+            }
             return nil if @input_data.any?(&:nil?)
 
-            @output_data = @procmatrix.process(@input_data)
+            @output_data = @procmatrix.process(@input_data, into: @output_data)
           end
 
           return nil if @input_data.any?(&:nil?)
 
           @sampled_set << index
 
-          @output_data[index].dup
+          # A reused buffer, like most nodes return; it is overwritten after
+          # all outputs are read
+          @output_data[index]
         end
 
         # Sets the sample rate of all inputs to the matrix to the given +rate+.
