@@ -77,11 +77,12 @@ Graph nodes maintain input/output relationships and support traversal via the `T
 - `ScriptingMethods` - `effect_script` / `synth_script` / `song_script` / `script` for standalone scripts in bin/ (see Scripts below)
 - `GainMethods`, `WindowMethods`, `AnalysisMethods`
 
-### C Extensions (3 native extensions, compiled via rake-compiler)
+### C Extensions (4 native extensions, compiled via rake-compiler)
 
 - `ext/mb/fast_sound/` - Fast waveform generation → `lib/mb/fast_sound.so`
 - `ext/mb/sound/fast_resample/` - libsamplerate bindings → `lib/mb/sound/fast_resample.so`
 - `ext/mb/sound/fast_wavetable/` - Fast wavetable synthesis → `lib/mb/sound/fast_wavetable.so`
+- `ext/mb/sound/fast_delay/` - Delay line read/feedback kernels (`DelayLine`) → `lib/mb/sound/fast_delay.so`
 
 ### Filter System
 
@@ -89,7 +90,7 @@ Graph nodes maintain input/output relationships and support traversal via the `T
 
 ### Delays
 
-`Filter::Delay` (`#delay`) and `GraphNode::MultitapDelay` (`#multitap`) are front ends for one `MB::Sound::DelayLine` (`lib/mb/sound/delay_line.rb`): a circular buffer that grows without losing stored audio, read in C (`MB::FastSound.delay_read` / `.delay_feedback`) with Ruby mirrors (`#read_ruby` / `#feedback_ruby`) that specs check for exactly equal values.  Interpolation (`interpolation:`) defaults to `:sinc` (`DelayLine::DEFAULT_INTERPOLATION`; Kaiser-windowed, cutoff lowered by the read speed when a moving delay raises the pitch, so no aliasing up to 4x); `:cubic` and `:linear` (the old lo-fi sound) are options.  Constant whole-sample delays read directly in every mode; a moving or fractional `:sinc` delay costs ~1.5-2% of realtime per mono delay.  No mode reads samples newer than the current input.  Delay time, `feedback:`, `wet:`, and `dry:` may be numbers or graph nodes; `#delay` smooths delay changes by default (`smoothing:`), `#multitap` only with `smoothing:`.  Tools: `bin/delay_gallery.rb` (null-test cases), `bin/delay_benchmark.rb` (`--interpolation`), `bin/delay_quality.rb` (error and aliasing against an exact sine answer).
+`Filter::Delay` (`#delay`) and `GraphNode::MultitapDelay` (`#multitap`) are front ends for one `MB::Sound::DelayLine` (`lib/mb/sound/delay_line.rb`): a circular buffer that grows without losing stored audio, read in C (`MB::Sound::FastDelay.read` / `.feedback`, the `fast_delay` extension) with Ruby mirrors (`#read_ruby` / `#feedback_ruby`) that specs check for exactly equal values.  Interpolation (`interpolation:`) defaults to `:sinc` (`DelayLine::DEFAULT_INTERPOLATION`; Kaiser-windowed, cutoff lowered by the read speed when a moving delay raises the pitch, so no aliasing up to 4x); `:cubic` and `:linear` (the old lo-fi sound) are options.  Constant whole-sample delays read directly in every mode; a moving or fractional `:sinc` delay costs ~1.5-2% of realtime per mono delay.  No mode reads samples newer than the current input.  Delay time, `feedback:`, `wet:`, and `dry:` may be numbers or graph nodes; `#delay` smooths delay changes by default (`smoothing:`), `#multitap` only with `smoothing:`.  Tools: `bin/delay_gallery.rb` (null-test cases), `bin/delay_benchmark.rb` (`--interpolation`), `bin/delay_quality.rb` (error and aliasing against an exact sine answer).
 
 ### Reverbs
 

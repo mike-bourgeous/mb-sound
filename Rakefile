@@ -20,3 +20,9 @@ Rake::ExtensionTask.new 'mb-sound-fast_wavetable' do |ext|
   ext.ext_dir = 'ext/mb/sound/fast_wavetable'
   ext.lib_dir = 'lib/mb/sound'
 end
+
+Rake::ExtensionTask.new 'mb-sound-fast_delay' do |ext|
+  ext.name = 'fast_delay'
+  ext.ext_dir = 'ext/mb/sound/fast_delay'
+  ext.lib_dir = 'lib/mb/sound'
+end

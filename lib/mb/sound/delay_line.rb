@@ -27,8 +27,8 @@ module MB
     # would be newer read the current sample, so very short delays (under
     # SINC_HALF samples for :sinc) are interpolated less accurately.
     #
-    # #read and #feedback run in C (MB::FastSound.delay_read and
-    # .delay_feedback); #read_ruby and #feedback_ruby are the same math in
+    # #read and #feedback run in C (MB::Sound::FastDelay.read and .feedback,
+    # in the fast_delay extension); #read_ruby and #feedback_ruby are the same math in
     # Ruby, and specs check that both give exactly the same values.
     #
     # The buffer grows when a block plus the longest delay doesn't fit
@@ -182,7 +182,7 @@ module MB
       # should be an Array kept by each reader between calls (state[0] is
       # its previous delay, for the read speed).
       def read(count, delay, interpolation: :linear, state: nil)
-        MB::FastSound.delay_read(@buffer, @buffer.class.zeros(count), @block_start, real_delay(delay), mode(interpolation), SINC_KERNEL, state)
+        MB::Sound::FastDelay.read(@buffer, @buffer.class.zeros(count), @block_start, real_delay(delay), mode(interpolation), SINC_KERNEL, state)
       end
 
       # The Ruby version of #read.
@@ -224,7 +224,7 @@ module MB
       def feedback(data, delay, feedback, interpolation: :linear, state: nil)
         @block_start = @write_offset
         out = @buffer.class.zeros(data.length)
-        @write_offset = MB::FastSound.delay_feedback(@buffer, @write_offset, data, out, real_delay(delay), feedback, mode(interpolation), SINC_KERNEL, state)
+        @write_offset = MB::Sound::FastDelay.feedback(@buffer, @write_offset, data, out, real_delay(delay), feedback, mode(interpolation), SINC_KERNEL, state)
         out
       end
 

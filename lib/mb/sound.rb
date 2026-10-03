@@ -15,6 +15,7 @@ require_relative 'sound/numeric_sound_mixins'
 require_relative 'fast_sound'
 require_relative 'sound/fast_resample'
 require_relative 'sound/fast_wavetable'
+require_relative 'sound/fast_delay'
 
 require_relative 'sound/version'
 require_relative 'sound/tuning'
