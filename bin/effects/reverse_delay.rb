@@ -9,8 +9,13 @@
 # CC 1 (the mod wheel) controls the delay time.  Run with --help for all
 # options.
 #
+# Runs at 48 kHz by default: oversampling barely changes the sound here
+# (1x is -80 dB from an 8x render, 2x -85 dB; measured 2026-10-03) but
+# roughly doubles the CPU cost per step.  Pass --oversample 2 to compare.
+#
 # Examples:
 #     $0 --dry 0 --delay 0.2 --feedback 0 sounds/drums.flac
+#     $0 --oversample 2 spec/test_data/arp_a7.flac
 
 require 'bundler/setup'
 require 'mb-sound'
@@ -20,7 +25,7 @@ MB::Sound.effect_script(
   feedback: [-0.25, 'Feedback gain'],
   dry: [0.25, 'Dry (input) level'],
   wet: [0.75, 'Wet (reversed) level'],
-  oversample: [2.0, 'Oversampling factor'],
+  oversample: [1.0, 'Oversampling factor (2 or 4 barely changes the sound here; see the header)'],
 ) { |input, p|
   processing_sample_rate = 48000 * p.oversample
   # The feedback comes back one internal buffer late; scaling the buffer with
