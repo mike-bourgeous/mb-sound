@@ -36,6 +36,8 @@ end
 #
 #   MEMCHECK_SPECS="spec/a_spec.rb spec/b_spec.rb"  run other specs
 #   MEMCHECK_GEN_SUPPRESSIONS=1                     print suppressions for errors
+#   MEMCHECK_GC_STRESS=1                           GC.stress during each extension call
+#                                                   (spec/valgrind/gc_stress_calls.rb)
 #   MEMCHECK_UNDEF=1                                also report uses of uninitialized
 #                                                   values with an extension on the stack
 #   rake memcheck:debug                             rebuild extensions at -O0 first
@@ -125,6 +127,7 @@ begin
     specs = ENV['MEMCHECK_SPECS'].to_s.split
     t.pattern = specs.empty? ? MEMCHECK_SPECS : specs
     t.rspec_opts = ['--format', 'progress']
+    t.rspec_opts += ['--require', './spec/valgrind/gc_stress_calls.rb'] if ENV['MEMCHECK_GC_STRESS'] == '1'
   end
 
   namespace :memcheck do
