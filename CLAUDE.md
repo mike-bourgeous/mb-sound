@@ -96,8 +96,8 @@ Graph nodes maintain input/output relationships and support traversal via the `T
 
 Two reverb implementations coexist; use `#reverb` in most cases:
 
-- `GraphNode::Reverb` / `#reverb` (`lib/mb/sound/graph_node/reverb.rb`) - the original from the reverb video; presets (`:room`, `:hall`, `:space`, ...).  `[l, r].reverb(:hall)` takes one input per Array element.  Stereo cost: `:hall` ~18% of realtime, `:space` ~55% (too heavy live on the user's laptop).
-- `GraphNode::FdnReverb` / `#fdn_reverb` - an experiment (clean-room, by Claude Code) with `room_size`/`decay`/`damping`; ~70% of realtime each, too slow live; may be removed once `#reverb` gets similar parameters.
+- `GraphNode::Reverb` / `#reverb` (`lib/mb/sound/graph_node/reverb.rb`) - the original from the reverb video; presets (`:room`, `:hall`, `:space`, ...).  `[l, r].reverb(:hall)` takes one input per Array element.  Its diffusion and feedback network runs as one fused stage (`Reverb::FusedStage`; `show_internals: true` builds the old node graph, which specs check gives identical samples) with C matrix mixing (`MB::FastSound.matrix_mix`, also used by `ChannelMixer` for real numeric gains).  Stereo cost (2026-10-03): `:hall` ~4% of realtime, `:space` ~6.5% (were ~18% and ~55%).
+- `GraphNode::FdnReverb` / `#fdn_reverb` - an experiment (clean-room, by Claude Code) with `room_size`/`decay`/`damping`; ~7% of realtime in stereo (2026-10-03, after the matrix kernel; was ~20-70%); may be removed once `#reverb` gets similar parameters.
 
 ### Sequences
 
