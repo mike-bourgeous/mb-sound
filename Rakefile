@@ -36,6 +36,8 @@ end
 #
 #   MEMCHECK_SPECS="spec/a_spec.rb spec/b_spec.rb"  run other specs
 #   MEMCHECK_GEN_SUPPRESSIONS=1                     print suppressions for errors
+#   MEMCHECK_UNDEF=1                                also report uses of uninitialized
+#                                                   values with an extension on the stack
 #   rake memcheck:debug                             rebuild extensions at -O0 first
 #
 # Suppressions for known false positives go in spec/valgrind/ruby.supp (or
@@ -85,9 +87,26 @@ begin
   end
   RubyMemcheck::TestTaskReporter.prepend(MemcheckTruncatedXml)
 
+  # With MEMCHECK_UNDEF=1, Ruby's conservative GC stack scanning gives
+  # thousands of uninitialized-value errors (gc_mark_set, is_pointer_to_heap,
+  # ...), many while an extension is on the stack.  Keep only those where
+  # the value is used in this project's extensions, or in a library they
+  # called (libm, libsamplerate, ...), before control returns to libruby.
+  module MemcheckUndefFilter
+    EXT_DIR = File.join(__dir__, 'lib', '')
+
+    def skip?
+      return super unless kind.start_with?('Uninit')
+
+      stack.frames.take_while { |f| !f.in_ruby? }.none? { |f| f.obj.to_s.start_with?(EXT_DIR) }
+    end
+  end
+  RubyMemcheck::ValgrindError.prepend(MemcheckUndefFilter)
+
   memcheck_config = RubyMemcheck::Configuration.new(
     valgrind_options: [
       *RubyMemcheck::Configuration::DEFAULT_VALGRIND_OPTIONS,
+      *(ENV['MEMCHECK_UNDEF'] == '1' ? ['--undef-value-errors=yes', '--track-origins=yes'] : []),
       # --trace-children=yes (a default) keeps the GC.stress `ruby -e` load
       # specs under Valgrind; ffmpeg and other tools run natively.  A
       # process that execs a skipped program leaves truncated XML, which
