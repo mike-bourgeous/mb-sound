@@ -97,6 +97,25 @@ RSpec.describe(MB::Sound::ProcessingMatrix) do
     end
 
     describe '#process' do
+      it 'gives the same SFloat results with the C kernel as the Ruby Matrix product' do
+        m = Matrix[[0.5, -1, 2], [1, 0, -0.25]]
+        p = MB::Sound::ProcessingMatrix.new(m)
+        data = Array.new(3) { Numo::SFloat.new(50).rand(-1, 1) }
+        expect(p.process(data)).to eq((m * Vector[*data]).to_a)
+      end
+
+      it 'writes into the given buffers if they fit' do
+        p = MB::Sound::ProcessingMatrix.new(Matrix[[1, 1], [1, -1]])
+        into = [Numo::SFloat.zeros(2), Numo::SFloat.zeros(2)]
+        result = p.process([Numo::SFloat[1, 2], Numo::SFloat[3, 5]], into: into)
+        expect(result).to equal(into)
+        expect(into.map(&:to_a)).to eq([[4, 7], [-2, -3]])
+
+        result = p.process([Numo::SFloat[1, 2, 3], Numo::SFloat[3, 5, 7]], into: into)
+        expect(result).not_to equal(into)
+        expect(result.map(&:to_a)).to eq([[4, 7, 10], [-2, -3, -4]])
+      end
+
       it 'raises an error if given the wrong number of channels' do
         m = Matrix.build(2, 4) { 0 }
         p = MB::Sound::ProcessingMatrix.new(m)

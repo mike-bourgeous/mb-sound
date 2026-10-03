@@ -219,6 +219,12 @@ module MB
 
           @gains = numeric_params? ? gains_for(**@param_values) : nil
 
+          # Real numeric gains mix single-precision inputs in C
+          # (MB::FastSound.matrix_mix)
+          if @gains && !@complex && @gains.flatten.all? { |g| g.is_a?(Numeric) && g.real? }
+            @fast_gains = Numo::DFloat.cast(@gains)
+          end
+
           output_count = out_spec.is_a?(Integer) ? out_spec : output_channels
           @outputs = Array.new(output_count) { |idx| Output.new(mixer: self, index: idx) }.freeze
 
@@ -276,7 +282,14 @@ module MB
             end
             @sampled.clear
 
-            data = @inputs.map { |inp| inp.sample(count)&.dup }
+            # Outputs are written into the previous output buffers, so an
+            # input that is one of them (e.g. a direct feedback loop) is
+            # copied first
+            data = @inputs.map { |inp|
+              d = inp.sample(count)
+              d = d.dup if d && @output_data&.any? { |o| o.equal?(d) }
+              d
+            }
             return @output_data = nil if data.any?(&:nil?)
 
             values = @param_values.transform_values { |v| v.respond_to?(:sample) ? v.sample(count) : v }
@@ -293,7 +306,10 @@ module MB
           return nil if @output_data.nil?
 
           @sampled << index
-          @output_data[index].dup
+
+          # A reused buffer, like most nodes return; it is overwritten after
+          # every output has been read
+          @output_data[index]
         end
 
         # A description with the mixing law, options, and parameters.
@@ -349,7 +365,19 @@ module MB
 
         # Returns output data: each output is the sum of gain times input,
         # skipping zero gains, as real parts unless an input was complex.
+        # Real numeric gains with single-precision inputs mix in C, into the
+        # previous output buffers when they fit.
         def mix(gains, data)
+          if @fast_gains && data.all? { |d| d.is_a?(Numo::SFloat) }
+            length = data.map(&:length).min
+            data = data.map { |d| d.contiguous? ? d : d.dup }
+            into = @output_data
+            if into.nil? || into.length != @fast_gains.shape[0] || into.any? { |o| !o.is_a?(Numo::SFloat) || o.length != length }
+              into = Array.new(@fast_gains.shape[0]) { Numo::SFloat.zeros(length) }
+            end
+            return MB::FastSound.matrix_mix(@fast_gains, data, into)
+          end
+
           real_out = @complex && @inputs.none? { |inp| inp.complex_input? }
 
           gains.map { |row|

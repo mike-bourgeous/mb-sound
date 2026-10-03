@@ -335,6 +335,18 @@ module MB
             u.length > 1 ? u.sum : u[0]
           }
 
+          # Without show_internals, the diffusion and feedback network runs as
+          # one fused loop of delay lines and matrix kernels (#fused_wet)
+          # instead of a graph of delay, Tee, and matrix nodes.  Both use the
+          # same random draws in the same order, so they sound identical.
+          @fused = !@show_internals
+          if @fused
+            # Sample each distinct input node once
+            distinct = @last_stage.uniq(&:object_id)
+            @fused_input_samplers = distinct.map(&:get_sampler)
+            @fused_input_index = @last_stage.map { |n| distinct.index { |d| d.equal?(n) } }
+          end
+
           # Create diffusers with delays evenly spaced across the range
           # TODO: consider uneven spacing e.g. placing more near the start
           delay_span = @diffusion_range.end - @diffusion_range.begin
@@ -342,7 +354,7 @@ module MB
           @diffusers = Array.new(@stages) do |idx|
             delay_end = @diffusion_range.begin + delay_span * (idx + 1)
             delay_range = 0..delay_end
-            @last_stage = make_diffuser(
+            @last_stage = (@fused ? method(:plan_diffuser) : method(:make_diffuser)).call(
               channels: @channels,
               delay_range: @diffusion_range.begin..(delays[idx] + delay_span),
               input: @last_stage,
@@ -366,9 +378,10 @@ module MB
 
           if @feedback_enabled
             @feedback = Array.new(@channels) { Numo::SFloat.zeros(48000) }
-            @feedback_network = make_fdn(@last_stage)
+            @feedback_network = @fused ? plan_fdn(@last_stage) : make_fdn(@last_stage)
             @last_stage = @feedback_network
           end
+          @last_stage = [] if @fused
 
           # This gets overwritten on every call to #update
           @output_groups = partition_outputs(Array.new(@channels), @output_channels)
@@ -413,6 +426,134 @@ module MB
           matrix = ChannelMixer::Matrix.new(nodes, matrix: hadamard, sample_rate: @sample_rate)
             .named("Hadamard #{stage + 1}")
           matrix.outputs.shuffle(random: @random)
+        end
+
+        # For internal use.  A fused stage of the reverb network (see
+        # #fused_wet): constant delays (whole samples, like Filter::Delay)
+        # on each channel, then a matrix (with any delay polarity folded into
+        # its columns), then a shuffle of the outputs.
+        class FusedStage
+          attr_reader :delay_seconds, :matrix, :order
+
+          # +:delay_seconds+ - one delay per channel.
+          # +:matrix+ - a real matrix (Array of Arrays) mixing the delayed
+          #             channels (or the inputs, if +:delay_first+ is false).
+          # +:order+ - the matrix output index for each stage output.
+          # +:delay_first+ - true to delay then mix, false to mix then delay.
+          def initialize(delay_seconds:, matrix:, order:, delay_first:, sample_rate:, buffer_time:)
+            @delay_seconds = delay_seconds.map(&:to_f).freeze
+            @matrix = Numo::DFloat.cast(matrix)
+            @order = order.freeze
+            @delay_first = delay_first
+            @lines = Array.new(@delay_seconds.length) {
+              MB::Sound::DelayLine.new((sample_rate * buffer_time).ceil)
+            }
+            @states = Array.new(@delay_seconds.length) { [] }
+            @mixed = nil
+            self.sample_rate = sample_rate
+          end
+
+          # Recomputes the delays in samples for a new +rate+.
+          def sample_rate=(rate)
+            @delay_samples = @delay_seconds.map { |s| (s * rate.to_f).round }
+          end
+
+          # Processes one buffer of channel +data+ (an Array of SFloat, one
+          # per channel), returning an Array of channel outputs.  Outputs from
+          # the matrix are reused buffers.
+          def process(data)
+            data = delay(data) if @delay_first
+            @mixed = MB::FastSound.matrix_mix(@matrix, data, mix_buffers(data))
+            out = @order.map { |idx| @mixed[idx] }
+            @delay_first ? out : delay(out)
+          end
+
+          private
+
+          def delay(data)
+            Array.new(@lines.length) do |idx|
+              v = data[idx]
+              d = @delay_samples[idx]
+              line = @lines[idx]
+              line.prepare(v.length, d, v.class)
+              line.write(v)
+              line.read(v.length, d, interpolation: MB::Sound::DelayLine::DEFAULT_INTERPOLATION, state: @states[idx])
+            end
+          end
+
+          def mix_buffers(data)
+            length = data.map(&:length).min
+            if @mixed.nil? || @mixed[0].length != length
+              @mixed = Array.new(@matrix.shape[0]) { Numo::SFloat.zeros(length) }
+            end
+            @mixed
+          end
+        end
+
+        # For internal use.  Like #make_diffuser, but returns a FusedStage,
+        # drawing the same random values in the same order.
+        def plan_diffuser(stage:, channels:, delay_range:, input:)
+          delay_span = (delay_range.end - delay_range.begin).to_f
+          delays = [
+            0,
+            *delay_series(count: channels - 1, max: delay_span)
+          ].shuffle(random: @random)
+
+          buffer_time = MB::M.max(delays.max + 0.2, 1.0)
+
+          delay_times = Array.new(channels) { |idx| delays[idx] + delay_range.begin }
+          polarities = Array.new(channels) { @random.rand > 0.5 ? 1 : -1 }
+
+          # Fold the polarities into the Hadamard matrix's columns (exact,
+          # since they are +/-1)
+          hadamard = MB::M.hadamard(channels).to_a.map { |row|
+            row.map.with_index { |v, col| v * polarities[col] }
+          }
+          order = (0...channels).to_a.shuffle(random: @random)
+
+          FusedStage.new(
+            delay_seconds: delay_times, matrix: hadamard, order: order,
+            delay_first: true, sample_rate: @sample_rate, buffer_time: buffer_time
+          )
+        end
+
+        # For internal use.  Like #make_fdn, but returns a FusedStage for the
+        # matrix and delays (the feedback is added in #fused_wet).
+        def plan_fdn(_inputs)
+          delay_span = @feedback_range.end - @feedback_range.begin
+          delays = delay_series(count: @channels, max: delay_span).shuffle(random: @random)
+
+          buffer_time = MB::M.max(delays.max + 0.2, 1.0)
+
+          order = (0...@channels).to_a.shuffle(random: @random)
+          delay_times = Array.new(@channels) { |idx| delays[idx] + @feedback_range.begin }
+
+          FusedStage.new(
+            delay_seconds: delay_times, matrix: @householder.to_a, order: order,
+            delay_first: false, sample_rate: @sample_rate, buffer_time: buffer_time
+          )
+        end
+
+        # For internal use.  Runs the fused diffusion and feedback network
+        # for +count+ samples, returning the wet channels (with nil if an
+        # input ended).
+        def fused_wet(count)
+          inputs = @fused_input_samplers.map { |s| s.sample(count) }
+          return [nil] if inputs.any?(&:nil?)
+
+          data = @fused_input_index.map { |idx| inputs[idx] }
+          @diffusers.each do |stage|
+            data = stage.process(data)
+          end
+
+          if @feedback_enabled
+            data = data.map.with_index { |v, idx|
+              (@feedback[idx][0...v.length].inplace * @feedback_gain + v).not_inplace!
+            }
+            data = @feedback_network.process(data)
+          end
+
+          data
         end
 
         # For internal use.  Creates the feedback delay network, minus the
@@ -475,6 +616,17 @@ module MB
         def sample_rate=(rate)
           @sample_rate = rate.to_f
 
+          if @fused
+            @diffusers.each do |stage|
+              stage.sample_rate = @sample_rate
+            end
+            @feedback_network&.sample_rate = @sample_rate
+            @fused_input_samplers.each do |c|
+              c.sample_rate = @sample_rate unless c.sample_rate == @sample_rate
+            end
+            return self
+          end
+
           @diffusers.each do |stage|
             stage.each do |c|
               c.sample_rate = @sample_rate unless c.sample_rate == @sample_rate
@@ -493,7 +645,7 @@ module MB
         def update(count)
           dry = @upstream_samplers.map { |u| u.sample(count) }
 
-          wet = @last_stage.map { |c| c.sample(count) }
+          wet = @fused ? fused_wet(count) : @last_stage.map { |c| c.sample(count) }
           if dry.nil? || wet.any?(&:nil?)
             @pipeline_output = wet
             @dry_output = nil

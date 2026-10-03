@@ -38,4 +38,5 @@ RSpec.describe(MB::FastSound) do
       end
     end
   end
+
 end
