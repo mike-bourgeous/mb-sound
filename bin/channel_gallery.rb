@@ -47,6 +47,10 @@ CASES = {
     MB::Sound::GraphNode::ChannelMixer::Matrix.new([l, r], matrix: [[1, 0.5], [0.25, -1], [0.3, 0.3]]).outputs
   },
   reverb_hall_stereo: -> { stereo_source.reverb(:hall) },
+  place_rear_left: -> { mono_source.place(x: -1, y: -1) },
+  place_side: -> { mono_source.place(x: 0.3, y: 0) },
+  place_circling: -> { mono_source.place(x: 2.hz.lfo, y: 2.hz.lfo.with_phase(Math::PI / 2)) },
+  place_complex: -> { 330.hz.complex_ramp.at(0.3).place(x: -0.5, y: 0.5).map(&:real) },
 }
 
 MB::Sound.script(

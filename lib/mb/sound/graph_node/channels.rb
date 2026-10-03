@@ -181,6 +181,14 @@ module MB
           mixed(ChannelMixer::Balance.new(@outputs, position: position))
         end
 
+        # Places a one-channel bundle's channel (see ChannelMethods#place);
+        # other bundles raise an error.  Also available as #position.
+        def place(x: 0, y: 1, law: :equal_power)
+          raise ArgumentError, "place needs a single-channel node (this one has #{channel_count} channels)" unless channel_count == 1
+          @outputs[0].place(x: x, y: y, law: law)
+        end
+        alias position place
+
         # Returns [left gain, right gain] for balancing a stereo signal to
         # +position+ (see ChannelMixer::PanLaws.balance).
         def self.balance_gains(position)

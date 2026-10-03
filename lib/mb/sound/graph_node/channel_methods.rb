@@ -51,6 +51,23 @@ module MB
           mixer.outputs.length == 1 ? mixer.outputs[0] : Channels.new(mixer.outputs)
         end
 
+        # Places this single-channel node in a two-channel phase-amplitude
+        # field, as matrix surround encoders do (a ChannelMixer::Position):
+        # +x+ from -1 (left) to 1 (right) sets the levels, and +y+ from 1
+        # (front) to -1 (rear) the phase difference (in phase at the front,
+        # opposite at the rear).  Both may be graph nodes.  Real inputs come
+        # out as real Lt/Rt channels; complex inputs stay complex.  Also
+        # available as #position.
+        #
+        # Examples (bin/sound.rb):
+        #     bg 220.hz.ramp.at(0.3).place(x: -1, y: -1)               # rear left
+        #     bg 220.hz.ramp.at(0.3).place(x: 2.hz.lfo, y: 0.3.hz.lfo)  # circling
+        def place(x: 0, y: 1, law: :equal_power)
+          raise ArgumentError, "place needs a single-channel node (this one has #{channel_count} channels)" if channel_count > 1
+          ChannelMixer::Position.new(self, x: x, y: y, law: law).then { |m| Channels.new(m.outputs) }
+        end
+        alias position place
+
         # Returns this node if it has a single channel, or its channels mixed
         # down (see Channels#mono).  Also available as #mixdown.
         def mono
