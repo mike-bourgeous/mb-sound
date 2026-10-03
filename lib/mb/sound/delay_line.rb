@@ -99,6 +99,31 @@ module MB
       # The most samples older than floor(delay) that any mode reads.
       MARGIN = (SINC_HALF * SINC_MAX_RATE).ceil + 2
 
+      # Returns a filter that smooths delay times (in samples) for the
+      # +smoothing+ setting of a delay: nil for false, a given Filter as is,
+      # or a LinearFollower letting the delay change at most +smoothing+
+      # seconds per second (Filter::Delay::DEFAULT_SMOOTHING_RATE for true).
+      def self.smoother(smoothing, sample_rate)
+        return nil unless smoothing
+        return smoothing if smoothing.respond_to?(:process) && smoothing.respond_to?(:reset)
+
+        limit = sample_rate * (smoothing.is_a?(Numeric) ? smoothing : MB::Sound::Filter::Delay::DEFAULT_SMOOTHING_RATE)
+        MB::Sound::Filter::LinearFollower.new(sample_rate: sample_rate, max_rise: limit, max_fall: limit)
+      end
+
+      # Smooths +delays+ (an NArray of delays in samples) with +filter+ (from
+      # .smoother), skipping a LinearFollower that has settled on a constant
+      # delay (it would output the delay unchanged).  Returns the smoothed
+      # delays.
+      def self.smooth(filter, delays)
+        if filter.is_a?(MB::Sound::Filter::LinearFollower)
+          min, max = delays.minmax
+          return delays if min == max && min == filter.peek
+        end
+
+        filter.process(delays.dup.inplace).not_inplace!
+      end
+
       # The circular buffer (do not modify).
       attr_reader :buffer
 

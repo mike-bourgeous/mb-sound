@@ -33,7 +33,9 @@ module MB
           # +:mtd+ - The containing MultitapDelay object.
           # +:index+ - The index of this tap.
           # +:delay+ - The delay source for this tap.
-          def initialize(mtd:, index:, delay_samples:)
+          # +:smoothing+ - Delay smoothing, as for Filter::Delay (false for
+          #                none).
+          def initialize(mtd:, index:, delay_samples:, smoothing: false)
             @owner = mtd
             @mtd = mtd
             @index = index
@@ -60,6 +62,10 @@ module MB
 
             # This tap's previous delay, for the read speed (sinc)
             @read_state = []
+
+            # Starts at the first delay instead of gliding up from zero
+            @smoother = MB::Sound::DelayLine.smoother(smoothing, mtd.sample_rate)
+            @smoother_started = false
           end
 
           # Returns +count+ samples from this delay tap, based on the delay
@@ -67,6 +73,15 @@ module MB
           def sample(count)
             delay_buf = @delay_samples.sample(count)
             return nil if delay_buf.nil?
+
+            if @smoother
+              delay_buf = delay_buf.real if delay_buf.is_a?(Numo::SComplex) || delay_buf.is_a?(Numo::DComplex)
+              unless @smoother_started
+                @smoother.reset(delay_buf[0])
+                @smoother_started = true
+              end
+              delay_buf = MB::Sound::DelayLine.smooth(@smoother, delay_buf)
+            end
 
             @mtd.internal_sample(self, delay_buf, @read_state)
           end
@@ -76,6 +91,7 @@ module MB
           def sample_rate=(new_rate)
             super
             @mtd.sample_rate = new_rate
+            @smoother = @smoother&.at_rate(new_rate)
             self
           end
           alias at_rate sample_rate=
@@ -108,7 +124,11 @@ module MB
         #
         # +:interpolation+ chooses how fractional delays are read: :linear,
         # :cubic, or :sinc (see MB::Sound::DelayLine).
-        def initialize(source, *delays_in_seconds, initial_buffer_seconds: 1, sample_rate: 48000, interpolation: MB::Sound::DelayLine::DEFAULT_INTERPOLATION)
+        #
+        # +:smoothing+ glides each tap's delay changes as for Filter::Delay
+        # (true, a rate in seconds per second, or a Filter); off by default,
+        # so delay jumps (e.g. a ramp restarting) stay jumps.
+        def initialize(source, *delays_in_seconds, initial_buffer_seconds: 1, sample_rate: 48000, interpolation: MB::Sound::DelayLine::DEFAULT_INTERPOLATION, smoothing: false)
           unless MB::Sound::DelayLine::INTERPOLATION.include?(interpolation)
             raise ArgumentError, "Unknown interpolation #{interpolation.inspect} (use one of #{MB::Sound::DelayLine::INTERPOLATION.keys.join(', ')})"
           end
@@ -137,7 +157,8 @@ module MB
             DelayTap.new(
               mtd: self,
               index: idx,
-              delay_samples: d * @sample_rate_node
+              delay_samples: d * @sample_rate_node,
+              smoothing: smoothing
             )
           }
 

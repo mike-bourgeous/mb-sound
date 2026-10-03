@@ -148,11 +148,7 @@ module MB
             new_limit = @sample_rate * (smoothing.is_a?(Numeric) ? smoothing : DEFAULT_SMOOTHING_RATE)
             if new_limit != @smooth_limit
               @smooth_limit = new_limit
-              @filter = MB::Sound::Filter::LinearFollower.new(
-                sample_rate: @sample_rate,
-                max_rise: @smooth_limit,
-                max_fall: @smooth_limit
-              )
+              @filter = MB::Sound::DelayLine.smoother(smoothing || true, @sample_rate)
             end
           end
 

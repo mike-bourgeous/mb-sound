@@ -41,6 +41,36 @@ RSpec.describe(MB::Sound::GraphNode::MultitapDelay) do
     expect(data.to_a).to eq((4000...5000).map { |v| [v - 4500, 0].max.to_f })
   end
 
+  describe 'smoothing' do
+    let(:ramp) { MB::Sound::ArrayInput.new(data: [Numo::SFloat.new(400).seq], sample_rate: 1) }
+
+    it 'jumps by default' do
+      delay = 10.constant(smoothing: false, sample_rate: 1)
+      tap = MB::Sound::GraphNode::MultitapDelay.new(ramp, delay, sample_rate: 1, interpolation: :linear).taps[0]
+      tap.sample(100)
+      delay.constant = 30
+      expect(tap.sample(5).to_a).to eq([70, 71, 72, 73, 74])
+    end
+
+    it 'glides delay changes at the smoothing rate, starting at the first delay' do
+      delay = 10.constant(smoothing: false, sample_rate: 1)
+      mtd = MB::Sound::GraphNode::MultitapDelay.new(ramp, delay, sample_rate: 1, interpolation: :linear, smoothing: 0.5)
+      tap = mtd.taps[0]
+
+      # No glide up from zero at the start
+      expect(tap.sample(100).to_a[10..14]).to eq([0, 1, 2, 3, 4])
+
+      # Half a sample of delay per sample: the read point moves at 0.5x
+      delay.constant = 30
+      expect(tap.sample(4).to_a).to eq([89.5, 90, 90.5, 91])
+    end
+
+    it 'is available from the DSL' do
+      taps = 100.hz.multitap(0.01, 0.02, smoothing: true)
+      expect(taps.map { |t| t.instance_variable_get(:@smoother) }.to_a).to all(be_a(MB::Sound::Filter::LinearFollower))
+    end
+  end
+
   it 'can delay multiple taps by differing constant amounts' do
     dly = MB::Sound::GraphNode::MultitapDelay.new(-2.constant, 2.5, 4.5, 0, sample_rate: 1, interpolation: :linear)
     two, five, zero = dly.taps

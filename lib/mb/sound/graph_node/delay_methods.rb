@@ -84,16 +84,15 @@ module MB
         # produce a number of seconds as output, or musical lengths that
         # follow the tempo, as for #delay (e.g. `1.n8.dotted`).
         #
-        # To smooth delay values, use #clip_rate, #smooth, #filter, or similar
-        # methods (unlike the filter used by #delay, the
-        # MB::Sound::GraphNode::MultitapDelay does not do built-in smoothing,
-        # so tempo changes jump).
+        # Delay changes jump unless +:smoothing+ is given (true, a rate in
+        # seconds per second, or a Filter, as for #delay), which glides each
+        # tap's delay like a tape delay.
         #
         # +:interpolation+ is as for #delay.
         #
         # Example (bin/sound.rb):
         #     l, r = sig.multitap(1.n8.dotted, 1.n4)
-        def multitap(*delays, sample_rate: 48000, name: nil, initial_buffer_seconds: 1, interpolation: MB::Sound::DelayLine::DEFAULT_INTERPOLATION)
+        def multitap(*delays, sample_rate: 48000, name: nil, initial_buffer_seconds: 1, interpolation: MB::Sound::DelayLine::DEFAULT_INTERPOLATION, smoothing: false)
           longest = delays.filter_map { |d| MB::Sound::Sequence::TempoNode.max_seconds(d) }.max
           initial_buffer_seconds = MB::M.max(initial_buffer_seconds, 1.1 * longest) if longest
 
@@ -102,7 +101,8 @@ module MB
             *delays.map { |d| MB::Sound::Sequence::TempoNode.seconds_source(d) },
             sample_rate: sample_rate,
             initial_buffer_seconds: initial_buffer_seconds,
-            interpolation: interpolation
+            interpolation: interpolation,
+            smoothing: smoothing
           ).named(name).taps.then { |taps| Channels.new(taps) }
         end
         alias multitap_delay multitap
