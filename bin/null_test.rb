@@ -40,6 +40,7 @@ ARP = 'spec/test_data/arp_a7.flac'
 # directory for cases ending in '/'
 CASES = {
   'gallery/' => 'bin/tone_gallery.rb %{out}',
+  'delays/' => 'bin/delay_gallery.rb %{out}',
 
   'song_stereo_drone' => 'bin/songs/stereo_drone.rb -q -f -b 4 %{out}',
   'song_sequence_demo' => 'bin/songs/sequence_demo.rb -q -f -b 2 %{out}',
@@ -64,6 +65,11 @@ CASES = {
   'fx_ping_pong_delay' => "bin/effects/ping_pong_delay.rb -q -f #{ARP} %{out}",
   'fx_tape_delay' => "bin/effects/tape_delay.rb -q -f --oversample 1 #{ARP} %{out}",
   'fx_reverse_delay' => "bin/effects/reverse_delay.rb -q -f --oversample 1 #{ARP} %{out}",
+  'fx_multitap_delay' => "bin/effects/multitap_delay.rb -q -f #{ARP} %{out}",
+  'fx_multitap_delay_frac' => "bin/effects/multitap_delay.rb -q -f --delay 0.10001 #{ARP} %{out}",
+  'fx_reverb_hall' => "bin/effects/reverb.rb -q -f --preset hall #{ARP} %{out}",
+  'fx_fdn_reverb' => "bin/effects/fdn_reverb.rb -q -f #{ARP} %{out}",
+  'fx_grain_repeater' => "bin/effects/grain_repeater.rb -q -f #{ARP} %{out}",
 }.freeze
 
 # Renders every case (or those whose names contain one of +only+) from the
