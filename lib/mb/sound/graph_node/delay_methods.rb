@@ -14,6 +14,13 @@ module MB
         # alternates every bar).  Buffers for musical lengths are sized for
         # tempos down to Sequence::TempoNode::SLOWEST_BPM.
         #
+        # +:samples+ (a number or a node) counts samples at +:sample_rate+
+        # and becomes a time in seconds, so a later sample rate change (e.g.
+        # #oversample) keeps the delay time, not the sample count.  Inside an
+        # oversampled graph, pass the oversampled rate as +:sample_rate+ when
+        # +:samples+ are at that rate (e.g. compensating a feedback loop's
+        # buffer size; see bin/effects/flanger.rb and tape_delay.rb).
+        #
         # See MB::Sound::Filter::Delay#initialize for a description of the
         # +:smoothing+ parameter.  By default, delay time changes (including
         # tempo changes) glide like a tape delay; pass `smoothing: false` to

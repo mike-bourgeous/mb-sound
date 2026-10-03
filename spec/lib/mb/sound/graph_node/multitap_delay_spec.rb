@@ -65,6 +65,22 @@ RSpec.describe(MB::Sound::GraphNode::MultitapDelay) do
       expect(tap.sample(4).to_a).to eq([89.5, 90, 90.5, 91])
     end
 
+    it 'keeps the smoothing rate in seconds per second when oversampled' do
+      [1, 2, 4].each do |os|
+        jump = MB::Sound::ArrayInput.new(data: [Numo::SFloat.zeros(48000).fill(0.03).tap { |d| d[0...4800] = 0.01 }])
+          .with_buffer(800).resample(mode: :libsamplerate_fastest)
+        sig = MB::Sound::ArrayInput.new(data: [Numo::SFloat.new(48000).seq / 48000.0]).with_buffer(800).resample(mode: :libsamplerate_fastest)
+        node = sig.multitap(jump, smoothing: 0.1, interpolation: :linear)[0].oversample(os)
+        out = Numo::SFloat.zeros(0).concatenate(*Array.new(30) { node.sample(800).dup })
+        d = Numo::SFloat.new(out.length).seq / 48000.0 - out
+
+        # Starts at the first delay, then glides 0.02 s in 0.2 s
+        expect(d[2400]).to be_within(2e-4).of(0.01), "at #{os}x"
+        expect(d[4800 + 4800]).to be_within(2e-4).of(0.02), "at #{os}x"
+        expect(d[4800 + 9600 + 480]).to be_within(2e-4).of(0.03), "at #{os}x"
+      end
+    end
+
     it 'is available from the DSL' do
       taps = 100.hz.multitap(0.01, 0.02, smoothing: true)
       expect(taps.map { |t| t.instance_variable_get(:@smoother) }.to_a).to all(be_a(MB::Sound::Filter::LinearFollower))

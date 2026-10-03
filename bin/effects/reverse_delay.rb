@@ -9,8 +9,13 @@
 # CC 1 (the mod wheel) controls the delay time.  Run with --help for all
 # options.
 #
+# Runs at 48 kHz by default: oversampling barely changes the sound here
+# (1x is -80 dB from an 8x render, 2x -85 dB; measured 2026-10-03) but
+# roughly doubles the CPU cost per step.  Pass --oversample 2 to compare.
+#
 # Examples:
 #     $0 --dry 0 --delay 0.2 --feedback 0 sounds/drums.flac
+#     $0 --oversample 2 spec/test_data/arp_a7.flac
 
 require 'bundler/setup'
 require 'mb-sound'
@@ -20,17 +25,27 @@ MB::Sound.effect_script(
   feedback: [-0.25, 'Feedback gain'],
   dry: [0.25, 'Dry (input) level'],
   wet: [0.75, 'Wet (reversed) level'],
-  oversample: [2.0, 'Oversampling factor'],
+  oversample: [1.0, 'Oversampling factor (2 or 4 barely changes the sound here; see the header)'],
 ) { |input, p|
   processing_sample_rate = 48000 * p.oversample
-  internal_buffer = 64
+  # The feedback comes back one internal buffer late; scaling the buffer with
+  # oversampling keeps that latency (1.3 ms) the same, so every oversampling
+  # factor sounds alike, and keeps the per-buffer overhead from growing.
+  internal_buffer = [(64 * p.oversample).round, 16].max
   internal_buftime = internal_buffer.to_f / processing_sample_rate
 
   # TODO: Allow base delay and loop length? or mindelay and maxdelay?
   # TODO: It would be cool to be able to crossfade the delay time jump; this
   # could be possible with a multi-tap delay (e.g. fade out from t1 while
   # fading in from t2)
-  delay_time = p.midi_cc(1, :delay, range: 0.0..2.0).filter(:lowpass, cutoff: 10).clip(internal_buftime, nil)
+  # The smoothing filter starts at the delay time instead of rising from zero.
+  # The LFOs below integrate 1 / delay_time, so a rise from zero would race
+  # through thousands of cycles (faster with more oversampling, as the clip
+  # floor is one internal buffer) and leave the reverse loop at an arbitrary
+  # phase.
+  delay_time = p.midi_cc(1, :delay, range: 0.0..2.0)
+    .filter(:lowpass, cutoff: 10).tap { |f| f.reset(p.delay) }
+    .clip(internal_buftime, nil)
 
   lfo_freq = (1.0 / delay_time).named('LFO Frequency')
 

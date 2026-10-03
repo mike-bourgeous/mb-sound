@@ -79,11 +79,12 @@ module MB
           end
         end
 
-        # Mixes the channels into one node, averaging them so levels stay the
-        # same for correlated channels.  Also available as #mixdown.
+        # Mixes the channels into one node (a ChannelMixer::Mono), averaging
+        # them so levels stay the same for correlated channels.  Also
+        # available as #mixdown.
         def mono
           return @outputs[0] if channel_count == 1
-          @outputs.reduce(:+) * (1.0 / channel_count)
+          ChannelMixer::Mono.new(@outputs).outputs[0]
         end
         alias mixdown mono
 
@@ -101,21 +102,21 @@ module MB
         # Returns a stereo bundle with the left and right channels swapped.
         def swap
           require_stereo('swap')
-          Channels.new([right, left])
+          mixed(ChannelMixer::Swap.new(@outputs))
         end
 
         # Converts left/right stereo to mid/side: mid is (L + R) / 2 and side
         # is (L - R) / 2.  See #from_mid_side.
         def mid_side
           require_stereo('mid_side')
-          Channels.new([(left + right) * 0.5, (left - right) * 0.5])
+          mixed(ChannelMixer::MidSide.new(@outputs))
         end
 
         # Converts mid/side back to left/right stereo: left is M + S and
         # right is M - S.  See #mid_side.
         def from_mid_side
           require_stereo('from_mid_side')
-          Channels.new([left + right, left - right])
+          mixed(ChannelMixer::FromMidSide.new(@outputs))
         end
 
         # Changes the stereo width by scaling the side (L - R) signal: 0 is
@@ -125,8 +126,8 @@ module MB
         # Example (bin/sound.rb):
         #     bg stereo(220.hz.ramp.at(0.2), 221.hz.ramp.at(0.2)).width(1.5)
         def width(amount)
-          mid, side = mid_side
-          Channels.new([mid, side * amount]).from_mid_side
+          require_stereo('width')
+          mixed(ChannelMixer::Width.new(@outputs, amount: amount))
         end
 
         # Runs every channel into one multichannel reverb (one reverb input
@@ -153,12 +154,9 @@ module MB
         end
 
         # Pans a one-channel bundle like a single node (see
-        # ChannelMethods#pan), or balances a stereo bundle: +position+ from
-        # -1 (left only) through 0 (unchanged) to 1 (right only), and may be
-        # a graph node.  The side being turned down follows an equal-power
-        # curve scaled to unity at the center (about -5.3 dB at +/-0.5); the
-        # other side stays at full level.
-        # Bundles with more channels raise an error.
+        # ChannelMethods#pan), or balances a stereo bundle (see #balance), as
+        # most DAWs' stereo track pan controls do.  Bundles with more
+        # channels raise an error.
         #
         # Example (bin/sound.rb):
         #     bg stereo(220.hz.ramp.at(0.2), 330.hz.ramp.at(0.2)).pan(2.bars.lfo)
@@ -167,30 +165,34 @@ module MB
           raise ArgumentError, "Can only pan bundles with 1 or 2 channels (got #{channel_count})" unless channel_count == 2
           raise ArgumentError, "Unknown pan law #{law.inspect} (supported: #{ChannelMethods::PAN_LAWS.map(&:inspect).join(', ')})" unless ChannelMethods::PAN_LAWS.include?(law)
 
-          if position.is_a?(Numeric)
-            raise ArgumentError, "Pan position must be from -1 to 1 (got #{position})" unless position.between?(-1, 1)
-            gains = Channels.balance_gains(position)
-            Channels.new([left * gains[0], right * gains[1]])
-          else
-            pos = position.get_sampler
-            lg = pos.proc(type_name: 'balance left') { |d| Channels.balance_gains(d)[0] }
-            rg = pos.proc(type_name: 'balance right') { |d| Channels.balance_gains(d)[1] }
-            Channels.new([left * lg, right * rg])
-          end
+          balance(position)
         end
 
+        # Balances a stereo bundle (a ChannelMixer::Balance): +position+ from
+        # -1 (left only) through 0 (unchanged) to 1 (right only), and may be
+        # a graph node.  The side being turned down follows an equal-power
+        # curve scaled to unity at the center (about -5.3 dB at +/-0.5); the
+        # other side stays at full level.
+        #
+        # Example (bin/sound.rb):
+        #     bg stereo(220.hz.ramp.at(0.2), 330.hz.ramp.at(0.2)).balance(-0.3)
+        def balance(position = 0)
+          require_stereo('balance')
+          mixed(ChannelMixer::Balance.new(@outputs, position: position))
+        end
+
+        # Places a one-channel bundle's channel (see ChannelMethods#place);
+        # other bundles raise an error.  Also available as #position.
+        def place(x: 0, y: 1, law: :equal_power)
+          raise ArgumentError, "place needs a single-channel node (this one has #{channel_count} channels)" unless channel_count == 1
+          @outputs[0].place(x: x, y: y, law: law)
+        end
+        alias position place
+
         # Returns [left gain, right gain] for balancing a stereo signal to
-        # +position+ (a Numeric or Numo::NArray, -1..1): full level on the
-        # favored side, and an equal-power fade on the other side.
+        # +position+ (see ChannelMixer::PanLaws.balance).
         def self.balance_gains(position)
-          p = position.is_a?(Numo::NArray) ? position.clip(-1, 1) : MB::M.clamp(position, -1, 1)
-          # Equal-power pan gains scaled so the center is unity, capped at 1
-          angle = (p + 1) * (Math::PI / 4)
-          if p.is_a?(Numo::NArray)
-            [(Numo::NMath.cos(angle) * Math.sqrt(2)).clip(0, 1), (Numo::NMath.sin(angle) * Math.sqrt(2)).clip(0, 1)]
-          else
-            [[Math.cos(angle) * Math.sqrt(2), 1].min, [Math.sin(angle) * Math.sqrt(2), 1].min]
-          end
+          ChannelMixer::PanLaws.balance(position)
         end
 
         # Allows numbers first in arithmetic with bundles (e.g. `2 * bundle`).
@@ -217,6 +219,11 @@ module MB
         end
 
         private
+
+        # A bundle of a mixer's outputs.
+        def mixed(mixer)
+          Channels.new(mixer.outputs)
+        end
 
         def require_stereo(method)
           raise ArgumentError, "#{method} needs a stereo bundle (got #{channel_count} channels)" unless channel_count == 2
