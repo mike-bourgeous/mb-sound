@@ -5,21 +5,17 @@ module MB
       # GraphNode.
       module DelayMethods
         # Adds a MB::Sound::Filter::Delay to the signal chain with a delay of
-        # +time+, or the given number of +:seconds+ or +:samples+.
-        #
-        # +time+ and +:seconds+ may be a number of seconds, a graph node
-        # that outputs seconds, or a musical length that follows the tempo: a
-        # Sequence::Duration (e.g. `3.n16` or `1.n8.dotted`) or a node that
-        # outputs one (e.g. `2.bars.lfo.square.at(3.n16..5.n16)`, which
-        # alternates every bar).  Buffers for musical lengths are sized for
-        # tempos down to Sequence::TempoNode::SLOWEST_BPM.
-        #
-        # +:samples+ (a number or a node) counts samples at +:sample_rate+
-        # and becomes a time in seconds, so a later sample rate change (e.g.
-        # #oversample) keeps the delay time, not the sample count.  Inside an
-        # oversampled graph, pass the oversampled rate as +:sample_rate+ when
-        # +:samples+ are at that rate (e.g. compensating a feedback loop's
-        # buffer size; see bin/effects/flanger.rb and tape_delay.rb).
+        # +time+ (also accepted as +:seconds+): a number of seconds, any
+        # length (`5.samples`, `250.ms`, `0.01.seconds`), a musical length
+        # that follows the tempo (`3.n16`, `1.n8.dotted`), or a graph node
+        # giving the time every sample (seconds, or samples with
+        # `node.samples`; musical-time nodes like
+        # `2.bars.lfo.square.at(3.n16..5.n16)` follow the tempo).  The time
+        # keeps its unit when the sample rate changes: inside #oversample,
+        # `5.samples` stays 5 samples at the oversampled rate and `0.01`
+        # stays 10 ms.  Buffers for musical lengths are sized for tempos down
+        # to Sequence::TempoNode::SLOWEST_BPM; +:max_delay+ (any length)
+        # sizes the initial buffer otherwise (buffers grow as needed).
         #
         # See MB::Sound::Filter::Delay#initialize for a description of the
         # +:smoothing+ parameter.  By default, delay time changes (including
@@ -36,78 +32,59 @@ module MB
         #
         # Examples (bin/sound.rb):
         #     sig.delay(0.25, feedback: -6.db, dry: 1)           # seconds
+        #     sig.delay(250.ms, feedback: -6.db, dry: 1)         # the same
         #     sig.delay(1.n8.dotted, feedback: -6.db, dry: 1)    # follows the tempo
+        #     sig.delay(96.samples)                              # samples at the running rate
+        #     sig.delay(lfo.at(10..20).samples)                  # a node in samples
         #     sig.delay(0.3, feedback: 0.2.hz.lfo.at(0.2..0.8), dry: 1)  # swelling repeats
         #
         # This can be used for spectral distortion:
         #
         #     graph = (60.hz * 0.5.hz.ramp.at(1..0).with_phase(-Math::PI))
         #       .proc { |v| MB::Sound.real_fft(v) }
-        #       .delay(samples: 3208.4, feedback: 0.9, dry: 1, wet: 1)
+        #       .delay(3208.4.samples, feedback: 0.9, dry: 1, wet: 1)
         #       .proc { |v| MB::Sound.real_ifft(MB::M.shl(v, 0)) }
-        def delay(time = nil, seconds: nil, samples: nil, sample_rate: 48000, smoothing: true, max_delay: 1.0, feedback: false, dry: 0, wet: 1, interpolation: MB::Sound::DelayLine::DEFAULT_INTERPOLATION)
+        def delay(time = nil, seconds: nil, smoothing: true, max_delay: 1.0, feedback: false, dry: 0, wet: 1, interpolation: MB::Sound::DelayLine::DEFAULT_INTERPOLATION)
           filter(MB::Sound::GraphNode::DelayMethods.delay_filter(
-            time, seconds: seconds, samples: samples, sample_rate: sample_rate, smoothing: smoothing,
-            max_delay: max_delay, feedback: feedback, dry: dry, wet: wet, interpolation: interpolation
+            time, seconds: seconds, smoothing: smoothing, max_delay: max_delay,
+            feedback: feedback, dry: dry, wet: wet, interpolation: interpolation
           ))
         end
 
         # Builds the MB::Sound::Filter::Delay for #delay and
         # Sequence::Duration#delay (see #delay for parameters).
-        def self.delay_filter(time = nil, seconds: nil, samples: nil, sample_rate: 48000, smoothing: true, max_delay: 1.0, feedback: false, dry: 0, wet: 1, interpolation: MB::Sound::DelayLine::DEFAULT_INTERPOLATION)
-          raise ArgumentError, 'Pass a delay time, seconds:, or samples:, not more than one' if [time, seconds, samples].compact.length > 1
-          seconds ||= time
+        def self.delay_filter(time = nil, seconds: nil, smoothing: true, max_delay: 1.0, feedback: false, dry: 0, wet: 1, interpolation: MB::Sound::DelayLine::DEFAULT_INTERPOLATION)
+          raise ArgumentError, 'Pass a delay time or seconds:, not more than one' if time && seconds
+          time ||= seconds || 0
 
-          if samples
-            samples = samples.to_f if samples.is_a?(Numeric)
-            seconds = samples / sample_rate
-          else
-            max_delay = MB::M.max(max_delay, 1.1 * MB::Sound::Sequence::TempoNode.max_seconds(seconds)) if MB::Sound::Sequence::TempoNode.max_seconds(seconds)
-            seconds = MB::Sound::Sequence::TempoNode.seconds_source(seconds)
-            seconds = seconds.to_f if seconds.is_a?(Numeric)
-          end
-
-
-          filter = MB::Sound::Filter::Delay.new(
-            delay: seconds, sample_rate: sample_rate, smoothing: smoothing,
-            delay_buffer_size: (sample_rate * max_delay).ceil, feedback: feedback,
+          MB::Sound::Filter::Delay.new(
+            delay: time, smoothing: smoothing,
+            delay_buffer_size: MB::Sound::Length.samples(max_delay, sample_rate: 48000).ceil, feedback: feedback,
             dry: dry, wet: wet, interpolation: interpolation
           )
-
-          # Start a tempo-synced delay at its time (at the current tempo, and
-          # again when a Session starts it) instead of gliding up from zero
-          if seconds.is_a?(MB::Sound::Sequence::TempoNode)
-            filter.reset_delay(seconds.value * sample_rate)
-            seconds.on_start { |n| filter.reset_delay(n.value * sample_rate) }
-          end
-
-          filter
         end
 
         # Adds a multi-tap delay with the given delay sources, returning an Array
         # of nodes representing the taps, as a channel bundle (e.g.
         # `l, r = sig.multitap(...)`).  Also available as #multitap_delay.
-        # The +delays+ may be numeric values in seconds, graph nodes that
-        # produce a number of seconds as output, or musical lengths that
-        # follow the tempo, as for #delay (e.g. `1.n8.dotted`).
+        # The +delays+ may be any delay time accepted by #delay: seconds,
+        # lengths (`96.samples`, `250.ms`), musical lengths that follow the
+        # tempo (`1.n8.dotted`), or graph nodes.
         #
         # Delay changes jump unless +:smoothing+ is given (true, a rate in
         # seconds per second, or a Filter, as for #delay), which glides each
-        # tap's delay like a tape delay.
+        # tap's delay like a tape delay.  +:initial_buffer+ (any length) sizes
+        # the starting buffer (it grows as needed).
         #
         # +:interpolation+ is as for #delay.
         #
         # Example (bin/sound.rb):
         #     l, r = sig.multitap(1.n8.dotted, 1.n4)
-        def multitap(*delays, sample_rate: 48000, name: nil, initial_buffer_seconds: 1, interpolation: MB::Sound::DelayLine::DEFAULT_INTERPOLATION, smoothing: false)
-          longest = delays.filter_map { |d| MB::Sound::Sequence::TempoNode.max_seconds(d) }.max
-          initial_buffer_seconds = MB::M.max(initial_buffer_seconds, 1.1 * longest) if longest
-
+        def multitap(*delays, name: nil, initial_buffer: 1, interpolation: MB::Sound::DelayLine::DEFAULT_INTERPOLATION, smoothing: false)
           MB::Sound::GraphNode::MultitapDelay.new(
             self,
-            *delays.map { |d| MB::Sound::Sequence::TempoNode.seconds_source(d) },
-            sample_rate: sample_rate,
-            initial_buffer_seconds: initial_buffer_seconds,
+            *delays,
+            initial_buffer: initial_buffer,
             interpolation: interpolation,
             smoothing: smoothing
           ).named(name).taps.then { |taps| Channels.new(taps) }

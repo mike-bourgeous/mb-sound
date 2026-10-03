@@ -350,7 +350,7 @@ module MB
           def initialize(delay_times, mixing_matrix, sample_rate: 48000)
             @delays = delay_times.map { |dt|
               MB::Sound::Filter::Delay.new(
-                delay: dt,
+                delay: (dt * sample_rate).round.samples, # whole samples, like the gains below
                 sample_rate: sample_rate,
                 delay_buffer_size: (dt * sample_rate * 1.5).ceil + 1,
                 smoothing: false,
@@ -392,7 +392,7 @@ module MB
 
             @delays = delay_times.map { |dt|
               MB::Sound::Filter::Delay.new(
-                delay: dt,
+                delay: (dt * sample_rate).round.samples, # whole samples, like the gains below
                 sample_rate: sample_rate,
                 delay_buffer_size: (dt * sample_rate * 1.5).ceil + 1,
                 smoothing: false,

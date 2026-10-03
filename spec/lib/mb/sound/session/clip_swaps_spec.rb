@@ -29,7 +29,7 @@ RSpec.describe(MB::Sound::Session::ClipSwaps) do
   end
 
   it 'keeps the state of nodes after the clips' do
-    session.add(bass.gate.delay(samples: 1000, smoothing: false), name: :bass)
+    session.add(bass.gate.delay(1000.samples, smoothing: false), name: :bass)
     run(4000)
     session.swap(:bass, MB::Sound.seq(nil).n1.loop) # silence from the next bar
     data = run(96000)

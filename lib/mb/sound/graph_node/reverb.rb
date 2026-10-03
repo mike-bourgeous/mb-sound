@@ -417,7 +417,7 @@ module MB
 
             diffuser_polarity = @random.rand > 0.5 ? 1 : -1
             input[idx]
-              .delay(seconds: delay_time, wet: diffuser_polarity, smoothing: false, max_delay: buffer_time)
+              .delay((delay_time * @sample_rate).round.samples, wet: diffuser_polarity, smoothing: false, max_delay: buffer_time)
               .named("Diffuse #{stage + 1} #{idx + 1}")
           end
 
@@ -589,7 +589,7 @@ module MB
           delays = hhmx.outputs.shuffle(random: @random).map.with_index { |inp, idx|
             delay_time = delays[idx] + @feedback_range.begin
             inp
-              .delay(seconds: delay_time, smoothing: false, max_delay: buffer_time)
+              .delay((delay_time * @sample_rate).round.samples, smoothing: false, max_delay: buffer_time)
               .named("Feedback delay #{idx + 1}")
           }
 

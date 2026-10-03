@@ -32,31 +32,25 @@ module MB
           #
           # +:mtd+ - The containing MultitapDelay object.
           # +:index+ - The index of this tap.
-          # +:delay+ - The delay source for this tap.
+          # +:delay+ - The delay time for this tap (any time Filter::Delay#delay=
+          #            accepts: seconds, lengths, Durations, graph nodes).
           # +:smoothing+ - Delay smoothing, as for Filter::Delay (false for
           #                none).
-          def initialize(mtd:, index:, delay_samples:, smoothing: false)
+          def initialize(mtd:, index:, delay:, smoothing: false)
             @owner = mtd
             @mtd = mtd
             @index = index
 
             @graph_node_name = "Tap #{index}"
 
-            case delay_samples
-            when Numeric
-              @delay_samples = delay_samples.constant(unit: ' samples', si: false)
-
-            else
-              raise 'Delay must be Numeric or respond to :sample' unless delay_samples.respond_to?(:sample)
-              check_rate(delay_samples, index)
-              @delay_samples = delay_samples.get_sampler
-            end
+            @time = MB::Sound::Length::Source.new(delay)
+            check_rate(@time.node, index) if @time.node?
 
             # TODO: Support per-tap feedback into all taps?
             # TODO: Support per-tap feedback just into that tap?
 
             @sources = {
-              delay_samples: @delay_samples,
+              **(@time.node? ? { delay: @time.node } : {}),
               multitap_delay: @mtd,
             }.freeze
 
@@ -69,22 +63,33 @@ module MB
             @smoother_started = false
           end
 
+          # The delay time as given.
+          def delay
+            @time.length
+          end
+
+          # The longest delay in samples at +sample_rate+, if known.
+          def max_delay_samples(sample_rate)
+            @time.max_samples(sample_rate)
+          end
+
           # Returns +count+ samples from this delay tap, based on the delay
           # that was given to MultitapDelay#initialize.
           def sample(count)
-            delay_buf = @delay_samples.sample(count)
-            return nil if delay_buf.nil?
+            delays = @time.samples(count, sample_rate)
+            return nil if delays.nil?
 
             if @smoother
-              delay_buf = delay_buf.real if delay_buf.is_a?(Numo::SComplex) || delay_buf.is_a?(Numo::DComplex)
+              delays = delays.real if delays.is_a?(Numo::SComplex) || delays.is_a?(Numo::DComplex)
               unless @smoother_started
-                @smoother.reset(delay_buf[0])
+                @smoother.reset(delays.is_a?(Numeric) ? delays : delays[0])
                 @smoother_started = true
               end
-              delay_buf = MB::Sound::DelayLine.smooth(@smoother, delay_buf)
+              delays = Numo::SFloat.new(count).fill(delays) if delays.is_a?(Numeric)
+              delays = MB::Sound::DelayLine.smooth(@smoother, delays)
             end
 
-            @mtd.internal_sample(self, delay_buf, @read_state)
+            @mtd.internal_sample(self, count, delays, @read_state)
           end
 
           # Changes the sample rate of all taps on this multitap delay and all
@@ -121,8 +126,11 @@ module MB
         attr_reader :interpolation
 
         # Creates a MultitapDelay that samples audio from one +source+ graph
-        # node and produces output tap nodes for each source +delay_in_seconds+
-        # (Numeric or GraphNode).
+        # node and produces output tap nodes for each of the +delays+ (any
+        # time Filter::Delay#delay= accepts: seconds, lengths like
+        # `96.samples`, Durations, graph nodes), which keep their units when
+        # the sample rate changes.  +:initial_buffer+ (any length) sizes the
+        # starting buffer; it grows as needed.
         #
         # +:interpolation+ chooses how fractional delays are read: :linear,
         # :cubic, or :sinc (see MB::Sound::DelayLine).
@@ -130,7 +138,7 @@ module MB
         # +:smoothing+ glides each tap's delay changes as for Filter::Delay
         # (true, a rate in seconds per second, or a Filter); off by default,
         # so delay jumps (e.g. a ramp restarting) stay jumps.
-        def initialize(source, *delays_in_seconds, initial_buffer_seconds: 1, sample_rate: 48000, interpolation: MB::Sound::DelayLine::DEFAULT_INTERPOLATION, smoothing: false)
+        def initialize(source, *delays, initial_buffer: 1, interpolation: MB::Sound::DelayLine::DEFAULT_INTERPOLATION, smoothing: false)
           unless MB::Sound::DelayLine::INTERPOLATION.include?(interpolation)
             raise ArgumentError, "Unknown interpolation #{interpolation.inspect} (use one of #{MB::Sound::DelayLine::INTERPOLATION.keys.join(', ')})"
           end
@@ -141,9 +149,7 @@ module MB
           @graph_node_name = nil
           @named = false
 
-          # TODO: is the sample_rate_node needed?
-          @sample_rate = sample_rate.to_f
-          @sample_rate_node = @sample_rate.constant(smoothing: false, unit: 'Hz')
+          @sample_rate = source.sample_rate.to_f
           @source = source.get_sampler
           @sources = { input: @source }.freeze
 
@@ -151,20 +157,18 @@ module MB
           # when a new graph frame has started and don't over-sample the input.
           @sampled = Set.new
 
-          if delays_in_seconds.empty?
-            raise 'No delay taps were provided; give Numeric or GraphNode values for delays'
+          if delays.empty?
+            raise ArgumentError, 'No delay taps were provided; give delay times (seconds, lengths, Durations, or graph nodes)'
           end
 
-          @taps = delays_in_seconds.map.with_index { |d, idx|
-            DelayTap.new(
-              mtd: self,
-              index: idx,
-              delay_samples: d * @sample_rate_node,
-              smoothing: smoothing
-            )
+          @taps = delays.map.with_index { |d, idx|
+            DelayTap.new(mtd: self, index: idx, delay: d, smoothing: smoothing)
           }
 
-          @line = MB::Sound::DelayLine.new((initial_buffer_seconds * sample_rate).ceil)
+          longest = @taps.filter_map { |t| t.max_delay_samples(@sample_rate) }.max
+          initial = MB::Sound::Length.samples(initial_buffer, sample_rate: @sample_rate)
+          initial = 1.1 * longest if longest && initial < 1.1 * longest
+          @line = MB::Sound::DelayLine.new(initial.ceil)
           @audio_buf = nil
         end
 
@@ -187,7 +191,6 @@ module MB
         def sample_rate=(new_rate)
           super
           @sample_rate = sample_rate.to_f
-          @sample_rate_node.constant = @sample_rate
           self
         end
         alias at_rate sample_rate=
@@ -196,7 +199,7 @@ module MB
         # delayed output for a given tap.  The first tap sampled in each graph
         # frame reads the input and writes it to the shared delay line; every
         # tap then reads the line at its own delays.
-        def internal_sample(tap, delay_buf, state = nil)
+        def internal_sample(tap, count, delays, state = nil)
           if @sampled.include?(tap.index)
             if @sampled.length < @taps.length
               warn "Delay tap #{tap} on #{self} sampled again with #{@sampled.length} of #{@taps.length} sampled"
@@ -209,19 +212,19 @@ module MB
           if @audio_buf.nil?
             # TODO: drain the delay buffer if the audio stops?  Or rely on
             # .and_then in graph DSL to append silence?
-            @audio_buf = @source.sample(delay_buf.length)
+            @audio_buf = @source.sample(delays.is_a?(Numeric) ? count : delays.length)
             return nil if @audio_buf.nil?
-
-            @line.prepare(@audio_buf.length, delay_buf.max.real.ceil, @audio_buf.class)
-            @line.write(@audio_buf)
-          else
-            # Later taps may have longer delays (growing keeps the block)
-            @line.prepare(@audio_buf.length, delay_buf.max.real.ceil, @audio_buf.class)
           end
+
+          # Later taps may have longer delays (growing keeps the block)
+          longest = delays.is_a?(Numeric) ? delays : delays.max.real
+          @line.prepare(@audio_buf.length, longest.ceil, @audio_buf.class)
+          @line.write(@audio_buf) unless @sampled.any?
 
           @sampled << tap.index
 
-          @line.read(MB::M.min(delay_buf.length, @audio_buf.length), delay_buf, interpolation: @interpolation, state: state)
+          length = delays.is_a?(Numeric) ? @audio_buf.length : MB::M.min(delays.length, @audio_buf.length)
+          @line.read(length, delays, interpolation: @interpolation, state: state)
         end
       end
     end
