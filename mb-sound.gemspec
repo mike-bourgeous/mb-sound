@@ -50,7 +50,7 @@ Gem::Specification.new do |spec|
   spec.add_runtime_dependency 'builder', '~> 3.2.4'
 
   spec.add_development_dependency 'rake', '~> 13.0.1'
-  spec.add_development_dependency 'bundler', '2.4.22'
+  spec.add_development_dependency 'bundler', '>= 2.4.22'
   spec.add_development_dependency 'rake-compiler', '~> 1.1.1'
 
   # Interactive command line gems
