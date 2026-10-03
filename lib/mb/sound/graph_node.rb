@@ -315,6 +315,8 @@ require_relative 'graph_node/data_shuffler'
 require_relative 'graph_node/wavetable'
 require_relative 'graph_node/channel_mixer'
 require_relative 'graph_node/channel_mixer/matrix'
+require_relative 'graph_node/channel_mixer/pan_laws'
+require_relative 'graph_node/channel_mixer/stereo'
 require_relative 'graph_node/fdn_reverb'
 require_relative 'graph_node/reverb'
 

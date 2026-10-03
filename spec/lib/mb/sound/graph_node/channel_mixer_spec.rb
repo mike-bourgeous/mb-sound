@@ -84,4 +84,54 @@ RSpec.describe(MB::Sound::GraphNode::ChannelMixer, :aggregate_failures) do
       expect(gain.sample_rate).to eq(96000)
     end
   end
+
+  describe 'subclasses' do
+    let(:stereo) { MB::Sound.stereo(1.constant, 0.5.constant) }
+
+    it 'declare their parameters and options for discovery' do
+      expect(MB::Sound::GraphNode::ChannelMixer::Pan.params).to eq(position: { default: 0, range: -1..1 })
+      expect(MB::Sound::GraphNode::ChannelMixer::Pan.options[:law][:values]).to eq([:equal_power, :minus_4_5db, :linear])
+      expect(MB::Sound::GraphNode::ChannelMixer::Pan.channels).to eq([1, 2])
+      expect(MB::Sound::GraphNode::ChannelMixer::Mono.channels).to eq([:any, 1])
+    end
+
+    it 'report their parameters, options, and gains' do
+      lfo = 2.hz.lfo
+      pan = MB::Sound::GraphNode::ChannelMixer::Pan.new(1.constant, position: lfo, law: :linear)
+      expect(pan.params[:position]).to equal(lfo)
+      expect(pan.option(:law)).to eq(:linear)
+      expect(pan.to_s).to start_with('Pan (law: linear, position: ')
+
+      fixed = MB::Sound::GraphNode::ChannelMixer::Pan.new(1.constant, position: -1)
+      expect(fixed.gains).to eq([[1.0], [0.0]].map { |r| r.map { |v| be_within(1e-12).of(v) } }).or eq([[Math.cos(0)], [Math.sin(0)]])
+      expect(fixed.to_s).to eq('Pan (law: equal_power, position: -1)')
+    end
+
+    it 'check channel counts and parameter ranges' do
+      expect { MB::Sound::GraphNode::ChannelMixer::Pan.new(stereo) }.to raise_error(ArgumentError, /1 input channel/)
+      expect { MB::Sound::GraphNode::ChannelMixer::Balance.new(1.constant) }.to raise_error(ArgumentError, /2 input channels/)
+      expect { MB::Sound::GraphNode::ChannelMixer::Pan.new(1.constant, position: 3) }.to raise_error(ArgumentError, /-1..1/)
+      expect { MB::Sound::GraphNode::ChannelMixer::Pan.new(1.constant, law: :wide) }.to raise_error(ArgumentError, /law/)
+      expect { MB::Sound::GraphNode::ChannelMixer::Pan.new(1.constant, volume: 1) }.to raise_error(ArgumentError, /Unknown settings/)
+    end
+
+    it 'mix width, mid/side, swap, and mono as one node each' do
+      first = ->(bundle) { bundle.outputs.map { |o| o.sample(2)[0] } }
+      expect(first.(stereo.width(0))).to eq([0.75, 0.75])
+      expect(first.(stereo.width(2))).to eq([1.25, 0.25])
+      expect(first.(stereo.mid_side)).to eq([0.75, 0.25])
+      expect(first.(stereo.mid_side.from_mid_side)).to eq([1, 0.5])
+      expect(first.(stereo.swap)).to eq([0.5, 1])
+      expect(stereo.mono.sample(2)[0]).to eq(0.75)
+      expect(stereo.width(1.5).outputs.map(&:original_source).uniq.length).to eq(1)
+      expect(stereo.width(1.5)[0].graph.grep(MB::Sound::GraphNode::ChannelMixer::Width).length).to eq(1)
+    end
+
+    it 'reads node parameters every sample' do
+      amount = MB::Sound::ArrayInput.new(data: [Numo::SFloat[0, 1, 2]])
+      l, r = stereo.width(amount).outputs.map { |o| o.sample(3).to_a }
+      expect(l).to eq([0.75, 1, 1.25])
+      expect(r).to eq([0.75, 0.5, 0.25])
+    end
+  end
 end
