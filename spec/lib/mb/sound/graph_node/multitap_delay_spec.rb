@@ -1,6 +1,6 @@
 RSpec.describe(MB::Sound::GraphNode::MultitapDelay) do
   it 'can delay a single tap by a graph constant' do
-    dly = MB::Sound::GraphNode::MultitapDelay.new(5.constant(smoothing: false).named('Const'), 4.constant, sample_rate: 1)
+    dly = MB::Sound::GraphNode::MultitapDelay.new(5.constant(smoothing: false).named('Const'), 4.constant.samples)
     tap = dly.taps[0]
 
     expect(tap.sample(10)).to eq(Numo::SFloat[0, 0, 0, 0, 5, 5, 5, 5, 5, 5])
@@ -13,7 +13,7 @@ RSpec.describe(MB::Sound::GraphNode::MultitapDelay) do
   it 'interpolates values when delayed by a fractional sample' do
     c = 0.constant(smoothing: false)
     d = 0.5.constant(smoothing: false)
-    dly = MB::Sound::GraphNode::MultitapDelay.new(c, d, sample_rate: 1, interpolation: :linear)
+    dly = MB::Sound::GraphNode::MultitapDelay.new(c, d.samples, interpolation: :linear)
     tap = dly.taps[0]
 
     expect(tap.sample(5)).to eq(Numo::SFloat[0, 0, 0, 0, 0])
@@ -31,7 +31,7 @@ RSpec.describe(MB::Sound::GraphNode::MultitapDelay) do
   it 'keeps stored audio when a longer delay grows the buffer' do
     ramp = MB::Sound::ArrayInput.new(data: [Numo::SFloat.new(20000).seq], sample_rate: 1)
     delay = 1000.constant(smoothing: false, sample_rate: 1)
-    dly = MB::Sound::GraphNode::MultitapDelay.new(ramp, delay, initial_buffer_seconds: 1500, sample_rate: 1)
+    dly = MB::Sound::GraphNode::MultitapDelay.new(ramp, delay.samples, initial_buffer: 1500.samples)
     tap = dly.taps[0]
     tap.sample(4000)
 
@@ -46,7 +46,7 @@ RSpec.describe(MB::Sound::GraphNode::MultitapDelay) do
 
     it 'jumps by default' do
       delay = 10.constant(smoothing: false, sample_rate: 1)
-      tap = MB::Sound::GraphNode::MultitapDelay.new(ramp, delay, sample_rate: 1, interpolation: :linear).taps[0]
+      tap = MB::Sound::GraphNode::MultitapDelay.new(ramp, delay.samples, interpolation: :linear).taps[0]
       tap.sample(100)
       delay.constant = 30
       expect(tap.sample(5).to_a).to eq([70, 71, 72, 73, 74])
@@ -54,7 +54,7 @@ RSpec.describe(MB::Sound::GraphNode::MultitapDelay) do
 
     it 'glides delay changes at the smoothing rate, starting at the first delay' do
       delay = 10.constant(smoothing: false, sample_rate: 1)
-      mtd = MB::Sound::GraphNode::MultitapDelay.new(ramp, delay, sample_rate: 1, interpolation: :linear, smoothing: 0.5)
+      mtd = MB::Sound::GraphNode::MultitapDelay.new(ramp, delay.samples, interpolation: :linear, smoothing: 0.5)
       tap = mtd.taps[0]
 
       # No glide up from zero at the start
@@ -88,7 +88,7 @@ RSpec.describe(MB::Sound::GraphNode::MultitapDelay) do
   end
 
   it 'can delay multiple taps by differing constant amounts' do
-    dly = MB::Sound::GraphNode::MultitapDelay.new(-2.constant, 2.5, 4.5, 0, sample_rate: 1, interpolation: :linear)
+    dly = MB::Sound::GraphNode::MultitapDelay.new(-2.constant, 2.5.samples, 4.5.samples, 0.samples, interpolation: :linear)
     two, five, zero = dly.taps
 
     expect(two.sample(6)).to eq(Numo::SFloat[0, 0, -1, -2, -2, -2])
@@ -101,7 +101,7 @@ RSpec.describe(MB::Sound::GraphNode::MultitapDelay) do
   end
 
   it 'can process complex data' do
-    dly = MB::Sound::GraphNode::MultitapDelay.new((1+1i).constant, 0.5, sample_rate: 10)
+    dly = MB::Sound::GraphNode::MultitapDelay.new((1+1i).constant, 5.samples)
     tap = dly.taps[0]
 
     expect(tap.sample(7)).to eq(Numo::SComplex[0, 0, 0, 0, 0, 1+1i, 1+1i])
@@ -110,7 +110,7 @@ RSpec.describe(MB::Sound::GraphNode::MultitapDelay) do
 
   it 'can delay by a variable amount' do
     d = 0.constant(smoothing: false).at_rate(1)
-    tap = 1.hz.square.at(1).at_rate(2).multitap(d.clip_rate(1, sample_rate: 1), sample_rate: 1)[0]
+    tap = 1.hz.square.at(1).at_rate(2).multitap(d.clip_rate(1, sample_rate: 1).samples)[0]
 
     expect(tap.sample(6)).to eq(Numo::SFloat[1, -1, 1, -1, 1, -1])
 

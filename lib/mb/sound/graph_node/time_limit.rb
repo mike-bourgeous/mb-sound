@@ -30,19 +30,22 @@ module MB
         # The source node.
         attr_reader :source
 
-        # The length: seconds (Numeric) or a Sequence::Duration.
+        # The length: seconds (Numeric), a Length (e.g. 480.samples, 250.ms),
+        # or a Sequence::Duration.
         attr_reader :length
 
         def initialize(source, length)
-          unless (length.is_a?(Numeric) || length.is_a?(Sequence::Duration)) && length.to_r >= 0
-            raise ArgumentError, "Give #until a length in seconds or a Duration (e.g. 2.bars) >= 0 (got #{length.inspect})"
+          fixed = length.is_a?(Numeric) || (length.is_a?(MB::Sound::Length) && length.fixed?)
+          unless fixed && length.to_r >= 0
+            raise ArgumentError, "Give #until a length >= 0: seconds, a Length (e.g. 480.samples), or a Duration (e.g. 2.bars) (got #{length.inspect})"
           end
 
           @source = source.get_sampler
           @length = length
           @sample_rate = @source.sample_rate.to_f
-          @elapsed = 0 # samples, for seconds
+          @elapsed = 0 # samples, for seconds and samples
           @remaining = length.to_r # whole notes, for Durations
+          @time = MB::Sound::Length::Source.new(length) unless musical?
           @node_type_name = 'Until'
         end
 
@@ -54,7 +57,7 @@ module MB
         # Returns up to +count+ samples of the source, fewer at the end of
         # the time limit, then nil.
         def sample(count)
-          remaining = musical? ? musical_samples_left : (@length * @sample_rate).round - @elapsed
+          remaining = musical? ? musical_samples_left : @time.constant_samples(@sample_rate).round - @elapsed
           return nil if remaining <= 0
 
           count = remaining if count > remaining
@@ -70,11 +73,12 @@ module MB
           data
         end
 
-        # Changes the sample rate, keeping the elapsed time in seconds.
+        # Changes the sample rate, keeping the elapsed time in seconds (a
+        # length in samples keeps counting samples).
         def sample_rate=(rate)
           old_rate = @sample_rate
           super
-          @elapsed = (@elapsed * @sample_rate / old_rate).round
+          @elapsed = (@elapsed * @sample_rate / old_rate).round if !musical? && @time.unit == :seconds
           self
         end
         alias at_rate sample_rate=
@@ -84,7 +88,7 @@ module MB
         end
 
         def to_s
-          "#{super} -- #{musical? ? @length : "#{MB::M.sigfigs(@length, 4)}s"}"
+          "#{super} -- #{@length.is_a?(Numeric) ? "#{MB::M.sigfigs(@length, 4)}s" : @length}"
         end
 
         private

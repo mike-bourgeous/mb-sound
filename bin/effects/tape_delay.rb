@@ -70,9 +70,9 @@ MB::Sound.effect_script(
     # buffer late, so the delay line is that much shorter; the input is
     # delayed by the same amount so the first echo isn't early.
     adjusted_delay = (delay_samples.named('delay in samples') - internal_bufsize.constant.named('buffer size')).clip(0, nil)
-    tape_in = inp.delay(samples: internal_bufsize, smoothing: false, sample_rate: sample_rate * p.oversample).named('loop latency')
+    tape_in = inp.delay(internal_bufsize.samples, smoothing: false).named('loop latency')
     b = (tape_in * p.drive.constant.named('drive') + 0.constant.proc { a }.named('feedback') * p.feedback)
-      .delay(samples: adjusted_delay, smoothing: p.smoothing, sample_rate: sample_rate * p.oversample)
+      .delay(adjusted_delay.samples, smoothing: p.smoothing)
       .named('delay')
 
     # Tape saturator

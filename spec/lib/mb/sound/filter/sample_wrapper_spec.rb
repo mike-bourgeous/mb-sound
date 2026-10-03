@@ -32,7 +32,7 @@ RSpec.describe(MB::Sound::Filter::SampleWrapper, :aggregate_failures) do
       a = 2.constant
       b = 15.hz
       c = a * b
-      d = c.delay(samples: 1)
+      d = c.delay(1.samples)
 
       expect(d).to be_a(MB::Sound::Filter::SampleWrapper)
       d.at_rate(1234)

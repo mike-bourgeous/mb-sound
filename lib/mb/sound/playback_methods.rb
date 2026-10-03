@@ -477,7 +477,8 @@ module MB
         session = Session.new(output: output, transport: transport, master_gain: gain || master_gain, channels: channels, buffer_size: buffer_size, realtime: false, raise_errors: true)
 
         rate = output.sample_rate
-        bars = Sequence::Duration.bars(bars, transport.bar_length)
+        bars = Sequence::Duration.bars(bars, transport.bar_length, transport: transport, sample_rate: rate)
+        seconds = Length.seconds(seconds, sample_rate: rate, transport: transport) if seconds
         end_time = bars && bars.to_r * transport.bar_length
         max_frames = ((seconds || MAX_RENDER_SECONDS) * rate).round
 

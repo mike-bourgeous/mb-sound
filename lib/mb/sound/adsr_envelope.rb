@@ -59,7 +59,9 @@ module MB
       # The number of seconds after which one-shot envelopes (and
       # MB::Sound.adsr / GraphNode#adsr by default) release: twice the
       # attack plus decay, at least 0.1 seconds.
-      def self.default_auto_release(attack_time, decay_time)
+      def self.default_auto_release(attack_time, decay_time, sample_rate: 48000)
+        attack_time = MB::Sound::Length.seconds(attack_time, sample_rate: sample_rate)
+        decay_time = MB::Sound::Length.seconds(decay_time, sample_rate: sample_rate)
         [2.0 * (attack_time + decay_time), 0.1].max
       end
 
@@ -76,6 +78,9 @@ module MB
       # +:sample_rate+ is required to ensure envelope times are accurate.
       #
       # Note that the +:sustain_level+ may be greater than 1.0.
+      #
+      # Times may be seconds or any length (e.g. `20.ms`, `480.samples`, or
+      # `1.n16`, which is converted at the current tempo).
       def initialize(attack_time:, decay_time:, sustain_level:, release_time:, sample_rate:, filter_freq: 10000)
         @sample_rate = sample_rate.to_f
         @on = false
@@ -163,9 +168,9 @@ module MB
         @peak = peak
         @value = 0
 
-        self.time = -delay
+        self.time = -time_seconds(delay)
 
-        @auto_release = auto_release
+        @auto_release = auto_release.is_a?(MB::Sound::Length) ? time_seconds(auto_release) : auto_release
         @auto_release = @attack_time + @decay_time if @auto_release == true
 
         @on = true
@@ -429,10 +434,10 @@ module MB
       # be at the same phase and amplitude (unless in the sustain phase) after
       # the update.
       def update(attack_time, decay_time, sustain_level, release_time)
-        @attack_time = attack_time.to_f
-        @decay_time = decay_time.to_f
+        @attack_time = time_seconds(attack_time)
+        @decay_time = time_seconds(decay_time)
         @sustain_level = sustain_level.to_f
-        @release_time = release_time.to_f
+        @release_time = time_seconds(release_time)
         @release_start = @attack_time + @decay_time
         @total = @attack_time + @decay_time + @release_time
 
@@ -452,6 +457,11 @@ module MB
       # description) as a one-shot.
       def fire_one_shot
         trigger(1.0, auto_release: self.class.default_auto_release(@attack_time, @decay_time))
+      end
+
+      # A time in seconds from seconds or any length (see MB::Sound::Length).
+      def time_seconds(time)
+        MB::Sound::Length.seconds(time, sample_rate: @sample_rate).to_f
       end
     end
   end
