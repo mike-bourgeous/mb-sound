@@ -132,6 +132,7 @@ end
 
 require_relative 'sound/buffer_helper'
 require_relative 'sound/circular_buffer'
+require_relative 'sound/delay_line'
 require_relative 'sound/wavetable'
 require_relative 'sound/graph_node'
 require_relative 'sound/adsr_envelope'

@@ -84,20 +84,18 @@ RSpec.describe(MB::Sound::Filter::Delay, :aggregate_failures) do
           expect(shortbuf.process(Numo::SFloat.zeros(5))).to eq(Numo::SFloat[-2,1,2,0,0])
         end
 
-        it 'can trigger buffer growth without error' do
+        it 'keeps stored audio when a longer delay grows the buffer' do
+          ramp = Numo::SFloat.new(40).seq + 1
           shortbuf.delay = 5
           shortbuf.reset_delay
+          expect(shortbuf.process(ramp[0...20])).to eq(MB::M.shr(ramp[0...20], 5))
 
-          # This should wrap around the write pointer but not the read pointer
-          expect(shortbuf.process(Numo::SFloat.zeros(11))).to eq(Numo::SFloat.zeros(11))
-          expect(shortbuf.write_offset).to be < shortbuf.read_offset
-
-          shortbuf.delay = 25
+          # The 10-sample buffer grew for the 20-sample block, keeping all
+          # of it, so a longer delay reads samples written before growing
+          shortbuf.delay = 15
           shortbuf.reset_delay
-          shortbuf.process(Numo::SFloat.zeros(1))
-
-          expect(shortbuf.write_offset).to be < shortbuf.read_offset
-          expect((shortbuf.write_offset - shortbuf.read_offset) % shortbuf.delay_buffer_size).to eq(25)
+          expect(shortbuf.process(ramp[20...30])).to eq(ramp[5...15])
+          expect(shortbuf.delay_buffer_size).to be >= 25
         end
 
         it 'accepts a sample source/graph node' do

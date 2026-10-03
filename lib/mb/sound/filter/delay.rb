@@ -23,14 +23,19 @@ module MB
         attr_accessor :feedback
 
         # Initializes a single-channel delay with a given +:delay+ in seconds,
-        # based on the +:sample_rate+..  The +:delay_buffer_size+ sets the maximum
-        # possible delay.
+        # based on the +:sample_rate+..  The +:delay_buffer_size+ sets the
+        # initial buffer size in samples; the buffer grows (keeping its
+        # audio) if a longer delay is needed, but growing allocates memory.
         #
         # If +:smoothing+ is true (the default), then the delay time will be
         # adjusted slowly to prevent sudden jumps or clicks in the output.  If
         # +:smoothing+ is a numeric value, then that is the maximum delay
         # change in seconds allowed per second.  The default smoothing rate is
         # MB::Sound::Filter::Delay::DEFAULT_SMOOTHING_RATE.
+        #
+        # The output is +:wet+ times the delayed signal plus +:dry+ times the
+        # input.  A +:feedback+ gain feeds the delayed signal back into the
+        # delay.
         def initialize(delay: 0, sample_rate: 48000, delay_buffer_size: 48000, smoothing: true, feedback: false, wet: 1, dry: 0)
           @sample_rate = sample_rate.to_f
 
@@ -38,15 +43,12 @@ module MB
             delay_buffer_size = 1.1 * delay * @sample_rate if delay_buffer_size < 1.1 * delay * @sample_rate
           end
 
-          @buf = Numo::SFloat.zeros(delay_buffer_size)
-          @out_buf = Numo::SFloat.zeros(1) # For wrap-around reads
+          @line = MB::Sound::DelayLine.new(delay_buffer_size)
           @delay = 0
           @delay_samples = 0
-          @read_offset = 0
-          @write_offset = 0
           @smooth_limit = nil
 
-          @filter_buf = Numo::SFloat.zeros(delay_buffer_size)
+          @filter_buf = Numo::SFloat.zeros(1)
 
           @feedback = feedback
           @dry = dry.to_f
@@ -56,16 +58,28 @@ module MB
           self.smoothing = smoothing
         end
 
+        # The size of the delay buffer in samples.
         def delay_buffer_size
-          @buf.length
+          @line.capacity
+        end
+
+        # Where the next input sample will be written in the delay buffer.
+        def write_offset
+          @line.write_offset
+        end
+
+        # Where a constant delay reads its next output sample in the delay
+        # buffer.
+        def read_offset
+          delay = @delay_samples.is_a?(Numeric) ? @delay_samples : @last_delay_samples.to_f.round
+          (@line.write_offset - delay) % @line.capacity
         end
 
         # Fills the entire delay line with the given value.  Future calls to
         # #process will return this value for #delay_samples samples, before
         # returning the newly written data.
         def reset(value = 0)
-          @buf.fill(value)
-          @out_buf.fill(value)
+          @line.fill(value)
           reset_delay
         end
 
@@ -149,16 +163,11 @@ module MB
             @last_delay_samples = 0
           else
             samples = samples.round
-            # If samples exceeds buffer size, the buffer will grow in #sample
-            # (not ideal for realtime use due to allocation, but it works)
-
-            delta = samples - @delay_samples
             @delay_samples = samples
             @min_delay_samples = @delay_samples
             @max_delay_samples = @delay_samples
             @last_delay_samples = @delay_samples
             @delay = samples.to_f / @sample_rate
-            @read_offset = (@write_offset - @delay_samples) % @buf.length
           end
         end
 
@@ -174,9 +183,7 @@ module MB
         # pointer is always at the start of the returned buffer copy, for
         # visualization use.
         def buffer
-          # TODO: create and reuse a single buffer
-          # TODO: should this rotate to the read pointer instead?  Or not rotate at all?
-          MB::M.rol(@buf, @write_offset)
+          @line.unwrapped
         end
 
         # Returns an Array of signal nodes and/or numeric values that feed this
@@ -186,152 +193,44 @@ module MB
           { delay_samples: @delay_samples }
         end
 
-        # Delays the given +data+ by #delay_samples samples.
-        #
-        # The +:chunk_delay_buf+ parameter is used internally for recursive
-        # calls to process chunks of data longer than the delay buffer.
-        def process(data, chunk_delay_buf: nil)
+        # Delays the given +data+ by #delay_samples samples, returning +wet+
+        # times the delayed signal plus +dry+ times the input (in +data+
+        # itself if it is in-place).  Returns nil if a delay time node ends.
+        def process(data)
           raise 'Cannot process a zero-length array' if data.length == 0
 
-          if @buf.is_a?(Numo::SFloat) && (data.is_a?(Numo::SComplex) || data.is_a?(Numo::DComplex) || @feedback.is_a?(Complex))
-            @buf = Numo::SComplex.cast(@buf)
-            @out_buf = Numo::SComplex.cast(@out_buf)
-          end
+          delays = delay_buffer(data.length)
+          return nil if delays.equal?(:end)
 
-          # Fill a buffer with the intended delay at each sample (if
-          # chunk_delay_buf is set, then this buffer was already generated and
-          # this is a recursive call for a subset of the incoming data).
-          if chunk_delay_buf
-            delay_buf = chunk_delay_buf
+          if delays
+            data = data[0...delays.length] if data.length > delays.length
+            delays = delays[0...data.length] if delays.length > data.length
+            @min_delay_samples, @max_delay_samples = delays.minmax
+            @last_delay_samples = delays[-1]
+            max_delay = @max_delay_samples
           else
-            if @delay_samples.respond_to?(:sample)
-              # TODO: maybe upstream sampling should be moved to SampleWrapper
-              # and we should use a dynamic_process method for processing with
-              # multiple inputs
-              delay_buf = @delay_samples.sample(data.length)
-              return nil if delay_buf.nil? # end of input
-            elsif @smoothing
-              if @filter_buf.length < data.length
-                @filter_buf = Numo::SFloat.zeros(data.length)
-              end
-
-              delay_buf = @filter_buf[0...data.length].fill(@delay_samples)
-            end
-
-            if @smoothing
-              delay_buf = @filter.process(delay_buf.inplace).not_inplace!
-            end
+            max_delay = @delay_samples
           end
 
-          if delay_buf
-            max_delay = delay_buf.max.ceil
-          else
-            max_delay = @delay_samples.ceil
-          end
+          complex = data.is_a?(Numo::SComplex) || data.is_a?(Numo::DComplex) || @feedback.is_a?(Complex)
+          @line.prepare(data.length, max_delay, complex ? Numo::SComplex : data.class)
 
-          # If there's zero room in the delay buffer given the maximum delay,
-          # grow the delay buffer (this should only happen if we have a dynamic
-          # delay source with long delays).
-          #
-          # TODO: use BufferHelper and promote_buffer or expand_buffer
-          max_length = @buf.length - max_delay
-          if max_length <= 0
-            max_length += 2 * max_delay
-            old_buf = @buf
-            @buf = old_buf.class.zeros(old_buf.length + 2 * max_delay)
-            @buf[0...old_buf.length] = old_buf
-
-            @read_offset = (@write_offset - max_delay) % @buf.length
-          end
-
-          # Switch to chunked processing if there's not enough room in the
-          # delay buffer for the entire incoming data, given the maximum delay.
-          if data.length > max_length
-            chunk_buf = data.inplace? ? data : data.dup.inplace
-
-            for idx in (0...data.length).step(max_length)
-              end_idx = idx + max_length
-              end_idx = data.length if end_idx > data.length
-              process(chunk_buf[idx...end_idx].inplace, chunk_delay_buf: delay_buf&.[](idx...end_idx))
-            end
-
-            return chunk_buf
-          end
-
-          # Clamp lengths to shortest input
-          if delay_buf
-            data = data[0...delay_buf.length] if data.length < delay_buf.length
-            delay_buf = delay_buf[0...data.length] if delay_buf.length < data.length
-
-            @min_delay_samples, @max_delay_samples = delay_buf.minmax
-            @last_delay_samples = delay_buf[-1]
-          end
-
-          # TODO: feedback amount from dynamic source
-          # TODO: feedback in-line cookbook filter
-          # TODO: simplify this method and write a C version
           if @feedback && @feedback != 0
-            if delay_buf
-              ret = data.map_with_index { |v_in, idx|
-                delay_idx = MB::M.min(idx, delay_buf.length - 1)
-                delay = delay_buf[idx]
-
-                min = delay.floor
-                max = delay.ceil
-                delta = delay - min
-
-                off1 = (@write_offset - min + idx) % @buf.length
-                off2 = (@write_offset - max + idx) % @buf.length
-                write_idx = (@write_offset + idx) % @buf.length
-
-                @buf[write_idx] = v_in
-                v_out = @buf[off1] * (1.0 - delta) + @buf[off2] * delta
-                @buf[write_idx] += @feedback * v_out
-
-                v_in * @dry + v_out * @wet
-              }
-            else
-              ret = data.map_with_index { |v_in, idx|
-                read_idx = (@read_offset + idx) % @buf.length
-                write_idx = (@write_offset + idx) % @buf.length
-
-                @buf[write_idx] = v_in
-                v_out = @buf[read_idx]
-                @buf[write_idx] += @feedback * v_out
-
-                v_in * @dry + v_out * @wet
-              }
-            end
-
+            delayed = @line.feedback(data, delays || @delay_samples, @feedback)
           else
-            # Copy the new data into the delay buffer
-            MB::M.circular_write(@buf, data, @write_offset)
-
-            if delay_buf
-              # Time-varying delay
-              # TODO: Something better than linear interpolation?
-              # TODO: Allow switching off interpolation?
-              # TODO: Use MB::M.fractional_index()?
-              ret = @wet * data.map_with_index { |_, idx|
-                delay = delay_buf[idx] # TODO: does this need to clamp to >= 0 ???
-                min = delay.floor
-                max = delay.ceil
-                delta = delay - min
-                @read_offset = (@write_offset - min + idx) % @buf.length
-                off2 = (@write_offset - max + idx) % @buf.length
-                @buf[@read_offset] * (1.0 - delta) + @buf[off2] * delta
-              }
-            else
-              # Constant delay
-              @out_buf = Numo::SFloat.zeros(data.length) if @out_buf.length < data.length
-              ret = @wet * MB::M.circular_read(@buf, @read_offset, data.length, target: @out_buf[0...data.length]) + @dry * data
-            end
+            @line.write(data)
+            delayed = @line.read(data.length, delays || @delay_samples)
           end
 
-          @read_offset = (@read_offset + data.length) % @buf.length
-          @write_offset = (@write_offset + data.length) % @buf.length
+          result = @wet * delayed
+          result = result + @dry * data if @dry != 0
 
-          ret
+          if data.inplace?
+            data[true] = result
+            data
+          else
+            result
+          end
         end
 
         def response
@@ -344,6 +243,29 @@ module MB
 
         def to_s_graphviz
           "Delay\nsmoothing: #{@smoothing}\nsmooth_limit: #{@smooth_limit}\nfeedback: #{@feedback}\ndry: #{@dry.to_db}\nwet: #{@wet.to_db}"
+        end
+
+        private
+
+        # Returns the delay in samples for each of +count+ samples (smoothed
+        # if smoothing is on), nil for a constant unsmoothed delay, or :end if
+        # the delay time node ended.
+        def delay_buffer(count)
+          if @delay_samples.respond_to?(:sample)
+            # TODO: maybe upstream sampling should be moved to SampleWrapper
+            # and we should use a dynamic_process method for processing with
+            # multiple inputs
+            delays = @delay_samples.sample(count)
+            return :end if delays.nil?
+          elsif @smoothing
+            @filter_buf = Numo::SFloat.zeros(count) if @filter_buf.length < count
+            delays = @filter_buf[0...count].fill(@delay_samples)
+          else
+            return nil
+          end
+
+          delays = @filter.process(delays.inplace).not_inplace! if @smoothing
+          delays
         end
       end
     end

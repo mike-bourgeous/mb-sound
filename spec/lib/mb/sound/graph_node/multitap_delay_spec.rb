@@ -21,9 +21,24 @@ RSpec.describe(MB::Sound::GraphNode::MultitapDelay) do
     c.constant = 1
     expect(tap.sample(5)).to eq(Numo::SFloat[0.5, 1, 1, 1, 1])
 
+    # A quarter sample back from the new value: 0.75 * 2 + 0.25 * 1 (the
+    # weights used to be reversed, giving 1.25)
     d.constant = 0.25
     c.constant = 2
-    expect(tap.sample(3)).to eq(Numo::SFloat[1.25, 2, 2])
+    expect(tap.sample(3)).to eq(Numo::SFloat[1.75, 2, 2])
+  end
+
+  it 'keeps stored audio when a longer delay grows the buffer' do
+    ramp = MB::Sound::ArrayInput.new(data: [Numo::SFloat.new(20000).seq], sample_rate: 1)
+    delay = 1000.constant(smoothing: false, sample_rate: 1)
+    dly = MB::Sound::GraphNode::MultitapDelay.new(ramp, delay, initial_buffer_seconds: 1500, sample_rate: 1)
+    tap = dly.taps[0]
+    tap.sample(4000)
+
+    # 4500 samples back from 4000..4999 reaches 500 samples before the start
+    delay.constant = 4500
+    data = tap.sample(1000)
+    expect(data.to_a).to eq((4000...5000).map { |v| [v - 4500, 0].max.to_f })
   end
 
   it 'can delay multiple taps by differing constant amounts' do

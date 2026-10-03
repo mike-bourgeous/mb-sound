@@ -126,11 +126,8 @@ module MB
             )
           }
 
-          @write_offset = 0
-          @read_offset = 0 # Previous write offset, not delay read point
-          @buf = Numo::SFloat[0]
+          @line = MB::Sound::DelayLine.new((initial_buffer_seconds * sample_rate).ceil)
           @audio_buf = nil
-          update_buf(Numo::SFloat, (initial_buffer_seconds * sample_rate).ceil)
         end
 
         # Sets the name of the overarching multi-tap delay node (kind of a
@@ -158,12 +155,10 @@ module MB
         alias at_rate sample_rate=
 
         # Do not use directly.  Called by DelayTap#sample to retrieve the
-        # delayed output for a given tap.
+        # delayed output for a given tap.  The first tap sampled in each graph
+        # frame reads the input and writes it to the shared delay line; every
+        # tap then reads the line at its own delays.
         def internal_sample(tap, delay_buf)
-          max_delay = delay_buf.max.ceil
-          # Ensure there are at least three buffers for delay increases without dropouts
-          max_delay = delay_buf.length if max_delay < delay_buf.length
-
           if @sampled.include?(tap.index)
             if @sampled.length < @taps.length
               warn "Delay tap #{tap} on #{self} sampled again with #{@sampled.length} of #{@taps.length} sampled"
@@ -179,67 +174,16 @@ module MB
             @audio_buf = @source.sample(delay_buf.length)
             return nil if @audio_buf.nil?
 
-            update_buf(@audio_buf.class, @audio_buf.length + 2 * max_delay)
-
-            MB::M.circular_write(@buf, @audio_buf, @write_offset)
-
-            @read_offset = @write_offset
-            @write_offset = (@write_offset + @audio_buf.length) % @buf.length
+            @line.prepare(@audio_buf.length, delay_buf.max.real.ceil, @audio_buf.class)
+            @line.write(@audio_buf)
           else
-            update_buf(@audio_buf.class, @audio_buf.length + 2 * max_delay)
-            @read_offset = (@write_offset - @audio_buf.length) % @buf.length
+            # Later taps may have longer delays (growing keeps the block)
+            @line.prepare(@audio_buf.length, delay_buf.max.real.ceil, @audio_buf.class)
           end
 
           @sampled << tap.index
 
-          # TODO: Only allocate one complex buffer per tap if needed instead of
-          # reallocating every iteration
-          if (delay_buf.is_a?(Numo::SFloat) || delay_buf.is_a?(Numo::DFloat)) &&
-              @buf.is_a?(Numo::SComplex) || @buf.is_a?(Numo::DComplex)
-            delay_buf = Numo::SComplex.cast(delay_buf)
-          end
-
-          result = delay_buf.inplace!.map_with_index { |d, idx|
-            d = d.real
-            d = 0 if d < 0
-            d = @buf.length - 1 if d >= @buf.length - 1
-
-            d1 = d.floor
-            d2 = d.ceil
-            delta = d - d1
-
-            o1 = (@read_offset - d1 + idx) % @buf.length
-            o2 = (@read_offset - d2 + idx) % @buf.length
-
-            v1 = @buf[o1]
-            v2 = @buf[o2]
-
-            v2 * (1.0 - delta) + v1 * delta
-          }.not_inplace!
-
-          result
-        end
-
-        private
-
-        # TODO: There's got to be a way to abstract this common buffer
-        # management that occurs in a lot of different classes
-        #
-        # TODO: maybe use BufferHelper
-        def update_buf(type, min_length)
-          length = min_length
-          length = @buf.length if @buf.length > min_length
-
-          if @buf.is_a?(Numo::SFloat) && (type == Numo::SComplex || type == Numo::DComplex)
-            @buf = Numo::SComplex.cast(@buf)
-          end
-
-          if @buf.length < min_length
-            old_buf = @buf
-            @buf = @buf.class.new(min_length).allocate
-            @buf[0...old_buf.length] = old_buf
-            @buf[old_buf.length..-1].fill(0)
-          end
+          @line.read(MB::M.min(delay_buf.length, @audio_buf.length), delay_buf)
         end
       end
     end
