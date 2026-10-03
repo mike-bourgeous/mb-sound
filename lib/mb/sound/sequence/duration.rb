@@ -19,6 +19,7 @@ module MB
       #     2.bars + 1.beat        # => 9 × n4
       class Duration
         include Comparable
+        include Length
 
         # Note divisions that get predefined n* methods (e.g. Note#n4 or
         # Numeric#n4).  Any other division is available with #n(k).
@@ -164,6 +165,17 @@ module MB
         # now.  The result doesn't follow later tempo changes.
         def seconds(transport = Sequence.transport)
           transport.seconds(@whole_notes).to_f
+        end
+
+        # Length protocol: the length in seconds at the tempo of +transport+
+        # right now (see Length).
+        def to_seconds(sample_rate: 48000, transport: Sequence.transport)
+          seconds(transport)
+        end
+
+        # Length protocol: the length in whole notes.
+        def to_whole_notes(sample_rate: 48000, transport: Sequence.transport)
+          @whole_notes
         end
 
         def +(other)

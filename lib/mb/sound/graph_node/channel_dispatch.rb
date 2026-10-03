@@ -93,6 +93,7 @@ module MB
           :get_sampler, :tee, :as_input, :multi_sample, :coerce,
           :spy, :debug, :clear_spies,
           :reverb, :fdn_reverb, :multitap, :multitap_delay,
+          :samples, :seconds,
         ].freeze
 
         # Modules included in GraphNode that aren't per-channel DSL methods.

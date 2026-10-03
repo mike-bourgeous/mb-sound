@@ -55,6 +55,19 @@ module MB
           ProcNode.new(self, extra_sources: sources, sample_rate: self.sample_rate, type_name: type_name, &block)
         end
 
+        # Marks this node's output as a length in samples (Length::Samples),
+        # e.g. for a delay time that changes every sample:
+        # `sig.delay(lfo.at(10..20).samples)`.
+        def samples
+          Length::Samples.new(self)
+        end
+
+        # Marks this node's output as a length in seconds (Length::Seconds).
+        # Plain nodes are already seconds where a method counts in seconds.
+        def seconds
+          Length::Seconds.new(self)
+        end
+
         # If this node (or its inputs) have a finite length of audio data
         # available (e.g. a sound file), then when they run out of data the given
         # +sources+ (other graph nodes that respond to :sample) will be played

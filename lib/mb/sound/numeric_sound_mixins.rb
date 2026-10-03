@@ -95,11 +95,29 @@ module MB
       end
 
 
-      # Returns the number of seconds at the given sample rate (default
-      # 48kHz).
-      def samples(rate = 48000)
-        self.to_f / rate
+      # Returns a length of this many samples (Length::Samples), counted at
+      # the sample rate where it's used: `sig.delay(5.samples)`.
+      def samples
+        Length::Samples.new(self)
       end
+
+      # Returns a length of this many seconds (Length::Seconds):
+      # `sig.delay(0.25.seconds)`.  Plain numbers are seconds where a method
+      # counts in seconds, but this also works where plain numbers mean bars
+      # (e.g. `fade: 2.seconds`).  Also available as #second.
+      def seconds
+        Length::Seconds.new(self)
+      end
+      alias second seconds
+
+      # Returns a length of this many milliseconds (as Length::Seconds):
+      # `sig.delay(250.ms)`.  Also available as #milliseconds and
+      # #millisecond.
+      def ms
+        Length::Seconds.new(self / 1000.0)
+      end
+      alias milliseconds ms
+      alias millisecond ms
 
       # Returns a Pitch at this frequency in Hz, which makes oscillators
       # (`100.hz.sine.at(-12.db)`) and plays as a sine when used as a signal.

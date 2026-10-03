@@ -9,6 +9,7 @@ require 'mb-util'
 # Kernel#rand here, and Oscillator::RAND and Noise::RAND below.
 srand(Integer(ENV['RANDOM_SEED'])) if ENV['RANDOM_SEED']
 
+require_relative 'sound/length'
 require_relative 'sound/numeric_sound_mixins'
 
 # Load C extensions
