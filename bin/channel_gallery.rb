@@ -44,7 +44,7 @@ CASES = {
   swap: -> { stereo_source.swap },
   matrix_2_to_3: -> {
     l, r = stereo_source.to_a
-    MB::Sound::GraphNode::MatrixMixer.new(matrix: [[1, 0.5], [0.25, -1], [0.3, 0.3]], inputs: [l, r], sample_rate: 48000).outputs
+    MB::Sound::GraphNode::ChannelMixer::Matrix.new([l, r], matrix: [[1, 0.5], [0.25, -1], [0.3, 0.3]]).outputs
   },
   reverb_hall_stereo: -> { stereo_source.reverb(:hall) },
 }
