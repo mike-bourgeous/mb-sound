@@ -408,6 +408,13 @@ module MB
         }
       end
 
+      # How busy rendering the last buffer was: its render time (before
+      # writing to the output) divided by its length in time, e.g. 0.25 when
+      # rendering takes a quarter of real time.  Nil before the first buffer.
+      def render_load
+        @load
+      end
+
       # Calls the block with every buffer of the mix (an Array of
       # Numo::SFloat, one per channel) after it is written to the output,
       # e.g. for plotting.  The arrays are new for each buffer, so the block

@@ -157,6 +157,8 @@ module MB
         @sample_rate = @playback.sample_rate.to_f
         @backend = @playback.backend
         @device_name = @playback.device_name
+        @period = @playback.period
+        @device_buffer = @period * @playback.periods
 
         if @sample_rate != requested_rate
           warn "#{@device_name} runs at #{@sample_rate.round} Hz instead of #{requested_rate} Hz"
@@ -182,7 +184,7 @@ module MB
       # output (the queue plus the sound card's own buffer).  Changes as the
       # queue fills and drains.
       def latency
-        (@playback.stats[:queued] + @playback.period * @playback.periods) / @sample_rate
+        (@playback.stats[:queued] + @device_buffer) / @sample_rate
       end
 
       # Frames queued ahead of the sound card at most (see +:latency+).
@@ -192,7 +194,7 @@ module MB
 
       # The sound card's period (frames per callback).
       def period
-        @playback.period
+        @period
       end
 
       # Statistics from the C extension: :queued, :frames_written,

@@ -62,8 +62,11 @@ module MB
       # TODO: it could make sense to have a synth or pool method on the MIDI
       # DSL as well
       #
+      # Prints the MIDI parameter map (an ACID-compatible controller
+      # definition) unless +:parameter_map+ is false.
+      #
       # See ScriptingMethods#synth_script.
-      def synth(input_name = nil, osc_count: ENV['OSC_COUNT']&.to_i || 4, channel: ENV['CHANNEL']&.to_i&.-(1))
+      def synth(input_name = nil, osc_count: ENV['OSC_COUNT']&.to_i || 4, channel: ENV['CHANNEL']&.to_i&.-(1), parameter_map: true)
         raise 'Pass a block to define individual voices' unless block_given?
 
         # TODO: further automate connecting to an output, parsing command-line
@@ -90,8 +93,10 @@ module MB
         clock&.node ||= pool
 
         # TODO: Write the parameter map to a file if requested.
-        puts MB::U.syntax(manager.to_acid_xml, :xml)
-        puts "\n" * MB::U.height
+        if parameter_map
+          puts MB::U.syntax(manager.to_acid_xml, :xml)
+          puts "\n" * MB::U.height
+        end
 
         pool
       end
