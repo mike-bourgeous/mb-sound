@@ -267,10 +267,18 @@ module MB
       alias sound_brightness brightness
       alias timbre resonance
 
-      # The MIDI::ControlSpecs of the controller nodes in use on this
-      # instance's control stream (shared by every Notes instance there),
-      # sorted by controller number, for control lists and ACID XML.
+      # A MIDI::ControlMap of the controller nodes in use on this instance's
+      # control stream (shared by every Notes instance there, so every lane
+      # of a synth), for control lists and ACID XML (`midi.controls` in the
+      # console; see MIDI::ControlMap#to_acid_xml).
       def controls
+        MIDI::ControlMap.new(self)
+      end
+
+      # The MIDI::ControlSpecs of the controller nodes in use on this
+      # instance's control stream, sorted by controller number (see
+      # #controls).
+      def control_specs
         cache = SHARED[@control_stream] || {}
         cache.values.filter_map { |ref| live(ref) }.grep(Control).map(&:spec).uniq.sort_by { |s| [s.number, s.name] }
       end

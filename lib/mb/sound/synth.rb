@@ -118,8 +118,9 @@ module MB
       # description).
       attr_reader :seed
 
-      # The output controls in use (see CONTROLS).
-      attr_reader :controls
+      # The output controls in use (see CONTROLS; the +:controls+ given to
+      # the constructor).
+      attr_reader :output_controls
 
       # See the class description.
       def initialize(
@@ -129,8 +130,8 @@ module MB
       )
         raise ArgumentError, 'Pass a block that builds the graph of one voice from |v, index|' unless block
 
-        @controls = Array(controls).uniq.freeze
-        bad = @controls - CONTROLS
+        @output_controls = Array(controls).uniq.freeze
+        bad = @output_controls - CONTROLS
         raise ArgumentError, "Unknown synth controls #{bad} (use #{CONTROLS})" unless bad.empty?
 
         @sample_rate = sample_rate.to_f
@@ -141,6 +142,7 @@ module MB
         stream = MIDI::Stream.for(source)
         stream = stream.bend_range(bend_range) if bend_range
         stream = stream.sustain if sustain
+        @sustain = !!sustain
 
         @allocator = MIDI::Allocator.new(
           stream, voices: voices, spares: spares, steal: steal, protect: protect, mono: mono,
@@ -166,12 +168,29 @@ module MB
         @sampled = []
         @frame = nil
 
-        @control_notes = Notes.new(@allocator.stream, sample_rate: @sample_rate) unless @controls.empty?
+        @control_notes = Notes.new(@allocator.stream, sample_rate: @sample_rate) unless @output_controls.empty?
         @gain = make_gain
-        @core_outputs = @channels > 1 || @controls.include?(:pan) ? Array.new(@channels) { |c| Output.new(self, c) } : nil
+        @core_outputs = @channels > 1 || @output_controls.include?(:pan) ? Array.new(@channels) { |c| Output.new(self, c) } : nil
         @final = make_pan
 
         @node_type_name = "Synth (#{@allocator.mono? ? 'mono' : "#{voices} voices"})"
+      end
+
+      # A MIDI::ControlMap of the controllers this synth responds to: the
+      # controller nodes of its lanes (shared by every lane), its output
+      # controls, and the sustain pedals unless +sustain: false+ (see
+      # #control_specs).  Prints as a listing in the console;
+      # `synth.controls.to_acid_xml` gives an ACID controller map.
+      def controls
+        MIDI::ControlMap.new(self)
+      end
+
+      # The MIDI::ControlSpecs behind #controls.
+      def control_specs
+        # Every lane (and the output controls' Notes) shares one control
+        # stream, the allocator's input
+        specs = Notes.new(@allocator.stream).control_specs
+        @sustain ? specs + MIDI::Transform::Sustain::CONTROL_SPECS : specs
       end
 
       # The number of voices (active lanes) the allocator allows.
@@ -441,8 +460,8 @@ module MB
       # squared by #apply_gain), or nil.
       def make_gain
         parts = []
-        parts << @control_notes.volume if @controls.include?(:volume)
-        parts << @control_notes.expression if @controls.include?(:expression)
+        parts << @control_notes.volume if @output_controls.include?(:volume)
+        parts << @control_notes.expression if @output_controls.include?(:expression)
         return nil if parts.empty?
 
         node = parts.length == 1 ? parts[0] : GraphNode::Multiplier.new(parts, sample_rate: @sample_rate)
@@ -452,7 +471,7 @@ module MB
       # The pan stage (a mono synth panned, or a stereo synth balanced), or
       # nil.
       def make_pan
-        return nil unless @controls.include?(:pan)
+        return nil unless @output_controls.include?(:pan)
 
         if @channels > 2
           raise ArgumentError, "The pan control needs a mono or stereo synth (lanes have #{@channels} channels)"

@@ -1,0 +1,87 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<parammap mapname="test_synth" ver="1" summary="" params="4">
+  <param name="Modulation">
+    <flags>
+      <flag>DEFAULT</flag>
+      <flag>ACTIVE</flag>
+      <flag>LOCAL</flag>
+    </flags>
+    <ChannelMask>1</ChannelMask>
+    <MIDIMsg>176</MIDIMsg>
+    <ccMsg>1</ccMsg>
+    <CurveType>LINEAR</CurveType>
+    <CurveMask>
+      <curve>HOLD</curve>
+      <curve>LINEAR</curve>
+      <curve>LOG FAST</curve>
+      <curve>LOG SLOW</curve>
+      <curve>CUBIC SHARP TANGENT</curve>
+      <curve>CUBIC SMOOTH</curve>
+    </CurveMask>
+    <Min>0</Min>
+    <Max>127</Max>
+    <Neutral>0</Neutral>
+  </param>
+  <param name="Volume">
+    <flags>
+      <flag>DEFAULT</flag>
+      <flag>ACTIVE</flag>
+      <flag>LOCAL</flag>
+    </flags>
+    <ChannelMask>1</ChannelMask>
+    <MIDIMsg>176</MIDIMsg>
+    <ccMsg>7</ccMsg>
+    <CurveType>LINEAR</CurveType>
+    <CurveMask>
+      <curve>HOLD</curve>
+      <curve>LINEAR</curve>
+      <curve>LOG FAST</curve>
+      <curve>LOG SLOW</curve>
+      <curve>CUBIC SHARP TANGENT</curve>
+      <curve>CUBIC SMOOTH</curve>
+    </CurveMask>
+    <Min>0</Min>
+    <Max>127</Max>
+    <Neutral>100</Neutral>
+  </param>
+  <param name="Cutoff">
+    <flags>
+      <flag>DEFAULT</flag>
+      <flag>ACTIVE</flag>
+      <flag>LOCAL</flag>
+    </flags>
+    <ChannelMask>1</ChannelMask>
+    <MIDIMsg>176</MIDIMsg>
+    <ccMsg>20</ccMsg>
+    <CurveType>LINEAR</CurveType>
+    <CurveMask>
+      <curve>HOLD</curve>
+      <curve>LINEAR</curve>
+      <curve>LOG FAST</curve>
+      <curve>LOG SLOW</curve>
+      <curve>CUBIC SHARP TANGENT</curve>
+      <curve>CUBIC SMOOTH</curve>
+    </CurveMask>
+    <Min>0</Min>
+    <Max>127</Max>
+    <Neutral>64</Neutral>
+  </param>
+  <param name="Sustain">
+    <flags>
+      <flag>DEFAULT</flag>
+      <flag>ACTIVE</flag>
+      <flag>LOCAL</flag>
+      <flag>SWITCH</flag>
+    </flags>
+    <ChannelMask>65535</ChannelMask>
+    <MIDIMsg>176</MIDIMsg>
+    <ccMsg>64</ccMsg>
+    <CurveType>HOLD</CurveType>
+    <CurveMask>
+      <curve>HOLD</curve>
+    </CurveMask>
+    <Min>0</Min>
+    <Max>127</Max>
+    <Neutral>0</Neutral>
+  </param>
+</parammap>

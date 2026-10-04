@@ -142,7 +142,7 @@ RSpec.describe(MB::Sound::MidiMethods, :aggregate_failures) do
       s = MB::Sound.synth('spec/test_data/c_major.mid', seed: 5, controls: [:volume]) { |v, i| v.hz * v.env }
       expect(s.voices).to eq(8)
       expect(s.seed).to eq(5)
-      expect(s.controls).to eq([:volume])
+      expect(s.output_controls).to eq([:volume])
 
       mono = MB::Sound.synth('spec/test_data/c_major.mid', voices: 1) { |v| v.hz * v.env }
       expect(mono).to be_mono
