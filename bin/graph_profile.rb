@@ -7,6 +7,11 @@
 # players launched immediately).  Only the graph is measured: no Session
 # mixing, master effects, or output.
 #
+# --profile wraps every node's #sample, which adds about 3 us per call, so
+# cheap nodes called often (Constant, Tee branches) look more expensive than
+# they are; compare self times between branches rather than reading them as
+# absolute costs, and use the unprofiled percentages for speedups.
+#
 # Graphs that take an input (effects) get spec/test_data/arp_a7.flac unless
 # script arguments name another file; synths need a MIDI file argument.
 #
