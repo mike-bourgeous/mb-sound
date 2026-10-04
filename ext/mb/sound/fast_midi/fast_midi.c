@@ -21,6 +21,11 @@
 
 #include "rtmidi_c.h"
 
+#ifdef __UNIX_JACK__
+#include <stdio.h>
+#include <jack/jack.h>
+#endif
+
 // The longest message (e.g. SysEx) read at once
 #define MAX_MESSAGE 65536
 
@@ -107,6 +112,47 @@ static VALUE protected_port_names(VALUE device)
 {
 	return port_names((RtMidiPtr)device);
 }
+
+/*
+ * call-seq: MB::Sound::FastMIDI.jack_server? -> true or false
+ *
+ * True if a JACK server (jackd, or PipeWire through pipewire-jack) accepts
+ * a client, checked by opening and closing one without starting a server.
+ * libjack's connection errors are silenced during the check.  Always false
+ * when this build has no JACK support (e.g. macOS).
+ */
+#ifdef __UNIX_JACK__
+static void jack_silent(const char *msg)
+{
+	(void)msg;
+}
+
+static void jack_stderr(const char *msg)
+{
+	fprintf(stderr, "%s\n", msg);
+}
+
+static VALUE ruby_jack_server(VALUE self)
+{
+	jack_status_t status;
+
+	jack_set_error_function(jack_silent);
+	jack_set_info_function(jack_silent);
+	jack_client_t *client = jack_client_open("mb_sound_probe", JackNoStartServer, &status);
+	if (client != NULL) {
+		jack_client_close(client);
+	}
+	jack_set_error_function(jack_stderr);
+	jack_set_info_function(jack_stderr);
+
+	return client != NULL ? Qtrue : Qfalse;
+}
+#else
+static VALUE ruby_jack_server(VALUE self)
+{
+	return Qfalse;
+}
+#endif
 
 /*
  * call-seq:
@@ -464,6 +510,7 @@ void Init_fast_midi(void)
 	rb_define_module_function(fast_midi, "compiled_apis", ruby_compiled_apis, 0);
 	rb_define_module_function(fast_midi, "input_ports", ruby_input_ports, 2);
 	rb_define_module_function(fast_midi, "output_ports", ruby_output_ports, 2);
+	rb_define_module_function(fast_midi, "jack_server?", ruby_jack_server, 0);
 
 	VALUE input = rb_define_class_under(fast_midi, "Input", rb_cObject);
 	rb_define_alloc_func(input, input_alloc);

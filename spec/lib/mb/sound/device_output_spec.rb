@@ -1,5 +1,3 @@
-require 'socket'
-
 RSpec.describe(MB::Sound::DeviceOutput, :aggregate_failures) do
   DEVICE_OUTPUT_ENV = [
     'AUDIO_BACKEND', 'OUTPUT_DEVICE', 'DEVICE', 'AUDIO_SAMPLE_RATE', 'AUDIO_PROFILE', 'AUDIO_BUFFER', 'AUDIO_LATENCY',
@@ -331,22 +329,10 @@ RSpec.describe(MB::Sound::DeviceOutput, :aggregate_failures) do
     end
 
     describe '.jack_running?' do
-      before { allow(MB::Sound::DeviceOutput).to receive(:`).and_return('') } # no jackd process
-
-      it 'ignores files JACK2 leaves behind after the server exits' do
-        stale = tmp_path('jack_default_0_0')
-        File.write(stale, '')
-        allow(Dir).to receive(:glob).and_return([stale])
-        expect(MB::Sound::DeviceOutput.jack_running?).to eq(false)
-      end
-
-      it 'finds a server socket' do
-        path = tmp_path('jack_default_0_0')
-        server = UNIXServer.new(path)
-        allow(Dir).to receive(:glob).and_return([path])
+      it 'asks JACK whether a server accepts clients' do
+        allow(MB::Sound::FastMIDI).to receive(:jack_server?).and_return(true, false)
         expect(MB::Sound::DeviceOutput.jack_running?).to eq(true)
-      ensure
-        server&.close
+        expect(MB::Sound::DeviceOutput.jack_running?).to eq(false)
       end
     end
 

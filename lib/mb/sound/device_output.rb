@@ -128,26 +128,15 @@ module MB
           name[0, 63]
         end
 
-        # True if a JACK server (jackd or jackdbus) seems to be running.
+        # True if a JACK server accepts clients: jackd, or PipeWire through
+        # pipewire-jack (FastMIDI.jack_server? opens and closes a client without
+        # starting a server; ~5 ms).  Always false without JACK support (macOS).
+        # Guessing from processes and files failed under PipeWire (no jackd) and
+        # after jackd exits (JACK2 leaves /dev/shm/jack-shm-registry).
         def jack_running?
-          # Server sockets only: JACK2 leaves /dev/shm/jack-shm-registry (and
-          # sometimes shm segments) behind after the server exits.
-          uid = Process.uid
-          sockets = Dir.glob([
-            "/dev/shm/jack_*_#{uid}_*", # JACK2 on Linux
-            "/dev/shm/jack-#{uid}/*/*", "/tmp/jack-#{uid}/*/*", "/run/user/#{uid}/jack/*", # JACK1, other layouts
-          ])
-
-          !`pgrep -x 'jackd|jackdbus' 2>/dev/null`.strip.empty? || sockets.any? { |f| File.socket?(f) }
+          FastMIDI.jack_server?
         end
-
-        # True if a PipeWire server's socket exists (PipeWire can also serve
-        # JACK clients through pipewire-jack).
-        def pipewire_running?
-          dir = ENV['XDG_RUNTIME_DIR'] || "/run/user/#{Process.uid}"
-          File.socket?(File.join(dir, 'pipewire-0'))
-        end
-
+        
         # Called by outputs as they open and close, so open outputs are
         # closed at exit before Ruby tears down.
         def track(output, open)

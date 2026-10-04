@@ -13,12 +13,12 @@ module MB
       # to connect to, named after the script (see DeviceOutput.client_name).
       # With +:connect+ (or MIDI_DEVICE), the input connects to the first
       # MIDI source whose name contains it (or to that index; see .ports),
-      # also searching JACK when MIDI defaults to ALSA (see .find_port).
+      # also searching the other API's ports (see .find_port).
       #
       # Environment variables take precedence:
       #   MIDI_API=jack        API: core (macOS), alsa or jack (Linux); by
-      #                        default JACK when a JACK server is running,
-      #                        else ALSA
+      #                        default JACK when a JACK server answers
+      #                        (jackd, or PipeWire's JACK), else ALSA
       #   MIDI_DEVICE=name     a source to connect to instead of a virtual port
       #
       # Example:
@@ -48,9 +48,9 @@ module MB
           # the first API searched, has that index): sources for +kind+
           # :input, destinations for :output.  Without an explicit +api+ or
           # MIDI_API, ports of the other compiled APIs are searched after the
-          # default one, so e.g. a JACK MIDI program (jack-keyboard) is found
-          # under PipeWire while MIDI defaults to ALSA; JACK is searched only
-          # when a JACK or PipeWire server runs, to avoid libjack's errors.
+          # default one: ALSA sequencer ports (hardware that plain jackd
+          # doesn't bridge) when JACK is the default, and JACK only when a
+          # JACK server answers (DeviceOutput.jack_running?).
           #
           # Returns [api, index, name, {api => [names]}] (index and name nil
           # when nothing matched; api is then the default API).
@@ -112,7 +112,7 @@ module MB
             return [chosen] if api || (ENV['MIDI_API'] && !ENV['MIDI_API'].empty?)
 
             others = apis - [chosen]
-            others.delete(:jack) unless DeviceOutput.jack_running? || DeviceOutput.pipewire_running?
+            others.delete(:jack) unless DeviceOutput.jack_running?
             [chosen, *others]
           end
         end
