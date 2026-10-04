@@ -36,7 +36,10 @@ module MB
       # until half of it has played), so a MIDI read can come up to the whole
       # queue after the event arrived.  With DeviceOutput's :default profile
       # (50 ms queue, 128-frame period, 512-sample buffers) L is about 63 ms;
-      # :low is about 18 ms.  L follows the output's (adaptive) queue limit;
+      # :low is about 18 ms.  (Measured on the dummy JACK server with
+      # 256-frame periods and 512-sample buffers, events sent at cycle
+      # starts needed up to the queue plus 416 frames; L allowed the queue
+      # plus 768.)  L follows the output's (adaptive) queue limit;
       # event times never go backwards when it changes.
       #
       # :asap places every event at the start of the read that polled it

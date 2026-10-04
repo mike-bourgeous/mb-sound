@@ -321,4 +321,110 @@ RSpec.describe(MB::Sound::MIDI::LiveSource, :aggregate_failures) do
       expect(fake.closed?).to eq(true)
     end
   end
+
+  context 'with a JACK server' do
+    before(:context) { @jack_error = JackDummy.start }
+    after(:context) { JackDummy.stop }
+
+    around(:each) do |ex|
+      names = %w[AUDIO_BACKEND OUTPUT_DEVICE DEVICE MIDI_API MIDI_DEVICE JACK_CLIENT_NAME AUDIO_PROFILE AUDIO_LATENCY AUDIO_BUFFER]
+      saved = names.to_h { |k| [k, ENV.delete(k)] }
+      ex.run
+    ensure
+      saved.each { |k, v| v ? ENV[k] = v : ENV.delete(k) }
+    end
+
+    before(:each) do
+      skip @jack_error if @jack_error
+      ENV['AUDIO_BACKEND'] = 'jack'
+      ENV['OUTPUT_DEVICE'] = 'none'
+      ENV['JACK_CLIENT_NAME'] = "mbspec_live#{rand(1 << 20)}"
+      @opened = []
+    end
+
+    after(:each) do
+      @opened.reverse_each(&:close)
+      MB::Sound::Jack.close
+    end
+
+    def open(obj)
+      @opened << obj
+      obj
+    end
+
+    # Plays like a Session (read MIDI for a buffer, then write the buffer)
+    # with a click on the sample of each note-on, while another JACK client
+    # sends notes; returns the clicks' captured indices by note number and
+    # the source.
+    def play_notes(timing:, notes: 12, buffer_size: 512)
+      out = open(MB::Sound::DeviceOutput.new(channels: 1, latency: 0.2, adaptive: false, capture: 48000 * 4))
+      keyboard = open(MB::Sound::FastMIDI::Output.new(:jack, "#{ENV['JACK_CLIENT_NAME']}_keys", nil, 'out'))
+      inp = open(MB::Sound::MIDI::Input.new(connect: "#{ENV['JACK_CLIENT_NAME']}_keys"))
+      reference = open(MB::Sound::MIDI::Input.new(connect: "#{ENV['JACK_CLIENT_NAME']}_keys"))
+      expect(inp.api).to eq(:jack)
+      src = open(MB::Sound::MIDI::LiveSource.new(inp, output: out, timing: timing))
+
+      sender = Thread.new do
+        sleep 0.3
+        notes.times do |i|
+          keyboard.send_bytes([0x90, 40 + i, 100].pack('C*'))
+          sleep 0.0137 + 0.011 * (i % 3)
+        end
+        sleep 0.5
+      end
+
+      clicks = {}
+      n = 0
+      while sender.alive?
+        from = Rational(n * buffer_size, 48000)
+        buf = Numo::SFloat.zeros(buffer_size)
+        src.read(from, from + Rational(buffer_size, 48000)).each do |e|
+          next unless e.note_on?
+          offset = (e.time - from) * 48000
+          expect(offset.denominator).to eq(1) if timing == :exact
+          buf[offset.floor] = e.note
+        end
+        out.write([buf])
+        n += 1
+      end
+
+      wait_until = MB::U.clock_now + 2
+      sleep 0.01 until out.frames_played > out.frames_written + 9600 || MB::U.clock_now > wait_until
+      played = out.captured[0]
+      played.to_a.each_with_index { |v, i| clicks[v.round] = i if v != 0 }
+
+      [clicks, reference.read_raw, out, src]
+    end
+
+    it 'places JACK MIDI on the output sample that plays at its frame plus the latency' do
+      clicks, raw, out, src = play_notes(timing: :exact)
+      expect(src.frame_exact?).to eq(true)
+      expect(out.underruns).to eq(1) # only before the first write
+      expect(raw.length).to eq(12)
+      expect(clicks.length).to eq(12)
+      expect(src.late_events).to eq(0)
+
+      latency = src.latency * 48000
+      expect(latency).to eq(out.queue_limit + 256 + 512)
+
+      clock = out.jack_clock
+      expected = raw.to_h { |frame, bytes|
+        delta = ((frame - clock[:frame_time] + 0x8000_0000) & 0xffff_ffff) - 0x8000_0000
+        [bytes.bytes[1], clock[:frames_played] + delta + latency]
+      }
+      expect(clicks).to eq(expected)
+    end
+
+    it 'snaps JACK MIDI to buffers with :asap timing' do
+      clicks, _raw, _out, src = play_notes(timing: :asap)
+      expect(clicks.length).to eq(12)
+      expect(src.latency).to be_nil
+
+      # Every click is on a buffer boundary of the written audio (the first
+      # write started at frame 0 of the queue, but the captured audio has
+      # silence from before it)
+      starts = clicks.values.map { |i| i % 512 }.uniq
+      expect(starts.length).to eq(1)
+    end
+  end
 end
