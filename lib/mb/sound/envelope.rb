@@ -63,6 +63,9 @@ module MB
       SEGMENTS = [:attack, :decay, :release].freeze
       RELEASE_NODE = 2
 
+      # Keys for the last values of curve nodes (see #fit).
+      CURVE_KEYS = SEGMENTS.map { |s| [s, :"#{s}_curve"] }.to_h.freeze
+
       # Curve presets in dB: [attack, decay, release].
       CURVES = {
         linear: [0, 0, 0].freeze,
@@ -299,6 +302,7 @@ module MB
       def attack=(time)
         @times[:attack] = Length::Source.new(time)
         @default_hold = nil
+        changed!
       end
       alias attack_time= attack=
 
@@ -306,12 +310,14 @@ module MB
       def decay=(time)
         @times[:decay] = Length::Source.new(time)
         @default_hold = nil
+        changed!
       end
       alias decay_time= decay=
 
       # Changes the release time (seconds, a length, or a graph node).
       def release=(time)
         @times[:release] = Length::Source.new(time)
+        changed!
       end
       alias release_time= release=
 
@@ -319,6 +325,7 @@ module MB
       # peak).
       def sustain=(level)
         @sustain = param(level, 'Sustain')
+        changed!
       end
       alias sustain_level= sustain=
 
@@ -335,6 +342,7 @@ module MB
       def hold=(time)
         time = false if time.is_a?(Numeric) && time.infinite?
         @hold = time.nil? || time == false ? time : Length::Source.new(time)
+        changed!
       end
 
       # Sets curves for any segments (see .curve_values) and returns self, or
@@ -352,6 +360,7 @@ module MB
         spec = args.length == 1 ? args.first : args
         values = self.class.curve_values(spec, @curves || SEGMENTS.zip(CURVES[:analog]).to_h)
         @curves = values.transform_values { |v| v.is_a?(Numeric) ? v : v.get_sampler }
+        changed!
         self
       end
       alias curves curve
@@ -360,6 +369,7 @@ module MB
       # restart the attack again if +enabled+ is false).  Returns self.
       def legato(enabled = true)
         @legato = !!enabled
+        changed!
         self
       end
 
@@ -393,6 +403,7 @@ module MB
         @velocity_low = low
         @velocity_high = high
         @velocity_scale = scale
+        changed!
         self
       end
 
@@ -407,6 +418,7 @@ module MB
         depth = depth.to_octaves if depth.respond_to?(:to_octaves) # TODO: Interval (branch interval)
         depth = nil if depth == 0
         @octaves = depth&.to_f
+        changed!
       end
 
       # The current stage: :idle, :attack, :decay, :sustain, :release, :choke,
@@ -487,6 +499,7 @@ module MB
           @state[STATE_POSITION] = (@state[STATE_POSITION] * @sample_rate / old_rate).round
           @state[STATE_PLANNED] = 0
         end
+        changed!
         self
       end
       alias at_rate sample_rate=
@@ -743,24 +756,48 @@ module MB
 
         @buf = Numo::SFloat.zeros(count) if @buf.nil? || @buf.length != count
 
-        times = SEGMENTS.map { |s| read_length(s, @times[s], count) }
-        curves = SEGMENTS.map { |s| read_param(:"#{s}_curve", @curves[s], count) }
-        levels = [1.0, read_param(:sustain, @sustain, count), 0.0]
-        hold = @hold == false ? Float::INFINITY : read_length(:hold, @hold || default_hold, count)
-        inputs = [
-          read_input(:gate, @gate, count, 0.0),
-          read_input(:trigger, @trigger, count, 0.0),
-          read_input(:velocity, @velocity, count, nil),
-          read_input(:choke, @choke, count, 0.0),
-        ]
+        # Constant arguments are computed once (see #changed!); nodes are
+        # read into the same Arrays every buffer.
+        args = @args ||= kernel_args
+        times, curves, levels, inputs, config = args
+        SEGMENTS.each_with_index do |s, i|
+          times[i] = read_length(s, @times[s], count) if @times[s].node?
+          curves[i] = read_param(CURVE_KEYS[s], @curves[s], count) unless @curves[s].is_a?(Numeric)
+        end
+        levels[1] = read_param(:sustain, @sustain, count) unless @sustain.is_a?(Numeric)
+        hold = args[5]
+        hold = read_length(:hold, @hold || default_hold, count) if hold.nil?
+        inputs[0] = read_input(:gate, @gate, count, 0.0) if @gate.respond_to?(:sample)
+        inputs[1] = read_input(:trigger, @trigger, count, 0.0) if @trigger.respond_to?(:sample)
+        inputs[2] = read_input(:velocity, @velocity, count, nil) if @velocity.respond_to?(:sample)
+        inputs[3] = read_input(:choke, @choke, count, 0.0) if @choke.respond_to?(:sample)
 
         if kernel == :ruby
-          self.class.process_ruby(@buf, @state, times, curves, levels, hold, inputs, kernel_config)
+          self.class.process_ruby(@buf, @state, times, curves, levels, hold, inputs, config)
         else
-          MB::Sound::FastEnvelope.process(@buf, @state, times, curves, levels, hold, inputs, kernel_config)
+          MB::Sound::FastEnvelope.process(@buf, @state, times, curves, levels, hold, inputs, config)
         end
 
         @buf
+      end
+
+      # Forgets the cached kernel arguments after a parameter change.
+      def changed!
+        @args = nil
+      end
+
+      # Kernel arguments with constants filled in (nil for nodes): [times,
+      # curves, levels, inputs, config, hold].
+      def kernel_args
+        times = SEGMENTS.map { |s| @times[s].node? ? nil : @times[s].constant_samples(@sample_rate) }
+        curves = SEGMENTS.map { |s| @curves[s].is_a?(Numeric) ? @curves[s] : nil }
+        levels = [1.0, @sustain.is_a?(Numeric) ? @sustain : nil, 0.0]
+        inputs = [@gate, @trigger, @velocity, @choke].map { |v| v.respond_to?(:sample) ? nil : v }
+
+        hold_source = @hold == false ? nil : (@hold || default_hold)
+        hold = hold_source.nil? ? Float::INFINITY : (hold_source.node? ? nil : hold_source.constant_samples(@sample_rate))
+
+        [times, curves, levels, inputs, kernel_config, hold]
       end
 
       # Reads a length source in samples (a number or NArray).  Lengths from
