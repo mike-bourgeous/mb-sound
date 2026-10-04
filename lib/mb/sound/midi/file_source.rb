@@ -105,6 +105,11 @@ module MB
           @loop ? nil : @offset + @content_end
         end
 
+        # The file's first note-on (see Source#first_note).
+        def first_note
+          @events.find(&:note_on?)
+        end
+
         private
 
         def seek_to(time)

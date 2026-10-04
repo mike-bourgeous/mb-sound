@@ -19,9 +19,20 @@ module MB
       #
       # A live source may return events slightly before +from+ (late
       # events); Stream moves those to +from+.
+      #
+      # Sources that know their content may also tell which note would be
+      # sounding at a jump (#chase) and which note comes first
+      # (#first_note), so held values like note numbers can jump to the
+      # note at the new position (like ClipNode does; see
+      # MB::Sound::Notes).
       module Source
         include GraphNode::Nameable
         include GraphNode::Traversable
+
+        # The note to chase where the content last jumped (see
+        # Source#chase): the #generation of the jump, the stream +time+ of
+        # the jump, and a note-on +event+ for the note.
+        Chase = Data.define(:generation, :time, :event)
 
         # Stream time (Rational seconds) up to which this source has been
         # read.
@@ -98,6 +109,25 @@ module MB
           nil
         end
 
+        # The note most recently started in the content at the latest jump
+        # (#seek, #restart, a timeline jump, or a clip swap; like
+        # Sequence::Clip#event_at) as a Chase, or nil if there is none or
+        # the source can't tell.  Readers compare
+        # Chase#generation to #generation to see whether it belongs to the
+        # latest jump.  The note isn't played again (sources only send
+        # note-offs at jumps); this is for values that hold the last note,
+        # like a note number.
+        def chase
+          @chase
+        end
+
+        # A note-on Event for the first note of the content, or nil if
+        # unknown (e.g. live sources), for the starting values of held
+        # note numbers and velocities (so oscillators don't start at 0 Hz).
+        def first_note
+          nil
+        end
+
         def to_s
           node_type_name
         end
@@ -119,6 +149,15 @@ module MB
         def jumped
           @generation = generation + 1
           @jump_pending = true
+          note = chase_event
+          @chase = note && Chase.new(generation: @generation, time: position, event: note.at(position))
+        end
+
+        # Returns a note-on Event for the note most recently started at the
+        # current content position, or nil (see #chase).  Overridden by sources that
+        # know their content.
+        def chase_event
+          nil
         end
 
         # Whether #read keeps notes balanced (see #read); transforms read

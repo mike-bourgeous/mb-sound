@@ -9,7 +9,9 @@ module MB
       #
       # Fields:
       # - +type+: :note_on, :note_off, :poly_pressure, :cc, :program,
-      #   :channel_pressure, :bend, :sysex, or :system.  A note-on with
+      #   :channel_pressure, :bend, :sysex, or :system for MIDI messages, or
+      #   :choke or :glide for events that only exist inside the program (see
+      #   .choke and .glide; they have no bytes).  A note-on with
       #   velocity 0 becomes a :note_off (with the conventional release
       #   velocity of 64).  Channel mode messages (CC 120-127) stay :cc; see
       #   #all_sound_off?, #reset_controllers?, and #all_notes_off?.
@@ -34,12 +36,19 @@ module MB
       # - +bend_range+: for :bend events, the bend range in semitones in
       #   effect for the event's channel (set by Stream from RPN 0 and
       #   Stream#bend_range; see #bend_semitones).
+      # - +legato+: true for a note-on that continues a phrase although the
+      #   stream it is in has no other note held (e.g. a mono voice whose
+      #   previous note was ended by an allocator at the same time), so
+      #   legato-only glides and similar behavior still apply.  False by
+      #   default.  Not sent as MIDI.
       #
       # Examples:
       #     Event.parse("\x90\x3c\x40")          # note_on C4 (60), velocity 64/127
       #     Event.note_on(60, 0.5, channel: 9)   # normalized velocity
       #     Event.bend(-1.0).bend_semitones      # => -2.0
-      class Event < Data.define(:type, :channel, :note, :value, :velocity, :raw, :bytes, :time, :bend_range)
+      #     Event.choke(channel: 0)              # silence a voice quickly
+      #     Event.glide(48)                      # next note glides from C3
+      class Event < Data.define(:type, :channel, :note, :value, :velocity, :raw, :bytes, :time, :bend_range, :legato)
         # The pitch bend range in semitones when nothing else sets it.
         DEFAULT_BEND_RANGE = 2
 
@@ -68,10 +77,13 @@ module MB
         # (0xf1 to 0xf6; sysex and realtime messages are handled separately).
         SYSTEM_DATA_BYTES = { 0xf1 => 1, 0xf2 => 2, 0xf3 => 1, 0xf6 => 0 }.freeze
 
-        def initialize(type:, time: 0r, channel: nil, note: nil, value: nil, velocity: nil, raw: nil, bytes: nil, bend_range: nil)
+        def initialize(type:, time: 0r, channel: nil, note: nil, value: nil, velocity: nil, raw: nil, bytes: nil, bend_range: nil, legato: false)
           bytes = bytes.pack('C*') if bytes.is_a?(Array)
           bytes = bytes.b.freeze if bytes && !(bytes.frozen? && bytes.encoding == Encoding::BINARY)
-          super(type: type, channel: channel, note: note, value: value, velocity: velocity, raw: raw, bytes: bytes, time: time.to_r, bend_range: bend_range)
+          super(
+            type: type, channel: channel, note: note, value: value, velocity: velocity, raw: raw, bytes: bytes,
+            time: time.to_r, bend_range: bend_range, legato: !!legato
+          )
         end
 
         # Parses one complete MIDI message (a String or Array of bytes) at
@@ -204,12 +216,12 @@ module MB
 
         # A note-on event.  +velocity+ is 0..1 and is kept as given (not
         # rounded to a MIDI value); the raw velocity is at least 1, since 0
-        # would mean note-off.
-        def self.note_on(note, velocity = 1.0, channel: 0, time: 0r)
+        # would mean note-off.  See the class description for +:legato+.
+        def self.note_on(note, velocity = 1.0, channel: 0, time: 0r, legato: false)
           raw = MB::M.max(raw7(velocity), 1)
           new(
             type: :note_on, channel: channel, note: note, value: velocity.to_f, velocity: velocity.to_f,
-            raw: raw, bytes: note_bytes(:note_on, channel, note, raw), time: time
+            raw: raw, bytes: note_bytes(:note_on, channel, note, raw), time: time, legato: legato
           )
         end
 
@@ -237,6 +249,23 @@ module MB
         def self.bend(value, channel: 0, time: 0r)
           raw = bend_raw(value)
           new(type: :bend, channel: channel, value: value.to_f, raw: raw, bytes: [0xe0 | channel, raw & 0x7f, raw >> 7], time: time)
+        end
+
+        # A choke: silences the notes of a voice quickly (a 3 ms release in
+        # Envelope; see MB::Sound::Notes#choke), e.g. when an allocator
+        # steals the voice.  +note+ may name the note being choked, or be
+        # nil.  Not a MIDI message (no bytes).
+        def self.choke(note = nil, channel: 0, time: 0r)
+          new(type: :choke, channel: channel, note: note, value: 1.0, time: time)
+        end
+
+        # A glide: the next note-on glides to its pitch from +note+ (a note
+        # number) instead of from the current pitch, in pitches that glide
+        # (see MB::Sound::Notes::NotePitch#glide), like MIDI CC 84
+        # (portamento control).  An allocator sends these to idle voices for
+        # polyphonic glide.  Not a MIDI message (no bytes).
+        def self.glide(note, channel: 0, time: 0r)
+          new(type: :glide, channel: channel, note: note, time: time)
         end
 
         # A program change (+program+ 0..127).
@@ -285,6 +314,21 @@ module MB
 
         def bend?
           type == :bend
+        end
+
+        # True for :choke events (see .choke).
+        def choke?
+          type == :choke
+        end
+
+        # True for :glide events (see .glide).
+        def glide?
+          type == :glide
+        end
+
+        # True for a note-on marked as legato (see the class description).
+        def legato?
+          legato
         end
 
         # True for channel mode messages (CC 120 to 127).
@@ -343,9 +387,10 @@ module MB
                  when :cc, :poly_pressure then "#{note}=#{MB::M.sigfigs(value, 3)}"
                  when :bend then "#{MB::M.sigfigs(value, 4)}#{" (#{MB::M.sigfigs(bend_semitones, 4)} st)" if bend_range}"
                  when :sysex then "#{bytes.bytesize} bytes"
+                 when :choke, :glide then note.inspect
                  else value.inspect
                  end
-          "#{type}#{"/ch#{channel}" if channel} #{desc} @#{t}s"
+          "#{type}#{"/ch#{channel}" if channel} #{desc}#{' legato' if legato} @#{t}s"
         end
       end
     end
