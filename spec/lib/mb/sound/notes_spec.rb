@@ -445,6 +445,56 @@ RSpec.describe(MB::Sound::Notes) do
     end
   end
 
+  describe '#cutoff and #quality' do
+    it 'multiply the base by brightness, the envelope, and key tracking' do
+      v = notes_for(ev.note_on(72, 1.0), ev.cc_raw(74, 127, time: 1/100r), ev.cc_raw(74, 0, time: 2/100r))
+      c = v.cutoff(500, env: false)
+      k = v.cutoff(500, env: false, keytrack: 1, gm: false)
+      out = run({ c: c, k: k }, buffer: 480, buffers: 3)
+      expect(out[:c][0]).to be_within(1e-3).of(500 * 2 ** 0.5)
+      expect(out[:c][480]).to be_within(1e-2).of(500 * 4 * 2 ** 0.5)
+      expect(out[:c][960]).to be_within(1e-3).of(500 / 4.0 * 2 ** 0.5)
+      expect(out[:k].to_a.uniq).to eq([1000])
+    end
+
+    it 'adds a default filter envelope of 2 octaves' do
+      v = notes_for(ev.note_on(60, 1.0), ev.note_off(60, time: 1r), ev.cc(99, 0, time: 10r))
+      c = v.cutoff(200)
+      expect(c.env).to be_a(MB::Sound::Notes::NoteEnvelope)
+      expect(c.env.octaves).to eq(2)
+      expect(v.envelopes).to include(c.env)
+      out = 60.times.map { c.sample(480).dup }.reduce(:concatenate) # past the 0.4 s decay
+      expect(out.max).to be_within(1).of(800) # peak: base x 2 ** 2 at full velocity
+      expect(out[-1]).to be_within(5).of(200 * 2 ** (2 * 0.3))
+      expect(c.gm?).to eq(true)
+      expect(c.env.gm?).to eq(true)
+      c.gm(false)
+      expect(c.env.gm?).to eq(false)
+      expect(c.sources).not_to have_key(:brightness)
+    end
+
+    it 'clamps to 1 Hz..0.49 x the sample rate' do
+      v = notes_for(ev.note_on(127))
+      expect(v.cutoff(20000, env: false, keytrack: 1).sample(10)[0]).to eq(0.49 * 48000)
+      expect(v.cutoff(0.0, env: false).sample(10)[0]).to eq(1)
+    end
+
+    it 'scales quality by resonance' do
+      v = notes_for(ev.cc_raw(71, 64), ev.cc_raw(71, 127, time: 1/100r), ev.cc_raw(71, 0, time: 2/100r))
+      q = v.quality(2)
+      out = run({ q: q, n: v.quality(2, gm: false) }, buffer: 480, buffers: 3)
+      expect(out[:q][[0, 480, 960]].to_a).to eq([2, 8, 1])
+      expect(out[:n].to_a.uniq).to eq([2])
+    end
+
+    it 'works in a filter', :check_shared do
+      v = notes_for(ev.note_on(48, 1.0), ev.note_off(48, time: 1/2r), ev.cc(99, 0, time: 10r))
+      sig = v.hz.saw.filter(:lowpass, cutoff: v.cutoff(400), quality: v.quality(3)) * v.amp_env
+      out = 30.times.map { sig.sample(800).dup }.reduce(:concatenate)
+      expect(out.abs.max).to be_between(0.1, 2)
+    end
+  end
+
   describe 'ending' do
     let(:clip) { MB::Sound.seq(MB::Sound::C4, MB::Sound::E4).n8 } # 0.5 s at 120 BPM
 

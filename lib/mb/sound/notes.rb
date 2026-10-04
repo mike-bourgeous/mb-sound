@@ -306,6 +306,35 @@ module MB
       alias tone hz
       alias pitch hz
 
+      # A filter cutoff in Hz following the notes (a Notes::Cutoff), for
+      # GraphNode#filter's +cutoff:+: +base+ (Hz, a Pitch, or a node) ×
+      # brightness (CC 74, ±2 octaves around 64; GM, on unless +gm: false+
+      # or `.gm(false)`) × +env+ (a cutoff multiplier such as #filt_env; by
+      # default filt_env(0, 0.4, 0.3, 0.3) with a depth of 2 octaves; false
+      # for none) × key tracking 2 ** ((note − 60) / 12 × +keytrack+) (0.5
+      # by default: half an octave per octave).
+      #
+      #     play v.hz.saw.filter(:lowpass, cutoff: v.cutoff(800), quality: v.quality(4)) * v.amp_env
+      #     v.cutoff(300, env: v.filt_env(0.01, 1, 0.2, 0.5, depth: 4), keytrack: 1)
+      def cutoff(base, env: nil, keytrack: 0.5, gm: true)
+        base = base.constant? ? base.frequency : base.freq if base.is_a?(MB::Sound::Pitch)
+        own = env.nil?
+        env = filt_env(0, 0.4, 0.3, 0.3, gm: gm) if own
+        env = nil if env == false
+
+        c = Cutoff.new(base, number: number, keytrack: keytrack, env: env, brightness: -> { brightness }, sample_rate: @sample_rate)
+        c.own_env! if own
+        c.gm(gm)
+      end
+
+      # A filter quality following resonance (a Notes::Quality), for
+      # GraphNode#filter's +quality:+: +q+ (a number or node) × CC 71
+      # (x0.5 at 0, x1 at 64, x4 at 127, exponential; GM, on unless +gm:
+      # false+ or `.gm(false)`).
+      def quality(q = 1.0, gm: true)
+        Quality.new(q, resonance: -> { resonance }, sample_rate: @sample_rate).gm(gm)
+      end
+
       # The envelopes made through this instance (see #env).
       def envelopes
         @envelopes.dup
@@ -394,3 +423,4 @@ require_relative 'notes/channel_nodes'
 require_relative 'notes/frequency'
 require_relative 'notes/note_envelope'
 require_relative 'notes/note_pitch'
+require_relative 'notes/filter_nodes'
