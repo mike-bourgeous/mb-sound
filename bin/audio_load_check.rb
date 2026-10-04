@@ -73,6 +73,7 @@ MB::Sound.script(
   backend: [nil, String, '-b', 'Backends to try, comma-separated (e.g. jack,pulseaudio)'],
   device: [nil, String, '-d', 'Device index or part of its name'],
   rate: [48000, Integer, '-r', 'Sample rate to ask for', 8000..384000],
+  oversample: [4, Integer, 'fm_bass oversampling factor (1 for none)', 1..8],
 ) { |_args, p|
   list = ->(s, conv) { s.split(',').map { |v| conv.(v.strip) } }
   buffers = list.(p.buffers, ->(v) { Integer(v) })
@@ -80,15 +81,19 @@ MB::Sound.script(
   latencies = list.(p.latencies, ->(v) { Float(v) })
   backends = MB::Sound::DeviceOutput.backends(p.backend)
 
-  midi = File.join(Dir.mktmpdir('audio_load_check'), 'riff.mid')
+  tmpdir = Dir.mktmpdir('audio_load_check')
   combos = buffers.product(periods, latencies)
-  write_riff(midi, p.seconds + 2)
 
-  puts "Load: #{p.load}; #{combos.length} settings, #{p.seconds} s each " \
+  puts "Load: #{p.load}; #{combos.length} settings, #{p.seconds} s each, fm_bass oversampled #{p.oversample}x " \
     "(RUBY_THREAD_TIMESLICE=#{ENV['RUBY_THREAD_TIMESLICE'] || 'default'})"
   puts
 
-  results = combos.map do |buffer, period, latency|
+  results = combos.each_with_index.map do |(buffer, period, latency), index|
+    # A new file for each setting: MB::Sound.midi_manager reuses the reader
+    # (and its clock) for a filename it has seen before.
+    midi = File.join(tmpdir, "riff_#{index}.mid")
+    write_riff(midi, p.seconds + 2)
+
     out = MB::Sound::DeviceOutput.new(
       channels: 2, sample_rate: p.rate, device: p.device, backends: backends,
       buffer_size: buffer, period: period, latency: latency
@@ -97,15 +102,17 @@ MB::Sound.script(
     session = MB::Sound::Session.new(output: out, transport: MB::Sound::Sequence::Transport.new, buffer_size: buffer)
     loads = []
     latencies_seen = []
+    peak = 0.0
     warm = false
-    session.add_tap {
+    session.add_tap { |mix|
       next unless warm
       loads << session.render_load
       latencies_seen << out.latency
+      peak = [peak, *mix.map { |c| c.abs.max }].max
     }
 
     session.add(MB::Sound.stereo_drone, at: :now) unless p.load == 'fm_bass'
-    session.add(MB::Sound.fm_bass(midi, parameter_map: false), at: :now) unless p.load == 'stereo_drone'
+    session.add(MB::Sound.fm_bass(midi, parameter_map: false, oversample: p.oversample), at: :now) unless p.load == 'stereo_drone'
 
     sleep 1
     warm = true
@@ -116,17 +123,17 @@ MB::Sound.script(
 
     result = {
       buffer: buffer, period: out.period, queue: out.queue_limit, rate: out.sample_rate.round,
-      underruns: underruns, seconds: p.seconds,
+      underruns: underruns, seconds: p.seconds, peak: peak,
       load_mean: loads.empty? ? 0 : loads.sum / loads.length, load_p99: percentile(loads, 0.99), load_max: loads.max || 0,
       latency_min: latencies_seen.min || 0, latency_max: latencies_seen.max || 0,
     }
 
     puts format('write %4d  period %4d  queue %5d (%5.1f ms)  latency %5.1f..%5.1f ms  ' \
-                'load mean %3d%% p99 %3d%% max %3d%%  underruns %d%s',
+                'load mean %3d%% p99 %3d%% max %3d%%  peak %6.1f dB  underruns %d%s',
                 buffer, result[:period], result[:queue], result[:queue] * 1000.0 / result[:rate],
                 result[:latency_min] * 1000, result[:latency_max] * 1000,
                 result[:load_mean] * 100, result[:load_p99] * 100, result[:load_max] * 100,
-                underruns, underruns == 0 ? '' : '  <--')
+                peak > 0 ? peak.to_db : -999, underruns, peak < 1e-4 ? '  <-- silent' : underruns == 0 ? '' : '  <--')
     result
   end
 
