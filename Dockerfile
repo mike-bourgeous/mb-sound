@@ -1,4 +1,4 @@
-FROM docker.io/library/ruby:4.0.3
+FROM docker.io/library/ruby:4.0.7
 
 ARG DEBIAN_FRONTEND=none
 RUN apt-get -y update && apt-get -y upgrade && apt-get -y --no-install-recommends install \
