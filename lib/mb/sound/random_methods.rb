@@ -12,7 +12,8 @@ module MB
     # DEFAULT_SEED, so renders repeat from run to run; set another with
     # `seed 42` (bin/sound.rb).
     #
-    # Users so far: Tone#random_phase (alias #rnd).  Older randomness keeps
+    # Users so far: Tone#random_phase (alias #rnd), Synth (per-lane seeds
+    # through #with_seed).  Older randomness keeps
     # its own generators for now: Oscillator::RAND / Phasor::RAND /
     # Noise::RAND (noise), Kernel#rand (ADSREnvelope#randomize), Clip seeds
     # (probability, #permute), and Reverb/FdnReverb seeds; they could move to

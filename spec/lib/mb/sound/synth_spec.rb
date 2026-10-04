@@ -230,6 +230,14 @@ RSpec.describe(MB::Sound::Synth) do
     expect(h[10000]).to eq(0)
   end
 
+  it 'changes the sample rate of every lane and control' do
+    s = described_class.new(source(ev.note_on(48, time: 1/10r)), voices: 2, controls: [:volume]) { |v| v.gate }
+    s.sample_rate = 24000
+    expect(s.notes.map { |v| v.gate.sample_rate }).to all(eq(24000))
+    out = render(s, buffers: 10)
+    expect(out.to_a.index { |x| x > 0 }).to eq(2400)
+  end
+
   describe 'channels' do
     it 'mixes multichannel lanes per channel, repeating narrower lanes' do
       s = described_class.new(source(ev.note_on(48), ev.note_on(52)), voices: 2, spares: 0) { |v, i|

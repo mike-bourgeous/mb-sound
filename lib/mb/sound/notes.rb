@@ -31,8 +31,9 @@ module MB
     #     play v.hz.saw * v.gate
     #     v.number.smooth(0.05, reset: v.trigger)
     #
-    # In progress (step D of the MIDI flow plan): the Allocator, synth
-    # wiring, and the clip/console/script integration come later.
+    # MB::Sound::Synth builds one Notes per MIDI::Allocator lane (step F2
+    # of the MIDI flow plan); the clip/console/script integration comes
+    # later.
     class Notes
       # The note number held before the first note when the source can't
       # tell its first note (C4).
