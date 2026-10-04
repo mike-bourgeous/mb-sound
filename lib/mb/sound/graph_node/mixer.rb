@@ -87,7 +87,28 @@ module MB
         # constructor) returns nil or an empty buffer, then this method will
         # return nil.
         def sample(count)
-          arithmetic_sample(count, sources: @gains, pad: 0, fill: @constant, stop_early: @stop_early) do |retbuf, inputs|
+          sampled = @gains.map { |s, gain| [s.sample(count), gain] }
+
+          # Fast path: the same arithmetic as below without the general
+          # bookkeeping, when every input is a full buffer of our type; a
+          # gain of 1 skips its multiply (1 * v == v exactly)
+          if arithmetic_fast?(count, sampled, @constant) && @tmpbuf.class == @buf.class && @tmpbuf.length >= count
+            retbuf = arithmetic_view(@buf, count, :buf)
+            retbuf.fill(@constant)
+            tmpbuf = nil
+            sampled.each do |v, gain|
+              if gain == 1
+                retbuf.inplace + v
+              else
+                tmpbuf ||= arithmetic_view(@tmpbuf, count, :tmp)
+                tmpbuf.fill(gain).inplace * v
+                retbuf.inplace + tmpbuf
+              end
+            end
+            return retbuf.not_inplace!
+          end
+
+          arithmetic_combine(count, sampled, sources: @gains, pad: 0, fill: @constant, stop_early: @stop_early) do |retbuf, inputs|
             inputs.each do |v, gain|
               tmpbuf = @tmpbuf[0...v.length]
               tmpbuf.fill(gain).inplace * v
