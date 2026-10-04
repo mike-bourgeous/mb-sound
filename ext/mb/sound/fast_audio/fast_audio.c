@@ -24,6 +24,8 @@
 #include <errno.h>
 #include <unistd.h>
 #include <math.h>
+#include <stdio.h>
+#include <dlfcn.h>
 
 #include <samplerate.h>
 
@@ -190,6 +192,73 @@ static VALUE ruby_devices(VALUE self, VALUE backends, VALUE client_name)
 	rb_ensure(device_list_body, (VALUE)&args, device_list_ensure, (VALUE)&args);
 
 	return args.result;
+}
+
+/*
+ * JACK server probe, loading libjack at run time like miniaudio does, so it
+ * needs no JACK headers at build time and finds whichever libjack the
+ * system resolves (e.g. PipeWire's through pipewire-jack's ld.so config).
+ */
+typedef struct jack_client_t jack_client_t;
+typedef jack_client_t *(*jack_client_open_fn)(const char *name, int options, int *status, ...);
+typedef int (*jack_client_close_fn)(jack_client_t *client);
+typedef void (*jack_set_function_fn)(void (*func)(const char *));
+
+#define MB_JACK_NO_START_SERVER 0x01
+
+static void jack_silent(const char *msg)
+{
+	(void)msg;
+}
+
+static void jack_stderr(const char *msg)
+{
+	fprintf(stderr, "%s\n", msg);
+}
+
+/*
+ * call-seq: MB::Sound::FastAudio.jack_server? -> true or false
+ *
+ * True if a JACK server (jackd, or PipeWire through pipewire-jack) accepts
+ * a client, checked by opening and closing one without starting a server
+ * (~5 ms).  libjack's connection errors are silenced during the check.
+ * False if libjack can't be loaded.
+ */
+static VALUE ruby_jack_server(VALUE self)
+{
+	static void *lib = NULL;
+	static const char *names[] = { "libjack.so.0", "libjack.so", "libjack.0.dylib", "libjack.dylib" };
+
+	for (size_t i = 0; lib == NULL && i < sizeof(names) / sizeof(names[0]); i++) {
+		// Kept open: libjack may already be loaded (RtMidi), and unloading
+		// it isn't safe
+		lib = dlopen(names[i], RTLD_NOW | RTLD_GLOBAL);
+	}
+	if (lib == NULL) {
+		return Qfalse;
+	}
+
+	jack_client_open_fn client_open = (jack_client_open_fn)dlsym(lib, "jack_client_open");
+	jack_client_close_fn client_close = (jack_client_close_fn)dlsym(lib, "jack_client_close");
+	jack_set_function_fn set_error = (jack_set_function_fn)dlsym(lib, "jack_set_error_function");
+	jack_set_function_fn set_info = (jack_set_function_fn)dlsym(lib, "jack_set_info_function");
+	if (client_open == NULL || client_close == NULL) {
+		return Qfalse;
+	}
+
+	if (set_error) set_error(jack_silent);
+	if (set_info) set_info(jack_silent);
+
+	int status = 0;
+	jack_client_t *client = client_open("mb_sound_probe", MB_JACK_NO_START_SERVER, &status);
+	if (client != NULL) {
+		client_close(client);
+	}
+
+	if (set_error) set_error(jack_stderr);
+	if (set_info) set_info(jack_stderr);
+
+	return client != NULL ? Qtrue : Qfalse;
 }
 
 /*
@@ -1751,6 +1820,7 @@ void Init_fast_audio(void)
 	rb_define_const(fast_audio, "MINIAUDIO_VERSION", rb_str_freeze(rb_str_new_cstr(MA_VERSION_STRING)));
 	rb_define_module_function(fast_audio, "enabled_backends", ruby_enabled_backends, 0);
 	rb_define_module_function(fast_audio, "devices", ruby_devices, 2);
+	rb_define_module_function(fast_audio, "jack_server?", ruby_jack_server, 0);
 
 	VALUE playback = rb_define_class_under(fast_audio, "Playback", rb_cObject);
 	rb_define_alloc_func(playback, playback_alloc);

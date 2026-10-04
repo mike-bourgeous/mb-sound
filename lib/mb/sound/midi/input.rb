@@ -40,8 +40,21 @@ module MB
             if apis.include?(:jack) && apis.include?(:alsa)
               DeviceOutput.jack_running? ? :jack : :alsa
             else
+              warn_without_jack if apis.include?(:alsa)
               apis.first
             end
+          end
+
+          # Warns once if a JACK server answers but this build's MIDI has no
+          # JACK support (the JACK headers were missing when it was compiled).
+          def warn_without_jack
+            return if @warned_without_jack
+            @warned_without_jack = true
+            return unless DeviceOutput.jack_running?
+
+            warn "A JACK server is running, but MIDI was built without JACK (no JACK headers), so MIDI uses ALSA.\n" \
+              "For JACK MIDI: install libjack-jackd2-dev (or your distro's JACK headers), then\n" \
+              "  rm -rf tmp/*/fast_midi && bundle exec rake compile"
           end
 
           # Finds the first MIDI port whose name contains +connect+ (or, in

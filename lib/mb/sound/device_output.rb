@@ -129,12 +129,13 @@ module MB
         end
 
         # True if a JACK server accepts clients: jackd, or PipeWire through
-        # pipewire-jack (FastMIDI.jack_server? opens and closes a client without
-        # starting a server; ~5 ms).  Always false without JACK support (macOS).
+        # pipewire-jack (FastAudio.jack_server? loads libjack at run time and opens
+        # and closes a client without starting a server; ~5 ms).  False without
+        # libjack.
         # Guessing from processes and files failed under PipeWire (no jackd) and
         # after jackd exits (JACK2 leaves /dev/shm/jack-shm-registry).
         def jack_running?
-          FastMIDI.jack_server?
+          FastAudio.jack_server?
         end
         
         # Called by outputs as they open and close, so open outputs are

@@ -330,7 +330,7 @@ RSpec.describe(MB::Sound::DeviceOutput, :aggregate_failures) do
 
     describe '.jack_running?' do
       it 'asks JACK whether a server accepts clients' do
-        allow(MB::Sound::FastMIDI).to receive(:jack_server?).and_return(true, false)
+        allow(MB::Sound::FastAudio).to receive(:jack_server?).and_return(true, false)
         expect(MB::Sound::DeviceOutput.jack_running?).to eq(true)
         expect(MB::Sound::DeviceOutput.jack_running?).to eq(false)
       end

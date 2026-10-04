@@ -85,9 +85,14 @@ MB::Sound.script(
     puts "  #{var}=#{ENV[var]}" if ENV[var]
   end
 
-  if apis.include?(:jack)
-    jack = fast.jack_server?
-    puts "JACK server answers: #{jack ? 'yes' : 'no'} (a JACK client opened without starting a server)"
+  jack = MB::Sound::FastAudio.jack_server?
+  puts "JACK server answers: #{jack ? 'yes' : 'no'} (a JACK client opened without starting a server)"
+  unless apis.include?(:jack) || RUBY_PLATFORM !~ /linux/
+    puts '  JACK MIDI is not compiled in (no JACK headers at build time); install libjack-jackd2-dev,'
+    puts '  then: rm -rf tmp/*/fast_midi && bundle exec rake compile'
+  end
+
+  if jack || apis.include?(:jack)
 
     libs = loaded_libraries(/libjack/)
     if libs

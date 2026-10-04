@@ -17,6 +17,10 @@ else
   if have_header('jack/jack.h') && have_library('jack', 'jack_client_open')
     $defs << '-D__UNIX_JACK__'
     $defs << '-DJACK_HAS_PORT_RENAME' if have_func('jack_port_rename', 'jack/jack.h')
+  else
+    warn "\n*** JACK headers not found: building MIDI without JACK MIDI (ALSA only).\n" \
+      "*** For JACK MIDI (jackd or PipeWire), install libjack-jackd2-dev (or libjack-dev)\n" \
+      "*** and rebuild: rm -rf tmp/*/fast_midi && bundle exec rake compile\n\n"
   end
 
   $libs << ' -lstdc++'

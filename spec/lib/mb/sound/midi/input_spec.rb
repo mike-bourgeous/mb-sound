@@ -26,6 +26,15 @@ RSpec.describe(MB::Sound::MIDI::Input, :aggregate_failures) do
       expect(MB::Sound::MIDI::Input.api).to eq(:alsa)
     end
 
+    it 'warns once when JACK runs but MIDI was built without JACK' do
+      allow(MB::Sound::FastMIDI).to receive(:compiled_apis).and_return([:alsa])
+      allow(MB::Sound::DeviceOutput).to receive(:jack_running?).and_return(true)
+      MB::Sound::MIDI::Input.instance_variable_set(:@warned_without_jack, nil)
+
+      expect { expect(MB::Sound::MIDI::Input.api).to eq(:alsa) }.to output(/MIDI was built without JACK.*libjack-jackd2-dev/m).to_stderr
+      expect { MB::Sound::MIDI::Input.api }.not_to output.to_stderr
+    end
+
     it 'uses CoreMIDI on macOS' do
       allow(MB::Sound::FastMIDI).to receive(:compiled_apis).and_return([:core])
       expect(MB::Sound::MIDI::Input.api).to eq(:core)
@@ -97,7 +106,7 @@ RSpec.describe(MB::Sound::MIDI::Input, :aggregate_failures) do
 
     it 'defaults to JACK MIDI when a JACK server answers' do
       ENV.delete('MIDI_API')
-      expect(MB::Sound::FastMIDI.jack_server?).to eq(true)
+      expect(MB::Sound::FastAudio.jack_server?).to eq(true)
       expect(MB::Sound::MIDI::Input.api).to eq(:jack)
 
       inp = input(connect: 'mbspec_key')
