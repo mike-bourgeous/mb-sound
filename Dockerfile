@@ -10,7 +10,7 @@ COPY .bashrc /root/.bashrc
 
 RUN mkdir /app
 COPY . /app
-RUN cd /app && bundle install
+RUN cd /app && bundle install && bundle exec rake compile
 
 VOLUME /app
 WORKDIR /
