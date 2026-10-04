@@ -403,6 +403,24 @@ RSpec.describe(MB::Sound::PlaybackMethods) do
       expect(MB::Sound::Session.default.instance_variable_get(:@taps)).to be_empty
     end
 
+    it "shows each buffer after the output's latency, when it is heard" do
+      out = MB::Sound::NullOutput.new(channels: 2)
+      out.define_singleton_method(:latency) { 0.2 }
+      MB::Sound.use_output(out)
+      MB::Sound.bg(220.hz.sine)
+
+      start = MB::U.clock_now
+      first = nil
+      allow_any_instance_of(MB::Sound::PlotOutput).to receive(:plot) { |_, _data|
+        first ||= MB::U.clock_now
+        raise Interrupt
+      }
+      allow($stdout).to receive(:write)
+
+      MB::Sound.visualize
+      expect(first - start).to be >= 0.18
+    end
+
     it 'is also called vis' do
       expect(MB::Sound.method(:vis)).to eq(MB::Sound.method(:visualize))
     end

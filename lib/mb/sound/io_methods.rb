@@ -220,8 +220,9 @@ module MB
       # the default being 'system:capture_'.
       #
       # The input type may be changed using the INPUT_TYPE environment
-      # variable.  Supported input types are :jack_ffi, :jack, :alsa_pulse,
-      # :alsa, and :null.
+      # variable.  Supported input types are :device (sound cards through
+      # miniaudio; see DeviceInput), :jack_ffi, :jack, :alsa_pulse, :alsa,
+      # and :null.  On macOS, :device is used when JackD is not running.
       #
       # See FFMPEGInput, mb-sound-jackffi, JackInput, and AlsaInput for more
       # flexible recording.
@@ -246,6 +247,9 @@ module MB
 
         when :alsa
           inp = MB::Sound::AlsaInput.new(device: device || 'default', sample_rate: sample_rate, channels: channels, buffer_size: buffer_size)
+
+        when :device
+          inp = MB::Sound::DeviceInput.new(channels: channels, sample_rate: sample_rate, device: device, buffer_size: buffer_size)
 
         when :null
           # TODO: Allow changing the duration of the null input using environment variables
@@ -299,7 +303,7 @@ module MB
               :jack
             end
           else
-            raise NotImplementedError, 'JackD is currently required for audio input on macOS'
+            :device
           end
 
         else

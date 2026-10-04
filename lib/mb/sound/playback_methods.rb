@@ -399,8 +399,21 @@ module MB
           return nil
         end
 
+        # Each buffer is shown when it reaches the speakers: the tap runs
+        # right after a buffer is written, so it plays after the output's
+        # current latency (DeviceOutput#latency; outputs without one are
+        # shown right away)
+        output = session.output
+        due = []
+        due_lock = Mutex.new
+        tap = session.add_tap { |mix|
+          delay = output.respond_to?(:latency) ? output.latency : 0
+          due_lock.synchronize {
+            due << [MB::U.clock_now + delay, mix]
+            due.shift while due.length > 1000
+          }
+        }
         latest = nil
-        tap = session.add_tap { |mix| latest = mix }
 
         header = "\e[H\e[J\e[36mVisualizing the background mix\e[0m\n\n"
         $stdout.write header
@@ -417,6 +430,11 @@ module MB
         start = MB::U.clock_now
         shown = nil
         loop do
+          now = MB::U.clock_now
+          due_lock.synchronize {
+            latest = due.shift[1] while due.first && due.first[0] <= now
+          }
+
           data = latest
           if data.nil? || data.equal?(shown)
             sleep 0.001

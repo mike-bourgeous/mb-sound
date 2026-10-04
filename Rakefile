@@ -84,6 +84,8 @@ MEMCHECK_SPECS = [
   'spec/lib/mb/sound/filter/smoothstep_spec.rb',   # FastSound.smoothstep*
   'spec/lib/mb/sound/graph_node/resample_spec.rb', # FastResample (libsamplerate)
   'spec/lib/mb/sound/graph_node/constant_spec.rb', # FastSound.smootherstep_buf
+  'spec/lib/mb/sound/device_output_spec.rb',       # FastAudio::Playback
+  'spec/lib/mb/sound/device_input_spec.rb',        # FastAudio::Capture
 ].freeze
 
 begin

@@ -152,6 +152,26 @@ RSpec.describe(MB::Sound::IOMethods) do
     end
   end
 
+  describe '#detect_input' do
+    around(:each) do |ex|
+      orig = ENV.delete('INPUT_TYPE')
+      ex.run
+    ensure
+      orig ? ENV['INPUT_TYPE'] = orig : ENV.delete('INPUT_TYPE')
+    end
+
+    it 'uses the sound card on macOS when JackD is not running' do
+      stub_const('RUBY_PLATFORM', 'arm64-darwin24')
+      allow(MB::Sound).to receive(:`).with('pgrep jackd').and_return('')
+      expect(MB::Sound.detect_input(nil)).to eq(:device)
+    end
+
+    it 'uses INPUT_TYPE' do
+      ENV['INPUT_TYPE'] = 'device'
+      expect(MB::Sound.detect_input(nil)).to eq(:device)
+    end
+  end
+
   describe '#read' do
     it 'can read a sound file' do
       a = MB::Sound.read('sounds/sine/sine_100_1s_mono.flac')

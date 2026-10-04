@@ -93,8 +93,8 @@ module MB
 
         # Lists the playback devices of the first working backend from
         # .backends: an Array of Hashes with :index, :name, and :default.
-        def devices(backends: nil)
-          FastAudio.devices(self.backends(backends), client_name)[:playback]
+        def devices(backends: nil, kind: :playback)
+          FastAudio.devices(self.backends(backends), client_name)[kind]
         end
 
         # The backend .devices and new outputs would use.
@@ -104,16 +104,17 @@ module MB
 
         # Returns the device index for +device+ (an Integer index, a String of
         # digits, or part of a device name, case-insensitive), or -1 for the
-        # default device if +device+ is nil, empty, or 'default'.
-        def device_index(device, backends: nil)
+        # default device if +device+ is nil, empty, or 'default'.  +:kind+ is
+        # :playback or :capture (see DeviceInput).
+        def device_index(device, backends: nil, kind: :playback)
           return -1 if device.nil? || device.to_s.strip.empty? || device.to_s == 'default'
           return Integer(device) if device.is_a?(Integer) || device.to_s =~ /\A\d+\z/
 
-          list = devices(backends: backends)
+          list = devices(backends: backends, kind: kind)
           found = list.find { |d| d[:name].downcase.include?(device.to_s.downcase) }
           if found.nil?
             names = list.map { |d| "  #{d[:index]}: #{d[:name]}" }.join("\n")
-            raise ArgumentError, "No output device matches #{device.inspect}.  Devices:\n#{names}"
+            raise ArgumentError, "No #{kind == :capture ? 'input' : 'output'} device matches #{device.inspect}.  Devices:\n#{names}"
           end
 
           found[:index]
