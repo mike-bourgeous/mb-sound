@@ -3,7 +3,7 @@ module MB
     class Notes
       # A Tone made from a Notes pitch (Notes#hz): its phase resets at each
       # note-on of the Notes instance (key sync, Tone#reset(v.trigger)) by
-      # default.  Calling #free, #lfo (or #no_trigger), #sync, or #softsync
+      # default.  Calling #free, #lfo, #sync, or #softsync
       # drops the key sync quietly, since those mean the tone isn't reset by
       # notes; #reset replaces it; #rnd keeps it (a random phase at each
       # note).
@@ -41,8 +41,8 @@ module MB
           super
         end
 
-        def no_trigger(trig = true)
-          drop_key_sync if trig
+        def lfo
+          drop_key_sync
           super
         end
 

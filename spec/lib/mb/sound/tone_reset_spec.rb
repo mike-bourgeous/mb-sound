@@ -325,7 +325,7 @@ RSpec.describe('Tone reset inputs, free and random phases') do
         expect(t.free?).to eq(false)
         expect(t.free).to equal(t)
         expect(t.free?).to eq(true)
-        expect(t.no_trigger?).to eq(true)
+        expect(t.lfo?).to eq(false)
       end
 
       it 'is not implied by #lfo' do
