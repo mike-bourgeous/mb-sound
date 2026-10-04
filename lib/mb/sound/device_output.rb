@@ -25,8 +25,16 @@ module MB
     #                                  two writes)
     #   AUDIO_BACKEND=jack,pulseaudio  backends to try, in order (see .backends)
     #   OUTPUT_DEVICE=name or DEVICE   device index or part of its name (see .devices)
-    #   AUDIO_SAMPLE_RATE=44100        rate to ask for (the device's own rate
-    #                                  is used if it can't run at this one)
+    #   AUDIO_SAMPLE_RATE=44100        rate of the audio written (default 48000)
+    #   AUDIO_DEVICE_RATE=44100        rate to open the sound card at (default:
+    #                                  AUDIO_SAMPLE_RATE, else the card's own)
+    #   AUDIO_RESAMPLE=fastest         resampler when the card's rate differs:
+    #                                  fastest (default), medium, best (sinc),
+    #                                  linear, zoh, or off (run at the card's
+    #                                  rate; #sample_rate is then the card's)
+    #   AUDIO_SET_DEVICE_RATE=1        let CoreAudio switch the card's
+    #                                  system-wide rate (macOS; changes it for
+    #                                  every app, as in Audio MIDI Setup)
     #   JACK_CLIENT_NAME=name          JACK client name (default: script name)
     #
     # JACK servers are never started; JACK is used when a server (jackd or
@@ -140,20 +148,33 @@ module MB
         end
       end
 
-      attr_reader :channels, :sample_rate, :buffer_size, :backend, :device_name, :device_channels, :profile
+      # libsamplerate converters for +:resample+ (false or :off for none).
+      RESAMPLE_QUALITIES = { best: 0, medium: 1, fastest: 2, zoh: 3, linear: 4, off: -1 }.freeze
+
+      attr_reader :channels, :sample_rate, :device_rate, :buffer_size, :backend, :device_name, :device_channels, :profile
 
       # Opens and starts the sound card.  +:channels+ is how many channels
       # #write takes (a mono output plays on both channels of a stereo
-      # device).  +:sample_rate+ is the rate to ask for; if the device runs
-      # at another rate, #sample_rate is the device's rate (a warning is
-      # printed).  +:device+ is a device index or part of a device name (see
-      # .devices; default: the system default).  +:profile+ is a latency
-      # profile from PROFILES (:low, :default, :safe), whose settings
+      # device).  +:sample_rate+ is the rate of the audio written (graphs and
+      # Sessions run at it).  The sound card opens at +:device_rate+
+      # (default: +:sample_rate+), or at its own rate if it can't; when its
+      # rate differs from +:sample_rate+, the C extension resamples with
+      # +:resample+ (see RESAMPLE_QUALITIES; :fastest sinc by default), or
+      # with +resample: false+ doesn't, and #sample_rate is the card's rate.
+      # +:set_device_rate+ lets CoreAudio change the card's system-wide rate
+      # (macOS).  #device_rate is the card's rate.
+      #
+      # +:device+ is a device index or part of a device name (see .devices;
+      # default: the system default).  +:profile+ is a latency profile from
+      # PROFILES (:low, :default, :video, :safe), whose settings
       # +:buffer_size+ (the block size Session renders), +:period+ (the sound
       # card period in frames), and +:latency+ (the most audio queued ahead of
       # the sound card, in seconds) override.  +:backends+ is an Array of
       # backends to try (see .backends).
-      def initialize(channels: 2, sample_rate: 48000, device: nil, profile: nil, buffer_size: nil, latency: nil, period: nil, backends: nil, capture: 0)
+      def initialize(
+        channels: 2, sample_rate: 48000, device: nil, profile: nil, buffer_size: nil, latency: nil, period: nil,
+        backends: nil, device_rate: nil, resample: :fastest, set_device_rate: false, capture: 0
+      )
         raise ArgumentError, 'Channels must be positive' if channels < 1
 
         profile = (ENV['AUDIO_PROFILE'] || profile || :default).to_s.delete_prefix(':').to_sym
@@ -172,6 +193,15 @@ module MB
         @buffer_size = Integer(ENV['AUDIO_BUFFER'] || buffer_size || settings[:buffer_size])
         @requested_rate = requested_rate
 
+        device_rate = Integer(ENV['AUDIO_DEVICE_RATE'] || device_rate || 0)
+        resample = ENV['AUDIO_RESAMPLE'] || resample
+        resample = :off if resample == false || resample.nil?
+        resample = resample.to_s.delete_prefix(':').to_sym
+        quality = RESAMPLE_QUALITIES.fetch(resample) {
+          raise ArgumentError, "Unknown resampler #{resample.inspect} (#{RESAMPLE_QUALITIES.keys.join(', ')})"
+        }
+        set_device_rate = ENV.key?('AUDIO_SET_DEVICE_RATE') ? ENV['AUDIO_SET_DEVICE_RATE'] == '1' : set_device_rate
+
         # A mono output still opens two channels, so mono plays on both
         # speakers (and on both JACK playback ports).
         @device_channels = channels == 1 ? 2 : channels
@@ -179,16 +209,20 @@ module MB
 
         @playback = FastAudio::Playback.new(
           backends, self.class.device_index(device, backends: backends), self.class.client_name,
-          channels, @device_channels, requested_rate, period, queue, capture
+          channels, @device_channels, requested_rate, device_rate, period, queue, capture,
+          quality, set_device_rate
         )
 
         @sample_rate = @playback.sample_rate.to_f
+        @device_rate = @playback.device_rate.to_f
         @backend = @playback.backend
         @device_name = @playback.device_name
         @period = @playback.period
         @device_buffer = @period * @playback.periods
 
-        if @sample_rate != requested_rate
+        if @playback.resampling?
+          warn "#{@device_name} runs at #{@device_rate.round} Hz; resampling from #{requested_rate} Hz (#{resample})"
+        elsif @sample_rate != requested_rate
           warn "#{@device_name} runs at #{@sample_rate.round} Hz instead of #{requested_rate} Hz"
         end
 
@@ -212,10 +246,16 @@ module MB
       # output (the queue plus the sound card's own buffer).  Changes as the
       # queue fills and drains.
       def latency
-        (@playback.stats[:queued] + @device_buffer) / @sample_rate
+        (@playback.stats[:queued] + @device_buffer) / @device_rate
       end
 
-      # Frames queued ahead of the sound card at most (see +:latency+).
+      # True if written audio is resampled to the sound card's rate.
+      def resampling?
+        @playback.resampling?
+      end
+
+      # Frames queued ahead of the sound card at most, at the card's rate
+      # (see +:latency+).  #stats frame counts are at the card's rate too.
       def queue_limit
         @playback.queue_limit
       end
@@ -266,7 +306,8 @@ module MB
       end
 
       def inspect
-        "#<#{self.class.name} #{@backend} #{@device_name.inspect} #{@channels}ch #{@sample_rate.round}Hz #{@profile}#{' closed' if closed?}>"
+        rate = resampling? ? "#{@sample_rate.round}Hz->#{@device_rate.round}Hz" : "#{@sample_rate.round}Hz"
+        "#<#{self.class.name} #{@backend} #{@device_name.inspect} #{@channels}ch #{rate} #{@profile}#{' closed' if closed?}>"
       end
       alias to_s inspect
     end

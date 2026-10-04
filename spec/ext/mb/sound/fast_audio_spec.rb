@@ -6,8 +6,12 @@ RSpec.describe('MB::Sound::FastAudio', :aggregate_failures) do
   let(:rate) { 48000 }
 
   # Opens a null-backend playback device, closed after the example.
-  def playback(in_channels: 2, out_channels: 2, queue: 4096, capture: 0, sample_rate: rate)
-    MB::Sound::FastAudio::Playback.new([:null], -1, 'mb-sound-spec', in_channels, out_channels, sample_rate, 0, queue, capture).tap { |p|
+  # +quality+ is a libsamplerate converter (2 = fastest sinc; -1 = run at the
+  # device's rate instead of resampling).
+  def playback(in_channels: 2, out_channels: 2, queue: 4096, capture: 0, sample_rate: rate, device_rate: 0, quality: 2)
+    MB::Sound::FastAudio::Playback.new(
+      [:null], -1, 'mb-sound-spec', in_channels, out_channels, sample_rate, device_rate, 0, queue, capture, quality, false
+    ).tap { |p|
       @playbacks << p
     }
   end
@@ -78,6 +82,55 @@ RSpec.describe('MB::Sound::FastAudio', :aggregate_failures) do
     it 'queues at least two device periods, so the device does not starve' do
       pb = playback(queue: 16)
       expect(pb.queue_limit).to eq(2 * pb.period)
+    end
+
+    context 'when the device runs at another rate' do
+      # A 1 kHz sine at 48 kHz played on a 44.1 kHz device
+      let(:sine) { Numo::SFloat.new(rate).seq.map { |i| Math.sin(2 * Math::PI * 1000 * i / rate) * 0.5 } }
+
+      def write_all(pb, data, chunk)
+        0.step(data.length - 1, chunk) { |i| pb.write([data[i...[i + chunk, data.length].min]] * 2) }
+      end
+
+      it 'resamples written audio to the device rate' do
+        pb = playback(sample_rate: 48000, device_rate: 44100, capture: 60000)
+        expect(pb.sample_rate).to eq(48000)
+        expect(pb.device_rate).to eq(44100)
+        expect(pb.resampling?).to eq(true)
+
+        write_all(pb, sine, 777) # odd sizes cross libsamplerate's chunks
+        wait_until { pb.stats[:queued] == 0 }
+
+        # One second at 48k is one second at 44.1k (less the converter's delay)
+        expect(pb.stats[:frames_written]).to be_within(200).of(44100)
+
+        l, r = captured(pb)
+        steady = l[2000...42000]
+        expect(steady.abs.max).to be_within(0.01).of(0.5)
+        crossings = (1...steady.length).count { |i| (steady[i - 1] < 0) != (steady[i] < 0) }
+        expect(crossings).to be_within(4).of(2 * 1000 * steady.length / 44100.0) # still 1 kHz
+        expect(r[2000...42000]).to eq(steady)
+      end
+
+      it 'scales the queue limit to device frames' do
+        expect(playback(sample_rate: 48000, device_rate: 44100, queue: 4800).queue_limit).to eq(4410)
+      end
+
+      it 'runs at the device rate without resampling when told not to' do
+        pb = playback(sample_rate: 48000, device_rate: 44100, quality: -1)
+        expect(pb.sample_rate).to eq(44100)
+        expect(pb.device_rate).to eq(44100)
+        expect(pb.resampling?).to eq(false)
+      end
+
+      it 'raises for unknown converters' do
+        expect { playback(quality: 7) }.to raise_error(ArgumentError, /Resample quality/)
+      end
+    end
+
+    it 'does not resample when the device runs at the requested rate' do
+      pb = playback
+      expect([pb.sample_rate, pb.device_rate, pb.resampling?]).to eq([rate, rate, false])
     end
 
     it 'opens at other requested rates the device supports' do
@@ -165,7 +218,7 @@ RSpec.describe('MB::Sound::FastAudio', :aggregate_failures) do
       expect { playback(out_channels: 0) }.to raise_error(ArgumentError, /Output channels/)
       expect { playback(queue: 1) }.to raise_error(ArgumentError, /Queue size/)
       expect {
-        MB::Sound::FastAudio::Playback.new([:null], 5, 'x', 2, 2, rate, 0, 4096, 0)
+        MB::Sound::FastAudio::Playback.new([:null], 5, 'x', 2, 2, rate, 0, 0, 4096, 0, 2, false)
       }.to raise_error(MB::Sound::FastAudio::Error, /device 5 does not exist/)
     end
 

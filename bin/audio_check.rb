@@ -59,7 +59,10 @@ MB::Sound.script(
   list: [false, '-l', 'List backends and devices, then exit'],
   backend: [nil, String, '-b', 'Backends to try, comma-separated (e.g. jack,pulseaudio)'],
   device: [nil, String, '-d', 'Device index or part of its name'],
-  rate: [48000, Integer, '-r', 'Sample rate to ask for', 8000..384000],
+  rate: [48000, Integer, '-r', 'Sample rate of the clicks', 8000..384000],
+  device_rate: [nil, Integer, 'Sample rate to open the sound card at (default: --rate)', 8000..384000],
+  resample: ['fastest', String, 'Resampler when the card runs at another rate', %w[fastest medium best linear zoh off]],
+  set_device_rate: [false, "Let CoreAudio change the card's system-wide rate (macOS)"],
   profile: [nil, String, 'Latency profile (default: AUDIO_PROFILE or default)', %w[low default video safe]],
   latency: [nil, Float, 'Seconds queued ahead of the sound card (overrides the profile)', 0.0..2.0],
   period: [nil, Integer, 'Sound card period in frames (overrides the profile)', 16..16384],
@@ -91,17 +94,21 @@ MB::Sound.script(
   out = MB::Sound::DeviceOutput.new(
     channels: 2, sample_rate: p.rate, device: p.device, profile: p.profile,
     latency: p.latency, period: p.period, buffer_size: p.buffer,
+    device_rate: p.device_rate, resample: p.resample, set_device_rate: p.set_device_rate,
     backends: backends
   )
 
-  ms = ->(frames) { (frames * 1000.0 / out.sample_rate).round(1) }
+  # Sound card frames (period, queue) are at the card's rate; writes are at
+  # the written rate
+  ms = ->(frames) { (frames * 1000.0 / out.device_rate).round(1) }
   puts
   puts "Opened: #{out.inspect}"
   puts "  JACK client name: #{MB::Sound::DeviceOutput.client_name}" if out.backend == :jack
   puts "  sample rate: #{out.sample_rate.round} Hz (asked for #{p.rate})"
+  puts "  sound card rate: #{out.device_rate.round} Hz#{out.resampling? ? " (resampling: #{p.resample})" : ''}"
   puts "  period: #{out.period} frames (#{ms.(out.period)} ms)"
   puts "  queue limit: #{out.queue_limit} frames (#{ms.(out.queue_limit)} ms)"
-  puts "  write size: #{out.buffer_size} frames (#{ms.(out.buffer_size)} ms)"
+  puts "  write size: #{out.buffer_size} frames (#{(out.buffer_size * 1000.0 / out.sample_rate).round(1)} ms)"
   puts "  latency now: #{(out.latency * 1000).round(1)} ms (queue + sound card buffer)"
   puts
 
@@ -160,7 +167,7 @@ MB::Sound.script(
 
   if snapshots.length >= 2
     (t0, f0), (t1, f1) = snapshots.first, snapshots.last
-    device = (f1 - f0) / out.sample_rate
+    device = (f1 - f0) / out.device_rate
     puts "Sound card clock vs wall clock: #{((device - (t1 - t0)) / (t1 - t0) * 1e6).round} ppm over #{(t1 - t0).round(1)} s" \
       "#{' (rough; the clock moves a period at a time, so use -s 30 or more)' if t1 - t0 < 20}"
   end

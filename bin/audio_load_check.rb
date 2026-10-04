@@ -154,7 +154,7 @@ def measure(load, setting, seconds:, midi:, oversample:, rate:, device:, backend
   session.close
 
   {
-    label: setting[:label], buffer: out.buffer_size, period: out.period, queue: out.queue_limit, rate: out.sample_rate.round,
+    label: setting[:label], buffer: out.buffer_size, period: out.period, queue: out.queue_limit, rate: out.device_rate.round,
     underruns: underruns, peak: peak, spikes: spikes, gc_spikes: gc_spikes, major_gcs: major_gcs,
     load_mean: loads.empty? ? 0 : loads.sum / loads.length, load_p99: percentile(loads, 0.99), load_max: loads.max || 0,
     latency_min: latencies.min || 0, latency_max: latencies.max || 0,
