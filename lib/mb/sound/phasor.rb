@@ -189,6 +189,8 @@ module MB
       # Returns +count+ phases (cycles) as an SFloat NArray (reused between
       # calls), or nil once the frequency source ends.
       def sample(count)
+        return sample_main(count) if @ports.nil?
+
         port_frame(count) { sample_main(count) }
       end
 

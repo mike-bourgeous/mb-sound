@@ -106,7 +106,7 @@ static double bl_read_phi(VALUE state)
 // osc_sample.  At a breakpoint this is the value after it (approaching from
 // above); with +left+ it is the value before it (approaching from below,
 // with u = 1 for the end of the cycle).
-static double bl_shape(enum bl_wave wt, double u, _Bool left)
+static inline __attribute__((always_inline)) double bl_shape(enum bl_wave wt, double u, _Bool left)
 {
 	switch (wt) {
 		case BL_RAMP:
@@ -257,7 +257,7 @@ static int bl_breakpoints(enum bl_wave wt, double w, struct bl_breakpoint *bp)
 // If moving from phase +e+ by +d+ cycles (|d| < 1, either direction) crosses
 // phase +b+, returns the crossing time as a fraction of the step in (0, 1]
 // (a crossing exactly at +e+ belongs to the previous step); otherwise -1.
-static double bl_crossing(double e, double d, double b)
+static inline __attribute__((always_inline)) double bl_crossing(double e, double d, double b)
 {
 	double dist;
 
@@ -315,7 +315,7 @@ static inline double bl_clamp_width(double w)
 // The fraction of the correction to apply at +freq+ Hz: 1 if +lo+ and +hi+
 // are both zero, otherwise a smoothstep from 0 at +lo+ Hz to 1 at +hi+ Hz
 // (Tone#lfo uses this so slow LFOs keep their exact edges).
-static double bl_fade(double freq, double lo, double hi)
+static inline double bl_fade(double freq, double lo, double hi)
 {
 	if (lo <= 0 && hi <= 0) {
 		return 1.0;
@@ -436,6 +436,10 @@ static VALUE ruby_oscillate_bl(VALUE self, VALUE buffer, VALUE wave_type, VALUE 
 	struct bl_breakpoint bp[BL_MAX_BREAKPOINTS];
 	int nbp = bl_breakpoints(wt, w, bp);
 
+	// Warp factors, recomputed when the width changes (the same values as
+	// bl_warp; at width 0.5 the warp is skipped, which is exact)
+	double k1 = 0.5 / w, k2 = 0.5 / (1.0 - w);
+
 	_Bool constant = !freqptr;
 	double steps = 0;
 	double e = 0, inc = 0;
@@ -452,6 +456,8 @@ static VALUE ruby_oscillate_bl(VALUE self, VALUE buffer, VALUE wave_type, VALUE 
 			if (new_w != w) {
 				w = new_w;
 				nbp = bl_breakpoints(wt, w, bp);
+				k1 = 0.5 / w;
+				k2 = 0.5 / (1.0 - w);
 			}
 		}
 
@@ -470,7 +476,7 @@ static VALUE ruby_oscillate_bl(VALUE self, VALUE buffer, VALUE wave_type, VALUE 
 			e = bp[snapped].pos;
 			v = bp[snapped].vr;
 		} else {
-			v = bl_value(wt, e, w);
+			v = bl_shape(wt, w == 0.5 ? e : (e < w ? e * k1 : 0.5 + (e - w) * k2), 0);
 		}
 
 		// Edges between the previous sample and this one: usually found

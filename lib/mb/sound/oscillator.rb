@@ -56,7 +56,14 @@ module MB
         parabola: 0.01,
       }
 
-      attr_accessor :wave_type, :pre_power, :post_power, :range
+      attr_accessor :pre_power, :post_power, :range
+      attr_reader :wave_type
+
+      # Changes the wave type (see WAVE_TYPES).
+      def wave_type=(wave_type)
+        @wave_type = wave_type
+        @kernel = nil
+      end
       attr_reader :frequency, :phase_mod
 
       # The Phasor that holds this oscillator's phase (in cycles).  The
@@ -210,6 +217,7 @@ module MB
 
       # Sets the maximum random addition to the phase advance, in radians.
       def random_advance=(random_advance)
+        @kernel = nil
         @phasor.random_advance = random_advance / TWOPI
       end
 
@@ -270,6 +278,7 @@ module MB
       # when #band_limit is on, and can't also have phase modulation.  Only
       # ramp, square, triangle, sine, and parabola can be synced.
       def sync=(source)
+        @kernel = nil
         unless source.nil? || source.respond_to?(:sample)
           raise ArgumentError, "Sync must be nil or a graph node of sync pulses (got #{source.inspect})"
         end
@@ -282,6 +291,7 @@ module MB
       # Sets whether ramp, square, and triangle waves are band-limited (see
       # #band_limit).
       def band_limit=(band_limit)
+        @kernel = nil
         unless band_limit == true || band_limit == false || band_limit.nil? || (band_limit.is_a?(Range) && band_limit.begin.is_a?(Numeric))
           raise ArgumentError, "Band limit must be true, false, or a Range of Hz (got #{band_limit.inspect})"
         end
@@ -296,6 +306,7 @@ module MB
       # 0.25), a triangle a skewed triangle, and a sine an asymmetric sine.
       # Only ramp, square, triangle, sine, and parabola can be warped.
       def width=(width)
+        @kernel = nil
         unless width.nil? || width.is_a?(Numeric) || width.respond_to?(:sample)
           raise ArgumentError, "Width must be nil, a Numeric, or a graph node (got #{width.inspect})"
         end
@@ -339,6 +350,7 @@ module MB
       # frequency before calculating phase-per-sample, while phase modulation
       # is added directly to the phase value passed into #oscillator.
       def phase_mod=(pm)
+        @kernel = nil
         unless pm.nil? || pm.is_a?(Numeric) || pm.respond_to?(:sample) || pm.respond_to?(:get_sampler)
           raise "Phase modulation source must be nil, a Numeric, or respond to :sample"
         end
@@ -514,7 +526,7 @@ module MB
       # Note that future calls to this method may overwrite the buffer returned
       # by previous calls.
       def sample(count = nil)
-        return sample_c(count) if count.nil?
+        return sample_c(count) if count.nil? || @ports.nil?
 
         port_frame(count) { sample_main(count) }
       end
@@ -526,8 +538,10 @@ module MB
         count, freq, phase, width, pulses = get_upstream_inputs(count)
         return nil if freq.nil? || phase.nil? || (warped? && width.nil?) || (@sync && pulses.nil?)
 
-        @frame_phi = @phasor.state[0]
-        @frame_freq = freq
+        if @ports
+          @frame_phi = @phasor.state[0]
+          @frame_freq = freq
+        end
 
         build_buffer(count)
 
@@ -539,7 +553,8 @@ module MB
           offset = 0
         end
 
-        if @sync
+        case kernel
+        when :sync
           check_sync(phase)
           blep, blamp = BandLimit.minblep_tables
           buf = MB::Sound::FastSynth.oscillate_sync(
@@ -548,7 +563,7 @@ module MB
             blep, blamp, BandLimit::SYNC_OVERSAMPLE, BandLimit::SYNC_TAPS, !!@band_limit
           ).inplace!
           @phasor.state[0] = @sync_state[0]
-        elsif blit?
+        when :blit
           buf = MB::Sound::FastSynth.blit(
             @osc_buf[0...count].inplace!,
             wave_type,
@@ -559,7 +574,7 @@ module MB
             @phasor.state,
             @blit_state
           ).inplace!
-        elsif synth_kernel?
+        when :synth
           buf = MB::Sound::FastSynth.oscillate_bl(
             @osc_buf[0...count].inplace!,
             wave_type,
@@ -591,7 +606,7 @@ module MB
         @last_freq = freq.is_a?(Numeric) ? freq : freq[-1]
         @last_width = width.is_a?(Numo::NArray) ? width[-1] : width
 
-        add_jump_residual(buf, gain)
+        add_jump_residual(buf, gain) if @jump_residual
         buf = add_waveshape_and_range(buf)
 
         buf.not_inplace!
@@ -779,6 +794,21 @@ module MB
         raise ArgumentError, 'A synced oscillator cannot also have phase modulation' unless phase_mod == 0 || phase_mod.nil?
       end
 
+      # Which kernel computes samples: :sync, :blit, :synth (FastSynth
+      # band-limited or warped), or :naive (FastSound), cached until a
+      # setting changes.
+      def kernel
+        @kernel ||= if @sync
+                      :sync
+                    elsif blit?
+                      :blit
+                    elsif synth_kernel?
+                      :synth
+                    else
+                      :naive
+                    end
+      end
+
       # The main output for GraphNode::Ports.
       def sample_main(count)
         sample_c(count)
@@ -796,8 +826,14 @@ module MB
       # for always on.
       def band_limit_fade
         return BandLimit::NEVER unless band_limited?
-        @band_limit.is_a?(Range) ? [@band_limit.begin.to_f, @band_limit.end.to_f] : [0.0, 0.0]
+        return ALWAYS unless @band_limit.is_a?(Range)
+
+        @fade_band = [@band_limit.begin.to_f, @band_limit.end.to_f].freeze unless @fade_band&.first == @band_limit.begin.to_f && @fade_band.last == @band_limit.end.to_f
+        @fade_band
       end
+
+      # The fade band for band-limiting that is always on.
+      ALWAYS = [0.0, 0.0].freeze
 
       # True if samples come from the band-limiting kernel (band-limited or
       # warped waveforms).
