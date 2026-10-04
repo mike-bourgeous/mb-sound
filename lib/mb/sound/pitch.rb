@@ -102,6 +102,8 @@ module MB
       def log_fm(tone_or_node, index = nil) = tone.log_fm(tone_or_node, index)
       def pm(tone_or_node, index = nil) = tone.pm(tone_or_node, index)
       def lfo = tone.lfo
+      def sync(master = nil, ratio: nil) = tone.sync(master, ratio: ratio)
+      def softsync(master = nil, ratio: nil) = tone.softsync(master, ratio: ratio)
       def wraps = signal.wraps
       def increment = signal.increment
       def pwm(width, dc: false) = tone.pwm(width, dc: dc)

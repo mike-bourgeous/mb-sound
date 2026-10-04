@@ -40,6 +40,8 @@ module MB
         @lfo = false
         @width = nil
         @keep_dc = false
+        @sync = nil
+        @soft_sync = false
         @noise = 0
         @amplitude_set = false
         @phase_mod = nil
@@ -138,6 +140,42 @@ module MB
 
       # The phase warp width (see #pwm), or nil.
       attr_reader :width
+
+      # Hard sync: restarts this tone's waveform at every cycle of a master,
+      # the classic sweepable lead sound.  With +ratio:+ the master is this
+      # tone's own pitch (hidden, not heard) and this tone plays at that
+      # pitch times +ratio+ (a number or a graph node), so the note sets the
+      # pitch and the ratio sweeps the timbre:
+      #
+      #     play C2.saw.sync(ratio: adsr(0.01, 0.4, 0.3, 0.3).at(1..6))
+      #
+      # Or give a +master+: a Pitch or Note (a hidden phasor at that pitch),
+      # a Tone or Phasor (its #wraps port, so it can be heard too), or any
+      # graph node of sync pulses or triggers (e.g. clip.trigger; a value v
+      # resets the phase 1 - v samples before its sample, so 1 is exactly on
+      # it):
+      #
+      #     play C3.saw.sync(C2)
+      #
+      # Synced tones are band-limited with minBLEP (BandLimit, FastSynth.
+      # oscillate_sync), clean even at high ratios; aramp etc. give naive
+      # sync.  A synced tone can't also have phase modulation.  See
+      # #softsync.
+      def sync(master = nil, ratio: nil)
+        set_sync(master, ratio, false)
+      end
+
+      # Soft sync: like #sync, but each master cycle reverses the direction
+      # of this tone's phase instead of restarting it (a gentler, more
+      # metallic sound).
+      #
+      #     play C2.triangle.softsync(ratio: 1.5.hz.lfo.at(1.5..3))
+      def softsync(master = nil, ratio: nil)
+        set_sync(master, ratio, true)
+      end
+
+      # The sync pulse source (see #sync), or nil.
+      attr_reader :sync_source
 
       # Sync pulses from this tone's phase (a GraphNode::Ports port; see
       # Phasor.sync_pulses and #sync).
@@ -524,6 +562,7 @@ module MB
           phase: @phase,
           phase_mod: @phase_mod,
           width: @width,
+          sync: @sync,
         }.compact
       end
 
@@ -546,7 +585,9 @@ module MB
           no_trigger: @no_trigger,
           band_limit: oscillator_band_limit,
           width: @width,
-          remove_dc: !@keep_dc
+          remove_dc: !@keep_dc,
+          sync: @sync,
+          soft_sync: @soft_sync
         )
       end
 
@@ -623,7 +664,7 @@ module MB
       end
 
       def to_s
-        "#{super} -- #{wave_name} freq=#{make_source_name(@frequency)} range=#{@range}#{" pwm=#{make_source_name(@width)}" if @width}"
+        "#{super} -- #{wave_name} freq=#{make_source_name(@frequency)} range=#{@range}#{" pwm=#{make_source_name(@width)}" if @width}#{" #{@soft_sync ? 'softsync' : 'sync'}" if @sync}"
       end
 
       def to_s_graphviz
@@ -656,6 +697,36 @@ module MB
       end
 
       private
+
+      # See #sync and #softsync.
+      def set_sync(master, ratio, soft)
+        raise ArgumentError, 'Give a master or a ratio:, not both' if master && ratio
+        raise ArgumentError, 'Give a master (e.g. C2) or ratio: (e.g. ratio: 2.5)' if master.nil? && ratio.nil?
+
+        if master.nil?
+          # A hidden master at this tone's pitch; this tone plays ratio times higher
+          hidden = Phasor.new(frequency: @frequency, sample_rate: @sample_rate)
+          ratio = fixup_source(ratio)
+          set_frequency(@frequency.is_a?(Numeric) && ratio.is_a?(Numeric) ? @frequency * ratio : fixup_source(ratio.is_a?(Numeric) ? @frequency * ratio : ratio * @frequency))
+          pulses = hidden.wraps
+        else
+          pulses = case master
+                   when Pitch then master.phasor.wraps
+                   when Tone, Phasor, Oscillator then master.wraps
+                   else
+                     raise ArgumentError, "Sync master must be a Pitch, Tone, Phasor, or a graph node (got #{master.inspect})" unless master.respond_to?(:sample)
+                     master
+                   end
+        end
+
+        @sync = pulses.respond_to?(:get_sampler) ? pulses.get_sampler : pulses
+        @soft_sync = soft
+        if @oscillator
+          @oscillator.sync = @sync
+          @oscillator.soft_sync = soft
+        end
+        self
+      end
 
       # Sets the wave type and whether it's band-limited (see #ramp, #aramp).
       def set_wave(wave_type, band_limit)

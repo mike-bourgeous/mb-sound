@@ -80,6 +80,12 @@ module MB
       # Whether a warped waveform's DC offset is removed (see #width=).
       attr_accessor :remove_dc
 
+      # The sync pulse source (see #sync=), or nil.
+      attr_reader :sync
+
+      # Whether sync reverses the phase (soft sync) instead of resetting it.
+      attr_accessor :soft_sync
+
       # An informational marker for classes like MB::Sound::MIDI::GraphVoice
       # indicating that the oscillator should not be reset when a note is
       # played.  Has no effect within the oscillator itself.
@@ -120,10 +126,12 @@ module MB
       #                which gives the exact shapes; Tone turns it on.
       # +width+ - See #width= (nil for no phase warp).
       # +remove_dc+ - Whether to remove a warped waveform's DC offset.
+      # +sync+ - A sync pulse source (see #sync=), or nil.
+      # +soft_sync+ - Whether sync reverses the phase instead of resetting it.
       #
       # TODO: it probably makes sense to move pre_power/post_power elsewhere if
       # possible, e.g. a new waveshaper node or something
-      def initialize(wave_type, frequency: 1.0, phase: 0.0, phase_mod: nil, range: nil, pre_power: 1.0, post_power: 1.0, advance: Math::PI / 24000.0, random_advance: 0.0, no_trigger: false, band_limit: false, width: nil, remove_dc: true)
+      def initialize(wave_type, frequency: 1.0, phase: 0.0, phase_mod: nil, range: nil, pre_power: 1.0, post_power: 1.0, advance: Math::PI / 24000.0, random_advance: 0.0, no_trigger: false, band_limit: false, width: nil, remove_dc: true, sync: nil, soft_sync: false)
         unless WAVE_TYPES.include?(wave_type)
           raise "Invalid wave type #{wave_type.inspect}; only #{WAVE_TYPES.map(&:inspect).join(', ')} are supported"
         end
@@ -162,6 +170,8 @@ module MB
         @bl_state = [0.0, 0.0, 0.0, 0]
         @blit_state = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0]
         @pulse_state = [0.0, 0.0, 0]
+        self.sync = sync
+        @soft_sync = !!soft_sync
 
         @osc_buf = nil
         @truncated = false
@@ -209,6 +219,7 @@ module MB
           phase: phase,
           phase_mod: @phase_mod,
           width: @width,
+          sync: @sync,
         }.compact
       end
 
@@ -231,15 +242,30 @@ module MB
       # Directly sets the current phase offset for this oscillator.
       def phi=(phi)
         @phasor.phi = phi / TWOPI
-        @bl_state[3] = 0
-        @blit_state[6] = 0
+        unprime
       end
 
       # Resets the oscillator phase to its starting phase (see #phase).
       def reset
         @phasor.reset
-        @bl_state[3] = 0
-        @blit_state[6] = 0
+        unprime
+      end
+
+      # Sets a sync input: a graph node of sync pulses (see
+      # Phasor.sync_pulses; e.g. another oscillator's #wraps port), or nil.
+      # Each pulse resets the phase to zero (hard sync), or reverses its
+      # direction with #soft_sync, at the pulse's sub-sample time.  Synced
+      # oscillators are band-limited with minBLEP (FastSynth.oscillate_sync)
+      # when #band_limit is on, and can't also have phase modulation.  Only
+      # ramp, square, triangle, sine, and parabola can be synced.
+      def sync=(source)
+        unless source.nil? || source.respond_to?(:sample)
+          raise ArgumentError, "Sync must be nil or a graph node of sync pulses (got #{source.inspect})"
+        end
+
+        @sync = source.respond_to?(:get_sampler) ? source.get_sampler : source
+        @sync_state = [@phasor.phi, 0.0, 1.0, 0, 0]
+        @sync_ring = Numo::DFloat.zeros(BandLimit::SYNC_TAPS)
       end
 
       # Sets whether ramp, square, and triangle waves are band-limited (see
@@ -486,8 +512,8 @@ module MB
       def sample_c(count = nil)
         return sample_c(1)[0] if count.nil?
 
-        count, freq, phase, width = get_upstream_inputs(count)
-        return nil if freq.nil? || phase.nil? || (warped? && width.nil?)
+        count, freq, phase, width, pulses = get_upstream_inputs(count)
+        return nil if freq.nil? || phase.nil? || (warped? && width.nil?) || (@sync && pulses.nil?)
 
         @frame_phi = @phasor.state[0]
         @frame_freq = freq
@@ -502,7 +528,16 @@ module MB
           offset = 0
         end
 
-        if blit?
+        if @sync
+          check_sync(phase)
+          blep, blamp = BandLimit.minblep_tables
+          buf = MB::Sound::FastSynth.oscillate_sync(
+            @osc_buf[0...count].inplace!, wave_type, freq, @phasor.advance, gain, offset,
+            @sync_state, @sync_ring, pulses, @soft_sync, width, @remove_dc,
+            blep, blamp, BandLimit::SYNC_OVERSAMPLE, BandLimit::SYNC_TAPS, !!@band_limit
+          ).inplace!
+          @phasor.state[0] = @sync_state[0]
+        elsif blit?
           buf = MB::Sound::FastSynth.blit(
             @osc_buf[0...count].inplace!,
             wave_type,
@@ -553,8 +588,8 @@ module MB
       def sample_ruby(count = nil)
         return sample_ruby(1)[0] if count.nil?
 
-        count, freq_table, phase_table, width = get_upstream_inputs(count)
-        return nil if freq_table.nil? || phase_table.nil? || (warped? && width.nil?)
+        count, freq_table, phase_table, width, pulses = get_upstream_inputs(count)
+        return nil if freq_table.nil? || phase_table.nil? || (warped? && width.nil?) || (@sync && pulses.nil?)
 
         build_buffer(count)
 
@@ -566,7 +601,16 @@ module MB
           offset = 0
         end
 
-        if blit?
+        if @sync
+          check_sync(phase_table)
+          blep, blamp = BandLimit.minblep_tables
+          values = BandLimit.sync_ruby(
+            count, @wave_type, freq_table, @phasor.advance, gain, offset,
+            @sync_state, @sync_ring, pulses, @soft_sync, width, @remove_dc,
+            blep, blamp, BandLimit::SYNC_OVERSAMPLE, BandLimit::SYNC_TAPS, !!@band_limit
+          )
+          @phasor.state[0] = @sync_state[0]
+        elsif blit?
           values = BandLimit.blit_ruby(count, @wave_type, freq_table, @phasor.advance, gain, offset, @phasor.state, @blit_state)
         elsif synth_kernel?
           values = BandLimit.oscillate_ruby(
@@ -661,6 +705,23 @@ module MB
 
       private
 
+      # Clears band-limiting history after a phase jump.
+      def unprime
+        @bl_state[3] = 0
+        @blit_state[6] = 0
+        if @sync
+          @sync_state = [@phasor.phi, 0.0, 1.0, 0, 0]
+          @sync_ring.fill(0)
+        end
+      end
+
+      def check_sync(phase_mod)
+        unless BandLimit::WARP_WAVES.include?(@wave_type)
+          raise ArgumentError, "A #{@wave_type} can't be synced (only #{BandLimit::WARP_WAVES.join(', ')})"
+        end
+        raise ArgumentError, 'A synced oscillator cannot also have phase modulation' unless phase_mod == 0 || phase_mod.nil?
+      end
+
       # The main output for GraphNode::Ports.
       def sample_main(count)
         sample_c(count)
@@ -731,6 +792,13 @@ module MB
           min_length = width.length if width && width.length < min_length
         end
 
+        pulses = @sync
+        if pulses.respond_to?(:sample)
+          pulses = pulses.sample(count)
+          pulses = nil if pulses&.empty?
+          min_length = pulses.length if pulses && pulses.length < min_length
+        end
+
         if min_length != count
           # TODO: this double truncation might be impossible now that we use get_sampler
           raise "Truncation happened more than once on oscillator #{self} (try adding .with_buffer to upstreams)" if @truncated
@@ -738,9 +806,10 @@ module MB
           freq = freq[0...min_length] if freq&.is_a?(Numo::NArray)
           phase = phase[0...min_length] if phase&.is_a?(Numo::NArray)
           width = width[0...min_length] if width&.is_a?(Numo::NArray)
+          pulses = pulses[0...min_length] if pulses&.is_a?(Numo::NArray)
         end
 
-        return min_length, freq, phase, width
+        return min_length, freq, phase, width, pulses
       end
 
       # Applies pre- and post-power waveshaping to the buffer.

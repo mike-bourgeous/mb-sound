@@ -494,6 +494,194 @@ module MB
 
         out
       end
+
+      # Taps and oversampling of the minBLEP tables used by synced
+      # oscillators (see .minblep_tables).
+      SYNC_TAPS = 32
+      SYNC_OVERSAMPLE = 64
+
+      # Returns [blep, blamp] residual tables for synced oscillators
+      # (FastSynth.oscillate_sync), built once: a Blackman-windowed sinc
+      # (cutoff 0.45 of the sample rate) made minimum-phase by the real
+      # cepstrum, integrated into a band-limited step B(t) over SYNC_TAPS
+      # samples at SYNC_OVERSAMPLE points per sample.  The step residual is
+      # R = B - 1; the ramp residual is the integral of R minus its final
+      # value times B, which is still band-limited and settles exactly on the
+      # ideal ramp (a plain integral would leave a permanent offset, since a
+      # minimum-phase step is delayed).
+      def self.minblep_tables
+        @minblep_tables ||= begin
+          taps = SYNC_TAPS
+          os = SYNC_OVERSAMPLE
+          len = taps * os + 1
+          t = Numo::DFloat.new(len).seq / os - taps / 2.0
+          x = t * (2 * 0.45)
+          sinc = Numo::DFloat.ones(len)
+          nz = x.ne(0)
+          sinc[nz] = Numo::NMath.sin(x[nz] * Math::PI) / (x[nz] * Math::PI)
+          window = t / taps + 0.5
+          blackman = 0.42 - 0.5 * Numo::NMath.cos(window * 2 * Math::PI) + 0.08 * Numo::NMath.cos(window * 4 * Math::PI)
+
+          step = minimum_phase(sinc * blackman).cumsum
+          step /= step[-1]
+          step[-1] = 1.0
+
+          blep = step - 1.0
+          ramp = blep.cumsum / os
+          blamp = ramp - ramp[-1] * step
+          blep[-1] = 0.0
+          blamp[-1] = 0.0
+
+          [blep.freeze, blamp.freeze]
+        end
+      end
+
+      # Minimum-phase version of the FIR +h+ by the real cepstrum.
+      def self.minimum_phase(h)
+        len = h.length
+        m = 2**(Math.log2(len).ceil + 3)
+        x = Numo::DFloat.zeros(m)
+        x[0...len] = h
+        cep = MB::Sound.ifft(Numo::NMath.log(MB::Sound.fft(x).abs + 1e-12)).real
+        fold = Numo::DFloat.zeros(m)
+        fold[0] = 1
+        fold[1...(m / 2)] = 2
+        fold[m / 2] = 1
+        MB::Sound.ifft(Numo::NMath.exp(MB::Sound.fft(cep * fold))).real[0...len]
+      end
+
+      # See sync_table in fast_synth.c.
+      def self.sync_table(table, os, taps, t)
+        x = t * os
+        return 0.0 if x < 0 || x >= (taps * os).to_f
+
+        idx = x.to_i
+        frac = x - idx
+        table[idx] + (table[idx + 1] - table[idx]) * frac
+      end
+
+      # See sync_event in fast_synth.c.
+      def self.sync_event(acc, pos, blep, blamp, os, taps, t, dv, ds)
+        return if dv == 0 && ds == 0
+
+        taps.times do |j|
+          tt = t + j
+          k = (pos + j) % taps
+          acc[k] += dv * sync_table(blep, os, taps, tt) + ds * sync_table(blamp, os, taps, tt)
+        end
+      end
+
+      # [value, slope per cycle] of +wave_type+ warped by +w+ at phase +p+.
+      def self.sync_shape(wave_type, w, p)
+        k = p < w ? 0.5 / w : 0.5 / (1.0 - w)
+        u = warp(p, w)
+        [shape(wave_type, u), slope(wave_type, u) * k]
+      end
+
+      # See sync_move in fast_synth.c; returns the new phase.
+      def self.sync_move(points, p, vel, dur, end_t, acc, pos, blep, blamp, os, taps, bl)
+        move = vel * dur
+        if bl && move != 0
+          points.each do |bpos, bdv, bds, _|
+            f = crossing(p, move, bpos)
+            next if f.nil?
+
+            dv = move > 0 ? bdv : -bdv
+            ds = bds * vel.abs
+            t = end_t + (1.0 - f) * dur
+            sync_event(acc, pos, blep, blamp, os, taps, t, dv, ds)
+          end
+        end
+
+        # A phase within rounding of an edge is on it (see bl_snap)
+        p = wrap(p + move)
+        snapped = snap(points, p)
+        snapped ? points[snapped][0] : p
+      end
+
+      # Ruby mirror of MB::Sound::FastSynth.oscillate_sync (see there),
+      # returning +count+ samples as an SFloat; +sync_state+ and the +ring+
+      # (a DFloat) are updated like the C version.
+      def self.sync_ruby(count, wave_type, freq, advance, gain, offset, sync_state, ring, pulses, soft, width, remove_dc, blep, blamp, os, taps, bl)
+        freqs = freq.is_a?(Numo::NArray) ? real_floats(freq) : nil
+        pulse_list = pulses.is_a?(Numo::NArray) ? real_floats(pulses) : nil
+        widths = width.is_a?(Numo::NArray) ? real_floats(width) : nil
+        freq = freqs ? freqs[0] : freq.to_f
+        pulse = pulse_list ? pulse_list[0] : 0.0
+        w = clamp_width(widths ? widths[0] : (width || 0.5).to_f)
+        half_mean = HALF_MEAN.fetch(wave_type)
+        points = breakpoints(wave_type, w)
+        blep = blep.to_a
+        blamp = blamp.to_a
+        acc = ring.to_a
+
+        p, prev_inc, dir, pos, primed = sync_state
+        pos %= taps
+        primed = primed != 0
+
+        out = Numo::SFloat.zeros(count)
+        count.times do |i|
+          freq = freqs[i] if freqs
+          pulse = pulse_list[i] if pulse_list
+          if widths
+            new_w = clamp_width(widths[i])
+            if new_w != w
+              w = new_w
+              points = breakpoints(wave_type, w)
+            end
+          end
+
+          if primed
+            vel = dir * prev_inc
+
+            if pulse != 0
+              d = 1.0 - pulse.abs
+              d = 0.0 if d < 0
+              d = 1.0 if d > 1
+
+              p = sync_move(points, p, vel, 1.0 - d, d, acc, pos, blep, blamp, os, taps, bl)
+
+              v0, s0 = sync_shape(wave_type, w, p)
+              if soft
+                dir = -dir
+                nvel = -vel
+                sync_event(acc, pos, blep, blamp, os, taps, d, 0.0, s0 * (nvel - vel)) if bl
+                vel = nvel
+              else
+                dir = 1.0
+                nvel = prev_inc
+                p = 0.0
+                v1, s1 = sync_shape(wave_type, w, p)
+                sync_event(acc, pos, blep, blamp, os, taps, d, v1 - v0, s1 * nvel - s0 * vel) if bl
+                vel = nvel
+              end
+
+              p = sync_move(points, p, vel, d, 0.0, acc, pos, blep, blamp, os, taps, bl)
+            else
+              p = sync_move(points, p, vel, 1.0, 0.0, acc, pos, blep, blamp, os, taps, bl)
+            end
+          end
+
+          v, _ = sync_shape(wave_type, w, p)
+          v += acc[pos]
+          acc[pos] = 0.0
+          pos = (pos + 1) % taps
+
+          v -= half_mean * (2.0 * w - 1.0) if remove_dc
+
+          out[i] = v * gain + offset
+
+          prev_inc = freq * advance
+          primed = true
+        end
+
+        if count > 0
+          sync_state.replace([p, prev_inc, dir, pos, 1])
+          ring[0...taps] = Numo::DFloat.cast(acc)
+        end
+
+        out
+      end
     end
   end
 end

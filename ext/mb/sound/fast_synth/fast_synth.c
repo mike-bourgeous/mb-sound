@@ -834,6 +834,264 @@ static VALUE ruby_blit(VALUE self, VALUE buffer, VALUE shape_v, VALUE frequency,
 	return buffer;
 }
 
+/*
+ * Synced oscillators (hard and soft sync), band-limited with minBLEP.
+ *
+ * A sync input (sync pulses, see MB::Sound::Phasor.sync_pulses) resets the
+ * phase to zero (hard sync) or reverses its direction (soft sync) at a
+ * sub-sample time.  Resets can't be predicted, so instead of PolyBLEP (which
+ * corrects the sample before an edge) this kernel is causal: every event
+ * (the shape's own edges, warp corners, resets, reversals) adds a
+ * minimum-phase band-limited step (minBLEP) times its jump in value, plus a
+ * band-limited ramp (minBLAMP) times its jump in slope, into a ring of the
+ * following samples.  No latency, and clean hard sync (-98 to -106 dB in the
+ * research measurements, against -32 to -40 dB for PolyBLEP).
+ *
+ * The tables (built in Ruby by MB::Sound::BandLimit.minblep_tables) hold
+ * the step residual R(t) = B(t) - 1 and the ramp residual
+ * Q(t) = integral of R - Q(inf) B(t) (band-limited, and settling exactly on
+ * the ideal ramp), sampled +oversample+ times per sample over +taps+
+ * samples.
+ */
+
+// Linear interpolation into a residual table at +t+ samples after an event.
+static inline double sync_table(const double *table, size_t os, size_t taps, double t)
+{
+	double x = t * os;
+	if (x < 0 || x >= (double)(taps * os)) {
+		return 0;
+	}
+
+	size_t idx = (size_t)x;
+	double frac = x - idx;
+	return table[idx] + (table[idx + 1] - table[idx]) * frac;
+}
+
+// Adds an event +t+ samples before the current sample (0 <= t < 1+) with a
+// jump of +dv+ in value and +ds+ in slope per sample to the ring +acc+
+// (whose current sample is at +pos+).
+static inline void sync_event(double *acc, size_t pos, const double *blep, const double *blamp, size_t os, size_t taps, double t, double dv, double ds)
+{
+	if (dv == 0 && ds == 0) {
+		return;
+	}
+
+	for (size_t j = 0; j < taps; j++) {
+		double tt = t + j;
+		acc[(pos + j) % taps] += dv * sync_table(blep, os, taps, tt) + ds * sync_table(blamp, os, taps, tt);
+	}
+}
+
+// The value and slope per cycle of +wt+ warped by +w+ at phase +p+ (cycles).
+static inline void sync_shape(enum bl_wave wt, double w, double p, double *v, double *s)
+{
+	double k = p < w ? 0.5 / w : 0.5 / (1.0 - w);
+	double u = bl_warp(p, w);
+	*v = bl_shape(wt, u, 0);
+	*s = bl_slope(wt, u, 0) * k;
+}
+
+// Moves phase *p by +vel+ cycles per sample for +dur+ samples, adding an
+// event for every breakpoint crossed; the segment ends +end_t+ samples
+// before the current sample.  Returns nothing; updates *p.
+static inline void sync_move(struct bl_breakpoint *bp, int nbp, double *p, double vel, double dur, double end_t,
+		double *acc, size_t pos, const double *blep, const double *blamp, size_t os, size_t taps, _Bool bl)
+{
+	double move = vel * dur;
+	if (bl && move != 0) {
+		for (int j = 0; j < nbp; j++) {
+			double f = bl_crossing(*p, move, bp[j].pos);
+			if (f < 0) {
+				continue;
+			}
+
+			double dv = move > 0 ? bp[j].dv : -bp[j].dv;
+			double ds = bp[j].ds * fabs(vel);
+			double t = end_t + (1.0 - f) * dur; // samples before the current sample
+			sync_event(acc, pos, blep, blamp, os, taps, t, dv, ds);
+		}
+	}
+
+	// A phase within rounding of an edge is on it (the value after it),
+	// matching the crossing tolerance (see bl_snap)
+	*p = mb_wrap(*p + move, 1.0);
+	int snapped = bl_snap(bp, nbp, *p);
+	if (snapped >= 0) {
+		*p = bp[snapped].pos;
+	}
+}
+
+/*
+ * A synced oscillator:
+ *   oscillate_sync(buffer, wave_type, frequency, advance, gain, offset,
+ *                  sync_state, ring, pulses, soft, width, remove_dc,
+ *                  blep, blamp, oversample, taps, band_limit)
+ * +sync_state+ is [phase at the last sample (cycles), last increment,
+ * direction (1 or -1), ring position, primed (0 or 1)]; the first sample of
+ * an unprimed oscillator starts at the phase in sync_state[0].  +ring+ is a
+ * DFloat of +taps+ pending corrections.  +pulses+ is an NArray of sync
+ * pulses (or nil): a nonzero value v means a reset (+soft+ false) or a
+ * reversal (+soft+ true) 1 - |v| samples before that sample.  +width+ and
+ * +remove_dc+ are as for oscillate_bl; +band_limit+ false skips the
+ * corrections (naive sync).  See MB::Sound::BandLimit.sync_ruby.
+ */
+static VALUE ruby_oscillate_sync(int argc, VALUE *argv, VALUE self)
+{
+	if (argc != 17) {
+		rb_raise(rb_eArgError, "wrong number of arguments (given %d, expected 17)", argc);
+	}
+
+	VALUE buffer = argv[0], frequency = argv[2], sync_state = argv[6], ring = argv[7], pulses = argv[8];
+	VALUE width = argv[10], blep_v = argv[12], blamp_v = argv[13];
+
+	enum bl_wave wt = bl_find_wave(argv[1]);
+	double adv = NUM2DBL(argv[3]);
+	double g = NUM2DBL(argv[4]);
+	double off = NUM2DBL(argv[5]);
+	_Bool soft = RTEST(argv[9]);
+	_Bool dc = RTEST(argv[11]);
+	size_t os = NUM2SIZET(argv[14]);
+	size_t taps = NUM2SIZET(argv[15]);
+	_Bool bl = RTEST(argv[16]);
+
+	Check_Type(sync_state, T_ARRAY);
+	if (RARRAY_LEN(sync_state) != 5) {
+		rb_raise(rb_eArgError, "Sync state must have five elements");
+	}
+	double p = NUM2DBL(rb_ary_entry(sync_state, 0));
+	double prev_inc = NUM2DBL(rb_ary_entry(sync_state, 1));
+	double dir = NUM2DBL(rb_ary_entry(sync_state, 2));
+	size_t pos = NUM2SIZET(rb_ary_entry(sync_state, 3));
+	_Bool primed = NUM2INT(rb_ary_entry(sync_state, 4)) != 0;
+
+	if (CLASS_OF(ring) != numo_cDFloat || RNARRAY_SHAPE(ring)[0] != taps || !RTEST(nary_check_contiguous(ring))) {
+		rb_raise(rb_eArgError, "Ring must be a contiguous DFloat of taps elements");
+	}
+	double *acc = (double *)(nary_get_pointer_for_write(ring) + nary_get_offset(ring));
+	pos %= taps;
+
+	size_t table_len = taps * os + 1;
+	if (CLASS_OF(blep_v) != numo_cDFloat || RNARRAY_SHAPE(blep_v)[0] != table_len ||
+			CLASS_OF(blamp_v) != numo_cDFloat || RNARRAY_SHAPE(blamp_v)[0] != table_len) {
+		rb_raise(rb_eArgError, "Tables must be DFloats of taps * oversample + 1 elements");
+	}
+	const double *blep = (const double *)(nary_get_pointer_for_read(blep_v) + nary_get_offset(blep_v));
+	const double *blamp = (const double *)(nary_get_pointer_for_read(blamp_v) + nary_get_offset(blamp_v));
+
+	_Bool was_inplace;
+	mb_ensure_inplace_sfloat(&buffer, &was_inplace);
+	size_t length = RNARRAY_SHAPE(buffer)[0];
+	float *out = mb_sfloat_ptr(buffer);
+
+	double freq;
+	complex float *freqptr;
+	mb_read_signal_input(&frequency, length, "Frequency", &freq, &freqptr);
+
+	double pulse;
+	complex float *pulseptr;
+	mb_read_signal_input(&pulses, length, "Sync", &pulse, &pulseptr);
+	if (!pulseptr) {
+		pulse = 0;
+	}
+
+	double w;
+	complex float *wptr;
+	if (NIL_P(width)) {
+		width = DBL2NUM(0.5);
+	}
+	mb_read_signal_input(&width, length, "Width", &w, &wptr);
+	w = bl_clamp_width(w);
+	double half_mean = bl_half_mean(wt);
+
+	struct bl_breakpoint bp[BL_MAX_BREAKPOINTS];
+	int nbp = bl_breakpoints(wt, w, bp);
+
+	for (size_t i = 0; i < length; i++) {
+		if (freqptr) {
+			freq = crealf(freqptr[i]);
+		}
+		if (pulseptr) {
+			pulse = crealf(pulseptr[i]);
+		}
+		if (wptr) {
+			double new_w = bl_clamp_width(crealf(wptr[i]));
+			if (new_w != w) {
+				w = new_w;
+				nbp = bl_breakpoints(wt, w, bp);
+			}
+		}
+
+		if (primed) {
+			double vel = dir * prev_inc;
+
+			if (pulse != 0) {
+				double d = 1.0 - fabs(pulse); // the event is d samples before this sample
+				if (d < 0) d = 0;
+				if (d > 1) d = 1;
+
+				sync_move(bp, nbp, &p, vel, 1.0 - d, d, acc, pos, blep, blamp, os, taps, bl);
+
+				double v0, s0, v1, s1;
+				sync_shape(wt, w, p, &v0, &s0);
+				if (soft) {
+					dir = -dir;
+					double nvel = -vel;
+					if (bl) sync_event(acc, pos, blep, blamp, os, taps, d, 0, s0 * (nvel - vel));
+					vel = nvel;
+				} else {
+					dir = 1.0;
+					double nvel = prev_inc;
+					p = 0;
+					sync_shape(wt, w, p, &v1, &s1);
+					if (bl) sync_event(acc, pos, blep, blamp, os, taps, d, v1 - v0, s1 * nvel - s0 * vel);
+					vel = nvel;
+				}
+
+				sync_move(bp, nbp, &p, vel, d, 0, acc, pos, blep, blamp, os, taps, bl);
+			} else {
+				sync_move(bp, nbp, &p, vel, 1.0, 0, acc, pos, blep, blamp, os, taps, bl);
+			}
+		}
+
+		double v, s;
+		sync_shape(wt, w, p, &v, &s);
+		v += acc[pos];
+		acc[pos] = 0;
+		pos = (pos + 1) % taps;
+
+		if (dc) {
+			v -= half_mean * (2.0 * w - 1.0);
+		}
+
+		out[i] = v * g + off;
+
+		prev_inc = freq * adv;
+		primed = 1;
+	}
+
+	if (length > 0) {
+		rb_ary_store(sync_state, 0, rb_float_new(p));
+		rb_ary_store(sync_state, 1, rb_float_new(prev_inc));
+		rb_ary_store(sync_state, 2, rb_float_new(dir));
+		rb_ary_store(sync_state, 3, SIZET2NUM(pos));
+		rb_ary_store(sync_state, 4, INT2NUM(1));
+	}
+
+	if (!was_inplace) {
+		UNSET_INPLACE(buffer);
+	}
+
+	RB_GC_GUARD(frequency);
+	RB_GC_GUARD(pulses);
+	RB_GC_GUARD(width);
+	RB_GC_GUARD(ring);
+	RB_GC_GUARD(blep_v);
+	RB_GC_GUARD(blamp_v);
+	RB_GC_GUARD(buffer);
+
+	return buffer;
+}
+
 void Init_fast_synth(void)
 {
 	VALUE mb = rb_define_module("MB");
@@ -851,4 +1109,5 @@ void Init_fast_synth(void)
 
 	rb_define_module_function(fast_synth, "oscillate_bl", ruby_oscillate_bl, 13);
 	rb_define_module_function(fast_synth, "blit", ruby_blit, 8);
+	rb_define_module_function(fast_synth, "oscillate_sync", ruby_oscillate_sync, -1);
 }

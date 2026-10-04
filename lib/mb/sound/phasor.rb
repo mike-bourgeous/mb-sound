@@ -43,6 +43,8 @@ module MB
       # backward (negative frequency) gives -(1 - d); a jump of the phase
       # between buffers (a reset or sync) gives 1.
       def self.sync_pulses(phi, freq, advance, count, prev)
+        return [Numo::SFloat[], Numo::SFloat[]] if count == 0
+
         freq = Numo::DFloat.cast(Numo::SFloat.cast(freq.is_a?(Numo::SComplex) || freq.is_a?(Numo::DComplex) ? freq.real : freq)) if freq.is_a?(Numo::NArray)
         increments = freq * advance
 

@@ -311,4 +311,104 @@ RSpec.describe(MB::Sound::BandLimit) do
       expect(osc.sample(800)).to eq(fresh.sample(800))
     end
   end
+
+  describe 'sync' do
+    def coherent_db(tone, k, n: 65536)
+      buffers = Array.new((4800 + n) / 800 + 1) { tone.sample(800).dup }
+      data = Numo::DFloat.cast(Numo::SFloat.zeros(0).concatenate(*buffers)[4800...(4800 + n)])
+      pow = MB::Sound.real_fft(data).abs**2
+      harm = Numo::Bit.zeros(pow.length)
+      (k...pow.length).step(k) { |b| harm[b] = 1 }
+      # Below 20 kHz: minBLEP leaves some inaudible energy from 20 to 24 kHz
+      other = ~harm
+      other[0] = 0
+      other[(20000.0 / 48000 * n).ceil..] = 0
+      10 * Math.log10(pow[other.where].sum / pow[harm.where].sum)
+    end
+
+    [48000, 44100].each do |rate|
+      MB::Sound::BandLimit::WARP_WAVES.each do |wave|
+        [false, true].each do |soft|
+          it "gives identical C and Ruby samples for a #{soft ? 'soft' : 'hard'}-synced, warped #{wave} at #{rate} Hz" do
+            make = -> {
+              master = MB::Sound::Phasor.new(frequency: 110.0, sample_rate: rate)
+              MB::Sound::Oscillator.new(
+                wave, frequency: 271.3, advance: 2 * Math::PI / rate, band_limit: true,
+                width: 0.4, sync: master.wraps, soft_sync: soft
+              )
+            }
+            c = make.call
+            r = make.call
+            [800, 333, 1].each { |n| expect(c.sample_c(n)).to eq(r.sample_ruby(n)) }
+          end
+        end
+      end
+    end
+
+    it 'gives clean hard sync for ramp, square, and pulse' do
+      k = 301
+      f = k * 48000.0 / 65536
+      expect(coherent_db(f.hz.ramp.sync(ratio: 2.37), k)).to be < -95
+      expect(coherent_db(f.hz.square.sync(ratio: 2.37), k)).to be < -95
+      expect(coherent_db(f.hz.pulse(0.3).sync(ratio: 1.7), k)).to be < -95
+    end
+
+    it 'reduces aliasing of synced triangles and sines' do
+      k = 301
+      f = k * 48000.0 / 65536
+      expect(coherent_db(f.hz.triangle.sync(ratio: 3.31), k)).to be < coherent_db(f.hz.atriangle.sync(ratio: 3.31), k) - 30
+      expect(coherent_db(f.hz.sine.sync(ratio: 2.37), k)).to be < -80
+    end
+
+    it 'restarts the naive waveform at each master cycle' do
+      # 1 kHz master at 48 kHz: resets on samples 0 and 48 (the next lands
+      # within rounding of 96, either side)
+      data = 1000.hz.aramp.sync(ratio: 2.5).sample(96)
+      inc = 2500.0 / 48000
+      expected = Numo::SFloat.cast((0...96).map { |i| p = ((i % 48) * inc) % 1.0; p < 0.5 ? 2 * p : 2 * p - 2 })
+      expect(data).to all_be_within(1e-5).of_array(expected)
+    end
+
+    it 'reverses the phase with softsync' do
+      # 400 Hz slave, 1 kHz master: up to phase 0.4, then back down
+      data = 1000.hz.aramp.softsync(ratio: 0.4).sample(96)
+      rising = data[1..46] - data[0..45]
+      falling = data[50..94] - data[49..93]
+      expect(rising.min).to be > 0
+      expect(falling.max).to be < 0
+    end
+
+    it 'accepts a Pitch, Tone, Phasor, or trigger node as master' do
+      expect(MB::Sound::C3.saw.sync(MB::Sound::C2).sample(800).abs.max).to be_between(0.5, 1.5)
+      master = 110.hz.square
+      slave = 333.hz.ramp.sync(master)
+      2.times do
+        expect(master.sample(800).length).to eq(800)
+        expect(slave.sample(800).length).to eq(800)
+      end
+      expect(220.hz.ramp.sync(MB::Sound::Phasor.new(frequency: 100)).sample(800).length).to eq(800)
+
+      trigger = MB::Sound::ArrayInput.new(data: [Numo::SFloat.zeros(800).tap { |t| t[100] = 1; t[500] = 1 }])
+      data = 1000.hz.aramp.sync(trigger).sample(800)
+      expect(data[100]).to eq(0)
+      expect(data[500]).to eq(0)
+    end
+
+    it 'accepts a graph node ratio' do
+      tone = 110.hz.ramp.sync(ratio: 0.5.hz.lfo.at(1..4))
+      expect(tone.sample(4800).abs.max).to be_between(0.5, 1.5)
+    end
+
+    it 'checks its arguments' do
+      expect { 100.hz.ramp.sync(MB::Sound::C2, ratio: 2) }.to raise_error(ArgumentError, /not both/)
+      expect { 100.hz.ramp.sync }.to raise_error(ArgumentError, /ratio/)
+      expect { 100.hz.ramp.pm(3.hz).sync(ratio: 2).sample(800) }.to raise_error(ArgumentError, /phase modulation/)
+      expect { 100.hz.gauss.sync(ratio: 2).sample(800) }.to raise_error(ArgumentError, /can't be synced/)
+    end
+
+    it 'shows sync in to_s' do
+      expect(100.hz.ramp.sync(ratio: 2).to_s).to include('sync')
+      expect(100.hz.ramp.softsync(ratio: 2).to_s).to include('softsync')
+    end
+  end
 end
