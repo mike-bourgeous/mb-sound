@@ -113,7 +113,7 @@ module MB
 
           def sample_rate=(rate)
             super
-            @hilbert = nil
+            @hilbert&.sample_rate = rate
             self
           end
 

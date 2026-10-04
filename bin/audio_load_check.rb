@@ -1,6 +1,8 @@
 #!/usr/bin/env -S RUBY_THREAD_TIMESLICE=10 ruby
 # Plays reference synth loads (bin/synths/fm_bass.rb playing a generated
-# bass riff, bin/songs/stereo_drone.rb, or both) through the sound card with
+# bass riff, bin/songs/stereo_drone.rb, both, or a set of band-limited
+# oscillators: synced saw, PWM pulse, skewed and soft-synced triangles)
+# through the sound card with
 # several latency settings, and reports underruns, render load, render
 # spikes and garbage collections, and latency for each, to choose latency
 # defaults (MB::Sound::DeviceOutput::PROFILES).
@@ -8,7 +10,7 @@
 # Usage: $0 [options]
 #
 # Examples:
-#     $0                                   # the profiles and 400/128/50 with each load (~2 min)
+#     $0                                   # every profile with each load (~3 min)
 #     $0 --loads fm_bass -s 20             # only the bass
 #     $0 --settings default,512/256/30     # profiles or write/period/queue ms
 #     $0 --buffers 256,512 --periods 128 --latencies 0,0.02   # a grid of settings
@@ -57,6 +59,25 @@ def write_riff(path, seconds)
   track.sort
   track.recalc_delta_from_times
   File.open(path, 'wb') { |f| seq.write(f) }
+end
+
+# Band-limited oscillators from the antialiasing work, as a stereo bundle:
+# hard-synced saws, PWM pulses, skewed triangles, and soft sync, with slow
+# LFOs so every oscillator's band-limiting corrections stay busy.
+def oscillators
+  left = [
+    110.hz.ramp.sync(ratio: 0.2.hz.lfo.at(1..5)).at(0.15),
+    220.hz.pulse(0.5.hz.lfo.at(0.1..0.9)).at(0.1),
+    330.hz.triangle.skew(0.3.hz.lfo.at(0.05..0.95)).at(0.1),
+    165.hz.triangle.softsync(ratio: 1.6).at(0.1),
+  ]
+  right = [
+    165.hz.ramp.sync(ratio: 0.17.hz.lfo.at(1..6)).at(0.15),
+    277.hz.pulse(0.4.hz.lfo.at(0.1..0.9)).at(0.1),
+    440.hz.triangle.skew(0.25.hz.lfo.at(0.05..0.95)).at(0.1),
+    220.hz.triangle.softsync(ratio: 2.3).at(0.1),
+  ]
+  MB::Sound.stereo(left.sum, right.sum).softclip(0.6, 0.95)
 end
 
 def percentile(values, p)
@@ -115,8 +136,13 @@ def measure(load, setting, seconds:, midi:, oversample:, rate:, device:, backend
     peak = [peak, *mix.map { |c| c.abs.max }].max
   }
 
-  session.add(MB::Sound.stereo_drone, at: :now) unless load == 'fm_bass'
-  session.add(MB::Sound.fm_bass(midi, parameter_map: false, oversample: oversample), at: :now) unless load == 'stereo_drone'
+  case load
+  when 'oscillators'
+    session.add(oscillators, at: :now)
+  else
+    session.add(MB::Sound.stereo_drone, at: :now) unless load == 'fm_bass'
+    session.add(MB::Sound.fm_bass(midi, parameter_map: false, oversample: oversample), at: :now) unless load == 'stereo_drone'
+  end
 
   sleep 1
   warm = true
@@ -128,7 +154,7 @@ def measure(load, setting, seconds:, midi:, oversample:, rate:, device:, backend
   session.close
 
   {
-    label: setting[:label], buffer: out.buffer_size, period: out.period, queue: out.queue_limit, rate: out.sample_rate.round,
+    label: setting[:label], buffer: out.buffer_size, period: out.period, queue: out.queue_limit, rate: out.device_rate.round,
     underruns: underruns, peak: peak, spikes: spikes, gc_spikes: gc_spikes, major_gcs: major_gcs,
     load_mean: loads.empty? ? 0 : loads.sum / loads.length, load_p99: percentile(loads, 0.99), load_max: loads.max || 0,
     latency_min: latencies.min || 0, latency_max: latencies.max || 0,
@@ -137,8 +163,8 @@ end
 
 MB::Sound.script(
   args: 0,
-  loads: ['fm_bass,stereo_drone,both', String, 'Reference loads to play in turn (fm_bass, stereo_drone, both)'],
-  settings: ['low,default,400/128/50,safe', String, 'Latency settings: profiles or write/period/queue_ms'],
+  loads: ['fm_bass,stereo_drone,oscillators,both', String, 'Reference loads to play in turn (fm_bass, stereo_drone, oscillators, both)'],
+  settings: ['low,default,video,safe', String, 'Latency settings: profiles or write/period/queue_ms'],
   buffers: [nil, String, 'Instead of --settings, a grid: write sizes (frames, comma-separated)'],
   periods: ['128,256', String, 'Grid: sound card periods (frames, comma-separated)'],
   latencies: ['0,0.02,0.05', String, 'Grid: queue lengths (seconds; at least two writes each)'],
@@ -149,8 +175,8 @@ MB::Sound.script(
   rate: [48000, Integer, '-r', 'Sample rate to ask for', 8000..384000],
 ) { |_args, p|
   loads = p.loads.split(',').map(&:strip)
-  bad = loads - %w[fm_bass stereo_drone both]
-  abort "Unknown loads: #{bad.join(', ')} (use fm_bass, stereo_drone, both)" unless bad.empty?
+  bad = loads - %w[fm_bass stereo_drone oscillators both]
+  abort "Unknown loads: #{bad.join(', ')} (use fm_bass, stereo_drone, oscillators, both)" unless bad.empty?
 
   settings =
     if p.buffers

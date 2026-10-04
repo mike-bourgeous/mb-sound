@@ -77,11 +77,19 @@ module MB
             cosines = COSINE_POLES
           end
 
-          # FIXME: do I need to swap these?  sine - cosine gives a difference of -90 rather than +90
-          @cosine = filters_for_poles(cosines)
-          @sine = filters_for_poles(sines)
-          @filters = [@cosine, @sine]
+          @cosine_poles = cosines
+          @sine_poles = sines
+          build_filters
         end
+
+        # Rebuilds the allpass sections for a new sample rate (resetting
+        # their state).
+        def sample_rate=(rate)
+          return if @sample_rate == rate
+          @sample_rate = rate.to_f
+          build_filters
+        end
+        alias at_rate sample_rate=
 
         # Returns complex values with cosine and sine components for an
         # analytic signal form of +data+ (with some phase variation relative to
@@ -128,6 +136,14 @@ module MB
         end
 
         private
+
+        # Builds the cosine and sine allpass chains at the current rate.
+        def build_filters
+          # FIXME: do I need to swap these?  sine - cosine gives a difference of -90 rather than +90
+          @cosine = filters_for_poles(@cosine_poles)
+          @sine = filters_for_poles(@sine_poles)
+          @filters = [@cosine, @sine]
+        end
 
         # Converts an Array of angular frequencies (radians per second) into
         # a filter chain of MB::Sound::Filter::Biquads.

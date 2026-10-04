@@ -150,7 +150,7 @@ module MB
         #
         #     # Stereo file input -> stereo reverb
         #     play file_input('sounds/synth0.flac').fdn_reverb
-        def fdn_reverb(room_size: 0.5, decay: 2.0, damping: 0.5, diffusion_steps: 4, channels: 8, output_channels: nil, wet: 0.3, dry: 0.7, seed: 0, sample_rate: 48000, tail: nil)
+        def fdn_reverb(room_size: 0.5, decay: 2.0, damping: 0.5, diffusion_steps: 4, channels: 8, output_channels: nil, wet: 0.3, dry: 0.7, seed: 0, sample_rate: self.sample_rate, tail: nil)
           decay = MB::Sound::Length.seconds(decay, sample_rate: sample_rate)
           tail = decay + 0.5 if tail.nil?
           tail = 0 if tail == false

@@ -24,6 +24,15 @@ module MB
           super(*filters)
         end
 
+        # Redesigns every stage for a new sample rate, keeping the center
+        # frequency (limited to below Nyquist).
+        def sample_rate=(rate)
+          return if @sample_rate == rate
+          @sample_rate = rate.to_f
+          self.center_frequency = [@center_frequency, 0.499 * rate].min
+        end
+        alias at_rate sample_rate=
+
         def center_frequency=(f_center)
           @center_frequency = f_center
 

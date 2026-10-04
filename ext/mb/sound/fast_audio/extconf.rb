@@ -17,6 +17,9 @@ have_library('pthread')
 have_library('m')
 have_library('dl')
 
+# Resampling to the device's rate (also used by fast_resample)
+raise 'libsamplerate not found; please install libsamplerate0-dev' unless have_library('samplerate', 'src_new')
+
 # gnu11 for C11 atomics in the ring buffer
 with_cflags("#{$CFLAGS} -O3 -ggdb3 -Wall -Wextra -Werror -Wno-unused-parameter #{ENV['EXTRACFLAGS']} -std=gnu11") do
   create_makefile('mb/sound/fast_audio')

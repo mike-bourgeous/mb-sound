@@ -205,7 +205,7 @@ module MB
         explicit_fade = !fade.nil?
         fade = bars_or_nil(fade)
 
-        nodes = to_nodes(sound)
+        nodes = match_rate(to_nodes(sound))
         input = MB::Sound::GraphNodeInput.new(nodes)
         timeline_nodes = nodes.flat_map { |n| [n, *n.graph] }.grep(Sequence::TimelineNode).uniq
 
@@ -442,6 +442,12 @@ module MB
         @mutex.synchronize { @players.empty? }
       end
 
+      # The sample rate graphs play at: the output's (opening it if needed).
+      # Graphs added at another rate are set to it (see #add).
+      def sample_rate
+        output.sample_rate
+      end
+
       # The output being written, opening it if needed.
       def output
         @output ||= MB::Sound.output(channels: @channels, shared: false)
@@ -571,7 +577,7 @@ module MB
       def to_nodes(sound)
         case sound
         when String
-          [MB::Sound.file_input(sound)]
+          [MB::Sound.file_input(sound, resample: sample_rate.round)]
         when MB::Sound::GraphNode, MB::Sound::GraphNode::MultiOutput
           sound.outputs
         when Array
@@ -582,6 +588,25 @@ module MB
         else
           raise ArgumentError, "Cannot play #{sound.class} in the background; use a GraphNode, a channel bundle, an Array of GraphNodes, or a filename"
         end
+      end
+
+      # Sets each node to the session's sample rate (see #sample_rate) if it
+      # runs at another rate, so it plays at the right speed and its timeline
+      # nodes count samples like the transport.  A node that can't change
+      # its rate (e.g. a file input) is resampled instead.
+      def match_rate(nodes)
+        rate = sample_rate
+        nodes.map { |n|
+          next n if n.sample_rate == rate
+          next n.resample(rate) unless n.respond_to?(:sample_rate=)
+
+          begin
+            n.sample_rate = rate
+            n
+          rescue GraphNode::SampleRateHelper::SampleRateSupportError, NotImplementedError
+            n.resample(rate)
+          end
+        }
       end
 
       # Returns the timeline position where a new graph should start.  See

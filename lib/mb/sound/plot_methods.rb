@@ -285,7 +285,8 @@ module MB
             elapsed = [now - t, 0.1].min
             t = now
 
-            offset += elapsed * 48000
+            # Files and arrays are read at 48 kHz; graph nodes have their own rate
+            offset += elapsed * (file_tone_data.respond_to?(:sample_rate) ? file_tone_data.sample_rate : 48000)
 
             STDOUT.flush
             sleep 0.02
