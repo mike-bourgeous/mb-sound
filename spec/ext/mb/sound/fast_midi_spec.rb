@@ -52,12 +52,26 @@ RSpec.describe('MB::Sound::FastMIDI', :aggregate_failures) do
       messages
     end
 
+    # Sends a probe until it arrives, so the JACK connection is live (under
+    # load it can take longer than a fixed sleep; messages sent earlier are
+    # lost), then drops anything still queued.
+    def wait_for_connection(input)
+      deadline = MB::U.clock_now + 5
+      until MB::U.clock_now > deadline
+        output.send_bytes([0x80, 0, 0].pack('C*'))
+        sleep 0.02
+        break unless input.read.empty?
+      end
+      sleep 0.05
+      input.read
+    end
+
     it 'receives exactly the messages sent' do
       output
       input = open_input
       expect(input.api).to eq(:jack)
       expect(input.ports).to include('mbspec_sender:out')
-      sleep 0.05
+      wait_for_connection(input)
 
       sent = [[0x90, 60, 100], [0xb0, 1, 64], [0xe0, 0, 0x40], [0x80, 60, 0]]
       sent.each { |m| output.send_bytes(m.pack('C*')) }
