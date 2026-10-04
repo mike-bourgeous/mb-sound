@@ -4,8 +4,28 @@ module MB
   module Sound
     module GraphNode
       # Creates fan-out branches from a signal node (any object that responds
-      # to #sample and returns a single audio buffer), using buffer copies to
-      # prevent parallel branches from interfering with each other.
+      # to #sample and returns a single audio buffer).
+      #
+      # When every branch reads each buffer once with the same count
+      # (lockstep, the usual case in a Session), the source is sampled once
+      # and every branch gets the same frozen, read-only view of the source's
+      # output buffer, valid until the next buffer like any #sample result.
+      # Otherwise (a branch reads again before another has read, asks for a
+      # different count, or the source returns a short buffer) that buffer
+      # goes into a CircularBuffer and each branch reads its own copy, until
+      # all branches have caught up.  A branch that is never read keeps the
+      # Tee in that mode until its reader falls a whole CircularBuffer behind
+      # (it then raises BranchBufferOverflow if it ever reads, as before).
+      #
+      # Nodes must not modify a frozen buffer they are given (copy it first;
+      # see the nodes that process in place).  Numo raises for most writes to
+      # a frozen view, but not for in-place arithmetic (`buf.inplace * 2`), so
+      # with Tee.shared_check set (or MB_SOUND_CHECK_SHARED=1 in the
+      # environment) each shared buffer is checked when the next one starts:
+      # :raise raises naming the branches; :warn warns once and makes that Tee
+      # copy for each branch instead (bin/sound.rb uses :warn, so a live set
+      # keeps playing).  Tee.shared = false (MB_SOUND_SHARED_TEE=0) turns
+      # sharing off.
       #
       # The ideal way to create a Tee is with the GraphNode#tee method or
       # GraphNode#get_sampler method.
@@ -36,6 +56,27 @@ module MB
         # Raised when trying to read from a branch that has been destroyed.
         class BranchDestroyedError < MB::Sound::CircularBuffer::ReaderClosedError; end
 
+        # Raised (with Tee.shared_check :raise) when a downstream node
+        # modified a buffer shared by all branches.
+        class SharedBufferModified < RuntimeError; end
+
+        class << self
+          # Whether lockstep branches share one buffer (default true; false
+          # with MB_SOUND_SHARED_TEE=0).
+          attr_accessor :shared
+
+          # Whether to verify that shared buffers weren't modified: nil (off),
+          # :raise, or :warn (see the class description).
+          attr_accessor :shared_check
+        end
+
+        self.shared = ENV['MB_SOUND_SHARED_TEE'] != '0'
+        self.shared_check = case ENV['MB_SOUND_CHECK_SHARED']
+                            when nil, '', '0' then nil
+                            when 'warn' then :warn
+                            else :raise
+                            end
+
         # An individual branch of a Tee, returned by Tee#branches.
         class Branch
           extend Forwardable
@@ -45,6 +86,9 @@ module MB
 
           # Values for internal use by Tee.
           attr_reader :index, :reader, :tee
+
+          # For internal use by Tee: the last shared frame this branch read.
+          attr_accessor :frame
 
           def_delegators :@tee, :sample_rate, :sample_rate=, :reset, :original_source
           def_delegators :@reader, :count, :length
@@ -132,6 +176,14 @@ module MB
           end
 
           @done = false
+
+          # Shared fan-out state (see the class description)
+          @frame = 0
+          @frame_data = nil
+          @frame_count = nil
+          @frame_snapshot = nil
+          @buffered = false
+          @copying = false
         end
 
         # Adds a new branch to the Tee and returns it.
@@ -141,6 +193,7 @@ module MB
         def add_branch
           reader = @cbuf.reader
           branch = Branch.new(self, @branch_index, reader)
+          branch.frame = @frame || 0
 
           @branch_index += 1
 
@@ -160,17 +213,113 @@ module MB
           self
         end
 
-        # For internal use by Branch#sample.  Fills the internal circular
-        # buffer as needed until there are +count+ samples available for the
-        # given branch, or the upstream returns nil or empty.  Returns the next
-        # +count+ samples from the given branch's circular buffer reader (or
-        # fewer if the upstream has stopped).
+        # For internal use by Branch#sample.  Returns the next +count+ samples
+        # for +branch+ (fewer, or nil, once the source ends): the shared
+        # buffer in lockstep, otherwise from the CircularBuffer (see the class
+        # description).
         def internal_sample(branch, count)
           return @source.sample(count) if @branches.count == 1
+          return buffered_sample(branch, count) if @buffered || !Tee.shared || branch.reader.overflowed?
 
-          # TODO: maybe dedupe with InputChannelSplit?
-          # TODO: should we grow the buffer automatically?
+          # This branch hasn't read the current shared buffer yet
+          if branch.frame < @frame && @frame_data
+            return switch_to_buffer(branch, count) if count != @frame_count
 
+            branch.frame = @frame
+            return frame_data_for_branch
+          end
+
+          # This branch wants the next buffer: share it if the others are done
+          # with this one (or have fallen a whole CircularBuffer behind)
+          if @frame_data && @branches.any? { |b| b.frame < @frame && !b.reader.overflowed? }
+            return switch_to_buffer(branch, count)
+          end
+
+          next_frame(count)
+          return nil if @frame_data.nil?
+
+          # A short read before the end goes through the CircularBuffer, which
+          # fills the request from later buffers
+          return switch_to_buffer(branch, count) if @frame_data.length < count
+
+          branch.frame = @frame
+          frame_data_for_branch
+
+        rescue BranchBufferOverflow
+          raise
+
+        rescue MB::Sound::CircularBuffer::BufferOverflow
+          raise_overflow(branch)
+        end
+
+        private
+
+        # Samples the source for the next shared buffer, checking the last one
+        # first (see Tee.shared_check).
+        def next_frame(count)
+          check_frame if @frame_snapshot
+
+          @frame += 1
+          @frame_count = count
+          @frame_data = nil
+          @frame_snapshot = nil
+          return if @done
+
+          buf = @source.sample(count)
+          if buf.nil? || buf.empty?
+            @done = true
+            return
+          end
+
+          @frame_data = buf[0..].freeze
+          @frame_snapshot = buf.to_binary if Tee.shared_check && !@copying
+        end
+
+        # The shared buffer, or a copy for each branch once a Tee has been
+        # caught modifying its shared buffer with :warn.
+        def frame_data_for_branch
+          @copying ? @frame_data.dup : @frame_data
+        end
+
+        # Raises or warns if the last shared buffer was modified.
+        def check_frame
+          return if @frame_data.to_binary == @frame_snapshot
+
+          message = "A node downstream of #{original_source} modified the buffer shared by its #{@branches.count} branches " \
+            "(copy a frozen input before modifying it).  Branch creation traces:\n" +
+            @branches.map { |b| "#{b}:\n\t#{b.instance_variable_get(:@trace)&.first(6)&.join("\n\t")}" }.join("\n")
+
+          if Tee.shared_check == :warn
+            warn "#{message}\nCopying the buffer for each branch of this Tee from now on."
+            @copying = true
+          else
+            raise SharedBufferModified, message
+          end
+        end
+
+        # Leaves lockstep: puts the current shared buffer into the
+        # CircularBuffer for the branches that haven't read it, then serves
+        # +branch+ from the CircularBuffer.
+        def switch_to_buffer(branch, count)
+          check_frame if @frame_snapshot
+          @frame_snapshot = nil
+
+          if @frame_data
+            @cbuf.write(@frame_data)
+            @branches.each do |b|
+              b.reader.discard(@frame_data.length) if b.frame >= @frame && !b.reader.overflowed?
+            end
+          end
+
+          @frame_data = nil
+          @buffered = true
+          buffered_sample(branch, count)
+        end
+
+        # Reads +count+ samples for +branch+ from the CircularBuffer, sampling
+        # the source as needed, and returns to lockstep once every branch has
+        # caught up.
+        def buffered_sample(branch, count)
           r = branch.reader
 
           while !@done && r.length < count
@@ -182,16 +331,17 @@ module MB
             end
           end
 
-          if r.empty?
-            nil
-          else
-            r.read(MB::M.min(r.length, count))
+          data = r.empty? ? nil : r.read(MB::M.min(r.length, count))
+
+          if @buffered && Tee.shared && @branches.all? { |b| b.reader.overflowed? || b.reader.empty? }
+            @buffered = false
+            @branches.each { |b| b.frame = @frame }
           end
 
-        rescue BranchBufferOverflow
-          raise
+          data
+        end
 
-        rescue MB::Sound::CircularBuffer::BufferOverflow
+        def raise_overflow(branch)
           src = original_source
 
           raise BranchBufferOverflow, <<~EOF
@@ -205,6 +355,8 @@ module MB
             }.join}
           EOF
         end
+
+        public
 
         # Clears the "done" flag that returns nil if upstreams return nil, in
         # case the upstreams were restarted.

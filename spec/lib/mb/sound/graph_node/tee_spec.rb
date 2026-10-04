@@ -16,16 +16,33 @@ RSpec.describe(MB::Sound::GraphNode::Tee, aggregate_failures: true) do
 
     a1 = a.sample(100)
     b1 = b.sample(100)
-    expect(a1).not_to equal(b1)
     expect(a1).to eq(b1)
 
     ref = a1.dup
 
     b2 = b.sample(100)
     a2 = a.sample(100)
-    expect(a2).not_to equal(b2)
     expect(a2).to eq(b2)
     expect(ref).not_to eq(b2)
+  end
+
+  it 'shares one frozen buffer among branches read in lockstep' do
+    a, b = 157.hz.tee
+    a1 = a.sample(100)
+    b1 = b.sample(100)
+    expect(a1).to equal(b1)
+    expect(a1).to be_frozen
+  end
+
+  it 'gives each branch a copy with sharing turned off' do
+    MB::Sound::GraphNode::Tee.shared = false
+    a, b = 157.hz.tee
+    a1 = a.sample(100)
+    b1 = b.sample(100)
+    expect(a1).not_to equal(b1)
+    expect(a1).to eq(b1)
+  ensure
+    MB::Sound::GraphNode::Tee.shared = true
   end
 
   it 'gives the same data to many branches' do
@@ -162,5 +179,53 @@ RSpec.describe(MB::Sound::GraphNode::Tee, aggregate_failures: true) do
       end
     end
 
+  end
+
+  describe 'shared buffers' do
+    let(:source) { MB::Sound::ArrayInput.new(data: [Numo::SFloat.new(4000).seq]) }
+
+    it 'raises when a node writes to a shared buffer' do
+      a, b = source.tee
+      writer = a.proc { |buf| buf[0] = 5; buf }
+      expect { writer.sample(100) }.to raise_error(/frozen/)
+    end
+
+    it 'raises at the next buffer when in-place arithmetic changes a shared buffer', :check_shared do
+      a, b = source.tee
+      doubler = a.proc { |buf| buf.inplace * 2 }
+      doubler.sample(100)
+      b.sample(100)
+      expect { doubler.sample(100) }.to raise_error(MB::Sound::GraphNode::Tee::SharedBufferModified, /modified the buffer shared/)
+    end
+
+    it 'warns and copies for each branch from then on with :warn' do
+      MB::Sound::GraphNode::Tee.shared_check = :warn
+      a, b = source.tee
+      doubler = a.proc { |buf| buf.inplace * 2 }
+      doubler.sample(100)
+      b.sample(100)
+      expect { doubler.sample(100) }.to output(/Copying the buffer for each branch/).to_stderr
+      expect(b.sample(100)).to eq(Numo::SFloat.new(100).seq + 100) # not doubled by the other branch
+    ensure
+      MB::Sound::GraphNode::Tee.shared_check = nil
+    end
+
+    it 'passes a well-behaved graph with checks on', :check_shared do
+      a, b, c = source.tee(3)
+      sum = (a * 2 + b.softclip + c.abs.filter(:lowpass, cutoff: 1000)).delay(0.001)
+      expect { 20.times { sum.sample(100) } }.not_to raise_error
+    end
+
+    it 'falls back to copies when branches read out of step, and shares again once caught up' do
+      a, b = source.tee
+      a1 = a.sample(10).dup
+      a2 = a.sample(10).dup # b hasn't read yet: buffered
+      expect(b.sample(10)).to eq(a1)
+      expect(b.sample(10)).to eq(a2)
+      x = a.sample(10)
+      y = b.sample(10)
+      expect(x).to equal(y)
+      expect(x).to eq(Numo::SFloat.new(10).seq + 20)
+    end
   end
 end
