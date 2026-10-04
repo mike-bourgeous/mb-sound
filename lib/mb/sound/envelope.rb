@@ -223,8 +223,8 @@ module MB
       # +:hold+ - Seconds (or a length) from the start of a one-shot or a
       #           gateless trigger to its release (like the old
       #           auto_release); false holds forever.  Defaults to twice the
-      #           attack plus decay time, at least MIN_HOLD (the old
-      #           ADSREnvelope.default_auto_release).
+      #           attack plus decay time, at least MIN_HOLD (like the old
+      #           smoothstep ADSREnvelope's default auto release).
       # +:gate+, +:trigger+, +:velocity+, +:choke+, +:lift+ - Inputs (see
       #                                                       the class
       #                                                       description).

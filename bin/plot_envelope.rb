@@ -1,5 +1,5 @@
 #!/usr/bin/env -S RUBY_THREAD_TIMESLICE=10 RUBY_YJIT_ENABLE=1 ruby
-# Plots MB::Sound::Envelope curves and presets (or the old ADSREnvelope beside them).
+# Plots MB::Sound::Envelope curves and presets.
 #
 # Usage: $0 [options] [attack [decay [sustain [release]]]]
 #
@@ -14,7 +14,6 @@
 #     $0 --curve 30 --db 80 0 1 0 1        # a 30 dB curve, plotted in dB
 #     $0 --curve 0,60,60 --gate 0.2 --lift 0.9 0.1 0.2 0.5 0.4
 #     $0 --preset filter_env --velocity 0.5 0.01 0.3 0 0.3
-#     $0 --old 0.05 0.3 0.4 0.5            # old ADSREnvelope (smoothstep) vs new
 #     $0 --print 0.01 0.02 0.5 0.03
 
 require 'bundler/setup'
@@ -49,7 +48,6 @@ MB::Sound.script(
   gate: [nil, '-g', Float, 'Hold a gate for this many seconds instead of a one-shot'],
   velocity: [1.0, '-v', Float, 'Note velocity (0..1)', 0.0..1.0],
   compare: [false, 'Plot every curve preset (CURVES) with the same times'],
-  old: [false, 'Also plot the old ADSREnvelope (smoothstep curves) with the same times'],
   db: [nil, Float, 'Plot in decibels over this range (e.g. 80)', 1.0..],
   terminal: [false, '-t', 'Plot in the terminal instead of a gnuplot window'],
   print: [false, 'Print segment boundaries and levels instead of plotting'],
@@ -100,20 +98,6 @@ MB::Sound.script(
     end
   else
     plots[:"#{preset} #{p.curve || 'default'}"] = sample_all(envelope, limit)
-  end
-
-  if p.old
-    sustain = envelope.sustain.is_a?(Numeric) ? envelope.sustain : 0.5
-    old = MB::Sound::ADSREnvelope.new(
-      attack_time: envelope.attack_time, decay_time: envelope.decay_time,
-      sustain_level: sustain, release_time: envelope.release_time, sample_rate: envelope.sample_rate
-    )
-    old.trigger(1)
-    on = p.gate || envelope.hold.to_f
-    a = old.sample((on * envelope.sample_rate).round).dup
-    old.release
-    b = old.sample(((envelope.release_time + 0.25) * envelope.sample_rate).round).dup
-    plots[:ADSREnvelope] = a.concatenate(b)
   end
 
   length = plots.values.map(&:length).max
