@@ -1,0 +1,592 @@
+module MB
+  module Sound
+    module MIDI
+      # Splits a MIDI Stream's notes among voice lanes, the event-level half
+      # of a polyphonic synth.  Each lane (#lanes) is a Stream of its own,
+      # read like any stream (by Notes signal nodes, or #reader), that
+      # carries at most one note at a time plus every channel-wide event.
+      # The allocator reads its input once for all lanes, the first time
+      # any lane reads past what it has seen, so lanes may read in any
+      # order.  Lane streams keep the input's time base and Rational event
+      # times; nothing is delayed.  The same events always give the same
+      # allocation (lane idle checks aside; see below).
+      #
+      # Lanes: +voices+ plus +spares+ (see #spares=).  At most +voices+
+      # lanes are active (sounding, or released and possibly still
+      # ringing) at once.  A new note goes to a free lane (the one free the
+      # longest).  When all voices are active, the +:steal+ chain picks a
+      # victim (the first policy that finds one wins):
+      # - :same_note - the lane already playing the same (channel, note)
+      #   gets the note-on again (a retrigger; no choke).
+      # - :oldest_released - the released lane whose note-off came first.
+      # - :oldest - the lane whose note started first (sounding or
+      #   released).
+      # - :quietest - the lane with the lowest Lane#level_check, or without
+      #   level checks, released lanes first, then the lowest velocity.
+      # If no policy finds a victim, :oldest is used.  The victim gets a
+      # :choke event (a 3 ms release; see Event) and the new note goes to a
+      # spare lane, so no lane ever carries two notes.  A choking lane
+      # becomes free after +:choke_time+ (Envelope::CHOKE_TIME) or when its
+      # idle check says so.  With no free lane (no spares, or every spare
+      # still choking), the oldest choking lane is reused, or else the
+      # victim gets a note-off and the new note directly (a hard steal).
+      # +:protect+ (:lowest, :highest, or both in an Array) keeps the lane
+      # holding the lowest or highest sounding note from being stolen while
+      # another victim exists.
+      #
+      # Idle checks: Lane#idle_check (a Proc returning true when the lane's
+      # sound has ended, set by +synth+ from the lane's envelopes) lets a
+      # released lane become free.  Without one, a released lane counts as
+      # active until it is reused (stolen).  Checks are asked only about
+      # lanes that have already read every note event sent to them, so a
+      # check never sees a graph that hasn't caught up with its events.
+      #
+      # Event routing:
+      # - Notes route by (channel, note), so MPE fits later.  Overlapping
+      #   notes on the same key are counted: each note-on gets its own
+      #   allocation and note-offs end them oldest first.  Note-offs for
+      #   choked notes are dropped.
+      # - Poly pressure goes to the lanes holding its key.
+      # - Channel-wide events (CCs, bend, channel pressure, program, sysex,
+      #   system) go to every lane.
+      # - All notes off (CC 123, and 124-127) releases every lane on its
+      #   channel (note-offs) and all sound off (CC 120) chokes them; both
+      #   CCs then go to every lane.  Reset controllers (121) passes
+      #   through (streams already handle controller resets).
+      # - Jumps (seek, restart, clip swaps): sources send note-offs for
+      #   sounding notes, which release lanes as usual; each lane's
+      #   #generation follows the input's.
+      #
+      # Example:
+      #     alloc = MB::Sound::MIDI::Allocator.new('song.mid', voices: 4)
+      #     alloc.lanes[0].reader.next(1)   # the first lane's events in the first second
+      class Allocator
+        include GraphNode::Nameable
+        include GraphNode::Traversable
+
+        # The default steal chain.
+        DEFAULT_STEAL = [:same_note, :oldest_released, :oldest].freeze
+
+        # Every steal policy (see the class description).
+        STEAL_POLICIES = [:same_note, :oldest_released, :oldest, :quietest].freeze
+
+        # Notes that +:protect+ can keep from being stolen.
+        PROTECT = [:lowest, :highest].freeze
+
+        # One voice lane: a Stream of the notes given to the lane plus every
+        # channel-wide event.  Also shows the lane's allocation state.
+        class Lane < Stream
+          # The Allocator that feeds this lane.
+          attr_reader :allocator
+
+          # The lane's index in Allocator#lanes.
+          attr_reader :index
+
+          # A Proc (or anything with #call) that returns true once the
+          # lane's sound has ended (all of its envelopes are idle), so a
+          # released lane can be reused without a choke.  Set by +synth+.
+          attr_accessor :idle_check
+
+          # A Proc returning the lane's current level, for the :quietest
+          # steal policy (optional).
+          attr_accessor :level_check
+
+          def initialize(allocator, index)
+            @allocator = allocator
+            @index = index
+            super(LaneSource.new(allocator, index))
+          end
+
+          # The result of the idle check, or nil if there isn't one.
+          def idle?
+            @idle_check ? !!@idle_check.call : nil
+          end
+
+          # The lane's allocation state as of the last event the allocator
+          # read: :free, :sounding, :released, or :choking.
+          def state
+            @allocator.lane_state(@index).state
+          end
+
+          # The note the lane plays or last played (nil if never used).
+          def note
+            @allocator.lane_state(@index).note
+          end
+
+          # The channel of #note.
+          def channel
+            @allocator.lane_state(@index).channel
+          end
+
+          def to_s
+            "MIDI lane #{@index}"
+          end
+        end
+
+        # The Source of a Lane stream: events the allocator queued for the
+        # lane.  A Transform of the allocator's input (so streams treat it
+        # as derived, e.g. no second pitch bend range tracker, and seeks go
+        # to the root source), but it doesn't read the input itself: the
+        # allocator reads it once for every lane.
+        class LaneSource < Transform
+          attr_reader :index
+
+          def initialize(allocator, index)
+            # Not calling super, which would open a reader of the input
+            @allocator = allocator
+            @index = index
+            @parent = allocator.stream
+            @position = allocator.position
+            @queue = []
+            @node_type_name = "lane #{index}"
+          end
+
+          # True once the allocator's input has ended and this lane has
+          # read every event sent to it.
+          def ended?
+            @allocator.ended? && @queue.empty?
+          end
+
+          def sources
+            { allocator: @allocator }
+          end
+
+          # Used by Allocator to send an event to this lane (in time order).
+          def push(event)
+            @queue << event
+          end
+
+          private
+
+          def read_events(from, to)
+            @allocator.advance(to)
+            count = @queue.bsearch_index { |e| e.time >= to } || @queue.length
+            out = @queue.shift(count)
+            out.select! { |e| e.time >= from } if !out.empty? && out.first.time < from
+            out
+          end
+        end
+
+        # Allocation state of one lane (internal; see Lane#state).
+        class LaneState
+          attr_accessor :index, :state, :channel, :note, :velocity, :slots,
+            :on_seq, :off_seq, :free_seq, :choke_end, :last_time
+
+          def initialize(index)
+            @index = index
+            @state = :free
+            @slots = []
+            @free_seq = -1
+            @last_time = nil
+          end
+
+          def key
+            [@channel, @note]
+          end
+
+          def active?
+            @state == :sounding || @state == :released
+          end
+        end
+
+        # One note-on's allocation, queued per (channel, note) so note-offs
+        # end overlapping notes oldest first.  +voice+ is nil once the note
+        # was choked or released another way.
+        Slot = Struct.new(:voice)
+
+        # The input Stream.
+        attr_reader :stream
+
+        # The lane Streams (Lane objects).
+        attr_reader :lanes
+
+        # The maximum number of active lanes.
+        attr_reader :voices
+
+        # The number of spare lanes in use (see #spares=).
+        attr_reader :spares
+
+        # The largest #spares allowed (the spares given to the constructor).
+        attr_reader :max_spares
+
+        # The steal chain (an Array of policies).
+        attr_reader :steal
+
+        # Notes protected from stealing (an Array, maybe empty).
+        attr_reader :protect
+
+        # Seconds a choking lane takes to become free.
+        attr_reader :choke_time
+
+        # The input stream time where lanes start.
+        attr_reader :position
+
+        # Stream time up to which the input has been read.
+        attr_reader :read_to
+
+        # +stream+ is anything Stream.for accepts (a Stream, Source, Clip,
+        # MIDIFile, or filename).  See the class description for
+        # +:voices+, +:spares+, +:steal+ (a policy or Array of policies),
+        # and +:protect+.  +:choke_time+ is the seconds after a :choke event
+        # when a lane counts as free.
+        def initialize(stream, voices: 8, spares: 2, steal: DEFAULT_STEAL, protect: nil, choke_time: Envelope::CHOKE_TIME)
+          unless voices.is_a?(Integer) && voices >= 1
+            raise ArgumentError, "Voices must be a positive Integer (got #{voices.inspect})"
+          end
+          unless spares.is_a?(Integer) && spares >= 0
+            raise ArgumentError, "Spares must be a non-negative Integer (got #{spares.inspect})"
+          end
+
+          @steal = Array(steal).freeze
+          bad = @steal - STEAL_POLICIES
+          raise ArgumentError, "Unknown steal policies #{bad} (use #{STEAL_POLICIES})" unless bad.empty?
+
+          @protect = Array(protect).freeze
+          bad = @protect - PROTECT
+          raise ArgumentError, "Unknown protect values #{bad} (use #{PROTECT})" unless bad.empty?
+
+          @voices = voices
+          @spares = spares
+          @max_spares = spares
+          @choke_time = choke_time.to_r.rationalize(Rational(1, 10**12))
+
+          @stream = Stream.for(stream)
+          @input = @stream.reader
+          @position = @input.cursor
+          @read_to = @position
+
+          lane_count = voices + spares
+          @voice_states = Array.new(lane_count) { |idx| LaneState.new(idx) }
+          @lanes = Array.new(lane_count) { |idx| Lane.new(self, idx) }
+          @lane_sources = @lanes.map(&:source)
+
+          @held = {}
+          @seq = 0
+          @node_type_name = "allocator(#{voices} voices)"
+        end
+
+        # Changes the number of spare lanes in use (from 0 to #max_spares),
+        # e.g. to drop a spare under sustained CPU overload.  Lanes beyond
+        # +voices + spares+ get no new notes but finish what they play.
+        def spares=(count)
+          unless count.is_a?(Integer) && count.between?(0, @max_spares)
+            raise ArgumentError, "Spares must be an Integer from 0 to #{@max_spares} (got #{count.inspect})"
+          end
+          @spares = count
+        end
+
+        # The allocation state of lane +index+ (see Lane#state).
+        def lane_state(index)
+          @voice_states[index]
+        end
+
+        # The number of active lanes (sounding or released) as of the last
+        # event read.
+        def active_count
+          @voice_states.count(&:active?)
+        end
+
+        # True once the input has ended and been read.
+        def ended?
+          @input.ended?
+        end
+
+        # The input's generation (see Stream#generation).
+        def generation
+          @stream.generation
+        end
+
+        def music_end
+          @stream.music_end
+        end
+
+        def sources
+          { input: @stream }
+        end
+
+        def to_s
+          node_type_name
+        end
+
+        # Reads the input up to +to+ seconds and sends its events to the
+        # lanes.  Called by lanes when they read.
+        def advance(to)
+          return if to <= @read_to
+
+          events = @input.events(@read_to, to)
+          @read_to = to
+          events.each do |e| process(e) end
+        end
+
+        private
+
+        # Sends +event+ to lane +voice+.
+        def send_to(voice, event)
+          voice.last_time = event.time if event.type != :cc
+          @lane_sources[voice.index].push(event)
+        end
+
+        def broadcast(event)
+          @lane_sources.each do |s| s.push(event) end
+        end
+
+        def next_seq
+          @seq += 1
+        end
+
+        def process(e)
+          case e.type
+          when :note_on then note_on(e)
+          when :note_off then note_off(e)
+
+          when :poly_pressure
+            @held[[e.channel, e.note]]&.each { |slot| send_to(slot.voice, e) if slot.voice }
+
+          when :cc
+            if e.all_notes_off?
+              release_channel(e.channel, e.time)
+            elsif e.all_sound_off?
+              choke_channel(e.channel, e.time)
+            end
+            broadcast(e)
+
+          when :choke, :glide
+            # Allocation events from another allocator's lane mean nothing here
+
+          else
+            broadcast(e)
+          end
+        end
+
+        def note_on(e)
+          key = [e.channel, e.note]
+          refresh(e.time)
+
+          if active_count >= @voices
+            policy, victim = steal_victim(key)
+
+            if policy == :same_note
+              retrigger(victim, e)
+              return
+            end
+
+            target = free_lane || oldest_choking
+            if target
+              choke(victim, e.time)
+            else
+              hard_steal(victim, e.time)
+              target = victim
+            end
+          else
+            target = free_lane || oldest_choking || oldest_active
+            hard_steal(target, e.time) if target.active?
+          end
+
+          start(target, e)
+        end
+
+        def note_off(e)
+          key = [e.channel, e.note]
+          slots = @held[key]
+          return unless slots
+
+          slot = slots.shift
+          @held.delete(key) if slots.empty?
+
+          voice = slot.voice
+          return unless voice
+
+          voice.slots.delete(slot)
+          send_to(voice, e)
+
+          if voice.slots.empty?
+            voice.state = :released
+            voice.off_seq = next_seq
+          end
+        end
+
+        # Starts note-on +e+ on +voice+, which carries no note.
+        def start(voice, e)
+          voice.state = :sounding
+          voice.channel = e.channel
+          voice.note = e.note
+          voice.velocity = e.velocity
+          voice.on_seq = next_seq
+          voice.off_seq = nil
+          voice.choke_end = nil
+          add_slot(voice, e)
+          send_to(voice, e)
+        end
+
+        # Sends note-on +e+ again to +voice+, which plays the same key.
+        def retrigger(voice, e)
+          voice.state = :sounding
+          voice.velocity = e.velocity
+          voice.on_seq = next_seq
+          voice.off_seq = nil
+          add_slot(voice, e)
+          send_to(voice, e)
+        end
+
+        def add_slot(voice, e)
+          slot = Slot.new(voice)
+          voice.slots << slot
+          (@held[[e.channel, e.note]] ||= []) << slot
+        end
+
+        # Detaches +voice+ from its held notes, so their note-offs are
+        # dropped.
+        def detach(voice)
+          voice.slots.each do |slot| slot.voice = nil end
+          voice.slots.clear
+        end
+
+        def choke(voice, time)
+          detach(voice)
+          send_to(voice, Event.choke(voice.note, channel: voice.channel, time: time))
+          voice.state = :choking
+          voice.choke_end = time + @choke_time
+        end
+
+        # Ends the note on +voice+ with a note-off so it can take a new note
+        # directly (when no spare lane is free).
+        def hard_steal(voice, time)
+          count = voice.slots.length
+          detach(voice)
+          count.times do
+            send_to(voice, Event.note_off(voice.note, channel: voice.channel, time: time))
+          end
+          free(voice)
+        end
+
+        def free(voice)
+          voice.state = :free
+          voice.free_seq = next_seq
+        end
+
+        # Frees choking lanes whose choke is over and released or choking
+        # lanes whose idle check says so.
+        def refresh(time)
+          @voice_states.each do |v|
+            case v.state
+            when :choking
+              free(v) if time >= v.choke_end || idle?(v)
+            when :released
+              free(v) if idle?(v)
+            end
+          end
+        end
+
+        # Asks lane +voice+'s idle check, only if the lane has read every
+        # note event sent to it.
+        def idle?(voice)
+          lane = @lanes[voice.index]
+          return false unless lane.idle_check
+          return false if voice.last_time && voice.last_time >= @lane_sources[voice.index].position
+          lane.idle? == true
+        end
+
+        # The free lane (among lanes in use) that has been free the longest.
+        def free_lane
+          limit = @voices + @spares
+          @voice_states.select { |v| v.state == :free && v.index < limit }.min_by { |v| [v.free_seq, v.index] }
+        end
+
+        def oldest_choking
+          @voice_states.select { |v| v.state == :choking }.min_by(&:choke_end)
+        end
+
+        def oldest_active
+          @voice_states.select(&:active?).min_by(&:on_seq)
+        end
+
+        # Returns [policy, voice] for the lane to steal for a note on +key+.
+        def steal_victim(key)
+          active = @voice_states.select(&:active?)
+          candidates = unprotected(active)
+
+          @steal.each do |policy|
+            victim = case policy
+                     when :same_note
+                       active.select { |v| v.key == key }.max_by(&:on_seq)
+                     when :oldest_released
+                       candidates.select { |v| v.state == :released }.min_by(&:off_seq)
+                     when :oldest
+                       candidates.min_by(&:on_seq)
+                     when :quietest
+                       candidates.min_by { |v| [quietness(v), v.on_seq] }
+                     end
+            return [policy, victim] if victim
+          end
+
+          [:oldest, candidates.min_by(&:on_seq)]
+        end
+
+        # Removes lanes holding protected notes from +active+, unless that
+        # would leave nothing.
+        def unprotected(active)
+          return active if @protect.empty?
+
+          sounding = active.select { |v| v.state == :sounding }
+          return active if sounding.length < 2
+
+          keep = []
+          keep << sounding.min_by { |v| [Allocator.pitch_value(v.note), v.on_seq] } if @protect.include?(:lowest)
+          keep << sounding.max_by { |v| [Allocator.pitch_value(v.note), -v.on_seq] } if @protect.include?(:highest)
+
+          rest = active - keep
+          rest.empty? ? active : rest
+        end
+
+        # A sort key for the :quietest policy.
+        def quietness(voice)
+          check = @lanes[voice.index].level_check
+          return [0, check.call.to_f] if check
+          [voice.state == :released ? 0 : 1, voice.velocity || 0]
+        end
+
+        # Sends note-offs to every lane sounding on +channel+ (CC 123).
+        def release_channel(channel, time)
+          @voice_states.each do |v|
+            next unless v.state == :sounding && v.channel == channel
+            count = v.slots.length
+            detach(v)
+            count.times do send_to(v, Event.note_off(v.note, channel: channel, time: time)) end
+            v.state = :released
+            v.off_seq = next_seq
+          end
+          forget_channel(channel)
+        end
+
+        # Chokes every active lane on +channel+ (CC 120).
+        def choke_channel(channel, time)
+          @voice_states.each do |v|
+            choke(v, time) if v.active? && v.channel == channel
+          end
+          forget_channel(channel)
+        end
+
+        # Forgets held notes on +channel+, so a later note on the same key
+        # isn't ended by an old note-off that never arrives (some
+        # sequencers send CC 123 instead of note-offs).
+        def forget_channel(channel)
+          @held.delete_if { |(ch, _), _| ch == channel }
+        end
+
+        public
+
+        # Returns a number for comparing note pitches (MIDI note numbers):
+        # Numerics as they are, Notes by number, and Pitches from their
+        # frequency at A4 = 440 Hz.
+        def self.pitch_value(note)
+          case note
+          when Numeric then note
+          when Note then note.number
+          when Pitch then 69 + 12 * Math.log2(note.frequency / 440.0)
+          else note.to_f
+          end
+        end
+      end
+    end
+  end
+end

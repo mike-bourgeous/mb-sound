@@ -1,0 +1,350 @@
+RSpec.describe(MB::Sound::MIDI::Allocator) do
+  let(:ev) { MB::Sound::MIDI::Event }
+
+  # Events spaced 10 ms apart in the order given (Arrays share one time).
+  def timeline(*events)
+    events.each_with_index.flat_map { |e, idx| Array(e).map { |x| x.at(Rational(idx, 100)) } }
+  end
+
+  def stream(*events)
+    MB::Sound::MIDI::Stream.new(MIDIListSource.new(timeline(*events)))
+  end
+
+  def alloc(*events, **opts)
+    MB::Sound::MIDI::Allocator.new(stream(*events), **opts)
+  end
+
+  # Each lane's events as compact strings ("on60@2" = note-on 60 at 20 ms),
+  # reading every lane in +step+ second reads up to +seconds+.
+  def lanes(a, seconds: 1, step: nil)
+    readers = a.lanes.map(&:reader)
+    out = Array.new(readers.length) { [] }
+    step ||= seconds
+    (seconds / step).ceil.times do
+      readers.each_with_index { |r, idx| out[idx].concat(r.next(step)) }
+    end
+    out.map { |l| l.map { |e| short(e) } }
+  end
+
+  def short(e)
+    t = (e.time * 100).round
+    case e.type
+    when :note_on then "#{e.legato ? 'leg' : 'on'}#{e.note}@#{t}"
+    when :note_off then "off#{e.note}@#{t}"
+    when :choke then "choke#{e.note}@#{t}"
+    when :glide then "glide#{e.note}@#{t}"
+    when :cc then "cc#{e.note}@#{t}"
+    else "#{e.type}@#{t}"
+    end
+  end
+
+  def on(n, v = 1.0, ch: 0)
+    ev.note_on(n, v, channel: ch)
+  end
+
+  def off(n, ch: 0)
+    ev.note_off(n, channel: ch)
+  end
+
+  describe '#initialize' do
+    it 'makes voices + spares lanes that are Streams' do
+      a = alloc(voices: 3, spares: 2)
+      expect(a.lanes.length).to eq(5)
+      expect(a.lanes).to all(be_a(MB::Sound::MIDI::Stream))
+      expect(a.lanes.map(&:index)).to eq([0, 1, 2, 3, 4])
+      expect(a.lanes.map(&:state)).to all(eq(:free))
+      expect(MB::Sound::MIDI::Stream.for(a.lanes[1])).to equal(a.lanes[1])
+    end
+
+    it 'accepts anything Stream.for accepts' do
+      a = MB::Sound::MIDI::Allocator.new('spec/test_data/c_major.mid', voices: 2, spares: 0)
+      expect(a.lanes[0].reader.next(1).count(&:note_on?)).to be > 0
+    end
+
+    it 'rejects bad arguments' do
+      expect { alloc(voices: 0) }.to raise_error(ArgumentError, /Voices/)
+      expect { alloc(spares: -1) }.to raise_error(ArgumentError, /Spares/)
+      expect { alloc(steal: :loudest) }.to raise_error(ArgumentError, /loudest/)
+      expect { alloc(protect: :middle) }.to raise_error(ArgumentError, /middle/)
+    end
+
+    it 'shows up in graph traversal' do
+      s = stream(on(60))
+      a = MB::Sound::MIDI::Allocator.new(s)
+      expect(a.lanes[0].graph).to include(a, s)
+      expect(a.lanes[0].to_s).to eq('MIDI lane 0')
+    end
+  end
+
+  describe 'note assignment' do
+    it 'gives each note its own free lane while voices are free' do
+      a = alloc(on(60), on(64), on(67), off(64), off(60), off(67), voices: 4, spares: 0)
+      expect(lanes(a)).to eq([
+        ['on60@0', 'off60@4'],
+        ['on64@1', 'off64@3'],
+        ['on67@2', 'off67@5'],
+        [],
+      ])
+      expect(a.lanes.map(&:state)).to eq([:released, :released, :released, :free])
+    end
+
+    it 'routes note-offs by channel and note' do
+      a = alloc(on(60, ch: 0), on(60, ch: 1), off(60, ch: 1), off(60, ch: 0), voices: 2, spares: 0)
+      expect(lanes(a)).to eq([['on60@0', 'off60@3'], ['on60@1', 'off60@2']])
+      expect(a.lanes.map(&:channel)).to eq([0, 1])
+    end
+
+    it 'counts overlapping notes on the same key, ending the oldest first' do
+      a = alloc(on(60), on(60), off(60), off(60), voices: 4, spares: 0)
+      expect(lanes(a)).to eq([['on60@0', 'off60@2'], ['on60@1', 'off60@3'], [], []])
+    end
+
+    it 'keeps event times exact and lanes on the input time base' do
+      s = MB::Sound::MIDI::Stream.new(MIDIListSource.new(on(60).at(1/3r), off(60).at(2/3r)))
+      a = MB::Sound::MIDI::Allocator.new(s, voices: 1, spares: 0)
+      r = a.lanes[0].reader
+      expect(r.next(1/2r).map(&:time)).to eq([1/3r])
+      expect(r.next(1/2r).map(&:time)).to eq([2/3r])
+    end
+
+    it 'gives each lane the same events however the lanes read' do
+      events = [on(60), on(62), on(64), off(62), on(65), on(67), off(60), off(64), on(69), off(65), off(67), off(69)]
+      whole = lanes(alloc(*events, voices: 3), seconds: 1)
+      stepped = lanes(alloc(*events, voices: 3), seconds: 1, step: 3/100r)
+
+      reversed = alloc(*events, voices: 3)
+      backwards = reversed.lanes.reverse.map { |l| l.reader.next(1).map { |e| short(e) } }.reverse
+
+      expect(stepped).to eq(whole)
+      expect(backwards).to eq(whole)
+    end
+
+    it 'gives the same allocation every time (deterministic)' do
+      events = 40.times.map { |i| i.even? ? on(40 + (i * 7) % 30) : off(40 + ((i - 1) * 7) % 30) }
+      expect(lanes(alloc(*events, voices: 3))).to eq(lanes(alloc(*events, voices: 3)))
+    end
+
+    it 'reuses the lane free the longest' do
+      a = alloc(on(60), off(60), on(62), off(62), on(64), voices: 2, spares: 1)
+      a.lanes.each { |l| l.idle_check = -> { true } }
+      out = lanes(a, step: 1/100r)
+      expect(out.map(&:first)).to eq(['on60@0', 'on62@2', 'on64@4'])
+    end
+  end
+
+  describe 'stealing' do
+    it 'chokes the oldest released lane and plays the new note on a spare' do
+      a = alloc(on(60), on(62), off(60), on(64), voices: 2, spares: 1)
+      expect(lanes(a)).to eq([
+        ['on60@0', 'off60@2', 'choke60@3'],
+        ['on62@1'],
+        ['on64@3'],
+      ])
+      expect(a.lanes.map(&:state)).to eq([:choking, :sounding, :sounding])
+    end
+
+    it 'chokes the oldest sounding lane when none are released, dropping its note-off' do
+      a = alloc(on(60), on(62), on(64), off(60), off(64), voices: 2, spares: 1)
+      expect(lanes(a)).to eq([
+        ['on60@0', 'choke60@2'],
+        ['on62@1'],
+        ['on64@2', 'off64@4'],
+      ])
+    end
+
+    it 'retriggers the lane playing the same note with :same_note' do
+      a = alloc(on(60), on(62), off(60), on(60), off(60), voices: 2, spares: 1)
+      expect(lanes(a)).to eq([['on60@0', 'off60@2', 'on60@3', 'off60@4'], ['on62@1'], []])
+    end
+
+    it 'retriggers a sounding lane on the same note, counting both notes' do
+      a = alloc(on(60), on(62), on(60), off(60), off(60), voices: 2, spares: 1)
+      expect(lanes(a)).to eq([['on60@0', 'on60@2', 'off60@3', 'off60@4'], ['on62@1'], []])
+      expect(a.lanes[0].state).to eq(:released)
+    end
+
+    it 'follows the steal chain in order' do
+      events = [on(60), on(62), off(62), on(60)]
+      expect(lanes(alloc(*events, voices: 2, spares: 1, steal: [:oldest_released, :same_note]))).to eq([
+        ['on60@0'], ['on62@1', 'off62@2', 'choke62@3'], ['on60@3'],
+      ])
+      expect(lanes(alloc(*events, voices: 2, spares: 1, steal: :oldest))).to eq([
+        ['on60@0', 'choke60@3'], ['on62@1', 'off62@2'], ['on60@3'],
+      ])
+    end
+
+    it 'falls back to the oldest lane when no policy finds one' do
+      a = alloc(on(60), on(62), on(64), voices: 2, spares: 1, steal: :oldest_released)
+      expect(lanes(a)).to eq([['on60@0', 'choke60@2'], ['on62@1'], ['on64@2']])
+    end
+
+    it 'steals the lowest velocity or released lane with :quietest' do
+      a = alloc(on(60, 0.9), on(62, 0.2), on(64, 0.5), on(65), voices: 3, spares: 1, steal: :quietest)
+      expect(lanes(a)[1]).to eq(['on62@1', 'choke62@3'])
+
+      b = alloc(on(60, 0.9), on(62, 0.2), off(60), on(65), voices: 2, spares: 1, steal: :quietest)
+      expect(lanes(b)[0]).to eq(['on60@0', 'off60@2', 'choke60@3'])
+    end
+
+    it 'uses level checks for :quietest when given' do
+      a = alloc(on(60), on(62), on(64), voices: 2, spares: 1, steal: :quietest)
+      a.lanes[0].level_check = -> { 0.5 }
+      a.lanes[1].level_check = -> { 0.1 }
+      expect(lanes(a)[1]).to eq(['on62@1', 'choke62@2'])
+    end
+
+    it 'protects the lowest or highest sounding note' do
+      events = [on(40), on(70), on(60), on(65)]
+      expect(lanes(alloc(*events, voices: 3, spares: 1, steal: :oldest, protect: :lowest))[1]).to eq(['on70@1', 'choke70@3'])
+      expect(lanes(alloc(*events, voices: 3, spares: 1, steal: :oldest, protect: [:lowest, :highest]))[2]).to eq(['on60@2', 'choke60@3'])
+    end
+
+    it 'counts released lanes as active until reused when there is no idle check' do
+      a = alloc(on(60), off(60), on(62), off(62), on(64), voices: 2, spares: 1)
+      expect(lanes(a)).to eq([['on60@0', 'off60@1', 'choke60@4'], ['on62@2', 'off62@3'], ['on64@4']])
+    end
+
+    it 'frees choking lanes after the choke time' do
+      # 62 chokes 60 (lane 0) at 10 ms; the next note-on (30 ms) frees it if the choke is over
+      events = [on(60), on(62), off(62), on(64)]
+      short_choke = alloc(*events, voices: 1, spares: 2, choke_time: 0.02)
+      long_choke = alloc(*events, voices: 1, spares: 2, choke_time: 0.021)
+      expect(lanes(short_choke)).to eq(lanes(long_choke))
+      expect(short_choke.lanes[0].state).to eq(:free)
+      expect(long_choke.lanes[0].state).to eq(:choking)
+      expect(short_choke.lanes.map(&:state)).to eq([:free, :choking, :sounding])
+    end
+
+    it 'takes its default choke time from Envelope' do
+      expect(alloc.choke_time).to eq(3/1000r)
+      expect(MB::Sound::Envelope::CHOKE_TIME).to eq(0.003)
+    end
+
+    it 'reuses the oldest choking lane when every spare is still choking' do
+      a = alloc(on(60), on(62), on(64), on(65), voices: 2, spares: 1, choke_time: 1)
+      expect(lanes(a)).to eq([['on60@0', 'choke60@2', 'on65@3'], ['on62@1', 'choke62@3'], ['on64@2']])
+    end
+
+    it 'hands a note straight to the victim without spares' do
+      a = alloc(on(60), on(62), on(64), off(60), off(64), voices: 2, spares: 0)
+      expect(lanes(a)).to eq([['on60@0', 'off60@2', 'on64@2', 'off64@4'], ['on62@1']])
+    end
+  end
+
+  describe '#spares=' do
+    it 'stops new notes from going to lanes beyond voices + spares' do
+      a = alloc(on(60), on(62), on(64), on(65), voices: 2, spares: 2, choke_time: 1)
+      a.spares = 1
+      expect(lanes(a)).to eq([['on60@0', 'choke60@2', 'on65@3'], ['on62@1', 'choke62@3'], ['on64@2'], []])
+    end
+
+    it 'accepts 0 up to the spares given to the constructor' do
+      a = alloc(spares: 2)
+      a.spares = 0
+      expect(a.spares).to eq(0)
+      expect { a.spares = 3 }.to raise_error(ArgumentError, /0 to 2/)
+    end
+  end
+
+  describe 'idle checks' do
+    it 'frees released lanes whose check says they are idle' do
+      a = alloc(on(60), off(60), on(62), off(62), on(64), voices: 2, spares: 1)
+      a.lanes.each { |l| l.idle_check = -> { true } }
+      expect(lanes(a, step: 1/100r)).to eq([['on60@0', 'off60@1'], ['on62@2', 'off62@3'], ['on64@4']])
+      expect(a.lanes.map(&:state)).to eq([:free, :free, :sounding])
+    end
+
+    it 'keeps released lanes whose check says they are ringing' do
+      a = alloc(on(60), off(60), on(62), off(62), on(64), voices: 2, spares: 1)
+      a.lanes.each { |l| l.idle_check = -> { false } }
+      expect(lanes(a, step: 1/100r)).to eq([['on60@0', 'off60@1', 'choke60@4'], ['on62@2', 'off62@3'], ['on64@4']])
+    end
+
+    it 'only asks lanes that have read every note event sent to them' do
+      a = alloc(on(60), off(60), on(62), off(62), on(64), voices: 2, spares: 1)
+      checked = []
+      a.lanes.each { |l| l.idle_check = -> { checked << l.index; true } }
+      # One read: no lane has read its note-off when 64 arrives
+      expect(lanes(a)).to eq([['on60@0', 'off60@1', 'choke60@4'], ['on62@2', 'off62@3'], ['on64@4']])
+      expect(checked).to be_empty
+    end
+
+    it 'frees choking lanes early when idle' do
+      a = alloc(on(60), on(62), on(64), [off(62), off(64)], on(65), voices: 2, spares: 1, choke_time: 1)
+      a.lanes[0].idle_check = -> { true }
+      out = lanes(a, step: 1/100r)
+      expect(out[0]).to eq(['on60@0', 'choke60@2', 'on65@4'])
+    end
+
+    it 'reports the check result' do
+      a = alloc
+      expect(a.lanes[0].idle?).to eq(nil)
+      a.lanes[0].idle_check = -> { 1 }
+      expect(a.lanes[0].idle?).to eq(true)
+    end
+  end
+
+  describe 'channel-wide events' do
+    it 'sends CCs, bend, pressure, program, and system events to every lane' do
+      a = alloc(on(60), ev.cc(1, 0.5), ev.bend(0.25), ev.channel_pressure(0.5), ev.program(3), ev.parse([0xf8]), voices: 1, spares: 1)
+      out = lanes(a)
+      expect(out[0]).to eq(['on60@0', 'cc1@1', 'bend@2', 'channel_pressure@3', 'program@4', 'system@5'])
+      expect(out[1]).to eq(out[0].drop(1))
+    end
+
+    it 'keeps the stream pitch bend range on bends' do
+      a = MB::Sound::MIDI::Allocator.new(stream(ev.bend(1)).bend_range(12), voices: 1, spares: 0)
+      expect(a.lanes[0].reader.next(1).first.bend_semitones).to eq(12)
+    end
+
+    it 'sends poly pressure only to lanes holding its key' do
+      a = alloc(on(60), on(62), ev.poly_pressure(62, 0.5), voices: 2, spares: 0)
+      expect(lanes(a)).to eq([['on60@0'], ['on62@1', 'poly_pressure@2']])
+    end
+
+    it 'releases every lane on the channel at all notes off (123), ignoring later note-offs' do
+      a = alloc(on(60), on(62), on(64, ch: 1), ev.cc(123, 0), on(60), off(60), off(62), off(60), voices: 4, spares: 0)
+      expect(lanes(a)).to eq([
+        ['on60@0', 'off60@3', 'cc123@3'],
+        ['on62@1', 'off62@3', 'cc123@3'],
+        ['on64@2', 'cc123@3'],
+        ['cc123@3', 'on60@4', 'off60@5'],
+      ])
+      expect(a.lanes[2].state).to eq(:sounding)
+    end
+
+    it 'chokes every lane on the channel at all sound off (120)' do
+      a = alloc(on(60), on(62), off(62), ev.cc(120, 0), off(60), voices: 2, spares: 0)
+      expect(lanes(a)).to eq([['on60@0', 'choke60@3', 'cc120@3'], ['on62@1', 'off62@2', 'choke62@3', 'cc120@3']])
+      expect(a.lanes.map(&:state)).to eq([:choking, :choking])
+    end
+
+    it 'passes reset controllers (121) through' do
+      a = alloc(on(60), ev.cc(121, 0), voices: 1, spares: 0)
+      expect(lanes(a)).to eq([['on60@0', 'cc121@1']])
+      expect(a.lanes[0].state).to eq(:sounding)
+    end
+  end
+
+  describe 'jumps' do
+    it 'releases lanes with the note-offs the source sends at a seek' do
+      s = stream(on(60), on(64), off(60), off(64))
+      a = MB::Sound::MIDI::Allocator.new(s, voices: 2, spares: 0)
+      readers = a.lanes.map(&:reader)
+      readers.each { |r| r.next(2/100r) }
+      gen = readers[0].generation
+      a.lanes[1].seek(0)
+      out = readers.map { |r| r.next(3/100r).map { |e| short(e) } }
+      expect(out).to eq([['off60@2', 'on60@2', 'off60@4'], ['off64@2', 'on64@3']])
+      expect(readers[0].generation).to eq(gen + 1)
+    end
+
+    it 'ends lanes when the input has ended and been read' do
+      a = alloc(on(60), off(60), voices: 1, spares: 1)
+      r = a.lanes.map(&:reader)
+      r.each { |x| x.next(1) }
+      expect(r.map(&:ended?)).to eq([true, true])
+      expect(a.ended?).to eq(true)
+    end
+  end
+end
