@@ -51,6 +51,25 @@ RSpec.describe(MB::Sound::Tuning, :aggregate_failures) do
       tuning.set(a4: 442)
       expect(node.sample(4).to_a).to all(be_within(1e-3).of(442))
     end
+
+    it 'leaves a shared input buffer alone', :check_shared do
+      src = 69.constant + 2.hz.lfo.at(12)
+      f = tuning.freq(src)
+      other = src.get_sampler
+      3.times do
+        hz = f.sample(480).dup
+        num = other.sample(480).dup
+        expect(num.max).to be > 70
+        expect(hz).to all_be_within(1e-2).of_array(440 * 2 ** ((num - 69) / 12))
+      end
+    end
+
+    it 'leaves an unshared input buffer alone' do
+      data = Numo::SFloat[60, 69, 81]
+      f = tuning.freq(MB::Sound::ArrayInput.new(data: [data]))
+      expect(f.sample(3).to_a).to match([be_within(1e-3).of(261.626), be_within(1e-3).of(440), be_within(1e-3).of(880)])
+      expect(data.to_a).to eq([60, 69, 81])
+    end
   end
 
   describe 'MB::Sound.tuning' do
