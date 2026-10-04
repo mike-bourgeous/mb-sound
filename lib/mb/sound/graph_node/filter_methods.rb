@@ -198,18 +198,30 @@ module MB
         # over +length+: seconds or any length (e.g. `60.samples`, `100.ms`,
         # `1.n16` at the current tempo).
         #
+        # With +reset:+ (a graph node of triggers, e.g. a note-on trigger), the
+        # output jumps to the input at every nonzero sample of +reset+ instead
+        # of gliding, so only changes without a reset glide (e.g. portamento
+        # for legato notes only).
+        #
         # Examples:
         #     midi.number.smooth(0.1)
         #     120.hz.square.smooth(60.samples)
+        #     clip.number.smooth(0.05, reset: clip.trigger)
         #
         # TODO: instead of reacting to step changes in the input, use an FIR
         # filter whose step response is the smoothstep function.
-        def smooth(length)
+        def smooth(length, reset: nil)
           if length.is_a?(MB::Sound::Length::Samples)
-            filter(MB::Sound::Filter::Smoothstep.new(sample_rate: sample_rate, samples: length.value))
+            f = MB::Sound::Filter::Smoothstep.new(sample_rate: sample_rate, samples: length.value)
           else
-            filter(MB::Sound::Filter::Smoothstep.new(sample_rate: sample_rate, seconds: MB::Sound::Length.seconds(length, sample_rate: sample_rate)))
+            f = MB::Sound::Filter::Smoothstep.new(sample_rate: sample_rate, seconds: MB::Sound::Length.seconds(length, sample_rate: sample_rate))
           end
+
+          return filter(f) if reset.nil?
+
+          raise ArgumentError, "Smooth reset must be a graph node of triggers (got #{reset.inspect})" unless reset.respond_to?(:sample)
+
+          MB::Sound::Filter::SampleWrapper.new(f, self, inputs: { reset: reset })
         end
 
         # Hard-clips the slope of the output of this node to the given +max_rise+

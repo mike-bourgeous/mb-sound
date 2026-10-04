@@ -102,6 +102,39 @@ module MB
           }
         end
 
+        # Like #process, but at every sample where +reset+ (an NArray of the
+        # same length) is nonzero, the output jumps to the input instead of
+        # gliding (and any glide in progress stops), e.g. to glide only
+        # between legato notes.  Used by GraphNode#smooth with +reset:+.
+        def dynamic_process(samples, reset:)
+          i = -1
+          samples.map { |s|
+            i += 1
+            if reset[i] != 0
+              @s = s
+              @old = s
+              @d = 0
+              @t = @fade_samples
+              @v = s
+              next s
+            end
+
+            if s != @s
+              @old = @v
+              @s = s
+              @d = @s - @old
+              @t = 0
+            end
+
+            if @t < @fade_samples
+              @t += 1
+              @v = MB::FastSound.smoothstep(@t.to_f / @fade_samples) * @d + @old
+            else
+              @v = s
+            end
+          }
+        end
+
         # Returns the current output value without changing the filter state.
         def peek
           @v
