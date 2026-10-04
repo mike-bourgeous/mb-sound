@@ -111,8 +111,10 @@ module MB
         false
       end
 
-      # Returns the Note +semitones+ higher (lower if negative).
+      # Returns the Note +semitones+ higher (lower if negative); +semitones+
+      # may be an Interval (`7.st`, `1.oct`).
       def transpose(semitones)
+        semitones = Interval.semitones(semitones)
         Note.new(detuned_number + semitones, sample_rate: @sample_rate)
       end
 
