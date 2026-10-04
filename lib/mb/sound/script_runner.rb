@@ -13,7 +13,7 @@ module MB
     #     -o, --output FILE        write to an audio file instead of playing
     #     -f, --force              overwrite the output file (alias --overwrite)
     #     -g, --graphviz           open a visualization of the node graph
-    #     -p, --plot               plot the output while playing live
+    #     -P, --plot               plot the output while playing live
     #     -q, --quiet              don't print the parameters
     #
     # General scripts (kind :script; utilities, plots, file processors) have
@@ -52,10 +52,10 @@ module MB
       # Short options used by every script of a kind, which parameters can't
       # use.
       COMMON_SHORT_OPTIONS = {
-        effect: %w[-o -f -g -p -q -h -i -c],
+        effect: %w[-o -f -g -P -q -h -i -c],
         script: %w[-h],
-        synth: %w[-o -f -g -p -q -h -i],
-        song: %w[-o -f -g -p -q -h -b],
+        synth: %w[-o -f -g -P -q -h -i],
+        song: %w[-o -f -g -P -q -h -b],
       }.freeze
 
       # Raised for invalid command-line arguments.  #help has the option
@@ -269,7 +269,7 @@ module MB
             o.on('-o', '--output FILE', 'Write to an audio file instead of playing') { |v| @options[:output] = v }
             o.on('-f', '--force', '--overwrite', 'Overwrite the output file') { @options[:force] = true }
             o.on('-g', '--graphviz', 'Open a visualization of the node graph') { @options[:graphviz] = true }
-            o.on('-p', '--plot', 'Plot the output while playing live') { @options[:plot] = true }
+            o.on('-P', '--plot', 'Plot the output while playing live') { @options[:plot] = true }
             o.on('-q', '--quiet', "Don't print the parameters") { @options[:quiet] = true }
           end
 
