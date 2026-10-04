@@ -283,7 +283,10 @@ module MB
       # step, including phase modulation at that sample), and works with
       # frequency and phase modulation, but not with #sync.  Buffers with
       # resets are computed in pieces split at the reset samples; buffers
-      # without resets cost one scan of the trigger buffer.
+      # without resets cost one scan of the trigger buffer.  A reset input
+      # that ends (returns nil) means no more resets, not the end of the
+      # oscillator, so e.g. a key-synced clip tone keeps playing through an
+      # envelope's release after its clip's trigger has ended.
       def reset_input=(trigger)
         unless trigger.nil? || trigger.respond_to?(:sample)
           raise ArgumentError, "Reset input must be nil or a graph node of triggers (got #{trigger.inspect})"
@@ -291,6 +294,7 @@ module MB
         raise ArgumentError, 'A synced oscillator cannot also have a reset input' if trigger && @sync
 
         @reset_input = trigger.respond_to?(:get_sampler) ? trigger.get_sampler : trigger
+        @reset_ended = false
       end
 
       # Sets where the reset input (see #reset_input=) moves the phase: nil
@@ -804,7 +808,7 @@ module MB
       # True if an input needed for the next samples has ended.
       def missing_input?(freq, phase, width, pulses, resets, targets)
         freq.nil? || phase.nil? || (warped? && width.nil?) || (@sync && pulses.nil?) ||
-          (@reset_input && resets.nil?) || (@reset_to.respond_to?(:sample) && targets.nil?)
+          (@reset_to.respond_to?(:sample) && targets.nil?)
       end
 
       # The indices of the nonzero samples of the reset input's buffer
@@ -1049,10 +1053,11 @@ module MB
           min_length = pulses.length if pulses && pulses.length < min_length
         end
 
-        resets = @reset_input
+        resets = @reset_ended ? nil : @reset_input
         if resets
           resets = resets.sample(count)
           resets = nil if resets&.empty?
+          @reset_ended = true if resets.nil?
           min_length = resets.length if resets && resets.length < min_length
         end
 
