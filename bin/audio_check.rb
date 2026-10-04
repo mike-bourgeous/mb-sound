@@ -11,6 +11,7 @@
 #     $0 --list                   # backends and devices
 #     $0 -d 'MacBook' -s 10       # a device by part of its name
 #     $0 --latency 0.03 --busy    # small queue while Ruby is kept busy
+#     $0 --buffer 256 --period 128 --latency 0.001   # lowest latency that keeps up?
 #     AUDIO_BACKEND=jack $0       # Linux: only JACK (jackd or PipeWire)
 #     AUDIO_BACKEND=null $0       # no sound card (miniaudio's null device)
 #
@@ -61,6 +62,7 @@ MB::Sound.script(
   rate: [48000, Integer, '-r', 'Sample rate to ask for', 8000..384000],
   latency: [nil, Float, 'Seconds queued ahead of the sound card', 0.001..2.0],
   period: [nil, Integer, 'Sound card period in frames', 16..16384],
+  buffer: [800, Integer, 'Frames per write (the block size a Session renders)', 16..16384],
   gain: [-12.0, Float, '-g', 'Click level in dB', -60.0..0.0],
   interval: [0.5, Float, 'Seconds between clicks', 0.05..5.0],
   busy: [false, 'Keep another Ruby thread busy (allocating, GC) to test dropouts'],
@@ -86,7 +88,8 @@ MB::Sound.script(
   next if p.list
 
   out = MB::Sound::DeviceOutput.new(
-    channels: 2, sample_rate: p.rate, device: p.device, latency: p.latency, period: p.period, backends: backends
+    channels: 2, sample_rate: p.rate, device: p.device, latency: p.latency, period: p.period, buffer_size: p.buffer,
+    backends: backends
   )
 
   ms = ->(frames) { (frames * 1000.0 / out.sample_rate).round(1) }
@@ -151,6 +154,7 @@ MB::Sound.script(
   puts "Latency: #{(latencies.min * 1000).round(1)}..#{(latencies.max * 1000).round(1)} ms " \
     '(queue + sound card buffer; excludes driver and converter delay)'
   puts "Underruns while playing: #{underruns}"
+  puts "Largest sound card request: #{out.stats[:max_callback]} frames (period #{out.period})"
 
   if snapshots.length >= 2
     (t0, f0), (t1, f1) = snapshots.first, snapshots.last

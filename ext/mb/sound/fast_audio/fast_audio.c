@@ -230,6 +230,7 @@ struct playback {
 
 	_Atomic size_t underruns; // times the device ran out of queued audio
 	_Atomic size_t frames_played; // device clock in frames (including silence)
+	_Atomic size_t max_callback; // most frames the device asked for at once
 	int starving; // callback only: the last callback ran out of audio
 
 	_Atomic int open;
@@ -364,6 +365,9 @@ static void playback_callback(ma_device *device, void *output, const void *input
 
 	atomic_store_explicit(&p->read_pos, rp + count, memory_order_release);
 	atomic_fetch_add_explicit(&p->frames_played, frames, memory_order_relaxed);
+	if (frames > atomic_load_explicit(&p->max_callback, memory_order_relaxed)) {
+		atomic_store_explicit(&p->max_callback, frames, memory_order_relaxed);
+	}
 
 	if (p->capture != NULL) {
 		size_t length = atomic_load_explicit(&p->capture_length, memory_order_relaxed);
@@ -859,6 +863,7 @@ static VALUE playback_stats(VALUE self)
 	rb_hash_aset(h, ID2SYM(rb_intern("frames_written")), SIZET2NUM(wp));
 	rb_hash_aset(h, ID2SYM(rb_intern("frames_played")), SIZET2NUM(atomic_load(&p->frames_played)));
 	rb_hash_aset(h, ID2SYM(rb_intern("underruns")), SIZET2NUM(atomic_load(&p->underruns)));
+	rb_hash_aset(h, ID2SYM(rb_intern("max_callback")), SIZET2NUM(atomic_load(&p->max_callback)));
 
 	return h;
 }

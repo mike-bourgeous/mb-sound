@@ -135,6 +135,7 @@ RSpec.describe('MB::Sound::FastAudio', :aggregate_failures) do
       expect(max_queued).to be <= 2048
       expect(elapsed).to be_within(0.06).of((20000 - 2048).to_f / rate)
       expect(pb.stats[:underruns]).to eq(0)
+      expect(pb.stats[:max_callback]).to eq(pb.period)
     end
 
     it 'counts each time the audio runs out, not every silent callback' do
