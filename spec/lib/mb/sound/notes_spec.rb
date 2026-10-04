@@ -305,6 +305,20 @@ RSpec.describe(MB::Sound::Notes) do
       expect(v.envelopes.length).to eq(4)
     end
 
+    it 'end (return nil) once the stream has ended and they are idle' do
+      v = MB::Sound::Notes.new(MIDIListSource.new([ev.note_on(60, 1.0), ev.note_off(60, time: 1/10r)]))
+      e = v.env(0.001, 0.01, 1, 0.05, curve: :linear)
+      bufs = []
+      while (b = e.sample(480)) && bufs.length < 100
+        bufs << b.dup
+      end
+      expect(bufs.length).to be_between(10 + 5, 10 + 5 + 2) # note-off at 4800, release 2400
+      expect(bufs.last.to_a.last).to eq(0)
+
+      looping = clip_notes(MB::Sound::C4.n16.loop).env(0.001, 0.01, 1, 0.01)
+      expect(Array.new(100) { looping.sample(480) }.compact.length).to eq(100)
+    end
+
     it 'scale times by the GM2 controllers with .gm' do
       [[127, 3840, 38400], [0, 60, 600], [64, 480, 4800]].each do |raw, attack, release|
         v = notes_with(ev.cc_raw(73, raw), ev.cc_raw(72, raw))

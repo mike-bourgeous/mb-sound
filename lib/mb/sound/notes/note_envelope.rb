@@ -42,6 +42,16 @@ module MB
           self
         end
 
+        # Returns +count+ samples, or nil once the Notes' stream has ended
+        # (a non-looping clip or a MIDI file has played its last event and
+        # every node has read it) and this envelope is idle, so e.g. `noise
+        # * clip.env` ends with its clip like the Notes gate does.  Envelopes
+        # on looping or live streams never end.
+        def sample(count)
+          return nil if idle? && @notes.ended?
+          super
+        end
+
         # True if GM2 time scaling is on (see #gm).
         def gm?
           @gm
