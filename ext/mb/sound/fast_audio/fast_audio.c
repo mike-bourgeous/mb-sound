@@ -118,6 +118,9 @@ static void init_context(ma_context *context, VALUE backends, const char *client
 	ma_context_config config = ma_context_config_init();
 	config.jack.pClientName = client_name;
 	config.jack.tryStartServer = MA_FALSE;
+	// The PulseAudio client (and PipeWire node) name; else libpulse uses the
+	// process name ("ruby").  miniaudio copies it.
+	config.pulse.pApplicationName = client_name;
 
 	ma_result result = ma_context_init(count ? list : NULL, count, &config, context);
 	if (result != MA_SUCCESS) {
