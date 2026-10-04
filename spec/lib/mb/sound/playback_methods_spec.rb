@@ -59,6 +59,39 @@ RSpec.describe(MB::Sound::PlaybackMethods) do
       MB::Sound.rewind
     end
 
+    describe '#latency' do
+      around(:each) do |ex|
+        saved = %w[AUDIO_BACKEND AUDIO_PROFILE].to_h { |k| [k, ENV.delete(k)] }
+        ENV['AUDIO_BACKEND'] = 'null' # miniaudio's null sound card
+        ex.run
+      ensure
+        saved.each { |k, v| v ? ENV[k] = v : ENV.delete(k) }
+      end
+
+      # After the file's before hook, which sets OUTPUT_TYPE=null
+      before(:each) { ENV['OUTPUT_TYPE'] = 'device' }
+
+      it 'plays background sounds through a sound card with a latency profile' do
+        expect(MB::Sound.latency(:low)).to eq(:low)
+        out = MB::Sound::Session.default.output
+        expect(out).to be_a(MB::Sound::DeviceOutput)
+        expect(out.profile).to eq(:low)
+        expect(out.buffer_size).to eq(256)
+        expect(MB::Sound.latency).to eq(:low)
+      end
+
+      it 'is also called lag' do
+        expect(MB::Sound.lag(:safe)).to eq(:safe)
+        expect(MB::Sound.lag).to eq(:safe)
+      end
+
+      it 'refuses to switch while players are running' do
+        MB::Sound.latency(:default)
+        MB::Sound.bg(220.hz.sine)
+        expect { MB::Sound.latency(:low) }.to raise_error(ArgumentError, /Stop the background players/)
+      end
+    end
+
     describe '#use_output' do
       it 'plays background sounds through an output object' do
         out = MB::Sound::NullOutput.new(channels: 2)

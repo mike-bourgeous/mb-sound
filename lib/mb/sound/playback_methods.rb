@@ -221,6 +221,32 @@ module MB
         output
       end
 
+      # With a +profile+ (:low, :default, :video, or :safe; see
+      # DeviceOutput::PROFILES), plays background sounds through the sound
+      # card with that latency from now on: the background session restarts
+      # with a new output (see #use_output), so stop all players first.
+      # Light patches (e.g. a few band-limited oscillators) can use :low;
+      # heavy graphs need :default or :safe.  An AUDIO_PROFILE environment
+      # variable still takes precedence.  Without a profile, returns the
+      # current output's profile (nil if it has none).  Also available as
+      # #lag.
+      #
+      # Example (bin/sound.rb):
+      #     latency :low     # about 16-19 ms on the user's Mac
+      #     lag :default     # about 45-56 ms
+      #     latency          # => :default
+      def latency(profile = nil)
+        if profile.nil?
+          out = Session.default.output
+          return out.respond_to?(:profile) ? out.profile : nil
+        end
+
+        type = detect_output == :null ? :null : :device
+        use_output(MB::Sound.output(output_type: type, channels: 2, shared: false, profile: profile))
+        profile.to_s.delete_prefix(':').to_sym
+      end
+      alias lag latency
+
       # Sets master effects that the whole background mix (see #bg) runs
       # through, e.g. to tame levels or add a shared reverb.  The block gets
       # the mix and returns the processed mix.  Also available as

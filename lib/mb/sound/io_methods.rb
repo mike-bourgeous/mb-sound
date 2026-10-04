@@ -331,6 +331,9 @@ module MB
       # See FFMPEGOutput, mb-sound-jackffi, JackOutput, and AlsaOutput for more
       # flexible playback.
       #
+      # +:profile+ is a latency profile for :device outputs (see
+      # DeviceOutput::PROFILES); other output types ignore it.
+      #
       # Pass either true or a Hash of options for MB::Sound::PlotOutput in
       # +:plot+ to enable live plotting.
       #
@@ -338,8 +341,8 @@ module MB
       # unless +:shared+ is false.  An unshared output is always new and is
       # never returned to other callers, so the caller should close it (e.g.
       # for playing several sounds at once; see PlaybackMethods#bg).
-      def output(sample_rate: 48000, channels: 2, device: nil, buffer_size: nil, plot: nil, output_type: nil, shared: true)
-        info = {sample_rate: sample_rate, channels: channels, device: device, buffer_size: buffer_size, plot: plot, output_type: output_type}
+      def output(sample_rate: 48000, channels: 2, device: nil, buffer_size: nil, plot: nil, output_type: nil, shared: true, profile: nil)
+        info = {sample_rate: sample_rate, channels: channels, device: device, buffer_size: buffer_size, plot: plot, output_type: output_type, profile: profile}
 
         if plot
           graphical = plot.is_a?(Hash) && plot[:graphical] || false
@@ -401,7 +404,7 @@ module MB
           )
 
         when :device
-          o = MB::Sound::DeviceOutput.new(channels: channels, sample_rate: sample_rate, buffer_size: buffer_size, device: device)
+          o = MB::Sound::DeviceOutput.new(channels: channels, sample_rate: sample_rate, buffer_size: buffer_size, device: device, profile: profile)
 
         when :null
           o = MB::Sound::NullOutput.new(channels: channels, sample_rate: sample_rate, buffer_size: buffer_size)

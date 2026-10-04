@@ -58,6 +58,53 @@ RSpec.describe(MB::Sound::ScriptRunner) do
     end
   end
 
+  describe 'latency profiles' do
+    around(:each) do |ex|
+      saved = ENV.delete('AUDIO_PROFILE')
+      ex.run
+    ensure
+      saved ? ENV['AUDIO_PROFILE'] = saved : ENV.delete('AUDIO_PROFILE')
+    end
+
+    def with_profile(kind, argv, profile)
+      described_class.new(kind, {}, argv: argv.dup, script: 'bin/example.rb', profile: profile)
+    end
+
+    it 'sets AUDIO_PROFILE from -L/--latency-profile' do
+      runner(:synth, ['-L', 'low'])
+      expect(ENV['AUDIO_PROFILE']).to eq('low')
+      runner(:effect, ['--latency-profile', 'video'])
+      expect(ENV['AUDIO_PROFILE']).to eq('video')
+    end
+
+    it "uses the script's profile when nothing else sets one" do
+      with_profile(:song, [], :low)
+      expect(ENV['AUDIO_PROFILE']).to eq('low')
+    end
+
+    it 'lets AUDIO_PROFILE override the script, and -L override both' do
+      ENV['AUDIO_PROFILE'] = 'safe'
+      with_profile(:song, [], :low)
+      expect(ENV['AUDIO_PROFILE']).to eq('safe')
+
+      with_profile(:song, ['-L', 'video'], :low)
+      expect(ENV['AUDIO_PROFILE']).to eq('video')
+    end
+
+    it 'leaves AUDIO_PROFILE alone without a profile' do
+      runner(:song, [])
+      expect(ENV['AUDIO_PROFILE']).to be_nil
+    end
+
+    it 'rejects unknown profiles' do
+      expect { runner(:synth, ['-L', 'fast']) }.to raise_error(described_class::UsageError, /invalid argument: -L fast/)
+    end
+
+    it 'is not an option of general scripts' do
+      expect { runner(:script, ['-L', 'low']) }.to raise_error(described_class::UsageError, /invalid option: -L/)
+    end
+  end
+
   describe 'general scripts' do
     it 'passes positional arguments and parameters to the block' do
       r = runner(:script, ['a.flac', '--count', '3', 'b.txt'], count: 1)
