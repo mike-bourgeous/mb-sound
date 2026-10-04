@@ -1,4 +1,4 @@
-#!/usr/bin/env ruby
+#!/usr/bin/env -S RUBY_THREAD_TIMESLICE=10 ruby
 # A 32 second demo of clip swaps (swap): the same bass synth, pad, and
 # drum kit play for the whole song while their clips change on the bar,
 # so filters, envelopes, and the delay on the bass keep ringing through

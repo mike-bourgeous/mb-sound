@@ -1,4 +1,4 @@
-#!/usr/bin/env ruby
+#!/usr/bin/env -S RUBY_THREAD_TIMESLICE=10 ruby
 # Measures oscillator-heavy workloads as a percentage of realtime (CPU time
 # per second of audio), for comparing oscillator implementations: single
 # oscillators, 8 voices of 6-operator FM (phase modulation chains), 8 voices

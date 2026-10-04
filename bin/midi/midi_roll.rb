@@ -1,4 +1,4 @@
-#!/usr/bin/env ruby
+#!/usr/bin/env -S RUBY_THREAD_TIMESLICE=10 ruby
 # Displays an extremely simple piano roll style view of a MIDI file.
 #
 # Usage: $0 [options] midi_file.mid

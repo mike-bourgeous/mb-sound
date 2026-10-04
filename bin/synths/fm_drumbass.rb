@@ -1,4 +1,4 @@
-#!/usr/bin/env ruby
+#!/usr/bin/env -S RUBY_THREAD_TIMESLICE=10 ruby
 # A one-voice FM drum/bass synthesizer: a chain of FM operators with
 # fast-decaying modulation envelopes.  Plays live MIDI (JACK) or a MIDI file;
 # run with --help for all options.

@@ -1,4 +1,4 @@
-#!/usr/bin/env ruby
+#!/usr/bin/env -S RUBY_THREAD_TIMESLICE=10 ruby
 # Tests assigning multiple parameters to a single MIDI message type.
 #
 # Usage: $0 [input_port]

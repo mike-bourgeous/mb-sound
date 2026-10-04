@@ -1,4 +1,4 @@
-#!/usr/bin/env ruby
+#!/usr/bin/env -S RUBY_THREAD_TIMESLICE=10 ruby
 # Plots waveforms supported by MB::Sound::Oscillator and their spectra
 #
 # Usage: $0 [--imag] [--width PX] [--height PX] [wave_type ...]

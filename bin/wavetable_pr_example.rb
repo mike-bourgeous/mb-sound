@@ -1,4 +1,4 @@
-#!/usr/bin/env ruby
+#!/usr/bin/env -S RUBY_THREAD_TIMESLICE=10 ruby
 # First wavetable example from the wavetable pull request.
 # (C)2025 Mike Bourgeous
 #

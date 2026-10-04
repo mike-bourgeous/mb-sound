@@ -1,4 +1,4 @@
-#!/usr/bin/env ruby
+#!/usr/bin/env -S RUBY_THREAD_TIMESLICE=10 ruby
 # Measures the interpolation error and aliasing of modulated delays against
 # an exact answer.  A sine x[n] = sin(2π f0 n / fs) through a delay of d[i]
 # samples should give y[i] = sin(2π f0 (i - d[i]) / fs), whose frequency is

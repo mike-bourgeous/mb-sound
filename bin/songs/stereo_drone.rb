@@ -1,4 +1,4 @@
-#!/usr/bin/env ruby
+#!/usr/bin/env -S RUBY_THREAD_TIMESLICE=10 ruby
 # A slowly shifting stereo drone: phase-modulated tones on B, D#, E, and F#
 # fading in and out on slow LFOs, with filtered noise and a short
 # modulated delay on each side.  Plays until Ctrl-C.

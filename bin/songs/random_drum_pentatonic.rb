@@ -1,4 +1,4 @@
-#!/usr/bin/env ruby
+#!/usr/bin/env -S RUBY_THREAD_TIMESLICE=10 ruby
 # An endless generative song: slices of sounds/drums.flac and pentatonic
 # chords shuffled at random, through flanging echoes and a swept lowpass.
 #

@@ -1,4 +1,4 @@
-#!/usr/bin/env ruby
+#!/usr/bin/env -S RUBY_THREAD_TIMESLICE=10 ruby
 # A very rough approximation of Solid Bass or Lately Bass from the classic
 # Yamaha FM synthesizers.
 
