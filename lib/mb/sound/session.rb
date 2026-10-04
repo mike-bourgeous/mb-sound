@@ -765,6 +765,10 @@ module MB
         return if @thread&.alive?
 
         @thread = Thread.new do
+          # Scheduled like interactive audio on macOS (QoS), so a busy
+          # machine (e.g. waking the screen) doesn't starve the renderer
+          FastAudio.boost_thread_priority
+
           until @closed
             process_buffer
           end

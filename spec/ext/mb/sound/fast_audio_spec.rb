@@ -5,6 +5,13 @@ require 'shellwords'
 RSpec.describe('MB::Sound::FastAudio', :aggregate_failures) do
   let(:rate) { 48000 }
 
+  describe '.boost_thread_priority' do
+    it 'raises a thread to user-interactive QoS on macOS, and does nothing elsewhere' do
+      result = Thread.new { MB::Sound::FastAudio.boost_thread_priority }.value
+      expect(result).to eq(RUBY_PLATFORM.include?('darwin'))
+    end
+  end
+
   # Opens a null-backend playback device, closed after the example.
   # +quality+ is a libsamplerate converter (2 = fastest sinc; -1 = run at the
   # device's rate instead of resampling).

@@ -17,6 +17,9 @@
  */
 #include <stdatomic.h>
 #include <pthread.h>
+#ifdef __APPLE__
+#include <pthread/qos.h>
+#endif
 #include <string.h>
 #include <stdlib.h>
 #include <stdint.h>
@@ -207,6 +210,26 @@ static VALUE ruby_devices(VALUE self, VALUE backends, VALUE client_name)
 static VALUE ruby_jack_server(VALUE self)
 {
 	return mb_jack_probe() ? Qtrue : Qfalse;
+}
+
+/*
+ * call-seq: MB::Sound::FastAudio.boost_thread_priority -> true or false
+ *
+ * Asks the OS to schedule the calling thread like interactive audio work,
+ * so the Session's render thread keeps up when the machine is busy.  On
+ * macOS this sets the thread's QoS class to user-interactive
+ * (pthread_set_qos_class_self_np; no privileges needed, not realtime).
+ * Returns true if the priority changed, false where unsupported (other
+ * systems) or refused.  Each Ruby thread is its own OS thread, so call it
+ * from the thread to boost.
+ */
+static VALUE ruby_boost_thread_priority(VALUE self)
+{
+#ifdef __APPLE__
+	return pthread_set_qos_class_self_np(QOS_CLASS_USER_INTERACTIVE, 0) == 0 ? Qtrue : Qfalse;
+#else
+	return Qfalse;
+#endif
 }
 
 // Converts a NULL-terminated JACK name list to an Array and frees it.
@@ -2635,17 +2658,18 @@ void Init_fast_audio(void)
 	rb_define_const(fast_audio, "MINIAUDIO_VERSION", rb_str_freeze(rb_str_new_cstr(MA_VERSION_STRING)));
 	rb_define_module_function(fast_audio, "enabled_backends", ruby_enabled_backends, 0);
 	rb_define_module_function(fast_audio, "devices", ruby_devices, 2);
-rb_define_module_function(fast_audio, "jack_server?", ruby_jack_server, 0);
-rb_define_module_function(fast_audio, "jack_open", ruby_jack_open, 1);
-rb_define_module_function(fast_audio, "jack_info", ruby_jack_info, 0);
-rb_define_module_function(fast_audio, "jack_close", ruby_jack_close, 0);
-rb_define_module_function(fast_audio, "jack_ports", ruby_jack_ports, 3);
-rb_define_module_function(fast_audio, "jack_connect", ruby_jack_connect, 2);
-rb_define_module_function(fast_audio, "jack_disconnect", ruby_jack_disconnect, 2);
-rb_define_module_function(fast_audio, "jack_connections", ruby_jack_connections, 1);
-rb_define_const(fast_audio, "JACK_PORT_IS_INPUT", INT2NUM(MB_JACK_PORT_IS_INPUT));
-rb_define_const(fast_audio, "JACK_PORT_IS_OUTPUT", INT2NUM(MB_JACK_PORT_IS_OUTPUT));
-rb_define_const(fast_audio, "JACK_PORT_IS_PHYSICAL", INT2NUM(MB_JACK_PORT_IS_PHYSICAL));
+	rb_define_module_function(fast_audio, "jack_server?", ruby_jack_server, 0);
+	rb_define_module_function(fast_audio, "boost_thread_priority", ruby_boost_thread_priority, 0);
+	rb_define_module_function(fast_audio, "jack_open", ruby_jack_open, 1);
+	rb_define_module_function(fast_audio, "jack_info", ruby_jack_info, 0);
+	rb_define_module_function(fast_audio, "jack_close", ruby_jack_close, 0);
+	rb_define_module_function(fast_audio, "jack_ports", ruby_jack_ports, 3);
+	rb_define_module_function(fast_audio, "jack_connect", ruby_jack_connect, 2);
+	rb_define_module_function(fast_audio, "jack_disconnect", ruby_jack_disconnect, 2);
+	rb_define_module_function(fast_audio, "jack_connections", ruby_jack_connections, 1);
+	rb_define_const(fast_audio, "JACK_PORT_IS_INPUT", INT2NUM(MB_JACK_PORT_IS_INPUT));
+	rb_define_const(fast_audio, "JACK_PORT_IS_OUTPUT", INT2NUM(MB_JACK_PORT_IS_OUTPUT));
+	rb_define_const(fast_audio, "JACK_PORT_IS_PHYSICAL", INT2NUM(MB_JACK_PORT_IS_PHYSICAL));
 
 	VALUE playback = rb_define_class_under(fast_audio, "Playback", rb_cObject);
 	rb_define_alloc_func(playback, playback_alloc);
