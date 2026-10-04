@@ -6,7 +6,7 @@
 #
 # - Bar 5: the bass line changes; its octave-up layer follows.
 # - Bar 7: the drums switch to a busier pattern (swapping whole grid kits).
-# - Bar 9: new chords; the pad's synth voices re-split the new notes.
+# - Bar 9: new chords; the pad's synth plays them on its voices.
 # - Bar 11: the bass line plays backward (reverse).
 # - Bar 13: the bass notes are shuffled over the same rhythm (permute).
 # - Bar 15: everything goes back to the start and fades out.
@@ -70,7 +70,7 @@ module MB::Sound
 
     kick = (40.constant + 90 * beat_a[:kick].env(0, 0.04, 0, 0.01)).tone.sine.at(1) * beat_a[:kick].env(0, 0.3, 0, 0.05) * 0.5
     snare = noise.at(1).filter(:bandpass, cutoff: 1900, quality: 1.5) * beat_a[:snare].env(0, 0.12, 0, 0.05) * 0.5
-    hats = noise.at(1).filter(:highpass, cutoff: 7500) * beat_a[:hat].env(0, 0.025, 0, 0.02, velocity: 0.1..1) * 0.14
+    hats = noise.at(1).filter(:highpass, cutoff: 7500) * beat_a[:hat].env(0, 0.025, 0, 0.02, sensitivity: 0.1..1) * 0.14
 
     master { |mix| mix.softclip(0.6, 0.98) }
 

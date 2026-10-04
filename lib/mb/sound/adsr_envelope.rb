@@ -46,8 +46,8 @@ module MB
     #     total = a.concatenate(b)
     #     plotter.plot(envelope: total)
     #
-    # Envelopes that something will trigger (MIDI voices, GraphVoice, clip
-    # envelopes, MIDI DSL envelopes) are #retriggerable!: they output zero
+    # Envelopes that something will trigger (MIDI voices, GraphVoice, MIDI
+    # DSL envelopes) are #retriggerable!: they output zero
     # while idle and never end by themselves.  Any other envelope that is
     # sampled before it was ever triggered is a one-shot: it triggers itself,
     # releases after .default_auto_release seconds, and ends (returns nil)

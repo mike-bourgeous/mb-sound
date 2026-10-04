@@ -135,6 +135,14 @@ RSpec.describe('Tone reset inputs, free and random phases') do
       expect(o.sample(100)).to eq(bl_osc.sample(100))
     end
 
+    it 'keeps playing without resets after the reset input ends' do
+      o = bl_osc
+      o.reset_input = input(triggers(100, 10)) # ends after 100 samples
+      ref = bl_osc
+      ref.reset_input = input(triggers(300, 10))
+      expect(pieces(o, :sample, [100, 100, 100]) {}).to eq(pieces(ref, :sample, [100, 100, 100]) {})
+    end
+
     it 'gives the same samples as no reset input when the trigger is always zero' do
       o = bl_osc(:square)
       o.reset_input = input(triggers(256))

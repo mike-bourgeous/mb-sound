@@ -19,19 +19,20 @@ require 'mb-sound'
 
 module MB::Sound
   # +:voices+ - Number of voices, so each chord's release rings under the
-  #             next chord's attack (see Sequence::Clip#synth).
+  #             next chord's attack (see Sequence::Clip#synth; two spare
+  #             voices take over when a new chord steals a ringing one).
   # +:cutoff+ - Lowpass cutoff in Hz (the filter opens to 1.5x with each chord).
   # +:detune+ - Semitones between each saw pair (0.07 is about 7 cents).
   # +:attack+, +:release+ - Swell times in seconds.
   # +:width+ - Seconds to delay the right channel (0 for mono).
   def self.fifth_pad(clip, voices: 2, cutoff: 1400, detune: 0.07, attack: 0.6, release: 2.5, width: 0.012)
-    saws = ->(c) { c.tone.ramp.at(0.5) + c.transpose(detune).tone.ramp.at(0.5) }
+    saws = ->(pitch) { pitch.ramp.at(0.5) + pitch.transpose(detune).ramp.at(0.5) }
 
     pad = clip.synth(voices: voices) { |v|
       swell = v.env(attack, 1.0, 0.8, release)
       bloom = v.env(attack * 1.5, 2.0, 0.3, release)
 
-      ((saws.(v) + saws.(v.transpose(7)) * 0.7) * swell * 0.35)
+      ((saws.(v.hz) + saws.(v.hz.transpose(7)) * 0.7) * swell * 0.35)
         .filter(:lowpass, cutoff: cutoff * 0.5 + cutoff * bloom, quality: 0.9)
     }.softclip(0.4, 0.9)
 

@@ -151,7 +151,7 @@ RSpec.describe(MB::Sound::Session) do
       clip = MB::Sound.grid(16, 'x...x...x.x.x...').loop
       session.add(clip.trigger)
       run(40000)
-      session.add(clip.trigger(range: 0..2))
+      session.add(clip.trigger * 2)
       data = run(96000 * 2)
 
       hits = nonzero(data)

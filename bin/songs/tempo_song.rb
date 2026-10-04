@@ -48,12 +48,12 @@ module MB::Sound
     # Pad: two detuned saws per voice, through one filter swept by a
     # 4-bar LFO that stays on the bar grid
     pad = chords.synth(voices: 2) { |v|
-      (v.tone.ramp.at(0.5) + v.transpose(0.07).tone.ramp.at(0.5) + v.transpose(7).tone.ramp.at(0.3)) *
+      (v.hz.ramp.at(0.5) + v.hz.transpose(0.07).ramp.at(0.5) + v.hz.transpose(7).ramp.at(0.3)) *
         v.env(0.4, 1.0, 0.8, 1.5)
     }.filter(:lowpass, cutoff: 4.bars.lfo.triangle.at(350..2800), quality: 2) * 0.12
 
     # Pluck through a dotted-eighth delay
-    pluck = (arp.tone.triangle.at(1) * arp.env(0.001, 0.12, 0, 0.08, velocity: 0.6..1))
+    pluck = (arp.tone.triangle.at(1) * arp.env(0.001, 0.12, 0, 0.08, sensitivity: 0.6..1))
       .delay(1.n8.dotted, feedback: -5.db, dry: 1, wet: -5.db) * 0.16
 
     # An echo whose delay alternates between 5/16 and 3/16 every bar
@@ -62,7 +62,7 @@ module MB::Sound
 
     bass_synth = (bass.tone.ramp.at(1).filter(:lowpass, cutoff: 150 + 1200 * bass.env(0.001, 0.1, 0.1, 0.05), quality: 4) *
       bass.env(0.003, 0.15, 0.6, 0.08)) * 0.18
-    hat_synth = noise.at(1).filter(:highpass, cutoff: 8000) * hats.env(0, 0.03, 0, 0.02, velocity: 0.2..1) * 0.12
+    hat_synth = noise.at(1).filter(:highpass, cutoff: 8000) * hats.env(0, 0.03, 0, 0.02, sensitivity: 0.2..1) * 0.12
 
     master { |mix| mix.softclip(0.6, 0.98) }
 

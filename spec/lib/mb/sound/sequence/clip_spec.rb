@@ -181,69 +181,131 @@ RSpec.describe(MB::Sound::Sequence::Clip) do
   describe '#synth' do
     let(:chords) { MB::Sound.seq(MB::Sound::A2, MB::Sound::F2, MB::Sound::C3, MB::Sound::G2).n1 }
 
-    it 'yields one clip per voice with notes assigned round-robin, and the index' do
+    # Renders +frames+ samples of +node+ in 800-sample buffers (nil buffers
+    # end it early).
+    def render(node, frames)
+      Array.new(frames / 800) { node.sample(800)&.dup }.compact.reduce(:concatenate)
+    end
+
+    it 'returns a Synth on the clip with Notes for each lane and the lane index' do
       yielded = []
-      chords.synth(voices: 2) { |v, idx| yielded << [idx, v.events.map(&:value)]; 1.constant }
-      expect(yielded).to eq([[0, [45, 48]], [1, [41, 43]]])
+      s = chords.synth(voices: 2) { |v, idx| yielded << [v.class, idx]; v.number * v.gate }
+      expect(s).to be_a(MB::Sound::Synth)
+      expect(s.voices).to eq(2)
+      expect(yielded).to eq(Array.new(4) { |i| [MB::Sound::Notes, i] }) # 2 voices + 2 spares
+      expect(s.graph.grep(MB::Sound::MIDI::ClipSource).map(&:clip)).to eq([chords])
     end
 
-    it 'defaults to two voices' do
-      count = 0
-      chords.synth { count += 1; 1.constant }
-      expect(count).to eq(2)
+    it 'passes options to the synth' do
+      s = chords.synth(voices: 3, spares: 0) { |v| v.gate }
+      expect(s.lanes.length).to eq(3)
     end
 
-    it 'puts notes that start together on different voices' do
-      yielded = []
-      (MB::Sound::C3.n1 & MB::Sound::G3.n1).synth { |v| yielded << v.events.map(&:value); 1.constant }
-      expect(yielded).to eq([[48], [55]])
-    end
-
-    it 'keeps the original timing and length in every voice' do
-      voices = []
-      chords.loop.synth { |v| voices << v; 1.constant }
-      expect(voices.map(&:length).uniq).to eq([4])
-      expect(voices.all?(&:looping?)).to eq(true)
-      expect(voices[1].events.map(&:start)).to eq([1, 3])
-    end
-
-    it 'repeats a loop whose notes do not divide evenly among the voices' do
-      voices = []
-      chords.loop.synth(voices: 3) { |v| voices << v; 1.constant }
-      expect(voices.map(&:length).uniq).to eq([12])
-      expect(voices.map { |v| v.events.length }).to eq([4, 4, 4])
-      expect(voices[0].events.map(&:start)).to eq([0, 3, 6, 9])
-    end
-
-    it 'skips voices with no notes' do
-      count = 0
-      MB::Sound::C3.n4.synth(voices: 4) { count += 1; 1.constant }
-      expect(count).to eq(1)
+    it 'gives notes to voices at runtime, so chords play on different voices' do
+      transport = MB::Sound::Sequence::Transport.new(bpm: 240) # a whole note is 1 second
+      chord = (MB::Sound::C3.n1 & MB::Sound::G3.n1)
+      s = MB::Sound::Synth.new(chord.stream(transport: transport), voices: 2, tail: 0) { |v| v.number * v.gate }
+      data = render(s, 4800)
+      expect(data[100]).to eq(MB::Sound::C3.number + MB::Sound::G3.number)
+      expect(s.notes.map { |n| n.number.value }.first(2)).to contain_exactly(MB::Sound::C3.number, MB::Sound::G3.number)
     end
 
     it 'mixes the voice graphs together' do
-      g = chords.synth(voices: 2) { |_, idx| (idx + 1).constant }
+      g = chords.synth(voices: 2, spares: 0) { |_, idx| (idx + 1).constant }
       expect(g.sample(10)[0]).to eq(3)
     end
 
     it 'mixes stereo pairs per channel' do
-      g = chords.synth(voices: 2) { |_, idx| [(idx + 1).constant, 10.constant] }
+      g = chords.synth(voices: 2, spares: 0) { |_, idx| [(idx + 1).constant, 10.constant] }
+      expect(g).to be_a(MB::Sound::GraphNode::Channels)
       expect(g.length).to eq(2)
       expect([g[0].sample(10)[0], g[1].sample(10)[0]]).to eq([3, 20])
     end
 
-    it 'lets one voice release while the next note attacks on another' do
+    it 'lets one voice release while the next note attacks on another, and ends after the last release' do
       transport = MB::Sound::Sequence::Transport.new(bpm: 240) # a whole note is 1 second
-      g = MB::Sound.seq(MB::Sound::C3, MB::Sound::E3).n1.synth { |v| v.env(0.01, 0.01, 1, 0.5, velocity: 1..1, transport: transport) }
-      data = Array.new(80) { g.sample(800).dup }.reduce(:concatenate) # the mixer reuses its buffer
+      g = MB::Sound.seq(MB::Sound::C3, MB::Sound::E3).n1.stream(transport: transport)
+      s = MB::Sound::Synth.new(g, voices: 2, tail: 0) { |v| v.env(0.01, 0.01, 1, 0.5, sensitivity: 1..1, curve: :linear) }
+      data = render(s, 48000 * 4)
       # Just after the second note starts, the first is still releasing
       expect(data[47000]).to be_within(0.01).of(1)
       expect(data[48000 + 480]).to be > 1.5
+      # Two seconds of notes plus half a second of release
+      expect(data.length).to be_between(120000, 120000 + 1600)
     end
 
-    it 'requires a block and a positive voice count' do
+    it 'requires a block' do
       expect { chords.synth }.to raise_error(ArgumentError, /block/)
-      expect { chords.synth(voices: 0) { 1.constant } }.to raise_error(ArgumentError, /Voice count/)
+    end
+  end
+
+  describe 'output methods' do
+    let(:transport) { MB::Sound::Sequence::Transport.new(bpm: 120) } # an eighth note is 12000 samples
+    let(:clip) { MB::Sound.seq(MB::Sound::C3, nil).n8 | MB::Sound.seq(MB::Sound::E3).n8.vel(1.0) }
+
+    def render(node, frames)
+      Array.new(frames / 800) { node.sample(800)&.dup }.compact.reduce(:concatenate)
+    end
+
+    it 'plays the clip through Notes on a new ClipSource stream each time' do
+      s1 = clip.stream(transport: transport)
+      expect(s1).to be_a(MB::Sound::MIDI::Stream)
+      expect(s1.source).to be_a(MB::Sound::MIDI::ClipSource)
+      expect(s1.source.clip).to equal(clip)
+      expect(clip.stream.source).not_to equal(clip.stream.source)
+      expect(clip.notes).to be_a(MB::Sound::Notes)
+    end
+
+    it 'has a gate, triggers, note numbers, and velocities on exact samples' do
+      gate = render(clip.gate(transport: transport), 36000)
+      expect(gate[0...12000].to_a.uniq).to eq([1])
+      expect(gate[12000...24000].to_a.uniq).to eq([0])
+      expect(gate[24000...36000].to_a.uniq).to eq([1])
+
+      trig = render(clip.trigger(transport: transport), 36000)
+      expect(trig.ne(0).where.to_a).to eq([0, 24000])
+      expect(trig[24000]).to eq(1)
+
+      num = render(clip.number(transport: transport), 36000)
+      expect([num[0], num[23999], num[24000]]).to eq([48, 48, 52])
+
+      vel = render(clip.velocity(range: 1.0..2.0, transport: transport), 36000)
+      expect(vel[0]).to be_within(1e-6).of(1 + MB::Sound::Sequence::Clip::DEFAULT_VELOCITY)
+      expect(vel[24000]).to be_within(1e-6).of(2)
+    end
+
+    it 'has a pitch, a frequency node, and a period' do
+      expect(clip.hz).to be_a(MB::Sound::Notes::NotePitch)
+      expect(clip.tone).to be_a(MB::Sound::Notes::NotePitch)
+      expect(render(clip.freq(transport: transport), 1600)[0]).to be_within(1e-3).of(MB::Sound::C3.frequency)
+      expect(render(clip.period(transport: transport), 1600)[0]).to be_within(1e-6).of(1.0 / MB::Sound::C3.frequency)
+      expect(render(clip.tone(transport: transport).ramp.at(1), 4800).abs.max).to be > 0.9
+    end
+
+    it 'has envelopes with Envelope options that end after a non-looping clip' do
+      env = clip.env(0.001, 0.01, 1, 0.1, curve: :linear, sensitivity: 1..1, transport: transport)
+      expect(env).to be_a(MB::Sound::Notes::NoteEnvelope)
+      expect(env.gm?).to eq(false)
+      data = render(env, 96000)
+      expect(data[6000]).to be_within(1e-6).of(1)
+      expect(data[12000 + 2400]).to be_within(0.01).of(0.5) # halfway through a linear release
+      expect(data[18000]).to eq(0)
+      # Ends a little after the last note's release (24000 + 12000 + 4800)
+      expect(data.length).to be_between(40800, 40800 + 1600)
+    end
+
+    it 'has the other envelope presets' do
+      expect(clip.amp_env.sensitivity).to eq(MB::Sound::Envelope::PRESETS[:amp_env][:sensitivity])
+      expect(clip.fm_env.sustain).to eq(0)
+      expect(clip.filt_env(depth: 3).octaves).to eq(3)
+      expect(clip.env(gm: true).gm?).to eq(true)
+    end
+
+    it 'keeps a key-synced tone playing through the release of an envelope made separately' do
+      g = clip.tone(transport: transport).ramp.at(1) * clip.env(0.001, 0.01, 1, 0.1, transport: transport)
+      data = render(g, 96000)
+      expect(data[36000 + 2400].abs).to be > 0
+      expect(data.length).to be_between(40800, 40800 + 1600)
     end
   end
 
@@ -311,15 +373,6 @@ RSpec.describe(MB::Sound::Sequence::Clip) do
       end
       expect((clip & c4.n4).source).to equal(clip)
       expect(clip.loop.source).to equal(clip)
-    end
-
-    it 'rebuilds synth voices from another clip' do
-      chords = MB::Sound.seq(MB::Sound::A2, MB::Sound::F2, MB::Sound::C3).n1.loop
-      voices = chords.voice_clips(2)
-      expect(voices.map(&:source)).to all(equal(chords))
-
-      four = MB::Sound.seq(MB::Sound::A2, MB::Sound::C3, MB::Sound::E3, MB::Sound::G3).n1.loop
-      expect(voices[1].rederive(four).events.map(&:value)).to eq([MB::Sound::C3.number, MB::Sound::G3.number])
     end
 
     it 'has no source for clips made directly' do

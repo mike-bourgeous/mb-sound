@@ -636,7 +636,7 @@ module MB
       # (the least common multiple of their lengths), or a bar if that is
       # too long or there are no looping clips.
       def clip_grid(timeline_nodes)
-        lengths = timeline_nodes.grep(Sequence::ClipNode).map(&:clip).select(&:looping?).map(&:length).uniq
+        lengths = timeline_nodes.grep(MIDI::ClipSource).map(&:clip).select(&:looping?).map(&:length).uniq
         return @transport.bar_length if lengths.empty?
 
         lcm = lengths.reduce { |a, b| Rational(a.numerator.lcm(b.numerator), a.denominator.gcd(b.denominator)) }
