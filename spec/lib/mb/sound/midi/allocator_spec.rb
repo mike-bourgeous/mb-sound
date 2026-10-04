@@ -100,6 +100,12 @@ RSpec.describe(MB::Sound::MIDI::Allocator) do
       expect(lanes(a)).to eq([['on60@0', 'off60@2'], ['on60@1', 'off60@3'], [], []])
     end
 
+    it 'keeps a lane sounding until each note retriggered on it ends' do
+      a = alloc(on(60), on(60), off(60), voices: 1, spares: 1, mono: false)
+      expect(lanes(a)).to eq([['on60@0', 'on60@1', 'off60@2'], []])
+      expect(a.lanes[0].state).to eq(:sounding)
+    end
+
     it 'keeps event times exact and lanes on the input time base' do
       s = MB::Sound::MIDI::Stream.new(MIDIListSource.new(on(60).at(1/3r), off(60).at(2/3r)))
       a = MB::Sound::MIDI::Allocator.new(s, voices: 1, spares: 0)
@@ -462,6 +468,61 @@ RSpec.describe(MB::Sound::MIDI::Allocator) do
     it 'sends no glide events in mono mode' do
       a = alloc(on(60), on(64), voices: 1, glide_mode: :last)
       expect(lanes(a)).to eq([['on60@0', 'off60@1', 'leg64@1']])
+    end
+  end
+
+  describe 'invariants' do
+    # Random balanced note events on two channels, with some overlapping
+    # notes on the same key.
+    def random_events(seed, count: 300)
+      rng = Random.new(seed)
+      held = []
+      count.times.map do
+        if !held.empty? && (held.length > 6 || rng.rand < 0.45)
+          ch, n = held.delete_at(rng.rand(held.length))
+          off(n, ch: ch)
+        else
+          key = [rng.rand(2), 50 + rng.rand(8)]
+          held << key
+          on(key[1], rng.rand, ch: key[0])
+        end
+      end + held.map { |ch, n| off(n, ch: ch) }
+    end
+
+    [[4, 2, :last], [3, 0, :last], [2, 1, :voice], [1, 2, :last]].each do |voices, spares, glide|
+      it "never puts two notes on a lane and ends every note (#{voices} voices, #{spares} spares)" do
+        [1, 2, 3].each do |seed|
+          a = MB::Sound::MIDI::Allocator.new(stream(*random_events(seed)), voices: voices, spares: spares, glide_mode: glide, mono: false)
+          a.lanes.each_with_index { |l, idx| l.idle_check = -> { idx.even? } }
+          readers = a.lanes.map(&:reader)
+          logs = Array.new(readers.length) { [] }
+          400.times { readers.each_with_index { |r, idx| logs[idx].concat(r.next(1/100r)) } }
+
+          logs.each do |log|
+            sounding = Hash.new(0)
+            log.each do |e|
+              key = [e.channel, e.note]
+              case e.type
+              when :note_on
+                expect(sounding.keys - [key]).to eq([])
+                sounding[key] += 1
+              when :note_off
+                expect(sounding[key]).to be > 0
+                sounding[key] -= 1
+                sounding.delete(key) if sounding[key] == 0
+              when :choke
+                # Released (ringing) lanes are choked too
+                expect(sounding.keys - [key]).to eq([])
+                sounding.clear
+              end
+            end
+            expect(sounding).to be_empty
+          end
+
+          expect(a.lanes.map(&:state) - [:free, :released, :choking]).to eq([])
+          expect(logs.sum { |l| l.count(&:note_on?) }).to eq(random_events(seed).count(&:note_on?))
+        end
+      end
     end
   end
 end

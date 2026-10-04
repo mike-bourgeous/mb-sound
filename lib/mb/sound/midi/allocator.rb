@@ -222,8 +222,15 @@ module MB
 
         # One note-on's allocation, queued per (channel, note) so note-offs
         # end overlapping notes oldest first.  +voice+ is nil once the note
-        # was choked or released another way.
-        Slot = Struct.new(:voice)
+        # was choked or released another way.  Compared by identity (a
+        # Struct would make two notes on one lane equal).
+        class Slot
+          attr_accessor :voice
+
+          def initialize(voice)
+            @voice = voice
+          end
+        end
 
         # The input Stream.
         attr_reader :stream
