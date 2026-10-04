@@ -24,10 +24,11 @@ end
 
 have_library('pthread')
 
-$CXXFLAGS = "#{$CXXFLAGS} -std=c++11 -O2"
+# RtMidi's own C++ shows -Wall -Wextra warnings but isn't held to -Werror,
+# so new compiler or SDK warnings in vendored code never break the build;
+# only the wrapper (fast_midi.c) is held to -Werror.
+$CXXFLAGS = "#{$CXXFLAGS} -std=c++11 -O2 -Wall -Wextra"
 
-# Only the wrapper (fast_midi.c) is held to -Werror; RtMidi's own C++ is
-# compiled with the default C++ flags, unmodified.
 with_cflags("#{$CFLAGS} -O2 -ggdb3 -Wall -Wextra -Werror -Wno-unused-parameter #{ENV['EXTRACFLAGS']} -std=gnu11") do
   create_makefile('mb/sound/fast_midi')
 end
