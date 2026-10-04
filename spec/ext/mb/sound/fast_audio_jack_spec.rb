@@ -100,6 +100,46 @@ RSpec.describe('MB::Sound::FastAudio JACK client', :aggregate_failures) do
     other.close
   end
 
+  def jack_capture(names, sample_rate: 48000, queue: 48000)
+    fa::Capture.new(nil, -1, client, names.length, sample_rate, 0, 0, queue, 2, false, names).tap { |c| @opened << c }
+  end
+
+  it 'records input ports on the same client, sample for sample (loopback)' do
+    out = jack_playback(['out_1', 'out_2'], queue: 4096)
+    inp = jack_capture(['in_1', 'in_2'])
+    expect(inp.jack_ports).to eq(["#{client}:in_1", "#{client}:in_2"])
+    expect(inp.backend).to eq(:jack)
+    expect(inp.period).to eq(256)
+    expect(fa.jack_ports("^#{client}:", false, 0).sort).to eq(["#{client}:in_1", "#{client}:in_2", "#{client}:out_1", "#{client}:out_2"])
+
+    expect(fa.jack_connect("#{client}:out_1", "#{client}:in_1")).to eq(true)
+    expect(fa.jack_connect("#{client}:out_2", "#{client}:in_2")).to eq(true)
+
+    ramp = Numo::SFloat.new(4096).seq(1) / 4096
+    out.write([ramp, -ramp])
+
+    # Silence until the written audio arrives, then the ramp exactly
+    got = [[], []]
+    deadline = MB::U.clock_now + 3
+    while got[0].length < 12000 && MB::U.clock_now < deadline
+      l, r = inp.read(512)
+      got[0].concat(l.to_a)
+      got[1].concat(r.to_a)
+    end
+
+    start = got[0].index { |v| v != 0 }
+    expect(start).not_to be_nil
+    expect(got[0][start, 4096]).to eq(ramp.to_a)
+    expect(got[1][start, 4096]).to eq((-ramp).to_a)
+  end
+
+  it 'records a test pattern from JACK input ports' do
+    inp = fa::Capture.new(nil, -1, client, 1, 48000, 0, 0, 48000, 2, true, ['in_1']).tap { |c| @opened << c }
+    data = inp.read(1000)[0]
+    expect(data.length).to eq(1000)
+    expect(data[1] - data[0]).to be_within(1e-6).of(1.0 / 2048)
+  end
+
   it 'stops writers when the client closes' do
     p = jack_playback(['out_1'], queue: 512)
     fa.jack_close

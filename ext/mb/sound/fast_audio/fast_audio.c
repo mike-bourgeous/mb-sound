@@ -1418,6 +1418,10 @@ struct capture {
 	int context_ready;
 	int device_ready;
 
+	struct dev_info info; // see dev_info
+	int jack; // ports on the shared JACK client instead of a miniaudio device
+	struct mb_jack_unit unit;
+
 	ma_uint32 output_rate; // the rate #read returns
 	SRC_STATE *src;
 	double src_ratio; // output rate / device rate
@@ -1433,10 +1437,16 @@ struct capture {
 
 static void capture_release_device(struct capture *c)
 {
+	c->info.ready = 0;
+
 	if (c->pid != getpid()) {
 		c->device_ready = 0;
 		c->context_ready = 0;
 		return;
+	}
+
+	if (c->jack) {
+		mb_jack_detach(&c->unit);
 	}
 
 	if (c->device_ready) {
@@ -1506,11 +1516,11 @@ static struct capture *get_capture(VALUE self)
 	return c;
 }
 
-// miniaudio's device thread.  Realtime safe: no Ruby, no allocation, no
+// Adds +frames+ interleaved frames from +in+ to the ring, for miniaudio's
+// device thread or JACK's.  Realtime safe: no Ruby, no allocation, no
 // blocking locks.
-static void capture_callback(ma_device *device, void *output, const void *input, ma_uint32 frames)
+static void capture_push(struct capture *c, const float *in, size_t frames)
 {
-	struct capture *c = device->pUserData;
 	size_t ch = c->channels;
 	size_t mask = c->capacity - 1;
 
@@ -1524,7 +1534,6 @@ static void capture_callback(ma_device *device, void *output, const void *input,
 		count = room;
 	}
 
-	const float *in = input;
 	for (size_t i = 0; i < count; i++) {
 		float *dst = c->data + ((wp + i) & mask) * ch;
 		if (c->test_pattern) {
@@ -1548,17 +1557,55 @@ static void capture_callback(ma_device *device, void *output, const void *input,
 	}
 }
 
+// miniaudio's device thread
+static void capture_callback(ma_device *device, void *output, const void *input, ma_uint32 frames)
+{
+	(void)output;
+	capture_push(device->pUserData, input, frames);
+}
+
+// JACK's thread: one buffer per port to the ring's interleaved frames
+static void capture_jack_process(struct mb_jack_unit *unit, uint32_t nframes)
+{
+	struct capture *c = unit->user;
+	size_t ch = c->channels;
+	const float *buffers[MB_JACK_MAX_PORTS];
+
+	for (size_t k = 0; k < ch; k++) {
+		buffers[k] = mb_jack_port_buffer(unit->ports[k], nframes);
+	}
+
+	for (size_t done = 0; done < nframes; done += JACK_CHUNK) {
+		size_t n = nframes - done < JACK_CHUNK ? nframes - done : JACK_CHUNK;
+		for (size_t i = 0; i < n; i++) {
+			for (size_t k = 0; k < ch; k++) {
+				jack_scratch[i * ch + k] = buffers[k][done + i];
+			}
+		}
+		capture_push(c, jack_scratch, n);
+	}
+}
+
+// Marks the input stopped and wakes the reader (from a device thread)
+static void capture_stop(struct capture *c)
+{
+	atomic_store(&c->stopped, 1);
+
+	if (pthread_mutex_trylock(&c->lock) == 0) {
+		pthread_cond_broadcast(&c->ready);
+		pthread_mutex_unlock(&c->lock);
+	}
+}
+
+static void capture_jack_shutdown(struct mb_jack_unit *unit)
+{
+	capture_stop(unit->user);
+}
+
 static void capture_notification(const ma_device_notification *notification)
 {
-	struct capture *c = notification->pDevice->pUserData;
-
 	if (notification->type == ma_device_notification_type_stopped) {
-		atomic_store(&c->stopped, 1);
-
-		if (pthread_mutex_trylock(&c->lock) == 0) {
-			pthread_cond_broadcast(&c->ready);
-			pthread_mutex_unlock(&c->lock);
-		}
+		capture_stop(notification->pDevice->pUserData);
 	}
 }
 
@@ -1586,12 +1633,29 @@ struct capture_args {
 	ma_uint32 period;
 	size_t queue;
 	int resample_quality;
+	VALUE jack_ports; // port names on the shared JACK client, or nil
 };
+
+static void capture_setup_queue(struct capture *c, struct capture_args *a);
 
 static VALUE capture_open_body(VALUE arg)
 {
 	struct capture_args *a = (struct capture_args *)arg;
 	struct capture *c = a->c;
+
+	if (!NIL_P(a->jack_ports)) {
+		c->jack = 1;
+		c->unit.process = capture_jack_process;
+		c->unit.shutdown = capture_jack_shutdown;
+		c->unit.user = c;
+		jack_register_ports(&c->unit, a->client_name, a->jack_ports, 0, 0);
+		dev_info_from_jack(&c->info);
+		capture_setup_queue(c, a);
+
+		atomic_store(&c->open, 1);
+		mb_jack_attach(&c->unit);
+		return Qnil;
+	}
 
 	init_context(&c->context, a->backends, a->client_name);
 	c->context_ready = 1;
@@ -1641,8 +1705,24 @@ static VALUE capture_open_body(VALUE arg)
 		}
 		c->device_ready = 1;
 	}
+	dev_info_from_miniaudio(&c->info, &c->device, 1);
+	capture_setup_queue(c, a);
 
-	ma_uint32 device_rate = c->device.sampleRate;
+	atomic_store(&c->open, 1);
+	result = ma_device_start(&c->device);
+	if (result != MA_SUCCESS) {
+		atomic_store(&c->open, 0);
+		rb_raise(cError, "Could not start audio input device: %s", ma_result_description(result));
+	}
+
+	return Qnil;
+}
+
+// Sets up resampling and allocates the ring once the device's rate and
+// period are known (c->info).
+static void capture_setup_queue(struct capture *c, struct capture_args *a)
+{
+	ma_uint32 device_rate = c->info.rate;
 	c->output_rate = device_rate;
 	double ratio = 1.0;
 	if (a->sample_rate != 0 && device_rate != a->sample_rate && a->resample_quality >= 0) {
@@ -1658,7 +1738,7 @@ static VALUE capture_open_body(VALUE arg)
 
 	// The queue limit was given at the output rate; keep at least two
 	// device periods, and room in the ring for the callback beyond it
-	size_t period = c->device.capture.internalPeriodSizeInFrames;
+	size_t period = c->info.period;
 	c->queue_limit = (size_t)ceil(a->queue * ratio);
 	if (c->queue_limit < 2 * period) {
 		c->queue_limit = 2 * period;
@@ -1673,15 +1753,6 @@ static VALUE capture_open_body(VALUE arg)
 		rb_raise(rb_eNoMemError, "Could not allocate the audio input queue");
 	}
 	c->capacity = capacity;
-
-	atomic_store(&c->open, 1);
-	result = ma_device_start(&c->device);
-	if (result != MA_SUCCESS) {
-		atomic_store(&c->open, 0);
-		rb_raise(cError, "Could not start audio input device: %s", ma_result_description(result));
-	}
-
-	return Qnil;
 }
 
 static VALUE capture_open_rescue(VALUE arg, VALUE exception)
@@ -1706,11 +1777,18 @@ static VALUE capture_open_rescue(VALUE arg, VALUE exception)
  * close to real time.  +test_pattern+ replaces the device's audio with a
  * counting pattern (frame number modulo 4096, scaled to -1..1, plus 0.001
  * per channel), for specs.
+ *
+ * With +jack_ports+ (an Array of port names, one per channel), the input is
+ * a set of ports on the process's shared JACK client (see Playback.new).
  */
-static VALUE capture_initialize(VALUE self, VALUE backends, VALUE device_index, VALUE client_name,
-		VALUE channels, VALUE sample_rate, VALUE device_rate, VALUE period, VALUE queue_frames,
-		VALUE resample_quality, VALUE test_pattern)
+static VALUE capture_initialize(int argc, VALUE *argv, VALUE self)
 {
+	rb_check_arity(argc, 10, 11);
+	VALUE backends = argv[0], device_index = argv[1], client_name = argv[2], channels = argv[3],
+	      sample_rate = argv[4], device_rate = argv[5], period = argv[6], queue_frames = argv[7],
+	      resample_quality = argv[8], test_pattern = argv[9];
+	VALUE jack_ports = argc > 10 ? argv[10] : Qnil;
+
 	struct capture *c;
 	TypedData_Get_Struct(self, struct capture, &capture_type, c);
 	if (c->data != NULL) {
@@ -1732,6 +1810,13 @@ static VALUE capture_initialize(VALUE self, VALUE backends, VALUE device_index, 
 		rb_raise(rb_eArgError, "Resample quality must be -1..%d (got %d)", SRC_LINEAR, quality);
 	}
 
+	if (!NIL_P(jack_ports)) {
+		Check_Type(jack_ports, T_ARRAY);
+		if (RARRAY_LEN(jack_ports) != ch) {
+			rb_raise(rb_eArgError, "Pass one JACK port name per channel (%d, got %ld)", ch, RARRAY_LEN(jack_ports));
+		}
+	}
+
 	c->channels = ch;
 	c->test_pattern = RTEST(test_pattern);
 
@@ -1745,11 +1830,13 @@ static VALUE capture_initialize(VALUE self, VALUE backends, VALUE device_index, 
 		.period = NUM2UINT(period),
 		.queue = (size_t)queue,
 		.resample_quality = quality,
+		.jack_ports = jack_ports,
 	};
 
 	rb_rescue2(capture_open_body, (VALUE)&args, capture_open_rescue, (VALUE)&args, rb_eException, (VALUE)0);
 
 	RB_GC_GUARD(client_name);
+	RB_GC_GUARD(jack_ports);
 
 	return self;
 }
@@ -1815,7 +1902,7 @@ static void unblock_capture_wait(void *arg)
 // queue limit.  Returns the number of frames copied into c->in_buf.
 static size_t take_frames(struct capture *c, size_t max)
 {
-	size_t period = c->device.capture.internalPeriodSizeInFrames;
+	size_t period = c->info.period;
 	size_t want = max < period ? max : period;
 	if (want < 1) {
 		want = 1;
@@ -1951,7 +2038,7 @@ static VALUE capture_close(VALUE self)
 {
 	struct capture *c = get_capture(self);
 
-	if (atomic_exchange(&c->open, 0) || c->device_ready || c->context_ready) {
+	if (atomic_exchange(&c->open, 0) || c->device_ready || c->context_ready || c->info.ready) {
 		capture_release_device(c);
 
 		if (c->pid == getpid()) {
@@ -1967,13 +2054,13 @@ static VALUE capture_closed(VALUE self)
 	return atomic_load(&get_capture(self)->open) ? Qfalse : Qtrue;
 }
 
-static ma_device *open_capture_device(VALUE self)
+static struct dev_info *open_capture_device(VALUE self)
 {
 	struct capture *c = get_capture(self);
-	if (!c->device_ready) {
+	if (!c->info.ready) {
 		rb_raise(rb_eIOError, "This input is closed");
 	}
-	return &c->device;
+	return &c->info;
 }
 
 /* The sample rate #read returns. */
@@ -1986,7 +2073,7 @@ static VALUE capture_sample_rate(VALUE self)
 /* The sample rate the device captures at. */
 static VALUE capture_device_rate(VALUE self)
 {
-	return UINT2NUM(open_capture_device(self)->sampleRate);
+	return UINT2NUM(open_capture_device(self)->rate);
 }
 
 /* True if #read resamples from the device's rate. */
@@ -1998,25 +2085,32 @@ static VALUE capture_resampling(VALUE self)
 /* The device's period (callback size) in frames. */
 static VALUE capture_period(VALUE self)
 {
-	return UINT2NUM(open_capture_device(self)->capture.internalPeriodSizeInFrames);
+	return UINT2NUM(open_capture_device(self)->period);
 }
 
 /* The number of periods in the device's own buffer. */
 static VALUE capture_periods(VALUE self)
 {
-	return UINT2NUM(open_capture_device(self)->capture.internalPeriods);
+	return UINT2NUM(open_capture_device(self)->periods);
 }
 
 /* The name of the device. */
 static VALUE capture_device_name(VALUE self)
 {
-	return rb_utf8_str_new_cstr(open_capture_device(self)->capture.name);
+	return rb_utf8_str_new_cstr(open_capture_device(self)->name);
 }
 
 /* The backend in use, as a Symbol. */
 static VALUE capture_backend(VALUE self)
 {
-	return backend_to_sym(open_capture_device(self)->pContext->backend);
+	return open_capture_device(self)->backend;
+}
+
+/* The JACK port names (client:port), or nil for a miniaudio device. */
+static VALUE capture_jack_ports(VALUE self)
+{
+	struct capture *c = get_capture(self);
+	return c->jack && c->info.ready ? jack_port_names(&c->unit) : Qnil;
 }
 
 /* The number of channels. */
@@ -2100,7 +2194,8 @@ rb_define_const(fast_audio, "JACK_PORT_IS_PHYSICAL", INT2NUM(MB_JACK_PORT_IS_PHY
 
 	VALUE capture = rb_define_class_under(fast_audio, "Capture", rb_cObject);
 	rb_define_alloc_func(capture, capture_alloc);
-	rb_define_method(capture, "initialize", capture_initialize, 10);
+	rb_define_method(capture, "initialize", capture_initialize, -1);
+	rb_define_method(capture, "jack_ports", capture_jack_ports, 0);
 	rb_define_method(capture, "read", capture_read, 1);
 	rb_define_method(capture, "close", capture_close, 0);
 	rb_define_method(capture, "closed?", capture_closed, 0);
