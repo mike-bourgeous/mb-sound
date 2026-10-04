@@ -18,7 +18,7 @@ RSpec.describe('bin/audio_check.rb') do
   it 'plays a click track and reports the queue, latency, and underruns' do
     text = run('-s', '1.2', '--latency', '0.05')
     expect(text).to include(
-      'Opened: #<MB::Sound::DeviceOutput null "NULL Playback Device" 2ch 48000Hz>',
+      'Opened: #<MB::Sound::DeviceOutput null "NULL Playback Device" 2ch 48000Hz default>',
       'sample rate: 48000 Hz (asked for 48000)',
       'queue limit: 2400 frames (50.0 ms)',
       'Clicks: left, right, both, both...',

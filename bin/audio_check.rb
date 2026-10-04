@@ -60,9 +60,10 @@ MB::Sound.script(
   backend: [nil, String, '-b', 'Backends to try, comma-separated (e.g. jack,pulseaudio)'],
   device: [nil, String, '-d', 'Device index or part of its name'],
   rate: [48000, Integer, '-r', 'Sample rate to ask for', 8000..384000],
-  latency: [nil, Float, 'Seconds queued ahead of the sound card', 0.001..2.0],
-  period: [nil, Integer, 'Sound card period in frames', 16..16384],
-  buffer: [800, Integer, 'Frames per write (the block size a Session renders)', 16..16384],
+  profile: [nil, String, 'Latency profile (default: AUDIO_PROFILE or default)', %w[low default safe]],
+  latency: [nil, Float, 'Seconds queued ahead of the sound card (overrides the profile)', 0.0..2.0],
+  period: [nil, Integer, 'Sound card period in frames (overrides the profile)', 16..16384],
+  buffer: [nil, Integer, 'Frames per write, the block size a Session renders (overrides the profile)', 16..16384],
   gain: [-12.0, Float, '-g', 'Click level in dB', -60.0..0.0],
   interval: [0.5, Float, 'Seconds between clicks', 0.05..5.0],
   busy: [false, 'Keep another Ruby thread busy (allocating, GC) to test dropouts'],
@@ -88,7 +89,8 @@ MB::Sound.script(
   next if p.list
 
   out = MB::Sound::DeviceOutput.new(
-    channels: 2, sample_rate: p.rate, device: p.device, latency: p.latency, period: p.period, buffer_size: p.buffer,
+    channels: 2, sample_rate: p.rate, device: p.device, profile: p.profile,
+    latency: p.latency, period: p.period, buffer_size: p.buffer,
     backends: backends
   )
 

@@ -14,13 +14,19 @@ module MB
     # sound card, so Ruby's garbage collection and busy threads don't cause
     # dropouts unless they take longer than the queue.
     #
-    # Environment variables take precedence over the constructor's arguments:
+    # Latency settings come from a profile (see PROFILES; :default unless
+    # +:profile+ or AUDIO_PROFILE says otherwise), and any of them can be
+    # set separately.  Environment variables take precedence over the
+    # constructor's arguments:
+    #   AUDIO_PROFILE=low              latency profile (low, default, safe)
+    #   AUDIO_BUFFER=512               frames per write (Session's block size)
+    #   AUDIO_PERIOD=128               sound card period in frames
+    #   AUDIO_LATENCY=0.05             seconds of audio queued ahead (at least
+    #                                  two writes)
     #   AUDIO_BACKEND=jack,pulseaudio  backends to try, in order (see .backends)
     #   OUTPUT_DEVICE=name or DEVICE   device index or part of its name (see .devices)
     #   AUDIO_SAMPLE_RATE=44100        rate to ask for (the device's own rate
     #                                  is used if it can't run at this one)
-    #   AUDIO_LATENCY=0.05             seconds of audio queued ahead
-    #   AUDIO_PERIOD=256               sound card period in frames
     #   JACK_CLIENT_NAME=name          JACK client name (default: script name)
     #
     # JACK servers are never started; JACK is used when a server (jackd or
@@ -33,11 +39,22 @@ module MB
     #     out.write([left, right])
     #     out.close
     class DeviceOutput
-      # Seconds of audio queued ahead of the sound card by default.
-      DEFAULT_LATENCY = 0.085
-
-      # Frames per #write that Session renders by default.
-      DEFAULT_BUFFER_SIZE = 800
+      # Latency profiles: frames per write (the block size Session renders),
+      # the sound card period in frames (nil for miniaudio's low-latency
+      # default, 10 ms), and seconds queued ahead of the sound card (at least
+      # two writes).  Chosen with bin/audio_load_check.rb on the user's Mac
+      # (2026-10-04; latencies at 48 kHz, plus driver delay):
+      # - :low (16-19 ms) for playing light patches live; heavier graphs
+      #   (fm_bass at 4x oversampling, fm_bass + stereo_drone) drop out
+      # - :default (45-56 ms) had no dropouts with fm_bass, stereo_drone, or
+      #   both
+      # - :safe (about 110 ms) is the first version's setting, for heavy
+      #   graphs or busy machines
+      PROFILES = {
+        low: { buffer_size: 256, period: 128, latency: 0 }.freeze,
+        default: { buffer_size: 512, period: 128, latency: 0.05 }.freeze,
+        safe: { buffer_size: 800, period: nil, latency: 0.085 }.freeze,
+      }.freeze
 
       @open_outputs = Set.new
       @exit_hook = false
@@ -119,29 +136,36 @@ module MB
         end
       end
 
-      attr_reader :channels, :sample_rate, :buffer_size, :backend, :device_name, :device_channels
+      attr_reader :channels, :sample_rate, :buffer_size, :backend, :device_name, :device_channels, :profile
 
       # Opens and starts the sound card.  +:channels+ is how many channels
       # #write takes (a mono output plays on both channels of a stereo
       # device).  +:sample_rate+ is the rate to ask for; if the device runs
       # at another rate, #sample_rate is the device's rate (a warning is
       # printed).  +:device+ is a device index or part of a device name (see
-      # .devices; default: the system default).  +:latency+ is the most audio
-      # queued ahead of the sound card, in seconds.  +:buffer_size+ is the
-      # block size Session renders.  +:period+ is the sound card period in
-      # frames (default: miniaudio's low-latency default).  +:backends+ is
-      # an Array of backends to try (see .backends).
-      def initialize(channels: 2, sample_rate: 48000, device: nil, buffer_size: nil, latency: nil, period: nil, backends: nil, capture: 0)
+      # .devices; default: the system default).  +:profile+ is a latency
+      # profile from PROFILES (:low, :default, :safe), whose settings
+      # +:buffer_size+ (the block size Session renders), +:period+ (the sound
+      # card period in frames), and +:latency+ (the most audio queued ahead of
+      # the sound card, in seconds) override.  +:backends+ is an Array of
+      # backends to try (see .backends).
+      def initialize(channels: 2, sample_rate: 48000, device: nil, profile: nil, buffer_size: nil, latency: nil, period: nil, backends: nil, capture: 0)
         raise ArgumentError, 'Channels must be positive' if channels < 1
+
+        profile = (ENV['AUDIO_PROFILE'] || profile || :default).to_s.delete_prefix(':').to_sym
+        settings = PROFILES.fetch(profile) {
+          raise ArgumentError, "Unknown audio profile #{profile.inspect} (#{PROFILES.keys.join(', ')})"
+        }
+        @profile = profile
 
         device = ENV['OUTPUT_DEVICE'] || ENV['DEVICE'] || device
         requested_rate = Integer(ENV['AUDIO_SAMPLE_RATE'] || sample_rate)
-        latency = Float(ENV['AUDIO_LATENCY'] || latency || DEFAULT_LATENCY)
-        period = Integer(ENV['AUDIO_PERIOD'] || period || 0)
+        latency = Float(ENV['AUDIO_LATENCY'] || latency || settings[:latency])
+        period = Integer(ENV['AUDIO_PERIOD'] || period || settings[:period] || 0)
         backends = self.class.backends(backends)
 
         @channels = channels
-        @buffer_size = buffer_size || DEFAULT_BUFFER_SIZE
+        @buffer_size = Integer(ENV['AUDIO_BUFFER'] || buffer_size || settings[:buffer_size])
         @requested_rate = requested_rate
 
         # A mono output still opens two channels, so mono plays on both
@@ -238,7 +262,7 @@ module MB
       end
 
       def inspect
-        "#<#{self.class.name} #{@backend} #{@device_name.inspect} #{@channels}ch #{@sample_rate.round}Hz#{' closed' if closed?}>"
+        "#<#{self.class.name} #{@backend} #{@device_name.inspect} #{@channels}ch #{@sample_rate.round}Hz #{@profile}#{' closed' if closed?}>"
       end
       alias to_s inspect
     end

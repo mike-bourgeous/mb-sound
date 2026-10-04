@@ -1,5 +1,8 @@
 RSpec.describe(MB::Sound::DeviceOutput, :aggregate_failures) do
-  ENV_NAMES = ['AUDIO_BACKEND', 'OUTPUT_DEVICE', 'DEVICE', 'AUDIO_SAMPLE_RATE', 'AUDIO_LATENCY', 'AUDIO_PERIOD', 'JACK_CLIENT_NAME', 'OUTPUT_TYPE']
+  ENV_NAMES = [
+    'AUDIO_BACKEND', 'OUTPUT_DEVICE', 'DEVICE', 'AUDIO_SAMPLE_RATE', 'AUDIO_PROFILE', 'AUDIO_BUFFER', 'AUDIO_LATENCY',
+    'AUDIO_PERIOD', 'JACK_CLIENT_NAME', 'OUTPUT_TYPE'
+  ]
 
   around(:each) do |ex|
     saved = ENV_NAMES.to_h { |k| [k, ENV.delete(k)] }
@@ -35,11 +38,48 @@ RSpec.describe(MB::Sound::DeviceOutput, :aggregate_failures) do
     expect(o.channels).to eq(2)
     expect(o.device_channels).to eq(2)
     expect(o.sample_rate).to eq(48000.0)
-    expect(o.buffer_size).to eq(800)
     expect(o.strict_buffer_size?).to eq(false)
-    expect(o.queue_limit).to eq((MB::Sound::DeviceOutput::DEFAULT_LATENCY * 48000).round)
-    expect(o.inspect).to include('null', 'NULL Playback Device', '2ch', '48000Hz')
+    expect(o.inspect).to include('null', 'NULL Playback Device', '2ch', '48000Hz', 'default')
     expect(o.closed?).to eq(false)
+  end
+
+  describe 'latency profiles' do
+    it 'uses the :default profile unless told otherwise' do
+      o = device_output
+      expect(o.profile).to eq(:default)
+      expect(o.buffer_size).to eq(512)
+      expect(o.period).to eq(128)
+      expect(o.queue_limit).to eq(2400)
+    end
+
+    it 'uses :low with two writes queued' do
+      o = device_output(profile: :low)
+      expect([o.buffer_size, o.period, o.queue_limit]).to eq([256, 128, 512])
+    end
+
+    it "uses :safe with miniaudio's default period" do
+      o = device_output(profile: 'safe')
+      expect([o.buffer_size, o.period, o.queue_limit]).to eq([800, 480, 4080])
+    end
+
+    it 'lets arguments override the profile, and AUDIO_PROFILE choose it' do
+      ENV['AUDIO_PROFILE'] = 'low'
+      o = device_output(profile: :safe, buffer_size: 400)
+      expect(o.profile).to eq(:low)
+      expect([o.buffer_size, o.period, o.queue_limit]).to eq([400, 128, 800])
+    end
+
+    it 'lets AUDIO_BUFFER, AUDIO_PERIOD, and AUDIO_LATENCY override everything' do
+      ENV['AUDIO_BUFFER'] = '400'
+      ENV['AUDIO_PERIOD'] = '256'
+      ENV['AUDIO_LATENCY'] = '0.1'
+      o = device_output(buffer_size: 128, period: 64, latency: 0.01)
+      expect([o.buffer_size, o.period, o.queue_limit]).to eq([400, 256, 4800])
+    end
+
+    it 'raises for unknown profiles' do
+      expect { device_output(profile: :fast) }.to raise_error(ArgumentError, /Unknown audio profile :fast \(low, default, safe\)/)
+    end
   end
 
   it 'plays exactly what is written' do
