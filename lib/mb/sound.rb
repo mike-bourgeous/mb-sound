@@ -159,6 +159,7 @@ require_relative 'sound/note'
 require_relative 'sound/sequence'
 require_relative 'sound/midi/streams'
 require_relative 'sound/notes'
+require_relative 'sound/synth'
 require_relative 'sound/session'
 
 require_relative 'sound/plot_output'
