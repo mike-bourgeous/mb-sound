@@ -163,6 +163,20 @@ module MB
       end
       alias at_rate sample_rate=
 
+      # Returns a Pitch with vibrato: a sine LFO at +rate+ Hz (a number or
+      # node) moving the frequency up and down by +depth+ (an Interval such
+      # as `30.cents`, semitones, or a node of semitones).  Notes pitches
+      # (Notes#hz) also have MIDI defaults (see Notes::NotePitch#vibrato).
+      #
+      #     play A4.vibrato(5.5, depth: 30.cents).triangle
+      def vibrato(rate = nil, depth: nil)
+        raise ArgumentError, 'Pitch#vibrato needs a rate and depth: (MIDI-controlled vibrato comes from Notes#hz)' if rate.nil? || depth.nil?
+
+        depth = Interval.semitones(depth).to_f unless depth.respond_to?(:sample)
+        lfo = Tone.new(frequency: rate, sample_rate: @sample_rate).lfo
+        Pitch.new(GraphNode::SemitoneShift.new(freq, lfo * depth, sample_rate: @sample_rate), sample_rate: @sample_rate)
+      end
+
       # Returns a Pitch +semitones+ higher (lower if negative); +semitones+
       # may be an Interval (`7.st`, `1.oct`).
       def transpose(semitones)

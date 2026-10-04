@@ -129,6 +129,21 @@ module MB
           with(bend_range: range.nil? ? nil : Interval.semitones(range).to_f)
         end
 
+        # Returns a NotePitch with vibrato (see Notes#vibrato for the
+        # arguments).  With no arguments, the GM controllers set it: depth =
+        # mod wheel × 50 cents (× CC 77), rate = CC 76 (5.5 Hz at 64), and a
+        # fade-in after each note-on of CC 78 (none at 64).  Explicit
+        # +rate+ (Hz) and +depth:+ (an Interval or semitones, e.g.
+        # `30.cents`) may be numbers or nodes; missing ones come from the
+        # controllers, and +delay:+ (seconds) is 0 unless given or all are
+        # left to the controllers.
+        #
+        #     play v.hz.vibrato.saw * v.amp_env
+        #     play v.hz.vibrato(6, depth: 20.cents).saw * v.amp_env
+        def vibrato(rate = nil, depth: nil, delay: nil)
+          with(vibrato: [rate, depth, delay].freeze)
+        end
+
         # Returns a NotePitch +semitones+ higher (an Interval or semitones).
         def transpose(semitones)
           with(transpose: @settings[:transpose] + Interval.semitones(semitones).to_f)
@@ -158,6 +173,7 @@ module MB
         def offsets
           o = [@notes.bend_semitones(@settings[:bend_range])]
           o << @settings[:transpose] if @settings[:transpose] != 0
+          o << @notes.vibrato(*@settings[:vibrato][0..0], depth: @settings[:vibrato][1], delay: @settings[:vibrato][2]) if @settings[:vibrato]
           o
         end
 

@@ -495,6 +495,59 @@ RSpec.describe(MB::Sound::Notes) do
     end
   end
 
+  describe 'vibrato' do
+    # Returns the min and max of +freq+ in semitones from A4 over 1 s,
+    # after +skip+ buffers of 480.
+    def swing(freq, skip: 0)
+      out = 100.times.map { freq.sample(480).dup }.reduce(:concatenate)[skip * 480..]
+      st = (out / 440).to_a.map { |f| 12 * Math.log2(f) }
+      [st.min, st.max]
+    end
+
+    it 'follows the mod wheel by default, up to 50 cents' do
+      [[0, 0], [64, 64 / 127.0 * 0.5], [127, 0.5]].each do |mod, depth|
+        v = notes_for(ev.note_on(69), ev.cc_raw(1, mod))
+        lo, hi = swing(v.hz.vibrato.freq)
+        expect(lo).to be_within(0.01).of(-depth)
+        expect(hi).to be_within(0.01).of(depth)
+      end
+    end
+
+    it 'runs at CC 76 and scales with CC 77' do
+      v = notes_for(ev.note_on(69), ev.cc_raw(1, 127), ev.cc_raw(77, 127), ev.cc_raw(76, 0))
+      f = v.hz.vibrato.freq
+      out = 100.times.map { f.sample(480).dup }.reduce(:concatenate)
+      st = (out / 440).to_a.map { |x| 12 * Math.log2(x) }
+      expect(st.max).to be_within(0.01).of(1)
+      crossings = st.each_cons(2).count { |a, b| a < 0 && b >= 0 }
+      expect(crossings).to be_within(1).of(1) # 1.375 Hz for 1 s
+    end
+
+    it 'fades in after each note-on with CC 78' do
+      v = notes_for(ev.note_on(69), ev.cc_raw(1, 127), ev.cc_raw(78, 127))
+      f = v.hz.vibrato.freq
+      out = 100.times.map { f.sample(480).dup }.reduce(:concatenate)
+      st = (out / 440).to_a.map { |x| 12 * Math.log2(x) }
+      expect(st[0...4800].map(&:abs).max).to be < 0.06 # 0.1 s into a 2 s fade
+      expect(st[24000..].map(&:abs).max).to be_between(0.1, 0.3)
+    end
+
+    it 'takes an explicit rate and depth' do
+      v = notes_for(ev.note_on(69))
+      lo, hi = swing(v.hz.vibrato(6, depth: 20.cents).freq)
+      expect([lo, hi]).to match([be_within(0.005).of(-0.2), be_within(0.005).of(0.2)])
+      expect(v.hz.vibrato(6, depth: 20.cents).freq.graph.grep(MB::Sound::Notes::FadeIn)).to eq([])
+    end
+
+    it 'works on any Pitch with a rate and depth' do
+      f = MB::Sound::A4.vibrato(5, depth: 1.st).freq
+      lo, hi = swing(f)
+      expect([lo, hi]).to match([be_within(0.01).of(-1), be_within(0.01).of(1)])
+      expect { 440.hz.vibrato }.to raise_error(ArgumentError, /rate and depth/)
+      expect(440.hz.vibrato(5.hz.lfo.at(4..6), depth: 0.1).tone.sample(100).length).to eq(100)
+    end
+  end
+
   describe 'ending' do
     let(:clip) { MB::Sound.seq(MB::Sound::C4, MB::Sound::E4).n8 } # 0.5 s at 120 BPM
 

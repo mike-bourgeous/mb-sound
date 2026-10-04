@@ -322,6 +322,7 @@ require_relative 'graph_node/channel_mixer/stereo'
 require_relative 'graph_node/channel_mixer/position'
 require_relative 'graph_node/fdn_reverb'
 require_relative 'graph_node/reverb'
+require_relative 'graph_node/semitone_shift'
 
 require_relative 'graph_node/graph_clock'
 

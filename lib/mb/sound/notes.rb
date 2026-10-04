@@ -335,6 +335,26 @@ module MB
         Quality.new(q, resonance: -> { resonance }, sample_rate: @sample_rate).gm(gm)
       end
 
+      # Vibrato in semitones (a node, for pitch offsets; see
+      # NotePitch#vibrato): a sine LFO at +rate+ Hz reset at each note-on, ×
+      # +depth+ semitones, × a fade-in over +delay+ seconds after each
+      # note-on (Notes::FadeIn).  Defaults: rate = #vibrato_rate (CC 76,
+      # 5.5 Hz at 64); depth = #mod × 0.5 semitones × #vibrato_depth (CC 77,
+      # x1 at 64); delay = #vibrato_delay (CC 78, 0 at 64) when rate and
+      # depth are both defaults, else 0.  Numbers, Intervals (depth), and
+      # nodes are all accepted.
+      def vibrato(rate = nil, depth: nil, delay: nil)
+        defaults = rate.nil? && depth.nil?
+        rate ||= vibrato_rate
+        depth = depth.nil? ? mod * vibrato_depth * 0.5 : (depth.respond_to?(:sample) ? depth : Interval.semitones(depth).to_f)
+        delay ||= defaults ? vibrato_delay : 0
+
+        lfo = MB::Sound::Tone.new(frequency: rate, sample_rate: @sample_rate).lfo.reset(trigger)
+        parts = [lfo, depth]
+        parts << FadeIn.new(@stream, delay: delay, notes: self, sample_rate: @sample_rate) unless delay == 0
+        GraphNode::Multiplier.new(parts, sample_rate: @sample_rate).named('vibrato')
+      end
+
       # The envelopes made through this instance (see #env).
       def envelopes
         @envelopes.dup
@@ -421,6 +441,7 @@ require_relative 'notes/note_stack'
 require_relative 'notes/note_nodes'
 require_relative 'notes/channel_nodes'
 require_relative 'notes/frequency'
+require_relative 'notes/fade_in'
 require_relative 'notes/note_envelope'
 require_relative 'notes/note_pitch'
 require_relative 'notes/filter_nodes'
