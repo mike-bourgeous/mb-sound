@@ -41,7 +41,8 @@ RSpec.describe(MB::Sound::Sequence::TempoNode) do
     it 'locks its phase to the timeline through tempo changes and seeks' do
       session.add(1.bar.lfo.ramp)
       data = run(192000)
-      expect([0, 24000, 48000, 96000, 120000].map { |i| data[i].round(3) }).to eq([0, 0.5, 1, 0, 0.5])
+      # The ramp jumps on sample 48000 (half a bar), not one sample late
+      expect([0, 24000, 47999, 48000, 96000, 120000].map { |i| data[i].round(3) }).to eq([0, 0.5, 1, -1, 0, 0.5])
 
       transport.bpm = 60 # a bar is now 192000 frames
       data = run(192000)

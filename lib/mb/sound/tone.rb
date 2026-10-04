@@ -36,6 +36,8 @@ module MB
       def initialize(wave_type: :sine, frequency: 440, amplitude: 1.0, phase: 0, sample_rate: 48000)
         @wave_type = wave_type
         @oscillator = nil
+        @band_limit = true
+        @lfo = false
         @noise = 0
         @amplitude_set = false
         @phase_mod = nil
@@ -56,25 +58,52 @@ module MB
       end
       alias sin sine
 
-      # Changes the waveform type to triangle.
+      # Changes the waveform type to a band-limited triangle (see BandLimit;
+      # #atriangle is the naive, aliased version).
       def triangle
-        @wave_type = :triangle
-        self
+        set_wave(:triangle, true)
       end
 
-      # Changes the waveform type to square.
+      # Changes the waveform type to a naive (aliased) triangle, whose
+      # corners alias a little; see #triangle.
+      def atriangle
+        set_wave(:triangle, false)
+      end
+
+      # Changes the waveform type to a band-limited square (see BandLimit;
+      # #asquare is the naive, aliased version).
       def square
-        @wave_type = :square
-        self
+        set_wave(:square, true)
       end
 
-      # Changes the waveform type to ramp.
+      # Changes the waveform type to a naive (aliased) square, whose jumps
+      # alias audibly at high pitches; see #square.
+      def asquare
+        set_wave(:square, false)
+      end
+
+      # Changes the waveform type to a band-limited ramp (sawtooth; see
+      # BandLimit; #aramp is the naive, aliased version).
       def ramp
-        @wave_type = :ramp
-        self
+        set_wave(:ramp, true)
       end
       alias saw ramp
       alias sawtooth ramp
+
+      # Changes the waveform type to a naive (aliased) ramp, whose jump
+      # aliases audibly at high pitches (the classic digital grit); see
+      # #ramp.
+      def aramp
+        set_wave(:ramp, false)
+      end
+      alias asaw aramp
+      alias asawtooth aramp
+
+      # True if this tone's ramp, square, or triangle waveform is
+      # band-limited (see #ramp, #aramp).
+      def band_limited?
+        @band_limit
+      end
 
       # Changes the waveform type to ramp, with phase set so the oscillator
       # starts at the bottom instead of the middle of its ramp.  This allows
@@ -323,12 +352,19 @@ module MB
       # full -1..1 range unless #at was called.  Call #at afterward to set the
       # range.
       #
+      # Band-limited waveforms (ramp, square, triangle) fade their
+      # band-limiting in between 15 and 30 Hz (BandLimit::LFO_FADE), so a slow
+      # LFO keeps exact jumps and corners (e.g. a delay time that should jump)
+      # while an LFO pushed to audio rates is band-limited.
+      #
       # Durations have their own #lfo for tempo-synced LFOs (see
       # Sequence::Duration#lfo).
       #
       # Example:
       #     play 220.hz.ramp.at(1).filter(:lowpass, cutoff: 0.25.hz.triangle.lfo.at(200..2000), quality: 4)
       def lfo
+        @lfo = true
+        @oscillator&.band_limit = oscillator_band_limit
         no_trigger
         or_at(1)
       end
@@ -414,7 +450,8 @@ module MB
           random_advance: rand_adv,
           range: @range,
           phase_mod: @phase_mod,
-          no_trigger: @no_trigger
+          no_trigger: @no_trigger,
+          band_limit: oscillator_band_limit
         )
       end
 
@@ -491,13 +528,13 @@ module MB
       end
 
       def to_s
-        "#{super} -- #{@wave_type} freq=#{make_source_name(@frequency)} range=#{@range}"
+        "#{super} -- #{wave_name} freq=#{make_source_name(@frequency)} range=#{@range}"
       end
 
       def to_s_graphviz
         <<~EOF
         #{super}---------------
-        #{@wave_type}
+        #{wave_name}
         freq=#{make_source_name(@frequency)}
         range=#{@range}
         EOF
@@ -524,6 +561,28 @@ module MB
       end
 
       private
+
+      # Sets the wave type and whether it's band-limited (see #ramp, #aramp).
+      def set_wave(wave_type, band_limit)
+        @wave_type = wave_type
+        @band_limit = band_limit
+        if @oscillator
+          @oscillator.wave_type = wave_type
+          @oscillator.band_limit = oscillator_band_limit
+        end
+        self
+      end
+
+      # The band_limit setting for the Oscillator (see Oscillator#band_limit).
+      def oscillator_band_limit
+        return false unless @band_limit
+        @lfo ? BandLimit::LFO_FADE : true
+      end
+
+      # The wave type as written in the DSL (e.g. :aramp for a naive ramp).
+      def wave_name
+        !@band_limit && BandLimit::WAVES.include?(@wave_type) ? :"a#{@wave_type}" : @wave_type
+      end
 
       # Allows subclasses (e.g. Note) to change the frequency after construction.
       def set_frequency(freq)

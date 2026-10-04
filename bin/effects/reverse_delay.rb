@@ -60,7 +60,7 @@ MB::Sound.effect_script(
     amp_lfo = lfo_freq.tone.sine.at(0..1000).with_phase((idx + 0.5) * 2.0 * Math::PI / channels).clip(0, 1).named('Amp LFO')
 
     # The delay LFO controls the position in the delay buffer
-    delay_lfo = lfo_freq.tone.ramp.at(0..2).with_phase(idx * 2.0 * Math::PI / channels).named('Delay LFO') * delay_time
+    delay_lfo = lfo_freq.tone.ramp.lfo.at(0..2).with_phase(idx * 2.0 * Math::PI / channels).named('Delay LFO') * delay_time
 
     delayed = inp.delay(seconds: delay_lfo, smoothing: false) * amp_lfo
 

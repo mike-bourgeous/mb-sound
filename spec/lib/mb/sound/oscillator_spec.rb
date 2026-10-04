@@ -231,7 +231,7 @@ RSpec.describe MB::Sound::Oscillator do
       end
 
       it 'produces expected square wave output for a low sample rate' do
-        oscil = 1.hz.square.at(0.5).at_rate(50).oscillator
+        oscil = 1.hz.asquare.at(0.5).at_rate(50).oscillator
         expect(oscil.send(method, 25)).to eq(Numo::SFloat.zeros(25).fill(0.5))
         expect(oscil.send(method, 25)).to eq(Numo::SFloat.zeros(25).fill(-0.5))
         expect(oscil.send(method, 25)).to eq(Numo::SFloat.zeros(25).fill(0.5))
@@ -239,7 +239,7 @@ RSpec.describe MB::Sound::Oscillator do
       end
 
       it 'produces expected square wave output for a moderate sample rate' do
-        oscil = 1.hz.square.at_rate(1600).at(1).oscillator
+        oscil = 1.hz.asquare.at_rate(1600).at(1).oscillator
         expect(oscil.send(method, 800)).to eq(Numo::SFloat.zeros(800).fill(1))
         expect(oscil.send(method, 800)).to eq(Numo::SFloat.zeros(800).fill(-1))
         expect(oscil.send(method, 800)).to eq(Numo::SFloat.zeros(800).fill(1))
@@ -259,7 +259,7 @@ RSpec.describe MB::Sound::Oscillator do
         result = oscil.send(method, 1600)
         # 240Hz at 48kHz puts square wave transitions exactly on samples, so
         # sample 6400 + i of the reference has the same phase as sample i
-        target = Numo::SComplex.cast(MB::Sound.analytic_signal(240.hz.square.at(1).sample(16000))[6400...8000])
+        target = Numo::SComplex.cast(MB::Sound.analytic_signal(240.hz.asquare.at(1).sample(16000))[6400...8000])
 
         expect(MB::M.round(result.real, 5)).to eq(MB::M.round(target.real, 5))
 
@@ -272,7 +272,7 @@ RSpec.describe MB::Sound::Oscillator do
       it 'matches the analytic signal for a complex triangle wave (approximately)' do
         oscil = 240.hz.complex_triangle.at(1).oscillator
         result = oscil.send(method, 1600)
-        target = Numo::SComplex.cast(MB::Sound.analytic_signal(240.hz.triangle.at(1).sample(16000))[6400...8000])
+        target = Numo::SComplex.cast(MB::Sound.analytic_signal(240.hz.atriangle.at(1).sample(16000))[6400...8000])
 
         expect(MB::M.round(result.real, 6)).to eq(MB::M.round(target.real, 6))
 
@@ -286,7 +286,7 @@ RSpec.describe MB::Sound::Oscillator do
         oscil = 240.hz.complex_ramp.at(1).oscillator
         result = oscil.send(method, 1600)
 
-        base = MB::Sound.analytic_signal(120.hz.ramp.at(1).sample(32000)).reshape(16000, 2)[nil, 1] # shift 240hz by half sample
+        base = MB::Sound.analytic_signal(120.hz.aramp.at(1).sample(32000)).reshape(16000, 2)[nil, 1] # shift 240hz by half sample
         target = Numo::SComplex.cast(base)[6400...8000]
 
         expect(MB::M.round(result.real, 6)).to eq(MB::M.round(target.real, 6))

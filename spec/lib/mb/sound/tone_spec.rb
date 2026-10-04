@@ -1,7 +1,7 @@
 RSpec.describe MB::Sound::Tone do
   describe '#generate' do
     it 'can generate triangle wave samples in an NArray' do
-      data = 500.hz.triangle.at(0.85).sample(48000)
+      data = 500.hz.atriangle.at(0.85).sample(48000)
       expect(data.length).to eq(48000)
       expect(data.max.round(3)).to eq(0.85)
       expect(data.min.round(3)).to eq(-0.85)
@@ -10,7 +10,7 @@ RSpec.describe MB::Sound::Tone do
     end
 
     it 'can generate square wave samples in an NArray' do
-      data = 500.hz.square.at(0.85).sample(48000)
+      data = 500.hz.asquare.at(0.85).sample(48000)
       expect(data.length).to eq(48000)
       expect(data.max.round(3)).to eq(0.85)
       expect(data.min.round(3)).to eq(-0.85)

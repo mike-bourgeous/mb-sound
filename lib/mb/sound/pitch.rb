@@ -86,6 +86,7 @@ module MB
       # Wave shapes: each returns a new Tone at this pitch.
       [
         :sine, :sin, :triangle, :square, :ramp, :saw, :sawtooth, :drumramp, :envramp, :gauss, :parabola,
+        :atriangle, :asquare, :aramp, :asaw, :asawtooth,
         :complex_sine, :complex_square, :complex_triangle, :complex_ramp,
       ].each do |wave|
         define_method(wave) { tone.public_send(wave) }

@@ -33,7 +33,7 @@ CASES = {
   const_int: -> { source.delay(samples(480), smoothing: false, dry: 0.5, wet: 0.5) },
   const_frac_node: -> { source.delay(seconds: samples(480.4).constant(smoothing: false), smoothing: false) },
   const_smoothed: -> { source.delay(0.01, dry: 0.5, wet: 0.5) },
-  smoothing_jumps: -> { source.delay(seconds: 2.hz.square.at(0.004..0.02), dry: 0.5, wet: 0.5) },
+  smoothing_jumps: -> { source.delay(seconds: 2.hz.square.lfo.at(0.004..0.02), dry: 0.5, wet: 0.5) },
   feedback_long: -> { source.delay(0.05, feedback: 0.6, dry: 1) * 0.3 },
   feedback_short: -> { source.delay(samples(96), feedback: 0.7, dry: 1, smoothing: false) },
   feedback_negative: -> { source.delay(samples(250), feedback: -0.8, dry: 1, smoothing: false) * 0.3 },
@@ -42,7 +42,7 @@ CASES = {
   modulated_feedback: -> { source.delay(seconds: 0.7.hz.lfo.at(0.002..0.006), feedback: 0.6, smoothing: false, dry: 1) * 0.3 },
   modulated_smoothed: -> { source.delay(seconds: 3.hz.lfo.at(0.001..0.03), dry: 0.5, wet: 0.5) },
   tempo_delay: -> { source.delay(3.n32, feedback: 0.5, dry: 1) },
-  growth: -> { source.delay(seconds: 0.7.hz.ramp.with_phase(Math::PI).at(0.01..0.3), max_delay: 0.05, smoothing: false) },
+  growth: -> { source.delay(seconds: 0.7.hz.ramp.lfo.with_phase(Math::PI).at(0.01..0.3), max_delay: 0.05, smoothing: false) },
   complex: -> {
     d = 330.hz.complex_ramp.at(0.15).delay(samples(300.5).constant(smoothing: false), smoothing: false, feedback: 0.5, dry: 1)
     [d.real, d.imag]

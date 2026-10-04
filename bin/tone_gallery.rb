@@ -25,6 +25,11 @@ CASES = {}
   end
 end
 
+# Naive (aliased) versions of the band-limited shapes
+[:atriangle, :asquare, :aramp].each do |wave|
+  CASES[:"#{wave}_1760"] = -> { 1760.hz.send(wave).at(0.5) }
+end
+
 [:complex_sine, :complex_square, :complex_triangle, :complex_ramp].each do |wave|
   CASES[:"#{wave}_220"] = -> {
     osc = 220.hz.send(wave).at(0.5)

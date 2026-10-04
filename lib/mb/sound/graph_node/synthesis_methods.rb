@@ -53,7 +53,9 @@ module MB
         # +:lookup+ - Interpolation mode (noisy :linear or cleaner :cubic).
         # +:wrap+ - A wrapping mode constant, or a MIDI value.
         #
-        # See Wavetable#initialize.
+        # See Wavetable#initialize.  A ramp Tone used as the phase is switched
+        # to its naive shape (Tone#aramp), since a phase must wrap exactly (a
+        # band-limited ramp would read the middle of the table at each wrap).
         #
         # Example:
         #     # Wavetable oscillator
@@ -61,7 +63,8 @@ module MB
         def wavetable(wavetable:, number:, lookup: :cubic, wrap: :wrap)
           number = number.constant if number.is_a?(Numeric)
           phase = self
-          phase = self.or_at(1) if self.respond_to?(:or_at)
+          phase = phase.aramp if phase.is_a?(Tone) && phase.wave_type == :ramp
+          phase = phase.or_at(1) if phase.respond_to?(:or_at)
           number = number.or_at(0..1) if number.respond_to?(:or_at)
           Wavetable.new(wavetable: wavetable, number: number, phase: phase, lookup: lookup, wrap: wrap, sample_rate: 48000)
         end
