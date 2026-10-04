@@ -1,11 +1,12 @@
 RSpec.describe(MB::Sound::DeviceOutput, :aggregate_failures) do
-  ENV_NAMES = [
+  DEVICE_OUTPUT_ENV = [
     'AUDIO_BACKEND', 'OUTPUT_DEVICE', 'DEVICE', 'AUDIO_SAMPLE_RATE', 'AUDIO_PROFILE', 'AUDIO_BUFFER', 'AUDIO_LATENCY',
-    'AUDIO_PERIOD', 'JACK_CLIENT_NAME', 'OUTPUT_TYPE', 'AUDIO_DEVICE_RATE', 'AUDIO_RESAMPLE', 'AUDIO_SET_DEVICE_RATE'
+    'AUDIO_PERIOD', 'JACK_CLIENT_NAME', 'OUTPUT_TYPE', 'AUDIO_DEVICE_RATE', 'AUDIO_RESAMPLE', 'AUDIO_SET_DEVICE_RATE',
+    'AUDIO_ADAPTIVE'
   ]
 
   around(:each) do |ex|
-    saved = ENV_NAMES.to_h { |k| [k, ENV.delete(k)] }
+    saved = DEVICE_OUTPUT_ENV.to_h { |k| [k, ENV.delete(k)] }
     ex.run
   ensure
     saved.each { |k, v| v ? ENV[k] = v : ENV.delete(k) }
@@ -41,6 +42,50 @@ RSpec.describe(MB::Sound::DeviceOutput, :aggregate_failures) do
     expect(o.strict_buffer_size?).to eq(false)
     expect(o.inspect).to include('null', 'NULL Playback Device', '2ch', '48000Hz', 'default')
     expect(o.closed?).to eq(false)
+  end
+
+  describe 'adaptive queue' do
+    let(:block) { [Numo::SFloat.zeros(256)] * 2 }
+
+    # Writes, then lets the queue run dry before writing again
+    def drop_out(o, pause: 0.03)
+      o.write(block)
+      sleep pause
+      o.write(block)
+    end
+
+    it 'grows the queue by half after a dropout while writing' do
+      o = device_output(profile: :low)
+      expect(o.adaptive?).to eq(true)
+      expect(o.queue_limit).to eq(512)
+      expect(o.max_queue).to eq(4080) # the :safe profile's queue
+
+      expect { drop_out(o) }.to output(/Audio dropout: raising the output queue to 16 ms/).to_stderr
+      expect(o.queue_limit).to eq(768)
+    end
+
+    it 'does not grow after a gap between sounds' do
+      o = device_output(profile: :low)
+      expect { drop_out(o, pause: 0.4) }.not_to output.to_stderr
+      expect(o.queue_limit).to eq(512)
+    end
+
+    it 'stops at the :safe queue' do
+      o = device_output(profile: :low)
+      expect { 8.times { drop_out(o) } }.to output.to_stderr
+      expect(o.queue_limit).to eq(4080)
+      expect { drop_out(o) }.not_to output.to_stderr
+    end
+
+    it 'can be turned off' do
+      o = device_output(profile: :low, adaptive: false)
+      expect(o.adaptive?).to eq(false)
+      expect(o.max_queue).to eq(512)
+      expect { drop_out(o) }.not_to output.to_stderr
+
+      ENV['AUDIO_ADAPTIVE'] = '0'
+      expect(device_output(profile: :low).adaptive?).to eq(false)
+    end
   end
 
   describe 'sample rates' do
@@ -191,6 +236,10 @@ RSpec.describe(MB::Sound::DeviceOutput, :aggregate_failures) do
 
     rendered = Array.new(20) { session.process_buffer.map(&:dup) }
     wait_until { o.stats[:queued] == 0 }
+
+    # Gaps from a slow writer (e.g. under rake memcheck) break the exact
+    # comparison; one underrun is the end of the audio
+    skip 'the Session fell behind the sound card (e.g. under rake memcheck)' if o.underruns > 1
 
     expected = 2.times.map { |c| rendered.map { |b| b[c] }.reduce(:concatenate) }
 

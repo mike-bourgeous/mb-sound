@@ -221,6 +221,32 @@ module MB
         output
       end
 
+      # With a +profile+ (:low, :default, :video, or :safe; see
+      # DeviceOutput::PROFILES), plays background sounds through the sound
+      # card with that latency from now on: the background session restarts
+      # with a new output (see #use_output), so stop all players first.
+      # Light patches (e.g. a few band-limited oscillators) can use :low;
+      # heavy graphs need :default or :safe.  An AUDIO_PROFILE environment
+      # variable still takes precedence.  Without a profile, returns the
+      # current output's profile (nil if it has none).  Also available as
+      # #lag.
+      #
+      # Example (bin/sound.rb):
+      #     latency :low     # about 16-19 ms on the user's Mac
+      #     lag :default     # about 45-56 ms
+      #     latency          # => :default
+      def latency(profile = nil)
+        if profile.nil?
+          out = Session.default.output
+          return out.respond_to?(:profile) ? out.profile : nil
+        end
+
+        type = detect_output == :null ? :null : :device
+        use_output(MB::Sound.output(output_type: type, channels: 2, shared: false, profile: profile))
+        profile.to_s.delete_prefix(':').to_sym
+      end
+      alias lag latency
+
       # Sets master effects that the whole background mix (see #bg) runs
       # through, e.g. to tame levels or add a shared reverb.  The block gets
       # the mix and returns the processed mix.  Also available as
@@ -373,8 +399,21 @@ module MB
           return nil
         end
 
+        # Each buffer is shown when it reaches the speakers: the tap runs
+        # right after a buffer is written, so it plays after the output's
+        # current latency (DeviceOutput#latency; outputs without one are
+        # shown right away)
+        output = session.output
+        due = []
+        due_lock = Mutex.new
+        tap = session.add_tap { |mix|
+          delay = output.respond_to?(:latency) ? output.latency : 0
+          due_lock.synchronize {
+            due << [MB::U.clock_now + delay, mix]
+            due.shift while due.length > 1000
+          }
+        }
         latest = nil
-        tap = session.add_tap { |mix| latest = mix }
 
         header = "\e[H\e[J\e[36mVisualizing the background mix\e[0m\n\n"
         $stdout.write header
@@ -391,6 +430,11 @@ module MB
         start = MB::U.clock_now
         shown = nil
         loop do
+          now = MB::U.clock_now
+          due_lock.synchronize {
+            latest = due.shift[1] while due.first && due.first[0] <= now
+          }
+
           data = latest
           if data.nil? || data.equal?(shown)
             sleep 0.001

@@ -134,7 +134,7 @@ module MB
       # files and live input, and +live_channels+ for live input only.  For
       # general scripts, +args+ is the number of positional arguments
       # allowed (an Integer or Range; nil for any number).
-      def initialize(kind, params = {}, argv: ARGV, script: $0, input_channels: nil, live_channels: nil, args: nil)
+      def initialize(kind, params = {}, argv: ARGV, script: $0, input_channels: nil, live_channels: nil, args: nil, profile: nil)
         raise ArgumentError, "Unknown script kind #{kind.inspect}" unless [:effect, :synth, :song, :script].include?(kind)
 
         @kind = kind
@@ -142,8 +142,10 @@ module MB
         @input_channels = input_channels
         @live_channels = live_channels
         @arg_count = args
+        @profile = profile
         @declared = params.map { |name, spec| declare(name, spec) }
         parse(argv)
+        apply_latency_profile
       end
 
       # Runs a general script: calls the block with the positional arguments
@@ -258,6 +260,17 @@ module MB
         end
       end
 
+      # Sets AUDIO_PROFILE for sound card outputs opened later (see
+      # MB::Sound::DeviceOutput::PROFILES): -L/--latency-profile wins, then
+      # an AUDIO_PROFILE already set, then the script's own +:profile+.
+      def apply_latency_profile
+        if @options[:profile]
+          ENV['AUDIO_PROFILE'] = @options[:profile].to_s
+        elsif @profile && !ENV['AUDIO_PROFILE']
+          ENV['AUDIO_PROFILE'] = @profile.to_s
+        end
+      end
+
       # Parses +argv+ into @options and @params.
       def parse(argv)
         @options = { input: nil, output: nil, force: false, graphviz: false, plot: false, quiet: false, channels: @input_channels, repeat: nil }
@@ -271,6 +284,11 @@ module MB
             o.on('-g', '--graphviz', 'Open a visualization of the node graph') { @options[:graphviz] = true }
             o.on('-P', '--plot', 'Plot the output while playing live') { @options[:plot] = true }
             o.on('-q', '--quiet', "Don't print the parameters") { @options[:quiet] = true }
+            profiles = MB::Sound::DeviceOutput::PROFILES.keys
+            o.on(
+              '-L', '--latency-profile PROFILE', profiles.map(&:to_s),
+              "Sound card latency profile: #{profiles.join(', ')} (default: #{@profile || 'AUDIO_PROFILE or default'})"
+            ) { |v| @options[:profile] = v.to_sym }
           end
 
           case @kind

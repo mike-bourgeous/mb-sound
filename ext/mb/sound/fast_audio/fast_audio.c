@@ -226,6 +226,7 @@ struct playback {
 	float *data;
 	size_t capacity; // frames, a power of two
 	size_t queue_limit; // most frames the writer queues (sets the latency)
+	size_t max_queue; // the largest #queue_limit= allowed (sizes the ring)
 	int in_channels; // channels written from Ruby (1 is fanned out)
 	int out_channels; // channels sent to miniaudio
 	_Atomic size_t write_pos;
@@ -530,8 +531,9 @@ static VALUE playback_open_body(VALUE arg)
 		p->src_ratio = (double)device_rate / a->sample_rate;
 		p->input_rate = a->sample_rate;
 
-		// The queue limit was given at the writer's rate
+		// The queue limits were given at the writer's rate
 		p->queue_limit = (size_t)ceil(p->queue_limit * p->src_ratio);
+		p->max_queue = (size_t)ceil(p->max_queue * p->src_ratio);
 	}
 
 	// The queue must hold at least two device periods, or the device runs
@@ -541,9 +543,12 @@ static VALUE playback_open_body(VALUE arg)
 	if (p->queue_limit < min_queue) {
 		p->queue_limit = min_queue;
 	}
+	if (p->max_queue < p->queue_limit) {
+		p->max_queue = p->queue_limit;
+	}
 
 	size_t capacity = 16;
-	while (capacity < p->queue_limit) {
+	while (capacity < p->max_queue) {
 		capacity <<= 1;
 	}
 
@@ -574,7 +579,7 @@ static VALUE playback_open_rescue(VALUE arg, VALUE exception)
  * call-seq:
  *   Playback.new(backends, device_index, client_name, in_channels, out_channels,
  *                sample_rate, device_rate, period, queue_frames, capture_frames,
- *                resample_quality, allow_rate_change)
+ *                resample_quality, allow_rate_change, max_queue_frames)
  *
  * Opens and starts a playback device.  +backends+ is an Array of backend
  * Symbols in order of preference, or nil.  +device_index+ is an index into
@@ -593,13 +598,16 @@ static VALUE playback_open_rescue(VALUE arg, VALUE exception)
  *
  * +period+ is the device period in frames (0 for miniaudio's low-latency
  * default).  +queue_frames+ (at +sample_rate+) is the most audio #write
- * queues ahead of the device, which sets the output latency.
+ * queues ahead of the device, which sets the output latency, and
+ * +max_queue_frames+ (also at +sample_rate+; 0 for +queue_frames+) the most
+ * #queue_limit= may raise it to later (the ring is sized for it).
  * +capture_frames+ records that many played frames for #captured (0 for
  * none; for specs).
  */
 static VALUE playback_initialize(VALUE self, VALUE backends, VALUE device_index, VALUE client_name,
 		VALUE in_channels, VALUE out_channels, VALUE sample_rate, VALUE device_rate, VALUE period,
-		VALUE queue_frames, VALUE capture_frames, VALUE resample_quality, VALUE allow_rate_change)
+		VALUE queue_frames, VALUE capture_frames, VALUE resample_quality, VALUE allow_rate_change,
+		VALUE max_queue_frames)
 {
 	struct playback *p;
 	TypedData_Get_Struct(self, struct playback, &playback_type, p);
@@ -619,6 +627,11 @@ static VALUE playback_initialize(VALUE self, VALUE backends, VALUE device_index,
 	long queue = NUM2LONG(queue_frames);
 	if (queue < 16 || queue > (1L << 24)) {
 		rb_raise(rb_eArgError, "Queue size must be 16..%ld frames (got %ld)", 1L << 24, queue);
+	}
+
+	long max_queue = NUM2LONG(max_queue_frames);
+	if (max_queue < 0 || max_queue > (1L << 24)) {
+		rb_raise(rb_eArgError, "Maximum queue size must be 0..%ld frames (got %ld)", 1L << 24, max_queue);
 	}
 
 	long capture = NUM2LONG(capture_frames);
@@ -646,6 +659,7 @@ static VALUE playback_initialize(VALUE self, VALUE backends, VALUE device_index,
 	p->in_channels = in_ch;
 	p->out_channels = out_ch;
 	p->queue_limit = queue;
+	p->max_queue = max_queue;
 	p->starving = 1; // silence before the first write isn't an underrun
 
 	if (capture > 0) {
@@ -977,6 +991,40 @@ static VALUE playback_queue_limit(VALUE self)
 	return SIZET2NUM(get_playback(self)->queue_limit);
 }
 
+/* The largest queue limit #queue_limit= accepts (in device frames). */
+static VALUE playback_max_queue(VALUE self)
+{
+	return SIZET2NUM(get_playback(self)->max_queue);
+}
+
+/*
+ * call-seq:
+ *   playback.queue_limit = frames
+ *
+ * Changes how many frames (at the device's rate) #write queues ahead of
+ * the device, from two device periods up to #max_queue (e.g. to add
+ * latency after underruns).  Call from the writing thread.
+ */
+static VALUE playback_set_queue_limit(VALUE self, VALUE frames)
+{
+	struct playback *p = get_playback(self);
+	size_t n = NUM2SIZET(frames);
+	size_t min = 2 * (size_t)open_device(self)->playback.internalPeriodSizeInFrames;
+
+	if (n < min) {
+		n = min;
+	}
+	if (n > p->max_queue) {
+		n = p->max_queue;
+	}
+
+	pthread_mutex_lock(&p->lock);
+	p->queue_limit = n;
+	pthread_mutex_unlock(&p->lock);
+
+	return SIZET2NUM(n);
+}
+
 /*
  * call-seq:
  *   playback.stats -> { queued:, frames_written:, frames_played:, underruns: }
@@ -1020,6 +1068,675 @@ static VALUE playback_captured(VALUE self)
 	return rb_str_new((const char *)p->capture, length * p->out_channels * sizeof(float));
 }
 
+/* Capture ------------------------------------------------------------------ */
+
+// The capture side mirrors playback: miniaudio's device thread copies
+// captured frames into a ring (the producer), and Ruby's #read waits
+// without the GVL until enough have arrived (the consumer), resampling
+// from the device's rate if it differs from the rate Ruby asked for.
+struct capture {
+	float *data; // interleaved device frames
+	size_t capacity; // frames, a power of two
+	size_t queue_limit; // most frames kept waiting; older ones are skipped
+	int channels;
+	_Atomic size_t write_pos; // owned by the callback
+	_Atomic size_t read_pos; // owned by the reader
+
+	_Atomic size_t frames_captured; // device clock in frames
+	_Atomic size_t overruns; // callbacks that found the ring full (frames lost)
+	size_t skipped; // frames the reader skipped to keep the latency down
+	int test_pattern; // write a counting pattern instead of the device's audio
+	size_t pattern_frame;
+
+	_Atomic int open;
+	_Atomic int stopped;
+	pid_t pid;
+
+	pthread_mutex_t lock;
+	pthread_cond_t ready;
+	int interrupted;
+
+	ma_context context;
+	ma_device device;
+	int context_ready;
+	int device_ready;
+
+	ma_uint32 output_rate; // the rate #read returns
+	SRC_STATE *src;
+	double src_ratio; // output rate / device rate
+
+	// Reader scratch: device frames taken from the ring, and frames ready
+	// to return (resampled if needed)
+	float *in_buf;
+	size_t in_cap;
+	float *pending;
+	size_t pending_cap;
+	size_t pending_count;
+};
+
+static void capture_release_device(struct capture *c)
+{
+	if (c->pid != getpid()) {
+		c->device_ready = 0;
+		c->context_ready = 0;
+		return;
+	}
+
+	if (c->device_ready) {
+		ma_device_uninit(&c->device);
+		c->device_ready = 0;
+	}
+
+	if (c->context_ready) {
+		ma_context_uninit(&c->context);
+		c->context_ready = 0;
+	}
+}
+
+static void capture_wake_reader(struct capture *c)
+{
+	pthread_mutex_lock(&c->lock);
+	c->interrupted = 1;
+	pthread_cond_broadcast(&c->ready);
+	pthread_mutex_unlock(&c->lock);
+}
+
+static void capture_free(void *ptr)
+{
+	struct capture *c = ptr;
+
+	atomic_store(&c->open, 0);
+	capture_release_device(c);
+
+	free(c->data);
+	free(c->in_buf);
+	free(c->pending);
+	if (c->src != NULL) {
+		src_delete(c->src);
+	}
+
+	if (c->pid == getpid()) {
+		pthread_cond_destroy(&c->ready);
+		pthread_mutex_destroy(&c->lock);
+	}
+
+	free(c);
+}
+
+static size_t capture_memsize(const void *ptr)
+{
+	const struct capture *c = ptr;
+	return sizeof(*c) + (c->capacity + c->in_cap + c->pending_cap) * c->channels * sizeof(float);
+}
+
+static const rb_data_type_t capture_type = {
+	.wrap_struct_name = "MB::Sound::FastAudio::Capture",
+	.function = {
+		.dmark = NULL,
+		.dfree = capture_free,
+		.dsize = capture_memsize,
+	},
+	.flags = RUBY_TYPED_FREE_IMMEDIATELY,
+};
+
+static struct capture *get_capture(VALUE self)
+{
+	struct capture *c;
+	TypedData_Get_Struct(self, struct capture, &capture_type, c);
+	if (c->data == NULL) {
+		rb_raise(cError, "Capture was not initialized");
+	}
+	return c;
+}
+
+// miniaudio's device thread.  Realtime safe: no Ruby, no allocation, no
+// blocking locks.
+static void capture_callback(ma_device *device, void *output, const void *input, ma_uint32 frames)
+{
+	struct capture *c = device->pUserData;
+	size_t ch = c->channels;
+	size_t mask = c->capacity - 1;
+
+	size_t wp = atomic_load_explicit(&c->write_pos, memory_order_relaxed);
+	size_t rp = atomic_load_explicit(&c->read_pos, memory_order_acquire);
+	size_t room = c->capacity - (wp - rp);
+	size_t count = frames;
+	if (count > room) {
+		// The reader fell far behind; drop what doesn't fit
+		atomic_fetch_add_explicit(&c->overruns, 1, memory_order_relaxed);
+		count = room;
+	}
+
+	const float *in = input;
+	for (size_t i = 0; i < count; i++) {
+		float *dst = c->data + ((wp + i) & mask) * ch;
+		if (c->test_pattern) {
+			// Frame number modulo 4096, scaled to -1..1, plus a channel offset
+			float v = (float)((c->pattern_frame + i) % 4096) / 2048.0f - 1.0f;
+			for (size_t k = 0; k < ch; k++) {
+				dst[k] = v + 0.001f * k;
+			}
+		} else {
+			memcpy(dst, in + i * ch, ch * sizeof(float));
+		}
+	}
+	c->pattern_frame += frames;
+
+	atomic_store_explicit(&c->write_pos, wp + count, memory_order_release);
+	atomic_fetch_add_explicit(&c->frames_captured, frames, memory_order_relaxed);
+
+	if (pthread_mutex_trylock(&c->lock) == 0) {
+		pthread_cond_signal(&c->ready);
+		pthread_mutex_unlock(&c->lock);
+	}
+}
+
+static void capture_notification(const ma_device_notification *notification)
+{
+	struct capture *c = notification->pDevice->pUserData;
+
+	if (notification->type == ma_device_notification_type_stopped) {
+		atomic_store(&c->stopped, 1);
+
+		if (pthread_mutex_trylock(&c->lock) == 0) {
+			pthread_cond_broadcast(&c->ready);
+			pthread_mutex_unlock(&c->lock);
+		}
+	}
+}
+
+static VALUE capture_alloc(VALUE klass)
+{
+	struct capture *c = calloc(1, sizeof(struct capture));
+	if (c == NULL) {
+		rb_raise(rb_eNoMemError, "Could not allocate audio capture");
+	}
+
+	c->pid = getpid();
+	pthread_mutex_init(&c->lock, NULL);
+	pthread_cond_init(&c->ready, NULL);
+
+	return TypedData_Wrap_Struct(klass, &capture_type, c);
+}
+
+struct capture_args {
+	struct capture *c;
+	VALUE backends;
+	long device_index;
+	const char *client_name;
+	ma_uint32 sample_rate;
+	ma_uint32 device_rate;
+	ma_uint32 period;
+	size_t queue;
+	int resample_quality;
+};
+
+static VALUE capture_open_body(VALUE arg)
+{
+	struct capture_args *a = (struct capture_args *)arg;
+	struct capture *c = a->c;
+
+	init_context(&c->context, a->backends, a->client_name);
+	c->context_ready = 1;
+
+	ma_device_id *device_id = NULL;
+	if (a->device_index >= 0) {
+		ma_device_info *infos;
+		ma_uint32 count;
+		ma_result result = ma_context_get_devices(&c->context, NULL, NULL, &infos, &count);
+		if (result != MA_SUCCESS) {
+			rb_raise(cError, "Could not list audio devices: %s", ma_result_description(result));
+		}
+		if ((ma_uint32)a->device_index >= count) {
+			rb_raise(cError, "Audio input device %ld does not exist (%u capture devices)", a->device_index, count);
+		}
+		device_id = &infos[a->device_index].id;
+	}
+
+	ma_uint32 ask = a->device_rate ? a->device_rate : a->sample_rate;
+
+	ma_device_config config = ma_device_config_init(ma_device_type_capture);
+	config.capture.pDeviceID = device_id;
+	config.capture.format = ma_format_f32;
+	config.capture.channels = c->channels;
+	config.sampleRate = ask;
+	config.periodSizeInFrames = a->period;
+	config.performanceProfile = ma_performance_profile_low_latency;
+	config.dataCallback = capture_callback;
+	config.notificationCallback = capture_notification;
+	config.pUserData = c;
+
+	ma_result result = ma_device_init(&c->context, &config, &c->device);
+	if (result != MA_SUCCESS) {
+		rb_raise(cError, "Could not open audio input device: %s", ma_result_description(result));
+	}
+	c->device_ready = 1;
+
+	// Capture at the device's own rate and resample with libsamplerate
+	ma_uint32 native = c->device.capture.internalSampleRate;
+	if (ask != 0 && native != 0 && native != ask) {
+		ma_device_uninit(&c->device);
+		c->device_ready = 0;
+		config.sampleRate = native;
+		result = ma_device_init(&c->context, &config, &c->device);
+		if (result != MA_SUCCESS) {
+			rb_raise(cError, "Could not open audio input device at %u Hz: %s", native, ma_result_description(result));
+		}
+		c->device_ready = 1;
+	}
+
+	ma_uint32 device_rate = c->device.sampleRate;
+	c->output_rate = device_rate;
+	double ratio = 1.0;
+	if (a->sample_rate != 0 && device_rate != a->sample_rate && a->resample_quality >= 0) {
+		int error = 0;
+		c->src = src_new(a->resample_quality, c->channels, &error);
+		if (c->src == NULL) {
+			rb_raise(cError, "Could not start resampling from %u to %u Hz: %s", device_rate, a->sample_rate, src_strerror(error));
+		}
+		c->src_ratio = (double)a->sample_rate / device_rate;
+		c->output_rate = a->sample_rate;
+		ratio = 1.0 / c->src_ratio;
+	}
+
+	// The queue limit was given at the output rate; keep at least two
+	// device periods, and room in the ring for the callback beyond it
+	size_t period = c->device.capture.internalPeriodSizeInFrames;
+	c->queue_limit = (size_t)ceil(a->queue * ratio);
+	if (c->queue_limit < 2 * period) {
+		c->queue_limit = 2 * period;
+	}
+
+	size_t capacity = 16;
+	while (capacity < c->queue_limit * 2 + period * 4) {
+		capacity <<= 1;
+	}
+	c->data = calloc(capacity * c->channels, sizeof(float));
+	if (c->data == NULL) {
+		rb_raise(rb_eNoMemError, "Could not allocate the audio input queue");
+	}
+	c->capacity = capacity;
+
+	atomic_store(&c->open, 1);
+	result = ma_device_start(&c->device);
+	if (result != MA_SUCCESS) {
+		atomic_store(&c->open, 0);
+		rb_raise(cError, "Could not start audio input device: %s", ma_result_description(result));
+	}
+
+	return Qnil;
+}
+
+static VALUE capture_open_rescue(VALUE arg, VALUE exception)
+{
+	capture_release_device(((struct capture_args *)arg)->c);
+	rb_exc_raise(exception);
+	return Qnil;
+}
+
+/*
+ * call-seq:
+ *   Capture.new(backends, device_index, client_name, channels, sample_rate,
+ *               device_rate, period, queue_frames, resample_quality, test_pattern)
+ *
+ * Opens and starts a capture device.  +backends+, +device_index+ (into
+ * FastAudio.devices' capture list, or -1 for the default), +client_name+,
+ * +device_rate+, +period+, and +resample_quality+ work as for Playback.new.
+ * +sample_rate+ is the rate #read returns (resampled from the device's rate
+ * if it differs, unless +resample_quality+ is -1; see #sample_rate).
+ * +queue_frames+ (at +sample_rate+) is the most audio kept waiting for
+ * #read; when more has arrived, #read skips the oldest so live input stays
+ * close to real time.  +test_pattern+ replaces the device's audio with a
+ * counting pattern (frame number modulo 4096, scaled to -1..1, plus 0.001
+ * per channel), for specs.
+ */
+static VALUE capture_initialize(VALUE self, VALUE backends, VALUE device_index, VALUE client_name,
+		VALUE channels, VALUE sample_rate, VALUE device_rate, VALUE period, VALUE queue_frames,
+		VALUE resample_quality, VALUE test_pattern)
+{
+	struct capture *c;
+	TypedData_Get_Struct(self, struct capture, &capture_type, c);
+	if (c->data != NULL) {
+		rb_raise(cError, "Capture is already initialized");
+	}
+
+	int ch = NUM2INT(channels);
+	if (ch < 1 || ch > MAX_CHANNELS) {
+		rb_raise(rb_eArgError, "Channels must be 1..%d (got %d)", MAX_CHANNELS, ch);
+	}
+
+	long queue = NUM2LONG(queue_frames);
+	if (queue < 16 || queue > (1L << 24)) {
+		rb_raise(rb_eArgError, "Queue size must be 16..%ld frames (got %ld)", 1L << 24, queue);
+	}
+
+	int quality = NUM2INT(resample_quality);
+	if (quality < -1 || quality > SRC_LINEAR) {
+		rb_raise(rb_eArgError, "Resample quality must be -1..%d (got %d)", SRC_LINEAR, quality);
+	}
+
+	c->channels = ch;
+	c->test_pattern = RTEST(test_pattern);
+
+	struct capture_args args = {
+		.c = c,
+		.backends = backends,
+		.device_index = NUM2LONG(device_index),
+		.client_name = StringValueCStr(client_name),
+		.sample_rate = NUM2UINT(sample_rate),
+		.device_rate = NUM2UINT(device_rate),
+		.period = NUM2UINT(period),
+		.queue = (size_t)queue,
+		.resample_quality = quality,
+	};
+
+	rb_rescue2(capture_open_body, (VALUE)&args, capture_open_rescue, (VALUE)&args, rb_eException, (VALUE)0);
+
+	RB_GC_GUARD(client_name);
+
+	return self;
+}
+
+static void capture_check_open(struct capture *c)
+{
+	if (c->pid != getpid()) {
+		rb_raise(rb_eIOError, "This audio input was opened by another process (pid %d)", (int)c->pid);
+	}
+	if (!atomic_load(&c->open)) {
+		rb_raise(rb_eIOError, "This input is closed");
+	}
+	if (atomic_load(&c->stopped)) {
+		rb_raise(cError, "The audio input device stopped");
+	}
+}
+
+static size_t captured_frames(struct capture *c)
+{
+	return atomic_load_explicit(&c->write_pos, memory_order_acquire) -
+		atomic_load_explicit(&c->read_pos, memory_order_relaxed);
+}
+
+struct capture_wait_args {
+	struct capture *c;
+	size_t want;
+};
+
+// Waits (without the GVL) until +want+ frames have arrived, the input
+// closes or stops, or Ruby interrupts the thread.
+static void *wait_for_frames(void *arg)
+{
+	struct capture_wait_args *a = arg;
+	struct capture *c = a->c;
+
+	pthread_mutex_lock(&c->lock);
+	while (!c->interrupted && atomic_load(&c->open) && !atomic_load(&c->stopped)) {
+		if (captured_frames(c) >= a->want) {
+			break;
+		}
+
+		struct timespec ts;
+		clock_gettime(CLOCK_REALTIME, &ts);
+		ts.tv_nsec += WAIT_TIMEOUT_NS;
+		if (ts.tv_nsec >= 1000000000) {
+			ts.tv_sec++;
+			ts.tv_nsec -= 1000000000;
+		}
+		pthread_cond_timedwait(&c->ready, &c->lock, &ts);
+	}
+	pthread_mutex_unlock(&c->lock);
+
+	return NULL;
+}
+
+static void unblock_capture_wait(void *arg)
+{
+	capture_wake_reader(arg);
+}
+
+// Takes up to +max+ device frames from the ring (waiting for at least one
+// period's worth, or +max+ if smaller), skipping the oldest frames beyond the
+// queue limit.  Returns the number of frames copied into c->in_buf.
+static size_t take_frames(struct capture *c, size_t max)
+{
+	size_t period = c->device.capture.internalPeriodSizeInFrames;
+	size_t want = max < period ? max : period;
+	if (want < 1) {
+		want = 1;
+	}
+
+	while (captured_frames(c) < want) {
+		struct capture_wait_args args = { c, want };
+		c->interrupted = 0;
+		rb_thread_call_without_gvl(wait_for_frames, &args, unblock_capture_wait, c);
+		rb_thread_check_ints();
+		capture_check_open(c);
+	}
+
+	size_t rp = atomic_load_explicit(&c->read_pos, memory_order_relaxed);
+	size_t available = captured_frames(c);
+
+	// Keep live input near real time: skip what's beyond the queue limit
+	if (available > c->queue_limit) {
+		size_t skip = available - c->queue_limit;
+		rp += skip;
+		available -= skip;
+		c->skipped += skip;
+	}
+
+	size_t n = available < max ? available : max;
+	size_t ch = c->channels;
+	size_t mask = c->capacity - 1;
+	grow_buffer(&c->in_buf, &c->in_cap, n, ch);
+
+	size_t start = rp & mask;
+	size_t first = c->capacity - start;
+	if (first > n) {
+		first = n;
+	}
+	memcpy(c->in_buf, c->data + start * ch, first * ch * sizeof(float));
+	memcpy(c->in_buf + first * ch, c->data, (n - first) * ch * sizeof(float));
+
+	atomic_store_explicit(&c->read_pos, rp + n, memory_order_release);
+
+	return n;
+}
+
+/*
+ * call-seq:
+ *   capture.read(frames) -> [channel_sfloat, ...]
+ *
+ * Returns +frames+ frames of captured audio at #sample_rate, one
+ * Numo::SFloat per channel, waiting without the GVL until enough has
+ * arrived.  Raises IOError if the input is closed, or FastAudio::Error if
+ * the device stopped.
+ */
+static VALUE capture_read(VALUE self, VALUE frames_value)
+{
+	struct capture *c = get_capture(self);
+	capture_check_open(c);
+
+	size_t frames = NUM2SIZET(frames_value);
+	size_t ch = c->channels;
+
+	while (c->pending_count < frames) {
+		size_t need = frames - c->pending_count;
+
+		if (c->src == NULL) {
+			size_t n = take_frames(c, need);
+			grow_buffer(&c->pending, &c->pending_cap, c->pending_count + n, ch);
+			memcpy(c->pending + c->pending_count * ch, c->in_buf, n * ch * sizeof(float));
+			c->pending_count += n;
+			continue;
+		}
+
+		// Device frames needed for +need+ output frames (plus a little for
+		// the converter's delay)
+		size_t in_need = (size_t)ceil(need / c->src_ratio) + 1;
+		size_t n = take_frames(c, in_need);
+
+		size_t out_cap = c->pending_count + (size_t)ceil(n * c->src_ratio) + 64;
+		grow_buffer(&c->pending, &c->pending_cap, out_cap, ch);
+
+		size_t used = 0;
+		while (used < n) {
+			SRC_DATA data = {
+				.data_in = c->in_buf + used * ch,
+				.input_frames = n - used,
+				.data_out = c->pending + c->pending_count * ch,
+				.output_frames = c->pending_cap - c->pending_count,
+				.src_ratio = c->src_ratio,
+				.end_of_input = 0,
+			};
+
+			int error = src_process(c->src, &data);
+			if (error) {
+				rb_raise(cError, "Resampling failed: %s", src_strerror(error));
+			}
+
+			used += data.input_frames_used;
+			c->pending_count += data.output_frames_gen;
+
+			if (data.input_frames_used == 0) {
+				if (c->pending_cap - c->pending_count == 0) {
+					grow_buffer(&c->pending, &c->pending_cap, c->pending_cap * 2, ch);
+				} else {
+					break; // libsamplerate keeps the rest internally
+				}
+			}
+		}
+	}
+
+	// Deinterleave the first +frames+ pending frames into new SFloats
+	VALUE result = rb_ary_new_capa(ch);
+	for (size_t k = 0; k < ch; k++) {
+		VALUE v = rb_funcall(numo_cSFloat, rb_intern("zeros"), 1, SIZET2NUM(frames));
+		float *dst = (float *)(nary_get_pointer_for_write(v) + nary_get_offset(v));
+		for (size_t i = 0; i < frames; i++) {
+			dst[i] = c->pending[i * ch + k];
+		}
+		rb_ary_push(result, v);
+	}
+
+	c->pending_count -= frames;
+	memmove(c->pending, c->pending + frames * ch, c->pending_count * ch * sizeof(float));
+
+	return result;
+}
+
+/*
+ * call-seq:
+ *   capture.close -> nil
+ *
+ * Stops and closes the device.  A reader waiting in another thread raises
+ * IOError.  Safe to call more than once.
+ */
+static VALUE capture_close(VALUE self)
+{
+	struct capture *c = get_capture(self);
+
+	if (atomic_exchange(&c->open, 0) || c->device_ready || c->context_ready) {
+		capture_release_device(c);
+
+		if (c->pid == getpid()) {
+			capture_wake_reader(c);
+		}
+	}
+
+	return Qnil;
+}
+
+static VALUE capture_closed(VALUE self)
+{
+	return atomic_load(&get_capture(self)->open) ? Qfalse : Qtrue;
+}
+
+static ma_device *open_capture_device(VALUE self)
+{
+	struct capture *c = get_capture(self);
+	if (!c->device_ready) {
+		rb_raise(rb_eIOError, "This input is closed");
+	}
+	return &c->device;
+}
+
+/* The sample rate #read returns. */
+static VALUE capture_sample_rate(VALUE self)
+{
+	open_capture_device(self);
+	return UINT2NUM(get_capture(self)->output_rate);
+}
+
+/* The sample rate the device captures at. */
+static VALUE capture_device_rate(VALUE self)
+{
+	return UINT2NUM(open_capture_device(self)->sampleRate);
+}
+
+/* True if #read resamples from the device's rate. */
+static VALUE capture_resampling(VALUE self)
+{
+	return get_capture(self)->src ? Qtrue : Qfalse;
+}
+
+/* The device's period (callback size) in frames. */
+static VALUE capture_period(VALUE self)
+{
+	return UINT2NUM(open_capture_device(self)->capture.internalPeriodSizeInFrames);
+}
+
+/* The number of periods in the device's own buffer. */
+static VALUE capture_periods(VALUE self)
+{
+	return UINT2NUM(open_capture_device(self)->capture.internalPeriods);
+}
+
+/* The name of the device. */
+static VALUE capture_device_name(VALUE self)
+{
+	return rb_utf8_str_new_cstr(open_capture_device(self)->capture.name);
+}
+
+/* The backend in use, as a Symbol. */
+static VALUE capture_backend(VALUE self)
+{
+	return backend_to_sym(open_capture_device(self)->pContext->backend);
+}
+
+/* The number of channels. */
+static VALUE capture_channels(VALUE self)
+{
+	return INT2NUM(get_capture(self)->channels);
+}
+
+/* The most device frames kept waiting for #read. */
+static VALUE capture_queue_limit(VALUE self)
+{
+	return SIZET2NUM(get_capture(self)->queue_limit);
+}
+
+/*
+ * call-seq:
+ *   capture.stats -> { queued:, frames_captured:, overruns:, skipped: }
+ *
+ * :queued device frames are waiting for #read (plus resampled frames
+ * pending); :frames_captured counts every frame the device captured (its
+ * clock); :overruns counts callbacks that found the ring full (audio
+ * lost); :skipped counts frames #read skipped to stay near real time.
+ */
+static VALUE capture_stats(VALUE self)
+{
+	struct capture *c = get_capture(self);
+
+	VALUE h = rb_hash_new();
+	rb_hash_aset(h, ID2SYM(rb_intern("queued")), SIZET2NUM(captured_frames(c)));
+	rb_hash_aset(h, ID2SYM(rb_intern("pending")), SIZET2NUM(c->pending_count));
+	rb_hash_aset(h, ID2SYM(rb_intern("frames_captured")), SIZET2NUM(atomic_load(&c->frames_captured)));
+	rb_hash_aset(h, ID2SYM(rb_intern("overruns")), SIZET2NUM(atomic_load(&c->overruns)));
+	rb_hash_aset(h, ID2SYM(rb_intern("skipped")), SIZET2NUM(c->skipped));
+
+	return h;
+}
+
 void Init_fast_audio(void)
 {
 	VALUE mb = rb_define_module("MB");
@@ -1034,7 +1751,9 @@ void Init_fast_audio(void)
 
 	VALUE playback = rb_define_class_under(fast_audio, "Playback", rb_cObject);
 	rb_define_alloc_func(playback, playback_alloc);
-	rb_define_method(playback, "initialize", playback_initialize, 12);
+	rb_define_method(playback, "initialize", playback_initialize, 13);
+	rb_define_method(playback, "max_queue", playback_max_queue, 0);
+	rb_define_method(playback, "queue_limit=", playback_set_queue_limit, 1);
 	rb_define_method(playback, "write", playback_write, 1);
 	rb_define_method(playback, "close", playback_close, 0);
 	rb_define_method(playback, "closed?", playback_closed, 0);
@@ -1049,4 +1768,21 @@ void Init_fast_audio(void)
 	rb_define_method(playback, "queue_limit", playback_queue_limit, 0);
 	rb_define_method(playback, "stats", playback_stats, 0);
 	rb_define_method(playback, "captured", playback_captured, 0);
+
+	VALUE capture = rb_define_class_under(fast_audio, "Capture", rb_cObject);
+	rb_define_alloc_func(capture, capture_alloc);
+	rb_define_method(capture, "initialize", capture_initialize, 10);
+	rb_define_method(capture, "read", capture_read, 1);
+	rb_define_method(capture, "close", capture_close, 0);
+	rb_define_method(capture, "closed?", capture_closed, 0);
+	rb_define_method(capture, "sample_rate", capture_sample_rate, 0);
+	rb_define_method(capture, "device_rate", capture_device_rate, 0);
+	rb_define_method(capture, "resampling?", capture_resampling, 0);
+	rb_define_method(capture, "period", capture_period, 0);
+	rb_define_method(capture, "periods", capture_periods, 0);
+	rb_define_method(capture, "device_name", capture_device_name, 0);
+	rb_define_method(capture, "backend", capture_backend, 0);
+	rb_define_method(capture, "channels", capture_channels, 0);
+	rb_define_method(capture, "queue_limit", capture_queue_limit, 0);
+	rb_define_method(capture, "stats", capture_stats, 0);
 }

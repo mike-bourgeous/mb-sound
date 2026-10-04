@@ -32,6 +32,7 @@ module MB
     #                                  fastest (default), medium, best (sinc),
     #                                  linear, zoh, or off (run at the card's
     #                                  rate; #sample_rate is then the card's)
+    #   AUDIO_ADAPTIVE=0               don't grow the queue after dropouts
     #   AUDIO_SET_DEVICE_RATE=1        let CoreAudio switch the card's
     #                                  system-wide rate (macOS; changes it for
     #                                  every app, as in Audio MIDI Setup)
@@ -92,8 +93,8 @@ module MB
 
         # Lists the playback devices of the first working backend from
         # .backends: an Array of Hashes with :index, :name, and :default.
-        def devices(backends: nil)
-          FastAudio.devices(self.backends(backends), client_name)[:playback]
+        def devices(backends: nil, kind: :playback)
+          FastAudio.devices(self.backends(backends), client_name)[kind]
         end
 
         # The backend .devices and new outputs would use.
@@ -103,16 +104,17 @@ module MB
 
         # Returns the device index for +device+ (an Integer index, a String of
         # digits, or part of a device name, case-insensitive), or -1 for the
-        # default device if +device+ is nil, empty, or 'default'.
-        def device_index(device, backends: nil)
+        # default device if +device+ is nil, empty, or 'default'.  +:kind+ is
+        # :playback or :capture (see DeviceInput).
+        def device_index(device, backends: nil, kind: :playback)
           return -1 if device.nil? || device.to_s.strip.empty? || device.to_s == 'default'
           return Integer(device) if device.is_a?(Integer) || device.to_s =~ /\A\d+\z/
 
-          list = devices(backends: backends)
+          list = devices(backends: backends, kind: kind)
           found = list.find { |d| d[:name].downcase.include?(device.to_s.downcase) }
           if found.nil?
             names = list.map { |d| "  #{d[:index]}: #{d[:name]}" }.join("\n")
-            raise ArgumentError, "No output device matches #{device.inspect}.  Devices:\n#{names}"
+            raise ArgumentError, "No #{kind == :capture ? 'input' : 'output'} device matches #{device.inspect}.  Devices:\n#{names}"
           end
 
           found[:index]
@@ -171,9 +173,13 @@ module MB
       # card period in frames), and +:latency+ (the most audio queued ahead of
       # the sound card, in seconds) override.  +:backends+ is an Array of
       # backends to try (see .backends).
+      #
+      # With +:adaptive+ (the default), the queue grows by half after each
+      # dropout while audio is being written, up to the :safe profile's
+      # queue, with a note on stderr; the write size and period stay.
       def initialize(
         channels: 2, sample_rate: 48000, device: nil, profile: nil, buffer_size: nil, latency: nil, period: nil,
-        backends: nil, device_rate: nil, resample: :fastest, set_device_rate: false, capture: 0
+        backends: nil, device_rate: nil, resample: :fastest, set_device_rate: false, adaptive: true, capture: 0
       )
         raise ArgumentError, 'Channels must be positive' if channels < 1
 
@@ -201,6 +207,7 @@ module MB
           raise ArgumentError, "Unknown resampler #{resample.inspect} (#{RESAMPLE_QUALITIES.keys.join(', ')})"
         }
         set_device_rate = ENV.key?('AUDIO_SET_DEVICE_RATE') ? ENV['AUDIO_SET_DEVICE_RATE'] == '1' : set_device_rate
+        @adaptive = ENV.key?('AUDIO_ADAPTIVE') ? ENV['AUDIO_ADAPTIVE'] != '0' : adaptive
 
         # A mono output still opens two channels, so mono plays on both
         # speakers (and on both JACK playback ports).
@@ -210,8 +217,10 @@ module MB
         @playback = FastAudio::Playback.new(
           backends, self.class.device_index(device, backends: backends), self.class.client_name,
           channels, @device_channels, requested_rate, device_rate, period, queue, capture,
-          quality, set_device_rate
+          quality, set_device_rate, @adaptive ? [max_adaptive_queue(requested_rate), queue].max : 0
         )
+        @underruns_seen = 0
+        @last_write = nil
 
         @sample_rate = @playback.sample_rate.to_f
         @device_rate = @playback.device_rate.to_f
@@ -234,7 +243,14 @@ module MB
       # queue is full.  Returns the number of frames written.
       def write(data)
         raise "Expected #{@channels} channels, got #{data.length}" unless data.length == @channels
-        @playback.write(data)
+        frames = @playback.write(data)
+        adapt if @adaptive
+        frames
+      end
+
+      # True if the queue grows after underruns (see +:adaptive+).
+      def adaptive?
+        @adaptive
       end
 
       # Session may write any number of frames per call.
@@ -258,6 +274,12 @@ module MB
       # (see +:latency+).  #stats frame counts are at the card's rate too.
       def queue_limit
         @playback.queue_limit
+      end
+
+      # The most frames an adaptive output's queue grows to (see
+      # +:adaptive+).
+      def max_queue
+        @playback.max_queue
       end
 
       # The sound card's period (frames per callback).
@@ -310,6 +332,36 @@ module MB
         "#<#{self.class.name} #{@backend} #{@device_name.inspect} #{@channels}ch #{rate} #{@profile}#{' closed' if closed?}>"
       end
       alias to_s inspect
+
+      private
+
+      # The largest queue (frames at +rate+) an adaptive output grows to: the
+      # :safe profile's.
+      def max_adaptive_queue(rate)
+        (PROFILES[:safe][:latency] * rate).round
+      end
+
+      # Grows the queue by half (up to #max_queue) when the sound card ran
+      # out of audio while something was writing to it.  A gap between
+      # writes (e.g. between sounds played with MB::Sound.play) isn't
+      # counted.
+      def adapt
+        underruns = @playback.stats[:underruns]
+        now = MB::U.clock_now
+        active = @last_write && now - @last_write < latency + 0.1
+
+        if underruns > @underruns_seen && active
+          limit = @playback.queue_limit
+          @playback.queue_limit = (limit * 1.5).ceil # clamped to max_queue
+          grown = @playback.queue_limit
+          if grown > limit
+            warn "Audio dropout: raising the output queue to #{(grown * 1000.0 / @device_rate).round} ms"
+          end
+        end
+
+        @underruns_seen = underruns
+        @last_write = now
+      end
     end
   end
 end
