@@ -38,7 +38,7 @@ Spec conventions (`spec/support/`):
 
 The bin/ script smoke tests (`spec/bin/script_smoke_spec.rb`, tagged `:smoke`) run every script with `--help` and a short render; plain `rspec` skips them (they take about 1.5 minutes) and CI runs them as a separate job.  Renders run as real processes; `--help` runs in forks for scripts that also render.  Run them with `bundle exec rspec --tag smoke` before merging changes to bin/ scripts or the script runner, and add new scripts to their tables.
 
-System dependencies (apt): `ffmpeg gnuplot-qt libsamplerate0-dev libjack-dev graphviz`
+System dependencies (apt): `ffmpeg gnuplot-qt libsamplerate0-dev libasound2-dev libjack-jackd2-dev jackd2 graphviz` (ALSA headers build RtMidi's ALSA sequencer backend; `jackd2` runs a dummy JACK server for the MIDI specs, which skip without it)
 
 In the container, `OUTPUT_TYPE=null` is set in the Dockerfile so playback uses `NullOutput`.
 
@@ -154,6 +154,8 @@ Effects, synths, and songs share `-o/--output` (or a positional audio file) to r
 ### MIDI
 
 `lib/mb/sound/midi/` handles MIDI file parsing, real-time input, voice management, and controller mapping. Integrates with the GraphNode DSL for synthesizer control.
+
+Live MIDI (audio I/O stage 4) goes through the bundled RtMidi 6.0.0 (`ext/mb/sound/fast_midi/`, `MB::Sound::FastMIDI`; CoreMIDI on macOS, ALSA sequencer plus JACK MIDI on Linux; RtMidi never starts jackd): `MB::Sound::MIDI::Input` (`lib/mb/sound/midi/input.rb`) polls RtMidi's queue in `#read` (Manager#update, once per buffer) and returns `[[[seconds, bytes], ...]]`.  By default it opens a virtual port named after the script (`DeviceOutput.client_name`); `connect:`/`MIDI_DEVICE` connect to a source by part of its name; `MIDI_API` picks `core`/`alsa`/`jack` (JACK by default only when a server runs).  `midi_manager`, `MB::Sound.midi`, synths, `midi_cc`, and `Manager.new` (now `jack: nil` by default) use it; the bin/midi scripts read through `MIDI::Input.open_live`, and `midi_events.rb --forward` still uses JackFFI until MIDI output exists (deferred to a sequence/MIDI/synth overhaul).  RtMidi's C API leaves `msg` dangling after errors, so `fast_midi.c` never reads it (RtMidi prints details to stderr).  Specs send real messages through a private JACK dummy server (`spec/support/jack_dummy.rb`: `--port-max 16` because Docker's 64 MB `/dev/shm` can't hold JACK2's default; they skip without `jackd`) with `FastMIDI::TestOutput` (test-only output).
 
 ### Sibling Libraries
 
