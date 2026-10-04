@@ -94,7 +94,7 @@ RSpec.describe(MB::Sound::Tuning, :aggregate_failures) do
 
     it 'converts clip note numbers with the tuning' do
       MB::Sound.tuning a4: 432
-      hz = MB::Sound.seq(MB::Sound::A4).n4.loop.hz
+      hz = MB::Sound.seq(MB::Sound::A4).n4.loop.freq
       expect(hz.sample(10).to_a).to all(be_within(1e-3).of(432))
     end
   end

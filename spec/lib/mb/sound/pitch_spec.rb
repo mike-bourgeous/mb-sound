@@ -83,7 +83,7 @@ RSpec.describe(MB::Sound::Pitch, :aggregate_failures) do
       expect(clip.events.map(&:to_s)).to eq(['69@0+n4', '300.0 Hz@1/4+n4'])
 
       MB::Sound.tuning a4: 432
-      hz = clip.hz
+      hz = clip.freq
       first = hz.sample(24000)[12000]
       second = hz.sample(24000)[12000]
       expect(first).to be_within(1e-3).of(432)

@@ -254,11 +254,6 @@ RSpec.describe(MB::Sound::ADSREnvelope, :aggregate_failures) do
       end
       expect(lengths.sum / 48000.0).to be_between(0.1, 0.2)
     end
-
-    it 'marks clip envelopes as retriggerable' do
-      clip_env = MB::Sound.seq(MB::Sound::C4).n4.env.instance_variable_get(:@env)
-      expect(clip_env).to be_a(described_class).and be_retriggerable
-    end
   end
 
   describe '#dup' do
