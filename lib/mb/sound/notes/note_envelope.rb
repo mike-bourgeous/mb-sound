@@ -24,6 +24,9 @@ module MB
         # whether +:gm+ scaling is on (see the class description).
         def initialize(notes:, gm: true, **options)
           @notes = notes
+          start = notes.stream.reader
+          @time = start.cursor # stream time of the next buffer (see #sample)
+          start.close
           @gm = false
           @base_times = {}
           @gm_nodes = {}
@@ -43,13 +46,29 @@ module MB
         end
 
         # Returns +count+ samples, or nil once the Notes' stream has ended
-        # (a non-looping clip or a MIDI file has played its last event and
-        # every node has read it) and this envelope is idle, so e.g. `noise
-        # * clip.env` ends with its clip like the Notes gate does.  Envelopes
+        # (a non-looping clip or a MIDI file has played its last event)
+        # before this buffer and this envelope is idle, so e.g. `noise *
+        # clip.env` ends with its clip like the Notes gate does.  Envelopes
         # on looping or live streams never end.
+        #
+        # The end is judged from the stream time where this buffer starts
+        # (counted by the envelope) and the time of the stream's last event
+        # (MIDI::Stream#music_end), so it doesn't depend on which other
+        # nodes of the stream exist or have been sampled first in this
+        # buffer (Notes#ended? waits for every reader of the stream, and
+        # skipped Synth lanes don't sample their envelopes).
         def sample(count)
-          return nil if idle? && @notes.ended?
+          count = count.round
+          return nil if idle? && stream_over?
+          @time += Rational(count) / @sample_rate.to_r
           super
+        end
+
+        # True if the stream's last event was before the start of the next
+        # buffer (never for looping and live streams).
+        def stream_over?
+          last = @notes.stream.music_end
+          !last.nil? && last < @time
         end
 
         # True if GM2 time scaling is on (see #gm).
