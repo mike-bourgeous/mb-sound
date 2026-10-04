@@ -8,7 +8,8 @@ module MB
         # The filter gain (should be an integer or float).
         attr_accessor :gain
 
-        attr_reader :sample_rate
+        # A gain is the same at any sample rate.
+        attr_accessor :sample_rate
 
         # Initializes a filter that applies the given constant +gain+.
         def initialize(gain, sample_rate:)

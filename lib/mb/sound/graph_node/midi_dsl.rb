@@ -70,14 +70,19 @@ module MB
         # files or MIDI interfaces.
         attr_reader :manager
 
+        # The sample rate of the nodes this DSL creates (a filtered DSL uses
+        # its parent's).
+        attr_reader :sample_rate
+
         # Creates a DSL instance with the given MIDI manager, filtering to the
         # given channel, and receiving from the given parent MidiDsl.  The
         # initial DSL has channel and parent nil, while filtered DSLs will set
         # them accordingly.
-        def initialize(manager:, parent: nil)
+        def initialize(manager:, parent: nil, sample_rate: 48000)
           @manager = manager
           @channel = manager.channel
           @parent = parent
+          @sample_rate = parent&.sample_rate || sample_rate
 
           @freqs = {}
           @tones = {}
@@ -125,7 +130,7 @@ module MB
         def cc(number, range: 0..1, unit: nil, si: false, smoothing: true, default: nil)
           # TODO: MSB/LSB?  NRPN?
           cache(@ccs, [number, range, unit, si, smoothing, default]) do
-            MidiCc.new(dsl: self, number: number, range: range, unit: unit, si: si, sample_rate: 48000, smoothing: smoothing, default: default)
+            MidiCc.new(dsl: self, number: number, range: range, unit: unit, si: si, sample_rate: @sample_rate, smoothing: smoothing, default: default)
           end
         end
 
@@ -145,7 +150,7 @@ module MB
         def frequency(ratio = 1, offset = 0, bend_range: DEFAULT_BEND_RANGE, smoothing: false)
           offset = offset.frequency if offset.is_a?(MB::Sound::Tone) || offset.is_a?(MB::Sound::Pitch)
           cache(@freqs, [ratio, offset, bend_range, smoothing]) do
-            MidiFrequency.new(dsl: self, bend_range: bend_range, ratio: ratio, offset: offset, sample_rate: 48000, smoothing: smoothing)
+            MidiFrequency.new(dsl: self, bend_range: bend_range, ratio: ratio, offset: offset, sample_rate: @sample_rate, smoothing: smoothing)
           end
         end
         alias freq frequency
@@ -173,7 +178,7 @@ module MB
         #                 pitch bend.
         def number(range: nil, bend_range: DEFAULT_BEND_RANGE, unit: nil, si: false, smoothing: false)
           cache(@numbers, [range, bend_range, unit, si]) do
-            MidiNumber.new(dsl: self, range: range, bend_range: bend_range, unit: unit, si: si, sample_rate: 48000, smoothing: smoothing)
+            MidiNumber.new(dsl: self, range: range, bend_range: bend_range, unit: unit, si: si, sample_rate: @sample_rate, smoothing: smoothing)
           end
         end
 
@@ -186,7 +191,7 @@ module MB
           number = number.number if number.is_a?(MB::Sound::Note)
 
           cache(@velocities, [number, range, unit, si]) do
-            MidiVelocity.new(dsl: self, number: number, range: range, unit: unit, si: si, sample_rate: 48000, smoothing: smoothing)
+            MidiVelocity.new(dsl: self, number: number, range: range, unit: unit, si: si, sample_rate: @sample_rate, smoothing: smoothing)
           end
         end
 
@@ -194,7 +199,7 @@ module MB
         # linear map of semitones within DEFAULT_BEND_RANGE.
         def bend(range: DEFAULT_BEND_RANGE, unit: 'st', si: false, smoothing: true)
           cache(@bends, [range, unit, si]) do
-            MidiBend.new(dsl: self, range: range, unit: unit, si: si, sample_rate: 48000, smoothing: smoothing)
+            MidiBend.new(dsl: self, range: range, unit: unit, si: si, sample_rate: @sample_rate, smoothing: smoothing)
           end
         end
 
@@ -216,7 +221,7 @@ module MB
               decay: decay_s,
               sustain: sustain_l,
               release: release_s,
-              sample_rate: 48000,
+              sample_rate: @sample_rate,
               range: range,
               velocity: velocity
             )
@@ -236,7 +241,7 @@ module MB
         def gate(range: 0..1, unit: nil, si: false, smoothing: true)
           key = [range, unit, si]
           cache(@gates, key) do
-            MidiGate.new(dsl: self, range: range, unit: unit, si: si, sample_rate: 48000, smoothing: true)
+            MidiGate.new(dsl: self, range: range, unit: unit, si: si, sample_rate: @sample_rate, smoothing: true)
           end
         end
 
@@ -245,7 +250,7 @@ module MB
         def click(range: 0..1)
           key = [range]
           cache(@clicks, key) do
-            MidiClick.new(dsl: self, range: range, sample_rate: 48000)
+            MidiClick.new(dsl: self, range: range, sample_rate: @sample_rate)
           end
         end
 
@@ -293,10 +298,9 @@ module MB
         # node.  Yields to create a new object if the key is not in the
         # collection.
         #
-        # Resets the node's sample rate to 48000 in case there were prior
-        # sample rate changes to the node in a previous graph.  This means that
-        # .oversample is not fool-proof and can break graphs with parallel
-        # paths at different sample rates.
+        # Cached nodes keep any sample rate changes from a previous graph
+        # (e.g. from .oversample), so .oversample is not fool-proof and can
+        # break graphs with parallel paths at different sample rates.
         def cache(collection, key)
           # TODO: maybe #at_rate should behave differently for nodes with
           # multiple output branches, inserting a resampling step instead if

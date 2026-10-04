@@ -190,7 +190,7 @@ module MB
         # and produce a Complex-valued analytic signal.
         #
         # See MB::Sound::Filter::HilbertIIR.
-        def hilbert_iir(sample_rate: 48000)
+        def hilbert_iir(sample_rate: self.sample_rate)
           filter(MB::Sound::Filter::HilbertIIR.new(sample_rate: sample_rate))
         end
 
@@ -226,7 +226,7 @@ module MB
         # also #smooth and #filter).
         #
         # Uses MB::Sound::Filter::LinearFollower.
-        def clip_rate(max_rise, max_fall = nil, reset: nil, sample_rate: 48000)
+        def clip_rate(max_rise, max_fall = nil, reset: nil, sample_rate: self.sample_rate)
           max_fall ||= -max_rise
           max_rise ||= -max_fall
           f = MB::Sound::Filter::LinearFollower.new(sample_rate: sample_rate, max_rise: max_rise, max_fall: max_fall)

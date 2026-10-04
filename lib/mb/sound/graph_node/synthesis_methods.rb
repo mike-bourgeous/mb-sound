@@ -66,7 +66,7 @@ module MB
           phase = phase.aramp if phase.is_a?(Tone) && phase.wave_type == :ramp
           phase = phase.or_at(1) if phase.respond_to?(:or_at)
           number = number.or_at(0..1) if number.respond_to?(:or_at)
-          Wavetable.new(wavetable: wavetable, number: number, phase: phase, lookup: lookup, wrap: wrap, sample_rate: 48000)
+          Wavetable.new(wavetable: wavetable, number: number, phase: phase, lookup: lookup, wrap: wrap, sample_rate: phase.sample_rate)
         end
       end
     end
