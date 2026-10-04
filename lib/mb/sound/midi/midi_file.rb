@@ -281,8 +281,8 @@ module MB
             ch_info = channels[e.channel]
             ch_notes = ch_info[:active_notes]
 
-            # TODO: This code has some similarity to code in the MIDI manager
-            # and VoicePool; see if that can be deduplicated.
+            # TODO: This could share the sustain handling of MIDI::Stream#sustain
+            # (e.g. by reading a FileSource through it).
             case e
             when ::MIDI::NoteOn
               # Treat repeated note on events as a note off followed by note on

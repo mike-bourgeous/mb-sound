@@ -174,10 +174,13 @@ play (midi.hz.ramp.at(-6.db) * midi.amp_env).filter(:lowpass, cutoff: (midi.freq
 
 # Polyphonic, with a voice per note
 play synth(voices: 6) { |v| v.hz.ramp.at(-6.db).filter(:lowpass, cutoff: v.cutoff(400), quality: v.quality(4)) * v.amp_env }
+
+# The same from a MIDI file
+play midi_file('spec/test_data/c_major.mid').synth(voices: 6) { |v| v.hz.ramp.at(-6.db) * v.amp_env }
 ```
 
-`midi` is a `MB::Sound::Notes` (`lib/mb/sound/notes.rb`): notes and
-controllers as signals.  See `MB::Sound::Synth` (`lib/mb/sound/synth.rb`) for
+`midi` and `midi_file(name)` are `MB::Sound::Notes` (`lib/mb/sound/notes.rb`):
+notes and controllers as signals.  See `MB::Sound::Synth` (`lib/mb/sound/synth.rb`) for
 polyphonic synths, and the scripts in `bin/synths/` for more.
 
 ### Calculating wavelength and frequency
