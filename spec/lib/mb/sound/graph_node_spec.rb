@@ -413,7 +413,7 @@ RSpec.describe(MB::Sound::GraphNode, aggregate_failures: true) do
     end
 
     it 'can create a dynamic filter' do
-      graph = 500.hz.filter(:highpass, cutoff: MB::Sound.adsr(0.2, 0.0, 1.0, 0.75, hold: 0.3) * 1000 + 100, quality: MB::Sound.adsr(0.3, 0.3, 1.0, 1.0, hold: 0.1) * -5 + 6)
+      graph = 500.hz.filter(:highpass, cutoff: MB::Sound.adsr(0.2, 0.0, 1.0, 0.75, hold: 0.5) * 1000 + 100, quality: MB::Sound.adsr(0.3, 0.3, 1.0, 1.0, hold: 0.7) * -5 + 6)
 
       # Ensure the correct types were created and stored
       expect(graph).to be_a(MB::Sound::Filter::SampleWrapper)

@@ -29,15 +29,24 @@ module MB
     # Inputs (graph nodes or numbers, all optional):
     # - +:gate+: a rising edge (0 to nonzero) starts the attack from the
     #   current level; a falling edge starts the release.
-    # - +:trigger+: every nonzero sample (re)starts the attack.  Without a
-    #   gate, a triggered note sustains for +:hold+ seconds, then releases.
+    # - +:trigger+: a rising edge (a sample > 0 after one <= 0; negative
+    #   values are ignored, reserved for bipolar triggers) (re)starts the
+    #   attack.  Without a gate, a triggered note releases +:hold+ seconds
+    #   after it starts.
     # - +:velocity+: read on the sample of each note start (0..1), scaled to
     #   the note's peak by +:sensitivity+ and +:velocity_scale+.
     # - +:choke+: a nonzero sample releases to 0 over CHOKE_TIME.
+    # - +:lift+: release velocity (0..1), read on the sample each release
+    #   starts, scaling the release time by 2 ** ((0.5 - lift) * 2): 0.5
+    #   (MIDI 64, the usual default) leaves it alone, a slow lift (0)
+    #   doubles it, a fast lift (1) halves it.  Exponential so equal steps of
+    #   lift are equal ratios of time, like the octave steps of a pitch.
+    #   Without +:lift+ the release time is unchanged.
     #
     # With no gate and no trigger, the envelope is a one-shot: it starts on
-    # its first sample, holds the sustain level for +:hold+ seconds, releases,
-    # and then #sample returns nil.  Gated and triggered envelopes never end;
+    # its first sample, releases +:hold+ seconds later (from wherever it is,
+    # so a hold shorter than the attack and decay cuts them short), and
+    # then #sample returns nil once the release ends.  Gated and triggered envelopes never end;
     # #idle? tells when they are silent.
     #
     # Example:
@@ -119,13 +128,18 @@ module MB
       STATE_W = 13
       STATE_G = 14
       STATE_LINEAR = 15
-      STATE_SIZE = 16
+      STATE_TRIGGER = 16
+      STATE_NOTE_POSITION = 17
+      STATE_RELEASE_SCALE = 18
+      STATE_SIZE = 19
 
       # Kernel flags.
       FLAG_GATE = 1
       FLAG_TRIGGER = 2
       FLAG_ONE_SHOT = 4
       FLAG_LEGATO = 8
+      FLAG_OCTAVES = 16
+      FLAG_LIFT = 32
 
       # Remaining curvature below which a segment is planned as a line (the
       # C ENV_LINEAR_LIMIT).
@@ -139,7 +153,7 @@ module MB
         settings = PRESETS.fetch(name) { raise ArgumentError, "Unknown envelope preset #{name.inspect} (#{PRESETS.keys.join(', ')})" }
 
         if options.key?(:auto_release) || options.key?(:log)
-          raise ArgumentError, 'Envelopes take hold: (seconds of sustain after the attack and decay) instead of auto_release:, and curve: (dB) instead of log:'
+          raise ArgumentError, 'Envelopes take hold: (seconds from the start to the release) instead of auto_release:, and curve: (dB) instead of log:'
         end
 
         if options.key?(:depth)
@@ -197,7 +211,7 @@ module MB
       attr_reader :octaves
 
       # The input nodes (or numbers), or nil.
-      attr_reader :gate, :trigger, :velocity, :choke
+      attr_reader :gate, :trigger, :velocity, :choke, :lift
 
       # Creates an envelope (usually through EnvelopeMethods or .preset).
       #
@@ -206,12 +220,14 @@ module MB
       #                                    or a graph node (seconds).
       # +:sustain+ - The sustain level relative to the peak (number or node).
       # +:curve+ - Curves in dB (see .curve_values and CURVES).
-      # +:hold+ - Seconds (or a length) to hold the sustain level for
-      #           one-shots and triggers without a gate; false holds
-      #           forever.  Defaults to the attack plus decay time, at least
-      #           MIN_HOLD.
-      # +:gate+, +:trigger+, +:velocity+, +:choke+ - Inputs (see the class
-      #                                              description).
+      # +:hold+ - Seconds (or a length) from the start of a one-shot or a
+      #           gateless trigger to its release (like the old
+      #           auto_release); false holds forever.  Defaults to twice the
+      #           attack plus decay time, at least MIN_HOLD (the old
+      #           ADSREnvelope.default_auto_release).
+      # +:gate+, +:trigger+, +:velocity+, +:choke+, +:lift+ - Inputs (see
+      #                                                       the class
+      #                                                       description).
       # +:sensitivity+ (alias +:velocity_range+) - A Range of peak levels for
       #                                            velocity 0..1, or 0 or nil
       #                                            to ignore velocity.
@@ -221,12 +237,13 @@ module MB
       # +:legato+ - If true, triggers while the gate is held keep the current
       #             stage (see #legato).
       # +:octaves+ - If not nil or 0, the output is 2 ** (level * octaves), a
-      #              cutoff multiplier (a number of octaves, or anything with
-      #              #to_octaves, e.g. an Interval).
+      #              cutoff multiplier (a number of octaves, anything with
+      #              #to_octaves such as an Interval, or a graph node read
+      #              every sample, e.g. the mod wheel).
       def initialize(
         attack: DEFAULT_ATTACK, decay: DEFAULT_DECAY, sustain: DEFAULT_SUSTAIN, release: DEFAULT_RELEASE,
         curve: :analog, hold: nil,
-        gate: nil, trigger: nil, velocity: nil, choke: nil,
+        gate: nil, trigger: nil, velocity: nil, choke: nil, lift: nil,
         sensitivity: 0..1, velocity_range: nil, velocity_scale: :linear, legato: false, octaves: nil,
         sample_rate: 48000
       )
@@ -251,6 +268,7 @@ module MB
         @trigger = input(trigger, :trigger)
         @velocity = input(velocity, :velocity)
         @choke = input(choke, :choke)
+        @lift = input(lift, :lift)
 
         unless velocity_range.nil?
           raise ArgumentError, 'Give sensitivity: or velocity_range:, not both' unless sensitivity == (0..1)
@@ -336,9 +354,9 @@ module MB
         @hold ? @hold.length : default_hold.length
       end
 
-      # Changes the sustain time of one-shots and gateless triggers (seconds,
-      # a length, a graph node, nil for the default, or false or infinity for
-      # forever).
+      # Changes the time from the start of a one-shot or gateless trigger to
+      # its release (seconds, a length, a graph node, nil for the default, or
+      # false or infinity for forever).
       def hold=(time)
         time = false if time.is_a?(Numeric) && time.infinite?
         @hold = time.nil? || time == false ? time : Length::Source.new(time)
@@ -417,7 +435,7 @@ module MB
       def octaves=(depth)
         depth = depth.to_octaves if depth.respond_to?(:to_octaves) # TODO: Interval (branch interval)
         depth = nil if depth == 0
-        @octaves = depth&.to_f
+        @octaves = depth.respond_to?(:sample) ? depth.get_sampler : depth&.to_f
         changed!
       end
 
@@ -463,6 +481,7 @@ module MB
         @state[STATE_PEAK] = 1
         @state[STATE_W] = 1
         @state[STATE_G] = 1
+        @state[STATE_RELEASE_SCALE] = 1
         self
       end
 
@@ -487,6 +506,8 @@ module MB
         s[:trigger] = @trigger if @trigger.respond_to?(:sample)
         s[:velocity] = @velocity if @velocity.respond_to?(:sample)
         s[:choke] = @choke if @choke.respond_to?(:sample)
+        s[:lift] = @lift if @lift.respond_to?(:sample)
+        s[:octaves] = @octaves if @octaves.respond_to?(:sample)
         s
       end
 
@@ -497,6 +518,7 @@ module MB
         super
         if @sample_rate != old_rate
           @state[STATE_POSITION] = (@state[STATE_POSITION] * @sample_rate / old_rate).round
+          @state[STATE_NOTE_POSITION] = (@state[STATE_NOTE_POSITION] * @sample_rate / old_rate).round
           @state[STATE_PLANNED] = 0
         end
         changed!
@@ -519,6 +541,8 @@ module MB
         flags |= FLAG_TRIGGER if @trigger
         flags |= FLAG_ONE_SHOT if one_shot?
         flags |= FLAG_LEGATO if @legato
+        flags |= FLAG_OCTAVES if @octaves
+        flags |= FLAG_LIFT if @lift
 
         [
           flags,
@@ -528,7 +552,6 @@ module MB
           @velocity_scale == :db ? 1 : 0,
           CHOKE_TIME * @sample_rate,
           CURVE_SCALE,
-          @octaves || 0.0,
         ]
       end
 
@@ -539,7 +562,7 @@ module MB
       def self.process_ruby(out, state, times, curves, levels, hold, inputs, config)
         n = out.length
         nseg = times.length
-        flags, release_node, velocity_low, velocity_high, velocity_db, choke_samples, curve_scale, octaves = config
+        flags, release_node, velocity_low, velocity_high, velocity_db, choke_samples, curve_scale = config
         flags = Integer(flags)
         release_node = Integer(release_node)
         velocity_low = velocity_low.to_f
@@ -547,7 +570,6 @@ module MB
         velocity_db = velocity_db.to_i != 0
         choke_samples = length_samples(choke_samples.to_f)
         curve_scale = curve_scale.to_f
-        octaves = octaves.to_f
 
         raise ArgumentError, 'Release node out of range' unless release_node >= 1 && release_node < nseg
 
@@ -555,12 +577,17 @@ module MB
         has_trigger = flags & FLAG_TRIGGER != 0
         one_shot = flags & FLAG_ONE_SHOT != 0
         legato = flags & FLAG_LEGATO != 0
+        use_octaves = flags & FLAG_OCTAVES != 0
+        has_lift = flags & FLAG_LIFT != 0
 
         seg_times = times.map { |v| signal(v, n, 0.0) }
         seg_curves = curves.map { |v| signal(v, n, 0.0) }
         seg_levels = levels.map { |v| signal(v, n, 0.0) }
         hold_sig = signal(hold, n, 0.0)
-        gate_sig, trigger_sig, velocity_sig, choke_sig = inputs.each_with_index.map { |v, idx| signal(v, n, idx == 2 ? 1.0 : 0.0) }
+        raise ArgumentError, 'Inputs must be [gate, trigger, velocity, choke, lift, octaves]' unless inputs.length == 6
+        gate_sig, trigger_sig, velocity_sig, choke_sig, lift_sig, octaves_sig = inputs.each_with_index.map { |v, idx|
+          signal(v, n, [0.0, 0.0, 1.0, 0.0, 0.5, 0.0][idx])
+        }
 
         st = state.to_a
         stage = st[STATE_STAGE].to_i
@@ -579,6 +606,9 @@ module MB
         w = st[STATE_W]
         g = st[STATE_G]
         linear = st[STATE_LINEAR] != 0
+        trigger_prev = st[STATE_TRIGGER] != 0
+        note_position = st[STATE_NOTE_POSITION]
+        release_scale = st[STATE_RELEASE_SCALE]
 
         result = Array.new(n)
 
@@ -600,12 +630,15 @@ module MB
               seg = release_node
               e = 0.0
               planned = false
+              release_scale = has_lift ? lift_scale(at(lift_sig, i)) : 1.0
             end
           end
 
-          if has_trigger && at(trigger_sig, i) != 0 && !(legato && gate_prev && gate_now)
+          trigger_now = has_trigger && at(trigger_sig, i) > 0
+          if trigger_now && !trigger_prev && !(legato && gate_prev && gate_now)
             start = true
           end
+          trigger_prev = trigger_now
 
           if start
             peak = velocity_peak(at(velocity_sig, i), velocity_low, velocity_high, velocity_db)
@@ -613,18 +646,31 @@ module MB
             seg = 0
             e = 0.0
             planned = false
+            note_position = 0.0
+            release_scale = 1.0
           end
 
           gate_prev = gate_now
 
           loop do
+            if !has_gate && ((stage == STAGE_SEGMENT && seg < release_node) || stage == STAGE_SUSTAIN) &&
+                note_position >= length_samples(at(hold_sig, i))
+              stage = STAGE_SEGMENT
+              seg = release_node
+              e = 0.0
+              planned = false
+              release_scale = has_lift ? lift_scale(at(lift_sig, i)) : 1.0
+              next
+            end
+
             if stage == STAGE_SEGMENT || stage == STAGE_CHOKE
               if stage == STAGE_CHOKE
                 length = choke_samples
                 curve = 0.0
                 target = 0.0
               else
-                length = length_samples(at(seg_times[seg], i))
+                t = at(seg_times[seg], i)
+                length = length_samples(seg >= release_node ? t * release_scale : t)
                 curve = at(seg_curves[seg], i)
                 target = at(seg_levels[seg], i) * peak
               end
@@ -684,11 +730,12 @@ module MB
             end
 
             if stage == STAGE_SUSTAIN
-              if has_gate ? !gate_now : e >= length_samples(at(hold_sig, i))
+              if has_gate && !gate_now
                 stage = STAGE_SEGMENT
                 seg = release_node
                 e = 0.0
                 planned = false
+                release_scale = has_lift ? lift_scale(at(lift_sig, i)) : 1.0
                 next
               end
 
@@ -701,14 +748,15 @@ module MB
             break
           end
 
-          result[i] = octaves != 0 ? 2.0 ** (y * octaves) : y
+          note_position += 1
+          result[i] = use_octaves ? 2.0 ** (y * at(octaves_sig, i)) : y
         end
 
         out[0..] = result unless n == 0
 
         state[0..] = [
           stage, seg, e, y, peak, gate_prev ? 1 : 0, planned ? 1 : 0, plan_length, plan_curve, plan_target,
-          e0, y0, scale, w, g, linear ? 1 : 0
+          e0, y0, scale, w, g, linear ? 1 : 0, trigger_prev ? 1 : 0, note_position, release_scale
         ]
 
         out
@@ -719,6 +767,14 @@ module MB
         return 0.0 unless t > 0
         return t if t.infinite?
         t.round.to_f
+      end
+
+      # Mirror of the C env_lift_scale: the release time multiplier for
+      # release velocity +lift+ (see #initialize).
+      def self.lift_scale(lift)
+        lift = 0.0 unless lift >= 0
+        lift = 1.0 if lift > 1
+        2.0 ** ((0.5 - lift) * 2.0)
       end
 
       # Mirror of the C env_peak.
@@ -771,6 +827,8 @@ module MB
         inputs[1] = read_input(:trigger, @trigger, count, 0.0) if @trigger.respond_to?(:sample)
         inputs[2] = read_input(:velocity, @velocity, count, nil) if @velocity.respond_to?(:sample)
         inputs[3] = read_input(:choke, @choke, count, 0.0) if @choke.respond_to?(:sample)
+        inputs[4] = read_input(:lift, @lift, count, nil) if @lift.respond_to?(:sample)
+        inputs[5] = read_param(:octaves, @octaves, count) if @octaves.respond_to?(:sample)
 
         if kernel == :ruby
           self.class.process_ruby(@buf, @state, times, curves, levels, hold, inputs, config)
@@ -792,7 +850,7 @@ module MB
         times = SEGMENTS.map { |s| @times[s].node? ? nil : @times[s].constant_samples(@sample_rate) }
         curves = SEGMENTS.map { |s| @curves[s].is_a?(Numeric) ? @curves[s] : nil }
         levels = [1.0, @sustain.is_a?(Numeric) ? @sustain : nil, 0.0]
-        inputs = [@gate, @trigger, @velocity, @choke].map { |v| v.respond_to?(:sample) ? nil : v }
+        inputs = [@gate, @trigger, @velocity, @choke, @lift, @octaves].map { |v| v.respond_to?(:sample) ? nil : v }
 
         hold_source = @hold == false ? nil : (@hold || default_hold)
         hold = hold_source.nil? ? Float::INFINITY : (hold_source.node? ? nil : hold_source.constant_samples(@sample_rate))
@@ -821,7 +879,7 @@ module MB
 
         data = value.sample(count)
         if data.nil?
-          return ended_value.nil? ? @last.fetch(key, 1.0) : ended_value
+          return ended_value.nil? ? @last.fetch(key, key == :lift ? 0.5 : 1.0) : ended_value
         end
 
         fit(key, data, count, pad: ended_value)
@@ -850,7 +908,7 @@ module MB
 
       # The default hold (see #initialize) as a length source.
       def default_hold
-        @default_hold ||= Length::Source.new([fixed_seconds(@times[:attack]) + fixed_seconds(@times[:decay]), MIN_HOLD].max)
+        @default_hold ||= Length::Source.new([2.0 * (fixed_seconds(@times[:attack]) + fixed_seconds(@times[:decay])), MIN_HOLD].max)
       end
 
       # A time in seconds for defaults (0 for graph nodes).

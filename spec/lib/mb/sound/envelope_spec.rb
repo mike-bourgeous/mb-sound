@@ -93,6 +93,8 @@ RSpec.describe(MB::Sound::Envelope) do
         flags |= MB::Sound::Envelope::FLAG_TRIGGER if rng.rand < 0.5
         flags |= MB::Sound::Envelope::FLAG_ONE_SHOT if flags & 3 == 0
         flags |= MB::Sound::Envelope::FLAG_LEGATO if rng.rand < 0.3
+        flags |= MB::Sound::Envelope::FLAG_OCTAVES if rng.rand < 0.2
+        flags |= MB::Sound::Envelope::FLAG_LIFT if rng.rand < 0.4
         db = rng.rand < 0.4
         config = [
           flags, 2,
@@ -100,7 +102,6 @@ RSpec.describe(MB::Sound::Envelope) do
           db ? 1 : 0,
           rng.rand(0.0..300.0),
           MB::Sound::Envelope::CURVE_SCALE,
-          rng.rand < 0.2 ? rng.rand(-3.0..3.0) : 0.0,
         ]
 
         state_c = Numo::DFloat.zeros(MB::Sound::Envelope::STATE_SIZE)
@@ -129,9 +130,11 @@ RSpec.describe(MB::Sound::Envelope) do
 
           inputs = [
             flags & 1 != 0 ? gates(rng, n, 0.01) : nil,
-            flags & 2 != 0 ? sparse(rng, n, 0.005) : nil,
+            flags & 2 != 0 ? (rng.rand < 0.5 ? sparse(rng, n, 0.005) : gates(rng, n, 0.01) * 2 - 0.5) : nil,
             rng.rand < 0.5 ? piecewise(rng, n, -0.1..1.1, 0.05) : (rng.rand < 0.5 ? rng.rand : nil),
             rng.rand < 0.5 ? sparse(rng, n, 0.002) : nil,
+            rng.rand < 0.5 ? piecewise(rng, n, -0.1..1.1, 0.05) : (rng.rand < 0.5 ? rng.rand : nil),
+            rng.rand < 0.5 ? piecewise(rng, n, -3.0..3.0, 0.01) : rng.rand(-3.0..3.0),
           ]
 
           out_c = MB::Sound::FastEnvelope.process(Numo::SFloat.zeros(n), state_c, times, curves, levels, hold, inputs, config)
@@ -168,17 +171,20 @@ RSpec.describe(MB::Sound::Envelope) do
 
     it 'rejects mismatched buffer lengths and bad configs' do
       state = Numo::DFloat.zeros(MB::Sound::Envelope::STATE_SIZE)
-      config = [1, 2, 1.0, 1.0, 0, 144, MB::Sound::Envelope::CURVE_SCALE, 0.0]
+      config = [1, 2, 1.0, 1.0, 0, 144, MB::Sound::Envelope::CURVE_SCALE]
       out = Numo::SFloat.zeros(10)
       expect {
-        MB::Sound::FastEnvelope.process(out, state, [1, 2, 3], [0, 0, 0], [1, 0.5, 0], 0, [Numo::SFloat.zeros(9), nil, nil, nil], config)
+        MB::Sound::FastEnvelope.process(out, state, [1, 2, 3], [0, 0, 0], [1, 0.5, 0], 0, [Numo::SFloat.zeros(9), nil, nil, nil, nil, nil], config)
       }.to raise_error(ArgumentError, /length/)
       expect {
-        MB::Sound::FastEnvelope.process(out, state, [1, 2, 3], [0, 0, 0], [1, 0.5, 0], 0, [nil, nil, nil, nil], config.dup.tap { |c| c[1] = 3 })
+        MB::Sound::FastEnvelope.process(out, state, [1, 2, 3], [0, 0, 0], [1, 0.5, 0], 0, [nil, nil, nil, nil, nil, nil], config.dup.tap { |c| c[1] = 3 })
       }.to raise_error(ArgumentError, /Release node/)
       expect {
-        MB::Sound::FastEnvelope.process(out, Numo::DFloat.zeros(3), [1, 2, 3], [0, 0, 0], [1, 0.5, 0], 0, [nil, nil, nil, nil], config)
+        MB::Sound::FastEnvelope.process(out, Numo::DFloat.zeros(3), [1, 2, 3], [0, 0, 0], [1, 0.5, 0], 0, [nil, nil, nil, nil, nil, nil], config)
       }.to raise_error(ArgumentError, /State/)
+      expect {
+        MB::Sound::FastEnvelope.process(out, state, [1, 2, 3], [0, 0, 0], [1, 0.5, 0], 0, [nil, nil, nil, nil], config)
+      }.to raise_error(ArgumentError, /lift/)
     end
   end
 
@@ -188,25 +194,41 @@ RSpec.describe(MB::Sound::Envelope) do
       expect(env.one_shot?).to eq(true)
 
       data = collect(env, 20000, buffer: 512)
-      # attack 480, decay 960, hold 4800, release 240
+      # attack 480, decay 960, release 4800 samples after the start, taking 240
       expect(data[0]).to eq(0)
       expect(data[479]).to be < 1
       expect(data[480]).to eq(1)
       expect(data[481]).to be < 1
       expect(data[1439]).to be > 0.5
-      expect(data[1440..6240].to_a.uniq).to eq([0.5])
-      expect(data[6241]).to be < 0.5
-      expect(data[6479]).to be > 0
-      expect(data[6480..].to_a.uniq).to eq([0])
-      expect(data.length).to eq(6656) # 13 buffers, ending in the 13th
+      expect(data[1440..4800].to_a.uniq).to eq([0.5])
+      expect(data[4801]).to be < 0.5
+      expect(data[5039]).to be > 0
+      expect(data[5040..].to_a.uniq).to eq([0])
+      expect(data.length).to eq(5120) # 10 buffers, ending in the 10th
       expect(env.ended?).to eq(true)
       expect(env.stage).to eq(:ended)
       expect(env.sample(512)).to eq(nil)
     end
 
-    it 'holds for the attack plus decay time by default, at least MIN_HOLD' do
-      expect(described_class.new(attack: 0.1, decay: 0.2).hold).to eq(0.30000000000000004)
+    it 'releases after twice the attack plus decay time by default, at least MIN_HOLD' do
+      expect(described_class.new(attack: 0.1, decay: 0.2).hold).to eq(0.6000000000000001)
       expect(described_class.new(attack: 0.01, decay: 0.02).hold).to eq(0.1)
+    end
+
+    it 'releases from the current level when the hold ends during the attack or decay' do
+      env = described_class.new(attack: 100.samples, decay: 100.samples, sustain: 0.5, release: 100.samples, hold: 50.samples, curve: 0)
+      data = env.sample(300)
+      expect(data[49]).to be_within(1e-6).of(0.49)
+      expect(data[50]).to be_within(1e-6).of(0.49)
+      expect(data[100]).to be_within(1e-6).of(0.245)
+      expect(data[150]).to eq(0)
+      expect(env.ended?).to eq(true)
+
+      env = described_class.new(attack: 100.samples, decay: 100.samples, sustain: 0.5, release: 100.samples, hold: 150.samples, curve: 0)
+      data = env.sample(300)
+      expect(data[150]).to be_within(1e-6).of(0.755) # repeats sample 149
+      expect(data[151]).to be < 0.755
+      expect(data[250]).to eq(0)
     end
 
     it 'never ends with hold: false' do
@@ -238,7 +260,7 @@ RSpec.describe(MB::Sound::Envelope) do
     [:linear, :analog, :snappy, :gentle, :swell, :dx].each do |preset|
       it "#{preset} matches the curve formula at half of each segment" do
         a, d, r = described_class::CURVES[preset]
-        env = described_class.new(attack: 1000.samples, decay: 2000.samples, sustain: 0.25, release: 500.samples, hold: 1000.samples, curve: preset)
+        env = described_class.new(attack: 1000.samples, decay: 2000.samples, sustain: 0.25, release: 500.samples, hold: 4000.samples, curve: preset)
         data = collect(env, 5000)
 
         expect(data[500]).to be_within(1e-6).of(curve_p(a, 0.5))
@@ -347,7 +369,7 @@ RSpec.describe(MB::Sound::Envelope) do
     end
 
     it 'restarts the attack from the current level on each trigger' do
-      env = described_class.new(attack: 100.samples, decay: 100.samples, sustain: 0.5, release: 100.samples, hold: 100.samples, trigger: array_node_class.new(pulses(1000, 10, 150)), curve: 0)
+      env = described_class.new(attack: 100.samples, decay: 100.samples, sustain: 0.5, release: 100.samples, hold: 300.samples, trigger: array_node_class.new(pulses(1000, 10, 150)), curve: 0)
       data = env.sample(1000)
       expect(data[0..10].to_a.uniq).to eq([0])
       expect(data[110]).to eq(1)
@@ -357,6 +379,48 @@ RSpec.describe(MB::Sound::Envelope) do
       expect(data[350..450].to_a.uniq).to eq([0.5])
       expect(data[550..].to_a.uniq).to eq([0])
       expect(env.idle?).to eq(true)
+    end
+
+    it 'triggers only on rising edges, across buffers, ignoring negative values' do
+      trigger = Numo::SFloat.zeros(3000)
+      trigger[10...700] = 1     # held: one note
+      trigger[700...800] = -1   # negative: ignored
+      trigger[799] = 0
+      trigger[800...1000] = 0.5 # rising from -1/0 to 0.5: one note at 800
+      trigger[1200] = -1
+      trigger[1500...2500] = 1  # one note, crossing a buffer boundary
+      env = described_class.new(attack: 0, decay: 50.samples, sustain: 0, release: 0, hold: false, trigger: array_node_class.new(trigger), curve: 0)
+      data = collect(env, 3000, buffer: 1600)
+      expect(data[10]).to eq(1)
+      expect(data[60..799].to_a.uniq).to eq([0])
+      expect(data[800]).to eq(1)
+      expect(data[850..1499].to_a.uniq).to eq([0])
+      expect(data[1500]).to eq(1)
+      expect(data[1550..].to_a.uniq).to eq([0])
+    end
+
+    it 'scales the release time by lift read on the release sample' do
+      gate = pulses(3000, 0...100, 1000...1100, 2000...2100)
+      lift = Numo::SFloat.zeros(3000).fill(0.5)
+      lift[1100] = 0
+      lift[2100] = 1
+      lift[2101..] = 0
+      env = described_class.new(attack: 0, decay: 0, sustain: 1, release: 100.samples, gate: array_node_class.new(gate), lift: array_node_class.new(lift), curve: 0)
+      data = env.sample(3000)
+      expect(data[199]).to be > 0
+      expect(data[200]).to eq(0)
+      expect(data[1299]).to be > 0
+      expect(data[1300]).to eq(0)
+      expect(data[2149]).to be > 0
+      expect(data[2150]).to eq(0)
+
+      plain = described_class.new(attack: 0, decay: 0, sustain: 1, release: 100.samples, gate: array_node_class.new(gate), curve: 0)
+      plain_data = plain.sample(3000)
+      expect(plain_data[1199]).to be > 0
+      expect(plain_data[1200]).to eq(0)
+      expect(described_class.lift_scale(0.5)).to eq(1)
+      expect(described_class.lift_scale(0)).to eq(2)
+      expect(described_class.lift_scale(1)).to eq(0.5)
     end
 
     it 'scales the peak by velocity read on the note start sample' do
@@ -449,7 +513,7 @@ RSpec.describe(MB::Sound::Envelope) do
 
   describe 'lengths' do
     it 'accepts seconds, milliseconds, samples, and Durations' do
-      env = described_class.new(attack: 10.ms, decay: 96.samples, sustain: 0.5, release: 1.n16, hold: 0)
+      env = described_class.new(attack: 10.ms, decay: 96.samples, sustain: 0.5, release: 1.n16, hold: 577.samples)
       expect(env.attack_time).to be_within(1e-12).of(0.01)
       expect(env.decay_time).to be_within(1e-12).of(0.002)
       expect(env.release_time).to be_within(1e-12).of(MB::Sound::Sequence.transport.seconds(1/16r))
@@ -457,8 +521,9 @@ RSpec.describe(MB::Sound::Envelope) do
       release = (MB::Sound::Sequence.transport.seconds(1/16r) * 48000).round
       expect(data[480]).to eq(1)
       expect(data[576]).to eq(0.5)
-      expect(data[576 + release - 1]).to be > 0
-      expect(data[576 + release]).to eq(0)
+      expect(data[577]).to eq(0.5)
+      expect(data[577 + release - 1]).to be > 0
+      expect(data[577 + release]).to eq(0)
     end
 
     it 'follows tempo changes with Durations' do
@@ -512,6 +577,16 @@ RSpec.describe(MB::Sound::Envelope) do
       expect(data[0]).to eq(1)
       expect(data[100]).to eq(8)
       expect(data[250]).to be_within(1e-5).of(2 ** 1.5)
+    end
+
+    it 'reads a graph node every sample' do
+      depth = Numo::SFloat.zeros(300).fill(1)
+      depth[150..] = 3
+      env = described_class.new(attack: 0, decay: 0, sustain: 1, release: 0, hold: false, octaves: array_node_class.new(depth))
+      data = env.sample(300)
+      expect(data[149]).to eq(2)
+      expect(data[150]).to eq(8)
+      expect(env.sources).to include(:octaves)
     end
 
     it 'accepts anything with #to_octaves' do

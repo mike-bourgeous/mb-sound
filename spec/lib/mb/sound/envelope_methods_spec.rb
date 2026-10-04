@@ -42,7 +42,7 @@ RSpec.describe(MB::Sound::EnvelopeMethods) do
           total += buf.length
           raise 'too long' if total > 48000
         end
-        expect(total).to eq(500) # 480 samples, then the end
+        expect(total).to eq(400) # released at 192 samples, ended at 336
       end
     end
   end

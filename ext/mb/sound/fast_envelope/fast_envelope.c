@@ -73,6 +73,9 @@ enum env_state_index {
 	ST_W,
 	ST_G,
 	ST_LINEAR,
+	ST_TRIGGER,        // whether the trigger was > 0 on the last sample
+	ST_NOTE_POSITION,  // samples since the note started (for hold)
+	ST_RELEASE_SCALE,  // release time multiplier from lift (1 without)
 	ST_SIZE
 };
 
@@ -85,7 +88,6 @@ enum env_config_index {
 	CF_VELOCITY_DB,
 	CF_CHOKE_SAMPLES,
 	CF_CURVE_SCALE,
-	CF_OCTAVES,
 	CF_SIZE
 };
 
@@ -94,6 +96,8 @@ enum env_flags {
 	ENV_HAS_TRIGGER = 2,
 	ENV_ONE_SHOT = 4,
 	ENV_LEGATO = 8,
+	ENV_OCTAVES = 16,
+	ENV_LIFT = 32,
 };
 
 // A parameter or input: a constant, or a float or double per sample.
@@ -167,6 +171,21 @@ static double env_length(double t)
 	return round(t);
 }
 
+// The release time multiplier for release velocity +lift+ (clamped to
+// 0..1): 2 ** ((0.5 - lift) * 2), so 0.5 (MIDI 64) is neutral, 0 doubles the
+// release time, and 1 halves it.
+static double env_lift_scale(double lift)
+{
+	if (!(lift >= 0)) {
+		lift = 0;
+	}
+	if (lift > 1) {
+		lift = 1;
+	}
+
+	return pow(2.0, (0.5 - lift) * 2.0);
+}
+
 // The peak level for velocity +v+ (clamped to 0..1).
 static double env_peak(double v, double low, double high, int db)
 {
@@ -191,11 +210,17 @@ static double env_peak(double v, double low, double high, int db)
  * a contiguous DFloat of ST_SIZE values, updated in place.  +times+ (in
  * samples), +curves+ (in dB), and +levels+ (relative to the peak) are
  * Arrays with one entry per segment, each a Numeric or an NArray of
- * out.length values.  +hold+ is the sustain time of envelopes without a
- * gate, in samples (Numeric or NArray).  +inputs+ is [gate, trigger,
- * velocity, choke], each nil, a Numeric, or an NArray.  +config+ is [flags,
- * release node, velocity low, velocity high, velocity in dB (0 or 1), choke
- * samples, curve scale, octaves] (see MB::Sound::Envelope#kernel_config).
+ * out.length values.  +hold+ is how long notes of envelopes without a gate
+ * last before releasing, counted from the note start, in samples (Numeric
+ * or NArray).  +inputs+ is [gate, trigger, velocity, choke, lift, octaves],
+ * each nil, a Numeric, or an NArray (lift and octaves are used only with
+ * the ENV_LIFT and ENV_OCTAVES flags).  +config+ is [flags, release node,
+ * velocity low, velocity high, velocity in dB (0 or 1), choke samples,
+ * curve scale] (see MB::Sound::Envelope#kernel_config).
+ *
+ * Triggers fire on rising edges: a sample > 0 after a sample <= 0
+ * (negative values are reserved).  A release starts with its time scaled
+ * by env_lift_scale of the lift input on that sample.
  */
 static VALUE ruby_process(VALUE self, VALUE out, VALUE state, VALUE times, VALUE curves, VALUE levels, VALUE hold, VALUE inputs, VALUE config)
 {
@@ -216,8 +241,8 @@ static VALUE ruby_process(VALUE self, VALUE out, VALUE state, VALUE times, VALUE
 	if (nseg < 2 || nseg > ENV_MAX_SEGMENTS || RARRAY_LEN(curves) != nseg || RARRAY_LEN(levels) != nseg) {
 		rb_raise(rb_eArgError, "Times, curves, and levels must have the same number of segments (2 to %d)", ENV_MAX_SEGMENTS);
 	}
-	if (RARRAY_LEN(inputs) != 4) {
-		rb_raise(rb_eArgError, "Inputs must be [gate, trigger, velocity, choke]");
+	if (RARRAY_LEN(inputs) != 6) {
+		rb_raise(rb_eArgError, "Inputs must be [gate, trigger, velocity, choke, lift, octaves]");
 	}
 	if (RARRAY_LEN(config) != CF_SIZE) {
 		rb_raise(rb_eArgError, "Config must have %d values", CF_SIZE);
@@ -230,7 +255,6 @@ static VALUE ruby_process(VALUE self, VALUE out, VALUE state, VALUE times, VALUE
 	int velocity_db = NUM2INT(rb_ary_entry(config, CF_VELOCITY_DB));
 	double choke_samples = env_length(NUM2DBL(rb_ary_entry(config, CF_CHOKE_SAMPLES)));
 	double curve_scale = NUM2DBL(rb_ary_entry(config, CF_CURVE_SCALE));
-	double octaves = NUM2DBL(rb_ary_entry(config, CF_OCTAVES));
 
 	if (release_node < 1 || release_node >= nseg) {
 		rb_raise(rb_eArgError, "Release node must be from 1 to %ld", nseg - 1);
@@ -243,6 +267,8 @@ static VALUE ruby_process(VALUE self, VALUE out, VALUE state, VALUE times, VALUE
 	int has_trigger = !!(flags & ENV_HAS_TRIGGER);
 	int one_shot = !!(flags & ENV_ONE_SHOT);
 	int legato = !!(flags & ENV_LEGATO);
+	int use_octaves = !!(flags & ENV_OCTAVES);
+	int has_lift = !!(flags & ENV_LIFT);
 
 	size_t n = RNARRAY_SHAPE(out)[0];
 	VALUE keep = rb_ary_new();
@@ -254,12 +280,14 @@ static VALUE ruby_process(VALUE self, VALUE out, VALUE state, VALUE times, VALUE
 		env_read_signal(rb_ary_entry(levels, s), n, "Segment level", 0, keep, &seg_levels[s]);
 	}
 
-	struct env_signal hold_sig, gate_sig, trigger_sig, velocity_sig, choke_sig;
+	struct env_signal hold_sig, gate_sig, trigger_sig, velocity_sig, choke_sig, lift_sig, octaves_sig;
 	env_read_signal(hold, n, "Hold", 0, keep, &hold_sig);
 	env_read_signal(rb_ary_entry(inputs, 0), n, "Gate", 0, keep, &gate_sig);
 	env_read_signal(rb_ary_entry(inputs, 1), n, "Trigger", 0, keep, &trigger_sig);
 	env_read_signal(rb_ary_entry(inputs, 2), n, "Velocity", 1, keep, &velocity_sig);
 	env_read_signal(rb_ary_entry(inputs, 3), n, "Choke", 0, keep, &choke_sig);
+	env_read_signal(rb_ary_entry(inputs, 4), n, "Lift", 0.5, keep, &lift_sig);
+	env_read_signal(rb_ary_entry(inputs, 5), n, "Octaves", 0, keep, &octaves_sig);
 
 	float *o = (float *)(nary_get_pointer_for_write(out) + nary_get_offset(out));
 	double *st = (double *)(nary_get_pointer_for_write(state) + nary_get_offset(state));
@@ -280,6 +308,9 @@ static VALUE ruby_process(VALUE self, VALUE out, VALUE state, VALUE times, VALUE
 	double w = st[ST_W];
 	double g = st[ST_G];
 	int linear = st[ST_LINEAR] != 0;
+	int trigger_prev = st[ST_TRIGGER] != 0;
+	double note_position = st[ST_NOTE_POSITION];
+	double release_scale = st[ST_RELEASE_SCALE];
 
 	if (seg < 0 || seg >= nseg) {
 		rb_raise(rb_eArgError, "Segment index %ld out of range in envelope state", seg);
@@ -303,12 +334,15 @@ static VALUE ruby_process(VALUE self, VALUE out, VALUE state, VALUE times, VALUE
 				seg = release_node;
 				e = 0;
 				planned = 0;
+				release_scale = has_lift ? env_lift_scale(env_at(&lift_sig, i)) : 1.0;
 			}
 		}
 
-		if (has_trigger && env_at(&trigger_sig, i) != 0 && !(legato && gate_prev && gate_now)) {
+		int trigger_now = has_trigger && env_at(&trigger_sig, i) > 0;
+		if (trigger_now && !trigger_prev && !(legato && gate_prev && gate_now)) {
 			start = 1;
 		}
+		trigger_prev = trigger_now;
 
 		if (start) {
 			peak = env_peak(env_at(&velocity_sig, i), velocity_low, velocity_high, velocity_db);
@@ -316,11 +350,24 @@ static VALUE ruby_process(VALUE self, VALUE out, VALUE state, VALUE times, VALUE
 			seg = 0;
 			e = 0;
 			planned = 0;
+			note_position = 0;
+			release_scale = 1.0;
 		}
 
 		gate_prev = gate_now;
 
 		for (;;) {
+			if (!has_gate && ((stage == ENV_SEGMENT && seg < release_node) || stage == ENV_SUSTAIN) &&
+					note_position >= env_length(env_at(&hold_sig, i))) {
+				// Notes without a gate release +hold+ samples after they start
+				stage = ENV_SEGMENT;
+				seg = release_node;
+				e = 0;
+				planned = 0;
+				release_scale = has_lift ? env_lift_scale(env_at(&lift_sig, i)) : 1.0;
+				continue;
+			}
+
 			if (stage == ENV_SEGMENT || stage == ENV_CHOKE) {
 				double length, curve, target;
 				if (stage == ENV_CHOKE) {
@@ -328,7 +375,8 @@ static VALUE ruby_process(VALUE self, VALUE out, VALUE state, VALUE times, VALUE
 					curve = 0;
 					target = 0;
 				} else {
-					length = env_length(env_at(&seg_times[seg], i));
+					double t = env_at(&seg_times[seg], i);
+					length = env_length(seg >= release_node ? t * release_scale : t);
 					curve = env_at(&seg_curves[seg], i);
 					target = env_at(&seg_levels[seg], i) * peak;
 				}
@@ -395,11 +443,13 @@ static VALUE ruby_process(VALUE self, VALUE out, VALUE state, VALUE times, VALUE
 			}
 
 			if (stage == ENV_SUSTAIN) {
-				if (has_gate ? !gate_now : e >= env_length(env_at(&hold_sig, i))) {
+				if (has_gate && !gate_now) {
+					// A triggered note reached sustain with the gate low
 					stage = ENV_SEGMENT;
 					seg = release_node;
 					e = 0;
 					planned = 0;
+					release_scale = has_lift ? env_lift_scale(env_at(&lift_sig, i)) : 1.0;
 					continue;
 				}
 
@@ -413,7 +463,8 @@ static VALUE ruby_process(VALUE self, VALUE out, VALUE state, VALUE times, VALUE
 			break;
 		}
 
-		o[i] = octaves != 0 ? pow(2.0, y * octaves) : y;
+		note_position += 1;
+		o[i] = use_octaves ? pow(2.0, y * env_at(&octaves_sig, i)) : y;
 	}
 
 	st[ST_STAGE] = stage;
@@ -432,6 +483,9 @@ static VALUE ruby_process(VALUE self, VALUE out, VALUE state, VALUE times, VALUE
 	st[ST_W] = w;
 	st[ST_G] = g;
 	st[ST_LINEAR] = linear;
+	st[ST_TRIGGER] = trigger_prev;
+	st[ST_NOTE_POSITION] = note_position;
+	st[ST_RELEASE_SCALE] = release_scale;
 
 	RB_GC_GUARD(keep);
 

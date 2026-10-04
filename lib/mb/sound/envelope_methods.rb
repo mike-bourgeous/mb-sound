@@ -8,8 +8,8 @@ module MB
     # +:choke+, +:sensitivity+, +:velocity_scale+, +:legato+, +:sample_rate+).
     #
     # Without a gate or trigger, they are one-shots: they start on their
-    # first sample, hold the sustain level for +:hold+ seconds, release, and
-    # end (see Envelope).
+    # first sample, release +:hold+ seconds later (default twice the attack
+    # plus decay, at least 0.1 s), and end (see Envelope).
     #
     # Examples:
     #     play 220.hz.ramp * adsr(0.01, 0.3, 0.5, 1)
@@ -49,9 +49,9 @@ module MB
 
       # A filter cutoff envelope whose output is a cutoff multiplier, 2 **
       # (env * depth): :analog curves, sustain 0 by default, +:depth+ (alias
-      # +:octaves+) 2 octaves by default (a number of octaves, or an Interval
-      # once that exists), and velocity sensitivity 0.5..1 (linear) scaling
-      # the depth.
+      # +:octaves+) 2 octaves by default (a number of octaves, an Interval
+      # once that exists, or a graph node such as the mod wheel, read every
+      # sample), and velocity sensitivity 0.5..1 (linear) scaling the depth.
       #
       # Example:
       #     play 110.hz.ramp.filter(:lowpass, cutoff: 200.constant * filter_env(0.01, 0.4, depth: 4), quality: 4)

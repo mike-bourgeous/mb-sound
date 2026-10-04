@@ -18,9 +18,9 @@ module MB
         # Multiplies this node by a one-shot MB::Sound::Envelope (see
         # EnvelopeMethods#adsr) with the given +attack+, +decay+, +sustain+,
         # and +release+ (times in seconds or any length, +sustain+ relative to
-        # the peak), at this node's sample rate.  The envelope holds the
-        # sustain level for +:hold+ seconds (default: attack plus decay, at
-        # least 0.1 s; false for forever), then releases and ends.  Other
+        # the peak), at this node's sample rate.  The envelope releases
+        # +:hold+ seconds after it starts (default: twice the attack plus
+        # decay, at least 0.1 s; false for forever), then ends.  Other
         # options (e.g. +:curve+, default :analog) go to Envelope#initialize.
         #
         # Example:

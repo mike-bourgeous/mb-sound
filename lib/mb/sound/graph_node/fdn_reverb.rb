@@ -23,8 +23,8 @@ module MB
       # class for each output.  When P == 1, behaves as a simple mono node.
       #
       # Examples (in bin/sound.rb):
-      #     play 440.hz.sine.adsr(0.005, 0.05, 1, 0.05, hold: 0.45).fdn_reverb
-      #     play 440.hz.sine.adsr(0.005, 0.05, 1, 0.05, hold: 0.45).fdn_reverb(room_size: 0.8, decay: 3.0, damping: 0.7)
+      #     play 440.hz.sine.adsr(0.005, 0.05, 1, 0.05, hold: 0.5).fdn_reverb
+      #     play 440.hz.sine.adsr(0.005, 0.05, 1, 0.05, hold: 0.5).fdn_reverb(room_size: 0.8, decay: 3.0, damping: 0.7)
       #
       #     # Stereo input from a file
       #     l, r = file_input('sounds/synth0.flac').split
