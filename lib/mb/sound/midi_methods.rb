@@ -14,7 +14,7 @@ module MB
       def midi_file(filename, speed: 1.0, clock: nil)
         clock ||= MB::Sound::GraphNode::MidiDsl::DslClock.new
         mfile = MB::Sound::MIDI::MIDIFile.new(filename, speed: speed, clock: clock)
-        mgr = MB::Sound::MIDI::Manager.new(input: mfile, jack: nil)
+        mgr = MB::Sound::MIDI::Manager.new(input: mfile)
         dsl = MB::Sound::GraphNode::MidiDsl.new(manager: mgr)
 
         clock.dsl = dsl if clock.is_a?(MB::Sound::GraphNode::MidiDsl::DslClock)
@@ -33,16 +33,29 @@ module MB
         @midi_dsl ||= MB::Sound::GraphNode::MidiDsl.new(manager: midi_manager)
       end
 
+      # Whether #synth prints parameter maps by default (ScriptRunner sets
+      # false for -q/--quiet).
+      attr_writer :parameter_maps
+
+      def parameter_maps?
+        @parameter_maps != false
+      end
+
       # Creates and caches a MIDI manager for the given +input_name+, which may
-      # be a MIDI filename, part of a live MIDI source's name to connect to,
-      # or nil for a virtual MIDI port named after the script (see
-      # MB::Sound::MIDI::Input; live MIDI goes through RtMidi and never
-      # starts a JACK server).
+      # be a MIDI filename (any existing file must be .mid or .midi), part of
+      # a live MIDI source's name to connect to (an unconnected port with a
+      # warning if none matches), or nil for a virtual MIDI port named after
+      # the script (see MB::Sound::MIDI::Input; live MIDI goes through RtMidi
+      # and never starts a JACK server).
       def midi_manager(input_name = nil)
         @midi_managers ||= {}
         return @midi_managers[input_name] if @midi_managers.include?(input_name)
 
-        if input_name && input_name.downcase.end_with?('.mid') && File.readable?(input_name)
+        if input_name && File.file?(input_name)
+          unless input_name.downcase.end_with?('.mid', '.midi')
+            raise ArgumentError, "#{input_name} is not a MIDI file (expected .mid or .midi)"
+          end
+
           # FIXME: really need a better way of connecting the clock to the graph
           clock = MB::Sound::GraphNode::GraphClock.new
           midi_in = MB::Sound::MIDI::MIDIFile.new(input_name, clock: clock)
@@ -57,7 +70,7 @@ module MB
           update_rate = 48000.0 / buffer
         end
 
-        manager = MB::Sound::MIDI::Manager.new(jack: nil, input: midi_in, update_rate: update_rate)
+        manager = MB::Sound::MIDI::Manager.new(input: midi_in, update_rate: update_rate)
 
         @midi_managers[input_name] = manager
       end
@@ -69,10 +82,11 @@ module MB
       # DSL as well
       #
       # Prints the MIDI parameter map (an ACID-compatible controller
-      # definition) unless +:parameter_map+ is false.
+      # definition) unless +:parameter_map+ is false (by default false when a
+      # script runs with -q/--quiet; see #parameter_maps=).
       #
       # See ScriptingMethods#synth_script.
-      def synth(input_name = nil, osc_count: ENV['OSC_COUNT']&.to_i || 4, channel: ENV['CHANNEL']&.to_i&.-(1), parameter_map: true)
+      def synth(input_name = nil, osc_count: ENV['OSC_COUNT']&.to_i || 4, channel: ENV['CHANNEL']&.to_i&.-(1), parameter_map: parameter_maps?)
         raise 'Pass a block to define individual voices' unless block_given?
 
         # TODO: further automate connecting to an output, parsing command-line

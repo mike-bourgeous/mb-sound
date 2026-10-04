@@ -2,7 +2,10 @@ module MB
   module Sound
     # Records sound from a sound card through miniaudio (the fast_audio C
     # extension; see MB::Sound::FastAudio::Capture): CoreAudio on macOS
-    # (no JACK needed), and JACK, PulseAudio/PipeWire, or ALSA on Linux.
+    # (no JACK needed), and JACK, PulseAudio/PipeWire, or ALSA on Linux.  On
+    # JACK, inputs are in_1, in_2, ... ports on the script's one shared JACK
+    # client (see MB::Sound::Jack), connected once to the physical capture
+    # ports or to ports whose names contain INPUT_DEVICE ('none' for none).
     # The sound card's capture thread fills a queue in C, and #read waits
     # (without holding Ruby's GVL) until enough audio has arrived, so live
     # input paces itself by the sound card's clock.  If more than +:latency+
@@ -74,7 +77,23 @@ module MB
         @buffer_size = Integer(ENV['AUDIO_BUFFER'] || buffer_size || settings[:buffer_size])
         queue = [(latency * requested_rate).round, @buffer_size * 2, 64].max
 
-        @capture = FastAudio::Capture.new(
+        if backends&.first == :jack
+          # Ports on the shared JACK client (see MB::Sound::Jack), falling
+          # back to the other backends if no JACK server answers
+          begin
+            names = Jack.port_names('in', channels)
+            @capture = FastAudio::Capture.new(
+              backends, -1, DeviceOutput.client_name, channels, requested_rate, 0, 0, queue, quality, test_pattern, names
+            )
+            Jack.connect(@capture.jack_ports, device, output: false)
+          rescue FastAudio::Error => e
+            backends = backends.drop(1)
+            raise if backends.empty?
+            warn "JACK: #{e.message}; trying #{backends.join(', ')}"
+          end
+        end
+
+        @capture ||= FastAudio::Capture.new(
           backends, DeviceOutput.device_index(device, backends: backends, kind: :capture), DeviceOutput.client_name,
           channels, requested_rate, device_rate, period, queue, quality, test_pattern
         )
@@ -141,6 +160,12 @@ module MB
 
       def closed?
         @capture.closed?
+      end
+
+      # The full names of this input's ports on the shared JACK client (see
+      # MB::Sound::Jack), or nil if it isn't a JACK input.
+      def jack_ports
+        @capture.jack_ports
       end
 
       def inspect

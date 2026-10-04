@@ -44,7 +44,6 @@ Gem::Specification.new do |spec|
 
   spec.add_runtime_dependency 'mb-math', '>= 0.5.0.usegit'
   spec.add_runtime_dependency 'mb-util', '>= 0.1.29.usegit'
-  spec.add_runtime_dependency 'mb-sound-jackffi', '>= 0.3.0.usegit'
 
   # For generating MIDI controller templates for ACID
   spec.add_runtime_dependency 'builder', '~> 3.2.4'

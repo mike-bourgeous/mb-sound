@@ -2,7 +2,7 @@ RSpec.describe(MB::Sound::MIDI::GraphVoice, aggregate_failures: true) do
   let (:filename) { 'spec/test_data/midi.mid' }
   let (:clock) { MB::Sound::GraphNode::MidiDsl::DslClock.new }
   let (:midi_file) { MB::Sound::MIDI::MIDIFile.new(filename, clock: clock) }
-  let (:manager) { MB::Sound::MIDI::Manager.new(jack: nil, input: midi_file) }
+  let (:manager) { MB::Sound::MIDI::Manager.new(input: midi_file) }
   let (:voice_count) { 1 }
   let (:voice) { proc { MB::Sound::MIDI::GraphVoice.new(manager: manager) { 0.constant } } }
   let (:voices) { Array.new(voice_count, &voice) }

@@ -199,33 +199,20 @@ module MB
         MB::Sound::FFMPEGOutput.new(filename, channels: channels, sample_rate: sample_rate, **kwargs)
       end
 
-      # When the mb-sound-jackffi gem is present and the :jack_ffi input or
-      # output type is used, this returns a shared instance of the
-      # MB::Sound::JackFFI connection to the Jackd audio server.  Used by
-      # #input and #output.
-      def jack
-        log_level = ENV['JACK_DEBUG'] == '1' ? Logger::DEBUG : Logger::ERROR
-        @jack ||= MB::Sound::JackFFI[].tap { |j| j.logger = Logger.new(STDOUT, level: log_level) }
-      end
-
-      # Tries to auto-detect an input device for recording sound.  Returns a
-      # sound input stream with a :read method for reading all channels, and
-      # :split and :sample methods for use with node graphs (see GraphNode and
-      # GraphNode::IOSampleMixin).
+      # Opens sound input for recording (cached and reused for the same
+      # options).  Returns a sound input stream with a :read method for
+      # reading all channels, and :split and :sample methods for use with node
+      # graphs (see GraphNode and GraphNode::IOSampleMixin).
       #
-      # For input types that support naming a specific device, the INPUT_DEVICE
-      # environment variable, the DEVICE environment variable, or the +:device+
-      # parameter may be used to override the default.  Environment variables
-      # take precedence.  For Jackd, the device is a prefix for port names, with
-      # the default being 'system:capture_'.
+      # The INPUT_DEVICE environment variable, the DEVICE environment
+      # variable, or the +:device+ parameter (a device index or part of its
+      # name) chooses the sound card; environment variables take precedence.
       #
       # The input type may be changed using the INPUT_TYPE environment
-      # variable.  Supported input types are :device (sound cards through
-      # miniaudio; see DeviceInput), :jack_ffi, :jack, :alsa_pulse, :alsa,
-      # and :null.  On macOS, :device is used when JackD is not running.
+      # variable: :device (the default; sound cards through miniaudio, see
+      # DeviceInput for its environment variables) or :null.
       #
-      # See FFMPEGInput, mb-sound-jackffi, JackInput, and AlsaInput for more
-      # flexible recording.
+      # See FFMPEGInput for recording through ffmpeg.
       def input(sample_rate: 48000, channels: 2, device: nil, buffer_size: nil)
         @inputs ||= {}
 
@@ -236,18 +223,6 @@ module MB
         return inp if inp && !(inp.respond_to?(:closed?) && inp.closed?)
 
         case input_type
-        when :jack_ffi
-          inp = jack.input(channels: channels, connect: device || :physical)
-
-        when :jack
-          inp = MB::Sound::JackInput.new(ports: { device: device, count: channels }, buffer_size: buffer_size)
-
-        when :alsa_pulse
-          inp = MB::Sound::AlsaInput.new(device: 'pulse', sample_rate: sample_rate, channels: channels, buffer_size: buffer_size)
-
-        when :alsa
-          inp = MB::Sound::AlsaInput.new(device: device || 'default', sample_rate: sample_rate, channels: channels, buffer_size: buffer_size)
-
         when :device
           inp = MB::Sound::DeviceInput.new(channels: channels, sample_rate: sample_rate, device: device, buffer_size: buffer_size)
 
@@ -256,15 +231,8 @@ module MB
           inp = MB::Sound::NullInput.new(sample_rate: sample_rate, channels: channels)
 
         else
-          raise NotImplementedError, 'TODO: support other platforms'
+          raise ArgumentError, "Unsupported input type: #{input_type.inspect} (use device or null)"
         end
-
-        # mb-sound-jackffi cannot depend on this gem since we depend on it.
-        # Therefore we have to mix in GraphNode stuff here instead of including
-        # it in mb-sound-jackffi.  We could split the node graph code into a
-        # separate gem to get around this.
-        inp.extend(GraphNode) unless inp.is_a?(GraphNode)
-        inp.extend(GraphNode::IOSampleMixin) unless inp.is_a?(GraphNode::IOSampleMixin)
 
         inp = MB::Sound::InputBufferWrapper.new(inp)
         @inputs[info] = inp
@@ -272,68 +240,34 @@ module MB
         inp
       end
 
-      # Returns a Symbol describing the type of input that should be used,
-      # based on operating system-specific detection and the INPUT_TYPE
-      # environment variable.  See #input.
+      # Returns a Symbol describing the type of input that should be used:
+      # INPUT_TYPE, :null for a +device+ of 'null', else :device.  See
+      # #input.
       def detect_input(device)
         return ENV['INPUT_TYPE'].gsub(/^:/, '').to_sym if ENV['INPUT_TYPE']
-
         return :null if device == 'null' || device == ':null' || device == :null
 
-        # TODO: Dedupe with detect_output
-        case RUBY_PLATFORM
-        when /linux/
-          if `pgrep jackd`.strip.length > 0
-            if defined?(JackFFI)
-              :jack_ffi
-            else
-              :jack
-            end
-          elsif `pgrep pulseaudio`.strip.length > 0
-            :alsa_pulse
-          else
-            :alsa
-          end
-
-        when /darwin/
-          if `pgrep jackd`.strip.length > 0
-            if defined?(JackFFI)
-              :jack_ffi
-            else
-              :jack
-            end
-          else
-            :device
-          end
-
-        else
-          raise NotImplementedError, 'TODO: support other platforms'
-        end
+        :device
       end
 
-      # Tries to auto-detect an output device for playing sound.  Returns a sound
-      # output stream with a :write method.
+      # Opens sound output for playing sound.  Returns a sound output stream
+      # with a :write method.
       #
-      # For output types that support naming a specific device, the OUTPUT_DEVICE
-      # environment variable, the DEVICE environment variable or +:device+
-      # parameter may be used to override the default.  Environment variables
-      # take precedence.  For JackD, the device is a prefix for port names, with
-      # the default being 'system:playback_'.  For :ffmpeg, the device is the
-      # ffmpeg output name (an audiotoolbox device index on macOS, or e.g. a
-      # URL when OUTPUT_FORMAT is a streaming format).
+      # The OUTPUT_DEVICE environment variable, the DEVICE environment
+      # variable, or the +:device+ parameter chooses the device; environment
+      # variables take precedence.  For :device outputs it's a device index
+      # or part of its name; for :ffmpeg, the ffmpeg output name (an
+      # audiotoolbox device index on macOS, or e.g. a URL when OUTPUT_FORMAT
+      # is a streaming format).
       #
       # The output type may be changed using the OUTPUT_TYPE environment
-      # variable.  Supported output types are :device (sound cards through
-      # miniaudio; see DeviceOutput for its own environment variables),
-      # :jack_ffi, :jack, :alsa_pulse, :alsa, :ffmpeg (any live ffmpeg
-      # output: OUTPUT_FORMAT sets ffmpeg's -f, default audiotoolbox on macOS
-      # and pulse elsewhere, and OUTPUT_CODEC the codec, default pcm_f32le),
-      # and :null.  On macOS, :ffmpeg is used automatically if JackD is not
-      # running.  The +:output_type+ parameter overrides both the environment
-      # variable and automatic detection.
+      # variable: :device (the default; sound cards through miniaudio, see
+      # DeviceOutput for its own environment variables), :ffmpeg (any live
+      # ffmpeg output: OUTPUT_FORMAT sets ffmpeg's -f, default audiotoolbox on
+      # macOS and pulse elsewhere, and OUTPUT_CODEC the codec, default
+      # pcm_f32le), or :null.  The +:output_type+ parameter overrides both.
       #
-      # See FFMPEGOutput, mb-sound-jackffi, JackOutput, and AlsaOutput for more
-      # flexible playback.
+      # See FFMPEGOutput for writing files.
       #
       # +:profile+ is a latency profile for :device outputs (see
       # DeviceOutput::PROFILES); other output types ignore it.
@@ -373,18 +307,6 @@ module MB
         o = nil
         output_type ||= detect_output
         case output_type
-        when :jack_ffi
-          o = jack.output(channels: channels, connect: device || :physical)
-
-        when :jack
-          o = MB::Sound::JackOutput.new(ports: { device: device, count: channels }, buffer_size: buffer_size)
-
-        when :alsa_pulse
-          o = MB::Sound::AlsaOutput.new(device: 'pulse', sample_rate: sample_rate, channels: channels, buffer_size: buffer_size)
-
-        when :alsa
-          o = MB::Sound::AlsaOutput.new(device: device || 'default', sample_rate: sample_rate, channels: channels, buffer_size: buffer_size)
-
         when :ffmpeg
           # Any live ffmpeg output: OUTPUT_FORMAT is ffmpeg's -f (default
           # audiotoolbox on macOS, pulse elsewhere), OUTPUT_DEVICE/DEVICE the
@@ -414,7 +336,7 @@ module MB
           o = MB::Sound::NullOutput.new(channels: channels, sample_rate: sample_rate, buffer_size: buffer_size)
 
         else
-          raise "Unsupported output type: #{output_type.inspect}"
+          raise ArgumentError, "Unsupported output type: #{output_type.inspect} (use device, ffmpeg, or null)"
         end
 
         @outputs[info] = o if shared
@@ -436,42 +358,12 @@ module MB
         nil
       end
 
-      # Returns a Symbol describing the type of output that should be used,
-      # based on operating system-specific detection and the OUTPUT_TYPE
-      # environment variable.  See #output.
+      # Returns a Symbol describing the type of output that should be used:
+      # OUTPUT_TYPE, else :device (see #output).
       def detect_output
         return ENV['OUTPUT_TYPE'].gsub(/^:/, '').to_sym if ENV['OUTPUT_TYPE']
 
-        case RUBY_PLATFORM
-        when /linux/
-          if `pgrep jackd`.strip.length > 0
-            if defined?(JackFFI)
-              :jack_ffi
-            else
-              :jack
-            end
-          elsif `pgrep pulseaudio`.strip.length > 0
-            :alsa_pulse
-          else
-            :alsa
-          end
-
-        when /darwin/
-          # TODO: mac output is flaky, has glitches when plotting to terminal, and MIDI input crashes when RUBYOPT=--jit
-          # To use JackD instead of ffmpeg: jackd -R -X coremidi -d coreaudio
-          if `pgrep jackd`.strip.length > 0
-            if defined?(JackFFI)
-              :jack_ffi
-            else
-              :jack
-            end
-          else
-            :ffmpeg
-          end
-
-        else
-          raise NotImplementedError, 'TODO: support other platforms'
-        end
+        :device
       end
 
       # Endlessly streams audio in non-overlapping +:block_size+ chunks from

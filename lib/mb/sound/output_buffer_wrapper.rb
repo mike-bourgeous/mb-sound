@@ -14,7 +14,7 @@ module MB
       def_delegators :@output, :sample_rate, :channels, :buffer_size, :closed?
 
       # Creates a buffer wrapper with the given +output+ instance (e.g.
-      # MB::Sound::FFMPEGOutput or MB::Sound::JackFFI::Output).
+      # MB::Sound::FFMPEGOutput or MB::Sound::DeviceOutput).
       #
       # If +:always_pad+ is true, then #flush will zero-pad the data it writes
       # to a multiple of the output buffer size even if the output does not

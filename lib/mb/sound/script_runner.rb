@@ -19,9 +19,9 @@ module MB
     # General scripts (kind :script; utilities, plots, file processors) have
     # only -h/--help: their positional arguments go to the block.
     #
-    # Effects add -i/--input FILE, -c/--input-channels N, and --repeat
-    # [COUNT]; synths add -i/--input MIDI; songs add -b/--bars N and
-    # --bpm BPM.
+    # Effects add -i/--input FILE, -c/--input-channels N, --repeat [COUNT],
+    # and -m/--midi SOURCE (MIDI controls from a port or a MIDI file); synths
+    # add -i/--input MIDI; songs add -b/--bars N and --bpm BPM.
     #
     # Parameters are declared with defaults (and optional descriptions):
     #
@@ -183,8 +183,9 @@ module MB
         # oscillators need
         MB::Sound.master_gain(1)
 
+        # Only the input's ring-out ends an effect (not MIDI file controls)
         play_or_render(graph) do |session|
-          stop_after_ringdown(session, ending_nodes(graph))
+          stop_after_ringdown(session, ending_nodes(graph).grep(GraphNode::Ringdown))
         end
       end
 
@@ -196,6 +197,7 @@ module MB
       # Session::TAIL_QUIET_SECONDS (see MIDI::MIDIFile#ended?).
       def run_synth(&block)
         @params.midi_source = method(:midi)
+        MB::Sound.parameter_maps = !@options[:quiet]
         graph = to_graph(block.arity == 1 ? block.call(@options[:input]) : block.call(@options[:input], @params))
         announce(graph)
         play_or_render(graph) do |session|
@@ -234,16 +236,28 @@ module MB
         block.call(@params)
       end
 
-      # Returns the MidiDsl for live MIDI control (see Values#midi_cc), or
-      # nil when writing a file or when MIDI isn't available.  Tries once.
+      # Returns the MidiDsl for MIDI control (see Values#midi_cc), or nil
+      # when MIDI isn't available.  Tries once.  An effect's --midi SOURCE is
+      # a .mid/.midi file (played along with the graph, also when writing a
+      # file) or part of a port's name to connect to; otherwise live MIDI
+      # comes from a port to connect to, and none is used when writing a
+      # file.
       def midi
         return @midi if defined?(@midi)
 
         @midi = nil
+        source = @options[:midi]
+        if source && File.file?(source)
+          raise "#{source} is not a MIDI file (expected .mid or .midi)" unless source.downcase.end_with?('.mid', '.midi')
+          @midi = MB::Sound.midi_file(source)
+          puts "\e[1mMIDI control from #{source}\e[0m" unless @options[:quiet]
+          return @midi
+        end
+
         return if @options[:output]
 
-        @midi = MB::Sound.midi
-        puts "\e[1mMIDI control enabled\e[0m" unless @options[:quiet]
+        @midi = source ? GraphNode::MidiDsl.new(manager: MB::Sound.midi_manager(source)) : MB::Sound.midi
+        puts "\e[1mMIDI control enabled\e[0m (#{@midi.manager.connections.join(', ')})" unless @options[:quiet]
         @midi
       rescue => e
         puts "\e[38;5;243mMIDI control disabled (#{e.message})\e[0m" unless @options[:quiet]
@@ -297,6 +311,10 @@ module MB
             o.on('-i', '--input FILE', 'An audio file to process (default: live input)') { |v| @options[:input] = v }
             o.on('-c', '--input-channels N', Integer, 'Input channels (live input, or to up/downmix a file)') { |v| @options[:channels] = v }
             o.on('--repeat [COUNT]', Integer, 'Loop the input file COUNT times (forever without COUNT)') { |v| @options[:repeat] = v || -1 }
+            o.on(
+              '-m', '--midi SOURCE',
+              'MIDI controls from a port (part of its name) or a .mid file (default: a port to connect to)'
+            ) { |v| @options[:midi] = v }
           when :synth
             o.on('-i', '--input MIDI', 'A MIDI file, or a MIDI port name (default: live MIDI)') { |v| @options[:input] = v }
           when :song
@@ -529,7 +547,7 @@ module MB
           end
           puts "Rendered #{seconds.round(1)} seconds to #{@options[:output]}"
         else
-          MB::Sound.warm_up # before the first write to the output (see WarmUpMethods)
+          MB::Sound.warm_up(midi: @kind == :synth) # before the first write to the output (see WarmUpMethods)
           MB::Sound.bg(:script, graph, fade: 0)
           yield Session.current if block_given?
           live

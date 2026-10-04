@@ -39,9 +39,12 @@ module MB
     #   JACK_CLIENT_NAME=name          JACK client name (default: script name)
     #
     # JACK servers are never started; JACK is used when a server (jackd or
-    # PipeWire's JACK) is running.  New JACK ports are connected to the
-    # physical outputs once at startup, and later rewiring (qjackctl,
-    # qpwgraph, session managers) is left alone.
+    # PipeWire's JACK) is running, through the script's one shared JACK
+    # client (see MB::Sound::Jack): outputs are out_1, out_2, ... ports next
+    # to the script's inputs and MIDI ports, all on one JACK/PipeWire node.
+    # New ports are connected once (to the physical outputs, or to ports
+    # whose names contain OUTPUT_DEVICE; 'none' for no connections), and
+    # later rewiring (qjackctl, qpwgraph, session managers) is left alone.
     #
     # Example:
     #     out = MB::Sound::DeviceOutput.new(channels: 2)
@@ -128,13 +131,16 @@ module MB
           name[0, 63]
         end
 
-        # True if a JACK server (jackd, or PipeWire's JACK) seems to be
-        # running.
+        # True if a JACK server accepts clients: jackd, or PipeWire through
+        # pipewire-jack (FastAudio.jack_server? loads libjack at run time and opens
+        # and closes a client without starting a server; ~5 ms).  False without
+        # libjack.
+        # Guessing from processes and files failed under PipeWire (no jackd) and
+        # after jackd exits (JACK2 leaves /dev/shm/jack-shm-registry).
         def jack_running?
-          !`pgrep -x 'jackd|jackdbus' 2>/dev/null`.strip.empty? ||
-            !Dir.glob(['/dev/shm/jack-*', "/run/user/#{Process.uid}/jack/*", "/tmp/jack-#{Process.uid}/*"]).empty?
+          FastAudio.jack_server?
         end
-
+        
         # Called by outputs as they open and close, so open outputs are
         # closed at exit before Ruby tears down.
         def track(output, open)
@@ -152,6 +158,10 @@ module MB
 
       # libsamplerate converters for +:resample+ (false or :off for none).
       RESAMPLE_QUALITIES = { best: 0, medium: 1, fastest: 2, zoh: 3, linear: 4, off: -1 }.freeze
+
+      # Seconds without dropouts before an adaptive output's grown queue
+      # shrinks back by a third (see +:adaptive+).
+      SHRINK_AFTER = 10.0
 
       attr_reader :channels, :sample_rate, :device_rate, :buffer_size, :backend, :device_name, :device_channels, :profile
 
@@ -176,7 +186,10 @@ module MB
       #
       # With +:adaptive+ (the default), the queue grows by half after each
       # dropout while audio is being written, up to the :safe profile's
-      # queue, with a note on stderr; the write size and period stay.
+      # queue, with a note on stderr; the write size and period stay.  After
+      # SHRINK_AFTER seconds without dropouts (e.g. after stalls while YJIT
+      # compiles at startup), it shrinks back by a third at a time, down to
+      # where it started (see also #reset_queue).
       def initialize(
         channels: 2, sample_rate: 48000, device: nil, profile: nil, buffer_size: nil, latency: nil, period: nil,
         backends: nil, device_rate: nil, resample: :fastest, set_device_rate: false, adaptive: true, capture: 0
@@ -214,13 +227,35 @@ module MB
         @device_channels = channels == 1 ? 2 : channels
         queue = [(latency * requested_rate).round, @buffer_size * 2, 64].max
 
-        @playback = FastAudio::Playback.new(
+        max_queue = @adaptive ? [max_adaptive_queue(requested_rate), queue].max : 0
+        @jack_connections = nil
+
+        if backends&.first == :jack
+          # Ports on the shared JACK client (see MB::Sound::Jack), falling
+          # back to the other backends if no JACK server answers
+          begin
+            names = Jack.port_names('out', @device_channels)
+            @playback = FastAudio::Playback.new(
+              backends, -1, self.class.client_name, channels, @device_channels, requested_rate, 0, 0,
+              queue, capture, quality, false, max_queue, names
+            )
+            @jack_connections = Jack.connect(@playback.jack_ports, device, output: true)
+          rescue FastAudio::Error => e
+            backends = backends.drop(1)
+            raise if backends.empty?
+            warn "JACK: #{e.message}; trying #{backends.join(', ')}"
+          end
+        end
+
+        @playback ||= FastAudio::Playback.new(
           backends, self.class.device_index(device, backends: backends), self.class.client_name,
           channels, @device_channels, requested_rate, device_rate, period, queue, capture,
-          quality, set_device_rate, @adaptive ? [max_adaptive_queue(requested_rate), queue].max : 0
+          quality, set_device_rate, max_queue
         )
         @underruns_seen = 0
         @last_write = nil
+        @base_queue = @playback.queue_limit
+        @last_change = MB::U.clock_now
 
         @sample_rate = @playback.sample_rate.to_f
         @device_rate = @playback.device_rate.to_f
@@ -282,6 +317,14 @@ module MB
         @playback.max_queue
       end
 
+      # Puts an adaptive output's queue back where it started (it also
+      # shrinks back on its own after SHRINK_AFTER seconds without dropouts).
+      def reset_queue
+        @playback.queue_limit = @base_queue
+        @last_change = MB::U.clock_now
+        nil
+      end
+
       # The sound card's period (frames per callback).
       def period
         @period
@@ -327,6 +370,12 @@ module MB
         @playback.closed?
       end
 
+      # The full names of this output's ports on the shared JACK client (see
+      # MB::Sound::Jack), or nil if it isn't a JACK output.
+      def jack_ports
+        @playback.jack_ports
+      end
+
       def inspect
         rate = resampling? ? "#{@sample_rate.round}Hz->#{@device_rate.round}Hz" : "#{@sample_rate.round}Hz"
         "#<#{self.class.name} #{@backend} #{@device_name.inspect} #{@channels}ch #{rate} #{@profile}#{' closed' if closed?}>"
@@ -350,17 +399,28 @@ module MB
         now = MB::U.clock_now
         active = @last_write && now - @last_write < latency + 0.1
 
+        limit = @playback.queue_limit
         if underruns > @underruns_seen && active
-          limit = @playback.queue_limit
           @playback.queue_limit = (limit * 1.5).ceil # clamped to max_queue
           grown = @playback.queue_limit
           if grown > limit
-            warn "Audio dropout: raising the output queue to #{(grown * 1000.0 / @device_rate).round} ms"
+            warn "Audio dropout: raising the output queue to #{ms(grown)} ms"
           end
+          @last_change = now
+        elsif limit > @base_queue && now - @last_change >= SHRINK_AFTER
+          # No dropouts for a while (e.g. after startup stalls): shrink back
+          # by a third at a time, down to where the queue started
+          @playback.queue_limit = [(limit / 1.5).floor, @base_queue].max
+          warn "No audio dropouts for #{SHRINK_AFTER.round} s: lowering the output queue to #{ms(@playback.queue_limit)} ms"
+          @last_change = now
         end
 
         @underruns_seen = underruns
         @last_write = now
+      end
+
+      def ms(frames)
+        (frames * 1000.0 / @device_rate).round
       end
     end
   end

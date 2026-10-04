@@ -26,9 +26,23 @@ RSpec.describe(MB::Sound::MIDI::Input, :aggregate_failures) do
       expect(MB::Sound::MIDI::Input.api).to eq(:alsa)
     end
 
+    it 'uses JACK even when RtMidi was built without it (JACK MIDI is the shared client)' do
+      stub_const('RUBY_PLATFORM', 'x86_64-linux')
+      allow(MB::Sound::FastMIDI).to receive(:compiled_apis).and_return([:alsa])
+      allow(MB::Sound::DeviceOutput).to receive(:jack_running?).and_return(true)
+      expect(MB::Sound::MIDI::Input.apis).to eq([:alsa, :jack])
+      expect(MB::Sound::MIDI::Input.api).to eq(:jack)
+    end
+
     it 'uses CoreMIDI on macOS' do
       allow(MB::Sound::FastMIDI).to receive(:compiled_apis).and_return([:core])
       expect(MB::Sound::MIDI::Input.api).to eq(:core)
+    end
+  end
+
+  describe 'MB::Sound.midi_manager' do
+    it 'refuses an existing file that is not a MIDI file' do
+      expect { MB::Sound.midi_manager('spec/test_data/make_arp_a7.rb') }.to raise_error(ArgumentError, /make_arp_a7.rb is not a MIDI file/)
     end
   end
 
@@ -37,7 +51,7 @@ RSpec.describe(MB::Sound::MIDI::Input, :aggregate_failures) do
     after(:context) { JackDummy.stop }
     before(:each) { skip @jack_error if @jack_error }
 
-    let!(:output) { MB::Sound::FastMIDI::TestOutput.new(:jack, 'mbspec_keyboard', 'out') }
+    let!(:keyboard) { MB::Sound::FastMIDI::Output.new(:jack, 'mbspec_keyboard', nil, 'out') }
 
     before(:each) do
       ENV['MIDI_API'] = 'jack'
@@ -45,7 +59,8 @@ RSpec.describe(MB::Sound::MIDI::Input, :aggregate_failures) do
     end
     after(:each) do
       @inputs.each(&:close)
-      output.close
+      keyboard.close
+      MB::Sound::Jack.close
     end
 
     def input(**kwargs)
@@ -53,7 +68,7 @@ RSpec.describe(MB::Sound::MIDI::Input, :aggregate_failures) do
     end
 
     def send(*messages)
-      messages.each { |m| output.send_bytes(m.pack('C*')) }
+      messages.each { |m| keyboard.send_bytes(m.pack('C*')) }
     end
 
     # Reads until +count+ events arrive (Manager#update's read format)
@@ -65,6 +80,10 @@ RSpec.describe(MB::Sound::MIDI::Input, :aggregate_failures) do
         sleep 0.005
       end
       events
+    end
+
+    it 'sees the running server' do
+      expect(MB::Sound::DeviceOutput.jack_running?).to eq(true)
     end
 
     it 'lists sources' do
@@ -85,20 +104,63 @@ RSpec.describe(MB::Sound::MIDI::Input, :aggregate_failures) do
       expect(events[1][0]).to be >= 0
     end
 
+    it 'defaults to JACK MIDI when a JACK server answers' do
+      ENV.delete('MIDI_API')
+      expect(MB::Sound::FastAudio.jack_server?).to eq(true)
+      expect(MB::Sound::MIDI::Input.api).to eq(:jack)
+
+      inp = input(connect: 'mbspec_key')
+      expect(inp.api).to eq(:jack)
+      expect(inp.connected_to).to eq('mbspec_keyboard:out')
+
+      sleep 0.05
+      send([0x90, 64, 90])
+      expect(wait_for(inp, 1).map { |_, b| b.bytes }).to eq([[0x90, 64, 90]])
+    end
+
+    it 'also searches ALSA sequencer ports when JACK is the default' do
+      ENV.delete('MIDI_API')
+      allow(MB::Sound::FastMIDI).to receive(:input_ports).and_call_original
+      allow(MB::Sound::FastMIDI).to receive(:input_ports).with(:alsa, anything).and_return(['Launchkey MIDI 20:0'])
+
+      api, index, name, lists = MB::Sound::MIDI::Input.find_port('launchkey', kind: :input)
+      expect([api, index, name]).to eq([:alsa, 0, 'Launchkey MIDI 20:0'])
+      expect(lists.keys).to eq([:jack, :alsa])
+      expect(MB::Sound::MIDI::Input.port_list(lists)).to match(/0: mbspec_keyboard:out \(jack\).*0: Launchkey MIDI 20:0 \(alsa\)/m)
+    end
+
+    it 'searches only ALSA without a JACK server' do
+      ENV.delete('MIDI_API')
+      allow(MB::Sound::DeviceOutput).to receive(:jack_running?).and_return(false)
+      allow(MB::Sound::FastMIDI).to receive(:input_ports).and_call_original
+      allow(MB::Sound::FastMIDI).to receive(:input_ports).with(:alsa, anything).and_return([])
+
+      expect(MB::Sound::MIDI::Input.find_port('mbspec_key', kind: :input)).to eq([:alsa, nil, nil, { alsa: [] }])
+      expect(MB::Sound::FastMIDI).not_to have_received(:input_ports).with(:jack, anything)
+    end
+
     it 'connects to MIDI_DEVICE' do
       ENV['MIDI_DEVICE'] = 'mbspec_key'
       expect(input.connected_to).to eq('mbspec_keyboard:out')
     end
 
-    it 'lists the sources when none match' do
-      expect { input(connect: 'Launchkey') }.to raise_error(ArgumentError, /No MIDI source matches "Launchkey".*0: mbspec_keyboard:out/m)
+    it 'warns with the sources and opens an unconnected port when none match' do
+      inp = nil
+      expect { inp = input(connect: 'Launchkey') }.to output(/No MIDI source matches "Launchkey"; opening an unconnected port.*0: mbspec_keyboard:out/m).to_stderr
+      expect(inp.connected_to).to be_nil
+      expect(inp.connections).to eq(["#{MB::Sound::Jack.client_name}:midi_in"])
     end
 
-    it 'creates a virtual port named after the script when not connecting' do
+    it 'creates midi_in on the script-named JACK client when not connecting' do
+      MB::Sound::Jack.close
       ENV['JACK_CLIENT_NAME'] = 'my_synth'
       inp = input
       expect(inp.connected_to).to be_nil
-      expect(inp.connections).to eq(['my_synth:midi_in (virtual)'])
+      expect(inp.port).to eq('my_synth:midi_in')
+      expect(inp.connections).to eq(['my_synth:midi_in'])
+
+      second = input
+      expect(second.port).to eq('my_synth:midi_in_2')
     end
 
     it 'returns [[]] when nothing has arrived, and waits with blocking: true' do
@@ -132,8 +194,7 @@ RSpec.describe(MB::Sound::MIDI::Input, :aggregate_failures) do
       expect(mod).to be_within(0.01).of(127)
     end
 
-    it 'is what MB::Sound.midi_manager opens for live MIDI (no JackFFI)' do
-      expect(MB::Sound::JackFFI).not_to receive(:[]) if defined?(MB::Sound::JackFFI)
+    it 'is what MB::Sound.midi_manager opens for live MIDI' do
       manager = MB::Sound.midi_manager('mbspec_keyboard')
       @inputs << manager.instance_variable_get(:@midi_in)
       expect(manager.connections).to eq(['mbspec_keyboard:out'])

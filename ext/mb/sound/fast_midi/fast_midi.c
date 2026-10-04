@@ -1,6 +1,7 @@
 /*
- * MIDI input through RtMidi (https://github.com/thestk/rtmidi, vendored
- * 6.0.0, MIT-style license in RtMidi-LICENSE) for MB::Sound::MIDI::DeviceInput:
+ * MIDI input and output through RtMidi (https://github.com/thestk/rtmidi,
+ * vendored 6.0.0, MIT-style license in RtMidi-LICENSE; see README.md for
+ * updating it) for MB::Sound::MIDI::Input and MIDI::Output:
  * CoreMIDI on macOS, the ALSA sequencer and JACK MIDI on Linux.
  *
  * RtMidi's own thread queues incoming messages, and Ruby polls the queue
@@ -19,6 +20,7 @@
 #include <ruby.h>
 
 #include "rtmidi_c.h"
+
 
 // The longest message (e.g. SysEx) read at once
 #define MAX_MESSAGE 65536
@@ -64,6 +66,7 @@ static void check(RtMidiPtr device, const char *what)
 
 // Frees +device+ (an input if +input+, else an output) and raises
 // FastMIDI::Error saying +what+ failed.
+NORETURN(static void fail(RtMidiPtr device, int input, const char *what));
 static void fail(RtMidiPtr device, int input, const char *what)
 {
 	if (device != NULL) {
@@ -98,6 +101,12 @@ static VALUE port_names(RtMidiPtr device)
 	}
 
 	return names;
+}
+
+// port_names for rb_protect, which passes a VALUE.
+static VALUE protected_port_names(VALUE device)
+{
+	return port_names((RtMidiPtr)device);
 }
 
 /*
@@ -135,7 +144,7 @@ static VALUE ruby_input_ports(VALUE self, VALUE api, VALUE client_name)
 	}
 
 	int state;
-	VALUE names = rb_protect((VALUE (*)(VALUE))port_names, (VALUE)device, &state);
+	VALUE names = rb_protect(protected_port_names, (VALUE)device, &state);
 	rtmidi_in_free(device);
 	if (state) {
 		rb_jump_tag(state);
@@ -316,10 +325,11 @@ static VALUE input_closed(VALUE self)
 
 /* Test output ---------------------------------------------------------------- */
 
-// A minimal MIDI output for specs (sending messages into a DeviceInput
-// through a JACK dummy server).  Full MIDI output is a later project.
+// A minimal MIDI output (MB::Sound::MIDI::Output): sends raw messages to a
+// virtual port or a connected destination.  A fuller MIDI output (clocks,
+// scheduling) is part of a later sequence/MIDI/synth overhaul.
 
-static void test_output_free(void *ptr)
+static void output_free(void *ptr)
 {
 	RtMidiOutPtr device = ptr;
 	if (device != NULL) {
@@ -328,68 +338,115 @@ static void test_output_free(void *ptr)
 	}
 }
 
-static const rb_data_type_t test_output_type = {
-	.wrap_struct_name = "MB::Sound::FastMIDI::TestOutput",
+static const rb_data_type_t output_type = {
+	.wrap_struct_name = "MB::Sound::FastMIDI::Output",
 	.function = {
 		.dmark = NULL,
-		.dfree = test_output_free,
+		.dfree = output_free,
 		.dsize = NULL,
 	},
 	.flags = RUBY_TYPED_FREE_IMMEDIATELY,
 };
 
+static RtMidiOutPtr get_output(VALUE self)
+{
+	RtMidiOutPtr device;
+	TypedData_Get_Struct(self, struct RtMidiWrapper, &output_type, device);
+	if (device == NULL) {
+		rb_raise(rb_eIOError, "This MIDI output is closed");
+	}
+	return device;
+}
+
 /*
  * call-seq:
- *   TestOutput.new(api, client_name, port_name) -> output
+ *   MB::Sound::FastMIDI.output_ports(api, client_name) -> [name, ...]
  *
- * Opens a virtual MIDI output port named +port_name+ (for specs).
+ * Lists the MIDI destinations +api+ (a Symbol, or nil for RtMidi's choice)
+ * can send to.
  */
-static VALUE test_output_new(VALUE klass, VALUE api, VALUE client_name, VALUE port_name)
+static VALUE ruby_output_ports(VALUE self, VALUE api, VALUE client_name)
 {
 	RtMidiOutPtr device = rtmidi_out_create(sym_to_api(api), StringValueCStr(client_name));
 	if (device == NULL || !device->ok) {
 		fail(device, 0, "Starting MIDI output");
 	}
 
-	VALUE self = TypedData_Wrap_Struct(klass, &test_output_type, device);
+	int state;
+	VALUE names = rb_protect(protected_port_names, (VALUE)device, &state);
+	rtmidi_out_free(device);
+	if (state) {
+		rb_jump_tag(state);
+	}
 
-	rtmidi_open_virtual_port(device, StringValueCStr(port_name));
-	check(device, "Opening a virtual MIDI output port");
+	return names;
+}
+
+/*
+ * call-seq:
+ *   Output.new(api, client_name, port_index, port_name) -> output
+ *
+ * Opens MIDI output through +api+ as client +client_name+: connected to
+ * destination +port_index+ (see FastMIDI.output_ports) with our port named
+ * +port_name+, or with nil, a virtual source named +port_name+ that other
+ * programs connect to.
+ */
+static VALUE output_new(VALUE klass, VALUE api, VALUE client_name, VALUE port_index, VALUE port_name)
+{
+	RtMidiOutPtr device = rtmidi_out_create(sym_to_api(api), StringValueCStr(client_name));
+	if (device == NULL || !device->ok) {
+		fail(device, 0, "Starting MIDI output");
+	}
+
+	VALUE self = TypedData_Wrap_Struct(klass, &output_type, device);
+
+	if (NIL_P(port_index)) {
+		rtmidi_open_virtual_port(device, StringValueCStr(port_name));
+	} else {
+		rtmidi_open_port(device, NUM2UINT(port_index), StringValueCStr(port_name));
+	}
+	check(device, "Opening the MIDI output port");
 
 	return self;
 }
 
 /*
  * call-seq:
- *   test_output.close -> nil
+ *   output.close -> nil
  *
- * Closes the port and frees the JACK/ALSA client.  Safe to call more than
- * once.
+ * Closes the port and frees the client.  Safe to call more than once.
  */
-static VALUE test_output_close(VALUE self)
+static VALUE output_close(VALUE self)
 {
 	RtMidiOutPtr device;
-	TypedData_Get_Struct(self, struct RtMidiWrapper, &test_output_type, device);
+	TypedData_Get_Struct(self, struct RtMidiWrapper, &output_type, device);
 	if (device != NULL) {
 		DATA_PTR(self) = NULL;
-		test_output_free(device);
+		output_free(device);
 	}
 	return Qnil;
 }
 
+static VALUE output_closed(VALUE self)
+{
+	return DATA_PTR(self) == NULL ? Qtrue : Qfalse;
+}
+
+/* The MIDI API in use, as a Symbol. */
+static VALUE output_api(VALUE self)
+{
+	return api_to_sym(rtmidi_out_get_current_api(get_output(self)));
+}
+
 /*
  * call-seq:
- *   test_output.send_bytes(string) -> nil
+ *   output.send_bytes(string) -> nil
  *
  * Sends one MIDI message (its bytes as a String).
  */
-static VALUE test_output_send(VALUE self, VALUE bytes)
+static VALUE output_send(VALUE self, VALUE bytes)
 {
-	RtMidiOutPtr device;
-	TypedData_Get_Struct(self, struct RtMidiWrapper, &test_output_type, device);
-	if (device == NULL) {
-		rb_raise(rb_eIOError, "This MIDI output is closed");
-	}
+	RtMidiOutPtr device = get_output(self);
 	StringValue(bytes);
 	rtmidi_out_send_message(device, (const unsigned char *)RSTRING_PTR(bytes), (int)RSTRING_LEN(bytes));
 	check(device, "Sending MIDI");
@@ -407,6 +464,7 @@ void Init_fast_midi(void)
 	rb_define_const(fast_midi, "RTMIDI_VERSION", rb_str_freeze(rb_str_new_cstr(rtmidi_get_version())));
 	rb_define_module_function(fast_midi, "compiled_apis", ruby_compiled_apis, 0);
 	rb_define_module_function(fast_midi, "input_ports", ruby_input_ports, 2);
+	rb_define_module_function(fast_midi, "output_ports", ruby_output_ports, 2);
 
 	VALUE input = rb_define_class_under(fast_midi, "Input", rb_cObject);
 	rb_define_alloc_func(input, input_alloc);
@@ -417,9 +475,11 @@ void Init_fast_midi(void)
 	rb_define_method(input, "close", input_close, 0);
 	rb_define_method(input, "closed?", input_closed, 0);
 
-	VALUE test_output = rb_define_class_under(fast_midi, "TestOutput", rb_cObject);
-	rb_undef_alloc_func(test_output);
-	rb_define_singleton_method(test_output, "new", test_output_new, 3);
-	rb_define_method(test_output, "send_bytes", test_output_send, 1);
-	rb_define_method(test_output, "close", test_output_close, 0);
+	VALUE output = rb_define_class_under(fast_midi, "Output", rb_cObject);
+	rb_undef_alloc_func(output);
+	rb_define_singleton_method(output, "new", output_new, 4);
+	rb_define_method(output, "send_bytes", output_send, 1);
+	rb_define_method(output, "api", output_api, 0);
+	rb_define_method(output, "close", output_close, 0);
+	rb_define_method(output, "closed?", output_closed, 0);
 }

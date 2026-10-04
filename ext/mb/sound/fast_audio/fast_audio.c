@@ -24,15 +24,18 @@
 #include <errno.h>
 #include <unistd.h>
 #include <math.h>
+#include <stdio.h>
 
 #include <samplerate.h>
 
 #include <ruby.h>
 #include <ruby/thread.h>
+#include <ruby/encoding.h>
 
 #include "numo/narray.h"
 
 #include "mb_miniaudio.h"
+#include "mb_jack.h"
 
 #define MAX_CHANNELS 64
 #define MAX_BACKENDS 16
@@ -118,6 +121,9 @@ static void init_context(ma_context *context, VALUE backends, const char *client
 	ma_context_config config = ma_context_config_init();
 	config.jack.pClientName = client_name;
 	config.jack.tryStartServer = MA_FALSE;
+	// The PulseAudio client (and PipeWire node) name; else libpulse uses the
+	// process name ("ruby").  miniaudio copies it.
+	config.pulse.pApplicationName = client_name;
 
 	ma_result result = ma_context_init(count ? list : NULL, count, &config, context);
 	if (result != MA_SUCCESS) {
@@ -190,6 +196,133 @@ static VALUE ruby_devices(VALUE self, VALUE backends, VALUE client_name)
 }
 
 /*
+ * call-seq: MB::Sound::FastAudio.jack_server? -> true or false
+ *
+ * True if a JACK server (jackd, or PipeWire through pipewire-jack) accepts
+ * a client, checked by opening and closing one without starting a server
+ * (~5 ms; true right away if the shared JACK client is open).  libjack is
+ * loaded at run time, and its connection errors are silenced during the
+ * check.  False if libjack can't be loaded.
+ */
+static VALUE ruby_jack_server(VALUE self)
+{
+	return mb_jack_probe() ? Qtrue : Qfalse;
+}
+
+// Converts a NULL-terminated JACK name list to an Array and frees it.
+static VALUE jack_list_to_array(const char **list)
+{
+	VALUE result = rb_ary_new();
+	if (list != NULL) {
+		for (size_t i = 0; list[i] != NULL; i++) {
+			rb_ary_push(result, rb_utf8_str_new_cstr(list[i]));
+		}
+		mb_jack_free_list(list);
+	}
+	return result;
+}
+
+/*
+ * call-seq: MB::Sound::FastAudio.jack_open(client_name) -> nil
+ *
+ * Opens the process's shared JACK client (see Playback.new's +jack_ports+)
+ * if it isn't open, raising FastAudio::Error if no JACK server answers.
+ */
+static VALUE ruby_jack_open(VALUE self, VALUE name)
+{
+	const char *error = mb_jack_open(StringValueCStr(name));
+	RB_GC_GUARD(name);
+	if (error != NULL) {
+		rb_raise(cError, "%s", error);
+	}
+	return Qnil;
+}
+
+/*
+ * call-seq: MB::Sound::FastAudio.jack_info -> Hash or nil
+ *
+ * The shared JACK client's :client_name, :sample_rate, :buffer_size, and
+ * :cycles (process cycles run), or nil if it isn't open.
+ */
+static VALUE ruby_jack_info(VALUE self)
+{
+	if (!mb_jack_is_open()) {
+		return Qnil;
+	}
+
+	VALUE h = rb_hash_new();
+	rb_hash_aset(h, ID2SYM(rb_intern("client_name")), rb_utf8_str_new_cstr(mb_jack_client_name()));
+	rb_hash_aset(h, ID2SYM(rb_intern("sample_rate")), UINT2NUM(mb_jack_sample_rate()));
+	rb_hash_aset(h, ID2SYM(rb_intern("buffer_size")), UINT2NUM(mb_jack_buffer_size()));
+	rb_hash_aset(h, ID2SYM(rb_intern("cycles")), SIZET2NUM(mb_jack_cycles()));
+	return h;
+}
+
+/*
+ * call-seq: MB::Sound::FastAudio.jack_close -> nil
+ *
+ * Closes the shared JACK client; its outputs and inputs stop.
+ */
+static VALUE ruby_jack_close(VALUE self)
+{
+	mb_jack_close();
+	return Qnil;
+}
+
+/*
+ * call-seq: MB::Sound::FastAudio.jack_ports(pattern, midi, flags) -> [names]
+ *
+ * Names of the JACK ports matching +pattern+ (a regular expression String,
+ * or nil for all), of MIDI type if +midi+ is true, audio if false, any if
+ * nil, with all of +flags+ (JACK_PORT_IS_INPUT, _OUTPUT, _PHYSICAL).
+ */
+static VALUE ruby_jack_ports(VALUE self, VALUE pattern, VALUE midi, VALUE flags)
+{
+	const char *type = NIL_P(midi) ? NULL : RTEST(midi) ? MB_JACK_MIDI_TYPE : MB_JACK_AUDIO_TYPE;
+	const char *cpattern = NIL_P(pattern) ? NULL : StringValueCStr(pattern);
+	VALUE result = jack_list_to_array(mb_jack_get_ports(cpattern, type, NUM2ULONG(flags)));
+	RB_GC_GUARD(pattern);
+	return result;
+}
+
+/*
+ * call-seq: MB::Sound::FastAudio.jack_connect(source, destination) -> true or false
+ *
+ * Connects two JACK ports by full name; true on success or if they were
+ * already connected.
+ */
+static VALUE ruby_jack_connect(VALUE self, VALUE source, VALUE destination)
+{
+	int result = mb_jack_connect(StringValueCStr(source), StringValueCStr(destination));
+	RB_GC_GUARD(source);
+	RB_GC_GUARD(destination);
+	return result == 0 || result == EEXIST ? Qtrue : Qfalse;
+}
+
+/*
+ * call-seq: MB::Sound::FastAudio.jack_disconnect(source, destination) -> true or false
+ */
+static VALUE ruby_jack_disconnect(VALUE self, VALUE source, VALUE destination)
+{
+	int result = mb_jack_disconnect(StringValueCStr(source), StringValueCStr(destination));
+	RB_GC_GUARD(source);
+	RB_GC_GUARD(destination);
+	return result == 0 ? Qtrue : Qfalse;
+}
+
+/*
+ * call-seq: MB::Sound::FastAudio.jack_connections(port_name) -> [names]
+ *
+ * The full names of the ports connected to one of the shared client's
+ * ports (or any port), by full name.
+ */
+static VALUE ruby_jack_connections(VALUE self, VALUE name)
+{
+	VALUE result = jack_list_to_array(mb_jack_connections_by_name(StringValueCStr(name)));
+	RB_GC_GUARD(name);
+	return result;
+}
+/*
  * call-seq:
  *   MB::Sound::FastAudio.enabled_backends -> [:pulseaudio, :alsa, :jack, :null]
  *
@@ -215,6 +348,84 @@ static VALUE ruby_enabled_backends(VALUE self)
 
 	return list;
 }
+
+
+/* Devices ------------------------------------------------------------------ */
+
+// What Ruby can ask about an open device, from miniaudio or from the shared
+// JACK client.  +ready+ is set while the device or JACK ports are open.
+struct dev_info {
+	int ready;
+	ma_uint32 rate;
+	ma_uint32 period;
+	ma_uint32 periods;
+	char name[256];
+	VALUE backend; // a Symbol (static, so not marked)
+};
+
+static void dev_info_from_miniaudio(struct dev_info *info, ma_device *device, int capture)
+{
+	info->ready = 1;
+	info->rate = device->sampleRate;
+	info->period = capture ? device->capture.internalPeriodSizeInFrames : device->playback.internalPeriodSizeInFrames;
+	info->periods = capture ? device->capture.internalPeriods : device->playback.internalPeriods;
+	snprintf(info->name, sizeof(info->name), "%s", capture ? device->capture.name : device->playback.name);
+	info->backend = backend_to_sym(device->pContext->backend);
+}
+
+static void dev_info_from_jack(struct dev_info *info)
+{
+	info->ready = 1;
+	info->rate = mb_jack_sample_rate();
+	info->period = mb_jack_buffer_size();
+	info->periods = 1;
+	snprintf(info->name, sizeof(info->name), "%s", mb_jack_client_name());
+	info->backend = ID2SYM(rb_intern("jack"));
+}
+
+// Registers +names+ (an Array of Strings) as ports of +unit+ on the shared
+// JACK client named +client_name+ (opened if needed), raising on failure.
+static void jack_register_ports(struct mb_jack_unit *unit, const char *client_name, VALUE names, int midi, int output)
+{
+	Check_Type(names, T_ARRAY);
+	long count = RARRAY_LEN(names);
+	if (count < 1 || count > MB_JACK_MAX_PORTS) {
+		rb_raise(rb_eArgError, "Pass 1..%d JACK port names (got %ld)", MB_JACK_MAX_PORTS, count);
+	}
+
+	const char *error = mb_jack_open(client_name);
+	if (error != NULL) {
+		rb_raise(cError, "%s", error);
+	}
+
+	const char *cnames[MB_JACK_MAX_PORTS];
+	for (long i = 0; i < count; i++) {
+		VALUE name = rb_ary_entry(names, i);
+		cnames[i] = StringValueCStr(name);
+	}
+
+	error = mb_jack_register(unit, cnames, (int)count, midi, output);
+	RB_GC_GUARD(names);
+	if (error != NULL) {
+		rb_raise(cError, "%s", error);
+	}
+}
+
+// The full names (client:port) of +unit+'s ports.
+static VALUE jack_port_names(struct mb_jack_unit *unit)
+{
+	VALUE list = rb_ary_new_capa(unit->port_count);
+	for (int i = 0; i < unit->port_count; i++) {
+		rb_ary_push(list, rb_utf8_str_new_cstr(mb_jack_port_name(unit->ports[i])));
+	}
+	return list;
+}
+
+// Converts between interleaved scratch frames and JACK's per-port buffers,
+// a chunk at a time, on JACK's thread (only one runs, so one scratch buffer
+// serves every unit).
+#define JACK_CHUNK 1024
+static float jack_scratch[JACK_CHUNK * MB_JACK_MAX_PORTS];
 
 
 /* Playback ----------------------------------------------------------------- */
@@ -251,6 +462,11 @@ struct playback {
 	int context_ready;
 	int device_ready;
 
+	// The device, from miniaudio or the shared JACK client (see dev_info)
+	struct dev_info info;
+	int jack; // ports on the shared JACK client instead of a miniaudio device
+	struct mb_jack_unit unit;
+
 	// Optional record of the first capture_frames frames played (for specs)
 	float *capture;
 	size_t capture_frames;
@@ -274,11 +490,17 @@ struct playback {
 // thread may still be looking at until it sees that the output is closed).
 static void playback_release_device(struct playback *p)
 {
+	p->info.ready = 0;
+
 	// A forked child has no device thread to stop; leave the copies alone.
 	if (p->pid != getpid()) {
 		p->device_ready = 0;
 		p->context_ready = 0;
 		return;
+	}
+
+	if (p->jack) {
+		mb_jack_detach(&p->unit);
 	}
 
 	if (p->device_ready) {
@@ -349,12 +571,11 @@ static struct playback *get_playback(VALUE self)
 	return p;
 }
 
-// miniaudio's device thread.  Realtime safe: no Ruby, no allocation, no
-// blocking locks.
-static void playback_callback(ma_device *device, void *output, const void *input, ma_uint32 frames)
+// Takes +frames+ interleaved frames from the ring into +out+ (silence where
+// it runs out), for miniaudio's device thread or JACK's.  Realtime safe: no
+// Ruby, no allocation, no blocking locks.
+static void playback_pull(struct playback *p, float *out, size_t frames)
 {
-	struct playback *p = device->pUserData;
-	float *out = output;
 	size_t ch = p->out_channels;
 	size_t mask = p->capacity - 1;
 
@@ -410,17 +631,55 @@ static void playback_callback(ma_device *device, void *output, const void *input
 	}
 }
 
+// miniaudio's device thread
+static void playback_callback(ma_device *device, void *output, const void *input, ma_uint32 frames)
+{
+	(void)input;
+	playback_pull(device->pUserData, output, frames);
+}
+
+// JACK's thread: the ring's interleaved frames to one buffer per port
+static void playback_jack_process(struct mb_jack_unit *unit, uint32_t nframes)
+{
+	struct playback *p = unit->user;
+	size_t ch = p->out_channels;
+	float *buffers[MB_JACK_MAX_PORTS];
+
+	for (size_t c = 0; c < ch; c++) {
+		buffers[c] = mb_jack_port_buffer(unit->ports[c], nframes);
+	}
+
+	for (size_t done = 0; done < nframes; done += JACK_CHUNK) {
+		size_t n = nframes - done < JACK_CHUNK ? nframes - done : JACK_CHUNK;
+		playback_pull(p, jack_scratch, n);
+		for (size_t i = 0; i < n; i++) {
+			for (size_t c = 0; c < ch; c++) {
+				buffers[c][done + i] = jack_scratch[i * ch + c];
+			}
+		}
+	}
+}
+
+// Marks the output stopped and wakes the writer (from a device thread)
+static void playback_stop(struct playback *p)
+{
+	atomic_store(&p->stopped, 1);
+
+	if (pthread_mutex_trylock(&p->lock) == 0) {
+		pthread_cond_broadcast(&p->space);
+		pthread_mutex_unlock(&p->lock);
+	}
+}
+
+static void playback_jack_shutdown(struct mb_jack_unit *unit)
+{
+	playback_stop(unit->user);
+}
+
 static void playback_notification(const ma_device_notification *notification)
 {
-	struct playback *p = notification->pDevice->pUserData;
-
 	if (notification->type == ma_device_notification_type_stopped) {
-		atomic_store(&p->stopped, 1);
-
-		if (pthread_mutex_trylock(&p->lock) == 0) {
-			pthread_cond_broadcast(&p->space);
-			pthread_mutex_unlock(&p->lock);
-		}
+		playback_stop(notification->pDevice->pUserData);
 	}
 }
 
@@ -504,23 +763,16 @@ struct open_args {
 	ma_uint32 period;
 	int resample_quality;
 	int allow_rate_change;
+	VALUE jack_ports; // port names on the shared JACK client, or nil
 };
 
-static VALUE playback_open_body(VALUE arg)
+// Sets up resampling and allocates the ring once the device's rate and
+// period are known (p->info).
+static void playback_setup_queue(struct playback *p, struct open_args *a)
 {
-	struct open_args *a = (struct open_args *)arg;
-
-	struct playback *p = a->p;
-
-	init_context(&p->context, a->backends, a->client_name);
-	p->context_ready = 1;
-
-	ma_uint32 ask = a->device_rate ? a->device_rate : a->sample_rate;
-	playback_open_device(p, a->device_index, ask, a->period, a->allow_rate_change);
-
 	// Resample from the writer's rate to the device's, unless told not to
 	// (then the writer must use the device's rate; see #sample_rate).
-	ma_uint32 device_rate = p->device.sampleRate;
+	ma_uint32 device_rate = p->info.rate;
 	p->input_rate = device_rate;
 	if (a->sample_rate != 0 && device_rate != a->sample_rate && a->resample_quality >= 0) {
 		int error = 0;
@@ -538,8 +790,8 @@ static VALUE playback_open_body(VALUE arg)
 
 	// The queue must hold at least two device periods, or the device runs
 	// dry on every callback.  The ring is allocated now that the period is
-	// known (the callback only runs after ma_device_start).
-	size_t min_queue = 2 * (size_t)p->device.playback.internalPeriodSizeInFrames;
+	// known (the callback only runs after the device starts).
+	size_t min_queue = 2 * (size_t)p->info.period;
 	if (p->queue_limit < min_queue) {
 		p->queue_limit = min_queue;
 	}
@@ -557,6 +809,34 @@ static VALUE playback_open_body(VALUE arg)
 		rb_raise(rb_eNoMemError, "Could not allocate the audio queue");
 	}
 	p->capacity = capacity;
+}
+
+static VALUE playback_open_body(VALUE arg)
+{
+	struct open_args *a = (struct open_args *)arg;
+	struct playback *p = a->p;
+
+	if (!NIL_P(a->jack_ports)) {
+		p->jack = 1;
+		p->unit.process = playback_jack_process;
+		p->unit.shutdown = playback_jack_shutdown;
+		p->unit.user = p;
+		jack_register_ports(&p->unit, a->client_name, a->jack_ports, 0, 1);
+		dev_info_from_jack(&p->info);
+		playback_setup_queue(p, a);
+
+		atomic_store(&p->open, 1);
+		mb_jack_attach(&p->unit);
+		return Qnil;
+	}
+
+	init_context(&p->context, a->backends, a->client_name);
+	p->context_ready = 1;
+
+	ma_uint32 ask = a->device_rate ? a->device_rate : a->sample_rate;
+	playback_open_device(p, a->device_index, ask, a->period, a->allow_rate_change);
+	dev_info_from_miniaudio(&p->info, &p->device, 0);
+	playback_setup_queue(p, a);
 
 	atomic_store(&p->open, 1);
 	ma_result result = ma_device_start(&a->p->device);
@@ -603,12 +883,35 @@ static VALUE playback_open_rescue(VALUE arg, VALUE exception)
  * #queue_limit= may raise it to later (the ring is sized for it).
  * +capture_frames+ records that many played frames for #captured (0 for
  * none; for specs).
+ *
+ * With +jack_ports+ (an Array of port names, one per output channel), the
+ * output is a set of ports on the process's shared JACK client named
+ * +client_name+ (opened on first use) instead of a miniaudio device, so
+ * every JACK port of the process is on one JACK/PipeWire node; +backends+,
+ * +device_index+, +device_rate+, +period+, and +allow_rate_change+ are
+ * ignored, and the JACK server's rate and buffer size are the device's.
  */
-static VALUE playback_initialize(VALUE self, VALUE backends, VALUE device_index, VALUE client_name,
-		VALUE in_channels, VALUE out_channels, VALUE sample_rate, VALUE device_rate, VALUE period,
-		VALUE queue_frames, VALUE capture_frames, VALUE resample_quality, VALUE allow_rate_change,
-		VALUE max_queue_frames)
+static VALUE playback_initialize(int argc, VALUE *argv, VALUE self)
 {
+	VALUE backends, device_index, client_name, in_channels, out_channels, sample_rate, device_rate,
+	      period, queue_frames, capture_frames, resample_quality, allow_rate_change, max_queue_frames,
+	      jack_ports;
+	rb_check_arity(argc, 13, 14);
+	backends = argv[0];
+	device_index = argv[1];
+	client_name = argv[2];
+	in_channels = argv[3];
+	out_channels = argv[4];
+	sample_rate = argv[5];
+	device_rate = argv[6];
+	period = argv[7];
+	queue_frames = argv[8];
+	capture_frames = argv[9];
+	resample_quality = argv[10];
+	allow_rate_change = argv[11];
+	max_queue_frames = argv[12];
+	jack_ports = argc > 13 ? argv[13] : Qnil;
+
 	struct playback *p;
 	TypedData_Get_Struct(self, struct playback, &playback_type, p);
 	if (p->data != NULL) {
@@ -622,6 +925,12 @@ static VALUE playback_initialize(VALUE self, VALUE backends, VALUE device_index,
 	}
 	if (in_ch != 1 && in_ch != out_ch) {
 		rb_raise(rb_eArgError, "Input channels must be 1 or %d (got %d)", out_ch, in_ch);
+	}
+	if (!NIL_P(jack_ports)) {
+		Check_Type(jack_ports, T_ARRAY);
+		if (RARRAY_LEN(jack_ports) != out_ch) {
+			rb_raise(rb_eArgError, "Pass one JACK port name per output channel (%d, got %ld)", out_ch, RARRAY_LEN(jack_ports));
+		}
 	}
 
 	long queue = NUM2LONG(queue_frames);
@@ -654,6 +963,7 @@ static VALUE playback_initialize(VALUE self, VALUE backends, VALUE device_index,
 		.period = NUM2UINT(period),
 		.resample_quality = quality,
 		.allow_rate_change = RTEST(allow_rate_change),
+		.jack_ports = jack_ports,
 	};
 
 	p->in_channels = in_ch;
@@ -673,6 +983,7 @@ static VALUE playback_initialize(VALUE self, VALUE backends, VALUE device_index,
 	rb_rescue2(playback_open_body, (VALUE)&args, playback_open_rescue, (VALUE)&args, rb_eException, (VALUE)0);
 
 	RB_GC_GUARD(client_name);
+	RB_GC_GUARD(jack_ports);
 
 	return self;
 }
@@ -910,7 +1221,7 @@ static VALUE playback_close(VALUE self)
 {
 	struct playback *p = get_playback(self);
 
-	if (atomic_exchange(&p->open, 0) || p->device_ready || p->context_ready) {
+	if (atomic_exchange(&p->open, 0) || p->device_ready || p->context_ready || p->info.ready) {
 		playback_release_device(p);
 
 		if (p->pid == getpid()) {
@@ -926,14 +1237,14 @@ static VALUE playback_closed(VALUE self)
 	return atomic_load(&get_playback(self)->open) ? Qfalse : Qtrue;
 }
 
-// Returns a device property, raising if the device is closed.
-static ma_device *open_device(VALUE self)
+// The open device's properties, raising if it's closed.
+static struct dev_info *open_device(VALUE self)
 {
 	struct playback *p = get_playback(self);
-	if (!p->device_ready) {
+	if (!p->info.ready) {
 		rb_raise(rb_eIOError, "This output is closed");
 	}
-	return &p->device;
+	return &p->info;
 }
 
 /* The sample rate #write's audio is at (resampled to #device_rate if they differ). */
@@ -946,7 +1257,7 @@ static VALUE playback_sample_rate(VALUE self)
 /* The sample rate the device runs at. */
 static VALUE playback_device_rate(VALUE self)
 {
-	return UINT2NUM(open_device(self)->sampleRate);
+	return UINT2NUM(open_device(self)->rate);
 }
 
 /* True if #write resamples to the device's rate. */
@@ -958,25 +1269,32 @@ static VALUE playback_resampling(VALUE self)
 /* The device's period (callback size) in frames. */
 static VALUE playback_period(VALUE self)
 {
-	return UINT2NUM(open_device(self)->playback.internalPeriodSizeInFrames);
+	return UINT2NUM(open_device(self)->period);
 }
 
 /* The number of periods in the device's own buffer. */
 static VALUE playback_periods(VALUE self)
 {
-	return UINT2NUM(open_device(self)->playback.internalPeriods);
+	return UINT2NUM(open_device(self)->periods);
 }
 
 /* The name of the device. */
 static VALUE playback_device_name(VALUE self)
 {
-	return rb_utf8_str_new_cstr(open_device(self)->playback.name);
+	return rb_utf8_str_new_cstr(open_device(self)->name);
 }
 
 /* The backend in use, as a Symbol (e.g. :coreaudio, :jack). */
 static VALUE playback_backend(VALUE self)
 {
-	return backend_to_sym(open_device(self)->pContext->backend);
+	return open_device(self)->backend;
+}
+
+/* The JACK port names (client:port), or nil for a miniaudio device. */
+static VALUE playback_jack_ports(VALUE self)
+{
+	struct playback *p = get_playback(self);
+	return p->jack && p->info.ready ? jack_port_names(&p->unit) : Qnil;
 }
 
 /* The number of channels sent to the device. */
@@ -1009,7 +1327,7 @@ static VALUE playback_set_queue_limit(VALUE self, VALUE frames)
 {
 	struct playback *p = get_playback(self);
 	size_t n = NUM2SIZET(frames);
-	size_t min = 2 * (size_t)open_device(self)->playback.internalPeriodSizeInFrames;
+	size_t min = 2 * (size_t)open_device(self)->period;
 
 	if (n < min) {
 		n = min;
@@ -1101,6 +1419,10 @@ struct capture {
 	int context_ready;
 	int device_ready;
 
+	struct dev_info info; // see dev_info
+	int jack; // ports on the shared JACK client instead of a miniaudio device
+	struct mb_jack_unit unit;
+
 	ma_uint32 output_rate; // the rate #read returns
 	SRC_STATE *src;
 	double src_ratio; // output rate / device rate
@@ -1116,10 +1438,16 @@ struct capture {
 
 static void capture_release_device(struct capture *c)
 {
+	c->info.ready = 0;
+
 	if (c->pid != getpid()) {
 		c->device_ready = 0;
 		c->context_ready = 0;
 		return;
+	}
+
+	if (c->jack) {
+		mb_jack_detach(&c->unit);
 	}
 
 	if (c->device_ready) {
@@ -1189,11 +1517,11 @@ static struct capture *get_capture(VALUE self)
 	return c;
 }
 
-// miniaudio's device thread.  Realtime safe: no Ruby, no allocation, no
+// Adds +frames+ interleaved frames from +in+ to the ring, for miniaudio's
+// device thread or JACK's.  Realtime safe: no Ruby, no allocation, no
 // blocking locks.
-static void capture_callback(ma_device *device, void *output, const void *input, ma_uint32 frames)
+static void capture_push(struct capture *c, const float *in, size_t frames)
 {
-	struct capture *c = device->pUserData;
 	size_t ch = c->channels;
 	size_t mask = c->capacity - 1;
 
@@ -1207,7 +1535,6 @@ static void capture_callback(ma_device *device, void *output, const void *input,
 		count = room;
 	}
 
-	const float *in = input;
 	for (size_t i = 0; i < count; i++) {
 		float *dst = c->data + ((wp + i) & mask) * ch;
 		if (c->test_pattern) {
@@ -1231,17 +1558,55 @@ static void capture_callback(ma_device *device, void *output, const void *input,
 	}
 }
 
+// miniaudio's device thread
+static void capture_callback(ma_device *device, void *output, const void *input, ma_uint32 frames)
+{
+	(void)output;
+	capture_push(device->pUserData, input, frames);
+}
+
+// JACK's thread: one buffer per port to the ring's interleaved frames
+static void capture_jack_process(struct mb_jack_unit *unit, uint32_t nframes)
+{
+	struct capture *c = unit->user;
+	size_t ch = c->channels;
+	const float *buffers[MB_JACK_MAX_PORTS];
+
+	for (size_t k = 0; k < ch; k++) {
+		buffers[k] = mb_jack_port_buffer(unit->ports[k], nframes);
+	}
+
+	for (size_t done = 0; done < nframes; done += JACK_CHUNK) {
+		size_t n = nframes - done < JACK_CHUNK ? nframes - done : JACK_CHUNK;
+		for (size_t i = 0; i < n; i++) {
+			for (size_t k = 0; k < ch; k++) {
+				jack_scratch[i * ch + k] = buffers[k][done + i];
+			}
+		}
+		capture_push(c, jack_scratch, n);
+	}
+}
+
+// Marks the input stopped and wakes the reader (from a device thread)
+static void capture_stop(struct capture *c)
+{
+	atomic_store(&c->stopped, 1);
+
+	if (pthread_mutex_trylock(&c->lock) == 0) {
+		pthread_cond_broadcast(&c->ready);
+		pthread_mutex_unlock(&c->lock);
+	}
+}
+
+static void capture_jack_shutdown(struct mb_jack_unit *unit)
+{
+	capture_stop(unit->user);
+}
+
 static void capture_notification(const ma_device_notification *notification)
 {
-	struct capture *c = notification->pDevice->pUserData;
-
 	if (notification->type == ma_device_notification_type_stopped) {
-		atomic_store(&c->stopped, 1);
-
-		if (pthread_mutex_trylock(&c->lock) == 0) {
-			pthread_cond_broadcast(&c->ready);
-			pthread_mutex_unlock(&c->lock);
-		}
+		capture_stop(notification->pDevice->pUserData);
 	}
 }
 
@@ -1269,12 +1634,29 @@ struct capture_args {
 	ma_uint32 period;
 	size_t queue;
 	int resample_quality;
+	VALUE jack_ports; // port names on the shared JACK client, or nil
 };
+
+static void capture_setup_queue(struct capture *c, struct capture_args *a);
 
 static VALUE capture_open_body(VALUE arg)
 {
 	struct capture_args *a = (struct capture_args *)arg;
 	struct capture *c = a->c;
+
+	if (!NIL_P(a->jack_ports)) {
+		c->jack = 1;
+		c->unit.process = capture_jack_process;
+		c->unit.shutdown = capture_jack_shutdown;
+		c->unit.user = c;
+		jack_register_ports(&c->unit, a->client_name, a->jack_ports, 0, 0);
+		dev_info_from_jack(&c->info);
+		capture_setup_queue(c, a);
+
+		atomic_store(&c->open, 1);
+		mb_jack_attach(&c->unit);
+		return Qnil;
+	}
 
 	init_context(&c->context, a->backends, a->client_name);
 	c->context_ready = 1;
@@ -1324,8 +1706,24 @@ static VALUE capture_open_body(VALUE arg)
 		}
 		c->device_ready = 1;
 	}
+	dev_info_from_miniaudio(&c->info, &c->device, 1);
+	capture_setup_queue(c, a);
 
-	ma_uint32 device_rate = c->device.sampleRate;
+	atomic_store(&c->open, 1);
+	result = ma_device_start(&c->device);
+	if (result != MA_SUCCESS) {
+		atomic_store(&c->open, 0);
+		rb_raise(cError, "Could not start audio input device: %s", ma_result_description(result));
+	}
+
+	return Qnil;
+}
+
+// Sets up resampling and allocates the ring once the device's rate and
+// period are known (c->info).
+static void capture_setup_queue(struct capture *c, struct capture_args *a)
+{
+	ma_uint32 device_rate = c->info.rate;
 	c->output_rate = device_rate;
 	double ratio = 1.0;
 	if (a->sample_rate != 0 && device_rate != a->sample_rate && a->resample_quality >= 0) {
@@ -1341,7 +1739,7 @@ static VALUE capture_open_body(VALUE arg)
 
 	// The queue limit was given at the output rate; keep at least two
 	// device periods, and room in the ring for the callback beyond it
-	size_t period = c->device.capture.internalPeriodSizeInFrames;
+	size_t period = c->info.period;
 	c->queue_limit = (size_t)ceil(a->queue * ratio);
 	if (c->queue_limit < 2 * period) {
 		c->queue_limit = 2 * period;
@@ -1356,15 +1754,6 @@ static VALUE capture_open_body(VALUE arg)
 		rb_raise(rb_eNoMemError, "Could not allocate the audio input queue");
 	}
 	c->capacity = capacity;
-
-	atomic_store(&c->open, 1);
-	result = ma_device_start(&c->device);
-	if (result != MA_SUCCESS) {
-		atomic_store(&c->open, 0);
-		rb_raise(cError, "Could not start audio input device: %s", ma_result_description(result));
-	}
-
-	return Qnil;
 }
 
 static VALUE capture_open_rescue(VALUE arg, VALUE exception)
@@ -1389,11 +1778,18 @@ static VALUE capture_open_rescue(VALUE arg, VALUE exception)
  * close to real time.  +test_pattern+ replaces the device's audio with a
  * counting pattern (frame number modulo 4096, scaled to -1..1, plus 0.001
  * per channel), for specs.
+ *
+ * With +jack_ports+ (an Array of port names, one per channel), the input is
+ * a set of ports on the process's shared JACK client (see Playback.new).
  */
-static VALUE capture_initialize(VALUE self, VALUE backends, VALUE device_index, VALUE client_name,
-		VALUE channels, VALUE sample_rate, VALUE device_rate, VALUE period, VALUE queue_frames,
-		VALUE resample_quality, VALUE test_pattern)
+static VALUE capture_initialize(int argc, VALUE *argv, VALUE self)
 {
+	rb_check_arity(argc, 10, 11);
+	VALUE backends = argv[0], device_index = argv[1], client_name = argv[2], channels = argv[3],
+	      sample_rate = argv[4], device_rate = argv[5], period = argv[6], queue_frames = argv[7],
+	      resample_quality = argv[8], test_pattern = argv[9];
+	VALUE jack_ports = argc > 10 ? argv[10] : Qnil;
+
 	struct capture *c;
 	TypedData_Get_Struct(self, struct capture, &capture_type, c);
 	if (c->data != NULL) {
@@ -1415,6 +1811,13 @@ static VALUE capture_initialize(VALUE self, VALUE backends, VALUE device_index, 
 		rb_raise(rb_eArgError, "Resample quality must be -1..%d (got %d)", SRC_LINEAR, quality);
 	}
 
+	if (!NIL_P(jack_ports)) {
+		Check_Type(jack_ports, T_ARRAY);
+		if (RARRAY_LEN(jack_ports) != ch) {
+			rb_raise(rb_eArgError, "Pass one JACK port name per channel (%d, got %ld)", ch, RARRAY_LEN(jack_ports));
+		}
+	}
+
 	c->channels = ch;
 	c->test_pattern = RTEST(test_pattern);
 
@@ -1428,11 +1831,13 @@ static VALUE capture_initialize(VALUE self, VALUE backends, VALUE device_index, 
 		.period = NUM2UINT(period),
 		.queue = (size_t)queue,
 		.resample_quality = quality,
+		.jack_ports = jack_ports,
 	};
 
 	rb_rescue2(capture_open_body, (VALUE)&args, capture_open_rescue, (VALUE)&args, rb_eException, (VALUE)0);
 
 	RB_GC_GUARD(client_name);
+	RB_GC_GUARD(jack_ports);
 
 	return self;
 }
@@ -1498,7 +1903,7 @@ static void unblock_capture_wait(void *arg)
 // queue limit.  Returns the number of frames copied into c->in_buf.
 static size_t take_frames(struct capture *c, size_t max)
 {
-	size_t period = c->device.capture.internalPeriodSizeInFrames;
+	size_t period = c->info.period;
 	size_t want = max < period ? max : period;
 	if (want < 1) {
 		want = 1;
@@ -1634,7 +2039,7 @@ static VALUE capture_close(VALUE self)
 {
 	struct capture *c = get_capture(self);
 
-	if (atomic_exchange(&c->open, 0) || c->device_ready || c->context_ready) {
+	if (atomic_exchange(&c->open, 0) || c->device_ready || c->context_ready || c->info.ready) {
 		capture_release_device(c);
 
 		if (c->pid == getpid()) {
@@ -1650,13 +2055,13 @@ static VALUE capture_closed(VALUE self)
 	return atomic_load(&get_capture(self)->open) ? Qfalse : Qtrue;
 }
 
-static ma_device *open_capture_device(VALUE self)
+static struct dev_info *open_capture_device(VALUE self)
 {
 	struct capture *c = get_capture(self);
-	if (!c->device_ready) {
+	if (!c->info.ready) {
 		rb_raise(rb_eIOError, "This input is closed");
 	}
-	return &c->device;
+	return &c->info;
 }
 
 /* The sample rate #read returns. */
@@ -1669,7 +2074,7 @@ static VALUE capture_sample_rate(VALUE self)
 /* The sample rate the device captures at. */
 static VALUE capture_device_rate(VALUE self)
 {
-	return UINT2NUM(open_capture_device(self)->sampleRate);
+	return UINT2NUM(open_capture_device(self)->rate);
 }
 
 /* True if #read resamples from the device's rate. */
@@ -1681,25 +2086,32 @@ static VALUE capture_resampling(VALUE self)
 /* The device's period (callback size) in frames. */
 static VALUE capture_period(VALUE self)
 {
-	return UINT2NUM(open_capture_device(self)->capture.internalPeriodSizeInFrames);
+	return UINT2NUM(open_capture_device(self)->period);
 }
 
 /* The number of periods in the device's own buffer. */
 static VALUE capture_periods(VALUE self)
 {
-	return UINT2NUM(open_capture_device(self)->capture.internalPeriods);
+	return UINT2NUM(open_capture_device(self)->periods);
 }
 
 /* The name of the device. */
 static VALUE capture_device_name(VALUE self)
 {
-	return rb_utf8_str_new_cstr(open_capture_device(self)->capture.name);
+	return rb_utf8_str_new_cstr(open_capture_device(self)->name);
 }
 
 /* The backend in use, as a Symbol. */
 static VALUE capture_backend(VALUE self)
 {
-	return backend_to_sym(open_capture_device(self)->pContext->backend);
+	return open_capture_device(self)->backend;
+}
+
+/* The JACK port names (client:port), or nil for a miniaudio device. */
+static VALUE capture_jack_ports(VALUE self)
+{
+	struct capture *c = get_capture(self);
+	return c->jack && c->info.ready ? jack_port_names(&c->unit) : Qnil;
 }
 
 /* The number of channels. */
@@ -1737,6 +2149,481 @@ static VALUE capture_stats(VALUE self)
 	return h;
 }
 
+/* JACK MIDI ---------------------------------------------------------------- */
+
+// MIDI ports on the shared JACK client.  Each direction has a lock-free byte
+// ring of records: a 4-byte JACK frame time (input) or nothing (output), a
+// 2-byte length, then the message bytes.  The process thread is the
+// producer for input and the consumer for output.
+#define MIDI_HEADER 6
+#define MIDI_MAX_MESSAGE 65535
+
+// For output messages that wrap around the ring (JACK's thread only)
+static uint8_t midi_scratch[MIDI_MAX_MESSAGE];
+
+struct jack_midi {
+	struct mb_jack_unit unit;
+	int output;
+
+	uint8_t *data;
+	size_t capacity; // bytes, a power of two
+	_Atomic size_t write_pos;
+	_Atomic size_t read_pos;
+	_Atomic size_t messages; // messages that went through
+	_Atomic size_t dropped; // messages that didn't fit (queue or port buffer)
+
+	_Atomic int open;
+	_Atomic int stopped;
+	pid_t pid;
+
+	pthread_mutex_t lock;
+	pthread_cond_t ready;
+	int interrupted;
+};
+
+static void ring_put(struct jack_midi *m, size_t pos, const uint8_t *src, size_t n)
+{
+	size_t mask = m->capacity - 1;
+	size_t start = pos & mask;
+	size_t first = m->capacity - start < n ? m->capacity - start : n;
+	memcpy(m->data + start, src, first);
+	memcpy(m->data, src + first, n - first);
+}
+
+static void ring_get(struct jack_midi *m, size_t pos, uint8_t *dst, size_t n)
+{
+	size_t mask = m->capacity - 1;
+	size_t start = pos & mask;
+	size_t first = m->capacity - start < n ? m->capacity - start : n;
+	memcpy(dst, m->data + start, first);
+	memcpy(dst + first, m->data, n - first);
+}
+
+// JACK's thread: input port events into the ring
+static void midi_in_process(struct mb_jack_unit *unit, uint32_t nframes)
+{
+	struct jack_midi *m = unit->user;
+	void *buffer = mb_jack_port_buffer(unit->ports[0], nframes);
+	uint32_t count = mb_jack_midi_count(buffer);
+	if (count == 0) {
+		return;
+	}
+
+	uint32_t base = mb_jack_last_frame_time();
+	size_t wp = atomic_load_explicit(&m->write_pos, memory_order_relaxed);
+	size_t rp = atomic_load_explicit(&m->read_pos, memory_order_acquire);
+
+	for (uint32_t i = 0; i < count; i++) {
+		uint32_t time;
+		const uint8_t *bytes;
+		size_t size;
+		if (mb_jack_midi_get(buffer, i, &time, &bytes, &size) != 0 || size == 0) {
+			continue;
+		}
+		if (size > MIDI_MAX_MESSAGE || m->capacity - (wp - rp) < MIDI_HEADER + size) {
+			atomic_fetch_add_explicit(&m->dropped, 1, memory_order_relaxed);
+			continue;
+		}
+
+		uint8_t header[MIDI_HEADER];
+		uint32_t frame = base + time;
+		memcpy(header, &frame, 4);
+		header[4] = size & 0xff;
+		header[5] = size >> 8;
+		ring_put(m, wp, header, MIDI_HEADER);
+		ring_put(m, wp + MIDI_HEADER, bytes, size);
+		wp += MIDI_HEADER + size;
+		atomic_fetch_add_explicit(&m->messages, 1, memory_order_relaxed);
+	}
+
+	atomic_store_explicit(&m->write_pos, wp, memory_order_release);
+
+	if (pthread_mutex_trylock(&m->lock) == 0) {
+		pthread_cond_signal(&m->ready);
+		pthread_mutex_unlock(&m->lock);
+	}
+}
+
+// JACK's thread: queued messages out of the ring into the output port (all
+// at the start of the cycle; what doesn't fit waits for the next cycle)
+static void midi_out_process(struct mb_jack_unit *unit, uint32_t nframes)
+{
+	struct jack_midi *m = unit->user;
+	void *buffer = mb_jack_port_buffer(unit->ports[0], nframes);
+	mb_jack_midi_clear(buffer);
+
+	size_t rp = atomic_load_explicit(&m->read_pos, memory_order_relaxed);
+	size_t wp = atomic_load_explicit(&m->write_pos, memory_order_acquire);
+
+	while (wp - rp >= MIDI_HEADER) {
+		uint8_t header[MIDI_HEADER];
+		ring_get(m, rp, header, MIDI_HEADER);
+		size_t size = header[4] | (header[5] << 8);
+
+		// Straight from the ring, or copied if it wraps around the end
+		size_t start = (rp + MIDI_HEADER) & (m->capacity - 1);
+		const uint8_t *bytes = m->data + start;
+		if (start + size > m->capacity) {
+			ring_get(m, rp + MIDI_HEADER, midi_scratch, size);
+			bytes = midi_scratch;
+		}
+
+		if (mb_jack_midi_write(buffer, 0, bytes, size) != 0) {
+			break; // the port buffer is full; try again next cycle
+		}
+		rp += MIDI_HEADER + size;
+		atomic_fetch_add_explicit(&m->messages, 1, memory_order_relaxed);
+	}
+
+	atomic_store_explicit(&m->read_pos, rp, memory_order_release);
+}
+
+static void midi_jack_shutdown(struct mb_jack_unit *unit)
+{
+	struct jack_midi *m = unit->user;
+	atomic_store(&m->stopped, 1);
+	if (pthread_mutex_trylock(&m->lock) == 0) {
+		pthread_cond_broadcast(&m->ready);
+		pthread_mutex_unlock(&m->lock);
+	}
+}
+
+static void jack_midi_release(struct jack_midi *m)
+{
+	atomic_store(&m->open, 0);
+	if (m->pid == getpid()) {
+		mb_jack_detach(&m->unit);
+	}
+}
+
+static void jack_midi_free(void *ptr)
+{
+	struct jack_midi *m = ptr;
+	jack_midi_release(m);
+	free(m->data);
+	if (m->pid == getpid()) {
+		pthread_cond_destroy(&m->ready);
+		pthread_mutex_destroy(&m->lock);
+	}
+	free(m);
+}
+
+static size_t jack_midi_memsize(const void *ptr)
+{
+	const struct jack_midi *m = ptr;
+	return sizeof(*m) + m->capacity;
+}
+
+static const rb_data_type_t jack_midi_type = {
+	.wrap_struct_name = "MB::Sound::FastAudio::JackMIDI",
+	.function = {
+		.dmark = NULL,
+		.dfree = jack_midi_free,
+		.dsize = jack_midi_memsize,
+	},
+	.flags = RUBY_TYPED_FREE_IMMEDIATELY,
+};
+
+static VALUE jack_midi_alloc(VALUE klass)
+{
+	struct jack_midi *m = calloc(1, sizeof(struct jack_midi));
+	if (m == NULL) {
+		rb_raise(rb_eNoMemError, "Could not allocate JACK MIDI");
+	}
+	m->pid = getpid();
+	pthread_mutex_init(&m->lock, NULL);
+	pthread_cond_init(&m->ready, NULL);
+	return TypedData_Wrap_Struct(klass, &jack_midi_type, m);
+}
+
+static struct jack_midi *get_jack_midi(VALUE self)
+{
+	struct jack_midi *m;
+	TypedData_Get_Struct(self, struct jack_midi, &jack_midi_type, m);
+	if (m->data == NULL) {
+		rb_raise(cError, "JACK MIDI was not initialized");
+	}
+	return m;
+}
+
+static void jack_midi_check_open(struct jack_midi *m)
+{
+	if (m->pid != getpid()) {
+		rb_raise(rb_eIOError, "This MIDI port was opened by another process (pid %d)", (int)m->pid);
+	}
+	if (!atomic_load(&m->open)) {
+		rb_raise(rb_eIOError, "This MIDI port is closed");
+	}
+	if (atomic_load(&m->stopped)) {
+		rb_raise(cError, "The JACK server closed the connection");
+	}
+}
+
+struct jack_midi_open_args {
+	struct jack_midi *m;
+	const char *client_name;
+	VALUE name;
+};
+
+static VALUE jack_midi_open_body(VALUE arg)
+{
+	struct jack_midi_open_args *a = (struct jack_midi_open_args *)arg;
+	VALUE names = rb_ary_new_from_args(1, a->name);
+	jack_register_ports(&a->m->unit, a->client_name, names, 1, a->m->output);
+	atomic_store(&a->m->open, 1);
+	mb_jack_attach(&a->m->unit);
+	return Qnil;
+}
+
+static VALUE jack_midi_open_rescue(VALUE arg, VALUE exception)
+{
+	jack_midi_release(((struct jack_midi_open_args *)arg)->m);
+	rb_exc_raise(exception);
+	return Qnil;
+}
+
+// Shared by JackMIDIInput.new and JackMIDIOutput.new
+static VALUE jack_midi_initialize(VALUE self, VALUE client_name, VALUE port_name, VALUE queue_bytes, int output)
+{
+	struct jack_midi *m;
+	TypedData_Get_Struct(self, struct jack_midi, &jack_midi_type, m);
+	if (m->data != NULL) {
+		rb_raise(cError, "JACK MIDI is already initialized");
+	}
+
+	long bytes = NUM2LONG(queue_bytes);
+	if (bytes < 1024 || bytes > (1L << 26)) {
+		rb_raise(rb_eArgError, "Queue size must be 1024..%ld bytes (got %ld)", 1L << 26, bytes);
+	}
+
+	size_t capacity = 1024;
+	while (capacity < (size_t)bytes) {
+		capacity <<= 1;
+	}
+	m->data = calloc(capacity, 1);
+	if (m->data == NULL) {
+		rb_raise(rb_eNoMemError, "Could not allocate the MIDI queue");
+	}
+	m->capacity = capacity;
+	m->output = output;
+	m->unit.process = output ? midi_out_process : midi_in_process;
+	m->unit.shutdown = midi_jack_shutdown;
+	m->unit.user = m;
+
+	struct jack_midi_open_args args = { m, StringValueCStr(client_name), port_name };
+	StringValueCStr(port_name);
+	rb_rescue2(jack_midi_open_body, (VALUE)&args, jack_midi_open_rescue, (VALUE)&args, rb_eException, (VALUE)0);
+	RB_GC_GUARD(client_name);
+	RB_GC_GUARD(port_name);
+
+	return self;
+}
+
+/*
+ * call-seq:
+ *   JackMIDIInput.new(client_name, port_name, queue_bytes)
+ *
+ * A MIDI input port named +port_name+ on the process's shared JACK client
+ * (opened as +client_name+ on first use).  Up to +queue_bytes+ of messages
+ * (plus 6 bytes each) wait for #read; more are dropped and counted.
+ */
+static VALUE jack_midi_in_initialize(VALUE self, VALUE client_name, VALUE port_name, VALUE queue_bytes)
+{
+	return jack_midi_initialize(self, client_name, port_name, queue_bytes, 0);
+}
+
+/*
+ * call-seq:
+ *   JackMIDIOutput.new(client_name, port_name, queue_bytes)
+ *
+ * A MIDI output port on the shared JACK client (see JackMIDIInput.new).
+ * #write queues messages that the next JACK cycle sends.
+ */
+static VALUE jack_midi_out_initialize(VALUE self, VALUE client_name, VALUE port_name, VALUE queue_bytes)
+{
+	return jack_midi_initialize(self, client_name, port_name, queue_bytes, 1);
+}
+
+static size_t midi_queued(struct jack_midi *m)
+{
+	return atomic_load_explicit(&m->write_pos, memory_order_acquire) -
+		atomic_load_explicit(&m->read_pos, memory_order_relaxed);
+}
+
+static void *wait_for_midi(void *arg)
+{
+	struct jack_midi *m = arg;
+
+	pthread_mutex_lock(&m->lock);
+	while (!m->interrupted && atomic_load(&m->open) && !atomic_load(&m->stopped) && midi_queued(m) == 0) {
+		struct timespec ts;
+		clock_gettime(CLOCK_REALTIME, &ts);
+		ts.tv_nsec += WAIT_TIMEOUT_NS;
+		if (ts.tv_nsec >= 1000000000) {
+			ts.tv_sec++;
+			ts.tv_nsec -= 1000000000;
+		}
+		pthread_cond_timedwait(&m->ready, &m->lock, &ts);
+	}
+	pthread_mutex_unlock(&m->lock);
+
+	return NULL;
+}
+
+static void unblock_midi_wait(void *arg)
+{
+	struct jack_midi *m = arg;
+	pthread_mutex_lock(&m->lock);
+	m->interrupted = 1;
+	pthread_cond_broadcast(&m->ready);
+	pthread_mutex_unlock(&m->lock);
+}
+
+/*
+ * call-seq:
+ *   input.read(blocking) -> [[frame_time, bytes], ...]
+ *
+ * The messages received since the last read, each with the JACK frame time
+ * (the server's frame counter, wrapping at 2**32) of its sample in the
+ * cycle it arrived in, and its bytes as a binary String.  With +blocking+,
+ * waits (without the GVL) for at least one message.
+ */
+static VALUE jack_midi_read(VALUE self, VALUE blocking)
+{
+	struct jack_midi *m = get_jack_midi(self);
+	jack_midi_check_open(m);
+	if (m->output) {
+		rb_raise(rb_eIOError, "This is a MIDI output");
+	}
+
+	while (RTEST(blocking) && midi_queued(m) == 0) {
+		m->interrupted = 0;
+		rb_thread_call_without_gvl(wait_for_midi, m, unblock_midi_wait, m);
+		rb_thread_check_ints();
+		jack_midi_check_open(m);
+	}
+
+	VALUE result = rb_ary_new();
+	size_t rp = atomic_load_explicit(&m->read_pos, memory_order_relaxed);
+	size_t wp = atomic_load_explicit(&m->write_pos, memory_order_acquire);
+
+	while (wp - rp >= MIDI_HEADER) {
+		uint8_t header[MIDI_HEADER];
+		ring_get(m, rp, header, MIDI_HEADER);
+		uint32_t frame;
+		memcpy(&frame, header, 4);
+		size_t size = header[4] | (header[5] << 8);
+
+		VALUE bytes = rb_str_buf_new(size);
+		ring_get(m, rp + MIDI_HEADER, (uint8_t *)RSTRING_PTR(bytes), size);
+		rb_str_set_len(bytes, size);
+		rb_enc_associate(bytes, rb_ascii8bit_encoding());
+
+		rb_ary_push(result, rb_ary_new_from_args(2, UINT2NUM(frame), bytes));
+		rp += MIDI_HEADER + size;
+	}
+
+	atomic_store_explicit(&m->read_pos, rp, memory_order_release);
+	return result;
+}
+
+/*
+ * call-seq:
+ *   output.write(bytes) -> bytes.bytesize
+ *
+ * Queues one MIDI message (a binary String) for the next JACK cycle.
+ * Raises FastAudio::Error if the queue is full.
+ */
+static VALUE jack_midi_write(VALUE self, VALUE bytes)
+{
+	struct jack_midi *m = get_jack_midi(self);
+	jack_midi_check_open(m);
+	if (!m->output) {
+		rb_raise(rb_eIOError, "This is a MIDI input");
+	}
+
+	StringValue(bytes);
+	size_t size = RSTRING_LEN(bytes);
+	if (size == 0) {
+		return INT2NUM(0);
+	}
+	if (size > MIDI_MAX_MESSAGE) {
+		rb_raise(rb_eArgError, "MIDI messages are limited to %d bytes (got %zu)", MIDI_MAX_MESSAGE, size);
+	}
+
+	size_t wp = atomic_load_explicit(&m->write_pos, memory_order_relaxed);
+	size_t rp = atomic_load_explicit(&m->read_pos, memory_order_acquire);
+	if (m->capacity - (wp - rp) < MIDI_HEADER + size) {
+		atomic_fetch_add_explicit(&m->dropped, 1, memory_order_relaxed);
+		rb_raise(cError, "The JACK MIDI output queue is full");
+	}
+
+	uint8_t header[MIDI_HEADER] = { 0, 0, 0, 0, size & 0xff, size >> 8 };
+	ring_put(m, wp, header, MIDI_HEADER);
+	ring_put(m, wp + MIDI_HEADER, (const uint8_t *)RSTRING_PTR(bytes), size);
+	atomic_store_explicit(&m->write_pos, wp + MIDI_HEADER + size, memory_order_release);
+
+	RB_GC_GUARD(bytes);
+	return SIZET2NUM(size);
+}
+
+/* Closes the port.  A reader waiting in another thread raises IOError. */
+static VALUE jack_midi_close(VALUE self)
+{
+	struct jack_midi *m = get_jack_midi(self);
+	if (atomic_load(&m->open)) {
+		jack_midi_release(m);
+		if (m->pid == getpid()) {
+			unblock_midi_wait(m);
+		}
+	}
+	return Qnil;
+}
+
+static VALUE jack_midi_closed(VALUE self)
+{
+	return atomic_load(&get_jack_midi(self)->open) ? Qfalse : Qtrue;
+}
+
+/* The port's full name (client:port), or nil once closed. */
+static VALUE jack_midi_port_name(VALUE self)
+{
+	struct jack_midi *m = get_jack_midi(self);
+	return atomic_load(&m->open) && m->unit.port_count ? rb_utf8_str_new_cstr(mb_jack_port_name(m->unit.ports[0])) : Qnil;
+}
+
+/* { messages:, dropped:, queued: } (queued in bytes) */
+static VALUE jack_midi_stats(VALUE self)
+{
+	struct jack_midi *m = get_jack_midi(self);
+	VALUE h = rb_hash_new();
+	rb_hash_aset(h, ID2SYM(rb_intern("messages")), SIZET2NUM(atomic_load(&m->messages)));
+	rb_hash_aset(h, ID2SYM(rb_intern("dropped")), SIZET2NUM(atomic_load(&m->dropped)));
+	rb_hash_aset(h, ID2SYM(rb_intern("queued")), SIZET2NUM(midi_queued(m)));
+	return h;
+}
+
+static void init_jack_midi(VALUE fast_audio)
+{
+	VALUE input = rb_define_class_under(fast_audio, "JackMIDIInput", rb_cObject);
+	rb_define_alloc_func(input, jack_midi_alloc);
+	rb_define_method(input, "initialize", jack_midi_in_initialize, 3);
+	rb_define_method(input, "read", jack_midi_read, 1);
+	rb_define_method(input, "close", jack_midi_close, 0);
+	rb_define_method(input, "closed?", jack_midi_closed, 0);
+	rb_define_method(input, "port_name", jack_midi_port_name, 0);
+	rb_define_method(input, "stats", jack_midi_stats, 0);
+
+	VALUE output = rb_define_class_under(fast_audio, "JackMIDIOutput", rb_cObject);
+	rb_define_alloc_func(output, jack_midi_alloc);
+	rb_define_method(output, "initialize", jack_midi_out_initialize, 3);
+	rb_define_method(output, "write", jack_midi_write, 1);
+	rb_define_method(output, "close", jack_midi_close, 0);
+	rb_define_method(output, "closed?", jack_midi_closed, 0);
+	rb_define_method(output, "port_name", jack_midi_port_name, 0);
+	rb_define_method(output, "stats", jack_midi_stats, 0);
+}
+
 void Init_fast_audio(void)
 {
 	VALUE mb = rb_define_module("MB");
@@ -1748,10 +2635,22 @@ void Init_fast_audio(void)
 	rb_define_const(fast_audio, "MINIAUDIO_VERSION", rb_str_freeze(rb_str_new_cstr(MA_VERSION_STRING)));
 	rb_define_module_function(fast_audio, "enabled_backends", ruby_enabled_backends, 0);
 	rb_define_module_function(fast_audio, "devices", ruby_devices, 2);
+rb_define_module_function(fast_audio, "jack_server?", ruby_jack_server, 0);
+rb_define_module_function(fast_audio, "jack_open", ruby_jack_open, 1);
+rb_define_module_function(fast_audio, "jack_info", ruby_jack_info, 0);
+rb_define_module_function(fast_audio, "jack_close", ruby_jack_close, 0);
+rb_define_module_function(fast_audio, "jack_ports", ruby_jack_ports, 3);
+rb_define_module_function(fast_audio, "jack_connect", ruby_jack_connect, 2);
+rb_define_module_function(fast_audio, "jack_disconnect", ruby_jack_disconnect, 2);
+rb_define_module_function(fast_audio, "jack_connections", ruby_jack_connections, 1);
+rb_define_const(fast_audio, "JACK_PORT_IS_INPUT", INT2NUM(MB_JACK_PORT_IS_INPUT));
+rb_define_const(fast_audio, "JACK_PORT_IS_OUTPUT", INT2NUM(MB_JACK_PORT_IS_OUTPUT));
+rb_define_const(fast_audio, "JACK_PORT_IS_PHYSICAL", INT2NUM(MB_JACK_PORT_IS_PHYSICAL));
 
 	VALUE playback = rb_define_class_under(fast_audio, "Playback", rb_cObject);
 	rb_define_alloc_func(playback, playback_alloc);
-	rb_define_method(playback, "initialize", playback_initialize, 13);
+	rb_define_method(playback, "initialize", playback_initialize, -1);
+	rb_define_method(playback, "jack_ports", playback_jack_ports, 0);
 	rb_define_method(playback, "max_queue", playback_max_queue, 0);
 	rb_define_method(playback, "queue_limit=", playback_set_queue_limit, 1);
 	rb_define_method(playback, "write", playback_write, 1);
@@ -1771,7 +2670,8 @@ void Init_fast_audio(void)
 
 	VALUE capture = rb_define_class_under(fast_audio, "Capture", rb_cObject);
 	rb_define_alloc_func(capture, capture_alloc);
-	rb_define_method(capture, "initialize", capture_initialize, 10);
+	rb_define_method(capture, "initialize", capture_initialize, -1);
+	rb_define_method(capture, "jack_ports", capture_jack_ports, 0);
 	rb_define_method(capture, "read", capture_read, 1);
 	rb_define_method(capture, "close", capture_close, 0);
 	rb_define_method(capture, "closed?", capture_closed, 0);
@@ -1785,4 +2685,6 @@ void Init_fast_audio(void)
 	rb_define_method(capture, "channels", capture_channels, 0);
 	rb_define_method(capture, "queue_limit", capture_queue_limit, 0);
 	rb_define_method(capture, "stats", capture_stats, 0);
+
+	init_jack_midi(fast_audio);
 }

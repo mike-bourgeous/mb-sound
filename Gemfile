@@ -11,7 +11,6 @@ gem 'numo-narray', github: 'mike-bourgeous/numo-narray-compat.git', branch: 'com
 
 gem 'mb-math', github: 'mike-bourgeous/mb-math.git'
 gem 'mb-util', github: 'mike-bourgeous/mb-util.git'
-gem 'mb-sound-jackffi', github: 'mike-bourgeous/mb-sound-jackffi.git'
 
 group :development, :test do
   # Runs specs under Valgrind memcheck, filtering Ruby's own noise

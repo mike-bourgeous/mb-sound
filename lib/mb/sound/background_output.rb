@@ -11,8 +11,7 @@ module MB
     # gap, so later writes return early and playback falls out of sync with
     # the code that is writing (see also issue #68).
     #
-    # Writes go into a bounded queue (like the port queues in
-    # MB::Sound::JackFFI), so #write still blocks when the caller gets too far
+    # Writes go into a bounded queue, so #write still blocks when the caller gets too far
     # ahead of playback.  Silence is paced against the wall clock so that no
     # more than about +:lead_time+ seconds of silence are queued in the
     # output, which limits the latency added when real audio starts again.
@@ -122,8 +121,7 @@ module MB
 
       private
 
-      # Re-raises an error from the background thread in the calling thread
-      # (the same approach as JackFFI#check_for_processing_error).
+      # Re-raises an error from the background thread in the calling thread.
       def check_error
         if @error
           e = @error
