@@ -46,6 +46,16 @@ RSpec::Matchers.define_negated_matcher :not_change, :change
 #
 # See http://rubydoc.info/gems/rspec-core/RSpec/Core/Configuration
 RSpec.configure do |config|
+  # Examples tagged :check_shared raise if a node modifies a buffer that a
+  # Tee shares among its branches (see MB::Sound::GraphNode::Tee)
+  config.around(:each, :check_shared) do |example|
+    old_check = MB::Sound::GraphNode::Tee.shared_check
+    MB::Sound::GraphNode::Tee.shared_check = :raise
+    example.run
+  ensure
+    MB::Sound::GraphNode::Tee.shared_check = old_check
+  end
+
   # The bin/ script smoke tests (spec/bin/script_smoke_spec.rb) run every
   # script and take several minutes, so plain `rspec` skips them; run them
   # with `bundle exec rspec --tag smoke` (CI runs them as a separate job).

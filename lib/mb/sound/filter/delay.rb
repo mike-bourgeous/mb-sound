@@ -289,7 +289,7 @@ module MB
             result = result + dry * data
           end
 
-          if data.inplace?
+          if data.inplace? && !data.frozen?
             data[true] = result
             data
           else
@@ -368,7 +368,10 @@ module MB
             delays = @filter_buf[0...count].fill(target)
           end
 
-          delays = @filter.process(delays.inplace).not_inplace! if @smoothing
+          if @smoothing
+            delays = delays.dup if delays.frozen? # a shared buffer (see GraphNode::Tee)
+            delays = @filter.process(delays.inplace).not_inplace!
+          end
           delays
         end
       end

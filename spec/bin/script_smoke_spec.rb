@@ -7,6 +7,19 @@ require 'shellwords'
 # real processes; --help runs in a fork of the spec process (see ForkScript)
 # for scripts that also render here, saving ~0.7 s of startup each.
 RSpec.describe('script runner scripts', :smoke) do
+  # Scripts here check that no node modifies a buffer a Tee shares among
+  # its branches (see GraphNode::Tee.shared_check), raising if one does
+  around(:each) do |example|
+    old_env = ENV['MB_SOUND_CHECK_SHARED']
+    old_check = MB::Sound::GraphNode::Tee.shared_check
+    ENV['MB_SOUND_CHECK_SHARED'] = '1'
+    MB::Sound::GraphNode::Tee.shared_check = :raise
+    example.run
+  ensure
+    ENV['MB_SOUND_CHECK_SHARED'] = old_env
+    MB::Sound::GraphNode::Tee.shared_check = old_check
+  end
+
   # Script => extra arguments for a short render
   songs = {
     'bin/songs/antialias_song.rb' => ['--bars', '0.5'],

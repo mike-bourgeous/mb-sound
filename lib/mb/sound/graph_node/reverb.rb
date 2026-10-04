@@ -663,7 +663,8 @@ module MB
 
           @output_groups = partition_outputs(@pipeline_output, @output_channels)
 
-          @dry_output = dry.map { |c| (c.inplace * @dry).not_inplace! }
+          # (scales the dry input in place unless it's a frozen, shared buffer)
+          @dry_output = dry.map { |c| ((c.frozen? ? c.dup : c).inplace * @dry).not_inplace! }
           @dry_groups = partition_outputs(@dry_output, @output_channels)
         end
 

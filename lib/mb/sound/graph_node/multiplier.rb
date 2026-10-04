@@ -84,7 +84,18 @@ module MB
         # buffer, or if stop_early is false than all short inputs will be
         # zero-padded.
         def sample(count)
-          arithmetic_sample(count, sources: @multiplicands, pad: 1, fill: @constant, stop_early: @stop_early) do |retbuf, inputs|
+          sampled = @multiplicands.map { |s, extra| [s.sample(count), extra] }
+
+          # Fast path: the same arithmetic as below without the general
+          # bookkeeping, when every input is a full buffer of our type
+          if arithmetic_fast?(count, sampled, @constant)
+            retbuf = arithmetic_view(@buf, count, :buf)
+            retbuf.fill(@constant)
+            sampled.each { |v, _| retbuf.inplace * v }
+            return retbuf.not_inplace!
+          end
+
+          arithmetic_combine(count, sampled, sources: @multiplicands, pad: 1, fill: @constant, stop_early: @stop_early) do |retbuf, inputs|
             inputs.each.with_index do |(v, _), idx|
               retbuf.inplace * v
             end

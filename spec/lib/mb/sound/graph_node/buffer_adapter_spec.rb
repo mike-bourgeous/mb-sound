@@ -184,4 +184,11 @@ RSpec.describe(MB::Sound::GraphNode::BufferAdapter, :aggregate_failures) do
       expect(b.sample_rate).to eq(51515)
     end
   end
+
+  it 'passes the upstream buffer through when the counts match and nothing is buffered' do
+    adapter = 100.hz.sine.with_buffer(64)
+    expect(MB::Sound::CircularBuffer).not_to receive(:new)
+    data = Numo::SFloat.zeros(0).concatenate(adapter.sample(64).dup, adapter.sample(64).dup)
+    expect(data).to eq(100.hz.sine.sample(128))
+  end
 end

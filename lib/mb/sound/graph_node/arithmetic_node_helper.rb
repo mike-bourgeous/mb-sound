@@ -21,7 +21,16 @@ module MB
         # Yields the output buffer and the list of inputs and their associated
         # data (if any) (an Array of two-element Arrays).  Returns the output
         # buffer.
-        def arithmetic_sample(count, sources:, pad:, fill:, stop_early:)
+        def arithmetic_sample(count, sources:, pad:, fill:, stop_early:, &block)
+          sampled = sources.map { |s, extra| [s.sample(count), extra] }
+          arithmetic_combine(count, sampled, sources: sources, pad: pad, fill: fill, stop_early: stop_early, &block)
+        end
+
+        # The rest of #arithmetic_sample, for inputs already sampled: +sampled+
+        # is an Array of [buffer or nil, extra data] in the order of
+        # +sources+.  Used directly by nodes with a fast path for the common
+        # case (see Multiplier#sample).
+        def arithmetic_combine(count, sampled, sources:, pad:, fill:, stop_early:)
           complex = @bufcomplex
           complex ||= @constant.is_a?(Complex) if defined?(@constant)
           complex ||= fill.is_a?(Complex)
@@ -37,10 +46,10 @@ module MB
             max_length = 0
           end
 
-          inputs = sources.map.with_index { |(s, extra), idx|
+          inputs = sampled.map.with_index { |(v, extra), idx|
             complex ||= extra.is_a?(Complex)
 
-            v = s.sample(count)&.not_inplace!
+            v = v&.not_inplace!
             next if v.nil? || v.empty?
 
             min_length = v.length if v.length < min_length
@@ -95,6 +104,45 @@ module MB
           yield retbuf, inputs
 
           retbuf.not_inplace!
+        end
+
+        # Input buffer classes that never promote a buffer of each class (the
+        # same precision, or real into complex).
+        FAST_INPUTS = {
+          Numo::SFloat => [Numo::SFloat].freeze,
+          Numo::DFloat => [Numo::DFloat].freeze,
+          Numo::SComplex => [Numo::SComplex, Numo::SFloat].freeze,
+          Numo::DComplex => [Numo::DComplex, Numo::DFloat].freeze,
+        }.freeze
+
+        # For the fast paths: true if every input in +sampled+ ([buffer,
+        # extra] pairs) is a full +count+-sample buffer that wouldn't promote
+        # this node's buffer type (the same type, or real into complex), the
+        # buffers are large enough, and no extra data or +fill+ would promote
+        # it either, so the general path would do exactly the same
+        # arithmetic.
+        def arithmetic_fast?(count, sampled, fill)
+          return false if @buf.nil? || @buf.length < count
+          return false if !@bufcomplex && fill.is_a?(Complex)
+
+          ok = FAST_INPUTS[@buf.class]
+          return false unless ok
+
+          sampled.all? { |v, extra|
+            v && v.length == count && ok.include?(v.class) && (@bufcomplex || !extra.is_a?(Complex))
+          }
+        end
+
+        # A view of the first +count+ samples of +buf+, reused while the
+        # buffer and count stay the same.
+        def arithmetic_view(buf, count, key)
+          @arithmetic_views ||= {}
+          cached = @arithmetic_views[key]
+          return cached[2] if cached && cached[0].equal?(buf) && cached[1] == count
+
+          view = buf[0...count]
+          @arithmetic_views[key] = [buf, count, view]
+          view
         end
       end
     end
