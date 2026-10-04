@@ -809,12 +809,19 @@ module MB
 
       # The indices of the nonzero samples of the reset input's buffer
       # +resets+ as an Array, or nil if there are none (or no reset input).
+      #
+      # A frozen buffer already found to be all zeros (e.g. the constant
+      # buffer of a Notes trigger without note-ons) isn't scanned again.
       def reset_points(resets)
         return nil if resets.nil?
+        return nil if resets.equal?(@quiet_resets)
 
         unless resets.is_a?(Numo::SComplex) || resets.is_a?(Numo::DComplex)
           min, max = resets.minmax
-          return nil if min == 0 && max == 0 # cheaper than ne(0).where
+          if min == 0 && max == 0 # cheaper than ne(0).where
+            @quiet_resets = resets if resets.frozen?
+            return nil
+          end
         end
 
         resets = resets.ne(0).where
