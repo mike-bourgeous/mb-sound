@@ -1,6 +1,4 @@
 RSpec.describe(MB::Sound::RandomMethods) do
-  after { MB::Sound.seed(MB::Sound::RandomMethods::DEFAULT_SEED) }
-
   describe '#seed' do
     it 'restarts the root generator so sub-seeds repeat' do
       MB::Sound.seed(42)

@@ -46,8 +46,15 @@ module MB
       # The root random number generator (a Random), for code that can
       # control the order of its draws.
       def root_rng
-        seed(ENV['RANDOM_SEED'] ? Integer(ENV['RANDOM_SEED']) : DEFAULT_SEED) if @root_rng.nil?
+        seed(default_seed) if @root_rng.nil?
         @root_rng
+      end
+
+      # The root seed at startup: RANDOM_SEED from the environment, or
+      # DEFAULT_SEED (restore it with `seed default_seed`; the specs do
+      # before every example).
+      def default_seed
+        ENV['RANDOM_SEED'] ? Integer(ENV['RANDOM_SEED']) : DEFAULT_SEED
       end
 
       # Draws a seed for a sub-generator from the root generator (a
