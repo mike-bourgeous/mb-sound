@@ -391,6 +391,21 @@ RSpec.describe(MB::Sound::Notes) do
   describe '#hz' do
     let(:v) { notes_for(ev.note_on(69, 1.0), ev.bend(1.0, time: 1/100r), ev.note_on(57, 1.0, time: 1/7r)) }
 
+    it 'shares one Frequency node among pitches with the same settings' do
+      expect(v.hz.freq).to equal(v.freq)
+      expect(v.hz.transpose(7).freq).to equal(v.hz.transpose(7).freq)
+      expect(v.hz.transpose(7).freq).not_to equal(v.hz.transpose(5).freq)
+      expect(v.hz.bend_range(12.st).freq).to equal(v.hz.bend_range(12).freq)
+
+      a = v.hz.transpose(7).saw
+      b = v.hz.transpose(7).square
+      a1 = a.sample(480).dup
+      b1 = b.sample(480).dup
+      expect(a1.abs.max).to be > 0.5
+      expect(b1.abs.max).to be > 0.5
+      expect(v.hz.transpose(7).freq.value).to be_within(0.01).of(MB::Sound.tuning.frequency_of(69 + 7)) # bend comes at sample 480
+    end
+
     it 'gives a Pitch following the note and bend' do
       expect(v.hz).to be_a(MB::Sound::Pitch)
       expect(v.hz).to equal(v.tone)

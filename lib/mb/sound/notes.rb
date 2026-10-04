@@ -215,6 +215,16 @@ module MB
       end
       alias frequency freq
 
+      # The Notes::Frequency for NotePitch +settings+ at +sample_rate+,
+      # made by the block once and shared by every pitch with the same
+      # settings (e.g. each `v.hz.transpose(7)`), so tones on equal pitches
+      # read one Frequency node through a Tee.  Default settings at this
+      # instance's rate give #freq.  Used by NotePitch#freq.
+      def frequency_for(settings, sample_rate)
+        return freq if settings == NotePitch::DEFAULTS && sample_rate.to_f == @sample_rate
+        memo([:frequency, settings, sample_rate.to_f]) { yield }
+      end
+
       # Pitch bend, -1..1 (a Notes::Bend shared by every Notes instance on
       # the control stream).
       def bend
