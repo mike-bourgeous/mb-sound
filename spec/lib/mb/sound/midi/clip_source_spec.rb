@@ -160,4 +160,33 @@ RSpec.describe(MB::Sound::MIDI::ClipSource) do
       expect(src.read(1/10r, 1).map { |e| [e.time, e.type, e.note] }).to eq([[1/10r, :note_off, 60], [1/10r, :note_on, 64], [7/20r, :note_off, 64]])
     end
   end
+
+  describe '#chase and #first_note' do
+    let(:clip) { MB::Sound.seq(MB::Sound::C4, MB::Sound.seq(MB::Sound::E4).vel(0.5), MB::Sound::G4).n4.loop }
+
+    it 'gives the first note' do
+      src = MB::Sound::MIDI::ClipSource.new(clip, channel: 3, transport: transport)
+      expect(src.first_note).to have_attributes(type: :note_on, note: 60, channel: 3)
+      expect(src.chase).to eq(nil)
+    end
+
+    it 'chases the note most recently started at a timeline jump' do
+      src = MB::Sound::MIDI::ClipSource.new(clip, transport: transport)
+      src.read(0, 1/10r)
+      src.start_at(5/16r) # in the E4 (1/4 to 1/2 whole note)
+      c = src.chase
+      expect(c.generation).to eq(src.generation)
+      expect(c.time).to eq(1/10r)
+      expect(c.event).to have_attributes(type: :note_on, note: 64, velocity: 0.5, time: 1/10r)
+    end
+
+    it 'chases at a clip swap' do
+      src = MB::Sound::MIDI::ClipSource.new(MB::Sound::C4.n8.loop, transport: transport)
+      src.swap_clip(clip, time: 3/8r)
+      src.read(0, 1)
+      expect(src.chase.time).to eq(3/4r)
+      expect(src.chase.event.note).to eq(64)
+      expect(src.chase.generation).to eq(src.generation)
+    end
+  end
 end

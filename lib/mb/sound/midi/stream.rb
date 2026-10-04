@@ -204,6 +204,17 @@ module MB
           @source.music_end
         end
 
+        # The note to chase after the latest content jump, or nil (see
+        # Source#chase; transforms pass it through).
+        def chase
+          @source.chase
+        end
+
+        # The first note of the content, or nil (see Source#first_note).
+        def first_note
+          @source.first_note
+        end
+
         # The number of events read from the source and not yet passed by
         # every reader.
         def pending_count

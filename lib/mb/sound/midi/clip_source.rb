@@ -77,7 +77,23 @@ module MB
           "#{super} #{@clip}"
         end
 
+        # The first event of the clip as a note-on (see Source#first_note).
+        def first_note
+          note_event(@clip.events.first, 0r)
+        end
+
         private
+
+        # The clip event at the current clip position as a note-on, like
+        # ClipNode's held values chase it (see Source#chase).
+        def chase_event
+          note_event(@clip.event_at(@clip_position), position)
+        end
+
+        # A note-on Event for the clip +event+ at stream +time+, or nil.
+        def note_event(event, time)
+          event && Event.note_on(event.value, event.velocity, channel: @channel, time: time)
+        end
 
         # Seeks to +time+ seconds into the clip at the current tempo.
         def seek_to(time)
@@ -109,6 +125,8 @@ module MB
               @origin = clip.looping? ? 0r : MB::M.max(time, start)
               @clip_position = MB::M.max(time, start) - @origin
               @generation = generation + 1
+              note = chase_event
+              @chase = note && Chase.new(generation: @generation, time: split, event: note.at(split))
               out << Jump.new(split)
               return out.concat(edges(split, to, wnps))
             end
