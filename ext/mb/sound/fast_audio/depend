@@ -1,0 +1,2 @@
+fast_audio.o: fast_audio.c mb_miniaudio.h miniaudio.h
+miniaudio_impl.o: miniaudio_impl.c mb_miniaudio.h miniaudio.h

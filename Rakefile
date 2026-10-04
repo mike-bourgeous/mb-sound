@@ -27,6 +27,12 @@ Rake::ExtensionTask.new 'mb-sound-fast_delay' do |ext|
   ext.lib_dir = 'lib/mb/sound'
 end
 
+Rake::ExtensionTask.new 'mb-sound-fast_audio' do |ext|
+  ext.name = 'fast_audio'
+  ext.ext_dir = 'ext/mb/sound/fast_audio'
+  ext.lib_dir = 'lib/mb/sound'
+end
+
 
 # Valgrind memcheck of the C extensions (`bundle exec rake memcheck`), using
 # ruby_memcheck, which runs rspec under Valgrind and filters out Ruby's own
