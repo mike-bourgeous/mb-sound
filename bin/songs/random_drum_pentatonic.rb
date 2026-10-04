@@ -25,9 +25,9 @@ MB::Sound.song_script(bars: 30) {
       n = note.ramp.at(1)
       n2 = note.triangle.at(1)
       if idx > 1
-        env = MB::Sound.adsr(0.01, 0.5, 0.5, 2 + idx, auto_release: 2 + (6 - idx * 2))
+        env = MB::Sound.adsr(0.01, 0.5, 0.5, 2 + idx, hold: 1.49 + (6 - idx * 2))
       else
-        env = MB::Sound.adsr(2, 2, 0.2, 2 + idx, auto_release: 2 + idx)
+        env = MB::Sound.adsr(2, 2, 0.2, 2 + idx, hold: 0)
       end
       n = n + n2 if idx == 3
       n = (n * env).filter(:lowpass, cutoff: 300 + 1500 * env, quality: 2 * (idx + 1))

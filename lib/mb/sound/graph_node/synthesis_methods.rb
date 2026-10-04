@@ -15,34 +15,18 @@ module MB
           MB::Sound::Tone[self]
         end
 
-        # Multiplies this envelope by an ADSR envelope with the given +attack+,
-        # +decay+, +sustain+, and +release+ parameters, with times in seconds,
-        # and +sustain+ ranging from 0 to 1 (typically).
+        # Multiplies this node by a one-shot MB::Sound::Envelope (see
+        # EnvelopeMethods#adsr) with the given +attack+, +decay+, +sustain+,
+        # and +release+ (times in seconds or any length, +sustain+ relative to
+        # the peak), at this node's sample rate.  The envelope holds the
+        # sustain level for +:hold+ seconds (default: attack plus decay, at
+        # least 0.1 s; false for forever), then releases and ends.  Other
+        # options (e.g. +:curve+, default :analog) go to Envelope#initialize.
         #
-        # If +:log+ is given, then the envelope will be converted to a
-        # logarithmic envelope ranging from +:log+ decibels (e.g. `-30`) to 1.0.
-        #
-        # If the +:auto_release+ parameter is a number of seconds (defaults to 2x
-        # attack + decay, or 0.25, whichever is longer; set it to false to
-        # disable), then the envelope will release automatically after that time.
-        def adsr(attack, decay, sustain, release, log: nil, auto_release: nil, filter_freq: 10000)
-          auto_release = MB::Sound::ADSREnvelope.default_auto_release(attack, decay, sample_rate: sample_rate) if auto_release.nil?
-
-          env = MB::Sound::ADSREnvelope.new(
-            attack_time: attack,
-            decay_time: decay,
-            sustain_level: sustain,
-            release_time: release,
-            sample_rate: self.sample_rate,
-            filter_freq: filter_freq
-          )
-
-          env.trigger(1.0, auto_release: auto_release)
-
-          # TODO: this log parameter still doesn't seem like the right interface
-          env = env.db(log) if log
-
-          self * env
+        # Example:
+        #     play 220.hz.ramp.adsr(0.005, 0.3, 0.4, 1, curve: :snappy)
+        def adsr(attack = nil, decay = nil, sustain = nil, release = nil, **options)
+          self * MB::Sound::Envelope.preset(:adsr, attack, decay, sustain, release, sample_rate: sample_rate, **options)
         end
 
         # Uses this node as the phase of a wavetable, with the given +:wavetable+

@@ -19,6 +19,12 @@ module MB
     #     play 220.hz.pm(440.hz.at(3) * fm_env(0.002, 2)) * amp_env(0.002, 2, 0.2, 1)
     #     play (120.hz.ramp * adsr(gate: 2.hz.lfo.square.at(0..1))).filter(1200.hz.lowpass)
     module EnvelopeMethods
+      # A generic envelope with :analog curves ([12, 60, 60] dB) and velocity
+      # sensitivity 0..1 (the peak is the velocity).
+      def adsr(attack = nil, decay = nil, sustain = nil, release = nil, **options)
+        MB::Sound::Envelope.preset(:adsr, attack, decay, sustain, release, **options)
+      end
+
       # A generic control envelope with :analog curves and velocity
       # sensitivity 0.5..1 (linear).
       def env(attack = nil, decay = nil, sustain = nil, release = nil, **options)

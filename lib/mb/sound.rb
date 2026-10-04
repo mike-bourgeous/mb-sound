@@ -103,28 +103,6 @@ module MB
       }
     end
 
-    # Creates a new, triggered ADSR envelope generator.  If the +:auto_release+
-    # parameter is a number of seconds (defaults to 2x attack + decay, or 0.25,
-    # whichever is longer; set it to false to disable), then the envelope will
-    # release automatically after that time.  The default sample rate is 48kHz.
-    #
-    # For DSL use in combination with tones, inputs, etc.  See
-    # MB::Sound::GraphNode.
-    def self.adsr(attack = 0.01, decay = 0.1, sustain = -12.db, release = 0.4, auto_release: nil, sample_rate: 48000, filter_freq: 10000)
-      auto_release = MB::Sound::ADSREnvelope.default_auto_release(attack, decay, sample_rate: sample_rate) if auto_release.nil?
-
-      env = MB::Sound::ADSREnvelope.new(
-        attack_time: attack,
-        decay_time: decay,
-        sustain_level: sustain,
-        release_time: release,
-        sample_rate: sample_rate,
-        filter_freq: filter_freq
-      )
-      env.trigger(1.0, auto_release: auto_release)
-      env
-    end
-
     # Allows retrieving a Note by name using e.g. MB::Sound::A4 (or just A4 in
     # the interactive CLI).  A new Note object is created each time to allow
     # for modifications to old Notes and changes in global tuning.

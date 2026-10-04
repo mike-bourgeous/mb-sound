@@ -135,6 +135,10 @@ module MB
       def self.preset(name, attack = nil, decay = nil, sustain = nil, release = nil, **options)
         settings = PRESETS.fetch(name) { raise ArgumentError, "Unknown envelope preset #{name.inspect} (#{PRESETS.keys.join(', ')})" }
 
+        if options.key?(:auto_release) || options.key?(:log)
+          raise ArgumentError, 'Envelopes take hold: (seconds of sustain after the attack and decay) instead of auto_release:, and curve: (dB) instead of log:'
+        end
+
         if options.key?(:depth)
           raise ArgumentError, 'Give depth: or octaves:, not both' if options.key?(:octaves)
           options[:octaves] = options.delete(:depth)

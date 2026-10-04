@@ -128,6 +128,7 @@ module MB
             # TODO: Implement this in C if it's slow
             (10 ** ((self * env_range - env_range) / 20) - env_min) * env_comp
           else
+            raise ArgumentError, "Envelopes take curve: #{env_range.abs} (in dB) instead of .db(#{env_range})" if env_range && self.is_a?(MB::Sound::Envelope)
             raise 'Do not specify envelope range if .db is not applied to an envelope' if env_range
             10 ** (self / 20)
           end

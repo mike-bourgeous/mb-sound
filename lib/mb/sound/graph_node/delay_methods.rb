@@ -146,7 +146,7 @@ module MB
         # disable.
         #
         # Example:
-        #     play 440.hz.sine.adsr(0.005, 0.05, 1, 0.05, auto_release: 0.5).fdn_reverb(room_size: 0.8, decay: 3.0)
+        #     play 440.hz.sine.adsr(0.005, 0.05, 1, 0.05, hold: 0.45).fdn_reverb(room_size: 0.8, decay: 3.0)
         #
         #     # Stereo file input -> stereo reverb
         #     play file_input('sounds/synth0.flac').fdn_reverb

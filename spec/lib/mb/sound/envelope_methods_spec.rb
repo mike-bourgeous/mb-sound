@@ -47,6 +47,23 @@ RSpec.describe(MB::Sound::EnvelopeMethods) do
     end
   end
 
+  it 'explains the replacements for auto_release: and log:' do
+    expect { MB::Sound.adsr(auto_release: 1) }.to raise_error(ArgumentError, /hold:/)
+    expect { 1.constant.adsr(log: -30) }.to raise_error(ArgumentError, /curve:/)
+    expect { MB::Sound.adsr.db(30) }.to raise_error(ArgumentError, /curve: 30/)
+  end
+
+  describe '#adsr' do
+    it 'makes a generic Envelope with :analog curves and full velocity sensitivity' do
+      env = MB::Sound.adsr
+      expect(env).to be_a(MB::Sound::Envelope)
+      expect(env.curve.values).to eq([12, 60, 60])
+      expect(env.sensitivity).to eq(0.0..1.0)
+      expect([env.attack, env.decay, env.sustain, env.release]).to eq([0.005, 0.2, 0.7, 0.3])
+      expect(MB::Sound.adsr(0, 0, 1, 0, trigger: 1, velocity: 0.25, hold: false).sample(10)[5]).to eq(0.25)
+    end
+  end
+
   it 'has aliases' do
     expect(MB::Sound.method(:envelope)).to eq(MB::Sound.method(:env))
     expect(MB::Sound.method(:amp_envelope)).to eq(MB::Sound.method(:amp_env))
