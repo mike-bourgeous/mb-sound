@@ -3,15 +3,14 @@ require 'midilib'
 module MB
   module Sound
     module MIDI
-      # Reads from a MIDI file, returning MIDI data at the appropriate times
-      # for each MIDI event.  Can be used by MB::Sound::MIDI::Manager to play a
-      # MIDI file.
+      # Parses a MIDI file with the midilib gem, merging its tracks into one
+      # event list (see #events, read by FileSource, which plays files), and
+      # describes its tracks and notes (#tracks, #notes, #note_stats; used by
+      # bin/midi/midi_info.rb and midi_roll.rb).
       #
-      # This implements just enough compatibility with
-      # MB::Sound::MIDI::Input#read to work with MB::Sound::MIDI::Manager.
-      #
-      # This uses the midilib gem for MIDI parsing.  Due to limitations in the
-      # midilib gem, this does not support MIDI files that change tempo.
+      # Playback goes through MIDI::FileSource (no clocks; see GH #67).  Due
+      # to limitations in the midilib gem, times here use one tempo for the
+      # whole file.
       #
       # Also note that track names from midilib might include a trailing NUL
       # ("\x00") byte.  This happens with MIDI files exported from ACID Pro,
@@ -20,42 +19,18 @@ module MB
       # Useful references:
       #  - https://www.cs.cmu.edu/~music/cmsip/readings/Standard-MIDI-file-format-updated.pdf
       class MIDIFile
-        # How long #done? waits after #ended? for sounds to decay, for players
-        # that don't detect the end of the tail themselves.  The script
-        # runner stops sooner, once the output has been quiet for a second
-        # (see ScriptRunner#stop_after_ringdown); this is longer than its
+        # How long a Synth (and Notes nodes) keep playing silence after a MIDI
+        # file ends, for sounds to decay in players that don't detect the end
+        # of the tail themselves.  The script runner stops sooner, once the
+        # output has been quiet for a second (see
+        # ScriptRunner#stop_after_ringdown); this is longer than its
         # 10-second tail limit and fade so that it never cuts the runner off.
         TAIL_SECONDS = 11
-
-        # A clock that may be passed to the constructor that returns whatever
-        # value was last assigned to #clock_now=.  Useful for testing.
-        class ConstantClock
-          # The constant value assigned to the clock.
-          attr_reader :clock_now
-
-          # Initializes a constant-value clock, with an optional initial time.
-          def initialize(time = 0)
-            @clock_now = time.to_f
-          end
-
-          # Sets the value to be returned for the current time.
-          def clock_now=(time)
-            @clock_now = time.to_f
-          end
-        end
 
         # The MIDI filename that was given to the constructor.
         attr_reader :filename
 
-        # The index of the next MIDI event to read, when its timestamp has
-        # elapsed.
-        attr_reader :index
-
-        # The current playback time (in seconds) within the MIDI file.  See
-        # #seek.
-        attr_reader :elapsed
-
-        # The number of events that could be read.
+        # The number of events in #events.
         attr_reader :count
 
         # The *approximate* duration of the MIDI file, in seconds.  This is the
@@ -68,42 +43,24 @@ module MB
 
         # The time in seconds of the last channel (non-meta) event in the file:
         # when the music ends, not counting sounds' decay or trailing meta
-        # events like the end of a track.  See #ended?.
+        # events like the end of a track.
         attr_reader :music_end
 
         # The sequence object from the midilib gem that contains MIDI data from the file.
         attr_reader :seq
 
-        # The full list of events that will be returned over time by #read.
+        # The merged list of midilib events (or the #read_track's events
+        # alone without track merging), including meta events.
         attr_reader :events
 
         # The track index given to the constructor.
         attr_reader :read_track
 
-        # The source clock that governs when #read will return events.
-        attr_reader :clock
-
-        # Reads MIDI data from the given +filename+.  Call #read repeatedly to
-        # receive MIDI events based on elapsed time.
-        #
-        # The +:clock+ parameter accepts any object that responds to
-        # :clock_now.  This allows playing a MIDI file at a speed other than
-        # monotonic real time.  Additionally the +:speed+ parameter allows
-        # specifying a playback speed ratio.
+        # Reads MIDI data from the given +filename+.
         #
         # If +:merge_tracks+ is false, then events will not be merged across
-        # tracks, and #read will only return events from track +:read_track+.
-        def initialize(filename, clock: MB::U, merge_tracks: true, read_track: 0, speed: 1.0)
-          @index = 0
-          @elapsed = 0
-          @last_time = 0
-          @start = nil
-
-          self.clock = clock
-
-          raise 'Speed must be greater than zero' unless speed > 0
-          @speed = 1.0 / speed
-
+        # tracks, and #events will only have events from track +:read_track+.
+        def initialize(filename, merge_tracks: true, read_track: 0)
           @filename = filename
 
           @seq = ::MIDI::Sequence.new
@@ -245,30 +202,10 @@ module MB
           }
         end
 
-        # Returns true if there are no more events available to #read.
+        # Returns true if the file has no events (in the #read_track, without
+        # track merging).
         def empty?
-          @events.empty? || @index >= @events.length
-        end
-
-        # Returns true once playback has passed the last note or controller
-        # event (see #music_end).  Sounds may still be decaying; graph nodes
-        # driven by the file keep playing until #done?, and pass this on with
-        # their own #ended? methods so the script runner can stop once the
-        # output is quiet.
-        def ended?
-          return false unless @start
-
-          @elapsed = @clock.clock_now - @start
-          @elapsed > @music_end
-        end
-
-        # Returns true TAIL_SECONDS after #ended?, when graph nodes driven by
-        # the file stop (return nil).
-        def done?
-          return false unless @start
-
-          @elapsed = @clock.clock_now - @start
-          @elapsed > @music_end + TAIL_SECONDS
+          @events.empty?
         end
 
         # Returns the index of the first event with a timestamp greater than or
@@ -288,10 +225,7 @@ module MB
         # the fractional index to be used to scroll an event list before or
         # after playback in a plausible way.
         #
-        # If +time+ is nil, then the current #elapsed playback time is used.
-        def fractional_index(time = nil)
-          time ||= @elapsed
-
+        def fractional_index(time)
           idx1 = find_index(time) - 1
           idx1 = 0 if idx1 < 0
 
@@ -324,79 +258,6 @@ module MB
           else
             idx1 + (time - time1).to_f / (time2 - time1)
           end
-        end
-
-        # Changes the clock used by this MIDI file for tracking time.
-        def clock=(clock)
-          raise "Clock must respond to :clock_now" unless clock.respond_to?(:clock_now)
-          @clock = clock
-          @start = @clock.clock_now - @elapsed if @start
-        end
-
-        # Sets the current time used by #read to +time+ (in seconds).  Negative
-        # values delay the start of playback.
-        def seek(time)
-          delta = @elapsed - @last_time
-          @elasped = time.to_f
-          @last_time = @elapsed - delta
-          @start = @clock.clock_now - @elapsed
-          @index = find_index(time)
-        end
-
-        # Returns events from the MIDI file whose timestamps are less than or
-        # equal to the elapsed time since this method was first called.
-        #
-        # Returns events in the same form as MIDI::Input#read, with an Array of
-        # Arrays wrapped in an Array:
-        #
-        #     [ # Array for input ports (files have one port only)
-        #       [ # Array for events
-        #         [timestamp, bytestring],
-        #         ...
-        #       ]
-        #     ]
-        #
-        # Returns nil if there are no events left to read, or an empty inner
-        # Array if +:blocking+ is false and no events occur within the elapsed
-        # time.
-        #
-        # If :blocking is true, then this method will sleep to keep time with
-        # the MIDI file.  This will not work correctly if a non-realtime clock
-        # was given to the constructor, so in that case, set :blocking to false
-        # and use a different means of keeping time.
-        def read(blocking: true)
-          return nil if @events.empty? || @index >= @events.length
-
-          @start ||= @clock.clock_now
-
-          current_events = []
-
-          if blocking
-            # Sleep until the scheduled time of the next event
-            ev = @events[@index]
-            delay = @clock.clock_now - (@start + pulse_time(ev.time_from_start))
-            sleep delay if delay > 0
-          end
-
-          now = @clock.clock_now
-          @last_time = @elapsed
-          @elapsed = now - @start
-
-          while @index < @events.length
-            ev = @events[@index]
-
-            # Stop the loop when we see an event from the future
-            t = pulse_time(ev.time_from_start)
-            break if t > @elapsed
-
-            unless ev.is_a?(::MIDI::MetaEvent)
-              current_events << [t - @last_time, ev.data_as_bytes.pack('C*')]
-            end
-
-            @index += 1
-          end
-
-          [current_events]
         end
 
         private
@@ -519,7 +380,7 @@ module MB
         # pulses (specified by the file, commonly 960 pulses per quarter note).
         # Does not handle variable tempo MIDI files.
         def pulse_time(pulses)
-          @seq.pulses_to_seconds(pulses) * @speed
+          @seq.pulses_to_seconds(pulses)
         end
       end
     end
