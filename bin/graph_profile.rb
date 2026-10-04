@@ -108,7 +108,8 @@ def capture_graph(script, args)
   $0 = script
   graph = nil
 
-  MB::Sound.singleton_class.prepend(GraphCapture::BgHook)
+  MB::Sound.singleton_class.prepend(GraphCapture::BgHook) unless MB::Sound.singleton_class.include?(GraphCapture::BgHook)
+  GraphCapture.songs.clear
   begin
     load script
   rescue GraphCapture::Captured => e
