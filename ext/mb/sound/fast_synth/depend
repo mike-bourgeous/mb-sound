@@ -1,0 +1,1 @@
+fast_synth.o: $(srcdir)/../include/mb_ext_helpers.h

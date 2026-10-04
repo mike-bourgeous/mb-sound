@@ -64,6 +64,12 @@ module MB
       # oscillator.  Starts at zero before #sample is called
       attr_reader :last_freq
 
+      # Whether ramp, square, and triangle waves are band-limited (see
+      # BandLimit): true, false for the naive (aliased) waveforms, or a Range
+      # of frequencies in Hz over which band-limiting fades in (see
+      # BandLimit::LFO_FADE).  Other wave types are unaffected.
+      attr_reader :band_limit
+
       # An informational marker for classes like MB::Sound::MIDI::GraphVoice
       # indicating that the oscillator should not be reset when a note is
       # played.  Has no effect within the oscillator itself.
@@ -99,10 +105,13 @@ module MB
       #             to #sample.  This should be (2 * Math::PI / sample_rate)
       #             for audio oscillators.
       # +random_advance+ - The internal phase is incremented by a random value up to this amount on top of +advance+.
+      # +band_limit+ - See #band_limit (noise, with a +random_advance+, is never
+      #                band-limited).  Off by default for this low-level class,
+      #                which gives the exact shapes; Tone turns it on.
       #
       # TODO: it probably makes sense to move pre_power/post_power elsewhere if
       # possible, e.g. a new waveshaper node or something
-      def initialize(wave_type, frequency: 1.0, phase: 0.0, phase_mod: nil, range: nil, pre_power: 1.0, post_power: 1.0, advance: Math::PI / 24000.0, random_advance: 0.0, no_trigger: false)
+      def initialize(wave_type, frequency: 1.0, phase: 0.0, phase_mod: nil, range: nil, pre_power: 1.0, post_power: 1.0, advance: Math::PI / 24000.0, random_advance: 0.0, no_trigger: false, band_limit: false)
         unless WAVE_TYPES.include?(wave_type)
           raise "Invalid wave type #{wave_type.inspect}; only #{WAVE_TYPES.map(&:inspect).join(', ')} are supported"
         end
@@ -134,6 +143,9 @@ module MB
         @post_power = post_power.to_f
 
         @no_trigger = !!no_trigger
+
+        self.band_limit = band_limit
+        @bl_state = [0.0, 0.0, 0.0, 0]
 
         @osc_buf = nil
         @truncated = false
@@ -202,11 +214,27 @@ module MB
       # Directly sets the current phase offset for this oscillator.
       def phi=(phi)
         @phasor.phi = phi / TWOPI
+        @bl_state[3] = 0
       end
 
       # Resets the oscillator phase to its starting phase (see #phase).
       def reset
         @phasor.reset
+        @bl_state[3] = 0
+      end
+
+      # Sets whether ramp, square, and triangle waves are band-limited (see
+      # #band_limit).
+      def band_limit=(band_limit)
+        unless band_limit == true || band_limit == false || band_limit.nil? || (band_limit.is_a?(Range) && band_limit.begin.is_a?(Numeric))
+          raise ArgumentError, "Band limit must be true, false, or a Range of Hz (got #{band_limit.inspect})"
+        end
+        @band_limit = band_limit || false
+      end
+
+      # True if this oscillator's samples are band-limited right now.
+      def band_limited?
+        !!@band_limit && BandLimit::WAVES.include?(@wave_type) && @phasor.random_advance == 0
       end
 
       # Changes the oscillator's frequency source to the given Numeric value or
@@ -419,17 +447,32 @@ module MB
           offset = 0
         end
 
-        buf = MB::FastSound.oscillate(
-          @osc_buf[0...count].inplace!,
-          wave_type,
-          freq,
-          phase,
-          @phasor.advance,
-          @phasor.random_advance,
-          gain,
-          offset,
-          @phasor.state
-        ).inplace!
+        if band_limited?
+          buf = MB::Sound::FastSynth.oscillate_bl(
+            @osc_buf[0...count].inplace!,
+            wave_type,
+            freq,
+            phase,
+            @phasor.advance,
+            gain,
+            offset,
+            @phasor.state,
+            @bl_state,
+            *band_limit_fade
+          ).inplace!
+        else
+          buf = MB::FastSound.oscillate(
+            @osc_buf[0...count].inplace!,
+            wave_type,
+            freq,
+            phase,
+            @phasor.advance,
+            @phasor.random_advance,
+            gain,
+            offset,
+            @phasor.state
+          ).inplace!
+        end
 
         @last_freq = freq.is_a?(Numeric) ? freq : freq[-1]
 
@@ -455,8 +498,15 @@ module MB
           offset = 0
         end
 
-        phases, increments = @phasor.phases_ruby(freq_table, count)
-        values = Oscillator.shape_ruby(@wave_type, phases, increments, phase_table) * gain + offset
+        if band_limited?
+          values = BandLimit.oscillate_ruby(
+            count, @wave_type, freq_table, phase_table, @phasor.advance, gain, offset,
+            @phasor.state, @bl_state, *band_limit_fade
+          )
+        else
+          phases, increments = @phasor.phases_ruby(freq_table, count)
+          values = Oscillator.shape_ruby(@wave_type, phases, increments, phase_table) * gain + offset
+        end
 
         @last_freq = freq_table.is_a?(Numeric) ? freq_table : freq_table[-1]
 
@@ -540,6 +590,12 @@ module MB
       end
 
       private
+
+      # [low, high] frequencies (Hz) for fading band-limiting in, or [0, 0]
+      # for always on.
+      def band_limit_fade
+        @band_limit.is_a?(Range) ? [@band_limit.begin.to_f, @band_limit.end.to_f] : [0.0, 0.0]
+      end
 
       # TODO: use BufferHelper?
       def build_buffer(count)
