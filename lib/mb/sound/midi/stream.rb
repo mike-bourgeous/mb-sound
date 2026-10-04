@@ -50,7 +50,8 @@ module MB
           # the cursor to +to+.  +from+ may be after the cursor (skipping
           # events) but not before it.  Late events from a live source can
           # have times before +from+; they are moved to the time they
-          # arrived (see Stream).
+          # arrived (see Stream).  The Array is frozen (readers of the same
+          # range may share it).
           def events(from, to)
             @stream.read_for(self, from.to_r, to.to_r)
           end
@@ -298,11 +299,22 @@ module MB
           raise ArgumentError, "MIDI read must not end (#{to}) before it starts (#{from})" if to < from
           raise ArgumentError, "MIDI reader already read up to #{reader.cursor} (asked from #{from})" if from < reader.cursor
 
+          # Readers asking for the range just read (e.g. the nodes of one
+          # Notes instance, each reading the same buffer) share its events.
+          # Still valid: later fills only add events at or after +to+, and
+          # drops only remove events before the slowest reader's cursor.
+          last = @last_read
+          if last && last[0] == from && last[1] == to
+            reader.cursor = to
+            return last[2]
+          end
+
           fill(to)
 
           start = @log.bsearch_index { |e| e.time >= from } || @log.length
           stop = @log.bsearch_index { |e| e.time >= to } || @log.length
-          events = @log[start...stop]
+          events = @log[start...stop].freeze
+          @last_read = [from, to, events]
 
           reader.cursor = to
           drop
@@ -351,6 +363,8 @@ module MB
 
         # Drops events that every reader has passed.
         def drop
+          return if @log.empty?
+
           horizon = min_cursor || @read_to
           count = @log.bsearch_index { |e| e.time >= horizon } || @log.length
           @log.shift(count) if count > 0
