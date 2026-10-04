@@ -31,4 +31,21 @@ RSpec.describe(MB::Sound::WarmUpMethods) do
     expect(batches.map(&:length)).to eq([0, 2] * 4) # one batch per Manager#update
     expect(events.map(&:first).uniq.sort).to eq([0x80, 0x90, 0xb0])
   end
+
+  it 'feeds the new MIDI path (LiveSource, Synth of Notes voices) from the fake input' do
+    input = MB::Sound::WarmUpMethods::WarmUpMIDI.new
+    events = MB::Sound::MIDI::LiveSource.new(input, latency: 0).then { |src|
+      (0...20).flat_map { |n| src.read(Rational(n * 128, 48000), Rational((n + 1) * 128, 48000)) }
+    }
+    expect(events.map(&:type).uniq).to contain_exactly(:note_on, :note_off, :cc)
+
+    # #warm_up_notes runs without YJIT too (the spec process has none)
+    synths = []
+    allow(MB::Sound::Synth).to receive(:new).and_wrap_original { |m, *a, **k, &b|
+      m.call(*a, **k, &b).tap { |s| synths << s }
+    }
+    MB::Sound.send(:warm_up_notes, calls: 30, buffer: 128)
+    expect(synths.length).to eq(1)
+    expect(synths[0].lanes.length).to eq(3)
+  end
 end
