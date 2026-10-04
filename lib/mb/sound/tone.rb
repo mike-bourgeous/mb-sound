@@ -495,8 +495,10 @@ module MB
       # The jump is band-limited like a MIDI voice's retrigger (a 32-sample
       # minBLEP step from the value the wave would have had; see
       # Oscillator#reset_input=), and works with #fm and #pm.  A tone can't
-      # have both a reset input and #sync (sync already resets the phase), and
-      # a #free tone can't have one.  MIDI voices (GraphVoice) leave tones
+      # have both a reset input and #sync (an error: sync already resets the
+      # phase, in its own kernel).  On a #free tone the last call wins: a
+      # reset input makes it no longer free, and a fixed +to:+ replaces
+      # #rnd, each with a warning.  MIDI voices (GraphVoice) leave tones
       # with a reset input to it instead of resetting them at each note.
       #
       # Examples (bin/sound.rb):
@@ -511,17 +513,23 @@ module MB
           return self
         end
 
-        raise ArgumentError, 'A free tone (see #free) cannot have a reset input' if @free
         raise ArgumentError, 'A synced tone cannot also have a reset input' if @sync
         unless to.nil? || to == :random || to.is_a?(Numeric) || to.respond_to?(:sample)
           raise ArgumentError, "Reset target must be nil, :random, radians, or a graph node (got #{to.inspect})"
+        end
+
+        if @free
+          override_warning('reset overrides free (the tone is no longer free)')
+          @free = false
         end
 
         if to == :random
           to = nil
           random_phase
         elsif to && @random_phase
-          raise ArgumentError, 'A random-phase tone (see #rnd) resets to a random phase; remove to: or #rnd'
+          override_warning("reset(to: #{make_source_name(to)}) overrides rnd (no more random phases)")
+          @random_phase = false
+          @oscillator&.random_phase = nil
         end
 
         @reset = fixup_source(trigger)
@@ -538,12 +546,15 @@ module MB
 
       # Marks this tone as never reset: a free-running oscillator whose phase
       # never restarts, like an analog oscillator.  MIDI voices won't reset
-      # it (see #no_trigger), and it can't have a reset input (see #reset).
-      # Combine with #rnd for a random starting phase (analog-style unison):
+      # it (see #no_trigger).  It replaces a reset input (see #reset; the
+      # last call wins, with a warning).  Combine with #rnd for a random starting phase (analog-style unison):
       #
       #     play 3.times.map { |i| (110 + i * 0.3).hz.saw.free.rnd }.sum * -15.db
       def free(free = true)
-        raise ArgumentError, 'A tone with a reset input (see #reset) cannot be free' if free && @reset
+        if free && @reset
+          override_warning('free overrides reset (removed the reset input)')
+          reset(nil)
+        end
 
         @free = !!free
         no_trigger if @free
@@ -562,12 +573,17 @@ module MB
       # random numbers come from a Random seeded with +seed+, or by default
       # a sub-seed drawn from the root generator when this is called (see
       # MB::Sound.seed), so tones created in the same order after the same
-      # root seed repeat.  Also available as #rnd.
+      # root seed repeat.  Replaces a fixed +to:+ given to #reset (the last
+      # call wins, with a warning).  Also available as #rnd.
       #
       #     play 220.hz.saw.rnd                                # random start
       #     play 110.hz.square.reset(clip.trigger).rnd        # random at each note
       def random_phase(seed: nil)
-        raise ArgumentError, 'Remove the to: of #reset before using a random phase' if @reset_to
+        if @reset_to
+          override_warning("rnd overrides reset(to: #{make_source_name(@reset_to)}) (resets go to random phases)")
+          @reset_to = nil
+          update_reset
+        end
 
         @seed = Integer(seed) if seed
         @seed ||= MB::Sound.next_seed
@@ -820,6 +836,12 @@ module MB
       end
 
       private
+
+      # Warns that a call replaced an earlier conflicting setting (the last
+      # call wins; see #reset, #free, #random_phase).
+      def override_warning(message)
+        warn "Tone #{wave_name} #{make_source_name(@frequency)}: #{message}"
+      end
 
       # Gives the oscillator, if made, the reset settings (see #reset).
       def update_reset

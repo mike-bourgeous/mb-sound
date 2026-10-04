@@ -1,6 +1,4 @@
 RSpec.describe('Tone reset inputs, free and random phases') do
-  after { MB::Sound.seed(MB::Sound::RandomMethods::DEFAULT_SEED) }
-
   let(:advance) { 2 * Math::PI / 48000 }
 
   def bl_osc(wave = :ramp, frequency: 1001.3, **opts)
@@ -213,11 +211,30 @@ RSpec.describe('Tone reset inputs, free and random phases') do
         expect { 3.times { a.sample(800); b.sample(800) } }.not_to raise_error
       end
 
-      it 'refuses sync and free tones' do
+      it 'refuses sync' do
         expect { 100.hz.ramp.sync(ratio: 2).reset(input(triggers(10, 1))) }.to raise_error(ArgumentError, /sync/)
         expect { 100.hz.ramp.reset(input(triggers(10, 1))).sync(ratio: 2) }.to raise_error(ArgumentError, /reset/)
-        expect { 100.hz.ramp.free.reset(input(triggers(10, 1))) }.to raise_error(ArgumentError, /free/)
-        expect { 100.hz.ramp.reset(input(triggers(10, 1))).free }.to raise_error(ArgumentError, /free/)
+      end
+
+      it 'makes a free tone not free, with a warning (the last call wins)' do
+        t = nil
+        expect { t = 100.hz.ramp.free.reset(input(triggers(10, 1))) }.to output(/reset overrides free/).to_stderr
+        expect(t.free?).to eq(false)
+        expect(t.reset_input).not_to be_nil
+      end
+
+      it 'is removed by #free, with a warning (the last call wins)' do
+        t = 100.hz.aramp.reset(input(triggers(100, 50)), to: 1.0)
+        t.oscillator
+        expect { t.free }.to output(/free overrides reset/).to_stderr
+        expect(t.free?).to eq(true)
+        expect(t.reset_input).to be_nil
+        expect(t.oscillator.reset_input).to be_nil
+        expect(t.sample(100)).to eq(100.hz.aramp.sample(100))
+      end
+
+      it 'does not warn without a conflict' do
+        expect { 100.hz.ramp.reset(input(triggers(10, 1))).rnd.free(false) }.not_to output.to_stderr
       end
 
       it 'rejects other targets' do
@@ -264,9 +281,22 @@ RSpec.describe('Tone reset inputs, free and random phases') do
           expect(a).to eq(b)
         end
 
-        it 'refuses a fixed target with #rnd' do
-          expect { 100.hz.rnd.reset(input(triggers(10, 1)), to: 1.0) }.to raise_error(ArgumentError, /random/)
-          expect { 100.hz.ramp.reset(input(triggers(10, 1)), to: 1.0).rnd }.to raise_error(ArgumentError, /to:/)
+        it 'replaces #rnd with a fixed target, with a warning (the last call wins)' do
+          t = nil
+          expect { t = 100.hz.aramp.rnd.reset(input(triggers(100, 50)), to: 0.5 * Math::PI) }.to output(/overrides rnd/).to_stderr
+          expect(t.random_phase?).to eq(false)
+          expect(t.sample(100)[50]).to be_within(1e-6).of(0.5)
+        end
+
+        it 'is replaced by #rnd after a fixed target, with a warning (the last call wins)' do
+          MB::Sound.seed(9)
+          a = 100.hz.aramp.reset(input(triggers(300, 100, 200))).rnd.sample(300)
+
+          MB::Sound.seed(9)
+          t = nil
+          expect { t = 100.hz.aramp.reset(input(triggers(300, 100, 200)), to: 1.0).rnd }.to output(/rnd overrides reset\(to:/).to_stderr
+          expect(t.reset_to).to be_nil
+          expect(t.sample(300)).to eq(a)
         end
       end
     end
