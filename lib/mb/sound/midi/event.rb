@@ -9,9 +9,7 @@ module MB
       #
       # Fields:
       # - +type+: :note_on, :note_off, :poly_pressure, :cc, :program,
-      #   :channel_pressure, :bend, :sysex, or :system for MIDI messages, or
-      #   :choke or :glide for events that only exist inside the program (see
-      #   .choke and .glide; they have no bytes).  A note-on with
+      #   :channel_pressure, :bend, :sysex, or :system.  A note-on with
       #   velocity 0 becomes a :note_off (with the conventional release
       #   velocity of 64).  Channel mode messages (CC 120-127) stay :cc; see
       #   #all_sound_off?, #reset_controllers?, and #all_notes_off?.
@@ -36,18 +34,26 @@ module MB
       # - +bend_range+: for :bend events, the bend range in semitones in
       #   effect for the event's channel (set by Stream from RPN 0 and
       #   Stream#bend_range; see #bend_semitones).
-      # - +legato+: true for a note-on that continues a phrase although the
-      #   stream it is in has no other note held (e.g. a mono voice whose
-      #   previous note was ended by an allocator at the same time), so
-      #   legato-only glides and similar behavior still apply.  False by
-      #   default.  Not sent as MIDI.
+      # - +legato+: true on a note-on that continues a held note without a
+      #   new attack (made by Allocator in mono mode; see below), else
+      #   false.
+      #
+      # Voice allocation events (made by Allocator for its lanes; they have
+      # no MIDI bytes):
+      # - :choke - the lane's note stops quickly (a 3 ms release,
+      #   Envelope::CHOKE_TIME) because its voice was stolen.  +note+ is the
+      #   note being choked.  No note-off follows for it.
+      # - :glide - +note+ is the pitch the lane's next note glides from
+      #   (polyphonic portamento, Allocator's +glide_mode: :last+).  It never
+      #   changes a sounding note.
+      # - A legato note-on (+legato+ true) follows a note-off of the
+      #   previous note at the same time: process both before computing the
+      #   gate, which stays up, and glide instead of retriggering.
       #
       # Examples:
       #     Event.parse("\x90\x3c\x40")          # note_on C4 (60), velocity 64/127
       #     Event.note_on(60, 0.5, channel: 9)   # normalized velocity
       #     Event.bend(-1.0).bend_semitones      # => -2.0
-      #     Event.choke(60)                      # silence a voice quickly
-      #     Event.glide(48)                      # next note glides from C3
       class Event < Data.define(:type, :channel, :note, :value, :velocity, :raw, :bytes, :time, :bend_range, :legato)
         # The pitch bend range in semitones when nothing else sets it.
         DEFAULT_BEND_RANGE = 2
@@ -251,23 +257,6 @@ module MB
           new(type: :bend, channel: channel, value: value.to_f, raw: raw, bytes: [0xe0 | channel, raw & 0x7f, raw >> 7], time: time)
         end
 
-        # A choke: silences the notes of a voice quickly (a 3 ms release in
-        # Envelope; see MB::Sound::Notes#choke), e.g. when an allocator
-        # steals the voice.  +note+ may name the note being choked, or be
-        # nil.  Not a MIDI message (no bytes).
-        def self.choke(note, channel: 0, time: 0r)
-          new(type: :choke, channel: channel, note: note, time: time)
-        end
-
-        # A glide: the next note-on glides to its pitch from +note+ (a note
-        # number) instead of from the current pitch, in pitches that glide
-        # (see MB::Sound::Notes::NotePitch#glide), like MIDI CC 84
-        # (portamento control).  An allocator sends these to idle voices for
-        # polyphonic glide.  Not a MIDI message (no bytes).
-        def self.glide(note, channel: 0, time: 0r)
-          new(type: :glide, channel: channel, note: note, time: time)
-        end
-
         # A program change (+program+ 0..127).
         def self.program(program, channel: 0, time: 0r)
           parse([0xc0 | channel, program], time: time)
@@ -288,6 +277,18 @@ module MB
           )
         end
 
+        # A choke (fast release) of +note+ on a voice allocator lane (see the
+        # class description).
+        def self.choke(note, channel: 0, time: 0r)
+          new(type: :choke, channel: channel, note: note, time: time)
+        end
+
+        # Tells a voice allocator lane that its next note glides from +note+
+        # (see the class description).
+        def self.glide(note, channel: 0, time: 0r)
+          new(type: :glide, channel: channel, note: note, time: time)
+        end
+
         # The note or controller number (an alias of +note+ that reads better
         # for CCs).
         def index
@@ -302,6 +303,19 @@ module MB
           type == :note_off
         end
 
+        # True for a legato note-on (see the class description).
+        def legato?
+          legato
+        end
+
+        def choke?
+          type == :choke
+        end
+
+        def glide?
+          type == :glide
+        end
+
         # True for note-on and note-off events.
         def note?
           type == :note_on || type == :note_off
@@ -314,21 +328,6 @@ module MB
 
         def bend?
           type == :bend
-        end
-
-        # True for :choke events (see .choke).
-        def choke?
-          type == :choke
-        end
-
-        # True for :glide events (see .glide).
-        def glide?
-          type == :glide
-        end
-
-        # True for a note-on marked as legato (see the class description).
-        def legato?
-          legato
         end
 
         # True for channel mode messages (CC 120 to 127).
@@ -384,10 +383,10 @@ module MB
           t = MB::M.sigfigs(time.to_f, 6)
           desc = case type
                  when :note_on, :note_off then "#{note} v#{MB::M.sigfigs(velocity, 3)}#{' legato' if legato}"
+                 when :choke, :glide then note.to_s
                  when :cc, :poly_pressure then "#{note}=#{MB::M.sigfigs(value, 3)}"
                  when :bend then "#{MB::M.sigfigs(value, 4)}#{" (#{MB::M.sigfigs(bend_semitones, 4)} st)" if bend_range}"
                  when :sysex then "#{bytes.bytesize} bytes"
-                 when :choke, :glide then note.to_s
                  else value.inspect
                  end
           "#{type}#{"/ch#{channel}" if channel} #{desc} @#{t}s"
