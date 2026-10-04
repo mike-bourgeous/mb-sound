@@ -584,6 +584,7 @@ mb-sound, for testing of and experimentation with the mb-sound project itself.
 This code uses some really cool other projects either directly or indirectly:
 
 - FFMPEG
+- [miniaudio](https://miniaud.io) by David Reid (public domain or MIT-0), included in `ext/mb/sound/fast_audio/` for sound card I/O
 - Numo::NArray
 - Numo::Pocketfft
 - Pry interactive console for Ruby
