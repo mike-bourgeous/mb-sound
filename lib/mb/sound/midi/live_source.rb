@@ -31,10 +31,11 @@ module MB
       #
       # L is +:latency+ if given, else the smallest constant latency that
       # keeps events from arriving too late with the output's queue: the
-      # queue limit plus one device period plus one read (buffer).  The
-      # Session writes in bursts (DeviceOutput fills the queue, then waits
-      # until half of it has played), so a MIDI read can come up to the whole
-      # queue after the event arrived.  With DeviceOutput's :default profile
+      # queue limit plus one device period plus one read (buffer).  Audio
+      # already queued for output plays before anything rendered after the
+      # event, so the queue depth is the latency floor (DeviceOutput tops up
+      # steadily, one write at a time; reads are about a buffer plus a period
+      # apart when rendering keeps up).  With DeviceOutput's :default profile
       # (50 ms queue, 128-frame period, 512-sample buffers) L is about 63 ms;
       # :low is about 18 ms.  (Measured on the dummy JACK server with
       # 256-frame periods and 512-sample buffers, events sent at cycle
