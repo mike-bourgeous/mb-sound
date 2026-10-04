@@ -70,7 +70,7 @@ Graph nodes maintain input/output relationships and support traversal via the `T
 - `PlaybackMethods` - `play`, `input`, real-time audio, plus the background session:
   - `bg` / `stop` / `outro` (alias `fadeout`) / `panic` / `players` / `resume` / `stopped` / `forget` play sounds in the background through one shared `Session` (`lib/mb/sound/session.rb`) that mixes every player in a single render loop locked to the sequence timeline
   - `swap` changes the clips a player plays without rebuilding its graph; `master` (alias `master_fx`) sets master effects on the mix (see Sequences and Master effects below)
-  - `visualize` (alias `vis`) plots the mix live; `render` runs a `Session` into a file; `wait` blocks until everything has ended, including master effects tails (use it at the end of scripts)
+  - `visualize` (alias `vis`) plots the mix live; `render` runs a `Session` into a file (or any output object); `wait` blocks until everything has ended, including master effects tails (use it at the end of scripts); `use_output` sets the background session's output (see Audio I/O below)
 - `MultichannelMethods` - `channels`, `stereo`, `spread` build multichannel signals and per-channel arguments (see Multichannel below)
 - `ScheduleMethods` - `at_bar` (alias `on_bar`) / `after` / `every` / `scheduled` / `cancel` run blocks at bars on the `Session` timeline; `bg`/`stop`/`resume`/`bpm` inside them take effect exactly at the scheduled time (see `bin/songs/scheduled_song.rb`)
 - `PlotMethods` - Terminal/gnuplot visualization
@@ -78,12 +78,15 @@ Graph nodes maintain input/output relationships and support traversal via the `T
 - `ScriptingMethods` - `effect_script` / `synth_script` / `song_script` / `script` for standalone scripts in bin/ (see Scripts below)
 - `GainMethods`, `WindowMethods`, `AnalysisMethods`
 
-### C Extensions (4 native extensions, compiled via rake-compiler)
+### C Extensions (compiled via rake-compiler)
 
 - `ext/mb/fast_sound/` - Fast waveform generation → `lib/mb/fast_sound.so`
 - `ext/mb/sound/fast_resample/` - libsamplerate bindings → `lib/mb/sound/fast_resample.so`
 - `ext/mb/sound/fast_wavetable/` - Fast wavetable synthesis → `lib/mb/sound/fast_wavetable.so`
 - `ext/mb/sound/fast_delay/` - Delay line read/feedback kernels (`DelayLine`) → `lib/mb/sound/fast_delay.so`
+- `ext/mb/sound/fast_audio/` - Sound card I/O through bundled miniaudio (`DeviceOutput`; see Audio I/O) → `lib/mb/sound/fast_audio.so`
+
+`depend` files list an extension's headers (rake doesn't rebuild on header changes otherwise); after changing `depend` or removing a source file, `rm -rf tmp/<platform>/<extension>` so the Makefile is regenerated.
 
 ### Filter System
 
@@ -117,6 +120,10 @@ Every GraphNode has `outputs` (`[self]` for one channel) and `channel_count`; no
 ### Master effects
 
 `Session#master` (`lib/mb/sound/session/master.rb`, console `master { |mix| mix.softclip }`) runs the whole mix through a chain built on `GraphNode::MixSource` channels (one param = the mix as a stereo bundle, N params = one per channel; `master nil` bypasses). New chains start at `bg`-style launch points; by default the old chain "spills over" (fed silence from the switch sample so tails ring out, dropped after 1s below -90dB or 10s), `fade:` crossfades, `fade: 0` cuts (also used when the render load is over 60%). Chains keep processing while idle, `panic` rebuilds the chain to clear tails, and `render` adds the tail after the last player (10s cap). Nodes that change the sample count (`resample`, `oversample`) can't be used in a master chain yet. See Reverbs above for which reverbs are light enough for a live master chain.
+
+### Audio I/O
+
+Device I/O is being replaced by miniaudio in stages (the user's plan, 2026-10-04: 1 output, 2 device sample rate, 3 input, 4 MIDI via RtMidi, 5 switch defaults and remove JackFFI/JackOutput/JackInput/AlsaOutput/AlsaInput and the jackffi gem; ffmpeg stays for files and other ffmpeg outputs).  `MB::Sound::DeviceOutput` (`lib/mb/sound/device_output.rb`, `OUTPUT_TYPE=device`, opt-in until stage 5) writes into a lock-free ring that a C callback on miniaudio's device thread drains (`FastAudio::Playback` in `fast_audio`); Ruby never runs on the audio thread.  `#write` keeps at most `AUDIO_LATENCY` seconds queued (default 85 ms), then waits without the GVL until the device has played half of it, so the sound card's clock paces the Session.  Environment: `AUDIO_BACKEND` (e.g. `jack,pulseaudio`; on Linux JACK first only if a server runs, then PulseAudio/PipeWire, then ALSA; CoreAudio on macOS), `OUTPUT_DEVICE`/`DEVICE` (index or part of a name), `AUDIO_SAMPLE_RATE` (asks for 48000 by default; if the device runs at another rate, `#sample_rate` is the device's rate), `AUDIO_PERIOD`, `JACK_CLIENT_NAME` (default: the script's name).  JACK servers are never started, ports are connected to the physical outputs once at startup, and later rewiring by qjackctl/qpwgraph/session managers is left alone.  Mono outputs open two channels.  `AUDIO_BACKEND=null` uses miniaudio's null device (a timer-driven fake sound card, used by the specs).  `bin/audio_check.rb` lists devices and measures latency, underruns, and clock drift (`--busy` adds GVL contention).  A busy Ruby thread can starve the writer for a whole time slice (100 ms by default, longer than the queue): `RUBY_THREAD_TIMESLICE=10` or a priority of -3 on the busy thread gave no underruns in measurements (decision pending).  `use_output(obj_or_type)` gives the background session another output (refuses while players run); `render` accepts an output object; `OUTPUT_TYPE=ffmpeg` is any live ffmpeg output (`OUTPUT_FORMAT`, `OUTPUT_CODEC`, `OUTPUT_DEVICE` as the name or URL).
 
 ### Scripts
 
@@ -175,7 +182,7 @@ The container has no audio device, so check sound-producing code by rendering it
 - C4 = 60 (C3 = 48).  Derive expected values in specs from note constants or a quick script; hand-computed notes and offsets caused several wrong assertions.
 - A realtime Session's render thread runs until `close`; close sessions in spec `after` blocks.  `kill -QUIT <pid>` prints every thread's backtrace (`MB::U.sigquit_backtrace`, set up in spec_helper).
 - Before adding `bin/sound.rb` commands, check for collisions with `MB::Sound` methods and Pry commands (`Pry::Commands`; e.g. `reset` and `watch` are taken).
-- macOS playback goes through ffmpeg's audiotoolbox output with `FFMPEGOutput realtime: true` and `BackgroundOutput`; expect about 0.4s latency.
+- macOS playback goes through ffmpeg's audiotoolbox output with `FFMPEGOutput realtime: true` and `BackgroundOutput` by default (about 0.4s latency) until the audio I/O work makes `OUTPUT_TYPE=device` the default (see Audio I/O).
 
 ### Process
 
