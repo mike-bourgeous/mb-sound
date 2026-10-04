@@ -95,6 +95,32 @@ RSpec.describe(MB::Sound::MIDI::Input, :aggregate_failures) do
       expect(events[1][0]).to be >= 0
     end
 
+    it 'finds JACK MIDI sources when MIDI defaults to ALSA (e.g. under PipeWire)' do
+      ENV.delete('MIDI_API')
+      allow(MB::Sound::DeviceOutput).to receive(:jack_running?).and_return(false)
+      allow(MB::Sound::DeviceOutput).to receive(:pipewire_running?).and_return(true)
+      expect(MB::Sound::MIDI::Input.api).to eq(:alsa)
+
+      inp = input(connect: 'mbspec_key')
+      expect(inp.api).to eq(:jack)
+      expect(inp.connected_to).to eq('mbspec_keyboard:out')
+
+      sleep 0.05
+      send([0x90, 64, 90])
+      expect(wait_for(inp, 1).map { |_, b| b.bytes }).to eq([[0x90, 64, 90]])
+    end
+
+    it 'searches only the default API without a JACK or PipeWire server' do
+      ENV.delete('MIDI_API')
+      allow(MB::Sound::DeviceOutput).to receive(:jack_running?).and_return(false)
+      allow(MB::Sound::DeviceOutput).to receive(:pipewire_running?).and_return(false)
+      allow(MB::Sound::FastMIDI).to receive(:input_ports).and_call_original
+      allow(MB::Sound::FastMIDI).to receive(:input_ports).with(:alsa, anything).and_return([])
+
+      expect(MB::Sound::MIDI::Input.find_port('mbspec_key', kind: :input)).to eq([:alsa, nil, nil, { alsa: [] }])
+      expect(MB::Sound::FastMIDI).not_to have_received(:input_ports).with(:jack, anything)
+    end
+
     it 'connects to MIDI_DEVICE' do
       ENV['MIDI_DEVICE'] = 'mbspec_key'
       expect(input.connected_to).to eq('mbspec_keyboard:out')

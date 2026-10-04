@@ -30,14 +30,11 @@ module MB
 
           index = nil
           if connect
-            names = FastMIDI.output_ports(@api, client)
-            index = Integer(connect) if connect.is_a?(Integer) || connect.to_s =~ /\A\d+\z/
-            index ||= names.index { |n| n.downcase.include?(connect.to_s.downcase) }
-            if index.nil? || index >= names.length
-              list = names.each_with_index.map { |n, i| "  #{i}: #{n}" }.join("\n")
-              raise ArgumentError, "No MIDI destination matches #{connect.inspect}.  Destinations:\n#{list}"
+            # Searches the other APIs too (see Input.find_port)
+            @api, index, @connected_to, lists = Input.find_port(connect, kind: :output, api: api)
+            unless index
+              raise ArgumentError, "No MIDI destination matches #{connect.inspect}.  Destinations:\n#{Input.port_list(lists)}"
             end
-            @connected_to = names[index]
           end
 
           @output = FastMIDI::Output.new(@api, client, index, @port_name)

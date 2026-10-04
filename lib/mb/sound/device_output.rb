@@ -141,6 +141,13 @@ module MB
           !`pgrep -x 'jackd|jackdbus' 2>/dev/null`.strip.empty? || sockets.any? { |f| File.socket?(f) }
         end
 
+        # True if a PipeWire server's socket exists (PipeWire can also serve
+        # JACK clients through pipewire-jack).
+        def pipewire_running?
+          dir = ENV['XDG_RUNTIME_DIR'] || "/run/user/#{Process.uid}"
+          File.socket?(File.join(dir, 'pipewire-0'))
+        end
+
         # Called by outputs as they open and close, so open outputs are
         # closed at exit before Ruby tears down.
         def track(output, open)

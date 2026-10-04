@@ -12,7 +12,8 @@ module MB
       # keyboards' software, qjackctl, qpwgraph, aconnect, Audio MIDI Setup)
       # to connect to, named after the script (see DeviceOutput.client_name).
       # With +:connect+ (or MIDI_DEVICE), the input connects to the first
-      # MIDI source whose name contains it (or to that index; see .ports).
+      # MIDI source whose name contains it (or to that index; see .ports),
+      # also searching JACK when MIDI defaults to ALSA (see .find_port).
       #
       # Environment variables take precedence:
       #   MIDI_API=jack        API: core (macOS), alsa or jack (Linux); by
@@ -43,6 +44,46 @@ module MB
             end
           end
 
+          # Finds the first MIDI port whose name contains +connect+ (or, in
+          # the first API searched, has that index): sources for +kind+
+          # :input, destinations for :output.  Without an explicit +api+ or
+          # MIDI_API, ports of the other compiled APIs are searched after the
+          # default one, so e.g. a JACK MIDI program (jack-keyboard) is found
+          # under PipeWire while MIDI defaults to ALSA; JACK is searched only
+          # when a JACK or PipeWire server runs, to avoid libjack's errors.
+          #
+          # Returns [api, index, name, {api => [names]}] (index and name nil
+          # when nothing matched; api is then the default API).
+          def find_port(connect, kind:, api: nil)
+            client = DeviceOutput.client_name
+            lists = {}
+            search_apis(api).each_with_index do |a, i|
+              names = begin
+                kind == :input ? FastMIDI.input_ports(a, client) : FastMIDI.output_ports(a, client)
+              rescue FastMIDI::Error
+                # e.g. no ALSA sequencer device; the other APIs may still work
+                raise if i == 0 && search_apis(api).length == 1
+                []
+              end
+              lists[a] = names
+
+              index = nil
+              index = Integer(connect) if i == 0 && (connect.is_a?(Integer) || connect.to_s =~ /\A\d+\z/)
+              index ||= names.index { |n| n.downcase.include?(connect.to_s.downcase) }
+              return [a, index, names[index], lists] if index && index < names.length
+            end
+
+            [lists.keys.first, nil, nil, lists]
+          end
+
+          # Formats the port lists from .find_port for error messages.
+          def port_list(lists)
+            lines = lists.flat_map { |a, names|
+              names.each_with_index.map { |n, i| "  #{i}: #{n}#{" (#{a})" if lists.length > 1}" }
+            }
+            lines.empty? ? '  (none)' : lines.join("\n")
+          end
+
           # Lists the names of the MIDI sources that an input can connect to.
           def ports(api: nil)
             FastMIDI.input_ports(self.api(api), DeviceOutput.client_name)
@@ -62,6 +103,18 @@ module MB
             end
             input
           end
+
+          private
+
+          # The default API, then (without an explicit choice) the others.
+          def search_apis(api)
+            chosen = self.api(api)
+            return [chosen] if api || (ENV['MIDI_API'] && !ENV['MIDI_API'].empty?)
+
+            others = apis - [chosen]
+            others.delete(:jack) unless DeviceOutput.jack_running? || DeviceOutput.pipewire_running?
+            [chosen, *others]
+          end
         end
 
         attr_reader :api, :port_name, :connected_to
@@ -78,18 +131,14 @@ module MB
 
           index = nil
           if connect
-            names = FastMIDI.input_ports(@api, client)
-            index = Integer(connect) if connect.is_a?(Integer) || connect.to_s =~ /\A\d+\z/
-            index ||= names.index { |n| n.downcase.include?(connect.to_s.downcase) }
-            if index.nil? || index >= names.length
+            found_api, index, @connected_to, lists = self.class.find_port(connect, kind: :input, api: api)
+            if index
+              @api = found_api
+            else
               # Like the old JACK input: open an unconnected port that can be
               # wired later (e.g. with qpwgraph) instead of failing.
-              list = names.empty? ? '  (none)' : names.each_with_index.map { |n, i| "  #{i}: #{n}" }.join("\n")
-              warn "No MIDI source matches #{connect.inspect}; opening an unconnected port.  Sources:\n#{list}"
-              index = nil
+              warn "No MIDI source matches #{connect.inspect}; opening an unconnected port.  Sources:\n#{self.class.port_list(lists)}"
               connect = nil
-            else
-              @connected_to = names[index]
             end
           end
 
