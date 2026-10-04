@@ -57,6 +57,11 @@ RSpec.describe(MB::Sound::DeviceOutput, :aggregate_failures) do
       expect([o.buffer_size, o.period, o.queue_limit]).to eq([256, 128, 512])
     end
 
+    it 'uses :video with 120 fps writes' do
+      o = device_output(profile: :video)
+      expect([o.buffer_size, o.period, o.queue_limit]).to eq([400, 128, 2400])
+    end
+
     it "uses :safe with miniaudio's default period" do
       o = device_output(profile: 'safe')
       expect([o.buffer_size, o.period, o.queue_limit]).to eq([800, 480, 4080])
@@ -78,7 +83,7 @@ RSpec.describe(MB::Sound::DeviceOutput, :aggregate_failures) do
     end
 
     it 'raises for unknown profiles' do
-      expect { device_output(profile: :fast) }.to raise_error(ArgumentError, /Unknown audio profile :fast \(low, default, safe\)/)
+      expect { device_output(profile: :fast) }.to raise_error(ArgumentError, /Unknown audio profile :fast \(low, default, video, safe\)/)
     end
   end
 

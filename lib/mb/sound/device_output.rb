@@ -18,7 +18,7 @@ module MB
     # +:profile+ or AUDIO_PROFILE says otherwise), and any of them can be
     # set separately.  Environment variables take precedence over the
     # constructor's arguments:
-    #   AUDIO_PROFILE=low              latency profile (low, default, safe)
+    #   AUDIO_PROFILE=low              latency profile (low, default, video, safe)
     #   AUDIO_BUFFER=512               frames per write (Session's block size)
     #   AUDIO_PERIOD=128               sound card period in frames
     #   AUDIO_LATENCY=0.05             seconds of audio queued ahead (at least
@@ -48,11 +48,15 @@ module MB
       #   (fm_bass at 4x oversampling, fm_bass + stereo_drone) drop out
       # - :default (45-56 ms) had no dropouts with fm_bass, stereo_drone, or
       #   both
+      # - :video (about 45-58 ms) writes 400 frames, one 120 fps video frame
+      #   at 48 kHz; about 8-10 points more render load than :default (more
+      #   calls), which failed fm_bass + stereo_drone at 4x oversampling
       # - :safe (about 110 ms) is the first version's setting, for heavy
-      #   graphs or busy machines
+      #   graphs or busy machines; its 800-frame writes are 60 fps frames
       PROFILES = {
         low: { buffer_size: 256, period: 128, latency: 0 }.freeze,
         default: { buffer_size: 512, period: 128, latency: 0.05 }.freeze,
+        video: { buffer_size: 400, period: 128, latency: 0.05 }.freeze,
         safe: { buffer_size: 800, period: nil, latency: 0.085 }.freeze,
       }.freeze
 

@@ -60,7 +60,7 @@ MB::Sound.script(
   backend: [nil, String, '-b', 'Backends to try, comma-separated (e.g. jack,pulseaudio)'],
   device: [nil, String, '-d', 'Device index or part of its name'],
   rate: [48000, Integer, '-r', 'Sample rate to ask for', 8000..384000],
-  profile: [nil, String, 'Latency profile (default: AUDIO_PROFILE or default)', %w[low default safe]],
+  profile: [nil, String, 'Latency profile (default: AUDIO_PROFILE or default)', %w[low default video safe]],
   latency: [nil, Float, 'Seconds queued ahead of the sound card (overrides the profile)', 0.0..2.0],
   period: [nil, Integer, 'Sound card period in frames (overrides the profile)', 16..16384],
   buffer: [nil, Integer, 'Frames per write, the block size a Session renders (overrides the profile)', 16..16384],
