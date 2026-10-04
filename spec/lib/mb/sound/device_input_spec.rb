@@ -1,11 +1,11 @@
 RSpec.describe(MB::Sound::DeviceInput, :aggregate_failures) do
-  ENV_NAMES = [
+  DEVICE_INPUT_ENV = [
     'AUDIO_BACKEND', 'INPUT_DEVICE', 'DEVICE', 'AUDIO_SAMPLE_RATE', 'AUDIO_PROFILE', 'AUDIO_BUFFER', 'AUDIO_LATENCY',
     'AUDIO_PERIOD', 'AUDIO_DEVICE_RATE', 'AUDIO_RESAMPLE', 'INPUT_TYPE'
   ]
 
   around(:each) do |ex|
-    saved = ENV_NAMES.to_h { |k| [k, ENV.delete(k)] }
+    saved = DEVICE_INPUT_ENV.to_h { |k| [k, ENV.delete(k)] }
     ex.run
   ensure
     saved.each { |k, v| v ? ENV[k] = v : ENV.delete(k) }
