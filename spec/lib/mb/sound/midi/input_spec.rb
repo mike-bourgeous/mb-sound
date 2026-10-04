@@ -32,12 +32,18 @@ RSpec.describe(MB::Sound::MIDI::Input, :aggregate_failures) do
     end
   end
 
+  describe 'MB::Sound.midi_manager' do
+    it 'refuses an existing file that is not a MIDI file' do
+      expect { MB::Sound.midi_manager('spec/test_data/make_arp_a7.rb') }.to raise_error(ArgumentError, /make_arp_a7.rb is not a MIDI file/)
+    end
+  end
+
   context 'with a JACK server' do
     before(:context) { @jack_error = JackDummy.start }
     after(:context) { JackDummy.stop }
     before(:each) { skip @jack_error if @jack_error }
 
-    let!(:output) { MB::Sound::FastMIDI::Output.new(:jack, 'mbspec_keyboard', nil, 'out') }
+    let!(:keyboard) { MB::Sound::FastMIDI::Output.new(:jack, 'mbspec_keyboard', nil, 'out') }
 
     before(:each) do
       ENV['MIDI_API'] = 'jack'
@@ -45,7 +51,7 @@ RSpec.describe(MB::Sound::MIDI::Input, :aggregate_failures) do
     end
     after(:each) do
       @inputs.each(&:close)
-      output.close
+      keyboard.close
     end
 
     def input(**kwargs)
@@ -53,7 +59,7 @@ RSpec.describe(MB::Sound::MIDI::Input, :aggregate_failures) do
     end
 
     def send(*messages)
-      messages.each { |m| output.send_bytes(m.pack('C*')) }
+      messages.each { |m| keyboard.send_bytes(m.pack('C*')) }
     end
 
     # Reads until +count+ events arrive (Manager#update's read format)
@@ -65,6 +71,10 @@ RSpec.describe(MB::Sound::MIDI::Input, :aggregate_failures) do
         sleep 0.005
       end
       events
+    end
+
+    it 'sees the running server' do
+      expect(MB::Sound::DeviceOutput.jack_running?).to eq(true)
     end
 
     it 'lists sources' do
@@ -90,8 +100,11 @@ RSpec.describe(MB::Sound::MIDI::Input, :aggregate_failures) do
       expect(input.connected_to).to eq('mbspec_keyboard:out')
     end
 
-    it 'lists the sources when none match' do
-      expect { input(connect: 'Launchkey') }.to raise_error(ArgumentError, /No MIDI source matches "Launchkey".*0: mbspec_keyboard:out/m)
+    it 'warns with the sources and opens an unconnected port when none match' do
+      inp = nil
+      expect { inp = input(connect: 'Launchkey') }.to output(/No MIDI source matches "Launchkey"; opening an unconnected port.*0: mbspec_keyboard:out/m).to_stderr
+      expect(inp.connected_to).to be_nil
+      expect(inp.connections).to eq(["#{MB::Sound::DeviceOutput.client_name}:midi_in (virtual)"])
     end
 
     it 'creates a virtual port named after the script when not connecting' do

@@ -34,15 +34,20 @@ module MB
       end
 
       # Creates and caches a MIDI manager for the given +input_name+, which may
-      # be a MIDI filename, part of a live MIDI source's name to connect to,
-      # or nil for a virtual MIDI port named after the script (see
-      # MB::Sound::MIDI::Input; live MIDI goes through RtMidi and never
-      # starts a JACK server).
+      # be a MIDI filename (any existing file must be .mid or .midi), part of
+      # a live MIDI source's name to connect to (an unconnected port with a
+      # warning if none matches), or nil for a virtual MIDI port named after
+      # the script (see MB::Sound::MIDI::Input; live MIDI goes through RtMidi
+      # and never starts a JACK server).
       def midi_manager(input_name = nil)
         @midi_managers ||= {}
         return @midi_managers[input_name] if @midi_managers.include?(input_name)
 
-        if input_name && input_name.downcase.end_with?('.mid') && File.readable?(input_name)
+        if input_name && File.file?(input_name)
+          unless input_name.downcase.end_with?('.mid', '.midi')
+            raise ArgumentError, "#{input_name} is not a MIDI file (expected .mid or .midi)"
+          end
+
           # FIXME: really need a better way of connecting the clock to the graph
           clock = MB::Sound::GraphNode::GraphClock.new
           midi_in = MB::Sound::MIDI::MIDIFile.new(input_name, clock: clock)

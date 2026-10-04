@@ -128,11 +128,17 @@ module MB
           name[0, 63]
         end
 
-        # True if a JACK server (jackd, or PipeWire's JACK) seems to be
-        # running.
+        # True if a JACK server (jackd or jackdbus) seems to be running.
         def jack_running?
-          !`pgrep -x 'jackd|jackdbus' 2>/dev/null`.strip.empty? ||
-            !Dir.glob(['/dev/shm/jack-*', "/run/user/#{Process.uid}/jack/*", "/tmp/jack-#{Process.uid}/*"]).empty?
+          # Server sockets only: JACK2 leaves /dev/shm/jack-shm-registry (and
+          # sometimes shm segments) behind after the server exits.
+          uid = Process.uid
+          sockets = Dir.glob([
+            "/dev/shm/jack_*_#{uid}_*", # JACK2 on Linux
+            "/dev/shm/jack-#{uid}/*/*", "/tmp/jack-#{uid}/*/*", "/run/user/#{uid}/jack/*", # JACK1, other layouts
+          ])
+
+          !`pgrep -x 'jackd|jackdbus' 2>/dev/null`.strip.empty? || sockets.any? { |f| File.socket?(f) }
         end
 
         # Called by outputs as they open and close, so open outputs are

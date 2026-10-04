@@ -75,7 +75,6 @@ module MB
           @api = self.class.api(api)
           connect = ENV['MIDI_DEVICE'] if ENV['MIDI_DEVICE'] && !ENV['MIDI_DEVICE'].empty?
           client = DeviceOutput.client_name
-          @port_name = port_name || (@api == :core && connect.nil? ? client : 'midi_in')
 
           index = nil
           if connect
@@ -83,11 +82,18 @@ module MB
             index = Integer(connect) if connect.is_a?(Integer) || connect.to_s =~ /\A\d+\z/
             index ||= names.index { |n| n.downcase.include?(connect.to_s.downcase) }
             if index.nil? || index >= names.length
-              list = names.each_with_index.map { |n, i| "  #{i}: #{n}" }.join("\n")
-              raise ArgumentError, "No MIDI source matches #{connect.inspect}.  Sources:\n#{list}"
+              # Like the old JACK input: open an unconnected port that can be
+              # wired later (e.g. with qpwgraph) instead of failing.
+              list = names.empty? ? '  (none)' : names.each_with_index.map { |n, i| "  #{i}: #{n}" }.join("\n")
+              warn "No MIDI source matches #{connect.inspect}; opening an unconnected port.  Sources:\n#{list}"
+              index = nil
+              connect = nil
+            else
+              @connected_to = names[index]
             end
-            @connected_to = names[index]
           end
+
+          @port_name = port_name || (@api == :core && connect.nil? ? client : 'midi_in')
 
           @input = FastMIDI::Input.new(@api, client, index, @port_name, queue_size)
           DeviceOutput.track(self, true)
