@@ -10,15 +10,15 @@ module MB
       class KeyedTone < MB::Sound::Tone
         # Turns key sync on with +trigger+ (a Notes#trigger).  Returns self.
         #
-        # Sets the reset input directly instead of through Tone#reset, whose
-        # cycle check (in #fixup_source) mistakes a shared upstream node for
-        # a cycle: the frequency of a vibrato pitch already depends on the
-        # same trigger (its LFO resets at note-ons).
+        # Sets the reset input directly instead of through Tone#reset (which
+        # KeyedTone overrides to drop key sync, and which warns about
+        # conflicting calls).  The frequency of a vibrato pitch may already
+        # depend on the same trigger (its LFO resets at note-ons); the cycle
+        # check accepts that second path.
         def key_sync(trigger)
           raise ArgumentError, 'Key sync must be set before sync or other resets' if @sync || @reset
 
-          trigger = trigger.at_rate(@sample_rate) if trigger.sample_rate != @sample_rate
-          @reset = trigger.get_sampler
+          @reset = fixup_source(trigger)
           @reset_to = nil
           update_reset
           @key_sync = @reset

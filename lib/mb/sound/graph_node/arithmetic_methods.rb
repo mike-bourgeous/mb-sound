@@ -167,6 +167,8 @@ module MB
                 # will create a new object, so we grab the yielded value.
                 # TODO: should we be operating in place here?  This could modify
                 # the source of an upstream ArrayInput for example.
+                # A Tee's shared buffer is frozen: copy it (see Tee)
+                v = v.dup if v.frozen?
                 v.inplace!
                 ret = yield v, data
                 ret.not_inplace!
@@ -177,6 +179,7 @@ module MB
               if v.nil? || v.empty?
                 nil
               else
+                v = v.dup if v.frozen?
                 v.inplace!
                 ret = yield v, other
                 ret.not_inplace!

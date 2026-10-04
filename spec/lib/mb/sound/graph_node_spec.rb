@@ -210,6 +210,20 @@ RSpec.describe(MB::Sound::GraphNode, aggregate_failures: true) do
       it 'truncates short reads from other' do
         expect(longnode.send(operator, shortnode).sample(10)).to eq(expected_long_short)
       end
+
+      it 'does not modify a shared input buffer', :check_shared do
+        src = 3.hz.lfo.at(2) + 3
+        a = src.get_sampler.send(operator, 2)
+        b = src.get_sampler.send(operator, src.get_sampler)
+        c = src.get_sampler
+        3.times do
+          ra = a.sample(480).dup
+          rb = b.sample(480).dup
+          rc = c.sample(480).dup
+          expect(ra).to all_be_within(1e-4).of_array(rc.send(operator, 2))
+          expect(rb).to all_be_within(1e-3).of_array(rc.send(operator, rc))
+        end
+      end
     end
 
     describe '#/' do

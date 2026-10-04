@@ -933,9 +933,13 @@ module MB
       def fixup_source(src)
         return nil if src.nil?
 
+        # A cycle exists only if this tone is +src+ or feeds +src+.  A node
+        # that already feeds this tone through another input (e.g. one
+        # trigger, through a Tee, resetting both this tone and its vibrato
+        # LFO) just adds a second path, which is fine.
         if src.respond_to?(:sources)
           # O(n^2)ish if building a complex network of modulation?
-          if src == self || src.graph(include_tees: true).include?(self) || self.graph(include_tees: true).include?(src)
+          if src.equal?(self) || src.graph(include_tees: true).any? { |n| n.equal?(self) }
             raise 'Cyclic modulation detected'
           end
         end
