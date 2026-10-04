@@ -33,6 +33,12 @@ Rake::ExtensionTask.new 'mb-sound-fast_synth' do |ext|
   ext.lib_dir = 'lib/mb/sound'
 end
 
+Rake::ExtensionTask.new 'mb-sound-fast_clip' do |ext|
+  ext.name = 'fast_clip'
+  ext.ext_dir = 'ext/mb/sound/fast_clip'
+  ext.lib_dir = 'lib/mb/sound'
+end
+
 
 # Valgrind memcheck of the C extensions (`bundle exec rake memcheck`), using
 # ruby_memcheck, which runs rspec under Valgrind and filters out Ruby's own
@@ -62,7 +68,8 @@ MEMCHECK_SPECS = [
   'spec/lib/mb/sound/filter/delay_spec.rb',
   'spec/lib/mb/sound/phasor_spec.rb',              # FastSound.phasor
   'spec/lib/mb/sound/oscillator_spec.rb',          # FastSound.osc/oscillate, FastSynth.oscillate_bl
-  'spec/lib/mb/sound/band_limit_spec.rb',          # FastSynth.oscillate_bl
+  'spec/lib/mb/sound/band_limit_spec.rb',          # FastSynth.oscillate_bl/blit/oscillate_sync
+  'spec/lib/mb/sound/shaper_spec.rb',              # FastClip.shape
   'spec/lib/mb/sound/adsr_envelope_spec.rb',       # FastSound.adsr*
   'spec/lib/mb/sound/wavetable_spec.rb',           # FastWavetable
   'spec/lib/mb/sound/graph_node/wavetable_spec.rb',

@@ -87,12 +87,12 @@ MB::Sound.effect_script(
     lfo = lfo_freq.tone.with_phase(phase).send(p.wave).at(0..1)
 
     # Delay in samples
-    samples = (delayconst * sample_rate).clip(0, nil).named('Delay in samples')
+    samples = (delayconst * sample_rate).aclip(0, nil).named('Delay in samples')
 
     # Delay LFO
     lfo_scale = depthconst * samples
     lfo_base = samples - lfo_scale * 0.5
-    lfo_mod = (lfo * lfo_scale + lfo_base).clip(0, nil)
+    lfo_mod = (lfo * lfo_scale + lfo_base).aclip(0, nil)
 
     # Split input into original and first delay
     inp_delayed = inp.delay(lfo_mod.samples, smoothing: delay_smoothing)
@@ -101,7 +101,7 @@ MB::Sound.effect_script(
     # TODO: better way of injecting an NArray into a node chain than
     # constant.proc; e.g. maybe a node that takes a pointer to a buffer and
     # always returns the buffer; or better way of just doing feedback
-    d_fb = (lfo_mod - internal_bufsize).clip(0, nil)
+    d_fb = (lfo_mod - internal_bufsize).aclip(0, nil)
     b = 0.constant.proc { a }.delay(d_fb.samples, smoothing: delay_smoothing2)
 
     # Effected output, with a spy to save feedback buffer

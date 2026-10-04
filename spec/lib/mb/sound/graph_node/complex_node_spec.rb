@@ -32,7 +32,9 @@ RSpec.describe(MB::Sound::GraphNode::ComplexNode, :aggregate_failures) do
         cases.each do |mode, expected|
           context "when mode is #{mode}" do
             it 'returns expected outputs for given inputs' do
-              chain = MB::Sound::ArrayInput.new(data: [input]).send(mode)
+              # (GraphNode#abs is a Shaper now; ComplexNode's :abs mode remains)
+              source = MB::Sound::ArrayInput.new(data: [input])
+              chain = mode == :abs ? MB::Sound::GraphNode::ComplexNode.new(source, mode: :abs) : source.send(mode)
               expect(chain).to be_a(MB::Sound::GraphNode::ComplexNode)
               expect(chain.mode).to eq(mode)
 

@@ -69,7 +69,7 @@ MB::Sound.effect_script(
     # Feedback injector and delay.  The feedback comes back one internal
     # buffer late, so the delay line is that much shorter; the input is
     # delayed by the same amount so the first echo isn't early.
-    adjusted_delay = (delay_samples.named('delay in samples') - internal_bufsize.constant.named('buffer size')).clip(0, nil)
+    adjusted_delay = (delay_samples.named('delay in samples') - internal_bufsize.constant.named('buffer size')).aclip(0, nil)
     tape_in = inp.delay(internal_bufsize.samples, smoothing: false).named('loop latency')
     b = (tape_in * p.drive.constant.named('drive') + 0.constant.proc { a }.named('feedback') * p.feedback)
       .delay(adjusted_delay.samples, smoothing: p.smoothing)
