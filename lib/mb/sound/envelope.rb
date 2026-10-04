@@ -280,6 +280,7 @@ module MB
         self.octaves = octaves
 
         @last = {}
+        @fitted = {}
         @buf = nil
         @state = Numo::DFloat.zeros(STATE_SIZE)
         reset
@@ -888,9 +889,16 @@ module MB
       # Returns +data+ fitted to +count+ samples (padded with +:pad+, or the
       # last value if +:pad+ is nil), remembering its last value for when its
       # node ends.  Numbers are returned unchanged; nil gives the last value.
+      #
+      # A frozen buffer of +count+ samples seen last time for +key+ (e.g. a
+      # Notes node's constant buffer) is returned at once: it holds the same
+      # values, so its last value is already remembered.
       def fit(key, data, count, pad: nil)
         return @last.fetch(key, 0.0) if data.nil?
         return data if data.is_a?(Numeric)
+        return data if data.equal?(@fitted[key]) && data.length == count
+
+        @fitted[key] = data.frozen? && (data.is_a?(Numo::SFloat) || data.is_a?(Numo::DFloat)) ? data : nil
 
         data = data.real if data.is_a?(Numo::SComplex) || data.is_a?(Numo::DComplex)
         @last[key] = data[-1] unless data.empty?

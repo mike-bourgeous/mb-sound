@@ -342,6 +342,23 @@ RSpec.describe(MB::Sound::Envelope) do
   end
 
   describe 'inputs' do
+    it 'gives the same samples for frozen input buffers seen again as for fresh copies' do
+      on = Numo::SFloat.ones(100).freeze
+      off = Numo::SFloat.zeros(100).freeze
+      vel = Numo::SFloat.new(100).fill(0.6).freeze
+      gates = [off, on, on, on, off, off, on, off, off]
+      outputs = [true, false].map { |reuse|
+        g = gates.dup
+        v = [vel] * gates.length + [nil] * 3
+        gate = MB::Sound::GraphNode::ProcNode.new(0.constant) { b = g.shift || off; reuse ? b : b.dup }
+        velocity = MB::Sound::GraphNode::ProcNode.new(0.constant) { b = v.shift; reuse || b.nil? ? b : b.dup }
+        env = described_class.new(attack: 0.002, decay: 0.002, sustain: 0.5, release: 0.002, gate: gate, velocity: velocity, sensitivity: 0..1)
+        12.times.map { env.sample(100).dup }.reduce(:concatenate)
+      }
+      expect(outputs[0].to_a).to eq(outputs[1].to_a)
+      expect(outputs[0].max).to be > 0.5
+    end
+
     it 'starts the attack on a rising gate mid-buffer and releases on a falling gate' do
       gate = array_node_class.new(pulses(2000, 123..999))
       env = described_class.new(attack: 100.samples, decay: 100.samples, sustain: 0.5, release: 200.samples, gate: gate)
