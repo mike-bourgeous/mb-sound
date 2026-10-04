@@ -376,6 +376,16 @@ module MB
         @playback.jack_ports
       end
 
+      # For JACK outputs, where the latest JACK cycle started: a Hash with
+      # its :frame_time (JACK's 32-bit frame counter), the queue's
+      # :read_pos and :write_pos (device-rate frames since opening), and the
+      # device clock (:frames_played).  Queued frame +x+ plays at JACK frame
+      # `frame_time + (x - read_pos)` (until an underrun), the time base of
+      # JACK MIDI input (see MIDI::LiveSource).  nil for other backends.
+      def jack_clock
+        @playback.jack_clock
+      end
+
       def inspect
         rate = resampling? ? "#{@sample_rate.round}Hz->#{@device_rate.round}Hz" : "#{@sample_rate.round}Hz"
         "#<#{self.class.name} #{@backend} #{@device_name.inspect} #{@channels}ch #{rate} #{@profile}#{' closed' if closed?}>"

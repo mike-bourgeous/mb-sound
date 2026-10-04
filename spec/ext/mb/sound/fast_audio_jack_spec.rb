@@ -64,6 +64,41 @@ RSpec.describe('MB::Sound::FastAudio JACK client', :aggregate_failures) do
     expect(played[start...(start + 2047), 1]).to eq(right[1..])
   end
 
+  it 'reports where each cycle starts, mapping queued frames to JACK frame times' do
+    p = jack_playback(['out_1'], capture: 8192)
+    wait_until { p.jack_clock }
+    first = p.jack_clock
+    expect(first.keys).to eq([:frame_time, :read_pos, :frames_played, :write_pos])
+    expect(first[:read_pos]).to eq(0)
+    expect(first[:write_pos]).to eq(0)
+
+    # The device clock and JACK's frame counter advance together
+    wait_until { p.jack_clock[:frame_time] != first[:frame_time] }
+    later = p.jack_clock
+    expect((later[:frame_time] - first[:frame_time]) % 256).to eq(0)
+    expect(later[:frames_played] - first[:frames_played]).to eq((later[:frame_time] - first[:frame_time]) & 0xffff_ffff)
+
+    # Ring frame x plays at frame_time + x - read_pos, which is captured
+    # index x - read_pos + frames_played
+    ramp = Numo::SFloat.linspace(0, 1, 4096)
+    p.write([ramp])
+    clock = nil
+    wait_until(2) { (c = p.jack_clock) && c[:read_pos] > 0 && (clock = c) }
+    expect(clock[:write_pos]).to eq(4096)
+    expect(clock[:read_pos]).to be < 4096
+
+    wait_until { p.stats[:frames_played] >= clock[:frames_played] + 4096 }
+    played = Numo::SFloat.from_binary(p.captured)
+    start = (0...played.length).find { |i| played[i] != 0 }
+    expect(start).to eq(1 - clock[:read_pos] + clock[:frames_played])
+  end
+
+  it 'has no JACK clock for miniaudio devices' do
+    p = fa::Playback.new([:null], -1, client, 1, 2, 48000, 0, 0, 2048, 0, 2, false, 0)
+    @opened << p
+    expect(p.jack_clock).to be_nil
+  end
+
   it 'puts later outputs on the same client, and removes ports on close' do
     a = jack_playback(['out_1', 'out_2'])
     b = jack_playback(['out_3'])
