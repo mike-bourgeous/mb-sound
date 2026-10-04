@@ -76,8 +76,11 @@ module MB
           out = (events.empty? && chase.nil? && Notes.fast_paths && steady_buffer(count))
           unless out
             @buf = Numo::SFloat.zeros(count) if @buf.nil? || @buf.length != count
-            render(@buf, items(events, chase, from, @rate_r, count))
-            out = @buf
+            uniform = render(@buf, items(events, chase, from, @rate_r, count))
+
+            # Events that left the output constant (e.g. note events seen by
+            # a controller) give the constant buffer too
+            out = uniform.is_a?(Float) && Notes.fast_paths ? constant_buffer(count, uniform) : @buf
           end
 
           @tail += count if ended?
@@ -196,7 +199,8 @@ module MB
           off < 0 ? 0 : (off >= count ? count - 1 : off)
         end
 
-        # Fills +buf+ from +items+ (see #items).
+        # Fills +buf+ from +items+ (see #items).  Returns the buffer's value
+        # if every sample is the same Float, else nil (or anything else).
         def render(buf, items)
           raise NotImplementedError, "#{self.class} must implement #render"
         end
@@ -213,7 +217,12 @@ module MB
         class Held < Node
           private
 
+          # Returns the value of the whole buffer if every #fill wrote the
+          # same one (only the default #fill tracks this; see Node#render).
           def render(buf, items)
+            @first_fill = nil
+            @uniform = true
+
             start = 0
             items.each do |off, item|
               if off > start
@@ -225,11 +234,20 @@ module MB
             end
 
             fill(buf, start, buf.length) if start < buf.length
+
+            @uniform ? @first_fill : nil
           end
 
           # Fills buf[from...to] with the current output.
           def fill(buf, from, to)
-            buf[from...to] = level
+            value = level
+            if @first_fill.nil?
+              @first_fill = value
+            elsif value != @first_fill
+              @uniform = false
+            end
+
+            buf[from...to] = value
           end
 
           def steady_buffer(count)
@@ -268,13 +286,19 @@ module MB
 
           private
 
+          # Returns 0.0 if no event gave an impulse (see Node#render).
           def render(buf, items)
             buf.fill(0)
+            quiet = 0.0
             items.each do |off, item|
               next if item.is_a?(MIDI::Source::Chase)
               v = impulse(item)
-              buf[off] = v if v && v > buf[off]
+              if v && v > buf[off]
+                buf[off] = v
+                quiet = nil
+              end
             end
+            quiet
           end
 
           def impulse(event)
