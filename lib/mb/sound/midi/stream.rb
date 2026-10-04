@@ -137,16 +137,28 @@ module MB
         end
 
         # Returns a Stream reading +obj+: a Source, a Stream (returned as-is),
-        # a Sequence::Clip (ClipSource), a MIDIFile, or a MIDI filename
-        # (FileSource).
+        # a Sequence::Clip (ClipSource), a MIDIFile, a MIDI filename
+        # (FileSource), or a live MIDI::Input (LiveSource).
         def self.for(obj)
           case obj
           when Stream then obj
           when Source then new(obj)
+          when Input then new(LiveSource.new(obj))
           when Sequence::Clip then new(ClipSource.new(obj))
           when MIDIFile, String then new(FileSource.new(obj))
           else raise ArgumentError, "Cannot make a MIDI stream from #{obj.inspect}"
           end
+        end
+
+        # Returns a Stream of live MIDI input: a LiveSource reading a new
+        # MIDI::Input connected to +:connect+ (part of a source's name, or nil
+        # for a port to connect to later), with +options+ for LiveSource.new
+        # (+:timing+, +:output+, +:latency+) and MIDI::Input.new.  Close it
+        # with `stream.source.close`.
+        #
+        #     MB::Sound::MIDI::Stream.live(connect: 'Launchkey', output: out)
+        def self.live(connect: nil, **options)
+          new(LiveSource.new(connect: connect, **options))
         end
 
         # The Source (or transform) this stream reads.
