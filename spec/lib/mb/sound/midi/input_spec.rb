@@ -40,6 +40,22 @@ RSpec.describe(MB::Sound::MIDI::Input, :aggregate_failures) do
     end
   end
 
+  describe '#read_raw with RtMidi' do
+    it "passes RtMidi's deltas through, while #read keeps its per-read times" do
+      rtmidi = instance_double(MB::Sound::FastMIDI::Input, close: nil, closed?: false)
+      allow(MB::Sound::FastMIDI::Input).to receive(:new).and_return(rtmidi)
+      allow(rtmidi).to receive(:read).and_return([[0.5, "\x90<d"], [0.25, "\x80<\x00"]])
+
+      inp = MB::Sound::MIDI::Input.new(api: :alsa)
+      expect(inp.frame_times?).to eq(false)
+      expect(inp.frame_rate).to be_nil
+      expect(inp.read_raw).to eq([[0.5, "\x90<d"], [0.25, "\x80<\x00"]])
+      expect(inp.read).to eq([[[0.0, "\x90<d"], [0.25, "\x80<\x00"]]])
+    ensure
+      inp&.close
+    end
+  end
+
   describe 'MB::Sound.midi_manager' do
     it 'refuses an existing file that is not a MIDI file' do
       expect { MB::Sound.midi_manager('spec/test_data/make_arp_a7.rb') }.to raise_error(ArgumentError, /make_arp_a7.rb is not a MIDI file/)
@@ -161,6 +177,29 @@ RSpec.describe(MB::Sound::MIDI::Input, :aggregate_failures) do
 
       second = input
       expect(second.port).to eq('my_synth:midi_in_2')
+    end
+
+    it 'gives raw JACK frame times with read_raw' do
+      inp = input(connect: 'mbspec_keyboard')
+      expect(inp.frame_times?).to eq(true)
+      expect(inp.frame_rate).to eq(48000)
+      expect(inp.read_raw).to eq([])
+      sleep 0.05
+
+      send([0x90, 64, 90])
+      sleep 0.02
+      send([0x80, 64, 0])
+      raw = []
+      deadline = MB::U.clock_now + 2
+      raw.concat(inp.read_raw) while raw.length < 2 && MB::U.clock_now < deadline && sleep(0.005)
+
+      expect(raw.map { |_, b| b.bytes }).to eq([[0x90, 64, 90], [0x80, 64, 0]])
+      expect(raw.map(&:first)).to all(be_a(Integer))
+      # About 20 ms apart, in whole 256-frame cycles (RtMidi's JACK output
+      # sends at the start of a cycle)
+      gap = (raw[1][0] - raw[0][0]) & 0xffff_ffff
+      expect(gap % 256).to eq(0)
+      expect(gap).to be_between(512, 4800)
     end
 
     it 'returns [[]] when nothing has arrived, and waits with blocking: true' do

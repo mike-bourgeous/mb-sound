@@ -193,6 +193,29 @@ module MB
           [events]
         end
 
+        # Returns the messages received since the last read with their
+        # timestamps as the API gives them (for MIDI::LiveSource; #read is
+        # the old Manager's format): on JACK (#frame_times?), [[frame,
+        # bytes], ...] with absolute JACK frame times (JACK's 32-bit frame
+        # counter, which wraps; #frame_rate frames per second); with RtMidi,
+        # [[delta, bytes], ...] with each message's time in seconds after the
+        # previous message received (across reads; 0 for the first message
+        # since opening).  Never waits.
+        def read_raw
+          @api == :jack ? @input.read(false) : @input.read
+        end
+
+        # True if #read_raw gives JACK frame times, false for RtMidi deltas.
+        def frame_times?
+          @api == :jack
+        end
+
+        # The rate of #read_raw's JACK frame times (the JACK server's sample
+        # rate), or nil for RtMidi.
+        def frame_rate
+          @rate
+        end
+
         # This input's port: the full JACK name (client:port), or a
         # description of the RtMidi port.
         def port
