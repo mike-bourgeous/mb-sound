@@ -149,4 +149,101 @@ RSpec.describe(MB::Sound::BandLimit) do
       expect(MB::Sound::Oscillator.new(:ramp, band_limit: true).band_limited?).to eq(true)
     end
   end
+
+  describe 'phase warp (pwm)' do
+    [48000, 44100].each do |rate|
+      MB::Sound::BandLimit::WARP_WAVES.each do |wave|
+        [true, false].each do |bl|
+          it "gives identical C and Ruby samples for a #{bl ? 'band-limited' : 'naive'} #{wave} at #{rate} Hz, fixed and modulated" do
+            c = oscillator(wave, rate: rate, frequency: 1234.5, width: 0.3, band_limit: bl)
+            r = oscillator(wave, rate: rate, frequency: 1234.5, width: 0.3, band_limit: bl)
+            3.times { expect(c.sample_c(333)).to eq(r.sample_ruby(333)) }
+
+            make = -> {
+              w = MB::Sound::ArrayInput.new(data: [Numo::SFloat.cast(Numo::DFloat.new(4800).seq.map { |i| 0.5 + 0.49 * Math.sin(i / 97.0) })]).with_buffer(480)
+              oscillator(wave, rate: rate, frequency: 777, width: w, band_limit: bl)
+            }
+            c = make.call
+            r = make.call
+            5.times { expect(c.sample_c(480)).to eq(r.sample_ruby(480)) }
+          end
+        end
+      end
+    end
+
+    it 'leaves band-limited shapes unchanged at width 0.5' do
+      [:ramp, :square, :triangle].each do |wave|
+        expect(321.hz.send(wave).pwm(0.5).sample(4800)).to eq(321.hz.send(wave).sample(4800)), wave.to_s
+      end
+    end
+
+    it 'leaves a sine unchanged (within rounding) at width 0.5' do
+      expect(321.hz.sine.pwm(0.5).sample(4800)).to all_be_within(1e-6).of_array(321.hz.sine.sample(4800))
+    end
+
+    it 'makes a pulse high for the given fraction of each cycle, with DC removed' do
+      data = 100.hz.pulse(0.25).sample(48000)
+      expect(data.mean).to be_within(0.001).of(0)
+
+      # With DC removed the levels are 1.5 and -0.5; count samples above the
+      # middle (band-limited edges land in between)
+      high = data.gt(0.5).count_true / 48000.0
+      expect(high).to be_within(1.0 / 480).of(0.25) # one sample per cycle
+    end
+
+    it 'keeps the DC offset with dc: true' do
+      expect(100.hz.pulse(0.25, dc: true).sample(48000).mean).to be_within(0.001).of(-0.5)
+    end
+
+    it 'removes the DC offset of every warped shape' do
+      MB::Sound::BandLimit::WARP_WAVES.each do |wave|
+        expect(100.hz.send(wave).pwm(0.2).sample(48000).mean).to be_within(0.003).of(0), wave.to_s
+      end
+    end
+
+    it 'reduces aliasing of warped shapes' do
+      # (at 4 kHz a warped sine improves less: BLAMP corrects its corners, but
+      # its curvature also changes at the knee)
+      n = 16384
+      k = 341 # ~1 kHz
+      f = k * 48000.0 / n
+      {
+        ->(t) { t.square.pwm(0.25) } => ->(t) { t.asquare.pwm(0.25) },
+        ->(t) { t.triangle.skew(0.1) } => ->(t) { t.atriangle.skew(0.1) },
+        ->(t) { t.sine.pwm(0.15) } => ->(t) { t.sine.pwm(0.15).tap { |x| x.oscillator.band_limit = false } },
+      }.each do |clean, naive|
+        expect(nonharmonic_db(clean.call(f.hz.tone), k, n: n)).to be < nonharmonic_db(naive.call(f.hz.tone), k, n: n) - 10
+      end
+    end
+
+    it 'accepts a graph node for the width' do
+      tone = 220.hz.pwm(0.5.hz.lfo.at(0.1..0.9)).square
+      expect(tone.sources[:width]).to respond_to(:sample)
+      expect(tone.sample(800).abs.max).to be <= 2
+    end
+
+    it 'has DSL shortcuts' do
+      expect(100.hz.pulse(0.3).width).to eq(0.3)
+      expect(100.hz.pulse(0.3).wave_type).to eq(:square)
+      expect(100.hz.apulse(0.3).band_limited?).to eq(false)
+      expect(100.hz.triangle.skew(0.2).width).to eq(0.2)
+      expect(100.hz.skew(0.2).width).to eq(0.2)
+      expect(100.hz.pwm(0.2).square.width).to eq(0.2)
+      expect(100.hz.pulse(0.3).to_s).to include('pwm=0.3')
+    end
+
+    it 'handles extreme widths' do
+      # Widths are clamped to MIN_WIDTH..(1 - MIN_WIDTH); a pulse narrower
+      # than a sample is almost silent once band-limited (as it should be)
+      [0, 1, -3, 7, Float::NAN].each do |w|
+        data = 100.hz.pulse(w).sample(4800)
+        expect(data.isfinite.all?).to eq(true), w.to_s
+        expect(data.abs.max).to be < 2, w.to_s
+      end
+
+      # 1% of a 100 Hz cycle is 4.8 samples: clearly there
+      data = 100.hz.pulse(0.01).sample(4800)
+      expect(data.max - data.min).to be > 1.5
+    end
+  end
 end

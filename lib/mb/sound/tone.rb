@@ -38,6 +38,8 @@ module MB
         @oscillator = nil
         @band_limit = true
         @lfo = false
+        @width = nil
+        @keep_dc = false
         @noise = 0
         @amplitude_set = false
         @phase_mod = nil
@@ -103,6 +105,53 @@ module MB
       # band-limited (see #ramp, #aramp).
       def band_limited?
         @band_limit
+      end
+
+      # Warps the phase so the first half of the waveform plays over +width+
+      # of each cycle and the second half over the rest: pulse width
+      # modulation for every shape.  A square becomes a pulse (see #pulse), a
+      # triangle a skewed triangle (towards a saw near 0 or 1), a ramp a saw
+      # with a kink, and a sine an asymmetric sine (like Casio's phase
+      # distortion).  +width+ is a number from 0 to 1 (0.5 is no change) or a
+      # graph node, read every sample.  Band-limited shapes stay band-limited
+      # (including the corners the warp adds to sines and parabolas).
+      #
+      # A warped waveform's DC offset (e.g. 2 * width - 1 for a pulse) is
+      # removed, like the AC-coupled output of an analog synth, so sweeping
+      # the width doesn't thump; pass dc: true to keep it.  Also available as
+      # #skew.
+      #
+      # Examples (bin/sound.rb):
+      #     play 110.hz.pwm(0.5.hz.lfo.at(0.1..0.9)).square.at(-12.db)   # classic PWM
+      #     play 110.hz.triangle.skew(0.1).at(-12.db)                    # nearly a saw
+      #     play C2.sine.pwm(adsr(0.01, 0.3, 0.2, 0.3).at(0.5..0.05))   # CZ-style sweep
+      def pwm(width, dc: false)
+        @width = fixup_source(width)
+        @keep_dc = !!dc
+        if @oscillator
+          @oscillator.width = @width
+          @oscillator.remove_dc = !@keep_dc
+        end
+        self
+      end
+      alias skew pwm
+
+      # The phase warp width (see #pwm), or nil.
+      attr_reader :width
+
+      # Changes the waveform to a band-limited pulse that is high for +width+
+      # (0 to 1, or a graph node) of each cycle: #square with #pwm.  See #pwm
+      # for +dc+; #apulse is the naive (aliased) version.
+      #
+      # Example (bin/sound.rb):
+      #     play 220.hz.pulse(0.25).at(-12.db)
+      def pulse(width = 0.5, dc: false)
+        square.pwm(width, dc: dc)
+      end
+
+      # The naive (aliased) version of #pulse.
+      def apulse(width = 0.5, dc: false)
+        asquare.pwm(width, dc: dc)
       end
 
       # Changes the waveform type to ramp, with phase set so the oscillator
@@ -431,6 +480,7 @@ module MB
           frequency: @frequency,
           phase: @phase,
           phase_mod: @phase_mod,
+          width: @width,
         }.compact
       end
 
@@ -451,7 +501,9 @@ module MB
           range: @range,
           phase_mod: @phase_mod,
           no_trigger: @no_trigger,
-          band_limit: oscillator_band_limit
+          band_limit: oscillator_band_limit,
+          width: @width,
+          remove_dc: !@keep_dc
         )
       end
 
@@ -528,7 +580,7 @@ module MB
       end
 
       def to_s
-        "#{super} -- #{wave_name} freq=#{make_source_name(@frequency)} range=#{@range}"
+        "#{super} -- #{wave_name} freq=#{make_source_name(@frequency)} range=#{@range}#{" pwm=#{make_source_name(@width)}" if @width}"
       end
 
       def to_s_graphviz

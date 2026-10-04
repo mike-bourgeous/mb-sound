@@ -23,44 +23,132 @@ module MB
     # The C kernel is MB::Sound::FastSynth.oscillate_bl (the fast_synth
     # extension); .oscillate_ruby mirrors it exactly for testing.
     module BandLimit
-      # Wave types that have band-limited versions.
+      # Wave types that are band-limited without a phase warp.
       WAVES = [:ramp, :square, :triangle].freeze
+
+      # Wave types that can be warped (Tone#pwm); a warped sine or parabola
+      # has corners, which are band-limited too.
+      WARP_WAVES = [:ramp, :square, :triangle, :sine, :parabola].freeze
 
       # Frequencies (Hz) over which Tone#lfo fades band-limiting in.
       LFO_FADE = (15.0..30.0).freeze
+
+      # Passed as the fade band for a naive (unband-limited) warped waveform.
+      NEVER = [Float::INFINITY, Float::INFINITY].freeze
 
       INV_2PI = 1.0 / (2.0 * Math::PI)
 
       # Phases this close to an edge (cycles) count as on it.
       EPS = 1e-9
 
-      # The naive waveform at phase +u+ (cycles, 0..1).
-      def self.shape(wave_type, u)
+      # The narrowest pulse width (and 1 minus the widest).
+      MIN_WIDTH = 1e-4
+
+      # The average of each shape's first half; a warped shape's DC offset is
+      # this times (2 * width - 1).
+      HALF_MEAN = {
+        square: 1.0,
+        ramp: 0.5,
+        triangle: 0.5,
+        sine: 2.0 / Math::PI,
+        parabola: 2.0 / 3.0,
+      }.freeze
+
+      # The naive waveform at phase +u+ (cycles, 0..1): the value after a
+      # breakpoint, or before it if +left+ (with u = 1 for the cycle's end).
+      def self.shape(wave_type, u, left = false)
         case wave_type
-        when :ramp then u < 0.5 ? 2.0 * u : 2.0 * u - 2.0
-        when :square then u < 0.5 ? 1.0 : -1.0
+        when :ramp then (left ? u <= 0.5 : u < 0.5) ? 2.0 * u : 2.0 * u - 2.0
+        when :square then (left ? u <= 0.5 : u < 0.5) ? 1.0 : -1.0
         when :triangle
-          if u < 0.25
+          if left ? u <= 0.25 : u < 0.25
             4.0 * u
-          elsif u < 0.75
+          elsif left ? u <= 0.75 : u < 0.75
             2.0 - 4.0 * u
           else
             4.0 * u - 4.0
+          end
+        when :sine then Math.sin(u * (2.0 * Math::PI))
+        when :parabola
+          if left ? u <= 0.5 : u < 0.5
+            x = 1.0 - 4.0 * u
+            1.0 - x * x
+          else
+            x = 4.0 * u - 3.0
+            x * x - 1.0
           end
         else
           raise ArgumentError, "No band-limited version of #{wave_type.inspect}"
         end
       end
 
-      # Breakpoints of +wave_type+: [phase (cycles), jump in value, jump in
-      # slope per cycle], moving forward.
-      def self.breakpoints(wave_type)
+      # The slope per cycle of the naive waveform at +u+ (see .shape).
+      def self.slope(wave_type, u, left = false)
         case wave_type
-        when :ramp then [[0.5, -2.0, 0.0]]
-        when :square then [[0.0, 2.0, 0.0], [0.5, -2.0, 0.0]]
-        when :triangle then [[0.25, 0.0, -8.0], [0.75, 0.0, 8.0]]
-        else raise ArgumentError, "No band-limited version of #{wave_type.inspect}"
+        when :ramp then 2.0
+        when :square then 0.0
+        when :triangle
+          if left ? u <= 0.25 : u < 0.25
+            4.0
+          elsif left ? u <= 0.75 : u < 0.75
+            -4.0
+          else
+            4.0
+          end
+        when :sine then (2.0 * Math::PI) * Math.cos(u * (2.0 * Math::PI))
+        when :parabola
+          (left ? u <= 0.5 : u < 0.5) ? 8.0 * (1.0 - 4.0 * u) : 8.0 * (4.0 * u - 3.0)
+        else
+          raise ArgumentError, "No band-limited version of #{wave_type.inspect}"
         end
+      end
+
+      # The phases of the shape's own breakpoints, then the wrap and the
+      # middle (where a warp bends the phase).
+      def self.candidates(wave_type)
+        u = case wave_type
+            when :ramp then [0.5]
+            when :square then [0.0, 0.5]
+            when :triangle then [0.25, 0.75]
+            else []
+            end
+        u << 0.0 unless u.include?(0.0)
+        u << 0.5 unless u.include?(0.5)
+        u
+      end
+
+      # Maps phase +p+ through the warp with width +w+ (identity at 0.5).
+      def self.warp(p, w)
+        p < w ? p * (0.5 / w) : 0.5 + (p - w) * (0.5 / (1.0 - w))
+      end
+
+      # Breakpoints of +wave_type+ warped by width +w+: [phase, jump in value,
+      # jump in slope per cycle, value after], leaving out points with no
+      # jump.  See bl_breakpoints in fast_synth.c.
+      def self.breakpoints(wave_type, w = 0.5)
+        k1 = 0.5 / w
+        k2 = 0.5 / (1.0 - w)
+
+        candidates(wave_type).filter_map do |ub|
+          ul = ub == 0.0 ? 1.0 : ub
+          kr = ub < 0.5 ? k1 : k2
+          kl = ul <= 0.5 ? k1 : k2
+
+          vr = shape(wave_type, ub)
+          dv = vr - shape(wave_type, ul, true)
+          ds = slope(wave_type, ub) * kr - slope(wave_type, ul, true) * kl
+          next if dv == 0 && ds == 0
+
+          pos = ub < 0.5 ? ub * (2.0 * w) : w + (ub - 0.5) * (2.0 * (1.0 - w))
+          [pos, dv, ds, vr]
+        end
+      end
+
+      # Clamps a pulse width to MIN_WIDTH..(1 - MIN_WIDTH) (NaN to MIN_WIDTH).
+      def self.clamp_width(w)
+        return MIN_WIDTH unless w >= MIN_WIDTH
+        return 1.0 - MIN_WIDTH if w > 1.0 - MIN_WIDTH
+        w
       end
 
       # Like mb_wrap() in the C extensions (Ruby's %, written out to match C).
@@ -90,15 +178,14 @@ module MB
         dist >= ad ? 1.0 : dist / ad
       end
 
-      # Returns phase +e+ moved onto any breakpoint within EPS of it, so a
-      # sample at an edge takes the value after the edge (see bl_snap in
-      # fast_synth.c).
+      # Returns the index of a breakpoint within EPS of phase +e+, or nil (a
+      # sample there takes the value after the edge; see bl_snap).
       def self.snap(points, e)
-        points.each do |pos, _, _|
+        points.each_with_index do |(pos, _, _, _), j|
           diff = (e - pos).abs
-          return pos if diff < EPS || diff > 1.0 - EPS
+          return j if diff < EPS || diff > 1.0 - EPS
         end
-        e
+        nil
       end
 
       # The fraction of the correction applied at +freq+ Hz (1 when +lo+ and
@@ -112,51 +199,57 @@ module MB
         t * t * (3.0 - 2.0 * t)
       end
 
-      # The correction for edges crossed while moving from +e+ by +d+; see
-      # bl_step in fast_synth.c.
-      def self.correction(points, e, d, after, adv, lo, hi)
-        corr = 0.0
+      # The corrections for edges crossed while moving from +e+ by +d+:
+      # [for the sample at the start of the step, for the sample at its end].
+      # See bl_step in fast_synth.c.
+      def self.step(points, e, d, adv, lo, hi)
+        before = 0.0
+        after = 0.0
         k = nil
 
-        points.each do |pos, dv, ds|
+        points.each do |pos, dv, ds, _|
           f = crossing(e, d, pos)
           next if f.nil?
 
           if k.nil?
             k = fade(d.abs / adv, lo, hi)
-            return 0.0 if k == 0
+            return [0.0, 0.0] if k == 0
           end
 
           dv = d > 0 ? dv : -dv
           ds *= d.abs
 
-          x = after ? f : 1.0 - f
-          blep = after ? -0.5 * x * x : 0.5 * x * x
-          blamp = x * x * x / 6.0
-
-          corr += k * (dv * blep + ds * blamp)
+          xa = f
+          xb = 1.0 - f
+          after += k * (dv * (-0.5 * xa * xa) + ds * (xa * xa * xa / 6.0))
+          before += k * (dv * (0.5 * xb * xb) + ds * (xb * xb * xb / 6.0))
         end
 
-        corr
+        [before, after]
       end
 
       # The real parts of +narray+ rounded to single precision, as the C code
-      # reads signal inputs (mb_read_signal_input in ext/mb/sound/include/mb_ext_helpers.h).
+      # reads signal inputs (mb_read_signal_input in
+      # ext/mb/sound/include/mb_ext_helpers.h).
       def self.real_floats(narray)
         narray = narray.real if narray.is_a?(Numo::SComplex) || narray.is_a?(Numo::DComplex)
         Numo::SFloat.cast(narray).to_a
       end
 
-      # Ruby mirror of MB::Sound::FastSynth.oscillate_bl, returning +count+ samples
-      # as an SFloat.  +freq+ and +phase_mod+ (radians) are Numerics or
-      # NArrays; +state+ is the phasor's [phi] and +bl_state+ the
-      # band-limiting state, both updated like the C version.
-      def self.oscillate_ruby(count, wave_type, freq, phase_mod, advance, gain, offset, state, bl_state, fade_lo, fade_hi)
-        points = breakpoints(wave_type)
+      # Ruby mirror of MB::Sound::FastSynth.oscillate_bl, returning +count+
+      # samples as an SFloat.  +freq+, +phase_mod+ (radians), and +width+ are
+      # Numerics or NArrays (+width+ nil for 0.5); +state+ is the phasor's
+      # [phi] and +bl_state+ the band-limiting state, both updated like the C
+      # version.
+      def self.oscillate_ruby(count, wave_type, freq, phase_mod, advance, gain, offset, state, bl_state, fade_lo, fade_hi, width = nil, remove_dc = false)
         freqs = freq.is_a?(Numo::NArray) ? real_floats(freq) : nil
         pms = phase_mod.is_a?(Numo::NArray) ? real_floats(phase_mod) : nil
+        widths = width.is_a?(Numo::NArray) ? real_floats(width) : nil
         freq = freqs ? freqs[0] : freq.to_f
         pm = pms ? pms[0] : (phase_mod || 0).to_f
+        w = clamp_width(widths ? widths[0] : (width || 0.5).to_f)
+        half_mean = HALF_MEAN.fetch(wave_type)
+        points = breakpoints(wave_type, w)
 
         phi = state[0].to_f
         prev_e, prev_inc, prev_pm, primed = bl_state
@@ -165,21 +258,37 @@ module MB
         out = Numo::SFloat.zeros(count)
         steps = 0.0
         e = inc = 0.0
+        pending = 0.0
+        pending_d = 0.0
         count.times do |i|
           freq = freqs[i] if freqs
           pm = pms[i] if pms
+          if widths
+            new_w = clamp_width(widths[i])
+            if new_w != w
+              w = new_w
+              points = breakpoints(wave_type, w)
+            end
+          end
 
           inc = freq * advance
           steps = inc * i unless freqs
 
           e = wrap(phi + steps)
           e = wrap(e + pm * INV_2PI) if pm != 0
-          e = snap(points, e)
-          v = shape(wave_type, e)
+          snapped = snap(points, e)
+          if snapped
+            e = points[snapped][0]
+            v = points[snapped][3]
+          else
+            v = shape(wave_type, warp(e, w))
+          end
 
           d_back = prev_inc + (pm - prev_pm) * INV_2PI
-          if primed && (i > 0 || (wrap(prev_e + d_back - e + 0.5) - 0.5).abs < 1e-6)
-            v += correction(points, prev_e, d_back, true, advance, fade_lo, fade_hi)
+          if i > 0 && d_back == pending_d
+            v += pending
+          elsif primed && (i > 0 || (wrap(prev_e + d_back - e + 0.5) - 0.5).abs < 1e-6)
+            v += step(points, prev_e, d_back, advance, fade_lo, fade_hi)[1]
           end
 
           if i + 1 < count
@@ -188,7 +297,11 @@ module MB
             next_pm = pm + (pm - (i > 0 || primed ? prev_pm : pm))
           end
           d_fwd = inc + (next_pm - pm) * INV_2PI
-          v += correction(points, e, d_fwd, false, advance, fade_lo, fade_hi)
+          before, pending = step(points, e, d_fwd, advance, fade_lo, fade_hi)
+          v += before
+          pending_d = d_fwd
+
+          v -= half_mean * (2.0 * w - 1.0) if remove_dc
 
           out[i] = v * gain + offset
 

@@ -70,6 +70,12 @@ module MB
       # BandLimit::LFO_FADE).  Other wave types are unaffected.
       attr_reader :band_limit
 
+      # The phase warp width (see #width=), or nil for none.
+      attr_reader :width
+
+      # Whether a warped waveform's DC offset is removed (see #width=).
+      attr_accessor :remove_dc
+
       # An informational marker for classes like MB::Sound::MIDI::GraphVoice
       # indicating that the oscillator should not be reset when a note is
       # played.  Has no effect within the oscillator itself.
@@ -108,10 +114,12 @@ module MB
       # +band_limit+ - See #band_limit (noise, with a +random_advance+, is never
       #                band-limited).  Off by default for this low-level class,
       #                which gives the exact shapes; Tone turns it on.
+      # +width+ - See #width= (nil for no phase warp).
+      # +remove_dc+ - Whether to remove a warped waveform's DC offset.
       #
       # TODO: it probably makes sense to move pre_power/post_power elsewhere if
       # possible, e.g. a new waveshaper node or something
-      def initialize(wave_type, frequency: 1.0, phase: 0.0, phase_mod: nil, range: nil, pre_power: 1.0, post_power: 1.0, advance: Math::PI / 24000.0, random_advance: 0.0, no_trigger: false, band_limit: false)
+      def initialize(wave_type, frequency: 1.0, phase: 0.0, phase_mod: nil, range: nil, pre_power: 1.0, post_power: 1.0, advance: Math::PI / 24000.0, random_advance: 0.0, no_trigger: false, band_limit: false, width: nil, remove_dc: true)
         unless WAVE_TYPES.include?(wave_type)
           raise "Invalid wave type #{wave_type.inspect}; only #{WAVE_TYPES.map(&:inspect).join(', ')} are supported"
         end
@@ -145,6 +153,8 @@ module MB
         @no_trigger = !!no_trigger
 
         self.band_limit = band_limit
+        self.width = width
+        @remove_dc = !!remove_dc
         @bl_state = [0.0, 0.0, 0.0, 0]
 
         @osc_buf = nil
@@ -192,6 +202,7 @@ module MB
           frequency: @frequency,
           phase: phase,
           phase_mod: @phase_mod,
+          width: @width,
         }.compact
       end
 
@@ -232,9 +243,31 @@ module MB
         @band_limit = band_limit || false
       end
 
+      # Sets the phase warp width (pulse width modulation for every shape,
+      # see BandLimit): a Numeric or a graph node from 0 to 1 (clamped to
+      # BandLimit::MIN_WIDTH..(1 - MIN_WIDTH)), or nil for no warp.  The
+      # first half of the waveform plays over +width+ of each cycle and the
+      # second half over the rest, so a square becomes a pulse (25% high at
+      # 0.25), a triangle a skewed triangle, and a sine an asymmetric sine.
+      # Only ramp, square, triangle, sine, and parabola can be warped.
+      def width=(width)
+        unless width.nil? || width.is_a?(Numeric) || width.respond_to?(:sample)
+          raise ArgumentError, "Width must be nil, a Numeric, or a graph node (got #{width.inspect})"
+        end
+
+        width = width.get_sampler if width.respond_to?(:get_sampler)
+        @width = width
+      end
+
       # True if this oscillator's samples are band-limited right now.
       def band_limited?
-        !!@band_limit && BandLimit::WAVES.include?(@wave_type) && @phasor.random_advance == 0
+        !!@band_limit && @phasor.random_advance == 0 &&
+          (BandLimit::WAVES.include?(@wave_type) || (warped? && BandLimit::WARP_WAVES.include?(@wave_type)))
+      end
+
+      # True if this oscillator has a phase warp (see #width=).
+      def warped?
+        !@width.nil?
       end
 
       # Changes the oscillator's frequency source to the given Numeric value or
@@ -434,8 +467,8 @@ module MB
       def sample_c(count = nil)
         return sample_c(1)[0] if count.nil?
 
-        count, freq, phase = get_upstream_inputs(count)
-        return nil if freq.nil? || phase.nil?
+        count, freq, phase, width = get_upstream_inputs(count)
+        return nil if freq.nil? || phase.nil? || (warped? && width.nil?)
 
         build_buffer(count)
 
@@ -447,7 +480,7 @@ module MB
           offset = 0
         end
 
-        if band_limited?
+        if synth_kernel?
           buf = MB::Sound::FastSynth.oscillate_bl(
             @osc_buf[0...count].inplace!,
             wave_type,
@@ -458,7 +491,9 @@ module MB
             offset,
             @phasor.state,
             @bl_state,
-            *band_limit_fade
+            *band_limit_fade,
+            width,
+            @remove_dc
           ).inplace!
         else
           buf = MB::FastSound.oscillate(
@@ -485,8 +520,8 @@ module MB
       def sample_ruby(count = nil)
         return sample_ruby(1)[0] if count.nil?
 
-        count, freq_table, phase_table = get_upstream_inputs(count)
-        return nil if freq_table.nil? || phase_table.nil?
+        count, freq_table, phase_table, width = get_upstream_inputs(count)
+        return nil if freq_table.nil? || phase_table.nil? || (warped? && width.nil?)
 
         build_buffer(count)
 
@@ -498,10 +533,10 @@ module MB
           offset = 0
         end
 
-        if band_limited?
+        if synth_kernel?
           values = BandLimit.oscillate_ruby(
             count, @wave_type, freq_table, phase_table, @phasor.advance, gain, offset,
-            @phasor.state, @bl_state, *band_limit_fade
+            @phasor.state, @bl_state, *band_limit_fade, width, @remove_dc
           )
         else
           phases, increments = @phasor.phases_ruby(freq_table, count)
@@ -594,7 +629,14 @@ module MB
       # [low, high] frequencies (Hz) for fading band-limiting in, or [0, 0]
       # for always on.
       def band_limit_fade
+        return BandLimit::NEVER unless band_limited?
         @band_limit.is_a?(Range) ? [@band_limit.begin.to_f, @band_limit.end.to_f] : [0.0, 0.0]
+      end
+
+      # True if samples come from the band-limiting kernel (band-limited or
+      # warped waveforms).
+      def synth_kernel?
+        band_limited? || (warped? && BandLimit::WARP_WAVES.include?(@wave_type) && @phasor.random_advance == 0)
       end
 
       # TODO: use BufferHelper?
@@ -634,15 +676,23 @@ module MB
           min_length = phase.length if phase && phase.length < min_length
         end
 
+        width = @width
+        if width.respond_to?(:sample)
+          width = width.sample(count)
+          width = nil if width&.empty?
+          min_length = width.length if width && width.length < min_length
+        end
+
         if min_length != count
           # TODO: this double truncation might be impossible now that we use get_sampler
           raise "Truncation happened more than once on oscillator #{self} (try adding .with_buffer to upstreams)" if @truncated
           @truncated = true
           freq = freq[0...min_length] if freq&.is_a?(Numo::NArray)
           phase = phase[0...min_length] if phase&.is_a?(Numo::NArray)
+          width = width[0...min_length] if width&.is_a?(Numo::NArray)
         end
 
-        return min_length, freq, phase
+        return min_length, freq, phase, width
       end
 
       # Applies pre- and post-power waveshaping to the buffer.
