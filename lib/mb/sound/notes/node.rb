@@ -150,27 +150,44 @@ module MB
         # GraphNode::Tee.shared_check on, checks that no consumer changed a
         # reused buffer (consumers must copy frozen buffers before changing
         # them; Numo allows in-place arithmetic on frozen arrays).
-        def constant_buffer(count, value)
+        #
+        # Nodes with several outputs (see EnvelopeInputs) pass a +slot+ name
+        # for each output's buffer.
+        def constant_buffer(count, value, slot = nil)
+          return slot_buffer(slot, count, value) if slot
+
           buf = @steady
           if buf && buf.length == count && @steady_value == value
-            check_steady(buf, value) if GraphNode::Tee.shared_check
-            return buf
+            return buf unless GraphNode::Tee.shared_check && !steady_intact?(buf, value)
           end
 
           @steady_value = value
           @steady = Numo::SFloat.new(count).fill(value).freeze
         end
 
-        # Raises (or warns and replaces the buffer) if a consumer changed the
-        # reused frozen buffer of #constant_buffer.
-        def check_steady(buf, value)
-          return if buf.eq(buf[0]).all? && buf[0] == Numo::SFloat[value][0]
+        # #constant_buffer for the output +slot+.
+        def slot_buffer(slot, count, value)
+          entry = (@slots ||= {})[slot] ||= [nil, nil]
+          buf = entry[0]
+          if buf && buf.length == count && entry[1] == value
+            return buf unless GraphNode::Tee.shared_check && !steady_intact?(buf, value)
+          end
+
+          entry[1] = value
+          entry[0] = Numo::SFloat.new(count).fill(value).freeze
+        end
+
+        # Returns true if no consumer changed the reused frozen buffer +buf+
+        # of #constant_buffer, else raises (or with :warn, warns and returns
+        # false, so the caller makes a new buffer).
+        def steady_intact?(buf, value)
+          return true if buf.eq(buf[0]).all? && buf[0] == Numo::SFloat[value][0]
 
           message = "A node downstream of #{self} modified its frozen constant buffer (copy a frozen input before modifying it)"
           raise GraphNode::Tee::SharedBufferModified, message unless GraphNode::Tee.shared_check == :warn
 
           warn message
-          @steady = Numo::SFloat.new(buf.length).fill(value).freeze
+          false
         end
 
         # Returns the Source::Chase to apply in the buffer ending at stream

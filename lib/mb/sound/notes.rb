@@ -448,11 +448,22 @@ module MB
                else lift
                end
 
-        inputs = { gate: gate, trigger: trigger, velocity: velocity, choke: choke, lift: lift }.compact
+        inputs = envelope_inputs.merge(lift: lift).compact
         register(NoteEnvelope.preset(
           preset, attack, decay, sustain, release,
           notes: self, gm: gm, sample_rate: @sample_rate, **inputs, **options
         ))
+      end
+
+      # The gate, trigger, velocity, and choke inputs for a new envelope:
+      # with Notes.fast_paths, one EnvelopeInputs node of its own (one
+      # reader instead of four shared nodes and their Tees), else #gate,
+      # #trigger, #velocity, and #choke (the same samples).
+      def envelope_inputs
+        return { gate: gate, trigger: trigger, velocity: velocity, choke: choke } unless Notes.fast_paths
+
+        node = memo([:envelope_inputs, @envelopes.length]) { EnvelopeInputs.new(@stream, notes: self, sample_rate: @sample_rate) }
+        { gate: node, trigger: node.trigger, velocity: node.velocity, choke: node.choke }
       end
 
       # Like #memo, but shared by every Notes instance on the same control
@@ -484,6 +495,7 @@ require_relative 'notes/channel_nodes'
 require_relative 'notes/frequency'
 require_relative 'notes/fade_in'
 require_relative 'notes/glide'
+require_relative 'notes/envelope_inputs'
 require_relative 'notes/note_envelope'
 require_relative 'notes/note_pitch'
 require_relative 'notes/filter_nodes'

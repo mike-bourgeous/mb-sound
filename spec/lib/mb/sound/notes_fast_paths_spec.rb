@@ -78,6 +78,25 @@ RSpec.describe('MB::Sound::Notes fast paths', :check_shared) do
     }
   end
 
+  it 'gives envelope inputs with the samples of the gate, trigger, velocity, and choke nodes' do
+    ev = MB::Sound::MIDI::Event
+    src = -> {
+      MIDIListSource.new(
+        ev.note_on(60, 0.5, time: 0.01r), ev.note_on(64, 0.9, time: 0.02r), ev.note_off(60, time: 0.03r),
+        ev.choke(64, time: 0.035r), ev.note_on(67, 0.3, time: 0.05r), ev.cc_raw(120, 0, time: 0.06r),
+        ev.note_on(67, 0.7, time: 0.07r), ev.note_off(67, time: 0.08r), ev.cc(99, 0, time: 1000r)
+      )
+    }
+    v = MB::Sound::Notes.new(src.call)
+    w = MB::Sound::Notes.new(src.call)
+    inputs = MB::Sound::Notes::EnvelopeInputs.new(w.stream, notes: w)
+    [128, 100, 300, 128, 64, 1000].each do |n|
+      expected = [v.gate, v.trigger, v.velocity, v.choke].map { |node| node.sample(n).dup }
+      got = [inputs.sample(n).dup] + [inputs.trigger, inputs.velocity, inputs.choke].map { |p| p.sample(n).dup }
+      expect(got.map(&:to_a)).to eq(expected.map(&:to_a))
+    end
+  end
+
   it 'gives the same samples for a looping clip through seeks' do
     clip = MB::Sound.seq(MB::Sound::C3, MB::Sound::E3, MB::Sound::G3.n4, MB::Sound::B3).n8.loop
 
