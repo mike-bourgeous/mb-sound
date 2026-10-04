@@ -10,8 +10,9 @@ RSpec.describe(MB::Sound::MIDI::Allocator) do
     MB::Sound::MIDI::Stream.new(MIDIListSource.new(timeline(*events)))
   end
 
+  # Glide events are left out unless asked for (see 'glide modes').
   def alloc(*events, **opts)
-    MB::Sound::MIDI::Allocator.new(stream(*events), **opts)
+    MB::Sound::MIDI::Allocator.new(stream(*events), glide_mode: nil, **opts)
   end
 
   # Each lane's events as compact strings ("on60@2" = note-on 60 at 20 ms),
@@ -329,7 +330,7 @@ RSpec.describe(MB::Sound::MIDI::Allocator) do
   describe 'jumps' do
     it 'releases lanes with the note-offs the source sends at a seek' do
       s = stream(on(60), on(64), off(60), off(64))
-      a = MB::Sound::MIDI::Allocator.new(s, voices: 2, spares: 0)
+      a = MB::Sound::MIDI::Allocator.new(s, voices: 2, spares: 0, glide_mode: nil)
       readers = a.lanes.map(&:reader)
       readers.each { |r| r.next(2/100r) }
       gen = readers[0].generation
@@ -413,6 +414,54 @@ RSpec.describe(MB::Sound::MIDI::Allocator) do
     it 'sends channel-wide events' do
       a = alloc(on(60), ev.cc(1, 1), ev.bend(1), voices: 1)
       expect(lanes(a)).to eq([['on60@0', 'cc1@1', 'bend@2']])
+    end
+  end
+
+  describe 'glide modes' do
+    it 'defaults to :last' do
+      expect(MB::Sound::MIDI::Allocator.new(stream).glide_mode).to eq(:last)
+    end
+
+    it 'tells free and released lanes to glide from the last note played (:last)' do
+      a = alloc(on(60), off(60), on(64), on(67), voices: 3, spares: 0, glide_mode: :last)
+      expect(lanes(a)).to eq([
+        ['on60@0', 'off60@1', 'glide64@2', 'glide67@3'],
+        ['glide60@0', 'on64@2'],
+        ['glide60@0', 'glide64@2', 'on67@3'],
+      ])
+    end
+
+    it 'skips sounding and choking lanes (:last)' do
+      a = alloc(on(60), on(62), on(64), voices: 2, spares: 1, glide_mode: :last)
+      expect(lanes(a)).to eq([
+        ['on60@0', 'choke60@2'],
+        ['glide60@0', 'on62@1'],
+        ['glide60@0', 'glide62@1', 'on64@2'],
+      ])
+    end
+
+    it 'sends glides on retriggers too (:last)' do
+      a = alloc(on(60), off(60), on(60), voices: 1, spares: 1, mono: false, glide_mode: :last)
+      expect(lanes(a)).to eq([['on60@0', 'off60@1', 'on60@2'], ['glide60@0', 'glide60@2']])
+    end
+
+    it 'sends no glide events with :voice or nil (or :off)' do
+      [:voice, nil, :off].each do |mode|
+        a = alloc(on(60), off(60), on(64), voices: 2, spares: 0, glide_mode: mode)
+        expect(lanes(a)).to eq([['on60@0', 'off60@1'], ['on64@2']])
+      end
+      expect { alloc(glide_mode: :fast) }.to raise_error(ArgumentError, /fast/)
+    end
+
+    it 'does not hold back idle checks' do
+      a = alloc(on(60), off(60), on(62), off(62), on(64), voices: 2, spares: 1, glide_mode: :last)
+      a.lanes.each { |l| l.idle_check = -> { true } }
+      expect(lanes(a, step: 1/100r).map { |l| l.grep(/choke/) }).to eq([[], [], []])
+    end
+
+    it 'sends no glide events in mono mode' do
+      a = alloc(on(60), on(64), voices: 1, glide_mode: :last)
+      expect(lanes(a)).to eq([['on60@0', 'off60@1', 'leg64@1']])
     end
   end
 end

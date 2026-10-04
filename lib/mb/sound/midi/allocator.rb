@@ -41,6 +41,17 @@ module MB
       # lanes that have already read every note event sent to them, so a
       # check never sees a graph that hasn't caught up with its events.
       #
+      # Polyphonic glide (+:glide_mode+), for synths with portamento:
+      # - :last (the default) - every free or released lane gets a :glide
+      #   event (see Event) with each new note, so whichever lane plays the
+      #   next note glides from the last note played, as on most polysynths
+      #   and the old VoicePool.
+      # - :voice - no extra events: each lane glides from its own previous
+      #   note (classic analog polysynths).
+      # - nil (or :off) - no :glide events either; for synths without
+      #   portamento, :voice and nil are the same.
+      # Mono mode marks legato notes instead (below).
+      #
       # Mono mode (+voices: 1+, or +mono: true+) has one lane and a note
       # stack, so +:spares+ and +:steal+ don't apply.  +:priority+ picks the
       # held note that sounds: :last (the newest, the default), :low, or
@@ -86,6 +97,12 @@ module MB
 
         # Mono mode note priorities (see the class description).
         PRIORITIES = [:last, :low, :high].freeze
+
+        # Polyphonic glide modes (see the class description).
+        GLIDE_MODES = [:last, :voice, nil].freeze
+
+        # Event types that change whether a lane is sounding (see #idle?).
+        NOTE_TYPES = [:note_on, :note_off, :choke].freeze
 
         # One voice lane: a Stream of the notes given to the lane plus every
         # channel-wide event.  Also shows the lane's allocation state.
@@ -235,6 +252,9 @@ module MB
         # The mono mode note priority.
         attr_reader :priority
 
+        # The polyphonic glide mode (:last, :voice, or nil).
+        attr_reader :glide_mode
+
         # The input stream time where lanes start.
         attr_reader :position
 
@@ -245,11 +265,11 @@ module MB
         # MIDIFile, or filename).  See the class description for
         # +:voices+, +:spares+, +:steal+ (a policy or Array of policies),
         # +:protect+, +:mono+ (true by default for one voice), and
-        # +:priority+.  +:choke_time+ is the seconds after a :choke event
+        # +:priority+, and +:glide_mode+.  +:choke_time+ is the seconds after a :choke event
         # when a lane counts as free.
         def initialize(
           stream, voices: 8, spares: 2, steal: DEFAULT_STEAL, protect: nil, mono: nil, priority: :last,
-          choke_time: Envelope::CHOKE_TIME
+          glide_mode: :last, choke_time: Envelope::CHOKE_TIME
         )
           unless voices.is_a?(Integer) && voices >= 1
             raise ArgumentError, "Voices must be a positive Integer (got #{voices.inspect})"
@@ -269,6 +289,12 @@ module MB
           unless PRIORITIES.include?(priority)
             raise ArgumentError, "Unknown note priority #{priority.inspect} (use #{PRIORITIES})"
           end
+
+          glide_mode = nil if glide_mode == :off || glide_mode == false
+          unless GLIDE_MODES.include?(glide_mode)
+            raise ArgumentError, "Unknown glide mode #{glide_mode.inspect} (use #{GLIDE_MODES} or :off)"
+          end
+          @glide_mode = glide_mode
 
           @mono = mono.nil? ? voices == 1 : !!mono
           raise ArgumentError, "Mono mode has one voice (got #{voices})" if @mono && voices != 1
@@ -359,7 +385,7 @@ module MB
 
         # Sends +event+ to lane +voice+.
         def send_to(voice, event)
-          voice.last_time = event.time if event.type != :cc
+          voice.last_time = event.time if NOTE_TYPES.include?(event.type)
           @lane_sources[voice.index].push(event)
         end
 
@@ -457,6 +483,7 @@ module MB
           voice.choke_end = nil
           add_slot(voice, e)
           send_to(voice, e)
+          glide_others(voice, e)
         end
 
         # Sends note-on +e+ again to +voice+, which plays the same key.
@@ -467,6 +494,18 @@ module MB
           voice.off_seq = nil
           add_slot(voice, e)
           send_to(voice, e)
+          glide_others(voice, e)
+        end
+
+        # With glide mode :last, tells every free or released lane other
+        # than +voice+ to glide from note-on +e+'s note.
+        def glide_others(voice, e)
+          return unless @glide_mode == :last
+
+          @voice_states.each do |v|
+            next if v.equal?(voice) || !(v.state == :free || v.state == :released)
+            send_to(v, Event.glide(e.note, channel: e.channel, time: e.time))
+          end
         end
 
         def add_slot(voice, e)
