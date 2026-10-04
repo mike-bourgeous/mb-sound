@@ -132,8 +132,7 @@ RSpec.describe(MB::Sound::MIDI::Input, :aggregate_failures) do
       expect(mod).to be_within(0.01).of(127)
     end
 
-    it 'is what MB::Sound.midi_manager opens for live MIDI (no JackFFI)' do
-      expect(MB::Sound::JackFFI).not_to receive(:[]) if defined?(MB::Sound::JackFFI)
+    it 'is what MB::Sound.midi_manager opens for live MIDI' do
       manager = MB::Sound.midi_manager('mbspec_keyboard')
       @inputs << manager.instance_variable_get(:@midi_in)
       expect(manager.connections).to eq(['mbspec_keyboard:out'])

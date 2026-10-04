@@ -139,16 +139,22 @@ RSpec.describe(MB::Sound::IOMethods) do
       ENV['OUTPUT_TYPE'] = orig if orig
     end
 
-    it 'uses ffmpeg on macOS when JackD is not running' do
-      stub_const('RUBY_PLATFORM', 'arm64-darwin24')
-      allow(MB::Sound).to receive(:`).with('pgrep jackd').and_return('')
+    ['arm64-darwin24', 'x86_64-linux'].each do |platform|
+      it "uses the sound card on #{platform}" do
+        stub_const('RUBY_PLATFORM', platform)
+        expect(MB::Sound.detect_output).to eq(:device)
+      end
+    end
+
+    it 'uses OUTPUT_TYPE' do
+      ENV['OUTPUT_TYPE'] = ':ffmpeg'
       expect(MB::Sound.detect_output).to eq(:ffmpeg)
     end
 
-    it 'uses JackD on macOS when it is running' do
-      stub_const('RUBY_PLATFORM', 'arm64-darwin24')
-      allow(MB::Sound).to receive(:`).with('pgrep jackd').and_return("1234\n")
-      expect([:jack, :jack_ffi]).to include(MB::Sound.detect_output)
+    it 'rejects the removed JACK and ALSA output types' do
+      [:jack_ffi, :jack, :alsa_pulse, :alsa].each do |type|
+        expect { MB::Sound.output(output_type: type, shared: false) }.to raise_error(ArgumentError, /Unsupported output type.*use device, ffmpeg, or null/)
+      end
     end
   end
 
@@ -160,15 +166,25 @@ RSpec.describe(MB::Sound::IOMethods) do
       orig ? ENV['INPUT_TYPE'] = orig : ENV.delete('INPUT_TYPE')
     end
 
-    it 'uses the sound card on macOS when JackD is not running' do
-      stub_const('RUBY_PLATFORM', 'arm64-darwin24')
-      allow(MB::Sound).to receive(:`).with('pgrep jackd').and_return('')
-      expect(MB::Sound.detect_input(nil)).to eq(:device)
+    ['arm64-darwin24', 'x86_64-linux'].each do |platform|
+      it "uses the sound card on #{platform}" do
+        stub_const('RUBY_PLATFORM', platform)
+        expect(MB::Sound.detect_input(nil)).to eq(:device)
+      end
+    end
+
+    it 'uses the null input for a null device' do
+      expect(MB::Sound.detect_input(:null)).to eq(:null)
     end
 
     it 'uses INPUT_TYPE' do
-      ENV['INPUT_TYPE'] = 'device'
-      expect(MB::Sound.detect_input(nil)).to eq(:device)
+      ENV['INPUT_TYPE'] = 'null'
+      expect(MB::Sound.detect_input(nil)).to eq(:null)
+    end
+
+    it 'rejects the removed JACK and ALSA input types' do
+      ENV['INPUT_TYPE'] = 'alsa'
+      expect { MB::Sound.input(channels: 1) }.to raise_error(ArgumentError, /Unsupported input type.*use device or null/)
     end
   end
 

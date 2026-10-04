@@ -3,8 +3,8 @@ require 'nibbler'
 module MB
   module Sound
     module MIDI
-      # Creates a MIDI input port and reads MIDI data from jackd using
-      # MB::Sound::JackFFI, smooths control values using
+      # Reads MIDI data from live MIDI (MB::Sound::MIDI::Input, through
+      # RtMidi) or a MIDI file, smooths control values using
       # MB::Sound::MIDI::Parameter, and sends smoothed parameter data to
       # callbacks.  The #update method should be called 60 times per second, or
       # whatever value was given to the update_rate constructor parameter.
@@ -19,10 +19,8 @@ module MB
         # (MB::Sound::MIDI::Input through RtMidi by default) and sends
         # smoothed control values to callbacks when #update is called.
         #
-        # :jack - An instance of MB::Sound::JackFFI to read JACK MIDI through
-        #         it instead (deprecated; RtMidi reads JACK MIDI too)
-        # :input - An optional MIDI::Input, MIDIFile, or JackFFI (or
-        #          compatible) MIDI input object.
+        # :input - An optional MIDI::Input, MIDIFile, or compatible MIDI input
+        #          object (with read(blocking:) returning [[[time, bytes], ...]]).
         #          +:port_name+ and +:connect+ will be ignored if +:input+ is
         #          specified.  May also be another manager for doing channel
         #          filtering on an unfiltered manager (see #for_channel).
@@ -36,7 +34,7 @@ module MB
         #            or nil to receive all channels.  Non-channel messages will
         #            always be received.  Drums are usually on channel 10, so
         #            pass 9 to listen to the drum channel, for example.
-        def initialize(jack: nil, input: nil, port_name: 'midi_in', connect: nil, update_rate: nil, channel: ENV['CHANNEL']&.to_i)
+        def initialize(input: nil, port_name: 'midi_in', connect: nil, update_rate: nil, channel: ENV['CHANNEL']&.to_i)
           @parameters = {}
           @named_parameters = {}
           @event_callbacks = []
@@ -44,33 +42,22 @@ module MB
           @update_callbacks = []
           @nested_managers = []
 
-          if update_rate.nil?
-            if jack
-              update_rate = jack.sample_rate.to_f / jack.buffer_size
-            else
-              update_rate = 60
-            end
-          end
-
-          @update_rate = update_rate
+          @update_rate = update_rate || 60
           @channel = channel
 
           @cc = Array.new(128)
           @cc_thresholds = {}
 
-          @jack = jack
-          @midi_in = input ||
-            @jack&.input(port_type: :midi, port_names: [port_name], connect: connect) ||
-            MB::Sound::MIDI::Input.new(connect: connect, port_name: connect ? port_name : nil)
+          @midi_in = input || MB::Sound::MIDI::Input.new(connect: connect, port_name: connect ? port_name : nil)
           @m = Nibbler.new
 
           @transpose = ENV['TRANSPOSE']&.to_i || 0
         end
 
-        # If the input is a JackFFI MIDI input, returns an Array of Strings
-        # with the names of ports connected to the MIDI input.  If the input is
-        # a MIDI file, returns the MIDI filename in an Array.  Otherwise,
-        # returns the input in String form using String interpolation.
+        # If the input is a live MIDI::Input, returns an Array with the source
+        # it's connected to (or its virtual port).  If the input is a MIDI
+        # file, returns the MIDI filename in an Array.  Otherwise, returns the
+        # input in String form using String interpolation.
         def connections
           case @midi_in
           when MB::Sound::MIDI::MIDIFile
@@ -78,9 +65,6 @@ module MB
 
           when MB::Sound::MIDI::Input
             @midi_in.connections
-
-          when MB::Sound::JackFFI::Input
-            @midi_in.connections.flatten
 
           else
             "#{@midi_in}"
@@ -103,7 +87,7 @@ module MB
         # This allows using a single MIDI Manager to split MIDI events from
         # different channels (see MB::Sound::GraphNode::MidiDsl#channel).
         def for_channel(channel)
-          self.class.new(jack: @jack, input: self, update_rate: @update_rate, channel: channel).tap { |m|
+          self.class.new(input: self, update_rate: @update_rate, channel: channel).tap { |m|
             @nested_managers << m
           }
         end

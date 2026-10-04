@@ -1,7 +1,6 @@
 require 'cmath'
 require 'numo/narray'
 
-require 'mb-sound-jackffi'
 require 'mb-math'
 require 'mb-util'
 
@@ -155,10 +154,6 @@ require_relative 'sound/io_input'
 require_relative 'sound/io_output'
 require_relative 'sound/ffmpeg_input'
 require_relative 'sound/ffmpeg_output'
-require_relative 'sound/alsa_input'
-require_relative 'sound/alsa_output'
-require_relative 'sound/jack_input'
-require_relative 'sound/jack_output'
 require_relative 'sound/null_input'
 require_relative 'sound/null_output'
 require_relative 'sound/device_output'

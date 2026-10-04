@@ -1,6 +1,6 @@
 RSpec.describe(MB::Sound::MIDI::VoicePool) do
   let(:midi_file) { MB::Sound::MIDI::MIDIFile.new('spec/test_data/all_notes.mid') }
-  let(:manager) { MB::Sound::MIDI::Manager.new(jack: nil, input: midi_file) }
+  let(:manager) { MB::Sound::MIDI::Manager.new(input: midi_file) }
 
   describe '#sample_rate=' do
     it 'passes sample rate through to GraphNode' do

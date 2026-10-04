@@ -14,7 +14,7 @@ module MB
       def midi_file(filename, speed: 1.0, clock: nil)
         clock ||= MB::Sound::GraphNode::MidiDsl::DslClock.new
         mfile = MB::Sound::MIDI::MIDIFile.new(filename, speed: speed, clock: clock)
-        mgr = MB::Sound::MIDI::Manager.new(input: mfile, jack: nil)
+        mgr = MB::Sound::MIDI::Manager.new(input: mfile)
         dsl = MB::Sound::GraphNode::MidiDsl.new(manager: mgr)
 
         clock.dsl = dsl if clock.is_a?(MB::Sound::GraphNode::MidiDsl::DslClock)
@@ -57,7 +57,7 @@ module MB
           update_rate = 48000.0 / buffer
         end
 
-        manager = MB::Sound::MIDI::Manager.new(jack: nil, input: midi_in, update_rate: update_rate)
+        manager = MB::Sound::MIDI::Manager.new(input: midi_in, update_rate: update_rate)
 
         @midi_managers[input_name] = manager
       end

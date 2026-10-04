@@ -79,19 +79,23 @@ RSpec.describe(MB::Sound::DeviceOutput, :aggregate_failures) do
 
     it 'shrinks back by a third after a while without dropouts, down to where it started' do
       stub_const('MB::Sound::DeviceOutput::SHRINK_AFTER', 0.1)
-      o = device_output(profile: :low)
-      expect { 2.times { drop_out(o) } }.to output.to_stderr
-      expect(o.queue_limit).to eq(1152)
+
+      # A deep enough queue that steady writing doesn't drop out on a busy
+      # machine; pauses long enough to drain it, short enough to count
+      o = device_output(profile: :low, latency: 0.05)
+      expect(o.queue_limit).to eq(2400)
+      expect { 2.times { drop_out(o, pause: 0.08) } }.to output.to_stderr
+      expect(o.queue_limit).to eq(4080) # the :safe cap
 
       notes = []
       allow(o).to receive(:warn) { |msg| notes << msg }
       deadline = MB::U.clock_now + 0.6
       o.write(block) while MB::U.clock_now < deadline
 
-      expect(o.queue_limit).to eq(512)
+      expect(o.queue_limit).to eq(2400)
       expect(notes).to eq([
-        'No audio dropouts for 0 s: lowering the output queue to 16 ms',
-        'No audio dropouts for 0 s: lowering the output queue to 11 ms',
+        'No audio dropouts for 0 s: lowering the output queue to 57 ms',
+        'No audio dropouts for 0 s: lowering the output queue to 50 ms',
       ])
     end
 

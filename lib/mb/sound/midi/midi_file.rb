@@ -8,7 +8,7 @@ module MB
       # MIDI file.
       #
       # This implements just enough compatibility with
-      # MB::Sound::JackFFI::Input#read to work with MB::Sound::MIDI::Manager.
+      # MB::Sound::MIDI::Input#read to work with MB::Sound::MIDI::Manager.
       #
       # This uses the midilib gem for MIDI parsing.  Due to limitations in the
       # midilib gem, this does not support MIDI files that change tempo.
@@ -346,7 +346,7 @@ module MB
         # Returns events from the MIDI file whose timestamps are less than or
         # equal to the elapsed time since this method was first called.
         #
-        # Returns events in the same form as mb-sound-jackffi, with an Array of
+        # Returns events in the same form as MIDI::Input#read, with an Array of
         # Arrays wrapped in an Array:
         #
         #     [ # Array for input ports (files have one port only)

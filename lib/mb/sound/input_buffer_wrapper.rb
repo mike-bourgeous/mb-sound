@@ -17,7 +17,7 @@ module MB
       attr_reader :input
 
       # Creates a buffer wrapper with the given +input+ instance (e.g.
-      # MB::Sound::FFMPEGInput or MB::Sound::JackFFI::Input).
+      # MB::Sound::FFMPEGInput or MB::Sound::DeviceInput).
       #
       # The +:buffer_size+ parameter allows forcing a new buffer size value for
       # other code to use.  Otherwise #buffer_size delegates to the input.
