@@ -41,6 +41,17 @@ module MB
       # lanes that have already read every note event sent to them, so a
       # check never sees a graph that hasn't caught up with its events.
       #
+      # Mono mode (+voices: 1+, or +mono: true+) has one lane and a note
+      # stack, so +:spares+ and +:steal+ don't apply.  +:priority+ picks the
+      # held note that sounds: :last (the newest, the default), :low, or
+      # :high.  A note that takes over while another is held is legato: a
+      # note-off of the old note and a note-on of the new one with +legato+
+      # true (see Event), at the same time, so Notes keeps the gate up and
+      # glides instead of retriggering.  Releasing the sounding note while
+      # others are held returns to the one +:priority+ picks, also legato.
+      # A note played with nothing held is a normal note-on.  Pass
+      # +mono: false+ for one polyphonic voice (stealing with a spare).
+      #
       # Event routing:
       # - Notes route by (channel, note), so MPE fits later.  Overlapping
       #   notes on the same key are counted: each note-on gets its own
@@ -72,6 +83,9 @@ module MB
 
         # Notes that +:protect+ can keep from being stolen.
         PROTECT = [:lowest, :highest].freeze
+
+        # Mono mode note priorities (see the class description).
+        PRIORITIES = [:last, :low, :high].freeze
 
         # One voice lane: a Stream of the notes given to the lane plus every
         # channel-wide event.  Also shows the lane's allocation state.
@@ -218,6 +232,9 @@ module MB
         # Seconds a choking lane takes to become free.
         attr_reader :choke_time
 
+        # The mono mode note priority.
+        attr_reader :priority
+
         # The input stream time where lanes start.
         attr_reader :position
 
@@ -227,9 +244,13 @@ module MB
         # +stream+ is anything Stream.for accepts (a Stream, Source, Clip,
         # MIDIFile, or filename).  See the class description for
         # +:voices+, +:spares+, +:steal+ (a policy or Array of policies),
-        # and +:protect+.  +:choke_time+ is the seconds after a :choke event
+        # +:protect+, +:mono+ (true by default for one voice), and
+        # +:priority+.  +:choke_time+ is the seconds after a :choke event
         # when a lane counts as free.
-        def initialize(stream, voices: 8, spares: 2, steal: DEFAULT_STEAL, protect: nil, choke_time: Envelope::CHOKE_TIME)
+        def initialize(
+          stream, voices: 8, spares: 2, steal: DEFAULT_STEAL, protect: nil, mono: nil, priority: :last,
+          choke_time: Envelope::CHOKE_TIME
+        )
           unless voices.is_a?(Integer) && voices >= 1
             raise ArgumentError, "Voices must be a positive Integer (got #{voices.inspect})"
           end
@@ -245,9 +266,20 @@ module MB
           bad = @protect - PROTECT
           raise ArgumentError, "Unknown protect values #{bad} (use #{PROTECT})" unless bad.empty?
 
+          unless PRIORITIES.include?(priority)
+            raise ArgumentError, "Unknown note priority #{priority.inspect} (use #{PRIORITIES})"
+          end
+
+          @mono = mono.nil? ? voices == 1 : !!mono
+          raise ArgumentError, "Mono mode has one voice (got #{voices})" if @mono && voices != 1
+          spares = 0 if @mono
+
           @voices = voices
           @spares = spares
           @max_spares = spares
+          @priority = priority
+          @stack = []
+          @playing = nil
           @choke_time = choke_time.to_r.rationalize(Rational(1, 10**12))
 
           @stream = Stream.for(stream)
@@ -273,6 +305,11 @@ module MB
             raise ArgumentError, "Spares must be an Integer from 0 to #{@max_spares} (got #{count.inspect})"
           end
           @spares = count
+        end
+
+        # True in mono mode (see the class description).
+        def mono?
+          @mono
         end
 
         # The allocation state of lane +index+ (see Lane#state).
@@ -336,17 +373,21 @@ module MB
 
         def process(e)
           case e.type
-          when :note_on then note_on(e)
-          when :note_off then note_off(e)
+          when :note_on then @mono ? mono_on(e) : note_on(e)
+          when :note_off then @mono ? mono_off(e) : note_off(e)
 
           when :poly_pressure
-            @held[[e.channel, e.note]]&.each { |slot| send_to(slot.voice, e) if slot.voice }
+            if @mono
+              send_to(@voice_states[0], e) if @playing && @playing.channel == e.channel && @playing.note == e.note
+            else
+              @held[[e.channel, e.note]]&.each { |slot| send_to(slot.voice, e) if slot.voice }
+            end
 
           when :cc
             if e.all_notes_off?
-              release_channel(e.channel, e.time)
+              @mono ? mono_clear(e.channel, e.time, choke: false) : release_channel(e.channel, e.time)
             elsif e.all_sound_off?
-              choke_channel(e.channel, e.time)
+              @mono ? mono_clear(e.channel, e.time, choke: true) : choke_channel(e.channel, e.time)
             end
             broadcast(e)
 
@@ -543,6 +584,87 @@ module MB
           check = @lanes[voice.index].level_check
           return [0, check.call.to_f] if check
           [voice.state == :released ? 0 : 1, voice.velocity || 0]
+        end
+
+        # Mono mode note-on: pushes the note on the stack, and plays it if
+        # it takes over (legato if another note was sounding).
+        def mono_on(e)
+          @stack << e
+          target = mono_target
+          prev = @playing
+          return if prev && target.equal?(prev)
+
+          voice = @voice_states[0]
+          if prev
+            send_to(voice, Event.note_off(prev.note, channel: prev.channel, time: e.time))
+            mono_play(voice, target, e.time, legato: true)
+          else
+            mono_play(voice, target, e.time, legato: false)
+          end
+        end
+
+        # Mono mode note-off: removes the oldest matching note from the
+        # stack, and if it was sounding, returns to the next held note
+        # (legato) or releases the lane.
+        def mono_off(e)
+          idx = @stack.index { |x| x.channel == e.channel && x.note == e.note }
+          return unless idx
+
+          removed = @stack.delete_at(idx)
+          return unless removed.equal?(@playing)
+
+          voice = @voice_states[0]
+          send_to(voice, e)
+
+          if @stack.empty?
+            @playing = nil
+            voice.state = :released
+            voice.off_seq = next_seq
+          else
+            mono_play(voice, mono_target, e.time, legato: true)
+          end
+        end
+
+        # Sends held note-on +entry+ to the mono lane at +time+.
+        def mono_play(voice, entry, time, legato:)
+          @playing = entry
+          voice.state = :sounding
+          voice.channel = entry.channel
+          voice.note = entry.note
+          voice.velocity = entry.velocity
+          voice.on_seq = next_seq
+          event = entry.time == time ? entry : entry.at(time)
+          send_to(voice, legato ? event.with(legato: true) : event)
+        end
+
+        # The held note that sounds in mono mode, by #priority (the newest
+        # wins ties).
+        def mono_target
+          case @priority
+          when :last then @stack.last
+          when :low then @stack.each_with_index.min_by { |x, idx| [Allocator.pitch_value(x.note), -idx] }.first
+          when :high then @stack.each_with_index.max_by { |x, idx| [Allocator.pitch_value(x.note), idx] }.first
+          end
+        end
+
+        # Mono mode all notes off (CC 123) or all sound off (CC 120, with
+        # +:choke+): forgets held notes on +channel+ and ends the sounding
+        # one if it's on that channel.
+        def mono_clear(channel, time, choke:)
+          @stack.reject! { |x| x.channel == channel }
+          return unless @playing&.channel == channel
+
+          voice = @voice_states[0]
+          @playing = nil
+          if choke
+            send_to(voice, Event.choke(voice.note, channel: channel, time: time))
+            voice.state = :choking
+            voice.choke_end = time + @choke_time
+          else
+            send_to(voice, Event.note_off(voice.note, channel: channel, time: time))
+            voice.state = :released
+            voice.off_seq = next_seq
+          end
         end
 
         # Sends note-offs to every lane sounding on +channel+ (CC 123).

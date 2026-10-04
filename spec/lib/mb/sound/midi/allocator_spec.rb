@@ -207,8 +207,8 @@ RSpec.describe(MB::Sound::MIDI::Allocator) do
     it 'frees choking lanes after the choke time' do
       # 62 chokes 60 (lane 0) at 10 ms; the next note-on (30 ms) frees it if the choke is over
       events = [on(60), on(62), off(62), on(64)]
-      short_choke = alloc(*events, voices: 1, spares: 2, choke_time: 0.02)
-      long_choke = alloc(*events, voices: 1, spares: 2, choke_time: 0.021)
+      short_choke = alloc(*events, voices: 1, spares: 2, mono: false, choke_time: 0.02)
+      long_choke = alloc(*events, voices: 1, spares: 2, mono: false, choke_time: 0.021)
       expect(lanes(short_choke)).to eq(lanes(long_choke))
       expect(short_choke.lanes[0].state).to eq(:free)
       expect(long_choke.lanes[0].state).to eq(:choking)
@@ -286,7 +286,7 @@ RSpec.describe(MB::Sound::MIDI::Allocator) do
 
   describe 'channel-wide events' do
     it 'sends CCs, bend, pressure, program, and system events to every lane' do
-      a = alloc(on(60), ev.cc(1, 0.5), ev.bend(0.25), ev.channel_pressure(0.5), ev.program(3), ev.parse([0xf8]), voices: 1, spares: 1)
+      a = alloc(on(60), ev.cc(1, 0.5), ev.bend(0.25), ev.channel_pressure(0.5), ev.program(3), ev.parse([0xf8]), voices: 1, spares: 1, mono: false)
       out = lanes(a)
       expect(out[0]).to eq(['on60@0', 'cc1@1', 'bend@2', 'channel_pressure@3', 'program@4', 'system@5'])
       expect(out[1]).to eq(out[0].drop(1))
@@ -340,11 +340,79 @@ RSpec.describe(MB::Sound::MIDI::Allocator) do
     end
 
     it 'ends lanes when the input has ended and been read' do
-      a = alloc(on(60), off(60), voices: 1, spares: 1)
+      a = alloc(on(60), off(60), voices: 1, spares: 1, mono: false)
       r = a.lanes.map(&:reader)
       r.each { |x| x.next(1) }
       expect(r.map(&:ended?)).to eq([true, true])
       expect(a.ended?).to eq(true)
+    end
+  end
+
+  describe 'mono mode' do
+    it 'is the default for one voice, with one lane' do
+      a = alloc(voices: 1, spares: 2)
+      expect(a.mono?).to eq(true)
+      expect(a.lanes.length).to eq(1)
+      expect(a.spares).to eq(0)
+      expect(alloc(voices: 1, mono: false).lanes.length).to eq(3)
+      expect { alloc(voices: 2, mono: true) }.to raise_error(ArgumentError, /one voice/)
+      expect { alloc(voices: 1, priority: :middle) }.to raise_error(ArgumentError, /middle/)
+    end
+
+    it 'plays notes played with nothing held normally' do
+      a = alloc(on(60), off(60), on(62), off(62), voices: 1)
+      expect(lanes(a)).to eq([['on60@0', 'off60@1', 'on62@2', 'off62@3']])
+    end
+
+    it 'plays new notes legato while one is held, returning to held notes (:last)' do
+      a = alloc(on(60), on(64), on(67), off(67), off(60), off(64), voices: 1)
+      expect(lanes(a)).to eq([[
+        'on60@0',
+        'off60@1', 'leg64@1',
+        'off64@2', 'leg67@2',
+        'off67@3', 'leg64@3',
+        'off64@5',
+      ]])
+      expect(a.lanes[0].state).to eq(:released)
+    end
+
+    it 'keeps the velocity of the note it returns to' do
+      a = alloc(on(60, 0.25), on(64, 0.75), off(64), voices: 1)
+      out = a.lanes[0].reader.next(1)
+      expect(out.select(&:note_on?).map { |e| [e.note, e.velocity, e.legato?] }).to eq([[60, 0.25, false], [64, 0.75, true], [60, 0.25, true]])
+    end
+
+    it 'plays the lowest held note with priority :low' do
+      a = alloc(on(60), on(64), on(55), off(55), off(60), off(64), voices: 1, priority: :low)
+      expect(lanes(a)).to eq([['on60@0', 'off60@2', 'leg55@2', 'off55@3', 'leg60@3', 'off60@4', 'leg64@4', 'off64@5']])
+    end
+
+    it 'plays the highest held note with priority :high' do
+      a = alloc(on(60), on(55), on(64), off(64), off(55), off(60), voices: 1, priority: :high)
+      expect(lanes(a)).to eq([['on60@0', 'off60@2', 'leg64@2', 'off64@3', 'leg60@3', 'off60@5']])
+    end
+
+    it 'sends poly pressure only for the sounding note' do
+      a = alloc(on(60), on(64), ev.poly_pressure(60, 1), ev.poly_pressure(64, 1), voices: 1)
+      expect(lanes(a)[0].last(2)).to eq(['leg64@1', 'poly_pressure@3'])
+    end
+
+    it 'counts overlapping notes on the same key' do
+      a = alloc(on(60), on(60), off(60), off(60), voices: 1)
+      expect(lanes(a)).to eq([['on60@0', 'off60@1', 'leg60@1', 'off60@3']])
+    end
+
+    it 'releases or chokes the note at all notes off or all sound off' do
+      a = alloc(on(60), on(64), ev.cc(123, 0), off(64), on(62), voices: 1)
+      expect(lanes(a)).to eq([['on60@0', 'off60@1', 'leg64@1', 'off64@2', 'cc123@2', 'on62@4']])
+
+      b = alloc(on(60), ev.cc(120, 0), off(60), voices: 1)
+      expect(lanes(b)).to eq([['on60@0', 'choke60@1', 'cc120@1']])
+    end
+
+    it 'sends channel-wide events' do
+      a = alloc(on(60), ev.cc(1, 1), ev.bend(1), voices: 1)
+      expect(lanes(a)).to eq([['on60@0', 'cc1@1', 'bend@2']])
     end
   end
 end
