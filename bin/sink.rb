@@ -1,4 +1,4 @@
-#!/usr/bin/env ruby
+#!/usr/bin/env -S RUBY_THREAD_TIMESLICE=10 ruby
 # Ignores input to keep Pipewire from closing a USB audio interface.
 #
 # Usage: $0

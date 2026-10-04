@@ -1,4 +1,4 @@
-#!/usr/bin/env ruby
+#!/usr/bin/env -S RUBY_THREAD_TIMESLICE=10 ruby
 # Very simple granular delay repeater.
 # (C)2024 Mike Bourgeous
 #

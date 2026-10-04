@@ -81,6 +81,22 @@ module MB
         @default ||= new(fade_in: DEFAULT_FADE_IN, fade_out: DEFAULT_FADE_OUT)
       end
 
+      # Replaces the default session (see .default) with a new one that
+      # plays through +output+ (any object with the output interface, e.g.
+      # an FFMPEGOutput streaming to a URL; closed with the session), or with
+      # nil to open the usual output from MB::Sound.output when next needed.
+      # Raises if the current default session still has players, since its
+      # graphs and master effects aren't moved to the new session.  See
+      # PlaybackMethods#use_output.
+      def self.use_output(output)
+        if @default && !@default.closed?
+          raise ArgumentError, 'Stop the background players first (e.g. panic)' unless @default.idle?
+          @default.close
+        end
+
+        @default = output && new(output: output, fade_in: DEFAULT_FADE_IN, fade_out: DEFAULT_FADE_OUT)
+      end
+
       # The playback context of the current thread, set by #with_context: a
       # Hash with the +:session+ that commands like PlaybackMethods#bg should
       # use, and while a scheduled block runs, its +:time+ and a +:batch+
@@ -390,6 +406,13 @@ module MB
             "#{p.description}#{status}"
           }
         }
+      end
+
+      # How busy rendering the last buffer was: its render time (before
+      # writing to the output) divided by its length in time, e.g. 0.25 when
+      # rendering takes a quarter of real time.  Nil before the first buffer.
+      def render_load
+        @load
       end
 
       # Calls the block with every buffer of the mix (an Array of

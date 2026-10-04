@@ -1,4 +1,4 @@
-#!/usr/bin/env ruby
+#!/usr/bin/env -S RUBY_THREAD_TIMESLICE=10 ruby
 # Measures aliasing and cost of oscillators and nonlinearities, and renders
 # sweeps to listen to.  Each case is a Ruby expression of `p`, a Pitch (e.g.
 # `p.ramp`, `p.sine.at(4).softclip`).

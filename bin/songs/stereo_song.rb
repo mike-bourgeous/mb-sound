@@ -1,4 +1,4 @@
-#!/usr/bin/env ruby
+#!/usr/bin/env -S RUBY_THREAD_TIMESLICE=10 ruby
 # An 8-bar demo of multichannel (stereo) graphs: a pad with a different
 # filter sweep on each side, an arpeggio that pans back and forth, echoes
 # with a different delay per side, hats placed right of center, and a

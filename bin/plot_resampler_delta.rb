@@ -1,4 +1,4 @@
-#!/usr/bin/env ruby
+#!/usr/bin/env -S RUBY_THREAD_TIMESLICE=10 ruby
 # Plots difference between Ruby and libsamplerate implementations of ZOH and
 # linear resamplers.  There shouldn't be a difference (other than possible
 # lag), but at time of writing, there is.

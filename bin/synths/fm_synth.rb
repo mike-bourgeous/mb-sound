@@ -1,4 +1,4 @@
-#!/usr/bin/env ruby
+#!/usr/bin/env -S RUBY_THREAD_TIMESLICE=10 ruby
 # An experimental FM synthesizer that uses later notes to modulate earlier
 # notes.  If only one note is played, that note is unmodulated.  Each later
 # note modulates the note that came before it.  The modulation wheel controls

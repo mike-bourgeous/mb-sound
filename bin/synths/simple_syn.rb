@@ -1,4 +1,4 @@
-#!/usr/bin/env ruby
+#!/usr/bin/env -S RUBY_THREAD_TIMESLICE=10 ruby
 # One-oscillator synthesizer based on MB::Sound::MIDI::Voice (slight upgrade of
 # bin/synths/ep2_syn.rb).
 #

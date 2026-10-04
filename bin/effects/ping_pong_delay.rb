@@ -1,4 +1,4 @@
-#!/usr/bin/env ruby
+#!/usr/bin/env -S RUBY_THREAD_TIMESLICE=10 ruby
 # A left/right ping-pong delay
 # (C)2025 Mike Bourgeous
 #

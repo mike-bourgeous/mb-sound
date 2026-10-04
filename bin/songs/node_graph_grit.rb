@@ -1,4 +1,4 @@
-#!/usr/bin/env ruby
+#!/usr/bin/env -S RUBY_THREAD_TIMESLICE=10 ruby
 # Just a 23-ish second bass sound of increasing distortion.  The little drum
 # sound at the end comes from filter pinging when the triangle wave gets cut
 # off in the middle of a cycle.

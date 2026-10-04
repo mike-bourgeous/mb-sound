@@ -1,4 +1,4 @@
-#!/usr/bin/env ruby
+#!/usr/bin/env -S RUBY_THREAD_TIMESLICE=10 ruby
 # A simple tape-simulator echo with feedback, one tape per channel.
 # (C)2022-2025 Mike Bourgeous
 #
