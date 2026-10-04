@@ -1,48 +1,61 @@
 #!/usr/bin/env -S RUBY_THREAD_TIMESLICE=10 RUBY_YJIT_ENABLE=1 ruby
 # Something between a bell and a sitar??
+#
+# Usage: $0 [options] [midi_file_or_port [output_file]]
+#
+# Velocity and CC 1 (the mod wheel) set modulation depths; slow LFOs
+# (restarted with each note) move the operator levels.
+#
+# Examples:
+#     $0                                    # live MIDI
+#     $0 spec/test_data/c_major.mid sitar_bell.flac
 
 require 'bundler/setup'
 require 'mb-sound'
 
-MB::Sound.synth_script { |input|
-  s = MB::Sound.synth(input) { |midi|
+MB::Sound.synth_script { |midi|
+  s = midi.synth(voices: 4) { |v|
     # FIXME: velocity curve is too low at mid-low velocities, too high above
 
-    r_ratio = (8 * 3.5).constant.named('R Ratio')
-    r_osc = (midi.frequency * r_ratio).tone.complex_sine.at(1).named('R')
-    r_env = midi.env(0.05, 4, 0.1, 4).named('R Envelope').db(20)
+    # An operator pitch: +ratio+ times the note, detuned up by +mils+
+    # thousandths of an octave
+    op = ->(ratio, mils = 0) { v.hz.transpose((Math.log2(ratio) + mils / 1000.0).oct) }
+
+    # A level LFO restarted with each note
+    lfo = ->(hz, range) { hz.hz.sine.at(range).reset(v.trigger) }
+
+    # The envelopes are the old `.db(20)` and `.db(30)` ones (straight
+    # lines in dB) converted: rising curves of -20 or -30 dB, falls by the
+    # share of that range they cover, sustain levels mapped the same way.
+    # Modulators get fm_env, the A and C carriers amp_env.
+
+    r_osc = op.(8 * 3.5).complex_sine.at(1).named('R')
+    r_env = v.fm_env(0.05, 4, 0.029, 4, curve: [-20, 18, 2], sensitivity: -12.4.db..0.db).named('R Envelope')
     r_out = (r_osc * r_env).named('R Out')
     rq_const = 1.4.constant.named('R into Q')
 
-    q_ratio = 8.constant.named('Q Ratio')
-    q_osc = (midi.frequency * q_ratio).tone.complex_sine.at(1).pm(r_out * rq_const).named('Q')
-    q_env = midi.env(2, 3, 0.7, 3).named('Q Envelope').db(30) * 0.1632.hz.sine.at(0.5..1.5).named('Q LFO')
+    q_osc = op.(8).complex_sine.at(1).pm(r_out * rq_const).named('Q')
+    q_env = v.fm_env(2, 3, 0.334, 3, curve: [-30, 9, 21]).named('Q Envelope') * lfo.(0.1632, 0.5..1.5).named('Q LFO')
     q_out = (q_osc * q_env).named('Q Out')
-    qb_mod = midi.cc(1, range: 0.15..0.5).named('Q into B')
-    qa_mod = midi.cc(1, range: 0.25..4.0).named('Q into A')
+    qb_mod = v.cc(1, range: 0.15..0.5, name: 'Q into B')
+    qa_mod = v.cc(1, range: 0.25..4.0, name: 'Q into A')
 
-    # 7 mils detuned up, 3.5 ratio
-    b_ratio = 3.5.constant.named('B Ratio')
-    b_osc = (midi.frequency * b_ratio * (2 ** (2.0 / 1000.0))).tone.complex_sine.at(1).pm(q_out * qb_mod).named('B')
-    b_env = midi.env(0, 5, 0.2, 4).named('B Envelope').db(30) * 0.223.hz.sine.at(0.8..1.1).named('B LFO')
+    b_osc = op.(3.5, 2).complex_sine.at(1).pm(q_out * qb_mod).named('B')
+    b_env = v.fm_env(0, 5, 0.033, 4, curve: [-30, 24, 6]).named('B Envelope') * lfo.(0.223, 0.8..1.1).named('B LFO')
     b_out = (b_osc * b_env).named('B Out')
 
-    # 7 mils up
-    ba_vel = midi.velocity(range: 0.8..2.4).named('B into A')
-    a_osc = (midi.frequency * (2 ** (2.0 / 1000.0))).tone.complex_sine.at(1).pm(b_out * ba_vel + q_out * qa_mod).named('A')
-    a_env = midi.env(0, 6, 0.5, 5).named('A Envelope').db(30) * 0.111.hz.sine.at(0.9..1.0).named('A LFO')
+    ba_vel = (v.velocity * 1.6 + 0.8).named('B into A')
+    a_osc = op.(1, 2).complex_sine.at(1).pm(b_out * ba_vel + q_out * qa_mod).named('A')
+    a_env = v.amp_env(0.001, 6, 0.151, 5, curve: [-30, 15, 15]).named('A Envelope') * lfo.(0.111, 0.9..1.0).named('A LFO')
     a_out = (a_osc * a_env).named('A Out')
 
-    # 5 mils up, 3.5 ratio
-    d_ratio = 3.5.constant.named('D Ratio')
-    d_osc = (midi.frequency * d_ratio * (2 ** (3.0 / 1000.0))).tone.complex_sine.at(1).named('D')
-    d_env = midi.env(0, 5, 0.13, 4).named('D Envelope').db(30) * 0.157.hz.sine.at(0.3..1.1).named('D LFO')
+    d_osc = op.(3.5, 3).complex_sine.at(1).named('D')
+    d_env = v.fm_env(0, 5, 0.019, 4, curve: [-30, 26, 4]).named('D Envelope') * lfo.(0.157, 0.3..1.1).named('D LFO')
     d_out = (d_osc * d_env).named('D Out')
 
-    # 2 mils up
-    dc_vel = midi.velocity(range: 0.8..2.4).named('D into C')
-    c_osc = (midi.frequency * (2 ** (1.0 / 1000.0))).tone.complex_sine.at(1).pm(d_out * dc_vel).named('C')
-    c_env = midi.env(0, 6, 0.55, 5).named('C Envelope').db(30) * 0.317.hz.sine.at(0.9..1.0).named('C LFO')
+    dc_vel = (v.velocity * 1.6 + 0.8).named('D into C')
+    c_osc = op.(1, 1).complex_sine.at(1).pm(d_out * dc_vel).named('C')
+    c_env = v.amp_env(0.001, 6, 0.186, 5, curve: [-30, 13.5, 16.5]).named('C Envelope') * lfo.(0.317, 0.9..1.0).named('C LFO')
     c_out = (c_osc * c_env).named('C Out')
 
     a_out + c_out + (q_out * 0.05)
