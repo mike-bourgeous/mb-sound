@@ -485,8 +485,8 @@ brew install ffmpeg gnuplot libsamplerate
 Sound card input and output (CoreAudio on macOS; JACK, PipeWire/PulseAudio,
 or ALSA on Linux) go through the bundled miniaudio, and live MIDI through the
 bundled RtMidi, so no audio daemon is needed.  Run `bin/audio_check.rb --list`
-to see devices.  On macOS, playback still uses ffmpeg's `audiotoolbox` output
-by default for now; set `OUTPUT_TYPE=device` to use the sound card directly.
+to see devices.  Set `OUTPUT_TYPE=ffmpeg` to play through an ffmpeg output
+instead (e.g. `audiotoolbox` on macOS, `pulse` on Linux).
 
 Then you'll want to install Ruby 4.0 or newer.
 
