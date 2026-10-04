@@ -23,9 +23,12 @@ module JackDummy
         out: File::NULL, err: File::NULL
       )
 
+      # Wait for the server's socket before connecting: a JACK MIDI output
+      # created while no server runs leaks RtMidi's ring buffers (see
+      # spec/valgrind/ruby.supp)
       deadline = MB::U.clock_now + 5
       until MB::U.clock_now > deadline
-        return nil if connectable?
+        return nil if Dir.glob(["/dev/shm/jack_#{@name}_*", "/tmp/jack-#{Process.uid}/jack_#{@name}_*"]).any? && connectable?
         sleep 0.1
       end
 
