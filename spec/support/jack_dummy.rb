@@ -1,7 +1,7 @@
 # Starts a private JACK server with the dummy driver (no sound card), so
 # MIDI specs can send real messages through JACK MIDI ports.  The server
 # gets a unique name, and JACK_DEFAULT_SERVER points libjack (and RtMidi's
-# JACK clients) at it.  --port-max 16 keeps its shared memory small (Docker's
+# JACK clients) at it.  --port-max 64 keeps its shared memory small (Docker's
 # /dev/shm is 64 MB; JACK2's default needs about 100 MB).
 #
 # Usage in a spec file:
@@ -19,7 +19,7 @@ module JackDummy
       @old_server = ENV['JACK_DEFAULT_SERVER']
       ENV['JACK_DEFAULT_SERVER'] = @name
       @pid = spawn(
-        'jackd', '--no-realtime', '--port-max', '16', '-n', @name, '-d', 'dummy', '-r', '48000', '-p', '256',
+        'jackd', '--no-realtime', '--port-max', '64', '-n', @name, '-d', 'dummy', '-r', '48000', '-p', '256',
         out: File::NULL, err: File::NULL
       )
 
@@ -36,8 +36,10 @@ module JackDummy
       'the JACK dummy server did not start (another spec process may be using /dev/shm)'
     end
 
-    # Stops the server and restores JACK_DEFAULT_SERVER.
+    # Stops the server and restores JACK_DEFAULT_SERVER, closing this
+    # process's shared JACK client first.
     def stop
+      MB::Sound::FastAudio.jack_close
       if @pid
         Process.kill('TERM', @pid) rescue nil
         Process.wait(@pid) rescue nil

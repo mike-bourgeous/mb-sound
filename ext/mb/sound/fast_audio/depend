@@ -1,2 +1,3 @@
-fast_audio.o: fast_audio.c mb_miniaudio.h miniaudio.h
+fast_audio.o: fast_audio.c mb_miniaudio.h miniaudio.h mb_jack.h
 miniaudio_impl.o: miniaudio_impl.c mb_miniaudio.h miniaudio.h
+mb_jack.o: mb_jack.c mb_jack.h
