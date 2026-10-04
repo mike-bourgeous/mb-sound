@@ -1,4 +1,4 @@
-#!/usr/bin/env ruby
+#!/usr/bin/env -S RUBY_THREAD_TIMESLICE=10 ruby
 # A standalone reverb effect: one reverb for every input channel.
 #
 # Input and output file can be specified using flags or positional arguments.

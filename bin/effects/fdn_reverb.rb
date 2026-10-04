@@ -1,4 +1,4 @@
-#!/usr/bin/env ruby
+#!/usr/bin/env -S RUBY_THREAD_TIMESLICE=10 ruby
 # Adds reverb to an audio file or real-time input using diffusion stages
 # and a feedback delay network (FDN).
 # (C)2025 Mike Bourgeous

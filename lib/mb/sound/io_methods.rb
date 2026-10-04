@@ -314,14 +314,19 @@ module MB
       # environment variable, the DEVICE environment variable or +:device+
       # parameter may be used to override the default.  Environment variables
       # take precedence.  For JackD, the device is a prefix for port names, with
-      # the default being 'system:playback_'.  For :ffmpeg on macOS, the device
-      # is an audiotoolbox device index.
+      # the default being 'system:playback_'.  For :ffmpeg, the device is the
+      # ffmpeg output name (an audiotoolbox device index on macOS, or e.g. a
+      # URL when OUTPUT_FORMAT is a streaming format).
       #
       # The output type may be changed using the OUTPUT_TYPE environment
-      # variable.  Supported output types are :jack_ffi, :jack, :alsa_pulse,
-      # :alsa, :ffmpeg (macOS only), and :null.  On macOS, :ffmpeg is used
-      # automatically if JackD is not running.  The +:output_type+ parameter
-      # overrides both the environment variable and automatic detection.
+      # variable.  Supported output types are :device (sound cards through
+      # miniaudio; see DeviceOutput for its own environment variables),
+      # :jack_ffi, :jack, :alsa_pulse, :alsa, :ffmpeg (any live ffmpeg
+      # output: OUTPUT_FORMAT sets ffmpeg's -f, default audiotoolbox on macOS
+      # and pulse elsewhere, and OUTPUT_CODEC the codec, default pcm_f32le),
+      # and :null.  On macOS, :ffmpeg is used automatically if JackD is not
+      # running.  The +:output_type+ parameter overrides both the environment
+      # variable and automatic detection.
       #
       # See FFMPEGOutput, mb-sound-jackffi, JackOutput, and AlsaOutput for more
       # flexible playback.
@@ -374,8 +379,11 @@ module MB
           o = MB::Sound::AlsaOutput.new(device: device || 'default', sample_rate: sample_rate, channels: channels, buffer_size: buffer_size)
 
         when :ffmpeg
-          raise NotImplementedError, 'The :ffmpeg output type is currently only supported on macOS' unless RUBY_PLATFORM =~ /darwin/
-
+          # Any live ffmpeg output: OUTPUT_FORMAT is ffmpeg's -f (default
+          # audiotoolbox on macOS, pulse elsewhere), OUTPUT_DEVICE/DEVICE the
+          # output name (a device, or e.g. a URL for streaming formats), and
+          # OUTPUT_CODEC the codec (default 32-bit float PCM).
+          #
           # ffmpeg's audiotoolbox device parses the output name as a device
           # index (list them with `ffmpeg -f lavfi -i sine=d=0.5 -f audiotoolbox
           # -list_devices true -`); a non-numeric name selects the system
@@ -383,12 +391,17 @@ module MB
           # ffmpeg's default of 16-bit integer.
           #
           # realtime: true keeps ffmpeg from buffering seconds of audio ahead
-          # of the sound card, and BackgroundOutput keeps audiotoolbox fed
-          # with silence between sounds so it never runs dry.
+          # of the sound card, and BackgroundOutput keeps the output fed with
+          # silence between sounds so it never runs dry.
+          format = ENV['OUTPUT_FORMAT'] || (RUBY_PLATFORM =~ /darwin/ ? 'audiotoolbox' : 'pulse')
+          codec = ENV['OUTPUT_CODEC'] || 'pcm_f32le'
           at_device = ENV['OUTPUT_DEVICE'] || ENV['DEVICE'] || device || 'default'
           o = MB::Sound::BackgroundOutput.new(
-            MB::Sound::FFMPEGOutput.new(at_device.to_s, sample_rate: sample_rate, channels: channels, buffer_size: buffer_size, format: 'audiotoolbox', codec: 'pcm_f32le', realtime: true)
+            MB::Sound::FFMPEGOutput.new(at_device.to_s, sample_rate: sample_rate, channels: channels, buffer_size: buffer_size, format: format, codec: codec, realtime: true)
           )
+
+        when :device
+          o = MB::Sound::DeviceOutput.new(channels: channels, sample_rate: sample_rate, buffer_size: buffer_size, device: device)
 
         when :null
           o = MB::Sound::NullOutput.new(channels: channels, sample_rate: sample_rate, buffer_size: buffer_size)

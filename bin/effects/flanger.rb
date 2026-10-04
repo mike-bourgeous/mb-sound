@@ -1,4 +1,4 @@
-#!/usr/bin/env ruby
+#!/usr/bin/env -S RUBY_THREAD_TIMESLICE=10 ruby
 # A simple flanger effect, to demonstrate using a signal node as a delay time.
 # (C)2022 Mike Bourgeous
 #

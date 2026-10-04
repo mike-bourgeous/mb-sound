@@ -101,9 +101,32 @@ RSpec.describe(MB::Sound::IOMethods) do
         o&.close
       end
 
-      it 'raises an error on other platforms' do
+      it 'uses ffmpeg pulse output on other platforms' do
         stub_const('RUBY_PLATFORM', 'x86_64-linux')
-        expect { MB::Sound.output(output_type: :ffmpeg, device: 'ffmpeg-spec-linux') }.to raise_error(NotImplementedError, /macOS/)
+        expect(MB::Sound::FFMPEGOutput).to receive(:new)
+          .with('default', hash_including(format: 'pulse', codec: 'pcm_f32le', realtime: true))
+          .and_return(MB::Sound::NullOutput.new(channels: 2))
+
+        o = MB::Sound.output(output_type: :ffmpeg, device: 'default', shared: false)
+      ensure
+        o&.close
+      end
+
+      it 'uses OUTPUT_FORMAT, OUTPUT_CODEC, and OUTPUT_DEVICE for other ffmpeg outputs' do
+        ENV['OUTPUT_FORMAT'] = 'mpegts'
+        ENV['OUTPUT_CODEC'] = 'aac'
+        ENV['OUTPUT_DEVICE'] = 'udp://127.0.0.1:1234'
+        expect(MB::Sound::FFMPEGOutput).to receive(:new)
+          .with('udp://127.0.0.1:1234', hash_including(format: 'mpegts', codec: 'aac', realtime: true))
+          .and_return(MB::Sound::NullOutput.new(channels: 2))
+
+        o = MB::Sound.output(output_type: :ffmpeg, shared: false)
+        expect(o).to be_a(MB::Sound::BackgroundOutput)
+      ensure
+        ENV.delete('OUTPUT_FORMAT')
+        ENV.delete('OUTPUT_CODEC')
+        ENV.delete('OUTPUT_DEVICE')
+        o&.close
       end
     end
   end

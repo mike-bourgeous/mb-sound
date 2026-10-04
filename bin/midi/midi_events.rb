@@ -1,4 +1,4 @@
-#!/usr/bin/env ruby
+#!/usr/bin/env -S RUBY_THREAD_TIMESLICE=10 ruby
 # Prints events as they occur in real time, either from a jackd input or a MIDI
 # file.  Can optionally forward events to a jackd MIDI output.
 #

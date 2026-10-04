@@ -1,4 +1,4 @@
-#!/usr/bin/env ruby
+#!/usr/bin/env -S RUBY_THREAD_TIMESLICE=10 ruby
 # Chops any sound file into a wavetable.
 #
 # Works by trying to detect the fundamental frequency of the sound, then

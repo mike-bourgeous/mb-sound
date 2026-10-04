@@ -1,4 +1,4 @@
-#!/usr/bin/env ruby
+#!/usr/bin/env -S RUBY_THREAD_TIMESLICE=10 ruby
 # Plots different window functions and their overlap
 #
 # Usage: $0 [window_length [hop_size]] [window and plot names...]

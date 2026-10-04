@@ -1,4 +1,4 @@
-#!/usr/bin/env ruby
+#!/usr/bin/env -S RUBY_THREAD_TIMESLICE=10 ruby
 # Interactive sound environment.  Uses Pry within the MB::Sound module context.
 # See README.md for more info, including copyright and license.
 

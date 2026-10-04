@@ -1,4 +1,4 @@
-#!/usr/bin/env ruby
+#!/usr/bin/env -S RUBY_THREAD_TIMESLICE=10 ruby
 # Shows the last-received value of MIDI CCs in a table layout.
 #
 # Requires MB::Sound::JackFFI and needs jackd running.

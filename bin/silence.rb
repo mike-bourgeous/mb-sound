@@ -1,4 +1,4 @@
-#!/usr/bin/env ruby
+#!/usr/bin/env -S RUBY_THREAD_TIMESLICE=10 ruby
 # Plays silence forever to try to keep the USB audio interface open.
 #
 # Usage: $0

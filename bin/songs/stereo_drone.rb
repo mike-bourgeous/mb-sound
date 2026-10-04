@@ -1,4 +1,4 @@
-#!/usr/bin/env ruby
+#!/usr/bin/env -S RUBY_THREAD_TIMESLICE=10 ruby
 # A slowly shifting stereo drone: phase-modulated tones on B, D#, E, and F#
 # fading in and out on slow LFOs, with filtered noise and a short
 # modulated delay on each side.  Plays until Ctrl-C.
@@ -33,7 +33,9 @@ module MB::Sound
     }
   end
 
-  song_script(bars: 30) {
+  # The drone as a stereo bundle.  Also used by bin/audio_load_check.rb as a
+  # reference load.
+  def self.stereo_drone
     q = 0.5 * toneseq(12, B1, Ds2, E2).sum
 
     # Alternating notes go left and right
@@ -43,7 +45,7 @@ module MB::Sound
 
     # DSL calls on a stereo bundle run per channel; the noise is inverted on
     # the right
-    drone = (stereo(0.3 * left_tones.sum, 0.3 * right_tones.sum) + q + stereo(noise, noise * -1))
+    (stereo(0.3 * left_tones.sum, 0.3 * right_tones.sum) + q + stereo(noise, noise * -1))
       .softclip(0.6)
       .oversample(2)
       .delay(
@@ -51,7 +53,11 @@ module MB::Sound
         feedback: -0.5, dry: 1, smoothing: false
       )
       .softclip(0.8)
+  end
 
-    bg :drone, drone, fade: 0
-  }
+  if main_script?(__FILE__)
+    song_script(bars: 30) {
+      bg :drone, stereo_drone, fade: 0
+    }
+  end
 end

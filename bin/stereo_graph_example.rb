@@ -1,4 +1,4 @@
-#!/usr/bin/env ruby
+#!/usr/bin/env -S RUBY_THREAD_TIMESLICE=10 ruby
 # A stereo drone example: two phase-modulated tones and a filtered sawtooth,
 # widened by a different modulated delay on each side.
 #
