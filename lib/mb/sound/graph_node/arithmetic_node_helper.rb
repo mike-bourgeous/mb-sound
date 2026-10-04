@@ -106,18 +106,30 @@ module MB
           retbuf.not_inplace!
         end
 
+        # Input buffer classes that never promote a buffer of each class (the
+        # same precision, or real into complex).
+        FAST_INPUTS = {
+          Numo::SFloat => [Numo::SFloat].freeze,
+          Numo::DFloat => [Numo::DFloat].freeze,
+          Numo::SComplex => [Numo::SComplex, Numo::SFloat].freeze,
+          Numo::DComplex => [Numo::DComplex, Numo::DFloat].freeze,
+        }.freeze
+
         # For the fast paths: true if every input in +sampled+ ([buffer,
-        # extra] pairs) is a full +count+-sample buffer of this node's buffer
-        # type, the buffers are large enough, and no extra data or +fill+
-        # would promote the buffer type, so the general path would do exactly
-        # the same arithmetic.
+        # extra] pairs) is a full +count+-sample buffer that wouldn't promote
+        # this node's buffer type (the same type, or real into complex), the
+        # buffers are large enough, and no extra data or +fill+ would promote
+        # it either, so the general path would do exactly the same
+        # arithmetic.
         def arithmetic_fast?(count, sampled, fill)
           return false if @buf.nil? || @buf.length < count
           return false if !@bufcomplex && fill.is_a?(Complex)
 
-          bufclass = @buf.class
+          ok = FAST_INPUTS[@buf.class]
+          return false unless ok
+
           sampled.all? { |v, extra|
-            v && v.class == bufclass && v.length == count && (@bufcomplex || !extra.is_a?(Complex))
+            v && v.length == count && ok.include?(v.class) && (@bufcomplex || !extra.is_a?(Complex))
           }
         end
 

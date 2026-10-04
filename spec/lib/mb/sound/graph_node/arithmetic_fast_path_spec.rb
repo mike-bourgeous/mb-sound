@@ -31,6 +31,10 @@ RSpec.describe('Multiplier and Mixer fast paths') do
     compare { 220.hz.complex_sine * 330.hz.sine + 110.hz.sine * (1 + 1i) }
   end
 
+  it 'gives the same results for real inputs into a complex buffer' do
+    compare { (220.hz.complex_sine * 330.hz.sine) * 110.hz.sine * 55.hz.ramp + 330.hz.sine }
+  end
+
   it 'falls back for double-precision inputs' do
     data = Numo::DFloat.new(4000).seq.map { |i| Math.sin(i * 0.1) }
     compare { MB::Sound::ArrayInput.new(data: [data]) * 220.hz.sine + 1.constant }

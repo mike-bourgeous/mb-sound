@@ -56,6 +56,11 @@ module MB
         # Returns +count+ samples, using as many or as few reads from the
         # upstream as needed to fulfill the request.
         def sample(count)
+          # Nothing to re-block: pass the upstream buffer through
+          if count == @upstream_count && (@circbuf.nil? || @circbuf.length == 0)
+            return @upstream.sample(count)&.not_inplace!
+          end
+
           setup_circular_buffer(count)
 
           while @circbuf.length < count
