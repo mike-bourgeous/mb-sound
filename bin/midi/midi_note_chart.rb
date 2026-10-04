@@ -1,70 +1,56 @@
 #!/usr/bin/env -S RUBY_THREAD_TIMESLICE=10 RUBY_YJIT_ENABLE=1 ruby
 # Shows the attack velocity of notes while they are held.
 #
-# Reads live MIDI through RtMidi (CoreMIDI, ALSA, or JACK; see
-# MB::Sound::MIDI::Input), or a MIDI file.  Without an argument, connect a MIDI
-# source to the virtual port it creates.
+# Reads live MIDI (JACK or RtMidi; see MB::Sound::MIDI::Input) or a MIDI file
+# played in real time (see MB::Sound::MIDI::RealtimeReader).  Without an
+# argument, connect a MIDI source to the port it creates.
 #
 # Usage: $0 [part_of_a_midi_source_name_or_midi_filename]
 
 require 'bundler/setup'
 
-require 'nibbler'
-require 'forwardable'
-
 require 'mb-sound'
 
 MB::Sound.script(args: 0..1) { |(input)|
-  if input && input.end_with?('.mid') && File.readable?(input)
-    puts "Reading MIDI from #{input}"
-    midi_in = MB::Sound::MIDI::MIDIFile.new(input)
-  else
-    midi_in = MB::Sound::MIDI::Input.open_live(input)
-  end
-
-  midi = Nibbler.new
+  midi_in = MB::Sound::MIDI::RealtimeReader.new(input)
+  puts "Reading MIDI from #{input}" if midi_in.file?
 
   note_chart = Array.new(128)
 
   puts "#{"\n" * MB::U.height}\e[H\e[J" # move to home, then clear everything
 
-  # See bin/ep2_syn.rb for an example of an event loop that works with MIDI and
-  # audio together (basically read MIDI with blocking: false)
   frame = 0
-  loop do
-    STDOUT.write("\e[J\e[H") # clear below the current output first, then move to home
-    MB::U.table(
-      note_chart.each_slice(12).map.with_index { |r, idx| [idx - 1] + r },
-      header: ['###', 'C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'],
-      separate_rows: true
-    )
-    puts
-
-    midi.clear_buffer
-
-    events = []
-    while events.empty?
-      data = midi_in.read
-      exit if data.nil? # end of a MIDI file
+  begin
+    loop do
+      STDOUT.write("\e[J\e[H") # clear below the current output first, then move to home
+      MB::U.table(
+        note_chart.each_slice(12).map.with_index { |r, idx| [idx - 1] + r },
+        header: ['###', 'C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'],
+        separate_rows: true
+      )
+      puts
 
       # TODO: Somehow show realtime messages without clearing the other received messages
-      data[0].each do |t, e|
-        events.concat([midi.parse(e.bytes)].flatten.compact.reject { |e| e.is_a?(MIDIMessage::SystemRealtime) })
+      events = midi_in.read
+      break if events.nil? # end of a MIDI file
+
+      events.each_with_index do |e, idx|
+        id = "#{MB::U.highlight(frame).strip}.#{MB::U.highlight(idx).strip}"
+        puts "#{id}: #{e}\e[K"
+        case e.type
+        when :note_on
+          note_chart[e.note] = e.raw
+
+        when :note_off
+          note_chart[e.note] = "\e[38;5;237m#{-e.raw}\e[0m"
+        end
       end
+
+      frame += 1
     end
-
-    events.each_with_index do |e, idx|
-      id = "#{MB::U.highlight(frame).strip}.#{MB::U.highlight(idx).strip}"
-      puts "#{id}: #{MB::U.highlight(e).lines.map { |v| v.rstrip + "\e[K" }.join("\n")}"
-      case e
-      when MIDIMessage::NoteOn
-        note_chart[e.note] = e.velocity
-
-      when MIDIMessage::NoteOff
-        note_chart[e.note] = "\e[38;5;237m#{-e.velocity}\e[0m"
-      end
-    end
-
-    frame += 1
+  rescue Interrupt
+    puts
+  ensure
+    midi_in.close
   end
 }
