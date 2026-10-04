@@ -42,7 +42,8 @@ module MB
       # output clock (see MIDI::LiveSource for MIDI_TIMING).  +connect+ is
       # part of a MIDI source's name to connect to, or nil for a port named
       # after the script that other software connects to (see MIDI::Input).
-      # Each +connect+ opens one input, cached until #close_midi.
+      # Each +connect+ opens one input, cached until #close_midi.  +:quiet+
+      # skips the note about the latency profile.
       #
       # Opening live MIDI switches the background session to the :low
       # latency profile unless a profile was chosen (see
@@ -54,14 +55,14 @@ module MB
       #     play Synth.new(midi_stream.transpose(-12)) { |v| v.hz.square * v.amp_env }
       #     midi.mod                                              # the mod wheel, 0..1
       #     midi('Launchkey')                                     # a keyboard by name
-      def midi(connect = nil)
+      def midi(connect = nil, quiet: false)
         @live_midi ||= {}
         notes = @live_midi[connect]
         return notes if notes && !notes.stream.source.closed?
 
         # Switches the output only once the input has opened
         source = MB::Sound::MIDI::LiveSource.new(connect: connect)
-        live_midi_latency
+        live_midi_latency(quiet: quiet)
         source.output = Session.default.output
         @live_midi[connect] = MB::Sound::Notes.new(MB::Sound::MIDI::Stream.new(source))
       end
