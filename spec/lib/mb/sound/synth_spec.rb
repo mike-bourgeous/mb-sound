@@ -314,6 +314,77 @@ RSpec.describe(MB::Sound::Synth) do
     end
   end
 
+  describe 'idle lane skipping', :check_shared do
+    let(:notes) {
+      [ev.note_on(48), ev.note_off(48, time: 0.05r), ev.note_on(52, time: 0.2r), ev.note_off(52, time: 0.25r),
+       ev.cc_raw(1, 100, time: 0.3r), ev.note_on(55, time: 0.4r), ev.note_off(55, time: 0.45r), ev.note_on(60, time: 0.6r)]
+    }
+
+    # A patch whose output is exactly the same with skipping (naive
+    # oscillator reset to a fixed phase, no filter state).
+    let(:exact_patch) {
+      ->(v, _i) { v.hz.aramp * v.amp_env(0.002, 0.01, 0.5, 0.01, curve: :linear) * (1 + v.mod) * v.velocity }
+    }
+
+    def run(synth, buffers, size = 480)
+      skipped = []
+      out = buffers.times.map { b = synth.sample(size).dup; skipped << synth.skipped_lanes; b }
+      [out.reduce(:concatenate), skipped]
+    end
+
+    it 'skips idle silent lanes, wakes them for events, and gives the same samples for an exactly resettable patch' do
+      s1 = described_class.new(source(*notes), voices: 2, spares: 1, seed: 1, &exact_patch)
+      s2 = described_class.new(source(*notes), voices: 2, spares: 1, seed: 1, skip_idle: false, &exact_patch)
+      expect(s1.skippable_lanes).to eq([0, 1, 2])
+
+      out1, skipped = run(s1, 80)
+      out2, _ = run(s2, 80)
+
+      expect(skipped[0]).to eq([1, 2]) # unused lanes from the first buffer
+      expect(skipped[20]).to include(0) # after the first note's release
+      expect(skipped.flatten.uniq.sort).to eq([0, 1, 2])
+      expect(out1.abs.max).to be > 0.3
+      expect(out1.to_a).to eq(out2.to_a)
+    end
+
+    it 'stays close to rendering every lane for a filtered band-limited patch' do
+      s1 = described_class.new(source(*notes), voices: 2, spares: 1, seed: 1, &patch)
+      s2 = described_class.new(source(*notes), voices: 2, spares: 1, seed: 1, skip_idle: false, &patch)
+      out1, skipped = run(s1, 80)
+      out2, _ = run(s2, 80)
+      expect(skipped.flatten).not_to be_empty
+
+      # Only the band-limited reset steps at note-ons differ (32 samples),
+      # since a skipped lane's oscillator resets from where it paused
+      diff = (out1 - out2).abs
+      starts = [0, 9600, 19200, 28800]
+      far = diff.to_a.each_index.select { |i| diff[i] > 1e-6 && starts.none? { |s| (s...(s + 40)).cover?(i) } }
+      expect(far).to eq([])
+      expect(diff.max).to be < 0.05
+    end
+
+    it 'never skips lanes with delays or reverbs, or with skip_idle: false' do
+      s = described_class.new(source(*notes), voices: 2, spares: 0) { |v| (v.hz.saw * v.amp_env).delay(0.1) }
+      expect(s.skippable_lanes).to eq([])
+      s = described_class.new(source(*notes), voices: 2, spares: 0) { |v| [v.hz.saw * v.amp_env].reverb(:room) }
+      expect(s.skippable_lanes).to eq([])
+      s = described_class.new(source(*notes), voices: 2, skip_idle: false, &patch)
+      expect(s.skippable_lanes).to eq([])
+      expect(run(s, 30)[1].flatten).to be_empty
+    end
+
+    it 'keeps shared controller and glide inputs in step while lanes are skipped' do
+      events = notes + 30.times.map { |i| ev.cc_raw([1, 74, 73, 76][i % 4], (i * 37) % 128, time: Rational(i, 40)) } + [ev.bend(0.5, time: 0.33r)]
+      s = described_class.new(source(*events), voices: 3, spares: 1) { |v|
+        tone = v.hz.glide(0.02).vibrato.saw.filter(:lowpass, cutoff: v.cutoff(900), quality: v.quality(2))
+        tone * v.amp_env(0.002, 0.02, 0.5, 0.02) * (1 + v.mod)
+      }
+      out, skipped = run(s, 100, 256)
+      expect(skipped.flatten).not_to be_empty
+      expect(out.abs.max).to be > 0.1
+    end
+  end
+
   it 'never modifies shared buffers', :check_shared do
     s = described_class.new(
       source(ev.note_on(48), ev.note_on(55, time: 1/50r), ev.cc_raw(74, 90), ev.note_off(48, time: 1/10r)),

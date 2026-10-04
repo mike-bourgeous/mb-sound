@@ -38,17 +38,61 @@ module MB
         # buffer).
         attr_reader :value
 
+        #
+        # While the note number and offset nodes return the same frozen
+        # buffers (Notes nodes without events) and the tuning is the same,
+        # returns the same frozen buffer (see Notes.fast_paths).
         def sample(count)
           n = @number.sample(count)
           return nil if n.nil?
 
+          return steady(n) if Notes.fast_paths && n.frozen?
+
+          compute(n)
+        end
+
+        def sources
+          s = { number: @number }
+          @offsets.each_with_index { |o, idx| s[:"offset_#{idx + 1}"] = o }
+          s
+        end
+
+        private
+
+        # Returns the cached frozen output if +n+ and every offset buffer are
+        # the frozen buffers it was computed from, else computes it (frozen
+        # and cached if every input was frozen).
+        def steady(n)
+          offsets = @nodes.map { |node| node.sample(n.length) }
+          tuning = MB::Sound.tuning
+
+          key = @steady_key
+          if key && key[0].equal?(n) && key[1] == tuning.note && key[2] == tuning.frequency &&
+              offsets.each_with_index.all? { |o, idx| o.equal?(key[3][idx]) }
+            return @steady
+          end
+
+          out = compute(n, offsets)
+          if out && offsets.all? { |o| o.frozen? && o.length == n.length }
+            @steady_key = [n, tuning.note, tuning.frequency, offsets]
+            @steady = out.dup.freeze
+            return @steady
+          end
+
+          @steady_key = nil
+          out
+        end
+
+        # Computes the frequencies from note number buffer +n+ and the offset
+        # nodes' buffers (sampled here unless given as +offsets+).
+        def compute(n, offsets = nil)
           count = n.length
           @buf = Numo::SFloat.zeros(count) if @buf.nil? || @buf.length != count
           @buf[0..] = n
           @buf.inplace + @constant if @constant != 0
 
-          @nodes.each do |node|
-            o = node.sample(count)
+          @nodes.each_with_index do |node, idx|
+            o = offsets ? offsets[idx] : node.sample(count)
             return nil if o.nil?
             if o.length < count
               count = o.length
@@ -62,12 +106,6 @@ module MB
           @buf.not_inplace!
           @value = @buf[-1]
           @buf
-        end
-
-        def sources
-          s = { number: @number }
-          @offsets.each_with_index { |o, idx| s[:"offset_#{idx + 1}"] = o }
-          s
         end
       end
     end

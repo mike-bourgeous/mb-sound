@@ -128,6 +128,15 @@ module MB
             super(LaneSource.new(allocator, index))
           end
 
+          # True if the lane has an event before stream time +to+ that its
+          # readers haven't read yet (reading the allocator's input up to
+          # +to+ first, as a read of the lane would).  Used by Synth to wake
+          # a lane it skips while idle.
+          def pending_before?(to)
+            @allocator.advance(to)
+            (!@log.empty? && @log.first.time < to) || source.pending_before?(to)
+          end
+
           # The result of the idle check, or nil if there isn't one.
           def idle?
             @idle_check ? !!@idle_check.call : nil
@@ -180,6 +189,12 @@ module MB
 
           def sources
             { allocator: @allocator }
+          end
+
+          # True if an event queued for the lane is before stream time +to+
+          # (see Lane#pending_before?).
+          def pending_before?(to)
+            !@queue.empty? && @queue.first.time < to
           end
 
           # Used by Allocator to send an event to this lane (in time order).

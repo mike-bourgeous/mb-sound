@@ -34,6 +34,14 @@ RSpec.describe(MB::Sound::GraphNode::Tee, aggregate_failures: true) do
     expect(a1).to be_frozen
   end
 
+  it 'passes a frozen source buffer through as it is' do
+    buf = Numo::SFloat.new(100).fill(0.5).freeze
+    a, b = 0.constant.proc { buf }.tee
+    expect(a.sample(100)).to equal(buf)
+    expect(b.sample(100)).to equal(buf)
+    expect(a.sample(100)).to equal(buf)
+  end
+
   it 'gives each branch a copy with sharing turned off' do
     MB::Sound::GraphNode::Tee.shared = false
     a, b = 157.hz.tee

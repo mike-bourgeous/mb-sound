@@ -280,6 +280,8 @@ module MB
         self.octaves = octaves
 
         @last = {}
+        @fitted = {}
+        @quiet = {}
         @buf = nil
         @state = Numo::DFloat.zeros(STATE_SIZE)
         reset
@@ -832,11 +834,52 @@ module MB
 
         if kernel == :ruby
           self.class.process_ruby(@buf, @state, times, curves, levels, hold, inputs, config)
+        elsif quiet_idle?(inputs, config)
+          return idle_buffer(count)
         else
           MB::Sound::FastEnvelope.process(@buf, @state, times, curves, levels, hold, inputs, config)
         end
 
         @buf
+      end
+
+      # True if the envelope is idle and stays idle for this buffer: no gate
+      # was high at the end of the last buffer, and the gate and trigger
+      # inputs are absent, zero, or frozen buffers already found quiet (see
+      # #quiet?).  Updates the state as the kernel would (the level stays
+      # 0, the trigger edge detector resets, and the note position
+      # advances), so #run can skip the kernel.  Not with octaves (the
+      # output would be 2 ** (0 * octaves)).
+      def quiet_idle?(inputs, config)
+        return false unless @state[STATE_STAGE] == STAGE_IDLE && @state[STATE_GATE] == 0
+        return false if config[0] & FLAG_OCTAVES != 0
+        return false unless quiet?(:gate, inputs[0]) && quiet?(:trigger, inputs[1])
+
+        @state[STATE_LEVEL] = 0
+        @state[STATE_TRIGGER] = 0
+        @state[STATE_NOTE_POSITION] += @buf.length
+        true
+      end
+
+      # True if a gate (+key+ :gate; every sample 0) or trigger (:trigger;
+      # no sample above 0) input can't start a note: nil, a number, or a
+      # frozen buffer (remembered by identity, since frozen buffers don't
+      # change).
+      def quiet?(key, value)
+        return true if value.nil?
+        return key == :gate ? value == 0 : value <= 0 if value.is_a?(Numeric)
+        return true if value.equal?(@quiet[key])
+        return false unless value.frozen?
+
+        quiet = key == :gate ? value.max == 0 && value.min == 0 : value.max <= 0
+        @quiet[key] = value if quiet
+        quiet
+      end
+
+      # A frozen buffer of zeros for an idle envelope (see #quiet_idle?).
+      def idle_buffer(count)
+        @idle_buf = Numo::SFloat.zeros(count).freeze if @idle_buf.nil? || @idle_buf.length != count
+        @idle_buf
       end
 
       # Forgets the cached kernel arguments after a parameter change.
@@ -888,9 +931,16 @@ module MB
       # Returns +data+ fitted to +count+ samples (padded with +:pad+, or the
       # last value if +:pad+ is nil), remembering its last value for when its
       # node ends.  Numbers are returned unchanged; nil gives the last value.
+      #
+      # A frozen buffer of +count+ samples seen last time for +key+ (e.g. a
+      # Notes node's constant buffer) is returned at once: it holds the same
+      # values, so its last value is already remembered.
       def fit(key, data, count, pad: nil)
         return @last.fetch(key, 0.0) if data.nil?
         return data if data.is_a?(Numeric)
+        return data if data.equal?(@fitted[key]) && data.length == count
+
+        @fitted[key] = data.frozen? && (data.is_a?(Numo::SFloat) || data.is_a?(Numo::DFloat)) ? data : nil
 
         data = data.real if data.is_a?(Numo::SComplex) || data.is_a?(Numo::DComplex)
         @last[key] = data[-1] unless data.empty?

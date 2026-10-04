@@ -111,7 +111,7 @@ module MB
         # The node producing this pitch's frequency in Hz (a
         # Notes::Frequency, made on first use).
         def freq
-          @freq ||= build_freq
+          @freq ||= @notes.frequency_for(@settings, @sample_rate) { build_freq }
         end
 
         # The current frequency in Hz.

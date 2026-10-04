@@ -80,10 +80,10 @@ module MB
           factor = @notes.public_send(GM_TIMES.fetch(segment))
           node = case time
                  when Numeric
-                   factor * time.to_f
+                   GmTime.new(factor, time.to_f, sample_rate: @sample_rate)
                  when Length
                    return time if time.respond_to?(:node) && time.node # node lengths stay unscaled
-                   factor * Length.seconds(time, sample_rate: @sample_rate)
+                   GmTime.new(factor, Length.seconds(time, sample_rate: @sample_rate).to_f, sample_rate: @sample_rate)
                  else
                    return time unless time.respond_to?(:sample)
                    time * factor
@@ -91,6 +91,14 @@ module MB
 
           @gm_nodes[segment] = node
           node
+        end
+
+        # Reads GM-scaled fixed times through GmTime#length_samples (a
+        # number while the controller holds still) with Notes.fast_paths.
+        def read_length(key, source, count)
+          gm = @gm_nodes[key]
+          return super unless gm.is_a?(GmTime) && Notes.fast_paths
+          fit(key, gm.length_samples(count, @sample_rate), count)
         end
 
         # Destroys the Tee branches of a scaling node that is no longer used
@@ -101,6 +109,86 @@ module MB
 
           node.sources.each_value do |src|
             src.destroy if src.is_a?(GraphNode::Tee::Branch)
+          end
+        end
+
+        # A fixed time in seconds scaled by a GM2 time controller (see
+        # NoteEnvelope#gm): the controller's buffer times the time, in
+        # single precision like a Multiplier.  NoteEnvelope reads it through
+        # #length_samples, which gives the length in samples as one number
+        # (computed once per controller value) when the controller's buffer
+        # is constant, skipping a buffer multiply per segment per buffer.
+        class GmTime
+          include GraphNode
+          include GraphNode::SampleRateHelper
+
+          # The controller node (a sampler branch).
+          attr_reader :factor
+
+          # The time in seconds before scaling.
+          attr_reader :time
+
+          def initialize(factor, time, sample_rate: 48000)
+            @factor = factor.get_sampler
+            @time = time.to_f
+            @sample_rate = sample_rate.to_f
+            @buf = nil
+            @node_type_name = 'GM time'
+          end
+
+          # Returns +count+ samples of the scaled time in seconds, or nil if
+          # the controller ended.
+          def sample(count)
+            f = @factor.sample(count)
+            return nil if f.nil?
+
+            @buf = Numo::SFloat.zeros(f.length) if @buf.nil? || @buf.length != f.length
+            scale(@buf, f)
+          end
+
+          # Returns the scaled time in samples at +sample_rate+ for the next
+          # +count+ samples: a Float when the controller's buffer is
+          # constant, else an SFloat (the same values #sample gives, times
+          # the rate in single precision, as Length::Source#samples
+          # computes), or nil if the controller ended.
+          def length_samples(count, sample_rate)
+            f = @factor.sample(count)
+            return nil if f.nil?
+
+            # The same frozen buffer as last time (e.g. a Notes controller's
+            # constant buffer passed through a Tee) holds the same values
+            return @steady_samples if f.equal?(@steady_buf) && sample_rate == @steady_rate
+            @steady_buf = nil
+
+            if f.length == count && (v = f[0]) == f.max && v == f.min
+              if v != @steady_factor || sample_rate != @steady_rate
+                @steady_factor = v
+                @steady_rate = sample_rate
+                @steady_samples = (scale(Numo::SFloat.zeros(1), Numo::SFloat[v]) * sample_rate)[0]
+              end
+              @steady_buf = f if f.frozen?
+              return @steady_samples
+            end
+
+            @buf = Numo::SFloat.zeros(f.length) if @buf.nil? || @buf.length != f.length
+            scale(@buf, f) * sample_rate
+          end
+
+          def sources
+            { factor: @factor }
+          end
+
+          def to_s
+            "GM time #{MB::M.sigfigs(@time, 4)} s"
+          end
+
+          private
+
+          # Fills +buf+ with the time times +f+ (Multiplier's operations).
+          def scale(buf, f)
+            buf.fill(@time)
+            buf.inplace * f
+            buf.not_inplace!
           end
         end
       end

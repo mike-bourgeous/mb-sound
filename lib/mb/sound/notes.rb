@@ -104,6 +104,16 @@ module MB
         chorus_send: { number: 93, name: 'Chorus Send' },
       }.transform_values { |h| MIDI::ControlSpec.new(**h).freeze }.freeze
 
+      class << self
+        # Whether Notes nodes and envelopes take their fast paths for
+        # buffers without events (constant frozen buffers, envelope times
+        # as numbers; see Notes::Node#sample).  On unless the environment
+        # sets MB_SOUND_NOTES_FAST=0.  The output is the same either way;
+        # specs compare the two.
+        attr_accessor :fast_paths
+      end
+      self.fast_paths = ENV['MB_SOUND_NOTES_FAST'] != '0'
+
       # Shared channel-wide nodes per control stream (see .control_stream):
       # stream => { key => WeakRef(node) }.
       SHARED = ObjectSpace::WeakKeyMap.new
@@ -204,6 +214,16 @@ module MB
         memo(:freq) { Frequency.new(number, offsets: [bend_semitones], sample_rate: @sample_rate) }
       end
       alias frequency freq
+
+      # The Notes::Frequency for NotePitch +settings+ at +sample_rate+,
+      # made by the block once and shared by every pitch with the same
+      # settings (e.g. each `v.hz.transpose(7)`), so tones on equal pitches
+      # read one Frequency node through a Tee.  Default settings at this
+      # instance's rate give #freq.  Used by NotePitch#freq.
+      def frequency_for(settings, sample_rate)
+        return freq if settings == NotePitch::DEFAULTS && sample_rate.to_f == @sample_rate
+        memo([:frequency, settings, sample_rate.to_f]) { yield }
+      end
 
       # Pitch bend, -1..1 (a Notes::Bend shared by every Notes instance on
       # the control stream).
@@ -428,11 +448,22 @@ module MB
                else lift
                end
 
-        inputs = { gate: gate, trigger: trigger, velocity: velocity, choke: choke, lift: lift }.compact
+        inputs = envelope_inputs.merge(lift: lift).compact
         register(NoteEnvelope.preset(
           preset, attack, decay, sustain, release,
           notes: self, gm: gm, sample_rate: @sample_rate, **inputs, **options
         ))
+      end
+
+      # The gate, trigger, velocity, and choke inputs for a new envelope:
+      # with Notes.fast_paths, one EnvelopeInputs node of its own (one
+      # reader instead of four shared nodes and their Tees), else #gate,
+      # #trigger, #velocity, and #choke (the same samples).
+      def envelope_inputs
+        return { gate: gate, trigger: trigger, velocity: velocity, choke: choke } unless Notes.fast_paths
+
+        node = memo([:envelope_inputs, @envelopes.length]) { EnvelopeInputs.new(@stream, notes: self, sample_rate: @sample_rate) }
+        { gate: node, trigger: node.trigger, velocity: node.velocity, choke: node.choke }
       end
 
       # Like #memo, but shared by every Notes instance on the same control
@@ -464,6 +495,7 @@ require_relative 'notes/channel_nodes'
 require_relative 'notes/frequency'
 require_relative 'notes/fade_in'
 require_relative 'notes/glide'
+require_relative 'notes/envelope_inputs'
 require_relative 'notes/note_envelope'
 require_relative 'notes/note_pitch'
 require_relative 'notes/filter_nodes'

@@ -141,6 +141,16 @@ RSpec.describe('Tone reset inputs, free and random phases') do
       expect(o.sample(256)).to eq(bl_osc(:square).sample(256))
     end
 
+    it 'remembers a quiet frozen trigger buffer and still resets at a new one' do
+      quiet = triggers(100).freeze
+      bufs = [quiet, quiet, triggers(100, 40).freeze, quiet]
+      o = bl_osc
+      o.reset_input = MB::Sound::GraphNode::ProcNode.new(0.constant) { bufs.shift }
+      ref = bl_osc
+      ref.reset_input = input(triggers(400, 240))
+      expect(pieces(o, :sample, [100] * 4) {}).to eq(ref.sample(400))
+    end
+
     it 'cannot be combined with sync' do
       o = bl_osc
       o.reset_input = input(triggers(10, 1))
