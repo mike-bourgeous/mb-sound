@@ -29,14 +29,16 @@ module MB::Sound
     saws = ->(pitch) { pitch.ramp.at(0.5) + pitch.transpose(detune).ramp.at(0.5) }
 
     pad = clip.synth(voices: voices) { |v|
-      swell = v.env(attack, 1.0, 0.8, release)
-      bloom = v.env(attack * 1.5, 2.0, 0.3, release)
+      swell = v.amp_env(attack, 1.0, 0.8, release, sensitivity: -6.db..0.db)
+
+      # From half the cutoff up to 1.5x (log2(3) octaves above it)
+      bloom = v.filt_env(attack * 1.5, 2.0, 0.3, release, depth: Math.log2(3))
 
       ((saws.(v.hz) + saws.(v.hz.transpose(7)) * 0.7) * swell * 0.35)
-        .filter(:lowpass, cutoff: cutoff * 0.5 + cutoff * bloom, quality: 0.9)
+        .filter(:lowpass, cutoff: v.cutoff(cutoff * 0.5, env: bloom, keytrack: 0), quality: 0.9)
     }.softclip(0.4, 0.9)
 
-    [pad, pad.delay(seconds: width)]
+    [pad, pad.delay(width)]
   end
 
   if main_script?(__FILE__)
