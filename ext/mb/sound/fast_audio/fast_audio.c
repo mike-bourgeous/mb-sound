@@ -30,6 +30,7 @@
 
 #include <ruby.h>
 #include <ruby/thread.h>
+#include <ruby/encoding.h>
 
 #include "numo/narray.h"
 
@@ -2148,6 +2149,481 @@ static VALUE capture_stats(VALUE self)
 	return h;
 }
 
+/* JACK MIDI ---------------------------------------------------------------- */
+
+// MIDI ports on the shared JACK client.  Each direction has a lock-free byte
+// ring of records: a 4-byte JACK frame time (input) or nothing (output), a
+// 2-byte length, then the message bytes.  The process thread is the
+// producer for input and the consumer for output.
+#define MIDI_HEADER 6
+#define MIDI_MAX_MESSAGE 65535
+
+// For output messages that wrap around the ring (JACK's thread only)
+static uint8_t midi_scratch[MIDI_MAX_MESSAGE];
+
+struct jack_midi {
+	struct mb_jack_unit unit;
+	int output;
+
+	uint8_t *data;
+	size_t capacity; // bytes, a power of two
+	_Atomic size_t write_pos;
+	_Atomic size_t read_pos;
+	_Atomic size_t messages; // messages that went through
+	_Atomic size_t dropped; // messages that didn't fit (queue or port buffer)
+
+	_Atomic int open;
+	_Atomic int stopped;
+	pid_t pid;
+
+	pthread_mutex_t lock;
+	pthread_cond_t ready;
+	int interrupted;
+};
+
+static void ring_put(struct jack_midi *m, size_t pos, const uint8_t *src, size_t n)
+{
+	size_t mask = m->capacity - 1;
+	size_t start = pos & mask;
+	size_t first = m->capacity - start < n ? m->capacity - start : n;
+	memcpy(m->data + start, src, first);
+	memcpy(m->data, src + first, n - first);
+}
+
+static void ring_get(struct jack_midi *m, size_t pos, uint8_t *dst, size_t n)
+{
+	size_t mask = m->capacity - 1;
+	size_t start = pos & mask;
+	size_t first = m->capacity - start < n ? m->capacity - start : n;
+	memcpy(dst, m->data + start, first);
+	memcpy(dst + first, m->data, n - first);
+}
+
+// JACK's thread: input port events into the ring
+static void midi_in_process(struct mb_jack_unit *unit, uint32_t nframes)
+{
+	struct jack_midi *m = unit->user;
+	void *buffer = mb_jack_port_buffer(unit->ports[0], nframes);
+	uint32_t count = mb_jack_midi_count(buffer);
+	if (count == 0) {
+		return;
+	}
+
+	uint32_t base = mb_jack_last_frame_time();
+	size_t wp = atomic_load_explicit(&m->write_pos, memory_order_relaxed);
+	size_t rp = atomic_load_explicit(&m->read_pos, memory_order_acquire);
+
+	for (uint32_t i = 0; i < count; i++) {
+		uint32_t time;
+		const uint8_t *bytes;
+		size_t size;
+		if (mb_jack_midi_get(buffer, i, &time, &bytes, &size) != 0 || size == 0) {
+			continue;
+		}
+		if (size > MIDI_MAX_MESSAGE || m->capacity - (wp - rp) < MIDI_HEADER + size) {
+			atomic_fetch_add_explicit(&m->dropped, 1, memory_order_relaxed);
+			continue;
+		}
+
+		uint8_t header[MIDI_HEADER];
+		uint32_t frame = base + time;
+		memcpy(header, &frame, 4);
+		header[4] = size & 0xff;
+		header[5] = size >> 8;
+		ring_put(m, wp, header, MIDI_HEADER);
+		ring_put(m, wp + MIDI_HEADER, bytes, size);
+		wp += MIDI_HEADER + size;
+		atomic_fetch_add_explicit(&m->messages, 1, memory_order_relaxed);
+	}
+
+	atomic_store_explicit(&m->write_pos, wp, memory_order_release);
+
+	if (pthread_mutex_trylock(&m->lock) == 0) {
+		pthread_cond_signal(&m->ready);
+		pthread_mutex_unlock(&m->lock);
+	}
+}
+
+// JACK's thread: queued messages out of the ring into the output port (all
+// at the start of the cycle; what doesn't fit waits for the next cycle)
+static void midi_out_process(struct mb_jack_unit *unit, uint32_t nframes)
+{
+	struct jack_midi *m = unit->user;
+	void *buffer = mb_jack_port_buffer(unit->ports[0], nframes);
+	mb_jack_midi_clear(buffer);
+
+	size_t rp = atomic_load_explicit(&m->read_pos, memory_order_relaxed);
+	size_t wp = atomic_load_explicit(&m->write_pos, memory_order_acquire);
+
+	while (wp - rp >= MIDI_HEADER) {
+		uint8_t header[MIDI_HEADER];
+		ring_get(m, rp, header, MIDI_HEADER);
+		size_t size = header[4] | (header[5] << 8);
+
+		// Straight from the ring, or copied if it wraps around the end
+		size_t start = (rp + MIDI_HEADER) & (m->capacity - 1);
+		const uint8_t *bytes = m->data + start;
+		if (start + size > m->capacity) {
+			ring_get(m, rp + MIDI_HEADER, midi_scratch, size);
+			bytes = midi_scratch;
+		}
+
+		if (mb_jack_midi_write(buffer, 0, bytes, size) != 0) {
+			break; // the port buffer is full; try again next cycle
+		}
+		rp += MIDI_HEADER + size;
+		atomic_fetch_add_explicit(&m->messages, 1, memory_order_relaxed);
+	}
+
+	atomic_store_explicit(&m->read_pos, rp, memory_order_release);
+}
+
+static void midi_jack_shutdown(struct mb_jack_unit *unit)
+{
+	struct jack_midi *m = unit->user;
+	atomic_store(&m->stopped, 1);
+	if (pthread_mutex_trylock(&m->lock) == 0) {
+		pthread_cond_broadcast(&m->ready);
+		pthread_mutex_unlock(&m->lock);
+	}
+}
+
+static void jack_midi_release(struct jack_midi *m)
+{
+	atomic_store(&m->open, 0);
+	if (m->pid == getpid()) {
+		mb_jack_detach(&m->unit);
+	}
+}
+
+static void jack_midi_free(void *ptr)
+{
+	struct jack_midi *m = ptr;
+	jack_midi_release(m);
+	free(m->data);
+	if (m->pid == getpid()) {
+		pthread_cond_destroy(&m->ready);
+		pthread_mutex_destroy(&m->lock);
+	}
+	free(m);
+}
+
+static size_t jack_midi_memsize(const void *ptr)
+{
+	const struct jack_midi *m = ptr;
+	return sizeof(*m) + m->capacity;
+}
+
+static const rb_data_type_t jack_midi_type = {
+	.wrap_struct_name = "MB::Sound::FastAudio::JackMIDI",
+	.function = {
+		.dmark = NULL,
+		.dfree = jack_midi_free,
+		.dsize = jack_midi_memsize,
+	},
+	.flags = RUBY_TYPED_FREE_IMMEDIATELY,
+};
+
+static VALUE jack_midi_alloc(VALUE klass)
+{
+	struct jack_midi *m = calloc(1, sizeof(struct jack_midi));
+	if (m == NULL) {
+		rb_raise(rb_eNoMemError, "Could not allocate JACK MIDI");
+	}
+	m->pid = getpid();
+	pthread_mutex_init(&m->lock, NULL);
+	pthread_cond_init(&m->ready, NULL);
+	return TypedData_Wrap_Struct(klass, &jack_midi_type, m);
+}
+
+static struct jack_midi *get_jack_midi(VALUE self)
+{
+	struct jack_midi *m;
+	TypedData_Get_Struct(self, struct jack_midi, &jack_midi_type, m);
+	if (m->data == NULL) {
+		rb_raise(cError, "JACK MIDI was not initialized");
+	}
+	return m;
+}
+
+static void jack_midi_check_open(struct jack_midi *m)
+{
+	if (m->pid != getpid()) {
+		rb_raise(rb_eIOError, "This MIDI port was opened by another process (pid %d)", (int)m->pid);
+	}
+	if (!atomic_load(&m->open)) {
+		rb_raise(rb_eIOError, "This MIDI port is closed");
+	}
+	if (atomic_load(&m->stopped)) {
+		rb_raise(cError, "The JACK server closed the connection");
+	}
+}
+
+struct jack_midi_open_args {
+	struct jack_midi *m;
+	const char *client_name;
+	VALUE name;
+};
+
+static VALUE jack_midi_open_body(VALUE arg)
+{
+	struct jack_midi_open_args *a = (struct jack_midi_open_args *)arg;
+	VALUE names = rb_ary_new_from_args(1, a->name);
+	jack_register_ports(&a->m->unit, a->client_name, names, 1, a->m->output);
+	atomic_store(&a->m->open, 1);
+	mb_jack_attach(&a->m->unit);
+	return Qnil;
+}
+
+static VALUE jack_midi_open_rescue(VALUE arg, VALUE exception)
+{
+	jack_midi_release(((struct jack_midi_open_args *)arg)->m);
+	rb_exc_raise(exception);
+	return Qnil;
+}
+
+// Shared by JackMIDIInput.new and JackMIDIOutput.new
+static VALUE jack_midi_initialize(VALUE self, VALUE client_name, VALUE port_name, VALUE queue_bytes, int output)
+{
+	struct jack_midi *m;
+	TypedData_Get_Struct(self, struct jack_midi, &jack_midi_type, m);
+	if (m->data != NULL) {
+		rb_raise(cError, "JACK MIDI is already initialized");
+	}
+
+	long bytes = NUM2LONG(queue_bytes);
+	if (bytes < 1024 || bytes > (1L << 26)) {
+		rb_raise(rb_eArgError, "Queue size must be 1024..%ld bytes (got %ld)", 1L << 26, bytes);
+	}
+
+	size_t capacity = 1024;
+	while (capacity < (size_t)bytes) {
+		capacity <<= 1;
+	}
+	m->data = calloc(capacity, 1);
+	if (m->data == NULL) {
+		rb_raise(rb_eNoMemError, "Could not allocate the MIDI queue");
+	}
+	m->capacity = capacity;
+	m->output = output;
+	m->unit.process = output ? midi_out_process : midi_in_process;
+	m->unit.shutdown = midi_jack_shutdown;
+	m->unit.user = m;
+
+	struct jack_midi_open_args args = { m, StringValueCStr(client_name), port_name };
+	StringValueCStr(port_name);
+	rb_rescue2(jack_midi_open_body, (VALUE)&args, jack_midi_open_rescue, (VALUE)&args, rb_eException, (VALUE)0);
+	RB_GC_GUARD(client_name);
+	RB_GC_GUARD(port_name);
+
+	return self;
+}
+
+/*
+ * call-seq:
+ *   JackMIDIInput.new(client_name, port_name, queue_bytes)
+ *
+ * A MIDI input port named +port_name+ on the process's shared JACK client
+ * (opened as +client_name+ on first use).  Up to +queue_bytes+ of messages
+ * (plus 6 bytes each) wait for #read; more are dropped and counted.
+ */
+static VALUE jack_midi_in_initialize(VALUE self, VALUE client_name, VALUE port_name, VALUE queue_bytes)
+{
+	return jack_midi_initialize(self, client_name, port_name, queue_bytes, 0);
+}
+
+/*
+ * call-seq:
+ *   JackMIDIOutput.new(client_name, port_name, queue_bytes)
+ *
+ * A MIDI output port on the shared JACK client (see JackMIDIInput.new).
+ * #write queues messages that the next JACK cycle sends.
+ */
+static VALUE jack_midi_out_initialize(VALUE self, VALUE client_name, VALUE port_name, VALUE queue_bytes)
+{
+	return jack_midi_initialize(self, client_name, port_name, queue_bytes, 1);
+}
+
+static size_t midi_queued(struct jack_midi *m)
+{
+	return atomic_load_explicit(&m->write_pos, memory_order_acquire) -
+		atomic_load_explicit(&m->read_pos, memory_order_relaxed);
+}
+
+static void *wait_for_midi(void *arg)
+{
+	struct jack_midi *m = arg;
+
+	pthread_mutex_lock(&m->lock);
+	while (!m->interrupted && atomic_load(&m->open) && !atomic_load(&m->stopped) && midi_queued(m) == 0) {
+		struct timespec ts;
+		clock_gettime(CLOCK_REALTIME, &ts);
+		ts.tv_nsec += WAIT_TIMEOUT_NS;
+		if (ts.tv_nsec >= 1000000000) {
+			ts.tv_sec++;
+			ts.tv_nsec -= 1000000000;
+		}
+		pthread_cond_timedwait(&m->ready, &m->lock, &ts);
+	}
+	pthread_mutex_unlock(&m->lock);
+
+	return NULL;
+}
+
+static void unblock_midi_wait(void *arg)
+{
+	struct jack_midi *m = arg;
+	pthread_mutex_lock(&m->lock);
+	m->interrupted = 1;
+	pthread_cond_broadcast(&m->ready);
+	pthread_mutex_unlock(&m->lock);
+}
+
+/*
+ * call-seq:
+ *   input.read(blocking) -> [[frame_time, bytes], ...]
+ *
+ * The messages received since the last read, each with the JACK frame time
+ * (the server's frame counter, wrapping at 2**32) of its sample in the
+ * cycle it arrived in, and its bytes as a binary String.  With +blocking+,
+ * waits (without the GVL) for at least one message.
+ */
+static VALUE jack_midi_read(VALUE self, VALUE blocking)
+{
+	struct jack_midi *m = get_jack_midi(self);
+	jack_midi_check_open(m);
+	if (m->output) {
+		rb_raise(rb_eIOError, "This is a MIDI output");
+	}
+
+	while (RTEST(blocking) && midi_queued(m) == 0) {
+		m->interrupted = 0;
+		rb_thread_call_without_gvl(wait_for_midi, m, unblock_midi_wait, m);
+		rb_thread_check_ints();
+		jack_midi_check_open(m);
+	}
+
+	VALUE result = rb_ary_new();
+	size_t rp = atomic_load_explicit(&m->read_pos, memory_order_relaxed);
+	size_t wp = atomic_load_explicit(&m->write_pos, memory_order_acquire);
+
+	while (wp - rp >= MIDI_HEADER) {
+		uint8_t header[MIDI_HEADER];
+		ring_get(m, rp, header, MIDI_HEADER);
+		uint32_t frame;
+		memcpy(&frame, header, 4);
+		size_t size = header[4] | (header[5] << 8);
+
+		VALUE bytes = rb_str_buf_new(size);
+		ring_get(m, rp + MIDI_HEADER, (uint8_t *)RSTRING_PTR(bytes), size);
+		rb_str_set_len(bytes, size);
+		rb_enc_associate(bytes, rb_ascii8bit_encoding());
+
+		rb_ary_push(result, rb_ary_new_from_args(2, UINT2NUM(frame), bytes));
+		rp += MIDI_HEADER + size;
+	}
+
+	atomic_store_explicit(&m->read_pos, rp, memory_order_release);
+	return result;
+}
+
+/*
+ * call-seq:
+ *   output.write(bytes) -> bytes.bytesize
+ *
+ * Queues one MIDI message (a binary String) for the next JACK cycle.
+ * Raises FastAudio::Error if the queue is full.
+ */
+static VALUE jack_midi_write(VALUE self, VALUE bytes)
+{
+	struct jack_midi *m = get_jack_midi(self);
+	jack_midi_check_open(m);
+	if (!m->output) {
+		rb_raise(rb_eIOError, "This is a MIDI input");
+	}
+
+	StringValue(bytes);
+	size_t size = RSTRING_LEN(bytes);
+	if (size == 0) {
+		return INT2NUM(0);
+	}
+	if (size > MIDI_MAX_MESSAGE) {
+		rb_raise(rb_eArgError, "MIDI messages are limited to %d bytes (got %zu)", MIDI_MAX_MESSAGE, size);
+	}
+
+	size_t wp = atomic_load_explicit(&m->write_pos, memory_order_relaxed);
+	size_t rp = atomic_load_explicit(&m->read_pos, memory_order_acquire);
+	if (m->capacity - (wp - rp) < MIDI_HEADER + size) {
+		atomic_fetch_add_explicit(&m->dropped, 1, memory_order_relaxed);
+		rb_raise(cError, "The JACK MIDI output queue is full");
+	}
+
+	uint8_t header[MIDI_HEADER] = { 0, 0, 0, 0, size & 0xff, size >> 8 };
+	ring_put(m, wp, header, MIDI_HEADER);
+	ring_put(m, wp + MIDI_HEADER, (const uint8_t *)RSTRING_PTR(bytes), size);
+	atomic_store_explicit(&m->write_pos, wp + MIDI_HEADER + size, memory_order_release);
+
+	RB_GC_GUARD(bytes);
+	return SIZET2NUM(size);
+}
+
+/* Closes the port.  A reader waiting in another thread raises IOError. */
+static VALUE jack_midi_close(VALUE self)
+{
+	struct jack_midi *m = get_jack_midi(self);
+	if (atomic_load(&m->open)) {
+		jack_midi_release(m);
+		if (m->pid == getpid()) {
+			unblock_midi_wait(m);
+		}
+	}
+	return Qnil;
+}
+
+static VALUE jack_midi_closed(VALUE self)
+{
+	return atomic_load(&get_jack_midi(self)->open) ? Qfalse : Qtrue;
+}
+
+/* The port's full name (client:port), or nil once closed. */
+static VALUE jack_midi_port_name(VALUE self)
+{
+	struct jack_midi *m = get_jack_midi(self);
+	return atomic_load(&m->open) && m->unit.port_count ? rb_utf8_str_new_cstr(mb_jack_port_name(m->unit.ports[0])) : Qnil;
+}
+
+/* { messages:, dropped:, queued: } (queued in bytes) */
+static VALUE jack_midi_stats(VALUE self)
+{
+	struct jack_midi *m = get_jack_midi(self);
+	VALUE h = rb_hash_new();
+	rb_hash_aset(h, ID2SYM(rb_intern("messages")), SIZET2NUM(atomic_load(&m->messages)));
+	rb_hash_aset(h, ID2SYM(rb_intern("dropped")), SIZET2NUM(atomic_load(&m->dropped)));
+	rb_hash_aset(h, ID2SYM(rb_intern("queued")), SIZET2NUM(midi_queued(m)));
+	return h;
+}
+
+static void init_jack_midi(VALUE fast_audio)
+{
+	VALUE input = rb_define_class_under(fast_audio, "JackMIDIInput", rb_cObject);
+	rb_define_alloc_func(input, jack_midi_alloc);
+	rb_define_method(input, "initialize", jack_midi_in_initialize, 3);
+	rb_define_method(input, "read", jack_midi_read, 1);
+	rb_define_method(input, "close", jack_midi_close, 0);
+	rb_define_method(input, "closed?", jack_midi_closed, 0);
+	rb_define_method(input, "port_name", jack_midi_port_name, 0);
+	rb_define_method(input, "stats", jack_midi_stats, 0);
+
+	VALUE output = rb_define_class_under(fast_audio, "JackMIDIOutput", rb_cObject);
+	rb_define_alloc_func(output, jack_midi_alloc);
+	rb_define_method(output, "initialize", jack_midi_out_initialize, 3);
+	rb_define_method(output, "write", jack_midi_write, 1);
+	rb_define_method(output, "close", jack_midi_close, 0);
+	rb_define_method(output, "closed?", jack_midi_closed, 0);
+	rb_define_method(output, "port_name", jack_midi_port_name, 0);
+	rb_define_method(output, "stats", jack_midi_stats, 0);
+}
+
 void Init_fast_audio(void)
 {
 	VALUE mb = rb_define_module("MB");
@@ -2209,4 +2685,6 @@ rb_define_const(fast_audio, "JACK_PORT_IS_PHYSICAL", INT2NUM(MB_JACK_PORT_IS_PHY
 	rb_define_method(capture, "channels", capture_channels, 0);
 	rb_define_method(capture, "queue_limit", capture_queue_limit, 0);
 	rb_define_method(capture, "stats", capture_stats, 0);
+
+	init_jack_midi(fast_audio);
 }

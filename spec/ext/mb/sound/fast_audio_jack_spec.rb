@@ -140,6 +140,84 @@ RSpec.describe('MB::Sound::FastAudio JACK client', :aggregate_failures) do
     expect(data[1] - data[0]).to be_within(1e-6).of(1.0 / 2048)
   end
 
+  describe 'MIDI ports' do
+    def midi_in(name = 'midi_in')
+      fa::JackMIDIInput.new(client, name, 4096).tap { |m| @opened << m }
+    end
+
+    def midi_out(name = 'midi_out')
+      fa::JackMIDIOutput.new(client, name, 4096).tap { |m| @opened << m }
+    end
+
+    def read_until(input, count)
+      events = []
+      deadline = MB::U.clock_now + 2
+      events.concat(input.read(false)) while events.length < count && MB::U.clock_now < deadline && sleep(0.005)
+      events
+    end
+
+    it 'sends MIDI out and back in on the same client, with JACK frame times' do
+      out = midi_out
+      inp = midi_in
+      expect(out.port_name).to eq("#{client}:midi_out")
+      expect(inp.port_name).to eq("#{client}:midi_in")
+      expect(fa.jack_ports("^#{client}:", true, 0).sort).to eq(["#{client}:midi_in", "#{client}:midi_out"])
+      expect(fa.jack_connect("#{client}:midi_out", "#{client}:midi_in")).to eq(true)
+
+      out.write([0x90, 60, 100].pack('C*'))
+      out.write([0x80, 60, 0].pack('C*'))
+      sysex = ([0xf0] + Array.new(300) { |i| i % 128 } + [0xf7]).pack('C*')
+      out.write(sysex)
+
+      events = read_until(inp, 3)
+      expect(events.map { |_, b| b }).to eq([[0x90, 60, 100].pack('C*'), [0x80, 60, 0].pack('C*'), sysex])
+      expect(events.map { |_, b| b.encoding }.uniq).to eq([Encoding::BINARY])
+      times = events.map(&:first)
+      expect(times).to all(be_a(Integer))
+      expect(times).to eq(times.sort)
+      expect(inp.stats[:messages]).to eq(3)
+      expect(out.stats).to include(messages: 3, dropped: 0, queued: 0)
+    end
+
+    it 'receives from another JACK client (e.g. jack-keyboard)' do
+      inp = midi_in
+      keyboard = MB::Sound::FastMIDI::Output.new(:jack, 'mbspec_keys', nil, 'out')
+      expect(fa.jack_connect('mbspec_keys:out', "#{client}:midi_in")).to eq(true)
+
+      keyboard.send_bytes([0xb0, 1, 64].pack('C*'))
+      expect(read_until(inp, 1).map(&:last)).to eq([[0xb0, 1, 64].pack('C*')])
+    ensure
+      keyboard&.close
+    end
+
+    it 'waits for a message with read(true)' do
+      out = midi_out
+      inp = midi_in
+      fa.jack_connect("#{client}:midi_out", "#{client}:midi_in")
+      Thread.new { sleep 0.05; out.write([0xc0, 5].pack('C*')) }
+      expect(inp.read(true).map(&:last)).to eq([[0xc0, 5].pack('C*')])
+    end
+
+    it 'puts MIDI and audio ports on one client, removing them on close' do
+      jack_playback(['out_1', 'out_2'])
+      inp = midi_in
+      expect(fa.jack_ports("^#{client}:", nil, 0).sort).to eq(["#{client}:midi_in", "#{client}:out_1", "#{client}:out_2"])
+      inp.close
+      expect(inp.closed?).to eq(true)
+      expect(inp.port_name).to be_nil
+      expect(fa.jack_ports("^#{client}:", true, 0)).to eq([])
+      expect { inp.read(false) }.to raise_error(IOError)
+    end
+
+    it 'raises when the output queue is full, and for the wrong direction' do
+      out = fa::JackMIDIOutput.new(client, 'midi_out', 1024).tap { |m| @opened << m }
+      inp = midi_in
+      expect { out.read(false) }.to raise_error(NoMethodError)
+      expect { 400.times { out.write([0x90, 1, 1].pack('C*')) } }.to raise_error(MB::Sound::FastAudio::Error, /full/)
+      expect { inp.write('x') }.to raise_error(NoMethodError)
+    end
+  end
+
   it 'stops writers when the client closes' do
     p = jack_playback(['out_1'], queue: 512)
     fa.jack_close
