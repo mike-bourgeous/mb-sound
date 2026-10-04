@@ -75,4 +75,104 @@ RSpec.describe(MB::Sound::MIDI::Transform) do
     end
   end
 
+  describe '#sustain' do
+    it 'holds note-offs until the pedal lifts' do
+      s = stream(ev.cc(64, 1), ev.note_on(60), ev.note_off(60), ev.note_on(64), ev.cc(64, 0), ev.note_off(64))
+      expect(summary(s.sustain)).to eq([
+        [:cc, 64, 0], [:note_on, 60, 1], [:note_on, 64, 3],
+        [:cc, 64, 4], [:note_off, 60, 4], [:note_off, 64, 5],
+      ])
+    end
+
+    it 'treats CC 64 values from 64 up as down' do
+      s = stream(ev.cc_raw(64, 63), ev.note_on(60), ev.note_off(60), ev.cc_raw(64, 64), ev.note_on(62), ev.note_off(62), ev.cc_raw(64, 63))
+      expect(summary(s.sustain).select { |t, _, _| t == :note_off }).to eq([[:note_off, 60, 2], [:note_off, 62, 6]])
+    end
+
+    it 'sends a held note-off before a repeated note' do
+      s = stream(ev.cc(64, 1), ev.note_on(60, 0.5), ev.note_off(60), ev.note_on(60, 1.0), ev.cc(64, 0), ev.note_off(60))
+      expect(summary(s.sustain)).to eq([
+        [:cc, 64, 0], [:note_on, 60, 1], [:note_off, 60, 3], [:note_on, 60, 3], [:cc, 64, 4], [:note_off, 60, 5],
+      ])
+    end
+
+    it 'keeps pedals per channel' do
+      s = stream(ev.cc(64, 1, channel: 1), ev.note_on(60), ev.note_off(60), ev.note_on(60, channel: 1), ev.note_off(60, channel: 1), ev.cc(64, 0, channel: 1))
+      offs = s.sustain.reader.next(1).select(&:note_off?).map { |e| [e.channel, (e.time * 100).to_i] }
+      expect(offs).to eq([[0, 2], [1, 5]])
+    end
+
+    it 'holds only the notes sounding when sostenuto went down' do
+      s = stream(
+        ev.note_on(60), ev.cc(66, 1), ev.note_on(64), ev.note_off(60), ev.note_off(64), ev.cc(66, 0)
+      )
+      expect(summary(s.sustain)).to eq([
+        [:note_on, 60, 0], [:cc, 66, 1], [:note_on, 64, 2], [:note_off, 64, 4], [:cc, 66, 5], [:note_off, 60, 5],
+      ])
+    end
+
+    it 'keeps sostenuto notes held when the sustain pedal lifts, and sustain notes when sostenuto lifts' do
+      s = stream(
+        ev.note_on(60), ev.cc(66, 1), ev.note_off(60), # 60 held by sostenuto
+        ev.cc(64, 1), ev.note_on(64), ev.note_off(64), # 64 held by sustain
+        ev.cc(64, 0), # releases 64 only
+        ev.cc(64, 1), ev.note_on(67), ev.note_off(67), # 67 held by sustain
+        ev.cc(66, 0), # 60 stays held by the sustain pedal, like a piano's raised dampers
+        ev.cc(64, 0), # releases 60 and 67
+      )
+      offs = summary(s.sustain).select { |t, _, _| t == :note_off }
+      expect(offs).to eq([[:note_off, 64, 6], [:note_off, 60, 11], [:note_off, 67, 11]])
+    end
+
+    it 'catches notes held by the sustain pedal with sostenuto' do
+      s = stream(ev.cc(64, 1), ev.note_on(60), ev.note_off(60), ev.cc(66, 1), ev.cc(64, 0), ev.cc(66, 0))
+      expect(summary(s.sustain).select { |t, _, _| t == :note_off }).to eq([[:note_off, 60, 5]])
+    end
+
+    it 'scales note-on velocities while the soft pedal is down' do
+      s = stream(ev.note_on(60, 1.0), ev.cc(67, 1), ev.note_on(62, 1.0), ev.note_on(64, 0.5), ev.cc(67, 0), ev.note_on(65, 1.0))
+      a = s.sustain.reader
+      b = s.sustain(soft: 0.5).reader
+      expect(a.next(1).select(&:note_on?).map(&:velocity)).to eq([1.0, 0.7, 0.35, 1.0])
+      expect(b.next(1).select(&:note_on?).map(&:velocity)).to eq([1.0, 0.5, 0.25, 1.0])
+    end
+
+    it 'releases held notes on all sound off and reset controllers' do
+      s = stream(ev.cc(64, 1), ev.note_on(60), ev.note_off(60), ev.cc(120, 0), ev.note_on(62), ev.note_off(62), ev.cc(121, 0), ev.note_on(64), ev.note_off(64))
+      offs = summary(s.sustain).select { |t, _, _| t == :note_off }
+      # Reset controllers lifts the pedal, so 64 isn't held
+      expect(offs).to eq([[:note_off, 60, 3], [:note_off, 62, 6], [:note_off, 64, 8]])
+    end
+
+    it 'lets go of held notes when the input ends' do
+      s = stream(ev.cc(64, 1), ev.note_on(60), ev.note_off(60))
+      view = s.sustain
+      r = view.reader
+      expect(r.next(1/100r).map(&:type)).to eq([:cc])
+      out = r.next(1)
+      expect(out.map(&:type)).to eq([:note_on, :note_off])
+      expect(out.last.time).to eq(2/100r)
+      expect(view.ended?).to eq(true)
+    end
+
+    it 'lets go of held notes and pedals when the content jumps' do
+      s = stream(ev.cc(64, 1), ev.note_on(60), ev.note_off(60), ev.note_on(62), ev.note_off(62))
+      r = s.sustain.reader
+      expect(r.events(0, 3/100r).map(&:type)).to eq([:cc, :note_on])
+      s.seek(3/100r) # into the middle of the file, after the pedal went down
+      out = r.events(3/100r, 1)
+      expect(out.map { |e| [e.type, e.note, e.time] }).to eq([
+        [:note_off, 60, 3/100r], [:note_on, 62, 3/100r], [:note_off, 62, 4/100r],
+      ])
+    end
+
+    it 'gives the note ends of MIDIFile#notes with a sustain pedal' do
+      m = MB::Sound::MIDI::MIDIFile.new('spec/test_data/c2_sustain.mid')
+      events = MB::Sound::MIDI::Stream.for('spec/test_data/c2_sustain.mid').sustain.reader.next(10)
+      ends = events.select(&:note_off?).map { |e| [e.note, e.time.to_f.round(9)] }
+      expected = m.notes.map { |n| [n[:number], n[:sustain_time].round(9)] }
+      expect(ends).to eq(expected)
+      expect(m.notes.map { |n| n[:sustain_time] }).not_to eq(m.notes.map { |n| n[:off_time] })
+    end
+  end
 end

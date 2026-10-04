@@ -134,6 +134,144 @@ module MB
             (value.is_a?(Rational) || value.is_a?(Float)) && value.finite? && value == value.round ? value.round : value
           end
         end
+
+        # Applies sustain, sostenuto, and soft pedals (see Stream#sustain).
+        class Sustain < Transform
+          # The note-on velocity multiplier while the soft pedal is down.
+          SOFT_VELOCITY = 0.7
+
+          def initialize(parent, soft: SOFT_VELOCITY)
+            super(parent)
+            @soft = soft.to_f
+            @channels = Array.new(16) { new_channel }
+            @node_type_name = 'sustain'
+          end
+
+          # True if any note-offs are held by a pedal.
+          def holding?
+            @channels.any? { |c| !c[:held].empty? }
+          end
+
+          # Once the input has ended, held notes are let go (see #process),
+          # so this ends with it.
+          def ended?
+            super && !holding?
+          end
+
+          private
+
+          def new_channel
+            {
+              sustain: false,
+              sostenuto: false,
+              soft: false,
+              keys: {},        # note => true for keys that are down
+              held: {},        # note => held note-off Event
+              sostenuto_notes: {}, # note => true for notes caught by sostenuto
+            }
+          end
+
+          def process(events, from, to)
+            out = []
+
+            events.each do |e|
+              ch = e.channel
+              state = ch && ch < 16 ? @channels[ch] : nil
+
+              unless state
+                out << e
+                next
+              end
+
+              case e.type
+              when :note_on
+                if (held = state[:held].delete(e.note))
+                  out << held.at(e.time)
+                end
+                state[:keys][e.note] = true
+                e = e.with_velocity(e.velocity * @soft) if state[:soft]
+                out << e
+
+              when :note_off
+                state[:keys].delete(e.note)
+                if state[:sustain] || (state[:sostenuto] && state[:sostenuto_notes][e.note])
+                  state[:held][e.note] = e
+                else
+                  out << e
+                end
+
+              when :cc
+                out << e
+                case e.note
+                when 64
+                  down = e.raw >= 64
+                  if state[:sustain] && !down
+                    state[:sustain] = false
+                    release(state, e.time, out) { |note| !state[:sostenuto_notes][note] }
+                  end
+                  state[:sustain] = down
+
+                when 66
+                  down = e.raw >= 64
+                  if down && !state[:sostenuto]
+                    state[:sostenuto_notes] = (state[:keys].keys | state[:held].keys).to_h { |n| [n, true] }
+                  elsif !down && state[:sostenuto]
+                    state[:sostenuto] = false
+                    notes = state[:sostenuto_notes]
+                    state[:sostenuto_notes] = {}
+                    release(state, e.time, out) { |note| notes[note] } unless state[:sustain]
+                  end
+                  state[:sostenuto] = down
+
+                when 67
+                  state[:soft] = e.raw >= 64
+
+                when 120
+                  release(state, e.time, out)
+
+                when 121
+                  state[:sustain] = state[:sostenuto] = state[:soft] = false
+                  state[:sostenuto_notes] = {}
+                  release(state, e.time, out)
+                end
+
+              else
+                out << e
+              end
+            end
+
+            # Let go of held notes when the music is over, so they don't hang
+            release_all(MB::M.max(from, events.last&.time || from), out) if @input.ended?
+
+            out
+          end
+
+          # Lets go of held notes at a jump (seek, restart, or clip swap).
+          def jump(from)
+            out = []
+            release_all(from, out)
+            @channels.each do |c|
+              c[:keys].clear
+              c[:sostenuto_notes] = {}
+              c[:sustain] = c[:sostenuto] = c[:soft] = false
+            end
+            out
+          end
+
+          def release_all(time, out)
+            @channels.each do |c| release(c, time, out) end
+          end
+
+          # Sends the held note-offs (those for which the block returns true,
+          # or all of them) at +time+.
+          def release(state, time, out)
+            state[:held].delete_if do |note, off|
+              next false if block_given? && !yield(note)
+              out << off.at(time)
+              true
+            end
+          end
+        end
       end
     end
   end
