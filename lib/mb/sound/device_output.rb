@@ -224,10 +224,30 @@ module MB
         @device_channels = channels == 1 ? 2 : channels
         queue = [(latency * requested_rate).round, @buffer_size * 2, 64].max
 
-        @playback = FastAudio::Playback.new(
+        max_queue = @adaptive ? [max_adaptive_queue(requested_rate), queue].max : 0
+        @jack_connections = nil
+
+        if backends&.first == :jack
+          # Ports on the shared JACK client (see MB::Sound::Jack), falling
+          # back to the other backends if no JACK server answers
+          begin
+            names = Jack.port_names('out', @device_channels)
+            @playback = FastAudio::Playback.new(
+              backends, -1, self.class.client_name, channels, @device_channels, requested_rate, 0, 0,
+              queue, capture, quality, false, max_queue, names
+            )
+            @jack_connections = Jack.connect(@playback.jack_ports, device, output: true)
+          rescue FastAudio::Error => e
+            backends = backends.drop(1)
+            raise if backends.empty?
+            warn "JACK: #{e.message}; trying #{backends.join(', ')}"
+          end
+        end
+
+        @playback ||= FastAudio::Playback.new(
           backends, self.class.device_index(device, backends: backends), self.class.client_name,
           channels, @device_channels, requested_rate, device_rate, period, queue, capture,
-          quality, set_device_rate, @adaptive ? [max_adaptive_queue(requested_rate), queue].max : 0
+          quality, set_device_rate, max_queue
         )
         @underruns_seen = 0
         @last_write = nil
@@ -345,6 +365,12 @@ module MB
 
       def closed?
         @playback.closed?
+      end
+
+      # The full names of this output's ports on the shared JACK client (see
+      # MB::Sound::Jack), or nil if it isn't a JACK output.
+      def jack_ports
+        @playback.jack_ports
       end
 
       def inspect

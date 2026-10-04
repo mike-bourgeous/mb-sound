@@ -3,7 +3,7 @@ require 'mkmf'
 # RtMidi 6.0.0 (vendored C++: RtMidi.cpp, rtmidi_c.cpp) with the MIDI
 # backends available at build time: CoreMIDI on macOS (system frameworks,
 # nothing to install); the ALSA sequencer on Linux (libasound2-dev), plus
-# JACK MIDI when libjack is available (RtMidi never starts a JACK server).
+# RtMidi's JACK MIDI when JACK headers are available (only used by specs).
 if RUBY_PLATFORM =~ /darwin/
   $defs << '-D__MACOSX_CORE__'
   $LDFLAGS << ' -framework CoreMIDI -framework CoreAudio -framework CoreFoundation'
@@ -14,13 +14,12 @@ else
   end
   $defs << '-D__LINUX_ALSA__'
 
+  # Optional: MB::Sound's JACK MIDI goes through fast_audio's shared JACK
+  # client (loaded at run time), not RtMidi; RtMidi's JACK API only serves
+  # the specs as an outside JACK client.
   if have_header('jack/jack.h') && have_library('jack', 'jack_client_open')
     $defs << '-D__UNIX_JACK__'
     $defs << '-DJACK_HAS_PORT_RENAME' if have_func('jack_port_rename', 'jack/jack.h')
-  else
-    warn "\n*** JACK headers not found: building MIDI without JACK MIDI (ALSA only).\n" \
-      "*** For JACK MIDI (jackd or PipeWire), install libjack-jackd2-dev (or libjack-dev)\n" \
-      "*** and rebuild: rm -rf tmp/*/fast_midi && bundle exec rake compile\n\n"
   end
 
   $libs << ' -lstdc++'

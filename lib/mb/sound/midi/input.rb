@@ -1,19 +1,21 @@
 module MB
   module Sound
     module MIDI
-      # Live MIDI input through RtMidi (the fast_midi C extension; see
-      # MB::Sound::FastMIDI::Input): CoreMIDI on macOS, the ALSA sequencer
-      # (also PipeWire) or JACK MIDI on Linux.  RtMidi's thread queues
-      # messages and #read polls them (once per audio buffer, from
-      # Manager#update), so no Ruby code runs on a MIDI thread, and no JACK
-      # server is ever started.
+      # Live MIDI input: JACK MIDI ports on the script's one JACK client (with
+      # its audio ports; see MB::Sound::Jack and FastAudio::JackMIDIInput) when
+      # a JACK server answers (jackd, or PipeWire's JACK), else RtMidi (the
+      # fast_midi C extension; MB::Sound::FastMIDI::Input): CoreMIDI on
+      # macOS, the ALSA sequencer on Linux.  A C thread queues messages and
+      # #read polls them (once per audio buffer, from Manager#update), so no
+      # Ruby code runs on a MIDI thread, and no JACK server is ever started.
       #
-      # By default a virtual port is created for other programs (DAWs,
-      # keyboards' software, qjackctl, qpwgraph, aconnect, Audio MIDI Setup)
-      # to connect to, named after the script (see DeviceOutput.client_name).
-      # With +:connect+ (or MIDI_DEVICE), the input connects to the first
-      # MIDI source whose name contains it (or to that index; see .ports),
-      # also searching the other API's ports (see .find_port).
+      # By default the input is a port for other programs (DAWs, keyboards'
+      # software, qjackctl, qpwgraph, aconnect, Audio MIDI Setup) to connect
+      # to: midi_in on JACK, else a virtual port named after the script (see
+      # DeviceOutput.client_name).  With +:connect+ (or MIDI_DEVICE), it also
+      # connects to the first MIDI source whose name contains it (or to that
+      # index; see .ports), searching the other API's ports too (see
+      # .find_port).
       #
       # Environment variables take precedence:
       #   MIDI_API=jack        API: core (macOS), alsa or jack (Linux); by
@@ -26,9 +28,12 @@ module MB
       #     input.read  # => [[[0.0, "\x90<d"], [0.012, "\x80<\x00"]]]
       class Input
         class << self
-          # The MIDI APIs this build supports (:core, :alsa, :jack).
+          # The MIDI APIs available: RtMidi's (:core, :alsa) plus :jack (the
+          # shared JACK client, loaded at run time) except on macOS, where
+          # CoreMIDI covers everything.
           def apis
-            FastMIDI.compiled_apis
+            rtmidi = FastMIDI.compiled_apis - [:jack]
+            RUBY_PLATFORM =~ /darwin/ ? rtmidi : rtmidi + [:jack]
           end
 
           # The MIDI API to use for +api+, MIDI_API, or the platform default
@@ -40,21 +45,21 @@ module MB
             if apis.include?(:jack) && apis.include?(:alsa)
               DeviceOutput.jack_running? ? :jack : :alsa
             else
-              warn_without_jack if apis.include?(:alsa)
               apis.first
             end
           end
 
-          # Warns once if a JACK server answers but this build's MIDI has no
-          # JACK support (the JACK headers were missing when it was compiled).
-          def warn_without_jack
-            return if @warned_without_jack
-            @warned_without_jack = true
-            return unless DeviceOutput.jack_running?
-
-            warn "A JACK server is running, but MIDI was built without JACK (no JACK headers), so MIDI uses ALSA.\n" \
-              "For JACK MIDI: install libjack-jackd2-dev (or your distro's JACK headers), then\n" \
-              "  rm -rf tmp/*/fast_midi && bundle exec rake compile"
+          # Names of the MIDI sources (+kind+ :input) or destinations
+          # (:output) on +api+.  JACK lists open the shared client.
+          def port_names(api, kind)
+            if api == :jack
+              Jack.open
+              flags = kind == :input ? FastAudio::JACK_PORT_IS_OUTPUT : FastAudio::JACK_PORT_IS_INPUT
+              FastAudio.jack_ports(nil, true, flags)
+            else
+              client = DeviceOutput.client_name
+              kind == :input ? FastMIDI.input_ports(api, client) : FastMIDI.output_ports(api, client)
+            end
           end
 
           # Finds the first MIDI port whose name contains +connect+ (or, in
@@ -68,12 +73,11 @@ module MB
           # Returns [api, index, name, {api => [names]}] (index and name nil
           # when nothing matched; api is then the default API).
           def find_port(connect, kind:, api: nil)
-            client = DeviceOutput.client_name
             lists = {}
             search_apis(api).each_with_index do |a, i|
               names = begin
-                kind == :input ? FastMIDI.input_ports(a, client) : FastMIDI.output_ports(a, client)
-              rescue FastMIDI::Error
+                port_names(a, kind)
+              rescue FastMIDI::Error, FastAudio::Error
                 # e.g. no ALSA sequencer device; the other APIs may still work
                 raise if i == 0 && search_apis(api).length == 1
                 []
@@ -99,7 +103,7 @@ module MB
 
           # Lists the names of the MIDI sources that an input can connect to.
           def ports(api: nil)
-            FastMIDI.input_ports(self.api(api), DeviceOutput.client_name)
+            port_names(self.api(api), :input)
           end
 
           # Opens an input for a script: connected to +connect+ (part of a
@@ -111,7 +115,7 @@ module MB
               puts "Reading MIDI from #{input.connected_to} (#{input.api})"
             else
               sources = ports(api: input.api)
-              puts "Connect a MIDI source to #{input.connections.first} (#{input.api})"
+              puts "Connect a MIDI source to #{input.port} (#{input.api})"
               puts "or pass part of its name: #{sources.empty? ? 'no sources found' : sources.join(', ')}"
             end
             input
@@ -133,10 +137,10 @@ module MB
         attr_reader :api, :port_name, :connected_to
 
         # Opens MIDI input (see the class comment).  +:connect+ is a source
-        # index or part of a source's name (nil for a virtual port);
-        # +:port_name+ names our port (default: the script's name for
-        # CoreMIDI virtual sources, else 'midi_in'); +:queue_size+ messages
-        # are kept between reads.
+        # index or part of a source's name (nil to only wait for
+        # connections); +:port_name+ names our port (default: midi_in, or
+        # midi_in_2 etc. on JACK if taken; the script's name for CoreMIDI
+        # virtual sources); +:queue_size+ messages are kept between reads.
         def initialize(connect: nil, port_name: nil, api: nil, queue_size: 1024)
           @api = self.class.api(api)
           connect = ENV['MIDI_DEVICE'] if ENV['MIDI_DEVICE'] && !ENV['MIDI_DEVICE'].empty?
@@ -155,9 +159,16 @@ module MB
             end
           end
 
-          @port_name = port_name || (@api == :core && connect.nil? ? client : 'midi_in')
+          if @api == :jack
+            @port_name = port_name || Jack.port_names('midi_in', 1, numbered: false).first
+            @input = FastAudio::JackMIDIInput.new(client, @port_name, queue_size * 16)
+            @rate = Jack.info[:sample_rate].to_f
+            FastAudio.jack_connect(@connected_to, @input.port_name) if @connected_to
+          else
+            @port_name = port_name || (@api == :core && connect.nil? ? client : 'midi_in')
+            @input = FastMIDI::Input.new(@api, client, index, @port_name, queue_size)
+          end
 
-          @input = FastMIDI::Input.new(@api, client, index, @port_name, queue_size)
           DeviceOutput.track(self, true)
         end
 
@@ -166,6 +177,8 @@ module MB
         # message's time in seconds after the first one in this read.  With
         # +blocking: true+, waits for at least one message.
         def read(blocking: false)
+          return [jack_events(@input.read(blocking))] if @api == :jack
+
           messages = @input.read
           while blocking && messages.empty?
             sleep 0.001
@@ -180,9 +193,22 @@ module MB
           [events]
         end
 
+        # This input's port: the full JACK name (client:port), or a
+        # description of the RtMidi port.
+        def port
+          @api == :jack ? (@input.port_name || "#{Jack.client_name}:#{@port_name}") : "#{DeviceOutput.client_name}:#{@port_name} (virtual)"
+        end
+
         # The sources this input is connected to (for Manager#connections).
+        # On JACK these are its live connections (including any made in
+        # qpwgraph etc.), or the port itself while unconnected.
         def connections
-          [@connected_to || "#{DeviceOutput.client_name}:#{@port_name} (virtual)"]
+          if @api == :jack
+            live = @input.closed? ? [] : Jack.connections(@input.port_name)
+            return live.empty? ? [port] : live
+          end
+
+          [@connected_to || port]
         end
 
         # Closes the port.  Safe to call more than once.
@@ -195,6 +221,18 @@ module MB
         def closed?
           @input.closed?
         end
+
+        private
+
+        # JACK frame times to seconds after the first message in the read
+        def jack_events(messages)
+          return [] if messages.empty?
+
+          first = messages[0][0]
+          messages.map { |frame, bytes| [((frame - first) & 0xffff_ffff) / @rate, bytes] }
+        end
+
+        public
 
         def to_s
           "#<#{self.class.name} #{@api} #{connections.first}#{' closed' if closed?}>"

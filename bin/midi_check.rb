@@ -29,13 +29,13 @@ def loaded_libraries(pattern)
 end
 
 def show_ports(api)
-  sources = MB::Sound::FastMIDI.input_ports(api, MB::Sound::DeviceOutput.client_name)
-  destinations = MB::Sound::FastMIDI.output_ports(api, MB::Sound::DeviceOutput.client_name)
+  sources = MB::Sound::MIDI::Input.port_names(api, :input)
+  destinations = MB::Sound::MIDI::Input.port_names(api, :output)
   puts "  sources (#{sources.length}):"
   sources.each_with_index { |n, i| puts "    #{i}: #{n}" }
   puts "  destinations (#{destinations.length}):"
   destinations.each_with_index { |n, i| puts "    #{i}: #{n}" }
-rescue MB::Sound::FastMIDI::Error => e
+rescue MB::Sound::FastMIDI::Error, MB::Sound::FastAudio::Error => e
   puts "  unavailable: #{e.message}"
 end
 
@@ -61,7 +61,7 @@ def loopback(api)
   else
     "ok: #{events[0][1].bytes.map { |b| '%02x' % b }.join(' ')} in #{((MB::U.clock_now - start) * 1000).round(1)} ms via #{input.connected_to}"
   end
-rescue MB::Sound::FastMIDI::Error, ArgumentError => e
+rescue MB::Sound::FastMIDI::Error, MB::Sound::FastAudio::Error, ArgumentError => e
   "failed: #{e.message}"
 ensure
   input&.close
@@ -76,10 +76,10 @@ MB::Sound.script(
   loopback: [false, 'Send a note through a virtual port on each API'],
 ) { |_args, p|
   fast = MB::Sound::FastMIDI
-  apis = fast.compiled_apis
+  apis = MB::Sound::MIDI::Input.apis
   client = MB::Sound::DeviceOutput.client_name
 
-  puts "RtMidi #{fast::RTMIDI_VERSION}; compiled APIs: #{apis.join(', ')}"
+  puts "MIDI APIs: #{apis.join(', ')} (JACK through the shared client; RtMidi #{fast::RTMIDI_VERSION} for the rest)"
   puts "Platform: #{RUBY_PLATFORM}; client name: #{client}"
   %w[MIDI_API MIDI_DEVICE AUDIO_BACKEND JACK_DEFAULT_SERVER JACK_CLIENT_NAME LD_LIBRARY_PATH PIPEWIRE_RUNTIME_DIR XDG_RUNTIME_DIR].each do |var|
     puts "  #{var}=#{ENV[var]}" if ENV[var]
@@ -87,13 +87,7 @@ MB::Sound.script(
 
   jack = MB::Sound::FastAudio.jack_server?
   puts "JACK server answers: #{jack ? 'yes' : 'no'} (a JACK client opened without starting a server)"
-  unless apis.include?(:jack) || RUBY_PLATFORM !~ /linux/
-    puts '  JACK MIDI is not compiled in (no JACK headers at build time); install libjack-jackd2-dev,'
-    puts '  then: rm -rf tmp/*/fast_midi && bundle exec rake compile'
-  end
-
   if jack || apis.include?(:jack)
-
     libs = loaded_libraries(/libjack/)
     if libs
       libs = libs.map { |l| "#{l}#{" -> #{File.realpath(l)}" if File.symlink?(l)}" }

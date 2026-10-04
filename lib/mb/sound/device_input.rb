@@ -74,7 +74,23 @@ module MB
         @buffer_size = Integer(ENV['AUDIO_BUFFER'] || buffer_size || settings[:buffer_size])
         queue = [(latency * requested_rate).round, @buffer_size * 2, 64].max
 
-        @capture = FastAudio::Capture.new(
+        if backends&.first == :jack
+          # Ports on the shared JACK client (see MB::Sound::Jack), falling
+          # back to the other backends if no JACK server answers
+          begin
+            names = Jack.port_names('in', channels)
+            @capture = FastAudio::Capture.new(
+              backends, -1, DeviceOutput.client_name, channels, requested_rate, 0, 0, queue, quality, test_pattern, names
+            )
+            Jack.connect(@capture.jack_ports, device, output: false)
+          rescue FastAudio::Error => e
+            backends = backends.drop(1)
+            raise if backends.empty?
+            warn "JACK: #{e.message}; trying #{backends.join(', ')}"
+          end
+        end
+
+        @capture ||= FastAudio::Capture.new(
           backends, DeviceOutput.device_index(device, backends: backends, kind: :capture), DeviceOutput.client_name,
           channels, requested_rate, device_rate, period, queue, quality, test_pattern
         )
@@ -141,6 +157,12 @@ module MB
 
       def closed?
         @capture.closed?
+      end
+
+      # The full names of this input's ports on the shared JACK client (see
+      # MB::Sound::Jack), or nil if it isn't a JACK input.
+      def jack_ports
+        @capture.jack_ports
       end
 
       def inspect

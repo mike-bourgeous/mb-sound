@@ -476,17 +476,20 @@ There are some base packages you'll need first:
 
 ```bash
 # Debian-/Ubuntu-based Linux (macOS/Arch/CentOS will differ)
-sudo apt-get install ffmpeg gnuplot-qt libsamplerate0-dev libasound2-dev libjack-jackd2-dev
+sudo apt-get install ffmpeg gnuplot-qt libsamplerate0-dev libasound2-dev
 
 # macOS (with Homebrew)
 brew install ffmpeg gnuplot libsamplerate
 ```
 
-Sound card input and output (CoreAudio on macOS; JACK, PipeWire/PulseAudio,
-or ALSA on Linux) go through the bundled miniaudio, and live MIDI through the
-bundled RtMidi, so no audio daemon is needed.  Run `bin/audio_check.rb --list`
-to see devices.  Set `OUTPUT_TYPE=ffmpeg` to play through an ffmpeg output
-instead (e.g. `audiotoolbox` on macOS, `pulse` on Linux).
+Sound card input and output (CoreAudio on macOS; PipeWire/PulseAudio or ALSA
+on Linux) go through the bundled miniaudio, and live MIDI through the bundled
+RtMidi, so no audio daemon is needed.  When a JACK server is running (jackd,
+or PipeWire's JACK), a script's audio outputs, inputs, and MIDI ports all go
+on one JACK client (one node in qpwgraph or qjackctl), with libjack loaded at
+run time.  Run `bin/audio_check.rb --list` to see devices, and
+`bin/midi_check.rb` for MIDI.  Set `OUTPUT_TYPE=ffmpeg` to play through an
+ffmpeg output instead (e.g. `audiotoolbox` on macOS, `pulse` on Linux).
 
 Then you'll want to install Ruby 4.0 or newer.
 

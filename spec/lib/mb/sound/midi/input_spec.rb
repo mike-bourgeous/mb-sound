@@ -26,13 +26,12 @@ RSpec.describe(MB::Sound::MIDI::Input, :aggregate_failures) do
       expect(MB::Sound::MIDI::Input.api).to eq(:alsa)
     end
 
-    it 'warns once when JACK runs but MIDI was built without JACK' do
+    it 'uses JACK even when RtMidi was built without it (JACK MIDI is the shared client)' do
+      stub_const('RUBY_PLATFORM', 'x86_64-linux')
       allow(MB::Sound::FastMIDI).to receive(:compiled_apis).and_return([:alsa])
       allow(MB::Sound::DeviceOutput).to receive(:jack_running?).and_return(true)
-      MB::Sound::MIDI::Input.instance_variable_set(:@warned_without_jack, nil)
-
-      expect { expect(MB::Sound::MIDI::Input.api).to eq(:alsa) }.to output(/MIDI was built without JACK.*libjack-jackd2-dev/m).to_stderr
-      expect { MB::Sound::MIDI::Input.api }.not_to output.to_stderr
+      expect(MB::Sound::MIDI::Input.apis).to eq([:alsa, :jack])
+      expect(MB::Sound::MIDI::Input.api).to eq(:jack)
     end
 
     it 'uses CoreMIDI on macOS' do
@@ -61,6 +60,7 @@ RSpec.describe(MB::Sound::MIDI::Input, :aggregate_failures) do
     after(:each) do
       @inputs.each(&:close)
       keyboard.close
+      MB::Sound::Jack.close
     end
 
     def input(**kwargs)
@@ -148,14 +148,19 @@ RSpec.describe(MB::Sound::MIDI::Input, :aggregate_failures) do
       inp = nil
       expect { inp = input(connect: 'Launchkey') }.to output(/No MIDI source matches "Launchkey"; opening an unconnected port.*0: mbspec_keyboard:out/m).to_stderr
       expect(inp.connected_to).to be_nil
-      expect(inp.connections).to eq(["#{MB::Sound::DeviceOutput.client_name}:midi_in (virtual)"])
+      expect(inp.connections).to eq(["#{MB::Sound::Jack.client_name}:midi_in"])
     end
 
-    it 'creates a virtual port named after the script when not connecting' do
+    it 'creates midi_in on the script-named JACK client when not connecting' do
+      MB::Sound::Jack.close
       ENV['JACK_CLIENT_NAME'] = 'my_synth'
       inp = input
       expect(inp.connected_to).to be_nil
-      expect(inp.connections).to eq(['my_synth:midi_in (virtual)'])
+      expect(inp.port).to eq('my_synth:midi_in')
+      expect(inp.connections).to eq(['my_synth:midi_in'])
+
+      second = input
+      expect(second.port).to eq('my_synth:midi_in_2')
     end
 
     it 'returns [[]] when nothing has arrived, and waits with blocking: true' do

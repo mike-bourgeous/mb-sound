@@ -14,7 +14,10 @@ RSpec.describe(MB::Sound::MIDI::Output, :aggregate_failures) do
       ENV['MIDI_API'] = 'jack'
       @ports = []
     end
-    after(:each) { @ports.each(&:close) }
+    after(:each) do
+      @ports.each(&:close)
+      MB::Sound::Jack.close
+    end
 
     def track(port)
       @ports << port
@@ -34,28 +37,28 @@ RSpec.describe(MB::Sound::MIDI::Output, :aggregate_failures) do
 
     it 'connects to a destination by part of its name and sends Arrays and Strings' do
       ENV['JACK_CLIENT_NAME'] = 'mbspec_synth'
-      input = track(MB::Sound::MIDI::Input.new) # virtual destination mbspec_synth:midi_in
-      ENV['JACK_CLIENT_NAME'] = 'mbspec_player'
+      input = track(MB::Sound::MIDI::Input.new) # mbspec_synth:midi_in on the shared client
 
       expect(MB::Sound::MIDI::Output.ports).to include('mbspec_synth:midi_in')
-      out = track(MB::Sound::MIDI::Output.new(connect: 'SYNTH:midi'))
+      out = track(MB::Sound::MIDI::Output.new(connect: 'SYNTH:midi_in'))
       expect(out.connected_to).to eq('mbspec_synth:midi_in')
+      expect(out.port).to eq('mbspec_synth:midi_out')
+      expect(out.connections).to eq(['mbspec_synth:midi_in'])
       expect(out.api).to eq(:jack)
-      sleep 0.05
 
       out.write([0x90, 62, 80])
       out << "\x80\x3e\x00".b
       expect(wait_for(input, 2)).to eq([[0x90, 62, 80], [0x80, 62, 0]])
     end
 
-    it 'sends from a virtual source named after the script' do
+    it 'sends from a midi_out port on the script-named JACK client' do
       ENV['JACK_CLIENT_NAME'] = 'mbspec_seq'
       out = track(MB::Sound::MIDI::Output.new)
-      expect(out.connections).to eq(['mbspec_seq:midi_out (virtual)'])
+      expect(out.connections).to eq(['mbspec_seq:midi_out'])
 
-      ENV['JACK_CLIENT_NAME'] = 'mbspec_listener'
-      input = track(MB::Sound::MIDI::Input.new(connect: 'mbspec_seq'))
-      sleep 0.05
+      input = track(MB::Sound::MIDI::Input.new(connect: 'mbspec_seq:midi_out'))
+      expect(input.connections).to eq(['mbspec_seq:midi_out'])
+      expect(out.connections).to eq(['mbspec_seq:midi_in'])
       out.write([0xb0, 74, 33])
       expect(wait_for(input, 1)).to eq([[0xb0, 74, 33]])
     end

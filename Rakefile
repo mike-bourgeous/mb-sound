@@ -92,7 +92,9 @@ MEMCHECK_SPECS = [
   'spec/lib/mb/sound/graph_node/constant_spec.rb', # FastSound.smootherstep_buf
   'spec/lib/mb/sound/device_output_spec.rb',       # FastAudio::Playback
   'spec/lib/mb/sound/device_input_spec.rb',        # FastAudio::Capture
-  'spec/lib/mb/sound/midi/input_spec.rb',          # FastMIDI::Input (with a JACK dummy server)
+  'spec/lib/mb/sound/midi/input_spec.rb',          # MIDI::Input on JACK and RtMidi (with a JACK dummy server)
+  'spec/ext/mb/sound/fast_audio_jack_spec.rb',     # the shared JACK client (mb_jack.c), JACK MIDI
+  'spec/lib/mb/sound/jack_spec.rb',                # DeviceOutput/Input and MIDI on one JACK client
 ].freeze
 
 begin
