@@ -1,4 +1,4 @@
-#!/usr/bin/env -S RUBY_THREAD_TIMESLICE=10 ruby
+#!/usr/bin/env -S RUBY_THREAD_TIMESLICE=10 RUBY_YJIT_ENABLE=1 ruby
 # Checks sound card output through miniaudio (MB::Sound::DeviceOutput):
 # prints the backend, device, sample rate, period, queue size, and latency,
 # plays a click track (left, right, both, both), and reports underruns and

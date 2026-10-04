@@ -1,4 +1,4 @@
-#!/usr/bin/env -S RUBY_THREAD_TIMESLICE=10 ruby
+#!/usr/bin/env -S RUBY_THREAD_TIMESLICE=10 RUBY_YJIT_ENABLE=1 ruby
 # A 16-bar demo of tempo sync: a pad whose filter sweeps with a 4-bar LFO,
 # a pluck through a dotted-eighth delay, and an echo part whose delay
 # alternates between 3/16 and 5/16 every bar.  The tempo drops from 100 to

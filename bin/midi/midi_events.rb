@@ -1,4 +1,4 @@
-#!/usr/bin/env -S RUBY_THREAD_TIMESLICE=10 ruby
+#!/usr/bin/env -S RUBY_THREAD_TIMESLICE=10 RUBY_YJIT_ENABLE=1 ruby
 # Prints events as they occur in real time, either from live MIDI or a MIDI
 # file.  Can optionally forward events to a jackd MIDI output.
 #

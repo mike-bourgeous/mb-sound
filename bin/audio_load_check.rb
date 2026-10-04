@@ -1,4 +1,4 @@
-#!/usr/bin/env -S RUBY_THREAD_TIMESLICE=10 ruby
+#!/usr/bin/env -S RUBY_THREAD_TIMESLICE=10 RUBY_YJIT_ENABLE=1 ruby
 # Plays reference synth loads (bin/synths/fm_bass.rb playing a generated
 # bass riff, bin/songs/stereo_drone.rb, both, or a set of band-limited
 # oscillators: synced saw, PWM pulse, skewed and soft-synced triangles)

@@ -1,4 +1,4 @@
-#!/usr/bin/env -S RUBY_THREAD_TIMESLICE=10 ruby
+#!/usr/bin/env -S RUBY_THREAD_TIMESLICE=10 RUBY_YJIT_ENABLE=1 ruby
 # A two-voice root + fifth pad patch for sequences: two slightly detuned saws
 # per interval, slow swells that overlap between chords, a lowpass that opens
 # with each chord, and a little Haas stereo width.  Returns a stereo pair of

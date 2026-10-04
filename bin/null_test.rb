@@ -1,4 +1,4 @@
-#!/usr/bin/env -S RUBY_THREAD_TIMESLICE=10 ruby
+#!/usr/bin/env -S RUBY_THREAD_TIMESLICE=10 RUBY_YJIT_ENABLE=1 ruby
 # Null tests for refactors that shouldn't change the sound: renders a fixed
 # set of cases (songs, synth scripts on a MIDI file, effects on a test sound,
 # and bin/tone_gallery.rb), then compares new renders to reference renders

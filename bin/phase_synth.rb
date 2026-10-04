@@ -1,4 +1,4 @@
-#!/usr/bin/env -S RUBY_THREAD_TIMESLICE=10 ruby
+#!/usr/bin/env -S RUBY_THREAD_TIMESLICE=10 RUBY_YJIT_ENABLE=1 ruby
 # Synthesizes a stereo sine wave with periodic phase transitions between
 # in-phase, out-of-phase, or between.  The final phase will play for 1 second
 # unless a final delay is given.

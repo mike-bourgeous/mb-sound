@@ -1,4 +1,4 @@
-#!/usr/bin/env -S RUBY_THREAD_TIMESLICE=10 ruby
+#!/usr/bin/env -S RUBY_THREAD_TIMESLICE=10 RUBY_YJIT_ENABLE=1 ruby
 # Plots difference between resampling with a large buffer size and a small
 # buffer size.  There shouldn't be a difference, but at time of writing this
 # script there is.

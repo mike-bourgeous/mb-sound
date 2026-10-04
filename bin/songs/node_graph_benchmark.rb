@@ -1,4 +1,4 @@
-#!/usr/bin/env -S RUBY_THREAD_TIMESLICE=10 ruby
+#!/usr/bin/env -S RUBY_THREAD_TIMESLICE=10 RUBY_YJIT_ENABLE=1 ruby
 # This is a simple algorithmically defined song that exercises several common
 # parts of the GraphNode and Filter code, including processing with complex
 # numbers.

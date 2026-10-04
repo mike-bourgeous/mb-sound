@@ -1,4 +1,4 @@
-#!/usr/bin/env -S RUBY_THREAD_TIMESLICE=10 ruby
+#!/usr/bin/env -S RUBY_THREAD_TIMESLICE=10 RUBY_YJIT_ENABLE=1 ruby
 # Uses MB::Sound::Filter::FIR to design a filter with a desired response, and
 # process a sound file with that filter.  The filter design algorithm is very
 # crude, but it works.

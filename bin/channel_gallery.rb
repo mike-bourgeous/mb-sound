@@ -1,4 +1,4 @@
-#!/usr/bin/env -S RUBY_THREAD_TIMESLICE=10 ruby
+#!/usr/bin/env -S RUBY_THREAD_TIMESLICE=10 RUBY_YJIT_ENABLE=1 ruby
 # Renders a gallery of channel mixing test sounds, one file per case, for
 # null tests of channel mixing changes (see bin/null_test.rb): mono panning,
 # stereo balance, width, mono mixdown, mid/side, swapping, matrix mixing,

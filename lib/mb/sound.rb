@@ -37,6 +37,7 @@ require_relative 'sound/scripting_methods'
 require_relative 'sound/sequence_methods'
 require_relative 'sound/schedule_methods'
 require_relative 'sound/multichannel_methods'
+require_relative 'sound/warm_up_methods'
 
 module MB
   # Convenience functions for making quick work of sound.
@@ -59,6 +60,7 @@ module MB
     extend ScheduleMethods
     extend MultichannelMethods
     extend TuningMethods
+    extend WarmUpMethods
 
     # Speed of sound for wavelength calculations, in meters per second.
     SPEED_OF_SOUND = 343.0

@@ -1,4 +1,4 @@
-#!/usr/bin/env -S RUBY_THREAD_TIMESLICE=10 ruby
+#!/usr/bin/env -S RUBY_THREAD_TIMESLICE=10 RUBY_YJIT_ENABLE=1 ruby
 # Interactive sound environment.  Uses Pry within the MB::Sound module context.
 # See README.md for more info, including copyright and license.
 
@@ -22,6 +22,9 @@ require 'mb/sound'
 # Shared Tee buffer checks are off unless MB_SOUND_CHECK_SHARED is set; here
 # they only warn, so a live set keeps playing (see GraphNode::Tee)
 MB::Sound::GraphNode::Tee.shared_check = :warn if MB::Sound::GraphNode::Tee.shared_check
+
+# Compile common node types before anything plays (YJIT is on via the shebang)
+MB::Sound.warm_up
 
 def clear
   STDOUT.write("\e[H\e[2J")

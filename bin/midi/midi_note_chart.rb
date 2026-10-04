@@ -1,4 +1,4 @@
-#!/usr/bin/env -S RUBY_THREAD_TIMESLICE=10 ruby
+#!/usr/bin/env -S RUBY_THREAD_TIMESLICE=10 RUBY_YJIT_ENABLE=1 ruby
 # Shows the attack velocity of notes while they are held.
 #
 # Reads live MIDI through RtMidi (CoreMIDI, ALSA, or JACK; see
