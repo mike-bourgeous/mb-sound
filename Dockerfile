@@ -1,8 +1,8 @@
-FROM docker.io/library/ruby:4.0.3
+FROM docker.io/library/ruby:4.0.7
 
 ARG DEBIAN_FRONTEND=none
 RUN apt-get -y update && apt-get -y upgrade && apt-get -y --no-install-recommends install \
-	build-essential bash-completion git pkgconf vim less ripgrep jq \
+	build-essential bash-completion git pkgconf vim less ripgrep jq valgrind \
 	libsamplerate0-dev libasound2-dev libjack-jackd2-dev jackd2 gnuplot ffmpeg graphviz
 
 COPY .bash_aliases /root/.bash_aliases
@@ -10,7 +10,7 @@ COPY .bashrc /root/.bashrc
 
 RUN mkdir /app
 COPY . /app
-RUN cd /app && bundle install
+RUN cd /app && bundle install && bundle exec rake compile
 
 VOLUME /app
 WORKDIR /
