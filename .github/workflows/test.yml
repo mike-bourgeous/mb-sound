@@ -24,7 +24,7 @@ jobs:
       - name: Install apt deps
         run: |
           sudo apt-get update
-          sudo apt-get install ffmpeg gnuplot-qt libsamplerate0-dev graphviz
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y ffmpeg gnuplot-qt libsamplerate0-dev libasound2-dev libjack-jackd2-dev jackd2 graphviz
       - name: Install gem deps
         run: bundle install
       - name: Compile native extension
@@ -48,7 +48,7 @@ jobs:
       - name: Install apt deps
         run: |
           sudo apt-get update
-          sudo apt-get install ffmpeg gnuplot-qt libsamplerate0-dev graphviz
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y ffmpeg gnuplot-qt libsamplerate0-dev libasound2-dev libjack-jackd2-dev jackd2 graphviz
       - name: Install gem deps
         run: bundle install
       - name: Compile native extension

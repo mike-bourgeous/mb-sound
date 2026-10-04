@@ -1,19 +1,20 @@
 #!/usr/bin/env -S RUBY_THREAD_TIMESLICE=10 ruby
 # Tests assigning multiple parameters to a single MIDI message type.
 #
-# Usage: $0 [input_port]
+# Reads live MIDI through RtMidi (see MB::Sound::MIDI::Input); without an
+# argument, connect a MIDI source to the virtual port it creates.
+#
+# Usage: $0 [part_of_a_midi_source_name]
 
 require 'bundler/setup'
 
 require 'mb-sound'
-require 'mb-sound-jackffi'
 require 'mb-util'
 
 MB::U.sigquit_backtrace
 
 MB::Sound.script(args: 0..1) { |(port)|
-  jack = MB::Sound::JackFFI[]
-  manager = MB::Sound::MIDI::Manager.new(jack: jack, connect: port || :physical, channel: 0)
+  manager = MB::Sound::MIDI::Manager.new(input: MB::Sound::MIDI::Input.open_live(port), channel: 0)
 
   manager.on_bend(range: 0.0..0.5, description: 'First bend') do |b|
     puts "First pitch bend callback: #{b}\e[K"

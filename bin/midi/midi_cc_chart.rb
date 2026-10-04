@@ -1,9 +1,11 @@
 #!/usr/bin/env -S RUBY_THREAD_TIMESLICE=10 ruby
 # Shows the last-received value of MIDI CCs in a table layout.
 #
-# Requires MB::Sound::JackFFI and needs jackd running.
+# Reads live MIDI through RtMidi (CoreMIDI, ALSA, or JACK; see
+# MB::Sound::MIDI::Input), or a MIDI file.  Without an argument, connect a MIDI
+# source to the virtual port it creates.
 #
-# Usage: $0 [input_port_or_midi_filename]
+# Usage: $0 [part_of_a_midi_source_name_or_midi_filename]
 
 require 'bundler/setup'
 
@@ -11,15 +13,13 @@ require 'nibbler'
 require 'forwardable'
 
 require 'mb-sound'
-require 'mb-sound-jackffi'
 
 MB::Sound.script(args: 0..1) { |(input)|
   if input && input.end_with?('.mid') && File.readable?(input)
     puts "Reading MIDI from #{input}"
     midi_in = MB::Sound::MIDI::MIDIFile.new(input)
   else
-    jack = MB::Sound::JackFFI[]
-    midi_in = jack.input(port_type: :midi, port_names: ['midi_in'], connect: input || :physical)
+    midi_in = MB::Sound::MIDI::Input.open_live(input)
   end
 
   midi = Nibbler.new

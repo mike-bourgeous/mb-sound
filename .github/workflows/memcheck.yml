@@ -51,7 +51,7 @@ jobs:
       - name: Install apt deps
         run: |
           sudo apt-get update
-          sudo apt-get install ffmpeg libsamplerate0-dev valgrind
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y ffmpeg libsamplerate0-dev libasound2-dev libjack-jackd2-dev jackd2 valgrind
           valgrind --version
       - name: Install gem deps
         run: bundle install
@@ -84,7 +84,7 @@ jobs:
       - name: Install apt deps
         run: |
           sudo apt-get update
-          sudo apt-get install ffmpeg libsamplerate0-dev valgrind
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y ffmpeg libsamplerate0-dev libasound2-dev libjack-jackd2-dev jackd2 valgrind
       - name: Install gem deps
         run: bundle install
       - name: Run extension specs under Valgrind with GC.stress per call

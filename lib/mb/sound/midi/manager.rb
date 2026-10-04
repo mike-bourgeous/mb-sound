@@ -15,26 +15,28 @@ module MB
         # #on_event).  This may be fractional for use with VoicePool.
         attr_reader :transpose
 
-        # Initializes a MIDI manager that parses MIDI data from jackd and sends
+        # Initializes a MIDI manager that parses MIDI data from live MIDI
+        # (MB::Sound::MIDI::Input through RtMidi by default) and sends
         # smoothed control values to callbacks when #update is called.
         #
-        # :jack - An instance of MB::Sound::JackFFI (e.g. to customize the
-        #         client name)
-        # :input - An optional JackFFI (or compatible) MIDI input object.
+        # :jack - An instance of MB::Sound::JackFFI to read JACK MIDI through
+        #         it instead (deprecated; RtMidi reads JACK MIDI too)
+        # :input - An optional MIDI::Input, MIDIFile, or JackFFI (or
+        #          compatible) MIDI input object.
         #          +:port_name+ and +:connect+ will be ignored if +:input+ is
         #          specified.  May also be another manager for doing channel
         #          filtering on an unfiltered manager (see #for_channel).
         # :port_name - The name of the input port to create (e.g. if multiple
         #              MIDI managers will be used in one program)
-        # :connect - The name or type of MIDI port to which to try to connect,
-        #            or nil to leave the input port unconnected.
+        # :connect - Part of the name of a MIDI source to connect to, or nil
+        #            for a virtual port named after the script.
         # :update_rate - How often the #update method will be called.  This is
         #                used to configure parameter smoothing.
         # :channel - The *zero-indexed* MIDI channel to listen on from 0 to 15,
         #            or nil to receive all channels.  Non-channel messages will
         #            always be received.  Drums are usually on channel 10, so
         #            pass 9 to listen to the drum channel, for example.
-        def initialize(jack: MB::Sound::JackFFI[], input: nil, port_name: 'midi_in', connect: nil, update_rate: nil, channel: ENV['CHANNEL']&.to_i)
+        def initialize(jack: nil, input: nil, port_name: 'midi_in', connect: nil, update_rate: nil, channel: ENV['CHANNEL']&.to_i)
           @parameters = {}
           @named_parameters = {}
           @event_callbacks = []
@@ -57,7 +59,9 @@ module MB
           @cc_thresholds = {}
 
           @jack = jack
-          @midi_in = input || @jack.input(port_type: :midi, port_names: [port_name], connect: connect)
+          @midi_in = input ||
+            @jack&.input(port_type: :midi, port_names: [port_name], connect: connect) ||
+            MB::Sound::MIDI::Input.new(connect: connect, port_name: connect ? port_name : nil)
           @m = Nibbler.new
 
           @transpose = ENV['TRANSPOSE']&.to_i || 0
@@ -71,6 +75,9 @@ module MB
           case @midi_in
           when MB::Sound::MIDI::MIDIFile
             [@midi_in.filename]
+
+          when MB::Sound::MIDI::Input
+            @midi_in.connections
 
           when MB::Sound::JackFFI::Input
             @midi_in.connections.flatten

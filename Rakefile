@@ -45,6 +45,12 @@ Rake::ExtensionTask.new 'mb-sound-fast_audio' do |ext|
   ext.lib_dir = 'lib/mb/sound'
 end
 
+Rake::ExtensionTask.new 'mb-sound-fast_midi' do |ext|
+  ext.name = 'fast_midi'
+  ext.ext_dir = 'ext/mb/sound/fast_midi'
+  ext.lib_dir = 'lib/mb/sound'
+end
+
 
 # Valgrind memcheck of the C extensions (`bundle exec rake memcheck`), using
 # ruby_memcheck, which runs rspec under Valgrind and filters out Ruby's own
@@ -86,6 +92,7 @@ MEMCHECK_SPECS = [
   'spec/lib/mb/sound/graph_node/constant_spec.rb', # FastSound.smootherstep_buf
   'spec/lib/mb/sound/device_output_spec.rb',       # FastAudio::Playback
   'spec/lib/mb/sound/device_input_spec.rb',        # FastAudio::Capture
+  'spec/lib/mb/sound/midi/input_spec.rb',          # FastMIDI::Input (with a JACK dummy server)
 ].freeze
 
 begin
@@ -138,7 +145,8 @@ begin
         # specs under Valgrind; ffmpeg and other tools run natively.  A
         # process that execs a skipped program leaves truncated XML, which
         # MemcheckTruncatedXml above cleans up.
-        '--trace-children-skip=*ffmpeg*,*ffprobe*,*gnuplot*,*/dot,*/git',
+        # jackd: the MIDI specs' dummy JACK server (spec/support/jack_dummy.rb).
+        '--trace-children-skip=*ffmpeg*,*ffprobe*,*gnuplot*,*/dot,*/git,*jackd*',
         # Forked children that don't exec (fork_script) would repeat the
         # parent's leak report, so only exec'd programs report.
         '--child-silent-after-fork=yes',
