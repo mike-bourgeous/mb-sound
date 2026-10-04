@@ -490,6 +490,16 @@ struct playback {
 	int jack; // ports on the shared JACK client instead of a miniaudio device
 	struct mb_jack_unit unit;
 
+	// JACK only: the cycle's frame time and the ring and device clock
+	// positions at the start of the latest process cycle, so #jack_clock
+	// can map JACK frame times (e.g. MIDI input) to ring frames.  A seqlock:
+	// jack_seq is odd while the process thread writes, and 0 until the first
+	// cycle.
+	_Atomic unsigned jack_seq;
+	_Atomic uint32_t jack_frame;
+	_Atomic size_t jack_read_pos;
+	_Atomic size_t jack_played;
+
 	// Optional record of the first capture_frames frames played (for specs)
 	float *capture;
 	size_t capture_frames;
@@ -671,6 +681,16 @@ static void playback_jack_process(struct mb_jack_unit *unit, uint32_t nframes)
 	for (size_t c = 0; c < ch; c++) {
 		buffers[c] = mb_jack_port_buffer(unit->ports[c], nframes);
 	}
+
+	// Publish where this cycle starts (see #jack_clock); the reader retries
+	// while the sequence is odd or changed
+	unsigned seq = atomic_load_explicit(&p->jack_seq, memory_order_relaxed);
+	atomic_store_explicit(&p->jack_seq, seq + 1, memory_order_relaxed);
+	atomic_thread_fence(memory_order_release);
+	atomic_store_explicit(&p->jack_frame, mb_jack_last_frame_time(), memory_order_relaxed);
+	atomic_store_explicit(&p->jack_read_pos, atomic_load_explicit(&p->read_pos, memory_order_relaxed), memory_order_relaxed);
+	atomic_store_explicit(&p->jack_played, atomic_load_explicit(&p->frames_played, memory_order_relaxed), memory_order_relaxed);
+	atomic_store_explicit(&p->jack_seq, seq + 2, memory_order_release);
 
 	for (size_t done = 0; done < nframes; done += JACK_CHUNK) {
 		size_t n = nframes - done < JACK_CHUNK ? nframes - done : JACK_CHUNK;
@@ -1318,6 +1338,51 @@ static VALUE playback_jack_ports(VALUE self)
 {
 	struct playback *p = get_playback(self);
 	return p->jack && p->info.ready ? jack_port_names(&p->unit) : Qnil;
+}
+
+/*
+ * call-seq:
+ *   playback.jack_clock -> { frame_time:, read_pos:, frames_played:, write_pos: } or nil
+ *
+ * For outputs on JACK, where the latest process cycle started: its JACK
+ * frame time (jack_last_frame_time, a 32-bit counter that wraps), the
+ * ring's read position (frames taken from the queue since opening; see
+ * #stats) and the device clock (:frames_played) at that moment, plus the
+ * current :write_pos (frames queued since opening).  Until the next
+ * underrun, ring frame +x+ goes to the ports at JACK frame
+ * `frame_time + (x - read_pos)`, the same time base as a JACK MIDI input
+ * event at that frame.  nil for miniaudio devices, before the first cycle,
+ * and once closed.
+ */
+static VALUE playback_jack_clock(VALUE self)
+{
+	struct playback *p = get_playback(self);
+	if (!p->jack || !p->info.ready) {
+		return Qnil;
+	}
+
+	unsigned s1, s2;
+	uint32_t frame;
+	size_t read_pos, played;
+	do {
+		s1 = atomic_load_explicit(&p->jack_seq, memory_order_acquire);
+		frame = atomic_load_explicit(&p->jack_frame, memory_order_relaxed);
+		read_pos = atomic_load_explicit(&p->jack_read_pos, memory_order_relaxed);
+		played = atomic_load_explicit(&p->jack_played, memory_order_relaxed);
+		atomic_thread_fence(memory_order_acquire);
+		s2 = atomic_load_explicit(&p->jack_seq, memory_order_relaxed);
+	} while ((s1 & 1) || s1 != s2);
+
+	if (s1 == 0) {
+		return Qnil;
+	}
+
+	VALUE h = rb_hash_new();
+	rb_hash_aset(h, ID2SYM(rb_intern("frame_time")), UINT2NUM(frame));
+	rb_hash_aset(h, ID2SYM(rb_intern("read_pos")), SIZET2NUM(read_pos));
+	rb_hash_aset(h, ID2SYM(rb_intern("frames_played")), SIZET2NUM(played));
+	rb_hash_aset(h, ID2SYM(rb_intern("write_pos")), SIZET2NUM(atomic_load(&p->write_pos)));
+	return h;
 }
 
 /* The number of channels sent to the device. */
@@ -2675,6 +2740,7 @@ void Init_fast_audio(void)
 	rb_define_alloc_func(playback, playback_alloc);
 	rb_define_method(playback, "initialize", playback_initialize, -1);
 	rb_define_method(playback, "jack_ports", playback_jack_ports, 0);
+	rb_define_method(playback, "jack_clock", playback_jack_clock, 0);
 	rb_define_method(playback, "max_queue", playback_max_queue, 0);
 	rb_define_method(playback, "queue_limit=", playback_set_queue_limit, 1);
 	rb_define_method(playback, "write", playback_write, 1);
