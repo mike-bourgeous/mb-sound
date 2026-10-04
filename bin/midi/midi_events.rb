@@ -1,11 +1,12 @@
 #!/usr/bin/env -S RUBY_THREAD_TIMESLICE=10 RUBY_YJIT_ENABLE=1 ruby
 # Prints events as they occur in real time, either from live MIDI or a MIDI
-# file.  Can optionally forward events to a jackd MIDI output.
+# file.  Can optionally forward events to a MIDI output.
 #
-# Live MIDI comes through RtMidi (CoreMIDI, ALSA, or JACK; see
-# MB::Sound::MIDI::Input); without an input argument, connect a MIDI source to
-# the virtual port it creates.  Forwarding still uses MB::Sound::JackFFI and
-# needs jackd running (MIDI output is a later project).
+# MIDI goes through RtMidi (CoreMIDI, ALSA, or JACK; see MB::Sound::MIDI::Input
+# and MB::Sound::MIDI::Output); without an input argument, connect a MIDI
+# source to the virtual port it creates.  --forward sends events from a virtual
+# source named after this script; --forward-to connects to a destination by
+# part of its name.
 #
 # Usage:
 #     $0 [--forward] [--forward-to PORT] [part_of_a_midi_source_name_or_midi_filename]
@@ -16,7 +17,6 @@ require 'nibbler'
 require 'forwardable'
 
 require 'mb-sound'
-require 'mb-sound-jackffi'
 require 'mb-util'
 
 MB::U.sigquit_backtrace
@@ -24,15 +24,16 @@ MB::U.sigquit_backtrace
 
 MB::Sound.script(
   args: 0..1,
-  forward: [false, 'Forward events to a JACK MIDI output'],
-  forward_to: [nil, String, 'Forward events to this JACK MIDI port (implies --forward)'],
+  forward: [false, 'Forward events from a virtual MIDI source'],
+  forward_to: [nil, String, 'Forward events to the MIDI destination whose name contains this (implies --forward)'],
 ) { |(input), p|
   puts "#{"\n" * MB::U.height}\e[H\e[J" # move to home, then clear everything
 
   if p.forward || p.forward_to
     puts 'Enabling output'
     puts "Connecting output to #{p.forward_to.inspect}" if p.forward_to
-    midi_out = MB::Sound::JackFFI[].output(port_type: :midi, port_names: ['midi_out'], connect: p.forward_to)
+    midi_out = MB::Sound::MIDI::Output.new(connect: p.forward_to)
+    puts "Sending to #{midi_out.connections.first} (#{midi_out.api})"
   end
 
   if input && input.end_with?('.mid') && File.readable?(input)
@@ -74,7 +75,7 @@ MB::Sound.script(
         cc_chart[e.index] = e.value
       end
 
-      midi_out&.write([Numo::Int8.cast(e.to_a)])
+      midi_out&.write(e.to_a)
     end
 
     frame += 1

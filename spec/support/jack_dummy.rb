@@ -50,7 +50,7 @@ module JackDummy
 
     # RtMidi's JACK input only connects when a port opens, so open one
     def connectable?
-      MB::Sound::FastMIDI::TestOutput.new(:jack, 'mbspec_probe', 'probe').close
+      MB::Sound::FastMIDI::Output.new(:jack, 'mbspec_probe', nil, 'probe').close
       true
     rescue MB::Sound::FastMIDI::Error
       false

@@ -34,7 +34,7 @@ RSpec.describe('MB::Sound::FastMIDI', :aggregate_failures) do
     after(:context) { JackDummy.stop }
     before(:each) { skip @jack_error if @jack_error }
 
-    let(:output) { @output = MB::Sound::FastMIDI::TestOutput.new(:jack, 'mbspec_sender', 'out') }
+    let(:output) { @output = MB::Sound::FastMIDI::Output.new(:jack, 'mbspec_sender', nil, 'out') }
     after(:each) { @output&.close }
 
     def open_input(name = 'mbspec_receiver')

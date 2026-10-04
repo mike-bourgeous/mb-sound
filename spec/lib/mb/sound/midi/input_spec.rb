@@ -37,7 +37,7 @@ RSpec.describe(MB::Sound::MIDI::Input, :aggregate_failures) do
     after(:context) { JackDummy.stop }
     before(:each) { skip @jack_error if @jack_error }
 
-    let!(:output) { MB::Sound::FastMIDI::TestOutput.new(:jack, 'mbspec_keyboard', 'out') }
+    let!(:output) { MB::Sound::FastMIDI::Output.new(:jack, 'mbspec_keyboard', nil, 'out') }
 
     before(:each) do
       ENV['MIDI_API'] = 'jack'
