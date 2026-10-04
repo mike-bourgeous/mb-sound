@@ -175,4 +175,70 @@ RSpec.describe(MB::Sound::MIDI::Transform) do
       expect(m.notes.map { |n| n[:sustain_time] }).not_to eq(m.notes.map { |n| n[:off_time] })
     end
   end
+
+  describe '#velocity_curve' do
+    let(:s) { stream(ev.note_on(60, 0.5), ev.note_off(60, 0.5), ev.note_on(62, 1.0)) }
+
+    it 'is linear by default' do
+      expect(s.velocity_curve.reader.next(1).map(&:velocity)).to eq([0.5, 0.5, 1.0])
+    end
+
+    it 'raises note-on velocities to an exponent' do
+      out = s.velocity_curve(2).reader.next(1)
+      expect(out.map(&:velocity)).to eq([0.25, 0.5, 1.0])
+      expect(out[0].raw).to eq(32)
+    end
+
+    it 'accepts a block or Proc and clamps the result' do
+      a = s.velocity_curve { |v| v * 3 - 1 }.reader
+      b = s.velocity_curve(->(v) { v - 0.75 }).reader
+      expect(a.next(1).select(&:note_on?).map(&:velocity)).to eq([0.5, 1.0])
+      expect(b.next(1).select(&:note_on?).map(&:velocity)).to eq([0.0, 0.25])
+    end
+
+    it 'keeps notes on even at velocity 0' do
+      e = s.velocity_curve { 0 }.reader.next(1).first
+      expect(e).to have_attributes(type: :note_on, velocity: 0.0, raw: 1)
+    end
+
+    it 'rejects bad curves' do
+      expect { s.velocity_curve(0) }.to raise_error(ArgumentError)
+      expect { s.velocity_curve('x') }.to raise_error(ArgumentError)
+    end
+  end
+
+  describe '#bend_range' do
+    it 'sets the bend range of bend events' do
+      s = stream(ev.bend(0.5), ev.bend(-1.0, channel: 3))
+      a = s.bend_range(12.st).reader
+      b = s.bend_range(1.oct).channel(3).reader
+      expect(a.next(1).map(&:bend_semitones)).to eq([6.0, -12.0])
+      expect(b.next(1).map(&:bend_semitones)).to eq([-12.0])
+    end
+
+    it 'lets RPN 0 change the range on its channel' do
+      s = stream(ev.bend(1.0), ev.cc_raw(101, 0), ev.cc_raw(100, 0), ev.cc_raw(6, 24), ev.bend(1.0), ev.bend(1.0, channel: 1))
+      expect(s.bend_range(12).reader.next(1).select(&:bend?).map(&:bend_semitones)).to eq([12.0, 24.0, 12.0])
+    end
+
+    it 'does not change the original stream' do
+      s = stream(ev.bend(1.0))
+      a = s.reader
+      s.bend_range(7).reader.next(1)
+      expect(a.next(1).first.bend_semitones).to eq(2.0)
+    end
+  end
+
+  describe 'chains' do
+    it 'combines transforms and runs each once for many readers' do
+      src = MIDIListSource.new(timeline(ev.note_on(60, 0.5, channel: 2), ev.note_on(61, channel: 3), ev.note_off(60, channel: 2), ev.note_off(61, channel: 3)))
+      view = MB::Sound::MIDI::Stream.new(src).channel(2).transpose(-12).velocity_curve(2)
+      a = view.reader
+      b = view.reader
+      out = a.next(1)
+      expect(out.map { |e| [e.type, e.note, e.velocity] }).to eq([[:note_on, 48, 0.25], [:note_off, 48, 64 / 127.0]])
+      expect(b.next(1)).to eq(out)
+      expect(src.reads).to eq(1)
+    end
+  end
 end

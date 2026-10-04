@@ -272,6 +272,48 @@ module MB
             end
           end
         end
+
+        # Shapes note-on velocities (see Stream#velocity_curve).
+        class VelocityCurve < Transform
+          def initialize(parent, curve)
+            super(parent)
+            if curve.is_a?(Numeric)
+              raise ArgumentError, "A velocity curve exponent must be positive (got #{curve})" unless curve > 0
+              exponent = curve
+              @curve = ->(v) { v ** exponent }
+              @node_type_name = "velocity_curve(#{curve})"
+            elsif curve.respond_to?(:call)
+              @curve = curve
+              @node_type_name = 'velocity_curve(proc)'
+            else
+              raise ArgumentError, "Expected an exponent or a block for the velocity curve (got #{curve.inspect})"
+            end
+          end
+
+          private
+
+          def process(events, _from, _to)
+            events.map { |e|
+              next e unless e.note_on?
+              e.with_velocity(MB::M.clamp(@curve.call(e.velocity).to_f, 0.0, 1.0))
+            }
+          end
+        end
+
+        # Sets the default bend range (see Stream#bend_range).
+        class BendRange < Transform
+          def initialize(parent, interval)
+            super(parent)
+            @tracker = Stream::BendTracker.new(Interval.semitones(interval))
+            @node_type_name = "bend_range(#{interval})"
+          end
+
+          private
+
+          def process(events, _from, _to)
+            events.map { |e| @tracker.process(e) }
+          end
+        end
       end
     end
   end
