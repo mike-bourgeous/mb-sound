@@ -27,3 +27,5 @@
 .claude/worktrees/
 .claude-user
 .gh-user
+
+.DS_Store
