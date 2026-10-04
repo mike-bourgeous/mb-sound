@@ -3,7 +3,7 @@ FROM docker.io/library/ruby:4.0.3
 ARG DEBIAN_FRONTEND=none
 RUN apt-get -y update && apt-get -y upgrade && apt-get -y --no-install-recommends install \
 	build-essential bash-completion git pkgconf vim less ripgrep jq \
-	libsamplerate0-dev libjack-dev gnuplot ffmpeg graphviz
+	libsamplerate0-dev libasound2-dev libjack-jackd2-dev jackd2 gnuplot ffmpeg graphviz
 
 COPY .bash_aliases /root/.bash_aliases
 COPY .bashrc /root/.bashrc

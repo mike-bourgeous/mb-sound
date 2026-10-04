@@ -476,16 +476,17 @@ There are some base packages you'll need first:
 
 ```bash
 # Debian-/Ubuntu-based Linux (macOS/Arch/CentOS will differ)
-sudo apt-get install ffmpeg gnuplot-qt
+sudo apt-get install ffmpeg gnuplot-qt libsamplerate0-dev libasound2-dev libjack-jackd2-dev
 
 # macOS (with Homebrew)
-brew install ffmpeg gnuplot
+brew install ffmpeg gnuplot libsamplerate
 ```
 
-On macOS, audio playback uses ffmpeg's `audiotoolbox` output unless JackD is
-running.  Set `OUTPUT_DEVICE` to a device index to choose a different output
-(list devices with `ffmpeg -f lavfi -i sine=d=0.5 -f audiotoolbox -list_devices true -`).
-Audio input on macOS still requires JackD.
+Sound card input and output (CoreAudio on macOS; JACK, PipeWire/PulseAudio,
+or ALSA on Linux) go through the bundled miniaudio, and live MIDI through the
+bundled RtMidi, so no audio daemon is needed.  Run `bin/audio_check.rb --list`
+to see devices.  On macOS, playback still uses ffmpeg's `audiotoolbox` output
+by default for now; set `OUTPUT_TYPE=device` to use the sound card directly.
 
 Then you'll want to install Ruby 4.0 or newer.
 
@@ -585,6 +586,7 @@ This code uses some really cool other projects either directly or indirectly:
 
 - FFMPEG
 - [miniaudio](https://miniaud.io) by David Reid (public domain or MIT-0), included in `ext/mb/sound/fast_audio/` for sound card I/O
+- [RtMidi](https://github.com/thestk/rtmidi) by Gary P. Scavone (MIT-style license), included in `ext/mb/sound/fast_midi/` for live MIDI input
 - Numo::NArray
 - Numo::Pocketfft
 - Pry interactive console for Ruby
