@@ -238,6 +238,22 @@ RSpec.describe(MB::Sound::ScriptRunner) do
     end
   end
 
+  describe '#ending_nodes' do
+    it 'keeps a Synth but skips the nodes inside it and gated envelopes' do
+      r = runner(:synth, [])
+      gated = MB::Sound::Envelope.new(gate: 0.constant)
+      one_shot = MB::Sound::Envelope.new
+      synth = MB::Sound::Synth.new('spec/test_data/c_major.mid', voices: 2) { |v| v.hz.saw * v.amp_env }
+      graph = (synth + 220.hz.sine * gated + 110.hz.sine * one_shot).ringdown
+
+      nodes = r.send(:ending_nodes, graph)
+      expect(nodes).to include(synth, one_shot, graph)
+      expect(nodes).not_to include(gated)
+      expect(nodes.grep(MB::Sound::Notes::Node)).to eq([])
+      expect(nodes.grep(MB::Sound::Envelope)).to eq([one_shot])
+    end
+  end
+
   describe '#run_song' do
     let(:outfile) { tmp_path('script_runner_song.flac') }
 

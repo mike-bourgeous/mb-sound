@@ -287,6 +287,23 @@ RSpec.describe(MB::Sound::Synth) do
       50.times { expect(s.sample(4800)).not_to eq(nil) }
       expect(s.ended?).to eq(false)
     end
+
+    it 'stops a synth script after its tail with the runner ringdown' do
+      midi_file = 'spec/test_data/c_major.mid'
+      music_end = MB::Sound::MIDI::MIDIFile.new(midi_file).music_end
+      outfile = tmp_path('synth_script.flac')
+
+      r = MB::Sound::ScriptRunner.new(:synth, {}, argv: [midi_file, outfile, '-q'], script: 'bin/example.rb')
+      expect {
+        r.run_synth { |input| described_class.new(input, voices: 4) { |v| v.hz.saw * v.amp_env(0.005, 0.1, 0.5, 0.3) } }
+      }.to output(/Rendered/).to_stdout
+
+      data = MB::Sound.read(outfile)[0]
+      last_sound = (0...data.length).select { |i| data[i].abs > 1e-4 }.last / 48000.0
+      expect(last_sound).to be > music_end
+      expect(last_sound).to be < music_end + 0.5
+      expect(data.length / 48000.0 - last_sound).to be_within(0.15).of(1) # a second of quiet, not the 10 s tail limit
+    end
   end
 
   it 'never modifies shared buffers', :check_shared do

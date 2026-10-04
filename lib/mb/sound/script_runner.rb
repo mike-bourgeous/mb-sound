@@ -566,8 +566,16 @@ module MB
       # Returns the nodes in +graph+ whose sources can end while the graph
       # keeps sounding (they respond to #ended?): GraphNode::Ringdown for
       # file inputs, and MIDI::VoicePool and MIDI DSL nodes for MIDI files.
+      #
+      # A Synth stands for everything inside it (its #ended? waits for the
+      # source and for every voice lane to go idle), and Envelopes with a
+      # gate or trigger are skipped, since they never end by themselves.
       def ending_nodes(graph)
-        graph_nodes(graph).select { |n| n.respond_to?(:ended?) }
+        nodes = graph_nodes(graph).select { |n| n.respond_to?(:ended?) }
+        inside = nodes.grep(Synth).flat_map(&:graph).reject { |n| n.is_a?(Synth) }.map(&:__id__).to_set
+        nodes.reject { |n|
+          inside.include?(n.__id__) || (n.is_a?(Envelope) && !n.one_shot?)
+        }.uniq(&:__id__)
       end
 
       # Stops the script's player once every node in +ringdowns+ has ended
