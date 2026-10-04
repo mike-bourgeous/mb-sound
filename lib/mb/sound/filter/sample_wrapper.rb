@@ -81,7 +81,10 @@ module MB
           # TODO: Drain ring-out from filters and delays after a source returns nil
           return nil if buf.nil? || buf.empty?
 
-          buf.inplace! if @in_place
+          if @in_place
+            buf = buf.dup if buf.frozen? # a shared buffer (see Tee)
+            buf.inplace!
+          end
           buf = SampleWrapper.call_filter(@base_filter, buf, @inputs)
           buf&.not_inplace!
         end
