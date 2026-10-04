@@ -3,3 +3,6 @@
 # many readers by Streams, with stream transforms.  Loaded after Sequence,
 # since ClipSource follows the sequence timeline.
 require_relative 'event'
+require_relative 'source'
+require_relative 'file_source'
+require_relative 'clip_source'
