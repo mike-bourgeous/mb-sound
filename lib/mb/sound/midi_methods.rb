@@ -34,7 +34,10 @@ module MB
       end
 
       # Creates and caches a MIDI manager for the given +input_name+, which may
-      # be a MIDI filename or a JACK connection port name.
+      # be a MIDI filename, part of a live MIDI source's name to connect to,
+      # or nil for a virtual MIDI port named after the script (see
+      # MB::Sound::MIDI::Input; live MIDI goes through RtMidi and never
+      # starts a JACK server).
       def midi_manager(input_name = nil)
         @midi_managers ||= {}
         return @midi_managers[input_name] if @midi_managers.include?(input_name)
@@ -46,12 +49,15 @@ module MB
         end
 
         unless midi_in
-          jack = MB::Sound::JackFFI[]
-          midi_in = jack.input(port_type: :midi, port_names: ['midi_in'], connect: input_name)
-          update_rate = jack.buffer_size.to_f / jack.sample_rate
+          midi_in = MB::Sound::MIDI::Input.new(connect: input_name)
+
+          # Manager#update runs once per audio buffer
+          profile = MB::Sound::DeviceOutput::PROFILES[(ENV['AUDIO_PROFILE'] || :default).to_s.delete_prefix(':').to_sym]
+          buffer = Integer(ENV['AUDIO_BUFFER'] || profile&.[](:buffer_size) || 512)
+          update_rate = 48000.0 / buffer
         end
 
-        manager = MB::Sound::MIDI::Manager.new(jack: jack, input: midi_in, update_rate: update_rate)
+        manager = MB::Sound::MIDI::Manager.new(jack: nil, input: midi_in, update_rate: update_rate)
 
         @midi_managers[input_name] = manager
       end
