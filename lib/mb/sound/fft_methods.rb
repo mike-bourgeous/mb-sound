@@ -26,6 +26,7 @@ module MB
         # information.
         def fft(data)
           data = convert_sound_to_narray(data) unless data.is_a?(Numo::NArray)
+          data = data.dup if data.is_a?(Numo::NArray) # Pocketfft reads a view (e.g. x[100..]) from its parent's start
 
           case data
           when Numo::NArray
@@ -57,6 +58,7 @@ module MB
         # information.
         def ifft(data)
           data = convert_sound_to_narray(data) unless data.is_a?(Numo::NArray)
+          data = data.dup if data.is_a?(Numo::NArray) # Pocketfft reads a view (e.g. x[100..]) from its parent's start
 
           case data
           when Numo::NArray
@@ -87,6 +89,7 @@ module MB
         # information.
         def real_fft(data)
           data = convert_sound_to_narray(data) unless data.is_a?(Numo::NArray)
+          data = data.dup if data.is_a?(Numo::NArray) # Pocketfft reads a view (e.g. x[100..]) from its parent's start
 
           case data
           when Numo::NArray
@@ -118,6 +121,7 @@ module MB
         # information.
         def real_ifft(data, odd_length: false)
           data = convert_sound_to_narray(data) unless data.is_a?(Numo::NArray)
+          data = data.dup if data.is_a?(Numo::NArray) # Pocketfft reads a view (e.g. x[100..]) from its parent's start
 
           case data
           when Numo::NArray
