@@ -724,6 +724,16 @@ module MB
         end
       end
 
+      # The minBLEP and minBLAMP tables at whole-sample offsets (a jump
+      # exactly between samples), for #phase_jump, made on first use.
+      def self.jump_tables
+        @jump_tables ||= begin
+          blep, blamp = BandLimit.minblep_tables
+          steps = Numo::DFloat.new(BandLimit::SYNC_TAPS).seq * BandLimit::SYNC_OVERSAMPLE
+          [blep[steps].freeze, blamp[steps].freeze].freeze
+        end
+      end
+
       private
 
       # Runs the block, which jumps the phase, and for a band-limited
@@ -751,9 +761,8 @@ module MB
         k = 0.0 unless band_limited?
         return if k == 0
 
-        blep, blamp = BandLimit.minblep_tables
-        steps = Numo::DFloat.new(BandLimit::SYNC_TAPS).seq * BandLimit::SYNC_OVERSAMPLE
-        residual = (blep[steps] * (v1 - v0) + blamp[steps] * ((s1 - s0) * inc)) * k
+        blep, blamp = Oscillator.jump_tables
+        residual = (blep * (v1 - v0) + blamp * ((s1 - s0) * inc)) * k
         @jump_residual = @jump_residual ? residual + pad_residual(@jump_residual, residual.length) : residual
       end
 
@@ -802,6 +811,11 @@ module MB
       # +resets+ as an Array, or nil if there are none (or no reset input).
       def reset_points(resets)
         return nil if resets.nil?
+
+        unless resets.is_a?(Numo::SComplex) || resets.is_a?(Numo::DComplex)
+          min, max = resets.minmax
+          return nil if min == 0 && max == 0 # cheaper than ne(0).where
+        end
 
         resets = resets.ne(0).where
         resets.empty? ? nil : resets.to_a
