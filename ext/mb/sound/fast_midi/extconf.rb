@@ -24,6 +24,10 @@ end
 
 have_library('pthread')
 
+# Drop libraries Ruby's own LIBS already has (e.g. -lpthread, and -lc++ on
+# macOS), which macOS's ld warns about as duplicates.
+$libs = ($libs.split.uniq - $LIBS.split).join(' ')
+
 # RtMidi's own C++ shows -Wall -Wextra warnings but isn't held to -Werror,
 # so new compiler or SDK warnings in vendored code never break the build;
 # only the wrapper (fast_midi.c) is held to -Werror.
