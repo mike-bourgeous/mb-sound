@@ -1,4 +1,4 @@
-#!/usr/bin/env -S RUBY_THREAD_TIMESLICE=10 ruby
+#!/usr/bin/env -S RUBY_THREAD_TIMESLICE=10 RUBY_YJIT_ENABLE=1 ruby
 # Plots an ADSR envelope with parameters given on the command line.
 #
 # Usage: $0 [--db RANGE] [--filter HZ] attack_time decay_time sustain_level release_time

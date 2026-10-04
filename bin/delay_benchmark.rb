@@ -1,4 +1,4 @@
-#!/usr/bin/env -S RUBY_THREAD_TIMESLICE=10 ruby
+#!/usr/bin/env -S RUBY_THREAD_TIMESLICE=10 RUBY_YJIT_ENABLE=1 ruby
 # Measures delay workloads as a percentage of realtime (CPU time per second
 # of audio), for comparing delay implementations: constant delays (integer,
 # fractional, smoothed, tempo-synced), feedback (longer and shorter than a

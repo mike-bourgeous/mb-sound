@@ -1,4 +1,4 @@
-#!/usr/bin/env -S RUBY_THREAD_TIMESLICE=10 ruby
+#!/usr/bin/env -S RUBY_THREAD_TIMESLICE=10 RUBY_YJIT_ENABLE=1 ruby
 # Measures oscillator-heavy workloads as a percentage of realtime (CPU time
 # per second of audio), for comparing oscillator implementations: single
 # oscillators (band-limited and naive, pwm, sync, complex BLIT, soft clip with

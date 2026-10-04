@@ -1,4 +1,4 @@
-#!/usr/bin/env -S RUBY_THREAD_TIMESLICE=10 ruby
+#!/usr/bin/env -S RUBY_THREAD_TIMESLICE=10 RUBY_YJIT_ENABLE=1 ruby
 # Renders a gallery of oscillator test sounds, one file per case, for null
 # tests of oscillator changes (see bin/null_test.rb): every wave type, complex
 # waves, phase, ranges, FM/PM, noise, notes, tuning, tempo LFOs, and a clip.

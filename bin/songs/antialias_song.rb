@@ -1,4 +1,4 @@
-#!/usr/bin/env -S RUBY_THREAD_TIMESLICE=10 ruby
+#!/usr/bin/env -S RUBY_THREAD_TIMESLICE=10 RUBY_YJIT_ENABLE=1 ruby
 # A 16-bar demo of the antialiased oscillators and shapers: a hard-synced
 # lead whose sync ratio follows each note's envelope, a pulse-width
 # modulated pad, a CZ-style bass (a sine whose phase warp closes with the

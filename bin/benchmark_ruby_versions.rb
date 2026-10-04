@@ -1,4 +1,4 @@
-#!/usr/bin/env -S RUBY_THREAD_TIMESLICE=10 ruby
+#!/usr/bin/env -S RUBY_THREAD_TIMESLICE=10 RUBY_YJIT_ENABLE=1 ruby
 # Installs several Ruby versions with rvm and runs the node graph,
 # resampling, and wavetable benchmarks on each (with and without JIT),
 # combining their CSV results.
