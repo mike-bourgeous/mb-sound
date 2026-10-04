@@ -11,7 +11,17 @@ module MB
       #       midi.tone.ramp.filter(:lowpass, cutoff: midi.frequency + 100) * midi.gate
       #     }
       #     play graph
+      #
+      # Old synth scripts that get a Notes from ScriptingMethods#synth_script
+      # may pass it here (see #midi_manager); live input then gives a
+      # MidiDsl on that input.
       def midi_file(filename, speed: 1.0, clock: nil)
+        filename = legacy_midi_input(filename)
+        unless filename.is_a?(String)
+          dsl = MB::Sound::GraphNode::MidiDsl.new(manager: midi_manager(filename))
+          return block_given? ? yield(dsl) : dsl
+        end
+
         clock ||= MB::Sound::GraphNode::MidiDsl::DslClock.new
         mfile = MB::Sound::MIDI::MIDIFile.new(filename, speed: speed, clock: clock)
         mgr = MB::Sound::MIDI::Manager.new(input: mfile)
@@ -26,10 +36,54 @@ module MB
         end
       end
 
-      # Returns a handle for connecting MIDI events to GraphNode networks.  See
-      # MidiDsl for details.  Mostly useful in bin/sound.rb.  Use #midi_manager
-      # and #synth for scripts.
-      def midi
+      # Returns live MIDI input as a MB::Sound::Notes (notes and controllers
+      # as signal nodes; a mono DSL that is also a MIDI source for synths),
+      # reading a MIDI::LiveSource that follows the background session's
+      # output clock (see MIDI::LiveSource for MIDI_TIMING).  +connect+ is
+      # part of a MIDI source's name to connect to, or nil for a port named
+      # after the script that other software connects to (see MIDI::Input).
+      # Each +connect+ opens one input, cached until #close_midi.
+      #
+      # Opening live MIDI switches the background session to the :low
+      # latency profile unless a profile was chosen (see
+      # PlaybackMethods#live_midi_latency).
+      #
+      # Example (bin/sound.rb):
+      #     play midi.hz.saw * midi.amp_env                       # mono
+      #     play midi.synth(voices: 6) { |v| v.hz.saw.filter(:lowpass, cutoff: v.cutoff(800)) * v.amp_env }
+      #     play Synth.new(midi_stream.transpose(-12)) { |v| v.hz.square * v.amp_env }
+      #     midi.mod                                              # the mod wheel, 0..1
+      #     midi('Launchkey')                                     # a keyboard by name
+      def midi(connect = nil)
+        @live_midi ||= {}
+        notes = @live_midi[connect]
+        return notes if notes && !notes.stream.source.closed?
+
+        # Switches the output only once the input has opened
+        source = MB::Sound::MIDI::LiveSource.new(connect: connect)
+        live_midi_latency
+        source.output = Session.default.output
+        @live_midi[connect] = MB::Sound::Notes.new(MB::Sound::MIDI::Stream.new(source))
+      end
+
+      # The MIDI::Stream of live MIDI input from #midi (for transforms and
+      # Synth.new; `Synth.new(midi)` works too).
+      def midi_stream(connect = nil)
+        midi(connect).stream
+      end
+
+      # Closes the live MIDI inputs opened by #midi (later calls open new
+      # ones).  Returns nil.
+      def close_midi
+        (@live_midi || {}).each_value { |notes| notes.stream.source.close }
+        @live_midi = {}
+        nil
+      end
+
+      # The old MIDI DSL (GraphNode::MidiDsl) on live MIDI, which #midi
+      # returned before the Notes rework; kept for old scripts until they
+      # move to Notes (see #midi_manager).
+      def midi_dsl
         @midi_dsl ||= MB::Sound::GraphNode::MidiDsl.new(manager: midi_manager)
       end
 
@@ -47,11 +101,19 @@ module MB
       # warning if none matches), or nil for a virtual MIDI port named after
       # the script (see MB::Sound::MIDI::Input; live MIDI goes through RtMidi
       # and never starts a JACK server).
+      #
+      # Old synth scripts pass the Notes (or MIDI::Stream) that
+      # ScriptingMethods#synth_script now gives their block: a MIDI file's
+      # name is used, and live input shares its MIDI::Input (one port).
       def midi_manager(input_name = nil)
+        input_name = legacy_midi_input(input_name)
         @midi_managers ||= {}
         return @midi_managers[input_name] if @midi_managers.include?(input_name)
 
-        if input_name && File.file?(input_name)
+        if input_name.respond_to?(:read_raw)
+          midi_in = input_name
+          update_rate = 48000.0 / Session.default.buffer_size
+        elsif input_name && File.file?(input_name)
           unless input_name.downcase.end_with?('.mid', '.midi')
             raise ArgumentError, "#{input_name} is not a MIDI file (expected .mid or .midi)"
           end
@@ -119,6 +181,31 @@ module MB
         end
 
         pool
+      end
+
+      private
+
+      # Points the live MIDI sources of #midi at the background session's
+      # current output (see PlaybackMethods#use_output).
+      def retarget_live_midi
+        return if @live_midi.nil? || @live_midi.empty?
+
+        output = Session.default.output
+        @live_midi.each_value { |notes| notes.stream.source.output = output }
+      end
+
+      # For the old MIDI APIs (#midi_manager, #midi_file, #synth): the MIDI
+      # file name or live MIDI::Input behind a Notes or MIDI::Stream (as
+      # ScriptingMethods#synth_script gives), else +input+ unchanged.
+      def legacy_midi_input(input)
+        return input unless input.respond_to?(:to_midi_stream) || input.is_a?(MB::Sound::MIDI::Stream)
+
+        source = MB::Sound::MIDI::Stream.for(input).source
+        case source
+        when MB::Sound::MIDI::FileSource then source.midi_file.filename
+        when MB::Sound::MIDI::LiveSource then source.input
+        else raise ArgumentError, "The old MIDI Manager can't read #{source}"
+        end
       end
     end
   end
