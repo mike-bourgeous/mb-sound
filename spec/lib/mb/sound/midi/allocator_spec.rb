@@ -39,6 +39,29 @@ RSpec.describe(MB::Sound::MIDI::Allocator) do
     end
   end
 
+  # Checks that a lane's events never start a note while another key
+  # sounds, only end sounding notes, and end every note.
+  def expect_one_note_at_a_time(log)
+    sounding = Hash.new(0)
+    log.each do |e|
+      key = [e.channel, e.note]
+      case e.type
+      when :note_on
+        expect(sounding.keys - [key]).to eq([])
+        sounding[key] += 1
+      when :note_off
+        expect(sounding[key]).to be > 0
+        sounding[key] -= 1
+        sounding.delete(key) if sounding[key] == 0
+      when :choke
+        # Released (ringing) lanes are choked too
+        expect(sounding.keys - [key]).to eq([])
+        sounding.clear
+      end
+    end
+    expect(sounding).to be_empty
+  end
+
   def on(n, v = 1.0, ch: 0)
     ev.note_on(n, v, channel: ch)
   end
@@ -346,6 +369,25 @@ RSpec.describe(MB::Sound::MIDI::Allocator) do
       expect(readers[0].generation).to eq(gen + 1)
     end
 
+    it 'keeps lanes balanced across seeks of a MIDI file with a sustain transform' do
+      s = MB::Sound::MIDI::Stream.for('spec/test_data/c_major.mid').sustain
+      a = MB::Sound::MIDI::Allocator.new(s, voices: 2)
+      readers = a.lanes.map(&:reader)
+      logs = Array.new(readers.length) { [] }
+      read = ->(seconds) { (seconds * 100).round.times { readers.each_with_index { |r, idx| logs[idx].concat(r.next(1/100r)) } } }
+
+      read.(0.4) # seeks while 28 is held
+      s.seek(0.6)
+      read.(0.5)
+      s.restart
+      read.(30)
+
+      expect(logs.flatten.count(&:note_on?)).to be > 10
+      logs.each do |log| expect_one_note_at_a_time(log) end
+      expect(logs.flatten.count(&:choke?)).to be > 0
+      expect(readers.map(&:ended?)).to all(eq(true))
+    end
+
     it 'ends lanes when the input has ended and been read' do
       a = alloc(on(60), off(60), voices: 1, spares: 1, mono: false)
       r = a.lanes.map(&:reader)
@@ -498,26 +540,7 @@ RSpec.describe(MB::Sound::MIDI::Allocator) do
           logs = Array.new(readers.length) { [] }
           400.times { readers.each_with_index { |r, idx| logs[idx].concat(r.next(1/100r)) } }
 
-          logs.each do |log|
-            sounding = Hash.new(0)
-            log.each do |e|
-              key = [e.channel, e.note]
-              case e.type
-              when :note_on
-                expect(sounding.keys - [key]).to eq([])
-                sounding[key] += 1
-              when :note_off
-                expect(sounding[key]).to be > 0
-                sounding[key] -= 1
-                sounding.delete(key) if sounding[key] == 0
-              when :choke
-                # Released (ringing) lanes are choked too
-                expect(sounding.keys - [key]).to eq([])
-                sounding.clear
-              end
-            end
-            expect(sounding).to be_empty
-          end
+          logs.each do |log| expect_one_note_at_a_time(log) end
 
           expect(a.lanes.map(&:state) - [:free, :released, :choking]).to eq([])
           expect(logs.sum { |l| l.count(&:note_on?) }).to eq(random_events(seed).count(&:note_on?))
