@@ -144,6 +144,18 @@ module MB
           with(vibrato: [rate, depth, delay].freeze)
         end
 
+        # Returns a NotePitch that glides between notes (portamento) over
+        # +time+ (seconds or a length, e.g. `50.ms`; a node of seconds; or
+        # :gm for CC 5 time with CC 65 on/off and CC 84), in the pitch
+        # domain.  With +legato: true+ only legato notes glide; otherwise
+        # every note after the first does.  See Notes::Glide.
+        #
+        #     play v.hz.glide(80.ms).saw * v.amp_env
+        #     play v.hz.glide(:gm, legato: true).saw * v.amp_env.legato
+        def glide(time, legato: false)
+          with(glide: [time, !!legato].freeze)
+        end
+
         # Returns a NotePitch +semitones+ higher (an Interval or semitones).
         def transpose(semitones)
           with(transpose: @settings[:transpose] + Interval.semitones(semitones).to_f)
@@ -164,9 +176,13 @@ module MB
           NotePitch.new(@notes, sample_rate: @sample_rate, **@settings, **changes)
         end
 
-        # The note number node (see #build_freq).
+        # The note number node (see #build_freq): Notes#number, or a
+        # Notes::Glide.
         def number_node
-          @notes.number
+          return @notes.number unless @settings[:glide]
+
+          time, legato = @settings[:glide]
+          Glide.new(@notes.stream, time: time, legato: legato, notes: @notes, sample_rate: @sample_rate)
         end
 
         # Semitone offsets for #build_freq.

@@ -29,6 +29,7 @@ module MB
 
           when :cc
             @stack.clear if event.all_sound_off? || event.all_notes_off?
+            other(event)
 
           else
             other(event)
@@ -48,7 +49,7 @@ module MB
         def uncovered(entry)
         end
 
-        # Called for other events (e.g. :glide).
+        # Called for other events (e.g. :glide, :cc).
         def other(event)
         end
       end

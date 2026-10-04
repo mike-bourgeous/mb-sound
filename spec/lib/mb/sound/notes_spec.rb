@@ -548,6 +548,86 @@ RSpec.describe(MB::Sound::Notes) do
     end
   end
 
+  describe 'glide' do
+    # Note numbers from a glide over +events+ for +buffers+ buffers of 480.
+    def glide_numbers(*events, time: 0.05, legato: false, buffers: 60)
+      v = notes_for(*events)
+      g = MB::Sound::Notes::Glide.new(v.stream, time: time, legato: legato, notes: v)
+      buffers.times.map { g.sample(480).dup }.reduce(:concatenate)
+    end
+
+    let(:gap) { [ev.note_on(60), ev.note_off(60, time: 1/10r), ev.note_on(72, time: 2/10r)] }
+    let(:overlap) { [ev.note_on(60), ev.note_on(72, time: 2/10r), ev.note_off(72, time: 3/10r)] }
+
+    it 'glides every note after the first by default, along a smoothstep in note numbers' do
+      n = glide_numbers(*gap)
+      expect(n[0]).to eq(60)
+      expect(n[9600]).to be_within(1e-4).of(60 + 12 * (1 / 2400.0) ** 2 * (3 - 2 / 2400.0))
+      expect(n[9600 + 1199]).to be_within(1e-3).of(66)
+      expect(n[9600 + 2399]).to eq(72)
+      expect(n[9600 + 2400]).to eq(72)
+    end
+
+    it 'glides only legato notes with legato: true' do
+      expect(glide_numbers(*gap, legato: true)[9600]).to eq(72)
+      n = glide_numbers(*overlap, legato: true)
+      expect(n[9600 + 1199]).to be_within(1e-3).of(66)
+      # releasing the newest note glides back to the held one
+      expect(n[14400 + 1199]).to be_within(1e-3).of(66)
+      expect(n[14400 + 2400]).to eq(60)
+    end
+
+    it 'treats legato-marked note-ons as legato (allocator mono lanes)' do
+      n = glide_numbers(ev.note_on(60), ev.note_off(60, time: 2/10r), ev.note_on(72, time: 2/10r, legato: true), legato: true)
+      expect(n[9600 + 1199]).to be_within(1e-3).of(66)
+    end
+
+    it 'glides the next note from a :glide event or CC 84, never moving a sounding note' do
+      n = glide_numbers(ev.note_on(60), ev.note_off(60, time: 1/10r), ev.glide(48, time: 1/10r), ev.note_on(72, time: 2/10r), legato: true)
+      expect(n[4800...9600].to_a.uniq).to eq([60])
+      expect(n[9600]).to be_within(1e-3).of(48)
+      expect(n[9600 + 1199]).to be_within(1e-3).of(60)
+
+      n = glide_numbers(ev.note_on(60), ev.cc_raw(84, 36, time: 1/10r), ev.note_on(72, time: 2/10r), ev.cc_raw(84, 50, time: 3/10r), legato: true)
+      expect(n[4800...9600].to_a.uniq).to eq([60])
+      expect(n[9600 + 1199]).to be_within(1e-3).of(54)
+      expect(n[14400..].to_a.uniq.last).to eq(72) # the pending 84 waits for a note
+    end
+
+    it 'uses CC 5 and CC 65 with :gm' do
+      off = glide_numbers(*gap, time: :gm)
+      expect(off[9600]).to eq(72)
+      on = glide_numbers(ev.cc_raw(65, 127), ev.cc_raw(5, 64), *gap, time: :gm)
+      len = (MB::Sound::Notes::GM_CONTROLS[:portamento_time].value(64) * 48000).round
+      expect(on[9600 + len / 2 - 1]).to be_within(0.05).of(66)
+      expect(on[9600 + len]).to eq(72)
+      expect(on[9600 + len - 10]).to be < 72
+    end
+
+    it 'reads a time node on the note-on sample' do
+      n = glide_numbers(*gap, time: 0.1.constant)
+      expect(n[9600 + 2399]).to be_within(1e-3).of(66)
+    end
+
+    it 'jumps at content jumps' do
+      clip = MB::Sound.seq(MB::Sound::C4, MB::Sound::G4).n4.loop
+      src = MB::Sound::MIDI::ClipSource.new(clip, transport: transport)
+      v = MB::Sound::Notes.new(src)
+      g = MB::Sound::Notes::Glide.new(v.stream, time: 0.1, notes: v)
+      3.times { g.sample(480) }
+      src.start_at(5/16r)
+      expect(g.sample(480)[0]).to eq(67)
+    end
+
+    it 'glides the frequency of a pitch' do
+      v = notes_for(*gap)
+      f = v.hz.glide(50.ms).freq
+      out = 60.times.map { f.sample(480).dup }.reduce(:concatenate)
+      expect(out[9600 + 1199]).to be_within(0.05).of(MB::Sound.tuning.frequency_of(66))
+      expect(v.hz.glide(:gm, legato: true).settings[:glide]).to eq([:gm, true])
+    end
+  end
+
   describe 'ending' do
     let(:clip) { MB::Sound.seq(MB::Sound::C4, MB::Sound::E4).n8 } # 0.5 s at 120 BPM
 
