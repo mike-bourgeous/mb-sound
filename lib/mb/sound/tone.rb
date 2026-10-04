@@ -503,7 +503,7 @@ module MB
       # #with_phase).  Used by Sequence::TempoNode to lock tempo-synced tones
       # to the timeline.
       def sync_cycles(cycles)
-        oscillator.phasor.sync(cycles)
+        oscillator.sync_cycles(cycles)
         self
       end
 

@@ -88,13 +88,6 @@ RSpec.describe(MB::Sound::BandLimit) do
     expect(clean[23]).to be_within(1e-6).of(1000.hz.aramp.sample(48)[23])
   end
 
-  it 'does not correct across a phase reset' do
-    osc = oscillator(:ramp, frequency: 100)
-    osc.sample(240) # half a cycle: the next sample is right after the jump
-    osc.reset
-    expect(osc.sample(1)[0]).to eq(0)
-  end
-
   it 'is not used for noise' do
     expect(1.hz.ramp.noise.oscillator.band_limited?).to eq(false)
   end
@@ -409,6 +402,65 @@ RSpec.describe(MB::Sound::BandLimit) do
     it 'shows sync in to_s' do
       expect(100.hz.ramp.sync(ratio: 2).to_s).to include('sync')
       expect(100.hz.ramp.softsync(ratio: 2).to_s).to include('softsync')
+    end
+  end
+
+  describe 'phase jumps (note retriggers, timeline locks)' do
+    def bl_osc(**opts)
+      MB::Sound::Oscillator.new(:ramp, frequency: 1001.3, advance: 2 * Math::PI / 48000, band_limit: true, **opts)
+    end
+
+    it 'turns a reset into a band-limited step that starts at the continuing value' do
+      continuing = bl_osc.sample(31).dup[30]
+      o = bl_osc
+      o.sample(30)
+      o.reset
+      after = o.sample(40).dup
+      expect(after[0]).to be_within(0.01).of(continuing)
+
+      # After the step, the same as an oscillator started at that phase
+      fresh = bl_osc.sample(40)
+      expect(after[32..]).to all_be_within(1e-6).of_array(fresh[32..])
+    end
+
+    it 'leaves naive and slow LFO oscillators jumping' do
+      o = MB::Sound::Oscillator.new(:ramp, frequency: 1001.3, advance: 2 * Math::PI / 48000)
+      o.sample(30)
+      o.reset
+      expect(o.sample(1)[0]).to eq(0)
+
+      lfo = MB::Sound::Oscillator.new(:ramp, frequency: 5.3, advance: 2 * Math::PI / 48000, band_limit: 15..30)
+      lfo.sample(3000)
+      lfo.reset
+      expect(lfo.sample(1)[0]).to be_within(1e-6).of(0)
+    end
+
+    it 'reduces the high-frequency energy of repeated retriggers' do
+      energy = ->(o) {
+        data = Numo::DFloat.cast(Numo::SFloat.zeros(0).concatenate(*Array.new(64) { o.sample(256).dup.tap { o.reset } }))
+        pow = MB::Sound.real_fft(data).abs**2
+        pow[(18000.0 / 48000 * data.length).ceil..].sum
+      }
+      clean = energy.(bl_osc)
+      naive = energy.(MB::Sound::Oscillator.new(:ramp, frequency: 1001.3, advance: 2 * Math::PI / 48000))
+      expect(10 * Math.log10(clean / naive)).to be < -6
+    end
+
+    it 'gives the same step in C and Ruby' do
+      c = bl_osc
+      r = bl_osc
+      c.sample_c(30)
+      r.sample_ruby(30)
+      c.reset
+      r.reset
+      expect(c.sample_c(50)).to eq(r.sample_ruby(50))
+    end
+
+    it 'smooths Tone#sync_cycles (tempo LFO phase locks)' do
+      t = 1001.3.hz.ramp
+      t.sample(30)
+      t.sync_cycles(0.0)
+      expect(t.sample(1)[0].abs).to be > 0.1 # not the jump to 0
     end
   end
 end

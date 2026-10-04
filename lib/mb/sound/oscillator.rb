@@ -239,16 +239,27 @@ module MB
         @phasor.phi * TWOPI
       end
 
-      # Directly sets the current phase offset for this oscillator.
+      # Directly sets the current phase offset for this oscillator.  A
+      # band-limited oscillator smooths the jump (see #reset).
       def phi=(phi)
-        @phasor.phi = phi / TWOPI
-        unprime
+        phase_jump { @phasor.phi = phi / TWOPI }
       end
 
-      # Resets the oscillator phase to its starting phase (see #phase).
+      # Resets the oscillator phase to its starting phase (see #phase), e.g.
+      # when a MIDI voice plays a note.  A band-limited oscillator turns the
+      # jump into a band-limited step (minBLEP; see BandLimit.minblep_tables)
+      # over the next samples, so a retrigger doesn't alias (the step itself
+      # is still there, as a softer click).
       def reset
-        @phasor.reset
-        unprime
+        phase_jump { @phasor.reset }
+      end
+
+      # Moves the phase to +cycles+ past the starting phase (e.g. to lock a
+      # tempo LFO to the timeline; see Sequence::TempoNode), smoothing the
+      # jump like #reset.
+      def sync_cycles(cycles)
+        phase_jump { @phasor.sync(cycles) }
+        self
       end
 
       # Sets a sync input: a graph node of sync pulses (see
@@ -578,7 +589,9 @@ module MB
         end
 
         @last_freq = freq.is_a?(Numeric) ? freq : freq[-1]
+        @last_width = width.is_a?(Numo::NArray) ? width[-1] : width
 
+        add_jump_residual(buf, gain)
         buf = add_waveshape_and_range(buf)
 
         buf.not_inplace!
@@ -623,10 +636,12 @@ module MB
         end
 
         @last_freq = freq_table.is_a?(Numeric) ? freq_table : freq_table[-1]
+        @last_width = width.is_a?(Numo::NArray) ? width[-1] : width
 
         values = values.real if !@osc_buf.is_a?(Numo::SComplex) && values.is_a?(Numo::DComplex)
         @osc_buf[0...count] = values
         buf = @osc_buf[0...count].inplace!
+        add_jump_residual(buf, gain)
         buf = add_waveshape_and_range(buf)
         buf.not_inplace!
       end
@@ -704,6 +719,48 @@ module MB
       end
 
       private
+
+      # Runs the block, which jumps the phase, and for a band-limited
+      # oscillator that has played, queues a band-limited step for the
+      # following samples (see #reset).
+      def phase_jump
+        before = @phasor.state[0]
+        played = @last_freq != 0.0 && (@bl_state[3] != 0 || @blit_state[6] != 0)
+        yield
+        after = @phasor.state[0]
+        unprime
+
+        return unless played && !@sync && synth_kernel? && !blit?
+
+        w = BandLimit.clamp_width((@last_width || 0.5).to_f)
+        v0, s0 = BandLimit.sync_shape(@wave_type, w, before)
+        v1, s1 = BandLimit.sync_shape(@wave_type, w, after)
+        inc = @last_freq * @phasor.advance
+        k = @band_limit.is_a?(Range) ? BandLimit.fade(inc.abs / @phasor.advance, @band_limit.begin.to_f, @band_limit.end.to_f) : 1.0
+        k = 0.0 unless band_limited?
+        return if k == 0
+
+        blep, blamp = BandLimit.minblep_tables
+        steps = Numo::DFloat.new(BandLimit::SYNC_TAPS).seq * BandLimit::SYNC_OVERSAMPLE
+        residual = (blep[steps] * (v1 - v0) + blamp[steps] * ((s1 - s0) * inc)) * k
+        @jump_residual = @jump_residual ? residual + pad_residual(@jump_residual, residual.length) : residual
+      end
+
+      def pad_residual(r, length)
+        return r[0...length] if r.length >= length
+
+        Numo::DFloat.zeros(length).tap { |z| z[0...r.length] = r }
+      end
+
+      # Adds any queued phase jump step (see #phase_jump) to +buf+, scaled
+      # by the output +gain+.
+      def add_jump_residual(buf, gain)
+        return unless @jump_residual
+
+        n = [buf.length, @jump_residual.length].min
+        buf[0...n] += @jump_residual[0...n] * gain
+        @jump_residual = n < @jump_residual.length ? @jump_residual[n..].dup : nil
+      end
 
       # Clears band-limiting history after a phase jump.
       def unprime
