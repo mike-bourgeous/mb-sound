@@ -8,9 +8,11 @@ module MB
       # Clips are usually built with MB::Sound#seq or MB::Sound#grid rather
       # than created directly.
       #
-      # Playback into a node graph uses the output methods (#trigger, #gate,
-      # #velocity, #number, #hz, #tone, and #env), which create ClipNodes that
-      # read the clip in sync with a Transport.
+      # A clip is a MIDI source (#stream, a MIDI::ClipSource that follows a
+      # Transport's timeline).  Playback into a node graph uses the output
+      # methods (#trigger, #gate, #velocity, #number, #hz/#tone, #freq,
+      # #env, ...), which are nodes of a mono MB::Sound::Notes on the clip's
+      # stream (#notes); #synth plays it polyphonically.
       #
       # Example (bin/sound.rb):
       #     riff = seq(C3, Ds3, G3, As3).n8 | seq(G3.n4, rest.n4)
@@ -36,7 +38,7 @@ module MB
         attr_reader :seed
 
         # The clip this clip was made from by a transform like #transpose,
-        # #legato, or #loop (or a voice of #synth), or nil.  Session#swap uses
+        # #legato, or #loop, or nil.  Session#swap uses
         # this to rebuild derived clips (e.g. a transposed layer) from a
         # replacement clip (see #rederive).
         attr_reader :source
@@ -306,7 +308,7 @@ module MB
         # [time, :on/:off, event, cycle] sorted by time.  Note-offs sort before
         # note-ons at the same time so repeated notes retrigger.
         #
-        # Used by ClipNode.
+        # Used by MIDI::ClipSource.
         def edges(from, to)
           return [] if @length <= 0 && @events.empty?
 
@@ -353,41 +355,77 @@ module MB
           Random.new((@seed * 1_000_003 + cycle) * 1_000_003 + index).rand < event.probability
         end
 
-        # Creates a graph node that outputs a single-sample impulse at the
-        # start of each event, scaled from velocity to +:range+.  Useful for
-        # pinging filters or driving other trigger-based nodes.
-        def trigger(range: 0.0..1.0, transport: nil)
-          ClipNode::Trigger.new(self, range: range, transport: transport)
+        # Returns a MIDI::Stream playing this clip: a new MIDI::ClipSource
+        # (each clip event becomes a note-on and a note-off on +:channel+)
+        # at the tempo of +:transport+ (the session's by default).  A clip is
+        # just a MIDI source, so anything that reads streams plays clips:
+        # Notes (#notes and the output methods below), MB::Sound::Synth
+        # (#synth), and MIDI transforms (`clip.stream.transpose(12)`).
+        #
+        # Each call makes a new source, since a source follows the timeline
+        # of the graph that plays it (see Sequence::TimelineNode): a clip can
+        # play in several players at once, each in its own place.
+        def stream(channel: 0, transport: nil)
+          MIDI::Stream.new(MIDI::ClipSource.new(self, channel: channel, transport: transport))
         end
 
-        # Creates a graph node that outputs 1.0 while any event is playing and
-        # 0.0 otherwise.
+        # Returns a MB::Sound::Notes on a new #stream of this clip: the mono
+        # (last-note priority) signal DSL also used for MIDI and synth voices
+        # (v.gate, v.trigger, v.number, v.hz, v.env, ...).  The output
+        # methods below each make their own Notes; call this once to share
+        # one between several nodes:
+        #
+        #     n = bass.notes
+        #     play n.hz.saw * n.amp_env(0.003, 0.15, 0.6, 0.08)
+        def notes(transport: nil)
+          MB::Sound::Notes.new(stream(transport: transport))
+        end
+
+        # A single-sample impulse at the start of each event, valued at its
+        # velocity (0..1; a Notes::Trigger).  Useful for pinging filters or
+        # resetting other trigger-based nodes.
+        def trigger(transport: nil)
+          notes(transport: transport).trigger
+        end
+
+        # 1.0 while any event is playing and 0.0 otherwise (a Notes::Gate).
         def gate(transport: nil)
-          ClipNode::Gate.new(self, transport: transport)
+          notes(transport: transport).gate
         end
 
-        # Creates a graph node that outputs the velocity of the most recent
-        # event, scaled to +:range+.
+        # The velocity of the most recent event (0..1 scaled to +:range+).
         def velocity(range: 0.0..1.0, transport: nil)
-          ClipNode::Velocity.new(self, range: range, transport: transport)
+          v = notes(transport: transport).velocity
+          range == (0.0..1.0) ? v : v * (range.end - range.begin).to_f + range.begin.to_f
         end
 
-        # Creates a graph node that outputs the value (e.g. MIDI note number)
-        # of the most recent event, starting with the first event's value.
+        # The value (e.g. MIDI note number) of the most recent event,
+        # starting with the first event's value (a Notes::Number).
         def number(transport: nil)
-          ClipNode::Number.new(self, transport: transport)
+          notes(transport: transport).number
         end
         alias value number
 
-        # Creates a graph node that outputs the frequency in Hz of the most
-        # recent event's note number.  See also #period.
+        # A Pitch following this clip's notes (a Notes::NotePitch, like
+        # `v.hz` in a synth voice): chain a wave type (`clip.hz.ramp`,
+        # `clip.tone.square.at(0.5)`) or `.transpose(7)`.  Its oscillators
+        # reset their phase at each note (key sync) unless they are #free.
+        # Used directly as a signal, it plays a sine, like any Pitch.
         def hz(transport: nil)
-          number(transport: transport).freq
+          notes(transport: transport).hz
         end
-        alias frequency hz
+        alias tone hz
+        alias pitch hz
+
+        # A node giving the frequency in Hz of the most recent event's note
+        # (a Notes::Frequency), for arithmetic.  See also #period.
+        def freq(transport: nil)
+          notes(transport: transport).freq
+        end
+        alias frequency freq
 
         # Creates a graph node that outputs the period in seconds (one cycle,
-        # 1 / #hz) of the most recent event's note, e.g. for a delay that
+        # 1 / #freq) of the most recent event's note, e.g. for a delay that
         # resonates at each note's pitch.  Use `smoothing: false` so the
         # delay jumps to each new note instead of gliding.
         #
@@ -399,75 +437,70 @@ module MB
         # The delay's feedback is a plain gain, so this rings brightly like
         # a comb filter rather than a damped Karplus-Strong string.
         def period(transport: nil)
-          1 / hz(transport: transport)
+          1 / freq(transport: transport)
         end
 
-        # Creates an oscillator (a Tone) whose frequency follows this clip's
-        # notes.  Chain a wave type, e.g. `clip.tone.ramp`.
-        def tone(transport: nil)
-          hz(transport: transport).tone
-        end
-
-        # Creates an ADSR envelope node that triggers at the start of each
-        # event and releases at its end.  Envelope peak follows velocity,
-        # scaled to +:velocity+.  Times are in seconds.
-        def env(attack = 0.005, decay = 0.1, sustain = 0.5, release = 0.1, velocity: 0.5..1.0, transport: nil)
-          ClipNode::Envelope.new(
-            self,
-            attack: attack, decay: decay, sustain: sustain, release: release,
-            velocity: velocity, transport: transport
-          )
-        end
-
-        # Splits this clip into +voices+ clips and yields each one (and its
-        # index) to the block, which returns a graph that plays that voice
-        # (e.g. using voice.tone and voice.env).  Returns the voices' graphs
-        # mixed together, or an Array of mixed channels if the block returns
-        # Arrays (e.g. stereo pairs).  Modeled on MidiMethods#synth.
+        # An envelope (a Notes::NoteEnvelope, an MB::Sound::Envelope) that
+        # starts at each event and releases at its end, with the
+        # EnvelopeMethods#env preset: positional attack, decay, sustain, and
+        # release (5 ms, 0.2 s, 0.7, 0.3 s by default), :analog curves,
+        # velocity sensitivity 0.5..1, and any Envelope option (+:curve+,
+        # +:sensitivity+, +:velocity_scale+, +:legato+, +:hold+, ...).
         #
-        # Notes are given to voices round-robin in start order, so notes that
-        # start together (chords) play on different voices, and a note's
-        # release can ring on one voice while the next note starts on
-        # another.  Voices that get no notes are skipped.
+        # Overlapping events play mono, like a synth voice: each event
+        # retriggers the envelope from its current level, and it releases
+        # when no event is playing.  GM2 time scaling (CC 72/73/75) is off,
+        # since clips carry no controllers (+gm: true+ turns it on).
+        #
+        #     bass.env(0.003, 0.15, 0.6, 0.08, curve: :snappy)
+        #     hats.env(0, 0.03, 0, 0.02, sensitivity: 0.2..1)
+        def env(attack = nil, decay = nil, sustain = nil, release = nil, gm: false, transport: nil, **options)
+          notes(transport: transport).env(attack, decay, sustain, release, gm: gm, **options)
+        end
+        alias envelope env
+
+        # An amplitude envelope (see #env and EnvelopeMethods#amp_env).
+        def amp_env(attack = nil, decay = nil, sustain = nil, release = nil, gm: false, transport: nil, **options)
+          notes(transport: transport).amp_env(attack, decay, sustain, release, gm: gm, **options)
+        end
+        alias amp_envelope amp_env
+
+        # An FM index envelope (see #env and EnvelopeMethods#fm_env).
+        def fm_env(attack = nil, decay = nil, sustain = nil, release = nil, gm: false, transport: nil, **options)
+          notes(transport: transport).fm_env(attack, decay, sustain, release, gm: gm, **options)
+        end
+        alias fm_envelope fm_env
+
+        # A filter cutoff multiplier envelope (see #env and
+        # EnvelopeMethods#filter_env).
+        def filter_env(attack = nil, decay = nil, sustain = nil, release = nil, gm: false, transport: nil, **options)
+          notes(transport: transport).filter_env(attack, decay, sustain, release, gm: gm, **options)
+        end
+        alias filt_env filter_env
+        alias filter_envelope filter_env
+
+        # A polyphonic MB::Sound::Synth playing this clip: the block builds
+        # one voice from a Notes (+v+, as in synth scripts) and its lane
+        # index, and a MIDI::Allocator gives each note to a free voice at
+        # runtime (stealing the oldest released voice when all +:voices+
+        # are busy), so a note's release can ring on one voice while the
+        # next note starts on another.  +options+ go to Synth.new (+:spares+,
+        # +:steal+, +:mono+, +:seed+, ...); +:tail+ is 0, so a non-looping
+        # clip's synth ends when its last voice goes quiet.
+        #
+        # Returns the Synth, or a Channels bundle of its outputs if voices
+        # return several channels (e.g. stereo pairs).
         #
         # Example (bin/sound.rb):
         #     chords = seq(A2, F2, C3, G2).n1.legato(0.95).loop
         #     bg :pad, chords.synth(voices: 3) { |v|
-        #       (v.tone.ramp.at(1) + v.transpose(7).tone.ramp.at(0.7)) * v.env(0.6, 1.0, 0.8, 2.5) * 0.3
+        #       (v.hz.ramp.at(1) + v.hz.transpose(7).ramp.at(0.7)) * v.env(0.6, 1.0, 0.8, 2.5) * 0.3
         #     }
-        def synth(voices: 2)
-          raise ArgumentError, 'Pass a block that builds a graph for one voice' unless block_given?
-          raise ArgumentError, "Voice count must be a positive Integer (got #{voices.inspect})" unless voices.is_a?(Integer) && voices > 0
+        def synth(voices: 2, **options, &block)
+          raise ArgumentError, 'Pass a block that builds a graph for one voice' unless block
 
-          graphs = voice_clips(voices).each_with_index.filter_map { |v, idx|
-            yield v, idx unless v.events.empty?
-          }
-          raise ArgumentError, 'Cannot build a synth from a clip with no notes' if graphs.empty?
-
-          if graphs.any? { |g| g.is_a?(Array) || g.channel_count > 1 }
-            graphs = graphs.map { |g| g.is_a?(Array) ? g : g.outputs }
-            channels = graphs.map(&:length).max
-            GraphNode::Channels.new(Array.new(channels) { |c| graphs.map { |g| g[c % g.length] }.reduce(:+) })
-          else
-            graphs.reduce(:+)
-          end
-        end
-
-        # Splits this clip into +count+ clips with notes assigned round-robin
-        # in start order (see #synth).  A looping clip whose note count
-        # doesn't divide evenly among the voices is repeated first, so the
-        # round-robin order continues across loops.
-        def voice_clips(count)
-          clip = self
-          if @loop && !@events.empty?
-            cycles = count / @events.length.gcd(count)
-            clip = repeated(cycles).loop(seed: @seed) if cycles > 1
-          end
-
-          Array.new(count) { |v|
-            clip.with_events(clip.events.select.with_index { |_, idx| idx % count == v })
-              .derive_from(self, :voice_clips, [count, v], {})
-          }
+          s = MB::Sound::Synth.new(self, voices: voices, **{ tail: 0 }.merge(options), &block)
+          s.outputs.length > 1 ? GraphNode::Channels.new(s.outputs) : s
         end
 
         # Returns this clip, the clip it was made from (see #source), that
@@ -484,12 +517,7 @@ module MB
         def rederive(clip)
           raise ArgumentError, "#{self} wasn't made from another clip" unless @derivation
           name, args, kwargs = @derivation
-
-          if name == :voice_clips
-            clip.voice_clips(args[0])[args[1]]
-          else
-            clip.public_send(name, *args, **kwargs)
-          end
+          clip.public_send(name, *args, **kwargs)
         end
 
         def to_s

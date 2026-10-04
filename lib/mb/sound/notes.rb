@@ -10,8 +10,8 @@ module MB
     # filename (see MIDI::Stream.for).
     #
     # Every node is sample-exact: events land on their exact samples at the
-    # node's own sample rate (see Notes::Node), on the same samples as
-    # ClipNode for clips.  Nodes are made once per Notes instance and
+    # node's own sample rate (see Notes::Node); for clips, the samples where
+    # the clip's edges fall at the transport's tempo.  Nodes are made once per Notes instance and
     # reused (consumers branch them through Tees as usual); controller
     # nodes (#cc, #bend, #pressure and the named controls) are shared by
     # every Notes instance reading the same control stream, so every lane
@@ -31,9 +31,9 @@ module MB
     #     play v.hz.saw * v.gate
     #     v.number.smooth(0.05, reset: v.trigger)
     #
-    # MB::Sound::Synth builds one Notes per MIDI::Allocator lane (step F2
-    # of the MIDI flow plan); the clip/console/script integration comes
-    # later.
+    # MB::Sound::Synth builds one Notes per MIDI::Allocator lane, and the
+    # output methods of Sequence::Clip (clip.env, clip.tone, ...) are the
+    # nodes of a Notes on the clip (Clip#notes).
     class Notes
       # The note number held before the first note when the source can't
       # tell its first note (C4).

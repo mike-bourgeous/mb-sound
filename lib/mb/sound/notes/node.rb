@@ -7,13 +7,13 @@ module MB
       # sample rate, and puts every event on its exact sample: the event at
       # Rational stream time t lands on sample floor((t - from) * rate) of
       # the buffer that starts at stream time +from+.  For a clip source
-      # this is the same sample as ClipNode's (see MIDI::ClipSource).
+      # this is the sample on which the clip's edge falls at the transport's
+      # tempo (see MIDI::ClipSource).
       #
       # When the stream's content jumps (MIDI::Stream::Reader#generation
       # changes: seeks, timeline jumps, clip swaps), the source sends
       # note-offs for sounding notes, and held values chase the note at the
-      # new position (see MIDI::Source#chase) at the jump's sample, like
-      # ClipNode's #reset_notes.
+      # new position (see MIDI::Source#chase) at the jump's sample.
       #
       # Ending (see #ended? and #sample): #ended? is true once the stream's
       # source has ended (e.g. a MIDI file or a non-looping clip has played
@@ -22,9 +22,10 @@ module MB
       # DSL nodes).  Nodes for which #ends_graph? is true (gate, trigger,
       # choke) then return nil once the Notes instance is idle (every
       # envelope it made has finished; see Notes#idle?) or TAIL_SECONDS
-      # later, ending the graph like ClipNode's gate and trigger do.  Held
-      # values (note numbers, controllers) never end, so oscillators keep
-      # playing through an envelope's release.
+      # later, ending the graph (envelopes end too; see
+      # NoteEnvelope#sample).  Held values (note numbers, controllers) never
+      # end, and an oscillator's ended key sync trigger only stops its
+      # resets, so oscillators keep playing through an envelope's release.
       #
       # Subclasses implement #render(buf, items) (see Held and Impulse).
       class Node
@@ -145,10 +146,12 @@ module MB
           raise NotImplementedError, "#{self.class} must implement #render"
         end
 
-        # The note number of an event's note (a number, or a Pitch from a
-        # clip, converted in the current tuning like ClipNode::Number does).
+        # The note number of an event's note: a number, or a Pitch (a fixed
+        # frequency like `440.hz` in a clip) as the note number of its
+        # frequency in the current tuning when its event starts, so
+        # converting back (Notes#freq) gives its frequency in any tuning.
         def number_of(note)
-          Sequence::ClipNode::Number.number_of(note).to_f
+          (note.is_a?(MB::Sound::Pitch) ? MB::Sound.tuning.number_of(note.frequency) : note).to_f
         end
 
         # A node whose output holds a level between events.  Subclasses

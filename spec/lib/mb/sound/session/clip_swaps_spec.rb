@@ -66,11 +66,17 @@ RSpec.describe(MB::Sound::Session::ClipSwaps) do
     expect(starts.call).to contain_exactly([0, 1/16r], [3/16r], [0, 1/8r])
   end
 
-  it 'rebuilds synth voices from a new chord progression' do
+  it 'swaps the clip of a synth, whose voices play the new chords' do
     chords = MB::Sound.seq(MB::Sound::A2, MB::Sound::F2, MB::Sound::C3).n1.loop
-    session.add(chords.synth(voices: 2) { |v| v.number }, name: :pad)
-    session.swap(:pad, MB::Sound.seq(MB::Sound::A2, MB::Sound::C3, MB::Sound::E3, MB::Sound::G3).n1.loop)
-    expect(clips(:pad).map { |c| c.events.map(&:value) }).to eq([[45, 52], [48, 55]])
+    session.add(chords.synth(voices: 2) { |v| v.number * v.gate }, name: :pad)
+    run(4000)
+    four = MB::Sound.seq(MB::Sound::A2, MB::Sound::C3, MB::Sound::E3, MB::Sound::G3).n1.loop
+    expect(session.swap(:pad, four)).to eq(1)
+    expect(clips(:pad)).to eq([four])
+
+    data = run(96000)
+    expect(data[96000 - 4000 - 1]).to eq(MB::Sound::A2.number)
+    expect(data[96000 - 4000]).to eq(MB::Sound::C3.number) # bar 2 of the new loop, in phase
   end
 
   it 'swaps stopped players, playing the new clip when resumed' do

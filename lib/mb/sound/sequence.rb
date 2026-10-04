@@ -7,7 +7,6 @@ require_relative 'sequence/note_methods'
 require_relative 'sequence/grid'
 require_relative 'sequence/transport'
 require_relative 'sequence/timeline_node'
-require_relative 'sequence/clip_node'
 require_relative 'sequence/tempo_node'
 
 module MB
@@ -27,7 +26,8 @@ module MB
     #       noise.filter(:highpass, cutoff: 8000) * beat[:hat].env(0, 0.03, 0, 0.02) * 0.5
     #     ).softclip
     module Sequence
-      # The default Transport used by ClipNodes (see MB::Sound#bpm).
+      # The default Transport followed by clips (MIDI::ClipSource) and
+      # tempo nodes (see MB::Sound#bpm).
       def self.transport
         @transport ||= Transport.new
       end

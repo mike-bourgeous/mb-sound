@@ -23,8 +23,7 @@ module MB
       # Sources that know their content may also tell which note would be
       # sounding at a jump (#chase) and which note comes first
       # (#first_note), so held values like note numbers can jump to the
-      # note at the new position (like ClipNode does; see
-      # MB::Sound::Notes).
+      # note at the new position (see MB::Sound::Notes).
       module Source
         include GraphNode::Nameable
         include GraphNode::Traversable

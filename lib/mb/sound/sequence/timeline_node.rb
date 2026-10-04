@@ -2,7 +2,7 @@ module MB
   module Sound
     module Sequence
       # Mixin for graph nodes that follow a Transport's timeline, like
-      # ClipNode (clips), TempoNode (tempo-synced frequencies and delay
+      # MIDI::ClipSource (clips), TempoNode (tempo-synced frequencies and delay
       # times), and the LFOs built on them.
       #
       # Session finds these nodes in every graph it plays (including master

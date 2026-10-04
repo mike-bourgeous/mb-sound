@@ -47,7 +47,7 @@ module MB::Sound
 
     kick = (40.constant + 90 * beat[:kick].env(0, 0.04, 0, 0.01)).tone.sine.at(1) * beat[:kick].env(0, 0.3, 0, 0.05)
     snare = noise.at(0.1).filter(:bandpass, cutoff: 1900, quality: 1.5) * beat[:snare].env(0, 0.12, 0, 0.05) * 2
-    hats = noise.at(0.1).filter(:highpass, cutoff: 7500) * hat.env(0, 0.025, 0, 0.02, velocity: 0.1..1) * 0.6
+    hats = noise.at(0.1).filter(:highpass, cutoff: 7500) * hat.env(0, 0.025, 0, 0.02, sensitivity: 0.1..1) * 0.6
 
     mix = (bass_synth + kick + snare + hats).softclip(0.5, 0.95)
 

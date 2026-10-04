@@ -3,7 +3,7 @@ module MB
     module Sequence
       # Tempo and timeline for playing Clips in node graphs.
       #
-      # ClipNodes read the tempo on every buffer, so changing #bpm while
+      # Clip sources read the tempo on every buffer, so changing #bpm while
       # playing changes the speed of all clips using this transport.
       #
       # The #position is a musical timeline in whole notes, advanced by a
