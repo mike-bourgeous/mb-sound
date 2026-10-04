@@ -14,7 +14,7 @@ module MB
     #     -f, --force              overwrite the output file (alias --overwrite)
     #     -g, --graphviz           open a visualization of the node graph
     #     -P, --plot               plot the output while playing live
-    #     -q, --quiet              don't print the parameters
+    #     -q, --quiet              don't print the parameters (or MIDI controls)
     #
     # General scripts (kind :script; utilities, plots, file processors) have
     # only -h/--help: their positional arguments go to the block.
@@ -25,6 +25,13 @@ module MB
     # block gets as a MB::Sound::Notes); songs add -b/--bars N and --bpm BPM.
     # Live MIDI switches the sound card to the :low latency profile unless
     # one was chosen (see PlaybackMethods#live_midi_latency).
+    #
+    # Effects and synths list the MIDI controllers they respond to (a
+    # MIDI::ControlMap of their Values#midi_cc parameters, the controllers
+    # in use on their MIDI, and every controller node and Synth in the
+    # graph) when MIDI is in use, unless --quiet, and take --acid-xml FILE
+    # to write the map as a controller map for the ACID DAW ('-' prints it,
+    # highlighted on a terminal).
     #
     # Parameters are declared with defaults (and optional descriptions):
     #
@@ -112,9 +119,18 @@ module MB
         def midi_cc(number, name, range:, relative: true)
           value = self[name]
           range = (value * range.begin)..(value * range.end) if relative
+          spec = Values.cc_spec(number, name, value, range, @descriptions&.[](name.to_sym))
+          (@control_specs ||= []) << spec unless @control_specs&.include?(spec)
           notes = midi
-          node = notes ? notes.control(Values.cc_spec(number, name, value, range, @descriptions&.[](name.to_sym))) : value.constant
+          node = notes ? notes.control(spec) : value.constant
           node.named(name.to_s)
+        end
+
+        # The MIDI::ControlSpecs of every #midi_cc call so far, also those
+        # that gave constants because MIDI wasn't available (for the
+        # script's MIDI::ControlMap; see ScriptRunner#controls).
+        def control_specs
+          @control_specs || []
         end
 
         # The MIDI::ControlSpec for #midi_cc: controller +number+ named after
@@ -254,7 +270,7 @@ module MB
       #
       # MB::Sound.synth(midi) { |v| ... } is the same as midi.synth.
       def run_synth(&block)
-        notes = synth_midi
+        notes = @synth_notes = synth_midi
         @params.midi_source = -> { notes }
         graph = to_graph(block.arity == 1 ? block.call(notes) : block.call(notes, @params))
         announce(graph)
@@ -379,7 +395,7 @@ module MB
             o.on('-f', '--force', '--overwrite', 'Overwrite the output file') { @options[:force] = true }
             o.on('-g', '--graphviz', 'Open a visualization of the node graph') { @options[:graphviz] = true }
             o.on('-P', '--plot', 'Plot the output while playing live') { @options[:plot] = true }
-            o.on('-q', '--quiet', "Don't print the parameters") { @options[:quiet] = true }
+            o.on('-q', '--quiet', "Don't print the parameters or MIDI controls") { @options[:quiet] = true }
             profiles = MB::Sound::DeviceOutput::PROFILES.keys
             o.on(
               '-L', '--latency-profile PROFILE', profiles.map(&:to_s),
@@ -401,6 +417,10 @@ module MB
           when :song
             o.on('-b', '--bars N', Float, 'Bars to play or render (default: the whole song)') { |v| @options[:bars] = v.rationalize }
             o.on('--bpm BPM', Float, "Starting tempo (the song's tempo changes scale with it)") { |v| @options[:bpm] = v }
+          end
+
+          if @kind == :effect || @kind == :synth
+            o.on('--acid-xml FILE', "Write the MIDI controls as an ACID controller map ('-' prints it)") { |v| @options[:acid_xml] = v }
           end
 
           @declared.each do |p|
@@ -585,6 +605,7 @@ module MB
       # visualization (with --graphviz).
       def announce(graph)
         print_params
+        show_controls(graph)
         if @options[:graphviz]
           png = graph.open_graphviz
           puts "Wrote GraphViz image to #{png}"
@@ -611,6 +632,37 @@ module MB
         shown[:input] = @options[:input] || 'live' unless @kind == :song
         shown[:output] = @options[:output] || 'sound card'
         puts MB::U.highlight(shown)
+      end
+
+      # The script's MIDI controls as a MIDI::ControlMap: its
+      # Values#midi_cc parameters, the controllers in use on its MIDI (a
+      # synth's Notes, or an effect's when opened), and every controller
+      # node and Synth in +graph+.
+      def controls(graph)
+        notes = @kind == :synth ? @synth_notes : (@midi if defined?(@midi))
+        MIDI::ControlMap.new(@params, notes, graph)
+      end
+
+      # Writes or prints the ACID controller map (--acid-xml), and lists the
+      # MIDI controls unless --quiet, if MIDI is in use (a synth, or an
+      # effect with MIDI open) and there are any (see #controls).
+      def show_controls(graph)
+        map = controls(graph)
+        name = File.basename(@script)
+
+        case @options[:acid_xml]
+        when nil
+        when '-'
+          xml = map.to_acid_xml(name: name)
+          puts $stdout.tty? ? MB::U.syntax(xml, :xml) : xml
+        else
+          map.write_acid_xml(@options[:acid_xml], name: name)
+          n = map.numbers.length
+          puts "Wrote an ACID controller map (#{n} MIDI control#{'s' unless n == 1}) to #{@options[:acid_xml]}" unless @options[:quiet]
+        end
+
+        midi_in_use = @kind == :synth || (defined?(@midi) && @midi)
+        puts map if midi_in_use && !map.empty? && !@options[:quiet]
       end
 
       # Every node in +graph+ (a node or bundle).
