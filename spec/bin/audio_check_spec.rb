@@ -25,6 +25,8 @@ RSpec.describe('bin/audio_check.rb') do
       'Played 1.2 s in'
     )
     expect(text).to match(/Underruns while playing: \d+/)
+    expect(text).to match(/Write spacing: mean [\d.]+ ms, sd [\d.]+ ms, [\d.]+\.\.[\d.]+ ms \(write size 10\.67 ms\)/)
+    expect(text).to match(/Queue after each write: [\d.]+\.\.[\d.]+ ms \(limit 50\.0 ms\)/)
   end
 
   it 'explains how to test without a sound card when no backend starts' do

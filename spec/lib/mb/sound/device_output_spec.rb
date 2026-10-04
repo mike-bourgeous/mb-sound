@@ -241,6 +241,29 @@ RSpec.describe(MB::Sound::DeviceOutput, :aggregate_failures) do
     expect(o.latency).to be_between(0.02, 0.05 + 0.03)
   end
 
+  it 'tops the queue up one write at a time instead of in bursts' do
+    # When full, a write waits only until it fits, so each write returns
+    # with the queue nearly full, and writes are spaced about one write
+    # apart.  Waiting for half the queue to play instead would let about
+    # half the writes return at once (measured on the null device: median
+    # queue 1664 of 2400, 33 of 50 writes returning at once).
+    o = device_output(profile: :default)
+    data = [Numo::SFloat.zeros(o.buffer_size)] * 2
+    20.times { o.write(data) } # fill the queue
+
+    depths = []
+    instant = 0
+    50.times do
+      t = MB::U.clock_now
+      o.write(data)
+      instant += 1 if MB::U.clock_now - t < 0.001
+      depths << o.stats[:queued]
+    end
+
+    expect(depths.sort[depths.length / 2]).to be >= o.queue_limit - o.buffer_size
+    expect(instant).to be < 10
+  end
+
   it 'never queues less than two buffers' do
     expect(device_output(latency: 0.001, buffer_size: 512).queue_limit).to eq(1024)
   end

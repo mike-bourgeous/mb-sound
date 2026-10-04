@@ -7,9 +7,10 @@
  * callback never touches Ruby objects, never takes the GVL, never allocates,
  * and never blocks (it only try-locks to wake the writer), so garbage
  * collection or a busy Ruby thread can't stall the sound card; the ring
- * absorbs them.  Ruby keeps the GVL while there is room in the ring, and
- * releases it only to wait for the device to drain the ring to half full, so
- * one GVL round trip covers many buffers.  The device clock paces the writer.
+ * absorbs them.  Ruby keeps the GVL while there is room in the ring; a write
+ * that doesn't fit queues what fits and releases the GVL only to wait until
+ * the rest does (one round trip per write), so the device clock paces the
+ * writer one write at a time and the queue stays near full.
  *
  * A mono writer is fanned out to every device channel in C.
  *
@@ -1116,8 +1117,10 @@ static void push_frames(struct playback *p, const float *frames, size_t count)
 		size_t room = queued < p->queue_limit ? p->queue_limit - queued : 0;
 
 		if (room == 0) {
-			// Wait for the queue to drain halfway, so one GVL round trip
-			// covers many buffers.
+			// Wait until the rest of this write fits (the room left was
+			// filled above), so writes top the queue up steadily and the
+			// writer's calls are evenly spaced.  Only a write larger
+			// than half the queue waits for half of it at a time.
 			size_t want = count - done;
 			if (want > p->queue_limit / 2) {
 				want = p->queue_limit / 2;
