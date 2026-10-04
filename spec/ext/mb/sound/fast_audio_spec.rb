@@ -75,6 +75,11 @@ RSpec.describe('MB::Sound::FastAudio', :aggregate_failures) do
       expect(pb.closed?).to eq(false)
     end
 
+    it 'queues at least two device periods, so the device does not starve' do
+      pb = playback(queue: 16)
+      expect(pb.queue_limit).to eq(2 * pb.period)
+    end
+
     it 'opens at other requested rates the device supports' do
       expect(playback(sample_rate: 44100).sample_rate).to eq(44100)
     end
@@ -175,7 +180,10 @@ RSpec.describe('MB::Sound::FastAudio', :aggregate_failures) do
     it 'wakes a blocked writer with IOError when closed from another thread' do
       pb = playback(queue: 1024)
       big = Numo::SFloat.zeros(rate * 5)
-      t = Thread.new { pb.write([big, big]) }
+      t = Thread.new {
+        Thread.current.report_on_exception = false
+        pb.write([big, big])
+      }
       wait_until { pb.stats[:queued] > 0 }
       sleep 0.02
 

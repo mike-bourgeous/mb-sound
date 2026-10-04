@@ -478,15 +478,36 @@ static VALUE playback_open_body(VALUE arg)
 {
 	struct open_args *a = (struct open_args *)arg;
 
-	init_context(&a->p->context, a->backends, a->client_name);
-	a->p->context_ready = 1;
+	struct playback *p = a->p;
 
-	playback_open_device(a->p, a->device_index, a->sample_rate, a->period);
+	init_context(&p->context, a->backends, a->client_name);
+	p->context_ready = 1;
 
-	atomic_store(&a->p->open, 1);
+	playback_open_device(p, a->device_index, a->sample_rate, a->period);
+
+	// The queue must hold at least two device periods, or the device runs
+	// dry on every callback.  The ring is allocated now that the period is
+	// known (the callback only runs after ma_device_start).
+	size_t min_queue = 2 * (size_t)p->device.playback.internalPeriodSizeInFrames;
+	if (p->queue_limit < min_queue) {
+		p->queue_limit = min_queue;
+	}
+
+	size_t capacity = 16;
+	while (capacity < p->queue_limit) {
+		capacity <<= 1;
+	}
+
+	p->data = calloc(capacity * p->out_channels, sizeof(float));
+	if (p->data == NULL) {
+		rb_raise(rb_eNoMemError, "Could not allocate the audio queue");
+	}
+	p->capacity = capacity;
+
+	atomic_store(&p->open, 1);
 	ma_result result = ma_device_start(&a->p->device);
 	if (result != MA_SUCCESS) {
-		atomic_store(&a->p->open, 0);
+		atomic_store(&p->open, 0);
 		rb_raise(cError, "Could not start audio device: %s", ma_result_description(result));
 	}
 
@@ -546,11 +567,6 @@ static VALUE playback_initialize(VALUE self, VALUE backends, VALUE device_index,
 		rb_raise(rb_eArgError, "Capture length must be 0..%ld frames (got %ld)", 1L << 26, capture);
 	}
 
-	size_t capacity = 16;
-	while (capacity < (size_t)queue) {
-		capacity <<= 1;
-	}
-
 	struct open_args args = {
 		.p = p,
 		.backends = backends,
@@ -564,11 +580,6 @@ static VALUE playback_initialize(VALUE self, VALUE backends, VALUE device_index,
 	p->out_channels = out_ch;
 	p->queue_limit = queue;
 	p->starving = 1; // silence before the first write isn't an underrun
-	p->data = calloc(capacity * out_ch, sizeof(float));
-	if (p->data == NULL) {
-		rb_raise(rb_eNoMemError, "Could not allocate the audio queue");
-	}
-	p->capacity = capacity;
 
 	if (capture > 0) {
 		p->capture = calloc(capture * out_ch, sizeof(float));
