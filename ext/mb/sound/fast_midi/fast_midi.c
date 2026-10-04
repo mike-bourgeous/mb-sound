@@ -64,6 +64,7 @@ static void check(RtMidiPtr device, const char *what)
 
 // Frees +device+ (an input if +input+, else an output) and raises
 // FastMIDI::Error saying +what+ failed.
+NORETURN(static void fail(RtMidiPtr device, int input, const char *what));
 static void fail(RtMidiPtr device, int input, const char *what)
 {
 	if (device != NULL) {
@@ -98,6 +99,12 @@ static VALUE port_names(RtMidiPtr device)
 	}
 
 	return names;
+}
+
+// port_names for rb_protect, which passes a VALUE.
+static VALUE protected_port_names(VALUE device)
+{
+	return port_names((RtMidiPtr)device);
 }
 
 /*
@@ -135,7 +142,7 @@ static VALUE ruby_input_ports(VALUE self, VALUE api, VALUE client_name)
 	}
 
 	int state;
-	VALUE names = rb_protect((VALUE (*)(VALUE))port_names, (VALUE)device, &state);
+	VALUE names = rb_protect(protected_port_names, (VALUE)device, &state);
 	rtmidi_in_free(device);
 	if (state) {
 		rb_jump_tag(state);
@@ -364,7 +371,7 @@ static VALUE ruby_output_ports(VALUE self, VALUE api, VALUE client_name)
 	}
 
 	int state;
-	VALUE names = rb_protect((VALUE (*)(VALUE))port_names, (VALUE)device, &state);
+	VALUE names = rb_protect(protected_port_names, (VALUE)device, &state);
 	rtmidi_out_free(device);
 	if (state) {
 		rb_jump_tag(state);
