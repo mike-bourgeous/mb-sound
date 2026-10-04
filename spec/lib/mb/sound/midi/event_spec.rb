@@ -122,10 +122,10 @@ RSpec.describe(MB::Sound::MIDI::Event) do
   describe 'program-only events' do
     it 'makes chokes' do
       e = MB::Sound::MIDI::Event.choke(60, channel: 2, time: 1/2r)
-      expect(e).to have_attributes(type: :choke, channel: 2, note: 60, value: 1.0, bytes: nil, time: 1/2r)
+      expect(e).to have_attributes(type: :choke, channel: 2, note: 60, bytes: nil, time: 1/2r)
       expect(e.choke?).to eq(true)
       expect(e.note?).to eq(false)
-      expect(MB::Sound::MIDI::Event.choke.note).to eq(nil)
+      expect(MB::Sound::MIDI::Event.choke(nil).note).to eq(nil)
       expect(e.to_s).to eq('choke/ch2 60 @0.5s')
     end
 

@@ -132,7 +132,7 @@ RSpec.describe(MB::Sound::Notes) do
 
     it 'releases every note at chokes and all notes off, with choke impulses' do
       v = notes_for(
-        ev.note_on(60, time: 0r), ev.choke(time: 1/100r),
+        ev.note_on(60, time: 0r), ev.choke(nil, time: 1/100r),
         ev.note_on(62, time: 2/100r), ev.cc(123, 0, time: 3/100r),
         ev.note_on(64, time: 4/100r), ev.cc(120, 0, time: 5/100r)
       )
@@ -222,6 +222,57 @@ RSpec.describe(MB::Sound::Notes) do
       out = run({ bend: v.bend, pressure: v.pressure }, buffer: 480, buffers: 2)
       expect(out[:bend][[0, 480]].to_a).to eq([0.5, 0])
       expect(out[:pressure][[0, 480]].to_a).to eq([0.25, 0])
+    end
+  end
+
+  describe 'controllers' do
+    it 'map CCs through their specs, starting at the default' do
+      v = notes_for(ev.cc(74, 0, time: 1/100r), ev.cc_raw(74, 127, time: 2/100r), ev.cc_raw(1, 64, time: 1/100r))
+      out = run({ b: v.brightness, m: v.mod, e: v.expression, g: v.cc(16, range: 200..2000, default: 127) }, buffer: 480, buffers: 3)
+      expect(out[:b][[0, 480, 960]].to_a).to eq([1, 0.25, 4])
+      expect(out[:m][[0, 480]].to_a.map { |x| x.round(4) }).to eq([0, (64 / 127.0).round(4)])
+      expect(out[:e][0]).to eq(1)
+      expect(out[:g][0]).to eq(2000)
+    end
+
+    it 'scale envelope times x1/8..x1..x8 for .gm' do
+      spec = MB::Sound::Notes::GM_CONTROLS[:attack_time]
+      expect([0, 32, 64, 96, 127].map { |r| spec.value(r).round(4) }).to eq([0.125, 0.3536, 1, 2.8755, 8]) # 8 ** (32 / 63.0) above 64
+    end
+
+    it 'gives every GM control a spec with its standard number' do
+      c = MB::Sound::Notes::GM_CONTROLS
+      expect(c.transform_values(&:number)).to include(
+        mod: 1, breath: 2, foot: 4, portamento_time: 5, expression: 11, resonance: 71, brightness: 74,
+        vibrato_rate: 76, vibrato_depth: 77, vibrato_delay: 78, release_time: 72, attack_time: 73, decay_time: 75,
+      )
+      v = notes_for
+      expect(v.vibrato_rate.sample(10)[0]).to eq(5.5)
+      expect(v.vibrato_delay.sample(10)[0]).to eq(0)
+      expect(v.resonance.spec.value(127)).to eq(4)
+      expect(v.mod).to equal(v.modulation)
+    end
+
+    it 'are shared by every Notes on a stream and listed in controls' do
+      stream = MB::Sound::MIDI::Stream.new(MIDIListSource.new(ev.cc(1, 1)))
+      a = MB::Sound::Notes.new(stream)
+      b = MB::Sound::Notes.new(stream)
+      m = a.mod
+      c = a.cc(20, name: 'Wobble')
+      expect(b.mod).to equal(m)
+      expect(b.cc(20, name: 'Wobble')).to equal(c)
+      expect(b.cc(20, range: 0..2)).not_to equal(c)
+      expect(b.controls.map(&:number)).to eq([1, 20, 20])
+      expect(m.spec.name).to eq('Modulation')
+      expect(m.graph).to include(stream)
+    end
+
+    it 'reset modulation and expression on reset all controllers, but not others' do
+      v = notes_for(ev.cc(1, 1), ev.cc(11, 0), ev.cc(74, 1), ev.cc(121, 0, time: 1/100r))
+      out = run({ m: v.mod, e: v.expression, b: v.brightness }, buffer: 480, buffers: 2)
+      expect(out[:m][[0, 480]].to_a).to eq([1, 0])
+      expect(out[:e][[0, 480]].to_a).to eq([0, 1])
+      expect(out[:b][[0, 480]].to_a).to eq([4, 4])
     end
   end
 

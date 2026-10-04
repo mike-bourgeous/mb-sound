@@ -46,7 +46,7 @@ module MB
       #     Event.parse("\x90\x3c\x40")          # note_on C4 (60), velocity 64/127
       #     Event.note_on(60, 0.5, channel: 9)   # normalized velocity
       #     Event.bend(-1.0).bend_semitones      # => -2.0
-      #     Event.choke(channel: 0)              # silence a voice quickly
+      #     Event.choke(60)                      # silence a voice quickly
       #     Event.glide(48)                      # next note glides from C3
       class Event < Data.define(:type, :channel, :note, :value, :velocity, :raw, :bytes, :time, :bend_range, :legato)
         # The pitch bend range in semitones when nothing else sets it.
@@ -255,8 +255,8 @@ module MB
         # Envelope; see MB::Sound::Notes#choke), e.g. when an allocator
         # steals the voice.  +note+ may name the note being choked, or be
         # nil.  Not a MIDI message (no bytes).
-        def self.choke(note = nil, channel: 0, time: 0r)
-          new(type: :choke, channel: channel, note: note, value: 1.0, time: time)
+        def self.choke(note, channel: 0, time: 0r)
+          new(type: :choke, channel: channel, note: note, time: time)
         end
 
         # A glide: the next note-on glides to its pitch from +note+ (a note
@@ -383,14 +383,14 @@ module MB
         def to_s
           t = MB::M.sigfigs(time.to_f, 6)
           desc = case type
-                 when :note_on, :note_off then "#{note} v#{MB::M.sigfigs(velocity, 3)}"
+                 when :note_on, :note_off then "#{note} v#{MB::M.sigfigs(velocity, 3)}#{' legato' if legato}"
                  when :cc, :poly_pressure then "#{note}=#{MB::M.sigfigs(value, 3)}"
                  when :bend then "#{MB::M.sigfigs(value, 4)}#{" (#{MB::M.sigfigs(bend_semitones, 4)} st)" if bend_range}"
                  when :sysex then "#{bytes.bytesize} bytes"
-                 when :choke, :glide then note.inspect
+                 when :choke, :glide then note.to_s
                  else value.inspect
                  end
-          "#{type}#{"/ch#{channel}" if channel} #{desc}#{' legato' if legato} @#{t}s"
+          "#{type}#{"/ch#{channel}" if channel} #{desc} @#{t}s"
         end
       end
     end

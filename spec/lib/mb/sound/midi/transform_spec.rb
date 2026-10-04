@@ -263,7 +263,7 @@ RSpec.describe(MB::Sound::MIDI::Transform) do
   end
 
   it 'transposes glide events' do
-    s = stream(ev.glide(48), ev.choke).transpose(12)
+    s = stream(ev.glide(48), ev.choke(nil)).transpose(12)
     expect(summary(s)).to eq([[:glide, 60, 0], [:choke, nil, 1]])
   end
 end

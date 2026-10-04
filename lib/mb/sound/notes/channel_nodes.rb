@@ -76,6 +76,50 @@ module MB
         end
       end
 
+      # A MIDI controller's value mapped through its MIDI::ControlSpec (see
+      # Notes#cc and the GM-named controls such as Notes#mod), starting at
+      # the spec's default.  Reset all controllers (CC 121) returns the
+      # controllers that MIDI RP-15 resets (RESET_CONTROLLERS) to their
+      # defaults.  Values use the raw 7-bit number (MSB only for now).
+      class Control < ChannelNode
+        # Controllers reset by reset all controllers (RP-15): modulation,
+        # expression (to its default, 127), and the pedals 64 to 69.
+        RESET_CONTROLLERS = [1, 11, 64, 65, 66, 67, 68, 69].freeze
+
+        # The MIDI::ControlSpec describing this controller.
+        attr_reader :spec
+
+        def initialize(stream, spec, sample_rate: 48000)
+          super(stream, sample_rate: sample_rate)
+          @spec = spec
+          @value = spec.default_value
+          @node_type_name = "Notes CC #{spec.number} #{spec.name}"
+        end
+
+        def to_s_graphviz
+          "#{node_type_name}\n#{MB::M.sigfigs(@spec.range.begin, 4)}..#{MB::M.sigfigs(@spec.range.end, 4)}"
+        end
+
+        private
+
+        def level
+          @value
+        end
+
+        def update(event)
+          return unless event.cc?(@spec.number)
+          @value = @spec.value(event.raw || (event.value * 127).round)
+        end
+
+        def reset?
+          RESET_CONTROLLERS.include?(@spec.number)
+        end
+
+        def reset_value
+          @value = @spec.default_value
+        end
+      end
+
       # Channel pressure (aftertouch), 0..1 (see Notes#pressure).
       class Pressure < ChannelNode
         def initialize(stream, sample_rate: 48000)

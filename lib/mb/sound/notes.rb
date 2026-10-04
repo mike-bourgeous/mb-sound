@@ -38,6 +38,71 @@ module MB
       # tell its first note (C4).
       DEFAULT_NUMBER = 60.0
 
+      # GM and GM2 controllers with standard numbers, ranges, and defaults,
+      # each available as a method returning its shared node (e.g. #mod,
+      # #brightness).  The sound controllers (70-79) are relative around
+      # their default of 64, as in GM2.  Ranges (judgment calls where GM2
+      # only says "relative"):
+      # - attack/decay/release_time: a time multiplier, x1/8 at 0, x1 at 64,
+      #   x8 at 127 (exponential), used by envelope .gm scaling (see #env);
+      # - brightness: a cutoff multiplier of +-2 octaves (see #cutoff);
+      # - resonance: a quality multiplier x0.5..x1..x4 (see #quality);
+      # - vibrato_rate: 5.5 Hz at 64, x1/4..x4; vibrato_depth: a depth
+      #   multiplier 0..1..2 (linear); vibrato_delay: 0 s up to 64, then up
+      #   to 2 s (see NotePitch#vibrato);
+      # - portamento_time: 2 ms at 0 to 5 s at 127, exponential (100 ms at
+      #   64; see NotePitch#glide);
+      # - volume (7), balance (8), pan (10), and expression (11) are not
+      #   used by default (synth output controls are opt-in).
+      GM_CONTROLS = {
+        mod: { number: 1, name: 'Modulation', description: 'Mod wheel (vibrato depth for NotePitch#vibrato)' },
+        breath: { number: 2, name: 'Breath' },
+        foot: { number: 4, name: 'Foot' },
+        portamento_time: {
+          number: 5, name: 'Portamento Time', range: 0.002..5.0, curve: :exponential,
+          description: 'Glide time in seconds (NotePitch#glide(:gm))',
+        },
+        volume: { number: 7, name: 'Volume', default: 100 },
+        balance: { number: 8, name: 'Balance', range: -1.0..1.0, center: 0, default: 64 },
+        pan: { number: 10, name: 'Pan', range: -1.0..1.0, center: 0, default: 64 },
+        expression: { number: 11, name: 'Expression', default: 127 },
+        portamento: { number: 65, name: 'Portamento', curve: :switch, description: 'Glide on/off (NotePitch#glide(:gm))' },
+        resonance: {
+          number: 71, name: 'Resonance', range: 0.5..4.0, center: 1, curve: :exponential, default: 64,
+          description: 'Filter quality multiplier (Notes#quality)',
+        },
+        release_time: {
+          number: 72, name: 'Release Time', range: 0.125..8.0, center: 1, curve: :exponential, default: 64,
+          description: 'Envelope release time multiplier (.gm)',
+        },
+        attack_time: {
+          number: 73, name: 'Attack Time', range: 0.125..8.0, center: 1, curve: :exponential, default: 64,
+          description: 'Envelope attack time multiplier (.gm)',
+        },
+        brightness: {
+          number: 74, name: 'Brightness', range: 0.25..4.0, center: 1, curve: :exponential, default: 64,
+          description: 'Filter cutoff multiplier, +-2 octaves (Notes#cutoff)',
+        },
+        decay_time: {
+          number: 75, name: 'Decay Time', range: 0.125..8.0, center: 1, curve: :exponential, default: 64,
+          description: 'Envelope decay time multiplier (.gm)',
+        },
+        vibrato_rate: {
+          number: 76, name: 'Vibrato Rate', range: 1.375..22.0, center: 5.5, curve: :exponential, default: 64,
+          description: 'Vibrato rate in Hz (NotePitch#vibrato)',
+        },
+        vibrato_depth: {
+          number: 77, name: 'Vibrato Depth', range: 0.0..2.0, center: 1, default: 64,
+          description: 'Vibrato depth multiplier (NotePitch#vibrato)',
+        },
+        vibrato_delay: {
+          number: 78, name: 'Vibrato Delay', range: 0.0..2.0, center: 0, default: 64,
+          description: 'Vibrato fade-in time in seconds (NotePitch#vibrato)',
+        },
+        reverb_send: { number: 91, name: 'Reverb Send', default: 40 },
+        chorus_send: { number: 93, name: 'Chorus Send' },
+      }.transform_values { |h| MIDI::ControlSpec.new(**h).freeze }.freeze
+
       # Shared channel-wide nodes per control stream (see .control_stream):
       # stream => { key => WeakRef(node) }.
       SHARED = ObjectSpace::WeakKeyMap.new
@@ -46,17 +111,30 @@ module MB
       # pressure) +stream+ shares: +stream+ itself, or for a voice stream
       # split from another by an allocator, the stream it was split from.
       #
-      # Protocol (for the Allocator, built in parallel): a Source whose
-      # #control_parent returns a MIDI::Stream marks its stream as a lane of
-      # that stream, so every lane's Notes shares one node per controller,
-      # read from the parent.  Transforms (channel, transpose, ...) don't
-      # define it, since they change what the stream carries.
+      # A lane of an allocator (anything with #allocator whose allocator has
+      # a #stream, like MIDI::Allocator::Lane on the allocator branch) and a
+      # stream or Source with a #control_parent Stream are lanes of that
+      # stream, so every lane's Notes shares one node per controller, read
+      # from the parent.  Transforms (channel, transpose, ...) don't count,
+      # since they change what the stream carries.
       def self.control_stream(stream)
         s = stream
-        while s.source.respond_to?(:control_parent) && (parent = s.source.control_parent)
+        while (parent = control_parent(s))
           s = parent
         end
         s
+      end
+
+      # The stream +stream+ was split from as a lane, or nil (see
+      # .control_stream).
+      def self.control_parent(stream)
+        if stream.respond_to?(:control_parent)
+          stream.control_parent
+        elsif stream.respond_to?(:allocator) && stream.allocator.respond_to?(:stream)
+          stream.allocator.stream
+        elsif stream.source.respond_to?(:control_parent)
+          stream.source.control_parent
+        end
       end
 
       # The MIDI::Stream this instance reads.
@@ -139,6 +217,40 @@ module MB
       def bend_semitones(range = nil)
         range = range.nil? ? :stream : Interval.semitones(range).to_f
         shared([:bend, range]) { Bend.new(@control_stream, range: range, sample_rate: @sample_rate) }
+      end
+
+      # A MIDI controller as a shared Notes::Control node (one per control
+      # stream and spec), mapped linearly from raw 0..127 to +range+ (see
+      # MIDI::ControlSpec for other mappings; pass a spec to #control),
+      # starting at the raw +default+ (0..127).
+      #
+      #     v.cc(1)                        # mod wheel, 0..1
+      #     v.cc(16, range: 200..2000)     # general purpose 1 as a cutoff
+      def cc(number, range: 0.0..1.0, default: 0, name: nil, description: nil)
+        control(MIDI::ControlSpec.new(number: number, range: range, default: default, name: name, description: description))
+      end
+
+      # A shared Notes::Control node for a MIDI::ControlSpec (see #cc).
+      def control(spec)
+        shared([:cc, spec]) { Control.new(@control_stream, spec, sample_rate: @sample_rate) }
+      end
+
+      GM_CONTROLS.each do |name, spec|
+        define_method(name) { control(spec) }
+      end
+      alias modulation mod
+      alias mod_wheel mod
+      alias breath_controller breath
+      alias foot_controller foot
+      alias sound_brightness brightness
+      alias timbre resonance
+
+      # The MIDI::ControlSpecs of the controller nodes in use on this
+      # instance's control stream (shared by every Notes instance there),
+      # sorted by controller number, for control lists and ACID XML.
+      def controls
+        cache = SHARED[@control_stream] || {}
+        cache.values.filter_map { |ref| live(ref) }.grep(Control).map(&:spec).uniq.sort_by { |s| [s.number, s.name] }
       end
 
       # Channel pressure (aftertouch), 0..1 (a shared Notes::Pressure).
