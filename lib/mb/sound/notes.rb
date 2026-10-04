@@ -259,6 +259,41 @@ module MB
       end
       alias aftertouch pressure
 
+      # Envelope helpers: the MB::Sound::EnvelopeMethods presets (positional
+      # attack, decay, sustain, release, plus any Envelope options) as
+      # Notes::NoteEnvelopes wired to this instance's #gate, #trigger,
+      # #velocity, and #choke, registered for #idle?.  +lift: true+ also
+      # wires #lift (release velocity scales the release time; off by
+      # default), or pass a node.  GM2 time scaling (NoteEnvelope#gm) is on
+      # unless +gm: false+ or `.gm(false)`.
+      #
+      #     play v.hz.saw * v.amp_env(0.01, 0.3, 0.6, 0.5)
+      #     v.filt_env(0, 0.4, 0.3, 0.3, depth: 3).gm(false)
+      def env(attack = nil, decay = nil, sustain = nil, release = nil, **options)
+        note_envelope(:env, attack, decay, sustain, release, **options)
+      end
+      alias envelope env
+
+      # An amplitude envelope (see #env and EnvelopeMethods#amp_env).
+      def amp_env(attack = nil, decay = nil, sustain = nil, release = nil, **options)
+        note_envelope(:amp_env, attack, decay, sustain, release, **options)
+      end
+      alias amp_envelope amp_env
+
+      # An FM index envelope (see #env and EnvelopeMethods#fm_env).
+      def fm_env(attack = nil, decay = nil, sustain = nil, release = nil, **options)
+        note_envelope(:fm_env, attack, decay, sustain, release, **options)
+      end
+      alias fm_envelope fm_env
+
+      # A filter cutoff multiplier envelope (see #env and
+      # EnvelopeMethods#filter_env).
+      def filter_env(attack = nil, decay = nil, sustain = nil, release = nil, **options)
+        note_envelope(:filter_env, attack, decay, sustain, release, **options)
+      end
+      alias filt_env filter_env
+      alias filter_envelope filter_env
+
       # The envelopes made through this instance (see #env).
       def envelopes
         @envelopes.dup
@@ -302,6 +337,22 @@ module MB
         node
       end
 
+      # Makes and registers a NoteEnvelope from an Envelope preset (see
+      # #env).
+      def note_envelope(preset, attack, decay, sustain, release, lift: false, gm: true, **options)
+        lift = case lift
+               when true then self.lift
+               when false, nil then nil
+               else lift
+               end
+
+        inputs = { gate: gate, trigger: trigger, velocity: velocity, choke: choke, lift: lift }.compact
+        register(NoteEnvelope.preset(
+          preset, attack, decay, sustain, release,
+          notes: self, gm: gm, sample_rate: @sample_rate, **inputs, **options
+        ))
+      end
+
       # Like #memo, but shared by every Notes instance on the same control
       # stream (see .control_stream).
       def shared(key)
@@ -329,3 +380,4 @@ require_relative 'notes/note_stack'
 require_relative 'notes/note_nodes'
 require_relative 'notes/channel_nodes'
 require_relative 'notes/frequency'
+require_relative 'notes/note_envelope'

@@ -276,6 +276,118 @@ RSpec.describe(MB::Sound::Notes) do
     end
   end
 
+  describe 'envelopes' do
+    # Renders +env+ for +buffers+ buffers of 480 samples.
+    def render_env(env, buffers = 80)
+      buffers.times.map { env.sample(480).dup }.reduce(:concatenate)
+    end
+
+    def notes_with(*events)
+      notes_for(ev.note_on(60, 1.0), *events, ev.note_off(60, time: 1/2r))
+    end
+
+    it 'are wired to the gate, trigger, velocity, and choke, and register for idle?' do
+      v = notes_with
+      e = v.amp_env(0.01, 0.1, 0.5, 0.1)
+      expect(e).to be_a(MB::Sound::Notes::NoteEnvelope)
+      expect(e.sources.keys).to include(:gate, :trigger, :velocity, :choke)
+      expect(e.sources).not_to have_key(:lift)
+      expect(v.envelopes).to eq([e])
+      expect(v.idle?).to eq(true)
+      out = render_env(e, 10)
+      expect(out.max).to be_within(1e-6).of(1)
+      expect(v.idle?).to eq(false)
+      render_env(e, 55) # note-off at 24000, release 4800 samples
+      expect(v.idle?).to eq(true)
+      expect(v.filt_env).to be_a(MB::Sound::Notes::NoteEnvelope)
+      expect(v.filter_env.octaves).to eq(2)
+      expect(v.fm_env).to be_a(MB::Sound::Notes::NoteEnvelope)
+      expect(v.envelopes.length).to eq(4)
+    end
+
+    it 'scale times by the GM2 controllers with .gm' do
+      [[127, 3840, 38400], [0, 60, 600], [64, 480, 4800]].each do |raw, attack, release|
+        v = notes_with(ev.cc_raw(73, raw), ev.cc_raw(72, raw))
+        out = render_env(v.env(0.01, 0.1, 0.5, 0.1, curve: :linear), 140).to_a
+        expect(out.index { |x| x >= 0.9999 }).to be_within(1).of(attack - 1), "attack at #{raw}"
+        expect(out.rindex { |x| x > 0 }).to be_within(1).of(24000 + release - 1), "release at #{raw}"
+      end
+    end
+
+    it 'turn GM2 scaling off with gm: false or .gm(false)' do
+      v = notes_with(ev.cc_raw(73, 127))
+      a = v.env(0.01, 0.1, 0.5, 0.1, curve: :linear, gm: false)
+      b = v.env(0.01, 0.1, 0.5, 0.1, curve: :linear).gm(false)
+      expect(a.gm?).to eq(false)
+      expect(b.attack).to eq(0.01)
+      expect(v.attack_time.get_sampler.instance_variable_get(:@tee).branches.length).to eq(1) # the dropped scaling branch is gone
+      expect(render_env(a, 10).to_a).to eq(render_env(b, 10).to_a)
+      expect(render_env(a, 1).to_a.index(1.0)).to eq(nil)
+      b.gm
+      expect(b.gm?).to eq(true)
+      expect(b.attack).to be_a(MB::Sound::GraphNode)
+    end
+
+    it 'wire release velocity with lift: true' do
+      fast = notes_for(ev.note_on(60, 1.0), ev.note_off(60, 1.0, time: 1/10r), ev.cc(99, 0, time: 10r))
+      slow = notes_for(ev.note_on(60, 1.0), ev.note_off(60, 0.0, time: 1/10r), ev.cc(99, 0, time: 10r))
+      plain = notes_for(ev.note_on(60, 1.0), ev.note_off(60, 0.0, time: 1/10r), ev.cc(99, 0, time: 10r))
+      ends = [
+        fast.env(0, 0.01, 1, 0.1, lift: true, curve: :linear),
+        slow.env(0, 0.01, 1, 0.1, lift: true, curve: :linear),
+        plain.env(0, 0.01, 1, 0.1, curve: :linear),
+      ].map { |e| render_env(e, 40).to_a.rindex { |x| x > 0 } - 4800 }
+      expect(ends[0]).to be_within(2).of(2400)
+      expect(ends[1]).to be_within(2).of(9600)
+      expect(ends[2]).to be_within(2).of(4800)
+    end
+
+    it 'choke quickly on :choke events, with no note-off' do
+      v = notes_for(ev.note_on(60, 1.0), ev.choke(60, time: 1/10r), ev.cc(99, 0, time: 10r))
+      e = v.amp_env(0, 0.01, 1, 2)
+      out = render_env(e, 20).to_a
+      expect(out[4799]).to be > 0.5
+      last = out.rindex { |x| x > 0 }
+      expect(last - 4800).to be_within(2).of(144) # 3 ms
+      expect(v.idle?).to eq(true)
+    end
+
+    it 'keep the gate high through a note-off and legato note-on at one time' do
+      v = notes_for(
+        ev.note_on(60, 1.0), ev.note_off(60, time: 1/10r), ev.note_on(64, 0.5, time: 1/10r, legato: true),
+        ev.note_off(64, time: 2/10r)
+      )
+      out = run({ gate: v.gate, number: v.number, trigger: v.trigger }, buffer: 480, buffers: 25)
+      expect(out[:gate][0...9600].to_a.uniq).to eq([1])
+      expect(out[:number][4800]).to eq(64)
+      expect(out[:trigger].ne(0).where.to_a).to eq([0, 4800])
+    end
+
+    it 'keep a legato envelope in its stage through legato notes' do
+      v = notes_for(
+        ev.note_on(60, 1.0), ev.note_off(60, time: 1/10r), ev.note_on(64, 1.0, time: 1/10r, legato: true),
+        ev.note_off(64, time: 2/10r), ev.cc(99, 0, time: 10r)
+      )
+      e = v.env(0.001, 0.01, 0.5, 0.01).legato
+      out = render_env(e, 25)
+      expect(out[4790..4900].to_a.map { |x| x.round(4) }.uniq).to eq([0.5])
+    end
+
+    it 'end the graph once the stream ended and the envelopes finished' do
+      v = clip_notes(MB::Sound.seq(MB::Sound::C4).n8) # 0.25 s
+      out = v.gate.get_sampler
+      e = v.amp_env(0, 0.01, 1, 0.2) # releases from 0.25 s for 0.2 s
+      n = 0
+      loop do
+        o = out.sample(480)
+        b = e.sample(480)
+        break if o.nil? || b.nil?
+        n += 1
+      end
+      expect(n).to be_between(46, 48)
+    end
+  end
+
   describe 'ending' do
     let(:clip) { MB::Sound.seq(MB::Sound::C4, MB::Sound::E4).n8 } # 0.5 s at 120 BPM
 
