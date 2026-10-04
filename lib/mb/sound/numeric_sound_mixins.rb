@@ -119,6 +119,31 @@ module MB
       alias milliseconds ms
       alias millisecond ms
 
+      # Returns a pitch Interval of this many octaves: `filter_env(depth:
+      # 3.oct)`.  Also available as #octave and #oct.
+      def octaves
+        Interval.new(self * 12, unit: :octaves)
+      end
+      alias octave octaves
+      alias oct octaves
+
+      # Returns a pitch Interval of this many semitones: `C4.transpose(7.st)`.
+      # Also available as #semitone, #st, and #semi.
+      def semitones
+        Interval.new(self, unit: :semitones)
+      end
+      alias semitone semitones
+      alias st semitones
+      alias semi semitones
+
+      # Returns a pitch Interval of this many cents (hundredths of a
+      # semitone): `detune: 12.cents`.  Whole numbers stay exact.  Also
+      # available as #cent.
+      def cents
+        Interval.new(is_a?(Integer) ? Rational(self, 100) : self / 100.0, unit: :cents)
+      end
+      alias cent cents
+
       # Returns a Pitch at this frequency in Hz, which makes oscillators
       # (`100.hz.sine.at(-12.db)`) and plays as a sine when used as a signal.
       # If this is a Meters or Feet object, then the frequency is calculated

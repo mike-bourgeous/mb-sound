@@ -155,8 +155,10 @@ module MB
       end
       alias at_rate sample_rate=
 
-      # Returns a Pitch +semitones+ higher (lower if negative).
+      # Returns a Pitch +semitones+ higher (lower if negative); +semitones+
+      # may be an Interval (`7.st`, `1.oct`).
       def transpose(semitones)
+        semitones = Interval.semitones(semitones)
         ratio = 2 ** (semitones / 12.0)
         Pitch.new(constant? ? @source * ratio : freq * ratio, sample_rate: @sample_rate)
       end

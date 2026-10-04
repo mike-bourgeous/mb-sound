@@ -35,6 +35,7 @@ module MB
       # Returns an event value (a note number, or a Pitch for a fixed
       # frequency) moved by +semitones+.
       def self.transpose_value(value, semitones)
+        semitones = MB::Sound::Interval.semitones(semitones)
         value.is_a?(MB::Sound::Pitch) ? value.transpose(semitones) : value + semitones
       end
     end
