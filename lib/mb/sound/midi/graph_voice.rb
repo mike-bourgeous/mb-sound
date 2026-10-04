@@ -223,8 +223,9 @@ module MB
         def trigger(note, velocity, timestamp)
           set_note(note, timestamp, reset_portamento: false)
 
+          # Oscillators with a reset input (Tone#reset) reset themselves
           @oscillators.each do |o|
-            o.reset unless o.no_trigger
+            o.reset unless o.no_trigger || o.reset_input
           end
 
           # TODO: make envelope ranges controllable

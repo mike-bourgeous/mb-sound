@@ -113,6 +113,14 @@ module MB
       def noise(blend = true) = tone.noise(blend)
       def no_trigger(trig = true) = tone.no_trigger(trig)
 
+      # Shortcuts for a sine Tone at this pitch with a reset input
+      # (Tone#reset), never reset (Tone#free), or a random phase
+      # (Tone#random_phase / #rnd).
+      def reset(trigger, to: nil) = tone.reset(trigger, to: to)
+      def free(free = true) = tone.free(free)
+      def random_phase(seed: nil) = tone.random_phase(seed: seed)
+      alias rnd random_phase
+
       # The Oscillator of #signal.
       def oscillator
         signal.oscillator

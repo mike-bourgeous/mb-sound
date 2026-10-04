@@ -93,6 +93,16 @@ module MB
       # Whether sync reverses the phase (soft sync) instead of resetting it.
       attr_accessor :soft_sync
 
+      # The reset trigger input (see #reset_input=), or nil.
+      attr_reader :reset_input
+
+      # Where a reset trigger moves the phase (see #reset_to=): nil for the
+      # starting phase, radians, or a graph node of radians.
+      attr_reader :reset_to
+
+      # The seed of the random phase generator (see #random_phase=), or nil.
+      attr_reader :random_phase
+
       # An informational marker for classes like MB::Sound::MIDI::GraphVoice
       # indicating that the oscillator should not be reset when a note is
       # played.  Has no effect within the oscillator itself.
@@ -228,6 +238,8 @@ module MB
           phase_mod: @phase_mod,
           width: @width,
           sync: @sync,
+          reset: @reset_input,
+          reset_to: @reset_to.respond_to?(:sample) ? @reset_to : nil,
         }.compact
       end
 
@@ -258,9 +270,56 @@ module MB
       # jump into a band-limited step (minBLEP; see BandLimit.minblep_tables)
       # over the next samples, so a retrigger doesn't alias (the step itself
       # is still there, as a softer click).
+      #
+      # With a random phase (see #random_phase=) each reset goes to a new
+      # random phase instead.
       def reset
-        phase_jump { @phasor.reset }
+        phase_jump { @phasor.phi = @phase_rng ? @phase_rng.rand : @phasor.phase }
       end
+
+      # Sets a reset trigger input: a graph node whose every nonzero sample
+      # (any value) moves the phase to #reset_to at that sample, or nil to
+      # remove it.  The jump is band-limited like #reset (a 32-sample minBLEP
+      # step, including phase modulation at that sample), and works with
+      # frequency and phase modulation, but not with #sync.  Buffers with
+      # resets are computed in pieces split at the reset samples; buffers
+      # without resets cost one scan of the trigger buffer.
+      def reset_input=(trigger)
+        unless trigger.nil? || trigger.respond_to?(:sample)
+          raise ArgumentError, "Reset input must be nil or a graph node of triggers (got #{trigger.inspect})"
+        end
+        raise ArgumentError, 'A synced oscillator cannot also have a reset input' if trigger && @sync
+
+        @reset_input = trigger.respond_to?(:get_sampler) ? trigger.get_sampler : trigger
+      end
+
+      # Sets where the reset input (see #reset_input=) moves the phase: nil
+      # for the starting phase (see #phase), a phase in radians (like
+      # #phi=), or a graph node of radians read at each reset sample.
+      # Ignored while #random_phase is set.
+      def reset_to=(to)
+        unless to.nil? || to.is_a?(Numeric) || to.respond_to?(:sample)
+          raise ArgumentError, "Reset target must be nil, radians, or a graph node of radians (got #{to.inspect})"
+        end
+
+        @reset_to = to.respond_to?(:get_sampler) ? to.get_sampler : to
+      end
+
+      # Gives this oscillator a random phase from a Random seeded with +seed+
+      # (an Integer; see MB::Sound.next_seed), or removes it with nil.  The
+      # starting phase (see #phase) becomes random right away, and every
+      # reset (#reset or the reset input) goes to a new random phase.
+      def random_phase=(seed)
+        if seed.nil?
+          @random_phase = nil
+          @phase_rng = nil
+        else
+          @random_phase = Integer(seed)
+          @phase_rng = Random.new(@random_phase)
+          self.phase = @phase_rng.rand * TWOPI
+        end
+      end
+
 
       # Moves the phase to +cycles+ past the starting phase (e.g. to lock a
       # tempo LFO to the timeline; see Sequence::TempoNode), smoothing the
@@ -282,6 +341,7 @@ module MB
         unless source.nil? || source.respond_to?(:sample)
           raise ArgumentError, "Sync must be nil or a graph node of sync pulses (got #{source.inspect})"
         end
+        raise ArgumentError, 'An oscillator with a reset input cannot also be synced' if source && @reset_input
 
         @sync = source.respond_to?(:get_sampler) ? source.get_sampler : source
         @sync_state = [@phasor.phi, 0.0, 1.0, 0, 0]
@@ -535,78 +595,31 @@ module MB
       def sample_c(count = nil)
         return sample_c(1)[0] if count.nil?
 
-        count, freq, phase, width, pulses = get_upstream_inputs(count)
-        return nil if freq.nil? || phase.nil? || (warped? && width.nil?) || (@sync && pulses.nil?)
+        count, freq, phase, width, pulses, resets, targets = get_upstream_inputs(count)
+        return nil if missing_input?(freq, phase, width, pulses, resets, targets)
 
         if @ports
           @frame_phi = @phasor.state[0]
           @frame_freq = freq
+          @frame_segments = nil
         end
 
         build_buffer(count)
+        gain, offset = gain_and_offset
 
-        if @range && @pre_power == 1.0
-          gain = (@range.last - @range.first) / 2.0
-          offset = (@range.first + @range.last) / 2.0
+        points = reset_points(resets)
+        if points
+          buf = sample_segments(count, freq, phase, width, gain, offset, points, targets) do |out, f, ph, w|
+            kernel_c(out, f, ph, w, nil, gain, offset)
+          end
         else
-          gain = 1
-          offset = 0
-        end
-
-        case kernel
-        when :sync
-          check_sync(phase)
-          blep, blamp = BandLimit.minblep_tables
-          buf = MB::Sound::FastSynth.oscillate_sync(
-            @osc_buf[0...count].inplace!, wave_type, freq, @phasor.advance, gain, offset,
-            @sync_state, @sync_ring, pulses, @soft_sync, width, @remove_dc,
-            blep, blamp, BandLimit::SYNC_OVERSAMPLE, BandLimit::SYNC_TAPS, !!@band_limit
-          ).inplace!
-          @phasor.state[0] = @sync_state[0]
-        when :blit
-          buf = MB::Sound::FastSynth.blit(
-            @osc_buf[0...count].inplace!,
-            wave_type,
-            freq,
-            @phasor.advance,
-            gain,
-            offset,
-            @phasor.state,
-            @blit_state
-          ).inplace!
-        when :synth
-          buf = MB::Sound::FastSynth.oscillate_bl(
-            @osc_buf[0...count].inplace!,
-            wave_type,
-            freq,
-            phase,
-            @phasor.advance,
-            gain,
-            offset,
-            @phasor.state,
-            @bl_state,
-            *band_limit_fade,
-            width,
-            @remove_dc
-          ).inplace!
-        else
-          buf = MB::FastSound.oscillate(
-            @osc_buf[0...count].inplace!,
-            wave_type,
-            freq,
-            phase,
-            @phasor.advance,
-            @phasor.random_advance,
-            gain,
-            offset,
-            @phasor.state
-          ).inplace!
+          buf = kernel_c(@osc_buf[0...count].inplace!, freq, phase, width, pulses, gain, offset)
+          add_jump_residual(buf, gain) if @jump_residual
         end
 
         @last_freq = freq.is_a?(Numeric) ? freq : freq[-1]
         @last_width = width.is_a?(Numo::NArray) ? width[-1] : width
 
-        add_jump_residual(buf, gain) if @jump_residual
         buf = add_waveshape_and_range(buf)
 
         buf.not_inplace!
@@ -616,47 +629,25 @@ module MB
       def sample_ruby(count = nil)
         return sample_ruby(1)[0] if count.nil?
 
-        count, freq_table, phase_table, width, pulses = get_upstream_inputs(count)
-        return nil if freq_table.nil? || phase_table.nil? || (warped? && width.nil?) || (@sync && pulses.nil?)
+        count, freq_table, phase_table, width, pulses, resets, targets = get_upstream_inputs(count)
+        return nil if missing_input?(freq_table, phase_table, width, pulses, resets, targets)
 
         build_buffer(count)
+        gain, offset = gain_and_offset
 
-        if @range && @pre_power == 1.0
-          gain = (@range.last - @range.first) / 2.0
-          offset = (@range.first + @range.last) / 2.0
+        points = reset_points(resets)
+        if points
+          buf = sample_segments(count, freq_table, phase_table, width, gain, offset, points, targets) do |out, f, ph, w|
+            kernel_ruby(out, f, ph, w, nil, gain, offset)
+          end
         else
-          gain = 1
-          offset = 0
-        end
-
-        if @sync
-          check_sync(phase_table)
-          blep, blamp = BandLimit.minblep_tables
-          values = BandLimit.sync_ruby(
-            count, @wave_type, freq_table, @phasor.advance, gain, offset,
-            @sync_state, @sync_ring, pulses, @soft_sync, width, @remove_dc,
-            blep, blamp, BandLimit::SYNC_OVERSAMPLE, BandLimit::SYNC_TAPS, !!@band_limit
-          )
-          @phasor.state[0] = @sync_state[0]
-        elsif blit?
-          values = BandLimit.blit_ruby(count, @wave_type, freq_table, @phasor.advance, gain, offset, @phasor.state, @blit_state)
-        elsif synth_kernel?
-          values = BandLimit.oscillate_ruby(
-            count, @wave_type, freq_table, phase_table, @phasor.advance, gain, offset,
-            @phasor.state, @bl_state, *band_limit_fade, width, @remove_dc
-          )
-        else
-          phases, increments = @phasor.phases_ruby(freq_table, count)
-          values = Oscillator.shape_ruby(@wave_type, phases, increments, phase_table) * gain + offset
+          buf = kernel_ruby(@osc_buf[0...count].inplace!, freq_table, phase_table, width, pulses, gain, offset)
+          add_jump_residual(buf, gain)
         end
 
         @last_freq = freq_table.is_a?(Numeric) ? freq_table : freq_table[-1]
         @last_width = width.is_a?(Numo::NArray) ? width[-1] : width
 
-        values = values.real if !@osc_buf.is_a?(Numo::SComplex) && values.is_a?(Numo::DComplex)
-        @osc_buf[0...count] = values
-        buf = @osc_buf[0...count].inplace!
-        add_jump_residual(buf, gain)
         buf = add_waveshape_and_range(buf)
         buf.not_inplace!
       end
@@ -733,31 +724,45 @@ module MB
         end
       end
 
+      # The minBLEP and minBLAMP tables at whole-sample offsets (a jump
+      # exactly between samples), for #phase_jump, made on first use.
+      def self.jump_tables
+        @jump_tables ||= begin
+          blep, blamp = BandLimit.minblep_tables
+          steps = Numo::DFloat.new(BandLimit::SYNC_TAPS).seq * BandLimit::SYNC_OVERSAMPLE
+          [blep[steps].freeze, blamp[steps].freeze].freeze
+        end
+      end
+
       private
 
       # Runs the block, which jumps the phase, and for a band-limited
       # oscillator that has played, queues a band-limited step for the
-      # following samples (see #reset).
-      def phase_jump
+      # following samples (see #reset).  The step is measured at frequency
+      # +freq+, warp +width+, and phase modulation +phase_mod+ (radians):
+      # by default those of the last sample played and no phase modulation
+      # (a jump between buffers), or those of the reset sample (a reset
+      # input; see #sample_segments).
+      def phase_jump(freq: @last_freq, width: @last_width, phase_mod: 0.0)
         before = @phasor.state[0]
-        played = @last_freq != 0.0 && (@bl_state[3] != 0 || @blit_state[6] != 0)
+        played = freq != 0.0 && (@bl_state[3] != 0 || @blit_state[6] != 0)
         yield
         after = @phasor.state[0]
         unprime
 
         return unless played && !@sync && synth_kernel? && !blit?
 
-        w = BandLimit.clamp_width((@last_width || 0.5).to_f)
-        v0, s0 = BandLimit.sync_shape(@wave_type, w, before)
-        v1, s1 = BandLimit.sync_shape(@wave_type, w, after)
-        inc = @last_freq * @phasor.advance
+        w = BandLimit.clamp_width((width || 0.5).to_f)
+        pm = phase_mod / TWOPI
+        v0, s0 = BandLimit.sync_shape(@wave_type, w, pm == 0 ? before : BandLimit.wrap(before + pm))
+        v1, s1 = BandLimit.sync_shape(@wave_type, w, pm == 0 ? after : BandLimit.wrap(after + pm))
+        inc = freq * @phasor.advance
         k = @band_limit.is_a?(Range) ? BandLimit.fade(inc.abs / @phasor.advance, @band_limit.begin.to_f, @band_limit.end.to_f) : 1.0
         k = 0.0 unless band_limited?
         return if k == 0
 
-        blep, blamp = BandLimit.minblep_tables
-        steps = Numo::DFloat.new(BandLimit::SYNC_TAPS).seq * BandLimit::SYNC_OVERSAMPLE
-        residual = (blep[steps] * (v1 - v0) + blamp[steps] * ((s1 - s0) * inc)) * k
+        blep, blamp = Oscillator.jump_tables
+        residual = (blep * (v1 - v0) + blamp * ((s1 - s0) * inc)) * k
         @jump_residual = @jump_residual ? residual + pad_residual(@jump_residual, residual.length) : residual
       end
 
@@ -785,6 +790,151 @@ module MB
           @sync_state = [@phasor.phi, 0.0, 1.0, 0, 0]
           @sync_ring.fill(0)
         end
+      end
+
+      # Output gain and offset for the kernels from #range (see #sample_c).
+      def gain_and_offset
+        if @range && @pre_power == 1.0
+          [(@range.last - @range.first) / 2.0, (@range.first + @range.last) / 2.0]
+        else
+          [1, 0]
+        end
+      end
+
+      # True if an input needed for the next samples has ended.
+      def missing_input?(freq, phase, width, pulses, resets, targets)
+        freq.nil? || phase.nil? || (warped? && width.nil?) || (@sync && pulses.nil?) ||
+          (@reset_input && resets.nil?) || (@reset_to.respond_to?(:sample) && targets.nil?)
+      end
+
+      # The indices of the nonzero samples of the reset input's buffer
+      # +resets+ as an Array, or nil if there are none (or no reset input).
+      def reset_points(resets)
+        return nil if resets.nil?
+
+        unless resets.is_a?(Numo::SComplex) || resets.is_a?(Numo::DComplex)
+          min, max = resets.minmax
+          return nil if min == 0 && max == 0 # cheaper than ne(0).where
+        end
+
+        resets = resets.ne(0).where
+        resets.empty? ? nil : resets.to_a
+      end
+
+      # Computes +count+ samples split into pieces at the reset sample
+      # indices in +points+ (see #reset_input=), jumping the phase before
+      # each reset sample.  The block runs a kernel (#kernel_c or
+      # #kernel_ruby) on a view of the output buffer with the matching
+      # slices of the frequency, phase modulation, and width inputs, and
+      # returns the samples.  Returns a view of the output buffer.
+      def sample_segments(count, freq, phase, width, gain, offset, points, targets)
+        @frame_segments = [] if @ports
+
+        start = 0
+        (points + [count]).each do |stop|
+          if stop > start
+            f = slice_input(freq, start, stop)
+            @frame_segments&.push([@phasor.state[0], f, stop - start])
+
+            out = @osc_buf[start...stop].inplace!
+            result = yield(out, f, slice_input(phase, start, stop), slice_input(width, start, stop))
+            out[true] = result unless result.equal?(out)
+            add_jump_residual(out, gain)
+          end
+
+          break if stop == count
+
+          target = reset_target(targets, stop)
+          phase_jump(freq: input_at(freq, stop), width: width && input_at(width, stop), phase_mod: input_at(phase, stop)) do
+            @phasor.phi = target
+          end
+
+          start = stop
+        end
+
+        @osc_buf[0...count].inplace!
+      end
+
+      # The phase in cycles for a reset at sample +i+ (see #reset_to=).
+      def reset_target(targets, i)
+        return @phase_rng.rand if @phase_rng
+        return input_at(targets, i) / TWOPI if targets
+        return @reset_to / TWOPI if @reset_to
+
+        @phasor.phase
+      end
+
+      # Sample +i+ of a kernel input (Numeric or NArray) as a real Float.
+      def input_at(input, i)
+        v = input.is_a?(Numo::NArray) ? input[i] : (input || 0)
+        v = v.real if v.is_a?(Complex)
+        v.to_f
+      end
+
+      # Samples +start+...+stop+ of a kernel input (Numeric, NArray, or nil).
+      def slice_input(input, start, stop)
+        input.is_a?(Numo::NArray) ? input[start...stop] : input
+      end
+
+      # Runs the C kernel for the current settings (see #kernel) into +out+
+      # (an inplace view of the output buffer), returning the samples.
+      def kernel_c(out, freq, phase, width, pulses, gain, offset)
+        case kernel
+        when :sync
+          check_sync(phase)
+          blep, blamp = BandLimit.minblep_tables
+          buf = MB::Sound::FastSynth.oscillate_sync(
+            out, wave_type, freq, @phasor.advance, gain, offset,
+            @sync_state, @sync_ring, pulses, @soft_sync, width, @remove_dc,
+            blep, blamp, BandLimit::SYNC_OVERSAMPLE, BandLimit::SYNC_TAPS, !!@band_limit
+          ).inplace!
+          @phasor.state[0] = @sync_state[0]
+          buf
+        when :blit
+          MB::Sound::FastSynth.blit(
+            out, wave_type, freq, @phasor.advance, gain, offset, @phasor.state, @blit_state
+          ).inplace!
+        when :synth
+          MB::Sound::FastSynth.oscillate_bl(
+            out, wave_type, freq, phase, @phasor.advance, gain, offset,
+            @phasor.state, @bl_state, *band_limit_fade, width, @remove_dc
+          ).inplace!
+        else
+          MB::FastSound.oscillate(
+            out, wave_type, freq, phase, @phasor.advance, @phasor.random_advance, gain, offset, @phasor.state
+          ).inplace!
+        end
+      end
+
+      # Ruby mirror of #kernel_c: computes out.length samples and stores
+      # them in +out+ (an inplace view of the output buffer), returning it.
+      def kernel_ruby(out, freq_table, phase_table, width, pulses, gain, offset)
+        count = out.length
+
+        if @sync
+          check_sync(phase_table)
+          blep, blamp = BandLimit.minblep_tables
+          values = BandLimit.sync_ruby(
+            count, @wave_type, freq_table, @phasor.advance, gain, offset,
+            @sync_state, @sync_ring, pulses, @soft_sync, width, @remove_dc,
+            blep, blamp, BandLimit::SYNC_OVERSAMPLE, BandLimit::SYNC_TAPS, !!@band_limit
+          )
+          @phasor.state[0] = @sync_state[0]
+        elsif blit?
+          values = BandLimit.blit_ruby(count, @wave_type, freq_table, @phasor.advance, gain, offset, @phasor.state, @blit_state)
+        elsif synth_kernel?
+          values = BandLimit.oscillate_ruby(
+            count, @wave_type, freq_table, phase_table, @phasor.advance, gain, offset,
+            @phasor.state, @bl_state, *band_limit_fade, width, @remove_dc
+          )
+        else
+          phases, increments = @phasor.phases_ruby(freq_table, count)
+          values = Oscillator.shape_ruby(@wave_type, phases, increments, phase_table) * gain + offset
+        end
+
+        values = values.real if !out.is_a?(Numo::SComplex) && values.is_a?(Numo::DComplex)
+        out[true] = values
+        out
       end
 
       def check_sync(phase_mod)
@@ -817,7 +967,14 @@ module MB
       # Port data from the phases of the frame just computed (the phasor's
       # phase, without phase modulation; see Phasor.sync_pulses).
       def compute_ports(count)
-        pulses, increments = Phasor.sync_pulses(@frame_phi, @frame_freq, @phasor.advance, count, @pulse_state)
+        if @frame_segments
+          # Resets split the frame into pieces (see #sample_segments)
+          parts = @frame_segments.map { |phi, freq, n| Phasor.sync_pulses(phi, freq, @phasor.advance, n, @pulse_state) }
+          pulses = parts[0][0].concatenate(*parts[1..].map(&:first))
+          increments = parts[0][1].concatenate(*parts[1..].map(&:last))
+        else
+          pulses, increments = Phasor.sync_pulses(@frame_phi, @frame_freq, @phasor.advance, count, @pulse_state)
+        end
         store_port(:wraps, pulses)
         store_port(:increment, increments)
       end
@@ -892,6 +1049,22 @@ module MB
           min_length = pulses.length if pulses && pulses.length < min_length
         end
 
+        resets = @reset_input
+        if resets
+          resets = resets.sample(count)
+          resets = nil if resets&.empty?
+          min_length = resets.length if resets && resets.length < min_length
+        end
+
+        targets = @reset_to
+        if targets.respond_to?(:sample)
+          targets = targets.sample(count)
+          targets = nil if targets&.empty?
+          min_length = targets.length if targets && targets.length < min_length
+        else
+          targets = nil
+        end
+
         if min_length != count
           # TODO: this double truncation might be impossible now that we use get_sampler
           raise "Truncation happened more than once on oscillator #{self} (try adding .with_buffer to upstreams)" if @truncated
@@ -900,9 +1073,11 @@ module MB
           phase = phase[0...min_length] if phase&.is_a?(Numo::NArray)
           width = width[0...min_length] if width&.is_a?(Numo::NArray)
           pulses = pulses[0...min_length] if pulses&.is_a?(Numo::NArray)
+          resets = resets[0...min_length] if resets&.is_a?(Numo::NArray)
+          targets = targets[0...min_length] if targets&.is_a?(Numo::NArray)
         end
 
-        return min_length, freq, phase, width, pulses
+        return min_length, freq, phase, width, pulses, resets, targets
       end
 
       # Applies pre- and post-power waveshaping to the buffer.

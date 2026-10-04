@@ -46,6 +46,11 @@ module MB
         @amplitude_set = false
         @phase_mod = nil
         @no_trigger = false
+        @reset = nil
+        @reset_to = nil
+        @free = false
+        @random_phase = false
+        @seed = nil
 
         @frequency = nil
         @phase = nil
@@ -477,6 +482,134 @@ module MB
         self
       end
 
+      # Resets the phase at every nonzero sample of +trigger+ (a graph node,
+      # e.g. clip.trigger or a MIDI note-on trigger; the value is ignored),
+      # at exactly that sample, or removes the reset input with nil.  The
+      # phase goes +to:+
+      #
+      # - nil (default): the starting phase (see #with_phase; 0 unless set),
+      # - a phase in radians, like #with_phase (e.g. 90.degrees),
+      # - a graph node of radians, read at each reset sample,
+      # - :random, a new random phase at each reset (the same as #rnd).
+      #
+      # The jump is band-limited like a MIDI voice's retrigger (a 32-sample
+      # minBLEP step from the value the wave would have had; see
+      # Oscillator#reset_input=), and works with #fm and #pm.  A tone can't
+      # have both a reset input and #sync (an error: sync already resets the
+      # phase, in its own kernel).  On a #free tone the last call wins: a
+      # reset input makes it no longer free, and a fixed +to:+ replaces
+      # #rnd, each with a warning.  MIDI voices (GraphVoice) leave tones
+      # with a reset input to it instead of resetting them at each note.
+      #
+      # Examples (bin/sound.rb):
+      #     bpm 120; c = grid(16, 'x..x..x.').loop
+      #     play 55.hz.saw.reset(c.trigger) * c.env           # every hit starts at phase 0
+      #     play 2.hz.lfo.reset(c.trigger, to: 90.degrees)    # an LFO that restarts at its peak
+      def reset(trigger, to: nil)
+        if trigger.nil?
+          @reset = nil
+          @reset_to = nil
+          update_reset
+          return self
+        end
+
+        raise ArgumentError, 'A synced tone cannot also have a reset input' if @sync
+        unless to.nil? || to == :random || to.is_a?(Numeric) || to.respond_to?(:sample)
+          raise ArgumentError, "Reset target must be nil, :random, radians, or a graph node (got #{to.inspect})"
+        end
+
+        if @free
+          override_warning('reset overrides free (the tone is no longer free)')
+          @free = false
+        end
+
+        if to == :random
+          to = nil
+          random_phase
+        elsif to && @random_phase
+          override_warning("reset(to: #{make_source_name(to)}) overrides rnd (no more random phases)")
+          @random_phase = false
+          @oscillator&.random_phase = nil
+        end
+
+        @reset = fixup_source(trigger)
+        @reset_to = to.respond_to?(:sample) ? fixup_source(to) : to
+        update_reset
+        self
+      end
+
+      # The reset trigger input (see #reset), or nil.
+      def reset_input = @reset
+
+      # The reset target given to #reset (nil, radians, or a node).
+      def reset_to = @reset_to
+
+      # Marks this tone as never reset: a free-running oscillator whose phase
+      # never restarts, like an analog oscillator.  MIDI voices won't reset
+      # it (see #no_trigger).  It replaces a reset input (see #reset; the
+      # last call wins, with a warning).  Combine with #rnd for a random starting phase (analog-style unison):
+      #
+      #     play 3.times.map { |i| (110 + i * 0.3).hz.saw.free.rnd }.sum * -15.db
+      def free(free = true)
+        if free && @reset
+          override_warning('free overrides reset (removed the reset input)')
+          reset(nil)
+        end
+
+        @free = !!free
+        no_trigger if @free
+        self
+      end
+
+      # True if #free was called (never reset).  LFOs (#lfo, #no_trigger)
+      # aren't retriggered by MIDI voices either, but may still have a reset
+      # input; see #no_trigger?.
+      def free?
+        @free
+      end
+
+      # Gives this tone a random phase: a random starting phase, and with a
+      # reset input (see #reset) a new random phase at every reset.  The
+      # random numbers come from a Random seeded with +seed+, or by default
+      # a sub-seed drawn from the root generator when this is called (see
+      # MB::Sound.seed), so tones created in the same order after the same
+      # root seed repeat.  Replaces a fixed +to:+ given to #reset (the last
+      # call wins, with a warning).  Also available as #rnd.
+      #
+      #     play 220.hz.saw.rnd                                # random start
+      #     play 110.hz.square.reset(clip.trigger).rnd        # random at each note
+      def random_phase(seed: nil)
+        if @reset_to
+          override_warning("rnd overrides reset(to: #{make_source_name(@reset_to)}) (resets go to random phases)")
+          @reset_to = nil
+          update_reset
+        end
+
+        @seed = Integer(seed) if seed
+        @seed ||= MB::Sound.next_seed
+        @random_phase = true
+        @oscillator&.random_phase = @seed
+        self
+      end
+      alias rnd random_phase
+
+      # True if this tone has a random phase (see #random_phase).
+      def random_phase?
+        @random_phase
+      end
+
+      # The seed of this tone's random phase generator (see #random_phase),
+      # or nil if none has been set or drawn.
+      attr_reader :seed
+
+      # Sets the seed for this tone's random phase (see #random_phase),
+      # restarting its generator if the tone has a random phase.  For code
+      # that derives seeds itself (e.g. one per synth voice).
+      def seed=(seed)
+        @seed = Integer(seed)
+        @oscillator&.random_phase = @seed if @random_phase
+      end
+
       # Makes this Tone a low-frequency oscillator for modulation: it won't
       # be retriggered by MIDI voices (see #no_trigger) and swings over the
       # full -1..1 range unless #at was called.  Call #at afterward to set the
@@ -563,6 +696,8 @@ module MB
           phase_mod: @phase_mod,
           width: @width,
           sync: @sync,
+          reset: @reset,
+          reset_to: @reset_to.respond_to?(:sample) ? @reset_to : nil,
         }.compact
       end
 
@@ -588,7 +723,11 @@ module MB
           remove_dc: !@keep_dc,
           sync: @sync,
           soft_sync: @soft_sync
-        )
+        ).tap { |o|
+          o.reset_input = @reset
+          o.reset_to = @reset_to
+          o.random_phase = @seed if @random_phase
+        }
       end
 
       # Returns a second-order low-pass Filter with this Tone's frequency as its
@@ -698,8 +837,23 @@ module MB
 
       private
 
+      # Warns that a call replaced an earlier conflicting setting (the last
+      # call wins; see #reset, #free, #random_phase).
+      def override_warning(message)
+        warn "Tone #{wave_name} #{make_source_name(@frequency)}: #{message}"
+      end
+
+      # Gives the oscillator, if made, the reset settings (see #reset).
+      def update_reset
+        return unless @oscillator
+
+        @oscillator.reset_input = @reset
+        @oscillator.reset_to = @reset_to
+      end
+
       # See #sync and #softsync.
       def set_sync(master, ratio, soft)
+        raise ArgumentError, 'A tone with a reset input cannot also be synced' if @reset
         raise ArgumentError, 'Give a master or a ratio:, not both' if master && ratio
         raise ArgumentError, 'Give a master (e.g. C2) or ratio: (e.g. ratio: 2.5)' if master.nil? && ratio.nil?
 
