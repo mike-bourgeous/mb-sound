@@ -19,7 +19,7 @@ RSpec.describe(MB::Sound::Session) do
   describe '#sample_rate' do
     it "is the output's rate" do
       expect(session.sample_rate).to eq(48000)
-      s = MB::Sound::Session.new(output: MB::Sound::NullOutput.new(channels: 2, sample_rate: 44100, sleep: false), realtime: false)
+      s = MB::Sound::Session.new(output: MB::Sound::NullOutput.new(channels: 2, sample_rate: 44100, sleep: false), transport: transport, realtime: false)
       expect(s.sample_rate).to eq(44100)
     ensure
       s&.close
@@ -67,7 +67,7 @@ RSpec.describe(MB::Sound::Session) do
     end
 
     it 'opens files at the session rate' do
-      s = MB::Sound::Session.new(output: MB::Sound::NullOutput.new(channels: 2, sample_rate: 44100, sleep: false), realtime: false, master_gain: 1)
+      s = MB::Sound::Session.new(output: MB::Sound::NullOutput.new(channels: 2, sample_rate: 44100, sleep: false), transport: transport, realtime: false, master_gain: 1)
       s.add(sine_file)
       data = Array.new(56) { s.process_buffer[0].dup }.reduce(:concatenate)
       expect(data[0...44100]).to eq(MB::Sound.read(sine_file, sample_rate: 44100)[0])
