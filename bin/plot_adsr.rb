@@ -1,5 +1,5 @@
 #!/usr/bin/env -S RUBY_THREAD_TIMESLICE=10 RUBY_YJIT_ENABLE=1 ruby
-# Plots an ADSR envelope with parameters given on the command line.
+# Plots an ADSR envelope with parameters given on the command line (the old ADSREnvelope; see plot_envelope.rb for MB::Sound::Envelope).
 #
 # Usage: $0 [--db RANGE] [--filter HZ] attack_time decay_time sustain_level release_time
 #
