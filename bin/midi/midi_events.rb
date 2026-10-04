@@ -1,11 +1,14 @@
 #!/usr/bin/env -S RUBY_THREAD_TIMESLICE=10 RUBY_YJIT_ENABLE=1 ruby
-# Prints events as they occur in real time, either from a jackd input or a MIDI
+# Prints events as they occur in real time, either from live MIDI or a MIDI
 # file.  Can optionally forward events to a jackd MIDI output.
 #
-# Requires MB::Sound::JackFFI and needs jackd running for realtime input.
+# Live MIDI comes through RtMidi (CoreMIDI, ALSA, or JACK; see
+# MB::Sound::MIDI::Input); without an input argument, connect a MIDI source to
+# the virtual port it creates.  Forwarding still uses MB::Sound::JackFFI and
+# needs jackd running (MIDI output is a later project).
 #
 # Usage:
-#     $0 [--forward] [--forward-to PORT] [input_port_or_midi_filename]
+#     $0 [--forward] [--forward-to PORT] [part_of_a_midi_source_name_or_midi_filename]
 
 require 'bundler/setup'
 
@@ -36,7 +39,7 @@ MB::Sound.script(
     puts "Reading MIDI from #{input}"
     midi_in = MB::Sound::MIDI::MIDIFile.new(input)
   else
-    midi_in = MB::Sound::JackFFI[].input(port_type: :midi, port_names: ['midi_in'], connect: input || :physical)
+    midi_in = MB::Sound::MIDI::Input.open_live(input)
   end
 
   midi = Nibbler.new

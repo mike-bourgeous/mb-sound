@@ -3,4 +3,5 @@ Valgrind suppression files for `rake memcheck` (see Rakefile).
 ruby_memcheck reads ruby.supp here for every Ruby, ruby-4.supp for Ruby 4.x,
 ruby-4.0.supp for 4.0.x, etc.  Generate entries with
 MEMCHECK_GEN_SUPPRESSIONS=1 bundle exec rake memcheck, and add a comment
-explaining why each one is a false positive.  None are needed yet.
+explaining why each one is a false positive (or a known leak outside our
+code, like RtMidi's in ruby.supp).

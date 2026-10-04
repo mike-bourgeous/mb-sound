@@ -1,0 +1,3 @@
+fast_midi.o: fast_midi.c rtmidi_c.h
+rtmidi_c.o: rtmidi_c.cpp rtmidi_c.h RtMidi.h
+RtMidi.o: RtMidi.cpp RtMidi.h

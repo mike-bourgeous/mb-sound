@@ -1,0 +1,14 @@
+# RtMidi 6.0.0 (vendored in ext/mb/sound/fast_midi/): MidiOutJack::connect()
+# creates its message ring buffers before calling jack_client_open, and the
+# destructor frees them only if the client opened, so creating a JACK MIDI
+# output while no JACK server is running leaks two ring buffers.  Only
+# FastMIDI::TestOutput (specs) creates JACK outputs, and only while waiting
+# for the dummy JACK server to start (spec/support/jack_dummy.rb).
+{
+   rtmidi-6.0.0-MidiOutJack-connect-leaks-ring-buffers-without-a-server
+   Memcheck:Leak
+   match-leak-kinds: definite
+   fun:malloc
+   fun:jack_ringbuffer_create
+   fun:*MidiOutJack*connect*
+}

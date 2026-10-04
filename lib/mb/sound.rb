@@ -20,6 +20,7 @@ require_relative 'sound/fast_delay'
 require_relative 'sound/fast_synth'
 require_relative 'sound/fast_clip'
 require_relative 'sound/fast_audio'
+require_relative 'sound/fast_midi'
 
 require_relative 'sound/version'
 require_relative 'sound/tuning'
