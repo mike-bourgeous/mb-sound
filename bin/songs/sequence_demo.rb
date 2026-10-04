@@ -7,6 +7,14 @@
 #     bin/songs/sequence_demo.rb --bpm 100           # at a different tempo
 #     bin/songs/sequence_demo.rb -b 16 demo.flac     # renders 16 bars (default 8)
 #     bin/songs/sequence_demo.rb --help              # all options
+#
+# Phase resets from clips (try in bin/sound.rb):
+#     bpm 124; k = grid(16, 'x...x...x...x..x').loop
+#     play 50.hz.sine.reset(k.trigger) * k.env(0, 0.3, 0, 0.05)    # every kick starts at phase 0 (same click each hit)
+#     b = seq(C2, C2, rest, C3, Ds2, G2).n16.loop
+#     play b.tone.saw.rnd.reset(b.trigger) * b.env(0.003, 0.1, 0.6, 0.04) * 0.3    # a new random phase per note
+#     play 3.times.map { |i| (110 + i * 0.4).hz.saw.free.rnd }.sum * -15.db      # free-running unison, random start
+#     seed 3    # makes the random phases above repeat
 
 require 'bundler/setup'
 require 'mb-sound'

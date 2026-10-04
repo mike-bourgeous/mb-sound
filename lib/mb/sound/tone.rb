@@ -500,7 +500,7 @@ module MB
       # with a reset input to it instead of resetting them at each note.
       #
       # Examples (bin/sound.rb):
-      #     bpm 120; c = grid('x..x..x.')
+      #     bpm 120; c = grid(16, 'x..x..x.').loop
       #     play 55.hz.saw.reset(c.trigger) * c.env           # every hit starts at phase 0
       #     play 2.hz.lfo.reset(c.trigger, to: 90.degrees)    # an LFO that restarts at its peak
       def reset(trigger, to: nil)
@@ -541,7 +541,7 @@ module MB
       # it (see #no_trigger), and it can't have a reset input (see #reset).
       # Combine with #rnd for a random starting phase (analog-style unison):
       #
-      #     play 3.times.map { |i| (110 + i * 0.3).hz.saw.free.rnd }.sum.at(-15.db)
+      #     play 3.times.map { |i| (110 + i * 0.3).hz.saw.free.rnd }.sum * -15.db
       def free(free = true)
         raise ArgumentError, 'A tone with a reset input (see #reset) cannot be free' if free && @reset
 
