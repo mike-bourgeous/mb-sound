@@ -199,6 +199,27 @@ module MB
         }
       end
 
+      # Plays background sounds (#bg, songs) through +output+ from now on:
+      # an output object (anything with #write, #sample_rate, #buffer_size,
+      # and #close, e.g. an FFMPEGOutput streaming to a URL), an output type
+      # Symbol for MB::Sound.output (e.g. :device, :ffmpeg, :null), or nil
+      # to go back to the automatic output.  The background session restarts
+      # with the new output (master effects too), so stop all players first.
+      # Returns the new output (nil for the automatic one).
+      #
+      # Example (bin/sound.rb):
+      #     use_output :device
+      #     use_output FFMPEGOutput.new('udp://127.0.0.1:1234', format: 'mpegts', codec: 'aac', sample_rate: 48000, channels: 2, realtime: true)
+      #     use_output nil
+      def use_output(output = nil)
+        if output.is_a?(Symbol)
+          output = MB::Sound.output(output_type: output, channels: 2, shared: false)
+        end
+
+        Session.use_output(output)
+        output
+      end
+
       # Sets master effects that the whole background mix (see #bg) runs
       # through, e.g. to tame levels or add a shared reverb.  The block gets
       # the mix and returns the processed mix.  Also available as
@@ -465,6 +486,11 @@ module MB
       # Build fresh graphs to render, rather than rendering graphs that are
       # playing in the background, because graphs keep their playback state.
       #
+      # Instead of a filename, +filename+ may be an output object (anything
+      # with #write, #sample_rate, and #close, e.g. an FFMPEGOutput with
+      # realtime: true streaming to a URL); it is closed when the render
+      # finishes.
+      #
       # Example (bin/sound.rb):
       #     bass = seq(C2, C2, rest, C3).n16.loop
       #     render '/tmp/bass.flac', bass.tone.ramp.at(1) * bass.env * 0.5, bars: 4
@@ -473,7 +499,7 @@ module MB
         raise ArgumentError, 'Pass bars: or seconds:, not both' if bars && seconds
 
         transport = Sequence::Transport.new(bpm: bpm || Sequence.transport.bpm, bar_length: Sequence.transport.bar_length)
-        output = file_output(filename, channels: channels, overwrite: overwrite)
+        output = filename.respond_to?(:write) ? filename : file_output(filename, channels: channels, overwrite: overwrite)
         session = Session.new(output: output, transport: transport, master_gain: gain || master_gain, channels: channels, buffer_size: buffer_size, realtime: false, raise_errors: true)
 
         rate = output.sample_rate

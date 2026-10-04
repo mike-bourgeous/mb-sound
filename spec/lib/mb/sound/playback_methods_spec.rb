@@ -59,6 +59,39 @@ RSpec.describe(MB::Sound::PlaybackMethods) do
       MB::Sound.rewind
     end
 
+    describe '#use_output' do
+      it 'plays background sounds through an output object' do
+        out = MB::Sound::NullOutput.new(channels: 2)
+        expect(MB::Sound.use_output(out)).to equal(out)
+        expect(MB::Sound::Session.default.output).to equal(out)
+
+        MB::Sound.bg(220.hz.sine)
+        deadline = MB::U.clock_now + 2
+        sleep 0.01 until out.frames_written > 0 || MB::U.clock_now > deadline
+        expect(out.frames_written).to be > 0
+      end
+
+      it 'opens an output type given as a Symbol' do
+        out = MB::Sound.use_output(:null)
+        expect(out).to be_a(MB::Sound::NullOutput)
+        expect(out.channels).to eq(2)
+        expect(MB::Sound::Session.default.output).to equal(out)
+      end
+
+      it 'refuses to switch while players are running' do
+        MB::Sound.bg(220.hz.sine)
+        expect { MB::Sound.use_output(:null) }.to raise_error(ArgumentError, /Stop the background players/)
+      end
+
+      it 'goes back to the automatic output with nil, closing the old one' do
+        out = MB::Sound::NullOutput.new(channels: 2)
+        MB::Sound.use_output(out)
+        expect(MB::Sound.use_output(nil)).to eq(nil)
+        expect(out).to be_closed
+        expect(MB::Sound::Session.default.output).not_to equal(out)
+      end
+    end
+
     describe '#bg' do
       it 'returns reused player numbers and lists players' do
         a = MB::Sound.bg(220.hz.sine)
@@ -353,6 +386,13 @@ RSpec.describe(MB::Sound::PlaybackMethods) do
     # These check render's timing and mixing at unity gain; the master bus
     # gain (reset before each example by spec_helper) is checked below.
     before { MB::Sound.master_gain(1) }
+
+    it 'renders to an output object instead of a file, closing it at the end' do
+      out = MB::Sound::NullOutput.new(channels: 2, sleep: false)
+      expect(MB::Sound.render(out, 1.constant, seconds: 0.1)).to eq(0.1)
+      expect(out.frames_written).to eq(4800)
+      expect(out).to be_closed
+    end
 
     it 'applies the master bus gain: -10 dB by default, or gain:' do
       MB::Sound.master_gain(MB::Sound::Session::DEFAULT_MASTER_GAIN)
