@@ -304,7 +304,9 @@ RSpec.describe(MB::Sound::ADSREnvelope, :aggregate_failures) do
     end
 
     it 'does not use the same buffer as the original (using vis env)' do
-      cenv2 = MB::Sound.adsr(0, 0.2, 0.0, 0.1).reset.named('cenv2')
+      # (MB::Sound.adsr made ADSREnvelopes before it switched to Envelope)
+      cenv2 = MB::Sound::ADSREnvelope.new(attack_time: 0, decay_time: 0.2, sustain_level: 0.0, release_time: 0.1, sample_rate: 48000)
+        .trigger(1.0, auto_release: 0.4).reset.named('cenv2')
 
       cenv2.sample(800)
       dup = cenv2.dup(1900)
