@@ -1,6 +1,7 @@
 /*
- * MIDI input through RtMidi (https://github.com/thestk/rtmidi, vendored
- * 6.0.0, MIT-style license in RtMidi-LICENSE) for MB::Sound::MIDI::DeviceInput:
+ * MIDI input and output through RtMidi (https://github.com/thestk/rtmidi,
+ * vendored 6.0.0, MIT-style license in RtMidi-LICENSE; see README.md for
+ * updating it) for MB::Sound::MIDI::Input and MIDI::Output:
  * CoreMIDI on macOS, the ALSA sequencer and JACK MIDI on Linux.
  *
  * RtMidi's own thread queues incoming messages, and Ruby polls the queue
