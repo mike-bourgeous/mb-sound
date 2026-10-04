@@ -32,8 +32,8 @@ module MB
     #     v.number.smooth(0.05, reset: v.trigger)
     #
     # MB::Sound::Synth builds one Notes per MIDI::Allocator lane (step F2
-    # of the MIDI flow plan); the clip/console/script integration comes
-    # later.
+    # of the MIDI flow plan); the console's `midi` (MidiMethods#midi) and
+    # synth scripts' block argument are Notes on live or file MIDI.
     class Notes
       # The note number held before the first note when the source can't
       # tell its first note (C4).

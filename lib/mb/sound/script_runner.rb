@@ -20,8 +20,11 @@ module MB
     # only -h/--help: their positional arguments go to the block.
     #
     # Effects add -i/--input FILE, -c/--input-channels N, --repeat [COUNT],
-    # and -m/--midi SOURCE (MIDI controls from a port or a MIDI file); synths
-    # add -i/--input MIDI; songs add -b/--bars N and --bpm BPM.
+    # and -m/--midi SOURCE (MIDI controls for Values#midi_cc from a port or a
+    # MIDI file); synths add -i/--input MIDI (a file or port, whose MIDI the
+    # block gets as a MB::Sound::Notes); songs add -b/--bars N and --bpm BPM.
+    # Live MIDI switches the sound card to the :low latency profile unless
+    # one was chosen (see PlaybackMethods#live_midi_latency).
     #
     # Parameters are declared with defaults (and optional descriptions):
     #

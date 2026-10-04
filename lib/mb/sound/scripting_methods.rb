@@ -34,17 +34,25 @@ module MB
         runner(:effect, params, input_channels: input_channels, live_channels: live_channels, profile: profile).run_effect(&block)
       end
 
-      # Runs a synthesizer script: the block gets the MIDI input name (a
-      # MIDI file or port, or nil for live MIDI; pass it to #synth) and,
-      # with two block parameters, the declared parameters, and returns the
-      # graph.  An audio file argument or --output writes a file.
+      # Runs a synthesizer script: the block gets the script's MIDI (a
+      # MIDI file, or live input from a port; see ScriptRunner#run_synth)
+      # as a MB::Sound::Notes and, with two block parameters, the declared
+      # parameters, and returns the graph.  The Notes is a mono voice and a
+      # MIDI source for polyphonic synths (Notes#synth, Synth.new).  Live
+      # MIDI switches to the :low latency profile unless +profile+,
+      # -L/--latency-profile, or AUDIO_PROFILE chose one.  An audio file
+      # argument or --output writes a file.
       #
       # Example:
-      #     MB::Sound.synth_script { |input|
-      #       MB::Sound.synth(input) { |midi| midi.hz.tone.ramp.at(1) * midi.env }
+      #     MB::Sound.synth_script(cutoff: 900) { |midi, p|
+      #       midi.synth(voices: 6) { |v| v.hz.saw.filter(:lowpass, cutoff: v.cutoff(p.cutoff)) * v.amp_env }
       #     }
+      #     MB::Sound.synth_script { |midi| midi.hz.square * midi.amp_env }   # mono
+      #
+      # Old scripts pass the Notes to MB::Sound.synth, #midi_manager, or
+      # #midi_file, which read the same MIDI (see MidiMethods#midi_manager).
       def synth_script(profile: nil, **params, &block)
-        raise ArgumentError, 'Provide a block to accept a MIDI name and return a node graph' unless block
+        raise ArgumentError, 'Provide a block that turns the MIDI input into a node graph' unless block
         runner(:synth, params, profile: profile).run_synth(&block)
       end
 
