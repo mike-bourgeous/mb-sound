@@ -33,6 +33,14 @@ module MB
         @midi_dsl ||= MB::Sound::GraphNode::MidiDsl.new(manager: midi_manager)
       end
 
+      # Whether #synth prints parameter maps by default (ScriptRunner sets
+      # false for -q/--quiet).
+      attr_writer :parameter_maps
+
+      def parameter_maps?
+        @parameter_maps != false
+      end
+
       # Creates and caches a MIDI manager for the given +input_name+, which may
       # be a MIDI filename (any existing file must be .mid or .midi), part of
       # a live MIDI source's name to connect to (an unconnected port with a
@@ -74,10 +82,11 @@ module MB
       # DSL as well
       #
       # Prints the MIDI parameter map (an ACID-compatible controller
-      # definition) unless +:parameter_map+ is false.
+      # definition) unless +:parameter_map+ is false (by default false when a
+      # script runs with -q/--quiet; see #parameter_maps=).
       #
       # See ScriptingMethods#synth_script.
-      def synth(input_name = nil, osc_count: ENV['OSC_COUNT']&.to_i || 4, channel: ENV['CHANNEL']&.to_i&.-(1), parameter_map: true)
+      def synth(input_name = nil, osc_count: ENV['OSC_COUNT']&.to_i || 4, channel: ENV['CHANNEL']&.to_i&.-(1), parameter_map: parameter_maps?)
         raise 'Pass a block to define individual voices' unless block_given?
 
         # TODO: further automate connecting to an output, parsing command-line

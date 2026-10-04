@@ -196,6 +196,7 @@ module MB
       # Session::TAIL_QUIET_SECONDS (see MIDI::MIDIFile#ended?).
       def run_synth(&block)
         @params.midi_source = method(:midi)
+        MB::Sound.parameter_maps = !@options[:quiet]
         graph = to_graph(block.arity == 1 ? block.call(@options[:input]) : block.call(@options[:input], @params))
         announce(graph)
         play_or_render(graph) do |session|

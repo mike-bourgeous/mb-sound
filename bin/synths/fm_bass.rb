@@ -10,7 +10,7 @@ module MB::Sound
   # for live MIDI).  Also used by bin/audio_load_check.rb as a reference
   # load.  See MidiMethods#synth for +:parameter_map+.  +:oversample+ is the
   # oversampling factor (1 for none).
-  def self.fm_bass(input, parameter_map: true, oversample: 4)
+  def self.fm_bass(input, parameter_map: parameter_maps?, oversample: 4)
     s = synth(input, parameter_map: parameter_map) { |midi|
       base = midi.number.named('Note number').smooth(0.1).freq.named('Base freq')
       base2x = (base * 2).named('Base 2x')
