@@ -16,6 +16,13 @@ module MB
           {}
         end
 
+        # The node's named inputs, for introspection (e.g. a future UI): the
+        # same as #sources.  Side outputs are listed by GraphNode::Ports#ports
+        # and #port_info on nodes that have them.
+        def inputs
+          sources
+        end
+
         # Returns a Hash with backward-pointing sources.  Keys are source names,
         # values are source nodes.  These sources are not used when building or
         # ordering the node #graph or #graph_ranks.

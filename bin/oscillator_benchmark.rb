@@ -1,8 +1,9 @@
 #!/usr/bin/env -S RUBY_THREAD_TIMESLICE=10 ruby
 # Measures oscillator-heavy workloads as a percentage of realtime (CPU time
 # per second of audio), for comparing oscillator implementations: single
-# oscillators, 8 voices of 6-operator FM (phase modulation chains), 8 voices
-# of a 7-oscillator supersaw, and 32 LFOs.
+# oscillators (band-limited and naive, pwm, sync, complex BLIT, soft clip with
+# and without ADAA), 8 voices of 6-operator FM (phase modulation chains), 8
+# voices of a 7-oscillator supersaw, and 32 LFOs.
 #
 # Usage: $0 [options]
 #
@@ -18,6 +19,12 @@ RATE = 48000
 WORKLOADS = {
   'sine x1' => -> { 220.hz.sine.at(0.5) },
   'ramp x1' => -> { 220.hz.ramp.at(0.5) },
+  'aramp x1 (naive)' => -> { 220.hz.aramp.at(0.5) },
+  'pulse pwm x1' => -> { 220.hz.pulse(0.5.hz.lfo.at(0.1..0.9)).at(0.5) },
+  'sync ramp x1' => -> { 110.hz.ramp.sync(ratio: 2.37).at(0.5) },
+  'complex_ramp x1 (BLIT)' => -> { 220.hz.complex_ramp.at(0.5).real },
+  'softclip x1 (ADAA)' => -> { 220.hz.sine.at(4).softclip },
+  'asoftclip x1 (naive)' => -> { 220.hz.sine.at(4).asoftclip },
   'complex_sine x1' => -> { 220.hz.complex_sine.at(0.5).real },
   'fm 6-op x8 voices' => -> {
     voices = 8.times.map { |v|

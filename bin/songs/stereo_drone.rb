@@ -26,7 +26,7 @@ module MB::Sound
     lfo_freq = 1.0 / interval
 
     notes.map.with_index { |note, idx|
-      fade = lfo_freq.hz.triangle.at(-90..-12).with_phase(Math::PI * 0.25 + phase * idx).db
+      fade = lfo_freq.hz.triangle.lfo.at(-90..-12).with_phase(Math::PI * 0.25 + phase * idx).db
       modulator = (note.freq * 2.hz.lfo.at(2.98..3.02)).tone.at(2) * (lfo_freq / 2 + lfo_freq / notes.count * idx).hz.lfo.at(0..1)
 
       fade * note.sine.pm(modulator)

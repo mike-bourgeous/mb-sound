@@ -14,7 +14,7 @@ RSpec.describe(MB::Sound::GraphNode::ChannelDispatch) do
     end
 
     it 'leaves single-channel nodes unchanged' do
-      expect(1.constant.softclip).to be_a(MB::Sound::Filter::SampleWrapper)
+      expect(1.constant.softclip).to be_a(MB::Sound::GraphNode::Shaper)
       expect(1.constant * 2).to be_a(MB::Sound::GraphNode)
     end
 

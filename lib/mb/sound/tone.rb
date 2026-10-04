@@ -36,6 +36,12 @@ module MB
       def initialize(wave_type: :sine, frequency: 440, amplitude: 1.0, phase: 0, sample_rate: 48000)
         @wave_type = wave_type
         @oscillator = nil
+        @band_limit = true
+        @lfo = false
+        @width = nil
+        @keep_dc = false
+        @sync = nil
+        @soft_sync = false
         @noise = 0
         @amplitude_set = false
         @phase_mod = nil
@@ -56,25 +62,156 @@ module MB
       end
       alias sin sine
 
-      # Changes the waveform type to triangle.
+      # Changes the waveform type to a band-limited triangle (see BandLimit;
+      # #atriangle is the naive, aliased version).
       def triangle
-        @wave_type = :triangle
-        self
+        set_wave(:triangle, true)
       end
 
-      # Changes the waveform type to square.
+      # Changes the waveform type to a naive (aliased) triangle, whose
+      # corners alias a little; see #triangle.
+      def atriangle
+        set_wave(:triangle, false)
+      end
+
+      # Changes the waveform type to a band-limited square (see BandLimit;
+      # #asquare is the naive, aliased version).
       def square
-        @wave_type = :square
-        self
+        set_wave(:square, true)
       end
 
-      # Changes the waveform type to ramp.
+      # Changes the waveform type to a naive (aliased) square, whose jumps
+      # alias audibly at high pitches; see #square.
+      def asquare
+        set_wave(:square, false)
+      end
+
+      # Changes the waveform type to a band-limited ramp (sawtooth; see
+      # BandLimit; #aramp is the naive, aliased version).
       def ramp
-        @wave_type = :ramp
-        self
+        set_wave(:ramp, true)
       end
       alias saw ramp
       alias sawtooth ramp
+
+      # Changes the waveform type to a naive (aliased) ramp, whose jump
+      # aliases audibly at high pitches (the classic digital grit); see
+      # #ramp.
+      def aramp
+        set_wave(:ramp, false)
+      end
+      alias asaw aramp
+      alias asawtooth aramp
+
+      # True if this tone's ramp, square, or triangle waveform is
+      # band-limited (see #ramp, #aramp).
+      def band_limited?
+        @band_limit
+      end
+
+      # Warps the phase so the first half of the waveform plays over +width+
+      # of each cycle and the second half over the rest: pulse width
+      # modulation for every shape.  A square becomes a pulse (see #pulse), a
+      # triangle a skewed triangle (towards a saw near 0 or 1), a ramp a saw
+      # with a kink, and a sine an asymmetric sine (like Casio's phase
+      # distortion).  +width+ is a number from 0 to 1 (0.5 is no change) or a
+      # graph node, read every sample.  Band-limited shapes stay band-limited
+      # (including the corners the warp adds to sines and parabolas).
+      #
+      # A warped waveform's DC offset (e.g. 2 * width - 1 for a pulse) is
+      # removed, like the AC-coupled output of an analog synth, so sweeping
+      # the width doesn't thump; pass dc: true to keep it.  Also available as
+      # #skew.
+      #
+      # Examples (bin/sound.rb):
+      #     play 110.hz.pwm(0.5.hz.lfo.at(0.1..0.9)).square.at(-12.db)   # classic PWM
+      #     play 110.hz.triangle.skew(0.1).at(-12.db)                    # nearly a saw
+      #     play C2.sine.pwm(adsr(0.01, 0.3, 0.2, 0.3).at(0.5..0.05))   # CZ-style sweep
+      def pwm(width, dc: false)
+        @width = fixup_source(width)
+        @keep_dc = !!dc
+        if @oscillator
+          @oscillator.width = @width
+          @oscillator.remove_dc = !@keep_dc
+        end
+        self
+      end
+      alias skew pwm
+
+      # The phase warp width (see #pwm), or nil.
+      attr_reader :width
+
+      # Hard sync: restarts this tone's waveform at every cycle of a master,
+      # the classic sweepable lead sound.  With +ratio:+ the master is this
+      # tone's own pitch (hidden, not heard) and this tone plays at that
+      # pitch times +ratio+ (a number or a graph node), so the note sets the
+      # pitch and the ratio sweeps the timbre:
+      #
+      #     play C2.saw.sync(ratio: adsr(0.01, 0.4, 0.3, 0.3).at(1..6))
+      #
+      # Or give a +master+: a Pitch or Note (a hidden phasor at that pitch),
+      # a Tone or Phasor (its #wraps port, so it can be heard too), or any
+      # graph node of sync pulses or triggers (e.g. clip.trigger; a value v
+      # resets the phase 1 - v samples before its sample, so 1 is exactly on
+      # it):
+      #
+      #     play C3.saw.sync(C2)
+      #
+      # Synced tones are band-limited with minBLEP (BandLimit, FastSynth.
+      # oscillate_sync), clean even at high ratios; aramp etc. give naive
+      # sync.  A synced tone can't also have phase modulation.  See
+      # #softsync.
+      def sync(master = nil, ratio: nil)
+        set_sync(master, ratio, false)
+      end
+
+      # Soft sync: like #sync, but each master cycle reverses the direction
+      # of this tone's phase instead of restarting it (a gentler, more
+      # metallic sound).
+      #
+      #     play C2.triangle.softsync(ratio: 1.5.hz.lfo.at(1.5..3))
+      def softsync(master = nil, ratio: nil)
+        set_sync(master, ratio, true)
+      end
+
+      # The sync pulse source (see #sync), or nil.
+      attr_reader :sync_source
+
+      # Sync pulses from this tone's phase (a GraphNode::Ports port; see
+      # Phasor.sync_pulses and #sync).
+      def wraps
+        oscillator.wraps
+      end
+
+      # This tone's phase increment per sample, in cycles (a port).
+      def increment
+        oscillator.increment
+      end
+
+      # The ports of this tone's oscillator in use (see GraphNode::Ports).
+      def ports
+        oscillator.ports
+      end
+
+      # Every port this tone has, with descriptions (see GraphNode::Ports).
+      def port_info
+        oscillator.port_info
+      end
+
+      # Changes the waveform to a band-limited pulse that is high for +width+
+      # (0 to 1, or a graph node) of each cycle: #square with #pwm.  See #pwm
+      # for +dc+; #apulse is the naive (aliased) version.
+      #
+      # Example (bin/sound.rb):
+      #     play 220.hz.pulse(0.25).at(-12.db)
+      def pulse(width = 0.5, dc: false)
+        square.pwm(width, dc: dc)
+      end
+
+      # The naive (aliased) version of #pulse.
+      def apulse(width = 0.5, dc: false)
+        asquare.pwm(width, dc: dc)
+      end
 
       # Changes the waveform type to ramp, with phase set so the oscillator
       # starts at the bottom instead of the middle of its ramp.  This allows
@@ -111,8 +248,13 @@ module MB
       # the cosecant, such that the resulting waveform matches the analytic
       # signal form of the square wave and spirals counterclockwise.
       def complex_square
-        @wave_type = :complex_square
-        self
+        set_wave(:complex_square, true)
+      end
+
+      # The naive (aliased) version of #complex_square, which also has energy at
+      # negative frequencies; see BandLimit.blit_ruby.
+      def acomplex_square
+        set_wave(:complex_square, false)
       end
 
       # Changes the waveform to complex triangle.  The real part is a triangle
@@ -120,17 +262,34 @@ module MB
       # cosecant, such that the resulting waveform matches the analytic signal
       # form of the triangle wave and spirals counterclockwise.
       def complex_triangle
-        @wave_type = :complex_triangle
-        self
+        set_wave(:complex_triangle, true)
+      end
+
+      # The naive (aliased) version of #complex_triangle, which also has energy at
+      # negative frequencies; see BandLimit.blit_ruby.
+      def acomplex_triangle
+        set_wave(:complex_triangle, false)
       end
 
       # Changes the waveform to complex ramp.  The real part matches the
       # standard ramp waveform, and the imaginary part is an integral of a
       # modified cotangent function, such that the resulting waveform matches
       # the analytic signal of a ramp wave, spiraling counterclockwise.
+      #
+      # Complex ramp, square, and triangle are band-limited (closed-form
+      # band-limited impulse trains, integrated; see BandLimit.blit_ruby):
+      # no aliasing and no negative frequencies, with the top octave lifted
+      # slightly (+2.6 dB at 20 kHz).  With phase modulation they fall back to
+      # the naive versions (acomplex_ramp, ...), which alias and clip their
+      # imaginary parts.
       def complex_ramp
-        @wave_type = :complex_ramp
-        self
+        set_wave(:complex_ramp, true)
+      end
+
+      # The naive (aliased) version of #complex_ramp, which also has energy at
+      # negative frequencies; see BandLimit.blit_ruby.
+      def acomplex_ramp
+        set_wave(:complex_ramp, false)
       end
 
       # Changes the oscillator to generate white noise using the distribution
@@ -323,12 +482,19 @@ module MB
       # full -1..1 range unless #at was called.  Call #at afterward to set the
       # range.
       #
+      # Band-limited waveforms (ramp, square, triangle) fade their
+      # band-limiting in between 15 and 30 Hz (BandLimit::LFO_FADE), so a slow
+      # LFO keeps exact jumps and corners (e.g. a delay time that should jump)
+      # while an LFO pushed to audio rates is band-limited.
+      #
       # Durations have their own #lfo for tempo-synced LFOs (see
       # Sequence::Duration#lfo).
       #
       # Example:
       #     play 220.hz.ramp.at(1).filter(:lowpass, cutoff: 0.25.hz.triangle.lfo.at(200..2000), quality: 4)
       def lfo
+        @lfo = true
+        @oscillator&.band_limit = oscillator_band_limit
         no_trigger
         or_at(1)
       end
@@ -337,7 +503,7 @@ module MB
       # #with_phase).  Used by Sequence::TempoNode to lock tempo-synced tones
       # to the timeline.
       def sync_cycles(cycles)
-        oscillator.phasor.sync(cycles)
+        oscillator.sync_cycles(cycles)
         self
       end
 
@@ -395,6 +561,8 @@ module MB
           frequency: @frequency,
           phase: @phase,
           phase_mod: @phase_mod,
+          width: @width,
+          sync: @sync,
         }.compact
       end
 
@@ -414,7 +582,12 @@ module MB
           random_advance: rand_adv,
           range: @range,
           phase_mod: @phase_mod,
-          no_trigger: @no_trigger
+          no_trigger: @no_trigger,
+          band_limit: oscillator_band_limit,
+          width: @width,
+          remove_dc: !@keep_dc,
+          sync: @sync,
+          soft_sync: @soft_sync
         )
       end
 
@@ -491,13 +664,13 @@ module MB
       end
 
       def to_s
-        "#{super} -- #{@wave_type} freq=#{make_source_name(@frequency)} range=#{@range}"
+        "#{super} -- #{wave_name} freq=#{make_source_name(@frequency)} range=#{@range}#{" pwm=#{make_source_name(@width)}" if @width}#{" #{@soft_sync ? 'softsync' : 'sync'}" if @sync}"
       end
 
       def to_s_graphviz
         <<~EOF
         #{super}---------------
-        #{@wave_type}
+        #{wave_name}
         freq=#{make_source_name(@frequency)}
         range=#{@range}
         EOF
@@ -524,6 +697,58 @@ module MB
       end
 
       private
+
+      # See #sync and #softsync.
+      def set_sync(master, ratio, soft)
+        raise ArgumentError, 'Give a master or a ratio:, not both' if master && ratio
+        raise ArgumentError, 'Give a master (e.g. C2) or ratio: (e.g. ratio: 2.5)' if master.nil? && ratio.nil?
+
+        if master.nil?
+          # A hidden master at this tone's pitch; this tone plays ratio times higher
+          hidden = Phasor.new(frequency: @frequency, sample_rate: @sample_rate)
+          ratio = fixup_source(ratio)
+          set_frequency(@frequency.is_a?(Numeric) && ratio.is_a?(Numeric) ? @frequency * ratio : fixup_source(ratio.is_a?(Numeric) ? @frequency * ratio : ratio * @frequency))
+          pulses = hidden.wraps
+        else
+          pulses = case master
+                   when Pitch then master.phasor.wraps
+                   when Tone, Phasor, Oscillator then master.wraps
+                   else
+                     raise ArgumentError, "Sync master must be a Pitch, Tone, Phasor, or a graph node (got #{master.inspect})" unless master.respond_to?(:sample)
+                     master
+                   end
+        end
+
+        @sync = pulses.respond_to?(:get_sampler) ? pulses.get_sampler : pulses
+        @soft_sync = soft
+        if @oscillator
+          @oscillator.sync = @sync
+          @oscillator.soft_sync = soft
+        end
+        self
+      end
+
+      # Sets the wave type and whether it's band-limited (see #ramp, #aramp).
+      def set_wave(wave_type, band_limit)
+        @wave_type = wave_type
+        @band_limit = band_limit
+        if @oscillator
+          @oscillator.wave_type = wave_type
+          @oscillator.band_limit = oscillator_band_limit
+        end
+        self
+      end
+
+      # The band_limit setting for the Oscillator (see Oscillator#band_limit).
+      def oscillator_band_limit
+        return false unless @band_limit
+        @lfo ? BandLimit::LFO_FADE : true
+      end
+
+      # The wave type as written in the DSL (e.g. :aramp for a naive ramp).
+      def wave_name
+        !@band_limit && (BandLimit::WAVES + BandLimit::COMPLEX_WAVES).include?(@wave_type) ? :"a#{@wave_type}" : @wave_type
+      end
 
       # Allows subclasses (e.g. Note) to change the frequency after construction.
       def set_frequency(freq)

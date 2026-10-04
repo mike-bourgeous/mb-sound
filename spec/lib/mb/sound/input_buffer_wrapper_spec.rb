@@ -1,9 +1,9 @@
 RSpec.describe(MB::Sound::InputBufferWrapper, :aggregate_failures) do
   let(:buffer_size) { 7 }
   let(:length) { 100 }
-  let(:c1) { 12000.hz.square.at(1).with_phase(0.0000001).sample(length) }
-  let(:c2) { 8000.hz.square.at(-1).with_phase(0.0000001).sample(length) }
-  let(:c3) { 6000.hz.square.at(1).with_phase(0.0000001).sample(length) }
+  let(:c1) { 12000.hz.asquare.at(1).with_phase(0.0000001).sample(length) }
+  let(:c2) { 8000.hz.asquare.at(-1).with_phase(0.0000001).sample(length) }
+  let(:c3) { 6000.hz.asquare.at(1).with_phase(0.0000001).sample(length) }
   let(:nullinput) { MB::Sound::NullInput.new(channels: 13, buffer_size: buffer_size, sample_rate: 1537, length: length) }
   let(:mono) { MB::Sound::ArrayInput.new(data: [c1], buffer_size: buffer_size) }
   let(:stereo) { MB::Sound::ArrayInput.new(data: [c1, c2], buffer_size: buffer_size) }

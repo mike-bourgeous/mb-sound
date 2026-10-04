@@ -15,10 +15,79 @@ module MB
     # Oscillator keeps its phase in a Phasor and runs phasor and shaper in
     # one C loop (MB::FastSound.oscillate).
     #
+    # Ports (see GraphNode::Ports): #wraps gives sync pulses (see .sync_pulses)
+    # and #increment the phase increment of each sample, in cycles.
+    #
     # Example (bin/sound.rb):
     #     plot 100.hz.phasor, samples: 1000
+    #     plot 100.hz.phasor.wraps, samples: 2000
     class Phasor
       include GraphNode
+      include GraphNode::Ports
+
+      port :wraps, 'Sync pulses: 0 except just after the phase wraps, where the value 1 - d (0 < 1 - d <= 1) says the wrap was d samples earlier; negative when moving backward; 1 after a jump (reset or sync)'
+      port :increment, 'The phase increment of each sample, in cycles'
+
+      # Computes sync pulses and increments for +count+ samples of a phase
+      # starting at +phi+ (cycles) and advancing by +freq+ (Hz; Numeric or
+      # NArray, read in single precision like the C kernels) times
+      # +advance+, the same phases as MB::FastSound.phasor and the oscillator
+      # kernels.  +prev+ is [last phase, last increment, primed (0 or 1)] from
+      # the previous call, updated.  Returns [pulses, increments] as SFloat
+      # NArrays.
+      #
+      # A pulse marks the first sample after the phase wraps: its value is
+      # 1 - d, where d (0 <= d < 1) is how many samples before that sample
+      # the wrap happened, so it's in (0, 1] (usable as an ordinary trigger)
+      # and exact enough to band-limit a reset (see Tone#sync).  Wrapping
+      # backward (negative frequency) gives -(1 - d); a jump of the phase
+      # between buffers (a reset or sync) gives 1.
+      def self.sync_pulses(phi, freq, advance, count, prev)
+        return [Numo::SFloat[], Numo::SFloat[]] if count == 0
+
+        freq = Numo::DFloat.cast(Numo::SFloat.cast(freq.is_a?(Numo::SComplex) || freq.is_a?(Numo::DComplex) ? freq.real : freq)) if freq.is_a?(Numo::NArray)
+        increments = freq * advance
+
+        if increments.is_a?(Numo::NArray)
+          sums = increments.cumsum
+          steps = Numo::DFloat.zeros(count)
+          steps[1..] = sums[0...-1] if count > 1
+          incs = increments
+        else
+          steps = Numo::DFloat.new(count).seq * increments
+          incs = Numo::DFloat.new(count).fill(increments)
+        end
+
+        phases = steps + phi
+        phases -= phases.floor
+
+        prev_p, prev_inc, primed = prev
+        before = Numo::DFloat.zeros(count)
+        before_inc = Numo::DFloat.zeros(count)
+        before[0] = prev_p
+        before_inc[0] = prev_inc
+        if count > 1
+          before[1..] = phases[0...-1]
+          before_inc[1..] = incs[0...-1]
+        end
+
+        reached = before + before_inc
+        pulses = Numo::DFloat.zeros(count)
+
+        forward = reached.ge(1)
+        pulses[forward] = (1.0 - before[forward]) / before_inc[forward] if forward.count_true > 0
+        backward = reached.lt(0)
+        pulses[backward] = -(before[backward] / -before_inc[backward]) if backward.count_true > 0
+
+        # A phase that didn't continue from the previous sample jumped
+        jumped = ((reached - phases + 0.5) - (reached - phases + 0.5).floor - 0.5).abs.gt(1e-6)
+        pulses[jumped] = 1.0 if jumped.count_true > 0
+        pulses[0] = 0.0 if primed == 0
+
+        prev.replace([phases[-1], incs[-1], 1]) if count > 0
+
+        [Numo::SFloat.cast(pulses.clip(-1, 1)), Numo::SFloat.cast(incs)]
+      end
 
       RAND = ENV['RANDOM_SEED'] ? Random.new(Integer(ENV['RANDOM_SEED'])) : Random.new
 
@@ -50,6 +119,7 @@ module MB
         @phase = phase % 1.0
         @state = [@phase.to_f]
         @buf = nil
+        @pulse_state = [0.0, 0.0, 0]
       end
 
       # Changes the frequency source to a Numeric (Hz) or a node.
@@ -119,7 +189,9 @@ module MB
       # Returns +count+ phases (cycles) as an SFloat NArray (reused between
       # calls), or nil once the frequency source ends.
       def sample(count)
-        sample_c(count)
+        return sample_main(count) if @ports.nil?
+
+        port_frame(count) { sample_main(count) }
       end
 
       # C implementation of #sample.
@@ -183,6 +255,24 @@ module MB
       end
 
       private
+
+      # The main output for GraphNode::Ports: phases, remembering where they
+      # started for #compute_ports.
+      def sample_main(count)
+        @frame_phi = @state[0]
+        freq = sample_frequency(count)
+        return nil if freq.nil?
+
+        @frame_freq = freq
+        count = freq.length if freq.is_a?(Numo::NArray)
+        phases_c(freq, count)
+      end
+
+      def compute_ports(count)
+        pulses, increments = Phasor.sync_pulses(@frame_phi, @frame_freq, @advance, count, @pulse_state)
+        store_port(:wraps, pulses)
+        store_port(:increment, increments)
+      end
 
       # Returns the frequency for +count+ samples: a Numeric, an NArray (maybe
       # shorter at the end of its source), or nil if the source ended.

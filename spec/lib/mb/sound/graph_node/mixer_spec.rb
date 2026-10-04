@@ -83,14 +83,14 @@ RSpec.describe(MB::Sound::GraphNode::Mixer) do
 
   describe '#sample' do
     it 'can change the buffer size' do
-      ss = MB::Sound::GraphNode::Mixer.new([1, 0.hz.square.at(0.5).oscillator], sample_rate: 48000)
+      ss = MB::Sound::GraphNode::Mixer.new([1, 0.hz.asquare.at(0.5).oscillator], sample_rate: 48000)
       expect(ss.sample(100)).to eq(Numo::SFloat.zeros(100).fill(1.5))
       expect(ss.sample(200)).to eq(Numo::SFloat.zeros(200).fill(1.5))
       expect(ss.sample(123)).to eq(Numo::SFloat.zeros(123).fill(1.5))
     end
 
     it 'returns the same buffer object if size and data type have not changed' do
-      ss = MB::Sound::GraphNode::Mixer.new([1, 0.hz.square.at(0.5).oscillator], sample_rate: 48000)
+      ss = MB::Sound::GraphNode::Mixer.new([1, 0.hz.asquare.at(0.5).oscillator], sample_rate: 48000)
       a = ss.sample(100)
       b = ss.sample(100)
       c = ss.sample(100)
@@ -104,7 +104,7 @@ RSpec.describe(MB::Sound::GraphNode::Mixer) do
       # With at least some sample rates, the square wave oscillator returns n+1
       # samples due to rounding inaccuracy in the oscillator's phase
       # advancement coefficient.  Sample rate of 1kHz was chosen to avoid this.
-      ss = MB::Sound::GraphNode::Mixer.new([1.hz.square.at_rate(1000).at(0.5).oscillator], sample_rate: 1000)
+      ss = MB::Sound::GraphNode::Mixer.new([1.hz.asquare.at_rate(1000).at(0.5).oscillator], sample_rate: 1000)
       expect(ss.sample(500)).to eq(Numo::SFloat.zeros(500).fill(0.5))
       expect(ss.sample(500)).to eq(Numo::SFloat.zeros(500).fill(-0.5))
     end
@@ -116,8 +116,8 @@ RSpec.describe(MB::Sound::GraphNode::Mixer) do
       ss = MB::Sound::GraphNode::Mixer.new({
         1 => 1, # constants should cancel out
         -1 => 1,
-        1.hz.square.at_rate(1000).at(1).oscillator => 0.5,
-        2.hz.square.at_rate(1000).at(0.25).oscillator => 3,
+        1.hz.asquare.at_rate(1000).at(1).oscillator => 0.5,
+        2.hz.asquare.at_rate(1000).at(0.25).oscillator => 3,
       }, sample_rate: 1000)
 
       expect(ss.sample(250)).to eq(Numo::SFloat.zeros(250).fill(1.25))
@@ -127,7 +127,7 @@ RSpec.describe(MB::Sound::GraphNode::Mixer) do
     end
 
     it 'returns SComplex if given a complex constant' do
-      ss = MB::Sound::GraphNode::Mixer.new([0+1i, 0.hz.square.at(1).oscillator], sample_rate: 48000)
+      ss = MB::Sound::GraphNode::Mixer.new([0+1i, 0.hz.asquare.at(1).oscillator], sample_rate: 48000)
       expect(ss.sample(800)).to eq(Numo::SComplex.zeros(800).fill(1+1i))
     end
 
@@ -140,7 +140,7 @@ RSpec.describe(MB::Sound::GraphNode::Mixer) do
     end
 
     it 'can change from SFloat to SComplex if the constant changes to complex' do
-      osc = 0.hz.square.at(0).oscillator
+      osc = 0.hz.asquare.at(0).oscillator
       ss = MB::Sound::GraphNode::Mixer.new([1, osc], sample_rate: 48000)
 
       result = ss.sample(100)
@@ -152,7 +152,7 @@ RSpec.describe(MB::Sound::GraphNode::Mixer) do
     end
 
     it 'can change from SFloat to SComplex if an input changes to complex' do
-      osc = 0.hz.square.at(0).oscillator
+      osc = 0.hz.asquare.at(0).oscillator
       ss = MB::Sound::GraphNode::Mixer.new([1, osc], sample_rate: 48000)
 
       result = ss.sample(100)
@@ -164,7 +164,7 @@ RSpec.describe(MB::Sound::GraphNode::Mixer) do
     end
 
     it 'can change from SFloat to SComplex if a gain changes to complex' do
-      osc = 0.hz.square.at(0).oscillator
+      osc = 0.hz.asquare.at(0).oscillator
       ss = MB::Sound::GraphNode::Mixer.new([1, osc], sample_rate: 48000)
 
       result = ss.sample(100)
@@ -176,8 +176,8 @@ RSpec.describe(MB::Sound::GraphNode::Mixer) do
     end
 
     it 'returns nil when any input returns nil, if stop_early is true' do
-      t1 = 0.hz.square.at(1).until(1).at_rate(50)
-      t2 = 0.hz.square.at(0.5).until(2).at_rate(50)
+      t1 = 0.hz.asquare.at(1).until(1).at_rate(50)
+      t2 = 0.hz.asquare.at(0.5).until(2).at_rate(50)
       ss = MB::Sound::GraphNode::Mixer.new([t1, t2], sample_rate: 50)
 
       result = ss.sample(50)
@@ -187,8 +187,8 @@ RSpec.describe(MB::Sound::GraphNode::Mixer) do
     end
 
     it 'returns nil only when all inputs return nil, if stop_early is false' do
-      t1 = 0.hz.square.at(1).until(1).at_rate(50)
-      t2 = 0.hz.square.at(0.5).until(2).at_rate(50)
+      t1 = 0.hz.asquare.at(1).until(1).at_rate(50)
+      t2 = 0.hz.asquare.at(0.5).until(2).at_rate(50)
       ss = MB::Sound::GraphNode::Mixer.new([t1, t2], stop_early: false, sample_rate: 50)
 
       result = ss.sample(50)
@@ -203,7 +203,7 @@ RSpec.describe(MB::Sound::GraphNode::Mixer) do
 
   describe '#clear' do
     it 'removes all non-constant summands' do
-      ss = MB::Sound::GraphNode::Mixer.new([2, 0.hz.square.at(2).oscillator, 0.hz.square.at(-1).oscillator], sample_rate: 48000)
+      ss = MB::Sound::GraphNode::Mixer.new([2, 0.hz.asquare.at(2).oscillator, 0.hz.asquare.at(-1).oscillator], sample_rate: 48000)
       expect(ss.sample(100)).to eq(Numo::SFloat.zeros(100).fill(3))
 
       ss.clear
@@ -214,16 +214,16 @@ RSpec.describe(MB::Sound::GraphNode::Mixer) do
 
   describe '#[]' do
     it 'returns the gain for a given summand' do
-      o1 = 0.hz.square.at(2).oscillator
-      o2 = 0.hz.square.at(-1).oscillator
+      o1 = 0.hz.asquare.at(2).oscillator
+      o2 = 0.hz.asquare.at(-1).oscillator
       ss = MB::Sound::GraphNode::Mixer.new([2, [o1, 2], [o2, 3-1i]], sample_rate: 48000)
       expect(ss[o1]).to eq(2)
       expect(ss[o2]).to eq(3-1i)
     end
 
     it 'returns the gain for a summand by index excluding constant summands' do
-      o1 = 0.hz.square.at(2).oscillator
-      o2 = 0.hz.square.at(-1).oscillator
+      o1 = 0.hz.asquare.at(2).oscillator
+      o2 = 0.hz.asquare.at(-1).oscillator
       ss = MB::Sound::GraphNode::Mixer.new([2, [o1, 2], 4, 5, [o2, 3-1i]], sample_rate: 48000)
       expect(ss[0]).to eq(2)
       expect(ss[1]).to eq(3-1i)
@@ -233,8 +233,8 @@ RSpec.describe(MB::Sound::GraphNode::Mixer) do
 
   describe '#[]=' do
     it 'can change the gain of a summand by reference' do
-      o1 = 0.hz.square.at(2).oscillator
-      o2 = 0.hz.square.at(-1).oscillator
+      o1 = 0.hz.asquare.at(2).oscillator
+      o2 = 0.hz.asquare.at(-1).oscillator
       ss = MB::Sound::GraphNode::Mixer.new([2, [o1, 2], [o2, 3]], sample_rate: 48000)
       expect(ss.sample(100)).to eq(Numo::SFloat.zeros(100).fill(3))
 
@@ -246,8 +246,8 @@ RSpec.describe(MB::Sound::GraphNode::Mixer) do
     end
 
     it 'can change the gain of a summand by index' do
-      o1 = 0.hz.square.at(2).oscillator
-      o2 = 0.hz.square.at(-1).oscillator
+      o1 = 0.hz.asquare.at(2).oscillator
+      o2 = 0.hz.asquare.at(-1).oscillator
       ss = MB::Sound::GraphNode::Mixer.new([2, [o1, 2], [o2, 3]], sample_rate: 48000)
       expect(ss.sample(100)).to eq(Numo::SFloat.zeros(100).fill(3))
 
@@ -263,14 +263,14 @@ RSpec.describe(MB::Sound::GraphNode::Mixer) do
 
   describe '#delete' do
     it 'removes a summand from the mixer' do
-      ss = MB::Sound::GraphNode::Mixer.new([2, 0.hz.square.at(2).oscillator, 0.hz.square.at(-1).oscillator], sample_rate: 48000)
+      ss = MB::Sound::GraphNode::Mixer.new([2, 0.hz.asquare.at(2).oscillator, 0.hz.asquare.at(-1).oscillator], sample_rate: 48000)
       ss.delete(ss.summands.last)
       expect(ss.count).to eq(1)
       expect(ss.sample(100)).to eq(Numo::SFloat.zeros(100).fill(4))
     end
 
     it 'can remove a summand by index' do
-      ss = MB::Sound::GraphNode::Mixer.new([2, 0.hz.square.at(2).oscillator, 0.hz.square.at(-1).oscillator], sample_rate: 48000)
+      ss = MB::Sound::GraphNode::Mixer.new([2, 0.hz.asquare.at(2).oscillator, 0.hz.asquare.at(-1).oscillator], sample_rate: 48000)
       ss.delete(0)
       expect(ss.count).to eq(1)
       expect(ss.sample(100)).to eq(Numo::SFloat.zeros(100).fill(1))
@@ -279,7 +279,7 @@ RSpec.describe(MB::Sound::GraphNode::Mixer) do
 
   describe '#count' do
     it 'returns the number of summands' do
-      ss = MB::Sound::GraphNode::Mixer.new([2, 0.hz.square.at(2).oscillator, 0.hz.square.at(-1).oscillator], sample_rate: 48000)
+      ss = MB::Sound::GraphNode::Mixer.new([2, 0.hz.asquare.at(2).oscillator, 0.hz.asquare.at(-1).oscillator], sample_rate: 48000)
       expect(ss.count).to eq(2)
 
       ss.clear
@@ -289,8 +289,8 @@ RSpec.describe(MB::Sound::GraphNode::Mixer) do
 
   describe '#sample_rate=' do
     it 'can change sample rate of upstream nodes' do
-      a = 5.hz.square.at_rate(1234)
-      b = 25.hz.square.at_rate(1234)
+      a = 5.hz.asquare.at_rate(1234)
+      b = 25.hz.asquare.at_rate(1234)
       m = MB::Sound::GraphNode::Mixer.new([a, b])
       expect(m.sample_rate).to eq(1234)
 

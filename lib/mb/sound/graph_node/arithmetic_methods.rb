@@ -54,9 +54,16 @@ module MB
         end
 
         # Appends a node that returns the magnitude of a complex signal, or the
-        # absolute value of a real signal.
+        # absolute value of a real signal, antialiased (a full-wave rectifier's
+        # corner aliases; see MB::Sound::Shaper).  See #aabs for the exact
+        # version for control signals.
         def abs
-          MB::Sound::GraphNode::ComplexNode.new(self, mode: :abs)
+          MB::Sound::GraphNode::Shaper.new(self, mode: :abs)
+        end
+
+        # The plain (aliased, exact) version of #abs.
+        def aabs
+          MB::Sound::GraphNode::Shaper.new(self, mode: :abs, antialias: false)
         end
 
         # Appends a node that returns the instantaneous phase of a complex

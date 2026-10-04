@@ -12,7 +12,7 @@ RSpec.describe(MB::Sound::GraphNode::ProcNode) do
     end
 
     it 'allows parallel branching' do
-      a = 6000.hz.square.at(1)
+      a = 6000.hz.asquare.at(1)
 
       b = a.get_sampler
       p = a.proc { |v| v + 1 }

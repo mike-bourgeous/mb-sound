@@ -1,7 +1,7 @@
 # Tests for the DSL overall, including Tone, Mixer, Multiplier
 RSpec.describe(MB::Sound::GraphNode, aggregate_failures: true) do
   it 'can create a complex signal graph' do
-    graph = (1.hz.square.at_rate(20).at(1) - 2.hz.square.at_rate(20).at(0.5) - 5 + 3 + 2) * 0.5.hz.square.at_rate(20).at(2..1) * 3 + 1
+    graph = (1.hz.asquare.at_rate(20).at(1) - 2.hz.asquare.at_rate(20).at(0.5) - 5 + 3 + 2) * 0.5.hz.asquare.at_rate(20).at(2..1) * 3 + 1
     expect(graph.sample(5)).to eq(Numo::SFloat.zeros(5).fill(2.5))
     expect(graph.sample(5)).to eq(Numo::SFloat.zeros(5).fill(5.5))
     expect(graph.sample(5)).to eq(Numo::SFloat.zeros(5).fill(-3.5))
@@ -366,7 +366,7 @@ RSpec.describe(MB::Sound::GraphNode, aggregate_failures: true) do
 
   describe '#softclip' do
     it 'can apply softclipping' do
-      graph = (1.hz.square.at_rate(20).at(10) + 9.75).softclip(0.5, 1)
+      graph = (1.hz.asquare.at_rate(20).at(10) + 9.75).asoftclip(0.5, 1)
       expect(graph.sample(10).mean).to be_between(0.5, 1.0)
       expect(graph.sample(10).mean.round(6)).to eq(-0.25)
     end
@@ -462,22 +462,22 @@ RSpec.describe(MB::Sound::GraphNode, aggregate_failures: true) do
 
   describe '#clip' do
     # FIXME: the first sample is repeated without the with_phase option
-    let(:cliposc) { 24000.hz.square.at(10).with_phase(0.0000001) }
+    let(:cliposc) { 24000.hz.asquare.at(10).with_phase(0.0000001) }
 
     it 'can clip values to a range' do
       expect(cliposc.sample(4)).to eq(Numo::SFloat[10, -10, 10, -10])
 
-      n = cliposc.clip(-4.5, 2.5)
+      n = cliposc.aclip(-4.5, 2.5)
       expect(n.sample(4)).to eq(Numo::SFloat[2.5, -4.5, 2.5, -4.5])
     end
 
     it 'can clip without a lower bound' do
-      n = cliposc.clip(nil, 2.5)
+      n = cliposc.aclip(nil, 2.5)
       expect(n.sample(4)).to eq(Numo::SFloat[2.5, -10, 2.5, -10])
     end
 
     it 'can clip without an upper bound' do
-      n = cliposc.clip(0.5, nil)
+      n = cliposc.aclip(0.5, nil)
       expect(n.sample(4)).to eq(Numo::SFloat[10, 0.5, 10, 0.5])
     end
   end

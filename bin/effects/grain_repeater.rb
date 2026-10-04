@@ -54,7 +54,7 @@ MB::Sound.effect_script(
   input.outputs.map { |inp|
     # TODO: cross-fade two delays with opposite phase instead of fading out and back in?
     # TODO: use a constant number of samples with smoothstep for the fade instead of scaling a sine wave
-    fade_osc = (1.0 / p.delay).hz.sine.at(0..500).with_phase(-Math::PI / 2).clip(0, 1)
+    fade_osc = (1.0 / p.delay).hz.sine.at(0..500).with_phase(-Math::PI / 2).aclip(0, 1)
 
     delay_osc = rate.hz.with_phase(Math::PI).ramp.at(0..1.0).proc { |v| (v * p.count).floor / (p.count - 1.0) } * (period - p.delay)
 

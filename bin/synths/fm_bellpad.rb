@@ -33,7 +33,7 @@ MB::Sound.synth_script { |input|
 
     sum = a_out + c_out
 
-    filt_freq = midi.frequency(15).clip(5000, 12000)
+    filt_freq = midi.frequency(15).aclip(5000, 12000)
     sum.filter(:lowpass, cutoff: filt_freq) # Try to cut down on aliasing chalkboard noise
   }
 

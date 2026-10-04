@@ -25,6 +25,31 @@ CASES = {}
   end
 end
 
+# Naive (aliased) versions of the band-limited shapes
+[:atriangle, :asquare, :aramp].each do |wave|
+  CASES[:"#{wave}_1760"] = -> { 1760.hz.send(wave).at(0.5) }
+end
+
+# Phase warp (pulse width modulation for every shape)
+CASES.merge!(
+  pulse_1760: -> { 1760.hz.pulse(0.25).at(0.5) },
+  apulse_1760: -> { 1760.hz.apulse(0.25).at(0.5) },
+  pulse_keep_dc: -> { 220.hz.pulse(0.1, dc: true).at(0.5) },
+  pwm_sweep: -> { 220.hz.pwm(0.5.hz.lfo.at(0.05..0.95)).square.at(0.5) },
+  skew_triangle: -> { 440.hz.triangle.skew(0.1).at(0.5) },
+  sine_pwm: -> { 220.hz.sine.pwm(0.2).at(0.5) },
+  ramp_pwm: -> { 330.hz.ramp.pwm(0.7).at(0.5) },
+)
+
+# Hard and soft sync
+CASES.merge!(
+  sync_ramp: -> { 110.hz.ramp.sync(ratio: 2.37).at(0.5) },
+  sync_sweep: -> { 110.hz.ramp.sync(ratio: 0.5.hz.lfo.at(1..5)).at(0.5) },
+  async_ramp: -> { 110.hz.aramp.sync(ratio: 2.37).at(0.5) },
+  softsync_triangle: -> { 110.hz.triangle.softsync(ratio: 1.7).at(0.5) },
+  sync_pulse_master: -> { 220.hz.pulse(0.3).sync(110.hz.square).at(0.5) },
+)
+
 [:complex_sine, :complex_square, :complex_triangle, :complex_ramp].each do |wave|
   CASES[:"#{wave}_220"] = -> {
     osc = 220.hz.send(wave).at(0.5)

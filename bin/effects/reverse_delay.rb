@@ -45,7 +45,7 @@ MB::Sound.effect_script(
   # phase.
   delay_time = p.midi_cc(1, :delay, range: 0.0..2.0)
     .filter(:lowpass, cutoff: 10).tap { |f| f.reset(p.delay) }
-    .clip(internal_buftime, nil)
+    .aclip(internal_buftime, nil)
 
   lfo_freq = (1.0 / delay_time).named('LFO Frequency')
 
@@ -57,17 +57,17 @@ MB::Sound.effect_script(
     a = Numo::SFloat.zeros(internal_buffer)
 
     # The amplitude LFO mutes the sound while the delay buffer jumps back to the present
-    amp_lfo = lfo_freq.tone.sine.at(0..1000).with_phase((idx + 0.5) * 2.0 * Math::PI / channels).clip(0, 1).named('Amp LFO')
+    amp_lfo = lfo_freq.tone.sine.at(0..1000).with_phase((idx + 0.5) * 2.0 * Math::PI / channels).aclip(0, 1).named('Amp LFO')
 
     # The delay LFO controls the position in the delay buffer
-    delay_lfo = lfo_freq.tone.ramp.at(0..2).with_phase(idx * 2.0 * Math::PI / channels).named('Delay LFO') * delay_time
+    delay_lfo = lfo_freq.tone.ramp.lfo.at(0..2).with_phase(idx * 2.0 * Math::PI / channels).named('Delay LFO') * delay_time
 
     delayed = inp.delay(seconds: delay_lfo, smoothing: false) * amp_lfo
 
     # TODO: create a better way to do feedback in node graphs, ideally while
     # automatically compensating for buffer size
     # TODO: implement cross-channel feedback
-    d_fb = (delay_lfo - internal_buftime).clip(0, nil).named('d_fb')
+    d_fb = (delay_lfo - internal_buftime).aclip(0, nil).named('d_fb')
     d_fb_amp = amp_lfo.multitap(d_fb)[0] # delay the amp lfo to match the feedback delay (FIXME: this seems to be off; it lets through some aliasing noise on each cycle; or maybe it's in both LFOs)
     fb_return = 0.constant.proc { a }.multitap(d_fb)[0] * d_fb_amp
     wet = (p.feedback * fb_return + delayed).softclip(0.85, 0.95).spy { |z| a[] = z if z }

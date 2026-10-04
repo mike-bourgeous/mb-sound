@@ -9,6 +9,7 @@ require 'shellwords'
 RSpec.describe('script runner scripts', :smoke) do
   # Script => extra arguments for a short render
   songs = {
+    'bin/songs/antialias_song.rb' => ['--bars', '0.5'],
     'bin/songs/node_graph_benchmark.rb' => ['--bars', '0.5'],
     'bin/songs/node_graph_grit.rb' => ['--bars', '0.5'],
     'bin/songs/random_drum_pentatonic.rb' => ['--bars', '0.5'],

@@ -86,19 +86,30 @@ module MB
       # Wave shapes: each returns a new Tone at this pitch.
       [
         :sine, :sin, :triangle, :square, :ramp, :saw, :sawtooth, :drumramp, :envramp, :gauss, :parabola,
+        :atriangle, :asquare, :aramp, :asaw, :asawtooth,
         :complex_sine, :complex_square, :complex_triangle, :complex_ramp,
+        :acomplex_square, :acomplex_triangle, :acomplex_ramp,
       ].each do |wave|
         define_method(wave) { tone.public_send(wave) }
       end
 
       # Shortcuts for a sine Tone at this pitch (see Tone#at, #with_phase,
-      # #fm, #log_fm, #pm, #lfo, #noise, #no_trigger).
+      # #fm, #log_fm, #pm, #lfo, #pwm/#skew, #noise, #no_trigger), and a
+      # pulse (Tone#pulse, #apulse).
       def at(amplitude) = tone.at(amplitude)
       def with_phase(phase) = tone.with_phase(phase)
       def fm(tone_or_node, index = nil) = tone.fm(tone_or_node, index)
       def log_fm(tone_or_node, index = nil) = tone.log_fm(tone_or_node, index)
       def pm(tone_or_node, index = nil) = tone.pm(tone_or_node, index)
       def lfo = tone.lfo
+      def sync(master = nil, ratio: nil) = tone.sync(master, ratio: ratio)
+      def softsync(master = nil, ratio: nil) = tone.softsync(master, ratio: ratio)
+      def wraps = signal.wraps
+      def increment = signal.increment
+      def pwm(width, dc: false) = tone.pwm(width, dc: dc)
+      def skew(width, dc: false) = tone.skew(width, dc: dc)
+      def pulse(width = 0.5, dc: false) = tone.pulse(width, dc: dc)
+      def apulse(width = 0.5, dc: false) = tone.apulse(width, dc: dc)
       def noise(blend = true) = tone.noise(blend)
       def no_trigger(trig = true) = tone.no_trigger(trig)
 

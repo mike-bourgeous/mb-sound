@@ -453,4 +453,27 @@ RSpec.describe(MB::Sound::FFTMethods) do
       expect(unwrapped_sigfigs(complex).to_a).to eq(phase.to_a) # to_a because narray truncates to_s
     end
   end
+
+  describe 'NArray views' do
+    # Numo::Pocketfft ignores a view's offset and reads from the start of
+    # its parent, so the FFT methods copy their input.
+    let(:base) { Numo::DFloat.new(64).seq }
+    let(:view) { base[32..] }
+
+    it 'real_fft transforms the view, not the start of its parent' do
+      expect(MB::Sound.real_fft(view)).to eq(MB::Sound.real_fft(view.dup))
+    end
+
+    it 'ifft transforms the view' do
+      c = Numo::DComplex.new(64).seq * (1 + 1i)
+      expect(MB::Sound.ifft(c[32..])).to eq(MB::Sound.ifft(c[32..].dup))
+    end
+
+    it 'real_ifft transforms the view' do
+      c = MB::Sound.real_fft(Numo::DFloat.new(64).rand)
+      big = Numo::DComplex.zeros(c.length * 2)
+      big[c.length..] = c
+      expect(MB::Sound.real_ifft(big[c.length..])).to eq(MB::Sound.real_ifft(c))
+    end
+  end
 end
