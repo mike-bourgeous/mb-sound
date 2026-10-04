@@ -318,8 +318,10 @@ module MB
       # is an audiotoolbox device index.
       #
       # The output type may be changed using the OUTPUT_TYPE environment
-      # variable.  Supported output types are :jack_ffi, :jack, :alsa_pulse,
-      # :alsa, :ffmpeg (macOS only), and :null.  On macOS, :ffmpeg is used
+      # variable.  Supported output types are :device (sound cards through
+      # miniaudio; see DeviceOutput for its own environment variables),
+      # :jack_ffi, :jack, :alsa_pulse, :alsa, :ffmpeg (macOS only), and
+      # :null.  On macOS, :ffmpeg is used
       # automatically if JackD is not running.  The +:output_type+ parameter
       # overrides both the environment variable and automatic detection.
       #
@@ -389,6 +391,9 @@ module MB
           o = MB::Sound::BackgroundOutput.new(
             MB::Sound::FFMPEGOutput.new(at_device.to_s, sample_rate: sample_rate, channels: channels, buffer_size: buffer_size, format: 'audiotoolbox', codec: 'pcm_f32le', realtime: true)
           )
+
+        when :device
+          o = MB::Sound::DeviceOutput.new(channels: channels, sample_rate: sample_rate, buffer_size: buffer_size, device: device)
 
         when :null
           o = MB::Sound::NullOutput.new(channels: channels, sample_rate: sample_rate, buffer_size: buffer_size)
