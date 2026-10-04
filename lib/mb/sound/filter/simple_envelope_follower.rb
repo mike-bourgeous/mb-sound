@@ -18,6 +18,12 @@ module MB
         end
 
         # Resets the envelope to 0, or to the given value.
+        # Keeps the decay time in seconds at a new sample rate.
+        def sample_rate=(rate)
+          @sample_rate = rate.to_f
+          @decay_per_sample = @decay_db.db ** (1.0 / (@decay_s * @sample_rate))
+        end
+
         def reset(initial_value = 0)
           @v = initial_value
         end

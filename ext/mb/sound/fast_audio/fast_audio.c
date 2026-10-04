@@ -23,6 +23,9 @@
 #include <time.h>
 #include <errno.h>
 #include <unistd.h>
+#include <math.h>
+
+#include <samplerate.h>
 
 #include <ruby.h>
 #include <ruby/thread.h>
@@ -251,6 +254,19 @@ struct playback {
 	float *capture;
 	size_t capture_frames;
 	_Atomic size_t capture_length;
+
+	// The rate #write's audio is at.  When the device runs at another rate,
+	// the writer resamples with libsamplerate (src is NULL otherwise), so
+	// the ring and the callback only see device-rate frames.
+	ma_uint32 input_rate;
+	SRC_STATE *src;
+	double src_ratio; // device rate / input rate
+
+	// Writer scratch: interleaved input frames and resampled frames
+	float *in_buf;
+	size_t in_cap; // frames
+	float *out_buf;
+	size_t out_cap; // frames
 };
 
 // Releases the device and context (not the ring, which a writer in another
@@ -292,6 +308,11 @@ static void playback_free(void *ptr)
 
 	free(p->data);
 	free(p->capture);
+	free(p->in_buf);
+	free(p->out_buf);
+	if (p->src != NULL) {
+		src_delete(p->src);
+	}
 
 	if (p->pid == getpid()) {
 		pthread_cond_destroy(&p->space);
@@ -304,7 +325,7 @@ static void playback_free(void *ptr)
 static size_t playback_memsize(const void *ptr)
 {
 	const struct playback *p = ptr;
-	return sizeof(*p) + p->capacity * p->out_channels * sizeof(float) + p->capture_frames * p->out_channels * sizeof(float);
+	return sizeof(*p) + (p->capacity + p->capture_frames + p->in_cap + p->out_cap) * p->out_channels * sizeof(float);
 }
 
 static const rb_data_type_t playback_type = {
@@ -418,7 +439,10 @@ static VALUE playback_alloc(VALUE klass)
 
 // Opens the device (with the context already initialized), raising on
 // failure.  See playback_initialize.
-static void playback_open_device(struct playback *p, long device_index, ma_uint32 sample_rate, ma_uint32 period)
+// Opens the device at +sample_rate+, or at the device's own rate if it
+// can't run at that one.  With +allow_rate_change+, CoreAudio may change
+// the device's system-wide rate (miniaudio's allowNominalSampleRateChange).
+static void playback_open_device(struct playback *p, long device_index, ma_uint32 sample_rate, ma_uint32 period, int allow_rate_change)
 {
 	ma_device_id *device_id = NULL;
 
@@ -445,6 +469,7 @@ static void playback_open_device(struct playback *p, long device_index, ma_uint3
 	config.dataCallback = playback_callback;
 	config.notificationCallback = playback_notification;
 	config.pUserData = p;
+	config.coreaudio.allowNominalSampleRateChange = allow_rate_change ? MA_TRUE : MA_FALSE;
 
 	ma_result result = ma_device_init(&p->context, &config, &p->device);
 	if (result != MA_SUCCESS) {
@@ -452,9 +477,8 @@ static void playback_open_device(struct playback *p, long device_index, ma_uint3
 	}
 	p->device_ready = 1;
 
-	// Use the device's own rate instead of resampling (miniaudio's resampler
-	// is linear); the caller asks for 48k first, and graphs run at whatever
-	// rate the output reports.
+	// Run the device at its own rate instead of letting miniaudio resample
+	// (its resampler is linear); the writer resamples with libsamplerate.
 	ma_uint32 device_rate = p->device.playback.internalSampleRate;
 	if (sample_rate != 0 && device_rate != 0 && device_rate != sample_rate) {
 		ma_device_uninit(&p->device);
@@ -475,7 +499,10 @@ struct open_args {
 	long device_index;
 	const char *client_name;
 	ma_uint32 sample_rate;
+	ma_uint32 device_rate;
 	ma_uint32 period;
+	int resample_quality;
+	int allow_rate_change;
 };
 
 static VALUE playback_open_body(VALUE arg)
@@ -487,7 +514,25 @@ static VALUE playback_open_body(VALUE arg)
 	init_context(&p->context, a->backends, a->client_name);
 	p->context_ready = 1;
 
-	playback_open_device(p, a->device_index, a->sample_rate, a->period);
+	ma_uint32 ask = a->device_rate ? a->device_rate : a->sample_rate;
+	playback_open_device(p, a->device_index, ask, a->period, a->allow_rate_change);
+
+	// Resample from the writer's rate to the device's, unless told not to
+	// (then the writer must use the device's rate; see #sample_rate).
+	ma_uint32 device_rate = p->device.sampleRate;
+	p->input_rate = device_rate;
+	if (a->sample_rate != 0 && device_rate != a->sample_rate && a->resample_quality >= 0) {
+		int error = 0;
+		p->src = src_new(a->resample_quality, p->out_channels, &error);
+		if (p->src == NULL) {
+			rb_raise(cError, "Could not start resampling from %u to %u Hz: %s", a->sample_rate, device_rate, src_strerror(error));
+		}
+		p->src_ratio = (double)device_rate / a->sample_rate;
+		p->input_rate = a->sample_rate;
+
+		// The queue limit was given at the writer's rate
+		p->queue_limit = (size_t)ceil(p->queue_limit * p->src_ratio);
+	}
 
 	// The queue must hold at least two device periods, or the device runs
 	// dry on every callback.  The ring is allocated now that the period is
@@ -528,23 +573,33 @@ static VALUE playback_open_rescue(VALUE arg, VALUE exception)
 /*
  * call-seq:
  *   Playback.new(backends, device_index, client_name, in_channels, out_channels,
- *                sample_rate, period, queue_frames, capture_frames)
+ *                sample_rate, device_rate, period, queue_frames, capture_frames,
+ *                resample_quality, allow_rate_change)
  *
  * Opens and starts a playback device.  +backends+ is an Array of backend
  * Symbols in order of preference, or nil.  +device_index+ is an index into
  * FastAudio.devices' playback list for the same backends, or -1 for the
  * default device.  +client_name+ names the JACK client.  +in_channels+ must
  * be 1 (fanned out to every device channel) or +out_channels+.
- * +sample_rate+ is the rate to ask for (0 for the device's rate); if the
- * device runs at another rate, it's reopened at that rate (see #sample_rate).
+ *
+ * +sample_rate+ is the rate #write's audio is at (0 for the device's rate).
+ * +device_rate+ is the rate to open the device at (0 for +sample_rate+); a
+ * device that can't run at it is reopened at its own rate (see
+ * #device_rate).  When the device's rate differs from +sample_rate+, #write
+ * resamples with libsamplerate converter +resample_quality+ (0 best sinc, 1
+ * medium sinc, 2 fastest sinc, 3 zero-order hold, 4 linear), or with -1 it
+ * doesn't, and #sample_rate is the device's rate.  +allow_rate_change+ lets
+ * CoreAudio change the device's system-wide rate to the one asked for.
+ *
  * +period+ is the device period in frames (0 for miniaudio's low-latency
- * default).  +queue_frames+ is the most audio #write queues ahead of the
- * device, which sets the output latency.  +capture_frames+ records that many
- * played frames for #captured (0 for none; for specs).
+ * default).  +queue_frames+ (at +sample_rate+) is the most audio #write
+ * queues ahead of the device, which sets the output latency.
+ * +capture_frames+ records that many played frames for #captured (0 for
+ * none; for specs).
  */
 static VALUE playback_initialize(VALUE self, VALUE backends, VALUE device_index, VALUE client_name,
-		VALUE in_channels, VALUE out_channels, VALUE sample_rate, VALUE period, VALUE queue_frames,
-		VALUE capture_frames)
+		VALUE in_channels, VALUE out_channels, VALUE sample_rate, VALUE device_rate, VALUE period,
+		VALUE queue_frames, VALUE capture_frames, VALUE resample_quality, VALUE allow_rate_change)
 {
 	struct playback *p;
 	TypedData_Get_Struct(self, struct playback, &playback_type, p);
@@ -571,13 +626,21 @@ static VALUE playback_initialize(VALUE self, VALUE backends, VALUE device_index,
 		rb_raise(rb_eArgError, "Capture length must be 0..%ld frames (got %ld)", 1L << 26, capture);
 	}
 
+	int quality = NUM2INT(resample_quality);
+	if (quality < -1 || quality > SRC_LINEAR) {
+		rb_raise(rb_eArgError, "Resample quality must be -1..%d (got %d)", SRC_LINEAR, quality);
+	}
+
 	struct open_args args = {
 		.p = p,
 		.backends = backends,
 		.device_index = NUM2LONG(device_index),
 		.client_name = StringValueCStr(client_name),
 		.sample_rate = NUM2UINT(sample_rate),
+		.device_rate = NUM2UINT(device_rate),
 		.period = NUM2UINT(period),
+		.resample_quality = quality,
+		.allow_rate_change = RTEST(allow_rate_change),
 	};
 
 	p->in_channels = in_ch;
@@ -657,6 +720,69 @@ static void unblock_wait(void *arg)
 	playback_wake_writer(arg);
 }
 
+// Grows *buf to hold at least +frames+ frames of +channels+ floats.
+static void grow_buffer(float **buf, size_t *cap, size_t frames, size_t channels)
+{
+	if (*cap >= frames) {
+		return;
+	}
+
+	float *bigger = realloc(*buf, frames * channels * sizeof(float));
+	if (bigger == NULL) {
+		rb_raise(rb_eNoMemError, "Could not allocate %zu audio frames", frames);
+	}
+	*buf = bigger;
+	*cap = frames;
+}
+
+// Copies +count+ interleaved device-rate frames into the ring, waiting
+// without the GVL while the queue is full (see #write).
+static void push_frames(struct playback *p, const float *frames, size_t count)
+{
+	size_t mask = p->capacity - 1;
+	size_t out_ch = p->out_channels;
+	size_t done = 0;
+
+	while (done < count) {
+		size_t queued = queued_frames(p);
+		size_t room = queued < p->queue_limit ? p->queue_limit - queued : 0;
+
+		if (room == 0) {
+			// Wait for the queue to drain halfway, so one GVL round trip
+			// covers many buffers.
+			size_t want = count - done;
+			if (want > p->queue_limit / 2) {
+				want = p->queue_limit / 2;
+			}
+
+			struct wait_args args = { p, want };
+			p->interrupted = 0;
+			rb_thread_call_without_gvl(wait_for_space, &args, unblock_wait, p);
+			rb_thread_check_ints();
+			check_open(p);
+			continue;
+		}
+
+		size_t n = count - done;
+		if (n > room) {
+			n = room;
+		}
+
+		// Copy in up to two pieces, around the end of the ring
+		size_t wp = atomic_load_explicit(&p->write_pos, memory_order_relaxed);
+		size_t start = wp & mask;
+		size_t first = p->capacity - start;
+		if (first > n) {
+			first = n;
+		}
+		memcpy(p->data + start * out_ch, frames + done * out_ch, first * out_ch * sizeof(float));
+		memcpy(p->data, frames + (done + first) * out_ch, (n - first) * out_ch * sizeof(float));
+		atomic_store_explicit(&p->write_pos, wp + n, memory_order_release);
+
+		done += n;
+	}
+}
+
 // Casts +value+ to a contiguous 1D SFloat (copying only if needed).
 static VALUE to_contiguous_sfloat(VALUE value)
 {
@@ -711,55 +837,50 @@ static VALUE playback_write(VALUE self, VALUE channels)
 		src[c] = (const float *)(nary_get_pointer_for_read(v) + nary_get_offset(v));
 	}
 
-	size_t mask = p->capacity - 1;
+	// Interleave (fanning out mono) into the writer's scratch buffer
 	size_t out_ch = p->out_channels;
-	size_t done = 0;
-
-	while (done < frames) {
-		size_t queued = queued_frames(p);
-		size_t room = queued < p->queue_limit ? p->queue_limit - queued : 0;
-
-		if (room == 0) {
-			// Wait for the queue to drain halfway, so one GVL round trip
-			// covers many buffers.
-			size_t want = frames - done;
-			if (want > p->queue_limit / 2) {
-				want = p->queue_limit / 2;
-			}
-
-			struct wait_args args = { p, want };
-			p->interrupted = 0;
-			rb_thread_call_without_gvl(wait_for_space, &args, unblock_wait, p);
-			rb_thread_check_ints();
-			check_open(p);
-			continue;
+	grow_buffer(&p->in_buf, &p->in_cap, frames, out_ch);
+	for (size_t i = 0; i < frames; i++) {
+		float *dst = p->in_buf + i * out_ch;
+		for (size_t c = 0; c < out_ch; c++) {
+			dst[c] = src[p->in_channels == 1 ? 0 : c][i];
 		}
-
-		size_t n = frames - done;
-		if (n > room) {
-			n = room;
-		}
-
-		size_t wp = atomic_load_explicit(&p->write_pos, memory_order_relaxed);
-		for (size_t i = 0; i < n; i++) {
-			float *dst = p->data + ((wp + i) & mask) * out_ch;
-			if (p->in_channels == 1) {
-				float v = src[0][done + i];
-				for (size_t c = 0; c < out_ch; c++) {
-					dst[c] = v;
-				}
-			} else {
-				for (size_t c = 0; c < out_ch; c++) {
-					dst[c] = src[c][done + i];
-				}
-			}
-		}
-		atomic_store_explicit(&p->write_pos, wp + n, memory_order_release);
-
-		done += n;
 	}
 
 	RB_GC_GUARD(keep);
+
+	if (p->src == NULL) {
+		push_frames(p, p->in_buf, frames);
+		return SIZET2NUM(frames);
+	}
+
+	// Resample to the device's rate, a chunk of output at a time
+	size_t out_cap = (size_t)ceil(frames * p->src_ratio) + 64;
+	grow_buffer(&p->out_buf, &p->out_cap, out_cap, out_ch);
+
+	size_t used = 0;
+	while (used < frames) {
+		SRC_DATA data = {
+			.data_in = p->in_buf + used * out_ch,
+			.input_frames = frames - used,
+			.data_out = p->out_buf,
+			.output_frames = p->out_cap,
+			.src_ratio = p->src_ratio,
+			.end_of_input = 0,
+		};
+
+		int error = src_process(p->src, &data);
+		if (error) {
+			rb_raise(cError, "Resampling failed: %s", src_strerror(error));
+		}
+
+		used += data.input_frames_used;
+		push_frames(p, p->out_buf, data.output_frames_gen);
+
+		if (data.input_frames_used == 0 && data.output_frames_gen == 0) {
+			break; // libsamplerate wants more input than it has
+		}
+	}
 
 	return SIZET2NUM(frames);
 }
@@ -801,10 +922,23 @@ static ma_device *open_device(VALUE self)
 	return &p->device;
 }
 
-/* The sample rate the device runs at (what #write's audio plays at). */
+/* The sample rate #write's audio is at (resampled to #device_rate if they differ). */
 static VALUE playback_sample_rate(VALUE self)
 {
+	open_device(self);
+	return UINT2NUM(get_playback(self)->input_rate);
+}
+
+/* The sample rate the device runs at. */
+static VALUE playback_device_rate(VALUE self)
+{
 	return UINT2NUM(open_device(self)->sampleRate);
+}
+
+/* True if #write resamples to the device's rate. */
+static VALUE playback_resampling(VALUE self)
+{
+	return get_playback(self)->src ? Qtrue : Qfalse;
 }
 
 /* The device's period (callback size) in frames. */
@@ -900,11 +1034,13 @@ void Init_fast_audio(void)
 
 	VALUE playback = rb_define_class_under(fast_audio, "Playback", rb_cObject);
 	rb_define_alloc_func(playback, playback_alloc);
-	rb_define_method(playback, "initialize", playback_initialize, 9);
+	rb_define_method(playback, "initialize", playback_initialize, 12);
 	rb_define_method(playback, "write", playback_write, 1);
 	rb_define_method(playback, "close", playback_close, 0);
 	rb_define_method(playback, "closed?", playback_closed, 0);
 	rb_define_method(playback, "sample_rate", playback_sample_rate, 0);
+	rb_define_method(playback, "device_rate", playback_device_rate, 0);
+	rb_define_method(playback, "resampling?", playback_resampling, 0);
 	rb_define_method(playback, "period", playback_period, 0);
 	rb_define_method(playback, "periods", playback_periods, 0);
 	rb_define_method(playback, "device_name", playback_device_name, 0);

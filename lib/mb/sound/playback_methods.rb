@@ -57,9 +57,10 @@ module MB
               buffer_size: bufsize
             )
 
+            # The output may run at another rate than asked for
             nodes = file_tone_data.map { |d|
-              if d.sample_rate != sample_rate
-                d.resample(sample_rate)
+              if d.sample_rate != output.sample_rate
+                d.resample(output.sample_rate)
               else
                 d
               end

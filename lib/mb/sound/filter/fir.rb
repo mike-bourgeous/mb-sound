@@ -58,12 +58,14 @@ module MB
         # Numo::NArray.
         def initialize(gains, filter_length: nil, window_length: nil, sample_rate: 48000)
           @filter_length = filter_length
+          @requested_filter_length = filter_length
           @window_length = window_length
           @sample_rate = sample_rate
           @nyquist = sample_rate / 2.0
 
           case gains
           when Hash
+            @source_gain_map = gains
             set_from_hash(gains)
 
           when Numo::NArray
@@ -74,6 +76,25 @@ module MB
             raise "Gains must be a Numo::NArray or a Hash mapping frequencies in Hz to linear gains (which may be complex)" unless gains.is_a?(Hash)
           end
         end
+
+        # Redesigns a filter made from a frequency => gain Hash for a new
+        # sample rate (frequencies above the new Nyquist are dropped).  A
+        # filter made from an NArray of per-bin gains is relative to the
+        # sample rate already, so only #sample_rate changes.
+        def sample_rate=(rate)
+          return if @sample_rate == rate
+
+          @sample_rate = rate
+          @nyquist = rate / 2.0
+          return unless @source_gain_map
+
+          gains = @source_gain_map.select { |f, _| (f.respond_to?(:frequency) ? f.frequency : f) <= @nyquist }
+          raise ArgumentError, "Fewer than two gains are below Nyquist at #{rate} Hz" if gains.length < 2
+
+          @filter_length = @requested_filter_length
+          set_from_hash(gains)
+        end
+        alias at_rate sample_rate=
 
         def process(data)
           data = Numo::NArray[data] if data.is_a?(Numeric)

@@ -420,6 +420,7 @@ module MB
 
         @frame = @frame * new_rate / @sample_rate
         @sample_rate = new_rate
+        @filter.sample_rate = new_rate
 
         self
       end

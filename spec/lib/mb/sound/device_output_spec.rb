@@ -1,7 +1,7 @@
 RSpec.describe(MB::Sound::DeviceOutput, :aggregate_failures) do
   ENV_NAMES = [
     'AUDIO_BACKEND', 'OUTPUT_DEVICE', 'DEVICE', 'AUDIO_SAMPLE_RATE', 'AUDIO_PROFILE', 'AUDIO_BUFFER', 'AUDIO_LATENCY',
-    'AUDIO_PERIOD', 'JACK_CLIENT_NAME', 'OUTPUT_TYPE'
+    'AUDIO_PERIOD', 'JACK_CLIENT_NAME', 'OUTPUT_TYPE', 'AUDIO_DEVICE_RATE', 'AUDIO_RESAMPLE', 'AUDIO_SET_DEVICE_RATE'
   ]
 
   around(:each) do |ex|
@@ -43,6 +43,45 @@ RSpec.describe(MB::Sound::DeviceOutput, :aggregate_failures) do
     expect(o.closed?).to eq(false)
   end
 
+  describe 'sample rates' do
+    it 'resamples to a sound card running at another rate' do
+      o = device_output(device_rate: 44100, latency: 0.1)
+      expect(o.sample_rate).to eq(48000)
+      expect(o.device_rate).to eq(44100)
+      expect(o.resampling?).to eq(true)
+      expect(o.queue_limit).to eq(4410) # 0.1 s at the card's rate
+      expect(o.inspect).to include('48000Hz->44100Hz')
+
+      10.times { o.write([Numo::SFloat.zeros(800)] * 2) }
+      expect(o.latency).to be_between(0.05, 0.1 + 0.04)
+    end
+
+    it 'runs at the card rate with resample: false' do
+      o = device_output(device_rate: 44100, resample: false)
+      expect([o.sample_rate, o.device_rate, o.resampling?]).to eq([44100, 44100, false])
+    end
+
+    it 'does not resample when the rates match' do
+      o = device_output
+      expect([o.sample_rate, o.device_rate, o.resampling?]).to eq([48000, 48000, false])
+    end
+
+    it 'uses AUDIO_DEVICE_RATE and AUDIO_RESAMPLE' do
+      ENV['AUDIO_DEVICE_RATE'] = '32000'
+      ENV['AUDIO_RESAMPLE'] = 'medium'
+      o = device_output(resample: :best)
+      expect([o.sample_rate, o.device_rate, o.resampling?]).to eq([48000, 32000, true])
+
+      ENV['AUDIO_RESAMPLE'] = 'off'
+      o = device_output
+      expect([o.sample_rate, o.resampling?]).to eq([32000, false])
+    end
+
+    it 'raises for unknown resamplers' do
+      expect { device_output(device_rate: 44100, resample: :sharp) }.to raise_error(ArgumentError, /Unknown resampler :sharp/)
+    end
+  end
+
   describe 'latency profiles' do
     it 'uses the :default profile unless told otherwise' do
       o = device_output
@@ -55,6 +94,11 @@ RSpec.describe(MB::Sound::DeviceOutput, :aggregate_failures) do
     it 'uses :low with two writes queued' do
       o = device_output(profile: :low)
       expect([o.buffer_size, o.period, o.queue_limit]).to eq([256, 128, 512])
+    end
+
+    it 'uses :video with 120 fps writes' do
+      o = device_output(profile: :video)
+      expect([o.buffer_size, o.period, o.queue_limit]).to eq([400, 128, 2400])
     end
 
     it "uses :safe with miniaudio's default period" do
@@ -78,7 +122,7 @@ RSpec.describe(MB::Sound::DeviceOutput, :aggregate_failures) do
     end
 
     it 'raises for unknown profiles' do
-      expect { device_output(profile: :fast) }.to raise_error(ArgumentError, /Unknown audio profile :fast \(low, default, safe\)/)
+      expect { device_output(profile: :fast) }.to raise_error(ArgumentError, /Unknown audio profile :fast \(low, default, video, safe\)/)
     end
   end
 

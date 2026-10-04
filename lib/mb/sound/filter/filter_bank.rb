@@ -91,6 +91,13 @@ module MB
           raise 'Filters must respond to the #process method' unless @filters.all? { |f| f.respond_to?(:process) }
         end
 
+        # Sets every filter in the bank to a new sample rate.
+        def sample_rate=(rate)
+          @filters.each { |f| f.sample_rate = rate }
+          @sample_rate = rate
+        end
+        alias at_rate sample_rate=
+
         # Returns the first filter in the bank.
         def first
           @filters.first

@@ -23,6 +23,14 @@ module MB
           super(@b0, @b1, @b2, @a1, @a2, sample_rate: f_samp)
         end
 
+        # Redesigns the filter for a new sample rate, keeping its center
+        # frequency (limited to below Nyquist).
+        def sample_rate=(rate)
+          return if @sample_rate == rate
+          set_parameters(@filter_type, rate.to_f, [@center_frequency, 0.499 * rate].min)
+        end
+        alias at_rate sample_rate=
+
         # Recalculates filter coefficients based on the given filter parameters.
         def set_parameters(filter_type, f_samp, f_center)
           @filter_type = filter_type
