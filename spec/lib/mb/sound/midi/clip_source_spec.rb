@@ -2,18 +2,14 @@ RSpec.describe(MB::Sound::MIDI::ClipSource) do
   let(:transport) { MB::Sound::Sequence::Transport.new(bpm: 120) }
   let(:rate) { 48000 }
 
-  # Plays +clip+ through a ClipNode::Trigger and ClipNode::Gate and through
-  # a ClipSource, one +buffer+ at a time, calling +tempo+ (if given) with the
-  # buffer index before each buffer so the tempo can change.  Returns the
-  # ClipNode outputs and the same signals rebuilt from the source's events
-  # by sample index.
-  def compare(clip, buffer:, buffers:, tempo: nil)
-    trigger = MB::Sound::Sequence::ClipNode::Trigger.new(clip, range: 0.0..1.0, transport: transport)
-    gate = MB::Sound::Sequence::ClipNode::Gate.new(clip, transport: transport)
+  # Plays +clip+ through a ClipSource, one +buffer+ at a time, calling
+  # +tempo+ (if given) with the buffer index before each buffer so the
+  # tempo can change.  Returns a trigger and a gate rebuilt from the
+  # source's events by sample index, to compare with the old ClipNode
+  # renderers' outputs (see spec/support/clip_node_reference.rb).
+  def render(clip, buffer:, buffers:, tempo: nil)
     src = MB::Sound::MIDI::ClipSource.new(clip, transport: transport)
 
-    node_trig = []
-    node_gate = []
     src_trig = Numo::SFloat.zeros(buffer * buffers)
     src_gate = Numo::SFloat.zeros(buffer * buffers)
     active = 0
@@ -21,9 +17,6 @@ RSpec.describe(MB::Sound::MIDI::ClipSource) do
 
     buffers.times do |b|
       tempo&.call(b)
-      node_trig << trigger.sample(buffer).dup
-      node_gate << gate.sample(buffer).dup
-
       start = b * buffer
       from = Rational(start, rate)
       src.read(from, Rational(start + buffer, rate)).each do |e|
@@ -40,31 +33,33 @@ RSpec.describe(MB::Sound::MIDI::ClipSource) do
     end
     src_gate[last..] = active > 0 ? 1 : 0
 
-    [node_trig.reduce(:concatenate), node_gate.reduce(:concatenate), src_trig, src_gate]
+    [src_trig, src_gate]
   end
 
-  it 'puts note edges on the same samples as ClipNode' do
+  it 'puts note edges on the same samples as ClipNode did' do
     clip = MB::Sound.seq(MB::Sound::C4, MB::Sound::E4, MB::Sound::G4).n8.t.legato(0.7).loop
     [441, 800, 1000].each do |buffer|
-      nt, ng, st, sg = compare(clip, buffer: buffer, buffers: 48000 * 3 / buffer)
-      expect(st.to_a).to eq(nt.to_a), "triggers with buffer #{buffer}"
-      expect(sg.to_a).to eq(ng.to_a), "gate with buffer #{buffer}"
-      expect(nt.ne(0).count_true).to be > 10
+      ref = ClipNodeReference["source_edges_#{buffer}"]
+      st, sg = render(clip, buffer: buffer, buffers: 48000 * 3 / buffer)
+      expect(st.to_a).to eq(ref[:trigger]), "triggers with buffer #{buffer}"
+      expect(sg.to_a).to eq(ref[:gate]), "gate with buffer #{buffer}"
+      expect(st.ne(0).count_true).to be > 10
     end
   end
 
-  it 'follows tempo changes like ClipNode' do
+  it 'follows tempo changes like ClipNode did' do
     clip = MB::Sound.seq(MB::Sound::C4, MB::Sound::E4.n16, MB::Sound::G4).n8.loop
     tempo = ->(b) { transport.bpm = { 20 => 97, 50 => 143.5, 90 => 61 }.fetch(b, transport.bpm) }
-    nt, ng, st, sg = compare(clip, buffer: 800, buffers: 150, tempo: tempo)
-    expect(st.to_a).to eq(nt.to_a)
-    expect(sg.to_a).to eq(ng.to_a)
+    ref = ClipNodeReference[:source_tempo]
+    st, sg = render(clip, buffer: 800, buffers: 150, tempo: tempo)
+    expect(st.to_a).to eq(ref[:trigger])
+    expect(sg.to_a).to eq(ref[:gate])
   end
 
   it 'plays a non-looping clip to its end' do
     clip = MB::Sound.seq(MB::Sound::C4, MB::Sound::E4).n8
-    _, ng, _, sg = compare(clip, buffer: 800, buffers: 30) # ClipNodes end at 24000 samples
-    expect(sg.to_a).to eq(ng.to_a)
+    _, sg = render(clip, buffer: 800, buffers: 30)
+    expect(sg.to_a).to eq(ClipNodeReference[:source_end_gate])
 
     src = MB::Sound::MIDI::ClipSource.new(clip, transport: transport)
     expect(src.music_end).to eq(1/2r)

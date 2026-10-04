@@ -26,20 +26,10 @@ RSpec.describe(MB::Sound::Notes) do
     out.transform_values { |l| l.reduce(:concatenate) }
   end
 
-  # Clip nodes and Notes nodes for +clip+, by name.
-  def compare_nodes(clip)
+  # Notes nodes for +clip+ by name, and the Notes instance.
+  def notes_nodes(clip)
     v = clip_notes(clip)
-    cn = MB::Sound::Sequence::ClipNode
-    [
-      {
-        gate: cn::Gate.new(clip, transport: transport),
-        trigger: cn::Trigger.new(clip, range: 0.0..1.0, transport: transport),
-        number: cn::Number.new(clip, transport: transport),
-        velocity: cn::Velocity.new(clip, range: 0.0..1.0, transport: transport),
-      },
-      { gate: v.gate, trigger: v.trigger, number: v.number, velocity: v.velocity },
-      v,
-    ]
+    [{ gate: v.gate, trigger: v.trigger, number: v.number, velocity: v.velocity }, v]
   end
 
   def expect_same(a, b, label = nil)
@@ -51,38 +41,36 @@ RSpec.describe(MB::Sound::Notes) do
   describe 'clip sources' do
     let(:clip) { MB::Sound.seq(MB::Sound::C4, MB::Sound.seq(MB::Sound::E4).vel(0.4), MB::Sound::G4.n16).n8.t.legato(0.7).loop }
 
-    it 'puts every edge on the same sample as ClipNode' do
+    # The expected outputs are the old ClipNode renderers' (see
+    # spec/support/clip_node_reference.rb).
+    it 'puts every edge on the same sample as ClipNode did' do
       [441, 800, 1000].each do |buffer|
-        cnodes, nnodes, _ = compare_nodes(clip)
-        a = run(cnodes, buffer: buffer, buffers: 48000 * 3 / buffer)
+        nnodes, _ = notes_nodes(clip)
         b = run(nnodes, buffer: buffer, buffers: 48000 * 3 / buffer)
-        expect_same(a, b, "buffer #{buffer}")
-        expect(a[:trigger].ne(0).count_true).to be > 10
+        expect_same(ClipNodeReference["notes_edges_#{buffer}"], b, "buffer #{buffer}")
+        expect(b[:trigger].ne(0).count_true).to be > 10
       end
     end
 
-    it 'follows tempo changes like ClipNode' do
-      cnodes, nnodes, _ = compare_nodes(clip)
-      nodes = cnodes.transform_keys { |k| :"c_#{k}" }.merge(nnodes)
-      out = run(nodes, buffer: 800, buffers: 150) { |b| transport.bpm = { 20 => 97, 50 => 143.5, 90 => 61 }.fetch(b, transport.bpm) }
-      expect_same(cnodes.keys.to_h { |k| [k, out[:"c_#{k}"]] }, out.slice(*cnodes.keys))
+    it 'follows tempo changes like ClipNode did' do
+      nnodes, _ = notes_nodes(clip)
+      out = run(nnodes, buffer: 800, buffers: 150) { |b| transport.bpm = { 20 => 97, 50 => 143.5, 90 => 61 }.fetch(b, transport.bpm) }
+      expect_same(ClipNodeReference[:notes_tempo], out)
     end
 
-    it 'chases held values at timeline jumps like ClipNode' do
-      cnodes, nnodes, v = compare_nodes(clip)
+    it 'chases held values at timeline jumps like ClipNode did' do
+      nnodes, v = notes_nodes(clip)
       jumps = { 7 => 5/16r, 20 => 1/3r, 33 => 0r, 41 => 17/24r }
-      a = run(cnodes, buffer: 600, buffers: 60) { |idx| cnodes.each_value { |n| n.start_at(jumps[idx]) } if jumps.key?(idx) }
       b = run(nnodes, buffer: 600, buffers: 60) { |idx| v.stream.source.start_at(jumps[idx]) if jumps.key?(idx) }
-      expect_same(a, b)
+      expect_same(ClipNodeReference[:notes_jumps], b)
       expect(b[:number].to_a.uniq.sort).to eq([60.0, 64.0, 67.0])
     end
 
-    it 'chases at clip swaps like ClipNode' do
-      cnodes, nnodes, v = compare_nodes(clip)
+    it 'chases at clip swaps like ClipNode did' do
+      nnodes, v = notes_nodes(clip)
       other = MB::Sound.seq(MB::Sound::D4, MB::Sound::A3).n4.legato(0.5).loop
-      a = run(cnodes, buffer: 500, buffers: 40) { |b| cnodes.each_value { |n| n.swap_clip(other, time: 1/6r) } if b == 3 }
       b = run(nnodes, buffer: 500, buffers: 40) { |idx| v.stream.source.swap_clip(other, time: 1/6r) if idx == 3 }
-      expect_same(a, b)
+      expect_same(ClipNodeReference[:notes_swap], b)
       expect(b[:number].to_a.uniq).to include(62.0)
     end
 
