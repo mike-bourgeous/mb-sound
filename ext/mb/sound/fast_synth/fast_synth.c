@@ -538,6 +538,302 @@ static VALUE ruby_oscillate_bl(VALUE self, VALUE buffer, VALUE wave_type, VALUE 
 	return buffer;
 }
 
+/*
+ * Band-limited complex (analytic) oscillators from band-limited impulse
+ * trains (BLIT).  An analytic waveform's derivative is a sum of complex
+ * exponentials with a closed form (the Dirichlet kernel for all harmonics,
+ * e^{iMx} sin(Mx) / sin(x) for the odd ones), so a ramp or square is the
+ * integral of a sum that stops below Nyquist: no aliasing, and no negative
+ * frequencies (the imaginary part is the real part's Hilbert transform).
+ * A triangle integrates a quarter-cycle-shifted square once more.
+ *
+ * The integrators integrate each step at its midpoint (a slight lift of the
+ * top octave: (w/2)/sin(w/2), +2.6 dB at 20 kHz), leak by BLIT_LEAK to
+ * absorb rounding, and start from their exact steady state at the current
+ * phase (also after a phase jump between buffers; see blit_start).  At 0 Hz
+ * the output is 0.  The highest harmonic
+ * fades in and out with the frequency (no clicks as harmonics come and go
+ * under FM).  Only real arithmetic is used, so the Ruby mirror
+ * (MB::Sound::BandLimit.blit_ruby) gives identical results.
+ */
+
+#define BLIT_LEAK (1.0 - 1e-4)
+#define BLIT_MAX_CYCLES 0.49 // highest harmonic, in cycles per sample
+
+enum blit_shape {
+	BLIT_RAMP,
+	BLIT_SQUARE,
+	BLIT_TRIANGLE,
+};
+
+static ID sym_complex_ramp, sym_complex_square, sym_complex_triangle;
+
+static enum blit_shape blit_find_shape(VALUE shape)
+{
+	ID id = SYM2ID(shape);
+	if (id == sym_complex_ramp) return BLIT_RAMP;
+	if (id == sym_complex_square) return BLIT_SQUARE;
+	if (id == sym_complex_triangle) return BLIT_TRIANGLE;
+	rb_raise(rb_eArgError, "No band-limited complex version of %"PRIsVALUE, shape);
+}
+
+// The weight of harmonic +k+ when harmonics below +h+ are allowed: 1 up to
+// h - 1, fading to 0 at h (so nothing reaches h).
+static inline double blit_weight(double k, double h)
+{
+	double w = h - k;
+	return w >= 1.0 ? 1.0 : (w <= 0.0 ? 0.0 : w);
+}
+
+// Sum of e^{ikx} for k = 1..+n+, plus +frac+ times e^{i(n+1)x}.
+static void blit_all(double x, double n, double frac, double *re, double *im)
+{
+	double s = sin(0.5 * x);
+	double mag;
+	if (fabs(s) < 1e-9) {
+		mag = n * cos(0.5 * n * x) / cos(0.5 * x);
+	} else {
+		mag = sin(0.5 * n * x) / s;
+	}
+
+	double ph = 0.5 * (n + 1.0) * x;
+	*re = mag * cos(ph);
+	*im = mag * sin(ph);
+
+	if (frac > 0) {
+		*re += frac * cos((n + 1.0) * x);
+		*im += frac * sin((n + 1.0) * x);
+	}
+}
+
+// Sum of e^{ikx} over the first +m+ odd k, plus +frac+ times the next.
+static void blit_odd(double x, double m, double frac, double *re, double *im)
+{
+	double s = sin(x);
+	double mag;
+	if (fabs(s) < 1e-9) {
+		mag = m * cos(m * x) / cos(x);
+	} else {
+		mag = sin(m * x) / s;
+	}
+
+	double ph = m * x;
+	*re = mag * cos(ph);
+	*im = mag * sin(ph);
+
+	if (frac > 0) {
+		*re += frac * cos((2.0 * m + 1.0) * x);
+		*im += frac * sin((2.0 * m + 1.0) * x);
+	}
+}
+
+// The derivative (per radian) of the analytic +shape+ at +theta+ with
+// harmonics up to +h+.  For a triangle this is the derivative of the
+// shifted square it integrates (its own derivative is that square).
+static void blit_derivative(enum blit_shape shape, double theta, double h, double *re, double *im)
+{
+	if (shape == BLIT_RAMP) {
+		double n = fmax(floor(h - 1.0), 0.0); // harmonics at full weight
+		blit_all(theta + M_PI, n, blit_weight(n + 1.0, h), re, im);
+		*re *= -2.0 / M_PI;
+		*im *= -2.0 / M_PI;
+	} else {
+		double m = fmax(floor(0.5 * (floor(h - 1.0) + 1.0)), 0.0); // odd harmonics at full weight
+		double frac = blit_weight(2.0 * m + 1.0, h);
+		double scale = shape == BLIT_SQUARE ? 4.0 / M_PI : 8.0 / (M_PI * M_PI);
+		blit_odd(shape == BLIT_SQUARE ? theta : theta + 0.5 * M_PI, m, frac, re, im);
+		*re *= scale;
+		*im *= scale;
+	}
+}
+
+// Complex multiply and divide on (re, im) pairs (written out, so the Ruby
+// mirror can match them exactly).
+static inline void blit_mul(double ar, double ai, double br, double bi, double *re, double *im)
+{
+	double r = ar * br - ai * bi;
+	double i = ar * bi + ai * br;
+	*re = r;
+	*im = i;
+}
+
+static inline void blit_div(double ar, double ai, double br, double bi, double *re, double *im)
+{
+	double d = br * br + bi * bi;
+	double r = (ar * br + ai * bi) / d;
+	double i = (ai * br - ar * bi) / d;
+	*re = r;
+	*im = i;
+}
+
+// The integrators' steady state for the analytic +shape+ at +theta+ with
+// harmonics below +h+ and a step of +delta+ radians (into y, and for a
+// triangle the shifted square it integrates into g), so they start without
+// a transient (a leftover offset would be amplified by a second stage).
+// For each harmonic k, with E = e^{-ik delta}, the midpoint step drives
+// delta * a_k k e^{-ik delta/2} into a leaky integrator 1 / (1 - leak E);
+// the triangle's trapezoid stage is (delta/2)(1 + E) / (1 - leak E).
+static void blit_start(enum blit_shape shape, double theta, double h, double delta, double *yre, double *yim, double *gre, double *gim)
+{
+	*yre = *yim = *gre = *gim = 0;
+
+	long top = (long)ceil(h);
+	for (long k = 1; k <= top; k++) {
+		double w = blit_weight((double)k, h);
+		if (w == 0) {
+			break;
+		}
+		if (shape != BLIT_RAMP && k % 2 == 0) {
+			continue;
+		}
+
+		double kd = k * delta;
+		double er = cos(kd), ei = -sin(kd);                 // E
+		double denr = 1.0 - BLIT_LEAK * er, deni = -BLIT_LEAK * ei; // 1 - leak E
+		double hr = cos(0.5 * kd), hi = -sin(0.5 * kd);     // e^{-ik delta/2}
+		double zr = cos(k * theta), zi = sin(k * theta);    // e^{ik theta}
+
+		double sr, si; // this harmonic's integrator state
+		if (shape == BLIT_TRIANGLE) {
+			// g = sum of (8/pi^2)/k (-i) e^{ik(theta + pi/2)}: coefficient
+			// b_k = (8/pi^2)/k * i^k on (-i) e^{ik theta}, derivative b_k k
+			double bmag = w * 8.0 / (M_PI * M_PI * k);
+			double br = 0, bi = k % 4 == 1 ? bmag : -bmag;   // i^k for odd k
+			double gr, gi;
+			blit_mul(br * delta * k, bi * delta * k, hr, hi, &gr, &gi);
+			blit_div(gr, gi, denr, deni, &gr, &gi);
+
+			double tr, ti;
+			blit_mul(gr, gi, zr, zi, &tr, &ti);
+			*gre += tr;
+			*gim += ti;
+
+			// y: (delta/2)(1 + E) / (1 - leak E) times G
+			blit_mul(0.5 * delta * (1.0 + er), 0.5 * delta * ei, gr, gi, &sr, &si);
+			blit_div(sr, si, denr, deni, &sr, &si);
+		} else {
+			double a = shape == BLIT_RAMP ? (k % 2 ? 2.0 : -2.0) / (M_PI * k) : 4.0 / (M_PI * k);
+			blit_mul(w * a * delta * k, 0, hr, hi, &sr, &si);
+			blit_div(sr, si, denr, deni, &sr, &si);
+		}
+
+		double tr, ti;
+		blit_mul(sr, si, zr, zi, &tr, &ti);
+		*yre += tr;
+		*yim += ti;
+	}
+}
+
+/*
+ * A band-limited complex oscillator:
+ *   blit(buffer (SComplex), shape, frequency, advance, gain, offset, state, blit_state)
+ * +shape+ is :complex_ramp, :complex_square, or :complex_triangle (same
+ * phase and scale as Oscillator's naive complex waves).  +state+ is the
+ * phasor's [phi]; +blit_state+ is [y re, y im, g re, g im, last phase,
+ * last increment, primed (0 or 1)].
+ */
+static VALUE ruby_blit(VALUE self, VALUE buffer, VALUE shape_v, VALUE frequency, VALUE advance, VALUE gain,
+		VALUE offset, VALUE state, VALUE blit_state)
+{
+	enum blit_shape shape = blit_find_shape(shape_v);
+	double phi = bl_read_phi(state);
+	double adv = NUM2DBL(advance);
+	double g = NUM2DBL(gain);
+	double off = NUM2DBL(offset);
+
+	Check_Type(blit_state, T_ARRAY);
+	if (RARRAY_LEN(blit_state) != 7) {
+		rb_raise(rb_eArgError, "BLIT state must have seven elements");
+	}
+	double yre = NUM2DBL(rb_ary_entry(blit_state, 0));
+	double yim = NUM2DBL(rb_ary_entry(blit_state, 1));
+	double gre = NUM2DBL(rb_ary_entry(blit_state, 2));
+	double gim = NUM2DBL(rb_ary_entry(blit_state, 3));
+	double prev_p = NUM2DBL(rb_ary_entry(blit_state, 4));
+	double prev_inc = NUM2DBL(rb_ary_entry(blit_state, 5));
+	_Bool primed = NUM2INT(rb_ary_entry(blit_state, 6)) != 0;
+
+	if (!RTEST(rb_obj_is_kind_of(buffer, numo_cSComplex)) || RNARRAY_NDIM(buffer) != 1 || !RTEST(nary_check_contiguous(buffer))) {
+		rb_raise(rb_eArgError, "Buffer must be a contiguous 1D SComplex NArray");
+	}
+	size_t length = RNARRAY_SHAPE(buffer)[0];
+	float complex *out = (float complex *)(nary_get_pointer_for_write(buffer) + nary_get_offset(buffer));
+
+	double freq;
+	complex float *freqptr;
+	mb_read_signal_input(&frequency, length, "Frequency", &freq, &freqptr);
+
+	_Bool constant = !freqptr;
+	double steps = 0;
+	double p = 0, inc = 0;
+	for (size_t i = 0; i < length; i++) {
+		if (freqptr) {
+			freq = crealf(freqptr[i]);
+		}
+
+		inc = freq * adv;
+		if (constant) {
+			steps = inc * i;
+		}
+
+		p = mb_wrap(phi + steps, 1.0);
+		double theta = p * (2.0 * M_PI);
+
+		_Bool continued = primed && (i > 0 || fabs(mb_wrap(prev_p + prev_inc - p + 0.5, 1.0) - 0.5) < 1e-6);
+		if (!continued) {
+			double h = fabs(inc) > 0 ? BLIT_MAX_CYCLES / fabs(inc) : 1.0;
+			blit_start(shape, theta, h, inc * (2.0 * M_PI), &yre, &yim, &gre, &gim);
+		} else if (prev_inc != 0) {
+			double h = BLIT_MAX_CYCLES / fabs(prev_inc);
+			double dtheta = prev_inc * (2.0 * M_PI);
+			double dre, dim;
+			blit_derivative(shape, theta - 0.5 * dtheta, h, &dre, &dim);
+
+			if (shape == BLIT_TRIANGLE) {
+				double ngre = BLIT_LEAK * gre + dtheta * dre;
+				double ngim = BLIT_LEAK * gim + dtheta * dim;
+				yre = BLIT_LEAK * yre + dtheta * 0.5 * (gre + ngre);
+				yim = BLIT_LEAK * yim + dtheta * 0.5 * (gim + ngim);
+				gre = ngre;
+				gim = ngim;
+			} else {
+				yre = BLIT_LEAK * yre + dtheta * dre;
+				yim = BLIT_LEAK * yim + dtheta * dim;
+			}
+		}
+
+		out[i] = (float)(yre * g + off) + I * (float)(yim * g);
+
+		prev_p = p;
+		prev_inc = inc;
+		primed = 1;
+
+		if (!constant) {
+			steps += inc;
+		}
+	}
+
+	if (constant) {
+		steps = freq * adv * length;
+	}
+	rb_ary_store(state, 0, rb_float_new(mb_wrap(phi + steps, 1.0)));
+
+	if (length > 0) {
+		rb_ary_store(blit_state, 0, rb_float_new(yre));
+		rb_ary_store(blit_state, 1, rb_float_new(yim));
+		rb_ary_store(blit_state, 2, rb_float_new(gre));
+		rb_ary_store(blit_state, 3, rb_float_new(gim));
+		rb_ary_store(blit_state, 4, rb_float_new(prev_p));
+		rb_ary_store(blit_state, 5, rb_float_new(prev_inc));
+		rb_ary_store(blit_state, 6, INT2NUM(1));
+	}
+
+	RB_GC_GUARD(frequency);
+	RB_GC_GUARD(buffer);
+
+	return buffer;
+}
+
 void Init_fast_synth(void)
 {
 	VALUE mb = rb_define_module("MB");
@@ -549,6 +845,10 @@ void Init_fast_synth(void)
 	sym_triangle = rb_intern("triangle");
 	sym_sine = rb_intern("sine");
 	sym_parabola = rb_intern("parabola");
+	sym_complex_ramp = rb_intern("complex_ramp");
+	sym_complex_square = rb_intern("complex_square");
+	sym_complex_triangle = rb_intern("complex_triangle");
 
 	rb_define_module_function(fast_synth, "oscillate_bl", ruby_oscillate_bl, 13);
+	rb_define_module_function(fast_synth, "blit", ruby_blit, 8);
 }

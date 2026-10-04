@@ -189,8 +189,13 @@ module MB
       # the cosecant, such that the resulting waveform matches the analytic
       # signal form of the square wave and spirals counterclockwise.
       def complex_square
-        @wave_type = :complex_square
-        self
+        set_wave(:complex_square, true)
+      end
+
+      # The naive (aliased) version of #complex_square, which also has energy at
+      # negative frequencies; see BandLimit.blit_ruby.
+      def acomplex_square
+        set_wave(:complex_square, false)
       end
 
       # Changes the waveform to complex triangle.  The real part is a triangle
@@ -198,17 +203,34 @@ module MB
       # cosecant, such that the resulting waveform matches the analytic signal
       # form of the triangle wave and spirals counterclockwise.
       def complex_triangle
-        @wave_type = :complex_triangle
-        self
+        set_wave(:complex_triangle, true)
+      end
+
+      # The naive (aliased) version of #complex_triangle, which also has energy at
+      # negative frequencies; see BandLimit.blit_ruby.
+      def acomplex_triangle
+        set_wave(:complex_triangle, false)
       end
 
       # Changes the waveform to complex ramp.  The real part matches the
       # standard ramp waveform, and the imaginary part is an integral of a
       # modified cotangent function, such that the resulting waveform matches
       # the analytic signal of a ramp wave, spiraling counterclockwise.
+      #
+      # Complex ramp, square, and triangle are band-limited (closed-form
+      # band-limited impulse trains, integrated; see BandLimit.blit_ruby):
+      # no aliasing and no negative frequencies, with the top octave lifted
+      # slightly (+2.6 dB at 20 kHz).  With phase modulation they fall back to
+      # the naive versions (acomplex_ramp, ...), which alias and clip their
+      # imaginary parts.
       def complex_ramp
-        @wave_type = :complex_ramp
-        self
+        set_wave(:complex_ramp, true)
+      end
+
+      # The naive (aliased) version of #complex_ramp, which also has energy at
+      # negative frequencies; see BandLimit.blit_ruby.
+      def acomplex_ramp
+        set_wave(:complex_ramp, false)
       end
 
       # Changes the oscillator to generate white noise using the distribution
@@ -633,7 +655,7 @@ module MB
 
       # The wave type as written in the DSL (e.g. :aramp for a naive ramp).
       def wave_name
-        !@band_limit && BandLimit::WAVES.include?(@wave_type) ? :"a#{@wave_type}" : @wave_type
+        !@band_limit && (BandLimit::WAVES + BandLimit::COMPLEX_WAVES).include?(@wave_type) ? :"a#{@wave_type}" : @wave_type
       end
 
       # Allows subclasses (e.g. Note) to change the frequency after construction.

@@ -319,6 +319,181 @@ module MB
 
         out
       end
+
+      # Complex wave types with band-limited (BLIT) versions; see .blit_ruby.
+      COMPLEX_WAVES = [:complex_ramp, :complex_square, :complex_triangle].freeze
+
+      # Leak of the BLIT integrators (see fast_synth.c).
+      BLIT_LEAK = 1.0 - 1e-4
+
+      # Highest BLIT harmonic, in cycles per sample.
+      BLIT_MAX_CYCLES = 0.49
+
+      # Weight of harmonic +k+ when harmonics below +h+ are allowed.
+      def self.blit_weight(k, h)
+        w = h - k
+        w >= 1.0 ? 1.0 : (w <= 0.0 ? 0.0 : w)
+      end
+
+      def self.blit_mul(ar, ai, br, bi)
+        [ar * br - ai * bi, ar * bi + ai * br]
+      end
+
+      def self.blit_div(ar, ai, br, bi)
+        d = br * br + bi * bi
+        [(ar * br + ai * bi) / d, (ai * br - ar * bi) / d]
+      end
+
+      # Sum of e^{ikx} for k = 1..n plus frac e^{i(n+1)x}.
+      def self.blit_all(x, n, frac)
+        s = Math.sin(0.5 * x)
+        mag = s.abs < 1e-9 ? n * Math.cos(0.5 * n * x) / Math.cos(0.5 * x) : Math.sin(0.5 * n * x) / s
+        ph = 0.5 * (n + 1.0) * x
+        re = mag * Math.cos(ph)
+        im = mag * Math.sin(ph)
+        if frac > 0
+          re += frac * Math.cos((n + 1.0) * x)
+          im += frac * Math.sin((n + 1.0) * x)
+        end
+        [re, im]
+      end
+
+      # Sum of e^{ikx} over the first m odd k plus frac times the next.
+      def self.blit_odd(x, m, frac)
+        s = Math.sin(x)
+        mag = s.abs < 1e-9 ? m * Math.cos(m * x) / Math.cos(x) : Math.sin(m * x) / s
+        ph = m * x
+        re = mag * Math.cos(ph)
+        im = mag * Math.sin(ph)
+        if frac > 0
+          re += frac * Math.cos((2.0 * m + 1.0) * x)
+          im += frac * Math.sin((2.0 * m + 1.0) * x)
+        end
+        [re, im]
+      end
+
+      # See blit_derivative in fast_synth.c.
+      def self.blit_derivative(shape, theta, h)
+        if shape == :complex_ramp
+          n = [(h - 1.0).floor.to_f, 0.0].max
+          re, im = blit_all(theta + Math::PI, n, blit_weight(n + 1.0, h))
+          [re * (-2.0 / Math::PI), im * (-2.0 / Math::PI)]
+        else
+          m = [(0.5 * ((h - 1.0).floor + 1.0)).floor.to_f, 0.0].max
+          frac = blit_weight(2.0 * m + 1.0, h)
+          scale = shape == :complex_square ? 4.0 / Math::PI : 8.0 / (Math::PI * Math::PI)
+          re, im = blit_odd(shape == :complex_square ? theta : theta + 0.5 * Math::PI, m, frac)
+          [re * scale, im * scale]
+        end
+      end
+
+      # See blit_start in fast_synth.c: [y re, y im, g re, g im].
+      def self.blit_start(shape, theta, h, delta)
+        yre = yim = gre = gim = 0.0
+
+        top = h.ceil
+        (1..top).each do |k|
+          w = blit_weight(k.to_f, h)
+          break if w == 0
+          next if shape != :complex_ramp && k.even?
+
+          kd = k * delta
+          er = Math.cos(kd)
+          ei = -Math.sin(kd)
+          denr = 1.0 - BLIT_LEAK * er
+          deni = -BLIT_LEAK * ei
+          hr = Math.cos(0.5 * kd)
+          hi = -Math.sin(0.5 * kd)
+          zr = Math.cos(k * theta)
+          zi = Math.sin(k * theta)
+
+          if shape == :complex_triangle
+            bmag = w * 8.0 / (Math::PI * Math::PI * k)
+            br = 0.0
+            bi = k % 4 == 1 ? bmag : -bmag
+            gr, gi = blit_mul(br * delta * k, bi * delta * k, hr, hi)
+            gr, gi = blit_div(gr, gi, denr, deni)
+
+            tr, ti = blit_mul(gr, gi, zr, zi)
+            gre += tr
+            gim += ti
+
+            sr, si = blit_mul(0.5 * delta * (1.0 + er), 0.5 * delta * ei, gr, gi)
+            sr, si = blit_div(sr, si, denr, deni)
+          else
+            a = shape == :complex_ramp ? (k.odd? ? 2.0 : -2.0) / (Math::PI * k) : 4.0 / (Math::PI * k)
+            sr, si = blit_mul(w * a * delta * k, 0.0, hr, hi)
+            sr, si = blit_div(sr, si, denr, deni)
+          end
+
+          tr, ti = blit_mul(sr, si, zr, zi)
+          yre += tr
+          yim += ti
+        end
+
+        [yre, yim, gre, gim]
+      end
+
+      # Ruby mirror of MB::Sound::FastSynth.blit, returning +count+ samples
+      # as an SComplex NArray.  +blit_state+ is [y re, y im, g re, g im, last
+      # phase, last increment, primed].
+      def self.blit_ruby(count, shape, freq, advance, gain, offset, state, blit_state)
+        raise ArgumentError, "No band-limited complex version of #{shape.inspect}" unless COMPLEX_WAVES.include?(shape)
+
+        freqs = freq.is_a?(Numo::NArray) ? real_floats(freq) : nil
+        freq = freqs ? freqs[0] : freq.to_f
+        phi = state[0].to_f
+        yre, yim, gre, gim, prev_p, prev_inc, primed = blit_state
+        primed = primed != 0
+
+        out = Numo::SComplex.zeros(count)
+        steps = 0.0
+        p = inc = 0.0
+        count.times do |i|
+          freq = freqs[i] if freqs
+          inc = freq * advance
+          steps = inc * i unless freqs
+
+          p = wrap(phi + steps)
+          theta = p * (2.0 * Math::PI)
+
+          continued = primed && (i > 0 || (wrap(prev_p + prev_inc - p + 0.5) - 0.5).abs < 1e-6)
+          if !continued
+            h = inc.abs > 0 ? BLIT_MAX_CYCLES / inc.abs : 1.0
+            yre, yim, gre, gim = blit_start(shape, theta, h, inc * (2.0 * Math::PI))
+          elsif prev_inc != 0
+            h = BLIT_MAX_CYCLES / prev_inc.abs
+            dtheta = prev_inc * (2.0 * Math::PI)
+            dre, dim = blit_derivative(shape, theta - 0.5 * dtheta, h)
+
+            if shape == :complex_triangle
+              ngre = BLIT_LEAK * gre + dtheta * dre
+              ngim = BLIT_LEAK * gim + dtheta * dim
+              yre = BLIT_LEAK * yre + dtheta * 0.5 * (gre + ngre)
+              yim = BLIT_LEAK * yim + dtheta * 0.5 * (gim + ngim)
+              gre = ngre
+              gim = ngim
+            else
+              yre = BLIT_LEAK * yre + dtheta * dre
+              yim = BLIT_LEAK * yim + dtheta * dim
+            end
+          end
+
+          out[i] = Complex(yre * gain + offset, yim * gain)
+
+          prev_p = p
+          prev_inc = inc
+          primed = true
+
+          steps += inc if freqs
+        end
+
+        steps = freq * advance * count unless freqs
+        state[0] = wrap(phi + steps)
+        blit_state.replace([yre, yim, gre, gim, prev_p, prev_inc, 1]) if count > 0
+
+        out
+      end
     end
   end
 end

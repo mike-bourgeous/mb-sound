@@ -88,6 +88,7 @@ module MB
         :sine, :sin, :triangle, :square, :ramp, :saw, :sawtooth, :drumramp, :envramp, :gauss, :parabola,
         :atriangle, :asquare, :aramp, :asaw, :asawtooth,
         :complex_sine, :complex_square, :complex_triangle, :complex_ramp,
+        :acomplex_square, :acomplex_triangle, :acomplex_ramp,
       ].each do |wave|
         define_method(wave) { tone.public_send(wave) }
       end

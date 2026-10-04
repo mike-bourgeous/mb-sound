@@ -246,4 +246,69 @@ RSpec.describe(MB::Sound::BandLimit) do
       expect(data.max - data.min).to be > 1.5
     end
   end
+
+  describe 'complex BLIT' do
+    def blit_osc(wave, rate: 48000, **opts)
+      MB::Sound::Oscillator.new(wave, advance: 2 * Math::PI / rate, band_limit: true, **opts)
+    end
+
+    [48000, 44100].each do |rate|
+      MB::Sound::BandLimit::COMPLEX_WAVES.each do |wave|
+        it "gives identical C and Ruby samples for #{wave} at #{rate} Hz, fixed and modulated" do
+          c = blit_osc(wave, rate: rate, frequency: 1234.5)
+          r = blit_osc(wave, rate: rate, frequency: 1234.5)
+          [333, 1, 800].each { |n| expect(c.sample_c(n)).to eq(r.sample_ruby(n)) }
+
+          make = -> { blit_osc(wave, rate: rate, frequency: MB::Sound::ArrayInput.new(data: [Numo::SFloat.new(4800).seq * 3 + 50]).with_buffer(480)) }
+          c = make.call
+          r = make.call
+          5.times { expect(c.sample_c(480)).to eq(r.sample_ruby(480)) }
+        end
+      end
+    end
+
+    MB::Sound::BandLimit::COMPLEX_WAVES.each do |wave|
+      it "has no aliases or negative frequencies above the float noise floor for #{wave}" do
+        n = 16384
+        k = 1025 # ~3 kHz
+        tone = (k * 48000.0 / n).hz.send(wave)
+        expect(tone.oscillator.blit?).to eq(true)
+        tone.sample(4800)
+        spec = Numo::Pocketfft.fft(Numo::DComplex.cast(tone.sample(n))).abs**2
+        harm = Numo::Bit.zeros(n)
+        (k...(n / 2)).step(k) { |b| harm[b] = 1 }
+        other_bins = ~harm
+        other_bins[0] = 0
+        other = spec[other_bins.where].sum
+        expect(10 * Math.log10(other / spec[harm.where].sum)).to be < -120
+      end
+
+      it "has a real part close to the band-limited real #{wave.to_s.sub('complex_', '')}" do
+        real = 1000.hz.send(wave).sample(4800).real
+        clean = 1000.hz.send(wave.to_s.sub('complex_', '')).sample(4800)
+        corr = (real * clean).sum / Math.sqrt((real**2).sum * (clean**2).sum)
+        expect(corr).to be > 0.99
+      end
+    end
+
+    it 'falls back to the naive complex wave with phase modulation' do
+      expect(100.hz.complex_ramp.pm(3.hz.at(1)).oscillator.blit?).to eq(false)
+    end
+
+    it 'has naive versions named acomplex_*' do
+      [:acomplex_ramp, :acomplex_square, :acomplex_triangle].each do |name|
+        tone = 100.hz.send(name)
+        expect(tone.oscillator.blit?).to eq(false)
+        expect(tone.to_s).to include(name.to_s)
+      end
+    end
+
+    it 'starts again without a transient after a phase reset' do
+      osc = blit_osc(:complex_triangle, frequency: 440)
+      fresh = blit_osc(:complex_triangle, frequency: 440)
+      osc.sample(1000)
+      osc.reset
+      expect(osc.sample(800)).to eq(fresh.sample(800))
+    end
+  end
 end

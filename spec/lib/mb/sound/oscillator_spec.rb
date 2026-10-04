@@ -255,7 +255,7 @@ RSpec.describe MB::Sound::Oscillator do
       end
 
       it 'matches the analytic signal for a complex square wave (approximately)' do
-        oscil = 240.hz.complex_square.at(1).oscillator
+        oscil = 240.hz.acomplex_square.at(1).oscillator
         result = oscil.send(method, 1600)
         # 240Hz at 48kHz puts square wave transitions exactly on samples, so
         # sample 6400 + i of the reference has the same phase as sample i
@@ -270,7 +270,7 @@ RSpec.describe MB::Sound::Oscillator do
       end
 
       it 'matches the analytic signal for a complex triangle wave (approximately)' do
-        oscil = 240.hz.complex_triangle.at(1).oscillator
+        oscil = 240.hz.acomplex_triangle.at(1).oscillator
         result = oscil.send(method, 1600)
         target = Numo::SComplex.cast(MB::Sound.analytic_signal(240.hz.atriangle.at(1).sample(16000))[6400...8000])
 
@@ -283,7 +283,7 @@ RSpec.describe MB::Sound::Oscillator do
       end
 
       it 'matches the analytic signal for a complex ramp wave (approximately)' do
-        oscil = 240.hz.complex_ramp.at(1).oscillator
+        oscil = 240.hz.acomplex_ramp.at(1).oscillator
         result = oscil.send(method, 1600)
 
         base = MB::Sound.analytic_signal(120.hz.aramp.at(1).sample(32000)).reshape(16000, 2)[nil, 1] # shift 240hz by half sample

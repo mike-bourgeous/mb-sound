@@ -156,6 +156,7 @@ module MB
         self.width = width
         @remove_dc = !!remove_dc
         @bl_state = [0.0, 0.0, 0.0, 0]
+        @blit_state = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0]
 
         @osc_buf = nil
         @truncated = false
@@ -226,12 +227,14 @@ module MB
       def phi=(phi)
         @phasor.phi = phi / TWOPI
         @bl_state[3] = 0
+        @blit_state[6] = 0
       end
 
       # Resets the oscillator phase to its starting phase (see #phase).
       def reset
         @phasor.reset
         @bl_state[3] = 0
+        @blit_state[6] = 0
       end
 
       # Sets whether ramp, square, and triangle waves are band-limited (see
@@ -268,6 +271,15 @@ module MB
       # True if this oscillator has a phase warp (see #width=).
       def warped?
         !@width.nil?
+      end
+
+      # True if this complex oscillator is band-limited right now (see
+      # BandLimit.blit_ruby): complex ramp, square, and triangle with
+      # band-limiting on, without phase modulation, noise, or a warp (those
+      # fall back to the naive complex waves).
+      def blit?
+        !!@band_limit && BandLimit::COMPLEX_WAVES.include?(@wave_type) && @phasor.random_advance == 0 &&
+          !warped? && (@phase_mod.nil? || @phase_mod == 0)
       end
 
       # Changes the oscillator's frequency source to the given Numeric value or
@@ -480,7 +492,18 @@ module MB
           offset = 0
         end
 
-        if synth_kernel?
+        if blit?
+          buf = MB::Sound::FastSynth.blit(
+            @osc_buf[0...count].inplace!,
+            wave_type,
+            freq,
+            @phasor.advance,
+            gain,
+            offset,
+            @phasor.state,
+            @blit_state
+          ).inplace!
+        elsif synth_kernel?
           buf = MB::Sound::FastSynth.oscillate_bl(
             @osc_buf[0...count].inplace!,
             wave_type,
@@ -533,7 +556,9 @@ module MB
           offset = 0
         end
 
-        if synth_kernel?
+        if blit?
+          values = BandLimit.blit_ruby(count, @wave_type, freq_table, @phasor.advance, gain, offset, @phasor.state, @blit_state)
+        elsif synth_kernel?
           values = BandLimit.oscillate_ruby(
             count, @wave_type, freq_table, phase_table, @phasor.advance, gain, offset,
             @phasor.state, @bl_state, *band_limit_fade, width, @remove_dc
