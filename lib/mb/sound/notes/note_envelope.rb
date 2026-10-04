@@ -47,9 +47,12 @@ module MB
 
         # Returns +count+ samples, or nil once the Notes' stream has ended
         # (a non-looping clip or a MIDI file has played its last event)
-        # before this buffer and this envelope is idle, so e.g. `noise *
-        # clip.env` ends with its clip like the Notes gate does.  Envelopes
-        # on looping or live streams never end.
+        # before this buffer and every envelope of the Notes is idle (see
+        # Notes#envelopes_idle?), so e.g. `noise * clip.env` ends with its
+        # clip like the Notes gate does.  Envelopes on looping or live
+        # streams never end.  Waiting for every envelope (not just this one)
+        # keeps a short envelope (e.g. Notes#cutoff's filt_env) from ending
+        # a voice while a longer one (the amp_env) is still releasing.
         #
         # The end is judged from the stream time where this buffer starts
         # (counted by the envelope) and the time of the stream's last event
@@ -59,7 +62,7 @@ module MB
         # skipped Synth lanes don't sample their envelopes).
         def sample(count)
           count = count.round
-          return nil if idle? && stream_over?
+          return nil if idle? && stream_over? && @notes.envelopes_idle?
           @time += Rational(count) / @sample_rate.to_r
           super
         end

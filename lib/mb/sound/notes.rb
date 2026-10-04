@@ -396,7 +396,13 @@ module MB
       # busy while its note is held.  True with no envelopes and no note
       # nodes.
       def idle?
-        !held? && @envelopes.all?(&:idle?)
+        !held? && envelopes_idle?
+      end
+
+      # True if every envelope made through this instance (see #env,
+      # #register) is idle.
+      def envelopes_idle?
+        @envelopes.all?(&:idle?)
       end
 
       # True if any note node made by this instance (#gate, #number,

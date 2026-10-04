@@ -702,6 +702,18 @@ RSpec.describe(MB::Sound::Notes) do
       MB::Sound.rewind
     end
 
+    it 'ends its envelopes together, once the last one is idle after the stream ends' do
+      v = MB::Sound::Notes.new(MIDIListSource.new(ev.note_on(60), ev.note_off(60, time: 0.05r)))
+      short = v.env(0, 0.01, 0.5, 0.02)
+      long = v.env(0, 0.01, 0.5, 0.2)
+      ends = [nil, nil]
+      100.times do |n|
+        [short, long].each_with_index { |e, i| ends[i] ||= n if ends[i].nil? && e.sample(480).nil? }
+      end
+      expect(ends[0]).to eq(ends[1]) # the short envelope waits for the long one
+      expect(ends[1] * 0.01).to be_within(0.03).of(0.05 + 0.2)
+    end
+
     it 'never ends looping clips' do
       g = clip_notes(clip.loop).gate
       100.times { expect(g.sample(800)).not_to eq(nil) }
