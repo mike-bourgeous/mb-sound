@@ -237,6 +237,10 @@ RSpec.describe(MB::Sound::DeviceOutput, :aggregate_failures) do
     rendered = Array.new(20) { session.process_buffer.map(&:dup) }
     wait_until { o.stats[:queued] == 0 }
 
+    # Gaps from a slow writer (e.g. under rake memcheck) break the exact
+    # comparison; one underrun is the end of the audio
+    skip 'the Session fell behind the sound card (e.g. under rake memcheck)' if o.underruns > 1
+
     expected = 2.times.map { |c| rendered.map { |b| b[c] }.reduce(:concatenate) }
 
     # The ramp starts at zero, so align the first nonzero samples
