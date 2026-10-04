@@ -107,6 +107,11 @@ RSpec.describe('MB::Sound::FastAudio', :aggregate_failures) do
         l, r = captured(pb)
         steady = l[2000...42000]
         expect(steady.abs.max).to be_within(0.01).of(0.5)
+
+        # Gaps from a slow writer (e.g. under Valgrind) break the frequency
+        # check; one underrun is the end of the audio
+        skip 'the writer fell behind (e.g. under rake memcheck)' if pb.stats[:underruns] > 1
+
         crossings = (1...steady.length).count { |i| (steady[i - 1] < 0) != (steady[i] < 0) }
         expect(crossings).to be_within(4).of(2 * 1000 * steady.length / 44100.0) # still 1 kHz
         expect(r[2000...42000]).to eq(steady)

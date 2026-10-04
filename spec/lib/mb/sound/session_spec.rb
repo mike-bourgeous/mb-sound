@@ -16,7 +16,65 @@ RSpec.describe(MB::Sound::Session) do
     data.to_a.each_index.select { |i| data[i] != 0 }
   end
 
+  describe '#sample_rate' do
+    it "is the output's rate" do
+      expect(session.sample_rate).to eq(48000)
+      s = MB::Sound::Session.new(output: MB::Sound::NullOutput.new(channels: 2, sample_rate: 44100, sleep: false), realtime: false)
+      expect(s.sample_rate).to eq(44100)
+    ensure
+      s&.close
+    end
+  end
+
   describe '#add' do
+    it "sets graphs at another rate to the session's rate" do
+      tone = 1000.hz.ramp.at_rate(44100)
+      session.add(tone)
+      expect(tone.sample_rate).to eq(48000)
+
+      # A 1 kHz ramp at 48 kHz repeats every 48 samples
+      data = run(4800)
+      expect(data[100]).to be_within(1e-4).of(data[148])
+    end
+
+    # Full cycles in +data+, counted with hysteresis so that resampler noise
+    # in silence doesn't count
+    def cycles(data)
+      state = 0
+      data.to_a.count { |v|
+        if v > 0.1 && state != 1
+          state = 1
+          true
+        elsif v < -0.1
+          state = -1
+          false
+        end
+      }
+    end
+
+    let(:sine_file) { 'sounds/sine/sine_100_1s_mono.flac' }
+
+    it 'resamples nodes that cannot change their rate' do
+      session.add(MB::Sound.file_input(sine_file, resample: 44100))
+
+      # The same cycles over the same time as the file read at 48 kHz
+      data = run(49600)
+      expected = MB::Sound.read(sine_file)[0]
+      expect(cycles(data)).to be_within(1).of(cycles(expected))
+      expect((0...data.length).select { |i| data[i].abs > 0.1 }.last).to be_within(100).of(
+        (0...expected.length).select { |i| expected[i].abs > 0.1 }.last
+      )
+    end
+
+    it 'opens files at the session rate' do
+      s = MB::Sound::Session.new(output: MB::Sound::NullOutput.new(channels: 2, sample_rate: 44100, sleep: false), realtime: false, master_gain: 1)
+      s.add(sine_file)
+      data = Array.new(56) { s.process_buffer[0].dup }.reduce(:concatenate)
+      expect(data[0...44100]).to eq(MB::Sound.read(sine_file, sample_rate: 44100)[0])
+    ensure
+      s&.close
+    end
+
     it 'starts the first graph right away' do
       session.add(1.constant)
       expect(run(800)[0]).to eq(1)
