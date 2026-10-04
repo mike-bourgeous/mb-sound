@@ -1,4 +1,4 @@
-#!/usr/bin/env -S RUBY_THREAD_TIMESLICE=10 ruby
+#!/usr/bin/env -S RUBY_THREAD_TIMESLICE=10 RUBY_YJIT_ENABLE=1 ruby
 # Applies time-varying Haas-effect panning to an audio file based on a sequence
 # of relative delay values in milliseconds and timestamps in seconds.
 #

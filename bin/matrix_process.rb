@@ -1,4 +1,4 @@
-#!/usr/bin/env -S RUBY_THREAD_TIMESLICE=10 ruby
+#!/usr/bin/env -S RUBY_THREAD_TIMESLICE=10 RUBY_YJIT_ENABLE=1 ruby
 # Multiplies each sample of an audio file by a processing matrix to produce a
 # new output file.  If the --decode flag is given, then the matrix is
 # transposed and the complex conjugate is taken of all coefficients to turn an

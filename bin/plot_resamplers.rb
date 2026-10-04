@@ -1,4 +1,4 @@
-#!/usr/bin/env -S RUBY_THREAD_TIMESLICE=10 ruby
+#!/usr/bin/env -S RUBY_THREAD_TIMESLICE=10 RUBY_YJIT_ENABLE=1 ruby
 # Plots the same function upsampled by all the different resampling modes,
 # showing the stairstep and jagged line effects of ZOH and linear resamplers
 # compared to the smooth sine wave of a sinc resampler.

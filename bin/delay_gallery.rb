@@ -1,4 +1,4 @@
-#!/usr/bin/env -S RUBY_THREAD_TIMESLICE=10 ruby
+#!/usr/bin/env -S RUBY_THREAD_TIMESLICE=10 RUBY_YJIT_ENABLE=1 ruby
 # Renders a gallery of delay test sounds, one file per case, for null tests
 # of delay changes (see bin/null_test.rb): constant integer and fractional
 # delays, smoothing, feedback (long and shorter than a buffer), modulated

@@ -218,6 +218,7 @@ module MB
           seconds = MB::Sound.render(@options[:output], bars: @options[:bars] || bars, tail: true, overwrite: overwrite) { arrange_song(&block) }
           puts "Rendered #{seconds.round(1)} seconds to #{@options[:output]}"
         else
+          MB::Sound.warm_up # before the first write to the output (see WarmUpMethods)
           arrange_song(&block)
           stop_after_bars(@options[:bars]) if @options[:bars]
           live
@@ -528,6 +529,7 @@ module MB
           end
           puts "Rendered #{seconds.round(1)} seconds to #{@options[:output]}"
         else
+          MB::Sound.warm_up # before the first write to the output (see WarmUpMethods)
           MB::Sound.bg(:script, graph, fade: 0)
           yield Session.current if block_given?
           live

@@ -1,4 +1,4 @@
-#!/usr/bin/env -S RUBY_THREAD_TIMESLICE=10 ruby
+#!/usr/bin/env -S RUBY_THREAD_TIMESLICE=10 RUBY_YJIT_ENABLE=1 ruby
 # Shows the last-received value of MIDI CCs in a table layout.
 #
 # Reads live MIDI through RtMidi (CoreMIDI, ALSA, or JACK; see

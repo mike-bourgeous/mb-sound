@@ -1,4 +1,4 @@
-#!/usr/bin/env -S RUBY_THREAD_TIMESLICE=10 ruby
+#!/usr/bin/env -S RUBY_THREAD_TIMESLICE=10 RUBY_YJIT_ENABLE=1 ruby
 # Trying to synthesize a kick inspired by a YouTube tutorial:
 # https://www.youtube.com/watch?v=ndG-6-vONNc
 

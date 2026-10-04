@@ -1,4 +1,4 @@
-#!/usr/bin/env -S RUBY_THREAD_TIMESLICE=10 ruby
+#!/usr/bin/env -S RUBY_THREAD_TIMESLICE=10 RUBY_YJIT_ENABLE=1 ruby
 # Plots phase difference effects of various experiments with the Hilbert IIR
 # filter.  The goal is to understand how to get closer to 90deg phase across a
 # wider range of the spectrum, what the effect of each filter is, etc.

@@ -1,4 +1,4 @@
-#!/usr/bin/env -S RUBY_THREAD_TIMESLICE=10 ruby
+#!/usr/bin/env -S RUBY_THREAD_TIMESLICE=10 RUBY_YJIT_ENABLE=1 ruby
 # A reverse delay effect.  This works by playing a delay buffer in reverse.
 # (C)2022 Mike Bourgeous
 #

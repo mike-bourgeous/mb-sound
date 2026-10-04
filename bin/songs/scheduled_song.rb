@@ -1,4 +1,4 @@
-#!/usr/bin/env -S RUBY_THREAD_TIMESLICE=10 ruby
+#!/usr/bin/env -S RUBY_THREAD_TIMESLICE=10 RUBY_YJIT_ENABLE=1 ruby
 # A 60 second demo song arranged with the scheduling commands (at_bar,
 # every, resume, outro): a two-voice fifth pad, a bass line, and synth
 # drums, at 120 BPM (30 bars).  Master effects glue the mix with a soft

@@ -1,4 +1,4 @@
-#!/usr/bin/env -S RUBY_THREAD_TIMESLICE=10 ruby
+#!/usr/bin/env -S RUBY_THREAD_TIMESLICE=10 RUBY_YJIT_ENABLE=1 ruby
 # Measures the graph cost of a bin/ script (effect, synth, or song) as a
 # percentage of realtime at one or more buffer sizes, and optionally the
 # self time of each node class.  The script runs normally up to the point
