@@ -216,12 +216,6 @@ static inline double bl_warp(double p, double w)
 	return p < w ? p * (0.5 / w) : 0.5 + (p - w) * (0.5 / (1.0 - w));
 }
 
-// The waveform at phase +p+ with width +w+.
-static inline double bl_value(enum bl_wave wt, double p, double w)
-{
-	return bl_shape(wt, bl_warp(p, w), 0);
-}
-
 // Fills +bp+ with the breakpoints of +wt+ warped by width +w+ (positions in
 // phase; jumps in value and in slope per cycle of phase), returning how
 // many there are.  Points with no jump are left out.
