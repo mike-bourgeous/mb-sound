@@ -638,6 +638,8 @@ RSpec.describe(MB::Sound::Notes) do
       t = v.trigger
       expect(g.ended?).to eq(false)
       30.times { expect(g.sample(800)).not_to eq(nil); t.sample(800); n.sample(800) }
+      expect(g.ended?).to eq(false) # the last note-off is at 24000
+      expect(g.sample(800)).not_to eq(nil); t.sample(800); n.sample(800)
       expect(g.ended?).to eq(true)
       expect(n.ended?).to eq(true)
       expect(g.sample(800)).to eq(nil)
@@ -660,7 +662,7 @@ RSpec.describe(MB::Sound::Notes) do
       v = clip_notes(clip)
       v.register(Struct.new(:x) { def idle? = false }.new)
       g = v.gate
-      expect(40.times.count { g.sample(800) }).to eq(35) # 30 buffers of clip, 5 of tail
+      expect(40.times.count { g.sample(800) }).to eq(36) # 30 buffers of clip, 1 with the last note-off, 5 of tail
     end
 
     it 'ends with a MIDI file' do
@@ -687,6 +689,43 @@ RSpec.describe(MB::Sound::Notes) do
       g = clip_notes(clip.loop).gate
       100.times { expect(g.sample(800)).not_to eq(nil) }
       expect(g.ended?).to eq(false)
+    end
+  end
+
+  describe '#idle? and #held?' do
+    it 'are busy while a note is held, with only a gate' do
+      v = notes_for(ev.note_on(60), ev.note_off(60, time: 1/10r))
+      expect(v.idle?).to eq(true)
+      g = v.gate
+      g.sample(480)
+      expect(v.held?).to eq(true)
+      expect(v.idle?).to eq(false)
+      10.times { g.sample(480) } # past the note-off at 4800
+      expect(v.held?).to eq(false)
+      expect(v.idle?).to eq(true)
+    end
+
+    it 'wait for both held notes and envelopes' do
+      v = notes_for(ev.note_on(60), ev.note_off(60, time: 1/10r))
+      e = v.env(0, 0.01, 1, 0.1, curve: :linear)
+      e.sample(480)
+      expect(v.idle?).to eq(false)
+      expect(v.level).to be > 0.9
+      10.times { e.sample(480) }
+      expect(v.held?).to eq(false)
+      expect(v.idle?).to eq(false) # releasing
+      20.times { e.sample(480) }
+      expect(v.idle?).to eq(true)
+      expect(v.level).to eq(0)
+    end
+
+    it 'counts overlapping notes on one key' do
+      v = notes_for(ev.note_on(60), ev.note_on(60, time: 1/100r), ev.note_off(60, time: 2/100r), ev.note_off(60, time: 3/100r))
+      n = v.number
+      n.sample(1200) # both note-ons and the first note-off
+      expect(v.held?).to eq(true)
+      n.sample(480)
+      expect(v.held?).to eq(false)
     end
   end
 

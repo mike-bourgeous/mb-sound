@@ -63,7 +63,7 @@ module MB
 
         # True once a non-looping clip has played to its end.
         def ended?
-          !@clip.looping? && @clip_position >= @clip.length
+          !@clip.looping? && @clip_position > @clip.length
         end
 
         # The stream time at which a non-looping clip ends (estimated at the

@@ -11,6 +11,12 @@ module MB
           @stack = NoteStack.new
         end
 
+        # True if a note-on read so far has no note-off yet (see
+        # Notes#held?).
+        def held?
+          @stack.held?
+        end
+
         private
 
         def handle(event)

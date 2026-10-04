@@ -367,11 +367,31 @@ module MB
         envelope
       end
 
-      # True when every envelope made through this instance (see #env,
-      # #register) is idle, so a voice allocator can reuse the voice.  True
-      # if there are none.
+      # True when no note is held and every envelope made through this
+      # instance (see #env, #register) is idle, so a voice allocator can
+      # reuse the voice.  Held notes are known from the note nodes in use
+      # (#gate, #number, ...; see #held?), so a voice with only a gate is
+      # busy while its note is held.  True with no envelopes and no note
+      # nodes.
       def idle?
-        @envelopes.all?(&:idle?)
+        !held? && @envelopes.all?(&:idle?)
+      end
+
+      # True if any note node made by this instance (#gate, #number,
+      # #velocity, #lift, ...) has read a note-on whose note-off it hasn't
+      # read yet.  False when there are no note nodes.
+      def held?
+        @nodes.each_value.any? { |ref|
+          node = live(ref)
+          node.is_a?(NoteNode) && node.held?
+        }
+      end
+
+      # The highest current level of the envelopes made through this
+      # instance (see #env), or 0 with none; e.g. for the :quietest steal
+      # policy (MIDI::Allocator::Lane#level_check).
+      def level
+        @envelopes.map { |e| e.respond_to?(:level) ? e.level.to_f.abs : 0.0 }.max || 0.0
       end
 
       # True once the stream's source has ended and every reader has read

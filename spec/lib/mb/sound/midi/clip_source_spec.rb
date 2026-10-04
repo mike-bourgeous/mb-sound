@@ -71,6 +71,8 @@ RSpec.describe(MB::Sound::MIDI::ClipSource) do
     src.read(0, 1/2r - 1/96000r)
     expect(src.ended?).to eq(false)
     src.read(1/2r - 1/96000r, 1/2r)
+    expect(src.ended?).to eq(false) # the last note-off is at 1/2
+    expect(src.read(1/2r, 1/2r + 1/96000r).map(&:type)).to eq([:note_off])
     expect(src.ended?).to eq(true)
   end
 
