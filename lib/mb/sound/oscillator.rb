@@ -16,6 +16,10 @@ module MB
     # values are scaled to the desired output range.
     class Oscillator
       include GraphNode
+      include GraphNode::Ports
+
+      port :wraps, Phasor.port_specs[:wraps]
+      port :increment, Phasor.port_specs[:increment]
 
       RAND = ENV['RANDOM_SEED'] ? Random.new(Integer(ENV['RANDOM_SEED'])) : Random.new
       TWOPI = Math::PI * 2.0
@@ -157,6 +161,7 @@ module MB
         @remove_dc = !!remove_dc
         @bl_state = [0.0, 0.0, 0.0, 0]
         @blit_state = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0]
+        @pulse_state = [0.0, 0.0, 0]
 
         @osc_buf = nil
         @truncated = false
@@ -472,7 +477,9 @@ module MB
       # Note that future calls to this method may overwrite the buffer returned
       # by previous calls.
       def sample(count = nil)
-        sample_c(count)
+        return sample_c(count) if count.nil?
+
+        port_frame(count) { sample_main(count) }
       end
 
       # Oscillator implementation in C.
@@ -481,6 +488,9 @@ module MB
 
         count, freq, phase, width = get_upstream_inputs(count)
         return nil if freq.nil? || phase.nil? || (warped? && width.nil?)
+
+        @frame_phi = @phasor.state[0]
+        @frame_freq = freq
 
         build_buffer(count)
 
@@ -650,6 +660,19 @@ module MB
       end
 
       private
+
+      # The main output for GraphNode::Ports.
+      def sample_main(count)
+        sample_c(count)
+      end
+
+      # Port data from the phases of the frame just computed (the phasor's
+      # phase, without phase modulation; see Phasor.sync_pulses).
+      def compute_ports(count)
+        pulses, increments = Phasor.sync_pulses(@frame_phi, @frame_freq, @phasor.advance, count, @pulse_state)
+        store_port(:wraps, pulses)
+        store_port(:increment, increments)
+      end
 
       # [low, high] frequencies (Hz) for fading band-limiting in, or [0, 0]
       # for always on.

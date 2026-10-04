@@ -139,6 +139,27 @@ module MB
       # The phase warp width (see #pwm), or nil.
       attr_reader :width
 
+      # Sync pulses from this tone's phase (a GraphNode::Ports port; see
+      # Phasor.sync_pulses and #sync).
+      def wraps
+        oscillator.wraps
+      end
+
+      # This tone's phase increment per sample, in cycles (a port).
+      def increment
+        oscillator.increment
+      end
+
+      # The ports of this tone's oscillator in use (see GraphNode::Ports).
+      def ports
+        oscillator.ports
+      end
+
+      # Every port this tone has, with descriptions (see GraphNode::Ports).
+      def port_info
+        oscillator.port_info
+      end
+
       # Changes the waveform to a band-limited pulse that is high for +width+
       # (0 to 1, or a graph node) of each cycle: #square with #pwm.  See #pwm
       # for +dc+; #apulse is the naive (aliased) version.
