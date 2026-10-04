@@ -62,6 +62,27 @@ module MB
       def next_seed
         root_rng.rand(1 << 62)
       end
+
+      # Runs the block with the root generator restarted from +seed+, then
+      # puts the previous root generator back as it was (its draws so far
+      # kept), so everything random created in the block (e.g. Tone#rnd)
+      # depends only on +seed+ and the block's own order of draws.  Used by
+      # Synth to give every voice lane its own seed (synth seed + lane
+      # index).  Returns the block's value.
+      #
+      #     a = MB::Sound.with_seed(5) { 110.hz.saw.rnd }
+      #     b = MB::Sound.with_seed(5) { 110.hz.saw.rnd }   # same phase as a
+      def with_seed(seed)
+        old_seed = random_seed
+        old_rng = @root_rng
+        seed(seed)
+        yield
+      ensure
+        if old_rng
+          @root_seed = old_seed
+          @root_rng = old_rng
+        end
+      end
     end
   end
 end
