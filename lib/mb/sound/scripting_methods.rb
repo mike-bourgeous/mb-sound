@@ -24,9 +24,14 @@ module MB
       # down-mixed to it.  +live_channels+ sets only the live input's
       # default channel count (2 if neither is given), so files keep their
       # channels.
-      def effect_script(input_channels: nil, live_channels: nil, **params, &block)
+      #
+      # +profile+ (also for #synth_script and #song_script) is the sound card
+      # latency profile the script plays with by default (see
+      # DeviceOutput::PROFILES; e.g. :low for light patches);
+      # -L/--latency-profile and AUDIO_PROFILE override it.
+      def effect_script(input_channels: nil, live_channels: nil, profile: nil, **params, &block)
         raise ArgumentError, 'Pass a block that turns the input into a graph' unless block
-        runner(:effect, params, input_channels: input_channels, live_channels: live_channels).run_effect(&block)
+        runner(:effect, params, input_channels: input_channels, live_channels: live_channels, profile: profile).run_effect(&block)
       end
 
       # Runs a synthesizer script: the block gets the MIDI input name (a
@@ -38,9 +43,9 @@ module MB
       #     MB::Sound.synth_script { |input|
       #       MB::Sound.synth(input) { |midi| midi.hz.tone.ramp.at(1) * midi.env }
       #     }
-      def synth_script(**params, &block)
+      def synth_script(profile: nil, **params, &block)
         raise ArgumentError, 'Provide a block to accept a MIDI name and return a node graph' unless block
-        runner(:synth, params).run_synth(&block)
+        runner(:synth, params, profile: profile).run_synth(&block)
       end
 
       # Runs a song script: the block arranges the song on the current
@@ -51,9 +56,9 @@ module MB
       #
       # Example:
       #     MB::Sound.song_script(bars: 8) { |p| my_song }
-      def song_script(bars: nil, **params, &block)
+      def song_script(bars: nil, profile: nil, **params, &block)
         raise ArgumentError, 'Pass a block that arranges the song' unless block
-        runner(:song, params).run_song(bars: bars, &block)
+        runner(:song, params, profile: profile).run_song(bars: bars, &block)
       end
 
       # Returns true if +file+ (pass __FILE__) is the script being run, rather
