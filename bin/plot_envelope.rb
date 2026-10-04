@@ -5,14 +5,14 @@
 #
 # Times are in seconds; omitted values come from the preset (see
 # MB::Sound::EnvelopeMethods).  Without --gate the envelope is a one-shot
-# that holds the sustain level for --hold seconds.  --print lists the
+# that releases --hold seconds after it starts.  --print lists the
 # segment boundaries and levels instead of plotting.
 #
 # Examples:
 #     $0                                   # adsr defaults, :analog curves
 #     $0 --compare 0.05 0.3 0.4 0.5        # every curve preset
 #     $0 --curve 30 --db 80 0 1 0 1        # a 30 dB curve, plotted in dB
-#     $0 --curve 0,60,60 --gate 0.2 0.1 0.2 0.5 0.4
+#     $0 --curve 0,60,60 --gate 0.2 --lift 0.9 0.1 0.2 0.5 0.4
 #     $0 --preset filter_env --velocity 0.5 0.01 0.3 0 0.3
 #     $0 --old 0.05 0.3 0.4 0.5            # old ADSREnvelope (smoothstep) vs new
 #     $0 --print 0.01 0.02 0.5 0.03
@@ -44,7 +44,8 @@ MB::Sound.script(
   args: 0..4,
   preset: ['adsr', '-p', 'Envelope preset', String, MB::Sound::Envelope::PRESETS.keys.map(&:to_s)],
   curve: [nil, '-c', String, 'Curve: a preset (linear, analog, snappy, gentle, swell, dx), dB, or attack,decay,release dB'],
-  hold: [nil, Float, 'Seconds to hold the sustain level (one-shots; default attack + decay, at least 0.1)'],
+  hold: [nil, Float, 'Seconds from the start to the release (one-shots; default 2 * (attack + decay), at least 0.1)'],
+  lift: [nil, Float, 'Release velocity (0..1; 0.5 leaves the release time alone, 0 doubles it, 1 halves it)', 0.0..1.0],
   gate: [nil, '-g', Float, 'Hold a gate for this many seconds instead of a one-shot'],
   velocity: [1.0, '-v', Float, 'Note velocity (0..1)', 0.0..1.0],
   compare: [false, 'Plot every curve preset (CURVES) with the same times'],
@@ -62,6 +63,7 @@ MB::Sound.script(
   make = ->(curve) {
     opts = { velocity: p.velocity }
     opts[:hold] = p.hold if p.hold
+    opts[:lift] = p.lift if p.lift
     if p.gate
       opts[:gate] = 1.constant.until(p.gate)
     elsif p.velocity != 1
@@ -107,7 +109,7 @@ MB::Sound.script(
       sustain_level: sustain, release_time: envelope.release_time, sample_rate: envelope.sample_rate
     )
     old.trigger(1)
-    on = p.gate || (envelope.attack_time + envelope.decay_time + envelope.hold.to_f)
+    on = p.gate || envelope.hold.to_f
     a = old.sample((on * envelope.sample_rate).round).dup
     old.release
     b = old.sample(((envelope.release_time + 0.25) * envelope.sample_rate).round).dup

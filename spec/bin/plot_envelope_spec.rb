@@ -13,9 +13,9 @@ RSpec.describe('bin/plot_envelope.rb') do
     expect(text).to match(/^0 +0\.00000 +0\.000000  attack$/)
     expect(text).to match(/^480 +0\.01000 +1\.000000  decay$/)
     expect(text).to match(/^1440 +0\.03000 +0\.500000  sustain$/)
-    expect(text).to match(/^6240 +0\.13000 +0\.500000  release$/) # hold 0.1 s
-    expect(text).to match(/^7680 +0\.16000 +0\.000000  ended$/)
-    expect(text).to include('7681 samples, ended')
+    expect(text).to match(/^4800 +0\.10000 +0\.500000  release$/) # hold 0.1 s from the start
+    expect(text).to match(/^6240 +0\.13000 +0\.000000  ended$/)
+    expect(text).to include('6241 samples, ended')
   end
 
   it 'prints a gated filter envelope with velocity' do
