@@ -138,8 +138,11 @@ module MB
 
         # Returns a Stream reading +obj+: a Source, a Stream (returned as-is),
         # a Sequence::Clip (ClipSource), a MIDIFile, a MIDI filename
-        # (FileSource), or a live MIDI::Input (LiveSource).
+        # (FileSource), a live MIDI::Input (LiveSource), or anything with
+        # #to_midi_stream (e.g. MB::Sound::Notes, whose stream is used).
         def self.for(obj)
+          return obj.to_midi_stream if obj.respond_to?(:to_midi_stream)
+
           case obj
           when Stream then obj
           when Source then new(obj)

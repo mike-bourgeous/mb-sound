@@ -405,6 +405,22 @@ module MB
         "Notes (#{@stream})"
       end
 
+      # The MIDI::Stream this instance reads, for MIDI::Stream.for, so a
+      # Notes can be given wherever a MIDI source is taken (e.g.
+      # `Synth.new(midi) { |v| ... }`).
+      def to_midi_stream
+        @stream
+      end
+
+      # A polyphonic MB::Sound::Synth playing this instance's stream (see
+      # Synth.new for the options and the block), for console and script
+      # code that has a mono Notes (`midi`) and wants voices.
+      #
+      #     play midi.synth(voices: 6) { |v| v.hz.saw * v.amp_env }
+      def synth(**options, &block)
+        Synth.new(@stream, **options, &block)
+      end
+
       private
 
       # Returns the node cached under +key+, or makes one with the block and

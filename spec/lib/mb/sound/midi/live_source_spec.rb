@@ -251,6 +251,25 @@ RSpec.describe(MB::Sound::MIDI::LiveSource, :aggregate_failures) do
       newest = buffer - Rational(1800, 48000) + latency
       expect(events.map(&:time)).to eq([newest - Rational(32, 48000), newest])
     end
+
+    it 'follows a new output given with #output=, anchoring again at the next events' do
+      src = MB::Sound::MIDI::LiveSource.new(input, output: output)
+      read_buffer(src, 0)
+      input.push([0.0, on])
+      read_buffer(src, 1)
+      expect(src.latency).to eq(Rational(2400 + 128 + 512, 48000))
+
+      low = FakeClockOutput.new(queue_limit: 512, period: 128, queued: 256)
+      src.output = low
+      expect(src.output).to equal(low)
+      input.push([0.001, off])
+      events = (2..5).flat_map { |n| read_buffer(src, n) }
+
+      latency = Rational(512 + 128 + 512, 48000)
+      expect(src.latency).to eq(latency)
+      expect(events.select(&:note_off?).map(&:time)).to eq([2 * buffer - Rational(256, 48000) + latency])
+      expect(src.reanchors).to eq(0)
+    end
   end
 
   describe 'Source behavior' do

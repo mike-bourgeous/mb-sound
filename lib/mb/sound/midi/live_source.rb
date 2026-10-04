@@ -124,6 +124,15 @@ module MB
           @latency
         end
 
+        # Follows a new +output+'s clock from the next read (e.g. after the
+        # background session switched outputs; see
+        # PlaybackMethods#use_output).  A free-running input clock is
+        # anchored again at the next events.
+        def output=(output)
+          @output = output
+          @anchor = nil
+        end
+
         # True if :exact timing currently places JACK events by the output's
         # JACK frame clock (see the class comment).
         def frame_exact?
