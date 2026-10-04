@@ -39,9 +39,12 @@ module MB
     #   JACK_CLIENT_NAME=name          JACK client name (default: script name)
     #
     # JACK servers are never started; JACK is used when a server (jackd or
-    # PipeWire's JACK) is running.  New JACK ports are connected to the
-    # physical outputs once at startup, and later rewiring (qjackctl,
-    # qpwgraph, session managers) is left alone.
+    # PipeWire's JACK) is running, through the script's one shared JACK
+    # client (see MB::Sound::Jack): outputs are out_1, out_2, ... ports next
+    # to the script's inputs and MIDI ports, all on one JACK/PipeWire node.
+    # New ports are connected once (to the physical outputs, or to ports
+    # whose names contain OUTPUT_DEVICE; 'none' for no connections), and
+    # later rewiring (qjackctl, qpwgraph, session managers) is left alone.
     #
     # Example:
     #     out = MB::Sound::DeviceOutput.new(channels: 2)

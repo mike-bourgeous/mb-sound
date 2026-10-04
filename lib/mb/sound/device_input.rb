@@ -2,7 +2,10 @@ module MB
   module Sound
     # Records sound from a sound card through miniaudio (the fast_audio C
     # extension; see MB::Sound::FastAudio::Capture): CoreAudio on macOS
-    # (no JACK needed), and JACK, PulseAudio/PipeWire, or ALSA on Linux.
+    # (no JACK needed), and JACK, PulseAudio/PipeWire, or ALSA on Linux.  On
+    # JACK, inputs are in_1, in_2, ... ports on the script's one shared JACK
+    # client (see MB::Sound::Jack), connected once to the physical capture
+    # ports or to ports whose names contain INPUT_DEVICE ('none' for none).
     # The sound card's capture thread fills a queue in C, and #read waits
     # (without holding Ruby's GVL) until enough audio has arrived, so live
     # input paces itself by the sound card's clock.  If more than +:latency+
