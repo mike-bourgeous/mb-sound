@@ -663,6 +663,26 @@ RSpec.describe(MB::Sound::Notes) do
       expect(40.times.count { g.sample(800) }).to eq(35) # 30 buffers of clip, 5 of tail
     end
 
+    it 'ends with a MIDI file' do
+      v = MB::Sound::Notes.new('spec/test_data/c_major.mid')
+      g = v.gate
+      n = 0
+      n += 1 while g.sample(4800) && n < 1000
+      expect(g.ended?).to eq(true)
+      expect(n.to_f / 10).to be_within(0.6).of(v.stream.music_end)
+    end
+
+    it 'renders a whole voice through a Session to the end of a clip' do
+      v = MB::Sound::Notes.new(MB::Sound.seq(MB::Sound::C3, MB::Sound::E3, MB::Sound::G3).n8) # 0.75 s at 120 BPM
+      sig = v.hz.glide(30.ms).vibrato.saw.filter(:lowpass, cutoff: v.cutoff(600), quality: v.quality(2)) * v.amp_env(0.01, 0.2, 0.5, 0.3)
+      MB::Sound.render(tmp_path('voice.flac'), sig)
+      d = MB::Sound.read(tmp_path('voice.flac'))
+      expect(d[0].length / 48000.0).to be_between(1.0, 1.2) # notes plus the 0.3 s release
+      expect(d[0].abs.max).to be_between(0.1, 1)
+    ensure
+      MB::Sound.rewind
+    end
+
     it 'never ends looping clips' do
       g = clip_notes(clip.loop).gate
       100.times { expect(g.sample(800)).not_to eq(nil) }
