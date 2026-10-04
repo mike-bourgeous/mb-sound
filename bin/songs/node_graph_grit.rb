@@ -23,7 +23,7 @@ MB::Sound.song_script {
       ).filter(:lowpass, cutoff: 0.3.hz.lfo.at(80..6000), quality: 3) * (
         25.hz.square.at(1..0.5).filter(6000.hz.lowpass) *
         4.hz.drumramp.at(1..0.2).filter(5000.hz.lowpass) *
-        MB::Sound.adsr(10, 30, 1, 20).db(-30)
+        MB::Sound.adsr(10, 30, 1, 20, curve: :dx) # :dx = the old .db(-30)
       )
     ).multitap(0, 0.125, 0.125 / 8, 5.0 / 16)
       .each_slice(2).map(&:sum)

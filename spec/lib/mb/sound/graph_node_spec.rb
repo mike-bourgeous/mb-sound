@@ -376,26 +376,29 @@ RSpec.describe(MB::Sound::GraphNode, aggregate_failures: true) do
     it 'multiplies the node by an envelope' do
       node = 5.hz.adsr(0.5, 1, 0.25, 2)
       expect(node).to be_a(MB::Sound::GraphNode::Multiplier)
-      expect(node.graph.any?(MB::Sound::ADSREnvelope)).to eq(true)
+      expect(node.graph.any?(MB::Sound::Envelope)).to eq(true)
 
-      env = node.graph.select { |s| s.is_a?(MB::Sound::ADSREnvelope) }.first
+      env = node.graph.select { |s| s.is_a?(MB::Sound::Envelope) }.first
       expect(env.attack_time).to eq(0.5)
       expect(env.decay_time).to eq(1.0)
       expect(env.sustain_level).to eq(0.25)
       expect(env.release_time).to eq(2)
     end
 
-    it 'can create a logarithmic envelope' do
-      linear = 1.constant.adsr(0.5, 1, 0.25, 2)
-      log = 1.constant.adsr(0.5, 1, 0.25, 2, log: -30)
-      expect(log.sample(30)[-1]).to be < linear.sample(30)[-1]
+    it 'passes options such as curves to the envelope' do
+      analog = 1.constant.adsr(0.5, 1, 0.25, 2)
+      swell = 1.constant.adsr(0.5, 1, 0.25, 2, curve: -30)
+      expect(swell.sample(30)[-1]).to be < analog.sample(30)[-1]
     end
 
     it 'triggers the envelope' do
       node = 1.constant.at_rate(12345).adsr(0.00001, 0.00001, 1.0, 0.1)
-      expect(node.sample(100)[-90..]).to eq(Numo::SFloat.ones(90))
-      # TODO: change this from multi_sample to sample when ADSREnvelope can release mid-buffer
-      expect(node.multi_sample(500, 1000)[-1]).to eq(0)
+      expect(node.sample(100).to_a.uniq).to eq([1])
+      # Hold 0.1 s, release 0.1 s, then the end
+      data = node.sample(4000)
+      expect(data[2469 - 100]).to be > 0
+      expect(data[2470 - 100]).to eq(0)
+      expect(node.sample(100)).to eq(nil)
     end
 
     it 'copies the sample rate from the source node' do
@@ -410,7 +413,7 @@ RSpec.describe(MB::Sound::GraphNode, aggregate_failures: true) do
     end
 
     it 'can create a dynamic filter' do
-      graph = 500.hz.filter(:highpass, cutoff: MB::Sound.adsr(0.2, 0.0, 1.0, 0.75, auto_release: 0.5) * 1000 + 100, quality: MB::Sound.adsr(0.3, 0.3, 1.0, 1.0, auto_release: 0.7) * -5 + 6)
+      graph = 500.hz.filter(:highpass, cutoff: MB::Sound.adsr(0.2, 0.0, 1.0, 0.75, hold: 0.5) * 1000 + 100, quality: MB::Sound.adsr(0.3, 0.3, 1.0, 1.0, hold: 0.7) * -5 + 6)
 
       # Ensure the correct types were created and stored
       expect(graph).to be_a(MB::Sound::Filter::SampleWrapper)

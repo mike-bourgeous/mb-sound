@@ -24,18 +24,18 @@ module MB
     #
     # Examples (run in the bin/sound.rb environment):
     #     # FM organ bass
-    #     mod = F2.at(300) * adsr(0, 0.1, 0.0, 0.5, auto_release: false)
-    #     play F1.at(-6.db).fm(mod) * adsr(0, 0, 1, 0, auto_release: 0.25)
+    #     mod = F2.at(300) * adsr(0, 0.1, 0.0, 0.5, hold: false)
+    #     play F1.at(-6.db).fm(mod) * adsr(0, 0, 1, 0, hold: 0.25)
     #
     #     # FM classic synth bass
-    #     cenv = adsr(0, 0.005, 0.5, 2.5).db(30)
-    #     cenv2 = adsr(0, 0.01, 0.5, 2.5).db(60)
+    #     cenv = adsr(0, 0.005, 0.5, 2.5, curve: 30)
+    #     cenv2 = adsr(0, 0.01, 0.5, 2.5, curve: 60)
     #     c = cenv * C3.at(1).fm(cenv2 * C3.at(1)); nil
-    #     denv = adsr(0, 0.005, 0, 2).db(50)
+    #     denv = adsr(0, 0.005, 0, 2, curve: 50)
     #     d = denv * Tone.new(frequency: C3.frequency.constant * 0.9996 - 0.22).at(1); nil
-    #     eenv = adsr(0, 3, 0.0, 2).db
+    #     eenv = adsr(0, 3, 0.0, 2, curve: 80)
     #     e = eenv * C2.at(1).fm(c * 4810 + d * 500); nil
-    #     fenv = adsr(0, 2, 0, 2).db
+    #     fenv = adsr(0, 2, 0, 2, curve: 80)
     #     f = C2.at(-10.db).fm(e * 250) * fenv; nil
     #     play f
     #

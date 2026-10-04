@@ -56,7 +56,7 @@ module MB
         lfo = 0.3.hz.lfo.at(0.2..0.8)
         osc = 110.hz.ramp.at(0.3) + 220.hz.pulse(lfo).at(0.2) + 330.hz.triangle.skew(0.3).at(0.2) +
           55.hz.sine.fm(110.hz.at(40)).at(0.3) + 165.hz.aramp.at(0.1) + 82.hz.sine.pm(164.hz.at(2)).at(0.2)
-        env = osc * adsr(0.01, 0.1, 0.5, 0.2, auto_release: 1000)
+        env = osc * adsr(0.01, 0.1, 0.5, 0.2, hold: 1000)
         shaped = (env.softclip + env.clip(-0.5, 0.5) + env.abs * 0.1 + env.quantize(0.01)) * lfo
         # Clip-driven voices, as in songs
         notes = seq(Note.new(48), Note.new(55), nil, Note.new(60)).n16.loop
