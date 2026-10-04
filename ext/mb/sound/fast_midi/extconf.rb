@@ -29,6 +29,12 @@ have_library('pthread')
 # only the wrapper (fast_midi.c) is held to -Werror.
 $CXXFLAGS = "#{$CXXFLAGS} -std=c++11 -O2 -Wall -Wextra"
 
+# RtMidi's CoreMIDI send uses a variable-length array (a clang extension in
+# C++; harmless), which clang 18+ warns about.  Older compilers don't know
+# the flag, so add it only if it compiles.
+vla_flag = '-Wno-vla-cxx-extension'
+$CXXFLAGS << " #{vla_flag}" if try_compile('int main(void) { return 0; }', "-Werror #{vla_flag}")
+
 with_cflags("#{$CFLAGS} -O2 -ggdb3 -Wall -Wextra -Werror -Wno-unused-parameter #{ENV['EXTRACFLAGS']} -std=gnu11") do
   create_makefile('mb/sound/fast_midi')
 end
