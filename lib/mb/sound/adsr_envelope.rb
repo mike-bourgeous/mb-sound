@@ -31,7 +31,7 @@ module MB
     #     ################################
     #
     # Example:
-    #     # Plot the envelope (also see bin/plot_adsr.rb).
+    #     # Plot the envelope (also see bin/plot_envelope.rb --old).
     #     env = MB::Sound::ADSREnvelope.new(
     #       attack_time: 0.05,
     #       decay_time: 0.1,

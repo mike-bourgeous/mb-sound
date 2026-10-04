@@ -68,32 +68,36 @@ write('/tmp/ramp.flac', D3.ramp * adsr(0.2, 0.2, 0.1, 0.4), overwrite: true)
 play '/tmp/ramp.flac'
 
 # Some hi-hat rhythms
-play 1000.hz.sine.noise.at(-30.db).filter(7000.hz.highpass(quality: 10)).filter(12345.hz.lowpass(quality: 4)) * (1.25.hz.ramp.with_phase(Math::PI).at(0..-60).db + 2.5.hz.ramp.at(-10..-70).db)
-play 1000.hz.sine.noise.at(-30.db).filter(7000.hz.highpass(quality: 10)).filter(12345.hz.lowpass(quality: 4)) * (5.hz.ramp.with_phase(Math::PI).at(0..-60).db + 5.hz.ramp.at(-10..-70).db)
+# (ramps in dB, converted to gains with 10 ** (dB / 20))
+play 1000.hz.sine.noise.at(-30.db).filter(7000.hz.highpass(quality: 10)).filter(12345.hz.lowpass(quality: 4)) * (10 ** (1.25.hz.ramp.with_phase(Math::PI).at(0..-60) / 20) + 10 ** (2.5.hz.ramp.at(-10..-70) / 20))
+play 1000.hz.sine.noise.at(-30.db).filter(7000.hz.highpass(quality: 10)).filter(12345.hz.lowpass(quality: 4)) * (10 ** (5.hz.ramp.with_phase(Math::PI).at(0..-60) / 20) + 10 ** (5.hz.ramp.at(-10..-70) / 20))
 
 # Heavily distorted synth kick
 play (2.5.hz.ramp.at(1.85) ** 13).filter(10.hz.highpass).softclip(0.1, 0.6).filter(cutoff: 2.5.hz.ramp.at(1..0) ** 10 * 0.2.hz.sine.at(120..300) + 40, quality: 14).filter(40.hz.highpass).softclip
 
 # Thick bass
-play (((42.5.hz.sine + 85.hz.triangle + 42.5.hz.saw) * adsr(0.01, 0.1, 0.5, 0.1).db(-30)).filter(:lowpass, cutoff: adsr(0.01, 0.1, 0.5, 0.1).db(-30) * 1850 + 85, quality: 3) * 8.db).softclip(0.1, 1)
+play (((42.5.hz.sine + 85.hz.triangle + 42.5.hz.saw) * amp_env(0.01, 0.1, 0.15, 0.1, curve: :dx)).filter(:lowpass, cutoff: 85.constant * filter_env(0.01, 0.1, 0.5, 0.1, depth: 4.5), quality: 3) * 8.db).softclip(0.1, 1)
 
 # MIDI control
-play (((midi.hz.sine + midi.hz(2).triangle + midi.hz.saw) * midi.env(0.01, 0.1, 0.5, 0.1).db(-30)).filter(:lowpass, cutoff: midi.env(0.01, 0.1, 0.5, 0.1).db(-30) * 1850 + 85, quality: 3) * 8.db).softclip(0.1, 1)
+play (((midi.hz.sine + midi.hz.transpose(1.oct).triangle + midi.hz.saw) * midi.amp_env(0.01, 0.1, 0.15, 0.1, curve: :dx)).filter(:lowpass, cutoff: midi.cutoff(85, env: midi.filt_env(0.01, 0.1, 0.5, 0.1, depth: 4.5)), quality: 3) * 8.db).softclip(0.1, 1)
+
+# A polyphonic MIDI synth (one graph per voice; `v` is the voice's notes)
+play synth(voices: 6) { |v| v.hz.saw.filter(:lowpass, cutoff: v.cutoff(800), quality: v.quality(4)) * v.amp_env }
 
 # Oversampling (this tells all graph nodes before .oversample to run at 4x
 # their previous sample rate)
 play 123.hz.ramp.at(1)
-  .pm(61.5.hz.triangle.at(2).adsr(0.05, 1.5, 0.7, 1, log: 10))
-  .adsr(0.2, 0.5, 0.75, 1, log: 20)
-  .filter(:lowpass, cutoff: 100 + 3200 * adsr(0.2, 1.95, 0.05, 1).db(40), quality: 9)
+  .pm(61.5.hz.triangle.at(2).adsr(0.05, 1.5, 0.7, 1, curve: 10))
+  .adsr(0.2, 0.5, 0.75, 1, curve: 20)
+  .filter(:lowpass, cutoff: 100 + 3200 * adsr(0.2, 1.95, 0.05, 1, curve: 40), quality: 9)
   .softclip
   .oversample(4)
 
 # Quantization/decimation
 play 123.hz.ramp.at(1)
-  .pm(61.5.hz.triangle.at(2).adsr(0.05, 1.5, 0.7, 1, log: 10))
-  .adsr(0.2, 0.5, 0.75, 1, log: 20)
-  .filter(:lowpass, cutoff: 100 + 1600 * adsr(0.2, 1.95, 0.05, 1).db(40), quality: 0.7)
+  .pm(61.5.hz.triangle.at(2).adsr(0.05, 1.5, 0.7, 1, curve: 10))
+  .adsr(0.2, 0.5, 0.75, 1, curve: 20)
+  .filter(:lowpass, cutoff: 100 + 1600 * adsr(0.2, 1.95, 0.05, 1, curve: 40), quality: 0.7)
   .softclip
   .quantize(6.bits).oversample(0.125, mode: :libsamplerate_zoh)
 ```
@@ -108,9 +112,9 @@ synthesizer in `bin/synths/fm_synth.rb` and a flanger effect in
 ### Generating tones
 
 ```ruby
-# Oscillators play until stopped (Ctrl-C); an envelope with auto_release
-# ends a note after that many seconds
-def note(tone, seconds) = tone.adsr(0.005, 0.05, 0.8, 0.05, auto_release: seconds)
+# Oscillators play until stopped (Ctrl-C); an envelope without a gate
+# releases after hold: seconds and ends the note
+def note(tone, seconds) = tone.adsr(0.005, 0.05, 0.8, 0.05, hold: seconds)
 
 5.times do
   play note(100.hz.triangle.at(-6.db), 0.25)
@@ -166,11 +170,15 @@ play 123.hz.fm(369.hz.at(1000))
 The graph DSL makes it very easy to incorporate MIDI into sound generation:
 
 ```ruby
-play midi.hz.ramp.at(-6.db).filter(:lowpass, cutoff: (midi.frequency * midi.cc(1, range: 1.3..16)), quality: 4).oversample(16).softclip.oversample(2)
+play (midi.hz.ramp.at(-6.db) * midi.amp_env).filter(:lowpass, cutoff: (midi.frequency * midi.cc(1, range: 1.3..16)), quality: 4).oversample(16).softclip.oversample(2)
+
+# Polyphonic, with a voice per note
+play synth(voices: 6) { |v| v.hz.ramp.at(-6.db).filter(:lowpass, cutoff: v.cutoff(400), quality: v.quality(4)) * v.amp_env }
 ```
 
-See the `MidiDsl` class in `lib/mb/sound/graph_node/midi_dsl.rb` for more info
-about the MIDI DSL.
+`midi` is a `MB::Sound::Notes` (`lib/mb/sound/notes.rb`): notes and
+controllers as signals.  See `MB::Sound::Synth` (`lib/mb/sound/synth.rb`) for
+polyphonic synths, and the scripts in `bin/synths/` for more.
 
 ### Calculating wavelength and frequency
 

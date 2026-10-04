@@ -39,13 +39,13 @@ def benchmark_song
 
   d = (
     50.hz.triangle.at(-3.db).filter(150.hz.lowpass1p) *
-    4.hz.drumramp.lfo.at(0..-30).db.filter(50.hz.lowpass)
+    (10 ** (4.hz.drumramp.lfo.at(0..-30) / 20)).filter(50.hz.lowpass)
   ).softclip(0.005, 0.25) * 10.db * denv
 
   drumenv = MB::Sound::ADSREnvelope.new(attack_time: 10, decay_time: 150, sustain_level: 1, release_time: 20, sample_rate: 48000)
 
-  hat = 10000.hz.noise.filter(9000.hz.highpass).filter(15000.hz.lowpass) * 8.hz.drumramp.lfo.at(-4..-25).filter(100.hz.lowpass).db
-  kick = 50.hz.at(-3.db).fm(2.hz.drumramp.at(90.to_db..-60).db.filter(100.hz.lowpass)) * 2.hz.drumramp.at(0..-30).db.filter(100.hz.lowpass)
+  hat = 10000.hz.noise.filter(9000.hz.highpass).filter(15000.hz.lowpass) * 10 ** (8.hz.drumramp.lfo.at(-4..-25).filter(100.hz.lowpass) / 20)
+  kick = 50.hz.at(-3.db).fm((10 ** (2.hz.drumramp.at(90.to_db..-60) / 20)).filter(100.hz.lowpass)) * (10 ** (2.hz.drumramp.at(0..-30) / 20)).filter(100.hz.lowpass)
 
   drums = (hat + kick) * drumenv
 

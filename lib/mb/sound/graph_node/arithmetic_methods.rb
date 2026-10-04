@@ -112,29 +112,6 @@ module MB
             .named("log10(#{make_source_name(self)})")
         end
 
-        # Interprets incoming samples as a number of decibels, outputting the
-        # corresponding linear amplitude.  This treats ADSREnvelope specially,
-        # converting to an exponential envelope with a default range of -80dB
-        # (controllable with the +env_range+ parameter).
-        def db(env_range = nil)
-          if self.is_a?(MB::Sound::ADSREnvelope)
-            # TODO: Do this with polymorphism? (move to ADSREnvelope)
-            # TODO: This interface for converting an envelope to logarithmic doesn't feel quite right; it shouldn't be called db.
-            # TODO: Maybe create an exponential envelope?  Or allow shaping individual phases within the ADSREnvelope?
-            env_range ||= 80
-            env_range = env_range.abs
-            env_min = (-env_range).db
-            env_comp = 1.0 / (1.0 - env_min)
-            # TODO: Implement this in C if it's slow
-            (10 ** ((self * env_range - env_range) / 20) - env_min) * env_comp
-          else
-            raise ArgumentError, "Envelopes take curve: #{env_range.abs} (in dB) instead of .db(#{env_range})" if env_range && self.is_a?(MB::Sound::Envelope)
-            raise 'Do not specify envelope range if .db is not applied to an envelope' if env_range
-            10 ** (self / 20)
-          end
-        end
-        alias dB db
-
         # Wraps the numeric in a MB::Sound::GraphNode::Constant so that numeric values can
         # be listed first in signal graph arithmetic operations.
         def coerce(numeric)
