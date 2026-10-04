@@ -8,9 +8,9 @@ RSpec.describe('MB::Sound::FastAudio', :aggregate_failures) do
   # Opens a null-backend playback device, closed after the example.
   # +quality+ is a libsamplerate converter (2 = fastest sinc; -1 = run at the
   # device's rate instead of resampling).
-  def playback(in_channels: 2, out_channels: 2, queue: 4096, capture: 0, sample_rate: rate, device_rate: 0, quality: 2)
+  def playback(in_channels: 2, out_channels: 2, queue: 4096, capture: 0, sample_rate: rate, device_rate: 0, quality: 2, max_queue: 0)
     MB::Sound::FastAudio::Playback.new(
-      [:null], -1, 'mb-sound-spec', in_channels, out_channels, sample_rate, device_rate, 0, queue, capture, quality, false
+      [:null], -1, 'mb-sound-spec', in_channels, out_channels, sample_rate, device_rate, 0, queue, capture, quality, false, max_queue
     ).tap { |p|
       @playbacks << p
     }
@@ -77,6 +77,36 @@ RSpec.describe('MB::Sound::FastAudio', :aggregate_failures) do
       expect(pb.period).to be > 0
       expect(pb.periods).to be > 0
       expect(pb.closed?).to eq(false)
+    end
+
+    describe '#queue_limit=' do
+      it 'changes the queue limit between two periods and the maximum' do
+        pb = playback(queue: 1024, max_queue: 4096)
+        expect(pb.queue_limit).to eq(1024)
+        expect(pb.max_queue).to eq(4096)
+
+        expect(pb.queue_limit = 3000).to eq(3000)
+        expect(pb.queue_limit).to eq(3000)
+
+        pb.queue_limit = 100_000
+        expect(pb.queue_limit).to eq(4096)
+
+        pb.queue_limit = 1
+        expect(pb.queue_limit).to eq(2 * pb.period)
+      end
+
+      it 'lets writes queue up to the new limit' do
+        pb = playback(queue: 1024, max_queue: 8192)
+        pb.queue_limit = 6000
+        pb.write([Numo::SFloat.zeros(5000)] * 2)
+        expect(pb.stats[:queued]).to be > 4000
+      end
+
+      it 'cannot exceed the queue size without a maximum' do
+        pb = playback(queue: 1024)
+        pb.queue_limit = 4096
+        expect(pb.queue_limit).to eq(1024)
+      end
     end
 
     it 'queues at least two device periods, so the device does not starve' do
@@ -223,7 +253,7 @@ RSpec.describe('MB::Sound::FastAudio', :aggregate_failures) do
       expect { playback(out_channels: 0) }.to raise_error(ArgumentError, /Output channels/)
       expect { playback(queue: 1) }.to raise_error(ArgumentError, /Queue size/)
       expect {
-        MB::Sound::FastAudio::Playback.new([:null], 5, 'x', 2, 2, rate, 0, 0, 4096, 0, 2, false)
+        MB::Sound::FastAudio::Playback.new([:null], 5, 'x', 2, 2, rate, 0, 0, 4096, 0, 2, false, 0)
       }.to raise_error(MB::Sound::FastAudio::Error, /device 5 does not exist/)
     end
 

@@ -226,6 +226,7 @@ struct playback {
 	float *data;
 	size_t capacity; // frames, a power of two
 	size_t queue_limit; // most frames the writer queues (sets the latency)
+	size_t max_queue; // the largest #queue_limit= allowed (sizes the ring)
 	int in_channels; // channels written from Ruby (1 is fanned out)
 	int out_channels; // channels sent to miniaudio
 	_Atomic size_t write_pos;
@@ -530,8 +531,9 @@ static VALUE playback_open_body(VALUE arg)
 		p->src_ratio = (double)device_rate / a->sample_rate;
 		p->input_rate = a->sample_rate;
 
-		// The queue limit was given at the writer's rate
+		// The queue limits were given at the writer's rate
 		p->queue_limit = (size_t)ceil(p->queue_limit * p->src_ratio);
+		p->max_queue = (size_t)ceil(p->max_queue * p->src_ratio);
 	}
 
 	// The queue must hold at least two device periods, or the device runs
@@ -541,9 +543,12 @@ static VALUE playback_open_body(VALUE arg)
 	if (p->queue_limit < min_queue) {
 		p->queue_limit = min_queue;
 	}
+	if (p->max_queue < p->queue_limit) {
+		p->max_queue = p->queue_limit;
+	}
 
 	size_t capacity = 16;
-	while (capacity < p->queue_limit) {
+	while (capacity < p->max_queue) {
 		capacity <<= 1;
 	}
 
@@ -574,7 +579,7 @@ static VALUE playback_open_rescue(VALUE arg, VALUE exception)
  * call-seq:
  *   Playback.new(backends, device_index, client_name, in_channels, out_channels,
  *                sample_rate, device_rate, period, queue_frames, capture_frames,
- *                resample_quality, allow_rate_change)
+ *                resample_quality, allow_rate_change, max_queue_frames)
  *
  * Opens and starts a playback device.  +backends+ is an Array of backend
  * Symbols in order of preference, or nil.  +device_index+ is an index into
@@ -593,13 +598,16 @@ static VALUE playback_open_rescue(VALUE arg, VALUE exception)
  *
  * +period+ is the device period in frames (0 for miniaudio's low-latency
  * default).  +queue_frames+ (at +sample_rate+) is the most audio #write
- * queues ahead of the device, which sets the output latency.
+ * queues ahead of the device, which sets the output latency, and
+ * +max_queue_frames+ (also at +sample_rate+; 0 for +queue_frames+) the most
+ * #queue_limit= may raise it to later (the ring is sized for it).
  * +capture_frames+ records that many played frames for #captured (0 for
  * none; for specs).
  */
 static VALUE playback_initialize(VALUE self, VALUE backends, VALUE device_index, VALUE client_name,
 		VALUE in_channels, VALUE out_channels, VALUE sample_rate, VALUE device_rate, VALUE period,
-		VALUE queue_frames, VALUE capture_frames, VALUE resample_quality, VALUE allow_rate_change)
+		VALUE queue_frames, VALUE capture_frames, VALUE resample_quality, VALUE allow_rate_change,
+		VALUE max_queue_frames)
 {
 	struct playback *p;
 	TypedData_Get_Struct(self, struct playback, &playback_type, p);
@@ -619,6 +627,11 @@ static VALUE playback_initialize(VALUE self, VALUE backends, VALUE device_index,
 	long queue = NUM2LONG(queue_frames);
 	if (queue < 16 || queue > (1L << 24)) {
 		rb_raise(rb_eArgError, "Queue size must be 16..%ld frames (got %ld)", 1L << 24, queue);
+	}
+
+	long max_queue = NUM2LONG(max_queue_frames);
+	if (max_queue < 0 || max_queue > (1L << 24)) {
+		rb_raise(rb_eArgError, "Maximum queue size must be 0..%ld frames (got %ld)", 1L << 24, max_queue);
 	}
 
 	long capture = NUM2LONG(capture_frames);
@@ -646,6 +659,7 @@ static VALUE playback_initialize(VALUE self, VALUE backends, VALUE device_index,
 	p->in_channels = in_ch;
 	p->out_channels = out_ch;
 	p->queue_limit = queue;
+	p->max_queue = max_queue;
 	p->starving = 1; // silence before the first write isn't an underrun
 
 	if (capture > 0) {
@@ -977,6 +991,40 @@ static VALUE playback_queue_limit(VALUE self)
 	return SIZET2NUM(get_playback(self)->queue_limit);
 }
 
+/* The largest queue limit #queue_limit= accepts (in device frames). */
+static VALUE playback_max_queue(VALUE self)
+{
+	return SIZET2NUM(get_playback(self)->max_queue);
+}
+
+/*
+ * call-seq:
+ *   playback.queue_limit = frames
+ *
+ * Changes how many frames (at the device's rate) #write queues ahead of
+ * the device, from two device periods up to #max_queue (e.g. to add
+ * latency after underruns).  Call from the writing thread.
+ */
+static VALUE playback_set_queue_limit(VALUE self, VALUE frames)
+{
+	struct playback *p = get_playback(self);
+	size_t n = NUM2SIZET(frames);
+	size_t min = 2 * (size_t)open_device(self)->playback.internalPeriodSizeInFrames;
+
+	if (n < min) {
+		n = min;
+	}
+	if (n > p->max_queue) {
+		n = p->max_queue;
+	}
+
+	pthread_mutex_lock(&p->lock);
+	p->queue_limit = n;
+	pthread_mutex_unlock(&p->lock);
+
+	return SIZET2NUM(n);
+}
+
 /*
  * call-seq:
  *   playback.stats -> { queued:, frames_written:, frames_played:, underruns: }
@@ -1034,7 +1082,9 @@ void Init_fast_audio(void)
 
 	VALUE playback = rb_define_class_under(fast_audio, "Playback", rb_cObject);
 	rb_define_alloc_func(playback, playback_alloc);
-	rb_define_method(playback, "initialize", playback_initialize, 12);
+	rb_define_method(playback, "initialize", playback_initialize, 13);
+	rb_define_method(playback, "max_queue", playback_max_queue, 0);
+	rb_define_method(playback, "queue_limit=", playback_set_queue_limit, 1);
 	rb_define_method(playback, "write", playback_write, 1);
 	rb_define_method(playback, "close", playback_close, 0);
 	rb_define_method(playback, "closed?", playback_closed, 0);
