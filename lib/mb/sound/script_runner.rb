@@ -529,7 +529,7 @@ module MB
           end
           puts "Rendered #{seconds.round(1)} seconds to #{@options[:output]}"
         else
-          MB::Sound.warm_up # before the first write to the output (see WarmUpMethods)
+          MB::Sound.warm_up(midi: @kind == :synth) # before the first write to the output (see WarmUpMethods)
           MB::Sound.bg(:script, graph, fade: 0)
           yield Session.current if block_given?
           live

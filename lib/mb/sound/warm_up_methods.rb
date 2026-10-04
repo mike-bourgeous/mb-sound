@@ -12,15 +12,43 @@ module MB
     # compiles per method, not per object, so this warms every graph that
     # uses them.  Renders don't need it.
     module WarmUpMethods
+      # A fake MIDI input for #warm_up: each MIDI::Manager#update gets one
+      # batch of events (a note on or off, and a mod wheel move), in the
+      # format MIDI::Input#read returns.
+      class WarmUpMIDI
+        NOTES = [40, 47, 52, 45].freeze
+
+        def initialize
+          @reads = 0
+        end
+
+        def read(blocking: false)
+          @reads += 1
+          return [[]] if @reads.odd? # ends Manager#update's read loop
+
+          step = @reads / 2
+          note = NOTES[(step / 2) % NOTES.length]
+          status = step.even? ? 0x90 : 0x80
+          [[[0.0, [status, note, step.even? ? 100 : 0].pack('C*')], [0.0, [0xb0, 1, step % 128].pack('C*')]]]
+        end
+
+        def close
+        end
+      end
+
       # Runs a throwaway graph of common node types (band-limited and naive
       # oscillators, FM, pwm, arithmetic, Tees, filters, delay, envelopes,
       # shapers, procs, clip-driven voices) for +calls+ buffers of +buffer+
-      # samples, so YJIT compiles their methods before live playback.  Does nothing (returns
-      # nil) without YJIT; otherwise returns the time taken in seconds.
+      # samples, so YJIT compiles their methods before live playback.  With
+      # +midi: true+ (synth scripts), MIDI synth voices too (VoicePool and
+      # MidiDsl nodes, as in bin/synths/fm_bass.rb; about 0.5 s more).  Does
+      # nothing (returns nil) without YJIT; otherwise returns the time taken
+      # in seconds.
       #
       # Example (bin/sound.rb):
       #     warm_up
-      def warm_up(calls: 200, buffer: 128)
+      #     warm_up(midi: true)
+      def warm_up(calls: 200, buffer: 128, midi: false)
         return nil unless defined?(RubyVM::YJIT) && RubyVM::YJIT.enabled?
 
         t0 = Process.clock_gettime(Process::CLOCK_MONOTONIC)
@@ -41,7 +69,28 @@ module MB
 
         calls.times { graph.sample(buffer) }
 
+        warm_up_midi(calls: [calls, 40].min, buffer: buffer) if midi
+
         Process.clock_gettime(Process::CLOCK_MONOTONIC) - t0
+      end
+
+      private
+
+      # MIDI synth voices (VoicePool, MidiDsl nodes), as in
+      # bin/synths/fm_bass.rb, fed by a fake MIDI input that plays notes and
+      # moves the mod wheel.  Voices are slow to run, and YJIT compiles a
+      # method after about 30 calls, so they get fewer buffers.
+      def warm_up_midi(calls:, buffer:)
+        manager = MIDI::Manager.new(input: WarmUpMIDI.new, update_rate: 48000.0 / buffer)
+        voices = synth(manager, osc_count: 2, parameter_map: false) { |midi|
+          base = midi.number.smooth(0.1).freq
+          mod = midi.cc(1, range: 1.0..2.0)
+          (base.tone.complex_sine.at(1).pm(mod * base.tone.at(1)) * midi.env(0, 0.2, 0.5, 0.1)).real * 0.1
+        }
+
+        calls.times { voices.sample(buffer) }
+      ensure
+        manager&.close
       end
     end
   end

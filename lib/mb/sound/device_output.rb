@@ -153,6 +153,10 @@ module MB
       # libsamplerate converters for +:resample+ (false or :off for none).
       RESAMPLE_QUALITIES = { best: 0, medium: 1, fastest: 2, zoh: 3, linear: 4, off: -1 }.freeze
 
+      # Seconds without dropouts before an adaptive output's grown queue
+      # shrinks back by a third (see +:adaptive+).
+      SHRINK_AFTER = 10.0
+
       attr_reader :channels, :sample_rate, :device_rate, :buffer_size, :backend, :device_name, :device_channels, :profile
 
       # Opens and starts the sound card.  +:channels+ is how many channels
@@ -176,7 +180,10 @@ module MB
       #
       # With +:adaptive+ (the default), the queue grows by half after each
       # dropout while audio is being written, up to the :safe profile's
-      # queue, with a note on stderr; the write size and period stay.
+      # queue, with a note on stderr; the write size and period stay.  After
+      # SHRINK_AFTER seconds without dropouts (e.g. after stalls while YJIT
+      # compiles at startup), it shrinks back by a third at a time, down to
+      # where it started (see also #reset_queue).
       def initialize(
         channels: 2, sample_rate: 48000, device: nil, profile: nil, buffer_size: nil, latency: nil, period: nil,
         backends: nil, device_rate: nil, resample: :fastest, set_device_rate: false, adaptive: true, capture: 0
@@ -221,6 +228,8 @@ module MB
         )
         @underruns_seen = 0
         @last_write = nil
+        @base_queue = @playback.queue_limit
+        @last_change = MB::U.clock_now
 
         @sample_rate = @playback.sample_rate.to_f
         @device_rate = @playback.device_rate.to_f
@@ -280,6 +289,14 @@ module MB
       # +:adaptive+).
       def max_queue
         @playback.max_queue
+      end
+
+      # Puts an adaptive output's queue back where it started (it also
+      # shrinks back on its own after SHRINK_AFTER seconds without dropouts).
+      def reset_queue
+        @playback.queue_limit = @base_queue
+        @last_change = MB::U.clock_now
+        nil
       end
 
       # The sound card's period (frames per callback).
@@ -350,17 +367,28 @@ module MB
         now = MB::U.clock_now
         active = @last_write && now - @last_write < latency + 0.1
 
+        limit = @playback.queue_limit
         if underruns > @underruns_seen && active
-          limit = @playback.queue_limit
           @playback.queue_limit = (limit * 1.5).ceil # clamped to max_queue
           grown = @playback.queue_limit
           if grown > limit
-            warn "Audio dropout: raising the output queue to #{(grown * 1000.0 / @device_rate).round} ms"
+            warn "Audio dropout: raising the output queue to #{ms(grown)} ms"
           end
+          @last_change = now
+        elsif limit > @base_queue && now - @last_change >= SHRINK_AFTER
+          # No dropouts for a while (e.g. after startup stalls): shrink back
+          # by a third at a time, down to where the queue started
+          @playback.queue_limit = [(limit / 1.5).floor, @base_queue].max
+          warn "No audio dropouts for #{SHRINK_AFTER.round} s: lowering the output queue to #{ms(@playback.queue_limit)} ms"
+          @last_change = now
         end
 
         @underruns_seen = underruns
         @last_write = now
+      end
+
+      def ms(frames)
+        (frames * 1000.0 / @device_rate).round
       end
     end
   end

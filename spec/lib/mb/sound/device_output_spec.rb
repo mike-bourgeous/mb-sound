@@ -77,6 +77,32 @@ RSpec.describe(MB::Sound::DeviceOutput, :aggregate_failures) do
       expect { drop_out(o) }.not_to output.to_stderr
     end
 
+    it 'shrinks back by a third after a while without dropouts, down to where it started' do
+      stub_const('MB::Sound::DeviceOutput::SHRINK_AFTER', 0.1)
+      o = device_output(profile: :low)
+      expect { 2.times { drop_out(o) } }.to output.to_stderr
+      expect(o.queue_limit).to eq(1152)
+
+      notes = []
+      allow(o).to receive(:warn) { |msg| notes << msg }
+      deadline = MB::U.clock_now + 0.6
+      o.write(block) while MB::U.clock_now < deadline
+
+      expect(o.queue_limit).to eq(512)
+      expect(notes).to eq([
+        'No audio dropouts for 0 s: lowering the output queue to 16 ms',
+        'No audio dropouts for 0 s: lowering the output queue to 11 ms',
+      ])
+    end
+
+    it 'puts the queue back with #reset_queue' do
+      o = device_output(profile: :low)
+      expect { drop_out(o) }.to output.to_stderr
+      expect(o.queue_limit).to eq(768)
+      o.reset_queue
+      expect(o.queue_limit).to eq(512)
+    end
+
     it 'can be turned off' do
       o = device_output(profile: :low, adaptive: false)
       expect(o.adaptive?).to eq(false)
