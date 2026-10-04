@@ -12,24 +12,13 @@ module MB
     # compiles per method, not per object, so this warms every graph that
     # uses them.  Renders don't need it.
     module WarmUpMethods
-      # A fake MIDI input for #warm_up: each MIDI::Manager#update gets one
-      # batch of events (a note on or off, and a mod wheel move), in the
-      # format MIDI::Input#read returns.
+      # A fake MIDI input for #warm_up(midi: true), read through a
+      # MIDI::LiveSource.
       class WarmUpMIDI
         NOTES = [40, 47, 52, 45].freeze
 
         def initialize
           @reads = 0
-        end
-
-        def read(blocking: false)
-          @reads += 1
-          return [[]] if @reads.odd? # ends Manager#update's read loop
-
-          step = @reads / 2
-          note = NOTES[(step / 2) % NOTES.length]
-          status = step.even? ? 0x90 : 0x80
-          [[[0.0, [status, note, step.even? ? 100 : 0].pack('C*')], [0.0, [0xb0, 1, step % 128].pack('C*')]]]
         end
 
         # For MIDI::LiveSource (RtMidi-style deltas in seconds): a note on or
@@ -60,10 +49,10 @@ module MB
       # oscillators, FM, pwm, arithmetic, Tees, filters, delay, envelopes,
       # shapers, procs, clip-driven voices) for +calls+ buffers of +buffer+
       # samples, so YJIT compiles their methods before live playback.  With
-      # +midi: true+ (synth scripts), MIDI synth voices too: the old ones
-      # (VoicePool and MidiDsl nodes, as in bin/synths/fm_bass.rb) and the
-      # new ones (a MIDI::LiveSource read through a Synth of Notes voices
-      # with envelopes, cutoff, vibrato, and a mono Notes voice).  Does
+      # +midi: true+ (synth scripts), MIDI synth voices too: a
+      # MIDI::LiveSource read through a Synth of Notes voices (envelopes,
+      # cutoff, vibrato, glide, and an FM pair as in bin/synths/fm_bass.rb)
+      # and a mono Notes voice.  Does
       # nothing (returns nil) without YJIT; otherwise returns the time taken
       # in seconds.
       #
@@ -91,41 +80,25 @@ module MB
 
         calls.times { graph.sample(buffer) }
 
-        if midi
-          warm_up_midi(calls: [calls, 40].min, buffer: buffer)
-          warm_up_notes(calls: [calls, 60].min, buffer: buffer)
-        end
+        warm_up_notes(calls: [calls, 60].min, buffer: buffer) if midi
 
         Process.clock_gettime(Process::CLOCK_MONOTONIC) - t0
       end
 
       private
 
-      # MIDI synth voices (VoicePool, MidiDsl nodes), as in
-      # bin/synths/fm_bass.rb, fed by a fake MIDI input that plays notes and
-      # moves the mod wheel.  Voices are slow to run, and YJIT compiles a
-      # method after about 30 calls, so they get fewer buffers.
-      def warm_up_midi(calls:, buffer:)
-        manager = MIDI::Manager.new(input: WarmUpMIDI.new, update_rate: 48000.0 / buffer)
-        voices = synth(manager, osc_count: 2, parameter_map: false) { |midi|
-          base = midi.number.smooth(0.1).freq
-          mod = midi.cc(1, range: 1.0..2.0)
-          (base.tone.complex_sine.at(1).pm(mod * base.tone.at(1)) * midi.env(0, 0.2, 0.5, 0.1)).real * 0.1
-        }
-
-        calls.times { voices.sample(buffer) }
-      ensure
-        manager&.close
-      end
-
-      # The new MIDI path: a LiveSource on a fake input (live MIDI timing),
-      # a Synth whose Notes voices use the common helpers (key-synced
-      # tones, envelopes with GM scaling, cutoff and quality, vibrato from
-      # the mod wheel), and a mono Notes voice on the same stream.
+      # The MIDI path: a LiveSource on a fake input (live MIDI timing), a
+      # Synth whose Notes voices use the common helpers (key-synced tones,
+      # envelopes with GM scaling, cutoff and quality, vibrato from the mod
+      # wheel, glide, and FM operators as in the FM synth scripts), and a
+      # mono Notes voice on the same stream.
       def warm_up_notes(calls:, buffer:)
         stream = MIDI::Stream.new(MIDI::LiveSource.new(WarmUpMIDI.new))
         synth = Synth.new(stream, voices: 2, spares: 1, seed: 1) { |v|
-          v.hz.vibrato.saw.filter(:lowpass, cutoff: v.cutoff(600), quality: v.quality(2)) * v.amp_env(0.005, 0.1, 0.6, 0.05)
+          pitch = v.hz.glide(50.ms)
+          op = pitch.transpose(1.oct).tone.complex_sine.at(1) * v.fm_env(0, 0.2, 0, 0.1)
+          fm = (pitch.tone.complex_sine.at(1).pm(op * v.mod) * v.amp_env(0, 0.3, 0.5, 0.1)).real * 0.1
+          v.hz.vibrato.saw.filter(:lowpass, cutoff: v.cutoff(600), quality: v.quality(2)) * v.amp_env(0.005, 0.1, 0.6, 0.05) + fm
         }
         mono = Notes.new(stream)
         graph = synth + mono.hz.square.at(0.1) * mono.env(0.01, 0.1, 0.5, 0.05) * mono.mod

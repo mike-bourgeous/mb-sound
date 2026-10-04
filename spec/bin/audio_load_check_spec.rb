@@ -11,6 +11,6 @@ RSpec.describe('bin/audio_load_check.rb') do
     expect(text).to match(/^safe +write  800  period  480  queue  4080 \( 85\.0 ms\)  latency .* load mean +\d+% .* spikes +\d+ \(GC \d+ of \d+\)  peak +-\d+\.\d dB  underruns \d+/)
     expect(text).to match(%r{^800/256/200 +write  800  period  256  queue  9600 \(200\.0 ms\)})
     expect(text).not_to include('silent') # each setting gets its own MIDI file and reader
-    expect(text).not_to include('parammap') # MB::Sound.synth(parameter_map: false)
+    expect(text).not_to include('parammap') # no old ACID XML parameter map
   end
 end

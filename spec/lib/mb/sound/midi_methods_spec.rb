@@ -127,26 +127,49 @@ RSpec.describe(MB::Sound::MidiMethods, :aggregate_failures) do
     end
   end
 
-  describe 'old MIDI APIs given a Notes (old synth scripts)' do
-    it 'reads the MIDI file of a file Notes' do
+  describe '#synth' do
+    it 'builds a Synth from a Notes, a filename, a clip, or a stream' do
       notes = MB::Sound::Notes.new('spec/test_data/c2_sustain.mid')
-      manager = MB::Sound.midi_manager(notes)
-      expect(manager.midi_in).to be_a(MB::Sound::MIDI::MIDIFile)
-      expect(manager.midi_in.filename).to eq('spec/test_data/c2_sustain.mid')
-      expect(MB::Sound.midi_file(notes)).to be_a(MB::Sound::GraphNode::MidiDsl)
+      [notes, 'spec/test_data/c2_sustain.mid', MB::Sound.seq(MB::Sound::C3).n8, notes.stream].each do |source|
+        s = MB::Sound.synth(source, voices: 2, spares: 1) { |v| v.hz.saw * v.amp_env }
+        expect(s).to be_a(MB::Sound::Synth)
+        expect(s.voices).to eq(2)
+        expect(s.lanes.length).to eq(3)
+      end
     end
 
-    it 'shares the MIDI::Input of a live Notes' do
+    it 'has 8 voices by default and passes options to Synth.new' do
+      s = MB::Sound.synth('spec/test_data/c_major.mid', seed: 5, controls: [:volume]) { |v, i| v.hz * v.env }
+      expect(s.voices).to eq(8)
+      expect(s.seed).to eq(5)
+      expect(s.controls).to eq([:volume])
+
+      mono = MB::Sound.synth('spec/test_data/c_major.mid', voices: 1) { |v| v.hz * v.env }
+      expect(mono).to be_mono
+    end
+
+    it 'plays a MIDI file to the end' do
+      s = MB::Sound.synth('spec/test_data/c2_sustain.mid', voices: 2, tail: 0) { |v| v.hz.saw * v.amp_env(0.001, 0.1, 0.5, 0.05) }
+      peak = 0
+      200.times do
+        buf = s.sample(4800)
+        break if buf.nil?
+        peak = [peak, buf.abs.max].max
+      end
+      expect(peak).to be > 0.1
+      expect(s.ended?).to eq(true)
+    end
+
+    it 'reads live MIDI (the console midi) without a source' do
       ENV['OUTPUT_TYPE'] = 'null'
       allow(MB::Sound::MIDI::Input).to receive(:new).and_return(fake_input)
       notes = MB::Sound.midi
-      manager = MB::Sound.midi_manager(notes)
-      expect(manager.midi_in).to equal(fake_input)
-      expect(MB::Sound.midi_manager(notes.stream)).to equal(manager)
-      expect(MB::Sound.midi_file(notes).manager).to equal(manager)
+      expect(MB::Sound::Synth).to receive(:new).with(notes, voices: 2).and_call_original
+      expect(MB::Sound.synth(voices: 2) { |v| v.hz.saw * v.amp_env }).to be_a(MB::Sound::Synth)
+    end
 
-      pool = MB::Sound.synth(notes, osc_count: 2, parameter_map: false) { |m| m.hz * m.env }
-      expect(pool).to be_a(MB::Sound::MIDI::VoicePool)
+    it 'requires a block' do
+      expect { MB::Sound.synth('spec/test_data/c2_sustain.mid') }.to raise_error(ArgumentError, /block/)
     end
   end
 

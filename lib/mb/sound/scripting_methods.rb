@@ -48,9 +48,6 @@ module MB
       #       midi.synth(voices: 6) { |v| v.hz.saw.filter(:lowpass, cutoff: v.cutoff(p.cutoff)) * v.amp_env }
       #     }
       #     MB::Sound.synth_script { |midi| midi.hz.square * midi.amp_env }   # mono
-      #
-      # Old scripts pass the Notes to MB::Sound.synth, #midi_manager, or
-      # #midi_file, which read the same MIDI (see MidiMethods#midi_manager).
       def synth_script(profile: nil, **params, &block)
         raise ArgumentError, 'Provide a block that turns the MIDI input into a node graph' unless block
         runner(:synth, params, profile: profile).run_synth(&block)

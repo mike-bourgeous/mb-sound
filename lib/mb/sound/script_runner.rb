@@ -240,8 +240,7 @@ module MB
       # (a MB::Sound::Notes; see below) and the parameters, then plays or
       # renders it.  MIDI files ring out, so after the last event, the synth
       # keeps playing until its output has been quiet for
-      # Session::TAIL_QUIET_SECONDS (see Synth#ended?, Notes#ended?, and the
-      # old MIDI::MIDIFile#ended?).
+      # Session::TAIL_QUIET_SECONDS (see Synth#ended? and Notes#ended?).
       #
       # The MIDI comes from a MIDI file (a non-audio argument or --input), or
       # from live input (a port given the same way, connected by part of its
@@ -253,12 +252,10 @@ module MB
       #     synth_script { |midi| midi.synth(voices: 6) { |v| v.hz.saw * v.amp_env } }
       #     synth_script { |midi| midi.hz.saw * midi.amp_env }   # mono
       #
-      # Old scripts pass it to MB::Sound.synth, #midi_manager, or #midi_file,
-      # which read the same file or live input (see MidiMethods#midi_manager).
+      # MB::Sound.synth(midi) { |v| ... } is the same as midi.synth.
       def run_synth(&block)
         notes = synth_midi
         @params.midi_source = -> { notes }
-        MB::Sound.parameter_maps = !@options[:quiet]
         graph = to_graph(block.arity == 1 ? block.call(notes) : block.call(notes, @params))
         announce(graph)
         play_or_render(graph) do |session|
@@ -650,7 +647,7 @@ module MB
 
       # Returns the nodes in +graph+ whose sources can end while the graph
       # keeps sounding (they respond to #ended?): GraphNode::Ringdown for
-      # file inputs, and MIDI::VoicePool and MIDI DSL nodes for MIDI files.
+      # file inputs, and Synths and Notes nodes for MIDI files.
       #
       # A Synth stands for everything inside it (its #ended? waits for the
       # source and for every voice lane to go idle), and Envelopes with a
