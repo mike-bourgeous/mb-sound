@@ -44,8 +44,8 @@ module MB
       # Polyphonic glide (+:glide_mode+), for synths with portamento:
       # - :last (the default) - every free or released lane gets a :glide
       #   event (see Event) with each new note, so whichever lane plays the
-      #   next note glides from the last note played, as on most polysynths
-      #   and the old VoicePool.
+      #   next note glides from the last note played, as on most
+      #   polysynths.
       # - :voice - no extra events: each lane glides from its own previous
       #   note (classic analog polysynths).
       # - nil (or :off) - no :glide events either; for synths without

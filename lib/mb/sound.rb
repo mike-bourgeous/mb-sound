@@ -129,7 +129,6 @@ require_relative 'sound/graph_node'
 require_relative 'sound/adsr_envelope'
 require_relative 'sound/envelope'
 require_relative 'sound/graph_node_input'
-require_relative 'sound/graph_node/midi_dsl'
 
 require_relative 'sound/midi'
 require_relative 'sound/timeline_interpolator'

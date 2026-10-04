@@ -3,27 +3,25 @@ module MB
     # Methods included in MB::Sound for working with MIDI files, MIDI-driven
     # synthesizers, etc.
     module MidiMethods
-      # Calls a block with a MIDI file to build a node graph, or returns a MIDI
-      # DSL based on a MIDI file.
+      # Returns a MB::Sound::Notes playing the MIDI file +filename+ (a
+      # MIDI::FileSource, looping with +:loop+), or the block's result if a
+      # block is given: a mono voice (`midi.hz.saw * midi.amp_env`) and a
+      # source for synths (`midi.synth(voices: 4) { |v| ... }`), like #midi
+      # for live input.
       #
       # Example (bin/sound.rb):
       #     graph = midi_file('spec/test_data/all_notes.mid') { |midi|
-      #       midi.tone.ramp.filter(:lowpass, cutoff: midi.frequency + 100) * midi.gate
+      #       midi.hz.ramp.filter(:lowpass, cutoff: midi.freq + 100) * midi.gate
       #     }
       #     play graph
-      def midi_file(filename, speed: 1.0, clock: nil)
-        clock ||= MB::Sound::GraphNode::MidiDsl::DslClock.new
-        mfile = MB::Sound::MIDI::MIDIFile.new(filename, speed: speed, clock: clock)
-        mgr = MB::Sound::MIDI::Manager.new(input: mfile)
-        dsl = MB::Sound::GraphNode::MidiDsl.new(manager: mgr)
-
-        clock.dsl = dsl if clock.is_a?(MB::Sound::GraphNode::MidiDsl::DslClock)
-
-        if block_given?
-          yield dsl
-        else
-          dsl
+      #     play midi_file('spec/test_data/c_major.mid').synth { |v| v.hz.square * v.amp_env }
+      def midi_file(filename, loop: false)
+        unless filename.to_s.downcase.end_with?('.mid', '.midi')
+          raise ArgumentError, "#{filename} is not a MIDI file (expected .mid or .midi)"
         end
+
+        notes = MB::Sound::Notes.new(MB::Sound::MIDI::FileSource.new(filename, loop: loop))
+        block_given? ? yield(notes) : notes
       end
 
       # Returns live MIDI input as a MB::Sound::Notes (notes and controllers
@@ -69,47 +67,6 @@ module MB
         (@live_midi || {}).each_value { |notes| notes.stream.source.close }
         @live_midi = {}
         nil
-      end
-
-      # The old MIDI DSL (GraphNode::MidiDsl) on live MIDI, which #midi
-      # returned before the Notes rework; kept for old scripts until they
-      # move to Notes (see #midi_manager).
-      def midi_dsl
-        @midi_dsl ||= MB::Sound::GraphNode::MidiDsl.new(manager: midi_manager)
-      end
-
-      # Creates and caches a MIDI manager for the given +input_name+, which may
-      # be a MIDI filename (any existing file must be .mid or .midi), part of
-      # a live MIDI source's name to connect to (an unconnected port with a
-      # warning if none matches), or nil for a virtual MIDI port named after
-      # the script (see MB::Sound::MIDI::Input; live MIDI goes through RtMidi
-      # and never starts a JACK server).
-      def midi_manager(input_name = nil)
-        @midi_managers ||= {}
-        return @midi_managers[input_name] if @midi_managers.include?(input_name)
-
-        if input_name && File.file?(input_name)
-          unless input_name.downcase.end_with?('.mid', '.midi')
-            raise ArgumentError, "#{input_name} is not a MIDI file (expected .mid or .midi)"
-          end
-
-          # FIXME: really need a better way of connecting the clock to the graph
-          clock = MB::Sound::GraphNode::GraphClock.new
-          midi_in = MB::Sound::MIDI::MIDIFile.new(input_name, clock: clock)
-        end
-
-        unless midi_in
-          midi_in = MB::Sound::MIDI::Input.new(connect: input_name)
-
-          # Manager#update runs once per audio buffer
-          profile = MB::Sound::DeviceOutput::PROFILES[(ENV['AUDIO_PROFILE'] || :default).to_s.delete_prefix(':').to_sym]
-          buffer = Integer(ENV['AUDIO_BUFFER'] || profile&.[](:buffer_size) || 512)
-          update_rate = 48000.0 / buffer
-        end
-
-        manager = MB::Sound::MIDI::Manager.new(input: midi_in, update_rate: update_rate)
-
-        @midi_managers[input_name] = manager
       end
 
       # A polyphonic MB::Sound::Synth: +source+ is a MIDI source (a Notes

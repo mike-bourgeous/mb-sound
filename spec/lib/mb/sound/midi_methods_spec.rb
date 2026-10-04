@@ -127,6 +127,39 @@ RSpec.describe(MB::Sound::MidiMethods, :aggregate_failures) do
     end
   end
 
+  describe '#midi_file' do
+    it 'returns a Notes playing the file, or the result of a block given one' do
+      notes = MB::Sound.midi_file('spec/test_data/c2_sustain.mid')
+      expect(notes).to be_a(MB::Sound::Notes)
+      expect(notes.stream.source).to be_a(MB::Sound::MIDI::FileSource)
+      expect(notes.stream.source.looping?).to eq(false)
+
+      gate = MB::Sound.midi_file('spec/test_data/c2_sustain.mid', loop: true) { |midi|
+        expect(midi.stream.source.looping?).to eq(true)
+        midi.gate
+      }
+      expect(gate).to be_a(MB::Sound::GraphNode)
+      expect(gate.sample(48000).max).to eq(1)
+    end
+
+    it 'plays as a mono voice to the end of the file' do
+      midi = MB::Sound.midi_file('spec/test_data/c2_sustain.mid')
+      graph = midi.hz.saw * midi.amp_env(0.001, 0.1, 0.5, 0.05)
+      peak = 0
+      100.times do
+        buf = graph.sample(4800)
+        break if buf.nil?
+        peak = [peak, buf.abs.max].max
+      end
+      expect(peak).to be > 0.1
+      expect(graph.sample(4800)).to eq(nil)
+    end
+
+    it 'refuses files that are not MIDI files' do
+      expect { MB::Sound.midi_file('spec/test_data/make_arp_a7.rb') }.to raise_error(ArgumentError, /make_arp_a7.rb is not a MIDI file/)
+    end
+  end
+
   describe '#synth' do
     it 'builds a Synth from a Notes, a filename, a clip, or a stream' do
       notes = MB::Sound::Notes.new('spec/test_data/c2_sustain.mid')

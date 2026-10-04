@@ -3,10 +3,7 @@ module MB
     # A polyphonic synth built from a MIDI source: a MIDI::Allocator splits
     # the source's notes among voice lanes, the block builds one graph per
     # lane from a Notes instance (+v+) on that lane, and the synth sums the
-    # lane graphs.  The new MIDI design's replacement for VoicePool,
-    # GraphVoice, and the old offline voice split of clips (Clip#synth is
-    # now this class; the public MB::Sound.synth method switches to it with
-    # the synth script rewrites).
+    # lane graphs.  Clip#synth and MB::Sound.synth build one.
     #
     #     s = MB::Sound::Synth.new(seq(C3, E3, G3, B3).n8.loop, voices: 4) { |v|
     #       v.hz.saw.filter(:lowpass, cutoff: v.cutoff(600), quality: v.quality(2)) * v.amp_env(0.01, 0.2, 0.6, 0.3)

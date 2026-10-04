@@ -100,8 +100,8 @@ module MB
         # controller's MIDI::ControlSpec (see .cc_spec) carries the
         # parameter's name and description, so `p.midi.controls` lists it.
         #
-        # Like MIDI::GraphVoice#on_cc, the +range+ multiplies the parameter's
-        # value unless +:relative+ is false (then it's an absolute range).
+        # The +range+ multiplies the parameter's value unless +:relative+ is
+        # false (then it's an absolute range).
         # When the value is inside the range, the controller's middle (64)
         # gives exactly the value, with each half of the knob mapped
         # linearly to its side (like the GM2 sound controllers), so the knob

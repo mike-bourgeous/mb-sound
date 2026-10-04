@@ -6,8 +6,7 @@ module MB
       # value (0 to 127), a +description+, and how raw values map onto the
       # range.  Attached to every controller node (MB::Sound::Notes#cc and
       # the GM-named controls) and collected by MB::Sound::Notes#controls,
-      # for documentation, control lists, and ACID XML (planned; this
-      # replaces MIDI::Parameter's metadata role).
+      # for documentation, control lists, and ACID XML (planned).
       #
       # Mapping (#value):
       # - +curve+ :linear (default) or :exponential (geometric; the range

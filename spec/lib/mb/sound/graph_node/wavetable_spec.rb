@@ -63,6 +63,24 @@ RSpec.describe(MB::Sound::GraphNode::Wavetable) do
           Numo::SFloat[1, -2, 0, 0, 0]
         )
       end
+
+      it 'can take a graph node (0..1) that picks the mode' do
+        make_phase = -> { MB::Sound::ArrayInput.new(data: [Numo::SFloat[0, 1.0 / 3.0, 4.0 / 3.0, 5.0 / 3.0, -1.0 / 3.0] * 2 - 1]) }
+        modes = MB::Sound::GraphNode::Wavetable::WRAP_MODES
+        modes.each_with_index do |mode, idx|
+          expected = make_phase.().wavetable(wavetable: table, number: 0, wrap: mode).sample(5).dup
+          node = make_phase.().wavetable(wavetable: table, number: 0, wrap: ((idx + 0.5) / modes.length).constant)
+          expect(node.sample(5)).to all_be_within(1e-6).of_array(expected), mode.to_s
+        end
+      end
+
+      it 'scales a MIDI controller node by its range' do
+        notes = MB::Sound::Notes.new('spec/test_data/c2_sustain.mid')
+        cc = notes.cc(20, range: 0..40, default: 127)
+        node = phase.wavetable(wavetable: table, number: 0, wrap: cc)
+        expect(node.sources[:wrap]).to be_a(MB::Sound::GraphNode)
+        expect(node.sample(phase.length)).to all_be_within(1e-6).of_array(Numo::SFloat[1, -2, 0, 0, 0])
+      end
     end
 
     describe ':lookup parameter' do

@@ -56,12 +56,6 @@ RSpec.describe(MB::Sound::MIDI::Input, :aggregate_failures) do
     end
   end
 
-  describe 'MB::Sound.midi_manager' do
-    it 'refuses an existing file that is not a MIDI file' do
-      expect { MB::Sound.midi_manager('spec/test_data/make_arp_a7.rb') }.to raise_error(ArgumentError, /make_arp_a7.rb is not a MIDI file/)
-    end
-  end
-
   context 'with a JACK server' do
     before(:context) { @jack_error = JackDummy.start }
     after(:context) { JackDummy.stop }
@@ -208,37 +202,6 @@ RSpec.describe(MB::Sound::MIDI::Input, :aggregate_failures) do
 
       Thread.new { sleep 0.05; send([0xb0, 7, 100]) }
       expect(inp.read(blocking: true)[0].map { |_, b| b.bytes }).to eq([[0xb0, 7, 100]])
-    end
-
-    it 'feeds a MIDI::Manager' do
-      inp = input(connect: 'mbspec_keyboard')
-      manager = MB::Sound::MIDI::Manager.new(input: inp, update_rate: 100)
-      expect(manager.connections).to eq(['mbspec_keyboard:out'])
-
-      notes = []
-      manager.on_note { |note, velocity, onoff| notes << [note, velocity, onoff] }
-      mod = nil
-      manager.on_cc(1, range: 0..127, filter_hz: nil) { |v| mod = v }
-      sleep 0.05
-      send([0x90, 60, 100], [0xb0, 1, 127], [0x80, 60, 0])
-
-      deadline = MB::U.clock_now + 2
-      until notes.length >= 2 || MB::U.clock_now > deadline
-        manager.update
-        sleep 0.005
-      end
-      manager.update
-
-      expect(notes.map { |n, v, on| [n, on] }).to eq([[60, true], [60, false]])
-      expect(mod).to be_within(0.01).of(127)
-    end
-
-    it 'is what MB::Sound.midi_manager opens for live MIDI' do
-      manager = MB::Sound.midi_manager('mbspec_keyboard')
-      @inputs << manager.instance_variable_get(:@midi_in)
-      expect(manager.connections).to eq(['mbspec_keyboard:out'])
-    ensure
-      MB::Sound.instance_variable_get(:@midi_managers)&.delete('mbspec_keyboard')
     end
   end
 end

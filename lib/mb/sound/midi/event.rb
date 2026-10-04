@@ -3,9 +3,8 @@ module MB
     module MIDI
       # One MIDI event as an immutable value, created once where events enter
       # the program (a Source; see Source, FileSource, and ClipSource) and
-      # passed unchanged through Streams and their transforms.  Part of the
-      # new pull-based MIDI layer (Event, Source, Stream) that will replace
-      # Manager and the MidiDsl callbacks.
+      # passed unchanged through Streams and their transforms (the
+      # pull-based MIDI layer: Event, Source, Stream).
       #
       # Fields:
       # - +type+: :note_on, :note_off, :poly_pressure, :cc, :program,
@@ -13,7 +12,7 @@ module MB
       #   velocity 0 becomes a :note_off (with the conventional release
       #   velocity of 64).  Channel mode messages (CC 120-127) stay :cc; see
       #   #all_sound_off?, #reset_controllers?, and #all_notes_off?.
-      # - +channel+: 0 to 15 (0-based, like Manager's +:channel+), or nil for
+      # - +channel+: 0 to 15 (0-based: MIDI channel 10 is 9), or nil for
       #   system messages.
       # - +note+ (alias #index): the note number for notes and poly
       #   pressure, the controller number for CCs, else nil.  Usually an
