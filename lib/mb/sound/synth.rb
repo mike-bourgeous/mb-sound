@@ -123,7 +123,7 @@ module MB
       def initialize(
         source, voices: 8, spares: 2, steal: MIDI::Allocator::DEFAULT_STEAL, protect: nil, mono: nil,
         priority: :last, glide_mode: :last, controls: [], bend_range: nil, sustain: true, seed: nil,
-        tail: TAIL_SECONDS, sample_rate: 48000, &block
+        tail: TAIL_SECONDS, skip_idle: true, sample_rate: 48000, &block
       )
         raise ArgumentError, 'Pass a block that builds the graph of one voice from |v, index|' unless block
 
@@ -158,6 +158,7 @@ module MB
 
         @channels = @lanes.map(&:length).max
         @done = Array.new(@lanes.length, false)
+        setup_idle_skipping(skip_idle)
         @buf = nil
         @channel_bufs = nil
         @sampled = []
@@ -218,11 +219,23 @@ module MB
       # one channel), or an Array of channel buffers per lane, before the
       # output controls; nil for lanes that have ended, or nil once every
       # lane has ended.  Takes the place of #sample for that buffer (e.g.
-      # to place voices yourself); don't mix the two.
+      # to place voices yourself); don't mix the two.  Lanes skipped while
+      # idle (see #skip_idle?) give frozen buffers of zeros.
       def sample_individual(count)
         any = false
         data = @lanes.each_with_index.map { |outs, idx|
           next nil if @done[idx]
+
+          if @skipping[idx]
+            case skip_lane(idx, count)
+            when :ended
+              @done[idx] = true
+              next nil
+            when :skipped
+              any = true
+              next outs.length == 1 && @channels == 1 ? zeros(count) : Array.new(outs.length) { zeros(count) }
+            end
+          end
 
           bufs = outs.map { |o| o.sample(count) }
           if bufs.any?(&:nil?)
@@ -230,11 +243,32 @@ module MB
             next nil
           end
 
+          @skipping[idx] = start_skipping?(idx, bufs) if @skippable[idx]
+
           any = true
           outs.length == 1 && @channels == 1 ? bufs[0] : bufs
         }
 
         any ? data : nil
+      end
+
+      # True if lanes may be skipped while idle (the +:skip_idle+ option;
+      # see #skippable_lanes).
+      def skip_idle?
+        @skip_idle
+      end
+
+      # The indices of lanes that may be skipped while idle: with
+      # +:skip_idle+ on (the default), lanes whose graphs have no delays,
+      # reverbs, FIR filters, or tempo-following nodes (see
+      # #setup_idle_skipping).
+      def skippable_lanes
+        @skippable.each_index.select { |idx| @skippable[idx] }
+      end
+
+      # The indices of the lanes being skipped right now.
+      def skipped_lanes
+        @skipping.each_index.select { |idx| @skipping[idx] }
       end
 
       # True once the source has ended, every lane has read its last event,
@@ -279,6 +313,113 @@ module MB
       end
 
       private
+
+      # Level below which an idle lane's output counts as silent (-120 dB).
+      SILENCE = 1e-6
+
+      # Node classes whose state can hold sound that comes back after a
+      # silent stretch (delays, reverbs, long FIR filters) or that follow
+      # the timeline (tempo LFOs), so lanes using them are never skipped.
+      def self.long_memory?(node)
+        node.is_a?(GraphNode::Reverb) || node.is_a?(GraphNode::FdnReverb) || node.is_a?(GraphNode::MultitapDelay) ||
+          node.is_a?(Sequence::TimelineNode) ||
+          (node.respond_to?(:base_filter) && (node.base_filter.is_a?(Filter::Delay) || node.base_filter.is_a?(Filter::FIR))) ||
+          node.is_a?(Filter::Delay) || node.is_a?(Filter::FIR)
+      end
+
+      # Idle lane skipping (+:skip_idle+, on by default).  A lane is skipped
+      # (its graph isn't sampled, and it outputs zeros) from the buffer
+      # after one in which
+      # - its Notes is idle (Notes#idle?: no held note, every envelope made
+      #   through it idle), and
+      # - every output channel of the lane stayed within -120 dB (SILENCE),
+      # and its graph has no long-memory nodes (see .long_memory?).  While
+      # skipped, the lane's own Notes nodes and its branches of nodes shared
+      # with other lanes (controllers, bend) are still read every buffer, so
+      # their readers and Tees stay in step; the lane wakes (renders again)
+      # at the first buffer with an event for it (note, controller, choke,
+      # glide) or after a content jump.
+      #
+      # Differences from rendering every lane (why it isn't sample-exact):
+      # free-running oscillators and LFOs in a skipped lane pause instead of
+      # advancing, key-synced oscillators reset from where they paused (the
+      # band-limited reset step starts from a different value), and filter
+      # states keep the residue they had below -120 dB.  Pass +skip_idle:
+      # false+ for exact rendering.
+      def setup_idle_skipping(enabled)
+        @skip_idle = !!enabled
+        @skipping = Array.new(@lanes.length, false)
+        @skip_generation = Array.new(@lanes.length)
+        @zeros = nil
+
+        graphs = @lanes.map { |outs| outs.flat_map { |o| o.graph(include_tees: true) }.uniq }
+        sets = graphs.map { |g| g.to_h { |n| [n.__id__, true] } }
+
+        @skippable = graphs.each_with_index.map { |g, idx|
+          @skip_idle && g.none? { |n| Synth.long_memory?(n) } && g.any? { |n| n.is_a?(Notes::Node) && n.notes.equal?(@notes[idx]) }
+        }
+
+        # What a skipped lane still reads: its own Notes nodes, and its
+        # branches of Tees whose other branches are in other lanes
+        @boundary = graphs.each_with_index.map { |g, idx|
+          next [] unless @skippable[idx]
+
+          # Nodes read by other boundary nodes (e.g. a Glide's time input)
+          # are read through them
+          own = g.select { |n| n.is_a?(Notes::Node) && n.notes.equal?(@notes[idx]) }
+          upstream = {}
+          own.each { |n| n.graph(include_tees: true).each { |u| upstream[u.__id__] = true unless u.equal?(n) } }
+          own.reject! { |n| upstream[n.__id__] }
+
+          shared = g.select { |n|
+            n.is_a?(GraphNode::Tee::Branch) && !upstream[n.__id__] && n.tee.branches.any? { |b| !sets[idx][b.__id__] }
+          }
+          own + shared
+        }
+        @clock_node = @boundary.map { |b| b.find { |n| n.is_a?(Notes::Node) } }
+      end
+
+      # True if lane +idx+ should be skipped from the next buffer (see
+      # #setup_idle_skipping), given its output buffers +bufs+.
+      def start_skipping?(idx, bufs)
+        return false unless @notes[idx].idle?
+        return false unless bufs.all? { |b| silent?(b) }
+
+        @skip_generation[idx] = @allocator.lanes[idx].generation
+        true
+      end
+
+      # True if every sample of +buf+ is within SILENCE of zero.
+      def silent?(buf)
+        return true if buf.equal?(@zeros)
+        buf = buf.abs if buf.is_a?(Numo::SComplex) || buf.is_a?(Numo::DComplex)
+        buf.max <= SILENCE && buf.min >= -SILENCE
+      end
+
+      # Skips lane +idx+ for +count+ samples, reading its boundary nodes
+      # (see #setup_idle_skipping): returns :skipped, :ended if one of them
+      # ended, or :wake (rendering resumes with this buffer) if the lane
+      # has an event in this buffer or its content jumped.
+      def skip_lane(idx, count)
+        lane = @allocator.lanes[idx]
+        clock = @clock_node[idx]
+        if lane.generation != @skip_generation[idx] || lane.pending_before?(clock.next_cursor(count))
+          @skipping[idx] = false
+          return :wake
+        end
+
+        @boundary[idx].each do |n|
+          return :ended if n.sample(count).nil?
+        end
+
+        :skipped
+      end
+
+      # A frozen buffer of +count+ zeros for skipped lanes.
+      def zeros(count)
+        @zeros = Numo::SFloat.zeros(count).freeze if @zeros.nil? || @zeros.length != count
+        @zeros
+      end
 
       # The output nodes of one lane's graph.
       def lane_outputs(graph, idx)
@@ -367,6 +508,7 @@ module MB
       def sum_into(out, bufs)
         out.fill(0)
         bufs.each do |d|
+          next if d.equal?(@zeros) # a skipped lane
           n = MB::M.min(d.length, out.length)
           if (d.is_a?(Numo::SComplex) || d.is_a?(Numo::DComplex)) && !out.is_a?(Numo::SComplex)
             out = Numo::SComplex.cast(out)

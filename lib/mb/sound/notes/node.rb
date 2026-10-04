@@ -87,6 +87,17 @@ module MB
           out
         end
 
+        # The stream time (Rational seconds) this node has read up to.
+        def cursor
+          @reader.cursor
+        end
+
+        # The stream time this node will have read up to after its next
+        # +count+ samples.
+        def next_cursor(count)
+          @reader.cursor + step(count.round)
+        end
+
         # True once the stream's source has ended and this node has read
         # every event (see the class description).
         def ended?

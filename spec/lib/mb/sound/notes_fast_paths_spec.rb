@@ -27,9 +27,9 @@ RSpec.describe('MB::Sound::Notes fast paths', :check_shared) do
 
   # Renders a synth from +source+ (made by the block, once per run) with
   # buffers of +sizes+ in turn, for +seconds+.
-  def render(fast, seconds:, sizes: [128], voices: 3, spares: 0, &source)
+  def render(fast, seconds:, sizes: [128], voices: 3, spares: 0, skip_idle: false, &source)
     MB::Sound::Notes.fast_paths = fast
-    synth = MB::Sound::Synth.new(source.call, voices: voices, spares: spares, seed: 3, tail: 0, &patch)
+    synth = MB::Sound::Synth.new(source.call, voices: voices, spares: spares, seed: 3, tail: 0, skip_idle: skip_idle, &patch)
     out = []
     total = 0
     i = 0
