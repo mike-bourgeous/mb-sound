@@ -63,6 +63,21 @@ RSpec.describe('MB::Sound::Notes fast paths', :check_shared) do
     null_test(seconds: 1, sizes: [512], voices: 2, spares: 1) { 'spec/test_data/c_major.mid' }
   end
 
+  it 'gives the same samples while GM time, brightness, and other controllers move' do
+    ev = MB::Sound::MIDI::Event
+    null_test(seconds: 0.8, sizes: [128, 200]) {
+      MIDIListSource.new(
+        [60, 64, 67].each_with_index.flat_map { |n, i|
+          [ev.note_on(n, 0.8, time: Rational(i, 7)), ev.note_off(n, time: Rational(i, 7) + 0.2)]
+        },
+        [73, 75, 72, 74, 71, 1].each_with_index.flat_map { |cc, i|
+          6.times.map { |k| ev.cc_raw(cc, (20 * k + 13 * i) % 128, time: Rational(k * 7 + i, 61)) }
+        },
+        ev.bend(0.3, time: 0.25r), ev.cc_raw(121, 0, time: 0.6r), ev.cc(99, 0, time: 1000r)
+      )
+    }
+  end
+
   it 'gives the same samples for a looping clip through seeks' do
     clip = MB::Sound.seq(MB::Sound::C3, MB::Sound::E3, MB::Sound::G3.n4, MB::Sound::B3).n8.loop
 
