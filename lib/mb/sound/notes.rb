@@ -31,9 +31,10 @@ module MB
     #     play v.hz.saw * v.gate
     #     v.number.smooth(0.05, reset: v.trigger)
     #
-    # MB::Sound::Synth builds one Notes per MIDI::Allocator lane, and the
-    # output methods of Sequence::Clip (clip.env, clip.tone, ...) are the
-    # nodes of a Notes on the clip (Clip#notes).
+    # MB::Sound::Synth builds one Notes per MIDI::Allocator lane; the output
+    # methods of Sequence::Clip (clip.env, clip.tone, ...) are the nodes of a
+    # Notes on the clip (Clip#notes); the console's `midi` (MidiMethods#midi)
+    # and synth scripts' block argument are Notes on live or file MIDI.
     class Notes
       # The note number held before the first note when the source can't
       # tell its first note (C4).
@@ -423,6 +424,22 @@ module MB
 
       def to_s
         "Notes (#{@stream})"
+      end
+
+      # The MIDI::Stream this instance reads, for MIDI::Stream.for, so a
+      # Notes can be given wherever a MIDI source is taken (e.g.
+      # `Synth.new(midi) { |v| ... }`).
+      def to_midi_stream
+        @stream
+      end
+
+      # A polyphonic MB::Sound::Synth playing this instance's stream (see
+      # Synth.new for the options and the block), for console and script
+      # code that has a mono Notes (`midi`) and wants voices.
+      #
+      #     play midi.synth(voices: 6) { |v| v.hz.saw * v.amp_env }
+      def synth(**options, &block)
+        Synth.new(@stream, **options, &block)
       end
 
       private

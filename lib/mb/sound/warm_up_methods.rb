@@ -32,6 +32,26 @@ module MB
           [[[0.0, [status, note, step.even? ? 100 : 0].pack('C*')], [0.0, [0xb0, 1, step % 128].pack('C*')]]]
         end
 
+        # For MIDI::LiveSource (RtMidi-style deltas in seconds): a note on or
+        # off and a mod wheel move every other read.
+        def read_raw
+          @reads += 1
+          return [] if @reads.odd?
+
+          step = @reads / 2
+          note = NOTES[(step / 2) % NOTES.length]
+          status = step.even? ? 0x90 : 0x80
+          [[0.01, [status, note, step.even? ? 100 : 0].pack('C*')], [0.001, [0xb0, 1, step % 128].pack('C*')]]
+        end
+
+        def frame_times?
+          false
+        end
+
+        def frame_rate
+          nil
+        end
+
         def close
         end
       end
@@ -40,8 +60,10 @@ module MB
       # oscillators, FM, pwm, arithmetic, Tees, filters, delay, envelopes,
       # shapers, procs, clip-driven voices) for +calls+ buffers of +buffer+
       # samples, so YJIT compiles their methods before live playback.  With
-      # +midi: true+ (synth scripts), MIDI synth voices too (VoicePool and
-      # MidiDsl nodes, as in bin/synths/fm_bass.rb; about 0.5 s more).  Does
+      # +midi: true+ (synth scripts), MIDI synth voices too: the old ones
+      # (VoicePool and MidiDsl nodes, as in bin/synths/fm_bass.rb) and the
+      # new ones (a MIDI::LiveSource read through a Synth of Notes voices
+      # with envelopes, cutoff, vibrato, and a mono Notes voice).  Does
       # nothing (returns nil) without YJIT; otherwise returns the time taken
       # in seconds.
       #
@@ -69,7 +91,10 @@ module MB
 
         calls.times { graph.sample(buffer) }
 
-        warm_up_midi(calls: [calls, 40].min, buffer: buffer) if midi
+        if midi
+          warm_up_midi(calls: [calls, 40].min, buffer: buffer)
+          warm_up_notes(calls: [calls, 60].min, buffer: buffer)
+        end
 
         Process.clock_gettime(Process::CLOCK_MONOTONIC) - t0
       end
@@ -91,6 +116,21 @@ module MB
         calls.times { voices.sample(buffer) }
       ensure
         manager&.close
+      end
+
+      # The new MIDI path: a LiveSource on a fake input (live MIDI timing),
+      # a Synth whose Notes voices use the common helpers (key-synced
+      # tones, envelopes with GM scaling, cutoff and quality, vibrato from
+      # the mod wheel), and a mono Notes voice on the same stream.
+      def warm_up_notes(calls:, buffer:)
+        stream = MIDI::Stream.new(MIDI::LiveSource.new(WarmUpMIDI.new))
+        synth = Synth.new(stream, voices: 2, spares: 1, seed: 1) { |v|
+          v.hz.vibrato.saw.filter(:lowpass, cutoff: v.cutoff(600), quality: v.quality(2)) * v.amp_env(0.005, 0.1, 0.6, 0.05)
+        }
+        mono = Notes.new(stream)
+        graph = synth + mono.hz.square.at(0.1) * mono.env(0.01, 0.1, 0.5, 0.05) * mono.mod
+
+        calls.times { graph.sample(buffer) }
       end
     end
   end

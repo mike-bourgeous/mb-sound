@@ -11,7 +11,7 @@ require 'bundler/setup'
 require 'mb-sound'
 
 MB::Sound.synth_script { |input|
-  midi = input ? MB::Sound.midi_file(input) : MB::Sound.midi
+  midi = input ? MB::Sound.midi_file(input) : MB::Sound.midi_dsl
 
   # Noise LFO
   nzlfo = 1.hz.gauss.noise.at(100).filter(:highpass, cutoff: 0.02, quality: 0.5).filter(:lowpass, cutoff: 0.3, quality: 0.5).softclip(0, 1) * 26.0/30 + 0.3333

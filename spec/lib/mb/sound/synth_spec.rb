@@ -400,4 +400,17 @@ RSpec.describe(MB::Sound::Synth) do
     end
     expect(s.notes.count { |v| !v.idle? }).to be >= 1
   end
+
+  describe 'from a Notes' do
+    it 'reads the Notes stream when given a Notes or made with Notes#synth' do
+      notes = MB::Sound::Notes.new(source(ev.note_on(60, 100, time: 0.01r), ev.note_off(60, 0, time: 0.05r)))
+      expect(MB::Sound::MIDI::Stream.for(notes)).to equal(notes.stream)
+
+      s = notes.synth(voices: 2, spares: 0, seed: 1, &patch)
+      expect(s).to be_a(described_class)
+      data = render(s, buffers: 10)
+      expect(peak(data, 0.012, 0.05)).to be > 0.3
+      expect(peak(data, 0, 0.0099)).to eq(0)
+    end
+  end
 end

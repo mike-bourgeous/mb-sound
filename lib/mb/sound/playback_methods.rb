@@ -217,7 +217,7 @@ module MB
           output = MB::Sound.output(output_type: output, channels: 2, shared: false)
         end
 
-        Session.use_output(output)
+        switch_output(output)
         output
       end
 
@@ -246,6 +246,42 @@ module MB
         profile.to_s.delete_prefix(':').to_sym
       end
       alias lag latency
+
+      # Switches the background session to the sound card's :low latency
+      # profile for live MIDI (about 18 ms from key to sound with exact MIDI
+      # timing instead of about 63 ms; see MIDI::LiveSource).  Called when
+      # live MIDI input opens (#midi, synth scripts, effect scripts' MIDI
+      # controls); heavy patches still play, since the adaptive output
+      # queue grows after dropouts (see DeviceOutput).
+      #
+      # Does nothing (returns nil) when a profile was chosen: AUDIO_PROFILE
+      # (which scripts' -L/--latency-profile and +profile:+ set), or an
+      # output given to #latency or #use_output.  Also nothing for outputs
+      # other than the sound card (OUTPUT_TYPE ffmpeg or null).  Prints a
+      # hint instead of switching when the background session has players
+      # or master effects (switching restarts the session).  Returns :low
+      # when the session plays (or will play) through the :low profile.
+      #
+      # Example (bin/sound.rb; #midi calls it):
+      #     live_midi_latency    # => :low
+      def live_midi_latency(quiet: false)
+        return nil if !ENV['AUDIO_PROFILE'].to_s.empty? || Session.output_chosen? || detect_output != :device
+
+        session = Session.default
+        if session.output_open?
+          out = session.output
+          return :low if out.respond_to?(:profile) && out.profile == :low
+
+          unless session.idle? && session.master_info == 'bypass'
+            warn 'Live MIDI: `latency :low` lowers the latency once players and master effects are stopped' unless quiet
+            return nil
+          end
+        end
+
+        switch_output(MB::Sound.output(output_type: :device, channels: 2, shared: false, profile: :low), chosen: false)
+        warn 'Live MIDI: using the :low latency profile (-L, AUDIO_PROFILE, or `latency` choose another)' unless quiet
+        :low
+      end
 
       # Sets master effects that the whole background mix (see #bg) runs
       # through, e.g. to tame levels or add a shared reverb.  The block gets
@@ -594,6 +630,14 @@ module MB
       end
 
       private
+
+      # Replaces the background session's output (see Session.use_output),
+      # and points live MIDI sources opened by #midi at the new output's
+      # clock (see MIDI::LiveSource#output=).
+      def switch_output(output, chosen: true)
+        Session.use_output(output, chosen: chosen)
+        retarget_live_midi if respond_to?(:retarget_live_midi, true)
+      end
 
       # Renders the tail of a session's master effects after the last player
       # stops (see #render), for up to +max_frames+.  Returns the number of
