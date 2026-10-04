@@ -388,6 +388,63 @@ RSpec.describe(MB::Sound::Notes) do
     end
   end
 
+  describe '#hz' do
+    let(:v) { notes_for(ev.note_on(69, 1.0), ev.bend(1.0, time: 1/100r), ev.note_on(57, 1.0, time: 1/7r)) }
+
+    it 'gives a Pitch following the note and bend' do
+      expect(v.hz).to be_a(MB::Sound::Pitch)
+      expect(v.hz).to equal(v.tone)
+      expect(v.pitch).to equal(v.hz)
+      f = v.hz.freq
+      g = v.hz.bend_range(12.st).freq
+      t = v.hz.transpose(-1.oct).freq
+      out = run({ f: f, g: g, t: t }, buffer: 480, buffers: 2)
+      expect(out[:f][0]).to be_within(1e-3).of(440)
+      expect(out[:f][480]).to be_within(1e-2).of(440 * 2 ** (2 / 12.0))
+      expect(out[:g][480]).to be_within(1e-2).of(880)
+      expect(out[:t][0]).to be_within(1e-3).of(220)
+      expect(v.hz.frequency).to be_within(1e-2).of(440 * 2 ** (2 / 12.0)) # the latest value
+    end
+
+    it 'makes tones that reset at every note-on' do
+      v = notes_for(ev.note_on(69, 1.0), ev.bend(1.0, time: 1/100r), ev.note_on(57, 1.0, time: 1/5r + 1/96000r))
+      keyed = v.hz.sine
+      expect(keyed).to be_a(MB::Sound::Notes::KeyedTone)
+      expect(keyed.key_sync?).to eq(true)
+      free = notes_for(ev.note_on(69, 1.0), ev.bend(1.0, time: 1/100r), ev.note_on(57, 1.0, time: 1/5r + 1/96000r)).hz.sine.free
+      a = 30.times.map { keyed.sample(480).dup }.reduce(:concatenate)
+      b = 30.times.map { free.sample(480).dup }.reduce(:concatenate)
+      reset = 9600 # the sample containing 0.2 s + half a sample
+      expect(a[0...reset].to_a).to eq(b[0...reset].to_a)
+      expect((a[reset...reset + 200] - b[reset...reset + 200]).abs.max).to be > 0.1
+      expect(a[reset + 40]).to be_within(0.02).of(Math.sin(2 * Math::PI * 220 * 2 ** (2 / 12.0) * 40 / 48000.0)) # bent up 2 st
+    end
+
+    it 'leaves free tones, LFOs, and synced tones alone, quietly' do
+      expect {
+        expect(v.hz.saw.free.key_sync?).to eq(false)
+        expect(v.hz.saw.free.reset_input).to eq(nil)
+        expect(v.hz.free.reset_input).to eq(nil)
+        expect(v.hz.ramp.lfo.reset_input).to eq(nil)
+        expect(v.hz.lfo.reset_input).to eq(nil)
+        expect(v.hz.saw.sync(ratio: 2).reset_input).to eq(nil) # no error from reset + sync
+        expect(v.hz.saw.no_trigger.key_sync?).to eq(false)
+      }.not_to output.to_stderr
+    end
+
+    it 'keeps key sync with a random phase, and replaces it with another reset' do
+      t = v.hz.saw.rnd
+      expect(t.key_sync?).to eq(true)
+      expect(t.random_phase?).to eq(true)
+      other = MB::Sound.seq(MB::Sound::C4).loop.trigger
+      r = v.hz.saw.reset(other)
+      expect(r.key_sync?).to eq(false)
+      expect(r.reset_input).not_to eq(nil)
+      tee = v.trigger.get_sampler.instance_variable_get(:@tee)
+      expect(tee.branches.length).to eq(2) # the rnd tone's and this branch; dropped ones are destroyed
+    end
+  end
+
   describe 'ending' do
     let(:clip) { MB::Sound.seq(MB::Sound::C4, MB::Sound::E4).n8 } # 0.5 s at 120 BPM
 

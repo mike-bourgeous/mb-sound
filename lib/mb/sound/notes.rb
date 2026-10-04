@@ -294,6 +294,18 @@ module MB
       alias filt_env filter_env
       alias filter_envelope filter_env
 
+      # A Pitch following the held note and pitch bend (a
+      # Notes::NotePitch), whose oscillators reset their phase at each
+      # note-on (key sync) unless they are #free or #lfo.
+      #
+      #     play v.hz.saw * v.amp_env
+      #     play v.hz.bend_range(12.st).square.free * v.amp_env
+      def hz
+        @pitch ||= NotePitch.new(self)
+      end
+      alias tone hz
+      alias pitch hz
+
       # The envelopes made through this instance (see #env).
       def envelopes
         @envelopes.dup
@@ -381,3 +393,4 @@ require_relative 'notes/note_nodes'
 require_relative 'notes/channel_nodes'
 require_relative 'notes/frequency'
 require_relative 'notes/note_envelope'
+require_relative 'notes/note_pitch'
