@@ -271,7 +271,10 @@ module MB
             return
           end
 
-          @frame_data = buf[0..].freeze
+          # A frozen source buffer is shared as it is, so consumers can tell
+          # an unchanged buffer by identity (e.g. Notes nodes' constant
+          # buffers)
+          @frame_data = buf.frozen? ? buf : buf[0..].freeze
           @frame_snapshot = buf.to_binary if Tee.shared_check && !@copying
         end
 
