@@ -104,6 +104,16 @@ module MB
         chorus_send: { number: 93, name: 'Chorus Send' },
       }.transform_values { |h| MIDI::ControlSpec.new(**h).freeze }.freeze
 
+      class << self
+        # Whether Notes nodes and envelopes take their fast paths for
+        # buffers without events (constant frozen buffers, envelope times
+        # as numbers; see Notes::Node#sample).  On unless the environment
+        # sets MB_SOUND_NOTES_FAST=0.  The output is the same either way;
+        # specs compare the two.
+        attr_accessor :fast_paths
+      end
+      self.fast_paths = ENV['MB_SOUND_NOTES_FAST'] != '0'
+
       # Shared channel-wide nodes per control stream (see .control_stream):
       # stream => { key => WeakRef(node) }.
       SHARED = ObjectSpace::WeakKeyMap.new

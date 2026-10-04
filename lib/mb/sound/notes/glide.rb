@@ -100,6 +100,12 @@ module MB
         end
 
         # The output at the current position (see #fill).
+        # Constant only while not gliding (see Node::Held#steady_level).
+        def steady_level
+          return nil if @gliding
+          @value = @number
+        end
+
         def current
           return @number unless @gliding
 

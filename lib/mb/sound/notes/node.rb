@@ -58,21 +58,30 @@ module MB
 
         # Returns +count+ samples (a buffer reused between calls), or nil if
         # the node has finished (see the class description).
+        #
+        # Buffers without events (most of them) take a fast path: nodes whose
+        # output is constant until the next event (see #steady_buffer)
+        # return one frozen buffer for as long as their value holds, so
+        # consumers must not modify it (see GraphNode::Tee; with
+        # Tee.shared_check on, a modified buffer raises or warns).
         def sample(count)
           count = count.round
           return nil if finished?
 
-          rate = @sample_rate.to_r
           from = @reader.cursor
-          to = from + Rational(count) / rate
+          to = from + step(count)
           events = @reader.events(from, to)
           chase = take_chase(to)
 
-          @buf = Numo::SFloat.zeros(count) if @buf.nil? || @buf.length != count
-          render(@buf, items(events, chase, from, rate, count))
+          out = (events.empty? && chase.nil? && Notes.fast_paths && steady_buffer(count))
+          unless out
+            @buf = Numo::SFloat.zeros(count) if @buf.nil? || @buf.length != count
+            render(@buf, items(events, chase, from, @rate_r, count))
+            out = @buf
+          end
 
           @tail += count if ended?
-          @buf
+          out
         end
 
         # True once the stream's source has ended and this node has read
@@ -101,6 +110,53 @@ module MB
         def finished?
           return false unless ends_graph? && ended?
           (@notes.nil? || @notes.idle?) || @tail >= TAIL_SECONDS * @sample_rate
+        end
+
+        # The length of +count+ samples in Rational seconds at the node's
+        # sample rate (cached for the last count and rate).
+        def step(count)
+          if count != @step_count || @sample_rate != @step_rate
+            @step_count = count
+            @step_rate = @sample_rate
+            @rate_r = @sample_rate.to_r
+            @step = Rational(count) / @rate_r
+          end
+          @step
+        end
+
+        # Returns a frozen buffer of +count+ samples for a buffer without
+        # events, or nil to render it with #render.  Subclasses return
+        # constant buffers (see Held and Impulse).
+        def steady_buffer(count)
+          nil
+        end
+
+        # Returns a frozen buffer of +count+ samples of +value+, reusing the
+        # last one while the value and count are the same.  With
+        # GraphNode::Tee.shared_check on, checks that no consumer changed a
+        # reused buffer (consumers must copy frozen buffers before changing
+        # them; Numo allows in-place arithmetic on frozen arrays).
+        def constant_buffer(count, value)
+          buf = @steady
+          if buf && buf.length == count && @steady_value == value
+            check_steady(buf, value) if GraphNode::Tee.shared_check
+            return buf
+          end
+
+          @steady_value = value
+          @steady = Numo::SFloat.new(count).fill(value).freeze
+        end
+
+        # Raises (or warns and replaces the buffer) if a consumer changed the
+        # reused frozen buffer of #constant_buffer.
+        def check_steady(buf, value)
+          return if buf.eq(buf[0]).all? && buf[0] == Numo::SFloat[value][0]
+
+          message = "A node downstream of #{self} modified its frozen constant buffer (copy a frozen input before modifying it)"
+          raise GraphNode::Tee::SharedBufferModified, message unless GraphNode::Tee.shared_check == :warn
+
+          warn message
+          @steady = Numo::SFloat.new(buf.length).fill(value).freeze
         end
 
         # Returns the Source::Chase to apply in the buffer ending at stream
@@ -176,6 +232,17 @@ module MB
             buf[from...to] = level
           end
 
+          def steady_buffer(count)
+            value = steady_level
+            value.nil? ? nil : constant_buffer(count, value)
+          end
+
+          # The output for a whole buffer without events if it is constant,
+          # else nil (#fill is then called).  #level by default.
+          def steady_level
+            level
+          end
+
           def handle(event)
             raise NotImplementedError
           end
@@ -212,6 +279,10 @@ module MB
 
           def impulse(event)
             raise NotImplementedError
+          end
+
+          def steady_buffer(count)
+            constant_buffer(count, 0.0)
           end
         end
       end

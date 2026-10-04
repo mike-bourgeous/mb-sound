@@ -42,6 +42,12 @@ module MB
           @length = (seconds * @sample_rate).round
         end
 
+        # 1 once the fade has finished, else nil (ramping; see
+        # Node::Held#steady_level).
+        def steady_level
+          @position.nil? || @length <= 0 || @position >= @length ? 1.0 : nil
+        end
+
         def fill(buf, from, to)
           @segment_start = to
           if @position.nil? || @length <= 0 || @position >= @length
