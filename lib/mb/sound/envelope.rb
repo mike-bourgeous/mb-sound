@@ -813,6 +813,9 @@ module MB
         corr_slope = st[STATE_CORR_SLOPE]
         corr_time = st[STATE_CORR_TIME]
         corr_position = st[STATE_CORR_POSITION]
+        # The S planner's own anchor, scale, and warp recursion (the C struct
+        # env_s_plan), saved instead of the exp planner's while it plans
+        s_e0, s_y0, s_scale, s_w, s_g = e0, y0, scale, w, g
 
         result = Array.new(n)
 
@@ -820,8 +823,7 @@ module MB
           gate_now = has_gate && at(gate_sig, i) != 0
           start = stage == STAGE_PENDING
           landed = false
-          slope = y - y_prev
-          y_prev = y
+          y_last = y
 
           if at(choke_sig, i) != 0 && (stage == STAGE_SEGMENT || stage == STAGE_SUSTAIN)
             stage = STAGE_CHOKE
@@ -909,42 +911,42 @@ module MB
                   timing = full || length != plan_length
                   c = curve * curve_scale
 
-                  e0 = e > 0 ? e - 1 : 0.0
-                  y0 = y
+                  s_e0 = e > 0 ? e - 1 : 0.0
+                  s_y0 = y
                   if e == 0
                     u = 0.0
                   elsif plan_shape != SHAPE_S
-                    u = e0 / length
+                    u = s_e0 / length
                   end
 
                   if full
                     warp_linear = c.abs < LINEAR_LIMIT
                     unless warp_linear
                       warp_inv = 1.0 / (1.0 - Math.exp(c))
-                      w = Math.exp(c * u)
+                      s_w = Math.exp(c * u)
                     end
                   end
                   if timing
-                    rate = (1.0 - u) / (length - e0)
-                    g = Math.exp(c * rate) unless warp_linear
+                    rate = (1.0 - u) / (length - s_e0)
+                    s_g = Math.exp(c * rate) unless warp_linear
                   end
 
-                  p = warp_linear ? u : (1.0 - w) * warp_inv
+                  p = warp_linear ? u : (1.0 - s_w) * warp_inv
                   s_anchor = p * p * (3.0 - 2.0 * p)
                   span = 1.0 - s_anchor
-                  scale = span > 0 ? (target - y0) / span : 0.0
+                  s_scale = span > 0 ? (target - s_y0) / span : 0.0
 
                   corr_position = 0.0
                   corr_time = 0.0
                   corr_slope = 0.0
                   unless landed
-                    dp = warp_linear ? 1.0 : -c * w * warp_inv
-                    corr_slope = slope - scale * (6.0 * p * (1.0 - p)) * dp * rate
+                    dp = warp_linear ? 1.0 : -c * s_w * warp_inv
+                    corr_slope = (y - y_prev) - s_scale * (6.0 * p * (1.0 - p)) * dp * rate
                     if corr_slope != 0
-                      step = (target - y0).abs
+                      step = (target - s_y0).abs
                       step = MIN_STEP if step < MIN_STEP
                       limit = 27.0 * overshoot * step / (4.0 * corr_slope.abs)
-                      corr_time = length - e0
+                      corr_time = length - s_e0
                       corr_time = slope_samples if slope_samples < corr_time
                       corr_time = limit if limit < corr_time
                       corr_time = 1.0 if corr_time < 1
@@ -958,14 +960,14 @@ module MB
                   plan_shape = SHAPE_S
                 end
 
-                if e > e0
+                if e > s_e0
                   u += rate
-                  w *= g unless warp_linear
+                  s_w *= s_g unless warp_linear
                 end
                 corr_position += 1
 
-                p = warp_linear ? u : (1.0 - w) * warp_inv
-                y = y0 + scale * (p * p * (3.0 - 2.0 * p) - s_anchor)
+                p = warp_linear ? u : (1.0 - s_w) * warp_inv
+                y = s_y0 + s_scale * (p * p * (3.0 - 2.0 * p) - s_anchor)
                 if corr_position < corr_time
                   x = corr_position / corr_time
                   h = 1.0 - x
@@ -1033,11 +1035,14 @@ module MB
             break
           end
 
+          y_prev = y_last
           note_position += 1
           result[i] = use_octaves ? 2.0 ** (y * at(octaves_sig, i)) : y
         end
 
         out[0..] = result unless n == 0
+
+        e0, y0, scale, w, g = s_e0, s_y0, s_scale, s_w, s_g if plan_shape == SHAPE_S
 
         state[0..] = [
           stage, seg, e, y, peak, gate_prev ? 1 : 0, planned ? 1 : 0, plan_length, plan_curve, plan_target,

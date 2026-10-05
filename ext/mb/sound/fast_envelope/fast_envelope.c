@@ -271,6 +271,110 @@ static double env_add_peak(double y, double p, double low, double high)
 	return sum > cap ? cap : sum;
 }
 
+// The plan of an S segment (see the top of the file).  Kept apart from the
+// exp planner's locals, with planning and sampling out of line, so the loop
+// of exp envelopes stays as tight as before the S shape existed.
+struct env_s_plan {
+	double e0;             // anchor position (the last output's)
+	double y0;             // anchor level
+	double scale;          // (target - y0) / (1 - S(u_a))
+	double w, g;           // warp recursion: w = e^(c u), w *= g each sample
+	double u, rate;        // phase of the last output, and its increment
+	double s_anchor;       // S(u_a)
+	double warp_inv;       // 1 / (1 - e^c)
+	int warp_linear;       // c = 0: the warp is the identity
+	double corr_slope;     // slope correction (see the top of the file)
+	double corr_time;
+	double corr_position;
+};
+
+// (Re-)plans the rest of an S segment at position +e+ from the last output
+// +y+ (whose slope was +slope+), for +length+ samples, curvature +c+, and
+// +target+.  +full+ recomputes the warp (new segment, new curve, or
+// another shape until now), +timing+ the phase rate; +landed+ skips the
+// slope correction (a normal landing on the previous segment's target).
+static __attribute__((noinline)) void env_plan_s(
+		struct env_s_plan *sp, int full, int timing, int other_shape, int landed,
+		double e, double y, double slope, double length, double c, double target,
+		double slope_samples, double overshoot)
+{
+	sp->e0 = e > 0 ? e - 1 : 0;
+	sp->y0 = y;
+	if (e == 0) {
+		sp->u = 0;
+	} else if (other_shape) {
+		// Another shape until now: the phase from the time
+		sp->u = sp->e0 / length;
+	}
+
+	if (full) {
+		sp->warp_linear = fabs(c) < ENV_LINEAR_LIMIT;
+		if (!sp->warp_linear) {
+			sp->warp_inv = 1.0 / (1.0 - exp(c));
+			sp->w = exp(c * sp->u);
+		}
+	}
+	if (timing) {
+		sp->rate = (1.0 - sp->u) / (length - sp->e0);
+		if (!sp->warp_linear) {
+			sp->g = exp(c * sp->rate);
+		}
+	}
+
+	double p = sp->warp_linear ? sp->u : (1.0 - sp->w) * sp->warp_inv;
+	sp->s_anchor = p * p * (3.0 - 2.0 * p);
+	double span = 1.0 - sp->s_anchor;
+	sp->scale = span > 0 ? (target - sp->y0) / span : 0.0;
+
+	// Slope correction (not after a normal landing)
+	sp->corr_position = 0;
+	sp->corr_time = 0;
+	sp->corr_slope = 0;
+	if (!landed) {
+		double dp = sp->warp_linear ? 1.0 : -c * sp->w * sp->warp_inv;
+		sp->corr_slope = slope - sp->scale * (6.0 * p * (1.0 - p)) * dp * sp->rate;
+		if (sp->corr_slope != 0) {
+			double step = fabs(target - sp->y0);
+			if (step < ENV_MIN_STEP) {
+				step = ENV_MIN_STEP;
+			}
+			double limit = 27.0 * overshoot * step / (4.0 * fabs(sp->corr_slope));
+			sp->corr_time = length - sp->e0;
+			if (slope_samples < sp->corr_time) {
+				sp->corr_time = slope_samples;
+			}
+			if (limit < sp->corr_time) {
+				sp->corr_time = limit;
+			}
+			if (sp->corr_time < 1) {
+				sp->corr_time = 1;
+			}
+		}
+	}
+}
+
+// The level of an S segment at position +e+ (advancing its phase).
+static __attribute__((noinline)) double env_sample_s(struct env_s_plan *sp, double e)
+{
+	if (e > sp->e0) {
+		sp->u += sp->rate;
+		if (!sp->warp_linear) {
+			sp->w *= sp->g;
+		}
+	}
+	sp->corr_position += 1;
+
+	double p = sp->warp_linear ? sp->u : (1.0 - sp->w) * sp->warp_inv;
+	double y = sp->y0 + sp->scale * (p * p * (3.0 - 2.0 * p) - sp->s_anchor);
+	if (sp->corr_position < sp->corr_time) {
+		double x = sp->corr_position / sp->corr_time;
+		double h = 1.0 - x;
+		y += sp->corr_slope * sp->corr_time * (x * h * h);
+	}
+
+	return y;
+}
+
 /*
  * Runs the envelope for one buffer:
  *   process(out, state, times, curves, levels, hold, inputs, config, shapes)
@@ -398,14 +502,17 @@ static VALUE ruby_process(VALUE self, VALUE out, VALUE state, VALUE times, VALUE
 	double release_scale = st[ST_RELEASE_SCALE];
 	double y_prev = st[ST_PREV_LEVEL];
 	int plan_shape = (int)st[ST_PLAN_SHAPE];
-	double u = st[ST_PHASE];
-	double rate = st[ST_RATE];
-	double s_anchor = st[ST_S_ANCHOR];
-	double warp_inv = st[ST_WARP_INV];
-	int warp_linear = st[ST_WARP_LINEAR] != 0;
-	double corr_slope = st[ST_CORR_SLOPE];
-	double corr_time = st[ST_CORR_TIME];
-	double corr_position = st[ST_CORR_POSITION];
+	struct env_s_plan sp = {
+		.e0 = e0, .y0 = y0, .scale = scale, .w = w, .g = g,
+		.u = st[ST_PHASE],
+		.rate = st[ST_RATE],
+		.s_anchor = st[ST_S_ANCHOR],
+		.warp_inv = st[ST_WARP_INV],
+		.warp_linear = st[ST_WARP_LINEAR] != 0,
+		.corr_slope = st[ST_CORR_SLOPE],
+		.corr_time = st[ST_CORR_TIME],
+		.corr_position = st[ST_CORR_POSITION],
+	};
 
 	if (seg < 0 || seg >= nseg) {
 		rb_raise(rb_eArgError, "Segment index %ld out of range in envelope state", seg);
@@ -415,8 +522,7 @@ static VALUE ruby_process(VALUE self, VALUE out, VALUE state, VALUE times, VALUE
 		int gate_now = has_gate && env_at(&gate_sig, i) != 0;
 		int start = stage == ENV_PENDING;
 		int landed = 0;
-		double slope = y - y_prev;
-		y_prev = y;
+		double y_last = y;
 
 		if (env_at(&choke_sig, i) != 0 && (stage == ENV_SEGMENT || stage == ENV_SUSTAIN)) {
 			stage = ENV_CHOKE;
@@ -510,63 +616,10 @@ static VALUE ruby_process(VALUE self, VALUE out, VALUE state, VALUE times, VALUE
 					if (!planned || length != plan_length || curve != plan_curve || target != plan_target || plan_shape != ENV_SHAPE_S) {
 						// (Re-)plan the rest of the segment from the last
 						// output, keeping its phase (see the top of the file).
-						int full = !planned || e == 0 || plan_shape != ENV_SHAPE_S || curve != plan_curve;
+						int other_shape = plan_shape != ENV_SHAPE_S;
+						int full = !planned || e == 0 || other_shape || curve != plan_curve;
 						int timing = full || length != plan_length;
-						double c = curve * curve_scale;
-
-						e0 = e > 0 ? e - 1 : 0;
-						y0 = y;
-						if (e == 0) {
-							u = 0;
-						} else if (plan_shape != ENV_SHAPE_S) {
-							// Another shape until now: the phase from time
-							u = e0 / length;
-						}
-
-						if (full) {
-							warp_linear = fabs(c) < ENV_LINEAR_LIMIT;
-							if (!warp_linear) {
-								warp_inv = 1.0 / (1.0 - exp(c));
-								w = exp(c * u);
-							}
-						}
-						if (timing) {
-							rate = (1.0 - u) / (length - e0);
-							if (!warp_linear) {
-								g = exp(c * rate);
-							}
-						}
-
-						double p = warp_linear ? u : (1.0 - w) * warp_inv;
-						s_anchor = p * p * (3.0 - 2.0 * p);
-						double span = 1.0 - s_anchor;
-						scale = span > 0 ? (target - y0) / span : 0.0;
-
-						// Slope correction (not after a normal landing)
-						corr_position = 0;
-						corr_time = 0;
-						corr_slope = 0;
-						if (!landed) {
-							double dp = warp_linear ? 1.0 : -c * w * warp_inv;
-							corr_slope = slope - scale * (6.0 * p * (1.0 - p)) * dp * rate;
-							if (corr_slope != 0) {
-								double step = fabs(target - y0);
-								if (step < ENV_MIN_STEP) {
-									step = ENV_MIN_STEP;
-								}
-								double limit = 27.0 * overshoot * step / (4.0 * fabs(corr_slope));
-								corr_time = length - e0;
-								if (slope_samples < corr_time) {
-									corr_time = slope_samples;
-								}
-								if (limit < corr_time) {
-									corr_time = limit;
-								}
-								if (corr_time < 1) {
-									corr_time = 1;
-								}
-							}
-						}
+						env_plan_s(&sp, full, timing, other_shape, landed, e, y, y - y_prev, length, curve * curve_scale, target, slope_samples, overshoot);
 
 						planned = 1;
 						plan_length = length;
@@ -575,22 +628,7 @@ static VALUE ruby_process(VALUE self, VALUE out, VALUE state, VALUE times, VALUE
 						plan_shape = ENV_SHAPE_S;
 					}
 
-					if (e > e0) {
-						u += rate;
-						if (!warp_linear) {
-							w *= g;
-						}
-					}
-					corr_position += 1;
-
-					double p = warp_linear ? u : (1.0 - w) * warp_inv;
-					y = y0 + scale * (p * p * (3.0 - 2.0 * p) - s_anchor);
-					if (corr_position < corr_time) {
-						double x = corr_position / corr_time;
-						double h = 1.0 - x;
-						y += corr_slope * corr_time * (x * h * h);
-					}
-
+					y = env_sample_s(&sp, e);
 					e += 1;
 					break;
 				}
@@ -657,6 +695,7 @@ static VALUE ruby_process(VALUE self, VALUE out, VALUE state, VALUE times, VALUE
 			break;
 		}
 
+		y_prev = y_last;
 		note_position += 1;
 		o[i] = use_octaves ? pow(2.0, y * env_at(&octaves_sig, i)) : y;
 	}
@@ -671,6 +710,13 @@ static VALUE ruby_process(VALUE self, VALUE out, VALUE state, VALUE times, VALUE
 	st[ST_PLAN_LENGTH] = plan_length;
 	st[ST_PLAN_CURVE] = plan_curve;
 	st[ST_PLAN_TARGET] = plan_target;
+	if (plan_shape == ENV_SHAPE_S) {
+		e0 = sp.e0;
+		y0 = sp.y0;
+		scale = sp.scale;
+		w = sp.w;
+		g = sp.g;
+	}
 	st[ST_ANCHOR_POSITION] = e0;
 	st[ST_ANCHOR_LEVEL] = y0;
 	st[ST_SCALE] = scale;
@@ -682,14 +728,14 @@ static VALUE ruby_process(VALUE self, VALUE out, VALUE state, VALUE times, VALUE
 	st[ST_RELEASE_SCALE] = release_scale;
 	st[ST_PREV_LEVEL] = y_prev;
 	st[ST_PLAN_SHAPE] = plan_shape;
-	st[ST_PHASE] = u;
-	st[ST_RATE] = rate;
-	st[ST_S_ANCHOR] = s_anchor;
-	st[ST_WARP_INV] = warp_inv;
-	st[ST_WARP_LINEAR] = warp_linear;
-	st[ST_CORR_SLOPE] = corr_slope;
-	st[ST_CORR_TIME] = corr_time;
-	st[ST_CORR_POSITION] = corr_position;
+	st[ST_PHASE] = sp.u;
+	st[ST_RATE] = sp.rate;
+	st[ST_S_ANCHOR] = sp.s_anchor;
+	st[ST_WARP_INV] = sp.warp_inv;
+	st[ST_WARP_LINEAR] = sp.warp_linear;
+	st[ST_CORR_SLOPE] = sp.corr_slope;
+	st[ST_CORR_TIME] = sp.corr_time;
+	st[ST_CORR_POSITION] = sp.corr_position;
 
 	RB_GC_GUARD(keep);
 
