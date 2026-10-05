@@ -434,15 +434,22 @@ module MB
         true
       end
 
-      # Records the peak of lane +idx+'s channel buffers +bufs+ (for
+      # Records the level of lane +idx+'s channel buffers +bufs+ (for
       # Notes#level), and whether the lane is quiet (QUIET; see
-      # #quiet_lanes) and silent (SILENCE; see #start_skipping?).
+      # #quiet_lanes) and silent (SILENCE; see #start_skipping?).  Quiet
+      # and the level use half the peak-to-peak range, ignoring a constant
+      # offset (e.g. a waveshaper's output for silence, which would keep a
+      # lane busy forever); silent uses the absolute peak, since skipping
+      # replaces the lane's output with zeros.
       def measure_lane(idx, bufs)
-        peak = bufs.map { |b| peak_of(b) }.max
+        ranges = bufs.map { |b| range_of(b) }
+        lo = ranges.map(&:first).min
+        hi = ranges.map(&:last).max
+        swing = ranges.map { |mn, mx| (mx - mn) * 0.5 }.max
         idle = @notes[idx].voice_idle?
-        @peaks[idx] = peak
-        @quiet[idx] = idle && peak <= QUIET
-        @silent[idx] = idle && peak <= SILENCE
+        @peaks[idx] = swing
+        @quiet[idx] = idle && swing <= QUIET
+        @silent[idx] = idle && hi <= SILENCE && lo >= -SILENCE
       end
 
       # Marks lane +idx+ as ended (silent from now on).
@@ -451,11 +458,11 @@ module MB
         @peaks[idx] = 0.0
       end
 
-      # The largest absolute sample of +buf+.
-      def peak_of(buf)
-        return 0.0 if buf.equal?(@zeros)
+      # The smallest and largest samples of +buf+ (magnitudes if complex).
+      def range_of(buf)
+        return [0.0, 0.0] if buf.equal?(@zeros)
         buf = buf.abs if buf.is_a?(Numo::SComplex) || buf.is_a?(Numo::DComplex)
-        MB::M.max(buf.max.to_f, -buf.min.to_f)
+        [buf.min.to_f, buf.max.to_f]
       end
 
       # Skips lane +idx+ for +count+ samples, reading its boundary nodes

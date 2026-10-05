@@ -384,6 +384,17 @@ RSpec.describe(MB::Sound::Synth) do
       expect(out.length).to eq(last_sound / 480 + 2)
     end
 
+    it 'ends lanes whose output settles at a constant offset' do
+      # A waveshaper that outputs DC for silence (like a wavetable shaper)
+      s = described_class.new(source(ev.note_on(48), ev.note_off(48, time: 1/20r), last: nil), voices: 1, mono: false, spares: 0, tail: 0) { |v|
+        v.hz.saw * v.amp_env(0, 0.02, 0, 0.02, curve: :linear) + 0.01
+      }
+      count = 0
+      count += 1 while s.sample(480) && count < 1000
+      expect(count).to be < 20
+      expect(s.ended?).to eq(true)
+    end
+
     it 'outputs silence for the tail after every lane has ended' do
       s = described_class.new(source(ev.note_on(48), ev.note_off(48, time: 1/100r), last: nil), voices: 1, tail: 0.5) { |v| v.gate }
       out = []
