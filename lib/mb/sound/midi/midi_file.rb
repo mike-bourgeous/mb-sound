@@ -130,58 +130,6 @@ module MB
           @events.empty?
         end
 
-        # Returns the index of the first event with a timestamp greater than or
-        # equal to the given number of seconds.  If +time+ is after the last
-        # event, returns the number of events (corresponding to an index just
-        # past the end of the list of events).
-        def find_index(time)
-          @events.bsearch_index { |ev| pulse_time(ev.time_from_start) >= time } || @events.length
-        end
-
-        # Returns a fractional index based on the given number of seconds,
-        # where the fractional part represents the relative distance between
-        # the given time and the previous and next events' timestamps.
-        #
-        # If the given +time+ is before or after all events, then the index
-        # will be extrapolated at a rate of 4 events per second.  This allows
-        # the fractional index to be used to scroll an event list before or
-        # after playback in a plausible way.
-        #
-        def fractional_index(time)
-          idx1 = find_index(time) - 1
-          idx1 = 0 if idx1 < 0
-
-          idx2 = idx1 + 1
-
-          if idx2 >= @events.length
-            idx1 = @events.length - 2
-            idx2 = @events.length - 1
-          end
-
-          ts1 = @events[idx1]&.time_from_start
-          ts1 ||= 0
-          time1 = pulse_time(ts1)
-
-          ts2 = @events[idx2]&.time_from_start
-          ts2 ||= ts1
-          time2 = pulse_time(ts2)
-
-          if time < time1
-            # Extrapolating before start
-            idx1 + 0.25 * (time - time1)
-          elsif time > time2
-            # Extrapolating after end
-            idx2 + 0.25 * (time - time2)
-          elsif time1 == time2
-            # Both events have the same timestamp when not extrapolating.  This
-            # must mean time is equal to one of the events.  Otherwise this
-            # should not be possible with binary search.
-            idx1.to_f
-          else
-            idx1 + (time - time1).to_f / (time2 - time1)
-          end
-        end
-
         private
 
         # Calculates the time in seconds at the given number of elapsed MIDI
