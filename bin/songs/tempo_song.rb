@@ -46,12 +46,12 @@ module MB::Sound
     hats = grid(16, 'x.x.x.x.x.x.X.x.').loop
 
     # Pad: two detuned saws per voice, through one filter swept by a
-    # 4-bar LFO that stays on the bar grid.  Its envelope (slow-first
-    # curves, shorter attack and release) swells and fades like the
-    # smoothstep ADSR this song was written with (0.4/1.0/0.8/1.5).
+    # 4-bar LFO that stays on the bar grid.  Its envelope uses smoothstep
+    # S-curves (curve: :smooth), the shape of the ADSR this song was
+    # written with, so the swell has no corner at its top.
     pad = chords.synth(voices: 2) { |v|
       (v.hz.ramp.at(0.5) + v.hz.transpose(0.07).ramp.at(0.5) + v.hz.transpose(7).ramp.at(0.3)) *
-        v.env(0.27, 1.0, 0.8, 1.35, curve: [-21, -12, -6])
+        v.env(0.4, 1.0, 0.8, 1.5, curve: :smooth)
     }.filter(:lowpass, cutoff: 4.bars.lfo.triangle.at(350..2800), quality: 2) * 0.12
 
     # Pluck through a dotted-eighth delay (linear decays here, the echo, and

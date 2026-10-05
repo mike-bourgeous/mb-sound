@@ -43,11 +43,11 @@ module MB::Sound
 
     # Pad: stereo voices (a slightly detuned saw on each side), with each
     # side's filter swept by the same 4-bar LFO half a cycle apart.  Its
-    # envelope (slow-first curves, shorter attack and release) swells and
-    # fades like the smoothstep ADSR this song was written with
-    # (0.4/1.0/0.8/1.5): the same times to -20 and -6 dB, within 5%.
+    # envelope uses smoothstep S-curves (curve: :smooth), the shape of the
+    # ADSR this song was written with, so the swell has no corner at its
+    # top.
     pad = chords.synth(voices: 2) { |v|
-      stereo(v.hz.ramp.at(0.5), v.hz.transpose(0.1).ramp.at(0.5)) * v.env(0.27, 1.0, 0.8, 1.35, curve: [-21, -12, -6])
+      stereo(v.hz.ramp.at(0.5), v.hz.transpose(0.1).ramp.at(0.5)) * v.env(0.4, 1.0, 0.8, 1.5, curve: :smooth)
     }
     sweep = channels(4.bars.lfo.triangle.at(350..2400), 4.bars.lfo.triangle.with_phase(Math::PI).at(350..2400))
     pad = pad.filter(:lowpass, cutoff: sweep, quality: 1.5) * 0.1

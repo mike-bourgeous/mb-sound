@@ -28,18 +28,16 @@ module MB::Sound
   def self.fifth_pad(clip, voices: 2, cutoff: 1400, detune: 0.07, attack: 0.6, release: 2.5, width: 0.012)
     saws = ->(pitch) { pitch.ramp.at(0.5) + pitch.transpose(detune).ramp.at(0.5) }
 
-    # Slow-first curves (attack, decay, release) with 0.68x the attack and
-    # 0.9x the release time swell and fade like the smoothstep envelopes
-    # this patch was written with (times to -20/-6 dB rising and -6/-20 dB
-    # falling within about 5%), so +:attack+ and +:release+ keep their sound.
-    curve = [-21, -12, -6]
-
+    # Smoothstep S-curves (curve: :smooth), the shape of the envelopes this
+    # patch was written with: swells with no corner at their top.
     pad = clip.synth(voices: voices) { |v|
-      swell = v.amp_env(attack * 0.68, 1.0, 0.8, release * 0.9, sensitivity: -6.db..0.db, curve: curve)
+      swell = v.amp_env(attack, 1.0, 0.8, release, sensitivity: -6.db..0.db, curve: :smooth)
 
       # From half the cutoff up to 1.5x (log2(3) octaves above it), settling
-      # at 0.8x (0.5 * 3 ** 0.43; the old linear sweep's 0.5 + 0.3)
-      bloom = v.filt_env(attack * 1.5 * 0.68, 2.0, 0.43, release * 0.9, depth: Math.log2(3), curve: curve)
+      # at 0.8x (0.5 * 3 ** 0.43; the old linear sweep's 0.5 + 0.3).  S
+      # skewed +6 dB rising and -6 dB falling follows the old linear sweep
+      # in octaves (0.03 octaves RMS).
+      bloom = v.filt_env(attack * 1.5, 2.0, 0.43, release, depth: Math.log2(3), curve: [6, 0, -6], shape: :s)
 
       ((saws.(v.hz) + saws.(v.hz.transpose(7)) * 0.7) * swell * 0.35)
         .filter(:lowpass, cutoff: v.cutoff(cutoff * 0.5, env: bloom, keytrack: 0), quality: 0.9)

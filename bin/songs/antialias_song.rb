@@ -51,12 +51,12 @@ module MB::Sound
     hats = grid(16, '..x...x...x..xx.').loop
 
     # Pad: pulses whose width sweeps with a 4-bar LFO, two per voice.  Its
-    # envelope (slow-first curves, shorter attack and release) swells and
-    # fades like the smoothstep ADSR this song was written with
-    # (0.3/0.8/0.8/1.0).
+    # envelope uses smoothstep S-curves (curve: :smooth), the shape of the
+    # ADSR this song was written with, so the swell has no corner at its
+    # top.
     pad = chords.synth(voices: 2) { |v|
       (v.hz.pulse(4.bars.lfo.at(0.12..0.88)).at(0.5) + v.hz.transpose(0.08).pulse(4.bars.lfo.with_phase(Math::PI).at(0.12..0.88)).at(0.5)) *
-        v.env(0.2, 0.8, 0.8, 0.9, curve: [-21, -12, -6])
+        v.env(0.3, 0.8, 0.8, 1.0, curve: :smooth)
     }.filter(:lowpass, cutoff: 2400, quality: 0.7) * 0.2
 
     # Lead: a saw hard-synced to its own note, the sync ratio rising with
