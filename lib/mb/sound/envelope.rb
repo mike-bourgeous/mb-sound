@@ -26,6 +26,17 @@ module MB
     # decays and releases (its attack was about -30); an analog attack with
     # r = 0.3 is about +12.7; r = 0.1 about +21.
     #
+    # Shapes (+:shape+, or #shape): each segment is :exp (the curve above;
+    # the default) or :s, an S-curve: a smoothstep of the same curve, so
+    # it starts and ends with zero slope and joins its neighbors without a
+    # corner (the old smoothstep ADSREnvelope's shape, at 0 dB).  The curve
+    # skews the S: negative dB swells, positive moves fast first.  When
+    # something changes mid-segment (a release, a retrigger, a time,
+    # level, or curve node), an S segment keeps its phase, re-plans the
+    # rest from the current level, and carries the old slope for up to 2
+    # ms (moving at most 1% of the step) so neither the level nor its
+    # slope jumps.  Presets :smooth and :pad set S on every segment.
+    #
     # Inputs (graph nodes or numbers, all optional):
     # - +:gate+: a rising edge (0 to nonzero) starts the attack from the
     #   current level; a falling edge starts the release.
@@ -70,6 +81,7 @@ module MB
     #     play 220.hz.ramp * adsr(0.01, 0.3, 0.5, 1, curve: :snappy)
     #     play 110.hz.ramp.filter(:lowpass, cutoff: 200.constant * filter_env(0.01, 0.4, depth: 4), quality: 4)
     #     play 200.hz.fm(400.hz.at(800) * fm_env(0, 1)) * amp_env(0.001, 1, 0, 0.5)
+    #     play 110.hz.ramp * adsr(1, 0.5, 0.6, 1, curve: :smooth, hold: 2)
     #
     # See bin/plot_envelope.rb to plot envelopes and curves.
     class Envelope

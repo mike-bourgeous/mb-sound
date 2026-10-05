@@ -15,9 +15,24 @@
 #     $0 --curve 0,60,60 --gate 0.2 --lift 0.9 0.1 0.2 0.5 0.4
 #     $0 --preset filter_env --velocity 0.5 0.01 0.3 0 0.3
 #     $0 --print 0.01 0.02 0.5 0.03
+#     $0 --curve smooth --gate 2 1 0.5 0.6 1   # S-curves (the old smoothstep)
+#     $0 --shape s --curve -12,0,12 1 0.5 0.6 1 # skewed S: swell, plain, fast-first
+#     $0 --shape s,exp,exp --gate 0.4 1 0.5 0.6 1  # S attack released early
+#
+# In the console, the same S-curves:
+#     play 110.hz.ramp * adsr(1, 0.5, 0.6, 1, shape: :s, hold: 2)
+#     play 110.hz.ramp * adsr(1, 0.5, 0.6, 1, curve: :pad, hold: 2)
+#     play 110.hz.ramp * adsr(1, 0.5, 0.6, 1, hold: 2).shape(attack: :s).curve(attack: -6)
 
 require 'bundler/setup'
 require 'mb-sound'
+
+# Parses a --shape value: exp or s, or attack,decay,release shapes.
+def parse_shape(text)
+  return nil if text.nil?
+  values = text.split(',').map(&:to_sym)
+  values.length == 1 ? values[0] : values
+end
 
 # Parses a --curve value: a preset name, one number, or attack,decay,release.
 def parse_curve(text)
@@ -42,7 +57,8 @@ end
 MB::Sound.script(
   args: 0..4,
   preset: ['adsr', '-p', 'Envelope preset', String, MB::Sound::Envelope::PRESETS.keys.map(&:to_s)],
-  curve: [nil, '-c', String, 'Curve: a preset (linear, analog, snappy, gentle, swell, dx), dB, or attack,decay,release dB'],
+  curve: [nil, '-c', String, "Curve: a preset (#{MB::Sound::Envelope::CURVES.keys.join(', ')}), dB, or attack,decay,release dB"],
+  shape: [nil, '-s', String, 'Segment shape: exp or s (S-curve) for every segment, or attack,decay,release (e.g. s,exp,exp)'],
   hold: [nil, Float, 'Seconds from the start to the release (one-shots; default 2 * (attack + decay), at least 0.1)'],
   lift: [nil, Float, 'Release velocity (0..1; 0.5 leaves the release time alone, 0 doubles it, 1 halves it)', 0.0..1.0],
   gate: [nil, '-g', Float, 'Hold a gate for this many seconds instead of a one-shot'],
@@ -68,6 +84,7 @@ MB::Sound.script(
       opts[:trigger] = 1.constant.until(1.samples)
     end
     opts[:curve] = curve if curve
+    opts[:shape] = parse_shape(p.shape) if p.shape
     MB::Sound::Envelope.preset(preset, **positional, **opts)
   }
 
@@ -97,7 +114,7 @@ MB::Sound.script(
       plots[name] = sample_all(make.(name), limit)
     end
   else
-    plots[:"#{preset} #{p.curve || 'default'}"] = sample_all(envelope, limit)
+    plots[:"#{preset} #{p.curve || 'default'}#{" #{p.shape}" if p.shape}"] = sample_all(envelope, limit)
   end
 
   length = plots.values.map(&:length).max

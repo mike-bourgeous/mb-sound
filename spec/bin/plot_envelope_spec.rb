@@ -25,4 +25,15 @@ RSpec.describe('bin/plot_envelope.rb') do
     expect(text).to match(/^1440 +0\.03000 +1\.000000  release$/)
     expect(text).to match(/^15840 +0\.33000 +1\.000000  idle$/)
   end
+
+  it 'prints S-curve shapes with --shape and the :smooth preset' do
+    text = run('--print', '--shape', 's,exp,exp', '--curve', '0', '--gate', '0.005', '0.01', '0.01', '0.5', '0.01')
+    expect(text).to include('curve linear shape s/exp/exp')
+    expect(text).to match(/^240 +0\.00500 +0\.496875  release$/) # smoothstep(239 / 480), the last attack sample
+
+    text = run('--print', '--curve', 'smooth', '0.01', '0.02', '0.5', '0.03')
+    expect(text).to include('curve smooth')
+    expect(text).to match(/^480 +0\.01000 +1\.000000  decay$/)
+    expect(text).to match(/^1440 +0\.03000 +0\.500000  sustain$/)
+  end
 end
