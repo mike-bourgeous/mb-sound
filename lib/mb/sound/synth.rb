@@ -34,18 +34,20 @@ module MB
     # (Envelope#retrigger_peak >= Envelope#level: no envelope would attack
     # downward).  :add reuses lanes like :reuse and sets every envelope
     # made through +v+ to Envelope's +retrigger: :add+ (a re-strike attacks
-    # to the energy sum of the current level and its own peak).  Reused
-    # lanes reset key-synced oscillators' phases; ringing patches using
-    # :add or :reuse may want `.free` oscillators.
+    # to the energy sum of the current level and its own peak).  Lanes
+    # re-struck while their :add envelopes still sound keep the phases of
+    # key-synced oscillators (Notes#key_trigger leaves those note-ons out),
+    # so a re-strike adds energy without a click; a lane whose envelopes
+    # have ended resets as a new note.  With :reuse (:restart envelopes)
+    # re-strikes reset key-synced oscillators, as before.
     #
     # Presets for ringing sounds (RETRIGGER_PRESETS):
     # - :string (piano, e-piano, plucked or struck strings): one lane per
     #   key, re-struck in place even with voices free (Allocator
     #   +retrigger: :per_key+), its envelopes adding the strike's energy
     #   (Envelope +retrigger: :add+), so a repeated key never doubles.
-    #   A re-struck string keeps its phase, so string patches want
-    #   `.free` oscillators (key-synced ones jump to phase 0 at each
-    #   strike).
+    #   A re-struck string keeps its phase, and so do key-synced
+    #   oscillators here (see :add); `.free` ones never reset.
     # - :ring (alias :bell; bells and other ringing sounds): a same-note
     #   strike takes a free voice if one is free (as always); with every
     #   voice busy it reuses the quietest lane already playing that note,

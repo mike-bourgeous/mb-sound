@@ -245,6 +245,67 @@ RSpec.describe(MB::Sound::Synth) do
       expect(peak(l0, 0.55, 0.6)).to be > 0.3
     end
 
+    describe 'key sync' do
+      # The 48 lane of #ringing as [tone, envelope] channels, with a
+      # key-synced sine (or a free one).
+      def ringing_tone(mode, vel: 0.1, free: false)
+        events = [
+          ev.note_on(52), ev.note_on(48, 1.0, time: 1/100r),
+          ev.note_off(52, time: 5/100r), ev.note_off(48, time: 5/100r),
+          ev.note_on(48, vel, time: 1/2r), ev.note_off(48, time: 6/10r),
+        ]
+        synth = described_class.new(source(*events), voices: 2, spares: 1, retrigger: mode) { |v|
+          MB::Sound.stereo(free ? v.hz.sine.free : v.hz.sine, v.amp_env(0.001, 2, 0, 1, curve: :linear))
+        }
+        70.times.map { synth.sample_individual(480)[1].map(&:dup) }.transpose.map { |l| l.reduce(:concatenate) }
+      end
+
+      # A sine at 48's frequency starting at sample +start+, for samples
+      # +range+.
+      def sine_from(start, range)
+        f = MB::Sound.tuning.frequency_of(48)
+        Numo::DFloat.cast(range.map { |n| Math.sin(2 * Math::PI * f * (n - start) / 48000.0) })
+      end
+
+      let(:fresh) { 480 }        # 48's first note-on (a fresh voice)
+      let(:restrike) { 24000 }   # its re-strike at 0.5 s
+
+      [:add, :ring, :string].each do |mode|
+        it "with #{mode}, keeps the phase of a ringing lane when it is struck again" do
+          tone, env = ringing_tone(mode)
+          expect(env[restrike - 1]).to be > 0.5 # still ringing
+
+          # A fresh voice resets at its note-on; the re-strike continues
+          after_fresh = (fresh + 40)...restrike
+          expect((tone[after_fresh] - sine_from(fresh, after_fresh)).abs.max).to be < 1e-3
+          later = restrike...(restrike + 4800)
+          expect((tone[later] - sine_from(fresh, later)).abs.max).to be < 1e-3
+        end
+      end
+
+      it 'with :reuse (:restart envelopes), still resets a ringing lane struck again' do
+        tone, env = ringing_tone(:reuse)
+        expect(env[restrike - 1]).to be > 0.5
+        later = (restrike + 40)...(restrike + 4800)
+        expect((tone[later] - sine_from(fresh, later)).abs.max).to be > 0.5
+        expect((tone[later] - sine_from(restrike, later)).abs.max).to be < 1e-3
+      end
+
+      it 'with :add, resets a lane struck after its envelopes have ended' do
+        events = [
+          ev.note_on(48, 1.0, time: 1/100r), ev.note_off(48, time: 5/100r),
+          ev.note_on(48, 0.5, time: 1/2r), ev.note_off(48, time: 6/10r),
+        ]
+        synth = described_class.new(source(*events), voices: 1, mono: false, spares: 0, retrigger: :add, skip_idle: false) { |v|
+          MB::Sound.stereo(v.hz.sine, v.amp_env(0.001, 0.01, 0, 0.01, curve: :linear))
+        }
+        tone, env = 70.times.map { synth.sample_individual(480)[0].map(&:dup) }.transpose.map { |l| l.reduce(:concatenate) }
+        expect(env[(restrike - 4800)...restrike].abs.max).to eq(0)
+        later = (restrike + 40)...(restrike + 4800)
+        expect((tone[later] - sine_from(restrike, later)).abs.max).to be < 1e-3
+      end
+    end
+
     describe ':ring (alias :bell)' do
       # 48 rings loud on lane 0, a softer 48 on lane 1 (a voice was free),
       # then 48 again at 0.5 s with every voice busy, and 55 at 0.6 s.
