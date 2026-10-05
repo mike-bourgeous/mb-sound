@@ -454,12 +454,68 @@ void mb_jack_free_list(const char **list)
 	}
 }
 
+// How long mb_jack_connect/mb_jack_disconnect wait for the graph to change.
+#define CONNECT_WAIT_NS 200000000L
+
+// True if +source+ is connected to +destination+ in JACK's current graph
+// (also true if either port can't be found, so callers don't wait for it).
+static int connected(const char *source, const char *destination)
+{
+	jack_port_t *src = jack.port_by_name(client, source);
+	jack_port_t *dst = jack.port_by_name(client, destination);
+	if (src == NULL || dst == NULL) {
+		return 1;
+	}
+
+	const char *dst_name = jack.port_name(dst); // the full name, not an alias
+	const char **list = jack.port_get_all_connections(client, src);
+	int found = 0;
+	for (int i = 0; list != NULL && list[i] != NULL && !found; i++) {
+		found = strcmp(list[i], dst_name) == 0;
+	}
+	mb_jack_free_list(list);
+	return found;
+}
+
+// jack_connect and jack_disconnect return once the server has queued the
+// change, which takes effect (and shows in the port's connections) at the
+// start of a later cycle: under load, 2 of 200 connections on the dummy
+// server weren't listed yet right after jack_connect (up to 19 ms), and a
+// message sent at once could miss the new connection.  So wait (up to
+// CONNECT_WAIT_NS) until the graph shows the change.
+static void wait_for_graph(const char *source, const char *destination, int want_connected)
+{
+	struct timespec start, now, pause = { 0, 1000000 };
+	clock_gettime(CLOCK_MONOTONIC, &start);
+	while (connected(source, destination) != want_connected) {
+		clock_gettime(CLOCK_MONOTONIC, &now);
+		if ((now.tv_sec - start.tv_sec) * 1000000000L + (now.tv_nsec - start.tv_nsec) > CONNECT_WAIT_NS) {
+			return;
+		}
+		nanosleep(&pause, NULL);
+	}
+}
+
 int mb_jack_connect(const char *source, const char *destination)
 {
-	return mb_jack_is_open() ? jack.connect(client, source, destination) : -1;
+	if (!mb_jack_is_open()) {
+		return -1;
+	}
+	int result = jack.connect(client, source, destination);
+	if (result == 0) {
+		wait_for_graph(source, destination, 1);
+	}
+	return result;
 }
 
 int mb_jack_disconnect(const char *source, const char *destination)
 {
-	return mb_jack_is_open() ? jack.disconnect(client, source, destination) : -1;
+	if (!mb_jack_is_open()) {
+		return -1;
+	}
+	int result = jack.disconnect(client, source, destination);
+	if (result == 0) {
+		wait_for_graph(source, destination, 0);
+	}
+	return result;
 }
