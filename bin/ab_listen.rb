@@ -214,13 +214,21 @@ class ABPlayer
     @b_gain = (a_rms.finite? && b_rms.finite?) ? 10 ** ((a_rms - b_rms) / 20) : 1.0
 
     $stderr.print "\r\e[K" if @keys
-    $stderr.puts pair_info
+    say pair_info
     if @notes
       @pair.notes.first(6).each do |n|
-        $stderr.puts MB::U.wrap(n, width: [MB::U.width - 4, 40].max).lines.map { |l| "  \e[2m#{l.chomp}\e[0m" }
+        say MB::U.wrap(n, width: [MB::U.width - 4, 40].max).lines.map { |l| "  \e[2m#{l.chomp}\e[0m" }
       end
     end
     status_line
+  end
+
+  # Prints lines to stderr, ending them with CR LF while the key reader
+  # has the terminal in raw mode (a bare LF doesn't return to column 0).
+  def say(lines)
+    text = Array(lines).join("\n")
+    eol = @keys ? "\r\n" : "\n"
+    $stderr.print text.gsub("\n", eol) + eol
   end
 
   def pair_info
@@ -381,7 +389,7 @@ class ABPlayer
           @revealed = true
           $stderr.print "\r\e[K"
           @blind = false
-          $stderr.puts pair_info
+          say pair_info
           @blind = true
           status_line
         end
