@@ -154,8 +154,9 @@ begin
         # specs under Valgrind; ffmpeg and other tools run natively.  A
         # process that execs a skipped program leaves truncated XML, which
         # MemcheckTruncatedXml above cleans up.
-        # jackd: the MIDI specs' dummy JACK server (spec/support/jack_dummy.rb).
-        '--trace-children-skip=*ffmpeg*,*ffprobe*,*gnuplot*,*/dot,*/git,*jackd*',
+        # jackd: the MIDI specs' dummy JACK server (spec/support/jack_dummy.rb),
+        # started through setpriv.
+        '--trace-children-skip=*ffmpeg*,*ffprobe*,*gnuplot*,*/dot,*/git,*jackd*,*setpriv*',
         # Forked children that don't exec (fork_script) would repeat the
         # parent's leak report, so only exec'd programs report.
         '--child-silent-after-fork=yes',

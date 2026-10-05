@@ -20,6 +20,14 @@ else
   if have_header('jack/jack.h') && have_library('jack', 'jack_client_open')
     $defs << '-D__UNIX_JACK__'
     $defs << '-DJACK_HAS_PORT_RENAME' if have_func('jack_port_rename', 'jack/jack.h')
+
+    # RtMidi's own build defines HAVE_SEMAPHORE where semaphore.h exists.
+    # Without it, MidiOutJack::closePort unregisters the port while the
+    # client's process callback may be using it, which crashed libjack's
+    # process thread in about one of ten JACK spec runs under load
+    # (jack_midi_clear_buffer on the unregistered port); with it, closePort
+    # first waits (up to 1 s) for a process cycle to finish.
+    $defs << '-DHAVE_SEMAPHORE' if have_header('semaphore.h')
   end
 
   $libs << ' -lstdc++'
