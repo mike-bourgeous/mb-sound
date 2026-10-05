@@ -376,13 +376,15 @@ RSpec.describe(MB::Sound::MIDI::LiveSource, :aggregate_failures) do
     # sends notes; returns the clicks' captured indices by note number, the
     # reference input's raw messages, the output, the source, and for each
     # note-on read, [note, event time, the read's start, the output's
-    # #jack_clock just before and just after the read].
+    # #jack_clock values the source read when it stamped the note].
     #
     # The dummy JACK server skips cycles when it wakes up late (e.g. under
     # the full suite's load): its frame clock then moves a period or more
     # ahead of the audio played (frame_time - frames_played grows by 256).
     # That is a server xrun, not a placement error, so expectations use the
-    # clock of the read that placed each event rather than one taken later.
+    # clock the source read when it stamped each event (recorded by wrapping
+    # the input's #read_raw and the output's #jack_clock) rather than one
+    # taken later or around the read that returned the event.
     def play_notes(timing:, notes: 12, buffer_size: 512)
       out = open(MB::Sound::DeviceOutput.new(channels: 1, latency: 0.2, adaptive: false, capture: 48000 * 4))
       keyboard = open(MB::Sound::FastMIDI::Output.new(:jack, "#{ENV['JACK_CLIENT_NAME']}_keys", nil, 'out'))
@@ -390,6 +392,20 @@ RSpec.describe(MB::Sound::MIDI::LiveSource, :aggregate_failures) do
       reference = open(MB::Sound::MIDI::Input.new(connect: "#{ENV['JACK_CLIENT_NAME']}_keys"))
       expect(inp.api).to eq(:jack)
       src = open(MB::Sound::MIDI::LiveSource.new(inp, output: out, timing: timing))
+
+      # The clocks the source read while stamping each note-on it polled
+      # (events wait in the source until their time comes, so a note is
+      # returned by a later read than the one that stamped it)
+      stamped = Hash.new { |h, k| h[k] = [] }
+      polled = []
+      read_raw = inp.method(:read_raw)
+      inp.define_singleton_method(:read_raw) { polled = read_raw.call }
+      jack_clock = out.method(:jack_clock)
+      out.define_singleton_method(:jack_clock) do
+        jack_clock.call.tap { |clock|
+          polled.each { |_frame, bytes| stamped[bytes.getbyte(1)] << clock if bytes.getbyte(0) & 0xf0 == 0x90 } if clock
+        }
+      end
 
       sender = Thread.new do
         sleep 0.3
@@ -406,12 +422,11 @@ RSpec.describe(MB::Sound::MIDI::LiveSource, :aggregate_failures) do
       while sender.alive?
         from = Rational(n * buffer_size, 48000)
         buf = Numo::SFloat.zeros(buffer_size)
-        before = out.jack_clock
         events = src.read(from, from + Rational(buffer_size, 48000))
-        after = out.jack_clock
+        polled = []
         events.each do |e|
           next unless e.note_on?
-          reads << [e.note, e.time, from, [before, after]]
+          reads << [e.note, e.time, from, stamped[e.note]]
           offset = (e.time - from) * 48000
           expect(offset.denominator).to eq(1) if timing == :exact
           buf[offset.floor] = e.note
@@ -476,10 +491,9 @@ RSpec.describe(MB::Sound::MIDI::LiveSource, :aggregate_failures) do
 
       # Each note plays on the captured sample (the device's clock) that
       # reached the ports at its JACK frame plus the latency, by the clock
-      # of the read that placed it (see #play_notes about skipped cycles;
-      # when the server skipped a cycle during the read itself, the source
-      # may have seen the clock from before or after it)
-      clocks = reads.to_h { |note, _time, _from, pair| [note, pair] }
+      # the source read when it placed the note (see #play_notes about
+      # skipped cycles)
+      clocks = reads.to_h { |note, _time, _from, seen| [note, seen] }
       expected = raw.to_h { |frame, bytes|
         note = bytes.bytes[1]
         options = clocks.fetch(note).map { |clock| played_at(frame, clock, latency) }.uniq
