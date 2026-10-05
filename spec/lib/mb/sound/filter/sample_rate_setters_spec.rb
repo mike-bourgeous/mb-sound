@@ -82,15 +82,14 @@ RSpec.describe('Filter#sample_rate=', :aggregate_failures) do
     end
   end
 
-  it 'retunes the ADSR smoothing filter' do
+  it 'retunes an Envelope' do
     make = ->(rate) {
-      MB::Sound::ADSREnvelope.new(attack_time: 0.01, decay_time: 0.05, sustain_level: 0.5, release_time: 0.1, sample_rate: rate)
+      MB::Sound::Envelope.new(attack: 0.01, decay: 0.05, sustain: 0.5, release: 0.1, hold: 0.06, sample_rate: rate)
     }
     retuned = make.call(44100)
     retuned.sample_rate = 48000
     fresh = make.call(48000)
-    [retuned, fresh].each { |e| e.trigger(1) }
-    expect(retuned.sample(4800)).to eq(fresh.sample(4800))
+    expect(retuned.sample(9600)).to eq(fresh.sample(9600))
   end
 
   it 'keeps the Hilbert stage of a complex ChannelMixer at the new rate' do

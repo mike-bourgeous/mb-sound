@@ -238,8 +238,8 @@ module MB
         end
 
         # Returns a stream with only events on +channels+ (an Integer from 0
-        # to 15, or an Array or Range of them).  Channels are 0-based, like
-        # Manager's +:channel+ (MIDI channel 10, drums, is 9).  System and
+        # to 15, or an Array or Range of them).  Channels are 0-based (MIDI
+        # channel 10, drums, is 9).  System and
         # sysex events pass through.
         def channel(channels)
           Stream.new(Transform::Channel.new(self, channels))

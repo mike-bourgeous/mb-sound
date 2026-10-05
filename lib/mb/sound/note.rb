@@ -95,8 +95,8 @@ module MB
         MB::Sound.tuning.frequency_of(@number, @detune)
       end
 
-      # The unit of the note number Constant inside #freq, which lets
-      # MIDI::GraphVoice tell it from frequencies in Hz.
+      # The unit of the note number Constant inside #freq (shown in graph
+      # views), which tells it from frequencies in Hz.
       NUMBER_UNIT = ' note'
 
       # A node producing the note's frequency in Hz in the current tuning,

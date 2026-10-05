@@ -24,9 +24,9 @@ module MB
         # will be interpolated over the duration one output sampling frame,
         # instead of changing suddenly at the start of the frame.
         #
-        # If nil, then other graph nodes (e.g. MIDI::GraphVoice) may change the
-        # value (e.g. defaulting frequency constants to change instantly
-        # instead of being interpolated).
+        # nil (the default) behaves like true; it leaves the choice open for
+        # code that changes the value from outside (e.g. to make frequency
+        # constants change instantly instead of being interpolated).
         attr_accessor :smoothing
 
         # The sample rate given to the constructor, used for timed changes.

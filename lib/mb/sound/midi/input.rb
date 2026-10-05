@@ -6,8 +6,9 @@ module MB
       # a JACK server answers (jackd, or PipeWire's JACK), else RtMidi (the
       # fast_midi C extension; MB::Sound::FastMIDI::Input): CoreMIDI on
       # macOS, the ALSA sequencer on Linux.  A C thread queues messages and
-      # #read polls them (once per audio buffer, from Manager#update), so no
-      # Ruby code runs on a MIDI thread, and no JACK server is ever started.
+      # #read_raw polls them (once per audio buffer, from MIDI::LiveSource),
+      # so no Ruby code runs on a MIDI thread, and no JACK server is ever
+      # started.
       #
       # By default the input is a port for other programs (DAWs, keyboards'
       # software, qjackctl, qpwgraph, aconnect, Audio MIDI Setup) to connect
@@ -25,7 +26,7 @@ module MB
       #
       # Example:
       #     input = MB::Sound::MIDI::Input.new(connect: 'Launchkey')
-      #     input.read  # => [[[0.0, "\x90<d"], [0.012, "\x80<\x00"]]]
+      #     input.read_raw  # => [[0.0, "\x90<d"], [0.012, "\x80<\x00"]] (RtMidi deltas)
       class Input
         class << self
           # The MIDI APIs available: RtMidi's (:core, :alsa) plus :jack (the
@@ -172,32 +173,11 @@ module MB
           DeviceOutput.track(self, true)
         end
 
-        # Returns the messages received since the last read in the form
-        # Manager#update expects: [[[seconds, bytes], ...]], with each
-        # message's time in seconds after the first one in this read.  With
-        # +blocking: true+, waits for at least one message.
-        def read(blocking: false)
-          return [jack_events(@input.read(blocking))] if @api == :jack
-
-          messages = @input.read
-          while blocking && messages.empty?
-            sleep 0.001
-            messages = @input.read
-          end
-
-          time = 0.0
-          events = messages.each_with_index.map { |(delta, bytes), i|
-            time += delta if i > 0
-            [time, bytes]
-          }
-          [events]
-        end
-
         # Returns the messages received since the last read with their
-        # timestamps as the API gives them (for MIDI::LiveSource; #read is
-        # the old Manager's format): on JACK (#frame_times?), [[frame,
-        # bytes], ...] with absolute JACK frame times (JACK's 32-bit frame
-        # counter, which wraps; #frame_rate frames per second); with RtMidi,
+        # timestamps as the API gives them (for MIDI::LiveSource): on JACK
+        # (#frame_times?), [[frame, bytes], ...] with absolute JACK frame
+        # times (JACK's 32-bit frame counter, which wraps; #frame_rate
+        # frames per second); with RtMidi,
         # [[delta, bytes], ...] with each message's time in seconds after the
         # previous message received (across reads; 0 for the first message
         # since opening).  Never waits.
@@ -222,7 +202,7 @@ module MB
           @api == :jack ? (@input.port_name || "#{Jack.client_name}:#{@port_name}") : "#{DeviceOutput.client_name}:#{@port_name} (virtual)"
         end
 
-        # The sources this input is connected to (for Manager#connections).
+        # The sources this input is connected to.
         # On JACK these are its live connections (including any made in
         # qpwgraph etc.), or the port itself while unconnected.
         def connections
@@ -244,18 +224,6 @@ module MB
         def closed?
           @input.closed?
         end
-
-        private
-
-        # JACK frame times to seconds after the first message in the read
-        def jack_events(messages)
-          return [] if messages.empty?
-
-          first = messages[0][0]
-          messages.map { |frame, bytes| [((frame - first) & 0xffff_ffff) / @rate, bytes] }
-        end
-
-        public
 
         def to_s
           "#<#{self.class.name} #{@api} #{connections.first}#{' closed' if closed?}>"

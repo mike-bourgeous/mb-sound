@@ -52,7 +52,7 @@ def loopback(api)
   out.write([0x90, 60, 100])
   events = []
   while events.empty? && MB::U.clock_now - start < 2
-    events.concat(input.read[0])
+    events.concat(input.read_raw)
     sleep 0.002
   end
 
@@ -136,7 +136,7 @@ MB::Sound.script(
 
     start = MB::U.clock_now
     while MB::U.clock_now - start < p.listen
-      input.read[0].each do |_t, bytes|
+      input.read_raw.each do |_t, bytes|
         puts format('%8.3f  %s', MB::U.clock_now - start, bytes.bytes.map { |b| '%02x' % b }.join(' '))
       end
       sleep 0.005

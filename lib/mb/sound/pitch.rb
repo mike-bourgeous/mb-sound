@@ -94,7 +94,7 @@ module MB
       end
 
       # Shortcuts for a sine Tone at this pitch (see Tone#at, #with_phase,
-      # #fm, #log_fm, #pm, #lfo, #pwm/#skew, #noise, #no_trigger), and a
+      # #fm, #log_fm, #pm, #lfo, #pwm/#skew, #noise), and a
       # pulse (Tone#pulse, #apulse).
       def at(amplitude) = tone.at(amplitude)
       def with_phase(phase) = tone.with_phase(phase)
@@ -111,7 +111,6 @@ module MB
       def pulse(width = 0.5, dc: false) = tone.pulse(width, dc: dc)
       def apulse(width = 0.5, dc: false) = tone.apulse(width, dc: dc)
       def noise(blend = true) = tone.noise(blend)
-      def no_trigger(trig = true) = tone.no_trigger(trig)
 
       # Shortcuts for a sine Tone at this pitch with a reset input
       # (Tone#reset), never reset (Tone#free), or a random phase

@@ -41,7 +41,7 @@ RSpec.describe(MB::Sound::MIDI::Input, :aggregate_failures) do
   end
 
   describe '#read_raw with RtMidi' do
-    it "passes RtMidi's deltas through, while #read keeps its per-read times" do
+    it "passes RtMidi's deltas through" do
       rtmidi = instance_double(MB::Sound::FastMIDI::Input, close: nil, closed?: false)
       allow(MB::Sound::FastMIDI::Input).to receive(:new).and_return(rtmidi)
       allow(rtmidi).to receive(:read).and_return([[0.5, "\x90<d"], [0.25, "\x80<\x00"]])
@@ -50,15 +50,8 @@ RSpec.describe(MB::Sound::MIDI::Input, :aggregate_failures) do
       expect(inp.frame_times?).to eq(false)
       expect(inp.frame_rate).to be_nil
       expect(inp.read_raw).to eq([[0.5, "\x90<d"], [0.25, "\x80<\x00"]])
-      expect(inp.read).to eq([[[0.0, "\x90<d"], [0.25, "\x80<\x00"]]])
     ensure
       inp&.close
-    end
-  end
-
-  describe 'MB::Sound.midi_manager' do
-    it 'refuses an existing file that is not a MIDI file' do
-      expect { MB::Sound.midi_manager('spec/test_data/make_arp_a7.rb') }.to raise_error(ArgumentError, /make_arp_a7.rb is not a MIDI file/)
     end
   end
 
@@ -87,12 +80,12 @@ RSpec.describe(MB::Sound::MIDI::Input, :aggregate_failures) do
       messages.each { |m| keyboard.send_bytes(m.pack('C*')) }
     end
 
-    # Reads until +count+ events arrive (Manager#update's read format)
+    # Reads until +count+ events arrive (#read_raw's [time, bytes] pairs)
     def wait_for(inp, count)
       events = []
       deadline = MB::U.clock_now + 2
       while events.length < count && MB::U.clock_now < deadline
-        events.concat(inp.read[0])
+        events.concat(inp.read_raw)
         sleep 0.005
       end
       events
@@ -116,8 +109,7 @@ RSpec.describe(MB::Sound::MIDI::Input, :aggregate_failures) do
       send([0x90, 64, 90], [0x80, 64, 0])
       events = wait_for(inp, 2)
       expect(events.map { |_, b| b.bytes }).to eq([[0x90, 64, 90], [0x80, 64, 0]])
-      expect(events[0][0]).to eq(0.0)
-      expect(events[1][0]).to be >= 0
+      expect(events.map(&:first)).to all(be_a(Integer)) # JACK frame times
     end
 
     it 'defaults to JACK MIDI when a JACK server answers' do
@@ -202,43 +194,13 @@ RSpec.describe(MB::Sound::MIDI::Input, :aggregate_failures) do
       expect(gap).to be_between(512, 4800)
     end
 
-    it 'returns [[]] when nothing has arrived, and waits with blocking: true' do
+    it 'returns [] from #read_raw when nothing has arrived' do
       inp = input(connect: 'mbspec_keyboard')
-      expect(inp.read).to eq([[]])
+      expect(inp.read_raw).to eq([])
 
-      Thread.new { sleep 0.05; send([0xb0, 7, 100]) }
-      expect(inp.read(blocking: true)[0].map { |_, b| b.bytes }).to eq([[0xb0, 7, 100]])
-    end
-
-    it 'feeds a MIDI::Manager' do
-      inp = input(connect: 'mbspec_keyboard')
-      manager = MB::Sound::MIDI::Manager.new(input: inp, update_rate: 100)
-      expect(manager.connections).to eq(['mbspec_keyboard:out'])
-
-      notes = []
-      manager.on_note { |note, velocity, onoff| notes << [note, velocity, onoff] }
-      mod = nil
-      manager.on_cc(1, range: 0..127, filter_hz: nil) { |v| mod = v }
       sleep 0.05
-      send([0x90, 60, 100], [0xb0, 1, 127], [0x80, 60, 0])
-
-      deadline = MB::U.clock_now + 2
-      until notes.length >= 2 || MB::U.clock_now > deadline
-        manager.update
-        sleep 0.005
-      end
-      manager.update
-
-      expect(notes.map { |n, v, on| [n, on] }).to eq([[60, true], [60, false]])
-      expect(mod).to be_within(0.01).of(127)
-    end
-
-    it 'is what MB::Sound.midi_manager opens for live MIDI' do
-      manager = MB::Sound.midi_manager('mbspec_keyboard')
-      @inputs << manager.instance_variable_get(:@midi_in)
-      expect(manager.connections).to eq(['mbspec_keyboard:out'])
-    ensure
-      MB::Sound.instance_variable_get(:@midi_managers)&.delete('mbspec_keyboard')
+      send([0xb0, 7, 100])
+      expect(wait_for(inp, 1).map { |_, b| b.bytes }).to eq([[0xb0, 7, 100]])
     end
   end
 end
