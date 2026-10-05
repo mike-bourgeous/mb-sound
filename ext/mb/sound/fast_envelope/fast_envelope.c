@@ -98,6 +98,7 @@ enum env_flags {
 	ENV_LEGATO = 8,
 	ENV_OCTAVES = 16,
 	ENV_LIFT = 32,
+	ENV_ADD = 64,     // retrigger peaks add to the current level (energy sum)
 };
 
 // A parameter or input: a constant, or a float or double per sample.
@@ -203,6 +204,22 @@ static double env_peak(double v, double low, double high, int db)
 	return low + (high - low) * v;
 }
 
+// The peak of a note that starts at level +y+ with velocity peak +p+ when
+// the ENV_ADD flag is set: the energy sum sqrt(y^2 + p^2), at most the
+// larger of the loudest velocity's peak (the larger of +low+ and +high+)
+// and the current level, so a retrigger never attacks downward and never
+// goes past a full-velocity note (unless it was already above one).
+static double env_add_peak(double y, double p, double low, double high)
+{
+	double a = fabs(y);
+	double sum = sqrt(a * a + p * p);
+	double cap = fabs(low) > fabs(high) ? fabs(low) : fabs(high);
+	if (a > cap) {
+		cap = a;
+	}
+	return sum > cap ? cap : sum;
+}
+
 /*
  * Runs the envelope for one buffer:
  *   process(out, state, times, curves, levels, hold, inputs, config)
@@ -217,6 +234,9 @@ static double env_peak(double v, double low, double high, int db)
  * the ENV_LIFT and ENV_OCTAVES flags).  +config+ is [flags, release node,
  * velocity low, velocity high, velocity in dB (0 or 1), choke samples,
  * curve scale] (see MB::Sound::Envelope#kernel_config).
+ *
+ * With the ENV_ADD flag, a note's peak is env_add_peak of the level when
+ * it starts and its velocity's peak (Envelope retrigger: :add).
  *
  * Triggers fire on rising edges: a sample > 0 after a sample <= 0
  * (negative values are reserved).  A release starts with its time scaled
@@ -269,6 +289,7 @@ static VALUE ruby_process(VALUE self, VALUE out, VALUE state, VALUE times, VALUE
 	int legato = !!(flags & ENV_LEGATO);
 	int use_octaves = !!(flags & ENV_OCTAVES);
 	int has_lift = !!(flags & ENV_LIFT);
+	int add = !!(flags & ENV_ADD);
 
 	size_t n = RNARRAY_SHAPE(out)[0];
 	VALUE keep = rb_ary_new();
@@ -346,6 +367,9 @@ static VALUE ruby_process(VALUE self, VALUE out, VALUE state, VALUE times, VALUE
 
 		if (start) {
 			peak = env_peak(env_at(&velocity_sig, i), velocity_low, velocity_high, velocity_db);
+			if (add) {
+				peak = env_add_peak(y, peak, velocity_low, velocity_high);
+			}
 			stage = ENV_SEGMENT;
 			seg = 0;
 			e = 0;

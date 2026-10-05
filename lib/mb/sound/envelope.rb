@@ -43,6 +43,18 @@ module MB
     #   lift are equal ratios of time, like the octave steps of a pitch.
     #   Without +:lift+ the release time is unchanged.
     #
+    # Retriggers (+:retrigger+, or #retrigger): a note that starts while the
+    # envelope is still sounding attacks from the current level.  With
+    # :restart (the default) it attacks to its own velocity's peak, even if
+    # that is lower than the current level (a ringing note struck softly
+    # drops to the softer note's peak).  With :add it attacks to the energy
+    # sum sqrt(level² + peak²), at most the larger of the loudest velocity's
+    # peak and the current level, so a retrigger never attacks downward or
+    # goes past a full-velocity note; the decay continues from there.  From
+    # silence both modes are the same.  (Synth voices reused for a repeated
+    # note also reset key-synced oscillators' phases; ringing patches that
+    # use :add usually want `.free` oscillators.)
+    #
     # With no gate and no trigger, the envelope is a one-shot: it starts on
     # its first sample, releases +:hold+ seconds later (from wherever it is,
     # so a hold shorter than the attack and decay cuts them short), and
@@ -140,6 +152,12 @@ module MB
       FLAG_LEGATO = 8
       FLAG_OCTAVES = 16
       FLAG_LIFT = 32
+      FLAG_ADD = 64
+
+      # Retrigger modes (see #retrigger): :restart attacks from the current
+      # level to the new note's velocity peak; :add attacks to the energy
+      # sum of the current level and that peak.
+      RETRIGGER_MODES = [:restart, :add].freeze
 
       # Remaining curvature below which a segment is planned as a line (the
       # C ENV_LINEAR_LIMIT).
@@ -236,6 +254,8 @@ module MB
       #                     gains, e.g. -18.db..0.db).
       # +:legato+ - If true, triggers while the gate is held keep the current
       #             stage (see #legato).
+      # +:retrigger+ - :restart (default) or :add (see the class
+      #                description and #retrigger).
       # +:octaves+ - If not nil or 0, the output is 2 ** (level * octaves), a
       #              cutoff multiplier (a number of octaves, anything with
       #              #to_octaves such as an Interval, or a graph node read
@@ -245,7 +265,7 @@ module MB
         curve: :analog, hold: nil,
         gate: nil, trigger: nil, velocity: nil, choke: nil, lift: nil,
         sensitivity: 0..1, velocity_range: nil, velocity_scale: :linear, legato: false, octaves: nil,
-        sample_rate: 48000
+        retrigger: :restart, sample_rate: 48000
       )
         @sample_rate = sample_rate.to_f
         raise ArgumentError, "Sample rate must be positive (got #{sample_rate.inspect})" unless @sample_rate > 0
@@ -277,6 +297,7 @@ module MB
         set_sensitivity(sensitivity, velocity_scale)
 
         @legato = !!legato
+        self.retrigger = retrigger
         self.octaves = octaves
 
         @last = {}
@@ -396,6 +417,41 @@ module MB
       # True if triggers while the gate is held are ignored (see #legato).
       def legato?
         @legato
+      end
+
+      # Sets the retrigger mode (:restart or :add; see the class description)
+      # and returns self, or returns the mode without an argument.
+      #
+      # Example:
+      #     v.amp_env(0.001, 6, 0, 5).retrigger(:add)
+      def retrigger(mode = nil)
+        return @retrigger if mode.nil?
+        self.retrigger = mode
+        self
+      end
+
+      # Sets the retrigger mode (:restart or :add; see the class
+      # description).
+      def retrigger=(mode)
+        unless RETRIGGER_MODES.include?(mode)
+          raise ArgumentError, "Retrigger mode must be one of #{RETRIGGER_MODES} (got #{mode.inspect})"
+        end
+        @retrigger = mode
+        changed!
+      end
+
+      # The peak level a note with +velocity+ (0..1) reaches, starting from
+      # silence: the velocity mapped through #sensitivity.  See
+      # #retrigger_peak for a note that starts while sounding.
+      def velocity_peak(velocity)
+        self.class.velocity_peak(velocity.to_f, @velocity_low, @velocity_high, @velocity_scale == :db)
+      end
+
+      # The peak level a note with +velocity+ would attack to if it started
+      # now (from the current #level), following the #retrigger mode.
+      def retrigger_peak(velocity)
+        peak = velocity_peak(velocity)
+        @retrigger == :add ? self.class.add_peak(level, peak, @velocity_low, @velocity_high) : peak
       end
 
       # Sets the velocity +range+ of peak levels (a Range, or 0 or nil for
@@ -533,7 +589,7 @@ module MB
           t.is_a?(Numeric) ? MB::M.sigfigs(t, 4) : t.to_s
         }
         curves = CURVES.key(@curves.values) || @curves.values.map { |c| c.is_a?(Numeric) ? MB::M.sigfigs(c, 4) : c.to_s }.join('/')
-        "#{super} -- adsr(#{times.join(', ')}) curve #{curves}"
+        "#{super} -- adsr(#{times.join(', ')}) curve #{curves}#{' retrigger add' if @retrigger == :add}"
       end
 
       # The config Array for the kernels (see FastEnvelope.process).
@@ -545,6 +601,7 @@ module MB
         flags |= FLAG_LEGATO if @legato
         flags |= FLAG_OCTAVES if @octaves
         flags |= FLAG_LIFT if @lift
+        flags |= FLAG_ADD if @retrigger == :add
 
         [
           flags,
@@ -581,6 +638,7 @@ module MB
         legato = flags & FLAG_LEGATO != 0
         use_octaves = flags & FLAG_OCTAVES != 0
         has_lift = flags & FLAG_LIFT != 0
+        add = flags & FLAG_ADD != 0
 
         seg_times = times.map { |v| signal(v, n, 0.0) }
         seg_curves = curves.map { |v| signal(v, n, 0.0) }
@@ -644,6 +702,7 @@ module MB
 
           if start
             peak = velocity_peak(at(velocity_sig, i), velocity_low, velocity_high, velocity_db)
+            peak = add_peak(y, peak, velocity_low, velocity_high) if add
             stage = STAGE_SEGMENT
             seg = 0
             e = 0.0
@@ -784,6 +843,17 @@ module MB
         v = 0.0 unless v >= 0
         v = 1.0 if v > 1
         db ? low * (high / low) ** v : low + (high - low) * v
+      end
+
+      # Mirror of the C env_add_peak: the peak of a note that starts at
+      # level +y+ with velocity peak +p+ in :add retrigger mode (see the
+      # class description).
+      def self.add_peak(y, p, low, high)
+        a = y.abs
+        sum = Math.sqrt(a * a + p * p)
+        cap = low.abs > high.abs ? low.abs : high.abs
+        cap = a if a > cap
+        sum > cap ? cap : sum
       end
 
       # A kernel signal for .process_ruby: a Float or an Array of Floats.

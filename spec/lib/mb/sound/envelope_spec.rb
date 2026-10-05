@@ -95,6 +95,7 @@ RSpec.describe(MB::Sound::Envelope) do
         flags |= MB::Sound::Envelope::FLAG_LEGATO if rng.rand < 0.3
         flags |= MB::Sound::Envelope::FLAG_OCTAVES if rng.rand < 0.2
         flags |= MB::Sound::Envelope::FLAG_LIFT if rng.rand < 0.4
+        flags |= MB::Sound::Envelope::FLAG_ADD if trial.odd? # without drawing from rng, keeping the older cases
         db = rng.rand < 0.4
         config = [
           flags, 2,
@@ -550,6 +551,76 @@ RSpec.describe(MB::Sound::Envelope) do
 
     it 'rejects a Range given as velocity' do
       expect { described_class.new(velocity: 0.5..1) }.to raise_error(ArgumentError, /sensitivity/)
+    end
+  end
+
+  describe 'retrigger modes' do
+    # A ringing envelope (attack 0, decay 1000 samples to 0, linear) struck
+    # at sample 0 with velocity 1 and at sample 500 with +second+.
+    def strikes(second, mode, kernel: :sample)
+      vel = Numo::SFloat.zeros(1000)
+      vel[0...500] = 1
+      vel[500..] = second
+      env = described_class.new(
+        attack: 0, decay: 1000.samples, sustain: 0, release: 0, curve: 0, hold: false,
+        trigger: array_node_class.new(pulses(1000, 0, 500)), velocity: array_node_class.new(vel),
+        retrigger: mode
+      )
+      env.public_send(kernel, 1000)
+    end
+
+    it 'defaults to :restart, attacking to the new peak even when lower' do
+      expect(described_class.new.retrigger).to eq(:restart)
+      data = strikes(0.2, :restart)
+      expect(data[499]).to be_within(1e-6).of(0.501)
+      expect(data[500]).to be_within(1e-6).of(0.2)
+    end
+
+    it 'with :add, attacks to the energy sum of the current level and the new peak' do
+      data = strikes(0.2, :add)
+      level = data[499]
+      expect(data[500]).to be_within(1e-6).of(Math.sqrt(level ** 2 + 0.2 ** 2))
+      expect(data[500]).to be > level
+      expect(data[501]).to be < data[500] # the decay continues from the new peak
+    end
+
+    it 'with :add, never goes past the loudest velocity peak' do
+      data = strikes(1, :add)
+      expect(data[500]).to eq(1)
+      expect(data.max).to eq(1)
+    end
+
+    it 'with :add, starts from silence like :restart' do
+      env = ->(mode) {
+        described_class.new(attack: 10.samples, decay: 10.samples, sustain: 0.5, release: 10.samples,
+                            gate: array_node_class.new(pulses(200, 5..50, 100..150)), velocity: 0.4, retrigger: mode)
+      }
+      expect(env.(:add).sample(200).to_a).to eq(env.(:restart).sample(200).to_a)
+    end
+
+    it 'gives the same samples in C and Ruby' do
+      [0.1, 0.5, 1].each do |v|
+        expect(strikes(v, :add).to_a).to eq(strikes(v, :add, kernel: :sample_ruby).to_a)
+      end
+    end
+
+    it 'can be changed with #retrigger and #retrigger=' do
+      env = described_class.new
+      expect(env.retrigger(:add)).to equal(env)
+      expect(env.retrigger).to eq(:add)
+      expect(env.kernel_config[0] & described_class::FLAG_ADD).not_to eq(0)
+      expect(env.to_s).to include('retrigger add')
+      env.retrigger = :restart
+      expect(env.kernel_config[0] & described_class::FLAG_ADD).to eq(0)
+      expect { env.retrigger = :louder }.to raise_error(ArgumentError, /restart/)
+      expect { described_class.new(retrigger: :bogus) }.to raise_error(ArgumentError, /Retrigger/)
+    end
+
+    it 'predicts the peak of a note with #velocity_peak and #retrigger_peak' do
+      env = described_class.new(sensitivity: -18.db..0.db, velocity_scale: :db, retrigger: :add)
+      expect(env.velocity_peak(1)).to be_within(1e-12).of(1)
+      expect(env.velocity_peak(0)).to be_within(1e-12).of(-18.db)
+      expect(env.retrigger_peak(0.5)).to eq(env.velocity_peak(0.5)) # level 0 before any note
     end
   end
 
