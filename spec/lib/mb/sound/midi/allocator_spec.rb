@@ -261,6 +261,130 @@ RSpec.describe(MB::Sound::MIDI::Allocator) do
     end
   end
 
+  describe 'same-note retrigger modes' do
+    # note_velocity.mid style: the same key struck three times, released in
+    # between, with +vels+; released lanes stay active (no idle checks).
+    def strikes(*vels)
+      vels.each_with_index.flat_map { |v, idx| [on(60, v), off(60)] }
+    end
+
+    it 'defaults to :reuse and rejects unknown modes' do
+      expect(alloc.retrigger).to eq(:reuse)
+      expect { alloc(retrigger: :add) }.to raise_error(ArgumentError, /retrigger/)
+    end
+
+    it 'restarts the lane playing the note with :reuse, at any velocity' do
+      [[1, 0.5, 0.2], [0.2, 0.5, 1]].each do |vels|
+        a = alloc(*strikes(*vels), voices: 2, spares: 1, retrigger: :reuse)
+        expect(lanes(a)).to eq([['on60@0', 'off60@1'], ['on60@2', 'off60@3', 'on60@4', 'off60@5'], []])
+      end
+    end
+
+    it 'plays the note on a free lane with :new_voice, choking another victim' do
+      [[1, 0.5, 0.2], [0.2, 0.5, 1]].each do |vels|
+        a = alloc(*strikes(*vels), voices: 2, spares: 1, retrigger: :new_voice)
+        expect(lanes(a)).to eq([['on60@0', 'off60@1', 'choke60@4'], ['on60@2', 'off60@3'], ['on60@4', 'off60@5']])
+      end
+    end
+
+    it 'keeps the lane playing the note ringing with :new_voice when another can be stolen' do
+      a = alloc(on(62), off(62), on(60), off(60), on(60, 0.5), off(60), voices: 2, spares: 1, retrigger: :new_voice)
+      expect(lanes(a)).to eq([['on62@0', 'off62@1', 'choke62@4'], ['on60@2', 'off60@3'], ['on60@4', 'off60@5']])
+
+      # :reuse restarts lane 1 instead
+      b = alloc(on(62), off(62), on(60), off(60), on(60, 0.5), off(60), voices: 2, spares: 1)
+      expect(lanes(b)).to eq([['on62@0', 'off62@1'], ['on60@2', 'off60@3', 'on60@4', 'off60@5'], []])
+    end
+
+    it 'falls back to restarting the lane with :new_voice and :louder when no lane is free' do
+      [:new_voice, :louder].each do |mode|
+        a = alloc(*strikes(1, 0.5, 0.2), voices: 2, spares: 0, retrigger: mode)
+        expect(lanes(a)).to eq([['on60@0', 'off60@1'], ['on60@2', 'off60@3', 'on60@4', 'off60@5']])
+      end
+    end
+
+    it 'with :louder, restarts the lane for a note at least as loud by velocity' do
+      a = alloc(*strikes(0.2, 0.5, 0.5), voices: 2, spares: 1, retrigger: :louder)
+      expect(lanes(a)).to eq([['on60@0', 'off60@1'], ['on60@2', 'off60@3', 'on60@4', 'off60@5'], []])
+    end
+
+    it 'with :louder, plays a softer note on a free lane' do
+      a = alloc(*strikes(1, 0.5, 0.2), voices: 2, spares: 1, retrigger: :louder)
+      expect(lanes(a)).to eq([['on60@0', 'off60@1', 'choke60@4'], ['on60@2', 'off60@3'], ['on60@4', 'off60@5']])
+    end
+
+    it 'with :louder, uses level checks of lanes that have read their notes' do
+      make = -> {
+        alloc(*strikes(1, 0.5, 0.2), voices: 2, spares: 1, retrigger: :louder).tap { |a|
+          a.lanes.each { |l| l.level_check = -> { 0.1 } }
+        }
+      }
+      # Read in 10 ms steps: lane 1 has read its notes, and its level (0.1) is below 0.2
+      expect(lanes(make.(), step: 1/100r)).to eq([['on60@0', 'off60@1'], ['on60@2', 'off60@3', 'on60@4', 'off60@5'], []])
+      # Read at once: lane 1 hasn't, so velocities are compared (0.2 < 0.5)
+      expect(lanes(make.())).to eq([['on60@0', 'off60@1', 'choke60@4'], ['on60@2', 'off60@3'], ['on60@4', 'off60@5']])
+    end
+
+    it 'with :louder, asks the louder check with the new velocity' do
+      asked = []
+      a = alloc(*strikes(1, 0.5, 0.2), voices: 2, spares: 1, retrigger: :louder)
+      a.lanes.each { |l|
+        l.level_check = -> { 1 }
+        l.louder_check = ->(vel) { asked << [l.index, vel]; true }
+      }
+      expect(lanes(a, step: 1/100r)[1]).to eq(['on60@2', 'off60@3', 'on60@4', 'off60@5'])
+      expect(asked).to eq([[1, 0.2]])
+    end
+
+    it 'with :quietest, restarts the quietest lane playing the note' do
+      events = [on(60, 1), off(60), on(60, 0.3), off(60), on(60, 0.6), off(60)]
+      a = alloc(*events, voices: 2, spares: 1, retrigger: :quietest)
+      expect(lanes(a)).to eq([['on60@0', 'off60@1'], ['on60@2', 'off60@3', 'on60@4', 'off60@5'], []])
+
+      # By level checks when given (lane 0 is quieter now)
+      b = alloc(*events, voices: 2, spares: 1, retrigger: :quietest)
+      b.lanes[0].level_check = -> { 0.1 }
+      b.lanes[1].level_check = -> { 0.2 }
+      expect(lanes(b)).to eq([['on60@0', 'off60@1', 'on60@4', 'off60@5'], ['on60@2', 'off60@3'], []])
+
+      # :reuse takes the newest
+      expect(lanes(alloc(*events, voices: 2, spares: 1))[1]).to eq(['on60@2', 'off60@3', 'on60@4', 'off60@5'])
+    end
+
+    it 'with :per_key, restarts the lane of a ringing key even with voices free' do
+      events = [on(60), off(60), on(62), on(60, 0.3), off(60), off(62)]
+      a = alloc(*events, voices: 4, spares: 1, retrigger: :per_key)
+      expect(lanes(a)).to eq([['on60@0', 'off60@1', 'on60@3', 'off60@4'], ['on62@2', 'off62@5'], [], [], []])
+      expect(lanes(alloc(*events, voices: 4, spares: 1))[2]).to eq(['on60@3', 'off60@4'])
+    end
+
+    it 'acts like :reuse without :same_note in the steal chain' do
+      events = strikes(1, 0.5, 0.2)
+      expected = lanes(alloc(*events, voices: 2, spares: 1, steal: [:oldest]))
+      [:louder, :new_voice].each do |mode|
+        expect(lanes(alloc(*events, voices: 2, spares: 1, steal: [:oldest], retrigger: mode))).to eq(expected)
+      end
+    end
+
+    it 'leaves notes with a free voice and mono mode alone' do
+      events = strikes(1, 0.5, 0.2)
+      [:reuse, :louder, :new_voice].each do |mode|
+        expect(lanes(alloc(*events, voices: 3, spares: 1, retrigger: mode))).to eq(lanes(alloc(*events, voices: 3, spares: 1)))
+        expect(lanes(alloc(*events, voices: 1, retrigger: mode))).to eq(lanes(alloc(*events, voices: 1)))
+      end
+    end
+
+    it 'gives the same allocation every time (deterministic)' do
+      events = [on(60), on(62), off(60), on(60, 0.3), off(62), on(62, 0.9), off(60), on(60, 0.1), off(60), off(62)]
+      [:reuse, :louder, :new_voice, :quietest, :per_key].each do |mode|
+        runs = Array.new(3) { lanes(alloc(*events, voices: 2, spares: 2, retrigger: mode), step: 1/200r) }
+        expect(runs.uniq.length).to eq(1)
+        a = alloc(*events, voices: 2, spares: 2, retrigger: mode)
+        a.lanes.each { |l| expect_one_note_at_a_time(l.reader.next(1)) }
+      end
+    end
+  end
+
   describe '#spares=' do
     it 'stops new notes from going to lanes beyond voices + spares' do
       a = alloc(on(60), on(62), on(64), on(65), voices: 2, spares: 2, choke_time: 1)

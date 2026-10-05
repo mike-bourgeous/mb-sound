@@ -186,6 +186,140 @@ RSpec.describe(MB::Sound::Synth) do
     end
   end
 
+  describe 'same-note retriggers' do
+    # Two voices and one spare: 52 and 48 (velocity 1) ring with long
+    # decays, then 48 is struck again at 0.5 s with +vel+.
+    def ringing(vel, mode)
+      events = [
+        ev.note_on(52), ev.note_on(48, 1.0, time: 1/100r),
+        ev.note_off(52, time: 5/100r), ev.note_off(48, time: 5/100r),
+        ev.note_on(48, vel, time: 1/2r), ev.note_off(48, time: 6/10r),
+      ]
+      synth = described_class.new(source(*events), voices: 2, spares: 1, retrigger: mode) { |v|
+        v.amp_env(0.001, 2, 0, 1, curve: :linear)
+      }
+      render(synth, buffers: 70, individual: true)
+    end
+
+    it 'defaults to :reuse and rejects unknown modes' do
+      expect(described_class.new(source) { |v| v.gate }.retrigger).to eq(:reuse)
+      expect { described_class.new(source, retrigger: :bogus) { |v| v.gate } }.to raise_error(ArgumentError, /retrigger/)
+    end
+
+    it 'with :reuse, drops a ringing note to a softer re-strike' do
+      l0, l1, l2 = ringing(0.1, :reuse)
+      before = peak(l1, 0.49, 0.5)
+      expect(peak(l1, 0.505, 0.51)).to be < before * 0.5
+      expect(peak(l0, 0.55, 0.6)).to be > 0.3 # 52 keeps ringing
+      expect(peak(l2, 0, 0.7)).to eq(0)
+    end
+
+    [:louder, :new_voice].each do |mode|
+      it "with #{mode}, plays a softer re-strike on a new voice, letting the ringing note ring" do
+        l0, l1, l2 = ringing(0.1, mode)
+        expect(peak(l1, 0.55, 0.6)).to be > 0.4 # the old 48 rings on (releasing)
+        expect(peak(l2, 0.5, 0.6)).to be > 0    # the new 48
+        expect(peak(l0, 0.52, 0.6)).to eq(0)    # 52 was choked
+      end
+    end
+
+    it 'with :louder, restarts the ringing lane for a louder re-strike, unlike :new_voice' do
+      louder = ringing(1, :louder)
+      expect(peak(louder[1], 0.505, 0.51)).to be > 0.99
+      expect(peak(louder[2], 0, 0.7)).to eq(0)
+
+      new_voice = ringing(1, :new_voice)
+      expect(peak(new_voice[2], 0.505, 0.51)).to be > 0.99
+      expect(peak(new_voice[1], 0.55, 0.6)).to be > 0.4
+    end
+
+    it 'with :add, sets the lane envelopes to add their peaks, so re-strikes never drop' do
+      seen = []
+      described_class.new(source, voices: 1, retrigger: :add) { |v| (seen << v.amp_env).last }
+      expect(seen.map(&:retrigger)).to all(eq(:add))
+
+      l0, l1, l2 = ringing(0.1, :add)
+      before = l1[(0.5 * 48000).round - 1]
+      expect(peak(l1, 0.5, 0.505)).to be >= before # never drops (+3 dB over 0.1's peak is below the ring)
+      expect(peak(l2, 0, 0.7)).to eq(0)
+      expect(peak(l0, 0.55, 0.6)).to be > 0.3
+    end
+
+    describe ':ring (alias :bell)' do
+      # 48 rings loud on lane 0, a softer 48 on lane 1 (a voice was free),
+      # then 48 again at 0.5 s with every voice busy, and 55 at 0.6 s.
+      def bells(mode, **opts)
+        events = [
+          ev.note_on(48, 1.0), ev.note_off(48, time: 5/100r),
+          ev.note_on(48, 0.3, time: 1/10r), ev.note_off(48, time: 15/100r),
+          ev.note_on(48, 0.5, time: 1/2r), ev.note_off(48, time: 55/100r),
+          ev.note_on(55, 0.5, time: 6/10r), ev.note_off(55, time: 65/100r),
+        ]
+        synth = described_class.new(source(*events), voices: 2, spares: 1, retrigger: mode, **opts) { |v|
+          v.amp_env(0.001, 3, 0, 3, curve: :linear)
+        }
+        [synth, render(synth, buffers: 80, individual: true)]
+      end
+
+      it 'reuses the quietest lane playing the note, adding energy, then steals the quietest lane' do
+        synth, (l0, l1, l2) = bells(:ring)
+        expect(synth.retrigger).to eq(:ring)
+        expect(synth.allocator.retrigger).to eq(:quietest)
+        expect(synth.allocator.steal).to eq(described_class::RING_STEAL)
+
+        # Lane 1 (the soft 48) gets the third strike and rises above its level
+        before = l1[(0.5 * 48000).round - 1]
+        expect(peak(l1, 0.5, 0.505)).to be > before
+        expect(peak(l1, 0.5, 0.505)).to be < 1
+        # Lane 0 (the loud 48) rings on until 55 steals the quietest lane
+        expect(peak(l0, 0.55, 0.6)).to be > 0.5
+        expect(peak(l2, 0.6, 0.61)).to be > 0 # 55 on the spare
+        quietest_choked = [l0, l1].count { |l| peak(l, 0.62, 0.7) == 0 }
+        expect(quietest_choked).to eq(1)
+        expect(peak(l0, 0.62, 0.7)).to be > 0 # the loud one kept ringing
+      end
+
+      it 'is the same as :bell, and takes a steal chain' do
+        expect(bells(:bell)[1].map(&:to_a)).to eq(bells(:ring)[1].map(&:to_a))
+        expect(bells(:ring, steal: :oldest)[0].allocator.steal).to eq([:oldest])
+      end
+    end
+
+    describe ':string' do
+      it 'restarts the lane of a ringing key even with voices free, envelopes adding' do
+        seen = []
+        s = described_class.new(source, voices: 2, retrigger: :string) { |v| (seen << v.amp_env).last }
+        expect(s.retrigger).to eq(:string)
+        expect(s.allocator.retrigger).to eq(:per_key)
+        expect(s.allocator.steal).to eq(MB::Sound::MIDI::Allocator::DEFAULT_STEAL)
+        expect(seen.map(&:retrigger)).to all(eq(:add))
+
+        # Every voice busy: the same as :add
+        expect(ringing(0.5, :string).map(&:to_a)).to eq(ringing(0.5, :add).map(&:to_a))
+
+        # Voices free: :add takes a new lane (doubling the key), :string doesn't
+        events = [ev.note_on(48, 1.0), ev.note_off(48, time: 5/100r), ev.note_on(48, 0.2, time: 1/2r), ev.note_off(48, time: 6/10r)]
+        mk = ->(mode) {
+          render(described_class.new(source(*events), voices: 4, spares: 0, retrigger: mode) { |v| v.amp_env(0.001, 2, 0, 1, curve: :linear) }, buffers: 70, individual: true)
+        }
+        add = mk.(:add)
+        string = mk.(:string)
+        expect(peak(add[1], 0.5, 0.6)).to be > 0
+        expect(string[1..].map { |l| peak(l, 0, 0.7) }).to all(eq(0))
+        before = string[0][(0.5 * 48000).round - 1]
+        expect(peak(string[0], 0.5, 0.52)).to be_between(before, before * 1.01) # 0.2 adds little to the ring
+      end
+    end
+
+    it 'renders the same every time in each mode' do
+      [:reuse, :louder, :new_voice, :add, :ring, :string].each do |mode|
+        [0.1, 1].each do |vel|
+          expect(ringing(vel, mode).map(&:to_a)).to eq(ringing(vel, mode).map(&:to_a))
+        end
+      end
+    end
+  end
+
   describe 'seeds' do
     let(:events) { [ev.note_on(48), ev.note_on(52), ev.note_on(55)] }
 

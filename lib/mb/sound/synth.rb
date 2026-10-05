@@ -27,6 +27,42 @@ module MB
     # output quiet; see #quiet_lanes), and its level (Notes#level) for the
     # :quietest steal policy.
     #
+    # Same-note retriggers (+:retrigger+, one word): :reuse (the default),
+    # :louder, and :new_voice go to MIDI::Allocator (see there); with
+    # :louder a lane counts as louder when the new note's velocity would
+    # take each envelope made through +v+ at least as high as it is now
+    # (Envelope#retrigger_peak >= Envelope#level: no envelope would attack
+    # downward).  :add reuses lanes like :reuse and sets every envelope
+    # made through +v+ to Envelope's +retrigger: :add+ (a re-strike attacks
+    # to the energy sum of the current level and its own peak).  Reused
+    # lanes reset key-synced oscillators' phases; ringing patches using
+    # :add or :reuse may want `.free` oscillators.
+    #
+    # Presets for ringing sounds (RETRIGGER_PRESETS):
+    # - :string (piano, e-piano, plucked or struck strings): one lane per
+    #   key, re-struck in place even with voices free (Allocator
+    #   +retrigger: :per_key+), its envelopes adding the strike's energy
+    #   (Envelope +retrigger: :add+), so a repeated key never doubles.
+    #   A re-struck string keeps its phase, so string patches want
+    #   `.free` oscillators (key-synced ones jump to phase 0 at each
+    #   strike).
+    # - :ring (alias :bell; bells and other ringing sounds): a same-note
+    #   strike takes a free voice if one is free (as always); with every
+    #   voice busy it reuses the quietest lane already playing that note,
+    #   its envelopes adding the new strike's energy (Envelope
+    #   +retrigger: :add+); with no lane playing the note it steals the
+    #   quietest lane (a choke, as usual).  That is Allocator
+    #   +retrigger: :quietest+, +steal: RING_STEAL+ (unless +:steal+ is
+    #   given), and :add envelopes.
+    #
+    #     midi.synth(voices: 4, retrigger: :ring) { |v| ... }
+    #     midi.synth(voices: 8, retrigger: :string) { |v| v.hz.sine.free * v.amp_env(0.002, 2, 0, 0.3) }
+    #
+    # With :add envelopes (:add, :string, :ring) a lane never rises above
+    # sqrt(2) times one strike's peak however fast it is struck (see
+    # Envelope's +retrigger: :add+); :ring can still stack up to +voices+
+    # lanes of one note, since a strike takes a free voice first.
+    #
     # Randomness: each lane's block runs with the root random generator
     # restarted from +seed+ + lane index (MB::Sound.with_seed), so lane
     # tones that call #rnd get different, repeatable phases.  +:seed+
@@ -65,6 +101,19 @@ module MB
 
       # Output controls (see the class description).
       CONTROLS = [:volume, :expression, :pan].freeze
+
+      # Same-note retrigger modes (see the class description).
+      # Named retrigger presets for ringing sounds, each with its canonical
+      # name (see the class description).
+      RETRIGGER_PRESETS = { string: :string, ring: :ring, bell: :ring }.freeze
+
+      RETRIGGER_MODES = [*MIDI::Allocator::RETRIGGER_MODES, :add, *RETRIGGER_PRESETS.keys].freeze
+
+      # The steal chain of +retrigger: :ring+ (see the class description).
+      RING_STEAL = [:same_note, :quietest, :oldest].freeze
+
+      # Allocator retrigger modes for the Synth-only modes.
+      ALLOCATOR_RETRIGGER = { add: :reuse, ring: :quietest, string: :per_key }.freeze
 
       # The default +:tail+: seconds of silence after every lane has ended
       # before #sample returns nil (the old MIDI file nodes' limit).
@@ -121,13 +170,24 @@ module MB
       # the constructor).
       attr_reader :output_controls
 
+      # The same-note retrigger mode (see the class description).
+      attr_reader :retrigger
+
       # See the class description.
       def initialize(
-        source, voices: 8, spares: 2, steal: MIDI::Allocator::DEFAULT_STEAL, protect: nil, mono: nil,
-        priority: :last, glide_mode: :last, controls: [], bend_range: nil, sustain: true, seed: nil,
-        tail: TAIL_SECONDS, skip_idle: true, sample_rate: 48000, &block
+        source, voices: 8, spares: 2, steal: nil, protect: nil, mono: nil,
+        priority: :last, glide_mode: :last, retrigger: :reuse, controls: [], bend_range: nil, sustain: true,
+        seed: nil, tail: TAIL_SECONDS, skip_idle: true, sample_rate: 48000, &block
       )
         raise ArgumentError, 'Pass a block that builds the graph of one voice from |v, index|' unless block
+
+        unless RETRIGGER_MODES.include?(retrigger)
+          raise ArgumentError, "Unknown retrigger mode #{retrigger.inspect} (use #{RETRIGGER_MODES})"
+        end
+        @retrigger = retrigger
+        retrigger = RETRIGGER_PRESETS.fetch(retrigger, retrigger)
+        steal ||= retrigger == :ring ? RING_STEAL : MIDI::Allocator::DEFAULT_STEAL
+        add = retrigger == :add || retrigger == :ring || retrigger == :string
 
         @output_controls = Array(controls).uniq.freeze
         bad = @output_controls - CONTROLS
@@ -145,7 +205,7 @@ module MB
 
         @allocator = MIDI::Allocator.new(
           stream, voices: voices, spares: spares, steal: steal, protect: protect, mono: mono,
-          priority: priority, glide_mode: glide_mode
+          priority: priority, glide_mode: glide_mode, retrigger: ALLOCATOR_RETRIGGER.fetch(retrigger, retrigger)
         )
 
         @notes = []
@@ -159,6 +219,8 @@ module MB
           graph = MB::Sound.with_seed(@seed + idx) { block.call(v, idx) }
           lane.idle_check = -> { v.idle? }
           lane.level_check = -> { v.level }
+          lane.louder_check = ->(velocity) { louder_lane?(v, velocity) }
+          v.envelopes.each { |env| env.retrigger(:add) if env.respond_to?(:retrigger) } if add
           @notes << v
           lane_outputs(graph, idx).map(&:get_sampler)
         }
@@ -351,6 +413,14 @@ module MB
       end
 
       private
+
+      # True if a note at +velocity+ would take each envelope of lane Notes
+      # +v+ at least as high as it is now (see +retrigger: :louder+).
+      def louder_lane?(v, velocity)
+        v.envelopes.all? { |env|
+          !env.respond_to?(:retrigger_peak) || env.retrigger_peak(velocity) >= env.level.to_f.abs
+        }
+      end
 
       # Level below which a released lane counts as quiet, so it can be
       # reused and a finished source can end (-90 dB, like the master
