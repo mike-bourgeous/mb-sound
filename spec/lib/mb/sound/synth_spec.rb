@@ -120,6 +120,42 @@ RSpec.describe(MB::Sound::Synth) do
       expect(ringing.quiet_lanes).to eq([])
     end
 
+    it 'counts lanes as quiet under -90 dB, but skips them only under -120 dB' do
+      # A ping that decays through -90 dB and -120 dB a while apart
+      s = described_class.new(source(ev.note_on(48), ev.note_off(48, time: 1/100r)), voices: 1, mono: false, spares: 0) { |v|
+        v.trigger.filter(:lowpass, cutoff: v.freq, quality: 30)
+      }
+      quiet_at = skipped_at = nil
+      data = 300.times.map { |i|
+        b = s.sample(480).dup
+        quiet_at ||= i if s.quiet_lanes == [0]
+        skipped_at ||= i if s.skipped_lanes == [0]
+        b
+      }.reduce(:concatenate)
+
+      buf_peak = ->(i) { data[(i * 480)...((i + 1) * 480)].abs.max }
+      expect(buf_peak.(quiet_at)).to be <= -90.db
+      expect(buf_peak.(quiet_at - 1)).to be > -90.db
+      expect(buf_peak.(skipped_at)).to be <= -120.db
+      expect(buf_peak.(skipped_at - 1)).to be > -120.db
+      expect(skipped_at).to be > quiet_at + 5
+    end
+
+    it 'gives Notes#level the measured peak of each lane, for :quietest stealing' do
+      # Envelope-less voices: the quiet one is stolen, not the oldest
+      events = [ev.note_on(48, 1.0), ev.note_on(52, 0.1, time: 1/100r), ev.note_on(55, time: 1/10r)]
+      s = described_class.new(source(*events), voices: 2, spares: 0, steal: [:quietest]) { |v|
+        (v.trigger * 10).filter(:lowpass, cutoff: v.freq, quality: 100)
+      }
+      render(s, buffers: 9)
+      levels = s.notes.map(&:level)
+      expect(levels[0]).to be > levels[1] * 5
+      expect(levels[0]).to eq(s.notes[0].level_check.call)
+      render(s, buffers: 2)
+      expect(s.lanes[0].note).to eq(48)
+      expect(s.lanes[1].note).to eq(55)
+    end
+
     it 'keeps a lane with only a gate busy while its note is held' do
       s = described_class.new(source(ev.note_on(48), ev.note_on(52, time: 1/10r)), voices: 1, mono: false, spares: 1) { |v| v.gate }
       first = s.sample_individual(480).map(&:dup)
@@ -314,8 +350,8 @@ RSpec.describe(MB::Sound::Synth) do
       data = out.reduce(:concatenate)
 
       # The ping rings for a while after the file's last event, and the synth
-      # ends one buffer after the ring falls below -120 dB
-      last_sound = (data.abs > 1e-6).where.to_a.last
+      # ends one buffer after the ring falls below -90 dB
+      last_sound = (data.abs > -90.db).where.to_a.last
       expect(last_sound / 48000.0).to be > 0.2
       expect(ended_at).to eq(last_sound / 480 + 2)
       expect(out.length).to eq(ended_at)
@@ -327,6 +363,25 @@ RSpec.describe(MB::Sound::Synth) do
         again << b.dup
       end
       expect(again.reduce(:concatenate)).to eq(data)
+    end
+
+    it 'lets an envelope into a resonant filter ring out after a finite source' do
+      events = [ev.note_on(48), ev.note_off(48, time: 1/20r)]
+      s = described_class.new(source(*events, last: nil), voices: 1, mono: false, spares: 0, tail: 0) { |v|
+        (v.hz.saw * v.amp_env(0, 0.02, 0, 0.02, curve: :linear)).filter(:lowpass, cutoff: v.freq, quality: 300)
+      }
+      out = []
+      while (b = s.sample(480)) && out.length < 2000
+        out << b.dup
+      end
+      data = out.reduce(:concatenate)
+
+      # The envelope is idle at 0.07 s, but the filter rings much longer
+      # (it was cut there, the envelope ending the lane's graph)
+      expect(peak(data, 0.3, 0.4)).to be > 0.1
+      last_sound = (data.abs > -90.db).where.to_a.last
+      expect(last_sound / 48000.0).to be > 1
+      expect(out.length).to eq(last_sound / 480 + 2)
     end
 
     it 'outputs silence for the tail after every lane has ended' do

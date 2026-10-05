@@ -150,9 +150,12 @@ module MB
 
         @notes = []
         @quiet = Array.new(@allocator.lanes.length, true)
+        @silent = Array.new(@allocator.lanes.length, true)
+        @peaks = Array.new(@allocator.lanes.length, 0.0)
         @lanes = @allocator.lanes.each_with_index.map { |lane, idx|
           v = Notes.new(lane, sustain: false, sample_rate: @sample_rate)
           v.quiet_check = -> { @quiet[idx] }
+          v.level_check = -> { @peaks[idx] }
           graph = MB::Sound.with_seed(@seed + idx) { block.call(v, idx) }
           lane.idle_check = -> { v.idle? }
           lane.level_check = -> { v.level }
@@ -251,7 +254,7 @@ module MB
           if @skipping[idx]
             case skip_lane(idx, count)
             when :ended
-              @done[idx] = @quiet[idx] = true # an ended lane is silent
+              lane_ended(idx)
               next nil
             when :skipped
               any = true
@@ -261,11 +264,11 @@ module MB
 
           bufs = outs.map { |o| o.sample(count) }
           if bufs.any?(&:nil?)
-            @done[idx] = @quiet[idx] = true
+            lane_ended(idx)
             next nil
           end
 
-          @quiet[idx] = @notes[idx].voice_idle? && bufs.all? { |b| silent?(b) }
+          measure_lane(idx, bufs)
           @skipping[idx] = start_skipping?(idx) if @skippable[idx]
 
           any = true
@@ -295,7 +298,7 @@ module MB
       end
 
       # The indices of the lanes whose last rendered buffer was quiet (every
-      # channel within -120 dB) with no note held and every envelope idle
+      # channel within -90 dB, QUIET) with no note held and every envelope idle
       # (or that haven't rendered since).  A lane counts as busy for the
       # allocator (and its Notes gate and trigger keep going after a MIDI
       # file ends) until it is quiet, so voices without envelopes, such as
@@ -349,8 +352,14 @@ module MB
 
       private
 
-      # Level below which a lane's output counts as silent (-120 dB; see
-      # #quiet_lanes and #setup_idle_skipping).
+      # Level below which a released lane counts as quiet, so it can be
+      # reused and a finished source can end (-90 dB, like the master
+      # effects tails of Session; see #quiet_lanes).
+      QUIET = -90.db
+
+      # Level below which a lane's output counts as silent for idle lane
+      # skipping (-120 dB; stricter than QUIET because skipping changes the
+      # output; see #setup_idle_skipping).
       SILENCE = 1e-6
 
       # Node classes whose state can hold sound that comes back after a
@@ -416,20 +425,37 @@ module MB
       end
 
       # True if lane +idx+ should be skipped from the next buffer (see
-      # #setup_idle_skipping): its Notes is idle, including the quiet check
-      # of the buffer just rendered (see #quiet_lanes).
+      # #setup_idle_skipping): its Notes is idle and the buffer just
+      # rendered was silent (within SILENCE).
       def start_skipping?(idx)
-        return false unless @notes[idx].idle?
+        return false unless @silent[idx]
 
         @skip_generation[idx] = @allocator.lanes[idx].generation
         true
       end
 
-      # True if every sample of +buf+ is within SILENCE of zero.
-      def silent?(buf)
-        return true if buf.equal?(@zeros)
+      # Records the peak of lane +idx+'s channel buffers +bufs+ (for
+      # Notes#level), and whether the lane is quiet (QUIET; see
+      # #quiet_lanes) and silent (SILENCE; see #start_skipping?).
+      def measure_lane(idx, bufs)
+        peak = bufs.map { |b| peak_of(b) }.max
+        idle = @notes[idx].voice_idle?
+        @peaks[idx] = peak
+        @quiet[idx] = idle && peak <= QUIET
+        @silent[idx] = idle && peak <= SILENCE
+      end
+
+      # Marks lane +idx+ as ended (silent from now on).
+      def lane_ended(idx)
+        @done[idx] = @quiet[idx] = @silent[idx] = true
+        @peaks[idx] = 0.0
+      end
+
+      # The largest absolute sample of +buf+.
+      def peak_of(buf)
+        return 0.0 if buf.equal?(@zeros)
         buf = buf.abs if buf.is_a?(Numo::SComplex) || buf.is_a?(Numo::DComplex)
-        buf.max <= SILENCE && buf.min >= -SILENCE
+        MB::M.max(buf.max.to_f, -buf.min.to_f)
       end
 
       # Skips lane +idx+ for +count+ samples, reading its boundary nodes

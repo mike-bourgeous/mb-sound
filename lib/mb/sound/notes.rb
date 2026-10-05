@@ -178,6 +178,7 @@ module MB
         @nodes = {}
         @envelopes = []
         @quiet_check = nil
+        @level_check = nil
       end
 
       # A Proc (or anything with #call) returning true once the output of
@@ -187,6 +188,13 @@ module MB
       # gate and trigger keep going after a MIDI file ends, until they have
       # rung out (see #idle?).
       attr_accessor :quiet_check
+
+      # A Proc (or anything with #call) returning the measured peak level
+      # of the output of the graph built on this instance, or nil (the
+      # default) to use the envelope levels (see #level).  Synth sets one
+      # per lane, so the :quietest steal policy also works for voices
+      # without envelopes.
+      attr_accessor :level_check
 
       # The stream read by channel-wide nodes (see .control_stream).
       attr_reader :control_stream
@@ -457,7 +465,13 @@ module MB
       # while its note is held.  True with no envelopes, no note nodes, and
       # no quiet check.
       def idle?
-        voice_idle? && (@quiet_check.nil? || !!@quiet_check.call)
+        voice_idle? && quiet?
+      end
+
+      # True if the #quiet_check says the output is quiet, or if there is no
+      # quiet check.
+      def quiet?
+        @quiet_check.nil? || !!@quiet_check.call
       end
 
       # Like #idle?, without the #quiet_check: no note held and every
@@ -482,10 +496,12 @@ module MB
         }
       end
 
-      # The highest current level of the envelopes made through this
-      # instance (see #env), or 0 with none; e.g. for the :quietest steal
-      # policy (MIDI::Allocator::Lane#level_check).
+      # The measured peak of the output (see #level_check) if there is a
+      # level check, else the highest current level of the envelopes made
+      # through this instance (see #env), or 0 with none; e.g. for the
+      # :quietest steal policy (MIDI::Allocator::Lane#level_check).
       def level
+        return @level_check.call.to_f if @level_check
         @envelopes.map { |e| e.respond_to?(:level) ? e.level.to_f.abs : 0.0 }.max || 0.0
       end
 
