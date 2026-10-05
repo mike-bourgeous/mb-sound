@@ -711,9 +711,11 @@ module MB
         times = [@times[:attack], @times[:decay], @sustain, @times[:release]].map { |t|
           t.is_a?(Numeric) ? MB::M.sigfigs(t, 4) : t.to_s
         }
-        preset = CURVES.select { |_, v| v == @curves.values }.keys.find { |k| self.class.shape_values(CURVE_SHAPES.fetch(k, :exp)) == @shapes }
+        preset_shapes = ->(k) { self.class.shape_values(CURVE_SHAPES.fetch(k, :exp)) }
+        names = CURVES.select { |_, v| v == @curves.values }.keys
+        preset = names.find { |k| preset_shapes.(k) == @shapes } || names.first
         curves = preset || @curves.values.map { |c| c.is_a?(Numeric) ? MB::M.sigfigs(c, 4) : c.to_s }.join('/')
-        shapes = " shape #{@shapes.values.join('/')}" if preset.nil? && @shapes.values.any? { |v| v != :exp }
+        shapes = " shape #{@shapes.values.join('/')}" unless preset_shapes.(preset) == @shapes
         "#{super} -- adsr(#{times.join(', ')}) curve #{curves}#{shapes}#{' retrigger add' if @retrigger == :add}"
       end
 
