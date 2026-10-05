@@ -103,7 +103,16 @@ RSpec.describe(MB::Sound::Envelope) do
           db ? 1 : 0,
           rng.rand(0.0..300.0),
           MB::Sound::Envelope::CURVE_SCALE,
+          96.0,
+          0.01,
         ]
+        # Shapes chosen without drawing from rng (keeping the older cases):
+        # exp, S, and mixes.
+        shapes = case trial % 3
+                 when 0 then [0, 0, 0]
+                 when 1 then [1, 1, 1]
+                 else [(trial / 3) & 1, (trial / 6) & 1, (trial / 12) & 1]
+                 end
 
         state_c = Numo::DFloat.zeros(MB::Sound::Envelope::STATE_SIZE)
         state_c[MB::Sound::Envelope::STATE_STAGE] = flags & MB::Sound::Envelope::FLAG_ONE_SHOT != 0 ? 5 : 0
@@ -138,8 +147,8 @@ RSpec.describe(MB::Sound::Envelope) do
             rng.rand < 0.5 ? piecewise(rng, n, -3.0..3.0, 0.01) : rng.rand(-3.0..3.0),
           ]
 
-          out_c = MB::Sound::FastEnvelope.process(Numo::SFloat.zeros(n), state_c, times, curves, levels, hold, inputs, config)
-          out_r = MB::Sound::Envelope.process_ruby(Numo::SFloat.zeros(n), state_r, times, curves, levels, hold, inputs, config)
+          out_c = MB::Sound::FastEnvelope.process(Numo::SFloat.zeros(n), state_c, times, curves, levels, hold, inputs, config, shapes)
+          out_r = MB::Sound::Envelope.process_ruby(Numo::SFloat.zeros(n), state_r, times, curves, levels, hold, inputs, config, shapes)
 
           expect(out_c.to_a).to eq(out_r.to_a), "trial #{trial}: outputs differ"
           expect(state_c.to_a).to eq(state_r.to_a), "trial #{trial}: states differ"
@@ -172,19 +181,19 @@ RSpec.describe(MB::Sound::Envelope) do
 
     it 'rejects mismatched buffer lengths and bad configs' do
       state = Numo::DFloat.zeros(MB::Sound::Envelope::STATE_SIZE)
-      config = [1, 2, 1.0, 1.0, 0, 144, MB::Sound::Envelope::CURVE_SCALE]
+      config = [1, 2, 1.0, 1.0, 0, 144, MB::Sound::Envelope::CURVE_SCALE, 96.0, 0.01]
       out = Numo::SFloat.zeros(10)
       expect {
-        MB::Sound::FastEnvelope.process(out, state, [1, 2, 3], [0, 0, 0], [1, 0.5, 0], 0, [Numo::SFloat.zeros(9), nil, nil, nil, nil, nil], config)
+        MB::Sound::FastEnvelope.process(out, state, [1, 2, 3], [0, 0, 0], [1, 0.5, 0], 0, [Numo::SFloat.zeros(9), nil, nil, nil, nil, nil], config, [0, 0, 0])
       }.to raise_error(ArgumentError, /length/)
       expect {
-        MB::Sound::FastEnvelope.process(out, state, [1, 2, 3], [0, 0, 0], [1, 0.5, 0], 0, [nil, nil, nil, nil, nil, nil], config.dup.tap { |c| c[1] = 3 })
+        MB::Sound::FastEnvelope.process(out, state, [1, 2, 3], [0, 0, 0], [1, 0.5, 0], 0, [nil, nil, nil, nil, nil, nil], config.dup.tap { |c| c[1] = 3 }, [0, 0, 0])
       }.to raise_error(ArgumentError, /Release node/)
       expect {
-        MB::Sound::FastEnvelope.process(out, Numo::DFloat.zeros(3), [1, 2, 3], [0, 0, 0], [1, 0.5, 0], 0, [nil, nil, nil, nil, nil, nil], config)
+        MB::Sound::FastEnvelope.process(out, Numo::DFloat.zeros(3), [1, 2, 3], [0, 0, 0], [1, 0.5, 0], 0, [nil, nil, nil, nil, nil, nil], config, [0, 0, 0])
       }.to raise_error(ArgumentError, /State/)
       expect {
-        MB::Sound::FastEnvelope.process(out, state, [1, 2, 3], [0, 0, 0], [1, 0.5, 0], 0, [nil, nil, nil, nil], config)
+        MB::Sound::FastEnvelope.process(out, state, [1, 2, 3], [0, 0, 0], [1, 0.5, 0], 0, [nil, nil, nil, nil], config, [0, 0, 0])
       }.to raise_error(ArgumentError, /lift/)
     end
   end

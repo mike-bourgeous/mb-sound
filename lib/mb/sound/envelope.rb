@@ -100,7 +100,45 @@ module MB
         gentle: [6, 21, 21].freeze,
         swell: [-24, 21, 21].freeze,
         dx: [-30, 30, 30].freeze,
+        smooth: [0, 0, 0].freeze,
+        pad: [0, 12, 12].freeze,
       }.freeze
+
+      # Segment shapes for the CURVES presets that set them (the rest set
+      # :exp on every segment): :smooth is plain smoothstep S-curves (the
+      # old smoothstep ADSREnvelope, without its corners), :pad S-curves
+      # whose decay and release move a little faster first (see SHAPES).
+      CURVE_SHAPES = {
+        smooth: :s,
+        pad: :s,
+      }.freeze
+
+      # Segment shapes (the C enum env_shape), see #shape:
+      # - :exp (alias :exponential): the curve in dB (see CURVES); the
+      #   default.
+      # - :s (alias :scurve): a smoothstep of the same curve, starting and
+      #   ending with zero slope, so joints between S segments have no
+      #   corner.  The curve in dB skews the S: 0 is plain smoothstep,
+      #   negative values swell (slow first), positive values move fast
+      #   first.  Changes mid-segment keep the slope at a 2 ms scale (see
+      #   S_SLOPE_TIME).
+      SHAPES = { exp: 0, s: 1 }.freeze
+      SHAPE_ALIASES = { exponential: :exp, scurve: :s }.freeze
+      SHAPE_EXP = 0
+      SHAPE_S = 1
+
+      # The longest time (seconds) an S segment carries the old slope after
+      # a change mid-segment (a release, a retrigger, or a parameter node
+      # moving), fading it out so the level and its slope stay continuous
+      # (see the C kernel's description).
+      S_SLOPE_TIME = 0.002
+
+      # The largest bump that slope correction may add, relative to the
+      # segment's step (the correction gets shorter to stay within it).
+      S_OVERSHOOT = 0.01
+
+      # The smallest step the overshoot bound uses (the C ENV_MIN_STEP).
+      MIN_STEP = 1e-3
 
       # Default times and sustain level (see PRESETS for per-preset changes).
       DEFAULT_ATTACK = 0.005
@@ -148,7 +186,17 @@ module MB
       STATE_TRIGGER = 16
       STATE_NOTE_POSITION = 17
       STATE_RELEASE_SCALE = 18
-      STATE_SIZE = 19
+      STATE_PREV_LEVEL = 19
+      STATE_PLAN_SHAPE = 20
+      STATE_PHASE = 21
+      STATE_RATE = 22
+      STATE_S_ANCHOR = 23
+      STATE_WARP_INV = 24
+      STATE_WARP_LINEAR = 25
+      STATE_CORR_SLOPE = 26
+      STATE_CORR_TIME = 27
+      STATE_CORR_POSITION = 28
+      STATE_SIZE = 29
 
       # Kernel flags.
       FLAG_GATE = 1
@@ -228,6 +276,34 @@ module MB
         }
       end
 
+      # Returns a Hash of shapes (:exp or :s) for each segment (see SEGMENTS)
+      # from any shape specification: a Symbol for every segment (see
+      # SHAPES), an Array of [attack, decay, release], or a Hash of some
+      # segments (the rest come from +current+).
+      def self.shape_values(shape, current = SEGMENTS.map { |s| [s, :exp] }.to_h)
+        values = case shape
+                 when Array
+                   raise ArgumentError, "Shape arrays need #{SEGMENTS.length} values (#{SEGMENTS.join(', ')})" unless shape.length == SEGMENTS.length
+                   SEGMENTS.zip(shape).to_h
+
+                 when Hash
+                   extra = shape.keys - SEGMENTS
+                   raise ArgumentError, "Unknown shape segments #{extra.inspect} (#{SEGMENTS.join(', ')})" unless extra.empty?
+                   current.merge(shape)
+
+                 else
+                   SEGMENTS.map { |s| [s, shape] }.to_h
+                 end
+
+        values.transform_values { |v|
+          v = SHAPE_ALIASES.fetch(v, v)
+          unless SHAPES.key?(v)
+            raise ArgumentError, "Unknown segment shape #{v.inspect} (#{(SHAPES.keys + SHAPE_ALIASES.keys).join(', ')})"
+          end
+          v
+        }
+      end
+
       # Velocity gains for velocity 0 and 1 (see #initialize).
       attr_reader :velocity_low, :velocity_high
 
@@ -247,7 +323,11 @@ module MB
       #                                    `250.ms`, `96.samples`, `1.n8`),
       #                                    or a graph node (seconds).
       # +:sustain+ - The sustain level relative to the peak (number or node).
-      # +:curve+ - Curves in dB (see .curve_values and CURVES).
+      # +:curve+ - Curves in dB (see .curve_values and CURVES).  A preset
+      #           name also sets the shapes (see CURVE_SHAPES).
+      # +:shape+ - Segment shapes: :exp or :s for every segment, or per
+      #           segment (see .shape_values, SHAPES, and #shape); applied
+      #           after +:curve+.
       # +:hold+ - Seconds (or a length) from the start of a one-shot or a
       #           gateless trigger to its release (like the old
       #           auto_release); false holds forever.  Defaults to twice the
@@ -272,7 +352,7 @@ module MB
       #              every sample, e.g. the mod wheel).
       def initialize(
         attack: DEFAULT_ATTACK, decay: DEFAULT_DECAY, sustain: DEFAULT_SUSTAIN, release: DEFAULT_RELEASE,
-        curve: :analog, hold: nil,
+        curve: :analog, shape: nil, hold: nil,
         gate: nil, trigger: nil, velocity: nil, choke: nil, lift: nil,
         sensitivity: 0..1, velocity_range: nil, velocity_scale: :linear, legato: false, octaves: nil,
         retrigger: :restart, sample_rate: 48000
@@ -288,7 +368,9 @@ module MB
         self.hold = hold
 
         @curves = nil
+        @shapes = nil
         self.curve(curve)
+        self.shape(shape) unless shape.nil?
 
         if velocity.is_a?(Range)
           raise ArgumentError, "velocity: is the velocity input (a node or number); give the velocity range as sensitivity: #{velocity.inspect}"
@@ -399,22 +481,53 @@ module MB
       # Sets curves for any segments (see .curve_values) and returns self, or
       # returns the curves (a Hash of segment => dB or node) without
       # arguments.  Accepts the same arguments as +:curve+ in #initialize, or
-      # three values for attack, decay, and release.
+      # three values for attack, decay, and release.  A preset name (see
+      # CURVES) also sets every segment's shape (:exp, or the preset's
+      # CURVE_SHAPES entry).
       #
       # Example:
       #     adsr(0.01, 0.5, 0.3, 1).curve(:snappy)
       #     adsr(0.01, 0.5, 0.3, 1).curve(release: 30)
       #     adsr(0.01, 0.5, 0.3, 1).curve(0, 60, 60)
+      #     adsr(1, 0.5, 0.6, 1).curve(:smooth)   # S-curves (see #shape)
       def curve(*args)
         return @curves.dup if args.empty?
 
         spec = args.length == 1 ? args.first : args
         values = self.class.curve_values(spec, @curves || SEGMENTS.zip(CURVES[:analog]).to_h)
         @curves = values.transform_values { |v| v.is_a?(Numeric) ? v : v.get_sampler }
+        @shapes = self.class.shape_values(CURVE_SHAPES.fetch(spec, :exp)) if spec.is_a?(Symbol) || @shapes.nil?
         changed!
         self
       end
       alias curves curve
+
+      # Sets segment shapes (see SHAPES and .shape_values) and returns self,
+      # or returns the shapes (a Hash of segment => :exp or :s) without
+      # arguments.  Accepts a shape for every segment, a Hash of some
+      # segments, an Array, or three values for attack, decay, and release.
+      # The curves in dB (see #curve) keep their meaning: for :s segments
+      # they skew the S (0 is plain smoothstep, negative swells, positive
+      # moves fast first).
+      #
+      # Example:
+      #     adsr(1, 0.5, 0.6, 1).shape(:s)          # the old smoothstep feel
+      #     amp_env(2, 1, 0.5, 2).shape(attack: :s).curve(attack: -6)
+      #     adsr(1, 0.5, 0.6, 1).shape(:s).curve(attack: 12.hz.lfo.at(12))
+      def shape(*args)
+        return @shapes.dup if args.empty?
+
+        spec = args.length == 1 ? args.first : args
+        @shapes = self.class.shape_values(spec, @shapes)
+        changed!
+        self
+      end
+      alias shapes shape
+
+      # Sets segment shapes (see #shape).
+      def shape=(spec)
+        shape(spec)
+      end
 
       # Makes triggers while the gate is held keep the current stage (or
       # restart the attack again if +enabled+ is false).  Returns self.
@@ -598,8 +711,10 @@ module MB
         times = [@times[:attack], @times[:decay], @sustain, @times[:release]].map { |t|
           t.is_a?(Numeric) ? MB::M.sigfigs(t, 4) : t.to_s
         }
-        curves = CURVES.key(@curves.values) || @curves.values.map { |c| c.is_a?(Numeric) ? MB::M.sigfigs(c, 4) : c.to_s }.join('/')
-        "#{super} -- adsr(#{times.join(', ')}) curve #{curves}#{' retrigger add' if @retrigger == :add}"
+        preset = CURVES.select { |_, v| v == @curves.values }.keys.find { |k| self.class.shape_values(CURVE_SHAPES.fetch(k, :exp)) == @shapes }
+        curves = preset || @curves.values.map { |c| c.is_a?(Numeric) ? MB::M.sigfigs(c, 4) : c.to_s }.join('/')
+        shapes = " shape #{@shapes.values.join('/')}" if preset.nil? && @shapes.values.any? { |v| v != :exp }
+        "#{super} -- adsr(#{times.join(', ')}) curve #{curves}#{shapes}#{' retrigger add' if @retrigger == :add}"
       end
 
       # The config Array for the kernels (see FastEnvelope.process).
@@ -621,6 +736,8 @@ module MB
           @velocity_scale == :db ? 1 : 0,
           CHOKE_TIME * @sample_rate,
           CURVE_SCALE,
+          S_SLOPE_TIME * @sample_rate,
+          S_OVERSHOOT,
         ]
       end
 
@@ -628,10 +745,10 @@ module MB
       # ext/mb/sound/fast_envelope/fast_envelope.c for the arguments and
       # algorithm).  Uses exactly the same operations, so the output and
       # state are identical.
-      def self.process_ruby(out, state, times, curves, levels, hold, inputs, config)
+      def self.process_ruby(out, state, times, curves, levels, hold, inputs, config, shapes)
         n = out.length
         nseg = times.length
-        flags, release_node, velocity_low, velocity_high, velocity_db, choke_samples, curve_scale = config
+        flags, release_node, velocity_low, velocity_high, velocity_db, choke_samples, curve_scale, slope_samples, overshoot = config
         flags = Integer(flags)
         release_node = Integer(release_node)
         velocity_low = velocity_low.to_f
@@ -639,6 +756,11 @@ module MB
         velocity_db = velocity_db.to_i != 0
         choke_samples = length_samples(choke_samples.to_f)
         curve_scale = curve_scale.to_f
+        slope_samples = slope_samples.to_f
+        overshoot = overshoot.to_f
+        seg_shapes = shapes.map { |v| Integer(v) }
+        raise ArgumentError, 'Times, curves, levels, and shapes must have the same number of segments' unless seg_shapes.length == nseg
+        raise ArgumentError, "Unknown segment shape in #{shapes}" unless seg_shapes.all? { |v| v == SHAPE_EXP || v == SHAPE_S }
 
         raise ArgumentError, 'Release node out of range' unless release_node >= 1 && release_node < nseg
 
@@ -679,12 +801,25 @@ module MB
         trigger_prev = st[STATE_TRIGGER] != 0
         note_position = st[STATE_NOTE_POSITION]
         release_scale = st[STATE_RELEASE_SCALE]
+        y_prev = st[STATE_PREV_LEVEL]
+        plan_shape = st[STATE_PLAN_SHAPE].to_i
+        u = st[STATE_PHASE]
+        rate = st[STATE_RATE]
+        s_anchor = st[STATE_S_ANCHOR]
+        warp_inv = st[STATE_WARP_INV]
+        warp_linear = st[STATE_WARP_LINEAR] != 0
+        corr_slope = st[STATE_CORR_SLOPE]
+        corr_time = st[STATE_CORR_TIME]
+        corr_position = st[STATE_CORR_POSITION]
 
         result = Array.new(n)
 
         n.times do |i|
           gate_now = has_gate && at(gate_sig, i) != 0
           start = stage == STAGE_PENDING
+          landed = false
+          slope = y - y_prev
+          y_prev = y
 
           if at(choke_sig, i) != 0 && (stage == STAGE_SEGMENT || stage == STAGE_SUSTAIN)
             stage = STAGE_CHOKE
@@ -751,6 +886,7 @@ module MB
                 y = target
                 e = 0.0
                 planned = false
+                landed = true
 
                 if stage == STAGE_CHOKE || seg == nseg - 1
                   stage = one_shot ? STAGE_ENDED : STAGE_IDLE
@@ -763,11 +899,87 @@ module MB
                 next
               end
 
-              if !planned || length != plan_length || curve != plan_curve || target != plan_target
+              shape = stage == STAGE_CHOKE ? SHAPE_EXP : seg_shapes[seg]
+
+              if shape == SHAPE_S
+                if !planned || length != plan_length || curve != plan_curve || target != plan_target || plan_shape != SHAPE_S
+                  full = !planned || e == 0 || plan_shape != SHAPE_S || curve != plan_curve
+                  timing = full || length != plan_length
+                  c = curve * curve_scale
+
+                  e0 = e > 0 ? e - 1 : 0.0
+                  y0 = y
+                  if e == 0
+                    u = 0.0
+                  elsif plan_shape != SHAPE_S
+                    u = e0 / length
+                  end
+
+                  if full
+                    warp_linear = c.abs < LINEAR_LIMIT
+                    unless warp_linear
+                      warp_inv = 1.0 / (1.0 - Math.exp(c))
+                      w = Math.exp(c * u)
+                    end
+                  end
+                  if timing
+                    rate = (1.0 - u) / (length - e0)
+                    g = Math.exp(c * rate) unless warp_linear
+                  end
+
+                  p = warp_linear ? u : (1.0 - w) * warp_inv
+                  s_anchor = p * p * (3.0 - 2.0 * p)
+                  span = 1.0 - s_anchor
+                  scale = span > 0 ? (target - y0) / span : 0.0
+
+                  corr_position = 0.0
+                  corr_time = 0.0
+                  corr_slope = 0.0
+                  unless landed
+                    dp = warp_linear ? 1.0 : -c * w * warp_inv
+                    corr_slope = slope - scale * (6.0 * p * (1.0 - p)) * dp * rate
+                    if corr_slope != 0
+                      step = (target - y0).abs
+                      step = MIN_STEP if step < MIN_STEP
+                      limit = 27.0 * overshoot * step / (4.0 * corr_slope.abs)
+                      corr_time = length - e0
+                      corr_time = slope_samples if slope_samples < corr_time
+                      corr_time = limit if limit < corr_time
+                      corr_time = 1.0 if corr_time < 1
+                    end
+                  end
+
+                  planned = true
+                  plan_length = length
+                  plan_curve = curve
+                  plan_target = target
+                  plan_shape = SHAPE_S
+                end
+
+                if e > e0
+                  u += rate
+                  w *= g unless warp_linear
+                end
+                corr_position += 1
+
+                p = warp_linear ? u : (1.0 - w) * warp_inv
+                y = y0 + scale * (p * p * (3.0 - 2.0 * p) - s_anchor)
+                if corr_position < corr_time
+                  x = corr_position / corr_time
+                  h = 1.0 - x
+                  y += corr_slope * corr_time * (x * h * h)
+                end
+
+                e += 1
+                break
+              end
+
+              if !planned || length != plan_length || curve != plan_curve || target != plan_target || plan_shape != SHAPE_EXP
                 planned = true
                 plan_length = length
                 plan_curve = curve
                 plan_target = target
+                plan_shape = SHAPE_EXP
                 e0 = e > 0 ? e - 1 : 0.0
                 y0 = y
 
@@ -827,7 +1039,8 @@ module MB
 
         state[0..] = [
           stage, seg, e, y, peak, gate_prev ? 1 : 0, planned ? 1 : 0, plan_length, plan_curve, plan_target,
-          e0, y0, scale, w, g, linear ? 1 : 0, trigger_prev ? 1 : 0, note_position, release_scale
+          e0, y0, scale, w, g, linear ? 1 : 0, trigger_prev ? 1 : 0, note_position, release_scale,
+          y_prev, plan_shape, u, rate, s_anchor, warp_inv, warp_linear ? 1 : 0, corr_slope, corr_time, corr_position
         ]
 
         out
@@ -899,7 +1112,7 @@ module MB
         # Constant arguments are computed once (see #changed!); nodes are
         # read into the same Arrays every buffer.
         args = @args ||= kernel_args
-        times, curves, levels, inputs, config = args
+        times, curves, levels, inputs, config, _hold, shapes = args
         SEGMENTS.each_with_index do |s, i|
           times[i] = read_length(s, @times[s], count) if @times[s].node?
           curves[i] = read_param(CURVE_KEYS[s], @curves[s], count) unless @curves[s].is_a?(Numeric)
@@ -915,11 +1128,11 @@ module MB
         inputs[5] = read_param(:octaves, @octaves, count) if @octaves.respond_to?(:sample)
 
         if kernel == :ruby
-          self.class.process_ruby(@buf, @state, times, curves, levels, hold, inputs, config)
+          self.class.process_ruby(@buf, @state, times, curves, levels, hold, inputs, config, shapes)
         elsif quiet_idle?(inputs, config)
           return idle_buffer(count)
         else
-          MB::Sound::FastEnvelope.process(@buf, @state, times, curves, levels, hold, inputs, config)
+          MB::Sound::FastEnvelope.process(@buf, @state, times, curves, levels, hold, inputs, config, shapes)
         end
 
         @buf
@@ -938,6 +1151,7 @@ module MB
         return false unless quiet?(:gate, inputs[0]) && quiet?(:trigger, inputs[1])
 
         @state[STATE_LEVEL] = 0
+        @state[STATE_PREV_LEVEL] = 0
         @state[STATE_TRIGGER] = 0
         @state[STATE_NOTE_POSITION] += @buf.length
         true
@@ -970,7 +1184,7 @@ module MB
       end
 
       # Kernel arguments with constants filled in (nil for nodes): [times,
-      # curves, levels, inputs, config, hold].
+      # curves, levels, inputs, config, hold, shapes].
       def kernel_args
         times = SEGMENTS.map { |s| @times[s].node? ? nil : @times[s].constant_samples(@sample_rate) }
         curves = SEGMENTS.map { |s| @curves[s].is_a?(Numeric) ? @curves[s] : nil }
@@ -980,7 +1194,9 @@ module MB
         hold_source = @hold == false ? nil : (@hold || default_hold)
         hold = hold_source.nil? ? Float::INFINITY : (hold_source.node? ? nil : hold_source.constant_samples(@sample_rate))
 
-        [times, curves, levels, inputs, kernel_config, hold]
+        shapes = SEGMENTS.map { |s| SHAPES.fetch(@shapes[s]) }
+
+        [times, curves, levels, inputs, kernel_config, hold, shapes]
       end
 
       # Reads a length source in samples (a number or NArray).  Lengths from

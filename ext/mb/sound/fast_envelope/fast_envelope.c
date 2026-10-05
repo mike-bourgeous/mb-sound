@@ -28,6 +28,27 @@
  * curvature c * (1 - x0)), so the level stays continuous.  Constant
  * parameters are planned once per segment (two exp() calls).
  *
+ * S segments (shape ENV_SHAPE_S) follow a smoothstep of the same dB-warped
+ * curve of a phase u that runs from 0 to 1 over the segment:
+ *   S(u) = s(p(u)), s(x) = x^2 (3 - 2x)
+ *   level = y_a + (target - y_a) * (S(u) - S(u_a)) / (1 - S(u_a))
+ * so every S segment starts and ends with zero slope (0 dB is plain
+ * smoothstep, negative dB swells, positive dB moves fast first).  y_a and
+ * u_a are the level and phase where the plan was made (0 at the segment
+ * start).  When the length changes, u keeps its value and its rate becomes
+ * (1 - u) / (samples left), so the segment still lands on its sample; a
+ * target or curve change re-anchors y_a and u_a at the current level and
+ * phase.  The warp p runs on the recursion w = e^(c u), w *= e^(c rate).
+ *
+ * After a re-plan, a release, or a note start (not a normal landing), an S
+ * segment carries the old slope for a moment and fades it out with a
+ * Hermite term m_c * tau * h(t / tau), h(x) = x (1 - x)^2, where m_c is the
+ * last output slope minus the new path's slope and t counts samples from
+ * the last output.  tau is at most CF_SLOPE_SAMPLES (2 ms), the samples
+ * left, and 27 eps |step| / (4 |m_c|), so the bump stays within eps
+ * (CF_OVERSHOOT, 1%) of the segment's step; the level stays continuous and
+ * the slope too, at that time scale.
+ *
  * The Ruby mirror is MB::Sound::Envelope.process_ruby; specs check that both
  * give exactly the same samples, so keep the operations identical (this
  * extension is built with -ffp-contract=off so clang doesn't fuse them).
@@ -76,6 +97,16 @@ enum env_state_index {
 	ST_TRIGGER,        // whether the trigger was > 0 on the last sample
 	ST_NOTE_POSITION,  // samples since the note started (for hold)
 	ST_RELEASE_SCALE,  // release time multiplier from lift (1 without)
+	ST_PREV_LEVEL,     // the output level before ST_LEVEL (for the slope)
+	ST_PLAN_SHAPE,     // the segment shape the plan was made for
+	ST_PHASE,          // S segments: phase u (0..1) of the last output
+	ST_RATE,           //   phase increment per sample
+	ST_S_ANCHOR,       //   S(u) at the anchor
+	ST_WARP_INV,       //   1 / (1 - e^c) for the dB warp of the phase
+	ST_WARP_LINEAR,    //   whether the warp is the identity (c = 0)
+	ST_CORR_SLOPE,     //   slope carried by the correction (per sample)
+	ST_CORR_TIME,      //   correction length tau (samples)
+	ST_CORR_POSITION,  //   samples since the correction's anchor
 	ST_SIZE
 };
 
@@ -88,8 +119,19 @@ enum env_config_index {
 	CF_VELOCITY_DB,
 	CF_CHOKE_SAMPLES,
 	CF_CURVE_SCALE,
+	CF_SLOPE_SAMPLES,  // longest slope correction of S segments (samples)
+	CF_OVERSHOOT,      // largest correction bump, relative to the step
 	CF_SIZE
 };
+
+// Segment shapes (MB::Sound::Envelope::SHAPES).
+enum env_shape {
+	ENV_SHAPE_EXP = 0,
+	ENV_SHAPE_S = 1,
+};
+
+// The smallest segment step the S correction's overshoot bound uses.
+#define ENV_MIN_STEP 1e-3
 
 enum env_flags {
 	ENV_HAS_GATE = 1,
@@ -231,18 +273,20 @@ static double env_add_peak(double y, double p, double low, double high)
 
 /*
  * Runs the envelope for one buffer:
- *   process(out, state, times, curves, levels, hold, inputs, config)
+ *   process(out, state, times, curves, levels, hold, inputs, config, shapes)
  * +out+ is a contiguous SFloat written in place (and returned).  +state+ is
  * a contiguous DFloat of ST_SIZE values, updated in place.  +times+ (in
  * samples), +curves+ (in dB), and +levels+ (relative to the peak) are
  * Arrays with one entry per segment, each a Numeric or an NArray of
- * out.length values.  +hold+ is how long notes of envelopes without a gate
+ * out.length values.  +shapes+ is an Array of one Integer per segment
+ * (enum env_shape).  +hold+ is how long notes of envelopes without a gate
  * last before releasing, counted from the note start, in samples (Numeric
  * or NArray).  +inputs+ is [gate, trigger, velocity, choke, lift, octaves],
  * each nil, a Numeric, or an NArray (lift and octaves are used only with
  * the ENV_LIFT and ENV_OCTAVES flags).  +config+ is [flags, release node,
  * velocity low, velocity high, velocity in dB (0 or 1), choke samples,
- * curve scale] (see MB::Sound::Envelope#kernel_config).
+ * curve scale, slope correction samples, overshoot] (see
+ * MB::Sound::Envelope#kernel_config).
  *
  * With the ENV_ADD flag, a note's peak is env_add_peak of the level when
  * it starts and its velocity's peak (Envelope retrigger: :add).
@@ -251,7 +295,7 @@ static double env_add_peak(double y, double p, double low, double high)
  * (negative values are reserved).  A release starts with its time scaled
  * by env_lift_scale of the lift input on that sample.
  */
-static VALUE ruby_process(VALUE self, VALUE out, VALUE state, VALUE times, VALUE curves, VALUE levels, VALUE hold, VALUE inputs, VALUE config)
+static VALUE ruby_process(VALUE self, VALUE out, VALUE state, VALUE times, VALUE curves, VALUE levels, VALUE hold, VALUE inputs, VALUE config, VALUE shapes)
 {
 	if (CLASS_OF(out) != numo_cSFloat || RNARRAY_NDIM(out) != 1 || !RTEST(nary_check_contiguous(out))) {
 		rb_raise(rb_eArgError, "Output must be a contiguous 1D SFloat");
@@ -265,10 +309,11 @@ static VALUE ruby_process(VALUE self, VALUE out, VALUE state, VALUE times, VALUE
 	Check_Type(levels, T_ARRAY);
 	Check_Type(inputs, T_ARRAY);
 	Check_Type(config, T_ARRAY);
+	Check_Type(shapes, T_ARRAY);
 
 	long nseg = RARRAY_LEN(times);
-	if (nseg < 2 || nseg > ENV_MAX_SEGMENTS || RARRAY_LEN(curves) != nseg || RARRAY_LEN(levels) != nseg) {
-		rb_raise(rb_eArgError, "Times, curves, and levels must have the same number of segments (2 to %d)", ENV_MAX_SEGMENTS);
+	if (nseg < 2 || nseg > ENV_MAX_SEGMENTS || RARRAY_LEN(curves) != nseg || RARRAY_LEN(levels) != nseg || RARRAY_LEN(shapes) != nseg) {
+		rb_raise(rb_eArgError, "Times, curves, levels, and shapes must have the same number of segments (2 to %d)", ENV_MAX_SEGMENTS);
 	}
 	if (RARRAY_LEN(inputs) != 6) {
 		rb_raise(rb_eArgError, "Inputs must be [gate, trigger, velocity, choke, lift, octaves]");
@@ -284,6 +329,8 @@ static VALUE ruby_process(VALUE self, VALUE out, VALUE state, VALUE times, VALUE
 	int velocity_db = NUM2INT(rb_ary_entry(config, CF_VELOCITY_DB));
 	double choke_samples = env_length(NUM2DBL(rb_ary_entry(config, CF_CHOKE_SAMPLES)));
 	double curve_scale = NUM2DBL(rb_ary_entry(config, CF_CURVE_SCALE));
+	double slope_samples = NUM2DBL(rb_ary_entry(config, CF_SLOPE_SAMPLES));
+	double overshoot = NUM2DBL(rb_ary_entry(config, CF_OVERSHOOT));
 
 	if (release_node < 1 || release_node >= nseg) {
 		rb_raise(rb_eArgError, "Release node must be from 1 to %ld", nseg - 1);
@@ -308,6 +355,14 @@ static VALUE ruby_process(VALUE self, VALUE out, VALUE state, VALUE times, VALUE
 		env_read_signal(rb_ary_entry(times, s), n, "Segment time", 0, keep, &seg_times[s]);
 		env_read_signal(rb_ary_entry(curves, s), n, "Segment curve", 0, keep, &seg_curves[s]);
 		env_read_signal(rb_ary_entry(levels, s), n, "Segment level", 0, keep, &seg_levels[s]);
+	}
+
+	int seg_shapes[ENV_MAX_SEGMENTS];
+	for (long s = 0; s < nseg; s++) {
+		seg_shapes[s] = NUM2INT(rb_ary_entry(shapes, s));
+		if (seg_shapes[s] != ENV_SHAPE_EXP && seg_shapes[s] != ENV_SHAPE_S) {
+			rb_raise(rb_eArgError, "Unknown segment shape %d", seg_shapes[s]);
+		}
 	}
 
 	struct env_signal hold_sig, gate_sig, trigger_sig, velocity_sig, choke_sig, lift_sig, octaves_sig;
@@ -341,6 +396,16 @@ static VALUE ruby_process(VALUE self, VALUE out, VALUE state, VALUE times, VALUE
 	int trigger_prev = st[ST_TRIGGER] != 0;
 	double note_position = st[ST_NOTE_POSITION];
 	double release_scale = st[ST_RELEASE_SCALE];
+	double y_prev = st[ST_PREV_LEVEL];
+	int plan_shape = (int)st[ST_PLAN_SHAPE];
+	double u = st[ST_PHASE];
+	double rate = st[ST_RATE];
+	double s_anchor = st[ST_S_ANCHOR];
+	double warp_inv = st[ST_WARP_INV];
+	int warp_linear = st[ST_WARP_LINEAR] != 0;
+	double corr_slope = st[ST_CORR_SLOPE];
+	double corr_time = st[ST_CORR_TIME];
+	double corr_position = st[ST_CORR_POSITION];
 
 	if (seg < 0 || seg >= nseg) {
 		rb_raise(rb_eArgError, "Segment index %ld out of range in envelope state", seg);
@@ -349,6 +414,9 @@ static VALUE ruby_process(VALUE self, VALUE out, VALUE state, VALUE times, VALUE
 	for (size_t i = 0; i < n; i++) {
 		int gate_now = has_gate && env_at(&gate_sig, i) != 0;
 		int start = stage == ENV_PENDING;
+		int landed = 0;
+		double slope = y - y_prev;
+		y_prev = y;
 
 		if (env_at(&choke_sig, i) != 0 && (stage == ENV_SEGMENT || stage == ENV_SUSTAIN)) {
 			stage = ENV_CHOKE;
@@ -423,6 +491,7 @@ static VALUE ruby_process(VALUE self, VALUE out, VALUE state, VALUE times, VALUE
 					y = target;
 					e = 0;
 					planned = 0;
+					landed = 1;
 
 					if (stage == ENV_CHOKE || seg == nseg - 1) {
 						stage = one_shot ? ENV_ENDED : ENV_IDLE;
@@ -435,12 +504,104 @@ static VALUE ruby_process(VALUE self, VALUE out, VALUE state, VALUE times, VALUE
 					continue;
 				}
 
-				if (!planned || length != plan_length || curve != plan_curve || target != plan_target) {
+				int shape = stage == ENV_CHOKE ? ENV_SHAPE_EXP : seg_shapes[seg];
+
+				if (shape == ENV_SHAPE_S) {
+					if (!planned || length != plan_length || curve != plan_curve || target != plan_target || plan_shape != ENV_SHAPE_S) {
+						// (Re-)plan the rest of the segment from the last
+						// output, keeping its phase (see the top of the file).
+						int full = !planned || e == 0 || plan_shape != ENV_SHAPE_S || curve != plan_curve;
+						int timing = full || length != plan_length;
+						double c = curve * curve_scale;
+
+						e0 = e > 0 ? e - 1 : 0;
+						y0 = y;
+						if (e == 0) {
+							u = 0;
+						} else if (plan_shape != ENV_SHAPE_S) {
+							// Another shape until now: the phase from time
+							u = e0 / length;
+						}
+
+						if (full) {
+							warp_linear = fabs(c) < ENV_LINEAR_LIMIT;
+							if (!warp_linear) {
+								warp_inv = 1.0 / (1.0 - exp(c));
+								w = exp(c * u);
+							}
+						}
+						if (timing) {
+							rate = (1.0 - u) / (length - e0);
+							if (!warp_linear) {
+								g = exp(c * rate);
+							}
+						}
+
+						double p = warp_linear ? u : (1.0 - w) * warp_inv;
+						s_anchor = p * p * (3.0 - 2.0 * p);
+						double span = 1.0 - s_anchor;
+						scale = span > 0 ? (target - y0) / span : 0.0;
+
+						// Slope correction (not after a normal landing)
+						corr_position = 0;
+						corr_time = 0;
+						corr_slope = 0;
+						if (!landed) {
+							double dp = warp_linear ? 1.0 : -c * w * warp_inv;
+							corr_slope = slope - scale * (6.0 * p * (1.0 - p)) * dp * rate;
+							if (corr_slope != 0) {
+								double step = fabs(target - y0);
+								if (step < ENV_MIN_STEP) {
+									step = ENV_MIN_STEP;
+								}
+								double limit = 27.0 * overshoot * step / (4.0 * fabs(corr_slope));
+								corr_time = length - e0;
+								if (slope_samples < corr_time) {
+									corr_time = slope_samples;
+								}
+								if (limit < corr_time) {
+									corr_time = limit;
+								}
+								if (corr_time < 1) {
+									corr_time = 1;
+								}
+							}
+						}
+
+						planned = 1;
+						plan_length = length;
+						plan_curve = curve;
+						plan_target = target;
+						plan_shape = ENV_SHAPE_S;
+					}
+
+					if (e > e0) {
+						u += rate;
+						if (!warp_linear) {
+							w *= g;
+						}
+					}
+					corr_position += 1;
+
+					double p = warp_linear ? u : (1.0 - w) * warp_inv;
+					y = y0 + scale * (p * p * (3.0 - 2.0 * p) - s_anchor);
+					if (corr_position < corr_time) {
+						double x = corr_position / corr_time;
+						double h = 1.0 - x;
+						y += corr_slope * corr_time * (x * h * h);
+					}
+
+					e += 1;
+					break;
+				}
+
+				if (!planned || length != plan_length || curve != plan_curve || target != plan_target || plan_shape != ENV_SHAPE_EXP) {
 					// (Re-)plan the rest of the segment from the last output.
 					planned = 1;
 					plan_length = length;
 					plan_curve = curve;
 					plan_target = target;
+					plan_shape = ENV_SHAPE_EXP;
 					e0 = e > 0 ? e - 1 : 0;
 					y0 = y;
 
@@ -519,6 +680,16 @@ static VALUE ruby_process(VALUE self, VALUE out, VALUE state, VALUE times, VALUE
 	st[ST_TRIGGER] = trigger_prev;
 	st[ST_NOTE_POSITION] = note_position;
 	st[ST_RELEASE_SCALE] = release_scale;
+	st[ST_PREV_LEVEL] = y_prev;
+	st[ST_PLAN_SHAPE] = plan_shape;
+	st[ST_PHASE] = u;
+	st[ST_RATE] = rate;
+	st[ST_S_ANCHOR] = s_anchor;
+	st[ST_WARP_INV] = warp_inv;
+	st[ST_WARP_LINEAR] = warp_linear;
+	st[ST_CORR_SLOPE] = corr_slope;
+	st[ST_CORR_TIME] = corr_time;
+	st[ST_CORR_POSITION] = corr_position;
 
 	RB_GC_GUARD(keep);
 
@@ -534,5 +705,5 @@ void Init_fast_envelope(void)
 	rb_define_const(fast_envelope, "STATE_SIZE", INT2FIX(ST_SIZE));
 	rb_define_const(fast_envelope, "MAX_SEGMENTS", INT2FIX(ENV_MAX_SEGMENTS));
 
-	rb_define_module_function(fast_envelope, "process", ruby_process, 8);
+	rb_define_module_function(fast_envelope, "process", ruby_process, 9);
 }
