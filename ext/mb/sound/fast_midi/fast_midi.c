@@ -405,7 +405,15 @@ static VALUE output_new(VALUE klass, VALUE api, VALUE client_name, VALUE port_in
 	} else {
 		rtmidi_open_port(device, NUM2UINT(port_index), StringValueCStr(port_name));
 	}
-	check(device, "Opening the MIDI output port");
+	if (!device->ok) {
+		// Close RtMidi's client now (e.g. a JACK client that connected
+		// before the port failed) rather than when GC frees the object, by
+		// which time its server may be gone (a JACK client closed after its
+		// server stopped crashed libjack's threads)
+		DATA_PTR(self) = NULL;
+		output_free(device);
+		rb_raise(cError, "Opening the MIDI output port failed (see RtMidi's message above)");
+	}
 
 	return self;
 }
