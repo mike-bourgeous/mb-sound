@@ -19,7 +19,7 @@ RSpec.describe(MB::Sound::MIDI::FileSource) do
 
   it 'has the same events at the same times as MIDIFile for every test file' do
     files.each do |f|
-      m = MB::Sound::MIDI::MIDIFile.new(f, clock: MB::Sound::MIDI::MIDIFile::ConstantClock.new)
+      m = MB::Sound::MIDI::MIDIFile.new(f)
       src = MB::Sound::MIDI::FileSource.new(f)
       expected = midi_file_events(m)
 

@@ -5,7 +5,7 @@ module MB
       # events, merged and converted to Events once (meta events like tempo
       # and track names are left out).  Reading is free of clocks and side
       # effects, so restarting, seeking, and looping just move a number
-      # (unlike MIDIFile, whose clock made reuse tricky, GH #67).
+      # (the old clock-driven MIDIFile#read made reuse tricky, GH #67).
       #
       # The file is parsed by MIDIFile (midilib).  Pulse times are turned
       # into seconds by a tempo map (+:tempo_map+, anything with
@@ -63,7 +63,7 @@ module MB
         # +file+ is a filename or a MIDIFile.  If +:loop+ is true, the file
         # repeats every #duration seconds (it must have a nonzero duration).
         def initialize(file, loop: false, tempo_map: nil)
-          @midi_file = file.is_a?(MIDIFile) ? file : MIDIFile.new(file, clock: MIDIFile::ConstantClock.new)
+          @midi_file = file.is_a?(MIDIFile) ? file : MIDIFile.new(file)
           seq = @midi_file.seq
           @tempo_map = tempo_map || ConstantTempo.from_sequence(seq)
           @loop = !!loop
@@ -103,6 +103,11 @@ module MB
         # The stream time of the last event (nil for looping files).
         def music_end
           @loop ? nil : @offset + @content_end
+        end
+
+        # The file's first note-on (see Source#first_note).
+        def first_note
+          @events.find(&:note_on?)
         end
 
         private

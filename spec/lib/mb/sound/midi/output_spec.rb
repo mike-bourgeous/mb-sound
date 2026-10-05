@@ -29,7 +29,7 @@ RSpec.describe(MB::Sound::MIDI::Output, :aggregate_failures) do
       events = []
       deadline = MB::U.clock_now + 2
       while events.length < count && MB::U.clock_now < deadline
-        events.concat(input.read[0])
+        events.concat(input.read_raw)
         sleep 0.005
       end
       events.map { |_, b| b.bytes }

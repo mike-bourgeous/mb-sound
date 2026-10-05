@@ -160,12 +160,49 @@ RSpec.describe(MB::Sound::ScriptRunner) do
 
     it 'gives MIDI a range relative to the parameter value unless relative: false' do
       r = runner(:effect, [], hz: 0.5)
-      midi = double('MidiDsl')
+      midi = double('Notes')
       r.params.midi_source = -> { midi }
-      expect(midi).to receive(:cc).with(1, range: 0.0..3.0, default: 0.5).and_return(0.5.constant)
-      expect(midi).to receive(:cc).with(2, range: 0.0..6.0, default: 0.5).and_return(0.5.constant)
+      expect(midi).to receive(:control).with(have_attributes(number: 1, range: 0.0..3.0, center: 0.5, default: 64)).and_return(0.5.constant)
+      expect(midi).to receive(:control).with(have_attributes(number: 2, range: 0.0..6.0, center: 0.5, default: 64)).and_return(0.5.constant)
       r.params.midi_cc(1, :hz, range: 0.0..6.0)
       r.params.midi_cc(2, :hz, range: 0.0..6.0, relative: false)
+    end
+
+    it 'is a Notes controller with the parameter as ControlSpec metadata, starting at the value' do
+      ev = MB::Sound::MIDI::Event
+      r = runner(:effect, [], hz: [0.5, 'LFO rate in Hz'], dry: [0.8, 'Dry level'])
+      notes = MB::Sound::Notes.new(MIDIListSource.new(
+        ev.cc(1, 127, time: Rational(100, 48000)), ev.cc(1, 0, time: Rational(200, 48000)), ev.cc(99, 0, time: 10r)
+      ))
+      r.params.midi_source = -> { notes }
+
+      hz = r.params.midi_cc(1, :hz, range: 0.0..6.0)
+      dry = r.params.midi_cc(1, :dry, range: 1.0..0.0)
+      expect(hz).to be_a(MB::Sound::Notes::Control)
+      expect(hz.graph_node_name).to eq('hz')
+      expect(r.params.midi).to equal(notes)
+
+      expect(hz.spec).to have_attributes(number: 1, name: 'hz', description: 'LFO rate in Hz', range: 0.0..3.0, center: 0.5, default: 64)
+      expect(dry.spec).to have_attributes(name: 'dry', description: 'Dry level', range: 0.8..0.0, center: nil, default: 0)
+      expect(notes.controls.map(&:name)).to contain_exactly('hz', 'dry')
+
+      h = hz.sample(300).dup
+      d = dry.sample(300).dup
+      expect(h[0]).to be_within(1e-6).of(0.5) # the parameter value until the knob moves
+      expect(h[150]).to be_within(1e-6).of(3.0)
+      expect(h[250]).to eq(0)
+      expect(d[0]).to be_within(1e-6).of(0.8)
+      expect(d[150]).to eq(0)
+      expect(d[250]).to be_within(1e-6).of(0.8)
+    end
+
+    it 'maps the knob linearly on each side of the value' do
+      spec = described_class::Values.cc_spec(1, :hz, 0.5, 0.0..3.0)
+      expect(spec.value(64)).to eq(0.5)
+      expect(spec.value(32)).to be_within(1e-9).of(0.25)
+      expect(spec.value(127)).to eq(3.0)
+      expect(described_class::Values.cc_spec(1, :x, 4.0, 0.0..2.0).default).to eq(127) # outside: nearest end
+      expect(described_class::Values.cc_spec(1, :x, 1.0, 1.0..1.0).value(100)).to eq(1)
     end
 
     it 'is a constant when MIDI is not available' do
@@ -223,6 +260,53 @@ RSpec.describe(MB::Sound::ScriptRunner) do
   describe '#run_synth' do
     let(:outfile) { tmp_path('script_runner_synth.flac') }
 
+    it 'gives the block a Notes playing the MIDI file, which makes synths and mono voices' do
+      midi_file = 'spec/test_data/c2_sustain.mid'
+      music_end = MB::Sound::MIDI::MIDIFile.new(midi_file).music_end
+      seen = nil
+
+      r = runner(:synth, [midi_file, outfile, '-q'], cutoff: 800)
+      expect {
+        r.run_synth { |midi, p|
+          seen = midi
+          midi.synth(voices: 2) { |v| v.hz.saw.filter(:lowpass, cutoff: v.cutoff(p.cutoff)) * v.amp_env(0.01, 0.1, 0.5, 0.2) }
+        }
+      }.to output(/Rendered/).to_stdout
+      expect(seen).to be_a(MB::Sound::Notes)
+      expect(seen.stream.source).to be_a(MB::Sound::MIDI::FileSource)
+
+      # The synth (sustain pedal on) rings past the file's end, then stops
+      # after a second below Session's -90 dB quiet threshold
+      quiet = MB::Sound::Session::TAIL_THRESHOLD
+      data = MB::Sound.read(outfile)[0]
+      last_sound = (0...data.length).select { |i| data[i].abs >= quiet }.last / 48000.0
+      expect(last_sound).to be > music_end
+      expect(data.length / 48000.0 - last_sound).to be_within(0.1).of(1)
+
+      # A mono voice (no sustain pedal: the note-off at 0.5 s releases it)
+      # ends with its release, when its nodes return nil
+      mono = tmp_path('mono.flac')
+      r = runner(:synth, [midi_file, mono, '-q'])
+      expect { r.run_synth { |midi| midi.hz.saw * midi.amp_env(0.01, 0.1, 0.5, 0.2) } }.to output(/Rendered/).to_stdout
+      data = MB::Sound.read(mono)[0]
+      last_sound = (0...data.length).select { |i| data[i].abs >= quiet }.last / 48000.0
+      expect(last_sound).to be_within(0.03).of(0.5 + 0.2)
+      expect(data.length / 48000.0 - last_sound).to be < 0.1
+    end
+
+    it 'uses the synth MIDI for p.midi_cc' do
+      r = runner(:synth, ['spec/test_data/c2_sustain.mid', outfile, '-q'], cutoff: 800)
+      node = nil
+      expect { r.run_synth { |midi, p| node = p.midi_cc(74, :cutoff, range: 0.5..2.0); midi.hz.saw * midi.amp_env * 0 } }.to output(/Rendered/).to_stdout
+      expect(node).to be_a(MB::Sound::Notes::Control)
+      expect(node.spec).to have_attributes(number: 74, name: 'cutoff', center: 800)
+    end
+
+    it 'refuses a MIDI input file that is not MIDI' do
+      r = runner(:synth, ['spec/test_data/arp_a7.flac', '-i', 'spec/test_data/arp_a7.flac', '-q'])
+      expect { r.run_synth { |midi| midi.gate } }.to raise_error(ArgumentError, /not a MIDI file/)
+    end
+
     it 'renders a MIDI file, letting notes ring out and stopping after a second of quiet' do
       midi_file = 'spec/test_data/c2_sustain.mid'
       music_end = MB::Sound::MIDI::MIDIFile.new(midi_file).music_end
@@ -235,6 +319,88 @@ RSpec.describe(MB::Sound::ScriptRunner) do
 
       expect(last_sound).to be > music_end # the release rings past the last MIDI event
       expect(data.length / 48000.0 - last_sound).to be_within(0.1).of(1) # a second of quiet (it was 5 s after the last event)
+    end
+  end
+
+  describe 'MIDI controls' do
+    let(:outfile) { tmp_path('script_runner_controls.flac') }
+    let(:xmlfile) { tmp_path('controls.xml') }
+
+    def synth_block
+      ->(midi, p) {
+        cutoff = p.midi_cc(21, :cutoff, range: 0.5..2.0)
+        midi.synth(voices: 2) { |v| v.hz.saw.filter(:lowpass, cutoff: cutoff * v.cutoff(1)) * v.amp_env(0.01, 0.1, 0.5, 0.2) }
+      }
+    end
+
+    it "lists a synth's controls with its parameters, and writes ACID XML" do
+      r = runner(:synth, ['spec/test_data/c2_sustain.mid', outfile, '--acid-xml', xmlfile], cutoff: [800, 'Filter cutoff'])
+      expect { r.run_synth(&synth_block) }.to output(
+        a_string_including(
+          'MIDI controls:',
+          'CC  21 cutoff (400.0..1600, default 64) - Filter cutoff',
+          'CC  64 Sustain',
+          'CC  74 Brightness',
+          "MIDI controls) to #{xmlfile}",
+          'Rendered'
+        )
+      ).to_stdout
+
+      xml = File.read(xmlfile)
+      expect(xml).to start_with('<?xml')
+      expect(xml).to include('mapname="example.rb"', '<param name="cutoff">', '<param name="Sustain">', '<param name="Brightness">')
+    end
+
+    it 'prints nothing about controls with -q, but still writes the XML' do
+      r = runner(:synth, ['spec/test_data/c_major.mid', '-q', '--acid-xml', xmlfile], cutoff: 800)
+      graph = synth_block.call(r.instance_variable_set(:@synth_notes, MB::Sound::Notes.new('spec/test_data/c_major.mid')), r.params)
+      expect { r.send(:announce, graph) }.not_to output.to_stdout
+      expect(File.read(xmlfile)).to include('<param name="cutoff">')
+    end
+
+    it "prints the XML with --acid-xml -" do
+      r = runner(:synth, ['spec/test_data/c_major.mid', '-q', '--acid-xml', '-'], cutoff: 800)
+      r.instance_variable_set(:@synth_notes, MB::Sound::Notes.new('spec/test_data/c_major.mid'))
+      graph = r.instance_variable_get(:@synth_notes).synth(voices: 1) { |v| v.hz.saw * v.mod }
+      expect { r.send(:announce, graph) }.to output(/parammap.*Modulation.*Sustain/m).to_stdout
+    end
+
+    it "doesn't list an effect's controls without MIDI, but writes them as XML" do
+      r = runner(:effect, ['in.flac', 'out.flac', '--acid-xml', xmlfile], hz: [0.5, 'LFO rate'])
+      r.params.midi_source = r.method(:midi)
+      graph = 100.hz.sine * r.params.midi_cc(1, :hz, range: 0.0..2.0)
+      expect { r.send(:announce, graph) }.not_to output(/MIDI controls:/).to_stdout
+      expect(File.read(xmlfile)).to include('<param name="hz">', '<ccMsg>1</ccMsg>', '<Neutral>64</Neutral>')
+    end
+
+    it "lists an effect's controls when MIDI is open" do
+      r = runner(:effect, ['in.flac', 'out.flac', '-m', 'spec/test_data/mod_wheel.mid'], hz: [0.5, 'LFO rate'])
+      r.params.midi_source = r.method(:midi)
+      graph = nil
+      expect { graph = 100.hz.sine * r.params.midi_cc(1, :hz, range: 0.0..2.0) }.to output(/MIDI control from/).to_stdout
+      expect { r.send(:announce, graph) }.to output(/MIDI controls:\n  CC   1 hz \(0.0..1.0, default 64\) - LFO rate\n\z/).to_stdout
+    end
+
+    it 'has --acid-xml for effects and synths only' do
+      expect(runner(:effect, []).instance_variable_get(:@parser).to_s).to include('--acid-xml FILE')
+      expect(runner(:synth, []).instance_variable_get(:@parser).to_s).to include('--acid-xml FILE')
+      expect { runner(:song, ['--acid-xml', 'x.xml']) }.to raise_error(described_class::UsageError)
+    end
+  end
+
+  describe '#ending_nodes' do
+    it 'keeps a Synth but skips the nodes inside it and gated envelopes' do
+      r = runner(:synth, [])
+      gated = MB::Sound::Envelope.new(gate: 0.constant)
+      one_shot = MB::Sound::Envelope.new
+      synth = MB::Sound::Synth.new('spec/test_data/c_major.mid', voices: 2) { |v| v.hz.saw * v.amp_env }
+      graph = (synth + 220.hz.sine * gated + 110.hz.sine * one_shot).ringdown
+
+      nodes = r.send(:ending_nodes, graph)
+      expect(nodes).to include(synth, one_shot, graph)
+      expect(nodes).not_to include(gated)
+      expect(nodes.grep(MB::Sound::Notes::Node)).to eq([])
+      expect(nodes.grep(MB::Sound::Envelope)).to eq([one_shot])
     end
   end
 

@@ -7,12 +7,15 @@ module MB
       # (usually a note number, but any Numeric or a Pitch is passed through
       # as the Event's note).  Note-offs have the default release velocity.
       #
-      # Like ClipNode, it follows the timeline as a Sequence::TimelineNode:
-      # looping clips play in phase with the transport's timeline, and
-      # non-looping clips play from their start where the graph launched.
-      # The tempo is read at each #read, and edges land at the same times as
-      # ClipNode's: a reader at sample rate r that reads one buffer at a time
-      # gets each edge on the same sample as a ClipNode would.
+      # It follows the timeline as a Sequence::TimelineNode: looping clips
+      # play in phase with the transport's timeline, and non-looping clips
+      # play from their start where the graph launched.  The tempo is read
+      # at each #read, so a reader at sample rate r that reads one buffer at
+      # a time gets each edge on the sample where it falls at the tempo of
+      # that buffer (the same samples as the old ClipNode renderers; see
+      # spec/support/clip_node_reference.rb).  Clip#stream, Clip#notes, the
+      # Clip output methods, and Clip#synth play clips through this class,
+      # and Session#swap finds it in graphs to swap clips.
       #
       # Example:
       #     src = MB::Sound::MIDI::ClipSource.new(seq(C4, E4, G4).n8.loop)
@@ -42,10 +45,15 @@ module MB
         end
 
         # Switches to playing +clip+ when the timeline reaches +time+ (whole
-        # notes; at the start of the next read if nil), like
-        # ClipNode#swap_clip.  The switch happens at the exact time rather
-        # than the next sample, so for non-looping clips the new clip's
-        # edges can land up to one sample earlier than ClipNode's.
+        # notes; at the start of the next read if nil), keeping every node
+        # reading this source.  A looping clip plays in phase with the
+        # timeline; a non-looping clip plays from its start.  Notes in
+        # progress get note-offs at the swap, and held values chase the new
+        # clip's note (see Source#chase).  Replaces any earlier swap that
+        # hasn't happened yet.  Used by Session#swap.  The switch happens at
+        # the exact time rather than the next sample, so for non-looping
+        # clips the new clip's edges can land up to one sample earlier than
+        # the old ClipNode's did.
         def swap_clip(clip, time: nil)
           raise ArgumentError, "Expected a Clip (got #{clip.class})" unless clip.is_a?(Sequence::Clip)
           @pending_swap = [clip, time&.to_r].freeze
@@ -63,7 +71,7 @@ module MB
 
         # True once a non-looping clip has played to its end.
         def ended?
-          !@clip.looping? && @clip_position >= @clip.length
+          !@clip.looping? && @clip_position > @clip.length
         end
 
         # The stream time at which a non-looping clip ends (estimated at the
@@ -77,14 +85,33 @@ module MB
           "#{super} #{@clip}"
         end
 
+        # The first event of the clip as a note-on (see Source#first_note).
+        def first_note
+          note_event(@clip.events.first, 0r)
+        end
+
         private
+
+        # The clip event at the current clip position as a note-on (see
+        # Source#chase).
+        def chase_event
+          note_event(@clip.event_at(@clip_position), position)
+        end
+
+        # A note-on Event for the clip +event+ at stream +time+, or nil.
+        def note_event(event, time)
+          event && Event.note_on(event.value, event.velocity, channel: @channel, time: time)
+        end
 
         # Seeks to +time+ seconds into the clip at the current tempo.
         def seek_to(time)
           @clip_position = time * transport.whole_notes_per_second
         end
 
-        # See ClipNode#timeline_start.
+        # Starts at timeline position +time+ for a graph launched at
+        # +origin+ (see Sequence::TimelineNode#start_at): looping clips play
+        # in phase with the timeline (clip position = +time+), non-looping
+        # clips from their start at +origin+.
         def timeline_start(time, origin)
           @origin = @clip.looping? ? 0r : origin
           @clip_position = time - @origin
@@ -109,6 +136,8 @@ module MB
               @origin = clip.looping? ? 0r : MB::M.max(time, start)
               @clip_position = MB::M.max(time, start) - @origin
               @generation = generation + 1
+              note = chase_event
+              @chase = note && Chase.new(generation: @generation, time: split, event: note.at(split))
               out << Jump.new(split)
               return out.concat(edges(split, to, wnps))
             end

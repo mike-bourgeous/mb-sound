@@ -141,7 +141,7 @@ def measure(load, setting, seconds:, midi:, oversample:, rate:, device:, backend
     session.add(oscillators, at: :now)
   else
     session.add(MB::Sound.stereo_drone, at: :now) unless load == 'fm_bass'
-    session.add(MB::Sound.fm_bass(midi, parameter_map: false, oversample: oversample), at: :now) unless load == 'stereo_drone'
+    session.add(MB::Sound.fm_bass(midi, oversample: oversample), at: :now) unless load == 'stereo_drone'
   end
 
   sleep 1
@@ -200,8 +200,7 @@ MB::Sound.script(
     puts "Load: #{load}"
 
     results = settings.map do |setting|
-      # A new file for each setting: MB::Sound.midi_manager reuses the reader
-      # (and its clock) for a filename it has seen before.
+      # A new riff file for each setting, as long as the setting plays
       midi = File.join(tmpdir, "riff_#{index += 1}.mid")
       write_riff(midi, p.seconds + 2)
 

@@ -8,9 +8,12 @@ module MB
     # packages needed.
     #
     # #write queues audio for the sound card and returns at once while there
-    # is room; when the queue holds +:latency+ seconds it waits (without
-    # holding Ruby's GVL) until the sound card has played half of it, so the
-    # sound card's clock paces whatever is writing.  A C callback feeds the
+    # is room.  When a write doesn't fit, it queues what fits (up to
+    # +:latency+ seconds) and waits (without holding Ruby's GVL) only until
+    # the rest fits, so the sound card's clock paces whatever is writing one
+    # write at a time: writes are evenly spaced (about one write's length
+    # apart, give or take a sound card period) and the queue stays within a
+    # period or so of full.  A C callback feeds the
     # sound card, so Ruby's garbage collection and busy threads don't cause
     # dropouts unless they take longer than the queue.
     #
@@ -374,6 +377,16 @@ module MB
       # MB::Sound::Jack), or nil if it isn't a JACK output.
       def jack_ports
         @playback.jack_ports
+      end
+
+      # For JACK outputs, where the latest JACK cycle started: a Hash with
+      # its :frame_time (JACK's 32-bit frame counter), the queue's
+      # :read_pos and :write_pos (device-rate frames since opening), and the
+      # device clock (:frames_played).  Queued frame +x+ plays at JACK frame
+      # `frame_time + (x - read_pos)` (until an underrun), the time base of
+      # JACK MIDI input (see MIDI::LiveSource).  nil for other backends.
+      def jack_clock
+        @playback.jack_clock
       end
 
       def inspect

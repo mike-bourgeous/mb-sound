@@ -62,6 +62,36 @@ RSpec.describe MB::Sound::Tone do
       b = a + 150.hz
       expect { a.send(method, b) }.to raise_error(/Cyclic modulation/)
     end
+
+    it 'rejects loops through a Tee' do
+      a = 300.hz.sine
+      b = a.get_sampler * 2
+      a.get_sampler # makes a Tee
+      expect { a.send(method, b) }.to raise_error(/Cyclic modulation/)
+    end
+
+    it 'accepts a node that already feeds the tone another way (no cycle)' do
+      lfo = 3.hz.lfo.at(10)
+      a = MB::Sound::Tone.new(frequency: lfo + 300)
+      expect { a.send(method, lfo) }.not_to raise_error
+      expect(a.graph).to include(lfo)
+      expect(a.sample(800)).to be_a(Numo::SFloat)
+    end
+  end
+
+  describe 'cycle check' do
+    it 'accepts a shared trigger feeding both the frequency and the reset input' do
+      trig = 0.constant
+      lfo = 5.hz.lfo.reset(trig)
+      a = MB::Sound::Tone.new(wave_type: :ramp, frequency: lfo * 10 + 300)
+      expect { a.reset(trig) }.not_to raise_error
+      expect(a.sample(480)).to be_a(Numo::SFloat)
+    end
+
+    it 'still rejects a reset input that depends on the tone' do
+      a = 300.hz.saw
+      expect { a.reset(a.get_sampler * 1) }.to raise_error(/Cyclic modulation/)
+    end
   end
 
   describe '#fm' do

@@ -39,4 +39,45 @@ RSpec.describe(MB::Sound::RandomMethods) do
       expect(MB::Sound.root_rng).to be_a(Random)
     end
   end
+
+  describe '#with_seed' do
+    it 'draws from the given seed inside the block' do
+      a = MB::Sound.with_seed(5) { 3.times.map { MB::Sound.next_seed } }
+      MB::Sound.next_seed
+      b = MB::Sound.with_seed(5) { 3.times.map { MB::Sound.next_seed } }
+      expect(a).to eq(b)
+      expect(MB::Sound.with_seed(6) { MB::Sound.next_seed }).not_to eq(a[0])
+    end
+
+    it 'puts the previous root generator back with its state' do
+      MB::Sound.seed(3)
+      first = MB::Sound.next_seed
+      MB::Sound.seed(3)
+      MB::Sound.next_seed
+      MB::Sound.with_seed(99) { MB::Sound.next_seed; expect(MB::Sound.random_seed).to eq(99) }
+      expect(MB::Sound.random_seed).to eq(3)
+      MB::Sound.seed(3)
+      2.times { MB::Sound.next_seed }
+      expected = MB::Sound.next_seed
+      MB::Sound.seed(3)
+      2.times { MB::Sound.next_seed }
+      MB::Sound.with_seed(1) { 10.times { MB::Sound.next_seed } }
+      expect(MB::Sound.next_seed).to eq(expected)
+      expect(first).to be_a(Integer)
+    end
+
+    it 'restores after an exception and returns the block value' do
+      MB::Sound.seed(4)
+      expect { MB::Sound.with_seed(1) { raise 'x' } }.to raise_error('x')
+      expect(MB::Sound.random_seed).to eq(4)
+      expect(MB::Sound.with_seed(1) { :v }).to eq(:v)
+    end
+
+    it 'repeats Tone#rnd phases' do
+      a = MB::Sound.with_seed(7) { 110.hz.saw.rnd }
+      b = MB::Sound.with_seed(7) { 110.hz.saw.rnd }
+      expect(a.seed).to eq(b.seed)
+      expect(a.sample(100)).to eq(b.sample(100))
+    end
+  end
 end

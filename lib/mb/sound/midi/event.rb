@@ -3,9 +3,8 @@ module MB
     module MIDI
       # One MIDI event as an immutable value, created once where events enter
       # the program (a Source; see Source, FileSource, and ClipSource) and
-      # passed unchanged through Streams and their transforms.  Part of the
-      # new pull-based MIDI layer (Event, Source, Stream) that will replace
-      # Manager and the MidiDsl callbacks.
+      # passed unchanged through Streams and their transforms (the
+      # pull-based MIDI layer: Event, Source, Stream).
       #
       # Fields:
       # - +type+: :note_on, :note_off, :poly_pressure, :cc, :program,
@@ -13,7 +12,7 @@ module MB
       #   velocity 0 becomes a :note_off (with the conventional release
       #   velocity of 64).  Channel mode messages (CC 120-127) stay :cc; see
       #   #all_sound_off?, #reset_controllers?, and #all_notes_off?.
-      # - +channel+: 0 to 15 (0-based, like Manager's +:channel+), or nil for
+      # - +channel+: 0 to 15 (0-based: MIDI channel 10 is 9), or nil for
       #   system messages.
       # - +note+ (alias #index): the note number for notes and poly
       #   pressure, the controller number for CCs, else nil.  Usually an
@@ -34,12 +33,27 @@ module MB
       # - +bend_range+: for :bend events, the bend range in semitones in
       #   effect for the event's channel (set by Stream from RPN 0 and
       #   Stream#bend_range; see #bend_semitones).
+      # - +legato+: true on a note-on that continues a held note without a
+      #   new attack (made by Allocator in mono mode; see below), else
+      #   false.
+      #
+      # Voice allocation events (made by Allocator for its lanes; they have
+      # no MIDI bytes):
+      # - :choke - the lane's note stops quickly (a 3 ms release,
+      #   Envelope::CHOKE_TIME) because its voice was stolen.  +note+ is the
+      #   note being choked.  No note-off follows for it.
+      # - :glide - +note+ is the pitch the lane's next note glides from
+      #   (polyphonic portamento, Allocator's +glide_mode: :last+).  It never
+      #   changes a sounding note.
+      # - A legato note-on (+legato+ true) follows a note-off of the
+      #   previous note at the same time: process both before computing the
+      #   gate, which stays up, and glide instead of retriggering.
       #
       # Examples:
       #     Event.parse("\x90\x3c\x40")          # note_on C4 (60), velocity 64/127
       #     Event.note_on(60, 0.5, channel: 9)   # normalized velocity
       #     Event.bend(-1.0).bend_semitones      # => -2.0
-      class Event < Data.define(:type, :channel, :note, :value, :velocity, :raw, :bytes, :time, :bend_range)
+      class Event < Data.define(:type, :channel, :note, :value, :velocity, :raw, :bytes, :time, :bend_range, :legato)
         # The pitch bend range in semitones when nothing else sets it.
         DEFAULT_BEND_RANGE = 2
 
@@ -68,10 +82,13 @@ module MB
         # (0xf1 to 0xf6; sysex and realtime messages are handled separately).
         SYSTEM_DATA_BYTES = { 0xf1 => 1, 0xf2 => 2, 0xf3 => 1, 0xf6 => 0 }.freeze
 
-        def initialize(type:, time: 0r, channel: nil, note: nil, value: nil, velocity: nil, raw: nil, bytes: nil, bend_range: nil)
+        def initialize(type:, time: 0r, channel: nil, note: nil, value: nil, velocity: nil, raw: nil, bytes: nil, bend_range: nil, legato: false)
           bytes = bytes.pack('C*') if bytes.is_a?(Array)
           bytes = bytes.b.freeze if bytes && !(bytes.frozen? && bytes.encoding == Encoding::BINARY)
-          super(type: type, channel: channel, note: note, value: value, velocity: velocity, raw: raw, bytes: bytes, time: time.to_r, bend_range: bend_range)
+          super(
+            type: type, channel: channel, note: note, value: value, velocity: velocity, raw: raw, bytes: bytes,
+            time: time.to_r, bend_range: bend_range, legato: !!legato
+          )
         end
 
         # Parses one complete MIDI message (a String or Array of bytes) at
@@ -204,12 +221,12 @@ module MB
 
         # A note-on event.  +velocity+ is 0..1 and is kept as given (not
         # rounded to a MIDI value); the raw velocity is at least 1, since 0
-        # would mean note-off.
-        def self.note_on(note, velocity = 1.0, channel: 0, time: 0r)
+        # would mean note-off.  See the class description for +:legato+.
+        def self.note_on(note, velocity = 1.0, channel: 0, time: 0r, legato: false)
           raw = MB::M.max(raw7(velocity), 1)
           new(
             type: :note_on, channel: channel, note: note, value: velocity.to_f, velocity: velocity.to_f,
-            raw: raw, bytes: note_bytes(:note_on, channel, note, raw), time: time
+            raw: raw, bytes: note_bytes(:note_on, channel, note, raw), time: time, legato: legato
           )
         end
 
@@ -259,6 +276,18 @@ module MB
           )
         end
 
+        # A choke (fast release) of +note+ on a voice allocator lane (see the
+        # class description).
+        def self.choke(note, channel: 0, time: 0r)
+          new(type: :choke, channel: channel, note: note, time: time)
+        end
+
+        # Tells a voice allocator lane that its next note glides from +note+
+        # (see the class description).
+        def self.glide(note, channel: 0, time: 0r)
+          new(type: :glide, channel: channel, note: note, time: time)
+        end
+
         # The note or controller number (an alias of +note+ that reads better
         # for CCs).
         def index
@@ -271,6 +300,19 @@ module MB
 
         def note_off?
           type == :note_off
+        end
+
+        # True for a legato note-on (see the class description).
+        def legato?
+          legato
+        end
+
+        def choke?
+          type == :choke
+        end
+
+        def glide?
+          type == :glide
         end
 
         # True for note-on and note-off events.
@@ -339,7 +381,8 @@ module MB
         def to_s
           t = MB::M.sigfigs(time.to_f, 6)
           desc = case type
-                 when :note_on, :note_off then "#{note} v#{MB::M.sigfigs(velocity, 3)}"
+                 when :note_on, :note_off then "#{note} v#{MB::M.sigfigs(velocity, 3)}#{' legato' if legato}"
+                 when :choke, :glide then note.to_s
                  when :cc, :poly_pressure then "#{note}=#{MB::M.sigfigs(value, 3)}"
                  when :bend then "#{MB::M.sigfigs(value, 4)}#{" (#{MB::M.sigfigs(bend_semitones, 4)} st)" if bend_range}"
                  when :sysex then "#{bytes.bytesize} bytes"

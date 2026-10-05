@@ -1,6 +1,5 @@
 RSpec.describe(MB::Sound::MIDI::MIDIFile) do
-  let(:clock) { MB::Sound::MIDI::MIDIFile::ConstantClock.new }
-  let(:seq) { MB::Sound::MIDI::MIDIFile.new('spec/test_data/midi.mid', clock: clock) }
+  let(:seq) { MB::Sound::MIDI::MIDIFile.new('spec/test_data/midi.mid') }
 
   it 'can be constructed and can load a MIDI file' do
     expect { seq }.not_to raise_error
@@ -23,41 +22,11 @@ RSpec.describe(MB::Sound::MIDI::MIDIFile) do
     end
   end
 
-  describe '#ended? and #done?' do
-    it 'ends after the last event, and is done TAIL_SECONDS later' do
-      seq.read(blocking: false) # starts playback at clock time 0
-      expect(seq.ended?).to eq(false)
-
-      clock.clock_now = seq.music_end + 0.01
-      expect(seq.ended?).to eq(true)
-      expect(seq.done?).to eq(false)
-
-      clock.clock_now = seq.music_end + MB::Sound::MIDI::MIDIFile::TAIL_SECONDS + 0.01
-      expect(seq.done?).to eq(true)
-    end
-
-    it 'is neither ended nor done before playback starts' do
-      clock.clock_now = 1000
-      expect(seq.ended?).to eq(false)
-      expect(seq.done?).to eq(false)
-    end
-  end
-
-  describe '#seek' do
-    it 'can seek to the end of the file' do
-      expect(seq.index).to eq(0)
-      expect(seq.empty?).to eq(false)
-
-      seq.seek(60000)
-
-      expect(seq.empty?).to eq(true)
-      expect(seq.index).to be > 0
-      expect(seq.index).to eq(seq.count)
-    end
-
-    it 'can seek to a specific time within the file' do
-      seq.seek(4.25)
-      expect(seq.index).to eq(24)
+  describe '#find_index' do
+    it 'returns the index of the first event at or after a time' do
+      expect(seq.find_index(0)).to eq(0)
+      expect(seq.find_index(4.25)).to eq(24)
+      expect(seq.find_index(60000)).to eq(seq.count)
     end
   end
 

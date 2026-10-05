@@ -241,4 +241,29 @@ RSpec.describe(MB::Sound::MIDI::Transform) do
       expect(src.reads).to eq(1)
     end
   end
+
+  describe 'chased and first notes' do
+    let(:clip) { MB::Sound.seq(MB::Sound::C4, MB::Sound.seq(MB::Sound::E4).vel(0.5)).n4.loop }
+    let(:root) { MB::Sound::MIDI::Stream.new(MB::Sound::MIDI::ClipSource.new(clip, channel: 2)) }
+
+    it 'passes through stateless transforms' do
+      s = root.transpose(12).velocity_curve(2).sustain
+      expect(s.first_note).to have_attributes(note: 72, velocity: 0.5625)
+      r = s.reader
+      r.next(1/10r)
+      root.source.start_at(5/16r)
+      expect(s.chase.event).to have_attributes(note: 76, velocity: 0.25)
+      expect(s.chase.generation).to eq(s.generation)
+    end
+
+    it 'drops notes on other channels' do
+      expect(root.channel(2).first_note.note).to eq(60)
+      expect(root.channel(1).first_note).to eq(nil)
+    end
+  end
+
+  it 'transposes glide events' do
+    s = stream(ev.glide(48), ev.choke(nil)).transpose(12)
+    expect(summary(s)).to eq([[:glide, 60, 0], [:choke, nil, 1]])
+  end
 end

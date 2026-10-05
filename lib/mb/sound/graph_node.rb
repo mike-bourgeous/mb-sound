@@ -322,8 +322,7 @@ require_relative 'graph_node/channel_mixer/stereo'
 require_relative 'graph_node/channel_mixer/position'
 require_relative 'graph_node/fdn_reverb'
 require_relative 'graph_node/reverb'
-
-require_relative 'graph_node/graph_clock'
+require_relative 'graph_node/semitone_shift'
 
 # Generates per-channel DSL methods, so it must load after every *Methods module
 require_relative 'graph_node/channel_dispatch'

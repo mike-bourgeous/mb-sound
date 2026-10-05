@@ -1,5 +1,4 @@
 require 'midi-message'
-require 'nibbler'
 
 require 'mb/fast_sound'
 
@@ -103,11 +102,6 @@ module MB
       # The seed of the random phase generator (see #random_phase=), or nil.
       attr_reader :random_phase
 
-      # An informational marker for classes like MB::Sound::MIDI::GraphVoice
-      # indicating that the oscillator should not be reset when a note is
-      # played.  Has no effect within the oscillator itself.
-      attr_accessor :no_trigger
-
       # TODO: maybe use a clock provider instead of +advance+?  The challenge is
       # that floating point accuracy goes down as a shared clock advances, and
       # every oscillator needs its own internal phase if the phase is to be kept
@@ -148,7 +142,7 @@ module MB
       #
       # TODO: it probably makes sense to move pre_power/post_power elsewhere if
       # possible, e.g. a new waveshaper node or something
-      def initialize(wave_type, frequency: 1.0, phase: 0.0, phase_mod: nil, range: nil, pre_power: 1.0, post_power: 1.0, advance: Math::PI / 24000.0, random_advance: 0.0, no_trigger: false, band_limit: false, width: nil, remove_dc: true, sync: nil, soft_sync: false)
+      def initialize(wave_type, frequency: 1.0, phase: 0.0, phase_mod: nil, range: nil, pre_power: 1.0, post_power: 1.0, advance: Math::PI / 24000.0, random_advance: 0.0, band_limit: false, width: nil, remove_dc: true, sync: nil, soft_sync: false)
         unless WAVE_TYPES.include?(wave_type)
           raise "Invalid wave type #{wave_type.inspect}; only #{WAVE_TYPES.map(&:inspect).join(', ')} are supported"
         end
@@ -179,7 +173,6 @@ module MB
         raise "Invalid post_power #{post_power.inspect}" unless post_power.is_a?(Numeric)
         @post_power = post_power.to_f
 
-        @no_trigger = !!no_trigger
 
         self.band_limit = band_limit
         self.width = width
@@ -283,7 +276,10 @@ module MB
       # step, including phase modulation at that sample), and works with
       # frequency and phase modulation, but not with #sync.  Buffers with
       # resets are computed in pieces split at the reset samples; buffers
-      # without resets cost one scan of the trigger buffer.
+      # without resets cost one scan of the trigger buffer.  A reset input
+      # that ends (returns nil) means no more resets, not the end of the
+      # oscillator, so e.g. a key-synced clip tone keeps playing through an
+      # envelope's release after its clip's trigger has ended.
       def reset_input=(trigger)
         unless trigger.nil? || trigger.respond_to?(:sample)
           raise ArgumentError, "Reset input must be nil or a graph node of triggers (got #{trigger.inspect})"
@@ -291,6 +287,7 @@ module MB
         raise ArgumentError, 'A synced oscillator cannot also have a reset input' if trigger && @sync
 
         @reset_input = trigger.respond_to?(:get_sampler) ? trigger.get_sampler : trigger
+        @reset_ended = false
       end
 
       # Sets where the reset input (see #reset_input=) moves the phase: nil
@@ -403,7 +400,6 @@ module MB
         frequency = frequency.get_sampler if frequency.respond_to?(:get_sampler)
 
         @frequency = frequency
-        @note_number = frequency.respond_to?(:sample) ? nil : MB::Sound.tuning.number_of(frequency)
       end
 
       # Sets a phase modulation source.  Frequency modulation is added to the
@@ -418,40 +414,6 @@ module MB
         pm = pm.get_sampler if pm.respond_to?(:get_sampler)
 
         @phase_mod = pm
-      end
-
-      # Returns an approximate MIDI note number for the oscillators frequency,
-      # in the current tuning (see MB::Sound.tuning).  This value may be fractional, and may be
-      # outside of the MIDI range of 0..127.
-      def number
-        raise 'Cannot calculate a note number for a variable oscillator' if @frequency.respond_to?(:sample)
-        @note_number
-      end
-
-      # Sets the oscillator's frequency to the given MIDI note number, using
-      # the current tuning (see MB::Sound.tuning).
-      def number=(note_number)
-        self.frequency = MB::Sound.tuning.frequency_of(note_number)
-        @note_number = note_number
-      end
-
-      # Restarts the oscillator at the given note number and velocity.
-      #
-      # TODO: remove this API and use GraphVoice or Voice exclusively.
-      def trigger(note_number, velocity, timestamp)
-        reset
-        @phasor.phi -= @frequency * timestamp
-        self.number = note_number
-        amplitude = MB::M.scale(velocity, 0..127, -30..-6).db
-        self.range = -amplitude..amplitude
-      end
-
-      # Stops the oscillator at the given release velocity (which may be
-      # ignored), if its note number matches the given note number.
-      def release(note_number, velocity, timestamp)
-        if note_number == @note_number || (note_number.round == @note_number.round rescue nil)
-          self.range = 0..0
-        end
       end
 
       # Returns the value of the oscillator for a given phase between 0 and
@@ -804,17 +766,24 @@ module MB
       # True if an input needed for the next samples has ended.
       def missing_input?(freq, phase, width, pulses, resets, targets)
         freq.nil? || phase.nil? || (warped? && width.nil?) || (@sync && pulses.nil?) ||
-          (@reset_input && resets.nil?) || (@reset_to.respond_to?(:sample) && targets.nil?)
+          (@reset_to.respond_to?(:sample) && targets.nil?)
       end
 
       # The indices of the nonzero samples of the reset input's buffer
       # +resets+ as an Array, or nil if there are none (or no reset input).
+      #
+      # A frozen buffer already found to be all zeros (e.g. the constant
+      # buffer of a Notes trigger without note-ons) isn't scanned again.
       def reset_points(resets)
         return nil if resets.nil?
+        return nil if resets.equal?(@quiet_resets)
 
         unless resets.is_a?(Numo::SComplex) || resets.is_a?(Numo::DComplex)
           min, max = resets.minmax
-          return nil if min == 0 && max == 0 # cheaper than ne(0).where
+          if min == 0 && max == 0 # cheaper than ne(0).where
+            @quiet_resets = resets if resets.frozen?
+            return nil
+          end
         end
 
         resets = resets.ne(0).where
@@ -1049,10 +1018,11 @@ module MB
           min_length = pulses.length if pulses && pulses.length < min_length
         end
 
-        resets = @reset_input
+        resets = @reset_ended ? nil : @reset_input
         if resets
           resets = resets.sample(count)
           resets = nil if resets&.empty?
+          @reset_ended = true if resets.nil?
           min_length = resets.length if resets && resets.length < min_length
         end
 

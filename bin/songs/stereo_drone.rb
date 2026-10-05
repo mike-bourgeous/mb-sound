@@ -26,7 +26,7 @@ module MB::Sound
     lfo_freq = 1.0 / interval
 
     notes.map.with_index { |note, idx|
-      fade = lfo_freq.hz.triangle.lfo.at(-90..-12).with_phase(Math::PI * 0.25 + phase * idx).db
+      fade = 10 ** (lfo_freq.hz.triangle.lfo.at(-90..-12).with_phase(Math::PI * 0.25 + phase * idx) / 20) # dB to gain
       modulator = (note.freq * 2.hz.lfo.at(2.98..3.02)).tone.at(2) * (lfo_freq / 2 + lfo_freq / notes.count * idx).hz.lfo.at(0..1)
 
       fade * note.sine.pm(modulator)
@@ -41,7 +41,7 @@ module MB::Sound
     # Alternating notes go left and right
     left_tones, right_tones = toneseq(32, Fs3, Ds3, Fs3, E3, Fs4, Ds4, Fs4, E4).each_slice(2).to_a.transpose
 
-    noise = (1.hz.noise.at(0.1) * 0.056.hz.lfo.at(-20..-10).db * B1.at(-2..1)).filter(:lowpass, cutoff: 0.082.hz.lfo.at(300..2200), quality: 2)
+    noise = (1.hz.noise.at(0.1) * 10 ** (0.056.hz.lfo.at(-20..-10) / 20) * B1.at(-2..1)).filter(:lowpass, cutoff: 0.082.hz.lfo.at(300..2200), quality: 2)
 
     # DSL calls on a stereo bundle run per channel; the noise is inverted on
     # the right

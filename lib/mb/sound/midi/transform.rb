@@ -53,6 +53,20 @@ module MB
           @parent.music_end
         end
 
+        # The parent's Source#chase, with its note passed through this
+        # transform (nil if the transform drops it).
+        def chase
+          c = @parent.chase
+          note = c && map_note(c.event)
+          note && c.with(event: note)
+        end
+
+        # The parent's Source#first_note, passed through this transform.
+        def first_note
+          note = @parent.first_note
+          note && map_note(note)
+        end
+
         def sources
           { input: @parent }
         end
@@ -91,6 +105,19 @@ module MB
           raise NotImplementedError, "#{self.class} must implement #process"
         end
 
+        # Returns a chased or first note (see #chase and #first_note) as this
+        # transform would send it, or nil to drop it.  Unchanged by default
+        # (e.g. for stateful transforms like Sustain); stateless transforms
+        # run it through #process.
+        def map_note(event)
+          event
+        end
+
+        # A #map_note for stateless transforms.
+        def process_note(event)
+          process([event], event.time, event.time).first
+        end
+
         # Keeps events on some channels (see Stream#channel).
         class Channel < Transform
           def initialize(parent, channels)
@@ -109,6 +136,8 @@ module MB
           def process(events, _from, _to)
             events.select { |e| e.channel.nil? || @channels.include?(e.channel) }
           end
+
+          alias map_note process_note
         end
 
         # Shifts note numbers (see Stream#transpose).
@@ -121,12 +150,15 @@ module MB
 
           private
 
+          # Glide events name a note too (see Event.glide).
           def process(events, _from, _to)
             events.map { |e|
-              next e unless e.note? || e.type == :poly_pressure
+              next e unless e.note? || e.type == :poly_pressure || (e.type == :glide && e.note)
               e.with_note(Transpose.whole(Sequence.transpose_value(e.note, @semitones)))
             }
           end
+
+          alias map_note process_note
 
           # Returns +value+ as an Integer if it's a whole Rational or Float,
           # so transposed notes keep their MIDI bytes.
@@ -139,6 +171,14 @@ module MB
         class Sustain < Transform
           # The note-on velocity multiplier while the soft pedal is down.
           SOFT_VELOCITY = 0.7
+
+          # The pedals this transform responds to (switches at 64 and up),
+          # for MIDI::ControlMap (see Synth#control_specs).
+          CONTROL_SPECS = [
+            ControlSpec.new(number: 64, name: 'Sustain', curve: :switch, description: 'Sustain pedal'),
+            ControlSpec.new(number: 66, name: 'Sostenuto', curve: :switch, description: 'Holds the notes down when pressed'),
+            ControlSpec.new(number: 67, name: 'Soft Pedal', curve: :switch, description: 'Softer note-on velocities'),
+          ].each(&:freeze).freeze
 
           def initialize(parent, soft: SOFT_VELOCITY)
             super(parent)
@@ -298,6 +338,8 @@ module MB
               e.with_velocity(MB::M.clamp(@curve.call(e.velocity).to_f, 0.0, 1.0))
             }
           end
+
+          alias map_note process_note
         end
 
         # Sets the default bend range (see Stream#bend_range).

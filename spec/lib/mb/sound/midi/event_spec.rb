@@ -119,6 +119,33 @@ RSpec.describe(MB::Sound::MIDI::Event) do
     end
   end
 
+  describe 'program-only events' do
+    it 'makes chokes' do
+      e = MB::Sound::MIDI::Event.choke(60, channel: 2, time: 1/2r)
+      expect(e).to have_attributes(type: :choke, channel: 2, note: 60, bytes: nil, time: 1/2r)
+      expect(e.choke?).to eq(true)
+      expect(e.note?).to eq(false)
+      expect(MB::Sound::MIDI::Event.choke(nil).note).to eq(nil)
+      expect(e.to_s).to eq('choke/ch2 60 @0.5s')
+    end
+
+    it 'makes glides' do
+      e = MB::Sound::MIDI::Event.glide(48, channel: 1)
+      expect(e).to have_attributes(type: :glide, channel: 1, note: 48, bytes: nil)
+      expect(e.glide?).to eq(true)
+      expect(e.with_note(50).note).to eq(50)
+    end
+
+    it 'marks legato note-ons' do
+      expect(MB::Sound::MIDI::Event.note_on(60).legato?).to eq(false)
+      e = MB::Sound::MIDI::Event.note_on(60, 0.5, legato: true)
+      expect(e.legato?).to eq(true)
+      expect(e.bytes).to eq("\x90\x3c\x40".b)
+      expect(e.to_s).to include('legato')
+      expect(e.with_velocity(0.2).legato?).to eq(true)
+    end
+  end
+
   describe '#bend_semitones' do
     it 'uses the default range of 2 semitones' do
       expect(MB::Sound::MIDI::Event.bend(0.5).bend_semitones).to eq(1.0)
@@ -149,5 +176,34 @@ RSpec.describe(MB::Sound::MIDI::Event) do
 
   it 'describes itself' do
     expect(MB::Sound::MIDI::Event.note_on(60, 0.5, time: 1).to_s).to eq('note_on/ch0 60 v0.5 @1.0s')
+  end
+
+  describe 'voice allocation events' do
+    let(:ev) { MB::Sound::MIDI::Event }
+
+    it 'defaults legato to false, including parsed and transformed events' do
+      expect(ev.note_on(60).legato).to eq(false)
+      expect(ev.parse([0x90, 60, 1]).legato?).to eq(false)
+      expect(ev.note_off(60).with_note(61).legato).to eq(false)
+    end
+
+    it 'can mark note-ons as legato, kept by transformations' do
+      e = ev.note_on(60, 0.5, legato: true)
+      expect(e.legato?).to eq(true)
+      expect(e.with_note(62).with_velocity(0.2).at(1).legato).to eq(true)
+      expect(e).not_to eq(ev.note_on(60, 0.5))
+      expect(e.to_s).to eq('note_on/ch0 60 v0.5 legato @0.0s')
+    end
+
+    it 'builds choke and glide events without MIDI bytes' do
+      c = ev.choke(60, channel: 2, time: 1/2r)
+      g = ev.glide(64, time: 1)
+      expect([c.type, c.note, c.channel, c.time, c.bytes]).to eq([:choke, 60, 2, 1/2r, nil])
+      expect([g.type, g.note, g.channel, g.time, g.bytes]).to eq([:glide, 64, 0, 1r, nil])
+      expect(c.choke?).to eq(true)
+      expect(g.glide?).to eq(true)
+      expect(c.note?).to eq(false)
+      expect(g.to_s).to eq('glide/ch0 64 @1.0s')
+    end
   end
 end

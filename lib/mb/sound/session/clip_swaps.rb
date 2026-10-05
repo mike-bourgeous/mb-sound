@@ -8,14 +8,16 @@ module MB
         # Swaps clips in the graph of the player named +name+ when the
         # timeline reaches the launch point +:at+ (the next bar by default;
         # see #add) or +:start_time+, on the exact sample.  Returns the number
-        # of clip nodes that will change.
+        # of clip sources (MIDI::ClipSource, found in the graph like other
+        # timeline nodes) that will change.
         #
         # +clips+ is either a Hash from old clips to new clips, or a single new
         # clip to replace the clip that every clip in the graph was made from
         # (e.g. both `bass` and `bass.transpose(12)` come from `bass`).
         # Clips made from a replaced clip with transforms like #transpose,
-        # #legato, or Clip#synth voices are rebuilt from the new clip with
-        # the same transforms.  Drum kits from #grid (or Hashes of clips) may
+        # or #legato are rebuilt from the new clip with the same transforms
+        # (a Clip#synth reads its clip through one source, so its voices
+        # follow the swap like any other clip node).  Drum kits from #grid (or Hashes of clips) may
         # be given as keys and values to swap each row with the same name.
         #
         # Looping clips play in phase with the timeline; non-looping clips
@@ -32,7 +34,7 @@ module MB
             player ||= @stopped[name]
             raise ArgumentError, "No background player #{name.inspect} is playing or stopped" if player.nil?
 
-            nodes = player.timeline_nodes.grep(Sequence::ClipNode)
+            nodes = player.timeline_nodes.grep(MIDI::ClipSource)
             raise ArgumentError, "Player #{name.inspect} doesn't play any clips" if nodes.empty?
 
             mapping = clips.is_a?(Sequence::Clip) ? auto_swap_mapping(name, nodes, clips) : swap_mapping(clips)
@@ -79,7 +81,7 @@ module MB
           mapping
         end
 
-        # Returns a mapping from the clip that every clip node's clip was
+        # Returns a mapping from the clip that every clip source's clip was
         # made from (the nearest common one) to +clip+.
         def auto_swap_mapping(name, nodes, clip)
           lineages = nodes.map { |n| (n.pending_clip || n.clip).lineage }

@@ -14,14 +14,24 @@ module MB
     #     -f, --force              overwrite the output file (alias --overwrite)
     #     -g, --graphviz           open a visualization of the node graph
     #     -P, --plot               plot the output while playing live
-    #     -q, --quiet              don't print the parameters
+    #     -q, --quiet              don't print the parameters (or MIDI controls)
     #
     # General scripts (kind :script; utilities, plots, file processors) have
     # only -h/--help: their positional arguments go to the block.
     #
     # Effects add -i/--input FILE, -c/--input-channels N, --repeat [COUNT],
-    # and -m/--midi SOURCE (MIDI controls from a port or a MIDI file); synths
-    # add -i/--input MIDI; songs add -b/--bars N and --bpm BPM.
+    # and -m/--midi SOURCE (MIDI controls for Values#midi_cc from a port or a
+    # MIDI file); synths add -i/--input MIDI (a file or port, whose MIDI the
+    # block gets as a MB::Sound::Notes); songs add -b/--bars N and --bpm BPM.
+    # Live MIDI switches the sound card to the :low latency profile unless
+    # one was chosen (see PlaybackMethods#live_midi_latency).
+    #
+    # Effects and synths list the MIDI controllers they respond to (a
+    # MIDI::ControlMap of their Values#midi_cc parameters, the controllers
+    # in use on their MIDI, and every controller node and Synth in the
+    # graph) when MIDI is in use, unless --quiet, and take --acid-xml FILE
+    # to write the map as a controller map for the ACID DAW ('-' prints it,
+    # highlighted on a terminal).
     #
     # Parameters are declared with defaults (and optional descriptions):
     #
@@ -90,27 +100,80 @@ module MB
         end
 
         # Returns a node for parameter +name+ that MIDI CC +number+ controls
-        # over +range+, starting at the parameter's value: a MidiDsl CC node
-        # when live MIDI is available (JACK is running) and the script isn't
-        # writing a file, otherwise a constant.  Both are named after the
-        # parameter.
+        # over +range+, starting at the parameter's value: a Notes controller
+        # node (MB::Sound::Notes#control) when MIDI is available (live MIDI
+        # unless the script is writing a file, or a -m/--midi MIDI file),
+        # otherwise a constant.  Both are named after the parameter.  The
+        # controller's MIDI::ControlSpec (see .cc_spec) carries the
+        # parameter's name and description, so `p.midi.controls` lists it.
         #
-        # Like MIDI::GraphVoice#on_cc, the +range+ multiplies the parameter's
-        # value unless +:relative+ is false (then it's an absolute range).
+        # The +range+ multiplies the parameter's value unless +:relative+ is
+        # false (then it's an absolute range).
+        # When the value is inside the range, the controller's middle (64)
+        # gives exactly the value, with each half of the knob mapped
+        # linearly to its side (like the GM2 sound controllers), so the knob
+        # starts in the middle at the value given on the command line.
         #
         # Example:
         #     lfo_hz = p.midi_cc(1, :hz, range: 0.0..6.0) # 0 to 6 times --hz
         def midi_cc(number, name, range:, relative: true)
           value = self[name]
           range = (value * range.begin)..(value * range.end) if relative
-          node = @midi&.call&.cc(number, range: range, default: value) || value.constant
+          spec = Values.cc_spec(number, name, value, range, @descriptions&.[](name.to_sym))
+          (@control_specs ||= []) << spec unless @control_specs&.include?(spec)
+          notes = midi
+          node = notes ? notes.control(spec) : value.constant
           node.named(name.to_s)
         end
 
-        # For internal use by ScriptRunner: sets a Proc that returns a
-        # MidiDsl, or nil when MIDI isn't available.
+        # The MIDI::ControlSpecs of every #midi_cc call so far, also those
+        # that gave constants because MIDI wasn't available (for the
+        # script's MIDI::ControlMap; see ScriptRunner#controls).
+        def control_specs
+          @control_specs || []
+        end
+
+        # The MIDI::ControlSpec for #midi_cc: controller +number+ named after
+        # parameter +name+, mapped linearly over +range+ (a Range of
+        # numbers, either direction) and starting at +value+: centered on it
+        # (raw 64 = +value+) when it is strictly inside the range, else at the
+        # range's end nearest to it.
+        def self.cc_spec(number, name, value, range, description = nil)
+          lo = range.begin.to_f
+          hi = range.end.to_f
+          inside = value > [lo, hi].min && value < [lo, hi].max
+          default = if inside
+                      64
+                    elsif hi == lo
+                      0
+                    else
+                      ((value - lo) / (hi - lo) * 127).round.clamp(0, 127)
+                    end
+
+          MIDI::ControlSpec.new(
+            number: number, name: name.to_s, range: lo..hi, default: default,
+            center: inside ? value : nil, description: description
+          )
+        end
+
+        # The script's MIDI as a MB::Sound::Notes (live input, a MIDI file
+        # given with -m/--midi for effects or as a synth's input), or nil when
+        # MIDI isn't available (e.g. an effect writing a file without
+        # -m/--midi).  Effects open it when first needed.
+        def midi
+          @midi&.call
+        end
+
+        # For internal use by ScriptRunner: sets a Proc that returns the
+        # script's Notes (see #midi), or nil when MIDI isn't available, and
+        # the parameter descriptions for controller specs.
         def midi_source=(source)
           @midi = source
+        end
+
+        # For internal use by ScriptRunner (see #midi_cc).
+        def descriptions=(descriptions)
+          @descriptions = descriptions
         end
       end
 
@@ -189,16 +252,27 @@ module MB
         end
       end
 
-      # Runs a synth: builds the graph with the block from the MIDI input
-      # name (a MIDI file or port given as a non-audio argument or --input;
-      # nil for the default live input) and the parameters, then plays or
+      # Runs a synth: builds the graph with the block from the script's MIDI
+      # (a MB::Sound::Notes; see below) and the parameters, then plays or
       # renders it.  MIDI files ring out, so after the last event, the synth
       # keeps playing until its output has been quiet for
-      # Session::TAIL_QUIET_SECONDS (see MIDI::MIDIFile#ended?).
+      # Session::TAIL_QUIET_SECONDS (see Synth#ended? and Notes#ended?).
+      #
+      # The MIDI comes from a MIDI file (a non-audio argument or --input), or
+      # from live input (a port given the same way, connected by part of its
+      # name, or by default a port named after the script).  Live input
+      # switches the sound card to the :low latency profile unless one was
+      # chosen (see PlaybackMethods#live_midi_latency).  The block gets it as
+      # a Notes, which is a mono voice and a source for polyphonic synths:
+      #
+      #     synth_script { |midi| midi.synth(voices: 6) { |v| v.hz.saw * v.amp_env } }
+      #     synth_script { |midi| midi.hz.saw * midi.amp_env }   # mono
+      #
+      # MB::Sound.synth(midi) { |v| ... } is the same as midi.synth.
       def run_synth(&block)
-        @params.midi_source = method(:midi)
-        MB::Sound.parameter_maps = !@options[:quiet]
-        graph = to_graph(block.arity == 1 ? block.call(@options[:input]) : block.call(@options[:input], @params))
+        notes = @synth_notes = synth_midi
+        @params.midi_source = -> { notes }
+        graph = to_graph(block.arity == 1 ? block.call(notes) : block.call(notes, @params))
         announce(graph)
         play_or_render(graph) do |session|
           stop_after_ringdown(session, ending_nodes(graph))
@@ -236,11 +310,11 @@ module MB
         block.call(@params)
       end
 
-      # Returns the MidiDsl for MIDI control (see Values#midi_cc), or nil
-      # when MIDI isn't available.  Tries once.  An effect's --midi SOURCE is
-      # a .mid/.midi file (played along with the graph, also when writing a
-      # file) or part of a port's name to connect to; otherwise live MIDI
-      # comes from a port to connect to, and none is used when writing a
+      # Returns the effect's MIDI as a Notes (see Values#midi and #midi_cc),
+      # or nil when MIDI isn't available.  Tries once.  An effect's --midi
+      # SOURCE is a .mid/.midi file (played along with the graph, also when
+      # writing a file) or part of a port's name to connect to; otherwise live
+      # MIDI comes from a port to connect to, and none is used when writing a
       # file.
       def midi
         return @midi if defined?(@midi)
@@ -248,20 +322,43 @@ module MB
         @midi = nil
         source = @options[:midi]
         if source && File.file?(source)
-          raise "#{source} is not a MIDI file (expected .mid or .midi)" unless source.downcase.end_with?('.mid', '.midi')
-          @midi = MB::Sound.midi_file(source)
+          @midi = file_notes(source)
           puts "\e[1mMIDI control from #{source}\e[0m" unless @options[:quiet]
           return @midi
         end
 
         return if @options[:output]
 
-        @midi = source ? GraphNode::MidiDsl.new(manager: MB::Sound.midi_manager(source)) : MB::Sound.midi
-        puts "\e[1mMIDI control enabled\e[0m (#{@midi.manager.connections.join(', ')})" unless @options[:quiet]
+        @midi = live_notes(source)
+        puts "\e[1mMIDI control enabled\e[0m (#{@midi.stream.source.input.connections.join(', ')})" unless @options[:quiet]
         @midi
       rescue => e
         puts "\e[38;5;243mMIDI control disabled (#{e.message})\e[0m" unless @options[:quiet]
         @midi = nil
+      end
+
+      # A synth's MIDI as a Notes: its input file, or live input (see
+      # #run_synth).  Rendering from live input reads it without changing
+      # the sound card's profile.
+      def synth_midi
+        input = @options[:input]
+        return file_notes(input) if input && File.file?(input)
+        return Notes.new(MIDI::Stream.live(connect: input)) if @options[:output]
+
+        live_notes(input)
+      end
+
+      # A Notes playing the MIDI file +path+ (raises unless it is .mid or
+      # .midi).
+      def file_notes(path)
+        raise ArgumentError, "#{path} is not a MIDI file (expected .mid or .midi)" unless path.downcase.end_with?('.mid', '.midi')
+        Notes.new(path)
+      end
+
+      # A Notes on live MIDI from MB::Sound.midi (shared with the console's
+      # #midi; switches to the :low latency profile unless one was chosen).
+      def live_notes(connect)
+        MB::Sound.midi(connect, quiet: @options[:quiet])
       end
 
       # Stops the song at the end of bar +bars+ on the current session's
@@ -298,7 +395,7 @@ module MB
             o.on('-f', '--force', '--overwrite', 'Overwrite the output file') { @options[:force] = true }
             o.on('-g', '--graphviz', 'Open a visualization of the node graph') { @options[:graphviz] = true }
             o.on('-P', '--plot', 'Plot the output while playing live') { @options[:plot] = true }
-            o.on('-q', '--quiet', "Don't print the parameters") { @options[:quiet] = true }
+            o.on('-q', '--quiet', "Don't print the parameters or MIDI controls") { @options[:quiet] = true }
             profiles = MB::Sound::DeviceOutput::PROFILES.keys
             o.on(
               '-L', '--latency-profile PROFILE', profiles.map(&:to_s),
@@ -320,6 +417,10 @@ module MB
           when :song
             o.on('-b', '--bars N', Float, 'Bars to play or render (default: the whole song)') { |v| @options[:bars] = v.rationalize }
             o.on('--bpm BPM', Float, "Starting tempo (the song's tempo changes scale with it)") { |v| @options[:bpm] = v }
+          end
+
+          if @kind == :effect || @kind == :synth
+            o.on('--acid-xml FILE', "Write the MIDI controls as an ACID controller map ('-' prints it)") { |v| @options[:acid_xml] = v }
           end
 
           @declared.each do |p|
@@ -353,6 +454,7 @@ module MB
         end
 
         @params = Values.new(values)
+        @params.descriptions = @declared.to_h { |p| [p.name, p.description] }
       end
 
       # Assigns positional filenames to input and output by script kind.
@@ -503,6 +605,7 @@ module MB
       # visualization (with --graphviz).
       def announce(graph)
         print_params
+        show_controls(graph)
         if @options[:graphviz]
           png = graph.open_graphviz
           puts "Wrote GraphViz image to #{png}"
@@ -529,6 +632,37 @@ module MB
         shown[:input] = @options[:input] || 'live' unless @kind == :song
         shown[:output] = @options[:output] || 'sound card'
         puts MB::U.highlight(shown)
+      end
+
+      # The script's MIDI controls as a MIDI::ControlMap: its
+      # Values#midi_cc parameters, the controllers in use on its MIDI (a
+      # synth's Notes, or an effect's when opened), and every controller
+      # node and Synth in +graph+.
+      def controls(graph)
+        notes = @kind == :synth ? @synth_notes : (@midi if defined?(@midi))
+        MIDI::ControlMap.new(@params, notes, graph)
+      end
+
+      # Writes or prints the ACID controller map (--acid-xml), and lists the
+      # MIDI controls unless --quiet, if MIDI is in use (a synth, or an
+      # effect with MIDI open) and there are any (see #controls).
+      def show_controls(graph)
+        map = controls(graph)
+        name = File.basename(@script)
+
+        case @options[:acid_xml]
+        when nil
+        when '-'
+          xml = map.to_acid_xml(name: name)
+          puts $stdout.tty? ? MB::U.syntax(xml, :xml) : xml
+        else
+          map.write_acid_xml(@options[:acid_xml], name: name)
+          n = map.numbers.length
+          puts "Wrote an ACID controller map (#{n} MIDI control#{'s' unless n == 1}) to #{@options[:acid_xml]}" unless @options[:quiet]
+        end
+
+        midi_in_use = @kind == :synth || (defined?(@midi) && @midi)
+        puts map if midi_in_use && !map.empty? && !@options[:quiet]
       end
 
       # Every node in +graph+ (a node or bundle).
@@ -565,9 +699,17 @@ module MB
 
       # Returns the nodes in +graph+ whose sources can end while the graph
       # keeps sounding (they respond to #ended?): GraphNode::Ringdown for
-      # file inputs, and MIDI::VoicePool and MIDI DSL nodes for MIDI files.
+      # file inputs, and Synths and Notes nodes for MIDI files.
+      #
+      # A Synth stands for everything inside it (its #ended? waits for the
+      # source and for every voice lane to go idle), and Envelopes with a
+      # gate or trigger are skipped, since they never end by themselves.
       def ending_nodes(graph)
-        graph_nodes(graph).select { |n| n.respond_to?(:ended?) }
+        nodes = graph_nodes(graph).select { |n| n.respond_to?(:ended?) }
+        inside = nodes.grep(Synth).flat_map(&:graph).reject { |n| n.is_a?(Synth) }.map(&:__id__).to_set
+        nodes.reject { |n|
+          inside.include?(n.__id__) || (n.is_a?(Envelope) && !n.one_shot?)
+        }.uniq(&:__id__)
       end
 
       # Stops the script's player once every node in +ringdowns+ has ended

@@ -12,9 +12,9 @@ module MB
     # DEFAULT_SEED, so renders repeat from run to run; set another with
     # `seed 42` (bin/sound.rb).
     #
-    # Users so far: Tone#random_phase (alias #rnd).  Older randomness keeps
-    # its own generators for now: Oscillator::RAND / Phasor::RAND /
-    # Noise::RAND (noise), Kernel#rand (ADSREnvelope#randomize), Clip seeds
+    # Users so far: Tone#random_phase (alias #rnd), Synth (per-lane seeds
+    # through #with_seed).  Older randomness keeps its own generators for
+    # now: Oscillator::RAND / Phasor::RAND / Noise::RAND (noise), Clip seeds
     # (probability, #permute), and Reverb/FdnReverb seeds; they could move to
     # sub-seeds from here later.
     module RandomMethods
@@ -61,6 +61,27 @@ module MB
       # non-negative Integer below 2**62), e.g. `Random.new(MB::Sound.next_seed)`.
       def next_seed
         root_rng.rand(1 << 62)
+      end
+
+      # Runs the block with the root generator restarted from +seed+, then
+      # puts the previous root generator back as it was (its draws so far
+      # kept), so everything random created in the block (e.g. Tone#rnd)
+      # depends only on +seed+ and the block's own order of draws.  Used by
+      # Synth to give every voice lane its own seed (synth seed + lane
+      # index).  Returns the block's value.
+      #
+      #     a = MB::Sound.with_seed(5) { 110.hz.saw.rnd }
+      #     b = MB::Sound.with_seed(5) { 110.hz.saw.rnd }   # same phase as a
+      def with_seed(seed)
+        old_seed = random_seed
+        old_rng = @root_rng
+        seed(seed)
+        yield
+      ensure
+        if old_rng
+          @root_seed = old_seed
+          @root_rng = old_rng
+        end
       end
     end
   end

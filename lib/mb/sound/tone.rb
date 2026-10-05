@@ -45,7 +45,6 @@ module MB
         @noise = 0
         @amplitude_set = false
         @phase_mod = nil
-        @no_trigger = false
         @reset = nil
         @reset_to = nil
         @free = false
@@ -474,14 +473,6 @@ module MB
         self
       end
 
-      # Marks the Tone as being used for modulation rather than tone
-      # generation, so that MB::Sound::MIDI::GraphVoice won't retrigger it when
-      # a note is played.
-      def no_trigger(trig = true)
-        @no_trigger = trig
-        self
-      end
-
       # Resets the phase at every nonzero sample of +trigger+ (a graph node,
       # e.g. clip.trigger or a MIDI note-on trigger; the value is ignored),
       # at exactly that sample, or removes the reset input with nil.  The
@@ -498,8 +489,7 @@ module MB
       # have both a reset input and #sync (an error: sync already resets the
       # phase, in its own kernel).  On a #free tone the last call wins: a
       # reset input makes it no longer free, and a fixed +to:+ replaces
-      # #rnd, each with a warning.  MIDI voices (GraphVoice) leave tones
-      # with a reset input to it instead of resetting them at each note.
+      # #rnd, each with a warning.
       #
       # Examples (bin/sound.rb):
       #     bpm 120; c = grid(16, 'x..x..x.').loop
@@ -545,8 +535,8 @@ module MB
       def reset_to = @reset_to
 
       # Marks this tone as never reset: a free-running oscillator whose phase
-      # never restarts, like an analog oscillator.  MIDI voices won't reset
-      # it (see #no_trigger).  It replaces a reset input (see #reset; the
+      # never restarts, like an analog oscillator.  Synth voices don't key
+      # sync it (see Notes::KeyedTone).  It replaces a reset input (see #reset; the
       # last call wins, with a warning).  Combine with #rnd for a random starting phase (analog-style unison):
       #
       #     play 3.times.map { |i| (110 + i * 0.3).hz.saw.free.rnd }.sum * -15.db
@@ -557,13 +547,12 @@ module MB
         end
 
         @free = !!free
-        no_trigger if @free
         self
       end
 
-      # True if #free was called (never reset).  LFOs (#lfo, #no_trigger)
-      # aren't retriggered by MIDI voices either, but may still have a reset
-      # input; see #no_trigger?.
+      # True if #free was called (never reset).  LFOs (#lfo) aren't key
+      # synced by synth voices either, but may still have a reset input; see
+      # #lfo?.
       def free?
         @free
       end
@@ -610,8 +599,8 @@ module MB
         @oscillator&.random_phase = @seed if @random_phase
       end
 
-      # Makes this Tone a low-frequency oscillator for modulation: it won't
-      # be retriggered by MIDI voices (see #no_trigger) and swings over the
+      # Makes this Tone a low-frequency oscillator for modulation: synth
+      # voices don't key sync it (see Notes::KeyedTone) and it swings over the
       # full -1..1 range unless #at was called.  Call #at afterward to set the
       # range.
       #
@@ -628,7 +617,6 @@ module MB
       def lfo
         @lfo = true
         @oscillator&.band_limit = oscillator_band_limit
-        no_trigger
         or_at(1)
       end
 
@@ -652,12 +640,11 @@ module MB
         self
       end
 
-      # Returns true if this Tone is not intended to be retriggered when a note
-      # is played.
-      def no_trigger?
-        @no_trigger
+      # Returns true if #lfo was called (a modulation source that synth
+      # voices don't key sync).
+      def lfo?
+        @lfo
       end
-      alias lfo? no_trigger?
 
       # Converts this Tone to the nearest Note based on its frequency.
       def to_note
@@ -717,7 +704,6 @@ module MB
           random_advance: rand_adv,
           range: @range,
           phase_mod: @phase_mod,
-          no_trigger: @no_trigger,
           band_limit: oscillator_band_limit,
           width: @width,
           remove_dc: !@keep_dc,
@@ -933,9 +919,13 @@ module MB
       def fixup_source(src)
         return nil if src.nil?
 
+        # A cycle exists only if this tone is +src+ or feeds +src+.  A node
+        # that already feeds this tone through another input (e.g. one
+        # trigger, through a Tee, resetting both this tone and its vibrato
+        # LFO) just adds a second path, which is fine.
         if src.respond_to?(:sources)
           # O(n^2)ish if building a complex network of modulation?
-          if src == self || src.graph(include_tees: true).include?(self) || self.graph(include_tees: true).include?(src)
+          if src.equal?(self) || src.graph(include_tees: true).any? { |n| n.equal?(self) }
             raise 'Cyclic modulation detected'
           end
         end

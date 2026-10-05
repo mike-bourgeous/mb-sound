@@ -50,7 +50,6 @@ RSpec.describe(MB::Sound::EnvelopeMethods) do
   it 'explains the replacements for auto_release: and log:' do
     expect { MB::Sound.adsr(auto_release: 1) }.to raise_error(ArgumentError, /hold:/)
     expect { 1.constant.adsr(log: -30) }.to raise_error(ArgumentError, /curve:/)
-    expect { MB::Sound.adsr.db(30) }.to raise_error(ArgumentError, /curve: 30/)
   end
 
   describe '#adsr' do

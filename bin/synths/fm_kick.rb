@@ -1,31 +1,39 @@
 #!/usr/bin/env -S RUBY_THREAD_TIMESLICE=10 RUBY_YJIT_ENABLE=1 ruby
 # Trying to synthesize a kick inspired by a YouTube tutorial:
 # https://www.youtube.com/watch?v=ndG-6-vONNc
+#
+# Usage: $0 [options] [midi_file_or_port [output_file]]
+#
+# Examples:
+#     $0                                    # live MIDI
+#     $0 spec/test_data/c_major.mid kick.flac
 
 require 'bundler/setup'
 require 'mb-sound'
 
-MB::Sound.synth_script { |input|
-  s = MB::Sound.synth(input) { |midi|
+MB::Sound.synth_script { |midi|
+  s = midi.synth(voices: 4) { |v|
     pitch_decay = 0.13
     decay_time = 0.18
 
     # FIXME: only sounds right at velocity 127
-    # TODO: the node graph and GraphVoice really need some concept of i/o ports
-    # and configurable parameters.
     #
-    # Also the envelope generator needs to be smarter about dynamic parameter
-    # changes.
+    # The envelopes are the old `.db(N)` ones (straight lines in dB over N
+    # dB) converted to curves of -N rising and N falling, with the old
+    # velocity ranges in dB; the pitch envelope and the second boom envelope
+    # were linear.  Every oscillator restarts at each note.
 
     attack_hz = 100.constant.named('Attack Hz')
-    attack_env = midi.env(0.0005, pitch_decay, 0, pitch_decay).db(60) # fast click at start
-    pitch_env = midi.env(0.0005, decay_time, 0, decay_time) # semitone fall over full decay
+    # fast click at start
+    attack_env = v.env(0.0005, pitch_decay, 0, pitch_decay, curve: [-60, 60, 60], sensitivity: -30.db..0.db, velocity_scale: :db)
+    pitch_env = v.env(0.0005, decay_time, 0, decay_time, curve: :linear) # semitone fall over full decay
 
     noise_cutoff = 1500.constant.named('Noise cutoff')
-    noise_source = 1000.hz.gauss.noise.at(0.4).filter(:lowpass, cutoff: noise_cutoff) * midi.env(0.0001, 0.04, 0, 0.04).db(60)
+    noise_source = 1000.hz.gauss.noise.at(0.4).filter(:lowpass, cutoff: noise_cutoff) *
+      v.fm_env(0.0001, 0.04, 0, 0.04, curve: [-60, 60, 60], sensitivity: -30.db..0.db)
 
-    falling_sine = (attack_env + midi.frequency * (0.06 * pitch_env + 0.97)).tone.at(1).pm(noise_source)
-    falling_sine_amp = falling_sine * midi.env(0.0001, decay_time, 0, decay_time).db(60)
+    falling_sine = (attack_env + v.freq * (0.06 * pitch_env + 0.97)).tone.at(1).pm(noise_source).reset(v.trigger)
+    falling_sine_amp = falling_sine * v.amp_env(0.0001, decay_time, 0, decay_time, curve: [-60, 60, 60], sensitivity: -30.db..0.db)
 
     sub = falling_sine_amp.peq({
       30.hz => 9.db,
@@ -45,10 +53,11 @@ MB::Sound.synth_script { |input|
       .at(1)
       .filter(:lowpass, cutoff: boom_noise_cutoff)
 
-    boom_noise *= midi.env(0.0001, boom_noise_decay, 0.0, boom_noise_decay).db(40)
+    boom_noise *= v.fm_env(0.0001, boom_noise_decay, 0.0, boom_noise_decay, curve: [-40, 40, 40], sensitivity: -20.8.db..0.db)
 
-    boom_sine = 143.hz.at(1).fm(boom_noise * boom_noise_gain)
-    boom_sine *= midi.env(0.01, boom_sine_decay, 0.0, boom_sine_decay).db(50) * midi.env(0.01, boom_sine_decay, 0.0, boom_sine_decay)
+    boom_sine = 143.hz.at(1).fm(boom_noise * boom_noise_gain).reset(v.trigger)
+    boom_sine *= v.amp_env(0.01, boom_sine_decay, 0.0, boom_sine_decay, curve: [-50, 50, 50], sensitivity: -25.5.db..0.db) *
+      v.env(0.01, boom_sine_decay, 0.0, boom_sine_decay, curve: :linear)
 
     boom = boom_sine.peq({
       20.hz => [-20.db, 1],

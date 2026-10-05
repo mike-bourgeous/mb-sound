@@ -18,40 +18,50 @@ require 'benchmark'
 require 'mb-util'
 require 'mb-sound'
 
+# A one-shot envelope over the whole song: linear segments (close to the
+# smoothstep ADSREnvelope this song was written with), releasing after the
+# attack and decay like that envelope's auto release.
+def song_envelope(attack, decay, sustain, release)
+  MB::Sound::Envelope.new(
+    attack: attack, decay: decay, sustain: sustain, release: release,
+    hold: attack + decay, curve: :linear, sample_rate: 48000
+  )
+end
+
 # Builds the song's graph, returning its left and right outputs and the
-# envelopes (already triggered).
+# envelopes (one-shots that start with the song).
 def benchmark_song
-  abenv = MB::Sound::ADSREnvelope.new(attack_time: 60, decay_time: 30, sustain_level: 0.125, release_time: 90, sample_rate: 48000)
+  abenv = song_envelope(60, 30, 0.125, 90)
 
   a = 100.hz.complex_square.at(-13.db).filter(1500.hz.lowpass(quality: 0.5))
   b = 150.hz.ramp.at(-15.db).filter(2600.hz.lowpass(quality: 0.5))
 
   ab = (a + b).softclip(0.05, 0.2) * 3.db * 1.hz.drumramp.lfo.at(2..0.1).filter(30.hz.lowpass) * abenv
 
-  cenv = MB::Sound::ADSREnvelope.new(attack_time: 90, decay_time: 60, sustain_level: 1, release_time: 30, sample_rate: 48000)
+  cenv = song_envelope(90, 60, 1, 30)
 
   c = (
     266.66667.hz.triangle.at(-4.db).softclip(0.05, 0.5).filter(1900.hz.lowpass1p) * 0.1.hz.lfo.at(0..1) +
     250.hz.complex_triangle.at(-3.db).softclip(0.05, 0.5).filter(1900.hz.lowpass1p) * 0.1.hz.lfo.at(0..1).with_phase(Math::PI)
   ).softclip(0.05, 0.25) * 10.db * cenv
 
-  denv = MB::Sound::ADSREnvelope.new(attack_time: 4, decay_time: 170, sustain_level: 1, release_time: 6, sample_rate: 48000)
+  denv = song_envelope(4, 170, 1, 6)
 
   d = (
     50.hz.triangle.at(-3.db).filter(150.hz.lowpass1p) *
-    4.hz.drumramp.lfo.at(0..-30).db.filter(50.hz.lowpass)
+    (10 ** (4.hz.drumramp.lfo.at(0..-30) / 20)).filter(50.hz.lowpass)
   ).softclip(0.005, 0.25) * 10.db * denv
 
-  drumenv = MB::Sound::ADSREnvelope.new(attack_time: 10, decay_time: 150, sustain_level: 1, release_time: 20, sample_rate: 48000)
+  drumenv = song_envelope(10, 150, 1, 20)
 
-  hat = 10000.hz.noise.filter(9000.hz.highpass).filter(15000.hz.lowpass) * 8.hz.drumramp.lfo.at(-4..-25).filter(100.hz.lowpass).db
-  kick = 50.hz.at(-3.db).fm(2.hz.drumramp.at(90.to_db..-60).db.filter(100.hz.lowpass)) * 2.hz.drumramp.at(0..-30).db.filter(100.hz.lowpass)
+  hat = 10000.hz.noise.filter(9000.hz.highpass).filter(15000.hz.lowpass) * 10 ** (8.hz.drumramp.lfo.at(-4..-25).filter(100.hz.lowpass) / 20)
+  kick = 50.hz.at(-3.db).fm((10 ** (2.hz.drumramp.at(90.to_db..-60) / 20)).filter(100.hz.lowpass)) * (10 ** (2.hz.drumramp.at(0..-30) / 20)).filter(100.hz.lowpass)
 
   drums = (hat + kick) * drumenv
 
   graph = ((drums + ab + c + d) * -6.db).softclip(0.25, 0.99)
 
-  envelopes = graph.graph.select { |n| n.is_a?(MB::Sound::ADSREnvelope) }
+  envelopes = graph.graph.select { |n| n.is_a?(MB::Sound::Envelope) }
 
   m = graph.real
   s = graph.imag
@@ -64,10 +74,6 @@ def benchmark_song
 
   flanger_r = -4.db * r - -5.db * r.delay(seconds: 0.1.hz.triangle.lfo.with_phase(Math::PI).at(0.001..0.008))
   final_r = flanger_r.softclip(0.5, 0.99)
-
-  envelopes.each do |e|
-    e.trigger(1, auto_release: true)
-  end
 
   [final_l, final_r, envelopes]
 end

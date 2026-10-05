@@ -40,7 +40,7 @@ module MB
             Step.new(value: item.detune == 0 ? item.number : item.detuned_number, velocity: DEFAULT_VELOCITY)
 
           when MB::Sound::Pitch
-            # A fixed frequency (e.g. 440.hz), kept as a Pitch (see ClipNode::Number)
+            # A fixed frequency (e.g. 440.hz), kept as a Pitch (see Notes::Node#number_of)
             Step.new(value: item, velocity: DEFAULT_VELOCITY)
 
           when Numeric

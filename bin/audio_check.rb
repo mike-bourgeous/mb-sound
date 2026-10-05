@@ -131,6 +131,8 @@ MB::Sound.script(
   start = MB::U.clock_now
   next_report = 1
   latencies = []
+  write_times = [] # when each write returned, for its spacing
+  queue_depths = [] # frames queued after each write
   snapshots = [] # [wall clock, frames played] once a second, for drift
 
   puts 'Clicks: left, right, both, both...'
@@ -141,6 +143,8 @@ MB::Sound.script(
     latencies << out.latency
 
     now = MB::U.clock_now
+    write_times << now
+    queue_depths << out.stats[:queued]
     if now - start >= next_report
       next_report += 1
       s = out.stats
@@ -163,6 +167,20 @@ MB::Sound.script(
   puts "Latency: #{(latencies.min * 1000).round(1)}..#{(latencies.max * 1000).round(1)} ms " \
     '(queue + sound card buffer; excludes driver and converter delay)'
   puts "Underruns while playing: #{underruns}"
+
+  # Write spacing and queue depth after the first second (startup and YJIT
+  # compiling aside): how evenly the sound card paces the writer (and so a
+  # Session's renders and live MIDI reads)
+  steady = write_times.each_index.select { |i| write_times[i] - start >= 1 }
+  if steady.length > 2
+    gaps = steady.each_cons(2).map { |a, b| (write_times[b] - write_times[a]) * 1000 }
+    mean = gaps.sum / gaps.length
+    sd = Math.sqrt(gaps.sum { |g| (g - mean)**2 } / gaps.length)
+    depths = steady.map { |i| queue_depths[i] }
+    puts format('Write spacing: mean %.2f ms, sd %.2f ms, %.2f..%.2f ms (write size %.2f ms)',
+                mean, sd, gaps.min, gaps.max, out.buffer_size * 1000.0 / out.sample_rate)
+    puts "Queue after each write: #{ms.(depths.min)}..#{ms.(depths.max)} ms (limit #{ms.(out.queue_limit)} ms)"
+  end
   puts "Largest sound card request: #{out.stats[:max_callback]} frames (period #{out.period})"
 
   if snapshots.length >= 2

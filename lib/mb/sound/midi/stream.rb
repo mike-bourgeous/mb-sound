@@ -50,7 +50,8 @@ module MB
           # the cursor to +to+.  +from+ may be after the cursor (skipping
           # events) but not before it.  Late events from a live source can
           # have times before +from+; they are moved to the time they
-          # arrived (see Stream).
+          # arrived (see Stream).  The Array is frozen (readers of the same
+          # range may share it).
           def events(from, to)
             @stream.read_for(self, from.to_r, to.to_r)
           end
@@ -137,16 +138,31 @@ module MB
         end
 
         # Returns a Stream reading +obj+: a Source, a Stream (returned as-is),
-        # a Sequence::Clip (ClipSource), a MIDIFile, or a MIDI filename
-        # (FileSource).
+        # a Sequence::Clip (ClipSource), a MIDIFile, a MIDI filename
+        # (FileSource), a live MIDI::Input (LiveSource), or anything with
+        # #to_midi_stream (e.g. MB::Sound::Notes, whose stream is used).
         def self.for(obj)
+          return obj.to_midi_stream if obj.respond_to?(:to_midi_stream)
+
           case obj
           when Stream then obj
           when Source then new(obj)
+          when Input then new(LiveSource.new(obj))
           when Sequence::Clip then new(ClipSource.new(obj))
           when MIDIFile, String then new(FileSource.new(obj))
           else raise ArgumentError, "Cannot make a MIDI stream from #{obj.inspect}"
           end
+        end
+
+        # Returns a Stream of live MIDI input: a LiveSource reading a new
+        # MIDI::Input connected to +:connect+ (part of a source's name, or nil
+        # for a port to connect to later), with +options+ for LiveSource.new
+        # (+:timing+, +:output+, +:latency+) and MIDI::Input.new.  Close it
+        # with `stream.source.close`.
+        #
+        #     MB::Sound::MIDI::Stream.live(connect: 'Launchkey', output: out)
+        def self.live(connect: nil, **options)
+          new(LiveSource.new(connect: connect, **options))
         end
 
         # The Source (or transform) this stream reads.
@@ -204,6 +220,17 @@ module MB
           @source.music_end
         end
 
+        # The note to chase after the latest content jump, or nil (see
+        # Source#chase; transforms pass it through).
+        def chase
+          @source.chase
+        end
+
+        # The first note of the content, or nil (see Source#first_note).
+        def first_note
+          @source.first_note
+        end
+
         # The number of events read from the source and not yet passed by
         # every reader.
         def pending_count
@@ -211,8 +238,8 @@ module MB
         end
 
         # Returns a stream with only events on +channels+ (an Integer from 0
-        # to 15, or an Array or Range of them).  Channels are 0-based, like
-        # Manager's +:channel+ (MIDI channel 10, drums, is 9).  System and
+        # to 15, or an Array or Range of them).  Channels are 0-based (MIDI
+        # channel 10, drums, is 9).  System and
         # sysex events pass through.
         def channel(channels)
           Stream.new(Transform::Channel.new(self, channels))
@@ -275,11 +302,22 @@ module MB
           raise ArgumentError, "MIDI read must not end (#{to}) before it starts (#{from})" if to < from
           raise ArgumentError, "MIDI reader already read up to #{reader.cursor} (asked from #{from})" if from < reader.cursor
 
+          # Readers asking for the range just read (e.g. the nodes of one
+          # Notes instance, each reading the same buffer) share its events.
+          # Still valid: later fills only add events at or after +to+, and
+          # drops only remove events before the slowest reader's cursor.
+          last = @last_read
+          if last && last[0] == from && last[1] == to
+            reader.cursor = to
+            return last[2]
+          end
+
           fill(to)
 
           start = @log.bsearch_index { |e| e.time >= from } || @log.length
           stop = @log.bsearch_index { |e| e.time >= to } || @log.length
-          events = @log[start...stop]
+          events = @log[start...stop].freeze
+          @last_read = [from, to, events]
 
           reader.cursor = to
           drop
@@ -328,6 +366,8 @@ module MB
 
         # Drops events that every reader has passed.
         def drop
+          return if @log.empty?
+
           horizon = min_cursor || @read_to
           count = @log.bsearch_index { |e| e.time >= horizon } || @log.length
           @log.shift(count) if count > 0

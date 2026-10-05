@@ -77,8 +77,21 @@ module MB
       # The session used by PlaybackMethods#bg, created when first needed,
       # with DEFAULT_FADE_IN and DEFAULT_FADE_OUT.
       def self.default
-        @default = nil if @default&.closed?
+        if @default&.closed?
+          @default = nil
+          @output_chosen = false
+        end
         @default ||= new(fade_in: DEFAULT_FADE_IN, fade_out: DEFAULT_FADE_OUT)
+      end
+
+      # True if the default session's output was chosen by the user (given
+      # to .use_output with +chosen: true+, e.g. through
+      # PlaybackMethods#use_output or #latency), rather than opened
+      # automatically.  Live MIDI's automatic switch to the :low latency
+      # profile leaves a chosen output alone (see
+      # PlaybackMethods#live_midi_latency).
+      def self.output_chosen?
+        !!@output_chosen && !@default.nil? && !@default.closed?
       end
 
       # Replaces the default session (see .default) with a new one that
@@ -87,13 +100,15 @@ module MB
       # nil to open the usual output from MB::Sound.output when next needed.
       # Raises if the current default session still has players, since its
       # graphs and master effects aren't moved to the new session.  See
-      # PlaybackMethods#use_output.
-      def self.use_output(output)
+      # PlaybackMethods#use_output.  Pass +chosen: false+ when the output
+      # wasn't the user's choice (see .output_chosen?).
+      def self.use_output(output, chosen: true)
         if @default && !@default.closed?
           raise ArgumentError, 'Stop the background players first (e.g. panic)' unless @default.idle?
           @default.close
         end
 
+        @output_chosen = !output.nil? && chosen
         @default = output && new(output: output, fade_in: DEFAULT_FADE_IN, fade_out: DEFAULT_FADE_OUT)
       end
 
@@ -453,6 +468,11 @@ module MB
         @output ||= MB::Sound.output(channels: @channels, shared: false)
       end
 
+      # True once the output has been given or opened (see #output).
+      def output_open?
+        !@output.nil?
+      end
+
       # The number of frames rendered per #process_buffer.
       def buffer_size
         @buffer_size || output.buffer_size
@@ -636,7 +656,7 @@ module MB
       # (the least common multiple of their lengths), or a bar if that is
       # too long or there are no looping clips.
       def clip_grid(timeline_nodes)
-        lengths = timeline_nodes.grep(Sequence::ClipNode).map(&:clip).select(&:looping?).map(&:length).uniq
+        lengths = timeline_nodes.grep(MIDI::ClipSource).map(&:clip).select(&:looping?).map(&:length).uniq
         return @transport.bar_length if lengths.empty?
 
         lcm = lengths.reduce { |a, b| Rational(a.numerator.lcm(b.numerator), a.denominator.gcd(b.denominator)) }

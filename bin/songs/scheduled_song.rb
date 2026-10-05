@@ -48,12 +48,12 @@ module MB::Sound
       bass.env(0.003, 0.15, 0.6, 0.05) * 0.15
     kick = (40.constant + 90 * beat[:kick].env(0, 0.04, 0, 0.01)).tone.sine.at(1) * beat[:kick].env(0, 0.3, 0, 0.05) * 0.55
     snare = noise.at(1).filter(:bandpass, cutoff: 1900, quality: 1.5) * beat[:snare].env(0, 0.12, 0, 0.05) * 0.6
-    hats = noise.at(1).filter(:highpass, cutoff: 7500) * beat[:hat].env(0, 0.025, 0, 0.02, velocity: 0.1..1) * 0.16
+    hats = noise.at(1).filter(:highpass, cutoff: 7500) * beat[:hat].env(0, 0.025, 0, 0.02, sensitivity: 0.1..1) * 0.16
 
     # A 32nd-note hat roll on the last beat of a bar, built fresh each time
     fill = -> {
       roll = seq(nil).n2.d | seq(42).n4.roll(32, velocity: 0.2..1.0)
-      noise.at(1).filter(:highpass, cutoff: 6000) * roll.env(0, 0.02, 0, 0.01, velocity: 0.1..0.8) * 0.2
+      noise.at(1).filter(:highpass, cutoff: 6000) * roll.env(0, 0.02, 0, 0.01, sensitivity: 0.1..0.8) * 0.2
     }
 
     # Master effects: a soft clipper keeps peaks under full scale
