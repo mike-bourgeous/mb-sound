@@ -323,15 +323,16 @@ module MB
       end
 
       # The MIDI::ControlSpecs of the controller nodes in use on this
-      # instance's control stream, plus the sustain pedals
+      # instance's control stream (CCs, pitch bend, including the bend
+      # inside #hz and #freq, and channel pressure), plus the sustain pedals
       # (MIDI::Transform::Sustain::CONTROL_SPECS) while note nodes read
       # through them (see #note_stream), sorted by controller number (see
       # #controls).
       def control_specs
         cache = SHARED[@control_stream] || {}
-        specs = cache.values.filter_map { |ref| live(ref) }.grep(Control).map(&:spec)
+        specs = cache.values.filter_map { |ref| live(ref) }.grep(ChannelNode).flat_map(&:control_specs)
         specs += MIDI::Transform::Sustain::CONTROL_SPECS if @sustain && live(@note_stream)
-        specs.uniq.sort_by { |s| [s.number, s.name] }
+        specs.uniq.sort_by { |s| [*s.key, s.name, s.range.begin] }
       end
 
       # Channel pressure (aftertouch), 0..1 (a shared Notes::Pressure).
