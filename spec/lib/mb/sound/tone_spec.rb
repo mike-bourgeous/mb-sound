@@ -249,12 +249,20 @@ RSpec.describe MB::Sound::Tone do
   end
 
   describe '#to_midi' do
-    it 'returns a midi note-on message' do
+    it 'returns a MIDI note-on event' do
       result = 50.hz.to_midi(channel: 4, velocity: 3)
-      expect(result).to be_a(MIDIMessage::NoteOn)
-      expect(result.note).to eq(50.hz.to_note.number)
-      expect(result.velocity).to eq(3)
+      expect(result).to be_a(MB::Sound::MIDI::Event)
+      expect(result.type).to eq(:note_on)
+      expect(result.note).to eq(50.hz.to_note.number.round)
+      expect(result.raw).to eq(3)
       expect(result.channel).to eq(4)
+      expect(result.bytes.bytes).to eq([0x94, 50.hz.to_note.number.round, 3])
+    end
+
+    it 'defaults to velocity 64 on channel 0, for Notes and Pitches too' do
+      expect(MB::Sound::C4.to_midi.bytes.bytes).to eq([0x90, 60, 64])
+      expect(440.hz.to_midi.bytes.bytes).to eq([0x90, 69, 64])
+      expect(MB::Sound::A4.to_midi(velocity: 127, channel: 15).bytes.bytes).to eq([0x9f, 69, 127])
     end
   end
 
@@ -275,6 +283,22 @@ RSpec.describe MB::Sound::Tone do
       expect(d.sample_rate).to eq(48001)
       expect(e.sample_rate).to eq(48001)
       expect(f.sample_rate).to eq(48001)
+    end
+
+    it 'keeps the pitch of a tone with #noise after its oscillator exists' do
+      # Count rising zero crossings over one second at each rate
+      cycles = ->(tone, rate) {
+        data = Array.new(10) { tone.sample(rate / 10).dup }.reduce(&:concatenate)
+        ((data[0...-1] < 0) & (data[1..] >= 0)).count_true
+      }
+
+      t = 200.hz.noise(0.000007).at(1)
+      t.sample(10)
+      t.at_rate(96000)
+      t.sample(10)
+
+      # Was 267 (the noise's random advance no longer centered)
+      expect(cycles.(t, 96000)).to be_within(3).of(200)
     end
   end
 end

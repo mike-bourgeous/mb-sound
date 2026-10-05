@@ -127,9 +127,13 @@ module MB
         @number + @detune * 0.01
       end
 
-      # Converts this Tone to a MIDI NoteOn message from the midi-message gem.
-      def to_midi(velocity: 64, channel: -1)
-        MIDIMessage::NoteOn.new(channel, number.round, velocity)
+      # Returns a note-on MB::Sound::MIDI::Event for this note (rounded to
+      # the nearest note number), with a raw +velocity+ (1 to 127) on
+      # 0-based +channel+.  Its #bytes can be sent with MIDI::Output:
+      #
+      #     out << C4.to_midi(velocity: 100).bytes
+      def to_midi(velocity: 64, channel: 0)
+        MIDI::Event.note_on(number.round, velocity / 127.0, channel: channel)
       end
 
       # Returns true if this Note represents a white key on a piano keyboard.

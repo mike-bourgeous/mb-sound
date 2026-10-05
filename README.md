@@ -605,7 +605,12 @@ This code uses some really cool other projects either directly or indirectly:
 - Numo::Pocketfft
 - Pry interactive console for Ruby
 - GNUplot
-- The MIDI Nibbler gem
+
+Earlier versions of mb-sound parsed MIDI with Ari Russo's
+[midi-message](https://github.com/arirusso/midi-message) and
+[Nibbler](https://github.com/arirusso/nibbler) (`midi-nibbler`) gems, from
+his UniMIDI family of Ruby MIDI libraries.  Thank you, Ari, for making MIDI
+in Ruby such a pleasure for so many years!
 
 ### References
 

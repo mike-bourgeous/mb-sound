@@ -17,17 +17,20 @@ module MB
       #   #control_specs (controller nodes, synths)
       #
       # Equal specs are kept once.  Different specs on the same controller
-      # number (e.g. p.midi_cc parameters of a synth script on CC 1 and the
-      # synth's vibrato on CC 1) are listed together, and share one entry
-      # in the ACID XML, named after all of them, with the first spec's
-      # default as its neutral value (like the old Manager#to_acid_xml).
+      # (e.g. p.midi_cc parameters of a synth script on CC 1 and the
+      # synth's vibrato on CC 1, or Notes#bend and the bend inside v.hz)
+      # are listed together, and share one entry in the ACID XML, named
+      # after all of them, with the first spec's default as its neutral
+      # value (like the old Manager#to_acid_xml).  Pitch bend and channel
+      # pressure specs (ControlSpec.bend, .pressure) come after the CCs,
+      # pressure first (sorted by MIDI status byte).
       #
       #     map = MB::Sound::MIDI::ControlMap.new(synth, p.midi)
       #     puts map
       #     File.write('synth.xml', map.to_acid_xml(name: 'My synth'))
       #
-      # Enumerable over the specs (sorted by controller number, then in the
-      # order they were added).
+      # Enumerable over the specs (sorted by ControlSpec#key: CC number,
+      # then pressure and bend; then in the order they were added).
       class ControlMap
         include Enumerable
 
@@ -92,20 +95,30 @@ module MB
           @specs.empty?
         end
 
-        # The controller numbers in use, sorted.
+        # The CC numbers in use, sorted (see #types for bend and pressure).
         def numbers
-          @specs.map(&:number).uniq.sort
+          @specs.select(&:cc?).map(&:number).uniq.sort
         end
 
-        # The specs on controller +number+ (an Array, empty if none).
+        # The controller types in use (:cc, :pressure, :bend), sorted.
+        def types
+          sorted.map(&:type).uniq
+        end
+
+        # The specs on CC +number+, or with +:bend+ or +:pressure+ the pitch
+        # bend or channel pressure specs (an Array, empty if none).
         def [](number)
-          sorted.select { |s| s.number == number }
+          if number.is_a?(Symbol)
+            sorted.select { |s| s.type == number }
+          else
+            sorted.select { |s| s.cc? && s.number == number }
+          end
         end
 
-        # A Hash from controller number to an Array of the specs on it,
-        # sorted by number.
+        # A Hash from controller (a CC number, or :pressure or :bend) to an
+        # Array of the specs on it, sorted (see ControlSpec#key).
         def groups
-          sorted.group_by(&:number)
+          sorted.group_by { |s| s.cc? ? s.number : s.type }
         end
 
         def ==(other)
@@ -117,12 +130,12 @@ module MB
         def to_s
           return 'MIDI controls: none' if empty?
 
-          lines = map { |s| "  #{s.to_s.sub(/\ACC (\d+)/) { format('CC %3d', $1.to_i) }}#{" - #{s.description}" if s.description}" }
+          lines = map { |s| "  #{s.cc? ? s.to_s.sub(/\ACC (\d+)/) { format('CC %3d', $1.to_i) } : s.to_s}#{" - #{s.description}" if s.description}" }
           "MIDI controls:\n#{lines.join("\n")}"
         end
 
         def inspect
-          "#<#{self.class.name} #{map { |s| "CC #{s.number} #{s.name}" }.join(', ')}>"
+          "#<#{self.class.name} #{map { |s| s.cc? ? "CC #{s.number} #{s.name}" : s.name }.join(', ')}>"
         end
 
         # Pry and pp show the listing (see #to_s).
@@ -137,7 +150,9 @@ module MB
         # ", "), continuous controllers on MIDI channel 1 with a neutral
         # value of the first spec's default, and switches (every spec on
         # the number a :switch, e.g. the sustain pedal) on any channel with
-        # ACID's HOLD curve.
+        # ACID's HOLD curve.  Channel pressure and pitch bend entries follow
+        # the CCs, as the old MIDI::Parameter wrote them (any channel,
+        # MIDIMsg 208 or 224, ccMsg 0, Max 127 or 16383).
         def to_acid_xml(name: File.basename($0))
           require 'builder'
 
@@ -146,7 +161,9 @@ module MB
           grouped = groups
           xml.parammap(mapname: name, ver: 1, summary: '', params: grouped.length) do |m|
             grouped.each do |number, specs|
-              if specs.all? { |s| s.curve == :switch }
+              if !specs.first.cc?
+                acid_param(m, number, specs)
+              elsif specs.all? { |s| s.curve == :switch }
                 acid_switch(m, number, specs)
               else
                 acid_param(m, number, specs)
@@ -167,7 +184,7 @@ module MB
         private
 
         def sorted
-          @specs.each_with_index.sort_by { |s, idx| [s.number, idx] }.map(&:first)
+          @specs.each_with_index.sort_by { |s, idx| [*s.key, idx] }.map(&:first)
         end
 
         def graph_nodes(src)
@@ -178,23 +195,25 @@ module MB
           specs.map(&:name).uniq.join(', ')
         end
 
+        # A continuous entry: a CC on channel 1, or pitch bend or channel
+        # pressure on any channel (the old MIDI::Parameter#to_acid_xml).
         def acid_param(xml, number, specs)
-          spec = specs.find { |s| s.curve != :switch }
+          spec = specs.find { |s| s.curve != :switch } || specs.first
           xml.param(name: acid_name(specs)) do |p|
             p.flags do |f|
               f.flag('DEFAULT')
               f.flag('ACTIVE')
               f.flag('LOCAL')
             end
-            p.ChannelMask(1)
-            p.MIDIMsg(176)
-            p.ccMsg(number)
+            p.ChannelMask(spec.cc? ? 1 : 65535)
+            p.MIDIMsg(spec.status)
+            p.ccMsg(spec.cc? ? number : 0)
             p.CurveType('LINEAR')
             p.CurveMask do |c|
               ACID_CURVES.each { |curve| c.curve(curve) }
             end
             p.Min(0)
-            p.Max(127)
+            p.Max(spec.raw_max)
             p.Neutral(spec.default)
           end
         end

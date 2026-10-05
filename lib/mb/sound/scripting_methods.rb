@@ -37,8 +37,10 @@ module MB
       # Runs a synthesizer script: the block gets the script's MIDI (a
       # MIDI file, or live input from a port; see ScriptRunner#run_synth)
       # as a MB::Sound::Notes and, with two block parameters, the declared
-      # parameters, and returns the graph.  The Notes is a mono voice and a
-      # MIDI source for polyphonic synths (Notes#synth, Synth.new).  Live
+      # parameters, and returns the graph.  The Notes is a mono voice
+      # (applying the sustain pedals; `Notes.new(midi.stream, sustain:
+      # false)` ignores them) and a MIDI source for polyphonic synths
+      # (Notes#synth, Synth.new).  Live
       # MIDI switches to the :low latency profile unless +profile+,
       # -L/--latency-profile, or AUDIO_PROFILE chose one.  An audio file
       # argument or --output writes a file.

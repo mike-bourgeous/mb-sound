@@ -46,8 +46,10 @@ module MB::Sound
       .filter(:lowpass, cutoff: 300 + 2500 * bass.env(0.001, 0.12, 0.1, 0.05), quality: 5) * bass_env * 0.5
 
     kick = (40.constant + 90 * beat[:kick].env(0, 0.04, 0, 0.01)).tone.sine.at(1) * beat[:kick].env(0, 0.3, 0, 0.05)
-    snare = noise.at(0.1).filter(:bandpass, cutoff: 1900, quality: 1.5) * beat[:snare].env(0, 0.12, 0, 0.05) * 2
-    hats = noise.at(0.1).filter(:highpass, cutoff: 7500) * hat.env(0, 0.025, 0, 0.02, sensitivity: 0.1..1) * 0.6
+    # Linear decays for the snare and hats: about the length of the old
+    # smoothstep envelopes (the default :analog curves sound too tight here)
+    snare = noise.at(0.1).filter(:bandpass, cutoff: 1900, quality: 1.5) * beat[:snare].env(0, 0.12, 0, 0.05, curve: :linear) * 2
+    hats = noise.at(0.1).filter(:highpass, cutoff: 7500) * hat.env(0, 0.025, 0, 0.02, sensitivity: 0.1..1, curve: :linear) * 0.6
 
     mix = (bass_synth + kick + snare + hats).softclip(0.5, 0.95)
 

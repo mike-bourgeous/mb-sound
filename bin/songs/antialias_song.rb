@@ -50,16 +50,22 @@ module MB::Sound
     kicks = grid(16, 'x...x...x...x..x').loop
     hats = grid(16, '..x...x...x..xx.').loop
 
-    # Pad: pulses whose width sweeps with a 4-bar LFO, two per voice
+    # Pad: pulses whose width sweeps with a 4-bar LFO, two per voice.  Its
+    # envelope uses smoothstep S-curves (curve: :smooth), the shape of the
+    # ADSR this song was written with, so the swell has no corner at its
+    # top.
     pad = chords.synth(voices: 2) { |v|
       (v.hz.pulse(4.bars.lfo.at(0.12..0.88)).at(0.5) + v.hz.transpose(0.08).pulse(4.bars.lfo.with_phase(Math::PI).at(0.12..0.88)).at(0.5)) *
-        v.env(0.3, 0.8, 0.8, 1.0)
+        v.env(0.3, 0.8, 0.8, 1.0, curve: :smooth)
     }.filter(:lowpass, cutoff: 2400, quality: 0.7) * 0.2
 
     # Lead: a saw hard-synced to its own note, the sync ratio rising with
-    # each note's envelope (the classic sync sweep)
-    lead_env = lead.env(0.002, 0.25, 0.3, 0.15)
-    lead_synth = (lead.tone.saw.sync(ratio: 1 + lead.env(0.001, 0.35, 0.1, 0.2) * 4) * lead_env)
+    # each note's envelope (the classic sync sweep).  Both envelopes are
+    # smoothstep S-curves (curve: :smooth), the old envelope shape: the
+    # sync sweep's shape sets the lead's timbre, and the faster :analog
+    # sweep made it sound like a different instrument (user listening test)
+    lead_env = lead.env(0.002, 0.25, 0.3, 0.15, curve: :smooth)
+    lead_synth = (lead.tone.saw.sync(ratio: 1 + lead.env(0.001, 0.35, 0.1, 0.2, curve: :smooth) * 4) * lead_env)
       .filter(:lowpass, cutoff: 5000, quality: 0.8)
       .delay(3.n16, feedback: -9.db, dry: 1, wet: -10.db) * 0.15
 
@@ -67,17 +73,18 @@ module MB::Sound
     bass_env = bass.env(0.002, 0.2, 0.4, 0.08)
     bass_synth = bass.tone.sine.pwm(0.5 - 0.45 * bass.env(0.001, 0.15, 0.0, 0.05)) * bass_env * 0.5
 
-    # Arp: skewed triangles, nearly saws
-    arp = (lead.transpose(12).tone.triangle.skew(0.15).at(1) * lead.env(0.001, 0.08, 0, 0.05)) * 0.08
+    # Arp: skewed triangles, nearly saws (a linear decay, like the old
+    # smoothstep envelope's length; the hats too)
+    arp = (lead.transpose(12).tone.triangle.skew(0.15).at(1) * lead.env(0.001, 0.08, 0, 0.05, curve: :linear)) * 0.08
 
     # Counter line: soft sync for a hollow, metallic tone
-    counter_synth = (counter.tone.triangle.softsync(ratio: 1.6) * counter.env(0.01, 0.3, 0.5, 0.2)) * 0.1
+    counter_synth = (counter.tone.triangle.softsync(ratio: 1.6) * counter.env(0.01, 0.3, 0.5, 0.2, curve: :linear)) * 0.1
 
     # Drums: a sine kick driven into the (antialiased) soft clipper, and
     # bitcrushed noise hats
     kick_env = kicks.env(0.0005, 0.12, 0, 0.05)
     kick = (60.hz.sine.fm(160 * kicks.env(0, 0.03, 0, 0.01)).at(3) * kick_env).softclip(0.4, 0.9) * 0.55
-    hat = (noise.at(1).filter(:highpass, cutoff: 6000) * hats.env(0, 0.03, 0, 0.02)).quantize(0.125) * 0.2
+    hat = (noise.at(1).filter(:highpass, cutoff: 6000) * hats.env(0, 0.03, 0, 0.02, curve: :linear)).quantize(0.125) * 0.2
 
     master { |mix| mix.softclip(0.6, 0.98) }
 

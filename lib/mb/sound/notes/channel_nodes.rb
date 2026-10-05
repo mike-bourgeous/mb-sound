@@ -53,6 +53,24 @@ module MB
           @bend = 0.0
           @event_range = nil
           @node_type_name = range.nil? ? 'Notes Bend' : "Notes Bend (#{range == :stream ? 'semitones' : "#{range} st"})"
+          @spec = case range
+                  when nil
+                    MIDI::ControlSpec.bend
+                  when :stream
+                    st = MIDI::Event::DEFAULT_BEND_RANGE.to_f
+                    MIDI::ControlSpec.bend(range: -st..st, description: "Pitch bend in semitones (the stream's bend range, #{MB::M.sigfigs(st, 3)} by default)")
+                  else
+                    MIDI::ControlSpec.bend(range: -range.to_f..range.to_f, description: "Pitch bend, #{MB::M.sigfigs(range.to_f, 3)} semitones")
+                  end
+        end
+
+        # The MIDI::ControlSpec describing this node's pitch bend (see
+        # MIDI::ControlSpec.bend).
+        attr_reader :spec
+
+        # [#spec], for MIDI::ControlMap.
+        def control_specs
+          [@spec]
         end
 
         private
@@ -132,6 +150,16 @@ module MB
           super(stream, sample_rate: sample_rate)
           @pressure = 0.0
           @node_type_name = 'Notes Pressure'
+        end
+
+        # The MIDI::ControlSpec of channel pressure (MIDI::ControlSpec.pressure).
+        def spec
+          MIDI::ControlSpec.pressure
+        end
+
+        # [#spec], for MIDI::ControlMap.
+        def control_specs
+          [spec]
         end
 
         private

@@ -39,7 +39,6 @@ Gem::Specification.new do |spec|
   spec.add_runtime_dependency 'numo-narray-alt', '~> 0.10.5'
   spec.add_runtime_dependency 'numo-pocketfft', '~> 0.6.0'
 
-  spec.add_runtime_dependency 'midi-nibbler', '~> 0.2.4'
   spec.add_runtime_dependency 'midilib', '~> 4.0.0'
 
   spec.add_runtime_dependency 'mb-math', '>= 0.5.0.usegit'

@@ -75,6 +75,60 @@ RSpec.describe(MB::Sound::MIDI::ControlMap) do
     end
   end
 
+  describe 'pitch bend and channel pressure' do
+    # The controls of spec/test_data/acid_xml_bend_reference.xml, written by
+    # the old MIDI::Manager#to_acid_xml (at 2e20764^, before the old layer
+    # was deleted) with on_cc(1, description: 'Modulation'), on_cc(74,
+    # range: 0.0..2.0, default: 1.0, description: 'Brightness'),
+    # on_midi(MIDIMessage::ChannelAftertouch.new(nil, 0)), and
+    # on_bend(range: -2.0..2.0, default: 0.0), the old MidiDsl#bend's call.
+    let(:bend_specs) {
+      [
+        spec_class.bend(range: -2.0..2.0),
+        spec_class.new(number: 74, name: 'Brightness', range: 0.0..2.0, center: 1.0, default: 64),
+        spec_class.pressure,
+        spec_class.new(number: 1, name: 'Modulation'),
+      ]
+    }
+
+    it 'writes them after the CCs as the old code did, byte for byte' do
+      xml = described_class.new(bend_specs).to_acid_xml(name: 'test_synth')
+      expect(xml).to eq(File.read('spec/test_data/acid_xml_bend_reference.xml'))
+    end
+
+    it 'sorts them after the CCs, pressure first, grouping specs of one kind' do
+      bend2 = spec_class.bend
+      map = described_class.new(*bend_specs, bend2)
+      expect(map.map(&:name)).to eq(['Modulation', 'Brightness', 'Aftertouch', 'Pitch Bend', 'Pitch Bend'])
+      expect(map.numbers).to eq([1, 74])
+      expect(map.types).to eq([:cc, :pressure, :bend])
+      expect(map[:bend]).to eq([bend_specs[0], bend2])
+      expect(map[:pressure]).to eq([bend_specs[2]])
+      expect(map.groups.keys).to eq([1, 74, :pressure, :bend])
+      expect(map.to_acid_xml(name: 'x').scan('<param ').length).to eq(4)
+      expect(map.to_s).to include("\n  Aftertouch (0.0..1.0, default 0) - Channel pressure\n  Pitch Bend (-2.0..2.0, default 8192) - Pitch bend\n")
+      expect(map.inspect).to end_with('CC 74 Brightness, Aftertouch, Pitch Bend, Pitch Bend>')
+    end
+
+    it 'finds them on a Notes and in a Synth (the bend inside v.hz)' do
+      notes = MB::Sound::Notes.new('spec/test_data/c_major.mid')
+      b = notes.bend
+      pr = notes.pressure
+      expect(notes.controls.map(&:type)).to eq([:pressure, :bend])
+      expect(notes.controls[:bend].first.range).to eq(-1.0..1.0)
+
+      s = synth
+      expect(s.controls.types).to eq([:cc, :bend])
+      expect(s.controls[:bend].map(&:range)).to eq([-2.0..2.0])
+      expect(s.controls.to_acid_xml(name: 'x')).to include('<MIDIMsg>224</MIDIMsg>')
+
+      s = MB::Sound::Synth.new('spec/test_data/c_major.mid', voices: 1) { |v| v.hz.bend_range(12.st).saw * v.pressure }
+      expect(s.controls.types).to eq([:cc, :pressure, :bend]) # pedals, then pressure and bend
+      expect(s.controls[:bend].map(&:range)).to eq([-12.0..12.0])
+      expect([b, pr]).to all(respond_to(:control_specs))
+    end
+  end
+
   describe '#write_acid_xml' do
     it 'writes the XML to a file' do
       path = tmp_path('map.xml')

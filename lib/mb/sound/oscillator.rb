@@ -1,5 +1,3 @@
-require 'midi-message'
-
 require 'mb/fast_sound'
 
 module MB

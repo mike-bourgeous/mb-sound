@@ -95,6 +95,7 @@ RSpec.describe(MB::Sound::Envelope) do
         flags |= MB::Sound::Envelope::FLAG_LEGATO if rng.rand < 0.3
         flags |= MB::Sound::Envelope::FLAG_OCTAVES if rng.rand < 0.2
         flags |= MB::Sound::Envelope::FLAG_LIFT if rng.rand < 0.4
+        flags |= MB::Sound::Envelope::FLAG_ADD if trial.odd? # without drawing from rng, keeping the older cases
         db = rng.rand < 0.4
         config = [
           flags, 2,
@@ -102,7 +103,16 @@ RSpec.describe(MB::Sound::Envelope) do
           db ? 1 : 0,
           rng.rand(0.0..300.0),
           MB::Sound::Envelope::CURVE_SCALE,
+          96.0,
+          0.01,
         ]
+        # Shapes chosen without drawing from rng (keeping the older cases):
+        # exp, S, and mixes.
+        shapes = case trial % 3
+                 when 0 then [0, 0, 0]
+                 when 1 then [1, 1, 1]
+                 else [(trial / 3) & 1, (trial / 6) & 1, (trial / 12) & 1]
+                 end
 
         state_c = Numo::DFloat.zeros(MB::Sound::Envelope::STATE_SIZE)
         state_c[MB::Sound::Envelope::STATE_STAGE] = flags & MB::Sound::Envelope::FLAG_ONE_SHOT != 0 ? 5 : 0
@@ -137,8 +147,8 @@ RSpec.describe(MB::Sound::Envelope) do
             rng.rand < 0.5 ? piecewise(rng, n, -3.0..3.0, 0.01) : rng.rand(-3.0..3.0),
           ]
 
-          out_c = MB::Sound::FastEnvelope.process(Numo::SFloat.zeros(n), state_c, times, curves, levels, hold, inputs, config)
-          out_r = MB::Sound::Envelope.process_ruby(Numo::SFloat.zeros(n), state_r, times, curves, levels, hold, inputs, config)
+          out_c = MB::Sound::FastEnvelope.process(Numo::SFloat.zeros(n), state_c, times, curves, levels, hold, inputs, config, shapes)
+          out_r = MB::Sound::Envelope.process_ruby(Numo::SFloat.zeros(n), state_r, times, curves, levels, hold, inputs, config, shapes)
 
           expect(out_c.to_a).to eq(out_r.to_a), "trial #{trial}: outputs differ"
           expect(state_c.to_a).to eq(state_r.to_a), "trial #{trial}: states differ"
@@ -171,19 +181,19 @@ RSpec.describe(MB::Sound::Envelope) do
 
     it 'rejects mismatched buffer lengths and bad configs' do
       state = Numo::DFloat.zeros(MB::Sound::Envelope::STATE_SIZE)
-      config = [1, 2, 1.0, 1.0, 0, 144, MB::Sound::Envelope::CURVE_SCALE]
+      config = [1, 2, 1.0, 1.0, 0, 144, MB::Sound::Envelope::CURVE_SCALE, 96.0, 0.01]
       out = Numo::SFloat.zeros(10)
       expect {
-        MB::Sound::FastEnvelope.process(out, state, [1, 2, 3], [0, 0, 0], [1, 0.5, 0], 0, [Numo::SFloat.zeros(9), nil, nil, nil, nil, nil], config)
+        MB::Sound::FastEnvelope.process(out, state, [1, 2, 3], [0, 0, 0], [1, 0.5, 0], 0, [Numo::SFloat.zeros(9), nil, nil, nil, nil, nil], config, [0, 0, 0])
       }.to raise_error(ArgumentError, /length/)
       expect {
-        MB::Sound::FastEnvelope.process(out, state, [1, 2, 3], [0, 0, 0], [1, 0.5, 0], 0, [nil, nil, nil, nil, nil, nil], config.dup.tap { |c| c[1] = 3 })
+        MB::Sound::FastEnvelope.process(out, state, [1, 2, 3], [0, 0, 0], [1, 0.5, 0], 0, [nil, nil, nil, nil, nil, nil], config.dup.tap { |c| c[1] = 3 }, [0, 0, 0])
       }.to raise_error(ArgumentError, /Release node/)
       expect {
-        MB::Sound::FastEnvelope.process(out, Numo::DFloat.zeros(3), [1, 2, 3], [0, 0, 0], [1, 0.5, 0], 0, [nil, nil, nil, nil, nil, nil], config)
+        MB::Sound::FastEnvelope.process(out, Numo::DFloat.zeros(3), [1, 2, 3], [0, 0, 0], [1, 0.5, 0], 0, [nil, nil, nil, nil, nil, nil], config, [0, 0, 0])
       }.to raise_error(ArgumentError, /State/)
       expect {
-        MB::Sound::FastEnvelope.process(out, state, [1, 2, 3], [0, 0, 0], [1, 0.5, 0], 0, [nil, nil, nil, nil], config)
+        MB::Sound::FastEnvelope.process(out, state, [1, 2, 3], [0, 0, 0], [1, 0.5, 0], 0, [nil, nil, nil, nil], config, [0, 0, 0])
       }.to raise_error(ArgumentError, /lift/)
     end
   end
@@ -553,6 +563,110 @@ RSpec.describe(MB::Sound::Envelope) do
     end
   end
 
+  describe 'retrigger modes' do
+    # A ringing envelope (attack 0, decay 1000 samples to 0, linear) struck
+    # at sample 0 with velocity 1 and at sample 500 with +second+.
+    def strikes(second, mode, kernel: :sample)
+      vel = Numo::SFloat.zeros(1000)
+      vel[0...500] = 1
+      vel[500..] = second
+      env = described_class.new(
+        attack: 0, decay: 1000.samples, sustain: 0, release: 0, curve: 0, hold: false,
+        trigger: array_node_class.new(pulses(1000, 0, 500)), velocity: array_node_class.new(vel),
+        retrigger: mode
+      )
+      env.public_send(kernel, 1000)
+    end
+
+    it 'defaults to :restart, attacking to the new peak even when lower' do
+      expect(described_class.new.retrigger).to eq(:restart)
+      data = strikes(0.2, :restart)
+      expect(data[499]).to be_within(1e-6).of(0.501)
+      expect(data[500]).to be_within(1e-6).of(0.2)
+    end
+
+    it 'with :add, attacks to the energy sum of the current level and the new peak' do
+      data = strikes(0.8, :add)
+      level = data[499]
+      expect(data[500]).to be_within(1e-6).of(Math.sqrt(level ** 2 + 0.8 ** 2))
+      expect(data[501]).to be < data[500] # the decay continues from the new peak
+    end
+
+    it 'with :add, rises at most sqrt(2) times the new peak, and never drops' do
+      data = strikes(0.4, :add) # sum 0.64 > 0.4 * sqrt(2)
+      expect(data[500]).to be_within(1e-6).of(0.4 * Math.sqrt(2))
+
+      data = strikes(0.2, :add) # 0.2 * sqrt(2) is below the current level
+      expect(data[500]).to be_within(1e-6).of(data[499])
+    end
+
+    it 'with :add, stays bounded through a roll of 200 strikes 10 ms apart, then decays normally' do
+      decay = 4800 # samples
+      [1.0, 0.5].each do |vel|
+        n = 200 * 480 + 2 * decay
+        trigger = Numo::SFloat.zeros(n)
+        200.times do |i| trigger[i * 480] = 1 end
+        env = described_class.new(
+          attack: 0, decay: decay.samples, sustain: 0, release: 0, curve: 30, hold: false,
+          trigger: array_node_class.new(trigger), velocity: vel, retrigger: :add
+        )
+        data = collect(env, n, buffer: 480)
+        bound = [vel * Math.sqrt(2), 1.0].min
+        expect(data.max).to be <= bound + 1e-6
+        expect(data[480...200 * 480].min).to be > 0.5 * vel # the roll keeps it up
+
+        # After the last strike, the usual decay from the bounded peak
+        last = 199 * 480
+        top = data[last]
+        expect(top).to be_between(vel, bound + 1e-6)
+        expect(data[last + decay]).to eq(0)
+        single = described_class.new(attack: 0, decay: decay.samples, sustain: 0, release: 0, curve: 30, hold: false,
+                                     trigger: array_node_class.new(pulses(decay + 10, 0)), velocity: 1)
+        ref = single.sample(decay + 10)
+        expect((data[last...(last + decay)] - ref[0...decay] * top).abs.max).to be < 1e-5
+      end
+    end
+
+    it 'with :add, never goes past the loudest velocity peak' do
+      data = strikes(1, :add)
+      expect(data[500]).to eq(1)
+      expect(data.max).to eq(1)
+    end
+
+    it 'with :add, starts from silence like :restart' do
+      env = ->(mode) {
+        described_class.new(attack: 10.samples, decay: 10.samples, sustain: 0.5, release: 10.samples,
+                            gate: array_node_class.new(pulses(200, 5..50, 100..150)), velocity: 0.4, retrigger: mode)
+      }
+      expect(env.(:add).sample(200).to_a).to eq(env.(:restart).sample(200).to_a)
+    end
+
+    it 'gives the same samples in C and Ruby' do
+      [0.1, 0.5, 1].each do |v|
+        expect(strikes(v, :add).to_a).to eq(strikes(v, :add, kernel: :sample_ruby).to_a)
+      end
+    end
+
+    it 'can be changed with #retrigger and #retrigger=' do
+      env = described_class.new
+      expect(env.retrigger(:add)).to equal(env)
+      expect(env.retrigger).to eq(:add)
+      expect(env.kernel_config[0] & described_class::FLAG_ADD).not_to eq(0)
+      expect(env.to_s).to include('retrigger add')
+      env.retrigger = :restart
+      expect(env.kernel_config[0] & described_class::FLAG_ADD).to eq(0)
+      expect { env.retrigger = :louder }.to raise_error(ArgumentError, /restart/)
+      expect { described_class.new(retrigger: :bogus) }.to raise_error(ArgumentError, /Retrigger/)
+    end
+
+    it 'predicts the peak of a note with #velocity_peak and #retrigger_peak' do
+      env = described_class.new(sensitivity: -18.db..0.db, velocity_scale: :db, retrigger: :add)
+      expect(env.velocity_peak(1)).to be_within(1e-12).of(1)
+      expect(env.velocity_peak(0)).to be_within(1e-12).of(-18.db)
+      expect(env.retrigger_peak(0.5)).to eq(env.velocity_peak(0.5)) # level 0 before any note
+    end
+  end
+
   describe 'lengths' do
     it 'accepts seconds, milliseconds, samples, and Durations' do
       env = described_class.new(attack: 10.ms, decay: 96.samples, sustain: 0.5, release: 1.n16, hold: 577.samples)
@@ -643,6 +757,237 @@ RSpec.describe(MB::Sound::Envelope) do
       env = described_class.new(attack: 2.constant, release: 1.n8, sustain: 0.5.constant, curve: { decay: 3.constant }, gate: g)
       expect(env.sources.keys).to contain_exactly(:attack, :release, :sustain, :decay_curve, :gate)
       expect(env.graph).to include(g)
+    end
+  end
+
+  describe 'S shape' do
+    # Double-precision levels, one sample at a time.
+    def levels(env, n)
+      Numo::DFloat.cast(Array.new(n) { env.sample(1); env.level })
+    end
+
+    def smoothstep(x)
+      x * x * (3 - 2 * x)
+    end
+
+    # The largest change of slope from one sample to the next.
+    def slope_step(y)
+      (y[2..] - 2 * y[1...-1] + y[0...-2]).abs.max
+    end
+
+    it 'follows smoothstep of the dB curve on every sample and lands on each target at its time' do
+      [0, -12, 12, 40].each do |d|
+        env = described_class.new(attack: 1000.samples, decay: 500.samples, sustain: 0.25, release: 400.samples,
+                                  hold: 2000.samples, curve: d, shape: :s)
+        data = collect(env, 3000)
+
+        attack = Numo::DFloat.linspace(0, 1, 1001).map { |x| smoothstep(curve_p(d, x)) }
+        decay = Numo::DFloat.linspace(0, 1, 501).map { |x| 1 - 0.75 * smoothstep(curve_p(d, x)) }
+        release = Numo::DFloat.linspace(0, 1, 401).map { |x| 0.25 - 0.25 * smoothstep(curve_p(d, x)) }
+        expect((data[0..1000] - attack).abs.max).to be < 1e-6
+        expect((data[1000..1500] - decay).abs.max).to be < 1e-6
+        expect((data[2000..2400] - release).abs.max).to be < 1e-6
+        expect(data[1000]).to eq(1)
+        expect(data[1500]).to eq(0.25)
+        expect(data[2400]).to eq(0)
+        expect(data[2999]).to eq(0)
+      end
+    end
+
+    it 'skews the S with the curve: negative swells, positive moves fast first' do
+      mid = ->(d) { collect(described_class.new(attack: 1000.samples, curve: d, shape: :s), 1000)[500] }
+      expect(mid.(0)).to be_within(1e-6).of(0.5)
+      expect(mid.(-12)).to be < 0.3
+      expect(mid.(12)).to be > 0.7
+    end
+
+    it 'starts and ends every segment with zero slope, so joints have no corner' do
+      s = described_class.new(attack: 1000.samples, decay: 500.samples, sustain: 0.5, release: 500.samples,
+                              gate: array_node_class.new(pulses(3000, 0...2000)), curve: :smooth)
+      y = levels(s, 3000)
+      expect(y[1] - y[0]).to be < 1e-5         # mean slope 1e-3
+      expect(1 - y[999]).to be < 1e-5
+      expect(y[1499] - 0.5).to be < 1e-5
+      expect(slope_step(y)).to be < 6.0 / 500**2 * 1.01 # the S's own curvature (6 / L^2)
+
+      exp = described_class.new(attack: 1000.samples, decay: 500.samples, sustain: 0.5, release: 500.samples,
+                                gate: array_node_class.new(pulses(3000, 0...2000)), curve: :analog)
+      expect(slope_step(levels(exp, 3000))).to be > 100 * slope_step(y) # exp has a corner at the peak
+    end
+
+    it 'keeps the phase when the attack time changes, so the slope stays smooth and the attack lands at the new time' do
+      [4000, 1200].each do |new_length|
+        env = described_class.new(attack: array_node_class.new([2000 / 48000.0] * 1000 + [new_length / 48000.0] * 10000),
+                                  decay: 0, sustain: 1, release: 0, curve: :smooth)
+        y = levels(env, new_length + 100)
+        expect(y[new_length - 1]).to be < 1
+        expect(y[new_length]).to eq(1)
+        expect(y.max).to be <= 1
+        expect(y[0..new_length].diff.min).to be >= 0
+        # The phase keeps its place, so the path's slope changes from
+        # S'(0.5) / 2000 to S'(0.5) * 0.5 / (samples left); the correction
+        # carries the old slope and blends to the new one over a few
+        # samples (at most 2 ms) instead of stepping at once.  (Restarting
+        # the S from rest would drop the slope to 0.)
+        old_slope = 1.5 / 2000
+        new_slope = 1.5 * 0.5 / (new_length - 999)
+        expect(((y[1000] - y[999]) - (y[999] - y[998])).abs).to be < 0.4 * (new_slope - old_slope).abs
+        expect(((y[1001] - y[1000]) - (y[1000] - y[999])).abs).to be < 0.4 * (new_slope - old_slope).abs
+        expect(y[1100] - y[1099]).to be_within(0.1 * new_slope).of(new_slope) if new_length > 2000
+      end
+    end
+
+    it 'follows an LFO-driven attack time without stalls, landing with its peak' do
+      # Times that shrink no faster than real time (the slope of the time
+      # is at most 0.47 samples per sample; faster shrinking lands early with
+      # a slope left over)
+      lfo = Numo::SFloat.cast(Array.new(6000) { |i| (2000 + 600 * Math.sin(2 * Math::PI * i / 8000.0)) / 48000.0 })
+      env = described_class.new(attack: array_node_class.new(lfo), decay: 0, sustain: 1, release: 0, curve: :smooth)
+      y = levels(env, 3000)
+      d = y.diff
+      expect(d[10...1800].min).to be > 0 # no stall (restarting from rest would stall)
+      expect(y.max).to be <= 1 + 1e-6
+      expect(y[-1]).to eq(1)
+      expect(slope_step(y)).to be < 1e-5
+    end
+
+    it 'restarts the rest of the curve from the current level when the target changes' do
+      sustain = array_node_class.new([0.5] * 1500 + [0.2] * 5000)
+      env = described_class.new(attack: 1000.samples, decay: 1000.samples, sustain: sustain, release: 0, curve: :smooth)
+      y = levels(env, 2200)
+      expect(y[1999]).to be > 0.2
+      expect(y[2000]).to eq(Numo::SFloat[0.2][0])
+      expect(y[2100]).to eq(Numo::SFloat[0.2][0])
+      expect(y[1000..2000].diff.max).to be <= 1e-12 # falls all the way
+      expect(y[1490..1510].diff.abs.max).to be < 2e-3
+    end
+
+    it 'turns a release mid-attack around smoothly, rising at most 1% of the step' do
+      env = described_class.new(attack: 2000.samples, decay: 500.samples, sustain: 0.6, release: 2000.samples,
+                                gate: array_node_class.new(pulses(5000, 0...1000)), curve: :smooth)
+      y = levels(env, 4000)
+      top = y[999]
+      expect(top).to be_within(0.01).of(0.5)
+      expect(y[1000..].max - top).to be_between(0, 0.01 * top)
+      expect(y[1000..1100].max - top).to be > 0 # carried the slope for a moment
+      # The slope continues across the release and then turns around within
+      # 2 ms, instead of stopping dead.
+      slope = y[999] - y[998]
+      expect(y[1000] - y[999]).to be_within(0.1 * slope).of(slope)
+      expect(y[1100] - y[1099]).to be < 0
+      expect(y[3000]).to eq(0)
+      expect(y[2999]).to be > 0
+    end
+
+    it 'bounds the bump of a release early in a fast attack to 1% of the step' do
+      env = described_class.new(attack: 0.005, decay: 0.2, sustain: 0.7, release: 0.3,
+                                gate: array_node_class.new(pulses(20000, 0...120)), curve: :smooth)
+      y = levels(env, 2000)
+      top = y[119]
+      expect(y[120..].max - top).to be_between(0, 0.01 * top)
+    end
+
+    it 'carries a retrigger smoothly with retrigger: :add, then attacks to the energy sum' do
+      make = ->(m) {
+        described_class.new(attack: 400.samples, decay: 2000.samples, sustain: 0, release: 0, hold: false,
+                            trigger: array_node_class.new(pulses(3000, 0, 1000)), velocity: 0.8, curve: :smooth, retrigger: :add)
+      }
+      y = levels(make.(nil), 3000)
+      level = y[999]
+      peak = described_class.add_peak(level, 0.8, 0.0, 1.0)
+      expect(y[1400]).to be_within(1e-9).of(peak)
+      expect(y[1000] - y[999]).to be < 0 # still falling for a moment
+      expect(y[999] - y[1000..1100].min).to be <= 0.01 * (peak - level)
+      expect(y[1400..].max).to be_within(1e-9).of(peak)
+
+      expect(collect(make.(nil), 3000, buffer: 77).to_a).to eq(collect(make.(nil), 3000, buffer: 77, method: :sample_ruby).to_a)
+    end
+
+    it 'chokes linearly as before' do
+      env = described_class.new(attack: 1000.samples, decay: 500.samples, sustain: 0.5, release: 500.samples, curve: :smooth,
+                                gate: array_node_class.new(pulses(3000, 0...2000)), choke: array_node_class.new(pulses(3000, 500)))
+      data = collect(env, 1000)
+      choke = (described_class::CHOKE_TIME * 48000).round
+      expect(data[500 + choke]).to eq(0)
+      expect(data[(500 + 1)..(500 + choke)].diff.to_a.uniq.length).to be < 10
+    end
+
+    it 'gives the same samples in C and Ruby with node times, curves, levels, and inputs' do
+      make = ->(m) {
+        n = array_node_class
+        lfo = Array.new(10000) { |i| 0.01 + 0.004 * Math.sin(i / 300.0) }
+        described_class.new(
+          attack: n.new(lfo),
+          decay: 1.n32,
+          sustain: n.new([0.6] * 2000 + [0.3] * 10000),
+          release: 96.samples,
+          curve: { attack: n.new([12] * 100 + [-20] * 10000), decay: 6 },
+          shape: { attack: :s, release: :s },
+          gate: n.new(pulses(6000, 50..2500, 3000..5000)),
+          trigger: n.new(pulses(6000, 1000, 4000)),
+          velocity: n.new(Numo::SFloat.linspace(0, 1, 6000)),
+          choke: n.new(pulses(6000, 4500)),
+          sensitivity: 0.25..1,
+          retrigger: :add,
+        )
+      }
+
+      a = collect(make.(nil), 6000, buffer: 333)
+      b = collect(make.(nil), 6000, buffer: 333, method: :sample_ruby)
+      expect(a.to_a).to eq(b.to_a)
+      expect(a.max).to be > 0.5
+    end
+
+    it 'keeps its phase when the sample rate changes' do
+      env = described_class.new(attack: 0.02, decay: 0, sustain: 1, release: 0, curve: :smooth)
+      first = env.sample(480)
+      env.sample_rate = 96000
+      rest = env.sample(2000)
+      expect(rest[0]).to be_within(0.002).of(first[-1])
+      expect(rest[0...1920].diff.min).to be >= 0
+      expect(rest[1919]).to eq(1)
+    end
+
+    describe 'options' do
+      it 'accepts a shape for every segment, a Hash, an Array, aliases, and chained #shape' do
+        expect(described_class.new.shape).to eq({ attack: :exp, decay: :exp, release: :exp })
+        expect(described_class.new(shape: :s).shape).to eq({ attack: :s, decay: :s, release: :s })
+        expect(described_class.new(shape: { attack: :scurve }).shape).to eq({ attack: :s, decay: :exp, release: :exp })
+        expect(described_class.new(shape: [:s, :exponential, :s]).shape).to eq({ attack: :s, decay: :exp, release: :s })
+
+        env = described_class.new
+        expect(env.shape(:s)).to equal(env)
+        expect(env.shape(release: :exp).shape).to eq({ attack: :s, decay: :s, release: :exp })
+        expect(env.shape(:exp, :s, :s).shape).to eq({ attack: :exp, decay: :s, release: :s })
+        env.shape = :s
+        expect(env.shapes).to eq({ attack: :s, decay: :s, release: :s })
+
+        expect { env.shape(:round) }.to raise_error(ArgumentError, /round/)
+        expect { env.shape(sustain: :s) }.to raise_error(ArgumentError, /sustain/)
+        expect { env.shape([:s]) }.to raise_error(ArgumentError, /3 values/)
+      end
+
+      it 'sets shapes from curve presets, and shape: after curve:' do
+        expect(described_class.new(curve: :smooth).shape).to eq({ attack: :s, decay: :s, release: :s })
+        expect(described_class.new(curve: :pad).curve).to eq(described_class::SEGMENTS.zip(described_class::CURVES[:pad]).to_h)
+        expect(described_class.new(curve: :pad).shape.values.uniq).to eq([:s])
+        expect(described_class.new(curve: :smooth).curve(:analog).shape.values.uniq).to eq([:exp])
+        expect(described_class.new(curve: :smooth).curve(release: 30).shape.values.uniq).to eq([:s])
+        expect(described_class.new(curve: :analog, shape: :s).shape.values.uniq).to eq([:s])
+        expect(described_class.new(curve: :smooth, shape: { decay: :exp }).shape).to eq({ attack: :s, decay: :exp, release: :s })
+      end
+
+      it 'passes shapes through the envelope constructors and Notes' do
+        expect(MB::Sound.adsr(1, 0.5, 0.6, 1, shape: :s).shape.values.uniq).to eq([:s])
+        expect(MB::Sound.amp_env(shape: { attack: :s }).shape[:attack]).to eq(:s)
+        expect(MB::Sound.env(curve: :pad).shape[:release]).to eq(:s)
+      end
+
+      it 'describes shapes in #to_s' do
+        expect(described_class.new(curve: :smooth).to_s).to include('curve smooth')
+        expect(described_class.new(curve: :linear).to_s).to include('curve linear')
+        expect(described_class.new(curve: :analog, shape: { attack: :s }).to_s).to include('curve analog shape s/exp/exp')
+      end
     end
   end
 

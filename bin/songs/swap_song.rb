@@ -69,8 +69,10 @@ module MB::Sound
     pad = fifth_pad(chords_a, cutoff: 1100).map { |c| c * 0.45 }
 
     kick = (40.constant + 90 * beat_a[:kick].env(0, 0.04, 0, 0.01)).tone.sine.at(1) * beat_a[:kick].env(0, 0.3, 0, 0.05) * 0.5
-    snare = noise.at(1).filter(:bandpass, cutoff: 1900, quality: 1.5) * beat_a[:snare].env(0, 0.12, 0, 0.05) * 0.5
-    hats = noise.at(1).filter(:highpass, cutoff: 7500) * beat_a[:hat].env(0, 0.025, 0, 0.02, sensitivity: 0.1..1) * 0.14
+    # Linear decays for the snare and hats: about the length of the old
+    # smoothstep envelopes (the default :analog curves sound too tight here)
+    snare = noise.at(1).filter(:bandpass, cutoff: 1900, quality: 1.5) * beat_a[:snare].env(0, 0.12, 0, 0.05, curve: :linear) * 0.5
+    hats = noise.at(1).filter(:highpass, cutoff: 7500) * beat_a[:hat].env(0, 0.025, 0, 0.02, sensitivity: 0.1..1, curve: :linear) * 0.14
 
     master { |mix| mix.softclip(0.6, 0.98) }
 

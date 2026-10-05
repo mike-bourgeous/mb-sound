@@ -166,13 +166,10 @@ RSpec.describe(MB::Sound::MIDI::Transform) do
       ])
     end
 
-    it 'gives the note ends of MIDIFile#notes with a sustain pedal' do
-      m = MB::Sound::MIDI::MIDIFile.new('spec/test_data/c2_sustain.mid')
+    it 'gives the note ends the old MIDIFile#notes gave with a sustain pedal' do
       events = MB::Sound::MIDI::Stream.for('spec/test_data/c2_sustain.mid').sustain.reader.next(10)
       ends = events.select(&:note_off?).map { |e| [e.note, e.time.to_f.round(9)] }
-      expected = m.notes.map { |n| [n[:number], n[:sustain_time].round(9)] }
-      expect(ends).to eq(expected)
-      expect(m.notes.map { |n| n[:sustain_time] }).not_to eq(m.notes.map { |n| n[:off_time] })
+      expect(ends).to eq([[36, 0.6875]]) # the key was released at 0.5 s
     end
   end
 

@@ -26,6 +26,10 @@ module MB
     # (seeks, timeline jumps, clip swaps), held values jump to the note at
     # the new position (see MIDI::Source#chase).
     #
+    # Pedals: note nodes apply the sustain, sostenuto, and soft pedals
+    # (MIDI::Stream#sustain; see #note_stream) unless +sustain: false+, as
+    # MB::Sound::Synth does.
+    #
     # Examples:
     #     v = MB::Sound::Notes.new(seq(C3, E3, G3).n8.loop)
     #     play v.hz.saw * v.gate
@@ -149,7 +153,11 @@ module MB
         end
       end
 
-      # The MIDI::Stream this instance reads.
+      # The MIDI::Stream this instance was given (before the sustain pedal
+      # transform; see #note_stream).  Controllers read it (or the stream
+      # it was split from; see .control_stream), synths built from this
+      # instance read it (see #to_midi_stream), and its #source is the
+      # MIDI source (e.g. a LiveSource or FileSource).
       attr_reader :stream
 
       # The sample rate of nodes made from now on (graphs change it as
@@ -157,46 +165,115 @@ module MB
       attr_reader :sample_rate
 
       # Creates a Notes instance reading +source+ (see the class
-      # description).
-      def initialize(source, sample_rate: 48000)
+      # description).  Note nodes read it through the sustain, sostenuto,
+      # and soft pedals (MIDI::Stream#sustain) unless +sustain: false+, as
+      # MB::Sound::Synth does; Synth lanes (already pedaled) and clip
+      # outputs (clips have no pedals) pass false.
+      def initialize(source, sustain: true, sample_rate: 48000)
         @stream = MIDI::Stream.for(source)
+        @sustain = !!sustain
+        @note_stream = nil
         @control_stream = Notes.control_stream(@stream)
         @sample_rate = sample_rate.to_f
         @nodes = {}
         @envelopes = []
+        @quiet_check = nil
+        @level_check = nil
       end
+
+      # A Proc (or anything with #call) returning true once the output of
+      # the graph built on this instance has gone quiet, or nil (the
+      # default) to ignore the output.  Synth sets one per lane, so voices
+      # without envelopes (e.g. resonant filter pings) stay busy, and their
+      # gate and trigger keep going after a MIDI file ends, until they have
+      # rung out (see #idle?).
+      attr_accessor :quiet_check
+
+      # A Proc (or anything with #call) returning the measured peak level
+      # of the output of the graph built on this instance, or nil (the
+      # default) to use the envelope levels (see #level).  Synth sets one
+      # per lane, so the :quietest steal policy also works for voices
+      # without envelopes.
+      attr_accessor :level_check
 
       # The stream read by channel-wide nodes (see .control_stream).
       attr_reader :control_stream
 
+      # True if note nodes apply the sustain pedals (see #initialize).
+      def sustain?
+        @sustain
+      end
+
+      # The stream note nodes read: #stream through the sustain pedal
+      # transform (MIDI::Stream#sustain) with +sustain: true+, else #stream.
+      #
+      # The pedaled stream is made when a note node first needs it, and
+      # held only by the nodes reading it (this instance keeps a weak
+      # reference), so a Notes used only for controllers or as a synth's
+      # source (e.g. the console's `midi`) never leaves an unread transform
+      # holding the input's events back (late readers of a stream start at
+      # its slowest reader).
+      def note_stream
+        return @stream unless @sustain
+
+        s = live(@note_stream)
+        return s if s
+
+        s = @stream.sustain
+        @note_stream = WeakRef.new(s)
+        s
+      end
+
       # 1 while any note is held, else 0 (a Notes::Gate).
       def gate
-        memo(:gate) { Gate.new(@stream, notes: self, sample_rate: @sample_rate) }
+        memo(:gate) { Gate.new(note_stream, notes: self, sample_rate: @sample_rate) }
       end
 
       # A single-sample impulse at every note-on, valued at its velocity
       # (0..1; a Notes::Trigger).  Inputs that take triggers (Tone#reset,
       # Envelope +:trigger+, #smooth +reset:+) react to its rising edges.
       def trigger
-        memo(:trigger) { Trigger.new(@stream, notes: self, sample_rate: @sample_rate) }
+        memo(:trigger) { Trigger.new(note_stream, notes: self, sample_rate: @sample_rate) }
       end
+
+      # The key sync trigger (a Notes::KeyTrigger): #trigger without the
+      # note-ons that re-strike a voice whose energy is being added to, so
+      # oscillators keep their phase when a ringing note is struck again.
+      # A note-on is left out when an envelope made through this instance
+      # with +retrigger: :add+ (Envelope's; e.g. Synth's +retrigger: :add+,
+      # :ring, :string) is sounding (not idle) when it arrives (see
+      # #adding_at?); with only :restart envelopes (the default), or none,
+      # it is the same as #trigger.  A mono voice re-struck while its note
+      # is held or still ringing counts too, as does a Synth lane re-struck
+      # while ringing.
+      #
+      # Oscillators from #hz key-sync to this (see NotePitch), and so should
+      # tones that sync to notes by hand; #trigger keeps every note-on, for
+      # envelopes and for tones that must restart at each note:
+      #
+      #     (v.freq * ratio).tone.reset(v.key_trigger)    # key sync, like v.hz
+      #     110.hz.square.reset(v.trigger)                # restarts at every note-on
+      def key_trigger
+        memo(:key_trigger) { KeyTrigger.new(note_stream, notes: self, sample_rate: @sample_rate) }
+      end
+      alias key_sync_trigger key_trigger
 
       # The note number of the newest held note, held after release (a
       # Notes::Number), starting at the source's first note (or C4).
       def number
-        memo(:number) { Number.new(@stream, notes: self, sample_rate: @sample_rate) }
+        memo(:number) { Number.new(note_stream, notes: self, sample_rate: @sample_rate) }
       end
       alias note_number number
 
       # The velocity (0..1) of the latest note-on (a Notes::Velocity).
       def velocity
-        memo(:velocity) { Velocity.new(@stream, notes: self, sample_rate: @sample_rate) }
+        memo(:velocity) { Velocity.new(note_stream, notes: self, sample_rate: @sample_rate) }
       end
 
       # The release velocity (0..1) of the latest note-off (a Notes::Lift),
       # 64/127 until the first one.
       def lift
-        memo(:lift) { Lift.new(@stream, notes: self, sample_rate: @sample_rate) }
+        memo(:lift) { Lift.new(note_stream, notes: self, sample_rate: @sample_rate) }
       end
       alias release_velocity lift
 
@@ -205,7 +282,7 @@ module MB
       # Envelopes from this instance release over Envelope::CHOKE_TIME at
       # each one.
       def choke
-        memo(:choke) { Choke.new(@stream, notes: self, sample_rate: @sample_rate) }
+        memo(:choke) { Choke.new(note_stream, notes: self, sample_rate: @sample_rate) }
       end
 
       # The frequency in Hz of #number plus pitch bend (MIDI::Event#bend_semitones,
@@ -276,11 +353,16 @@ module MB
       end
 
       # The MIDI::ControlSpecs of the controller nodes in use on this
-      # instance's control stream, sorted by controller number (see
+      # instance's control stream (CCs, pitch bend, including the bend
+      # inside #hz and #freq, and channel pressure), plus the sustain pedals
+      # (MIDI::Transform::Sustain::CONTROL_SPECS) while note nodes read
+      # through them (see #note_stream), sorted by controller number (see
       # #controls).
       def control_specs
         cache = SHARED[@control_stream] || {}
-        cache.values.filter_map { |ref| live(ref) }.grep(Control).map(&:spec).uniq.sort_by { |s| [s.number, s.name] }
+        specs = cache.values.filter_map { |ref| live(ref) }.grep(ChannelNode).flat_map(&:control_specs)
+        specs += MIDI::Transform::Sustain::CONTROL_SPECS if @sustain && live(@note_stream)
+        specs.uniq.sort_by { |s| [*s.key, s.name, s.range.begin] }
       end
 
       # Channel pressure (aftertouch), 0..1 (a shared Notes::Pressure).
@@ -326,7 +408,8 @@ module MB
 
       # A Pitch following the held note and pitch bend (a
       # Notes::NotePitch), whose oscillators reset their phase at each
-      # note-on (key sync) unless they are #free or #lfo.
+      # note-on (key sync, #key_trigger: not at re-strikes that add energy
+      # to a sounding voice) unless they are #free or #lfo.
       #
       #     play v.hz.saw * v.amp_env
       #     play v.hz.bend_range(12.st).square.free * v.amp_env
@@ -381,7 +464,7 @@ module MB
 
         lfo = MB::Sound::Tone.new(frequency: rate, sample_rate: @sample_rate).lfo.reset(trigger)
         parts = [lfo, depth]
-        parts << FadeIn.new(@stream, delay: delay, notes: self, sample_rate: @sample_rate) unless delay == 0
+        parts << FadeIn.new(note_stream, delay: delay, notes: self, sample_rate: @sample_rate) unless delay == 0
         GraphNode::Multiplier.new(parts, sample_rate: @sample_rate).named('vibrato')
       end
 
@@ -397,13 +480,26 @@ module MB
         envelope
       end
 
-      # True when no note is held and every envelope made through this
-      # instance (see #env, #register) is idle, so a voice allocator can
-      # reuse the voice.  Held notes are known from the note nodes in use
-      # (#gate, #number, ...; see #held?), so a voice with only a gate is
-      # busy while its note is held.  True with no envelopes and no note
-      # nodes.
+      # True when no note is held, every envelope made through this
+      # instance (see #env, #register) is idle, and the #quiet_check (if
+      # any) says the output is quiet, so a voice allocator can reuse the
+      # voice.  Held notes are known from the note nodes in use (#gate,
+      # #number, ...; see #held?), so a voice with only a gate is busy
+      # while its note is held.  True with no envelopes, no note nodes, and
+      # no quiet check.
       def idle?
+        voice_idle? && quiet?
+      end
+
+      # True if the #quiet_check says the output is quiet, or if there is no
+      # quiet check.
+      def quiet?
+        @quiet_check.nil? || !!@quiet_check.call
+      end
+
+      # Like #idle?, without the #quiet_check: no note held and every
+      # envelope idle.
+      def voice_idle?
         !held? && envelopes_idle?
       end
 
@@ -411,6 +507,24 @@ module MB
       # #register) is idle.
       def envelopes_idle?
         @envelopes.all?(&:idle?)
+      end
+
+      # True if any envelope made through this instance has +retrigger:
+      # :add+ (see Envelope#retrigger).
+      def add_envelopes?
+        @envelopes.any? { |e| add_envelope?(e) }
+      end
+
+      # True if an envelope made through this instance with +retrigger:
+      # :add+ was sounding (not idle) at stream time +time+, the start of
+      # a buffer (NoteEnvelope#sounding_at?, so the answer doesn't depend
+      # on whether the envelopes have rendered that buffer yet), so a
+      # note-on there adds energy to a sounding voice instead of starting
+      # one (see #key_trigger).
+      def adding_at?(time)
+        @envelopes.any? { |e|
+          add_envelope?(e) && (e.respond_to?(:sounding_at?) ? e.sounding_at?(time) : !e.idle?)
+        }
       end
 
       # True if any note node made by this instance (#gate, #number,
@@ -423,17 +537,19 @@ module MB
         }
       end
 
-      # The highest current level of the envelopes made through this
-      # instance (see #env), or 0 with none; e.g. for the :quietest steal
-      # policy (MIDI::Allocator::Lane#level_check).
+      # The measured peak of the output (see #level_check) if there is a
+      # level check, else the highest current level of the envelopes made
+      # through this instance (see #env), or 0 with none; e.g. for the
+      # :quietest steal policy (MIDI::Allocator::Lane#level_check).
       def level
+        return @level_check.call.to_f if @level_check
         @envelopes.map { |e| e.respond_to?(:level) ? e.level.to_f.abs : 0.0 }.max || 0.0
       end
 
       # True once the stream's source has ended and every reader has read
       # every event.
       def ended?
-        @stream.ended?
+        (live(@note_stream) || @stream).ended?
       end
 
       def to_s
@@ -457,6 +573,11 @@ module MB
       end
 
       private
+
+      # True if +envelope+ adds re-strikes' energy (see #adding_at?).
+      def add_envelope?(envelope)
+        envelope.respond_to?(:retrigger) && envelope.retrigger == :add
+      end
 
       # Returns the node cached under +key+, or makes one with the block and
       # caches it.  The cache holds weak references, so nodes nobody uses
@@ -493,7 +614,7 @@ module MB
       def envelope_inputs
         return { gate: gate, trigger: trigger, velocity: velocity, choke: choke } unless Notes.fast_paths
 
-        node = memo([:envelope_inputs, @envelopes.length]) { EnvelopeInputs.new(@stream, notes: self, sample_rate: @sample_rate) }
+        node = memo([:envelope_inputs, @envelopes.length]) { EnvelopeInputs.new(note_stream, notes: self, sample_rate: @sample_rate) }
         { gate: node, trigger: node.trigger, velocity: node.velocity, choke: node.choke }
       end
 

@@ -23,8 +23,47 @@ module MB
     # block is called once per lane (voices + spares lanes, or one in mono
     # mode) with the lane's Notes and the lane index.  Each lane's Notes
     # tells the allocator when a released lane has gone quiet (Notes#idle?:
-    # no held note and every envelope made through +v+ idle), and its level
-    # (Notes#level) for the :quietest steal policy.
+    # no held note, every envelope made through +v+ idle, and the lane's
+    # output quiet; see #quiet_lanes), and its level (Notes#level) for the
+    # :quietest steal policy.
+    #
+    # Same-note retriggers (+:retrigger+, one word): :reuse (the default),
+    # :louder, and :new_voice go to MIDI::Allocator (see there); with
+    # :louder a lane counts as louder when the new note's velocity would
+    # take each envelope made through +v+ at least as high as it is now
+    # (Envelope#retrigger_peak >= Envelope#level: no envelope would attack
+    # downward).  :add reuses lanes like :reuse and sets every envelope
+    # made through +v+ to Envelope's +retrigger: :add+ (a re-strike attacks
+    # to the energy sum of the current level and its own peak).  Lanes
+    # re-struck while their :add envelopes still sound keep the phases of
+    # key-synced oscillators (Notes#key_trigger leaves those note-ons out),
+    # so a re-strike adds energy without a click; a lane whose envelopes
+    # have ended resets as a new note.  With :reuse (:restart envelopes)
+    # re-strikes reset key-synced oscillators, as before.
+    #
+    # Presets for ringing sounds (RETRIGGER_PRESETS):
+    # - :string (piano, e-piano, plucked or struck strings): one lane per
+    #   key, re-struck in place even with voices free (Allocator
+    #   +retrigger: :per_key+), its envelopes adding the strike's energy
+    #   (Envelope +retrigger: :add+), so a repeated key never doubles.
+    #   A re-struck string keeps its phase, and so do key-synced
+    #   oscillators here (see :add); `.free` ones never reset.
+    # - :ring (alias :bell; bells and other ringing sounds): a same-note
+    #   strike takes a free voice if one is free (as always); with every
+    #   voice busy it reuses the quietest lane already playing that note,
+    #   its envelopes adding the new strike's energy (Envelope
+    #   +retrigger: :add+); with no lane playing the note it steals the
+    #   quietest lane (a choke, as usual).  That is Allocator
+    #   +retrigger: :quietest+, +steal: RING_STEAL+ (unless +:steal+ is
+    #   given), and :add envelopes.
+    #
+    #     midi.synth(voices: 4, retrigger: :ring) { |v| ... }
+    #     midi.synth(voices: 8, retrigger: :string) { |v| v.hz.sine.free * v.amp_env(0.002, 2, 0, 0.3) }
+    #
+    # With :add envelopes (:add, :string, :ring) a lane never rises above
+    # sqrt(2) times one strike's peak however fast it is struck (see
+    # Envelope's +retrigger: :add+); :ring can still stack up to +voices+
+    # lanes of one note, since a strike takes a free voice first.
     #
     # Randomness: each lane's block runs with the root random generator
     # restarted from +seed+ + lane index (MB::Sound.with_seed), so lane
@@ -49,7 +88,8 @@ module MB
     #
     # Ending: #ended? is true once a finite source (a MIDI file or a
     # non-looping clip) has ended, every lane has read its last event, and
-    # every lane is idle; the script runner's ringdown then stops a synth
+    # every lane is idle (including quiet; see #quiet_lanes, so voices
+    # without envelopes ring out); the script runner's ringdown then stops a synth
     # script after a second of quiet, so effects after the synth (delays,
     # reverbs) ring out.  A lane graph that returns nil (its Notes gate or
     # trigger ends once the source has ended and the lane is idle) drops
@@ -63,6 +103,19 @@ module MB
 
       # Output controls (see the class description).
       CONTROLS = [:volume, :expression, :pan].freeze
+
+      # Same-note retrigger modes (see the class description).
+      # Named retrigger presets for ringing sounds, each with its canonical
+      # name (see the class description).
+      RETRIGGER_PRESETS = { string: :string, ring: :ring, bell: :ring }.freeze
+
+      RETRIGGER_MODES = [*MIDI::Allocator::RETRIGGER_MODES, :add, *RETRIGGER_PRESETS.keys].freeze
+
+      # The steal chain of +retrigger: :ring+ (see the class description).
+      RING_STEAL = [:same_note, :quietest, :oldest].freeze
+
+      # Allocator retrigger modes for the Synth-only modes.
+      ALLOCATOR_RETRIGGER = { add: :reuse, ring: :quietest, string: :per_key }.freeze
 
       # The default +:tail+: seconds of silence after every lane has ended
       # before #sample returns nil (the old MIDI file nodes' limit).
@@ -119,13 +172,24 @@ module MB
       # the constructor).
       attr_reader :output_controls
 
+      # The same-note retrigger mode (see the class description).
+      attr_reader :retrigger
+
       # See the class description.
       def initialize(
-        source, voices: 8, spares: 2, steal: MIDI::Allocator::DEFAULT_STEAL, protect: nil, mono: nil,
-        priority: :last, glide_mode: :last, controls: [], bend_range: nil, sustain: true, seed: nil,
-        tail: TAIL_SECONDS, skip_idle: true, sample_rate: 48000, &block
+        source, voices: 8, spares: 2, steal: nil, protect: nil, mono: nil,
+        priority: :last, glide_mode: :last, retrigger: :reuse, controls: [], bend_range: nil, sustain: true,
+        seed: nil, tail: TAIL_SECONDS, skip_idle: true, sample_rate: 48000, &block
       )
         raise ArgumentError, 'Pass a block that builds the graph of one voice from |v, index|' unless block
+
+        unless RETRIGGER_MODES.include?(retrigger)
+          raise ArgumentError, "Unknown retrigger mode #{retrigger.inspect} (use #{RETRIGGER_MODES})"
+        end
+        @retrigger = retrigger
+        retrigger = RETRIGGER_PRESETS.fetch(retrigger, retrigger)
+        steal ||= retrigger == :ring ? RING_STEAL : MIDI::Allocator::DEFAULT_STEAL
+        add = retrigger == :add || retrigger == :ring || retrigger == :string
 
         @output_controls = Array(controls).uniq.freeze
         bad = @output_controls - CONTROLS
@@ -143,15 +207,22 @@ module MB
 
         @allocator = MIDI::Allocator.new(
           stream, voices: voices, spares: spares, steal: steal, protect: protect, mono: mono,
-          priority: priority, glide_mode: glide_mode
+          priority: priority, glide_mode: glide_mode, retrigger: ALLOCATOR_RETRIGGER.fetch(retrigger, retrigger)
         )
 
         @notes = []
+        @quiet = Array.new(@allocator.lanes.length, true)
+        @silent = Array.new(@allocator.lanes.length, true)
+        @peaks = Array.new(@allocator.lanes.length, 0.0)
         @lanes = @allocator.lanes.each_with_index.map { |lane, idx|
-          v = Notes.new(lane, sample_rate: @sample_rate)
+          v = Notes.new(lane, sustain: false, sample_rate: @sample_rate)
+          v.quiet_check = -> { @quiet[idx] }
+          v.level_check = -> { @peaks[idx] }
           graph = MB::Sound.with_seed(@seed + idx) { block.call(v, idx) }
           lane.idle_check = -> { v.idle? }
           lane.level_check = -> { v.level }
+          lane.louder_check = ->(velocity) { louder_lane?(v, velocity) }
+          v.envelopes.each { |env| env.retrigger(:add) if env.respond_to?(:retrigger) } if add
           @notes << v
           lane_outputs(graph, idx).map(&:get_sampler)
         }
@@ -165,7 +236,7 @@ module MB
         @sampled = []
         @frame = nil
 
-        @control_notes = Notes.new(@allocator.stream, sample_rate: @sample_rate) unless @output_controls.empty?
+        @control_notes = Notes.new(@allocator.stream, sustain: false, sample_rate: @sample_rate) unless @output_controls.empty?
         @gain = make_gain
         @core_outputs = @channels > 1 || @output_controls.include?(:pan) ? Array.new(@channels) { |c| Output.new(self, c) } : nil
         @final = make_pan
@@ -186,7 +257,7 @@ module MB
       def control_specs
         # Every lane (and the output controls' Notes) shares one control
         # stream, the allocator's input
-        specs = Notes.new(@allocator.stream).control_specs
+        specs = Notes.new(@allocator.stream, sustain: false).control_specs
         @sustain ? specs + MIDI::Transform::Sustain::CONTROL_SPECS : specs
       end
 
@@ -247,7 +318,7 @@ module MB
           if @skipping[idx]
             case skip_lane(idx, count)
             when :ended
-              @done[idx] = true
+              lane_ended(idx)
               next nil
             when :skipped
               any = true
@@ -257,11 +328,12 @@ module MB
 
           bufs = outs.map { |o| o.sample(count) }
           if bufs.any?(&:nil?)
-            @done[idx] = true
+            lane_ended(idx)
             next nil
           end
 
-          @skipping[idx] = start_skipping?(idx, bufs) if @skippable[idx]
+          measure_lane(idx, bufs)
+          @skipping[idx] = start_skipping?(idx) if @skippable[idx]
 
           any = true
           outs.length == 1 && @channels == 1 ? bufs[0] : bufs
@@ -287,6 +359,18 @@ module MB
       # The indices of the lanes being skipped right now.
       def skipped_lanes
         @skipping.each_index.select { |idx| @skipping[idx] }
+      end
+
+      # The indices of the lanes whose last rendered buffer was quiet (every
+      # channel within -90 dB, QUIET) with no note held and every envelope idle
+      # (or that haven't rendered since).  A lane counts as busy for the
+      # allocator (and its Notes gate and trigger keep going after a MIDI
+      # file ends) until it is quiet, so voices without envelopes, such as
+      # resonant filter pings, ring out.  Measured once per buffer, after
+      # the lane renders, so allocation stays the same for the same events
+      # and buffer sizes.
+      def quiet_lanes
+        @quiet.each_index.select { |idx| @quiet[idx] }
       end
 
       # True once the source has ended, every lane has read its last event,
@@ -332,7 +416,22 @@ module MB
 
       private
 
-      # Level below which an idle lane's output counts as silent (-120 dB).
+      # True if a note at +velocity+ would take each envelope of lane Notes
+      # +v+ at least as high as it is now (see +retrigger: :louder+).
+      def louder_lane?(v, velocity)
+        v.envelopes.all? { |env|
+          !env.respond_to?(:retrigger_peak) || env.retrigger_peak(velocity) >= env.level.to_f.abs
+        }
+      end
+
+      # Level below which a released lane counts as quiet, so it can be
+      # reused and a finished source can end (-90 dB, like the master
+      # effects tails of Session; see #quiet_lanes).
+      QUIET = -90.db
+
+      # Level below which a lane's output counts as silent for idle lane
+      # skipping (-120 dB; stricter than QUIET because skipping changes the
+      # output; see #setup_idle_skipping).
       SILENCE = 1e-6
 
       # Node classes whose state can hold sound that comes back after a
@@ -398,20 +497,44 @@ module MB
       end
 
       # True if lane +idx+ should be skipped from the next buffer (see
-      # #setup_idle_skipping), given its output buffers +bufs+.
-      def start_skipping?(idx, bufs)
-        return false unless @notes[idx].idle?
-        return false unless bufs.all? { |b| silent?(b) }
+      # #setup_idle_skipping): its Notes is idle and the buffer just
+      # rendered was silent (within SILENCE).
+      def start_skipping?(idx)
+        return false unless @silent[idx]
 
         @skip_generation[idx] = @allocator.lanes[idx].generation
         true
       end
 
-      # True if every sample of +buf+ is within SILENCE of zero.
-      def silent?(buf)
-        return true if buf.equal?(@zeros)
+      # Records the level of lane +idx+'s channel buffers +bufs+ (for
+      # Notes#level), and whether the lane is quiet (QUIET; see
+      # #quiet_lanes) and silent (SILENCE; see #start_skipping?).  Quiet
+      # and the level use half the peak-to-peak range, ignoring a constant
+      # offset (e.g. a waveshaper's output for silence, which would keep a
+      # lane busy forever); silent uses the absolute peak, since skipping
+      # replaces the lane's output with zeros.
+      def measure_lane(idx, bufs)
+        ranges = bufs.map { |b| range_of(b) }
+        lo = ranges.map(&:first).min
+        hi = ranges.map(&:last).max
+        swing = ranges.map { |mn, mx| (mx - mn) * 0.5 }.max
+        idle = @notes[idx].voice_idle?
+        @peaks[idx] = swing
+        @quiet[idx] = idle && swing <= QUIET
+        @silent[idx] = idle && hi <= SILENCE && lo >= -SILENCE
+      end
+
+      # Marks lane +idx+ as ended (silent from now on).
+      def lane_ended(idx)
+        @done[idx] = @quiet[idx] = @silent[idx] = true
+        @peaks[idx] = 0.0
+      end
+
+      # The smallest and largest samples of +buf+ (magnitudes if complex).
+      def range_of(buf)
+        return [0.0, 0.0] if buf.equal?(@zeros)
         buf = buf.abs if buf.is_a?(Numo::SComplex) || buf.is_a?(Numo::DComplex)
-        buf.max <= SILENCE && buf.min >= -SILENCE
+        [buf.min.to_f, buf.max.to_f]
       end
 
       # Skips lane +idx+ for +count+ samples, reading its boundary nodes

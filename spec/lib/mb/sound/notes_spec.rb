@@ -457,7 +457,7 @@ RSpec.describe(MB::Sound::Notes) do
       r = v.hz.saw.reset(other)
       expect(r.key_sync?).to eq(false)
       expect(r.reset_input).not_to eq(nil)
-      tee = v.trigger.get_sampler.instance_variable_get(:@tee)
+      tee = v.key_trigger.get_sampler.instance_variable_get(:@tee)
       expect(tee.branches.length).to eq(2) # the rnd tone's and this branch; dropped ones are destroyed
     end
   end
@@ -621,6 +621,28 @@ RSpec.describe(MB::Sound::Notes) do
       expect(on[9600 + len - 10]).to be < 72
     end
 
+    it 'holds a from: pitch until the first note, which glides from it' do
+      events = [ev.note_on(60, time: 1/10r), ev.note_off(60, time: 2/10r), ev.note_on(72, time: 3/10r)]
+      v = notes_for(*events)
+      g = MB::Sound::Notes::Glide.new(v.stream, time: 0.05, from: MB::Sound::A4, notes: v)
+      n = 80.times.map { g.sample(480).dup }.reduce(:concatenate)
+      expect(n[0...4800].to_a.uniq).to eq([69])
+      expect(n[4800 + 1199]).to be_within(1e-3).of(64.5)
+      expect(n[4800 + 2400]).to eq(60)
+      # later notes glide as usual
+      expect(n[14400 + 1199]).to be_within(1e-3).of(66)
+
+      # Pitches, note numbers, and time 0 (holds, then jumps)
+      g = MB::Sound::Notes::Glide.new(notes_for(*events).stream, time: 0, from: 48, notes: v)
+      n = 20.times.map { g.sample(480).dup }.reduce(:concatenate)
+      expect(n[4799]).to eq(48)
+      expect(n[4800]).to eq(60)
+
+      f = notes_for(*events).hz.glide(50.ms, from: 440.hz).freq
+      expect(f.sample(480)[0]).to be_within(1e-6).of(440)
+      expect { MB::Sound::Notes::Glide.new(v.stream, time: 0.1, from: 'A4') }.to raise_error(ArgumentError, /start/)
+    end
+
     it 'reads a time node on the note-on sample' do
       n = glide_numbers(*gap, time: 0.1.constant)
       expect(n[9600 + 2399]).to be_within(1e-3).of(66)
@@ -718,6 +740,69 @@ RSpec.describe(MB::Sound::Notes) do
       g = clip_notes(clip.loop).gate
       100.times { expect(g.sample(800)).not_to eq(nil) }
       expect(g.ended?).to eq(false)
+    end
+  end
+
+  describe 'sustain pedals' do
+    let(:pedaled) {
+      [
+        ev.cc_raw(64, 127), ev.note_on(60, time: 1/100r), ev.note_off(60, time: 1/20r),
+        ev.cc_raw(64, 0, time: 1/10r), ev.cc_raw(67, 127, time: 1/10r), ev.note_on(62, 1, time: 3/20r),
+      ]
+    }
+
+    it 'holds notes with the sustain pedal and softens them with the soft pedal by default' do
+      v = notes_for(*pedaled)
+      expect(v.sustain?).to eq(true)
+      out = run({ gate: v.gate, velocity: v.velocity }, buffer: 480, buffers: 20)
+      expect(out[:gate][480...4800].to_a.uniq).to eq([1]) # held past the note-off at 2400
+      expect(out[:gate][4800...7200].to_a.uniq).to eq([0]) # released when the pedal lifts
+      expect(out[:velocity][-1]).to be_within(1e-6).of(MB::Sound::MIDI::Transform::Sustain::SOFT_VELOCITY)
+    end
+
+    it 'ignores the pedals with sustain: false' do
+      v = MB::Sound::Notes.new(MIDIListSource.new(pedaled, ev.cc(99, 0, time: 1000r)), sustain: false)
+      expect(v.sustain?).to eq(false)
+      expect(v.note_stream).to equal(v.stream)
+      out = run({ gate: v.gate, velocity: v.velocity }, buffer: 480, buffers: 20)
+      expect(out[:gate][2400...4800].to_a.uniq).to eq([0])
+      expect(out[:velocity][-1]).to eq(1)
+    end
+
+    it 'keeps #stream as given, for sources and synths, while note nodes read the pedaled stream' do
+      v = notes_for(*pedaled)
+      expect(v.stream.source).to be_a(MIDIListSource)
+      expect(MB::Sound::MIDI::Stream.for(v)).to equal(v.stream)
+      g = v.gate
+      expect(v.note_stream).not_to equal(v.stream)
+      expect(v.note_stream.source).to be_a(MB::Sound::MIDI::Transform::Sustain)
+      expect(g.stream).to equal(v.note_stream)
+    end
+
+    it 'lists the pedals in control_specs only while note nodes use them' do
+      v = notes_for(*pedaled)
+      v.mod
+      expect(v.control_specs.map(&:number)).to eq([1])
+      g = v.gate
+      expect(v.control_specs.map(&:number)).to eq([1, 64, 66, 67])
+      expect(MB::Sound::Notes.new(v.stream, sustain: false).control_specs.map(&:number)).to eq([1])
+      g.sample(480)
+    end
+
+    it 'makes the pedaled stream only for note nodes, so controllers alone never hold the input back' do
+      v = notes_for(*pedaled)
+      m = v.mod
+      50.times { m.sample(480) }
+      expect(v.stream.pending_count).to eq(0)
+
+      # A pedaled stream made now starts where the input has been read
+      expect(v.gate.stream.source.position).to eq(m.cursor)
+    end
+
+    it 'skips the transform for clip outputs' do
+      n = MB::Sound.seq(MB::Sound::C4).n8.loop.notes(transport: transport)
+      expect(n.sustain?).to eq(false)
+      expect(n.gate.stream).to equal(n.stream)
     end
   end
 

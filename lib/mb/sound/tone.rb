@@ -383,7 +383,14 @@ module MB
       def sample_rate=(sample_rate)
         super
         @period_samples = @period * @sample_rate if @period
-        @oscillator&.at_rate(sample_rate)
+        if @oscillator
+          @oscillator.at_rate(sample_rate)
+          # Oscillator#at_rate sets a plain advance of 1 / rate, dropping the
+          # centering of #noise's random advance, which raised a noisy
+          # tone's pitch by 1 + rate * blend / 2 (e.g. +5 semitones at 96
+          # kHz with noise(0.000007)).
+          @oscillator.advance = oscillator_advance
+        end
         self
       end
       alias at_rate sample_rate=
@@ -651,8 +658,9 @@ module MB
         MB::Sound::Note.new(self)
       end
 
-      # Converts this Tone to a MIDI note-on message from the midi-message gem.
-      def to_midi(velocity: 64, channel: -1)
+      # Converts this Tone to a note-on MB::Sound::MIDI::Event at the
+      # nearest note (see Note#to_midi).
+      def to_midi(velocity: 64, channel: 0)
         to_note.to_midi(velocity: velocity, channel: channel)
       end
 
@@ -694,14 +702,12 @@ module MB
       # well, but other parameters likely won't be changed by changing the
       # Tone.
       def oscillator
-        rand_adv = MB::M.interp(0, Math::PI * 2.0, @noise)
-
         @oscillator ||= MB::Sound::Oscillator.new(
           @wave_type,
           frequency: @frequency,
           phase: @phase,
-          advance: Math::PI * 2.0 / @sample_rate - 0.5 * rand_adv,
-          random_advance: rand_adv,
+          advance: oscillator_advance,
+          random_advance: oscillator_random_advance,
           range: @range,
           phase_mod: @phase_mod,
           band_limit: oscillator_band_limit,
@@ -822,6 +828,19 @@ module MB
       end
 
       private
+
+      # The oscillator's random phase advance per Hz per sample, in radians
+      # (see #noise).
+      def oscillator_random_advance
+        MB::M.interp(0, Math::PI * 2.0, @noise)
+      end
+
+      # The oscillator's base phase advance per Hz per sample, in radians:
+      # one cycle per sample rate, minus half the random advance so that
+      # #noise jitters the phase without changing the average pitch.
+      def oscillator_advance
+        Math::PI * 2.0 / @sample_rate - 0.5 * oscillator_random_advance
+      end
 
       # Warns that a call replaced an earlier conflicting setting (the last
       # call wins; see #reset, #free, #random_phase).

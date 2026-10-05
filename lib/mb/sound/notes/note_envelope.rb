@@ -24,7 +24,7 @@ module MB
         # whether +:gm+ scaling is on (see the class description).
         def initialize(notes:, gm: true, **options)
           @notes = notes
-          start = notes.stream.reader
+          start = notes.note_stream.reader
           @time = start.cursor # stream time of the next buffer (see #sample)
           start.close
           @gm = false
@@ -47,9 +47,11 @@ module MB
 
         # Returns +count+ samples, or nil once the Notes' stream has ended
         # (a non-looping clip or a MIDI file has played its last event)
-        # before this buffer and every envelope of the Notes is idle (see
-        # Notes#envelopes_idle?), so e.g. `noise * clip.env` ends with its
-        # clip like the Notes gate does.  Envelopes on looping or live
+        # before this buffer, every envelope of the Notes is idle (see
+        # Notes#envelopes_idle?), and the Notes' output is quiet (see
+        # Notes#quiet?; a Synth lane's output under -90 dB), so e.g.
+        # `noise * clip.env` ends with its clip like the Notes gate does,
+        # while an envelope into a resonant filter lets the filter ring out.  Envelopes on looping or live
         # streams never end.  Waiting for every envelope (not just this one)
         # keeps a short envelope (e.g. Notes#cutoff's filt_env) from ending
         # a voice while a longer one (the amp_env) is still releasing.
@@ -62,15 +64,34 @@ module MB
         # skipped Synth lanes don't sample their envelopes).
         def sample(count)
           count = count.round
-          return nil if idle? && stream_over? && @notes.envelopes_idle?
+          return nil if idle? && stream_over? && @notes.envelopes_idle? && @notes.quiet?
+          @start_time = @time
+          @idle_at_start = idle?
           @time += Rational(count) / @sample_rate.to_r
           super
+        end
+
+        # True if this envelope was sounding (not #idle?) at stream time
+        # +time+, the start of a buffer, whether or not it has rendered that
+        # buffer yet: its state before the buffer that starts at +time+ if
+        # it has (kept from before rendering it), else its current state.
+        # Notes::KeyTrigger asks this to tell re-strikes of a sounding
+        # voice from fresh notes regardless of which node of the graph is
+        # sampled first (see Notes#adding_at?).  An envelope that lags
+        # behind +time+ (e.g. in a skipped Synth lane) is idle, so it gives
+        # its current state too.
+        def sounding_at?(time)
+          if @start_time && @start_time <= time && time < @time
+            !@idle_at_start
+          else
+            !idle?
+          end
         end
 
         # True if the stream's last event was before the start of the next
         # buffer (never for looping and live streams).
         def stream_over?
-          last = @notes.stream.music_end
+          last = @notes.note_stream.music_end
           !last.nil? && last < @time
         end
 
