@@ -60,8 +60,9 @@ module MB::Sound
     }.filter(:lowpass, cutoff: 2400, quality: 0.7) * 0.2
 
     # Lead: a saw hard-synced to its own note, the sync ratio rising with
-    # each note's envelope (the classic sync sweep)
-    lead_env = lead.env(0.002, 0.25, 0.3, 0.15)
+    # each note's envelope (the classic sync sweep); a linear amp envelope
+    # (close to the old smoothstep one), as on the counter line
+    lead_env = lead.env(0.002, 0.25, 0.3, 0.15, curve: :linear)
     lead_synth = (lead.tone.saw.sync(ratio: 1 + lead.env(0.001, 0.35, 0.1, 0.2) * 4) * lead_env)
       .filter(:lowpass, cutoff: 5000, quality: 0.8)
       .delay(3.n16, feedback: -9.db, dry: 1, wet: -10.db) * 0.15
@@ -75,7 +76,7 @@ module MB::Sound
     arp = (lead.transpose(12).tone.triangle.skew(0.15).at(1) * lead.env(0.001, 0.08, 0, 0.05, curve: :linear)) * 0.08
 
     # Counter line: soft sync for a hollow, metallic tone
-    counter_synth = (counter.tone.triangle.softsync(ratio: 1.6) * counter.env(0.01, 0.3, 0.5, 0.2)) * 0.1
+    counter_synth = (counter.tone.triangle.softsync(ratio: 1.6) * counter.env(0.01, 0.3, 0.5, 0.2, curve: :linear)) * 0.1
 
     # Drums: a sine kick driven into the (antialiased) soft clipper, and
     # bitcrushed noise hats
