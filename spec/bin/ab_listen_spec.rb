@@ -33,6 +33,33 @@ RSpec.describe('bin/ab_listen.rb') do
     expect(run('--list', '-F', 'tw', dir).lines.grep(/^\S/).map(&:strip)).to eq(['two'])
   end
 
+  it 'skips non-audio files named directly (e.g. by a shell glob)' do
+    tone('one_before.flac', 0.5)
+    tone('one_after.flac', 0.25)
+    File.write(File.join(dir, 'logs_one_before.txt'), 'log')
+    File.write(File.join(dir, 'logs_one_after.txt'), 'log')
+
+    text = run('--list', *Dir[File.join(dir, '*')].sort)
+    expect(text.lines.grep(/^\S/).map(&:strip)).to eq(['Skipping 2 non-audio files (not flac/wav/ogg/opus/mp3/m4a/aac/aif/aiff/caf): logs_one_after.txt, logs_one_before.txt', 'one'])
+    expect(text).not_to include('A: ' + File.join(dir, 'logs'))
+  end
+
+  it 'skips pairs whose files cannot be read' do
+    File.write(tmp_path('bad_before.flac'), 'not a flac')
+    tone('bad_after.flac', 0.5)
+    tone('good_before.flac', 0.5, seconds: 0.2)
+    tone('good_after.flac', 0.5, seconds: 0.2)
+
+    text = run('--auto', '0.1', dir)
+    expect(text).to include('Skipping bad: could not read bad_before.flac', '[1/1] good')
+  end
+
+  it 'asks for a folder when run without arguments' do
+    text = `OUTPUT_TYPE=null bin/ab_listen.rb 2>&1 < /dev/null`
+    expect($?).not_to be_success
+    expect(text).to include('pass a folder of before/after renders')
+  end
+
   it 'compares two files that do not pair by name' do
     a = tone('old.flac', 0.5)
     b = tone('new.flac', 0.5)
