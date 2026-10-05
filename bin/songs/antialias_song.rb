@@ -60,10 +60,12 @@ module MB::Sound
     }.filter(:lowpass, cutoff: 2400, quality: 0.7) * 0.2
 
     # Lead: a saw hard-synced to its own note, the sync ratio rising with
-    # each note's envelope (the classic sync sweep); a linear amp envelope
-    # (close to the old smoothstep one), as on the counter line
-    lead_env = lead.env(0.002, 0.25, 0.3, 0.15, curve: :linear)
-    lead_synth = (lead.tone.saw.sync(ratio: 1 + lead.env(0.001, 0.35, 0.1, 0.2) * 4) * lead_env)
+    # each note's envelope (the classic sync sweep).  Both envelopes are
+    # smoothstep S-curves (curve: :smooth), the old envelope shape: the
+    # sync sweep's shape sets the lead's timbre, and the faster :analog
+    # sweep made it sound like a different instrument (user listening test)
+    lead_env = lead.env(0.002, 0.25, 0.3, 0.15, curve: :smooth)
+    lead_synth = (lead.tone.saw.sync(ratio: 1 + lead.env(0.001, 0.35, 0.1, 0.2, curve: :smooth) * 4) * lead_env)
       .filter(:lowpass, cutoff: 5000, quality: 0.8)
       .delay(3.n16, feedback: -9.db, dry: 1, wet: -10.db) * 0.15
 
