@@ -65,8 +65,27 @@ module MB
         def sample(count)
           count = count.round
           return nil if idle? && stream_over? && @notes.envelopes_idle? && @notes.quiet?
+          @start_time = @time
+          @idle_at_start = idle?
           @time += Rational(count) / @sample_rate.to_r
           super
+        end
+
+        # True if this envelope was sounding (not #idle?) at stream time
+        # +time+, the start of a buffer, whether or not it has rendered that
+        # buffer yet: its state before the buffer that starts at +time+ if
+        # it has (kept from before rendering it), else its current state.
+        # Notes::KeyTrigger asks this to tell re-strikes of a sounding
+        # voice from fresh notes regardless of which node of the graph is
+        # sampled first (see Notes#adding_at?).  An envelope that lags
+        # behind +time+ (e.g. in a skipped Synth lane) is idle, so it gives
+        # its current state too.
+        def sounding_at?(time)
+          if @start_time && @start_time <= time && time < @time
+            !@idle_at_start
+          else
+            !idle?
+          end
         end
 
         # True if the stream's last event was before the start of the next

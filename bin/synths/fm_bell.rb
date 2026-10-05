@@ -34,15 +34,16 @@ MB::Sound.synth_script(
 
     # Fixed ratios as pitches: transposed up by thousandths of an octave
     # ("mils"; 7 mils is about 8 cents).  The B and D ratio follows the mod
-    # wheel, so those oscillators are built on the frequency node and reset
-    # at each note themselves.
-    b_osc = (v.freq * bd_ratio * (2 ** (7.0 / 1000.0))).tone.complex_sine.at(1).reset(v.trigger).named('B')
+    # wheel, so those oscillators are built on the frequency node and
+    # key-synced by hand (v.key_trigger, like v.hz tones: a re-strike that
+    # adds energy to a ringing voice keeps their phase).
+    b_osc = (v.freq * bd_ratio * (2 ** (7.0 / 1000.0))).tone.complex_sine.at(1).reset(v.key_trigger).named('B')
     b_out = (b_osc * bd_env).named('B Out')
 
     a_osc = v.hz.transpose(0.007.oct).complex_sine.at(1).pm(b_out * ba_dc_mod).named('A')
     a_out = (a_osc * ac_env).named('A Out')
 
-    d_osc = (v.freq * bd_ratio * (2 ** (5.0 / 1000.0))).tone.complex_sine.at(1).reset(v.trigger).named('D')
+    d_osc = (v.freq * bd_ratio * (2 ** (5.0 / 1000.0))).tone.complex_sine.at(1).reset(v.key_trigger).named('D')
     d_out = (d_osc * bd_env).named('D Out')
 
     c_osc = v.hz.transpose(0.002.oct).complex_sine.at(1).pm(d_out * ba_dc_mod).named('C')
