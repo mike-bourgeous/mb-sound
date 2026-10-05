@@ -16,8 +16,10 @@ MB::Sound.synth_script { |midi|
 
   # One voice (mono, with the sustain pedal)
   midi.synth(voices: 1) { |v|
-    # Portamento (ratio of 0.1114 scales default 440Hz to 49Hz to match video)
-    porta = (v.freq * 0.1114).filter(:lowpass, cutoff: 2, quality: 0.5)
+    # Portamento (ratio of 0.1114 scales default 440Hz to 49Hz to match video).
+    # The frequency holds 440 Hz until the first note, as the old MIDI DSL's
+    # did, so the first note glides down from 49 Hz instead of up from 0.
+    porta = (v.hz.glide(0, from: 440.hz).freq * 0.1114).filter(:lowpass, cutoff: 2, quality: 0.5)
 
     # The old MIDI gate: the note's velocity while held (with short ramps)
     gate = v.env(0.01, 0, 1, 0.01, curve: :linear, sensitivity: 0..1)

@@ -284,5 +284,21 @@ RSpec.describe MB::Sound::Tone do
       expect(e.sample_rate).to eq(48001)
       expect(f.sample_rate).to eq(48001)
     end
+
+    it 'keeps the pitch of a tone with #noise after its oscillator exists' do
+      # Count rising zero crossings over one second at each rate
+      cycles = ->(tone, rate) {
+        data = Array.new(10) { tone.sample(rate / 10).dup }.reduce(&:concatenate)
+        ((data[0...-1] < 0) & (data[1..] >= 0)).count_true
+      }
+
+      t = 200.hz.noise(0.000007).at(1)
+      t.sample(10)
+      t.at_rate(96000)
+      t.sample(10)
+
+      # Was 267 (the noise's random advance no longer centered)
+      expect(cycles.(t, 96000)).to be_within(3).of(200)
+    end
   end
 end

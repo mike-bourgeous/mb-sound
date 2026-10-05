@@ -621,6 +621,28 @@ RSpec.describe(MB::Sound::Notes) do
       expect(on[9600 + len - 10]).to be < 72
     end
 
+    it 'holds a from: pitch until the first note, which glides from it' do
+      events = [ev.note_on(60, time: 1/10r), ev.note_off(60, time: 2/10r), ev.note_on(72, time: 3/10r)]
+      v = notes_for(*events)
+      g = MB::Sound::Notes::Glide.new(v.stream, time: 0.05, from: MB::Sound::A4, notes: v)
+      n = 80.times.map { g.sample(480).dup }.reduce(:concatenate)
+      expect(n[0...4800].to_a.uniq).to eq([69])
+      expect(n[4800 + 1199]).to be_within(1e-3).of(64.5)
+      expect(n[4800 + 2400]).to eq(60)
+      # later notes glide as usual
+      expect(n[14400 + 1199]).to be_within(1e-3).of(66)
+
+      # Pitches, note numbers, and time 0 (holds, then jumps)
+      g = MB::Sound::Notes::Glide.new(notes_for(*events).stream, time: 0, from: 48, notes: v)
+      n = 20.times.map { g.sample(480).dup }.reduce(:concatenate)
+      expect(n[4799]).to eq(48)
+      expect(n[4800]).to eq(60)
+
+      f = notes_for(*events).hz.glide(50.ms, from: 440.hz).freq
+      expect(f.sample(480)[0]).to be_within(1e-6).of(440)
+      expect { MB::Sound::Notes::Glide.new(v.stream, time: 0.1, from: 'A4') }.to raise_error(ArgumentError, /start/)
+    end
+
     it 'reads a time node on the note-on sample' do
       n = glide_numbers(*gap, time: 0.1.constant)
       expect(n[9600 + 2399]).to be_within(1e-3).of(66)

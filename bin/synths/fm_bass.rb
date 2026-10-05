@@ -24,8 +24,11 @@ module MB::Sound
   # they cover (see Envelope); sustain levels and velocity ranges are the
   # old ones converted the same way.
   def self.fm_bass(midi, oversample: 4)
-    s = synth(midi, voices: 4, glide_mode: :voice) { |v|
-      # Each voice glides from its own previous note
+    s = synth(midi, voices: 4) { |v|
+      # Every note glides from the last note played (polyphonic glide,
+      # Synth's default glide_mode: :last), as the old GraphVoice version
+      # did: it moved idle voices' note numbers to each new note, smoothed
+      # over 0.1 s.
       base = v.hz.glide(100.ms)
       base2x = base.transpose(1.oct)
       mod = v.cc(1, range: 1.0..2.0, name: 'FM depth')
