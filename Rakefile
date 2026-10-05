@@ -88,7 +88,6 @@ MEMCHECK_SPECS = [
   'spec/lib/mb/sound/oscillator_spec.rb',          # FastSound.osc/oscillate, FastSynth.oscillate_bl
   'spec/lib/mb/sound/band_limit_spec.rb',          # FastSynth.oscillate_bl/blit/oscillate_sync
   'spec/lib/mb/sound/shaper_spec.rb',              # FastClip.shape
-  'spec/lib/mb/sound/adsr_envelope_spec.rb',       # FastSound.adsr*
   'spec/lib/mb/sound/envelope_spec.rb',            # FastEnvelope.process
   'spec/lib/mb/sound/wavetable_spec.rb',           # FastWavetable
   'spec/lib/mb/sound/graph_node/wavetable_spec.rb',
@@ -100,7 +99,7 @@ MEMCHECK_SPECS = [
   'spec/lib/mb/sound/device_output_spec.rb',       # FastAudio::Playback
   'spec/lib/mb/sound/device_input_spec.rb',        # FastAudio::Capture
   'spec/lib/mb/sound/midi/input_spec.rb',          # MIDI::Input on JACK and RtMidi (with a JACK dummy server)
-  'spec/ext/mb/sound/fast_audio_jack_spec.rb',     # the shared JACK client (mb_jack.c), JACK MIDI
+  'spec/lib/mb/sound/midi/live_source_spec.rb',    # Playback#jack_clock (with a JACK dummy server)
   'spec/lib/mb/sound/jack_spec.rb',                # DeviceOutput/Input and MIDI on one JACK client
 ].freeze
 
