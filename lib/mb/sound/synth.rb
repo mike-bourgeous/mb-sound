@@ -251,7 +251,7 @@ module MB
           if @skipping[idx]
             case skip_lane(idx, count)
             when :ended
-              @done[idx] = true
+              @done[idx] = @quiet[idx] = true # an ended lane is silent
               next nil
             when :skipped
               any = true
@@ -261,7 +261,7 @@ module MB
 
           bufs = outs.map { |o| o.sample(count) }
           if bufs.any?(&:nil?)
-            @done[idx] = true
+            @done[idx] = @quiet[idx] = true
             next nil
           end
 
