@@ -18,7 +18,12 @@ module MB
       #   lanes for polyphonic glide) or CC 84 (portamento control) makes
       #   the next note-on glide from its note, legato or not.  It never
       #   changes a sounding note.
-      # - The first note, and notes after content jumps (chased), jump.
+      # - The first note, and notes after content jumps (chased), jump,
+      #   unless +from:+ gives a start pitch (a Pitch such as `440.hz` or
+      #   A4, or a MIDI note number): the output holds it until the first
+      #   note, which glides from there (e.g. the old portamento filters
+      #   that started at the MIDI default of 440 Hz).  With +time+ 0 the
+      #   first note jumps, so a filter after the glide does the gliding.
       #
       # +time+ is seconds (a number or length), a graph node of seconds
       # (read on the note-on's sample), or :gm: CC 5 (Notes#portamento_time,
@@ -31,7 +36,10 @@ module MB
         # True if only legato notes glide (see the class description).
         attr_reader :legato
 
-        def initialize(stream, time:, legato: false, notes: nil, sample_rate: 48000)
+        # The start pitch as given (see the class description), or nil.
+        attr_reader :from
+
+        def initialize(stream, time:, legato: false, from: nil, notes: nil, sample_rate: 48000)
           super(stream, notes: notes, sample_rate: sample_rate)
 
           @time = time
@@ -51,10 +59,16 @@ module MB
             @time_node = time.get_sampler
           end
 
+          @from = from
+          @from_note = nil
+          unless from.nil?
+            raise ArgumentError, "Glide start must be a Pitch or a note number (got #{from.inspect})" unless from.is_a?(Numeric) || from.is_a?(MB::Sound::Pitch)
+            @number = @from_note = number_of(from)
+          end
+
           @value = @number
           @gliding = false
           @had_note = false
-          @from_note = nil
           @node_type_name = "Notes Glide#{' (legato)' if @legato}"
         end
 

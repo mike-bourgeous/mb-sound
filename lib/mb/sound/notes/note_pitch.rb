@@ -158,12 +158,15 @@ module MB
         # +time+ (seconds or a length, e.g. `50.ms`; a node of seconds; or
         # :gm for CC 5 time with CC 65 on/off and CC 84), in the pitch
         # domain.  With +legato: true+ only legato notes glide; otherwise
-        # every note after the first does.  See Notes::Glide.
+        # every note after the first does.  +from:+ (a Pitch or note number)
+        # is where the pitch starts, so the first note glides from it too.
+        # See Notes::Glide.
         #
         #     play v.hz.glide(80.ms).saw * v.amp_env
         #     play v.hz.glide(:gm, legato: true).saw * v.amp_env.legato
-        def glide(time, legato: false)
-          with(glide: [time, !!legato].freeze)
+        #     play v.hz.glide(100.ms, from: 440.hz).saw * v.amp_env
+        def glide(time, legato: false, from: nil)
+          with(glide: (from.nil? ? [time, !!legato] : [time, !!legato, from]).freeze)
         end
 
         # Returns a NotePitch +semitones+ higher (an Interval or semitones).
@@ -191,8 +194,8 @@ module MB
         def number_node
           return @notes.number unless @settings[:glide]
 
-          time, legato = @settings[:glide]
-          Glide.new(@notes.note_stream, time: time, legato: legato, notes: @notes, sample_rate: @sample_rate)
+          time, legato, from = @settings[:glide]
+          Glide.new(@notes.note_stream, time: time, legato: legato, from: from, notes: @notes, sample_rate: @sample_rate)
         end
 
         # Semitone offsets for #build_freq.
