@@ -5,8 +5,9 @@ module MB
     module MIDI
       # Parses a MIDI file with the midilib gem, merging its tracks into one
       # event list (see #events, read by FileSource, which plays files), and
-      # describes its tracks and notes (#tracks, #notes, #note_stats; used by
-      # bin/midi/midi_info.rb and midi_roll.rb).
+      # describes its tracks (#tracks, used by bin/midi/midi_info.rb).  Note
+      # lists with pedal times come from the events as played
+      # (FileSource#notes, MIDI::NoteList).
       #
       # Playback goes through MIDI::FileSource (no clocks; see GH #67).  Due
       # to limitations in the midilib gem, times here use one tempo for the
@@ -86,10 +87,6 @@ module MB
 
           @events = track.events.freeze
           @count = @events.count
-
-          @notes = nil
-          @note_stats = nil
-          @note_channel_stats = []
         end
 
         # Returns information about each track in the underlying midilib
@@ -115,91 +112,16 @@ module MB
           }
         end
 
-        # Returns all notes from track number +index+ (0-based, though in
-        # multi-track files the notes usually start in track 1), regardless of
-        # what track was specified as #read_track in the constructor or whether
-        # track merging was enabled.
-        def track_notes(index)
-          raise "Track index #{index} out of range 0...#{@seq.tracks.length}" unless (0...@seq.tracks.length).cover?(index)
-
-          @track_notes ||= {}
-          @track_notes[index] ||= event_notes(@seq.tracks[index].events)
-        end
-
-        # Returns an Array containing start and end times for all notes from
-        # the #read_track (or all tracks if track merging was specified),
-        # sorted by note start time.  These times do not account for variable
-        # tempo.
-        #
-        #     {
-        #       # The note channel (0-based)
-        #       channel: 0..15,
-        #
-        #       # The note number
-        #       note: 0..127,
-        #
-        #       # The note on and note off velocities
-        #       on_velocity: 0..127,
-        #       off_velocity: 0..127,
-        #
-        #       # The time when the note begins, in seconds, from the start of the file.
-        #       on_time: Float,
-        #
-        #       # The time when the note ends, in seconds, from the start of the file.
-        #       off_time: Float,
-        #
-        #       # If the sustain pedal was held when the note was released,
-        #       # then this is the time when the sustain pedal was released
-        #       # after the note was released.
-        #       sustain_time: Float,
-        #     }
-        def notes
-          @notes ||= event_notes(@events)
-        end
-
-        # Returns the minimum, median, and maximum note number used in the
-        # +index+th track, or 64 for each if there are no notes in the track
+        # Returns the minimum, median, and maximum note number of the note-ons
+        # in the +index+th track, or 64 for each if there are no notes in the
+        # track (see MIDI::NoteList.stats).
         def track_note_stats(index)
           raise "Track index #{index} out of range 0...#{@seq.tracks.length}" unless (0...@seq.tracks.length).cover?(index)
 
           @track_note_stats ||= {}
-          @track_note_stats[index] ||= note_list_stats(track_notes(index))
-        end
-
-        # Returns the minimum, median, and maximum note number used in the
-        # #read_track, or 64 for each if there are no notes in the MIDI file.
-        #
-        # This may be useful for setting an initial scroll position of a piano
-        # roll display, for example.
-        #
-        # If +:channel+ is not nil, then only stats for notes on the given
-        # channel are returned.
-        def note_stats(channel: nil)
-          if channel
-            @note_channel_stats[channel] ||= note_list_stats(notes, channel: channel)
-          else
-            @note_stats ||= note_list_stats(notes)
-          end
-        end
-
-        # Returns an Array of channels (0-based) used in the MIDI file.
-        def channels
-          @channel_list ||= tracks.flat_map { |t| t[:event_channels] }.sort.uniq
-        end
-
-        # Returns the track information for the track having the most notes or
-        # events on the given channel, breaking ties using the highest track
-        # index.
-        #
-        # This is useful for finding the track name given a channel number, for
-        # example.  This works best on MIDI files that use a separate track for
-        # each MIDI channel.
-        def track_for_channel(channel)
-          tracks.select { |t|
-            t[:channel] == channel
-          }.max_by { |t|
-            [t[:num_notes], t[:num_events], t[:index]]
-          }
+          @track_note_stats[index] ||= NoteList.stats(
+            @seq.tracks[index].events.select { |e| e.is_a?(::MIDI::NoteOn) && e.velocity > 0 }.map(&:note)
+          )
         end
 
         # Returns true if the file has no events (in the #read_track, without
@@ -261,120 +183,6 @@ module MB
         end
 
         private
-
-        # Returns an array of all notes from the given MIDILib event list,
-        # sorted by note start time.  This probably does not account for SMPTE
-        # track offset (this is untested).
-        def event_notes(events)
-          channels = 16.times.map {
-            {
-              sustain: false,
-              active_notes: {},
-            }
-          }
-          note_list = []
-
-          events.each do |e|
-            next unless e.respond_to?(:channel)
-
-            event_time = pulse_time(e.time_from_start)
-            ch_info = channels[e.channel]
-            ch_notes = ch_info[:active_notes]
-
-            # TODO: This could share the sustain handling of MIDI::Stream#sustain
-            # (e.g. by reading a FileSource through it).
-            case e
-            when ::MIDI::NoteOn
-              # Treat repeated note on events as a note off followed by note on
-              # (Alternatives could include counting the number of note ons,
-              # and waiting for that number of note offs)
-              existing_note = ch_notes[e.note]
-              if existing_note
-                existing_note[:off_velocity] ||= existing_note[:on_velocity]
-                existing_note[:off_time] ||= event_time
-                existing_note[:sustain_time] ||= event_time
-                note_list << existing_note
-              end
-
-              ch_notes[e.note] = {
-                channel: e.channel,
-                number: e.note,
-                on_velocity: e.velocity,
-                off_velocity: nil,
-                on_time: event_time,
-                off_time: nil,
-                sustain_time: nil,
-              }
-
-            when ::MIDI::NoteOff
-              existing_note = ch_notes[e.note]
-              if existing_note
-                # Using ||= in case of repeated note off events during a sustain
-                existing_note[:off_velocity] ||= e.velocity
-                existing_note[:off_time] ||= event_time
-
-                unless ch_info[:sustain]
-                  # If the sustain pedal isn't pressed, move the note into the completed note list
-                  existing_note[:sustain_time] ||= event_time
-                  note_list << existing_note
-                  ch_notes.delete(e.note)
-                end
-              end
-
-            when ::MIDI::Controller
-              if e.controller == 64 # sustain pedal is CC 64
-                # TODO: what about half/variable pedal?
-                # TODO: what about sostenuto?
-                if e.value >= 64
-                  ch_info[:sustain] = true
-                else
-                  ch_info[:sustain] = false
-
-                  ch_notes.select! { |_, n|
-                    if n[:off_time]
-                      # If the note has an off time, it was sustained.  Release it.
-                      n[:sustain_time] = event_time
-                      note_list << n
-
-                      false
-                    else
-                      # Keep notes without an off time
-                      true
-                    end
-                  }
-                end
-              end
-            end
-          end
-
-          # If any notes weren't released at the end, set their release times
-          # to the MIDI file duration
-          channels.each do |ch_info|
-            ch_info[:active_notes].each do |n|
-              n[:off_velocity] ||= n[:on_velocity]
-              n[:off_time] ||= @duration
-              n[:sustain_time] ||= @duration
-              note_list << n
-            end
-          end
-
-          notes = note_list.sort_by! { |n| [n[:on_time], n[:channel], n[:number], n[:off_time], n[:velocity]] }
-
-          notes
-        end
-
-        # Returns min, median, and max note numbers from the given list of
-        # notes, or 64 for each value if the list is empty.  Filters to notes
-        # on the given +:channel+ (0-based) if +:channel+ is not nil.
-        def note_list_stats(notes, channel: nil)
-          numbers = notes.select { |n| channel.nil? || n[:channel] == channel }.map { |n| n[:number] }.sort
-
-          [
-            numbers[0] || 64,
-            numbers[numbers.length / 2] || 64,
-            numbers[-1] || 64,
-          ]
-        end
 
         # Calculates the time in seconds at the given number of elapsed MIDI
         # pulses (specified by the file, commonly 960 pulses per quarter note).

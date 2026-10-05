@@ -64,8 +64,7 @@ RSpec.describe(MB::Sound::MIDI::FileSource) do
     expect(src.read(t, t + 1/1000r).first).to eq(src.events[2])
   end
 
-  it 'gives the same notes as MIDIFile#notes for a file without pedals' do
-    m = MB::Sound::MIDI::MIDIFile.new('spec/test_data/c_major.mid')
+  it 'gives the same notes as #notes for a file without pedals' do
     src = MB::Sound::MIDI::FileSource.new('spec/test_data/c_major.mid')
 
     on = {}
@@ -79,7 +78,8 @@ RSpec.describe(MB::Sound::MIDI::FileSource) do
       end
     end
 
-    expected = m.notes.map { |n| [n[:channel], n[:number], n[:on_velocity], n[:on_time], n[:off_time]] }
+    expected = src.notes.map { |n| [n[:channel], n[:number], n[:on_velocity], n[:on_time], n[:off_time]] }
+    expect(expected.length).to eq(22)
     expect(notes.sort.map { |n| n.map { |v| v.is_a?(Float) ? v.round(9) : v } }).to eq(expected.sort.map { |n| n.map { |v| v.is_a?(Float) ? v.round(9) : v } })
   end
 
@@ -167,5 +167,31 @@ RSpec.describe(MB::Sound::MIDI::FileSource) do
     src = MB::Sound::MIDI::FileSource.new('spec/test_data/c2_sustain.mid', tempo_map: tempo)
     normal = MB::Sound::MIDI::FileSource.new('spec/test_data/c2_sustain.mid')
     expect(src.events.map(&:time)).to eq(normal.events.map { |e| e.time * 2 })
+  end
+
+  describe '#notes and #note_stats' do
+    it 'returns no notes and 64s for a file without notes' do
+      src = described_class.new('spec/test_data/key_signature.mid')
+      expect(src.notes).to eq([])
+      expect(described_class.new('spec/test_data/empty.mid').note_stats).to eq([64, 64, 64])
+    end
+
+    it 'lists every note in start order, with min/median/max stats' do
+      src = described_class.new('spec/test_data/all_notes.mid')
+      expect(src.notes.length).to eq(128)
+      expect(src.notes.map { |n| n[:number] }).to eq((0..127).to_a)
+      expect(src.notes[0]).to include(:channel, :on_velocity, :off_velocity, :on_time, :off_time, :sustain_time)
+      expect(src.note_stats).to eq([0, 64, 127])
+      expect(src.note_stats(channel: 5)).to eq([64, 64, 64])
+    end
+
+    it 'returns sustain pedal release times with notes, without moving the source' do
+      src = described_class.new('spec/test_data/c2_sustain.mid')
+      src.seek(0.3)
+      n = src.notes
+      expect(n.length).to eq(1)
+      expect(n[0]).to include(number: 36, on_velocity: 64, off_time: 0.5, sustain_time: 0.6875)
+      expect(src.content_position).to eq(0.3)
+    end
   end
 end

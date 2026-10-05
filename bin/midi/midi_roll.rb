@@ -36,13 +36,14 @@ MB::Sound.script(
 
   abort 'Specify a MIDI file to display (see --help)' unless filename
   abort "MIDI file #{filename.inspect} not found" unless File.readable?(filename)
-  f = MB::Sound::MIDI::MIDIFile.new(filename)
+  # Notes as played, with pedal (sustain, sostenuto) release times
+  f = MB::Sound::MIDI::FileSource.new(filename)
 
   notes = f.notes.select { |n| channel.nil? || n[:channel] == channel }.group_by { |n| n[:number] }
 
   options[:'start-time'] ||= 0.0
   options[:'end-time'] ||= options[:'start-time'] + options[:duration] if options[:duration]
-  options[:'end-time'] ||= f.duration
+  options[:'end-time'] ||= f.duration.to_f
   time_range = options[:'start-time']..options[:'end-time']
   raise "Start time #{options[:'start-time']} must be before end time #{options[:'end-time']}" if options[:'start-time'] > options[:'end-time']
 
@@ -62,7 +63,7 @@ MB::Sound.script(
   # if all notes are within range, do nothing
   # if see how many notes we can get away with scrolling down
 
-  puts "\e[1;33;44m#{f.filename} -- #{time_range}/#{f.duration.round(2)}s \e[37m(#{channel_description})\e[K\e[0m"
+  puts "\e[1;33;44m#{f.midi_file.filename} -- #{time_range}/#{f.duration.to_f.round(2)}s \e[37m(#{channel_description})\e[K\e[0m"
 
   ruler = [' '] * (cols + 1) # FIXME: why is a note sometimes going beyond the end forcing adding 1?
   ruler_step = 30

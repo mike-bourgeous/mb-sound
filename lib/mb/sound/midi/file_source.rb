@@ -110,6 +110,22 @@ module MB
           @events.find(&:note_on?)
         end
 
+        # The file's notes, each with its start, key release, and pedal
+        # release (sustain, sostenuto) times, sorted by start time (see
+        # MIDI::NoteList), from one pass of the file (no loops).  Reads a
+        # copy, so this source's position doesn't change.  Notes held down
+        # at the end end at #duration.  Used by bin/midi/midi_roll.rb.
+        def notes
+          @notes ||= NoteList.notes(FileSource.new(@midi_file, tempo_map: @tempo_map), end_time: @duration).each(&:freeze).freeze
+        end
+
+        # The minimum, median, and maximum note number of #notes (only those
+        # on 0-based +:channel+ if given), or 64 for each without notes; e.g.
+        # for the initial scroll position of a piano roll.
+        def note_stats(channel: nil)
+          NoteList.stats(notes, channel: channel)
+        end
+
         private
 
         def seek_to(time)
