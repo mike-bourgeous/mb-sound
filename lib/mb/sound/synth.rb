@@ -38,6 +38,17 @@ module MB
     # lanes reset key-synced oscillators' phases; ringing patches using
     # :add or :reuse may want `.free` oscillators.
     #
+    # :ring (alias :bell) combines them for bells and other ringing
+    # sounds: a same-note strike takes a free voice if one is free (as
+    # always); with every voice busy it reuses the quietest lane already
+    # playing that note, its envelopes adding the new strike's energy
+    # (Envelope +retrigger: :add+); with no lane playing the note it steals
+    # the quietest lane (a choke, as usual).  That is Allocator
+    # +retrigger: :quietest+, +steal: RING_STEAL+ (unless +:steal+ is
+    # given), and :add envelopes.
+    #
+    #     midi.synth(voices: 4, retrigger: :ring) { |v| ... }
+    #
     # Randomness: each lane's block runs with the root random generator
     # restarted from +seed+ + lane index (MB::Sound.with_seed), so lane
     # tones that call #rnd get different, repeatable phases.  +:seed+
@@ -78,7 +89,13 @@ module MB
       CONTROLS = [:volume, :expression, :pan].freeze
 
       # Same-note retrigger modes (see the class description).
-      RETRIGGER_MODES = [*MIDI::Allocator::RETRIGGER_MODES, :add].freeze
+      RETRIGGER_MODES = [*MIDI::Allocator::RETRIGGER_MODES, :add, :ring, :bell].freeze
+
+      # The steal chain of +retrigger: :ring+ (see the class description).
+      RING_STEAL = [:same_note, :quietest, :oldest].freeze
+
+      # Allocator retrigger modes for the Synth-only modes.
+      ALLOCATOR_RETRIGGER = { add: :reuse, ring: :quietest }.freeze
 
       # The default +:tail+: seconds of silence after every lane has ended
       # before #sample returns nil (the old MIDI file nodes' limit).
@@ -140,7 +157,7 @@ module MB
 
       # See the class description.
       def initialize(
-        source, voices: 8, spares: 2, steal: MIDI::Allocator::DEFAULT_STEAL, protect: nil, mono: nil,
+        source, voices: 8, spares: 2, steal: nil, protect: nil, mono: nil,
         priority: :last, glide_mode: :last, retrigger: :reuse, controls: [], bend_range: nil, sustain: true,
         seed: nil, tail: TAIL_SECONDS, skip_idle: true, sample_rate: 48000, &block
       )
@@ -149,7 +166,10 @@ module MB
         unless RETRIGGER_MODES.include?(retrigger)
           raise ArgumentError, "Unknown retrigger mode #{retrigger.inspect} (use #{RETRIGGER_MODES})"
         end
+        retrigger = :ring if retrigger == :bell
         @retrigger = retrigger
+        steal ||= retrigger == :ring ? RING_STEAL : MIDI::Allocator::DEFAULT_STEAL
+        add = retrigger == :add || retrigger == :ring
 
         @output_controls = Array(controls).uniq.freeze
         bad = @output_controls - CONTROLS
@@ -167,7 +187,7 @@ module MB
 
         @allocator = MIDI::Allocator.new(
           stream, voices: voices, spares: spares, steal: steal, protect: protect, mono: mono,
-          priority: priority, glide_mode: glide_mode, retrigger: retrigger == :add ? :reuse : retrigger
+          priority: priority, glide_mode: glide_mode, retrigger: ALLOCATOR_RETRIGGER.fetch(retrigger, retrigger)
         )
 
         @notes = []
@@ -179,7 +199,7 @@ module MB
           lane.idle_check = -> { v.idle? }
           lane.level_check = -> { v.level }
           lane.louder_check = ->(velocity) { louder_lane?(v, velocity) }
-          v.envelopes.each { |env| env.retrigger(:add) if env.respond_to?(:retrigger) } if retrigger == :add
+          v.envelopes.each { |env| env.retrigger(:add) if env.respond_to?(:retrigger) } if add
           @notes << v
           lane_outputs(graph, idx).map(&:get_sampler)
         }

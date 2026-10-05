@@ -209,8 +209,48 @@ RSpec.describe(MB::Sound::Synth) do
       expect(peak(l0, 0.55, 0.6)).to be > 0.3
     end
 
+    describe ':ring (alias :bell)' do
+      # 48 rings loud on lane 0, a softer 48 on lane 1 (a voice was free),
+      # then 48 again at 0.5 s with every voice busy, and 55 at 0.6 s.
+      def bells(mode, **opts)
+        events = [
+          ev.note_on(48, 1.0), ev.note_off(48, time: 5/100r),
+          ev.note_on(48, 0.3, time: 1/10r), ev.note_off(48, time: 15/100r),
+          ev.note_on(48, 0.5, time: 1/2r), ev.note_off(48, time: 55/100r),
+          ev.note_on(55, 0.5, time: 6/10r), ev.note_off(55, time: 65/100r),
+        ]
+        synth = described_class.new(source(*events), voices: 2, spares: 1, retrigger: mode, **opts) { |v|
+          v.amp_env(0.001, 3, 0, 3, curve: :linear)
+        }
+        [synth, render(synth, buffers: 80, individual: true)]
+      end
+
+      it 'reuses the quietest lane playing the note, adding energy, then steals the quietest lane' do
+        synth, (l0, l1, l2) = bells(:ring)
+        expect(synth.retrigger).to eq(:ring)
+        expect(synth.allocator.retrigger).to eq(:quietest)
+        expect(synth.allocator.steal).to eq(described_class::RING_STEAL)
+
+        # Lane 1 (the soft 48) gets the third strike and rises above its level
+        before = l1[(0.5 * 48000).round - 1]
+        expect(peak(l1, 0.5, 0.505)).to be > before
+        expect(peak(l1, 0.5, 0.505)).to be < 1
+        # Lane 0 (the loud 48) rings on until 55 steals the quietest lane
+        expect(peak(l0, 0.55, 0.6)).to be > 0.5
+        expect(peak(l2, 0.6, 0.61)).to be > 0 # 55 on the spare
+        quietest_choked = [l0, l1].count { |l| peak(l, 0.62, 0.7) == 0 }
+        expect(quietest_choked).to eq(1)
+        expect(peak(l0, 0.62, 0.7)).to be > 0 # the loud one kept ringing
+      end
+
+      it 'is the same as :bell, and takes a steal chain' do
+        expect(bells(:bell)[1].map(&:to_a)).to eq(bells(:ring)[1].map(&:to_a))
+        expect(bells(:ring, steal: :oldest)[0].allocator.steal).to eq([:oldest])
+      end
+    end
+
     it 'renders the same every time in each mode' do
-      [:reuse, :louder, :new_voice, :add].each do |mode|
+      [:reuse, :louder, :new_voice, :add, :ring].each do |mode|
         [0.1, 1].each do |vel|
           expect(ringing(vel, mode).map(&:to_a)).to eq(ringing(vel, mode).map(&:to_a))
         end

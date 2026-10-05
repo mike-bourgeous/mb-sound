@@ -336,6 +336,21 @@ RSpec.describe(MB::Sound::MIDI::Allocator) do
       expect(asked).to eq([[1, 0.2]])
     end
 
+    it 'with :quietest, restarts the quietest lane playing the note' do
+      events = [on(60, 1), off(60), on(60, 0.3), off(60), on(60, 0.6), off(60)]
+      a = alloc(*events, voices: 2, spares: 1, retrigger: :quietest)
+      expect(lanes(a)).to eq([['on60@0', 'off60@1'], ['on60@2', 'off60@3', 'on60@4', 'off60@5'], []])
+
+      # By level checks when given (lane 0 is quieter now)
+      b = alloc(*events, voices: 2, spares: 1, retrigger: :quietest)
+      b.lanes[0].level_check = -> { 0.1 }
+      b.lanes[1].level_check = -> { 0.2 }
+      expect(lanes(b)).to eq([['on60@0', 'off60@1', 'on60@4', 'off60@5'], ['on60@2', 'off60@3'], []])
+
+      # :reuse takes the newest
+      expect(lanes(alloc(*events, voices: 2, spares: 1))[1]).to eq(['on60@2', 'off60@3', 'on60@4', 'off60@5'])
+    end
+
     it 'acts like :reuse without :same_note in the steal chain' do
       events = strikes(1, 0.5, 0.2)
       expected = lanes(alloc(*events, voices: 2, spares: 1, steal: [:oldest]))
@@ -354,7 +369,7 @@ RSpec.describe(MB::Sound::MIDI::Allocator) do
 
     it 'gives the same allocation every time (deterministic)' do
       events = [on(60), on(62), off(60), on(60, 0.3), off(62), on(62, 0.9), off(60), on(60, 0.1), off(60), off(62)]
-      [:reuse, :louder, :new_voice].each do |mode|
+      [:reuse, :louder, :new_voice, :quietest].each do |mode|
         runs = Array.new(3) { lanes(alloc(*events, voices: 2, spares: 2, retrigger: mode), step: 1/200r) }
         expect(runs.uniq.length).to eq(1)
         a = alloc(*events, voices: 2, spares: 2, retrigger: mode)

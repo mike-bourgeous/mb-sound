@@ -55,6 +55,11 @@ module MB
       #   unless no other lane can be stolen), so the old note keeps
       #   ringing.  Only when no lane is free does :same_note restart the
       #   lane playing the note, as with :reuse.
+      # - :quietest - like :reuse, but when several lanes play the note
+      #   (ringing re-strikes), :same_note restarts the quietest of them
+      #   (as the :quietest policy measures) instead of the newest.  With
+      #   +steal: [:same_note, :quietest, ...]+ and envelopes that add
+      #   retriggers, this is Synth's +retrigger: :ring+ for bells.
       # Mono mode ignores +:retrigger+.
       #
       # Idle checks: Lane#idle_check (a Proc returning true when the lane's
@@ -122,7 +127,7 @@ module MB
         PRIORITIES = [:last, :low, :high].freeze
 
         # Same-note retrigger modes (see the class description).
-        RETRIGGER_MODES = [:reuse, :louder, :new_voice].freeze
+        RETRIGGER_MODES = [:reuse, :louder, :new_voice, :quietest].freeze
 
         # Polyphonic glide modes (see the class description).
         GLIDE_MODES = [:last, :voice, nil].freeze
@@ -557,7 +562,7 @@ module MB
         # lane playing the key, :same_note not in the chain, or no free
         # lane).
         def new_voice_retrigger(key, e)
-          return false if @retrigger == :reuse || !@steal.include?(:same_note)
+          return false if @retrigger == :reuse || @retrigger == :quietest || !@steal.include?(:same_note)
 
           same = same_note_voice(key)
           return false unless same
@@ -707,7 +712,8 @@ module MB
           policies.each do |policy|
             victim = case policy
                      when :same_note
-                       active.select { |v| v.key == key }.max_by(&:on_seq)
+                       same = active.select { |v| v.key == key }
+                       @retrigger == :quietest ? same.min_by { |v| [quietness(v), v.on_seq] } : same.max_by(&:on_seq)
                      when :oldest_released
                        candidates.select { |v| v.state == :released }.min_by(&:off_seq)
                      when :oldest
