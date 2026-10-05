@@ -23,9 +23,9 @@ MB::Sound.synth_script { |midi|
     # note 0 down to -44 dB at note 127
     gain = 10 ** ((48 - v.number * (92 / 127.0)) / 20)
 
-    # The voice has no envelope, so its trigger ends with a MIDI file, and
-    # ringdown keeps feeding the filter silence after that so it rings out
-    ping = v.trigger.ringdown * 25
+    # The voice has no envelope: the synth keeps its lane (and its trigger,
+    # after a MIDI file ends) going until the ping has rung out
+    ping = v.trigger * 25
 
     (ping.filter(:lowpass, cutoff: v.freq, quality: quality) * gain).softclip
   }.softclip(0.8, 0.95).oversample(3)

@@ -103,6 +103,23 @@ RSpec.describe(MB::Sound::Synth) do
       expect(ringing.lanes.map(&:state)).to eq([:choking, :sounding])
     end
 
+    it 'keeps a lane without envelopes busy until its output is quiet' do
+      events = [ev.note_on(48), ev.note_off(48, time: 1/20r), ev.note_on(52, time: 2/10r)]
+      ping = ->(q) { ->(v, _i) { v.trigger.filter(:lowpass, cutoff: v.freq, quality: q) } }
+
+      # A damped ping is quiet long before the next note, so its lane is reused
+      quick = described_class.new(source(*events), voices: 1, mono: false, spares: 1, &ping.(0.7))
+      render(quick, buffers: 25)
+      expect(quick.lanes.map(&:state)).to eq([:free, :sounding])
+
+      # A resonant ping still rings, so the next note steals it like a
+      # sounding voice (the old code freed it at the note-off)
+      ringing = described_class.new(source(*events), voices: 1, mono: false, spares: 1, &ping.(200))
+      render(ringing, buffers: 25)
+      expect(ringing.lanes.map(&:state)).to eq([:choking, :sounding])
+      expect(ringing.quiet_lanes).to eq([])
+    end
+
     it 'keeps a lane with only a gate busy while its note is held' do
       s = described_class.new(source(ev.note_on(48), ev.note_on(52, time: 1/10r)), voices: 1, mono: false, spares: 1) { |v| v.gate }
       first = s.sample_individual(480).map(&:dup)
@@ -277,6 +294,39 @@ RSpec.describe(MB::Sound::Synth) do
       end
       expect(ended_at).to be_within(1).of(21) # note-off at 4800, release 4800 samples
       expect(count).to be <= ended_at + 1
+    end
+
+    it 'lets lanes without envelopes ring out after a finite source' do
+      events = [ev.note_on(48), ev.note_off(48, time: 1/100r)]
+      mk = -> {
+        described_class.new(source(*events, last: nil), voices: 2, tail: 0) { |v|
+          v.trigger.filter(:lowpass, cutoff: v.freq, quality: 30)
+        }
+      }
+
+      s = mk.()
+      out = []
+      ended_at = nil
+      while (b = s.sample(480)) && out.length < 1000
+        out << b.dup
+        ended_at ||= out.length if s.ended?
+      end
+      data = out.reduce(:concatenate)
+
+      # The ping rings for a while after the file's last event, and the synth
+      # ends one buffer after the ring falls below -120 dB
+      last_sound = (data.abs > 1e-6).where.to_a.last
+      expect(last_sound / 48000.0).to be > 0.2
+      expect(ended_at).to eq(last_sound / 480 + 2)
+      expect(out.length).to eq(ended_at)
+
+      # Repeatable
+      again = []
+      s2 = mk.()
+      while (b = s2.sample(480)) && again.length < 1000
+        again << b.dup
+      end
+      expect(again.reduce(:concatenate)).to eq(data)
     end
 
     it 'outputs silence for the tail after every lane has ended' do

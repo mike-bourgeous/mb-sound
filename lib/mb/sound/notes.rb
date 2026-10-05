@@ -164,7 +164,16 @@ module MB
         @sample_rate = sample_rate.to_f
         @nodes = {}
         @envelopes = []
+        @quiet_check = nil
       end
+
+      # A Proc (or anything with #call) returning true once the output of
+      # the graph built on this instance has gone quiet, or nil (the
+      # default) to ignore the output.  Synth sets one per lane, so voices
+      # without envelopes (e.g. resonant filter pings) stay busy, and their
+      # gate and trigger keep going after a MIDI file ends, until they have
+      # rung out (see #idle?).
+      attr_accessor :quiet_check
 
       # The stream read by channel-wide nodes (see .control_stream).
       attr_reader :control_stream
@@ -397,13 +406,20 @@ module MB
         envelope
       end
 
-      # True when no note is held and every envelope made through this
-      # instance (see #env, #register) is idle, so a voice allocator can
-      # reuse the voice.  Held notes are known from the note nodes in use
-      # (#gate, #number, ...; see #held?), so a voice with only a gate is
-      # busy while its note is held.  True with no envelopes and no note
-      # nodes.
+      # True when no note is held, every envelope made through this
+      # instance (see #env, #register) is idle, and the #quiet_check (if
+      # any) says the output is quiet, so a voice allocator can reuse the
+      # voice.  Held notes are known from the note nodes in use (#gate,
+      # #number, ...; see #held?), so a voice with only a gate is busy
+      # while its note is held.  True with no envelopes, no note nodes, and
+      # no quiet check.
       def idle?
+        voice_idle? && (@quiet_check.nil? || !!@quiet_check.call)
+      end
+
+      # Like #idle?, without the #quiet_check: no note held and every
+      # envelope idle.
+      def voice_idle?
         !held? && envelopes_idle?
       end
 

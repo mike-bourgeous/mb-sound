@@ -23,8 +23,9 @@ module MB
     # block is called once per lane (voices + spares lanes, or one in mono
     # mode) with the lane's Notes and the lane index.  Each lane's Notes
     # tells the allocator when a released lane has gone quiet (Notes#idle?:
-    # no held note and every envelope made through +v+ idle), and its level
-    # (Notes#level) for the :quietest steal policy.
+    # no held note, every envelope made through +v+ idle, and the lane's
+    # output quiet; see #quiet_lanes), and its level (Notes#level) for the
+    # :quietest steal policy.
     #
     # Randomness: each lane's block runs with the root random generator
     # restarted from +seed+ + lane index (MB::Sound.with_seed), so lane
@@ -49,7 +50,8 @@ module MB
     #
     # Ending: #ended? is true once a finite source (a MIDI file or a
     # non-looping clip) has ended, every lane has read its last event, and
-    # every lane is idle; the script runner's ringdown then stops a synth
+    # every lane is idle (including quiet; see #quiet_lanes, so voices
+    # without envelopes ring out); the script runner's ringdown then stops a synth
     # script after a second of quiet, so effects after the synth (delays,
     # reverbs) ring out.  A lane graph that returns nil (its Notes gate or
     # trigger ends once the source has ended and the lane is idle) drops
@@ -147,8 +149,10 @@ module MB
         )
 
         @notes = []
+        @quiet = Array.new(@allocator.lanes.length, true)
         @lanes = @allocator.lanes.each_with_index.map { |lane, idx|
           v = Notes.new(lane, sample_rate: @sample_rate)
+          v.quiet_check = -> { @quiet[idx] }
           graph = MB::Sound.with_seed(@seed + idx) { block.call(v, idx) }
           lane.idle_check = -> { v.idle? }
           lane.level_check = -> { v.level }
@@ -261,7 +265,8 @@ module MB
             next nil
           end
 
-          @skipping[idx] = start_skipping?(idx, bufs) if @skippable[idx]
+          @quiet[idx] = @notes[idx].voice_idle? && bufs.all? { |b| silent?(b) }
+          @skipping[idx] = start_skipping?(idx) if @skippable[idx]
 
           any = true
           outs.length == 1 && @channels == 1 ? bufs[0] : bufs
@@ -287,6 +292,18 @@ module MB
       # The indices of the lanes being skipped right now.
       def skipped_lanes
         @skipping.each_index.select { |idx| @skipping[idx] }
+      end
+
+      # The indices of the lanes whose last rendered buffer was quiet (every
+      # channel within -120 dB) with no note held and every envelope idle
+      # (or that haven't rendered since).  A lane counts as busy for the
+      # allocator (and its Notes gate and trigger keep going after a MIDI
+      # file ends) until it is quiet, so voices without envelopes, such as
+      # resonant filter pings, ring out.  Measured once per buffer, after
+      # the lane renders, so allocation stays the same for the same events
+      # and buffer sizes.
+      def quiet_lanes
+        @quiet.each_index.select { |idx| @quiet[idx] }
       end
 
       # True once the source has ended, every lane has read its last event,
@@ -332,7 +349,8 @@ module MB
 
       private
 
-      # Level below which an idle lane's output counts as silent (-120 dB).
+      # Level below which a lane's output counts as silent (-120 dB; see
+      # #quiet_lanes and #setup_idle_skipping).
       SILENCE = 1e-6
 
       # Node classes whose state can hold sound that comes back after a
@@ -398,10 +416,10 @@ module MB
       end
 
       # True if lane +idx+ should be skipped from the next buffer (see
-      # #setup_idle_skipping), given its output buffers +bufs+.
-      def start_skipping?(idx, bufs)
+      # #setup_idle_skipping): its Notes is idle, including the quiet check
+      # of the buffer just rendered (see #quiet_lanes).
+      def start_skipping?(idx)
         return false unless @notes[idx].idle?
-        return false unless bufs.all? { |b| silent?(b) }
 
         @skip_generation[idx] = @allocator.lanes[idx].generation
         true
