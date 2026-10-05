@@ -8,12 +8,16 @@ RSpec.describe('bin/graph_profile.rb') do
     expect(text).to match(/flanger\.rb +buffer +128: +[\d.]+% of realtime \(2 outputs, 0\.5 s, profiled\)/)
 
     # GC.stat deltas: the flanger allocates objects every buffer
-    gc = text.match(/GC: (\d+) runs \((\d+) minor, (\d+) major\), ([\d.]+) ms = ([\d.]+)% of render time; ([\d.]+) objects\/buffer/)
+    gc = text.match(/GC: (\d+) runs \((\d+) minor, (\d+) major\), ([\d.]+) ms = ([\d.]+)% of render time; ([\d.]+) objects\/buffer; longest GC [\d.]+ ms/)
     expect(gc).not_to be_nil, text
     expect(gc[1].to_i).to eq(gc[2].to_i + gc[3].to_i)
     expect(gc[6].to_f).to be > 10
 
-    expect(text).to match(/longest GC [\d.]+ ms; slowest buffer doing GC work [\d.]+ ms \(\d+ buffers\), p99 of others [\d.]+ ms; buffer is 2\.67 ms/)
+    # Buffer CPU times by GC work; the groups add up to every buffer
+    groups = text.match(/buffer CPU \(ms, buffer is 2\.67\): no GC median [\d.]+ p99 [\d.]+ \((\d+)\); GC start median [\d.]+ max [\d.]+ \((\d+)\); GC steps max [\d.]+ \((\d+)\)/)
+    expect(groups).not_to be_nil, text
+    expect(groups[1..3].sum(&:to_i)).to eq((0.5 * 48000 / 128.0).ceil)
+    expect(groups[2].to_i).to be <= gc[1].to_i
 
     # Per-class self allocations
     expect(text).to match(/GraphNode::Multiplier +[\d.]+% +[\d.]+ us\/call +\d+ calls +[\d.]+ obj\/call/)

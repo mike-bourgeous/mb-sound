@@ -17,9 +17,11 @@
 # buffers (GC runs, minor/major, GC time as a share of the render's CPU
 # time, objects allocated per buffer), the longest single GC
 # (GC::Profiler's GC_TIME, marking plus its lazy sweep steps, so an upper
-# bound on one pause), the slowest buffer that did GC work (a GC started,
-# or incremental marking or lazy sweeping was under way) against the 99th
-# percentile of the other buffers (thread CPU time), and why GCs ran
+# bound on one pause), thread CPU time per buffer for buffers without GC
+# work (median, 99th percentile), buffers in which a GC started (median,
+# max; the difference from the no-GC median is about the pause), and
+# buffers that only ran incremental marking or lazy sweep steps (max),
+# and why GCs ran
 # (minor:newobj = object slots ran out, minor:malloc = malloc'd bytes such
 # as Numo data passed a limit, major:oldgen/nofree/oldmalloc/...).  The run
 # starts after a warm-up (at least 12000 samples, for YJIT) and a GC.start,
@@ -138,7 +140,7 @@ end
 # CPU time per buffer to compare buffers that did GC work (a GC started, or
 # incremental marking or lazy sweeping was under way) with the others.
 class GCStats
-  KEYS = [:count, :minor_gc_count, :major_gc_count, :total_allocated_objects, :time].freeze
+  KEYS = [:count, :minor_gc_count, :major_gc_count, :total_allocated_objects, :time, :old_objects, :heap_live_slots].freeze
 
   attr_reader :buffer_times, :buffer_gcs
 
@@ -190,26 +192,34 @@ class GCStats
     @gc_times.max || 0.0
   end
 
-  # [max CPU time of buffers that did GC work, p99 of the others, count of GC buffers]
-  def buffer_summary
-    with_gc = []
-    without = []
+  # CPU times of buffers in which a GC started, buffers that only did
+  # incremental marking or lazy sweeping, and buffers without GC work.
+  def buffer_groups
+    groups = { start: [], step: [], none: [] }
     @buffer_times.each_with_index do |t, i|
-      (@buffer_gcs[i] > 0 ? with_gc : without) << t
+      groups[[:none, :step, :start][@buffer_gcs[i]]] << t
     end
-    without.sort!
-    p99 = without.empty? ? 0.0 : without[(without.size * 0.99).floor.clamp(0, without.size - 1)]
-    [with_gc.max || 0.0, p99, with_gc.size]
+    groups.transform_values(&:sort)
+  end
+
+  def self.percentile(sorted, fraction)
+    return 0.0 if sorted.empty?
+
+    sorted[(sorted.size * fraction).floor.clamp(0, sorted.size - 1)]
   end
 
   def report(elapsed, buffer_seconds)
-    gc_max, p99, gc_buffers = buffer_summary
+    g = buffer_groups
+    pc = ->(list, f) { GCStats.percentile(list, f) * 1000 }
     lines = []
-    lines << format('    GC: %d runs (%d minor, %d major), %.1f ms = %.2f%% of render time; %.1f objects/buffer',
+    lines << format('    GC: %d runs (%d minor, %d major), %.1f ms = %.2f%% of render time; %.1f objects/buffer; longest GC %.2f ms',
       delta(:count), delta(:minor_gc_count), delta(:major_gc_count),
-      gc_seconds * 1000, 100 * gc_seconds / elapsed, allocations_per_buffer)
-    lines << format('    longest GC %.2f ms; slowest buffer doing GC work %.2f ms (%d buffers), p99 of others %.2f ms; buffer is %.2f ms',
-      longest_gc * 1000, gc_max * 1000, gc_buffers, p99 * 1000, buffer_seconds * 1000)
+      gc_seconds * 1000, 100 * gc_seconds / elapsed, allocations_per_buffer, longest_gc * 1000)
+    lines << format('    buffer CPU (ms, buffer is %.2f): no GC median %.2f p99 %.2f (%d); GC start median %.2f max %.2f (%d); GC steps max %.2f (%d)',
+      buffer_seconds * 1000, pc.(g[:none], 0.5), pc.(g[:none], 0.99), g[:none].size,
+      pc.(g[:start], 0.5), pc.(g[:start], 1), g[:start].size, pc.(g[:step], 1), g[:step].size)
+    lines << format('    heap: old objects %+d, live slots %+d (growth means retained objects, which lead to major GCs)',
+      delta(:old_objects), delta(:heap_live_slots))
     lines << "    GC causes: #{@reasons.sort.map { |r, c| "#{r} #{c}" }.join(', ')}" unless @reasons.empty?
     lines
   end
@@ -358,7 +368,7 @@ MB::Sound.script(
       times[i] = Process.clock_gettime(Process::CLOCK_THREAD_CPUTIME_ID) - b0
       # A buffer did GC work if a GC started or an incremental mark or lazy
       # sweep was running at either end
-      gcs[i] = 1 if busy || GC.count != count0 || GC.latest_gc_info(:state) != :none
+      gcs[i] = GC.count != count0 ? 2 : (busy || GC.latest_gc_info(:state) != :none) ? 1 : 0
       if ended
         done = i
         break
