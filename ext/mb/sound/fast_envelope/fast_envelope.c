@@ -204,16 +204,25 @@ static double env_peak(double v, double low, double high, int db)
 	return low + (high - low) * v;
 }
 
+// How far a retrigger with ENV_ADD may rise above its own velocity peak:
+// sqrt(2), two equal strikes summed in energy (MB::Sound::Envelope::ADD_LIMIT).
+#define ENV_ADD_LIMIT 1.4142135623730951
+
 // The peak of a note that starts at level +y+ with velocity peak +p+ when
-// the ENV_ADD flag is set: the energy sum sqrt(y^2 + p^2), at most the
-// larger of the loudest velocity's peak (the larger of +low+ and +high+)
-// and the current level, so a retrigger never attacks downward and never
-// goes past a full-velocity note (unless it was already above one).
+// the ENV_ADD flag is set: the energy sum sqrt(y^2 + p^2), at most
+// ENV_ADD_LIMIT * p and the loudest velocity's peak (the larger of |low|
+// and |high|), but never below the current level.  So a retrigger never
+// attacks downward, and a roll of equal strikes levels off at sqrt(2)
+// times one strike's peak (+3 dB) from the second strike on.
 static double env_add_peak(double y, double p, double low, double high)
 {
 	double a = fabs(y);
 	double sum = sqrt(a * a + p * p);
-	double cap = fabs(low) > fabs(high) ? fabs(low) : fabs(high);
+	double vmax = fabs(low) > fabs(high) ? fabs(low) : fabs(high);
+	double cap = p * ENV_ADD_LIMIT;
+	if (cap > vmax) {
+		cap = vmax;
+	}
 	if (a > cap) {
 		cap = a;
 	}

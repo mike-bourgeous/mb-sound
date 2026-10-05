@@ -204,7 +204,7 @@ RSpec.describe(MB::Sound::Synth) do
 
       l0, l1, l2 = ringing(0.1, :add)
       before = l1[(0.5 * 48000).round - 1]
-      expect(peak(l1, 0.5, 0.505)).to be > before
+      expect(peak(l1, 0.5, 0.505)).to be >= before # never drops (+3 dB over 0.1's peak is below the ring)
       expect(peak(l2, 0, 0.7)).to eq(0)
       expect(peak(l0, 0.55, 0.6)).to be > 0.3
     end
@@ -249,8 +249,20 @@ RSpec.describe(MB::Sound::Synth) do
       end
     end
 
+    describe ':string' do
+      it 'is :add: lanes reused per key, envelopes adding' do
+        seen = []
+        s = described_class.new(source, voices: 2, retrigger: :string) { |v| (seen << v.amp_env).last }
+        expect(s.retrigger).to eq(:string)
+        expect(s.allocator.retrigger).to eq(:reuse)
+        expect(s.allocator.steal).to eq(MB::Sound::MIDI::Allocator::DEFAULT_STEAL)
+        expect(seen.map(&:retrigger)).to all(eq(:add))
+        expect(ringing(0.5, :string).map(&:to_a)).to eq(ringing(0.5, :add).map(&:to_a))
+      end
+    end
+
     it 'renders the same every time in each mode' do
-      [:reuse, :louder, :new_voice, :add, :ring].each do |mode|
+      [:reuse, :louder, :new_voice, :add, :ring, :string].each do |mode|
         [0.1, 1].each do |vel|
           expect(ringing(vel, mode).map(&:to_a)).to eq(ringing(vel, mode).map(&:to_a))
         end

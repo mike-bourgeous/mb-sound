@@ -577,11 +577,45 @@ RSpec.describe(MB::Sound::Envelope) do
     end
 
     it 'with :add, attacks to the energy sum of the current level and the new peak' do
-      data = strikes(0.2, :add)
+      data = strikes(0.8, :add)
       level = data[499]
-      expect(data[500]).to be_within(1e-6).of(Math.sqrt(level ** 2 + 0.2 ** 2))
-      expect(data[500]).to be > level
+      expect(data[500]).to be_within(1e-6).of(Math.sqrt(level ** 2 + 0.8 ** 2))
       expect(data[501]).to be < data[500] # the decay continues from the new peak
+    end
+
+    it 'with :add, rises at most sqrt(2) times the new peak, and never drops' do
+      data = strikes(0.4, :add) # sum 0.64 > 0.4 * sqrt(2)
+      expect(data[500]).to be_within(1e-6).of(0.4 * Math.sqrt(2))
+
+      data = strikes(0.2, :add) # 0.2 * sqrt(2) is below the current level
+      expect(data[500]).to be_within(1e-6).of(data[499])
+    end
+
+    it 'with :add, stays bounded through a roll of 200 strikes 10 ms apart, then decays normally' do
+      decay = 4800 # samples
+      [1.0, 0.5].each do |vel|
+        n = 200 * 480 + 2 * decay
+        trigger = Numo::SFloat.zeros(n)
+        200.times do |i| trigger[i * 480] = 1 end
+        env = described_class.new(
+          attack: 0, decay: decay.samples, sustain: 0, release: 0, curve: 30, hold: false,
+          trigger: array_node_class.new(trigger), velocity: vel, retrigger: :add
+        )
+        data = collect(env, n, buffer: 480)
+        bound = [vel * Math.sqrt(2), 1.0].min
+        expect(data.max).to be <= bound + 1e-6
+        expect(data[480...200 * 480].min).to be > 0.5 * vel # the roll keeps it up
+
+        # After the last strike, the usual decay from the bounded peak
+        last = 199 * 480
+        top = data[last]
+        expect(top).to be_between(vel, bound + 1e-6)
+        expect(data[last + decay]).to eq(0)
+        single = described_class.new(attack: 0, decay: decay.samples, sustain: 0, release: 0, curve: 30, hold: false,
+                                     trigger: array_node_class.new(pulses(decay + 10, 0)), velocity: 1)
+        ref = single.sample(decay + 10)
+        expect((data[last...(last + decay)] - ref[0...decay] * top).abs.max).to be < 1e-5
+      end
     end
 
     it 'with :add, never goes past the loudest velocity peak' do

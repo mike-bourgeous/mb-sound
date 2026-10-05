@@ -48,10 +48,15 @@ module MB
     # :restart (the default) it attacks to its own velocity's peak, even if
     # that is lower than the current level (a ringing note struck softly
     # drops to the softer note's peak).  With :add it attacks to the energy
-    # sum sqrt(level² + peak²), at most the larger of the loudest velocity's
-    # peak and the current level, so a retrigger never attacks downward or
-    # goes past a full-velocity note; the decay continues from there.  From
-    # silence both modes are the same.  (Synth voices reused for a repeated
+    # sum sqrt(level² + peak²) (strikes adding with unrelated phases), but
+    # no higher than sqrt(2) × its own peak (ADD_LIMIT, +3 dB) or the
+    # loudest velocity's peak, and never lower than the current level; the
+    # decay continues from there.  So soft re-strikes of a ringing note lift
+    # it a little and never drop it, and however many strikes come (a roll,
+    # a trill, a file hammering one key) the level stays within +3 dB of
+    # one strike: a roll of equal strikes levels off at the second strike,
+    # as a struck string or bar can't ring much harder than one blow of
+    # the same force drives it.  From silence both modes are the same.  (Synth voices reused for a repeated
     # note also reset key-synced oscillators' phases; ringing patches that
     # use :add usually want `.free` oscillators.)
     #
@@ -158,6 +163,11 @@ module MB
       # level to the new note's velocity peak; :add attacks to the energy
       # sum of the current level and that peak.
       RETRIGGER_MODES = [:restart, :add].freeze
+
+      # How far an :add retrigger may rise above its own velocity peak
+      # (sqrt(2): two equal strikes summed in energy, +3 dB; the C
+      # ENV_ADD_LIMIT).
+      ADD_LIMIT = 1.4142135623730951
 
       # Remaining curvature below which a segment is planned as a line (the
       # C ENV_LINEAR_LIMIT).
@@ -851,7 +861,9 @@ module MB
       def self.add_peak(y, p, low, high)
         a = y.abs
         sum = Math.sqrt(a * a + p * p)
-        cap = low.abs > high.abs ? low.abs : high.abs
+        vmax = low.abs > high.abs ? low.abs : high.abs
+        cap = p * ADD_LIMIT
+        cap = vmax if cap > vmax
         cap = a if a > cap
         sum > cap ? cap : sum
       end

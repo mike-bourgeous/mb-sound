@@ -38,8 +38,13 @@ module MB
     # lanes reset key-synced oscillators' phases; ringing patches using
     # :add or :reuse may want `.free` oscillators.
     #
-    # :ring (alias :bell) combines them for bells and other ringing
-    # sounds: a same-note strike takes a free voice if one is free (as
+    # Presets for ringing sounds (RETRIGGER_PRESETS):
+    # - :string (piano, e-piano, plucked or struck strings) is :add under
+    #   an instrument name: one lane per key, re-struck in place, its
+    #   envelopes adding the strike's energy.  A re-struck string keeps its
+    #   phase, so string patches want `.free` oscillators (key-synced
+    #   ones jump to phase 0 at each strike).
+    # - :ring (alias :bell) for bells and other ringing sounds: a same-note strike takes a free voice if one is free (as
     # always); with every voice busy it reuses the quietest lane already
     # playing that note, its envelopes adding the new strike's energy
     # (Envelope +retrigger: :add+); with no lane playing the note it steals
@@ -48,6 +53,12 @@ module MB
     # given), and :add envelopes.
     #
     #     midi.synth(voices: 4, retrigger: :ring) { |v| ... }
+    #     midi.synth(voices: 8, retrigger: :string) { |v| v.hz.free.sine * v.amp_env(0.002, 2, 0, 0.3) }
+    #
+    # With :add envelopes (:add, :string, :ring) a lane never rises above
+    # sqrt(2) times one strike's peak however fast it is struck (see
+    # Envelope's +retrigger: :add+); :ring can still stack up to +voices+
+    # lanes of one note, since a strike takes a free voice first.
     #
     # Randomness: each lane's block runs with the root random generator
     # restarted from +seed+ + lane index (MB::Sound.with_seed), so lane
@@ -89,7 +100,11 @@ module MB
       CONTROLS = [:volume, :expression, :pan].freeze
 
       # Same-note retrigger modes (see the class description).
-      RETRIGGER_MODES = [*MIDI::Allocator::RETRIGGER_MODES, :add, :ring, :bell].freeze
+      # Named retrigger presets for ringing sounds and the modes they mean
+      # (see the class description).
+      RETRIGGER_PRESETS = { string: :add, ring: :ring, bell: :ring }.freeze
+
+      RETRIGGER_MODES = [*MIDI::Allocator::RETRIGGER_MODES, :add, *RETRIGGER_PRESETS.keys].freeze
 
       # The steal chain of +retrigger: :ring+ (see the class description).
       RING_STEAL = [:same_note, :quietest, :oldest].freeze
@@ -166,8 +181,8 @@ module MB
         unless RETRIGGER_MODES.include?(retrigger)
           raise ArgumentError, "Unknown retrigger mode #{retrigger.inspect} (use #{RETRIGGER_MODES})"
         end
-        retrigger = :ring if retrigger == :bell
         @retrigger = retrigger
+        retrigger = RETRIGGER_PRESETS.fetch(retrigger, retrigger)
         steal ||= retrigger == :ring ? RING_STEAL : MIDI::Allocator::DEFAULT_STEAL
         add = retrigger == :add || retrigger == :ring
 
