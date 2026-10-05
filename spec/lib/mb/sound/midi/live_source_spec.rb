@@ -373,8 +373,16 @@ RSpec.describe(MB::Sound::MIDI::LiveSource, :aggregate_failures) do
 
     # Plays like a Session (read MIDI for a buffer, then write the buffer)
     # with a click on the sample of each note-on, while another JACK client
-    # sends notes; returns the clicks' captured indices by note number and
-    # the source.
+    # sends notes; returns the clicks' captured indices by note number, the
+    # reference input's raw messages, the output, the source, and for each
+    # note-on read, [note, event time, the read's start, the output's
+    # #jack_clock just before and just after the read].
+    #
+    # The dummy JACK server skips cycles when it wakes up late (e.g. under
+    # the full suite's load): its frame clock then moves a period or more
+    # ahead of the audio played (frame_time - frames_played grows by 256).
+    # That is a server xrun, not a placement error, so expectations use the
+    # clock of the read that placed each event rather than one taken later.
     def play_notes(timing:, notes: 12, buffer_size: 512)
       out = open(MB::Sound::DeviceOutput.new(channels: 1, latency: 0.2, adaptive: false, capture: 48000 * 4))
       keyboard = open(MB::Sound::FastMIDI::Output.new(:jack, "#{ENV['JACK_CLIENT_NAME']}_keys", nil, 'out'))
@@ -393,12 +401,17 @@ RSpec.describe(MB::Sound::MIDI::LiveSource, :aggregate_failures) do
       end
 
       clicks = {}
+      reads = []
       n = 0
       while sender.alive?
         from = Rational(n * buffer_size, 48000)
         buf = Numo::SFloat.zeros(buffer_size)
-        src.read(from, from + Rational(buffer_size, 48000)).each do |e|
+        before = out.jack_clock
+        events = src.read(from, from + Rational(buffer_size, 48000))
+        after = out.jack_clock
+        events.each do |e|
           next unless e.note_on?
+          reads << [e.note, e.time, from, [before, after]]
           offset = (e.time - from) * 48000
           expect(offset.denominator).to eq(1) if timing == :exact
           buf[offset.floor] = e.note
@@ -412,32 +425,80 @@ RSpec.describe(MB::Sound::MIDI::LiveSource, :aggregate_failures) do
       played = out.captured[0]
       played.to_a.each_with_index { |v, i| clicks[v.round] = i if v != 0 }
 
-      [clicks, reference.read_raw, out, src]
+      [clicks, reference.read_raw, out, src, reads]
+    end
+
+    # Runs #play_notes until the machine kept up (up to three times; the
+    # last attempt is checked whatever happened), since these depend on
+    # scheduling, not on the code under test:
+    #
+    # - JACK delivers every note once.  When a client's process thread
+    #   (non-realtime here) doesn't finish in time, the dummy server's
+    #   cycle fails ("JackAudioDriver::ProcessGraphAsyncMaster: Process
+    #   error" in its log) and a MIDI message can be lost or repeated for
+    #   every reader; the reference input shows what JACK delivered.
+    # - No underrun after the first write, and no late events: both mean
+    #   this thread was starved for longer than the output's queue.
+    def play_delivered_notes(timing:)
+      3.times do |attempt|
+        result = play_notes(timing: timing)
+        _clicks, raw, out, src = result
+        notes = raw.map { |_frame, bytes| bytes.bytes[1] }
+        kept_up = notes == (40..51).to_a && out.underruns == 1 && src.late_events == 0
+        return result if kept_up || attempt == 2
+
+        warn "\nJACK delivered notes #{notes}, #{out.underruns} underruns, #{src.late_events} late " \
+          "(attempt #{attempt + 1}); retrying"
+        @opened.reverse_each(&:close)
+        @opened.clear
+        MB::Sound::Jack.close
+      end
+    end
+
+    # The output sample (the device's clock) that reaches the ports at JACK
+    # +frame+ plus +latency+, by +clock+ (DeviceOutput#jack_clock).
+    def played_at(frame, clock, latency)
+      delta = ((frame - clock[:frame_time] + 0x8000_0000) & 0xffff_ffff) - 0x8000_0000
+      clock[:frames_played] + delta + latency
     end
 
     it 'places JACK MIDI on the output sample that plays at its frame plus the latency' do
-      clicks, raw, out, src = play_notes(timing: :exact)
+      clicks, raw, out, src, reads = play_delivered_notes(timing: :exact)
       expect(src.frame_exact?).to eq(true)
       expect(out.underruns).to eq(1) # only before the first write
       expect(raw.length).to eq(12)
+      expect(reads.map(&:first)).to eq((40..51).to_a)
       expect(clicks.length).to eq(12)
       expect(src.late_events).to eq(0)
 
       latency = src.latency * 48000
       expect(latency).to eq(out.queue_limit + 256 + 512)
 
-      clock = out.jack_clock
+      # Each note plays on the captured sample (the device's clock) that
+      # reached the ports at its JACK frame plus the latency, by the clock
+      # of the read that placed it (see #play_notes about skipped cycles;
+      # when the server skipped a cycle during the read itself, the source
+      # may have seen the clock from before or after it)
+      clocks = reads.to_h { |note, _time, _from, pair| [note, pair] }
       expected = raw.to_h { |frame, bytes|
-        delta = ((frame - clock[:frame_time] + 0x8000_0000) & 0xffff_ffff) - 0x8000_0000
-        [bytes.bytes[1], clock[:frames_played] + delta + latency]
+        note = bytes.bytes[1]
+        options = clocks.fetch(note).map { |clock| played_at(frame, clock, latency) }.uniq
+        [note, options.include?(clicks[note]) ? clicks[note] : options]
       }
       expect(clicks).to eq(expected)
     end
 
     it 'snaps JACK MIDI to buffers with :asap timing' do
-      clicks, _raw, _out, src = play_notes(timing: :asap)
-      expect(clicks.length).to eq(12)
+      clicks, _raw, out, src, reads = play_delivered_notes(timing: :asap)
       expect(src.latency).to be_nil
+      expect(out.underruns).to eq(1) # only before the first write
+
+      # Every note-on starts the buffer of the read that got it.  Notes
+      # arriving between the same two reads (when a busy machine delays a
+      # read) share that sample, so the latest one's click hides the others.
+      expect(reads.map(&:first)).to eq((40..51).to_a)
+      expect(reads.map { |_note, time, from, _clock| time - from }.uniq).to eq([0])
+      expect(clicks.keys).to eq(reads.chunk_while { |a, b| a[2] == b[2] }.map { |group| group.last[0] })
 
       # Every click is on a buffer boundary of the written audio (the first
       # write started at frame 0 of the queue, but the captured audio has
