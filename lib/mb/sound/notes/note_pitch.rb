@@ -192,7 +192,7 @@ module MB
           return @notes.number unless @settings[:glide]
 
           time, legato = @settings[:glide]
-          Glide.new(@notes.stream, time: time, legato: legato, notes: @notes, sample_rate: @sample_rate)
+          Glide.new(@notes.note_stream, time: time, legato: legato, notes: @notes, sample_rate: @sample_rate)
         end
 
         # Semitone offsets for #build_freq.

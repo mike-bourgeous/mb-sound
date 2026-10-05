@@ -24,7 +24,7 @@ module MB
         # whether +:gm+ scaling is on (see the class description).
         def initialize(notes:, gm: true, **options)
           @notes = notes
-          start = notes.stream.reader
+          start = notes.note_stream.reader
           @time = start.cursor # stream time of the next buffer (see #sample)
           start.close
           @gm = false
@@ -70,7 +70,7 @@ module MB
         # True if the stream's last event was before the start of the next
         # buffer (never for looping and live streams).
         def stream_over?
-          last = @notes.stream.music_end
+          last = @notes.note_stream.music_end
           !last.nil? && last < @time
         end
 

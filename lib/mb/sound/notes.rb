@@ -26,6 +26,10 @@ module MB
     # (seeks, timeline jumps, clip swaps), held values jump to the note at
     # the new position (see MIDI::Source#chase).
     #
+    # Pedals: note nodes apply the sustain, sostenuto, and soft pedals
+    # (MIDI::Stream#sustain; see #note_stream) unless +sustain: false+, as
+    # MB::Sound::Synth does.
+    #
     # Examples:
     #     v = MB::Sound::Notes.new(seq(C3, E3, G3).n8.loop)
     #     play v.hz.saw * v.gate
@@ -149,7 +153,11 @@ module MB
         end
       end
 
-      # The MIDI::Stream this instance reads.
+      # The MIDI::Stream this instance was given (before the sustain pedal
+      # transform; see #note_stream).  Controllers read it (or the stream
+      # it was split from; see .control_stream), synths built from this
+      # instance read it (see #to_midi_stream), and its #source is the
+      # MIDI source (e.g. a LiveSource or FileSource).
       attr_reader :stream
 
       # The sample rate of nodes made from now on (graphs change it as
@@ -157,9 +165,14 @@ module MB
       attr_reader :sample_rate
 
       # Creates a Notes instance reading +source+ (see the class
-      # description).
-      def initialize(source, sample_rate: 48000)
+      # description).  Note nodes read it through the sustain, sostenuto,
+      # and soft pedals (MIDI::Stream#sustain) unless +sustain: false+, as
+      # MB::Sound::Synth does; Synth lanes (already pedaled) and clip
+      # outputs (clips have no pedals) pass false.
+      def initialize(source, sustain: true, sample_rate: 48000)
         @stream = MIDI::Stream.for(source)
+        @sustain = !!sustain
+        @note_stream = nil
         @control_stream = Notes.control_stream(@stream)
         @sample_rate = sample_rate.to_f
         @nodes = {}
@@ -178,34 +191,59 @@ module MB
       # The stream read by channel-wide nodes (see .control_stream).
       attr_reader :control_stream
 
+      # True if note nodes apply the sustain pedals (see #initialize).
+      def sustain?
+        @sustain
+      end
+
+      # The stream note nodes read: #stream through the sustain pedal
+      # transform (MIDI::Stream#sustain) with +sustain: true+, else #stream.
+      #
+      # The pedaled stream is made when a note node first needs it, and
+      # held only by the nodes reading it (this instance keeps a weak
+      # reference), so a Notes used only for controllers or as a synth's
+      # source (e.g. the console's `midi`) never leaves an unread transform
+      # holding the input's events back (late readers of a stream start at
+      # its slowest reader).
+      def note_stream
+        return @stream unless @sustain
+
+        s = live(@note_stream)
+        return s if s
+
+        s = @stream.sustain
+        @note_stream = WeakRef.new(s)
+        s
+      end
+
       # 1 while any note is held, else 0 (a Notes::Gate).
       def gate
-        memo(:gate) { Gate.new(@stream, notes: self, sample_rate: @sample_rate) }
+        memo(:gate) { Gate.new(note_stream, notes: self, sample_rate: @sample_rate) }
       end
 
       # A single-sample impulse at every note-on, valued at its velocity
       # (0..1; a Notes::Trigger).  Inputs that take triggers (Tone#reset,
       # Envelope +:trigger+, #smooth +reset:+) react to its rising edges.
       def trigger
-        memo(:trigger) { Trigger.new(@stream, notes: self, sample_rate: @sample_rate) }
+        memo(:trigger) { Trigger.new(note_stream, notes: self, sample_rate: @sample_rate) }
       end
 
       # The note number of the newest held note, held after release (a
       # Notes::Number), starting at the source's first note (or C4).
       def number
-        memo(:number) { Number.new(@stream, notes: self, sample_rate: @sample_rate) }
+        memo(:number) { Number.new(note_stream, notes: self, sample_rate: @sample_rate) }
       end
       alias note_number number
 
       # The velocity (0..1) of the latest note-on (a Notes::Velocity).
       def velocity
-        memo(:velocity) { Velocity.new(@stream, notes: self, sample_rate: @sample_rate) }
+        memo(:velocity) { Velocity.new(note_stream, notes: self, sample_rate: @sample_rate) }
       end
 
       # The release velocity (0..1) of the latest note-off (a Notes::Lift),
       # 64/127 until the first one.
       def lift
-        memo(:lift) { Lift.new(@stream, notes: self, sample_rate: @sample_rate) }
+        memo(:lift) { Lift.new(note_stream, notes: self, sample_rate: @sample_rate) }
       end
       alias release_velocity lift
 
@@ -214,7 +252,7 @@ module MB
       # Envelopes from this instance release over Envelope::CHOKE_TIME at
       # each one.
       def choke
-        memo(:choke) { Choke.new(@stream, notes: self, sample_rate: @sample_rate) }
+        memo(:choke) { Choke.new(note_stream, notes: self, sample_rate: @sample_rate) }
       end
 
       # The frequency in Hz of #number plus pitch bend (MIDI::Event#bend_semitones,
@@ -285,11 +323,15 @@ module MB
       end
 
       # The MIDI::ControlSpecs of the controller nodes in use on this
-      # instance's control stream, sorted by controller number (see
+      # instance's control stream, plus the sustain pedals
+      # (MIDI::Transform::Sustain::CONTROL_SPECS) while note nodes read
+      # through them (see #note_stream), sorted by controller number (see
       # #controls).
       def control_specs
         cache = SHARED[@control_stream] || {}
-        cache.values.filter_map { |ref| live(ref) }.grep(Control).map(&:spec).uniq.sort_by { |s| [s.number, s.name] }
+        specs = cache.values.filter_map { |ref| live(ref) }.grep(Control).map(&:spec)
+        specs += MIDI::Transform::Sustain::CONTROL_SPECS if @sustain && live(@note_stream)
+        specs.uniq.sort_by { |s| [s.number, s.name] }
       end
 
       # Channel pressure (aftertouch), 0..1 (a shared Notes::Pressure).
@@ -390,7 +432,7 @@ module MB
 
         lfo = MB::Sound::Tone.new(frequency: rate, sample_rate: @sample_rate).lfo.reset(trigger)
         parts = [lfo, depth]
-        parts << FadeIn.new(@stream, delay: delay, notes: self, sample_rate: @sample_rate) unless delay == 0
+        parts << FadeIn.new(note_stream, delay: delay, notes: self, sample_rate: @sample_rate) unless delay == 0
         GraphNode::Multiplier.new(parts, sample_rate: @sample_rate).named('vibrato')
       end
 
@@ -449,7 +491,7 @@ module MB
       # True once the stream's source has ended and every reader has read
       # every event.
       def ended?
-        @stream.ended?
+        (live(@note_stream) || @stream).ended?
       end
 
       def to_s
@@ -509,7 +551,7 @@ module MB
       def envelope_inputs
         return { gate: gate, trigger: trigger, velocity: velocity, choke: choke } unless Notes.fast_paths
 
-        node = memo([:envelope_inputs, @envelopes.length]) { EnvelopeInputs.new(@stream, notes: self, sample_rate: @sample_rate) }
+        node = memo([:envelope_inputs, @envelopes.length]) { EnvelopeInputs.new(note_stream, notes: self, sample_rate: @sample_rate) }
         { gate: node, trigger: node.trigger, velocity: node.velocity, choke: node.choke }
       end
 

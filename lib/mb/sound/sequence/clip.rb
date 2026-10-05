@@ -373,12 +373,13 @@ module MB
         # (last-note priority) signal DSL also used for MIDI and synth voices
         # (v.gate, v.trigger, v.number, v.hz, v.env, ...).  The output
         # methods below each make their own Notes; call this once to share
-        # one between several nodes:
+        # one between several nodes (clips have no pedals, so it skips the
+        # sustain pedal transform; see Notes.new):
         #
         #     n = bass.notes
         #     play n.hz.saw * n.amp_env(0.003, 0.15, 0.6, 0.08)
         def notes(transport: nil)
-          MB::Sound::Notes.new(stream(transport: transport))
+          MB::Sound::Notes.new(stream(transport: transport), sustain: false)
         end
 
         # A single-sample impulse at the start of each event, valued at its

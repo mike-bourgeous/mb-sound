@@ -283,15 +283,27 @@ RSpec.describe(MB::Sound::ScriptRunner) do
       expect(last_sound).to be > music_end
       expect(data.length / 48000.0 - last_sound).to be_within(0.1).of(1)
 
-      # A mono voice (no sustain pedal: the note-off at 0.5 s releases it)
+      # A mono voice applies the sustain pedal too: the pedal lifts at the
+      # file's end (0.6875 s), after the note-off at 0.5 s, and the voice
       # ends with its release, when its nodes return nil
       mono = tmp_path('mono.flac')
       r = runner(:synth, [midi_file, mono, '-q'])
       expect { r.run_synth { |midi| midi.hz.saw * midi.amp_env(0.01, 0.1, 0.5, 0.2) } }.to output(/Rendered/).to_stdout
       data = MB::Sound.read(mono)[0]
       last_sound = (0...data.length).select { |i| data[i].abs >= quiet }.last / 48000.0
-      expect(last_sound).to be_within(0.03).of(0.5 + 0.2)
+      expect(last_sound).to be_within(0.03).of(music_end + 0.2)
       expect(data.length / 48000.0 - last_sound).to be < 0.1
+
+      # Without the pedal (Notes.new(..., sustain: false)), the note-off
+      # releases it
+      dry = tmp_path('dry.flac')
+      r = runner(:synth, [midi_file, dry, '-q'])
+      expect {
+        r.run_synth { |midi| m = MB::Sound::Notes.new(midi.stream, sustain: false); m.hz.saw * m.amp_env(0.01, 0.1, 0.5, 0.2) }
+      }.to output(/Rendered/).to_stdout
+      data = MB::Sound.read(dry)[0]
+      last_sound = (0...data.length).select { |i| data[i].abs >= quiet }.last / 48000.0
+      expect(last_sound).to be_within(0.03).of(0.5 + 0.2)
     end
 
     it 'uses the synth MIDI for p.midi_cc' do

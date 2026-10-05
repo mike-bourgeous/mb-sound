@@ -151,7 +151,7 @@ module MB
         @notes = []
         @quiet = Array.new(@allocator.lanes.length, true)
         @lanes = @allocator.lanes.each_with_index.map { |lane, idx|
-          v = Notes.new(lane, sample_rate: @sample_rate)
+          v = Notes.new(lane, sustain: false, sample_rate: @sample_rate)
           v.quiet_check = -> { @quiet[idx] }
           graph = MB::Sound.with_seed(@seed + idx) { block.call(v, idx) }
           lane.idle_check = -> { v.idle? }
@@ -169,7 +169,7 @@ module MB
         @sampled = []
         @frame = nil
 
-        @control_notes = Notes.new(@allocator.stream, sample_rate: @sample_rate) unless @output_controls.empty?
+        @control_notes = Notes.new(@allocator.stream, sustain: false, sample_rate: @sample_rate) unless @output_controls.empty?
         @gain = make_gain
         @core_outputs = @channels > 1 || @output_controls.include?(:pan) ? Array.new(@channels) { |c| Output.new(self, c) } : nil
         @final = make_pan
@@ -190,7 +190,7 @@ module MB
       def control_specs
         # Every lane (and the output controls' Notes) shares one control
         # stream, the allocator's input
-        specs = Notes.new(@allocator.stream).control_specs
+        specs = Notes.new(@allocator.stream, sustain: false).control_specs
         @sustain ? specs + MIDI::Transform::Sustain::CONTROL_SPECS : specs
       end
 

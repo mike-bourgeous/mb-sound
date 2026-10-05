@@ -101,6 +101,19 @@ RSpec.describe(MB::Sound::MidiMethods, :aggregate_failures) do
       expect(source.output.profile).to eq(:low)
     end
 
+    it 'applies the sustain pedals unless sustain: false, which is another Notes on the same input' do
+      midi = MB::Sound.midi
+      expect(midi.sustain?).to eq(true)
+      dry = MB::Sound.midi(sustain: false)
+      expect(dry.sustain?).to eq(false)
+      expect(dry).not_to equal(midi)
+      expect(MB::Sound.midi(sustain: false)).to equal(dry)
+      expect(dry.stream).to equal(midi.stream)
+
+      MB::Sound.close_midi
+      expect(dry.stream.source).to be_closed
+    end
+
     it 'follows the output when the session switches outputs' do
       midi = MB::Sound.midi
       MB::Sound.latency(:safe)
@@ -133,6 +146,8 @@ RSpec.describe(MB::Sound::MidiMethods, :aggregate_failures) do
       expect(notes).to be_a(MB::Sound::Notes)
       expect(notes.stream.source).to be_a(MB::Sound::MIDI::FileSource)
       expect(notes.stream.source.looping?).to eq(false)
+      expect(notes.sustain?).to eq(true)
+      expect(MB::Sound.midi_file('spec/test_data/c2_sustain.mid', sustain: false).sustain?).to eq(false)
 
       gate = MB::Sound.midi_file('spec/test_data/c2_sustain.mid', loop: true) { |midi|
         expect(midi.stream.source.looping?).to eq(true)
