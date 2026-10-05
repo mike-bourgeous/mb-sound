@@ -172,6 +172,14 @@ module MB
           # The note-on velocity multiplier while the soft pedal is down.
           SOFT_VELOCITY = 0.7
 
+          # The pedals this transform responds to (switches at 64 and up),
+          # for MIDI::ControlMap (see Synth#control_specs).
+          CONTROL_SPECS = [
+            ControlSpec.new(number: 64, name: 'Sustain', curve: :switch, description: 'Sustain pedal'),
+            ControlSpec.new(number: 66, name: 'Sostenuto', curve: :switch, description: 'Holds the notes down when pressed'),
+            ControlSpec.new(number: 67, name: 'Soft Pedal', curve: :switch, description: 'Softer note-on velocities'),
+          ].each(&:freeze).freeze
+
           def initialize(parent, soft: SOFT_VELOCITY)
             super(parent)
             @soft = soft.to_f

@@ -59,11 +59,11 @@ MB::Sound.script(args: 0..1) { |(port)|
       sleep delay if delay > 0
     end
   ensure
-    # TODO: print ACID XML here once the new ControlMap/ACID XML lands (branch
-    # acid-xml); until then, the plain controller list from Notes#controls.
+    # The controllers this test responds to, and the ACID XML for them.
     puts
-    puts 'Controllers:'
-    midi.controls.each { |c| puts "  #{c}" }
+    puts midi.controls
+    puts
+    puts midi.controls.to_acid_xml
     source.close
     input.close
   end

@@ -322,6 +322,72 @@ RSpec.describe(MB::Sound::ScriptRunner) do
     end
   end
 
+  describe 'MIDI controls' do
+    let(:outfile) { tmp_path('script_runner_controls.flac') }
+    let(:xmlfile) { tmp_path('controls.xml') }
+
+    def synth_block
+      ->(midi, p) {
+        cutoff = p.midi_cc(21, :cutoff, range: 0.5..2.0)
+        midi.synth(voices: 2) { |v| v.hz.saw.filter(:lowpass, cutoff: cutoff * v.cutoff(1)) * v.amp_env(0.01, 0.1, 0.5, 0.2) }
+      }
+    end
+
+    it "lists a synth's controls with its parameters, and writes ACID XML" do
+      r = runner(:synth, ['spec/test_data/c2_sustain.mid', outfile, '--acid-xml', xmlfile], cutoff: [800, 'Filter cutoff'])
+      expect { r.run_synth(&synth_block) }.to output(
+        a_string_including(
+          'MIDI controls:',
+          'CC  21 cutoff (400.0..1600, default 64) - Filter cutoff',
+          'CC  64 Sustain',
+          'CC  74 Brightness',
+          "MIDI controls) to #{xmlfile}",
+          'Rendered'
+        )
+      ).to_stdout
+
+      xml = File.read(xmlfile)
+      expect(xml).to start_with('<?xml')
+      expect(xml).to include('mapname="example.rb"', '<param name="cutoff">', '<param name="Sustain">', '<param name="Brightness">')
+    end
+
+    it 'prints nothing about controls with -q, but still writes the XML' do
+      r = runner(:synth, ['spec/test_data/c_major.mid', '-q', '--acid-xml', xmlfile], cutoff: 800)
+      graph = synth_block.call(r.instance_variable_set(:@synth_notes, MB::Sound::Notes.new('spec/test_data/c_major.mid')), r.params)
+      expect { r.send(:announce, graph) }.not_to output.to_stdout
+      expect(File.read(xmlfile)).to include('<param name="cutoff">')
+    end
+
+    it "prints the XML with --acid-xml -" do
+      r = runner(:synth, ['spec/test_data/c_major.mid', '-q', '--acid-xml', '-'], cutoff: 800)
+      r.instance_variable_set(:@synth_notes, MB::Sound::Notes.new('spec/test_data/c_major.mid'))
+      graph = r.instance_variable_get(:@synth_notes).synth(voices: 1) { |v| v.hz.saw * v.mod }
+      expect { r.send(:announce, graph) }.to output(/parammap.*Modulation.*Sustain/m).to_stdout
+    end
+
+    it "doesn't list an effect's controls without MIDI, but writes them as XML" do
+      r = runner(:effect, ['in.flac', 'out.flac', '--acid-xml', xmlfile], hz: [0.5, 'LFO rate'])
+      r.params.midi_source = r.method(:midi)
+      graph = 100.hz.sine * r.params.midi_cc(1, :hz, range: 0.0..2.0)
+      expect { r.send(:announce, graph) }.not_to output(/MIDI controls:/).to_stdout
+      expect(File.read(xmlfile)).to include('<param name="hz">', '<ccMsg>1</ccMsg>', '<Neutral>64</Neutral>')
+    end
+
+    it "lists an effect's controls when MIDI is open" do
+      r = runner(:effect, ['in.flac', 'out.flac', '-m', 'spec/test_data/mod_wheel.mid'], hz: [0.5, 'LFO rate'])
+      r.params.midi_source = r.method(:midi)
+      graph = nil
+      expect { graph = 100.hz.sine * r.params.midi_cc(1, :hz, range: 0.0..2.0) }.to output(/MIDI control from/).to_stdout
+      expect { r.send(:announce, graph) }.to output(/MIDI controls:\n  CC   1 hz \(0.0..1.0, default 64\) - LFO rate\n\z/).to_stdout
+    end
+
+    it 'has --acid-xml for effects and synths only' do
+      expect(runner(:effect, []).instance_variable_get(:@parser).to_s).to include('--acid-xml FILE')
+      expect(runner(:synth, []).instance_variable_get(:@parser).to_s).to include('--acid-xml FILE')
+      expect { runner(:song, ['--acid-xml', 'x.xml']) }.to raise_error(described_class::UsageError)
+    end
+  end
+
   describe '#ending_nodes' do
     it 'keeps a Synth but skips the nodes inside it and gated envelopes' do
       r = runner(:synth, [])
