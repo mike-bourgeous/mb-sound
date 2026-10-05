@@ -34,6 +34,29 @@ module MB
       # holding the lowest or highest sounding note from being stolen while
       # another victim exists.
       #
+      # Same-note retriggers (+:retrigger+; these apply when every voice is
+      # active and the steal chain includes :same_note, since a note with a
+      # voice free always gets a free lane):
+      # - :reuse (the default) - the steal chain as given: :same_note
+      #   restarts the lane already playing the note.  Its envelopes attack
+      #   from their current level to the new note's peak, so a soft
+      #   re-strike of a loud ringing note drops to the soft note's level
+      #   (see Envelope's +retrigger: :add+ for another answer).
+      # - :louder - the lane playing the note is reused only if the new
+      #   note is at least as loud as the lane is now: by the lane's
+      #   #louder_check if it has one (Synth: no envelope of the voice would
+      #   attack downward), else by its #level_check (velocity >= level),
+      #   else by velocity (velocity >= the lane's note's velocity; also
+      #   used while the lane hasn't yet read its last note event).
+      #   Otherwise the note is played as with :new_voice.
+      # - :new_voice - the note goes to a free lane (a spare, or the oldest
+      #   choking lane), and the victim comes from the rest of the steal
+      #   chain (without :same_note, and not a lane playing the same note
+      #   unless no other lane can be stolen), so the old note keeps
+      #   ringing.  Only when no lane is free does :same_note restart the
+      #   lane playing the note, as with :reuse.
+      # Mono mode ignores +:retrigger+.
+      #
       # Idle checks: Lane#idle_check (a Proc returning true when the lane's
       # sound has ended, set by +synth+ from the lane's envelopes) lets a
       # released lane become free.  Without one, a released lane counts as
@@ -98,6 +121,9 @@ module MB
         # Mono mode note priorities (see the class description).
         PRIORITIES = [:last, :low, :high].freeze
 
+        # Same-note retrigger modes (see the class description).
+        RETRIGGER_MODES = [:reuse, :louder, :new_voice].freeze
+
         # Polyphonic glide modes (see the class description).
         GLIDE_MODES = [:last, :voice, nil].freeze
 
@@ -119,8 +145,13 @@ module MB
           attr_accessor :idle_check
 
           # A Proc returning the lane's current level, for the :quietest
-          # steal policy (optional).
+          # steal policy and +retrigger: :louder+ (optional).
           attr_accessor :level_check
+
+          # A Proc taking a note-on velocity (0..1) that returns true if a
+          # note at that velocity would bring the lane at least as high as
+          # it is now, for +retrigger: :louder+ (optional; set by Synth).
+          attr_accessor :louder_check
 
           def initialize(allocator, index)
             @allocator = allocator
@@ -277,6 +308,9 @@ module MB
         # The polyphonic glide mode (:last, :voice, or nil).
         attr_reader :glide_mode
 
+        # The same-note retrigger mode (:reuse, :louder, or :new_voice).
+        attr_reader :retrigger
+
         # The input stream time where lanes start.
         attr_reader :position
 
@@ -287,11 +321,11 @@ module MB
         # MIDIFile, or filename).  See the class description for
         # +:voices+, +:spares+, +:steal+ (a policy or Array of policies),
         # +:protect+, +:mono+ (true by default for one voice), and
-        # +:priority+, and +:glide_mode+.  +:choke_time+ is the seconds after a :choke event
-        # when a lane counts as free.
+        # +:priority+, +:glide_mode+, and +:retrigger+.  +:choke_time+ is the
+        # seconds after a :choke event when a lane counts as free.
         def initialize(
           stream, voices: 8, spares: 2, steal: DEFAULT_STEAL, protect: nil, mono: nil, priority: :last,
-          glide_mode: :last, choke_time: Envelope::CHOKE_TIME
+          glide_mode: :last, retrigger: :reuse, choke_time: Envelope::CHOKE_TIME
         )
           unless voices.is_a?(Integer) && voices >= 1
             raise ArgumentError, "Voices must be a positive Integer (got #{voices.inspect})"
@@ -317,6 +351,11 @@ module MB
             raise ArgumentError, "Unknown glide mode #{glide_mode.inspect} (use #{GLIDE_MODES} or :off)"
           end
           @glide_mode = glide_mode
+
+          unless RETRIGGER_MODES.include?(retrigger)
+            raise ArgumentError, "Unknown retrigger mode #{retrigger.inspect} (use #{RETRIGGER_MODES})"
+          end
+          @retrigger = retrigger
 
           @mono = mono.nil? ? voices == 1 : !!mono
           raise ArgumentError, "Mono mode has one voice (got #{voices})" if @mono && voices != 1
@@ -452,10 +491,12 @@ module MB
           refresh(e.time)
 
           if active_count >= @voices
+            return if new_voice_retrigger(key, e)
+
             policy, victim = steal_victim(key)
 
             if policy == :same_note
-              retrigger(victim, e)
+              restrike(victim, e)
               return
             end
 
@@ -508,8 +549,55 @@ module MB
           glide_others(voice, e)
         end
 
+        # For +retrigger: :louder+ or :new_voice+, with every voice active:
+        # plays note-on +e+ for +key+ on the lane already playing it (if
+        # :louder finds it louder) or on a free lane, choking a victim from
+        # the steal chain without :same_note.  Returns true if it handled
+        # the note, false to leave it to the normal steal chain (:reuse, no
+        # lane playing the key, :same_note not in the chain, or no free
+        # lane).
+        def new_voice_retrigger(key, e)
+          return false if @retrigger == :reuse || !@steal.include?(:same_note)
+
+          same = same_note_voice(key)
+          return false unless same
+
+          if @retrigger == :louder && louder?(same, e)
+            restrike(same, e)
+            return true
+          end
+
+          target = free_lane || oldest_choking
+          return false unless target
+
+          _, victim = steal_victim(key, same_note: false)
+          choke(victim, e.time)
+          start(target, e)
+          true
+        end
+
+        # The active lane playing +key+ that started last, or nil.
+        def same_note_voice(key)
+          @voice_states.select { |v| v.active? && v.key == key }.max_by(&:on_seq)
+        end
+
+        # True if note-on +e+ is at least as loud as lane +voice+ is now
+        # (see :louder in the class description).
+        def louder?(voice, e)
+          lane = @lanes[voice.index]
+          caught_up = voice.last_time.nil? || voice.last_time < @lane_sources[voice.index].position
+
+          if caught_up && lane.louder_check
+            !!lane.louder_check.call(e.velocity)
+          elsif caught_up && lane.level_check
+            e.velocity >= lane.level_check.call.to_f
+          else
+            e.velocity >= (voice.velocity || 0)
+          end
+        end
+
         # Sends note-on +e+ again to +voice+, which plays the same key.
-        def retrigger(voice, e)
+        def restrike(voice, e)
           voice.state = :sounding
           voice.velocity = e.velocity
           voice.on_seq = next_seq
@@ -603,11 +691,20 @@ module MB
         end
 
         # Returns [policy, voice] for the lane to steal for a note on +key+.
-        def steal_victim(key)
+        # With +:same_note+ false, skips the :same_note policy and lanes
+        # playing +key+ (unless no other lane can be stolen).
+        def steal_victim(key, same_note: true)
           active = @voice_states.select(&:active?)
           candidates = unprotected(active)
+          policies = @steal
 
-          @steal.each do |policy|
+          unless same_note
+            policies = @steal - [:same_note]
+            others = candidates.reject { |v| v.key == key }
+            candidates = others unless others.empty?
+          end
+
+          policies.each do |policy|
             victim = case policy
                      when :same_note
                        active.select { |v| v.key == key }.max_by(&:on_seq)
