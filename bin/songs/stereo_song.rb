@@ -42,23 +42,27 @@ module MB::Sound
     hats = grid(16, 'x.x.x.x.x.x.X.x.').loop
 
     # Pad: stereo voices (a slightly detuned saw on each side), with each
-    # side's filter swept by the same 4-bar LFO half a cycle apart
+    # side's filter swept by the same 4-bar LFO half a cycle apart.  Its
+    # envelope (slow-first curves, shorter attack and release) swells and
+    # fades like the smoothstep ADSR this song was written with
+    # (0.4/1.0/0.8/1.5): the same times to -20 and -6 dB, within 5%.
     pad = chords.synth(voices: 2) { |v|
-      stereo(v.hz.ramp.at(0.5), v.hz.transpose(0.1).ramp.at(0.5)) * v.env(0.4, 1.0, 0.8, 1.5)
+      stereo(v.hz.ramp.at(0.5), v.hz.transpose(0.1).ramp.at(0.5)) * v.env(0.27, 1.0, 0.8, 1.35, curve: [-21, -12, -6])
     }
     sweep = channels(4.bars.lfo.triangle.at(350..2400), 4.bars.lfo.triangle.with_phase(Math::PI).at(350..2400))
     pad = pad.filter(:lowpass, cutoff: sweep, quality: 1.5) * 0.1
 
-    # Arpeggio panned back and forth every two bars
-    pluck = (arp.tone.triangle.at(1) * arp.env(0.001, 0.12, 0, 0.08, sensitivity: 0.6..1)).pan(2.bars.lfo.at(-0.8..0.8)) * 0.14
+    # Arpeggio panned back and forth every two bars (linear decays here, the
+    # hats, and the echo: the length of the old smoothstep envelopes)
+    pluck = (arp.tone.triangle.at(1) * arp.env(0.001, 0.12, 0, 0.08, sensitivity: 0.6..1, curve: :linear)).pan(2.bars.lfo.at(-0.8..0.8)) * 0.14
 
     # Echoes of the arpeggio an octave up: 3/16 on the left, 1/4 on the right
-    echo = (arp.transpose(12).tone.at(1) * arp.env(0.001, 0.05, 0, 0.05))
+    echo = (arp.transpose(12).tone.at(1) * arp.env(0.001, 0.05, 0, 0.05, curve: :linear))
       .delay(channels(3.n16, 1.n4), feedback: -7.db, dry: 0, wet: 1) * 0.05
 
     bass_synth = (bass.tone.ramp.at(1).filter(:lowpass, cutoff: 150 + 1200 * bass.env(0.001, 0.1, 0.1, 0.05), quality: 4) *
       bass.env(0.003, 0.15, 0.6, 0.08)) * 0.16
-    hat_synth = (noise.at(1).filter(:highpass, cutoff: 8000) * hats.env(0, 0.03, 0, 0.02, sensitivity: 0.2..1) * 0.1).pan(0.4)
+    hat_synth = (noise.at(1).filter(:highpass, cutoff: 8000) * hats.env(0, 0.03, 0, 0.02, sensitivity: 0.2..1, curve: :linear) * 0.1).pan(0.4)
 
     master { |mix| mix.reverb(:hall, wet: -10.db).softclip(0.6, 0.98) }
 
