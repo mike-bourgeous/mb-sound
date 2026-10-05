@@ -250,14 +250,28 @@ RSpec.describe(MB::Sound::Synth) do
     end
 
     describe ':string' do
-      it 'is :add: lanes reused per key, envelopes adding' do
+      it 'restarts the lane of a ringing key even with voices free, envelopes adding' do
         seen = []
         s = described_class.new(source, voices: 2, retrigger: :string) { |v| (seen << v.amp_env).last }
         expect(s.retrigger).to eq(:string)
-        expect(s.allocator.retrigger).to eq(:reuse)
+        expect(s.allocator.retrigger).to eq(:per_key)
         expect(s.allocator.steal).to eq(MB::Sound::MIDI::Allocator::DEFAULT_STEAL)
         expect(seen.map(&:retrigger)).to all(eq(:add))
+
+        # Every voice busy: the same as :add
         expect(ringing(0.5, :string).map(&:to_a)).to eq(ringing(0.5, :add).map(&:to_a))
+
+        # Voices free: :add takes a new lane (doubling the key), :string doesn't
+        events = [ev.note_on(48, 1.0), ev.note_off(48, time: 5/100r), ev.note_on(48, 0.2, time: 1/2r), ev.note_off(48, time: 6/10r)]
+        mk = ->(mode) {
+          render(described_class.new(source(*events), voices: 4, spares: 0, retrigger: mode) { |v| v.amp_env(0.001, 2, 0, 1, curve: :linear) }, buffers: 70, individual: true)
+        }
+        add = mk.(:add)
+        string = mk.(:string)
+        expect(peak(add[1], 0.5, 0.6)).to be > 0
+        expect(string[1..].map { |l| peak(l, 0, 0.7) }).to all(eq(0))
+        before = string[0][(0.5 * 48000).round - 1]
+        expect(peak(string[0], 0.5, 0.52)).to be_between(before, before * 1.01) # 0.2 adds little to the ring
       end
     end
 

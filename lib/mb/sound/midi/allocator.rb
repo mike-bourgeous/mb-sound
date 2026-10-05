@@ -34,9 +34,9 @@ module MB
       # holding the lowest or highest sounding note from being stolen while
       # another victim exists.
       #
-      # Same-note retriggers (+:retrigger+; these apply when every voice is
-      # active and the steal chain includes :same_note, since a note with a
-      # voice free always gets a free lane):
+      # Same-note retriggers (+:retrigger+; except for :per_key, these apply
+      # when every voice is active and the steal chain includes :same_note,
+      # since a note with a voice free always gets a free lane):
       # - :reuse (the default) - the steal chain as given: :same_note
       #   restarts the lane already playing the note.  Its envelopes attack
       #   from their current level to the new note's peak, so a soft
@@ -60,6 +60,11 @@ module MB
       #   (as the :quietest policy measures) instead of the newest.  With
       #   +steal: [:same_note, :quietest, ...]+ and envelopes that add
       #   retriggers, this is Synth's +retrigger: :ring+ for bells.
+      # - :per_key - one lane per key, like a string: a note on a key whose
+      #   lane is still active (sounding, or released and ringing) always
+      #   restarts that lane (the newest, if several), even with voices
+      #   free.  Other notes are allocated as usual.  With envelopes that
+      #   add retriggers, this is Synth's +retrigger: :string+.
       # Mono mode ignores +:retrigger+.
       #
       # Idle checks: Lane#idle_check (a Proc returning true when the lane's
@@ -127,7 +132,7 @@ module MB
         PRIORITIES = [:last, :low, :high].freeze
 
         # Same-note retrigger modes (see the class description).
-        RETRIGGER_MODES = [:reuse, :louder, :new_voice, :quietest].freeze
+        RETRIGGER_MODES = [:reuse, :louder, :new_voice, :quietest, :per_key].freeze
 
         # Polyphonic glide modes (see the class description).
         GLIDE_MODES = [:last, :voice, nil].freeze
@@ -495,6 +500,11 @@ module MB
           key = [e.channel, e.note]
           refresh(e.time)
 
+          if @retrigger == :per_key && (same = same_note_voice(key))
+            restrike(same, e)
+            return
+          end
+
           if active_count >= @voices
             return if new_voice_retrigger(key, e)
 
@@ -562,7 +572,7 @@ module MB
         # lane playing the key, :same_note not in the chain, or no free
         # lane).
         def new_voice_retrigger(key, e)
-          return false if @retrigger == :reuse || @retrigger == :quietest || !@steal.include?(:same_note)
+          return false unless (@retrigger == :louder || @retrigger == :new_voice) && @steal.include?(:same_note)
 
           same = same_note_voice(key)
           return false unless same

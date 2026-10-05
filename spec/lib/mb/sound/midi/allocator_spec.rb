@@ -351,6 +351,13 @@ RSpec.describe(MB::Sound::MIDI::Allocator) do
       expect(lanes(alloc(*events, voices: 2, spares: 1))[1]).to eq(['on60@2', 'off60@3', 'on60@4', 'off60@5'])
     end
 
+    it 'with :per_key, restarts the lane of a ringing key even with voices free' do
+      events = [on(60), off(60), on(62), on(60, 0.3), off(60), off(62)]
+      a = alloc(*events, voices: 4, spares: 1, retrigger: :per_key)
+      expect(lanes(a)).to eq([['on60@0', 'off60@1', 'on60@3', 'off60@4'], ['on62@2', 'off62@5'], [], [], []])
+      expect(lanes(alloc(*events, voices: 4, spares: 1))[2]).to eq(['on60@3', 'off60@4'])
+    end
+
     it 'acts like :reuse without :same_note in the steal chain' do
       events = strikes(1, 0.5, 0.2)
       expected = lanes(alloc(*events, voices: 2, spares: 1, steal: [:oldest]))
@@ -369,7 +376,7 @@ RSpec.describe(MB::Sound::MIDI::Allocator) do
 
     it 'gives the same allocation every time (deterministic)' do
       events = [on(60), on(62), off(60), on(60, 0.3), off(62), on(62, 0.9), off(60), on(60, 0.1), off(60), off(62)]
-      [:reuse, :louder, :new_voice, :quietest].each do |mode|
+      [:reuse, :louder, :new_voice, :quietest, :per_key].each do |mode|
         runs = Array.new(3) { lanes(alloc(*events, voices: 2, spares: 2, retrigger: mode), step: 1/200r) }
         expect(runs.uniq.length).to eq(1)
         a = alloc(*events, voices: 2, spares: 2, retrigger: mode)

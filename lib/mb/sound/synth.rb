@@ -39,21 +39,24 @@ module MB
     # :add or :reuse may want `.free` oscillators.
     #
     # Presets for ringing sounds (RETRIGGER_PRESETS):
-    # - :string (piano, e-piano, plucked or struck strings) is :add under
-    #   an instrument name: one lane per key, re-struck in place, its
-    #   envelopes adding the strike's energy.  A re-struck string keeps its
-    #   phase, so string patches want `.free` oscillators (key-synced
-    #   ones jump to phase 0 at each strike).
-    # - :ring (alias :bell) for bells and other ringing sounds: a same-note strike takes a free voice if one is free (as
-    # always); with every voice busy it reuses the quietest lane already
-    # playing that note, its envelopes adding the new strike's energy
-    # (Envelope +retrigger: :add+); with no lane playing the note it steals
-    # the quietest lane (a choke, as usual).  That is Allocator
-    # +retrigger: :quietest+, +steal: RING_STEAL+ (unless +:steal+ is
-    # given), and :add envelopes.
+    # - :string (piano, e-piano, plucked or struck strings): one lane per
+    #   key, re-struck in place even with voices free (Allocator
+    #   +retrigger: :per_key+), its envelopes adding the strike's energy
+    #   (Envelope +retrigger: :add+), so a repeated key never doubles.
+    #   A re-struck string keeps its phase, so string patches want
+    #   `.free` oscillators (key-synced ones jump to phase 0 at each
+    #   strike).
+    # - :ring (alias :bell; bells and other ringing sounds): a same-note
+    #   strike takes a free voice if one is free (as always); with every
+    #   voice busy it reuses the quietest lane already playing that note,
+    #   its envelopes adding the new strike's energy (Envelope
+    #   +retrigger: :add+); with no lane playing the note it steals the
+    #   quietest lane (a choke, as usual).  That is Allocator
+    #   +retrigger: :quietest+, +steal: RING_STEAL+ (unless +:steal+ is
+    #   given), and :add envelopes.
     #
     #     midi.synth(voices: 4, retrigger: :ring) { |v| ... }
-    #     midi.synth(voices: 8, retrigger: :string) { |v| v.hz.free.sine * v.amp_env(0.002, 2, 0, 0.3) }
+    #     midi.synth(voices: 8, retrigger: :string) { |v| v.hz.sine.free * v.amp_env(0.002, 2, 0, 0.3) }
     #
     # With :add envelopes (:add, :string, :ring) a lane never rises above
     # sqrt(2) times one strike's peak however fast it is struck (see
@@ -100,9 +103,9 @@ module MB
       CONTROLS = [:volume, :expression, :pan].freeze
 
       # Same-note retrigger modes (see the class description).
-      # Named retrigger presets for ringing sounds and the modes they mean
-      # (see the class description).
-      RETRIGGER_PRESETS = { string: :add, ring: :ring, bell: :ring }.freeze
+      # Named retrigger presets for ringing sounds, each with its canonical
+      # name (see the class description).
+      RETRIGGER_PRESETS = { string: :string, ring: :ring, bell: :ring }.freeze
 
       RETRIGGER_MODES = [*MIDI::Allocator::RETRIGGER_MODES, :add, *RETRIGGER_PRESETS.keys].freeze
 
@@ -110,7 +113,7 @@ module MB
       RING_STEAL = [:same_note, :quietest, :oldest].freeze
 
       # Allocator retrigger modes for the Synth-only modes.
-      ALLOCATOR_RETRIGGER = { add: :reuse, ring: :quietest }.freeze
+      ALLOCATOR_RETRIGGER = { add: :reuse, ring: :quietest, string: :per_key }.freeze
 
       # The default +:tail+: seconds of silence after every lane has ended
       # before #sample returns nil (the old MIDI file nodes' limit).
@@ -184,7 +187,7 @@ module MB
         @retrigger = retrigger
         retrigger = RETRIGGER_PRESETS.fetch(retrigger, retrigger)
         steal ||= retrigger == :ring ? RING_STEAL : MIDI::Allocator::DEFAULT_STEAL
-        add = retrigger == :add || retrigger == :ring
+        add = retrigger == :add || retrigger == :ring || retrigger == :string
 
         @output_controls = Array(controls).uniq.freeze
         bad = @output_controls - CONTROLS

@@ -86,6 +86,7 @@ RSpec.describe('script runner scripts', :smoke) do
     'bin/synths/fm_bellpad.rb' => [],
     'bin/synths/fm_chain.rb' => ['--no-table'],
     'bin/synths/fm_drumbass.rb' => [],
+    'bin/synths/fm_epiano.rb' => [],
     'bin/synths/fm_experimental_bell.rb' => [],
     'bin/synths/fm_kick.rb' => [],
     'bin/synths/fm_synth.rb' => [],
