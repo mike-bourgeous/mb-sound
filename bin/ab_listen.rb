@@ -45,14 +45,23 @@ class ABPair
   # Finds pairs in the given directories and files (see the header).
   def self.find(paths)
     files = []
+    given = [] # audio files named directly (not found in a directory)
+    skipped = []
     paths.each do |p|
       if File.directory?(p)
         files.concat(Dir.glob(File.join(p, '**', '*')).select { |f| File.file?(f) && audio?(f) })
-      elsif File.file?(p)
-        files << p
-      else
+      elsif !File.file?(p)
         raise ArgumentError, "Not found: #{p}"
+      elsif audio?(p)
+        files << p
+        given << p
+      else
+        # e.g. logs beside the renders when a shell glob names every file
+        skipped << File.basename(p)
       end
+    end
+    unless skipped.empty?
+      $stderr.puts "Skipping #{skipped.length} non-audio file#{'s' if skipped.length != 1} (not #{AUDIO_EXTENSIONS.join('/')}): #{skipped.uniq.first(3).join(', ')}#{', ...' if skipped.uniq.length > 3}"
     end
     files = files.map { |f| File.expand_path(f) }.uniq.sort
 
@@ -66,8 +75,8 @@ class ABPair
       new(m[1], f, partner) if partner
     }
 
-    if pairs.empty? && files.length == 2 && paths.none? { |p| File.directory?(p) }
-      pairs << new(paths.map { |p| File.basename(p) }.join(' vs '), *paths.map { |p| File.expand_path(p) })
+    if pairs.empty? && given.length == 2 && files.length == 2
+      pairs << new(given.map { |p| File.basename(p) }.join(' vs '), *given.map { |p| File.expand_path(p) })
     end
 
     pairs
@@ -126,7 +135,12 @@ class ABPair
     return @data if @data && @rate == sample_rate
 
     a, b = [@a_path, @b_path].map { |f|
-      d = MB::Sound.read(f, sample_rate: sample_rate).map { |c| Numo::SFloat.cast(c) }
+      d = begin
+        MB::Sound.read(f, sample_rate: sample_rate).map { |c| Numo::SFloat.cast(c) }
+      rescue StandardError => e
+        # e.g. FloatDomainError (NaN duration) from a file ffprobe can't decode
+        raise "could not read #{File.basename(f)} (#{e.class}: #{e.message.lines.first&.strip})"
+      end
       d.length == 1 ? [d[0], d[0]] : d[0..1]
     }
     @lengths = [a[0].length, b[0].length]
@@ -198,8 +212,25 @@ class ABPlayer
   private
 
   def start_pair
-    @pair = @pairs[@index]
-    @a, @b = @pair.load(@rate)
+    # Pairs whose files can't be read are dropped with a warning
+    loop do
+      @pair = @pairs[@index]
+      begin
+        @a, @b = @pair.load(@rate)
+        break
+      rescue StandardError => e
+        $stderr.print "\r\e[K" if @keys
+        say "\e[31mSkipping #{@pair.name}: #{e.message.lines.first&.strip}\e[0m"
+        @pairs.delete_at(@index)
+        # Past the end: wrap around when keys choose pairs, else finish
+        @index = 0 if @index >= @pairs.length && @keys
+        if @index >= @pairs.length
+          @pair = nil
+          @quit = true
+          return
+        end
+      end
+    end
     @pos = 0
     @mix = 0.0 # 0 = A, 1 = B
     @target = 0.0
@@ -214,13 +245,21 @@ class ABPlayer
     @b_gain = (a_rms.finite? && b_rms.finite?) ? 10 ** ((a_rms - b_rms) / 20) : 1.0
 
     $stderr.print "\r\e[K" if @keys
-    $stderr.puts pair_info
+    say pair_info
     if @notes
       @pair.notes.first(6).each do |n|
-        $stderr.puts MB::U.wrap(n, width: [MB::U.width - 4, 40].max).lines.map { |l| "  \e[2m#{l.chomp}\e[0m" }
+        say MB::U.wrap(n, width: [MB::U.width - 4, 40].max).lines.map { |l| "  \e[2m#{l.chomp}\e[0m" }
       end
     end
     status_line
+  end
+
+  # Prints lines to stderr, ending them with CR LF while the key reader
+  # has the terminal in raw mode (a bare LF doesn't return to column 0).
+  def say(lines)
+    text = Array(lines).join("\n")
+    eol = @keys ? "\r\n" : "\n"
+    $stderr.print text.gsub("\n", eol) + eol
   end
 
   def pair_info
@@ -381,7 +420,7 @@ class ABPlayer
           @revealed = true
           $stderr.print "\r\e[K"
           @blind = false
-          $stderr.puts pair_info
+          say pair_info
           @blind = true
           status_line
         end
@@ -391,7 +430,7 @@ class ABPlayer
 end
 
 MB::Sound.script(
-  args: 1..,
+  args: 0.., # checked below, with a friendlier message than the runner's count error
   filter: [nil, String, '-F', 'Only pairs whose names contain this text (comma-separated alternatives)'],
   blind: [false, '-B', 'Blind test: label the files X and Y in random order (? reveals)'],
   auto: [nil, Float, '-a', 'Switch A/B every this many seconds and play each pair once (no keys needed)', 0.05..600.0],
@@ -402,6 +441,11 @@ MB::Sound.script(
   notes: [true, 'Show README.md items that name each pair (what to listen for)'],
   list: [false, '-l', 'List the pairs and exit'],
 ) { |args, p|
+  if args.empty?
+    $stderr.puts "ab_listen.rb: pass a folder of before/after renders (e.g. #{File.basename($0)} tmp/listening) or two files to compare; --help for more"
+    exit 1
+  end
+
   pairs = ABPair.find(args)
   if p.filter
     words = p.filter.split(',')
