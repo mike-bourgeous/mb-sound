@@ -651,8 +651,9 @@ module MB
         MB::Sound::Note.new(self)
       end
 
-      # Converts this Tone to a MIDI note-on message from the midi-message gem.
-      def to_midi(velocity: 64, channel: -1)
+      # Converts this Tone to a note-on MB::Sound::MIDI::Event at the
+      # nearest note (see Note#to_midi).
+      def to_midi(velocity: 64, channel: 0)
         to_note.to_midi(velocity: velocity, channel: channel)
       end
 

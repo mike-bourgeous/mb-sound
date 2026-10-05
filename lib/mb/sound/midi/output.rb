@@ -52,8 +52,13 @@ module MB
           DeviceOutput.track(self, true)
         end
 
-        # Sends one MIDI message: an Array of byte values or a binary String.
+        # Sends one MIDI message: an Array of byte values, a binary String,
+        # or a MIDI::Event with bytes (e.g. `C4.to_midi`).
         def write(message)
+          if message.is_a?(Event)
+            raise ArgumentError, "#{message.type} event has no MIDI bytes" if message.bytes.nil?
+            message = message.bytes
+          end
           bytes = message.is_a?(String) ? message.b : message.to_a.pack('C*')
           @api == :jack ? @output.write(bytes) : @output.send_bytes(bytes)
           nil
