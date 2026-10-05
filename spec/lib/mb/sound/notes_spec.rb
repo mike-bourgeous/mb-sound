@@ -457,7 +457,7 @@ RSpec.describe(MB::Sound::Notes) do
       r = v.hz.saw.reset(other)
       expect(r.key_sync?).to eq(false)
       expect(r.reset_input).not_to eq(nil)
-      tee = v.trigger.get_sampler.instance_variable_get(:@tee)
+      tee = v.key_trigger.get_sampler.instance_variable_get(:@tee)
       expect(tee.branches.length).to eq(2) # the rnd tone's and this branch; dropped ones are destroyed
     end
   end

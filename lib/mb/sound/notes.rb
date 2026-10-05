@@ -236,6 +236,28 @@ module MB
         memo(:trigger) { Trigger.new(note_stream, notes: self, sample_rate: @sample_rate) }
       end
 
+      # The key sync trigger (a Notes::KeyTrigger): #trigger without the
+      # note-ons that re-strike a voice whose energy is being added to, so
+      # oscillators keep their phase when a ringing note is struck again.
+      # A note-on is left out when an envelope made through this instance
+      # with +retrigger: :add+ (Envelope's; e.g. Synth's +retrigger: :add+,
+      # :ring, :string) is sounding (not idle) when it arrives (see
+      # #adding_at?); with only :restart envelopes (the default), or none,
+      # it is the same as #trigger.  A mono voice re-struck while its note
+      # is held or still ringing counts too, as does a Synth lane re-struck
+      # while ringing.
+      #
+      # Oscillators from #hz key-sync to this (see NotePitch), and so should
+      # tones that sync to notes by hand; #trigger keeps every note-on, for
+      # envelopes and for tones that must restart at each note:
+      #
+      #     (v.freq * ratio).tone.reset(v.key_trigger)    # key sync, like v.hz
+      #     110.hz.square.reset(v.trigger)                # restarts at every note-on
+      def key_trigger
+        memo(:key_trigger) { KeyTrigger.new(note_stream, notes: self, sample_rate: @sample_rate) }
+      end
+      alias key_sync_trigger key_trigger
+
       # The note number of the newest held note, held after release (a
       # Notes::Number), starting at the source's first note (or C4).
       def number
@@ -386,7 +408,8 @@ module MB
 
       # A Pitch following the held note and pitch bend (a
       # Notes::NotePitch), whose oscillators reset their phase at each
-      # note-on (key sync) unless they are #free or #lfo.
+      # note-on (key sync, #key_trigger: not at re-strikes that add energy
+      # to a sounding voice) unless they are #free or #lfo.
       #
       #     play v.hz.saw * v.amp_env
       #     play v.hz.bend_range(12.st).square.free * v.amp_env
@@ -486,6 +509,24 @@ module MB
         @envelopes.all?(&:idle?)
       end
 
+      # True if any envelope made through this instance has +retrigger:
+      # :add+ (see Envelope#retrigger).
+      def add_envelopes?
+        @envelopes.any? { |e| add_envelope?(e) }
+      end
+
+      # True if an envelope made through this instance with +retrigger:
+      # :add+ was sounding (not idle) at stream time +time+, the start of
+      # a buffer (NoteEnvelope#sounding_at?, so the answer doesn't depend
+      # on whether the envelopes have rendered that buffer yet), so a
+      # note-on there adds energy to a sounding voice instead of starting
+      # one (see #key_trigger).
+      def adding_at?(time)
+        @envelopes.any? { |e|
+          add_envelope?(e) && (e.respond_to?(:sounding_at?) ? e.sounding_at?(time) : !e.idle?)
+        }
+      end
+
       # True if any note node made by this instance (#gate, #number,
       # #velocity, #lift, ...) has read a note-on whose note-off it hasn't
       # read yet.  False when there are no note nodes.
@@ -532,6 +573,11 @@ module MB
       end
 
       private
+
+      # True if +envelope+ adds re-strikes' energy (see #adding_at?).
+      def add_envelope?(envelope)
+        envelope.respond_to?(:retrigger) && envelope.retrigger == :add
+      end
 
       # Returns the node cached under +key+, or makes one with the block and
       # caches it.  The cache holds weak references, so nodes nobody uses

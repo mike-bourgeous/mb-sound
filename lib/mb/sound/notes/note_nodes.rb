@@ -177,6 +177,41 @@ module MB
         end
       end
 
+      # The key sync trigger (see Notes#key_trigger): a Trigger without the
+      # note-ons that add energy to a voice that is still sounding, that
+      # is, note-ons while an envelope of the Notes with +retrigger: :add+
+      # is sounding (Notes#adding_at?).  Whether one is sounding is asked
+      # once per buffer, as of the buffer's start (so it doesn't depend on
+      # whether the envelopes have rendered the buffer yet; see
+      # NoteEnvelope#sounding_at?); after a note-on in the buffer, the :add
+      # envelopes count as sounding for the rest of it.
+      class KeyTrigger < Trigger
+        def initialize(stream, notes:, sample_rate: 48000)
+          super
+          @node_type_name = 'Notes Key Trigger'
+        end
+
+        def sample(count)
+          @from = @reader.cursor
+          super
+        end
+
+        private
+
+        def render(buf, items)
+          @adding = @notes.adding_at?(@from)
+          super
+        end
+
+        def impulse(event)
+          return nil unless event.type == :note_on
+          return nil if @adding
+
+          @adding = @notes.add_envelopes?
+          event.velocity
+        end
+      end
+
       # A single-sample impulse of 1 at every :choke event and all sound off
       # (CC 120) (see Notes#choke).
       class Choke < Node::Impulse

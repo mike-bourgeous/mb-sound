@@ -2,13 +2,16 @@ module MB
   module Sound
     class Notes
       # A Tone made from a Notes pitch (Notes#hz): its phase resets at each
-      # note-on of the Notes instance (key sync, Tone#reset(v.trigger)) by
-      # default.  Calling #free, #lfo, #sync, or #softsync
+      # note-on of the Notes instance (key sync, Tone#reset(v.key_trigger))
+      # by default, except re-strikes that add energy to a sounding voice
+      # (envelopes with +retrigger: :add+; see Notes#key_trigger), so a
+      # ringing note struck again keeps its phase instead of clicking.  Calling #free, #lfo, #sync, or #softsync
       # drops the key sync quietly, since those mean the tone isn't reset by
       # notes; #reset replaces it; #rnd keeps it (a random phase at each
       # note).
       class KeyedTone < MB::Sound::Tone
-        # Turns key sync on with +trigger+ (a Notes#trigger).  Returns self.
+        # Turns key sync on with +trigger+ (a Notes#key_trigger).  Returns
+        # self.
         #
         # Sets the reset input directly instead of through Tone#reset (which
         # KeyedTone overrides to drop key sync, and which warns about
@@ -77,7 +80,8 @@ module MB
       # A Pitch whose frequency follows a Notes instance (Notes#hz, alias
       # #tone and #pitch): the held note number plus pitch bend through the
       # session Tuning.  Oscillators made from it (#tone, #saw, #square, ...)
-      # are KeyedTones that reset their phase at every note-on, unless they
+      # are KeyedTones that reset their phase at every note-on (except :add
+      # re-strikes of a sounding voice; see Notes#key_trigger), unless they
       # are #free or #lfo.
       #
       # Settings return a new NotePitch (pitches are values):
@@ -129,7 +133,7 @@ module MB
 
         # A KeyedTone at this pitch (see the class description).
         def tone(wave_type = :sine)
-          KeyedTone.new(frequency: freq, wave_type: wave_type, sample_rate: @sample_rate).key_sync(@notes.trigger)
+          KeyedTone.new(frequency: freq, wave_type: wave_type, sample_rate: @sample_rate).key_sync(@notes.key_trigger)
         end
         alias hz tone
 
