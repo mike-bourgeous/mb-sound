@@ -24,8 +24,14 @@ MB::Sound.synth_script { |midi|
     # share of that range they cover, sustain levels and velocity ranges
     # mapped the same way.  Operators are pitches transposed by ratios and
     # thousandths of an octave ("mils"; 7 mils is about 8 cents).
+    #
+    # B and D were written as ratios 3.5 and 6, but in the old version
+    # their phase noise ran them 1.336x and 1.24x sharp (a Tone bug at
+    # 96 kHz, fixed 2026-10-05), so ratios 4.676 (about a fourth above
+    # 3.5) and 7.44 keep the sound the patch had.  Use 3.5 and 6 to hear
+    # the ratios as written.
 
-    b_osc = v.hz.transpose((Math.log2(3.5) + 0.007).oct).tone.noise(0.000007).at(1).named('B')
+    b_osc = v.hz.transpose((Math.log2(3.5 * 1.336) + 0.007).oct).tone.noise(0.000007).at(1).named('B')
     b_env = v.fm_env(0.4, 3.1, 0.59, 6, curve: [-20, 4, 16], sensitivity: -12.4.db..0.db).named('B Envelope')
     b_out = (b_osc * b_env).named('B Out')
 
@@ -34,7 +40,7 @@ MB::Sound.synth_script { |midi|
     a_env = v.amp_env(0.9, 3.2, 0.698, 6.1, curve: [-30, 3, 27], sensitivity: -16.4.db..0.db).named('A Envelope')
     a_out = (a_osc * a_env).named('A Out')
 
-    d_osc = v.hz.transpose((Math.log2(6) + 0.005).oct).tone.noise(0.000005).at(1).named('D')
+    d_osc = v.hz.transpose((Math.log2(6 * 1.24) + 0.005).oct).tone.noise(0.000005).at(1).named('D')
     d_env = v.fm_env(0.6, 3.2, 0.64, 6.4, curve: [-20, 3.4, 16.6], sensitivity: -12.4.db..0.db).named('D Envelope')
     d_out = (d_osc * d_env).named('D Out')
 
