@@ -312,8 +312,28 @@ module MB
           cutoff = cutoff.real if cutoff.is_a?(Numo::SComplex) || cutoff.is_a?(Numo::DComplex)
           quality = quality.real if quality.is_a?(Numo::SComplex) || quality.is_a?(Numo::DComplex)
 
-          coeffs = [@omega, @b0, @b1, @b2, @a1, @a2]
-          state = [@x1, @x2, @y1, @y2]
+          # The kernel filters an inplace SFloat where it is and copies
+          # anything else; copy a non-inplace SFloat into a reused buffer
+          # instead of a new one (same kernel, same samples)
+          copied = false
+          if samples.is_a?(Numo::SFloat) && !samples.inplace?
+            @dynamic_out = (@dynamic_copy ||= GraphNode::FrozenCopy.new).copy(samples)
+            samples = @dynamic_out.inplace!
+            copied = true
+          end
+
+          coeffs = (@dynamic_coeffs ||= Array.new(6))
+          coeffs[0] = @omega
+          coeffs[1] = @b0
+          coeffs[2] = @b1
+          coeffs[3] = @b2
+          coeffs[4] = @a1
+          coeffs[5] = @a2
+          state = (@dynamic_state ||= Array.new(4))
+          state[0] = @x1
+          state[1] = @x2
+          state[2] = @y1
+          state[3] = @y2
 
           result = MB::FastSound.dynamic_biquad(
             samples,
@@ -338,7 +358,7 @@ module MB
           @center_frequency = f0
           @cutoff = @center_frequency
 
-          result
+          copied ? result.not_inplace! : result
         end
 
         def dynamic_process_ruby_c(samples, cutoff:, quality:)

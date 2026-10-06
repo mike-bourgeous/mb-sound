@@ -248,6 +248,8 @@ module MB
           def read_events(from, to)
             @allocator.advance(to)
             count = @queue.bsearch_index { |e| e.time >= to } || @queue.length
+            return Stream::NO_EVENTS if count == 0
+
             out = @queue.shift(count)
             out.select! { |e| e.time >= from } if !out.empty? && out.first.time < from
             out

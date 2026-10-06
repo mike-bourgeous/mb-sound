@@ -580,6 +580,37 @@ RSpec.describe(MB::Sound::Filter::Cookbook, :aggregate_failures) do
     end
   end
 
+  describe '#dynamic_process buffers' do
+    let(:input) { Numo::SFloat.linspace(-1, 1, 300).map { |v| Math.sin(v * 40) } }
+    let(:cutoff) { Numo::SFloat.linspace(200, 4000, 300) }
+    let(:quality) { Numo::SFloat.new(300).fill(2) }
+
+    def make
+      MB::Sound::Filter::Cookbook.new(:lowpass, 48000, 1000, quality: 2)
+    end
+
+    it 'leaves a non-inplace input alone and matches filtering an inplace copy' do
+      a = make
+      b = make
+      before = input.dup
+      out1 = a.dynamic_process(input, cutoff: cutoff, quality: quality).dup
+      out2 = a.dynamic_process(input, cutoff: cutoff, quality: quality)
+      expect(input).to eq(before)
+
+      ref1 = b.dynamic_process(input.dup.inplace!, cutoff: cutoff, quality: quality).dup
+      ref2 = b.dynamic_process(input.dup.inplace!, cutoff: cutoff, quality: quality)
+      expect(out1.to_binary).to eq(ref1.to_binary)
+      expect(out2.to_binary).to eq(ref2.to_binary)
+      expect(out2.inplace?).to eq(false)
+    end
+
+    it 'reuses one output buffer for non-inplace inputs' do
+      f = make
+      out1 = f.dynamic_process(input, cutoff: cutoff, quality: quality)
+      expect(f.dynamic_process(input, cutoff: cutoff, quality: quality)).to equal(out1)
+    end
+  end
+
   pending '#set_parameters_c'
   pending '#set_parameters_ruby'
 end

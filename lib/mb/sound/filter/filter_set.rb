@@ -130,7 +130,7 @@ module MB
         #
         # Returns nil if any of the extra inputs returned nil.
         def call_filter(idx, data)
-          SampleWrapper.call_filter(@filters[idx], data, @inputs[idx])
+          SampleWrapper.call_filter(@filters[idx], data, @inputs[idx], scratch: ((@sampled_inputs ||= [])[idx] ||= {}))
         end
 
         # Raises an error if this filter set has a cycle or duplicated filters.

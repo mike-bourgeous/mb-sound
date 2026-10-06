@@ -97,7 +97,9 @@ module MB
         # The stream time this node will have read up to after its next
         # +count+ samples.
         def next_cursor(count)
-          @reader.cursor + step(count.round)
+          count = count.round
+          step(count)
+          @stream.advance(@reader.cursor, count, @sample_rate)
         end
 
         # True once the stream's source has ended and this node has read

@@ -74,7 +74,7 @@ module MB
           @position = to
 
           if balance_notes?
-            events.unshift(Jump.new(from)) if @jump_pending
+            events = [Jump.new(from), *events] if @jump_pending # (events may be frozen)
             events = balance(events)
           end
           @jump_pending = false
