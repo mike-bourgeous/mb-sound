@@ -113,6 +113,10 @@ RSpec.describe(MB::Sound::GraphNode::FourPole, :check_shared) do
       expect(saw.filter(:hp4, cutoff: 500).filter.mode).to eq(:hp4)
     end
 
+    it 'knows every four-pole mode' do
+      expect(MB::Sound::GraphNode::FilterMethods::FOUR_POLE_TYPES - [:four_pole]).to eq(MB::Sound::Filter::FourPole::MODES.keys)
+    end
+
     it 'rejects quality for four-pole filters and resonance for others' do
       expect { saw.filter(:lp4, cutoff: 500, quality: 4) }.to raise_error(ArgumentError, /resonance/)
       expect { saw.filter(:lowpass, cutoff: 500, resonance: 0.5) }.to raise_error(ArgumentError, /resonance/)
