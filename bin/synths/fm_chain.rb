@@ -29,6 +29,12 @@
 #     $0 spec/test_data/c_major.mid         # a MIDI file
 #     $0 --no-table spec/test_data/midi.mid fm.flac
 #     $0 --index 0 spec/test_data/mod_wheel.mid   # the old starting point
+#     $0 spec/test_data/fm_chain_demo.mid   # FM-friendly key orders and wheel moves
+#
+# Playing it: hold keys in order (the first sounds, each later key modulates
+# the one before) at close FM-friendly intervals, and ride the mod wheel.  A
+# growly bass: D4, then A4, then G#5 (or D#5), mod wheel around 71; it likes
+# a little chorus and reverb.
 
 require 'bundler/setup'
 require 'mb-sound'
