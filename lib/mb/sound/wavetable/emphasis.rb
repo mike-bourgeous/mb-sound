@@ -42,12 +42,17 @@ module MB
         # complex sinusoid through it (images left out).
         def self.response(code, f)
           # Each tap's weight at each quadrature node, from unit impulses
-          taps = (-KernelRuby::SINC_HALF..(KernelRuby::SINC_HALF + 1)).to_a
-          weights = taps.map { |k|
-            row = Numo::DFloat.zeros(1, 2 * GUARD + 4)
-            row[0, GUARD + k] = 1.0
-            NODES.map { |x| KernelRuby.interpolate(row, 0, nil, 0.0, x, code, GUARD) }
-          }
+          @weights ||= {}
+          taps, weights = @weights[code] ||= begin
+            all = (-KernelRuby::SINC_HALF..(KernelRuby::SINC_HALF + 1)).to_a
+            w = all.map { |k|
+              row = Numo::DFloat.zeros(1, 2 * GUARD + 4)
+              row[0, GUARD + k] = 1.0
+              NODES.map { |x| KernelRuby.interpolate(row, 0, nil, 0.0, x, code, GUARD) }
+            }
+            used = all.each_index.reject { |t| w[t].all?(&:zero?) } # 4-point interpolators use 4 taps
+            [used.map { |t| all[t] }, used.map { |t| w[t] }]
+          end
 
           f = Numo::DFloat.cast(f) unless f.is_a?(Numeric)
           sum = f.is_a?(Numeric) ? 0.0 : Numo::DFloat.zeros(f.length)
@@ -59,8 +64,9 @@ module MB
           sum
         end
 
-        # Grid points per cycle per sample for .gains.
-        GRID = 65536
+        # Grid points per cycle per sample for .gains (linear interpolation
+        # between them is within 1e-7 of the response).
+        GRID = 16384
 
         # Interpolators whose levels are emphasized.
         INTERPOLATORS = [:optimal].freeze
@@ -73,7 +79,7 @@ module MB
 
         # Gains for bins 0...+count+ of a +length+-sample level read with
         # +interpolation+ (a DFloat; interpolated from a fine grid, within
-        # about 1e-9).
+        # about 1e-7).
         def self.gains(count, length, interpolation = :optimal)
           @grids ||= {}
           grid = @grids[interpolation] ||= (1.0 / response(INTERPOLATIONS.fetch(interpolation), Numo::DFloat.new(GRID / 2 + 2).seq / GRID)).freeze

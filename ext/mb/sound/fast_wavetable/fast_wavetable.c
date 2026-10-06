@@ -64,6 +64,23 @@ enum wt_wrap {
 #define OPT_C4E 0.00986988334359864
 #define OPT_C4O -0.00989340017126506
 
+// floor() without a library call (x86-64 compilers call floor() unless
+// SSE4.1 is enabled); the same result for any value that fits a long.
+static inline __attribute__((always_inline)) double wt_floor(double x)
+{
+	if (!(fabs(x) < 4.0e18)) {
+		return floor(x); // huge values and NaN
+	}
+	long i = (long)x;
+	return (double)(x < (double)i ? i - 1 : i);
+}
+
+// Wraps +x+ to 0...+y+ like mb_wrap (and Ruby's %), with wt_floor.
+static inline __attribute__((always_inline)) double wt_wrap(double x, double y)
+{
+	return x - y * wt_floor(x / y);
+}
+
 // One level: +data+ points at the first float of the NArray (complex
 // values are two floats), +stride+ is the row length in samples.
 struct wt_level {
@@ -254,9 +271,9 @@ static inline __attribute__((always_inline)) double wt_tap(const float *d, long 
 }
 
 // Interpolates at +q+ samples past the guard (one component of the data).
-static inline double wt_interpolate(const float *d, long cs, long ra, long rb, double fs, double q, int mode, long guard, const struct wt_sinc *k)
+static inline __attribute__((always_inline)) double wt_interpolate(const float *d, long cs, long ra, long rb, double fs, double q, int mode, long guard, const struct wt_sinc *k)
 {
-	double qi = floor(q);
+	double qi = wt_floor(q);
 	double t = q - qi;
 	long base = guard + (long)qi;
 
@@ -320,7 +337,7 @@ static inline double wt_interpolate(const float *d, long cs, long ra, long rb, d
 
 // The frames around +scan+ (0..1, clamped): *fa, *fb (-1 for one frame),
 // and the blend *fs.
-static inline void wt_frames(long count, double scan, long *fa, long *fb, double *fs)
+static inline __attribute__((always_inline)) void wt_frames(long count, double scan, long *fa, long *fb, double *fs)
 {
 	if (count == 1) {
 		*fa = 0;
@@ -332,7 +349,7 @@ static inline void wt_frames(long count, double scan, long *fa, long *fb, double
 	double f = scan * (double)(count - 1);
 	if (!(f >= 0)) f = 0; // also NaN
 	if (f > count - 1) f = (double)(count - 1);
-	double fl = floor(f);
+	double fl = wt_floor(f);
 	if (fl > count - 2) fl = (double)(count - 2);
 	*fa = (long)fl;
 	*fb = *fa + 1;
@@ -341,7 +358,7 @@ static inline void wt_frames(long count, double scan, long *fa, long *fb, double
 
 // Level +k+ at +u+ (cycles, or source samples in sample mode) into
 // *re/*im.
-static inline void wt_level_value(const struct wt_table *t, int k, double u, long fa, long fb, double fs, int mode, const struct wt_sinc *ks, double *re, double *im)
+static inline __attribute__((always_inline)) void wt_level_value(const struct wt_table *t, int k, double u, long fa, long fb, double fs, int mode, const struct wt_sinc *ks, double *re, double *im)
 {
 	const struct wt_level *l;
 	double q;
@@ -360,7 +377,7 @@ static inline void wt_level_value(const struct wt_table *t, int k, double u, lon
 	} else {
 		l = &t->levels[k];
 		q = u * t->rates[k];
-		double i = floor(q);
+		double i = wt_floor(q);
 		double half = 12; // the most taps any interpolator reads on each side (sinc)
 		if (i < -(t->guard - half) || i > l->count + t->guard - half - 1) {
 			return;
@@ -378,7 +395,7 @@ static inline void wt_level_value(const struct wt_table *t, int k, double u, lon
 }
 
 // The table's value at +u+ moving +m+ per sample, at +scan+.
-static inline void wt_value(const struct wt_table *t, double u, double m, double scan, int mode, const struct wt_sinc *ks, double *re, double *im)
+static inline __attribute__((always_inline)) void wt_value(const struct wt_table *t, double u, double m, double scan, int mode, const struct wt_sinc *ks, double *re, double *im)
 {
 	long fa, fb;
 	double fs;
@@ -512,8 +529,8 @@ static inline double wt_crossing(double e, double d, double b)
 static inline void wt_table_slope(const struct wt_table *t, double u, double m, double sc, int mode, const struct wt_sinc *ks, double *re, double *im)
 {
 	double are, aim, bre, bim;
-	wt_value(t, mb_wrap(u + WT_SLOPE_DELTA, 1.0), m, sc, mode, ks, &are, &aim);
-	wt_value(t, mb_wrap(u - WT_SLOPE_DELTA, 1.0), m, sc, mode, ks, &bre, &bim);
+	wt_value(t, wt_wrap(u + WT_SLOPE_DELTA, 1.0), m, sc, mode, ks, &are, &aim);
+	wt_value(t, wt_wrap(u - WT_SLOPE_DELTA, 1.0), m, sc, mode, ks, &bre, &bim);
 	*re = (are - bre) / (2.0 * WT_SLOPE_DELTA);
 	*im = (aim - bim) / (2.0 * WT_SLOPE_DELTA);
 }
@@ -628,9 +645,9 @@ static VALUE ruby_oscillate(VALUE self, VALUE buffer, VALUE spec, VALUE frequenc
 			steps = inc * i;
 		}
 
-		double e = mb_wrap(phi + steps, 1.0);
+		double e = wt_wrap(phi + steps, 1.0);
 		if (pm != 0) {
-			e = mb_wrap(e + pm * WT_INV_2PI, 1.0);
+			e = wt_wrap(e + pm * WT_INV_2PI, 1.0);
 		}
 
 		double u, wf;
@@ -658,7 +675,7 @@ static VALUE ruby_oscillate(VALUE self, VALUE buffer, VALUE spec, VALUE frequenc
 			if (i > 0 && d_back == pending_d) {
 				re += pending_re;
 				im += pending_im;
-			} else if (primed && (i > 0 || fabs(mb_wrap(prev_e + d_back - e + 0.5, 1.0) - 0.5) < 1e-6)) {
+			} else if (primed && (i > 0 || fabs(wt_wrap(prev_e + d_back - e + 0.5, 1.0) - 0.5) < 1e-6)) {
 				double bre, bim, are, aim;
 				wt_corner_step(&t, prev_e, d_back, w, m, sc, mode, &ks, &bre, &bim, &are, &aim);
 				re += are;
@@ -699,7 +716,7 @@ static VALUE ruby_oscillate(VALUE self, VALUE buffer, VALUE spec, VALUE frequenc
 	if (constant) {
 		steps = freq * adv * length;
 	}
-	rb_ary_store(state, 0, rb_float_new(mb_wrap(phi + steps, 1.0)));
+	rb_ary_store(state, 0, rb_float_new(wt_wrap(phi + steps, 1.0)));
 	if (length > 0) {
 		rb_ary_store(tstate, 1, rb_float_new(prev_pm));
 		rb_ary_store(tstate, 2, INT2NUM(1));
@@ -769,10 +786,10 @@ static VALUE ruby_lookup(VALUE self, VALUE buffer, VALUE spec, VALUE phase, VALU
 		double u;
 		switch (wrapmode) {
 			case WT_WRAP:
-				u = mb_wrap(ph, 1.0);
+				u = wt_wrap(ph, 1.0);
 				break;
 			case WT_BOUNCE: {
-				double b = mb_wrap(ph, 2.0);
+				double b = wt_wrap(ph, 2.0);
 				u = b > 1 ? 2.0 - b : b;
 				break;
 			}
@@ -862,7 +879,7 @@ static VALUE ruby_play(VALUE self, VALUE buffer, VALUE spec, VALUE frequency, VA
 
 		double p = pos + psteps;
 		if (t.has_loop && p >= t.loop_end) {
-			p = ls + mb_wrap(p - ls, len);
+			p = ls + wt_wrap(p - ls, len);
 		}
 
 		double re, im;
@@ -879,10 +896,10 @@ static VALUE ruby_play(VALUE self, VALUE buffer, VALUE spec, VALUE frequency, VA
 		steps = freq * adv * length;
 		psteps = freq * spd * length;
 	}
-	rb_ary_store(state, 0, rb_float_new(mb_wrap(phi + steps, 1.0)));
+	rb_ary_store(state, 0, rb_float_new(wt_wrap(phi + steps, 1.0)));
 	double p = pos + psteps;
 	if (t.has_loop && p >= t.loop_end) {
-		p = ls + mb_wrap(p - ls, len);
+		p = ls + wt_wrap(p - ls, len);
 	}
 	rb_ary_store(tstate, 0, rb_float_new(p));
 	if (length > 0) {
@@ -952,8 +969,8 @@ static inline double wt_shape(const struct wt_table *t, double p, double w, doub
 // The slope per cycle of wt_shape at +p+.
 static inline double wt_slope(const struct wt_table *t, double p, double w, double m, double sc, int mode, const struct wt_sinc *ks)
 {
-	double a = wt_shape(t, mb_wrap(p + WT_SLOPE_DELTA, 1.0), w, m, sc, mode, ks);
-	double b = wt_shape(t, mb_wrap(p - WT_SLOPE_DELTA, 1.0), w, m, sc, mode, ks);
+	double a = wt_shape(t, wt_wrap(p + WT_SLOPE_DELTA, 1.0), w, m, sc, mode, ks);
+	double b = wt_shape(t, wt_wrap(p - WT_SLOPE_DELTA, 1.0), w, m, sc, mode, ks);
 	return (a - b) / (2.0 * WT_SLOPE_DELTA);
 }
 
@@ -1068,7 +1085,7 @@ static VALUE ruby_sync(int argc, VALUE *argv, VALUE self)
 				if (d < 0) d = 0;
 				if (d > 1) d = 1;
 
-				p = mb_wrap(p + vel * (1.0 - d), 1.0);
+				p = wt_wrap(p + vel * (1.0 - d), 1.0);
 				double v0 = wt_shape(&t, p, w, m, sc, mode, &ks);
 				double s0 = wt_slope(&t, p, w, m, sc, mode, &ks);
 				if (soft) {
@@ -1086,9 +1103,9 @@ static VALUE ruby_sync(int argc, VALUE *argv, VALUE self)
 					vel = nvel;
 				}
 
-				p = mb_wrap(p + vel * d, 1.0);
+				p = wt_wrap(p + vel * d, 1.0);
 			} else {
-				p = mb_wrap(p + vel, 1.0);
+				p = wt_wrap(p + vel, 1.0);
 			}
 		}
 
