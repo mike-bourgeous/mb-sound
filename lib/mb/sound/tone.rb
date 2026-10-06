@@ -514,7 +514,7 @@ module MB
           raise ArgumentError, "Scan must be nil, a number, or a graph node (got #{scan.inspect})"
         end
 
-        scan = scan.at(0..1) if scan.is_a?(Tone) && !scan.amplitude_set # (fixup_source would make it -1..1)
+        scan = scan.at(0..1) if scan.is_a?(Tone) && !scan.amplitude_set && !scan.phasor? # (fixup_source would make it -1..1)
 
         configure do
           @table = table

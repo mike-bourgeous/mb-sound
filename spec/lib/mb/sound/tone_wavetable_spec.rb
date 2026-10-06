@@ -52,6 +52,11 @@ RSpec.describe(MB::Sound::Tone, '#wavetable', aggregate_failures: true) do
       expect(scan.range).to eq(0.0..1.0)
     end
 
+    it 'takes a phasor as the scan input' do
+      t = 220.hz.wavetable(:basic, scan: 0.5.hz.phasor)
+      expect(t.sample(100)).to be_a(Numo::SFloat)
+    end
+
     it 'lists the scan input in its sources' do
       scan = 1.hz.triangle
       expect(220.hz.wavetable(:basic, scan: scan).sources[:scan]).not_to be_nil
