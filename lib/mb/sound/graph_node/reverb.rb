@@ -23,6 +23,29 @@ module MB
         include GraphNode::SampleRateHelper
         include MultiOutput
 
+        # The block size (samples at FEEDBACK_BLOCK_RATE) the presets were
+        # tuned at.  The feedback network reads its feedback this much later
+        # than its delay lines' outputs, so its loop delays are the line
+        # delays plus this time at every buffer size (they used to be the
+        # line delays plus the caller's buffer size, so the sound changed
+        # with the buffer size).
+        #
+        # Why 1024: the presets were added on 2026-01-08 (c8657797), when
+        # output was Linux only and live playback used either JackFFI,
+        # whose blocks are the JACK period (1024 by default for jackd's ALSA
+        # driver, qjackctl, and PipeWire), or AlsaOutput (IOBase's
+        # DEFAULT_BUFFER, 1024).  File renders then used 32768-sample
+        # blocks, which would make :room echo every 0.7 s, so the presets
+        # weren't tuned by rendering.
+        #
+        # A preliminary fix: the real one is per-sample feedback in a kernel
+        # (the feedback-loop project).
+        FEEDBACK_BLOCK = 1024
+
+        # The sample rate FEEDBACK_BLOCK is counted at (it is scaled to keep
+        # its time at other rates).
+        FEEDBACK_BLOCK_RATE = 48000
+
         # Some known-reasonable parameters for the reverb algorithm (plus an
         # extra_time value for roughly how long it takes for the reverb to ring
         # out).
@@ -226,9 +249,9 @@ module MB
         #                     usually be high enough that feedback doesn't amplify
         #                     audible frequencies, so at least 0.1s, but
         #                     smaller values can effectively simulate small
-        #                     reverberant rooms.  The buffer size is implicitly
-        #                     added to this delay time because of the buffered
-        #                     processing structure.
+        #                     reverberant rooms.  FEEDBACK_BLOCK (about
+        #                     21 ms) is added to the loop delays (not to the
+        #                     first pass), whatever the buffer size.
         # +:feedback_gain+ - The linear volume of feedback in the feedback
         #                    loop.  Must be less than 1.0 to avoid overload.
         # +:feedback_enabled+ - If true, feedback is included after diffusion.
@@ -377,7 +400,6 @@ module MB
           }.transpose]
 
           if @feedback_enabled
-            @feedback = Array.new(@channels) { Numo::SFloat.zeros(48000) }
             @feedback_network = @fused ? plan_fdn(@last_stage) : make_fdn(@last_stage)
             @last_stage = @feedback_network
           end
@@ -458,6 +480,12 @@ module MB
             @delay_samples = @delay_seconds.map { |s| (s * rate.to_f).round }
           end
 
+          # The input of channel +index+'s delay line +delay+ samples before
+          # the next block (see DelayLine#past).
+          def past(index, count, delay)
+            @lines[index].past(count, delay)
+          end
+
           # Processes one buffer of channel +data+ (an Array of SFloat, one
           # per channel), returning an Array of channel outputs.  Outputs from
           # the matrix are reused buffers.
@@ -527,6 +555,7 @@ module MB
 
           order = (0...@channels).to_a.shuffle(random: @random)
           delay_times = Array.new(@channels) { |idx| delays[idx] + @feedback_range.begin }
+          @fdn_delay_seconds = delay_times.map(&:to_f).freeze
 
           FusedStage.new(
             delay_seconds: delay_times, matrix: @householder.to_a, order: order,
@@ -547,8 +576,10 @@ module MB
           end
 
           if @feedback_enabled
+            loop_delays = feedback_delays
             data = data.map.with_index { |v, idx|
-              (@feedback[idx][0...v.length].inplace * @feedback_gain + v).not_inplace!
+              fb = @feedback_network.past(idx, v.length, loop_delays[idx])
+              (fb.inplace * @feedback_gain + v).not_inplace!
             }
             data = @feedback_network.process(data)
           end
@@ -567,10 +598,14 @@ module MB
 
           buffer_time = MB::M.max(delays.max + 0.2, 1.0)
 
-          # Add feedback from the feedback buffer
+          # The inputs of the feedback delays, kept to read the feedback at
+          # each loop delay (see #feedback_delays)
+          @fdn_history = Array.new(inputs.length) { MB::Sound::DelayLine.new((@sample_rate * buffer_time).ceil) }
+
+          # Add feedback from the feedback delays' inputs
           feedback = inputs.map.with_index { |inp, idx|
             inp
-              .proc { |v| (@feedback[idx][0...v.length].inplace * @feedback_gain + v).not_inplace! }
+              .proc { |v| (@fdn_history[idx].past(v.length, feedback_delays[idx]).inplace * @feedback_gain + v).not_inplace! }
               .named("Feedback return #{idx + 1}")
           }
 
@@ -586,9 +621,12 @@ module MB
           end
 
           # Delay step
+          @fdn_delay_seconds = Array.new(inputs.length) { |idx| (delays[idx] + @feedback_range.begin).to_f }.freeze
           delays = hhmx.outputs.shuffle(random: @random).map.with_index { |inp, idx|
             delay_time = delays[idx] + @feedback_range.begin
             inp
+              .proc { |v| record_feedback_input(idx, v) }
+              .named("Feedback tap #{idx + 1}")
               .delay((delay_time * @sample_rate).round.samples, smoothing: false, max_delay: buffer_time)
               .named("Feedback delay #{idx + 1}")
           }
@@ -612,9 +650,19 @@ module MB
           }
         end
 
+        # The loop delay of each feedback channel in samples at the current
+        # rate: its line delay plus FEEDBACK_BLOCK (see FEEDBACK_BLOCK).
+        def feedback_delays
+          @feedback_delays ||= begin
+            block = (FEEDBACK_BLOCK * @sample_rate / FEEDBACK_BLOCK_RATE).round
+            @fdn_delay_seconds.map { |s| (s * @sample_rate).round + block }.freeze
+          end
+        end
+
         # Sets the sample rate of the upstream source and internal components.
         def sample_rate=(rate)
           @sample_rate = rate.to_f
+          @feedback_delays = nil
 
           if @fused
             @diffusers.each do |stage|
@@ -641,22 +689,21 @@ module MB
         end
 
         # For internal use.  Generates the next +count+ samples without
-        # downmixing and updates the feedback buffer.
+        # downmixing.  Buffers longer than the shortest feedback loop (see
+        # #feedback_delays) run in pieces, since the feedback for a sample
+        # must already have been computed.
         def update(count)
-          dry = @upstream_samplers.map { |u| u.sample(count) }
+          limit = @feedback_enabled ? feedback_delays.min : nil
+          if limit && count > limit
+            dry, wet = render_pieces(count, limit)
+          else
+            dry, wet = render_block(count)
+          end
 
-          wet = @fused ? fused_wet(count) : @last_stage.map { |c| c.sample(count) }
           if dry.nil? || wet.any?(&:nil?)
             @pipeline_output = wet
             @dry_output = nil
             return
-          end
-
-          if @feedback_enabled
-            # Store feedback for next iteration
-            wet.each_with_index do |v, idx|
-              @feedback[idx][0...v.length] = v if v
-            end
           end
 
           @pipeline_output = wet
@@ -666,6 +713,45 @@ module MB
           # (scales the dry input in place unless it's a frozen, shared buffer)
           @dry_output = dry.map { |c| ((c.frozen? ? c.dup : c).inplace * @dry).not_inplace! }
           @dry_groups = partition_outputs(@dry_output, @output_channels)
+        end
+
+        # For internal use.  Samples the dry inputs and the wet network for
+        # +count+ samples.  Returns [dry, wet] (Arrays of channel buffers).
+        def render_block(count)
+          dry = @upstream_samplers.map { |u| u.sample(count) }
+          wet = @fused ? fused_wet(count) : @last_stage.map { |c| c.sample(count) }
+          [dry, wet]
+        end
+
+        # For internal use.  Like #render_block, in pieces of at most +limit+
+        # samples, joined.  Stops early (a shorter or nil result) if the
+        # input ends.
+        def render_pieces(count, limit)
+          pieces = []
+          done = 0
+          while done < count
+            n = MB::M.min(limit, count - done)
+            dry, wet = render_block(n)
+            break if dry.any?(&:nil?) || wet.any?(&:nil?)
+
+            pieces << [dry.map(&:dup), wet.map(&:dup)]
+            done += n
+            break if (dry + wet).any? { |c| c.length < n }
+          end
+
+          return [nil, [nil]] if pieces.empty?
+
+          join = ->(lists) { lists.transpose.map { |bufs| bufs[0].concatenate(*bufs[1..]) } }
+          [join.(pieces.map(&:first)), join.(pieces.map(&:last))]
+        end
+
+        # For internal use.  Records the input of feedback delay +idx+ (graph
+        # mode; see #make_fdn) and passes it on.
+        def record_feedback_input(idx, v)
+          line = @fdn_history[idx]
+          line.prepare(v.length, feedback_delays[idx])
+          line.write(v)
+          v
         end
 
         # For internal use by ReverbOutput#sample.

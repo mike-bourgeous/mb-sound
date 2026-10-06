@@ -680,9 +680,13 @@ module MB
           p.gain_step = -fade_step(p.fade_out, rate) if p.gain_step >= 0
         end
 
+        # A graph launched at time t starts on the sample whose window
+        # [i, i + 1) holds t, where Notes nodes put an edge at t (see
+        # Notes::Node), so a clip launched on its first note keeps it, and a
+        # replaced graph stops before that sample
         offset = 0
         unless p.started
-          offset = MB::M.max(((p.start - from) / per_sample).ceil, 0)
+          offset = MB::M.max(((p.start - from) / per_sample).floor, 0)
           start = from + offset * per_sample
           p.timeline_nodes.each { |n| n.start_at(start, origin: start, transport: @transport) }
           p.start = start
@@ -691,7 +695,8 @@ module MB
         end
 
         frames = count - offset
-        frames = MB::M.min(frames, ((p.stop_at - from) / per_sample).ceil - offset) if p.stop_at && !p.fade_out
+        frames = MB::M.min(frames, ((p.stop_at - from) / per_sample).floor - offset) if p.stop_at && !p.fade_out
+        return retire(p, keep: p.keep) if frames <= 0
         t = MB::U.clock_now
         data = p.input.read(frames)
         check_speed(p, MB::U.clock_now - t, frames)

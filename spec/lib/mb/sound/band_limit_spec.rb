@@ -315,6 +315,68 @@ RSpec.describe(MB::Sound::BandLimit) do
     end
   end
 
+  describe 'sync pulses (wraps) at frequencies whose wraps land on samples' do
+    # Expected [sample, value] of each wrap of a phase advancing k/n cycles
+    # per sample from 0, for +total+ samples (exact Rational arithmetic): a
+    # wrap at time t gives a pulse of 1 - d on sample ceil(t), d = ceil(t) - t,
+    # so a wrap exactly on a sample gives 1 on that sample.
+    def expected_wraps(k, n, total, sign = 1)
+      (1...total).filter_map { |i|
+        next if (i * k) / n == ((i - 1) * k) / n
+        t = Rational(((i * k) / n) * n, k)
+        [i, sign * (1 - (i - t)).to_f]
+      }
+    end
+
+    # Pulses of +freq+.hz.phasor.wraps read in +sizes+, as [sample, value].
+    def wraps(freq, total, sizes)
+      tone = freq.hz.phasor
+      w = tone.wraps
+      bufs = []
+      done = 0
+      sizes.cycle do |s|
+        s = [s, total - done].min
+        tone.sample(s)
+        bufs << w.sample(s).dup
+        done += s
+        break if done >= total
+      end
+      data = bufs.reduce(:concatenate)
+      data.ne(0).where.to_a.map { |i| [i, data[i]] }
+    end
+
+    # Integer frequencies whose period is a whole number of samples or a
+    # whole number of samples per few cycles (e.g. 4800 Hz, 20000 Hz)
+    exact = [2000, 1000, 4000, 4800, 9600, 16000, 1500, 3000, 6000, 12000, 20000, 18000, 750, 100, 50]
+
+    exact.each do |f|
+      it "gives one pulse per wrap, on the sample, at #{f} Hz" do
+        k, n = (f.to_r / 48000).then { |r| [r.numerator, r.denominator] }
+        got = wraps(f, 4800, [800, 37, 128, 1, 300])
+        want = expected_wraps(k, n, 4800)
+        expect(got.map(&:first)).to eq(want.map(&:first))
+        got.zip(want).each { |(_, g), (_, e)| expect(g).to be_within(1e-6).of(e) }
+      end
+
+      it "gives one negative pulse per backward wrap at -#{f} Hz" do
+        k, n = (f.to_r / 48000).then { |r| [r.numerator, r.denominator] }
+        # Backward from phase 0: the wrap at sample 0 (unprimed) isn't a
+        # pulse; the later ones fall at the same times as forward wraps
+        got = wraps(-f, 4800, [800, 37, 128, 1, 300])
+        want = expected_wraps(k, n, 4800, -1)
+        expect(got.map(&:first)).to eq(want.map(&:first))
+        got.zip(want).each { |(_, g), (_, e)| expect(g).to be_within(1e-6).of(e) }
+      end
+    end
+
+    it 'still gives fractional pulses at 2001 Hz' do
+      got = wraps(2001, 4800, [800])
+      want = expected_wraps(2001, 48000, 4800)
+      expect(got.map(&:first)).to eq(want.map(&:first))
+      got.zip(want).each { |(_, g), (_, e)| expect(g).to be_within(1e-4).of(e) }
+    end
+  end
+
   describe 'sync' do
     def coherent_db(tone, k, n: 65536)
       buffers = Array.new((4800 + n) / 800 + 1) { tone.sample(800).dup }

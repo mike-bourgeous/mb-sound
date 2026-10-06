@@ -458,6 +458,27 @@ RSpec.describe(MB::Sound::PlaybackMethods) do
       expect(MB::Sound.read(filename)[0].max).to be_within(1e-6).of(-3.db)
     end
 
+    # bin/songs/antialias_song.rb -b 2 raised in Envelope: at 112 BPM the
+    # render ends 5/7 of a sample after bar 3, and graphs launched on bar 3
+    # were given zero frames (Tones would even have ended on the nil that
+    # sample(0) returns)
+    it 'gives graphs launched in the last sample of a bar-limited render that sample' do
+      out = MB::Sound::NullOutput.new(channels: 2, sleep: false)
+      kicks = MB::Sound.seq(MB::Sound::C2).n4.loop
+      counts = []
+      spy = MB::Sound::GraphNode::ProcNode.new(1.constant) { |buf| counts << buf.length; buf }
+      seconds = MB::Sound.render(out, bars: 2, bpm: 112) do
+        MB::Sound.bg(:pad, 0.constant)
+        MB::Sound.at_bar(3) do
+          MB::Sound.bg(:kick, 60.hz.sine * kicks.env(0.0005, 0.12, 0, 0.05), fade: 0)
+          MB::Sound.bg(:spy, spy, fade: 0)
+        end
+      end
+      expect(out.frames_written).to eq(205715)
+      expect(seconds).to eq(205715 / 48000.0)
+      expect(counts).to eq([1])
+    end
+
     it 'renders a sequence for a number of bars at the current tempo' do
       bass = MB::Sound.seq(MB::Sound::C2, MB::Sound::G1).n8.loop
       seconds = MB::Sound.render(filename, bass.tone.ramp.at(1) * bass.env * 0.5, bars: 2)

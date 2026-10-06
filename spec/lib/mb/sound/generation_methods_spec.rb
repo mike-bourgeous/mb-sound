@@ -30,6 +30,65 @@ RSpec.describe(MB::Sound::GenerationMethods) do
       # A normal ramp wave will produce only two diff values, while noise will produce many
       expect(diff.length).to be > 10
     end
+
+    it 'repeats after the same MB::Sound.seed, whatever ran before' do
+      MB::Sound.seed(5)
+      a = MB::Sound.noise.sample(1000).dup
+
+      # Other noise sampled in between used to move the shared drand48 stream
+      MB::Sound.noise.sample(777)
+      2.hz.gauss.noise.sample(333)
+
+      MB::Sound.seed(5)
+      b = MB::Sound.noise.sample(1000).dup
+      expect(b).to eq(a)
+
+      MB::Sound.seed(6)
+      expect(MB::Sound.noise.sample(1000)).not_to eq(a)
+    end
+
+    it 'gives each noise node its own stream, independent of read order' do
+      MB::Sound.seed(5)
+      a1 = MB::Sound.noise
+      a2 = MB::Sound.noise
+      x1 = a1.sample(500).dup
+      x2 = a2.sample(500).dup
+      expect(x1).not_to eq(x2)
+
+      MB::Sound.seed(5)
+      b1 = MB::Sound.noise
+      b2 = MB::Sound.noise
+      expect(b2.sample(500)).to eq(x2)
+      expect(b1.sample(500)).to eq(x1)
+    end
+
+    it 'takes an explicit seed' do
+      expect(MB::Sound.noise(seed: 3).sample(100)).to eq(MB::Sound.noise(seed: 3).sample(100))
+      expect(MB::Sound.noise(seed: 3).noise_seed).to eq(3)
+    end
+
+    it 'restarts from its seed with the state, and keeps going across buffers' do
+      n = MB::Sound.noise(seed: 9)
+      whole = n.sample(600).dup
+      m = MB::Sound.noise(seed: 9)
+      parts = [m.sample(100).dup, m.sample(1).dup, m.sample(499).dup].reduce(:concatenate)
+      expect(parts).to eq(whole)
+      expect(m.state.to_h[:noise]).to eq(n.state.to_h[:noise])
+    end
+
+    [
+      ['uniform noise', -> { 2000.hz.ramp.noise(seed: 1) }],
+      ['gauss noise', -> { 1.hz.gauss.noise(seed: 2) }],
+      ['blended noise', -> { 200.hz.sine.noise(0.00001, seed: 3) }],
+      ['frequency-modulated noise', -> { 300.hz.ramp.fm(90.hz.at(200)).noise(0.5, seed: 4) }],
+      ['a noise phasor', -> { 400.hz.phasor.noise(0.01, seed: 5) }],
+    ].each do |name, make|
+      it "gives identical C and Ruby samples for #{name}" do
+        c = make.call
+        r = make.call
+        [800, 37, 1, 256].each { |n| expect(c.sample_c(n)).to eq(r.sample_ruby(n)) }
+      end
+    end
   end
 
   describe '#impulse' do

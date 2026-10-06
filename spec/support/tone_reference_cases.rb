@@ -8,9 +8,9 @@
 #
 # Each case returns a Hash of named outputs (NArrays).  When the API
 # changes, a case is rewritten in the new API to describe the same sound.
-# Noise isn't here: FastSound draws from the process-wide drand48, so its
-# samples depend on what ran before (bin/null_test.rb covers it in a fresh
-# process).
+# Noise cases were added with the per-tone noise generator (2026-10-06;
+# before, FastSound drew from the process-wide drand48, so noise samples
+# depended on what ran before).
 module ToneReferenceCases
   S = MB::Sound
 
@@ -171,7 +171,13 @@ module ToneReferenceCases
     'phasor' => -> { render(1234.5.hz.phasor) },
     'phasor_phase' => -> { render(100.hz.phasor(phase: 0.25)) },
     'phasor_ports' => -> { render(S::Pitch.new(steps(64, 900, 3000)).phasor, ports: [:wraps, :increment]) },
-    'phasor_wraps_only' => -> { render(2001.hz.phasor.wraps) },
+    # 2000 Hz: 24 samples per cycle, every wrap exactly on a sample
+    'phasor_wraps_only' => -> { { 'main' => render(2001.hz.phasor.wraps)['main'], 'at_2000' => render(2000.hz.phasor.wraps)['main'] } },
+
+    # Noise (per-tone generators seeded from the root seed or seed:)
+    'noise_root_seed' => -> { render(S.noise + 1.hz.gauss.noise.at(0.5)) },
+    'noise_seeded_blend' => -> { render(300.hz.ramp.fm(90.hz.at(200)).noise(0.5, seed: 4).at(0.5)) },
+    'noise_phasor' => -> { render(400.hz.phasor.noise(0.01, seed: 5)) },
 
     # Sample rates, oversampling, channels
     'rate_44100' => -> { render(1000.hz.ramp.at(0.5).at_rate(44100)) },

@@ -12,7 +12,14 @@ RSpec.describe('Tone null-test reference') do
   REFERENCE = JSON.parse(File.read(File.expand_path('../../../test_data/tone_reference.json', __dir__)))
 
   # Case name => why its reference was re-recorded.
-  INTENDED = {}.freeze
+  INTENDED = {
+    # Bug fix 2026-10-06: wraps landing exactly on a sample (a whole number
+    # of cycles) were lost to rounding; now a pulse of 1 on that sample
+    'tone_ports' => 'wraps: adds the pulse lost at sample 960 (1500 Hz + 200 Hz FM, whole cycles)',
+    'tone_ports_negative' => 'wraps: adds the pulse lost at sample 480 (-1700 Hz, 17 whole cycles)',
+    'phasor_ports' => 'wraps: adds the pulse lost at sample 288 (900 Hz, whole cycles)',
+    'phasor_wraps_only' => 'new at_2000 output (2000 Hz, every wrap on a sample; had no pulses); main unchanged',
+  }.freeze
 
   it 'has a reference for every case' do
     expect(REFERENCE.keys.sort).to eq(ToneReferenceCases::CASES.keys.sort)

@@ -84,8 +84,9 @@ MEMCHECK_SPECS = [
   'spec/lib/mb/sound/delay_line_spec.rb',          # FastDelay.read/feedback
   'spec/lib/mb/sound/graph_node/multitap_delay_spec.rb',
   'spec/lib/mb/sound/filter/delay_spec.rb',
-  'spec/lib/mb/sound/phasor_spec.rb',              # FastSound.phasor
-  'spec/lib/mb/sound/oscillator_spec.rb',          # FastSound.osc/oscillate, FastSynth.oscillate_bl
+  'spec/lib/mb/sound/tone_phasor_spec.rb',         # FastSound.phasor/oscillate
+  'spec/lib/mb/sound/tone_waveforms_spec.rb',      # FastSound.osc/oscillate, FastSynth.oscillate_bl
+  'spec/lib/mb/sound/generation_methods_spec.rb',  # FastSound noise (splitmix64 state)
   'spec/lib/mb/sound/band_limit_spec.rb',          # FastSynth.oscillate_bl/blit/oscillate_sync
   'spec/lib/mb/sound/shaper_spec.rb',              # FastClip.shape
   'spec/lib/mb/sound/envelope_spec.rb',            # FastEnvelope.process

@@ -23,6 +23,8 @@ module MB
       #   (FastSynth.oscillate_sync).
       # - +pulses+: [previous phase, previous increment, primed 0/1] for the
       #   wraps/increment ports (BandLimit.sync_pulses).
+      # - +noise+: [splitmix64 generator state, an Integer below 2**64] for
+      #   noise (FastSound.phasor/oscillate, Tone.noise_random), or nil.
       #
       # The other fields:
       # - +jump_residual+: the rest of a band-limited phase jump's step still
@@ -42,7 +44,7 @@ module MB
       # (bin/osc_state_benchmark.rb).
       class State
         FIELDS = [
-          :phase, :blep, :blit, :sync, :sync_ring, :pulses,
+          :phase, :blep, :blit, :sync, :sync_ring, :pulses, :noise,
           :jump_residual, :last_freq, :last_width, :seed, :draws, :reset_ended,
         ].freeze
 
@@ -64,6 +66,7 @@ module MB
           @sync = [@phase[0], 0.0, 1.0, 0, 0]
           @sync_ring = Numo::DFloat.zeros(BandLimit::SYNC_TAPS)
           @pulses = [0.0, 0.0, 0]
+          @noise = nil
           @jump_residual = nil
           @last_freq = 0.0
           @last_width = nil
@@ -131,6 +134,7 @@ module MB
             sync: @sync.dup,
             sync_ring: @sync_ring.to_a,
             pulses: @pulses.dup,
+            noise: @noise&.dup,
             jump_residual: @jump_residual&.to_a,
             last_freq: @last_freq,
             last_width: @last_width,

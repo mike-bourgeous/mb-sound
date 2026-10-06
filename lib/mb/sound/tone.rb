@@ -86,9 +86,22 @@ module MB
 
       TWOPI = Math::PI * 2.0
 
-      # Random numbers for the Ruby mirror of noise (#sample_ruby; the C
-      # kernels use drand48).
-      RAND = ENV['RANDOM_SEED'] ? Random.new(Integer(ENV['RANDOM_SEED'])) : Random.new
+      # The splitmix64 generator for noise (see #noise and noise_random).
+      NOISE_GAMMA = 0x9E3779B97F4A7C15
+      NOISE_MIX1 = 0xBF58476D1CE4E5B9
+      NOISE_MIX2 = 0x94D049BB133111EB
+      MASK64 = (1 << 64) - 1
+
+      # Ruby mirror of noise_random() in fast_sound.c: advances the
+      # splitmix64 state in +rng+ (an Array of one Integer; see
+      # State#noise) and returns a uniform Float in 0...1 (53 bits).
+      def self.noise_random(rng)
+        z = rng[0] = (rng[0] + NOISE_GAMMA) & MASK64
+        z = ((z ^ (z >> 30)) * NOISE_MIX1) & MASK64
+        z = ((z ^ (z >> 27)) * NOISE_MIX2) & MASK64
+        z ^= z >> 31
+        (z >> 11) * (2.0**-53)
+      end
 
       # Waveform shapes (see #sine, #ramp, ...).  A #phasor tone has the
       # wave type :phasor instead.
@@ -136,6 +149,9 @@ module MB
       # The seed of this tone's random phase generator (see #random_phase),
       # or nil if none has been set or drawn.
       attr_reader :seed
+
+      # The seed of this tone's noise generator (see #noise), or nil.
+      attr_reader :noise_seed
 
       # Shortcut for creating a new tone with the given frequency source, for
       # building more complex FM signal graphs.
@@ -372,6 +388,7 @@ module MB
         @free = false
         @random_phase = false
         @seed = nil
+        @noise_seed = nil
         @start_cycles = nil
         @tempo = nil
         @lock = nil
@@ -653,10 +670,19 @@ module MB
       # Example:
       #     1.hz.gauss.noise
       #
+      # The random numbers come from the tone's own generator, seeded with
+      # +seed+, or by default a sub-seed drawn from the root generator when
+      # this is called (see MB::Sound.seed), so noise created in the same
+      # order after the same root seed repeats, and every noise tone has its
+      # own stream.
+      #
       # Also see the MB::Sound::Noise class for another way to synthesize
       # noise.
-      def noise(blend = true)
+      def noise(blend = true, seed: nil)
         configure do
+          @noise_seed = Integer(seed) if seed
+          @noise_seed ||= MB::Sound.next_seed if blend != false && blend != 0
+
           case blend
           when true
             @noise = 1.0
@@ -1299,6 +1325,7 @@ module MB
       def initial_state
         start = @start_cycles || (@phase / TWOPI) % 1.0
         s = State.new(phase: start)
+        s.noise = [@noise_seed & MASK64] if @noise != 0
         if @random_phase
           s.seed = @seed
           p = (s.random * TWOPI) / TWOPI
@@ -1516,10 +1543,10 @@ module MB
             state.phase, state.blep, *@fade_band, width, !@keep_dc
           ).inplace!
         when :phasor
-          MB::FastSound.phasor(out, freq, @advance, @random_advance, state.phase, nil).inplace!
+          MB::FastSound.phasor(out, freq, @advance, @random_advance, state.phase, nil, state.noise).inplace!
         else
           MB::FastSound.oscillate(
-            out, @wave_type, freq, phase, @advance, @random_advance, @gain, @offset, state.phase
+            out, @wave_type, freq, phase, @advance, @random_advance, @gain, @offset, state.phase, state.noise
           ).inplace!
         end
       end
@@ -1570,7 +1597,8 @@ module MB
         freq = Numo::DFloat.cast(freq) if freq.is_a?(Numo::NArray)
 
         if @random_advance != 0
-          random = Numo::DFloat.cast(Array.new(count) { RAND.rand })
+          rng = @state.noise
+          random = Numo::DFloat.cast(Array.new(count) { Tone.noise_random(rng) })
           increments = freq * (random * @random_advance + @advance)
         else
           increments = freq * @advance

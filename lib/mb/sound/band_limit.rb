@@ -36,7 +36,10 @@ module MB
       # the wrap happened, so it's in (0, 1] (usable as an ordinary trigger)
       # and exact enough to band-limit a reset (see Tone#sync).  Wrapping
       # backward (negative frequency) gives -(1 - d); a jump of the phase
-      # between buffers (a reset or sync) gives 1.
+      # between buffers (a reset or sync) gives 1.  A wrap exactly on a
+      # sample (within EPS, like the kernels' edges; e.g. every wrap of
+      # 2000 Hz at 48 kHz) gives a pulse of 1 on that sample.  There is no
+      # C version: the C sync kernel only reads the pulses.
       def self.sync_pulses(phi, freq, advance, count, prev)
         return [Numo::SFloat[], Numo::SFloat[]] if count == 0
 
@@ -56,6 +59,12 @@ module MB
         phases = steps + phi
         phases -= phases.floor
 
+        # A phase within rounding of the wrap is on it (see .snap and
+        # bl_snap in fast_synth.c): e.g. at 2000 Hz, 23/24 + 1/24 is just
+        # below 1 in floating point
+        near = phases.lt(EPS) | phases.gt(1.0 - EPS)
+        phases[near] = 0.0 if near.count_true > 0
+
         prev_p, prev_inc, primed = prev
         before = Numo::DFloat.zeros(count)
         before_inc = Numo::DFloat.zeros(count)
@@ -69,9 +78,13 @@ module MB
         reached = before + before_inc
         pulses = Numo::DFloat.zeros(count)
 
-        forward = reached.ge(1)
+        # A wrap within EPS past the end of a step lands on its last sample,
+        # and one exactly at its start belongs to the step before (see
+        # .crossing and bl_crossing), so a wrap exactly on a sample gives a
+        # pulse of 1 on that sample, once
+        forward = before_inc.gt(0) & reached.ge(1.0 - EPS)
         pulses[forward] = (1.0 - before[forward]) / before_inc[forward] if forward.count_true > 0
-        backward = reached.lt(0)
+        backward = before_inc.lt(0) & before.gt(0) & reached.le(EPS)
         pulses[backward] = -(before[backward] / -before_inc[backward]) if backward.count_true > 0
 
         # A phase that didn't continue from the previous sample jumped

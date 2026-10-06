@@ -245,7 +245,7 @@ module MB
             return if chain.started || (chain.start >= to && @players.any?)
 
             # While idle the timeline doesn't advance, so start right away
-            offset = chain.start >= to ? 0 : MB::M.max(((chain.start - from) / per_sample).ceil, 0)
+            offset = chain.start >= to ? 0 : MB::M.max(((chain.start - from) / per_sample).floor, 0)
             start_master_chain(chain, from + offset * per_sample)
             chain.timeline_nodes.each { |n| n.start_at(from, transport: @transport) }
 

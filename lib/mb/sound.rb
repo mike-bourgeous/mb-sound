@@ -5,7 +5,8 @@ require 'mb-math'
 require 'mb-util'
 
 # RANDOM_SEED makes random sounds repeatable (e.g. for bin/null_test.rb):
-# Kernel#rand here, and Tone::RAND and Noise::RAND below.
+# Kernel#rand here, Noise::RAND below, and the root seed (RandomMethods),
+# which Tone#rnd and Tone#noise draw their seeds from.
 srand(Integer(ENV['RANDOM_SEED'])) if ENV['RANDOM_SEED']
 
 require_relative 'sound/length'

@@ -12,9 +12,11 @@ module MB
     # DEFAULT_SEED, so renders repeat from run to run; set another with
     # `seed 42` (bin/sound.rb).
     #
-    # Users so far: Tone#random_phase (alias #rnd), Synth (per-lane seeds
-    # through #with_seed).  Older randomness keeps its own generators for
-    # now: Tone::RAND (Ruby noise mirror) / Noise::RAND (noise), Clip seeds
+    # Users so far: Tone#random_phase (alias #rnd), Tone#noise (and
+    # MB::Sound.noise; each noise tone keeps its own splitmix64 state, see
+    # Tone::State#noise), Synth (per-lane seeds through #with_seed).  Older
+    # randomness keeps its own generators for now: Noise::RAND (spectral
+    # noise), Clip seeds
     # (probability, #permute), and Reverb/FdnReverb seeds; they could move to
     # sub-seeds from here later.
     module RandomMethods
