@@ -164,6 +164,12 @@ module MB
           u * (m[0] + m[1] * h + m[2] * h**2 + m[3] * h**3 + m[4] * h**4)
         end
 
+        # Filters +source+ with this filter in a GraphNode::FourPole at the
+        # current cutoff and resonance (used by GraphNode#filter).
+        def wrap(source, in_place: false)
+          MB::Sound::GraphNode::FourPole.new(source, self, cutoff: @cutoff, resonance: @resonance)
+        end
+
         def to_s
           "#{@mode}(#{@cutoff.round(2)} Hz, r=#{@resonance.round(3)}#{@drive > 0 ? ", drive #{@drive}" : ''}#{@self_oscillate ? ', self-osc' : ''})"
         end

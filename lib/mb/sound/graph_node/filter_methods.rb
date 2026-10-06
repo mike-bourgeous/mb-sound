@@ -22,9 +22,20 @@ module MB
         #     # High-pass filter controlled by envelopes
         #     MB::Sound.play 500.hz.ramp.filter(:highpass, frequency: adsr() * 1000 + 100, quality: adsr() * -5 + 6)
         #
+        #     # CEM3379-style 4-pole lowpass (see #lp4); takes resonance: 0..1
+        #     MB::Sound.play 110.hz.ramp.filter(:lp4, cutoff: 0.2.hz.lfo.at(300..3000), resonance: 0.7)
+        #
         # TODO: support SampleWrapper inputs argument
-        def filter(filter_or_type = :lowpass, cutoff: nil, quality: nil, gain: nil, in_place: false)
+        def filter(filter_or_type = :lowpass, cutoff: nil, quality: nil, gain: nil, resonance: nil, in_place: false)
           f = filter_or_type
+
+          if FOUR_POLE_TYPES.include?(f)
+            raise ArgumentError, 'Cutoff frequency must be given when creating a filter by type' if cutoff.nil?
+            raise ArgumentError, "Four-pole filters take resonance: 0..1, not quality: or gain:" if quality || gain
+            return lp4(cutoff, resonance: resonance || 0.0, mode: f == :four_pole ? :lp4 : f)
+          end
+          raise ArgumentError, "Only four-pole filters (#{FOUR_POLE_TYPES.join(', ')}) take resonance:" if resonance
+
           f = f.hz if f.is_a?(Numeric)
           f = f.lowpass if f.is_a?(Tone) || f.is_a?(Pitch)
 
@@ -73,6 +84,44 @@ module MB
             raise "Unsupported filter type: #{filter_or_type.inspect}"
           end
         end
+
+        # Filter types for #filter that make a four-pole filter (#lp4).
+        FOUR_POLE_TYPES = [:four_pole, :lp4, :lp2, :bp2, :bp4, :hp2, :hp4].freeze # Filter::FourPole::MODES
+
+        # A CEM3379-style 4-pole resonant lowpass (24 dB/octave), the filter
+        # of the Ensoniq SQ-80 and many analog polysynths (see
+        # MB::Sound::Filter::FourPole and GraphNode::FourPole).
+        #
+        # +cutoff+ is in Hz (a number, a Pitch such as `800.hz`, or a node,
+        # e.g. Notes#cutoff); +resonance+ is 0..1 (a number or node).  Both
+        # are read per sample, so audio-rate filter FM works.
+        #
+        # Like the SQ-80 it never self-oscillates by default: full resonance
+        # rings strongly and keeps most of the bass (about -6 dB, from the
+        # CEM3379's passband compensation; +compensation: 0+ gives the
+        # classic 12 dB loss).  +self_oscillate: true+ lets the top of the
+        # resonance range (above about 0.93) oscillate, with the drive's
+        # saturation (+drive:+ 1 unless given) setting the level.  +drive:+
+        # (nil = linear) saturates the cascade input: unity gain for small
+        # signals, softly limited above about 1 / drive.  +mode:+ picks
+        # another tap mix: :lp2, :bp2, :bp4, :hp2, :hp4.
+        #
+        # Examples:
+        #     play 110.hz.ramp.lp4(800, resonance: 0.6)
+        #     play 55.hz.ramp.lp4(0.25.hz.lfo.at(100..4000), resonance: 0.9, drive: 2)
+        #     # A synth voice (v from synth_script or midi.synth)
+        #     v.hz.saw.lp4(v.cutoff(300, keytrack: 1), resonance: 0.5) * v.amp_env
+        #     # Self-oscillating sine at the cutoff
+        #     play 0.constant.lp4(440, resonance: 1, self_oscillate: true)
+        def lp4(cutoff, resonance: 0.0, mode: :lp4, drive: nil, self_oscillate: false, compensation: nil)
+          f = MB::Sound::Filter::FourPole.new(
+            mode: mode, drive: drive, self_oscillate: self_oscillate, compensation: compensation,
+            sample_rate: sample_rate
+          )
+          MB::Sound::GraphNode::FourPole.new(self, f, cutoff: cutoff, resonance: resonance)
+        end
+        alias four_pole lp4
+        alias lowpass4 lp4
 
         # Adds a filter chain that applies parametric peaking EQ.  The +pairs+
         # parameter should be a Hash mapping a frequency in Hz (or a Tone) to a
