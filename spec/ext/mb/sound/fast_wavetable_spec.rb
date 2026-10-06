@@ -109,14 +109,27 @@ RSpec.describe(MB::Sound::FastWavetable, aggregate_failures: true) do
       end
     end
 
-    it 'takes 1 to 4 residual orders' do
-      t = w[:saw]
-      pulses = Numo::SFloat.zeros(n).tap { |z| z[[17, 100, 200]] = 0.4 }
-      out = (1..4).map { |o|
-        t.sync(Numo::SFloat.zeros(n), 1000.0, 1 / 48000.0, 1, 0, [0.0, 0.0, 1.0, 0, 0], Numo::DFloat.zeros(32), pulses, false, nil, 0, nil, 48000, true, true, orders: o).not_inplace!
-      }
-      expect((out[3] - out[1]).abs.max).to be > 1e-4
-      expect { t.sync(Numo::SFloat.zeros(n), 1000.0, 1 / 48000.0, 1, 0, [0.0, 0.0, 1.0, 0, 0], Numo::DFloat.zeros(32), pulses, false, nil, 0, nil, 48000, true, true, orders: 5) }.to raise_error(ArgumentError)
+    it 'keeps a synced saw table within its normal peaks at high pitches' do
+      # Truncated Taylor residuals (value, slope, curvature, third
+      # derivative) overshot to several times full scale near 2-3 kHz
+      [1000, 2500, 3000].each do |f|
+        tone = f.hz.wavetable(:saw).sync(ratio: 2.37)
+        data = Numo::SFloat.cast(Numo::NArray.concatenate(Array.new(12) { tone.sample(800).dup }))
+        expect(data.abs.max).to be < 1.3
+      end
+    end
+
+    it 'uses residual tables that start at 0 and settle to 1' do
+      g = w.sync_residuals
+      os = MB::Sound::BandLimit::SYNC_OVERSAMPLE
+      taps = MB::Sound::BandLimit::SYNC_TAPS
+      expect(g.shape).to eq([w::SYNC_RESIDUAL_ROWS, os + 2, taps])
+      expect(g[true, 0, 0].abs.max).to be < 1e-9
+      expect(g[true, os..(os + 1), -1].to_a.flatten.uniq).to eq([Complex(1, 0)]) # t = 32 and later
+      expect((g[true, true, -1] - 1).abs.max).to be < 1e-4 # nearly settled at t = 31
+      # The zero-frequency row is the minBLEP's step
+      step = MB::Sound::BandLimit.minblep_tables[0] + 1.0
+      expect(g[0, 5, true].real.to_a).to eq(step[(5...(5 + taps * os)).step(os).to_a].to_a)
     end
 
     it 'raises an error for a ring of the wrong size' do

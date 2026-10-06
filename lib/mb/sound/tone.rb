@@ -495,12 +495,13 @@ module MB
       # clean as far as the levels allow; warp corners get PolyBLAMP
       # corrections, and resets, timeline jumps, and hard or soft sync
       # (#sync, #softsync, real or complex tables) get minimum-phase steps
-      # measured on the table: for sync, residuals for the jumps in the
-      # value and its first three derivatives, which come exactly from the
-      # table's harmonics (Wavetable.sync_tables).  A synced saw table
-      # aliases -75 dB at 1 kHz and -57 dB at 3 kHz (a synced #ramp: -99 and
-      # -95; `.oversample(2)` gets the table to -90 and -70 at about 10% of
-      # realtime).  Sample-mode tables take no phase modulation, warp,
+      # measured on the table.  A synced table reads the table's sync levels
+      # (finely spaced, crossfaded continuously, every harmonic below 20 kHz;
+      # Wavetable#sync_levels), and each harmonic gets an exact
+      # minimum-phase residual at every sync event (Wavetable.sync_residuals,
+      # FastWavetable.sync): a synced saw table aliases -104 dB at 1 kHz and
+      # -100 dB at 3 kHz (a synced #ramp: -99 and -95) at about 0.3% of
+      # realtime for the kernel.  Sample-mode tables take no phase modulation, warp,
       # sync, or noise.  #noise reads a cycle table at random phases
       # (picking levels by the pitch), so it has the table's distribution
       # of values.
