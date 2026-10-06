@@ -101,15 +101,63 @@ RSpec.describe(MB::Sound::Tone, '#wavetable', aggregate_failures: true) do
       expect_c_and_ruby { 220.hz.wavetable(w.from_harmonics([1, 0.5, 0.25], complex: true)).sync(ratio: 2.5) }
     end
 
-    it 'syncs with band-limited steps' do
+    it 'syncs with exact band-limited residuals for every harmonic' do
       synced = aliasing_db(1365) { |p| p.wavetable(:saw).sync(ratio: 2.37) }
+      high = aliasing_db(4097) { |p| p.wavetable(:saw).sync(ratio: 2.37) }
+      sine = aliasing_db(4097) { |p| p.wavetable(:sine).sync(ratio: 2.37) }
       naive = aliasing_db(1365) { |p| p.wavetable(w.from_harmonics(w::Library.saw, mips: false)).sync(ratio: 2.37) }
-      expect(synced).to be < -70
+      expect(synced).to be < -100
+      expect(high).to be < -95
+      expect(sine).to be < -95
       expect(naive).to be > synced + 30
 
       complex = 220.hz.wavetable(w.from_harmonics(w::Library.saw(100), complex: true)).sync(ratio: 2.37).sample(800)
       expect(complex).to be_a(Numo::SComplex)
       expect(complex.imag.abs.max).to be > 0.1
+    end
+
+    it 'keeps synced tables within their normal peaks and brightness steady as the pitch rises' do
+      # Truncated Taylor residuals overshot to several times full scale at
+      # 2-3 kHz and brightened by up to 9% per semitone; octave levels
+      # stepped the brightness
+      hann = (1 - Numo::NMath.cos(Numo::DFloat.new(9600).seq * (2 * Math::PI / 9600))) * 0.5
+      bright = Array.new(13) { |i|
+        f = 1000 * 2**(i / 12.0)
+        tone = f.hz.wavetable(:saw).sync(ratio: 2.37)
+        tone.sample(4800)
+        data = Numo::DFloat.cast(Numo::NArray.concatenate(Array.new(12) { tone.sample(800).dup }))
+        expect(data.abs.max).to be < 1.3
+        pow = MB::Sound.real_fft(data * hann).abs**2
+        pow[0..2] = 0
+        freqs = Numo::DFloat.new(pow.length).seq * (24000.0 / (pow.length - 1))
+        (pow * freqs).sum / pow.sum / f
+      }
+      bright.each_cons(2) { |a, b| expect(b / a).to be_within(0.03).of(1) }
+    end
+
+    it 'keeps synced phase-warped tables within their normal peaks' do
+      # Taylor residuals reached 9.1 here (a sine table!); fast warp
+      # segments (pwm(0.1) at 4 kHz moves 0.99 cycles per sample) fall back
+      # to a minBLEP of the value jump
+      [[0.3, 4000], [0.1, 4000], [0.3, 1000]].each do |width, f|
+        tone = f.hz.wavetable(:sine).pwm(width).sync(ratio: 2.37)
+        tone.sample(4800)
+        data = Numo::NArray.concatenate(Array.new(6) { tone.sample(800).dup })
+        expect(data.abs.max).to be < 1.6
+      end
+    end
+
+    it 'gives synced tones finely spaced sync levels under the sync ceiling' do
+      t = w[:saw]
+      counts = t.sync_levels.map { |l| l.bandwidth.to_i }
+      expect(counts.last(8)).to eq([8, 7, 6, 5, 4, 3, 2, 1])
+      expect(counts.select { |c| c >= 8 }.each_cons(2).map { |a, b| a.to_f / b }.max).to be < 1.34
+      hi, lo = t.thresholds(48000, sync: true)
+      expect(hi[0] * counts[0]).to be_within(1e-12).of(20000.0 / 48000)
+      expect(lo[1...-1].to_a).to eq(hi[0...-2].to_a) # always crossfading
+      spec = t.kernel_spec(48000, nil, sync: true)
+      expect(spec[16]).to eq(counts)
+      expect(t.kernel_spec(48000, nil)[16]).to eq(t.levels.map { |l| l.bandwidth.to_i })
     end
 
     it 'band-limits the corners of a phase warp' do
@@ -138,15 +186,24 @@ RSpec.describe(MB::Sound::Tone, '#wavetable', aggregate_failures: true) do
       expect(amps[(1..127).map { |h| h * 10 }]).to all_be_within(1e-4).of_array(fourier)
     end
 
-    it 'plays the library saw at the level of a PolyBLEP ramp' do
+    it 'plays the library saw at the RMS level of a PolyBLEP ramp, with Gibbs peaks' do
       [55, 880].each do |f|
         t = f.hz.wavetable(:saw)
         r = f.hz.ramp
         a = Numo::DFloat.cast(Numo::NArray.concatenate(Array.new(12) { t.sample(800).dup }))
         b = Numo::DFloat.cast(Numo::NArray.concatenate(Array.new(12) { r.sample(800).dup }))
-        expect(a.abs.max).to be_within(0.08).of(b.abs.max)
-        expect(10 * Math.log10((a**2).mean / (b**2).mean)).to be_within(0.4).of(0)
+        expect(10 * Math.log10((a**2).mean / (b**2).mean)).to be_within(0.2).of(0)
+        expect(a.abs.max).to be_between(b.abs.max + 0.05, 1.2)
       end
+    end
+
+    it 'plays the sigma-tapered saw with peaks near the PolyBLEP ramp' do
+      t = 55.hz.wavetable(w.from_harmonics(w::Library.saw, taper: :sigma))
+      r = 55.hz.ramp
+      a = Numo::DFloat.cast(Numo::NArray.concatenate(Array.new(12) { t.sample(800).dup }))
+      b = Numo::DFloat.cast(Numo::NArray.concatenate(Array.new(12) { r.sample(800).dup }))
+      expect(a.abs.max).to be_within(0.05).of(b.abs.max)
+      expect(10 * Math.log10((a**2).mean / (b**2).mean)).to be_within(0.4).of(0)
     end
 
     it 'aliases far less than naive and PolyBLEP ramps' do

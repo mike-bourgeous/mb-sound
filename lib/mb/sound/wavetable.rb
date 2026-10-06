@@ -55,6 +55,13 @@ module MB
     # 20 kHz); a sample plays its own level, unfiltered, up to its root
     # pitch.
     #
+    # Synced tones (Tone#sync) read separate sync levels (#sync_levels):
+    # every harmonic count up to 8, then a quarter octave apart, with every
+    # harmonic below 20 kHz (#sync_ceiling; sync spreads each harmonic's
+    # spectrum, so none may fold back from above Nyquist), always
+    # crossfading into the next level, so brightness follows the pitch
+    # smoothly instead of stepping every octave.
+    #
     # == Interpolation
     #
     # +interpolation:+ :none (drop-sample, lo-fi), :linear, :cubic
@@ -477,13 +484,16 @@ module MB
       # loop start, 12 loop end, 13 end (source samples), 14 GUARD, 15 the
       # harmonic spectra for exact derivatives (cycle mode; see
       # #derivative_spectra), 16 the harmonic count of each level, 17 the
-      # taper (1 for :sigma, else 0).
-      def kernel_spec(sample_rate, interpolation = nil)
+      # taper (1 for :sigma, else 0).  With +sync+ (band-limited cycle
+      # tables), the levels and thresholds are the sync levels' (see
+      # #sync_levels and FastWavetable.sync).
+      def kernel_spec(sample_rate, interpolation = nil, sync: false)
         emphasis = emphasis?(interpolation)
+        sync = false unless sync && @mode == :cycle && @spacing
         by_rate = @kernel_specs[sample_rate] ||= {}
-        by_rate[emphasis] ||= begin
-          hi, lo = thresholds(sample_rate)
-          levels, loop_levels = level_set(emphasis)
+        by_rate[[emphasis, sync]] ||= begin
+          hi, lo = thresholds(sample_rate, sync: sync)
+          levels, loop_levels = sync ? [sync_level_set(emphasis), nil] : level_set(emphasis)
           [
             @mode == :cycle ? 0 : 1,
             @frame_count,
@@ -518,18 +528,58 @@ module MB
       end
 
       # [hi, lo] level thresholds (DFloat, increments per sample) for
-      # +sample_rate+ (see #kernel_spec and the class description).
-      def thresholds(sample_rate)
-        top = ceiling(sample_rate)
-        bw = levels.map(&:bandwidth)
+      # +sample_rate+ (see #kernel_spec and the class description).  With
+      # +sync+, for the sync levels: under #sync_ceiling, each level
+      # crossfading into the next all the way from the level above's
+      # threshold (see #sync_levels).
+      def thresholds(sample_rate, sync: false)
+        top = sync ? sync_ceiling(sample_rate) : ceiling(sample_rate)
+        bw = (sync ? sync_levels : levels).map(&:bandwidth)
         hi = bw.map { |b| b.finite? ? top / b : Float::INFINITY }
         lo = hi.each_with_index.map { |h, k|
           next h if k == hi.length - 1
 
           below = k > 0 ? hi[k - 1] : 0.0
-          [below, h * 2.0**-LEVEL_FADE, h * bw[k + 1] / bw[k]].max
+          sync ? below : [below, h * 2.0**-LEVEL_FADE, h * bw[k + 1] / bw[k]].max
         }
         [Numo::DFloat.cast(hi), Numo::DFloat.cast(lo)]
+      end
+
+      # The highest frequency, in cycles per sample at +sample_rate+, of the
+      # harmonics of a synced tone's levels: AUDIBLE_LIMIT, at most
+      # SYNC_BAND (where the residuals of FastWavetable.sync can still undo
+      # the minBLEP's own response).  Sync spreads every harmonic's spectrum,
+      # so harmonics may not fold back from above Nyquist as in #ceiling.
+      def sync_ceiling(sample_rate)
+        [AUDIBLE_LIMIT / sample_rate, SYNC_BAND].min
+      end
+
+      # Cycle mode with levels: the levels synced tones read (built on first
+      # use, for +interpolation+ as for #levels): every harmonic count up to
+      # SYNC_ALL_COUNTS, then SYNC_SPACING apart, so a synced tone's
+      # brightness, crossfaded continuously between them, doesn't step as
+      # its pitch moves (sync usually runs a tone high, where octave levels
+      # have only a few harmonics each).
+      def sync_levels(interpolation = nil)
+        sync_level_set(emphasis?(interpolation))
+      end
+
+      # The sync levels with or without +emphasis+ (see #sync_levels).
+      def sync_level_set(emphasis)
+        raise ArgumentError, 'Only band-limited cycle tables have sync levels' unless @mode == :cycle && @spacing
+
+        @sync_levels ||= {}
+        @sync_levels[emphasis] ||= begin
+          counts_for = ->(spacing) { (Builder.level_harmonics(harmonics, spacing) | (1..[SYNC_ALL_COUNTS, harmonics].min).to_a).sort.reverse }
+          spacing = SYNC_SPACING
+          counts = counts_for.(spacing)
+          while counts.length > MAX_LEVELS
+            spacing *= 1.1 # very long frames: wider spacing to stay within the kernels' level limit
+            counts = counts_for.(spacing)
+          end
+          datas, lengths, bandwidths = Builder.cycle_levels(@spectra, counts, @complex, emphasis, @taper)
+          datas.each_with_index.map { |d, k| d.freeze; Level.new(d, lengths[k], lengths[k].to_f, bandwidths[k]) }.freeze
+        end
       end
 
       # Cycle mode: the value at +phase+ (cycles) and +scan+ (0..1) for a
@@ -573,60 +623,87 @@ module MB
         )
       end
 
-      # Hard (or +soft+) synced cycle-mode oscillator in C, band-limited
-      # with minimum-phase residuals for the jumps in the table's value and
-      # its first +orders+ - 1 derivatives (see .sync_tables) unless
-      # +band_limit+ is false: like #oscillate, with +sync_state+ and
-      # +pulses+ as for FastSynth.oscillate_sync and +ring+ a DFloat of
-      # BandLimit::SYNC_TAPS pending corrections (twice that for complex
-      # tables).  See Tone#sync.
-      def sync(out, freq, advance, gain, offset, sync_state, ring, pulses, soft, width, scan, interpolation, sample_rate, remove_dc, band_limit = true, orders: SYNC_ORDERS)
+      # Hard (or +soft+) synced cycle-mode oscillator in C: like #oscillate,
+      # with +sync_state+ and +pulses+ as for FastSynth.oscillate_sync and
+      # +ring+ a DFloat of BandLimit::SYNC_TAPS pending corrections (twice
+      # that for complex tables).  Unless +band_limit+ is false, the tone
+      # reads the sync levels (#sync_levels) and each harmonic gets an exact
+      # minimum-phase residual at every sync event (see .sync_residuals and
+      # FastWavetable.sync).  See Tone#sync.
+      def sync(out, freq, advance, gain, offset, sync_state, ring, pulses, soft, width, scan, interpolation, sample_rate, remove_dc, band_limit = true)
         MB::Sound::FastWavetable.sync(
-          out, kernel_spec(sample_rate, interpolation), freq, advance.to_f, gain.to_f, offset.to_f, sync_state, ring,
-          pulses, !!soft, width, scan, interpolation_code(interpolation), !!remove_dc, Wavetable.sync_tables(orders),
-          BandLimit::SYNC_OVERSAMPLE, BandLimit::SYNC_TAPS, !!band_limit, sinc_kernel(interpolation)
+          out, kernel_spec(sample_rate, interpolation, sync: band_limit), freq, advance.to_f, gain.to_f, offset.to_f, sync_state, ring,
+          pulses, !!soft, width, scan, interpolation_code(interpolation), !!remove_dc, Wavetable.sync_residuals,
+          BandLimit.minblep_tables[0], BandLimit::SYNC_OVERSAMPLE, BandLimit::SYNC_TAPS, !!band_limit, SYNC_RESIDUAL_LIMIT, sinc_kernel(interpolation)
         )
       end
 
       # Ruby mirror of #sync.
-      def sync_ruby(out, freq, advance, gain, offset, sync_state, ring, pulses, soft, width, scan, interpolation, sample_rate, remove_dc, band_limit = true, orders: SYNC_ORDERS)
+      def sync_ruby(out, freq, advance, gain, offset, sync_state, ring, pulses, soft, width, scan, interpolation, sample_rate, remove_dc, band_limit = true)
         KernelRuby.sync(
-          out, kernel_spec(sample_rate, interpolation), freq, advance.to_f, gain.to_f, offset.to_f, sync_state, ring,
-          pulses, !!soft, width, scan, interpolation_code(interpolation), !!remove_dc, Wavetable.sync_tables(orders),
-          BandLimit::SYNC_OVERSAMPLE, BandLimit::SYNC_TAPS, !!band_limit
+          out, kernel_spec(sample_rate, interpolation, sync: band_limit), freq, advance.to_f, gain.to_f, offset.to_f, sync_state, ring,
+          pulses, !!soft, width, scan, interpolation_code(interpolation), !!remove_dc, Wavetable.sync_residuals,
+          BandLimit.minblep_tables[0], BandLimit::SYNC_OVERSAMPLE, BandLimit::SYNC_TAPS, !!band_limit, SYNC_RESIDUAL_LIMIT
         )
       end
 
-      # The number of sync residuals (value, slope, curvature, third
-      # derivative) that synced tables use (see .sync_tables).
-      SYNC_ORDERS = 4
+      # The most levels a table may have (WT_MAX_LEVELS in the kernels).
+      MAX_LEVELS = 64
 
-      # Minimum-phase residual tables for sync events (FastWavetable.sync):
-      # the first +orders+ of BandLimit.minblep_tables' step and ramp, then
-      # each next one the integral of the one before (a band-limited
-      # parabola t^2 / 2, then cubic t^3 / 6), minus its final value times
-      # the band-limited step so it settles exactly on the ideal curve.
-      def self.sync_tables(orders = SYNC_ORDERS)
-        @sync_tables ||= begin
-          blep, blamp = BandLimit.minblep_tables
+      # Synced tones' levels: every harmonic count up to this one...
+      SYNC_ALL_COUNTS = 8
+
+      # ...then this ratio apart (a quarter octave; see #sync_levels).
+      SYNC_SPACING = 2.0**0.25
+
+      # The highest harmonic frequency of synced tones' levels in cycles per
+      # sample (see #sync_ceiling): the minBLEP passes 0.89 there.
+      SYNC_BAND = 0.42
+
+      # Harmonics moving faster than this (cycles per sample; fast phase warp
+      # segments) get no exact sync residual, only a minBLEP for their value
+      # jump: past it the minBLEP's response H(f) is too small to divide out.
+      SYNC_RESIDUAL_LIMIT = 0.45
+
+      # Rows of .sync_residuals (frequencies 0 to 0.5 cycles per sample;
+      # FastWavetable.sync reads the nearest row).
+      SYNC_RESIDUAL_ROWS = 129
+
+      # The minimum-phase residuals of switching on a complex exponential
+      # (FastWavetable.sync): G(f, t) = (sum of h(s) e^(-2 pi i f s) for s
+      # < t) / H(f), with h the impulse of BandLimit.minblep_tables' step
+      # (its differences at the oversampled points, at their midpoints) and
+      # H(f) its whole sum, so G(0, t) is the step and G(f, t) is 1 from
+      # BandLimit::SYNC_TAPS samples on.  A contiguous 3D DComplex of
+      # [SYNC_RESIDUAL_ROWS frequencies from 0 to 0.5 cycles per sample,
+      # SYNC_OVERSAMPLE + 2 fractional offsets p, SYNC_TAPS taps j] for t =
+      # p / SYNC_OVERSAMPLE + j, so the taps the kernel reads for an event
+      # are contiguous.
+      def self.sync_residuals
+        @sync_residuals ||= begin
           os = BandLimit::SYNC_OVERSAMPLE
+          taps = BandLimit::SYNC_TAPS
+          blep, _ = BandLimit.minblep_tables
           step = blep + 1.0
-          list = [blep, blamp]
-          (WT_SYNC_EXTRA).times do
-            r = list.last.cumsum / os
-            r = r - r[-1] * step
-            r[-1] = 0.0
-            list << r.freeze
+          h = step[1..] - step[0...-1]
+          s = (Numo::DFloat.new(h.length).seq + 0.5) / os
+          flat = Numo::DComplex.ones(SYNC_RESIDUAL_ROWS, step.length + os + 1)
+          SYNC_RESIDUAL_ROWS.times do |r|
+            f = r * 0.5 / (SYNC_RESIDUAL_ROWS - 1)
+            c = (h * Numo::NMath.exp(s * Complex(0, -2 * Math::PI * f))).cumsum
+            flat[r, 0] = 0
+            flat[r, 1...step.length] = c / c[-1]
           end
-          list.freeze
+          flat[0, 0...step.length] = step
+          flat[true, step.length - 1] = 1.0
+
+          g = Numo::DComplex.zeros(SYNC_RESIDUAL_ROWS, os + 2, taps)
+          (os + 2).times do |p|
+            g[true, p, true] = flat[true, (p...(p + taps * os)).step(os).to_a]
+          end
+          g.freeze
         end
-        raise ArgumentError, "Sync orders must be 1 to #{SYNC_ORDERS}" unless orders.between?(1, SYNC_ORDERS)
-
-        @sync_tables[0...orders]
       end
-
-      # Residual tables beyond BandLimit's step and ramp.
-      WT_SYNC_EXTRA = SYNC_ORDERS - 2
 
       # Phase-driven lookup in C: fills +out+ from +phase+ (cycles, an
       # NArray) with +increments+ (cycles per sample for picking levels: an
