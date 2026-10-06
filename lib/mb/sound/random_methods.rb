@@ -14,7 +14,7 @@ module MB
     #
     # Users so far: Tone#random_phase (alias #rnd), Synth (per-lane seeds
     # through #with_seed).  Older randomness keeps its own generators for
-    # now: Oscillator::RAND / Phasor::RAND / Noise::RAND (noise), Clip seeds
+    # now: Tone::RAND (Ruby noise mirror) / Noise::RAND (noise), Clip seeds
     # (probability, #permute), and Reverb/FdnReverb seeds; they could move to
     # sub-seeds from here later.
     module RandomMethods

@@ -101,7 +101,7 @@ module ToneReferenceCases
     'negative_freq' => -> { render(-440.hz.ramp.at(0.5)) },
     'tone_new' => -> { render(S::Tone.new(wave_type: :triangle, frequency: 330, amplitude: 0.5)) },
     'tone_bracket' => -> { render(S::Tone[220].ramp) },
-    'oscillator_direct' => -> { render(S::Oscillator.new(:triangle, frequency: 330, range: -0.5..0.5)) },
+    'oscillator_direct' => -> { render(S::Tone.new(wave_type: :triangle, frequency: 330).atriangle.at(-0.5..0.5)) }, # was Oscillator.new(:triangle, frequency: 330, range: -0.5..0.5)
 
     # Warps
     'pulse' => -> { render(1760.hz.pulse(0.25).at(0.5)) },

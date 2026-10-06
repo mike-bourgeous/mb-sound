@@ -42,7 +42,7 @@ MB::Sound.effect_script(
   feedback: [-0.3, 'Feedback gain'],
   hz: [-0.7, 'LFO frequency (negative runs the waveform backward)'],
   depth: [0.35, 'LFO depth as a fraction of the delay'],
-  wave: [:sine, 'LFO waveform', MB::Sound::Oscillator::WAVE_TYPES],
+  wave: [:sine, 'LFO waveform', MB::Sound::Tone::WAVE_TYPES],
   smoothing: [nil, Float, 'Max delay change rate in seconds per second (default: none)'],
   dry: [1.0, 'Dry (input) level'],
   wet: [1.0, 'Wet (flanged) level'],

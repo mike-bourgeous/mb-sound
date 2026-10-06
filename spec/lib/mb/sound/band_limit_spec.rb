@@ -12,8 +12,19 @@ RSpec.describe(MB::Sound::BandLimit) do
     10 * Math.log10(pow[nonharm].sum / pow[harm].sum)
   end
 
-  def oscillator(wave, rate: 48000, **opts)
-    MB::Sound::Oscillator.new(wave, advance: 2 * Math::PI / rate, band_limit: true, **opts)
+  # A Tone for kernel tests (the former low-level Oscillator): +band_limit+
+  # true (default), false (naive a* shapes), or BandLimit::LFO_FADE (#lfo).
+  def oscillator(wave, rate: 48000, frequency: 440, band_limit: true, phase_mod: nil, width: nil, sync: nil, soft_sync: false)
+    t = MB::Sound::Tone.new(wave_type: wave, frequency: frequency, sample_rate: rate)
+    t.send(:set_wave, wave, !!band_limit)
+    if band_limit.is_a?(Range)
+      raise 'Only BandLimit::LFO_FADE (Tone#lfo)' unless band_limit == MB::Sound::BandLimit::LFO_FADE
+      t.lfo
+    end
+    t.pm(phase_mod) if phase_mod
+    t.pwm(width) if width
+    soft_sync ? t.softsync(sync) : t.sync(sync) if sync
+    t
   end
 
   describe 'C and Ruby versions' do
@@ -30,10 +41,10 @@ RSpec.describe(MB::Sound::BandLimit) do
 
           it 'give identical samples with frequency and phase modulation, including moving backward' do
             make = -> {
-              fm = MB::Sound::ArrayInput.new(data: [Numo::SFloat.new(4800).seq * 3 + 50]).with_buffer(480)
+              fm = MB::Sound::ArrayInput.new(data: [Numo::SFloat.new(4800).seq * 3 + 50], sample_rate: rate).with_buffer(480)
               # 30 radians of phase modulation at ~200 Hz moves the phase
               # backward through edges
-              pm = MB::Sound::ArrayInput.new(data: [Numo::SFloat.cast(Numo::DFloat.new(4800).seq.map { |i| 30 * Math.sin(i / 37.0) })]).with_buffer(480)
+              pm = MB::Sound::ArrayInput.new(data: [Numo::SFloat.cast(Numo::DFloat.new(4800).seq.map { |i| 30 * Math.sin(i / 37.0) })], sample_rate: rate).with_buffer(480)
               oscillator(wave, rate: rate, frequency: fm, phase_mod: pm)
             }
             c = make.call
@@ -44,7 +55,7 @@ RSpec.describe(MB::Sound::BandLimit) do
           end
 
           it 'give identical samples while fading band-limiting in' do
-            fm = -> { MB::Sound::ArrayInput.new(data: [Numo::SFloat.new(4800).seq * 0.01 + 10]).with_buffer(800) }
+            fm = -> { MB::Sound::ArrayInput.new(data: [Numo::SFloat.new(4800).seq * 0.01 + 10], sample_rate: rate).with_buffer(800) }
             c = oscillator(wave, rate: rate, frequency: fm.call, band_limit: 15..30)
             r = oscillator(wave, rate: rate, frequency: fm.call, band_limit: 15..30)
             6.times do
@@ -89,7 +100,7 @@ RSpec.describe(MB::Sound::BandLimit) do
   end
 
   it 'is not used for noise' do
-    expect(1.hz.ramp.noise.oscillator.band_limited?).to eq(false)
+    expect(1.hz.ramp.noise.band_limited?).to eq(false)
   end
 
   describe 'Tone#lfo' do
@@ -114,7 +125,7 @@ RSpec.describe(MB::Sound::BandLimit) do
   describe 'DSL' do
     it 'band-limits Tone ramp, square, and triangle by default' do
       [:ramp, :saw, :sawtooth, :square, :triangle].each do |wave|
-        expect(100.hz.send(wave).oscillator.band_limited?).to eq(true), wave.to_s
+        expect(100.hz.send(wave).band_limited?).to eq(true), wave.to_s
       end
     end
 
@@ -122,24 +133,24 @@ RSpec.describe(MB::Sound::BandLimit) do
       { aramp: :ramp, asaw: :ramp, asawtooth: :ramp, asquare: :square, atriangle: :triangle }.each do |name, wave|
         tone = 100.hz.send(name)
         expect(tone.wave_type).to eq(wave)
-        expect(tone.oscillator.band_limited?).to eq(false), name.to_s
+        expect(tone.band_limited?).to eq(false), name.to_s
         expect(tone.to_s).to include(name.to_s.sub(/saw(tooth)?\z/, 'ramp'))
       end
     end
 
     it 'can switch after the oscillator was made' do
       tone = 100.hz.ramp
-      expect(tone.oscillator.band_limited?).to eq(true)
+      expect(tone.band_limited?).to eq(true)
       tone.aramp
-      expect(tone.oscillator.band_limited?).to eq(false)
+      expect(tone.band_limited?).to eq(false)
       tone.square
-      expect(tone.oscillator.band_limited?).to eq(true)
-      expect(tone.oscillator.wave_type).to eq(:square)
+      expect(tone.band_limited?).to eq(true)
+      expect(tone.wave_type).to eq(:square)
     end
 
-    it 'leaves the low-level Oscillator naive unless asked' do
-      expect(MB::Sound::Oscillator.new(:ramp).band_limited?).to eq(false)
-      expect(MB::Sound::Oscillator.new(:ramp, band_limit: true).band_limited?).to eq(true)
+    it 'is set by the shape name' do
+      expect(MB::Sound::Tone.new(wave_type: :ramp).band_limited?).to eq(true)
+      expect(MB::Sound::Tone.new(wave_type: :ramp).aramp.band_limited?).to eq(false)
     end
   end
 
@@ -153,7 +164,7 @@ RSpec.describe(MB::Sound::BandLimit) do
             3.times { expect(c.sample_c(333)).to eq(r.sample_ruby(333)) }
 
             make = -> {
-              w = MB::Sound::ArrayInput.new(data: [Numo::SFloat.cast(Numo::DFloat.new(4800).seq.map { |i| 0.5 + 0.49 * Math.sin(i / 97.0) })]).with_buffer(480)
+              w = MB::Sound::ArrayInput.new(data: [Numo::SFloat.cast(Numo::DFloat.new(4800).seq.map { |i| 0.5 + 0.49 * Math.sin(i / 97.0) })], sample_rate: rate).with_buffer(480)
               oscillator(wave, rate: rate, frequency: 777, width: w, band_limit: bl)
             }
             c = make.call
@@ -203,7 +214,7 @@ RSpec.describe(MB::Sound::BandLimit) do
       {
         ->(t) { t.square.pwm(0.25) } => ->(t) { t.asquare.pwm(0.25) },
         ->(t) { t.triangle.skew(0.1) } => ->(t) { t.atriangle.skew(0.1) },
-        ->(t) { t.sine.pwm(0.15) } => ->(t) { t.sine.pwm(0.15).tap { |x| x.oscillator.band_limit = false } },
+        ->(t) { t.sine.pwm(0.15) } => ->(t) { t.sine.pwm(0.15).tap { |x| x.send(:set_wave, :sine, false) } },
       }.each do |clean, naive|
         expect(nonharmonic_db(clean.call(f.hz.tone), k, n: n)).to be < nonharmonic_db(naive.call(f.hz.tone), k, n: n) - 10
       end
@@ -242,7 +253,7 @@ RSpec.describe(MB::Sound::BandLimit) do
 
   describe 'complex BLIT' do
     def blit_osc(wave, rate: 48000, **opts)
-      MB::Sound::Oscillator.new(wave, advance: 2 * Math::PI / rate, band_limit: true, **opts)
+      oscillator(wave, rate: rate, **opts)
     end
 
     [48000, 44100].each do |rate|
@@ -252,7 +263,7 @@ RSpec.describe(MB::Sound::BandLimit) do
           r = blit_osc(wave, rate: rate, frequency: 1234.5)
           [333, 1, 800].each { |n| expect(c.sample_c(n)).to eq(r.sample_ruby(n)) }
 
-          make = -> { blit_osc(wave, rate: rate, frequency: MB::Sound::ArrayInput.new(data: [Numo::SFloat.new(4800).seq * 3 + 50]).with_buffer(480)) }
+          make = -> { blit_osc(wave, rate: rate, frequency: MB::Sound::ArrayInput.new(data: [Numo::SFloat.new(4800).seq * 3 + 50], sample_rate: rate).with_buffer(480)) }
           c = make.call
           r = make.call
           5.times { expect(c.sample_c(480)).to eq(r.sample_ruby(480)) }
@@ -265,7 +276,7 @@ RSpec.describe(MB::Sound::BandLimit) do
         n = 16384
         k = 1025 # ~3 kHz
         tone = (k * 48000.0 / n).hz.send(wave)
-        expect(tone.oscillator.blit?).to eq(true)
+        expect(tone.blit?).to eq(true)
         tone.sample(4800)
         spec = Numo::Pocketfft.fft(Numo::DComplex.cast(tone.sample(n))).abs**2
         harm = Numo::Bit.zeros(n)
@@ -285,23 +296,22 @@ RSpec.describe(MB::Sound::BandLimit) do
     end
 
     it 'falls back to the naive complex wave with phase modulation' do
-      expect(100.hz.complex_ramp.pm(3.hz.at(1)).oscillator.blit?).to eq(false)
+      expect(100.hz.complex_ramp.pm(3.hz.at(1)).blit?).to eq(false)
     end
 
     it 'has naive versions named acomplex_*' do
       [:acomplex_ramp, :acomplex_square, :acomplex_triangle].each do |name|
         tone = 100.hz.send(name)
-        expect(tone.oscillator.blit?).to eq(false)
+        expect(tone.blit?).to eq(false)
         expect(tone.to_s).to include(name.to_s)
       end
     end
 
     it 'starts again without a transient after a phase reset' do
-      osc = blit_osc(:complex_triangle, frequency: 440)
+      trigger = MB::Sound::ArrayInput.new(data: [Numo::SFloat.zeros(1800).tap { |t| t[1000] = 1 }])
+      osc = blit_osc(:complex_triangle, frequency: 440).reset(trigger)
       fresh = blit_osc(:complex_triangle, frequency: 440)
-      osc.sample(1000)
-      osc.reset
-      expect(osc.sample(800)).to eq(fresh.sample(800))
+      expect(osc.sample(1800)[1000..]).to eq(fresh.sample(800))
     end
   end
 
@@ -324,11 +334,8 @@ RSpec.describe(MB::Sound::BandLimit) do
         [false, true].each do |soft|
           it "gives identical C and Ruby samples for a #{soft ? 'soft' : 'hard'}-synced, warped #{wave} at #{rate} Hz" do
             make = -> {
-              master = MB::Sound::Phasor.new(frequency: 110.0, sample_rate: rate)
-              MB::Sound::Oscillator.new(
-                wave, frequency: 271.3, advance: 2 * Math::PI / rate, band_limit: true,
-                width: 0.4, sync: master.wraps, soft_sync: soft
-              )
+              master = MB::Sound::Pitch.new(110.0, sample_rate: rate).phasor
+              oscillator(wave, rate: rate, frequency: 271.3, width: 0.4, sync: master.wraps, soft_sync: soft)
             }
             c = make.call
             r = make.call
@@ -371,7 +378,7 @@ RSpec.describe(MB::Sound::BandLimit) do
       expect(falling.max).to be < 0
     end
 
-    it 'accepts a Pitch, Tone, Phasor, or trigger node as master' do
+    it 'accepts a Pitch, Tone, phasor, or trigger node as master' do
       expect(MB::Sound::C3.saw.sync(MB::Sound::C2).sample(800).abs.max).to be_between(0.5, 1.5)
       master = 110.hz.square
       slave = 333.hz.ramp.sync(master)
@@ -379,7 +386,7 @@ RSpec.describe(MB::Sound::BandLimit) do
         expect(master.sample(800).length).to eq(800)
         expect(slave.sample(800).length).to eq(800)
       end
-      expect(220.hz.ramp.sync(MB::Sound::Phasor.new(frequency: 100)).sample(800).length).to eq(800)
+      expect(220.hz.ramp.sync(100.hz.phasor).sample(800).length).to eq(800)
 
       trigger = MB::Sound::ArrayInput.new(data: [Numo::SFloat.zeros(800).tap { |t| t[100] = 1; t[500] = 1 }])
       data = 1000.hz.aramp.sync(trigger).sample(800)
@@ -406,16 +413,19 @@ RSpec.describe(MB::Sound::BandLimit) do
   end
 
   describe 'phase jumps (note retriggers, timeline locks)' do
+    # Triggers at +indices+ (repeating every +length+ samples if +repeat+).
+    def trig(length, *indices, repeat: false)
+      MB::Sound::ArrayInput.new(data: [Numo::SFloat.zeros(length).tap { |t| indices.each { |i| t[i] = 1 } }], repeat: repeat)
+    end
+
     def bl_osc(**opts)
-      MB::Sound::Oscillator.new(:ramp, frequency: 1001.3, advance: 2 * Math::PI / 48000, band_limit: true, **opts)
+      oscillator(:ramp, frequency: 1001.3, **opts)
     end
 
     it 'turns a reset into a band-limited step that starts at the continuing value' do
       continuing = bl_osc.sample(31).dup[30]
-      o = bl_osc
-      o.sample(30)
-      o.reset
-      after = o.sample(40).dup
+      o = bl_osc.reset(trig(70, 30))
+      after = o.sample(70).dup[30..]
       expect(after[0]).to be_within(0.01).of(continuing)
 
       # After the step, the same as an oscillator started at that phase
@@ -424,36 +434,28 @@ RSpec.describe(MB::Sound::BandLimit) do
     end
 
     it 'leaves naive and slow LFO oscillators jumping' do
-      o = MB::Sound::Oscillator.new(:ramp, frequency: 1001.3, advance: 2 * Math::PI / 48000)
-      o.sample(30)
-      o.reset
-      expect(o.sample(1)[0]).to eq(0)
+      o = oscillator(:ramp, frequency: 1001.3, band_limit: false).reset(trig(31, 30))
+      expect(o.sample(31)[30]).to eq(0)
 
-      lfo = MB::Sound::Oscillator.new(:ramp, frequency: 5.3, advance: 2 * Math::PI / 48000, band_limit: 15..30)
-      lfo.sample(3000)
-      lfo.reset
-      expect(lfo.sample(1)[0]).to be_within(1e-6).of(0)
+      lfo = oscillator(:ramp, frequency: 5.3, band_limit: MB::Sound::BandLimit::LFO_FADE).reset(trig(3001, 3000))
+      expect(lfo.sample(3001)[3000]).to be_within(1e-6).of(0)
     end
 
     it 'reduces the high-frequency energy of repeated retriggers' do
       energy = ->(o) {
-        data = Numo::DFloat.cast(Numo::SFloat.zeros(0).concatenate(*Array.new(64) { o.sample(256).dup.tap { o.reset } }))
+        data = Numo::DFloat.cast(Numo::SFloat.zeros(0).concatenate(*Array.new(64) { o.sample(256).dup }))
         pow = MB::Sound.real_fft(data).abs**2
         pow[(18000.0 / 48000 * data.length).ceil..].sum
       }
-      clean = energy.(bl_osc)
-      naive = energy.(MB::Sound::Oscillator.new(:ramp, frequency: 1001.3, advance: 2 * Math::PI / 48000))
+      clean = energy.(bl_osc.reset(trig(256, 0, repeat: true)))
+      naive = energy.(oscillator(:ramp, frequency: 1001.3, band_limit: false).reset(trig(256, 0, repeat: true)))
       expect(10 * Math.log10(clean / naive)).to be < -6
     end
 
     it 'gives the same step in C and Ruby' do
-      c = bl_osc
-      r = bl_osc
-      c.sample_c(30)
-      r.sample_ruby(30)
-      c.reset
-      r.reset
-      expect(c.sample_c(50)).to eq(r.sample_ruby(50))
+      c = bl_osc.reset(trig(80, 30))
+      r = bl_osc.reset(trig(80, 30))
+      expect(c.sample_c(80)).to eq(r.sample_ruby(80))
     end
 
     it 'smooths Tone#sync_cycles (tempo LFO phase locks)' do

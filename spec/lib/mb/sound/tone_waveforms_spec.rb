@@ -1,8 +1,21 @@
-RSpec.describe MB::Sound::Oscillator do
-  [:value_at, :value_at_c, :value_at_ruby].each do |method|
-    describe "##{method}" do
+# Waveform values and sampling of Tone (formerly the Oscillator specs;
+# Oscillator was folded into Tone).
+RSpec.describe MB::Sound::Tone do
+  [:value_at, :value_at_ruby].each do |method|
+    describe ".#{method}" do
+      let(:method_name) { method }
+
+      # Calls Tone.value_at(wave, phi) as wave.send(method, phi)
+      def wave(type)
+        m = method_name
+        Struct.new(:type) do
+          define_method(:value_at) { |phi| MB::Sound::Tone.value_at(type, phi) }
+          define_method(m) { |phi| MB::Sound::Tone.public_send(m, type, phi) }
+        end.new(type)
+      end
+
       it 'returns expected sine wave values for given phases' do
-        lfo = MB::Sound::Oscillator.new(:sine)
+        lfo = wave(:sine)
         expect(lfo.send(method, 0).round(6)).to eq(0)
         expect(lfo.send(method, 0.25 * Math::PI).round(6)).to eq((0.5 ** 0.5).round(6))
         expect(lfo.send(method, 0.5 * Math::PI).round(6)).to eq(1)
@@ -12,7 +25,7 @@ RSpec.describe MB::Sound::Oscillator do
       end
 
       it 'returns expected triangle wave values for given phases' do
-        lfo = MB::Sound::Oscillator.new(:triangle)
+        lfo = wave(:triangle)
         expect(lfo.send(method, 0).round(6)).to eq(0)
         expect(lfo.send(method, 0.125 * Math::PI).round(6)).to eq(0.25)
         expect(lfo.send(method, 0.25 * Math::PI).round(6)).to eq(0.5)
@@ -26,7 +39,7 @@ RSpec.describe MB::Sound::Oscillator do
       end
 
       it 'returns expected ramp wave values for given phases' do
-        lfo = MB::Sound::Oscillator.new(:ramp)
+        lfo = wave(:ramp)
         expect(lfo.send(method, 0).round(6)).to eq(0)
         expect(lfo.send(method, 0.125 * Math::PI).round(6)).to eq(0.125)
         expect(lfo.send(method, 0.25 * Math::PI).round(6)).to eq(0.25)
@@ -41,7 +54,7 @@ RSpec.describe MB::Sound::Oscillator do
       end
 
       it 'returns expected square wave values for given phases' do
-        lfo = MB::Sound::Oscillator.new(:square)
+        lfo = wave(:square)
         expect(lfo.send(method, 0).round(6)).to eq(1)
         expect(lfo.send(method, 0.125 * Math::PI).round(6)).to eq(1)
         expect(lfo.send(method, 0.25 * Math::PI).round(6)).to eq(1)
@@ -54,7 +67,7 @@ RSpec.describe MB::Sound::Oscillator do
       end
 
       it 'returns expected complex sine values' do
-        o = MB::Sound::Oscillator.new(:complex_sine)
+        o = wave(:complex_sine)
         expect(MB::M.round(o.send(method, 0), 6)).to eq(0-1i)
         expect(MB::M.round(o.send(method, 45.degrees), 6)).to eq(MB::M.round(CMath.exp(-45i.degrees), 6))
         expect(MB::M.round(o.send(method, 90.degrees), 6)).to eq(1+0i)
@@ -63,7 +76,7 @@ RSpec.describe MB::Sound::Oscillator do
       end
 
       it 'returns expected complex square values' do
-        o = MB::Sound::Oscillator.new(:complex_square)
+        o = wave(:complex_square)
         expect(MB::M.round(o.send(method, 45.degrees), 6).real).to eq(1)
         expect(MB::M.round(o.send(method, 45.degrees), 6).imag).to be < 0.25
 
@@ -82,25 +95,25 @@ RSpec.describe MB::Sound::Oscillator do
       end
 
       it 'wraps around phase for triangle' do
-        o = MB::Sound::Oscillator.new(:triangle)
+        o = wave(:triangle)
         expect(MB::M.round(o.send(method, 0.1), 6)).to eq(MB::M.round(o.send(method, 2*Math::PI + 0.1), 6))
         expect(MB::M.round(o.send(method, -0.1), 6)).to eq(MB::M.round(o.send(method, 2*Math::PI - 0.1), 6))
       end
 
       it 'wraps around phase for gauss' do
-        o = MB::Sound::Oscillator.new(:gauss)
+        o = wave(:gauss)
         expect(MB::M.round(o.send(method, 0.1), 6)).to eq(MB::M.round(o.send(method, 2*Math::PI + 0.1), 6))
         expect(MB::M.round(o.send(method, -0.1), 6)).to eq(MB::M.round(o.send(method, 2*Math::PI - 0.1), 6))
       end
 
       it 'wraps around phase for square' do
-        o = MB::Sound::Oscillator.new(:square)
+        o = wave(:square)
         expect(o.send(method, 0.1)).to eq(o.value_at(2*Math::PI + 0.1))
         expect(o.send(method, -0.1)).to eq(o.value_at(2*Math::PI - 0.1))
       end
 
       it 'wraps around phase for parabola' do
-        o = MB::Sound::Oscillator.new(:parabola)
+        o = wave(:parabola)
         expect(MB::M.round(o.send(method, 0.1), 6)).to eq(MB::M.round(o.send(method, 2*Math::PI + 0.1), 6))
         expect(MB::M.round(o.send(method, -0.1), 6)).to eq(MB::M.round(o.send(method, 2*Math::PI - 0.1), 6))
       end
@@ -112,117 +125,54 @@ RSpec.describe MB::Sound::Oscillator do
 
   [:sample, :sample_ruby, :sample_c].each do |method|
     describe "##{method}" do
+      # A naive tone at 1 Hz and +rate+ samples per second, so each sample
+      # advances by 1 / rate cycles.
+      def slow(wave, rate, **opts)
+        MB::Sound::Tone.new(wave_type: wave, frequency: 1, sample_rate: rate, **opts).tap { |t| t.send(:set_wave, wave, false) }
+      end
+
+      def one(tone, method)
+        tone.send(method, 1)[0]
+      end
+
       it 'returns a different value on subsequent calls' do
-        lfo = MB::Sound::Oscillator.new(:sine)
-        result = lfo.sample
+        lfo = 1.hz.sine
+        result = one(lfo, method)
         5.times do
           old_result = result
-          result = lfo.sample
+          result = one(lfo, method)
           expect(result).not_to eq(old_result)
         end
       end
 
       it 'returns the expected sequence for a faster advancing sine wave' do
-        lfo = MB::Sound::Oscillator.new(:sine, advance: 0.25 * Math::PI)
-        expect(lfo.send(method).round(6)).to eq(0)
-        expect(lfo.send(method).round(6)).to eq((0.5 ** 0.5).round(6))
-        expect(lfo.send(method).round(6)).to eq(1)
-        expect(lfo.send(method).round(6)).to eq((0.5 ** 0.5).round(6))
-        expect(lfo.send(method).round(6)).to eq(0)
-        expect(lfo.send(method).round(6)).to eq(-(0.5 ** 0.5).round(6))
-        expect(lfo.send(method).round(6)).to eq(-1)
-        expect(lfo.send(method).round(6)).to eq(-(0.5 ** 0.5).round(6))
-        expect(lfo.send(method).round(6)).to eq(0)
+        lfo = slow(:sine, 8)
+        r = 0.5 ** 0.5
+        expect(9.times.map { one(lfo, method).round(6) }).to eq([0, r, 1, r, 0, -r, -1, -r, 0].map { |v| v.round(6) })
       end
 
       it 'returns the expected sequence for a faster advancing triangle wave' do
-        lfo = MB::Sound::Oscillator.new(:triangle, advance: 0.25 * Math::PI)
-        expect(lfo.send(method).round(6)).to eq(0)
-        expect(lfo.send(method).round(6)).to eq(0.5)
-        expect(lfo.send(method).round(6)).to eq(1)
-        expect(lfo.send(method).round(6)).to eq(0.5)
-        expect(lfo.send(method).round(6)).to eq(0)
-        expect(lfo.send(method).round(6)).to eq(-0.5)
-        expect(lfo.send(method).round(6)).to eq(-1)
-        expect(lfo.send(method).round(6)).to eq(-0.5)
-        expect(lfo.send(method).round(6)).to eq(0)
+        lfo = slow(:triangle, 8)
+        expect(9.times.map { one(lfo, method).round(6) }).to eq([0, 0.5, 1, 0.5, 0, -0.5, -1, -0.5, 0])
       end
 
       it 'scales to a different range' do
-        lfo = MB::Sound::Oscillator.new(:triangle, range: 2..5, advance: 0.25 * Math::PI)
-        expect(lfo.send(method).round(6)).to eq(3.5)
-        expect(lfo.send(method).round(6)).to eq(4.25)
-        expect(lfo.send(method).round(6)).to eq(5)
-        expect(lfo.send(method).round(6)).to eq(4.25)
-        expect(lfo.send(method).round(6)).to eq(3.5)
-        expect(lfo.send(method).round(6)).to eq(2.75)
-        expect(lfo.send(method).round(6)).to eq(2)
-        expect(lfo.send(method).round(6)).to eq(2.75)
-        expect(lfo.send(method).round(6)).to eq(3.5)
-      end
-
-      it 'includes pre_power' do
-        lfo = MB::Sound::Oscillator.new(:triangle, pre_power: 0.5, advance: 0.125 * Math::PI)
-
-        expect(lfo.send(method).round(6)).to eq(0)
-        expect(lfo.send(method).round(6)).to eq((0.25 ** 0.5).round(6))
-        expect(lfo.send(method).round(6)).to eq((0.5 ** 0.5).round(6))
-        expect(lfo.send(method).round(6)).to eq((0.75 ** 0.5).round(6))
-        expect(lfo.send(method).round(6)).to eq(1)
-        expect(lfo.send(method).round(6)).to eq((0.75 ** 0.5).round(6))
-        expect(lfo.send(method).round(6)).to eq((0.5 ** 0.5).round(6))
-        expect(lfo.send(method).round(6)).to eq((0.25 ** 0.5).round(6))
-        expect(lfo.send(method).round(6)).to eq(0)
-        expect(lfo.send(method).round(6)).to eq(-(0.25 ** 0.5).round(6))
-        expect(lfo.send(method).round(6)).to eq(-(0.5 ** 0.5).round(6))
-        expect(lfo.send(method).round(6)).to eq(-(0.75 ** 0.5).round(6))
-        expect(lfo.send(method).round(6)).to eq(-1)
-        expect(lfo.send(method).round(6)).to eq(-(0.75 ** 0.5).round(6))
-        expect(lfo.send(method).round(6)).to eq(-(0.5 ** 0.5).round(6))
-        expect(lfo.send(method).round(6)).to eq(-(0.25 ** 0.5).round(6))
-        expect(lfo.send(method).round(6)).to eq(0)
-      end
-
-      it 'clamps values with negative pre_power' do
-        lfo = MB::Sound::Oscillator.new(:triangle, pre_power: -100)
-        expect(lfo.send(method).round(6)).to eq(-1.0)
-        expect(lfo.send(method).round(6)).to eq(1.0)
-      end
-
-      it 'applies pre_power before scaling' do
-        lfo = MB::Sound::Oscillator.new(:triangle, range: 2..4, pre_power: 0.5, advance: 0.25 * Math::PI)
-        expect(lfo.send(method).round(6)).to eq(3)
-        expect(lfo.send(method).round(6)).to eq((3 + 0.5 ** 0.5).round(6))
-        expect(lfo.send(method).round(6)).to eq(4)
-        expect(lfo.send(method).round(6)).to eq((3 + 0.5 ** 0.5).round(6))
-        expect(lfo.send(method).round(6)).to eq(3)
-        expect(lfo.send(method).round(6)).to eq((3 - 0.5 ** 0.5).round(6))
-        expect(lfo.send(method).round(6)).to eq(2)
-        expect(lfo.send(method).round(6)).to eq((3 - 0.5 ** 0.5).round(6))
-        expect(lfo.send(method).round(6)).to eq(3)
-      end
-
-      it 'applies post_power after scaling' do
-        lfo = MB::Sound::Oscillator.new(:triangle, range: 2..4, post_power: 2, advance: 0.5 * Math::PI)
-        expect(lfo.send(method).round(6)).to eq(9)
-        expect(lfo.send(method).round(6)).to eq(16)
-        expect(lfo.send(method).round(6)).to eq(9)
-        expect(lfo.send(method).round(6)).to eq(4)
-        expect(lfo.send(method).round(6)).to eq(9)
+        lfo = slow(:triangle, 8).at(2..5)
+        expect(9.times.map { one(lfo, method).round(6) }).to eq([3.5, 4.25, 5, 4.25, 3.5, 2.75, 2, 2.75, 3.5])
       end
 
       it 'takes phase into account' do
-        lfo = MB::Sound::Oscillator.new(:square, phase: 0.9 * Math::PI, advance: 0.2 * Math::PI)
-        expect(lfo.send(method)).to eq(1)
-        expect(lfo.send(method)).to eq(-1)
+        lfo = slow(:square, 10).with_phase(0.9 * Math::PI)
+        expect(one(lfo, method)).to eq(1)
+        expect(one(lfo, method)).to eq(-1)
 
-        lfo = MB::Sound::Oscillator.new(:square, phase: 1.5 * Math::PI, advance: Math::PI)
-        expect(lfo.send(method)).to eq(-1)
-        expect(lfo.send(method)).to eq(1)
+        lfo = slow(:square, 2).with_phase(1.5 * Math::PI)
+        expect(one(lfo, method)).to eq(-1)
+        expect(one(lfo, method)).to eq(1)
       end
 
       it 'can generate more than one sample' do
-        oscil = MB::Sound::Oscillator.new(:sine, frequency: 100, advance: Math::PI / 24000)
+        oscil = 100.hz.sine
         data = oscil.send(method, 48000)
         expect(data.length).to eq(48000)
         expect(data.min.round(3)).to eq(-1)
@@ -231,7 +181,7 @@ RSpec.describe MB::Sound::Oscillator do
       end
 
       it 'produces expected square wave output for a low sample rate' do
-        oscil = 1.hz.asquare.at(0.5).at_rate(50).oscillator
+        oscil = 1.hz.asquare.at(0.5).at_rate(50)
         expect(oscil.send(method, 25)).to eq(Numo::SFloat.zeros(25).fill(0.5))
         expect(oscil.send(method, 25)).to eq(Numo::SFloat.zeros(25).fill(-0.5))
         expect(oscil.send(method, 25)).to eq(Numo::SFloat.zeros(25).fill(0.5))
@@ -239,7 +189,7 @@ RSpec.describe MB::Sound::Oscillator do
       end
 
       it 'produces expected square wave output for a moderate sample rate' do
-        oscil = 1.hz.asquare.at_rate(1600).at(1).oscillator
+        oscil = 1.hz.asquare.at_rate(1600).at(1)
         expect(oscil.send(method, 800)).to eq(Numo::SFloat.zeros(800).fill(1))
         expect(oscil.send(method, 800)).to eq(Numo::SFloat.zeros(800).fill(-1))
         expect(oscil.send(method, 800)).to eq(Numo::SFloat.zeros(800).fill(1))
@@ -247,7 +197,7 @@ RSpec.describe MB::Sound::Oscillator do
       end
 
       it 'matches the analytic signal for a complex sine wave' do
-        oscil = 240.hz.complex_sine.at(1).oscillator
+        oscil = 240.hz.complex_sine.at(1)
         result = oscil.send(method, 1600)
         target = Numo::SComplex.cast(MB::Sound.analytic_signal(240.hz.at(1).sample(1600)))
 
@@ -255,7 +205,7 @@ RSpec.describe MB::Sound::Oscillator do
       end
 
       it 'matches the analytic signal for a complex square wave (approximately)' do
-        oscil = 240.hz.acomplex_square.at(1).oscillator
+        oscil = 240.hz.acomplex_square.at(1)
         result = oscil.send(method, 1600)
         # 240Hz at 48kHz puts square wave transitions exactly on samples, so
         # sample 6400 + i of the reference has the same phase as sample i
@@ -270,7 +220,7 @@ RSpec.describe MB::Sound::Oscillator do
       end
 
       it 'matches the analytic signal for a complex triangle wave (approximately)' do
-        oscil = 240.hz.acomplex_triangle.at(1).oscillator
+        oscil = 240.hz.acomplex_triangle.at(1)
         result = oscil.send(method, 1600)
         target = Numo::SComplex.cast(MB::Sound.analytic_signal(240.hz.atriangle.at(1).sample(16000))[6400...8000])
 
@@ -283,7 +233,7 @@ RSpec.describe MB::Sound::Oscillator do
       end
 
       it 'matches the analytic signal for a complex ramp wave (approximately)' do
-        oscil = 240.hz.acomplex_ramp.at(1).oscillator
+        oscil = 240.hz.acomplex_ramp.at(1)
         result = oscil.send(method, 1600)
 
         base = MB::Sound.analytic_signal(120.hz.aramp.at(1).sample(32000)).reshape(16000, 2)[nil, 1] # shift 240hz by half sample
@@ -298,11 +248,11 @@ RSpec.describe MB::Sound::Oscillator do
       end
 
       it 'truncates output for short reads on frequency' do
-        expect(0.constant.until(0.0001).tone.oscillator.send(method, 48000)).to eq(Numo::SFloat.zeros(5))
+        expect(0.constant.until(0.0001).tone.send(method, 48000)).to eq(Numo::SFloat.zeros(5))
       end
 
       it 'truncates output for short reads on phase' do
-        expect(0.hz.pm(0.constant.until(0.0001)).oscillator.send(method, 48000)).to eq(Numo::SFloat.zeros(5))
+        expect(0.hz.pm(0.constant.until(0.0001)).send(method, 48000)).to eq(Numo::SFloat.zeros(5))
       end
 
       it 'raises an error if truncation happens twice' do
@@ -330,70 +280,31 @@ RSpec.describe MB::Sound::Oscillator do
     end
   end
 
-  describe '#phi=' do
-    let (:oscil) {
-      MB::Sound::Oscillator.new(:sine, frequency: 0)
-    }
-
-    it 'can change the oscillator phase' do
-      # Check twice to make sure frequency is at 0
-      expect(oscil.sample.round(5)).to eq(0)
-      expect(oscil.sample.round(5)).to eq(0)
-
-      oscil.phi += 90.degrees
-      expect(oscil.sample.round(5)).to eq(1)
-
-      oscil.phi += 90.degrees
-      expect(oscil.sample.round(5)).to eq(0)
-
-      oscil.phi += 90.degrees
-      expect(oscil.sample.round(5)).to eq(-1)
-
-      oscil.phi += 45.degrees
-      expect(oscil.sample.round(5)).to eq(-(0.5 ** 0.5).round(5))
-
-      oscil.phi += 45.degrees
-      expect(oscil.sample.round(5)).to eq(0)
+  describe '#phi' do
+    it 'gives the starting phase before playing, wrapped to 0..2pi' do
+      expect(1.hz.with_phase(362.degrees).phi.round(5)).to eq(2.degrees.round(5))
+      expect(1.hz.with_phase(-2.degrees).phi.round(5)).to eq(358.degrees.round(5))
     end
 
-    it 'clamps phase to 0..2pi' do
-      oscil.phi = 362.degrees
-      expect(oscil.phi.round(5)).to eq(2.degrees.round(5))
-      oscil.phi = -2.degrees
-      expect(oscil.phi.round(5)).to eq(358.degrees.round(5))
+    it 'follows the phase while playing' do
+      t = MB::Sound::Tone.new(frequency: 1, sample_rate: 4)
+      t.sample(1)
+      expect(t.phi).to be_within(1e-12).of(Math::PI / 2)
     end
   end
 
-  describe '#phase=' do
-    let (:oscil) {
-      MB::Sound::Oscillator.new(:sine, frequency: 0)
-    }
+  describe '#state' do
+    it 'holds everything that changes from sample to sample' do
+      make = -> { 1001.hz.ramp.fm(70.hz.at(80)).reset(MB::Sound::ArrayInput.new(data: [Numo::SFloat.zeros(173).tap { |t| t[37] = 1 }], repeat: true)).at(0.5) }
+      a = make.call
+      a.sample(150)
 
-    it 'shifts the current phase by the difference in starting phases' do
-      # The phase is kept in cycles (see Phasor), so radians round slightly
-      oscil.phi = 1
-      oscil.phase = 1
-      expect(oscil.phi).to be_within(1e-12).of(2)
-
-      oscil.phase = 0
-      oscil.phi = 0
-      oscil.phase = -10
-      expect(oscil.phi).to be_within(1e-12).of(-10 % (Math::PI * 2))
-    end
-  end
-
-  describe '#reset' do
-    let (:oscil) {
-      MB::Sound::Oscillator.new(:sine, frequency: 0)
-    }
-
-    it 'sets the phase to its initial phase' do
-      oscil.phi = 1
-      oscil.reset
-      expect(oscil.phi).to eq(0)
-      oscil.phase = 2
-      oscil.reset
-      expect(oscil.phi).to eq(2)
+      # A new tone with a copy of a's state plays on exactly like a (its
+      # inputs are new, so they restart: read them to the same place)
+      b = make.call
+      b.sample(150)
+      b.instance_variable_set(:@state, MB::Sound::Tone::State.new(**a.state.to_h))
+      expect(b.sample(400)).to eq(a.sample(400))
     end
   end
 end

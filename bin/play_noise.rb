@@ -32,7 +32,27 @@ class NoiseGenerator
     wave: '34',
   }
 
-  LFO_ADVANCE = Math::PI * 0.001 * HOP_SIZE / 300
+  # The LFOs' sample rate: one sample per hop, slowed down
+  LFO_RATE = 2 * Math::PI / (Math::PI * 0.001 * HOP_SIZE / 300)
+
+  # A slow naive LFO (a Tone sampled once per hop) with power shaping: the
+  # value raised to +pre_power+ (keeping its sign), scaled from -1..1 to
+  # +range+, then raised to +post_power+.
+  LFO = Struct.new(:tone, :range, :pre_power, :post_power) do
+    def self.make(wave, frequency:, phase:, range: nil, pre_power: 1, post_power: 1)
+      tone = MB::Sound::Tone.new(wave_type: wave, frequency: frequency, phase: phase, sample_rate: LFO_RATE)
+      tone = tone.atriangle if wave == :triangle
+      new(tone, range, pre_power, post_power)
+    end
+
+    def sample
+      v = tone.sample(1)[0]
+      v = MB::M.safe_power(v, pre_power) if pre_power != 1
+      v = MB::M.scale(v, -1.0..1.0, range) if range
+      v = MB::M.safe_power(v, post_power) if post_power != 1
+      v
+    end
+  end
 
   RAND = Random.new
 
@@ -61,14 +81,14 @@ class NoiseGenerator
 
   def make_lfos
     [
-      MB::Sound::Oscillator.new(:triangle, frequency: 0.89 + RAND.rand(0.2), phase: RAND.rand(1.5), advance: LFO_ADVANCE),
-      MB::Sound::Oscillator.new(:triangle, frequency: 1.1 + RAND.rand(0.2), phase: RAND.rand(1.5) + 1.3, advance: LFO_ADVANCE),
-      MB::Sound::Oscillator.new(:triangle, frequency: 1.901 + RAND.rand(0.2), phase: RAND.rand(1.5), range: 0.0..0.6, post_power: 0.55, advance: LFO_ADVANCE),
-      MB::Sound::Oscillator.new(:sine, frequency: 1.3153 + RAND.rand(0.2), phase: RAND.rand(1.5) - 1, pre_power: 0.5, advance: LFO_ADVANCE),
-      MB::Sound::Oscillator.new(:sine, frequency: 0.788 + RAND.rand(0.2), phase: RAND.rand(1.5) + 4.25, pre_power: 0.7, range: -0.5..0.5, advance: LFO_ADVANCE),
-      MB::Sound::Oscillator.new(:sine, frequency: 2.02 + RAND.rand(0.2), phase: RAND.rand(1.5) - 2, range: -0.5..0.5, advance: LFO_ADVANCE),
-      MB::Sound::Oscillator.new(:triangle, frequency: 0.7554 + RAND.rand(0.2), phase: RAND.rand(1.5) + 0.5, pre_power: 0.75, advance: LFO_ADVANCE),
-      MB::Sound::Oscillator.new(:triangle, frequency: 0.45 + RAND.rand(0.2), phase: RAND.rand(1.5) + 3, pre_power: 0.8, advance: LFO_ADVANCE),
+      LFO.make(:triangle, frequency: 0.89 + RAND.rand(0.2), phase: RAND.rand(1.5)),
+      LFO.make(:triangle, frequency: 1.1 + RAND.rand(0.2), phase: RAND.rand(1.5) + 1.3),
+      LFO.make(:triangle, frequency: 1.901 + RAND.rand(0.2), phase: RAND.rand(1.5), range: 0.0..0.6, post_power: 0.55),
+      LFO.make(:sine, frequency: 1.3153 + RAND.rand(0.2), phase: RAND.rand(1.5) - 1, pre_power: 0.5),
+      LFO.make(:sine, frequency: 0.788 + RAND.rand(0.2), phase: RAND.rand(1.5) + 4.25, pre_power: 0.7, range: -0.5..0.5),
+      LFO.make(:sine, frequency: 2.02 + RAND.rand(0.2), phase: RAND.rand(1.5) - 2, range: -0.5..0.5),
+      LFO.make(:triangle, frequency: 0.7554 + RAND.rand(0.2), phase: RAND.rand(1.5) + 0.5, pre_power: 0.75),
+      LFO.make(:triangle, frequency: 0.45 + RAND.rand(0.2), phase: RAND.rand(1.5) + 3, pre_power: 0.8),
     ]
   end
 

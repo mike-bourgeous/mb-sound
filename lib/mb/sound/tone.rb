@@ -1,32 +1,349 @@
-require 'forwardable'
-
 module MB
   module Sound
-    # Representation of a tone to generate or play.  Uses MB::Sound::Oscillator
-    # for tone generation.
+    # An oscillator: a graph node that generates a waveform at a frequency
+    # (Hz, or a node), with optional phase modulation, phase warp (pulse
+    # width), hard or soft sync, reset inputs, and band-limiting.  It is also
+    # the oscillator DSL: methods like #ramp, #at, #fm, #pm, #lfo, #pwm,
+    # #sync, #reset, and #rnd configure it before it plays and return self,
+    # so a tone is built by chaining:
+    #
+    #     play 440.hz.saw.at(0.3).fm(110.hz.at(200))
+    #
+    # Usually made from a Pitch (`440.hz`, `C4`, `1.beat.hz`, `v.hz` in a
+    # synth voice; see Pitch, Note, Notes::NotePitch), or as `Tone.new` /
+    # `Tone[frequency]`.
+    #
+    # A tone is configured before it plays; values that change while it
+    # plays come from its inputs (frequency, phase modulation, width, sync,
+    # reset, and reset target nodes; use a Constant or any node for a value
+    # that changes).  Configuration calls after the first sample raise
+    # (see #configure).  #sample_rate= (e.g. from Session#add or
+    # #oversample) works at any time.
+    #
+    # Everything that changes from sample to sample is in #state (a
+    # Tone::State: the phase in cycles, band-limiting history, the queued
+    # phase-jump step, the random phase generator, ...), so the node
+    # itself only holds configuration and caches.
+    #
+    # == Waveforms
+    #
+    # Shapes are WAVE_TYPES (see #sine, #ramp, ...).  Ramp, square, and
+    # triangle are band-limited by default (PolyBLEP/PolyBLAMP; see
+    # BandLimit) and have naive (aliased) twins (#aramp, #asquare,
+    # #atriangle); complex ramp, square, and triangle are closed-form
+    # band-limited impulse trains (BLIT) with naive twins.  A #phasor tone
+    # outputs its phase in cycles (0...1) instead of a shape, e.g. for
+    # wavetables and as a sync master.
+    #
+    # == Per-sample math as plan-layer ops
+    #
+    # Each buffer runs these steps (the shape planned for fused plans; see
+    # the plan-layer notes), each a C kernel with an exact Ruby mirror
+    # (#sample_c and #sample_ruby):
+    #
+    # 1. Inputs: read +count+ samples of each input node (frequency, phase
+    #    modulation, width, sync pulses, reset triggers, reset targets);
+    #    numbers are constants.  A plan would read them from registers.
+    # 2. SPLIT (control): nonzero reset trigger samples split the buffer into
+    #    segments; before each reset sample the phase jumps (a JUMP).
+    #    Buffers without resets are one segment (one scan of the triggers).
+    # 3. PHASE: inc[i] = freq[i] * advance (+ random * random_advance for
+    #    noise); phase[i] = wrap(phase0 + sum(inc[0...i])) in cycles, double
+    #    precision; state.phase[0] is phase0 and becomes the next phase.
+    # 4. SHAPE (fused with PHASE in each kernel): one of
+    #    - naive: shape(wave, phase[i] + pm[i]) (FastSound.oscillate);
+    #    - band-limited: the naive shape plus PolyBLEP/BLAMP corrections at
+    #      edges of the warped, modulated phase, with state.blep carrying
+    #      the previous sample (FastSynth.oscillate_bl);
+    #    - BLIT: integrated complex impulse trains, state.blit carrying the
+    #      integrators (FastSynth.blit);
+    #    - SYNC: phase driven by sync pulses with minBLEP/minBLAMP events in
+    #      state.sync and state.sync_ring (FastSynth.oscillate_sync);
+    #    - PHASOR: the phase itself (FastSound.phasor).
+    # 5. GAIN (fused into the kernel): y = v * gain + offset, from #at.
+    # 6. JUMP: a phase jump (reset input, timeline lock) of a band-limited
+    #    tone queues a minBLEP/minBLAMP step from the old waveform to the
+    #    new (state.jump_residual); queued steps are added as y += r * gain.
+    # 7. PORTS (when used): wraps/increment from the frame's phases
+    #    (BandLimit.sync_pulses with state.pulses).
+    #
+    # == Ports
+    #
+    # #wraps gives sync pulses (see BandLimit.sync_pulses) and #increment
+    # the phase increment of each sample in cycles (see GraphNode::Ports).
     class Tone
-      extend Forwardable
-
       include GraphNode
       include GraphNode::SampleRateHelper
+      include GraphNode::Ports
+
+      port :wraps, 'Sync pulses: 0 except just after the phase wraps, where the value 1 - d (0 < 1 - d <= 1) says the wrap was d samples earlier; negative when moving backward; 1 after a jump (reset or sync)'
+      port :increment, 'The phase increment of each sample, in cycles'
+
+      TWOPI = Math::PI * 2.0
+
+      # Random numbers for the Ruby mirror of noise (#sample_ruby; the C
+      # kernels use drand48).
+      RAND = ENV['RANDOM_SEED'] ? Random.new(Integer(ENV['RANDOM_SEED'])) : Random.new
+
+      # Waveform shapes (see #sine, #ramp, ...).  A #phasor tone has the
+      # wave type :phasor instead.
+      WAVE_TYPES = [
+        :sine,
+        :complex_sine,
+        :square,
+        :complex_square,
+        :triangle,
+        :complex_triangle,
+        :ramp,
+        :complex_ramp,
+        :gauss,
+        :parabola,
+      ].freeze
+
+      # Buffer type for each wave type; anything not here uses
+      # Numo::SFloat.
+      BUFFER_CLASS = {
+        complex_sine: Numo::SComplex,
+        complex_square: Numo::SComplex,
+        complex_triangle: Numo::SComplex,
+        complex_ramp: Numo::SComplex,
+      }.freeze
+
+      # The band-limiting fade band for band-limiting that is always on.
+      ALWAYS = [0.0, 0.0].freeze
 
       attr_reader :wave_type, :frequency, :amplitude, :range, :wavelength, :phase
       attr_reader :period, :period_samples
       attr_reader :amplitude_set
 
+      # The phase modulation source (radians; a number or node), or nil.
+      attr_reader :phase_mod
+
+      # The phase warp width (see #pwm), or nil.
+      attr_reader :width
+
+      # The sync pulse source (see #sync), or nil.
+      attr_reader :sync_source
+
+      # Whether #softsync was used (sync reverses the phase).
+      attr_reader :soft_sync
+
+      # The seed of this tone's random phase generator (see #random_phase),
+      # or nil if none has been set or drawn.
+      attr_reader :seed
+
       # Shortcut for creating a new tone with the given frequency source, for
       # building more complex FM signal graphs.
       def self.[](frequency)
-        MB::Sound::Tone.new(frequency: frequency)
+        new(frequency: frequency)
+      end
+
+      # Returns the value of +wave_type+ at phase +phi+ (radians), from -1 to
+      # 1 (C).
+      def self.value_at(wave_type, phi)
+        MB::FastSound.osc(wave_type, phi)
+      end
+
+      # Ruby version of .value_at.
+      def self.value_at_ruby(wave_type, phi)
+        case wave_type
+        when :sine
+          s = Math.sin(phi)
+
+        when :complex_sine
+          s = CMath.exp(1i * (phi - Math::PI / 2))
+
+        when :triangle
+          phi %= TWOPI
+
+          if phi < 0.5 * Math::PI
+            # Initial rise from 0..1 in 0..pi/2
+            s = phi * 2.0 / Math::PI
+          elsif phi < 1.5 * Math::PI
+            # Fall from 1..-1 in pi/2..3pi/2
+            s = 2.0 - phi * 2.0 / Math::PI
+          else
+            # Final rise from -1..0 in 3pi/2..2pi
+            s = phi * 2.0 / Math::PI - 4.0
+          end
+
+        when :complex_triangle
+          # The constant factor scales the triangle portion to a range of -1..1.
+          # In Sage:
+          #     f = integrate(-2*atanh(e^(i*x)), x)
+          #     limit(f, x = 0)
+          #     # -pi*log(2) + I*dilog(2)
+          #
+          # The -pi*log(2) cancels the real part of dilog(2) leaving:
+          #     (-pi*log(2) + I*dilog(2)).n()
+          #     # 2.46740110027234*I
+          s = MB::M.csc_int_int(phi + Math::PI / 2) * 1i / 2.46740110027234
+
+        when :square
+          phi %= TWOPI
+
+          if phi < Math::PI
+            s = 1.0
+          else
+            s = -1.0
+          end
+
+        when :complex_square
+          # Note: to draw a rectangle in the polar view, the phase needs to be
+          # shifted by one half sample.  This is done in #sample.
+          s = 2.0 * MB::M.csc_int(phi).conj * 1i / Math::PI + 1.0
+          unless s.finite?
+            s = 2.0 * MB::M.csc_int(phi + 0.0000001).conj * 1i / Math::PI + 1.0
+          end
+
+          # Experimentally obtained clipping values to preserve approximate timbre
+          s = Complex(s.real, -3.8) if s.imag < -3.8
+          s = Complex(s.real, 3.8) if s.imag > 3.8
+
+        when :ramp
+          phi %= TWOPI
+
+          if phi < Math::PI
+            # Initial rise from 0..1 in 0..pi
+            s = phi / Math::PI
+          else
+            # Final rise from -1..0 in pi..2pi
+            s = phi / Math::PI - 2.0
+          end
+
+        when :complex_ramp
+          s = MB::M.cot_int(phi + Math::PI / 2) * 1i
+
+          # Experimentally obtained clipping values to preserve approximate timbre
+          s = Complex(s.real, -3.5) if s.imag < -3.5
+          s = Complex(s.real, 3.5) if s.imag > 3.5
+
+        when :gauss
+          phi %= TWOPI
+
+          # Sideways Gaussian attempt 2
+          # This has an approximately Gaussian distribution, but the crest
+          # factor when generating noise is 16dB instead of the expected 14dB,
+          # and the min and max do not go to infinity.
+          #
+          # TODO: see if there's a better way to calculate this same function
+          x = phi / Math::PI
+          if x < 1.0
+            # 1.6487212707 is ~Math.sqrt(Math::E)
+            s = (Math.sqrt(2 * Math.log(1.6487212707 / (1.0 - x))) - 1) * 0.7071067811865476
+          else
+            s = (-Math.sqrt(2 * Math.log(1.6487212707 / (x - 1.0))) + 1) * 0.7071067811865476
+          end
+
+          # Clamp range to prevent periodic clicks when we get infinity at phi=pi
+          s = -3 if s < -3
+          s = 3 if s > 3
+
+        when :parabola
+          phi %= TWOPI
+
+          if phi < Math::PI
+            s = 1.0 - (1.0 - phi * 2.0 / Math::PI) ** 2
+          else
+            s = (phi * 2.0 / Math::PI - 3.0) ** 2 - 1.0
+          end
+
+        else
+          raise "Invalid wave type #{wave_type.inspect}"
+        end
+
+        s
+      end
+
+      # Wraps an NArray of radians to 0...2pi like Ruby's % (Numo's % keeps
+      # the sign of negative values, like C's fmod).  Same as wrap() in
+      # fast_sound.c.
+      def self.wrap_radians(radians)
+        radians - (radians / TWOPI).floor * TWOPI
+      end
+
+      # Returns +wave_type+ at +phases+ (cycles, a DFloat NArray) plus
+      # +phase_mod+ (radians; Numeric or NArray), as a DFloat or DComplex
+      # NArray.  +increments+ (cycles; Numeric or NArray) offset complex
+      # square and ramp waves by half an increment.  Ruby version of
+      # MB::FastSound.shape (fast_sound.c), vectorized with Numo where the
+      # formula allows; see .value_at_ruby for the formulas.
+      def self.shape_ruby(wave_type, phases, increments, phase_mod)
+        radians = phases * TWOPI
+        radians = radians + increments * Math::PI if wave_type == :complex_square || wave_type == :complex_ramp
+        radians = radians + phase_mod if phase_mod
+
+        case wave_type
+        when :sine
+          Numo::NMath.sin(radians)
+
+        when :complex_sine
+          # exp(i * (phi - pi / 2)) = sin(phi) - i * cos(phi)
+          Numo::NMath.sin(radians) - Numo::NMath.cos(radians) * 1i
+
+        when :triangle
+          phi = wrap_radians(radians)
+          s = phi * (2.0 / Math::PI)
+          falling = phi.ge(0.5 * Math::PI) & phi.lt(1.5 * Math::PI)
+          s[falling] = 2.0 - s[falling]
+          s[phi.ge(1.5 * Math::PI)] -= 4.0
+          s
+
+        when :square
+          phi = wrap_radians(radians)
+          s = Numo::DFloat.ones(phi.length)
+          s[phi.ge(Math::PI)] = -1.0
+          s
+
+        when :ramp
+          phi = wrap_radians(radians)
+          s = phi / Math::PI
+          s[phi.ge(Math::PI)] -= 2.0
+          s
+
+        when :parabola
+          t = wrap_radians(radians) * (2.0 / Math::PI)
+          s = 1.0 - (1.0 - t)**2
+          upper = t.ge(2.0)
+          s[upper] = (t[upper] - 3.0)**2 - 1.0
+          s
+
+        when :gauss
+          x = wrap_radians(radians) / Math::PI
+          s = Numo::DFloat.zeros(x.length)
+          lower = x.lt(1.0)
+          upper = ~lower
+          s[lower] = (Numo::NMath.sqrt(Numo::NMath.log(1.6487212707 / (1.0 - x[lower])) * 2) - 1) * 0.7071067811865476 if lower.count_true > 0
+          s[upper] = (-Numo::NMath.sqrt(Numo::NMath.log(1.6487212707 / (x[upper] - 1.0)) * 2) + 1) * 0.7071067811865476 if upper.count_true > 0
+          s.clip(-3, 3)
+
+        when :complex_triangle, :complex_square, :complex_ramp
+          # These use complex integrals per sample (see .value_at_ruby)
+          Numo::DComplex.cast(radians.to_a.map { |phi| value_at_ruby(wave_type, phi) })
+
+        else
+          raise "Invalid wave type #{wave_type.inspect}"
+        end
+      end
+
+      # The minBLEP and minBLAMP tables at whole-sample offsets (a jump
+      # exactly between samples), for phase jumps, made on first use.
+      def self.jump_tables
+        @jump_tables ||= begin
+          blep, blamp = BandLimit.minblep_tables
+          steps = Numo::DFloat.new(BandLimit::SYNC_TAPS).seq * BandLimit::SYNC_OVERSAMPLE
+          [blep[steps].freeze, blamp[steps].freeze].freeze
+        end
       end
 
       # Initializes an oscillator node with a simple generated waveform,
       # which plays forever (see Session and PlaybackMethods for ending
       # playback, or use a finite source such as an envelope or a file).
       #
-      # +wave_type+ - One of the waveform types supported by MB::Sound::Oscillator (e.g. :sine).
+      # +wave_type+ - One of WAVE_TYPES (e.g. :sine), or :phasor.
       # +frequency+ - The frequency of the tone, in Hz at the given
-      #               +:sample_rate+ (or a wavelength as Meters or Feet).
+      #               +:sample_rate+ (or a wavelength as Meters or Feet), or
+      #               a node producing Hz.
       # +amplitude+ - The linear peak amplitude of the tone, or a Range
       #               (default 1: full scale, -1..1; the master bus is
       #               -10 dB by default, see Session#master_gain).
@@ -34,13 +351,13 @@ module MB
       #           radians phase starts at 0 and rises).
       # +sample_rate+ - The sample rate to use to calculate the frequency.
       def initialize(wave_type: :sine, frequency: 440, amplitude: 1.0, phase: 0, sample_rate: 48000)
+        check_wave_type(wave_type)
         @wave_type = wave_type
-        @oscillator = nil
         @band_limit = true
         @lfo = false
         @width = nil
         @keep_dc = false
-        @sync = nil
+        @sync_source = nil
         @soft_sync = false
         @noise = 0
         @amplitude_set = false
@@ -50,10 +367,16 @@ module MB
         @free = false
         @random_phase = false
         @seed = nil
+        @start_cycles = nil
 
         @frequency = nil
         @phase = nil
         @period = nil
+
+        @state = nil
+        @osc_buf = nil
+        @truncated = false
+        @quiet_resets = nil
 
         self.or_at(amplitude).at_rate(sample_rate).with_phase(phase)
         set_frequency(fixup_source(frequency))
@@ -61,8 +384,7 @@ module MB
 
       # Changes the waveform type to sine.
       def sine
-        @wave_type = :sine
-        self
+        set_wave(:sine, @band_limit)
       end
       alias sin sine
 
@@ -107,10 +429,47 @@ module MB
       alias asaw aramp
       alias asawtooth aramp
 
-      # True if this tone's ramp, square, or triangle waveform is
-      # band-limited (see #ramp, #aramp).
+      # Makes this tone output its phase in cycles (0 <= phase < 1) instead
+      # of a waveform: a phase accumulator for driving wavetables or other
+      # shapers, or a sync master (see #sync).  Its phase runs like any
+      # tone's (frequency and #reset inputs, timeline locks for tempo
+      # pitches).  It has no amplitude (#at raises); scale it with
+      # arithmetic (e.g. `phasor * 2 * Math::PI` for radians).
+      #
+      # Example (bin/sound.rb):
+      #     plot 100.hz.phasor, samples: 1000
+      #     plot 100.hz.phasor.wraps, samples: 2000
+      def phasor
+        raise ArgumentError, 'A phasor outputs cycles (0...1) and has no amplitude; scale it with arithmetic' if @amplitude_set
+
+        set_wave(:phasor, false)
+      end
+
+      # True if this is a #phasor.
+      def phasor?
+        @wave_type == :phasor
+      end
+
+      # True if this tone's samples are band-limited (see BandLimit): a
+      # band-limited ramp, square, or triangle (not their naive a* twins),
+      # or a warped band-limited shape, and not noise.  See also #blit?.
       def band_limited?
-        @band_limit
+        !!band_limit_setting && random_advance == 0 &&
+          (BandLimit::WAVES.include?(@wave_type) || (warped? && BandLimit::WARP_WAVES.include?(@wave_type)))
+      end
+
+      # True if this tone has a phase warp (see #pwm).
+      def warped?
+        !@width.nil?
+      end
+
+      # True if this complex tone is band-limited right now (see
+      # BandLimit.blit_ruby): complex ramp, square, and triangle with
+      # band-limiting on, without phase modulation, noise, or a warp (those
+      # fall back to the naive complex waves).
+      def blit?
+        !!band_limit_setting && BandLimit::COMPLEX_WAVES.include?(@wave_type) && random_advance == 0 &&
+          !warped? && (@phase_mod.nil? || @phase_mod == 0)
       end
 
       # Warps the phase so the first half of the waveform plays over +width+
@@ -119,8 +478,10 @@ module MB
       # triangle a skewed triangle (towards a saw near 0 or 1), a ramp a saw
       # with a kink, and a sine an asymmetric sine (like Casio's phase
       # distortion).  +width+ is a number from 0 to 1 (0.5 is no change) or a
-      # graph node, read every sample.  Band-limited shapes stay band-limited
-      # (including the corners the warp adds to sines and parabolas).
+      # graph node, read every sample (clamped to BandLimit::MIN_WIDTH..(1 -
+      # MIN_WIDTH)).  Band-limited shapes stay band-limited (including the
+      # corners the warp adds to sines and parabolas).  Only ramp, square,
+      # triangle, sine, and parabola can be warped.
       #
       # A warped waveform's DC offset (e.g. 2 * width - 1 for a pulse) is
       # removed, like the AC-coupled output of an analog synth, so sweeping
@@ -132,18 +493,16 @@ module MB
       #     play 110.hz.triangle.skew(0.1).at(-12.db)                    # nearly a saw
       #     play C2.sine.pwm(adsr(0.01, 0.3, 0.2, 0.3).at(0.5..0.05))   # CZ-style sweep
       def pwm(width, dc: false)
-        @width = fixup_source(width)
-        @keep_dc = !!dc
-        if @oscillator
-          @oscillator.width = @width
-          @oscillator.remove_dc = !@keep_dc
+        unless width.nil? || width.is_a?(Numeric) || width.respond_to?(:sample)
+          raise ArgumentError, "Width must be nil, a Numeric, or a graph node (got #{width.inspect})"
         end
-        self
+
+        configure do
+          @width = fixup_source(width)
+          @keep_dc = !!dc
+        end
       end
       alias skew pwm
-
-      # The phase warp width (see #pwm), or nil.
-      attr_reader :width
 
       # Hard sync: restarts this tone's waveform at every cycle of a master,
       # the classic sweepable lead sound.  With +ratio:+ the master is this
@@ -154,17 +513,17 @@ module MB
       #     play C2.saw.sync(ratio: adsr(0.01, 0.4, 0.3, 0.3).at(1..6))
       #
       # Or give a +master+: a Pitch or Note (a hidden phasor at that pitch),
-      # a Tone or Phasor (its #wraps port, so it can be heard too), or any
-      # graph node of sync pulses or triggers (e.g. clip.trigger; a value v
-      # resets the phase 1 - v samples before its sample, so 1 is exactly on
-      # it):
+      # a Tone (its #wraps port, so it can be heard too), or any graph node
+      # of sync pulses or triggers (e.g. clip.trigger; a value v resets the
+      # phase 1 - v samples before its sample, so 1 is exactly on it):
       #
       #     play C3.saw.sync(C2)
       #
       # Synced tones are band-limited with minBLEP (BandLimit, FastSynth.
       # oscillate_sync), clean even at high ratios; aramp etc. give naive
-      # sync.  A synced tone can't also have phase modulation.  See
-      # #softsync.
+      # sync.  A synced tone can't also have phase modulation or a reset
+      # input.  Only ramp, square, triangle, sine, and parabola can be
+      # synced.  See #softsync.
       def sync(master = nil, ratio: nil)
         set_sync(master, ratio, false)
       end
@@ -176,30 +535,6 @@ module MB
       #     play C2.triangle.softsync(ratio: 1.5.hz.lfo.at(1.5..3))
       def softsync(master = nil, ratio: nil)
         set_sync(master, ratio, true)
-      end
-
-      # The sync pulse source (see #sync), or nil.
-      attr_reader :sync_source
-
-      # Sync pulses from this tone's phase (a GraphNode::Ports port; see
-      # Phasor.sync_pulses and #sync).
-      def wraps
-        oscillator.wraps
-      end
-
-      # This tone's phase increment per sample, in cycles (a port).
-      def increment
-        oscillator.increment
-      end
-
-      # The ports of this tone's oscillator in use (see GraphNode::Ports).
-      def ports
-        oscillator.ports
-      end
-
-      # Every port this tone has, with descriptions (see GraphNode::Ports).
-      def port_info
-        oscillator.port_info
       end
 
       # Changes the waveform to a band-limited pulse that is high for +width+
@@ -229,22 +564,19 @@ module MB
       # waveform shows a truncated, roughly Gaussian distribution.  The peaks
       # of this wave type are higher, to match the RMS of the ramp wave.
       def gauss
-        @wave_type = :gauss
-        self
+        set_wave(:gauss, @band_limit)
       end
 
       # Changes the waveform type to parabolic.
       def parabola
-        @wave_type = :parabola
-        self
+        set_wave(:parabola, @band_limit)
       end
 
       # Changes the waveform to complex sine.  The real part is equal to the
       # sine waveform, and the complex part is such that the combined waveform
       # spirals counterclockwise.
       def complex_sine
-        @wave_type = :complex_sine
-        self
+        set_wave(:complex_sine, @band_limit)
       end
 
       # Changes the waveform to complex square.  The real part is approximately
@@ -301,9 +633,9 @@ module MB
       # For approximately Gaussian noise, use the gauss wave type.  The
       # frequency should probably be 1Hz, but definitely needs to be nonzero.
       #
-      # This sets the oscillator's +advance+ to 0, and +random_advance+ to
-      # 2*pi, or if +blend+ is used, to values between those and the original
-      # values.
+      # This sets the phase advance to 0 and the random advance to one cycle
+      # per Hz per sample, or if +blend+ is used, to values between those and
+      # the original values.
       #
       # The +blend+ parameter may be used to give a value between 0 and 1 to
       # interpolate between the original tone and pure noise.  Useful values
@@ -315,18 +647,18 @@ module MB
       # Also see the MB::Sound::Noise class for another way to synthesize
       # noise.
       def noise(blend = true)
-        case blend
-        when true
-          @noise = 1.0
+        configure do
+          case blend
+          when true
+            @noise = 1.0
 
-        when false
-          @noise = 0.0
+          when false
+            @noise = 0.0
 
-        else
-          @noise = blend.to_f
+          else
+            @noise = blend.to_f
+          end
         end
-
-        self
       end
 
       # Changes the linear gain of the tone.  This may be negative to invert
@@ -341,19 +673,21 @@ module MB
         durations = amplitude.is_a?(Range) ? [amplitude.begin, amplitude.end].count { |v| v.is_a?(Sequence::Duration) } : 0
         raise ArgumentError, 'Use a Range of Durations (e.g. 3.n16..5.n16), not a single Duration' if amplitude.is_a?(Sequence::Duration)
         raise ArgumentError, 'Both ends of a Range must be Durations, or neither' if durations == 1
-        @musical_time = durations == 2
+        raise ArgumentError, 'A phasor outputs cycles (0...1) and has no amplitude; scale it with arithmetic' if phasor? && !@in_or_at
 
-        if amplitude.is_a?(Range)
-          @range = amplitude.begin.to_f..amplitude.end.to_f
-          @amplitude = (@range.end - @range.begin) / 2
-        else
-          @amplitude = amplitude.to_f
-          @range = -@amplitude..@amplitude
+        configure do
+          @musical_time = durations == 2
+
+          if amplitude.is_a?(Range)
+            @range = amplitude.begin.to_f..amplitude.end.to_f
+            @amplitude = (@range.end - @range.begin) / 2
+          else
+            @amplitude = amplitude.to_f
+            @range = -@amplitude..@amplitude
+          end
+
+          @amplitude_set = true
         end
-
-        @amplitude_set = true
-
-        self
       end
 
       # True if #at was given a Range of Durations, so this tone outputs a
@@ -366,31 +700,25 @@ module MB
       # or a Range, if #at has not yet been called.
       def or_at(amplitude)
         unless @amplitude_set
-          at(amplitude)
+          begin
+            @in_or_at = true
+            at(amplitude)
+          ensure
+            @in_or_at = false
+          end
           @amplitude_set = false
         end
 
         self
       end
 
-      # Returns the sample rate of the tone (or its underlying oscillator if it
-      # has been created).
-      def sample_rate
-        @sample_rate
-      end
-
-      # Changes the target sample rate of the tone.
+      # Changes the sample rate of the tone (and its inputs; see
+      # GraphNode::SampleRateHelper), at any time.
       def sample_rate=(sample_rate)
         super
         @period_samples = @period * @sample_rate if @period
-        if @oscillator
-          @oscillator.at_rate(sample_rate)
-          # Oscillator#at_rate sets a plain advance of 1 / rate, dropping the
-          # centering of #noise's random advance, which raised a noisy
-          # tone's pitch by 1 + rate * blend / 2 (e.g. +5 semitones at 96
-          # kHz with noise(0.000007)).
-          @oscillator.advance = oscillator_advance
-        end
+        @advance = nil
+        @kernel = nil
         self
       end
       alias at_rate sample_rate=
@@ -401,8 +729,18 @@ module MB
       #
       # Example: 123.hz.with_phase(90.degrees)
       def with_phase(phase)
-        @phase = phase
-        self
+        configure do
+          @phase = phase
+          @start_cycles = nil
+        end
+      end
+
+      # Like #with_phase, in cycles (0 to 1; e.g. 0.25 is 90 degrees).
+      def with_phase_cycles(cycles)
+        configure do
+          @phase = cycles * TWOPI
+          @start_cycles = cycles
+        end
       end
 
       # Adds the given other +tone+ as a frequency modulator for this tone,
@@ -426,13 +764,14 @@ module MB
       #     # or
       #     200.hz.fm(600.hz.at(1000) + 300.hz.at(1000))
       def fm(tone, index = nil)
-        tone = tone.hz if tone.is_a?(Numeric)
-        tone = tone.at(1) if index && tone.is_a?(Tone)
-        tone = fixup_source(tone)
-        index = fixup_source(index)
+        configure do
+          tone = tone.hz if tone.is_a?(Numeric)
+          tone = tone.at(1) if index && tone.is_a?(Tone)
+          tone = fixup_source(tone)
+          index = fixup_source(index)
 
-        @frequency = MB::Sound::GraphNode::Mixer.new([@frequency, [tone, index || 1]], sample_rate: @sample_rate)
-        self
+          @frequency = MB::Sound::GraphNode::Mixer.new([@frequency, [tone, index || 1]], sample_rate: @sample_rate)
+        end
       end
 
       # Like #fm, but the modulation index is in semitones instead of Hz.  This
@@ -445,39 +784,39 @@ module MB
       # Examples:
       #     100.hz.log_fm(200.hz.at(2))
       def log_fm(tone, index = nil)
-        tone = tone.hz if tone.is_a?(Numeric)
-        tone = tone.at(1) if index && tone.is_a?(Tone)
+        configure do
+          tone = tone.hz if tone.is_a?(Numeric)
+          tone = tone.at(1) if index && tone.is_a?(Tone)
 
-        tone = fixup_source(tone)
-        index = fixup_source(index)
+          tone = fixup_source(tone)
+          index = fixup_source(index)
 
-        tone = 2 ** (tone / 12)
-        tone = tone * index if index
-        @frequency = @frequency * tone
-
-        self
+          tone = 2 ** (tone / 12)
+          tone = tone * index if index
+          @frequency = @frequency * tone
+        end
       end
 
       # Adds the given other +tone+ or signal graph as a phase modulation
       # source for this tone.  Like #fm, but added to the phase given to the
       # oscillator, rather than to the frequency itself.
       def pm(tone, index = nil)
-        tone = tone.hz if tone.is_a?(Numeric)
-        if tone.is_a?(Tone)
-          if index
-            tone.at(1)
-          else
-            tone.or_at(1)
+        configure do
+          tone = tone.hz if tone.is_a?(Numeric)
+          if tone.is_a?(Tone)
+            if index
+              tone.at(1)
+            else
+              tone.or_at(1)
+            end
           end
+
+          tone = fixup_source(tone)
+          index = fixup_source(index)
+
+          tone = tone * index if index
+          @phase_mod = tone
         end
-
-        tone = fixup_source(tone)
-        index = fixup_source(index)
-
-        tone = tone * index if index
-        @phase_mod = tone
-
-        self
       end
 
       # Resets the phase at every nonzero sample of +trigger+ (a graph node,
@@ -490,13 +829,19 @@ module MB
       # - a graph node of radians, read at each reset sample,
       # - :random, a new random phase at each reset (the same as #rnd).
       #
-      # The jump is band-limited like a MIDI voice's retrigger (a 32-sample
-      # minBLEP step from the value the wave would have had; see
-      # Oscillator#reset_input=), and works with #fm and #pm.  A tone can't
-      # have both a reset input and #sync (an error: sync already resets the
-      # phase, in its own kernel).  On a #free tone the last call wins: a
-      # reset input makes it no longer free, and a fixed +to:+ replaces
-      # #rnd, each with a warning.
+      # The jump is band-limited (a 32-sample minBLEP step from the value the
+      # wave would have had, including phase modulation at that sample), and
+      # works with #fm and #pm.  Buffers with resets are computed in pieces
+      # split at the reset samples; buffers without resets cost one scan of
+      # the trigger buffer.  A reset input that ends (returns nil) means no
+      # more resets, not the end of the tone, so e.g. a key-synced clip tone
+      # keeps playing through an envelope's release after its clip's
+      # trigger has ended.
+      #
+      # A tone can't have both a reset input and #sync (an error: sync
+      # already resets the phase, in its own kernel).  On a #free tone the
+      # last call wins: a reset input makes it no longer free, and a fixed
+      # +to:+ replaces #rnd, each with a warning.
       #
       # Examples (bin/sound.rb):
       #     bpm 120; c = grid(16, 'x..x..x.').loop
@@ -504,35 +849,37 @@ module MB
       #     play 2.hz.lfo.reset(c.trigger, to: 90.degrees)    # an LFO that restarts at its peak
       def reset(trigger, to: nil)
         if trigger.nil?
-          @reset = nil
-          @reset_to = nil
-          update_reset
-          return self
+          return configure do
+            @reset = nil
+            @reset_to = nil
+          end
         end
 
-        raise ArgumentError, 'A synced tone cannot also have a reset input' if @sync
+        unless trigger.respond_to?(:sample)
+          raise ArgumentError, "Reset input must be nil or a graph node of triggers (got #{trigger.inspect})"
+        end
+        raise ArgumentError, 'A synced tone cannot also have a reset input' if @sync_source
         unless to.nil? || to == :random || to.is_a?(Numeric) || to.respond_to?(:sample)
           raise ArgumentError, "Reset target must be nil, :random, radians, or a graph node (got #{to.inspect})"
         end
 
-        if @free
-          override_warning('reset overrides free (the tone is no longer free)')
-          @free = false
-        end
+        configure do
+          if @free
+            override_warning('reset overrides free (the tone is no longer free)')
+            @free = false
+          end
 
-        if to == :random
-          to = nil
-          random_phase
-        elsif to && @random_phase
-          override_warning("reset(to: #{make_source_name(to)}) overrides rnd (no more random phases)")
-          @random_phase = false
-          @oscillator&.random_phase = nil
-        end
+          if to == :random
+            to = nil
+            random_phase
+          elsif to && @random_phase
+            override_warning("reset(to: #{make_source_name(to)}) overrides rnd (no more random phases)")
+            @random_phase = false
+          end
 
-        @reset = fixup_source(trigger)
-        @reset_to = to.respond_to?(:sample) ? fixup_source(to) : to
-        update_reset
-        self
+          @reset = fixup_source(trigger)
+          @reset_to = to.respond_to?(:sample) ? fixup_source(to) : to
+        end
       end
 
       # The reset trigger input (see #reset), or nil.
@@ -548,13 +895,14 @@ module MB
       #
       #     play 3.times.map { |i| (110 + i * 0.3).hz.saw.free.rnd }.sum * -15.db
       def free(free = true)
-        if free && @reset
-          override_warning('free overrides reset (removed the reset input)')
-          reset(nil)
-        end
+        configure do
+          if free && @reset
+            override_warning('free overrides reset (removed the reset input)')
+            reset(nil)
+          end
 
-        @free = !!free
-        self
+          @free = !!free
+        end
       end
 
       # True if #free was called (never reset).  LFOs (#lfo) aren't key
@@ -575,17 +923,16 @@ module MB
       #     play 220.hz.saw.rnd                                # random start
       #     play 110.hz.square.reset(clip.trigger).rnd        # random at each note
       def random_phase(seed: nil)
-        if @reset_to
-          override_warning("rnd overrides reset(to: #{make_source_name(@reset_to)}) (resets go to random phases)")
-          @reset_to = nil
-          update_reset
-        end
+        configure do
+          if @reset_to
+            override_warning("rnd overrides reset(to: #{make_source_name(@reset_to)}) (resets go to random phases)")
+            @reset_to = nil
+          end
 
-        @seed = Integer(seed) if seed
-        @seed ||= MB::Sound.next_seed
-        @random_phase = true
-        @oscillator&.random_phase = @seed
-        self
+          @seed = Integer(seed) if seed
+          @seed ||= MB::Sound.next_seed
+          @random_phase = true
+        end
       end
       alias rnd random_phase
 
@@ -594,16 +941,11 @@ module MB
         @random_phase
       end
 
-      # The seed of this tone's random phase generator (see #random_phase),
-      # or nil if none has been set or drawn.
-      attr_reader :seed
-
       # Sets the seed for this tone's random phase (see #random_phase),
-      # restarting its generator if the tone has a random phase.  For code
-      # that derives seeds itself (e.g. one per synth voice).
+      # before it plays.  For code that derives seeds itself (e.g. one per
+      # synth voice).
       def seed=(seed)
-        @seed = Integer(seed)
-        @oscillator&.random_phase = @seed if @random_phase
+        configure { @seed = Integer(seed) }
       end
 
       # Makes this Tone a low-frequency oscillator for modulation: synth
@@ -622,16 +964,16 @@ module MB
       # Example:
       #     play 220.hz.ramp.at(1).filter(:lowpass, cutoff: 0.25.hz.triangle.lfo.at(200..2000), quality: 4)
       def lfo
-        @lfo = true
-        @oscillator&.band_limit = oscillator_band_limit
+        configure { @lfo = true }
         or_at(1)
       end
 
       # Sets this Tone's current phase to +cycles+ past its phase offset (see
-      # #with_phase).  Used by Sequence::TempoNode to lock tempo-synced tones
-      # to the timeline.
+      # #with_phase), with a band-limited step.  Used by Sequence::TempoNode
+      # to lock tempo-synced tones to the timeline.
       def sync_cycles(cycles)
-        oscillator.sync_cycles(cycles)
+        start_state = state
+        phase_jump { start_state.phi = @start_cycles + cycles }
         self
       end
 
@@ -664,25 +1006,108 @@ module MB
         to_note.to_midi(velocity: velocity, channel: channel)
       end
 
-      # The last frequency value used by the oscillator for synthesis.
-      def last_freq
-        oscillator.last_freq
+      # The per-sample state (see Tone::State), made when the tone starts
+      # playing (or on first use).
+      def state
+        @state ||= initial_state
       end
 
-      # Generates +count+ samples of the tone.  The tone parameters cannot be
-      # changed directly after this method is called; instead Oscillator
-      # parameters must be changed (TODO: fix this; maybe combine the two
-      # classes or delegate post-creation updates).
-      #
-      # Returns nil only if a frequency or phase modulation source ends.
+      # The current phase in radians (0 to 2pi).
+      def phi
+        state.phi * TWOPI
+      end
+
+      # The last frequency value used for synthesis (0 before the first
+      # sample).
+      def last_freq
+        @state ? @state.last_freq : 0.0
+      end
+
+      # The phase advance per sample per Hz, in cycles (normally 1 /
+      # sample_rate; a little less with #noise, which adds a random
+      # advance).
+      def advance
+        @advance || compute_advance
+        @advance
+      end
+
+      # The maximum random addition to the phase advance per Hz per sample,
+      # in cycles (see #noise).
+      def random_advance
+        MB::M.interp(0, TWOPI, @noise) / TWOPI
+      end
+
+      # Generates +count+ samples of the tone.  Returns nil only if an input
+      # (frequency, phase modulation, width, sync, or reset target) ends.
       def sample(count)
         return nil if count <= 0
 
-        oscillator.sample(count.round)
+        count = count.round
+        return sample_c(count) if @ports.nil?
+
+        port_frame(count) { sample_c(count) }
       end
 
-      # See GraphNode#sources.  Returns the frequency and phase modulation
-      # source of the tone, which will either be a number or a signal
+      # The tone in C (see the class description for the steps).
+      def sample_c(count)
+        start unless @started
+
+        count, freq, phase, width, pulses, resets, targets = get_upstream_inputs(count)
+        return nil if missing_input?(freq, phase, width, pulses, resets, targets)
+
+        state = @state
+        if @ports
+          state.frame_phase = state.phase[0]
+          state.frame_freq = freq
+          state.frame_segments = nil
+        end
+
+        build_buffer(count)
+
+        points = reset_points(resets)
+        if points
+          buf = sample_segments(count, freq, phase, width, points, targets) do |out, f, ph, w|
+            kernel_c(out, f, ph, w, nil)
+          end
+        else
+          buf = kernel_c(@osc_buf[0...count].inplace!, freq, phase, width, pulses)
+          add_jump_residual(buf) if state.jump_residual
+        end
+
+        state.last_freq = freq.is_a?(Numeric) ? freq : freq[-1]
+        state.last_width = width.is_a?(Numo::NArray) ? width[-1] : width
+
+        buf.not_inplace!
+      end
+
+      # The tone in Ruby: the same samples as #sample_c (except noise),
+      # from the kernels' Ruby mirrors.
+      def sample_ruby(count)
+        start unless @started
+
+        count, freq_table, phase_table, width, pulses, resets, targets = get_upstream_inputs(count)
+        return nil if missing_input?(freq_table, phase_table, width, pulses, resets, targets)
+
+        build_buffer(count)
+
+        points = reset_points(resets)
+        if points
+          buf = sample_segments(count, freq_table, phase_table, width, points, targets) do |out, f, ph, w|
+            kernel_ruby(out, f, ph, w, nil)
+          end
+        else
+          buf = kernel_ruby(@osc_buf[0...count].inplace!, freq_table, phase_table, width, pulses)
+          add_jump_residual(buf)
+        end
+
+        @state.last_freq = freq_table.is_a?(Numeric) ? freq_table : freq_table[-1]
+        @state.last_width = width.is_a?(Numo::NArray) ? width[-1] : width
+
+        buf.not_inplace!
+      end
+
+      # See GraphNode#sources.  Returns the frequency, phase modulation, and
+      # other inputs of the tone, each either a number or a signal
       # generator.
       def sources
         {
@@ -690,36 +1115,10 @@ module MB
           phase: @phase,
           phase_mod: @phase_mod,
           width: @width,
-          sync: @sync,
+          sync: @sync_source,
           reset: @reset,
           reset_to: @reset_to.respond_to?(:sample) ? @reset_to : nil,
         }.compact
-      end
-
-      # Returns an Oscillator that will generate a wave with the wave type,
-      # frequency, etc. from this tone.  If this tone's frequency is changed
-      # (e.g. by the Note subclass), the Oscillator will change frequency as
-      # well, but other parameters likely won't be changed by changing the
-      # Tone.
-      def oscillator
-        @oscillator ||= MB::Sound::Oscillator.new(
-          @wave_type,
-          frequency: @frequency,
-          phase: @phase,
-          advance: oscillator_advance,
-          random_advance: oscillator_random_advance,
-          range: @range,
-          phase_mod: @phase_mod,
-          band_limit: oscillator_band_limit,
-          width: @width,
-          remove_dc: !@keep_dc,
-          sync: @sync,
-          soft_sync: @soft_sync
-        ).tap { |o|
-          o.reset_input = @reset
-          o.reset_to = @reset_to
-          o.random_phase = @seed if @random_phase
-        }
       end
 
       # Returns a second-order low-pass Filter with this Tone's frequency as its
@@ -795,7 +1194,7 @@ module MB
       end
 
       def to_s
-        "#{super} -- #{wave_name} freq=#{make_source_name(@frequency)} range=#{@range}#{" pwm=#{make_source_name(@width)}" if @width}#{" #{@soft_sync ? 'softsync' : 'sync'}" if @sync}"
+        "#{super} -- #{wave_name} freq=#{make_source_name(@frequency)} range=#{@range}#{" pwm=#{make_source_name(@width)}" if @width}#{" #{@soft_sync ? 'softsync' : 'sync'}" if @sync_source}"
       end
 
       def to_s_graphviz
@@ -829,17 +1228,448 @@ module MB
 
       private
 
-      # The oscillator's random phase advance per Hz per sample, in radians
-      # (see #noise).
-      def oscillator_random_advance
-        MB::M.interp(0, Math::PI * 2.0, @noise)
+      # Runs the block (which changes configuration) and returns self,
+      # forgetting cached settings so the next sample picks the change up.
+      def configure
+        yield
+        @kernel = nil
+        @advance = nil
+        self
       end
 
-      # The oscillator's base phase advance per Hz per sample, in radians:
-      # one cycle per sample rate, minus half the random advance so that
-      # #noise jitters the phase without changing the average pitch.
-      def oscillator_advance
-        Math::PI * 2.0 / @sample_rate - 0.5 * oscillator_random_advance
+      def check_wave_type(wave_type)
+        return if WAVE_TYPES.include?(wave_type) || wave_type == :phasor
+
+        raise ArgumentError, "Invalid wave type #{wave_type.inspect}; only #{WAVE_TYPES.map(&:inspect).join(', ')}, or :phasor are supported"
+      end
+
+      # Prepares to play: makes the state and caches the settings.
+      def start
+        state
+        @started = true
+      end
+
+      # The state at the start: the starting phase (with a random phase
+      # drawn if #rnd was used; the same arithmetic as the old Phasor#phase=,
+      # so renders match), unprimed.
+      def initial_state
+        start = @start_cycles || (@phase / TWOPI) % 1.0
+        s = State.new(phase: start)
+        if @random_phase
+          s.seed = @seed
+          p = (s.random * TWOPI) / TWOPI
+          s.phi = s.phi + p - start
+          start = p % 1.0
+        end
+        @start_cycles = start
+        s
+      end
+
+      # Computes the phase advance and random advance in cycles per Hz per
+      # sample (see #advance).
+      def compute_advance
+        ra = MB::M.interp(0, TWOPI, @noise)
+        @random_advance = ra / TWOPI
+        @advance = (phasor? && ra == 0) ? 1.0 / @sample_rate : (TWOPI / @sample_rate - 0.5 * ra) / TWOPI
+        @gain, @offset = gain_and_offset
+      end
+
+      # Output gain and offset for the kernels from #range.
+      def gain_and_offset
+        if @range && !phasor?
+          [(@range.last - @range.first) / 2.0, (@range.first + @range.last) / 2.0]
+        else
+          [1, 0]
+        end
+      end
+
+      # The band_limit setting for the kernels: false, true, or a Range of
+      # frequencies (Hz) over which band-limiting fades in (LFOs).
+      def band_limit_setting
+        return false unless @band_limit
+        @lfo ? BandLimit::LFO_FADE : true
+      end
+
+      # Runs the block, which jumps the phase, and for a band-limited
+      # tone that has played, queues a band-limited step for the following
+      # samples.  The step is measured at frequency +freq+, warp +width+, and
+      # phase modulation +phase_mod+ (radians): by default those of the last
+      # sample played and no phase modulation (a jump between buffers), or
+      # those of the reset sample (a reset input; see #sample_segments).
+      def phase_jump(freq: state.last_freq, width: state.last_width, phase_mod: 0.0)
+        state = @state
+        before = state.phase[0]
+        played = freq != 0.0 && (state.blep[3] != 0 || state.blit[6] != 0)
+        yield
+        after = state.phase[0]
+        state.unprime(sync: !!@sync_source)
+
+        return unless played && !@sync_source && synth_kernel? && !blit?
+
+        w = BandLimit.clamp_width((width || 0.5).to_f)
+        pm = phase_mod / TWOPI
+        v0, s0 = BandLimit.sync_shape(@wave_type, w, pm == 0 ? before : BandLimit.wrap(before + pm))
+        v1, s1 = BandLimit.sync_shape(@wave_type, w, pm == 0 ? after : BandLimit.wrap(after + pm))
+        inc = freq * advance
+        bl = band_limit_setting
+        k = bl.is_a?(Range) ? BandLimit.fade(inc.abs / advance, bl.begin.to_f, bl.end.to_f) : 1.0
+        k = 0.0 unless band_limited?
+        return if k == 0
+
+        blep, blamp = Tone.jump_tables
+        residual = (blep * (v1 - v0) + blamp * ((s1 - s0) * inc)) * k
+        state.jump_residual = state.jump_residual ? residual + pad_residual(state.jump_residual, residual.length) : residual
+      end
+
+      def pad_residual(r, length)
+        return r[0...length] if r.length >= length
+
+        Numo::DFloat.zeros(length).tap { |z| z[0...r.length] = r }
+      end
+
+      # Adds any queued phase jump step (see #phase_jump) to +buf+, scaled
+      # by the output gain.
+      def add_jump_residual(buf)
+        residual = @state.jump_residual
+        return unless residual
+
+        n = [buf.length, residual.length].min
+        buf[0...n] += residual[0...n] * @gain
+        @state.jump_residual = n < residual.length ? residual[n..].dup : nil
+      end
+
+      # True if an input needed for the next samples has ended.
+      def missing_input?(freq, phase, width, pulses, resets, targets)
+        freq.nil? || phase.nil? || (warped? && width.nil?) || (@sync_source && pulses.nil?) ||
+          (@reset_to.respond_to?(:sample) && targets.nil?)
+      end
+
+      # The indices of the nonzero samples of the reset input's buffer
+      # +resets+ as an Array, or nil if there are none (or no reset input).
+      #
+      # A frozen buffer already found to be all zeros (e.g. the constant
+      # buffer of a Notes trigger without note-ons) isn't scanned again.
+      def reset_points(resets)
+        return nil if resets.nil?
+        return nil if resets.equal?(@quiet_resets)
+
+        unless resets.is_a?(Numo::SComplex) || resets.is_a?(Numo::DComplex)
+          min, max = resets.minmax
+          if min == 0 && max == 0 # cheaper than ne(0).where
+            @quiet_resets = resets if resets.frozen?
+            return nil
+          end
+        end
+
+        resets = resets.ne(0).where
+        resets.empty? ? nil : resets.to_a
+      end
+
+      # Computes +count+ samples split into pieces at the reset sample
+      # indices in +points+ (see #reset), jumping the phase before each
+      # reset sample.  The block runs a kernel (#kernel_c or #kernel_ruby) on
+      # a view of the output buffer with the matching slices of the
+      # frequency, phase modulation, and width inputs, and returns the
+      # samples.  Returns a view of the output buffer.
+      def sample_segments(count, freq, phase, width, points, targets)
+        state = @state
+        state.frame_segments = [] if @ports
+
+        start = 0
+        (points + [count]).each do |stop|
+          if stop > start
+            f = slice_input(freq, start, stop)
+            state.frame_segments&.push([state.phase[0], f, stop - start])
+
+            out = @osc_buf[start...stop].inplace!
+            result = yield(out, f, slice_input(phase, start, stop), slice_input(width, start, stop))
+            out[true] = result unless result.equal?(out)
+            add_jump_residual(out)
+          end
+
+          break if stop == count
+
+          target = reset_target(targets, stop)
+          phase_jump(freq: input_at(freq, stop), width: width && input_at(width, stop), phase_mod: input_at(phase, stop)) do
+            state.phi = target
+          end
+
+          start = stop
+        end
+
+        @osc_buf[0...count].inplace!
+      end
+
+      # The phase in cycles for a reset at sample +i+ (see #reset).
+      def reset_target(targets, i)
+        return @state.random if @state.random?
+        return input_at(targets, i) / TWOPI if targets
+        return @reset_to / TWOPI if @reset_to
+
+        @start_cycles
+      end
+
+      # Sample +i+ of a kernel input (Numeric or NArray) as a real Float.
+      def input_at(input, i)
+        v = input.is_a?(Numo::NArray) ? input[i] : (input || 0)
+        v = v.real if v.is_a?(Complex)
+        v.to_f
+      end
+
+      # Samples +start+...+stop+ of a kernel input (Numeric, NArray, or nil).
+      def slice_input(input, start, stop)
+        input.is_a?(Numo::NArray) ? input[start...stop] : input
+      end
+
+      # Runs the C kernel for the current settings (see #kernel) into +out+
+      # (an inplace view of the output buffer), returning the samples.
+      def kernel_c(out, freq, phase, width, pulses)
+        state = @state
+        case kernel
+        when :sync
+          check_sync(phase)
+          blep, blamp = BandLimit.minblep_tables
+          buf = MB::Sound::FastSynth.oscillate_sync(
+            out, @wave_type, freq, @advance, @gain, @offset,
+            state.sync, state.sync_ring, pulses, @soft_sync, width, !@keep_dc,
+            blep, blamp, BandLimit::SYNC_OVERSAMPLE, BandLimit::SYNC_TAPS, !!band_limit_setting
+          ).inplace!
+          state.phase[0] = state.sync[0]
+          buf
+        when :blit
+          MB::Sound::FastSynth.blit(
+            out, @wave_type, freq, @advance, @gain, @offset, state.phase, state.blit
+          ).inplace!
+        when :synth
+          MB::Sound::FastSynth.oscillate_bl(
+            out, @wave_type, freq, phase, @advance, @gain, @offset,
+            state.phase, state.blep, *@fade_band, width, !@keep_dc
+          ).inplace!
+        when :phasor
+          MB::FastSound.phasor(out, freq, @advance, @random_advance, state.phase, nil).inplace!
+        else
+          MB::FastSound.oscillate(
+            out, @wave_type, freq, phase, @advance, @random_advance, @gain, @offset, state.phase
+          ).inplace!
+        end
+      end
+
+      # Ruby mirror of #kernel_c: computes out.length samples and stores
+      # them in +out+ (an inplace view of the output buffer), returning it.
+      def kernel_ruby(out, freq_table, phase_table, width, pulses)
+        count = out.length
+        state = @state
+
+        case kernel
+        when :sync
+          check_sync(phase_table)
+          blep, blamp = BandLimit.minblep_tables
+          values = BandLimit.sync_ruby(
+            count, @wave_type, freq_table, @advance, @gain, @offset,
+            state.sync, state.sync_ring, pulses, @soft_sync, width, !@keep_dc,
+            blep, blamp, BandLimit::SYNC_OVERSAMPLE, BandLimit::SYNC_TAPS, !!band_limit_setting
+          )
+          state.phase[0] = state.sync[0]
+        when :blit
+          values = BandLimit.blit_ruby(count, @wave_type, freq_table, @advance, @gain, @offset, state.phase, state.blit)
+        when :synth
+          values = BandLimit.oscillate_ruby(
+            count, @wave_type, freq_table, phase_table, @advance, @gain, @offset,
+            state.phase, state.blep, *@fade_band, width, !@keep_dc
+          )
+        when :phasor
+          phases, _increments = phases_ruby(freq_table, count)
+          values = Numo::SFloat.cast(phases)
+        else
+          phases, increments = phases_ruby(freq_table, count)
+          values = Tone.shape_ruby(@wave_type, phases, increments, phase_table) * @gain + @offset
+        end
+
+        values = values.real if !out.is_a?(Numo::SComplex) && values.is_a?(Numo::DComplex)
+        out[true] = values
+        out
+      end
+
+      # Advances the phase over +count+ samples at +freq+ (Hz; a Numeric or
+      # an NArray of +count+ values) in Ruby, returning [phases, increments]
+      # as DFloat NArrays (increments is a Float if every sample advances by
+      # the same amount).  The same math as MB::FastSound.phasor: phase[i] =
+      # phi + sum(increments[0...i]) (i * increment when constant), wrapped
+      # once to 0...1.
+      def phases_ruby(freq, count)
+        freq = Numo::DFloat.cast(freq) if freq.is_a?(Numo::NArray)
+
+        if @random_advance != 0
+          random = Numo::DFloat.cast(Array.new(count) { RAND.rand })
+          increments = freq * (random * @random_advance + @advance)
+        else
+          increments = freq * @advance
+        end
+
+        if increments.is_a?(Numo::NArray)
+          # Running sum: phase i has advanced by increments 0...i
+          sums = increments.cumsum
+          steps = Numo::DFloat.zeros(count)
+          steps[1..] = sums[0...-1] if count > 1
+          total = sums[-1]
+        else
+          steps = Numo::DFloat.new(count).seq * increments
+          total = increments * count
+        end
+
+        phi = @state.phi
+        phases = steps + phi
+        phases -= phases.floor # like Ruby's %, not Numo's (which keeps the sign)
+        @state.phi = phi + total
+
+        [phases, increments]
+      end
+
+      def check_sync(phase_mod)
+        unless BandLimit::WARP_WAVES.include?(@wave_type)
+          raise ArgumentError, "A #{@wave_type} can't be synced (only #{BandLimit::WARP_WAVES.join(', ')})"
+        end
+        raise ArgumentError, 'A synced oscillator cannot also have phase modulation' unless phase_mod == 0 || phase_mod.nil?
+      end
+
+      # Which kernel computes samples: :sync, :blit, :synth (FastSynth
+      # band-limited or warped), :phasor, or :naive (FastSound), cached
+      # (with the advance, gain, and band-limit fade) until a setting
+      # changes.
+      def kernel
+        @kernel ||= begin
+          compute_advance
+          @fade_band = band_limit_fade
+          if phasor?
+            :phasor
+          elsif @sync_source
+            :sync
+          elsif blit?
+            :blit
+          elsif synth_kernel?
+            :synth
+          else
+            :naive
+          end
+        end
+      end
+
+      # The main output for GraphNode::Ports.
+      def sample_main(count)
+        sample_c(count)
+      end
+
+      # Port data from the phases of the frame just computed (the phase,
+      # without phase modulation; see BandLimit.sync_pulses).
+      def compute_ports(count)
+        state = @state
+        if state.frame_segments
+          # Resets split the frame into pieces (see #sample_segments)
+          parts = state.frame_segments.map { |phi, freq, n| BandLimit.sync_pulses(phi, freq, advance, n, state.pulses) }
+          pulses = parts[0][0].concatenate(*parts[1..].map(&:first))
+          increments = parts[0][1].concatenate(*parts[1..].map(&:last))
+        else
+          pulses, increments = BandLimit.sync_pulses(state.frame_phase, state.frame_freq, advance, count, state.pulses)
+        end
+        store_port(:wraps, pulses)
+        store_port(:increment, increments)
+      end
+
+      # [low, high] frequencies (Hz) for fading band-limiting in, or [0, 0]
+      # for always on.
+      def band_limit_fade
+        return BandLimit::NEVER unless band_limited?
+
+        bl = band_limit_setting
+        return ALWAYS unless bl.is_a?(Range)
+
+        [bl.begin.to_f, bl.end.to_f].freeze
+      end
+
+      # True if samples come from the band-limiting kernel (band-limited or
+      # warped waveforms).
+      def synth_kernel?
+        band_limited? || (warped? && BandLimit::WARP_WAVES.include?(@wave_type) && random_advance == 0)
+      end
+
+      # TODO: use BufferHelper?
+      def build_buffer(count)
+        buf_class = BUFFER_CLASS[@wave_type] || Numo::SFloat
+        if @osc_buf.nil? || @osc_buf.class != buf_class || @osc_buf.length != count
+          old_length = @osc_buf&.length || 0
+          @osc_buf = buf_class.zeros(MB::M.max(count, old_length))
+        end
+      end
+
+      # This retrieves the upstream input buffers, finds whichever is
+      # shortest, truncates to that length, and returns the new count and
+      # buffers.
+      #
+      # Raises an error if truncation happens more than once.
+      #
+      # TODO: a lot of classes need this input truncation; it might make sense
+      # to build a shared API around the concept of multiple inputs.  There is
+      # similar code in MB::Sound::GraphNode::ArithmeticNodeHelper.
+      def get_upstream_inputs(count)
+        min_length = count
+
+        freq = @frequency
+        if freq.respond_to?(:sample)
+          freq = freq.sample(count)
+          freq = nil if freq&.empty?
+          min_length = freq.length if freq && freq.length < min_length
+        end
+
+        phase = @phase_mod || 0
+        if phase.respond_to?(:sample)
+          phase = phase.sample(count)
+          phase = nil if phase&.empty?
+          min_length = phase.length if phase && phase.length < min_length
+        end
+
+        width = @width
+        if width.respond_to?(:sample)
+          width = width.sample(count)
+          width = nil if width&.empty?
+          min_length = width.length if width && width.length < min_length
+        end
+
+        pulses = @sync_source
+        if pulses.respond_to?(:sample)
+          pulses = pulses.sample(count)
+          pulses = nil if pulses&.empty?
+          min_length = pulses.length if pulses && pulses.length < min_length
+        end
+
+        resets = @state.reset_ended ? nil : @reset
+        if resets
+          resets = resets.sample(count)
+          resets = nil if resets&.empty?
+          @state.reset_ended = true if resets.nil?
+          min_length = resets.length if resets && resets.length < min_length
+        end
+
+        targets = @reset_to
+        if targets.respond_to?(:sample)
+          targets = targets.sample(count)
+          targets = nil if targets&.empty?
+          min_length = targets.length if targets && targets.length < min_length
+        else
+          targets = nil
+        end
+
+        if min_length != count
+          raise "Truncation happened more than once on oscillator #{self} (try adding .with_buffer to upstreams)" if @truncated
+          @truncated = true
+          freq = freq[0...min_length] if freq&.is_a?(Numo::NArray)
+          phase = phase[0...min_length] if phase&.is_a?(Numo::NArray)
+          width = width[0...min_length] if width&.is_a?(Numo::NArray)
+          pulses = pulses[0...min_length] if pulses&.is_a?(Numo::NArray)
+          resets = resets[0...min_length] if resets&.is_a?(Numo::NArray)
+          targets = targets[0...min_length] if targets&.is_a?(Numo::NArray)
+        end
+
+        return min_length, freq, phase, width, pulses, resets, targets
       end
 
       # Warns that a call replaced an earlier conflicting setting (the last
@@ -848,60 +1678,40 @@ module MB
         warn "Tone #{wave_name} #{make_source_name(@frequency)}: #{message}"
       end
 
-      # Gives the oscillator, if made, the reset settings (see #reset).
-      def update_reset
-        return unless @oscillator
-
-        @oscillator.reset_input = @reset
-        @oscillator.reset_to = @reset_to
-      end
-
       # See #sync and #softsync.
       def set_sync(master, ratio, soft)
         raise ArgumentError, 'A tone with a reset input cannot also be synced' if @reset
         raise ArgumentError, 'Give a master or a ratio:, not both' if master && ratio
         raise ArgumentError, 'Give a master (e.g. C2) or ratio: (e.g. ratio: 2.5)' if master.nil? && ratio.nil?
 
-        if master.nil?
-          # A hidden master at this tone's pitch; this tone plays ratio times higher
-          hidden = Phasor.new(frequency: @frequency, sample_rate: @sample_rate)
-          ratio = fixup_source(ratio)
-          set_frequency(@frequency.is_a?(Numeric) && ratio.is_a?(Numeric) ? @frequency * ratio : fixup_source(ratio.is_a?(Numeric) ? @frequency * ratio : ratio * @frequency))
-          pulses = hidden.wraps
-        else
-          pulses = case master
-                   when Pitch then master.phasor.wraps
-                   when Tone, Phasor, Oscillator then master.wraps
-                   else
-                     raise ArgumentError, "Sync master must be a Pitch, Tone, Phasor, or a graph node (got #{master.inspect})" unless master.respond_to?(:sample)
-                     master
-                   end
-        end
+        configure do
+          if master.nil?
+            # A hidden master at this tone's pitch; this tone plays ratio times higher
+            hidden = Tone.new(wave_type: :phasor, frequency: @frequency, sample_rate: @sample_rate)
+            ratio = fixup_source(ratio)
+            set_frequency(@frequency.is_a?(Numeric) && ratio.is_a?(Numeric) ? @frequency * ratio : fixup_source(ratio.is_a?(Numeric) ? @frequency * ratio : ratio * @frequency))
+            pulses = hidden.wraps
+          else
+            pulses = case master
+                     when Pitch then master.phasor.wraps
+                     when Tone then master.wraps
+                     else
+                       raise ArgumentError, "Sync master must be a Pitch, Tone, or a graph node (got #{master.inspect})" unless master.respond_to?(:sample)
+                       master
+                     end
+          end
 
-        @sync = pulses.respond_to?(:get_sampler) ? pulses.get_sampler : pulses
-        @soft_sync = soft
-        if @oscillator
-          @oscillator.sync = @sync
-          @oscillator.soft_sync = soft
+          @sync_source = pulses.respond_to?(:get_sampler) ? pulses.get_sampler : pulses
+          @soft_sync = soft
         end
-        self
       end
 
       # Sets the wave type and whether it's band-limited (see #ramp, #aramp).
       def set_wave(wave_type, band_limit)
-        @wave_type = wave_type
-        @band_limit = band_limit
-        if @oscillator
-          @oscillator.wave_type = wave_type
-          @oscillator.band_limit = oscillator_band_limit
+        configure do
+          @wave_type = wave_type
+          @band_limit = band_limit
         end
-        self
-      end
-
-      # The band_limit setting for the Oscillator (see Oscillator#band_limit).
-      def oscillator_band_limit
-        return false unless @band_limit
-        @lfo ? BandLimit::LFO_FADE : true
       end
 
       # The wave type as written in the DSL (e.g. :aramp for a naive ramp).
@@ -915,6 +1725,10 @@ module MB
           freq = MB::Sound::SPEED_OF_SOUND / freq.meters
         end
 
+        unless freq.is_a?(Numeric) || freq.respond_to?(:sample)
+          raise ArgumentError, "Invalid frequency #{freq.inspect}"
+        end
+
         if freq.is_a?(Numeric)
           freq = freq.to_f if freq.is_a?(Numeric)
           @period = 1.0 / freq
@@ -926,7 +1740,6 @@ module MB
 
         @frequency = freq
         @wavelength = (SPEED_OF_SOUND / @frequency).meters if @frequency.is_a?(Numeric)
-        @oscillator&.frequency = @frequency
       end
 
       # Configures the source given as the frequency, FM amount, PM amount,

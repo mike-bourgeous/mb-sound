@@ -48,10 +48,14 @@ class FMChain
     @mod_index = 0.0
 
     @oscillators = osc_count.times.map {
-      # Parabola is a little more interesting than sine without being too chaotic
-      o = 440.hz.parabola.at(-10.db).oscillator
-      o.frequency = MB::Sound::GraphNode::Mixer.new([], sample_rate: @sample_rate)
-      o
+      # Parabola is a little more interesting than sine without being too
+      # chaotic.  Each frequency is a Mixer that #note rewires (a constant
+      # for the note plus the next oscillator in the chain as FM).
+      MB::Sound::Tone.new(
+        wave_type: :parabola,
+        frequency: MB::Sound::GraphNode::Mixer.new([], sample_rate: @sample_rate),
+        sample_rate: @sample_rate
+      ).at(-10.db)
     }
     @oscs_used = 0
     @osc_map = {}

@@ -112,54 +112,47 @@ RSpec.describe MB::Sound::Tone do
     pending 'expected output'
   end
 
-  describe '#oscillator' do
-    it 'returns an Oscillator with the same frequency and range' do
+  describe 'as an oscillator' do
+    it 'keeps its frequency and range' do
       tone = 222.hz.at(-5.db)
-      osc = tone.oscillator
-      expect(osc).to be_a(MB::Sound::Oscillator)
-      expect(osc.frequency).to eq(tone.frequency)
-      expect(osc.range).to eq(-tone.amplitude..tone.amplitude)
+      expect(tone.frequency).to eq(222)
+      expect(tone.range).to eq(-tone.amplitude..tone.amplitude)
     end
 
-    it 'passes a reversed range to the oscillator' do
+    it 'plays a reversed range' do
       tone = 220.hz.at(1..-1)
-      osc = tone.oscillator
-      expect(osc.range).to eq(1..-1)
+      expect(tone.range).to eq(1..-1)
 
-      data = osc.sample(48000)
+      data = tone.sample(48000)
       expect(data.min.round(2)).to eq(-1)
       expect(data.max.round(2)).to eq(1)
       expect(data[0]).to eq(0)
       expect(data[30]).to be < 0 # should go down first instead of up because of reversed range
     end
 
-    it 'passes an asymmetric range to the oscillator' do
+    it 'plays an asymmetric range' do
       tone = 220.hz.at(3..5)
-      osc = tone.oscillator
-      expect(osc.range).to eq(3..5)
+      expect(tone.range).to eq(3..5)
 
-      data = osc.sample(48000)
+      data = tone.sample(48000)
       expect(data.min.round(2)).to eq(3)
       expect(data.max.round(2)).to eq(5)
       expect(data[0]).to eq(4)
       expect(data[30]).to be > 4 # should go up first
     end
 
-    it 'passes initial phase to an oscillator' do
+    it 'starts at its initial phase' do
       tone = 220.hz.with_phase(180.degrees)
-      osc = tone.oscillator
-      expect(osc.phase).to eq(180.degrees)
+      expect(tone.phase).to eq(180.degrees)
 
-      data = osc.sample(48000)
+      data = tone.sample(48000)
       expect(data[0].round(8)).to eq(0)
       expect(data[30].round(8)).to be < 0 # should go down first because of phase
     end
 
-    it 'passes sample rate to an oscillator' do
-      tone = 220.hz.at_rate(43210)
-      osc = tone.oscillator
-
-      expect(osc.advance.round(5)).to eq((2.0 * Math::PI / 43210).round(5))
+    it 'advances its phase at its sample rate' do
+      tone = 220.hz.at_rate(43210).tone
+      expect(tone.advance.round(12)).to eq((1.0 / 43210).round(12))
     end
   end
 

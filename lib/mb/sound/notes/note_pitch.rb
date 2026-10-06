@@ -19,13 +19,13 @@ module MB
         # depend on the same trigger (its LFO resets at note-ons); the cycle
         # check accepts that second path.
         def key_sync(trigger)
-          raise ArgumentError, 'Key sync must be set before sync or other resets' if @sync || @reset
+          raise ArgumentError, 'Key sync must be set before sync or other resets' if @sync_source || @reset
 
-          @reset = fixup_source(trigger)
-          @reset_to = nil
-          update_reset
-          @key_sync = @reset
-          self
+          configure do
+            @reset = fixup_source(trigger)
+            @reset_to = nil
+            @key_sync = @reset
+          end
         end
 
         # True if the tone still resets at each note (see the class
@@ -68,9 +68,10 @@ module MB
           return unless @key_sync
 
           if @reset.equal?(@key_sync)
-            @reset = nil
-            @reset_to = nil
-            update_reset
+            configure do
+              @reset = nil
+              @reset_to = nil
+            end
           end
           @key_sync.destroy if @key_sync.respond_to?(:destroy)
           @key_sync = nil

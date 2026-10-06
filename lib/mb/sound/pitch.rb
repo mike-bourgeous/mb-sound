@@ -11,7 +11,7 @@ module MB
     # make a new Tone at this pitch each time they're called: #tone (alias
     # #hz) for a sine, #sine/#triangle/#ramp/... for other waves, and #at,
     # #with_phase, #fm, #log_fm, #pm, #lfo, #noise as shortcuts on that tone;
-    # #phasor makes a Phasor.  Filter helpers (#lowpass, #highpass, ...) use
+    # #phasor makes a phasor (Tone#phasor).  Filter helpers (#lowpass, #highpass, ...) use
     # the current frequency.
     #
     # A Pitch used directly as a signal (`play 440.hz`, `440.hz * env`) is a
@@ -120,11 +120,6 @@ module MB
       def random_phase(seed: nil) = tone.random_phase(seed: seed)
       alias rnd random_phase
 
-      # The Oscillator of #signal.
-      def oscillator
-        signal.oscillator
-      end
-
       # For a tempo-synced pitch (Sequence::Duration#hz), lets the phases of
       # its oscillators run free of the timeline (see
       # Sequence::TempoNode#freewheel).
@@ -135,9 +130,10 @@ module MB
         self
       end
 
-      # Returns a Phasor (phase in cycles) at this pitch.
+      # Returns a phasor (a Tone that outputs its phase in cycles; see
+      # Tone#phasor) at this pitch, starting at +phase+ (cycles).
       def phasor(phase: 0.0)
-        Phasor.new(frequency: oscillator_frequency, phase: phase, sample_rate: @sample_rate).tap { |p| follow(p) }
+        tone(:phasor).with_phase_cycles(phase % 1.0)
       end
 
       # The sine this pitch plays as when used directly as a signal (created

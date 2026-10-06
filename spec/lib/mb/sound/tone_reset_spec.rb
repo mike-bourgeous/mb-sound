@@ -1,8 +1,18 @@
 RSpec.describe('Tone reset inputs, free and random phases') do
-  let(:advance) { 2 * Math::PI / 48000 }
+  # A band-limited tone (the former Oscillator with band_limit: true).
+  def bl_osc(wave = :ramp, frequency: 1001.3, phase_mod: nil, width: nil, sync: nil, reset: nil, to: nil)
+    t = MB::Sound::Tone.new(wave_type: wave, frequency: frequency)
+    t.pm(phase_mod) if phase_mod
+    t.pwm(width) if width
+    t.sync(sync) if sync
+    t.reset(reset, to: to) if reset
+    t
+  end
 
-  def bl_osc(wave = :ramp, frequency: 1001.3, **opts)
-    MB::Sound::Oscillator.new(wave, frequency: frequency, advance: advance, band_limit: true, **opts)
+  # Jumps the phase of +osc+ to +radians+ between pieces, as a reset does
+  # (the private band-limited jump; the old Oscillator#phi=).
+  def jump(osc, radians)
+    osc.send(:phase_jump) { osc.state.phi = radians / (2 * Math::PI) }
   end
 
   def triggers(count, *indices, value: 1)
@@ -24,22 +34,19 @@ RSpec.describe('Tone reset inputs, free and random phases') do
     Numo::SFloat.zeros(0).concatenate(*out)
   end
 
-  describe MB::Sound::Oscillator do
+  describe 'reset inputs' do
     [:sample_c, :sample_ruby].each do |method|
       context "with #{method}" do
         it 'jumps at the exact samples, like phi= between pieces' do
-          o = bl_osc
-          o.reset_input = input(triggers(100, 37, 80, value: 0.25))
+          o = bl_osc(reset: input(triggers(100, 37, 80, value: 0.25)))
           result = o.public_send(method, 100)
 
-          expected = pieces(bl_osc, method, [37, 43, 20]) { |osc| osc.phi = 0 }
+          expected = pieces(bl_osc, method, [37, 43, 20]) { |osc| jump(osc, 0) }
           expect(result).to eq(expected)
         end
 
         it 'puts a naive oscillator at the target phase on the reset sample' do
-          o = MB::Sound::Oscillator.new(:ramp, frequency: 1001.3, advance: advance)
-          o.reset_input = input(triggers(100, 37))
-          o.reset_to = 0.5 * Math::PI
+          o = 1001.3.hz.aramp.reset(input(triggers(100, 37)), to: 0.5 * Math::PI)
           result = o.public_send(method, 100)
 
           expect(result[36]).not_to be_within(0.1).of(0.5)
@@ -47,11 +54,10 @@ RSpec.describe('Tone reset inputs, free and random phases') do
         end
 
         it 'handles resets on the first and last samples of a buffer' do
-          o = bl_osc
-          o.reset_input = input(triggers(128, 0, 63, 65))
+          o = bl_osc(reset: input(triggers(128, 0, 63, 65)))
           result = pieces(o, method, [64, 64]) {}
 
-          expected = pieces(bl_osc, method, [63, 2, 63]) { |osc| osc.phi = 0 }
+          expected = pieces(bl_osc, method, [63, 2, 63]) { |osc| jump(osc, 0) }
           expect(result).to eq(expected)
         end
       end
@@ -64,10 +70,7 @@ RSpec.describe('Tone reset inputs, free and random phases') do
       trig = triggers(256, 5, 100, 101, 200)
 
       c, r = 2.times.map {
-        bl_osc(:square, frequency: input(fm), phase_mod: input(pm), width: input(width)).tap { |o|
-          o.reset_input = input(trig)
-          o.reset_to = 1.0
-        }
+        bl_osc(:square, frequency: input(fm), phase_mod: input(pm), width: input(width), reset: input(trig), to: 1.0)
       }
 
       expect(c.sample_c(256)).to eq(r.sample_ruby(256))
@@ -76,8 +79,7 @@ RSpec.describe('Tone reset inputs, free and random phases') do
     it 'turns a reset into a band-limited step from the continuing value to the target phase' do
       continuing = bl_osc.sample(100).dup
 
-      o = bl_osc
-      o.reset_input = input(triggers(100, 37))
+      o = bl_osc(reset: input(triggers(100, 37)))
       result = o.sample(100).dup
 
       expect(result[0...37]).to eq(continuing[0...37])
@@ -92,8 +94,7 @@ RSpec.describe('Tone reset inputs, free and random phases') do
       pm = Numo::SFloat.cast(Numo::NMath.sin(Numo::DFloat.new(200).seq * 0.07) * 1.5)
       continuing = bl_osc(:triangle, phase_mod: input(pm)).sample(200).dup
 
-      o = bl_osc(:triangle, phase_mod: input(pm))
-      o.reset_input = input(triggers(200, 60))
+      o = bl_osc(:triangle, phase_mod: input(pm), reset: input(triggers(200, 60)))
       result = o.sample(200).dup
 
       # The step starts from the phase-modulated value the wave would have had
@@ -106,8 +107,7 @@ RSpec.describe('Tone reset inputs, free and random phases') do
     it 'works with frequency modulation' do
       fm = Numo::SFloat.linspace(300, 2000, 200)
 
-      o = bl_osc(frequency: input(fm))
-      o.reset_input = input(triggers(200, 90))
+      o = bl_osc(frequency: input(fm), reset: input(triggers(200, 90)))
       result = o.sample(200).dup
 
       fresh = bl_osc(frequency: input(fm[90..].dup)).sample(110).dup
@@ -119,9 +119,7 @@ RSpec.describe('Tone reset inputs, free and random phases') do
       targets[0...50] = 0.5 * Math::PI
       targets[50..] = Math::PI
 
-      o = MB::Sound::Oscillator.new(:ramp, frequency: 100, advance: advance)
-      o.reset_input = input(triggers(100, 20, 70))
-      o.reset_to = input(targets)
+      o = 100.hz.aramp.reset(input(triggers(100, 20, 70)), to: input(targets))
       result = o.sample(100)
 
       expect(result[20]).to be_within(1e-6).of(0.5)
@@ -129,49 +127,39 @@ RSpec.describe('Tone reset inputs, free and random phases') do
     end
 
     it 'can be removed with nil' do
-      o = bl_osc
-      o.reset_input = input(triggers(100, 10))
-      o.reset_input = nil
+      o = bl_osc(reset: input(triggers(100, 10))).reset(nil)
       expect(o.sample(100)).to eq(bl_osc.sample(100))
     end
 
     it 'keeps playing without resets after the reset input ends' do
-      o = bl_osc
-      o.reset_input = input(triggers(100, 10)) # ends after 100 samples
-      ref = bl_osc
-      ref.reset_input = input(triggers(300, 10))
+      o = bl_osc(reset: input(triggers(100, 10))) # ends after 100 samples
+      ref = bl_osc(reset: input(triggers(300, 10)))
       expect(pieces(o, :sample, [100, 100, 100]) {}).to eq(pieces(ref, :sample, [100, 100, 100]) {})
     end
 
     it 'gives the same samples as no reset input when the trigger is always zero' do
-      o = bl_osc(:square)
-      o.reset_input = input(triggers(256))
+      o = bl_osc(:square, reset: input(triggers(256)))
       expect(o.sample(256)).to eq(bl_osc(:square).sample(256))
     end
 
     it 'remembers a quiet frozen trigger buffer and still resets at a new one' do
       quiet = triggers(100).freeze
       bufs = [quiet, quiet, triggers(100, 40).freeze, quiet]
-      o = bl_osc
-      o.reset_input = MB::Sound::GraphNode::ProcNode.new(0.constant) { bufs.shift }
-      ref = bl_osc
-      ref.reset_input = input(triggers(400, 240))
+      o = bl_osc(reset: MB::Sound::GraphNode::ProcNode.new(0.constant) { bufs.shift })
+      ref = bl_osc(reset: input(triggers(400, 240)))
       expect(pieces(o, :sample, [100] * 4) {}).to eq(ref.sample(400))
     end
 
     it 'cannot be combined with sync' do
-      o = bl_osc
-      o.reset_input = input(triggers(10, 1))
-      expect { o.sync = input(triggers(10, 2)) }.to raise_error(ArgumentError, /reset/)
+      o = bl_osc(reset: input(triggers(10, 1)))
+      expect { o.sync(input(triggers(10, 2))) }.to raise_error(ArgumentError, /reset/)
 
       s = bl_osc(sync: input(triggers(10, 2)))
-      expect { s.reset_input = input(triggers(10, 1)) }.to raise_error(ArgumentError, /sync/)
+      expect { s.reset(input(triggers(10, 1))) }.to raise_error(ArgumentError, /sync/)
     end
 
     it 'gives sync pulses (the wraps port) at reset samples' do
-      o = MB::Sound::Oscillator.new(:ramp, frequency: 100, advance: advance)
-      o.reset_input = input(triggers(100, 30))
-      o.reset_to = Math::PI
+      o = 100.hz.aramp.reset(input(triggers(100, 30)), to: Math::PI)
       wraps = o.wraps
       o.sample(100)
       pulses = wraps.sample(100)
@@ -183,9 +171,7 @@ RSpec.describe('Tone reset inputs, free and random phases') do
     it 'lists the reset input and target node as sources' do
       trig = input(triggers(10, 1))
       to = input(Numo::SFloat.zeros(10))
-      o = bl_osc
-      o.reset_input = trig
-      o.reset_to = to
+      o = bl_osc(reset: trig, to: to)
       expect(o.sources.keys).to include(:reset, :reset_to)
     end
   end
@@ -195,7 +181,6 @@ RSpec.describe('Tone reset inputs, free and random phases') do
       it 'returns self and passes the input to the oscillator' do
         t = 100.hz.ramp
         expect(t.reset(input(triggers(10, 3)))).to equal(t)
-        expect(t.oscillator.reset_input).not_to be_nil
         expect(t.reset_input).not_to be_nil
       end
 
@@ -243,11 +228,9 @@ RSpec.describe('Tone reset inputs, free and random phases') do
 
       it 'is removed by #free, with a warning (the last call wins)' do
         t = 100.hz.aramp.reset(input(triggers(100, 50)), to: 1.0)
-        t.oscillator
         expect { t.free }.to output(/free overrides reset/).to_stderr
         expect(t.free?).to eq(true)
         expect(t.reset_input).to be_nil
-        expect(t.oscillator.reset_input).to be_nil
         expect(t.sample(100)).to eq(100.hz.aramp.sample(100))
       end
 
@@ -360,25 +343,24 @@ RSpec.describe('Tone reset inputs, free and random phases') do
         expect(100.hz.rnd.seed).to eq(s)
       end
 
-      it 'can be reseeded with #seed=, also after the oscillator was made' do
+      it 'can be reseeded with #seed=' do
         a = 100.hz.aramp.rnd(seed: 5).sample(1)[0]
         t = 100.hz.aramp.rnd(seed: 1)
-        t.oscillator
         t.seed = 5
         expect(t.sample(1)[0]).to eq(a)
       end
 
-      it 'gives MIDI-style resets (Oscillator#reset) a new random phase' do
-        t = 100.hz.aramp.rnd(seed: 1)
-        values = 3.times.map { t.oscillator.reset; t.sample(1)[0] }
+      it 'gives each reset a new random phase' do
+        t = 100.hz.aramp.rnd(seed: 1).reset(input(triggers(1, 0), repeat: true))
+        values = 3.times.map { t.sample(1)[0] }
         expect(values.uniq.length).to eq(3)
       end
 
       it 'keeps a random offset for tempo-locked tones' do
         t = 100.hz.aramp.rnd(seed: 1)
-        start = t.oscillator.phase
+        start = t.phi
         t.sync_cycles(0)
-        expect(t.oscillator.phi).to be_within(1e-9).of(start)
+        expect(t.phi).to be_within(1e-9).of(start)
       end
     end
   end

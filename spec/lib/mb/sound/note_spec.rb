@@ -226,7 +226,7 @@ RSpec.describe MB::Sound::Note do
         MB::Sound.tuning a4: 432 # it's got bad frequencies!
         expect(a4.frequency.round(5)).to eq(432)
         expect(MB::Sound::A4.frequency.round(5)).to eq(432)
-        expect(tone.oscillator.frequency.sample(1)[0].round(3)).to eq(432)
+        expect(tone.frequency.sample(1)[0].round(3)).to eq(432)
       end
 
       it 'can use a different tuning note' do

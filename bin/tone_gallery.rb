@@ -73,7 +73,7 @@ CASES.merge!(
     MB::Sound.tuning b4: 480 # reset after each case
     MB::Sound::B4.sine.at(0.5)
   },
-  oscillator_direct: -> { MB::Sound::Oscillator.new(:triangle, frequency: 330, range: -0.5..0.5) },
+  oscillator_direct: -> { MB::Sound::Tone.new(wave_type: :triangle, frequency: 330).atriangle.at(-0.5..0.5) }, # was Oscillator.new(:triangle, ...)
   tone_lowpass: -> { 440.hz.ramp.at(0.5).filter(880.hz.lowpass(quality: 2)) },
   tempo_lfo: -> { 220.hz.sine.at(0.5) * 1.beat.lfo.at(0..1) },
   tempo_lfo_square: -> { 330.hz.triangle.at(0.5) * 2.beats.lfo.square.at(0.2..1) },
