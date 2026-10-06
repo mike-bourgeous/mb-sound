@@ -488,7 +488,7 @@ module MB
         end
 
         # See wt_sync_spectral in C (+sel+ from #select).
-        def sync_spectral(spec, sel, u0, f0, u1, f1, v0re, v0im, v1re, v1im, d, grows, blep, os, taps, acc, pos, cs)
+        def sync_spectral(spec, sel, u0, f0, u1, f1, v0re, v0im, v1re, v1im, d, grows, blep, os, taps, acc, pos, cs, limit)
           s0re = 0.0
           s0im = 0.0
           s1re = 0.0
@@ -518,6 +518,9 @@ module MB
             b0r, b0i, r0r, r0i = rotations(f0, d, taps) unless same
 
             (1..hmax).each do |h|
+              hf = h.to_f
+              break if (hf * f1).abs > limit || (hf * f0).abs > limit
+
               nr = e0r * c0 - e0i * sn0
               ni = e0r * sn0 + e0i * c0
               e0r = nr
@@ -553,7 +556,6 @@ module MB
               s1re += a1r
               s1im += a1i
 
-              hf = h.to_f
               if same
                 add_q(acc, pos, grows, os, taps, cs, hf * f1, d, r1r, r1i, a1r - a0r, a1i - a0i)
               else
@@ -574,7 +576,7 @@ module MB
         end
 
         # Ruby version of FastWavetable.sync (see Wavetable#sync).
-        def sync(out, spec, freq, adv, g, off, sync_state, ring, pulses, soft, width, scan, interp, remove_dc, residuals, blep, os, taps, bl)
+        def sync(out, spec, freq, adv, g, off, sync_state, ring, pulses, soft, width, scan, interp, remove_dc, residuals, blep, os, taps, bl, limit)
           count = out.length
           cs = spec[2][0].is_a?(Numo::SComplex) ? 2 : 1
           f_s, f_a = signal(freq, count)
@@ -640,7 +642,7 @@ module MB
                 if bl
                   u1, k1 = warp_slope(p, w)
                   v1re, v1im = soft ? [v0re, v0im] : parts.(value(spec, u1, m, sc, interp))
-                  sync_spectral(spec, select(spec, m, sc), u0, vel * k0, u1, nvel * k1, v0re, v0im, v1re, v1im, d, grows, blep, os, taps, acc, pos, cs)
+                  sync_spectral(spec, select(spec, m, sc), u0, vel * k0, u1, nvel * k1, v0re, v0im, v1re, v1im, d, grows, blep, os, taps, acc, pos, cs, limit)
                 end
                 vel = nvel
 

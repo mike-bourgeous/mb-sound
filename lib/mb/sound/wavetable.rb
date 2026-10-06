@@ -634,7 +634,7 @@ module MB
         MB::Sound::FastWavetable.sync(
           out, kernel_spec(sample_rate, interpolation, sync: band_limit), freq, advance.to_f, gain.to_f, offset.to_f, sync_state, ring,
           pulses, !!soft, width, scan, interpolation_code(interpolation), !!remove_dc, Wavetable.sync_residuals,
-          BandLimit.minblep_tables[0], BandLimit::SYNC_OVERSAMPLE, BandLimit::SYNC_TAPS, !!band_limit, sinc_kernel(interpolation)
+          BandLimit.minblep_tables[0], BandLimit::SYNC_OVERSAMPLE, BandLimit::SYNC_TAPS, !!band_limit, SYNC_RESIDUAL_LIMIT, sinc_kernel(interpolation)
         )
       end
 
@@ -643,7 +643,7 @@ module MB
         KernelRuby.sync(
           out, kernel_spec(sample_rate, interpolation, sync: band_limit), freq, advance.to_f, gain.to_f, offset.to_f, sync_state, ring,
           pulses, !!soft, width, scan, interpolation_code(interpolation), !!remove_dc, Wavetable.sync_residuals,
-          BandLimit.minblep_tables[0], BandLimit::SYNC_OVERSAMPLE, BandLimit::SYNC_TAPS, !!band_limit
+          BandLimit.minblep_tables[0], BandLimit::SYNC_OVERSAMPLE, BandLimit::SYNC_TAPS, !!band_limit, SYNC_RESIDUAL_LIMIT
         )
       end
 
@@ -659,6 +659,11 @@ module MB
       # The highest harmonic frequency of synced tones' levels in cycles per
       # sample (see #sync_ceiling): the minBLEP passes 0.89 there.
       SYNC_BAND = 0.42
+
+      # Harmonics moving faster than this (cycles per sample; fast phase warp
+      # segments) get no exact sync residual, only a minBLEP for their value
+      # jump: past it the minBLEP's response H(f) is too small to divide out.
+      SYNC_RESIDUAL_LIMIT = 0.45
 
       # Rows of .sync_residuals (frequencies 0 to 0.5 cycles per sample;
       # FastWavetable.sync reads the nearest row).

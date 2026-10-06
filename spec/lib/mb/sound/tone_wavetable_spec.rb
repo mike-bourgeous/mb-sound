@@ -135,6 +135,18 @@ RSpec.describe(MB::Sound::Tone, '#wavetable', aggregate_failures: true) do
       bright.each_cons(2) { |a, b| expect(b / a).to be_within(0.03).of(1) }
     end
 
+    it 'keeps synced phase-warped tables within their normal peaks' do
+      # Taylor residuals reached 9.1 here (a sine table!); fast warp
+      # segments (pwm(0.1) at 4 kHz moves 0.99 cycles per sample) fall back
+      # to a minBLEP of the value jump
+      [[0.3, 4000], [0.1, 4000], [0.3, 1000]].each do |width, f|
+        tone = f.hz.wavetable(:sine).pwm(width).sync(ratio: 2.37)
+        tone.sample(4800)
+        data = Numo::NArray.concatenate(Array.new(6) { tone.sample(800).dup })
+        expect(data.abs.max).to be < 1.6
+      end
+    end
+
     it 'gives synced tones finely spaced sync levels under the sync ceiling' do
       t = w[:saw]
       counts = t.sync_levels.map { |l| l.bandwidth.to_i }

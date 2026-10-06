@@ -1391,7 +1391,7 @@ static inline double wt_harmonic_gain(long h, long harmonics, int taper)
 // +v1re+/+v1im+ are the played values before and after.
 static void wt_sync_spectral(const struct wt_table *t, const struct wt_sel *sel, double u0, double f0, double u1, double f1,
 		double v0re, double v0im, double v1re, double v1im, double d, const struct wt_residuals *rs, const double *blep,
-		size_t os, size_t taps, double *acc, size_t pos, int cs)
+		size_t os, size_t taps, double *acc, size_t pos, int cs, double limit)
 {
 	double s0re = 0, s0im = 0, s1re = 0, s1im = 0;
 
@@ -1418,6 +1418,13 @@ static void wt_sync_spectral(const struct wt_table *t, const struct wt_sel *sel,
 		}
 
 		for (long h = 1; h <= hmax; h++) {
+			// Harmonics moving faster than +limit+ (a fast phase warp
+			// segment) get only the plain minBLEP of their value jump
+			double hf = (double)h;
+			if (fabs(hf * f1) > limit || fabs(hf * f0) > limit) {
+				break;
+			}
+
 			double nr = e0r * c0 - e0i * sn0;
 			double ni = e0r * sn0 + e0i * c0;
 			e0r = nr;
@@ -1457,7 +1464,6 @@ static void wt_sync_spectral(const struct wt_table *t, const struct wt_sel *sel,
 			s1re += a1r;
 			s1im += a1i;
 
-			double hf = (double)h;
 			if (same) {
 				wt_add_q(acc, pos, rs, os, taps, cs, hf * f1, d, r1r, r1i, a1r - a0r, a1i - a0i);
 			} else {
@@ -1487,23 +1493,25 @@ static inline double wt_warp_slope(double p, double w, double *k)
  * A synced wavetable oscillator (see Wavetable#sync):
  *   sync(buffer, spec, frequency, advance, gain, offset, sync_state, ring,
  *        pulses, soft, width, scan, interpolation, remove_dc, residuals,
- *        blep, oversample, taps, band_limit, sinc)
+ *        blep, oversample, taps, band_limit, limit, sinc)
  *
  * +sync_state+ is as for FastSynth.oscillate_sync ([phase, last increment,
  * direction, ring position, primed]); +ring+ is a DFloat of +taps+ pending
  * corrections (twice that for complex tables).  +residuals+ is the 2D
  * DComplex of Wavetable.sync_residuals ([rows, taps * oversample + 1]) and
- * +blep+ the minBLEP residual (BandLimit.minblep_tables).  +spec+ is
+ * +blep+ the minBLEP residual (BandLimit.minblep_tables); harmonics faster
+ * than +limit+ cycles per sample (Wavetable::SYNC_RESIDUAL_LIMIT) get only
+ * a minBLEP for their value jump.  +spec+ is
  * normally the table's sync spec (Wavetable#kernel_spec with sync: true).
  */
 static VALUE ruby_sync(int argc, VALUE *argv, VALUE self)
 {
-	if (argc != 20) {
-		rb_raise(rb_eArgError, "wrong number of arguments (given %d, expected 20)", argc);
+	if (argc != 21) {
+		rb_raise(rb_eArgError, "wrong number of arguments (given %d, expected 21)", argc);
 	}
 
 	VALUE buffer = argv[0], spec = argv[1], frequency = argv[2], sync_state = argv[6], ring = argv[7];
-	VALUE pulses = argv[8], width = argv[10], scan = argv[11], residuals = argv[14], blep_v = argv[15], sinc = argv[19];
+	VALUE pulses = argv[8], width = argv[10], scan = argv[11], residuals = argv[14], blep_v = argv[15], sinc = argv[20];
 
 	struct wt_table t;
 	wt_read_table(spec, &t);
@@ -1523,6 +1531,7 @@ static VALUE ruby_sync(int argc, VALUE *argv, VALUE self)
 	size_t os = NUM2SIZET(argv[16]);
 	size_t taps = NUM2SIZET(argv[17]);
 	_Bool bl = RTEST(argv[18]);
+	double limit = NUM2DBL(argv[19]);
 
 	Check_Type(sync_state, T_ARRAY);
 	if (RARRAY_LEN(sync_state) != 5) {
@@ -1638,7 +1647,7 @@ static VALUE ruby_sync(int argc, VALUE *argv, VALUE self)
 					} else {
 						wt_value_sel(&t, u1, &sel, mode, cs, &ks, &v1re, &v1im);
 					}
-					wt_sync_spectral(&t, &sel, u0, vel * k0, u1, nvel * k1, v0re, v0im, v1re, v1im, d, &rs, blep, os, taps, acc, pos, cs);
+					wt_sync_spectral(&t, &sel, u0, vel * k0, u1, nvel * k1, v0re, v0im, v1re, v1im, d, &rs, blep, os, taps, acc, pos, cs, limit);
 				}
 				vel = nvel;
 
