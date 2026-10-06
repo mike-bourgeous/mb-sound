@@ -3,13 +3,14 @@ module MB
     class Wavetable
       # The named tables (Wavetable[:saw], ...; see Wavetable.register).
       # The classic shapes (saw/ramp, square, triangle, basic, pulses) are
-      # the Fourier series of the naive Tone shapes with each level's
-      # harmonics tapered by Lanczos sigma factors (taper: :sigma), so they
-      # match the PolyBLEP Tone#ramp etc. in level (peaks near 1 instead of
-      # the 18% Gibbs overshoot, RMS within 0.3 dB; measured in the
-      # wavetables listening README) and phase.  Organ is scaled to a peak
-      # near 1.  For the exact series, use
-      # Wavetable.from_harmonics(Library.saw) etc.
+      # the exact Fourier series of the naive Tone shapes, band-limited per
+      # level, so they match the PolyBLEP Tone#ramp etc. in RMS, harmonic
+      # level, and phase, while their peaks differ: the natural Gibbs
+      # overshoot reaches about 1.18 on the saw and square (user's choice,
+      # 2026-10-06: the exact series over the sigma taper, accepting
+      # different peaks into nonlinear effects).  For peaks near 1, use
+      # Wavetable.from_harmonics(Library.saw) etc.  Organ is
+      # scaled to a peak near 1.
       module Library
         HARMONICS = 1023
 
@@ -47,10 +48,10 @@ module MB
       end
 
       register(:sine) { from_harmonics([1.0]) }
-      register(:saw) { from_harmonics(Library.saw, taper: :sigma) }
+      register(:saw) { from_harmonics(Library.saw) }
       register(:ramp) { named(:saw) }
-      register(:square) { from_harmonics(Library.square, taper: :sigma) }
-      register(:triangle) { from_harmonics(Library.triangle, taper: :sigma) }
+      register(:square) { from_harmonics(Library.square) }
+      register(:triangle) { from_harmonics(Library.triangle) }
 
       # Drawbar organ: 8', 4', 2 2/3', 2', 1 3/5', 1 1/3', 1' (harmonics 1,
       # 2, 3, 4, 5, 6, 8) at 8 8 6 6 0 4 0 4 (out of 8).
@@ -64,13 +65,13 @@ module MB
       register(:basic) {
         h = Library::HARMONICS
         sine = [1.0] + Array.new(h - 1, 0.0)
-        from_harmonics([sine, Library.triangle, Library.square, Library.saw], taper: :sigma)
+        from_harmonics([sine, Library.triangle, Library.square, Library.saw])
       }
 
       # Sixteen pulses from 50% (square) to 3% wide.
       register(:pulses) {
         frames = Array.new(16) { |i| Library.pulse(0.5 - i * (0.47 / 15)) }
-        from_harmonics(frames.map(&:first), frames.map(&:last), taper: :sigma)
+        from_harmonics(frames.map(&:first), frames.map(&:last))
       }
     end
   end

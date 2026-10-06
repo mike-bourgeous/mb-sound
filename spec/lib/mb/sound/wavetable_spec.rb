@@ -61,6 +61,14 @@ RSpec.describe(MB::Sound::Wavetable, aggregate_failures: true) do
       expect { w.from_harmonics([1], taper: :hann) }.to raise_error(ArgumentError, /taper/)
     end
 
+    it 'builds the library classic shapes from the exact series (no taper)' do
+      [:saw, :square, :triangle, :basic, :pulses].each do |name|
+        expect(w[name].taper).to be_nil
+      end
+      expect(w[:saw].metadata[:taper]).to be_nil
+      expect(w[:saw].frames.abs.max).to be > 1.15
+    end
+
     it 'wraps the guard samples around the cycle' do
       l = w[:saw].levels[3]
       d = l.data[0, nil]
