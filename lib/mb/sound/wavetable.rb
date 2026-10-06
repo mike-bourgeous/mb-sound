@@ -477,7 +477,8 @@ module MB
       # loop start, 12 loop end, 13 end (source samples), 14 GUARD.
       def kernel_spec(sample_rate, interpolation = nil)
         emphasis = emphasis?(interpolation)
-        @kernel_specs[[sample_rate.to_f, emphasis]] ||= begin
+        by_rate = @kernel_specs[sample_rate] ||= {}
+        by_rate[emphasis] ||= begin
           hi, lo = thresholds(sample_rate)
           levels, loop_levels = level_set(emphasis)
           [

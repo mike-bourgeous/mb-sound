@@ -33,6 +33,7 @@
 #include "mb_ext_helpers.h"
 
 #define WT_MAX_LEVELS 32
+#define WT_GUARD 16 // Wavetable::GUARD
 #define WT_INV_2PI (1.0 / (2.0 * M_PI))
 #define WT_MIN_WIDTH 1e-4
 
@@ -183,7 +184,7 @@ static void wt_read_table(VALUE spec, struct wt_table *t)
 	t->mode = NUM2INT(rb_ary_entry(spec, 0));
 	t->frames = NUM2LONG(rb_ary_entry(spec, 1));
 	t->guard = NUM2LONG(rb_ary_entry(spec, 14));
-	if (t->frames < 1 || (t->mode != 0 && t->mode != 1) || t->guard < 16) {
+	if (t->frames < 1 || (t->mode != 0 && t->mode != 1) || t->guard != WT_GUARD) {
 		rb_raise(rb_eArgError, "Invalid wavetable mode, frame count, or guard");
 	}
 
@@ -366,7 +367,7 @@ static inline __attribute__((always_inline)) void wt_frames(long count, double s
 
 // Level +k+ at +u+ (cycles, or source samples in sample mode) into
 // *re/*im.
-static inline __attribute__((always_inline)) void wt_level_value(const struct wt_table *t, int k, double u, long fa, long fb, double fs, int mode, const struct wt_sinc *ks, double *re, double *im)
+static inline __attribute__((always_inline)) void wt_level_value(const struct wt_table *t, int k, double u, long fa, long fb, double fs, int mode, int cs, const struct wt_sinc *ks, double *re, double *im)
 {
 	const struct wt_level *l;
 	double q;
@@ -396,40 +397,90 @@ static inline __attribute__((always_inline)) void wt_level_value(const struct wt
 
 	long ra = fa * l->stride;
 	long rb = fb < 0 ? -1 : fb * l->stride;
-	*re = wt_interpolate(l->data, t->cs, ra, rb, fs, q, mode, t->guard, ks);
-	if (t->cs == 2) {
-		*im = wt_interpolate(l->data + 1, t->cs, ra, rb, fs, q, mode, t->guard, ks);
+	*re = wt_interpolate(l->data, cs, ra, rb, fs, q, mode, WT_GUARD, ks);
+	if (cs == 2) {
+		*im = wt_interpolate(l->data + 1, cs, ra, rb, fs, q, mode, WT_GUARD, ks);
+	}
+}
+
+// Levels and frames chosen for a motion +m+ and scan position (see
+// wt_select): the first level k, whether to crossfade into k + 1 by x, and
+// the frames fa and fb (-1 for none) blended by fs.  Kernels keep one and
+// redo the choice only when m or the scan changes.
+struct wt_sel {
+	double m, scan;
+	_Bool valid;
+	int k;
+	_Bool two;
+	double x;
+	long fa, fb;
+	double fs;
+};
+
+static inline __attribute__((always_inline)) void wt_select(const struct wt_table *t, double m, double scan, struct wt_sel *sel)
+{
+	sel->m = m;
+	sel->scan = scan;
+	sel->valid = 1;
+	wt_frames(t->frames, scan, &sel->fa, &sel->fb, &sel->fs);
+
+	int n = t->nlevels;
+	int k = 0;
+	if (n > 1) {
+		while (k < n - 1 && m > t->hi[k]) {
+			k++;
+		}
+	}
+	sel->k = k;
+	sel->two = n > 1 && k < n - 1 && m > t->lo[k];
+	sel->x = sel->two ? (m - t->lo[k]) / (t->hi[k] - t->lo[k]) : 0;
+}
+
+// Like wt_select, reusing +sel+ if +m+ and +scan+ haven't changed.
+static inline __attribute__((always_inline)) void wt_reselect(const struct wt_table *t, double m, double scan, struct wt_sel *sel)
+{
+	if (!sel->valid || m != sel->m || scan != sel->scan) {
+		wt_select(t, m, scan, sel);
+	}
+}
+
+// The table's value at +u+ with the levels and frames of +sel+.
+static inline __attribute__((always_inline)) void wt_value_sel(const struct wt_table *t, double u, const struct wt_sel *sel, int mode, int cs, const struct wt_sinc *ks, double *re, double *im)
+{
+	if (sel->two) {
+		double re1, im1, re2, im2;
+		wt_level_value(t, sel->k, u, sel->fa, sel->fb, sel->fs, mode, cs, ks, &re1, &im1);
+		wt_level_value(t, sel->k + 1, u, sel->fa, sel->fb, sel->fs, mode, cs, ks, &re2, &im2);
+		*re = re1 + (re2 - re1) * sel->x;
+		*im = im1 + (im2 - im1) * sel->x;
+	} else {
+		wt_level_value(t, sel->k, u, sel->fa, sel->fb, sel->fs, mode, cs, ks, re, im);
+	}
+}
+
+// wt_value_sel with the interpolation +mode+ a constant in each branch, so
+// the compiler specializes the interpolator (the hot loops' dispatch).
+static inline __attribute__((always_inline)) void wt_value_dispatch(const struct wt_table *t, double u, const struct wt_sel *sel, int mode, const struct wt_sinc *ks, double *re, double *im)
+{
+	if (t->cs == 1) {
+		switch (mode) {
+			case WT_NONE: wt_value_sel(t, u, sel, WT_NONE, 1, ks, re, im); break;
+			case WT_LINEAR: wt_value_sel(t, u, sel, WT_LINEAR, 1, ks, re, im); break;
+			case WT_CUBIC: wt_value_sel(t, u, sel, WT_CUBIC, 1, ks, re, im); break;
+			case WT_OPTIMAL: wt_value_sel(t, u, sel, WT_OPTIMAL, 1, ks, re, im); break;
+			default: wt_value_sel(t, u, sel, WT_SINC, 1, ks, re, im); break;
+		}
+	} else {
+		wt_value_sel(t, u, sel, mode, 2, ks, re, im);
 	}
 }
 
 // The table's value at +u+ moving +m+ per sample, at +scan+.
 static inline __attribute__((always_inline)) void wt_value(const struct wt_table *t, double u, double m, double scan, int mode, const struct wt_sinc *ks, double *re, double *im)
 {
-	long fa, fb;
-	double fs;
-	wt_frames(t->frames, scan, &fa, &fb, &fs);
-
-	int n = t->nlevels;
-	if (n == 1) {
-		wt_level_value(t, 0, u, fa, fb, fs, mode, ks, re, im);
-		return;
-	}
-
-	int k = 0;
-	while (k < n - 1 && m > t->hi[k]) {
-		k++;
-	}
-
-	if (k < n - 1 && m > t->lo[k]) {
-		double x = (m - t->lo[k]) / (t->hi[k] - t->lo[k]);
-		double re1, im1, re2, im2;
-		wt_level_value(t, k, u, fa, fb, fs, mode, ks, &re1, &im1);
-		wt_level_value(t, k + 1, u, fa, fb, fs, mode, ks, &re2, &im2);
-		*re = re1 + (re2 - re1) * x;
-		*im = im1 + (im2 - im1) * x;
-	} else {
-		wt_level_value(t, k, u, fa, fb, fs, mode, ks, re, im);
-	}
+	struct wt_sel sel;
+	wt_select(t, m, scan, &sel);
+	wt_value_sel(t, u, &sel, mode, t->cs, ks, re, im);
 }
 
 // The half mean (Wavetable::Builder.half_means) at +scan+.
@@ -642,6 +693,7 @@ static VALUE ruby_oscillate(VALUE self, VALUE buffer, VALUE spec, VALUE frequenc
 
 	_Bool constant = !freqptr;
 	double steps = 0;
+	struct wt_sel sel = { .valid = 0 };
 	for (size_t i = 0; i < length; i++) {
 		if (freqptr) freq = crealf(freqptr[i]);
 		if (pmptr) pm = crealf(pmptr[i]);
@@ -672,7 +724,8 @@ static VALUE ruby_oscillate(VALUE self, VALUE buffer, VALUE spec, VALUE frequenc
 		double d = inc + (pm - prev_pm) * WT_INV_2PI;
 		double m = fabs(d) * wf;
 		double re, im;
-		wt_value(&t, u, m, sc, mode, &ks, &re, &im);
+		wt_reselect(&t, m, sc, &sel);
+		wt_value_dispatch(&t, u, &sel, mode, &ks, &re, &im);
 
 		if (corners) {
 			// Corners between the previous sample and this one: usually
@@ -811,6 +864,7 @@ static VALUE ruby_lookup(VALUE self, VALUE buffer, VALUE spec, VALUE phase, VALU
 	complex float *scptr;
 	mb_read_signal_input(&scan, length, "Scan", &sc, &scptr);
 
+	struct wt_sel sel = { .valid = 0 };
 	for (size_t i = 0; i < length; i++) {
 		if (phptr) ph = crealf(phptr[i]);
 		if (incptr) inc = crealf(incptr[i]);
@@ -871,7 +925,8 @@ static VALUE ruby_lookup(VALUE self, VALUE buffer, VALUE spec, VALUE phase, VALU
 		}
 
 		double re, im;
-		wt_value(&t, u, m, sc, mode, &ks, &re, &im);
+		wt_reselect(&t, m, sc, &sel);
+		wt_value_dispatch(&t, u, &sel, mode, &ks, &re, &im);
 		wt_store(out, t.cs, i, re, im, 1, 0);
 	}
 
@@ -939,6 +994,7 @@ static VALUE ruby_play(VALUE self, VALUE buffer, VALUE spec, VALUE frequency, VA
 
 	_Bool constant = !freqptr;
 	double steps = 0, psteps = 0;
+	struct wt_sel sel = { .valid = 0 };
 	for (size_t i = 0; i < length; i++) {
 		if (freqptr) freq = crealf(freqptr[i]);
 
@@ -955,7 +1011,8 @@ static VALUE ruby_play(VALUE self, VALUE buffer, VALUE spec, VALUE frequency, VA
 		}
 
 		double re, im;
-		wt_value(&t, p, fabs(sp), 0, mode, &ks, &re, &im);
+		wt_reselect(&t, fabs(sp), 0, &sel);
+		wt_value_dispatch(&t, p, &sel, mode, &ks, &re, &im);
 		wt_store(out, t.cs, i, re, im, g, off);
 
 		if (!constant) {
