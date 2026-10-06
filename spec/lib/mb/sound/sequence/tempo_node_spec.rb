@@ -23,6 +23,28 @@ RSpec.describe(MB::Sound::Sequence::TempoNode) do
       expect(seconds.value).to eq(0.75)
     end
 
+    it 'returns one frozen buffer while the tempo holds' do
+      hz = described_class.new(1.bar, mode: :hz, transport: transport)
+      a = hz.sample(4)
+      expect(a).to be_frozen
+      expect(hz.sample(4)).to equal(a)
+
+      transport.bpm = 90
+      b = hz.sample(4)
+      expect(b).not_to equal(a)
+      expect(b.to_a).to eq([0.375] * 4)
+      expect(hz.sample(8).to_a).to eq([0.375] * 8)
+    end
+
+    it 'follows the transport after tempo changes to equal values of other classes' do
+      expect(transport.whole_notes_per_second).to eq(0.5r)
+      transport.bpm = 120.0
+      expect(transport.whole_notes_per_second).to eq(0.5r)
+      transport.bpm = 150r
+      expect(transport.whole_notes_per_second).to eq(Rational(150, 240))
+      expect(transport.whole_notes_per_second).to equal(transport.whole_notes_per_second)
+    end
+
     it 'rejects unknown modes and empty durations' do
       expect { described_class.new(1.bar, mode: :bpm) }.to raise_error(ArgumentError, /Mode/)
       expect { described_class.new(0.bars, mode: :hz) }.to raise_error(ArgumentError, /longer than zero/)

@@ -70,7 +70,8 @@ module MB
           return nil if finished?
 
           from = @reader.cursor
-          to = from + step(count)
+          step(count)
+          to = @stream.advance(from, count, @sample_rate)
           events = @reader.events(from, to)
           chase = take_chase(to)
 
