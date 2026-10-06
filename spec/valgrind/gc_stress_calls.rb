@@ -28,7 +28,7 @@ module GCStressCalls
   end
 end
 
-[MB::FastSound, MB::Sound::FastDelay, MB::Sound::FastWavetable].each do |mod|
+[MB::FastSound, MB::Sound::FastDelay, MB::Sound::FastWavetable, MB::Sound::FastUnison].each do |mod|
   GCStressCalls.wrap(mod.singleton_class, mod.singleton_methods(false))
 end
 GCStressCalls.wrap(MB::Sound::FastResample, [:read])
