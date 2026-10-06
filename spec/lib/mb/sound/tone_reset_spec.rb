@@ -184,11 +184,10 @@ RSpec.describe('Tone reset inputs, free and random phases') do
         expect(t.reset_input).not_to be_nil
       end
 
-      it 'works when set after the oscillator was made' do
+      it 'cannot be added once the tone is playing' do
         t = 100.hz.aramp
         t.sample(10)
-        t.reset(input(triggers(10, 4)), to: 0.5 * Math::PI)
-        expect(t.sample(10)[4]).to be_within(1e-6).of(0.5)
+        expect { t.reset(input(triggers(10, 4)), to: 0.5 * Math::PI) }.to raise_error(FrozenError, /already playing/)
       end
 
       it 'takes a phase in radians, like #with_phase' do

@@ -112,6 +112,35 @@ RSpec.describe MB::Sound::Tone do
     pending 'expected output'
   end
 
+  describe 'configuration' do
+    it 'is fixed once the tone plays' do
+      t = 220.hz.ramp.at(0.5)
+      t.sample(10)
+      [
+        -> { t.at(0.2) }, -> { t.square }, -> { t.with_phase(1) }, -> { t.fm(110.hz) },
+        -> { t.pm(110.hz) }, -> { t.pwm(0.3) }, -> { t.sync(ratio: 2) }, -> { t.reset(nil) },
+        -> { t.free }, -> { t.rnd }, -> { t.lfo }, -> { t.noise }, -> { t.seed = 3 },
+      ].each do |change|
+        expect(&change).to raise_error(FrozenError, /already playing/)
+      end
+    end
+
+    it 'still accepts or_at and sample rate changes after playing starts' do
+      t = 220.hz.ramp.at(0.5)
+      t.sample(10)
+      expect(t.or_at(1).range).to eq(-0.5..0.5)
+      expect { t.at_rate(96000) }.not_to raise_error
+      expect(t.advance).to eq(1.0 / 96000)
+    end
+
+    it 'picks up changes made after the state was inspected' do
+      t = 220.hz.ramp
+      expect(t.phi).to eq(0)
+      t.with_phase(Math::PI / 2)
+      expect(t.phi).to be_within(1e-12).of(Math::PI / 2)
+    end
+  end
+
   describe 'as an oscillator' do
     it 'keeps its frequency and range' do
       tone = 222.hz.at(-5.db)

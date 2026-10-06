@@ -16,9 +16,9 @@ module MB
     # A tone is configured before it plays; values that change while it
     # plays come from its inputs (frequency, phase modulation, width, sync,
     # reset, and reset target nodes; use a Constant or any node for a value
-    # that changes).  Configuration calls after the first sample raise
-    # (see #configure).  #sample_rate= (e.g. from Session#add or
-    # #oversample) works at any time.
+    # that changes).  Configuration calls after the first sample raise a
+    # FrozenError.  #sample_rate= (e.g. from Session#add or #oversample)
+    # works at any time.
     #
     # Everything that changes from sample to sample is in #state (a
     # Tone::State: the phase in cycles, band-limiting history, the queued
@@ -701,9 +701,10 @@ module MB
       end
 
       # Sets the default linear +amplitude+ of the tone, which may be a Numeric
-      # or a Range, if #at has not yet been called.
+      # or a Range, if #at has not yet been called (and the tone hasn't
+      # started playing).
       def or_at(amplitude)
-        unless @amplitude_set
+        unless @amplitude_set || @started
           begin
             @in_or_at = true
             at(amplitude)
@@ -1254,11 +1255,22 @@ module MB
       private
 
       # Runs the block (which changes configuration) and returns self,
-      # forgetting cached settings so the next sample picks the change up.
+      # forgetting cached settings (and a state made early for
+      # introspection) so the first sample picks the change up.  Raises
+      # FrozenError once the tone has started playing.
       def configure
+        if @started
+          raise FrozenError.new(
+            "#{self.class.name} #{wave_name} #{make_source_name(@frequency)} is already playing, so its settings are fixed " \
+            '(values that change while playing come from inputs, e.g. a Constant or another node)',
+            receiver: self
+          )
+        end
+
         yield
         @kernel = nil
         @advance = nil
+        @state = nil
         self
       end
 
