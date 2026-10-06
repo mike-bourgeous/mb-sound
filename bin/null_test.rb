@@ -49,6 +49,9 @@ CASES = {
   'song_stereo_song' => 'bin/songs/stereo_song.rb -q -f -b 2 %{out}',
   'song_scheduled_song' => 'bin/songs/scheduled_song.rb -q -f -b 2 %{out}',
   'song_node_graph_grit' => 'bin/songs/node_graph_grit.rb -q -f -b 1 %{out}',
+  'song_antialias_song' => 'bin/songs/antialias_song.rb -q -f %{out}', # -b N raises in Envelope (empty buffer at the limit)
+  'song_swap_song' => 'bin/songs/swap_song.rb -q -f -b 4 %{out}',
+  'song_random_drum_pentatonic' => 'bin/songs/random_drum_pentatonic.rb -q -f -b 2 %{out}',
 
   'synth_sinewave' => "bin/synths/sinewave.rb -q -f #{MIDI_FILE} %{out}",
   'synth_fm_bass' => "bin/synths/fm_bass.rb -q -f #{MIDI_FILE} %{out}",
@@ -60,6 +63,11 @@ CASES = {
   'synth_filter_ping' => "bin/synths/filter_ping.rb -q -f #{MIDI_FILE} %{out}",
   'synth_stereo_graph' => "bin/synths/stereo_graph_synth_example.rb -q -f #{MIDI_FILE} %{out}",
   'synth_wavetable_bass' => "bin/synths/wavetable_bass.rb -q -f #{MIDI_FILE} %{out}",
+  'synth_fm_epiano' => "bin/synths/fm_epiano.rb -q -f #{MIDI_FILE} %{out}",
+  'synth_fm_kick' => "bin/synths/fm_kick.rb -q -f #{MIDI_FILE} %{out}",
+  'song_fifth_pad' => 'bin/synths/fifth_pad.rb -q -f -b 2 %{out}',
+  'synth_fm_chain' => "bin/synths/fm_chain.rb -q -f --no-table #{MIDI_FILE} %{out}",
+  'synth_fm_experimental_bell' => "bin/synths/fm_experimental_bell.rb -q -f #{MIDI_FILE} %{out}",
 
   'fx_flanger' => "bin/effects/flanger.rb -q -f --oversample 1 #{ARP} %{out}",
   'fx_ping_pong_delay' => "bin/effects/ping_pong_delay.rb -q -f #{ARP} %{out}",
@@ -129,6 +137,7 @@ def compare_file(ref_path, new_path)
     raw_db: ref_energy > 0 ? db(Math.sqrt(raw / ref_energy)) : db(Math.sqrt(raw)),
     aligned_db: ref_energy > 0 ? db(Math.sqrt(aligned / ref_energy)) : db(Math.sqrt(aligned)),
     aligned_dbfs: db(Math.sqrt(aligned / samples)),
+    exact: raw == 0,
   }
 end
 
@@ -195,7 +204,7 @@ MB::Sound.script(
 
         ok = (r[:aligned_db] <= p.limit || r[:aligned_dbfs] <= p.floor) && r[:length_diff] == 0
         failures += 1 unless ok
-        puts format('%-40s %8d %6d %9.2f %9.1f %11.1f %9.1f %s', label, r[:frames], r[:length_diff], r[:gain_db], r[:raw_db], r[:aligned_db], r[:aligned_dbfs], ok ? '' : 'FAIL')
+        puts format('%-40s %8d %6d %9.2f %9.1f %11.1f %9.1f %s', label, r[:frames], r[:length_diff], r[:gain_db], r[:raw_db], r[:aligned_db], r[:aligned_dbfs], ok ? (r[:exact] ? 'exact' : '') : 'FAIL')
       end
     end
 

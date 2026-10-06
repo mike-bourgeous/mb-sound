@@ -78,6 +78,15 @@ CASES.merge!(
   tempo_lfo: -> { 220.hz.sine.at(0.5) * 1.beat.lfo.at(0..1) },
   tempo_lfo_square: -> { 330.hz.triangle.at(0.5) * 2.beats.lfo.square.at(0.2..1) },
   freewheel_lfo: -> { 220.hz.ramp.at(0.5) * 1.beat.lfo.freewheel.at(0..1) },
+  reset_trigger: -> {
+    hits = MB::Sound.grid(16, 'x..x..x.x..x.x..').loop
+    300.hz.saw.reset(hits.trigger).at(0.5) * hits.env
+  },
+  reset_random: -> { 220.hz.square.reset(4.hz.lfo.asquare.at(0..1), to: :random).at(0.5) },
+  rnd_unison: -> { 3.times.map { |i| (110 + i * 0.37).hz.saw.free.rnd.at(0.2) }.sum },
+  lfo_fade_sweep: -> { 1.hz.lfo.at(5..60).tone.ramp.lfo.at(0.5) },
+  tempo_audio_rate: -> { 1.n64.hz.ramp.at(0.3) + 1.n32.hz.square.at(0.2) },
+  phasor_wraps: -> { 220.hz.triangle.sync(MB::Sound::Pitch.new(137.5).phasor).at(0.5) },
   clip_bass: -> {
     bass = MB::Sound.seq(MB::Sound::C2, MB::Sound::G1, MB::Sound.rest, MB::Sound::C3).n8.loop
     bass.tone.ramp.at(0.5) * bass.env
