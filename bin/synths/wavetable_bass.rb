@@ -72,7 +72,7 @@ MB::Sound.synth_script { |midi|
       # Waveshaper: the clipped sum sweeps the shaper's cycle (-1..1 is two
       # cycles, centered on the middle of the table)
       (sum.softclip + 0.5)
-        .table_lookup(shaperwave, scan: cc4)
+        .phase_table(shaperwave, scan: cc4)
     }.filter(:highpass, cutoff: 10, quality: 0.7)
   }
 

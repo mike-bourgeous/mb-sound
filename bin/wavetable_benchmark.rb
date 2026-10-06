@@ -24,7 +24,7 @@ MB::Sound.script(
     bench.report('build wavetable') do
       table = MB::Sound::Wavetable.from_file('sounds/drums_wavetable.flac')
       osc = 100.hz.wavetable(table, scan: 1.hz.ramp.lfo.at(0..1))
-      shaper = 100.hz.sine.at(-0.5..1.5).table_lookup(table, scan: 0.5)
+      shaper = 100.hz.sine.at(-0.5..1.5).phase_table(table, scan: 0.5)
       sample_tone = 100.hz.wavetable(MB::Sound::Wavetable.from_file('sounds/piano0.flac', mode: :sample, root: 100, loop: 24000...48000))
     end
 

@@ -118,7 +118,7 @@ module MB
       INTERPOLATIONS = { none: 0, linear: 1, cubic: 2, optimal: 3, sinc: 4 }.freeze
 
       # Wrapping modes for phases outside 0...1 in GraphNode::Wavetable.
-      WRAP_MODES = [:wrap, :bounce, :clamp, :zero].freeze
+      WRAP_MODES = [:wrap, :bounce, :clamp, :zero, :shape].freeze
 
       MODES = [:cycle, :sample].freeze
 
@@ -517,19 +517,22 @@ module MB
       end
 
       # Phase-driven lookup in C: fills +out+ from +phase+ (cycles, an
-      # NArray) with +increments+ (cycles per sample, an NArray, for picking
-      # levels; nil for the brightest), +scan+, and the +wrap+ mode for
-      # phases outside 0...1 (see WRAP_MODES).  See GraphNode::Wavetable.
-      def lookup(out, phase, increments, scan, interpolation, sample_rate, wrap)
+      # NArray) with +increments+ (cycles per sample for picking levels: an
+      # NArray or number, false for the brightest level, or nil to estimate
+      # the speed from the phase changes, holding their peak, with the
+      # lookup state +lstate+ ([last phase, primed, peak, hold])), +scan+,
+      # and the +wrap+ mode for phases outside 0...1 (see WRAP_MODES; :shape
+      # spreads -1..1 across the cycle).  See GraphNode::Wavetable.
+      def lookup(out, phase, increments, scan, interpolation, sample_rate, wrap, lstate = nil)
         MB::Sound::FastWavetable.lookup(
           out, kernel_spec(sample_rate, interpolation), phase, increments, scan, interpolation_code(interpolation),
-          wrap_code(wrap), sinc_kernel(interpolation)
+          wrap_code(wrap), sinc_kernel(interpolation), lstate
         )
       end
 
       # Ruby mirror of #lookup.
-      def lookup_ruby(out, phase, increments, scan, interpolation, sample_rate, wrap)
-        KernelRuby.lookup(out, kernel_spec(sample_rate, interpolation), phase, increments, scan, interpolation_code(interpolation), wrap_code(wrap))
+      def lookup_ruby(out, phase, increments, scan, interpolation, sample_rate, wrap, lstate = nil)
+        KernelRuby.lookup(out, kernel_spec(sample_rate, interpolation), phase, increments, scan, interpolation_code(interpolation), wrap_code(wrap), lstate)
       end
 
       # Sample mode player in C: fills +out+ at +freq+ (Hz), advancing the

@@ -118,23 +118,43 @@ RSpec.describe(MB::Sound::FastWavetable, aggregate_failures: true) do
   end
 
   describe '.lookup' do
-    it 'matches the Ruby mirror for every wrapping mode and interpolator' do
+    it 'matches the Ruby mirror for every wrapping mode, interpolator, and kind of increment' do
       Numo::NArray.srand(2)
       phase = rand_input(-1.5, 2.5)
       incs = rand_input(-0.2, 0.2)
       scan = rand_input(-0.2, 1.2)
+      slow = Numo::SFloat.new(n).seq * 0.003 - 0.7
 
       cycle_tables.each do |name, t|
         w::INTERPOLATIONS.each_key do |interp|
           w::WRAP_MODES.each do |wrap|
-            [nil, incs].each do |inc|
-              a = t.lookup(out_buffer(t), phase, inc, scan, interp, 48000, wrap)
-              b = t.lookup_ruby(out_buffer(t), phase, inc, scan, interp, 48000, wrap)
-              expect(a.to_a).to eq(b.to_a), "#{name} #{interp} #{wrap} #{inc.nil?}: max difference #{(a - b).abs.max}"
+            [false, incs, 0.01, nil].each do |inc|
+              [phase, slow].each do |ph|
+                s1 = [0.25, 1, 0.003, 2]
+                s2 = s1.dup
+                a = t.lookup(out_buffer(t), ph, inc, scan, interp, 48000, wrap, s1)
+                b = t.lookup_ruby(out_buffer(t), ph, inc, scan, interp, 48000, wrap, s2)
+                expect(a.to_a).to eq(b.to_a), "#{name} #{interp} #{wrap} #{inc.class}: max difference #{(a - b).abs.max}"
+                expect(s1).to eq(s2)
+              end
             end
           end
         end
       end
+    end
+
+    it 'holds the peak phase change, then releases it' do
+      t = w[:saw]
+      state = [0.0, 1, 0.0, 0]
+      jump = Numo::SFloat.new(100).fill(0.05)
+      t.lookup(Numo::SFloat.zeros(100), jump, nil, 0, nil, 48000, :wrap, state)
+      expect(state[2]).to be_within(1e-6).of(0.05)
+      expect(state[3]).to eq(w::KernelRuby::HOLD - 99)
+
+      still = Numo::SFloat.zeros(2000)
+      t.lookup(Numo::SFloat.zeros(2000), still, nil, 0, nil, 48000, :wrap, state)
+      expect(state[3]).to eq(0)
+      expect(state[2]).to be < 0.05 * 0.995**900
     end
   end
 

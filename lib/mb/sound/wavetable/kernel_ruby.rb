@@ -174,16 +174,59 @@ module MB
         end
 
         # Ruby version of FastWavetable.lookup (see Wavetable#lookup).
-        def lookup(out, spec, phase, increments, scan, interp, wrap_mode)
+        # Samples the held peak of the phase change lasts (see FastWavetable.lookup).
+        HOLD = 1024
+
+        # Release factor per sample of the held peak.
+        RELEASE = 0.995
+
+        def lookup(out, spec, phase, increments, scan, interp, wrap_mode, lstate = nil)
           count = out.length
           ph_s, ph_a = signal(phase, count)
-          inc_s, inc_a = signal(increments, count)
+          automatic = increments.nil?
+          inc_s, inc_a = automatic || increments.equal?(false) ? [0.0, nil] : signal(increments, count)
           sc_s, sc_a = signal(scan, count)
+
+          if automatic
+            raise ArgumentError, 'Lookup state must have four elements' unless lstate.is_a?(Array) && lstate.length == 4
+
+            prev = lstate[0].to_f
+            primed = lstate[1] != 0
+            peak = lstate[2].to_f
+            hold = lstate[3].to_i
+          end
 
           values = Array.new(count) { |i|
             ph = ph_a ? ph_a[i] : ph_s
             inc = inc_a ? inc_a[i] : inc_s
             sc = sc_a ? sc_a[i] : sc_s
+
+            if automatic
+              d = 0.0
+              if primed
+                d = ph - prev
+                if wrap_mode == 0
+                  d -= (d + 0.5).floor
+                elsif wrap_mode == 4
+                  d *= 0.5
+                end
+                d = d.abs
+              end
+              if d >= peak
+                peak = d
+                hold = HOLD
+              elsif hold > 0
+                hold -= 1
+              else
+                r = peak * RELEASE
+                peak = r > d ? r : d
+              end
+              prev = ph
+              primed = true
+              m = peak
+            else
+              m = inc.abs
+            end
 
             case wrap_mode
             when 0
@@ -193,14 +236,21 @@ module MB
               u = b > 1 ? 2.0 - b : b
             when 2
               u = ph < 0 ? 0.0 : (ph > 1 ? 1.0 : ph)
+            when 4
+              u = (ph + 1.0) * 0.5
+              u = u < 0 ? 0.0 : (u > 1 ? 1.0 : u)
             else
               next 0.0 if ph < 0 || ph >= 1
 
               u = ph
             end
 
-            value(spec, u, inc.abs, sc, interp)
+            value(spec, u, m, sc, interp)
           }
+
+          if automatic && count > 0
+            lstate.replace([prev, 1, peak, hold])
+          end
 
           store(out, values)
         end

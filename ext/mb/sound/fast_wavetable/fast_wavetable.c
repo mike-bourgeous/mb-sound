@@ -49,7 +49,15 @@ enum wt_wrap {
 	WT_BOUNCE = 1,
 	WT_CLAMP = 2,
 	WT_ZERO = 3,
+	WT_SHAPE = 4,
 };
+
+// Phase-driven lookups without increments estimate the speed from the
+// phase change per sample, holding its peak for WT_HOLD samples, then
+// releasing by WT_RELEASE per sample, so levels don't flicker within a
+// cycle (see ruby_lookup).
+#define WT_HOLD 1024
+#define WT_RELEASE 0.995
 
 // Niemitalo's optimal 4-point, 4th-order interpolator for 4x oversampled
 // data (z-form; see Wavetable::KernelRuby::OPTIMAL).
@@ -741,13 +749,21 @@ static VALUE ruby_oscillate(VALUE self, VALUE buffer, VALUE spec, VALUE frequenc
 
 /*
  * Phase-driven wavetable lookup (see Wavetable#lookup):
- *   lookup(buffer, spec, phase, increments, scan, interpolation, wrap, sinc)
+ *   lookup(buffer, spec, phase, increments, scan, interpolation, wrap, sinc,
+ *          lstate)
  *
- * Reads the table at +phase+ (cycles; outside 0...1 handled by +wrap+:
- * 0 wrap, 1 bounce, 2 clamp, 3 zero), picking levels by |increments| (nil
- * for 0: the brightest level).
+ * Reads the table at +phase+ (cycles), handling phases outside 0...1 by
+ * +wrap+: 0 wrap, 1 bounce, 2 clamp, 3 zero, or 4 shape (the phase is a
+ * signal from -1 to 1 spread across the whole cycle, clamped at the ends).
+ *
+ * Levels follow |increments| (cycles per sample; false for 0, the
+ * brightest level).  With nil increments the speed comes from the phase
+ * itself: the change from the previous sample (wrapped to -0.5..0.5 for
+ * :wrap, halved for :shape), whose peak is held for WT_HOLD samples and
+ * then released by WT_RELEASE per sample.  +lstate+ is [last phase,
+ * primed, held peak, hold samples left].
  */
-static VALUE ruby_lookup(VALUE self, VALUE buffer, VALUE spec, VALUE phase, VALUE increments, VALUE scan, VALUE interp, VALUE wrap, VALUE sinc)
+static VALUE ruby_lookup(VALUE self, VALUE buffer, VALUE spec, VALUE phase, VALUE increments, VALUE scan, VALUE interp, VALUE wrap, VALUE sinc, VALUE lstate)
 {
 	struct wt_table t;
 	wt_read_table(spec, &t);
@@ -757,8 +773,23 @@ static VALUE ruby_lookup(VALUE self, VALUE buffer, VALUE spec, VALUE phase, VALU
 	struct wt_sinc ks = { 0 };
 	int mode = wt_read_interp(interp, sinc, &t, &ks);
 	int wrapmode = NUM2INT(wrap);
-	if (wrapmode < WT_WRAP || wrapmode > WT_ZERO) {
+	if (wrapmode < WT_WRAP || wrapmode > WT_SHAPE) {
 		rb_raise(rb_eArgError, "Invalid wrapping mode code %d", wrapmode);
+	}
+
+	_Bool automatic = NIL_P(increments);
+	double prev = 0, peak = 0;
+	long hold = 0;
+	_Bool primed = 0;
+	if (automatic) {
+		Check_Type(lstate, T_ARRAY);
+		if (RARRAY_LEN(lstate) != 4) {
+			rb_raise(rb_eArgError, "Lookup state must have four elements");
+		}
+		prev = NUM2DBL(rb_ary_entry(lstate, 0));
+		primed = NUM2INT(rb_ary_entry(lstate, 1)) != 0;
+		peak = NUM2DBL(rb_ary_entry(lstate, 2));
+		hold = NUM2LONG(rb_ary_entry(lstate, 3));
 	}
 
 	_Bool was_inplace;
@@ -770,9 +801,11 @@ static VALUE ruby_lookup(VALUE self, VALUE buffer, VALUE spec, VALUE phase, VALU
 	complex float *phptr;
 	mb_read_signal_input(&phase, length, "Phase", &ph, &phptr);
 
-	double inc;
-	complex float *incptr;
-	mb_read_signal_input(&increments, length, "Increments", &inc, &incptr);
+	double inc = 0;
+	complex float *incptr = NULL;
+	if (!automatic && increments != Qfalse) {
+		mb_read_signal_input(&increments, length, "Increments", &inc, &incptr);
+	}
 
 	double sc;
 	complex float *scptr;
@@ -782,6 +815,34 @@ static VALUE ruby_lookup(VALUE self, VALUE buffer, VALUE spec, VALUE phase, VALU
 		if (phptr) ph = crealf(phptr[i]);
 		if (incptr) inc = crealf(incptr[i]);
 		if (scptr) sc = crealf(scptr[i]);
+
+		double m;
+		if (automatic) {
+			double d = 0;
+			if (primed) {
+				d = ph - prev;
+				if (wrapmode == WT_WRAP) {
+					d = d - wt_floor(d + 0.5);
+				} else if (wrapmode == WT_SHAPE) {
+					d = d * 0.5;
+				}
+				d = fabs(d);
+			}
+			if (d >= peak) {
+				peak = d;
+				hold = WT_HOLD;
+			} else if (hold > 0) {
+				hold--;
+			} else {
+				double r = peak * WT_RELEASE;
+				peak = r > d ? r : d;
+			}
+			prev = ph;
+			primed = 1;
+			m = peak;
+		} else {
+			m = fabs(inc);
+		}
 
 		double u;
 		switch (wrapmode) {
@@ -796,6 +857,10 @@ static VALUE ruby_lookup(VALUE self, VALUE buffer, VALUE spec, VALUE phase, VALU
 			case WT_CLAMP:
 				u = ph < 0 ? 0.0 : (ph > 1 ? 1.0 : ph);
 				break;
+			case WT_SHAPE:
+				u = (ph + 1.0) * 0.5;
+				u = u < 0 ? 0.0 : (u > 1 ? 1.0 : u);
+				break;
 			default:
 				if (ph < 0 || ph >= 1) {
 					wt_store(out, t.cs, i, 0, 0, 1, 0);
@@ -806,8 +871,15 @@ static VALUE ruby_lookup(VALUE self, VALUE buffer, VALUE spec, VALUE phase, VALU
 		}
 
 		double re, im;
-		wt_value(&t, u, fabs(inc), sc, mode, &ks, &re, &im);
+		wt_value(&t, u, m, sc, mode, &ks, &re, &im);
 		wt_store(out, t.cs, i, re, im, 1, 0);
+	}
+
+	if (automatic && length > 0) {
+		rb_ary_store(lstate, 0, rb_float_new(prev));
+		rb_ary_store(lstate, 1, INT2NUM(1));
+		rb_ary_store(lstate, 2, rb_float_new(peak));
+		rb_ary_store(lstate, 3, LONG2NUM(hold));
 	}
 
 	if (!was_inplace) {
@@ -1157,7 +1229,7 @@ void Init_fast_wavetable(void)
 	VALUE fast_wavetable_module = rb_define_module_under(sound, "FastWavetable");
 
 	rb_define_module_function(fast_wavetable_module, "oscillate", ruby_oscillate, 14);
-	rb_define_module_function(fast_wavetable_module, "lookup", ruby_lookup, 8);
+	rb_define_module_function(fast_wavetable_module, "lookup", ruby_lookup, 9);
 	rb_define_module_function(fast_wavetable_module, "play", ruby_play, 11);
 	rb_define_module_function(fast_wavetable_module, "sync", ruby_sync, -1);
 }
