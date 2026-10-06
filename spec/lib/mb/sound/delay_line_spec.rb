@@ -27,6 +27,40 @@ RSpec.describe(MB::Sound::DelayLine, :aggregate_failures) do
     end
   end
 
+  describe 'reading into a given buffer' do
+    let(:line) {
+      MB::Sound::DelayLine.new(64).tap { |l|
+        3.times { |i| l.write(Numo::SFloat.new(20).seq + i * 20) }
+      }
+    }
+
+    it '#past copies into out (wrapping) with the same values' do
+      expected = line.past(30, 50)
+      out = Numo::SFloat.zeros(30)
+      expect(line.past(30, 50, out: out)).to equal(out)
+      expect(out).to eq(expected)
+    end
+
+    it '#past makes a new buffer when out does not fit' do
+      out = Numo::SFloat.zeros(5)
+      expect(line.past(30, 50, out: out)).not_to equal(out)
+    end
+
+    it '#read fills out with the same samples' do
+      [7, 7.5, Numo::SFloat.linspace(3, 9, 20)].each do |delay|
+        expected = line.read(20, delay, interpolation: :sinc, state: [])
+        out = Numo::SFloat.new(20).fill(99)
+        expect(line.read(20, delay, interpolation: :sinc, state: [], out: out)).to equal(out)
+        expect(out.to_binary).to eq(expected.to_binary)
+      end
+    end
+
+    it '#read makes a new buffer for a frozen or misfit out' do
+      expect(line.read(20, 3, out: Numo::SFloat.zeros(20).freeze)).not_to be_frozen
+      expect(line.read(20, 3, out: Numo::DFloat.zeros(20))).to be_a(Numo::SFloat)
+    end
+  end
+
   describe '#past' do
     it 'reads samples already written, from a delay before the next write' do
       line = described_class.new(32)

@@ -482,8 +482,8 @@ module MB
 
           # The input of channel +index+'s delay line +delay+ samples before
           # the next block (see DelayLine#past).
-          def past(index, count, delay)
-            @lines[index].past(count, delay)
+          def past(index, count, delay, out: nil)
+            @lines[index].past(count, delay, out: out)
           end
 
           # Processes one buffer of channel +data+ (an Array of SFloat, one
@@ -505,7 +505,11 @@ module MB
               line = @lines[idx]
               line.prepare(v.length, d, v.class)
               line.write(v)
-              line.read(v.length, d, interpolation: MB::Sound::DelayLine::DEFAULT_INTERPOLATION, state: @states[idx])
+              # Into a reused buffer per line (consumed by the next step
+              # before the next block; Reverb#render_pieces copies pieces)
+              out = (@read_bufs ||= [])[idx]
+              out = @read_bufs[idx] = line.buffer_class.zeros(v.length) unless out && out.class == line.buffer_class && out.length == v.length
+              line.read(v.length, d, interpolation: MB::Sound::DelayLine::DEFAULT_INTERPOLATION, state: @states[idx], out: out)
             end
           end
 
@@ -578,7 +582,13 @@ module MB
           if @feedback_enabled
             loop_delays = feedback_delays
             data = data.map.with_index { |v, idx|
-              fb = @feedback_network.past(idx, v.length, loop_delays[idx])
+              # fb * gain + v in a reused buffer per channel (wet_dry: the
+              # same product and sum; 1 * v is v), else Numo
+              out = (@feedback_bufs ||= [])[idx]
+              out = @feedback_bufs[idx] = Numo::SFloat.zeros(v.length) unless out && out.length == v.length
+              fb = @feedback_network.past(idx, v.length, loop_delays[idx], out: out)
+              next fb if fb.equal?(out) && MB::Sound::FastArithmetic.wet_dry(fb, fb, @feedback_gain, v, 1)
+
               (fb.inplace * @feedback_gain + v).not_inplace!
             }
             data = @feedback_network.process(data)
@@ -710,9 +720,56 @@ module MB
 
           @output_groups = partition_outputs(@pipeline_output, @output_channels)
 
-          # (scales the dry input in place unless it's a frozen, shared buffer)
-          @dry_output = dry.map { |c| ((c.frozen? ? c.dup : c).inplace * @dry).not_inplace! }
+          # (scales the dry input in place unless it's a frozen, shared
+          # buffer, which is scaled into a reused buffer per channel)
+          @dry_output = dry.map.with_index { |c, idx| scale_dry(c, idx) }
           @dry_groups = partition_outputs(@dry_output, @output_channels)
+        end
+
+        # Output +index+'s wet group sum times the wet gain plus its dry group
+        # sum, as #sample_internal's Numo expression (Array#sum adds to 0 in
+        # order), in reused buffers without allocating (FastArithmetic.mix
+        # and .wet_dry), or nil to use Numo.
+        def mix_output(index)
+          wet = @output_groups[index]
+          dry = @dry_groups[index]
+          return nil if wet.empty? || dry.empty?
+          length = wet[0].length
+
+          bufs = ((@output_bufs ||= [])[index] ||= [nil, nil, [], []])
+          bufs[0] = Numo::SFloat.zeros(length) unless bufs[0]&.length == length
+          bufs[1] = Numo::SFloat.zeros(length) unless bufs[1]&.length == length
+          wet_pairs = unity_pairs(bufs[2], wet)
+          dry_pairs = unity_pairs(bufs[3], dry)
+
+          return nil unless MB::Sound::FastArithmetic.mix(bufs[0], 0, wet_pairs) && MB::Sound::FastArithmetic.mix(bufs[1], 0, dry_pairs)
+          MB::Sound::FastArithmetic.wet_dry(bufs[0], bufs[0], @wet * @diffusion_gain, bufs[1], 1)
+        end
+
+        # Fills reused [buffer, 1] pairs in +pairs+ for each of +bufs+.
+        def unity_pairs(pairs, bufs)
+          pairs.pop while pairs.length > bufs.length
+          bufs.each_with_index do |b, i|
+            pair = (pairs[i] ||= [nil, 1])
+            pair[0] = b
+          end
+          pairs
+        end
+
+        # Returns dry channel +c+ (input +idx+) times the dry gain: in place,
+        # or for a frozen buffer into a reused one, with
+        # FastArithmetic.wet_dry for SFloat buffers and Numeric gains (the
+        # same product as Numo's, (float)dry * x), else with Numo.
+        def scale_dry(c, idx)
+          target = c
+          if c.frozen?
+            bufs = (@dry_bufs ||= [])
+            target = bufs[idx]
+            target = bufs[idx] = c.class.zeros(c.length) unless target && target.class == c.class && target.length == c.length
+          end
+          return target if MB::Sound::FastArithmetic.wet_dry(target, c, @dry, c, nil)
+
+          ((c.frozen? ? c.dup : c).inplace * @dry).not_inplace!
         end
 
         # For internal use.  Samples the dry inputs and the wet network for
@@ -768,8 +825,10 @@ module MB
 
           return nil if @dry_output.nil? || @pipeline_output.any?(&:nil?)
 
-          wet = @output_groups[index].sum * (@wet * @diffusion_gain)
-          (wet.inplace + @dry_groups[index].sum).not_inplace!
+          mix_output(index) || begin
+            wet = @output_groups[index].sum * (@wet * @diffusion_gain)
+            (wet.inplace + @dry_groups[index].sum).not_inplace!
+          end
         end
 
         # Generates and returns +count+ samples of the mixed dry and

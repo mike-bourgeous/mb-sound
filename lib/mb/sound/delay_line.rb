@@ -207,11 +207,19 @@ module MB
       # would read at a constant delay of +delay+, before that block is
       # written.  +count+ may not exceed +delay+ (the samples must exist).
       # Used by GraphNode::Reverb to read its feedback at a fixed loop delay.
-      def past(count, delay)
+      #
+      # +out+ is an optional NArray of the buffer's type and +count+ samples
+      # to copy into instead of a new one (used when it fits; check the
+      # result's identity).
+      def past(count, delay, out: nil)
         raise ArgumentError, "Can't read #{count} samples from #{delay} samples ago" if count > delay
         raise ArgumentError, "Delay #{delay} is longer than the buffer (#{capacity})" if delay > capacity
 
         start = (@write_offset - delay) % capacity
+        if out && out.length == count && MB::Sound::FastArithmetic.circular_read(@buffer, start, count, out)
+          return out
+        end
+
         stop = start + count
         return @buffer[start...stop].dup if stop <= capacity
 
