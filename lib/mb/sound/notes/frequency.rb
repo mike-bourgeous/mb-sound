@@ -64,11 +64,10 @@ module MB
         # and cached if every input was frozen).
         def steady(n)
           offsets = @nodes.map { |node| node.sample(n.length) }
-          tuning = MB::Sound.tuning
+          tuning = Tuning.current
 
           key = @steady_key
-          if key && key[0].equal?(n) && key[1] == tuning.note && key[2] == tuning.frequency &&
-              offsets.each_with_index.all? { |o, idx| o.equal?(key[3][idx]) }
+          if key && key[0].equal?(n) && key[1] == tuning.note && key[2] == tuning.frequency && same_buffers?(offsets, key[3])
             return @steady
           end
 
@@ -81,6 +80,18 @@ module MB
 
           @steady_key = nil
           out
+        end
+
+        # True if Arrays +a+ and +b+ hold the same objects (without an
+        # Enumerator per call).
+        def same_buffers?(a, b)
+          return false unless a.length == b.length
+          idx = 0
+          while idx < a.length
+            return false unless a[idx].equal?(b[idx])
+            idx += 1
+          end
+          true
         end
 
         # Computes the frequencies from note number buffer +n+ and the offset
@@ -101,7 +112,7 @@ module MB
             @buf.inplace + o[0...count]
           end
 
-          tuning = MB::Sound.tuning
+          tuning = Tuning.current
           @buf = MB::FastSound.number_to_freq(@buf.inplace!, tuning.note, tuning.frequency)
           @buf.not_inplace!
           @value = @buf[-1]

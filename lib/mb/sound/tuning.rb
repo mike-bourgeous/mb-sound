@@ -23,6 +23,14 @@ module MB
         @default ||= new
       end
 
+      # The tuning in effect: the current session's (inside a Session
+      # render or scheduled block) or the default.  Same as MB::Sound.tuning
+      # without arguments, without allocating its keyword Hash (for nodes
+      # that check it every buffer).
+      def self.current
+        MB::Sound::Session.context&.[](:session)&.tuning || default
+      end
+
       # The reference MIDI note number and its frequency in Hz.
       attr_reader :note, :frequency
 
@@ -102,7 +110,7 @@ module MB
       #     at_bar(9) { tuning a4: 432 }
       def tuning(**reference)
         context = MB::Sound::Session.context
-        current = context&.[](:session)&.tuning || Tuning.default
+        current = Tuning.current
 
         if reference.any? && context&.[](:batch)
           Tuning.new.set(**reference) # raises for invalid references now
