@@ -1,0 +1,1 @@
+fast_sound.o: $(srcdir)/../sound/include/mb_ext_helpers.h

@@ -48,37 +48,39 @@ static inline void mb_ensure_inplace_sfloat(VALUE *narray, _Bool *was_inplace)
 	}
 }
 
-// Replaces *narray with a contiguous 1D SComplex NArray.
-static inline void mb_ensure_scomplex(VALUE *narray)
-{
-	int dim = RNARRAY_NDIM(*narray);
-	if (dim != 1) {
-		rb_raise(rb_eArgError, "Only 1D NArrays may be processed (got %d dimensions)", dim);
-	}
-
-	*narray = rb_funcall(numo_cSComplex, rb_intern("cast"), 1, *narray);
-
-	if (!RTEST(nary_check_contiguous(*narray))) {
-		*narray = nary_dup(*narray);
-	}
-}
-
 // Reads a signal input: a Numeric (into *scalar, with *ptr set to NULL) or an
-// NArray of +length+ values (cast to SComplex, whose real parts the caller
-// reads through *ptr; *scalar gets the first).  nil is 0.  +name+ is for
-// errors.
-static inline void mb_read_signal_input(VALUE *value, size_t length, const char *name, double *scalar, complex float **ptr)
+// NArray of +length+ values, whose real parts the caller reads as float32
+// values (*ptr)[i * *step] (*scalar gets the first).  Contiguous SFloat
+// (step 1) and SComplex (step 2, the real parts) NArrays are read where they
+// are, so the usual inputs allocate nothing; others (DFloat, DComplex,
+// non-contiguous views) are cast to SFloat or SComplex first, which rounds
+// to float32 the same way.  nil is 0.  +name+ is for errors.
+static inline void mb_read_signal_input(VALUE *value, size_t length, const char *name, double *scalar, const float **ptr, size_t *step)
 {
 	*ptr = NULL;
+	*step = 1;
 
-	if (CLASS_OF(*value) == numo_cDFloat || CLASS_OF(*value) == numo_cSFloat || CLASS_OF(*value) == numo_cSComplex || CLASS_OF(*value) == numo_cDComplex) {
+	VALUE cls = CLASS_OF(*value);
+	if (cls == numo_cDFloat || cls == numo_cSFloat || cls == numo_cSComplex || cls == numo_cDComplex) {
+		if (RNARRAY_NDIM(*value) != 1) {
+			rb_raise(rb_eArgError, "%s array must be 1D (got %d dimensions)", name, RNARRAY_NDIM(*value));
+		}
 		if (RNARRAY_SHAPE(*value)[0] != length) {
 			rb_raise(rb_eArgError, "%s array length does not match sample buffer length", name);
 		}
 
-		mb_ensure_scomplex(value);
-		*ptr = (complex float *)(nary_get_pointer_for_read(*value) + nary_get_offset(*value));
-		*scalar = crealf((*ptr)[0]);
+		_Bool is_complex = cls == numo_cSComplex || cls == numo_cDComplex;
+		VALUE target = is_complex ? numo_cSComplex : numo_cSFloat;
+		if (cls != target) {
+			*value = rb_funcall(target, rb_intern("cast"), 1, *value);
+		}
+		if (!RTEST(nary_check_contiguous(*value))) {
+			*value = nary_dup(*value);
+		}
+
+		*step = is_complex ? 2 : 1;
+		*ptr = (const float *)(nary_get_pointer_for_read(*value) + nary_get_offset(*value));
+		*scalar = length > 0 ? (*ptr)[0] : 0;
 	} else if (RTEST(*value)) {
 		*scalar = NUM2DBL(*value);
 	} else {

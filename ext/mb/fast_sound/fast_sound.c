@@ -12,6 +12,8 @@
 
 #include "numo/narray.h"
 
+#include "mb_ext_helpers.h"
+
 enum wave_types {
 	OSC_SINE,
 	OSC_COMPLEX_SINE,
@@ -737,21 +739,6 @@ static void ensure_sfloat(VALUE *narray)
 	}
 }
 
-static void ensure_scomplex(VALUE *narray)
-{
-	int dim = RNARRAY_NDIM(*narray);
-	if (dim != 1) {
-		rb_raise(rb_eArgError, "Only 1D NArrays may be processed (got %d dimensions)", dim);
-	}
-
-	*narray = rb_funcall(numo_cSComplex, rb_intern("cast"), 1, *narray);
-
-	if (!RTEST(nary_check_contiguous(*narray))) {
-		*narray = nary_dup(*narray);
-	}
-}
-
-
 static enum wave_types find_wave_type(ID wave_type)
 {
 	if (wave_type == sym_osc_sine) {
@@ -1212,27 +1199,6 @@ static inline double complex shape_sample(enum wave_types wt, double phi, double
 	return osc_sample(wt, radians + pm);
 }
 
-// Reads a Numeric (into *scalar) or an NArray of +length+ values (cast to
-// SComplex, real parts used; pointer into *ptr) from *value.  nil is 0.
-static void read_signal_input(VALUE *value, size_t length, const char *name, double *scalar, complex float **ptr)
-{
-	*ptr = NULL;
-
-	if (CLASS_OF(*value) == numo_cDFloat || CLASS_OF(*value) == numo_cSFloat || CLASS_OF(*value) == numo_cSComplex || CLASS_OF(*value) == numo_cDComplex) {
-		if (RNARRAY_SHAPE(*value)[0] != length) {
-			rb_raise(rb_eArgError, "%s array length does not match sample buffer length", name);
-		}
-
-		ensure_scomplex(value);
-		*ptr = (float complex *)(nary_get_pointer_for_read(*value) + nary_get_offset(*value));
-		*scalar = crealf((*ptr)[0]);
-	} else if (RTEST(*value)) {
-		*scalar = NUM2DBL(*value);
-	} else {
-		*scalar = 0;
-	}
-}
-
 // Reads and checks the [phi] state array of a phasor.
 static double read_phasor_state(VALUE state)
 {
@@ -1267,8 +1233,9 @@ static VALUE ruby_phasor(VALUE self, VALUE buffer, VALUE frequency, VALUE advanc
 	float *out = (float *)(nary_get_pointer_for_write(buffer) + nary_get_offset(buffer));
 
 	double freq;
-	complex float *freqptr;
-	read_signal_input(&frequency, length, "Frequency", &freq, &freqptr);
+	const float *freqptr;
+	size_t freqstep;
+	mb_read_signal_input(&frequency, length, "Frequency", &freq, &freqptr, &freqstep);
 
 	float *incptr = NULL;
 	if (RTEST(increments)) {
@@ -1282,7 +1249,7 @@ static VALUE ruby_phasor(VALUE self, VALUE buffer, VALUE frequency, VALUE advanc
 	double steps = 0;
 	for (size_t i = 0; i < length; i++) {
 		if (freqptr) {
-			freq = crealf(freqptr[i]);
+			freq = freqptr[i * freqstep];
 		}
 
 		double inc = phasor_increment(freq, adv, rndadv, &rng);
@@ -1343,19 +1310,21 @@ static VALUE ruby_shape(VALUE self, VALUE buffer, VALUE wave_type, VALUE phases,
 	float *phaseptr = (float *)(nary_get_pointer_for_read(phases) + nary_get_offset(phases));
 
 	double inc;
-	complex float *incptr;
-	read_signal_input(&increments, length, "Increment", &inc, &incptr);
+	const float *incptr;
+	size_t incstep;
+	mb_read_signal_input(&increments, length, "Increment", &inc, &incptr, &incstep);
 
 	double pm;
-	complex float *pmptr;
-	read_signal_input(&phase_mod, length, "Phase modulation", &pm, &pmptr);
+	const float *pmptr;
+	size_t pmstep;
+	mb_read_signal_input(&phase_mod, length, "Phase modulation", &pm, &pmptr, &pmstep);
 
 	for (size_t i = 0; i < length; i++) {
 		if (incptr) {
-			inc = crealf(incptr[i]);
+			inc = incptr[i * incstep];
 		}
 		if (pmptr) {
-			pm = crealf(pmptr[i]);
+			pm = pmptr[i * pmstep];
 		}
 
 		double complex v = shape_sample(wt, phaseptr[i], inc, pm) * g + off;
@@ -1404,21 +1373,23 @@ static VALUE ruby_oscillate(VALUE self, VALUE buffer, VALUE wave_type, VALUE fre
 	void *out = nary_get_pointer_for_write(buffer) + nary_get_offset(buffer);
 
 	double freq;
-	complex float *freqptr;
-	read_signal_input(&frequency, length, "Frequency", &freq, &freqptr);
+	const float *freqptr;
+	size_t freqstep;
+	mb_read_signal_input(&frequency, length, "Frequency", &freq, &freqptr, &freqstep);
 
 	double pm;
-	complex float *pmptr;
-	read_signal_input(&phase_mod, length, "Phase modulation", &pm, &pmptr);
+	const float *pmptr;
+	size_t pmstep;
+	mb_read_signal_input(&phase_mod, length, "Phase modulation", &pm, &pmptr, &pmstep);
 
 	_Bool constant = !freqptr && rndadv == 0;
 	double steps = 0;
 	for (size_t i = 0; i < length; i++) {
 		if (freqptr) {
-			freq = crealf(freqptr[i]);
+			freq = freqptr[i * freqstep];
 		}
 		if (pmptr) {
-			pm = crealf(pmptr[i]);
+			pm = pmptr[i * pmstep];
 		}
 
 		double inc = phasor_increment(freq, adv, rndadv, &rng);
