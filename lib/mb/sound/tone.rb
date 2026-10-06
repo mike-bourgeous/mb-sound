@@ -1514,13 +1514,22 @@ module MB
       # cycles per sample.
       def table_shape(table, e, w, inc, scan)
         wf = w == 0.5 ? 1.0 : 0.5 / [w, 1.0 - w].min
-        value = ->(x) {
-          x -= x.floor
-          u = w == 0.5 ? x : BandLimit.warp(x, w)
-          table.value_at(u, scan: scan, increment: inc.abs * wf, sample_rate: @sample_rate, interpolation: @interpolation)
-        }
-        d = 1e-4
-        [value.(e), (value.(e + d) - value.(e - d)) / (2 * d)]
+        m = inc.abs * wf
+        x = e - e.floor
+        u = w == 0.5 ? x : BandLimit.warp(x, w)
+        k = w == 0.5 ? 1.0 : (x < w ? 0.5 / w : 0.5 / (1.0 - w))
+        value = table.value_at(u, scan: scan, increment: m, sample_rate: @sample_rate, interpolation: @interpolation)
+
+        # The exact slope from the table's harmonics (see
+        # Wavetable::KernelRuby.spectral_derivs)
+        spec = table.kernel_spec(@sample_rate, @interpolation)
+        dre = [0.0, 0.0]
+        dim = [0.0, 0.0]
+        kr = MB::Sound::Wavetable::KernelRuby
+        kr.spectral_derivs(spec, u, kr.select(spec, m, scan.to_f), 2, dre, dim)
+        slope = table.complex? ? Complex(dre[1], dim[1]) : dre[1]
+
+        [value, slope * k]
       end
 
       # Adds any queued phase jump step (see #phase_jump) to +buf+, scaled
