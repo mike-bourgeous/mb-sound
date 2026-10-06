@@ -364,6 +364,27 @@ RSpec.describe(MB::Sound::FastArithmetic) do
     end
   end
 
+  describe '.complex_part' do
+    [[Numo::SComplex, Numo::SFloat], [Numo::DComplex, Numo::DFloat]].each do |src_class, out_class|
+      it "copies the real and imaginary parts of #{src_class} like Numo" do
+        src = make_input(src_class, 129, 41)
+        [false, true].each do |imag|
+          out = out_class.zeros(129)
+          expect(MB::Sound::FastArithmetic.complex_part(out, src, imag)).to equal(out)
+          expect(out.to_binary).to eq((imag ? src.imag : src.real).to_binary)
+        end
+      end
+    end
+
+    it 'returns nil for mismatched types, lengths, or a frozen output' do
+      src = Numo::SComplex[1 + 2i, 3]
+      expect(MB::Sound::FastArithmetic.complex_part(Numo::DFloat.zeros(2), src, false)).to be_nil
+      expect(MB::Sound::FastArithmetic.complex_part(Numo::SFloat.zeros(3), src, false)).to be_nil
+      expect(MB::Sound::FastArithmetic.complex_part(Numo::SFloat.zeros(2).freeze, src, false)).to be_nil
+      expect(MB::Sound::FastArithmetic.complex_part(Numo::SFloat.zeros(2), Numo::SFloat[1, 2], false)).to be_nil
+    end
+  end
+
   describe '.copy' do
     [Numo::SFloat, Numo::DFloat, Numo::SComplex, Numo::DComplex].each do |cls|
       it "copies #{cls} buffers exactly" do

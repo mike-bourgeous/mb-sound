@@ -105,7 +105,7 @@ Tone waveforms are antialiased by default (`lib/mb/sound/band_limit.rb`, kernels
 - `ext/mb/sound/fast_delay/` - Delay line read/feedback kernels (`DelayLine`) → `lib/mb/sound/fast_delay.so`
 - `ext/mb/sound/fast_synth/` - Band-limited oscillators (`FastSynth.oscillate_bl`, `.blit`, `.oscillate_sync`) → `lib/mb/sound/fast_synth.so`
 - `ext/mb/sound/fast_clip/` - Antialiased waveshapers (`FastClip.shape`) → `lib/mb/sound/fast_clip.so`
-- `ext/mb/sound/fast_arithmetic/` - Allocation-free Multiplier/Mixer fast paths and buffer copies (`FastArithmetic.product`/`.mix`/`.copy`; Numo's arithmetic exactly, `-ffp-contract=off`) → `lib/mb/sound/fast_arithmetic.so`
+- `ext/mb/sound/fast_arithmetic/` - Allocation-free kernels mirroring Numo exactly (`-ffp-contract=off`; complex products only with one truly complex factor, so Numo's own FMA contraction can't make them differ): Multiplier/Mixer (`product`/`mix`), `divide`/`power`, `min_max`, `wet_dry` (Filter::Delay, Reverb), `copy`, `circular_read`/`circular_write` (MB::M's ring copies), `complex_part` → `lib/mb/sound/fast_arithmetic.so`
 - `ext/mb/sound/fast_envelope/` - Envelope state machine (`FastEnvelope.process`; built with `-ffp-contract=off` for its exact mirror) → `lib/mb/sound/fast_envelope.so`
 - `ext/mb/sound/fast_audio/` - Sound card I/O through bundled miniaudio, plus the JACK backend (see Audio I/O) → `lib/mb/sound/fast_audio.so`
 - `ext/mb/sound/fast_midi/` - Bundled RtMidi (see MIDI) → `lib/mb/sound/fast_midi.so`

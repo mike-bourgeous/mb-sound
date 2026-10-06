@@ -38,7 +38,8 @@
  * in-place / and ** of GraphNode arithmetic procs for real buffers, and
  * .circular_read/.circular_write are MB::M's ring buffer copies (delay
  * lines, CircularBuffer) without the Ranges and views; .wet_dry is
- * Filter::Delay's output mix.
+ * Filter::Delay's output mix, and .complex_part copies real or imaginary
+ * parts out of complex buffers.
  *
  * Buffer types: SFloat (SFloat inputs), DFloat (DFloat), SComplex (SComplex
  * or SFloat), DComplex (DComplex or DFloat), every input exactly as long as
@@ -819,6 +820,42 @@ static VALUE ruby_wet_dry(VALUE self, VALUE out, VALUE delayed, VALUE wet, VALUE
 	return out;
 }
 
+/*
+ * call-seq: MB::Sound::FastArithmetic.complex_part(out, src, imag) -> out or nil
+ *
+ * Copies the real parts (or imaginary parts if +imag+ is true) of the
+ * contiguous SComplex/DComplex +src+ into +out+ (a writable contiguous
+ * SFloat/DFloat of the same precision and length), as src.real / src.imag
+ * would return them.  Returns nil without writing for anything else.
+ */
+static VALUE ruby_complex_part(VALUE self, VALUE out, VALUE src, VALUE imag)
+{
+	enum mb_arith_type st = arith_type(src);
+	enum mb_arith_type ot = arith_type(out);
+	if (!((st == MB_ARITH_SC && ot == MB_ARITH_SF) || (st == MB_ARITH_DC && ot == MB_ARITH_DF)) || !writable_contiguous(out)) {
+		return Qnil;
+	}
+	size_t length = RNARRAY_SIZE(out);
+	if (!shape_ok(src, length)) {
+		return Qnil;
+	}
+
+	char *outp = nary_get_pointer_for_write(out) + nary_get_offset(out);
+	_Bool im = RTEST(imag);
+	if (st == MB_ARITH_SC) {
+		const mb_sc *x = (const mb_sc *)read_ptr(src);
+		float *o = (float *)outp;
+		for (size_t i = 0; i < length; i++) o[i] = im ? x[i].i : x[i].r;
+	} else {
+		const mb_dc *x = (const mb_dc *)read_ptr(src);
+		double *o = (double *)outp;
+		for (size_t i = 0; i < length; i++) o[i] = im ? x[i].i : x[i].r;
+	}
+
+	RB_GC_GUARD(src);
+	return out;
+}
+
 void Init_fast_arithmetic(void)
 {
 	VALUE mb = rb_define_module("MB");
@@ -834,4 +871,5 @@ void Init_fast_arithmetic(void)
 	rb_define_module_function(fast_arithmetic, "circular_read", ruby_circular_read, 4);
 	rb_define_module_function(fast_arithmetic, "circular_write", ruby_circular_write, 3);
 	rb_define_module_function(fast_arithmetic, "wet_dry", ruby_wet_dry, 5);
+	rb_define_module_function(fast_arithmetic, "complex_part", ruby_complex_part, 3);
 }
