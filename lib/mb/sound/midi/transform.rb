@@ -83,6 +83,11 @@ module MB
 
         def read_events(from, to)
           events = @input.events(from, to)
+
+          # Nothing to transform (every #process is a function of its
+          # events): a shared frozen empty Array instead of new ones
+          return Stream::NO_EVENTS if events.empty? && @parent.generation == @seen_generation
+
           out = []
 
           if @parent.generation != @seen_generation

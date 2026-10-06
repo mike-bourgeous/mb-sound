@@ -67,7 +67,7 @@ module MB
           return nil if idle? && stream_over? && @notes.envelopes_idle? && @notes.quiet?
           @start_time = @time
           @idle_at_start = idle?
-          @time += Rational(count) / @sample_rate.to_r
+          @time = @notes.note_stream.advance(@time, count, @sample_rate)
           super
         end
 

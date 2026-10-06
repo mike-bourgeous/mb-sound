@@ -194,4 +194,19 @@ RSpec.describe(MB::Sound::MIDI::FileSource) do
       expect(src.content_position).to eq(0.3)
     end
   end
+
+  it 'updates #ended? and #music_end after seeks' do
+    src = MB::Sound::MIDI::FileSource.new('spec/test_data/c_major.mid')
+    last = src.events.last.time
+    expect(src.music_end).to eq(last)
+
+    src.read(0r, last)
+    expect(src.ended?).to eq(false)
+    src.read(last, last + 1r / 100)
+    expect(src.ended?).to eq(true)
+
+    src.seek(0)
+    expect(src.ended?).to eq(false)
+    expect(src.music_end).to eq(src.position + last)
+  end
 end

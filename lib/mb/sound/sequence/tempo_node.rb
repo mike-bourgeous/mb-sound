@@ -85,7 +85,7 @@ module MB
           @sample_rate = sample_rate.to_f
           @freewheel = false
           @pending_jump = nil
-          @buf = nil
+          @steady = nil
           @node_type_name = "Tempo #{mode == :hz ? 'Hz' : 'seconds'}"
           @graph_node_name = duration.to_s
         end
@@ -106,7 +106,17 @@ module MB
         # transport's current tempo, ignoring pauses.
         def value
           wnps = transport.whole_notes_per_second
-          @mode == :hz ? (wnps / @duration.whole_notes).to_f : (@duration.whole_notes / wnps).to_f
+
+          # Cached while the tempo (Transport caches its Rational), length,
+          # and mode stay the same
+          unless @value_wnps.equal?(wnps) && @value_duration.equal?(@duration) && @value_mode == @mode
+            @value_wnps = wnps
+            @value_duration = @duration
+            @value_mode = @mode
+            @value = @mode == :hz ? (wnps / @duration.whole_notes).to_f : (@duration.whole_notes / wnps).to_f
+          end
+
+          @value
         end
 
         # Calls the block with this node whenever it lines up with the
@@ -131,13 +141,16 @@ module MB
 
         private
 
+        # Returns one frozen buffer while the value and count stay the same
+        # (like GraphNode::Constant), so a steady tempo allocates nothing;
+        # consumers must copy a frozen input before changing it.
         def sample_main(count)
-          @buf = Numo::SFloat.zeros(count) if @buf.nil? || @buf.length != count
-          if @mode == :hz && timeline_paused? && !@freewheel
-            @buf.fill(0)
-          else
-            @buf.fill(value)
-          end
+          v = @mode == :hz && timeline_paused? && !@freewheel ? 0.0 : value
+          buf = @steady
+          return buf if buf && buf.length == count && @steady_value.eql?(v)
+
+          @steady_value = v
+          @steady = Numo::SFloat.new(count).fill(v).freeze
         end
 
         # The ports for the frame just computed: a jump on its first sample

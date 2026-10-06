@@ -67,7 +67,13 @@ module MB
         # The number of whole notes that play per second at the current tempo,
         # as an exact Rational.
         def whole_notes_per_second
-          @bpm.to_r / 240
+          # Cached (Rationals are immutable) so readers every buffer don't
+          # allocate; any change to @bpm is seen
+          unless @wnps && @wnps_bpm.eql?(@bpm)
+            @wnps_bpm = @bpm
+            @wnps = @bpm.to_r / 240
+          end
+          @wnps
         end
 
         # Converts a number of whole notes to seconds at the current tempo.

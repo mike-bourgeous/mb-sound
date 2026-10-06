@@ -101,8 +101,8 @@ module MB
           phi = MB::M.zpad(phi, count) if phi.length < count
 
           # The lookup writes into its inputs; copy frozen (shared) buffers
-          rho = rho.dup if rho.frozen?
-          phi = phi.dup if phi.frozen?
+          rho = (@rho_copy ||= FrozenCopy.new).copy(rho) if rho.frozen?
+          phi = (@phi_copy ||= FrozenCopy.new).copy(phi) if phi.frozen?
 
           case @wrap
           when Symbol

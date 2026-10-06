@@ -151,6 +151,69 @@ RSpec.describe(MB::Sound::Tone, :aggregate_failures) do
     end
   end
 
+  describe 'signal inputs to the C kernels' do
+    # The same float32 values as each NArray type the kernels accept, plus a
+    # non-contiguous view
+    def input_variants(values)
+      sf = Numo::SFloat.cast(values)
+      strided = Numo::SFloat.zeros(values.length * 2)
+      strided[(0..) % 2] = sf
+      {
+        sfloat: sf,
+        dfloat: Numo::DFloat.cast(sf),
+        scomplex: Numo::SComplex.cast(sf) + 0.5i,
+        dcomplex: Numo::DComplex.cast(sf) - 0.25i,
+        strided: strided[(0..) % 2],
+      }
+    end
+
+    it 'read every input type as the same float32 values (FastSound.oscillate and .phasor)' do
+      freqs = input_variants(Numo::DFloat.linspace(100.123456789, 3000.987654321, 300))
+      pms = input_variants(Numo::DFloat.linspace(-1.1111111, 1.3333333, 300))
+
+      [:sine, :complex_square].each do |wave|
+        complex = MB::Sound::Tone::BUFFER_CLASS.include?(wave)
+        results = freqs.keys.map { |k|
+          out = (complex ? Numo::SComplex : Numo::SFloat).zeros(300)
+          MB::FastSound.oscillate(out, wave, freqs[k], pms[k], 1.0 / 48000, 0, 0.5, 0.1, [0.2], nil).to_binary
+        }
+        expect(results.uniq.length).to eq(1)
+
+        phases = freqs.keys.map { |k| MB::FastSound.phasor(Numo::SFloat.zeros(300), freqs[k], 1.0 / 48000, 0, [0.2], nil, nil).to_binary }
+        expect(phases.uniq.length).to eq(1)
+      end
+    end
+
+    it 'read every input type as the same float32 values (FastSynth.oscillate_bl through Tone)' do
+      freqs = input_variants(Numo::DFloat.linspace(100.123456789, 3000.987654321, 256))
+      results = freqs.map { |k, v|
+        node = Class.new {
+          include MB::Sound::GraphNode
+          define_method(:sample) { |count| v[0...count] }
+          def sample_rate = 48000
+        }.new
+        MB::Sound::Tone.new(wave_type: :ramp, frequency: node).sample(256).to_binary
+      }
+      expect(results.uniq.length).to eq(1)
+    end
+
+    it 'allocate nothing for SFloat inputs' do
+      freq = Numo::SFloat.linspace(100, 3000, 128)
+      pm = Numo::SFloat.linspace(-1, 1, 128)
+      out = Numo::SFloat.zeros(128).inplace!
+      state = [0.0]
+      MB::FastSound.oscillate(out, :sine, freq, pm, 1.0 / 48000, 0, 1, 0, state, nil)
+
+      before = GC.stat(:total_allocated_objects)
+      1000.times do
+        MB::FastSound.oscillate(out, :sine, freq, pm, 1.0 / 48000, 0, 1, 0, state, nil)
+      end
+      # The state's Float may be a heap object on some platforms; the loop
+      # and GC.stat allocate a couple
+      expect(GC.stat(:total_allocated_objects) - before).to be < 1010
+    end
+  end
+
   describe '#sample_c and #sample_ruby' do
     it 'match for FM and PM oscillators' do
       [:sine, :ramp, :complex_sine, :parabola].each do |wave|

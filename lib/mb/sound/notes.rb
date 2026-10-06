@@ -531,7 +531,7 @@ module MB
       # #velocity, #lift, ...) has read a note-on whose note-off it hasn't
       # read yet.  False when there are no note nodes.
       def held?
-        @nodes.each_value.any? { |ref|
+        @nodes.any? { |_, ref|
           node = live(ref)
           node.is_a?(NoteNode) && node.held?
         }

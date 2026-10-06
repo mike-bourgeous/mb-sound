@@ -217,14 +217,26 @@ module MB
           end
 
           # Later taps may have longer delays (growing keeps the block)
-          longest = delays.is_a?(Numeric) ? delays : delays.max.real
+          longest = delays.is_a?(Numeric) ? delays : delays_max(delays)
           @line.prepare(@audio_buf.length, longest.ceil, @audio_buf.class)
           @line.write(@audio_buf) unless @sampled.any?
 
           @sampled << tap.index
 
           length = delays.is_a?(Numeric) ? @audio_buf.length : MB::M.min(delays.length, @audio_buf.length)
-          @line.read(length, delays, interpolation: @interpolation, state: state)
+          # Each tap reads into its own reused buffer
+          out = (@tap_bufs ||= {})[tap.index]
+          out = @tap_bufs[tap.index] = @line.buffer_class.zeros(length) unless out && out.class == @line.buffer_class && out.length == length
+          @line.read(length, delays, interpolation: @interpolation, state: state, out: out)
+        end
+
+        private
+
+        # delays.max.real without allocating for real buffers
+        # (FastArithmetic.min_max gives Numo's max).
+        def delays_max(delays)
+          r = (@delay_range ||= [0.0, 0.0])
+          MB::Sound::FastArithmetic.min_max(delays, r) ? r[1] : delays.max.real
         end
       end
     end

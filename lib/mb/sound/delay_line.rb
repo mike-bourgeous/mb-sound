@@ -166,6 +166,11 @@ module MB
         @block_start = 0
       end
 
+      # The NArray class of the buffer (and of what #read returns).
+      def buffer_class
+        @buffer.class
+      end
+
       # The number of samples the buffer holds.
       def capacity
         @buffer.length
@@ -191,7 +196,7 @@ module MB
       # back with #read.
       def write(data)
         @block_start = @write_offset
-        MB::M.circular_write(@buffer, data, @write_offset)
+        MB::Sound::FastArithmetic.circular_write(@buffer, data, @write_offset) || MB::M.circular_write(@buffer, data, @write_offset)
         @write_offset = (@write_offset + data.length) % capacity
         self
       end
@@ -202,11 +207,19 @@ module MB
       # would read at a constant delay of +delay+, before that block is
       # written.  +count+ may not exceed +delay+ (the samples must exist).
       # Used by GraphNode::Reverb to read its feedback at a fixed loop delay.
-      def past(count, delay)
+      #
+      # +out+ is an optional NArray of the buffer's type and +count+ samples
+      # to copy into instead of a new one (used when it fits; check the
+      # result's identity).
+      def past(count, delay, out: nil)
         raise ArgumentError, "Can't read #{count} samples from #{delay} samples ago" if count > delay
         raise ArgumentError, "Delay #{delay} is longer than the buffer (#{capacity})" if delay > capacity
 
         start = (@write_offset - delay) % capacity
+        if out && out.length == count && MB::Sound::FastArithmetic.circular_read(@buffer, start, count, out)
+          return out
+        end
+
         stop = start + count
         return @buffer[start...stop].dup if stop <= capacity
 
@@ -223,8 +236,13 @@ module MB
       # per-sample delays read at the speed their changes give.  For :sinc, +state+
       # should be an Array kept by each reader between calls (state[0] is
       # its previous delay, for the read speed).
-      def read(count, delay, interpolation: :linear, state: nil)
-        MB::Sound::FastDelay.read(@buffer, @buffer.class.zeros(count), @block_start, real_delay(delay), mode(interpolation), SINC_KERNEL, state)
+      #
+      # +out+ is an optional NArray to read into instead of a new one (used
+      # if it has the buffer's type and +count+ samples; every sample is
+      # overwritten), so a reader can reuse its buffer.
+      def read(count, delay, interpolation: :linear, state: nil, out: nil)
+        out = @buffer.class.zeros(count) unless out && out.class == @buffer.class && out.length == count && !out.frozen?
+        MB::Sound::FastDelay.read(@buffer, out, @block_start, real_delay(delay), mode(interpolation), SINC_KERNEL, state)
       end
 
       # The Ruby version of #read.

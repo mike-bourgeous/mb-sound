@@ -26,6 +26,29 @@ module MB
           arithmetic_combine(count, sampled, sources: sources, pad: pad, fill: fill, stop_early: stop_early, &block)
         end
 
+        # Samples +count+ samples from each of +sources+ (a Hash from node to
+        # extra data), returning [buffer, extra] pairs in order like
+        # #arithmetic_sample, but in an Array (and pairs) reused by every
+        # call, so a buffer allocates nothing here.  The result is only valid
+        # until the next call.
+        def arithmetic_inputs(count, sources)
+          sampled = (@arithmetic_sampled ||= [])
+          if sampled.length != sources.length
+            sampled.clear
+            sources.length.times { sampled << [nil, nil] }
+          end
+
+          idx = 0
+          sources.each do |s, extra|
+            pair = sampled[idx]
+            pair[0] = s.sample(count)
+            pair[1] = extra
+            idx += 1
+          end
+
+          sampled
+        end
+
         # The rest of #arithmetic_sample, for inputs already sampled: +sampled+
         # is an Array of [buffer or nil, extra data] in the order of
         # +sources+.  Used directly by nodes with a fast path for the common

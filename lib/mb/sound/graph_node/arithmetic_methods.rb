@@ -29,7 +29,9 @@ module MB
         # by the corresponding denominator value at the same index.
         def /(other)
           arithmetic_proc(other, '/') { |d1, d2|
-            d1 / d2
+            # In place without allocating for real buffers (the same
+            # operations as Numo's)
+            MB::Sound::FastArithmetic.divide(d1, d2) || d1 / d2
           }
         end
 
@@ -37,7 +39,7 @@ module MB
         # be either a numeric or another signal graph.
         def **(other)
           arithmetic_proc(other, '**') { |d1, d2|
-            d1 ** d2
+            MB::Sound::FastArithmetic.power(d1, d2) || d1 ** d2
           }
         end
 
@@ -122,6 +124,7 @@ module MB
 
         # Setup/boilerplate buffer management used by #/ and #**.
         def arithmetic_proc(other, name)
+          copier = FrozenCopy.new
           if other.respond_to?(:sample)
             other = other.get_sampler
 
@@ -144,8 +147,9 @@ module MB
                 # will create a new object, so we grab the yielded value.
                 # TODO: should we be operating in place here?  This could modify
                 # the source of an upstream ArrayInput for example.
-                # A Tee's shared buffer is frozen: copy it (see Tee)
-                v = v.dup if v.frozen?
+                # A frozen buffer (a Tee's shared buffer, a Constant) is
+                # copied (see Tee)
+                v = copier.copy(v) if v.frozen?
                 v.inplace!
                 ret = yield v, data
                 ret.not_inplace!
@@ -156,7 +160,7 @@ module MB
               if v.nil? || v.empty?
                 nil
               else
-                v = v.dup if v.frozen?
+                v = copier.copy(v) if v.frozen?
                 v.inplace!
                 ret = yield v, other
                 ret.not_inplace!

@@ -82,10 +82,10 @@ module MB
           return nil if buf.nil? || buf.empty?
 
           if @in_place
-            buf = buf.dup if buf.frozen? # a shared buffer (see Tee)
+            buf = (@frozen_copy ||= GraphNode::FrozenCopy.new).copy(buf) if buf.frozen? # a shared buffer (see Tee)
             buf.inplace!
           end
-          buf = SampleWrapper.call_filter(@base_filter, buf, @inputs)
+          buf = SampleWrapper.call_filter(@base_filter, buf, @inputs, scratch: (@sampled_inputs ||= {}))
           buf&.not_inplace!
         end
 
@@ -205,23 +205,37 @@ module MB
         # Calls #process (if no inputs are given) or #dynamic_process (if
         # there are extra inputs) on the given +filter+ with the given +data+
         # and extra +inputs+, handling nil and short reads.
-        def self.call_filter(filter, data, inputs)
+        #
+        # +scratch+ is an optional Hash reused by the caller for the sampled
+        # inputs (otherwise a new one per call).
+        def self.call_filter(filter, data, inputs, scratch: nil)
           return nil if data.nil? || data.empty?
 
-          if inputs && inputs.any?
-            inputs = inputs.transform_values { |inp| inp.sample(data.length) }
-
-            # Handle end-of-stream from inputs
-            return nil if inputs.values.any? { |i| i.nil? || i.empty? }
-
-            # Handle short reads from inputs
-            minlen, maxlen = [data.length, *inputs.values.map(&:length)].minmax
-            if minlen != maxlen
-              data = data[0...minlen]
-              inputs = inputs.transform_values { |v| v.length != minlen ? v[0...minlen] : v }
+          if inputs && !inputs.empty?
+            sampled = scratch || {}
+            sampled.clear if sampled.length != inputs.length
+            inputs.each do |name, inp|
+              sampled[name] = inp.sample(data.length)
             end
 
-            filter.dynamic_process(data, **inputs)
+            # Handle end-of-stream from inputs
+            minlen = maxlen = data.length
+            sampled.each_value do |i|
+              return nil if i.nil? || i.empty?
+              minlen = i.length if i.length < minlen
+              maxlen = i.length if i.length > maxlen
+            end
+
+            # Handle short reads from inputs
+            if minlen != maxlen
+              data = data[0...minlen]
+              sampled.each_key do |name|
+                v = sampled[name]
+                sampled[name] = v[0...minlen] if v.length != minlen
+              end
+            end
+
+            filter.dynamic_process(data, **sampled)
 
           else
             filter.process(data)

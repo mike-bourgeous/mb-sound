@@ -164,7 +164,7 @@ static inline double env_at(const struct env_signal *s, size_t i)
 // Reads a parameter or input: nil (+nil_value+), a Numeric, or a 1D SFloat
 // or DFloat (other NArrays are cast to DFloat) of +length+ values.  NArrays
 // that had to be converted are kept alive in +keep+.
-static void env_read_signal(VALUE v, size_t length, const char *name, double nil_value, VALUE keep, struct env_signal *s)
+static void env_read_signal(VALUE v, size_t length, const char *name, double nil_value, VALUE *keep, struct env_signal *s)
 {
 	s->scalar = nil_value;
 	s->f = NULL;
@@ -186,13 +186,22 @@ static void env_read_signal(VALUE v, size_t length, const char *name, double nil
 		rb_raise(rb_eArgError, "%s length %zu does not match the output length %zu", name, (size_t)RNARRAY_SHAPE(v)[0], length);
 	}
 
+	VALUE orig = v;
 	if (CLASS_OF(v) != numo_cSFloat && CLASS_OF(v) != numo_cDFloat) {
 		v = rb_funcall(numo_cDFloat, rb_intern("cast"), 1, v);
 	}
 	if (!RTEST(nary_check_contiguous(v))) {
 		v = nary_dup(v);
 	}
-	rb_ary_push(keep, v);
+	if (v != orig) {
+		// Only converted copies need keeping alive (the caller's Arrays
+		// hold the originals); the Array is made on first use, so the usual
+		// call allocates nothing
+		if (NIL_P(*keep)) {
+			*keep = rb_ary_new();
+		}
+		rb_ary_push(*keep, v);
+	}
 
 	if (CLASS_OF(v) == numo_cSFloat) {
 		s->f = (const float *)(nary_get_pointer_for_read(v) + nary_get_offset(v));
@@ -452,13 +461,13 @@ static VALUE ruby_process(VALUE self, VALUE out, VALUE state, VALUE times, VALUE
 	int add = !!(flags & ENV_ADD);
 
 	size_t n = RNARRAY_SHAPE(out)[0];
-	VALUE keep = rb_ary_new();
+	VALUE keep = Qnil;
 
 	struct env_signal seg_times[ENV_MAX_SEGMENTS], seg_curves[ENV_MAX_SEGMENTS], seg_levels[ENV_MAX_SEGMENTS];
 	for (long s = 0; s < nseg; s++) {
-		env_read_signal(rb_ary_entry(times, s), n, "Segment time", 0, keep, &seg_times[s]);
-		env_read_signal(rb_ary_entry(curves, s), n, "Segment curve", 0, keep, &seg_curves[s]);
-		env_read_signal(rb_ary_entry(levels, s), n, "Segment level", 0, keep, &seg_levels[s]);
+		env_read_signal(rb_ary_entry(times, s), n, "Segment time", 0, &keep, &seg_times[s]);
+		env_read_signal(rb_ary_entry(curves, s), n, "Segment curve", 0, &keep, &seg_curves[s]);
+		env_read_signal(rb_ary_entry(levels, s), n, "Segment level", 0, &keep, &seg_levels[s]);
 	}
 
 	int seg_shapes[ENV_MAX_SEGMENTS];
@@ -470,13 +479,13 @@ static VALUE ruby_process(VALUE self, VALUE out, VALUE state, VALUE times, VALUE
 	}
 
 	struct env_signal hold_sig, gate_sig, trigger_sig, velocity_sig, choke_sig, lift_sig, octaves_sig;
-	env_read_signal(hold, n, "Hold", 0, keep, &hold_sig);
-	env_read_signal(rb_ary_entry(inputs, 0), n, "Gate", 0, keep, &gate_sig);
-	env_read_signal(rb_ary_entry(inputs, 1), n, "Trigger", 0, keep, &trigger_sig);
-	env_read_signal(rb_ary_entry(inputs, 2), n, "Velocity", 1, keep, &velocity_sig);
-	env_read_signal(rb_ary_entry(inputs, 3), n, "Choke", 0, keep, &choke_sig);
-	env_read_signal(rb_ary_entry(inputs, 4), n, "Lift", 0.5, keep, &lift_sig);
-	env_read_signal(rb_ary_entry(inputs, 5), n, "Octaves", 0, keep, &octaves_sig);
+	env_read_signal(hold, n, "Hold", 0, &keep, &hold_sig);
+	env_read_signal(rb_ary_entry(inputs, 0), n, "Gate", 0, &keep, &gate_sig);
+	env_read_signal(rb_ary_entry(inputs, 1), n, "Trigger", 0, &keep, &trigger_sig);
+	env_read_signal(rb_ary_entry(inputs, 2), n, "Velocity", 1, &keep, &velocity_sig);
+	env_read_signal(rb_ary_entry(inputs, 3), n, "Choke", 0, &keep, &choke_sig);
+	env_read_signal(rb_ary_entry(inputs, 4), n, "Lift", 0.5, &keep, &lift_sig);
+	env_read_signal(rb_ary_entry(inputs, 5), n, "Octaves", 0, &keep, &octaves_sig);
 
 	float *o = (float *)(nary_get_pointer_for_write(out) + nary_get_offset(out));
 	double *st = (double *)(nary_get_pointer_for_write(state) + nary_get_offset(state));

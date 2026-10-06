@@ -32,6 +32,9 @@ module MB
         include GraphNode::Nameable
         include GraphNode::Traversable
 
+        # The (frozen) result of a read without events.
+        NO_EVENTS = [].freeze
+
         # One consumer's view of a Stream, with its own cursor.  Create with
         # Stream#reader.
         class Reader
@@ -297,6 +300,27 @@ module MB
           "#{to_s}\n#{name_or_id}"
         end
 
+        # Returns +time+ (Rational seconds) plus +count+ samples at
+        # +sample_rate+, exactly.  The readers of one stream (e.g. the nodes
+        # of a Notes instance) advance from the same time by the same
+        # buffer, so the last result is shared instead of each reader
+        # allocating its own Rational.
+        def advance(time, count, sample_rate)
+          if count != @advance_count || sample_rate != @advance_rate
+            @advance_count = count
+            @advance_rate = sample_rate
+            @advance_step = Rational(count) / sample_rate.to_r
+            @advance_from = nil
+          end
+
+          unless @advance_from && @advance_from == time
+            @advance_from = time
+            @advance_to = time + @advance_step
+          end
+
+          @advance_to
+        end
+
         # Used by Reader#events.
         def read_for(reader, from, to)
           raise ArgumentError, "MIDI read must not end (#{to}) before it starts (#{from})" if to < from
@@ -306,18 +330,19 @@ module MB
           # Notes instance, each reading the same buffer) share its events.
           # Still valid: later fills only add events at or after +to+, and
           # drops only remove events before the slowest reader's cursor.
-          last = @last_read
-          if last && last[0] == from && last[1] == to
+          if @last_events && @last_from == from && @last_to == to
             reader.cursor = to
-            return last[2]
+            return @last_events
           end
 
           fill(to)
 
           start = @log.bsearch_index { |e| e.time >= from } || @log.length
           stop = @log.bsearch_index { |e| e.time >= to } || @log.length
-          events = @log[start...stop].freeze
-          @last_read = [from, to, events]
+          events = start == stop ? NO_EVENTS : @log[start...stop].freeze
+          @last_from = from
+          @last_to = to
+          @last_events = events
 
           reader.cursor = to
           drop

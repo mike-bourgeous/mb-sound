@@ -1124,7 +1124,7 @@ module MB
             kernel_c(out, f, ph, w, nil)
           end
         else
-          buf = kernel_c(@osc_buf[0...count].inplace!, freq, phase, width, pulses)
+          buf = kernel_c(osc_view(count), freq, phase, width, pulses)
           add_jump_residual(buf) if state.jump_residual
         end
 
@@ -1151,7 +1151,7 @@ module MB
             kernel_ruby(out, f, ph, w, nil)
           end
         else
-          buf = kernel_ruby(@osc_buf[0...count].inplace!, freq_table, phase_table, width, pulses)
+          buf = kernel_ruby(osc_view(count), freq_table, phase_table, width, pulses)
           add_jump_residual(buf)
         end
 
@@ -1690,6 +1690,20 @@ module MB
         band_limited? || (warped? && BandLimit::WARP_WAVES.include?(@wave_type) && random_advance == 0)
       end
 
+      # An inplace view of the first +count+ samples of the output buffer,
+      # reused while the buffer and count stay the same (a new view and
+      # Range every buffer were a top allocation site).  Only for kernels
+      # that return the view they write (a Marshal copy of a Tone has a
+      # cached view that is no longer a view of its @osc_buf).
+      def osc_view(count)
+        view = @osc_view
+        unless view && @osc_view_buf.equal?(@osc_buf) && view.length == count
+          @osc_view_buf = @osc_buf
+          view = @osc_view = @osc_buf[0...count]
+        end
+        view.inplace!
+      end
+
       # TODO: use BufferHelper?
       def build_buffer(count)
         buf_class = BUFFER_CLASS[@wave_type] || Numo::SFloat
@@ -1777,7 +1791,19 @@ module MB
           jump_phase = jump_phase[0...min_length] if jump_phase&.is_a?(Numo::NArray)
         end
 
-        return min_length, freq, phase, width, pulses, resets, targets, jumps, jump_phase
+        # One Array reused by every call (destructured by the callers), not
+        # a new one per buffer
+        ret = (@upstream_inputs ||= Array.new(9))
+        ret[0] = min_length
+        ret[1] = freq
+        ret[2] = phase
+        ret[3] = width
+        ret[4] = pulses
+        ret[5] = resets
+        ret[6] = targets
+        ret[7] = jumps
+        ret[8] = jump_phase
+        ret
       end
 
       # Warns that a call replaced an earlier conflicting setting (the last

@@ -171,6 +171,76 @@ RSpec.describe(MB::Sound::GraphNode::Constant) do
     end
   end
 
+  describe 'steady buffers' do
+    let(:c) { 0.25.constant }
+
+    it 'returns one frozen buffer while the value and count stay the same' do
+      a = c.sample(128)
+      expect(a).to be_frozen
+      expect(a.to_a).to eq([0.25] * 128)
+      expect(c.sample(128)).to equal(a)
+    end
+
+    it 'allocates nothing for a steady value' do
+      c.sample(128)
+      before = GC.stat(:total_allocated_objects)
+      100.times { c.sample(128) }
+      expect(GC.stat(:total_allocated_objects) - before).to be < 5
+    end
+
+    it 'makes a new buffer when the count changes' do
+      a = c.sample(128)
+      b = c.sample(64)
+      expect(b).not_to equal(a)
+      expect(b.to_a).to eq([0.25] * 64)
+    end
+
+    it 'follows value changes with and without smoothing' do
+      a = c.sample(4)
+      c.constant = 1
+      changed = c.sample(4)
+      expect(changed).not_to equal(a)
+      expect(changed.to_a).to all(be_between(0.25, 1).exclusive)
+      expect(changed[-1]).to be > changed[0]
+
+      steady = c.sample(4)
+      expect(steady).to be_frozen
+      expect(steady.to_a).to eq([1, 1, 1, 1])
+
+      c.smoothing = false
+      c.constant = -0.5
+      expect(c.sample(4).to_a).to eq([-0.5] * 4)
+      expect(c.sample(4).to_a).to eq([-0.5] * 4)
+    end
+
+    it 'changes to a complex buffer for a complex value' do
+      c.sample(4)
+      c.smoothing = false
+      c.constant = 1 + 2i
+      c.sample(4)
+      buf = c.sample(4)
+      expect(buf).to be_a(Numo::SComplex)
+      expect(buf.to_a).to eq([1 + 2i] * 4)
+    end
+
+    it 'gives a new buffer for a signed zero' do
+      z = 0.0.constant(smoothing: false)
+      a = z.sample(4)
+      z.constant = -0.0
+      z.sample(4)
+      b = z.sample(4)
+      expect(b.to_a.map { |v| 1 / v }).to eq([-Float::INFINITY] * 4)
+      expect(a.to_a.map { |v| 1 / v }).to eq([Float::INFINITY] * 4)
+    end
+
+    it 'cannot be changed by a consumer' do
+      a = c.sample(8)
+      expect { a.inplace * 2 }.to raise_error(/frozen/)
+      expect { a[0] = 1 }.to raise_error(/frozen/)
+      expect(c.sample(8).to_a).to eq([0.25] * 8)
+    end
+  end
+
   it 'never ends' do
     c = 1.constant(sample_rate: 1)
     3.times { expect(c.sample(6)).to eq(Numo::SFloat.ones(6)) }

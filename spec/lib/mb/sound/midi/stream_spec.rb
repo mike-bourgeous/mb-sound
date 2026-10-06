@@ -219,4 +219,39 @@ RSpec.describe(MB::Sound::MIDI::Stream) do
       expect(stream.reader.next(1).first.bend_semitones).to eq(12.0)
     end
   end
+
+  describe '#advance' do
+    let(:stream) { MB::Sound::MIDI::Stream.new(MB::Sound::MIDI::FileSource.new(file)) }
+
+    it 'adds a buffer of samples exactly' do
+      expect(stream.advance(0r, 128, 48000.0)).to eq(Rational(128, 48000))
+      expect(stream.advance(Rational(1, 3), 100, 44100.0)).to eq(Rational(1, 3) + Rational(100, 44100))
+      expect(stream.advance(Rational(1, 3), 100, 44100.0)).to be_a(Rational)
+    end
+
+    it 'shares the result among readers at the same time' do
+      a = stream.advance(Rational(5, 7), 128, 48000.0)
+      b = stream.advance(Rational(5, 7), 128, 48000.0)
+      expect(b).to equal(a)
+    end
+
+    it 'follows changes of time, count, and rate' do
+      t = Rational(5, 7)
+      a = stream.advance(t, 128, 48000.0)
+      expect(stream.advance(a, 128, 48000.0)).to eq(t + Rational(256, 48000))
+      expect(stream.advance(t, 64, 48000.0)).to eq(t + Rational(64, 48000))
+      expect(stream.advance(t, 64, 96000.0)).to eq(t + Rational(64, 96000))
+    end
+  end
+
+  it 'returns one frozen empty Array for reads without events' do
+    stream = MB::Sound::MIDI::Stream.new(MB::Sound::MIDI::FileSource.new(file))
+    reader = stream.reader
+    reader.events(0r, 0r)
+    a = reader.events(100r, 101r)
+    b = reader.events(101r, 102r)
+    expect(a).to be_empty
+    expect(a).to be_frozen
+    expect(b).to equal(a)
+  end
 end

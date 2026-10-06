@@ -97,12 +97,12 @@ module MB
 
         # True once the last event has been read (never for looping files).
         def ended?
-          !@loop && content_position > @content_end
+          !@loop && position > music_end
         end
 
         # The stream time of the last event (nil for looping files).
         def music_end
-          @loop ? nil : @offset + @content_end
+          @loop ? nil : (@music_end ||= @offset + @content_end)
         end
 
         # The file's first note-on (see Source#first_note).
@@ -130,6 +130,7 @@ module MB
 
         def seek_to(time)
           @offset = position - time
+          @music_end = nil
         end
 
         def read_events(from, to)

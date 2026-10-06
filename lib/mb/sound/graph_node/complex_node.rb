@@ -54,10 +54,10 @@ module MB
           if data.is_a?(Numo::SComplex) || data.is_a?(Numo::DComplex)
             case @mode
             when :real
-              data.real
+              part(data, false) || data.real
 
             when :imag
-              data.imag
+              part(data, true) || data.imag
 
             when :abs
               data.abs
@@ -109,6 +109,16 @@ module MB
           #{super}---------------
           #{@mode_name}
           EOF
+        end
+
+        private
+
+        # The real (or +imag+inary) parts of complex +data+ in a reused
+        # buffer (FastArithmetic.complex_part), or nil to use Numo.
+        def part(data, imag)
+          cls = data.is_a?(Numo::SComplex) ? Numo::SFloat : Numo::DFloat
+          @part_buf = cls.zeros(data.length) unless @part_buf && @part_buf.class == cls && @part_buf.length == data.length
+          MB::Sound::FastArithmetic.complex_part(@part_buf, data, imag)
         end
       end
     end

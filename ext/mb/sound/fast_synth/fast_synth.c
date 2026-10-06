@@ -409,19 +409,22 @@ static VALUE ruby_oscillate_bl(VALUE self, VALUE buffer, VALUE wave_type, VALUE 
 	float *out = mb_sfloat_ptr(buffer);
 
 	double freq;
-	complex float *freqptr;
-	mb_read_signal_input(&frequency, length, "Frequency", &freq, &freqptr);
+	const float *freqptr;
+	size_t freqstep;
+	mb_read_signal_input(&frequency, length, "Frequency", &freq, &freqptr, &freqstep);
 
 	double pm;
-	complex float *pmptr;
-	mb_read_signal_input(&phase_mod, length, "Phase modulation", &pm, &pmptr);
+	const float *pmptr;
+	size_t pmstep;
+	mb_read_signal_input(&phase_mod, length, "Phase modulation", &pm, &pmptr, &pmstep);
 
 	double w;
-	complex float *wptr;
+	const float *wptr;
+	size_t wstep;
 	if (NIL_P(width)) {
 		width = DBL2NUM(0.5);
 	}
-	mb_read_signal_input(&width, length, "Width", &w, &wptr);
+	mb_read_signal_input(&width, length, "Width", &w, &wptr, &wstep);
 	w = bl_clamp_width(w);
 
 	_Bool dc = RTEST(remove_dc);
@@ -440,13 +443,13 @@ static VALUE ruby_oscillate_bl(VALUE self, VALUE buffer, VALUE wave_type, VALUE 
 	double pending = 0, pending_d = 0;
 	for (size_t i = 0; i < length; i++) {
 		if (freqptr) {
-			freq = crealf(freqptr[i]);
+			freq = freqptr[i * freqstep];
 		}
 		if (pmptr) {
-			pm = crealf(pmptr[i]);
+			pm = pmptr[i * pmstep];
 		}
 		if (wptr) {
-			double new_w = bl_clamp_width(crealf(wptr[i]));
+			double new_w = bl_clamp_width(wptr[i * wstep]);
 			if (new_w != w) {
 				w = new_w;
 				nbp = bl_breakpoints(wt, w, bp);
@@ -490,7 +493,7 @@ static VALUE ruby_oscillate_bl(VALUE self, VALUE buffer, VALUE wave_type, VALUE 
 		// last sample is extrapolated)
 		double next_pm;
 		if (i + 1 < length) {
-			next_pm = pmptr ? crealf(pmptr[i + 1]) : pm;
+			next_pm = pmptr ? pmptr[(i + 1) * pmstep] : pm;
 		} else {
 			next_pm = pm + (pm - (i > 0 || primed ? prev_pm : pm));
 		}
@@ -760,15 +763,16 @@ static VALUE ruby_blit(VALUE self, VALUE buffer, VALUE shape_v, VALUE frequency,
 	float complex *out = (float complex *)(nary_get_pointer_for_write(buffer) + nary_get_offset(buffer));
 
 	double freq;
-	complex float *freqptr;
-	mb_read_signal_input(&frequency, length, "Frequency", &freq, &freqptr);
+	const float *freqptr;
+	size_t freqstep;
+	mb_read_signal_input(&frequency, length, "Frequency", &freq, &freqptr, &freqstep);
 
 	_Bool constant = !freqptr;
 	double steps = 0;
 	double p = 0, inc = 0;
 	for (size_t i = 0; i < length; i++) {
 		if (freqptr) {
-			freq = crealf(freqptr[i]);
+			freq = freqptr[i * freqstep];
 		}
 
 		inc = freq * adv;
@@ -984,22 +988,25 @@ static VALUE ruby_oscillate_sync(int argc, VALUE *argv, VALUE self)
 	float *out = mb_sfloat_ptr(buffer);
 
 	double freq;
-	complex float *freqptr;
-	mb_read_signal_input(&frequency, length, "Frequency", &freq, &freqptr);
+	const float *freqptr;
+	size_t freqstep;
+	mb_read_signal_input(&frequency, length, "Frequency", &freq, &freqptr, &freqstep);
 
 	double pulse;
-	complex float *pulseptr;
-	mb_read_signal_input(&pulses, length, "Sync", &pulse, &pulseptr);
+	const float *pulseptr;
+	size_t pulsestep;
+	mb_read_signal_input(&pulses, length, "Sync", &pulse, &pulseptr, &pulsestep);
 	if (!pulseptr) {
 		pulse = 0;
 	}
 
 	double w;
-	complex float *wptr;
+	const float *wptr;
+	size_t wstep;
 	if (NIL_P(width)) {
 		width = DBL2NUM(0.5);
 	}
-	mb_read_signal_input(&width, length, "Width", &w, &wptr);
+	mb_read_signal_input(&width, length, "Width", &w, &wptr, &wstep);
 	w = bl_clamp_width(w);
 	double half_mean = bl_half_mean(wt);
 
@@ -1008,13 +1015,13 @@ static VALUE ruby_oscillate_sync(int argc, VALUE *argv, VALUE self)
 
 	for (size_t i = 0; i < length; i++) {
 		if (freqptr) {
-			freq = crealf(freqptr[i]);
+			freq = freqptr[i * freqstep];
 		}
 		if (pulseptr) {
-			pulse = crealf(pulseptr[i]);
+			pulse = pulseptr[i * pulsestep];
 		}
 		if (wptr) {
-			double new_w = bl_clamp_width(crealf(wptr[i]));
+			double new_w = bl_clamp_width(wptr[i * wstep]);
 			if (new_w != w) {
 				w = new_w;
 				nbp = bl_breakpoints(wt, w, bp);
