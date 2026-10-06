@@ -87,13 +87,20 @@ module MB
         # constructor) returns nil or an empty buffer, then this method will
         # return nil.
         def sample(count)
-          sampled = @gains.map { |s, gain| [s.sample(count), gain] }
+          sampled = arithmetic_inputs(count, @gains)
 
           # Fast path: the same arithmetic as below without the general
           # bookkeeping, when every input is a full buffer of our type; a
-          # gain of 1 skips its multiply (1 * v == v exactly)
-          if arithmetic_fast?(count, sampled, @constant) && @tmpbuf.class == @buf.class && @tmpbuf.length >= count
+          # gain of 1 skips its multiply (1 * v == v exactly).  The C kernel
+          # allocates nothing; the Numo version (its mirror) takes inputs it
+          # can't read directly.
+          fast = arithmetic_fast?(count, sampled, @constant)
+          if fast
             retbuf = arithmetic_view(@buf, count, :buf)
+            return retbuf.not_inplace! if MB::Sound::FastArithmetic.mix(retbuf, @constant, sampled)
+          end
+
+          if fast && @tmpbuf.class == @buf.class && @tmpbuf.length >= count
             retbuf.fill(@constant)
             tmpbuf = nil
             sampled.each do |v, gain|

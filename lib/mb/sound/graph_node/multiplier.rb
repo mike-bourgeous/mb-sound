@@ -84,14 +84,18 @@ module MB
         # buffer, or if stop_early is false than all short inputs will be
         # zero-padded.
         def sample(count)
-          sampled = @multiplicands.map { |s, extra| [s.sample(count), extra] }
+          sampled = arithmetic_inputs(count, @multiplicands)
 
           # Fast path: the same arithmetic as below without the general
-          # bookkeeping, when every input is a full buffer of our type
+          # bookkeeping, when every input is a full buffer of our type; the
+          # C kernel allocates nothing, and the Numo version (its mirror)
+          # takes inputs it can't read directly
           if arithmetic_fast?(count, sampled, @constant)
             retbuf = arithmetic_view(@buf, count, :buf)
-            retbuf.fill(@constant)
-            sampled.each { |v, _| retbuf.inplace * v }
+            unless MB::Sound::FastArithmetic.product(retbuf, @constant, sampled)
+              retbuf.fill(@constant)
+              sampled.each { |v, _| retbuf.inplace * v }
+            end
             return retbuf.not_inplace!
           end
 

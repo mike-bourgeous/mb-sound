@@ -39,6 +39,12 @@ Rake::ExtensionTask.new 'mb-sound-fast_clip' do |ext|
   ext.lib_dir = 'lib/mb/sound'
 end
 
+Rake::ExtensionTask.new 'mb-sound-fast_arithmetic' do |ext|
+  ext.name = 'fast_arithmetic'
+  ext.ext_dir = 'ext/mb/sound/fast_arithmetic'
+  ext.lib_dir = 'lib/mb/sound'
+end
+
 Rake::ExtensionTask.new 'mb-sound-fast_envelope' do |ext|
   ext.name = 'fast_envelope'
   ext.ext_dir = 'ext/mb/sound/fast_envelope'

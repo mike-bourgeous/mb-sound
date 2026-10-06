@@ -45,6 +45,49 @@ RSpec.describe('Multiplier and Mixer fast paths') do
     compare(buffers: 6) { MB::Sound::ArrayInput.new(data: [data]) * 220.hz.sine }
   end
 
+  # Renders with the C kernels (MB::Sound::FastArithmetic), then with their
+  # Numo mirrors (the kernels declining every call), sample for sample
+  def compare_kernels(count: 800, buffers: 4, &build)
+    fast = build.call
+    a = Array.new(buffers) { fast.sample(count)&.dup }
+
+    numo = build.call
+    allow(MB::Sound::FastArithmetic).to receive(:product).and_return(nil)
+    allow(MB::Sound::FastArithmetic).to receive(:mix).and_return(nil)
+    b = Array.new(buffers) { numo.sample(count)&.dup }
+
+    expect(MB::Sound::FastArithmetic).to have_received(:product).at_least(:once)
+    expect(MB::Sound::FastArithmetic).to have_received(:mix).at_least(:once)
+    expect(a).to eq(b)
+  end
+
+  it 'gives the same results from the C kernels and their Numo mirrors' do
+    compare_kernels { (220.hz.ramp + 330.hz.sine * 0.25 + 0.5.hz.lfo - 3) * 110.hz.triangle * 0.7 }
+  end
+
+  it 'gives the same complex results from the C kernels and their Numo mirrors' do
+    compare_kernels(count: 33) { 220.hz.complex_sine * 330.hz.sine * (0.5 - 0.25i) + 110.hz.complex_ramp * 0.3 + 55.hz.sine }
+  end
+
+  it 'falls back to Numo for inputs the kernels decline' do
+    data = Numo::SFloat.new(8000).seq.map { |i| Math.sin(i * 0.1) }
+    strided = Class.new do
+      include MB::Sound::GraphNode
+      def initialize(data) = (@data = data; @pos = 0)
+      def sample_rate = 48000
+      def sample(count)
+        # A non-contiguous view, which the C kernels don't read
+        v = @data[(@pos * 2)...((@pos + count) * 2)][(0..) % 2]
+        @pos += count
+        v
+      end
+    end
+
+    a = (strided.new(data) * 220.hz.sine + strided.new(data)).sample(400).dup
+    b = (MB::Sound::ArrayInput.new(data: [data[(0..) % 2].dup]) * 220.hz.sine + MB::Sound::ArrayInput.new(data: [data[(0..) % 2].dup])).sample(400).dup
+    expect(a).to eq(b)
+  end
+
   it 'uses the fast path for full buffers of the same type' do
     node = 220.hz.ramp * 330.hz.sine
     expect(node).to receive(:arithmetic_combine).never

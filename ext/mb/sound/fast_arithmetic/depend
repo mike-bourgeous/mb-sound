@@ -1,0 +1,1 @@
+fast_arithmetic.o: $(srcdir)/../include/mb_ext_helpers.h
