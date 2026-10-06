@@ -115,7 +115,7 @@ module MB
       # may be an Interval (`7.st`, `1.oct`).
       def transpose(semitones)
         semitones = Interval.semitones(semitones)
-        Note.new(detuned_number + semitones, sample_rate: @sample_rate)
+        derived(Note.new(detuned_number + semitones, sample_rate: @sample_rate))
       end
 
       def to_s

@@ -22,6 +22,7 @@ require_relative 'sound/fast_synth'
 require_relative 'sound/fast_clip'
 require_relative 'sound/fast_envelope'
 require_relative 'sound/fast_filter'
+require_relative 'sound/fast_unison'
 require_relative 'sound/fast_audio'
 require_relative 'sound/fast_midi'
 

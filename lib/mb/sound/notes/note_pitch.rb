@@ -134,7 +134,7 @@ module MB
 
         # A KeyedTone at this pitch (see the class description).
         def tone(wave_type = :sine)
-          KeyedTone.new(frequency: freq, wave_type: wave_type, sample_rate: @sample_rate).key_sync(@notes.key_trigger)
+          setup_tone(new_tone(freq, wave_type))
         end
         alias hz tone
 
@@ -187,11 +187,18 @@ module MB
           "#<#{self.class.name} #{@settings.reject { |k, v| DEFAULTS[k] == v }}>"
         end
 
+        protected
+
+        # A KeyedTone at +frequency+, key synced to the notes (see Pitch#new_tone).
+        def new_tone(frequency, wave_type)
+          KeyedTone.new(frequency: frequency, wave_type: wave_type, sample_rate: @sample_rate).key_sync(@notes.key_trigger)
+        end
+
         private
 
         # A copy with changed settings.
         def with(**changes)
-          NotePitch.new(@notes, sample_rate: @sample_rate, **@settings, **changes)
+          derived(NotePitch.new(@notes, sample_rate: @sample_rate, **@settings, **changes))
         end
 
         # The note number node (see #build_freq): Notes#number, or a
