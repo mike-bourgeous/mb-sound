@@ -134,7 +134,7 @@ module MB
 
         # A KeyedTone at this pitch (see the class description).
         def tone(wave_type = :sine)
-          KeyedTone.new(frequency: freq, wave_type: wave_type, sample_rate: @sample_rate).key_sync(@notes.key_trigger)
+          setup_tone(KeyedTone.new(frequency: freq, wave_type: wave_type, sample_rate: @sample_rate).key_sync(@notes.key_trigger))
         end
         alias hz tone
 

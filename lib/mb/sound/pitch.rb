@@ -79,9 +79,67 @@ module MB
       # Returns a new full-scale Tone (sine unless +wave_type+ is given) at
       # this pitch.
       def tone(wave_type = :sine)
-        Tone.new(frequency: oscillator_frequency, wave_type: wave_type, sample_rate: @sample_rate).tap { |t| follow(t) }
+        setup_tone(Tone.new(frequency: oscillator_frequency, wave_type: wave_type, sample_rate: @sample_rate))
       end
       alias hz tone
+
+      # Returns +count+ copies of an oscillator at this pitch, detuned
+      # around it and mixed: a unison or "supersaw" sound.  The block is
+      # called once per copy with a detuned Pitch (and the copy's index) and
+      # returns that copy's oscillator, so any shape or modulation works;
+      # without a block the copies are saws.  Works on any Pitch: `220.hz`,
+      # Notes like `A3`, and Notes pitches in synth voices (`v.hz`, which
+      # keep their key sync, bend, glide, and vibrato).
+      #
+      # +count+ - The number of copies (default Unison::DEFAULT_COUNT = 3,
+      #           or the length of a +detune:+ Array).
+      # +detune:+ - How far the outermost copies are from the pitch, either
+      #             side: an Interval (default `12.cents`), or semitones.  An
+      #             Array gives each copy's offset instead.
+      # +layout:+ - :random (default) for uneven spacing within the detune,
+      #             so the beats between copies don't form a regular pattern
+      #             (less flanging; see Unison.offsets), or :even.  The random
+      #             layout comes from +seed:+ (an Integer), or by default a
+      #             sub-seed of the root generator (MB::Sound.seed), so it
+      #             repeats from render to render; in a Synth each voice gets
+      #             its own (like slightly different analog voices) unless
+      #             +seed:+ is given.
+      # +phase:+ - The copies' phases: :random (default) gives every
+      #            oscillator made in the block a random phase (Tone#rnd),
+      #            which in synth voices means new random phases at every
+      #            note-on (key sync with random targets), so notes start
+      #            without the zipping, flanging attack of copies starting
+      #            together; radians (e.g. 0) start (and key sync) every copy
+      #            at that phase, for a hard, repeatable attack; :reset leaves
+      #            the block's oscillators as they are.  Call #free in the
+      #            block for free-running copies that never reset (random
+      #            start, like the JP-8000's supersaw).
+      # +spread:+ - Stereo spread from 0 (default: a mono node) to 1 (the
+      #             outermost copies hard left and right), or a graph node of
+      #             0..1; any spread above 0 returns a stereo Channels bundle.
+      #             The sides alternate so each gets copies above and below
+      #             the pitch (Unison.pan_slots).
+      # +normalize:+ - :power (default) scales the sum by 1/sqrt(count), so
+      #                the loudness stays about the same for any count (peaks
+      #                may pass full scale when copies line up); :peak by
+      #                1/count (never louder than one copy, quieter as count
+      #                grows); a number scales the plain sum.  With a spread
+      #                each channel has the mono mix's power (see
+      #                GraphNode::ChannelMixer::Unison).
+      #
+      # Examples (bin/sound.rb):
+      #     play 110.hz.unison(7, detune: 25.cents)                              # a supersaw
+      #     play A2.unison(3, detune: 8.cents) { |p| p.square.pwm(0.3) }.at(-6.db)
+      #     play 220.hz.unison(7, detune: 20.cents, spread: 0.8).filter(:lowpass, cutoff: 2000)
+      #     play 110.hz.unison(5, layout: :even, phase: 0)                      # flanging, hard attack
+      #     midi.synth(voices: 4) { |v| v.hz.unison(5, detune: 15.cents, spread: 1) * v.amp_env }
+      def unison(count = nil, detune: 12.cents, layout: :random, phase: :random, spread: 0, normalize: :power, seed: nil, &block)
+        Unison.build(self, count, detune: detune, layout: layout, phase: phase, spread: spread, normalize: normalize, seed: seed, &block)
+      end
+
+      # The phase setting for oscillators made from a unison copy (see
+      # #unison and Unison.apply_phase; nil normally).
+      attr_accessor :unison_phase
 
       # Wave shapes: each returns a new Tone at this pitch.
       [
@@ -255,6 +313,13 @@ module MB
 
       private
 
+      # Applies this pitch's settings to a +tone+ made from it (#follow, and
+      # the #unison_phase).  Returns the tone.
+      def setup_tone(tone)
+        follow(tone)
+        @unison_phase ? Unison.apply_phase(tone, @unison_phase) : tone
+      end
+
       # Locks the phase of a tone made from this pitch to the timeline if
       # the frequency comes from a tempo source (Sequence::TempoNode; see
       # Tone#follow_timeline).
@@ -265,3 +330,5 @@ module MB
     end
   end
 end
+
+require_relative 'unison'
