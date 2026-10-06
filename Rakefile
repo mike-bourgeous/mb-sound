@@ -45,6 +45,12 @@ Rake::ExtensionTask.new 'mb-sound-fast_envelope' do |ext|
   ext.lib_dir = 'lib/mb/sound'
 end
 
+Rake::ExtensionTask.new 'mb-sound-fast_filter' do |ext|
+  ext.name = 'fast_filter'
+  ext.ext_dir = 'ext/mb/sound/fast_filter'
+  ext.lib_dir = 'lib/mb/sound'
+end
+
 Rake::ExtensionTask.new 'mb-sound-fast_audio' do |ext|
   ext.name = 'fast_audio'
   ext.ext_dir = 'ext/mb/sound/fast_audio'
@@ -90,6 +96,7 @@ MEMCHECK_SPECS = [
   'spec/lib/mb/sound/band_limit_spec.rb',          # FastSynth.oscillate_bl/blit/oscillate_sync
   'spec/lib/mb/sound/shaper_spec.rb',              # FastClip.shape
   'spec/lib/mb/sound/envelope_spec.rb',            # FastEnvelope.process
+  'spec/lib/mb/sound/filter/four_pole_spec.rb',    # FastFilter.four_pole
   'spec/lib/mb/sound/wavetable_spec.rb',           # FastWavetable
   'spec/lib/mb/sound/graph_node/wavetable_spec.rb',
   'spec/lib/mb/sound/filter/biquad_spec.rb',       # FastSound.biquad*
