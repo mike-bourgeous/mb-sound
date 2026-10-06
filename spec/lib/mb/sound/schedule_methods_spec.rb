@@ -68,6 +68,73 @@ RSpec.describe(MB::Sound::ScheduleMethods) do
     it 'is also called on_bar' do
       expect(MB::Sound.method(:on_bar)).to eq(MB::Sound.method(:at_bar))
     end
+
+    # At 112 BPM a bar is 102857 1/7 samples, so bar lines fall between
+    # samples.  Notes put an edge on the sample whose window holds it
+    # (floor), so a graph launched on a bar must start on that sample too,
+    # or a clip's first note lands before its first sample and is lost.
+    context 'when the bar line falls between samples' do
+      let(:transport) { MB::Sound::Sequence::Transport.new(bpm: 112) }
+      let(:bar2) { (transport.bar_length / transport.whole_notes_per_second * 48000).floor }
+
+      before { expect(bar2).to eq(102857) }
+
+      # Launches +node+ on bar 2 and returns the changes in its output.
+      def launch(node = nil, &block)
+        within do
+          MB::Sound.bg(:a, 0.constant)
+          MB::Sound.at_bar(2) { MB::Sound.bg(:b, node || block.call) }
+        end
+        changes(run(800 * 300))
+      end
+
+      it 'plays the first note of a looping clip' do
+        clip = MB::Sound.seq(MB::Sound::A2).n1.legato(1/8r).loop
+        expect(launch(clip.gate).first(2)).to eq([[0, 0], [bar2, 1]])
+      end
+
+      it 'plays the first note of a looping clip made inside the block' do
+        result = launch { MB::Sound.seq(MB::Sound::A2, MB::Sound::C3).n4.loop.number }
+        expect(result.first(3)).to eq([[0, 0], [bar2, MB::Sound::A2.number], [bar2 + 25714, MB::Sound::C3.number]])
+      end
+
+      it 'plays the first note of a looping clip.synth' do
+        clip = MB::Sound.seq(MB::Sound::A2).n1.legato(1/8r).loop
+        synth = clip.synth(voices: 2) { |v| v.gate }
+        expect(launch(synth).first(2)).to eq([[0, 0], [bar2, 1]])
+      end
+
+      it 'plays the first hit of a looping grid kit row' do
+        kit = MB::Sound.grid(16, kick: 'x...x...x...x...')
+        expect(launch(kit[:kick].loop.trigger)[1]).to eq([bar2, 0.75])
+      end
+
+      it 'starts a non-looping clip on the bar line sample' do
+        expect(launch(MB::Sound.seq(MB::Sound::A2).n4.gate)).to eq([[0, 0], [bar2, 1], [bar2 + 25714, 0]])
+      end
+
+      it 'starts a constant on the bar line sample' do
+        expect(launch(1.constant)).to eq([[0, 0], [bar2, 1]])
+      end
+
+      it 'hands over from a replaced player on the bar line sample' do
+        within do
+          MB::Sound.bg(:a, 1.constant)
+          MB::Sound.at_bar(2) { MB::Sound.bg(:a, 2.constant, fade: 0) }
+        end
+        expect(changes(run(800 * 300))).to eq([[0, 1], [bar2, 2]])
+      end
+
+      it 'lands a launch on the same sample as a swap' do
+        c1 = MB::Sound.seq(MB::Sound::A2).n1.legato(1/8r).loop
+        c2 = MB::Sound.seq(MB::Sound::C4).n1.legato(1/8r).loop
+        within do
+          MB::Sound.bg(:a, c1.number)
+          MB::Sound.at_bar(2) { MB::Sound.swap(:a, c2) }
+        end
+        expect(changes(run(800 * 300))).to eq([[0, MB::Sound::A2.number], [bar2, MB::Sound::C4.number]])
+      end
+    end
   end
 
   describe '#after' do
