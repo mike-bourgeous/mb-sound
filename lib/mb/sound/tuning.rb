@@ -83,7 +83,12 @@ module MB
       # computed (see GraphNode::SynthesisMethods#freq).
       def freq(node)
         tuning = self
+        copier = GraphNode::FrozenCopy.new
         node.proc(type_name: 'Number to frequency') { |v|
+          # number_to_freq converts an inplace SFloat where it is (else it
+          # copies the input first), so convert a reused copy instead of a
+          # new one every buffer
+          v = copier.copy(v).inplace! if v.is_a?(Numo::SFloat)
           MB::FastSound.number_to_freq(v, tuning.note, tuning.frequency)
         }
       end

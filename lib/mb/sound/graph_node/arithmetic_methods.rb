@@ -29,7 +29,9 @@ module MB
         # by the corresponding denominator value at the same index.
         def /(other)
           arithmetic_proc(other, '/') { |d1, d2|
-            d1 / d2
+            # In place without allocating for real buffers (the same
+            # operations as Numo's)
+            MB::Sound::FastArithmetic.divide(d1, d2) || d1 / d2
           }
         end
 
@@ -37,7 +39,7 @@ module MB
         # be either a numeric or another signal graph.
         def **(other)
           arithmetic_proc(other, '**') { |d1, d2|
-            d1 ** d2
+            MB::Sound::FastArithmetic.power(d1, d2) || d1 ** d2
           }
         end
 

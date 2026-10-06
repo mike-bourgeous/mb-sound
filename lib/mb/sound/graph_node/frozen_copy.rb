@@ -12,7 +12,8 @@ module MB
       # buffer.
       class FrozenCopy
         # Returns a writable buffer of the same type and length as +buf+
-        # (an NArray) holding its values.
+        # (an NArray) holding its values.  Works for unfrozen buffers too
+        # (e.g. a scratch copy to convert in place).
         def copy(buf)
           c = @buf
           return @buf = buf.dup if c.nil? || c.class != buf.class || c.length != buf.length || c.frozen?

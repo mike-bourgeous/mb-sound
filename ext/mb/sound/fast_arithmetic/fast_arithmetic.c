@@ -34,7 +34,8 @@
  *
  * .copy copies a buffer into another (for nodes that work in place on a
  * copy of a frozen input), and .min_max finds Numo's min and max of a real
- * buffer at once (for Synth's lane levels).
+ * buffer at once (for Synth's lane levels).  .divide and .power are the
+ * in-place / and ** of GraphNode arithmetic procs for real buffers.
  *
  * Buffer types: SFloat (SFloat inputs), DFloat (DFloat), SComplex (SComplex
  * or SFloat), DComplex (DComplex or DFloat), every input exactly as long as
@@ -561,6 +562,104 @@ static VALUE ruby_min_max(VALUE self, VALUE buf, VALUE result)
 	return result;
 }
 
+// Checks a real, contiguous, writable output for .divide and .power;
+// returns its type or MB_ARITH_NONE.
+static enum mb_arith_type writable_real(VALUE out)
+{
+	enum mb_arith_type ot = arith_type(out);
+	if ((ot != MB_ARITH_SF && ot != MB_ARITH_DF) || RNARRAY_NDIM(out) != 1 || !RTEST(nary_check_contiguous(out))) {
+		return MB_ARITH_NONE;
+	}
+
+	VALUE data = RNARRAY_TYPE(out) == NARRAY_VIEW_T ? RNARRAY_VIEW(out)->data : out;
+	return OBJ_FROZEN(data) || OBJ_FROZEN(out) ? MB_ARITH_NONE : ot;
+}
+
+/*
+ * call-seq: MB::Sound::FastArithmetic.divide(out, divisor) -> out or nil
+ *
+ * Divides the real buffer +out+ in place by +divisor+ (a contiguous NArray
+ * of the same type and length, or a Float or Integer cast to the buffer's
+ * type), as Numo's out.inplace / divisor does.  Returns nil without
+ * writing for anything else (complex, other types, promotion).
+ */
+static VALUE ruby_divide(VALUE self, VALUE out, VALUE divisor)
+{
+	enum mb_arith_type ot = writable_real(out);
+	if (ot == MB_ARITH_NONE) {
+		return Qnil;
+	}
+
+	size_t length = RNARRAY_SIZE(out);
+	char *outp = nary_get_pointer_for_write(out) + nary_get_offset(out);
+
+	if (RB_FLOAT_TYPE_P(divisor) || RB_INTEGER_TYPE_P(divisor)) {
+		double d = NUM2DBL(divisor);
+		if (ot == MB_ARITH_SF) {
+			float *o = (float *)outp;
+			float df = (float)d;
+			for (size_t i = 0; i < length; i++) o[i] = o[i] / df;
+		} else {
+			double *o = (double *)outp;
+			for (size_t i = 0; i < length; i++) o[i] = o[i] / d;
+		}
+		return out;
+	}
+
+	if (arith_type(divisor) != ot || !shape_ok(divisor, length)) {
+		return Qnil;
+	}
+
+	if (ot == MB_ARITH_SF) {
+		float *o = (float *)outp;
+		const float *x = (const float *)read_ptr(divisor);
+		for (size_t i = 0; i < length; i++) o[i] = o[i] / x[i];
+	} else {
+		double *o = (double *)outp;
+		const double *x = (const double *)read_ptr(divisor);
+		for (size_t i = 0; i < length; i++) o[i] = o[i] / x[i];
+	}
+
+	RB_GC_GUARD(divisor);
+	return out;
+}
+
+/*
+ * call-seq: MB::Sound::FastArithmetic.power(out, exponent) -> out or nil
+ *
+ * Raises the real buffer +out+ in place to the powers in +exponent+ (a
+ * contiguous NArray of the same type and length), as Numo's
+ * out.inplace ** exponent does (numo's m_pow: C's double pow, rounded to
+ * the buffer type).  Scalar exponents (Numo uses repeated multiplication
+ * for Integers) and anything else return nil without writing.
+ */
+static VALUE ruby_power(VALUE self, VALUE out, VALUE exponent)
+{
+	enum mb_arith_type ot = writable_real(out);
+	if (ot == MB_ARITH_NONE) {
+		return Qnil;
+	}
+
+	size_t length = RNARRAY_SIZE(out);
+	if (arith_type(exponent) != ot || !shape_ok(exponent, length)) {
+		return Qnil;
+	}
+
+	char *outp = nary_get_pointer_for_write(out) + nary_get_offset(out);
+	if (ot == MB_ARITH_SF) {
+		float *o = (float *)outp;
+		const float *x = (const float *)read_ptr(exponent);
+		for (size_t i = 0; i < length; i++) o[i] = pow(o[i], x[i]);
+	} else {
+		double *o = (double *)outp;
+		const double *x = (const double *)read_ptr(exponent);
+		for (size_t i = 0; i < length; i++) o[i] = pow(o[i], x[i]);
+	}
+
+	RB_GC_GUARD(exponent);
+	return out;
+}
+
 void Init_fast_arithmetic(void)
 {
 	VALUE mb = rb_define_module("MB");
@@ -571,4 +670,6 @@ void Init_fast_arithmetic(void)
 	rb_define_module_function(fast_arithmetic, "mix", ruby_mix, 3);
 	rb_define_module_function(fast_arithmetic, "copy", ruby_copy, 2);
 	rb_define_module_function(fast_arithmetic, "min_max", ruby_min_max, 2);
+	rb_define_module_function(fast_arithmetic, "divide", ruby_divide, 2);
+	rb_define_module_function(fast_arithmetic, "power", ruby_power, 2);
 }
