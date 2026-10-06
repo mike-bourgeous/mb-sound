@@ -224,6 +224,42 @@ RSpec.describe(MB::Sound::FastArithmetic) do
     end
   end
 
+  describe '.min_max' do
+    def bits(v)
+      [v].pack('d')
+    end
+
+    [Numo::SFloat, Numo::DFloat].each do |cls|
+      it "matches Numo's min and max for #{cls}" do
+        nan = Float::NAN
+        cases = [
+          make_input(cls, 129, 5),
+          cls[1],
+          cls[nan, 3, -2, nan, 5],
+          cls[nan, nan],
+          cls[-0.0, 0.0, -0.0],
+          cls[0.0, -0.0],
+          cls[Float::INFINITY, -Float::INFINITY, 1],
+          make_input(cls, 129, 9)[3..],
+        ]
+        result = [nil, nil]
+        cases.each do |buf|
+          expect(MB::Sound::FastArithmetic.min_max(buf, result)).to equal(result)
+          expect(bits(result[0])).to eq(bits(buf.min.to_f)), "min of #{buf.to_a}"
+          expect(bits(result[1])).to eq(bits(buf.max.to_f)), "max of #{buf.to_a}"
+        end
+      end
+    end
+
+    it 'returns nil for complex, empty, or non-contiguous buffers' do
+      r = [1, 2]
+      expect(MB::Sound::FastArithmetic.min_max(Numo::SComplex[1, 2], r)).to be_nil
+      expect(MB::Sound::FastArithmetic.min_max(Numo::SFloat[], r)).to be_nil
+      expect(MB::Sound::FastArithmetic.min_max(Numo::SFloat.new(8).seq[(0..) % 2], r)).to be_nil
+      expect(r).to eq([1, 2])
+    end
+  end
+
   describe '.copy' do
     [Numo::SFloat, Numo::DFloat, Numo::SComplex, Numo::DComplex].each do |cls|
       it "copies #{cls} buffers exactly" do

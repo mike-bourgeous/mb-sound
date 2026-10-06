@@ -33,7 +33,8 @@
  * from a product that underflows (below ~1e-45 in float).
  *
  * .copy copies a buffer into another (for nodes that work in place on a
- * copy of a frozen input).
+ * copy of a frozen input), and .min_max finds Numo's min and max of a real
+ * buffer at once (for Synth's lane levels).
  *
  * Buffer types: SFloat (SFloat inputs), DFloat (DFloat), SComplex (SComplex
  * or SFloat), DComplex (DComplex or DFloat), every input exactly as long as
@@ -42,6 +43,7 @@
  */
 
 #include <string.h>
+#include <math.h>
 
 #include <ruby.h>
 #include "numo/narray.h"
@@ -498,6 +500,67 @@ static VALUE ruby_copy(VALUE self, VALUE out, VALUE src)
 	return out;
 }
 
+// Numo's default min/max (types/real_accum.h f_min/f_max): leading NaNs
+// are skipped, later NaNs never compare, and an all-NaN buffer gives its last
+// value.
+#define MB_MINMAX(type, data, n, lt_or_gt, result) do { \
+	type mm_y = 0; \
+	size_t mm_i = 0; \
+	while (mm_i < (n)) { \
+		mm_y = (data)[mm_i++]; \
+		if (!isnan(mm_y)) { \
+			for (; mm_i < (n); mm_i++) { \
+				type mm_v = (data)[mm_i]; \
+				if (mm_v lt_or_gt mm_y) mm_y = mm_v; \
+			} \
+			break; \
+		} \
+	} \
+	(result) = mm_y; \
+} while (0)
+
+/*
+ * call-seq: MB::Sound::FastArithmetic.min_max(buf, result) -> result or nil
+ *
+ * Stores buf.min and buf.max (as Numo computes them, as Floats) in
+ * result[0] and result[1] (a 2-element Array, reused by the caller), for a
+ * contiguous 1D SFloat or DFloat +buf+ with at least one value.  Returns
+ * nil for anything else.
+ */
+static VALUE ruby_min_max(VALUE self, VALUE buf, VALUE result)
+{
+	Check_Type(result, T_ARRAY);
+	enum mb_arith_type t = arith_type(buf);
+	if ((t != MB_ARITH_SF && t != MB_ARITH_DF) || RNARRAY_NDIM(buf) != 1 || !RTEST(nary_check_contiguous(buf))) {
+		return Qnil;
+	}
+
+	size_t n = RNARRAY_SIZE(buf);
+	if (n == 0) {
+		return Qnil;
+	}
+
+	double lo, hi;
+	if (t == MB_ARITH_SF) {
+		const float *x = (const float *)read_ptr(buf);
+		float a, b;
+		MB_MINMAX(float, x, n, <, a);
+		MB_MINMAX(float, x, n, >, b);
+		lo = a;
+		hi = b;
+	} else {
+		const double *x = (const double *)read_ptr(buf);
+		MB_MINMAX(double, x, n, <, lo);
+		MB_MINMAX(double, x, n, >, hi);
+	}
+
+	rb_ary_store(result, 0, DBL2NUM(lo));
+	rb_ary_store(result, 1, DBL2NUM(hi));
+
+	RB_GC_GUARD(buf);
+	return result;
+}
+
 void Init_fast_arithmetic(void)
 {
 	VALUE mb = rb_define_module("MB");
@@ -507,4 +570,5 @@ void Init_fast_arithmetic(void)
 	rb_define_module_function(fast_arithmetic, "product", ruby_product, 3);
 	rb_define_module_function(fast_arithmetic, "mix", ruby_mix, 3);
 	rb_define_module_function(fast_arithmetic, "copy", ruby_copy, 2);
+	rb_define_module_function(fast_arithmetic, "min_max", ruby_min_max, 2);
 }

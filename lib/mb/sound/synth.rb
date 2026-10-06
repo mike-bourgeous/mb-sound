@@ -311,35 +311,8 @@ module MB
       # to place voices yourself); don't mix the two.  Lanes skipped while
       # idle (see #skip_idle?) give frozen buffers of zeros.
       def sample_individual(count)
-        any = false
-        data = @lanes.each_with_index.map { |outs, idx|
-          next nil if @done[idx]
-
-          if @skipping[idx]
-            case skip_lane(idx, count)
-            when :ended
-              lane_ended(idx)
-              next nil
-            when :skipped
-              any = true
-              next outs.length == 1 && @channels == 1 ? zeros(count) : Array.new(outs.length) { zeros(count) }
-            end
-          end
-
-          bufs = outs.map { |o| o.sample(count) }
-          if bufs.any?(&:nil?)
-            lane_ended(idx)
-            next nil
-          end
-
-          measure_lane(idx, bufs)
-          @skipping[idx] = start_skipping?(idx) if @skippable[idx]
-
-          any = true
-          outs.length == 1 && @channels == 1 ? bufs[0] : bufs
-        }
-
-        any ? data : nil
+        data = sample_lanes(count)
+        data&.map { |d| d.is_a?(Array) ? d.dup : d }
       end
 
       # True if lanes may be skipped while idle (the +:skip_idle+ option;
@@ -514,10 +487,14 @@ module MB
       # lane busy forever); silent uses the absolute peak, since skipping
       # replaces the lane's output with zeros.
       def measure_lane(idx, bufs)
-        ranges = bufs.map { |b| range_of(b) }
-        lo = ranges.map(&:first).min
-        hi = ranges.map(&:last).max
-        swing = ranges.map { |mn, mx| (mx - mn) * 0.5 }.max
+        lo = hi = swing = nil
+        bufs.each do |b|
+          mn, mx = range_of(b)
+          lo = mn if lo.nil? || mn < lo
+          hi = mx if hi.nil? || mx > hi
+          sw = (mx - mn) * 0.5
+          swing = sw if swing.nil? || sw > swing
+        end
         idle = @notes[idx].voice_idle?
         @peaks[idx] = swing
         @quiet[idx] = idle && swing <= QUIET
@@ -530,11 +507,22 @@ module MB
         @peaks[idx] = 0.0
       end
 
-      # The smallest and largest samples of +buf+ (magnitudes if complex).
+      # The smallest and largest samples of +buf+ (magnitudes if complex),
+      # in an Array reused by every call (FastArithmetic.min_max for real
+      # buffers, so nothing is allocated).
       def range_of(buf)
-        return [0.0, 0.0] if buf.equal?(@zeros)
+        r = (@range ||= [0.0, 0.0])
+        if buf.equal?(@zeros)
+          r[0] = r[1] = 0.0
+          return r
+        end
+
+        return r if MB::Sound::FastArithmetic.min_max(buf, r)
+
         buf = buf.abs if buf.is_a?(Numo::SComplex) || buf.is_a?(Numo::DComplex)
-        [buf.min.to_f, buf.max.to_f]
+        r[0] = buf.min.to_f
+        r[1] = buf.max.to_f
+        r
       end
 
       # Skips lane +idx+ for +count+ samples, reading its boundary nodes
@@ -602,13 +590,61 @@ module MB
         result.is_a?(GraphNode::Channels) ? result : GraphNode::Channels.new(result.outputs)
       end
 
+      # #sample_individual's work, in Arrays reused by every call (the
+      # result, and each lane's Array of channel buffers), for #mix_mono and
+      # #mix_channels.
+      def sample_lanes(count)
+        any = false
+        data = (@lane_data ||= Array.new(@lanes.length))
+        idx = 0
+        while idx < @lanes.length
+          data[idx] = sample_lane(idx, count)
+          any = true unless data[idx].nil?
+          idx += 1
+        end
+
+        any ? data : nil
+      end
+
+      # One lane's entry of #sample_lanes.
+      def sample_lane(idx, count)
+        return nil if @done[idx]
+
+        outs = @lanes[idx]
+        if @skipping[idx]
+          case skip_lane(idx, count)
+          when :ended
+            lane_ended(idx)
+            return nil
+          when :skipped
+            return outs.length == 1 && @channels == 1 ? zeros(count) : Array.new(outs.length) { zeros(count) }
+          end
+        end
+
+        bufs = ((@lane_bufs ||= [])[idx] ||= [])
+        bufs.clear
+        outs.each do |o|
+          buf = o.sample(count)
+          if buf.nil?
+            lane_ended(idx)
+            return nil
+          end
+          bufs << buf
+        end
+
+        measure_lane(idx, bufs)
+        @skipping[idx] = start_skipping?(idx) if @skippable[idx]
+
+        outs.length == 1 && @channels == 1 ? bufs[0] : bufs
+      end
+
       # Sums the lanes into one buffer, with the output gain.
       def mix_mono(count)
-        data = sample_individual(count)
+        data = sample_lanes(count)
         @buf = Numo::SFloat.zeros(count) if @buf.nil? || @buf.length != count
         return (tail_silence(count) ? @buf.fill(0) : nil) if data.nil?
 
-        out = sum_into(@buf, data.compact)
+        out = sum_into(@buf, data)
         apply_gain(out, count)
       end
 
@@ -616,20 +652,18 @@ module MB
       # channels), with the output gain.  Returns :ended once every lane has
       # ended.
       def mix_channels(count)
-        data = sample_individual(count)
+        data = sample_lanes(count)
         @channel_bufs = Array.new(@channels) { Numo::SFloat.zeros(count) } if @channel_bufs.nil? || @channel_bufs[0].length != count
         if data.nil?
           return :ended unless tail_silence(count)
           return @channel_bufs.map { |b| b.fill(0) }
         end
 
-        data = data.compact
-
         gain = gain_data(count)
         return :ended if @gain && gain.nil?
 
         Array.new(@channels) { |c|
-          out = sum_into(@channel_bufs[c], data.map { |bufs| bufs[c % bufs.length] })
+          out = sum_into(@channel_bufs[c], data, c)
           @channel_bufs[c] = out if out.length == count && !out.equal?(@channel_bufs[c]) # a promoted (e.g. complex) buffer
           gain ? scale(out, gain) : out
         }
@@ -643,12 +677,39 @@ module MB
         true
       end
 
-      # Adds +bufs+ into +out+ (zeroed first).  Shorter buffers add to the
-      # start.  Returns +out+, or a new buffer if a lane promoted the type
-      # (e.g. complex).
-      def sum_into(out, bufs)
+      # Adds the lane buffers of +data+ (from #sample_lanes; nil for ended
+      # lanes, or with a +channel+, each lane's Array of channel buffers,
+      # narrower lanes repeating) into +out+ (zeroed first).  Shorter
+      # buffers add to the start.  Returns +out+, or a new buffer if a lane
+      # promoted the type (e.g. complex).  Full buffers of out's type take
+      # MB::Sound::FastArithmetic.mix (the same additions, no allocations).
+      def sum_into(out, data, channel = nil)
+        pairs = (@sum_pairs ||= [])
+        pool = (@sum_pool ||= [])
+        n = 0
+        fast = true
+        data.each do |d|
+          next if d.nil?
+          d = d[channel % d.length] if channel
+          next if d.equal?(@zeros) # a skipped lane
+          unless d.class == out.class && d.length == out.length
+            fast = false
+            break
+          end
+          pair = (pool[n] ||= [nil, 1])
+          pair[0] = d
+          pairs[n] = pair
+          n += 1
+        end
+        if fast
+          pairs.pop while pairs.length > n
+          return out if MB::Sound::FastArithmetic.mix(out, 0, pairs)
+        end
+
         out.fill(0)
-        bufs.each do |d|
+        data.each do |d|
+          next if d.nil?
+          d = d[channel % d.length] if channel
           next if d.equal?(@zeros) # a skipped lane
           n = MB::M.min(d.length, out.length)
           if (d.is_a?(Numo::SComplex) || d.is_a?(Numo::DComplex)) && !out.is_a?(Numo::SComplex)
