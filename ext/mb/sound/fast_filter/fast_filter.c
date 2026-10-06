@@ -27,7 +27,6 @@
 
 #include <stdlib.h>
 #include <math.h>
-#include <complex.h>
 
 #include <ruby.h>
 #include "numo/narray.h"
@@ -123,9 +122,10 @@ static VALUE ruby_four_pole(VALUE self, VALUE buffer, VALUE cutoff, VALUE resona
 	float *data = mb_sfloat_ptr(buffer);
 
 	double fc_scalar, res_scalar;
-	complex float *fc_ptr, *res_ptr;
-	mb_read_signal_input(&cutoff, length, "Cutoff", &fc_scalar, &fc_ptr);
-	mb_read_signal_input(&resonance, length, "Resonance", &res_scalar, &res_ptr);
+	const float *fc_ptr, *res_ptr;
+	size_t fc_step, res_step;
+	mb_read_signal_input(&cutoff, length, "Cutoff", &fc_scalar, &fc_ptr, &fc_step);
+	mb_read_signal_input(&resonance, length, "Resonance", &res_scalar, &res_ptr, &res_step);
 
 	double pi_over_rate = M_PI / rate;
 	double fc_max = rate * FP_MAX_CUTOFF_RATIO;
@@ -136,8 +136,8 @@ static VALUE ruby_four_pole(VALUE self, VALUE buffer, VALUE cutoff, VALUE resona
 	double G = 0, one = 1, k = 0, inv = 1, in_gain = 1;
 
 	for (size_t i = 0; i < length; i++) {
-		double fc = fc_ptr ? crealf(fc_ptr[i]) : fc_scalar;
-		double res = res_ptr ? crealf(res_ptr[i]) : res_scalar;
+		double fc = fc_ptr ? fc_ptr[i * fc_step] : fc_scalar;
+		double res = res_ptr ? res_ptr[i * res_step] : res_scalar;
 
 		if (fc != last_fc || res != last_res) {
 			last_fc = fc;
