@@ -17,11 +17,11 @@ MB::Sound.synth_script { |midi|
     decay_time = 0.18
 
     # Velocity: the carrier levels have 12 dB ranges (the boom another 6
-    # dB from its linear envelope), as
-    # kicks usually have 10-20 dB of level change, while the noise click
-    # and the boom's noise FM keep their wide ranges (30 and 21 dB), so
-    # soft hits are mostly duller as well as quieter.  (The level ranges
-    # were 30 and 25.5 dB, so anything below about 100 sounded weak.)
+    # dB from its linear envelope), as kicks usually have 10-20 dB of
+    # level change (they were 30 and 25.5 dB), while the clicks (the
+    # 100 Hz pitch click, the noise click, and the boom's noise FM) keep
+    # their wide ranges (30, 30, and 21 dB), so soft hits are duller as
+    # well as quieter.
     #
     # The envelopes are the old `.db(N)` ones (straight lines in dB over N
     # dB) converted to curves of -N rising and N falling, with the old
@@ -29,8 +29,8 @@ MB::Sound.synth_script { |midi|
     # were linear.  Every oscillator restarts at each note.
 
     attack_hz = 100.constant.named('Attack Hz')
-    # fast click at start
-    attack_env = v.env(0.0005, pitch_decay, 0, pitch_decay, curve: [-60, 60, 60], sensitivity: -30.db..0.db, velocity_scale: :db)
+    # fast click at start: up to 100 Hz above the note, falling 60 dB
+    attack_env = attack_hz * v.env(0.0005, pitch_decay, 0, pitch_decay, curve: [-60, 60, 60], sensitivity: -30.db..0.db, velocity_scale: :db)
     pitch_env = v.env(0.0005, decay_time, 0, decay_time, curve: :linear) # semitone fall over full decay
 
     noise_cutoff = 1500.constant.named('Noise cutoff')
