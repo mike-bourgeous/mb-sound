@@ -261,6 +261,167 @@ RSpec.describe(MB::Sound::Unison, :aggregate_failures) do
     end
   end
 
+  describe 'detune nodes' do
+    # The Unison::Detune node behind a unison graph.
+    def detune_node(node)
+      node.graph.find { |n| n.is_a?(MB::Sound::Unison::Detune) }
+    end
+
+    # Samples every output of a Detune node +buffers+ times; returns one
+    # DFloat of Hz per copy.
+    def copy_freqs(det, buffers: 20, buffer: 480)
+      out = det.outputs.map { [] }
+      buffers.times { det.outputs.each_with_index { |o, i| out[i] << o.sample(buffer).cast_to(Numo::DFloat) } }
+      out.map { |l| l.reduce(:concatenate) }
+    end
+
+    def cents(a, b)
+      Numo::NMath.log2(a / b) * 1200
+    end
+
+    it 'leaves fixed detunes on plain transposed pitches (no Detune node)' do
+      seen = []
+      node = 110.hz.unison(3, detune: 10.cents, detune_mode: :exact) { |p| seen << p; p.saw }
+      expect(detune_node(node)).to be_nil
+      expect(seen.map(&:class)).to all(eq(MB::Sound::Pitch))
+      expect(seen).to all(be_constant)
+    end
+
+    it 'gives the block copies at fixed fractions of the detune, scaled by the node' do
+      seen = []
+      node = 220.hz.unison(5, detune: 0.2.constant, layout: :even) { |p, i| seen << [p, i]; p.saw }
+      expect(seen.map(&:last)).to eq([0, 1, 2, 3, 4])
+      expect(seen.map(&:first)).to all(be_a(MB::Sound::Unison::CopyPitch))
+      expect(seen.map(&:first)).not_to include(be_constant)
+
+      det = detune_node(node)
+      expect(det.fractions).to eq([-1, -0.5, 0, 0.5, 1])
+      expect(det.mode).to eq(:interp)
+      expect(mixer(node).slots).to eq(described_class.pan_slots(det.fractions))
+      expect(mixer(node).offsets).to be_nil
+      expect(render(node).abs.max).to be > 0.5
+    end
+
+    it 'takes the random layout from the seed, like fixed detunes' do
+      a = detune_node(110.hz.unison(7, detune: 0.2.constant, seed: 3))
+      expect(a.fractions).to eq(described_class.fractions(7, rng: Random.new(3)))
+      expect(a.fractions.map(&:abs).max).to eq(1)
+      expect(a.fractions.each_cons(2).all? { |x, y| x < y }).to eq(true)
+      expect(described_class.fractions(7, rng: Random.new(3))).to eq(described_class.offsets(7, 1, rng: Random.new(3)))
+    end
+
+    it 'matches the exact formula per sample in :exact mode' do
+      lfo = 3.hz.lfo.at(0..1)
+      node = 110.hz.unison(7, detune: lfo, detune_mode: :exact, seed: 1)
+      det = detune_node(node)
+      expect(det.mode).to eq(:exact)
+      freqs = copy_freqs(det)
+
+      d = render(3.hz.lfo.at(0..1), buffers: 20).cast_to(Numo::DFloat)
+      det.fractions.each_with_index do |a, i|
+        expected = 110 * 2 ** (a * d / 12)
+        expect(cents(freqs[i], expected).abs.max).to be < 1e-4
+      end
+    end
+
+    [10, 25, 50, 100].each do |c|
+      it "keeps :interp within the predicted error at #{c} cents (middle copy sharp by 1200 log2(cosh(x)))" do
+        bound = 1200 * Math.log2(Math.cosh(c / 100.0 * Math.log(2) / 12))
+        det = detune_node(110.hz.unison(7, detune: (c / 100.0).constant, layout: :even))
+        freqs = copy_freqs(det, buffers: 2)
+        errs = det.fractions.each_with_index.map { |a, i| cents(freqs[i], 110 * 2 ** (a * c / 1200.0)).abs.max }
+
+        expect(errs[0]).to be < 1e-3
+        expect(errs[6]).to be < 1e-3
+        expect(errs.max).to be_within(1e-3).of(bound)
+        expect(errs[3]).to eq(errs.max)
+        expect(cents(freqs[3], 110.0 * Math.cosh(c / 100.0 * Math.log(2) / 12)).abs.max).to be < 1e-3
+      end
+    end
+
+    it 'follows a moving detune in :interp mode with exact outer copies and the same bound' do
+      lfo = -> { 0.5.hz.lfo.at(0..0.5) }
+      ex = copy_freqs(detune_node(110.hz.unison(7, detune: lfo.call, detune_mode: :exact, layout: :even)), buffers: 50)
+      it = copy_freqs(detune_node(110.hz.unison(7, detune: lfo.call, layout: :even)), buffers: 50)
+      bound = 1200 * Math.log2(Math.cosh(0.5 * Math.log(2) / 12))
+      # Outer copies only lag by the control interval (up to 78.5 cents/s × 16 samples)
+      7.times do |i|
+        expect(cents(it[i], ex[i]).abs.max).to be < ([0, 6].include?(i) ? 0.03 : bound + 0.03)
+      end
+    end
+
+    it 'gives the same :interp output at any buffer size' do
+      a = copy_freqs(detune_node(110.hz.unison(5, detune: 7.hz.lfo.at(0..0.5), layout: :even)), buffers: 20, buffer: 480)
+      b = copy_freqs(detune_node(110.hz.unison(5, detune: 7.hz.lfo.at(0..0.5), layout: :even)), buffers: 75, buffer: 128)
+      expect(b.map { |x| x[0...9600] }).to eq(a)
+    end
+
+    it 'ramps to detune steps over the control interval in :interp mode, and jumps in :exact mode' do
+      step = -> { MB::Sound.silence(0.01).and_then(1.constant) }
+      ex = copy_freqs(detune_node(110.hz.unison(3, detune: step.call, layout: :even, detune_mode: :exact)), buffers: 2)
+      it = copy_freqs(detune_node(110.hz.unison(3, detune: step.call, layout: :even)), buffers: 2)
+      r = 2 ** (1 / 12.0)
+      expect(ex[2][479..481].to_a).to match([be_within(1e-4).of(110), be_within(1e-4).of(110 * r), be_within(1e-4).of(110 * r)])
+
+      k = MB::Sound::Unison::Detune::DEFAULT_CONTROL
+      expect(it[2][479]).to be_within(1e-4).of(110)
+      # The step lands at sample 480 (a control point for 16 and 32), ramping over k samples
+      expect(it[2][480 + k - 1]).to be_within(1e-4).of(110 * r)
+      expect(it[2][480 + k / 2 - 1]).to be_within(1e-4).of(110 * (1 + (r - 1) / 2))
+    end
+
+    it 'uses scalar ratios for constant buffers, giving the same samples as the per-sample kernel' do
+      det = detune_node(MB::Sound::Pitch.new(110.constant).unison(5, detune: 0.3.constant, detune_mode: :exact))
+      expect(MB::Sound::FastUnison).to receive(:scale).at_least(:once).and_call_original
+      expect(MB::Sound::FastUnison).not_to receive(:exact)
+      freqs = copy_freqs(det, buffers: 3)
+
+      out = Numo::SFloat.zeros(5, 480)
+      MB::Sound::Unison::Detune::RubyKernel.exact(out, 110.0, Numo::SFloat.zeros(480).fill(0.3), det.fractions)
+      5.times { |i| expect(freqs[i][-480..]).to eq(out[i, true].cast_to(Numo::DFloat)) }
+    end
+
+    it 'keeps the last frame for a constant pitch and detune' do
+      [:exact, :interp].each do |mode|
+        det = detune_node(110.hz.unison(3, detune: 0.3.constant, detune_mode: mode))
+        copy_freqs(det, buffers: 2)
+        expect(MB::Sound::FastUnison).not_to receive(:scale)
+        expect(MB::Sound::FastUnison).not_to receive(:exact)
+        expect(MB::Sound::FastUnison).not_to receive(:interp)
+        copy_freqs(det, buffers: 3)
+        RSpec::Mocks.space.reset_all
+      end
+    end
+
+    it 'gives the same samples with the Ruby kernel' do
+      [:exact, :interp].each do |mode|
+        a = MB::Sound::Unison::Detune.new(220.hz.vibrato(5, depth: 0.2).freq, 2.hz.lfo.at(0..0.4), fractions: [-1, -0.3, 0.2, 1], mode: mode)
+        b = MB::Sound::Unison::Detune.new(220.hz.vibrato(5, depth: 0.2).freq, 2.hz.lfo.at(0..0.4), fractions: [-1, -0.3, 0.2, 1], mode: mode, kernel: MB::Sound::Unison::Detune::RubyKernel)
+        expect(copy_freqs(a, buffers: 5, buffer: 100)).to eq(copy_freqs(b, buffers: 5, buffer: 100))
+      end
+    end
+
+    it 'keeps derived pitches on the detune' do
+      seen = []
+      node = 110.hz.unison(3, detune: 0.2.constant, layout: :even, detune_mode: :exact) { |p| seen << p.transpose(12); p.sine.fm(seen.last.sine.at(100)) }
+      expect(seen).to all(be_a(MB::Sound::Unison::CopyPitch))
+      expect(render(node, buffers: 2).abs.max).to be > 0.5
+      up = seen[2].freq.sample(480)
+      expect(up.cast_to(Numo::DFloat)).to be_within(1e-3).of(220 * 2 ** (0.2 / 12))
+    end
+
+    it 'has stereo spread with a detune node' do
+      l, r = render(110.hz.unison(5, detune: 0.2.hz.lfo.at(0..0.3), spread: 1), buffers: 2)
+      expect(l).not_to eq(r)
+    end
+
+    it 'rejects nodes in a detune Array, and unknown modes' do
+      expect { 110.hz.unison(detune: [0.1.constant, 0, 0.1]) }.to raise_error(ArgumentError, /fixed offsets only/)
+      expect { 110.hz.unison(detune: 0.1.constant, detune_mode: :fast) }.to raise_error(ArgumentError, /detune mode/)
+      expect { 110.hz.unison(detune: 0.1, detune_mode: :fast) }.to raise_error(ArgumentError, /detune mode/)
+    end
+  end
+
   describe 'in Synth lanes' do
     let(:ev) { MB::Sound::MIDI::Event }
     let(:events) { [ev.note_on(48, 100), ev.note_on(55, 100, time: 0.05r), ev.note_off(48, time: 0.1r), ev.note_on(52, 100, time: 0.12r)] }
@@ -298,6 +459,30 @@ RSpec.describe(MB::Sound::Unison, :aggregate_failures) do
 
       fixed = synth(seed: 4, unison_seed: 3).graph.select { |n| n.is_a?(MB::Sound::GraphNode::ChannelMixer::Unison) }.map(&:offsets)
       expect(fixed.uniq.length).to eq(1)
+    end
+
+    it 'takes a detune node from the voice, keeping key sync' do
+      src = MIDIListSource.new([ev.cc(1, 0, time: 0r), ev.note_on(57, 100, time: 0r), ev.cc(1, 1.0, time: 0.05r)], [ev.cc(99, 0, time: 1000r)])
+      tones = []
+      allow(MB::Sound::Unison).to receive(:apply_phase).and_wrap_original { |m, t, ph| tones << t; m.call(t, ph) }
+      s = MB::Sound::Synth.new(src, voices: 1, spares: 0) { |v| v.hz.unison(5, detune: v.mod * 0.5, layout: :even) * v.gate }
+      expect(tones.length).to eq(5)
+      expect(tones).to all(be_a(MB::Sound::Notes::KeyedTone))
+      expect(tones).to all(be_key_sync)
+
+      det = s.graph.find { |n| n.is_a?(MB::Sound::Unison::Detune) }
+      out = render_synth(s)
+      expect(out.abs.max).to be > 0.1
+
+      # The wheel went from 0 to 1 at 0.05 s: the outer copies end 50 cents
+      # from A3
+      expect(det.outputs.map(&:value)).to match([
+        be_within(1e-3).of(220 * 2 ** (-0.5 / 12)),
+        be_within(0.01).of(220 * Math.cosh(0.5 * Math.log(2) / 12) - 220 * Math.sinh(0.5 * Math.log(2) / 12) / 2),
+        be_within(1e-3).of(220 * Math.cosh(0.5 * Math.log(2) / 12)),
+        be_within(0.01).of(220 * Math.cosh(0.5 * Math.log(2) / 12) + 220 * Math.sinh(0.5 * Math.log(2) / 12) / 2),
+        be_within(1e-3).of(220 * 2 ** (0.5 / 12)),
+      ])
     end
 
     it 'restarts every copy at the same phase on each note with a fixed phase' do

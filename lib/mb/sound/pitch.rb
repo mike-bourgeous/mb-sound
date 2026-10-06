@@ -95,7 +95,24 @@ module MB
       #           or the length of a +detune:+ Array).
       # +detune:+ - How far the outermost copies are from the pitch, either
       #             side: an Interval (default `12.cents`), or semitones.  An
-      #             Array gives each copy's offset instead.
+      #             Array gives each copy's offset instead (fixed values
+      #             only).  A graph node of semitones (e.g. `v.mod * 0.3`,
+      #             or `0.2.hz.lfo.at(5..30) / 100` for 5 to 30 cents)
+      #             changes it while playing: each copy keeps its layout
+      #             position, a fixed fraction from -1 to 1 of the detune,
+      #             and the copies are Unison::CopyPitches (apply glide,
+      #             bend range, and vibrato to the pitch before #unison).
+      # +detune_mode:+ - How copies follow a +detune:+ node (see
+      #                  Unison::Detune): :interp (default) computes the
+      #                  outermost ratio r = 2 ** (detune / 12) exactly every
+      #                  16 samples, ramps it linearly in between, and spaces
+      #                  the copies linearly in Hz from f / r to f × r, so
+      #                  inner copies are slightly sharp (the middle one by
+      #                  0.18 cents at 25 cents of detune, 0.72 at 50, 2.9 at
+      #                  100; inaudible next to the detune itself) for about
+      #                  half the cost of :exact, which computes every copy
+      #                  at f × 2 ** (fraction × detune / 12) every sample.
+      #                  Fixed detunes are always exact.
       # +layout:+ - :random (default) for uneven spacing within the detune,
       #             so the beats between copies don't form a regular pattern
       #             (less flanging; see Unison.offsets), or :even.  The random
@@ -133,8 +150,10 @@ module MB
       #     play 220.hz.unison(7, detune: 20.cents, spread: 0.8).filter(:lowpass, cutoff: 2000)
       #     play 110.hz.unison(5, layout: :even, phase: 0)                      # flanging, hard attack
       #     midi.synth(voices: 4) { |v| v.hz.unison(5, detune: 15.cents, spread: 1) * v.amp_env }
-      def unison(count = nil, detune: 12.cents, layout: :random, phase: :random, spread: 0, normalize: :power, seed: nil, &block)
-        Unison.build(self, count, detune: detune, layout: layout, phase: phase, spread: spread, normalize: normalize, seed: seed, &block)
+      #     midi.synth(voices: 4) { |v| v.hz.unison(7, detune: v.mod * 0.5) * v.amp_env }  # mod wheel: 0-50 cents
+      #     play 110.hz.unison(7, detune: 0.2.hz.lfo.at(0..50) / 100, detune_mode: :exact)
+      def unison(count = nil, detune: 12.cents, layout: :random, phase: :random, spread: 0, normalize: :power, seed: nil, detune_mode: :interp, &block)
+        Unison.build(self, count, detune: detune, layout: layout, phase: phase, spread: spread, normalize: normalize, seed: seed, detune_mode: detune_mode, &block)
       end
 
       # The phase setting for oscillators made from a unison copy (see

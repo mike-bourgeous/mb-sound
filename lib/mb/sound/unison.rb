@@ -96,6 +96,14 @@ module MB
         slots
       end
 
+      # Returns the layout positions of +count+ copies for a detune that
+      # changes (a graph node): fractions from -1 to 1 of the detune, from
+      # the same layouts as .offsets (Unison.offsets(count, 1)).  Used by
+      # Unison::Detune.
+      def self.fractions(count, layout: :random, rng: nil)
+        offsets(count, 1, layout: layout, rng: rng).map { |o| o.clamp(-1.0, 1.0) }
+      end
+
       # Gives +tone+ the unison starting +phase+ (see Pitch#unison):
       # :random calls Tone#rnd, a number (radians) Tone#with_phase, and
       # :reset leaves the tone as it is.  Returns the tone.
@@ -119,18 +127,33 @@ module MB
       # made from it get the +phase+ setting) and the copy's index, and
       # returns the copies mixed by a GraphNode::ChannelMixer::Unison (one
       # node for mono, a Channels bundle for stereo).
-      def self.build(pitch, count = nil, detune:, layout:, phase:, spread:, normalize:, seed:)
+      def self.build(pitch, count = nil, detune:, layout:, phase:, spread:, normalize:, seed:, detune_mode: :interp)
         count ||= detune.is_a?(Array) ? detune.length : DEFAULT_COUNT
         check_phase(phase)
         unless spread.respond_to?(:sample) || (spread.is_a?(Numeric) && (0..1).cover?(spread))
           raise ArgumentError, "Unison spread must be 0..1 or a graph node (got #{spread.inspect})"
         end
+        unless Detune::MODES.include?(detune_mode)
+          raise ArgumentError, "Unknown detune mode #{detune_mode.inspect} (use #{Detune::MODES.map(&:inspect).join(' or ')})"
+        end
+        if detune.is_a?(Array) && detune.any? { |d| d.respond_to?(:sample) }
+          raise ArgumentError, 'A unison detune Array takes fixed offsets only; for a changing detune give one node (with a layout:) instead'
+        end
 
         rng = Random.new(seed.nil? ? MB::Sound.next_seed : Integer(seed))
-        offsets = self.offsets(count, detune, layout: layout, rng: rng)
+        detune_node = nil
 
-        copies = offsets.each_with_index.map { |o, i|
-          p = pitch.transpose(o)
+        if detune.respond_to?(:sample) && !detune.is_a?(Array)
+          # A changing detune: fixed layout positions scaled by the node
+          offsets = fractions(count, layout: layout, rng: rng)
+          detune_node = Detune.new(pitch.oscillator_frequency, detune, fractions: offsets, mode: detune_mode, sample_rate: pitch.sample_rate)
+          pitches = detune_node.outputs.map { |o| CopyPitch.new(pitch, o) }
+        else
+          offsets = self.offsets(count, detune, layout: layout, rng: rng)
+          pitches = offsets.map { |o| pitch.transpose(o) }
+        end
+
+        copies = pitches.each_with_index.map { |p, i|
           p.unison_phase = phase
           node = block_given? ? yield(p, i) : p.saw
           node = node.signal if node.is_a?(Pitch)
@@ -146,7 +169,7 @@ module MB
           spread: stereo ? spread : 0,
           stereo: stereo,
           normalize: normalize,
-          offsets: offsets,
+          offsets: detune_node ? nil : offsets,
           sample_rate: pitch.sample_rate
         )
         stereo ? GraphNode::Channels.new(mixer.outputs) : mixer.outputs[0]
@@ -154,3 +177,6 @@ module MB
     end
   end
 end
+
+require_relative 'unison/detune'
+require_relative 'unison/copy_pitch'
