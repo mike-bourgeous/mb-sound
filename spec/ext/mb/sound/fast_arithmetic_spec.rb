@@ -59,30 +59,70 @@ RSpec.describe(MB::Sound::FastArithmetic) do
           Array.new(4) { |i| make_input(input_classes[i % input_classes.length], length, length * 10 + i) }
         }
 
-        it 'multiplies exactly like Numo' do
-          constants.each do |c|
-            (0..4).each do |n|
-              sampled = inputs.first(n).map { |v| [v, nil] }
-              expected = numo_product(out_class.zeros(length), c, sampled)
-              out = out_class.zeros(length)
-              result = MB::Sound::FastArithmetic.product(out, c, sampled)
-              expect(result).to equal(out)
-              expect(out.to_binary).to eq(expected.to_binary), "constant #{c}, #{n} inputs"
-            end
-          end
+        def complex_class?(c)
+          c == Numo::SComplex || c == Numo::DComplex
         end
 
-        it 'mixes exactly like Numo' do
+        # Products of two truly complex factors are left to Numo (see
+        # fast_arithmetic.c): a complex constant or input followed by
+        # another complex input
+        def declined_product?(out_class, constant, sampled)
+          return false unless complex_class?(out_class)
+          factors = sampled.count { |v, _| complex_class?(v.class) }
+          factors += 1 if constant.is_a?(Complex) && constant.imag != 0 && factors > 0
+          factors > 1
+        end
+
+        # A complex input times a gain with an imaginary part
+        def declined_mix?(out_class, sampled)
+          complex_class?(out_class) && sampled.any? { |v, g| complex_class?(v.class) && g.is_a?(Complex) && g.imag != 0 }
+        end
+
+        it 'multiplies exactly like Numo, leaving complex by complex products to Numo' do
+          computed = 0
           constants.each do |c|
             (0..4).each do |n|
-              sampled = inputs.first(n).map.with_index { |v, i| [v, gains[(i + n) % gains.length]] }
-              expected = numo_mix(out_class.zeros(length), out_class.zeros(length), c, sampled)
-              out = out_class.zeros(length)
-              result = MB::Sound::FastArithmetic.mix(out, c, sampled)
-              expect(result).to equal(out)
-              expect(out.to_binary).to eq(expected.to_binary), "constant #{c}, gains #{sampled.map(&:last)}"
+              [inputs.first(n), inputs.select { |v| v.class == input_classes.last }.first(n)].each do |list|
+                sampled = list.map { |v| [v, nil] }
+                expected = numo_product(out_class.zeros(length), c, sampled)
+                out = out_class.zeros(length)
+                result = MB::Sound::FastArithmetic.product(out, c, sampled)
+
+                if declined_product?(out_class, c, sampled)
+                  expect(result).to be_nil
+                  expect(out).to eq(out_class.zeros(length))
+                else
+                  computed += 1
+                  expect(result).to equal(out)
+                  expect(out.to_binary).to eq(expected.to_binary), "constant #{c}, #{n} inputs"
+                end
+              end
             end
           end
+          expect(computed).to be >= constants.length * 2
+        end
+
+        it 'mixes exactly like Numo, leaving complex inputs with gains to Numo' do
+          computed = 0
+          constants.each do |c|
+            (0..4).each do |n|
+              [0, 1, 2].each do |offset|
+                sampled = inputs.first(n).map.with_index { |v, i| [v, gains[(i + n + offset) % gains.length]] }
+                expected = numo_mix(out_class.zeros(length), out_class.zeros(length), c, sampled)
+                out = out_class.zeros(length)
+                result = MB::Sound::FastArithmetic.mix(out, c, sampled)
+
+                if declined_mix?(out_class, sampled)
+                  expect(result).to be_nil
+                else
+                  computed += 1
+                  expect(result).to equal(out)
+                  expect(out.to_binary).to eq(expected.to_binary), "constant #{c}, gains #{sampled.map(&:last)}"
+                end
+              end
+            end
+          end
+          expect(computed).to be > constants.length * 3
         end
       end
     end
@@ -159,6 +199,28 @@ RSpec.describe(MB::Sound::FastArithmetic) do
     it 'for a complex gain with a real output (mix only)' do
       expect(MB::Sound::FastArithmetic.mix(out, 1, [[Numo::SFloat.ones(4), Complex(0, 1)]])).to be_nil
       expect(out).to eq(Numo::SFloat.zeros(4))
+    end
+  end
+
+  describe 'complex products (FMA safety)' do
+    let(:c1) { Numo::SComplex[1 + 2i, 3 - 1i] }
+    let(:c2) { Numo::SComplex[0.5 - 2i, -1 + 1i] }
+    let(:r) { Numo::SFloat[2, -3] }
+
+    it 'computes one complex factor among real ones' do
+      out = Numo::SComplex.zeros(2)
+      expect(MB::Sound::FastArithmetic.product(out, 0.5, [[r, nil], [c1, nil], [r, nil]])).to equal(out)
+      expect(out.to_binary).to eq(numo_product(Numo::SComplex.zeros(2), 0.5, [[r, nil], [c1, nil], [r, nil]]).to_binary)
+      expect(MB::Sound::FastArithmetic.product(out, 2i, [[r, nil], [r, nil]])).to equal(out)
+      expect(MB::Sound::FastArithmetic.mix(out, 1i, [[c1, 0.25], [r, 2 - 1i], [c2, 1]])).to equal(out)
+    end
+
+    it 'leaves two truly complex factors to Numo' do
+      out = Numo::SComplex.zeros(2)
+      expect(MB::Sound::FastArithmetic.product(out, 1, [[c1, nil], [c2, nil]])).to be_nil
+      expect(MB::Sound::FastArithmetic.product(out, 1 + 1i, [[c1, nil]])).to be_nil
+      expect(MB::Sound::FastArithmetic.mix(out, 0, [[c1, 0.5 + 0.5i]])).to be_nil
+      expect(out).to eq(Numo::SComplex.zeros(2))
     end
   end
 

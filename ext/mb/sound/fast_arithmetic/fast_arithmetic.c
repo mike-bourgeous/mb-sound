@@ -8,9 +8,9 @@
  * source of garbage.  These kernels do the same arithmetic in one call
  * without allocating.
  *
- * The Ruby mirror is the Numo code in Multiplier#sample_numo and
- * Mixer#sample_numo (the fast paths' former bodies), and specs compare both
- * for exactly equal values, so the operations are Numo's, in Numo's order:
+ * The Ruby mirror is the Numo code of the Multiplier and Mixer fast paths
+ * (their fallback when a kernel returns nil), and specs compare both for
+ * exactly equal values, so the operations are Numo's, in Numo's order:
  * the output is filled with the constant (cast to the buffer type), then
  * each input is multiplied in (Multiplier) or added (Mixer; an input whose
  * gain isn't == 1 is first multiplied by the gain cast to the buffer type).
@@ -18,6 +18,19 @@
  * full complex product, as Numo's cast does.  Complex products are written
  * out (not C99's complex *, which adds Annex G infinity handling), and the
  * extension is built with -ffp-contract=off so nothing is fused.
+ *
+ * Numo itself may be built with FMA contraction (clang's default on arm64
+ * Macs fuses a * b - c * d), which no flag here can match, so the kernels
+ * only compute complex products in which one factor has an imaginary part
+ * of exactly zero: a real input promoted to (x, 0), a real gain, or a
+ * running product that is still real (a real constant times real inputs,
+ * whose imaginary part stays +-0).  Then one term of each part is y * 0, an
+ * exact zero, and fused and unfused evaluation give the same value
+ * (re = a*x - b*0 is a*x either way).  Products of two truly complex
+ * factors (a complex input after a complex constant or another complex
+ * input, or a complex input times a complex gain) return nil for Numo.  The
+ * only difference left possible under contraction is the sign of a zero
+ * from a product that underflows (below ~1e-45 in float).
  *
  * .copy copies a buffer into another (for nodes that work in place on a
  * copy of a frozen input).
@@ -153,8 +166,22 @@ static VALUE ruby_product(VALUE self, VALUE out, VALUE constant, VALUE sampled)
 		return Qnil;
 	}
 
-	char *outp = nary_get_pointer_for_write(out) + nary_get_offset(out);
 	long n = RARRAY_LEN(sampled);
+	if (ot == MB_ARITH_SC || ot == MB_ARITH_DC) {
+		// At most one truly complex factor (see the file comment)
+		_Bool complex_so_far = ci != 0;
+		for (long k = 0; k < n; k++) {
+			enum mb_arith_type it = arith_type(RARRAY_AREF(RARRAY_AREF(sampled, k), 0));
+			if (it == MB_ARITH_SC || it == MB_ARITH_DC) {
+				if (complex_so_far) {
+					return Qnil;
+				}
+				complex_so_far = 1;
+			}
+		}
+	}
+
+	char *outp = nary_get_pointer_for_write(out) + nary_get_offset(out);
 
 	switch (ot) {
 		case MB_ARITH_SF:
@@ -277,6 +304,17 @@ static VALUE ruby_mix(VALUE self, VALUE out, VALUE constant, VALUE sampled)
 		VALUE gain = RARRAY_AREF(pair, 1);
 		if (!rb_obj_is_kind_of(gain, rb_cNumeric) || (real && RB_TYPE_P(gain, T_COMPLEX))) {
 			return Qnil;
+		}
+
+		// A complex input times a gain with an imaginary part is a product
+		// of two truly complex factors (see the file comment)
+		enum mb_arith_type it = arith_type(RARRAY_AREF(pair, 0));
+		if ((it == MB_ARITH_SC || it == MB_ARITH_DC) && RB_TYPE_P(gain, T_COMPLEX) && !RTEST(rb_equal(gain, one))) {
+			double gr, gi;
+			num_parts(gain, &gr, &gi);
+			if (gi != 0) {
+				return Qnil;
+			}
 		}
 	}
 
