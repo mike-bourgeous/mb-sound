@@ -354,6 +354,68 @@ RSpec.describe(MB::Sound::Wavetable, aggregate_failures: true) do
       t2 = w.from_file(name, align: false)
       expect(t2.frames).to all_be_within(1e-4).of_array(t.frames)
     end
+
+    it 'saves the settings and derived values, which load as defaults' do
+      name = tmp_path('saved_settings.flac')
+      t = w.from_harmonics(w::Library.square(100), mips: :half_octave, interpolation: :cubic, taper: :sigma, name: 'sq')
+      t.save(name)
+
+      info = {}
+      MB::Sound.read(name, metadata_out: info)
+      tags = w.table_metadata(info)
+      t2 = w.from_file(name)
+      expect(t2.name).to eq('sq')
+      expect(t2.spacing).to eq(Math.sqrt(2))
+      expect(t2.interpolation).to eq(:cubic)
+      expect(t2.taper).to eq(:sigma)
+      expect(t2.levels(:cubic)[2].data).to all_be_within(1e-5).of_array(t.levels(:cubic)[2].data)
+      expect(t.metadata).to include(mode: 'cycle', frames: 1, period: 2048, aligned: 'false', taper: 'sigma', harmonics: 100)
+      expect(tags).to include(period: 2048, frames: 1, harmonics: 100, spacing: Math.sqrt(2), interpolation: 'cubic', taper: 'sigma', name: 'sq')
+    end
+
+    it 'saves peaks above 1 with a scale' do
+      name = tmp_path('saved_scaled.flac')
+      t = w.from_harmonics(w::Library.saw, mips: false)
+      expect(t.frames.abs.max).to be > 1.1
+      t.save(name)
+      t2 = w.from_file(name, mips: false)
+      expect(t2.frames).to all_be_within(1e-5).of_array(t.frames)
+    end
+
+    it 'marks aligned frames so they are not aligned again' do
+      name = tmp_path('saved_aligned.flac')
+      cycle = Numo::SFloat.new(64).seq.map { |v| Math.sin(2 * Math::PI * v / 64) }
+      t = w.from_samples(Numo::SFloat[cycle.to_a, MB::M.rol(cycle, 9).to_a])
+      expect(t).to be_aligned
+      t.save(name)
+      t2 = w.from_file(name)
+      expect(t2).to be_aligned
+      expect(t2.metadata[:aligned]).to eq('true')
+      expect(t2.frames).to all_be_within(1e-5).of_array(t.frames)
+    end
+
+    it 'saves where a sliced table came from' do
+      name = tmp_path('saved_sliced.flac')
+      allow($stderr).to receive(:puts)
+      t = w.from_file('sounds/piano_120hz_b2.flac', slices: 4)
+      expect(t.source_info[:frequency]).to be_within(2).of(120)
+      t.save(name)
+      t2 = w.from_file(name)
+      expect(t2.source_info[:frequency]).to be_within(1e-6).of(t.source_info[:frequency])
+      expect(t2.source_info[:note_name]).to eq(t.source_info[:note_name])
+    end
+
+    it 'saves sample mode tables with their root and loop' do
+      name = tmp_path('saved_sample.flac')
+      sound = Numo::SFloat.new(2000).rand(-1, 1)
+      t = w.from_samples(sound, mode: :sample, root: 220, loop: 500...1500)
+      t.save(name)
+      t2 = w.from_file(name)
+      expect(t2.mode).to eq(:sample)
+      expect(t2.root).to eq(220)
+      expect(t2.loop).to eq(500...1500)
+      expect(t2.frames).to all_be_within(1e-5).of_array(sound)
+    end
   end
 
   describe '#to_s' do

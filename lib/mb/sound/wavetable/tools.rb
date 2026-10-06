@@ -9,6 +9,9 @@ module MB
       #
       # See bin/make_wavetable.rb.
       module Tools
+        # The prefix of a saved table's metadata tags (see .save_frames).
+        METADATA_PREFIX = 'mb_sound_wavetable_'
+
         # Loads an existing wavetable from the given +filename+, using the
         # mb_sound_wavetable_period metadata tag to slice the file.
         #
@@ -16,7 +19,11 @@ module MB
         # audio is passed into Wavetable.slice_frames to create a wavetable
         # from a normal sound file.  The +:slices+ parameter controls how many
         # slices to ask slice_frames to provide.
-        def load_frames(filename, slices: 10, ratio: 1.0)
+        #
+        # +:metadata_out+, if a Hash, receives the table's saved metadata
+        # (see .save_frames, without the tag prefix) or the slicing details
+        # (see .slice_frames).
+        def load_frames(filename, slices: 10, ratio: 1.0, metadata_out: nil)
           # Using weighted mixing for now; TODO: find a safe way to combine
           # channels with minimal cancellation of reverb or introduction of high
           # frequency oscillation when normalizing
@@ -28,24 +35,58 @@ module MB
           raise 'Wavetable period must be greater than 1' if period.is_a?(Integer) && period <= 1
 
           if period
+            info = table_metadata(metadata)
+            metadata_out&.merge!(info)
+            data = data * info[:scale].to_f if info[:scale]
             count = data.length / period
             data[0...(count * period)].reshape(count, period)
           else
-            slice_frames(data, slices: slices, ratio: ratio)
+            slice_frames(data, slices: slices, ratio: ratio, metadata_out: metadata_out)
           end
+        end
+
+        # The wavetable entries of a file's +metadata+ (tags starting with
+        # METADATA_PREFIX, without it).
+        def table_metadata(metadata)
+          metadata.each_with_object({}) { |(k, v), h|
+            h[k.to_s.delete_prefix(METADATA_PREFIX).to_sym] = v if k.to_s.start_with?(METADATA_PREFIX)
+          }
         end
 
         # Saves 2D NArray +data+ containing a wavetable to the given sound
         # +filename+, using the mb_sound_wavetable_period tag to record the
         # correct shape of the wavetable.  The rows of the NArray are the entries
         # in the table, and the columns are the audio samples over time.
-        def save_frames(filename, data, sample_rate: 48000, overwrite: false)
+        #
+        # +:metadata+ adds more tags (keys without METADATA_PREFIX; e.g.
+        # Wavetable#metadata, or the slicing details from .slice_frames such
+        # as the detected frequency and note); the period and frame count
+        # are always written.
+        def save_frames(filename, data, sample_rate: 48000, overwrite: false, metadata: {})
           raise 'Data must be a 2D Numo::NArray' unless data.is_a?(Numo::NArray) && data.ndim == 2
 
-          period = data.shape[1]
-          total = data.length
-          # TODO: Add all metadata to the file including root note, etc.
-          MB::Sound.write(filename, data.reshape(total), sample_rate: sample_rate, overwrite: overwrite, metadata: { mb_sound_wavetable_period: period })
+          rows, period = data.shape
+          data, scale = fit_for_file(data)
+          tags = metadata_tags(metadata.merge(period: period, frames: rows, scale: scale))
+          MB::Sound.write(filename, data.reshape(data.length), sample_rate: sample_rate, overwrite: overwrite, metadata: tags)
+        end
+
+        # [+data+ scaled to fit a sound file (peaks at most 1), the scale
+        # tag that undoes it (nil if unscaled)].  Tables may peak above 1
+        # (e.g. the Gibbs overshoot of an exact saw series).
+        def fit_for_file(data)
+          peak = data.abs.max
+          return [data, nil] unless peak > 1
+
+          [data / peak, peak.to_f]
+        end
+
+        # File tags for +metadata+ (prefixed keys; values other than numbers
+        # and strings as strings).
+        def metadata_tags(metadata)
+          metadata.compact.each_with_object({}) { |(k, v), h|
+            h[:"#{METADATA_PREFIX}#{k}"] = v.is_a?(Numeric) || v.is_a?(String) ? v : v.to_s
+          }
         end
 
         # Slices the given 1D NArray to return a wavetable as a 2D NArray.

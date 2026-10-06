@@ -52,7 +52,7 @@ MB::Sound.script(
 
   MB::U.headline("Writing to #{outname}")
   MB::U.table(metadata.merge(p.to_h).to_a)
-  MB::Sound::Wavetable.save_frames(outname, result, overwrite: p.force ? true : :prompt)
+  MB::Sound::Wavetable.save_frames(outname, result, overwrite: p.force ? true : :prompt, metadata: metadata.merge(blur: p.blur, normalized: true))
 
   MB::U.headline "Code to load this wavetable in bin/sound.rb:", color: 36
   puts "\n#{MB::U.syntax("table = Wavetable.from_file(#{outname.inspect})")}"

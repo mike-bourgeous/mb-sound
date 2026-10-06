@@ -160,8 +160,9 @@ module MB
         # +align+ lines frames up in time (see the class description) and
         # +normalize+ removes DC and scales each frame to a peak of 1.  In
         # sample mode, +data+ is the sound (1D; +root+, +loop+, and
-        # +sample_rate+ apply).
-        def from_samples(data, mode: :cycle, complex: false, mips: :octave, interpolation: nil, align: true, normalize: false, root: nil, loop: nil, sample_rate: 48000, name: nil)
+        # +sample_rate+ apply).  +harmonics+ limits a cycle table's
+        # harmonics (default: all that fit the frame size).
+        def from_samples(data, mode: :cycle, complex: false, mips: :octave, interpolation: nil, align: true, aligned: false, normalize: false, taper: nil, harmonics: nil, root: nil, loop: nil, sample_rate: 48000, name: nil, source_info: nil)
           data = to_narray(data)
 
           case mode
@@ -171,14 +172,14 @@ module MB
 
             data = data.is_a?(Numo::SComplex) || data.is_a?(Numo::DComplex) ? Numo::SComplex.cast(data) : Numo::SFloat.cast(data)
             data = Wavetable.normalize(data.dup) if normalize
-            new(frames: data, complex: complex, mips: mips, interpolation: interpolation, align: align, name: name)
+            new(frames: data, complex: complex, mips: mips, interpolation: interpolation, align: align, aligned: aligned, taper: taper, harmonics: harmonics, name: name, source_info: source_info)
 
           when :sample
             raise ArgumentError, 'A sample must be a 1D NArray' unless data.ndim == 1
             raise ArgumentError, 'A sample needs a root: (Hz, a Pitch, or a Note)' if root.nil?
 
             new(mode: :sample, data: data, complex: complex, mips: mips, interpolation: interpolation,
-              root: root, loop: loop, sample_rate: sample_rate, name: name)
+              root: root, loop: loop, sample_rate: sample_rate, name: name, source_info: source_info)
 
           else
             raise ArgumentError, "Unknown wavetable mode #{mode.inspect} (#{MODES.join(', ')})"
@@ -204,25 +205,46 @@ module MB
           from_samples(Numo::NArray.concatenate(rows.map { |r| Numo::DFloat.cast(r).reshape(1, size) }), **options)
         end
 
-        # A table from a sound file.  In cycle mode, a file saved by
-        # .save_frames (or bin/make_wavetable.rb) loads its frames, and any
+        # A table from a sound file.  In cycle mode, a file saved by #save,
+        # .save_frames, or bin/make_wavetable.rb loads its frames, and any
         # other sound is sliced into +slices+ cycles (see .load_frames).  In
         # sample mode, the sound (mixed to mono) with +root+ (estimated
         # from the sound if nil) and +loop+.  Other options as for
         # .from_samples.
-        def from_file(path, mode: :cycle, slices: 10, ratio: 1.0, root: nil, loop: nil, **options)
+        #
+        # Settings saved by #save (see #metadata) are the defaults: the mode,
+        # levels, taper, interpolation, name, root, and loop; frames saved
+        # aligned aren't aligned again.
+        def from_file(path, mode: nil, slices: 10, ratio: 1.0, root: nil, loop: nil, **options)
           path = path.path if path.respond_to?(:path)
-          options[:name] ||= File.basename(path.to_s)
+
+          info = {}
+          channels = MB::Sound.read(path.to_s, metadata_out: info)
+          info = table_metadata(info)
+          mode ||= info[:mode]&.to_sym || :cycle
+          options[:name] ||= info[:name] || File.basename(path.to_s)
+          options[:mips] = parse_saved_spacing(info[:spacing]) if !options.include?(:mips) && info.include?(:spacing)
+          options[:taper] = info[:taper].to_sym if !options.include?(:taper) && info[:taper] && info[:taper] != ''
+          options[:interpolation] ||= info[:interpolation]&.to_sym
+          options[:harmonics] ||= info[:harmonics].to_i if mode == :cycle && info[:harmonics]
+          options.delete(:interpolation) if options[:interpolation].nil?
 
           case mode
           when :cycle
-            from_samples(load_frames(path.to_s, slices: slices, ratio: ratio), **options)
+            source = {}
+            frames = load_frames(path.to_s, slices: slices, ratio: ratio, metadata_out: source)
+            if source[:aligned].to_s == 'true' && !options.include?(:align)
+              options[:align] = false
+              options[:aligned] = true
+            end
+            from_samples(frames, source_info: source, **options)
 
           when :sample
-            channels = MB::Sound.read(path.to_s)
             data = channels.sum / channels.length
-            root ||= MB::Sound.freq_estimate(data, sample_rate: 48000)
-            from_samples(data, mode: :sample, root: root, loop: loop, sample_rate: 48000, **options)
+            data = data * info[:scale].to_f if info[:scale]
+            root ||= info[:root]&.to_f || MB::Sound.freq_estimate(data, sample_rate: 48000)
+            loop ||= parse_saved_loop(info[:loop])
+            from_samples(data, mode: :sample, root: root, loop: loop, sample_rate: 48000, source_info: info, **options)
 
           else
             raise ArgumentError, "Unknown wavetable mode #{mode.inspect} (#{MODES.join(', ')})"
@@ -248,6 +270,24 @@ module MB
 
             raise ArgumentError, "Can't make a wavetable from #{source.inspect}"
           end
+        end
+
+        # Level spacing from a saved tag (see #metadata).
+        def parse_saved_spacing(v)
+          case v
+          when nil, '', 'none' then false
+          when Numeric then v.to_f
+          when /\A[\d.]+\z/ then v.to_f
+          else v.to_s.split(',').map(&:to_i)
+          end
+        end
+
+        # A loop Range from a saved "begin...end" tag.
+        def parse_saved_loop(v)
+          return nil if v.nil? || v == ''
+
+          a, b = v.to_s.split('...').map(&:to_i)
+          a...b
         end
 
         # Like .[], but passing a KeyMap through (for Tone#wavetable).
@@ -336,17 +376,30 @@ module MB
       # The harmonic taper (:sigma) or nil (see .from_harmonics).
       attr_reader :taper
 
+      # True if the frames were aligned in time (see .from_samples).
+      def aligned?
+        @aligned
+      end
+
+      # What the table was made from, as saved by #save and loaded by
+      # .from_file (e.g. the detected frequency and note of a sliced sound;
+      # see .slice_frames).
+      attr_reader :source_info
+
       # A name for displays (the library name or file name), or nil.
       attr_accessor :name
 
       # Use the class methods (.from_harmonics, .from_samples, ...).
-      def initialize(mode: :cycle, spectra: nil, frames: nil, data: nil, size: nil, complex: false, mips: :octave, interpolation: nil, align: false, taper: nil, root: nil, loop: nil, sample_rate: 48000, name: nil)
+      def initialize(mode: :cycle, spectra: nil, frames: nil, data: nil, size: nil, complex: false, mips: :octave, interpolation: nil, align: false, aligned: false, taper: nil, harmonics: nil, root: nil, loop: nil, sample_rate: 48000, name: nil, source_info: nil)
         raise ArgumentError, "Unknown wavetable mode #{mode.inspect} (#{MODES.join(', ')})" unless MODES.include?(mode)
 
         @mode = mode
         @complex = !!complex
         @spacing = parse_spacing(mips)
         @taper = taper
+        @aligned = !!aligned
+        @harmonic_limit = harmonics
+        @source_info = (source_info || {}).reject { |k, _| SAVED_KEYS.include?(k) }.freeze
         Builder.taper_gains(taper, 1) if taper # checks it
         @name = name
         @kernel_specs = {}
@@ -569,13 +622,50 @@ module MB
 
       # Saves the frames (cycle mode) or the sound (sample mode) to
       # +filename+ (see .save_frames).
+      #
+      # Everything derived while making the table is saved as tags (see
+      # #metadata), so .from_file makes the same table again: frames saved
+      # aligned aren't aligned again, and a tapered table saves its exact
+      # series (the taper is applied per level when it loads).  Complex
+      # tables save their real parts.
       def save(filename, overwrite: false)
         if @mode == :cycle
-          frames = @complex ? @frames.real : @frames
-          Wavetable.save_frames(filename, frames, overwrite: overwrite)
+          frames = @taper && @spectra ? Builder.synthesize(@spectra, @size, complex: @complex) : @frames
+          frames = frames.real if @complex
+          Wavetable.save_frames(filename, frames, overwrite: overwrite, metadata: metadata)
         else
-          MB::Sound.write(filename, @complex ? @data.real : @data, sample_rate: @sample_rate, overwrite: overwrite)
+          data, scale = Wavetable.fit_for_file(@complex ? @data.real : @data)
+          MB::Sound.write(filename, data, sample_rate: @sample_rate, overwrite: overwrite, metadata: Wavetable.metadata_tags(metadata.merge(scale: scale)))
         end
+      end
+
+      # Tags saved by #save that describe the table (others in #source_info
+      # are saved too).
+      SAVED_KEYS = [:mode, :name, :frames, :period, :size, :aligned, :spacing, :taper, :interpolation, :complex, :root, :loop, :sample_rate, :scale, :harmonics].freeze
+
+      # The table's settings and derived values, as saved by #save (with
+      # #source_info): mode, name, frame count, period (cycle mode samples
+      # per frame), whether the frames are aligned, level spacing, taper,
+      # interpolation, complex, harmonics (cycle mode), and in sample mode
+      # the root (Hz), loop
+      # ("begin...end" source samples), size, and sample rate.
+      def metadata
+        spacing = case @spacing
+                  when nil then 'none'
+                  when Array then @spacing.join(',')
+                  else @spacing
+                  end
+        m = @source_info.merge(
+          mode: @mode.to_s, name: @name, frames: @frame_count, aligned: @aligned.to_s, spacing: spacing,
+          taper: @taper&.to_s, interpolation: @interpolation.to_s, complex: @complex.to_s
+        )
+        if @mode == :cycle
+          m[:period] = @size
+          m[:harmonics] = harmonics
+        else
+          m.merge!(root: @root, loop: @loop && "#{@loop.begin}...#{@loop.end}", size: @size, sample_rate: @sample_rate)
+        end
+        m.compact
       end
 
       def to_s
@@ -616,9 +706,13 @@ module MB
           @frames = frames
           @frames = Numo::SComplex.cast(@frames) if @complex
           size = frames.shape[1]
-          spectra = Builder.spectra_from_frames(frames) if @spacing || align
-          spectra = Builder.align(spectra) if align && frames.shape[0] > 1
-          @frames = Builder.synthesize(spectra, size, complex: @complex) if align && frames.shape[0] > 1
+          spectra = Builder.spectra_from_frames(frames) if @spacing || align || @harmonic_limit
+          spectra = spectra[true, 0..@harmonic_limit] if @harmonic_limit && spectra.shape[1] - 1 > @harmonic_limit
+          if align && frames.shape[0] > 1
+            spectra = Builder.align(spectra)
+            @frames = Builder.synthesize(spectra, size, complex: @complex)
+            @aligned = true
+          end
         else
           @frames = Builder.synthesize(spectra, size, complex: @complex, taper: @taper)
         end
