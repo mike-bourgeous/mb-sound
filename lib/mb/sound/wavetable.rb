@@ -139,18 +139,20 @@ module MB
         # at 0), each an Array or 1D NArray, or an Array of them for several
         # frames (scanned in order).  Amplitudes are kept exactly (no
         # normalizing), so e.g. the Fourier series of a ramp plays at the
-        # same level as Tone#ramp, Gibbs overshoot included.  +size+ is the
+        # same level as Tone#ramp, Gibbs overshoot included (unless +taper+ is
+        # :sigma: each level's harmonics are scaled by Lanczos sigma factors,
+        # see Builder.taper_gains, so its peaks stay near 1).  +size+ is the
         # length of #frames (and caps the harmonics at size / 2 - 1).  See
         # the class description for +complex+, +mips+, +interpolation+;
         # +align+ lines up frames in time (off by default, since the phases
         # are given).
-        def from_harmonics(amplitudes, phases = nil, size: 2048, complex: false, mips: :octave, interpolation: nil, align: false, name: nil)
+        def from_harmonics(amplitudes, phases = nil, size: 2048, complex: false, mips: :octave, interpolation: nil, align: false, taper: nil, name: nil)
           spectra = Builder.spectra_from_harmonics(amplitudes, phases)
           max = (size - 1) / 2
           spectra = spectra[true, 0..max] if spectra.shape[1] - 1 > max
           spectra = Builder.align(spectra) if align && spectra.shape[0] > 1
 
-          new(spectra: spectra, size: size, complex: complex, mips: mips, interpolation: interpolation, name: name)
+          new(spectra: spectra, size: size, complex: complex, mips: mips, interpolation: interpolation, taper: taper, name: name)
         end
 
         # A table from samples.  In cycle mode (default), +data+ is one
@@ -331,16 +333,21 @@ module MB
       # see Builder.spectra_from_frames), or nil for unmipped tables.
       attr_reader :spectra
 
+      # The harmonic taper (:sigma) or nil (see .from_harmonics).
+      attr_reader :taper
+
       # A name for displays (the library name or file name), or nil.
       attr_accessor :name
 
       # Use the class methods (.from_harmonics, .from_samples, ...).
-      def initialize(mode: :cycle, spectra: nil, frames: nil, data: nil, size: nil, complex: false, mips: :octave, interpolation: nil, align: false, root: nil, loop: nil, sample_rate: 48000, name: nil)
+      def initialize(mode: :cycle, spectra: nil, frames: nil, data: nil, size: nil, complex: false, mips: :octave, interpolation: nil, align: false, taper: nil, root: nil, loop: nil, sample_rate: 48000, name: nil)
         raise ArgumentError, "Unknown wavetable mode #{mode.inspect} (#{MODES.join(', ')})" unless MODES.include?(mode)
 
         @mode = mode
         @complex = !!complex
         @spacing = parse_spacing(mips)
+        @taper = taper
+        Builder.taper_gains(taper, 1) if taper # checks it
         @name = name
         @kernel_specs = {}
         @interpolation = interpolation || (@spacing ? :optimal : :cubic)
@@ -613,7 +620,7 @@ module MB
           spectra = Builder.align(spectra) if align && frames.shape[0] > 1
           @frames = Builder.synthesize(spectra, size, complex: @complex) if align && frames.shape[0] > 1
         else
-          @frames = Builder.synthesize(spectra, size, complex: @complex)
+          @frames = Builder.synthesize(spectra, size, complex: @complex, taper: @taper)
         end
 
         @size = size
@@ -644,13 +651,13 @@ module MB
 
       def build_cycle_levels(emphasis)
         if @spacing
-          datas, counts, bandwidths = Builder.cycle_levels(@spectra, @spacing, @complex, emphasis)
+          datas, counts, bandwidths = Builder.cycle_levels(@spectra, @spacing, @complex, emphasis, @taper)
           levels = datas.each_with_index.map { |d, k| Level.new(d, counts[k], counts[k].to_f, bandwidths[k]) }
         else
           frames = @frames
           if emphasis
             spectra = @spectra || Builder.spectra_from_frames(@frames)
-            frames = Builder.synthesize(spectra, @size, complex: @complex, emphasis: emphasis)
+            frames = Builder.synthesize(spectra, @size, complex: @complex, emphasis: emphasis, taper: @taper)
           end
           levels = [Level.new(Builder.wrap_guard(frames), @size, @size.to_f, Float::INFINITY)]
         end

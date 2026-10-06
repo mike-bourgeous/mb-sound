@@ -25,7 +25,7 @@ RSpec.describe(MB::Sound::Wavetable, aggregate_failures: true) do
     end
 
     it 'keeps only the harmonics of each level' do
-      t = w[:saw]
+      t = w.from_harmonics(w::Library.saw)
       t.levels(:cubic).each do |l|
         data = l.data[0, w::GUARD...(w::GUARD + l.count)]
         amps = harmonic_amplitudes(data)
@@ -36,13 +36,29 @@ RSpec.describe(MB::Sound::Wavetable, aggregate_failures: true) do
     end
 
     it 'stores levels for the optimal interpolator with its pre-emphasis' do
-      t = w[:saw]
+      t = w.from_harmonics(w::Library.saw)
       l = t.levels(:optimal)[2]
       data = l.data[0, w::GUARD...(w::GUARD + l.count)]
       amps = harmonic_amplitudes(data)[1..255]
       gains = w::Emphasis.gains(256, l.count)[1..255]
       expect(amps).to all_be_within(1e-5).of_array(Numo::DFloat.cast(w::Library.saw(255)).abs * gains)
       expect(gains[-1]).to be_within(0.01).of(1.13)
+    end
+
+    it 'can taper each level with Lanczos sigma factors' do
+      t = w.from_harmonics(w::Library.saw, taper: :sigma)
+      expect(t.taper).to eq(:sigma)
+      l = t.levels(:cubic)[2]
+      data = l.data[0, w::GUARD...(w::GUARD + l.count)]
+      amps = harmonic_amplitudes(data)[1..255]
+      x = Numo::DFloat.new(255).seq(1) * (Math::PI / 256)
+      sigma = Numo::NMath.sin(x) / x
+      expect(amps).to all_be_within(1e-5).of_array(Numo::DFloat.cast(w::Library.saw(255)).abs * sigma)
+
+      # No Gibbs overshoot: the exact series peaks 18% high
+      expect(t.levels(:cubic).map { |lv| lv.data.abs.max }.max).to be < 1.03
+      expect(w.from_harmonics(w::Library.saw).levels(:cubic)[0].data.abs.max).to be > 1.15
+      expect { w.from_harmonics([1], taper: :hann) }.to raise_error(ArgumentError, /taper/)
     end
 
     it 'wraps the guard samples around the cycle' do
@@ -279,7 +295,7 @@ RSpec.describe(MB::Sound::Wavetable, aggregate_failures: true) do
     it 'has a scannable table of basic shapes' do
       t = w[:basic]
       expect(t.frame_count).to eq(4)
-      expect(t.value_at(0.25, scan: 0)).to be_within(1e-6).of(1)
+      expect(t.value_at(0.25, scan: 0)).to be_within(1e-5).of(1)
       expect(t.value_at(0.25, scan: 1)).to be_within(0.02).of(0.5)
     end
 

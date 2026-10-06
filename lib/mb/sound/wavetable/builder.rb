@@ -72,11 +72,14 @@ module MB
         # 1..+harmonics+ (default all) at +length+ samples (2D SFloat, or
         # SComplex if +complex+), with each harmonic boosted for the
         # interpolator +emphasis+ (:optimal or :sinc; nil for none; see
-        # Emphasis).
-        def synthesize(spectra, length, complex: false, harmonics: nil, emphasis: nil)
+        # Emphasis) and scaled by +taper+ (see .taper_gains).
+        def synthesize(spectra, length, complex: false, harmonics: nil, emphasis: nil, taper: nil)
           rows, cols = spectra.shape
           harmonics ||= cols - 1
           harmonics = [harmonics, cols - 1, complex ? length - 1 : (length - 1) / 2].min
+          if taper
+            spectra = spectra[true, 0..harmonics] * taper_gains(taper, harmonics).reshape(1, harmonics + 1)
+          end
           if emphasis
             spectra = spectra[true, 0..harmonics] * Emphasis.gains(harmonics + 1, length, emphasis).reshape(1, harmonics + 1)
           end
@@ -155,6 +158,22 @@ module MB
           out
         end
 
+        # Gains for harmonics 0..+harmonics+ (a DFloat) of a level that stops
+        # at +harmonics+: for +taper+ :sigma, Lanczos's sigma factors
+        # sinc(h / (harmonics + 1)), which smooth away the Gibbs overshoot of
+        # a truncated series (the waveform is averaged over the width of its
+        # top harmonic's period), so peaks stay near the unlimited shape's at
+        # every level.
+        def taper_gains(taper, harmonics)
+          raise ArgumentError, "Unknown taper #{taper.inspect} (:sigma or nil)" unless taper == :sigma
+
+          h = Numo::DFloat.new(harmonics + 1).seq
+          x = h * (Math::PI / (harmonics + 1))
+          g = Numo::NMath.sin(x) / x
+          g[0] = 1.0
+          g
+        end
+
         # The harmonic counts of the levels of a cycle table with +harmonics+
         # harmonics: +spacing+ is a ratio (> 1) between levels, or an Array of
         # counts.
@@ -198,7 +217,7 @@ module MB
 
         # Builds the cycle-mode levels: [datas, lengths, bandwidths] (see
         # .synthesize for +emphasis+).
-        def cycle_levels(spectra, spacing, complex, emphasis)
+        def cycle_levels(spectra, spacing, complex, emphasis, taper = nil)
           harmonics = spectra.shape[1] - 1
           raise ArgumentError, 'A band-limited table needs at least one harmonic' if harmonics < 1
 
@@ -207,7 +226,7 @@ module MB
           lengths = []
           counts.each do |h|
             len = level_length(h)
-            datas << wrap_guard(synthesize(spectra, len, complex: complex, harmonics: h, emphasis: emphasis))
+            datas << wrap_guard(synthesize(spectra, len, complex: complex, harmonics: h, emphasis: emphasis, taper: taper))
             lengths << len
           end
 

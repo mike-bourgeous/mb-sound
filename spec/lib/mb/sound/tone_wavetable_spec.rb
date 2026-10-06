@@ -125,13 +125,24 @@ RSpec.describe(MB::Sound::Tone, '#wavetable', aggregate_failures: true) do
       expect(t).to all_be_within(1e-4).of_array(expected)
     end
 
-    it 'plays a library saw with the Fourier amplitudes of a ramp up to the crossfade' do
+    it 'plays an exact saw series with the Fourier amplitudes of a ramp up to the crossfade' do
       # 100 Hz is between the 255- and 127-harmonic levels: harmonics up to
       # 127 at full level
-      data = Numo::DFloat.cast(100.hz.wavetable(:saw).sample(4800))
+      data = Numo::DFloat.cast(100.hz.wavetable(w.from_harmonics(w::Library.saw)).sample(4800))
       amps = MB::Sound.real_fft(data).abs
       fourier = Numo::DFloat.cast(w::Library.saw(127)).abs
       expect(amps[(1..127).map { |h| h * 10 }]).to all_be_within(1e-4).of_array(fourier)
+    end
+
+    it 'plays the library saw at the level of a PolyBLEP ramp' do
+      [55, 880].each do |f|
+        t = f.hz.wavetable(:saw)
+        r = f.hz.ramp
+        a = Numo::DFloat.cast(Numo::NArray.concatenate(Array.new(12) { t.sample(800).dup }))
+        b = Numo::DFloat.cast(Numo::NArray.concatenate(Array.new(12) { r.sample(800).dup }))
+        expect(a.abs.max).to be_within(0.08).of(b.abs.max)
+        expect(10 * Math.log10((a**2).mean / (b**2).mean)).to be_within(0.4).of(0)
+      end
     end
 
     it 'aliases far less than naive and PolyBLEP ramps' do
