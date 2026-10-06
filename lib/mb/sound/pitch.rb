@@ -112,6 +112,9 @@ module MB
       def apulse(width = 0.5, dc: false) = tone.apulse(width, dc: dc)
       def noise(blend = true, seed: nil) = tone.noise(blend, seed: seed)
 
+      # A wavetable Tone at this pitch (see Tone#wavetable).
+      def wavetable(table, scan: nil, interpolation: nil) = tone.wavetable(table, scan: scan, interpolation: interpolation)
+
       # Shortcuts for a sine Tone at this pitch with a reset input
       # (Tone#reset), never reset (Tone#free), or a random phase
       # (Tone#random_phase / #rnd).

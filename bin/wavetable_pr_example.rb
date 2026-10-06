@@ -14,6 +14,8 @@ MB::Sound.synth_script { |midi|
   # Noise LFO
   nzlfo = 1.hz.gauss.noise.at(100).filter(:highpass, cutoff: 0.02, quality: 0.5).filter(:lowpass, cutoff: 0.3, quality: 0.5).softclip(0, 1) * 26.0/30 + 0.3333
 
+  table = MB::Sound::Wavetable.from_file('sounds/drums_wavetable.flac', align: false)
+
   # One voice (mono, with the sustain pedal)
   midi.synth(voices: 1) { |v|
     # Portamento (ratio of 0.1114 scales default 440Hz to 49Hz to match video).
@@ -24,7 +26,10 @@ MB::Sound.synth_script { |midi|
     # The old MIDI gate: the note's velocity while held (with short ramps)
     gate = v.env(0.01, 0, 1, 0.01, curve: :linear, sensitivity: 0..1)
 
-    # Synth
-    (gate * (porta.tone.at(2).wavetable(wavetable: 'sounds/drums_wavetable.flac', number: nzlfo) * 0.5 + porta.tone.triangle.at(0.1))).filter(:lowpass, cutoff: 5000, quality: 0.25).softclip
+    # Synth: a sine waveshaped by the table (the sine sweeps two cycles of
+    # the table, centered on its middle; frames not aligned, since this is
+    # a shaper)
+    shaper = porta.tone.at(-0.5..1.5).table_lookup(table, scan: nzlfo)
+    (gate * (shaper * 0.5 + porta.tone.triangle.at(0.1))).filter(:lowpass, cutoff: 5000, quality: 0.25).softclip
   }
 }
