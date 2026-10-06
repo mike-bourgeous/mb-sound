@@ -368,6 +368,9 @@ module MB
         @random_phase = false
         @seed = nil
         @start_cycles = nil
+        @tempo = nil
+        @lock = nil
+        @lock_phase = nil
 
         @frequency = nil
         @phase = nil
@@ -377,6 +380,7 @@ module MB
         @osc_buf = nil
         @truncated = false
         @quiet_resets = nil
+        @quiet_locks = nil
 
         self.or_at(amplitude).at_rate(sample_rate).with_phase(phase)
         set_frequency(fixup_source(frequency))
@@ -968,24 +972,41 @@ module MB
         or_at(1)
       end
 
-      # Sets this Tone's current phase to +cycles+ past its phase offset (see
-      # #with_phase), with a band-limited step.  Used by Sequence::TempoNode
-      # to lock tempo-synced tones to the timeline.
-      def sync_cycles(cycles)
-        start_state = state
-        phase_jump { start_state.phi = @start_cycles + cycles }
-        self
+      # Locks this tone's phase to the timeline of +tempo+ (a
+      # Sequence::TempoNode in :hz mode, usually this tone's frequency; see
+      # Pitch, Sequence::Duration#hz): at each sample where the tempo node's
+      # #jumps port is nonzero (the timeline started, jumped, or resumed),
+      # the phase goes to the tempo node's #jump_phase (cycles of its
+      # duration) past this tone's starting phase (see #with_phase), with a
+      # band-limited step like a reset (see #reset).  Both ports are inputs
+      # of this tone, read every buffer.  Called by Pitch for tones made
+      # from a tempo pitch.
+      def follow_timeline(tempo)
+        raise ArgumentError, "Expected a Sequence::TempoNode in :hz mode (got #{tempo.inspect})" unless tempo.is_a?(Sequence::TempoNode) && tempo.mode == :hz
+
+        configure do
+          @tempo = tempo
+          @lock = tempo.jumps.get_sampler
+          @lock_phase = tempo.jump_phase.get_sampler
+        end
       end
 
-      # For a Tone whose frequency follows the tempo (see
+      # The Sequence::TempoNode this tone's phase follows (see
+      # #follow_timeline), or nil.
+      def timeline
+        @tempo
+      end
+
+      # For a Tone whose phase follows the timeline (see #follow_timeline,
       # Sequence::Duration#hz), lets its phase run free of the timeline and
       # keeps it running while the timeline is paused.  Its frequency still
-      # follows the tempo.  See Sequence::TempoNode#freewheel.
+      # follows the tempo.  This changes the tempo node (see
+      # Sequence::TempoNode#freewheel), so every tone made from the same
+      # tempo pitch freewheels.
       def freewheel(free = true)
-        node = graph.find { |n| n.is_a?(Sequence::TempoNode) && n.follows?(self) }
-        raise ArgumentError, 'Only tempo-synced tones (e.g. 4.bars.lfo) can freewheel' if node.nil?
+        raise ArgumentError, 'Only tempo-synced tones (e.g. 4.bars.lfo) can freewheel' if @tempo.nil?
 
-        node.freewheel(free)
+        @tempo.freewheel(free)
         self
       end
 
@@ -1052,7 +1073,7 @@ module MB
       def sample_c(count)
         start unless @started
 
-        count, freq, phase, width, pulses, resets, targets = get_upstream_inputs(count)
+        count, freq, phase, width, pulses, resets, targets, jumps, jump_phase = get_upstream_inputs(count)
         return nil if missing_input?(freq, phase, width, pulses, resets, targets)
 
         state = @state
@@ -1065,8 +1086,9 @@ module MB
         build_buffer(count)
 
         points = reset_points(resets)
-        if points
-          buf = sample_segments(count, freq, phase, width, points, targets) do |out, f, ph, w|
+        locks = lock_points(jumps)
+        if points || locks
+          buf = sample_segments(count, freq, phase, width, points, targets, locks, jump_phase) do |out, f, ph, w|
             kernel_c(out, f, ph, w, nil)
           end
         else
@@ -1085,14 +1107,15 @@ module MB
       def sample_ruby(count)
         start unless @started
 
-        count, freq_table, phase_table, width, pulses, resets, targets = get_upstream_inputs(count)
+        count, freq_table, phase_table, width, pulses, resets, targets, jumps, jump_phase = get_upstream_inputs(count)
         return nil if missing_input?(freq_table, phase_table, width, pulses, resets, targets)
 
         build_buffer(count)
 
         points = reset_points(resets)
-        if points
-          buf = sample_segments(count, freq_table, phase_table, width, points, targets) do |out, f, ph, w|
+        locks = lock_points(jumps)
+        if points || locks
+          buf = sample_segments(count, freq_table, phase_table, width, points, targets, locks, jump_phase) do |out, f, ph, w|
             kernel_ruby(out, f, ph, w, nil)
           end
         else
@@ -1118,6 +1141,8 @@ module MB
           sync: @sync_source,
           reset: @reset,
           reset_to: @reset_to.respond_to?(:sample) ? @reset_to : nil,
+          timeline_jumps: @lock,
+          timeline_phase: @lock_phase,
         }.compact
       end
 
@@ -1365,18 +1390,38 @@ module MB
         resets.empty? ? nil : resets.to_a
       end
 
-      # Computes +count+ samples split into pieces at the reset sample
-      # indices in +points+ (see #reset), jumping the phase before each
-      # reset sample.  The block runs a kernel (#kernel_c or #kernel_ruby) on
-      # a view of the output buffer with the matching slices of the
-      # frequency, phase modulation, and width inputs, and returns the
-      # samples.  Returns a view of the output buffer.
-      def sample_segments(count, freq, phase, width, points, targets)
+      # The indices of the nonzero samples of the timeline jumps input (see
+      # #follow_timeline), or nil if there are none.  The tempo node's
+      # shared frozen zeros are recognized without a scan.
+      def lock_points(jumps)
+        return nil if jumps.nil? || jumps.equal?(@quiet_locks)
+
+        if jumps.frozen? && jumps.max == 0 && jumps.min == 0
+          @quiet_locks = jumps
+          return nil
+        end
+
+        points = jumps.ne(0).where
+        points.empty? ? nil : points.to_a
+      end
+
+      # Computes +count+ samples split into pieces at the sample indices of
+      # timeline jumps (+locks+, see #follow_timeline) and resets (+points+,
+      # see #reset), jumping the phase before each of those samples (a
+      # timeline jump first, then a reset, at the same sample).  Each jump
+      # is band-limited at that sample's frequency, phase modulation, and
+      # width (see #phase_jump).  The block runs a kernel (#kernel_c or
+      # #kernel_ruby) on a view of the output buffer with the matching
+      # slices of the frequency, phase modulation, and width inputs, and
+      # returns the samples.  Returns a view of the output buffer.
+      def sample_segments(count, freq, phase, width, points, targets, locks = nil, jump_phase = nil)
         state = @state
         state.frame_segments = [] if @ports
 
+        splits = locks ? (points ? (points | locks).sort : locks) : points
+
         start = 0
-        (points + [count]).each do |stop|
+        (splits + [count]).each do |stop|
           if stop > start
             f = slice_input(freq, start, stop)
             state.frame_segments&.push([state.phase[0], f, stop - start])
@@ -1389,9 +1434,15 @@ module MB
 
           break if stop == count
 
-          target = reset_target(targets, stop)
-          phase_jump(freq: input_at(freq, stop), width: width && input_at(width, stop), phase_mod: input_at(phase, stop)) do
-            state.phi = target
+          jump_args = { freq: input_at(freq, stop), width: width && input_at(width, stop), phase_mod: input_at(phase, stop) }
+          if locks&.include?(stop)
+            target = @start_cycles + jump_phase[stop]
+            phase_jump(**jump_args) { state.phi = target }
+          end
+
+          if points&.include?(stop)
+            target = reset_target(targets, stop)
+            phase_jump(**jump_args) { state.phi = target }
           end
 
           start = stop
@@ -1658,6 +1709,14 @@ module MB
           targets = nil
         end
 
+        # Timeline jumps (see #follow_timeline); a tempo node never ends
+        if @lock
+          jumps = @lock.sample(count)
+          jump_phase = @lock_phase.sample(count)
+          jumps = nil if jumps&.empty? || jump_phase.nil? || jump_phase.empty?
+          min_length = jumps.length if jumps && jumps.length < min_length
+        end
+
         if min_length != count
           raise "Truncation happened more than once on oscillator #{self} (try adding .with_buffer to upstreams)" if @truncated
           @truncated = true
@@ -1667,9 +1726,11 @@ module MB
           pulses = pulses[0...min_length] if pulses&.is_a?(Numo::NArray)
           resets = resets[0...min_length] if resets&.is_a?(Numo::NArray)
           targets = targets[0...min_length] if targets&.is_a?(Numo::NArray)
+          jumps = jumps[0...min_length] if jumps&.is_a?(Numo::NArray)
+          jump_phase = jump_phase[0...min_length] if jump_phase&.is_a?(Numo::NArray)
         end
 
-        return min_length, freq, phase, width, pulses, resets, targets
+        return min_length, freq, phase, width, pulses, resets, targets, jumps, jump_phase
       end
 
       # Warns that a call replaced an earlier conflicting setting (the last

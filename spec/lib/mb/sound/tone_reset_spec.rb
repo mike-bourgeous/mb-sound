@@ -357,10 +357,12 @@ RSpec.describe('Tone reset inputs, free and random phases') do
       end
 
       it 'keeps a random offset for tempo-locked tones' do
-        t = 100.hz.aramp.rnd(seed: 1)
+        tempo = MB::Sound::Sequence::TempoNode.new(1.beat, mode: :hz, transport: MB::Sound::Sequence::Transport.new(bpm: 120))
+        t = MB::Sound::Pitch.new(tempo).aramp.rnd(seed: 1)
         start = t.phi
-        t.sync_cycles(0)
-        expect(t.phi).to be_within(1e-9).of(start)
+        t.sample(10)
+        tempo.start_at(0) # back to the start of a beat
+        expect(t.sample(1)[0]).to be_within(1e-6).of(MB::Sound::Tone.value_at(:ramp, start))
       end
     end
   end

@@ -458,10 +458,13 @@ RSpec.describe(MB::Sound::BandLimit) do
       expect(c.sample_c(80)).to eq(r.sample_ruby(80))
     end
 
-    it 'smooths Tone#sync_cycles (tempo LFO phase locks)' do
-      t = 1001.3.hz.ramp
+    it 'smooths timeline jumps (tempo-synced phase locks)' do
+      # 1.n128 at 1920 BPM is 1024 Hz
+      tempo = MB::Sound::Sequence::TempoNode.new(1.n128, mode: :hz, transport: MB::Sound::Sequence::Transport.new(bpm: 1920))
+      t = MB::Sound::Pitch.new(tempo).ramp
+      tempo.start_at(0)
       t.sample(30)
-      t.sync_cycles(0.0)
+      tempo.start_at(0)
       expect(t.sample(1)[0].abs).to be > 0.1 # not the jump to 0
     end
   end

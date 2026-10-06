@@ -59,10 +59,11 @@ RSpec.describe('Tone#phasor', :aggregate_failures) do
       expect(data[124]).to be_within(1e-7).of(0.1 + 100.0 / 48000)
     end
 
-    it 'syncs to a number of cycles past the starting phase' do
-      p = phasor(100, phase: 0.1)
-      p.sync_cycles(2.3)
-      expect(p.state.phi).to be_within(1e-12).of(0.4)
+    it 'locks to the timeline, cycles past the starting phase' do
+      tempo = MB::Sound::Sequence::TempoNode.new(1.beat, mode: :hz, transport: MB::Sound::Sequence::Transport.new(bpm: 120))
+      p = phasor(tempo, phase: 0.1)
+      tempo.start_at(2.3r / 4) # 2.3 beats
+      expect(p.sample(1)[0]).to be_within(1e-7).of(0.4)
     end
   end
 

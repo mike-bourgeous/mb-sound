@@ -255,10 +255,12 @@ module MB
 
       private
 
-      # Lets a tempo source (Sequence::TempoNode) lock the phase of an
-      # oscillator made from this pitch to the timeline.
-      def follow(phase_holder)
-        @source.add_follower(phase_holder) if @source.respond_to?(:add_follower)
+      # Locks the phase of a tone made from this pitch to the timeline if
+      # the frequency comes from a tempo source (Sequence::TempoNode; see
+      # Tone#follow_timeline).
+      def follow(tone)
+        tone.follow_timeline(@source) if @source.is_a?(Sequence::TempoNode)
+        tone
       end
     end
   end

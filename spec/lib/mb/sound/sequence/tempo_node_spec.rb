@@ -101,6 +101,68 @@ RSpec.describe(MB::Sound::Sequence::TempoNode) do
   it 'only allows tempo-synced tones to freewheel' do
     expect { 2.hz.freewheel }.to raise_error(ArgumentError, /tempo-synced/)
   end
+
+  describe 'timeline jump ports' do
+    let(:tempo) { described_class.new(1.beat, mode: :hz, transport: transport) }
+
+    it 'gives a jump with the timeline phase on the first sample after each start' do
+      jumps = tempo.jumps
+      phases = tempo.jump_phase
+      tempo.start_at(5/16r) # 1.25 beats
+      tempo.sample(10)
+      expect(jumps.sample(10).to_a).to eq([1] + [0] * 9)
+      expect(phases.sample(10).to_a).to eq([0.25] + [0] * 9)
+      expect(phases.sample(10)).to be_a(Numo::DFloat)
+
+      tempo.sample(10)
+      expect(jumps.sample(10).max).to eq(0)
+      expect(phases.sample(10).max).to eq(0)
+    end
+
+    it 'shares frozen zeros between jumps' do
+      j = tempo.jumps
+      tempo.sample(10)
+      a = j.sample(10)
+      tempo.sample(10)
+      expect(j.sample(10)).to equal(a)
+      expect(a).to be_frozen
+    end
+
+    it 'gives no jumps while freewheeling' do
+      j = tempo.jumps
+      tempo.freewheel
+      tempo.start_at(1/8r)
+      tempo.sample(10)
+      expect(j.sample(10).max).to eq(0)
+    end
+
+    it 'are inputs of the tones that follow the timeline' do
+      p = MB::Sound::Pitch.new(tempo)
+      t = p.ramp
+      expect(t.timeline).to equal(tempo)
+      expect(t.sources.keys).to include(:timeline_jumps, :timeline_phase)
+      expect(t.graph).to include(tempo)
+      expect(2.hz.ramp.timeline).to be_nil
+    end
+
+    it 'gives the same samples in C and Ruby across a jump' do
+      fast = described_class.new(1.n128, mode: :hz, transport: MB::Sound::Sequence::Transport.new(bpm: 1920))
+      c = MB::Sound::Pitch.new(fast).saw
+      fast2 = described_class.new(1.n128, mode: :hz, transport: MB::Sound::Sequence::Transport.new(bpm: 1920))
+      r = MB::Sound::Pitch.new(fast2).saw
+      [fast, fast2].each { |f| f.start_at(0) }
+      expect(c.sample_c(100)).to eq(r.sample_ruby(100))
+      [fast, fast2].each { |f| f.start_at(1/3r) }
+      expect(c.sample_c(100)).to eq(r.sample_ruby(100))
+    end
+
+    it 'freewheels the tempo node from a tone without searching the graph' do
+      t = MB::Sound::Pitch.new(tempo).ramp
+      expect(t).not_to receive(:graph)
+      t.freewheel
+      expect(tempo.freewheel?).to eq(true)
+    end
+  end
 end
 
 RSpec.describe(MB::Sound::Tone) do

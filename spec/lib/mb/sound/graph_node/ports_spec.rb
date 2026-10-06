@@ -29,10 +29,11 @@ RSpec.describe(MB::Sound::GraphNode::Ports) do
     end
 
     it 'gives 1 after a phase jump' do
-      phasor = 100.hz.phasor
+      tempo = MB::Sound::Sequence::TempoNode.new(1.beat, mode: :hz, transport: MB::Sound::Sequence::Transport.new(bpm: 120))
+      phasor = MB::Sound::Pitch.new(tempo).phasor
       wraps = phasor.wraps
       wraps.sample(100)
-      phasor.sync_cycles(0.3)
+      tempo.start_at(0.3r / 4) # 0.3 beats
       expect(wraps.sample(10)[0]).to eq(1)
     end
   end
