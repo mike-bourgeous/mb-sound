@@ -112,6 +112,16 @@ module MB
       def apulse(width = 0.5, dc: false) = tone.apulse(width, dc: dc)
       def noise(blend = true, seed: nil) = tone.noise(blend, seed: seed)
 
+      # An additive oscillator at this pitch whose harmonic amplitudes
+      # (+spectrum+: numbers, graph nodes, or a callable of the time) may
+      # change while it plays (see GraphNode::HarmonicTable).
+      def harmonics(spectrum, phases: nil, update: GraphNode::HarmonicTable::DEFAULT_UPDATE, interpolation: nil)
+        GraphNode::HarmonicTable.new(
+          frequency: oscillator_frequency, spectrum: spectrum, phases: phases, update: update,
+          interpolation: interpolation, sample_rate: @sample_rate
+        )
+      end
+
       # A wavetable Tone at this pitch (see Tone#wavetable).
       def wavetable(table, scan: nil, interpolation: nil) = tone.wavetable(table, scan: scan, interpolation: interpolation)
 
