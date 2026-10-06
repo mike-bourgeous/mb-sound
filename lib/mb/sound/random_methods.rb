@@ -14,7 +14,8 @@ module MB
     #
     # Users so far: Tone#random_phase (alias #rnd), Tone#noise (and
     # MB::Sound.noise; each noise tone keeps its own splitmix64 state, see
-    # Tone::State#noise), Synth (per-lane seeds through #with_seed).  Older
+    # Tone::State#noise), Synth (per-lane seeds through #with_seed),
+    # Pitch#unison (a sub-seed for the random detune layout).  Older
     # randomness keeps its own generators for now: Noise::RAND (spectral
     # noise), Clip seeds
     # (probability, #permute), and Reverb/FdnReverb seeds; they could move to
