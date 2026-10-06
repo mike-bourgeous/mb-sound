@@ -16,7 +16,12 @@ MB::Sound.synth_script { |midi|
     pitch_decay = 0.13
     decay_time = 0.18
 
-    # FIXME: only sounds right at velocity 127
+    # Velocity: the carrier levels have 12 dB ranges (the boom another 6
+    # dB from its linear envelope), as
+    # kicks usually have 10-20 dB of level change, while the noise click
+    # and the boom's noise FM keep their wide ranges (30 and 21 dB), so
+    # soft hits are mostly duller as well as quieter.  (The level ranges
+    # were 30 and 25.5 dB, so anything below about 100 sounded weak.)
     #
     # The envelopes are the old `.db(N)` ones (straight lines in dB over N
     # dB) converted to curves of -N rising and N falling, with the old
@@ -33,7 +38,7 @@ MB::Sound.synth_script { |midi|
       v.fm_env(0.0001, 0.04, 0, 0.04, curve: [-60, 60, 60], sensitivity: -30.db..0.db)
 
     falling_sine = (attack_env + v.freq * (0.06 * pitch_env + 0.97)).tone.at(1).pm(noise_source).reset(v.trigger)
-    falling_sine_amp = falling_sine * v.amp_env(0.0001, decay_time, 0, decay_time, curve: [-60, 60, 60], sensitivity: -30.db..0.db)
+    falling_sine_amp = falling_sine * v.amp_env(0.0001, decay_time, 0, decay_time, curve: [-60, 60, 60], sensitivity: -12.db..0.db)
 
     sub = falling_sine_amp.peq({
       30.hz => 9.db,
@@ -56,7 +61,7 @@ MB::Sound.synth_script { |midi|
     boom_noise *= v.fm_env(0.0001, boom_noise_decay, 0.0, boom_noise_decay, curve: [-40, 40, 40], sensitivity: -20.8.db..0.db)
 
     boom_sine = 143.hz.at(1).fm(boom_noise * boom_noise_gain).reset(v.trigger)
-    boom_sine *= v.amp_env(0.01, boom_sine_decay, 0.0, boom_sine_decay, curve: [-50, 50, 50], sensitivity: -25.5.db..0.db) *
+    boom_sine *= v.amp_env(0.01, boom_sine_decay, 0.0, boom_sine_decay, curve: [-50, 50, 50], sensitivity: -12.db..0.db) *
       v.env(0.01, boom_sine_decay, 0.0, boom_sine_decay, curve: :linear)
 
     boom = boom_sine.peq({
