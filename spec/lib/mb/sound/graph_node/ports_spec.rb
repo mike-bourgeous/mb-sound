@@ -3,7 +3,7 @@ RSpec.describe(MB::Sound::GraphNode::Ports) do
     data.to_a.each_with_index.reject { |v, _| v == 0 }.map { |v, i| [v.round(6), i] }
   end
 
-  describe 'Phasor#wraps' do
+  describe 'Tone#wraps on a phasor' do
     it 'marks the first sample after each wrap with 1 - d' do
       # 1001.3 Hz at 48 kHz: the first wrap is (47 * inc + inc - 1) / inc
       # samples before sample 48
@@ -22,23 +22,24 @@ RSpec.describe(MB::Sound::GraphNode::Ports) do
     end
 
     it 'is negative when the phase moves backward' do
-      wraps = MB::Sound::Phasor.new(frequency: -1001.3, phase: 0.5).wraps
+      wraps = -1001.3.hz.phasor(phase: 0.5).wraps
       values = nonzero(wraps.sample(200)).map(&:first)
       expect(values).not_to be_empty
       expect(values).to all(be_between(-1, 0))
     end
 
     it 'gives 1 after a phase jump' do
-      phasor = 100.hz.phasor
+      tempo = MB::Sound::Sequence::TempoNode.new(1.beat, mode: :hz, transport: MB::Sound::Sequence::Transport.new(bpm: 120))
+      phasor = MB::Sound::Pitch.new(tempo).phasor
       wraps = phasor.wraps
       wraps.sample(100)
-      phasor.sync(0.3)
+      tempo.start_at(0.3r / 4) # 0.3 beats
       expect(wraps.sample(10)[0]).to eq(1)
     end
   end
 
   it 'gives the increment per sample' do
-    expect(MB::Sound::Phasor.new(frequency: 480).increment.sample(10)).to all_be_within(1e-7).of_array(Numo::SFloat.new(10).fill(0.01))
+    expect(480.hz.phasor.increment.sample(10)).to all_be_within(1e-7).of_array(Numo::SFloat.new(10).fill(0.01))
   end
 
   describe 'frames' do

@@ -18,7 +18,7 @@ module MB
 
         class WrapperArgumentError < ArgumentError
           def initialize(msg = nil, field: nil, source: nil)
-            msg ||= 'Pass a Numeric, a Numo::NArray, or a non-Array object that responds to :sample, such as Tone, Oscillator, or IOInput'
+            msg ||= 'Pass a Numeric, a Numo::NArray, or a non-Array object that responds to :sample, such as Tone or IOInput'
             msg << " for #{field}" if field
             msg << " (got #{source})" if source
             super(msg)

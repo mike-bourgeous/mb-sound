@@ -50,7 +50,7 @@ module MB
     # - :required for a parameter that must be given (with a nil default)
     #
     #     count: [2, 'Repeats per grain', 2.., '-n'],
-    #     wave: [:sine, 'LFO waveform', MB::Sound::Oscillator::WAVE_TYPES],
+    #     wave: [:sine, 'LFO waveform', MB::Sound::Tone::WAVE_TYPES],
     #     preset: [nil, 'Reverb preset', Symbol],
     class ScriptRunner
       # Audio file extensions recognized in positional arguments.

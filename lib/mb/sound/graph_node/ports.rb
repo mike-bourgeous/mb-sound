@@ -1,8 +1,8 @@
 module MB
   module Sound
     module GraphNode
-      # Side outputs of a node that aren't audio channels (e.g. a phasor's
-      # sync pulses, Phasor#wraps), so they aren't part of #outputs and
+      # Side outputs of a node that aren't audio channels (e.g. a tone's
+      # sync pulses, Tone#wraps), so they aren't part of #outputs and
       # per-channel DSL calls don't fan them out.  Each port is a GraphNode
       # (a Port) made on first use, so it can be patched, plotted, or
       # counted like any signal; nodes that never use a port behave exactly
@@ -13,7 +13,7 @@ module MB
       # in #sample_main(count), define #sample(count) as
       # `port_frame(count) { sample_main(count) }`, and implement
       # #compute_ports(count) to fill #store_port for each port in use after
-      # each frame (see Phasor).
+      # each frame (see Tone, Sequence::TempoNode).
       #
       # Once a port exists, the node computes its main output and ports in
       # frames: each reader (the main output and each port) reads each frame

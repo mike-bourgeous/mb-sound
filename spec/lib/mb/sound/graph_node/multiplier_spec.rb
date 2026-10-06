@@ -71,14 +71,14 @@ RSpec.describe(MB::Sound::GraphNode::Multiplier, aggregate_failures: true) do
     let(:stop_early) { true }
 
     it 'can change the buffer size' do
-      ss = MB::Sound::GraphNode::Multiplier.new([1, 0.hz.asquare.at(1.5).oscillator], sample_rate: 48000)
+      ss = MB::Sound::GraphNode::Multiplier.new([1, 0.hz.asquare.at(1.5)], sample_rate: 48000)
       expect(ss.sample(100)).to eq(Numo::SFloat.zeros(100).fill(1.5))
       expect(ss.sample(200)).to eq(Numo::SFloat.zeros(200).fill(1.5))
       expect(ss.sample(123)).to eq(Numo::SFloat.zeros(123).fill(1.5))
     end
 
     it 'returns the same buffer object if size and data type have not changed' do
-      ss = MB::Sound::GraphNode::Multiplier.new([1, 0.hz.asquare.at(0.5).oscillator])
+      ss = MB::Sound::GraphNode::Multiplier.new([1, 0.hz.asquare.at(0.5)])
       a = ss.sample(100)
       b = ss.sample(100)
       c = ss.sample(100)
@@ -92,7 +92,7 @@ RSpec.describe(MB::Sound::GraphNode::Multiplier, aggregate_failures: true) do
       # With at least some sample rates, the square wave oscillator returns n+1
       # samples due to rounding inaccuracy in the oscillator's phase
       # advancement coefficient.  Sample rate of 1kHz was chosen to avoid this.
-      ss = MB::Sound::GraphNode::Multiplier.new([1.hz.asquare.at_rate(1000).at(0.5).oscillator])
+      ss = MB::Sound::GraphNode::Multiplier.new([1.hz.asquare.at_rate(1000).at(0.5)])
       expect(ss.sample(500)).to eq(Numo::SFloat.zeros(500).fill(0.5))
       expect(ss.sample(500)).to eq(Numo::SFloat.zeros(500).fill(-0.5))
     end
@@ -104,8 +104,8 @@ RSpec.describe(MB::Sound::GraphNode::Multiplier, aggregate_failures: true) do
       ss = MB::Sound::GraphNode::Multiplier.new(
         1,
         -1,
-        1.hz.asquare.at_rate(1000).at(1).oscillator,
-        2.hz.asquare.at_rate(1000).at(0.25).oscillator,
+        1.hz.asquare.at_rate(1000).at(1),
+        2.hz.asquare.at_rate(1000).at(0.25),
       )
 
       expect(ss.sample(250)).to eq(Numo::SFloat.zeros(250).fill(-0.25))
@@ -115,20 +115,23 @@ RSpec.describe(MB::Sound::GraphNode::Multiplier, aggregate_failures: true) do
     end
 
     it 'returns SComplex if given a complex constant' do
-      ss = MB::Sound::GraphNode::Multiplier.new([0+1i, 0.hz.asquare.at(1).oscillator])
+      ss = MB::Sound::GraphNode::Multiplier.new([0+1i, 0.hz.asquare.at(1)])
       expect(ss.sample(800)).to eq(Numo::SComplex.zeros(800).fill(0+1i))
     end
 
     it 'returns SComplex if given a complex input' do
-      ss = MB::Sound::GraphNode::Multiplier.new([180.hz.complex_sine.at(1).oscillator])
-      osc = 180.hz.complex_sine.at(1).oscillator
+      ss = MB::Sound::GraphNode::Multiplier.new([180.hz.complex_sine.at(1)])
+      osc = 180.hz.complex_sine.at(1)
       result = ss.sample(800)
       expect(result).to be_a(Numo::SComplex)
       expect(result).to eq(osc.sample(800))
     end
 
     it 'can change from SFloat to SComplex if the constant changes to complex' do
-      osc = 0.hz.asquare.at(1).oscillator
+      # An input that switches to complex samples (tones are configured
+      # before they play, so this used to change an oscillator's wave type)
+      bufs = [Numo::SFloat.ones(100), Numo::SComplex.ones(100)]
+      osc = MB::Sound::GraphNode::ProcNode.new(0.constant) { bufs.shift }
       ss = MB::Sound::GraphNode::Multiplier.new([1, osc])
 
       result = ss.sample(100)
@@ -140,14 +143,16 @@ RSpec.describe(MB::Sound::GraphNode::Multiplier, aggregate_failures: true) do
     end
 
     it 'can change from SFloat to SComplex if an input changes to complex' do
-      osc = 0.hz.asquare.at(1).oscillator
+      # An input that switches to complex samples (tones are configured
+      # before they play, so this used to change an oscillator's wave type)
+      bufs = [Numo::SFloat.ones(100), Numo::SComplex.ones(100)]
+      osc = MB::Sound::GraphNode::ProcNode.new(0.constant) { bufs.shift }
       ss = MB::Sound::GraphNode::Multiplier.new([1, osc])
 
       result = ss.sample(100)
       expect(result).to be_a(Numo::SFloat)
       expect(result).to eq(Numo::SFloat.ones(100))
 
-      osc.wave_type = :complex_square
       expect(ss.sample(100)).to be_a(Numo::SComplex)
     end
 
@@ -204,7 +209,7 @@ RSpec.describe(MB::Sound::GraphNode::Multiplier, aggregate_failures: true) do
 
   describe '#clear' do
     it 'removes all non-constant multiplicands' do
-      ss = MB::Sound::GraphNode::Multiplier.new([2, 0.hz.asquare.at(2).oscillator, 0.hz.asquare.at(-1).oscillator])
+      ss = MB::Sound::GraphNode::Multiplier.new([2, 0.hz.asquare.at(2), 0.hz.asquare.at(-1)])
       expect(ss.sample(100)).to eq(Numo::SFloat.zeros(100).fill(-4))
 
       ss.clear
@@ -215,8 +220,8 @@ RSpec.describe(MB::Sound::GraphNode::Multiplier, aggregate_failures: true) do
 
   describe '#[]' do
     it 'returns a multiplicand by identity' do
-      o1 = 0.hz.asquare.at(2).oscillator
-      o2 = 0.hz.asquare.at(-1).oscillator
+      o1 = 0.hz.asquare.at(2)
+      o2 = 0.hz.asquare.at(-1)
       ss = MB::Sound::GraphNode::Multiplier.new([2, o1, o2, 3-1i])
       expect(ss[o1]).to eq(o1)
       expect(ss[o2]).to eq(o2)
@@ -225,8 +230,8 @@ RSpec.describe(MB::Sound::GraphNode::Multiplier, aggregate_failures: true) do
     end
 
     it 'returns a multiplicand by index' do
-      o1 = 0.hz.asquare.at(2).oscillator
-      o2 = 0.hz.asquare.at(-1).oscillator
+      o1 = 0.hz.asquare.at(2)
+      o2 = 0.hz.asquare.at(-1)
       ss = MB::Sound::GraphNode::Multiplier.new([2, o1, 4, 5, o2, 3-1i])
       expect(ss[0]).to equal(o1)
       expect(ss[1]).to equal(o2)
@@ -236,14 +241,14 @@ RSpec.describe(MB::Sound::GraphNode::Multiplier, aggregate_failures: true) do
 
   describe '#delete' do
     it 'removes a multiplicand from the multiplier' do
-      ss = MB::Sound::GraphNode::Multiplier.new([2, 0.hz.asquare.at(2).oscillator, 0.hz.asquare.at(-1).oscillator])
+      ss = MB::Sound::GraphNode::Multiplier.new([2, 0.hz.asquare.at(2), 0.hz.asquare.at(-1)])
       ss.delete(ss.multiplicands.last)
       expect(ss.count).to eq(1)
       expect(ss.sample(100)).to eq(Numo::SFloat.zeros(100).fill(4))
     end
 
     it 'can remove a multiplicand by index' do
-      ss = MB::Sound::GraphNode::Multiplier.new([2, 0.hz.asquare.at(2).oscillator, 0.hz.asquare.at(-1).oscillator])
+      ss = MB::Sound::GraphNode::Multiplier.new([2, 0.hz.asquare.at(2), 0.hz.asquare.at(-1)])
       expect(ss.count).to eq(2)
       expect(ss.sample(100)).to eq(Numo::SFloat.zeros(100).fill(-4))
 
@@ -255,7 +260,7 @@ RSpec.describe(MB::Sound::GraphNode::Multiplier, aggregate_failures: true) do
 
   describe '#count' do
     it 'returns the number of multiplicands' do
-      ss = MB::Sound::GraphNode::Multiplier.new([2, 0.hz.asquare.at(2).oscillator, 0.hz.asquare.at(-1).oscillator])
+      ss = MB::Sound::GraphNode::Multiplier.new([2, 0.hz.asquare.at(2), 0.hz.asquare.at(-1)])
       expect(ss.count).to eq(2)
 
       ss.clear

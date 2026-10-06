@@ -5,7 +5,7 @@ require 'mb-math'
 require 'mb-util'
 
 # RANDOM_SEED makes random sounds repeatable (e.g. for bin/null_test.rb):
-# Kernel#rand here, and Oscillator::RAND and Noise::RAND below.
+# Kernel#rand here, and Tone::RAND and Noise::RAND below.
 srand(Integer(ENV['RANDOM_SEED'])) if ENV['RANDOM_SEED']
 
 require_relative 'sound/length'
@@ -41,6 +41,7 @@ require_relative 'sound/multichannel_methods'
 require_relative 'sound/warm_up_methods'
 require_relative 'sound/envelope_methods'
 require_relative 'sound/random_methods'
+require_relative 'sound/live_methods'
 
 module MB
   # Convenience functions for making quick work of sound.
@@ -66,6 +67,7 @@ module MB
     extend WarmUpMethods
     extend EnvelopeMethods
     extend RandomMethods
+    extend LiveMethods
 
     # Speed of sound for wavelength calculations, in meters per second.
     SPEED_OF_SOUND = 343.0
@@ -148,9 +150,8 @@ require_relative 'sound/input_buffer_wrapper'
 require_relative 'sound/output_buffer_wrapper'
 require_relative 'sound/background_output'
 
-require_relative 'sound/phasor'
 require_relative 'sound/band_limit'
-require_relative 'sound/oscillator'
+require_relative 'sound/tone/state'
 require_relative 'sound/tone'
 require_relative 'sound/pitch'
 require_relative 'sound/note'

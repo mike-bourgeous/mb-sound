@@ -1,5 +1,5 @@
 #!/usr/bin/env -S RUBY_THREAD_TIMESLICE=10 RUBY_YJIT_ENABLE=1 ruby
-# Plots waveforms supported by MB::Sound::Oscillator and their spectra
+# Plots the waveforms of MB::Sound::Tone and their spectra
 #
 # Usage: $0 [--imag] [--width PX] [--height PX] [wave_type ...]
 
@@ -14,12 +14,11 @@ MB::Sound.script(
 ) { |waves, p|
   input = Numo::DComplex.linspace(0, 64.0 * Math::PI, 64000)
 
-  plots = MB::Sound::Oscillator::WAVE_TYPES.flat_map { |w|
+  plots = MB::Sound::Tone::WAVE_TYPES.flat_map { |w|
     next unless waves.empty? || waves.include?(w.to_s)
 
-    osc = MB::Sound::Oscillator.new(w)
     time = input.map { |v|
-      osc.value_at(v.real % (2.0 * Math::PI))
+      MB::Sound::Tone.value_at(w, v.real % (2.0 * Math::PI))
     }
     freq = MB::Sound.fft(time).abs.map(&:to_db)
 

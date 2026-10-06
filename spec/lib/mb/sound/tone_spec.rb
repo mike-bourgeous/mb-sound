@@ -112,54 +112,91 @@ RSpec.describe MB::Sound::Tone do
     pending 'expected output'
   end
 
-  describe '#oscillator' do
-    it 'returns an Oscillator with the same frequency and range' do
-      tone = 222.hz.at(-5.db)
-      osc = tone.oscillator
-      expect(osc).to be_a(MB::Sound::Oscillator)
-      expect(osc.frequency).to eq(tone.frequency)
-      expect(osc.range).to eq(-tone.amplitude..tone.amplitude)
+  describe 'configuration' do
+    it 'is fixed once the tone plays' do
+      t = 220.hz.ramp.at(0.5)
+      t.sample(10)
+      [
+        -> { t.at(0.2) }, -> { t.square }, -> { t.with_phase(1) }, -> { t.fm(110.hz) },
+        -> { t.pm(110.hz) }, -> { t.pwm(0.3) }, -> { t.sync(ratio: 2) }, -> { t.reset(nil) },
+        -> { t.free }, -> { t.rnd }, -> { t.lfo }, -> { t.noise }, -> { t.seed = 3 },
+      ].each do |change|
+        expect(&change).to raise_error(FrozenError, /already playing/)
+      end
     end
 
-    it 'passes a reversed range to the oscillator' do
-      tone = 220.hz.at(1..-1)
-      osc = tone.oscillator
-      expect(osc.range).to eq(1..-1)
+    it 'warns and keeps the tone unchanged in live mode' do
+      t = 220.hz.ramp.at(0.5)
+      before = t.sample(100).dup
+      MB::Sound.live = true
+      expect { expect(t.at(0.1)).to equal(t) }.to output(/FrozenError.*already playing.*live mode: ignored/).to_stderr
+      expect { t.square }.to output(/live mode/).to_stderr
 
-      data = osc.sample(48000)
+      u = 220.hz.ramp.at(0.5)
+      u.sample(100)
+      expect(t.sample(100)).to eq(u.sample(100))
+      expect(before.length).to eq(100)
+    ensure
+      MB::Sound.live = false
+    end
+
+    it 'still accepts or_at and sample rate changes after playing starts' do
+      t = 220.hz.ramp.at(0.5)
+      t.sample(10)
+      expect(t.or_at(1).range).to eq(-0.5..0.5)
+      expect { t.at_rate(96000) }.not_to raise_error
+      expect(t.advance).to eq(1.0 / 96000)
+    end
+
+    it 'picks up changes made after the state was inspected' do
+      t = 220.hz.ramp
+      expect(t.phi).to eq(0)
+      t.with_phase(Math::PI / 2)
+      expect(t.phi).to be_within(1e-12).of(Math::PI / 2)
+    end
+  end
+
+  describe 'as an oscillator' do
+    it 'keeps its frequency and range' do
+      tone = 222.hz.at(-5.db)
+      expect(tone.frequency).to eq(222)
+      expect(tone.range).to eq(-tone.amplitude..tone.amplitude)
+    end
+
+    it 'plays a reversed range' do
+      tone = 220.hz.at(1..-1)
+      expect(tone.range).to eq(1..-1)
+
+      data = tone.sample(48000)
       expect(data.min.round(2)).to eq(-1)
       expect(data.max.round(2)).to eq(1)
       expect(data[0]).to eq(0)
       expect(data[30]).to be < 0 # should go down first instead of up because of reversed range
     end
 
-    it 'passes an asymmetric range to the oscillator' do
+    it 'plays an asymmetric range' do
       tone = 220.hz.at(3..5)
-      osc = tone.oscillator
-      expect(osc.range).to eq(3..5)
+      expect(tone.range).to eq(3..5)
 
-      data = osc.sample(48000)
+      data = tone.sample(48000)
       expect(data.min.round(2)).to eq(3)
       expect(data.max.round(2)).to eq(5)
       expect(data[0]).to eq(4)
       expect(data[30]).to be > 4 # should go up first
     end
 
-    it 'passes initial phase to an oscillator' do
+    it 'starts at its initial phase' do
       tone = 220.hz.with_phase(180.degrees)
-      osc = tone.oscillator
-      expect(osc.phase).to eq(180.degrees)
+      expect(tone.phase).to eq(180.degrees)
 
-      data = osc.sample(48000)
+      data = tone.sample(48000)
       expect(data[0].round(8)).to eq(0)
       expect(data[30].round(8)).to be < 0 # should go down first because of phase
     end
 
-    it 'passes sample rate to an oscillator' do
-      tone = 220.hz.at_rate(43210)
-      osc = tone.oscillator
-
-      expect(osc.advance.round(5)).to eq((2.0 * Math::PI / 43210).round(5))
+    it 'advances its phase at its sample rate' do
+      tone = 220.hz.at_rate(43210).tone
+      expect(tone.advance.round(12)).to eq((1.0 / 43210).round(12))
     end
   end
 

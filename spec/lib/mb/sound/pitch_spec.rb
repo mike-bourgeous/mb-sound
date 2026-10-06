@@ -29,9 +29,10 @@ RSpec.describe(MB::Sound::Pitch, :aggregate_failures) do
       expect(p.sine.sample(800).abs.max).to be_within(1e-3).of(1)
     end
 
-    it 'make a Phasor' do
+    it 'make a phasor' do
       ph = 4800.hz.phasor
-      expect(ph).to be_a(MB::Sound::Phasor)
+      expect(ph).to be_a(MB::Sound::Tone)
+      expect(ph.phasor?).to eq(true)
       expect(ph.sample(3).to_a.map { |v| v.round(6) }).to eq([0, 0.1, 0.2])
     end
   end

@@ -19,6 +19,10 @@ $LOAD_PATH << File.expand_path('../lib', __dir__)
 
 require 'mb/sound'
 
+# Live mode: mistakes that raise in scripts only warn here, so a live set keeps
+# playing (see MB::Sound::LiveMethods)
+MB::Sound.live = true
+
 # Shared Tee buffer checks are off unless MB_SOUND_CHECK_SHARED is set; here
 # they only warn, so a live set keeps playing (see GraphNode::Tee)
 MB::Sound::GraphNode::Tee.shared_check = :warn if MB::Sound::GraphNode::Tee.shared_check

@@ -23,6 +23,67 @@ module MB
     # The C kernel is MB::Sound::FastSynth.oscillate_bl (the fast_synth
     # extension); .oscillate_ruby mirrors it exactly for testing.
     module BandLimit
+      # Computes sync pulses and increments for +count+ samples of a phase
+      # starting at +phi+ (cycles) and advancing by +freq+ (Hz; Numeric or
+      # NArray, read in single precision like the C kernels) times
+      # +advance+, the same phases as MB::FastSound.phasor and the oscillator
+      # kernels.  +prev+ is [last phase, last increment, primed (0 or 1)] from
+      # the previous call, updated.  Returns [pulses, increments] as SFloat
+      # NArrays.
+      #
+      # A pulse marks the first sample after the phase wraps: its value is
+      # 1 - d, where d (0 <= d < 1) is how many samples before that sample
+      # the wrap happened, so it's in (0, 1] (usable as an ordinary trigger)
+      # and exact enough to band-limit a reset (see Tone#sync).  Wrapping
+      # backward (negative frequency) gives -(1 - d); a jump of the phase
+      # between buffers (a reset or sync) gives 1.
+      def self.sync_pulses(phi, freq, advance, count, prev)
+        return [Numo::SFloat[], Numo::SFloat[]] if count == 0
+
+        freq = Numo::DFloat.cast(Numo::SFloat.cast(freq.is_a?(Numo::SComplex) || freq.is_a?(Numo::DComplex) ? freq.real : freq)) if freq.is_a?(Numo::NArray)
+        increments = freq * advance
+
+        if increments.is_a?(Numo::NArray)
+          sums = increments.cumsum
+          steps = Numo::DFloat.zeros(count)
+          steps[1..] = sums[0...-1] if count > 1
+          incs = increments
+        else
+          steps = Numo::DFloat.new(count).seq * increments
+          incs = Numo::DFloat.new(count).fill(increments)
+        end
+
+        phases = steps + phi
+        phases -= phases.floor
+
+        prev_p, prev_inc, primed = prev
+        before = Numo::DFloat.zeros(count)
+        before_inc = Numo::DFloat.zeros(count)
+        before[0] = prev_p
+        before_inc[0] = prev_inc
+        if count > 1
+          before[1..] = phases[0...-1]
+          before_inc[1..] = incs[0...-1]
+        end
+
+        reached = before + before_inc
+        pulses = Numo::DFloat.zeros(count)
+
+        forward = reached.ge(1)
+        pulses[forward] = (1.0 - before[forward]) / before_inc[forward] if forward.count_true > 0
+        backward = reached.lt(0)
+        pulses[backward] = -(before[backward] / -before_inc[backward]) if backward.count_true > 0
+
+        # A phase that didn't continue from the previous sample jumped
+        jumped = ((reached - phases + 0.5) - (reached - phases + 0.5).floor - 0.5).abs.gt(1e-6)
+        pulses[jumped] = 1.0 if jumped.count_true > 0
+        pulses[0] = 0.0 if primed == 0
+
+        prev.replace([phases[-1], incs[-1], 1]) if count > 0
+
+        [Numo::SFloat.cast(pulses.clip(-1, 1)), Numo::SFloat.cast(incs)]
+      end
+
       # Wave types that are band-limited without a phase warp.
       WAVES = [:ramp, :square, :triangle].freeze
 

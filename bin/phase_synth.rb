@@ -47,7 +47,7 @@ AMP_TRANSITION = 4800
 MB::Sound.script(
   args: 2..,
   transition: [480, 'Phase transition length in samples', 1..],
-  wave: [:sine, 'Waveform', MB::Sound::Oscillator::WAVE_TYPES],
+  wave: [:sine, 'Waveform', MB::Sound::Tone::WAVE_TYPES],
 ) { |(filename, freq, *rest), p|
   phase_transition = p.transition
 
@@ -81,7 +81,6 @@ MB::Sound.script(
     puts "\e[33m#{idx.to_s.rjust(4)}: \e[32m#{p[:start].to_s.rjust(7)} \e[34m#{(p[:phase] ? '%.2f' % p[:phase] : 'END').rjust(6)}\e[0m"
   end
 
-  osc = MB::Sound::Oscillator.new(p.wave)
   sample = 0
   phase_idx = 0
   prior_phase = phases[0][:phase]
@@ -108,8 +107,8 @@ MB::Sound.script(
 
     # phase is divided by 360 for half phase in each channel
     base_phase = sample * freq * 2.0 * Math::PI / RATE
-    data[0][sample] = amp * osc.value_at((base_phase + phase * Math::PI / 360.0) % (2.0 * Math::PI))
-    data[1][sample] = amp * osc.value_at((base_phase - phase * Math::PI / 360.0) % (2.0 * Math::PI))
+    data[0][sample] = amp * MB::Sound::Tone.value_at(p.wave, (base_phase + phase * Math::PI / 360.0) % (2.0 * Math::PI))
+    data[1][sample] = amp * MB::Sound::Tone.value_at(p.wave, (base_phase - phase * Math::PI / 360.0) % (2.0 * Math::PI))
 
     sample += 1
 
