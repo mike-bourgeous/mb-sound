@@ -45,6 +45,11 @@ module MB
         MIN_CUTOFF = 1.0
         MAX_CUTOFF_RATIO = 0.49
 
+        # With +self_oscillate: true+, the first integrator starts (and
+        # resets) this far from rest, like the noise that starts a real
+        # filter oscillating; silence would otherwise stay silent.
+        SELF_OSCILLATE_SEED = 1e-4
+
         # States smaller than this are flushed to zero after each buffer.
         FLUSH = 1e-30
 
@@ -86,6 +91,7 @@ module MB
           self.resonance = resonance
 
           @state = [0.0, 0.0, 0.0, 0.0]
+          reset(0)
         end
 
         # Whether the resonance may reach self-oscillation.
@@ -141,6 +147,7 @@ module MB
           # Every stage holds the lowpass level, whatever the output mix
           dc = value * (1.0 + @compensation * k) / (1.0 + k)
           @state = [dc, dc, dc, dc]
+          @state[0] += SELF_OSCILLATE_SEED if @self_oscillate
           self
         end
 

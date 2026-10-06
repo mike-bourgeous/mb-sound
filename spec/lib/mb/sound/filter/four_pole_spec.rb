@@ -175,6 +175,13 @@ RSpec.describe(MB::Sound::Filter::FourPole) do
       expect(crossings).to be_within(10).of(440)
     end
 
+    it 'starts oscillating from silence with self_oscillate: true' do
+      f = FP.new(cutoff: 1000, resonance: 1, self_oscillate: true)
+      out = f.process(Numo::SFloat.zeros(24000))
+      expect(out[-4800..].abs.max).to be > 0.1
+      expect(f.process(Numo::SFloat.zeros(24000)).abs.max).to be < 0.2
+    end
+
     it 'does not oscillate with self_oscillate: true below the threshold' do
       out = ring(FP.new(cutoff: 440, resonance: 0.9, self_oscillate: true), 2)
       expect(out[-4800..].abs.max).to be < 1e-4
