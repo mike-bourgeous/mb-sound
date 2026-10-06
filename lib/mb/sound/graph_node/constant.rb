@@ -99,10 +99,24 @@ module MB
         end
 
         # Returns +count+ samples of the constant value.
+        #
+        # While no change is queued, this is one frozen buffer, returned
+        # again (without refilling it) as long as the value, type, and count
+        # stay the same, so steady constants allocate nothing and consumers
+        # may cache results by the buffer's identity (as with the Notes
+        # nodes' constant buffers).  Consumers must copy a frozen input
+        # before changing it (Numo refuses writes to a frozen NArray that
+        # isn't a view, even in-place arithmetic, so a consumer that forgets
+        # raises instead of changing the constant).
         def sample(count)
           return nil if count == 0
 
           @elapsed_samples += count
+
+          if @changes.empty?
+            @old_constant = @constant
+            return steady_buffer(count)
+          end
 
           setup_buffer(length: count, complex: @complex)
 
@@ -166,6 +180,30 @@ module MB
         def sources
           { value: @constant }
         end
+
+        private
+
+        # Returns the frozen buffer of +count+ samples of the current value
+        # for #sample, reusing the last one while it still matches.
+        def steady_buffer(count)
+          cls = @complex ? Numo::SComplex : Numo::SFloat
+          buf = @steady
+          if buf && buf.length == count && buf.class == cls && same_value?(@steady_value, @constant)
+            return buf
+          end
+
+          @steady_value = @constant
+          @steady = cls.new(count).fill(@constant).freeze
+        end
+
+        # True if +a+ and +b+ fill a buffer with the same bits (the same
+        # object, or equal values of one class other than signed zeros).
+        def same_value?(a, b)
+          return true if a.equal?(b)
+          a.class == b.class && a == b && !a.zero?
+        end
+
+        public
 
         # Changes the sample rate of this constant value, used for timed
         # changes.
