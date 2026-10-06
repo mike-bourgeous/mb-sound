@@ -7,6 +7,12 @@ RSpec.describe('bin/make_wavetable.rb', aggregate_failures: true) do
 
     info = MB::Sound::FFMPEGInput.parse_info(name)
     expect(info[:streams][0][:duration_ts]).to eq((48000 / 120) * 10)
+
+    # The slicing details are saved with the table
+    t = MB::Sound::Wavetable.from_file(name)
+    expect(t.source_info[:frequency]).to be_within(2).of(120)
+    expect(t.source_info[:note_name]).to match(/B2|A#2/)
+    expect(t.frame_count).to eq(10)
   end
 
   it 'can change the table size' do

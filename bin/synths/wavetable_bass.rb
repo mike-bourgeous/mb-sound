@@ -20,19 +20,15 @@ DETUNE = 0.05.oct
 PORTAMENTO_TIME = 0.1 # TODO: control with MIDI CC 5
 
 MB::Sound.synth_script { |midi|
-  # Tables saved from MB::Sound::Wavetable.load_wavetable('sounds/drums.flac',
+  # Frames saved from MB::Sound::Wavetable.load_frames('sounds/drums.flac',
   # slices: 10) (and synth0.flac), which takes several seconds to analyze.
+  # The oscillator's frames are aligned in time (the default), so scanning
+  # doesn't cancel harmonics; the shaper's aren't, since alignment would
+  # shift its transfer curves.
   MB::U.headline('Loading wavetables...')
-  synthwave = MB::Sound::Wavetable.sort(
-    MB::Sound::Wavetable.normalize(
-      MB::Sound::Wavetable.load_wavetable('sounds/drums_wavetable_10.flac')
-    )
-  )
-  shaperwave = MB::Sound::Wavetable.sort(
-    MB::Sound::Wavetable.normalize(
-      MB::Sound::Wavetable.load_wavetable('sounds/synth0_wavetable_10.flac')
-    )
-  )
+  wt = MB::Sound::Wavetable
+  synthwave = wt.from_samples(wt.sort(wt.normalize(wt.load_frames('sounds/drums_wavetable_10.flac'))), name: 'drums')
+  shaperwave = wt.from_samples(wt.sort(wt.normalize(wt.load_frames('sounds/synth0_wavetable_10.flac'))), align: false, name: 'synth0')
 
   MB::U.headline('Building synth...')
 
@@ -54,15 +50,15 @@ MB::Sound.synth_script { |midi|
       portamento = ->(pitch) {
         pitch.glide(0, from: 440.hz).freq
           .filter(:lowpass, cutoff: 1.0 / PORTAMENTO_TIME, quality: 0.5)
-          .tone.reset(v.trigger)
       }
 
-      a = portamento.(v.hz.transpose(detune.()))
-        .ramp.at(2).named('A Phase')
-        .wavetable(wavetable: synthwave, number: cc1).named('A Wavetable')
+      # Wavetable oscillator an octave up (the old version read the table
+      # twice per cycle), starting half a cycle in, as before
+      a = (portamento.(v.hz.transpose(detune.())) * 2).tone.reset(v.trigger).with_phase(Math::PI)
+        .wavetable(synthwave, scan: cc1).named('A Wavetable')
         .filter(:lowpass, cutoff: 5000, quality: 0.4).named('A Filter')
 
-      b = portamento.(v.hz.transpose(detune.()))
+      b = portamento.(v.hz.transpose(detune.())).tone.reset(v.trigger)
         .triangle.at(0.5).named('B')
 
       # The old envelope measured: linear in velocity (0.1..1) and close to
@@ -73,8 +69,10 @@ MB::Sound.synth_script { |midi|
 
       sum = (a + b) * cc2 * env
 
-      (sum.softclip * 2)
-        .wavetable(wavetable: shaperwave, number: cc4)
+      # Waveshaper: the clipped sum sweeps the shaper's cycle (-1..1 is two
+      # cycles, centered on the middle of the table)
+      (sum.softclip + 0.5)
+        .phase_table(shaperwave, scan: cc4)
     }.filter(:highpass, cutoff: 10, quality: 0.7)
   }
 

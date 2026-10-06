@@ -13,47 +13,40 @@ MB::Sound.script(
   samples: [ENV['SAMPLES']&.to_i || 48000 * 60, 'Samples per benchmark (default from SAMPLES, else 1 minute)', 1..],
 ) { |_, p|
   samples = p.samples
+  ruby_samples = [samples / 50, 4800].max
 
-  wt = nil
-  phase = nil
-  number = nil
-  number_arr = nil
-  phase_arr = nil
-
+  table = nil
+  osc = nil
+  shaper = nil
+  sample_tone = nil
 
   MB::U.bench_csv(prefix: MB::U.ruby_info) do |bench|
     bench.report('build wavetable') do
-      phase = 100.hz.aramp.at(1)
-      phase_arr = phase.sample(samples)
-
-      number = 1.hz.ramp.lfo.at(0..1)
-      number_arr = number_arr = number.sample(samples)
-
-      wt = phase.wavetable(wavetable: 'sounds/piano0.flac', number: number)
+      table = MB::Sound::Wavetable.from_file('sounds/drums_wavetable.flac')
+      osc = 100.hz.wavetable(table, scan: 1.hz.ramp.lfo.at(0..1))
+      shaper = 100.hz.sine.at(-0.5..1.5).phase_table(table, scan: 0.5)
+      sample_tone = 100.hz.wavetable(MB::Sound::Wavetable.from_file('sounds/piano0.flac', mode: :sample, root: 100, loop: 24000...48000))
     end
 
-    bench.report('sample wavetable once') do
-      wt.sample(samples)
+    bench.report('oscillator once') do
+      osc.sample(samples)
     end
 
-    bench.report('sample wavetable in loop') do
-      wt.multi_sample(800, samples / 800)
+    bench.report('oscillator in loop') do
+      osc.multi_sample(800, samples / 800)
     end
 
-    bench.report('pure ruby linear') do
-      MB::Sound::Wavetable.wavetable_lookup_ruby(wavetable: wt.table, number: number_arr, phase: phase_arr.dup, lookup: :linear, wrap: :wrap)
+    bench.report('waveshaper in loop') do
+      shaper.multi_sample(800, samples / 800)
     end
 
-    bench.report('pure C linear') do
-      MB::Sound::Wavetable.wavetable_lookup_c(wavetable: wt.table, number: number_arr, phase: phase_arr.dup, lookup: :linear, wrap: :wrap)
+    bench.report('sample mode in loop') do
+      sample_tone.multi_sample(800, samples / 800)
     end
 
-    bench.report('pure ruby cubic') do
-      MB::Sound::Wavetable.wavetable_lookup_ruby(wavetable: wt.table, number: number_arr, phase: phase_arr.dup, lookup: :cubic, wrap: :wrap)
-    end
-
-    bench.report('pure C cubic') do
-      MB::Sound::Wavetable.wavetable_lookup_c(wavetable: wt.table, number: number_arr, phase: phase_arr.dup, lookup: :cubic, wrap: :wrap)
+    bench.report("pure ruby oscillator (#{ruby_samples} samples)") do
+      t = 100.hz.wavetable(table, scan: 0.3)
+      (ruby_samples / 800).times { t.sample_ruby(800) }
     end
   end
 }

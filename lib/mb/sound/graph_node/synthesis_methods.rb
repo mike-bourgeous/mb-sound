@@ -29,28 +29,45 @@ module MB
           self * MB::Sound::Envelope.preset(:adsr, attack, decay, sustain, release, sample_rate: sample_rate, **options)
         end
 
-        # Uses this node as the phase of a wavetable, with the given +:wavetable+
-        # 2D NArray and +:number+.
-        #
-        # +:wavetable+ - A 2D NArray to use as the wavetable.
-        # +:number+ - A GraphNode or Numeric to control wave number.
-        # +:lookup+ - Interpolation mode (noisy :linear or cleaner :cubic).
-        # +:wrap+ - A wrapping mode constant, or a MIDI value.
-        #
-        # See Wavetable#initialize.  A ramp Tone used as the phase is switched
-        # to its naive shape (Tone#aramp), since a phase must wrap exactly (a
-        # band-limited ramp would read the middle of the table at each wrap).
+        # Reads a cycle-mode MB::Sound::Wavetable (+table+: anything
+        # Wavetable.[] accepts) with this node as the phase in cycles (0...1
+        # is one cycle), +scan+ (0..1, a number or node; a Tone without an
+        # amplitude scans 0..1) across its frames.  Levels follow the phase's
+        # speed: +increment+ (a node of cycles per sample, or false for the
+        # brightest level), a phasor Tone's increment port, or else the
+        # phase's own change per sample (see GraphNode::Wavetable).  On a
+        # Tone, #wavetable makes the table its waveform instead (see
+        # Tone#wavetable); #phase_table always reads at this node's value.
         #
         # Example:
-        #     # Wavetable oscillator
-        #     midi.tone.ramp.wavetable(wavetable: t, number: midi.cc(1))
-        def wavetable(wavetable:, number:, lookup: :cubic, wrap: :wrap)
-          number = number.constant if number.is_a?(Numeric)
-          phase = self
-          phase = phase.aramp if phase.is_a?(Tone) && phase.wave_type == :ramp
-          phase = phase.or_at(1) if phase.respond_to?(:or_at)
-          number = number.or_at(0..1) if number.respond_to?(:or_at)
-          Wavetable.new(wavetable: wavetable, number: number, phase: phase, lookup: lookup, wrap: wrap, sample_rate: phase.sample_rate)
+        #     # Phase distortion from a wobbling phase
+        #     play (100.hz.phasor + 3.hz.sine.at(0.1)).phase_table(:basic, scan: 0.5)
+        def phase_table(table, scan: 0, interpolation: nil, wrap: :wrap, increment: nil)
+          scan = scan.or_at(0..1) if scan.is_a?(MB::Sound::Tone)
+          increment = self.increment if increment.nil? && is_a?(MB::Sound::Tone) && phasor?
+          Wavetable.new(
+            table: table, phase: self, scan: scan, increment: increment, interpolation: interpolation,
+            wrap: wrap, sample_rate: sample_rate
+          )
+        end
+
+        # See #phase_table (Tone#wavetable makes a wavetable oscillator).
+        def wavetable(table, scan: 0, interpolation: nil, wrap: :wrap, increment: nil)
+          phase_table(table, scan: scan, interpolation: interpolation, wrap: wrap, increment: increment)
+        end
+
+        # Waveshapes this node through a cycle-mode MB::Sound::Wavetable: the
+        # input from -1 to 1 reads across the whole cycle (0 reads the middle;
+        # beyond -1..1 the ends), +scan+ as for #phase_table.  Levels follow
+        # how fast the input moves (half its change per sample, its peak held
+        # for about a buffer), so a loud or high input reads duller levels
+        # instead of aliasing; +increment: false+ always reads the brightest
+        # level.
+        #
+        # Example:
+        #     play 110.hz.sine.waveshape(:basic, scan: 0.2.hz.lfo.triangle.at(0..1)).at(-12.db)
+        def waveshape(table, scan: 0, interpolation: nil, increment: nil)
+          phase_table(table, scan: scan, interpolation: interpolation, wrap: :shape, increment: increment)
         end
       end
     end

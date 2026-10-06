@@ -25,6 +25,10 @@ module MB
       #   wraps/increment ports (BandLimit.sync_pulses).
       # - +noise+: [splitmix64 generator state, an Integer below 2**64] for
       #   noise (FastSound.phasor/oscillate, Tone.noise_random), or nil.
+      # - +table+: [sample position in source samples, last phase
+      #   modulation, primed (0 or 1), last phase, last increment] for
+      #   #wavetable tones
+      #   (FastWavetable.oscillate/play, Wavetable::KernelRuby).
       #
       # The other fields:
       # - +jump_residual+: the rest of a band-limited phase jump's step still
@@ -45,7 +49,7 @@ module MB
       class State
         FIELDS = [
           :phase, :blep, :blit, :sync, :sync_ring, :pulses, :noise,
-          :jump_residual, :last_freq, :last_width, :seed, :draws, :reset_ended,
+          :jump_residual, :last_freq, :last_width, :seed, :draws, :reset_ended, :table,
         ].freeze
 
         attr_accessor(*FIELDS)
@@ -74,6 +78,7 @@ module MB
           @draws = 0
           @rng = nil
           @reset_ended = false
+          @table = [0.0, 0.0, 0, 0.0, 0.0]
 
           fields.each do |k, v|
             v = Numo::DFloat.cast(v) if (k == :sync_ring || k == :jump_residual) && v.is_a?(Array)
@@ -118,6 +123,7 @@ module MB
         def unprime(sync: false)
           @blep[3] = 0
           @blit[6] = 0
+          @table[2] = 0
           if sync
             @sync = [@phase[0], 0.0, 1.0, 0, 0]
             @sync_ring.fill(0)
@@ -141,6 +147,7 @@ module MB
             seed: @seed,
             draws: @draws,
             reset_ended: @reset_ended,
+            table: @table.dup,
           }
         end
 

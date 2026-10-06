@@ -393,6 +393,10 @@ module MB
         @tempo = nil
         @lock = nil
         @lock_phase = nil
+        @table = nil
+        @zone_table = nil
+        @scan = nil
+        @interpolation = nil
 
         @frequency = nil
         @phase = nil
@@ -476,10 +480,78 @@ module MB
         @wave_type == :phasor
       end
 
+      # Makes a MB::Sound::Wavetable this tone's waveform: +table+ is
+      # anything Wavetable.[] accepts (a Wavetable, a library name like
+      # :saw, a sound file, samples) or a Wavetable::KeyMap.  A cycle-mode
+      # table plays one cycle per period, with +scan+ (0..1, a number or a
+      # graph node; a Tone without an amplitude scans 0..1) morphing across
+      # its frames; a sample-mode table plays its sound at this tone's pitch
+      # relative to its root, restarting at each reset (see #reset, e.g.
+      # key sync in a synth voice).  +interpolation+ overrides the table's
+      # (see Wavetable::INTERPOLATIONS).
+      #
+      # Band-limited tables pick their levels from this tone's motion per
+      # sample, so FM, phase modulation (#pm), and phase warps (#pwm) stay
+      # clean as far as the levels allow; warp corners get PolyBLAMP
+      # corrections, and resets, timeline jumps, and hard or soft sync
+      # (#sync, #softsync, real or complex tables) get minimum-phase steps
+      # measured on the table: for sync, residuals for the jumps in the
+      # value and its first three derivatives, which come exactly from the
+      # table's harmonics (Wavetable.sync_tables).  A synced saw table
+      # aliases -75 dB at 1 kHz and -57 dB at 3 kHz (a synced #ramp: -99 and
+      # -95; `.oversample(2)` gets the table to -90 and -70 at about 10% of
+      # realtime).  Sample-mode tables take no phase modulation, warp,
+      # sync, or noise.  #noise reads a cycle table at random phases
+      # (picking levels by the pitch), so it has the table's distribution
+      # of values.
+      #
+      # Examples (bin/sound.rb):
+      #     play 110.hz.wavetable(:basic, scan: 0.2.hz.lfo.triangle.at(0..1)).at(-12.db)
+      #     play C3.wavetable(:pulses, scan: adsr(0.01, 1, 0.2, 0.5)).at(-12.db)
+      #     t = Wavetable.from_file('sounds/piano_120hz_b2.flac', mode: :sample, root: 120)
+      #     play E3.wavetable(t)
+      def wavetable(table, scan: nil, interpolation: nil)
+        table = MB::Sound::Wavetable.for(table)
+        tables = table.is_a?(MB::Sound::Wavetable::KeyMap) ? table.tables : [table]
+        tables.each { |t| t.interpolation_code(interpolation) } # checks the name
+        unless scan.nil? || scan.is_a?(Numeric) || scan.respond_to?(:sample)
+          raise ArgumentError, "Scan must be nil, a number, or a graph node (got #{scan.inspect})"
+        end
+
+        scan = scan.at(0..1) if scan.is_a?(Tone) && !scan.amplitude_set && !scan.phasor? # (fixup_source would make it -1..1)
+
+        configure do
+          @table = table
+          @zone_table = nil
+          @scan = fixup_source(scan)
+          @interpolation = interpolation
+          @wave_type = :wavetable
+          @band_limit = true
+        end
+      end
+
+      # The table (a Wavetable or Wavetable::KeyMap) of a #wavetable tone,
+      # or nil.
+      def table
+        @table
+      end
+
+      # The scan input of a #wavetable tone (nil, a number, or a node).
+      def scan
+        @scan
+      end
+
+      # True if this is a #wavetable tone.
+      def wavetable?
+        @wave_type == :wavetable
+      end
+
       # True if this tone's samples are band-limited (see BandLimit): a
       # band-limited ramp, square, or triangle (not their naive a* twins),
       # or a warped band-limited shape, and not noise.  See also #blit?.
       def band_limited?
+        return current_table.mipped? if wavetable?
+
         !!band_limit_setting && random_advance == 0 &&
           (BandLimit::WAVES.include?(@wave_type) || (warped? && BandLimit::WARP_WAVES.include?(@wave_type)))
       end
@@ -1104,9 +1176,10 @@ module MB
       # The tone in C (see the class description for the steps).
       def sample_c(count)
         start unless @started
+        return nil if one_shot_ended?
 
-        count, freq, phase, width, pulses, resets, targets, jumps, jump_phase = get_upstream_inputs(count)
-        return nil if missing_input?(freq, phase, width, pulses, resets, targets)
+        count, freq, phase, width, pulses, resets, targets, jumps, jump_phase, scan = get_upstream_inputs(count)
+        return nil if missing_input?(freq, phase, width, pulses, resets, targets, scan)
 
         state = @state
         if @ports
@@ -1115,16 +1188,17 @@ module MB
           state.frame_segments = nil
         end
 
+        pick_zone(freq) if @table.is_a?(MB::Sound::Wavetable::KeyMap) && (@zone_table.nil? || @reset.nil?)
         build_buffer(count)
 
         points = reset_points(resets)
         locks = lock_points(jumps)
         if points || locks
-          buf = sample_segments(count, freq, phase, width, points, targets, locks, jump_phase) do |out, f, ph, w|
-            kernel_c(out, f, ph, w, nil)
+          buf = sample_segments(count, freq, phase, width, points, targets, locks, jump_phase, scan) do |out, f, ph, w, sc|
+            kernel_c(out, f, ph, w, nil, sc)
           end
         else
-          buf = kernel_c(osc_view(count), freq, phase, width, pulses)
+          buf = kernel_c(osc_view(count), freq, phase, width, pulses, scan)
           add_jump_residual(buf) if state.jump_residual
         end
 
@@ -1138,20 +1212,22 @@ module MB
       # from the kernels' Ruby mirrors.
       def sample_ruby(count)
         start unless @started
+        return nil if one_shot_ended?
 
-        count, freq_table, phase_table, width, pulses, resets, targets, jumps, jump_phase = get_upstream_inputs(count)
-        return nil if missing_input?(freq_table, phase_table, width, pulses, resets, targets)
+        count, freq_table, phase_table, width, pulses, resets, targets, jumps, jump_phase, scan = get_upstream_inputs(count)
+        return nil if missing_input?(freq_table, phase_table, width, pulses, resets, targets, scan)
 
+        pick_zone(freq_table) if @table.is_a?(MB::Sound::Wavetable::KeyMap) && (@zone_table.nil? || @reset.nil?)
         build_buffer(count)
 
         points = reset_points(resets)
         locks = lock_points(jumps)
         if points || locks
-          buf = sample_segments(count, freq_table, phase_table, width, points, targets, locks, jump_phase) do |out, f, ph, w|
-            kernel_ruby(out, f, ph, w, nil)
+          buf = sample_segments(count, freq_table, phase_table, width, points, targets, locks, jump_phase, scan) do |out, f, ph, w, sc|
+            kernel_ruby(out, f, ph, w, nil, sc)
           end
         else
-          buf = kernel_ruby(osc_view(count), freq_table, phase_table, width, pulses)
+          buf = kernel_ruby(osc_view(count), freq_table, phase_table, width, pulses, scan)
           add_jump_residual(buf)
         end
 
@@ -1175,6 +1251,7 @@ module MB
           reset_to: @reset_to.respond_to?(:sample) ? @reset_to : nil,
           timeline_jumps: @lock,
           timeline_phase: @lock_phase,
+          scan: @scan.respond_to?(:sample) ? @scan : nil,
         }.compact
       end
 
@@ -1309,6 +1386,7 @@ module MB
 
       def check_wave_type(wave_type)
         return if WAVE_TYPES.include?(wave_type) || wave_type == :phasor
+        raise ArgumentError, 'Use Tone#wavetable to give a wavetable tone its table' if wave_type == :wavetable
 
         raise ArgumentError, "Invalid wave type #{wave_type.inspect}; only #{WAVE_TYPES.map(&:inspect).join(', ')}, or :phasor are supported"
       end
@@ -1367,14 +1445,19 @@ module MB
       # phase modulation +phase_mod+ (radians): by default those of the last
       # sample played and no phase modulation (a jump between buffers), or
       # those of the reset sample (a reset input; see #sample_segments).
-      def phase_jump(freq: state.last_freq, width: state.last_width, phase_mod: 0.0)
+      def phase_jump(freq: state.last_freq, width: state.last_width, phase_mod: 0.0, scan: nil)
         state = @state
         before = state.phase[0]
-        played = freq != 0.0 && (state.blep[3] != 0 || state.blit[6] != 0)
+        played = freq != 0.0 && (state.blep[3] != 0 || state.blit[6] != 0 || state.table[2] != 0)
+        if wavetable?
+          table_before = current_table
+          position = state.table[0]
+        end
         yield
         after = state.phase[0]
         state.unprime(sync: !!@sync_source)
 
+        return table_jump(table_before, before, after, position, freq, width, phase_mod, scan) if wavetable? && played && !@sync_source
         return unless played && !@sync_source && synth_kernel? && !blit?
 
         w = BandLimit.clamp_width((width || 0.5).to_f)
@@ -1395,7 +1478,58 @@ module MB
       def pad_residual(r, length)
         return r[0...length] if r.length >= length
 
-        Numo::DFloat.zeros(length).tap { |z| z[0...r.length] = r }
+        r.class.zeros(length).tap { |z| z[0...r.length] = r }
+      end
+
+      # Queues a band-limited step (see #phase_jump) for a wavetable tone
+      # whose phase jumped from +before+ to +after+ (cycles; sample mode:
+      # from source position +position+ to the start), measuring the old
+      # waveform in +old_table+ and the new in the current table.
+      def table_jump(old_table, before, after, position, freq, width, phase_mod, scan)
+        table = current_table
+        return unless old_table.mipped? && table.mipped?
+
+        scan = scan.nil? ? 0.0 : scan.to_f
+        inc = freq * advance
+
+        if table.mode == :sample
+          v0 = old_table.value_at(position, increment: freq * old_table.speed(@sample_rate), sample_rate: @sample_rate, interpolation: @interpolation)
+          v1 = table.value_at(@state.table[0], increment: freq * table.speed(@sample_rate), sample_rate: @sample_rate, interpolation: @interpolation)
+          s0 = s1 = 0.0
+        else
+          w = width.nil? ? 0.5 : BandLimit.clamp_width(width.to_f)
+          pm = phase_mod / TWOPI
+          v0, s0 = table_shape(old_table, before + pm, w, inc, scan)
+          v1, s1 = table_shape(table, after + pm, w, inc, scan)
+        end
+
+        blep, blamp = Tone.jump_tables
+        residual = blep * (v1 - v0) + blamp * ((s1 - s0) * inc)
+        residual = residual.real if residual.is_a?(Numo::DComplex) && !table.complex?
+        @state.jump_residual = @state.jump_residual ? residual + pad_residual(@state.jump_residual, residual.length) : residual
+      end
+
+      # [value, slope per cycle] of a cycle-mode +table+ at phase +e+ (cycles,
+      # with phase modulation) warped by width +w+, for a tone moving +inc+
+      # cycles per sample.
+      def table_shape(table, e, w, inc, scan)
+        wf = w == 0.5 ? 1.0 : 0.5 / [w, 1.0 - w].min
+        m = inc.abs * wf
+        x = e - e.floor
+        u = w == 0.5 ? x : BandLimit.warp(x, w)
+        k = w == 0.5 ? 1.0 : (x < w ? 0.5 / w : 0.5 / (1.0 - w))
+        value = table.value_at(u, scan: scan, increment: m, sample_rate: @sample_rate, interpolation: @interpolation)
+
+        # The exact slope from the table's harmonics (see
+        # Wavetable::KernelRuby.spectral_derivs)
+        spec = table.kernel_spec(@sample_rate, @interpolation)
+        dre = [0.0, 0.0]
+        dim = [0.0, 0.0]
+        kr = MB::Sound::Wavetable::KernelRuby
+        kr.spectral_derivs(spec, u, kr.select(spec, m, scan.to_f), 2, dre, dim)
+        slope = table.complex? ? Complex(dre[1], dim[1]) : dre[1]
+
+        [value, slope * k]
       end
 
       # Adds any queued phase jump step (see #phase_jump) to +buf+, scaled
@@ -1410,9 +1544,32 @@ module MB
       end
 
       # True if an input needed for the next samples has ended.
-      def missing_input?(freq, phase, width, pulses, resets, targets)
+      def missing_input?(freq, phase, width, pulses, resets, targets, scan = nil)
         freq.nil? || phase.nil? || (warped? && width.nil?) || (@sync_source && pulses.nil?) ||
-          (@reset_to.respond_to?(:sample) && targets.nil?)
+          (@reset_to.respond_to?(:sample) && targets.nil?) || (@scan.respond_to?(:sample) && scan.nil?)
+      end
+
+      # True if this is a sample-mode one-shot (see Wavetable) that has
+      # played to its end without a reset input to restart it.
+      def one_shot_ended?
+        return false unless wavetable? && @reset.nil? && @state
+
+        table = current_table
+        table.one_shot? && @state.table[0] >= table.size
+      end
+
+      # The table a #wavetable tone plays now (for a KeyMap, the zone picked
+      # by #pick_zone).
+      def current_table
+        return @table unless @table.is_a?(MB::Sound::Wavetable::KeyMap)
+
+        @zone_table || @table.tables[0]
+      end
+
+      # Picks a KeyMap zone from the frequency +freq+ (Hz; a number or the
+      # first value of an NArray).
+      def pick_zone(freq)
+        @zone_table = @table.table_for_frequency(input_at(freq, 0))
       end
 
       # The indices of the nonzero samples of the reset input's buffer
@@ -1460,7 +1617,7 @@ module MB
       # #kernel_ruby) on a view of the output buffer with the matching
       # slices of the frequency, phase modulation, and width inputs, and
       # returns the samples.  Returns a view of the output buffer.
-      def sample_segments(count, freq, phase, width, points, targets, locks = nil, jump_phase = nil)
+      def sample_segments(count, freq, phase, width, points, targets, locks = nil, jump_phase = nil, scan = nil)
         state = @state
         state.frame_segments = [] if @ports
 
@@ -1473,7 +1630,7 @@ module MB
             state.frame_segments&.push([state.phase[0], f, stop - start])
 
             out = @osc_buf[start...stop].inplace!
-            result = yield(out, f, slice_input(phase, start, stop), slice_input(width, start, stop))
+            result = yield(out, f, slice_input(phase, start, stop), slice_input(width, start, stop), slice_input(scan, start, stop))
             out[true] = result unless result.equal?(out)
             add_jump_residual(out)
           end
@@ -1481,6 +1638,7 @@ module MB
           break if stop == count
 
           jump_args = { freq: input_at(freq, stop), width: width && input_at(width, stop), phase_mod: input_at(phase, stop) }
+          jump_args[:scan] = input_at(scan, stop) if wavetable?
           if locks&.include?(stop)
             target = @start_cycles + jump_phase[stop]
             phase_jump(**jump_args) { state.phi = target }
@@ -1488,7 +1646,14 @@ module MB
 
           if points&.include?(stop)
             target = reset_target(targets, stop)
-            phase_jump(**jump_args) { state.phi = target }
+            phase_jump(**jump_args) {
+              state.phi = target
+              if wavetable?
+                # Samples restart; key zones are picked anew
+                state.table[0] = 0.0
+                pick_zone(jump_args[:freq]) if @table.is_a?(MB::Sound::Wavetable::KeyMap)
+              end
+            }
           end
 
           start = stop
@@ -1520,9 +1685,31 @@ module MB
 
       # Runs the C kernel for the current settings (see #kernel) into +out+
       # (an inplace view of the output buffer), returning the samples.
-      def kernel_c(out, freq, phase, width, pulses)
+      def kernel_c(out, freq, phase, width, pulses, scan = nil)
         state = @state
         case kernel
+        when :wavetable
+          table = current_table
+          if @sync_source
+            check_sync(phase)
+            ensure_sync_ring(table)
+            buf = table.sync(
+              out, freq, @advance, @gain, @offset, state.sync, state.sync_ring, pulses, @soft_sync, width, scan || 0,
+              @interpolation, @sample_rate, !@keep_dc, table.mipped?
+            ).inplace!
+            state.phase[0] = state.sync[0]
+            buf
+          elsif table.mode == :cycle
+            table.oscillate(
+              out, freq, @advance, @gain, @offset, state.phase, state.table, phase, width, scan || 0,
+              @interpolation, @sample_rate, !@keep_dc, @random_advance, state.noise
+            ).inplace!
+          else
+            table.play(
+              out, freq, @advance, table.speed(@sample_rate), @gain, @offset, state.phase, state.table,
+              @interpolation, @sample_rate
+            ).inplace!
+          end
         when :sync
           check_sync(phase)
           blep, blamp = BandLimit.minblep_tables
@@ -1553,11 +1740,32 @@ module MB
 
       # Ruby mirror of #kernel_c: computes out.length samples and stores
       # them in +out+ (an inplace view of the output buffer), returning it.
-      def kernel_ruby(out, freq_table, phase_table, width, pulses)
+      def kernel_ruby(out, freq_table, phase_table, width, pulses, scan = nil)
         count = out.length
         state = @state
 
         case kernel
+        when :wavetable
+          table = current_table
+          if @sync_source
+            check_sync(phase_table)
+            ensure_sync_ring(table)
+            values = table.sync_ruby(
+              out.dup, freq_table, @advance, @gain, @offset, state.sync, state.sync_ring, pulses, @soft_sync, width, scan || 0,
+              @interpolation, @sample_rate, !@keep_dc, table.mipped?
+            )
+            state.phase[0] = state.sync[0]
+          elsif table.mode == :cycle
+            values = table.oscillate_ruby(
+              out.dup, freq_table, @advance, @gain, @offset, state.phase, state.table, phase_table, width, scan || 0,
+              @interpolation, @sample_rate, !@keep_dc, @random_advance, state.noise
+            )
+          else
+            values = table.play_ruby(
+              out.dup, freq_table, @advance, table.speed(@sample_rate), @gain, @offset, state.phase, state.table,
+              @interpolation, @sample_rate
+            )
+          end
         when :sync
           check_sync(phase_table)
           blep, blamp = BandLimit.minblep_tables
@@ -1623,8 +1831,27 @@ module MB
         [phases, increments]
       end
 
+      # Complex tables keep imaginary sync corrections after the real ones.
+      def ensure_sync_ring(table)
+        taps = BandLimit::SYNC_TAPS * (table.complex? ? 2 : 1)
+        @state.sync_ring = Numo::DFloat.zeros(taps) if @state.sync_ring.length != taps
+      end
+
+      # Raises an error for settings a #wavetable tone can't play.
+      def check_wavetable
+        tables = @table.is_a?(MB::Sound::Wavetable::KeyMap) ? @table.tables : [@table]
+        if random_advance != 0 && (@sync_source || tables.any? { |t| t.mode == :sample })
+          raise ArgumentError, 'Synced and sample-mode wavetable tones cannot be noise'
+        end
+        if tables.any? { |t| t.mode == :sample }
+          raise ArgumentError, 'Sample-mode wavetables take no phase modulation' if @phase_mod && @phase_mod != 0
+          raise ArgumentError, 'Sample-mode wavetables take no phase warp (pwm)' if warped?
+          raise ArgumentError, 'Sample-mode wavetables cannot be synced' if @sync_source
+        end
+      end
+
       def check_sync(phase_mod)
-        unless BandLimit::WARP_WAVES.include?(@wave_type)
+        unless BandLimit::WARP_WAVES.include?(@wave_type) || wavetable?
           raise ArgumentError, "A #{@wave_type} can't be synced (only #{BandLimit::WARP_WAVES.join(', ')})"
         end
         raise ArgumentError, 'A synced oscillator cannot also have phase modulation' unless phase_mod == 0 || phase_mod.nil?
@@ -1638,7 +1865,10 @@ module MB
         @kernel ||= begin
           compute_advance
           @fade_band = band_limit_fade
-          if phasor?
+          if wavetable?
+            check_wavetable
+            :wavetable
+          elsif phasor?
             :phasor
           elsif @sync_source
             :sync
@@ -1706,7 +1936,7 @@ module MB
 
       # TODO: use BufferHelper?
       def build_buffer(count)
-        buf_class = BUFFER_CLASS[@wave_type] || Numo::SFloat
+        buf_class = BUFFER_CLASS[@wave_type] || (wavetable? && current_table.complex? ? Numo::SComplex : Numo::SFloat)
         if @osc_buf.nil? || @osc_buf.class != buf_class || @osc_buf.length != count
           old_length = @osc_buf&.length || 0
           @osc_buf = buf_class.zeros(MB::M.max(count, old_length))
@@ -1770,6 +2000,13 @@ module MB
           targets = nil
         end
 
+        scan = @scan
+        if scan.respond_to?(:sample)
+          scan = scan.sample(count)
+          scan = nil if scan&.empty?
+          min_length = scan.length if scan && scan.length < min_length
+        end
+
         # Timeline jumps (see #follow_timeline); a tempo node never ends
         if @lock
           jumps = @lock.sample(count)
@@ -1789,11 +2026,12 @@ module MB
           targets = targets[0...min_length] if targets&.is_a?(Numo::NArray)
           jumps = jumps[0...min_length] if jumps&.is_a?(Numo::NArray)
           jump_phase = jump_phase[0...min_length] if jump_phase&.is_a?(Numo::NArray)
+          scan = scan[0...min_length] if scan&.is_a?(Numo::NArray)
         end
 
         # One Array reused by every call (destructured by the callers), not
         # a new one per buffer
-        ret = (@upstream_inputs ||= Array.new(9))
+        ret = (@upstream_inputs ||= Array.new(10))
         ret[0] = min_length
         ret[1] = freq
         ret[2] = phase
@@ -1803,6 +2041,7 @@ module MB
         ret[6] = targets
         ret[7] = jumps
         ret[8] = jump_phase
+        ret[9] = scan
         ret
       end
 
