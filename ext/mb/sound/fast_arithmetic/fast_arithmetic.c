@@ -35,7 +35,10 @@
  * .copy copies a buffer into another (for nodes that work in place on a
  * copy of a frozen input), and .min_max finds Numo's min and max of a real
  * buffer at once (for Synth's lane levels).  .divide and .power are the
- * in-place / and ** of GraphNode arithmetic procs for real buffers.
+ * in-place / and ** of GraphNode arithmetic procs for real buffers, and
+ * .circular_read/.circular_write are MB::M's ring buffer copies (delay
+ * lines, CircularBuffer) without the Ranges and views; .wet_dry is
+ * Filter::Delay's output mix.
  *
  * Buffer types: SFloat (SFloat inputs), DFloat (DFloat), SComplex (SComplex
  * or SFloat), DComplex (DComplex or DFloat), every input exactly as long as
@@ -55,6 +58,8 @@ enum mb_arith_type { MB_ARITH_NONE, MB_ARITH_SF, MB_ARITH_DF, MB_ARITH_SC, MB_AR
 
 typedef struct { float r, i; } mb_sc;
 typedef struct { double r, i; } mb_dc;
+
+static size_t elem_size(enum mb_arith_type t);
 
 static enum mb_arith_type arith_type(VALUE v)
 {
@@ -482,14 +487,7 @@ static VALUE ruby_copy(VALUE self, VALUE out, VALUE src)
 		return Qnil;
 	}
 
-	size_t elsize;
-	switch (ot) {
-		case MB_ARITH_SF: elsize = sizeof(float); break;
-		case MB_ARITH_DF: elsize = sizeof(double); break;
-		case MB_ARITH_SC: elsize = sizeof(mb_sc); break;
-		case MB_ARITH_DC: elsize = sizeof(mb_dc); break;
-		default: return Qnil;
-	}
+	size_t elsize = elem_size(ot);
 
 	char *outp = nary_get_pointer_for_write(out) + nary_get_offset(out);
 	const char *srcp = read_ptr(src);
@@ -660,6 +658,167 @@ static VALUE ruby_power(VALUE self, VALUE out, VALUE exponent)
 	return out;
 }
 
+// The element size of an arithmetic type.
+static size_t elem_size(enum mb_arith_type t)
+{
+	switch (t) {
+		case MB_ARITH_SF: return sizeof(float);
+		case MB_ARITH_DF: return sizeof(double);
+		case MB_ARITH_SC: return sizeof(mb_sc);
+		case MB_ARITH_DC: return sizeof(mb_dc);
+		default: return 0;
+	}
+}
+
+// True if +v+ is a writable contiguous 1D NArray.
+static _Bool writable_contiguous(VALUE v)
+{
+	if (RNARRAY_NDIM(v) != 1 || !RTEST(nary_check_contiguous(v)) || OBJ_FROZEN(v)) {
+		return 0;
+	}
+	VALUE data = RNARRAY_TYPE(v) == NARRAY_VIEW_T ? RNARRAY_VIEW(v)->data : v;
+	return !OBJ_FROZEN(data);
+}
+
+/*
+ * call-seq: MB::Sound::FastArithmetic.circular_read(source, offset, length, target) -> target or nil
+ *
+ * MB::M.circular_read(source, offset, length, target: target) without
+ * allocating: copies +length+ values of +source+ from +offset+ (negative
+ * counts from the end), wrapping at its end, into the start of +target+.
+ * Both must be contiguous 1D NArrays of one type, +target+ writable and at
+ * least +length+ long, +length+ from 1 to the source length, and +offset+
+ * within the source; otherwise returns nil (MB::M then raises or casts).
+ */
+static VALUE ruby_circular_read(VALUE self, VALUE source, VALUE offset_v, VALUE length_v, VALUE target)
+{
+	enum mb_arith_type t = arith_type(source);
+	if (t == MB_ARITH_NONE || arith_type(target) != t || !RB_INTEGER_TYPE_P(offset_v) || !RB_INTEGER_TYPE_P(length_v)) {
+		return Qnil;
+	}
+	if (RNARRAY_NDIM(source) != 1 || !RTEST(nary_check_contiguous(source)) || !writable_contiguous(target)) {
+		return Qnil;
+	}
+
+	long n = (long)RNARRAY_SIZE(source);
+	long offset = NUM2LONG(offset_v);
+	long length = NUM2LONG(length_v);
+	if (offset < -n || offset >= n || length < 1 || length > n || (size_t)length > RNARRAY_SIZE(target)) {
+		return Qnil;
+	}
+	if (offset < 0) {
+		offset += n;
+	}
+
+	size_t es = elem_size(t);
+	const char *src = read_ptr(source);
+	char *dst = nary_get_pointer_for_write(target) + nary_get_offset(target);
+	long before = n - offset;
+	if (length <= before) {
+		memmove(dst, src + offset * es, length * es);
+	} else {
+		memmove(dst, src + offset * es, before * es);
+		memmove(dst + before * es, src, (length - before) * es);
+	}
+
+	RB_GC_GUARD(source);
+	return target;
+}
+
+/*
+ * call-seq: MB::Sound::FastArithmetic.circular_write(target, source, offset) -> target or nil
+ *
+ * MB::M.circular_write(target, source, offset) without allocating: copies
+ * +source+ into +target+ from +offset+ (negative counts from the end),
+ * wrapping at its end.  Both must be contiguous 1D NArrays of one type,
+ * +target+ writable and at least as long as +source+ (not empty), and
+ * +offset+ within the target; otherwise returns nil (MB::M then raises or
+ * casts).
+ */
+static VALUE ruby_circular_write(VALUE self, VALUE target, VALUE source, VALUE offset_v)
+{
+	enum mb_arith_type t = arith_type(target);
+	if (t == MB_ARITH_NONE || arith_type(source) != t || !RB_INTEGER_TYPE_P(offset_v)) {
+		return Qnil;
+	}
+	if (RNARRAY_NDIM(source) != 1 || !RTEST(nary_check_contiguous(source)) || !writable_contiguous(target)) {
+		return Qnil;
+	}
+
+	long n = (long)RNARRAY_SIZE(target);
+	long length = (long)RNARRAY_SIZE(source);
+	long offset = NUM2LONG(offset_v);
+	if (offset < -n || offset >= n || length < 1 || length > n) {
+		return Qnil;
+	}
+	if (offset < 0) {
+		offset += n;
+	}
+
+	size_t es = elem_size(t);
+	const char *src = read_ptr(source);
+	char *dst = nary_get_pointer_for_write(target) + nary_get_offset(target);
+	long before = n - offset;
+	if (length <= before) {
+		memmove(dst + offset * es, src, length * es);
+	} else {
+		memmove(dst + offset * es, src, before * es);
+		memmove(dst, src + before * es, (length - before) * es);
+	}
+
+	RB_GC_GUARD(source);
+	return target;
+}
+
+/*
+ * call-seq: MB::Sound::FastArithmetic.wet_dry(out, delayed, wet, data, dry) -> out or nil
+ *
+ * Computes wet * delayed + dry * data (or just wet * delayed when +dry+ is
+ * nil) into +out+, as Filter::Delay's Numo expression does for SFloat
+ * buffers and Numeric gains: each product rounded to float, then the sum.
+ * +out+ may be +data+ (each sample reads its inputs before writing).  All
+ * buffers must be contiguous SFloat of one length, +out+ writable, and
+ * +wet+/+dry+ Floats or Integers; otherwise returns nil without writing.
+ */
+static VALUE ruby_wet_dry(VALUE self, VALUE out, VALUE delayed, VALUE wet, VALUE data, VALUE dry)
+{
+	if (arith_type(out) != MB_ARITH_SF || !writable_contiguous(out)) {
+		return Qnil;
+	}
+	size_t length = RNARRAY_SIZE(out);
+	if (arith_type(delayed) != MB_ARITH_SF || !shape_ok(delayed, length)) {
+		return Qnil;
+	}
+	if (!(RB_FLOAT_TYPE_P(wet) || RB_INTEGER_TYPE_P(wet))) {
+		return Qnil;
+	}
+	_Bool use_dry = !NIL_P(dry);
+	if (use_dry && (!(RB_FLOAT_TYPE_P(dry) || RB_INTEGER_TYPE_P(dry)) || arith_type(data) != MB_ARITH_SF || !shape_ok(data, length))) {
+		return Qnil;
+	}
+
+	float w = (float)NUM2DBL(wet);
+	float *o = (float *)(nary_get_pointer_for_write(out) + nary_get_offset(out));
+	const float *d = (const float *)read_ptr(delayed);
+	if (use_dry) {
+		float g = (float)NUM2DBL(dry);
+		const float *x = (const float *)read_ptr(data);
+		for (size_t i = 0; i < length; i++) {
+			float a = w * d[i];
+			float b = g * x[i];
+			o[i] = a + b;
+		}
+	} else {
+		for (size_t i = 0; i < length; i++) {
+			o[i] = w * d[i];
+		}
+	}
+
+	RB_GC_GUARD(delayed);
+	RB_GC_GUARD(data);
+	return out;
+}
+
 void Init_fast_arithmetic(void)
 {
 	VALUE mb = rb_define_module("MB");
@@ -672,4 +831,7 @@ void Init_fast_arithmetic(void)
 	rb_define_module_function(fast_arithmetic, "min_max", ruby_min_max, 2);
 	rb_define_module_function(fast_arithmetic, "divide", ruby_divide, 2);
 	rb_define_module_function(fast_arithmetic, "power", ruby_power, 2);
+	rb_define_module_function(fast_arithmetic, "circular_read", ruby_circular_read, 4);
+	rb_define_module_function(fast_arithmetic, "circular_write", ruby_circular_write, 3);
+	rb_define_module_function(fast_arithmetic, "wet_dry", ruby_wet_dry, 5);
 }

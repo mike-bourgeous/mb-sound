@@ -298,6 +298,72 @@ RSpec.describe(MB::Sound::FastArithmetic) do
     end
   end
 
+  describe '.circular_read and .circular_write' do
+    [Numo::SFloat, Numo::DComplex].each do |cls|
+      it "match MB::M for #{cls} at every offset and length" do
+        source = make_input(cls, 13, 21)
+        (-13...13).each do |offset|
+          [1, 5, 12, 13].each do |length|
+            target = cls.zeros(15)
+            expected = MB::M.circular_read(source, offset, length, target: cls.zeros(15))
+            expect(MB::Sound::FastArithmetic.circular_read(source, offset, length, target)).to equal(target)
+            expect(target.to_binary).to eq(expected.to_binary), "read #{offset}, #{length}"
+
+            data = make_input(cls, length, offset + 50)
+            buf = source.dup
+            expected = MB::M.circular_write(source.dup, data, offset)
+            expect(MB::Sound::FastArithmetic.circular_write(buf, data, offset)).to equal(buf)
+            expect(buf.to_binary).to eq(expected.to_binary), "write #{offset}, #{length}"
+          end
+        end
+      end
+    end
+
+    it 'return nil for bad offsets and lengths, other types, and frozen targets' do
+      s = Numo::SFloat.new(8).seq
+      t = Numo::SFloat.zeros(8)
+      expect(MB::Sound::FastArithmetic.circular_read(s, 8, 2, t)).to be_nil
+      expect(MB::Sound::FastArithmetic.circular_read(s, 0, 0, t)).to be_nil
+      expect(MB::Sound::FastArithmetic.circular_write(t, Numo::SFloat[], 0)).to be_nil
+      expect(MB::Sound::FastArithmetic.circular_read(s, -9, 2, t)).to be_nil
+      expect(MB::Sound::FastArithmetic.circular_read(s, 0, 9, Numo::SFloat.zeros(9))).to be_nil
+      expect(MB::Sound::FastArithmetic.circular_read(s, 0, 4, Numo::SFloat.zeros(3))).to be_nil
+      expect(MB::Sound::FastArithmetic.circular_read(s, 0, 4, Numo::DFloat.zeros(4))).to be_nil
+      expect(MB::Sound::FastArithmetic.circular_read(s, 0, 4, t.dup.freeze)).to be_nil
+      expect(MB::Sound::FastArithmetic.circular_write(t, Numo::SFloat.ones(9), 0)).to be_nil
+      expect(MB::Sound::FastArithmetic.circular_write(t, Numo::SFloat.ones(2), 8)).to be_nil
+      expect(MB::Sound::FastArithmetic.circular_write(t, Numo::DFloat.ones(2), 0)).to be_nil
+      expect(t).to eq(Numo::SFloat.zeros(8))
+    end
+  end
+
+  describe '.wet_dry' do
+    it "matches Filter::Delay's Numo mix exactly" do
+      delayed = make_input(Numo::SFloat, 129, 31)
+      data = make_input(Numo::SFloat, 129, 32)
+      [[0.5, 0.25], [1, 0], [0.3, 1], [-0.7, 0.123], [2, nil]].each do |wet, dry|
+        expected = wet * delayed
+        expected = expected + dry * data if dry && dry != 0
+        out = Numo::SFloat.zeros(129)
+        expect(MB::Sound::FastArithmetic.wet_dry(out, delayed, wet, data, dry && dry != 0 ? dry : nil)).to equal(out)
+        expect(out.to_binary).to eq(expected.to_binary), "wet #{wet}, dry #{dry}"
+
+        in_place = data.dup
+        MB::Sound::FastArithmetic.wet_dry(in_place, delayed, wet, in_place, dry && dry != 0 ? dry : nil)
+        expect(in_place.to_binary).to eq(expected.to_binary)
+      end
+    end
+
+    it 'returns nil for complex buffers, NArray gains, or other lengths' do
+      out = Numo::SFloat.zeros(4)
+      expect(MB::Sound::FastArithmetic.wet_dry(out, Numo::SComplex.ones(4), 1, Numo::SFloat.ones(4), 1)).to be_nil
+      expect(MB::Sound::FastArithmetic.wet_dry(out, Numo::SFloat.ones(4), Numo::SFloat.ones(4), Numo::SFloat.ones(4), 1)).to be_nil
+      expect(MB::Sound::FastArithmetic.wet_dry(out, Numo::SFloat.ones(3), 1, Numo::SFloat.ones(4), 1)).to be_nil
+      expect(MB::Sound::FastArithmetic.wet_dry(out, Numo::SFloat.ones(4), 1, Numo::SFloat.ones(3), 1)).to be_nil
+      expect(out).to eq(Numo::SFloat.zeros(4))
+    end
+  end
+
   describe '.copy' do
     [Numo::SFloat, Numo::DFloat, Numo::SComplex, Numo::DComplex].each do |cls|
       it "copies #{cls} buffers exactly" do

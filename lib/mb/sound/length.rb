@@ -287,7 +287,29 @@ module MB
 
           buf = @node.sample(count)
           return nil if buf.nil?
-          @unit == :seconds ? buf * sample_rate : buf
+          @unit == :seconds ? scaled(buf, sample_rate) : buf
+        end
+
+        # +buf+ (seconds) times +sample_rate+, as Numo's buf * sample_rate:
+        # when the same frozen buffer comes back (a steady node), one frozen
+        # result (so consumers can cache it by identity); otherwise a reused
+        # buffer (FastArithmetic.product, which multiplies the same way), so
+        # nothing is allocated per buffer.
+        private def scaled(buf, sample_rate)
+          if buf.frozen? && buf.equal?(@scaled_from) && sample_rate == @scaled_rate
+            return @scaled ||= (buf * sample_rate).freeze
+          end
+          @scaled_from = buf.frozen? ? buf : nil
+          @scaled_rate = sample_rate
+          @scaled = nil
+
+          out = @scaled_buf
+          out = @scaled_buf = buf.class.new(buf.length) if out.nil? || out.class != buf.class || out.length != buf.length
+          pair = (@scaled_pair ||= [[nil, nil]])
+          pair[0][0] = buf
+          return out if MB::Sound::FastArithmetic.product(out, sample_rate, pair)
+
+          buf * sample_rate
         end
 
         # The longest this length can be, in samples at +sample_rate+, if

@@ -256,7 +256,7 @@ module MB
           else
             data = data[0...delays.length] if data.length > delays.length
             delays = delays[0...data.length] if delays.length > data.length
-            @min_delay_samples, @max_delay_samples = delays.minmax
+            @min_delay_samples, @max_delay_samples = delays_minmax(delays)
             @last_delay_samples = delays[-1]
             max_delay = @max_delay_samples
           end
@@ -279,7 +279,16 @@ module MB
             delayed = @line.feedback(data, delays, feedback.is_a?(Numo::NArray) ? feedback[0...length] : feedback, interpolation: @interpolation, state: @read_state)
           else
             @line.write(data)
-            delayed = @line.read(data.length, delays, interpolation: @interpolation, state: @read_state)
+            @read_buf = @line.buffer_class.zeros(data.length) unless @read_buf && @read_buf.class == @line.buffer_class && @read_buf.length == data.length
+            delayed = @line.read(data.length, delays, interpolation: @interpolation, state: @read_state, out: @read_buf)
+          end
+
+          # Numeric gains on SFloat buffers: the same products and sum in
+          # one allocation-free pass, into the input (as below) or a reused
+          # buffer
+          if wet.is_a?(Numeric) && dry.is_a?(Numeric) && data.length == length
+            target = data.inplace? && !data.frozen? ? data : (@result_buf = reuse_buffer(@result_buf, data))
+            return target if target && MB::Sound::FastArithmetic.wet_dry(target, delayed, wet, data, dry != 0 ? dry : nil)
           end
 
           result = wet.is_a?(Numo::NArray) ? delayed * wet[0...length] : wet * delayed
@@ -310,6 +319,23 @@ module MB
         end
 
         private
+
+        # A reused SFloat buffer as long as +data+ (an SFloat), or nil.
+        def reuse_buffer(buf, data)
+          return nil unless data.is_a?(Numo::SFloat)
+          buf && buf.length == data.length ? buf : Numo::SFloat.zeros(data.length)
+        end
+
+        # delays.minmax, as Floats, without allocating for real buffers
+        # (FastArithmetic.min_max matches Numo's minmax except for all-NaN
+        # buffers, which take Numo's path).
+        def delays_minmax(delays)
+          r = (@delay_range ||= [0.0, 0.0])
+          if MB::Sound::FastArithmetic.min_max(delays, r) && !r[0].nan?
+            return r
+          end
+          delays.minmax
+        end
 
         # Checks a feedback/wet/dry value: a graph node (sampled per buffer,
         # through get_sampler) or a number (false/nil allowed for feedback).

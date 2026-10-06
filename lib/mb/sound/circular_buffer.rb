@@ -83,6 +83,17 @@ module MB
           # Return an empty NArray if asked to read nothing, even if the buffer is empty
           return @buf.class[] if count == 0
 
+          # A reused view of the target while the target and count stay the
+          # same (MB::M's read allocates Ranges and views every call)
+          if @cbuf.direct_copy(@read_pos, count, @buf)
+            view = @view
+            unless view && @view_target.equal?(@buf) && view.length == count && !view.frozen?
+              @view_target = @buf
+              view = @view = @buf[0...count]
+            end
+            return view.not_inplace!
+          end
+
           @cbuf.direct_read(pos: @read_pos, count: count, target: @buf)
         end
 
@@ -281,6 +292,13 @@ module MB
         MB::M.circular_read(@buf, pos, count, target: target)[0...count].not_inplace!
       end
 
+      # For internal use by Reader.  Copies like #direct_read into the start
+      # of +target+ without allocating (FastArithmetic.circular_read), or
+      # returns nil if it can't (then use #direct_read).
+      def direct_copy(pos, count, target)
+        MB::Sound::FastArithmetic.circular_read(@buf, pos, count, target)
+      end
+
       # Appends the given +narray+ to the circular buffer, returning the new
       # count of available samples to read from the furthest-behind reader.
       #
@@ -313,7 +331,7 @@ module MB
 
         expand_buffer(narray, grow: false)
 
-        MB::M.circular_write(@buf, narray, @write_pos)
+        MB::Sound::FastArithmetic.circular_write(@buf, narray, @write_pos) || MB::M.circular_write(@buf, narray, @write_pos)
         @write_pos = (@write_pos + narray.length) % @buffer_size
 
         # Update each reader in multi-reader mode
