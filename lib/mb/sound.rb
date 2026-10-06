@@ -148,6 +148,7 @@ require_relative 'sound/input_buffer_wrapper'
 require_relative 'sound/output_buffer_wrapper'
 require_relative 'sound/background_output'
 
+require_relative 'sound/tone/state'
 require_relative 'sound/phasor'
 require_relative 'sound/band_limit'
 require_relative 'sound/oscillator'

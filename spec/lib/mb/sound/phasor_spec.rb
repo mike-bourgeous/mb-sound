@@ -128,7 +128,7 @@ RSpec.describe(MB::Sound::Oscillator, :aggregate_failures) do
 
         phasor = MB::Sound::Phasor.new(phase: 0.2)
         increments = Numo::SFloat.zeros(800)
-        phases = MB::FastSound.phasor(Numo::SFloat.zeros(800), freq, phasor.advance, 0, phasor.state, increments)
+        phases = MB::FastSound.phasor(Numo::SFloat.zeros(800), freq, phasor.advance, 0, phasor.state.phase, increments)
         shaped = MB::FastSound.shape((complex ? Numo::SComplex : Numo::SFloat).zeros(800), wave, phases, increments, pm, 0.5, 0.1)
 
         state = [0.2]

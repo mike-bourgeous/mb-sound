@@ -68,9 +68,15 @@ module MB
       # runs the phasor and waveform in one C loop (#sample_c).
       attr_reader :phasor
 
+      # Everything that changes from sample to sample (phase, band-limiting
+      # history, ...), in one Tone::State shared with #phasor.
+      attr_reader :state
+
       # The most recent true frequency on an FM-modulated (not PM-modulated)
       # oscillator.  Starts at zero before #sample is called
-      attr_reader :last_freq
+      def last_freq
+        @state.last_freq
+      end
 
       # Whether ramp, square, and triangle waves are band-limited (see
       # BandLimit): true, false for the naive (aliased) waveforms, or a Range
@@ -98,7 +104,9 @@ module MB
       attr_reader :reset_to
 
       # The seed of the random phase generator (see #random_phase=), or nil.
-      attr_reader :random_phase
+      def random_phase
+        @state.seed
+      end
 
       # TODO: maybe use a clock provider instead of +advance+?  The challenge is
       # that floating point accuracy goes down as a shared clock advances, and
@@ -155,11 +163,13 @@ module MB
 
         # The phasor's frequency is unused: #sample reads the frequency input
         # and hands it to the phasor's math directly.
+        @state = Tone::State.new
         @phasor = Phasor.new(
           frequency: 0.0,
           phase: phase / TWOPI,
           advance: advance / TWOPI,
-          random_advance: random_advance / TWOPI
+          random_advance: random_advance / TWOPI,
+          state: @state
         )
 
         raise "Invalid range #{range.inspect}" unless range.nil? || range.first.is_a?(Numeric)
@@ -175,16 +185,11 @@ module MB
         self.band_limit = band_limit
         self.width = width
         @remove_dc = !!remove_dc
-        @bl_state = [0.0, 0.0, 0.0, 0]
-        @blit_state = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0]
-        @pulse_state = [0.0, 0.0, 0]
         self.sync = sync
         @soft_sync = !!soft_sync
 
         @osc_buf = nil
         @truncated = false
-
-        @last_freq = 0.0
       end
 
       # The sample rate of the oscillator (calculated from the phase advance
@@ -265,7 +270,7 @@ module MB
       # With a random phase (see #random_phase=) each reset goes to a new
       # random phase instead.
       def reset
-        phase_jump { @phasor.phi = @phase_rng ? @phase_rng.rand : @phasor.phase }
+        phase_jump { @phasor.phi = @state.random? ? @state.random : @phasor.phase }
       end
 
       # Sets a reset trigger input: a graph node whose every nonzero sample
@@ -285,7 +290,7 @@ module MB
         raise ArgumentError, 'A synced oscillator cannot also have a reset input' if trigger && @sync
 
         @reset_input = trigger.respond_to?(:get_sampler) ? trigger.get_sampler : trigger
-        @reset_ended = false
+        @state.reset_ended = false
       end
 
       # Sets where the reset input (see #reset_input=) moves the phase: nil
@@ -305,14 +310,8 @@ module MB
       # starting phase (see #phase) becomes random right away, and every
       # reset (#reset or the reset input) goes to a new random phase.
       def random_phase=(seed)
-        if seed.nil?
-          @random_phase = nil
-          @phase_rng = nil
-        else
-          @random_phase = Integer(seed)
-          @phase_rng = Random.new(@random_phase)
-          self.phase = @phase_rng.rand * TWOPI
-        end
+        @state.seed = seed
+        self.phase = @state.random * TWOPI if @state.random?
       end
 
 
@@ -339,8 +338,8 @@ module MB
         raise ArgumentError, 'An oscillator with a reset input cannot also be synced' if source && @reset_input
 
         @sync = source.respond_to?(:get_sampler) ? source.get_sampler : source
-        @sync_state = [@phasor.phi, 0.0, 1.0, 0, 0]
-        @sync_ring = Numo::DFloat.zeros(BandLimit::SYNC_TAPS)
+        @state.sync = [@phasor.phi, 0.0, 1.0, 0, 0]
+        @state.sync_ring = Numo::DFloat.zeros(BandLimit::SYNC_TAPS)
       end
 
       # Sets whether ramp, square, and triangle waves are band-limited (see
@@ -558,10 +557,11 @@ module MB
         count, freq, phase, width, pulses, resets, targets = get_upstream_inputs(count)
         return nil if missing_input?(freq, phase, width, pulses, resets, targets)
 
+        state = @state
         if @ports
-          @frame_phi = @phasor.state[0]
-          @frame_freq = freq
-          @frame_segments = nil
+          state.frame_phase = state.phase[0]
+          state.frame_freq = freq
+          state.frame_segments = nil
         end
 
         build_buffer(count)
@@ -574,11 +574,11 @@ module MB
           end
         else
           buf = kernel_c(@osc_buf[0...count].inplace!, freq, phase, width, pulses, gain, offset)
-          add_jump_residual(buf, gain) if @jump_residual
+          add_jump_residual(buf, gain) if state.jump_residual
         end
 
-        @last_freq = freq.is_a?(Numeric) ? freq : freq[-1]
-        @last_width = width.is_a?(Numo::NArray) ? width[-1] : width
+        state.last_freq = freq.is_a?(Numeric) ? freq : freq[-1]
+        state.last_width = width.is_a?(Numo::NArray) ? width[-1] : width
 
         buf = add_waveshape_and_range(buf)
 
@@ -605,8 +605,8 @@ module MB
           add_jump_residual(buf, gain)
         end
 
-        @last_freq = freq_table.is_a?(Numeric) ? freq_table : freq_table[-1]
-        @last_width = width.is_a?(Numo::NArray) ? width[-1] : width
+        @state.last_freq = freq_table.is_a?(Numeric) ? freq_table : freq_table[-1]
+        @state.last_width = width.is_a?(Numo::NArray) ? width[-1] : width
 
         buf = add_waveshape_and_range(buf)
         buf.not_inplace!
@@ -703,12 +703,13 @@ module MB
       # by default those of the last sample played and no phase modulation
       # (a jump between buffers), or those of the reset sample (a reset
       # input; see #sample_segments).
-      def phase_jump(freq: @last_freq, width: @last_width, phase_mod: 0.0)
-        before = @phasor.state[0]
-        played = freq != 0.0 && (@bl_state[3] != 0 || @blit_state[6] != 0)
+      def phase_jump(freq: @state.last_freq, width: @state.last_width, phase_mod: 0.0)
+        state = @state
+        before = state.phase[0]
+        played = freq != 0.0 && (state.blep[3] != 0 || state.blit[6] != 0)
         yield
-        after = @phasor.state[0]
-        unprime
+        after = state.phase[0]
+        state.unprime(sync: !!@sync)
 
         return unless played && !@sync && synth_kernel? && !blit?
 
@@ -723,7 +724,7 @@ module MB
 
         blep, blamp = Oscillator.jump_tables
         residual = (blep * (v1 - v0) + blamp * ((s1 - s0) * inc)) * k
-        @jump_residual = @jump_residual ? residual + pad_residual(@jump_residual, residual.length) : residual
+        state.jump_residual = state.jump_residual ? residual + pad_residual(state.jump_residual, residual.length) : residual
       end
 
       def pad_residual(r, length)
@@ -735,21 +736,12 @@ module MB
       # Adds any queued phase jump step (see #phase_jump) to +buf+, scaled
       # by the output +gain+.
       def add_jump_residual(buf, gain)
-        return unless @jump_residual
+        residual = @state.jump_residual
+        return unless residual
 
-        n = [buf.length, @jump_residual.length].min
-        buf[0...n] += @jump_residual[0...n] * gain
-        @jump_residual = n < @jump_residual.length ? @jump_residual[n..].dup : nil
-      end
-
-      # Clears band-limiting history after a phase jump.
-      def unprime
-        @bl_state[3] = 0
-        @blit_state[6] = 0
-        if @sync
-          @sync_state = [@phasor.phi, 0.0, 1.0, 0, 0]
-          @sync_ring.fill(0)
-        end
+        n = [buf.length, residual.length].min
+        buf[0...n] += residual[0...n] * gain
+        @state.jump_residual = n < residual.length ? residual[n..].dup : nil
       end
 
       # Output gain and offset for the kernels from #range (see #sample_c).
@@ -795,13 +787,13 @@ module MB
       # slices of the frequency, phase modulation, and width inputs, and
       # returns the samples.  Returns a view of the output buffer.
       def sample_segments(count, freq, phase, width, gain, offset, points, targets)
-        @frame_segments = [] if @ports
+        @state.frame_segments = [] if @ports
 
         start = 0
         (points + [count]).each do |stop|
           if stop > start
             f = slice_input(freq, start, stop)
-            @frame_segments&.push([@phasor.state[0], f, stop - start])
+            @state.frame_segments&.push([@state.phase[0], f, stop - start])
 
             out = @osc_buf[start...stop].inplace!
             result = yield(out, f, slice_input(phase, start, stop), slice_input(width, start, stop))
@@ -824,7 +816,7 @@ module MB
 
       # The phase in cycles for a reset at sample +i+ (see #reset_to=).
       def reset_target(targets, i)
-        return @phase_rng.rand if @phase_rng
+        return @state.random if @state.random?
         return input_at(targets, i) / TWOPI if targets
         return @reset_to / TWOPI if @reset_to
 
@@ -852,23 +844,23 @@ module MB
           blep, blamp = BandLimit.minblep_tables
           buf = MB::Sound::FastSynth.oscillate_sync(
             out, wave_type, freq, @phasor.advance, gain, offset,
-            @sync_state, @sync_ring, pulses, @soft_sync, width, @remove_dc,
+            @state.sync, @state.sync_ring, pulses, @soft_sync, width, @remove_dc,
             blep, blamp, BandLimit::SYNC_OVERSAMPLE, BandLimit::SYNC_TAPS, !!@band_limit
           ).inplace!
-          @phasor.state[0] = @sync_state[0]
+          @state.phase[0] = @state.sync[0]
           buf
         when :blit
           MB::Sound::FastSynth.blit(
-            out, wave_type, freq, @phasor.advance, gain, offset, @phasor.state, @blit_state
+            out, wave_type, freq, @phasor.advance, gain, offset, @state.phase, @state.blit
           ).inplace!
         when :synth
           MB::Sound::FastSynth.oscillate_bl(
             out, wave_type, freq, phase, @phasor.advance, gain, offset,
-            @phasor.state, @bl_state, *band_limit_fade, width, @remove_dc
+            @state.phase, @state.blep, *band_limit_fade, width, @remove_dc
           ).inplace!
         else
           MB::FastSound.oscillate(
-            out, wave_type, freq, phase, @phasor.advance, @phasor.random_advance, gain, offset, @phasor.state
+            out, wave_type, freq, phase, @phasor.advance, @phasor.random_advance, gain, offset, @state.phase
           ).inplace!
         end
       end
@@ -883,16 +875,16 @@ module MB
           blep, blamp = BandLimit.minblep_tables
           values = BandLimit.sync_ruby(
             count, @wave_type, freq_table, @phasor.advance, gain, offset,
-            @sync_state, @sync_ring, pulses, @soft_sync, width, @remove_dc,
+            @state.sync, @state.sync_ring, pulses, @soft_sync, width, @remove_dc,
             blep, blamp, BandLimit::SYNC_OVERSAMPLE, BandLimit::SYNC_TAPS, !!@band_limit
           )
-          @phasor.state[0] = @sync_state[0]
+          @state.phase[0] = @state.sync[0]
         elsif blit?
-          values = BandLimit.blit_ruby(count, @wave_type, freq_table, @phasor.advance, gain, offset, @phasor.state, @blit_state)
+          values = BandLimit.blit_ruby(count, @wave_type, freq_table, @phasor.advance, gain, offset, @state.phase, @state.blit)
         elsif synth_kernel?
           values = BandLimit.oscillate_ruby(
             count, @wave_type, freq_table, phase_table, @phasor.advance, gain, offset,
-            @phasor.state, @bl_state, *band_limit_fade, width, @remove_dc
+            @state.phase, @state.blep, *band_limit_fade, width, @remove_dc
           )
         else
           phases, increments = @phasor.phases_ruby(freq_table, count)
@@ -934,13 +926,14 @@ module MB
       # Port data from the phases of the frame just computed (the phasor's
       # phase, without phase modulation; see Phasor.sync_pulses).
       def compute_ports(count)
-        if @frame_segments
+        state = @state
+        if state.frame_segments
           # Resets split the frame into pieces (see #sample_segments)
-          parts = @frame_segments.map { |phi, freq, n| Phasor.sync_pulses(phi, freq, @phasor.advance, n, @pulse_state) }
+          parts = state.frame_segments.map { |phi, freq, n| Phasor.sync_pulses(phi, freq, @phasor.advance, n, state.pulses) }
           pulses = parts[0][0].concatenate(*parts[1..].map(&:first))
           increments = parts[0][1].concatenate(*parts[1..].map(&:last))
         else
-          pulses, increments = Phasor.sync_pulses(@frame_phi, @frame_freq, @phasor.advance, count, @pulse_state)
+          pulses, increments = Phasor.sync_pulses(state.frame_phase, state.frame_freq, @phasor.advance, count, state.pulses)
         end
         store_port(:wraps, pulses)
         store_port(:increment, increments)
@@ -1016,11 +1009,11 @@ module MB
           min_length = pulses.length if pulses && pulses.length < min_length
         end
 
-        resets = @reset_ended ? nil : @reset_input
+        resets = @state.reset_ended ? nil : @reset_input
         if resets
           resets = resets.sample(count)
           resets = nil if resets&.empty?
-          @reset_ended = true if resets.nil?
+          @state.reset_ended = true if resets.nil?
           min_length = resets.length if resets && resets.length < min_length
         end
 

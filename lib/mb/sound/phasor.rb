@@ -104,12 +104,14 @@ module MB
       # The sample rate (from #advance, or set with #sample_rate=).
       attr_reader :sample_rate
 
-      # The state passed to the C code: [current phase in cycles].
+      # The phase and port history (a Tone::State; the C code updates
+      # its +phase+ Array).
       attr_reader :state
 
       # Creates a phasor at +frequency+ (Hz, or a node) starting at +phase+
-      # (cycles).  +advance+ defaults to 1 / +sample_rate+.
-      def initialize(frequency: 1.0, phase: 0.0, sample_rate: 48000, advance: nil, random_advance: 0.0)
+      # (cycles).  +advance+ defaults to 1 / +sample_rate+.  An Oscillator
+      # passes its own +state+ (a Tone::State) to share.
+      def initialize(frequency: 1.0, phase: 0.0, sample_rate: 48000, advance: nil, random_advance: 0.0, state: nil)
         raise "Invalid phase #{phase.inspect}" unless phase.is_a?(Numeric)
 
         self.frequency = frequency
@@ -117,9 +119,9 @@ module MB
         @advance = (advance || 1.0 / @sample_rate).to_f
         @random_advance = random_advance.to_f
         @phase = phase % 1.0
-        @state = [@phase.to_f]
+        @state = state || Tone::State.new
+        @state.phase[0] = @phase.to_f
         @buf = nil
-        @pulse_state = [0.0, 0.0, 0]
       end
 
       # Changes the frequency source to a Numeric (Hz) or a node.
@@ -153,12 +155,12 @@ module MB
 
       # The current phase in cycles.
       def phi
-        @state[0]
+        @state.phase[0]
       end
 
       # Sets the current phase in cycles (wrapped to 0...1).
       def phi=(phi)
-        @state[0] = (phi % 1.0).to_f
+        @state.phase[0] = (phi % 1.0).to_f
       end
 
       # Changes the starting phase (cycles), shifting the current phase by
@@ -217,7 +219,7 @@ module MB
       # NArray (reused between calls).
       def phases_c(freq, count)
         @buf = Numo::SFloat.zeros(count) if @buf.nil? || @buf.length != count
-        MB::FastSound.phasor(@buf.inplace!, freq, @advance, @random_advance, @state, nil).not_inplace!
+        MB::FastSound.phasor(@buf.inplace!, freq, @advance, @random_advance, @state.phase, nil).not_inplace!
       end
 
       # Advances the phase over +count+ samples at +freq+ (Hz; a Numeric or
@@ -259,17 +261,17 @@ module MB
       # The main output for GraphNode::Ports: phases, remembering where they
       # started for #compute_ports.
       def sample_main(count)
-        @frame_phi = @state[0]
+        @state.frame_phase = @state.phase[0]
         freq = sample_frequency(count)
         return nil if freq.nil?
 
-        @frame_freq = freq
+        @state.frame_freq = freq
         count = freq.length if freq.is_a?(Numo::NArray)
         phases_c(freq, count)
       end
 
       def compute_ports(count)
-        pulses, increments = Phasor.sync_pulses(@frame_phi, @frame_freq, @advance, count, @pulse_state)
+        pulses, increments = Phasor.sync_pulses(@state.frame_phase, @state.frame_freq, @advance, count, @state.pulses)
         store_port(:wraps, pulses)
         store_port(:increment, increments)
       end
