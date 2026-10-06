@@ -42,11 +42,16 @@ module MB
     # (#sample_c and #sample_ruby):
     #
     # 1. Inputs: read +count+ samples of each input node (frequency, phase
-    #    modulation, width, sync pulses, reset triggers, reset targets);
-    #    numbers are constants.  A plan would read them from registers.
-    # 2. SPLIT (control): nonzero reset trigger samples split the buffer into
-    #    segments; before each reset sample the phase jumps (a JUMP).
-    #    Buffers without resets are one segment (one scan of the triggers).
+    #    modulation, width, sync pulses, reset triggers, reset targets, and
+    #    a tempo tone's timeline jumps and jump phases); numbers are
+    #    constants.  A plan would read them from registers.
+    # 2. SPLIT (control): nonzero reset triggers and timeline jumps split the
+    #    buffer into segments; before each such sample the phase jumps (a
+    #    JUMP to the reset target, or to the starting phase plus the jump
+    #    phase).  Buffers without them are one segment (one scan of the
+    #    triggers; shared frozen zero buffers are recognized without one).
+    #    A plan would run quiet buffers fused and hand split buffers to the
+    #    node, or port the split as an op.
     # 3. PHASE: inc[i] = freq[i] * advance (+ random * random_advance for
     #    noise); phase[i] = wrap(phase0 + sum(inc[0...i])) in cycles, double
     #    precision; state.phase[0] is phase0 and becomes the next phase.

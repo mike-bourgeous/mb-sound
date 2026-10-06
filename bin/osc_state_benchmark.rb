@@ -2,7 +2,7 @@
 # Measures container types for an oscillator's per-buffer state
 # (Tone/Oscillator consolidation, 2026-10-06), with and without YJIT.
 #
-# Each buffer does what Oscillator#sample_c does with its state: read the
+# Each buffer does what Oscillator#sample_c did (now Tone#sample_c) with its state: read the
 # phase and band-limiting Arrays that the C kernel updates in place, note
 # the phase at the frame start (for ports), check the queued phase-jump
 # residual and the reset-ended flag, run the kernel, and store the last
