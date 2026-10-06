@@ -79,7 +79,7 @@ module MB
       # Returns a new full-scale Tone (sine unless +wave_type+ is given) at
       # this pitch.
       def tone(wave_type = :sine)
-        setup_tone(Tone.new(frequency: oscillator_frequency, wave_type: wave_type, sample_rate: @sample_rate))
+        setup_tone(new_tone(oscillator_frequency, wave_type))
       end
       alias hz tone
 
@@ -229,7 +229,7 @@ module MB
 
         depth = Interval.semitones(depth).to_f unless depth.respond_to?(:sample)
         lfo = Tone.new(frequency: rate, sample_rate: @sample_rate).lfo
-        derived(Pitch.new(GraphNode::SemitoneShift.new(freq, lfo * depth, sample_rate: @sample_rate), sample_rate: @sample_rate))
+        rebased(GraphNode::SemitoneShift.new(freq, lfo * depth, sample_rate: @sample_rate))
       end
 
       # Returns a Pitch +semitones+ higher (lower if negative); +semitones+
@@ -237,7 +237,7 @@ module MB
       def transpose(semitones)
         semitones = Interval.semitones(semitones)
         ratio = 2 ** (semitones / 12.0)
-        derived(Pitch.new(constant? ? @source * ratio : freq * ratio, sample_rate: @sample_rate))
+        rebased(constant? ? @source * ratio : freq * ratio)
       end
 
       # The period of one cycle in seconds and in samples.
@@ -313,7 +313,24 @@ module MB
         "#<#{self.class.name} #{self}>"
       end
 
+      protected
+
+      # Returns a new Tone (before #setup_tone) at +frequency+ (Hz or a node
+      # of Hz) for #tone.  Subclasses that make other oscillators (e.g.
+      # Notes::NotePitch's key-synced tones) override it, and unison copies
+      # with a changing detune (Unison::CopyPitch) use it to make their
+      # base pitch's kind of oscillator at their own frequency.
+      def new_tone(frequency, wave_type)
+        Tone.new(frequency: frequency, wave_type: wave_type, sample_rate: @sample_rate)
+      end
+
       private
+
+      # Returns a Pitch at +frequency+ (Hz or a node of Hz) derived from
+      # this one (for #transpose and #vibrato; see #derived).
+      def rebased(frequency)
+        derived(Pitch.new(frequency, sample_rate: @sample_rate))
+      end
 
       # Gives +pitch+, derived from this one, this pitch's #unison_phase.
       # Returns +pitch+.
