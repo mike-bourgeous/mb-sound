@@ -171,7 +171,8 @@ module ToneReferenceCases
     'phasor' => -> { render(1234.5.hz.phasor) },
     'phasor_phase' => -> { render(100.hz.phasor(phase: 0.25)) },
     'phasor_ports' => -> { render(S::Pitch.new(steps(64, 900, 3000)).phasor, ports: [:wraps, :increment]) },
-    'phasor_wraps_only' => -> { render(2001.hz.phasor.wraps) },
+    # 2000 Hz: 24 samples per cycle, every wrap exactly on a sample
+    'phasor_wraps_only' => -> { { 'main' => render(2001.hz.phasor.wraps)['main'], 'at_2000' => render(2000.hz.phasor.wraps)['main'] } },
 
     # Sample rates, oversampling, channels
     'rate_44100' => -> { render(1000.hz.ramp.at(0.5).at_rate(44100)) },
