@@ -19,11 +19,16 @@
  * out (not C99's complex *, which adds Annex G infinity handling), and the
  * extension is built with -ffp-contract=off so nothing is fused.
  *
+ * .copy copies a buffer into another (for nodes that work in place on a
+ * copy of a frozen input).
+ *
  * Buffer types: SFloat (SFloat inputs), DFloat (DFloat), SComplex (SComplex
  * or SFloat), DComplex (DComplex or DFloat), every input exactly as long as
  * the output and contiguous, and the output writable.  Anything else returns
  * nil without touching the output, and the caller falls back to Numo.
  */
+
+#include <string.h>
 
 #include <ruby.h>
 #include "numo/narray.h"
@@ -408,6 +413,53 @@ static VALUE ruby_mix(VALUE self, VALUE out, VALUE constant, VALUE sampled)
 	return out;
 }
 
+/*
+ * call-seq: MB::Sound::FastArithmetic.copy(out, src) -> out or nil
+ *
+ * Copies +src+ into +out+ (e.g. a reused buffer for a node that works in
+ * place on a frozen input) without allocating.  Both must be contiguous 1D
+ * NArrays of the same type (SFloat, DFloat, SComplex, or DComplex) and
+ * length, and +out+ writable; otherwise returns nil without writing.
+ */
+static VALUE ruby_copy(VALUE self, VALUE out, VALUE src)
+{
+	enum mb_arith_type ot = arith_type(out);
+	if (ot == MB_ARITH_NONE || ot != arith_type(src) || RNARRAY_NDIM(out) != 1 || !RTEST(nary_check_contiguous(out))) {
+		return Qnil;
+	}
+
+	size_t length = RNARRAY_SIZE(out);
+	if (!shape_ok(src, length)) {
+		return Qnil;
+	}
+
+	VALUE data = out;
+	if (RNARRAY_TYPE(out) == NARRAY_VIEW_T) {
+		data = RNARRAY_VIEW(out)->data;
+	}
+	if (OBJ_FROZEN(data)) {
+		return Qnil;
+	}
+
+	size_t elsize;
+	switch (ot) {
+		case MB_ARITH_SF: elsize = sizeof(float); break;
+		case MB_ARITH_DF: elsize = sizeof(double); break;
+		case MB_ARITH_SC: elsize = sizeof(mb_sc); break;
+		case MB_ARITH_DC: elsize = sizeof(mb_dc); break;
+		default: return Qnil;
+	}
+
+	char *outp = nary_get_pointer_for_write(out) + nary_get_offset(out);
+	const char *srcp = read_ptr(src);
+	if (length > 0) {
+		memmove(outp, srcp, length * elsize);
+	}
+
+	RB_GC_GUARD(src);
+	return out;
+}
+
 void Init_fast_arithmetic(void)
 {
 	VALUE mb = rb_define_module("MB");
@@ -416,4 +468,5 @@ void Init_fast_arithmetic(void)
 
 	rb_define_module_function(fast_arithmetic, "product", ruby_product, 3);
 	rb_define_module_function(fast_arithmetic, "mix", ruby_mix, 3);
+	rb_define_module_function(fast_arithmetic, "copy", ruby_copy, 2);
 }

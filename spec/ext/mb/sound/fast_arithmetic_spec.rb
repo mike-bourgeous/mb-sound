@@ -162,6 +162,33 @@ RSpec.describe(MB::Sound::FastArithmetic) do
     end
   end
 
+  describe '.copy' do
+    [Numo::SFloat, Numo::DFloat, Numo::SComplex, Numo::DComplex].each do |cls|
+      it "copies #{cls} buffers exactly" do
+        src = make_input(cls, 129, 3)
+        out = cls.zeros(129)
+        expect(MB::Sound::FastArithmetic.copy(out, src)).to equal(out)
+        expect(out.to_binary).to eq(src.to_binary)
+      end
+    end
+
+    it 'copies between views' do
+      base = Numo::SFloat.zeros(10)
+      expect(MB::Sound::FastArithmetic.copy(base[2...5], Numo::SFloat.new(8).seq[4...7])).not_to be_nil
+      expect(base.to_a).to eq([0, 0, 4, 5, 6, 0, 0, 0, 0, 0])
+    end
+
+    it 'returns nil for other types, lengths, layouts, or a frozen output' do
+      out = Numo::SFloat.zeros(4)
+      expect(MB::Sound::FastArithmetic.copy(out, Numo::DFloat.ones(4))).to be_nil
+      expect(MB::Sound::FastArithmetic.copy(out, Numo::SFloat.ones(3))).to be_nil
+      expect(MB::Sound::FastArithmetic.copy(out, Numo::SFloat.ones(8)[(0..) % 2])).to be_nil
+      expect(MB::Sound::FastArithmetic.copy(out.dup.freeze, Numo::SFloat.ones(4))).to be_nil
+      expect(MB::Sound::FastArithmetic.copy(out, [1, 2, 3, 4])).to be_nil
+      expect(out).to eq(Numo::SFloat.zeros(4))
+    end
+  end
+
   it 'does not allocate objects for full real buffers' do
     out = Numo::SFloat.zeros(128)
     sampled = [[Numo::SFloat.ones(128), 0.5], [Numo::SFloat.ones(128), 1]]

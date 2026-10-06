@@ -82,7 +82,7 @@ module MB
           return nil if buf.nil? || buf.empty?
 
           if @in_place
-            buf = buf.dup if buf.frozen? # a shared buffer (see Tee)
+            buf = (@frozen_copy ||= GraphNode::FrozenCopy.new).copy(buf) if buf.frozen? # a shared buffer (see Tee)
             buf.inplace!
           end
           buf = SampleWrapper.call_filter(@base_filter, buf, @inputs)

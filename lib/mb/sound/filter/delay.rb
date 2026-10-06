@@ -369,7 +369,7 @@ module MB
           end
 
           if @smoothing
-            delays = delays.dup if delays.frozen? # a shared buffer (see GraphNode::Tee)
+            delays = (@frozen_copy ||= GraphNode::FrozenCopy.new).copy(delays) if delays.frozen? # a shared buffer (see GraphNode::Tee)
             delays = @filter.process(delays.inplace).not_inplace!
           end
           delays
