@@ -35,7 +35,7 @@ RSpec.describe(MB::Sound::FastWavetable, aggregate_failures: true) do
         w::INTERPOLATIONS.each_key do |interp|
           cases.each_with_index do |(f, pm, width, scan), ci|
             st1 = [0.3]
-            ts1 = [0.0, 0.0, 0]
+            ts1 = [0.0, 0.0, 0, 0.0, 0.0]
             st2 = st1.dup
             ts2 = ts1.dup
 
@@ -54,23 +54,23 @@ RSpec.describe(MB::Sound::FastWavetable, aggregate_failures: true) do
     it 'continues smoothly across buffers' do
       t = w[:saw]
       st = [0.0]
-      ts = [0.0, 0.0, 0]
+      ts = [0.0, 0.0, 0, 0.0, 0.0]
       a = t.oscillate(Numo::SFloat.zeros(100), 100.0, 1 / 48000.0, 1, 0, st, ts, 0, nil, 0, nil, 48000, true)
       b = t.oscillate(Numo::SFloat.zeros(100), 100.0, 1 / 48000.0, 1, 0, st, ts, 0, nil, 0, nil, 48000, true)
-      whole = t.oscillate(Numo::SFloat.zeros(200), 100.0, 1 / 48000.0, 1, 0, [0.0], [0.0, 0.0, 0], 0, nil, 0, nil, 48000, true)
+      whole = t.oscillate(Numo::SFloat.zeros(200), 100.0, 1 / 48000.0, 1, 0, [0.0], [0.0, 0.0, 0, 0.0, 0.0], 0, nil, 0, nil, 48000, true)
       expect(a.concatenate(b)).to all_be_within(1e-6).of_array(whole)
     end
 
     it 'raises errors for a sample-mode table' do
       t = w.from_samples(Numo::SFloat.zeros(100), mode: :sample, root: 100)
       expect {
-        MB::Sound::FastWavetable.oscillate(Numo::SFloat.zeros(10), t.kernel_spec(48000), 1, 1, 1, 0, [0.0], [0.0, 0.0, 0], 0, nil, 0, 3, false, nil)
+        MB::Sound::FastWavetable.oscillate(Numo::SFloat.zeros(10), t.kernel_spec(48000), 1, 1, 1, 0, [0.0], [0.0, 0.0, 0, 0.0, 0.0], 0, nil, 0, 3, false, nil)
       }.to raise_error(ArgumentError, /cycle/)
     end
 
     it 'raises an error for a bad interpolation code' do
       expect {
-        MB::Sound::FastWavetable.oscillate(Numo::SFloat.zeros(10), w[:saw].kernel_spec(48000), 1, 1, 1, 0, [0.0], [0.0, 0.0, 0], 0, nil, 0, 7, false, nil)
+        MB::Sound::FastWavetable.oscillate(Numo::SFloat.zeros(10), w[:saw].kernel_spec(48000), 1, 1, 1, 0, [0.0], [0.0, 0.0, 0, 0.0, 0.0], 0, nil, 0, 7, false, nil)
       }.to raise_error(ArgumentError, /interpolation/)
     end
 
@@ -78,8 +78,42 @@ RSpec.describe(MB::Sound::FastWavetable, aggregate_failures: true) do
       spec = w[:saw].kernel_spec(48000).dup
       spec[2] = [Numo::DFloat.zeros(1, 40)]
       expect {
-        MB::Sound::FastWavetable.oscillate(Numo::SFloat.zeros(10), spec, 1, 1, 1, 0, [0.0], [0.0, 0.0, 0], 0, nil, 0, 3, false, nil)
+        MB::Sound::FastWavetable.oscillate(Numo::SFloat.zeros(10), spec, 1, 1, 1, 0, [0.0], [0.0, 0.0, 0, 0.0, 0.0], 0, nil, 0, 3, false, nil)
       }.to raise_error(ArgumentError)
+    end
+  end
+
+  describe '.sync' do
+    it 'matches the Ruby mirror for hard and soft sync with every interpolator' do
+      Numo::NArray.srand(4)
+      pulses = Numo::SFloat.zeros(n)
+      pulses[(0...n).step(37).to_a] = rand_input(0.01, 1)[(0...n).step(37).to_a]
+
+      [w[:saw], w[:basic], w.from_samples(Numo::SFloat.new(2, 64).rand(-1, 1), mips: false)].each do |t|
+        w::INTERPOLATIONS.each_key do |interp|
+          [false, true].each do |soft|
+            [[1000.0, nil, 0.0], [rand_input(100, 8000), rand_input(0.1, 0.9), rand_input(0, 1)]].each_with_index do |(f, width, scan), ci|
+              s1 = [0.25, 0.0, 1.0, 3, 0]
+              r1 = Numo::DFloat.zeros(MB::Sound::BandLimit::SYNC_TAPS)
+              s2 = s1.dup
+              r2 = r1.dup
+
+              a = t.sync(Numo::SFloat.zeros(n), f, 1 / 48000.0, 0.9, 0.05, s1, r1, pulses, soft, width, scan, interp, 48000, true, t.mipped?).not_inplace!
+              b = t.sync_ruby(Numo::SFloat.zeros(n), f, 1 / 48000.0, 0.9, 0.05, s2, r2, pulses, soft, width, scan, interp, 48000, true, t.mipped?)
+              expect(a.to_a).to eq(b.to_a), "#{t} #{interp} #{soft} #{ci}: max difference #{(a - b).abs.max}"
+              expect(s1).to eq(s2)
+              expect(r1.to_a).to eq(r2.to_a)
+            end
+          end
+        end
+      end
+    end
+
+    it 'raises an error for a complex table' do
+      t = w.from_harmonics([1], complex: true)
+      expect {
+        t.sync(Numo::SComplex.zeros(10), 100, 1, 1, 0, [0.0, 0.0, 1.0, 0, 0], Numo::DFloat.zeros(32), nil, false, nil, 0, nil, 48000, true)
+      }.to raise_error(ArgumentError, /real/)
     end
   end
 
@@ -134,7 +168,7 @@ RSpec.describe(MB::Sound::FastWavetable, aggregate_failures: true) do
 
     it 'raises an error for a cycle-mode table' do
       expect {
-        MB::Sound::FastWavetable.play(Numo::SFloat.zeros(10), w[:saw].kernel_spec(48000), 1, 1, 1, 1, 0, [0.0], [0.0, 0.0, 0], 3, nil)
+        MB::Sound::FastWavetable.play(Numo::SFloat.zeros(10), w[:saw].kernel_spec(48000), 1, 1, 1, 1, 0, [0.0], [0.0, 0.0, 0, 0.0, 0.0], 3, nil)
       }.to raise_error(ArgumentError, /sample/)
     end
   end

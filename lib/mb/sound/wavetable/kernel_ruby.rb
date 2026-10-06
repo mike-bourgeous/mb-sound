@@ -37,7 +37,13 @@ module MB
           remove_dc &&= warped
 
           w = BandLimit.clamp_width(w_s)
-          prev_pm = tstate[2] != 0 ? tstate[1].to_f : pm_s
+          primed = tstate[2] != 0
+          prev_pm = primed ? tstate[1].to_f : pm_s
+          prev_e = tstate[3].to_f
+          prev_inc = tstate[4].to_f
+          corners = warped && spec[5][0].finite?
+          pending = 0.0
+          pending_d = 0.0
           constant = f_a.nil?
           steps = 0.0
           values = Array.new(count)
@@ -65,11 +71,36 @@ module MB
             end
 
             d = inc + (pm - prev_pm) * INV_2PI
-            v = value(spec, u, d.abs * wf, sc, interp)
-            v -= half_mean(spec, sc) * (2.0 * w - 1.0) if remove_dc
+            m = d.abs * wf
+            v = value(spec, u, m, sc, interp)
+
+            if corners
+              d_back = prev_inc + (pm - prev_pm) * INV_2PI
+              if i > 0 && d_back == pending_d
+                v = add(v, pending)
+              elsif primed && (i > 0 || (wrap(prev_e + d_back - e + 0.5) - 0.5).abs < 1e-6)
+                _before, after = corner_step(spec, prev_e, d_back, w, m, sc, interp)
+                v = add(v, after)
+              end
+
+              if i + 1 < count
+                next_pm = pm_a ? pm_a[i + 1] : pm
+              else
+                next_pm = pm + (pm - (i > 0 || primed ? prev_pm : pm))
+              end
+              d_fwd = inc + (next_pm - pm) * INV_2PI
+              before, pending = corner_step(spec, e, d_fwd, w, m, sc, interp)
+              v = add(v, before)
+              pending_d = d_fwd
+            end
+
+            v = add(v, -half_mean(spec, sc) * (2.0 * w - 1.0)) if remove_dc
 
             values[i] = gain(v, g, off)
             prev_pm = pm
+            prev_e = e
+            prev_inc = inc
+            primed = true
             steps += inc unless constant
           end
 
@@ -78,9 +109,68 @@ module MB
           if count > 0
             tstate[1] = prev_pm
             tstate[2] = 1
+            tstate[3] = prev_e
+            tstate[4] = prev_inc
           end
 
           store(out, values)
+        end
+
+        # Adds the real and imaginary parts of +c+ (a Complex correction) to
+        # +v+ as C does (separately; a real +v+ takes only the real part).
+        def add(v, c)
+          if v.is_a?(Complex)
+            Complex(v.real + c.real, v.imag + c.imag)
+          else
+            v + c.real
+          end
+        end
+
+        # [correction before, correction after] (Complex) for the warp
+        # corners crossed moving from +e+ by +d+ (see wt_corner_step in C).
+        def corner_step(spec, e, d, w, m, sc, interp)
+          bre = bim = are = aim = 0.0
+          [0.0, w].each_with_index do |b, j|
+            f = crossing(e, d, b)
+            next if f < 0
+
+            k1 = 0.5 / w
+            k2 = 0.5 / (1.0 - w)
+            jump = (j == 0 ? k1 - k2 : k2 - k1) * d.abs
+            u = j == 0 ? 0.0 : 0.5
+            a = value(spec, wrap(u + SLOPE_DELTA), m, sc, interp)
+            bv = value(spec, wrap(u - SLOPE_DELTA), m, sc, interp)
+            sre = (a.real - bv.real) / (2.0 * SLOPE_DELTA)
+            sim = (a.imag - bv.imag) / (2.0 * SLOPE_DELTA)
+
+            xa = f
+            xb = 1.0 - f
+            ca = xa * xa * xa / 6.0
+            cb = xb * xb * xb / 6.0
+            are += sre * jump * ca
+            aim += sim * jump * ca
+            bre += sre * jump * cb
+            bim += sim * jump * cb
+          end
+          [Complex(bre, bim), Complex(are, aim)]
+        end
+
+        # See wt_crossing in C (and bl_crossing in fast_synth.c).
+        def crossing(e, d, b)
+          if d > 0
+            dist = b - e
+          elsif d < 0
+            dist = e - b
+          else
+            return -1
+          end
+          dist += 1.0 if dist < 0
+          dist = 1.0 if dist == 0
+
+          ad = d.abs
+          return -1 if ad >= 1.0 || dist > ad + BandLimit::EPS
+
+          dist >= ad ? 1.0 : dist / ad
         end
 
         # Ruby version of FastWavetable.lookup (see Wavetable#lookup).
@@ -160,6 +250,112 @@ module MB
           p = ls + fwrap(p - ls, len) if looped && p >= le
           tstate[0] = p
           tstate[2] = 1 if count > 0
+
+          store(out, values)
+        end
+
+        # Central difference step for slopes in .sync (cycles).
+        SLOPE_DELTA = 1e-5
+
+        # Ruby version of FastWavetable.sync (see Wavetable#sync).
+        def sync(out, spec, freq, adv, g, off, sync_state, ring, pulses, soft, width, scan, interp, remove_dc, blep, blamp, os, taps, bl)
+          count = out.length
+          f_s, f_a = signal(freq, count)
+          pu_s, pu_a = signal(pulses, count)
+          pu_s = 0.0 unless pu_a
+          warped = !width.nil?
+          w_s, w_a = signal(warped ? width : 0.5, count)
+          sc_s, sc_a = signal(scan, count)
+          remove_dc &&= warped
+          blep = blep.to_a
+          blamp = blamp.to_a
+          acc = ring.to_a
+
+          p, prev_inc, dir, pos, primed = sync_state
+          p = p.to_f
+          prev_inc = prev_inc.to_f
+          dir = dir.to_f
+          pos %= taps
+          primed = primed != 0
+          w = BandLimit.clamp_width(w_s)
+          fr = f_s
+          pulse = pu_s
+          sc = sc_s
+
+          shape = ->(ph, m) {
+            u = w != 0.5 ? (ph < w ? ph * (0.5 / w) : 0.5 + (ph - w) * (0.5 / (1.0 - w))) : ph
+            v = value(spec, u, m, sc, interp)
+            v.is_a?(Complex) ? v.real : v
+          }
+          slope = ->(ph, m) {
+            a = shape.(wrap(ph + SLOPE_DELTA), m)
+            b = shape.(wrap(ph - SLOPE_DELTA), m)
+            (a - b) / (2.0 * SLOPE_DELTA)
+          }
+
+          values = Array.new(count)
+          count.times do |i|
+            fr = f_a[i] if f_a
+            pulse = pu_a[i] if pu_a
+            w = BandLimit.clamp_width(w_a[i]) if w_a
+            sc = sc_a[i] if sc_a
+
+            wf = 1.0
+            if w != 0.5
+              k1 = 0.5 / w
+              k2 = 0.5 / (1.0 - w)
+              wf = k1 > k2 ? k1 : k2
+            end
+            m = (fr * adv).abs * wf
+
+            if primed
+              vel = dir * prev_inc
+
+              if pulse != 0
+                d = 1.0 - pulse.abs
+                d = 0.0 if d < 0
+                d = 1.0 if d > 1
+
+                p = wrap(p + vel * (1.0 - d))
+                v0 = shape.(p, m)
+                s0 = slope.(p, m)
+                if soft
+                  dir = -dir
+                  nvel = -vel
+                  BandLimit.sync_event(acc, pos, blep, blamp, os, taps, d, 0.0, s0 * (nvel - vel)) if bl
+                  vel = nvel
+                else
+                  dir = 1.0
+                  nvel = prev_inc
+                  p = 0.0
+                  v1 = shape.(p, m)
+                  s1 = slope.(p, m)
+                  BandLimit.sync_event(acc, pos, blep, blamp, os, taps, d, v1 - v0, s1 * nvel - s0 * vel) if bl
+                  vel = nvel
+                end
+
+                p = wrap(p + vel * d)
+              else
+                p = wrap(p + vel)
+              end
+            end
+
+            v = shape.(p, m)
+            v += acc[pos]
+            acc[pos] = 0.0
+            pos = (pos + 1) % taps
+
+            v -= half_mean(spec, sc) * (2.0 * w - 1.0) if remove_dc
+
+            values[i] = v * g + off
+            prev_inc = fr * adv
+            primed = true
+          end
+
+          if count > 0
+            sync_state.replace([p, prev_inc, dir, pos, 1])
+            ring[0...taps] = Numo::DFloat.cast(acc)
+          end
 
           store(out, values)
         end

@@ -71,12 +71,13 @@ RSpec.describe(MB::Sound::Tone, '#wavetable', aggregate_failures: true) do
     end
 
     it 'raises an error for settings it cannot play' do
-      expect { 220.hz.wavetable(:saw).sync(ratio: 2).sample(10) }.to raise_error(ArgumentError, /synced/)
+      expect { 220.hz.wavetable(w.from_harmonics([1], complex: true)).sync(ratio: 2).sample(10) }.to raise_error(ArgumentError, /synced/)
       expect { 220.hz.wavetable(:saw).noise.sample(10) }.to raise_error(ArgumentError, /noise/)
 
       s = w.from_samples(Numo::SFloat.zeros(100), mode: :sample, root: 100)
       expect { 220.hz.wavetable(s).pm(3.hz).sample(10) }.to raise_error(ArgumentError, /phase modulation/)
       expect { 220.hz.wavetable(s).pwm(0.3).sample(10) }.to raise_error(ArgumentError, /warp/)
+      expect { 220.hz.wavetable(s).sync(ratio: 2).sample(10) }.to raise_error(ArgumentError, /synced/)
     end
   end
 
@@ -87,6 +88,24 @@ RSpec.describe(MB::Sound::Tone, '#wavetable', aggregate_failures: true) do
       expect_c_and_ruby { 440.hz.fm(5.hz.at(400)).wavetable(:saw, interpolation: :cubic) }
       expect_c_and_ruby { 440.hz.wavetable(:pulses, scan: 0.7).pm(220.hz.at(2)).pwm(3.hz.lfo.at(0.2..0.8)) }
       expect_c_and_ruby { 440.hz.wavetable(w.from_harmonics([1, 0.5, 0.25], complex: true)) }
+    end
+
+    it 'gives the same samples in C and Ruby with hard and soft sync' do
+      expect_c_and_ruby { 220.hz.wavetable(:saw).sync(ratio: 3.hz.lfo.at(1.5..4)) }
+      expect_c_and_ruby { 220.hz.wavetable(:basic, scan: 0.6).pwm(0.3).softsync(MB::Sound::C2) }
+      expect_c_and_ruby { 220.hz.wavetable(w.from_harmonics([1, 1, 1], mips: false)).sync(ratio: 2.5) }
+    end
+
+    it 'syncs with band-limited steps' do
+      synced = aliasing_db(1365) { |p| p.wavetable(:sine).sync(ratio: 2.37) }
+      naive = aliasing_db(1365) { |p| p.wavetable(w.from_harmonics([1], mips: false)).sync(ratio: 2.37) }
+      expect(synced).to be < -60
+      expect(naive).to be > synced + 15
+    end
+
+    it 'band-limits the corners of a phase warp' do
+      warped = aliasing_db(1365) { |p| p.wavetable(:sine).pwm(0.2) }
+      expect(warped).to be < -65
     end
 
     it 'gives the same samples in C and Ruby with resets' do

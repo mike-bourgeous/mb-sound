@@ -26,7 +26,8 @@ module MB
       # - +noise+: [splitmix64 generator state, an Integer below 2**64] for
       #   noise (FastSound.phasor/oscillate, Tone.noise_random), or nil.
       # - +table+: [sample position in source samples, last phase
-      #   modulation, primed (0 or 1)] for #wavetable tones
+      #   modulation, primed (0 or 1), last phase, last increment] for
+      #   #wavetable tones
       #   (FastWavetable.oscillate/play, Wavetable::KernelRuby).
       #
       # The other fields:
@@ -77,7 +78,7 @@ module MB
           @draws = 0
           @rng = nil
           @reset_ended = false
-          @table = [0.0, 0.0, 0]
+          @table = [0.0, 0.0, 0, 0.0, 0.0]
 
           fields.each do |k, v|
             v = Numo::DFloat.cast(v) if (k == :sync_ring || k == :jump_residual) && v.is_a?(Array)

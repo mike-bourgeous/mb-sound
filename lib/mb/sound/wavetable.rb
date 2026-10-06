@@ -492,6 +492,30 @@ module MB
         )
       end
 
+      # Hard (or +soft+) synced cycle-mode oscillator in C, band-limited
+      # with minBLEP unless +band_limit+ is false: like #oscillate, with
+      # +sync_state+, +ring+, and +pulses+ as for FastSynth.oscillate_sync
+      # (BandLimit.minblep_tables give +blep+ and +blamp+).  Real tables
+      # only.  See Tone#sync.
+      def sync(out, freq, advance, gain, offset, sync_state, ring, pulses, soft, width, scan, interpolation, sample_rate, remove_dc, band_limit = true)
+        blep, blamp = BandLimit.minblep_tables
+        MB::Sound::FastWavetable.sync(
+          out, kernel_spec(sample_rate, interpolation), freq, advance.to_f, gain.to_f, offset.to_f, sync_state, ring,
+          pulses, !!soft, width, scan, interpolation_code(interpolation), !!remove_dc, blep, blamp,
+          BandLimit::SYNC_OVERSAMPLE, BandLimit::SYNC_TAPS, !!band_limit, sinc_kernel(interpolation)
+        )
+      end
+
+      # Ruby mirror of #sync.
+      def sync_ruby(out, freq, advance, gain, offset, sync_state, ring, pulses, soft, width, scan, interpolation, sample_rate, remove_dc, band_limit = true)
+        blep, blamp = BandLimit.minblep_tables
+        KernelRuby.sync(
+          out, kernel_spec(sample_rate, interpolation), freq, advance.to_f, gain.to_f, offset.to_f, sync_state, ring,
+          pulses, !!soft, width, scan, interpolation_code(interpolation), !!remove_dc, blep, blamp,
+          BandLimit::SYNC_OVERSAMPLE, BandLimit::SYNC_TAPS, !!band_limit
+        )
+      end
+
       # Phase-driven lookup in C: fills +out+ from +phase+ (cycles, an
       # NArray) with +increments+ (cycles per sample, an NArray, for picking
       # levels; nil for the brightest), +scan+, and the +wrap+ mode for

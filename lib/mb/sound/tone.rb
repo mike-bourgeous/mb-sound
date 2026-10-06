@@ -492,10 +492,14 @@ module MB
       #
       # Band-limited tables pick their levels from this tone's motion per
       # sample, so FM, phase modulation (#pm), and phase warps (#pwm) stay
-      # clean as far as the levels allow; resets and timeline jumps are
-      # band-limited like the classic shapes' (see #reset).  Sample-mode
-      # tables take no phase modulation or warp.  Hard sync and #noise
-      # aren't supported for tables yet.
+      # clean as far as the levels allow; warp corners get PolyBLAMP
+      # corrections, and resets, timeline jumps, and hard or soft sync
+      # (#sync, #softsync; real tables only) get minBLEP/minBLAMP steps
+      # measured on the table, like the classic shapes'.  A table is smooth,
+      # so sync leaves curvature jumps uncorrected: about as clean as a
+      # synced #sine (-50 to -65 dB of aliasing), not the -95 dB of a synced
+      # #ramp.  Sample-mode tables take no phase modulation, warp, or sync.
+      # #noise isn't supported for tables.
       #
       # Examples (bin/sound.rb):
       #     play 110.hz.wavetable(:basic, scan: 0.2.hz.lfo.triangle.at(0..1)).at(-12.db)
@@ -1449,7 +1453,7 @@ module MB
         after = state.phase[0]
         state.unprime(sync: !!@sync_source)
 
-        return table_jump(table_before, before, after, position, freq, width, phase_mod, scan) if wavetable? && played
+        return table_jump(table_before, before, after, position, freq, width, phase_mod, scan) if wavetable? && played && !@sync_source
         return unless played && !@sync_source && synth_kernel? && !blit?
 
         w = BandLimit.clamp_width((width || 0.5).to_f)
@@ -1673,7 +1677,15 @@ module MB
         case kernel
         when :wavetable
           table = current_table
-          if table.mode == :cycle
+          if @sync_source
+            check_sync(phase)
+            buf = table.sync(
+              out, freq, @advance, @gain, @offset, state.sync, state.sync_ring, pulses, @soft_sync, width, scan || 0,
+              @interpolation, @sample_rate, !@keep_dc, table.mipped?
+            ).inplace!
+            state.phase[0] = state.sync[0]
+            buf
+          elsif table.mode == :cycle
             table.oscillate(
               out, freq, @advance, @gain, @offset, state.phase, state.table, phase, width, scan || 0,
               @interpolation, @sample_rate, !@keep_dc
@@ -1721,7 +1733,14 @@ module MB
         case kernel
         when :wavetable
           table = current_table
-          if table.mode == :cycle
+          if @sync_source
+            check_sync(phase_table)
+            values = table.sync_ruby(
+              out.dup, freq_table, @advance, @gain, @offset, state.sync, state.sync_ring, pulses, @soft_sync, width, scan || 0,
+              @interpolation, @sample_rate, !@keep_dc, table.mipped?
+            )
+            state.phase[0] = state.sync[0]
+          elsif table.mode == :cycle
             values = table.oscillate_ruby(
               out.dup, freq_table, @advance, @gain, @offset, state.phase, state.table, phase_table, width, scan || 0,
               @interpolation, @sample_rate, !@keep_dc
@@ -1799,18 +1818,19 @@ module MB
 
       # Raises an error for settings a #wavetable tone can't play.
       def check_wavetable
-        raise ArgumentError, 'Wavetable tones cannot be synced yet' if @sync_source
         raise ArgumentError, 'Wavetable tones cannot be noise' if random_advance != 0
 
         tables = @table.is_a?(MB::Sound::Wavetable::KeyMap) ? @table.tables : [@table]
         if tables.any? { |t| t.mode == :sample }
           raise ArgumentError, 'Sample-mode wavetables take no phase modulation' if @phase_mod && @phase_mod != 0
           raise ArgumentError, 'Sample-mode wavetables take no phase warp (pwm)' if warped?
+          raise ArgumentError, 'Sample-mode wavetables cannot be synced' if @sync_source
         end
+        raise ArgumentError, 'Complex wavetables cannot be synced yet' if @sync_source && tables.any?(&:complex?)
       end
 
       def check_sync(phase_mod)
-        unless BandLimit::WARP_WAVES.include?(@wave_type)
+        unless BandLimit::WARP_WAVES.include?(@wave_type) || wavetable?
           raise ArgumentError, "A #{@wave_type} can't be synced (only #{BandLimit::WARP_WAVES.join(', ')})"
         end
         raise ArgumentError, 'A synced oscillator cannot also have phase modulation' unless phase_mod == 0 || phase_mod.nil?

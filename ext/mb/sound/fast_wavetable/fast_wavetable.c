@@ -468,6 +468,88 @@ static double wt_read_state(VALUE state, long length, const char *name)
 }
 
 /*
+ * Band-limited warp corners.  A phase warp (width w != 0.5) bends the phase
+ * at e = w (the table's middle, u = 0.5) and at the wrap (u = 0), so the
+ * waveform's slope jumps there by T'(u) times the change in the warp's
+ * slope (T' per cycle of the table, k1 = 0.5 / w before the knee, k2 =
+ * 0.5 / (1 - w) after).  As in FastSynth.oscillate_bl, each crossing adds
+ * a 2-point PolyBLAMP to the samples before and after it, at its sub-sample
+ * time.  The table is continuous, so there are no value jumps.  T' is a
+ * central difference of the interpolated table (WT_SLOPE_DELTA).
+ */
+#define WT_EPS 1e-9
+#define WT_SLOPE_DELTA 1e-5
+
+// If moving from phase +e+ by +d+ cycles crosses phase +b+, the crossing
+// time as a fraction of the step in (0, 1], else -1 (the same as
+// bl_crossing in fast_synth.c).
+static inline double wt_crossing(double e, double d, double b)
+{
+	double dist;
+	if (d > 0) {
+		dist = b - e;
+	} else if (d < 0) {
+		dist = e - b;
+	} else {
+		return -1;
+	}
+	if (dist < 0) {
+		dist += 1.0;
+	}
+	if (dist == 0) {
+		dist = 1.0;
+	}
+
+	double ad = fabs(d);
+	if (ad >= 1.0 || dist > ad + WT_EPS) {
+		return -1;
+	}
+
+	return dist >= ad ? 1.0 : dist / ad;
+}
+
+// The table's slope per cycle at +u+ (real and imaginary parts).
+static inline void wt_table_slope(const struct wt_table *t, double u, double m, double sc, int mode, const struct wt_sinc *ks, double *re, double *im)
+{
+	double are, aim, bre, bim;
+	wt_value(t, mb_wrap(u + WT_SLOPE_DELTA, 1.0), m, sc, mode, ks, &are, &aim);
+	wt_value(t, mb_wrap(u - WT_SLOPE_DELTA, 1.0), m, sc, mode, ks, &bre, &bim);
+	*re = (are - bre) / (2.0 * WT_SLOPE_DELTA);
+	*im = (aim - bim) / (2.0 * WT_SLOPE_DELTA);
+}
+
+// The warp corners crossed moving from phase +e+ by +d+ cycles: the
+// corrections for the sample at the start of the step go in *bre/*bim, and
+// for the sample at its end in *are/*aim.
+static inline void wt_corner_step(const struct wt_table *t, double e, double d, double w, double m, double sc, int mode, const struct wt_sinc *ks,
+		double *bre, double *bim, double *are, double *aim)
+{
+	*bre = *bim = *are = *aim = 0;
+
+	for (int j = 0; j < 2; j++) {
+		double f = wt_crossing(e, d, j == 0 ? 0.0 : w);
+		if (f < 0) {
+			continue;
+		}
+
+		double k1 = 0.5 / w;
+		double k2 = 0.5 / (1.0 - w);
+		double jump = (j == 0 ? k1 - k2 : k2 - k1) * fabs(d);
+		double sre, sim;
+		wt_table_slope(t, j == 0 ? 0.0 : 0.5, m, sc, mode, ks, &sre, &sim);
+
+		double xa = f;
+		double xb = 1.0 - f;
+		double ca = xa * xa * xa / 6.0;
+		double cb = xb * xb * xb / 6.0;
+		*are += sre * jump * ca;
+		*aim += sim * jump * ca;
+		*bre += sre * jump * cb;
+		*bim += sim * jump * cb;
+	}
+}
+
+/*
  * Cycle-mode wavetable oscillator (see Wavetable#oscillate):
  *   oscillate(buffer, spec, frequency, advance, gain, offset, state, tstate,
  *             phase_mod, width, scan, interpolation, remove_dc, sinc)
@@ -477,8 +559,9 @@ static double wt_read_state(VALUE state, long length, const char *name)
  * (i * increment for a constant frequency), plus phase_mod / 2pi, warped
  * like oscillate_bl when +width+ isn't nil.  Levels are picked from the
  * motion per sample (increment plus the change in phase modulation) times
- * the warp's steeper slope.  tstate is [position, last phase modulation,
- * primed].
+ * the warp's steeper slope.  With a warp and band-limited levels, the
+ * warp's corners get PolyBLAMP corrections (see wt_corner_step).  tstate is
+ * [position, last phase modulation, primed, last phase, last increment].
  */
 static VALUE ruby_oscillate(VALUE self, VALUE buffer, VALUE spec, VALUE frequency, VALUE advance,
 		VALUE gain, VALUE offset, VALUE state, VALUE tstate, VALUE phase_mod, VALUE width, VALUE scan,
@@ -493,7 +576,7 @@ static VALUE ruby_oscillate(VALUE self, VALUE buffer, VALUE spec, VALUE frequenc
 	int mode = wt_read_interp(interp, sinc, &t, &ks);
 
 	double phi = wt_read_state(state, 1, "Phase state");
-	wt_read_state(tstate, 3, "Wavetable state");
+	wt_read_state(tstate, 5, "Wavetable state");
 	double adv = NUM2DBL(advance);
 	double g = NUM2DBL(gain);
 	double off = NUM2DBL(offset);
@@ -525,7 +608,12 @@ static VALUE ruby_oscillate(VALUE self, VALUE buffer, VALUE spec, VALUE frequenc
 	mb_read_signal_input(&scan, length, "Scan", &sc, &scptr);
 
 	_Bool dc = RTEST(remove_dc) && warped;
-	double prev_pm = NUM2INT(rb_ary_entry(tstate, 2)) != 0 ? NUM2DBL(rb_ary_entry(tstate, 1)) : pm;
+	_Bool primed = NUM2INT(rb_ary_entry(tstate, 2)) != 0;
+	double prev_pm = primed ? NUM2DBL(rb_ary_entry(tstate, 1)) : pm;
+	double prev_e = NUM2DBL(rb_ary_entry(tstate, 3));
+	double prev_inc = NUM2DBL(rb_ary_entry(tstate, 4));
+	_Bool corners = warped && isfinite(t.hi[0]); // band-limited levels
+	double pending_re = 0, pending_im = 0, pending_d = 0;
 
 	_Bool constant = !freqptr;
 	double steps = 0;
@@ -557,14 +645,51 @@ static VALUE ruby_oscillate(VALUE self, VALUE buffer, VALUE spec, VALUE frequenc
 		}
 
 		double d = inc + (pm - prev_pm) * WT_INV_2PI;
+		double m = fabs(d) * wf;
 		double re, im;
-		wt_value(&t, u, fabs(d) * wf, sc, mode, &ks, &re, &im);
+		wt_value(&t, u, m, sc, mode, &ks, &re, &im);
+
+		if (corners) {
+			// Corners between the previous sample and this one: usually
+			// found while correcting the previous sample, unless its next
+			// phase modulation was extrapolated (between buffers, only if
+			// the phase continued without a jump)
+			double d_back = prev_inc + (pm - prev_pm) * WT_INV_2PI;
+			if (i > 0 && d_back == pending_d) {
+				re += pending_re;
+				im += pending_im;
+			} else if (primed && (i > 0 || fabs(mb_wrap(prev_e + d_back - e + 0.5, 1.0) - 0.5) < 1e-6)) {
+				double bre, bim, are, aim;
+				wt_corner_step(&t, prev_e, d_back, w, m, sc, mode, &ks, &bre, &bim, &are, &aim);
+				re += are;
+				im += aim;
+			}
+
+			// Corners between this sample and the next (phase modulation
+			// for the last sample is extrapolated)
+			double next_pm;
+			if (i + 1 < length) {
+				next_pm = pmptr ? crealf(pmptr[i + 1]) : pm;
+			} else {
+				next_pm = pm + (pm - (i > 0 || primed ? prev_pm : pm));
+			}
+			double d_fwd = inc + (next_pm - pm) * WT_INV_2PI;
+			double bre, bim;
+			wt_corner_step(&t, e, d_fwd, w, m, sc, mode, &ks, &bre, &bim, &pending_re, &pending_im);
+			re += bre;
+			im += bim;
+			pending_d = d_fwd;
+		}
+
 		if (dc) {
 			re -= wt_half_mean(&t, sc) * (2.0 * w - 1.0);
 		}
 
 		wt_store(out, t.cs, i, re, im, g, off);
 		prev_pm = pm;
+		prev_e = e;
+		prev_inc = inc;
+		primed = 1;
 
 		if (!constant) {
 			steps += inc;
@@ -578,6 +703,8 @@ static VALUE ruby_oscillate(VALUE self, VALUE buffer, VALUE spec, VALUE frequenc
 	if (length > 0) {
 		rb_ary_store(tstate, 1, rb_float_new(prev_pm));
 		rb_ary_store(tstate, 2, INT2NUM(1));
+		rb_ary_store(tstate, 3, rb_float_new(prev_e));
+		rb_ary_store(tstate, 4, rb_float_new(prev_inc));
 	}
 
 	if (!was_inplace) {
@@ -774,6 +901,238 @@ static VALUE ruby_play(VALUE self, VALUE buffer, VALUE spec, VALUE frequency, VA
 	return buffer;
 }
 
+/*
+ * Hard and soft sync for cycle-mode tables, band-limited with minBLEP like
+ * FastSynth.oscillate_sync: a sync pulse v at a sample resets the phase
+ * (hard) or reverses its direction (soft) 1 - |v| samples earlier, and the
+ * jump in the table's value and slope there adds a minimum-phase
+ * band-limited step and ramp (tables from BandLimit.minblep_tables) into a
+ * ring of the following samples.  The table itself is band-limited, so its
+ * wrap needs no correction.  Slopes are central differences of the
+ * interpolated table (WT_SLOPE_DELTA cycles each way).
+ */
+// Linear interpolation into a residual table +t+ samples after an event
+// (the same as sync_table in fast_synth.c).
+static inline double wt_sync_table(const double *table, size_t os, size_t taps, double t)
+{
+	double x = t * os;
+	if (x < 0 || x >= (double)(taps * os)) {
+		return 0;
+	}
+
+	size_t idx = (size_t)x;
+	double frac = x - idx;
+	return table[idx] + (table[idx + 1] - table[idx]) * frac;
+}
+
+// Adds an event +t+ samples before the current sample with jumps +dv+ in
+// value and +ds+ in slope per sample to the ring (the same as sync_event
+// in fast_synth.c).
+static inline void wt_sync_event(double *acc, size_t pos, const double *blep, const double *blamp, size_t os, size_t taps, double t, double dv, double ds)
+{
+	if (dv == 0 && ds == 0) {
+		return;
+	}
+
+	for (size_t j = 0; j < taps; j++) {
+		double tt = t + j;
+		acc[(pos + j) % taps] += dv * wt_sync_table(blep, os, taps, tt) + ds * wt_sync_table(blamp, os, taps, tt);
+	}
+}
+
+// The table's (real) value at phase +p+ warped by +w+.
+static inline double wt_shape(const struct wt_table *t, double p, double w, double m, double sc, int mode, const struct wt_sinc *ks)
+{
+	double u = w != 0.5 ? (p < w ? p * (0.5 / w) : 0.5 + (p - w) * (0.5 / (1.0 - w))) : p;
+	double re, im;
+	wt_value(t, u, m, sc, mode, ks, &re, &im);
+	return re;
+}
+
+// The slope per cycle of wt_shape at +p+.
+static inline double wt_slope(const struct wt_table *t, double p, double w, double m, double sc, int mode, const struct wt_sinc *ks)
+{
+	double a = wt_shape(t, mb_wrap(p + WT_SLOPE_DELTA, 1.0), w, m, sc, mode, ks);
+	double b = wt_shape(t, mb_wrap(p - WT_SLOPE_DELTA, 1.0), w, m, sc, mode, ks);
+	return (a - b) / (2.0 * WT_SLOPE_DELTA);
+}
+
+/*
+ * A synced wavetable oscillator (see Wavetable#sync):
+ *   sync(buffer, spec, frequency, advance, gain, offset, sync_state, ring,
+ *        pulses, soft, width, scan, interpolation, remove_dc, blep, blamp,
+ *        oversample, taps, band_limit, sinc)
+ *
+ * +sync_state+ and +ring+ are as for FastSynth.oscillate_sync ([phase,
+ * last increment, direction, ring position, primed] and a DFloat of
+ * +taps+ pending corrections).  Real tables only.
+ */
+static VALUE ruby_sync(int argc, VALUE *argv, VALUE self)
+{
+	if (argc != 20) {
+		rb_raise(rb_eArgError, "wrong number of arguments (given %d, expected 20)", argc);
+	}
+
+	VALUE buffer = argv[0], spec = argv[1], frequency = argv[2], sync_state = argv[6], ring = argv[7];
+	VALUE pulses = argv[8], width = argv[10], scan = argv[11], blep_v = argv[14], blamp_v = argv[15], sinc = argv[19];
+
+	struct wt_table t;
+	wt_read_table(spec, &t);
+	if (t.mode != 0 || t.cs != 1) {
+		rb_raise(rb_eArgError, "FastWavetable.sync needs a real cycle-mode table");
+	}
+	struct wt_sinc ks = { 0 };
+	int mode = wt_read_interp(argv[12], sinc, &t, &ks);
+
+	double adv = NUM2DBL(argv[3]);
+	double g = NUM2DBL(argv[4]);
+	double off = NUM2DBL(argv[5]);
+	_Bool soft = RTEST(argv[9]);
+	_Bool warped = !NIL_P(width);
+	_Bool dc = RTEST(argv[13]) && warped;
+	size_t os = NUM2SIZET(argv[16]);
+	size_t taps = NUM2SIZET(argv[17]);
+	_Bool bl = RTEST(argv[18]);
+
+	Check_Type(sync_state, T_ARRAY);
+	if (RARRAY_LEN(sync_state) != 5) {
+		rb_raise(rb_eArgError, "Sync state must have five elements");
+	}
+	double p = NUM2DBL(rb_ary_entry(sync_state, 0));
+	double prev_inc = NUM2DBL(rb_ary_entry(sync_state, 1));
+	double dir = NUM2DBL(rb_ary_entry(sync_state, 2));
+	size_t pos = NUM2SIZET(rb_ary_entry(sync_state, 3));
+	_Bool primed = NUM2INT(rb_ary_entry(sync_state, 4)) != 0;
+
+	if (taps < 1 || CLASS_OF(ring) != numo_cDFloat || RNARRAY_NDIM(ring) != 1 || RNARRAY_SHAPE(ring)[0] != taps || !RTEST(nary_check_contiguous(ring))) {
+		rb_raise(rb_eArgError, "Ring must be a contiguous DFloat of taps elements");
+	}
+	double *acc = (double *)(nary_get_pointer_for_write(ring) + nary_get_offset(ring));
+	pos %= taps;
+
+	size_t table_len = taps * os + 1;
+	if (CLASS_OF(blep_v) != numo_cDFloat || RNARRAY_SHAPE(blep_v)[0] != table_len || !RTEST(nary_check_contiguous(blep_v)) ||
+			CLASS_OF(blamp_v) != numo_cDFloat || RNARRAY_SHAPE(blamp_v)[0] != table_len || !RTEST(nary_check_contiguous(blamp_v))) {
+		rb_raise(rb_eArgError, "Tables must be contiguous DFloats of taps * oversample + 1 elements");
+	}
+	const double *blep = (const double *)(nary_get_pointer_for_read(blep_v) + nary_get_offset(blep_v));
+	const double *blamp = (const double *)(nary_get_pointer_for_read(blamp_v) + nary_get_offset(blamp_v));
+
+	_Bool was_inplace;
+	wt_ensure_output(&buffer, &t, &was_inplace);
+	size_t length = RNARRAY_SHAPE(buffer)[0];
+	float *out = mb_sfloat_ptr(buffer);
+
+	double freq;
+	complex float *freqptr;
+	mb_read_signal_input(&frequency, length, "Frequency", &freq, &freqptr);
+
+	double pulse;
+	complex float *pulseptr;
+	mb_read_signal_input(&pulses, length, "Sync", &pulse, &pulseptr);
+	if (!pulseptr) {
+		pulse = 0;
+	}
+
+	double w;
+	complex float *wptr;
+	if (!warped) {
+		width = DBL2NUM(0.5);
+	}
+	mb_read_signal_input(&width, length, "Width", &w, &wptr);
+	w = wt_clamp_width(w);
+
+	double sc;
+	complex float *scptr;
+	mb_read_signal_input(&scan, length, "Scan", &sc, &scptr);
+
+	for (size_t i = 0; i < length; i++) {
+		if (freqptr) freq = crealf(freqptr[i]);
+		if (pulseptr) pulse = crealf(pulseptr[i]);
+		if (wptr) w = wt_clamp_width(crealf(wptr[i]));
+		if (scptr) sc = crealf(scptr[i]);
+
+		double wf = 1.0;
+		if (w != 0.5) {
+			double k1 = 0.5 / w;
+			double k2 = 0.5 / (1.0 - w);
+			wf = k1 > k2 ? k1 : k2;
+		}
+		double m = fabs(freq * adv) * wf;
+
+		if (primed) {
+			double vel = dir * prev_inc;
+
+			if (pulse != 0) {
+				double d = 1.0 - fabs(pulse); // the event is d samples before this sample
+				if (d < 0) d = 0;
+				if (d > 1) d = 1;
+
+				p = mb_wrap(p + vel * (1.0 - d), 1.0);
+				double v0 = wt_shape(&t, p, w, m, sc, mode, &ks);
+				double s0 = wt_slope(&t, p, w, m, sc, mode, &ks);
+				if (soft) {
+					dir = -dir;
+					double nvel = -vel;
+					if (bl) wt_sync_event(acc, pos, blep, blamp, os, taps, d, 0, s0 * (nvel - vel));
+					vel = nvel;
+				} else {
+					dir = 1.0;
+					double nvel = prev_inc;
+					p = 0;
+					double v1 = wt_shape(&t, p, w, m, sc, mode, &ks);
+					double s1 = wt_slope(&t, p, w, m, sc, mode, &ks);
+					if (bl) wt_sync_event(acc, pos, blep, blamp, os, taps, d, v1 - v0, s1 * nvel - s0 * vel);
+					vel = nvel;
+				}
+
+				p = mb_wrap(p + vel * d, 1.0);
+			} else {
+				p = mb_wrap(p + vel, 1.0);
+			}
+		}
+
+		double v = wt_shape(&t, p, w, m, sc, mode, &ks);
+		v += acc[pos];
+		acc[pos] = 0;
+		pos = (pos + 1) % taps;
+
+		if (dc) {
+			v -= wt_half_mean(&t, sc) * (2.0 * w - 1.0);
+		}
+
+		out[i] = v * g + off;
+
+		prev_inc = freq * adv;
+		primed = 1;
+	}
+
+	if (length > 0) {
+		rb_ary_store(sync_state, 0, rb_float_new(p));
+		rb_ary_store(sync_state, 1, rb_float_new(prev_inc));
+		rb_ary_store(sync_state, 2, rb_float_new(dir));
+		rb_ary_store(sync_state, 3, SIZET2NUM(pos));
+		rb_ary_store(sync_state, 4, INT2NUM(1));
+	}
+
+	if (!was_inplace) {
+		UNSET_INPLACE(buffer);
+	}
+
+	RB_GC_GUARD(spec);
+	RB_GC_GUARD(sinc);
+	RB_GC_GUARD(frequency);
+	RB_GC_GUARD(pulses);
+	RB_GC_GUARD(width);
+	RB_GC_GUARD(scan);
+	RB_GC_GUARD(ring);
+	RB_GC_GUARD(blep_v);
+	RB_GC_GUARD(blamp_v);
+	RB_GC_GUARD(buffer);
+
+	return buffer;
+}
+
 void Init_fast_wavetable(void)
 {
 	VALUE mb = rb_define_module("MB");
@@ -783,4 +1142,5 @@ void Init_fast_wavetable(void)
 	rb_define_module_function(fast_wavetable_module, "oscillate", ruby_oscillate, 14);
 	rb_define_module_function(fast_wavetable_module, "lookup", ruby_lookup, 8);
 	rb_define_module_function(fast_wavetable_module, "play", ruby_play, 11);
+	rb_define_module_function(fast_wavetable_module, "sync", ruby_sync, -1);
 }
