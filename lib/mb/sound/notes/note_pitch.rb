@@ -191,7 +191,7 @@ module MB
 
         # A copy with changed settings.
         def with(**changes)
-          NotePitch.new(@notes, sample_rate: @sample_rate, **@settings, **changes)
+          derived(NotePitch.new(@notes, sample_rate: @sample_rate, **@settings, **changes))
         end
 
         # The note number node (see #build_freq): Notes#number, or a

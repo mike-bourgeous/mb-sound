@@ -138,7 +138,9 @@ module MB
       end
 
       # The phase setting for oscillators made from a unison copy (see
-      # #unison and Unison.apply_phase; nil normally).
+      # #unison and Unison.apply_phase; nil normally).  Pitches derived from
+      # a copy (#transpose, #vibrato, ...) keep it, so e.g. an FM modulator
+      # at `p.transpose(12)` in a unison block gets it too.
       attr_accessor :unison_phase
 
       # Wave shapes: each returns a new Tone at this pitch.
@@ -227,7 +229,7 @@ module MB
 
         depth = Interval.semitones(depth).to_f unless depth.respond_to?(:sample)
         lfo = Tone.new(frequency: rate, sample_rate: @sample_rate).lfo
-        Pitch.new(GraphNode::SemitoneShift.new(freq, lfo * depth, sample_rate: @sample_rate), sample_rate: @sample_rate)
+        derived(Pitch.new(GraphNode::SemitoneShift.new(freq, lfo * depth, sample_rate: @sample_rate), sample_rate: @sample_rate))
       end
 
       # Returns a Pitch +semitones+ higher (lower if negative); +semitones+
@@ -235,7 +237,7 @@ module MB
       def transpose(semitones)
         semitones = Interval.semitones(semitones)
         ratio = 2 ** (semitones / 12.0)
-        Pitch.new(constant? ? @source * ratio : freq * ratio, sample_rate: @sample_rate)
+        derived(Pitch.new(constant? ? @source * ratio : freq * ratio, sample_rate: @sample_rate))
       end
 
       # The period of one cycle in seconds and in samples.
@@ -312,6 +314,13 @@ module MB
       end
 
       private
+
+      # Gives +pitch+, derived from this one, this pitch's #unison_phase.
+      # Returns +pitch+.
+      def derived(pitch)
+        pitch.unison_phase = @unison_phase
+        pitch
+      end
 
       # Applies this pitch's settings to a +tone+ made from it (#follow, and
       # the #unison_phase).  Returns the tone.
