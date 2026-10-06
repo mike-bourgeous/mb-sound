@@ -77,7 +77,7 @@ RSpec.describe(MB::Sound::Tone, '#wavetable', aggregate_failures: true) do
 
     it 'raises an error for settings it cannot play' do
       expect { 220.hz.wavetable(w.from_harmonics([1], complex: true)).sync(ratio: 2).sample(10) }.to raise_error(ArgumentError, /synced/)
-      expect { 220.hz.wavetable(:saw).noise.sample(10) }.to raise_error(ArgumentError, /noise/)
+      expect { 220.hz.wavetable(:saw).noise.sync(ratio: 2).sample(10) }.to raise_error(ArgumentError, /noise/)
 
       s = w.from_samples(Numo::SFloat.zeros(100), mode: :sample, root: 100)
       expect { 220.hz.wavetable(s).pm(3.hz).sample(10) }.to raise_error(ArgumentError, /phase modulation/)
@@ -177,6 +177,15 @@ RSpec.describe(MB::Sound::Tone, '#wavetable', aggregate_failures: true) do
       t = 100.hz.wavetable(w.from_harmonics([1], complex: true)).sample(480)
       expect(t).to be_a(Numo::SComplex)
       expect(t.imag).to all_be_within(1e-4).of_array(100.hz.sine.with_phase(Math::PI / 2).sample(480) * -1)
+    end
+
+    it 'can be noise with the distribution of the table (the same in C and Ruby)' do
+      expect_c_and_ruby { 1.hz.wavetable(:saw).noise(seed: 3) }
+      expect_c_and_ruby { 220.hz.wavetable(:basic, scan: 0.4).noise(0.001, seed: 4) }
+
+      x = Numo::DFloat.cast(1.hz.wavetable(:saw).noise(seed: 5).sample(48000))
+      expect(Math.sqrt((x**2).mean)).to be_within(0.01).of(Math.sqrt(1.0 / 3)) # uniform, like ramp noise
+      expect(x.mean.abs).to be < 0.01
     end
 
     it 'band-limits resets' do

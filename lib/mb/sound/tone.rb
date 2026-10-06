@@ -498,8 +498,9 @@ module MB
       # measured on the table, like the classic shapes'.  A table is smooth,
       # so sync leaves curvature jumps uncorrected: about as clean as a
       # synced #sine (-50 to -65 dB of aliasing), not the -95 dB of a synced
-      # #ramp.  Sample-mode tables take no phase modulation, warp, or sync.
-      # #noise isn't supported for tables.
+      # #ramp.  Sample-mode tables take no phase modulation, warp, sync, or
+      # noise.  #noise reads a cycle table at random phases (picking levels
+      # by the pitch), so it has the table's distribution of values.
       #
       # Examples (bin/sound.rb):
       #     play 110.hz.wavetable(:basic, scan: 0.2.hz.lfo.triangle.at(0..1)).at(-12.db)
@@ -1688,7 +1689,7 @@ module MB
           elsif table.mode == :cycle
             table.oscillate(
               out, freq, @advance, @gain, @offset, state.phase, state.table, phase, width, scan || 0,
-              @interpolation, @sample_rate, !@keep_dc
+              @interpolation, @sample_rate, !@keep_dc, @random_advance, state.noise
             ).inplace!
           else
             table.play(
@@ -1743,7 +1744,7 @@ module MB
           elsif table.mode == :cycle
             values = table.oscillate_ruby(
               out.dup, freq_table, @advance, @gain, @offset, state.phase, state.table, phase_table, width, scan || 0,
-              @interpolation, @sample_rate, !@keep_dc
+              @interpolation, @sample_rate, !@keep_dc, @random_advance, state.noise
             )
           else
             values = table.play_ruby(
@@ -1818,9 +1819,10 @@ module MB
 
       # Raises an error for settings a #wavetable tone can't play.
       def check_wavetable
-        raise ArgumentError, 'Wavetable tones cannot be noise' if random_advance != 0
-
         tables = @table.is_a?(MB::Sound::Wavetable::KeyMap) ? @table.tables : [@table]
+        if random_advance != 0 && (@sync_source || tables.any? { |t| t.mode == :sample })
+          raise ArgumentError, 'Synced and sample-mode wavetable tones cannot be noise'
+        end
         if tables.any? { |t| t.mode == :sample }
           raise ArgumentError, 'Sample-mode wavetables take no phase modulation' if @phase_mod && @phase_mod != 0
           raise ArgumentError, 'Sample-mode wavetables take no phase warp (pwm)' if warped?

@@ -537,19 +537,22 @@ module MB
       # +advance+ per sample, +tstate+ ([position, last phase modulation,
       # primed]), +phase_mod+ (radians), +width+ (phase warp, nil for none),
       # +scan+ (0..1), and output gain and offset; +remove_dc+ removes the
-      # warp's DC offset.  See Tone#wavetable.
-      def oscillate(out, freq, advance, gain, offset, state, tstate, phase_mod, width, scan, interpolation, sample_rate, remove_dc)
+      # warp's DC offset; a nonzero +random_advance+ (cycles per Hz) adds
+      # noise to each increment from the generator state +noise+ (see
+      # Tone#noise).  See Tone#wavetable.
+      def oscillate(out, freq, advance, gain, offset, state, tstate, phase_mod, width, scan, interpolation, sample_rate, remove_dc, random_advance = 0.0, noise = nil)
         MB::Sound::FastWavetable.oscillate(
           out, kernel_spec(sample_rate, interpolation), freq, advance.to_f, gain.to_f, offset.to_f, state, tstate,
-          phase_mod, width, scan, interpolation_code(interpolation), !!remove_dc, sinc_kernel(interpolation)
+          phase_mod, width, scan, interpolation_code(interpolation), !!remove_dc, sinc_kernel(interpolation),
+          random_advance.to_f, noise
         )
       end
 
       # Ruby mirror of #oscillate (the same samples), returning +out+.
-      def oscillate_ruby(out, freq, advance, gain, offset, state, tstate, phase_mod, width, scan, interpolation, sample_rate, remove_dc)
+      def oscillate_ruby(out, freq, advance, gain, offset, state, tstate, phase_mod, width, scan, interpolation, sample_rate, remove_dc, random_advance = 0.0, noise = nil)
         KernelRuby.oscillate(
           out, kernel_spec(sample_rate, interpolation), freq, advance.to_f, gain.to_f, offset.to_f, state, tstate,
-          phase_mod, width, scan, interpolation_code(interpolation), !!remove_dc
+          phase_mod, width, scan, interpolation_code(interpolation), !!remove_dc, random_advance.to_f, noise
         )
       end
 

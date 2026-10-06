@@ -26,7 +26,7 @@ module MB
         module_function
 
         # Ruby version of FastWavetable.oscillate (see Wavetable#oscillate).
-        def oscillate(out, spec, freq, adv, g, off, state, tstate, phase_mod, width, scan, interp, remove_dc)
+        def oscillate(out, spec, freq, adv, g, off, state, tstate, phase_mod, width, scan, interp, remove_dc, rndadv = 0.0, noise = nil)
           count = out.length
           phi = state[0].to_f
           f_s, f_a = signal(freq, count)
@@ -44,7 +44,8 @@ module MB
           corners = warped && spec[5][0].finite?
           pending = 0.0
           pending_d = 0.0
-          constant = f_a.nil?
+          rndadv = rndadv.to_f
+          constant = f_a.nil? && rndadv == 0
           steps = 0.0
           values = Array.new(count)
 
@@ -54,7 +55,13 @@ module MB
             w = BandLimit.clamp_width(w_a[i]) if w_a
             sc = sc_a ? sc_a[i] : sc_s
 
-            inc = fr * adv
+            if rndadv != 0
+              r = Tone.noise_random(noise) * rndadv
+              a = adv + r
+              inc = fr * a
+            else
+              inc = fr * adv
+            end
             steps = inc * i if constant
 
             e = wrap(phi + steps)
@@ -70,7 +77,7 @@ module MB
               wf = 1.0
             end
 
-            d = inc + (pm - prev_pm) * INV_2PI
+            d = (rndadv != 0 ? fr * (adv + 0.5 * rndadv) : inc) + (pm - prev_pm) * INV_2PI
             m = d.abs * wf
             v = value(spec, u, m, sc, interp)
 

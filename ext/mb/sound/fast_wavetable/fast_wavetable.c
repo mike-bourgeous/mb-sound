@@ -543,6 +543,32 @@ static double wt_read_state(VALUE state, long length, const char *name)
 	return NUM2DBL(rb_ary_entry(state, 0));
 }
 
+// The next uniform random number in 0...1 from the splitmix64 state *s (the
+// same generator as noise_random in fast_sound.c; Ruby mirror
+// MB::Sound::Tone.noise_random).
+static inline double wt_noise_random(uint64_t *s)
+{
+	uint64_t z = (*s += 0x9E3779B97F4A7C15ULL);
+	z = (z ^ (z >> 30)) * 0xBF58476D1CE4E5B9ULL;
+	z = (z ^ (z >> 27)) * 0x94D049BB133111EBULL;
+	z ^= z >> 31;
+	return (double)(z >> 11) * 0x1.0p-53;
+}
+
+// The phase increment for one sample at +freq+ Hz, with a random part for
+// noise (as phasor_increment in fast_sound.c; separate statements so no
+// multiply-add is fused).
+static inline double wt_increment(double freq, double adv, double rndadv, uint64_t *rng)
+{
+	if (rndadv != 0) {
+		double r = wt_noise_random(rng) * rndadv;
+		double a = adv + r;
+		return freq * a;
+	}
+
+	return freq * adv;
+}
+
 /*
  * Band-limited warp corners.  A phase warp (width w != 0.5) bends the phase
  * at e = w (the table's middle, u = 0.5) and at the wrap (u = 0), so the
@@ -628,7 +654,8 @@ static inline void wt_corner_step(const struct wt_table *t, double e, double d, 
 /*
  * Cycle-mode wavetable oscillator (see Wavetable#oscillate):
  *   oscillate(buffer, spec, frequency, advance, gain, offset, state, tstate,
- *             phase_mod, width, scan, interpolation, remove_dc, sinc)
+ *             phase_mod, width, scan, interpolation, remove_dc, sinc
+ *             [, random_advance, noise])
  *
  * The phase (state[0], cycles) advances like FastSound.phasor and
  * FastSynth.oscillate_bl: sample i reads phase phi + (increments 0...i)
@@ -638,11 +665,20 @@ static inline void wt_corner_step(const struct wt_table *t, double e, double d, 
  * the warp's steeper slope.  With a warp and band-limited levels, the
  * warp's corners get PolyBLAMP corrections (see wt_corner_step).  tstate is
  * [position, last phase modulation, primed, last phase, last increment].
+ * A nonzero +random_advance+ adds noise to the increments (as
+ * FastSound.phasor; +noise+ is the generator state, Tone::State#noise).
  */
-static VALUE ruby_oscillate(VALUE self, VALUE buffer, VALUE spec, VALUE frequency, VALUE advance,
-		VALUE gain, VALUE offset, VALUE state, VALUE tstate, VALUE phase_mod, VALUE width, VALUE scan,
-		VALUE interp, VALUE remove_dc, VALUE sinc)
+static VALUE ruby_oscillate(int argc, VALUE *argv, VALUE self)
 {
+	if (argc != 14 && argc != 16) {
+		rb_raise(rb_eArgError, "wrong number of arguments (given %d, expected 14 or 16)", argc);
+	}
+	VALUE buffer = argv[0], spec = argv[1], frequency = argv[2], advance = argv[3], gain = argv[4], offset = argv[5];
+	VALUE state = argv[6], tstate = argv[7], phase_mod = argv[8], width = argv[9], scan = argv[10];
+	VALUE interp = argv[11], remove_dc = argv[12], sinc = argv[13];
+	VALUE random_advance = argc > 14 ? argv[14] : Qnil;
+	VALUE noise = argc > 15 ? argv[15] : Qnil;
+
 	struct wt_table t;
 	wt_read_table(spec, &t);
 	if (t.mode != 0) {
@@ -654,6 +690,15 @@ static VALUE ruby_oscillate(VALUE self, VALUE buffer, VALUE spec, VALUE frequenc
 	double phi = wt_read_state(state, 1, "Phase state");
 	wt_read_state(tstate, 5, "Wavetable state");
 	double adv = NUM2DBL(advance);
+	double rndadv = NIL_P(random_advance) ? 0 : NUM2DBL(random_advance);
+	uint64_t rng = 0;
+	if (rndadv != 0) {
+		Check_Type(noise, T_ARRAY);
+		if (RARRAY_LEN(noise) != 1) {
+			rb_raise(rb_eArgError, "Noise state must have exactly one Integer element");
+		}
+		rng = NUM2ULL(rb_ary_entry(noise, 0));
+	}
 	double g = NUM2DBL(gain);
 	double off = NUM2DBL(offset);
 
@@ -691,7 +736,7 @@ static VALUE ruby_oscillate(VALUE self, VALUE buffer, VALUE spec, VALUE frequenc
 	_Bool corners = warped && isfinite(t.hi[0]); // band-limited levels
 	double pending_re = 0, pending_im = 0, pending_d = 0;
 
-	_Bool constant = !freqptr;
+	_Bool constant = !freqptr && rndadv == 0;
 	double steps = 0;
 	struct wt_sel sel = { .valid = 0 };
 	for (size_t i = 0; i < length; i++) {
@@ -700,7 +745,7 @@ static VALUE ruby_oscillate(VALUE self, VALUE buffer, VALUE spec, VALUE frequenc
 		if (wptr) w = wt_clamp_width(crealf(wptr[i]));
 		if (scptr) sc = crealf(scptr[i]);
 
-		double inc = freq * adv;
+		double inc = wt_increment(freq, adv, rndadv, &rng);
 		if (constant) {
 			steps = inc * i;
 		}
@@ -721,7 +766,10 @@ static VALUE ruby_oscillate(VALUE self, VALUE buffer, VALUE spec, VALUE frequenc
 			wf = 1.0;
 		}
 
-		double d = inc + (pm - prev_pm) * WT_INV_2PI;
+		// Noise picks levels by the mean increment (the pitch; a random
+		// phase gives white noise with the table's distribution of values
+		// at any level)
+		double d = (rndadv != 0 ? freq * (adv + 0.5 * rndadv) : inc) + (pm - prev_pm) * WT_INV_2PI;
 		double m = fabs(d) * wf;
 		double re, im;
 		wt_reselect(&t, m, sc, &sel);
@@ -777,6 +825,9 @@ static VALUE ruby_oscillate(VALUE self, VALUE buffer, VALUE spec, VALUE frequenc
 	if (constant) {
 		steps = freq * adv * length;
 	}
+	if (rndadv != 0) {
+		rb_ary_store(noise, 0, ULL2NUM(rng));
+	}
 	rb_ary_store(state, 0, rb_float_new(wt_wrap(phi + steps, 1.0)));
 	if (length > 0) {
 		rb_ary_store(tstate, 1, rb_float_new(prev_pm));
@@ -789,6 +840,7 @@ static VALUE ruby_oscillate(VALUE self, VALUE buffer, VALUE spec, VALUE frequenc
 		UNSET_INPLACE(buffer);
 	}
 
+	RB_GC_GUARD(noise);
 	RB_GC_GUARD(spec);
 	RB_GC_GUARD(sinc);
 	RB_GC_GUARD(frequency);
@@ -1285,7 +1337,7 @@ void Init_fast_wavetable(void)
 	VALUE sound = rb_define_module_under(mb, "Sound");
 	VALUE fast_wavetable_module = rb_define_module_under(sound, "FastWavetable");
 
-	rb_define_module_function(fast_wavetable_module, "oscillate", ruby_oscillate, 14);
+	rb_define_module_function(fast_wavetable_module, "oscillate", ruby_oscillate, -1);
 	rb_define_module_function(fast_wavetable_module, "lookup", ruby_lookup, 9);
 	rb_define_module_function(fast_wavetable_module, "play", ruby_play, 11);
 	rb_define_module_function(fast_wavetable_module, "sync", ruby_sync, -1);
