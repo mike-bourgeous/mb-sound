@@ -7,9 +7,11 @@ module MB
     module GenerationMethods
       # Creates a uniformly distributed white noise generator that can be
       # combined with other tones, filters, etc.  See MB::Sound::GraphNode
-      # and MB::Sound::Tone.
-      def noise
-        2000.hz.ramp.noise
+      # and MB::Sound::Tone.  Each call gives a new random stream, seeded
+      # with +seed+ or a sub-seed from the root generator (see
+      # MB::Sound.seed and Tone#noise), so renders repeat.
+      def noise(seed: nil)
+        2000.hz.ramp.noise(seed: seed)
       end
 
       # Shortcut/DSL method for creating a tone with a given dynamic frequency

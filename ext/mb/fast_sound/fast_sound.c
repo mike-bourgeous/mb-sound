@@ -4,6 +4,7 @@
  * (C)2021 Mike Bourgeous
  */
 #include <stdlib.h>
+#include <stdint.h>
 #include <math.h>
 #include <complex.h>
 
@@ -1134,7 +1135,8 @@ static VALUE ruby_osc(VALUE self, VALUE wave_type, VALUE phi)
 // A phasor's phase is in cycles (0 <= phi < 1).  Each sample it advances by
 // frequency * (advance + random * random_advance), where advance and
 // random_advance are in cycles per Hz (advance is 1 / sample_rate) and
-// random is uniform in 0..1 (drand48, so the sequence repeats per process).
+// random is uniform in 0..1, from the oscillator's own generator (see
+// noise_random), so noise repeats from its seed.
 //
 // Within a buffer, the phase of sample i is phi + (the sum of increments
 // 0...i), wrapped once, rather than wrapping after every sample: i *
@@ -1142,14 +1144,58 @@ static VALUE ruby_osc(VALUE self, VALUE wave_type, VALUE phi)
 // rounding from drifting within a buffer and matches the Ruby version
 // (Phasor#phases_ruby), which does the same with Numo.
 
-// Returns the phase increment in cycles for one sample at +freq+ Hz.
-static inline double phasor_increment(double freq, double adv, double rndadv)
+// The next uniform random number in 0...1 from the splitmix64 generator
+// state *s (53 bits, like drand48's distribution; the Ruby mirror is
+// MB::Sound::Tone.noise_random).  Each noise oscillator keeps its own state
+// (Tone::State#noise), seeded from MB::Sound.next_seed.
+static inline double noise_random(uint64_t *s)
+{
+	uint64_t z = (*s += 0x9E3779B97F4A7C15ULL);
+	z = (z ^ (z >> 30)) * 0xBF58476D1CE4E5B9ULL;
+	z = (z ^ (z >> 27)) * 0x94D049BB133111EBULL;
+	z ^= z >> 31;
+	return (double)(z >> 11) * 0x1.0p-53;
+}
+
+// Returns the phase increment in cycles for one sample at +freq+ Hz.  The
+// random part is computed in separate statements so a compiler can't fuse
+// it into a multiply-add (keeping the Ruby mirror exact).
+static inline double phasor_increment(double freq, double adv, double rndadv, uint64_t *rng)
 {
 	if (rndadv != 0) {
-		return freq * (adv + drand48() * rndadv);
+		double r = noise_random(rng) * rndadv;
+		double a = adv + r;
+		return freq * a;
 	}
 
 	return freq * adv;
+}
+
+// Reads the noise generator state (an Array of one Integer, see
+// Tone::State#noise) into *rng; required if +rndadv+ is nonzero.
+static void read_noise_state(VALUE noise, double rndadv, uint64_t *rng)
+{
+	*rng = 0;
+	if (NIL_P(noise)) {
+		if (rndadv != 0) {
+			rb_raise(rb_eArgError, "Noise (a random advance) needs a generator state");
+		}
+		return;
+	}
+
+	Check_Type(noise, T_ARRAY);
+	if (RARRAY_LEN(noise) != 1) {
+		rb_raise(rb_eArgError, "Noise state must have exactly one Integer element");
+	}
+	*rng = NUM2ULL(rb_ary_entry(noise, 0));
+}
+
+// Stores the noise generator state back (see read_noise_state).
+static void write_noise_state(VALUE noise, uint64_t rng)
+{
+	if (!NIL_P(noise)) {
+		rb_ary_store(noise, 0, ULL2NUM(rng));
+	}
 }
 
 // Returns the waveform value at phase +phi+ (cycles) plus phase modulation
@@ -1203,13 +1249,17 @@ static double read_phasor_state(VALUE state)
  * Fills the SFloat +buffer+ with the phase in cycles of a phasor, starting
  * from state[0] and storing the next phase back into state[0].  If
  * +increments+ is an SFloat NArray of the same length, the increment for
- * each sample is written there too.  See Phasor#sample_c.
+ * each sample is written there too.  +noise+ is the random generator state
+ * (see Tone::State#noise), required when +random_advance+ is nonzero, else
+ * nil.  See Phasor#sample_c.
  */
-static VALUE ruby_phasor(VALUE self, VALUE buffer, VALUE frequency, VALUE advance, VALUE random_advance, VALUE state, VALUE increments)
+static VALUE ruby_phasor(VALUE self, VALUE buffer, VALUE frequency, VALUE advance, VALUE random_advance, VALUE state, VALUE increments, VALUE noise)
 {
 	double phi = read_phasor_state(state);
 	double adv = NUM2DBL(advance);
 	double rndadv = NUM2DBL(random_advance);
+	uint64_t rng;
+	read_noise_state(noise, rndadv, &rng);
 
 	_Bool was_inplace;
 	ensure_inplace_sfloat(&buffer, &was_inplace);
@@ -1235,7 +1285,7 @@ static VALUE ruby_phasor(VALUE self, VALUE buffer, VALUE frequency, VALUE advanc
 			freq = crealf(freqptr[i]);
 		}
 
-		double inc = phasor_increment(freq, adv, rndadv);
+		double inc = phasor_increment(freq, adv, rndadv, &rng);
 		if (constant) {
 			steps = inc * i;
 		}
@@ -1251,9 +1301,10 @@ static VALUE ruby_phasor(VALUE self, VALUE buffer, VALUE frequency, VALUE advanc
 	}
 
 	if (constant) {
-		steps = phasor_increment(freq, adv, 0) * length;
+		steps = phasor_increment(freq, adv, 0, &rng) * length;
 	}
 	rb_ary_store(state, 0, rb_float_new(wrap(phi + steps, 1.0)));
+	write_noise_state(noise, rng);
 
 	if (!was_inplace) {
 		UNSET_INPLACE(buffer);
@@ -1332,14 +1383,17 @@ static VALUE ruby_shape(VALUE self, VALUE buffer, VALUE wave_type, VALUE phases,
  * A phasor and shaper in one loop (the usual oscillator path, avoiding a
  * phase buffer): fills +buffer+ with +wave_type+ at +frequency+ (Hz; Numeric
  * or NArray) plus +phase_mod+, advancing the phase in state[0] (cycles).
- * Same math as ruby_phasor followed by ruby_shape.  See Oscillator#sample_c.
+ * Same math as ruby_phasor followed by ruby_shape.  +noise+ is as for
+ * ruby_phasor.  See Oscillator#sample_c.
  */
-static VALUE ruby_oscillate(VALUE self, VALUE buffer, VALUE wave_type, VALUE frequency, VALUE phase_mod, VALUE advance, VALUE random_advance, VALUE gain, VALUE offset, VALUE state)
+static VALUE ruby_oscillate(VALUE self, VALUE buffer, VALUE wave_type, VALUE frequency, VALUE phase_mod, VALUE advance, VALUE random_advance, VALUE gain, VALUE offset, VALUE state, VALUE noise)
 {
 	enum wave_types wt = find_wave_type(SYM2ID(wave_type));
 	double phi = read_phasor_state(state);
 	double adv = NUM2DBL(advance);
 	double rndadv = NUM2DBL(random_advance);
+	uint64_t rng;
+	read_noise_state(noise, rndadv, &rng);
 	double g = NUM2DBL(gain);
 	double off = NUM2DBL(offset);
 
@@ -1367,7 +1421,7 @@ static VALUE ruby_oscillate(VALUE self, VALUE buffer, VALUE wave_type, VALUE fre
 			pm = crealf(pmptr[i]);
 		}
 
-		double inc = phasor_increment(freq, adv, rndadv);
+		double inc = phasor_increment(freq, adv, rndadv, &rng);
 		if (constant) {
 			steps = inc * i;
 		}
@@ -1386,9 +1440,10 @@ static VALUE ruby_oscillate(VALUE self, VALUE buffer, VALUE wave_type, VALUE fre
 	}
 
 	if (constant) {
-		steps = phasor_increment(freq, adv, 0) * length;
+		steps = phasor_increment(freq, adv, 0, &rng) * length;
 	}
 	rb_ary_store(state, 0, rb_float_new(wrap(phi + steps, 1.0)));
+	write_noise_state(noise, rng);
 
 	if (!was_inplace) {
 		UNSET_INPLACE(buffer);
@@ -1902,9 +1957,9 @@ void Init_fast_sound(void)
 
 	// Oscillator functions
 	rb_define_module_function(fast_sound, "osc", ruby_osc, 2);
-	rb_define_module_function(fast_sound, "phasor", ruby_phasor, 6);
+	rb_define_module_function(fast_sound, "phasor", ruby_phasor, 7);
 	rb_define_module_function(fast_sound, "shape", ruby_shape, 7);
-	rb_define_module_function(fast_sound, "oscillate", ruby_oscillate, 9);
+	rb_define_module_function(fast_sound, "oscillate", ruby_oscillate, 10);
 
 	// Filtering functions
 	rb_define_module_function(fast_sound, "biquad", ruby_biquad, 10);

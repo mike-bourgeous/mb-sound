@@ -139,11 +139,11 @@ RSpec.describe(MB::Sound::Tone, :aggregate_failures) do
 
         phasor_state = [0.2]
         increments = Numo::SFloat.zeros(800)
-        phases = MB::FastSound.phasor(Numo::SFloat.zeros(800), freq, 1.0 / 48000, 0, phasor_state, increments)
+        phases = MB::FastSound.phasor(Numo::SFloat.zeros(800), freq, 1.0 / 48000, 0, phasor_state, increments, nil)
         shaped = MB::FastSound.shape((complex ? Numo::SComplex : Numo::SFloat).zeros(800), wave, phases, increments, pm, 0.5, 0.1)
 
         state = [0.2]
-        fused = MB::FastSound.oscillate((complex ? Numo::SComplex : Numo::SFloat).zeros(800), wave, freq, pm, 1.0 / 48000, 0, 0.5, 0.1, state)
+        fused = MB::FastSound.oscillate((complex ? Numo::SComplex : Numo::SFloat).zeros(800), wave, freq, pm, 1.0 / 48000, 0, 0.5, 0.1, state, nil)
 
         expect(fused).to all_be_within(1e-5).of_array(shaped)
         expect(state[0]).to be_within(1e-12).of(phasor_state[0])

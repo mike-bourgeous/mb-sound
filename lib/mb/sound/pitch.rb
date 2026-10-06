@@ -110,7 +110,7 @@ module MB
       def skew(width, dc: false) = tone.skew(width, dc: dc)
       def pulse(width = 0.5, dc: false) = tone.pulse(width, dc: dc)
       def apulse(width = 0.5, dc: false) = tone.apulse(width, dc: dc)
-      def noise(blend = true) = tone.noise(blend)
+      def noise(blend = true, seed: nil) = tone.noise(blend, seed: seed)
 
       # Shortcuts for a sine Tone at this pitch with a reset input
       # (Tone#reset), never reset (Tone#free), or a random phase
