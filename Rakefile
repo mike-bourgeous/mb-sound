@@ -92,6 +92,7 @@ MEMCHECK_SPECS = [
   'spec/lib/mb/sound/envelope_spec.rb',            # FastEnvelope.process
   'spec/lib/mb/sound/wavetable_spec.rb',           # FastWavetable
   'spec/lib/mb/sound/graph_node/wavetable_spec.rb',
+  'spec/lib/mb/sound/tone_wavetable_spec.rb',      # FastWavetable through Tone (sync, resets, sample mode)
   'spec/lib/mb/sound/filter/biquad_spec.rb',       # FastSound.biquad*
   'spec/lib/mb/sound/filter/cookbook_spec.rb',     # FastSound.cookbook, dynamic_biquad
   'spec/lib/mb/sound/filter/smoothstep_spec.rb',   # FastSound.smoothstep*
