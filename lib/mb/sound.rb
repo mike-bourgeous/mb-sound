@@ -41,6 +41,7 @@ require_relative 'sound/multichannel_methods'
 require_relative 'sound/warm_up_methods'
 require_relative 'sound/envelope_methods'
 require_relative 'sound/random_methods'
+require_relative 'sound/live_methods'
 
 module MB
   # Convenience functions for making quick work of sound.
@@ -66,6 +67,7 @@ module MB
     extend WarmUpMethods
     extend EnvelopeMethods
     extend RandomMethods
+    extend LiveMethods
 
     # Speed of sound for wavelength calculations, in meters per second.
     SPEED_OF_SOUND = 343.0

@@ -1262,14 +1262,16 @@ module MB
       # Runs the block (which changes configuration) and returns self,
       # forgetting cached settings (and a state made early for
       # introspection) so the first sample picks the change up.  Raises
-      # FrozenError once the tone has started playing.
+      # FrozenError once the tone has started playing (in live mode,
+      # MB::Sound.live?, it warns and leaves the tone unchanged instead).
       def configure
         if @started
-          raise FrozenError.new(
+          MB::Sound.live_error(FrozenError.new(
             "#{self.class.name} #{wave_name} #{make_source_name(@frequency)} is already playing, so its settings are fixed " \
             '(values that change while playing come from inputs, e.g. a Constant or another node)',
             receiver: self
-          )
+          ))
+          return self
         end
 
         yield

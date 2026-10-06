@@ -125,6 +125,21 @@ RSpec.describe MB::Sound::Tone do
       end
     end
 
+    it 'warns and keeps the tone unchanged in live mode' do
+      t = 220.hz.ramp.at(0.5)
+      before = t.sample(100).dup
+      MB::Sound.live = true
+      expect { expect(t.at(0.1)).to equal(t) }.to output(/FrozenError.*already playing.*live mode: ignored/).to_stderr
+      expect { t.square }.to output(/live mode/).to_stderr
+
+      u = 220.hz.ramp.at(0.5)
+      u.sample(100)
+      expect(t.sample(100)).to eq(u.sample(100))
+      expect(before.length).to eq(100)
+    ensure
+      MB::Sound.live = false
+    end
+
     it 'still accepts or_at and sample rate changes after playing starts' do
       t = 220.hz.ramp.at(0.5)
       t.sample(10)
