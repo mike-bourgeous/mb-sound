@@ -196,6 +196,23 @@ module MB
         self
       end
 
+      # Returns a copy of +count+ samples already written, starting +delay+
+      # (an Integer) samples before #write_offset (the next sample to be
+      # written), oldest first: the samples a block of +count+ written next
+      # would read at a constant delay of +delay+, before that block is
+      # written.  +count+ may not exceed +delay+ (the samples must exist).
+      # Used by GraphNode::Reverb to read its feedback at a fixed loop delay.
+      def past(count, delay)
+        raise ArgumentError, "Can't read #{count} samples from #{delay} samples ago" if count > delay
+        raise ArgumentError, "Delay #{delay} is longer than the buffer (#{capacity})" if delay > capacity
+
+        start = (@write_offset - delay) % capacity
+        stop = start + count
+        return @buffer[start...stop].dup if stop <= capacity
+
+        @buffer[start..].concatenate(@buffer[0...(stop - capacity)])
+      end
+
       # Returns +count+ samples of the last block written by #write, delayed
       # by +delay+ samples: a Numeric for all samples, or an NArray with one
       # delay per sample.  Returns a new NArray of the buffer's type.

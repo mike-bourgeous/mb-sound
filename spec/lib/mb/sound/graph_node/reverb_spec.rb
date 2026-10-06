@@ -36,6 +36,64 @@ RSpec.describe(MB::Sound::GraphNode::Reverb) do
       expect(wet.zip(dry).map { |w, d| (w - d).abs.max }.max).to be > 0.01
     end
 
+    # The feedback network used to feed back the previous block, so the
+    # loop delays were the line delays plus the caller's buffer size and
+    # the sound changed with the buffer size (RT60 of :room 0.11 s at
+    # 128-sample buffers, 0.23 s at 800).  Now the loops are the line
+    # delays plus FEEDBACK_BLOCK at every buffer size.
+    describe 'buffer size independence' do
+      # Renders 0.5 s of an impulse through +preset+ (wet only) in +block+
+      # sample reads.
+      def impulse(preset, block, show_internals: false, outputs: 1, total: 24000)
+        imp = Numo::SFloat.zeros(total)
+        imp[0] = 1
+        src = MB::Sound::ArrayInput.new(data: [imp])
+        rev = MB::Sound::GraphNode::Reverb.reverb(preset, input: src, output_channels: outputs, dry: 0, extra_time: 0, show_internals: show_internals)
+        outs = outputs > 1 ? rev.to_a : [rev]
+        bufs = []
+        done = 0
+        while done < total
+          n = [block, total - done].min
+          bufs << outs.map { |o| o.sample(n).dup }
+          done += n
+        end
+        bufs.transpose.map { |c| c[0].concatenate(*c[1..]) }
+      end
+
+      [:room, :hall, :space].each do |preset|
+        it "gives identical samples at every buffer size for #{preset}" do
+          ref = impulse(preset, 1024)
+          expect(ref[0].abs.max).to be > 0.001
+          [32, 128, 333, 800, 1].each do |block|
+            next if block == 1 && preset != :room
+
+            expect(impulse(preset, block)).to eq(ref), "buffer size #{block} differs"
+          end
+        end
+      end
+
+      it 'runs buffers longer than the shortest loop in pieces, with the same samples' do
+        rev = MB::Sound::ArrayInput.new(data: [Numo::SFloat.zeros(10)]).reverb(:room)
+        limit = rev.feedback_delays.min
+        expect(limit).to be_between(1024, 1024 + 0.016 * 48000)
+        expect(impulse(:room, limit + 1, outputs: 2)).to eq(impulse(:room, 128, outputs: 2))
+        expect(impulse(:room, 24000)).to eq(impulse(:room, 128))
+      end
+
+      it 'gives the node graph (show_internals) the same samples at any buffer size' do
+        ref = impulse(:hall, 1024)
+        expect(impulse(:hall, 333, show_internals: true)).to eq(ref)
+        expect(impulse(:hall, 6000, show_internals: true)).to eq(ref)
+      end
+
+      it 'keeps the loop time in seconds at other sample rates' do
+        rev = 100.hz.ramp.reverb(:room)
+        at48 = rev.feedback_delays
+        rev.sample_rate = 96000
+        expect(rev.feedback_delays.zip(at48).map { |a, b| a - 2 * b }).to all(be_between(-1, 1))
+      end
+    end
+
     it 'returns nil when its input ends' do
       rev = MB::Sound.silence(0.05).and_then(MB::Sound.silence(0)).reverb(:hall, extra_time: 0)
       expect(Array.new(10) { rev.sample(800) }.last).to be_nil

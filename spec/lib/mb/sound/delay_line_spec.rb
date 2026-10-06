@@ -27,6 +27,49 @@ RSpec.describe(MB::Sound::DelayLine, :aggregate_failures) do
     end
   end
 
+  describe '#past' do
+    it 'reads samples already written, from a delay before the next write' do
+      line = described_class.new(32)
+      line.write(ramp)
+      expect(line.past(4, 6)).to eq(Numo::SFloat[5, 6, 7, 8])
+      expect(line.past(3, 3)).to eq(Numo::SFloat[8, 9, 10])
+      expect(line.past(2, 12)).to eq(Numo::SFloat[0, 0])
+    end
+
+    it 'reads across the end of the circular buffer' do
+      line = described_class.new(1)
+      cap = line.capacity
+      written = (1..(cap + 25)).to_a
+      written.each_slice(10) { |b| line.write(Numo::SFloat.cast(b)) }
+      n = written.length
+      [[5, 7], [6, cap], [10, 30], [1, 1]].each do |count, delay|
+        expect(line.past(count, delay).to_a).to eq(written[(n - delay)...(n - delay + count)])
+      end
+    end
+
+    it 'gives the same samples a block written next would read at that delay' do
+      line = described_class.new(64)
+      line.write(ramp)
+      before = line.past(7, 9)
+      line.write(Numo::SFloat.zeros(7) + 99)
+      expect(line.read(7, 9)).to eq(before)
+    end
+
+    it 'refuses samples not written yet, or older than the buffer' do
+      line = described_class.new(32)
+      line.write(ramp)
+      expect { line.past(5, 4) }.to raise_error(ArgumentError, /from 4 samples ago/)
+      expect { line.past(5, line.capacity + 1) }.to raise_error(ArgumentError, /longer than the buffer/)
+    end
+
+    it 'returns a copy' do
+      line = described_class.new(32)
+      line.write(ramp)
+      line.past(3, 3).inplace.fill(0)
+      expect(line.past(3, 3)).to eq(Numo::SFloat[8, 9, 10])
+    end
+  end
+
   describe '#prepare' do
     it 'promotes the buffer to complex for complex input' do
       line = described_class.new(16)
