@@ -1,363 +1,777 @@
 /*
- * Low-level implementation of wavetable sampling.
+ * MB::Sound::FastWavetable: band-limited wavetable kernels (see
+ * MB::Sound::Wavetable for the design).
  * (C)2025-2026 Mike Bourgeous
+ *
+ * A table is a set of levels (mipmaps), brightest first, each a 2D SFloat
+ * or SComplex NArray of [frames, count + 2 * guard] samples: one cycle per
+ * frame in cycle mode (wrapped around in the guard samples), or the attack
+ * of a sampled sound (sample mode; a looped sound has separate loop levels
+ * holding one period of the loop each).  The Ruby side describes a table
+ * with Wavetable#kernel_spec.
+ *
+ * Each sample:
+ * - picks levels from the increment per sample m (cycles, or source samples
+ *   in sample mode): the first level k with m <= hi[k], crossfaded linearly
+ *   into level k + 1 while m is above lo[k];
+ * - in each level, blends the two frames around the scan position (0..1)
+ *   tap by tap and interpolates between samples (none, linear, cubic,
+ *   Niemitalo's optimal 4-point 4th-order for 4x oversampling, or the
+ *   Kaiser-windowed sinc of Wavetable::SINC_KERNEL).
+ *
+ * Complex levels interpolate their real and imaginary parts separately with
+ * the same real arithmetic.  The Ruby mirrors (MB::Sound::Wavetable::
+ * KernelRuby) do the same operations in the same order, and the extension
+ * is built with -ffp-contract=off, so both give identical samples.
  */
-#include <samplerate.h>
+#include <math.h>
+#include <complex.h>
 
 #include <ruby.h>
 
 #include "numo/narray.h"
+#include "mb_ext_helpers.h"
 
-static ID sym_cast;
+#define WT_MAX_LEVELS 32
+#define WT_INV_2PI (1.0 / (2.0 * M_PI))
+#define WT_MIN_WIDTH 1e-4
 
-static ID sym_cubic;
-static ID sym_linear;
-
-static ID sym_wrap;
-static ID sym_clamp;
-static ID sym_zero;
-static ID sym_bounce;
-
-enum wrapping_mode {
-	MODE_WRAP,
-	MODE_BOUNCE,
-	MODE_ZERO,
-	MODE_CLAMP,
+enum wt_interp {
+	WT_NONE = 0,
+	WT_LINEAR = 1,
+	WT_CUBIC = 2,
+	WT_OPTIMAL = 3,
+	WT_SINC = 4,
 };
 
-// Behaves like Ruby's % operator instead of fmod
-// Wraps X to be between 0 and Y
-// TODO: dedupe static functions with other files
-static inline double fwrap(double x, double y)
+enum wt_wrap {
+	WT_WRAP = 0,
+	WT_BOUNCE = 1,
+	WT_CLAMP = 2,
+	WT_ZERO = 3,
+};
+
+// Niemitalo's optimal 4-point, 4th-order interpolator for 4x oversampled
+// data (z-form; see Wavetable::KernelRuby::OPTIMAL).
+#define OPT_C0E 0.46567255120778489
+#define OPT_C0O 0.03432729708429672
+#define OPT_C1E 0.53743830753560162
+#define OPT_C1O 0.15429462557307461
+#define OPT_C2E -0.251942101340217441
+#define OPT_C2O 0.25194744935939062
+#define OPT_C3E -0.46896069955075126
+#define OPT_C3O 0.15578800670302476
+#define OPT_C4E 0.00986988334359864
+#define OPT_C4O -0.00989340017126506
+
+// One level: +data+ points at the first float of the NArray (complex
+// values are two floats), +stride+ is the row length in samples.
+struct wt_level {
+	const float *data;
+	long stride;
+	long count;
+};
+
+struct wt_table {
+	int mode; // 0 cycle, 1 sample
+	long frames;
+	int nlevels;
+	int cs; // floats per sample: 1 real, 2 complex
+	long guard;
+	struct wt_level levels[WT_MAX_LEVELS];
+	const double *rates;
+	const double *hi;
+	const double *lo;
+	const double *half_means;
+	int has_loop;
+	struct wt_level loops[WT_MAX_LEVELS];
+	const double *loop_rates;
+	double loop_start;
+	double loop_end;
+	double end;
+};
+
+// The sinc kernel (Wavetable::SINC_KERNEL: [table DFloat, half, resolution,
+// max_rate]).
+struct wt_sinc {
+	const double *table;
+	long table_length;
+	double half;
+	double resolution;
+};
+
+static const double *wt_dfloat(VALUE v, long length, const char *name)
 {
-	// this could instead be fmod(x, y) + y if x is negative
-	return x - y * floor(x / y);
+	if (CLASS_OF(v) != numo_cDFloat || RNARRAY_NDIM(v) != 1 || !RTEST(nary_check_contiguous(v)) || RNARRAY_SHAPE(v)[0] < (size_t)length) {
+		rb_raise(rb_eArgError, "%s must be a contiguous 1D DFloat of at least %ld values", name, length);
+	}
+	return (const double *)(nary_get_pointer_for_read(v) + nary_get_offset(v));
 }
 
-// Returns C enum for the wrapping mode of the given Ruby symbol, or raises an
-// error if it's not valid.
-static enum wrapping_mode get_wrapping_mode(ID wrap)
+// Reads an Array of level NArrays into +levels+, returning the count.
+static int wt_read_levels(VALUE datas, VALUE counts, struct wt_level *levels, long rows, long guard, VALUE *klass)
 {
-	if (wrap == sym_wrap) {
-		return MODE_WRAP;
+	Check_Type(datas, T_ARRAY);
+	Check_Type(counts, T_ARRAY);
+	long n = RARRAY_LEN(datas);
+	if (n < 1 || n > WT_MAX_LEVELS || RARRAY_LEN(counts) != n) {
+		rb_raise(rb_eArgError, "A wavetable needs 1 to %d levels with a count for each", WT_MAX_LEVELS);
 	}
 
-	if (wrap == sym_bounce) {
-		return MODE_BOUNCE;
+	for (long k = 0; k < n; k++) {
+		VALUE d = rb_ary_entry(datas, k);
+		VALUE c = CLASS_OF(d);
+		if ((c != numo_cSFloat && c != numo_cSComplex) || RNARRAY_NDIM(d) != 2 || !RTEST(nary_check_contiguous(d))) {
+			rb_raise(rb_eArgError, "Wavetable levels must be contiguous 2D SFloat or SComplex NArrays");
+		}
+		if (*klass == Qnil) {
+			*klass = c;
+		} else if (*klass != c) {
+			rb_raise(rb_eArgError, "Wavetable levels must all be real or all complex");
+		}
+		if ((long)RNARRAY_SHAPE(d)[0] != rows) {
+			rb_raise(rb_eArgError, "Wavetable level %ld has %ld rows instead of %ld", k, (long)RNARRAY_SHAPE(d)[0], rows);
+		}
+
+		long count = NUM2LONG(rb_ary_entry(counts, k));
+		long stride = RNARRAY_SHAPE(d)[1];
+		if (count < 0 || stride != count + 2 * guard) {
+			rb_raise(rb_eArgError, "Wavetable level %ld must have %ld + 2 * %ld guard samples per row", k, count, guard);
+		}
+
+		levels[k].data = (const float *)(nary_get_pointer_for_read(d) + nary_get_offset(d));
+		levels[k].stride = stride;
+		levels[k].count = count;
 	}
 
-	if (wrap == sym_zero) {
-		return MODE_ZERO;
-	}
-
-	if (wrap == sym_clamp) {
-		return MODE_CLAMP;
-	}
-
-	rb_raise(rb_eArgError, "Unsupported wrapping mode: %"PRIsVALUE, ID2SYM(wrap));
+	return (int)n;
 }
 
-static inline double fetch_wrap(float *wavetable, ssize_t columns, ssize_t idx)
+// Reads a Wavetable#kernel_spec (which must stay referenced while used).
+static void wt_read_table(VALUE spec, struct wt_table *t)
 {
-	if (idx < 0) {
-		idx = idx % columns + columns;
+	Check_Type(spec, T_ARRAY);
+	if (RARRAY_LEN(spec) != 15) {
+		rb_raise(rb_eArgError, "A wavetable kernel spec has 15 elements");
 	}
 
-	if (idx >= columns) {
-		idx = idx % columns;
+	t->mode = NUM2INT(rb_ary_entry(spec, 0));
+	t->frames = NUM2LONG(rb_ary_entry(spec, 1));
+	t->guard = NUM2LONG(rb_ary_entry(spec, 14));
+	if (t->frames < 1 || (t->mode != 0 && t->mode != 1) || t->guard < 16) {
+		rb_raise(rb_eArgError, "Invalid wavetable mode, frame count, or guard");
 	}
 
-	return wavetable[idx];
+	VALUE klass = Qnil;
+	t->nlevels = wt_read_levels(rb_ary_entry(spec, 2), rb_ary_entry(spec, 3), t->levels, t->frames, t->guard, &klass);
+	t->cs = klass == numo_cSComplex ? 2 : 1;
+	t->rates = wt_dfloat(rb_ary_entry(spec, 4), t->nlevels, "Level rates");
+	t->hi = wt_dfloat(rb_ary_entry(spec, 5), t->nlevels, "Level thresholds");
+	t->lo = wt_dfloat(rb_ary_entry(spec, 6), t->nlevels, "Level thresholds");
+	t->half_means = wt_dfloat(rb_ary_entry(spec, 7), t->frames, "Half means");
+
+	VALUE loops = rb_ary_entry(spec, 8);
+	t->has_loop = !NIL_P(loops);
+	if (t->has_loop) {
+		if (t->mode != 1 || t->frames != 1) {
+			rb_raise(rb_eArgError, "Only one-frame sample tables can loop");
+		}
+		VALUE loop_klass = klass;
+		int n = wt_read_levels(loops, rb_ary_entry(spec, 9), t->loops, 1, t->guard, &loop_klass);
+		if (n != t->nlevels) {
+			rb_raise(rb_eArgError, "A looped wavetable needs a loop level for each level");
+		}
+		t->loop_rates = wt_dfloat(rb_ary_entry(spec, 10), n, "Loop rates");
+	}
+
+	t->loop_start = NUM2DBL(rb_ary_entry(spec, 11));
+	t->loop_end = NUM2DBL(rb_ary_entry(spec, 12));
+	t->end = NUM2DBL(rb_ary_entry(spec, 13));
+	if (t->has_loop && !(t->loop_end > t->loop_start)) {
+		rb_raise(rb_eArgError, "The loop must end after it starts");
+	}
 }
 
-static inline double fetch_bounce(float *wavetable, ssize_t columns, ssize_t idx)
+static void wt_read_sinc(VALUE kernel, struct wt_sinc *k)
 {
-	if (columns <= 1) {
-		return wavetable[0];
+	if (!RB_TYPE_P(kernel, T_ARRAY) || RARRAY_LEN(kernel) != 4) {
+		rb_raise(rb_eArgError, "Sinc interpolation needs a kernel Array of [table, half, resolution, max_rate]");
 	}
 
-	ssize_t looplen = columns * 2 - 2;
-
-	idx = llabs(idx) % looplen;
-	if (idx > columns - 1) {
-		idx = looplen - idx;
+	VALUE table = rb_ary_entry(kernel, 0);
+	if (CLASS_OF(table) != numo_cDFloat || RNARRAY_NDIM(table) != 1 || !RTEST(nary_check_contiguous(table))) {
+		rb_raise(rb_eArgError, "The sinc kernel table must be a contiguous 1D DFloat NArray");
 	}
 
-        return wavetable[idx];
+	k->table = (const double *)(nary_get_pointer_for_read(table) + nary_get_offset(table));
+	k->table_length = RNARRAY_SHAPE(table)[0];
+	k->half = NUM2DBL(rb_ary_entry(kernel, 1));
+	k->resolution = NUM2DBL(rb_ary_entry(kernel, 2));
 }
 
-static inline double fetch_clamp(float *wavetable, ssize_t columns, ssize_t idx)
+// Reads the interpolation code and (for sinc) its kernel, checking that the
+// guard samples cover the interpolator.
+static int wt_read_interp(VALUE interp, VALUE sinc, const struct wt_table *t, struct wt_sinc *k)
 {
-	if (idx < 0) {
-		return wavetable[0];
-	} else if (idx >= columns) {
-		return wavetable[columns - 1];
-	} else {
-		return wavetable[idx];
+	int mode = NUM2INT(interp);
+	if (mode < WT_NONE || mode > WT_SINC) {
+		rb_raise(rb_eArgError, "Invalid interpolation code %d", mode);
 	}
+
+	if (mode == WT_SINC) {
+		wt_read_sinc(sinc, k);
+		if (k->half + 4 > t->guard) {
+			rb_raise(rb_eArgError, "The sinc kernel is too long for the guard samples");
+		}
+	}
+
+	return mode;
 }
 
-static inline double fetch_zero(float *wavetable, ssize_t columns, ssize_t idx)
+// The sinc kernel weight at +x+ samples from its center
+// (linearly interpolated in the table).
+static inline double wt_sinc_weight(const struct wt_sinc *k, double x)
 {
-	if (idx < 0 || idx >= columns) {
+	double u = x * k->resolution;
+	long j = (long)u;
+	if (j + 1 >= k->table_length) {
 		return 0;
-	} else {
-		return wavetable[idx];
 	}
+	double f = u - j;
+	return k->table[j] + (k->table[j + 1] - k->table[j]) * f;
 }
 
-// Port of Ruby fetch_oob from mb-math
-static inline double fetch_oob(float *wavetable, ssize_t columns, ssize_t idx, enum wrapping_mode wrap)
+// Sample +j+ of row offset +ra+ (blended with row offset +rb+ by +fs+ unless
+// +rb+ is negative), from floats +d+ with +cs+ floats per sample.
+static inline __attribute__((always_inline)) double wt_tap(const float *d, long cs, long ra, long rb, double fs, long j)
 {
-	switch(wrap) {
-		case MODE_WRAP:
-			return fetch_wrap(wavetable, columns, idx);
-
-		case MODE_BOUNCE:
-			return fetch_bounce(wavetable, columns, idx);
-
-		case MODE_CLAMP:
-			return fetch_clamp(wavetable, columns, idx);
-
-		case MODE_ZERO:
-			return fetch_zero(wavetable, columns, idx);
-
-		default:
-			fprintf(stderr, "BUG: invalid wrapping mode %d\n", wrap);
-			return 0;
+	double ya = d[(ra + j) * cs];
+	if (rb < 0) {
+		return ya;
 	}
+	double yb = d[(rb + j) * cs];
+	return ya + (yb - ya) * fs;
 }
 
-static VALUE ruby_fetch_oob(VALUE self, VALUE narray, VALUE idx, VALUE mode)
+// Interpolates at +q+ samples past the guard (one component of the data).
+static inline double wt_interpolate(const float *d, long cs, long ra, long rb, double fs, double q, int mode, long guard, const struct wt_sinc *k)
 {
-	enum wrapping_mode wrap = get_wrapping_mode(SYM2ID(mode));
+	double qi = floor(q);
+	double t = q - qi;
+	long base = guard + (long)qi;
 
-	narray = rb_funcall(numo_cSFloat, sym_cast, 1, narray);
-	float *ptr = (float *)(nary_get_pointer_for_read(narray) + nary_get_offset(narray));
+	switch (mode) {
+		case WT_NONE:
+			return wt_tap(d, cs, ra, rb, fs, base);
 
-	ssize_t columns = RNARRAY_SHAPE(narray)[RNARRAY_NDIM(narray) - 1];
-
-	if (columns == 0) {
-		return Qnil;
-	}
-
-	VALUE result = DBL2NUM(fetch_oob(ptr, columns, NUM2LL(idx), wrap));
-
-	RB_GC_GUARD(narray);
-
-	return result;
-}
-
-// See ruby_cubic_interp
-static double cubic_interp(double y_1, double y0, double y1, double y2, double blend)
-{
-	double d0 = (y1 - y_1) / 2; // divide by 2 because they are 2 units apart in X
-	double d1 = (y2 - y0) / 2;
-	double a = 2 * (y0 - y1) + d0 + d1;
-	double b = 3 * (y1 - y0) - 2 * d0 - d1;
-	double c = d0;
-	double d = y0;
-
-	return a * blend*blend*blend + b * blend*blend + c * blend + d;
-}
-
-// Uses the slope from y_1 to y1, the slope from y0 to y2, y0, and y1, to fit a
-// cubic to the given points.  Returns the coefficients of the cubic as an Array.
-//
-// Ported from mb-math (but taking four points instead of two slopes & points)
-static VALUE ruby_cubic_coeffs(VALUE self, VALUE y_1r, VALUE y0r, VALUE y1r, VALUE y2r)
-{
-	double y_1 = NUM2DBL(y_1r);
-	double y0 = NUM2DBL(y0r);
-	double y1 = NUM2DBL(y1r);
-	double y2 = NUM2DBL(y2r);
-	double d0 = (y1 - y_1) / 2; // divide by 2 because they are 2 units apart in X
-	double d1 = (y2 - y0) / 2;
-	double a = 2 * (y0 - y1) + d0 + d1;
-	double b = 3 * (y1 - y0) - 2 * d0 - d1;
-	double c = d0;
-	double d = y0;
-
-	return rb_ary_new_from_args(4, DBL2NUM(a), DBL2NUM(b), DBL2NUM(c), DBL2NUM(d));
-}
-
-// Uses the slope from y_1 to y1, the slope from y0 to y2, y0, and y1, to fit a
-// cubic to the given points.  Returns the value of the cubic at x=blend.
-//
-// Ported from mb-math (but taking four points instead of two slopes & points)
-static VALUE ruby_cubic_interp(VALUE self, VALUE y_1, VALUE y0, VALUE y1, VALUE y2, VALUE blend)
-{
-	return DBL2NUM(cubic_interp(
-				NUM2DBL(y_1),
-				NUM2DBL(y0),
-				NUM2DBL(y1),
-				NUM2DBL(y2),
-				NUM2DBL(blend)
-				));
-}
-
-// Interpolated 2D lookup.
-// Port of Ruby outer_linear and inner_lookup.
-// Phase ranges from -1..1 for a full single wave cycle.
-static double outer_linear(float *wavetable, size_t rows, size_t columns, double number, double phase, enum wrapping_mode wrap)
-{
-	double frow = fwrap(number * (rows - 1), rows);
-	ssize_t row1 = (ssize_t)floor(frow) % rows;
-	ssize_t row2 = (row1 + 1) % rows;
-	ssize_t offset1 = columns * row1;
-	ssize_t offset2 = columns * row2;
-	double rowratio = frow - row1;
-
-	double fcol = (phase + 1) / 2 * (columns - 1);
-	ssize_t col1 = (ssize_t)floor(fcol);
-	ssize_t col2 = col1 + 1;
-	double colratio = fcol - col1;
-
-	double val1l = fetch_oob(wavetable + offset1, columns, col1, wrap);
-	double val1r = fetch_oob(wavetable + offset1, columns, col2, wrap);
-	double val2l = fetch_oob(wavetable + offset2, columns, col1, wrap);
-	double val2r = fetch_oob(wavetable + offset2, columns, col2, wrap);
-
-	double valtop = val1r * colratio + val1l * (1.0 - colratio);
-	double valbot = val2r * colratio + val2l * (1.0 - colratio);
-
-	return valbot * rowratio + valtop * (1.0 - rowratio);
-}
-
-// wavetable - a 2D Numo::SFloat (TODO: other types)
-// number - a numeric from 0..1 (with wrapping)
-// phase - a numeric from 0..1 (with wrapping)
-// wrap - :wrap, :bounce, :clamp, or :zero
-static VALUE ruby_outer_linear(VALUE self, VALUE wavetable, VALUE number, VALUE phase, VALUE wrap)
-{
-	enum wrapping_mode wrapmode = get_wrapping_mode(SYM2ID(wrap));
-
-	double rho = NUM2DBL(number);
-	double phi = NUM2DBL(phase);
-
-	wavetable = rb_funcall(numo_cSFloat, sym_cast, 1, wavetable);
-
-	if (RNARRAY_NDIM(wavetable) != 2) {
-		rb_raise(rb_eArgError, "Wavetable must be a 2D Numo::SFloat");
-	}
-
-	float *ptr = (float *)(nary_get_pointer_for_read(wavetable) + nary_get_offset(wavetable));
-
-	VALUE ret = DBL2NUM(outer_linear(ptr, RNARRAY_SHAPE(wavetable)[0], RNARRAY_SHAPE(wavetable)[1], rho, phi, wrapmode));
-	RB_GC_GUARD(wavetable);
-	return ret;
-}
-
-// Cubic interpolated 2D lookup.
-// Phase ranges from -1..1 for a full single wave cycle.
-static double outer_cubic(float *wavetable, size_t rows, size_t columns, double number, double phase, enum wrapping_mode wrap)
-{
-	double frow = fwrap(number * (rows - 1), rows);
-	ssize_t row1 = (ssize_t)floor(frow) % rows;
-	ssize_t row2 = (row1 + 1) % rows;
-	ssize_t offset1 = columns * row1;
-	ssize_t offset2 = columns * row2;
-	double rowratio = frow - row1;
-
-	double fcol = (phase + 1) / 2 * (columns - 1);
-	ssize_t col1 = floor(fcol);
-	double colratio = fcol - col1;
-
-	double valtop = cubic_interp(
-			fetch_oob(wavetable + offset1, columns, col1 - 1, wrap),
-			fetch_oob(wavetable + offset1, columns, col1, wrap),
-			fetch_oob(wavetable + offset1, columns, col1 + 1, wrap),
-			fetch_oob(wavetable + offset1, columns, col1 + 2, wrap),
-			colratio
-			);
-	double valbot = cubic_interp(
-			fetch_oob(wavetable + offset2, columns, col1 - 1, wrap),
-			fetch_oob(wavetable + offset2, columns, col1, wrap),
-			fetch_oob(wavetable + offset2, columns, col1 + 1, wrap),
-			fetch_oob(wavetable + offset2, columns, col1 + 2, wrap),
-			colratio
-			);
-
-	return valbot * rowratio + valtop * (1.0 - rowratio);
-}
-
-// wavetable - a 2D Numo::SFloat (TODO: other types)
-// number - a numeric from 0..1 (with wrapping)
-// phase - a numeric from -1..1 (with optional wrapping)
-// wrap - :wrap, :bounce, :clamp, or :zero
-static VALUE ruby_outer_cubic(VALUE self, VALUE wavetable, VALUE number, VALUE phase, VALUE wrap)
-{
-	enum wrapping_mode wrapmode = get_wrapping_mode(SYM2ID(wrap));
-
-	double rho = NUM2DBL(number);
-	double phi = NUM2DBL(phase);
-
-	wavetable = rb_funcall(numo_cSFloat, sym_cast, 1, wavetable);
-
-	if (RNARRAY_NDIM(wavetable) != 2) {
-		rb_raise(rb_eArgError, "Wavetable must be a 2D Numo::SFloat");
-	}
-
-	float *ptr = (float *)(nary_get_pointer_for_read(wavetable) + nary_get_offset(wavetable));
-
-	VALUE ret = DBL2NUM(outer_cubic(ptr, RNARRAY_SHAPE(wavetable)[0], RNARRAY_SHAPE(wavetable)[1], rho, phi, wrapmode));
-	RB_GC_GUARD(wavetable);
-	return ret;
-}
-
-// Overwrites phase with the result of wavetable lookup in the given table,
-// using the given number array.
-//
-// wavetable - a 2D Numo::SFloat
-// number - a 1D Numo::SFloat from 0..1 (with wrapping)
-// phase - a 1D Numo::SFloat from -1..1 (with optional wrapping)
-// wrap - :wrap, :bounce, :clamp, or :zero
-static VALUE ruby_wavetable_lookup(VALUE self, VALUE wavetable, VALUE number, VALUE phase, VALUE lookup, VALUE wrap)
-{
-	ID symlookup = SYM2ID(lookup);
-	enum wrapping_mode wrapmode = get_wrapping_mode(SYM2ID(wrap));
-
-	wavetable = rb_funcall(numo_cSFloat, sym_cast, 1, wavetable);
-	number = rb_funcall(numo_cSFloat, sym_cast, 1, number);
-	phase = rb_funcall(numo_cSFloat, sym_cast, 1, phase);
-
-	if (RNARRAY_NDIM(wavetable) != 2 || !RTEST(nary_check_contiguous(wavetable))) {
-		rb_raise(rb_eArgError, "Wavetable must be a contiguous 2D Numo::SFloat");
-	}
-
-	if (RNARRAY_NDIM(number) != 1 || !RTEST(nary_check_contiguous(number)) ||
-			RNARRAY_NDIM(phase) != 1 || !RTEST(nary_check_contiguous(phase))) {
-		rb_raise(rb_eArgError, "Number and phase must be continuous 1D Numo::SFloat");
-	}
-
-	float *table_ptr = (float *)(nary_get_pointer_for_read(wavetable) + nary_get_offset(wavetable));
-	float *rho_ptr = (float *)(nary_get_pointer_for_read(number) + nary_get_offset(number));
-	float *phi_ptr = (float *)(nary_get_pointer_for_read_write(phase) + nary_get_offset(phase));
-
-	size_t length = RNARRAY_SHAPE(phase)[0];
-	if (RNARRAY_SHAPE(number)[0] != length) {
-		rb_raise(rb_eArgError, "Number and phase must be the same length");
-	}
-
-	size_t rows = RNARRAY_SHAPE(wavetable)[0];
-	size_t cols = RNARRAY_SHAPE(wavetable)[1];
-	if (symlookup == sym_linear) {
-		for (size_t i = 0; i < length; i++) {
-			phi_ptr[i] = outer_linear(table_ptr, rows, cols, rho_ptr[i], phi_ptr[i], wrapmode);
+		case WT_LINEAR: {
+			double y0 = wt_tap(d, cs, ra, rb, fs, base);
+			double y1 = wt_tap(d, cs, ra, rb, fs, base + 1);
+			return y0 + (y1 - y0) * t;
 		}
-	} else if (symlookup == sym_cubic) {
-		for (size_t i = 0; i < length; i++) {
-			phi_ptr[i] = outer_cubic(table_ptr, rows, cols, rho_ptr[i], phi_ptr[i], wrapmode);
+
+		case WT_CUBIC: {
+			double ym1 = wt_tap(d, cs, ra, rb, fs, base - 1);
+			double y0 = wt_tap(d, cs, ra, rb, fs, base);
+			double y1 = wt_tap(d, cs, ra, rb, fs, base + 1);
+			double y2 = wt_tap(d, cs, ra, rb, fs, base + 2);
+			double c0 = y0;
+			double c1 = 0.5 * (y1 - ym1);
+			double c2 = ym1 - 2.5 * y0 + 2.0 * y1 - 0.5 * y2;
+			double c3 = 0.5 * (y2 - ym1) + 1.5 * (y0 - y1);
+			return ((c3 * t + c2) * t + c1) * t + c0;
 		}
-	} else {
-		rb_raise(rb_eArgError, "Invalid lookup mode %"PRIsVALUE, lookup);
+
+		case WT_OPTIMAL: {
+			double ym1 = wt_tap(d, cs, ra, rb, fs, base - 1);
+			double y0 = wt_tap(d, cs, ra, rb, fs, base);
+			double y1 = wt_tap(d, cs, ra, rb, fs, base + 1);
+			double y2 = wt_tap(d, cs, ra, rb, fs, base + 2);
+			double z = t - 0.5;
+			double even1 = y1 + y0;
+			double odd1 = y1 - y0;
+			double even2 = y2 + ym1;
+			double odd2 = y2 - ym1;
+			double c0 = even1 * OPT_C0E + even2 * OPT_C0O;
+			double c1 = odd1 * OPT_C1E + odd2 * OPT_C1O;
+			double c2 = even1 * OPT_C2E + even2 * OPT_C2O;
+			double c3 = odd1 * OPT_C3E + odd2 * OPT_C3O;
+			double c4 = even1 * OPT_C4E + even2 * OPT_C4O;
+			return (((c4 * z + c3) * z + c2) * z + c1) * z + c0;
+		}
+
+		default: {
+			if (t == 0) {
+				return wt_tap(d, cs, ra, rb, fs, base);
+			}
+			long kmin = (long)ceil(q - k->half);
+			long kmax = (long)floor(q + k->half);
+			double sum = 0;
+			double wsum = 0;
+			for (long kk = kmin; kk <= kmax; kk++) {
+				double w = wt_sinc_weight(k, fabs((double)kk - q));
+				sum += wt_tap(d, cs, ra, rb, fs, guard + kk) * w;
+				wsum += w;
+			}
+			return wsum != 0 ? sum / wsum : 0;
+		}
+	}
+}
+
+// The frames around +scan+ (0..1, clamped): *fa, *fb (-1 for one frame),
+// and the blend *fs.
+static inline void wt_frames(long count, double scan, long *fa, long *fb, double *fs)
+{
+	if (count == 1) {
+		*fa = 0;
+		*fb = -1;
+		*fs = 0;
+		return;
 	}
 
-	RB_GC_GUARD(number);
+	double f = scan * (double)(count - 1);
+	if (!(f >= 0)) f = 0; // also NaN
+	if (f > count - 1) f = (double)(count - 1);
+	double fl = floor(f);
+	if (fl > count - 2) fl = (double)(count - 2);
+	*fa = (long)fl;
+	*fb = *fa + 1;
+	*fs = f - fl;
+}
+
+// Level +k+ at +u+ (cycles, or source samples in sample mode) into
+// *re/*im.
+static inline void wt_level_value(const struct wt_table *t, int k, double u, long fa, long fb, double fs, int mode, const struct wt_sinc *ks, double *re, double *im)
+{
+	const struct wt_level *l;
+	double q;
+
+	*re = 0;
+	*im = 0;
+
+	if (t->mode == 0) {
+		l = &t->levels[k];
+		q = u * t->rates[k];
+	} else if (t->has_loop && u >= t->loop_start) {
+		l = &t->loops[k];
+		q = (u - t->loop_start) * t->loop_rates[k];
+		fa = 0;
+		fb = -1;
+	} else {
+		l = &t->levels[k];
+		q = u * t->rates[k];
+		double i = floor(q);
+		double half = 12; // the most taps any interpolator reads on each side (sinc)
+		if (i < -(t->guard - half) || i > l->count + t->guard - half - 1) {
+			return;
+		}
+		fa = 0;
+		fb = -1;
+	}
+
+	long ra = fa * l->stride;
+	long rb = fb < 0 ? -1 : fb * l->stride;
+	*re = wt_interpolate(l->data, t->cs, ra, rb, fs, q, mode, t->guard, ks);
+	if (t->cs == 2) {
+		*im = wt_interpolate(l->data + 1, t->cs, ra, rb, fs, q, mode, t->guard, ks);
+	}
+}
+
+// The table's value at +u+ moving +m+ per sample, at +scan+.
+static inline void wt_value(const struct wt_table *t, double u, double m, double scan, int mode, const struct wt_sinc *ks, double *re, double *im)
+{
+	long fa, fb;
+	double fs;
+	wt_frames(t->frames, scan, &fa, &fb, &fs);
+
+	int n = t->nlevels;
+	if (n == 1) {
+		wt_level_value(t, 0, u, fa, fb, fs, mode, ks, re, im);
+		return;
+	}
+
+	int k = 0;
+	while (k < n - 1 && m > t->hi[k]) {
+		k++;
+	}
+
+	if (k < n - 1 && m > t->lo[k]) {
+		double x = (m - t->lo[k]) / (t->hi[k] - t->lo[k]);
+		double re1, im1, re2, im2;
+		wt_level_value(t, k, u, fa, fb, fs, mode, ks, &re1, &im1);
+		wt_level_value(t, k + 1, u, fa, fb, fs, mode, ks, &re2, &im2);
+		*re = re1 + (re2 - re1) * x;
+		*im = im1 + (im2 - im1) * x;
+	} else {
+		wt_level_value(t, k, u, fa, fb, fs, mode, ks, re, im);
+	}
+}
+
+// The half mean (Wavetable::Builder.half_means) at +scan+.
+static inline double wt_half_mean(const struct wt_table *t, double scan)
+{
+	long fa, fb;
+	double fs;
+	wt_frames(t->frames, scan, &fa, &fb, &fs);
+	if (fb < 0) {
+		return t->half_means[fa];
+	}
+	return t->half_means[fa] + (t->half_means[fb] - t->half_means[fa]) * fs;
+}
+
+static inline double wt_clamp_width(double w)
+{
+	if (!(w >= WT_MIN_WIDTH)) return WT_MIN_WIDTH; // also NaN
+	if (w > 1.0 - WT_MIN_WIDTH) return 1.0 - WT_MIN_WIDTH;
+	return w;
+}
+
+// Makes *buffer a contiguous inplace 1D NArray of the table's output type
+// (SFloat or SComplex), like mb_ensure_inplace_sfloat.
+static void wt_ensure_output(VALUE *buffer, const struct wt_table *t, _Bool *was_inplace)
+{
+	if (t->cs == 1) {
+		mb_ensure_inplace_sfloat(buffer, was_inplace);
+		return;
+	}
+
+	if (RNARRAY_NDIM(*buffer) != 1) {
+		rb_raise(rb_eArgError, "Only 1D NArrays may be processed");
+	}
+	_Bool prior_inplace = !!TEST_INPLACE(*buffer);
+	*buffer = rb_funcall(numo_cSComplex, rb_intern("cast"), 1, *buffer);
+	if (!RTEST(nary_check_contiguous(*buffer)) || !prior_inplace) {
+		*buffer = nary_dup(*buffer);
+		SET_INPLACE(*buffer);
+		prior_inplace = 0;
+	}
+	*was_inplace = prior_inplace;
+}
+
+static inline void wt_store(float *out, long cs, size_t i, double re, double im, double g, double off)
+{
+	if (cs == 1) {
+		out[i] = re * g + off;
+	} else {
+		out[2 * i] = re * g + off;
+		out[2 * i + 1] = im * g;
+	}
+}
+
+static double wt_read_state(VALUE state, long length, const char *name)
+{
+	Check_Type(state, T_ARRAY);
+	if (RARRAY_LEN(state) < length) {
+		rb_raise(rb_eArgError, "%s must have at least %ld elements", name, length);
+	}
+	return NUM2DBL(rb_ary_entry(state, 0));
+}
+
+/*
+ * Cycle-mode wavetable oscillator (see Wavetable#oscillate):
+ *   oscillate(buffer, spec, frequency, advance, gain, offset, state, tstate,
+ *             phase_mod, width, scan, interpolation, remove_dc, sinc)
+ *
+ * The phase (state[0], cycles) advances like FastSound.phasor and
+ * FastSynth.oscillate_bl: sample i reads phase phi + (increments 0...i)
+ * (i * increment for a constant frequency), plus phase_mod / 2pi, warped
+ * like oscillate_bl when +width+ isn't nil.  Levels are picked from the
+ * motion per sample (increment plus the change in phase modulation) times
+ * the warp's steeper slope.  tstate is [position, last phase modulation,
+ * primed].
+ */
+static VALUE ruby_oscillate(VALUE self, VALUE buffer, VALUE spec, VALUE frequency, VALUE advance,
+		VALUE gain, VALUE offset, VALUE state, VALUE tstate, VALUE phase_mod, VALUE width, VALUE scan,
+		VALUE interp, VALUE remove_dc, VALUE sinc)
+{
+	struct wt_table t;
+	wt_read_table(spec, &t);
+	if (t.mode != 0) {
+		rb_raise(rb_eArgError, "FastWavetable.oscillate needs a cycle-mode table");
+	}
+	struct wt_sinc ks = { 0 };
+	int mode = wt_read_interp(interp, sinc, &t, &ks);
+
+	double phi = wt_read_state(state, 1, "Phase state");
+	wt_read_state(tstate, 3, "Wavetable state");
+	double adv = NUM2DBL(advance);
+	double g = NUM2DBL(gain);
+	double off = NUM2DBL(offset);
+
+	_Bool was_inplace;
+	wt_ensure_output(&buffer, &t, &was_inplace);
+	size_t length = RNARRAY_SHAPE(buffer)[0];
+	float *out = mb_sfloat_ptr(buffer);
+
+	double freq;
+	complex float *freqptr;
+	mb_read_signal_input(&frequency, length, "Frequency", &freq, &freqptr);
+
+	double pm;
+	complex float *pmptr;
+	mb_read_signal_input(&phase_mod, length, "Phase modulation", &pm, &pmptr);
+
+	_Bool warped = !NIL_P(width);
+	double w;
+	complex float *wptr;
+	if (!warped) {
+		width = DBL2NUM(0.5);
+	}
+	mb_read_signal_input(&width, length, "Width", &w, &wptr);
+	w = wt_clamp_width(w);
+
+	double sc;
+	complex float *scptr;
+	mb_read_signal_input(&scan, length, "Scan", &sc, &scptr);
+
+	_Bool dc = RTEST(remove_dc) && warped;
+	double prev_pm = NUM2INT(rb_ary_entry(tstate, 2)) != 0 ? NUM2DBL(rb_ary_entry(tstate, 1)) : pm;
+
+	_Bool constant = !freqptr;
+	double steps = 0;
+	for (size_t i = 0; i < length; i++) {
+		if (freqptr) freq = crealf(freqptr[i]);
+		if (pmptr) pm = crealf(pmptr[i]);
+		if (wptr) w = wt_clamp_width(crealf(wptr[i]));
+		if (scptr) sc = crealf(scptr[i]);
+
+		double inc = freq * adv;
+		if (constant) {
+			steps = inc * i;
+		}
+
+		double e = mb_wrap(phi + steps, 1.0);
+		if (pm != 0) {
+			e = mb_wrap(e + pm * WT_INV_2PI, 1.0);
+		}
+
+		double u, wf;
+		if (w != 0.5) {
+			double k1 = 0.5 / w;
+			double k2 = 0.5 / (1.0 - w);
+			u = e < w ? e * k1 : 0.5 + (e - w) * k2;
+			wf = k1 > k2 ? k1 : k2;
+		} else {
+			u = e;
+			wf = 1.0;
+		}
+
+		double d = inc + (pm - prev_pm) * WT_INV_2PI;
+		double re, im;
+		wt_value(&t, u, fabs(d) * wf, sc, mode, &ks, &re, &im);
+		if (dc) {
+			re -= wt_half_mean(&t, sc) * (2.0 * w - 1.0);
+		}
+
+		wt_store(out, t.cs, i, re, im, g, off);
+		prev_pm = pm;
+
+		if (!constant) {
+			steps += inc;
+		}
+	}
+
+	if (constant) {
+		steps = freq * adv * length;
+	}
+	rb_ary_store(state, 0, rb_float_new(mb_wrap(phi + steps, 1.0)));
+	if (length > 0) {
+		rb_ary_store(tstate, 1, rb_float_new(prev_pm));
+		rb_ary_store(tstate, 2, INT2NUM(1));
+	}
+
+	if (!was_inplace) {
+		UNSET_INPLACE(buffer);
+	}
+
+	RB_GC_GUARD(spec);
+	RB_GC_GUARD(sinc);
+	RB_GC_GUARD(frequency);
+	RB_GC_GUARD(phase_mod);
+	RB_GC_GUARD(width);
+	RB_GC_GUARD(scan);
+	RB_GC_GUARD(buffer);
+
+	return buffer;
+}
+
+/*
+ * Phase-driven wavetable lookup (see Wavetable#lookup):
+ *   lookup(buffer, spec, phase, increments, scan, interpolation, wrap, sinc)
+ *
+ * Reads the table at +phase+ (cycles; outside 0...1 handled by +wrap+:
+ * 0 wrap, 1 bounce, 2 clamp, 3 zero), picking levels by |increments| (nil
+ * for 0: the brightest level).
+ */
+static VALUE ruby_lookup(VALUE self, VALUE buffer, VALUE spec, VALUE phase, VALUE increments, VALUE scan, VALUE interp, VALUE wrap, VALUE sinc)
+{
+	struct wt_table t;
+	wt_read_table(spec, &t);
+	if (t.mode != 0) {
+		rb_raise(rb_eArgError, "FastWavetable.lookup needs a cycle-mode table");
+	}
+	struct wt_sinc ks = { 0 };
+	int mode = wt_read_interp(interp, sinc, &t, &ks);
+	int wrapmode = NUM2INT(wrap);
+	if (wrapmode < WT_WRAP || wrapmode > WT_ZERO) {
+		rb_raise(rb_eArgError, "Invalid wrapping mode code %d", wrapmode);
+	}
+
+	_Bool was_inplace;
+	wt_ensure_output(&buffer, &t, &was_inplace);
+	size_t length = RNARRAY_SHAPE(buffer)[0];
+	float *out = mb_sfloat_ptr(buffer);
+
+	double ph;
+	complex float *phptr;
+	mb_read_signal_input(&phase, length, "Phase", &ph, &phptr);
+
+	double inc;
+	complex float *incptr;
+	mb_read_signal_input(&increments, length, "Increments", &inc, &incptr);
+
+	double sc;
+	complex float *scptr;
+	mb_read_signal_input(&scan, length, "Scan", &sc, &scptr);
+
+	for (size_t i = 0; i < length; i++) {
+		if (phptr) ph = crealf(phptr[i]);
+		if (incptr) inc = crealf(incptr[i]);
+		if (scptr) sc = crealf(scptr[i]);
+
+		double u;
+		switch (wrapmode) {
+			case WT_WRAP:
+				u = mb_wrap(ph, 1.0);
+				break;
+			case WT_BOUNCE: {
+				double b = mb_wrap(ph, 2.0);
+				u = b > 1 ? 2.0 - b : b;
+				break;
+			}
+			case WT_CLAMP:
+				u = ph < 0 ? 0.0 : (ph > 1 ? 1.0 : ph);
+				break;
+			default:
+				if (ph < 0 || ph >= 1) {
+					wt_store(out, t.cs, i, 0, 0, 1, 0);
+					continue;
+				}
+				u = ph;
+				break;
+		}
+
+		double re, im;
+		wt_value(&t, u, fabs(inc), sc, mode, &ks, &re, &im);
+		wt_store(out, t.cs, i, re, im, 1, 0);
+	}
+
+	if (!was_inplace) {
+		UNSET_INPLACE(buffer);
+	}
+
+	RB_GC_GUARD(spec);
+	RB_GC_GUARD(sinc);
 	RB_GC_GUARD(phase);
-	RB_GC_GUARD(wavetable);
+	RB_GC_GUARD(increments);
+	RB_GC_GUARD(scan);
+	RB_GC_GUARD(buffer);
 
-	return phase;
+	return buffer;
+}
+
+/*
+ * Sample-mode player (see Wavetable#play):
+ *   play(buffer, spec, frequency, advance, speed, gain, offset, state,
+ *        tstate, interpolation, sinc)
+ *
+ * The position in source samples (tstate[0]) advances by frequency * speed
+ * per sample (positions within a buffer are the start plus a running sum,
+ * like the phase), wrapping back into the loop (if any) when it reaches
+ * the loop's end; the phase in state[0] advances by frequency * advance as
+ * for any tone.  Positions outside the sound read silence.
+ */
+static VALUE ruby_play(VALUE self, VALUE buffer, VALUE spec, VALUE frequency, VALUE advance, VALUE speed,
+		VALUE gain, VALUE offset, VALUE state, VALUE tstate, VALUE interp, VALUE sinc)
+{
+	struct wt_table t;
+	wt_read_table(spec, &t);
+	if (t.mode != 1) {
+		rb_raise(rb_eArgError, "FastWavetable.play needs a sample-mode table");
+	}
+	struct wt_sinc ks = { 0 };
+	int mode = wt_read_interp(interp, sinc, &t, &ks);
+
+	double phi = wt_read_state(state, 1, "Phase state");
+	double pos = wt_read_state(tstate, 3, "Wavetable state");
+	double adv = NUM2DBL(advance);
+	double spd = NUM2DBL(speed);
+	double g = NUM2DBL(gain);
+	double off = NUM2DBL(offset);
+
+	_Bool was_inplace;
+	wt_ensure_output(&buffer, &t, &was_inplace);
+	size_t length = RNARRAY_SHAPE(buffer)[0];
+	float *out = mb_sfloat_ptr(buffer);
+
+	double freq;
+	complex float *freqptr;
+	mb_read_signal_input(&frequency, length, "Frequency", &freq, &freqptr);
+
+	double ls = t.loop_start;
+	double len = t.loop_end - t.loop_start;
+
+	_Bool constant = !freqptr;
+	double steps = 0, psteps = 0;
+	for (size_t i = 0; i < length; i++) {
+		if (freqptr) freq = crealf(freqptr[i]);
+
+		double inc = freq * adv;
+		double sp = freq * spd;
+		if (constant) {
+			steps = inc * i;
+			psteps = sp * i;
+		}
+
+		double p = pos + psteps;
+		if (t.has_loop && p >= t.loop_end) {
+			p = ls + mb_wrap(p - ls, len);
+		}
+
+		double re, im;
+		wt_value(&t, p, fabs(sp), 0, mode, &ks, &re, &im);
+		wt_store(out, t.cs, i, re, im, g, off);
+
+		if (!constant) {
+			steps += inc;
+			psteps += sp;
+		}
+	}
+
+	if (constant) {
+		steps = freq * adv * length;
+		psteps = freq * spd * length;
+	}
+	rb_ary_store(state, 0, rb_float_new(mb_wrap(phi + steps, 1.0)));
+	double p = pos + psteps;
+	if (t.has_loop && p >= t.loop_end) {
+		p = ls + mb_wrap(p - ls, len);
+	}
+	rb_ary_store(tstate, 0, rb_float_new(p));
+	if (length > 0) {
+		rb_ary_store(tstate, 2, INT2NUM(1));
+	}
+
+	if (!was_inplace) {
+		UNSET_INPLACE(buffer);
+	}
+
+	RB_GC_GUARD(spec);
+	RB_GC_GUARD(sinc);
+	RB_GC_GUARD(frequency);
+	RB_GC_GUARD(buffer);
+
+	return buffer;
 }
 
 void Init_fast_wavetable(void)
@@ -366,18 +780,7 @@ void Init_fast_wavetable(void)
 	VALUE sound = rb_define_module_under(mb, "Sound");
 	VALUE fast_wavetable_module = rb_define_module_under(sound, "FastWavetable");
 
-	rb_define_module_function(fast_wavetable_module, "fetch_oob", ruby_fetch_oob, 3);
-	rb_define_module_function(fast_wavetable_module, "cubic_coeffs", ruby_cubic_coeffs, 4);
-	rb_define_module_function(fast_wavetable_module, "cubic_interp", ruby_cubic_interp, 5);
-	rb_define_module_function(fast_wavetable_module, "outer_linear", ruby_outer_linear, 4);
-	rb_define_module_function(fast_wavetable_module, "outer_cubic", ruby_outer_cubic, 4);
-	rb_define_module_function(fast_wavetable_module, "wavetable_lookup", ruby_wavetable_lookup, 5);
-
-	sym_cast = rb_intern("cast");
-	sym_cubic = rb_intern("cubic");
-	sym_linear = rb_intern("linear");
-	sym_wrap = rb_intern("wrap");
-	sym_bounce = rb_intern("bounce");
-	sym_clamp = rb_intern("clamp");
-	sym_zero = rb_intern("zero");
+	rb_define_module_function(fast_wavetable_module, "oscillate", ruby_oscillate, 14);
+	rb_define_module_function(fast_wavetable_module, "lookup", ruby_lookup, 8);
+	rb_define_module_function(fast_wavetable_module, "play", ruby_play, 11);
 }

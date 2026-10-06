@@ -1,160 +1,141 @@
 RSpec.describe(MB::Sound::FastWavetable, aggregate_failures: true) do
-  # Additional tests are in specs for MB::Sound::Wavetable and MB::Sound::GraphNode::Wavetable.
+  # The C kernels must give exactly the same samples as their Ruby mirrors
+  # (MB::Sound::Wavetable::KernelRuby).
+  let(:w) { MB::Sound::Wavetable }
+  let(:n) { 300 }
 
-  describe '.outer_linear' do
-    it 'can retrieve a value from a wavetable' do
-      expect(MB::Sound::FastWavetable.outer_linear(Numo::SFloat[[0, 1], [-1, 2]], 0, 0 * 2 - 1, :wrap)).to eq(0)
-      expect(MB::Sound::FastWavetable.outer_linear(Numo::SFloat[[0, 1], [-1, 2]], 1, 1 * 2 - 1, :wrap)).to eq(2)
-      expect(MB::Sound::FastWavetable.outer_linear(Numo::SFloat[[0, 1], [-1, 2]], 1, 0 * 2 - 1, :wrap)).to eq(-1)
+  let(:cycle_tables) {
+    {
+      saw: w[:saw],
+      basic: w[:basic],
+      complex: w.from_harmonics([[1, 0.5, 0.3], [0.2, 1, 0.1]], complex: true),
+      unmipped: w.from_samples(Numo::SFloat.new(3, 100).rand(-1, 1), mips: false),
+      half_octave: w.from_harmonics(w::Library.square(200), mips: :half_octave),
+    }
+  }
+
+  def rand_input(min, max)
+    Numo::SFloat.new(n).rand(min, max)
+  end
+
+  def out_buffer(table)
+    (table.complex? ? Numo::SComplex : Numo::SFloat).zeros(n)
+  end
+
+  describe '.oscillate' do
+    it 'matches the Ruby mirror with every interpolator, with constant and changing inputs' do
+      Numo::NArray.srand(1)
+      cases = [
+        [440.0, 0, nil, 0.3],
+        [rand_input(-3000, 12000), rand_input(-3, 3), rand_input(0, 1), rand_input(-0.2, 1.2)],
+        [rand_input(20, 20000), 0.5, 0.3, 0.7],
+      ]
+
+      cycle_tables.each do |name, t|
+        w::INTERPOLATIONS.each_key do |interp|
+          cases.each_with_index do |(f, pm, width, scan), ci|
+            st1 = [0.3]
+            ts1 = [0.0, 0.0, 0]
+            st2 = st1.dup
+            ts2 = ts1.dup
+
+            a = t.oscillate(out_buffer(t).inplace!, f, 1 / 48000.0, 0.7, 0.1, st1, ts1, pm, width, scan, interp, 48000, true).not_inplace!
+            b = t.oscillate_ruby(out_buffer(t), f, 1 / 48000.0, 0.7, 0.1, st2, ts2, pm, width, scan, interp, 48000, true)
+
+            expect(a.to_a).to eq(b.to_a), "#{name} #{interp} case #{ci}: max difference #{(a - b).abs.max}"
+            expect(st1).to eq(st2)
+            expect(ts1).to eq(ts2)
+            expect(a.abs.max).to be > 0.05
+          end
+        end
+      end
+    end
+
+    it 'continues smoothly across buffers' do
+      t = w[:saw]
+      st = [0.0]
+      ts = [0.0, 0.0, 0]
+      a = t.oscillate(Numo::SFloat.zeros(100), 100.0, 1 / 48000.0, 1, 0, st, ts, 0, nil, 0, nil, 48000, true)
+      b = t.oscillate(Numo::SFloat.zeros(100), 100.0, 1 / 48000.0, 1, 0, st, ts, 0, nil, 0, nil, 48000, true)
+      whole = t.oscillate(Numo::SFloat.zeros(200), 100.0, 1 / 48000.0, 1, 0, [0.0], [0.0, 0.0, 0], 0, nil, 0, nil, 48000, true)
+      expect(a.concatenate(b)).to all_be_within(1e-6).of_array(whole)
+    end
+
+    it 'raises errors for a sample-mode table' do
+      t = w.from_samples(Numo::SFloat.zeros(100), mode: :sample, root: 100)
+      expect {
+        MB::Sound::FastWavetable.oscillate(Numo::SFloat.zeros(10), t.kernel_spec(48000), 1, 1, 1, 0, [0.0], [0.0, 0.0, 0], 0, nil, 0, 3, false, nil)
+      }.to raise_error(ArgumentError, /cycle/)
+    end
+
+    it 'raises an error for a bad interpolation code' do
+      expect {
+        MB::Sound::FastWavetable.oscillate(Numo::SFloat.zeros(10), w[:saw].kernel_spec(48000), 1, 1, 1, 0, [0.0], [0.0, 0.0, 0], 0, nil, 0, 7, false, nil)
+      }.to raise_error(ArgumentError, /interpolation/)
+    end
+
+    it 'raises an error for a malformed table' do
+      spec = w[:saw].kernel_spec(48000).dup
+      spec[2] = [Numo::DFloat.zeros(1, 40)]
+      expect {
+        MB::Sound::FastWavetable.oscillate(Numo::SFloat.zeros(10), spec, 1, 1, 1, 0, [0.0], [0.0, 0.0, 0], 0, nil, 0, 3, false, nil)
+      }.to raise_error(ArgumentError)
     end
   end
 
-  describe '.outer_cubic' do
-    it 'can retrieve a value from a wavetable' do
-      expect(MB::Sound::FastWavetable.outer_cubic(Numo::SFloat[[0, 1], [-1, 2]], 0, 0 * 2 - 1, :wrap)).to eq(0)
-      expect(MB::Sound::FastWavetable.outer_cubic(Numo::SFloat[[0, 1], [-1, 2]], 1, 1 * 2 - 1, :wrap)).to eq(2)
-      expect(MB::Sound::FastWavetable.outer_cubic(Numo::SFloat[[0, 1], [-1, 2]], 1, 0 * 2 - 1, :wrap)).to eq(-1)
+  describe '.lookup' do
+    it 'matches the Ruby mirror for every wrapping mode and interpolator' do
+      Numo::NArray.srand(2)
+      phase = rand_input(-1.5, 2.5)
+      incs = rand_input(-0.2, 0.2)
+      scan = rand_input(-0.2, 1.2)
+
+      cycle_tables.each do |name, t|
+        w::INTERPOLATIONS.each_key do |interp|
+          w::WRAP_MODES.each do |wrap|
+            [nil, incs].each do |inc|
+              a = t.lookup(out_buffer(t), phase, inc, scan, interp, 48000, wrap)
+              b = t.lookup_ruby(out_buffer(t), phase, inc, scan, interp, 48000, wrap)
+              expect(a.to_a).to eq(b.to_a), "#{name} #{interp} #{wrap} #{inc.nil?}: max difference #{(a - b).abs.max}"
+            end
+          end
+        end
+      end
     end
   end
 
-  describe '.wavetable_lookup' do
-    let(:table) { Numo::SFloat[[0, 1, -2], [-1, 2, -3]] }
-    let(:number) { Numo::SFloat[0, 0.5, 1] }
-    let(:phase) { Numo::SFloat[0, 1.0 / 2.0, 3.0 / 2.0] * 2 - 1 }
+  describe '.play' do
+    it 'matches the Ruby mirror with loops, levels, complex data, and every interpolator' do
+      Numo::NArray.srand(3)
+      data = Numo::SFloat.new(5000).rand(-1, 1)
 
-    it 'can retrieve values from a wavetable using narrays and linear interpolation' do
-      expect(MB::Sound::FastWavetable.wavetable_lookup(table, number, phase, :linear, :wrap)).to all_be_within(1e-6).of_array(Numo::SFloat[0, 1.5, -1])
+      [nil, 1000..3999, 0...100].each do |lp|
+        [:octave, false].each do |mips|
+          [false, true].each do |cx|
+            t = w.from_samples(data, mode: :sample, root: 100.0, loop: lp, mips: mips, complex: cx)
+            w::INTERPOLATIONS.each_key do |interp|
+              [[133.0, 0.0], [rand_input(-500, 3000), 100.0], [100.0, 4990.0], [rand_input(-500, 3000), 3990.0]].each_with_index do |(f, pos), ci|
+                st1 = [0.2]
+                ts1 = [pos, 0.0, 0]
+                st2 = st1.dup
+                ts2 = ts1.dup
+
+                a = t.play(out_buffer(t), f, 1 / 48000.0, t.speed(48000), 0.8, 0.0, st1, ts1, interp, 48000)
+                b = t.play_ruby(out_buffer(t), f, 1 / 48000.0, t.speed(48000), 0.8, 0.0, st2, ts2, interp, 48000)
+                expect(a.to_a).to eq(b.to_a), "#{lp} #{mips} #{cx} #{interp} #{ci}: max difference #{(a - b).abs.max}"
+                expect(st1).to eq(st2)
+                expect(ts1).to eq(ts2)
+              end
+            end
+          end
+        end
+      end
     end
 
-    it 'can retrieve values from a wavetable using narrays and cubic interpolation' do
-      expect(MB::Sound::FastWavetable.wavetable_lookup(table, number, phase, :cubic, :wrap)).to all_be_within(1e-6).of_array(Numo::SFloat[0, 1.5, -1])
-    end
-
-    it 'can bounce oob' do
-      expect(MB::Sound::FastWavetable.wavetable_lookup(table, number, phase, :cubic, :bounce)).to all_be_within(1e-6).of_array(Numo::SFloat[0, 1.5, 2])
-    end
-  end
-
-  describe '.fetch_oob' do
-    let(:table) { Numo::SFloat[1, -2, 3, -4] }
-    let(:table5) { Numo::SFloat[1, -2, 3, -4, 5] }
-    let(:table6) { Numo::SFloat[1, 2, 3, 4, 5, -6] }
-
-    it 'can bounce when length is 4' do
-      expect(MB::Sound::FastWavetable.fetch_oob(table, -5, :bounce)).to eq(-2)
-      expect(MB::Sound::FastWavetable.fetch_oob(table, -4, :bounce)).to eq(3)
-      expect(MB::Sound::FastWavetable.fetch_oob(table, -3, :bounce)).to eq(-4)
-      expect(MB::Sound::FastWavetable.fetch_oob(table, -2, :bounce)).to eq(3)
-      expect(MB::Sound::FastWavetable.fetch_oob(table, -1, :bounce)).to eq(-2)
-      expect(MB::Sound::FastWavetable.fetch_oob(table, 0, :bounce)).to eq(1)
-      expect(MB::Sound::FastWavetable.fetch_oob(table, 1, :bounce)).to eq(-2)
-      expect(MB::Sound::FastWavetable.fetch_oob(table, 2, :bounce)).to eq(3)
-      expect(MB::Sound::FastWavetable.fetch_oob(table, 3, :bounce)).to eq(-4)
-      expect(MB::Sound::FastWavetable.fetch_oob(table, 4, :bounce)).to eq(3)
-      expect(MB::Sound::FastWavetable.fetch_oob(table, 5, :bounce)).to eq(-2)
-      expect(MB::Sound::FastWavetable.fetch_oob(table, 6, :bounce)).to eq(1)
-      expect(MB::Sound::FastWavetable.fetch_oob(table, 7, :bounce)).to eq(-2)
-      expect(MB::Sound::FastWavetable.fetch_oob(table, 8, :bounce)).to eq(3)
-    end
-
-    it 'can bounce when length is 5' do
-      expect(MB::Sound::FastWavetable.fetch_oob(table5, -5, :bounce)).to eq(-4)
-      expect(MB::Sound::FastWavetable.fetch_oob(table5, -4, :bounce)).to eq(5)
-      expect(MB::Sound::FastWavetable.fetch_oob(table5, -3, :bounce)).to eq(-4)
-      expect(MB::Sound::FastWavetable.fetch_oob(table5, -2, :bounce)).to eq(3)
-      expect(MB::Sound::FastWavetable.fetch_oob(table5, -1, :bounce)).to eq(-2)
-      expect(MB::Sound::FastWavetable.fetch_oob(table5, 0, :bounce)).to eq(1)
-      expect(MB::Sound::FastWavetable.fetch_oob(table5, 1, :bounce)).to eq(-2)
-      expect(MB::Sound::FastWavetable.fetch_oob(table5, 2, :bounce)).to eq(3)
-      expect(MB::Sound::FastWavetable.fetch_oob(table5, 3, :bounce)).to eq(-4)
-      expect(MB::Sound::FastWavetable.fetch_oob(table5, 4, :bounce)).to eq(5)
-      expect(MB::Sound::FastWavetable.fetch_oob(table5, 5, :bounce)).to eq(-4)
-      expect(MB::Sound::FastWavetable.fetch_oob(table5, 6, :bounce)).to eq(3)
-      expect(MB::Sound::FastWavetable.fetch_oob(table5, 7, :bounce)).to eq(-2)
-      expect(MB::Sound::FastWavetable.fetch_oob(table5, 8, :bounce)).to eq(1)
-      expect(MB::Sound::FastWavetable.fetch_oob(table5, 9, :bounce)).to eq(-2)
-    end
-
-    it 'can return data from a 6-element array' do
-      expect(MB::Sound::FastWavetable.fetch_oob(table6, -11, :bounce)).to eq(2)
-      expect(MB::Sound::FastWavetable.fetch_oob(table6, -6, :bounce)).to eq(5)
-      expect(MB::Sound::FastWavetable.fetch_oob(table6, -5, :bounce)).to eq(-6)
-      expect(MB::Sound::FastWavetable.fetch_oob(table6, -1, :bounce)).to eq(2)
-      expect(MB::Sound::FastWavetable.fetch_oob(table6, 0, :bounce)).to eq(1)
-      expect(MB::Sound::FastWavetable.fetch_oob(table6, 1, :bounce)).to eq(2)
-      expect(MB::Sound::FastWavetable.fetch_oob(table6, 2, :bounce)).to eq(3)
-      expect(MB::Sound::FastWavetable.fetch_oob(table6, 3, :bounce)).to eq(4)
-      expect(MB::Sound::FastWavetable.fetch_oob(table6, 4, :bounce)).to eq(5)
-      expect(MB::Sound::FastWavetable.fetch_oob(table6, 5, :bounce)).to eq(-6)
-      expect(MB::Sound::FastWavetable.fetch_oob(table6, 6, :bounce)).to eq(5)
-      expect(MB::Sound::FastWavetable.fetch_oob(table6, 7, :bounce)).to eq(4)
-      expect(MB::Sound::FastWavetable.fetch_oob(table6, 11, :bounce)).to eq(2)
-      expect(MB::Sound::FastWavetable.fetch_oob(table6, 15, :bounce)).to eq(-6)
-      expect(MB::Sound::FastWavetable.fetch_oob(table6, 16, :bounce)).to eq(5)
-    end
-
-    it 'can wrap' do
-      expect(MB::Sound::FastWavetable.fetch_oob(table, -9, :wrap)).to eq(-4)
-      expect(MB::Sound::FastWavetable.fetch_oob(table, -8, :wrap)).to eq(1)
-      expect(MB::Sound::FastWavetable.fetch_oob(table, -7, :wrap)).to eq(-2)
-      expect(MB::Sound::FastWavetable.fetch_oob(table, -6, :wrap)).to eq(3)
-      expect(MB::Sound::FastWavetable.fetch_oob(table, -5, :wrap)).to eq(-4)
-      expect(MB::Sound::FastWavetable.fetch_oob(table, -4, :wrap)).to eq(1)
-      expect(MB::Sound::FastWavetable.fetch_oob(table, -3, :wrap)).to eq(-2)
-      expect(MB::Sound::FastWavetable.fetch_oob(table, -2, :wrap)).to eq(3)
-      expect(MB::Sound::FastWavetable.fetch_oob(table, -1, :wrap)).to eq(-4)
-      expect(MB::Sound::FastWavetable.fetch_oob(table, 0, :wrap)).to eq(1)
-      expect(MB::Sound::FastWavetable.fetch_oob(table, 1, :wrap)).to eq(-2)
-      expect(MB::Sound::FastWavetable.fetch_oob(table, 2, :wrap)).to eq(3)
-      expect(MB::Sound::FastWavetable.fetch_oob(table, 3, :wrap)).to eq(-4)
-      expect(MB::Sound::FastWavetable.fetch_oob(table, 4, :wrap)).to eq(1)
-      expect(MB::Sound::FastWavetable.fetch_oob(table, 5, :wrap)).to eq(-2)
-      expect(MB::Sound::FastWavetable.fetch_oob(table, 8, :wrap)).to eq(1)
-    end
-
-    it 'can clamp' do
-      expect(MB::Sound::FastWavetable.fetch_oob(table, 0, :clamp)).to eq(1)
-      expect(MB::Sound::FastWavetable.fetch_oob(table, -1, :clamp)).to eq(1)
-      expect(MB::Sound::FastWavetable.fetch_oob(table, 3, :clamp)).to eq(-4)
-      expect(MB::Sound::FastWavetable.fetch_oob(table, 4, :clamp)).to eq(-4)
-    end
-
-    it 'can zero' do
-      expect(MB::Sound::FastWavetable.fetch_oob(table, 0, :zero)).to eq(1)
-      expect(MB::Sound::FastWavetable.fetch_oob(table, -1, :zero)).to eq(0)
-      expect(MB::Sound::FastWavetable.fetch_oob(table, 3, :zero)).to eq(-4)
-      expect(MB::Sound::FastWavetable.fetch_oob(table, 4, :zero)).to eq(0)
-    end
-  end
-
-  describe '.cubic_coeffs' do
-    it 'behaves like MB::M.cubic_coeffs_direct' do
-      y_1 = -5
-      y0 = 2
-      y1 = 1
-      y2 = -3
-
-      d0 = (y1 - y_1) / 2.0
-      d1 = (y2 - y0) / 2.0
-
-      expect(MB::Sound::FastWavetable.cubic_coeffs(y_1, y0, y1, y2)).to all_be_within(1e-7).of_array(MB::M.cubic_coeffs_direct(y0, d0, y1, d1))
-    end
-  end
-
-  describe '.cubic_interp' do
-    it 'behaves like MB::M.cubic_interp' do
-      y_1 = -5
-      y0 = 2
-      y1 = 1
-      y2 = -3
-
-      d0 = (y1 - y_1) / 2.0
-      d1 = (y2 - y0) / 2.0
-
-      expect(MB::Sound::FastWavetable.cubic_interp(y_1, y0, y1, y2, 0.1)).to be_within(1e-7).of(MB::M.cubic_interp(y0, d0, y1, d1, 0.1))
-      expect(MB::Sound::FastWavetable.cubic_interp(y_1, y0, y1, y2, 0.3234)).to be_within(1e-7).of(MB::M.cubic_interp(y0, d0, y1, d1, 0.3234))
-      expect(MB::Sound::FastWavetable.cubic_interp(y_1, y0, y1, y2, 0.45)).to be_within(1e-7).of(MB::M.cubic_interp(y0, d0, y1, d1, 0.45))
-      expect(MB::Sound::FastWavetable.cubic_interp(y_1, y0, y1, y2, 0.89)).to be_within(1e-7).of(MB::M.cubic_interp(y0, d0, y1, d1, 0.89))
+    it 'raises an error for a cycle-mode table' do
+      expect {
+        MB::Sound::FastWavetable.play(Numo::SFloat.zeros(10), w[:saw].kernel_spec(48000), 1, 1, 1, 1, 0, [0.0], [0.0, 0.0, 0], 3, nil)
+      }.to raise_error(ArgumentError, /sample/)
     end
   end
 end

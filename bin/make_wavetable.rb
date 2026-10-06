@@ -39,7 +39,7 @@ MB::Sound.script(
   MB::U.headline("Estimating frequency of #{inname}", color: '1;34')
 
   metadata = {}
-  result = MB::Sound::Wavetable.make_wavetable(data, slices: table_size, ratio: ratio, metadata_out: metadata)
+  result = MB::Sound::Wavetable.slice_frames(data, slices: table_size, ratio: ratio, metadata_out: metadata)
 
   if p.blur != 0
     10.times do
@@ -52,10 +52,10 @@ MB::Sound.script(
 
   MB::U.headline("Writing to #{outname}")
   MB::U.table(metadata.merge(p.to_h).to_a)
-  MB::Sound::Wavetable.save_wavetable(outname, result, overwrite: p.force ? true : :prompt)
+  MB::Sound::Wavetable.save_frames(outname, result, overwrite: p.force ? true : :prompt)
 
   MB::U.headline "Code to load this wavetable in bin/sound.rb:", color: 36
-  puts "\n#{MB::U.syntax("data = MB::Sound::Wavetable.load_wavetable(#{outname.inspect})")}"
-  puts "#{MB::U.syntax("plot data, graphical: true")}"
-  puts "or\n#{MB::U.syntax("play midi.env * midi.hz.ramp.wavetable(#{outname.inspect})")}\n\n"
+  puts "\n#{MB::U.syntax("table = Wavetable.from_file(#{outname.inspect})")}"
+  puts "#{MB::U.syntax("plot table.frames, graphical: true")}"
+  puts "or\n#{MB::U.syntax("play midi.env * midi.hz.wavetable(#{outname.inspect}, scan: midi.cc(1))")}\n\n"
 }

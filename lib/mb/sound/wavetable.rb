@@ -1,497 +1,736 @@
+require 'numo/pocketfft'
+
 module MB
   module Sound
-    # Methods related to saving, loading, generating, and sampling from
-    # wavetables.
+    # A wavetable: single-cycle waveforms (frames) to morph between, or a
+    # sampled sound with a root note, stored as band-limited levels
+    # (mipmaps) so it plays without aliasing at any pitch.  Play one with a
+    # Tone (`440.hz.wavetable(table, scan: node)`, see Tone#wavetable), or
+    # look one up with any phase signal (`phase.wavetable(table)`, see
+    # GraphNode::Wavetable).
     #
-    # See MB::Sound::GraphNode::Wavetable.
-    # See bin/make_wavetable.rb.
-    module Wavetable
-      # Loads an existing wavetable from the given +filename+, using the
-      # mb_sound_wavetable_period metadata tag to slice the file.
-      #
-      # If the file does not have the mb_sound_wavetable_period tag, then the
-      # audio is passed into Wavetable.make_wavetable to create a wavetable
-      # from a normal sound file.  The +:slices+ parameter controls how many
-      # slices to ask make_wavetable to provide.
-      def self.load_wavetable(filename, slices: 10, ratio: 1.0)
-        # Using weighted mixing for now; TODO: find a safe way to combine
-        # channels with minimal cancellation of reverb or introduction of high
-        # frequency oscillation when normalizing
-        metadata = {}
-        data = MB::Sound.read(filename, metadata_out: metadata)
-        data = data.map.with_index { |c, idx| c / (idx + 1) }.sum
+    # == Making tables
+    #
+    #     Wavetable.from_harmonics([1, 0.5, 0.25])       # sine harmonics
+    #     Wavetable.from_harmonics([[1], [1, 0.5, 0.33]]) # two frames
+    #     Wavetable.from_samples(frames)                  # 2D NArray, a cycle per row
+    #     Wavetable.from_function(frames: 8) { |phase, scan| ... }
+    #     Wavetable.from_file('sounds/synth0.flac')       # sliced into cycles
+    #     Wavetable.from_file('sounds/piano_120hz_b2.flac', mode: :sample, root: B2)
+    #     Wavetable[:saw]                                 # the named library
+    #     Wavetable['sounds/drums_wavetable.flac']        # a file
+    #     Wavetable[array]                                # samples
+    #
+    # == Modes
+    #
+    # - :cycle (default): each frame is one period; the tone's phase reads
+    #   it, and +scan+ (0..1) morphs linearly across the frames (frame
+    #   phases are aligned at build time, so morphs don't comb-filter).
+    # - :sample: one sound of any length played at the tone's pitch relative
+    #   to its +root+ (Hz, a Pitch, or a Note), with +loop:+ (a Range of
+    #   source samples, or of Lengths such as `0.5.seconds`) or as a one-shot
+    #   that ends (unless the tone has a reset input, which restarts it).
+    #   Several samples across the keyboard: see KeyMap.
+    #
+    # == Levels (mipmaps)
+    #
+    # Each level keeps fewer harmonics (cycle mode) or a lower band (sample
+    # mode), +mips:+ apart: :octave (default; a ratio of 2), :half_octave,
+    # :third_octave, any ratio above 1, an Array of harmonic counts (cycle
+    # mode), or false for one level from the samples as given (the classic
+    # aliasing sound, read with :cubic by default).  Levels are stored
+    # OVERSAMPLE (4) times above their highest harmonic, so the
+    # default :optimal interpolator (below) is accurate.
+    #
+    # A tone picks levels by its phase increment per sample (including
+    # phase modulation and the fastest part of a phase warp): the brightest
+    # level whose highest harmonic stays below #ceiling (the highest
+    # frequency that can't alias into the audible band: harmonics above
+    # Nyquist fold back above AUDIBLE_LIMIT, 20 kHz), crossfaded linearly
+    # (by increment) into the next level over the last LEVEL_FADE octave
+    # (a fifth of an octave) before that limit, so brightness doesn't step
+    # between levels.  At 48 kHz with octave levels, every harmonic below
+    # about 14 kHz plays at full level at any pitch, and the top harmonic
+    # sits between 14 and 28 kHz (above 24 kHz only folding back above
+    # 20 kHz); a sample plays its own level, unfiltered, up to its root
+    # pitch.
+    #
+    # == Interpolation
+    #
+    # +interpolation:+ :none (drop-sample, lo-fi), :linear, :cubic
+    # (Catmull-Rom), :optimal, or :sinc.  :optimal (the default for
+    # band-limited levels) is Olli Niemitalo's 4-point, 4th-order optimal
+    # interpolator for 4x oversampled data ("Polynomial Interpolators for
+    # High-Quality Resampling of Oversampled Audio", 2001): 101 dB modified
+    # SNR at 4x, against 89 dB for the 4-point 3rd-order design, 66-70 dB
+    # for the 2x designs, and 44 dB for cubic Hermite at 4x; 4x
+    # oversampling doubles the table memory of 2x but puts interpolation
+    # errors below the PolyBLEP oscillators' aliasing.  Its passband
+    # droop (11% at the top of a level's band) is undone by storing
+    # emphasized levels for it (see Emphasis), which leaves errors about
+    # 100 dB down.  :sinc is a 24-tap Kaiser-windowed sinc (see
+    # SINC_KERNEL), about 112 dB down, for sample mode at the highest
+    # quality (about 6 times the cost of :optimal).
+    #
+    # == Complex tables
+    #
+    # With +complex: true+ the levels are analytic (no negative
+    # frequencies; the imaginary part is the Hilbert transform of the real
+    # part) and tones output SComplex samples.
+    #
+    # Lookups run in C (MB::Sound::FastWavetable) with exact Ruby mirrors
+    # (#oscillate_ruby, #lookup_ruby, #play_ruby).
+    class Wavetable
+      # Levels are stored this many times above their highest harmonic.
+      OVERSAMPLE = 4
 
-        period = metadata[:mb_sound_wavetable_period]&.to_i
-        raise 'Wavetable period must be greater than 1' if period.is_a?(Integer) && period <= 1
+      # Extra samples stored before and after each level row (wrapped
+      # around in cycle mode), so interpolators read without wrapping.
+      GUARD = 16
 
-        if period
-          count = data.length / period
-          data[0...(count * period)].reshape(count, period)
-        else
-          make_wavetable(data, slices: slices, ratio: ratio)
+      # The shortest cycle-mode level, in samples.
+      MIN_LENGTH = 32
+
+      # Harmonics may pass Nyquist as long as they fold back above this
+      # frequency (Hz); see #ceiling.
+      AUDIBLE_LIMIT = 20000.0
+
+      # Levels crossfade into the next over this many octaves of pitch
+      # below the #ceiling (where their highest harmonic would alias into
+      # the audible band).
+      LEVEL_FADE = 0.2
+
+      # Sample-mode levels roll off over this fraction of their band (a
+      # raised cosine), so filtering doesn't ring for long.
+      SAMPLE_TRANSITION = 0.25
+
+      # Sample mode stops adding levels below this band (Hz).
+      MIN_SAMPLE_BAND = 40.0
+
+      # Named level spacings (ratios of bandwidth between levels).
+      SPACINGS = {
+        octave: 2.0,
+        half_octave: Math.sqrt(2.0),
+        third_octave: 2.0**(1.0 / 3.0),
+      }.freeze
+
+      # Interpolators (see the class description) and their kernel codes.
+      INTERPOLATIONS = { none: 0, linear: 1, cubic: 2, optimal: 3, sinc: 4 }.freeze
+
+      # Wrapping modes for phases outside 0...1 in GraphNode::Wavetable.
+      WRAP_MODES = [:wrap, :bounce, :clamp, :zero].freeze
+
+      MODES = [:cycle, :sample].freeze
+
+      # The kernel of the :sinc interpolator: [table, half width, table
+      # entries per sample, max rate] as for DelayLine::SINC_KERNEL, from
+      # the same builder, but with a Kaiser beta of 12 instead of 6: levels
+      # are 4x oversampled, so they need a deep stopband (images 112 dB
+      # down) rather than a passband flat to Nyquist (the delay line's
+      # kernel leaves images about 65 dB down).
+      SINC_KERNEL = [DelayLine.sinc_table(beta: 12).freeze, DelayLine::SINC_HALF, DelayLine::SINC_RESOLUTION, 1.0].freeze
+
+      # The registry of named tables (see .register).
+      @registry = {}
+
+      class << self
+        # A table of sine harmonics: +amplitudes+ (first for harmonic 1) with
+        # +phases+ (radians; nil for all 0, every harmonic a sine starting
+        # at 0), each an Array or 1D NArray, or an Array of them for several
+        # frames (scanned in order).  Amplitudes are kept exactly (no
+        # normalizing), so e.g. the Fourier series of a ramp plays at the
+        # same level as Tone#ramp, Gibbs overshoot included.  +size+ is the
+        # length of #frames (and caps the harmonics at size / 2 - 1).  See
+        # the class description for +complex+, +mips+, +interpolation+;
+        # +align+ lines up frames in time (off by default, since the phases
+        # are given).
+        def from_harmonics(amplitudes, phases = nil, size: 2048, complex: false, mips: :octave, interpolation: nil, align: false, name: nil)
+          spectra = Builder.spectra_from_harmonics(amplitudes, phases)
+          max = (size - 1) / 2
+          spectra = spectra[true, 0..max] if spectra.shape[1] - 1 > max
+          spectra = Builder.align(spectra) if align && spectra.shape[0] > 1
+
+          new(spectra: spectra, size: size, complex: complex, mips: mips, interpolation: interpolation, name: name)
         end
-      end
 
-      # Saves 2D NArray +data+ containing a wavetable to the given sound
-      # +filename+, using the mb_sound_wavetable_period tag to record the
-      # correct shape of the wavetable.  The rows of the NArray are the entries
-      # in the table, and the columns are the audio samples over time.
-      def self.save_wavetable(filename, data, sample_rate: 48000, overwrite: false)
-        raise 'Data must be a 2D Numo::NArray' unless data.is_a?(Numo::NArray) && data.ndim == 2
+        # A table from samples.  In cycle mode (default), +data+ is one
+        # cycle per row (a 2D NArray, an Array of rows, or one 1D cycle);
+        # +align+ lines frames up in time (see the class description) and
+        # +normalize+ removes DC and scales each frame to a peak of 1.  In
+        # sample mode, +data+ is the sound (1D; +root+, +loop+, and
+        # +sample_rate+ apply).
+        def from_samples(data, mode: :cycle, complex: false, mips: :octave, interpolation: nil, align: true, normalize: false, root: nil, loop: nil, sample_rate: 48000, name: nil)
+          data = to_narray(data)
 
-        period = data.shape[1]
-        total = data.length
-        # TODO: Add all metadata to the file including root note, etc.
-        MB::Sound.write(filename, data.reshape(total), sample_rate: sample_rate, overwrite: overwrite, metadata: { mb_sound_wavetable_period: period })
-      end
+          case mode
+          when :cycle
+            data = data.reshape(1, data.length) if data.ndim == 1
+            raise ArgumentError, 'Cycle frames must be a 1D or 2D NArray' unless data.ndim == 2
 
-      # Slices the given 1D NArray to return a wavetable as a 2D NArray.
-      #
-      # +:metadata_out+ - An optional unfrozen Hash into which to write
-      # information about the wavetable.  Set to nil to disable printing of
-      # this info.
-      #
-      # See bin/make_wavetable.rb.
-      def self.make_wavetable(data, freq_range: 30..120, slices: 10, sample_rate: 48000, ratio: 1.0, metadata_out: {})
-        # TODO: maybe skip or interpolate over silent slices in the middle of the file
-        # TODO: guard against amplifying very high frequency noises e.g. 20k+ dithering noise?
-        # TODO: generate a whole bunch of table entries and use k-means clustering to select a few?
+            data = data.is_a?(Numo::SComplex) || data.is_a?(Numo::DComplex) ? Numo::SComplex.cast(data) : Numo::SFloat.cast(data)
+            data = Wavetable.normalize(data.dup) if normalize
+            new(frames: data, complex: complex, mips: mips, interpolation: interpolation, align: align, name: name)
 
-        # Chop off leading and trailing silence/near-silence
-        original_length = data.length
-        data = MB::M.trim(data) { |v| v.abs < -85.db }
+          when :sample
+            raise ArgumentError, 'A sample must be a 1D NArray' unless data.ndim == 1
+            raise ArgumentError, 'A sample needs a root: (Hz, a Pitch, or a Note)' if root.nil?
 
-        # Estimate frequency and wave period
-        freq = MB::Sound.freq_estimate(data, sample_rate: sample_rate, range: freq_range)
-        period = ratio.to_f / freq
-        xfade = period * 0.25
-        period_samples = (period * sample_rate).round
-        xfade_samples = (xfade * sample_rate).round
-        note = MB::Sound::Tone.new(frequency: freq).to_note
-
-        jump = (data.length - period_samples - xfade_samples) / (slices - 1)
-
-        total_samples = slices * period_samples
-        buf = data.class.zeros(total_samples)
-        offset = 0
-
-        metadata_out&.merge!({
-          original_length: original_length,
-          trimmed_silence: original_length - data.length,
-          frequency: freq,
-          note_name: note.name,
-          note_number: note.detuned_number,
-          ratio: ratio,
-          period: period,
-          period_samples: period_samples,
-          xfade: xfade,
-          xfade_samples: xfade_samples,
-        })
-
-        # FIXME: only print this in bin/sound.rb or something; not in rspec
-        $stderr.puts MB::U.highlight(metadata_out) if metadata_out
-
-        for start_samples in (0...(data.length - (period_samples + xfade_samples))).step(jump) do
-          start_samples = start_samples.floor
-          end_samples = start_samples + period_samples
-          lead_in_start = MB::M.max(0, start_samples - xfade_samples)
-          lead_out_end = end_samples + xfade_samples
-
-          if data.length < start_samples + period_samples + xfade_samples
-            # TODO: Allow shortening the lead-out somewhat?
-            raise "Sound is too short (must be #{start_samples + period_samples + xfade_samples} samples; got #{data.length} samples)"
-          end
-
-          # TODO: try windowing instead of cross-fading as an option?
-
-          # Take lead-in from before the loop (mixed in at the end of the loop)
-          if start_samples > 0
-            lead_in = data[lead_in_start...start_samples].dup
-            lead_in = fade(lead_in, true)
-          else
-            lead_in = Numo::SFloat[0]
-          end
-
-          # Copy loopable segment
-          middle = data[start_samples...end_samples].dup
-
-          # Take lead-out from after the loop (mixed in at the start of the loop)
-          lead_out = data[end_samples...lead_out_end].dup
-          lead_out = fade(lead_out, false)
-
-          # Add lead-in and lead-out to segment
-          middle[0...lead_out.length].inplace + lead_out
-          middle[-lead_in.length...].inplace + lead_in
-
-          # Normalize and remove DC offset
-          middle -= middle.mean
-          max = MB::M.max(middle.abs.max, -80.db)
-          middle = middle / max
-
-          buf[offset...(offset + period_samples)] = middle
-          offset += period_samples
-        end
-
-        center(buf.reshape(slices, period_samples).inplace!).not_inplace!
-      end
-
-      # Calls a block +:steps+ times to generate a wavetable by passing
-      # interpolating parameters to the block.  Sample rate is assumed to be
-      # 48kHz.
-      #
-      # The +:from+ and +:to+ parameters may be anything that MB::M.interp can
-      # interpolate.  Interpolation uses the smoothstep curve; use the :curve
-      # parameter to change this (nil or ->{it} will be linear).
-      #
-      # The block will receive the interpolated value for the current step and
-      # a Tone object with a period of +:length+ samples.
-      #
-      # If the block returns a Numo::NArray, then that will be appended to the
-      # wavetable.
-      #
-      # If the block returns a Graph, then it will be sampled for +:length+
-      # samples 3 times (to allow for filter stabilization) with the last tone
-      # cycle appended to the wavetable (-(length*3/2)...-(length/2)).
-      #
-      # The :center, :sort, and :normalize parameters enable or disable
-      # post-processing by the method of the same name.
-      #
-      # Examples:
-      #     # Square to saw
-      #     MB::Sound::Wavetable.generate(fade_edges: false) { |v, _t| MB::M.safe_power(Numo::SFloat.linspace(-1, 1, 2048), v) }
-      #
-      #     # Harmonics
-      #     MB::Sound::Wavetable.generate(from: 2, to: 11, curve: nil) { |v, t| t + (t.frequency * v).hz }
-      def self.generate(steps: 10, from: 0, to: 1, length: 2048, center: false, sort: false, normalize: true, fade_edges: true, curve: MB::M.method(:smoothstep))
-        table = Array.new(steps) { |i|
-          tone = (48000.0 / length).hz.at(1).with_phase(Math::PI)
-          val = MB::M.interp(from, to, i.to_f / (steps - 1), func: curve)
-
-          ret = yield val, tone
-          case ret
-          when Numo::NArray
-            raise "Wave length must be #{length} samples" unless ret.shape == [2048]
-            ret
-
-          when GraphNode
-            ret.sample(length)
-            ret.sample(length)
-            ret.sample(length)
+            new(mode: :sample, data: data, complex: complex, mips: mips, interpolation: interpolation,
+              root: root, loop: loop, sample_rate: sample_rate, name: name)
 
           else
-            raise "Unsupported wavetable entry: #{ret.inspect}"
+            raise ArgumentError, "Unknown wavetable mode #{mode.inspect} (#{MODES.join(', ')})"
           end
-        }
-
-        table = Numo::SFloat.cast(table).inplace!
-
-        table = normalize(table) if normalize
-        table = sort(table) if sort
-
-        table = fade_edges(table) if fade_edges && center
-        table = center(table) if center
-        table = fade_edges(table) if fade_edges
-
-        table.not_inplace!
-      end
-
-      # Fades +clip+ in or out in-place.  For .make_wavetable.
-      def self.fade(clip, fade_in)
-        fade = MB::FastSound.smootherstep_buf(Numo::SFloat.zeros(clip.length))
-        fade = 1 - fade.inplace unless fade_in
-        clip.inplace * fade.not_inplace!
-      end
-
-      # Blends the edges of each entry in +table+ to temper clicks for waves
-      # that aren't perfectly periodic or have discontinuities at the edge.
-      #
-      # Fades the first and last 1/64th of the buffer, with a minimum fade of 4
-      # samples.  Doesn't modify tables shorter than 8 samples.
-      def self.fade_edges(table)
-        raise 'Wavetable must be a 2D Numo::NArray' unless table.is_a?(Numo::NArray) && table.ndim == 2
-
-        # FIXME: make this look right for all of these:
-        # t = MB::Sound::Wavetable.generate { |v, t| t.fm(v.constant) }
-        # t = MB::Sound::Wavetable.generate(steps: 100, normalize: false) { |v, t| Numo::SFloat.zeros(2048).fill(v) }
-        #
-        # Idea: subtract a smoothstep or linear element across the fade range,
-        # preserving some higher frequencies but ending at the same value as
-        # the beginning.  This might be made idempotent(?)
-        #
-        # Idea 2: ignore the midpoint value and just blend between the end
-        # values
-
-        rows, cols = table.shape
-
-        return table if cols < 8
-
-        table = table.dup unless table.inplace?
-
-        fade_cols = cols / 64
-        fade_cols = 4 if fade_cols < 4
-
-        fade_buf = MB::FastSound.smootherstep_buf(Numo::SFloat.zeros(fade_cols * 2))
-        fade_in_buf = (fade_buf[fade_cols..-1].inplace! * 2 - 1).not_inplace!
-        fade_out_buf = (1 - fade_buf[0...fade_cols].inplace! * 2).not_inplace!
-
-        rows.times do |row|
-          wave = table[row, nil]
-
-          intro = wave[0...fade_cols].inplace!
-          outro = wave[-fade_cols..-1].inplace!
-
-          mid = 0.5 * (intro[0] + outro[-1])
-
-          intro * fade_in_buf + mid * (1 - fade_in_buf)
-          outro * fade_out_buf + mid * (1 - fade_out_buf)
         end
 
-        table
-      end
-
-      # Creates a new wavetable that blends each row in the given +wavetable+
-      # with adjacent rows.  A strength of 1.0 means an equal blend of the
-      # three rows.  As strength approaches infinity the original row fades
-      # away.
-      #
-      # You should probably use .normalize after this method to ensure the
-      # wavetable maintains a consistent peak amplitude.
-      def self.blur(wavetable, strength)
-        raise 'Wavetable must be a 2D Numo::NArray' unless wavetable.is_a?(Numo::NArray) && wavetable.ndim == 2
-
-        new_table = wavetable.dup
-
-        w_other = strength
-        w_self = 1.0
-        w_total = w_self + 2 * w_other.abs
-        w_self /= w_total
-        w_other /= w_total
-
-        rows = wavetable.shape[0]
-
-        for row in 0...rows
-          r1 = wavetable[row - 1, nil]
-          r2 = wavetable[row, nil]
-          r3 = wavetable[row == rows - 1 ? 0 : row + 1, nil]
-
-          new_table[row, nil] = (r1 + r3) * w_other + r2 * w_self
-        end
-
-        new_table
-      end
-
-      # Sorts a +wavetable+ by spectral slope and returns the sorted copy.  In
-      # this case spectral slope is the slope component of a linear regression
-      # on the frequency spectrum of the wave.  This should, roughly, place
-      # brighter and noisier waves at the end of the table (or at the start if
-      # +:reverse+ is true).
-      def self.sort(wavetable, reverse: false)
-        indices = (0...wavetable.shape[0]).to_a
-
-        # TODO: debug this; it doesn't put drums in the order I would expect.
-        # It might be better to define a crossover point and sort by the ratio
-        # between the areas above and below that point.
-        indices.sort_by! { |row|
-          fft = MB::Sound.real_fft(wavetable[row, nil]).abs
-          slope, _ = MB::M.linear_regression(fft)
-          slope
-        }
-
-        indices.reverse! if reverse
-
-        Numo::SFloat.cast(
-          indices.map { |row|
-            wavetable[row, nil].dup
+        # A cycle-mode table from a block called for each of +frames+ frames
+        # with the phase of each sample in cycles (a DFloat of +size+ values
+        # from 0 to just under 1) and the frame's scan position (0..1),
+        # returning +size+ samples (an NArray or Array).  Other options as
+        # for .from_samples.
+        #
+        #     Wavetable.from_function(frames: 8) { |ph, s| Numo::NMath.sin(ph * 2 * Math::PI) ** (1 + 8 * s) }
+        def from_function(frames: 1, size: 2048, **options)
+          phase = Numo::DFloat.new(size).seq / size
+          rows = Array.new(frames) { |f|
+            row = yield phase, frames > 1 ? f.to_f / (frames - 1) : 0.0
+            row = to_narray(row)
+            raise ArgumentError, "Frame #{f} has #{row.length} samples instead of #{size}" unless row.length == size
+            row
           }
+
+          from_samples(Numo::NArray.concatenate(rows.map { |r| Numo::DFloat.cast(r).reshape(1, size) }), **options)
+        end
+
+        # A table from a sound file.  In cycle mode, a file saved by
+        # .save_frames (or bin/make_wavetable.rb) loads its frames, and any
+        # other sound is sliced into +slices+ cycles (see .load_frames).  In
+        # sample mode, the sound (mixed to mono) with +root+ (estimated
+        # from the sound if nil) and +loop+.  Other options as for
+        # .from_samples.
+        def from_file(path, mode: :cycle, slices: 10, ratio: 1.0, root: nil, loop: nil, **options)
+          path = path.path if path.respond_to?(:path)
+          options[:name] ||= File.basename(path.to_s)
+
+          case mode
+          when :cycle
+            from_samples(load_frames(path.to_s, slices: slices, ratio: ratio), **options)
+
+          when :sample
+            channels = MB::Sound.read(path.to_s)
+            data = channels.sum / channels.length
+            root ||= MB::Sound.freq_estimate(data, sample_rate: 48000)
+            from_samples(data, mode: :sample, root: root, loop: loop, sample_rate: 48000, **options)
+
+          else
+            raise ArgumentError, "Unknown wavetable mode #{mode.inspect} (#{MODES.join(', ')})"
+          end
+        end
+
+        # A table from +source+: a Wavetable (itself), a Symbol (a named
+        # table; see .register and .names), a String, Pathname, or File (a
+        # sound file; see .from_file), or an Array or NArray (samples; see
+        # .from_samples).
+        def [](source)
+          case source
+          when Wavetable
+            source
+          when Symbol
+            named(source)
+          when String, File
+            from_file(source)
+          when Numo::NArray, Array
+            from_samples(source)
+          else
+            return from_file(source.to_s) if defined?(Pathname) && source.is_a?(Pathname)
+
+            raise ArgumentError, "Can't make a wavetable from #{source.inspect}"
+          end
+        end
+
+        # Like .[], but passing a KeyMap through (for Tone#wavetable).
+        def for(source)
+          source.is_a?(KeyMap) ? source : self[source]
+        end
+
+        # Adds a named table to the library (see .[]): +table+ (anything
+        # .[] accepts), or a block that builds it when first used.
+        def register(name, table = nil, &block)
+          raise ArgumentError, 'Give a table or a block, not both' if table && block
+          raise ArgumentError, 'Give a table or a block' unless table || block
+
+          @registry[name.to_sym] = block || table
+          @cache&.delete(name.to_sym)
+          name.to_sym
+        end
+
+        # The names of the library's tables.
+        def names
+          @registry.keys.sort
+        end
+
+        # The named table +name+ (built and cached on first use).
+        def named(name)
+          entry = @registry.fetch(name.to_sym) {
+            raise ArgumentError, "No wavetable named #{name.inspect} (try #{names.map(&:inspect).join(', ')})"
+          }
+
+          @cache ||= {}
+          @cache[name.to_sym] ||= begin
+            t = entry.respond_to?(:call) ? entry.call : self[entry]
+            t.name ||= name.to_s
+            t
+          end
+        end
+
+        private
+
+        def to_narray(data)
+          return data if data.is_a?(Numo::NArray)
+
+          if data.is_a?(Array) && data.any? { |r| r.is_a?(Array) || r.is_a?(Numo::NArray) }
+            rows = data.map { |r| r.is_a?(Numo::NArray) ? r.to_a : r }
+            return (rows.flatten.any?(Complex) ? Numo::DComplex : Numo::DFloat).cast(rows)
+          end
+
+          (data.any?(Complex) ? Numo::DComplex : Numo::DFloat).cast(data)
+        end
+      end
+
+      # One band-limited level: +data+ (a 2D SFloat or SComplex, [frames,
+      # count + 2 * GUARD]), +count+ samples (cycle mode: per cycle),
+      # +rate+ (stored samples per cycle or per source sample), and the
+      # highest +bandwidth+ (harmonics, or cycles per source sample).
+      Level = Struct.new(:data, :count, :rate, :bandwidth)
+
+      # :cycle or :sample.
+      attr_reader :mode
+
+      # The number of frames (scan positions) in cycle mode; 1 in sample
+      # mode.
+      attr_reader :frame_count
+
+      # Cycle mode: samples per frame in #frames.  Sample mode: the sound's
+      # length in samples.
+      attr_reader :size
+
+      # The level spacing (a ratio), an Array of harmonic counts, or nil
+      # without levels (see #mipped?).
+      attr_reader :spacing
+
+      # The default interpolation (see INTERPOLATIONS).
+      attr_reader :interpolation
+
+
+      # Sample mode: the root frequency in Hz, the loop as a Range of source
+      # samples (begin...end; nil for a one-shot), and the sound's sample
+      # rate.
+      attr_reader :root, :loop, :sample_rate
+
+      # Cycle mode: the harmonic spectra (DComplex [frames, harmonics + 1];
+      # see Builder.spectra_from_frames), or nil for unmipped tables.
+      attr_reader :spectra
+
+      # A name for displays (the library name or file name), or nil.
+      attr_accessor :name
+
+      # Use the class methods (.from_harmonics, .from_samples, ...).
+      def initialize(mode: :cycle, spectra: nil, frames: nil, data: nil, size: nil, complex: false, mips: :octave, interpolation: nil, align: false, root: nil, loop: nil, sample_rate: 48000, name: nil)
+        raise ArgumentError, "Unknown wavetable mode #{mode.inspect} (#{MODES.join(', ')})" unless MODES.include?(mode)
+
+        @mode = mode
+        @complex = !!complex
+        @spacing = parse_spacing(mips)
+        @name = name
+        @kernel_specs = {}
+        @interpolation = interpolation || (@spacing ? :optimal : :cubic)
+        raise ArgumentError, "Unknown interpolation #{@interpolation.inspect} (#{INTERPOLATIONS.keys.join(', ')})" unless INTERPOLATIONS.include?(@interpolation)
+
+        if mode == :cycle
+          build_cycle(spectra, frames, size, align)
+        else
+          build_sample(data, root, loop, sample_rate)
+        end
+
+        @level_sets = {}
+        freeze_contents
+        level_set(emphasis?(nil))
+      end
+
+      # The band-limited levels (Level structs), brightest first, read by
+      # +interpolation+ (default #interpolation; the :optimal interpolator
+      # reads levels with its pre-emphasis, see Emphasis; built on first
+      # use).
+      def levels(interpolation = nil)
+        level_set(emphasis?(interpolation))[0]
+      end
+
+      # Sample mode with a loop: the loop's levels (one period each, wrapped
+      # around), as for #levels.
+      def loop_levels(interpolation = nil)
+        level_set(emphasis?(interpolation))[1]
+      end
+
+      # True for analytic (complex) tables.
+      def complex?
+        @complex
+      end
+
+      # True if the table has band-limited levels (see the class
+      # description).
+      def mipped?
+        !@spacing.nil?
+      end
+
+      # True in sample mode without a loop (a one-shot ends).
+      def one_shot?
+        @mode == :sample && @loop.nil?
+      end
+
+      # Cycle mode: the frames as a 2D NArray (a cycle per row, #size
+      # samples; resynthesized from the spectra for harmonic tables).  Sample
+      # mode: the sound as a 1D NArray.
+      def frames
+        @mode == :cycle ? @frames : @data
+      end
+
+      # Cycle mode: the number of harmonics of the brightest level.
+      def harmonics
+        @spectra ? @spectra.shape[1] - 1 : nil
+      end
+
+      # The highest frequency, in cycles per sample at +sample_rate+, that
+      # levels may reach: harmonics above Nyquist fold back to 1 minus their
+      # frequency, so up to 1 - AUDIBLE_LIMIT / sample_rate they land above
+      # AUDIBLE_LIMIT (at least 0.5: Nyquist).
+      def ceiling(sample_rate)
+        [0.5, 1.0 - AUDIBLE_LIMIT / sample_rate].max
+      end
+
+      # The tables and thresholds the C kernels read (see
+      # FastWavetable.oscillate), for +sample_rate+ (cached).  An Array of:
+      # 0 mode (0 cycle, 1 sample), 1 frames, 2 level datas, 3 level counts,
+      # 4 level rates (DFloat), 5 hi and 6 lo thresholds (DFloat: a level is
+      # used alone up to lo, then crossfaded into the next until hi, in
+      # increments per sample), 7 half means (DFloat per frame; see
+      # Builder.half_means), 8 loop datas, 9 loop counts, 10 loop rates, 11
+      # loop start, 12 loop end, 13 end (source samples), 14 GUARD.
+      def kernel_spec(sample_rate, interpolation = nil)
+        emphasis = emphasis?(interpolation)
+        @kernel_specs[[sample_rate.to_f, emphasis]] ||= begin
+          hi, lo = thresholds(sample_rate)
+          levels, loop_levels = level_set(emphasis)
+          [
+            @mode == :cycle ? 0 : 1,
+            @frame_count,
+            levels.map(&:data).freeze,
+            levels.map(&:count).freeze,
+            Numo::DFloat.cast(levels.map(&:rate)).freeze,
+            hi.freeze, lo.freeze,
+            @half_means.freeze,
+            loop_levels&.map(&:data)&.freeze,
+            loop_levels&.map(&:count)&.freeze,
+            loop_levels && Numo::DFloat.cast(loop_levels.map(&:rate)).freeze,
+            @loop ? @loop.begin.to_f : 0.0,
+            @loop ? @loop.end.to_f : 0.0,
+            @mode == :sample ? @size.to_f : 0.0,
+            GUARD,
+          ].freeze
+        end
+      end
+
+      # [hi, lo] level thresholds (DFloat, increments per sample) for
+      # +sample_rate+ (see #kernel_spec and the class description).
+      def thresholds(sample_rate)
+        top = ceiling(sample_rate)
+        bw = levels.map(&:bandwidth)
+        hi = bw.map { |b| b.finite? ? top / b : Float::INFINITY }
+        lo = hi.each_with_index.map { |h, k|
+          next h if k == hi.length - 1
+
+          below = k > 0 ? hi[k - 1] : 0.0
+          [below, h * 2.0**-LEVEL_FADE, h * bw[k + 1] / bw[k]].max
+        }
+        [Numo::DFloat.cast(hi), Numo::DFloat.cast(lo)]
+      end
+
+      # Cycle mode: the value at +phase+ (cycles) and +scan+ (0..1) for a
+      # tone moving +increment+ cycles per sample at +sample_rate+, with
+      # +interpolation+ (default #interpolation).  Sample mode: +phase+ is
+      # the position in source samples and +increment+ the speed.
+      def value_at(phase, scan: 0, increment: 0, sample_rate: 48000, interpolation: nil)
+        KernelRuby.value(kernel_spec(sample_rate, interpolation), phase.to_f, increment.to_f.abs, scan.to_f, interpolation_code(interpolation))
+      end
+
+      # The kernel code of +interpolation+ (nil for #interpolation).
+      def interpolation_code(interpolation = nil)
+        interpolation ||= @interpolation
+        INTERPOLATIONS.fetch(interpolation) {
+          raise ArgumentError, "Unknown interpolation #{interpolation.inspect} (#{INTERPOLATIONS.keys.join(', ')})"
+        }
+      end
+
+      # Cycle mode oscillator kernel in C: fills +out+ (a 1D SFloat, or
+      # SComplex for complex tables) at +freq+ (Hz, Numeric or NArray), with
+      # the phase accumulator +state+ ([phase in cycles]) advancing by freq *
+      # +advance+ per sample, +tstate+ ([position, last phase modulation,
+      # primed]), +phase_mod+ (radians), +width+ (phase warp, nil for none),
+      # +scan+ (0..1), and output gain and offset; +remove_dc+ removes the
+      # warp's DC offset.  See Tone#wavetable.
+      def oscillate(out, freq, advance, gain, offset, state, tstate, phase_mod, width, scan, interpolation, sample_rate, remove_dc)
+        MB::Sound::FastWavetable.oscillate(
+          out, kernel_spec(sample_rate, interpolation), freq, advance.to_f, gain.to_f, offset.to_f, state, tstate,
+          phase_mod, width, scan, interpolation_code(interpolation), !!remove_dc, sinc_kernel(interpolation)
         )
       end
 
-      # Removes DC offset and rescales each row of the given +wavetable+ to the
-      # given +max+ amplitude.  Modifies the wavetable in place and returns it.
-      #
-      # TODO: allow normalizing RMS with waveshaping?
-      def self.normalize(wavetable, max = 1.0)
-        raise 'Wavetable must be a 2D Numo::NArray' unless wavetable.is_a?(Numo::NArray) && wavetable.ndim == 2
-
-        for row in 0...wavetable.shape[0]
-          data = wavetable[row, nil]
-          data -= data.mean
-          rowmax = MB::M.max(-80.db, data.abs.max)
-          wavetable[row, nil] = data * (max / rowmax)
-        end
-
-        wavetable
+      # Ruby mirror of #oscillate (the same samples), returning +out+.
+      def oscillate_ruby(out, freq, advance, gain, offset, state, tstate, phase_mod, width, scan, interpolation, sample_rate, remove_dc)
+        KernelRuby.oscillate(
+          out, kernel_spec(sample_rate, interpolation), freq, advance.to_f, gain.to_f, offset.to_f, state, tstate,
+          phase_mod, width, scan, interpolation_code(interpolation), !!remove_dc
+        )
       end
 
-      # Performs per-row centering to place each wave's first zero crossing in
-      # the middle of the buffer.  Returns the existing wavetable if it was
-      # marked as in-place, or a copy if it wasn't.  Raises an error if there
-      # is no zero crossing (could be caused by silence, DC offset).
-      #
-      # TODO: find the closest zero crossing to the existing center in either
-      # direction?
-      def self.center(wavetable)
-        raise 'Wavetable must be a 2D Numo::NArray' unless wavetable.is_a?(Numo::NArray) && wavetable.ndim == 2
-
-        wavetable = wavetable.dup unless wavetable.inplace?
-
-        for row in 0...wavetable.shape[0]
-          wave = wavetable[row, nil]
-
-          zc_index = MB::M.find_zero_crossing(wave)
-          if zc_index.nil? && wave[-1] < 0 && wave[0] >= 0
-            # TODO: should find_zero_crossing wrap around like this?
-            zc_index = 0
-          end
-
-          raise "No zero crossing found for row #{row} (min/max: #{wave.minmax})" unless zc_index
-
-          wavetable[row, nil] = MB::M.rol(wave, zc_index - wave.length / 2)
-        end
-
-        wavetable
+      # Phase-driven lookup in C: fills +out+ from +phase+ (cycles, an
+      # NArray) with +increments+ (cycles per sample, an NArray, for picking
+      # levels; nil for the brightest), +scan+, and the +wrap+ mode for
+      # phases outside 0...1 (see WRAP_MODES).  See GraphNode::Wavetable.
+      def lookup(out, phase, increments, scan, interpolation, sample_rate, wrap)
+        MB::Sound::FastWavetable.lookup(
+          out, kernel_spec(sample_rate, interpolation), phase, increments, scan, interpolation_code(interpolation),
+          wrap_code(wrap), sinc_kernel(interpolation)
+        )
       end
 
-      # TODO: functions to shuffle and stretch/interpolate wavetables?
-      # TODO: functions for spectral changes to wavetables?
-      # TODO: mip-mapped or note-range wavetables
-      # TODO: midi/realtime control of wavetable wrapping mode?
-      # TODO: blend between wrapping modes by output
-      # TODO: warp between wrapping modes by blending lookup indices?
-      # FIXME: make it super easy to play the full cycle including cubic
-      # overshoot, and make the areas around that more musical somehow (getting
-      # clicking and very sharp waves if the phase is off just a tiny bit); it
-      # might be better to create a true wavetable oscillator that knows when
-      # it's wrapping around early and feeds the wrapped samples into the cubic
-      # interpolator instead of feeding in samples beyond where the phase will
-      # actually wrap
-      # FIXME: glitch at the bottom CC range of play
-      # ((midi.hz.ramp.at(1)).wavetable(wavetable: wt2, number:
-      # midi.cc(1).spy{|v|puts v.minmax}, wrap: :wrap) *
-      # midi.gate).softclip.filter(:highpass, cutoff: 20, quality:
-      # 0.7).oversample(2) -- it seems to be wrapping around partially when it
-      # should be on the first wave; might be caused by wrapping around blur
-
-      # Performs a fractional wavetable lookup with wraparound.
-      #
-      # :number - A 1D Numo::NArray with the wave number (from 0..1) over time
-      # :phase - A 1D Numo::NArray with the wave phase (from 0..1) over time
-      # :lookup - Interpolation method (:linear or :cubic)
-      # :wrap - Wrapping method (:wrap, :bounce, :clamp, or :zero)
-      #
-      # See MB::Sound::GraphNode#wavetable.
-      def self.wavetable_lookup(wavetable:, number:, phase:, lookup:, wrap:)
-        wavetable_lookup_c(wavetable: wavetable, number: number, phase: phase, lookup: lookup, wrap: wrap)
+      # Ruby mirror of #lookup.
+      def lookup_ruby(out, phase, increments, scan, interpolation, sample_rate, wrap)
+        KernelRuby.lookup(out, kernel_spec(sample_rate, interpolation), phase, increments, scan, interpolation_code(interpolation), wrap_code(wrap))
       end
 
-      # Ruby implementation of .wavetable_lookup.
-      def self.wavetable_lookup_ruby(wavetable:, number:, phase:, lookup:, wrap:)
-        raise 'Number and phase must be the same size array' unless number.length == phase.length
+      # Sample mode player in C: fills +out+ at +freq+ (Hz), advancing the
+      # phase in +state+ like #oscillate (for ports and resets) and the
+      # position in source samples (+tstate+[0]) by freq * +speed+ per
+      # sample (see #speed), wrapping in the loop.
+      def play(out, freq, advance, speed, gain, offset, state, tstate, interpolation, sample_rate)
+        MB::Sound::FastWavetable.play(
+          out, kernel_spec(sample_rate, interpolation), freq, advance.to_f, speed.to_f, gain.to_f, offset.to_f, state, tstate,
+          interpolation_code(interpolation), sinc_kernel(interpolation)
+        )
+      end
 
-        case lookup
-        when :cubic
-          number.map_with_index do |num, idx|
-            phi = phase[idx]
-            outer_cubic_ruby(wavetable: wavetable, number: num, phase: phi, wrap: wrap)
-          end
+      # Ruby mirror of #play.
+      def play_ruby(out, freq, advance, speed, gain, offset, state, tstate, interpolation, sample_rate)
+        KernelRuby.play(
+          out, kernel_spec(sample_rate, interpolation), freq, advance.to_f, speed.to_f, gain.to_f, offset.to_f, state, tstate,
+          interpolation_code(interpolation)
+        )
+      end
 
-        when :linear
-          number.map_with_index do |num, idx|
-            phi = phase[idx]
-            outer_linear_ruby(wavetable: wavetable, number: num, phase: phi, wrap: wrap)
-          end
+      # Sample mode: source samples per output sample per Hz at
+      # +sample_rate+.
+      def speed(sample_rate)
+        @sample_rate.to_f / (@root * sample_rate)
+      end
 
+      # Saves the frames (cycle mode) or the sound (sample mode) to
+      # +filename+ (see .save_frames).
+      def save(filename, overwrite: false)
+        if @mode == :cycle
+          frames = @complex ? @frames.real : @frames
+          Wavetable.save_frames(filename, frames, overwrite: overwrite)
         else
-          raise ArgumentError, "Invalid wavetable lookup mode: #{lookup.inspect}"
+          MB::Sound.write(filename, @complex ? @data.real : @data, sample_rate: @sample_rate, overwrite: overwrite)
         end
       end
 
-      # C extension implementation of .wavetable_lookup.
-      def self.wavetable_lookup_c(wavetable:, number:, phase:, lookup:, wrap:)
-        MB::Sound::FastWavetable.wavetable_lookup(wavetable, number, phase, lookup, wrap)
+      def to_s
+        desc = @mode == :cycle ? "#{@frame_count} frame#{'s' if @frame_count != 1}" : "#{@size} samples, root #{format('%.2f', @root)} Hz#{@loop ? ", loop #{@loop}" : ''}"
+        mips = @spacing ? "#{levels.length} levels" : 'no levels'
+        "#{@name || 'Wavetable'} (#{@mode}, #{desc}, #{mips}#{', complex' if @complex})"
       end
 
-      # Interpolates waves and samples from the wavetable.  See also
-      # #wavetable_lookup.
-      #
-      # :number - Fractional wave number from 0 to 1.
-      # :phase - Time index from 0 to 1.
-      # :wrap - Wrapping mode (:wrap, :clamp, :bounce, :zero)
-      def self.outer_linear(wavetable:, number:, phase:, wrap:)
-        outer_linear_c(wavetable: wavetable, number: number, phase: phase, wrap: wrap)
+      def inspect
+        "#<#{self.class.name} #{self}>"
       end
 
-      # Interpolates waves and samples from the wavetable using cubic
-      # interpolation.  See also #wavetable_lookup.
-      #
-      # :number - Fractional wave number from 0 to 1.
-      # :phase - Time index from 0 to 1.
-      # :wrap - Wrapping mode (:wrap, :clamp, :bounce, :zero)
-      def self.outer_cubic(wavetable:, number:, phase:, wrap:)
-        outer_cubic_c(wavetable: wavetable, number: number, phase: phase, wrap: wrap)
+      private
+
+      def parse_spacing(mips)
+        case mips
+        when false, nil, :none
+          nil
+        when Symbol
+          SPACINGS.fetch(mips) { raise ArgumentError, "Unknown level spacing #{mips.inspect} (#{SPACINGS.keys.join(', ')}, a ratio, or false)" }
+        when Numeric
+          raise ArgumentError, 'Level spacing must be a ratio above 1' unless mips > 1
+
+          mips.to_f
+        when Array
+          raise ArgumentError, 'Level harmonics must be positive Integers' unless mips.all? { |m| m.is_a?(Integer) && m > 0 }
+
+          mips.sort.reverse.freeze
+        else
+          raise ArgumentError, "Invalid level spacing #{mips.inspect}"
+        end
       end
 
-      # Uses cubic interpolation to blend across samples and waves in the given
-      # +:wavetable+, as opposed to linear interpolation used by
-      # #outer_linear_ruby.
-      def self.outer_cubic_ruby(wavetable:, number:, phase:, wrap:)
-        rows = wavetable.shape[0]
-        cols = wavetable.shape[1]
+      def build_cycle(spectra, frames, size, align)
+        if spectra.nil?
+          raise ArgumentError, 'Give cycle frames or spectra' if frames.nil?
 
-        frow = (number * (rows - 1)) % rows
-        row1 = frow.floor
-        row2 = row1 + 1
-        row1 %= rows
-        row2 %= rows
-        rowratio = frow - row1
+          @frames = frames
+          @frames = Numo::SComplex.cast(@frames) if @complex
+          size = frames.shape[1]
+          spectra = Builder.spectra_from_frames(frames) if @spacing || align
+          spectra = Builder.align(spectra) if align && frames.shape[0] > 1
+          @frames = Builder.synthesize(spectra, size, complex: @complex) if align && frames.shape[0] > 1
+        else
+          @frames = Builder.synthesize(spectra, size, complex: @complex)
+        end
 
-        fcol = (phase + 1) / 2 * (cols - 1)
+        @size = size
+        @frame_count = @frames.shape[0]
+        @spectra = spectra
+        @half_means = spectra ? Builder.half_means(spectra) : half_means_of(@frames)
 
-        vtop = MB::M.cubic_lookup(wavetable[row1, nil], fcol, mode: wrap)
-        vbot = MB::M.cubic_lookup(wavetable[row2, nil], fcol, mode: wrap)
-
-        # TODO: smoothstep or cubic between waves?
-        vbot * rowratio + vtop * (1.0 - rowratio)
       end
 
-      # Ruby implementation of .outer_linear.
-      def self.outer_linear_ruby(wavetable:, number:, phase:, wrap:)
-        wave_count = wavetable.shape[0]
-        sample_count = wavetable.shape[1]
-
-        frow = (number * (wave_count - 1)) % wave_count
-        row1 = frow.floor
-        row2 = row1 + 1
-        row1 %= wave_count
-        row2 %= wave_count
-        rowratio = frow - row1
-
-        fcol = (phase + 1) / 2 * (sample_count - 1)
-        col1 = fcol.floor
-        col2 = col1 + 1
-        colratio = fcol - col1
-
-        val1l = MB::M.fetch_oob(wavetable[row1, nil], col1, mode: wrap)
-        val1r = MB::M.fetch_oob(wavetable[row1, nil], col2, mode: wrap)
-        val2l = MB::M.fetch_oob(wavetable[row2, nil], col1, mode: wrap)
-        val2r = MB::M.fetch_oob(wavetable[row2, nil], col2, mode: wrap)
-
-        valtop = val1r * colratio + val1l * (1.0 - colratio)
-        valbot = val2r * colratio + val2l * (1.0 - colratio)
-
-        # TODO: smoothstep between waves?
-        valbot * rowratio + valtop * (1.0 - rowratio)
+      # The emphasis of the levels +interpolation+ (nil for #interpolation)
+      # reads: the interpolation for those in Emphasis::INTERPOLATORS, else
+      # nil (see Emphasis).
+      def emphasis?(interpolation)
+        interpolation ||= @interpolation
+        Emphasis::INTERPOLATORS.include?(interpolation) ? interpolation : nil
       end
 
-      # C extension implementation of .outer_linear.
-      def self.outer_linear_c(wavetable:, number:, phase:, wrap:)
-        MB::Sound::FastWavetable.outer_linear(wavetable, number, phase, wrap)
+      # [levels, loop levels] with or without +emphasis+ (built on first use;
+      # see #levels).
+      def level_set(emphasis)
+        @level_sets[emphasis] ||= begin
+          levels, loop_levels = @mode == :cycle ? build_cycle_levels(emphasis) : build_sample_levels(emphasis)
+          levels.each { |l| l.data.freeze }
+          loop_levels&.each { |l| l.data.freeze }
+          [levels.freeze, loop_levels&.freeze].freeze
+        end
       end
 
-      # C extension implementation of .outer_cubic.
-      def self.outer_cubic_c(wavetable:, number:, phase:, wrap:)
-        MB::Sound::FastWavetable.outer_cubic(wavetable, number, phase, wrap)
+      def build_cycle_levels(emphasis)
+        if @spacing
+          datas, counts, bandwidths = Builder.cycle_levels(@spectra, @spacing, @complex, emphasis)
+          levels = datas.each_with_index.map { |d, k| Level.new(d, counts[k], counts[k].to_f, bandwidths[k]) }
+        else
+          frames = @frames
+          if emphasis
+            spectra = @spectra || Builder.spectra_from_frames(@frames)
+            frames = Builder.synthesize(spectra, @size, complex: @complex, emphasis: emphasis)
+          end
+          levels = [Level.new(Builder.wrap_guard(frames), @size, @size.to_f, Float::INFINITY)]
+        end
+
+        [levels, nil]
+      end
+
+      # Half means of frames without spectra (see Builder.half_means).
+      def half_means_of(frames)
+        rows, n = frames.shape
+        half = n / 2
+        Numo::DFloat.cast(Array.new(rows) { |r|
+          row = frames[r, nil]
+          row = row.real if row.respond_to?(:real) && !row.is_a?(Numo::SFloat)
+          (row[0...half].mean - row[half..].mean) / 2.0
+        })
+      end
+
+      def build_sample(data, root, loop, sample_rate)
+        @data = @complex ? Numo::SComplex.cast(data) : (data.is_a?(Numo::SComplex) || data.is_a?(Numo::DComplex) ? Numo::SComplex.cast(data) : Numo::SFloat.cast(data))
+        @complex ||= @data.is_a?(Numo::SComplex)
+        @size = @data.length
+        @frame_count = 1
+        @sample_rate = sample_rate.to_f
+        @root = root.respond_to?(:frequency) ? root.frequency.to_f : root.to_f
+        raise ArgumentError, "Root frequency must be positive (got #{root.inspect})" unless @root > 0
+
+        @loop = parse_loop(loop)
+        @half_means = Numo::DFloat.zeros(1)
+        @spectra = nil
+
+        raise ArgumentError, 'Sample mode levels take a spacing ratio, not harmonic counts' if @spacing.is_a?(Array)
+      end
+
+      def build_sample_levels(emphasis)
+        if @spacing
+          levels, loop_levels = Builder.sample_levels(@data, @spacing, @complex, @loop, @sample_rate, emphasis)
+          return [
+            levels.map { |l| Level.new(l[:data], l[:count], l[:rate], l[:bandwidth]) },
+            loop_levels&.map { |l| Level.new(l[:data], l[:count], l[:rate], l[:bandwidth]) },
+          ]
+        end
+
+        data = @data
+        period = @loop && @data[@loop.begin...@loop.end]
+        if emphasis
+          # Emphasis by FFT of the whole sound (padded) and of the loop
+          pad = data.class.zeros(data.length + 4096)
+          pad[0...data.length] = data
+          data = Builder.resample_band(pad, 0.5, pad.length + pad.length % 2, @complex, emphasis)
+          period = Builder.resample_band(period, 0.5, period.length + period.length % 2, @complex, emphasis)[0...period.length] if period
+        end
+
+        valid = @loop ? @loop.begin : @size
+        row = data.class.zeros(valid + 2 * GUARD)
+        row[GUARD...(GUARD + valid)] = data[0...valid] if valid > 0
+        if @loop
+          # Continue into the loop past its start
+          GUARD.times { |g| row[GUARD + valid + g] = data[@loop.begin + g % (@loop.end - @loop.begin)] }
+        end
+        levels = [Level.new(row.reshape(1, row.length), valid, 1.0, Float::INFINITY)]
+        loop_levels = @loop && [Level.new(Builder.wrap_guard(period.reshape(1, period.length)), period.length, 1.0, Float::INFINITY)]
+
+        [levels, loop_levels]
+      end
+
+      # A loop as begin...end in whole source samples (end exclusive), from a
+      # Range of sample counts or Lengths.
+      def parse_loop(loop)
+        return nil if loop.nil? || loop == false
+        raise ArgumentError, "Loop must be a Range (got #{loop.inspect})" unless loop.is_a?(Range)
+
+        first = loop_point(loop.begin || 0)
+        last = loop.end.nil? ? @size : loop_point(loop.end)
+        last += 1 if loop.end && !loop.exclude_end?
+        last = @size if last > @size
+        raise ArgumentError, "Loop #{loop} must be inside the sample (0...#{@size}) and not empty" unless first >= 0 && last > first
+
+        first...last
+      end
+
+      def loop_point(v)
+        v = v.to_samples(sample_rate: @sample_rate) if v.respond_to?(:to_samples)
+        v.round
+      end
+
+      def freeze_contents
+        @frames&.freeze
+        @data&.freeze
+        @spectra&.freeze
+        @half_means.freeze
+      end
+
+      def wrap_code(wrap)
+        WRAP_MODES.index(wrap) || raise(ArgumentError, "Unknown wrapping mode #{wrap.inspect} (#{WRAP_MODES.join(', ')})")
+      end
+
+      def sinc_kernel(interpolation)
+        (interpolation || @interpolation) == :sinc ? SINC_KERNEL : nil
       end
     end
   end
 end
+
+require_relative 'wavetable/builder'
+require_relative 'wavetable/tools'
+require_relative 'wavetable/kernel_ruby'
+require_relative 'wavetable/emphasis'
+require_relative 'wavetable/key_map'
+require_relative 'wavetable/library'
