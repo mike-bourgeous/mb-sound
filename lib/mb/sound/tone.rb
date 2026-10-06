@@ -494,13 +494,16 @@ module MB
       # sample, so FM, phase modulation (#pm), and phase warps (#pwm) stay
       # clean as far as the levels allow; warp corners get PolyBLAMP
       # corrections, and resets, timeline jumps, and hard or soft sync
-      # (#sync, #softsync; real tables only) get minBLEP/minBLAMP steps
-      # measured on the table, like the classic shapes'.  A table is smooth,
-      # so sync leaves curvature jumps uncorrected: about as clean as a
-      # synced #sine (-50 to -65 dB of aliasing), not the -95 dB of a synced
-      # #ramp.  Sample-mode tables take no phase modulation, warp, sync, or
-      # noise.  #noise reads a cycle table at random phases (picking levels
-      # by the pitch), so it has the table's distribution of values.
+      # (#sync, #softsync, real or complex tables) get minimum-phase steps
+      # measured on the table: for sync, residuals for the jumps in the
+      # value and its first three derivatives, which come exactly from the
+      # table's harmonics (Wavetable.sync_tables).  A synced saw table
+      # aliases -75 dB at 1 kHz and -57 dB at 3 kHz (a synced #ramp: -99 and
+      # -95; `.oversample(2)` gets the table to -90 and -70 at about 10% of
+      # realtime).  Sample-mode tables take no phase modulation, warp,
+      # sync, or noise.  #noise reads a cycle table at random phases
+      # (picking levels by the pitch), so it has the table's distribution
+      # of values.
       #
       # Examples (bin/sound.rb):
       #     play 110.hz.wavetable(:basic, scan: 0.2.hz.lfo.triangle.at(0..1)).at(-12.db)
@@ -1680,6 +1683,7 @@ module MB
           table = current_table
           if @sync_source
             check_sync(phase)
+            ensure_sync_ring(table)
             buf = table.sync(
               out, freq, @advance, @gain, @offset, state.sync, state.sync_ring, pulses, @soft_sync, width, scan || 0,
               @interpolation, @sample_rate, !@keep_dc, table.mipped?
@@ -1736,6 +1740,7 @@ module MB
           table = current_table
           if @sync_source
             check_sync(phase_table)
+            ensure_sync_ring(table)
             values = table.sync_ruby(
               out.dup, freq_table, @advance, @gain, @offset, state.sync, state.sync_ring, pulses, @soft_sync, width, scan || 0,
               @interpolation, @sample_rate, !@keep_dc, table.mipped?
@@ -1817,6 +1822,12 @@ module MB
         [phases, increments]
       end
 
+      # Complex tables keep imaginary sync corrections after the real ones.
+      def ensure_sync_ring(table)
+        taps = BandLimit::SYNC_TAPS * (table.complex? ? 2 : 1)
+        @state.sync_ring = Numo::DFloat.zeros(taps) if @state.sync_ring.length != taps
+      end
+
       # Raises an error for settings a #wavetable tone can't play.
       def check_wavetable
         tables = @table.is_a?(MB::Sound::Wavetable::KeyMap) ? @table.tables : [@table]
@@ -1828,7 +1839,6 @@ module MB
           raise ArgumentError, 'Sample-mode wavetables take no phase warp (pwm)' if warped?
           raise ArgumentError, 'Sample-mode wavetables cannot be synced' if @sync_source
         end
-        raise ArgumentError, 'Complex wavetables cannot be synced yet' if @sync_source && tables.any?(&:complex?)
       end
 
       def check_sync(phase_mod)

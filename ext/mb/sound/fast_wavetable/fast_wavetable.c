@@ -33,6 +33,7 @@
 #include "mb_ext_helpers.h"
 
 #define WT_MAX_LEVELS 32
+#define WT_SYNC_ORDERS 4 // value, slope, curvature, third derivative (see ruby_sync)
 #define WT_GUARD 16 // Wavetable::GUARD
 #define WT_INV_2PI (1.0 / (2.0 * M_PI))
 #define WT_MIN_WIDTH 1e-4
@@ -115,6 +116,10 @@ struct wt_table {
 	double loop_start;
 	double loop_end;
 	double end;
+	const double *spectra; // [frames, spec_cols] complex (re, im pairs), or NULL
+	long spec_cols;
+	long harmonics[WT_MAX_LEVELS];
+	int taper; // 1: Lanczos sigma
 };
 
 // The sinc kernel (Wavetable::SINC_KERNEL: [table DFloat, half, resolution,
@@ -177,8 +182,8 @@ static int wt_read_levels(VALUE datas, VALUE counts, struct wt_level *levels, lo
 static void wt_read_table(VALUE spec, struct wt_table *t)
 {
 	Check_Type(spec, T_ARRAY);
-	if (RARRAY_LEN(spec) != 15) {
-		rb_raise(rb_eArgError, "A wavetable kernel spec has 15 elements");
+	if (RARRAY_LEN(spec) != 18) {
+		rb_raise(rb_eArgError, "A wavetable kernel spec has 18 elements");
 	}
 
 	t->mode = NUM2INT(rb_ary_entry(spec, 0));
@@ -213,6 +218,28 @@ static void wt_read_table(VALUE spec, struct wt_table *t)
 	t->loop_start = NUM2DBL(rb_ary_entry(spec, 11));
 	t->loop_end = NUM2DBL(rb_ary_entry(spec, 12));
 	t->end = NUM2DBL(rb_ary_entry(spec, 13));
+
+	VALUE spectra = rb_ary_entry(spec, 15);
+	t->spectra = NULL;
+	t->spec_cols = 0;
+	t->taper = NUM2INT(rb_ary_entry(spec, 17));
+	if (!NIL_P(spectra)) {
+		if (CLASS_OF(spectra) != numo_cDComplex || RNARRAY_NDIM(spectra) != 2 || !RTEST(nary_check_contiguous(spectra)) ||
+				(long)RNARRAY_SHAPE(spectra)[0] != t->frames) {
+			rb_raise(rb_eArgError, "Derivative spectra must be a contiguous 2D DComplex with a row per frame");
+		}
+		t->spectra = (const double *)(nary_get_pointer_for_read(spectra) + nary_get_offset(spectra));
+		t->spec_cols = RNARRAY_SHAPE(spectra)[1];
+		VALUE counts = rb_ary_entry(spec, 16);
+		Check_Type(counts, T_ARRAY);
+		if (RARRAY_LEN(counts) != t->nlevels) {
+			rb_raise(rb_eArgError, "Give a harmonic count for each level");
+		}
+		for (int k = 0; k < t->nlevels; k++) {
+			long h = NUM2LONG(rb_ary_entry(counts, k));
+			t->harmonics[k] = h < t->spec_cols - 1 ? h : t->spec_cols - 1;
+		}
+	}
 	if (t->has_loop && !(t->loop_end > t->loop_start)) {
 		rb_raise(rb_eArgError, "The loop must end after it starts");
 	}
@@ -576,11 +603,10 @@ static inline double wt_increment(double freq, double adv, double rndadv, uint64
  * slope (T' per cycle of the table, k1 = 0.5 / w before the knee, k2 =
  * 0.5 / (1 - w) after).  As in FastSynth.oscillate_bl, each crossing adds
  * a 2-point PolyBLAMP to the samples before and after it, at its sub-sample
- * time.  The table is continuous, so there are no value jumps.  T' is a
- * central difference of the interpolated table (WT_SLOPE_DELTA).
+ * time.  The table is continuous, so there are no value jumps.  T' comes
+ * exactly from the table's harmonics (wt_table_slope).
  */
 #define WT_EPS 1e-9
-#define WT_SLOPE_DELTA 1e-5
 
 // If moving from phase +e+ by +d+ cycles crosses phase +b+, the crossing
 // time as a fraction of the step in (0, 1], else -1 (the same as
@@ -610,14 +636,94 @@ static inline double wt_crossing(double e, double d, double b)
 	return dist >= ad ? 1.0 : dist / ad;
 }
 
-// The table's slope per cycle at +u+ (real and imaginary parts).
+#define WT_TWO_PI (2.0 * M_PI)
+
+// Adds the derivatives of orders 1...+orders+ (per cycle) of one frame's
+// harmonics 1..+harmonics+ at +u+ times +weight+ to +dre+/+dim+: the sums of
+// c_h (2 pi i h)^o e^(2 pi i h u), with Lanczos sigma factors if +taper+
+// (as the levels have).  The real parts are a real table's derivatives;
+// complex tables use both.  The exponentials come from a rotation
+// recurrence (the Ruby mirror does the same real arithmetic).
+static void wt_harmonic_derivs(const double *c, long harmonics, int taper, double u, int orders, double weight, double *dre, double *dim)
+{
+	double cu = cos(WT_TWO_PI * u);
+	double su = sin(WT_TWO_PI * u);
+	double er = 1.0, ei = 0.0;
+	double sre[WT_SYNC_ORDERS] = { 0 }, sim[WT_SYNC_ORDERS] = { 0 };
+
+	for (long h = 1; h <= harmonics; h++) {
+		double nr = er * cu - ei * su;
+		double ni = er * su + ei * cu;
+		er = nr;
+		ei = ni;
+
+		double cr = c[2 * h];
+		double ci = c[2 * h + 1];
+		double zr = cr * er - ci * ei;
+		double zi = cr * ei + ci * er;
+		if (taper) {
+			double x = M_PI * (double)h / (double)(harmonics + 1);
+			double g = sin(x) / x;
+			zr = zr * g;
+			zi = zi * g;
+		}
+
+		double w = WT_TWO_PI * (double)h;
+		double pr = 1.0, pi = 0.0;
+		for (int o = 1; o < orders; o++) {
+			double qr = -pi * w;
+			double qi = pr * w;
+			pr = qr;
+			pi = qi;
+			sre[o] += zr * pr - zi * pi;
+			sim[o] += zr * pi + zi * pr;
+		}
+	}
+
+	for (int o = 1; o < orders; o++) {
+		dre[o] += sre[o] * weight;
+		dim[o] += sim[o] * weight;
+	}
+}
+
+// Derivatives of orders 1...+orders+ (per cycle) of the table at +u+ with
+// the levels and frames of +sel+ (crossfaded and scanned like the values),
+// into +dre+/+dim+ (order 0 is left alone).
+static void wt_spectral_derivs(const struct wt_table *t, double u, const struct wt_sel *sel, int orders, double *dre, double *dim)
+{
+	for (int o = 1; o < orders; o++) {
+		dre[o] = 0;
+		dim[o] = 0;
+	}
+	if (t->spectra == NULL) {
+		return;
+	}
+
+	int nlev = sel->two ? 2 : 1;
+	for (int l = 0; l < nlev; l++) {
+		double lw = sel->two ? (l == 0 ? 1.0 - sel->x : sel->x) : 1.0;
+		long h = t->harmonics[sel->k + l];
+		const double *fa = t->spectra + sel->fa * t->spec_cols * 2;
+		if (sel->fb < 0) {
+			wt_harmonic_derivs(fa, h, t->taper, u, orders, lw, dre, dim);
+		} else {
+			const double *fb = t->spectra + sel->fb * t->spec_cols * 2;
+			wt_harmonic_derivs(fa, h, t->taper, u, orders, lw * (1.0 - sel->fs), dre, dim);
+			wt_harmonic_derivs(fb, h, t->taper, u, orders, lw * sel->fs, dre, dim);
+		}
+	}
+}
+
+// The table's slope per cycle at +u+ (real and imaginary parts), exactly,
+// from its harmonics.
 static inline void wt_table_slope(const struct wt_table *t, double u, double m, double sc, int mode, const struct wt_sinc *ks, double *re, double *im)
 {
-	double are, aim, bre, bim;
-	wt_value(t, wt_wrap(u + WT_SLOPE_DELTA, 1.0), m, sc, mode, ks, &are, &aim);
-	wt_value(t, wt_wrap(u - WT_SLOPE_DELTA, 1.0), m, sc, mode, ks, &bre, &bim);
-	*re = (are - bre) / (2.0 * WT_SLOPE_DELTA);
-	*im = (aim - bim) / (2.0 * WT_SLOPE_DELTA);
+	struct wt_sel sel;
+	wt_select(t, m, sc, &sel);
+	double dre[2], dim[2];
+	wt_spectral_derivs(t, u, &sel, 2, dre, dim);
+	*re = dre[1];
+	*im = dim[1];
 }
 
 // The warp corners crossed moving from phase +e+ by +d+ cycles: the
@@ -1103,12 +1209,23 @@ static VALUE ruby_play(VALUE self, VALUE buffer, VALUE spec, VALUE frequency, VA
  * Hard and soft sync for cycle-mode tables, band-limited with minBLEP like
  * FastSynth.oscillate_sync: a sync pulse v at a sample resets the phase
  * (hard) or reverses its direction (soft) 1 - |v| samples earlier, and the
- * jump in the table's value and slope there adds a minimum-phase
- * band-limited step and ramp (tables from BandLimit.minblep_tables) into a
- * ring of the following samples.  The table itself is band-limited, so its
- * wrap needs no correction.  Slopes are central differences of the
- * interpolated table (WT_SLOPE_DELTA cycles each way).
+ * jumps in the table's value and derivatives there add minimum-phase
+ * band-limited residuals into a ring of the following samples.  The table
+ * itself is band-limited, so its wrap needs no correction.
+ *
+ * FastSynth's shapes are piecewise linear, so a step (minBLEP) and a ramp
+ * (minBLAMP) correct their edges exactly.  A table is smooth: resetting it
+ * also jumps its curvature and higher derivatives, so up to WT_SYNC_ORDERS
+ * residuals are used, for jumps in the value, slope, curvature, and third
+ * derivative (the tables from Wavetable.sync_tables: each the integral of
+ * the one before, made to settle with a band-limited step).  Derivatives
+ * come exactly from the table's harmonics (wt_spectral_derivs; the
+ * interpolated table isn't smooth at its sample points, where a hard sync
+ * lands).  Complex tables
+ * correct their real and imaginary parts alike (the ring holds taps real
+ * corrections, then taps imaginary).
  */
+
 // Linear interpolation into a residual table +t+ samples after an event
 // (the same as sync_table in fast_synth.c).
 static inline double wt_sync_table(const double *table, size_t os, size_t taps, double t)
@@ -1123,64 +1240,102 @@ static inline double wt_sync_table(const double *table, size_t os, size_t taps, 
 	return table[idx] + (table[idx + 1] - table[idx]) * frac;
 }
 
-// Adds an event +t+ samples before the current sample with jumps +dv+ in
-// value and +ds+ in slope per sample to the ring (the same as sync_event
-// in fast_synth.c).
-static inline void wt_sync_event(double *acc, size_t pos, const double *blep, const double *blamp, size_t os, size_t taps, double t, double dv, double ds)
+// Adds an event +t+ samples before the current sample with jumps +dre+ (and
+// +dim+ for complex tables, with a second ring of taps after the first) in
+// the value and derivatives per sample (orders 0...+orders+) to the ring
+// +acc+ (whose current sample is at +pos+).
+static inline void wt_sync_event(double *acc, size_t pos, const double *const *tables, int orders, size_t os, size_t taps,
+		double t, const double *dre, const double *dim, int cs)
 {
-	if (dv == 0 && ds == 0) {
+	_Bool any = 0;
+	for (int o = 0; o < orders; o++) {
+		if (dre[o] != 0 || (cs == 2 && dim[o] != 0)) {
+			any = 1;
+		}
+	}
+	if (!any) {
 		return;
 	}
 
 	for (size_t j = 0; j < taps; j++) {
 		double tt = t + j;
-		acc[(pos + j) % taps] += dv * wt_sync_table(blep, os, taps, tt) + ds * wt_sync_table(blamp, os, taps, tt);
+		size_t k = (pos + j) % taps;
+		double sre = 0, sim = 0;
+		for (int o = 0; o < orders; o++) {
+			double r = wt_sync_table(tables[o], os, taps, tt);
+			sre += dre[o] * r;
+			sim += dim[o] * r;
+		}
+		acc[k] += sre;
+		if (cs == 2) {
+			acc[taps + k] += sim;
+		}
 	}
 }
 
-// The table's (real) value at phase +p+ warped by +w+.
-static inline double wt_shape(const struct wt_table *t, double p, double w, double m, double sc, int mode, const struct wt_sinc *ks)
+// The table's value at phase +p+ warped by +w+, into *re and *im.
+static inline void wt_shape(const struct wt_table *t, double p, double w, double m, double sc, int mode, const struct wt_sinc *ks, double *re, double *im)
 {
 	double u = w != 0.5 ? (p < w ? p * (0.5 / w) : 0.5 + (p - w) * (0.5 / (1.0 - w))) : p;
-	double re, im;
-	wt_value(t, u, m, sc, mode, ks, &re, &im);
-	return re;
+	wt_value(t, u, m, sc, mode, ks, re, im);
 }
 
-// The slope per cycle of wt_shape at +p+.
-static inline double wt_slope(const struct wt_table *t, double p, double w, double m, double sc, int mode, const struct wt_sinc *ks)
+// The value (interpolated, as played) and exact derivatives (orders
+// 1...+orders+, per cycle of the phase) of wt_shape at +p+, into +dre+ and
+// +dim+.  The warp is piecewise linear, so derivative o is the table's
+// times the warp's slope to the power o.
+static inline void wt_derivs(const struct wt_table *t, double p, double w, double m, double sc, int mode, const struct wt_sinc *ks,
+		int orders, double *dre, double *dim)
 {
-	double a = wt_shape(t, wt_wrap(p + WT_SLOPE_DELTA, 1.0), w, m, sc, mode, ks);
-	double b = wt_shape(t, wt_wrap(p - WT_SLOPE_DELTA, 1.0), w, m, sc, mode, ks);
-	return (a - b) / (2.0 * WT_SLOPE_DELTA);
+	double u = p;
+	double k = 1.0;
+	if (w != 0.5) {
+		k = p < w ? 0.5 / w : 0.5 / (1.0 - w);
+		u = p < w ? p * (0.5 / w) : 0.5 + (p - w) * (0.5 / (1.0 - w));
+	}
+
+	struct wt_sel sel;
+	wt_select(t, m, sc, &sel);
+	wt_value_sel(t, u, &sel, mode, t->cs, ks, &dre[0], &dim[0]);
+	wt_spectral_derivs(t, u, &sel, orders, dre, dim);
+
+	double kk = 1.0;
+	for (int o = 1; o < orders; o++) {
+		kk *= k;
+		dre[o] *= kk;
+		dim[o] *= kk;
+	}
 }
 
 /*
  * A synced wavetable oscillator (see Wavetable#sync):
  *   sync(buffer, spec, frequency, advance, gain, offset, sync_state, ring,
- *        pulses, soft, width, scan, interpolation, remove_dc, blep, blamp,
+ *        pulses, soft, width, scan, interpolation, remove_dc, tables,
  *        oversample, taps, band_limit, sinc)
  *
- * +sync_state+ and +ring+ are as for FastSynth.oscillate_sync ([phase,
- * last increment, direction, ring position, primed] and a DFloat of
- * +taps+ pending corrections).  Real tables only.
+ * +sync_state+ is as for FastSynth.oscillate_sync ([phase, last increment,
+ * direction, ring position, primed]); +ring+ is a DFloat of +taps+ pending
+ * corrections (twice that for complex tables).  +tables+ is an Array of 1
+ * to WT_SYNC_ORDERS residual tables (value, slope, curvature, third
+ * derivative; see Wavetable.sync_tables), each taps * oversample + 1 long.
  */
 static VALUE ruby_sync(int argc, VALUE *argv, VALUE self)
 {
-	if (argc != 20) {
-		rb_raise(rb_eArgError, "wrong number of arguments (given %d, expected 20)", argc);
+	if (argc != 19) {
+		rb_raise(rb_eArgError, "wrong number of arguments (given %d, expected 19)", argc);
 	}
 
 	VALUE buffer = argv[0], spec = argv[1], frequency = argv[2], sync_state = argv[6], ring = argv[7];
-	VALUE pulses = argv[8], width = argv[10], scan = argv[11], blep_v = argv[14], blamp_v = argv[15], sinc = argv[19];
+	VALUE pulses = argv[8], width = argv[10], scan = argv[11], tables_v = argv[14], sinc = argv[18];
 
 	struct wt_table t;
 	wt_read_table(spec, &t);
-	if (t.mode != 0 || t.cs != 1) {
-		rb_raise(rb_eArgError, "FastWavetable.sync needs a real cycle-mode table");
+	if (t.mode != 0) {
+		rb_raise(rb_eArgError, "FastWavetable.sync needs a cycle-mode table");
 	}
 	struct wt_sinc ks = { 0 };
 	int mode = wt_read_interp(argv[12], sinc, &t, &ks);
+	int cs = t.cs;
 
 	double adv = NUM2DBL(argv[3]);
 	double g = NUM2DBL(argv[4]);
@@ -1188,9 +1343,9 @@ static VALUE ruby_sync(int argc, VALUE *argv, VALUE self)
 	_Bool soft = RTEST(argv[9]);
 	_Bool warped = !NIL_P(width);
 	_Bool dc = RTEST(argv[13]) && warped;
-	size_t os = NUM2SIZET(argv[16]);
-	size_t taps = NUM2SIZET(argv[17]);
-	_Bool bl = RTEST(argv[18]);
+	size_t os = NUM2SIZET(argv[15]);
+	size_t taps = NUM2SIZET(argv[16]);
+	_Bool bl = RTEST(argv[17]);
 
 	Check_Type(sync_state, T_ARRAY);
 	if (RARRAY_LEN(sync_state) != 5) {
@@ -1202,19 +1357,26 @@ static VALUE ruby_sync(int argc, VALUE *argv, VALUE self)
 	size_t pos = NUM2SIZET(rb_ary_entry(sync_state, 3));
 	_Bool primed = NUM2INT(rb_ary_entry(sync_state, 4)) != 0;
 
-	if (taps < 1 || CLASS_OF(ring) != numo_cDFloat || RNARRAY_NDIM(ring) != 1 || RNARRAY_SHAPE(ring)[0] != taps || !RTEST(nary_check_contiguous(ring))) {
-		rb_raise(rb_eArgError, "Ring must be a contiguous DFloat of taps elements");
+	if (taps < 1 || CLASS_OF(ring) != numo_cDFloat || RNARRAY_NDIM(ring) != 1 || RNARRAY_SHAPE(ring)[0] != taps * cs || !RTEST(nary_check_contiguous(ring))) {
+		rb_raise(rb_eArgError, "Ring must be a contiguous DFloat of taps (complex tables: 2 * taps) elements");
 	}
 	double *acc = (double *)(nary_get_pointer_for_write(ring) + nary_get_offset(ring));
 	pos %= taps;
 
-	size_t table_len = taps * os + 1;
-	if (CLASS_OF(blep_v) != numo_cDFloat || RNARRAY_SHAPE(blep_v)[0] != table_len || !RTEST(nary_check_contiguous(blep_v)) ||
-			CLASS_OF(blamp_v) != numo_cDFloat || RNARRAY_SHAPE(blamp_v)[0] != table_len || !RTEST(nary_check_contiguous(blamp_v))) {
-		rb_raise(rb_eArgError, "Tables must be contiguous DFloats of taps * oversample + 1 elements");
+	Check_Type(tables_v, T_ARRAY);
+	int orders = (int)RARRAY_LEN(tables_v);
+	if (orders < 1 || orders > WT_SYNC_ORDERS) {
+		rb_raise(rb_eArgError, "Give 1 to %d sync residual tables", WT_SYNC_ORDERS);
 	}
-	const double *blep = (const double *)(nary_get_pointer_for_read(blep_v) + nary_get_offset(blep_v));
-	const double *blamp = (const double *)(nary_get_pointer_for_read(blamp_v) + nary_get_offset(blamp_v));
+	const double *tables[WT_SYNC_ORDERS];
+	size_t table_len = taps * os + 1;
+	for (int o = 0; o < orders; o++) {
+		VALUE tv = rb_ary_entry(tables_v, o);
+		if (CLASS_OF(tv) != numo_cDFloat || RNARRAY_NDIM(tv) != 1 || RNARRAY_SHAPE(tv)[0] != table_len || !RTEST(nary_check_contiguous(tv))) {
+			rb_raise(rb_eArgError, "Sync tables must be contiguous DFloats of taps * oversample + 1 elements");
+		}
+		tables[o] = (const double *)(nary_get_pointer_for_read(tv) + nary_get_offset(tv));
+	}
 
 	_Bool was_inplace;
 	wt_ensure_output(&buffer, &t, &was_inplace);
@@ -1244,6 +1406,9 @@ static VALUE ruby_sync(int argc, VALUE *argv, VALUE self)
 	complex float *scptr;
 	mb_read_signal_input(&scan, length, "Scan", &sc, &scptr);
 
+	double d0re[WT_SYNC_ORDERS], d0im[WT_SYNC_ORDERS], d1re[WT_SYNC_ORDERS], d1im[WT_SYNC_ORDERS];
+	double jre[WT_SYNC_ORDERS], jim[WT_SYNC_ORDERS];
+
 	for (size_t i = 0; i < length; i++) {
 		if (freqptr) freq = crealf(freqptr[i]);
 		if (pulseptr) pulse = crealf(pulseptr[i]);
@@ -1267,22 +1432,43 @@ static VALUE ruby_sync(int argc, VALUE *argv, VALUE self)
 				if (d > 1) d = 1;
 
 				p = wt_wrap(p + vel * (1.0 - d), 1.0);
-				double v0 = wt_shape(&t, p, w, m, sc, mode, &ks);
-				double s0 = wt_slope(&t, p, w, m, sc, mode, &ks);
+				double nvel;
+				if (bl) {
+					wt_derivs(&t, p, w, m, sc, mode, &ks, orders, d0re, d0im);
+				}
 				if (soft) {
 					dir = -dir;
-					double nvel = -vel;
-					if (bl) wt_sync_event(acc, pos, blep, blamp, os, taps, d, 0, s0 * (nvel - vel));
-					vel = nvel;
+					nvel = -vel;
+					if (bl) {
+						// The value stays; each derivative of order o jumps by
+						// its value times (nvel^o - vel^o)
+						double nk = 1.0, vk = 1.0;
+						for (int o = 0; o < orders; o++) {
+							jre[o] = d0re[o] * (nk - vk);
+							jim[o] = d0im[o] * (nk - vk);
+							nk *= nvel;
+							vk *= vel;
+						}
+					}
 				} else {
 					dir = 1.0;
-					double nvel = prev_inc;
+					nvel = prev_inc;
 					p = 0;
-					double v1 = wt_shape(&t, p, w, m, sc, mode, &ks);
-					double s1 = wt_slope(&t, p, w, m, sc, mode, &ks);
-					if (bl) wt_sync_event(acc, pos, blep, blamp, os, taps, d, v1 - v0, s1 * nvel - s0 * vel);
-					vel = nvel;
+					if (bl) {
+						wt_derivs(&t, p, w, m, sc, mode, &ks, orders, d1re, d1im);
+						double nk = 1.0, vk = 1.0;
+						for (int o = 0; o < orders; o++) {
+							jre[o] = d1re[o] * nk - d0re[o] * vk;
+							jim[o] = d1im[o] * nk - d0im[o] * vk;
+							nk *= nvel;
+							vk *= vel;
+						}
+					}
 				}
+				if (bl) {
+					wt_sync_event(acc, pos, tables, orders, os, taps, d, jre, jim, cs);
+				}
+				vel = nvel;
 
 				p = wt_wrap(p + vel * d, 1.0);
 			} else {
@@ -1290,16 +1476,21 @@ static VALUE ruby_sync(int argc, VALUE *argv, VALUE self)
 			}
 		}
 
-		double v = wt_shape(&t, p, w, m, sc, mode, &ks);
-		v += acc[pos];
+		double re, im;
+		wt_shape(&t, p, w, m, sc, mode, &ks, &re, &im);
+		re += acc[pos];
 		acc[pos] = 0;
+		if (cs == 2) {
+			im += acc[taps + pos];
+			acc[taps + pos] = 0;
+		}
 		pos = (pos + 1) % taps;
 
 		if (dc) {
-			v -= wt_half_mean(&t, sc) * (2.0 * w - 1.0);
+			re -= wt_half_mean(&t, sc) * (2.0 * w - 1.0);
 		}
 
-		out[i] = v * g + off;
+		wt_store(out, cs, i, re, im, g, off);
 
 		prev_inc = freq * adv;
 		primed = 1;
@@ -1324,8 +1515,7 @@ static VALUE ruby_sync(int argc, VALUE *argv, VALUE self)
 	RB_GC_GUARD(width);
 	RB_GC_GUARD(scan);
 	RB_GC_GUARD(ring);
-	RB_GC_GUARD(blep_v);
-	RB_GC_GUARD(blamp_v);
+	RB_GC_GUARD(tables_v);
 	RB_GC_GUARD(buffer);
 
 	return buffer;

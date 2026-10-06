@@ -474,7 +474,10 @@ module MB
       # used alone up to lo, then crossfaded into the next until hi, in
       # increments per sample), 7 half means (DFloat per frame; see
       # Builder.half_means), 8 loop datas, 9 loop counts, 10 loop rates, 11
-      # loop start, 12 loop end, 13 end (source samples), 14 GUARD.
+      # loop start, 12 loop end, 13 end (source samples), 14 GUARD, 15 the
+      # harmonic spectra for exact derivatives (cycle mode; see
+      # #derivative_spectra), 16 the harmonic count of each level, 17 the
+      # taper (1 for :sigma, else 0).
       def kernel_spec(sample_rate, interpolation = nil)
         emphasis = emphasis?(interpolation)
         by_rate = @kernel_specs[sample_rate] ||= {}
@@ -496,8 +499,22 @@ module MB
             @loop ? @loop.end.to_f : 0.0,
             @mode == :sample ? @size.to_f : 0.0,
             GUARD,
+            derivative_spectra,
+            @mode == :cycle ? levels.map { |l| l.bandwidth.finite? ? l.bandwidth.to_i : derivative_spectra.shape[1] - 1 }.freeze : nil,
+            @taper == :sigma ? 1 : 0,
           ].freeze
         end
+      end
+
+      # Cycle mode: the spectra (a contiguous DComplex [frames, harmonics +
+      # 1]; from the frames for tables made without them) that the kernels
+      # use for exact derivatives of the table (sync events and phase warp
+      # corners: the interpolated table has no smooth higher derivatives at
+      # its sample points).
+      def derivative_spectra
+        return nil unless @mode == :cycle
+
+        @derivative_spectra ||= Numo::DComplex.cast(@spectra || Builder.spectra_from_frames(@frames)).dup.freeze
       end
 
       # [hi, lo] level thresholds (DFloat, increments per sample) for
@@ -557,28 +574,59 @@ module MB
       end
 
       # Hard (or +soft+) synced cycle-mode oscillator in C, band-limited
-      # with minBLEP unless +band_limit+ is false: like #oscillate, with
-      # +sync_state+, +ring+, and +pulses+ as for FastSynth.oscillate_sync
-      # (BandLimit.minblep_tables give +blep+ and +blamp+).  Real tables
-      # only.  See Tone#sync.
-      def sync(out, freq, advance, gain, offset, sync_state, ring, pulses, soft, width, scan, interpolation, sample_rate, remove_dc, band_limit = true)
-        blep, blamp = BandLimit.minblep_tables
+      # with minimum-phase residuals for the jumps in the table's value and
+      # its first +orders+ - 1 derivatives (see .sync_tables) unless
+      # +band_limit+ is false: like #oscillate, with +sync_state+ and
+      # +pulses+ as for FastSynth.oscillate_sync and +ring+ a DFloat of
+      # BandLimit::SYNC_TAPS pending corrections (twice that for complex
+      # tables).  See Tone#sync.
+      def sync(out, freq, advance, gain, offset, sync_state, ring, pulses, soft, width, scan, interpolation, sample_rate, remove_dc, band_limit = true, orders: SYNC_ORDERS)
         MB::Sound::FastWavetable.sync(
           out, kernel_spec(sample_rate, interpolation), freq, advance.to_f, gain.to_f, offset.to_f, sync_state, ring,
-          pulses, !!soft, width, scan, interpolation_code(interpolation), !!remove_dc, blep, blamp,
+          pulses, !!soft, width, scan, interpolation_code(interpolation), !!remove_dc, Wavetable.sync_tables(orders),
           BandLimit::SYNC_OVERSAMPLE, BandLimit::SYNC_TAPS, !!band_limit, sinc_kernel(interpolation)
         )
       end
 
       # Ruby mirror of #sync.
-      def sync_ruby(out, freq, advance, gain, offset, sync_state, ring, pulses, soft, width, scan, interpolation, sample_rate, remove_dc, band_limit = true)
-        blep, blamp = BandLimit.minblep_tables
+      def sync_ruby(out, freq, advance, gain, offset, sync_state, ring, pulses, soft, width, scan, interpolation, sample_rate, remove_dc, band_limit = true, orders: SYNC_ORDERS)
         KernelRuby.sync(
           out, kernel_spec(sample_rate, interpolation), freq, advance.to_f, gain.to_f, offset.to_f, sync_state, ring,
-          pulses, !!soft, width, scan, interpolation_code(interpolation), !!remove_dc, blep, blamp,
+          pulses, !!soft, width, scan, interpolation_code(interpolation), !!remove_dc, Wavetable.sync_tables(orders),
           BandLimit::SYNC_OVERSAMPLE, BandLimit::SYNC_TAPS, !!band_limit
         )
       end
+
+      # The number of sync residuals (value, slope, curvature, third
+      # derivative) that synced tables use (see .sync_tables).
+      SYNC_ORDERS = 4
+
+      # Minimum-phase residual tables for sync events (FastWavetable.sync):
+      # the first +orders+ of BandLimit.minblep_tables' step and ramp, then
+      # each next one the integral of the one before (a band-limited
+      # parabola t^2 / 2, then cubic t^3 / 6), minus its final value times
+      # the band-limited step so it settles exactly on the ideal curve.
+      def self.sync_tables(orders = SYNC_ORDERS)
+        @sync_tables ||= begin
+          blep, blamp = BandLimit.minblep_tables
+          os = BandLimit::SYNC_OVERSAMPLE
+          step = blep + 1.0
+          list = [blep, blamp]
+          (WT_SYNC_EXTRA).times do
+            r = list.last.cumsum / os
+            r = r - r[-1] * step
+            r[-1] = 0.0
+            list << r.freeze
+          end
+          list.freeze
+        end
+        raise ArgumentError, "Sync orders must be 1 to #{SYNC_ORDERS}" unless orders.between?(1, SYNC_ORDERS)
+
+        @sync_tables[0...orders]
+      end
+
+      # Residual tables beyond BandLimit's step and ramp.
+      WT_SYNC_EXTRA = SYNC_ORDERS - 2
 
       # Phase-driven lookup in C: fills +out+ from +phase+ (cycles, an
       # NArray) with +increments+ (cycles per sample for picking levels: an

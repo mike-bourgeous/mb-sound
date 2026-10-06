@@ -145,10 +145,11 @@ module MB
             k2 = 0.5 / (1.0 - w)
             jump = (j == 0 ? k1 - k2 : k2 - k1) * d.abs
             u = j == 0 ? 0.0 : 0.5
-            a = value(spec, wrap(u + SLOPE_DELTA), m, sc, interp)
-            bv = value(spec, wrap(u - SLOPE_DELTA), m, sc, interp)
-            sre = (a.real - bv.real) / (2.0 * SLOPE_DELTA)
-            sim = (a.imag - bv.imag) / (2.0 * SLOPE_DELTA)
+            dre = [0.0, 0.0]
+            dim = [0.0, 0.0]
+            spectral_derivs(spec, u, select(spec, m, sc), 2, dre, dim)
+            sre = dre[1]
+            sim = dim[1]
 
             xa = f
             xb = 1.0 - f
@@ -311,12 +312,95 @@ module MB
           store(out, values)
         end
 
-        # Central difference step for slopes in .sync (cycles).
-        SLOPE_DELTA = 1e-5
+        TWO_PI = 2.0 * Math::PI
+
+        # [k, two levels?, x, fa, fb, fs]: see wt_select in C.
+        def select(spec, m, scan)
+          fa, fb, fs = frames(spec[1], scan)
+          n = spec[2].length
+          k = 0
+          if n > 1
+            hi = spec[5]
+            k += 1 while k < n - 1 && m > hi[k]
+          end
+          two = n > 1 && k < n - 1 && m > spec[6][k]
+          x = two ? (m - spec[6][k]) / (spec[5][k] - spec[6][k]) : 0.0
+          [k, two, x, fa, fb || -1, fs]
+        end
+
+        # See wt_harmonic_derivs in C: adds derivatives of orders
+        # 1...+orders+ of frame +f+'s harmonics 1..+harmonics+ at +u+ times
+        # +weight+ to +dre+/+dim+.
+        def harmonic_derivs(spectra, f, harmonics, taper, u, orders, weight, dre, dim)
+          cu = Math.cos(TWO_PI * u)
+          su = Math.sin(TWO_PI * u)
+          er = 1.0
+          ei = 0.0
+          sre = Array.new(orders, 0.0)
+          sim = Array.new(orders, 0.0)
+
+          (1..harmonics).each do |h|
+            nr = er * cu - ei * su
+            ni = er * su + ei * cu
+            er = nr
+            ei = ni
+
+            c = spectra[f, h]
+            cr = c.real
+            ci = c.imag
+            zr = cr * er - ci * ei
+            zi = cr * ei + ci * er
+            if taper
+              x = Math::PI * h.to_f / (harmonics + 1).to_f
+              g = Math.sin(x) / x
+              zr *= g
+              zi *= g
+            end
+
+            w = TWO_PI * h.to_f
+            pr = 1.0
+            pi = 0.0
+            (1...orders).each do |o|
+              qr = -pi * w
+              qi = pr * w
+              pr = qr
+              pi = qi
+              sre[o] += zr * pr - zi * pi
+              sim[o] += zr * pi + zi * pr
+            end
+          end
+
+          (1...orders).each do |o|
+            dre[o] += sre[o] * weight
+            dim[o] += sim[o] * weight
+          end
+        end
+
+        # See wt_spectral_derivs in C.
+        def spectral_derivs(spec, u, sel, orders, dre, dim)
+          (1...orders).each { |o| dre[o] = 0.0; dim[o] = 0.0 }
+          spectra = spec[15]
+          return if spectra.nil?
+
+          k, two, x, fa, fb, fs = sel
+          cols = spectra.shape[1]
+          taper = spec[17] != 0
+          (two ? 2 : 1).times do |l|
+            lw = two ? (l == 0 ? 1.0 - x : x) : 1.0
+            h = [spec[16][k + l], cols - 1].min
+            if fb < 0
+              harmonic_derivs(spectra, fa, h, taper, u, orders, lw, dre, dim)
+            else
+              harmonic_derivs(spectra, fa, h, taper, u, orders, lw * (1.0 - fs), dre, dim)
+              harmonic_derivs(spectra, fb, h, taper, u, orders, lw * fs, dre, dim)
+            end
+          end
+        end
 
         # Ruby version of FastWavetable.sync (see Wavetable#sync).
-        def sync(out, spec, freq, adv, g, off, sync_state, ring, pulses, soft, width, scan, interp, remove_dc, blep, blamp, os, taps, bl)
+        def sync(out, spec, freq, adv, g, off, sync_state, ring, pulses, soft, width, scan, interp, remove_dc, tables, os, taps, bl)
           count = out.length
+          cs = spec[2][0].is_a?(Numo::SComplex) ? 2 : 1
           f_s, f_a = signal(freq, count)
           pu_s, pu_a = signal(pulses, count)
           pu_s = 0.0 unless pu_a
@@ -324,8 +408,8 @@ module MB
           w_s, w_a = signal(warped ? width : 0.5, count)
           sc_s, sc_a = signal(scan, count)
           remove_dc &&= warped
-          blep = blep.to_a
-          blamp = blamp.to_a
+          tables = tables.map(&:to_a)
+          orders = tables.length
           acc = ring.to_a
 
           p, prev_inc, dir, pos, primed = sync_state
@@ -342,12 +426,44 @@ module MB
           shape = ->(ph, m) {
             u = w != 0.5 ? (ph < w ? ph * (0.5 / w) : 0.5 + (ph - w) * (0.5 / (1.0 - w))) : ph
             v = value(spec, u, m, sc, interp)
-            v.is_a?(Complex) ? v.real : v
+            v.is_a?(Complex) ? [v.real, v.imag] : [v, 0.0]
           }
-          slope = ->(ph, m) {
-            a = shape.(wrap(ph + SLOPE_DELTA), m)
-            b = shape.(wrap(ph - SLOPE_DELTA), m)
-            (a - b) / (2.0 * SLOPE_DELTA)
+          derivs = ->(ph, m) {
+            v0 = shape.(ph, m)
+            re = [v0[0]] + Array.new(orders - 1, 0.0)
+            im = [v0[1]] + Array.new(orders - 1, 0.0)
+            k = 1.0
+            u = ph
+            if w != 0.5
+              k = ph < w ? 0.5 / w : 0.5 / (1.0 - w)
+              u = ph < w ? ph * (0.5 / w) : 0.5 + (ph - w) * (0.5 / (1.0 - w))
+            end
+            spectral_derivs(spec, u, select(spec, m, sc), orders, re, im)
+            kk = 1.0
+            (1...orders).each do |o|
+              kk *= k
+              re[o] *= kk
+              im[o] *= kk
+            end
+            [re, im]
+          }
+          event = ->(t, jre, jim) {
+            any = (0...orders).any? { |o| jre[o] != 0 || (cs == 2 && jim[o] != 0) }
+            next unless any
+
+            taps.times do |j|
+              tt = t + j
+              k = (pos + j) % taps
+              sre = 0.0
+              sim = 0.0
+              orders.times do |o|
+                r = BandLimit.sync_table(tables[o], os, taps, tt)
+                sre += jre[o] * r
+                sim += jim[o] * r
+              end
+              acc[k] += sre
+              acc[taps + k] += sim if cs == 2
+            end
           }
 
           values = Array.new(count)
@@ -374,22 +490,42 @@ module MB
                 d = 1.0 if d > 1
 
                 p = wrap(p + vel * (1.0 - d))
-                v0 = shape.(p, m)
-                s0 = slope.(p, m)
+                d0re, d0im = derivs.(p, m) if bl
                 if soft
                   dir = -dir
                   nvel = -vel
-                  BandLimit.sync_event(acc, pos, blep, blamp, os, taps, d, 0.0, s0 * (nvel - vel)) if bl
-                  vel = nvel
+                  if bl
+                    jre = []
+                    jim = []
+                    nk = 1.0
+                    vk = 1.0
+                    orders.times do |o|
+                      jre << d0re[o] * (nk - vk)
+                      jim << d0im[o] * (nk - vk)
+                      nk *= nvel
+                      vk *= vel
+                    end
+                  end
                 else
                   dir = 1.0
                   nvel = prev_inc
                   p = 0.0
-                  v1 = shape.(p, m)
-                  s1 = slope.(p, m)
-                  BandLimit.sync_event(acc, pos, blep, blamp, os, taps, d, v1 - v0, s1 * nvel - s0 * vel) if bl
-                  vel = nvel
+                  if bl
+                    d1re, d1im = derivs.(p, m)
+                    jre = []
+                    jim = []
+                    nk = 1.0
+                    vk = 1.0
+                    orders.times do |o|
+                      jre << d1re[o] * nk - d0re[o] * vk
+                      jim << d1im[o] * nk - d0im[o] * vk
+                      nk *= nvel
+                      vk *= vel
+                    end
+                  end
                 end
+                event.(d, jre, jim) if bl
+                vel = nvel
 
                 p = wrap(p + vel * d)
               else
@@ -397,21 +533,25 @@ module MB
               end
             end
 
-            v = shape.(p, m)
-            v += acc[pos]
+            re, im = shape.(p, m)
+            re += acc[pos]
             acc[pos] = 0.0
+            if cs == 2
+              im += acc[taps + pos]
+              acc[taps + pos] = 0.0
+            end
             pos = (pos + 1) % taps
 
-            v -= half_mean(spec, sc) * (2.0 * w - 1.0) if remove_dc
+            re -= half_mean(spec, sc) * (2.0 * w - 1.0) if remove_dc
 
-            values[i] = v * g + off
+            values[i] = cs == 2 ? Complex(re * g + off, im * g) : re * g + off
             prev_inc = fr * adv
             primed = true
           end
 
           if count > 0
             sync_state.replace([p, prev_inc, dir, pos, 1])
-            ring[0...taps] = Numo::DFloat.cast(acc)
+            ring[0...(taps * cs)] = Numo::DFloat.cast(acc)
           end
 
           store(out, values)

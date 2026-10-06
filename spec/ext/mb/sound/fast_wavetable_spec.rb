@@ -89,17 +89,17 @@ RSpec.describe(MB::Sound::FastWavetable, aggregate_failures: true) do
       pulses = Numo::SFloat.zeros(n)
       pulses[(0...n).step(37).to_a] = rand_input(0.01, 1)[(0...n).step(37).to_a]
 
-      [w[:saw], w[:basic], w.from_samples(Numo::SFloat.new(2, 64).rand(-1, 1), mips: false)].each do |t|
+      [w[:saw], w[:basic], w.from_samples(Numo::SFloat.new(2, 64).rand(-1, 1), mips: false), w.from_harmonics([[1, 0.5], [0.3, 1, 0.2]], complex: true)].each do |t|
         w::INTERPOLATIONS.each_key do |interp|
           [false, true].each do |soft|
             [[1000.0, nil, 0.0], [rand_input(100, 8000), rand_input(0.1, 0.9), rand_input(0, 1)]].each_with_index do |(f, width, scan), ci|
               s1 = [0.25, 0.0, 1.0, 3, 0]
-              r1 = Numo::DFloat.zeros(MB::Sound::BandLimit::SYNC_TAPS)
+              r1 = Numo::DFloat.zeros(MB::Sound::BandLimit::SYNC_TAPS * (t.complex? ? 2 : 1))
               s2 = s1.dup
               r2 = r1.dup
 
-              a = t.sync(Numo::SFloat.zeros(n), f, 1 / 48000.0, 0.9, 0.05, s1, r1, pulses, soft, width, scan, interp, 48000, true, t.mipped?).not_inplace!
-              b = t.sync_ruby(Numo::SFloat.zeros(n), f, 1 / 48000.0, 0.9, 0.05, s2, r2, pulses, soft, width, scan, interp, 48000, true, t.mipped?)
+              a = t.sync(out_buffer(t), f, 1 / 48000.0, 0.9, 0.05, s1, r1, pulses, soft, width, scan, interp, 48000, true, t.mipped?).not_inplace!
+              b = t.sync_ruby(out_buffer(t), f, 1 / 48000.0, 0.9, 0.05, s2, r2, pulses, soft, width, scan, interp, 48000, true, t.mipped?)
               expect(a.to_a).to eq(b.to_a), "#{t} #{interp} #{soft} #{ci}: max difference #{(a - b).abs.max}"
               expect(s1).to eq(s2)
               expect(r1.to_a).to eq(r2.to_a)
@@ -109,11 +109,21 @@ RSpec.describe(MB::Sound::FastWavetable, aggregate_failures: true) do
       end
     end
 
-    it 'raises an error for a complex table' do
+    it 'takes 1 to 4 residual orders' do
+      t = w[:saw]
+      pulses = Numo::SFloat.zeros(n).tap { |z| z[[17, 100, 200]] = 0.4 }
+      out = (1..4).map { |o|
+        t.sync(Numo::SFloat.zeros(n), 1000.0, 1 / 48000.0, 1, 0, [0.0, 0.0, 1.0, 0, 0], Numo::DFloat.zeros(32), pulses, false, nil, 0, nil, 48000, true, true, orders: o).not_inplace!
+      }
+      expect((out[3] - out[1]).abs.max).to be > 1e-4
+      expect { t.sync(Numo::SFloat.zeros(n), 1000.0, 1 / 48000.0, 1, 0, [0.0, 0.0, 1.0, 0, 0], Numo::DFloat.zeros(32), pulses, false, nil, 0, nil, 48000, true, true, orders: 5) }.to raise_error(ArgumentError)
+    end
+
+    it 'raises an error for a ring of the wrong size' do
       t = w.from_harmonics([1], complex: true)
       expect {
         t.sync(Numo::SComplex.zeros(10), 100, 1, 1, 0, [0.0, 0.0, 1.0, 0, 0], Numo::DFloat.zeros(32), nil, false, nil, 0, nil, 48000, true)
-      }.to raise_error(ArgumentError, /real/)
+      }.to raise_error(ArgumentError, /Ring/)
     end
   end
 
