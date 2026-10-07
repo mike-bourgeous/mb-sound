@@ -259,12 +259,12 @@ module MB
         n = Integer(check_amount(:steps, count, 1.., :cycles).round)
         base = curve && from(curve)
         nf = n.to_f
-        quant = ->(x) { q = (x * nf - 1e-9).ceil / nf; q < 0 ? 0.0 : (q > 1 ? 1.0 : q) }
+        quant = ->(x) { q = (x * nf - 1e-9).ceil / nf; q <= 0 ? 0.0 : (q > 1 ? 1.0 : q) }
         cells = n * (4096.0 / n).ceil
         new("steps(#{n}#{", #{base.name}" if base})", kind: base ? base.kind : :linear, monotonic: base.nil? || base.monotonic?,
                                                        options: { cycles: n }, slopes: [0.0, 0.0], cells: cells, key: [:steps, n, base&.key],
                                                        scalar: ->(x) { q = quant.(x); base ? base.call(q) : q },
-                                                       vector: ->(x) { q = ((x * nf - 1e-9).ceil / nf).clip(0.0, 1.0); base ? base.map(q) : q })
+                                                       vector: ->(x) { q = ((x * nf - 1e-9).ceil / nf).clip(0.0, 1.0) + 0.0; base ? base.map(q) : q })
       end
 
       # A CSS-style cubic bezier from (0, 0) to (1, 1) with control points
