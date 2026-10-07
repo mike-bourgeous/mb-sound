@@ -15,8 +15,6 @@ require 'mb-sound'
 
 MB::Sound.synth_script { |midi|
   s = midi.synth(voices: 4) { |v|
-    # FIXME: velocity curve is too low at mid-low velocities, too high above
-
     # An operator pitch: +ratio+ times the note, detuned up by +mils+
     # thousandths of an octave
     op = ->(ratio, mils = 0) { v.hz.transpose((Math.log2(ratio) + mils / 1000.0).oct) }
