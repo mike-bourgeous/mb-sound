@@ -94,6 +94,7 @@ module MB
           :spy, :debug, :clear_spies,
           :reverb, :fdn_reverb, :multitap, :multitap_delay,
           :samples, :seconds,
+          :loudness_meter, :lufs_meter,
         ].freeze
 
         # Modules included in GraphNode that aren't per-channel DSL methods.

@@ -100,6 +100,21 @@ module MB
           self
         end
 
+        # Passes this node through a live ITU-R BS.1770 loudness meter (see
+        # LoudnessMeter), returned as a one-channel bundle whose #momentary,
+        # #short_term, #integrated, #range, and #true_peak read the loudness
+        # so far.  Bundles measure all of their channels together (see
+        # Channels#loudness_meter).
+        #
+        # Example (bin/sound.rb):
+        #     m = 220.hz.ramp.at(-20.db).loudness_meter
+        #     bg m
+        #     m.short_term   # => LUFS of the last 3 s
+        def loudness_meter(weights: nil, true_peak: true)
+          LoudnessMeter.new(outputs, weights: weights, true_peak: true_peak)
+        end
+        alias lufs_meter loudness_meter
+
         # Logs the first, last, min, max, and mean values for each buffer from
         # this node.
         def debug
