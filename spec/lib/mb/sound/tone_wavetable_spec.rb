@@ -119,20 +119,30 @@ RSpec.describe(MB::Sound::Tone, '#wavetable', aggregate_failures: true) do
     it 'keeps synced tables within their normal peaks and brightness steady as the pitch rises' do
       # Truncated Taylor residuals overshot to several times full scale at
       # 2-3 kHz and brightened by up to 9% per semitone; octave levels
-      # stepped the brightness
+      # stepped the brightness.  The brightness relative to the pitch falls
+      # about 2% per semitone here as the band limit stays put, as for the
+      # exactly filtered synced ramp; it follows the ramp's trend.
       hann = (1 - Numo::NMath.cos(Numo::DFloat.new(9600).seq * (2 * Math::PI / 9600))) * 0.5
-      bright = Array.new(13) { |i|
-        f = 1000 * 2**(i / 12.0)
-        tone = f.hz.wavetable(:saw).sync(ratio: 2.37)
+      bright = ->(f, &blk) {
+        tone = blk.call(f.hz)
         tone.sample(4800)
         data = Numo::DFloat.cast(Numo::NArray.concatenate(Array.new(12) { tone.sample(800).dup }))
-        expect(data.abs.max).to be < 1.3
         pow = MB::Sound.real_fft(data * hann).abs**2
         pow[0..2] = 0
         freqs = Numo::DFloat.new(pow.length).seq * (24000.0 / (pow.length - 1))
-        (pow * freqs).sum / pow.sum / f
+        [(pow * freqs).sum / pow.sum / f, data.abs.max]
       }
-      bright.each_cons(2) { |a, b| expect(b / a).to be_within(0.03).of(1) }
+      table = Array.new(13) { |i| bright.(1000 * 2**(i / 12.0)) { |p| p.wavetable(:saw).sync(ratio: 2.37) } }
+      ramp = Array.new(13) { |i| bright.(1000 * 2**(i / 12.0)) { |p| p.ramp.sync(ratio: 2.37) } }
+      table.each { |_, peak| expect(peak).to be < 1.3 }
+      13.times { |i| expect(table[i][0] / ramp[i][0]).to be_between(0.88, 1.02) } # the table stops at 20 kHz
+      12.times { |i| expect((table[i + 1][0] / table[i][0]) / (ramp[i + 1][0] / ramp[i][0])).to be_within(0.025).of(1) }
+    end
+
+    it 'band-limits the phase warp corners of synced tables' do
+      # Left naive until 2026-10-08 (-26 to -44 dB)
+      expect(aliasing_db(1365) { |p| p.wavetable(:saw).pwm(0.3).sync(ratio: 2.37) }).to be < -100
+      expect(aliasing_db(4097) { |p| p.wavetable(:sine).pwm(0.2).sync(ratio: 2.37) }).to be < -95
     end
 
     it 'keeps synced phase-warped tables within their normal peaks' do

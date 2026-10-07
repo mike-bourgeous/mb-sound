@@ -600,8 +600,8 @@ module MB
 
       # The highest frequency, in cycles per sample at +sample_rate+, of the
       # harmonics of a synced tone's levels: AUDIBLE_LIMIT, at most
-      # SYNC_BAND (where the residuals of FastWavetable.sync can still undo
-      # the minBLEP's own response).  Sync spreads every harmonic's spectrum,
+      # SYNC_BAND (inside the minBLEP's passband, which FastWavetable.sync
+      # filters every harmonic by).  Sync spreads every harmonic's spectrum,
       # so harmonics may not fold back from above Nyquist as in #ceiling.
       def sync_ceiling(sample_rate)
         [AUDIBLE_LIMIT / sample_rate, SYNC_BAND].min
@@ -682,14 +682,15 @@ module MB
       # with +sync_state+ and +pulses+ as for FastSynth.oscillate_sync and
       # +ring+ a DFloat of BandLimit::SYNC_TAPS pending corrections (twice
       # that for complex tables).  Unless +band_limit+ is false, the tone
-      # reads the sync levels (#sync_levels) and each harmonic gets an exact
-      # minimum-phase residual at every sync event (see .sync_residuals and
-      # FastWavetable.sync).  See Tone#sync.
+      # plays the sync levels' harmonics (#sync_levels) through the minBLEP's
+      # filter, each harmonic switched with its exact minimum-phase residual
+      # at every sync event and phase warp corner (see FastWavetable.sync).
+      # See Tone#sync.
       def sync(out, freq, advance, gain, offset, sync_state, ring, pulses, soft, width, scan, interpolation, sample_rate, remove_dc, band_limit = true, scan_wrap: false)
         MB::Sound::FastWavetable.sync(
           out, kernel_spec(sample_rate, interpolation, sync: band_limit, scan_wrap: scan_wrap), freq, advance.to_f, gain.to_f, offset.to_f, sync_state, ring,
-          pulses, !!soft, width, scan, interpolation_code(interpolation), !!remove_dc, Wavetable.sync_residuals,
-          BandLimit.minblep_tables[0], BandLimit::SYNC_OVERSAMPLE, BandLimit::SYNC_TAPS, !!band_limit, SYNC_RESIDUAL_LIMIT, sinc_kernel(interpolation)
+          pulses, !!soft, width, scan, interpolation_code(interpolation), !!remove_dc, *Wavetable.sync_filter,
+          BandLimit::SYNC_OVERSAMPLE, BandLimit::SYNC_TAPS, !!band_limit, sinc_kernel(interpolation)
         )
       end
 
@@ -697,9 +698,19 @@ module MB
       def sync_ruby(out, freq, advance, gain, offset, sync_state, ring, pulses, soft, width, scan, interpolation, sample_rate, remove_dc, band_limit = true, scan_wrap: false)
         KernelRuby.sync(
           out, kernel_spec(sample_rate, interpolation, sync: band_limit, scan_wrap: scan_wrap), freq, advance.to_f, gain.to_f, offset.to_f, sync_state, ring,
-          pulses, !!soft, width, scan, interpolation_code(interpolation), !!remove_dc, Wavetable.sync_residuals,
-          BandLimit.minblep_tables[0], BandLimit::SYNC_OVERSAMPLE, BandLimit::SYNC_TAPS, !!band_limit, SYNC_RESIDUAL_LIMIT
+          pulses, !!soft, width, scan, interpolation_code(interpolation), !!remove_dc, *Wavetable.sync_filter,
+          BandLimit::SYNC_OVERSAMPLE, BandLimit::SYNC_TAPS, !!band_limit
         )
+      end
+
+      # [residual table, m1] for FastWavetable.sync: the synced sines'
+      # unnormalized residuals of switching a complex exponential on
+      # (BandLimit.sync_sine_table; also its H(G) at t = 0) and the
+      # minBLEP's delay at low frequencies they are rotated by (see
+      # BandLimit.sync_tables).
+      def self.sync_filter
+        tables = BandLimit.sync_tables(:sine)
+        [tables[5], tables[3]]
       end
 
       # The most levels a table may have (WT_MAX_LEVELS in the kernels).
@@ -714,51 +725,6 @@ module MB
       # The highest harmonic frequency of synced tones' levels in cycles per
       # sample (see #sync_ceiling): the minBLEP passes 0.89 there.
       SYNC_BAND = 0.42
-
-      # Harmonics moving faster than this (cycles per sample; fast phase warp
-      # segments) get no exact sync residual, only a minBLEP for their value
-      # jump: past it the minBLEP's response H(f) is too small to divide out.
-      SYNC_RESIDUAL_LIMIT = 0.45
-
-      # Rows of .sync_residuals (frequencies 0 to 0.5 cycles per sample;
-      # FastWavetable.sync reads the nearest row).
-      SYNC_RESIDUAL_ROWS = 129
-
-      # The minimum-phase residuals of switching on a complex exponential
-      # (FastWavetable.sync): G(f, t) = (sum of h(s) e^(-2 pi i f s) for s
-      # < t) / H(f), with h the impulse of BandLimit.minblep_tables' step
-      # (its differences at the oversampled points, at their midpoints) and
-      # H(f) its whole sum, so G(0, t) is the step and G(f, t) is 1 from
-      # BandLimit::SYNC_TAPS samples on.  A contiguous 3D DComplex of
-      # [SYNC_RESIDUAL_ROWS frequencies from 0 to 0.5 cycles per sample,
-      # SYNC_OVERSAMPLE + 2 fractional offsets p, SYNC_TAPS taps j] for t =
-      # p / SYNC_OVERSAMPLE + j, so the taps the kernel reads for an event
-      # are contiguous.
-      def self.sync_residuals
-        @sync_residuals ||= begin
-          os = BandLimit::SYNC_OVERSAMPLE
-          taps = BandLimit::SYNC_TAPS
-          blep, _ = BandLimit.minblep_tables
-          step = blep + 1.0
-          h = step[1..] - step[0...-1]
-          s = (Numo::DFloat.new(h.length).seq + 0.5) / os
-          flat = Numo::DComplex.ones(SYNC_RESIDUAL_ROWS, step.length + os + 1)
-          SYNC_RESIDUAL_ROWS.times do |r|
-            f = r * 0.5 / (SYNC_RESIDUAL_ROWS - 1)
-            c = (h * Numo::NMath.exp(s * Complex(0, -2 * Math::PI * f))).cumsum
-            flat[r, 0] = 0
-            flat[r, 1...step.length] = c / c[-1]
-          end
-          flat[0, 0...step.length] = step
-          flat[true, step.length - 1] = 1.0
-
-          g = Numo::DComplex.zeros(SYNC_RESIDUAL_ROWS, os + 2, taps)
-          (os + 2).times do |p|
-            g[true, p, true] = flat[true, (p...(p + taps * os)).step(os).to_a]
-          end
-          g.freeze
-        end
-      end
 
       # Phase-driven lookup in C: fills +out+ from +phase+ (cycles, an
       # NArray) with +increments+ (cycles per sample for picking levels: an

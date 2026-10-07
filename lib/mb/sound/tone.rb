@@ -549,11 +549,13 @@ module MB
       # (#sync, #softsync, real or complex tables) get minimum-phase steps
       # measured on the table.  A synced table reads the table's sync levels
       # (finely spaced, crossfaded continuously, every harmonic below 20 kHz;
-      # Wavetable#sync_levels), and each harmonic gets an exact
-      # minimum-phase residual at every sync event (Wavetable.sync_residuals,
-      # FastWavetable.sync): a synced saw table aliases -104 dB at 1 kHz and
-      # -100 dB at 3 kHz (a synced #ramp: -99 and -95) at about 0.3% of
-      # realtime for the kernel.  Sample-mode tables take no phase modulation, warp,
+      # Wavetable#sync_levels), every harmonic is filtered by the minBLEP
+      # and switched with its exact minimum-phase residual at every sync
+      # event and warp corner (FastWavetable.sync), so DC and harmonics
+      # match the ideal synced waveform's: a synced saw table aliases -112
+      # dB at 1 kHz and -106 dB at 3 kHz (with pwm(0.3) -107 and -100); the
+      # kernel's cost grows with the harmonics played (85 ns per sample for
+      # a 2.4 kHz slave, 220 ns at 150 Hz; more while the pitch glides).  Sample-mode tables take no phase modulation, warp,
       # sync, or noise.  #noise reads a cycle table at random phases
       # (picking levels by the pitch), so it has the table's distribution
       # of values.

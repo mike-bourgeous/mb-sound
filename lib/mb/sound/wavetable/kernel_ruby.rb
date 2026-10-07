@@ -395,165 +395,149 @@ module MB
           h > harmonics ? 0.0 : 1.0
         end
 
-        # [real parts, imaginary parts] of Wavetable.sync_residuals as nested
-        # Arrays [row][offset][tap] (cached).
-        def residual_rows(g)
-          @residual_rows ||= {}
-          @residual_rows[g.object_id] ||= [g.real.to_a, g.imag.to_a].freeze
+        # [hmax, ha, hb, x, two, fa, fb, fs]: the harmonics a synced tone
+        # plays (see wt_harms_of in C; +sel+ from #select).
+        def harms_of(spec, sel)
+          k, two, x, fa, fb, fs = sel
+          cols = spec[15].shape[1]
+          ha = [spec[16][k], cols - 1].min
+          hb = two ? [spec[16][k + 1], cols - 1].min : 0
+          [ha > hb ? ha : hb, ha, hb, two ? x : 0.0, two, fa, fb, fs]
         end
 
-        # See wt_add_q in C.
-        def add_q(acc, pos, grows, os, taps, cs, f, d, rre, rim, are, aim)
-          gre_rows, gim_rows = grows
-          rows = gre_rows.length
-          af = f.abs
-          af = 0.5 if af > 0.5
-          r = (af * 2.0 * (rows - 1).to_f + 0.5).to_i
+        # [re, im] of harmonic +h+'s complex amplitude, or nil if its weight
+        # is 0 (see wt_amp in C).
+        def amp(spectra, hs, h)
+          _, ha, hb, x, two, fa, fb, fs = hs
+          wgt = two ? (1.0 - x) * harmonic_gain(h, ha) + x * harmonic_gain(h, hb) : harmonic_gain(h, ha)
+          return nil if wgt == 0
 
-          y = d * os.to_f
-          i0 = y.to_i
-          ft = y - i0.to_f
-          sgn = f < 0 ? -1.0 : 1.0
+          c = spectra[fa, h]
+          cr = c.real
+          ci = c.imag
+          if fb >= 0
+            cb = spectra[fb, h]
+            cr = cr * (1.0 - fs) + cb.real * fs
+            ci = ci * (1.0 - fs) + cb.imag * fs
+          end
+          [cr * wgt, ci * wgt]
+        end
 
-          ar = gre_rows[r][i0]
-          ai = gim_rows[r][i0]
-          br = gre_rows[r][i0 + 1]
-          bi = gim_rows[r][i0 + 1]
+        # [re, im] of the frames' DC (see wt_dc in C).
+        def dc(spectra, hs)
+          _, _, _, _, _, fa, fb, fs = hs
+          c = spectra[fa, 0]
+          cr = c.real
+          ci = c.imag
+          if fb >= 0
+            cb = spectra[fb, 0]
+            cr = cr * (1.0 - fs) + cb.real * fs
+            ci = ci * (1.0 - fs) + cb.imag * fs
+          end
+          [cr, ci]
+        end
+
+        # See wt_e_add in C.
+        def e_add(acc, pos, et, cs, t, gh, ar, ai, zr, zi, sr, si)
+          flat, _rows, len, os, taps, _ = et
+          are = ar * zr - ai * zi
+          aim = ar * zi + ai * zr
+          cr = 1.0
+          ci = 0.0
+          lim = taps * os
+
+          gr = gh.abs * BandLimit::SYNC_SINE_ROWS_PER_CYCLE
+          r = gr.to_i
+          fg = gr - r
+          x0 = t * os
+          i0 = x0.to_i
+          ft = x0 - i0
+          sgn = gh < 0 ? -1.0 : 1.0
+          e0 = r * len * 2
+          e1 = e0 + len * 2
           k = pos
 
           taps.times do |j|
-            gre = ar[j] + (br[j] - ar[j]) * ft - 1.0
-            gim = (ai[j] + (bi[j] - ai[j]) * ft) * sgn
-            qre = gre * rre[j] - gim * rim[j]
-            qim = gre * rim[j] + gim * rre[j]
+            idx = i0 + j * os
+            break if idx >= lim
 
-            acc[k] += are * qre - aim * qim
-            acc[taps + k] += are * qim + aim * qre if cs == 2
+            q0 = e0 + idx * 2
+            q1 = e1 + idx * 2
+            a0 = flat[q0] + (flat[q0 + 2] - flat[q0]) * ft
+            a1 = flat[q0 + 1] + (flat[q0 + 3] - flat[q0 + 1]) * ft
+            b0 = flat[q1] + (flat[q1 + 2] - flat[q1]) * ft
+            b1 = flat[q1 + 1] + (flat[q1 + 3] - flat[q1 + 1]) * ft
+            er = a0 + (b0 - a0) * fg
+            ei = (a1 + (b1 - a1) * fg) * sgn
+
+            qr = er * cr - ei * ci
+            qi = er * ci + ei * cr
+            acc[k] += are * qr - aim * qi
+            acc[taps + k] += are * qi + aim * qr if cs == 2
+
+            nr = cr * sr - ci * si
+            ci = cr * si + ci * sr
+            cr = nr
 
             k += 1
             k = 0 if k == taps
           end
         end
 
-        # See wt_rotate in C.
-        def rotate(rre, rim, bre, bim, taps)
-          taps.times do |j|
-            nr = rre[j] * bre[j] - rim[j] * bim[j]
-            ni = rre[j] * bim[j] + rim[j] * bre[j]
-            rre[j] = nr
-            rim[j] = ni
-          end
-        end
+        # See wt_switch in C (+et+: [flat table, rows, len, os, taps, m1]).
+        def switch(acc, pos, et, cs, spectra, hs, t, u0, g0, u1, g1)
+          rows = et[1]
+          m1 = et[5]
+          gmax = (rows - 1).to_f / BandLimit::SYNC_SINE_ROWS_PER_CYCLE
+          same = g0 == g1
 
-        # See wt_rotations in C: [bre, bim, rre, rim].
-        def rotations(f, d, taps)
-          cr = Math.cos(TWO_PI * f * d)
-          ci = Math.sin(TWO_PI * f * d)
-          tr = Math.cos(TWO_PI * f)
-          ti = Math.sin(TWO_PI * f)
-          bre = Array.new(taps)
-          bim = Array.new(taps)
-          taps.times do |j|
-            bre[j] = cr
-            bim[j] = ci
-            nr = cr * tr - ci * ti
-            ni = cr * ti + ci * tr
-            cr = nr
-            ci = ni
-          end
-          [bre, bim, Array.new(taps, 1.0), Array.new(taps, 0.0)]
-        end
+          p0 = TWO_PI * (u0 + g0 * (t - m1))
+          p1 = TWO_PI * (u1 + g1 * (t - m1))
+          b0r = Math.cos(p0)
+          b0i = Math.sin(p0)
+          b1r = Math.cos(p1)
+          b1i = Math.sin(p1)
+          d0r = Math.cos(TWO_PI * g0)
+          d0i = Math.sin(TWO_PI * g0)
+          d1r = Math.cos(TWO_PI * g1)
+          d1i = Math.sin(TWO_PI * g1)
+          z0r = 1.0
+          z0i = 0.0
+          z1r = 1.0
+          z1i = 0.0
+          s0r = 1.0
+          s0i = 0.0
+          s1r = 1.0
+          s1i = 0.0
 
-        # See wt_add_step in C.
-        def add_step(acc, pos, blep, os, taps, cs, d, dre, dim)
-          return if dre == 0 && dim == 0
+          (1..hs[0]).each do |h|
+            nr = z0r * b0r - z0i * b0i
+            z0i = z0r * b0i + z0i * b0r
+            z0r = nr
+            nr = z1r * b1r - z1i * b1i
+            z1i = z1r * b1i + z1i * b1r
+            z1r = nr
+            nr = s0r * d0r - s0i * d0i
+            s0i = s0r * d0i + s0i * d0r
+            s0r = nr
+            nr = s1r * d1r - s1i * d1i
+            s1i = s1r * d1i + s1i * d1r
+            s1r = nr
 
-          taps.times do |j|
-            r = BandLimit.sync_table(blep, os, taps, d + j)
-            k = (pos + j) % taps
-            acc[k] += dre * r
-            acc[taps + k] += dim * r if cs == 2
-          end
-        end
+            a = amp(spectra, hs, h)
+            next if a.nil?
 
-        # See wt_sync_spectral in C (+sel+ from #select).
-        def sync_spectral(spec, sel, u0, f0, u1, f1, v0re, v0im, v1re, v1im, d, grows, blep, os, taps, acc, pos, cs, limit)
-          s0re = 0.0
-          s0im = 0.0
-          s1re = 0.0
-          s1im = 0.0
-          spectra = spec[15]
+            ar, ai = a
+            hf = h.to_f
+            if same
+              next if (hf * g1).abs >= gmax
 
-          if spectra
-            k, two, x, fa, fb, fs = sel
-            cols = spectra.shape[1]
-            ha = [spec[16][k], cols - 1].min
-            hb = two ? [spec[16][k + 1], cols - 1].min : 0
-            hmax = ha > hb ? ha : hb
-            x = two ? x : 0.0
-            same = f0 == f1
-
-            c0 = Math.cos(TWO_PI * u0)
-            sn0 = Math.sin(TWO_PI * u0)
-            c1 = Math.cos(TWO_PI * u1)
-            sn1 = Math.sin(TWO_PI * u1)
-            e0r = 1.0
-            e0i = 0.0
-            e1r = 1.0
-            e1i = 0.0
-
-            b1r, b1i, r1r, r1i = rotations(f1, d, taps)
-            b0r, b0i, r0r, r0i = rotations(f0, d, taps) unless same
-
-            (1..hmax).each do |h|
-              hf = h.to_f
-              break if (hf * f1).abs > limit || (hf * f0).abs > limit
-
-              nr = e0r * c0 - e0i * sn0
-              ni = e0r * sn0 + e0i * c0
-              e0r = nr
-              e0i = ni
-              nr = e1r * c1 - e1i * sn1
-              ni = e1r * sn1 + e1i * c1
-              e1r = nr
-              e1i = ni
-
-              rotate(r1r, r1i, b1r, b1i, taps)
-              rotate(r0r, r0i, b0r, b0i, taps) unless same
-
-              wgt = two ? (1.0 - x) * harmonic_gain(h, ha) + x * harmonic_gain(h, hb) : harmonic_gain(h, ha)
-              next if wgt == 0
-
-              c = spectra[fa, h]
-              cr = c.real
-              ci = c.imag
-              if fb >= 0
-                cb = spectra[fb, h]
-                cr = cr * (1.0 - fs) + cb.real * fs
-                ci = ci * (1.0 - fs) + cb.imag * fs
-              end
-              cr *= wgt
-              ci *= wgt
-
-              a0r = cr * e0r - ci * e0i
-              a0i = cr * e0i + ci * e0r
-              a1r = cr * e1r - ci * e1i
-              a1i = cr * e1i + ci * e1r
-              s0re += a0r
-              s0im += a0i
-              s1re += a1r
-              s1im += a1i
-
-              if same
-                add_q(acc, pos, grows, os, taps, cs, hf * f1, d, r1r, r1i, a1r - a0r, a1i - a0i)
-              else
-                add_q(acc, pos, grows, os, taps, cs, hf * f1, d, r1r, r1i, a1r, a1i)
-                add_q(acc, pos, grows, os, taps, cs, hf * f0, d, r0r, r0i, -a0r, -a0i)
-              end
+              e_add(acc, pos, et, cs, t, hf * g1, ar, ai, z1r - z0r, z1i - z0i, s1r, s1i)
+            else
+              e_add(acc, pos, et, cs, t, hf * g1, ar, ai, z1r, z1i, s1r, s1i) if (hf * g1).abs < gmax
+              e_add(acc, pos, et, cs, t, hf * g0, -ar, -ai, z0r, z0i, s0r, s0i) if (hf * g0).abs < gmax
             end
           end
-
-          add_step(acc, pos, blep, os, taps, cs, d, (v1re - v0re) - (s1re - s0re), (v1im - v0im) - (s1im - s0im))
         end
 
         # [warped phase, warp slope] of +p+ for width +w+ (wt_warp_slope).
@@ -563,8 +547,110 @@ module MB
           [p < w ? p * (0.5 / w) : 0.5 + (p - w) * (0.5 / (1.0 - w)), p < w ? 0.5 / w : 0.5 / (1.0 - w)]
         end
 
+        # See wt_corner_crossing in C.
+        def corner_crossing(p, move, c)
+          ad = move.abs
+          return nil if move == 0 || ad >= 1.0
+
+          dist = move > 0 ? c - p : p - c
+          dist += 1.0 if dist < 0
+          if move > 0
+            dist > 0 && dist <= ad ? dist / ad : nil
+          else
+            dist < ad ? dist / ad : nil
+          end
+        end
+
+        # See wt_sync_move in C; returns the new phase.
+        def sync_move(et, spectra, hs, p, vel, dur, end_t, w, bl, acc, pos, cs)
+          move = vel * dur
+          if bl && w != 0.5 && move != 0
+            k1 = 0.5 / w
+            k2 = 0.5 / (1.0 - w)
+            2.times do |j|
+              c = j == 0 ? w : 0.0
+              f = corner_crossing(p, move, c)
+              next if f.nil?
+
+              kl = j == 0 ? k1 : k2
+              kr = j == 0 ? k2 : k1
+              u = j == 0 ? 0.5 : 0.0
+              k0 = move > 0 ? kl : kr
+              kn = move > 0 ? kr : kl
+              te = end_t + (1.0 - f) * dur
+              switch(acc, pos, et, cs, spectra, hs, te, u, vel * k0, u, vel * kn)
+            end
+          end
+
+          wrap(p + move)
+        end
+
+        # Clenshaw chains of #steady (WT_CHAINS in C).
+        CHAINS = 4
+
+        # See wt_steady_coefs and wt_steady in C: [re, im].
+        def steady(et, spectra, hs, u, g, cs)
+          flat, rows, len, os, taps, m1 = et
+          dr, di = dc(spectra, hs)
+          hmax = hs[0]
+          cre = Array.new(hmax + CHAINS + 1, 0.0)
+          cim = Array.new(hmax + CHAINS + 1, 0.0)
+          (1..hmax).each do |h|
+            a = amp(spectra, hs, h)
+            next unless a
+
+            ar, ai = a
+            er, ei = BandLimit.sync_sine_lookup(flat, rows, len, os, taps, h.to_f * g, 0.0)
+            cre[h] = -(ar * er - ai * ei)
+            cim[h] = -(ar * ei + ai * er)
+          end
+
+          psi = TWO_PI * (u - g * m1)
+          c1 = Math.cos(psi)
+          s1 = Math.sin(psi)
+          er = [nil, c1]
+          ei = [nil, s1]
+          (2..CHAINS).each do |r|
+            er[r] = er[r - 1] * c1 - ei[r - 1] * s1
+            ei[r] = er[r - 1] * s1 + ei[r - 1] * c1
+          end
+          tc = er[CHAINS]
+          ts = ei[CHAINS]
+          x = 2.0 * tc
+
+          kmax = hmax >= 1 ? (hmax - 1) / CHAINS : -1
+          b1r = Array.new(CHAINS, 0.0)
+          b1i = Array.new(CHAINS, 0.0)
+          b2r = Array.new(CHAINS, 0.0)
+          b2i = Array.new(CHAINS, 0.0)
+          kmax.downto(1) do |k|
+            base = 1 + CHAINS * k
+            CHAINS.times do |r|
+              nr = (cre[base + r] - b2r[r]) + x * b1r[r]
+              ni = (cim[base + r] - b2i[r]) + x * b1i[r]
+              b2r[r] = b1r[r]
+              b2i[r] = b1i[r]
+              b1r[r] = nr
+              b1i[r] = ni
+            end
+          end
+
+          sr = 0.0
+          si = 0.0
+          if kmax >= 0
+            CHAINS.times do |r|
+              qr = cre[r + 1] + (b1r[r] * tc - b1i[r] * ts) - b2r[r]
+              qi = cim[r + 1] + (b1r[r] * ts + b1i[r] * tc) - b2i[r]
+              sr += qr * er[r + 1] - qi * ei[r + 1]
+              si += qr * ei[r + 1] + qi * er[r + 1]
+            end
+          end
+
+          [dr + sr, cs == 2 ? di + si : 0.0]
+        end
+
         # Ruby version of FastWavetable.sync (see Wavetable#sync).
-        def sync(out, spec, freq, adv, g, off, sync_state, ring, pulses, soft, width, scan, interp, remove_dc, residuals, blep, os, taps, bl, limit)
+        def sync(out, spec, freq, adv, g, off, sync_state, ring, pulses, soft, width, scan, interp, remove_dc, sine_table, m1, os, taps, bl)
           count = out.length
           cs = spec[2][0].is_a?(Numo::SComplex) ? 2 : 1
           f_s, f_a = signal(freq, count)
@@ -574,8 +660,8 @@ module MB
           w_s, w_a = signal(warped ? width : 0.5, count)
           sc_s, sc_a = signal(scan, count)
           remove_dc &&= warped
-          grows = residual_rows(residuals)
-          blep = blep.to_a
+          spectra = spec[15]
+          et = bl ? [BandLimit.sine_flat(sine_table), sine_table.shape[0], sine_table.shape[1], os, taps, m1] : nil
           acc = ring.to_a
 
           p, prev_inc, dir, pos, primed = sync_state
@@ -588,6 +674,7 @@ module MB
           fr = f_s
           pulse = pu_s
           sc = sc_s
+          hs = nil
 
           parts = ->(v) { v.is_a?(Complex) ? [v.real, v.imag] : [v, 0.0] }
 
@@ -605,18 +692,18 @@ module MB
               wf = k1 > k2 ? k1 : k2
             end
             m = (fr * adv).abs * wf
+            hs = harms_of(spec, select(spec, m, sc)) if bl
+
+            vel = dir * (primed ? prev_inc : fr * adv)
 
             if primed
-              vel = dir * prev_inc
-
               if pulse != 0
                 d = 1.0 - pulse.abs
                 d = 0.0 if d < 0
                 d = 1.0 if d > 1
 
-                p = wrap(p + vel * (1.0 - d))
+                p = sync_move(et, spectra, hs, p, vel, 1.0 - d, d, w, bl, acc, pos, cs)
                 u0, k0 = warp_slope(p, w)
-                v0re, v0im = parts.(value(spec, u0, m, sc, interp)) if bl
 
                 if soft
                   dir = -dir
@@ -629,19 +716,22 @@ module MB
 
                 if bl
                   u1, k1 = warp_slope(p, w)
-                  v1re, v1im = soft ? [v0re, v0im] : parts.(value(spec, u1, m, sc, interp))
-                  sync_spectral(spec, select(spec, m, sc), u0, vel * k0, u1, nvel * k1, v0re, v0im, v1re, v1im, d, grows, blep, os, taps, acc, pos, cs, limit)
+                  switch(acc, pos, et, cs, spectra, hs, d, u0, vel * k0, u1, nvel * k1)
                 end
                 vel = nvel
 
-                p = wrap(p + vel * d)
+                p = sync_move(et, spectra, hs, p, vel, d, 0.0, w, bl, acc, pos, cs)
               else
-                p = wrap(p + vel)
+                p = sync_move(et, spectra, hs, p, vel, 1.0, 0.0, w, bl, acc, pos, cs)
               end
             end
 
-            u = w != 0.5 ? (p < w ? p * (0.5 / w) : 0.5 + (p - w) * (0.5 / (1.0 - w))) : p
-            re, im = parts.(value(spec, u, m, sc, interp))
+            u, k = warp_slope(p, w)
+            if bl
+              re, im = steady(et, spectra, hs, u, vel * k, cs)
+            else
+              re, im = parts.(value(spec, u, m, sc, interp))
+            end
             re += acc[pos]
             acc[pos] = 0.0
             if cs == 2

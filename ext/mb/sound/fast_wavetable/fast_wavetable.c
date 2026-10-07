@@ -1236,150 +1236,87 @@ static VALUE ruby_play(VALUE self, VALUE buffer, VALUE spec, VALUE frequency, VA
 /*
  * Hard and soft sync for cycle-mode tables, band-limited like
  * FastSynth.oscillate_sync: a sync pulse v at a sample resets the phase
- * (hard) or reverses its direction (soft) 1 - |v| samples earlier, and
- * minimum-phase band-limited residuals for the switch add into a ring of
- * the following samples.  The table itself is band-limited, so its wrap
- * needs no correction.
+ * (hard) or reverses its direction (soft) 1 - |v| samples earlier.  The
+ * output is the naive synced waveform filtered by the minBLEP's minimum-
+ * phase lowpass h, exactly, harmonic by harmonic.
  *
- * FastSynth's shapes are piecewise linear, so a step (minBLEP) and a ramp
- * (minBLAMP) correct their edges exactly.  A table is a sum of harmonics,
- * and a sync event switches each harmonic from one sinusoid (amplitude A0
- * at the event, frequency f0 cycles per sample) to another (A1, f1).  So
- * each harmonic gets its own exact residual: the minimum-phase band-limited
- * switch-on of a complex exponential minus the naive one,
- *   Q(f, t) = e^(2 pi i f t) (G(f, t) - 1),
- *   G(f, t) = (integral over 0..t of h(s) e^(-2 pi i f s) ds) / H(f),
- * with h the minBLEP's impulse (BandLimit.minblep_tables) and H(f) its
- * whole transform, so the residual settles to zero (G(0, t) is the
- * minBLEP's step).  G is tabulated (Wavetable.sync_residuals) for |f| up to
- * 0.5 in rows and t up to +taps+ samples at +os+ points per sample, read
- * bilinearly (G(-f) = conj(G(f))).  The correction adds A1 Q(f1, t) -
- * A0 Q(f0, t) (real parts for real tables).  Truncated Taylor
- * corrections (value, slope, curvature, ...) can't do this near Nyquist,
- * where a harmonic changes too much per sample (they made the synced saw
- * table overshoot to several times full scale at high pitches).
+ * A table is a sum of harmonics, so between events each harmonic h is a
+ * complex exponential A e^(2 pi i (h u + G s)) (A its complex amplitude, u
+ * the warped phase in cycles, G = h g its frequency in cycles per sample,
+ * g the fundamental's: the phase velocity times the warp slope).  h
+ * applied to it is H(G) times it, so each sample reads the harmonic sums
+ * with every harmonic scaled by H(h g) (a phase delay of about 2.8 samples
+ * at low frequencies, 3.1 at 0.3 cycles per sample, 3.6 at 0.4) instead of
+ * the table's levels.  Switching an exponential on at an event adds the
+ * residual E(G, t) e^(2 pi i (h u + G t)) for the next +taps+ samples, and
+ * switching one off subtracts it, with E(G, t) = -(integral of h(s)
+ * e^(-2 pi i G s) for s > t), so E(G, 0) = -H(G) and E settles exactly on
+ * zero: unnormalized residuals, the same as FastSynth's synced sines
+ * (BandLimit.sync_sine_table, whose rows store E e^(2 pi i G m1) with m1
+ * the delay at low frequencies, so they interpolate well in G).  Every
+ * segment then has exactly the area and harmonics of the ideal: no DC
+ * drift, at any rate of events (until 2026-10-08 the residuals were
+ * normalized by H(G) per harmonic while the reads weren't filtered, which
+ * left each switch's transient area behind: a synced one-harmonic table
+ * drifted up to 0.21 from the ideal mean in a sweep).
+ *
+ * Events: sync resets and reversals switch every harmonic from (u0, g0) to
+ * (u1, g1); phase warp corners (pwm), crossed at the knee w and the wrap,
+ * switch each harmonic from one frequency to the other at the same phase
+ * (the warp's slope changes), so warped synced tables are band-limited
+ * too (the corners were left naive before, -26 to -44 dB of aliasing).
  *
  * Synced tones read the table's sync levels (Wavetable#kernel_spec with
- * sync: true): every harmonic stays below Wavetable#sync_ceiling, inside
- * the minBLEP's passband, where H(f) can be divided out, and finely spaced
- * levels crossfade continuously so brightness doesn't step.
- *
- * The played (interpolated) value jump differs from the harmonic sums by
- * the interpolation error; that difference gets a plain minBLEP, so the
- * corrections cancel the played jump exactly.  Complex tables correct their
- * real and imaginary parts alike (the ring holds taps real corrections,
- * then taps imaginary).
+ * sync: true): every harmonic stays below Wavetable#sync_ceiling, and finely
+ * spaced levels crossfade continuously so brightness doesn't step; the
+ * levels' weights and frames choose the harmonic amplitudes, read from the
+ * spectra (so the interpolation setting doesn't matter when band-limited).
+ * Complex tables correct their real and imaginary parts alike (the ring
+ * holds taps real corrections, then taps imaginary).
  */
 
-// Linear interpolation into a residual table +t+ samples after an event
-// (the same as sync_table in fast_synth.c).
-static inline double wt_sync_table(const double *table, size_t os, size_t taps, double t)
-{
-	double x = t * os;
-	if (x < 0 || x >= (double)(taps * os)) {
-		return 0;
-	}
+// Rows per cycle per sample of BandLimit.sync_sine_table
+// (BandLimit::SYNC_SINE_ROWS_PER_CYCLE; SYNC_SINE_ROWS_PER_CYCLE in
+// fast_synth.c).
+#define WT_E_ROWS_PER_CYCLE 256
 
-	size_t idx = (size_t)x;
-	double frac = x - idx;
-	return table[idx] + (table[idx + 1] - table[idx]) * frac;
-}
-
-// The residual table of Wavetable.sync_residuals: +rows+ rows of G for
-// frequencies 0..0.5 cycles per sample, each +os+ + 2 fractional offsets
-// (t = p / os + j) of +taps+ complex values (the taps of one offset are
-// contiguous).
-struct wt_residuals {
-	const double *g;
-	long rows;
+// BandLimit.sync_sine_table: +rows+ rows of +len+ complex values (re, im
+// interleaved) for t = 0 to +taps+ samples at +os+ points per sample, and
+// the delay m1 its rows are rotated by.
+struct wt_etab {
+	const double *e;
+	size_t rows, len, os, taps;
+	double m1;
+	double *e0; // the rows at t = 0 (re, im interleaved), for the steady sums
 };
 
-// Adds the residual of a complex exponential of amplitude (are, aim) and
-// frequency +f+ (cycles per sample) switched on +d+ samples before the
-// ring's current sample (at +pos+) to the ring +acc+.  +rre+/+rim+ hold
-// e^(2 pi i f (d + j)) for each tap j.
-static void wt_add_q(double *acc, size_t pos, const struct wt_residuals *rs, size_t os, size_t taps, int cs,
-		double f, double d, const double *rre, const double *rim, double are, double aim)
+// E e^(2 pi i G m1) at frequency +g+ (cycles per sample, either sign) and
+// +t+ samples after a switch, interpolated linearly in both (the same as
+// sync_sine_lookup in fast_synth.c); 0 past the table.
+static inline void wt_e_lookup(const struct wt_etab *et, double g, double t, double *re, double *im)
 {
-	// The nearest row: G(f', t) e^(2 pi i f t) for f' near f is still
-	// band-limited (shifted by under half a row) and settles exactly with
-	// the naive part, so rows only need to be close
-	double af = fabs(f);
-	if (af > 0.5) {
-		af = 0.5;
-	}
-	long r = (long)(af * 2.0 * (double)(rs->rows - 1) + 0.5);
-
-	double y = d * (double)os;
-	long i0 = (long)y;
-	double ft = y - (double)i0;
-	double sgn = f < 0 ? -1.0 : 1.0;
-
-	const double *a = rs->g + 2 * ((r * (long)(os + 2) + i0) * (long)taps);
-	const double *b = a + 2 * taps;
-	size_t k = pos;
-
-	for (size_t j = 0; j < taps; j++) {
-		double gre = a[2 * j] + (b[2 * j] - a[2 * j]) * ft - 1.0;
-		double gim = (a[2 * j + 1] + (b[2 * j + 1] - a[2 * j + 1]) * ft) * sgn;
-		double qre = gre * rre[j] - gim * rim[j];
-		double qim = gre * rim[j] + gim * rre[j];
-
-		acc[k] += are * qre - aim * qim;
-		if (cs == 2) {
-			acc[taps + k] += are * qim + aim * qre;
-		}
-
-		k++;
-		if (k == taps) {
-			k = 0;
-		}
-	}
-}
-
-// Advances the rotations +rre+/+rim+ (one per tap) by +bre+/+bim+.
-static inline void wt_rotate(double *rre, double *rim, const double *bre, const double *bim, size_t taps)
-{
-	for (size_t j = 0; j < taps; j++) {
-		double nr = rre[j] * bre[j] - rim[j] * bim[j];
-		double ni = rre[j] * bim[j] + rim[j] * bre[j];
-		rre[j] = nr;
-		rim[j] = ni;
-	}
-}
-
-// Fills +bre+/+bim+ with e^(2 pi i f (d + j)) for taps j (a recurrence
-// from the first) and sets +rre+/+rim+ to 1.
-static inline void wt_rotations(double f, double d, size_t taps, double *bre, double *bim, double *rre, double *rim)
-{
-	double cr = cos(WT_TWO_PI * f * d), ci = sin(WT_TWO_PI * f * d);
-	double tr = cos(WT_TWO_PI * f), ti = sin(WT_TWO_PI * f);
-	for (size_t j = 0; j < taps; j++) {
-		bre[j] = cr;
-		bim[j] = ci;
-		rre[j] = 1.0;
-		rim[j] = 0.0;
-		double nr = cr * tr - ci * ti;
-		double ni = cr * ti + ci * tr;
-		cr = nr;
-		ci = ni;
-	}
-}
-
-// Adds a minBLEP residual for a jump of (dre, dim) +d+ samples before the
-// current sample.
-static void wt_add_step(double *acc, size_t pos, const double *blep, size_t os, size_t taps, int cs, double d, double dre, double dim)
-{
-	if (dre == 0 && dim == 0) {
+	double gr = fabs(g) * WT_E_ROWS_PER_CYCLE;
+	double x = t * et->os;
+	if (gr >= (double)(et->rows - 1) || x < 0 || x >= (double)(et->taps * et->os)) {
+		*re = 0.0;
+		*im = 0.0;
 		return;
 	}
-	for (size_t j = 0; j < taps; j++) {
-		double r = wt_sync_table(blep, os, taps, d + j);
-		size_t k = (pos + j) % taps;
-		acc[k] += dre * r;
-		if (cs == 2) {
-			acc[taps + k] += dim * r;
-		}
+
+	size_t r = (size_t)gr;
+	double fg = gr - r;
+	size_t idx = (size_t)x;
+	double ft = x - idx;
+	const double *e00 = et->e + (r * et->len + idx) * 2;
+	const double *e10 = e00 + et->len * 2;
+	double are = e00[0] + (e00[2] - e00[0]) * ft;
+	double aim = e00[1] + (e00[3] - e00[1]) * ft;
+	double bre = e10[0] + (e10[2] - e10[0]) * ft;
+	double bim = e10[1] + (e10[3] - e10[1]) * ft;
+	*re = are + (bre - are) * fg;
+	*im = aim + (bim - aim) * fg;
+	if (g < 0) {
+		*im = -*im;
 	}
 }
 
@@ -1390,98 +1327,180 @@ static inline double wt_harmonic_gain(long h, long harmonics)
 	return h > harmonics ? 0.0 : 1.0;
 }
 
-// Adds the residuals of a sync event +d+ samples before the current sample
-// to the ring: every harmonic of the levels and frames of +sel+ switches
-// from phase +u0+ (cycles, warped) moving +f0+ cycles per sample (the
-// fundamental's frequency) to phase +u1+ moving +f1+.  +v0re+/+v0im+ and
-// +v1re+/+v1im+ are the played values before and after.
-static void wt_sync_spectral(const struct wt_table *t, const struct wt_sel *sel, double u0, double f0, double u1, double f1,
-		double v0re, double v0im, double v1re, double v1im, double d, const struct wt_residuals *rs, const double *blep,
-		size_t os, size_t taps, double *acc, size_t pos, int cs, double limit)
+// The harmonics a synced tone plays with the levels and frames of +sel+:
+// the highest harmonic, and per harmonic h its complex amplitude (the
+// frames' spectra blended by the scan, times the levels' weights) through
+// wt_amp.
+struct wt_harms {
+	long hmax, ha, hb;
+	double x;
+	_Bool two;
+	const double *ca, *cb;
+	double fs;
+};
+
+static inline void wt_harms_of(const struct wt_table *t, const struct wt_sel *sel, struct wt_harms *hs)
 {
-	double s0re = 0, s0im = 0, s1re = 0, s1im = 0;
+	hs->ha = t->harmonics[sel->k];
+	hs->hb = sel->two ? t->harmonics[sel->k + 1] : 0;
+	hs->hmax = hs->ha > hs->hb ? hs->ha : hs->hb;
+	hs->two = sel->two;
+	hs->x = sel->two ? sel->x : 0.0;
+	hs->ca = t->spectra + sel->fa * t->spec_cols * 2;
+	hs->cb = sel->fb < 0 ? NULL : t->spectra + sel->fb * t->spec_cols * 2;
+	hs->fs = sel->fs;
+}
 
-	if (t->spectra != NULL) {
-		long ha = t->harmonics[sel->k];
-		long hb = sel->two ? t->harmonics[sel->k + 1] : 0;
-		long hmax = ha > hb ? ha : hb;
-		double x = sel->two ? sel->x : 0.0;
-		const double *ca = t->spectra + sel->fa * t->spec_cols * 2;
-		const double *cb = sel->fb < 0 ? NULL : t->spectra + sel->fb * t->spec_cols * 2;
-		_Bool same = f0 == f1;
+// Harmonic +h+'s complex amplitude into *ar/*ai; returns 0 if its weight
+// is 0 (the amplitude is then left unset).
+static inline int wt_amp(const struct wt_harms *hs, long h, double *ar, double *ai)
+{
+	double wgt = hs->two ?
+		(1.0 - hs->x) * wt_harmonic_gain(h, hs->ha) + hs->x * wt_harmonic_gain(h, hs->hb) :
+		wt_harmonic_gain(h, hs->ha);
+	if (wgt == 0) {
+		return 0;
+	}
 
-		double c0 = cos(WT_TWO_PI * u0), sn0 = sin(WT_TWO_PI * u0);
-		double c1 = cos(WT_TWO_PI * u1), sn1 = sin(WT_TWO_PI * u1);
-		double e0r = 1.0, e0i = 0.0, e1r = 1.0, e1i = 0.0;
+	double cr = hs->ca[2 * h];
+	double ci = hs->ca[2 * h + 1];
+	if (hs->cb) {
+		cr = cr * (1.0 - hs->fs) + hs->cb[2 * h] * hs->fs;
+		ci = ci * (1.0 - hs->fs) + hs->cb[2 * h + 1] * hs->fs;
+	}
+	*ar = cr * wgt;
+	*ai = ci * wgt;
+	return 1;
+}
 
-		// e^(2 pi i h f (d + j)) for each tap j, by recurrence over
-		// harmonics (independent per tap)
-		double b1r[WT_MAX_TAPS], b1i[WT_MAX_TAPS], r1r[WT_MAX_TAPS], r1i[WT_MAX_TAPS];
-		double b0r[WT_MAX_TAPS], b0i[WT_MAX_TAPS], r0r[WT_MAX_TAPS], r0i[WT_MAX_TAPS];
-		wt_rotations(f1, d, taps, b1r, b1i, r1r, r1i);
-		if (!same) {
-			wt_rotations(f0, d, taps, b0r, b0i, r0r, r0i);
+// The DC value (column 0) of the frames of +hs+ (real and imaginary).
+static inline void wt_dc(const struct wt_harms *hs, double *re, double *im)
+{
+	double cr = hs->ca[0];
+	double ci = hs->ca[1];
+	if (hs->cb) {
+		cr = cr * (1.0 - hs->fs) + hs->cb[0] * hs->fs;
+		ci = ci * (1.0 - hs->fs) + hs->cb[1] * hs->fs;
+	}
+	*re = cr;
+	*im = ci;
+}
+
+// Adds the residual of one harmonic's exponential, of complex amplitude
+// (ar, ai) at phase e^(2 pi i h (u + g (t - m1))) = (zr, zi) and frequency
+// +gh+ = h g (below the table's last row), switched on +t+ samples (0 to
+// 1) before the ring's current sample (at +pos+), rotating by (sr, si) =
+// e^(2 pi i gh) per tap.  The table is read at t + j for taps j as
+// wt_e_lookup does, with the row and the fraction between table points
+// found once (index t * os + j * os, fraction t * os - floor(t * os)).
+static inline void wt_e_add(double *acc, size_t pos, const struct wt_etab *et, int cs, double t, double gh,
+		double ar, double ai, double zr, double zi, double sr, double si)
+{
+	double are = ar * zr - ai * zi;
+	double aim = ar * zi + ai * zr;
+	double cr = 1.0, ci = 0.0;
+	size_t taps = et->taps, os = et->os;
+	size_t lim = taps * os;
+
+	double gr = fabs(gh) * WT_E_ROWS_PER_CYCLE;
+	size_t r = (size_t)gr;
+	double fg = gr - r;
+	double x0 = t * os;
+	size_t i0 = (size_t)x0;
+	double ft = x0 - i0;
+	double sgn = gh < 0 ? -1.0 : 1.0;
+	const double *e0 = et->e + r * et->len * 2;
+	const double *e1 = e0 + et->len * 2;
+	size_t k = pos;
+
+	for (size_t j = 0; j < taps; j++) {
+		size_t idx = i0 + j * os;
+		if (idx >= lim) {
+			break;
+		}
+		const double *p0 = e0 + idx * 2;
+		const double *p1 = e1 + idx * 2;
+		double a0 = p0[0] + (p0[2] - p0[0]) * ft;
+		double a1 = p0[1] + (p0[3] - p0[1]) * ft;
+		double b0 = p1[0] + (p1[2] - p1[0]) * ft;
+		double b1 = p1[1] + (p1[3] - p1[1]) * ft;
+		double er = a0 + (b0 - a0) * fg;
+		double ei = (a1 + (b1 - a1) * fg) * sgn;
+
+		double qr = er * cr - ei * ci;
+		double qi = er * ci + ei * cr;
+		acc[k] += are * qr - aim * qi;
+		if (cs == 2) {
+			acc[taps + k] += are * qi + aim * qr;
 		}
 
-		for (long h = 1; h <= hmax; h++) {
-			// Harmonics moving faster than +limit+ (a fast phase warp
-			// segment) get only the plain minBLEP of their value jump
-			double hf = (double)h;
-			if (fabs(hf * f1) > limit || fabs(hf * f0) > limit) {
-				break;
-			}
+		double nr = cr * sr - ci * si;
+		ci = cr * si + ci * sr;
+		cr = nr;
 
-			double nr = e0r * c0 - e0i * sn0;
-			double ni = e0r * sn0 + e0i * c0;
-			e0r = nr;
-			e0i = ni;
-			nr = e1r * c1 - e1i * sn1;
-			ni = e1r * sn1 + e1i * c1;
-			e1r = nr;
-			e1i = ni;
+		k++;
+		if (k == taps) {
+			k = 0;
+		}
+	}
+}
 
-			wt_rotate(r1r, r1i, b1r, b1i, taps);
-			if (!same) {
-				wt_rotate(r0r, r0i, b0r, b0i, taps);
-			}
+// Adds the residuals of an event +t+ samples before the current sample
+// (0 <= t <= 1): every harmonic of +hs+ switches off at warped phase +u0+
+// and fundamental frequency +g0+ and on at +u1+ and +g1+ (cycles per
+// sample, signed).  Harmonics past the residual table (G above
+// BandLimit::SYNC_SINE_MAX, where H is -107 dB) are left out, as in the
+// sample values.
+static void wt_switch(double *acc, size_t pos, const struct wt_etab *et, int cs, const struct wt_harms *hs, double t,
+		double u0, double g0, double u1, double g1)
+{
+	double gmax = (double)(et->rows - 1) / WT_E_ROWS_PER_CYCLE;
+	_Bool same = g0 == g1;
 
-			double wgt = sel->two ?
-				(1.0 - x) * wt_harmonic_gain(h, ha) + x * wt_harmonic_gain(h, hb) :
-				wt_harmonic_gain(h, ha);
-			if (wgt == 0) {
+	// Per harmonic h: e^(2 pi i h (u + g (t - m1))) and e^(2 pi i h g), by
+	// recurrence from h = 1
+	double p0 = WT_TWO_PI * (u0 + g0 * (t - et->m1)), p1 = WT_TWO_PI * (u1 + g1 * (t - et->m1));
+	double b0r = cos(p0), b0i = sin(p0), b1r = cos(p1), b1i = sin(p1);
+	double d0r = cos(WT_TWO_PI * g0), d0i = sin(WT_TWO_PI * g0);
+	double d1r = cos(WT_TWO_PI * g1), d1i = sin(WT_TWO_PI * g1);
+	double z0r = 1.0, z0i = 0.0, z1r = 1.0, z1i = 0.0;
+	double s0r = 1.0, s0i = 0.0, s1r = 1.0, s1i = 0.0;
+
+	for (long h = 1; h <= hs->hmax; h++) {
+		double nr = z0r * b0r - z0i * b0i;
+		z0i = z0r * b0i + z0i * b0r;
+		z0r = nr;
+		nr = z1r * b1r - z1i * b1i;
+		z1i = z1r * b1i + z1i * b1r;
+		z1r = nr;
+		nr = s0r * d0r - s0i * d0i;
+		s0i = s0r * d0i + s0i * d0r;
+		s0r = nr;
+		nr = s1r * d1r - s1i * d1i;
+		s1i = s1r * d1i + s1i * d1r;
+		s1r = nr;
+
+		double ar, ai;
+		if (!wt_amp(hs, h, &ar, &ai)) {
+			continue;
+		}
+
+		double hf = (double)h;
+		if (same) {
+			if (fabs(hf * g1) >= gmax) {
 				continue;
 			}
-
-			double cr = ca[2 * h];
-			double ci = ca[2 * h + 1];
-			if (cb) {
-				cr = cr * (1.0 - sel->fs) + cb[2 * h] * sel->fs;
-				ci = ci * (1.0 - sel->fs) + cb[2 * h + 1] * sel->fs;
+			// One lookup for both: A (z1 - z0) E(G, t + j) ...
+			wt_e_add(acc, pos, et, cs, t, hf * g1, ar, ai, z1r - z0r, z1i - z0i, s1r, s1i);
+		} else {
+			if (fabs(hf * g1) < gmax) {
+				wt_e_add(acc, pos, et, cs, t, hf * g1, ar, ai, z1r, z1i, s1r, s1i);
 			}
-			cr = cr * wgt;
-			ci = ci * wgt;
-
-			double a0r = cr * e0r - ci * e0i;
-			double a0i = cr * e0i + ci * e0r;
-			double a1r = cr * e1r - ci * e1i;
-			double a1i = cr * e1i + ci * e1r;
-			s0re += a0r;
-			s0im += a0i;
-			s1re += a1r;
-			s1im += a1i;
-
-			if (same) {
-				wt_add_q(acc, pos, rs, os, taps, cs, hf * f1, d, r1r, r1i, a1r - a0r, a1i - a0i);
-			} else {
-				wt_add_q(acc, pos, rs, os, taps, cs, hf * f1, d, r1r, r1i, a1r, a1i);
-				wt_add_q(acc, pos, rs, os, taps, cs, hf * f0, d, r0r, r0i, -a0r, -a0i);
+			if (fabs(hf * g0) < gmax) {
+				wt_e_add(acc, pos, et, cs, t, hf * g0, -ar, -ai, z0r, z0i, s0r, s0i);
 			}
 		}
 	}
-
-	// The rest of the played jump (interpolation error; all of it without
-	// spectra)
-	wt_add_step(acc, pos, blep, os, taps, cs, d, (v1re - v0re) - (s1re - s0re), (v1im - v0im) - (s1im - s0im));
 }
 
 // The warped phase of +p+ for width +w+, and the warp's slope there.
@@ -1495,29 +1514,181 @@ static inline double wt_warp_slope(double p, double w, double *k)
 	return p < w ? p * (0.5 / w) : 0.5 + (p - w) * (0.5 / (1.0 - w));
 }
 
+// If moving from phase +p+ by +move+ cycles crosses the warp corner at
+// phase +c+ (the knee w or the wrap 0), returns the crossing time as a
+// fraction of the move, else -1.  A phase on a corner is on its right side
+// (the segment after it going forward), as the warp's slope is chosen
+// there: a forward move starting on +c+ doesn't cross it and one ending on
+// it does; a backward move starting on +c+ crosses it at once (0) and one
+// ending on it doesn't.
+static inline double wt_corner_crossing(double p, double move, double c)
+{
+	double ad = fabs(move);
+	if (move == 0 || ad >= 1.0) {
+		return -1;
+	}
+
+	double dist = move > 0 ? c - p : p - c;
+	if (dist < 0) {
+		dist += 1.0;
+	}
+
+	if (move > 0) {
+		return dist > 0 && dist <= ad ? dist / ad : -1;
+	}
+	return dist < ad ? dist / ad : -1;
+}
+
+// Moves phase *p by +vel+ cycles per sample for +dur+ samples, ending
+// +end_t+ samples before the current sample; with a warp (+w+ not 0.5) and
+// band-limiting, each warp corner crossed switches every harmonic from one
+// frequency to the other at the corner's phase (see wt_switch).
+static inline void wt_sync_move(const struct wt_etab *et, const struct wt_harms *hs, double *p, double vel, double dur,
+		double end_t, double w, _Bool bl, double *acc, size_t pos, int cs)
+{
+	double move = vel * dur;
+	if (bl && w != 0.5 && move != 0) {
+		double k1 = 0.5 / w, k2 = 0.5 / (1.0 - w);
+		for (int j = 0; j < 2; j++) {
+			double c = j == 0 ? w : 0.0;
+			double f = wt_corner_crossing(*p, move, c);
+			if (f < 0) {
+				continue;
+			}
+
+			// Slopes on the corner's left and right sides, and its
+			// warped phase (0.5 at the knee; the wrap as 0)
+			double kl = j == 0 ? k1 : k2;
+			double kr = j == 0 ? k2 : k1;
+			double u = j == 0 ? 0.5 : 0.0;
+			double k0 = move > 0 ? kl : kr;
+			double kn = move > 0 ? kr : kl;
+			double te = end_t + (1.0 - f) * dur;
+			wt_switch(acc, pos, et, cs, hs, te, u, vel * k0, u, vel * kn);
+		}
+	}
+
+	*p = wt_wrap(*p + move, 1.0);
+}
+
+// Independent Clenshaw chains of wt_steady (harmonics h = r + WT_CHAINS k).
+#define WT_CHAINS 4
+
+// The harmonic sums at warped phase +u+ for fundamental frequency +g+,
+// every harmonic scaled by H(h g) (see the top): the DC plus the sums of
+// coef[h] e^(2 pi i h (u - g m1)), with coef[h] = -A_h E(h g, 0)
+// e^(2 pi i h g m1) recomputed by wt_steady_coefs when +g+ or the
+// selection changes (+coef+ holds 2 * (hmax + WT_CHAINS + 1) doubles; the
+// entries past hmax are zeroed for the chains).
+static void wt_steady_coefs(const struct wt_etab *et, const struct wt_harms *hs, double g, double *coef)
+{
+	// E(h g, 0) e^(2 pi i h g m1) as wt_e_lookup reads it at t = 0, from
+	// the compact copy of the rows' first points (the rows themselves are
+	// 32 KB apart)
+	double rmax = (double)(et->rows - 1);
+	const double *e0 = et->e0;
+	for (long h = 1; h <= hs->hmax; h++) {
+		double ar, ai;
+		double gh = (double)h * g;
+		double gr = fabs(gh) * WT_E_ROWS_PER_CYCLE;
+		if (gr >= rmax || !wt_amp(hs, h, &ar, &ai)) {
+			coef[2 * h] = 0.0;
+			coef[2 * h + 1] = 0.0;
+			continue;
+		}
+		size_t r = (size_t)gr;
+		double fg = gr - r;
+		double er = e0[2 * r] + (e0[2 * r + 2] - e0[2 * r]) * fg;
+		double ei = e0[2 * r + 1] + (e0[2 * r + 3] - e0[2 * r + 1]) * fg;
+		if (gh < 0) {
+			ei = -ei;
+		}
+		coef[2 * h] = -(ar * er - ai * ei);
+		coef[2 * h + 1] = -(ar * ei + ai * er);
+	}
+	for (long h = hs->hmax + 1; h <= hs->hmax + WT_CHAINS; h++) {
+		coef[2 * h] = 0.0;
+		coef[2 * h + 1] = 0.0;
+	}
+}
+
+// Sums coef[h] e^(i h psi) for h = 1 to +hmax+ by Clenshaw's recurrence
+// in WT_CHAINS interleaved chains (harmonics r + WT_CHAINS k for r = 1 to
+// WT_CHAINS, each a sum over k of a_k e^(i k theta), theta = WT_CHAINS psi:
+// b_k = (a_k - b_(k+2)) + 2 cos(theta) b_(k+1), sum a_0 + b_1 e^(i theta) -
+// b_2, times e^(i r psi)), so the dependency chains are short and run side
+// by side (about 1 ns per harmonic instead of 4 for rotating e^(i h psi)).
+static inline void wt_steady(const struct wt_etab *et, const struct wt_harms *hs, const double *coef, double u, double g, int cs,
+		double *re, double *im)
+{
+	double dr, di;
+	wt_dc(hs, &dr, &di);
+
+	double psi = WT_TWO_PI * (u - g * et->m1);
+	double c1 = cos(psi), s1 = sin(psi);
+
+	// e^(i r psi) for r = 1..4, and e^(i theta)
+	double er[WT_CHAINS + 1], ei[WT_CHAINS + 1];
+	er[1] = c1;
+	ei[1] = s1;
+	for (int r = 2; r <= WT_CHAINS; r++) {
+		er[r] = er[r - 1] * c1 - ei[r - 1] * s1;
+		ei[r] = er[r - 1] * s1 + ei[r - 1] * c1;
+	}
+	double tc = er[WT_CHAINS], ts = ei[WT_CHAINS];
+	double x = 2.0 * tc;
+
+	long kmax = hs->hmax >= 1 ? (hs->hmax - 1) / WT_CHAINS : -1;
+	double b1r[WT_CHAINS] = { 0 }, b1i[WT_CHAINS] = { 0 }, b2r[WT_CHAINS] = { 0 }, b2i[WT_CHAINS] = { 0 };
+	for (long k = kmax; k >= 1; k--) {
+		const double *a = coef + 2 * (1 + WT_CHAINS * k);
+		for (int r = 0; r < WT_CHAINS; r++) {
+			double nr = (a[2 * r] - b2r[r]) + x * b1r[r];
+			double ni = (a[2 * r + 1] - b2i[r]) + x * b1i[r];
+			b2r[r] = b1r[r];
+			b2i[r] = b1i[r];
+			b1r[r] = nr;
+			b1i[r] = ni;
+		}
+	}
+
+	double sr = 0.0, si = 0.0;
+	if (kmax >= 0) {
+		for (int r = 0; r < WT_CHAINS; r++) {
+			// a_0 + b_1 e^(i theta) - b_2, times e^(i (r + 1) psi)
+			double qr = coef[2 * (r + 1)] + (b1r[r] * tc - b1i[r] * ts) - b2r[r];
+			double qi = coef[2 * (r + 1) + 1] + (b1r[r] * ts + b1i[r] * tc) - b2i[r];
+			sr += qr * er[r + 1] - qi * ei[r + 1];
+			si += qr * ei[r + 1] + qi * er[r + 1];
+		}
+	}
+
+	*re = dr + sr;
+	*im = cs == 2 ? di + si : 0.0;
+}
+
 /*
  * A synced wavetable oscillator (see Wavetable#sync):
  *   sync(buffer, spec, frequency, advance, gain, offset, sync_state, ring,
- *        pulses, soft, width, scan, interpolation, remove_dc, residuals,
- *        blep, oversample, taps, band_limit, limit, sinc)
+ *        pulses, soft, width, scan, interpolation, remove_dc, sine_table,
+ *        m1, oversample, taps, band_limit, sinc)
  *
  * +sync_state+ is as for FastSynth.oscillate_sync ([phase, last increment,
  * direction, ring position, primed]); +ring+ is a DFloat of +taps+ pending
- * corrections (twice that for complex tables).  +residuals+ is the 2D
- * DComplex of Wavetable.sync_residuals ([rows, taps * oversample + 1]) and
- * +blep+ the minBLEP residual (BandLimit.minblep_tables); harmonics faster
- * than +limit+ cycles per sample (Wavetable::SYNC_RESIDUAL_LIMIT) get only
- * a minBLEP for their value jump.  +spec+ is
- * normally the table's sync spec (Wavetable#kernel_spec with sync: true).
+ * corrections (twice that for complex tables).  +sine_table+ and +m1+ are
+ * BandLimit.sync_tables(:sine)'s residual table and delay (see the top);
+ * +band_limit+ false reads the table's levels with no filtering or
+ * residuals (naive sync).  +spec+ is normally the table's sync spec
+ * (Wavetable#kernel_spec with sync: true); band-limiting needs its spectra.
  */
 static VALUE ruby_sync(int argc, VALUE *argv, VALUE self)
 {
-	if (argc != 21) {
-		rb_raise(rb_eArgError, "wrong number of arguments (given %d, expected 21)", argc);
+	if (argc != 20) {
+		rb_raise(rb_eArgError, "wrong number of arguments (given %d, expected 20)", argc);
 	}
 
 	VALUE buffer = argv[0], spec = argv[1], frequency = argv[2], sync_state = argv[6], ring = argv[7];
-	VALUE pulses = argv[8], width = argv[10], scan = argv[11], residuals = argv[14], blep_v = argv[15], sinc = argv[20];
+	VALUE pulses = argv[8], width = argv[10], scan = argv[11], sine_v = argv[14], sinc = argv[19];
 
 	struct wt_table t;
 	wt_read_table(spec, &t);
@@ -1534,10 +1705,13 @@ static VALUE ruby_sync(int argc, VALUE *argv, VALUE self)
 	_Bool soft = RTEST(argv[9]);
 	_Bool warped = !NIL_P(width);
 	_Bool dc = RTEST(argv[13]) && warped;
+	double m1 = NUM2DBL(argv[15]);
 	size_t os = NUM2SIZET(argv[16]);
 	size_t taps = NUM2SIZET(argv[17]);
 	_Bool bl = RTEST(argv[18]);
-	double limit = NUM2DBL(argv[19]);
+	if (bl && t.spectra == NULL) {
+		rb_raise(rb_eArgError, "A band-limited synced table needs its spectra (Wavetable#kernel_spec with sync: true)");
+	}
 
 	Check_Type(sync_state, T_ARRAY);
 	if (RARRAY_LEN(sync_state) != 5) {
@@ -1556,18 +1730,21 @@ static VALUE ruby_sync(int argc, VALUE *argv, VALUE self)
 	pos %= taps;
 
 	size_t table_len = taps * os + 1;
-	if (CLASS_OF(blep_v) != numo_cDFloat || RNARRAY_NDIM(blep_v) != 1 || RNARRAY_SHAPE(blep_v)[0] != table_len || !RTEST(nary_check_contiguous(blep_v))) {
-		rb_raise(rb_eArgError, "The minBLEP table must be a contiguous DFloat of taps * oversample + 1 elements");
+	struct wt_etab et = { 0 };
+	if (bl) {
+		if (CLASS_OF(sine_v) != numo_cDComplex || RNARRAY_NDIM(sine_v) != 2 || RNARRAY_SHAPE(sine_v)[0] < 2 ||
+				RNARRAY_SHAPE(sine_v)[1] != table_len || !RTEST(nary_check_contiguous(sine_v))) {
+			rb_raise(rb_eArgError, "The sine residual table must be a contiguous 2D DComplex of [rows (at least 2), taps * oversample + 1]");
+		}
+		et = (struct wt_etab){
+			.e = (const double *)(nary_get_pointer_for_read(sine_v) + nary_get_offset(sine_v)),
+			.rows = RNARRAY_SHAPE(sine_v)[0],
+			.len = table_len,
+			.os = os,
+			.taps = taps,
+			.m1 = m1,
+		};
 	}
-	const double *blep = (const double *)(nary_get_pointer_for_read(blep_v) + nary_get_offset(blep_v));
-	if (CLASS_OF(residuals) != numo_cDComplex || RNARRAY_NDIM(residuals) != 3 || RNARRAY_SHAPE(residuals)[0] < 2 ||
-			RNARRAY_SHAPE(residuals)[1] != os + 2 || RNARRAY_SHAPE(residuals)[2] != taps || !RTEST(nary_check_contiguous(residuals))) {
-		rb_raise(rb_eArgError, "Sync residuals must be a contiguous 3D DComplex of [rows (at least 2), oversample + 2, taps]");
-	}
-	struct wt_residuals rs = {
-		.g = (const double *)(nary_get_pointer_for_read(residuals) + nary_get_offset(residuals)),
-		.rows = (long)RNARRAY_SHAPE(residuals)[0],
-	};
 
 	_Bool was_inplace;
 	wt_ensure_output(&buffer, &t, &was_inplace);
@@ -1601,8 +1778,22 @@ static VALUE ruby_sync(int argc, VALUE *argv, VALUE self)
 	size_t scptr_step = 1;
 	mb_read_signal_input(&scan, length, "Scan", &sc, &scptr, &scptr_step);
 
-	struct wt_sel sel;
-	sel.valid = 0;
+	struct wt_sel sel = { 0 };
+	struct wt_harms hs = { 0 };
+
+	// The steady harmonic coefficients (see wt_steady_coefs), kept while
+	// the fundamental's frequency and the selection stay the same
+	double *coef = bl ? ALLOC_N(double, 2 * (t.spec_cols + WT_CHAINS + 1)) : NULL;
+	if (bl) {
+		et.e0 = ALLOC_N(double, 2 * et.rows);
+		for (size_t r = 0; r < et.rows; r++) {
+			et.e0[2 * r] = et.e[r * et.len * 2];
+			et.e0[2 * r + 1] = et.e[r * et.len * 2 + 1];
+		}
+	}
+	_Bool coef_valid = 0;
+	double coef_g = 0;
+	struct wt_sel coef_sel = { 0 };
 
 	for (size_t i = 0; i < length; i++) {
 		if (freqptr) freq = freqptr[i * freqptr_step];
@@ -1617,23 +1808,24 @@ static VALUE ruby_sync(int argc, VALUE *argv, VALUE self)
 			wf = k1 > k2 ? k1 : k2;
 		}
 		double m = fabs(freq * adv) * wf;
+		if (bl) {
+			wt_reselect(&t, m, sc, &sel);
+			wt_harms_of(&t, &sel, &hs);
+		}
+
+		// The phase velocity into this sample (for the first sample of an
+		// unprimed oscillator, as if it had always run at this frequency)
+		double vel = dir * (primed ? prev_inc : freq * adv);
 
 		if (primed) {
-			double vel = dir * prev_inc;
-
 			if (pulse != 0) {
 				double d = 1.0 - fabs(pulse); // the event is d samples before this sample
 				if (d < 0) d = 0;
 				if (d > 1) d = 1;
 
-				p = wt_wrap(p + vel * (1.0 - d), 1.0);
+				wt_sync_move(&et, &hs, &p, vel, 1.0 - d, d, w, bl, acc, pos, cs);
 				double k0, k1;
 				double u0 = wt_warp_slope(p, w, &k0);
-				double v0re = 0, v0im = 0, v1re = 0, v1im = 0;
-				if (bl) {
-					wt_reselect(&t, m, sc, &sel);
-					wt_value_sel(&t, u0, &sel, mode, cs, &ks, &v0re, &v0im);
-				}
 
 				double nvel;
 				if (soft) {
@@ -1647,26 +1839,33 @@ static VALUE ruby_sync(int argc, VALUE *argv, VALUE self)
 
 				if (bl) {
 					double u1 = wt_warp_slope(p, w, &k1);
-					if (soft) {
-						v1re = v0re;
-						v1im = v0im;
-					} else {
-						wt_value_sel(&t, u1, &sel, mode, cs, &ks, &v1re, &v1im);
-					}
-					wt_sync_spectral(&t, &sel, u0, vel * k0, u1, nvel * k1, v0re, v0im, v1re, v1im, d, &rs, blep, os, taps, acc, pos, cs, limit);
+					wt_switch(acc, pos, &et, cs, &hs, d, u0, vel * k0, u1, nvel * k1);
 				}
 				vel = nvel;
 
-				p = wt_wrap(p + vel * d, 1.0);
+				wt_sync_move(&et, &hs, &p, vel, d, 0, w, bl, acc, pos, cs);
 			} else {
-				p = wt_wrap(p + vel, 1.0);
+				wt_sync_move(&et, &hs, &p, vel, 1.0, 0, w, bl, acc, pos, cs);
 			}
 		}
 
 		double re, im;
-		double u = w != 0.5 ? (p < w ? p * (0.5 / w) : 0.5 + (p - w) * (0.5 / (1.0 - w))) : p;
-		wt_reselect(&t, m, sc, &sel);
-		wt_value_dispatch(&t, u, &sel, mode, &ks, &re, &im);
+		double k;
+		double u = wt_warp_slope(p, w, &k);
+		if (bl) {
+			double gs = vel * k;
+			if (!coef_valid || gs != coef_g || sel.k != coef_sel.k || sel.two != coef_sel.two || sel.x != coef_sel.x ||
+					sel.fa != coef_sel.fa || sel.fb != coef_sel.fb || sel.fs != coef_sel.fs) {
+				wt_steady_coefs(&et, &hs, gs, coef);
+				coef_valid = 1;
+				coef_g = gs;
+				coef_sel = sel;
+			}
+			wt_steady(&et, &hs, coef, u, gs, cs, &re, &im);
+		} else {
+			wt_reselect(&t, m, sc, &sel);
+			wt_value_dispatch(&t, u, &sel, mode, &ks, &re, &im);
+		}
 		re += acc[pos];
 		acc[pos] = 0;
 		if (cs == 2) {
@@ -1683,6 +1882,11 @@ static VALUE ruby_sync(int argc, VALUE *argv, VALUE self)
 
 		prev_inc = freq * adv;
 		primed = 1;
+	}
+
+	if (coef) {
+		xfree(coef);
+		xfree(et.e0);
 	}
 
 	if (length > 0) {
@@ -1704,8 +1908,7 @@ static VALUE ruby_sync(int argc, VALUE *argv, VALUE self)
 	RB_GC_GUARD(width);
 	RB_GC_GUARD(scan);
 	RB_GC_GUARD(ring);
-	RB_GC_GUARD(residuals);
-	RB_GC_GUARD(blep_v);
+	RB_GC_GUARD(sine_v);
 	RB_GC_GUARD(buffer);
 
 	return buffer;
