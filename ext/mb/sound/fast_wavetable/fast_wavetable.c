@@ -120,7 +120,6 @@ struct wt_table {
 	const double *spectra; // [frames, spec_cols] complex (re, im pairs), or NULL
 	long spec_cols;
 	long harmonics[WT_MAX_LEVELS];
-	int taper; // 1: Lanczos sigma
 	int scan_wrap; // 1: scan positions wrap around (see wt_frames)
 };
 
@@ -184,8 +183,8 @@ static int wt_read_levels(VALUE datas, VALUE counts, struct wt_level *levels, lo
 static void wt_read_table(VALUE spec, struct wt_table *t)
 {
 	Check_Type(spec, T_ARRAY);
-	if (RARRAY_LEN(spec) != 19) {
-		rb_raise(rb_eArgError, "A wavetable kernel spec has 19 elements");
+	if (RARRAY_LEN(spec) != 18) {
+		rb_raise(rb_eArgError, "A wavetable kernel spec has 18 elements");
 	}
 
 	t->mode = NUM2INT(rb_ary_entry(spec, 0));
@@ -224,8 +223,7 @@ static void wt_read_table(VALUE spec, struct wt_table *t)
 	VALUE spectra = rb_ary_entry(spec, 15);
 	t->spectra = NULL;
 	t->spec_cols = 0;
-	t->taper = NUM2INT(rb_ary_entry(spec, 17));
-	t->scan_wrap = NUM2INT(rb_ary_entry(spec, 18)) != 0;
+	t->scan_wrap = NUM2INT(rb_ary_entry(spec, 17)) != 0;
 	if (!NIL_P(spectra)) {
 		if (CLASS_OF(spectra) != numo_cDComplex || RNARRAY_NDIM(spectra) != 2 || !RTEST(nary_check_contiguous(spectra)) ||
 				(long)RNARRAY_SHAPE(spectra)[0] != t->frames) {
@@ -669,11 +667,10 @@ static inline double wt_crossing(double e, double d, double b)
 
 // Adds the derivatives of orders 1...+orders+ (per cycle) of one frame's
 // harmonics 1..+harmonics+ at +u+ times +weight+ to +dre+/+dim+: the sums of
-// c_h (2 pi i h)^o e^(2 pi i h u), with Lanczos sigma factors if +taper+
-// (as the levels have).  The real parts are a real table's derivatives;
+// c_h (2 pi i h)^o e^(2 pi i h u).  The real parts are a real table's derivatives;
 // complex tables use both.  The exponentials come from a rotation
 // recurrence (the Ruby mirror does the same real arithmetic).
-static void wt_harmonic_derivs(const double *c, long harmonics, int taper, double u, int orders, double weight, double *dre, double *dim)
+static void wt_harmonic_derivs(const double *c, long harmonics, double u, int orders, double weight, double *dre, double *dim)
 {
 	double cu = cos(WT_TWO_PI * u);
 	double su = sin(WT_TWO_PI * u);
@@ -690,12 +687,6 @@ static void wt_harmonic_derivs(const double *c, long harmonics, int taper, doubl
 		double ci = c[2 * h + 1];
 		double zr = cr * er - ci * ei;
 		double zi = cr * ei + ci * er;
-		if (taper) {
-			double x = M_PI * (double)h / (double)(harmonics + 1);
-			double g = sin(x) / x;
-			zr = zr * g;
-			zi = zi * g;
-		}
 
 		double w = WT_TWO_PI * (double)h;
 		double pr = 1.0, pi = 0.0;
@@ -734,11 +725,11 @@ static void wt_spectral_derivs(const struct wt_table *t, double u, const struct 
 		long h = t->harmonics[sel->k + l];
 		const double *fa = t->spectra + sel->fa * t->spec_cols * 2;
 		if (sel->fb < 0) {
-			wt_harmonic_derivs(fa, h, t->taper, u, orders, lw, dre, dim);
+			wt_harmonic_derivs(fa, h, u, orders, lw, dre, dim);
 		} else {
 			const double *fb = t->spectra + sel->fb * t->spec_cols * 2;
-			wt_harmonic_derivs(fa, h, t->taper, u, orders, lw * (1.0 - sel->fs), dre, dim);
-			wt_harmonic_derivs(fb, h, t->taper, u, orders, lw * sel->fs, dre, dim);
+			wt_harmonic_derivs(fa, h, u, orders, lw * (1.0 - sel->fs), dre, dim);
+			wt_harmonic_derivs(fb, h, u, orders, lw * sel->fs, dre, dim);
 		}
 	}
 }
@@ -1392,18 +1383,11 @@ static void wt_add_step(double *acc, size_t pos, const double *blep, size_t os, 
 	}
 }
 
-// The gain of harmonic +h+ in a level with +harmonics+ harmonics (0 above
-// them; Lanczos sigma factors if +taper+, as the levels have).
-static inline double wt_harmonic_gain(long h, long harmonics, int taper)
+// The gain of harmonic +h+ in a level with +harmonics+ harmonics (1, or 0
+// above them).
+static inline double wt_harmonic_gain(long h, long harmonics)
 {
-	if (h > harmonics) {
-		return 0;
-	}
-	if (!taper) {
-		return 1.0;
-	}
-	double x = M_PI * (double)h / (double)(harmonics + 1);
-	return sin(x) / x;
+	return h > harmonics ? 0.0 : 1.0;
 }
 
 // Adds the residuals of a sync event +d+ samples before the current sample
@@ -1462,8 +1446,8 @@ static void wt_sync_spectral(const struct wt_table *t, const struct wt_sel *sel,
 			}
 
 			double wgt = sel->two ?
-				(1.0 - x) * wt_harmonic_gain(h, ha, t->taper) + x * wt_harmonic_gain(h, hb, t->taper) :
-				wt_harmonic_gain(h, ha, t->taper);
+				(1.0 - x) * wt_harmonic_gain(h, ha) + x * wt_harmonic_gain(h, hb) :
+				wt_harmonic_gain(h, ha);
 			if (wgt == 0) {
 				continue;
 			}

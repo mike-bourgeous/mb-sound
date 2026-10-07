@@ -316,7 +316,7 @@ module MB
 
         # [k, two levels?, x, fa, fb, fs]: see wt_select in C.
         def select(spec, m, scan)
-          fa, fb, fs = frames(spec[1], scan, spec[18])
+          fa, fb, fs = frames(spec[1], scan, spec[17])
           n = spec[2].length
           k = 0
           if n > 1
@@ -331,7 +331,7 @@ module MB
         # See wt_harmonic_derivs in C: adds derivatives of orders
         # 1...+orders+ of frame +f+'s harmonics 1..+harmonics+ at +u+ times
         # +weight+ to +dre+/+dim+.
-        def harmonic_derivs(spectra, f, harmonics, taper, u, orders, weight, dre, dim)
+        def harmonic_derivs(spectra, f, harmonics, u, orders, weight, dre, dim)
           cu = Math.cos(TWO_PI * u)
           su = Math.sin(TWO_PI * u)
           er = 1.0
@@ -350,12 +350,6 @@ module MB
             ci = c.imag
             zr = cr * er - ci * ei
             zi = cr * ei + ci * er
-            if taper
-              x = Math::PI * h.to_f / (harmonics + 1).to_f
-              g = Math.sin(x) / x
-              zr *= g
-              zi *= g
-            end
 
             w = TWO_PI * h.to_f
             pr = 1.0
@@ -384,26 +378,21 @@ module MB
 
           k, two, x, fa, fb, fs = sel
           cols = spectra.shape[1]
-          taper = spec[17] != 0
           (two ? 2 : 1).times do |l|
             lw = two ? (l == 0 ? 1.0 - x : x) : 1.0
             h = [spec[16][k + l], cols - 1].min
             if fb < 0
-              harmonic_derivs(spectra, fa, h, taper, u, orders, lw, dre, dim)
+              harmonic_derivs(spectra, fa, h, u, orders, lw, dre, dim)
             else
-              harmonic_derivs(spectra, fa, h, taper, u, orders, lw * (1.0 - fs), dre, dim)
-              harmonic_derivs(spectra, fb, h, taper, u, orders, lw * fs, dre, dim)
+              harmonic_derivs(spectra, fa, h, u, orders, lw * (1.0 - fs), dre, dim)
+              harmonic_derivs(spectra, fb, h, u, orders, lw * fs, dre, dim)
             end
           end
         end
 
         # See wt_harmonic_gain in C.
-        def harmonic_gain(h, harmonics, taper)
-          return 0.0 if h > harmonics
-          return 1.0 unless taper
-
-          x = Math::PI * h.to_f / (harmonics + 1).to_f
-          Math.sin(x) / x
+        def harmonic_gain(h, harmonics)
+          h > harmonics ? 0.0 : 1.0
         end
 
         # [real parts, imaginary parts] of Wavetable.sync_residuals as nested
@@ -502,7 +491,6 @@ module MB
             hb = two ? [spec[16][k + 1], cols - 1].min : 0
             hmax = ha > hb ? ha : hb
             x = two ? x : 0.0
-            taper = spec[17] != 0
             same = f0 == f1
 
             c0 = Math.cos(TWO_PI * u0)
@@ -533,7 +521,7 @@ module MB
               rotate(r1r, r1i, b1r, b1i, taps)
               rotate(r0r, r0i, b0r, b0i, taps) unless same
 
-              wgt = two ? (1.0 - x) * harmonic_gain(h, ha, taper) + x * harmonic_gain(h, hb, taper) : harmonic_gain(h, ha, taper)
+              wgt = two ? (1.0 - x) * harmonic_gain(h, ha) + x * harmonic_gain(h, hb) : harmonic_gain(h, ha)
               next if wgt == 0
 
               c = spectra[fa, h]
@@ -682,7 +670,7 @@ module MB
         def value(spec, u, m, scan, interp)
           datas = spec[2]
           n = datas.length
-          fa, fb, fs = frames(spec[1], scan, spec[18])
+          fa, fb, fs = frames(spec[1], scan, spec[17])
           return level(spec, 0, u, fa, fb, fs, interp) if n == 1
 
           hi = spec[5]
@@ -819,7 +807,7 @@ module MB
         # The half mean (see Builder.half_means) at +scan+.
         def half_mean(spec, scan)
           hm = spec[7]
-          fa, fb, fs = frames(spec[1], scan, spec[18])
+          fa, fb, fs = frames(spec[1], scan, spec[17])
           return hm[fa] unless fb
 
           hm[fa] + (hm[fb] - hm[fa]) * fs

@@ -8,9 +8,9 @@ module MB
       # level, and phase, while their peaks differ: the natural Gibbs
       # overshoot reaches about 1.18 on the saw and square (user's choice,
       # 2026-10-06: the exact series over the sigma taper, accepting
-      # different peaks into nonlinear effects).  For peaks near 1, use
-      # Wavetable.from_harmonics(Library.saw) etc.  Organ is
-      # scaled to a peak near 1.
+      # different peaks into nonlinear effects; the taper option was removed
+      # 2026-10-08, preferring the bright top octave).  Organ is scaled to a
+      # peak near 1.
       module Library
         HARMONICS = 1023
 

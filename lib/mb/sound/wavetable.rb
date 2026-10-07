@@ -164,20 +164,18 @@ module MB
         # at 0), each an Array or 1D NArray, or an Array of them for several
         # frames (scanned in order).  Amplitudes are kept exactly (no
         # normalizing), so e.g. the Fourier series of a ramp plays at the
-        # same level as Tone#ramp, Gibbs overshoot included (unless +taper+ is
-        # :sigma: each level's harmonics are scaled by Lanczos sigma factors,
-        # see Builder.taper_gains, so its peaks stay near 1).  +size+ is the
+        # same level as Tone#ramp, Gibbs overshoot included.  +size+ is the
         # length of #frames (and caps the harmonics at size / 2 - 1).  See
         # the class description for +complex+, +mips+, +interpolation+;
         # +align+ lines up frames in time (off by default, since the phases
         # are given).
-        def from_harmonics(amplitudes, phases = nil, size: 2048, complex: false, mips: :default, interpolation: nil, align: false, taper: nil, name: nil)
+        def from_harmonics(amplitudes, phases = nil, size: 2048, complex: false, mips: :default, interpolation: nil, align: false, name: nil)
           spectra = Builder.spectra_from_harmonics(amplitudes, phases)
           max = (size - 1) / 2
           spectra = spectra[true, 0..max] if spectra.shape[1] - 1 > max
           spectra = Builder.align(spectra) if align && spectra.shape[0] > 1
 
-          new(spectra: spectra, size: size, complex: complex, mips: mips, interpolation: interpolation, taper: taper, name: name)
+          new(spectra: spectra, size: size, complex: complex, mips: mips, interpolation: interpolation, name: name)
         end
 
         # A table from samples.  In cycle mode (default), +data+ is one
@@ -187,7 +185,7 @@ module MB
         # sample mode, +data+ is the sound (1D; +root+, +loop+, and
         # +sample_rate+ apply).  +harmonics+ limits a cycle table's
         # harmonics (default: all that fit the frame size).
-        def from_samples(data, mode: :cycle, complex: false, mips: :default, interpolation: nil, align: true, aligned: false, normalize: false, taper: nil, harmonics: nil, root: nil, loop: nil, sample_rate: 48000, name: nil, source_info: nil)
+        def from_samples(data, mode: :cycle, complex: false, mips: :default, interpolation: nil, align: true, aligned: false, normalize: false, harmonics: nil, root: nil, loop: nil, sample_rate: 48000, name: nil, source_info: nil)
           data = to_narray(data)
 
           case mode
@@ -197,7 +195,7 @@ module MB
 
             data = data.is_a?(Numo::SComplex) || data.is_a?(Numo::DComplex) ? Numo::SComplex.cast(data) : Numo::SFloat.cast(data)
             data = Wavetable.normalize(data.dup) if normalize
-            new(frames: data, complex: complex, mips: mips, interpolation: interpolation, align: align, aligned: aligned, taper: taper, harmonics: harmonics, name: name, source_info: source_info)
+            new(frames: data, complex: complex, mips: mips, interpolation: interpolation, align: align, aligned: aligned, harmonics: harmonics, name: name, source_info: source_info)
 
           when :sample
             raise ArgumentError, 'A sample must be a 1D NArray' unless data.ndim == 1
@@ -238,7 +236,7 @@ module MB
         # .from_samples.
         #
         # Settings saved by #save (see #metadata) are the defaults: the mode,
-        # level spacing, taper, interpolation, name, root, and loop; frames
+        # level spacing, interpolation, name, root, and loop; frames
         # saved aligned aren't aligned again.  Files hold the frames (or the
         # sound), not the levels: levels are always rebuilt on load.  A
         # spacing chosen explicitly when the table was made (+mips:+ other
@@ -247,6 +245,9 @@ module MB
         # given here always wins (e.g. to re-mipmap a saved table).  Files
         # saved before the spacing_explicit tag existed keep only 'none' and
         # harmonic-count lists (never defaults); their ratios get the default.
+        # Files saved with a taper tag (the Lanczos sigma taper, removed
+        # 2026-10-08; such files hold the exact series) load untapered, with
+        # a warning.
         def from_file(path, mode: nil, slices: 10, ratio: 1.0, root: nil, loop: nil, **options)
           path = path.path if path.respond_to?(:path)
 
@@ -258,7 +259,9 @@ module MB
           if !options.include?(:mips) && saved_spacing_explicit?(info)
             options[:mips] = parse_saved_spacing(info[:spacing])
           end
-          options[:taper] = info[:taper].to_sym if !options.include?(:taper) && info[:taper] && info[:taper] != ''
+          if info[:taper] && info[:taper] != ''
+            warn "Wavetable #{options[:name]}: ignoring the saved #{info[:taper]} taper (removed); playing the exact series"
+          end
           options[:interpolation] ||= info[:interpolation]&.to_sym
           options[:harmonics] ||= info[:harmonics].to_i if mode == :cycle && info[:harmonics]
           options.delete(:interpolation) if options[:interpolation].nil?
@@ -428,9 +431,6 @@ module MB
       # see Builder.spectra_from_frames), or nil for unmipped tables.
       attr_reader :spectra
 
-      # The harmonic taper (:sigma) or nil (see .from_harmonics).
-      attr_reader :taper
-
       # True if the frames were aligned in time (see .from_samples).
       def aligned?
         @aligned
@@ -445,18 +445,16 @@ module MB
       attr_accessor :name
 
       # Use the class methods (.from_harmonics, .from_samples, ...).
-      def initialize(mode: :cycle, spectra: nil, frames: nil, data: nil, size: nil, complex: false, mips: :default, interpolation: nil, align: false, aligned: false, taper: nil, harmonics: nil, root: nil, loop: nil, sample_rate: 48000, name: nil, source_info: nil)
+      def initialize(mode: :cycle, spectra: nil, frames: nil, data: nil, size: nil, complex: false, mips: :default, interpolation: nil, align: false, aligned: false, harmonics: nil, root: nil, loop: nil, sample_rate: 48000, name: nil, source_info: nil)
         raise ArgumentError, "Unknown wavetable mode #{mode.inspect} (#{MODES.join(', ')})" unless MODES.include?(mode)
 
         @mode = mode
         @complex = !!complex
         @spacing_explicit = mips != :default
         @spacing = parse_spacing(mips == :default ? DEFAULT_MIPS : mips)
-        @taper = taper
         @aligned = !!aligned
         @harmonic_limit = harmonics
         @source_info = (source_info || {}).reject { |k, _| SAVED_KEYS.include?(k) }.freeze
-        Builder.taper_gains(taper, 1) if taper # checks it
         @name = name
         @kernel_specs = {}
         @interpolation = interpolation || (@spacing ? :optimal : :cubic)
@@ -511,7 +509,7 @@ module MB
 
         # Tables made from spectra synthesize their frames on first use (the
         # kernels read the levels; HarmonicTable rebuilds tables often)
-        @frames ||= Builder.synthesize(@spectra, @size, complex: @complex, taper: @taper).freeze
+        @frames ||= Builder.synthesize(@spectra, @size, complex: @complex).freeze
       end
 
       # Cycle mode: the number of harmonics of the brightest level.
@@ -536,8 +534,8 @@ module MB
       # Builder.half_means), 8 loop datas, 9 loop counts, 10 loop rates, 11
       # loop start, 12 loop end, 13 end (source samples), 14 GUARD, 15 the
       # harmonic spectra for exact derivatives (cycle mode; see
-      # #derivative_spectra), 16 the harmonic count of each level, 17 the
-      # taper (1 for :sigma, else 0), 18 +scan_wrap+ (1 if scan positions
+      # #derivative_spectra), 16 the harmonic count of each level, 17
+      # +scan_wrap+ (1 if scan positions
       # wrap around instead of clamping, see Tone#wavetable, else 0).  With
       # +sync+ (band-limited cycle tables), the levels and thresholds are
       # the sync levels' (see #sync_levels and FastWavetable.sync).
@@ -566,7 +564,6 @@ module MB
             GUARD,
             derivative_spectra,
             @mode == :cycle ? levels.map { |l| l.bandwidth.finite? ? l.bandwidth.to_i : derivative_spectra.shape[1] - 1 }.freeze : nil,
-            @taper == :sigma ? 1 : 0,
             scan_wrap ? 1 : 0,
           ].freeze
         end
@@ -633,7 +630,7 @@ module MB
             spacing *= 1.1 # very long frames: wider spacing to stay within the kernels' level limit
             counts = counts_for.(spacing)
           end
-          datas, lengths, bandwidths = Builder.cycle_levels(@spectra, counts, @complex, emphasis, @taper)
+          datas, lengths, bandwidths = Builder.cycle_levels(@spectra, counts, @complex, emphasis)
           datas.each_with_index.map { |d, k| d.freeze; Level.new(d, lengths[k], lengths[k].to_f, bandwidths[k]) }.freeze
         end
       end
@@ -812,12 +809,10 @@ module MB
       #
       # Everything derived while making the table is saved as tags (see
       # #metadata), so .from_file makes the same table again: frames saved
-      # aligned aren't aligned again, and a tapered table saves its exact
-      # series (the taper is applied per level when it loads).  Complex
-      # tables save their real parts.
+      # aligned aren't aligned again.  Complex tables save their real parts.
       def save(filename, overwrite: false)
         if @mode == :cycle
-          frames = @taper && @spectra ? Builder.synthesize(@spectra, @size, complex: @complex) : self.frames
+          frames = self.frames
           frames = frames.real if @complex
           Wavetable.save_frames(filename, frames, overwrite: overwrite, metadata: metadata)
         else
@@ -833,7 +828,7 @@ module MB
       # The table's settings and derived values, as saved by #save (with
       # #source_info): mode, name, frame count, period (cycle mode samples
       # per frame), whether the frames are aligned, level spacing (and
-      # whether it was chosen explicitly, see .from_file), taper,
+      # whether it was chosen explicitly, see .from_file),
       # interpolation, complex, harmonics (cycle mode), and in sample mode
       # the root (Hz), loop
       # ("begin...end" source samples), size, and sample rate.
@@ -846,7 +841,7 @@ module MB
         m = @source_info.merge(
           mode: @mode.to_s, name: @name, frames: @frame_count, aligned: @aligned.to_s, spacing: spacing,
           spacing_explicit: @spacing_explicit.to_s,
-          taper: @taper&.to_s, interpolation: @interpolation.to_s, complex: @complex.to_s
+          interpolation: @interpolation.to_s, complex: @complex.to_s
         )
         if @mode == :cycle
           m[:period] = @size
@@ -934,13 +929,13 @@ module MB
 
       def build_cycle_levels(emphasis)
         if @spacing
-          datas, counts, bandwidths = Builder.cycle_levels(@spectra, @spacing, @complex, emphasis, @taper)
+          datas, counts, bandwidths = Builder.cycle_levels(@spectra, @spacing, @complex, emphasis)
           levels = datas.each_with_index.map { |d, k| Level.new(d, counts[k], counts[k].to_f, bandwidths[k]) }
         else
           frames = self.frames
           if emphasis
             spectra = @spectra || Builder.spectra_from_frames(@frames)
-            frames = Builder.synthesize(spectra, @size, complex: @complex, emphasis: emphasis, taper: @taper)
+            frames = Builder.synthesize(spectra, @size, complex: @complex, emphasis: emphasis)
           end
           levels = [Level.new(Builder.wrap_guard(frames), @size, @size.to_f, Float::INFINITY)]
         end

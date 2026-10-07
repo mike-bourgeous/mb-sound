@@ -197,15 +197,6 @@ RSpec.describe(MB::Sound::Tone, '#wavetable', aggregate_failures: true) do
       end
     end
 
-    it 'plays the sigma-tapered saw with peaks near the PolyBLEP ramp' do
-      t = 55.hz.wavetable(w.from_harmonics(w::Library.saw, taper: :sigma))
-      r = 55.hz.ramp
-      a = Numo::DFloat.cast(Numo::NArray.concatenate(Array.new(12) { t.sample(800).dup }))
-      b = Numo::DFloat.cast(Numo::NArray.concatenate(Array.new(12) { r.sample(800).dup }))
-      expect(a.abs.max).to be_within(0.05).of(b.abs.max)
-      expect(10 * Math.log10((a**2).mean / (b**2).mean)).to be_within(0.4).of(0)
-    end
-
     it 'aliases far less than naive and PolyBLEP ramps' do
       table = aliasing_db(1001) { |p| p.wavetable(:saw) }
       naive = aliasing_db(1001) { |p| p.aramp }
