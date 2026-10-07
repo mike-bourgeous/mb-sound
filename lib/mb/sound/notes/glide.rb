@@ -34,6 +34,14 @@ module MB
       # smoothstep plus a bump k × t³ × (1 - t)², with k found for the
       # overshoot; see .overshoot_k).
       #
+      # +shape+ (default nil: the smoothstep above, unchanged) gives the
+      # glide another curve from the tweening library (anything
+      # MB::Sound::Curve.from takes: :squiggle, :elastic, :back, :bounce,
+      # :steps, :s, a Curve, a Proc, ...).  With a named shape,
+      # +overshoot+ and +cycles+ (when given) set that curve's options
+      # (e.g. the squiggle's size and wiggles; see Curve); otherwise the
+      # curve's defaults apply.
+      #
       # +time+ is seconds (a number or length), a graph node of seconds
       # (read on the note-on's sample), or :gm: CC 5 (Notes#portamento_time,
       # 2 ms..5 s) with CC 65 (portamento on/off, off by default as in GM2)
@@ -51,6 +59,10 @@ module MB
         # The overshoot fraction (see the class description).
         attr_reader :overshoot
 
+        # The glide's MB::Sound::Curve, or nil for the default smoothstep
+        # (see the class description).
+        attr_reader :curve
+
         # Returns the bump scale k for which the glide curve
         # t²(3 - 2t) + k t³(1 - t)² peaks at 1 + +overshoot+ (found by
         # bisection; 0 for no overshoot).  The bump only passes the target
@@ -59,12 +71,25 @@ module MB
           MB::Sound::Curve.back_k(overshoot)
         end
 
-        def initialize(stream, time:, legato: false, from: nil, overshoot: 0, notes: nil, sample_rate: 48000)
+        def initialize(stream, time:, legato: false, from: nil, overshoot: nil, shape: nil, cycles: nil, notes: nil, sample_rate: 48000)
           super(stream, notes: notes, sample_rate: sample_rate)
 
-          raise ArgumentError, "Glide overshoot must be a number from 0 to 1 (got #{overshoot.inspect})" unless overshoot.is_a?(Numeric) && (0..1).cover?(overshoot)
-          @overshoot = overshoot.to_f
-          @overshoot_k = Glide.overshoot_k(@overshoot)
+          @curve = nil
+          if shape.nil?
+            raise ArgumentError, 'Glide cycles need a shape (e.g. shape: :squiggle)' unless cycles.nil?
+            overshoot ||= 0
+            raise ArgumentError, "Glide overshoot must be a number from 0 to 1 (got #{overshoot.inspect})" unless overshoot.is_a?(Numeric) && (0..1).cover?(overshoot)
+            @overshoot = overshoot.to_f
+            @overshoot_k = Glide.overshoot_k(@overshoot)
+          else
+            options = { overshoot: overshoot, cycles: cycles }.compact
+            @curve = shape.is_a?(Symbol) || shape.is_a?(String) ? MB::Sound::Curve.named(shape, **options) : MB::Sound::Curve.from(shape)
+            if !options.empty? && !(shape.is_a?(Symbol) || shape.is_a?(String))
+              raise ArgumentError, "Glide overshoot and cycles go with a shape name, not a #{shape.class} (give them to the curve)"
+            end
+            @overshoot = @curve.options[:overshoot].to_f
+            @overshoot_k = 0.0
+          end
 
           @time = time
           @legato = !!legato
@@ -96,7 +121,7 @@ module MB
           @value = @number
           @gliding = false
           @had_note = false
-          @node_type_name = "Notes Glide#{' (legato)' if @legato}"
+          @node_type_name = "Notes Glide#{' (legato)' if @legato}#{" #{@curve}" if @curve}"
         end
 
         # The current output note number.
@@ -138,6 +163,8 @@ module MB
           t = Numo::DFloat.new(n).seq(@position + 1)
           t.inplace / @length
           t.inplace.clip(0.0, 1.0)
+          return fill_curve(buf, from, to, t) if @curve
+
           shaped = t * -2
           shaped.inplace + 3
           sq = t * t
@@ -160,6 +187,18 @@ module MB
           @gliding = false if @position >= @length
         end
 
+        # #fill for a glide with a curve (see the class description) at
+        # positions +t+ (0..1).
+        def fill_curve(buf, from, to, t)
+          shaped = @curve.map(t)
+          shaped.inplace * (@number - @start)
+          shaped.inplace + @start
+          buf[from...to] = shaped
+          @position += to - from
+          @value = buf[to - 1]
+          @gliding = false if @position >= @length
+        end
+
         # The output at the current position (see #fill).
         # Constant only while not gliding (see Node::Held#steady_level).
         def steady_level
@@ -171,6 +210,8 @@ module MB
           return @number unless @gliding
 
           t = MB::M.clamp(@position.to_f / @length, 0.0, 1.0)
+          return @start + (@number - @start) * @curve.call(t) if @curve
+
           @start + (@number - @start) * (t * t * (3 - 2 * t) + @overshoot_k * t**3 * (1 - t)**2)
         end
 
