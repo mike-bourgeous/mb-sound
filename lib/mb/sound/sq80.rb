@@ -134,17 +134,77 @@ module MB
       end
 
       # A time node: +seconds+ shortened by +amount+ (0..1) of the +source+
-      # node (velocity: × (1 - amount × velocity); key: × 2 ** (-amount ×
-      # (key - 60) / 12)).
+      # node (see TimeScale).
       def self.scaled_time(seconds, source, amount, kind)
         raise ArgumentError, "SQ-80 #{kind} time scaling needs a #{kind} node (#{kind}:)" unless source.respond_to?(:sample)
         return seconds if seconds == 0
 
-        factor = case kind
-                 when :velocity then source * (-amount) + 1.0
-                 when :key then 2.0 ** ((source - 60.0) * (-amount / 12.0))
-                 end
-        (factor * seconds).named("SQ-80 #{kind} time")
+        TimeScale.new(seconds, source, kind, amount)
+      end
+
+      # An envelope time in seconds scaled by a control: +:velocity+ gives
+      # seconds × (1 - amount × velocity) (T1V), +:key+ seconds × 2 **
+      # (-amount × (note - 60) / 12) (TK).  The controls (Notes velocity
+      # and note number) hold still between notes, so while the source
+      # returns the same frozen constant buffer this returns one frozen
+      # constant buffer too (computed once per value), which envelopes
+      # take without copying.
+      class TimeScale
+        include GraphNode
+        include GraphNode::SampleRateHelper
+
+        KINDS = [:velocity, :key].freeze
+
+        attr_reader :seconds, :source, :kind, :amount
+
+        def initialize(seconds, source, kind, amount, sample_rate: 48000)
+          raise ArgumentError, "Time scale kind must be one of #{KINDS} (got #{kind.inspect})" unless KINDS.include?(kind)
+
+          @seconds = seconds.to_f
+          @source = source.get_sampler
+          @kind = kind
+          @amount = amount.to_f
+          @sample_rate = sample_rate.to_f
+          @buf = nil
+          @steady = nil
+          @steady_in = nil
+          @node_type_name = "SQ-80 #{kind} time"
+        end
+
+        def sample(count)
+          s = @source.sample(count)
+          return nil if s.nil?
+          return @steady if s.equal?(@steady_in) && @steady && @steady.length == s.length
+
+          if s.frozen? && (v = s[0]) == s.max && v == s.min
+            value = time(v)
+            @steady = @steady && @steady.length == s.length && @steady_value == value ? @steady : Numo::SFloat.new(s.length).fill(value).freeze
+            @steady_value = value
+            @steady_in = s
+            return @steady
+          end
+
+          @steady_in = nil
+          @buf = Numo::SFloat.zeros(s.length) if @buf.nil? || @buf.length != s.length
+          @buf[0..] = s.to_a.map { |x| time(x) }
+          @buf
+        end
+
+        # The scaled time for a control value +v+.
+        def time(v)
+          case @kind
+          when :velocity then @seconds * (1.0 - @amount * v)
+          else @seconds * 2.0 ** (-@amount * (v - 60.0) / 12.0)
+          end
+        end
+
+        def sources
+          { @kind => @source }
+        end
+
+        def to_s
+          "#{@node_type_name} #{MB::M.sigfigs(@seconds, 4)} s"
+        end
       end
 
       private_class_method :scaled_time

@@ -59,12 +59,21 @@ module MB
 
           @held ||= data ? data[0].to_f : draw
 
-          # Rising edges: sample i > 0 after i - 1 <= 0
-          pos = trig[0...n].gt(0)
-          prev = Numo::Bit.zeros(n)
-          prev[0] = @prev > 0 ? 1 : 0
-          prev[1..] = pos[0...(n - 1)] if n > 1
-          edges = (pos & ~prev).where
+          # Rising edges: sample i > 0 after i - 1 <= 0.  Most buffers of a
+          # slow trigger have no change (all high or all low).
+          trig = trig[0...n] if trig.length != n
+          pos = trig.gt(0)
+          high = pos.count_true
+          if high == 0
+            edges = []
+          elsif high == n
+            edges = @prev > 0 ? [] : [0]
+          else
+            prev = Numo::Bit.zeros(n)
+            prev[0] = @prev > 0 ? 1 : 0
+            prev[1..] = pos[0...(n - 1)] if n > 1
+            edges = (pos & ~prev).where.to_a
+          end
           @prev = trig[n - 1].to_f
 
           @buf = Numo::SFloat.zeros(n) if @buf.nil? || @buf.length != n

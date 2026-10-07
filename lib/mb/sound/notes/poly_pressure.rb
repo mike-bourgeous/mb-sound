@@ -90,7 +90,6 @@ module MB
           @poly = poly.get_sampler
           @channel = channel.get_sampler
           @sample_rate = sample_rate.to_f
-          @buf = nil
           @node_type_name = 'Notes Aftertouch'
         end
 
@@ -107,11 +106,7 @@ module MB
             return @steady = Numo::SFloat.new(count).fill(v).freeze
           end
 
-          @buf = Numo::SFloat.zeros(count) if @buf.nil? || @buf.length != count
-          @buf[0..] = p
-          mask = c.gt(p)
-          @buf[mask] = c[mask] if mask.any?
-          @buf
+          Numo::SFloat.maximum(p, c)
         end
 
         def control_specs

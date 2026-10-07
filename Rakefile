@@ -108,6 +108,7 @@ MEMCHECK_SPECS = [
   'spec/lib/mb/sound/band_limit_spec.rb',          # FastSynth.oscillate_bl/blit/oscillate_sync
   'spec/lib/mb/sound/shaper_spec.rb',              # FastClip.shape
   'spec/lib/mb/sound/envelope_spec.rb',            # FastEnvelope.process
+  'spec/lib/mb/sound/envelope_segments_spec.rb',   # FastEnvelope.process (segment lists, loops)
   'spec/lib/mb/sound/filter/four_pole_spec.rb',    # FastFilter.four_pole
   'spec/lib/mb/sound/wavetable_spec.rb',           # FastWavetable
   'spec/lib/mb/sound/graph_node/wavetable_spec.rb',
