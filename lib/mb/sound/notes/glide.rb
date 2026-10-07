@@ -24,6 +24,15 @@ module MB
       #   note, which glides from there (e.g. the old portamento filters
       #   that started at the MIDI default of 440 Hz).  With +time+ 0 the
       #   first note jumps, so a filter after the glide does the gliding.
+      #   An Interval (e.g. `-7.st`, `2.oct`) is relative instead: the first
+      #   note glides from that far away from itself (unison swarms start
+      #   their copies scattered this way; see Pitch#swarm).
+      #
+      # +overshoot+ (default 0) makes glides pass their target by that
+      # fraction of the glide's distance (0.1 = 10%) late in the glide and
+      # settle back onto it by the end, with zero slope at both ends (the
+      # smoothstep plus a bump k × t³ × (1 - t)², with k found for the
+      # overshoot; see .overshoot_k).
       #
       # +time+ is seconds (a number or length), a graph node of seconds
       # (read on the note-on's sample), or :gm: CC 5 (Notes#portamento_time,
@@ -39,8 +48,35 @@ module MB
         # The start pitch as given (see the class description), or nil.
         attr_reader :from
 
-        def initialize(stream, time:, legato: false, from: nil, notes: nil, sample_rate: 48000)
+        # The overshoot fraction (see the class description).
+        attr_reader :overshoot
+
+        # Returns the bump scale k for which the glide curve
+        # t²(3 - 2t) + k t³(1 - t)² peaks at 1 + +overshoot+ (found by
+        # bisection; 0 for no overshoot).  The bump only passes the target
+        # once k > 3, so tiny overshoots still need k near 3.
+        def self.overshoot_k(overshoot)
+          return 0.0 if overshoot <= 0
+
+          peak = ->(k) {
+            (1..999).map { |j| t = j / 1000.0; t * t * (3 - 2 * t) + k * t**3 * (1 - t)**2 }.max - 1
+          }
+          lo = 3.0
+          hi = 6.0
+          hi *= 2 while peak.(hi) < overshoot
+          60.times do
+            mid = (lo + hi) / 2
+            peak.(mid) < overshoot ? lo = mid : hi = mid
+          end
+          (lo + hi) / 2
+        end
+
+        def initialize(stream, time:, legato: false, from: nil, overshoot: 0, notes: nil, sample_rate: 48000)
           super(stream, notes: notes, sample_rate: sample_rate)
+
+          raise ArgumentError, "Glide overshoot must be a number from 0 to 1 (got #{overshoot.inspect})" unless overshoot.is_a?(Numeric) && (0..1).cover?(overshoot)
+          @overshoot = overshoot.to_f
+          @overshoot_k = Glide.overshoot_k(@overshoot)
 
           @time = time
           @legato = !!legato
@@ -61,8 +97,11 @@ module MB
 
           @from = from
           @from_note = nil
-          unless from.nil?
-            raise ArgumentError, "Glide start must be a Pitch or a note number (got #{from.inspect})" unless from.is_a?(Numeric) || from.is_a?(MB::Sound::Pitch)
+          @from_offset = nil
+          if from.is_a?(Interval)
+            @from_offset = from.to_semitones.to_f
+          elsif !from.nil?
+            raise ArgumentError, "Glide start must be a Pitch, a note number, or an Interval (got #{from.inspect})" unless from.is_a?(Numeric) || from.is_a?(MB::Sound::Pitch)
             @number = @from_note = number_of(from)
           end
 
@@ -107,6 +146,7 @@ module MB
           n = to - from
           t = (Numo::DFloat.new(n).seq(@position + 1) / @length).clip(0.0, 1.0)
           shaped = t * t * (3 - 2 * t)
+          shaped += @overshoot_k * t**3 * (1 - t)**2 if @overshoot_k != 0
           buf[from...to] = shaped * (@number - @start) + @start
           @position += n
           @value = buf[to - 1]
@@ -124,7 +164,7 @@ module MB
           return @number unless @gliding
 
           t = MB::M.clamp(@position.to_f / @length, 0.0, 1.0)
-          @start + (@number - @start) * t * t * (3 - 2 * t)
+          @start + (@number - @start) * (t * t * (3 - 2 * t) + @overshoot_k * t**3 * (1 - t)**2)
         end
 
         def note_on(event)
@@ -132,6 +172,10 @@ module MB
           legato = @stack.length > 1 || event.legato?
           from = @from_note
           @from_note = nil
+          if @from_offset
+            from ||= target + @from_offset
+            @from_offset = nil
+          end
 
           glide = from || (@had_note && enabled? && (legato || !@legato))
           @had_note = true
@@ -145,6 +189,7 @@ module MB
         def chase(event)
           @had_note = true
           @from_note = nil
+          @from_offset = nil
           glide_to(number_of(event.note), nil, false)
         end
 

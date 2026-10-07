@@ -88,7 +88,11 @@ module MB
       # Settings return a new NotePitch (pitches are values):
       # - #bend_range(12.st): the bend range of this pitch (the stream's by
       #   default; see MIDI::Stream#bend_range).
-      # - #transpose(7.st): an offset.
+      # - #transpose(7.st): an offset (or a graph node of semitones).
+      #
+      # Inside a unison block (Pitch#unison), the settings may be per-copy
+      # values: a Range (random per copy), `spread(a..b)` (even by copy),
+      # or `channels(...)` (see Unison::Copy).
       #
       # Examples:
       #     play v.hz.saw * v.amp_env
@@ -111,7 +115,7 @@ module MB
         end
 
         # Setting names accepted by #initialize.
-        SETTINGS = [:bend_range, :transpose, :glide, :vibrato].freeze
+        SETTINGS = [:bend_range, :transpose, :glide, :vibrato, :shift].freeze
 
         # The node producing this pitch's frequency in Hz (a
         # Notes::Frequency, made on first use).
@@ -141,6 +145,7 @@ module MB
         # Returns a NotePitch with a bend range of +range+ (an Interval or
         # semitones, e.g. `12.st`), or the stream's with nil.
         def bend_range(range)
+          range = per_copy(range)
           with(bend_range: range.nil? ? nil : Interval.semitones(range).to_f)
         end
 
@@ -156,7 +161,7 @@ module MB
         #     play v.hz.vibrato.saw * v.amp_env
         #     play v.hz.vibrato(6, depth: 20.cents).saw * v.amp_env
         def vibrato(rate = nil, depth: nil, delay: nil)
-          with(vibrato: [rate, depth, delay].freeze)
+          with(vibrato: [per_copy(rate), per_copy(depth), per_copy(delay)].freeze)
         end
 
         # Returns a NotePitch that glides between notes (portamento) over
@@ -165,17 +170,38 @@ module MB
         # domain.  With +legato: true+ only legato notes glide; otherwise
         # every note after the first does.  +from:+ (a Pitch or note number)
         # is where the pitch starts, so the first note glides from it too.
-        # See Notes::Glide.
+        # An Interval +from:+ is relative to the first note (e.g. `-1.oct`).
+        # +overshoot:+ passes the target by that fraction of the glide's
+        # distance before settling (0..1, default 0).  See Notes::Glide.
+        #
+        # Pitches with the same glide settings on one Notes instance share
+        # one Glide node (e.g. every copy of a unison with
+        # `p.glide(50.ms)`).
         #
         #     play v.hz.glide(80.ms).saw * v.amp_env
         #     play v.hz.glide(:gm, legato: true).saw * v.amp_env.legato
         #     play v.hz.glide(100.ms, from: 440.hz).saw * v.amp_env
-        def glide(time, legato: false, from: nil)
-          with(glide: (from.nil? ? [time, !!legato] : [time, !!legato, from]).freeze)
+        #     play v.hz.glide(300.ms, overshoot: 0.1).saw * v.amp_env
+        def glide(time, legato: false, from: nil, overshoot: 0)
+          time = per_copy(time)
+          # Per-copy starts of Intervals stay relative (see Unison::Copy)
+          relative = Unison::Copy.per_copy?(from) && Unison::Copy.values_of(from).all?(Interval)
+          from = per_copy(from)
+          from = from.semitones if relative && from.is_a?(Numeric)
+          overshoot = per_copy(overshoot)
+          settings = [time, !!legato]
+          settings << from unless from.nil? && overshoot == 0
+          settings << overshoot.to_f unless overshoot == 0
+          with(glide: settings.freeze)
         end
 
-        # Returns a NotePitch +semitones+ higher (an Interval or semitones).
+        # Returns a NotePitch +semitones+ higher (an Interval or semitones),
+        # or following a graph node of semitones (e.g. an LFO for a slow
+        # wander).
         def transpose(semitones)
+          semitones = per_copy(semitones)
+          return with(shift: [*@settings[:shift], semitones.get_sampler].freeze) if semitones.respond_to?(:sample)
+
           with(transpose: @settings[:transpose] + Interval.semitones(semitones).to_f)
         end
 
@@ -206,8 +232,10 @@ module MB
         def number_node
           return @notes.number unless @settings[:glide]
 
-          time, legato, from = @settings[:glide]
-          Glide.new(@notes.note_stream, time: time, legato: legato, from: from, notes: @notes, sample_rate: @sample_rate)
+          time, legato, from, overshoot = @settings[:glide]
+          @notes.send(:memo, [:glide, @settings[:glide], @sample_rate]) {
+            Glide.new(@notes.note_stream, time: time, legato: legato, from: from, overshoot: overshoot || 0, notes: @notes, sample_rate: @sample_rate)
+          }
         end
 
         # Semitone offsets for #build_freq.
@@ -215,6 +243,7 @@ module MB
           o = [@notes.bend_semitones(@settings[:bend_range])]
           o << @settings[:transpose] if @settings[:transpose] != 0
           o << @notes.vibrato(*@settings[:vibrato][0..0], depth: @settings[:vibrato][1], delay: @settings[:vibrato][2]) if @settings[:vibrato]
+          o.concat(@settings[:shift]) if @settings[:shift]
           o
         end
 
