@@ -113,9 +113,13 @@ module MB
         #     v.hz.saw.lp4(v.cutoff(300, keytrack: 1), resonance: 0.5) * v.amp_env
         #     # Self-oscillating sine at the cutoff
         #     play 0.constant.lp4(440, resonance: 1, self_oscillate: true)
-        def lp4(cutoff, resonance: 0.0, mode: :lp4, drive: nil, self_oscillate: false, compensation: nil)
+        def lp4(
+          cutoff, resonance: 0.0, mode: :lp4, drive: nil, self_oscillate: false, compensation: nil,
+          resonance_curve: :db, drive_mode: :input, clip: :soft
+        )
           f = MB::Sound::Filter::FourPole.new(
             mode: mode, drive: drive, self_oscillate: self_oscillate, compensation: compensation,
+            resonance_curve: resonance_curve, drive_mode: drive_mode, clip: clip,
             sample_rate: sample_rate
           )
           MB::Sound::GraphNode::FourPole.new(self, f, cutoff: cutoff, resonance: resonance)

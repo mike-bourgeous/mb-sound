@@ -94,7 +94,8 @@ RSpec.describe(MB::Sound::GraphNode::FourPole, :check_shared) do
     it 'resets the filter state' do
       node = 0.5.constant.lp4(100, resonance: 0.5)
       node.reset(0.5)
-      expected = 0.5 * (1 + 0.375 * 0.5 * 3.9) / (1 + 0.5 * 3.9)
+      k = MB::Sound::Filter::FourPole.resonance_curve(0.5) * 3.9
+      expected = 0.5 * (1 + 0.375 * k) / (1 + k)
       expect(node.sample(10).to_a).to all(be_within(1e-6).of(expected))
     end
 
