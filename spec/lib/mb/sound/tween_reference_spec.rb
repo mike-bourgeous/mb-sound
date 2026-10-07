@@ -20,9 +20,13 @@ RSpec.describe('Tweening reference outputs') do
     expect(digest(mel.notes.hz.glide(100.ms, from: 440.hz).freq)).to eq('81530cceaf3dd9dc')
   end
 
+  # Swarm digests re-recorded 2026-10-08 after merging tweening onto master-ai:
+  # the followups merge (caa39a5e) deliberately changed key-synced note starts
+  # (reset step correction) and the node-detune default, which swarms use
+  # (verified: 260b50aa... before caa39a5e, 82da65e6... after, unchanged by tweening).
   it 'keeps swarms unchanged' do
-    expect(digest(mel.synth(voices: 1) { |v| v.hz.swarm(6, glide: MB::Sound.spread(40.ms..400.ms), overshoot: 0..0.1, seed: 3) }.mono)).to eq('260b50aa1e8bac7b')
-    expect(digest(mel.synth(voices: 1) { |v| v.hz.swarm(5, seed: 4) }.mono)).to eq('2138ee7970716e5f')
+    expect(digest(mel.synth(voices: 1) { |v| v.hz.swarm(6, glide: MB::Sound.spread(40.ms..400.ms), overshoot: 0..0.1, seed: 3) }.mono)).to eq('82da65e65a627760')
+    expect(digest(mel.synth(voices: 1) { |v| v.hz.swarm(5, seed: 4) }.mono)).to eq('4cac9d2fac201fa3')
   end
 
   it 'keeps smoothing and envelopes unchanged' do
