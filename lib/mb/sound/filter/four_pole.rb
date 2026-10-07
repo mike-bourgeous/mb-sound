@@ -29,10 +29,22 @@ module MB
       # - Passband compensation (+compensation:+, default 0.375 like the
       #   CEM3379): full resonance loses about 6 dB of bass instead of 12.
       #   0 gives a classic Moog-style bass loss.
-      # - +self_oscillate: true+ raises #k_max to SELF_OSCILLATE_K (4.3;
-      #   oscillation starts at resonance 0.74 on the dB curve, 0.93 linear)
-      #   and turns on the drive (1.0 unless given), whose saturation sets
-      #   the amplitude.
+      # - +self_oscillate: true+ gives the resonance its own curve, the same
+      #   for both resonance curves (.self_oscillate_gain), so the knob
+      #   behaves like a classic synth's emphasis knob: the bottom 90%
+      #   (SELF_OSCILLATE_ONSET) is the chosen resonance curve, compressed so
+      #   it reaches the oscillation edge k = 4 at 0.9 (ringing grows to a
+      #   long, singing tone near the top of that range); above 0.9 the
+      #   filter oscillates, and the rest of the knob is "how much": k rises
+      #   from 4 to #k_max = SELF_OSCILLATE_K (5) as the square of the
+      #   distance above the onset, so the oscillation's amplitude (about
+      #   proportional to sqrt(k - 4)) grows roughly linearly from nothing
+      #   at 0.9 to about 0.22 peak at 1 (with drive 1; louder with lower
+      #   drive), and it starts faster and pushes the input harder as the
+      #   knob rises.  It also turns on the drive (1.0 unless given), whose
+      #   saturation sets the amplitude.  (Until 2026-10-07 it raised k_max
+      #   to 4.3 on the normal curves: oscillation from 0.74 on the dB
+      #   curve, 0.93 linear, and only -20 dB at the top.)
       # - +drive:+ (nil or 0 for linear) is the saturation level, tanh(drive
       #   × v) / drive: unity gain for small signals, saturating above about
       #   1 / drive.  +drive_mode:+ says where: :input (default) on the
@@ -51,8 +63,14 @@ module MB
         # Loop gain at full resonance by default (no self-oscillation).
         MAX_K = 3.9
 
-        # Loop gain at full resonance with +self_oscillate: true+.
-        SELF_OSCILLATE_K = 4.3
+        # Loop gain at full resonance with +self_oscillate: true+ (see
+        # .self_oscillate_gain).
+        SELF_OSCILLATE_K = 5.0
+
+        # The resonance where a +self_oscillate: true+ filter starts
+        # oscillating, and the loop gain there (the oscillation edge).
+        SELF_OSCILLATE_ONSET = 0.9
+        SELF_OSCILLATE_EDGE = 4.0
 
         # The CEM3379's passband compensation (6 dB bass loss at k = 4).
         COMPENSATION = 0.375
@@ -87,6 +105,10 @@ module MB
         # makes the gain at the cutoff rise linearly in dB; :linear is the
         # loop gain k = resonance × #k_max (round 1).
         RESONANCE_CURVES = { linear: 0, db: 1 }.freeze
+
+        # The kernel's +curve+ argument with +self_oscillate: true+ (see
+        # .self_oscillate_gain), by resonance curve.
+        SELF_OSCILLATE_CURVES = { linear: 2, db: 3 }.freeze
 
         # Drive modes (the kernel's +drive_mode+): where the saturation is.
         DRIVE_MODES = { input: 0, stages: 1, feedback: 2 }.freeze
@@ -225,9 +247,12 @@ module MB
         end
 
         # The loop gain k for +resonance+ (default: the current #resonance),
-        # through the #resonance_curve: 0 to #k_max.
+        # through the #resonance_curve (or the self-oscillation curve, see
+        # .self_oscillate_gain): 0 to #k_max.
         def loop_gain(resonance = @resonance)
           r = resonance.to_f.clamp(0.0, 1.0)
+          return self.class.self_oscillate_gain(r, @resonance_curve == :db, @k_max) if @self_oscillate
+
           r = self.class.resonance_curve(r) if @resonance_curve == :db
           r * @k_max
         end
@@ -254,7 +279,7 @@ module MB
           comp = comp.to_f
           drive = drive.to_f
           raise ArgumentError, 'Filter parameters must be finite (and drive not negative)' unless k_max.finite? && comp.finite? && drive >= 0 && drive.finite?
-          raise ArgumentError, 'Resonance curve must be 0 (linear) or 1 (dB)' unless [0, 1].include?(curve)
+          raise ArgumentError, 'Resonance curve must be 0 (linear), 1 (dB), 2 (self-oscillating linear), or 3 (self-oscillating dB)' unless [0, 1, 2, 3].include?(curve)
           raise ArgumentError, 'Drive mode must be 0 (input), 1 (stages), or 2 (feedback)' unless [0, 1, 2].include?(drive_mode)
           raise ArgumentError, 'Clip must be 0 (soft) or 1 (hard)' unless [0, 1].include?(clip)
           raise ArgumentError, 'Four-pole state must have four elements' unless state.is_a?(Array) && state.length == 4
@@ -301,7 +326,12 @@ module MB
                 elsif res > 1.0
                   res = 1.0
                 end
-                k = (curve == 1 ? resonance_curve(res) : res) * k_max
+                k = case curve
+                    when 1 then resonance_curve(res) * k_max
+                    when 2 then self_oscillate_gain(res, false, k_max)
+                    when 3 then self_oscillate_gain(res, true, k_max)
+                    else res * k_max
+                    end
                 in_gain = 1.0 + comp * k
               end
 
@@ -388,6 +418,22 @@ module MB
           return 1.0 if r >= 1.0
           e = exp2(r * CURVE_LOG2_RATIO)
           (e - 1.0) / ((1.0 + 0.25 * e) * CURVE_K)
+        end
+
+        # The loop gain k of a +self_oscillate: true+ filter for resonance
+        # +r+ (0..1), the kernel's curves 2 (+db+ false) and 3 (+db+ true):
+        # up to SELF_OSCILLATE_ONSET (0.9) the :linear or :db curve of r /
+        # 0.9, times SELF_OSCILLATE_EDGE (k = 4, where oscillation starts);
+        # above it 4 + (+k_max+ - 4) x², x = (r - 0.9) / 0.1.  0.5 -> 3.20
+        # (dB) or 2.22 (linear), 0.8 -> 3.92 or 3.56, 0.9 -> 4, 0.95 ->
+        # 4.25, 1 -> 5 (see the class description).
+        def self.self_oscillate_gain(r, db, k_max = SELF_OSCILLATE_K)
+          if r <= SELF_OSCILLATE_ONSET
+            x = r / SELF_OSCILLATE_ONSET
+            return (db ? resonance_curve(x) : x) * SELF_OSCILLATE_EDGE
+          end
+          x = (r - SELF_OSCILLATE_ONSET) / (1.0 - SELF_OSCILLATE_ONSET)
+          SELF_OSCILLATE_EDGE + (k_max - SELF_OSCILLATE_EDGE) * (x * x)
         end
 
         # The resonance on the :db curve that gives the same loop gain as
@@ -487,7 +533,8 @@ module MB
 
         # The kernel's curve, drive mode, and clip arguments.
         def kernel_options
-          [RESONANCE_CURVES.fetch(@resonance_curve), DRIVE_MODES.fetch(@drive_mode), CLIPS.fetch(@clip)]
+          curves = @self_oscillate ? SELF_OSCILLATE_CURVES : RESONANCE_CURVES
+          [curves.fetch(@resonance_curve), DRIVE_MODES.fetch(@drive_mode), CLIPS.fetch(@clip)]
         end
 
         # Keeps the last cutoff and resonance (for #reset, #response, #to_s).

@@ -49,13 +49,24 @@ RSpec.describe('Unison mix, per-copy settings, and swarms', :aggregate_failures)
       expect(m.centers).to eq([3])
     end
 
-    it 'plays the side copies at the mix level, normalized by the weights' do
+    it 'plays the side copies at mix squared, normalized by the weights' do
       m = mixer(110.hz.unison(5, detune: 20.cents, layout: :even, mix: 0.5))
-      g = 1 / Math.sqrt(1 + 4 * 0.25)
-      expect(m.gains[0]).to match([0.5 * g, 0.5 * g, g, 0.5 * g, 0.5 * g].map { |v| be_within(1e-12).of(v) })
+      g = 1 / Math.sqrt(1 + 4 * 0.0625)
+      expect(m.gains[0]).to match([0.25 * g, 0.25 * g, g, 0.25 * g, 0.25 * g].map { |v| be_within(1e-12).of(v) })
 
-      peak = mixer(110.hz.unison(4, detune: 20.cents, layout: :even, mix: 0.25, normalize: :peak))
+      peak = mixer(110.hz.unison(4, detune: 20.cents, layout: :even, mix: 0.5, normalize: :peak))
       expect(peak.gains[0]).to match([0.25, 1, 1, 0.25].map { |v| be_within(1e-12).of(v / 2.5) })
+    end
+
+    it 'puts the sides 12 dB down at mix 0.5 and 12 dB up at mix 2' do
+      [[0.5, -12.0412], [2, 12.0412], [Math.sqrt(0.5), -6.0206]].each do |mix, db|
+        g = mixer(110.hz.unison(3, detune: 20.cents, layout: :even, mix: mix)).gains[0]
+        expect(20 * Math.log10(g[0] / g[1])).to be_within(1e-3).of(db)
+        expect(g[0]).to eq(g[2])
+      end
+
+      g = mixer(110.hz.unison(3, detune: 20.cents, layout: :even, mix: 2, normalize: 1)).gains[0]
+      expect(g).to eq([4.0, 1.0, 4.0])
 
       fixed = mixer(110.hz.unison(3, detune: 20.cents, mix: 0, normalize: 1))
       expect(fixed.gains[0]).to eq([0.0, 1.0, 0.0])
@@ -68,12 +79,12 @@ RSpec.describe('Unison mix, per-copy settings, and swarms', :aggregate_failures)
     end
 
     it 'keeps the loudness about the same while the mix moves' do
-      levels = [0, 0.3, 0.6, 1].map { |m| rms(render(110.hz.unison(7, detune: 30.cents, mix: m) { |p| p.sine }, buffers: 200)) }
+      levels = [0, 0.3, 0.6, 1, 1.5, 2].map { |m| rms(render(110.hz.unison(7, detune: 30.cents, mix: m) { |p| p.sine }, buffers: 200)) }
       expect(levels).to all(be_within(0.1).of(Math.sqrt(0.5)))
     end
 
-    it 'takes a node, clipped to 0..1, and works in stereo' do
-      node = 110.hz.unison(5, detune: 20.cents, spread: 1, mix: 0.5.hz.lfo.at(-0.5..1.5))
+    it 'takes a node, clamped to 0..2, and works in stereo' do
+      node = 110.hz.unison(5, detune: 20.cents, spread: 1, mix: 0.5.hz.lfo.at(-0.5..2.5))
       l, r = render(node, buffers: 50)
       expect(rms(l)).to be > 0.3
       expect(rms(r)).to be > 0.3
@@ -81,10 +92,16 @@ RSpec.describe('Unison mix, per-copy settings, and swarms', :aggregate_failures)
       const = render(110.hz.unison(5, detune: 20.cents, layout: :even, phase: 0, mix: 0.4.constant))
       num = render(110.hz.unison(5, detune: 20.cents, layout: :even, phase: 0, mix: 0.4))
       expect((const - num).abs.max).to be < 1e-6
+
+      over = render(110.hz.unison(5, detune: 20.cents, layout: :even, phase: 0, mix: 3.constant))
+      top = render(110.hz.unison(5, detune: 20.cents, layout: :even, phase: 0, mix: 2))
+      expect((over - top).abs.max).to be < 1e-6
     end
 
     it 'rejects bad values' do
-      expect { 110.hz.unison(3, mix: 1.5) }.to raise_error(ArgumentError, /mix/)
+      expect { 110.hz.unison(3, mix: 2.5) }.to raise_error(ArgumentError, /mix/)
+      expect { 110.hz.unison(3, mix: -0.1) }.to raise_error(ArgumentError, /mix/)
+      expect { MB::Sound::GraphNode::ChannelMixer::Unison.new([110.hz.saw], mix: 2.1) }.to raise_error(ArgumentError, /mix/)
       expect { 110.hz.unison(3, mix: :loud) }.to raise_error(ArgumentError, /mix/)
     end
   end

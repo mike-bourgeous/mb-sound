@@ -3,8 +3,11 @@
 # frequency-modulates the note held before it, and only the first held note
 # is heard.  If only one note is held, it plays unmodulated.  Releasing a
 # note in the middle of the chain joins its neighbors.  The modulation wheel
-# controls the intensity of modulation (the peak frequency deviation each
-# link adds, 0 to 10 kHz).
+# controls the overall intensity of modulation (the peak frequency deviation
+# each link adds, 0 to 10 kHz), and each stacked note's velocity scales the
+# depth of its own link, so harder keys modulate more: --velocity-range dB
+# (default 24) across the velocity range, unchanged at velocity 96 (+5.9 dB
+# at 127, -6 dB at 64, -12 dB at 32; 0 turns it off).
 # (C)2021 Mike Bourgeous
 #
 # This is the 2021 bin/synths/fm_synth.rb on the Notes/Stream MIDI API
@@ -30,11 +33,13 @@
 #     $0 --no-table spec/test_data/midi.mid fm.flac
 #     $0 --index 0 spec/test_data/mod_wheel.mid   # the old starting point
 #     $0 spec/test_data/fm_chain_demo.mid   # FM-friendly key orders and wheel moves
+#     $0 --velocity-range 0 spec/test_data/fm_chain_demo.mid   # without velocity
 #
 # Playing it: hold keys in order (the first sounds, each later key modulates
 # the one before) at close FM-friendly intervals, and ride the mod wheel.  A
 # growly bass: D4, then A4, then G#5 (or D#5), mod wheel around 71; it likes
-# a little chorus and reverb.
+# a little chorus and reverb.  Play the modulating keys softly for a
+# rounder tone and harder for more bite.
 
 require 'bundler/setup'
 require 'mb-sound'
@@ -44,14 +49,22 @@ class FMChain
   include MB::Sound::GraphNode
   include MB::Sound::GraphNode::SampleRateHelper
 
+  # The velocity (normalized) at which a link gets exactly the wheel's
+  # modulation index.
+  VELOCITY_REFERENCE = 96 / 127.0
+
   # +notes+ is a MB::Sound::Notes (the script's +midi+); +index+ a node
   # giving the modulation index in Hz (read once per event segment).
-  def initialize(notes, index:, osc_count: 8, sample_rate: 48000)
+  # +velocity_range+ is the dB range of each link's index over the
+  # modulating note's velocity 0..1 (0 dB at VELOCITY_REFERENCE).
+  def initialize(notes, index:, velocity_range: 24, osc_count: 8, sample_rate: 48000)
     @sample_rate = sample_rate.to_f
     @reader = notes.note_stream.reader
     @time = @reader.cursor
     @index_node = index.get_sampler
     @mod_index = 0.0
+    @velocity_range = velocity_range.to_f
+    @link_gain = {}
 
     @oscillators = osc_count.times.map {
       # Parabola is a little more interesting than sine without being too
@@ -78,6 +91,11 @@ class FMChain
   # so the script runner can stop once the output is quiet.
   def ended?
     @reader.ended? && @oscs_used == 0
+  end
+
+  # The index multiplier for a modulating note of normalized +velocity+.
+  def velocity_gain(velocity)
+    10 ** (@velocity_range * (velocity - VELOCITY_REFERENCE) / 20)
   end
 
   def print
@@ -117,7 +135,7 @@ class FMChain
       at = ((e.time - start) * @sample_rate).floor.clamp(pos, count)
       render(index, pos, at)
       pos = at
-      note(e.note, e.type == :note_on) if e.type == :note_on || e.type == :note_off
+      note(e.note, e.type == :note_on, e.velocity) if e.type == :note_on || e.type == :note_off
     end
     render(index, pos, count)
 
@@ -132,20 +150,27 @@ class FMChain
 
     @mod_index = index.nil? ? @mod_index : index[from].to_f
     @oscillators.each do |o|
-      o.frequency[0] = @mod_index unless o.frequency.summands.empty?
+      mod = o.frequency.summands.first
+      o.frequency[0] = link_index(mod) if mod
     end
 
     data = @oscillators[0].sample(to - from)
     @buf[from...to] = @oscs_used > 0 ? data : 0
   end
 
-  def note(number, on)
+  # The FM gain (Hz of deviation) of the link modulated by +osc+.
+  def link_index(osc)
+    @mod_index * @link_gain.fetch(osc, 1.0)
+  end
+
+  def note(number, on, velocity = nil)
     if on
       note(number, false) if @osc_map.include?(number)
 
       if @oscs_used < @oscillators.length
         osc = @oscillators[@oscs_used]
         @osc_map[number] = osc
+        @link_gain[osc] = velocity_gain(velocity || VELOCITY_REFERENCE)
 
         osc.frequency.constant = MB::Sound.tuning.frequency_of(number)
         osc.frequency.clear
@@ -154,7 +179,7 @@ class FMChain
           # Wire this oscillator as FM modulator for the previous oscillator
           prev = @oscillators[@oscs_used - 1]
           prev.frequency.clear
-          prev.frequency[osc] = @mod_index
+          prev.frequency[osc] = link_index(osc)
         end
 
         @oscs_used += 1
@@ -171,7 +196,7 @@ class FMChain
           prev.frequency.clear
 
           next_osc = osc.frequency.summands.first
-          prev.frequency[next_osc] = @mod_index if next_osc
+          prev.frequency[next_osc] = link_index(next_osc) if next_osc
         end
 
         osc.frequency.clear
@@ -187,10 +212,11 @@ end
 
 MB::Sound.synth_script(
   index: [1000.0, Float, '-x', 'Modulation index (Hz of deviation per link) before the mod wheel moves', 0.0..10000.0],
+  velocity_range: [24.0, Float, '-V', 'dB range of each link\'s index over the modulating key\'s velocity (0 dB at 96; 0 = off)', 0.0..60.0],
   table: [true, 'Show the oscillator table while playing'],
 ) { |midi, p|
   wheel = midi.cc(1, range: 0.0..10000.0, default: (p.index / 10000.0 * 127).round, name: 'FM index')
-  synth = FMChain.new(midi, index: wheel.smooth(0.05), sample_rate: midi.sample_rate)
+  synth = FMChain.new(midi, index: wheel.smooth(0.05), velocity_range: p.velocity_range, sample_rate: midi.sample_rate)
 
   next synth unless p.table
 

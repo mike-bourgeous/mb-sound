@@ -38,7 +38,7 @@ RSpec.describe(MB::Sound::Filter::FourPole) do
       end
     end
 
-    [[1, 0, 0], [0, 1, 0], [1, 1, 0], [1, 2, 0], [1, 2, 1], [0, 2, 1]].each do |curve, drive_mode, clip|
+    [[1, 0, 0], [0, 1, 0], [1, 1, 0], [1, 2, 0], [1, 2, 1], [0, 2, 1], [2, 0, 0], [3, 0, 0], [3, 1, 0], [3, 2, 1], [2, 2, 0]].each do |curve, drive_mode, clip|
       it "give identical samples with curve #{curve}, drive mode #{drive_mode}, clip #{clip}" do
         s1 = [0.0] * 4
         s2 = [0.0] * 4
@@ -65,11 +65,12 @@ RSpec.describe(MB::Sound::Filter::FourPole) do
 
     it 'raise for bad curve, drive mode, and clip numbers' do
       args = [noise, 1000, 0.5, [0.0] * 4, 48000, 3.9, 0.375, 1.0, FP::MODES[:lp4]]
-      expect { MB::Sound::FastFilter.four_pole(*args, 2) }.to raise_error(ArgumentError, /curve/)
+      expect { MB::Sound::FastFilter.four_pole(*args, 4) }.to raise_error(ArgumentError, /curve/)
+      expect { MB::Sound::FastFilter.four_pole(*args, -1) }.to raise_error(ArgumentError, /curve/)
       expect { MB::Sound::FastFilter.four_pole(*args, 0, 3) }.to raise_error(ArgumentError, /Drive mode/)
       expect { MB::Sound::FastFilter.four_pole(*args, 0, 0, 2) }.to raise_error(ArgumentError, /Clip/)
       expect { MB::Sound::FastFilter.four_pole(*args, 0, 0, 0, 0) }.to raise_error(ArgumentError, /arguments/)
-      expect { FP.process_ruby(*args, 2) }.to raise_error(ArgumentError, /curve/)
+      expect { FP.process_ruby(*args, 4) }.to raise_error(ArgumentError, /curve/)
       expect { FP.process_ruby(*args, 0, 3) }.to raise_error(ArgumentError, /Drive mode/)
     end
 
@@ -192,7 +193,8 @@ RSpec.describe(MB::Sound::Filter::FourPole) do
       expect(FP.new.resonance_curve).to eq(:db)
       expect(FP.new(resonance: 0).loop_gain).to eq(0)
       expect(FP.new(resonance: 1).loop_gain).to eq(3.9)
-      expect(FP.new(resonance: 1, self_oscillate: true).loop_gain).to eq(4.3)
+      expect(FP.new(resonance: 1, self_oscillate: true).loop_gain).to eq(5.0)
+      expect(FP.new(resonance: 0, self_oscillate: true).loop_gain).to eq(0)
       expect(FP.resonance_curve(-1)).to eq(0)
       expect(FP.resonance_curve(Float::NAN)).to eq(0)
       expect(FP.resonance_curve(2)).to eq(1)
@@ -373,22 +375,48 @@ RSpec.describe(MB::Sound::Filter::FourPole) do
       f = FP.new(cutoff: 1000, resonance: 1, self_oscillate: true)
       out = f.process(Numo::SFloat.zeros(24000))
       expect(out[-4800..].abs.max).to be > 0.1
-      expect(f.process(Numo::SFloat.zeros(24000)).abs.max).to be < 0.2
+      expect(f.process(Numo::SFloat.zeros(24000)).abs.max).to be < 0.3
     end
 
     it 'does not oscillate with self_oscillate: true below the threshold' do
-      out = ring(FP.new(cutoff: 440, resonance: 0.7, self_oscillate: true), 2)
+      out = ring(FP.new(cutoff: 440, resonance: 0.6, self_oscillate: true), 2)
       expect(out[-4800..].abs.max).to be < 1e-4
-      out = ring(FP.new(cutoff: 440, resonance: 0.9, self_oscillate: true, resonance_curve: :linear), 2)
+      out = ring(FP.new(cutoff: 440, resonance: 0.8, self_oscillate: true, resonance_curve: :linear), 2)
       expect(out[-4800..].abs.max).to be < 1e-4
     end
 
-    it 'starts oscillating above resonance 0.74 with the dB curve (0.93 linear)' do
-      f = FP.new(resonance: 0.75, self_oscillate: true)
-      expect(f.loop_gain).to be > 4
-      expect(f.loop_gain(0.73)).to be < 4
-      expect(FP.new(resonance: 0.93, self_oscillate: true, resonance_curve: :linear).loop_gain).to be < 4
-      expect(FP.new(resonance: 0.94, self_oscillate: true, resonance_curve: :linear).loop_gain).to be > 4
+    it 'starts oscillating above resonance 0.9 with either curve' do
+      [:db, :linear].each do |curve|
+        f = FP.new(resonance: 0.9, self_oscillate: true, resonance_curve: curve)
+        expect(f.loop_gain).to eq(4)
+        expect(f.loop_gain(0.89)).to be < 4
+        expect(f.loop_gain(0.91)).to be > 4
+        expect(f.loop_gain(0.95)).to be_within(1e-12).of(4.25)
+      end
+    end
+
+    it 'gives the self-oscillation curve continuous, rising loop gains, matching C' do
+      r = Numo::DFloat.linspace(0, 1, 1001).to_a
+      [true, false].each do |db|
+        ks = r.map { |v| FP.self_oscillate_gain(v, db) }
+        expect(ks.each_cons(2).all? { |a, b| b > a }).to eq(true)
+        expect(ks.each_cons(2).map { |a, b| b - a }.max).to be < 0.03
+        r.each_slice(13) { |(v)| expect(MB::Sound::FastFilter.self_osc_gain(v, db, 5.0)).to eq(FP.self_oscillate_gain(v, db)) }
+        # The dB side is the normal dB curve compressed into 0..0.9, at k 4
+        expect(FP.self_oscillate_gain(0.45, db)).to eq(db ? FP.resonance_curve(0.5) * 4 : 2.0)
+      end
+    end
+
+    it 'grows the oscillation level steadily above the onset' do
+      levels = [0.89, 0.925, 0.95, 0.975, 1.0].map { |r|
+        f = FP.new(cutoff: 1000, resonance: r, self_oscillate: true)
+        f.process(Numo::SFloat.zeros(96000))
+        f.process(Numo::SFloat.zeros(9600)).abs.max
+      }
+      expect(levels[0]).to be < 0.01
+      expect(levels.each_cons(2).all? { |a, b| b > a }).to eq(true)
+      expect(levels[1]).to be_between(0.02, 0.08)
+      expect(levels[-1]).to be_between(0.18, 0.26)
     end
   end
 

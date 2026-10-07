@@ -99,6 +99,48 @@ RSpec.describe(MB::Sound::BandLimit) do
     expect(clean[23]).to be_within(1e-6).of(1000.hz.aramp.sample(48)[23])
   end
 
+  describe 'edges landing exactly on samples while the phase moves backward' do
+    # Runs the C kernel and its Ruby mirror; returns both outputs.
+    def both(wave, freq, phi, count, phase_mod = 0)
+      c = Numo::SFloat.zeros(count)
+      MB::Sound::FastSynth.oscillate_bl(c.inplace, wave, freq, phase_mod, 1 / 48000.0, 1.0, 0.0, [phi], [0.0, 0.0, 0.0, 0], 0.0, 0.0, nil, false)
+      r = MB::Sound::BandLimit.oscillate_ruby(count, wave, freq, phase_mod, 1 / 48000.0, 1.0, 0.0, [phi], [0.0, 0.0, 0.0, 0], 0.0, 0.0)
+      [c.not_inplace!, r]
+    end
+
+    [:ramp, :square].each do |wave|
+      it "gives the midpoint for a #{wave} edge on a sample at a negative frequency" do
+        c, r = both(wave, -1000.0, 0.0, 4800)
+        expect(c).to eq(r)
+        off, _ = both(wave, -1000.0 * (1 + 1e-7), 0.0, 4800)
+        expect((c - off).abs.max).to be < 1e-3
+        # The edge at phase 0.5 lands on sample 24 (and every 48 after)
+        expect(c[24]).to be_within(1e-6).of(0)
+        expect(c.abs.max).to be <= 1.0
+      end
+
+      it "matches a nearby off-sample phase for a #{wave} reversing through-zero FM on an edge" do
+        # +-2400 Hz in 4-sample runs: the phase goes 0.4, 0.45, 0.5 (the
+        # edge), 0.55, 0.6, then back down through 0.5, again and again
+        fm = Numo::SFloat.cast(Array.new(4800) { |i| (i / 4).even? ? 2400 : -2400 })
+        c, r = both(wave, fm, 0.4, 4800)
+        expect(c).to eq(r)
+        off, _ = both(wave, fm, 0.4 + 1e-6, 4800)
+        expect((c - off).abs.max).to be < 1e-3
+        expect(c.abs.max).to be <= 1.0
+      end
+
+      it "matches a nearby off-sample phase for a #{wave} with phase modulation reversing on an edge" do
+        # 0.1 cycles of phase per sample, forward 3 samples then back 3
+        pm = Numo::SFloat.cast(Numo::DFloat.new(4800).seq.map { |i| j = i % 6; 2 * Math::PI * 0.1 * (j <= 3 ? j : 6 - j) })
+        c, r = both(wave, 0.0, 0.3, 4800, pm)
+        expect(c).to eq(r)
+        off, _ = both(wave, 0.0, 0.3 + 1e-6, 4800, pm)
+        expect((c - off).abs.max).to be < 1e-3
+      end
+    end
+  end
+
   it 'is not used for noise' do
     expect(1.hz.ramp.noise.band_limited?).to eq(false)
   end
@@ -534,15 +576,47 @@ RSpec.describe(MB::Sound::BandLimit) do
       oscillator(:ramp, frequency: 1001.3, **opts)
     end
 
-    it 'turns a reset into a band-limited step that starts at the continuing value' do
+    it 'turns a reset into a band-limited step from the continuing value, with the ideal area' do
       continuing = bl_osc.sample(31).dup[30]
       o = bl_osc.reset(trig(70, 30))
       after = o.sample(70).dup[30..]
-      expect(after[0]).to be_within(0.01).of(continuing)
+
+      # The minBLEP holds the continuing value on the jump sample; the area
+      # correction's first tap moves it toward the new value
+      blep, _, area = MB::Sound::Tone.jump_tables
+      dv = 0 - continuing
+      expect(after[0]).to be_within(0.01).of(continuing + area[0] * (-0.5 * dv - blep.sum * dv))
+
+      # The step adds the area of an ideal step on the sample (-dv / 2)
+      fresh0 = bl_osc.sample(32)
+      expect((after[0...32] - fresh0).sum).to be_within(0.02).of(-0.5 * dv)
 
       # After the step, the same as an oscillator started at that phase
       fresh = bl_osc.sample(40)
       expect(after[32..]).to all_be_within(1e-6).of_array(fresh[32..])
+    end
+
+    it 'gives phase jump residuals the area of an ideal step or kink on the sample' do
+      [[1.0, 0.0], [-2.0, 0.0], [0.0, 0.05], [0.7, -0.03]].each do |dv, ds|
+        r = MB::Sound::Tone.jump_residual(dv, ds)
+        expect(r.sum).to be_within(1e-12).of(-0.5 * dv + ds / 12.0)
+        expect(r.length).to eq(MB::Sound::BandLimit::SYNC_TAPS)
+      end
+      expect(MB::Sound::Tone.jump_tables[2].sum).to be_within(1e-15).of(1)
+    end
+
+    # Coherent DC (mean over whole reset periods) of +node+.
+    def mean_of(node, period, periods = 200)
+      node.sample(period * 10)
+      Numo::DFloat.cast(node.sample(period * periods)).mean
+    end
+
+    [[:ramp, 700, 200, 1 / 14.0], [:square, 700, 200, 1 / 7.0], [:ramp, 1000, 400, 0.1], [:triangle, 1000, 400, 0.1], [:ramp, 1700, 750, nil]].each do |wave, f, r, ideal|
+      it "has the ideal mean with audio-rate resets (#{f} Hz #{wave} reset at #{r} Hz)" do
+        period = 48000 / r
+        ideal ||= mean_of(f.hz.send(wave).sync(r.hz.lfo.wraps), period)
+        expect(mean_of(f.hz.send(wave).reset(r.hz.lfo.wraps), period)).to be_within(1e-3).of(ideal)
+      end
     end
 
     it 'leaves naive and slow LFO oscillators jumping' do

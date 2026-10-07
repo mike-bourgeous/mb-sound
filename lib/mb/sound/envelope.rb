@@ -166,7 +166,7 @@ module MB
         adsr: { curve: :analog, sensitivity: 0..1 }.freeze,
         env: { curve: :analog, sensitivity: 0.5..1 }.freeze,
         amp_env: { curve: [12, 60, 40].freeze, sensitivity: -18.db..0.db, velocity_scale: :db }.freeze,
-        fm_env: { curve: :dx, sustain: 0, sensitivity: -18.db..0.db, velocity_scale: :db }.freeze,
+        fm_env: { curve: :dx, sustain: 0, sensitivity: -12.db..0.db, velocity_scale: :db }.freeze,
         filter_env: { curve: :analog, sustain: 0, sensitivity: 0.5..1, octaves: 2 }.freeze,
       }.freeze
 

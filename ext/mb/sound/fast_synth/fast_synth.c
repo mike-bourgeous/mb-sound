@@ -284,6 +284,38 @@ static inline __attribute__((always_inline)) double bl_crossing(double e, double
 	return dist >= ad ? 1.0 : dist / ad;
 }
 
+// Like bl_crossing, but a phase on a breakpoint is always on its right
+// side (the value after it going forward, as bl_snap gives it), whichever
+// way the phase moves, so the phase can reverse on an edge (soft sync,
+// through-zero FM, negative frequencies): a backward step starting exactly
+// on +b+ crosses it at once (0), and one ending within BL_EPS of +b+ (where
+// the phase snaps onto it) doesn't cross it.  Forward steps are as in
+// bl_crossing.  (bl_crossing alone counted a backward step ending on an
+// edge as crossing it while the snapped sample stayed on the right side,
+// and the next step, starting on the edge, never crossed it: an error of
+// the whole jump at every edge landing exactly on a sample.)
+static inline double bl_side_crossing(double e, double d, double b)
+{
+	if (d >= 0) {
+		return bl_crossing(e, d, b);
+	}
+
+	double dist = e - b;
+	if (dist < 0) {
+		dist += 1.0;
+	}
+	if (dist == 0) {
+		return 0;
+	}
+
+	double ad = -d;
+	if (ad >= 1.0 || dist >= ad - BL_EPS) {
+		return -1;
+	}
+
+	return dist / ad;
+}
+
 // Returns the index of a breakpoint within BL_EPS of phase +e+, or -1.  A
 // sample there is treated as exactly on the edge, taking the value after it,
 // matching bl_crossing.
@@ -338,7 +370,7 @@ static inline double bl_step(struct bl_breakpoint *bp, int count, double e, doub
 
 	*after_corr = 0;
 	for (int j = 0; j < count; j++) {
-		double f = bl_crossing(e, d, bp[j].pos);
+		double f = bl_side_crossing(e, d, bp[j].pos);
 		if (f < 0) {
 			continue;
 		}
@@ -1074,34 +1106,6 @@ static inline double sync_sine_value(const struct sync_sine *sn, double u, doubl
 	return -(re * sin(psi) + im * cos(psi));
 }
 
-// Like bl_crossing, but a phase on a breakpoint is always on its right
-// side (the value after it going forward), whichever way the phase moves,
-// so soft sync can reverse on an edge: a backward step starting exactly on
-// +b+ crosses it at once (0), and one ending within BL_EPS of +b+ (where
-// the phase snaps onto it) doesn't cross it.  Forward steps are as in
-// bl_crossing.
-static inline double sync_crossing(double e, double d, double b)
-{
-	if (d >= 0) {
-		return bl_crossing(e, d, b);
-	}
-
-	double dist = e - b;
-	if (dist < 0) {
-		dist += 1.0;
-	}
-	if (dist == 0) {
-		return 0;
-	}
-
-	double ad = -d;
-	if (ad >= 1.0 || dist >= ad - BL_EPS) {
-		return -1;
-	}
-
-	return dist / ad;
-}
-
 // Moves phase *p by +vel+ cycles per sample for +dur+ samples, adding an
 // event for every breakpoint crossed; the segment ends +end_t+ samples
 // before the current sample.  Returns nothing; updates *p.
@@ -1112,7 +1116,7 @@ static inline void sync_move(enum bl_wave wt, double w, struct bl_breakpoint *bp
 	double move = vel * dur;
 	if (bl && move != 0) {
 		for (int j = 0; j < nbp; j++) {
-			double f = sync_crossing(*p, move, bp[j].pos);
+			double f = bl_side_crossing(*p, move, bp[j].pos);
 			if (f < 0) {
 				continue;
 			}

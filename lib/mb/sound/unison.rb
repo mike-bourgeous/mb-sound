@@ -142,14 +142,14 @@ module MB
       # made from it get the +phase+ setting) and the copy's index, and
       # returns the copies mixed by a GraphNode::ChannelMixer::Unison (one
       # node for mono, a Channels bundle for stereo).
-      def self.build(pitch, count = nil, detune:, layout:, phase:, spread:, normalize:, seed:, detune_mode: :interp, mix: 1)
+      def self.build(pitch, count = nil, detune:, layout:, phase:, spread:, normalize:, seed:, detune_mode: :exact, mix: 1)
         count ||= detune.is_a?(Array) ? detune.length : DEFAULT_COUNT
         check_phase(phase)
         unless spread.respond_to?(:sample) || (spread.is_a?(Numeric) && (0..1).cover?(spread))
           raise ArgumentError, "Unison spread must be 0..1 or a graph node (got #{spread.inspect})"
         end
-        unless mix.respond_to?(:sample) || (mix.is_a?(Numeric) && (0..1).cover?(mix))
-          raise ArgumentError, "Unison mix must be 0..1 or a graph node (got #{mix.inspect})"
+        unless mix.respond_to?(:sample) || (mix.is_a?(Numeric) && (0..GraphNode::ChannelMixer::Unison::MAX_MIX).cover?(mix))
+          raise ArgumentError, "Unison mix must be 0..2 or a graph node (got #{mix.inspect})"
         end
         unless Detune::MODES.include?(detune_mode)
           raise ArgumentError, "Unknown detune mode #{detune_mode.inspect} (use #{Detune::MODES.map(&:inspect).join(' or ')})"

@@ -16,7 +16,7 @@ RSpec.describe('Tone null-test reference') do
     # Bug fix 2026-10-06: wraps landing exactly on a sample (a whole number
     # of cycles) were lost to rounding; now a pulse of 1 on that sample
     'tone_ports' => 'wraps: adds the pulse lost at sample 960 (1500 Hz + 200 Hz FM, whole cycles)',
-    'tone_ports_negative' => 'wraps: adds the pulse lost at sample 480 (-1700 Hz, 17 whole cycles)',
+    'tone_ports_negative' => 'wraps: adds the pulse lost at sample 480 (-1700 Hz, 17 whole cycles); 2026-10-07: no backward-edge spikes',
     'phasor_ports' => 'wraps: adds the pulse lost at sample 288 (900 Hz, whole cycles)',
     'phasor_wraps_only' => 'new at_2000 output (2000 Hz, every wrap on a sample; had no pulses); main unchanged',
     # Fix 2026-10-07: synced ramps, triangles, and parabolas are exactly the
@@ -26,6 +26,27 @@ RSpec.describe('Tone null-test reference') do
     'sync_ratio_node' => 'sync: delayed segments, no DC drift (ramp)',
     'sync_trigger' => 'sync: delayed segments, no DC drift (ramp)',
     'softsync' => 'sync: delayed segments, exact slope corners (triangle)',
+    # Fix 2026-10-07: a band-limited edge landing exactly on a sample while
+    # the phase moves backward was corrected as crossed and then never
+    # crossed (a full-jump spike, peak 1 instead of 0.5, at each one)
+    'negative_freq' => 'free-running backward edges on samples: no spikes (-440 Hz ramp)',
+    # Fix 2026-10-07: phase jumps (resets, key sync, timeline locks) get
+    # the area of an ideal step on the sample (no DC drift at audio-rate
+    # resets), and a reset on a jump in value starts from its left side
+    'clip_key_sync_variants' => 'phase jumps: ideal step area',
+    'clip_synth' => 'phase jumps: ideal step area',
+    'clip_tone' => 'phase jumps: ideal step area',
+    'reset' => 'phase jumps: ideal step area',
+    'reset_edges' => 'phase jumps: ideal step area',
+    'reset_fm_pm' => 'phase jumps: ideal step area',
+    'reset_pwm' => 'phase jumps: ideal step area',
+    'reset_random' => 'phase jumps: ideal step area',
+    'reset_to' => 'phase jumps: ideal step area',
+    'reset_to_node' => 'phase jumps: ideal step area',
+    'rnd_reset' => 'phase jumps: ideal step area',
+    'tempo_audio_rate_seek' => 'phase jumps: ideal step area',
+    'tempo_lfo_changes' => 'phase jumps: ideal step area',
+    'tone_ports_reset' => 'phase jumps: ideal step area',
   }.freeze
 
   it 'has a reference for every case' do

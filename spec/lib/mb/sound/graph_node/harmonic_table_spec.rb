@@ -11,6 +11,14 @@ RSpec.describe(MB::Sound::GraphNode::HarmonicTable, aggregate_failures: true) do
     expect(a).to all_be_within(1e-4).of_array(b)
   end
 
+  it 'is also Pitch#additive' do
+    expect(MB::Sound::Pitch.instance_method(:additive)).to eq(MB::Sound::Pitch.instance_method(:harmonics))
+    a = 100.hz.additive([1, 0.5, 0, 0.25], phases: [0, 1, 0, 2])
+    expect(a).to be_a(described_class)
+    expect(a.sample(960)).to eq(100.hz.harmonics([1, 0.5, 0, 0.25], phases: [0, 1, 0, 2]).sample(960))
+    expect(MB::Sound::C4.additive([1, 0.5])).to be_a(described_class)
+  end
+
   it 'takes phases' do
     a = 100.hz.harmonics([1, 1], phases: [0, Math::PI / 2]).sample(480)
     b = 100.hz.wavetable(w.from_harmonics([1, 1], [0, Math::PI / 2])).sample(480)

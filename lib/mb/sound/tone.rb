@@ -68,7 +68,9 @@ module MB
     # 5. GAIN (fused into the kernel): y = v * gain + offset, from #at.
     # 6. JUMP: a phase jump (reset input, timeline lock) of a band-limited
     #    tone queues a minBLEP/minBLAMP step from the old waveform to the
-    #    new (state.jump_residual); queued steps are added as y += r * gain.
+    #    new (state.jump_residual), with its area set to that of an ideal
+    #    step on the sample (see .jump_residual), so audio-rate resets don't
+    #    drift; queued steps are added as y += r * gain.
     # 7. PORTS (when used): wraps/increment from the frame's phases
     #    (BandLimit.sync_pulses with state.pulses).
     #
@@ -347,14 +349,53 @@ module MB
         end
       end
 
+      # The samples of .jump_residual's area correction: a raised cosine
+      # (sin² over JUMP_AREA_TAPS + 1 steps), centered 1.5 samples after the
+      # jump, about half the minBLEP's delay, which cancels the first-order
+      # (low-frequency phase) error too.  Measured (harmonic error against
+      # the ideal reset waveform, 11 cases): 4 taps beat 3, 6, 8, 16, and
+      # 32 below 2 kHz and above.
+      JUMP_AREA_TAPS = 4
+
       # The minBLEP and minBLAMP tables at whole-sample offsets (a jump
-      # exactly between samples), for phase jumps, made on first use.
+      # exactly between samples), for phase jumps, and the area correction
+      # shape for .jump_residual (sum 1), made on first use.
       def self.jump_tables
         @jump_tables ||= begin
           blep, blamp = BandLimit.minblep_tables
           steps = Numo::DFloat.new(BandLimit::SYNC_TAPS).seq * BandLimit::SYNC_OVERSAMPLE
-          [blep[steps].freeze, blamp[steps].freeze].freeze
+          n = JUMP_AREA_TAPS
+          area = Numo::DFloat.cast(Array.new(n) { |i| Math.sin(Math::PI * (i + 1) / (n + 1))**2 })
+          area /= area.sum
+          [blep[steps].freeze, blamp[steps].freeze, area.freeze].freeze
         end
+      end
+
+      # The sum of an ideal band-limited step's samples minus the naive
+      # step's, per unit of jump, for a jump exactly on a sample (whose
+      # ideal value there is the midpoint; see .jump_residual).
+      JUMP_STEP_AREA = -0.5
+
+      # The same for a unit change in slope per sample exactly on a sample
+      # (a kink: 1/12, from the Poisson sum of the ideal ramp residual).
+      JUMP_KINK_AREA = 1.0 / 12
+
+      # The residual (to add to the naive waveform from the jump sample on)
+      # of a band-limited phase jump that changes the value by +dv+ and the
+      # slope per sample by +ds+: the minBLEP/minBLAMP residuals, plus the
+      # short raised cosine (JUMP_AREA_TAPS) scaled so the residual's sum is
+      # that of an ideal (zero-phase) step on the sample.  A minimum-phase
+      # step acts like a step delayed by about 2.8 samples, so its residual
+      # alone leaves about -2.8 × dv of extra area per jump: a DC offset
+      # that grows with the reset rate (e.g. -0.36 on a 1500 Hz square
+      # reset at 2900 Hz), the same drift the sync kernel had (see
+      # research-sync).  With the correction the mean matches the ideal
+      # waveform's (and sync's) exactly.
+      def self.jump_residual(dv, ds)
+        blep, blamp, area = jump_tables
+        residual = blep * dv + blamp * ds
+        residual[0...area.length] += area * ((JUMP_STEP_AREA * dv + JUMP_KINK_AREA * ds) - residual.sum)
+        residual
       end
 
       # Initializes an oscillator node with a simple generated waveform,
@@ -1483,7 +1524,7 @@ module MB
 
         w = BandLimit.clamp_width((width || 0.5).to_f)
         pm = phase_mod / TWOPI
-        v0, s0 = BandLimit.sync_shape(@wave_type, w, pm == 0 ? before : BandLimit.wrap(before + pm))
+        v0, s0 = jump_from_shape(w, pm == 0 ? before : BandLimit.wrap(before + pm), freq > 0)
         v1, s1 = BandLimit.sync_shape(@wave_type, w, pm == 0 ? after : BandLimit.wrap(after + pm))
         inc = freq * advance
         bl = band_limit_setting
@@ -1491,9 +1532,27 @@ module MB
         k = 0.0 unless band_limited?
         return if k == 0
 
-        blep, blamp = Tone.jump_tables
-        residual = (blep * (v1 - v0) + blamp * ((s1 - s0) * inc)) * k
+        residual = Tone.jump_residual(v1 - v0, (s1 - s0) * inc) * k
         state.jump_residual = state.jump_residual ? residual + pad_residual(state.jump_residual, residual.length) : residual
+      end
+
+      # [value, slope per cycle] of the old waveform at phase +p+ (cycles)
+      # for a phase jump (see #phase_jump), warped by width +w+.  A phase on
+      # a jump in value (within BandLimit::EPS) that the tone reached moving
+      # +forward+ hasn't crossed it yet at the jump (an edge and a reset on
+      # the same sample, e.g. a 1 kHz ramp reset at 400 Hz), so it takes
+      # the value and slope before the edge; moving backward, the value
+      # after it (the side it came from; see BandLimit.side_crossing).
+      # Corners without a jump in value (triangles) keep the slope after
+      # them, which measured slightly closer to the ideal.
+      def jump_from_shape(w, p, forward)
+        points = BandLimit.breakpoints(@wave_type, w)
+        j = BandLimit.snap(points, p)
+        return BandLimit.sync_shape(@wave_type, w, p) unless j && points[j][1] != 0
+
+        pos, dv, ds, _ = points[j]
+        v, s = BandLimit.sync_shape(@wave_type, w, pos)
+        forward ? [v - dv, s - ds] : [v, s]
       end
 
       def pad_residual(r, length)
@@ -1524,8 +1583,7 @@ module MB
           v1, s1 = table_shape(table, after + pm, w, inc, scan)
         end
 
-        blep, blamp = Tone.jump_tables
-        residual = blep * (v1 - v0) + blamp * ((s1 - s0) * inc)
+        residual = Tone.jump_residual(v1 - v0, (s1 - s0) * inc)
         residual = residual.real if residual.is_a?(Numo::DComplex) && !table.complex?
         @state.jump_residual = @state.jump_residual ? residual + pad_residual(@state.jump_residual, residual.length) : residual
       end

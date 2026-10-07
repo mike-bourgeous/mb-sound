@@ -104,15 +104,15 @@ module MB
       #             Notes pitch take glide, bend range, and vibrato in the
       #             block too, per copy).
       # +detune_mode:+ - How copies follow a +detune:+ node (see
-      #                  Unison::Detune): :interp (default) computes the
-      #                  outermost ratio r = 2 ** (detune / 12) exactly every
-      #                  16 samples, ramps it linearly in between, and spaces
-      #                  the copies linearly in Hz from f / r to f × r, so
-      #                  inner copies are slightly sharp (the middle one by
-      #                  0.18 cents at 25 cents of detune, 0.72 at 50, 2.9 at
-      #                  100; inaudible next to the detune itself) for about
-      #                  half the cost of :exact, which computes every copy
-      #                  at f × 2 ** (fraction × detune / 12) every sample.
+      #                  Unison::Detune): :exact (default) computes every
+      #                  copy at f × 2 ** (fraction × detune / 12) every
+      #                  sample; :interp computes the outermost ratio
+      #                  r = 2 ** (detune / 12) exactly every 16 samples,
+      #                  ramps it linearly in between, and spaces the copies
+      #                  linearly in Hz from f / r to f × r, so inner copies
+      #                  are slightly sharp (the middle one by 0.18 cents at
+      #                  25 cents of detune, 0.72 at 50, 2.9 at 100) for
+      #                  slightly less CPU (~0.15% of realtime for 7 copies).
       #                  Fixed detunes are always exact.
       # +layout:+ - :random (default) for uneven spacing within the detune,
       #             so the beats between copies don't form a regular pattern
@@ -137,15 +137,18 @@ module MB
       #             0..1; any spread above 0 returns a stereo Channels bundle.
       #             The sides alternate so each gets copies above and below
       #             the pitch (Unison.pan_slots).
-      # +mix:+ - The level of the side copies, 0..1 (a number or a graph
-      #          node), like a supersaw's mix knob: the center copies (the
-      #          one nearest the pitch for an odd count, the two nearest for
-      #          an even count; Unison.center_copies) stay at level 1 and the
-      #          others play at +mix+.  The normalization follows the levels
-      #          (:power keeps the total power, so loudness stays about the
-      #          same while the mix moves; mix 0 with an odd count is the
-      #          center copy alone at full level).  The default 1 (every
-      #          copy equal) gives exactly the output without a mix.
+      # +mix:+ - The level of the side copies, 0..2 (a number or a graph
+      #          node, clamped), like a supersaw's mix knob on a perceptual
+      #          curve: the center copies (the one nearest the pitch for an
+      #          odd count, the two nearest for an even count;
+      #          Unison.center_copies) stay at level 1 and the others play at
+      #          mix²: 0.5 is -12 dB, about 0.7 is -6 dB, 1 (default) every
+      #          copy equal (exactly the output without a mix), 1.4 about
+      #          +6 dB, 2 +12 dB (sides above the center, a hollow, wide
+      #          sound).  The normalization follows the levels (:power keeps
+      #          the total power, so loudness stays about the same while the
+      #          mix moves; mix 0 with an odd count is the center copy alone
+      #          at full level).
       # +normalize:+ - :power (default) scales the sum by 1/sqrt(count), so
       #                the loudness stays about the same for any count (peaks
       #                may pass full scale when copies line up); :peak by
@@ -161,8 +164,10 @@ module MB
       #     play 110.hz.unison(5, layout: :even, phase: 0)                      # flanging, hard attack
       #     midi.synth(voices: 4) { |v| v.hz.unison(5, detune: 15.cents, spread: 1) * v.amp_env }
       #     midi.synth(voices: 4) { |v| v.hz.unison(7, detune: v.mod * 0.5) * v.amp_env }  # mod wheel: 0-50 cents
-      #     play 110.hz.unison(7, detune: 0.2.hz.lfo.at(0..50) / 100, detune_mode: :exact)
-      #     play 110.hz.unison(7, detune: 25.cents, mix: 0.4)                   # quieter sides
+      #     play 110.hz.unison(7, detune: 0.2.hz.lfo.at(0..50) / 100, detune_mode: :interp)  # a bit cheaper
+      #     play 110.hz.unison(7, detune: 25.cents, mix: 0.5)                   # sides 12 dB down
+      #     play 110.hz.unison(7, detune: 25.cents, mix: 1.5, spread: 1)        # sides 7 dB up: hollow and wide
+      #     midi.synth(voices: 4) { |v| v.hz.unison(7, detune: 25.cents, mix: v.mod * 2) * v.amp_env }  # mod wheel: center only to +12 dB sides
       #     midi.synth(voices: 4) { |v| v.hz.unison(5, detune: v.mod * 0.3) { |p| p.glide(50.ms).saw } * v.amp_env }
       #     midi.synth(voices: 4) { |v| v.hz.unison(7) { |p| p.glide(spread(30.ms..300.ms)).saw } * v.amp_env }
       #
@@ -174,7 +179,13 @@ module MB
       # see Unison::Copy.  Copies with the same Notes settings share their
       # nodes (one Glide for `p.glide(50.ms)` on every copy).  See #swarm
       # for a ready-made swarm of gliding copies.
-      def unison(count = nil, detune: 12.cents, layout: :random, phase: :random, spread: 0, mix: 1, normalize: :power, seed: nil, detune_mode: :interp, &block)
+      #
+      #     play 110.hz.unison(5, detune: 10.cents) { |p| p.vibrato(4.0..6.5, depth: 8.cents).saw }.at(-12.db)   # Range: random rate per copy
+      #     play 110.hz.unison(7, spread: 1) { |p| p.vibrato(spread(3..7), depth: 10.cents).saw }.at(-12.db)     # spread: 3 Hz low copy to 7 Hz high
+      #     play 110.hz.unison(4, detune: 6.cents) { |p| p.transpose(channels(0, 12, 0, 19)).saw }.at(-12.db)    # channels: octave and 12th stack
+      #     play 220.hz.unison(5) { |p| p.transpose(-0.1..0.1).square }.at(-12.db)                             # extra random detune per copy
+      #     midi.synth(voices: 4) { |v| v.hz.unison(6) { |p| p.glide(channels(20.ms, 80.ms, 250.ms)).saw } * v.amp_env }  # cycled list
+      def unison(count = nil, detune: 12.cents, layout: :random, phase: :random, spread: 0, mix: 1, normalize: :power, seed: nil, detune_mode: :exact, &block)
         Unison.build(self, count, detune: detune, layout: layout, phase: phase, spread: spread, mix: mix, normalize: normalize, seed: seed, detune_mode: detune_mode, &block)
       end
 
@@ -275,13 +286,19 @@ module MB
 
       # An additive oscillator at this pitch whose harmonic amplitudes
       # (+spectrum+: numbers, graph nodes, or a callable of the time) may
-      # change while it plays (see GraphNode::HarmonicTable).
+      # change while it plays (see GraphNode::HarmonicTable).  Also called
+      # #additive.
+      #
+      #     play 110.hz.harmonics([1, 0.5, 0.33, 0.25]) * 0.5
+      #     play 110.hz.additive([1, 0, 0.33, 0, 0.2]) * 0.5            # odd harmonics: square-ish
+      #     play 110.hz.additive([1, 0.2.hz.lfo.at(0..1), 0.5]) * 0.5  # a moving 2nd harmonic
       def harmonics(spectrum, phases: nil, update: GraphNode::HarmonicTable::DEFAULT_UPDATE, interpolation: nil)
         GraphNode::HarmonicTable.new(
           frequency: oscillator_frequency, spectrum: spectrum, phases: phases, update: update,
           interpolation: interpolation, sample_rate: @sample_rate
         )
       end
+      alias additive harmonics
 
       # A wavetable Tone at this pitch (see Tone#wavetable).
       def wavetable(table, scan: nil, interpolation: nil, scan_wrap: false) = tone.wavetable(table, scan: scan, interpolation: interpolation, scan_wrap: scan_wrap)

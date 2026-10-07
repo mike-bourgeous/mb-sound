@@ -33,7 +33,7 @@ MB::Sound.synth_script { |midi|
     denv = v.fm_env(0, 0.005, 0, 0.005, curve: [-50, 50, 50], sensitivity: -25.5.db..0.db).named('D Envelope')
     d = denv * (v.freq * 0.9996 - 0.22).tone.at(1).reset(v.trigger).named('D')
 
-    eenv = v.fm_env(0, 2, 0, 2, curve: [-80, 80, 80], sensitivity: -18.db..0.db).named('E Envelope')
+    eenv = v.fm_env(0, 2, 0, 2, curve: [-80, 80, 80]).named('E Envelope')
     e = eenv * v.hz.at(1).fm(c * 4810 + d * 500).named('E')
 
     fenv = v.amp_env(0.001, 2, 0, 2, curve: [-80, 80, 80], sensitivity: -14.db..0.db).named('F Envelope')

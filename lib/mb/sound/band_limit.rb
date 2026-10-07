@@ -252,6 +252,24 @@ module MB
         dist >= ad ? 1.0 : dist / ad
       end
 
+      # Like .crossing, but a phase on a breakpoint is always on its right
+      # side, whichever way it moves (see bl_side_crossing in fast_synth.c;
+      # used by the free-running and sync kernels): a backward step starting
+      # on +b+ crosses it at once (0.0), and one ending within EPS of it
+      # doesn't cross it.
+      def self.side_crossing(e, d, b)
+        return crossing(e, d, b) if d >= 0
+
+        dist = e - b
+        dist += 1.0 if dist < 0
+        return 0.0 if dist == 0
+
+        ad = -d
+        return nil if ad >= 1.0 || dist >= ad - EPS
+
+        dist / ad
+      end
+
       # Returns the index of a breakpoint within EPS of phase +e+, or nil (a
       # sample there takes the value after the edge; see bl_snap).
       def self.snap(points, e)
@@ -282,7 +300,7 @@ module MB
         k = nil
 
         points.each do |pos, dv, ds, _|
-          f = crossing(e, d, pos)
+          f = side_crossing(e, d, pos)
           next if f.nil?
 
           if k.nil?
@@ -849,29 +867,12 @@ module MB
         -(re * Math.sin(psi) + im * Math.cos(psi))
       end
 
-      # Like .crossing, but a phase on a breakpoint is always on its right
-      # side, whichever way it moves (see sync_crossing in fast_synth.c):
-      # a backward step starting on +b+ crosses it at once (0.0), and one
-      # ending within EPS of it doesn't cross it.
-      def self.sync_crossing(e, d, b)
-        return crossing(e, d, b) if d >= 0
-
-        dist = e - b
-        dist += 1.0 if dist < 0
-        return 0.0 if dist == 0
-
-        ad = -d
-        return nil if ad >= 1.0 || dist >= ad - EPS
-
-        dist / ad
-      end
-
       # See sync_move in fast_synth.c; returns the new phase.
       def self.sync_move(wave_type, w, points, p, vel, dur, end_t, acc, pos, tables, bl, sine = nil)
         move = vel * dur
         if bl && move != 0
           points.each do |bpos, _, _, _|
-            f = sync_crossing(p, move, bpos)
+            f = side_crossing(p, move, bpos)
             next if f.nil?
 
             t = end_t + (1.0 - f) * dur

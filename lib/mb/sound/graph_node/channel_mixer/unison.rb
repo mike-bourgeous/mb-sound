@@ -19,23 +19,33 @@ module MB
         # :peak by 1/n, so the mix never exceeds the copies' peak (it gets
         # quieter as n grows); or a number (1 for a plain sum).
         #
-        # +mix+ (0..1, a number or a graph node; default 1) is the level of
+        # +mix+ (0..2, a number or a graph node; default 1) sets the level of
         # the side copies relative to the center ones (+centers:+, input
-        # indices; see MB::Sound::Unison.center_copies): center copies play
-        # at weight 1, side copies at weight +mix+, like a supersaw's mix
-        # knob.  The normalization follows the weights w: :power scales by
-        # 1/sqrt(sum of w²) and :peak by 1/(sum of w), so the loudness stays
-        # about the same while +mix+ moves (mix 0 with one center copy is
-        # that copy at full level); a number scales the weighted sum.  At
-        # mix 1 every weight is 1 and the gains are exactly those without a
-        # mix.  Node values are clipped to 0..1.
+        # indices; see MB::Sound::Unison.center_copies), like a supersaw's
+        # mix knob, on a perceptual curve: center copies play at weight 1,
+        # side copies at weight mix² (MIX_EXPONENT), so mix 0.5 puts the
+        # sides 12 dB down, 0.7 about 6 dB down, 1 leaves them equal, and 2
+        # (the top) lifts them 12 dB above the centers.  The normalization
+        # follows the weights w: :power scales by 1/sqrt(sum of w²) and :peak
+        # by 1/(sum of w), so the loudness stays about the same while +mix+
+        # moves (mix 0 with one center copy is that copy at full level); a
+        # number scales the weighted sum.  At mix 1 every weight is 1 and the
+        # gains are exactly those without a mix.  Node values are clamped to
+        # 0..2; numbers outside raise.
         #
         #     ChannelMixer::Unison.new([a, b, c], slots: [0, -1, 1], spread: 0.5)
         #     ChannelMixer::Unison.new([a, b, c], centers: [1], mix: 0.3)
         class Unison < ChannelMixer
           channels :any => :any
           param :spread, default: 0, range: 0..1
-          param :mix, default: 1, range: 0..1
+          param :mix, default: 1, range: 0..2
+
+          # Side copies play at weight mix ** MIX_EXPONENT (see the class
+          # description): a dB-like knob, -12 dB at 0.5 and +12 dB at 2.
+          MIX_EXPONENT = 2
+
+          # The highest mix (side copies 12 dB above the centers).
+          MAX_MIX = 2.0
 
           # The gain for every input before panning (see the class
           # description).
@@ -68,9 +78,10 @@ module MB
             # Mix 1 keeps the plain gains (bit-identical to a mixer without mix)
             return plain_gains(spread) if mix.is_a?(Numeric) && mix == 1
 
-            mix = mix.is_a?(Numeric) ? mix.to_f.clamp(0.0, 1.0) : mix.clip(0.0, 1.0)
-            gain = weighted_gain(mix)
-            weights = Array.new(@slots.length) { |i| @center_set[i] ? gain : gain * mix }
+            mix = mix.is_a?(Numeric) ? mix.to_f.clamp(0.0, MAX_MIX) : mix.clip(0.0, MAX_MIX)
+            side = mix * mix
+            gain = weighted_gain(side)
+            weights = Array.new(@slots.length) { |i| @center_set[i] ? gain : gain * side }
 
             unless @stereo
               return [weights]
@@ -107,16 +118,16 @@ module MB
           end
 
           # The normalization gain for center weights 1 and side weights
-          # +mix+ (a number or NArray; see the class description).
-          def weighted_gain(mix)
+          # +side+ (mix², a number or NArray; see the class description).
+          def weighted_gain(side)
             centers = @center_set.count(true)
             sides = @slots.length - centers
             case @normalize
             when :power
-              total = mix * mix * sides + centers
+              total = side * side * sides + centers
               total.is_a?(Numeric) ? 1.0 / Math.sqrt(total) : 1.0 / Numo::NMath.sqrt(total)
             when :peak
-              1.0 / (mix * sides + centers)
+              1.0 / (side * sides + centers)
             else
               @gain
             end
