@@ -115,6 +115,42 @@ RSpec.describe(MB::Sound::GraphNode::ChannelMixer, :aggregate_failures) do
       expect { MB::Sound::GraphNode::ChannelMixer::Pan.new(1.constant, volume: 1) }.to raise_error(ArgumentError, /Unknown settings/)
     end
 
+    [:equal_power, :linear, :minus_4_5db].each do |law|
+      it "pans a moving position in C exactly as the Numo gains and mix (#{law})" do
+        make = -> { MB::Sound::GraphNode::ChannelMixer::Pan.new(330.hz.ramp, position: 3.hz.lfo.at(-1.2..1.2), law: law) }
+        fast = make.call
+        slow = make.call
+        slow.define_singleton_method(:mix_params) { |_values, _data| nil }
+
+        [128, 37, 800].each do |n|
+          a = fast.outputs.map { |o| o.sample(n).dup }
+          b = slow.outputs.map { |o| o.sample(n).dup }
+          expect(a.map(&:class)).to eq(b.map(&:class))
+          expect(a.map(&:to_binary)).to eq(b.map(&:to_binary))
+          expect(fast.gains.map { |row| row[0].to_binary }).to eq(slow.gains.map { |row| row[0].to_binary })
+        end
+      end
+    end
+
+    it 'pans a moving position without allocating' do
+      per_buffer = ->(&block) {
+        5.times(&block)
+        before = GC.stat(:total_allocated_objects)
+        100.times(&block)
+        (GC.stat(:total_allocated_objects) - before) / 100.0
+      }
+
+      input = 330.hz.ramp
+      position = 3.hz.lfo
+      sources = per_buffer.call { input.sample(128); position.sample(128) }
+
+      l, r = MB::Sound::GraphNode::ChannelMixer::Pan.new(330.hz.ramp, position: 3.hz.lfo).outputs
+      panned = per_buffer.call { l.sample(128); r.sample(128) }
+
+      # The mixer used to add about 30 objects per buffer
+      expect(panned - sources).to be < 0.5
+    end
+
     it 'mix width, mid/side, swap, and mono as one node each' do
       first = ->(bundle) { bundle.outputs.map { |o| o.sample(2)[0] } }
       expect(first.(stereo.width(0))).to eq([0.75, 0.75])

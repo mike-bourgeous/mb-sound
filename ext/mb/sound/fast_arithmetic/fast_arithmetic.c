@@ -39,7 +39,8 @@
  * .circular_read/.circular_write are MB::M's ring buffer copies (delay
  * lines, CircularBuffer) without the Ranges and views; .wet_dry is
  * Filter::Delay's output mix, and .complex_part copies real or imaginary
- * parts out of complex buffers.
+ * parts out of complex buffers.  .pan is ChannelMixer::Pan with a moving
+ * position (PanLaws.gains and the mix, in Numo's float steps).
  *
  * Buffer types: SFloat (SFloat inputs), DFloat (DFloat), SComplex (SComplex
  * or SFloat), DComplex (DComplex or DFloat), every input exactly as long as
@@ -856,6 +857,106 @@ static VALUE ruby_complex_part(VALUE self, VALUE out, VALUE src, VALUE imag)
 	return out;
 }
 
+/*
+ * call-seq: MB::Sound::FastArithmetic.pan(law, position, input, gains, outs) -> outs or nil
+ *
+ * ChannelMixer::Pan with a moving position: writes the left and right
+ * gains (ChannelMixer::PanLaws.gains) for the SFloat +position+ into the
+ * two SFloats of the Array +gains+, and the gains times the SFloat +input+
+ * into the two SFloats of +outs+.  +law+ is 0 (:equal_power), 1 (:linear),
+ * or 2 (:minus_4_5db).  Every buffer must be contiguous and as long as
+ * +input+, and the gains and outputs writable; otherwise returns nil without
+ * writing.
+ *
+ * The steps are Numo's, each rounded to float as Numo stores it: the
+ * position clipped to -1..1 (clip), then for :equal_power the angle
+ * (p + 1) * (float)(pi / 4) and the gains cos and sin of it (Numo's
+ * SFloat cos/sin call the double functions on the float and round the
+ * result); for :linear (1 - p) * 0.5 and (p + 1) * 0.5; for :minus_4_5db
+ * those raised to (float)0.75 with pow.  Each output is gain * input.
+ */
+static VALUE ruby_pan(VALUE self, VALUE law, VALUE position, VALUE input, VALUE gains, VALUE outs)
+{
+	if (!RB_TYPE_P(gains, T_ARRAY) || RARRAY_LEN(gains) != 2 || !RB_TYPE_P(outs, T_ARRAY) || RARRAY_LEN(outs) != 2) {
+		return Qnil;
+	}
+	if (arith_type(input) != MB_ARITH_SF || RNARRAY_NDIM(input) != 1 || !RTEST(nary_check_contiguous(input))) {
+		return Qnil;
+	}
+	size_t length = RNARRAY_SIZE(input);
+	if (arith_type(position) != MB_ARITH_SF || !shape_ok(position, length)) {
+		return Qnil;
+	}
+
+	VALUE gl_v = rb_ary_entry(gains, 0), gr_v = rb_ary_entry(gains, 1);
+	VALUE ol_v = rb_ary_entry(outs, 0), or_v = rb_ary_entry(outs, 1);
+	VALUE writes[4] = { gl_v, gr_v, ol_v, or_v };
+	for (int j = 0; j < 4; j++) {
+		if (writable_real(writes[j]) != MB_ARITH_SF || RNARRAY_SIZE(writes[j]) != length) {
+			return Qnil;
+		}
+	}
+
+	int lw = NUM2INT(law);
+	if (lw < 0 || lw > 2) {
+		return Qnil;
+	}
+
+	const float *pos = (const float *)read_ptr(position);
+	const float *x = (const float *)read_ptr(input);
+	float *gl = (float *)(nary_get_pointer_for_write(gl_v) + nary_get_offset(gl_v));
+	float *gr = (float *)(nary_get_pointer_for_write(gr_v) + nary_get_offset(gr_v));
+	float *ol = (float *)(nary_get_pointer_for_write(ol_v) + nary_get_offset(ol_v));
+	float *orr = (float *)(nary_get_pointer_for_write(or_v) + nary_get_offset(or_v));
+
+	const float quarter_pi = (float)(M_PI / 4);
+	const float half = 0.5f;
+	const float exponent = 0.75f;
+
+	if (lw == 0) {
+		// Separate loops for cos and sin, as Numo calls them: a compiler may
+		// otherwise merge the two into sincos(), which isn't guaranteed to
+		// round the same as cos() and sin() on every platform
+		for (size_t i = 0; i < length; i++) {
+			float p = pos[i];
+			if (p < -1.0f) p = -1.0f;
+			if (p > 1.0f) p = 1.0f;
+			float angle = (p + 1.0f) * quarter_pi;
+			gr[i] = angle;
+			gl[i] = (float)cos((double)angle);
+		}
+		for (size_t i = 0; i < length; i++) {
+			gr[i] = (float)sin((double)gr[i]);
+		}
+	} else {
+		for (size_t i = 0; i < length; i++) {
+			float p = pos[i];
+			if (p < -1.0f) p = -1.0f;
+			if (p > 1.0f) p = 1.0f;
+
+			float l = (1.0f - p) * half;
+			float r = (p + 1.0f) * half;
+			if (lw == 2) {
+				l = (float)pow((double)l, (double)exponent);
+				r = (float)pow((double)r, (double)exponent);
+			}
+			gl[i] = l;
+			gr[i] = r;
+		}
+	}
+
+	for (size_t i = 0; i < length; i++) {
+		ol[i] = gl[i] * x[i];
+		orr[i] = gr[i] * x[i];
+	}
+
+	RB_GC_GUARD(position);
+	RB_GC_GUARD(input);
+	RB_GC_GUARD(gains);
+	RB_GC_GUARD(outs);
+	return outs;
+}
+
 void Init_fast_arithmetic(void)
 {
 	VALUE mb = rb_define_module("MB");
@@ -872,4 +973,5 @@ void Init_fast_arithmetic(void)
 	rb_define_module_function(fast_arithmetic, "circular_write", ruby_circular_write, 3);
 	rb_define_module_function(fast_arithmetic, "wet_dry", ruby_wet_dry, 5);
 	rb_define_module_function(fast_arithmetic, "complex_part", ruby_complex_part, 3);
+	rb_define_module_function(fast_arithmetic, "pan", ruby_pan, 5);
 }

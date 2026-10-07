@@ -101,6 +101,24 @@ RSpec.describe(MB::Sound::FastResample, :aggregate_failures) do
   end
 
   describe '#read' do
+    it 'reads steady buffer sizes without allocating' do
+      data = Numo::SFloat.ones(64)
+      r = MB::Sound::FastResample.new(1.5, :libsamplerate_fastest) { |size| data.length == size ? data : (data = Numo::SFloat.ones(size)) }
+      first = nil
+      10.times { first = r.read(128) }
+      same = true
+      before = GC.stat(:total_allocated_objects)
+      100.times { same &&= r.read(128).equal?(first) }
+      # Reads used to allocate a Range, a view, and an Array per call
+      expect((GC.stat(:total_allocated_objects) - before) / 100.0).to be < 0.1
+      expect(same).to eq(true)
+
+      # A shorter read than the buffer is a view, kept while the size holds
+      short = r.read(100)
+      expect(short.length).to eq(100)
+      expect(r.read(100)).to equal(short)
+    end
+
     shared_examples_for 'a working libsamplerate wrapper' do
       it 'can read zeros' do
         result = r_half.read(100)

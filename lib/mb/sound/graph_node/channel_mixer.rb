@@ -284,23 +284,46 @@ module MB
 
             # Outputs are written into the previous output buffers, so an
             # input that is one of them (e.g. a direct feedback loop) is
-            # copied first
-            data = @inputs.map { |inp|
-              d = inp.sample(count)
+            # copied first.  The input and parameter lists are reused (no
+            # allocations per buffer when the lengths match).
+            data = (@data_list ||= Array.new(@inputs.length))
+            length = nil
+            ended = false
+            idx = 0
+            while idx < @inputs.length
+              d = @inputs[idx].sample(count)
               d = d.dup if d && @output_data&.any? { |o| o.equal?(d) }
-              d
-            }
-            return @output_data = nil if data.any?(&:nil?)
+              data[idx] = d
+              if d.nil?
+                ended = true
+              elsif length.nil? || d.length < length
+                length = d.length
+              end
+              idx += 1
+            end
+            return @output_data = nil if ended
 
-            values = @param_values.transform_values { |v| v.respond_to?(:sample) ? v.sample(count) : v }
-            return @output_data = nil if values.values.any?(&:nil?)
+            values = (@value_list ||= {})
+            @param_values.each do |name, v|
+              v = v.sample(count) if v.respond_to?(:sample)
+              values[name] = v
+              if v.nil?
+                ended = true
+              elsif v.is_a?(Numo::NArray) && v.length < length
+                length = v.length
+              end
+            end
+            return @output_data = nil if ended
 
-            length = (data + values.values.grep(Numo::NArray)).map(&:length).min
-            data = data.map { |d| d.length > length ? d[0...length] : d }
-            values = values.transform_values { |v| v.is_a?(Numo::NArray) && v.length > length ? v[0...length] : v }
+            if data.any? { |d| d.length > length } || values.any? { |_, v| v.is_a?(Numo::NArray) && v.length > length }
+              data = data.map { |d| d.length > length ? d[0...length] : d }
+              values = values.transform_values { |v| v.is_a?(Numo::NArray) && v.length > length ? v[0...length] : v }
+            end
 
-            gains = @gains || (@last_gains = gains_for(**values))
-            @output_data = mix(gains, data)
+            @output_data = (@gains.nil? && mix_params(values, data)) || begin
+              gains = @gains || (@last_gains = gains_for(**values))
+              mix(gains, data)
+            end
           end
 
           return nil if @output_data.nil?
@@ -327,6 +350,14 @@ module MB
         # remaining settings; subclasses may add parameters (see #add_param)
         # or consume settings.
         def setup(inputs, settings)
+        end
+
+        # Subclasses may mix node parameters' buffers +values+ (by name) and
+        # inputs +data+ without #gains_for and #mix, returning the outputs
+        # (setting @last_gains for #gains), or nil to use them.  The results
+        # must be exactly those of #gains_for and #mix.
+        def mix_params(values, data)
+          nil
         end
 
         # The number of outputs, for classes declaring :any outputs.

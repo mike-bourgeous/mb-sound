@@ -22,6 +22,7 @@ static ID sym_atratio;
 static ID sym_atcallback;
 static ID sym_atstate;
 static ID sym_atread_size;
+static ID sym_atview;
 static ID sym_array_lookup;
 static ID sym_array_assign;
 static ID sym_zeros;
@@ -112,9 +113,23 @@ static VALUE ruby_read(VALUE self, VALUE count)
 		rb_raise(rb_eIOError, "libsamplerate gave us %ld frames instead of the %ld we requested", frames_read, frames_requested);
 	}
 
+	// The whole buffer, or a view of its start, kept for the next read of
+	// the same length (so steady reads allocate nothing)
+	if ((size_t)frames_read == RNARRAY_SIZE(buf)) {
+		return buf;
+	}
+
+	VALUE view = rb_ivar_get(self, sym_atview);
+	if (!NIL_P(view) && RNARRAY_TYPE(view) == NARRAY_VIEW_T && RNARRAY_VIEW(view)->data == buf &&
+			RNARRAY_SIZE(view) == (size_t)frames_read) {
+		return view;
+	}
+
 	VALUE ruby_frames = LONG2NUM(frames_read);
 	VALUE result_range = rb_range_new(INT2FIX(0), ruby_frames, 1);
-	return rb_funcall(buf, rb_intern("[]"), 1, result_range);
+	view = rb_funcall(buf, sym_array_lookup, 1, result_range);
+	rb_ivar_set(self, sym_atview, view);
+	return view;
 }
 
 /**
@@ -148,8 +163,7 @@ static long read_callback(void *data, float **audio)
 	VALUE samples_requested = rb_ivar_get(self, sym_atread_size);
 	mbfr_debug("Reading %ld upstream samples for libsamplerate\n", NUM2LONG(samples_requested));
 
-	VALUE block_args = rb_ary_new_from_args(1, samples_requested);
-	VALUE buf = rb_proc_call(block, block_args);
+	VALUE buf = rb_proc_call_with_block(block, 1, &samples_requested, Qnil);
 
 	if (buf == Qnil) {
 		*audio = NULL;
@@ -277,6 +291,7 @@ static VALUE ruby_fast_resample_initialize(int argc, VALUE *argv, VALUE self)
 	rb_ivar_set(self, sym_atratio, DBL2NUM(r));
 	rb_ivar_set(self, sym_atread_size, INT2NUM(0));
 	rb_ivar_set(self, sym_atbuf, Qnil);
+	rb_ivar_set(self, sym_atview, Qnil);
 	rb_ivar_set(self, sym_atcallback, callback);
 
 	rb_funcall(self, rb_intern("setup_converter_type"), 1, mode);
@@ -323,6 +338,7 @@ void Init_fast_resample(void)
 	sym_atcallback = rb_intern("@callback");
 	sym_atstate = rb_intern("@state");
 	sym_atread_size = rb_intern("@read_size");
+	sym_atview = rb_intern("@view");
 	sym_zeros = rb_intern("zeros");
 	sym_array_lookup = rb_intern("[]");
 	sym_array_assign = rb_intern("[]=");

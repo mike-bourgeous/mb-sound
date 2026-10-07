@@ -1728,7 +1728,7 @@ module MB
         when :synth
           MB::Sound::FastSynth.oscillate_bl(
             out, @wave_type, freq, phase, @advance, @gain, @offset,
-            state.phase, state.blep, *@fade_band, width, !@keep_dc
+            state.phase, state.blep, @fade_band[0], @fade_band[1], width, !@keep_dc
           ).inplace!
         when :phasor
           MB::FastSound.phasor(out, freq, @advance, @random_advance, state.phase, nil, state.noise).inplace!
