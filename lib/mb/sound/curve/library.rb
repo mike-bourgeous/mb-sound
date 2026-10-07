@@ -177,35 +177,64 @@ module MB
         end
       end
 
-      # The peak of x³(1 - x)², the wiggle window of .squiggle.
-      SQUIGGLE_PEAK = 0.6**3 * 0.4**2
-
       # Where .squiggle's glide arrives (as a fraction of the time).
       SQUIGGLE_ARRIVE = 0.6
 
       # A wobbly glide: a smoothstep that arrives at 60% of the time
-      # (SQUIGGLE_ARRIVE), with a wiggle riding on it: +overshoot+ (default
-      # 0.15, a fraction of the distance) times sin(2π +cycles+ x) in a
-      # window x³(1 - x)² that peaks at 60%, so the wiggle is largest as it
-      # arrives, swings around the target (passing it by up to about
-      # +overshoot+), and dies away, settling onto it with zero slope.
+      # (SQUIGGLE_ARRIVE), with a wiggle riding on it: sin(2π +cycles+ x)
+      # in a window x³(1 - x)^1.5 that peaks at 2/3 of the time, so the
+      # wiggle is largest as it arrives, swings around the target, and dies
+      # away slowly, settling onto it with zero slope.  The wiggle is
+      # scaled so the curve passes the target by exactly +overshoot+
+      # (default 0.2, a fraction of the distance; see .squiggle_scale).
       # +cycles+ (default 4) counts the sine's cycles over the whole time.
-      def self.squiggle(overshoot: 0.15, cycles: 4)
-        a = check_amount(:squiggle, overshoot, 0..1) / SQUIGGLE_PEAK
+      # (Until 2026-10-07 the window was x³(1 - x)², unscaled, default 0.15:
+      # it peaked a little under the overshoot and decayed faster.)
+      def self.squiggle(overshoot: 0.2, cycles: 4)
+        ov = check_amount(:squiggle, overshoot, 0..1)
         c = check_amount(:squiggle, cycles, 0.., :cycles)
+        a = squiggle_scale(ov, c)
         w = 2.0 * Math::PI * c
         inv = 1.0 / SQUIGGLE_ARRIVE
-        new("squiggle(#{MB::M.sigfigs(a * SQUIGGLE_PEAK, 6)}, #{MB::M.sigfigs(c, 6)})", kind: :out,
-            options: { overshoot: a * SQUIGGLE_PEAK, cycles: c },
+        new("squiggle(#{MB::M.sigfigs(ov, 6)}, #{MB::M.sigfigs(c, 6)})", kind: :out,
+            options: { overshoot: ov, cycles: c },
             scalar: ->(x) {
               u = x * inv
               u = u < 0 ? 0.0 : (u > 1 ? 1.0 : u)
-              u * u * (3.0 - 2.0 * u) + a * x * x * x * (1.0 - x) * (1.0 - x) * Math.sin(w * x)
+              d = 1.0 - x
+              d = 0.0 if d < 0
+              u * u * (3.0 - 2.0 * u) + a * x * x * x * d * Math.sqrt(d) * Math.sin(w * x)
             },
             vector: ->(x) {
               u = (x * inv).clip(0.0, 1.0)
-              u * u * (3.0 - 2.0 * u) + a * x * x * x * (1.0 - x) * (1.0 - x) * Numo::NMath.sin(w * x)
+              d = (1.0 - x).clip(0.0, nil)
+              u * u * (3.0 - 2.0 * u) + a * x * x * x * d * Numo::NMath.sqrt(d) * Numo::NMath.sin(w * x)
             })
+      end
+
+      # The wiggle scale of .squiggle for which the curve peaks at 1 +
+      # +overshoot+ with +cycles+ (bisection on a 4001-point grid; 0 for no
+      # overshoot).
+      def self.squiggle_scale(overshoot, cycles)
+        return 0.0 if overshoot <= 0
+
+        (@squiggle_scale ||= {})[[overshoot, cycles]] ||= begin
+          x = Numo::DFloat.linspace(0, 1, 4001)
+          u = (x / SQUIGGLE_ARRIVE).clip(0.0, 1.0)
+          base = u * u * (3.0 - 2.0 * u)
+          wig = x**3 * (1.0 - x)**1.5 * Numo::NMath.sin(2.0 * Math::PI * cycles * x)
+          peak = ->(k) { (base + wig * k).max - 1.0 }
+          raise ArgumentError, "A squiggle with #{cycles} cycles can't overshoot" if peak.(1e6) <= 0
+
+          lo = 0.0
+          hi = 1.0
+          hi *= 2 while peak.(hi) < overshoot
+          60.times do
+            mid = (lo + hi) / 2
+            peak.(mid) < overshoot ? lo = mid : hi = mid
+          end
+          (lo + hi) / 2
+        end
       end
 
       # A ball dropped onto the target: a fall (x/T)², then +cycles+ bounces

@@ -60,13 +60,17 @@ RSpec.describe(MB::Sound::Curve) do
       expect(MB::Sound::Curve[:anticipate, overshoot: 0.2].extent(4001)[0]).to be_within(2e-4).of(-0.2)
     end
 
-    it 'keeps squiggles within the overshoot, actually passing the target' do
-      [0.05, 0.15, 0.4].each do |o|
-        lo, hi = MB::Sound::Curve.squiggle(overshoot: o, cycles: 4).extent(4001)
-        expect(hi).to be <= 1 + o
-        expect(hi).to be > 1 + o * 0.5
+    it 'passes the target by exactly the overshoot for squiggles, with later wiggles' do
+      [0.05, 0.2, 0.4].each do |o|
+        c = MB::Sound::Curve.squiggle(overshoot: o, cycles: 4)
+        lo, hi = c.extent(4001)
+        expect(hi).to be_within(1e-4).of(1 + o)
         expect(lo).to be >= -o
+        # the swing after the peak is about as large (slow decay)
+        late = c.map(Numo::DFloat.linspace(0.75, 0.9, 301))
+        expect(late.max - 1).to be > o * 0.7
       end
+      expect(MB::Sound::Curve[:squiggle].options).to eq(overshoot: 0.2, cycles: 4.0)
     end
 
     it 'bounces back by the overshoot (first bounce height)' do

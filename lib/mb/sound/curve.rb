@@ -52,8 +52,8 @@ module MB
     #   decaying swings (+overshoot+ is the first swing, default 0.3;
     #   +cycles+ the swings, default 3) and lands exactly on it
     # - :squiggle - a smooth glide with a decaying wiggle riding on it
-    #   (+overshoot+ is the wiggle's size, default 0.15; +cycles+ default
-    #   4), loudest as it arrives, settling onto the target
+    #   (+overshoot+ is how far it passes the target, default 0.2; +cycles+
+    #   default 4), loudest as it arrives, settling onto the target
     # - :bounce - falls onto the target and bounces under it (+overshoot+
     #   is the first bounce's height, default 0.25; +cycles+ the bounces,
     #   default 3: Robert Penner's easeOutBounce)
@@ -90,7 +90,7 @@ module MB
         back: { overshoot: 0.1 },
         anticipate: { overshoot: 0.1 },
         elastic: { overshoot: 0.3, cycles: 3 },
-        squiggle: { overshoot: 0.15, cycles: 4 },
+        squiggle: { overshoot: 0.2, cycles: 4 },
         bounce: { overshoot: 0.25, cycles: 3 },
         steps: { cycles: 4 },
       }.freeze
