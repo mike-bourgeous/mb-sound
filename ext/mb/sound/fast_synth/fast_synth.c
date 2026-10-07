@@ -1,5 +1,5 @@
 /*
- * MB::Sound::FastSynth: synthesis kernels.  First, band-limited oscillators
+ * MB::Sound::FastSynth: synthesis kernels.  Band-limited oscillators
  * (PolyBLEP / PolyBLAMP).
  *
  * A naive waveform with jumps (ramp, square) or corners (triangle) aliases,
