@@ -14,6 +14,7 @@ module MB
     #       { time: 1.0, data: [ 1, -1, 0 ], blend: :smoothstep },
     #       { time: 2.5, data: [ -1, 1, -1 ], blend: :smootherstep },
     #       { time: 5.0, data: [ 0, 0, 1 ], blend: :catmull_rom, alpha: 0.5 },
+    #       { time: 6.0, data: [ 1, 1, 1 ], blend: :elastic }, # any MB::Sound::Curve
     #       { time: 8.0, data: [ 1, 2, 3 ] },
     #     ])
     #
@@ -26,6 +27,14 @@ module MB
         :smoothstep,
         :smootherstep,
       ]
+
+      # True if +blend+ is one of INTERPOLATORS or anything
+      # MB::Sound::Curve.from accepts (e.g. :elastic, :bounce, a Curve).
+      def self.valid_blend?(blend)
+        INTERPOLATORS.include?(blend) || !MB::Sound::Curve.from(blend).nil?
+      rescue ArgumentError
+        false
+      end
 
       # The number of values being interpolated.
       attr_reader :num_values
@@ -47,7 +56,7 @@ module MB
       # that accept a parameter) if a keyframe does not specify its own alpha
       # value.
       def initialize(keyframes, default_blend: :smootherstep, default_alpha: 0.5)
-        raise "Unsupported blending mode #{default_blend.inspect}" unless INTERPOLATORS.include?(default_blend)
+        raise "Unsupported blending mode #{default_blend.inspect}" unless self.class.valid_blend?(default_blend)
         @default_blend = default_blend
 
         raise "Default alpha value must be numeric" unless default_alpha.is_a?(Numeric)
@@ -74,7 +83,7 @@ module MB
         @min_time = @keyframes[0][:time]
         @max_time = @keyframes[-1][:time]
 
-        unless @keyframes.all? { |k| INTERPOLATORS.include?(k[:blend] || @default_blend) }
+        unless @keyframes.all? { |k| self.class.valid_blend?(k[:blend] || @default_blend) }
           raise "A keyframe has an invalid :blend"
         end
 
@@ -171,7 +180,8 @@ module MB
           v
 
         else
-          raise "BUG: Unsupported blending mode #{k1[:blend] || @default_blend}"
+          # Any other blend is a tweening curve (see .curve_blend?)
+          MB::M.interp(k1[:data], k2[:data], MB::Sound::Curve.from(k1[:blend] || @default_blend).call(index_offset))
         end
       end
     end

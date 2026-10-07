@@ -19,6 +19,40 @@ module MB
         Sequence::Seq.new([nil])
       end
 
+      # Returns a control signal that tweens through +values+ (numbers), one
+      # per +step+, along +curve+ (a MB::Sound::Curve name such as
+      # :smoothstep (default), :elastic, :bounce, :squiggle, :steps, :back,
+      # a Curve, or a Proc): automation for a cutoff, a detune, a mix, ...
+      # following the session's tempo and timeline.  +step+ is a length
+      # (e.g. `1.bar`, `2.beats`, `3.n16`; a plain number counts bars) or
+      # an Array of lengths, one per value (cycling).  Each value is
+      # reached as the next step begins (or after +time+, then held); the
+      # first value starts in place (or tweens from +from:+), and with
+      # +loop: true+ (default) the last value tweens back to the first.
+      # +overshoot:+ and +cycles:+ go to a named curve.  Built on a Clip
+      # (Sequence::Clip#tween), so clips of values tween the same way.
+      #
+      #     bg :pad, 110.hz.saw.filter(:lowpass, cutoff: tween([300, 3000, 800], 1.bar, curve: :elastic), quality: 4) * 0.3
+      #     tween([0, 1, 0.3], 1.bar, curve: :bounce)               # a bouncing mix knob
+      #     tween([0, 7, 3, 12], 2.beats, curve: :steps, cycles: 4) # stepped automation
+      def tween(values, step = 1.bar, curve: :smoothstep, time: nil, overshoot: nil, cycles: nil, from: nil, loop: true)
+        values = Array(values)
+        raise ArgumentError, 'A tween needs at least one value' if values.empty?
+        raise ArgumentError, "Tween values must be numbers (got #{values.inspect})" unless values.all?(Numeric)
+
+        steps = Array(step).map { |s|
+          s.is_a?(Numeric) ? Sequence::Duration.rational(s) * transport.bar_length : Sequence::Duration.whole_notes(s)
+        }
+        start = 0r
+        events = values.each_with_index.map { |v, i|
+          len = steps[i % steps.length]
+          e = Sequence::Event.new(start: start, length: len, value: v, velocity: Sequence::Clip::DEFAULT_VELOCITY)
+          start += len
+          e
+        }
+        Sequence::Clip.new(events, length: start, loop: loop).tween(time, curve: curve, overshoot: overshoot, cycles: cycles, from: from)
+      end
+
       # Parses step-sequencer strings with steps of 1/+division+ whole notes
       # (an Integer note division or Rational whole notes).  One character is
       # one step: x = hit, X = accent, 1-9 = velocity, ? = 50% chance, . =

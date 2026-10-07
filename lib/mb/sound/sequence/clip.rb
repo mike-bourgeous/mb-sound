@@ -407,6 +407,31 @@ module MB
         end
         alias value number
 
+        # A control signal that tweens from each event's value to the next
+        # along a +curve+ from the tweening library (MB::Sound::Curve; a
+        # name like :elastic, :bounce, :squiggle, :steps, a Curve, or a
+        # Proc), e.g. automation for a cutoff, a detune, or a mix.  Each
+        # event starts a tween from the current output to its value, taking
+        # +time+ (default: until the next event starts, so each value is
+        # reached as the next one begins; a Duration follows the tempo;
+        # also seconds, Lengths, or a node of seconds), then holding it.
+        # The first event jumps (unless +from:+ gives a start value); a
+        # looping clip tweens from its last value back to its first.
+        # +overshoot:+ and +cycles:+ go to a named curve.  The values are
+        # plain numbers (not note numbers), so `seq(200, 2000, 800)` tweens
+        # between those values.  A Notes::Glide underneath; see also
+        # MB::Sound.tween.
+        #
+        #     cutoff = seq(300, 3000, 900, 1800).n2.loop.tween(curve: :elastic)
+        #     bg :pad, 110.hz.saw.filter(:lowpass, cutoff: cutoff, quality: 3) * 0.3
+        #     seq(0, 12).n1.loop.tween(1.n8, curve: :bounce)    # bounce to each value in an eighth
+        def tween(time = nil, curve: :smoothstep, overshoot: nil, cycles: nil, from: nil, transport: nil)
+          n = notes(transport: transport)
+          Notes::Glide.new(
+            n.note_stream, time: tween_time(time, transport), from: from, shape: curve, overshoot: overshoot, cycles: cycles, notes: n
+          ).named("tween #{Curve.from(curve, **{ overshoot: overshoot, cycles: cycles }.compact)}")
+        end
+
         # A Pitch following this clip's notes (a Notes::NotePitch, like
         # `v.hz` in a synth voice): chain a wave type (`clip.hz.ramp`,
         # `clip.tone.square.at(0.5)`) or `.transpose(7)`.  Its oscillators
@@ -551,6 +576,46 @@ module MB
         end
 
         private
+
+        # The glide time for #tween: +time+ as given (a Duration becomes a
+        # tempo-following TempoNode), or by default each event's distance to
+        # the next start, in seconds at the current tempo.
+        def tween_time(time, transport)
+          case time
+          when Duration then TempoNode.new(time, mode: :seconds, transport: transport)
+          when nil
+            gaps = step_gaps
+            raise ArgumentError, 'A tween needs events, or an explicit time' if gaps.empty?
+            if gaps.values.uniq.length == 1
+              TempoNode.new(Duration.new(gaps.values.first), mode: :seconds, transport: transport)
+            else
+              # Each event's gap as a value, read when the event starts
+              gap_clip = Clip.new(@events.map { |e| e.with(value: gaps.fetch(e.start, gaps.values.last).to_f) }, length: @length, loop: @loop, seed: @seed)
+              gap_clip.number(transport: transport) * TempoNode.new(Duration.new(1r), mode: :seconds, transport: transport)
+            end
+          else time
+          end
+        end
+
+        # The distance (whole notes) from each distinct event start to the
+        # next one (around the loop for looping clips; the last event's
+        # length otherwise), as a Hash of start => gap.
+        def step_gaps
+          starts = @events.map(&:start).uniq.sort
+          return {} if starts.empty?
+
+          starts.each_with_index.to_h { |st, i|
+            nxt = starts[i + 1]
+            gap = if nxt
+                    nxt - st
+                  elsif @loop
+                    @length - st + starts.first
+                  else
+                    @events.select { |e| e.start == st }.map(&:length).max
+                  end
+            [st, gap]
+          }.select { |_, g| g > 0 }
+        end
 
         # Returns a non-looping clip that plays this clip +count+ times in a
         # row, without #repeat's warning for looping clips.
