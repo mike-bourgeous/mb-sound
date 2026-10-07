@@ -31,6 +31,7 @@ RSpec.describe('script runner scripts', :smoke) do
     'bin/songs/stereo_drone.rb' => ['--bars', '0.5'],
     'bin/songs/stereo_song.rb' => ['--bars', '0.5'],
     'bin/songs/swap_song.rb' => ['--bars', '0.5'],
+    'bin/songs/swarm_song.rb' => ['--bars', '0.5', '-c', '8'],
     'bin/songs/tempo_song.rb' => ['--bars', '0.5'],
     'bin/songs/unison_song.rb' => ['--bars', '0.5', '-l', 'even'],
     'bin/songs/wavetable_song.rb' => ['--bars', '0.5'],
