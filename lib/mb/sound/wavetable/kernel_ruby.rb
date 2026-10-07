@@ -690,14 +690,12 @@ module MB
           k = 0
           k += 1 while k < n - 1 && m > hi[k]
 
-          if k < n - 1 && m > lo[k]
-            t = (m - lo[k]) / (hi[k] - lo[k])
-            v1 = level(spec, k, u, fa, fb, fs, interp)
-            v2 = level(spec, k + 1, u, fa, fb, fs, interp)
-            v1 + (v2 - v1) * t
-          else
-            level(spec, k, u, fa, fb, fs, interp)
-          end
+          # Always two levels, the second weighted 0 outside crossfades (see
+          # wt_value_sel in C: the same cost at every pitch)
+          t = k < n - 1 && m > lo[k] ? (m - lo[k]) / (hi[k] - lo[k]) : 0.0
+          v1 = level(spec, k, u, fa, fb, fs, interp)
+          v2 = level(spec, k < n - 1 ? k + 1 : k, u, fa, fb, fs, interp)
+          v1 + (v2 - v1) * t
         end
 
         # Level +k+'s value at +u+.

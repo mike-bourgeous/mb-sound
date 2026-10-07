@@ -449,11 +449,13 @@ static inline __attribute__((always_inline)) void wt_level_value(const struct wt
 // Levels and frames chosen for a motion +m+ and scan position (see
 // wt_select): the first level k, whether to crossfade into k + 1 by x, and
 // the frames fa and fb (-1 for none) blended by fs.  Kernels keep one and
-// redo the choice only when m or the scan changes.
+// redo the choice only when m or the scan changes.  Values always read k
+// and k2 (k + 1, or k itself for the last level) blended by x (0 outside a
+// crossfade), so every pitch costs the same (see wt_value_sel).
 struct wt_sel {
 	double m, scan;
 	_Bool valid;
-	int k;
+	int k, k2;
 	_Bool two;
 	double x;
 	long fa, fb;
@@ -481,6 +483,7 @@ static inline __attribute__((always_inline)) void wt_select(const struct wt_tabl
 		}
 	}
 	sel->k = k;
+	sel->k2 = k < n - 1 ? k + 1 : k;
 	sel->two = n > 1 && k < n - 1 && m > t->lo[k];
 	sel->x = sel->two ? (m - t->lo[k]) / (t->hi[k] - t->lo[k]) : 0;
 }
@@ -493,13 +496,17 @@ static inline __attribute__((always_inline)) void wt_reselect(const struct wt_ta
 	}
 }
 
-// The table's value at +u+ with the levels and frames of +sel+.
+// The table's value at +u+ with the levels and frames of +sel+.  Tables
+// with levels always read two (the second weighted 0 outside crossfades,
+// which leaves the first's value exactly), so a steady pitch costs the same
+// inside and outside a crossfade (user: "all notes should cost close to the
+// same for predictability").
 static inline __attribute__((always_inline)) void wt_value_sel(const struct wt_table *t, double u, const struct wt_sel *sel, int mode, int cs, const struct wt_sinc *ks, double *re, double *im)
 {
-	if (sel->two) {
+	if (t->nlevels > 1) {
 		double re1, im1, re2, im2;
 		wt_level_value(t, sel->k, u, sel->fa, sel->fb, sel->fs, mode, cs, ks, &re1, &im1);
-		wt_level_value(t, sel->k + 1, u, sel->fa, sel->fb, sel->fs, mode, cs, ks, &re2, &im2);
+		wt_level_value(t, sel->k2, u, sel->fa, sel->fb, sel->fs, mode, cs, ks, &re2, &im2);
 		*re = re1 + (re2 - re1) * sel->x;
 		*im = im1 + (im2 - im1) * sel->x;
 	} else {
