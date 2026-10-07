@@ -81,6 +81,12 @@ module MB
         # +interpolation+ (a DFloat; interpolated from a fine grid, within
         # about 1e-7).
         def self.gains(count, length, interpolation = :optimal)
+          @gain_cache ||= {}
+          @gain_cache[[count, length, interpolation]] ||= compute_gains(count, length, interpolation).freeze
+        end
+
+        # See .gains (uncached).
+        def self.compute_gains(count, length, interpolation)
           @grids ||= {}
           grid = @grids[interpolation] ||= (1.0 / response(INTERPOLATIONS.fetch(interpolation), Numo::DFloat.new(GRID / 2 + 2).seq / GRID)).freeze
           pos = Numo::DFloat.new(count).seq * (GRID.to_f / length)

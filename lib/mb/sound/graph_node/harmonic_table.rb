@@ -28,9 +28,11 @@ module MB
         include GraphNode::SampleRateHelper
 
         # The default number of samples between table rebuilds (about 11 ms
-        # at 48 kHz).  Each rebuild builds a Wavetable in Ruby: with YJIT a
-        # 32-harmonic oscillator costs about 2% of realtime at 512, 3.4% at
-        # 256, and 6.4% at 128.
+        # at 48 kHz).  Each rebuild builds a two-frame Wavetable (about 100 us
+        # for 32 harmonics with YJIT; the spectra and half means in C, the
+        # frames only if asked for): the oscillator itself costs about 1.4%
+        # of realtime at 512-sample buffers and 1.8% at 128, plus its
+        # amplitude sources (32 LFOs: about 3% more).
         DEFAULT_UPDATE = 512
 
         # The most harmonics a rebuilt table keeps.

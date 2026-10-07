@@ -1705,6 +1705,109 @@ static VALUE ruby_sync(int argc, VALUE *argv, VALUE self)
 	return buffer;
 }
 
+// Complex.polar(a, angle) exactly as Ruby computes it for Floats:
+// (a, 0.0) for a zero magnitude or angle, (-a, 0.0) at pi, (0.0, a) at pi / 2,
+// else a cos and a sin.
+static inline void wt_polar(double a, double angle, double *re, double *im)
+{
+	if (a == 0 || angle == 0) {
+		*re = a;
+		*im = 0.0;
+	} else if (angle == M_PI) {
+		*re = -a;
+		*im = 0.0;
+	} else if (angle == M_PI_2) {
+		*re = 0.0;
+		*im = a;
+	} else {
+		*re = a * cos(angle);
+		*im = a * sin(angle);
+	}
+}
+
+/*
+ * call-seq: MB::Sound::FastWavetable.harmonic_spectra(out, amplitudes, phases) -> out
+ *
+ * Fills the zeroed contiguous DComplex +out+ ([rows, harmonics + 1]) with
+ * the spectra of sine harmonics: +amplitudes+ and +phases+ (radians, or nil
+ * for 0) are Arrays of +rows+ Arrays of Floats (equal lengths per row,
+ * checked by the caller), column h is Complex.polar(a, p - pi / 2).  The
+ * Ruby mirror is Wavetable::Builder.spectra_from_harmonics_ruby.
+ */
+static VALUE ruby_harmonic_spectra(VALUE self, VALUE out, VALUE amplitudes, VALUE phases)
+{
+	Check_Type(amplitudes, T_ARRAY);
+	if (!NIL_P(phases)) {
+		Check_Type(phases, T_ARRAY);
+	}
+	long rows = RARRAY_LEN(amplitudes);
+	if (CLASS_OF(out) != numo_cDComplex || RNARRAY_NDIM(out) != 2 || !RTEST(nary_check_contiguous(out)) ||
+			(long)RNARRAY_SHAPE(out)[0] != rows || (!NIL_P(phases) && RARRAY_LEN(phases) != rows)) {
+		rb_raise(rb_eArgError, "Output must be a contiguous DComplex of [rows, harmonics + 1]");
+	}
+	size_t cols = RNARRAY_SHAPE(out)[1];
+	double *o = (double *)(nary_get_pointer_for_write(out) + nary_get_offset(out));
+
+	for (long r = 0; r < rows; r++) {
+		VALUE arow = rb_ary_entry(amplitudes, r);
+		Check_Type(arow, T_ARRAY);
+		VALUE prow = NIL_P(phases) ? Qnil : rb_ary_entry(phases, r);
+		if (!NIL_P(prow)) {
+			Check_Type(prow, T_ARRAY);
+		}
+		long n = RARRAY_LEN(arow);
+		if ((size_t)n + 1 > cols || (!NIL_P(prow) && RARRAY_LEN(prow) != n)) {
+			rb_raise(rb_eArgError, "Row %ld doesn't fit the output", r);
+		}
+
+		for (long i = 0; i < n; i++) {
+			double a = NUM2DBL(rb_ary_entry(arow, i));
+			double p = NIL_P(prow) ? 0.0 : NUM2DBL(rb_ary_entry(prow, i));
+			double *c = o + (r * cols + i + 1) * 2;
+			wt_polar(a, p - M_PI / 2, c, c + 1);
+		}
+	}
+
+	RB_GC_GUARD(amplitudes);
+	RB_GC_GUARD(phases);
+	return out;
+}
+
+/*
+ * call-seq: MB::Sound::FastWavetable.half_means(out, spectra) -> out
+ *
+ * Fills the contiguous DFloat +out+ ([rows]) with the half means of the
+ * contiguous DComplex +spectra+ ([rows, harmonics + 1]): the sum over odd h
+ * of the real part of 2i c_h / (pi h), in harmonic order, with the products
+ * as Ruby's Complex arithmetic does them (0 * re is a zero with re's sign).
+ * The Ruby mirror is Wavetable::Builder.half_means_ruby.
+ */
+static VALUE ruby_half_means(VALUE self, VALUE out, VALUE spectra)
+{
+	if (CLASS_OF(spectra) != numo_cDComplex || RNARRAY_NDIM(spectra) != 2 || !RTEST(nary_check_contiguous(spectra)) ||
+			CLASS_OF(out) != numo_cDFloat || RNARRAY_NDIM(out) != 1 || !RTEST(nary_check_contiguous(out)) ||
+			RNARRAY_SHAPE(out)[0] != RNARRAY_SHAPE(spectra)[0]) {
+		rb_raise(rb_eArgError, "Spectra must be a contiguous DComplex [rows, harmonics + 1] and out a DFloat [rows]");
+	}
+	size_t rows = RNARRAY_SHAPE(spectra)[0], cols = RNARRAY_SHAPE(spectra)[1];
+	const double *sp = (const double *)(nary_get_pointer_for_read(spectra) + nary_get_offset(spectra));
+	double *o = (double *)(nary_get_pointer_for_write(out) + nary_get_offset(out));
+
+	for (size_t r = 0; r < rows; r++) {
+		double sum = 0.0;
+		for (size_t h = 1; h < cols; h += 2) {
+			double re = sp[(r * cols + h) * 2];
+			double im = sp[(r * cols + h) * 2 + 1];
+			double z = isnan(re) ? re * 0.0 : copysign(0.0, re);
+			sum += (z - 2.0 * im) / (M_PI * (double)h);
+		}
+		o[r] = sum;
+	}
+
+	RB_GC_GUARD(spectra);
+	return out;
+}
+
 void Init_fast_wavetable(void)
 {
 	VALUE mb = rb_define_module("MB");
@@ -1715,4 +1818,6 @@ void Init_fast_wavetable(void)
 	rb_define_module_function(fast_wavetable_module, "lookup", ruby_lookup, 9);
 	rb_define_module_function(fast_wavetable_module, "play", ruby_play, 11);
 	rb_define_module_function(fast_wavetable_module, "sync", ruby_sync, -1);
+	rb_define_module_function(fast_wavetable_module, "harmonic_spectra", ruby_harmonic_spectra, 3);
+	rb_define_module_function(fast_wavetable_module, "half_means", ruby_half_means, 2);
 }
