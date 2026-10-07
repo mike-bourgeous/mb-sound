@@ -30,6 +30,13 @@ RSpec.describe(MB::Sound::Filter::Cookbook, :aggregate_failures) do
       expect(wrapper.sample(100)).to eq(nil)
     end
 
+    it 'accepts numbers for #dynamic_process parameters' do
+      f = MB::Sound::Filter::Cookbook.new(:lowpass, 48000, 1000, quality: 1)
+      out = f.dynamic_process(Numo::SFloat.ones(100), cutoff: 500, quality: 2.0)
+      expect(out.isfinite.all?).to eq(true)
+      expect(f.center_frequency).to eq(500)
+    end
+
     it 'can use an narray to control filter parameters' do
       f = 20000.hz.lowpass
       cutoff = 1.hz.square.at(20000..500).sample(48000)

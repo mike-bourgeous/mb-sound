@@ -328,6 +328,11 @@ module MB
           cutoff = cutoff.real if cutoff.is_a?(Numo::SComplex) || cutoff.is_a?(Numo::DComplex)
           quality = quality.real if quality.is_a?(Numo::SComplex) || quality.is_a?(Numo::DComplex)
 
+          # The kernel reads NArrays only (a number crashed it until
+          # 2026-10-08)
+          cutoff = Numo::SFloat.new(samples.length).fill(cutoff) if cutoff.is_a?(Numeric)
+          quality = Numo::SFloat.new(samples.length).fill(quality) if quality.is_a?(Numeric)
+
           # The kernel filters an inplace SFloat where it is and copies
           # anything else; copy a non-inplace SFloat into a reused buffer
           # instead of a new one (same kernel, same samples)
