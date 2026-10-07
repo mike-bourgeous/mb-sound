@@ -286,13 +286,19 @@ module MB
 
       # An additive oscillator at this pitch whose harmonic amplitudes
       # (+spectrum+: numbers, graph nodes, or a callable of the time) may
-      # change while it plays (see GraphNode::HarmonicTable).
+      # change while it plays (see GraphNode::HarmonicTable).  Also called
+      # #additive.
+      #
+      #     play 110.hz.harmonics([1, 0.5, 0.33, 0.25]) * 0.5
+      #     play 110.hz.additive([1, 0, 0.33, 0, 0.2]) * 0.5            # odd harmonics: square-ish
+      #     play 110.hz.additive([1, 0.2.hz.lfo.at(0..1), 0.5]) * 0.5  # a moving 2nd harmonic
       def harmonics(spectrum, phases: nil, update: GraphNode::HarmonicTable::DEFAULT_UPDATE, interpolation: nil)
         GraphNode::HarmonicTable.new(
           frequency: oscillator_frequency, spectrum: spectrum, phases: phases, update: update,
           interpolation: interpolation, sample_rate: @sample_rate
         )
       end
+      alias additive harmonics
 
       # A wavetable Tone at this pitch (see Tone#wavetable).
       def wavetable(table, scan: nil, interpolation: nil) = tone.wavetable(table, scan: scan, interpolation: interpolation)
