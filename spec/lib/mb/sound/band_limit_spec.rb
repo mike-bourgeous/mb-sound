@@ -433,7 +433,7 @@ RSpec.describe(MB::Sound::BandLimit) do
       sum / (m * periods)
     end
 
-    [:ramp, :triangle, :parabola, :square].each do |wave|
+    [:ramp, :triangle, :parabola, :square, :sine].each do |wave|
       [false, true].each do |soft|
         it "keeps the ideal DC level for a #{soft ? 'soft' : 'hard'}-synced #{wave} at high pitch" do
           # The minBLEP delays steps by about 2.78 samples; without delaying
@@ -461,11 +461,15 @@ RSpec.describe(MB::Sound::BandLimit) do
       expect(f.hz.square.softsync(ratio: 2.37).sample(4800).abs.max).to be < 1.6
     end
 
-    it 'reduces aliasing of synced triangles and sines' do
-      k = 301
-      f = k * 48000.0 / 65536
-      expect(coherent_db(f.hz.triangle.sync(ratio: 3.31), k)).to be < coherent_db(f.hz.atriangle.sync(ratio: 3.31), k) - 30
-      expect(coherent_db(f.hz.sine.sync(ratio: 2.37), k)).to be < -80
+    it 'gives clean hard sync for triangles, sines, and warped sines' do
+      # Slope corners and sine segments were inexact before 2026-10-07
+      # (-59 and -65 dB at 1 kHz)
+      [301, 4097].each do |k|
+        f = k * 48000.0 / 65536
+        expect(coherent_db(f.hz.triangle.sync(ratio: 3.31), k)).to be < -90
+        expect(coherent_db(f.hz.sine.sync(ratio: 2.37), k)).to be < -100
+        expect(coherent_db(f.hz.sine.pwm(0.3).sync(ratio: 2.37), k)).to be < -95
+      end
     end
 
     it 'restarts the naive waveform at each master cycle' do

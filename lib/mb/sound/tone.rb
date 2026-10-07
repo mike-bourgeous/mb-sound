@@ -1713,11 +1713,11 @@ module MB
           end
         when :sync
           check_sync(phase)
-          r0, r1, r2, m1, m2 = BandLimit.sync_tables(@wave_type)
+          r0, r1, r2, m1, m2, sine = BandLimit.sync_tables(@wave_type)
           buf = MB::Sound::FastSynth.oscillate_sync(
             out, @wave_type, freq, @advance, @gain, @offset,
             state.sync, state.sync_ring, pulses, @soft_sync, width, !@keep_dc,
-            r0, r1, r2, BandLimit::SYNC_OVERSAMPLE, BandLimit::SYNC_TAPS, !!band_limit_setting, m1, m2
+            r0, r1, r2, BandLimit::SYNC_OVERSAMPLE, BandLimit::SYNC_TAPS, !!band_limit_setting, m1, m2, sine
           ).inplace!
           state.phase[0] = state.sync[0]
           buf
@@ -1769,11 +1769,11 @@ module MB
           end
         when :sync
           check_sync(phase_table)
-          r0, r1, r2, m1, m2 = BandLimit.sync_tables(@wave_type)
+          r0, r1, r2, m1, m2, sine = BandLimit.sync_tables(@wave_type)
           values = BandLimit.sync_ruby(
             count, @wave_type, freq_table, @advance, @gain, @offset,
             state.sync, state.sync_ring, pulses, @soft_sync, width, !@keep_dc,
-            r0, r1, r2, BandLimit::SYNC_OVERSAMPLE, BandLimit::SYNC_TAPS, !!band_limit_setting, m1, m2
+            r0, r1, r2, BandLimit::SYNC_OVERSAMPLE, BandLimit::SYNC_TAPS, !!band_limit_setting, m1, m2, sine
           )
           state.phase[0] = state.sync[0]
         when :blit

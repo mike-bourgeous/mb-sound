@@ -866,10 +866,12 @@ static VALUE ruby_blit(VALUE self, VALUE buffer, VALUE shape_v, VALUE frequency,
  * height of DC behind: +0.82 for a ramp hard-synced at 2.37x of 3 kHz, and
  * scaled slope jumps' harmonics by 1 + 2 pi i f tau).
  *
- * A sine's segments aren't polynomials; with m1 = m2 = 0, R_0 = R, R_1 the
- * old minBLAMP residual Q = integral of R - Q(inf) B, and R_2 = 0, sines
- * keep the old undelayed scheme (a three-term expansion fails above a few
- * kHz).
+ * A sine's segments are complex exponentials e^(2 pi i (u + g t)) instead
+ * (u the shape's phase, g its frequency in cycles per sample), which h
+ * scales by H(g); switching one on adds the residual E(g, t) e^(...),
+ * tabulated over g (MB::Sound::BandLimit.sync_sine_table), and switching
+ * one off subtracts it.  So synced sines (and their warps) are exact too.
+ * (A three-term expansion of a sine's jumps failed above a few kHz.)
  *
  * The tables (built in Ruby by MB::Sound::BandLimit.sync_tables) are
  * sampled +oversample+ times per sample over +taps+ samples and read with
@@ -987,6 +989,91 @@ static inline void sync_raw(enum bl_wave wt, double w, double p, _Bool left, dou
 	a[2] *= g * g;
 }
 
+// Rows per cycle per sample of the sine residual table
+// (BandLimit::SYNC_SINE_ROWS_PER_CYCLE).
+#define SYNC_SINE_ROWS_PER_CYCLE 256
+
+// The sine residual table (MB::Sound::BandLimit.sync_sine_table): +rows+
+// rows of +len+ complex values (re, im interleaved), and the moment m1 the
+// table's rows are multiplied by e^(2 pi i g m1) with.
+struct sync_sine {
+	const double *e;
+	size_t rows, len, os, taps;
+	double m1;
+};
+
+// The shape's phase *u (cycles) of the segment of a sine warped by +w+ at
+// phase +p+ (on the left side of a breakpoint there with +left+), and its
+// frequency *g (cycles per sample) at +vel+.
+static inline void sync_sine_segment(double w, double p, _Bool left, double vel, double *u, double *g)
+{
+	_Bool first = left ? p <= w : p < w;
+	double k = first ? 0.5 / w : 0.5 / (1.0 - w);
+	*u = first ? p * k : 0.5 + (p - w) * k;
+	*g = vel * k;
+}
+
+// The sine residual table at frequency +g+ (cycles per sample, either sign)
+// and +t+ samples after the switch, interpolated linearly in both.
+static inline void sync_sine_lookup(const struct sync_sine *sn, double g, double t, double *re, double *im)
+{
+	double gr = fabs(g) * SYNC_SINE_ROWS_PER_CYCLE;
+	double x = t * sn->os;
+	if (gr >= (double)(sn->rows - 1) || x < 0 || x >= (double)(sn->taps * sn->os)) {
+		*re = 0.0;
+		*im = 0.0;
+		return;
+	}
+
+	size_t r = (size_t)gr;
+	double fg = gr - r;
+	size_t idx = (size_t)x;
+	double ft = x - idx;
+	const double *e00 = sn->e + (r * sn->len + idx) * 2;
+	const double *e10 = e00 + sn->len * 2;
+	double are = e00[0] + (e00[2] - e00[0]) * ft;
+	double aim = e00[1] + (e00[3] - e00[1]) * ft;
+	double bre = e10[0] + (e10[2] - e10[0]) * ft;
+	double bim = e10[1] + (e10[3] - e10[1]) * ft;
+	*re = are + (bre - are) * fg;
+	*im = aim + (bim - aim) * fg;
+	if (g < 0) {
+		*im = -*im;
+	}
+}
+
+// Adds (+sign+ 1) or removes (-1) the residual of a sine segment at phase
+// +u+ and frequency +g+ switched on +t+ samples before the current sample.
+static inline void sync_sine_switch(double *acc, size_t pos, const struct sync_sine *sn, double t, double u, double g, double sign)
+{
+	// e^(i psi) for psi = 2 pi (u + g (t + j - m1)), rotated by a complex
+	// multiply per tap
+	size_t taps = sn->taps;
+	double psi = 2.0 * M_PI * (u + g * (t - sn->m1));
+	double dpsi = 2.0 * M_PI * g;
+	double cr = cos(psi), ci = sin(psi);
+	double sr = cos(dpsi), si = sin(dpsi);
+	for (size_t j = 0; j < taps; j++) {
+		double re, im;
+		sync_sine_lookup(sn, g, t + j, &re, &im);
+		acc[(pos + j) % taps] += sign * (re * ci + im * cr);
+
+		double nr = cr * sr - ci * si;
+		ci = cr * si + ci * sr;
+		cr = nr;
+	}
+}
+
+// A sine segment at phase +u+ and frequency +g+, filtered by h: the
+// imaginary part of H(g) e^(2 pi i u), with H(g) = -E(g, 0).
+static inline double sync_sine_value(const struct sync_sine *sn, double u, double g)
+{
+	double re, im;
+	sync_sine_lookup(sn, g, 0.0, &re, &im);
+	double psi = 2.0 * M_PI * (u - g * sn->m1);
+	return -(re * sin(psi) + im * cos(psi));
+}
+
 // Like bl_crossing, but a phase on a breakpoint is always on its right
 // side (the value after it going forward), whichever way the phase moves,
 // so soft sync can reverse on an edge: a backward step starting exactly on
@@ -1019,7 +1106,8 @@ static inline double sync_crossing(double e, double d, double b)
 // event for every breakpoint crossed; the segment ends +end_t+ samples
 // before the current sample.  Returns nothing; updates *p.
 static inline void sync_move(enum bl_wave wt, double w, struct bl_breakpoint *bp, int nbp, double *p, double vel,
-		double dur, double end_t, double *acc, size_t pos, const struct sync_tables *tb, _Bool bl)
+		double dur, double end_t, double *acc, size_t pos, const struct sync_tables *tb, _Bool bl,
+		const struct sync_sine *sn)
 {
 	double move = vel * dur;
 	if (bl && move != 0) {
@@ -1029,12 +1117,31 @@ static inline void sync_move(enum bl_wave wt, double w, struct bl_breakpoint *bp
 				continue;
 			}
 
-			// Jumps from one side of the breakpoint to the other
 			double bpos = bp[j].pos;
+			double t = end_t + (1.0 - f) * dur; // samples before the current sample
+
+			if (sn) {
+				// From one sine segment to the other
+				double ur, gr, ul, gl;
+				sync_sine_segment(w, bpos, 0, vel, &ur, &gr);
+				sync_sine_segment(w, bpos == 0.0 ? 1.0 : bpos, 1, vel, &ul, &gl);
+				if (gl == gr) {
+					continue; // the same exponential (no warp here)
+				}
+				if (move > 0) {
+					sync_sine_switch(acc, pos, sn, t, ul, gl, -1.0);
+					sync_sine_switch(acc, pos, sn, t, ur, gr, 1.0);
+				} else {
+					sync_sine_switch(acc, pos, sn, t, ur, gr, -1.0);
+					sync_sine_switch(acc, pos, sn, t, ul, gl, 1.0);
+				}
+				continue;
+			}
+
+			// Jumps from one side of the breakpoint to the other
 			double r[3], l[3];
 			sync_raw(wt, w, bpos, 0, vel, r);
 			sync_raw(wt, w, bpos == 0.0 ? 1.0 : bpos, 1, vel, l);
-			double t = end_t + (1.0 - f) * dur; // samples before the current sample
 			if (move > 0) {
 				sync_event(acc, pos, tb, t, r[0] - l[0], r[1] - l[1], r[2] - l[2]);
 			} else {
@@ -1066,7 +1173,8 @@ static const double *sync_table_arg(VALUE table, size_t len)
  * A synced oscillator:
  *   oscillate_sync(buffer, wave_type, frequency, advance, gain, offset,
  *                  sync_state, ring, pulses, soft, width, remove_dc,
- *                  r0, r1, r2, oversample, taps, band_limit, m1, m2)
+ *                  r0, r1, r2, oversample, taps, band_limit, m1, m2,
+ *                  sine_table)
  * +sync_state+ is [phase at the last sample (cycles), last increment,
  * direction (1 or -1), ring position, primed (0 or 1)]; the first sample of
  * an unprimed oscillator starts at the phase in sync_state[0].  +ring+ is a
@@ -1076,17 +1184,18 @@ static const double *sync_table_arg(VALUE table, size_t len)
  * +remove_dc+ are as for oscillate_bl.  +r0+, +r1+, +r2+, +m1+, and +m2+
  * are the residual tables and moments of h (see above;
  * MB::Sound::BandLimit.sync_tables); +band_limit+ false skips the
- * corrections and the filtering (naive sync).  See
+ * corrections and the filtering (naive sync).  +sine_table+ is
+ * BandLimit.sync_sine_table for band-limited sines (nil otherwise).  See
  * MB::Sound::BandLimit.sync_ruby.
  */
 static VALUE ruby_oscillate_sync(int argc, VALUE *argv, VALUE self)
 {
-	if (argc != 20) {
-		rb_raise(rb_eArgError, "wrong number of arguments (given %d, expected 20)", argc);
+	if (argc != 21) {
+		rb_raise(rb_eArgError, "wrong number of arguments (given %d, expected 21)", argc);
 	}
 
 	VALUE buffer = argv[0], frequency = argv[2], sync_state = argv[6], ring = argv[7], pulses = argv[8];
-	VALUE width = argv[10], r0_v = argv[12], r1_v = argv[13], r2_v = argv[14];
+	VALUE width = argv[10], r0_v = argv[12], r1_v = argv[13], r2_v = argv[14], sine_v = argv[20];
 
 	enum bl_wave wt = bl_find_wave(argv[1]);
 	double adv = NUM2DBL(argv[3]);
@@ -1126,6 +1235,24 @@ static VALUE ruby_oscillate_sync(int argc, VALUE *argv, VALUE self)
 		.m1 = bl ? m1 : 0.0,
 		.half_m2 = bl ? 0.5 * m2 : 0.0,
 	};
+
+	struct sync_sine sine_tab;
+	const struct sync_sine *sn = NULL;
+	if (bl && wt == BL_SINE && !NIL_P(sine_v)) {
+		if (CLASS_OF(sine_v) != numo_cDComplex || RNARRAY_NDIM(sine_v) != 2 || RNARRAY_SHAPE(sine_v)[0] < 2 ||
+				RNARRAY_SHAPE(sine_v)[1] != table_len || !RTEST(nary_check_contiguous(sine_v))) {
+			rb_raise(rb_eArgError, "Sine table must be a contiguous 2D DComplex of [rows (at least 2), taps * oversample + 1]");
+		}
+		sine_tab = (struct sync_sine){
+			.e = (const double *)(nary_get_pointer_for_read(sine_v) + nary_get_offset(sine_v)),
+			.rows = RNARRAY_SHAPE(sine_v)[0],
+			.len = table_len,
+			.os = os,
+			.taps = taps,
+			.m1 = m1,
+		};
+		sn = &sine_tab;
+	}
 
 	_Bool was_inplace;
 	mb_ensure_inplace_sfloat(&buffer, &was_inplace);
@@ -1183,11 +1310,14 @@ static VALUE ruby_oscillate_sync(int argc, VALUE *argv, VALUE self)
 				if (d < 0) d = 0;
 				if (d > 1) d = 1;
 
-				sync_move(wt, w, bp, nbp, &p, vel, 1.0 - d, d, acc, pos, &tb, bl);
+				sync_move(wt, w, bp, nbp, &p, vel, 1.0 - d, d, acc, pos, &tb, bl, sn);
 
 				// Jumps from the old direction or phase to the new
-				double a0[3], a1[3];
+				double a0[3], a1[3], u0 = 0, g0 = 0;
 				sync_raw(wt, w, p, 0, vel, a0);
+				if (sn) {
+					sync_sine_segment(w, p, 0, vel, &u0, &g0);
+				}
 				double nvel;
 				if (soft) {
 					dir = -dir;
@@ -1198,19 +1328,33 @@ static VALUE ruby_oscillate_sync(int argc, VALUE *argv, VALUE self)
 					p = 0;
 				}
 				sync_raw(wt, w, p, 0, nvel, a1);
-				if (bl) sync_event(acc, pos, &tb, d, a1[0] - a0[0], a1[1] - a0[1], a1[2] - a0[2]);
+				if (sn) {
+					double u1, g1;
+					sync_sine_segment(w, p, 0, nvel, &u1, &g1);
+					sync_sine_switch(acc, pos, sn, d, u0, g0, -1.0);
+					sync_sine_switch(acc, pos, sn, d, u1, g1, 1.0);
+				} else if (bl) {
+					sync_event(acc, pos, &tb, d, a1[0] - a0[0], a1[1] - a0[1], a1[2] - a0[2]);
+				}
 				vel = nvel;
 
-				sync_move(wt, w, bp, nbp, &p, vel, d, 0, acc, pos, &tb, bl);
+				sync_move(wt, w, bp, nbp, &p, vel, d, 0, acc, pos, &tb, bl, sn);
 			} else {
-				sync_move(wt, w, bp, nbp, &p, vel, 1.0, 0, acc, pos, &tb, bl);
+				sync_move(wt, w, bp, nbp, &p, vel, 1.0, 0, acc, pos, &tb, bl, sn);
 			}
 		}
 
 		// The current segment, filtered by h (see above)
-		double a[3];
-		sync_raw(wt, w, p, 0, vel, a);
-		double v = a[0] - tb.m1 * a[1] + tb.half_m2 * a[2];
+		double v;
+		if (sn) {
+			double u, gs;
+			sync_sine_segment(w, p, 0, vel, &u, &gs);
+			v = sync_sine_value(sn, u, gs);
+		} else {
+			double a[3];
+			sync_raw(wt, w, p, 0, vel, a);
+			v = a[0] - tb.m1 * a[1] + tb.half_m2 * a[2];
+		}
 		v += acc[pos];
 		acc[pos] = 0;
 		pos = (pos + 1) % taps;
@@ -1244,6 +1388,7 @@ static VALUE ruby_oscillate_sync(int argc, VALUE *argv, VALUE self)
 	RB_GC_GUARD(r0_v);
 	RB_GC_GUARD(r1_v);
 	RB_GC_GUARD(r2_v);
+	RB_GC_GUARD(sine_v);
 	RB_GC_GUARD(buffer);
 
 	return buffer;

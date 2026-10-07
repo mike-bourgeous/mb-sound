@@ -610,19 +610,24 @@ module MB
         end
       end
 
-      # Returns [r0, r1, r2, m1, m2] for synced oscillators of +wave_type+
-      # (FastSynth.oscillate_sync; see there): residual tables R_n = B_n - M_n
-      # of jumps in the n-th time derivative, sampled like .minblep_tables,
-      # and the first two moments of h, the minBLEP's impulse (m1 is the
-      # delay of a minimum-phase step at low frequencies, about 2.78 samples).
-      # B_1 and B_2 are integrals of B by the trapezoid rule (the integrals
-      # of the linearly interpolated tables), and the moments come from their
-      # final values, so every residual settles exactly on zero.  A sine gets
-      # the old undelayed scheme: R_0 = R, R_1 = the minBLAMP residual of
-      # .minblep_tables, R_2 = 0, m1 = m2 = 0.
+      # Rows per cycle per sample of .sync_sine_table, and its highest
+      # frequency (the minBLEP's response is -107 dB there; sines above it
+      # are silent).
+      SYNC_SINE_ROWS_PER_CYCLE = 256
+      SYNC_SINE_MAX = 0.75
+
+      # Returns [r0, r1, r2, m1, m2, sine] for synced oscillators of
+      # +wave_type+ (FastSynth.oscillate_sync; see there): residual tables
+      # R_n = B_n - M_n of jumps in the n-th time derivative, sampled like
+      # .minblep_tables, the first two moments of h, the minBLEP's impulse
+      # (m1 is the delay of a minimum-phase step at low frequencies, about
+      # 2.78 samples), and for sines .sync_sine_table (nil otherwise).  B_1
+      # and B_2 are integrals of B by the trapezoid rule (the integrals of
+      # the linearly interpolated tables), and the moments come from their
+      # final values, so every residual settles exactly on zero.
       def self.sync_tables(wave_type)
         @sync_tables ||= begin
-          blep, blamp = minblep_tables
+          blep, _ = minblep_tables
           os = SYNC_OVERSAMPLE
           taps = SYNC_TAPS.to_f
           b = blep + 1.0
@@ -636,13 +641,50 @@ module MB
           r1[-1] = 0.0
           r2[-1] = 0.0
 
+          poly = [blep, r1.freeze, r2.freeze, m1, m2, nil].freeze
           {
-            poly: [blep, r1.freeze, r2.freeze, m1, m2].freeze,
-            sine: [blep, blamp, Numo::DFloat.zeros(blep.length).freeze, 0.0, 0.0].freeze,
+            poly: poly,
+            sine: [*poly[0..4], sync_sine_table(m1)].freeze,
           }.freeze
         end
 
         @sync_tables[wave_type == :sine ? :sine : :poly]
+      end
+
+      # The residuals of switching on a complex exponential e^(2 pi i g t)
+      # (cycles per sample g) at t = 0, for synced sines: h applied to it is
+      # H(g) e^(2 pi i g t) + E(g, t) e^(2 pi i g t), with
+      # E(g, t) = -(integral of h(s) e^(-2 pi i g s) for s > t), h the
+      # minBLEP's impulse (piecewise constant between the points of
+      # .minblep_tables, integrated exactly), so E(0, t) is the minBLEP
+      # residual and E(g, 0) = -H(g).  Stored times e^(2 pi i g m1) (taking
+      # out the delay, so rows interpolate well) as a contiguous DComplex of
+      # [rows for g = 0 to SYNC_SINE_MAX in steps of
+      # 1 / SYNC_SINE_ROWS_PER_CYCLE, SYNC_TAPS * SYNC_OVERSAMPLE + 1].
+      def self.sync_sine_table(m1)
+        blep, _ = minblep_tables
+        os = SYNC_OVERSAMPLE
+        b = blep + 1.0
+        h = b[1..] - b[0...-1]
+        a = Numo::DFloat.new(h.length).seq / os
+        rows = (SYNC_SINE_MAX * SYNC_SINE_ROWS_PER_CYCLE).round + 1
+        table = Numo::DComplex.zeros(rows, b.length)
+        rows.times do |r|
+          g = r.to_f / SYNC_SINE_ROWS_PER_CYCLE
+          if r == 0
+            c = Numo::DComplex.cast(h)
+          else
+            w = 2 * Math::PI * g
+            e0 = Numo::NMath.exp(a * Complex(0, -w))
+            e1 = Numo::NMath.exp((a + 1.0 / os) * Complex(0, -w))
+            c = h * os * (e0 - e1) / Complex(0, w)
+          end
+          tail = c.reverse.cumsum.reverse
+          row = Numo::DComplex.zeros(b.length)
+          row[0...-1] = -tail
+          table[r, true] = row * Complex.polar(1.0, 2 * Math::PI * g * m1)
+        end
+        table.freeze
       end
 
       # Minimum-phase version of the FIR +h+ by the real cepstrum.
@@ -734,6 +776,79 @@ module MB
         [f0, f1 * g, f2 * (g * g)]
       end
 
+      # [u, g]: the shape's phase +u+ (cycles) of the segment of a sine
+      # warped by +w+ at phase +p+ (left side if +left+), and its frequency
+      # +g+ (cycles per sample) at +vel+.  See sync_sine_segment in
+      # fast_synth.c.
+      def self.sync_sine_segment(w, p, left, vel)
+        first = left ? p <= w : p < w
+        k = first ? 0.5 / w : 0.5 / (1.0 - w)
+        u = first ? p * k : 0.5 + (p - w) * k
+        [u, vel * k]
+      end
+
+      # The flat Array of [re, im] pairs of a .sync_sine_table, cached.
+      def self.sine_flat(table)
+        @sine_flat ||= {}
+        @sine_flat[table.object_id] ||= Numo::DFloat.cast(table.real).to_a.flatten.zip(Numo::DFloat.cast(table.imag).to_a.flatten).flatten
+      end
+
+      # [re, im] of .sync_sine_table at frequency +g+ (cycles per sample,
+      # either sign) and +t+ samples after the switch, interpolated linearly
+      # in both.  See sync_sine_lookup in fast_synth.c.
+      def self.sync_sine_lookup(flat, rows, len, os, taps, g, t)
+        gr = g.abs * SYNC_SINE_ROWS_PER_CYCLE
+        return [0.0, 0.0] if gr >= rows - 1
+
+        x = t * os
+        return [0.0, 0.0] if x < 0 || x >= (taps * os).to_f
+
+        r = gr.to_i
+        fg = gr - r
+        idx = x.to_i
+        ft = x - idx
+        i00 = (r * len + idx) * 2
+        i10 = i00 + len * 2
+        are = flat[i00] + (flat[i00 + 2] - flat[i00]) * ft
+        aim = flat[i00 + 1] + (flat[i00 + 3] - flat[i00 + 1]) * ft
+        bre = flat[i10] + (flat[i10 + 2] - flat[i10]) * ft
+        bim = flat[i10 + 1] + (flat[i10 + 3] - flat[i10 + 1]) * ft
+        re = are + (bre - are) * fg
+        im = aim + (bim - aim) * fg
+        im = -im if g < 0
+        [re, im]
+      end
+
+      # Adds (+sign+ 1) or removes (-1) the residual of a sine segment at
+      # phase +u+ and frequency +g+ switched on +t+ samples before the
+      # current sample.  See sync_sine_switch in fast_synth.c.
+      def self.sync_sine_switch(acc, pos, sine, t, u, g, sign)
+        flat, rows, len, os, taps, m1 = sine
+        psi = 2.0 * Math::PI * (u + g * (t - m1))
+        dpsi = 2.0 * Math::PI * g
+        cr = Math.cos(psi)
+        ci = Math.sin(psi)
+        sr = Math.cos(dpsi)
+        si = Math.sin(dpsi)
+        taps.times do |j|
+          re, im = sync_sine_lookup(flat, rows, len, os, taps, g, t + j)
+          acc[(pos + j) % taps] += sign * (re * ci + im * cr)
+
+          nr = cr * sr - ci * si
+          ci = cr * si + ci * sr
+          cr = nr
+        end
+      end
+
+      # A synced sine at phase +u+ and frequency +g+, filtered by h (see
+      # sync_sine_value in fast_synth.c).
+      def self.sync_sine_value(sine, u, g)
+        flat, rows, len, os, taps, m1 = sine
+        re, im = sync_sine_lookup(flat, rows, len, os, taps, g, 0.0)
+        psi = 2.0 * Math::PI * (u - g * m1)
+        -(re * Math.sin(psi) + im * Math.cos(psi))
+      end
+
       # Like .crossing, but a phase on a breakpoint is always on its right
       # side, whichever way it moves (see sync_crossing in fast_synth.c):
       # a backward step starting on +b+ crosses it at once (0.0), and one
@@ -752,16 +867,31 @@ module MB
       end
 
       # See sync_move in fast_synth.c; returns the new phase.
-      def self.sync_move(wave_type, w, points, p, vel, dur, end_t, acc, pos, tables, bl)
+      def self.sync_move(wave_type, w, points, p, vel, dur, end_t, acc, pos, tables, bl, sine = nil)
         move = vel * dur
         if bl && move != 0
           points.each do |bpos, _, _, _|
             f = sync_crossing(p, move, bpos)
             next if f.nil?
 
+            t = end_t + (1.0 - f) * dur
+            if sine
+              ur, gr = sync_sine_segment(w, bpos, false, vel)
+              ul, gl = sync_sine_segment(w, bpos == 0.0 ? 1.0 : bpos, true, vel)
+              next if gl == gr # the same exponential (no warp here)
+
+              if move > 0
+                sync_sine_switch(acc, pos, sine, t, ul, gl, -1.0)
+                sync_sine_switch(acc, pos, sine, t, ur, gr, 1.0)
+              else
+                sync_sine_switch(acc, pos, sine, t, ur, gr, -1.0)
+                sync_sine_switch(acc, pos, sine, t, ul, gl, 1.0)
+              end
+              next
+            end
+
             r = sync_raw(wave_type, w, bpos, false, vel)
             l = sync_raw(wave_type, w, bpos == 0.0 ? 1.0 : bpos, true, vel)
-            t = end_t + (1.0 - f) * dur
             if move > 0
               sync_event(acc, pos, tables, t, r[0] - l[0], r[1] - l[1], r[2] - l[2])
             else
@@ -779,7 +909,7 @@ module MB
       # Ruby mirror of MB::Sound::FastSynth.oscillate_sync (see there),
       # returning +count+ samples as an SFloat; +sync_state+ and the +ring+
       # (a DFloat) are updated like the C version.
-      def self.sync_ruby(count, wave_type, freq, advance, gain, offset, sync_state, ring, pulses, soft, width, remove_dc, r0, r1, r2, os, taps, bl, m1, m2)
+      def self.sync_ruby(count, wave_type, freq, advance, gain, offset, sync_state, ring, pulses, soft, width, remove_dc, r0, r1, r2, os, taps, bl, m1, m2, sine_table = nil)
         freqs = freq.is_a?(Numo::NArray) ? real_floats(freq) : nil
         pulse_list = pulses.is_a?(Numo::NArray) ? real_floats(pulses) : nil
         widths = width.is_a?(Numo::NArray) ? real_floats(width) : nil
@@ -791,6 +921,10 @@ module MB
         tables = [r0.to_a, r1.to_a, r2.to_a, os, taps]
         m1 = bl ? m1.to_f : 0.0
         half_m2 = bl ? 0.5 * m2 : 0.0
+        sine = nil
+        if bl && sine_table && wave_type == :sine
+          sine = [sine_flat(sine_table), sine_table.shape[0], sine_table.shape[1], os, taps, m1]
+        end
         acc = ring.to_a
 
         p, prev_inc, dir, pos, primed = sync_state
@@ -817,9 +951,10 @@ module MB
               d = 0.0 if d < 0
               d = 1.0 if d > 1
 
-              p = sync_move(wave_type, w, points, p, vel, 1.0 - d, d, acc, pos, tables, bl)
+              p = sync_move(wave_type, w, points, p, vel, 1.0 - d, d, acc, pos, tables, bl, sine)
 
               a0 = sync_raw(wave_type, w, p, false, vel)
+              u0, g0 = sync_sine_segment(w, p, false, vel) if sine
               if soft
                 dir = -dir
                 nvel = -vel
@@ -829,17 +964,28 @@ module MB
                 p = 0.0
               end
               a1 = sync_raw(wave_type, w, p, false, nvel)
-              sync_event(acc, pos, tables, d, a1[0] - a0[0], a1[1] - a0[1], a1[2] - a0[2]) if bl
+              if sine
+                u1, g1 = sync_sine_segment(w, p, false, nvel)
+                sync_sine_switch(acc, pos, sine, d, u0, g0, -1.0)
+                sync_sine_switch(acc, pos, sine, d, u1, g1, 1.0)
+              elsif bl
+                sync_event(acc, pos, tables, d, a1[0] - a0[0], a1[1] - a0[1], a1[2] - a0[2])
+              end
               vel = nvel
 
-              p = sync_move(wave_type, w, points, p, vel, d, 0.0, acc, pos, tables, bl)
+              p = sync_move(wave_type, w, points, p, vel, d, 0.0, acc, pos, tables, bl, sine)
             else
-              p = sync_move(wave_type, w, points, p, vel, 1.0, 0.0, acc, pos, tables, bl)
+              p = sync_move(wave_type, w, points, p, vel, 1.0, 0.0, acc, pos, tables, bl, sine)
             end
           end
 
-          a = sync_raw(wave_type, w, p, false, vel)
-          v = a[0] - m1 * a[1] + half_m2 * a[2]
+          if sine
+            u, g = sync_sine_segment(w, p, false, vel)
+            v = sync_sine_value(sine, u, g)
+          else
+            a = sync_raw(wave_type, w, p, false, vel)
+            v = a[0] - m1 * a[1] + half_m2 * a[2]
+          end
           v += acc[pos]
           acc[pos] = 0.0
           pos = (pos + 1) % taps
