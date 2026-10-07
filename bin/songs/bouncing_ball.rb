@@ -34,6 +34,7 @@
 #     bin/songs/bouncing_ball.rb balls.flac             # renders to a file (-f to overwrite)
 #     bin/songs/bouncing_ball.rb --room balls.flac      # with a little room reverb
 #     bin/songs/bouncing_ball.rb -b 8 balls.flac        # the first section only
+#     bin/songs/bouncing_ball.rb --decay gentle         # hits fall half as far in dB (also none, 0.85, ...)
 #
 # Or in bin/sound.rb:
 #     load 'bin/songs/bouncing_ball.rb'
@@ -44,6 +45,13 @@
 #     bg :k, bounce_hits(1.bar, count: 16, elasticity: 0.75, note: C2).loop.synth(voices: 2) { |v| v.hz.transpose(v.velocity * 12).sine * v.amp_env(0.001, 0.25, 0, 0.1) }
 #     # A buzz: very elastic, many hits
 #     bg :h, bounce_hits(1.bar, count: 60, elasticity: 0.93).loop.synth(voices: 2) { |v| noise.filter(:highpass, cutoff: 7000) * v.amp_env(0, 0.02, 0, 0.01) } * -6.db
+#     # Loudness separate from timing: a dead ball (elasticity 0.5) fades
+#     # within four hits by impact speed; decay: :gentle (e^(i/2)) or a
+#     # fixed factor per hit keeps the bounces audible
+#     bg :k, bounce_hits(1.bar, count: 10, elasticity: 0.5, decay: :gentle, note: C2).loop(align: :launch).synth(voices: 2) { |v| v.hz.transpose(v.velocity * 12).sine * v.amp_env(0.001, 0.25, 0, 0.1) }
+#     # A tom ball dropping a semitone per bounce (pitch: per hit), every
+#     # hit equally loud (decay: :none)
+#     bg :t, bounce_hits(2.bars, count: 10, elasticity: 0.75, note: A2, pitch: -1, decay: :none).loop(align: :launch).synth(voices: 2) { |v| v.hz.sine.reset(v.trigger) * v.amp_env(0.001, 0.3, 0, 0.1) } * -6.db
 #     # Thrown backwards: hits accelerate apart, soft to loud
 #     bg :s, bounce_hits(2.bars, count: 12, elasticity: 0.7, reverse: true, note: D3).loop.synth(voices: 2) { |v| noise.filter(:bandpass, cutoff: 1800) * v.amp_env(0, 0.1, 0, 0.05) }
 #     # Polyrhythm: a 3-beat ball against the bar.  align: :launch drops it
@@ -112,10 +120,21 @@ module MB::Sound
     grid(division, pattern, value: note).loop.synth(voices: 2) { |v| BALL_VOICES.fetch(kind).(v) }.pan(pan) * (level * BALL_GAIN)
   end
 
+  # Converts the --decay option to a bounce_hits decay: a number (e.g.
+  # "0.85") or a name (speed, gentle, none, or a Curve name).
+  def self.ball_decay(text)
+    Float(text, exception: false) || text.to_sym
+  end
+
   # Starts the song on the current session (live, or inside a render
-  # block).  +room+ adds a little room reverb.
-  def self.bouncing_ball(room: false)
+  # block).  +room+ adds a little room reverb; +decay+ is how hit
+  # velocities (loudness, pitch, brightness) fall with each bounce (see
+  # MB::Sound.bounce_hits).
+  def self.bouncing_ball(room: false, decay: :speed)
     bpm 100
+
+    # Every ball's hits, with the chosen loudness fall (see bounce_hits)
+    hits = ->(length, **opts) { bounce_hits(length, decay: decay, **opts) }
 
     # Pan paths: each ball rolls across the field over its own time
     roll = ->(length, from, to) { tween([from, to], length, curve: :sine) }
@@ -126,13 +145,13 @@ module MB::Sound
     }
 
     # 1. Drop
-    bg :kick, ball(:kick, bounce_hits(2.bars, count: 18, elasticity: 0.78, note: C2), level: 0.9), fade: 0
-    at_bar(3) { bg :ping, ball(:ping, bounce_hits(4.bars, count: 20, elasticity: 0.82, note: E5), level: 0.35, pan: roll.(4.bars, -0.8, 0.8)), fade: 0 }
+    bg :kick, ball(:kick, hits.(2.bars, count: 18, elasticity: 0.78, note: C2), level: 0.9), fade: 0
+    at_bar(3) { bg :ping, ball(:ping, hits.(4.bars, count: 20, elasticity: 0.82, note: E5), level: 0.35, pan: roll.(4.bars, -0.8, 0.8)), fade: 0 }
 
     # 2. Juggling
     at_bar(9) do
-      bg :snare, ball(:snare, bounce_hits(2.bars, count: 12, elasticity: 0.7, reverse: true, note: D3), level: 0.5, pan: 0.2), fade: 0
-      bg :hat, ball(:hat, bounce_hits(1.bar, count: 48, elasticity: 0.9, note: C6), level: 0.35, pan: roll.(2.bars, 0.6, -0.6)), fade: 0
+      bg :snare, ball(:snare, hits.(2.bars, count: 12, elasticity: 0.7, reverse: true, note: D3), level: 0.5, pan: 0.2), fade: 0
+      bg :hat, ball(:hat, hits.(1.bar, count: 48, elasticity: 0.9, note: C6), level: 0.35, pan: roll.(2.bars, 0.6, -0.6)), fade: 0
     end
 
     # 3. Grid
@@ -142,25 +161,25 @@ module MB::Sound
       stop :ping, fade: 0
       bg :kick, grid_part(:kick, 4, 'xxxx', C2, level: 0.75), fade: 0
       bg :hat, grid_part(:hat, 8, 'x.xXx.xx', C6, level: 0.3, pan: -0.3), fade: 0
-      bg :blip, ball(:blip, bounce_hits(3.beats, count: 10, elasticity: 0.65, note: 60), level: 0.4, pan: roll.(3.beats, 0.7, -0.7)), fade: 0
-      bg :ping, ball(:ping, bounce_hits(5.beats, count: 12, elasticity: 0.7, note: B4), level: 0.3, pan: 0.5), fade: 0
+      bg :blip, ball(:blip, hits.(3.beats, count: 10, elasticity: 0.65, note: 60), level: 0.4, pan: roll.(3.beats, 0.7, -0.7)), fade: 0
+      bg :ping, ball(:ping, hits.(5.beats, count: 12, elasticity: 0.7, note: B4), level: 0.3, pan: 0.5), fade: 0
     end
 
     # 4. Pile-up
     at_bar(25) do
-      bg :kick, ball(:kick, bounce_hits(5.beats, count: 14, elasticity: 0.72, note: C2), level: 0.85, pan: roll.(5.beats, -0.3, 0.3)), fade: 0
-      bg :snare, ball(:snare, bounce_hits(3.beats, count: 10, elasticity: 0.6, reverse: true, note: D3), level: 0.45, pan: roll.(3.beats, 0.5, -0.5)), fade: 0
-      bg :hat, ball(:hat, bounce_hits(4.beats, count: 36, elasticity: 0.88, note: C6), level: 0.3, pan: roll.(4.beats, -0.7, 0.7)), fade: 0
-      bg :ping, ball(:ping, bounce_hits(7.beats, count: 16, elasticity: 0.8, note: G5), level: 0.3, pan: roll.(7.beats, 0.8, -0.8)), fade: 0
+      bg :kick, ball(:kick, hits.(5.beats, count: 14, elasticity: 0.72, note: C2), level: 0.85, pan: roll.(5.beats, -0.3, 0.3)), fade: 0
+      bg :snare, ball(:snare, hits.(3.beats, count: 10, elasticity: 0.6, reverse: true, note: D3), level: 0.45, pan: roll.(3.beats, 0.5, -0.5)), fade: 0
+      bg :hat, ball(:hat, hits.(4.beats, count: 36, elasticity: 0.88, note: C6), level: 0.3, pan: roll.(4.beats, -0.7, 0.7)), fade: 0
+      bg :ping, ball(:ping, hits.(7.beats, count: 16, elasticity: 0.8, note: G5), level: 0.3, pan: roll.(7.beats, 0.8, -0.8)), fade: 0
       stop :blip, fade: 0
     end
 
     # 5. Settle
     at_bar(33) do
       [:kick, :snare, :hat, :ping].each { |n| stop n, fade: 0 }
-      long = bounce_hits(6.bars, count: 40, elasticity: 0.88, note: C2)
+      long = hits.(6.bars, count: 40, elasticity: 0.88, note: C2)
       bg :kick, ball(:kick, long, level: 0.9), fade: 0
-      bg :ping, ball(:ping, bounce_hits(6.bars, count: 40, elasticity: 0.88, note: E5), level: 0.3, pan: roll.(6.bars, -0.8, 0.8)), fade: 0
+      bg :ping, ball(:ping, hits.(6.bars, count: 40, elasticity: 0.88, note: E5), level: 0.3, pan: roll.(6.bars, -0.8, 0.8)), fade: 0
     end
     at_bar(39) { outro fade: 1 }
   end
@@ -169,6 +188,7 @@ module MB::Sound
     song_script(
       bars: BOUNCING_BALL_BARS,
       room: [false, 'Add a little room reverb'],
-    ) { |p| bouncing_ball(room: p.room) }
+      decay: ['speed', 'How hit velocities fall per bounce: speed (e^i), gentle (e^(i/2)), none, or a factor like 0.85'],
+    ) { |p| bouncing_ball(room: p.room, decay: ball_decay(p.decay)) }
   end
 end
