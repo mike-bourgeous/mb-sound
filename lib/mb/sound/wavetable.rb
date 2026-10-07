@@ -134,10 +134,9 @@ module MB
       # band dips at most 0.7 dB below the unfiltered saw (octave levels:
       # 2.8 dB) and the brightness (mean harmonic) at most 3.5% (11%); a
       # piano sample swept above its root dips 2.5 dB (5.6 dB).  Twice as
-      # many pitches crossfade two levels (40% instead of 20%), so sweeps
-      # and FM cost 5-8% more CPU per sample, and a steady pitch inside a
-      # crossfade 1.5 times as much (36 instead of 24 ns); levels take
-      # 1.5-1.9 times the memory.
+      # many pitches crossfade two levels (40% instead of 20%); the kernels
+      # read two levels at every pitch anyway (the same cost for every
+      # note), and levels take 1.5-1.9 times the memory.
       DEFAULT_MIPS = :half_octave
 
       # Interpolators (see the class description) and their kernel codes.
