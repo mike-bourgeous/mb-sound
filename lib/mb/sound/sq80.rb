@@ -81,11 +81,14 @@ module MB
       # +loop+ - An extension: a segment index or name (:t1..:t3) to jump back
       #          to after T3 while the key is held (true: T1), so the
       #          envelope repeats as a rhythmic modulator.
+      # +restart+ - True for the SQ-80's ENV restart-from-zero mode: every
+      #             note starts the envelope from 0 (Envelope retrigger:
+      #             :zero) instead of from its current level.
       # +curve+ - Envelope curves (default DEFAULT_CURVE).
       def self.env_options(
         l1: 63, l2: 63, l3: 63, t1: 0, t2: 0, t3: 0, t4: 0,
         lv: 0, lv_curve: :linear, t1v: 0, tk: 0,
-        second_release: false, cycle: false, loop: nil, curve: DEFAULT_CURVE,
+        second_release: false, cycle: false, loop: nil, restart: false, curve: DEFAULT_CURVE,
         velocity: nil, key: nil
       )
         raise ArgumentError, 'Give cycle: or loop:, not both' if cycle && loop
@@ -115,6 +118,7 @@ module MB
         options[:loop] = 3 if cycle
         options[:loop] = loop == true ? 0 : loop if loop
         options[:hold] = false if cycle || loop
+        options[:retrigger] = :zero if restart
         options
       end
 

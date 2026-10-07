@@ -447,6 +447,8 @@ module MB
       # +:tk+ (higher keys shorten T2 and T3), +:second_release+ (the T4 "R"
       # pseudo-reverb tail), +:cycle+ (CYC: run every stage, ignoring the
       # key-up), +:loop+ (an extension: repeat from a segment while held),
+      # +:restart+ (true: every note starts from 0, the SQ-80's ENV
+      # restart mode; Envelope retrigger: :zero),
       # and +:curve+.  See MB::Sound::SQ80.env_options.  Other options are
       # Envelope's (e.g. +:retrigger+, +:octaves+).  Multiply by a depth or
       # feed #mod_sum for bipolar modulation.

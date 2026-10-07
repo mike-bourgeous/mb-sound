@@ -146,6 +146,7 @@ enum env_flags {
 	ENV_OCTAVES = 16,
 	ENV_LIFT = 32,
 	ENV_ADD = 64,     // retrigger peaks add to the current level (energy sum)
+	ENV_ZERO = 128,   // notes start from 0, not the current level (SQ-80 ENV restart)
 };
 
 // A parameter or input: a constant, or a float or double per sample.
@@ -413,6 +414,10 @@ static __attribute__((noinline)) double env_sample_s(struct env_s_plan *sp, doub
  * node runs straight into the release (the SQ-80's CYC mode with a
  * trigger and no gate).  Without a loop node (or -1) nothing changes.
  *
+ * With the ENV_ZERO flag, every note start drops the level to 0 first
+ * (and the slope the S segments carry), so the attack starts from zero
+ * like the SQ-80's ENV restart mode (it clicks if the level wasn't 0).
+ *
  * With the ENV_ADD flag, a note's peak is env_add_peak of the level when
  * it starts and its velocity's peak (Envelope retrigger: :add).
  *
@@ -475,6 +480,7 @@ static VALUE ruby_process(VALUE self, VALUE out, VALUE state, VALUE times, VALUE
 	int use_octaves = !!(flags & ENV_OCTAVES);
 	int has_lift = !!(flags & ENV_LIFT);
 	int add = !!(flags & ENV_ADD);
+	int zero = !!(flags & ENV_ZERO);
 
 	size_t n = RNARRAY_SHAPE(out)[0];
 	VALUE keep = Qnil;
@@ -578,6 +584,11 @@ static VALUE ruby_process(VALUE self, VALUE out, VALUE state, VALUE times, VALUE
 			peak = env_peak(env_at(&velocity_sig, i), velocity_low, velocity_high, velocity_db);
 			if (add) {
 				peak = env_add_peak(y, peak, velocity_low, velocity_high);
+			}
+			if (zero) {
+				y = 0;
+				y_prev = 0;
+				y_last = 0;
 			}
 			stage = ENV_SEGMENT;
 			seg = 0;

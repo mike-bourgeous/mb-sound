@@ -38,6 +38,7 @@ RSpec.describe(MB::Sound::Envelope, 'multi-segment envelopes') do
         flags |= sf::FLAG_TRIGGER if rng.rand < 0.5
         flags |= sf::FLAG_ONE_SHOT if flags & 3 == 0
         flags |= sf::FLAG_ADD if rng.rand < 0.3
+        flags |= sf::FLAG_ZERO if flags & sf::FLAG_ADD == 0 && rng.rand < 0.4
         config = [flags, release_node, rng.rand(0.0..0.5), 1.0, 0, 144.0, sf::CURVE_SCALE, 96.0, 0.01, loop_node]
         shapes = Array.new(nseg) { rng.rand < 0.3 ? 1 : 0 }
 
@@ -161,6 +162,45 @@ RSpec.describe(MB::Sound::Envelope, 'multi-segment envelopes') do
       expect(MB::Sound.adsr(0.01, 0.2, 0.7, 0.3).to_s).to include('adsr(0.01, 0.2, 0.7, 0.3) curve analog')
       s = MB::Sound.adsr([[1, 0.01], [0.5, 0.1], [0, 0.2]], loop: 1).to_s
       expect(s).to include('env(1.0/0.01, @0.5/0.1, | 0.0/0.2)')
+    end
+  end
+
+  describe 'retrigger: :zero (restart from zero)' do
+    # Gate on at 0 and again at 0.3 s (after a 1-sample gap), so the
+    # second note starts while the first is sounding
+    def regate
+      a = Numo::SFloat.zeros(48000)
+      a[0...14400] = 1
+      a[14401...30000] = 1
+      array_node(a)
+    end
+
+    it 'drops to 0 at a note start while sounding, then attacks again' do
+      zero = MB::Sound.adsr(0.05, 0.1, 0.6, 0.2, gate: regate, retrigger: :zero, curve: :linear)
+      plain = MB::Sound.adsr(0.05, 0.1, 0.6, 0.2, gate: regate, curve: :linear)
+      z = collect(zero, 48000)
+      p = collect(plain, 48000)
+      expect(z[14400]).to be > 0.5           # sounding when the second note starts
+      expect(z[14401]).to eq(0)
+      expect(z[14401 + 1200]).to be_within(1e-6).of(0.5) # half way up the 50 ms attack
+      expect(p[14401..(14401 + 1200)].min).to be > 0.5    # the default attacks from the current level
+      expect(z[0...14401].to_a).to eq(p[0...14401].to_a)  # the same from silence
+    end
+
+    it 'gives the C kernel and the Ruby mirror the same samples, also with S shapes' do
+      [:exp, :s].each do |shape|
+        a = MB::Sound.adsr(0.05, 0.1, 0.6, 0.2, gate: regate, retrigger: :zero, shape: shape)
+        b = MB::Sound.adsr(0.05, 0.1, 0.6, 0.2, gate: regate, retrigger: :zero, shape: shape)
+        expect(collect(a, 48000).to_a).to eq(collect(b, 48000, method: :sample_ruby).to_a), shape.to_s
+      end
+    end
+
+    it 'leaves the default unchanged (no flag) and is offered by sq80_env as restart: true' do
+      expect(MB::Sound.adsr.kernel_config[0] & described_class::FLAG_ZERO).to eq(0)
+      expect(MB::Sound.adsr(retrigger: :zero).kernel_config[0] & described_class::FLAG_ZERO).not_to eq(0)
+      expect(MB::Sound.sq80_env(restart: true).retrigger).to eq(:zero)
+      expect(MB::Sound.sq80_env.retrigger).to eq(:restart)
+      expect { MB::Sound.adsr(retrigger: :nope) }.to raise_error(ArgumentError, /zero/)
     end
   end
 

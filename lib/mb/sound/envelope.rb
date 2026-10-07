@@ -67,7 +67,9 @@ module MB
     # a trill, a file hammering one key) the level stays within +3 dB of
     # one strike: a roll of equal strikes levels off at the second strike,
     # as a struck string or bar can't ring much harder than one blow of
-    # the same force drives it.  From silence both modes are the same.  (Synth voices reused for a repeated
+    # the same force drives it.  With :zero every note starts from 0, like
+    # the SQ-80's ENV restart mode (an audible restart, by design, if the
+    # envelope was sounding).  From silence all modes are the same.  (Synth voices reused for a repeated
     # note also reset key-synced oscillators' phases; ringing patches that
     # use :add usually want `.free` oscillators.)
     #
@@ -238,11 +240,13 @@ module MB
       FLAG_OCTAVES = 16
       FLAG_LIFT = 32
       FLAG_ADD = 64
+      FLAG_ZERO = 128
 
       # Retrigger modes (see #retrigger): :restart attacks from the current
       # level to the new note's velocity peak; :add attacks to the energy
-      # sum of the current level and that peak.
-      RETRIGGER_MODES = [:restart, :add].freeze
+      # sum of the current level and that peak; :zero drops to 0 and
+      # attacks from there (the SQ-80's ENV restart; clicks if sounding).
+      RETRIGGER_MODES = [:restart, :add, :zero].freeze
 
       # How far an :add retrigger may rise above its own velocity peak
       # (sqrt(2): two equal strikes summed in energy, +3 dB; the C
@@ -449,7 +453,7 @@ module MB
       #                     gains, e.g. -18.db..0.db).
       # +:legato+ - If true, triggers while the gate is held keep the current
       #             stage (see #legato).
-      # +:retrigger+ - :restart (default) or :add (see the class
+      # +:retrigger+ - :restart (default), :add, or :zero (see the class
       #                description and #retrigger).
       # +:octaves+ - If not nil or 0, the output is 2 ** (level * octaves), a
       #              cutoff multiplier (a number of octaves, anything with
@@ -725,7 +729,7 @@ module MB
         @legato
       end
 
-      # Sets the retrigger mode (:restart or :add; see the class description)
+      # Sets the retrigger mode (:restart, :add, or :zero; see the class description)
       # and returns self, or returns the mode without an argument.
       #
       # Example:
@@ -736,7 +740,7 @@ module MB
         self
       end
 
-      # Sets the retrigger mode (:restart or :add; see the class
+      # Sets the retrigger mode (:restart, :add, or :zero; see the class
       # description).
       def retrigger=(mode)
         unless RETRIGGER_MODES.include?(mode)
@@ -914,6 +918,7 @@ module MB
         flags |= FLAG_OCTAVES if @octaves
         flags |= FLAG_LIFT if @lift
         flags |= FLAG_ADD if @retrigger == :add
+        flags |= FLAG_ZERO if @retrigger == :zero
 
         [
           flags,
@@ -962,6 +967,7 @@ module MB
         use_octaves = flags & FLAG_OCTAVES != 0
         has_lift = flags & FLAG_LIFT != 0
         add = flags & FLAG_ADD != 0
+        zero = flags & FLAG_ZERO != 0
 
         seg_times = times.map { |v| signal(v, n, 0.0) }
         seg_curves = curves.map { |v| signal(v, n, 0.0) }
@@ -1042,6 +1048,11 @@ module MB
           if start
             peak = velocity_peak(at(velocity_sig, i), velocity_low, velocity_high, velocity_db)
             peak = add_peak(y, peak, velocity_low, velocity_high) if add
+            if zero
+              y = 0.0
+              y_prev = 0.0
+              y_last = 0.0
+            end
             stage = STAGE_SEGMENT
             seg = 0
             e = 0.0

@@ -113,8 +113,9 @@ module MB::Sound
 
       # GM2 envelope time knobs (CC 72/73/75) act on ENV4 only (cheaper)
 
-      # ENV1 blips OSC3 (CYC: every stage runs, even for a short key-up)
-      env1 = v.sq80_env(l1: 63, l2: 18, l3: 0, t1: 0, t2: 14, t3: 20, t4: 16, lv: 30, cycle: true, gm: false)
+      # ENV1 blips OSC3 (CYC: every stage runs, even for a short key-up;
+      # restart: each note's blip starts from zero, the SQ-80's ENV restart)
+      env1 = v.sq80_env(l1: 63, l2: 18, l3: 0, t1: 0, t2: 14, t3: 20, t4: 16, lv: 30, cycle: true, restart: true, gm: false)
 
       # ENV2: the filter; velocity on levels and attack, higher keys decay faster
       env2 = v.sq80_env(l1: 63, l2: 36, l3: 24, t1: 4, t2: 28, t3: 38, t4: 30, lv: 24, t1v: 30, tk: 24, gm: false)
