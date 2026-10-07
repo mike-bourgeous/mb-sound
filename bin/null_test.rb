@@ -91,7 +91,10 @@ def render_all(root, dir, only)
     out += '.flac' unless name.end_with?('/')
     FileUtils.rm_rf(out)
     t = MB::U.clock_now
-    text, status = Open3.capture2e({ 'RANDOM_SEED' => '1' }, format(cmd, out: out.shellescape), chdir: root)
+    # BUNDLE_GEMFILE: this script's bundler/setup exported its own tree's
+    # Gemfile, which made reference renders load this tree's lib
+    env = { 'RANDOM_SEED' => '1', 'BUNDLE_GEMFILE' => File.join(root, 'Gemfile') }
+    text, status = Open3.capture2e(env, format(cmd, out: out.shellescape), chdir: root)
     unless status.success?
       warn text
       abort "Case #{name} failed in #{root}"
