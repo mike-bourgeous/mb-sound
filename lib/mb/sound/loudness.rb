@@ -7,8 +7,8 @@ module MB
     #
     # Most code uses MB::Sound.loudness (AnalysisMethods) for whole files or
     # arrays, or GraphNode#loudness_meter for a live meter.  Both run an
-    # Analyzer, which takes audio in buffers of any size and keeps only 100 ms
-    # energy sums (and the true peak), so hours of audio take little memory.
+    # Analyzer, which takes audio in buffers of any size and keeps only 10 ms
+    # energy sums (and the true peak), so an hour of audio takes a few MB.
     #
     # Channel order: weights default by channel count (see .default_weights),
     # assuming ffmpeg/SMPTE order (L R C LFE Ls Rs, then Lb Rb for 7.1).
@@ -35,16 +35,21 @@ module MB
       # range (EBU Tech 3342).
       LRA_PERCENTILES = [0.10, 0.95].freeze
 
-      # Step between momentary and short-term measurements, in seconds (the
-      # 75% overlap of 400 ms gating blocks).  Short-term values use the same
-      # step (10 Hz, as EBU Tech 3341 asks for).
-      STEP = 0.1
+      # Length in seconds of the energy sums the Analyzer keeps (10 ms), so
+      # momentary and short-term maxima are found to 10 ms even for bursts
+      # that start between 100 ms steps (EBU Tech 3341's burst cases).
+      SEGMENT = 0.01
 
-      # Momentary window (and gating block) length in steps (400 ms).
-      MOMENTARY_STEPS = 4
+      # Step between gating blocks and reported momentary/short-term values,
+      # in segments (100 ms: the 75% overlap of 400 ms gating blocks, and
+      # the 10 Hz rate EBU Tech 3341 asks for).
+      STEP_SEGMENTS = 10
 
-      # Short-term window length in steps (3 s).
-      SHORT_TERM_STEPS = 30
+      # Momentary window (and gating block) length in segments (400 ms).
+      MOMENTARY_SEGMENTS = 40
+
+      # Short-term window length in segments (3 s).
+      SHORT_TERM_SEGMENTS = 300
 
       # Channel weight of surround channels (BS.1770: 1.41, +1.5 dB).
       SURROUND_WEIGHT = 1.41
@@ -201,6 +206,7 @@ module MB
         def process(samples)
           x = Numo::DFloat.cast(samples)
           return self if x.empty?
+          x = x.dup.not_inplace! if x.inplace?
 
           @sample_peak = [@sample_peak, x.abs.max].max
           ext = @history.concatenate(x)
@@ -229,6 +235,8 @@ module MB
         # each phase is y[i] = sum(h[k] * x[i - k]), summed in order of k.
         def self.oversampled_max_ruby(ext, n)
           max = 0.0
+          return max if n == 0
+
           y = Numo::DFloat.zeros(n)
           PHASES.each do |h|
             y.fill(0)
@@ -287,16 +295,21 @@ module MB
 
           z = nil
           buffers.each_with_index do |buf, c|
+            # Numo methods write into in-place arrays, so work on a copy
             x = Numo::DFloat.cast(buf)
+            x = x.dup.not_inplace! if x.inplace?
             x = x[0...n] if x.length > n
             @true_peaks[c].process(x) if @true_peaks
             next if @weights[c] == 0
 
-            # The Biquad kernel returns a new array unless the input is
-            # in-place, so the caller's buffer is never modified.
-            y =@filters[c][1].process(@filters[c][0].process(x))
+            # The Biquad kernel works in place on in-place arrays and copies
+            # others, so the first stage copies and the second reuses it.
+            shelf, highpass = @filters[c]
+            y = shelf.process(x).inplace!
+            highpass.process(y)
             sq = y * y
-            sq.inplace * @weights[c] if @weights[c] != 1
+            sq * @weights[c] if @weights[c] != 1
+            sq.not_inplace!
             if z
               z.inplace + sq
             else
@@ -308,28 +321,28 @@ module MB
           self
         end
 
-        # Momentary loudness (LUFS) of the last 400 ms of complete 100 ms
-        # steps (silence before the start).
+        # Momentary loudness (LUFS) of the last 400 ms of complete 10 ms
+        # segments (silence before the start).
         def momentary
-          Loudness.lufs(window_energy(MOMENTARY_STEPS))
+          Loudness.lufs(window_energy(MOMENTARY_SEGMENTS))
         end
         alias m momentary
 
-        # Short-term loudness (LUFS) of the last 3 s of complete steps.
+        # Short-term loudness (LUFS) of the last 3 s of complete segments.
         def short_term
-          Loudness.lufs(window_energy(SHORT_TERM_STEPS))
+          Loudness.lufs(window_energy(SHORT_TERM_SEGMENTS))
         end
         alias s short_term
 
         # Gated integrated loudness (LUFS) so far.
         def integrated
-          Loudness.gate(block_energies(MOMENTARY_STEPS))[0]
+          Loudness.gate(block_energies(MOMENTARY_SEGMENTS, STEP_SEGMENTS))[0]
         end
         alias lufs integrated
 
         # Loudness range (LU) so far.
         def range
-          Loudness.range(block_energies(SHORT_TERM_STEPS))[0]
+          Loudness.range(block_energies(SHORT_TERM_SEGMENTS, STEP_SEGMENTS))[0]
         end
         alias lra range
 
@@ -341,22 +354,23 @@ module MB
 
         # Returns a Result with every measurement.
         def result
-          mom = block_energies(MOMENTARY_STEPS)
-          st = block_energies(SHORT_TERM_STEPS)
+          mom = block_energies(MOMENTARY_SEGMENTS, STEP_SEGMENTS)
+          st = block_energies(SHORT_TERM_SEGMENTS, STEP_SEGMENTS)
           integrated, threshold, _ = Loudness.gate(mom)
           lra, low, high = Loudness.range(st)
 
-          to_lufs = ->(e) { e.empty? ? Numo::DFloat[] : Numo::DFloat.cast(e.to_a.map { |v| Loudness.lufs(v) }) }
-          mom_lufs = to_lufs.(mom)
-          st_lufs = to_lufs.(st)
+          # Maxima from windows every 10 ms, so bursts between 100 ms steps
+          # count fully.
+          mom_max = block_energies(MOMENTARY_SEGMENTS, 1)
+          st_max = block_energies(SHORT_TERM_SEGMENTS, 1)
 
           Result.new(
             integrated: integrated,
             relative_threshold: threshold,
-            momentary: mom_lufs,
-            short_term: st_lufs,
-            momentary_max: mom_lufs.empty? ? -Float::INFINITY : mom_lufs.max,
-            short_term_max: st_lufs.empty? ? -Float::INFINITY : st_lufs.max,
+            momentary: to_lufs(mom),
+            short_term: to_lufs(st),
+            momentary_max: mom_max.empty? ? -Float::INFINITY : Loudness.lufs(mom_max.max),
+            short_term_max: st_max.empty? ? -Float::INFINITY : Loudness.lufs(st_max.max),
             range: lra,
             range_low: low,
             range_high: high,
@@ -372,14 +386,14 @@ module MB
 
         private
 
-        # The sample index where 100 ms step +k+ ends (rounded, so rates not
-        # divisible by 10 get steps that differ by one sample).
+        # The sample index where 10 ms segment +k+ ends (rounded, so rates
+        # not divisible by 100 get segments that differ by one sample).
         def boundary(k)
-          (k * @sample_rate * STEP).round
+          (k * @sample_rate * SEGMENT).round
         end
 
         # Adds the weighted squares +z+ (length +n+; nil when every channel
-        # weighs 0) to the 100 ms step sums.
+        # weighs 0) to the 10 ms segment sums.
         def accumulate(z, n)
           pos = 0
           while pos < n
@@ -397,27 +411,31 @@ module MB
           end
         end
 
-        # Mean square of the last +steps+ complete steps, with silence
+        # Mean square of the last +segments+ complete segments, with silence
         # before the start.
-        def window_energy(steps)
-          sums = @segment_sums.last(steps)
-          sums.sum / (steps * @sample_rate * STEP)
+        def window_energy(segments)
+          @segment_sums.last(segments).sum / (segments * @sample_rate * SEGMENT)
         end
 
-        # Mean squares of every complete window of +steps+ steps, one per
-        # step (hop 100 ms).
-        def block_energies(steps)
-          count = @segment_sums.length - steps + 1
-          return Numo::DFloat[] if count <= 0
+        # Mean squares of every complete window of +segments+ segments,
+        # starting every +hop+ segments from the start.
+        def block_energies(segments, hop)
+          return Numo::DFloat[] if @segment_sums.length < segments
 
-          sums = Numo::DFloat.cast(@segment_sums)
-          lengths = Numo::DFloat.cast(@segment_lengths)
-          cs = Numo::DFloat.zeros(sums.length + 1)
-          cs[1..] = sums.cumsum
-          cl = Numo::DFloat.zeros(lengths.length + 1)
-          cl[1..] = lengths.cumsum
+          cs = Numo::DFloat.zeros(@segment_sums.length + 1)
+          cs[1..] = Numo::DFloat.cast(@segment_sums).cumsum
+          cl = Numo::DFloat.zeros(@segment_lengths.length + 1)
+          cl[1..] = Numo::DFloat.cast(@segment_lengths).cumsum
 
-          (cs[steps..] - cs[0...count]) / (cl[steps..] - cl[0...count])
+          starts = Numo::Int64.new((@segment_sums.length - segments) / hop + 1).seq * hop
+          ends = starts + segments
+          (cs[ends] - cs[starts]) / (cl[ends] - cl[starts])
+        end
+
+        # Converts mean squares to LUFS (-Infinity for silence).
+        def to_lufs(energies)
+          return Numo::DFloat[] if energies.empty?
+          Numo::NMath.log10(energies) * 10.0 + OFFSET
         end
       end
 
