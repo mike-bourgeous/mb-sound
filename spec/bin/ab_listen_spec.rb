@@ -78,4 +78,22 @@ RSpec.describe('bin/ab_listen.rb') do
     expect(text).to match(/B \(after\) +0\.10 \/ 0\.30 s/)
     expect(text).to match(/A \(before\) +0\.20 \/ 0\.30 s/)
   end
+
+  it 'matches levels by integrated loudness, or by RMS with --match-by rms' do
+    tone('one_before.flac', 0.5, seconds: 0.6)
+    tone('one_after.flac', 0.25, seconds: 0.6)
+
+    text = run('--auto', '0.3', '-m', dir)
+    expect(text).to include('(-6.0 dB rms)  (-6.0 LU)', 'match LUFS')
+
+    text = run('--auto', '0.3', '-m', '--match-by', 'rms', dir)
+    expect(text).to include('match RMS')
+  end
+
+  it 'falls back to RMS matching for pairs too short to gate' do
+    tone('one_before.flac', 0.5, seconds: 0.3)
+    tone('one_after.flac', 0.25, seconds: 0.3)
+    text = run('--auto', '0.1', '-m', dir)
+    expect(text).to include('-- LUFS', 'match RMS')
+  end
 end
