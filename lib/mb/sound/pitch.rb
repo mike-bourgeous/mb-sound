@@ -208,6 +208,9 @@ module MB
       #              in: an Interval (e.g. `1.oct`, either side of the first
       #              note, random per copy) or a Range of Intervals; nil
       #              (default) starts them on the note.
+      # +from:+ - Where copies start instead, as an absolute band: a Range
+      #           of Pitches, Notes, or note numbers (e.g. `G3..G4`, like
+      #           the THX Deep Note's 200-400 Hz cloud), random per copy.
       # +drift:+ - A slow wander of each copy by up to this Interval (e.g.
       #            `20.cents`), a sine LFO at a random phase; nil (default)
       #            for none.
@@ -221,10 +224,10 @@ module MB
       #     midi.synth(voices: 2) { |v| v.hz.swarm(16, glide: spread(50.ms..1.5.seconds), overshoot: 0..0.1) * v.amp_env }
       #     midi.synth(voices: 1) { |v| v.hz.swarm(24, chord: [-12, 0, 7, 12, 16, 19], scatter: 2.oct, glide: 2..6) * v.amp_env(2, 0, 1, 3) }
       #     play 110.hz.swarm(9, glide: nil, drift: 15.cents)                                  # a drifting cloud on a fixed pitch
-      def swarm(count = 12, chord: nil, detune: 15.cents, glide: :auto, legato: false, overshoot: 0, scatter: nil, drift: nil,
+      def swarm(count = 12, chord: nil, detune: 15.cents, glide: :auto, legato: false, overshoot: 0, scatter: nil, from: nil, drift: nil,
                 drift_rate: Unison::SWARM_DRIFT_RATE, spread: 1, **unison, &block)
         Unison.swarm(
-          self, count, chord: chord, detune: detune, glide: glide, overshoot: overshoot, scatter: scatter, legato: legato,
+          self, count, chord: chord, detune: detune, glide: glide, overshoot: overshoot, scatter: scatter, from: from, legato: legato,
           drift: drift, drift_rate: drift_rate, spread: spread, **unison, &block
         )
       end

@@ -143,11 +143,30 @@ module MB
             return
           end
 
+          # The same operations as t * t * (3 - 2 * t) * (number - start) +
+          # start, in place to save allocations (glides are often long, and
+          # unison swarms run one per copy)
           n = to - from
-          t = (Numo::DFloat.new(n).seq(@position + 1) / @length).clip(0.0, 1.0)
-          shaped = t * t * (3 - 2 * t)
-          shaped += @overshoot_k * t**3 * (1 - t)**2 if @overshoot_k != 0
-          buf[from...to] = shaped * (@number - @start) + @start
+          t = Numo::DFloat.new(n).seq(@position + 1)
+          t.inplace / @length
+          t.inplace.clip(0.0, 1.0)
+          shaped = t * -2
+          shaped.inplace + 3
+          sq = t * t
+          shaped.inplace * sq
+          if @overshoot_k != 0
+            # + k t³ (1 - t)²
+            bump = t * -1
+            bump.inplace + 1
+            bump.inplace * bump
+            sq.inplace * t
+            bump.inplace * sq
+            bump.inplace * @overshoot_k
+            shaped.inplace + bump
+          end
+          shaped.inplace * (@number - @start)
+          shaped.inplace + @start
+          buf[from...to] = shaped
           @position += n
           @value = buf[to - 1]
           @gliding = false if @position >= @length
