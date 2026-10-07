@@ -224,6 +224,18 @@ RSpec.describe(MB::Sound::Filter::FourPole) do
       expect(peak_db(FP.new(cutoff: 1000, resonance: 0.5, resonance_curve: :linear))).to be_within(0.5).of(7.5)
     end
 
+    it 'converts linear-curve resonances to dB-curve ones with the same loop gain' do
+      [0, 0.1, 0.3, 0.5, 0.75, 0.9, 0.95, 0.999, 1].each do |lin|
+        db = FP.db_resonance(lin)
+        expect(FP.new(resonance: db).loop_gain).to be_within(1e-9).of(FP.new(resonance: lin, resonance_curve: :linear).loop_gain)
+        expect(FP.linear_resonance(db)).to be_within(1e-9).of(lin)
+      end
+      expect(FP.db_resonance(0.5)).to be_within(0.005).of(0.332)
+      expect(FP.db_resonance(0.75)).to be_within(0.005).of(0.508)
+      expect(FP.db_resonance(-1)).to eq(0)
+      expect(FP.db_resonance(2)).to eq(1)
+    end
+
     it 'rejects unknown curves' do
       expect { FP.new(resonance_curve: :log) }.to raise_error(ArgumentError, /curve/)
     end
@@ -298,6 +310,21 @@ RSpec.describe(MB::Sound::Filter::FourPole) do
             expect(out.abs.max).to be < 50
           end
         end
+      end
+    end
+
+    # Listening round 2 heard "sudden" level and timbre changes in cutoff
+    # sweeps; they were the resonant peak crossing single harmonics of a
+    # 55 Hz saw (in the undriven reference too), not the filter.  This
+    # checks that a smooth sweep gives no sample-level discontinuities.
+    [{}, { drive: 3 }, { drive_mode: :stages, drive: 3 }, { drive_mode: :feedback, drive: 3 }, { drive_mode: :feedback, clip: :hard, drive: 3, mode: :lp2 }].each do |opts|
+      it "has no discontinuities during a smooth cutoff sweep with #{opts}" do
+        n = 96000
+        x = Numo::SFloat.cast(Numo::NMath.sin(Numo::DFloat.new(n).seq * (2 * Math::PI * 110 / 48000)) * 0.5)
+        fc = Numo::SFloat.cast(80.0 * 100.0**(Numo::DFloat.new(n).seq / n))
+        y = Numo::DFloat.cast(FP.new(resonance: 0.9, **opts).dynamic_process(x, cutoff: fc, resonance: 0.9))
+        d2 = (y[2..] - y[1...-1] * 2 + y[0...-2]).abs.max
+        expect(d2 / y.abs.max).to be < 2 * (2 * Math::PI * 110 / 48000)**2
       end
     end
 

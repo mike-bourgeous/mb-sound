@@ -22,7 +22,9 @@ module MB
       #   linearly in dB, -12 dB at 0 to +33.8 dB at 1 (.resonance_curve; the
       #   resonant peak about +2.7, +14.5, +27.8, +37 dB at 0.2, 0.5, 0.8,
       #   1); :linear is k = resonance × #k_max (+7.5 dB at 0.5, +16.8 at
-      #   0.8).  .quality_to_resonance maps a 2-pole Q to the resonance with
+      #   0.8).  .db_resonance converts a :linear value to the :db value
+      #   with the same sound (0.5 -> 0.33, 0.75 -> 0.51, 0.9 -> 0.68).
+      #   .quality_to_resonance maps a 2-pole Q to the resonance with
       #   the same gain at the cutoff (GraphNode#lp4's +quality:+).
       # - Passband compensation (+compensation:+, default 0.375 like the
       #   CEM3379): full resonance loses about 6 dB of bass instead of 12.
@@ -386,6 +388,27 @@ module MB
           return 1.0 if r >= 1.0
           e = exp2(r * CURVE_LOG2_RATIO)
           (e - 1.0) / ((1.0 + 0.25 * e) * CURVE_K)
+        end
+
+        # The resonance on the :db curve that gives the same loop gain as
+        # +linear+ on the :linear curve (round 1's mapping), to retune
+        # patches written for it: log(4 (1 + K) / (4 - K)) / log(196) with
+        # K = 3.9 × linear.  0.3 -> 0.21, 0.5 -> 0.33, 0.6 -> 0.40, 0.7 ->
+        # 0.47, 0.75 -> 0.51, 0.8 -> 0.55, 0.9 -> 0.68, 0.95 -> 0.79, 1 -> 1.
+        # The inverse is .linear_resonance.
+        def self.db_resonance(linear)
+          linear = linear.to_f
+          return 0.0 unless linear > 0
+          return 1.0 if linear >= 1
+          k = CURVE_K * linear
+          (Math.log(4 * (1 + k) / (4 - k)) / Math.log(196)).clamp(0.0, 1.0)
+        end
+
+        # The resonance on the :linear curve that gives the same loop gain as
+        # +db+ on the :db curve (.resonance_curve; the inverse of
+        # .db_resonance).
+        def self.linear_resonance(db)
+          resonance_curve(db.to_f)
         end
 
         # The resonance (0..1) that gives this filter the gain at the cutoff

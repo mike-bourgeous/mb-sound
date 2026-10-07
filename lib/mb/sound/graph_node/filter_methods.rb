@@ -23,7 +23,7 @@ module MB
         #     MB::Sound.play 500.hz.ramp.filter(:highpass, frequency: adsr() * 1000 + 100, quality: adsr() * -5 + 6)
         #
         #     # CEM3379-style 4-pole lowpass (see #lp4); takes resonance: 0..1
-        #     MB::Sound.play 110.hz.ramp.filter(:lp4, cutoff: 0.2.hz.lfo.at(300..3000), resonance: 0.7)
+        #     MB::Sound.play 110.hz.ramp.filter(:lp4, cutoff: 0.2.hz.lfo.at(300..3000), resonance: 0.47)
         #
         # TODO: support SampleWrapper inputs argument
         def filter(filter_or_type = :lowpass, cutoff: nil, quality: nil, gain: nil, resonance: nil, in_place: false)
@@ -113,17 +113,18 @@ module MB
         # +resonance_curve: :db+ (default) makes the gain at the cutoff
         # rise linearly in dB with +resonance+ (-12 dB to +33.8 dB; the peak
         # about 4.5 dB per 0.1 above 0.2); :linear is the loop gain itself
-        # (round 1: +7.5 dB at 0.5).  +quality:+ (a number or node, e.g.
-        # Notes#quality) instead of +resonance:+ gives the gain at the
-        # cutoff of a 2-pole filter of that Q (see
-        # Filter::FourPole.quality_to_resonance).  In synth voices,
+        # (round 1: +7.5 dB at 0.5; Filter::FourPole.db_resonance converts
+        # its values, e.g. 0.5 -> 0.33, 0.75 -> 0.51, 0.9 -> 0.68).
+        # +quality:+ (a number or node, e.g. Notes#quality) instead of
+        # +resonance:+ gives the gain at the cutoff of a 2-pole filter of
+        # that Q (see Filter::FourPole.quality_to_resonance).  In synth voices,
         # Notes#reso follows CC 71 (resonance) like Notes#quality.
         #
         # Examples:
-        #     play 110.hz.ramp.lp4(800, resonance: 0.6)
-        #     play 55.hz.ramp.lp4(0.25.hz.lfo.at(100..4000), resonance: 0.9, drive: 2)
+        #     play 110.hz.ramp.lp4(800, resonance: 0.4)
+        #     play 55.hz.ramp.lp4(0.25.hz.lfo.at(100..4000), resonance: 0.68, drive: 3)
         #     # A synth voice (v from synth_script or midi.synth)
-        #     v.hz.saw.lp4(v.cutoff(300, keytrack: 1), resonance: 0.5) * v.amp_env
+        #     v.hz.saw.lp4(v.cutoff(300, keytrack: 1), resonance: 0.33) * v.amp_env
         #     # Resonance on CC 71, centered on 0.6
         #     v.hz.saw.lp4(v.cutoff(300), resonance: v.reso(0.6)) * v.amp_env
         #     # MS-20-style clipped resonance on the 2-pole tap
