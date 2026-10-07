@@ -512,6 +512,59 @@ RSpec.describe(MB::Sound::Notes) do
     end
   end
 
+  describe '#reso' do
+    it 'gives the base amount at 64, 0 at 0, and 1 at 127, linear in each half' do
+      v = notes_for(
+        ev.cc_raw(71, 64), ev.cc_raw(71, 127, time: 1/100r), ev.cc_raw(71, 0, time: 2/100r),
+        ev.cc_raw(71, 96, time: 3/100r), ev.cc_raw(71, 32, time: 4/100r)
+      )
+      r = v.reso(0.6)
+      out = run({ r: r, n: v.resonance_amount(0.6, gm: false), hi: v.reso(2) }, buffer: 480, buffers: 5)
+      expect(out[:r][0]).to be_within(1e-6).of(0.6)
+      expect(out[:r][480]).to be_within(1e-6).of(1)
+      expect(out[:r][960]).to eq(0)
+      expect(out[:r][1440]).to be_within(1e-3).of(0.6 + 0.4 * 32 / 63.0)
+      expect(out[:r][1920]).to be_within(1e-3).of(0.6 * 0.5)
+      expect(out[:n].to_a.uniq).to eq([0.6.to_f.then { |x| Numo::SFloat[x][0] }])
+      expect(out[:hi].max).to eq(1)
+    end
+
+    it 'takes a node as the base amount' do
+      v = notes_for(ev.cc_raw(71, 64))
+      expect(v.reso(0.25.constant).sample(10).to_a.uniq).to eq([0.25])
+    end
+
+    it 'shows CC 71 as a resonance amount in the controls and ACID XML' do
+      v = notes_for(ev.cc_raw(71, 64))
+      r = v.reso(0.6)
+      spec = v.controls.find { |s| s.description&.include?('Notes#reso') }
+      expect(spec.number).to eq(71)
+      expect(spec.value(64)).to eq(0)
+      expect(v.controls.to_acid_xml(name: 'x')).to include('71')
+      expect(r.gm(false).gm?).to eq(false)
+    end
+
+    it 'drives a 4-pole filter in synth voices', :check_shared do
+      clip = MB::Sound.seq(MB::Sound::A2.n4, MB::Sound::A2.n4)
+      synth = clip.synth(voices: 2) { |v| v.hz.saw.lp4(v.cutoff(300), resonance: v.reso(0.7)) * v.amp_env }
+      out = 20.times.map { synth.sample(800).dup }.reduce(:concatenate)
+      expect(out.isfinite.all?).to eq(true)
+      expect(out.abs.max).to be_between(0.05, 4)
+    end
+
+    it 'follows CC 71 in lp4 (a sine at the cutoff: -12 dB at 0, +33.8 dB at 127)' do
+      levels = [0, 64, 127].map { |raw|
+        v = notes_for(ev.note_on(69, 1.0), ev.cc_raw(71, raw), ev.cc(99, 0, time: 10r))
+        sig = v.hz.sine.lp4(440, resonance: v.reso(0.5))
+        60.times.map { sig.sample(800).dup }.reduce(:concatenate)[-4800..].abs.max
+      }
+      expect(levels[0].to_db).to be_within(0.3).of(-12.04)
+      k = MB::Sound::Filter::FourPole.resonance_curve(0.5) * 3.9
+      expect(levels[1].to_db).to be_within(0.3).of(-12.04 + 0.5 * 45.84 + 20 * Math.log10((1 + 0.375 * k) / (1 + k))) # over the passband
+      expect(levels[2].to_db).to be_within(0.5).of(33.8 - 20 * Math.log10(4.9 / (1 + 0.375 * 3.9)))
+    end
+  end
+
   describe 'vibrato' do
     # Returns the min and max of +freq+ in semitones from A4 over 1 s,
     # after +skip+ buffers of 480.

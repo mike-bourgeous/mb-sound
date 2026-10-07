@@ -56,6 +56,17 @@ module MB
           value.get_sampler
         end
 
+        # A resonance (a number, or a node from +quality+'s node) giving the
+        # gain at the cutoff of a 2-pole filter of quality +quality+ (a
+        # number or node such as Notes#quality; see
+        # Filter::FourPole.quality_to_resonance).
+        def self.quality_resonance(quality, curve = :db)
+          return MB::Sound::Filter::FourPole.quality_to_resonance(quality, curve: curve) if quality.is_a?(Numeric)
+          raise ArgumentError, "Quality must be a number or graph node (got #{quality.inspect})" unless quality.respond_to?(:sample)
+
+          quality.proc(type_name: 'Q to resonance') { |q| MB::Sound::Filter::FourPole.quality_to_resonance(q, curve: curve) }
+        end
+
         def sources
           { input: @source, cutoff: @cutoff, resonance: @resonance }.select { |_, v| v.respond_to?(:sample) }
         end

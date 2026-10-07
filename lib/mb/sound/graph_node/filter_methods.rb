@@ -31,8 +31,8 @@ module MB
 
           if FOUR_POLE_TYPES.include?(f)
             raise ArgumentError, 'Cutoff frequency must be given when creating a filter by type' if cutoff.nil?
-            raise ArgumentError, "Four-pole filters take resonance: 0..1, not quality: or gain:" if quality || gain
-            return lp4(cutoff, resonance: resonance || 0.0, mode: f == :four_pole ? :lp4 : f)
+            raise ArgumentError, "Four-pole filters take resonance: 0..1 or quality:, not gain:" if gain
+            return lp4(cutoff, resonance: resonance, quality: quality, mode: f == :four_pole ? :lp4 : f)
           end
           raise ArgumentError, "Only four-pole filters (#{FOUR_POLE_TYPES.join(', ')}) take resonance:" if resonance
 
@@ -102,26 +102,47 @@ module MB
         # classic 12 dB loss).  +self_oscillate: true+ lets the top of the
         # resonance range (above about 0.93) oscillate, with the drive's
         # saturation (+drive:+ 1 unless given) setting the level.  +drive:+
-        # (nil = linear) saturates the cascade input: unity gain for small
-        # signals, softly limited above about 1 / drive.  +mode:+ picks
-        # another tap mix: :lp2, :bp2, :bp4, :hp2, :hp4.
+        # (nil = linear) is the saturation level (unity gain for small
+        # signals, limited above about 1 / drive), and +drive_mode:+ where it
+        # acts: :input (default; the cascade input), :stages (every stage,
+        # OTA style), or :feedback (only the resonance feedback, MS-20
+        # style; +clip: :soft+ or :hard), the last two with drive 1 unless
+        # given.  +mode:+ picks another tap mix: :lp2, :bp2, :bp4, :hp2,
+        # :hp4.
+        #
+        # +resonance_curve: :db+ (default) makes the gain at the cutoff
+        # rise linearly in dB with +resonance+ (-12 dB to +33.8 dB; the peak
+        # about 4.5 dB per 0.1 above 0.2); :linear is the loop gain itself
+        # (round 1: +7.5 dB at 0.5).  +quality:+ (a number or node, e.g.
+        # Notes#quality) instead of +resonance:+ gives the gain at the
+        # cutoff of a 2-pole filter of that Q (see
+        # Filter::FourPole.quality_to_resonance).  In synth voices,
+        # Notes#reso follows CC 71 (resonance) like Notes#quality.
         #
         # Examples:
         #     play 110.hz.ramp.lp4(800, resonance: 0.6)
         #     play 55.hz.ramp.lp4(0.25.hz.lfo.at(100..4000), resonance: 0.9, drive: 2)
         #     # A synth voice (v from synth_script or midi.synth)
         #     v.hz.saw.lp4(v.cutoff(300, keytrack: 1), resonance: 0.5) * v.amp_env
+        #     # Resonance on CC 71, centered on 0.6
+        #     v.hz.saw.lp4(v.cutoff(300), resonance: v.reso(0.6)) * v.amp_env
+        #     # MS-20-style clipped resonance on the 2-pole tap
+        #     play 110.hz.ramp.lp4(0.2.hz.lfo.at(200..3000), resonance: 0.9, mode: :lp2, drive_mode: :feedback, drive: 2) * 0.3
         #     # Self-oscillating sine at the cutoff
         #     play 0.constant.lp4(440, resonance: 1, self_oscillate: true)
         def lp4(
-          cutoff, resonance: 0.0, mode: :lp4, drive: nil, self_oscillate: false, compensation: nil,
+          cutoff, resonance: nil, quality: nil, mode: :lp4, drive: nil, self_oscillate: false, compensation: nil,
           resonance_curve: :db, drive_mode: :input, clip: :soft
         )
+          raise ArgumentError, 'Give lp4 resonance: or quality:, not both' if resonance && quality
+
           f = MB::Sound::Filter::FourPole.new(
             mode: mode, drive: drive, self_oscillate: self_oscillate, compensation: compensation,
             resonance_curve: resonance_curve, drive_mode: drive_mode, clip: clip,
             sample_rate: sample_rate
           )
+          resonance = MB::Sound::GraphNode::FourPole.quality_resonance(quality, resonance_curve) if quality
+          resonance ||= 0.0
           MB::Sound::GraphNode::FourPole.new(self, f, cutoff: cutoff, resonance: resonance)
         end
         alias four_pole lp4

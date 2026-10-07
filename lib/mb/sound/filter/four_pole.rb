@@ -360,6 +360,24 @@ module MB
           (e - 1.0) / ((1.0 + 0.25 * e) * CURVE_K)
         end
 
+        # The resonance (0..1) that gives this filter the gain at the cutoff
+        # (relative to DC) of a 2-pole filter of quality +q+, which is q:
+        # log(4 q) / log(196) with the :db curve (q 0.25 or less gives 0,
+        # 0.707 gives 0.19, 4 gives 0.39, 10 gives 0.70, 49 or more gives
+        # 1), or the same loop gain with the :linear curve.  +q+ may be a
+        # number or an NArray.
+        def self.quality_to_resonance(q, curve: :db)
+          if q.is_a?(Numo::NArray)
+            r = (Numo::NMath.log(Numo::DFloat.cast(q).clip(0.25, nil) * 4) * (1.0 / Math.log(196))).clip(0.0, 1.0)
+            r = r.map { |v| resonance_curve(v) } if curve == :linear
+            return Numo::SFloat.cast(r)
+          end
+
+          q = q.to_f
+          r = q > 0.25 ? (Math.log(4 * q) / Math.log(196)).clamp(0.0, 1.0) : 0.0
+          curve == :linear ? resonance_curve(r) : r
+        end
+
         # The kernel's 2^y for y >= 0 (a Taylor series for the fraction).
         def self.exp2(y)
           n = y.floor
