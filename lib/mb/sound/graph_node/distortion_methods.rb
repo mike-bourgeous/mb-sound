@@ -56,6 +56,18 @@ module MB
         def aquantize(increment)
           MB::Sound::GraphNode::Quantize.new(upstream: self, increment: increment)
         end
+
+        # Samples this node at each rising edge of +trigger+ and holds the
+        # value until the next one (see GraphNode::SampleHold): quantizing
+        # in time, as #quantize does in level.  Without a trigger, this node
+        # is the trigger and the held values are random (+range+, default
+        # -1..1; +seed+), e.g. `8.hz.lfo.square.sample_hold` is a stepped
+        # random LFO at 8 steps per second.  Alias #sah.
+        def sample_hold(trigger = nil, range: -1.0..1.0, seed: nil)
+          return SampleHold.new(nil, self, range: range, seed: seed, sample_rate: sample_rate) if trigger.nil?
+          SampleHold.new(self, trigger, sample_rate: sample_rate)
+        end
+        alias sah sample_hold
       end
     end
   end
