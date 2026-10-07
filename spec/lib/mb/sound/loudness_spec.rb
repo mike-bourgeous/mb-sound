@@ -102,9 +102,10 @@ RSpec.describe(MB::Sound::Loudness, :aggregate_failures) do
 
     it 'case 9: alternating 1.34 s at -20 dBFS and 1.66 s at -30 dBFS gives a steady short-term -23.0' do
       r = MB::Sound.loudness(stereo([[-20, 1.34], [-30, 1.66]] * 5))
-      expect(r.short_term.length).to be > 100
-      expect(r.short_term.to_a.min).to be_within(0.1).of(-23)
-      expect(r.short_term.to_a.max).to be_within(0.1).of(-23)
+      expect(r.short_term.length).to eq(150)
+      full = r.short_term[29..].to_a # windows ending at 3 s and later
+      expect(full.min).to be_within(0.1).of(-23)
+      expect(full.max).to be_within(0.1).of(-23)
     end
 
     [0, 0.05, 0.123, 0.987].each do |offset|
@@ -141,6 +142,99 @@ RSpec.describe(MB::Sound::Loudness, :aggregate_failures) do
     end
   end
 
+  describe '.range (EBU Tech 3342 section 5)' do
+    def energies(lufs_values)
+      Numo::DFloat.cast(lufs_values.map { |l| MB::Sound::Loudness.energy(l) })
+    end
+
+    it 'takes the sorted values at round((n - 1) * p) without interpolation' do
+      lra, low, high = MB::Sound::Loudness.range(energies((-30..-21).to_a.shuffle(random: Random.new(1))))
+      expect(low).to be_within(1e-9).of(-29)  # round(9 * 0.10) = 1
+      expect(high).to be_within(1e-9).of(-21) # round(9 * 0.95) = round(8.55) = 9
+      expect(lra).to be_within(1e-9).of(8)
+
+      # Halves round up: round(10 * 0.95) = round(9.5) = 10
+      _, low, high = MB::Sound::Loudness.range(energies((-30..-20).to_a))
+      expect(low).to be_within(1e-9).of(-29)
+      expect(high).to be_within(1e-9).of(-20)
+    end
+
+    it 'gates at -70 LUFS and 20 LU below the power mean' do
+      lra, low, _ = MB::Sound::Loudness.range(energies([-80, -75] + [-20] * 20 + [-45]))
+      expect(low).to be_within(1e-9).of(-20)
+      expect(lra).to eq(0)
+    end
+
+    it 'counts 1.5 s of silence after the end (Tech 3342 file rule)' do
+      a = MB::Sound::Loudness::Analyzer.new(channels: 2).process(stereo([[-23, 10]]))
+      r = a.result
+      expect(r.range_high).to be_within(0.05).of(-23)
+      expect(r.range_low).to be < -23.3 # partial windows at both ends
+      expect(a.range).to eq(r.range)
+    end
+  end
+
+  describe 'targets' do
+    it 'has the verified broadcast and Spotify presets' do
+      t = MB::Sound::Loudness::TARGETS
+      expect([t[:ebu_r128].lufs, t[:ebu_r128].true_peak]).to eq([-23.0, -1.0])
+      expect([t[:atsc_a85].lufs, t[:atsc_a85].true_peak]).to eq([-24.0, -2.0])
+      expect([t[:spotify].lufs, t[:spotify_loud].lufs, t[:spotify_quiet].lufs]).to eq([-14.0, -11.0, -19.0])
+      expect(t.values_at(:ebu_r128, :atsc_a85, :spotify).map(&:verified)).to all(eq(true))
+      expect(t.values_at(:youtube, :apple_music, :amazon_music, :soundcloud).map(&:verified)).to all(eq(false))
+      t.each_value { |v| expect(v.source).to include('2026-10-07') }
+      expect(t[:youtube].to_s).to include('reported, unverified')
+    end
+
+    it 'finds targets by name, alias, String, or number' do
+      expect(MB::Sound::Loudness.target(:ebu).key).to eq(:ebu_r128)
+      expect(MB::Sound::Loudness.target('Spotify').lufs).to eq(-14)
+      expect(MB::Sound::Loudness.target('apple').key).to eq(:apple_music)
+      expect(MB::Sound::Loudness.target(-16).lufs).to eq(-16)
+      expect(MB::Sound::Loudness.target('-18.5').lufs).to eq(-18.5)
+      expect(MB::Sound::Loudness.target(-16).true_peak).to eq(-1)
+      expect { MB::Sound::Loudness.target(:tidal) }.to raise_error(ArgumentError, /Unknown loudness target/)
+    end
+  end
+
+  describe '.normalize_file' do
+    def write_tone(db, seconds: 3, name: 'n.flac')
+      path = tmp_path(name)
+      MB::Sound.write(path, stereo([[db, seconds]]).map { |c| Numo::SFloat.cast(c) }, sample_rate: 48000)
+      path
+    end
+
+    it 'applies gain in place to reach a target' do
+      path = write_tone(-20)
+      info = MB::Sound::Loudness.normalize_file(path, :ebu_r128)
+      expect(info[:gain]).to be_within(0.05).of(-3)
+      expect(MB::Sound.loudness(path).integrated).to be_within(0.05).of(-23)
+      expect(Dir.children(File.dirname(path))).to eq(['n.flac'])
+    end
+
+    it 'warns above the ceiling, or reduces the gain with peak: :reduce' do
+      # A sine's true peak equals its loudness (stereo), so -0.5 LUFS peaks
+      # at -0.5 dBTP, above the -1 dBTP ceiling of numeric targets
+      path = write_tone(-6)
+      out = tmp_path('out.flac')
+      expect { MB::Sound::Loudness.normalize_file(path, -0.5, output: out) }.to output(/above -0.5 LUFS's -1.0 dBTP/).to_stderr
+      expect(MB::Sound.loudness(out).integrated).to be_within(0.05).of(-0.5)
+
+      info = nil
+      expect { info = MB::Sound::Loudness.normalize_file(path, -0.5, output: out, peak: :reduce) }.to output(/gain reduced/).to_stderr
+      expect(info[:true_peak]).to be_within(0.01).of(-1)
+      expect(MB::Sound.loudness(out).true_peak).to be_within(0.05).of(-1)
+    end
+
+    it 'leaves silent files alone' do
+      path = tmp_path('silent.flac')
+      MB::Sound.write(path, [Numo::SFloat.zeros(4800)] * 2, sample_rate: 48000)
+      info = nil
+      expect { info = MB::Sound::Loudness.normalize_file(path, -14) }.to output(/silent/).to_stderr
+      expect(info[:gain]).to be_nil
+    end
+  end
+
   describe 'gating' do
     # The three blocks straddling the level change pass both gates, so the
     # result is about 0.06 LU under -23.
@@ -166,15 +260,35 @@ RSpec.describe(MB::Sound::Loudness, :aggregate_failures) do
       expect(r.integrated).to be_within(0.05).of(expected)
     end
 
-    it 'returns -Infinity for silence and for audio shorter than one 400 ms block' do
+    it 'returns -Infinity for silence' do
       r = MB::Sound.loudness([Numo::DFloat.zeros(48000)] * 2)
       expect(r.integrated).to eq(-Float::INFINITY)
-      expect(r.range).to eq(0)
-
-      r = MB::Sound.loudness(stereo([[-23, 0.39]]))
-      expect(r.integrated).to eq(-Float::INFINITY)
       expect(r.momentary_max).to eq(-Float::INFINITY)
+      expect(r.range).to eq(0)
+    end
+
+    # Padded with silence to the window, like a meter reset at the start
+    it 'measures audio shorter than the windows as padded with silence' do
+      r = MB::Sound.loudness(stereo([[-23, 0.2]]))
+      expect(r.integrated).to be_within(0.05).of(-26) # 0.2 s of 0.4 s
+      expect(r.momentary_max).to be_within(0.05).of(-26)
+      expect(r.short_term_max).to be_within(0.05).of(-23 + 10 * Math.log10(0.2 / 3))
+      expect(r.momentary.to_a.map { |v| v.round(1) }).to eq([-29.0, -26.0])
       expect(r.true_peak).to be_within(0.05).of(-23)
+
+      # 25 ms, shorter than one 100 ms step, still has maxima
+      r = MB::Sound.loudness(stereo([[-23, 0.025]]))
+      expect(r.momentary).to be_empty
+      expect(r.momentary_max).to be_within(0.1).of(-23 + 10 * Math.log10(0.025 / 0.4))
+      expect(r.integrated).to be_within(0.1).of(-23 + 10 * Math.log10(0.025 / 0.4))
+
+      # Very quiet short audio still falls below the absolute gate
+      expect(MB::Sound.loudness(stereo([[-66, 0.1]])).integrated).to eq(-Float::INFINITY) # -72 padded
+    end
+
+    it 'gates complete blocks only once there is one (no padding for integrated loudness)' do
+      r = MB::Sound.loudness(stereo([[-23, 0.4]]))
+      expect(r.integrated).to be_within(0.01).of(-23)
     end
   end
 
@@ -248,19 +362,50 @@ RSpec.describe(MB::Sound::Loudness, :aggregate_failures) do
 
     it 'matches the Ruby mirror exactly (C kernel)' do
       x = Numo::DFloat.new(10011).rand(-1, 1)
-      [0, 1, 7, 1000, 10000].each do |n|
-        expect(MB::Sound::FastLoudness.true_peak(x, n)).to eq(MB::Sound::Loudness::TruePeak.oversampled_max_ruby(x, n))
-      end
+      MB::Sound::Loudness::TruePeak::MATRICES.each do |name, phases|
+        [0, 1, 7, 1000, 9980].each do |n|
+          expect(MB::Sound::FastLoudness.true_peak(x, n, phases)).to eq(MB::Sound::Loudness::TruePeak.oversampled_max_ruby(x, n, phases)), "#{name} #{n}"
+        end
 
-      # Non-contiguous views are copied
-      v = x[(0..)%2]
-      expect(MB::Sound::FastLoudness.true_peak(v, 100)).to eq(MB::Sound::Loudness::TruePeak.oversampled_max_ruby(v.dup, 100))
+        # Non-contiguous views are copied
+        v = x[(0..)%2]
+        expect(MB::Sound::FastLoudness.true_peak(v, 100, phases)).to eq(MB::Sound::Loudness::TruePeak.oversampled_max_ruby(v.dup, 100, phases))
+      end
     end
 
     it 'rejects bad arguments in C' do
-      expect { MB::Sound::FastLoudness.true_peak(Numo::SFloat.zeros(20), 5) }.to raise_error(ArgumentError, /DFloat/)
-      expect { MB::Sound::FastLoudness.true_peak(Numo::DFloat.zeros(20), 10) }.to raise_error(ArgumentError, /Need/)
-      expect { MB::Sound::FastLoudness.true_peak(Numo::DFloat.zeros(20), -1) }.to raise_error(ArgumentError, /negative/)
+      ph = MB::Sound::Loudness::TruePeak::MATRICES[:annex2]
+      expect { MB::Sound::FastLoudness.true_peak(Numo::SFloat.zeros(20), 5, ph) }.to raise_error(ArgumentError, /DFloat/)
+      expect { MB::Sound::FastLoudness.true_peak(Numo::DFloat.zeros(20), 10, ph) }.to raise_error(ArgumentError, /Need/)
+      expect { MB::Sound::FastLoudness.true_peak(Numo::DFloat.zeros(20), -1, ph) }.to raise_error(ArgumentError, /negative/)
+      expect { MB::Sound::FastLoudness.true_peak(Numo::DFloat.zeros(20), 1, Numo::DFloat.zeros(4)) }.to raise_error(ArgumentError, /2 dimensions/)
+      expect { MB::Sound::FastLoudness.true_peak(Numo::DFloat.zeros(20), 1, Numo::DFloat.zeros(0, 3)) }.to raise_error(ArgumentError, /at least one/)
+    end
+
+    # The 32-tap Kaiser option tracks steady sines more closely
+    [997, 5000, 12000, 15000, 19000].each do |f|
+      it "reads a faded full-scale #{f} Hz sine within 0.2 dB with true_peak: :accurate" do
+        x = segments([[0, 1]], freq: f)
+        x[0...480] *= Numo::DFloat.new(480).seq / 480
+        x[-480..] *= (Numo::DFloat.new(480).seq / 480).reverse
+        tp = MB::Sound::Loudness::TruePeak.new(filter: :accurate).process(x)
+        expect(tp.oversampled_peak.to_db).to be_between(-0.2, 0.05)
+      end
+    end
+
+    it 'chooses filters by name' do
+      x = segments([[-6, 1]])
+      expect(MB::Sound.loudness([x, x], true_peak: :accurate).true_peak).to be_within(0.05).of(-6)
+      expect(MB::Sound.loudness([x, x], true_peak: :annex2).true_peak).to be_within(0.05).of(-6)
+      expect(MB::Sound.loudness([x, x], true_peak: false).true_peak).to be_nil
+      expect { MB::Sound::Loudness::TruePeak.new(filter: :best) }.to raise_error(ArgumentError, /annex2/)
+    end
+
+    it 'designs unity-gain Kaiser phases' do
+      phases = MB::Sound::Loudness::TruePeak::FILTERS[:accurate]
+      expect(phases.length).to eq(4)
+      expect(phases.map(&:length).uniq).to eq([32])
+      phases.each { |ph| expect(ph.sum).to be_within(1e-12).of(1) }
     end
 
     it 'gives the same result in any buffer sizes' do
@@ -347,7 +492,7 @@ RSpec.describe(MB::Sound::Loudness, :aggregate_failures) do
 
       h = result.to_h(series: true)
       expect(h[:momentary]).to be_a(Array)
-      expect(h[:momentary].length).to eq(47)
+      expect(h[:momentary].length).to eq(50)
 
       silent = MB::Sound.loudness([Numo::DFloat.zeros(100)])
       expect(silent.to_h[:integrated]).to eq(nil)

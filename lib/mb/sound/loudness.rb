@@ -51,6 +51,10 @@ module MB
       # Short-term window length in segments (3 s).
       SHORT_TERM_SEGMENTS = 300
 
+      # Silence after the end for the loudness range, in segments (1.5 s,
+      # EBU Tech 3342's file-based rule).
+      LRA_TAIL_SEGMENTS = 150
+
       # Channel weight of surround channels (BS.1770: 1.41, +1.5 dB).
       SURROUND_WEIGHT = 1.41
 
@@ -96,6 +100,170 @@ module MB
         )
 
         [shelf, highpass]
+      end
+
+      # A loudness target for normalization and reports: integrated
+      # loudness in LUFS (LKFS), the maximum true peak in dBTP, the
+      # tolerance in LU (nil if none is published), notes, where the numbers
+      # come from, and whether they were checked against the publisher's
+      # own document (+verified+ false means "reported, unverified").
+      Target = Data.define(:key, :name, :lufs, :true_peak, :tolerance, :notes, :source, :verified) do
+        def to_s
+          tp = true_peak ? format(', %.1f dBTP', true_peak) : ''
+          "#{name} (#{format('%.1f', lufs)} LUFS#{tp}#{verified ? '' : '; reported, unverified'})"
+        end
+      end
+
+      # Loudness targets by name (see Target and Loudness.target).  Checked
+      # 2026-10-07; streaming services change their practices, so re-check
+      # the sources before relying on them.
+      TARGETS = {
+        ebu_r128: Target.new(
+          key: :ebu_r128, name: 'EBU R 128', lufs: -23.0, true_peak: -1.0, tolerance: 0.5,
+          notes: 'Broadcast programme loudness; +/-1.0 LU where the target is not practically achievable (e.g. live).  True peak is the production maximum.',
+          source: 'EBU R 128-2023 (V5, November 2023), recommends h) and m); https://tech.ebu.ch/docs/r/r128.pdf, read 2026-10-07',
+          verified: true
+        ),
+        atsc_a85: Target.new(
+          key: :atsc_a85, name: 'ATSC A/85', lufs: -24.0, true_peak: -2.0, tolerance: 2.0,
+          notes: 'US television (LKFS = LUFS), content delivered without metadata; true peak tolerance +/-0.5 dB.',
+          source: 'ATSC A/85:2026-07 (8 July 2026), section 6; https://www.atsc.org/wp-content/uploads/2026/07/A85-2026-07.pdf, read 2026-10-07',
+          verified: true
+        ),
+        spotify: Target.new(
+          key: :spotify, name: 'Spotify', lufs: -14.0, true_peak: -1.0, tolerance: nil,
+          notes: 'Normal mode.  Loud mode -11 LUFS, quiet mode -19 LUFS (see :spotify_loud, :spotify_quiet); masters louder than -14 LUFS should keep true peaks below -2 dBTP.  Measured per ITU-R BS.1770.',
+          source: 'Spotify for Artists, "Loudness normalization", https://support.spotify.com/us/artists/article/loudness-normalization/, read 2026-10-07',
+          verified: true
+        ),
+        spotify_loud: Target.new(
+          key: :spotify_loud, name: 'Spotify (loud)', lufs: -11.0, true_peak: -2.0, tolerance: nil,
+          notes: 'Spotify loud mode (premium listeners; Spotify applies a limiter).  -2 dBTP per Spotify\'s advice for masters louder than -14 LUFS.',
+          source: 'Spotify for Artists, "Loudness normalization", https://support.spotify.com/us/artists/article/loudness-normalization/, read 2026-10-07',
+          verified: true
+        ),
+        spotify_quiet: Target.new(
+          key: :spotify_quiet, name: 'Spotify (quiet)', lufs: -19.0, true_peak: -1.0, tolerance: nil,
+          notes: 'Spotify quiet mode.',
+          source: 'Spotify for Artists, "Loudness normalization", https://support.spotify.com/us/artists/article/loudness-normalization/, read 2026-10-07',
+          verified: true
+        ),
+        apple_music: Target.new(
+          key: :apple_music, name: 'Apple Music', lufs: -16.0, true_peak: -1.0, tolerance: nil,
+          notes: 'Sound Check.  The -16 LUFS level is reported, unverified (Apple publishes no number); the -1 dBTP ceiling is Apple\'s advice to "leave at least 1 dB of headroom" for 4x oversampling.',
+          source: 'Apple Digital Masters technology brief (April 2021), https://www.apple.com/apple-music/apple-digital-masters/docs/apple-digital-masters.pdf, read 2026-10-07 (headroom only); -16 LUFS from third-party guides',
+          verified: false
+        ),
+        youtube: Target.new(
+          key: :youtube, name: 'YouTube', lufs: -14.0, true_peak: -1.0, tolerance: nil,
+          notes: 'Reported, unverified: YouTube publishes no target; third-party measurements report about -14 LUFS, turned down only.',
+          source: 'No official document found (2026-10-07); third-party mastering guides',
+          verified: false
+        ),
+        amazon_music: Target.new(
+          key: :amazon_music, name: 'Amazon Music', lufs: -14.0, true_peak: -2.0, tolerance: nil,
+          notes: 'Reported, unverified: about -14 LUFS (turned down only) with -2 dBTP.',
+          source: 'No official document found (2026-10-07); third-party mastering guides',
+          verified: false
+        ),
+        soundcloud: Target.new(
+          key: :soundcloud, name: 'SoundCloud', lufs: -14.0, true_peak: -1.0, tolerance: nil,
+          notes: 'Reported, unverified: -14 LUFS up and down, below -1 dBTP (-2 dBTP for masters louder than -14 LUFS), attributed to SoundCloud\'s help center.',
+          source: 'help.soundcloud.com article 360053660014 (returned HTTP 403 on 2026-10-07; numbers from search snippets)',
+          verified: false
+        ),
+      }.freeze
+
+      # Other names for TARGETS keys.
+      TARGET_ALIASES = {
+        ebu: :ebu_r128, r128: :ebu_r128, atsc: :atsc_a85, a85: :atsc_a85,
+        apple: :apple_music, amazon: :amazon_music,
+      }.freeze
+
+      # True peak ceiling for numeric targets (dBTP), as EBU R 128.
+      DEFAULT_TRUE_PEAK = -1.0
+
+      # Returns a Target for a TARGETS name or alias (Symbol or String), a
+      # number of LUFS (with a DEFAULT_TRUE_PEAK ceiling), a numeric String,
+      # or a Target.
+      def self.target(spec)
+        case spec
+        when Target
+          spec
+        when Numeric
+          Target.new(key: nil, name: format('%g LUFS', spec), lufs: spec.to_f, true_peak: DEFAULT_TRUE_PEAK, tolerance: nil, notes: 'Custom target', source: nil, verified: true)
+        when String, Symbol
+          str = spec.to_s.strip
+          return target(Float(str)) if str.match?(/\A[-+]?\d/)
+          key = str.downcase.tr('-', '_').to_sym
+          key = TARGET_ALIASES.fetch(key, key)
+          TARGETS.fetch(key) {
+            raise ArgumentError, "Unknown loudness target #{spec.inspect} (use a number of LUFS or one of #{(TARGETS.keys + TARGET_ALIASES.keys).join(', ')})"
+          }
+        else
+          raise ArgumentError, "Loudness targets are numbers of LUFS or names (got #{spec.inspect})"
+        end
+      end
+
+      # Applies gain to the audio file at +path+ so its integrated loudness
+      # reaches +target+ (see .target), writing +output+ (default: +path+
+      # itself, replaced through a temporary file in the same directory).
+      # The file is measured and rewritten at its own sample rate (FLAC
+      # comes back 24-bit).  Only gain is applied, never limiting.
+      #
+      # +:peak+ chooses what happens when the gain would put the true peak
+      # above the target's ceiling: :warn (default) keeps the loudness target
+      # and warns, :reduce lowers the gain to the ceiling (missing the
+      # loudness target, with a warning), :ignore says nothing.
+      #
+      # Returns a Hash with :gain (dB), :before (the Result before),
+      # :lufs and :true_peak (after), and :target.  Silent files are left
+      # alone (gain nil).
+      def self.normalize_file(path, target, output: nil, peak: :warn, true_peak: true, overwrite: true)
+        raise ArgumentError, "peak: must be :warn, :reduce, or :ignore (got #{peak.inspect})" unless [:warn, :reduce, :ignore].include?(peak)
+
+        target = self.target(target)
+        output ||= path
+        before = MB::Sound.loudness(path, true_peak: true_peak)
+        gain = before.gain_to(target.lufs)
+        info = { target: target, before: before, gain: gain, lufs: before.integrated, true_peak: before.true_peak }
+        if gain.nil?
+          warn "#{path}: silent, not normalized" unless peak == :ignore
+          return info
+        end
+
+        ceiling = target.true_peak
+        if ceiling && before.true_peak && before.true_peak + gain > ceiling
+          if peak == :reduce
+            reduced = ceiling - before.true_peak
+            warn format('%s: gain reduced from %+.1f to %+.1f dB to keep the true peak at %.1f dBTP (%.1f LUFS instead of %.1f)',
+              path, gain, reduced, ceiling, before.integrated + reduced, target.lufs)
+            gain = reduced
+          elsif peak == :warn
+            warn format('%s: true peak %.1f dBTP after %+.1f dB is above %s\'s %.1f dBTP%s; no limiter is applied',
+              path, before.true_peak + gain, gain, target.name, ceiling, before.true_peak + gain > 0 ? ' (clips in integer formats)' : '')
+          end
+        end
+
+        if !overwrite && File.exist?(output) && File.expand_path(output) != File.expand_path(path)
+          raise ArgumentError, "#{output} exists"
+        end
+
+        input = FFMPEGInput.new(path)
+        rate = input.sample_rate
+        input.close
+        factor = 10.0 ** (gain / 20.0)
+        data = MB::Sound.read(path, sample_rate: nil).map { |c| c * factor }
+
+        tmp = File.join(File.dirname(output), ".#{File.basename(output, '.*')}.normalizing.#{Process.pid}#{File.extname(output)}")
+        begin
+          MB::Sound.write(tmp, data, sample_rate: rate, overwrite: true)
+          File.rename(tmp, output)
+        ensure
+          File.unlink(tmp) if File.exist?(tmp)
+        end
+
+        info.merge(gain: gain, lufs: before.integrated + gain, true_peak: before.true_peak && before.true_peak + gain)
       end
 
       # Returns the K-weighting gain in dB at +frequency+ Hz for
@@ -151,28 +319,52 @@ module MB
 
       # Returns the loudness range in LU of short-term +energies+ (EBU Tech
       # 3342), with the low and high percentiles: [range, low, high].
+      #
+      # This follows the MATLAB definition in EBU Tech 3342 (November 2023,
+      # section 5) literally: short-term loudness values (LUFS) at or above
+      # -70 LUFS (>=) are kept; their power mean minus 20 LU is the relative
+      # threshold, again inclusive (>=); the kept values are sorted and the
+      # percentiles are the values at 1-based positions round((n - 1) *
+      # 10 / 100 + 1) and round((n - 1) * 95 / 100 + 1), with MATLAB's
+      # round (halves away from zero, as Ruby's Float#round).  No
+      # interpolation.  (BS.1770's integrated gating uses > instead; see
+      # .gate.)
       def self.range(energies)
-        _, _, gated = gate(energies, relative: LRA_RELATIVE_GATE)
-        return [0.0, -Float::INFINITY, -Float::INFINITY] if gated.empty?
+        none = [0.0, -Float::INFINITY, -Float::INFINITY]
+        return none if energies.empty?
 
-        sorted = gated.sort.to_a.map { |e| lufs(e) }
+        stl = energies.to_a.map { |e| lufs(e) }
+        abs_gated = stl.select { |l| l >= ABSOLUTE_GATE }
+        return none if abs_gated.empty?
+
+        integrated = 10.0 * Math.log10(abs_gated.sum { |l| 10.0 ** (l / 10.0) } / abs_gated.length)
+        sorted = abs_gated.select { |l| l >= integrated + LRA_RELATIVE_GATE }.sort
+        return none if sorted.empty?
+
         low, high = LRA_PERCENTILES.map { |p| percentile(sorted, p) }
         [high - low, low, high]
       end
 
-      # Linearly interpolated percentile +p+ (0..1) of a sorted Array.
+      # Percentile +p+ (0..1) of a sorted Array by EBU Tech 3342's rule: the
+      # element at 0-based index round((n - 1) * p), rounding halves up.
       def self.percentile(sorted, p)
-        pos = (sorted.length - 1) * p
-        i = pos.floor
-        return sorted[i] if i + 1 >= sorted.length
-        sorted[i] + (sorted[i + 1] - sorted[i]) * (pos - i)
+        sorted[((sorted.length - 1) * (p * 100).round / 100.0).round]
       end
 
-      # Streaming true-peak meter for one channel: 4x oversampling with the
-      # 48-tap polyphase FIR of BS.1770-4 Annex 2, then the absolute
-      # maximum.  The same filter is used at every sample rate (its passband
-      # scales with the rate).  Floats need none of the annex's 12.04 dB
-      # headroom attenuation.
+      # Streaming true-peak meter for one channel: oversampling with a
+      # polyphase interpolation filter, then the absolute maximum.  The same
+      # filter is used at every sample rate (its passband scales with the
+      # rate).  Floats need none of BS.1770's 12.04 dB headroom attenuation.
+      #
+      # Filters (+filter:+, see FILTERS):
+      # - :annex2 (default): the 4x, 12-taps-per-phase example filter of
+      #   BS.1770-4 Annex 2.  Reads steady sines within about -0.33..+0.17 dB
+      #   from 5 to 21 kHz at 48 kHz (EBU Tech 3341 allows +0.2/-0.4 dB).
+      # - :accurate: 4x with 32 taps per phase (Kaiser-windowed sinc, beta 9,
+      #   cutoff 0.95 of Nyquist, each phase normalized to unity DC gain).
+      #   Within about 0.05 dB to 19 kHz and 0.2 dB at 20 kHz (plus the 4x
+      #   grid's own -0.17 dB worst case near fs/4), closer to ffmpeg's
+      #   ebur128 on bright material; about 2.5x the cost.
       class TruePeak
         # The four 12-tap phases of BS.1770-4 Annex 2's interpolation filter.
         PHASES = [
@@ -186,8 +378,48 @@ module MB
            0.1373291015625, -0.0594482421875, 0.0332031250000, -0.0196533203125, 0.0109863281250, 0.0017089843750],
         ].map(&:freeze).freeze
 
-        TAPS = PHASES[0].length
-        HISTORY = TAPS - 1
+        # Zeroth-order modified Bessel function of the first kind (for the
+        # Kaiser window).
+        def self.bessel_i0(x)
+          x = x.to_f
+          sum = 1.0
+          term = 1.0
+          (1..50).each do |k|
+            term *= (x / (2 * k)) ** 2
+            sum += term
+          end
+          sum
+        end
+
+        # Designs a 4x polyphase Kaiser-windowed sinc interpolator with
+        # +taps+ taps per phase, each phase scaled to unity DC gain.
+        def self.kaiser_phases(taps: 32, beta: 9.0, cutoff: 0.95)
+          n = taps * 4
+          c = (n - 1) / 2.0
+          h = Array.new(n) { |i|
+            x = (i - c) / 4.0
+            s = x == 0 ? 1.0 : Math.sin(Math::PI * x * cutoff) / (Math::PI * x * cutoff)
+            w = bessel_i0(beta * Math.sqrt([1 - ((i - c) / c) ** 2, 0].max)) / bessel_i0(beta)
+            s * w
+          }
+          Array.new(4) { |p|
+            phase = Array.new(taps) { |k| h[k * 4 + p] }
+            sum = phase.sum
+            phase.map { |v| v / sum }.freeze
+          }.freeze
+        end
+
+        # Interpolation filters by name (Arrays of phases of taps).
+        FILTERS = {
+          annex2: PHASES,
+          accurate: kaiser_phases,
+        }.freeze
+
+        # Coefficient matrices for the C kernel.
+        MATRICES = FILTERS.transform_values { |ph| Numo::DFloat.cast(ph).freeze }.freeze
+
+        # The filter name.
+        attr_reader :filter
 
         # The largest oversampled absolute value so far (linear), not
         # counting the filter's tail after the last input.
@@ -196,8 +428,13 @@ module MB
         # The largest absolute input sample so far (linear).
         attr_reader :sample_peak
 
-        def initialize
-          @history = Numo::DFloat.zeros(HISTORY)
+        def initialize(filter: :annex2)
+          raise ArgumentError, "Unknown true-peak filter #{filter.inspect} (use #{FILTERS.keys.map(&:inspect).join(' or ')})" unless FILTERS.include?(filter)
+
+          @filter = filter
+          @phases = MATRICES[filter]
+          @history_length = FILTERS[filter][0].length - 1
+          @history = Numo::DFloat.zeros(@history_length)
           @oversampled_peak = 0.0
           @sample_peak = 0.0
         end
@@ -210,8 +447,8 @@ module MB
 
           @sample_peak = [@sample_peak, x.abs.max].max
           ext = @history.concatenate(x)
-          @oversampled_peak = [@oversampled_peak, Loudness::TruePeak.oversampled_max(ext, x.length)].max
-          @history = ext[-HISTORY..].dup
+          @oversampled_peak = [@oversampled_peak, Loudness::TruePeak.oversampled_max(ext, x.length, @phases)].max
+          @history = ext[-@history_length..].dup
           self
         end
 
@@ -219,29 +456,31 @@ module MB
         # (including the filter's tail after the last input, as if silence
         # followed) and the sample peak, as libebur128 reports it.
         def peak
-          tail = @history.concatenate(Numo::DFloat.zeros(HISTORY))
-          [@oversampled_peak, @sample_peak, Loudness::TruePeak.oversampled_max(tail, HISTORY)].max
+          tail = @history.concatenate(Numo::DFloat.zeros(@history_length))
+          [@oversampled_peak, @sample_peak, Loudness::TruePeak.oversampled_max(tail, @history_length, @phases)].max
         end
 
-        # Largest absolute value of the 4x oversampled signal for +n+ samples,
-        # given +ext+ (a contiguous Numo::DFloat) with HISTORY earlier
-        # samples before them.  Runs in C (MB::Sound::FastLoudness), about
-        # 25x faster than the Ruby mirror.
-        def self.oversampled_max(ext, n)
-          MB::Sound::FastLoudness.true_peak(ext, n)
+        # Largest absolute value of the oversampled signal for +n+ samples,
+        # given +ext+ (a contiguous Numo::DFloat) with (taps - 1) earlier
+        # samples before them and +phases+ (a [phases, taps] Numo::DFloat;
+        # default Annex 2).  Runs in C (MB::Sound::FastLoudness), about 25x
+        # faster than the Ruby mirror.
+        def self.oversampled_max(ext, n, phases = MATRICES[:annex2])
+          MB::Sound::FastLoudness.true_peak(ext, n, phases)
         end
 
         # Exact Ruby mirror of FastLoudness.true_peak (specs compare them):
         # each phase is y[i] = sum(h[k] * x[i - k]), summed in order of k.
-        def self.oversampled_max_ruby(ext, n)
+        def self.oversampled_max_ruby(ext, n, phases = MATRICES[:annex2])
           max = 0.0
           return max if n == 0
 
+          history = phases.shape[1] - 1
           y = Numo::DFloat.zeros(n)
-          PHASES.each do |h|
+          phases.to_a.each do |h|
             y.fill(0)
             h.each_with_index do |c, k|
-              y.inplace + ext[(HISTORY - k)...(HISTORY - k + n)] * c
+              y.inplace + ext[(history - k)...(history - k + n)] * c
             end
             m = y.abs.max
             max = m if m > max
@@ -262,8 +501,10 @@ module MB
         # +:channels+ - the channel count.
         # +:sample_rate+ - the sample rate in Hz.
         # +:weights+ - channel weights (default: Loudness.default_weights).
-        # +:true_peak+ - false to skip true-peak measurement (it is about
-        #                half the analysis time).
+        # +:true_peak+ - the true-peak filter (:annex2, the default for true,
+        #                or :accurate; see TruePeak), or false to skip
+        #                true-peak measurement (about half the analysis
+        #                time with :annex2).
         def initialize(channels:, sample_rate: 48000, weights: nil, true_peak: true)
           raise ArgumentError, "Channel count must be positive (got #{channels.inspect})" unless channels.is_a?(Integer) && channels > 0
           raise ArgumentError, "Sample rate must be positive (got #{sample_rate.inspect})" unless sample_rate.is_a?(Numeric) && sample_rate > 0
@@ -274,7 +515,8 @@ module MB
           raise ArgumentError, "Got #{@weights.length} weights for #{channels} channels" unless @weights.length == channels
 
           @filters = Array.new(channels) { Loudness.k_weighting(@sample_rate) }
-          @true_peaks = true_peak ? Array.new(channels) { TruePeak.new } : nil
+          filter = true_peak == true ? :annex2 : true_peak
+          @true_peaks = filter ? Array.new(channels) { TruePeak.new(filter: filter) } : nil
 
           @samples = 0
           @segment_sums = []
@@ -334,15 +576,16 @@ module MB
         end
         alias s short_term
 
-        # Gated integrated loudness (LUFS) so far.
+        # Gated integrated loudness (LUFS) so far (see #result).
         def integrated
-          Loudness.gate(block_energies(MOMENTARY_SEGMENTS, STEP_SEGMENTS))[0]
+          integrated_gate[0]
         end
         alias lufs integrated
 
-        # Loudness range (LU) so far.
+        # Loudness range (LU) so far, as if followed by 1.5 s of silence
+        # (see #result).
         def range
-          Loudness.range(block_energies(SHORT_TERM_SEGMENTS, STEP_SEGMENTS))[0]
+          Loudness.range(lra_energies)[0]
         end
         alias lra range
 
@@ -353,22 +596,33 @@ module MB
         end
 
         # Returns a Result with every measurement.
+        #
+        # Windows before the start are padded with silence, as a meter reset
+        # at the start sees them (and as ffmpeg's ebur128 does), so every
+        # measurement has a value however short the audio is:
+        # - momentary and short-term series: one value every 100 ms from
+        #   0.1 s, each over the 400 ms or 3 s ending there;
+        # - maxima: over windows ending every 10 ms (and at the last sample),
+        #   so bursts between 100 ms steps count fully;
+        # - integrated: BS.1770's gating over complete 400 ms blocks every
+        #   100 ms from the start; audio shorter than one block is measured
+        #   as one block padded with silence to 400 ms (then gated at -70);
+        # - range: EBU Tech 3342 over short-term values every 100 ms from
+        #   0.1 s through 1.5 s of silence after the end (Tech 3342: "For
+        #   file-based measurements, the signal should be followed by at
+        #   least 1.5 s of silence").
         def result
-          mom = block_energies(MOMENTARY_SEGMENTS, STEP_SEGMENTS)
-          st = block_energies(SHORT_TERM_SEGMENTS, STEP_SEGMENTS)
-          integrated, threshold, _ = Loudness.gate(mom)
-          lra, low, high = Loudness.range(st)
+          integrated, threshold, _ = integrated_gate
+          lra, low, high = Loudness.range(lra_energies)
 
-          # Maxima from windows every 10 ms, so bursts between 100 ms steps
-          # count fully.
-          mom_max = block_energies(MOMENTARY_SEGMENTS, 1)
-          st_max = block_energies(SHORT_TERM_SEGMENTS, 1)
+          mom_max = windows(MOMENTARY_SEGMENTS, 1, partial: true)
+          st_max = windows(SHORT_TERM_SEGMENTS, 1, partial: true)
 
           Result.new(
             integrated: integrated,
             relative_threshold: threshold,
-            momentary: to_lufs(mom),
-            short_term: to_lufs(st),
+            momentary: to_lufs(windows(MOMENTARY_SEGMENTS, STEP_SEGMENTS)),
+            short_term: to_lufs(windows(SHORT_TERM_SEGMENTS, STEP_SEGMENTS)),
             momentary_max: mom_max.empty? ? -Float::INFINITY : Loudness.lufs(mom_max.max),
             short_term_max: st_max.empty? ? -Float::INFINITY : Loudness.lufs(st_max.max),
             range: lra,
@@ -417,17 +671,48 @@ module MB
           @segment_sums.last(segments).sum / (segments * @sample_rate * SEGMENT)
         end
 
-        # Mean squares of every complete window of +segments+ segments,
-        # starting every +hop+ segments from the start.
-        def block_energies(segments, hop)
-          return Numo::DFloat[] if @segment_sums.length < segments
+        # BS.1770 gating of complete 400 ms blocks every 100 ms (no padding),
+        # or of one block padded with silence for audio shorter than 400 ms.
+        # Returns [loudness, relative threshold, gated energies].
+        def integrated_gate
+          blocks = windows(MOMENTARY_SEGMENTS, STEP_SEGMENTS, lead: false)
+          if blocks.empty? && @samples > 0
+            blocks = Numo::DFloat[(@segment_sums.sum + @segment_sum) / (@sample_rate * SEGMENT * MOMENTARY_SEGMENTS)]
+          end
+          Loudness.gate(blocks)
+        end
 
-          cs = Numo::DFloat.zeros(@segment_sums.length + 1)
-          cs[1..] = Numo::DFloat.cast(@segment_sums).cumsum
-          cl = Numo::DFloat.zeros(@segment_lengths.length + 1)
-          cl[1..] = Numo::DFloat.cast(@segment_lengths).cumsum
+        # Short-term energies for the loudness range (see #result).
+        def lra_energies
+          windows(SHORT_TERM_SEGMENTS, STEP_SEGMENTS, partial: true, trail: LRA_TAIL_SEGMENTS)
+        end
 
-          starts = Numo::Int64.new((@segment_sums.length - segments) / hop + 1).seq * hop
+        # Mean squares of windows of +segments+ segments starting every
+        # +hop+ segments.  With +lead+, silence before the start fills the
+        # first windows, so they end every +hop+ segments from the start.
+        # +partial+ includes the incomplete last segment, and +trail+ adds
+        # that many segments of silence after the end.
+        def windows(segments, hop, lead: true, partial: false, trail: 0)
+          sums = @segment_sums
+          lengths = @segment_lengths
+          if partial && @samples > boundary(@segment_sums.length)
+            sums = sums + [@segment_sum]
+            lengths = lengths + [@samples - boundary(@segment_sums.length)]
+          end
+          return Numo::DFloat[] if sums.empty?
+
+          nominal = @sample_rate * SEGMENT
+          pad = lead ? segments - hop : 0
+          sums = [0.0] * pad + sums + [0.0] * trail
+          lengths = [nominal] * pad + lengths + [nominal] * trail
+          return Numo::DFloat[] if sums.length < segments
+
+          cs = Numo::DFloat.zeros(sums.length + 1)
+          cs[1..] = Numo::DFloat.cast(sums).cumsum
+          cl = Numo::DFloat.zeros(lengths.length + 1)
+          cl[1..] = Numo::DFloat.cast(lengths).cumsum
+
+          starts = Numo::Int64.new((sums.length - segments) / hop + 1).seq * hop
           ends = starts + segments
           (cs[ends] - cs[starts]) / (cl[ends] - cl[starts])
         end
@@ -439,13 +724,13 @@ module MB
         end
       end
 
-      # Every measurement of one Analyzer (see MB::Sound.loudness).  Loudness
-      # values are LUFS (-Infinity for silence or audio shorter than the
-      # window), the range is in LU, peaks are dBTP/dBFS.
+      # Every measurement of one Analyzer (see MB::Sound.loudness and
+      # Analyzer#result).  Loudness values are LUFS (-Infinity for silence),
+      # the range is in LU, peaks are dBTP/dBFS.
       #
       # +momentary+ and +short_term+ are Numo::DFloat series with one value
-      # every 100 ms, the first at 400 ms or 3 s (each value covers the
-      # window ending there).
+      # every 100 ms; value i covers the 400 ms or 3 s window ending at
+      # (i + 1) * 0.1 s, with silence before the start.
       Result = Data.define(
         :integrated, :relative_threshold,
         :momentary, :short_term, :momentary_max, :short_term_max,

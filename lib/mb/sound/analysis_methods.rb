@@ -94,8 +94,16 @@ module MB
       # rate, so +:sample_rate+ is ignored), an Array of channels (Numo
       # arrays or Arrays), or one Numo array (mono).  Channel weights default
       # by channel count in ffmpeg/SMPTE order (Loudness.default_weights);
-      # pass +:weights+ for other layouts.  +:true_peak+ false skips the
-      # true peak (about half the time).
+      # pass +:weights+ for other layouts.  +:true_peak+ picks the true-peak
+      # filter (:annex2, BS.1770-4's example, also for true; :accurate, a
+      # 32-tap Kaiser design; see Loudness::TruePeak) or skips it (false,
+      # about half the time).
+      #
+      # Windows before the start count as silence, so short audio still gets
+      # momentary, short-term, and integrated values, and the loudness range
+      # follows EBU Tech 3342 literally (see Loudness::Analyzer#result and
+      # Loudness.range).  See Loudness::TARGETS and #gain_to for
+      # normalization targets.
       #
       # Examples:
       #     loudness('sounds/drums.flac').lufs           # => -18.3
