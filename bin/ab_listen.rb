@@ -30,8 +30,8 @@
 #
 # Level matching (-m, m key) scales B to A's integrated loudness (ITU-R
 # BS.1770 LUFS, see MB::Sound.loudness) by default, or to A's RMS with
-# --match-by rms (M key switches); pairs too short to gate (under 0.4 s)
-# fall back to RMS.
+# --match-by rms (M key switches); pairs with a file below BS.1770's
+# -70 LUFS gate fall back to RMS.
 #
 # Switches crossfade over --crossfade ms.  The time shown is the playback
 # position written to the sound card, about one output queue ahead of
@@ -269,7 +269,7 @@ class ABPlayer
   end
 
   # Sets B's gain for level matching: A's level minus B's by integrated
-  # loudness (or RMS with --match-by rms, and for pairs too short to gate).
+  # loudness (or RMS with --match-by rms, and for pairs with a file below the -70 LUFS gate).
   def update_match_gain
     a, b = @match_by == :lufs ? @pair.lufs : @pair.rms_db
     @match_used = @match_by
