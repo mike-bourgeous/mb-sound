@@ -36,6 +36,7 @@ enum filter_types {
 	FILT_PEAK,
 	FILT_LOWSHELF,
 	FILT_HIGHSHELF,
+	FILT_BANDPASS_SKIRT,
 };
 
 // Used by cookbook()
@@ -560,6 +561,16 @@ static struct biquad_coeffs cookbook(enum filter_types ftype, double rate, doubl
 			coeffs.b0 = alpha * a0_inv * linear_gain;
 			coeffs.b1 = 0;
 			coeffs.b2 = -alpha * a0_inv * linear_gain;
+			break;
+
+		case FILT_BANDPASS_SKIRT:
+			// Constant skirt gain (peak gain Q): b0 = sin(w0) / 2 = Q alpha
+			a0_inv = 1.0 / (1.0 + alpha);
+			coeffs.a1 = -2.0 * cosine * a0_inv;
+			coeffs.a2 = (1.0 - alpha) * a0_inv;
+			coeffs.b0 = 0.5 * sine * a0_inv * linear_gain;
+			coeffs.b1 = 0;
+			coeffs.b2 = -0.5 * sine * a0_inv * linear_gain;
 			break;
 
 		case FILT_NOTCH:

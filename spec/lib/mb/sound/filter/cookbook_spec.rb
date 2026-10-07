@@ -254,6 +254,22 @@ RSpec.describe(MB::Sound::Filter::Cookbook, :aggregate_failures) do
     end
   end
 
+  context 'bandpass_skirt' do
+    it 'has the constant 0 dB peak bandpass zeros times the quality' do
+      peak = MB::Sound::Filter::Cookbook.new(:bandpass, 48000, 5000, quality: 50)
+      skirt = MB::Sound::Filter::Cookbook.new(:bandpass_skirt, 48000, 5000, quality: 50)
+      expect(skirt.coefficients).to all_be_within(10).sigfigs.of_array(peak.coefficients.each_with_index.map { |c, i| i < 3 ? c * 50 : c })
+      expect(skirt.response(2 * Math::PI * 5000 / 48000).abs).to be_within(1e-9).of(50)
+    end
+
+    it 'gives the same coefficients in C and Ruby, with gain' do
+      f = MB::Sound::Filter::Cookbook.new(:bandpass_skirt, 48000, 1234, quality: 3, db_gain: -4)
+      c = f.coefficients
+      f.set_parameters_ruby(:bandpass_skirt, 48000, 1234, quality: 3, db_gain: -4)
+      expect(f.coefficients).to all_be_within(14).sigfigs.of_array(c)
+    end
+  end
+
   context 'notch' do
     it 'produces the right coefficients for 5k/48k/Q2' do
       coeff = [
