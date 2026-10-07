@@ -216,6 +216,33 @@ module MB
         end
       end
 
+      # The antiderivative table of this curve over 0..1 for the antialiased
+      # shaper (GraphNode::CurveShaper): [integral from 0, left limits,
+      # right limits] at +cells+ + 1 nodes (frozen Numo::DFloats).  The
+      # limits differ only at jumps (e.g. #steps, whose cells line up with
+      # the jumps); each cell is integrated with Simpson's rule.  Made once
+      # per cell count.
+      def integral_table(cells = nil)
+        cells = Integer(cells || @cells || 4096)
+        (@integral_tables ||= {})[cells] ||= begin
+          h = 1.0 / cells
+          x = Numo::DFloat.new(cells + 1).seq * h
+          x[-1] = 1.0
+          f = map(x)
+          delta = 1e-7
+          fl = map((x - delta).clip(0.0, 1.0))
+          fr = map((x + delta).clip(0.0, 1.0))
+          jump = (fr - fl).abs.gt(1e-5)
+          fl[~jump] = f[~jump]
+          fr[~jump] = f[~jump]
+          mid = map(x[0...cells] + 0.5 * h)
+          cell = (fr[0...cells] + mid * 4.0 + fl[1..]) * (h / 6.0)
+          integral = Numo::DFloat.zeros(cells + 1)
+          integral[1..] = cell.cumsum
+          [integral, fl, fr].map(&:freeze).freeze
+        end
+      end
+
       # The slopes [at 0, at 1] used by #map_edges :extend.
       def slopes
         @slopes ||= begin
@@ -244,11 +271,13 @@ module MB
       end
 
       # The same motion played backwards: 1 - f(1 - x).  An :in curve
-      # becomes :out (Curve.db(d).reverse equals Curve.db(-d)).
+      # becomes :out (Curve.db(d).reverse equals Curve.db(-d) on 0..1).
+      # Composed curves are never #natural? (they extend with their end
+      # slopes).
       def reverse
         f = self
         Curve.new(
-          "#{@name}.reverse", kind: Curve.flip_kind(@kind), monotonic: @monotonic, natural: @natural, key: [:reverse, key], cells: @cells,
+          "#{@name}.reverse", kind: Curve.flip_kind(@kind), monotonic: @monotonic, key: [:reverse, key], cells: @cells,
           scalar: ->(x) { 1.0 - f.call(1.0 - x) },
           vector: ->(x) { 1.0 - f.map(1.0 - x) },
         )
@@ -293,7 +322,7 @@ module MB
         other = Curve.from(other)
         f = self
         Curve.new(
-          "#{@name} >> #{other.name}", kind: @kind, monotonic: @monotonic && other.monotonic?, natural: @natural && other.natural?,
+          "#{@name} >> #{other.name}", kind: @kind, monotonic: @monotonic && other.monotonic?,
           key: [:then, key, other.key],
           scalar: ->(x) { other.call(f.call(x)) },
           vector: ->(x) { other.map(f.map(x)) },
