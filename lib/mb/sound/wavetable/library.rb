@@ -9,8 +9,12 @@ module MB
       # overshoot reaches about 1.18 on the saw and square (user's choice,
       # 2026-10-06: the exact series over the sigma taper, accepting
       # different peaks into nonlinear effects; the taper option was removed
-      # 2026-10-08, preferring the bright top octave).  Organ is scaled to a
-      # peak near 1.
+      # 2026-10-08, preferring the bright top octave).  The other tables
+      # (organ, basic, pulses) are normalized by perceived loudness
+      # (normalize: :loudness, see Loudness; 2026-10-08): every frame as loud
+      # as the saw, so scans and table changes keep their level (organ was
+      # scaled to a peak of 1, and the scans' frames kept their natural
+      # levels: 7.3 dB apart).
       module Library
         HARMONICS = 1023
 
@@ -58,20 +62,22 @@ module MB
       register(:organ) {
         bars = { 1 => 8, 2 => 8, 3 => 6, 4 => 6, 6 => 4, 8 => 4 }
         amps = Array.new(8) { |i| bars.fetch(i + 1, 0) / 8.0 }
-        Library.peak_normalized(amps)
+        from_harmonics(amps, normalize: :loudness)
       }
 
-      # Four classic shapes to scan through: sine, triangle, square, saw.
+      # Four classic shapes to scan through: sine, triangle, square, saw
+      # (each as loud as the saw).
       register(:basic) {
         h = Library::HARMONICS
         sine = [1.0] + Array.new(h - 1, 0.0)
-        from_harmonics([sine, Library.triangle, Library.square, Library.saw])
+        from_harmonics([sine, Library.triangle, Library.square, Library.saw], normalize: :loudness)
       }
 
-      # Sixteen pulses from 50% (square) to 3% wide.
+      # Sixteen pulses from 50% (square) to 3% wide (each as loud as the
+      # saw).
       register(:pulses) {
         frames = Array.new(16) { |i| Library.pulse(0.5 - i * (0.47 / 15)) }
-        from_harmonics(frames.map(&:first), frames.map(&:last))
+        from_harmonics(frames.map(&:first), frames.map(&:last), normalize: :loudness)
       }
     end
   end

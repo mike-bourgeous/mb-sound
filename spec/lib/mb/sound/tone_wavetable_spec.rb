@@ -217,13 +217,16 @@ RSpec.describe(MB::Sound::Tone, '#wavetable', aggregate_failures: true) do
     end
 
     it 'morphs across frames with the scan input' do
+      # :basic's frames are loudness-normalized: sine, triangle, square, saw
+      # scaled to the saw's loudness
+      g = w[:basic].derivative_spectra[true, 1].abs / Numo::DFloat[1, 8 / Math::PI**2, 4 / Math::PI, 2 / Math::PI]
       sine = 100.hz.wavetable(:basic, scan: 0).sample(480)
       saw = 100.hz.wavetable(:basic, scan: 1).sample(480)
-      expect(sine).to all_be_within(1e-4).of_array(100.hz.sine.sample(480))
+      expect(sine).to all_be_within(1e-4).of_array(100.hz.sine.sample(480) * g[0])
       expect(saw).to all_be_within(1e-4).of_array(100.hz.wavetable(:saw).sample(480))
 
       half = 100.hz.wavetable(:basic, scan: 1.0 / 6).sample(480)
-      tri = 100.hz.wavetable(:triangle).sample(480)
+      tri = 100.hz.wavetable(:triangle).sample(480) * g[1]
       expect(half).to all_be_within(1e-4).of_array(sine * 0.5 + tri * 0.5)
     end
 
@@ -240,7 +243,8 @@ RSpec.describe(MB::Sound::Tone, '#wavetable', aggregate_failures: true) do
       expect(clamped).not_to be_scan_wrap
       expect(wrapped).to be_scan_wrap
       expect(clamped.sample(480)).to all_be_within(1e-4).of_array(100.hz.wavetable(:saw).sample(480))
-      expect(wrapped.sample(480)).to all_be_within(1e-4).of_array(100.hz.sine.sample(480))
+      sine_gain = w[:basic].derivative_spectra[0, 1].abs # loudness-normalized sine frame
+      expect(wrapped.sample(480)).to all_be_within(1e-4).of_array(100.hz.sine.sample(480) * sine_gain)
       expect(100.hz.wavetable(:basic, scan: 1, scan_wrap: true).sample(480)).to all_be_within(1e-4).of_array(100.hz.wavetable(:saw).sample(480))
       expect(MB::Sound::C3.wavetable(:basic, scan: 1.5, scan_wrap: true)).to be_scan_wrap
     end
@@ -367,6 +371,29 @@ RSpec.describe(MB::Sound::Tone, '#wavetable', aggregate_failures: true) do
       expect(map.zones.map { |z| z[0..1] }).to eq([[40, 48], [48, 56]])
       expect(map.table_for(47.9)).to equal(low)
       expect(map.table_for(48)).to equal(high)
+    end
+
+    it 'can match the zones\' perceived loudness' do
+      tables = [:sine, :organ, :square, w[:pulses]]
+      plain = w::KeyMap.zones(tables, from: 36, size: 12)
+      map = w::KeyMap.zones(tables, from: 36, size: 12, normalize: :loudness)
+      expect(map.normalize).to eq(:loudness)
+      before = plain.zone_loudness
+      after = map.zone_loudness
+      expect(before.max - before.min).to be > 2
+      expect(after.max - after.min).to be < 1e-9
+      expect(after[0]).to be_within(1e-9).of(before.sum / before.length)
+
+      # Each zone is its table scaled
+      g = 10**((after[2] - before[2]) / 20.0)
+      expect(MB::Sound::Note.new(66).wavetable(map).sample(800)).to all_be_within(1e-4).of_array(MB::Sound::Note.new(66).wavetable(:square).sample(800) * g)
+
+      # Sample-mode zones too
+      sound = Numo::SFloat.cast(Array.new(4800) { |i| Math.sin(2 * Math::PI * 220 * i / 48000.0) * (i < 2400 ? 1 : 0.5) })
+      quiet = w.from_samples(sound * 0.1, mode: :sample, root: 220, loop: 2400...4800)
+      loud = w.from_samples(sound, mode: :sample, root: 220, loop: 2400...4800)
+      m = w::KeyMap.new({ 40...52 => quiet, 52...64 => loud }, normalize: :loudness)
+      expect(m.zone_loudness[0]).to be_within(0.5).of(m.zone_loudness[1])
     end
 
     it 'picks a new zone at each reset' do

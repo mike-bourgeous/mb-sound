@@ -168,20 +168,23 @@ module MB
         # length of #frames (and caps the harmonics at size / 2 - 1).  See
         # the class description for +complex+, +mips+, +interpolation+;
         # +align+ lines up frames in time (off by default, since the phases
-        # are given).
-        def from_harmonics(amplitudes, phases = nil, size: 2048, complex: false, mips: :default, interpolation: nil, align: false, name: nil)
+        # are given).  +normalize: :loudness+ scales each frame to the same
+        # perceived loudness as the library saw (see Loudness).
+        def from_harmonics(amplitudes, phases = nil, size: 2048, complex: false, mips: :default, interpolation: nil, align: false, normalize: nil, name: nil)
           spectra = Builder.spectra_from_harmonics(amplitudes, phases)
           max = (size - 1) / 2
           spectra = spectra[true, 0..max] if spectra.shape[1] - 1 > max
           spectra = Builder.align(spectra) if align && spectra.shape[0] > 1
 
-          new(spectra: spectra, size: size, complex: complex, mips: mips, interpolation: interpolation, name: name)
+          new(spectra: spectra, size: size, complex: complex, mips: mips, interpolation: interpolation, normalize: normalize, name: name)
         end
 
         # A table from samples.  In cycle mode (default), +data+ is one
         # cycle per row (a 2D NArray, an Array of rows, or one 1D cycle);
         # +align+ lines frames up in time (see the class description) and
-        # +normalize+ removes DC and scales each frame to a peak of 1.  In
+        # +normalize+ removes DC and scales each frame to a peak of 1 (true or
+        # :peak), or scales each frame to the library saw's perceived
+        # loudness (:loudness; see Loudness).  In
         # sample mode, +data+ is the sound (1D; +root+, +loop+, and
         # +sample_rate+ apply).  +harmonics+ limits a cycle table's
         # harmonics (default: all that fit the frame size).
@@ -194,8 +197,11 @@ module MB
             raise ArgumentError, 'Cycle frames must be a 1D or 2D NArray' unless data.ndim == 2
 
             data = data.is_a?(Numo::SComplex) || data.is_a?(Numo::DComplex) ? Numo::SComplex.cast(data) : Numo::SFloat.cast(data)
-            data = Wavetable.normalize(data.dup) if normalize
-            new(frames: data, complex: complex, mips: mips, interpolation: interpolation, align: align, aligned: aligned, harmonics: harmonics, name: name, source_info: source_info)
+            data = Wavetable.normalize(data.dup) if normalize == true || normalize == :peak
+            new(
+              frames: data, complex: complex, mips: mips, interpolation: interpolation, align: align, aligned: aligned, harmonics: harmonics,
+              normalize: normalize == :loudness ? :loudness : nil, name: name, source_info: source_info
+            )
 
           when :sample
             raise ArgumentError, 'A sample must be a 1D NArray' unless data.ndim == 1
@@ -444,9 +450,43 @@ module MB
       # A name for displays (the library name or file name), or nil.
       attr_accessor :name
 
+      # :loudness if the frames were scaled to a matching perceived loudness
+      # (see .from_harmonics), else nil.
+      attr_reader :normalize
+
+      # Cycle mode: the perceived loudness of each frame in dB (an Array),
+      # averaged over +pitches+ (Hz; default C2-C6), see Loudness.  Sample
+      # mode: the loudness of the sound with its root at the first of
+      # +pitches+ (default the root).
+      def loudness(pitches = nil)
+        if @mode == :cycle
+          Loudness.spectra_db(derivative_spectra, pitches || Loudness::PITCHES)
+        else
+          [Loudness.sample_db(@data, @sample_rate, @root, (pitches || [@root])[0])]
+        end
+      end
+
+      # A copy of this table scaled by +gain+ (every setting kept; KeyMap
+      # uses it to match zones' loudness).
+      def scaled(gain)
+        return self if gain == 1
+
+        mips = @spacing_explicit ? (@spacing.nil? ? false : @spacing) : :default
+        common = { complex: @complex, mips: mips, interpolation: @interpolation, name: @name, source_info: @source_info }
+        if @mode == :sample
+          Wavetable.new(mode: :sample, data: @data * gain, root: @root, loop: @loop, sample_rate: @sample_rate, **common)
+        elsif @spectra
+          Wavetable.new(spectra: @spectra * gain, size: @size, aligned: @aligned, **common)
+        else
+          Wavetable.new(frames: @frames * gain, aligned: @aligned, **common)
+        end
+      end
+
       # Use the class methods (.from_harmonics, .from_samples, ...).
-      def initialize(mode: :cycle, spectra: nil, frames: nil, data: nil, size: nil, complex: false, mips: :default, interpolation: nil, align: false, aligned: false, harmonics: nil, root: nil, loop: nil, sample_rate: 48000, name: nil, source_info: nil)
+      def initialize(mode: :cycle, spectra: nil, frames: nil, data: nil, size: nil, complex: false, mips: :default, interpolation: nil, align: false, aligned: false, harmonics: nil, normalize: nil, root: nil, loop: nil, sample_rate: 48000, name: nil, source_info: nil)
         raise ArgumentError, "Unknown wavetable mode #{mode.inspect} (#{MODES.join(', ')})" unless MODES.include?(mode)
+        raise ArgumentError, "Unknown normalize #{normalize.inspect} (nil or :loudness)" unless normalize.nil? || normalize == :loudness
+        raise ArgumentError, 'Only cycle tables can be normalized by loudness (see KeyMap for samples)' if normalize && mode != :cycle
 
         @mode = mode
         @complex = !!complex
@@ -460,6 +500,7 @@ module MB
         @interpolation = interpolation || (@spacing ? :optimal : :cubic)
         raise ArgumentError, "Unknown interpolation #{@interpolation.inspect} (#{INTERPOLATIONS.keys.join(', ')})" unless INTERPOLATIONS.include?(@interpolation)
 
+        @normalize = normalize
         if mode == :cycle
           build_cycle(spectra, frames, size, align)
         else
@@ -790,7 +831,7 @@ module MB
 
       # Tags saved by #save that describe the table (others in #source_info
       # are saved too).
-      SAVED_KEYS = [:mode, :name, :frames, :period, :size, :aligned, :spacing, :spacing_explicit, :taper, :interpolation, :complex, :root, :loop, :sample_rate, :scale, :harmonics].freeze
+      SAVED_KEYS = [:mode, :name, :frames, :period, :size, :aligned, :spacing, :spacing_explicit, :taper, :normalize, :interpolation, :complex, :root, :loop, :sample_rate, :scale, :harmonics].freeze
 
       # The table's settings and derived values, as saved by #save (with
       # #source_info): mode, name, frame count, period (cycle mode samples
@@ -808,7 +849,7 @@ module MB
         m = @source_info.merge(
           mode: @mode.to_s, name: @name, frames: @frame_count, aligned: @aligned.to_s, spacing: spacing,
           spacing_explicit: @spacing_explicit.to_s,
-          interpolation: @interpolation.to_s, complex: @complex.to_s
+          interpolation: @interpolation.to_s, complex: @complex.to_s, normalize: @normalize&.to_s
         )
         if @mode == :cycle
           m[:period] = @size
@@ -869,6 +910,14 @@ module MB
         end
 
         @size = size
+        if @normalize == :loudness
+          spectra ||= Builder.spectra_from_frames(@frames)
+          gains = Loudness.normalizing_gains(spectra)
+          spectra = spectra * Numo::DFloat.cast(gains).reshape(gains.length, 1)
+          if @frames
+            @frames = (@frames * Numo::DFloat.cast(gains).reshape(gains.length, 1)).then { |f| @complex ? Numo::SComplex.cast(f) : Numo::SFloat.cast(f) }
+          end
+        end
         @frame_count = spectra ? spectra.shape[0] : @frames.shape[0]
         @spectra = spectra
         @half_means = spectra ? Builder.half_means(spectra) : half_means_of(@frames)
@@ -1013,3 +1062,4 @@ require_relative 'wavetable/kernel_ruby'
 require_relative 'wavetable/emphasis'
 require_relative 'wavetable/key_map'
 require_relative 'wavetable/library'
+require_relative 'wavetable/loudness'
