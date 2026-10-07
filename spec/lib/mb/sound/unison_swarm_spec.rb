@@ -346,6 +346,16 @@ RSpec.describe('Unison mix, per-copy settings, and swarms', :aggregate_failures)
       expect(render(node, buffers: 5).map { |c| c.abs.max }).to all(be > 0)
     end
 
+    it 'starts copies in an absolute band with from:' do
+      n = notes_for(ev.note_on(38, 100, time: 0r))
+      seen = []
+      n.hz.swarm(9, chord: [-12, 0, 12, 24], from: MB::Sound::G3..MB::Sound::G4, glide: 0.5, seed: 1) { |p| seen << p; p.sine }
+      starts = seen.map { |p| p.freq.sample(480)[0] }.map { |f| MB::Sound.tuning.number_of(f) }
+      expect(starts).to all(be_between(55 - 0.01, 67 + 0.01))
+      expect(starts.uniq.length).to eq(9)
+      expect { n.hz.swarm(3, from: 60..70, scatter: 1.oct) }.to raise_error(ArgumentError, /not both/)
+    end
+
     it 'drifts and works on fixed pitches without glides' do
       node = 110.hz.swarm(5, glide: nil, drift: 20.cents, spread: 0)
       expect(node.channel_count).to eq(1)
