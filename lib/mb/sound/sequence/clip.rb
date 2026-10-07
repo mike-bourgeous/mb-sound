@@ -49,7 +49,7 @@ module MB
           :loop, :|, :&, :repeat, :*, :fill, :truncate, :roll, :ratchet, :stretch,
           :d, :dotted, :dd, :double_dotted, :t, :triplet,
           :legato, :staccato, :transpose, :vel,
-          :reverse, :retrograde, :permute, :shuffle,
+          :reverse, :retrograde, :permute, :shuffle, :rotate,
         ].freeze
 
         # Wraps the named transform methods of this class so the clips they
@@ -73,16 +73,27 @@ module MB
           obj.is_a?(Clip) ? obj : Seq.new([obj])
         end
 
+        # Where a looping clip's cycles are counted from (see #loop).
+        ALIGNMENTS = [:timeline, :launch].freeze
+
+        # How a looping clip lines up with the timeline: :timeline (cycles
+        # counted from the start of the timeline) or :launch (cycles counted
+        # from where it was launched).  See #loop.
+        attr_reader :align
+
         # Creates a clip from a list of Events.  The +:length+ defaults to the
-        # end of the last event.
-        def initialize(events, length: nil, loop: false, seed: 0)
+        # end of the last event.  +:align+ only matters for looping clips
+        # (see #loop).
+        def initialize(events, length: nil, loop: false, seed: 0, align: :timeline)
           @events = events.sort_by(&:start).freeze
           max_end = @events.map(&:end_time).max || 0
           @length = (length || max_end).to_r
           @loop = !!loop
           @seed = Integer(seed)
+          @align = align
 
           raise ArgumentError, 'A looping clip must have a positive length' if @loop && @length <= 0
+          raise ArgumentError, "Clip alignment must be one of #{ALIGNMENTS.map(&:inspect).join(', ')} (got #{align.inspect})" unless ALIGNMENTS.include?(align)
 
           # How many loop cycles an event can span, for finding note-off events
           # that belong to earlier cycles.
@@ -99,10 +110,33 @@ module MB
           @loop
         end
 
+        # Returns true if this clip loops from where it was launched rather
+        # than in phase with the timeline (see #loop).
+        def launch_aligned?
+          @loop && @align == :launch
+        end
+
         # Returns a copy of this clip that repeats forever.  Pass a +:seed+ to
         # change which probabilistic events play in each cycle.
-        def loop(seed: @seed)
-          Clip.new(@events, length: @length, loop: true, seed: seed)
+        #
+        # +:align+ says where the loop's cycles are counted from when it
+        # plays in a node graph (MIDI::ClipSource):
+        #
+        # :timeline (default) - in phase with the transport's timeline, so
+        #   loops launched at different times stay in sync, and a 3-beat
+        #   loop launched on bar 2 starts a beat into its cycle.
+        # :launch - from the moment the graph launches (or the swap that
+        #   brings the clip in), so the loop always starts at its beginning.
+        #   The anchor stays put when the timeline jumps: a seek or rewind
+        #   keeps the loop in the same phase relative to its launch point
+        #   (before the launch point it plays the cycles that would lead up
+        #   to it), and only a new launch (#bg, #resume) or swap moves it.
+        #   Same as rotating a :timeline loop by its launch position (see
+        #   #rotate).
+        #
+        #     bg :ball, bounce_hits(3.beats).loop(align: :launch).synth { |v| ... }
+        def loop(seed: @seed, align: @align)
+          Clip.new(@events, length: @length, loop: true, seed: seed, align: align)
         end
 
         # Returns a non-looping clip that plays this clip followed by +other+
@@ -298,6 +332,25 @@ module MB
         end
         alias shuffle permute
 
+        # Returns a clip with its events moved +amount+ later (a Duration, or
+        # a Numeric number of whole notes, which may be negative to move
+        # earlier), wrapping around the clip's length, which stays the same.
+        # Events pushed past the end start again from the beginning, so a
+        # looping clip plays the same cycle starting at a different point.
+        #
+        #     seq(C4, E4, G4, B4).n4.rotate(1.beat)        # B4, C4, E4, G4
+        #     seq(C4, E4, G4, B4).n4.rotate(-1/4r)         # E4, G4, B4, C4
+        #     ball.loop.rotate(2.bars)                     # a loop that starts on bar 3 (from 1)
+        def rotate(amount)
+          raise ArgumentError, 'Cannot rotate a clip without a length' if @length <= 0
+
+          shift = amount.is_a?(Duration) ? amount.whole_notes : Duration.rational(amount)
+          shift %= @length
+          return with_events(@events) if shift == 0
+
+          map_clip { |e| e.with(start: (e.start + shift) % @length) }
+        end
+
         # Returns a clip with every event's velocity set to +velocity+ (0..1).
         def vel(velocity)
           map_clip { |e| e.with(velocity: velocity.to_f) }
@@ -450,7 +503,7 @@ module MB
             gap = gaps[i] || [@length - starts[i], 1/64r].max
             Event.new(start: starts[i], length: gap, value: target, velocity: DEFAULT_VELOCITY)
           }
-          glide_clip = Clip.new(events, length: @length, loop: @loop, seed: @seed)
+          glide_clip = Clip.new(events, length: @length, loop: @loop, seed: @seed, align: @align)
 
           notes = glide_clip.notes(transport: transport)
           name = "tween #{Curve.from(curve, **{ overshoot: overshoot, cycles: cycles }.compact)}"
@@ -595,7 +648,7 @@ module MB
         end
 
         def to_s
-          "#{self.class.name.rpartition('::').last}(#{Duration.format(@length)}#{' loop' if @loop}: #{@events.map(&:to_s).join(', ')})"
+          "#{self.class.name.rpartition('::').last}(#{Duration.format(@length)}#{' loop' if @loop}#{' from launch' if launch_aligned?}: #{@events.map(&:to_s).join(', ')})"
         end
 
         def inspect
@@ -615,7 +668,7 @@ module MB
         # Returns a Clip with the given +events+ that keeps this clip's
         # looping and seed.
         def with_events(events, length: @length)
-          Clip.new(events, length: length, loop: @loop, seed: @seed)
+          Clip.new(events, length: length, loop: @loop, seed: @seed, align: @align)
         end
 
         # Returns a Clip with each event transformed by the block.
@@ -638,7 +691,7 @@ module MB
               TempoNode.new(Duration.new(gaps.values.first), mode: :seconds, transport: transport)
             else
               # Each event's gap as a value, read when the event starts
-              gap_clip = Clip.new(@events.map { |e| e.with(value: gaps.fetch(e.start, gaps.values.last).to_f) }, length: @length, loop: @loop, seed: @seed)
+              gap_clip = Clip.new(@events.map { |e| e.with(value: gaps.fetch(e.start, gaps.values.last).to_f) }, length: @length, loop: @loop, seed: @seed, align: @align)
               gap_clip.number(transport: transport) * TempoNode.new(Duration.new(1r), mode: :seconds, transport: transport)
             end
           else time
