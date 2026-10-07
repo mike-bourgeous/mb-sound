@@ -204,6 +204,18 @@ RSpec.describe(MB::Sound::Envelope, 'multi-segment envelopes') do
       expect { MB::Sound::SQ80.time(64) }.to raise_error(ArgumentError)
     end
 
+    it 'keeps one frozen time buffer while the control holds still' do
+      v = MB::Sound::Notes.new(MB::Sound.seq(72).n1.vel(0.5))
+      ts = MB::Sound::SQ80::TimeScale.new(0.5, v.velocity, :velocity, 1.0)
+      a = ts.sample(480)
+      b = ts.sample(480)
+      expect(a).to be_frozen
+      expect(b).to equal(a)
+      expect(a[0]).to eq(0.25)
+      key = MB::Sound::SQ80::TimeScale.new(0.5, v.number, :key, 1.0)
+      expect(key.sample(480)[0]).to eq(0.25) # an octave above C4 halves it
+    end
+
     it 'converts bipolar levels' do
       expect(MB::Sound::SQ80.level(-63)).to eq(-1)
       expect(MB::Sound::SQ80.level(63)).to eq(1)
