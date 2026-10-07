@@ -296,7 +296,7 @@ RSpec.describe(MB::Sound::Unison, :aggregate_failures) do
 
       det = detune_node(node)
       expect(det.fractions).to eq([-1, -0.5, 0, 0.5, 1])
-      expect(det.mode).to eq(:interp)
+      expect(det.mode).to eq(:exact)
       expect(mixer(node).slots).to eq(described_class.pan_slots(det.fractions))
       expect(mixer(node).offsets).to be_nil
       expect(render(node).abs.max).to be > 0.5
@@ -327,7 +327,7 @@ RSpec.describe(MB::Sound::Unison, :aggregate_failures) do
     [10, 25, 50, 100].each do |c|
       it "keeps :interp within the predicted error at #{c} cents (middle copy sharp by 1200 log2(cosh(x)))" do
         bound = 1200 * Math.log2(Math.cosh(c / 100.0 * Math.log(2) / 12))
-        det = detune_node(110.hz.unison(7, detune: (c / 100.0).constant, layout: :even))
+        det = detune_node(110.hz.unison(7, detune: (c / 100.0).constant, layout: :even, detune_mode: :interp))
         freqs = copy_freqs(det, buffers: 2)
         errs = det.fractions.each_with_index.map { |a, i| cents(freqs[i], 110 * 2 ** (a * c / 1200.0)).abs.max }
 
@@ -342,7 +342,7 @@ RSpec.describe(MB::Sound::Unison, :aggregate_failures) do
     it 'follows a moving detune in :interp mode with exact outer copies and the same bound' do
       lfo = -> { 0.5.hz.lfo.at(0..0.5) }
       ex = copy_freqs(detune_node(110.hz.unison(7, detune: lfo.call, detune_mode: :exact, layout: :even)), buffers: 50)
-      it = copy_freqs(detune_node(110.hz.unison(7, detune: lfo.call, layout: :even)), buffers: 50)
+      it = copy_freqs(detune_node(110.hz.unison(7, detune: lfo.call, layout: :even, detune_mode: :interp)), buffers: 50)
       bound = 1200 * Math.log2(Math.cosh(0.5 * Math.log(2) / 12))
       # Outer copies only lag by the control interval (up to 78.5 cents/s × 16 samples)
       7.times do |i|
@@ -351,15 +351,15 @@ RSpec.describe(MB::Sound::Unison, :aggregate_failures) do
     end
 
     it 'gives the same :interp output at any buffer size' do
-      a = copy_freqs(detune_node(110.hz.unison(5, detune: 7.hz.lfo.at(0..0.5), layout: :even)), buffers: 20, buffer: 480)
-      b = copy_freqs(detune_node(110.hz.unison(5, detune: 7.hz.lfo.at(0..0.5), layout: :even)), buffers: 75, buffer: 128)
+      a = copy_freqs(detune_node(110.hz.unison(5, detune: 7.hz.lfo.at(0..0.5), layout: :even, detune_mode: :interp)), buffers: 20, buffer: 480)
+      b = copy_freqs(detune_node(110.hz.unison(5, detune: 7.hz.lfo.at(0..0.5), layout: :even, detune_mode: :interp)), buffers: 75, buffer: 128)
       expect(b.map { |x| x[0...9600] }).to eq(a)
     end
 
     it 'ramps to detune steps over the control interval in :interp mode, and jumps in :exact mode' do
       step = -> { MB::Sound.silence(0.01).and_then(1.constant) }
       ex = copy_freqs(detune_node(110.hz.unison(3, detune: step.call, layout: :even, detune_mode: :exact)), buffers: 2)
-      it = copy_freqs(detune_node(110.hz.unison(3, detune: step.call, layout: :even)), buffers: 2)
+      it = copy_freqs(detune_node(110.hz.unison(3, detune: step.call, layout: :even, detune_mode: :interp)), buffers: 2)
       r = 2 ** (1 / 12.0)
       expect(ex[2][479..481].to_a).to match([be_within(1e-4).of(110), be_within(1e-4).of(110 * r), be_within(1e-4).of(110 * r)])
 
@@ -475,14 +475,9 @@ RSpec.describe(MB::Sound::Unison, :aggregate_failures) do
       expect(out.abs.max).to be > 0.1
 
       # The wheel went from 0 to 1 at 0.05 s: the outer copies end 50 cents
-      # from A3
-      expect(det.outputs.map(&:value)).to match([
-        be_within(1e-3).of(220 * 2 ** (-0.5 / 12)),
-        be_within(0.01).of(220 * Math.cosh(0.5 * Math.log(2) / 12) - 220 * Math.sinh(0.5 * Math.log(2) / 12) / 2),
-        be_within(1e-3).of(220 * Math.cosh(0.5 * Math.log(2) / 12)),
-        be_within(0.01).of(220 * Math.cosh(0.5 * Math.log(2) / 12) + 220 * Math.sinh(0.5 * Math.log(2) / 12) / 2),
-        be_within(1e-3).of(220 * 2 ** (0.5 / 12)),
-      ])
+      # from A3, the others at their exact fractions (:exact by default)
+      expect(det.mode).to eq(:exact)
+      expect(det.outputs.map(&:value)).to match([-1, -0.5, 0, 0.5, 1].map { |a| be_within(1e-3).of(220 * 2 ** (a * 0.5 / 12)) })
     end
 
     it 'restarts every copy at the same phase on each note with a fixed phase' do

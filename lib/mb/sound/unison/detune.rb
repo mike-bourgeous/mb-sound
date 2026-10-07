@@ -11,9 +11,9 @@ module MB
       # semitones, the outermost copies' distance either side of the pitch)
       # scales the layout.  Two ways to get the frequencies (+mode:+):
       #
-      # - :exact - every copy at f × 2 ** (fraction × detune / 12), every
-      #   sample (one exp() per copy per sample).
-      # - :interp (default) - only the outermost ratio r = 2 ** (detune / 12)
+      # - :exact (default) - every copy at f × 2 ** (fraction × detune /
+      #   12), every sample (one exp() per copy per sample).
+      # - :interp - only the outermost ratio r = 2 ** (detune / 12)
       #   is computed exactly, at control points, and interpolated linearly
       #   in between; the copies are spaced linearly in Hz between f / r and
       #   f × r (copy at fraction a: f × (1/r + (r - 1/r) × (a + 1) / 2)).
@@ -26,7 +26,9 @@ module MB
       #   (so the output doesn't depend on the buffer size, with 16 samples
       #   of latency); with +control+ nil the control point is the last
       #   sample of each buffer (no latency, but buffer-size dependent).
-      #   About half the cost of :exact for 7 copies at 512-sample buffers.
+      #   About half the cost of :exact's detune math for 7 copies at
+      #   512-sample buffers, but that is only ~0.15% of realtime of a
+      #   whole 7-saw unison, so :exact became the default (2026-10-07).
       #
       # A detune buffer with every value the same (e.g. a constant node, or
       # a MIDI controller that isn't moving) uses one ratio per copy for the
@@ -108,7 +110,7 @@ module MB
         # class description for +mode+ and +control+.  +kernel+ is
         # MB::Sound::FastUnison (C) or Detune::RubyKernel (its exact mirror;
         # for specs and benchmarks).
-        def initialize(frequency, detune, fractions:, mode: :interp, control: DEFAULT_CONTROL, sample_rate: 48000, kernel: MB::Sound::FastUnison)
+        def initialize(frequency, detune, fractions:, mode: :exact, control: DEFAULT_CONTROL, sample_rate: 48000, kernel: MB::Sound::FastUnison)
           raise ArgumentError, "Unknown detune mode #{mode.inspect} (use #{MODES.map(&:inspect).join(' or ')})" unless MODES.include?(mode)
           raise ArgumentError, "The detune control interval must be a positive Integer or nil (got #{control.inspect})" unless control.nil? || (control.is_a?(Integer) && control > 0)
           raise ArgumentError, 'Detune fractions must be numbers in -1..1' unless fractions.all? { |a| a.is_a?(Numeric) && (-1..1).cover?(a) }

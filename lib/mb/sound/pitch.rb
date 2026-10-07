@@ -104,15 +104,15 @@ module MB
       #             Notes pitch take glide, bend range, and vibrato in the
       #             block too, per copy).
       # +detune_mode:+ - How copies follow a +detune:+ node (see
-      #                  Unison::Detune): :interp (default) computes the
-      #                  outermost ratio r = 2 ** (detune / 12) exactly every
-      #                  16 samples, ramps it linearly in between, and spaces
-      #                  the copies linearly in Hz from f / r to f × r, so
-      #                  inner copies are slightly sharp (the middle one by
-      #                  0.18 cents at 25 cents of detune, 0.72 at 50, 2.9 at
-      #                  100; inaudible next to the detune itself) for about
-      #                  half the cost of :exact, which computes every copy
-      #                  at f × 2 ** (fraction × detune / 12) every sample.
+      #                  Unison::Detune): :exact (default) computes every
+      #                  copy at f × 2 ** (fraction × detune / 12) every
+      #                  sample; :interp computes the outermost ratio
+      #                  r = 2 ** (detune / 12) exactly every 16 samples,
+      #                  ramps it linearly in between, and spaces the copies
+      #                  linearly in Hz from f / r to f × r, so inner copies
+      #                  are slightly sharp (the middle one by 0.18 cents at
+      #                  25 cents of detune, 0.72 at 50, 2.9 at 100) for
+      #                  slightly less CPU (~0.15% of realtime for 7 copies).
       #                  Fixed detunes are always exact.
       # +layout:+ - :random (default) for uneven spacing within the detune,
       #             so the beats between copies don't form a regular pattern
@@ -164,7 +164,7 @@ module MB
       #     play 110.hz.unison(5, layout: :even, phase: 0)                      # flanging, hard attack
       #     midi.synth(voices: 4) { |v| v.hz.unison(5, detune: 15.cents, spread: 1) * v.amp_env }
       #     midi.synth(voices: 4) { |v| v.hz.unison(7, detune: v.mod * 0.5) * v.amp_env }  # mod wheel: 0-50 cents
-      #     play 110.hz.unison(7, detune: 0.2.hz.lfo.at(0..50) / 100, detune_mode: :exact)
+      #     play 110.hz.unison(7, detune: 0.2.hz.lfo.at(0..50) / 100, detune_mode: :interp)  # a bit cheaper
       #     play 110.hz.unison(7, detune: 25.cents, mix: 0.5)                   # sides 12 dB down
       #     play 110.hz.unison(7, detune: 25.cents, mix: 1.5, spread: 1)        # sides 7 dB up: hollow and wide
       #     midi.synth(voices: 4) { |v| v.hz.unison(7, detune: 25.cents, mix: v.mod * 2) * v.amp_env }  # mod wheel: center only to +12 dB sides
@@ -179,7 +179,7 @@ module MB
       # see Unison::Copy.  Copies with the same Notes settings share their
       # nodes (one Glide for `p.glide(50.ms)` on every copy).  See #swarm
       # for a ready-made swarm of gliding copies.
-      def unison(count = nil, detune: 12.cents, layout: :random, phase: :random, spread: 0, mix: 1, normalize: :power, seed: nil, detune_mode: :interp, &block)
+      def unison(count = nil, detune: 12.cents, layout: :random, phase: :random, spread: 0, mix: 1, normalize: :power, seed: nil, detune_mode: :exact, &block)
         Unison.build(self, count, detune: detune, layout: layout, phase: phase, spread: spread, mix: mix, normalize: normalize, seed: seed, detune_mode: detune_mode, &block)
       end
 

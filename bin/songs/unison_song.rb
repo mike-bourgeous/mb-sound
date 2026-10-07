@@ -26,7 +26,7 @@
 #     bg :fm, A2.unison(3, detune: 6.cents) { |p| p.sine.fm(p.transpose(12).sine.at(300)) } * -12.db
 #     bg :w, 220.hz.unison(5, detune: 15.cents, spread: 0.5.hz.lfo.at(0..1)) * -12.db   # spread from a node
 #     bg :sw, 110.hz.unison(7, detune: 0.1.hz.lfo.triangle.at(0..50) / 100) * -12.db       # detune from a node (semitones): sweeps 0-50 cents
-#     bg :sw, 110.hz.unison(7, detune: 0.1.hz.lfo.triangle.at(0..50) / 100, detune_mode: :exact) * -12.db   # exact per-copy exp (sounds the same)
+#     bg :sw, 110.hz.unison(7, detune: 0.1.hz.lfo.triangle.at(0..50) / 100, detune_mode: :interp) * -12.db  # interpolated Hz spacing (a bit cheaper, sounds the same)
 #     midi.synth(voices: 4) { |v| v.hz.unison(5, detune: 15.cents, spread: 1) * v.amp_env }   # key-synced, random phases per note
 #     midi.synth(voices: 4) { |v| v.hz.unison(7, detune: v.mod * 0.5, spread: 1) * v.amp_env }  # mod wheel: 0-50 cents of detune
 #     midi.synth(voices: 4) { |v| v.hz.unison(5) { |p| p.saw.free } * v.amp_env }             # free-running copies

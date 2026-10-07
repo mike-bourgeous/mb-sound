@@ -142,7 +142,7 @@ module MB
       # made from it get the +phase+ setting) and the copy's index, and
       # returns the copies mixed by a GraphNode::ChannelMixer::Unison (one
       # node for mono, a Channels bundle for stereo).
-      def self.build(pitch, count = nil, detune:, layout:, phase:, spread:, normalize:, seed:, detune_mode: :interp, mix: 1)
+      def self.build(pitch, count = nil, detune:, layout:, phase:, spread:, normalize:, seed:, detune_mode: :exact, mix: 1)
         count ||= detune.is_a?(Array) ? detune.length : DEFAULT_COUNT
         check_phase(phase)
         unless spread.respond_to?(:sample) || (spread.is_a?(Numeric) && (0..1).cover?(spread))
