@@ -109,6 +109,14 @@ module MB
         chorus_send: { number: 93, name: 'Chorus Send' },
       }.transform_values { |h| MIDI::ControlSpec.new(**h).freeze }.freeze
 
+      # CC 71 (GM2 "resonance", the same controller as #resonance) as a
+      # position -1..1 around the knob's center, for #reso: 0 at raw 0, the
+      # base amount at 64, 1 at 127.
+      RESONANCE_AMOUNT = MIDI::ControlSpec.new(
+        number: 71, name: 'Resonance', range: -1.0..1.0, center: 0, default: 64,
+        description: '4-pole resonance: 0, the base at 64, 1 (Notes#reso)'
+      ).freeze
+
       class << self
         # Whether Notes nodes and envelopes take their fast paths for
         # buffers without events (constant frozen buffers, envelope times
@@ -447,6 +455,20 @@ module MB
       def quality(q = 1.0, gm: true)
         Quality.new(q, resonance: -> { resonance }, sample_rate: @sample_rate).gm(gm)
       end
+
+      # A 0..1 resonance amount following resonance (CC 71; a
+      # Notes::Resonance), for GraphNode#lp4's +resonance:+: +amount+ (a
+      # number or node) at 64, falling linearly to 0 at 0 and rising
+      # linearly to 1 at 127, so the knob always reaches both ends (GM, on
+      # unless +gm: false+ or `.gm(false)`).  #quality is the same control
+      # for 2-pole filters (a Q multiplier).  Alias #resonance_amount
+      # (#resonance is the raw CC 71 node).
+      #
+      #     v.hz.saw.lp4(v.cutoff(300), resonance: v.reso(0.6)) * v.amp_env
+      def reso(amount = 0.5, gm: true)
+        Resonance.new(amount, control: -> { control(RESONANCE_AMOUNT) }, sample_rate: @sample_rate).gm(gm)
+      end
+      alias resonance_amount reso
 
       # Vibrato in semitones (a node, for pitch offsets; see
       # NotePitch#vibrato): a sine LFO at +rate+ Hz reset at each note-on, ×

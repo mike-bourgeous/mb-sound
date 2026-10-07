@@ -9,17 +9,30 @@
  * Design".
  *
  * Passband compensation: part of the input is added to the resonance path,
- * u = x (1 + c k) - k y4, so the DC gain is (1 + c k) / (1 + k); c = 0.375
- * loses 6 dB of bass at k = 4 instead of 12 dB (the CEM3379 datasheet's
- * "constant amplitude" behavior).
+ * u = x (1 + c k) - k y4 = x - k (y4 - c x), so the DC gain is
+ * (1 + c k) / (1 + k); c = 0.375 loses 6 dB of bass at k = 4 instead of
+ * 12 dB (the CEM3379 datasheet's "constant amplitude" behavior).
  *
- * The optional drive applies tanh(d u) / d to the solved input of the
- * cascade (a one-step nonlinearity that keeps the loop solution linear),
- * which also bounds the amplitude when the loop gain k exceeds 4 (self
- * oscillation).
+ * Resonance curve: the resonance r (0..1) gives the loop gain k = f(r) ×
+ * k_max, with f(r) = r (linear) or the dB curve (fp_resonance_curve), which
+ * makes the gain at the cutoff frequency (relative to DC) rise linearly in
+ * dB from -12 dB at r = 0 to +33.8 dB at r = 1 (k = 3.9).
  *
- * tan and tanh are rational approximations using only +, -, *, / so that
- * every platform (glibc, macOS libm) and the Ruby mirror,
+ * Drive modes (all off with drive 0; tanh_d(z) = tanh(d z) / d):
+ * - input: tanh_d on the solved input u of the cascade (one step after the
+ *   linear loop solution).
+ * - stages: every OTA stage saturates its drive current, dy/dt = wc
+ *   tanh_d(x - y).  Zavalishin's "cheap" one-step method: the linear loop
+ *   solution predicts each stage's input difference e, the stage's gain g
+ *   becomes g tanh_d(e) / e (the secant), and the loop is solved again in
+ *   closed form with those per-stage gains.
+ * - feedback: a clipper (soft tanh_d, or hard: a clamp with a short
+ *   quadratic knee) on the resonance feedback signal y4 - c x only (the
+ *   Korg MS-20's diode clipper idea), with the same secant step: the loop
+ *   gain becomes k clip_d(r) / r at the linear prediction r.
+ *
+ * tan, tanh, and 2^x are approximations using only +, -, *, /, floor, and
+ * ldexp, so that every platform (glibc, macOS libm) and the Ruby mirror,
  * MB::Sound::Filter::FourPole.process_ruby, give identical samples; the
  * extension is built with -ffp-contract=off so no multiply-adds are fused.
  * Keep the operations here and in the mirror identical.
@@ -40,6 +53,20 @@
 // States smaller than this are flushed to zero at the end of each buffer
 // (no denormals while decaying into silence).
 #define FP_FLUSH 1e-30
+
+// The resonance curve's top loop gain (the default k_max) and log2 of
+// 4 (1 + k) / (4 - k) there (= log2(196)), the ratio of the gains at the
+// cutoff at r = 1 and r = 0.
+#define FP_CURVE_K 3.9
+#define FP_CURVE_LOG2_RATIO 7.6147098441152083
+#define FP_LN2 0.69314718055994529
+
+// Drive modes and clip shapes (FourPole::DRIVE_MODES and CLIPS in Ruby).
+#define FP_DRIVE_INPUT 0
+#define FP_DRIVE_STAGES 1
+#define FP_DRIVE_FEEDBACK 2
+#define FP_CLIP_SOFT 0
+#define FP_CLIP_HARD 1
 
 // tan(w) for 0 <= w < pi/2: a [5/4] Pade approximation of tan(w / 2) (good
 // to about 1e-16 at pi/4), then the double-angle formula.  Relative error
@@ -66,6 +93,69 @@ static inline double fp_tanh(double x)
 	return x * (27.0 + x2) / (27.0 + 9.0 * x2);
 }
 
+// fp_tanh(x) / x (1 at 0): the secant gain of the soft saturator.
+static inline double fp_tanh_secant(double x)
+{
+	double a = fabs(x);
+	if (a > 3.0) {
+		return 1.0 / a;
+	}
+	double x2 = x * x;
+	return (27.0 + x2) / (27.0 + 9.0 * x2);
+}
+
+// The hard clipper's secant gain: the clipper is linear up to |x| = 0.8,
+// then a quadratic knee reaching 1 with zero slope at 1.2, then +-1.
+static inline double fp_hard_secant(double x)
+{
+	double a = fabs(x);
+	if (a <= 0.8) {
+		return 1.0;
+	}
+	if (a < 1.2) {
+		double d = a - 0.8;
+		return (a - d * d * 1.25) / a;
+	}
+	return 1.0 / a;
+}
+
+// 1 / i! for i = 0..13 (FourPole::EXP_TAYLOR in Ruby).
+static const double fp_exp_taylor[14] = {
+	1.0, 1.0, 0.5, 0.16666666666666666, 0.041666666666666664, 0.0083333333333333332,
+	0.0013888888888888889, 0.00019841269841269841, 2.4801587301587302e-05,
+	2.7557319223985893e-06, 2.7557319223985888e-07, 2.505210838544172e-08,
+	2.08767569878681e-09, 1.6059043836821613e-10,
+};
+
+// 2^y for y >= 0: a degree 13 Taylor series of e^(f ln 2) for the fraction
+// f (relative error about 1e-13), scaled by 2^floor(y).
+static inline double fp_exp2(double y)
+{
+	double n = floor(y);
+	double x = (y - n) * FP_LN2;
+	double p = fp_exp_taylor[13];
+	for (int i = 12; i >= 0; i--) {
+		p = p * x + fp_exp_taylor[i];
+	}
+	return ldexp(p, (int)n);
+}
+
+// The dB resonance curve: k / k_max for resonance r (0..1).  With G the
+// gain at the cutoff relative to DC, (1 + k) / (4 - k) for an analog
+// 4-pole (and the TPT one), G = 2^(r log2(196)) / 4 runs from 1/4 (-12 dB)
+// to 49 (+33.8 dB, k = 3.9), and k = (4 G - 1) / (1 + G).
+static inline double fp_resonance_curve(double r)
+{
+	if (!(r > 0.0)) {
+		return 0.0;
+	}
+	if (r >= 1.0) {
+		return 1.0;
+	}
+	double e = fp_exp2(r * FP_CURVE_LOG2_RATIO);
+	return (e - 1.0) / ((1.0 + 0.25 * e) * FP_CURVE_K);
+}
+
 static double fp_state_value(VALUE state, long idx)
 {
 	double v = NUM2DBL(rb_ary_entry(state, idx));
@@ -75,26 +165,44 @@ static double fp_state_value(VALUE state, long idx)
 /*
  * Filters +buffer+ (SFloat, modified in place if marked inplace):
  *   four_pole(buffer, cutoff, resonance, state, sample_rate, k_max,
- *             compensation, drive, mix)
+ *             compensation, drive, mix, curve = 0, drive_mode = 0, clip = 0)
  *
- * +cutoff+ (Hz) and +resonance+ (0..1, times +k_max+ for the loop gain k)
- * are Numerics or NArrays of the buffer's length (read as float32).
- * +state+ is a 4-element Array of the integrator states, updated.
- * +drive+ 0 is linear.  +mix+ is 5 output gains for the cascade input and
- * the four stage outputs (lowpass 4: [0, 0, 0, 0, 1]).
+ * +cutoff+ (Hz) and +resonance+ (0..1, through the curve and times +k_max+
+ * for the loop gain k) are Numerics or NArrays of the buffer's length (read
+ * as float32).  +state+ is a 4-element Array of the integrator states,
+ * updated.  +drive+ 0 is linear.  +mix+ is 5 output gains for the cascade
+ * input and the four stage outputs (lowpass 4: [0, 0, 0, 0, 1]).  +curve+ is
+ * 0 (linear) or 1 (dB); +drive_mode+ 0 (input), 1 (stages), or 2
+ * (feedback); +clip+ 0 (soft) or 1 (hard), for the feedback mode.
  */
-static VALUE ruby_four_pole(VALUE self, VALUE buffer, VALUE cutoff, VALUE resonance, VALUE state,
-		VALUE sample_rate, VALUE k_max_v, VALUE comp_v, VALUE drive_v, VALUE mix_v)
+static VALUE ruby_four_pole(int argc, VALUE *argv, VALUE self)
 {
-	double rate = NUM2DBL(sample_rate);
+	if (argc < 9 || argc > 12) {
+		rb_raise(rb_eArgError, "wrong number of arguments (given %d, expected 9..12)", argc);
+	}
+	VALUE buffer = argv[0], cutoff = argv[1], resonance = argv[2], state = argv[3];
+	double rate = NUM2DBL(argv[4]);
 	if (!(rate > 0) || !isfinite(rate)) {
 		rb_raise(rb_eArgError, "Sample rate must be positive and finite");
 	}
-	double k_max = NUM2DBL(k_max_v);
-	double comp = NUM2DBL(comp_v);
-	double drive = NUM2DBL(drive_v);
+	double k_max = NUM2DBL(argv[5]);
+	double comp = NUM2DBL(argv[6]);
+	double drive = NUM2DBL(argv[7]);
+	VALUE mix_v = argv[8];
 	if (!isfinite(k_max) || !isfinite(comp) || !(drive >= 0) || !isfinite(drive)) {
 		rb_raise(rb_eArgError, "Filter parameters must be finite (and drive not negative)");
+	}
+	int curve = argc > 9 ? NUM2INT(argv[9]) : 0;
+	int drive_mode = argc > 10 ? NUM2INT(argv[10]) : FP_DRIVE_INPUT;
+	int clip = argc > 11 ? NUM2INT(argv[11]) : FP_CLIP_SOFT;
+	if (curve < 0 || curve > 1) {
+		rb_raise(rb_eArgError, "Resonance curve must be 0 (linear) or 1 (dB)");
+	}
+	if (drive_mode < FP_DRIVE_INPUT || drive_mode > FP_DRIVE_FEEDBACK) {
+		rb_raise(rb_eArgError, "Drive mode must be 0 (input), 1 (stages), or 2 (feedback)");
+	}
+	if (clip < FP_CLIP_SOFT || clip > FP_CLIP_HARD) {
+		rb_raise(rb_eArgError, "Clip must be 0 (soft) or 1 (hard)");
 	}
 
 	Check_Type(state, T_ARRAY);
@@ -130,57 +238,92 @@ static VALUE ruby_four_pole(VALUE self, VALUE buffer, VALUE cutoff, VALUE resona
 	double pi_over_rate = M_PI / rate;
 	double fc_max = rate * FP_MAX_CUTOFF_RATIO;
 	double inv_drive = drive > 0 ? 1.0 / drive : 0.0;
+	_Bool driven = drive > 0;
 
 	// Coefficients, recomputed only when the cutoff or resonance changes
+	// (the loop gain only when the resonance changes)
 	double last_fc = NAN, last_res = NAN;
-	double G = 0, one = 1, k = 0, inv = 1, in_gain = 1;
+	double g = 0, G = 0, G4 = 0, one = 1, k = 0, inv = 1, in_gain = 1;
 
 	for (size_t i = 0; i < length; i++) {
 		double fc = fc_ptr ? fc_ptr[i * fc_step] : fc_scalar;
 		double res = res_ptr ? res_ptr[i * res_step] : res_scalar;
 
 		if (fc != last_fc || res != last_res) {
-			last_fc = fc;
-			last_res = res;
-
-			if (!(fc >= FP_MIN_CUTOFF)) {
-				fc = FP_MIN_CUTOFF;
-			} else if (fc > fc_max) {
-				fc = fc_max;
-			}
-			if (!(res >= 0.0)) {
-				res = 0.0;
-			} else if (res > 1.0) {
-				res = 1.0;
+			if (res != last_res) {
+				last_res = res;
+				if (!(res >= 0.0)) {
+					res = 0.0;
+				} else if (res > 1.0) {
+					res = 1.0;
+				}
+				k = (curve ? fp_resonance_curve(res) : res) * k_max;
+				in_gain = 1.0 + comp * k;
 			}
 
-			double g = fp_tan(fc * pi_over_rate);
-			G = g / (1.0 + g);
-			one = 1.0 - G;
-			double G2 = G * G;
-			k = res * k_max;
-			inv = 1.0 / (1.0 + k * (G2 * G2));
-			in_gain = 1.0 + comp * k;
+			if (fc != last_fc) {
+				last_fc = fc;
+				if (!(fc >= FP_MIN_CUTOFF)) {
+					fc = FP_MIN_CUTOFF;
+				} else if (fc > fc_max) {
+					fc = fc_max;
+				}
+				g = fp_tan(fc * pi_over_rate);
+				G = g / (1.0 + g);
+				one = 1.0 - G;
+				double G2 = G * G;
+				G4 = G2 * G2;
+			}
+
+			inv = 1.0 / (1.0 + k * G4);
 		}
 
 		double x = data[i];
 		double sum = ((s0 * one * G + s1 * one) * G + s2 * one) * G + s3 * one;
 		double u = (x * in_gain - k * sum) * inv;
-		if (drive > 0) {
-			u = fp_tanh(u * drive) * inv_drive;
+
+		// Per-stage gains (all G unless the stages saturate)
+		double Ga = G, Gb = G, Gc = G, Gd = G;
+
+		if (driven) {
+			if (drive_mode == FP_DRIVE_INPUT) {
+				u = fp_tanh(u * drive) * inv_drive;
+			} else if (drive_mode == FP_DRIVE_FEEDBACK) {
+				double r = G4 * u + sum - comp * x;
+				double T = clip == FP_CLIP_HARD ? fp_hard_secant(r * drive) : fp_tanh_secant(r * drive);
+				double kT = k * T;
+				u = (x * (1.0 + comp * kT) - kT * sum) / (1.0 + kT * G4);
+			} else {
+				// Linear predictions of each stage's input difference
+				double p1 = G * (u - s0) + s0;
+				double p2 = G * (p1 - s1) + s1;
+				double p3 = G * (p2 - s2) + s2;
+				double p4 = G * (p3 - s3) + s3;
+				double ga = g * fp_tanh_secant((u - p1) * drive);
+				double gb = g * fp_tanh_secant((p1 - p2) * drive);
+				double gc = g * fp_tanh_secant((p2 - p3) * drive);
+				double gd = g * fp_tanh_secant((p3 - p4) * drive);
+				Ga = ga / (1.0 + ga);
+				Gb = gb / (1.0 + gb);
+				Gc = gc / (1.0 + gc);
+				Gd = gd / (1.0 + gd);
+				double sum2 = ((s0 * (1.0 - Ga) * Gb + s1 * (1.0 - Gb)) * Gc + s2 * (1.0 - Gc)) * Gd + s3 * (1.0 - Gd);
+				u = (x * in_gain - k * sum2) / (1.0 + k * (Ga * Gb * Gc * Gd));
+				u = fp_tanh(u * drive) * inv_drive;
+			}
 		}
 
 		double v, y1, y2, y3, y4;
-		v = G * (u - s0);
+		v = Ga * (u - s0);
 		y1 = v + s0;
 		s0 = y1 + v;
-		v = G * (y1 - s1);
+		v = Gb * (y1 - s1);
 		y2 = v + s1;
 		s1 = y2 + v;
-		v = G * (y2 - s2);
+		v = Gc * (y2 - s2);
 		y3 = v + s2;
 		s2 = y3 + v;
-		v = G * (y3 - s3);
+		v = Gd * (y3 - s3);
 		y4 = v + s3;
 		s3 = y4 + v;
 
@@ -218,13 +361,28 @@ static VALUE ruby_tanh(VALUE self, VALUE x)
 	return rb_float_new(fp_tanh(NUM2DBL(x)));
 }
 
+// Exposes the saturators' secant gains for specs: clip 0 soft, 1 hard.
+static VALUE ruby_secant(VALUE self, VALUE x, VALUE clip)
+{
+	double v = NUM2DBL(x);
+	return rb_float_new(NUM2INT(clip) == FP_CLIP_HARD ? fp_hard_secant(v) : fp_tanh_secant(v));
+}
+
+// Exposes the dB resonance curve (k / k_max for resonance r) for specs.
+static VALUE ruby_resonance_curve(VALUE self, VALUE r)
+{
+	return rb_float_new(fp_resonance_curve(NUM2DBL(r)));
+}
+
 void Init_fast_filter(void)
 {
 	VALUE mb = rb_define_module("MB");
 	VALUE sound = rb_define_module_under(mb, "Sound");
 	VALUE fast_filter = rb_define_module_under(sound, "FastFilter");
 
-	rb_define_module_function(fast_filter, "four_pole", ruby_four_pole, 9);
+	rb_define_module_function(fast_filter, "four_pole", ruby_four_pole, -1);
 	rb_define_module_function(fast_filter, "tan", ruby_tan, 1);
 	rb_define_module_function(fast_filter, "tanh", ruby_tanh, 1);
+	rb_define_module_function(fast_filter, "secant", ruby_secant, 2);
+	rb_define_module_function(fast_filter, "resonance_curve", ruby_resonance_curve, 1);
 }

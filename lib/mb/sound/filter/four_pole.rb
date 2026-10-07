@@ -14,19 +14,36 @@ module MB
       #
       # Behavior (measured; see the specs):
       # - 24 dB/octave; -12 dB at the cutoff without resonance.
-      # - +resonance+ 0..1 sets the loop gain k = resonance × #k_max.  By
-      #   default #k_max is MAX_K (3.9, just below the oscillation edge at
-      #   4), so like the SQ-80 the filter rings but never self-oscillates
+      # - +resonance+ 0..1 sets the loop gain k = curve(resonance) × #k_max.
+      #   By default #k_max is MAX_K (3.9, just below the oscillation edge
+      #   at 4), so like the SQ-80 the filter rings but never self-oscillates
       #   (peak about +37 dB over the passband at full resonance).
+      # - +resonance_curve: :db+ (default) makes the gain at the cutoff rise
+      #   linearly in dB, -12 dB at 0 to +33.8 dB at 1 (.resonance_curve; the
+      #   resonant peak about +2.7, +14.5, +27.8, +37 dB at 0.2, 0.5, 0.8,
+      #   1); :linear is k = resonance × #k_max (+7.5 dB at 0.5, +16.8 at
+      #   0.8).  .db_resonance converts a :linear value to the :db value
+      #   with the same sound (0.5 -> 0.33, 0.75 -> 0.51, 0.9 -> 0.68).
+      #   .quality_to_resonance maps a 2-pole Q to the resonance with
+      #   the same gain at the cutoff (GraphNode#lp4's +quality:+).
       # - Passband compensation (+compensation:+, default 0.375 like the
       #   CEM3379): full resonance loses about 6 dB of bass instead of 12.
       #   0 gives a classic Moog-style bass loss.
       # - +self_oscillate: true+ raises #k_max to SELF_OSCILLATE_K (4.3;
-      #   oscillation starts at resonance 4 / 4.3 ≈ 0.93) and turns on the
-      #   drive (1.0 unless given), whose saturation sets the amplitude.
-      # - +drive:+ (nil or 0 for linear) applies tanh(drive × u) / drive to
-      #   the cascade's input: unity gain for small signals, saturating above
-      #   about 1 / drive.
+      #   oscillation starts at resonance 0.74 on the dB curve, 0.93 linear)
+      #   and turns on the drive (1.0 unless given), whose saturation sets
+      #   the amplitude.
+      # - +drive:+ (nil or 0 for linear) is the saturation level, tanh(drive
+      #   × v) / drive: unity gain for small signals, saturating above about
+      #   1 / drive.  +drive_mode:+ says where: :input (default) on the
+      #   cascade's input; :stages in every OTA stage (and the input), as
+      #   each stage's drive current saturates; :feedback only on the
+      #   resonance feedback (y4 - c x; +clip: :soft+ tanh or :hard, a clamp
+      #   with a short knee), so the passband stays clean while the
+      #   resonance clips and buzzes (the Korg MS-20's diode-clipper idea on
+      #   this 4-pole; not an MS-20 filter emulation).  :stages and
+      #   :feedback default to drive 1.  Measurements and renders:
+      #   /app/tmp/listening/four_pole/README.md (round 2).
       # - +mode:+ picks an output tap mix (Oberheim Xpander style): :lp4
       #   (default), :lp2, :bp2, :bp4, :hp2, :hp4.  Compensation only
       #   applies to the lowpass modes.
@@ -66,18 +83,54 @@ module MB
         # Modes that use passband compensation by default.
         LOWPASS_MODES = [:lp4, :lp2].freeze
 
-        attr_reader :sample_rate, :cutoff, :resonance, :mode, :drive, :compensation, :k_max
+        # Resonance curves (the kernel's +curve+ argument): :db (default)
+        # makes the gain at the cutoff rise linearly in dB; :linear is the
+        # loop gain k = resonance × #k_max (round 1).
+        RESONANCE_CURVES = { linear: 0, db: 1 }.freeze
+
+        # Drive modes (the kernel's +drive_mode+): where the saturation is.
+        DRIVE_MODES = { input: 0, stages: 1, feedback: 2 }.freeze
+
+        # Clipper shapes for +drive_mode: :feedback+.
+        CLIPS = { soft: 0, hard: 1 }.freeze
+
+        # The dB curve's top loop gain, and log2(4 (1 + k) / (4 - k)) there
+        # (log2(196): the gain ratio at the cutoff between r = 1 and 0).
+        CURVE_K = 3.9
+        CURVE_LOG2_RATIO = 7.6147098441152083
+        LN2 = 0.69314718055994529
+
+        # 1 / i! for i = 0..13: the kernel's Taylor series for 2^y.
+        EXP_TAYLOR = [
+          1.0, 1.0, 0.5, 0.16666666666666666, 0.041666666666666664, 0.0083333333333333332,
+          0.0013888888888888889, 0.00019841269841269841, 2.4801587301587302e-05,
+          2.7557319223985893e-06, 2.7557319223985888e-07, 2.505210838544172e-08,
+          2.08767569878681e-09, 1.6059043836821613e-10,
+        ].freeze
+
+        attr_reader :sample_rate, :cutoff, :resonance, :mode, :drive, :compensation, :k_max,
+          :resonance_curve, :drive_mode, :clip
 
         # Creates a filter at +cutoff+ Hz with +resonance+ 0..1 (see the
         # class description for the options).
-        def initialize(cutoff: 1000.0, resonance: 0.0, mode: :lp4, drive: nil, self_oscillate: false, compensation: nil, sample_rate: 48000)
+        def initialize(
+          cutoff: 1000.0, resonance: 0.0, mode: :lp4, drive: nil, self_oscillate: false, compensation: nil,
+          resonance_curve: :db, drive_mode: :input, clip: :soft, sample_rate: 48000
+        )
           raise ArgumentError, "Unknown four-pole mode #{mode.inspect} (use one of #{MODES.keys.join(', ')})" unless MODES.include?(mode)
+          raise ArgumentError, "Unknown resonance curve #{resonance_curve.inspect} (use :db or :linear)" unless RESONANCE_CURVES.include?(resonance_curve)
+          raise ArgumentError, "Unknown drive mode #{drive_mode.inspect} (use :input, :stages, or :feedback)" unless DRIVE_MODES.include?(drive_mode)
+          raise ArgumentError, "Unknown clip #{clip.inspect} (use :soft or :hard)" unless CLIPS.include?(clip)
+          raise ArgumentError, 'clip: only applies to drive_mode: :feedback' if clip != :soft && drive_mode != :feedback
 
           @mode = mode
+          @resonance_curve = resonance_curve
+          @drive_mode = drive_mode
+          @clip = clip
           @self_oscillate = !!self_oscillate
           @k_max = @self_oscillate ? SELF_OSCILLATE_K : MAX_K
 
-          drive = 1.0 if @self_oscillate && (drive.nil? || drive == 0)
+          drive = 1.0 if (@self_oscillate || drive_mode != :input) && (drive.nil? || drive == 0)
           @drive = drive.nil? || drive == false ? 0.0 : Float(drive)
           raise ArgumentError, "Drive must be a positive number or nil (got #{drive.inspect})" unless @drive >= 0 && @drive.finite?
 
@@ -126,7 +179,7 @@ module MB
         # NArrays of the same length (read per sample).
         def dynamic_process(samples, cutoff:, resonance:)
           samples = samples.real if samples.is_a?(Numo::SComplex) || samples.is_a?(Numo::DComplex)
-          out = MB::Sound::FastFilter.four_pole(samples, cutoff, resonance, @state, @sample_rate, @k_max, @compensation, @drive, @mix)
+          out = MB::Sound::FastFilter.four_pole(samples, cutoff, resonance, @state, @sample_rate, @k_max, @compensation, @drive, @mix, *kernel_options)
           remember(cutoff, resonance)
           out
         end
@@ -134,7 +187,7 @@ module MB
         # Same as #dynamic_process, through the Ruby mirror (slow; for specs).
         def dynamic_process_ruby(samples, cutoff:, resonance:)
           samples = samples.real if samples.is_a?(Numo::SComplex) || samples.is_a?(Numo::DComplex)
-          out = self.class.process_ruby(samples, cutoff, resonance, @state, @sample_rate, @k_max, @compensation, @drive, @mix)
+          out = self.class.process_ruby(samples, cutoff, resonance, @state, @sample_rate, @k_max, @compensation, @drive, @mix, *kernel_options)
           remember(cutoff, resonance)
           out
         end
@@ -143,7 +196,7 @@ module MB
         # (the steady state of the linear filter at the last resonance).
         def reset(value = 0)
           value = value.to_f
-          k = @resonance.clamp(0.0, 1.0) * @k_max
+          k = loop_gain
           # Every stage holds the lowpass level, whatever the output mix
           dc = value * (1.0 + @compensation * k) / (1.0 + k)
           @state = [dc, dc, dc, dc]
@@ -161,7 +214,7 @@ module MB
         def response(omega)
           fc = @cutoff.clamp(MIN_CUTOFF, @sample_rate * MAX_CUTOFF_RATIO)
           g = Math.tan(Math::PI * fc / @sample_rate)
-          k = @resonance.clamp(0.0, 1.0) * @k_max
+          k = loop_gain
           z1 = omega.is_a?(Numo::NArray) ? Numo::NMath.exp(Numo::DComplex.cast(omega) * -1i) : CMath.exp(-1i * omega)
 
           # One TPT stage: g (1 + z^-1) / ((1 + g) - (1 - g) z^-1)
@@ -171,6 +224,14 @@ module MB
           u * (m[0] + m[1] * h + m[2] * h**2 + m[3] * h**3 + m[4] * h**4)
         end
 
+        # The loop gain k for +resonance+ (default: the current #resonance),
+        # through the #resonance_curve: 0 to #k_max.
+        def loop_gain(resonance = @resonance)
+          r = resonance.to_f.clamp(0.0, 1.0)
+          r = self.class.resonance_curve(r) if @resonance_curve == :db
+          r * @k_max
+        end
+
         # Filters +source+ with this filter in a GraphNode::FourPole at the
         # current cutoff and resonance (used by GraphNode#filter).
         def wrap(source, in_place: false)
@@ -178,20 +239,24 @@ module MB
         end
 
         def to_s
-          "#{@mode}(#{@cutoff.round(2)} Hz, r=#{@resonance.round(3)}#{@drive > 0 ? ", drive #{@drive}" : ''}#{@self_oscillate ? ', self-osc' : ''})"
+          drive = @drive > 0 ? ", drive #{@drive}#{@drive_mode == :input ? '' : " #{@drive_mode}"}#{@clip == :hard ? ' hard' : ''}" : ''
+          "#{@mode}(#{@cutoff.round(2)} Hz, r=#{@resonance.round(3)}#{@resonance_curve == :linear ? ' linear' : ''}#{drive}#{@self_oscillate ? ', self-osc' : ''})"
         end
 
         # The Ruby mirror of MB::Sound::FastFilter.four_pole: the same
         # arguments, the same operations in the same order, and the same
         # samples (specs check every sample).  Returns a new SFloat (the C
         # version filters an inplace SFloat in place).
-        def self.process_ruby(buffer, cutoff, resonance, state, sample_rate, k_max, comp, drive, mix)
+        def self.process_ruby(buffer, cutoff, resonance, state, sample_rate, k_max, comp, drive, mix, curve = 0, drive_mode = 0, clip = 0)
           rate = sample_rate.to_f
           raise ArgumentError, 'Sample rate must be positive and finite' unless rate > 0 && rate.finite?
           k_max = k_max.to_f
           comp = comp.to_f
           drive = drive.to_f
           raise ArgumentError, 'Filter parameters must be finite (and drive not negative)' unless k_max.finite? && comp.finite? && drive >= 0 && drive.finite?
+          raise ArgumentError, 'Resonance curve must be 0 (linear) or 1 (dB)' unless [0, 1].include?(curve)
+          raise ArgumentError, 'Drive mode must be 0 (input), 1 (stages), or 2 (feedback)' unless [0, 1, 2].include?(drive_mode)
+          raise ArgumentError, 'Clip must be 0 (soft) or 1 (hard)' unless [0, 1].include?(clip)
           raise ArgumentError, 'Four-pole state must have four elements' unless state.is_a?(Array) && state.length == 4
           raise ArgumentError, 'Four-pole mix must have five elements' unless mix.is_a?(Array) && mix.length == 5
 
@@ -211,10 +276,13 @@ module MB
           pi_over_rate = Math::PI / rate
           fc_max = rate * MAX_CUTOFF_RATIO
           inv_drive = drive > 0 ? 1.0 / drive : 0.0
+          driven = drive > 0
 
           last_fc = Float::NAN
           last_res = Float::NAN
+          g = 0.0
           g_ = 0.0
+          g4 = 0.0
           one = 1.0
           k = 0.0
           inv = 1.0
@@ -225,44 +293,78 @@ module MB
             res = res_arr ? res_arr[i] : res_scalar
 
             if fc != last_fc || res != last_res
-              last_fc = fc
-              last_res = res
-
-              if !(fc >= MIN_CUTOFF)
-                fc = MIN_CUTOFF
-              elsif fc > fc_max
-                fc = fc_max
-              end
-              if !(res >= 0.0)
-                res = 0.0
-              elsif res > 1.0
-                res = 1.0
+              # (NaN != NaN, like C, so NaN inputs recompute every sample)
+              if res != last_res
+                last_res = res
+                if !(res >= 0.0)
+                  res = 0.0
+                elsif res > 1.0
+                  res = 1.0
+                end
+                k = (curve == 1 ? resonance_curve(res) : res) * k_max
+                in_gain = 1.0 + comp * k
               end
 
-              g = tan(fc * pi_over_rate)
-              g_ = g / (1.0 + g)
-              one = 1.0 - g_
-              g2 = g_ * g_
-              k = res * k_max
-              inv = 1.0 / (1.0 + k * (g2 * g2))
-              in_gain = 1.0 + comp * k
+              if fc != last_fc
+                last_fc = fc
+                if !(fc >= MIN_CUTOFF)
+                  fc = MIN_CUTOFF
+                elsif fc > fc_max
+                  fc = fc_max
+                end
+                g = tan(fc * pi_over_rate)
+                g_ = g / (1.0 + g)
+                one = 1.0 - g_
+                g2 = g_ * g_
+                g4 = g2 * g2
+              end
+
+              inv = 1.0 / (1.0 + k * g4)
             end
 
             x = data[i]
             sum = ((s0 * one * g_ + s1 * one) * g_ + s2 * one) * g_ + s3 * one
             u = (x * in_gain - k * sum) * inv
-            u = tanh(u * drive) * inv_drive if drive > 0
 
-            v = g_ * (u - s0)
+            ga_ = gb_ = gc_ = gd_ = g_
+
+            if driven
+              if drive_mode == 0
+                u = tanh(u * drive) * inv_drive
+              elsif drive_mode == 2
+                r = g4 * u + sum - comp * x
+                t = secant(r * drive, clip)
+                kt = k * t
+                u = (x * (1.0 + comp * kt) - kt * sum) / (1.0 + kt * g4)
+              else
+                p1 = g_ * (u - s0) + s0
+                p2 = g_ * (p1 - s1) + s1
+                p3 = g_ * (p2 - s2) + s2
+                p4 = g_ * (p3 - s3) + s3
+                ga = g * secant((u - p1) * drive, 0)
+                gb = g * secant((p1 - p2) * drive, 0)
+                gc = g * secant((p2 - p3) * drive, 0)
+                gd = g * secant((p3 - p4) * drive, 0)
+                ga_ = ga / (1.0 + ga)
+                gb_ = gb / (1.0 + gb)
+                gc_ = gc / (1.0 + gc)
+                gd_ = gd / (1.0 + gd)
+                sum2 = ((s0 * (1.0 - ga_) * gb_ + s1 * (1.0 - gb_)) * gc_ + s2 * (1.0 - gc_)) * gd_ + s3 * (1.0 - gd_)
+                u = (x * in_gain - k * sum2) / (1.0 + k * (ga_ * gb_ * gc_ * gd_))
+                u = tanh(u * drive) * inv_drive
+              end
+            end
+
+            v = ga_ * (u - s0)
             y1 = v + s0
             s0 = y1 + v
-            v = g_ * (y1 - s1)
+            v = gb_ * (y1 - s1)
             y2 = v + s1
             s1 = y2 + v
-            v = g_ * (y2 - s2)
+            v = gc_ * (y2 - s2)
             y3 = v + s2
             s2 = y3 + v
-            v = g_ * (y3 - s3)
+            v = gd_ * (y3 - s3)
             y4 = v + s3
             s3 = y4 + v
 
@@ -275,6 +377,83 @@ module MB
           end
 
           out
+        end
+
+        # The kernel's dB resonance curve: k / k_max for resonance +r+
+        # (0..1; see the class description).  G = 2^(r log2(196)) / 4 is the
+        # gain at the cutoff relative to DC, from 1/4 (-12 dB) to 49 (+33.8
+        # dB), and k = (4 G - 1) / (1 + G), scaled to 1 at k = CURVE_K.
+        def self.resonance_curve(r)
+          return 0.0 unless r > 0.0
+          return 1.0 if r >= 1.0
+          e = exp2(r * CURVE_LOG2_RATIO)
+          (e - 1.0) / ((1.0 + 0.25 * e) * CURVE_K)
+        end
+
+        # The resonance on the :db curve that gives the same loop gain as
+        # +linear+ on the :linear curve (round 1's mapping), to retune
+        # patches written for it: log(4 (1 + K) / (4 - K)) / log(196) with
+        # K = 3.9 × linear.  0.3 -> 0.21, 0.5 -> 0.33, 0.6 -> 0.40, 0.7 ->
+        # 0.47, 0.75 -> 0.51, 0.8 -> 0.55, 0.9 -> 0.68, 0.95 -> 0.79, 1 -> 1.
+        # The inverse is .linear_resonance.
+        def self.db_resonance(linear)
+          linear = linear.to_f
+          return 0.0 unless linear > 0
+          return 1.0 if linear >= 1
+          k = CURVE_K * linear
+          (Math.log(4 * (1 + k) / (4 - k)) / Math.log(196)).clamp(0.0, 1.0)
+        end
+
+        # The resonance on the :linear curve that gives the same loop gain as
+        # +db+ on the :db curve (.resonance_curve; the inverse of
+        # .db_resonance).
+        def self.linear_resonance(db)
+          resonance_curve(db.to_f)
+        end
+
+        # The resonance (0..1) that gives this filter the gain at the cutoff
+        # (relative to DC) of a 2-pole filter of quality +q+, which is q:
+        # log(4 q) / log(196) with the :db curve (q 0.25 or less gives 0,
+        # 0.707 gives 0.19, 4 gives 0.39, 10 gives 0.70, 49 or more gives
+        # 1), or the same loop gain with the :linear curve.  +q+ may be a
+        # number or an NArray.
+        def self.quality_to_resonance(q, curve: :db)
+          if q.is_a?(Numo::NArray)
+            r = (Numo::NMath.log(Numo::DFloat.cast(q).clip(0.25, nil) * 4) * (1.0 / Math.log(196))).clip(0.0, 1.0)
+            r = r.map { |v| resonance_curve(v) } if curve == :linear
+            return Numo::SFloat.cast(r)
+          end
+
+          q = q.to_f
+          r = q > 0.25 ? (Math.log(4 * q) / Math.log(196)).clamp(0.0, 1.0) : 0.0
+          curve == :linear ? resonance_curve(r) : r
+        end
+
+        # The kernel's 2^y for y >= 0 (a Taylor series for the fraction).
+        def self.exp2(y)
+          n = y.floor
+          x = (y - n) * LN2
+          p = EXP_TAYLOR[13]
+          12.downto(0) { |i| p = p * x + EXP_TAYLOR[i] }
+          Math.ldexp(p, n)
+        end
+
+        # The kernel's secant gains (saturator(x) / x): +clip+ 0 for the
+        # soft saturator (.tanh), 1 for the hard clipper (linear to 0.8, a
+        # quadratic knee to 1 at 1.2).
+        def self.secant(x, clip)
+          a = x.abs
+          if clip == 1
+            return 1.0 if a <= 0.8
+            if a < 1.2
+              d = a - 0.8
+              return (a - d * d * 1.25) / a
+            end
+            return 1.0 / a
+          end
+          return 1.0 / a if a > 3.0
+          x2 = x * x
+          (27.0 + x2) / (27.0 + 9.0 * x2)
         end
 
         # The kernel's tan approximation (see fast_filter.c): a [5/4] Pade
@@ -305,6 +484,11 @@ module MB
         private_class_method :signal_input
 
         private
+
+        # The kernel's curve, drive mode, and clip arguments.
+        def kernel_options
+          [RESONANCE_CURVES.fetch(@resonance_curve), DRIVE_MODES.fetch(@drive_mode), CLIPS.fetch(@clip)]
+        end
 
         # Keeps the last cutoff and resonance (for #reset, #response, #to_s).
         def remember(cutoff, resonance)

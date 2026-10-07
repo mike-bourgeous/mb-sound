@@ -147,6 +147,47 @@ module MB
           { quality: @quality, resonance: @gm_input }.compact
         end
       end
+
+      # A 0..1 resonance amount for 4-pole filters that follows resonance
+      # (CC 71; see Notes#reso): the base amount at 64, linear down to 0 at
+      # raw 0 and up to 1 at 127 (the base is clamped to 0..1 first).
+      class Resonance
+        include FilterParamNode
+
+        # The base amount (a number or node).
+        attr_reader :amount
+
+        def initialize(amount, control:, sample_rate: 48000)
+          @sample_rate = sample_rate.to_f
+          @amount = input(amount)
+          @gm_source = control
+          @gm_input = nil
+          @buf = nil
+          @node_type_name = 'Notes Resonance'
+        end
+
+        def sample(count)
+          return nil unless start(@amount, count)
+          @buf.inplace.clip(0.0, 1.0)
+
+          if @gm_input
+            pos = @gm_input.sample(count)
+            return nil if pos.nil? || pos.length < count
+
+            # base + pos (1 - base) above the center, base (1 + pos) below
+            up = pos.clip(0.0, 1.0)
+            down = pos.clip(-1.0, 0.0)
+            @buf.inplace * (down - up + 1.0)
+            @buf.inplace + up
+          end
+
+          @buf.not_inplace!
+        end
+
+        def sources
+          { amount: @amount, control: @gm_input }.compact
+        end
+      end
     end
   end
 end
