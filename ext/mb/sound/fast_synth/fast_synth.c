@@ -895,6 +895,34 @@ static inline void sync_shape(enum bl_wave wt, double w, double p, double *v, do
 	*s = bl_slope(wt, u, 0) * k;
 }
 
+// Like bl_crossing, but a phase on a breakpoint is always on its right
+// side (the value after it going forward), whichever way the phase moves,
+// so soft sync can reverse on an edge: a backward step starting exactly on
+// +b+ crosses it at once (0), and one ending within BL_EPS of +b+ (where
+// the phase snaps onto it) doesn't cross it.  Forward steps are as in
+// bl_crossing.
+static inline double sync_crossing(double e, double d, double b)
+{
+	if (d >= 0) {
+		return bl_crossing(e, d, b);
+	}
+
+	double dist = e - b;
+	if (dist < 0) {
+		dist += 1.0;
+	}
+	if (dist == 0) {
+		return 0;
+	}
+
+	double ad = -d;
+	if (ad >= 1.0 || dist >= ad - BL_EPS) {
+		return -1;
+	}
+
+	return dist / ad;
+}
+
 // Moves phase *p by +vel+ cycles per sample for +dur+ samples, adding an
 // event for every breakpoint crossed; the segment ends +end_t+ samples
 // before the current sample.  Returns nothing; updates *p.
@@ -904,7 +932,7 @@ static inline void sync_move(struct bl_breakpoint *bp, int nbp, double *p, doubl
 	double move = vel * dur;
 	if (bl && move != 0) {
 		for (int j = 0; j < nbp; j++) {
-			double f = bl_crossing(*p, move, bp[j].pos);
+			double f = sync_crossing(*p, move, bp[j].pos);
 			if (f < 0) {
 				continue;
 			}

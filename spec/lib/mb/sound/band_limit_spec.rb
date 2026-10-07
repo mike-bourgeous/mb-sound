@@ -415,6 +415,17 @@ RSpec.describe(MB::Sound::BandLimit) do
       expect(coherent_db(f.hz.pulse(0.3).sync(ratio: 1.7), k)).to be < -95
     end
 
+    it 'gives clean soft sync for squares, which reverse on their edge at phase 0' do
+      # Soft sync brings the phase back to its start (0, the square's edge)
+      # every two master cycles; it once crossed the edge backward without
+      # changing the naive value, spiking to 3 (-20 to -30 dB aliasing)
+      k = 682
+      f = k * 48000.0 / 65536
+      tone = f.hz.square.softsync(ratio: 2.37)
+      expect(coherent_db(tone, k / 2)).to be < -95
+      expect(f.hz.square.softsync(ratio: 2.37).sample(4800).abs.max).to be < 1.6
+    end
+
     it 'reduces aliasing of synced triangles and sines' do
       k = 301
       f = k * 48000.0 / 65536

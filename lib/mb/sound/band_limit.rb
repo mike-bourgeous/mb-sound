@@ -652,12 +652,29 @@ module MB
         [shape(wave_type, u), slope(wave_type, u) * k]
       end
 
+      # Like .crossing, but a phase on a breakpoint is always on its right
+      # side, whichever way it moves (see sync_crossing in fast_synth.c):
+      # a backward step starting on +b+ crosses it at once (0.0), and one
+      # ending within EPS of it doesn't cross it.
+      def self.sync_crossing(e, d, b)
+        return crossing(e, d, b) if d >= 0
+
+        dist = e - b
+        dist += 1.0 if dist < 0
+        return 0.0 if dist == 0
+
+        ad = -d
+        return nil if ad >= 1.0 || dist >= ad - EPS
+
+        dist / ad
+      end
+
       # See sync_move in fast_synth.c; returns the new phase.
       def self.sync_move(points, p, vel, dur, end_t, acc, pos, blep, blamp, os, taps, bl)
         move = vel * dur
         if bl && move != 0
           points.each do |bpos, bdv, bds, _|
-            f = crossing(p, move, bpos)
+            f = sync_crossing(p, move, bpos)
             next if f.nil?
 
             dv = move > 0 ? bdv : -bdv
