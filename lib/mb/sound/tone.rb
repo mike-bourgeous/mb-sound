@@ -1005,11 +1005,18 @@ module MB
       #
       # +amount+ is in radians of phase modulation per unit of output (a
       # number or a node, read every sample; nil removes feedback).  A sine
-      # brightens towards a saw: about 0.5 rad adds soft low harmonics,
-      # 1 to 1.5 rad is saw-like (harmonics falling about 6 dB per octave,
-      # the first few a little weaker), and above about 1.6 rad the loop
-      # turns chaotic and noisy (around pi it is mostly noise).  Negative
-      # amounts give the odd-ish, square-leaning family.
+      # brightens towards a saw (measured at 125 Hz, H2/H3 relative to the
+      # fundamental; a saw is -6.0/-9.5 dB):
+      #
+      #     0.5 rad   -12.5/-21.5 dB, harmonics above -60 dB to the 9th
+      #     1.0 rad    -8.1/-12.9 dB, to the 36th
+      #     1.5 rad    -7.0/-11.0 dB, to the 104th (a saw-like tone)
+      #     2.0 rad    -6.6/-10.5 dB, to the 162nd (brightest clean setting)
+      #
+      # Between about 2.1 and 2.2 rad the loop turns chaotic: a noisy buzz
+      # with strong content near Nyquist (non-harmonic power -10 to -5 dB
+      # from 2.2 rad up), as on a DX7 at full feedback.  Negative amounts
+      # give the same harmonic levels.
       #
       # +gain:+ (a number or node, default 1) is the operator's output level
       # inside the loop, e.g. its envelope: the tone outputs the enveloped
@@ -1023,12 +1030,16 @@ module MB
       # #sync, #noise, or wavetables; those raise an ArgumentError when the
       # tone starts).  It works with #fm, #pm, #reset (key sync), and
       # timeline locks; resets jump the phase but keep the feedback history,
-      # so the loop doesn't restart from silence.  The cost is the same for
-      # every amount (one sin and a few multiplies per sample; a little
-      # more than a plain sine), and feedback(0) plays a plain sine.
+      # so the loop doesn't restart from silence.  feedback(0) plays a plain
+      # sine (at the feedback kernel's cost).
       #
-      # Feedback raises the bandwidth like FM: a 1.5 rad loop at 1 kHz
-      # aliases audibly; #oversample helps.  See .dx7_feedback for the DX7's
+      # Feedback raises the bandwidth like FM, so high notes alias: at 1 kHz
+      # the worst alias is -103 dB at 1.0 rad, -59 dB at 1.5 rad, -30 dB at
+      # 2.0 rad (a band-limited ramp: -41 dB); at 4 kHz -46 dB at 1.0 rad
+      # and -27 dB at 1.5.  `oversample(4)` brings 1.5 rad at 1 kHz to -135
+      # dB (bin/aliasing.rb 'p.feedback(1.5)').  Cost: about 28 ns per
+      # sample whatever the amount (a plain sine: 21 ns; nodes for the
+      # amount and gain add their own cost).  See .dx7_feedback for the DX7's
       # 0-7 feedback setting in radians.  Also available as #fb.
       #
       # Examples (bin/sound.rb):
