@@ -51,6 +51,35 @@ RSpec.describe(MB::Sound::FastWavetable, aggregate_failures: true) do
       end
     end
 
+    it 'matches the Ruby mirror with wrapping scan positions' do
+      Numo::NArray.srand(5)
+      edges = Numo::SFloat.cast(Array.new(n) { |i| [0, 1, 1.5, 2, -0.5, -1, 4.0 / 3, 1.25, Float::NAN, 1e30, -1e30, -1e-30][i % 12] })
+      cases = [
+        [440.0, 0, nil, rand_input(-3.5, 3.5)],
+        [rand_input(20, 12000), rand_input(-3, 3), rand_input(0, 1), Numo::SFloat.new(n).seq * 0.02 - 3],
+        [220.0, 0, nil, edges],
+        [rand_input(20, 20000), 0.5, 0.3, -1.7],
+      ]
+
+      cycle_tables.merge(one_frame: w.from_harmonics([1, 0.5, 0.25])).each do |name, t|
+        w::INTERPOLATIONS.each_key do |interp|
+          cases.each_with_index do |(f, pm, width, scan), ci|
+            st1 = [0.3]
+            ts1 = [0.0, 0.0, 0, 0.0, 0.0]
+            st2 = st1.dup
+            ts2 = ts1.dup
+
+            a = t.oscillate(out_buffer(t).inplace!, f, 1 / 48000.0, 0.7, 0.1, st1, ts1, pm, width, scan, interp, 48000, true, scan_wrap: true).not_inplace!
+            b = t.oscillate_ruby(out_buffer(t), f, 1 / 48000.0, 0.7, 0.1, st2, ts2, pm, width, scan, interp, 48000, true, scan_wrap: true)
+
+            expect(a.to_a).to eq(b.to_a), "#{name} #{interp} case #{ci}: max difference #{(a - b).abs.max}"
+            expect(st1).to eq(st2)
+            expect(ts1).to eq(ts2)
+          end
+        end
+      end
+    end
+
     it 'continues smoothly across buffers' do
       t = w[:saw]
       st = [0.0]
@@ -100,6 +129,31 @@ RSpec.describe(MB::Sound::FastWavetable, aggregate_failures: true) do
 
               a = t.sync(out_buffer(t), f, 1 / 48000.0, 0.9, 0.05, s1, r1, pulses, soft, width, scan, interp, 48000, true, t.mipped?).not_inplace!
               b = t.sync_ruby(out_buffer(t), f, 1 / 48000.0, 0.9, 0.05, s2, r2, pulses, soft, width, scan, interp, 48000, true, t.mipped?)
+              expect(a.to_a).to eq(b.to_a), "#{t} #{interp} #{soft} #{ci}: max difference #{(a - b).abs.max}"
+              expect(s1).to eq(s2)
+              expect(r1.to_a).to eq(r2.to_a)
+            end
+          end
+        end
+      end
+    end
+
+    it 'matches the Ruby mirror with wrapping scan positions' do
+      Numo::NArray.srand(6)
+      pulses = Numo::SFloat.zeros(n)
+      pulses[(0...n).step(29).to_a] = rand_input(0.01, 1)[(0...n).step(29).to_a]
+
+      [w[:basic], w.from_samples(Numo::SFloat.new(3, 64).rand(-1, 1), mips: false), w.from_harmonics([[1, 0.5], [0.3, 1, 0.2]], complex: true)].each do |t|
+        w::INTERPOLATIONS.each_key do |interp|
+          [false, true].each do |soft|
+            [[1000.0, nil, 1.2], [rand_input(100, 8000), rand_input(0.1, 0.9), rand_input(-2.5, 2.5)]].each_with_index do |(f, width, scan), ci|
+              s1 = [0.25, 0.0, 1.0, 3, 0]
+              r1 = Numo::DFloat.zeros(MB::Sound::BandLimit::SYNC_TAPS * (t.complex? ? 2 : 1))
+              s2 = s1.dup
+              r2 = r1.dup
+
+              a = t.sync(out_buffer(t), f, 1 / 48000.0, 0.9, 0.05, s1, r1, pulses, soft, width, scan, interp, 48000, true, t.mipped?, scan_wrap: true).not_inplace!
+              b = t.sync_ruby(out_buffer(t), f, 1 / 48000.0, 0.9, 0.05, s2, r2, pulses, soft, width, scan, interp, 48000, true, t.mipped?, scan_wrap: true)
               expect(a.to_a).to eq(b.to_a), "#{t} #{interp} #{soft} #{ci}: max difference #{(a - b).abs.max}"
               expect(s1).to eq(s2)
               expect(r1.to_a).to eq(r2.to_a)
@@ -160,6 +214,27 @@ RSpec.describe(MB::Sound::FastWavetable, aggregate_failures: true) do
                 expect(a.to_a).to eq(b.to_a), "#{name} #{interp} #{wrap} #{inc.class}: max difference #{(a - b).abs.max}"
                 expect(s1).to eq(s2)
               end
+            end
+          end
+        end
+      end
+    end
+
+    it 'matches the Ruby mirror with wrapping scan positions' do
+      Numo::NArray.srand(7)
+      phase = rand_input(-1.5, 2.5)
+      scan = rand_input(-3.2, 3.2)
+
+      cycle_tables.each do |name, t|
+        w::INTERPOLATIONS.each_key do |interp|
+          [:wrap, :shape].each do |wrap|
+            [false, nil].each do |inc|
+              s1 = [0.25, 1, 0.003, 2]
+              s2 = s1.dup
+              a = t.lookup(out_buffer(t), phase, inc, scan, interp, 48000, wrap, s1, scan_wrap: true)
+              b = t.lookup_ruby(out_buffer(t), phase, inc, scan, interp, 48000, wrap, s2, scan_wrap: true)
+              expect(a.to_a).to eq(b.to_a), "#{name} #{interp} #{wrap} #{inc.class}: max difference #{(a - b).abs.max}"
+              expect(s1).to eq(s2)
             end
           end
         end

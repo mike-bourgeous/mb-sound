@@ -226,6 +226,37 @@ RSpec.describe(MB::Sound::Tone, '#wavetable', aggregate_failures: true) do
       expect(half).to all_be_within(1e-4).of_array(sine * 0.5 + tri * 0.5)
     end
 
+    it 'gives the same samples in C and Ruby with a wrapping scan' do
+      expect_c_and_ruby { 440.hz.wavetable(:basic, scan: 0.7.hz.phasor * 3 - 1, scan_wrap: true) }
+      expect_c_and_ruby { 440.hz.wavetable(:pulses, scan: 1.3, scan_wrap: true).pwm(3.hz.lfo.at(0.2..0.8)) }
+      expect_c_and_ruby { 220.hz.wavetable(:basic, scan: 2.hz.lfo.at(-1..2.5), scan_wrap: true).sync(ratio: 2.5) }
+      expect_c_and_ruby { 330.hz.wavetable(:basic, scan: 1.2, scan_wrap: true).reset(4.hz.lfo.square.at(0..1), to: Math::PI / 2) }
+    end
+
+    it 'clamps the scan by default, or wraps it around with scan_wrap: true' do
+      clamped = 100.hz.wavetable(:basic, scan: 4.0 / 3)
+      wrapped = 100.hz.wavetable(:basic, scan: 4.0 / 3, scan_wrap: true)
+      expect(clamped).not_to be_scan_wrap
+      expect(wrapped).to be_scan_wrap
+      expect(clamped.sample(480)).to all_be_within(1e-4).of_array(100.hz.wavetable(:saw).sample(480))
+      expect(wrapped.sample(480)).to all_be_within(1e-4).of_array(100.hz.sine.sample(480))
+      expect(100.hz.wavetable(:basic, scan: 1, scan_wrap: true).sample(480)).to all_be_within(1e-4).of_array(100.hz.wavetable(:saw).sample(480))
+      expect(MB::Sound::C3.wavetable(:basic, scan: 1.5, scan_wrap: true)).to be_scan_wrap
+    end
+
+    it 'morphs through the wrap without a jump when a phasor scans past the last frame' do
+      # 4 frames: a period of 4/3, so the phasor's wrap from 4/3 to 0 lands
+      # on the same timbre (sine)
+      tone = 50.hz.wavetable(:basic, scan: 1.hz.phasor * (4.0 / 3), scan_wrap: true)
+      data = Numo::SFloat.cast(Numo::NArray.concatenate(Array.new(80) { tone.sample(600).dup }))
+      # Compare each cycle (960 samples) with its neighbors: no cycle changes abruptly
+      cycles = data.reshape(50, 960)
+      diffs = (1...50).map { |i| (cycles[i, true] - cycles[i - 1, true]).abs.max }
+      expect(diffs.max).to be < 0.25
+      # The cycle where the phasor wraps (cycle 50 of each second) is close to a sine
+      expect(cycles[0, true]).to all_be_within(0.1).of_array(50.hz.sine.sample(960))
+    end
+
     it 'keeps a steady level through a sweep across levels' do
       sweep = 2.hz.ramp.lfo.at(0..1)
       freq = (sweep * 6).proc { |v| 2**v * 100 } # 100 Hz to 6.4 kHz

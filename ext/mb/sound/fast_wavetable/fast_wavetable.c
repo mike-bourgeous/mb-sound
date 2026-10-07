@@ -121,6 +121,7 @@ struct wt_table {
 	long spec_cols;
 	long harmonics[WT_MAX_LEVELS];
 	int taper; // 1: Lanczos sigma
+	int scan_wrap; // 1: scan positions wrap around (see wt_frames)
 };
 
 // The sinc kernel (Wavetable::SINC_KERNEL: [table DFloat, half, resolution,
@@ -183,8 +184,8 @@ static int wt_read_levels(VALUE datas, VALUE counts, struct wt_level *levels, lo
 static void wt_read_table(VALUE spec, struct wt_table *t)
 {
 	Check_Type(spec, T_ARRAY);
-	if (RARRAY_LEN(spec) != 18) {
-		rb_raise(rb_eArgError, "A wavetable kernel spec has 18 elements");
+	if (RARRAY_LEN(spec) != 19) {
+		rb_raise(rb_eArgError, "A wavetable kernel spec has 19 elements");
 	}
 
 	t->mode = NUM2INT(rb_ary_entry(spec, 0));
@@ -224,6 +225,7 @@ static void wt_read_table(VALUE spec, struct wt_table *t)
 	t->spectra = NULL;
 	t->spec_cols = 0;
 	t->taper = NUM2INT(rb_ary_entry(spec, 17));
+	t->scan_wrap = NUM2INT(rb_ary_entry(spec, 18)) != 0;
 	if (!NIL_P(spectra)) {
 		if (CLASS_OF(spectra) != numo_cDComplex || RNARRAY_NDIM(spectra) != 2 || !RTEST(nary_check_contiguous(spectra)) ||
 				(long)RNARRAY_SHAPE(spectra)[0] != t->frames) {
@@ -372,9 +374,12 @@ static inline __attribute__((always_inline)) double wt_interpolate(const float *
 	}
 }
 
-// The frames around +scan+ (0..1, clamped): *fa, *fb (-1 for one frame),
-// and the blend *fs.
-static inline __attribute__((always_inline)) void wt_frames(long count, double scan, long *fa, long *fb, double *fs)
+// The frames around +scan+: *fa, *fb (-1 for one frame), and the blend
+// *fs.  Frame k sits at k / (count - 1), so 0 is the first and 1 the last.
+// Without +wrap+ the scan is clamped to 0..1.  With +wrap+ it repeats every
+// count / (count - 1): from 1 to 1 + 1 / (count - 1) the last frame morphs
+// into the first (one more frame step), and so on.
+static inline __attribute__((always_inline)) void wt_frames(long count, double scan, int wrap, long *fa, long *fb, double *fs)
 {
 	if (count == 1) {
 		*fa = 0;
@@ -384,6 +389,16 @@ static inline __attribute__((always_inline)) void wt_frames(long count, double s
 	}
 
 	double f = scan * (double)(count - 1);
+	if (wrap && f == f && fabs(f) < 4.0e18) {
+		f = wt_wrap(f, (double)count);
+		if (f >= (double)count) f = 0; // rounding of tiny negative values
+		if (f >= (double)(count - 1)) {
+			*fa = count - 1;
+			*fb = 0;
+			*fs = f - (double)(count - 1);
+			return;
+		}
+	}
 	if (!(f >= 0)) f = 0; // also NaN
 	if (f > count - 1) f = (double)(count - 1);
 	double fl = wt_floor(f);
@@ -450,7 +465,7 @@ static inline __attribute__((always_inline)) void wt_select(const struct wt_tabl
 	sel->m = m;
 	sel->scan = scan;
 	sel->valid = 1;
-	wt_frames(t->frames, scan, &sel->fa, &sel->fb, &sel->fs);
+	wt_frames(t->frames, scan, t->scan_wrap, &sel->fa, &sel->fb, &sel->fs);
 
 	// The first level with m <= hi (the last for anything above), by
 	// binary search (hi rises; sync levels are many)
@@ -522,7 +537,7 @@ static inline double wt_half_mean(const struct wt_table *t, double scan)
 {
 	long fa, fb;
 	double fs;
-	wt_frames(t->frames, scan, &fa, &fb, &fs);
+	wt_frames(t->frames, scan, t->scan_wrap, &fa, &fb, &fs);
 	if (fb < 0) {
 		return t->half_means[fa];
 	}

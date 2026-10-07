@@ -284,7 +284,7 @@ module MB
       end
 
       # A wavetable Tone at this pitch (see Tone#wavetable).
-      def wavetable(table, scan: nil, interpolation: nil) = tone.wavetable(table, scan: scan, interpolation: interpolation)
+      def wavetable(table, scan: nil, interpolation: nil, scan_wrap: false) = tone.wavetable(table, scan: scan, interpolation: interpolation, scan_wrap: scan_wrap)
 
       # Shortcuts for a sine Tone at this pitch with a reset input
       # (Tone#reset), never reset (Tone#free), or a random phase

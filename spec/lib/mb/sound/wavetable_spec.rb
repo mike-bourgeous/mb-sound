@@ -369,6 +369,59 @@ RSpec.describe(MB::Sound::Wavetable, aggregate_failures: true) do
       expect(t.value_at(0.1, scan: -1)).to eq(t.value_at(0.1, scan: 0))
       expect(t.value_at(0.1, scan: 2)).to eq(t.value_at(0.1, scan: 1))
     end
+
+    context 'with wrapping scan positions' do
+      # Frames 1, 2, 3, 4 (DC levels) at scan 0, 1/3, 2/3, 1; the wrap
+      # period is 4/3
+      let(:t) { w.from_samples([[1] * 8, [2] * 8, [3] * 8, [4] * 8], mips: false, align: false) }
+
+      def at(scan) = t.value_at(0.1, scan: scan, scan_wrap: true)
+
+      it 'keeps 0..1 as without wrapping, with 1 the last frame' do
+        [0, 0.1, 1.0 / 3, 0.5, 2.0 / 3, 0.9, 1].each do |s|
+          expect(at(s)).to eq(t.value_at(0.1, scan: s)), "scan #{s}"
+        end
+        expect(at(1)).to be_within(1e-6).of(4)
+      end
+
+      it 'morphs the last frame into the first over one more frame step' do
+        expect(at(1 + 1.0 / 6)).to be_within(1e-6).of(2.5)
+        expect(at(1 + 1.0 / 12)).to be_within(1e-6).of(3.25)
+        expect(at(4.0 / 3)).to be_within(1e-6).of(1)
+        expect(at(4.0 / 3 + 1.0 / 3)).to be_within(1e-6).of(2)
+      end
+
+      it 'repeats every count / (count - 1), negative positions too' do
+        [0.05, 0.4, 0.95, 1.2].each do |s|
+          [-2, -1, 1, 3].each do |k|
+            expect(at(s + k * 4.0 / 3)).to be_within(1e-5).of(at(s)), "scan #{s} + #{k} periods"
+          end
+        end
+        expect(at(-1.0 / 6)).to be_within(1e-6).of(2.5)
+        expect(at(-1.0 / 3)).to be_within(1e-6).of(4)
+      end
+
+      it 'blends at the same rate per unit of scan across the wrap as between frames' do
+        (0..10).each do |i|
+          x = i / 10.0
+          expect(at(x / 3)).to be_within(1e-5).of(1 + x) # frame 0 -> 1
+          expect(at(1 + x / 3)).to be_within(1e-5).of(4 - 3 * x) # frame 3 -> 0
+        end
+      end
+
+      it 'treats NaN and huge positions as without wrapping' do
+        expect(at(Float::NAN)).to eq(t.value_at(0.1, scan: 0))
+        expect(at(1e30)).to eq(t.value_at(0.1, scan: 1))
+        expect(at(-1e30)).to eq(t.value_at(0.1, scan: 0))
+      end
+
+      it 'changes nothing for a one-frame table' do
+        one = w[:saw]
+        [-1.3, 0.2, 2.7].each do |s|
+          expect(one.value_at(0.1, scan: s, scan_wrap: true)).to eq(one.value_at(0.1))
+        end
+      end
+    end
   end
 
   describe '#save' do

@@ -58,6 +58,15 @@ RSpec.describe(MB::Sound::GraphNode::Wavetable, aggregate_failures: true) do
       expect(phases(0.1, 0.2).phase_table(t, scan: phases(0, 1)).sample(2)).to all_be_within(1e-6).of_array([1, 3])
     end
 
+    it 'wraps scan positions around with scan_wrap: true' do
+      t = w.from_samples([[1, 1, 1, 1], [3, 3, 3, 3]], mips: false, align: false)
+      # 2 frames: a period of 2, the last frame morphing back into the first from 1 to 2
+      expect(phases(0.1, 0.2, 0.3).phase_table(t, scan: phases(1.5, 2.5, -0.5), scan_wrap: true).sample(3)).to all_be_within(1e-6).of_array([2, 2, 2])
+      expect(phases(0.1, 0.2).phase_table(t, scan: phases(1.75, 2.25), scan_wrap: true).sample(2)).to all_be_within(1e-6).of_array([1.5, 1.5])
+      expect(phases(0.1).phase_table(t, scan: 1.75).sample(1)).to all_be_within(1e-6).of_array([3])
+      expect(phases(0.1).waveshape(t, scan: 2.0, scan_wrap: true)).to be_scan_wrap
+    end
+
     it 'scans 0..1 with a Tone that has no amplitude' do
       scan = 1.hz.triangle
       100.hz.phasor.phase_table(:basic, scan: scan)
