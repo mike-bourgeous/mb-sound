@@ -100,7 +100,7 @@ module MB
         # rings strongly and keeps most of the bass (about -6 dB, from the
         # CEM3379's passband compensation; +compensation: 0+ gives the
         # classic 12 dB loss).  +self_oscillate: true+ lets the top of the
-        # resonance range (above about 0.93) oscillate, with the drive's
+        # resonance range (above about 0.74; 0.93 with the linear curve) oscillate, with the drive's
         # saturation (+drive:+ 1 unless given) setting the level.  +drive:+
         # (nil = linear) is the saturation level (unity gain for small
         # signals, limited above about 1 / drive), and +drive_mode:+ where it

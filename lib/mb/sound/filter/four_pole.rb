@@ -14,19 +14,34 @@ module MB
       #
       # Behavior (measured; see the specs):
       # - 24 dB/octave; -12 dB at the cutoff without resonance.
-      # - +resonance+ 0..1 sets the loop gain k = resonance × #k_max.  By
-      #   default #k_max is MAX_K (3.9, just below the oscillation edge at
-      #   4), so like the SQ-80 the filter rings but never self-oscillates
+      # - +resonance+ 0..1 sets the loop gain k = curve(resonance) × #k_max.
+      #   By default #k_max is MAX_K (3.9, just below the oscillation edge
+      #   at 4), so like the SQ-80 the filter rings but never self-oscillates
       #   (peak about +37 dB over the passband at full resonance).
+      # - +resonance_curve: :db+ (default) makes the gain at the cutoff rise
+      #   linearly in dB, -12 dB at 0 to +33.8 dB at 1 (.resonance_curve; the
+      #   resonant peak about +2.7, +14.5, +27.8, +37 dB at 0.2, 0.5, 0.8,
+      #   1); :linear is k = resonance × #k_max (+7.5 dB at 0.5, +16.8 at
+      #   0.8).  .quality_to_resonance maps a 2-pole Q to the resonance with
+      #   the same gain at the cutoff (GraphNode#lp4's +quality:+).
       # - Passband compensation (+compensation:+, default 0.375 like the
       #   CEM3379): full resonance loses about 6 dB of bass instead of 12.
       #   0 gives a classic Moog-style bass loss.
       # - +self_oscillate: true+ raises #k_max to SELF_OSCILLATE_K (4.3;
-      #   oscillation starts at resonance 4 / 4.3 ≈ 0.93) and turns on the
-      #   drive (1.0 unless given), whose saturation sets the amplitude.
-      # - +drive:+ (nil or 0 for linear) applies tanh(drive × u) / drive to
-      #   the cascade's input: unity gain for small signals, saturating above
-      #   about 1 / drive.
+      #   oscillation starts at resonance 0.74 on the dB curve, 0.93 linear)
+      #   and turns on the drive (1.0 unless given), whose saturation sets
+      #   the amplitude.
+      # - +drive:+ (nil or 0 for linear) is the saturation level, tanh(drive
+      #   × v) / drive: unity gain for small signals, saturating above about
+      #   1 / drive.  +drive_mode:+ says where: :input (default) on the
+      #   cascade's input; :stages in every OTA stage (and the input), as
+      #   each stage's drive current saturates; :feedback only on the
+      #   resonance feedback (y4 - c x; +clip: :soft+ tanh or :hard, a clamp
+      #   with a short knee), so the passband stays clean while the
+      #   resonance clips and buzzes (the Korg MS-20's diode-clipper idea on
+      #   this 4-pole; not an MS-20 filter emulation).  :stages and
+      #   :feedback default to drive 1.  Measurements and renders:
+      #   /app/tmp/listening/four_pole/README.md (round 2).
       # - +mode:+ picks an output tap mix (Oberheim Xpander style): :lp4
       #   (default), :lp2, :bp2, :bp4, :hp2, :hp4.  Compensation only
       #   applies to the lowpass modes.
