@@ -46,6 +46,14 @@ RSpec.describe('Tweens (MB::Sound.tween, Clip#tween, smooth(curve:))') do
       MB::Sound.bpm(120)
     end
 
+    it 'tweens in octaves with log: true, keeping overshoots positive' do
+      out = take(MB::Sound.tween([3400, 700], 1.bar, curve: :elastic, overshoot: 0.35, log: true), 6)
+      expect(out[96000 + 47999]).to be_within(1).of(700 * (3400 / 700.0)**(1 - MB::Sound::Curve[:elastic, overshoot: 0.35].(0.5)))
+      expect(out.min).to be > 0
+      expect(out.min).to be_within(10).of(700 * (700 / 3400.0)**0.35)
+      expect { MB::Sound.tween([0, 1], log: true) }.to raise_error(ArgumentError, /positive/)
+    end
+
     it 'rejects non-numeric values' do
       expect { MB::Sound.tween([MB::Sound::C4, 1]) }.to raise_error(ArgumentError, /numbers/)
     end

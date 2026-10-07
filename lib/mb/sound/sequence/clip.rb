@@ -422,10 +422,24 @@ module MB
         # between those values.  A Notes::Glide underneath; see also
         # MB::Sound.tween.
         #
-        #     cutoff = seq(300, 3000, 900, 1800).n2.loop.tween(curve: :elastic)
+        # With +log: true+ the tween moves in octaves (the log2 of the
+        # values, which must be positive) and outputs 2 to that power, so
+        # frequencies and cutoffs move evenly in pitch and overshoots stay
+        # positive (a linear elastic tween from 3400 to 700 Hz overshoots
+        # below 0 Hz).
+        #
+        #     cutoff = seq(300, 3000, 900, 1800).n2.loop.tween(curve: :elastic, log: true)
         #     bg :pad, 110.hz.saw.filter(:lowpass, cutoff: cutoff, quality: 3) * 0.3
         #     seq(0, 12).n1.loop.tween(1.n8, curve: :bounce)    # bounce to each value in an eighth
-        def tween(time = nil, curve: :smoothstep, overshoot: nil, cycles: nil, from: nil, transport: nil)
+        def tween(time = nil, curve: :smoothstep, overshoot: nil, cycles: nil, from: nil, log: false, transport: nil)
+          if log
+            raise ArgumentError, 'Log tweens need positive values' unless @events.all? { |e| e.value.is_a?(Numeric) && e.value > 0 }
+            raise ArgumentError, 'A log tween needs a positive from: value' if from && !(from.is_a?(Numeric) && from > 0)
+            octaves = map_clip { |e| e.with(value: Math.log2(e.value)) }
+            g = octaves.tween(time, curve: curve, overshoot: overshoot, cycles: cycles, from: from && Math.log2(from), transport: transport)
+            return (2 ** g).named("log #{g.graph_node_name}")
+          end
+
           n = notes(transport: transport)
           Notes::Glide.new(
             n.note_stream, time: tween_time(time, transport), from: from, shape: curve, overshoot: overshoot, cycles: cycles, notes: n

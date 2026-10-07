@@ -36,11 +36,11 @@
 #     mel = seq(A3, C4, E4, D4, G3, C4).n4.loop
 #     bg :g, mel.synth(voices: 1) { |v| v.hz.swarm(8, glide: spread(60.ms..500.ms), shape: :bounce) * v.amp_env } * -9.db
 #     # An elastic filter sweep: the cutoff springs to each value
-#     bg :pad, D3.unison(7, detune: 15.cents).filter(:lowpass, cutoff: tween([400, 3000, 800, 2000], 1.bar, curve: :elastic), quality: 4) * -15.db
+#     bg :pad, D3.unison(7, detune: 15.cents).filter(:lowpass, cutoff: tween([400, 3000, 800, 2000], 1.bar, curve: :elastic, log: true), quality: 4) * -15.db
 #     # Bouncing detune: the unison spread drops onto each value like a ball
 #     bg :pad, D3.unison(7, detune: tween([0.02, 0.4], 2.bars, curve: :bounce)) * -15.db
 #     # Stepped automation: 8 steps a bar up to each value
-#     bg :b, A1.saw.filter(:lowpass, cutoff: tween([200, 2400], 1.bar, curve: :steps, cycles: 8), quality: 6) * -12.db
+#     bg :b, A1.saw.filter(:lowpass, cutoff: tween([200, 2400], 1.bar, curve: :steps, cycles: 8, log: true), quality: 6) * -12.db
 #     # An elastic knob: the mod wheel springs instead of gliding
 #     bg :k, midi.synth { |v| v.hz.saw.filter(:lowpass, cutoff: 300 + midi.mod.smooth(300.ms, curve: :elastic) * 4000) * v.amp_env } * -9.db
 #     # Odd uses: a sine through bouncing and staircase transfer curves (waveshapers)
@@ -97,7 +97,9 @@ module MB::Sound
     # twice: plain, then pumped; the tweens follow the timeline, so both
     # line up)
     make_pad = -> {
-      cutoff = tween([500, 2600, 900, 3400, 700, 2000, 1200, 4200], 1.bar, curve: :elastic, overshoot: 0.35, cycles: 3)
+      # In octaves (log: true): a linear elastic tween from 3400 to 700 Hz
+      # would overshoot below 0 Hz
+      cutoff = tween([500, 2600, 900, 3400, 700, 2000, 1200, 4200], 1.bar, curve: :elastic, overshoot: 0.35, cycles: 3, log: true)
       detune = tween([0.02, 0.35, 0.08, 0.5], 2.bars, curve: :bounce)
       pad = [D3, F3, A3, D4].map { |n| n.unison(5, detune: detune, spread: 1) }.reduce(:+)
       pad.filter(:lowpass, cutoff: cutoff, quality: 3) * 0.12
@@ -110,7 +112,7 @@ module MB::Sound
     bassline = seq(D2, D2, F2, D2, C2, C2, A1, C2).n4.legato(0.8).loop
     bass = bassline.synth(voices: 1) { |v| v.hz.saw.at(0.8) * v.amp_env(0.005, 0.2, 0.6, 0.1) }
     bass = bass.ease(:elastic, symmetric: true, overshoot: 0.5, cycles: 4)
-    bass = bass.filter(:lowpass, cutoff: tween([250, 2800, 400, 1800], 1.bar, curve: :steps, cycles: 8), quality: 4) * 0.14
+    bass = bass.filter(:lowpass, cutoff: tween([250, 2800, 400, 1800], 1.bar, curve: :steps, cycles: 8, log: true), quality: 4) * 0.14
 
     # 4. A bouncing ball every 2 bars: Curve[:bounce]'s contacts as hits
     times, heights = bounce_contacts(0.55, 9)
