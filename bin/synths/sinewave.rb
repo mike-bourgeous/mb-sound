@@ -16,5 +16,7 @@ MB::Sound.synth_script { |midi|
     v.hz * v.amp_env(0.002, 0.05, -10.db, 0.1, sensitivity: -20.db..0.db)
   }
 
-  s.softclip(0.8, 0.95).oversample(2)
+  # Makeup gain after the saturation: velocity 96 at about -24 dB RMS, like
+  # the other synth scripts
+  s.softclip(0.8, 0.95).oversample(2) * 3.3.db
 }
