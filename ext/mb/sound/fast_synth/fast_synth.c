@@ -1,6 +1,7 @@
 /*
  * MB::Sound::FastSynth: synthesis kernels.  Band-limited oscillators
- * (PolyBLEP / PolyBLAMP).
+ * (PolyBLEP / PolyBLAMP), and at the end a feedback sine (FM operator
+ * self-feedback, ruby_feedback_sine).
  *
  * A naive waveform with jumps (ramp, square) or corners (triangle) aliases,
  * because those edges contain harmonics far above Nyquist.  The band-limited
