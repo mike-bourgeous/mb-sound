@@ -33,7 +33,8 @@ RSpec.describe('bin/loudness.rb') do
     tone('b.flac', -18)
     text = run(File.dirname(a), real: true)
     expect(text).to include('Integrated LUFS', 'True peak dBTP')
-    expect(text.lines.grep(/a\.flac/).first).to match(/\A\s*-23\.0\s+-23\.0\s+-23\.0\s+0\.0\s+-23\.0\s+4\.0  /)
+    # LRA 2.2: Tech 3342's 1.5 s of silence after the end counts
+    expect(text.lines.grep(/a\.flac/).first).to match(/\A\s*-23\.0\s+-23\.0\s+-23\.0\s+2\.2\s+-23\.0\s+4\.0  /)
     expect(text.lines.grep(/b\.flac/).first).to match(/\A\s*-18\.0\s/)
   end
 
@@ -47,7 +48,7 @@ RSpec.describe('bin/loudness.rb') do
 
     list = JSON.parse(run('--json', '--series', a, a))
     expect(list.length).to eq(2)
-    expect(list[0]['short_term'].length).to eq(11)
+    expect(list[0]['short_term'].length).to eq(40) # every 100 ms from 0.1 s
   end
 
   it 'prints a Markdown table with --markdown' do
@@ -76,7 +77,33 @@ RSpec.describe('bin/loudness.rb') do
   it 'warns when a normalized copy peaks above -1 dBTP' do
     a = tone('a.flac', -6)
     text = run('-n', '1', '-o', tmp_path('loud.flac'), a)
-    expect(text).to include('true peak above -1 dBTP (clips in integer formats)')
+    expect(text).to include("is above 1 LUFS's -1.0 dBTP (clips in integer formats)")
+
+    text = run('-n', '1', '--reduce', '-f', '-o', tmp_path('loud.flac'), a)
+    expect(text).to include('gain reduced from +7.0 to +5.0 dB')
+  end
+
+  it 'normalizes to named targets' do
+    a = tone('a.flac', -20)
+    text = run('-n', 'ebu', a)
+    out = File.join(File.dirname(a), 'a_ebu_r128.flac')
+    expect(text).to include("#{out}: -3.0 dB -> -23.0 LUFS")
+    expect(MB::Sound.loudness(out).integrated).to be_within(0.05).of(-23)
+  end
+
+  it 'shows the gain to targets, marking gains past the true-peak ceiling' do
+    a = tone('a.flac', -6)
+    text = run('-t', 'spotify,atsc,-0.5', a)
+    expect(text).to include('Gain to spotify', 'Gain to atsc_a85', 'Gain to -0.5lufs')
+    expect(text.lines.grep(/a\.flac/).first).to match(/-8\.0\s+-18\.0\s+\+5\.5!\s+\S+a\.flac/)
+
+    h = JSON.parse(run('--json', '-t', 'spotify', a))
+    expect(h['gain_to']['spotify']).to be_within(0.02).of(-8)
+  end
+
+  it 'lists the targets with their sources' do
+    text = run('--targets')
+    expect(text).to include('ebu_r128: EBU R 128 (-23.0 LUFS, -1.0 dBTP)', 'Source: EBU R 128-2023', 'youtube: YouTube (-14.0 LUFS, -1.0 dBTP; reported, unverified)')
   end
 
   it 'fails for missing files' do

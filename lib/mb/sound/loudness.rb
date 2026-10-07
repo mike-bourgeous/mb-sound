@@ -328,7 +328,8 @@ module MB
       # 10 / 100 + 1) and round((n - 1) * 95 / 100 + 1), with MATLAB's
       # round (halves away from zero, as Ruby's Float#round).  No
       # interpolation.  (BS.1770's integrated gating uses > instead; see
-      # .gate.)
+      # .gate.)  Analyzer#result adds Tech 3342's 1.5 s of silence after the
+      # end.
       def self.range(energies)
         none = [0.0, -Float::INFINITY, -Float::INFINITY]
         return none if energies.empty?
@@ -607,10 +608,17 @@ module MB
         # - integrated: BS.1770's gating over complete 400 ms blocks every
         #   100 ms from the start; audio shorter than one block is measured
         #   as one block padded with silence to 400 ms (then gated at -70);
-        # - range: EBU Tech 3342 over short-term values every 100 ms from
-        #   0.1 s through 1.5 s of silence after the end (Tech 3342: "For
-        #   file-based measurements, the signal should be followed by at
-        #   least 1.5 s of silence").
+        # - range: EBU Tech 3342 over short-term values every 100 ms of the
+        #   signal followed by 1.5 s of silence (Tech 3342: "For file-based
+        #   measurements, the signal should be followed by at least 1.5 s
+        #   of silence (corresponding to the latency of the loudness
+        #   analysis-window)"), i.e. 3 s windows ending from 3 s to 1.5 s
+        #   after the end.  Tech 3342 says nothing about windows that start
+        #   before the signal, so none are added there (the most literal
+        #   reading; the latency remark could also suggest centered windows
+        #   with 1.5 s of silence before the start, which it doesn't state).
+        #   Audio shorter than 1.5 s has no complete window and a range of
+        #   0.
         def result
           integrated, threshold, _ = integrated_gate
           lra, low, high = Loudness.range(lra_energies)
@@ -684,7 +692,7 @@ module MB
 
         # Short-term energies for the loudness range (see #result).
         def lra_energies
-          windows(SHORT_TERM_SEGMENTS, STEP_SEGMENTS, partial: true, trail: LRA_TAIL_SEGMENTS)
+          windows(SHORT_TERM_SEGMENTS, STEP_SEGMENTS, lead: false, partial: true, trail: LRA_TAIL_SEGMENTS)
         end
 
         # Mean squares of windows of +segments+ segments starting every
