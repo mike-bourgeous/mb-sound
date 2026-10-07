@@ -35,8 +35,8 @@ module MB
     # == Levels (mipmaps)
     #
     # Each level keeps fewer harmonics (cycle mode) or a lower band (sample
-    # mode), +mips:+ apart: :octave (default; a ratio of 2), :half_octave,
-    # :third_octave, any ratio above 1, an Array of harmonic counts (cycle
+    # mode), +mips:+ apart: :half_octave (DEFAULT_MIPS; a ratio of the
+    # square root of 2), :octave, :third_octave, any ratio above 1, an Array of harmonic counts (cycle
     # mode), or false for one level from the samples as given (the classic
     # aliasing sound, read with :cubic by default).  Levels are stored
     # OVERSAMPLE (4) times above their highest harmonic, so the
@@ -49,11 +49,12 @@ module MB
     # Nyquist fold back above AUDIBLE_LIMIT, 20 kHz), crossfaded linearly
     # (by increment) into the next level over the last LEVEL_FADE octave
     # (a fifth of an octave) before that limit, so brightness doesn't step
-    # between levels.  At 48 kHz with octave levels, every harmonic below
-    # about 14 kHz plays at full level at any pitch, and the top harmonic
-    # sits between 14 and 28 kHz (above 24 kHz only folding back above
-    # 20 kHz); a sample plays its own level, unfiltered, up to its root
-    # pitch.
+    # between levels.  At 48 kHz with half-octave levels, every harmonic
+    # below about 19.8 kHz plays at full level at any pitch, and the top
+    # harmonic sits between 19.8 and 28 kHz (above 24 kHz only folding
+    # back above 20 kHz); with octave levels the band dips to 14 kHz, an
+    # audible brightness change as a sweep crosses levels.  A sample plays
+    # its own level, unfiltered, up to its root pitch.
     #
     # Synced tones (Tone#sync) read separate sync levels (#sync_levels):
     # every harmonic count up to 8, then a quarter octave apart, with every
@@ -121,6 +122,18 @@ module MB
         third_octave: 2.0**(1.0 / 3.0),
       }.freeze
 
+      # The default level spacing (+mips:+) in both modes: half an octave
+      # (user's choice, 2026-10-07), so brightness barely changes as a
+      # tone's pitch moves across levels.  In a slow saw sweep the 10-20 kHz
+      # band dips at most 0.7 dB below the unfiltered saw (octave levels:
+      # 2.8 dB) and the brightness (mean harmonic) at most 3.5% (11%); a
+      # piano sample swept above its root dips 2.5 dB (5.6 dB).  Twice as
+      # many pitches crossfade two levels (40% instead of 20%), so sweeps
+      # and FM cost 5-8% more CPU per sample, and a steady pitch inside a
+      # crossfade 1.5 times as much (36 instead of 24 ns); levels take
+      # 1.5-1.9 times the memory.
+      DEFAULT_MIPS = :half_octave
+
       # Interpolators (see the class description) and their kernel codes.
       INTERPOLATIONS = { none: 0, linear: 1, cubic: 2, optimal: 3, sinc: 4 }.freeze
 
@@ -153,7 +166,7 @@ module MB
         # the class description for +complex+, +mips+, +interpolation+;
         # +align+ lines up frames in time (off by default, since the phases
         # are given).
-        def from_harmonics(amplitudes, phases = nil, size: 2048, complex: false, mips: :octave, interpolation: nil, align: false, taper: nil, name: nil)
+        def from_harmonics(amplitudes, phases = nil, size: 2048, complex: false, mips: DEFAULT_MIPS, interpolation: nil, align: false, taper: nil, name: nil)
           spectra = Builder.spectra_from_harmonics(amplitudes, phases)
           max = (size - 1) / 2
           spectra = spectra[true, 0..max] if spectra.shape[1] - 1 > max
@@ -169,7 +182,7 @@ module MB
         # sample mode, +data+ is the sound (1D; +root+, +loop+, and
         # +sample_rate+ apply).  +harmonics+ limits a cycle table's
         # harmonics (default: all that fit the frame size).
-        def from_samples(data, mode: :cycle, complex: false, mips: :octave, interpolation: nil, align: true, aligned: false, normalize: false, taper: nil, harmonics: nil, root: nil, loop: nil, sample_rate: 48000, name: nil, source_info: nil)
+        def from_samples(data, mode: :cycle, complex: false, mips: DEFAULT_MIPS, interpolation: nil, align: true, aligned: false, normalize: false, taper: nil, harmonics: nil, root: nil, loop: nil, sample_rate: 48000, name: nil, source_info: nil)
           data = to_narray(data)
 
           case mode
@@ -397,7 +410,7 @@ module MB
       attr_accessor :name
 
       # Use the class methods (.from_harmonics, .from_samples, ...).
-      def initialize(mode: :cycle, spectra: nil, frames: nil, data: nil, size: nil, complex: false, mips: :octave, interpolation: nil, align: false, aligned: false, taper: nil, harmonics: nil, root: nil, loop: nil, sample_rate: 48000, name: nil, source_info: nil)
+      def initialize(mode: :cycle, spectra: nil, frames: nil, data: nil, size: nil, complex: false, mips: DEFAULT_MIPS, interpolation: nil, align: false, aligned: false, taper: nil, harmonics: nil, root: nil, loop: nil, sample_rate: 48000, name: nil, source_info: nil)
         raise ArgumentError, "Unknown wavetable mode #{mode.inspect} (#{MODES.join(', ')})" unless MODES.include?(mode)
 
         @mode = mode

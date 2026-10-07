@@ -16,8 +16,18 @@ RSpec.describe(MB::Sound::Wavetable, aggregate_failures: true) do
       expect(x).to all_be_within(1e-6).of_array(expected)
     end
 
-    it 'makes one level per octave by default, each oversampled 4x' do
+    it 'makes one level per half octave by default, each oversampled 4x' do
       t = w.from_harmonics(Array.new(100, 0.01))
+      expect(w::DEFAULT_MIPS).to eq(:half_octave)
+      expect(t.spacing).to eq(Math.sqrt(2))
+      expect(t.levels.map(&:bandwidth)).to eq([100, 70, 50, 35, 25, 17, 12, 8, 6, 4, 3, 2, 1].map(&:to_f))
+      expect(t.levels.map(&:count)).to eq([1024, 1024, 512, 512, 256, 256, 128, 64, 64, 32, 32, 32, 32])
+      expect(t.levels.map { |l| l.data.shape }).to all(satisfy { |s| s[0] == 1 })
+      expect(t.levels[0].data.shape[1]).to eq(1024 + 2 * w::GUARD)
+    end
+
+    it 'can make one level per octave' do
+      t = w.from_harmonics(Array.new(100, 0.01), mips: :octave)
       expect(t.levels.map(&:bandwidth)).to eq([100, 50, 25, 12, 6, 3, 1].map(&:to_f))
       expect(t.levels.map(&:count)).to eq([1024, 512, 256, 128, 64, 32, 32])
       expect(t.levels.map { |l| l.data.shape }).to all(satisfy { |s| s[0] == 1 })
@@ -37,7 +47,8 @@ RSpec.describe(MB::Sound::Wavetable, aggregate_failures: true) do
 
     it 'stores levels for the optimal interpolator with its pre-emphasis' do
       t = w.from_harmonics(w::Library.saw)
-      l = t.levels(:optimal)[2]
+      l = t.levels(:optimal)[4]
+      expect(l.bandwidth).to eq(255)
       data = l.data[0, w::GUARD...(w::GUARD + l.count)]
       amps = harmonic_amplitudes(data)[1..255]
       gains = w::Emphasis.gains(256, l.count)[1..255]
@@ -48,7 +59,8 @@ RSpec.describe(MB::Sound::Wavetable, aggregate_failures: true) do
     it 'can taper each level with Lanczos sigma factors' do
       t = w.from_harmonics(w::Library.saw, taper: :sigma)
       expect(t.taper).to eq(:sigma)
-      l = t.levels(:cubic)[2]
+      l = t.levels(:cubic)[4]
+      expect(l.bandwidth).to eq(255)
       data = l.data[0, w::GUARD...(w::GUARD + l.count)]
       amps = harmonic_amplitudes(data)[1..255]
       x = Numo::DFloat.new(255).seq(1) * (Math::PI / 256)
@@ -200,8 +212,13 @@ RSpec.describe(MB::Sound::Wavetable, aggregate_failures: true) do
         expect(t.levels[0].rate).to eq(4)
       end
 
-      it 'band-limits each level by an octave' do
+      it 'band-limits each level by half an octave by default, down to MIN_SAMPLE_BAND' do
         t = w.from_samples(sound, mode: :sample, root: 100)
+        expect(t.levels.map(&:bandwidth)[0..2]).to all_be_within(1e-12).of_array([0.5, 0.5 / Math.sqrt(2), 0.25])
+        expect(t.levels.length).to eq(19)
+        expect(t.levels[-1].bandwidth * 48000).to be_between(w::MIN_SAMPLE_BAND, w::MIN_SAMPLE_BAND * Math.sqrt(2))
+
+        t = w.from_samples(sound, mode: :sample, root: 100, mips: :octave)
         expect(t.levels.map(&:bandwidth)[0..2]).to eq([0.5, 0.25, 0.125])
         expect(t.speed(48000)).to eq(1.0 / 100)
       end
@@ -428,7 +445,7 @@ RSpec.describe(MB::Sound::Wavetable, aggregate_failures: true) do
 
   describe '#to_s' do
     it 'describes the table' do
-      expect(w[:basic].to_s).to eq('basic (cycle, 4 frames, 10 levels)')
+      expect(w[:basic].to_s).to eq('basic (cycle, 4 frames, 19 levels)')
     end
   end
 end
