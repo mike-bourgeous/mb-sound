@@ -19,6 +19,13 @@ RSpec.describe('Tone null-test reference') do
     'tone_ports_negative' => 'wraps: adds the pulse lost at sample 480 (-1700 Hz, 17 whole cycles)',
     'phasor_ports' => 'wraps: adds the pulse lost at sample 288 (900 Hz, whole cycles)',
     'phasor_wraps_only' => 'new at_2000 output (2000 Hz, every wrap on a sample; had no pulses); main unchanged',
+    # Fix 2026-10-07: synced ramps, triangles, and parabolas are exactly the
+    # minimum-phase filtered naive waveform (segments delayed with the
+    # minBLEP), removing a DC offset that grew with the master's pitch
+    'sync_ratio' => 'sync: delayed segments, no DC drift (ramp)',
+    'sync_ratio_node' => 'sync: delayed segments, no DC drift (ramp)',
+    'sync_trigger' => 'sync: delayed segments, no DC drift (ramp)',
+    'softsync' => 'sync: delayed segments, exact slope corners (triangle)',
   }.freeze
 
   it 'has a reference for every case' do

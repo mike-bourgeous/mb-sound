@@ -415,6 +415,41 @@ RSpec.describe(MB::Sound::BandLimit) do
       expect(coherent_db(f.hz.pulse(0.3).sync(ratio: 1.7), k)).to be < -95
     end
 
+    # The mean of the ideal (unlimited) synced waveform over one master
+    # cycle (hard sync) or two (soft sync).
+    def ideal_mean(wave, ratio, soft)
+      m = 1 << 14
+      periods = soft ? 2 : 1
+      p = 0.0
+      dir = 1.0
+      sum = 0.0
+      (m * periods).times do |i|
+        if i > 0 && i % m == 0
+          soft ? dir = -dir : p = 0.0
+        end
+        sum += MB::Sound::BandLimit.shape(wave, p + 0.5 * ratio * dir / m)
+        p = MB::Sound::BandLimit.wrap(p + ratio * dir / m)
+      end
+      sum / (m * periods)
+    end
+
+    [:ramp, :triangle, :parabola, :square].each do |wave|
+      [false, true].each do |soft|
+        it "keeps the ideal DC level for a #{soft ? 'soft' : 'hard'}-synced #{wave} at high pitch" do
+          # The minBLEP delays steps by about 2.78 samples; without delaying
+          # the segments to match, each step left that much area behind
+          # (DC of +0.82 for a ramp hard-synced at 2.37x of 3 kHz)
+          k = soft ? 4094 : 4097
+          f = k * 48000.0 / 65536
+          tone = f.hz.public_send(wave)
+          tone = soft ? tone.softsync(ratio: 2.37) : tone.sync(ratio: 2.37)
+          tone.sample(4800)
+          data = Numo::DFloat.cast(Numo::SFloat.zeros(0).concatenate(*Array.new(82) { tone.sample(800).dup }))[0...65536]
+          expect(data.mean).to be_within(2e-4).of(ideal_mean(wave, 2.37, soft))
+        end
+      end
+    end
+
     it 'gives clean soft sync for squares, which reverse on their edge at phase 0' do
       # Soft sync brings the phase back to its start (0, the square's edge)
       # every two master cycles; it once crossed the edge backward without

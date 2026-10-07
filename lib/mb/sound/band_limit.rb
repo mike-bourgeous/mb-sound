@@ -199,7 +199,7 @@ module MB
       # Breakpoints of +wave_type+ warped by width +w+: [phase, jump in value,
       # jump in slope per cycle, value after], leaving out points with no
       # jump.  See bl_breakpoints in fast_synth.c.
-      def self.breakpoints(wave_type, w = 0.5)
+      def self.breakpoints(wave_type, w = 0.5, all = false)
         k1 = 0.5 / w
         k2 = 0.5 / (1.0 - w)
 
@@ -211,7 +211,7 @@ module MB
           vr = shape(wave_type, ub)
           dv = vr - shape(wave_type, ul, true)
           ds = slope(wave_type, ub) * kr - slope(wave_type, ul, true) * kl
-          next if dv == 0 && ds == 0
+          next if dv == 0 && ds == 0 && !all
 
           pos = ub < 0.5 ? ub * (2.0 * w) : w + (ub - 0.5) * (2.0 * (1.0 - w))
           [pos, dv, ds, vr]
@@ -610,6 +610,41 @@ module MB
         end
       end
 
+      # Returns [r0, r1, r2, m1, m2] for synced oscillators of +wave_type+
+      # (FastSynth.oscillate_sync; see there): residual tables R_n = B_n - M_n
+      # of jumps in the n-th time derivative, sampled like .minblep_tables,
+      # and the first two moments of h, the minBLEP's impulse (m1 is the
+      # delay of a minimum-phase step at low frequencies, about 2.78 samples).
+      # B_1 and B_2 are integrals of B by the trapezoid rule (the integrals
+      # of the linearly interpolated tables), and the moments come from their
+      # final values, so every residual settles exactly on zero.  A sine gets
+      # the old undelayed scheme: R_0 = R, R_1 = the minBLAMP residual of
+      # .minblep_tables, R_2 = 0, m1 = m2 = 0.
+      def self.sync_tables(wave_type)
+        @sync_tables ||= begin
+          blep, blamp = minblep_tables
+          os = SYNC_OVERSAMPLE
+          taps = SYNC_TAPS.to_f
+          b = blep + 1.0
+          t = Numo::DFloat.new(b.length).seq / os
+          b1 = (b.cumsum - (b[0] + b) * 0.5) / os
+          b2 = (b1.cumsum - (b1[0] + b1) * 0.5) / os
+          m1 = taps - b1[-1]
+          m2 = 2.0 * (b2[-1] - taps * taps / 2.0 + m1 * taps)
+          r1 = b1 - (t - m1)
+          r2 = b2 - (t * t / 2.0 - m1 * t + m2 / 2.0)
+          r1[-1] = 0.0
+          r2[-1] = 0.0
+
+          {
+            poly: [blep, r1.freeze, r2.freeze, m1, m2].freeze,
+            sine: [blep, blamp, Numo::DFloat.zeros(blep.length).freeze, 0.0, 0.0].freeze,
+          }.freeze
+        end
+
+        @sync_tables[wave_type == :sine ? :sine : :poly]
+      end
+
       # Minimum-phase version of the FIR +h+ by the real cepstrum.
       def self.minimum_phase(h)
         len = h.length
@@ -635,21 +670,68 @@ module MB
       end
 
       # See sync_event in fast_synth.c.
-      def self.sync_event(acc, pos, blep, blamp, os, taps, t, dv, ds)
-        return if dv == 0 && ds == 0
+      def self.sync_event(acc, pos, tables, t, a0, a1, a2)
+        return if a0 == 0 && a1 == 0 && a2 == 0
 
+        r0, r1, r2, os, taps = tables
         taps.times do |j|
           tt = t + j
           k = (pos + j) % taps
-          acc[k] += dv * sync_table(blep, os, taps, tt) + ds * sync_table(blamp, os, taps, tt)
+          acc[k] += a0 * sync_table(r0, os, taps, tt) + a1 * sync_table(r1, os, taps, tt) +
+            a2 * sync_table(r2, os, taps, tt)
         end
       end
 
-      # [value, slope per cycle] of +wave_type+ warped by +w+ at phase +p+.
+      # [value, slope per cycle] of +wave_type+ warped by +w+ at phase +p+
+      # (for phase jumps of free-running tones; see Tone#queue_jump).
       def self.sync_shape(wave_type, w, p)
         k = p < w ? 0.5 / w : 0.5 / (1.0 - w)
         u = warp(p, w)
         [shape(wave_type, u), slope(wave_type, u) * k]
+      end
+
+      # [value, first and second derivatives per cycle] at +x+ of the segment
+      # of +wave_type+ that holds phase +u+ (see .shape for +left+).  See
+      # sync_segment in fast_synth.c.
+      def self.sync_segment(wave_type, u, left, x)
+        case wave_type
+        when :ramp then [(left ? u <= 0.5 : u < 0.5) ? 2.0 * x : 2.0 * x - 2.0, 2.0, 0.0]
+        when :square then [(left ? u <= 0.5 : u < 0.5) ? 1.0 : -1.0, 0.0, 0.0]
+        when :triangle
+          if left ? u <= 0.25 : u < 0.25
+            [4.0 * x, 4.0, 0.0]
+          elsif left ? u <= 0.75 : u < 0.75
+            [2.0 - 4.0 * x, -4.0, 0.0]
+          else
+            [4.0 * x - 4.0, 4.0, 0.0]
+          end
+        when :sine
+          v = Math.sin(x * (2.0 * Math::PI))
+          [v, (2.0 * Math::PI) * Math.cos(x * (2.0 * Math::PI)), -(4.0 * Math::PI * Math::PI) * v]
+        when :parabola
+          if left ? u <= 0.5 : u < 0.5
+            y = 1.0 - 4.0 * x
+            [1.0 - y * y, 8.0 * y, -32.0]
+          else
+            y = 4.0 * x - 3.0
+            [y * y - 1.0, 8.0 * y, 32.0]
+          end
+        else
+          raise ArgumentError, "No band-limited version of #{wave_type.inspect}"
+        end
+      end
+
+      # [value, first and second time derivatives per sample] of +wave_type+
+      # warped by +w+ at phase +p+ moving at +vel+ cycles per sample (on the
+      # left side of a breakpoint there if +left+, with p = 1 for the
+      # cycle's end).  See sync_raw in fast_synth.c.
+      def self.sync_raw(wave_type, w, p, left, vel)
+        first = left ? p <= w : p < w
+        k = first ? 0.5 / w : 0.5 / (1.0 - w)
+        u = first ? p * k : 0.5 + (p - w) * k
+        g = vel * k
+        f0, f1, f2 = sync_segment(wave_type, u, left, u)
+        [f0, f1 * g, f2 * (g * g)]
       end
 
       # Like .crossing, but a phase on a breakpoint is always on its right
@@ -670,17 +752,21 @@ module MB
       end
 
       # See sync_move in fast_synth.c; returns the new phase.
-      def self.sync_move(points, p, vel, dur, end_t, acc, pos, blep, blamp, os, taps, bl)
+      def self.sync_move(wave_type, w, points, p, vel, dur, end_t, acc, pos, tables, bl)
         move = vel * dur
         if bl && move != 0
-          points.each do |bpos, bdv, bds, _|
+          points.each do |bpos, _, _, _|
             f = sync_crossing(p, move, bpos)
             next if f.nil?
 
-            dv = move > 0 ? bdv : -bdv
-            ds = bds * vel.abs
+            r = sync_raw(wave_type, w, bpos, false, vel)
+            l = sync_raw(wave_type, w, bpos == 0.0 ? 1.0 : bpos, true, vel)
             t = end_t + (1.0 - f) * dur
-            sync_event(acc, pos, blep, blamp, os, taps, t, dv, ds)
+            if move > 0
+              sync_event(acc, pos, tables, t, r[0] - l[0], r[1] - l[1], r[2] - l[2])
+            else
+              sync_event(acc, pos, tables, t, l[0] - r[0], l[1] - r[1], l[2] - r[2])
+            end
           end
         end
 
@@ -693,7 +779,7 @@ module MB
       # Ruby mirror of MB::Sound::FastSynth.oscillate_sync (see there),
       # returning +count+ samples as an SFloat; +sync_state+ and the +ring+
       # (a DFloat) are updated like the C version.
-      def self.sync_ruby(count, wave_type, freq, advance, gain, offset, sync_state, ring, pulses, soft, width, remove_dc, blep, blamp, os, taps, bl)
+      def self.sync_ruby(count, wave_type, freq, advance, gain, offset, sync_state, ring, pulses, soft, width, remove_dc, r0, r1, r2, os, taps, bl, m1, m2)
         freqs = freq.is_a?(Numo::NArray) ? real_floats(freq) : nil
         pulse_list = pulses.is_a?(Numo::NArray) ? real_floats(pulses) : nil
         widths = width.is_a?(Numo::NArray) ? real_floats(width) : nil
@@ -701,9 +787,10 @@ module MB
         pulse = pulse_list ? pulse_list[0] : 0.0
         w = clamp_width(widths ? widths[0] : (width || 0.5).to_f)
         half_mean = HALF_MEAN.fetch(wave_type)
-        points = breakpoints(wave_type, w)
-        blep = blep.to_a
-        blamp = blamp.to_a
+        points = breakpoints(wave_type, w, true)
+        tables = [r0.to_a, r1.to_a, r2.to_a, os, taps]
+        m1 = bl ? m1.to_f : 0.0
+        half_m2 = bl ? 0.5 * m2 : 0.0
         acc = ring.to_a
 
         p, prev_inc, dir, pos, primed = sync_state
@@ -718,42 +805,41 @@ module MB
             new_w = clamp_width(widths[i])
             if new_w != w
               w = new_w
-              points = breakpoints(wave_type, w)
+              points = breakpoints(wave_type, w, true)
             end
           end
 
-          if primed
-            vel = dir * prev_inc
+          vel = dir * (primed ? prev_inc : freq * advance)
 
+          if primed
             if pulse != 0
               d = 1.0 - pulse.abs
               d = 0.0 if d < 0
               d = 1.0 if d > 1
 
-              p = sync_move(points, p, vel, 1.0 - d, d, acc, pos, blep, blamp, os, taps, bl)
+              p = sync_move(wave_type, w, points, p, vel, 1.0 - d, d, acc, pos, tables, bl)
 
-              v0, s0 = sync_shape(wave_type, w, p)
+              a0 = sync_raw(wave_type, w, p, false, vel)
               if soft
                 dir = -dir
                 nvel = -vel
-                sync_event(acc, pos, blep, blamp, os, taps, d, 0.0, s0 * (nvel - vel)) if bl
-                vel = nvel
               else
                 dir = 1.0
                 nvel = prev_inc
                 p = 0.0
-                v1, s1 = sync_shape(wave_type, w, p)
-                sync_event(acc, pos, blep, blamp, os, taps, d, v1 - v0, s1 * nvel - s0 * vel) if bl
-                vel = nvel
               end
+              a1 = sync_raw(wave_type, w, p, false, nvel)
+              sync_event(acc, pos, tables, d, a1[0] - a0[0], a1[1] - a0[1], a1[2] - a0[2]) if bl
+              vel = nvel
 
-              p = sync_move(points, p, vel, d, 0.0, acc, pos, blep, blamp, os, taps, bl)
+              p = sync_move(wave_type, w, points, p, vel, d, 0.0, acc, pos, tables, bl)
             else
-              p = sync_move(points, p, vel, 1.0, 0.0, acc, pos, blep, blamp, os, taps, bl)
+              p = sync_move(wave_type, w, points, p, vel, 1.0, 0.0, acc, pos, tables, bl)
             end
           end
 
-          v, _ = sync_shape(wave_type, w, p)
+          a = sync_raw(wave_type, w, p, false, vel)
+          v = a[0] - m1 * a[1] + half_m2 * a[2]
           v += acc[pos]
           acc[pos] = 0.0
           pos = (pos + 1) % taps
