@@ -2,7 +2,8 @@ module MB
   module Sound
     module MIDI
       # Describes a MIDI controller as a parameter: its +type+ (:cc, the
-      # default, :bend for pitch bend, or :pressure for channel pressure),
+      # default, :bend for pitch bend, :pressure for channel pressure, or
+      # :poly_pressure for polyphonic key pressure),
       # its +number+ (0 to 127, CCs only; nil otherwise), a +name+, the
       # +range+ of values it maps to, its +default+ raw value (0 to 127, or
       # 0 to 16383 for pitch bend), a +description+, and how raw values map
@@ -35,6 +36,7 @@ module MB
         TYPES = {
           cc: { raw: 0..127, status: 0xb0 },
           pressure: { raw: 0..127, status: 0xd0, name: 'Aftertouch', default: 0 },
+          poly_pressure: { raw: 0..127, status: 0xa0, name: 'Poly Aftertouch', default: 0 },
           bend: { raw: 0..16383, status: 0xe0, name: 'Pitch Bend', default: 8192 },
         }.freeze
 
@@ -49,6 +51,13 @@ module MB
         # A channel pressure (aftertouch) spec, 0..1 by default.
         def self.pressure(range: 0.0..1.0, name: nil, description: 'Channel pressure', **options)
           new(type: :pressure, range: range, name: name, description: description, **options)
+        end
+
+        # A polyphonic key pressure (poly aftertouch) spec, 0..1 by default.
+        # Listed by control maps, but left out of ACID XML (ACID maps a
+        # parameter to one controller, and poly pressure is per key).
+        def self.poly_pressure(range: 0.0..1.0, name: nil, description: 'Polyphonic key pressure', **options)
+          new(type: :poly_pressure, range: range, name: name, description: description, **options)
         end
 
         def initialize(type: :cc, number: nil, name: nil, range: 0.0..1.0, default: nil, description: nil, center: nil, curve: :linear)
@@ -97,6 +106,7 @@ module MB
         # A key that sorts CCs by number, then channel pressure, then pitch
         # bend (by status byte), and groups specs on the same controller.
         def key
+          return [TYPES[:pressure][:status], -1] if type == :poly_pressure # after the CCs, before channel pressure
           [status, number || 0]
         end
 

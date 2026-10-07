@@ -370,14 +370,38 @@ module MB
         cache = SHARED[@control_stream] || {}
         specs = cache.values.filter_map { |ref| live(ref) }.grep(ChannelNode).flat_map(&:control_specs)
         specs += MIDI::Transform::Sustain::CONTROL_SPECS if @sustain && live(@note_stream)
+        specs << MIDI::ControlSpec.poly_pressure if live(@nodes[:poly_pressure])
         specs.uniq.sort_by { |s| [*s.key, s.name, s.range.begin] }
       end
 
       # Channel pressure (aftertouch), 0..1 (a shared Notes::Pressure).
+      # See #aftertouch for either kind of pressure.
       def pressure
         shared(:pressure) { Pressure.new(@control_stream, sample_rate: @sample_rate) }
       end
-      alias aftertouch pressure
+      alias channel_pressure pressure
+
+      # Polyphonic key pressure (poly aftertouch, MIDI 0xA0), 0..1, of this
+      # voice's note: the newest held note's pressure (a
+      # Notes::PolyPressure).  In a Synth, each lane gets the pressure of
+      # the key it plays (MIDI::Allocator routes it), so every note of a
+      # chord follows its own finger.
+      #
+      #     play midi.synth { |v| v.hz.saw.lp4(v.cutoff(400) * (2 ** (v.poly_pressure * 3))) * v.amp_env }
+      def poly_pressure
+        memo(:poly_pressure) { PolyPressure.new(note_stream, notes: self, sample_rate: @sample_rate) }
+      end
+      alias key_pressure poly_pressure
+      alias poly_aftertouch poly_pressure
+
+      # Aftertouch of either kind, 0..1: the larger of #poly_pressure and
+      # channel #pressure (a Notes::Aftertouch), so a patch works with
+      # keyboards that send either (the SQ-80 sends one or the other) and
+      # doesn't double when one sends both.  (Before poly pressure, this
+      # was an alias of #pressure.)
+      def aftertouch
+        memo(:aftertouch) { Aftertouch.new(poly_pressure, pressure, sample_rate: @sample_rate) }
+      end
 
       # Envelope helpers: the MB::Sound::EnvelopeMethods presets (positional
       # attack, decay, sustain, release, plus any Envelope options) as
@@ -696,3 +720,4 @@ require_relative 'notes/envelope_inputs'
 require_relative 'notes/note_envelope'
 require_relative 'notes/note_pitch'
 require_relative 'notes/filter_nodes'
+require_relative 'notes/poly_pressure'
