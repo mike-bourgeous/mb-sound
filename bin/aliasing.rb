@@ -6,7 +6,9 @@
 # Method: coherent sampling.  f0 = k * fs / N with k odd and N = 65536, so
 # every harmonic and every alias lands exactly on an FFT bin (rectangular
 # window, no leakage).  Harmonic bins are multiples of k; every other bin
-# except DC is non-harmonic (aliases and noise).  Columns:
+# except DC is non-harmonic (aliases and noise).  Complex outputs are
+# measured by their real parts, or with -c as complex signals (two-sided:
+# negative frequencies count as non-harmonic).  Columns:
 #
 # - NHR<20k: non-harmonic power below 20 kHz relative to harmonic power (dB)
 # - below f0: non-harmonic power below the fundamental (the most audible
@@ -16,6 +18,8 @@
 # - top: the strongest harmonic from 10 to 20 kHz relative to the strongest
 #   overall (dBc),
 #   to compare high-frequency droop between methods
+# - neg (with -c): power at negative frequencies relative to the harmonics
+#   (with -c, harmonics are the multiples of f0 on both sides)
 # - cost: CPU time per second of audio (% of realtime, one thread)
 #
 # With --render, each case is also rendered as an exponential sweep of `p`
@@ -29,6 +33,7 @@
 #     $0 'p.ramp' 'p.aramp'               # compare two expressions
 #     $0 -k 4097 'p.sine.at(4).softclip'  # one frequency (~3 kHz)
 #     $0 --render /tmp/sweeps 'p.ramp' 'p.aramp'
+#     $0 -c 'p.complex_ramp' 'p.complex_ramp.pm(p.sine.at(0.5))'  # complex outputs, two-sided
 
 require 'bundler/setup'
 require 'fileutils'
@@ -60,7 +65,7 @@ def build(expression, p)
   eval(expression, binding, expression) # rubocop:disable Security/Eval
 end
 
-def collect(node, total)
+def collect(node, total, complex: false)
   out = []
   while out.sum(&:length) < total
     buf = node.sample(BUF)
@@ -68,6 +73,8 @@ def collect(node, total)
     out << buf.dup
   end
   data = Numo::NArray.concatenate(out)[0...total]
+  return Numo::DComplex.cast(data) if complex
+
   data = data.real if data.is_a?(Numo::SComplex) || data.is_a?(Numo::DComplex)
   Numo::DFloat.cast(data)
 end
@@ -101,6 +108,40 @@ def analyze(signal, k)
   }
 end
 
+# Like .analyze for a complex +signal+: the two-sided spectrum, where the
+# harmonics are the multiples of k on both sides (phase modulation, warps,
+# and sync give an analytic waveform harmonics at negative frequencies too)
+# and every other bin within +-20 kHz except DC is non-harmonic.  Adds
+# :neg, the power at negative frequencies relative to all harmonics (none
+# for an analytic waveform).
+def analyze_complex(signal, k)
+  pow = MB::Sound.fft(signal).abs**2
+  n = pow.length
+  half = n / 2
+  harm = Numo::Bit.zeros(n)
+  (k...half).step(k).each { |b| harm[b] = 1; harm[n - b] = 1 }
+  limit = (20000.0 / FS * N).floor
+  audible = Numo::Bit.zeros(n)
+  audible[1..limit] = 1
+  audible[(n - limit)..] = 1
+  nonharm = ~harm
+  nonharm[0] = 0
+
+  hpow = pow[harm].sum
+  hmax = pow[harm].max
+  na = pow[nonharm & audible]
+  top_bins = ((limit / 2.0 / k).ceil..(limit / k)).map { |m| m * k }
+  below = pow[1...k].sum + pow[(n - k + 1)..].sum
+
+  {
+    nhr: db(na.sum / hpow),
+    below: db(below / hpow),
+    worst: db(na.max / hmax),
+    top: top_bins.empty? ? -Float::INFINITY : db(top_bins.map { |b| pow[b] }.max / hmax),
+    neg: db(pow[(half + 1)..].sum / hpow),
+  }
+end
+
 def cost(node, seconds: 2.0)
   frames = (seconds * FS / BUF).ceil
   node.sample(BUF)
@@ -131,6 +172,7 @@ MB::Sound.script(
   args: 0..,
   k: ['1365,4097,5461', String, 'Comma-separated odd FFT bins of the test frequencies (f0 = k * 48000 / 65536)', '-k'],
   render: [nil, String, 'Directory to render 100 Hz - 8 kHz sweeps into', '-r'],
+  complex: [false, '-c', 'Analyze complex (analytic) outputs two-sided: negative frequencies count as non-harmonic; adds a column for their power'],
 ) { |args, p|
   cases = args.empty? ? OSCILLATORS + NONLINEAR : args
   ks = p.k.split(',').map { |v| Integer(v) }
@@ -148,10 +190,19 @@ MB::Sound.script(
     f = k * FS / N
     puts
     puts format('f0 = %.1f Hz (k = %d)', f, k)
-    puts format('%-30s %8s %8s %8s %8s %7s', 'case', 'NHR<20k', 'below f0', 'worst', 'top', 'cost %')
+    if p.complex
+      puts format('%-30s %8s %8s %8s %8s %8s %7s', 'case', 'NHR<20k', 'below f0', 'worst', 'top', 'neg', 'cost %')
+    else
+      puts format('%-30s %8s %8s %8s %8s %7s', 'case', 'NHR<20k', 'below f0', 'worst', 'top', 'cost %')
+    end
     cases.each do |c|
-      r = analyze(collect(build(c, f.hz), WARMUP + N)[WARMUP..], k)
-      puts format('%-30s %8.1f %8.1f %8.1f %8.1f %7.3f', c, r[:nhr], r[:below], r[:worst], r[:top], cost(build(c, f.hz)))
+      if p.complex
+        r = analyze_complex(collect(build(c, f.hz), WARMUP + N, complex: true)[WARMUP..], k)
+        puts format('%-30s %8.1f %8.1f %8.1f %8.1f %8.1f %7.3f', c, r[:nhr], r[:below], r[:worst], r[:top], r[:neg], cost(build(c, f.hz)))
+      else
+        r = analyze(collect(build(c, f.hz), WARMUP + N)[WARMUP..], k)
+        puts format('%-30s %8.1f %8.1f %8.1f %8.1f %7.3f', c, r[:nhr], r[:below], r[:worst], r[:top], cost(build(c, f.hz)))
+      end
     end
   end
 
