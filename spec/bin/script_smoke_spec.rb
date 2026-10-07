@@ -94,6 +94,7 @@ RSpec.describe('script runner scripts', :smoke) do
     'bin/synths/fm_kick.rb' => [],
     'bin/synths/fm_synth.rb' => [],
     'bin/synths/sinewave.rb' => [],
+    'bin/synths/sq80_voice.rb' => [],
     'bin/synths/stereo_graph_synth_example.rb' => [],
     'bin/synths/wavetable_bass.rb' => [],
     'bin/wavetable_pr_example.rb' => [],

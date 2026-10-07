@@ -55,6 +55,11 @@ module MB
           !@entries.empty?
         end
 
+        # True if +key+ ([channel, note]) is held.
+        def held_key?(key)
+          @entries.any? { |e| e.key == key }
+        end
+
         # The number of held keys.
         def length
           @entries.length

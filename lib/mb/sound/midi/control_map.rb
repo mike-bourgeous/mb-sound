@@ -158,7 +158,7 @@ module MB
 
           xml = Builder::XmlMarkup.new(indent: 2)
           xml.instruct!
-          grouped = groups
+          grouped = groups.reject { |_, specs| specs.first.type == :poly_pressure }
           xml.parammap(mapname: name, ver: 1, summary: '', params: grouped.length) do |m|
             grouped.each do |number, specs|
               if !specs.first.cc?

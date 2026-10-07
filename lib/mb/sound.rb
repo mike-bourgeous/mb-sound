@@ -44,6 +44,7 @@ require_relative 'sound/schedule_methods'
 require_relative 'sound/multichannel_methods'
 require_relative 'sound/warm_up_methods'
 require_relative 'sound/envelope_methods'
+require_relative 'sound/mod_methods'
 require_relative 'sound/random_methods'
 require_relative 'sound/live_methods'
 
@@ -70,6 +71,7 @@ module MB
     extend TuningMethods
     extend WarmUpMethods
     extend EnvelopeMethods
+    extend ModMethods
     extend RandomMethods
     extend LiveMethods
 
@@ -133,6 +135,7 @@ require_relative 'sound/delay_line'
 require_relative 'sound/wavetable'
 require_relative 'sound/graph_node'
 require_relative 'sound/envelope'
+require_relative 'sound/sq80'
 require_relative 'sound/graph_node_input'
 
 require_relative 'sound/midi'

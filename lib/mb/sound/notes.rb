@@ -40,6 +40,8 @@ module MB
     # Notes on the clip (Clip#notes); the console's `midi` (MidiMethods#midi)
     # and synth scripts' block argument are Notes on live or file MIDI.
     class Notes
+      include ModMethods
+
       # The note number held before the first note when the source can't
       # tell its first note (C4).
       DEFAULT_NUMBER = 60.0
@@ -370,14 +372,38 @@ module MB
         cache = SHARED[@control_stream] || {}
         specs = cache.values.filter_map { |ref| live(ref) }.grep(ChannelNode).flat_map(&:control_specs)
         specs += MIDI::Transform::Sustain::CONTROL_SPECS if @sustain && live(@note_stream)
+        specs << MIDI::ControlSpec.poly_pressure if live(@nodes[:poly_pressure])
         specs.uniq.sort_by { |s| [*s.key, s.name, s.range.begin] }
       end
 
       # Channel pressure (aftertouch), 0..1 (a shared Notes::Pressure).
+      # See #aftertouch for either kind of pressure.
       def pressure
         shared(:pressure) { Pressure.new(@control_stream, sample_rate: @sample_rate) }
       end
-      alias aftertouch pressure
+      alias channel_pressure pressure
+
+      # Polyphonic key pressure (poly aftertouch, MIDI 0xA0), 0..1, of this
+      # voice's note: the newest held note's pressure (a
+      # Notes::PolyPressure).  In a Synth, each lane gets the pressure of
+      # the key it plays (MIDI::Allocator routes it), so every note of a
+      # chord follows its own finger.
+      #
+      #     play midi.synth { |v| v.hz.saw.lp4(v.cutoff(400) * (2 ** (v.poly_pressure * 3))) * v.amp_env }
+      def poly_pressure
+        memo(:poly_pressure) { PolyPressure.new(note_stream, notes: self, sample_rate: @sample_rate) }
+      end
+      alias key_pressure poly_pressure
+      alias poly_aftertouch poly_pressure
+
+      # Aftertouch of either kind, 0..1: the larger of #poly_pressure and
+      # channel #pressure (a Notes::Aftertouch), so a patch works with
+      # keyboards that send either (the SQ-80 sends one or the other) and
+      # doesn't double when one sends both.  (Before poly pressure, this
+      # was an alias of #pressure.)
+      def aftertouch
+        memo(:aftertouch) { Aftertouch.new(poly_pressure, pressure, sample_rate: @sample_rate) }
+      end
 
       # Envelope helpers: the MB::Sound::EnvelopeMethods presets (positional
       # attack, decay, sustain, release, plus any Envelope options) as
@@ -413,6 +439,30 @@ module MB
       end
       alias filt_env filter_env
       alias filter_envelope filter_env
+
+      # An SQ-80-style envelope (a NoteEnvelope) from panel values: levels
+      # +:l1+, +:l2+, +:l3+ (-63..+63, L3 = sustain), times +:t1+..+:t4+
+      # (0..63, the manual's time chart), +:lv+ (velocity to levels, 0..63)
+      # with +:lv_curve+ (:linear or :exp), +:t1v+ (velocity shortens T1),
+      # +:tk+ (higher keys shorten T2 and T3), +:second_release+ (the T4 "R"
+      # pseudo-reverb tail), +:cycle+ (CYC: run every stage, ignoring the
+      # key-up), +:loop+ (an extension: repeat from a segment while held),
+      # +:restart+ (true: every note starts from 0, the SQ-80's ENV
+      # restart mode; Envelope retrigger: :zero),
+      # and +:curve+.  See MB::Sound::SQ80.env_options.  Other options are
+      # Envelope's (e.g. +:retrigger+, +:octaves+).  Multiply by a depth or
+      # feed #mod_sum for bipolar modulation.
+      #
+      #     amp = v.sq80_env(l1: 63, l2: 50, l3: 40, t1: 0, t2: 30, t3: 40, t4: 30, lv: 40)
+      #     wah = v.sq80_env(l1: 63, l2: -20, l3: 10, t1: 10, t2: 20, t3: 20, t4: 25, loop: :t2)
+      def sq80_env(lift: false, gm: true, **panel)
+        known = SQ80.method(:env_options).parameters.map(&:last) - [:velocity, :key]
+        env_opts = panel.slice(*known)
+        options = panel.except(*known)
+        opts = SQ80.env_options(velocity: velocity, key: number, **env_opts)
+        segments = opts.delete(:segments)
+        note_envelope(:adsr, segments, nil, nil, nil, lift: lift, gm: gm, gate: !panel[:cycle], **opts, **options)
+      end
 
       # A Pitch following the held note and pitch bend (a
       # Notes::NotePitch), whose oscillators reset their phase at each
@@ -484,10 +534,92 @@ module MB
         depth = depth.nil? ? mod * vibrato_depth * 0.5 : (depth.respond_to?(:sample) ? depth : Interval.semitones(depth).to_f)
         delay ||= defaults ? vibrato_delay : 0
 
-        lfo = MB::Sound::Tone.new(frequency: rate, sample_rate: @sample_rate).lfo.reset(trigger)
-        parts = [lfo, depth]
-        parts << FadeIn.new(note_stream, delay: delay, notes: self, sample_rate: @sample_rate) unless delay == 0
-        GraphNode::Multiplier.new(parts, sample_rate: @sample_rate).named('vibrato')
+        lfo(rate, shape: :sine, depth: depth, delay: delay).named('vibrato')
+      end
+
+      # LFO shapes for #lfo, with aliases.
+      LFO_SHAPES = {
+        sine: :sine, sin: :sine,
+        triangle: :triangle, tri: :triangle,
+        saw: :ramp, ramp: :ramp, sawtooth: :ramp,
+        square: :square, sqr: :square,
+        noise: :noise, random: :noise, sh: :noise, sample_hold: :noise,
+      }.freeze
+
+      # LFO phase modes for #lfo (+:sync+).
+      LFO_SYNC = [:key, :free, :random].freeze
+
+      # A per-voice LFO for modulation (SQ-80 style; a Multiplier of a Tone
+      # made with Tone#lfo, its depth, and a fade-in):
+      #
+      # +rate+ - Hz (a number or a node, e.g. following poly pressure), or a
+      #          musical length (a Duration such as `1.n8` or `2.bars`: one
+      #          cycle per length, following the tempo and locked to the
+      #          timeline).
+      # +:shape+ - :triangle (default; alias :tri), :saw (rising; :ramp),
+      #            :square (:sqr), :sine, or :noise (alias :random, :sh):
+      #            a random value held for each cycle (sample and hold; see
+      #            GraphNode::SampleHold).  LFO shapes keep exact edges below
+      #            15 Hz (Tone#lfo).
+      # +:depth+ - Output scale (a number, Interval as semitones, or node;
+      #            default 1).
+      # +:delay+ - Seconds (or a node) over which the depth fades in after
+      #            each note-on (Notes::FadeIn), from +:from+ (a fraction
+      #            of the depth, default 0) to the full depth; the SQ-80's
+      #            L1 -> L2 depth ramp.
+      # +:sync+ - :key (default for Hz rates: restart at phase 0 at each
+      #           note-on, the SQ-80's RESET), :free (never restart; tempo
+      #           LFOs stay locked to the timeline, the default for
+      #           Durations), or :random (a random phase at each note-on).
+      # +:wheel+ - Mod wheel depth added to the depth (wheel × this; e.g.
+      #            0.5 or `1.st`), the SQ-80's LFO MOD source.
+      # +:pressure+ - Aftertouch depth added the same way (#aftertouch:
+      #               poly or channel pressure).
+      # +:unipolar+ - true for 0..1 instead of -1..1 (the SQ-80's square is
+      #               unipolar).
+      # +:human+ - Random rate variation, a fraction of the rate (e.g. 0.2),
+      #            changing once per cycle (the SQ-80's HUMAN; numeric
+      #            rates only).
+      # +:seed+ - Seed for the :noise shape, random phases, and :human.
+      #
+      #     v.hz.transpose(v.lfo(5.5, depth: 0.3, delay: 0.4, wheel: 0.5))   # delayed vibrato
+      #     cutoff = v.cutoff(400) * (2 ** v.lfo(1.n8, shape: :square, depth: 1))
+      #     v.lfo(v.mod_scale(1, v.poly_pressure => 3.oct), shape: :noise)   # pressure speeds it up
+      def lfo(rate = 5.0, shape: :triangle, depth: 1.0, delay: 0, from: 0, sync: nil, wheel: nil, pressure: nil, unipolar: false, human: nil, seed: nil)
+        wave = LFO_SHAPES.fetch(shape) { raise ArgumentError, "Unknown LFO shape #{shape.inspect} (#{LFO_SHAPES.keys.join(', ')})" }
+        tempo = rate.is_a?(MB::Sound::Sequence::Duration)
+        sync ||= tempo ? :free : :key
+        raise ArgumentError, "LFO sync must be one of #{LFO_SYNC} (got #{sync.inspect})" unless LFO_SYNC.include?(sync)
+        raise ArgumentError, 'human: needs a numeric or node rate' if human && tempo
+
+        depth = Interval.semitones(depth).to_f if depth.is_a?(Interval)
+        rate = lfo_human(rate, human, seed) if human && human != 0
+
+        tone = tempo ? rate.lfo : MB::Sound::Tone.new(frequency: rate, sample_rate: @sample_rate).lfo
+        tone = case wave
+               when :sine then tone
+               when :noise then tone.asquare
+               else tone.public_send(wave)
+               end
+        case sync
+        when :key then tone.reset(trigger)
+        when :random then tone.reset(trigger, to: :random).tap { |t| t.seed = seed if seed }
+        end
+
+        src = if wave == :noise
+                tone.sample_hold(range: unipolar ? 0.0..1.0 : -1.0..1.0, seed: seed)
+              else
+                unipolar ? tone.at(0..1) : tone
+              end
+
+        depth = lfo_depth(depth, wheel, pressure)
+        parts = [src, depth]
+        unless delay == 0
+          fade = FadeIn.new(note_stream, delay: delay, notes: self, sample_rate: @sample_rate)
+          fade = fade * (1.0 - from) + from unless from == 0
+          parts << fade
+        end
+        GraphNode::Multiplier.new(parts, sample_rate: @sample_rate).named('lfo')
       end
 
       # The envelopes made through this instance (see #env).
@@ -596,6 +728,70 @@ module MB
 
       private
 
+      # Modulation source names for #mod_sum and #mod_scale (see
+      # #mod_source).
+      MOD_SOURCES = [
+        :velocity, :vel, :velocity_x, :vel_x, :key, :keyboard, :wheel, :mod, :pressure, :channel_pressure,
+        :poly_pressure, :key_pressure, :aftertouch, :pedal, :foot, :breath, :bend, :lift, :gate,
+      ].freeze
+
+      # The graph node for a modulation source of #mod_sum / #mod_scale
+      # (ModMethods): a node or number as is, or a Symbol naming this
+      # voice's controls, after the SQ-80's sources:
+      # - :velocity (:vel) 0..1, :velocity_x (:vel_x) velocity squared (the
+      #   SQ-80's VEL-X, an exponential-feeling curve)
+      # - :key (:keyboard): octaves from C4 (note − 60) / 12, so `:key =>
+      #   1.oct` in #mod_scale is full key tracking (the SQ-80's KYBD and
+      #   KYBD2 are offsets and scales of this)
+      # - :wheel (:mod) CC 1, :pedal (:foot) CC 4, :breath CC 2, :bend -1..1
+      # - :pressure (:channel_pressure), :poly_pressure (:key_pressure),
+      #   :aftertouch (the larger of both)
+      # - :lift (release velocity), :gate (1 while held)
+      def mod_source(source)
+        return super unless source.is_a?(Symbol)
+
+        case source
+        when :velocity, :vel then velocity
+        when :velocity_x, :vel_x then memo(:velocity_x) { (velocity * velocity).named('velocity²') }
+        when :key, :keyboard then memo(:key_octaves) { ((number - 60.0) * (1.0 / 12)).named('key octaves') }
+        when :wheel, :mod then mod
+        when :pressure, :channel_pressure then pressure
+        when :poly_pressure, :key_pressure then poly_pressure
+        when :aftertouch then aftertouch
+        when :pedal, :foot then foot
+        when :breath then breath
+        when :bend then bend
+        when :lift then lift
+        when :gate then gate
+        else
+          raise ArgumentError, "Unknown modulation source #{source.inspect} (#{MOD_SOURCES.join(', ')})"
+        end
+      end
+      public :mod_source
+
+      # The depth for #lfo: +depth+ plus wheel and aftertouch amounts.
+      def lfo_depth(depth, wheel, pressure)
+        extra = {}
+        extra[mod] = wheel_amount(wheel) if wheel && wheel != 0
+        extra[aftertouch] = wheel_amount(pressure) if pressure && pressure != 0
+        return depth if extra.empty?
+
+        GraphNode::Mixer.new([[depth, 1.0], *extra.map { |n, a| a.respond_to?(:sample) ? [n * a, 1.0] : [n, a] }], sample_rate: @sample_rate).named('lfo depth')
+      end
+
+      # A depth amount: a number, an Interval (semitones), or a node.
+      def wheel_amount(amount)
+        amount.is_a?(Interval) ? Interval.semitones(amount).to_f : amount
+      end
+
+      # +rate+ × (1 + +human+ × a random value held for each cycle of a
+      # half-rate square), for #lfo's +:human+.
+      def lfo_human(rate, human, seed)
+        steps = MB::Sound::Tone.new(frequency: rate.respond_to?(:sample) ? rate * 0.5 : rate * 0.5, sample_rate: @sample_rate).lfo.asquare
+        jitter = steps.sample_hold(seed: seed && seed + 1)
+        (jitter * human.to_f + 1.0) * rate
+      end
+
       # True if +envelope+ adds re-strikes' energy (see #adding_at?).
       def add_envelope?(envelope)
         envelope.respond_to?(:retrigger) && envelope.retrigger == :add
@@ -615,14 +811,15 @@ module MB
 
       # Makes and registers a NoteEnvelope from an Envelope preset (see
       # #env).
-      def note_envelope(preset, attack, decay, sustain, release, lift: false, gm: true, **options)
+      def note_envelope(preset, attack, decay, sustain, release, lift: false, gm: true, gate: true, **options)
         lift = case lift
                when true then self.lift
                when false, nil then nil
                else lift
                end
 
-        inputs = envelope_inputs.merge(lift: lift).compact
+        inputs = gate ? envelope_inputs : { trigger: trigger, velocity: velocity, choke: choke }
+        inputs = inputs.merge(lift: lift).compact
         register(NoteEnvelope.preset(
           preset, attack, decay, sustain, release,
           notes: self, gm: gm, sample_rate: @sample_rate, **inputs, **options
@@ -673,3 +870,4 @@ require_relative 'notes/envelope_inputs'
 require_relative 'notes/note_envelope'
 require_relative 'notes/note_pitch'
 require_relative 'notes/filter_nodes'
+require_relative 'notes/poly_pressure'

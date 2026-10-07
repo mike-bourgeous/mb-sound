@@ -13,8 +13,13 @@ module MB
       # musical lengths (Durations) and sample counts are converted to
       # seconds when set, so with #gm they no longer follow the tempo.  Times
       # given as nodes are multiplied by the factor nodes.
+      #
+      # Multi-segment envelopes (see Envelope.segments) scale each segment
+      # by its role (Envelope.segment_role): the first segment by the attack
+      # time, the rest before the release by the decay time, and the
+      # release segments by the release time.
       class NoteEnvelope < MB::Sound::Envelope
-        # The Notes method for each segment's GM2 time controller.
+        # The Notes method for each segment role's GM2 time controller.
         GM_TIMES = { attack: :attack_time, decay: :decay_time, release: :release_time }.freeze
 
         # The Notes instance this envelope belongs to.
@@ -41,7 +46,7 @@ module MB
           return self if enabled == @gm
 
           @gm = enabled
-          GM_TIMES.each_key { |seg| public_send(:"#{seg}=", @base_times[seg]) }
+          names.each { |seg| set_time(seg, @base_times[seg]) }
           self
         end
 
@@ -100,25 +105,19 @@ module MB
           @gm
         end
 
-        # The attack, decay, and release times as given, before GM2 scaling.
+        # The segment times as given (a Hash of segment name to time; the
+        # attack, decay, and release for ADSR envelopes), before GM2
+        # scaling.
         def base_times
           @base_times.dup
         end
 
-        def attack=(time)
-          super(gm_time(:attack, time))
+        # Sets segment +name+'s time (see Envelope#set_time), scaled by its
+        # GM2 time controller if #gm is on.
+        def set_time(name, time)
+          name = segment_name(name)
+          super(name, gm_time(name, time))
         end
-        alias attack_time= attack=
-
-        def decay=(time)
-          super(gm_time(:decay, time))
-        end
-        alias decay_time= decay=
-
-        def release=(time)
-          super(gm_time(:release, time))
-        end
-        alias release_time= release=
 
         private
 
@@ -130,7 +129,8 @@ module MB
           drop_gm_node(segment)
           return time unless @gm
 
-          factor = @notes.public_send(GM_TIMES.fetch(segment))
+          role = self.class.segment_role(names.index(segment), release_node)
+          factor = @notes.public_send(GM_TIMES.fetch(role))
           node = case time
                  when Numeric
                    GmTime.new(factor, time.to_f, sample_rate: @sample_rate)

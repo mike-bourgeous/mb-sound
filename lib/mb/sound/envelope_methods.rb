@@ -64,6 +64,22 @@ module MB
       end
       alias filt_env filter_env
       alias filter_envelope filter_env
+
+      # An SQ-80-style envelope from panel values (levels -63..+63, times
+      # 0..63; see MB::Sound::SQ80.env_options for the keywords), plus any
+      # Envelope options (+:gate+, +:trigger+, ...).  Velocity and key time
+      # scaling (+:t1v+, +:tk+) need +:velocity+ and +:key+ nodes;
+      # Notes#sq80_env wires them to the notes.
+      #
+      #     play 220.hz.ramp * sq80_env(l1: 63, l2: 30, l3: 45, t1: 20, t2: 24, t3: 30, t4: 32)
+      def sq80_env(**options)
+        known = SQ80.method(:env_options).parameters.map(&:last)
+        env_opts = options.slice(*known)
+        rest = options.except(*known, :velocity)
+        rest[:velocity] = options[:velocity] if options.key?(:velocity)
+        segments_opts = SQ80.env_options(**env_opts)
+        MB::Sound::Envelope.preset(:adsr, **segments_opts, **rest)
+      end
     end
   end
 end
