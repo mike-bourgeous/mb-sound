@@ -856,9 +856,9 @@ module MB
       #
       # Examples (bin/sound.rb; the imaginary part is the real part's
       # Hilbert transform until something warps or modulates it):
-      #     play 110.hz.complex_ramp.pm(220.hz.sine.at(0.7)).real.at(-12.db)
-      #     play 110.hz.complex_square.pwm(0.2.hz.lfo.at(0.2..0.8)).real.at(-12.db)
-      #     play 110.hz.complex_ramp.sync(ratio: 0.3.hz.lfo.at(1..3)).real.at(-12.db)
+      #     play 110.hz.complex_ramp.pm(220.hz.sine.at(0.7)).real * -12.db
+      #     play 110.hz.complex_square.pwm(0.2.hz.lfo.at(0.2..0.8)).real * -12.db
+      #     play 110.hz.complex_ramp.sync(ratio: 0.3.hz.lfo.at(1..3)).real * -12.db
       def complex_ramp
         set_wave(:complex_ramp, true)
       end
