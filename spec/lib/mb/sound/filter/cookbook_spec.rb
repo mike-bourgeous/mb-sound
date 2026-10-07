@@ -555,7 +555,7 @@ RSpec.describe(MB::Sound::Filter::Cookbook, :aggregate_failures) do
       quality = Numo::SFloat.ones(100)
       filter.send(process_method, samples.inplace!, cutoff: cutoff, quality: quality)
 
-      expect(filter.cutoff).to eq(1e-10)
+      expect(filter.cutoff).to eq(MB::Sound::Filter::Cookbook::DYNAMIC_MIN_CUTOFF)
 
       cutoff = Numo::SFloat.zeros(100).fill(100000)
       filter.send(process_method, samples.inplace!, cutoff: cutoff, quality: quality)
@@ -613,4 +613,29 @@ RSpec.describe(MB::Sound::Filter::Cookbook, :aggregate_failures) do
 
   pending '#set_parameters_c'
   pending '#set_parameters_ruby'
+end
+
+RSpec.describe(MB::Sound::Filter::Cookbook, 'with negative and NaN cutoffs') do
+  [:dynamic_process, :dynamic_process_ruby_c].each do |m|
+    it "clamps them to DYNAMIC_MIN_CUTOFF in #{m}, staying finite and recovering" do
+      f = MB::Sound::Filter::Cookbook.new(:lowpass, 48000, 1000, quality: 3)
+      g = MB::Sound::Filter::Cookbook.new(:lowpass, 48000, 1000, quality: 3)
+      x = Numo::SFloat.cast(Numo::NMath.sin(Numo::DFloat.new(4800).seq * 0.05))
+      q = Numo::SFloat.new(4800).fill(3)
+      bad = Numo::SFloat.new(4800).fill(-300)
+      bad[100] = Float::NAN
+      clamped = Numo::SFloat.new(4800).fill(1)
+      a = f.public_send(m, x.dup, cutoff: bad, quality: q)
+      b = g.public_send(m, x.dup, cutoff: clamped, quality: q)
+      expect(a).to eq(b)
+      expect(a.isnan.count_true).to eq(0)
+      expect(f.cutoff).to eq(1.0)
+
+      # Back to a normal cutoff, the output settles (no lasting DC)
+      good = Numo::SFloat.new(4800).fill(1000)
+      4.times { f.public_send(m, x.dup, cutoff: good, quality: q) }
+      out = f.public_send(m, x.dup, cutoff: good, quality: q)
+      expect(out.mean.abs).to be < 0.05
+    end
+  end
 end
