@@ -63,13 +63,17 @@ module MB
     #    - BLIT: integrated complex impulse trains, state.blit carrying the
     #      integrators (FastSynth.blit);
     #    - SYNC: phase driven by sync pulses with minBLEP/minBLAMP events in
-    #      state.sync and state.sync_ring (FastSynth.oscillate_sync);
+    #      state.sync and state.sync_ring (FastSynth.oscillate_sync); also
+    #      band-limited tones with resets or a timeline (reset_sync?), whose
+    #      jumps are hard sync events to the target phase;
     #    - PHASOR: the phase itself (FastSound.phasor).
     # 5. GAIN (fused into the kernel): y = v * gain + offset, from #at.
-    # 6. JUMP: a phase jump (reset input, timeline lock) of a band-limited
-    #    tone queues a minBLEP/minBLAMP step from the old waveform to the
-    #    new (state.jump_residual), with its area set to that of an ideal
-    #    step on the sample (see .jump_residual), so audio-rate resets don't
+    # 6. JUMP: a phase jump (reset input, timeline lock) of a tone on the
+    #    SYNC kernel (reset_sync?) is a sync event on its sample; for other
+    #    band-limited tones (phase modulation, LFO fades, wavetables) it
+    #    queues a minBLEP/minBLAMP step from the old waveform to the new
+    #    (state.jump_residual), with its area set to that of an ideal step
+    #    on the sample (see .jump_residual), so audio-rate resets don't
     #    drift; queued steps are added as y += r * gain.
     # 7. PORTS (when used): wraps/increment from the frame's phases
     #    (BandLimit.sync_pulses with state.pulses).
@@ -1001,9 +1005,14 @@ module MB
       # - a graph node of radians, read at each reset sample,
       # - :random, a new random phase at each reset (the same as #rnd).
       #
-      # The jump is band-limited (a 32-sample minBLEP step from the value the
-      # wave would have had, including phase modulation at that sample), and
-      # works with #fm and #pm.  Buffers with resets are computed in pieces
+      # The jump is band-limited.  Band-limited ramps, squares, triangles, and
+      # warped shapes without phase modulation play through the synced
+      # kernel, where each reset is a hard sync event on its sample (see
+      # #reset_sync?), as clean as #sync; others (phase modulation, LFO
+      # fades) get a 32-sample minBLEP step from the value the wave would
+      # have had, including phase modulation at that sample, with an ideal
+      # step's area (Tone.jump_residual).  Works with #fm and #pm.  Buffers
+      # with resets are computed in pieces
       # split at the reset samples; buffers without resets cost one scan of
       # the trigger buffer.  A reset input that ends (returns nil) means no
       # more resets, not the end of the tone, so e.g. a key-synced clip tone
@@ -1511,6 +1520,18 @@ module MB
       # those of the reset sample (a reset input; see #sample_segments).
       def phase_jump(freq: state.last_freq, width: state.last_width, phase_mod: 0.0, scan: nil)
         state = @state
+        if kernel == :reset_sync
+          # A hard sync event on the jump sample (see #reset_sync?), or the
+          # start of a tone that hasn't played
+          yield
+          if state.sync[4] == 0
+            state.sync[0] = state.phase[0]
+          else
+            @sync_reset = state.phase[0]
+          end
+          return
+        end
+
         before = state.phase[0]
         played = freq != 0.0 && (state.blep[3] != 0 || state.blit[6] != 0 || state.table[2] != 0)
         if wavetable?
@@ -1801,6 +1822,16 @@ module MB
           ).inplace!
           state.phase[0] = state.sync[0]
           buf
+        when :reset_sync
+          r0, r1, r2, m1, m2, sine = BandLimit.sync_tables(@wave_type)
+          pulses, target = reset_pulse(out.length)
+          buf = MB::Sound::FastSynth.oscillate_sync(
+            out, @wave_type, freq, @advance, @gain, @offset,
+            state.sync, state.sync_ring, pulses, false, width, !@keep_dc,
+            r0, r1, r2, BandLimit::SYNC_OVERSAMPLE, BandLimit::SYNC_TAPS, true, m1, m2, sine, target
+          ).inplace!
+          sync_next_phase
+          buf
         when :blit
           MB::Sound::FastSynth.blit(
             out, @wave_type, freq, @advance, @gain, @offset, state.phase, state.blit
@@ -1856,6 +1887,15 @@ module MB
             r0, r1, r2, BandLimit::SYNC_OVERSAMPLE, BandLimit::SYNC_TAPS, !!band_limit_setting, m1, m2, sine
           )
           state.phase[0] = state.sync[0]
+        when :reset_sync
+          r0, r1, r2, m1, m2, sine = BandLimit.sync_tables(@wave_type)
+          pulses, target = reset_pulse(count)
+          values = BandLimit.sync_ruby(
+            count, @wave_type, freq_table, @advance, @gain, @offset,
+            state.sync, state.sync_ring, pulses, false, width, !@keep_dc,
+            r0, r1, r2, BandLimit::SYNC_OVERSAMPLE, BandLimit::SYNC_TAPS, true, m1, m2, sine, target
+          )
+          sync_next_phase
         when :blit
           values = BandLimit.blit_ruby(count, @wave_type, freq_table, @advance, @gain, @offset, state.phase, state.blit)
         when :synth
@@ -1953,6 +1993,8 @@ module MB
             :phasor
           elsif @sync_source
             :sync
+          elsif reset_sync?
+            :reset_sync
           elsif blit?
             :blit
           elsif synth_kernel?
@@ -1993,6 +2035,43 @@ module MB
         return ALWAYS unless bl.is_a?(Range)
 
         [bl.begin.to_f, bl.end.to_f].freeze
+      end
+
+      # True if this tone's phase jumps (reset inputs, key sync, timeline
+      # jumps) run through the synced oscillator kernel as hard sync events
+      # on their samples (FastSynth.oscillate_sync with a reset phase), so
+      # resets are exactly as clean as sync: the whole tone is the naive
+      # waveform through the minBLEP's minimum-phase filter (about 2.8
+      # samples of delay; edges alias -95 dB or less instead of PolyBLEP's
+      # -35), with each jump an exact event.  For band-limited (or warped)
+      # ramps, squares, triangles, and warped sines and parabolas, with a
+      # reset input or a timeline, without phase modulation, noise, an LFO
+      # fade, or sync; other tones queue a minBLEP step with the ideal
+      # step's area (Tone.jump_residual).
+      def reset_sync?
+        (!@reset.nil? || !@lock.nil?) && @sync_source.nil? && band_limit_setting == true && synth_kernel? &&
+          random_advance == 0 && (@phase_mod.nil? || @phase_mod == 0) && BandLimit::WARP_WAVES.include?(@wave_type)
+      end
+
+      # [pulses, target] for the reset-sync kernel (see #reset_sync?): a
+      # pulse of 1 on the first sample of +count+ and the reset target if a
+      # phase jump is pending (see #phase_jump), else [nil, nil].
+      def reset_pulse(count)
+        target = @sync_reset
+        return [nil, nil] if target.nil?
+
+        @sync_reset = nil
+        pulses = Numo::SFloat.zeros(count)
+        pulses[0] = 1.0
+        [pulses, target]
+      end
+
+      # Sets state.phase (the phase of the next sample, as the free-running
+      # kernels leave it) from the synced kernel's state (the phase of the
+      # last sample, which moves by the last increment into the next).
+      def sync_next_phase
+        sync = @state.sync
+        @state.phase[0] = BandLimit.wrap(sync[0] + sync[2] * sync[1])
       end
 
       # True if samples come from the band-limiting kernel (band-limited or

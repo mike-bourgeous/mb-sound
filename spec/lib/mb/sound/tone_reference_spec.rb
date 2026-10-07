@@ -33,20 +33,28 @@ RSpec.describe('Tone null-test reference') do
     # Fix 2026-10-07: phase jumps (resets, key sync, timeline locks) get
     # the area of an ideal step on the sample (no DC drift at audio-rate
     # resets), and a reset on a jump in value starts from its left side
-    'clip_key_sync_variants' => 'phase jumps: ideal step area',
-    'clip_synth' => 'phase jumps: ideal step area',
-    'clip_tone' => 'phase jumps: ideal step area',
-    'reset' => 'phase jumps: ideal step area',
-    'reset_edges' => 'phase jumps: ideal step area',
+    'clip_key_sync_variants' => 'phase jumps: ideal step area; 2026-10-08: resets as clean as sync',
+    'clip_synth' => 'phase jumps: ideal step area; 2026-10-08: resets as clean as sync',
+    'clip_tone' => 'phase jumps: ideal step area; 2026-10-08: resets as clean as sync',
+    'reset' => 'phase jumps: ideal step area; 2026-10-08: resets as clean as sync',
+    'reset_edges' => 'phase jumps: ideal step area; 2026-10-08: resets as clean as sync',
     'reset_fm_pm' => 'phase jumps: ideal step area',
-    'reset_pwm' => 'phase jumps: ideal step area',
-    'reset_random' => 'phase jumps: ideal step area',
-    'reset_to' => 'phase jumps: ideal step area',
-    'reset_to_node' => 'phase jumps: ideal step area',
-    'rnd_reset' => 'phase jumps: ideal step area',
-    'tempo_audio_rate_seek' => 'phase jumps: ideal step area',
+    'reset_pwm' => 'phase jumps: ideal step area; 2026-10-08: resets as clean as sync',
+    'reset_random' => 'phase jumps: ideal step area; 2026-10-08: resets as clean as sync',
+    'reset_to' => 'phase jumps: ideal step area; 2026-10-08: resets as clean as sync',
+    'reset_to_node' => 'phase jumps: ideal step area; 2026-10-08: resets as clean as sync',
+    'rnd_reset' => 'phase jumps: ideal step area; 2026-10-08: resets as clean as sync',
+    'tempo_audio_rate_seek' => 'phase jumps: ideal step area; 2026-10-08: resets as clean as sync',
     'tempo_lfo_changes' => 'phase jumps: ideal step area',
-    'tone_ports_reset' => 'phase jumps: ideal step area',
+    'tone_ports_reset' => 'phase jumps: ideal step area; 2026-10-08: resets as clean as sync',
+    # 2026-10-08: band-limited ramps, squares, triangles, and warped shapes
+    # with a reset input or a timeline (and no phase modulation or LFO
+    # fade) play through the synced kernel, each reset a hard sync event on
+    # its sample (Tone#reset_sync?): the minimum-phase filtered waveform
+    # (about 2.8 samples of delay, minBLEP edges with their ringing: peaks
+    # up to 1.38x those of PolyBLEP), harmonic error against the ideal reset
+    # waveform -72 to -86 dB instead of -19 to -38 (reset_fm_pm and
+    # tempo_lfo_changes have phase modulation or an LFO fade: unchanged)
   }.freeze
 
   it 'has a reference for every case' do

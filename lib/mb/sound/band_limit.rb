@@ -910,7 +910,8 @@ module MB
       # Ruby mirror of MB::Sound::FastSynth.oscillate_sync (see there),
       # returning +count+ samples as an SFloat; +sync_state+ and the +ring+
       # (a DFloat) are updated like the C version.
-      def self.sync_ruby(count, wave_type, freq, advance, gain, offset, sync_state, ring, pulses, soft, width, remove_dc, r0, r1, r2, os, taps, bl, m1, m2, sine_table = nil)
+      def self.sync_ruby(count, wave_type, freq, advance, gain, offset, sync_state, ring, pulses, soft, width, remove_dc, r0, r1, r2, os, taps, bl, m1, m2, sine_table = nil, reset_phase = nil)
+        reset_phase = reset_phase.nil? ? 0.0 : reset_phase.to_f
         freqs = freq.is_a?(Numo::NArray) ? real_floats(freq) : nil
         pulse_list = pulses.is_a?(Numo::NArray) ? real_floats(pulses) : nil
         widths = width.is_a?(Numo::NArray) ? real_floats(width) : nil
@@ -962,7 +963,7 @@ module MB
               else
                 dir = 1.0
                 nvel = prev_inc
-                p = 0.0
+                p = reset_phase
               end
               a1 = sync_raw(wave_type, w, p, false, nvel)
               if sine

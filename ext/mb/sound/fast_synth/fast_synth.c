@@ -1178,7 +1178,7 @@ static const double *sync_table_arg(VALUE table, size_t len)
  *   oscillate_sync(buffer, wave_type, frequency, advance, gain, offset,
  *                  sync_state, ring, pulses, soft, width, remove_dc,
  *                  r0, r1, r2, oversample, taps, band_limit, m1, m2,
- *                  sine_table)
+ *                  sine_table, reset_phase)
  * +sync_state+ is [phase at the last sample (cycles), last increment,
  * direction (1 or -1), ring position, primed (0 or 1)]; the first sample of
  * an unprimed oscillator starts at the phase in sync_state[0].  +ring+ is a
@@ -1189,13 +1189,16 @@ static const double *sync_table_arg(VALUE table, size_t len)
  * are the residual tables and moments of h (see above;
  * MB::Sound::BandLimit.sync_tables); +band_limit+ false skips the
  * corrections and the filtering (naive sync).  +sine_table+ is
- * BandLimit.sync_sine_table for band-limited sines (nil otherwise).  See
+ * BandLimit.sync_sine_table for band-limited sines (nil otherwise).
+ * +reset_phase+ (cycles, or nil for 0) is where hard sync events put the
+ * phase: Tone resets (reset inputs, key sync, timeline jumps) are hard sync
+ * events on their sample (a pulse of 1) to the reset target.  See
  * MB::Sound::BandLimit.sync_ruby.
  */
 static VALUE ruby_oscillate_sync(int argc, VALUE *argv, VALUE self)
 {
-	if (argc != 21) {
-		rb_raise(rb_eArgError, "wrong number of arguments (given %d, expected 21)", argc);
+	if (argc != 21 && argc != 22) {
+		rb_raise(rb_eArgError, "wrong number of arguments (given %d, expected 21..22)", argc);
 	}
 
 	VALUE buffer = argv[0], frequency = argv[2], sync_state = argv[6], ring = argv[7], pulses = argv[8];
@@ -1212,6 +1215,7 @@ static VALUE ruby_oscillate_sync(int argc, VALUE *argv, VALUE self)
 	_Bool bl = RTEST(argv[17]);
 	double m1 = NUM2DBL(argv[18]);
 	double m2 = NUM2DBL(argv[19]);
+	double reset_phase = argc > 21 && !NIL_P(argv[21]) ? NUM2DBL(argv[21]) : 0.0;
 
 	Check_Type(sync_state, T_ARRAY);
 	if (RARRAY_LEN(sync_state) != 5) {
@@ -1329,7 +1333,7 @@ static VALUE ruby_oscillate_sync(int argc, VALUE *argv, VALUE self)
 				} else {
 					dir = 1.0;
 					nvel = prev_inc;
-					p = 0;
+					p = reset_phase;
 				}
 				sync_raw(wt, w, p, 0, nvel, a1);
 				if (sn) {

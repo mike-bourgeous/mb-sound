@@ -41,7 +41,7 @@ RSpec.describe('Tone reset inputs, free and random phases') do
           o = bl_osc(reset: input(triggers(100, 37, 80, value: 0.25)))
           result = o.public_send(method, 100)
 
-          expected = pieces(bl_osc, method, [37, 43, 20]) { |osc| jump(osc, 0) }
+          expected = pieces(bl_osc(reset: input(triggers(100))), method, [37, 43, 20]) { |osc| jump(osc, 0) }
           expect(result).to eq(expected)
         end
 
@@ -57,7 +57,7 @@ RSpec.describe('Tone reset inputs, free and random phases') do
           o = bl_osc(reset: input(triggers(128, 0, 63, 65)))
           result = pieces(o, method, [64, 64]) {}
 
-          expected = pieces(bl_osc, method, [63, 2, 63]) { |osc| jump(osc, 0) }
+          expected = pieces(bl_osc(reset: input(triggers(128))), method, [63, 2, 63]) { |osc| jump(osc, 0) }
           expect(result).to eq(expected)
         end
       end
@@ -76,20 +76,46 @@ RSpec.describe('Tone reset inputs, free and random phases') do
       expect(c.sample_c(256)).to eq(r.sample_ruby(256))
     end
 
+    it 'gives the same samples in C and Ruby through the synced kernel (resets, FM, a warp, targets)' do
+      fm = Numo::SFloat.linspace(200, 3000, 256)
+      width = Numo::SFloat.linspace(0.2, 0.8, 256)
+      targets = Numo::SFloat.linspace(-3, 9, 256)
+      trig = triggers(256, 0, 5, 100, 101, 200, 255)
+      [:ramp, :square, :triangle, :sine, :parabola].each do |wave|
+        c, r = 2.times.map {
+          bl_osc(wave, frequency: input(fm), width: input(width), reset: input(trig), to: input(targets))
+        }
+        expect(c.send(:kernel)).to eq(:reset_sync)
+        expect(c.sample_c(256)).to eq(r.sample_ruby(256)), wave.to_s
+        expect(c.state.to_h).to eq(r.state.to_h)
+      end
+    end
+
     it 'turns a reset into a band-limited step from the continuing value to the target phase' do
-      continuing = bl_osc.sample(100).dup
+      # Band-limited ramps run through the synced kernel (Tone#reset_sync?):
+      # the reset is a hard sync event on its sample
+      continuing = bl_osc(reset: input(triggers(100))).sample(100).dup
 
       o = bl_osc(reset: input(triggers(100, 37)))
       result = o.sample(100).dup
 
       expect(result[0...37]).to eq(continuing[0...37])
+      expect(result[37]).to be_between([continuing[37], 0].min - 0.1, [continuing[37], 0].max + 0.1)
+
+      # After the 32-sample step, the same as an oscillator started at phase 0
+      fresh = bl_osc(reset: input(triggers(63))).sample(63).dup
+      expect(result[(37 + 32)..]).to all_be_within(1e-6).of_array(fresh[32..])
+    end
+
+    it 'keeps the minBLEP step with the ideal area for tones with phase modulation' do
+      pm = Numo::SFloat.zeros(100)
+      o = bl_osc(phase_mod: input(pm), reset: input(triggers(100, 37)))
+      expect(o.send(:kernel)).to eq(:synth)
+      continuing = bl_osc(phase_mod: input(pm)).sample(100).dup
+      result = o.sample(100).dup
       blep, _, area = MB::Sound::Tone.jump_tables
       dv = 0 - continuing[37]
       expect(result[37]).to be_within(0.01).of(continuing[37] + area[0] * (-0.5 * dv - blep.sum * dv))
-
-      # After the 32-sample step, the same as an oscillator started at phase 0
-      fresh = bl_osc.sample(63).dup
-      expect(result[(37 + 32)..]).to all_be_within(1e-6).of_array(fresh[32..])
     end
 
     it 'works with phase modulation' do
@@ -113,7 +139,7 @@ RSpec.describe('Tone reset inputs, free and random phases') do
       o = bl_osc(frequency: input(fm), reset: input(triggers(200, 90)))
       result = o.sample(200).dup
 
-      fresh = bl_osc(frequency: input(fm[90..].dup)).sample(110).dup
+      fresh = bl_osc(frequency: input(fm[90..].dup), reset: input(triggers(110))).sample(110).dup
       expect(result[(90 + 32)..]).to all_be_within(1e-5).of_array(fresh[32..])
     end
 
@@ -140,9 +166,16 @@ RSpec.describe('Tone reset inputs, free and random phases') do
       expect(pieces(o, :sample, [100, 100, 100]) {}).to eq(pieces(ref, :sample, [100, 100, 100]) {})
     end
 
-    it 'gives the same samples as no reset input when the trigger is always zero' do
+    it 'gives the same samples as the synced kernel without events when the trigger is always zero' do
       o = bl_osc(:square, reset: input(triggers(256)))
-      expect(o.sample(256)).to eq(bl_osc(:square).sample(256))
+      expect(o.sample(256)).to eq(bl_osc(:square, sync: input(triggers(256))).sample(256))
+
+      # Naive tones and tones with phase modulation: as with no reset input
+      n = 1001.3.hz.asquare.reset(input(triggers(256)))
+      expect(n.sample(256)).to eq(1001.3.hz.asquare.sample(256))
+      pm = Numo::SFloat.cast(Numo::NMath.sin(Numo::DFloat.new(256).seq * 0.05))
+      p = bl_osc(:square, phase_mod: input(pm), reset: input(triggers(256)))
+      expect(p.sample(256)).to eq(bl_osc(:square, phase_mod: input(pm)).sample(256))
     end
 
     it 'remembers a quiet frozen trigger buffer and still resets at a new one' do

@@ -576,24 +576,22 @@ RSpec.describe(MB::Sound::BandLimit) do
       oscillator(:ramp, frequency: 1001.3, **opts)
     end
 
-    it 'turns a reset into a band-limited step from the continuing value, with the ideal area' do
-      continuing = bl_osc.sample(31).dup[30]
-      o = bl_osc.reset(trig(70, 30))
-      after = o.sample(70).dup[30..]
+    it 'runs resets through the synced kernel as hard sync events on their samples' do
+      # A reset to the start phase is exactly sync to a pulse of 1 on the
+      # same sample (2026-10-08: resets as clean as sync)
+      o = bl_osc.reset(trig(200, 30, 77, 150))
+      s = bl_osc.sync(trig(200, 30, 77, 150))
+      expect(o.send(:kernel)).to eq(:reset_sync)
+      expect(o.sample(200)).to eq(s.sample(200))
 
-      # The minBLEP holds the continuing value on the jump sample; the area
-      # correction's first tap moves it toward the new value
-      blep, _, area = MB::Sound::Tone.jump_tables
-      dv = 0 - continuing
-      expect(after[0]).to be_within(0.01).of(continuing + area[0] * (-0.5 * dv - blep.sum * dv))
-
-      # The step adds the area of an ideal step on the sample (-dv / 2)
-      fresh0 = bl_osc.sample(32)
-      expect((after[0...32] - fresh0).sum).to be_within(0.02).of(-0.5 * dv)
-
-      # After the step, the same as an oscillator started at that phase
-      fresh = bl_osc.sample(40)
-      expect(after[32..]).to all_be_within(1e-6).of_array(fresh[32..])
+      # Unchanged before the reset; after the step settles, the same as a
+      # tone (with a reset input) started at that phase
+      quiet = -> { bl_osc.reset(trig(100)) }
+      continuing = quiet.call.sample(100).dup
+      after = bl_osc.reset(trig(100, 30)).sample(100).dup
+      expect(after[0...30]).to eq(continuing[0...30])
+      fresh = quiet.call.sample(70).dup
+      expect(after[(30 + 32)..]).to all_be_within(1e-6).of_array(fresh[32..])
     end
 
     it 'gives phase jump residuals the area of an ideal step or kink on the sample' do
@@ -631,11 +629,14 @@ RSpec.describe(MB::Sound::BandLimit) do
       energy = ->(o) {
         data = Numo::DFloat.cast(Numo::SFloat.zeros(0).concatenate(*Array.new(64) { o.sample(256).dup }))
         pow = MB::Sound.real_fft(data).abs**2
-        pow[(18000.0 / 48000 * data.length).ceil..].sum
+        pow[(22500.0 / 48000 * data.length).ceil..].sum
       }
+      # Near Nyquist, above the minBLEP's passband (mostly aliasing there;
+      # -11.5 dB with the PolyBLEP tone and minBLEP steps before 2026-10-08,
+      # -21.8 through the synced kernel)
       clean = energy.(bl_osc.reset(trig(256, 0, repeat: true)))
       naive = energy.(oscillator(:ramp, frequency: 1001.3, band_limit: false).reset(trig(256, 0, repeat: true)))
-      expect(10 * Math.log10(clean / naive)).to be < -6
+      expect(10 * Math.log10(clean / naive)).to be < -18
     end
 
     it 'gives the same step in C and Ruby' do
