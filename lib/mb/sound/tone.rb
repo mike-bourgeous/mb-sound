@@ -397,6 +397,7 @@ module MB
         @zone_table = nil
         @scan = nil
         @interpolation = nil
+        @scan_wrap = false
 
         @frequency = nil
         @phase = nil
@@ -490,6 +491,16 @@ module MB
       # key sync in a synth voice).  +interpolation+ overrides the table's
       # (see Wavetable::INTERPOLATIONS).
       #
+      # Scan positions outside 0..1 clamp to the first or last frame
+      # unless +scan_wrap+ is true: then the timbre wraps around, with the
+      # last frame (still at 1.0) morphing into the first over one more
+      # frame step, so with N frames the scan repeats every N / (N - 1)
+      # (frame k at k / (N - 1) + any whole number of periods; negative
+      # scans wrap the same way).  A steady ramp or LFO then morphs at a
+      # constant rate through every frame in a loop, without a jump at the
+      # end or a duplicated first frame; e.g. `scan: 0.1.hz.ramp.lfo.at(0..8.0 / 7)`
+      # loops an 8-frame table seamlessly (a phasor times N / (N - 1) too).
+      #
       # Band-limited tables pick their levels from this tone's motion per
       # sample, so FM, phase modulation (#pm), and phase warps (#pwm) stay
       # clean as far as the levels allow; warp corners get PolyBLAMP
@@ -509,9 +520,11 @@ module MB
       # Examples (bin/sound.rb):
       #     play 110.hz.wavetable(:basic, scan: 0.2.hz.lfo.triangle.at(0..1)).at(-12.db)
       #     play C3.wavetable(:pulses, scan: adsr(0.01, 1, 0.2, 0.5)).at(-12.db)
+      #     # past the last frame (saw) back into the first (sine)
+      #     play 110.hz.wavetable(:basic, scan: 0.1.hz.phasor * 4 / 3.0, scan_wrap: true).at(-12.db)
       #     t = Wavetable.from_file('sounds/piano_120hz_b2.flac', mode: :sample, root: 120)
       #     play E3.wavetable(t)
-      def wavetable(table, scan: nil, interpolation: nil)
+      def wavetable(table, scan: nil, interpolation: nil, scan_wrap: false)
         table = MB::Sound::Wavetable.for(table)
         tables = table.is_a?(MB::Sound::Wavetable::KeyMap) ? table.tables : [table]
         tables.each { |t| t.interpolation_code(interpolation) } # checks the name
@@ -526,6 +539,7 @@ module MB
           @zone_table = nil
           @scan = fixup_source(scan)
           @interpolation = interpolation
+          @scan_wrap = !!scan_wrap
           @wave_type = :wavetable
           @band_limit = true
         end
@@ -540,6 +554,12 @@ module MB
       # The scan input of a #wavetable tone (nil, a number, or a node).
       def scan
         @scan
+      end
+
+      # True if a #wavetable tone's scan wraps around instead of clamping
+      # (see #wavetable).
+      def scan_wrap?
+        @scan_wrap
       end
 
       # True if this is a #wavetable tone.
@@ -1519,11 +1539,11 @@ module MB
         x = e - e.floor
         u = w == 0.5 ? x : BandLimit.warp(x, w)
         k = w == 0.5 ? 1.0 : (x < w ? 0.5 / w : 0.5 / (1.0 - w))
-        value = table.value_at(u, scan: scan, increment: m, sample_rate: @sample_rate, interpolation: @interpolation)
+        value = table.value_at(u, scan: scan, increment: m, sample_rate: @sample_rate, interpolation: @interpolation, scan_wrap: @scan_wrap)
 
         # The exact slope from the table's harmonics (see
         # Wavetable::KernelRuby.spectral_derivs)
-        spec = table.kernel_spec(@sample_rate, @interpolation)
+        spec = table.kernel_spec(@sample_rate, @interpolation, scan_wrap: @scan_wrap)
         dre = [0.0, 0.0]
         dim = [0.0, 0.0]
         kr = MB::Sound::Wavetable::KernelRuby
@@ -1696,14 +1716,14 @@ module MB
             ensure_sync_ring(table)
             buf = table.sync(
               out, freq, @advance, @gain, @offset, state.sync, state.sync_ring, pulses, @soft_sync, width, scan || 0,
-              @interpolation, @sample_rate, !@keep_dc, table.mipped?
+              @interpolation, @sample_rate, !@keep_dc, table.mipped?, scan_wrap: @scan_wrap
             ).inplace!
             state.phase[0] = state.sync[0]
             buf
           elsif table.mode == :cycle
             table.oscillate(
               out, freq, @advance, @gain, @offset, state.phase, state.table, phase, width, scan || 0,
-              @interpolation, @sample_rate, !@keep_dc, @random_advance, state.noise
+              @interpolation, @sample_rate, !@keep_dc, @random_advance, state.noise, scan_wrap: @scan_wrap
             ).inplace!
           else
             table.play(
@@ -1753,13 +1773,13 @@ module MB
             ensure_sync_ring(table)
             values = table.sync_ruby(
               out.dup, freq_table, @advance, @gain, @offset, state.sync, state.sync_ring, pulses, @soft_sync, width, scan || 0,
-              @interpolation, @sample_rate, !@keep_dc, table.mipped?
+              @interpolation, @sample_rate, !@keep_dc, table.mipped?, scan_wrap: @scan_wrap
             )
             state.phase[0] = state.sync[0]
           elsif table.mode == :cycle
             values = table.oscillate_ruby(
               out.dup, freq_table, @advance, @gain, @offset, state.phase, state.table, phase_table, width, scan || 0,
-              @interpolation, @sample_rate, !@keep_dc, @random_advance, state.noise
+              @interpolation, @sample_rate, !@keep_dc, @random_advance, state.noise, scan_wrap: @scan_wrap
             )
           else
             values = table.play_ruby(

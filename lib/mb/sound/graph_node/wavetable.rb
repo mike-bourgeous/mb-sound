@@ -39,11 +39,20 @@ module MB
         # The wrapping mode (a Symbol, or a graph node).
         attr_reader :wrap
 
+        # True if scan positions wrap around instead of clamping (see
+        # MB::Sound::Tone#wavetable).
+        def scan_wrap?
+          @scan_wrap
+        end
+
         # +:table+ - Anything MB::Sound::Wavetable.[] accepts (a Wavetable, a
         #            library name, a filename, samples).
         # +:phase+ - A graph node with the phase in cycles.
         # +:scan+ - The position across the table's frames (0..1), a number or
         #           a graph node.
+        # +:scan_wrap+ - If true, scan positions outside 0..1 wrap around
+        #                (the last frame morphing into the first) instead of
+        #                clamping; see MB::Sound::Tone#wavetable.
         # +:increment+ - A graph node with the phase increment per sample in
         #                cycles for picking levels, nil to estimate it from
         #                the phase, or false for the brightest level.
@@ -57,7 +66,7 @@ module MB
         #           sample of each buffer), its range (a MIDI controller's
         #           MIDI::ControlSpec range, e.g. from Notes#cc, else 0..1)
         #           scaled to cover the modes.
-        def initialize(table:, phase:, sample_rate:, scan: 0, increment: nil, interpolation: nil, wrap: :wrap)
+        def initialize(table:, phase:, sample_rate:, scan: 0, increment: nil, interpolation: nil, wrap: :wrap, scan_wrap: false)
           raise ArgumentError, 'Phase must be a graph node' unless phase.respond_to?(:sample)
           unless WRAP_MODES.include?(wrap) || wrap.respond_to?(:sample)
             raise ArgumentError, "Wrapping mode must be one of #{WRAP_MODES.join(', ')} or a graph node"
@@ -77,6 +86,7 @@ module MB
 
           @lstate = [0.0, 0, 0.0, 0]
           @scan = scan.respond_to?(:get_sampler) ? scan.get_sampler : scan
+          @scan_wrap = !!scan_wrap
           @sample_rate = sample_rate
           @wrap = wrap.respond_to?(:get_sampler) ? wrap.get_sampler : wrap
           @wrap_range = wrap.respond_to?(:spec) && wrap.spec.respond_to?(:range) ? wrap.spec.range : 0..1
@@ -134,7 +144,7 @@ module MB
 
           buf_class = @table.complex? ? Numo::SComplex : Numo::SFloat
           @buf = buf_class.zeros(count) if @buf.nil? || @buf.length != count
-          @table.lookup(@buf.inplace!, phi, inc, scan, @interpolation, @sample_rate, wrap, @lstate).not_inplace!
+          @table.lookup(@buf.inplace!, phi, inc, scan, @interpolation, @sample_rate, wrap, @lstate, scan_wrap: @scan_wrap).not_inplace!
         end
       end
     end

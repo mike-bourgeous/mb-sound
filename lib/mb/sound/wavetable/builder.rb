@@ -325,7 +325,7 @@ module MB
           bands = []
           b = 0.5
           ratio = spacing.is_a?(Array) ? 2.0 : spacing
-          while bands.length < 16 && (bands.empty? || b * sample_rate >= MIN_SAMPLE_BAND)
+          while bands.length < MAX_LEVELS && (bands.empty? || b * sample_rate >= MIN_SAMPLE_BAND)
             bands << b
             b /= ratio
           end

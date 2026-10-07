@@ -4,15 +4,22 @@
 #
 # Usage: $0 [options] [midi_file_or_port [output_file]]
 #
-# Plays live MIDI, or a MIDI file (e.g. spec/test_data/c_major.mid).
+# Plays live MIDI, or a MIDI file.  Long held notes let the noise LFO
+# sweep and wrap the table's timbre within each note:
+#     $0 spec/test_data/long_notes.mid               # play
+#     $0 -f spec/test_data/long_notes.mid out.flac   # render
+#     $0 spec/test_data/c_major.mid                  # short notes
 # Run with --help for all options.
 
 require 'bundler/setup'
 require 'mb-sound'
 
 MB::Sound.synth_script { |midi|
-  # Noise LFO
-  nzlfo = 1.hz.gauss.noise.at(100).filter(:highpass, cutoff: 0.02, quality: 0.5).filter(:lowpass, cutoff: 0.3, quality: 0.5).softclip(0, 1) * 26.0/30 + 0.3333
+  # Noise LFO: slow, mostly between -0.35 and 1.2 (about a quarter of the
+  # time past 1), so the scan wraps around the table at both ends.  (The
+  # original's .at(100) and + 0.3333 now stay below 0.7: the noise
+  # generator changed since; this restores the original's reach.)
+  nzlfo = 1.hz.gauss.noise.at(2000).filter(:highpass, cutoff: 0.02, quality: 0.5).filter(:lowpass, cutoff: 0.3, quality: 0.5).softclip(0, 1) * 26.0/30 + 0.4333
 
   table = MB::Sound::Wavetable.from_file('sounds/drums_wavetable.flac', align: false)
 
@@ -28,8 +35,10 @@ MB::Sound.synth_script { |midi|
 
     # Synth: a sine waveshaped by the table (the sine sweeps two cycles of
     # the table, centered on its middle; frames not aligned, since this is
-    # a shaper)
-    shaper = porta.tone.at(-0.5..1.5).phase_table(table, scan: nzlfo)
+    # a shaper).  The noise LFO reaches about 1.2, past the last frame, so
+    # the scan wraps around into the first frames (and below 0 into the
+    # last ones), as the original's wave number did.
+    shaper = porta.tone.at(-0.5..1.5).phase_table(table, scan: nzlfo, scan_wrap: true)
     (gate * (shaper * 0.5 + porta.tone.triangle.at(0.1))).filter(:lowpass, cutoff: 5000, quality: 0.25).softclip
   }
 }

@@ -16,8 +16,18 @@ RSpec.describe(MB::Sound::Wavetable, aggregate_failures: true) do
       expect(x).to all_be_within(1e-6).of_array(expected)
     end
 
-    it 'makes one level per octave by default, each oversampled 4x' do
+    it 'makes one level per half octave by default, each oversampled 4x' do
       t = w.from_harmonics(Array.new(100, 0.01))
+      expect(w::DEFAULT_MIPS).to eq(:half_octave)
+      expect(t.spacing).to eq(Math.sqrt(2))
+      expect(t.levels.map(&:bandwidth)).to eq([100, 70, 50, 35, 25, 17, 12, 8, 6, 4, 3, 2, 1].map(&:to_f))
+      expect(t.levels.map(&:count)).to eq([1024, 1024, 512, 512, 256, 256, 128, 64, 64, 32, 32, 32, 32])
+      expect(t.levels.map { |l| l.data.shape }).to all(satisfy { |s| s[0] == 1 })
+      expect(t.levels[0].data.shape[1]).to eq(1024 + 2 * w::GUARD)
+    end
+
+    it 'can make one level per octave' do
+      t = w.from_harmonics(Array.new(100, 0.01), mips: :octave)
       expect(t.levels.map(&:bandwidth)).to eq([100, 50, 25, 12, 6, 3, 1].map(&:to_f))
       expect(t.levels.map(&:count)).to eq([1024, 512, 256, 128, 64, 32, 32])
       expect(t.levels.map { |l| l.data.shape }).to all(satisfy { |s| s[0] == 1 })
@@ -37,7 +47,8 @@ RSpec.describe(MB::Sound::Wavetable, aggregate_failures: true) do
 
     it 'stores levels for the optimal interpolator with its pre-emphasis' do
       t = w.from_harmonics(w::Library.saw)
-      l = t.levels(:optimal)[2]
+      l = t.levels(:optimal)[4]
+      expect(l.bandwidth).to eq(255)
       data = l.data[0, w::GUARD...(w::GUARD + l.count)]
       amps = harmonic_amplitudes(data)[1..255]
       gains = w::Emphasis.gains(256, l.count)[1..255]
@@ -48,7 +59,8 @@ RSpec.describe(MB::Sound::Wavetable, aggregate_failures: true) do
     it 'can taper each level with Lanczos sigma factors' do
       t = w.from_harmonics(w::Library.saw, taper: :sigma)
       expect(t.taper).to eq(:sigma)
-      l = t.levels(:cubic)[2]
+      l = t.levels(:cubic)[4]
+      expect(l.bandwidth).to eq(255)
       data = l.data[0, w::GUARD...(w::GUARD + l.count)]
       amps = harmonic_amplitudes(data)[1..255]
       x = Numo::DFloat.new(255).seq(1) * (Math::PI / 256)
@@ -200,8 +212,13 @@ RSpec.describe(MB::Sound::Wavetable, aggregate_failures: true) do
         expect(t.levels[0].rate).to eq(4)
       end
 
-      it 'band-limits each level by an octave' do
+      it 'band-limits each level by half an octave by default, down to MIN_SAMPLE_BAND' do
         t = w.from_samples(sound, mode: :sample, root: 100)
+        expect(t.levels.map(&:bandwidth)[0..2]).to all_be_within(1e-12).of_array([0.5, 0.5 / Math.sqrt(2), 0.25])
+        expect(t.levels.length).to eq(19)
+        expect(t.levels[-1].bandwidth * 48000).to be_between(w::MIN_SAMPLE_BAND, w::MIN_SAMPLE_BAND * Math.sqrt(2))
+
+        t = w.from_samples(sound, mode: :sample, root: 100, mips: :octave)
         expect(t.levels.map(&:bandwidth)[0..2]).to eq([0.5, 0.25, 0.125])
         expect(t.speed(48000)).to eq(1.0 / 100)
       end
@@ -352,6 +369,59 @@ RSpec.describe(MB::Sound::Wavetable, aggregate_failures: true) do
       expect(t.value_at(0.1, scan: -1)).to eq(t.value_at(0.1, scan: 0))
       expect(t.value_at(0.1, scan: 2)).to eq(t.value_at(0.1, scan: 1))
     end
+
+    context 'with wrapping scan positions' do
+      # Frames 1, 2, 3, 4 (DC levels) at scan 0, 1/3, 2/3, 1; the wrap
+      # period is 4/3
+      let(:t) { w.from_samples([[1] * 8, [2] * 8, [3] * 8, [4] * 8], mips: false, align: false) }
+
+      def at(scan) = t.value_at(0.1, scan: scan, scan_wrap: true)
+
+      it 'keeps 0..1 as without wrapping, with 1 the last frame' do
+        [0, 0.1, 1.0 / 3, 0.5, 2.0 / 3, 0.9, 1].each do |s|
+          expect(at(s)).to eq(t.value_at(0.1, scan: s)), "scan #{s}"
+        end
+        expect(at(1)).to be_within(1e-6).of(4)
+      end
+
+      it 'morphs the last frame into the first over one more frame step' do
+        expect(at(1 + 1.0 / 6)).to be_within(1e-6).of(2.5)
+        expect(at(1 + 1.0 / 12)).to be_within(1e-6).of(3.25)
+        expect(at(4.0 / 3)).to be_within(1e-6).of(1)
+        expect(at(4.0 / 3 + 1.0 / 3)).to be_within(1e-6).of(2)
+      end
+
+      it 'repeats every count / (count - 1), negative positions too' do
+        [0.05, 0.4, 0.95, 1.2].each do |s|
+          [-2, -1, 1, 3].each do |k|
+            expect(at(s + k * 4.0 / 3)).to be_within(1e-5).of(at(s)), "scan #{s} + #{k} periods"
+          end
+        end
+        expect(at(-1.0 / 6)).to be_within(1e-6).of(2.5)
+        expect(at(-1.0 / 3)).to be_within(1e-6).of(4)
+      end
+
+      it 'blends at the same rate per unit of scan across the wrap as between frames' do
+        (0..10).each do |i|
+          x = i / 10.0
+          expect(at(x / 3)).to be_within(1e-5).of(1 + x) # frame 0 -> 1
+          expect(at(1 + x / 3)).to be_within(1e-5).of(4 - 3 * x) # frame 3 -> 0
+        end
+      end
+
+      it 'treats NaN and huge positions as without wrapping' do
+        expect(at(Float::NAN)).to eq(t.value_at(0.1, scan: 0))
+        expect(at(1e30)).to eq(t.value_at(0.1, scan: 1))
+        expect(at(-1e30)).to eq(t.value_at(0.1, scan: 0))
+      end
+
+      it 'changes nothing for a one-frame table' do
+        one = w[:saw]
+        [-1.3, 0.2, 2.7].each do |s|
+          expect(one.value_at(0.1, scan: s, scan_wrap: true)).to eq(one.value_at(0.1))
+        end
+      end
+    end
   end
 
   describe '#save' do
@@ -379,6 +449,56 @@ RSpec.describe(MB::Sound::Wavetable, aggregate_failures: true) do
       expect(t2.levels(:cubic)[2].data).to all_be_within(1e-5).of_array(t.levels(:cubic)[2].data)
       expect(t.metadata).to include(mode: 'cycle', frames: 1, period: 2048, aligned: 'false', taper: 'sigma', harmonics: 100)
       expect(tags).to include(period: 2048, frames: 1, harmonics: 100, spacing: Math.sqrt(2), interpolation: 'cubic', taper: 'sigma', name: 'sq')
+      expect(tags[:spacing_explicit].to_s).to eq('true')
+      expect(t2).to be_spacing_explicit
+    end
+
+    context 'with level spacings (levels are rebuilt on load)' do
+      def saved(**opts)
+        name = tmp_path('saved_spacing.flac')
+        w.from_harmonics(w::Library.saw(64), **opts).save(name, overwrite: true)
+        name
+      end
+
+      it 'keeps an explicitly chosen spacing' do
+        t = w.from_file(saved(mips: :octave))
+        expect(t.spacing).to eq(2.0)
+        expect(t).to be_spacing_explicit
+        expect(t.levels.map(&:bandwidth)).to eq(w.from_harmonics(w::Library.saw(64), mips: :octave).levels.map(&:bandwidth))
+        expect(w.from_file(saved(mips: [16, 4])).spacing).to eq([16, 4])
+        expect(w.from_file(saved(mips: false))).not_to be_mipped
+      end
+
+      it 'gives a table saved with the default spacing the current default' do
+        name = saved
+        info = {}
+        MB::Sound.read(name, metadata_out: info)
+        expect(w.table_metadata(info)[:spacing_explicit].to_s).to eq('false')
+
+        stub_const('MB::Sound::Wavetable::DEFAULT_MIPS', :octave)
+        t = w.from_file(name)
+        expect(t.spacing).to eq(2.0)
+        expect(t).not_to be_spacing_explicit
+      end
+
+      it 'lets mips: given to .from_file win' do
+        t = w.from_file(saved(mips: :octave), mips: :half_octave)
+        expect(t.spacing).to eq(Math.sqrt(2))
+        expect(w.from_file(saved(mips: false), mips: :default).spacing).to eq(Math.sqrt(2))
+      end
+
+      it 'keeps only surely explicit spacings of files saved without the explicit tag' do
+        name = tmp_path('legacy.flac')
+        frames = w.from_harmonics(w::Library.saw(64)).frames
+        w.save_frames(name, frames, metadata: { spacing: 2.0 })
+        expect(w.from_file(name).spacing).to eq(Math.sqrt(2))
+        w.save_frames(name, frames, overwrite: true, metadata: { spacing: 'none' })
+        expect(w.from_file(name)).not_to be_mipped
+        w.save_frames(name, frames, overwrite: true, metadata: { spacing: '16,4' })
+        expect(w.from_file(name).spacing).to eq([16, 4])
+        w.save_frames(name, frames, overwrite: true)
+        expect(w.from_file(name).spacing).to eq(Math.sqrt(2))
+      end
     end
 
     it 'saves peaks above 1 with a scale' do
@@ -428,7 +548,7 @@ RSpec.describe(MB::Sound::Wavetable, aggregate_failures: true) do
 
   describe '#to_s' do
     it 'describes the table' do
-      expect(w[:basic].to_s).to eq('basic (cycle, 4 frames, 10 levels)')
+      expect(w[:basic].to_s).to eq('basic (cycle, 4 frames, 19 levels)')
     end
   end
 end

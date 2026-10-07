@@ -316,7 +316,7 @@ module MB
 
         # [k, two levels?, x, fa, fb, fs]: see wt_select in C.
         def select(spec, m, scan)
-          fa, fb, fs = frames(spec[1], scan)
+          fa, fb, fs = frames(spec[1], scan, spec[18])
           n = spec[2].length
           k = 0
           if n > 1
@@ -682,7 +682,7 @@ module MB
         def value(spec, u, m, scan, interp)
           datas = spec[2]
           n = datas.length
-          fa, fb, fs = frames(spec[1], scan)
+          fa, fb, fs = frames(spec[1], scan, spec[18])
           return level(spec, 0, u, fa, fb, fs, interp) if n == 1
 
           hi = spec[5]
@@ -690,14 +690,12 @@ module MB
           k = 0
           k += 1 while k < n - 1 && m > hi[k]
 
-          if k < n - 1 && m > lo[k]
-            t = (m - lo[k]) / (hi[k] - lo[k])
-            v1 = level(spec, k, u, fa, fb, fs, interp)
-            v2 = level(spec, k + 1, u, fa, fb, fs, interp)
-            v1 + (v2 - v1) * t
-          else
-            level(spec, k, u, fa, fb, fs, interp)
-          end
+          # Always two levels, the second weighted 0 outside crossfades (see
+          # wt_value_sel in C: the same cost at every pitch)
+          t = k < n - 1 && m > lo[k] ? (m - lo[k]) / (hi[k] - lo[k]) : 0.0
+          v1 = level(spec, k, u, fa, fb, fs, interp)
+          v2 = level(spec, k < n - 1 ? k + 1 : k, u, fa, fb, fs, interp)
+          v1 + (v2 - v1) * t
         end
 
         # Level +k+'s value at +u+.
@@ -798,12 +796,19 @@ module MB
           table[j] + (table[j + 1] - table[j]) * f
         end
 
-        # [first frame, second frame or nil, blend] for +scan+ (0..1,
-        # clamped) across +count+ frames.
-        def frames(count, scan)
+        # [first frame, second frame or nil, blend] for +scan+ across +count+
+        # frames: clamped to 0..1, or with +wrap+ (nonzero) repeating
+        # every count / (count - 1), the last frame morphing into the first
+        # from 1 to 1 + 1 / (count - 1) (see wt_frames in C).
+        def frames(count, scan, wrap = 0)
           return [0, nil, 0.0] if count == 1
 
           f = scan * (count - 1)
+          if wrap != 0 && f == f && f.abs < 4.0e18
+            f = fwrap(f, count.to_f)
+            f = 0.0 if f >= count
+            return [count - 1, 0, f - (count - 1)] if f >= count - 1
+          end
           f = 0.0 unless f >= 0
           f = (count - 1).to_f if f > count - 1
           fa = f.floor
@@ -814,7 +819,7 @@ module MB
         # The half mean (see Builder.half_means) at +scan+.
         def half_mean(spec, scan)
           hm = spec[7]
-          fa, fb, fs = frames(spec[1], scan)
+          fa, fb, fs = frames(spec[1], scan, spec[18])
           return hm[fa] unless fb
 
           hm[fa] + (hm[fb] - hm[fa]) * fs

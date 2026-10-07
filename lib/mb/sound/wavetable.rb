@@ -26,6 +26,12 @@ module MB
     # - :cycle (default): each frame is one period; the tone's phase reads
     #   it, and +scan+ (0..1) morphs linearly across the frames (frame
     #   phases are aligned at build time, so morphs don't comb-filter).
+    #   Frame k of N sits at k / (N - 1).  Scans outside 0..1 clamp, or
+    #   with +scan_wrap: true+ (Tone#wavetable, GraphNode::Wavetable) wrap
+    #   around every N / (N - 1): from 1 to 1 + 1 / (N - 1) the last frame
+    #   morphs into the first, at the same rate per unit of scan as every
+    #   other frame step, so a steady ramp of scan morphs through all
+    #   frames in a loop with no seam and no duplicated frame.
     # - :sample: one sound of any length played at the tone's pitch relative
     #   to its +root+ (Hz, a Pitch, or a Note), with +loop:+ (a Range of
     #   source samples, or of Lengths such as `0.5.seconds`) or as a one-shot
@@ -35,8 +41,8 @@ module MB
     # == Levels (mipmaps)
     #
     # Each level keeps fewer harmonics (cycle mode) or a lower band (sample
-    # mode), +mips:+ apart: :octave (default; a ratio of 2), :half_octave,
-    # :third_octave, any ratio above 1, an Array of harmonic counts (cycle
+    # mode), +mips:+ apart: :default (DEFAULT_MIPS, :half_octave; a ratio
+    # of the square root of 2), :half_octave, :octave, :third_octave, any ratio above 1, an Array of harmonic counts (cycle
     # mode), or false for one level from the samples as given (the classic
     # aliasing sound, read with :cubic by default).  Levels are stored
     # OVERSAMPLE (4) times above their highest harmonic, so the
@@ -49,11 +55,12 @@ module MB
     # Nyquist fold back above AUDIBLE_LIMIT, 20 kHz), crossfaded linearly
     # (by increment) into the next level over the last LEVEL_FADE octave
     # (a fifth of an octave) before that limit, so brightness doesn't step
-    # between levels.  At 48 kHz with octave levels, every harmonic below
-    # about 14 kHz plays at full level at any pitch, and the top harmonic
-    # sits between 14 and 28 kHz (above 24 kHz only folding back above
-    # 20 kHz); a sample plays its own level, unfiltered, up to its root
-    # pitch.
+    # between levels.  At 48 kHz with half-octave levels, every harmonic
+    # below about 19.8 kHz plays at full level at any pitch, and the top
+    # harmonic sits between 19.8 and 28 kHz (above 24 kHz only folding
+    # back above 20 kHz); with octave levels the band dips to 14 kHz, an
+    # audible brightness change as a sweep crosses levels.  A sample plays
+    # its own level, unfiltered, up to its root pitch.
     #
     # Synced tones (Tone#sync) read separate sync levels (#sync_levels):
     # every harmonic count up to 8, then a quarter octave apart, with every
@@ -121,6 +128,17 @@ module MB
         third_octave: 2.0**(1.0 / 3.0),
       }.freeze
 
+      # The default level spacing (+mips:+) in both modes: half an octave
+      # (user's choice, 2026-10-07), so brightness barely changes as a
+      # tone's pitch moves across levels.  In a slow saw sweep the 10-20 kHz
+      # band dips at most 0.7 dB below the unfiltered saw (octave levels:
+      # 2.8 dB) and the brightness (mean harmonic) at most 3.5% (11%); a
+      # piano sample swept above its root dips 2.5 dB (5.6 dB).  Twice as
+      # many pitches crossfade two levels (40% instead of 20%); the kernels
+      # read two levels at every pitch anyway (the same cost for every
+      # note), and levels take 1.5-1.9 times the memory.
+      DEFAULT_MIPS = :half_octave
+
       # Interpolators (see the class description) and their kernel codes.
       INTERPOLATIONS = { none: 0, linear: 1, cubic: 2, optimal: 3, sinc: 4 }.freeze
 
@@ -153,7 +171,7 @@ module MB
         # the class description for +complex+, +mips+, +interpolation+;
         # +align+ lines up frames in time (off by default, since the phases
         # are given).
-        def from_harmonics(amplitudes, phases = nil, size: 2048, complex: false, mips: :octave, interpolation: nil, align: false, taper: nil, name: nil)
+        def from_harmonics(amplitudes, phases = nil, size: 2048, complex: false, mips: :default, interpolation: nil, align: false, taper: nil, name: nil)
           spectra = Builder.spectra_from_harmonics(amplitudes, phases)
           max = (size - 1) / 2
           spectra = spectra[true, 0..max] if spectra.shape[1] - 1 > max
@@ -169,7 +187,7 @@ module MB
         # sample mode, +data+ is the sound (1D; +root+, +loop+, and
         # +sample_rate+ apply).  +harmonics+ limits a cycle table's
         # harmonics (default: all that fit the frame size).
-        def from_samples(data, mode: :cycle, complex: false, mips: :octave, interpolation: nil, align: true, aligned: false, normalize: false, taper: nil, harmonics: nil, root: nil, loop: nil, sample_rate: 48000, name: nil, source_info: nil)
+        def from_samples(data, mode: :cycle, complex: false, mips: :default, interpolation: nil, align: true, aligned: false, normalize: false, taper: nil, harmonics: nil, root: nil, loop: nil, sample_rate: 48000, name: nil, source_info: nil)
           data = to_narray(data)
 
           case mode
@@ -220,8 +238,15 @@ module MB
         # .from_samples.
         #
         # Settings saved by #save (see #metadata) are the defaults: the mode,
-        # levels, taper, interpolation, name, root, and loop; frames saved
-        # aligned aren't aligned again.
+        # level spacing, taper, interpolation, name, root, and loop; frames
+        # saved aligned aren't aligned again.  Files hold the frames (or the
+        # sound), not the levels: levels are always rebuilt on load.  A
+        # spacing chosen explicitly when the table was made (+mips:+ other
+        # than :default) is kept; a table made with the default spacing gets
+        # today's DEFAULT_MIPS, as do files without a spacing tag; +mips:+
+        # given here always wins (e.g. to re-mipmap a saved table).  Files
+        # saved before the spacing_explicit tag existed keep only 'none' and
+        # harmonic-count lists (never defaults); their ratios get the default.
         def from_file(path, mode: nil, slices: 10, ratio: 1.0, root: nil, loop: nil, **options)
           path = path.path if path.respond_to?(:path)
 
@@ -230,7 +255,9 @@ module MB
           info = table_metadata(info)
           mode ||= info[:mode]&.to_sym || :cycle
           options[:name] ||= info[:name] || File.basename(path.to_s)
-          options[:mips] = parse_saved_spacing(info[:spacing]) if !options.include?(:mips) && info.include?(:spacing)
+          if !options.include?(:mips) && saved_spacing_explicit?(info)
+            options[:mips] = parse_saved_spacing(info[:spacing])
+          end
           options[:taper] = info[:taper].to_sym if !options.include?(:taper) && info[:taper] && info[:taper] != ''
           options[:interpolation] ||= info[:interpolation]&.to_sym
           options[:harmonics] ||= info[:harmonics].to_i if mode == :cycle && info[:harmonics]
@@ -276,6 +303,21 @@ module MB
             return from_file(source.to_s) if defined?(Pathname) && source.is_a?(Pathname)
 
             raise ArgumentError, "Can't make a wavetable from #{source.inspect}"
+          end
+        end
+
+        # True if saved table metadata +info+ (see #metadata) holds a level
+        # spacing that was chosen explicitly (see .from_file).
+        def saved_spacing_explicit?(info)
+          return false unless info.include?(:spacing)
+
+          case info[:spacing_explicit].to_s
+          when 'true' then true
+          when 'false' then false
+          else
+            # Older files: only 'none' and harmonic counts were surely chosen
+            v = info[:spacing].to_s
+            v == 'none' || v.include?(',')
           end
         end
 
@@ -367,6 +409,12 @@ module MB
       # without levels (see #mipped?).
       attr_reader :spacing
 
+      # True if the level spacing was chosen with +mips:+ (anything but
+      # :default), so #save records it for .from_file to keep.
+      def spacing_explicit?
+        @spacing_explicit
+      end
+
       # The default interpolation (see INTERPOLATIONS).
       attr_reader :interpolation
 
@@ -397,12 +445,13 @@ module MB
       attr_accessor :name
 
       # Use the class methods (.from_harmonics, .from_samples, ...).
-      def initialize(mode: :cycle, spectra: nil, frames: nil, data: nil, size: nil, complex: false, mips: :octave, interpolation: nil, align: false, aligned: false, taper: nil, harmonics: nil, root: nil, loop: nil, sample_rate: 48000, name: nil, source_info: nil)
+      def initialize(mode: :cycle, spectra: nil, frames: nil, data: nil, size: nil, complex: false, mips: :default, interpolation: nil, align: false, aligned: false, taper: nil, harmonics: nil, root: nil, loop: nil, sample_rate: 48000, name: nil, source_info: nil)
         raise ArgumentError, "Unknown wavetable mode #{mode.inspect} (#{MODES.join(', ')})" unless MODES.include?(mode)
 
         @mode = mode
         @complex = !!complex
-        @spacing = parse_spacing(mips)
+        @spacing_explicit = mips != :default
+        @spacing = parse_spacing(mips == :default ? DEFAULT_MIPS : mips)
         @taper = taper
         @aligned = !!aligned
         @harmonic_limit = harmonics
@@ -488,14 +537,16 @@ module MB
       # loop start, 12 loop end, 13 end (source samples), 14 GUARD, 15 the
       # harmonic spectra for exact derivatives (cycle mode; see
       # #derivative_spectra), 16 the harmonic count of each level, 17 the
-      # taper (1 for :sigma, else 0).  With +sync+ (band-limited cycle
-      # tables), the levels and thresholds are the sync levels' (see
-      # #sync_levels and FastWavetable.sync).
-      def kernel_spec(sample_rate, interpolation = nil, sync: false)
+      # taper (1 for :sigma, else 0), 18 +scan_wrap+ (1 if scan positions
+      # wrap around instead of clamping, see Tone#wavetable, else 0).  With
+      # +sync+ (band-limited cycle tables), the levels and thresholds are
+      # the sync levels' (see #sync_levels and FastWavetable.sync).
+      def kernel_spec(sample_rate, interpolation = nil, sync: false, scan_wrap: false)
         emphasis = emphasis?(interpolation)
         sync = false unless sync && @mode == :cycle && @spacing
+        scan_wrap = !!scan_wrap && @mode == :cycle && @frame_count > 1
         by_rate = @kernel_specs[sample_rate] ||= {}
-        by_rate[[emphasis, sync]] ||= begin
+        by_rate[[emphasis, sync, scan_wrap]] ||= begin
           hi, lo = thresholds(sample_rate, sync: sync)
           levels, loop_levels = sync ? [sync_level_set(emphasis), nil] : level_set(emphasis)
           [
@@ -516,6 +567,7 @@ module MB
             derivative_spectra,
             @mode == :cycle ? levels.map { |l| l.bandwidth.finite? ? l.bandwidth.to_i : derivative_spectra.shape[1] - 1 }.freeze : nil,
             @taper == :sigma ? 1 : 0,
+            scan_wrap ? 1 : 0,
           ].freeze
         end
       end
@@ -586,12 +638,13 @@ module MB
         end
       end
 
-      # Cycle mode: the value at +phase+ (cycles) and +scan+ (0..1) for a
+      # Cycle mode: the value at +phase+ (cycles) and +scan+ (0..1, or
+      # wrapping with +scan_wrap+; see the class description) for a
       # tone moving +increment+ cycles per sample at +sample_rate+, with
       # +interpolation+ (default #interpolation).  Sample mode: +phase+ is
       # the position in source samples and +increment+ the speed.
-      def value_at(phase, scan: 0, increment: 0, sample_rate: 48000, interpolation: nil)
-        KernelRuby.value(kernel_spec(sample_rate, interpolation), phase.to_f, increment.to_f.abs, scan.to_f, interpolation_code(interpolation))
+      def value_at(phase, scan: 0, increment: 0, sample_rate: 48000, interpolation: nil, scan_wrap: false)
+        KernelRuby.value(kernel_spec(sample_rate, interpolation, scan_wrap: scan_wrap), phase.to_f, increment.to_f.abs, scan.to_f, interpolation_code(interpolation))
       end
 
       # The kernel code of +interpolation+ (nil for #interpolation).
@@ -607,22 +660,23 @@ module MB
       # the phase accumulator +state+ ([phase in cycles]) advancing by freq *
       # +advance+ per sample, +tstate+ ([position, last phase modulation,
       # primed]), +phase_mod+ (radians), +width+ (phase warp, nil for none),
-      # +scan+ (0..1), and output gain and offset; +remove_dc+ removes the
+      # +scan+ (0..1, or wrapping with +scan_wrap+; see the class
+      # description), and output gain and offset; +remove_dc+ removes the
       # warp's DC offset; a nonzero +random_advance+ (cycles per Hz) adds
       # noise to each increment from the generator state +noise+ (see
       # Tone#noise).  See Tone#wavetable.
-      def oscillate(out, freq, advance, gain, offset, state, tstate, phase_mod, width, scan, interpolation, sample_rate, remove_dc, random_advance = 0.0, noise = nil)
+      def oscillate(out, freq, advance, gain, offset, state, tstate, phase_mod, width, scan, interpolation, sample_rate, remove_dc, random_advance = 0.0, noise = nil, scan_wrap: false)
         MB::Sound::FastWavetable.oscillate(
-          out, kernel_spec(sample_rate, interpolation), freq, advance.to_f, gain.to_f, offset.to_f, state, tstate,
+          out, kernel_spec(sample_rate, interpolation, scan_wrap: scan_wrap), freq, advance.to_f, gain.to_f, offset.to_f, state, tstate,
           phase_mod, width, scan, interpolation_code(interpolation), !!remove_dc, sinc_kernel(interpolation),
           random_advance.to_f, noise
         )
       end
 
       # Ruby mirror of #oscillate (the same samples), returning +out+.
-      def oscillate_ruby(out, freq, advance, gain, offset, state, tstate, phase_mod, width, scan, interpolation, sample_rate, remove_dc, random_advance = 0.0, noise = nil)
+      def oscillate_ruby(out, freq, advance, gain, offset, state, tstate, phase_mod, width, scan, interpolation, sample_rate, remove_dc, random_advance = 0.0, noise = nil, scan_wrap: false)
         KernelRuby.oscillate(
-          out, kernel_spec(sample_rate, interpolation), freq, advance.to_f, gain.to_f, offset.to_f, state, tstate,
+          out, kernel_spec(sample_rate, interpolation, scan_wrap: scan_wrap), freq, advance.to_f, gain.to_f, offset.to_f, state, tstate,
           phase_mod, width, scan, interpolation_code(interpolation), !!remove_dc, random_advance.to_f, noise
         )
       end
@@ -634,18 +688,18 @@ module MB
       # reads the sync levels (#sync_levels) and each harmonic gets an exact
       # minimum-phase residual at every sync event (see .sync_residuals and
       # FastWavetable.sync).  See Tone#sync.
-      def sync(out, freq, advance, gain, offset, sync_state, ring, pulses, soft, width, scan, interpolation, sample_rate, remove_dc, band_limit = true)
+      def sync(out, freq, advance, gain, offset, sync_state, ring, pulses, soft, width, scan, interpolation, sample_rate, remove_dc, band_limit = true, scan_wrap: false)
         MB::Sound::FastWavetable.sync(
-          out, kernel_spec(sample_rate, interpolation, sync: band_limit), freq, advance.to_f, gain.to_f, offset.to_f, sync_state, ring,
+          out, kernel_spec(sample_rate, interpolation, sync: band_limit, scan_wrap: scan_wrap), freq, advance.to_f, gain.to_f, offset.to_f, sync_state, ring,
           pulses, !!soft, width, scan, interpolation_code(interpolation), !!remove_dc, Wavetable.sync_residuals,
           BandLimit.minblep_tables[0], BandLimit::SYNC_OVERSAMPLE, BandLimit::SYNC_TAPS, !!band_limit, SYNC_RESIDUAL_LIMIT, sinc_kernel(interpolation)
         )
       end
 
       # Ruby mirror of #sync.
-      def sync_ruby(out, freq, advance, gain, offset, sync_state, ring, pulses, soft, width, scan, interpolation, sample_rate, remove_dc, band_limit = true)
+      def sync_ruby(out, freq, advance, gain, offset, sync_state, ring, pulses, soft, width, scan, interpolation, sample_rate, remove_dc, band_limit = true, scan_wrap: false)
         KernelRuby.sync(
-          out, kernel_spec(sample_rate, interpolation, sync: band_limit), freq, advance.to_f, gain.to_f, offset.to_f, sync_state, ring,
+          out, kernel_spec(sample_rate, interpolation, sync: band_limit, scan_wrap: scan_wrap), freq, advance.to_f, gain.to_f, offset.to_f, sync_state, ring,
           pulses, !!soft, width, scan, interpolation_code(interpolation), !!remove_dc, Wavetable.sync_residuals,
           BandLimit.minblep_tables[0], BandLimit::SYNC_OVERSAMPLE, BandLimit::SYNC_TAPS, !!band_limit, SYNC_RESIDUAL_LIMIT
         )
@@ -716,16 +770,16 @@ module MB
       # lookup state +lstate+ ([last phase, primed, peak, hold])), +scan+,
       # and the +wrap+ mode for phases outside 0...1 (see WRAP_MODES; :shape
       # spreads -1..1 across the cycle).  See GraphNode::Wavetable.
-      def lookup(out, phase, increments, scan, interpolation, sample_rate, wrap, lstate = nil)
+      def lookup(out, phase, increments, scan, interpolation, sample_rate, wrap, lstate = nil, scan_wrap: false)
         MB::Sound::FastWavetable.lookup(
-          out, kernel_spec(sample_rate, interpolation), phase, increments, scan, interpolation_code(interpolation),
+          out, kernel_spec(sample_rate, interpolation, scan_wrap: scan_wrap), phase, increments, scan, interpolation_code(interpolation),
           wrap_code(wrap), sinc_kernel(interpolation), lstate
         )
       end
 
       # Ruby mirror of #lookup.
-      def lookup_ruby(out, phase, increments, scan, interpolation, sample_rate, wrap, lstate = nil)
-        KernelRuby.lookup(out, kernel_spec(sample_rate, interpolation), phase, increments, scan, interpolation_code(interpolation), wrap_code(wrap), lstate)
+      def lookup_ruby(out, phase, increments, scan, interpolation, sample_rate, wrap, lstate = nil, scan_wrap: false)
+        KernelRuby.lookup(out, kernel_spec(sample_rate, interpolation, scan_wrap: scan_wrap), phase, increments, scan, interpolation_code(interpolation), wrap_code(wrap), lstate)
       end
 
       # Sample mode player in C: fills +out+ at +freq+ (Hz), advancing the
@@ -774,11 +828,12 @@ module MB
 
       # Tags saved by #save that describe the table (others in #source_info
       # are saved too).
-      SAVED_KEYS = [:mode, :name, :frames, :period, :size, :aligned, :spacing, :taper, :interpolation, :complex, :root, :loop, :sample_rate, :scale, :harmonics].freeze
+      SAVED_KEYS = [:mode, :name, :frames, :period, :size, :aligned, :spacing, :spacing_explicit, :taper, :interpolation, :complex, :root, :loop, :sample_rate, :scale, :harmonics].freeze
 
       # The table's settings and derived values, as saved by #save (with
       # #source_info): mode, name, frame count, period (cycle mode samples
-      # per frame), whether the frames are aligned, level spacing, taper,
+      # per frame), whether the frames are aligned, level spacing (and
+      # whether it was chosen explicitly, see .from_file), taper,
       # interpolation, complex, harmonics (cycle mode), and in sample mode
       # the root (Hz), loop
       # ("begin...end" source samples), size, and sample rate.
@@ -790,6 +845,7 @@ module MB
                   end
         m = @source_info.merge(
           mode: @mode.to_s, name: @name, frames: @frame_count, aligned: @aligned.to_s, spacing: spacing,
+          spacing_explicit: @spacing_explicit.to_s,
           taper: @taper&.to_s, interpolation: @interpolation.to_s, complex: @complex.to_s
         )
         if @mode == :cycle

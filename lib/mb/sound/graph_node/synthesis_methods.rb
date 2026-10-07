@@ -32,7 +32,9 @@ module MB
         # Reads a cycle-mode MB::Sound::Wavetable (+table+: anything
         # Wavetable.[] accepts) with this node as the phase in cycles (0...1
         # is one cycle), +scan+ (0..1, a number or node; a Tone without an
-        # amplitude scans 0..1) across its frames.  Levels follow the phase's
+        # amplitude scans 0..1) across its frames (clamped, or wrapping
+        # around with +scan_wrap: true+ as in Tone#wavetable; +wrap+ is
+        # about the phase).  Levels follow the phase's
         # speed: +increment+ (a node of cycles per sample, or false for the
         # brightest level), a phasor Tone's increment port, or else the
         # phase's own change per sample (see GraphNode::Wavetable).  On a
@@ -42,18 +44,18 @@ module MB
         # Example:
         #     # Phase distortion from a wobbling phase
         #     play (100.hz.phasor + 3.hz.sine.at(0.1)).phase_table(:basic, scan: 0.5)
-        def phase_table(table, scan: 0, interpolation: nil, wrap: :wrap, increment: nil)
+        def phase_table(table, scan: 0, interpolation: nil, wrap: :wrap, increment: nil, scan_wrap: false)
           scan = scan.or_at(0..1) if scan.is_a?(MB::Sound::Tone)
           increment = self.increment if increment.nil? && is_a?(MB::Sound::Tone) && phasor?
           Wavetable.new(
             table: table, phase: self, scan: scan, increment: increment, interpolation: interpolation,
-            wrap: wrap, sample_rate: sample_rate
+            wrap: wrap, scan_wrap: scan_wrap, sample_rate: sample_rate
           )
         end
 
         # See #phase_table (Tone#wavetable makes a wavetable oscillator).
-        def wavetable(table, scan: 0, interpolation: nil, wrap: :wrap, increment: nil)
-          phase_table(table, scan: scan, interpolation: interpolation, wrap: wrap, increment: increment)
+        def wavetable(table, scan: 0, interpolation: nil, wrap: :wrap, increment: nil, scan_wrap: false)
+          phase_table(table, scan: scan, interpolation: interpolation, wrap: wrap, increment: increment, scan_wrap: scan_wrap)
         end
 
         # Waveshapes this node through a cycle-mode MB::Sound::Wavetable: the
@@ -62,12 +64,12 @@ module MB
         # how fast the input moves (half its change per sample, its peak held
         # for about a buffer), so a loud or high input reads duller levels
         # instead of aliasing; +increment: false+ always reads the brightest
-        # level.
+        # level.  +scan_wrap+ as for #phase_table.
         #
         # Example:
         #     play 110.hz.sine.waveshape(:basic, scan: 0.2.hz.lfo.triangle.at(0..1)).at(-12.db)
-        def waveshape(table, scan: 0, interpolation: nil, increment: nil)
-          phase_table(table, scan: scan, interpolation: interpolation, wrap: :shape, increment: increment)
+        def waveshape(table, scan: 0, interpolation: nil, increment: nil, scan_wrap: false)
+          phase_table(table, scan: scan, interpolation: interpolation, wrap: :shape, increment: increment, scan_wrap: scan_wrap)
         end
       end
     end
