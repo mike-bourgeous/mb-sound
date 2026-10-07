@@ -100,8 +100,9 @@ module MB
       #             or `0.2.hz.lfo.at(5..30) / 100` for 5 to 30 cents)
       #             changes it while playing: each copy keeps its layout
       #             position, a fixed fraction from -1 to 1 of the detune,
-      #             and the copies are Unison::CopyPitches (apply glide,
-      #             bend range, and vibrato to the pitch before #unison).
+      #             and the copies are Unison::CopyPitches (copies of a
+      #             Notes pitch take glide, bend range, and vibrato in the
+      #             block too, per copy).
       # +detune_mode:+ - How copies follow a +detune:+ node (see
       #                  Unison::Detune): :interp (default) computes the
       #                  outermost ratio r = 2 ** (detune / 12) exactly every
@@ -136,6 +137,15 @@ module MB
       #             0..1; any spread above 0 returns a stereo Channels bundle.
       #             The sides alternate so each gets copies above and below
       #             the pitch (Unison.pan_slots).
+      # +mix:+ - The level of the side copies, 0..1 (a number or a graph
+      #          node), like a supersaw's mix knob: the center copies (the
+      #          one nearest the pitch for an odd count, the two nearest for
+      #          an even count; Unison.center_copies) stay at level 1 and the
+      #          others play at +mix+.  The normalization follows the levels
+      #          (:power keeps the total power, so loudness stays about the
+      #          same while the mix moves; mix 0 with an odd count is the
+      #          center copy alone at full level).  The default 1 (every
+      #          copy equal) gives exactly the output without a mix.
       # +normalize:+ - :power (default) scales the sum by 1/sqrt(count), so
       #                the loudness stays about the same for any count (peaks
       #                may pass full scale when copies line up); :peak by
@@ -152,8 +162,74 @@ module MB
       #     midi.synth(voices: 4) { |v| v.hz.unison(5, detune: 15.cents, spread: 1) * v.amp_env }
       #     midi.synth(voices: 4) { |v| v.hz.unison(7, detune: v.mod * 0.5) * v.amp_env }  # mod wheel: 0-50 cents
       #     play 110.hz.unison(7, detune: 0.2.hz.lfo.at(0..50) / 100, detune_mode: :exact)
-      def unison(count = nil, detune: 12.cents, layout: :random, phase: :random, spread: 0, normalize: :power, seed: nil, detune_mode: :interp, &block)
-        Unison.build(self, count, detune: detune, layout: layout, phase: phase, spread: spread, normalize: normalize, seed: seed, detune_mode: detune_mode, &block)
+      #     play 110.hz.unison(7, detune: 25.cents, mix: 0.4)                   # quieter sides
+      #     midi.synth(voices: 4) { |v| v.hz.unison(5, detune: v.mod * 0.3) { |p| p.glide(50.ms).saw } * v.amp_env }
+      #     midi.synth(voices: 4) { |v| v.hz.unison(7) { |p| p.glide(spread(30.ms..300.ms)).saw } * v.amp_env }
+      #
+      # Per-copy settings: the block gets each copy's index, and pitch
+      # methods on a copy (#transpose, #vibrato, and the Notes pitch
+      # methods glide, bend_range, vibrato) take per-copy values: a Range
+      # (random per copy from the unison's seed), `spread(a..b)` (even by
+      # copy, lowest copy first), or `channels(a, b, ...)` (one per copy);
+      # see Unison::Copy.  Copies with the same Notes settings share their
+      # nodes (one Glide for `p.glide(50.ms)` on every copy).  See #swarm
+      # for a ready-made swarm of gliding copies.
+      def unison(count = nil, detune: 12.cents, layout: :random, phase: :random, spread: 0, mix: 1, normalize: :power, seed: nil, detune_mode: :interp, &block)
+        Unison.build(self, count, detune: detune, layout: layout, phase: phase, spread: spread, mix: mix, normalize: normalize, seed: seed, detune_mode: detune_mode, &block)
+      end
+
+      # Returns a swarm: a unison (see #unison) whose copies glide between
+      # notes each in their own time, so the cloud smears and re-forms at
+      # every note, optionally spread over the tones of a +chord+, starting
+      # scattered (+scatter:+) and converging, and drifting slowly
+      # (+drift:+).  Glides need a Notes pitch (`v.hz` in a synth voice,
+      # `clip.tone`, `midi.hz`); on other pitches give `glide: nil`.  The
+      # block (default `p.saw`) gets each copy's pitch with the glide and
+      # drift already applied, and its index.
+      #
+      # Per-copy arguments (+glide:+, +overshoot:+, +drift_rate:+, and
+      # +scatter:+ as a Range) take a Range (random per copy, repeatable
+      # from +seed:+), `spread(a..b)` (from the lowest copy to the highest),
+      # `channels(...)`, or one value for every copy (see Unison::Copy).
+      #
+      # +count+ - The number of copies (default 12).
+      # +chord:+ - Intervals or semitones above the pitch for the copies to
+      #            settle on (copy k takes tone k % length; see
+      #            Unison.chord_offsets); nil (default) for a unison.
+      # +detune:+ - The detune of the copies on each tone (default
+      #             `15.cents`; see #unison).
+      # +glide:+ - Each copy's glide time between notes (seconds or
+      #            Lengths; default Unison::SWARM_GLIDE, random from 80 ms to
+      #            0.9 s), or nil for no glide.
+      # +legato:+ - Only legato notes glide (see Notes::NotePitch#glide).
+      # +overshoot:+ - How far glides pass their target, as a fraction of
+      #                the glide (default 0; e.g. 0..0.15; see Notes::Glide).
+      # +scatter:+ - Where copies start before the first note glides them
+      #              in: an Interval (e.g. `1.oct`, either side of the first
+      #              note, random per copy) or a Range of Intervals; nil
+      #              (default) starts them on the note.
+      # +from:+ - Where copies start instead, as an absolute band: a Range
+      #           of Pitches, Notes, or note numbers (e.g. `G3..G4`, like
+      #           the THX Deep Note's 200-400 Hz cloud), random per copy.
+      # +drift:+ - A slow wander of each copy by up to this Interval (e.g.
+      #            `20.cents`), a sine LFO at a random phase; nil (default)
+      #            for none.
+      # +drift_rate:+ - The drift LFOs' rates in Hz (default
+      #                 Unison::SWARM_DRIFT_RATE, 0.05 to 0.35 Hz per copy).
+      # Other options (+layout:+, +phase:+, +spread:+ (default 1 here),
+      # +mix:+, +normalize:+, +seed:+, +detune_mode:+) go to #unison.
+      #
+      # Examples (bin/sound.rb; more in bin/songs/swarm_song.rb):
+      #     midi.synth(voices: 1) { |v| v.hz.swarm(12) * v.amp_env }                       # copies arrive one by one
+      #     midi.synth(voices: 2) { |v| v.hz.swarm(16, glide: spread(50.ms..1.5.seconds), overshoot: 0..0.1) * v.amp_env }
+      #     midi.synth(voices: 1) { |v| v.hz.swarm(24, chord: [-12, 0, 7, 12, 16, 19], scatter: 2.oct, glide: 2..6) * v.amp_env(2, 0, 1, 3) }
+      #     play 110.hz.swarm(9, glide: nil, drift: 15.cents)                                  # a drifting cloud on a fixed pitch
+      def swarm(count = 12, chord: nil, detune: 15.cents, glide: :auto, legato: false, overshoot: 0, scatter: nil, from: nil, drift: nil,
+                drift_rate: Unison::SWARM_DRIFT_RATE, spread: 1, **unison, &block)
+        Unison.swarm(
+          self, count, chord: chord, detune: detune, glide: glide, overshoot: overshoot, scatter: scatter, from: from, legato: legato,
+          drift: drift, drift_rate: drift_rate, spread: spread, **unison, &block
+        )
       end
 
       # The phase setting for oscillators made from a unison copy (see
@@ -161,6 +237,12 @@ module MB
       # a copy (#transpose, #vibrato, ...) keep it, so e.g. an FM modulator
       # at `p.transpose(12)` in a unison block gets it too.
       attr_accessor :unison_phase
+
+      # The Unison::Copy this pitch belongs to inside a unison block (see
+      # #unison; nil normally).  Pitches derived from a copy keep it, and
+      # methods taking per-copy settings (ranges, `spread(a..b)`; see
+      # Unison::Copy) resolve them through it.
+      attr_accessor :unison_copy
 
       # Wave shapes: each returns a new Tone at this pitch.
       [
@@ -259,16 +341,31 @@ module MB
       def vibrato(rate = nil, depth: nil)
         raise ArgumentError, 'Pitch#vibrato needs a rate and depth: (MIDI-controlled vibrato comes from Notes#hz)' if rate.nil? || depth.nil?
 
+        rate = per_copy(rate)
+        depth = per_copy(depth)
+
         depth = Interval.semitones(depth).to_f unless depth.respond_to?(:sample)
         lfo = Tone.new(frequency: rate, sample_rate: @sample_rate).lfo
         rebased(GraphNode::SemitoneShift.new(freq, lfo * depth, sample_rate: @sample_rate))
       end
 
       # Returns a Pitch +semitones+ higher (lower if negative); +semitones+
-      # may be an Interval (`7.st`, `1.oct`).
+      # may be an Interval (`7.st`, `1.oct`), or a graph node of semitones
+      # (e.g. `0.2.hz.lfo.at(-0.3..0.3)` to wander by 30 cents).  On a
+      # unison copy it may also be a per-copy setting (see Unison::Copy).
+      #
+      # A tempo-synced pitch (`1.beat.hz`) transposed by a fixed interval
+      # stays tempo-synced: its oscillators follow a Sequence::TempoNode
+      # of the duration divided by the ratio (TempoNode#scaled), so they
+      # stay locked to the timeline.
       def transpose(semitones)
+        semitones = per_copy(semitones)
+        return rebased(GraphNode::SemitoneShift.new(freq, semitones, sample_rate: @sample_rate)) if semitones.respond_to?(:sample)
+
         semitones = Interval.semitones(semitones)
         ratio = 2 ** (semitones / 12.0)
+        return rebased(@source.scaled(ratio)) if @source.is_a?(Sequence::TempoNode) && @source.mode == :hz
+
         rebased(constant? ? @source * ratio : freq * ratio)
       end
 
@@ -368,7 +465,18 @@ module MB
       # Returns +pitch+.
       def derived(pitch)
         pitch.unison_phase = @unison_phase
+        pitch.unison_copy = @unison_copy
         pitch
+      end
+
+      # Resolves a per-copy +value+ (a Range, `spread(a..b)`, or
+      # `channels(...)`; see Unison::Copy) for this unison copy, or returns
+      # +value+ unchanged.
+      def per_copy(value)
+        return value unless Unison::Copy.per_copy?(value)
+        raise ArgumentError, "Per-copy values (#{value}) work only on unison copies, inside a Pitch#unison block" if @unison_copy.nil?
+
+        @unison_copy.pick(value)
       end
 
       # Applies this pitch's settings to a +tone+ made from it (#follow, and

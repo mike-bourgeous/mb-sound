@@ -97,9 +97,29 @@ module MB
           self
         end
 
-        # True if this node ignores the timeline (see #freewheel).
+        # True if this node ignores the timeline (see #freewheel), or the
+        # node it was scaled from (see #scaled) does.
         def freewheel?
-          @freewheel
+          @freewheel || (!@parent.nil? && @parent.freewheel?)
+        end
+
+        # The node this one was made from by #scaled, or nil.
+        attr_reader :parent
+
+        # Returns a TempoNode in the same mode and on the same transport for
+        # this duration divided by +ratio+ (in :hz mode, +ratio+ times the
+        # frequency), e.g. for Pitch#transpose of a tempo-synced pitch: its
+        # tones stay locked to the timeline (a cycle of the new duration
+        # starts at every multiple of it from the start of the timeline),
+        # and it freewheels while this node does.  The ratio is used exactly
+        # (Float#to_r), so small detunes of short durations keep their
+        # size.
+        def scaled(ratio)
+          raise ArgumentError, "The ratio must be a positive number (got #{ratio.inspect})" unless ratio.is_a?(Numeric) && ratio > 0
+
+          node = TempoNode.new(Duration.new(@duration.whole_notes / ratio.to_r, label: "#{@duration} / #{MB::M.sigfigs(ratio, 6)}"), mode: @mode, transport: @transport, sample_rate: @sample_rate)
+          node.instance_variable_set(:@parent, self)
+          node
         end
 
         # The current output value: Hz (:hz) or seconds (:seconds) at the
@@ -145,7 +165,7 @@ module MB
         # (like GraphNode::Constant), so a steady tempo allocates nothing;
         # consumers must copy a frozen input before changing it.
         def sample_main(count)
-          v = @mode == :hz && timeline_paused? && !@freewheel ? 0.0 : value
+          v = @mode == :hz && timeline_paused? && !freewheel? ? 0.0 : value
           buf = @steady
           return buf if buf && buf.length == count && @steady_value.eql?(v)
 
@@ -174,7 +194,7 @@ module MB
         def timeline_start(time, _origin)
           @start_callbacks&.each { |c| c.call(self) }
 
-          return if @freewheel || @mode != :hz || @ports.nil?
+          return if freewheel? || @mode != :hz || @ports.nil?
           cycles = time / @duration.whole_notes
           @pending_jump = (cycles - cycles.floor).to_f
         end
