@@ -84,5 +84,5 @@ MB::Sound.synth_script { |midi|
   }
 
   (s * -5.db)
-    .softclip(0.8, 0.95)
+    .softclip(0.8, 0.95) * 9.db # makeup gain (see velocity-fixes)
 }

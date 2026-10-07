@@ -59,7 +59,8 @@ module MB::Sound
     s = s.softclip(0.8, 0.95).filter(15000.hz.lowpass)
     s = s.oversample(oversample, mode: :libsamplerate_fastest) if oversample > 1
 
-    s + s.delay(100.ms)
+    # Makeup gain to the level of the louder synth scripts (see velocity-fixes)
+    (s + s.delay(100.ms)) * 13.db
   end
 
   if main_script?(__FILE__)
