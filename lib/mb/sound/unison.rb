@@ -148,8 +148,8 @@ module MB
         unless spread.respond_to?(:sample) || (spread.is_a?(Numeric) && (0..1).cover?(spread))
           raise ArgumentError, "Unison spread must be 0..1 or a graph node (got #{spread.inspect})"
         end
-        unless mix.respond_to?(:sample) || (mix.is_a?(Numeric) && (0..1).cover?(mix))
-          raise ArgumentError, "Unison mix must be 0..1 or a graph node (got #{mix.inspect})"
+        unless mix.respond_to?(:sample) || (mix.is_a?(Numeric) && (0..GraphNode::ChannelMixer::Unison::MAX_MIX).cover?(mix))
+          raise ArgumentError, "Unison mix must be 0..2 or a graph node (got #{mix.inspect})"
         end
         unless Detune::MODES.include?(detune_mode)
           raise ArgumentError, "Unknown detune mode #{detune_mode.inspect} (use #{Detune::MODES.map(&:inspect).join(' or ')})"

@@ -40,7 +40,7 @@
 #     # The same melody with one shared glide for comparison (every copy arrives together):
 #     bg :sq, seq(A2, C3, E3, G3, F3, E3).n4.loop.synth(voices: 1) { |v| v.hz.swarm(8, glide: 200.ms) * v.amp_env } * -9.db
 #     # Supersaw mix knob: the side copies at 30% (center copy full)
-#     bg :ss, 110.hz.unison(7, detune: 25.cents, mix: 0.3, spread: 1) * -12.db
+#     bg :ss, 110.hz.unison(7, detune: 25.cents, mix: 0.55, spread: 1) * -12.db
 #     # A drifting cloud on a fixed pitch (no glides on plain pitches)
 #     bg :cl, 110.hz.swarm(9, glide: nil, drift: 15.cents) * -12.db
 #     stop

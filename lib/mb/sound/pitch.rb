@@ -137,15 +137,18 @@ module MB
       #             0..1; any spread above 0 returns a stereo Channels bundle.
       #             The sides alternate so each gets copies above and below
       #             the pitch (Unison.pan_slots).
-      # +mix:+ - The level of the side copies, 0..1 (a number or a graph
-      #          node), like a supersaw's mix knob: the center copies (the
-      #          one nearest the pitch for an odd count, the two nearest for
-      #          an even count; Unison.center_copies) stay at level 1 and the
-      #          others play at +mix+.  The normalization follows the levels
-      #          (:power keeps the total power, so loudness stays about the
-      #          same while the mix moves; mix 0 with an odd count is the
-      #          center copy alone at full level).  The default 1 (every
-      #          copy equal) gives exactly the output without a mix.
+      # +mix:+ - The level of the side copies, 0..2 (a number or a graph
+      #          node, clamped), like a supersaw's mix knob on a perceptual
+      #          curve: the center copies (the one nearest the pitch for an
+      #          odd count, the two nearest for an even count;
+      #          Unison.center_copies) stay at level 1 and the others play at
+      #          mix²: 0.5 is -12 dB, about 0.7 is -6 dB, 1 (default) every
+      #          copy equal (exactly the output without a mix), 1.4 about
+      #          +6 dB, 2 +12 dB (sides above the center, a hollow, wide
+      #          sound).  The normalization follows the levels (:power keeps
+      #          the total power, so loudness stays about the same while the
+      #          mix moves; mix 0 with an odd count is the center copy alone
+      #          at full level).
       # +normalize:+ - :power (default) scales the sum by 1/sqrt(count), so
       #                the loudness stays about the same for any count (peaks
       #                may pass full scale when copies line up); :peak by
@@ -162,7 +165,9 @@ module MB
       #     midi.synth(voices: 4) { |v| v.hz.unison(5, detune: 15.cents, spread: 1) * v.amp_env }
       #     midi.synth(voices: 4) { |v| v.hz.unison(7, detune: v.mod * 0.5) * v.amp_env }  # mod wheel: 0-50 cents
       #     play 110.hz.unison(7, detune: 0.2.hz.lfo.at(0..50) / 100, detune_mode: :exact)
-      #     play 110.hz.unison(7, detune: 25.cents, mix: 0.4)                   # quieter sides
+      #     play 110.hz.unison(7, detune: 25.cents, mix: 0.5)                   # sides 12 dB down
+      #     play 110.hz.unison(7, detune: 25.cents, mix: 1.5, spread: 1)        # sides 7 dB up: hollow and wide
+      #     midi.synth(voices: 4) { |v| v.hz.unison(7, detune: 25.cents, mix: v.mod * 2) * v.amp_env }  # mod wheel: center only to +12 dB sides
       #     midi.synth(voices: 4) { |v| v.hz.unison(5, detune: v.mod * 0.3) { |p| p.glide(50.ms).saw } * v.amp_env }
       #     midi.synth(voices: 4) { |v| v.hz.unison(7) { |p| p.glide(spread(30.ms..300.ms)).saw } * v.amp_env }
       #
