@@ -414,6 +414,28 @@ module MB
       alias filt_env filter_env
       alias filter_envelope filter_env
 
+      # An SQ-80-style envelope (a NoteEnvelope) from panel values: levels
+      # +:l1+, +:l2+, +:l3+ (-63..+63, L3 = sustain), times +:t1+..+:t4+
+      # (0..63, the manual's time chart), +:lv+ (velocity to levels, 0..63)
+      # with +:lv_curve+ (:linear or :exp), +:t1v+ (velocity shortens T1),
+      # +:tk+ (higher keys shorten T2 and T3), +:second_release+ (the T4 "R"
+      # pseudo-reverb tail), +:cycle+ (CYC: run every stage, ignoring the
+      # key-up), +:loop+ (an extension: repeat from a segment while held),
+      # and +:curve+.  See MB::Sound::SQ80.env_options.  Other options are
+      # Envelope's (e.g. +:retrigger+, +:octaves+).  Multiply by a depth or
+      # feed #mod_sum for bipolar modulation.
+      #
+      #     amp = v.sq80_env(l1: 63, l2: 50, l3: 40, t1: 0, t2: 30, t3: 40, t4: 30, lv: 40)
+      #     wah = v.sq80_env(l1: 63, l2: -20, l3: 10, t1: 10, t2: 20, t3: 20, t4: 25, loop: :t2)
+      def sq80_env(lift: false, gm: true, **panel)
+        known = SQ80.method(:env_options).parameters.map(&:last) - [:velocity, :key]
+        env_opts = panel.slice(*known)
+        options = panel.except(*known)
+        opts = SQ80.env_options(velocity: velocity, key: number, **env_opts)
+        segments = opts.delete(:segments)
+        note_envelope(:adsr, segments, nil, nil, nil, lift: lift, gm: gm, gate: !panel[:cycle], **opts, **options)
+      end
+
       # A Pitch following the held note and pitch bend (a
       # Notes::NotePitch), whose oscillators reset their phase at each
       # note-on (key sync, #key_trigger: not at re-strikes that add energy
@@ -615,14 +637,15 @@ module MB
 
       # Makes and registers a NoteEnvelope from an Envelope preset (see
       # #env).
-      def note_envelope(preset, attack, decay, sustain, release, lift: false, gm: true, **options)
+      def note_envelope(preset, attack, decay, sustain, release, lift: false, gm: true, gate: true, **options)
         lift = case lift
                when true then self.lift
                when false, nil then nil
                else lift
                end
 
-        inputs = envelope_inputs.merge(lift: lift).compact
+        inputs = gate ? envelope_inputs : { trigger: trigger, velocity: velocity, choke: choke }
+        inputs = inputs.merge(lift: lift).compact
         register(NoteEnvelope.preset(
           preset, attack, decay, sustain, release,
           notes: self, gm: gm, sample_rate: @sample_rate, **inputs, **options

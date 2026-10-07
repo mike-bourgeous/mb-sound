@@ -77,6 +77,26 @@ module MB
     # then #sample returns nil once the release ends.  Gated and triggered envelopes never end;
     # #idle? tells when they are silent.
     #
+    # Multi-segment envelopes: every constructor (adsr, env, amp_env,
+    # fm_env, filter_env, and the Notes versions) also takes a segment list
+    # of [level, time, curve, shape] (curve and shape optional), named :t1,
+    # :t2, ...: each segment moves from wherever the envelope is to its
+    # level (relative to the velocity peak; negative levels are fine) over
+    # its time.  +release_at:+ is the index (or name) of the first release
+    # segment (default: the last); the level of the segment before it is
+    # the sustain level.  +loop:+ (an index, a name, or true for 0) makes
+    # the segment before the release jump back to that segment instead of
+    # sustaining, until the release; a loop at the release index runs
+    # straight into the release (the SQ-80's CYC mode, with a trigger and
+    # no gate).  Curves and shapes not given per segment come from the
+    # preset by role: the first segment is the attack, the others before
+    # the release decays, the rest releases (curve Hashes may name roles
+    # or segments).  ADSR is the list [[1, a], [s, d], [0, r]], sample for
+    # sample.  See also EnvelopeMethods#sq80_env and MB::Sound::SQ80.
+    #
+    #     play 220.hz.ramp * env([[1, 0.01], [0.3, 0.2], [0.8, 1.5], [0, 0.5]], release_at: 3, hold: 3)
+    #     wobble = env([[1, 0.005], [0, 0.1, 0], [1, 0.1, 0], [0, 0.2]], release_at: 3, loop: 1, gate: g)
+    #
     # Example:
     #     play 220.hz.ramp * adsr(0.01, 0.3, 0.5, 1, curve: :snappy)
     #     play 110.hz.ramp.filter(:lowpass, cutoff: 200.constant * filter_env(0.01, 0.4, depth: 4), quality: 4)
@@ -229,6 +249,13 @@ module MB
       # ENV_ADD_LIMIT).
       ADD_LIMIT = 1.4142135623730951
 
+      # The most segments an envelope may have (the C ENV_MAX_SEGMENTS).
+      MAX_SEGMENTS = 16
+
+      # The most loop jumps on one sample (the C ENV_MAX_LOOP_JUMPS): a loop
+      # of zero-length segments sustains instead of spinning forever.
+      MAX_LOOP_JUMPS = MAX_SEGMENTS
+
       # Remaining curvature below which a segment is planned as a line (the
       # C ENV_LINEAR_LIMIT).
       LINEAR_LIMIT = 1e-9
@@ -237,8 +264,27 @@ module MB
       # :amp_env, :fm_env, or :filter_env), with optional positional times
       # and sustain level, and any #initialize options (which override the
       # preset).  +:depth+ is an alias for +:octaves+.
+      #
+      # A segment list (an Array; see .segments) in place of +attack+ makes a
+      # multi-segment envelope with the preset's curves (by segment role),
+      # velocity settings, and octaves; +decay+, +sustain+, and +release+
+      # must then be left out.
+      #
+      #     Envelope.preset(:amp_env, [[1, 0.01], [0.5, 0.4], [0.8, 1], [0, 0.5]], release_at: 3)
       def self.preset(name, attack = nil, decay = nil, sustain = nil, release = nil, **options)
         settings = PRESETS.fetch(name) { raise ArgumentError, "Unknown envelope preset #{name.inspect} (#{PRESETS.keys.join(', ')})" }
+
+        if attack.is_a?(Array)
+          raise ArgumentError, 'Give a segment list or ADSR times, not both' unless [decay, sustain, release].all?(&:nil?)
+          raise ArgumentError, 'Give the segment list once' if options.key?(:segments)
+          options[:segments] = attack
+          attack = nil
+        end
+
+        if options.key?(:segments)
+          settings = settings.except(:sustain)
+          settings = settings.merge(curve: SEGMENTS.zip(settings[:curve]).to_h) if settings[:curve].is_a?(Array)
+        end
 
         if options.key?(:auto_release) || options.key?(:log)
           raise ArgumentError, 'Envelopes take hold: (seconds from the start to the release) instead of auto_release:, and curve: (dB) instead of log:'
@@ -258,24 +304,31 @@ module MB
 
       # Returns a Hash of curves for each segment (see SEGMENTS) from any
       # curve specification: a preset Symbol (see CURVES), a number or graph
-      # node for every segment, an Array of [attack, decay, release], or a
-      # Hash of some segments (the rest come from +current+).
-      def self.curve_values(curve, current = SEGMENTS.zip(CURVES[:analog]).to_h)
+      # node for every segment, an Array of one value per segment ([attack,
+      # decay, release] for ADSR), or a Hash of some segments (the rest come
+      # from +current+).
+      #
+      # For multi-segment envelopes (see .segments), +:names+ lists the
+      # segment names and +:release_node+ the first release segment; preset
+      # curves then apply by role (the first segment takes the preset's
+      # attack curve, the others before the release its decay curve, the
+      # release segments its release curve; see .segment_role), Hash keys
+      # may be segment names or roles (:attack, :decay, :release), and a
+      # three-value Array applies by role when there aren't three segments.
+      def self.curve_values(curve, current = nil, names: SEGMENTS, release_node: RELEASE_NODE)
+        current ||= role_values(CURVES[:analog], names, release_node)
         values = case curve
                  when Symbol
-                   SEGMENTS.zip(CURVES.fetch(curve) { raise ArgumentError, "Unknown curve preset #{curve.inspect} (#{CURVES.keys.join(', ')})" }).to_h
+                   role_values(CURVES.fetch(curve) { raise ArgumentError, "Unknown curve preset #{curve.inspect} (#{CURVES.keys.join(', ')})" }, names, release_node)
 
                  when Array
-                   raise ArgumentError, "Curve arrays need #{SEGMENTS.length} values (#{SEGMENTS.join(', ')})" unless curve.length == SEGMENTS.length
-                   SEGMENTS.zip(curve).to_h
+                   by_position(curve, names, release_node, 'Curve')
 
                  when Hash
-                   extra = curve.keys - SEGMENTS
-                   raise ArgumentError, "Unknown curve segments #{extra.inspect} (#{SEGMENTS.join(', ')})" unless extra.empty?
-                   current.merge(curve)
+                   by_key(curve, current, names, release_node, 'curve')
 
                  else
-                   SEGMENTS.map { |s| [s, curve] }.to_h
+                   names.map { |s| [s, curve] }.to_h
                  end
 
         values.transform_values { |v|
@@ -290,21 +343,20 @@ module MB
 
       # Returns a Hash of shapes (:exp or :s) for each segment (see SEGMENTS)
       # from any shape specification: a Symbol for every segment (see
-      # SHAPES), an Array of [attack, decay, release], or a Hash of some
-      # segments (the rest come from +current+).
-      def self.shape_values(shape, current = SEGMENTS.map { |s| [s, :exp] }.to_h)
+      # SHAPES), an Array of one per segment ([attack, decay, release] for
+      # ADSR), or a Hash of some segments (the rest come from +current+).
+      # +:names+ and +:release_node+ are as for .curve_values.
+      def self.shape_values(shape, current = nil, names: SEGMENTS, release_node: RELEASE_NODE)
+        current ||= names.map { |s| [s, :exp] }.to_h
         values = case shape
                  when Array
-                   raise ArgumentError, "Shape arrays need #{SEGMENTS.length} values (#{SEGMENTS.join(', ')})" unless shape.length == SEGMENTS.length
-                   SEGMENTS.zip(shape).to_h
+                   by_position(shape, names, release_node, 'Shape')
 
                  when Hash
-                   extra = shape.keys - SEGMENTS
-                   raise ArgumentError, "Unknown shape segments #{extra.inspect} (#{SEGMENTS.join(', ')})" unless extra.empty?
-                   current.merge(shape)
+                   by_key(shape, current, names, release_node, 'shape')
 
                  else
-                   SEGMENTS.map { |s| [s, shape] }.to_h
+                   names.map { |s| [s, shape] }.to_h
                  end
 
         values.transform_values { |v|
@@ -315,6 +367,47 @@ module MB
           v
         }
       end
+
+      # The role of segment +index+ for presets and GM time scaling: the
+      # first segment is the :attack, the others before +release_node+ are
+      # :decay, and the rest are :release.
+      def self.segment_role(index, release_node)
+        return :attack if index == 0
+        index < release_node ? :decay : :release
+      end
+
+      # A Hash of segment name to the value for its role from an [attack,
+      # decay, release] triple (see .segment_role).
+      def self.role_values(triple, names, release_node)
+        roles = SEGMENTS.zip(triple).to_h
+        names.each_with_index.map { |n, i| [n, roles[segment_role(i, release_node)]] }.to_h
+      end
+
+      # Values by position (one per segment, or an [attack, decay, release]
+      # triple by role for multi-segment envelopes).
+      def self.by_position(list, names, release_node, what)
+        return names.zip(list).to_h if list.length == names.length
+        return role_values(list, names, release_node) if list.length == SEGMENTS.length
+
+        raise ArgumentError, "#{what} arrays need #{names.length} values (#{names.join(', ')})"
+      end
+
+      # Values from a Hash of segment names or roles merged over +current+
+      # (roles first, so a segment name wins over its role).
+      def self.by_key(hash, current, names, release_node, what)
+        roles = names.each_with_index.map { |n, i| [n, segment_role(i, release_node)] }.to_h
+        extra = hash.keys - names - SEGMENTS
+        raise ArgumentError, "Unknown #{what} segments #{extra.inspect} (#{(names | SEGMENTS).join(', ')})" unless extra.empty?
+
+        values = current.dup
+        if names != SEGMENTS
+          hash.each { |k, v| names.each { |n| values[n] = v if roles[n] == k } if SEGMENTS.include?(k) && !names.include?(k) }
+        end
+        hash.each { |k, v| values[k] = v if names.include?(k) }
+        values
+      end
+
+      private_class_method :role_values, :by_position, :by_key
 
       # Velocity gains for velocity 0 and 1 (see #initialize).
       attr_reader :velocity_low, :velocity_high
@@ -362,8 +455,18 @@ module MB
       #              cutoff multiplier (a number of octaves, anything with
       #              #to_octaves such as an Interval, or a graph node read
       #              every sample, e.g. the mod wheel).
+      #
+      # Multi-segment envelopes (see .segments) take +:segments+ (a list of
+      # [level, time, curve, shape] entries, curve and shape optional), with
+      # +:release_at+ (the index or name of the first release segment;
+      # default the last segment) and +:loop+ (nil, or the index or name of
+      # the segment to jump back to from the segment before the release, or
+      # true for 0), instead of +:attack+, +:decay+, +:sustain+, and
+      # +:release+.  Per-segment curves and shapes in the list override
+      # +:curve+ and +:shape+.
       def initialize(
-        attack: DEFAULT_ATTACK, decay: DEFAULT_DECAY, sustain: DEFAULT_SUSTAIN, release: DEFAULT_RELEASE,
+        attack: nil, decay: nil, sustain: nil, release: nil,
+        segments: nil, release_at: nil, loop: nil,
         curve: :analog, shape: nil, hold: nil,
         gate: nil, trigger: nil, velocity: nil, choke: nil, lift: nil,
         sensitivity: 0..1, velocity_range: nil, velocity_scale: :linear, legato: false, octaves: nil,
@@ -373,16 +476,33 @@ module MB
         raise ArgumentError, "Sample rate must be positive (got #{sample_rate.inspect})" unless @sample_rate > 0
 
         @times = {}
-        self.attack = attack
-        self.decay = decay
-        self.release = release
-        self.sustain = sustain
+        @levels = {}
+        if segments.nil?
+          raise ArgumentError, 'release_at: and loop: need a segment list (segments:)' unless release_at.nil? && (loop.nil? || loop == false)
+
+          @names = SEGMENTS
+          @release_node = RELEASE_NODE
+          @loop_node = nil
+          @levels[:attack] = 1.0
+          @levels[:release] = 0.0
+          self.attack = attack.nil? ? DEFAULT_ATTACK : attack
+          self.decay = decay.nil? ? DEFAULT_DECAY : decay
+          self.release = release.nil? ? DEFAULT_RELEASE : release
+          self.sustain = sustain.nil? ? DEFAULT_SUSTAIN : sustain
+          list = nil
+        else
+          unless [attack, decay, sustain, release].all?(&:nil?)
+            raise ArgumentError, 'Give segments: or attack:/decay:/sustain:/release:, not both'
+          end
+          list = setup_segments(segments, release_at, loop)
+        end
         self.hold = hold
 
         @curves = nil
         @shapes = nil
         self.curve(curve)
         self.shape(shape) unless shape.nil?
+        apply_segment_styles(list) if list
 
         if velocity.is_a?(Range)
           raise ArgumentError, "velocity: is the velocity input (a node or number); give the velocity range as sensitivity: #{velocity.inspect}"
@@ -412,65 +532,116 @@ module MB
         reset
       end
 
-      # Times as given (seconds, lengths, or graph nodes).
+      # The segment names in order: [:attack, :decay, :release] for ADSR
+      # envelopes, :t1, :t2, ... for multi-segment envelopes (see
+      # .segments).
+      attr_reader :names
+      alias segment_names names
+
+      # The index of the first release segment (see .segments).
+      attr_reader :release_node
+
+      # The index of the segment that the segment before the release jumps
+      # back to (see .segments), or nil.
+      attr_reader :loop_node
+
+      # True for a multi-segment envelope (see .segments).
+      def multi?
+        !@names.equal?(SEGMENTS)
+      end
+
+      # The segments as an Array of Hashes with :name, :level (relative to
+      # the peak), :time (as given), :curve (dB), and :shape.
+      def segments
+        @names.map { |n| { name: n, level: @levels[n], time: @times[n].length, curve: @curves[n], shape: @shapes[n] } }
+      end
+
+      # Times as given (seconds, lengths, or graph nodes): the first
+      # segment's, the second's, and the first release segment's.
       def attack
-        @times[:attack].length
+        @times[@names[0]].length
       end
 
       def decay
-        @times[:decay].length
+        @times[@names[1]].length
       end
 
       def release
-        @times[:release].length
+        @times[@names[@release_node]].length
       end
 
       # Times in seconds (lengths converted at the current tempo), or nil for
       # times from graph nodes.
       def attack_time
-        seconds(@times[:attack])
+        seconds(@times[@names[0]])
       end
 
       def decay_time
-        seconds(@times[:decay])
+        seconds(@times[@names[1]])
       end
 
       def release_time
-        seconds(@times[:release])
+        seconds(@times[@names[@release_node]])
       end
 
-      # The sustain level (a number or graph node), relative to the peak.
-      attr_reader :sustain
+      # The time of segment +name+ (a name or index) as given.
+      def time(name)
+        @times[segment_name(name)].length
+      end
+
+      # The level of segment +name+ (a name or index; a number or node).
+      def level_of(name)
+        @levels[segment_name(name)]
+      end
+
+      # The sustain level (a number or graph node), relative to the peak:
+      # the level of the segment before the release.
+      def sustain
+        @levels[@names[@release_node - 1]]
+      end
       alias sustain_level sustain
 
       # Changes the attack time (seconds, a length, or a graph node).
       def attack=(time)
-        @times[:attack] = Length::Source.new(time)
-        @default_hold = nil
-        changed!
+        set_time(@names[0], time)
       end
       alias attack_time= attack=
 
       # Changes the decay time (seconds, a length, or a graph node).
       def decay=(time)
-        @times[:decay] = Length::Source.new(time)
-        @default_hold = nil
-        changed!
+        set_time(@names[1], time)
       end
       alias decay_time= decay=
 
       # Changes the release time (seconds, a length, or a graph node).
       def release=(time)
-        @times[:release] = Length::Source.new(time)
-        changed!
+        set_time(@names[@release_node], time)
       end
       alias release_time= release=
 
-      # Changes the sustain level (a number or graph node, relative to the
-      # peak).
-      def sustain=(level)
-        @sustain = param(level, 'Sustain')
+      # Changes the time of segment +name+ (a name or index; seconds, a
+      # length, or a graph node).
+      def set_time(name, time)
+        name = segment_name(name)
+        @times[name] = Length::Source.new(time)
+        @default_hold = nil if @names.index(name) < @release_node
         changed!
+        self
+      end
+
+      # Changes the level of segment +name+ (a name or index; a number or
+      # graph node, relative to the peak).
+      def set_level(name, level)
+        name = segment_name(name)
+        @levels[name] = param(level, name == @names[@release_node - 1] ? 'Sustain' : 'Level')
+        changed!
+        self
+      end
+
+      # Changes the sustain level (a number or graph node, relative to the
+      # peak): the level of the segment before the release.
+      def sustain=(level)
+        set_level(@names[@release_node - 1], level)
       end
       alias sustain_level= sustain=
 
@@ -506,9 +677,9 @@ module MB
         return @curves.dup if args.empty?
 
         spec = args.length == 1 ? args.first : args
-        values = self.class.curve_values(spec, @curves || SEGMENTS.zip(CURVES[:analog]).to_h)
+        values = self.class.curve_values(spec, @curves, names: @names, release_node: @release_node)
         @curves = values.transform_values { |v| v.is_a?(Numeric) ? v : v.get_sampler }
-        @shapes = self.class.shape_values(CURVE_SHAPES.fetch(spec, :exp)) if spec.is_a?(Symbol) || @shapes.nil?
+        @shapes = self.class.shape_values(CURVE_SHAPES.fetch(spec, :exp), names: @names, release_node: @release_node) if spec.is_a?(Symbol) || @shapes.nil?
         changed!
         self
       end
@@ -530,7 +701,7 @@ module MB
         return @shapes.dup if args.empty?
 
         spec = args.length == 1 ? args.first : args
-        @shapes = self.class.shape_values(spec, @shapes)
+        @shapes = self.class.shape_values(spec, @shapes, names: @names, release_node: @release_node)
         changed!
         self
       end
@@ -637,7 +808,7 @@ module MB
       def stage
         case @state[STATE_STAGE].to_i
         when STAGE_IDLE then :idle
-        when STAGE_SEGMENT then SEGMENTS[@state[STATE_SEGMENT].to_i]
+        when STAGE_SEGMENT then @names[@state[STATE_SEGMENT].to_i]
         when STAGE_SUSTAIN then :sustain
         when STAGE_ENDED then :ended
         when STAGE_CHOKE then :choke
@@ -693,7 +864,7 @@ module MB
         s = {}
         @times.each { |name, src| s[name] = src.node if src.node? }
         s[:hold] = @hold.node if @hold && @hold.node?
-        s[:sustain] = @sustain if @sustain.respond_to?(:sample)
+        @levels.each { |name, l| s[level_key(name)] = l if l.respond_to?(:sample) }
         @curves.each { |name, c| s[:"#{name}_curve"] = c if c.respond_to?(:sample) }
         s[:gate] = @gate if @gate.respond_to?(:sample)
         s[:trigger] = @trigger if @trigger.respond_to?(:sample)
@@ -720,7 +891,9 @@ module MB
       alias at_rate sample_rate=
 
       def to_s
-        times = [@times[:attack], @times[:decay], @sustain, @times[:release]].map { |t|
+        return "#{super} -- #{multi_to_s}" if multi?
+
+        times = [@times[:attack], @times[:decay], sustain, @times[:release]].map { |t|
           t.is_a?(Numeric) ? MB::M.sigfigs(t, 4) : t.to_s
         }
         preset_shapes = ->(k) { self.class.shape_values(CURVE_SHAPES.fetch(k, :exp)) }
@@ -744,7 +917,7 @@ module MB
 
         [
           flags,
-          RELEASE_NODE,
+          @release_node,
           @velocity_low,
           @velocity_high,
           @velocity_scale == :db ? 1 : 0,
@@ -752,6 +925,7 @@ module MB
           CURVE_SCALE,
           S_SLOPE_TIME * @sample_rate,
           S_OVERSHOOT,
+          *(@loop_node ? [@loop_node] : []),
         ]
       end
 
@@ -762,7 +936,8 @@ module MB
       def self.process_ruby(out, state, times, curves, levels, hold, inputs, config, shapes)
         n = out.length
         nseg = times.length
-        flags, release_node, velocity_low, velocity_high, velocity_db, choke_samples, curve_scale, slope_samples, overshoot = config
+        raise ArgumentError, 'Config must have 9 or 10 values' unless config.length == 9 || config.length == 10
+        flags, release_node, velocity_low, velocity_high, velocity_db, choke_samples, curve_scale, slope_samples, overshoot, loop_node = config
         flags = Integer(flags)
         release_node = Integer(release_node)
         velocity_low = velocity_low.to_f
@@ -777,6 +952,8 @@ module MB
         raise ArgumentError, "Unknown segment shape in #{shapes}" unless seg_shapes.all? { |v| v == SHAPE_EXP || v == SHAPE_S }
 
         raise ArgumentError, 'Release node out of range' unless release_node >= 1 && release_node < nseg
+        loop_node = loop_node.nil? ? -1 : Integer(loop_node)
+        raise ArgumentError, 'Loop node out of range' unless loop_node >= -1 && loop_node <= release_node
 
         has_gate = flags & FLAG_GATE != 0
         has_trigger = flags & FLAG_TRIGGER != 0
@@ -835,6 +1012,7 @@ module MB
           gate_now = has_gate && at(gate_sig, i) != 0
           start = stage == STAGE_PENDING
           landed = false
+          loop_jumps = 0
           y_last = y
 
           if at(choke_sig, i) != 0 && (stage == STAGE_SEGMENT || stage == STAGE_SUSTAIN)
@@ -907,7 +1085,12 @@ module MB
                 if stage == STAGE_CHOKE || seg == nseg - 1
                   stage = one_shot ? STAGE_ENDED : STAGE_IDLE
                 elsif seg == release_node - 1
-                  stage = STAGE_SUSTAIN
+                  if loop_node >= 0 && loop_jumps < MAX_LOOP_JUMPS
+                    seg = loop_node
+                    loop_jumps += 1
+                  else
+                    stage = STAGE_SUSTAIN
+                  end
                 else
                   seg += 1
                 end
@@ -1132,11 +1315,11 @@ module MB
         # read into the same Arrays every buffer.
         args = @args ||= kernel_args
         times, curves, levels, inputs, config, _hold, shapes = args
-        SEGMENTS.each_with_index do |s, i|
+        @names.each_with_index do |s, i|
           times[i] = read_length(s, @times[s], count) if @times[s].node?
-          curves[i] = read_param(CURVE_KEYS[s], @curves[s], count) unless @curves[s].is_a?(Numeric)
+          curves[i] = read_param(curve_key(s), @curves[s], count) unless @curves[s].is_a?(Numeric)
+          levels[i] = read_param(level_key(s), @levels[s], count) unless @levels[s].is_a?(Numeric)
         end
-        levels[1] = read_param(:sustain, @sustain, count) unless @sustain.is_a?(Numeric)
         hold = args[5]
         hold = read_length(:hold, @hold || default_hold, count) if hold.nil?
         inputs[0] = read_input(:gate, @gate, count, 0.0) if @gate.respond_to?(:sample)
@@ -1205,15 +1388,15 @@ module MB
       # Kernel arguments with constants filled in (nil for nodes): [times,
       # curves, levels, inputs, config, hold, shapes].
       def kernel_args
-        times = SEGMENTS.map { |s| @times[s].node? ? nil : @times[s].constant_samples(@sample_rate) }
-        curves = SEGMENTS.map { |s| @curves[s].is_a?(Numeric) ? @curves[s] : nil }
-        levels = [1.0, @sustain.is_a?(Numeric) ? @sustain : nil, 0.0]
+        times = @names.map { |s| @times[s].node? ? nil : @times[s].constant_samples(@sample_rate) }
+        curves = @names.map { |s| @curves[s].is_a?(Numeric) ? @curves[s] : nil }
+        levels = @names.map { |s| @levels[s].is_a?(Numeric) ? @levels[s] : nil }
         inputs = [@gate, @trigger, @velocity, @choke, @lift, @octaves].map { |v| v.respond_to?(:sample) ? nil : v }
 
         hold_source = @hold == false ? nil : (@hold || default_hold)
         hold = hold_source.nil? ? Float::INFINITY : (hold_source.node? ? nil : hold_source.constant_samples(@sample_rate))
 
-        shapes = SEGMENTS.map { |s| SHAPES.fetch(@shapes[s]) }
+        shapes = @names.map { |s| SHAPES.fetch(@shapes[s]) }
 
         [times, curves, levels, inputs, kernel_config, hold, shapes]
       end
@@ -1275,7 +1458,106 @@ module MB
 
       # The default hold (see #initialize) as a length source.
       def default_hold
-        @default_hold ||= Length::Source.new([2.0 * (fixed_seconds(@times[:attack]) + fixed_seconds(@times[:decay])), MIN_HOLD].max)
+        @default_hold ||= Length::Source.new([2.0 * @names[0...@release_node].map { |n| fixed_seconds(@times[n]) }.inject(:+), MIN_HOLD].max)
+      end
+
+      # The key for the last values of segment +name+'s curve node (see
+      # #fit).
+      def curve_key(name)
+        CURVE_KEYS[name] || :"#{name}_curve"
+      end
+
+      # The key for segment +name+'s level node in #sources and #fit
+      # (:sustain for ADSR envelopes, as before multi-segment envelopes).
+      def level_key(name)
+        multi? ? :"#{name}_level" : :sustain
+      end
+
+      # The segment name for a name or 0-based index.
+      def segment_name(name)
+        return @names.fetch(name) { raise ArgumentError, "No segment #{name} (#{@names.length} segments)" } if name.is_a?(Integer)
+        raise ArgumentError, "Unknown segment #{name.inspect} (#{@names.join(', ')})" unless @names.include?(name)
+        name
+      end
+
+      # Sets up the segments of a multi-segment envelope from +list+ (see
+      # #initialize) and returns the normalized list of [level, time, curve,
+      # shape].
+      def setup_segments(list, release_at, loop)
+        raise ArgumentError, "A segment list must be an Array (got #{list.inspect})" unless list.is_a?(Array)
+        unless list.length.between?(2, MAX_SEGMENTS)
+          raise ArgumentError, "Envelopes need 2 to #{MAX_SEGMENTS} segments (got #{list.length})"
+        end
+
+        list = list.map { |seg| normalize_segment(seg) }
+        @names = list.length.times.map { |i| :"t#{i + 1}" }.freeze
+        @release_node = segment_index(release_at.nil? ? list.length - 1 : release_at, 'release_at')
+        raise ArgumentError, "release_at: must be from 1 to #{list.length - 1} (got #{release_at.inspect})" unless @release_node.between?(1, list.length - 1)
+
+        @loop_node = case loop
+                     when nil, false then nil
+                     when true then 0
+                     else segment_index(loop, 'loop')
+                     end
+        if @loop_node && !@loop_node.between?(0, @release_node)
+          raise ArgumentError, "loop: must be a segment from 0 to the release segment #{@release_node} (got #{loop.inspect})"
+        end
+
+        list.each_with_index do |(level, time, _, _), i|
+          set_level(@names[i], level)
+          set_time(@names[i], time)
+        end
+
+        list
+      end
+
+      # A segment as [level, time, curve, shape] from an Array or a Hash with
+      # :level, :time, :curve, :shape.
+      def normalize_segment(seg)
+        case seg
+        when Array
+          raise ArgumentError, "Segments are [level, time, curve, shape] (got #{seg.inspect})" unless seg.length.between?(2, 4)
+          seg.values_at(0, 1, 2, 3)
+        when Hash
+          extra = seg.keys - [:level, :time, :curve, :shape]
+          raise ArgumentError, "Unknown segment keys #{extra.inspect}" unless extra.empty?
+          raise ArgumentError, "Segments need a level and a time (got #{seg.inspect})" unless seg.key?(:level) && seg.key?(:time)
+          seg.values_at(:level, :time, :curve, :shape)
+        else
+          raise ArgumentError, "Segments are [level, time, curve, shape] Arrays or Hashes (got #{seg.inspect})"
+        end
+      end
+
+      # The 0-based index for a segment index or name (:t1 is 0).
+      def segment_index(value, what)
+        case value
+        when Integer then value
+        when Symbol
+          idx = @names.index(value)
+          raise ArgumentError, "Unknown segment #{value.inspect} for #{what}: (#{@names.join(', ')})" unless idx
+          idx
+        else
+          raise ArgumentError, "#{what}: must be a segment index or name (got #{value.inspect})"
+        end
+      end
+
+      # Applies the curves and shapes given in a segment list.
+      def apply_segment_styles(list)
+        curves = @names.zip(list).filter_map { |n, seg| [n, seg[2]] unless seg[2].nil? }.to_h
+        shapes = @names.zip(list).filter_map { |n, seg| [n, seg[3]] unless seg[3].nil? }.to_h
+        curve(curves) unless curves.empty?
+        shape(shapes) unless shapes.empty?
+      end
+
+      # #to_s for multi-segment envelopes.
+      def multi_to_s
+        num = ->(v) { v.is_a?(Numeric) ? MB::M.sigfigs(v, 4) : v.to_s }
+        segs = @names.each_with_index.map { |n, i|
+          mark = i == @release_node ? '| ' : ''
+          mark += '@' if i == @loop_node
+          "#{mark}#{num.(@levels[n])}/#{num.(@times[n].length)}"
+        }
+        "env(#{segs.join(', ')}) curve #{@curves.values.map(&num).join('/')}#{' retrigger add' if @retrigger == :add}"
       end
 
       # A time in seconds for defaults (0 for graph nodes).

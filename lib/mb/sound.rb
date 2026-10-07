@@ -133,6 +133,7 @@ require_relative 'sound/delay_line'
 require_relative 'sound/wavetable'
 require_relative 'sound/graph_node'
 require_relative 'sound/envelope'
+require_relative 'sound/sq80'
 require_relative 'sound/graph_node_input'
 
 require_relative 'sound/midi'

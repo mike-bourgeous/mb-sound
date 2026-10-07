@@ -121,8 +121,13 @@ enum env_config_index {
 	CF_CURVE_SCALE,
 	CF_SLOPE_SAMPLES,  // longest slope correction of S segments (samples)
 	CF_OVERSHOOT,      // largest correction bump, relative to the step
-	CF_SIZE
+	CF_SIZE,
+	CF_LOOP_NODE = CF_SIZE, // optional: segment to loop back to, or -1
 };
+
+// The most loop jumps on one sample (a loop of zero-length segments stops
+// looping and sustains instead of spinning forever).
+#define ENV_MAX_LOOP_JUMPS ENV_MAX_SEGMENTS
 
 // Segment shapes (MB::Sound::Envelope::SHAPES).
 enum env_shape {
@@ -398,8 +403,15 @@ static __attribute__((noinline)) double env_sample_s(struct env_s_plan *sp, doub
  * each nil, a Numeric, or an NArray (lift and octaves are used only with
  * the ENV_LIFT and ENV_OCTAVES flags).  +config+ is [flags, release node,
  * velocity low, velocity high, velocity in dB (0 or 1), choke samples,
- * curve scale, slope correction samples, overshoot] (see
- * MB::Sound::Envelope#kernel_config).
+ * curve scale, slope correction samples, overshoot], optionally followed
+ * by a loop node (see MB::Sound::Envelope#kernel_config).
+ *
+ * Loops: with a loop node L >= 0 (at most the release node), the segment
+ * before the release node jumps to segment L when it lands instead of
+ * entering the sustain stage, so segments L to release node - 1 repeat
+ * until the release (gate off, hold, or choke).  L equal to the release
+ * node runs straight into the release (the SQ-80's CYC mode with a
+ * trigger and no gate).  Without a loop node (or -1) nothing changes.
  *
  * With the ENV_ADD flag, a note's peak is env_add_peak of the level when
  * it starts and its velocity's peak (Envelope retrigger: :add).
@@ -431,8 +443,8 @@ static VALUE ruby_process(VALUE self, VALUE out, VALUE state, VALUE times, VALUE
 	if (RARRAY_LEN(inputs) != 6) {
 		rb_raise(rb_eArgError, "Inputs must be [gate, trigger, velocity, choke, lift, octaves]");
 	}
-	if (RARRAY_LEN(config) != CF_SIZE) {
-		rb_raise(rb_eArgError, "Config must have %d values", CF_SIZE);
+	if (RARRAY_LEN(config) != CF_SIZE && RARRAY_LEN(config) != CF_SIZE + 1) {
+		rb_raise(rb_eArgError, "Config must have %d or %d values", CF_SIZE, CF_SIZE + 1);
 	}
 
 	int flags = NUM2INT(rb_ary_entry(config, CF_FLAGS));
@@ -447,6 +459,10 @@ static VALUE ruby_process(VALUE self, VALUE out, VALUE state, VALUE times, VALUE
 
 	if (release_node < 1 || release_node >= nseg) {
 		rb_raise(rb_eArgError, "Release node must be from 1 to %ld", nseg - 1);
+	}
+	long loop_node = RARRAY_LEN(config) > CF_LOOP_NODE ? NUM2LONG(rb_ary_entry(config, CF_LOOP_NODE)) : -1;
+	if (loop_node < -1 || loop_node > release_node) {
+		rb_raise(rb_eArgError, "Loop node must be -1 (none) or from 0 to the release node %ld", release_node);
 	}
 	if (velocity_db && !(velocity_low > 0 && velocity_high > 0)) {
 		rb_raise(rb_eArgError, "Velocity gains must be positive for dB scaling");
@@ -531,6 +547,7 @@ static VALUE ruby_process(VALUE self, VALUE out, VALUE state, VALUE times, VALUE
 		int gate_now = has_gate && env_at(&gate_sig, i) != 0;
 		int start = stage == ENV_PENDING;
 		int landed = 0;
+		int loop_jumps = 0;
 		double y_last = y;
 
 		if (env_at(&choke_sig, i) != 0 && (stage == ENV_SEGMENT || stage == ENV_SUSTAIN)) {
@@ -611,7 +628,12 @@ static VALUE ruby_process(VALUE self, VALUE out, VALUE state, VALUE times, VALUE
 					if (stage == ENV_CHOKE || seg == nseg - 1) {
 						stage = one_shot ? ENV_ENDED : ENV_IDLE;
 					} else if (seg == release_node - 1) {
-						stage = ENV_SUSTAIN;
+						if (loop_node >= 0 && loop_jumps < ENV_MAX_LOOP_JUMPS) {
+							seg = loop_node;
+							loop_jumps++;
+						} else {
+							stage = ENV_SUSTAIN;
+						}
 					} else {
 						seg++;
 					}
