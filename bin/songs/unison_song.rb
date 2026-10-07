@@ -30,6 +30,16 @@
 #     midi.synth(voices: 4) { |v| v.hz.unison(5, detune: 15.cents, spread: 1) * v.amp_env }   # key-synced, random phases per note
 #     midi.synth(voices: 4) { |v| v.hz.unison(7, detune: v.mod * 0.5, spread: 1) * v.amp_env }  # mod wheel: 0-50 cents of detune
 #     midi.synth(voices: 4) { |v| v.hz.unison(5) { |p| p.saw.free } * v.amp_env }             # free-running copies
+#     bg :ss, 110.hz.unison(7, detune: 25.cents, mix: 0.5) * -12.db               # mix²: sides 12 dB down (0..2; 2 = +12 dB)
+#     bg :ss, 110.hz.unison(7, detune: 25.cents, mix: 1.5, spread: 1) * -12.db    # sides louder than the center: hollow and wide
+# Per-copy values in the block (a Range is random per copy, spread(a..b) is
+# even from the lowest copy to the highest, channels(...) is a cycled list):
+#     bg :pv, 110.hz.unison(5, detune: 10.cents) { |p| p.vibrato(4.0..6.5, depth: 8.cents).saw } * -12.db   # random vibrato rates
+#     bg :pv, 110.hz.unison(7, spread: 1) { |p| p.vibrato(spread(3..7), depth: 10.cents).saw } * -12.db     # 3 Hz low copy .. 7 Hz high
+#     bg :pv, 110.hz.unison(4, detune: 6.cents) { |p| p.transpose(channels(0, 12, 0, 19)).saw } * -12.db    # an octave/12th stack
+#     bg :pv, 220.hz.unison(5) { |p| p.transpose(-0.1..0.1).square } * -12.db                             # extra random detune per copy
+#     midi.synth(voices: 4) { |v| v.hz.unison(6) { |p| p.glide(channels(20.ms, 80.ms, 250.ms)).saw } * v.amp_env }  # cycled glide times
+#     midi.synth(voices: 4) { |v| v.hz.unison(9) { |p| p.glide(spread(30.ms..300.ms)).saw } * v.amp_env }           # low copies arrive first
 #     Unison.offsets(7, 25.cents, layout: :even)                                  # the detunes in semitones
 #     stop
 

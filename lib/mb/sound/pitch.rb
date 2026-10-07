@@ -179,6 +179,12 @@ module MB
       # see Unison::Copy.  Copies with the same Notes settings share their
       # nodes (one Glide for `p.glide(50.ms)` on every copy).  See #swarm
       # for a ready-made swarm of gliding copies.
+      #
+      #     play 110.hz.unison(5, detune: 10.cents) { |p| p.vibrato(4.0..6.5, depth: 8.cents).saw }.at(-12.db)   # Range: random rate per copy
+      #     play 110.hz.unison(7, spread: 1) { |p| p.vibrato(spread(3..7), depth: 10.cents).saw }.at(-12.db)     # spread: 3 Hz low copy to 7 Hz high
+      #     play 110.hz.unison(4, detune: 6.cents) { |p| p.transpose(channels(0, 12, 0, 19)).saw }.at(-12.db)    # channels: octave and 12th stack
+      #     play 220.hz.unison(5) { |p| p.transpose(-0.1..0.1).square }.at(-12.db)                             # extra random detune per copy
+      #     midi.synth(voices: 4) { |v| v.hz.unison(6) { |p| p.glide(channels(20.ms, 80.ms, 250.ms)).saw } * v.amp_env }  # cycled list
       def unison(count = nil, detune: 12.cents, layout: :random, phase: :random, spread: 0, mix: 1, normalize: :power, seed: nil, detune_mode: :exact, &block)
         Unison.build(self, count, detune: detune, layout: layout, phase: phase, spread: spread, mix: mix, normalize: normalize, seed: seed, detune_mode: detune_mode, &block)
       end
