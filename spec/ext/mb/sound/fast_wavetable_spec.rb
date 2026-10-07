@@ -173,17 +173,35 @@ RSpec.describe(MB::Sound::FastWavetable, aggregate_failures: true) do
       end
     end
 
-    it 'uses residual tables that start at 0 and settle to 1' do
-      g = w.sync_residuals
-      os = MB::Sound::BandLimit::SYNC_OVERSAMPLE
-      taps = MB::Sound::BandLimit::SYNC_TAPS
-      expect(g.shape).to eq([w::SYNC_RESIDUAL_ROWS, os + 2, taps])
-      expect(g[true, 0, 0].abs.max).to be < 1e-9
-      expect(g[true, os..(os + 1), -1].to_a.flatten.uniq).to eq([Complex(1, 0)]) # t = 32 and later
-      expect((g[true, true, -1] - 1).abs.max).to be < 1e-4 # nearly settled at t = 31
-      # The zero-frequency row is the minBLEP's step
-      step = MB::Sound::BandLimit.minblep_tables[0] + 1.0
-      expect(g[0, 5, true].real.to_a).to eq(step[(5...(5 + taps * os)).step(os).to_a].to_a)
+    it 'plays a one-harmonic table exactly like the synced sine kernel (FastSynth.oscillate_sync)' do
+      # Both filter every exponential by the minBLEP's H and switch it with
+      # the same unnormalized residuals (BandLimit.sync_sine_table)
+      [[false, 2.37, nil], [true, 1.37, nil], [false, 2.37, 0.3]].each do |soft, ratio, width|
+        mk = ->(table) {
+          p = MB::Sound::Pitch.new(MB::Sound::ArrayInput.new(data: [Numo::SFloat.new(4800).seq(300, 0.5)]))
+          t = table ? p.wavetable(w.from_harmonics([1])) : p.sine
+          t = t.pwm(width, dc: true) if width
+          soft ? t.softsync(ratio: ratio) : t.sync(ratio: ratio)
+        }
+        a = mk.(true).sample(4800)
+        b = mk.(false).sample(4800)
+        expect((a - b).abs.max).to be < 1e-5, "soft #{soft} ratio #{ratio} width #{width.inspect}"
+      end
+    end
+
+    it 'keeps the mean of a synced table at the ideal waveform\'s as the sync rate sweeps' do
+      # The old residuals, normalized by H per harmonic while the table
+      # reads weren't filtered, drifted up to 0.21 from the ideal mean
+      t = w.from_harmonics([1])
+      f = Numo::SFloat.cast(Numo::DFloat.new(48000).seq.map { |i| 300 * 8**(i / 48000.0) })
+      a = MB::Sound::Pitch.new(MB::Sound::ArrayInput.new(data: [f])).wavetable(t).sync(ratio: 1.37)
+      b = MB::Sound::Pitch.new(MB::Sound::ArrayInput.new(data: [f.dup])).sine.sync(ratio: 1.37)
+      x = Numo::NArray.concatenate(Array.new(60) { a.sample(800).dup })
+      y = Numo::NArray.concatenate(Array.new(60) { b.sample(800).dup })
+      6.times do |k|
+        r = (k * 8000)...((k + 1) * 8000)
+        expect(x[r].mean).to be_within(1e-5).of(y[r].mean)
+      end
     end
 
     it 'raises an error for a ring of the wrong size' do

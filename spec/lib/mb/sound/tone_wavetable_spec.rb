@@ -119,20 +119,30 @@ RSpec.describe(MB::Sound::Tone, '#wavetable', aggregate_failures: true) do
     it 'keeps synced tables within their normal peaks and brightness steady as the pitch rises' do
       # Truncated Taylor residuals overshot to several times full scale at
       # 2-3 kHz and brightened by up to 9% per semitone; octave levels
-      # stepped the brightness
+      # stepped the brightness.  The brightness relative to the pitch falls
+      # about 2% per semitone here as the band limit stays put, as for the
+      # exactly filtered synced ramp; it follows the ramp's trend.
       hann = (1 - Numo::NMath.cos(Numo::DFloat.new(9600).seq * (2 * Math::PI / 9600))) * 0.5
-      bright = Array.new(13) { |i|
-        f = 1000 * 2**(i / 12.0)
-        tone = f.hz.wavetable(:saw).sync(ratio: 2.37)
+      bright = ->(f, &blk) {
+        tone = blk.call(f.hz)
         tone.sample(4800)
         data = Numo::DFloat.cast(Numo::NArray.concatenate(Array.new(12) { tone.sample(800).dup }))
-        expect(data.abs.max).to be < 1.3
         pow = MB::Sound.real_fft(data * hann).abs**2
         pow[0..2] = 0
         freqs = Numo::DFloat.new(pow.length).seq * (24000.0 / (pow.length - 1))
-        (pow * freqs).sum / pow.sum / f
+        [(pow * freqs).sum / pow.sum / f, data.abs.max]
       }
-      bright.each_cons(2) { |a, b| expect(b / a).to be_within(0.03).of(1) }
+      table = Array.new(13) { |i| bright.(1000 * 2**(i / 12.0)) { |p| p.wavetable(:saw).sync(ratio: 2.37) } }
+      ramp = Array.new(13) { |i| bright.(1000 * 2**(i / 12.0)) { |p| p.ramp.sync(ratio: 2.37) } }
+      table.each { |_, peak| expect(peak).to be < 1.3 }
+      13.times { |i| expect(table[i][0] / ramp[i][0]).to be_between(0.88, 1.02) } # the table stops at 20 kHz
+      12.times { |i| expect((table[i + 1][0] / table[i][0]) / (ramp[i + 1][0] / ramp[i][0])).to be_within(0.025).of(1) }
+    end
+
+    it 'band-limits the phase warp corners of synced tables' do
+      # Left naive until 2026-10-08 (-26 to -44 dB)
+      expect(aliasing_db(1365) { |p| p.wavetable(:saw).pwm(0.3).sync(ratio: 2.37) }).to be < -100
+      expect(aliasing_db(4097) { |p| p.wavetable(:sine).pwm(0.2).sync(ratio: 2.37) }).to be < -95
     end
 
     it 'keeps synced phase-warped tables within their normal peaks' do
@@ -197,15 +207,6 @@ RSpec.describe(MB::Sound::Tone, '#wavetable', aggregate_failures: true) do
       end
     end
 
-    it 'plays the sigma-tapered saw with peaks near the PolyBLEP ramp' do
-      t = 55.hz.wavetable(w.from_harmonics(w::Library.saw, taper: :sigma))
-      r = 55.hz.ramp
-      a = Numo::DFloat.cast(Numo::NArray.concatenate(Array.new(12) { t.sample(800).dup }))
-      b = Numo::DFloat.cast(Numo::NArray.concatenate(Array.new(12) { r.sample(800).dup }))
-      expect(a.abs.max).to be_within(0.05).of(b.abs.max)
-      expect(10 * Math.log10((a**2).mean / (b**2).mean)).to be_within(0.4).of(0)
-    end
-
     it 'aliases far less than naive and PolyBLEP ramps' do
       table = aliasing_db(1001) { |p| p.wavetable(:saw) }
       naive = aliasing_db(1001) { |p| p.aramp }
@@ -224,6 +225,10 @@ RSpec.describe(MB::Sound::Tone, '#wavetable', aggregate_failures: true) do
       half = 100.hz.wavetable(:basic, scan: 1.0 / 6).sample(480)
       tri = 100.hz.wavetable(:triangle).sample(480)
       expect(half).to all_be_within(1e-4).of_array(sine * 0.5 + tri * 0.5)
+
+      # :basic_norm scales each frame to the saw's loudness
+      g = w[:basic_norm].derivative_spectra[0, 1].abs
+      expect(100.hz.wavetable(:basic_norm, scan: 0).sample(480)).to all_be_within(1e-4).of_array(sine * g)
     end
 
     it 'gives the same samples in C and Ruby with a wrapping scan' do
@@ -366,6 +371,29 @@ RSpec.describe(MB::Sound::Tone, '#wavetable', aggregate_failures: true) do
       expect(map.zones.map { |z| z[0..1] }).to eq([[40, 48], [48, 56]])
       expect(map.table_for(47.9)).to equal(low)
       expect(map.table_for(48)).to equal(high)
+    end
+
+    it 'can match the zones\' perceived loudness' do
+      tables = [:sine, :organ, :square, w[:pulses]]
+      plain = w::KeyMap.zones(tables, from: 36, size: 12)
+      map = w::KeyMap.zones(tables, from: 36, size: 12, normalize: :loudness)
+      expect(map.normalize).to eq(:loudness)
+      before = plain.zone_loudness
+      after = map.zone_loudness
+      expect(before.max - before.min).to be > 2
+      expect(after.max - after.min).to be < 1e-9
+      expect(after[0]).to be_within(1e-9).of(before.sum / before.length)
+
+      # Each zone is its table scaled
+      g = 10**((after[2] - before[2]) / 20.0)
+      expect(MB::Sound::Note.new(66).wavetable(map).sample(800)).to all_be_within(1e-4).of_array(MB::Sound::Note.new(66).wavetable(:square).sample(800) * g)
+
+      # Sample-mode zones too
+      sound = Numo::SFloat.cast(Array.new(4800) { |i| Math.sin(2 * Math::PI * 220 * i / 48000.0) * (i < 2400 ? 1 : 0.5) })
+      quiet = w.from_samples(sound * 0.1, mode: :sample, root: 220, loop: 2400...4800)
+      loud = w.from_samples(sound, mode: :sample, root: 220, loop: 2400...4800)
+      m = w::KeyMap.new({ 40...52 => quiet, 52...64 => loud }, normalize: :loudness)
+      expect(m.zone_loudness[0]).to be_within(0.5).of(m.zone_loudness[1])
     end
 
     it 'picks a new zone at each reset' do

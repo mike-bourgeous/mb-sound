@@ -32,7 +32,7 @@ RSpec.describe(MB::Sound::Filter::Cookbook, :aggregate_failures) do
 
     it 'can use an narray to control filter parameters' do
       f = 20000.hz.lowpass
-      cutoff = 1.hz.square.at(20000..500).sample(48000)
+      cutoff = 1.hz.lfo.square.at(20000..500).sample(48000) # an LFO keeps exact edges (a band-limited square starts at its midpoint)
       wrapper = MB::Sound::Filter::SampleWrapper.new(
         f,
         500.hz.at(1),

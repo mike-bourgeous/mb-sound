@@ -345,7 +345,8 @@ module MB
 
         phi = state[0].to_f
         prev_e, prev_inc, prev_pm, primed = bl_state
-        primed = primed != 0
+        fresh = primed == 0
+        primed = primed == 1
 
         out = Numo::SFloat.zeros(count)
         steps = 0.0
@@ -381,6 +382,8 @@ module MB
             v += pending
           elsif primed && (i > 0 || (wrap(prev_e + d_back - e + 0.5) - 0.5).abs < 1e-6)
             v += step(points, prev_e, d_back, advance, fade_lo, fade_hi)[1]
+          elsif fresh && i == 0
+            v += step(points, wrap(e - inc), inc, advance, fade_lo, fade_hi)[1]
           end
 
           if i + 1 < count
@@ -910,7 +913,8 @@ module MB
       # Ruby mirror of MB::Sound::FastSynth.oscillate_sync (see there),
       # returning +count+ samples as an SFloat; +sync_state+ and the +ring+
       # (a DFloat) are updated like the C version.
-      def self.sync_ruby(count, wave_type, freq, advance, gain, offset, sync_state, ring, pulses, soft, width, remove_dc, r0, r1, r2, os, taps, bl, m1, m2, sine_table = nil)
+      def self.sync_ruby(count, wave_type, freq, advance, gain, offset, sync_state, ring, pulses, soft, width, remove_dc, r0, r1, r2, os, taps, bl, m1, m2, sine_table = nil, reset_phase = nil)
+        reset_phase = reset_phase.nil? ? 0.0 : reset_phase.to_f
         freqs = freq.is_a?(Numo::NArray) ? real_floats(freq) : nil
         pulse_list = pulses.is_a?(Numo::NArray) ? real_floats(pulses) : nil
         widths = width.is_a?(Numo::NArray) ? real_floats(width) : nil
@@ -962,7 +966,7 @@ module MB
               else
                 dir = 1.0
                 nvel = prev_inc
-                p = 0.0
+                p = reset_phase
               end
               a1 = sync_raw(wave_type, w, p, false, nvel)
               if sine
