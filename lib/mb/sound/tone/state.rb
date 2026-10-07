@@ -29,6 +29,9 @@ module MB
       #   modulation, primed (0 or 1), last phase, last increment] for
       #   #wavetable tones
       #   (FastWavetable.oscillate/play, Wavetable::KernelRuby).
+      # - +feedback+: [y[n-1], y[n-2]], the last two outputs of a #feedback
+      #   sine before #at (FastSynth.feedback_sine, Tone#feedback_ruby).
+      #   Kept across phase jumps.
       #
       # The other fields:
       # - +jump_residual+: the rest of a band-limited phase jump's step still
@@ -49,7 +52,7 @@ module MB
       class State
         FIELDS = [
           :phase, :blep, :blit, :sync, :sync_ring, :pulses, :noise,
-          :jump_residual, :last_freq, :last_width, :seed, :draws, :reset_ended, :table,
+          :jump_residual, :last_freq, :last_width, :seed, :draws, :reset_ended, :table, :feedback,
         ].freeze
 
         attr_accessor(*FIELDS)
@@ -79,6 +82,7 @@ module MB
           @rng = nil
           @reset_ended = false
           @table = [0.0, 0.0, 0, 0.0, 0.0]
+          @feedback = [0.0, 0.0]
 
           fields.each do |k, v|
             v = Numo::DFloat.cast(v) if (k == :sync_ring || k == :jump_residual) && v.is_a?(Array)
@@ -148,6 +152,7 @@ module MB
             draws: @draws,
             reset_ended: @reset_ended,
             table: @table.dup,
+            feedback: @feedback.dup,
           }
         end
 

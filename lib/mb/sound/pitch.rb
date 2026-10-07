@@ -274,13 +274,15 @@ module MB
       end
 
       # Shortcuts for a sine Tone at this pitch (see Tone#at, #with_phase,
-      # #fm, #log_fm, #pm, #lfo, #pwm/#skew, #noise), and a
+      # #fm, #log_fm, #pm, #feedback/#fb, #lfo, #pwm/#skew, #noise), and a
       # pulse (Tone#pulse, #apulse).
       def at(amplitude) = tone.at(amplitude)
       def with_phase(phase) = tone.with_phase(phase)
       def fm(tone_or_node, index = nil) = tone.fm(tone_or_node, index)
       def log_fm(tone_or_node, index = nil) = tone.log_fm(tone_or_node, index)
       def pm(tone_or_node, index = nil) = tone.pm(tone_or_node, index)
+      def feedback(amount, gain: nil) = tone.feedback(amount, gain: gain)
+      def fb(amount, gain: nil) = tone.feedback(amount, gain: gain)
       def lfo = tone.lfo
       def sync(master = nil, ratio: nil) = tone.sync(master, ratio: ratio)
       def softsync(master = nil, ratio: nil) = tone.softsync(master, ratio: ratio)

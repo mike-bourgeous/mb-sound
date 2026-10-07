@@ -64,7 +64,11 @@ module MB
     #      integrators (FastSynth.blit);
     #    - SYNC: phase driven by sync pulses with minBLEP/minBLAMP events in
     #      state.sync and state.sync_ring (FastSynth.oscillate_sync);
-    #    - PHASOR: the phase itself (FastSound.phasor).
+    #    - PHASOR: the phase itself (FastSound.phasor);
+    #    - FEEDBACK: a sine whose phase adds feedback * the average of its
+    #      last two outputs, times an in-loop gain (FastSynth.feedback_sine,
+    #      state.feedback; see #feedback): a per-sample recurrence, so a
+    #      fused plan keeps it as one sequential op.
     # 5. GAIN (fused into the kernel): y = v * gain + offset, from #at.
     # 6. JUMP: a phase jump (reset input, timeline lock) of a band-limited
     #    tone queues a minBLEP/minBLAMP step from the old waveform to the
@@ -439,6 +443,8 @@ module MB
         @scan = nil
         @interpolation = nil
         @scan_wrap = false
+        @feedback = nil
+        @feedback_gain = nil
 
         @frequency = nil
         @phase = nil
@@ -989,6 +995,108 @@ module MB
         end
       end
 
+      # Operator self-feedback (FM synth style): the sine's phase is
+      # modulated by its own output, averaged over the last two samples (as
+      # the DX7 does; one-sample feedback "hunts" at Nyquist at high
+      # amounts), computed per sample inside the kernel rather than through
+      # a graph loop:
+      #
+      #     y[n] = sin(2pi * phase[n] + pm[n] + amount * (y[n-1] + y[n-2]) / 2) * gain[n]
+      #
+      # +amount+ is in radians of phase modulation per unit of output (a
+      # number or a node, read every sample; nil removes feedback).  A sine
+      # brightens towards a saw: about 0.5 rad adds soft low harmonics,
+      # 1 to 1.5 rad is saw-like (harmonics falling about 6 dB per octave,
+      # the first few a little weaker), and above about 1.6 rad the loop
+      # turns chaotic and noisy (around pi it is mostly noise).  Negative
+      # amounts give the odd-ish, square-leaning family.
+      #
+      # +gain:+ (a number or node, default 1) is the operator's output level
+      # inside the loop, e.g. its envelope: the tone outputs the enveloped
+      # signal, and the feedback reads it, so the timbre follows the level
+      # (bright attacks, mellowing decays) as on an FM synth.  #at scales the
+      # output after the loop (e.g. a modulator's index in radians), so it
+      # doesn't change the operator's own timbre.  An input that ends (e.g.
+      # a one-shot envelope) ends the tone.
+      #
+      # Only plain sines take feedback (not other shapes, warps (#pwm),
+      # #sync, #noise, or wavetables; those raise an ArgumentError when the
+      # tone starts).  It works with #fm, #pm, #reset (key sync), and
+      # timeline locks; resets jump the phase but keep the feedback history,
+      # so the loop doesn't restart from silence.  The cost is the same for
+      # every amount (one sin and a few multiplies per sample; a little
+      # more than a plain sine), and feedback(0) plays a plain sine.
+      #
+      # Feedback raises the bandwidth like FM: a 1.5 rad loop at 1 kHz
+      # aliases audibly; #oversample helps.  See .dx7_feedback for the DX7's
+      # 0-7 feedback setting in radians.  Also available as #fb.
+      #
+      # Examples (bin/sound.rb):
+      #     play 110.hz.feedback(1.3).at(-12.db)                          # a saw-like sine
+      #     play 220.hz.feedback(2.hz.lfo.at(0..1.5)).at(-12.db)          # sweeping brightness
+      #     e = adsr(0.05, 0.4, 0.5, 0.3, hold: 1)
+      #     play 220.hz.feedback(1.4, gain: e).at(-6.db)                  # brass-like: bright as it swells
+      #     play 220.hz.pm(440.hz.feedback(1.0).at(1.5)).at(-12.db)       # a feedback modulator
+      def feedback(amount, gain: nil)
+        if amount.nil?
+          return configure do
+            @feedback = nil
+            @feedback_gain = nil
+          end
+        end
+
+        [[amount, 'Feedback amount'], [gain, 'Feedback gain']].each do |v, name|
+          next if v.nil? || v.is_a?(Numeric) || v.respond_to?(:sample)
+          raise ArgumentError, "#{name} must be a Numeric or a graph node (got #{v.inspect})"
+        end
+        raise ArgumentError, "Only sines take feedback (this is a #{wave_name})" unless @wave_type == :sine
+
+        configure do
+          @feedback = amount.is_a?(Numeric) ? amount.to_f : fixup_source(amount)
+          @feedback_gain = gain.nil? ? 1.0 : (gain.is_a?(Numeric) ? gain.to_f : fixup_source(gain))
+        end
+      end
+      alias fb feedback
+
+      # The feedback amount (radians; a number or node) given to #feedback,
+      # or nil for none.
+      def feedback_amount = @feedback
+
+      # The in-loop gain given to #feedback (a number or node), or nil
+      # without feedback.
+      def feedback_gain = @feedback && @feedback_gain
+
+      # True if this tone has operator feedback (see #feedback).
+      def feedback?
+        !@feedback.nil?
+      end
+
+      # The DX7 feedback steps: 0 is off and each step up doubles the
+      # amount, to 2pi rad per unit of output at 7 (see .dx7_feedback).
+      DX7_FEEDBACK_MAX = 2 * Math::PI
+
+      # Converts a DX7 feedback setting +fb+ (0 to 7) to radians for
+      # #feedback, for an operator whose #feedback gain is 1.0 at full
+      # level (output level 99, envelope at 99): 0 for 0, else 2pi *
+      # 2**(fb - 7) (pi/32 at 1, ..., pi at 6, 2pi at 7).
+      #
+      # From the arithmetic of MSFA (Apache-2.0, in Dexed): the feedback
+      # term is (y[n-1] + y[n-2]) >> (9 - fb) on Q24 values whose phase
+      # unit is one cycle per 2**24, and a full-level operator's output
+      # peaks at 2.0 (its maximum modulation index is 4pi).  So the DX7's
+      # feedback depends on the operator's level, which is what #feedback's
+      # +gain:+ is for: pass the operator's linear level (relative to full)
+      # times its envelope.  Full-level FB 7 is noise, as on the DX7 (a known
+      # noise trick); saw-like patches use FB 6-7 on quieter operators or
+      # lower FB.  Not bit-exact (the DX7 works on log-sine tables).
+      def self.dx7_feedback(fb)
+        fb = Integer(fb)
+        raise ArgumentError, "DX7 feedback must be 0 to 7 (got #{fb})" unless (0..7).cover?(fb)
+        return 0.0 if fb == 0
+
+        DX7_FEEDBACK_MAX * 2.0**(fb - 7)
+      end
+
       # Resets the phase at every nonzero sample of +trigger+ (a graph node,
       # e.g. clip.trigger or a MIDI note-on trigger; the value is ignored),
       # at exactly that sample, or removes the reset input with nil.  The
@@ -1240,8 +1348,8 @@ module MB
         start unless @started
         return nil if one_shot_ended?
 
-        count, freq, phase, width, pulses, resets, targets, jumps, jump_phase, scan = get_upstream_inputs(count)
-        return nil if missing_input?(freq, phase, width, pulses, resets, targets, scan)
+        count, freq, phase, width, pulses, resets, targets, jumps, jump_phase, scan, fb, fb_gain = get_upstream_inputs(count)
+        return nil if missing_input?(freq, phase, width, pulses, resets, targets, scan, fb, fb_gain)
 
         state = @state
         if @ports
@@ -1256,11 +1364,11 @@ module MB
         points = reset_points(resets)
         locks = lock_points(jumps)
         if points || locks
-          buf = sample_segments(count, freq, phase, width, points, targets, locks, jump_phase, scan) do |out, f, ph, w, sc|
-            kernel_c(out, f, ph, w, nil, sc)
+          buf = sample_segments(count, freq, phase, width, points, targets, locks, jump_phase, scan, fb, fb_gain) do |out, f, ph, w, sc, fbs, fgs|
+            kernel_c(out, f, ph, w, nil, sc, fbs, fgs)
           end
         else
-          buf = kernel_c(osc_view(count), freq, phase, width, pulses, scan)
+          buf = kernel_c(osc_view(count), freq, phase, width, pulses, scan, fb, fb_gain)
           add_jump_residual(buf) if state.jump_residual
         end
 
@@ -1276,8 +1384,8 @@ module MB
         start unless @started
         return nil if one_shot_ended?
 
-        count, freq_table, phase_table, width, pulses, resets, targets, jumps, jump_phase, scan = get_upstream_inputs(count)
-        return nil if missing_input?(freq_table, phase_table, width, pulses, resets, targets, scan)
+        count, freq_table, phase_table, width, pulses, resets, targets, jumps, jump_phase, scan, fb, fb_gain = get_upstream_inputs(count)
+        return nil if missing_input?(freq_table, phase_table, width, pulses, resets, targets, scan, fb, fb_gain)
 
         pick_zone(freq_table) if @table.is_a?(MB::Sound::Wavetable::KeyMap) && (@zone_table.nil? || @reset.nil?)
         build_buffer(count)
@@ -1285,11 +1393,11 @@ module MB
         points = reset_points(resets)
         locks = lock_points(jumps)
         if points || locks
-          buf = sample_segments(count, freq_table, phase_table, width, points, targets, locks, jump_phase, scan) do |out, f, ph, w, sc|
-            kernel_ruby(out, f, ph, w, nil, sc)
+          buf = sample_segments(count, freq_table, phase_table, width, points, targets, locks, jump_phase, scan, fb, fb_gain) do |out, f, ph, w, sc, fbs, fgs|
+            kernel_ruby(out, f, ph, w, nil, sc, fbs, fgs)
           end
         else
-          buf = kernel_ruby(osc_view(count), freq_table, phase_table, width, pulses, scan)
+          buf = kernel_ruby(osc_view(count), freq_table, phase_table, width, pulses, scan, fb, fb_gain)
           add_jump_residual(buf)
         end
 
@@ -1314,6 +1422,8 @@ module MB
           timeline_jumps: @lock,
           timeline_phase: @lock_phase,
           scan: @scan.respond_to?(:sample) ? @scan : nil,
+          feedback: @feedback.respond_to?(:sample) ? @feedback : nil,
+          feedback_gain: @feedback && @feedback_gain.respond_to?(:sample) ? @feedback_gain : nil,
         }.compact
       end
 
@@ -1623,9 +1733,10 @@ module MB
       end
 
       # True if an input needed for the next samples has ended.
-      def missing_input?(freq, phase, width, pulses, resets, targets, scan = nil)
+      def missing_input?(freq, phase, width, pulses, resets, targets, scan = nil, fb = 0, fb_gain = 1)
         freq.nil? || phase.nil? || (warped? && width.nil?) || (@sync_source && pulses.nil?) ||
-          (@reset_to.respond_to?(:sample) && targets.nil?) || (@scan.respond_to?(:sample) && scan.nil?)
+          (@reset_to.respond_to?(:sample) && targets.nil?) || (@scan.respond_to?(:sample) && scan.nil?) ||
+          (@feedback && (fb.nil? || fb_gain.nil?))
       end
 
       # True if this is a sample-mode one-shot (see Wavetable) that has
@@ -1696,7 +1807,7 @@ module MB
       # #kernel_ruby) on a view of the output buffer with the matching
       # slices of the frequency, phase modulation, and width inputs, and
       # returns the samples.  Returns a view of the output buffer.
-      def sample_segments(count, freq, phase, width, points, targets, locks = nil, jump_phase = nil, scan = nil)
+      def sample_segments(count, freq, phase, width, points, targets, locks = nil, jump_phase = nil, scan = nil, fb = nil, fb_gain = nil)
         state = @state
         state.frame_segments = [] if @ports
 
@@ -1709,7 +1820,10 @@ module MB
             state.frame_segments&.push([state.phase[0], f, stop - start])
 
             out = @osc_buf[start...stop].inplace!
-            result = yield(out, f, slice_input(phase, start, stop), slice_input(width, start, stop), slice_input(scan, start, stop))
+            result = yield(
+              out, f, slice_input(phase, start, stop), slice_input(width, start, stop), slice_input(scan, start, stop),
+              slice_input(fb, start, stop), slice_input(fb_gain, start, stop)
+            )
             out[true] = result unless result.equal?(out)
             add_jump_residual(out)
           end
@@ -1764,9 +1878,13 @@ module MB
 
       # Runs the C kernel for the current settings (see #kernel) into +out+
       # (an inplace view of the output buffer), returning the samples.
-      def kernel_c(out, freq, phase, width, pulses, scan = nil)
+      def kernel_c(out, freq, phase, width, pulses, scan = nil, fb = nil, fb_gain = nil)
         state = @state
         case kernel
+        when :feedback
+          MB::Sound::FastSynth.feedback_sine(
+            out, freq, phase, @advance, @gain, @offset, state.phase, state.feedback, fb, fb_gain
+          ).inplace!
         when :wavetable
           table = current_table
           if @sync_source
@@ -1819,11 +1937,13 @@ module MB
 
       # Ruby mirror of #kernel_c: computes out.length samples and stores
       # them in +out+ (an inplace view of the output buffer), returning it.
-      def kernel_ruby(out, freq_table, phase_table, width, pulses, scan = nil)
+      def kernel_ruby(out, freq_table, phase_table, width, pulses, scan = nil, fb = nil, fb_gain = nil)
         count = out.length
         state = @state
 
         case kernel
+        when :feedback
+          values = feedback_ruby(count, freq_table, phase_table, fb, fb_gain)
         when :wavetable
           table = current_table
           if @sync_source
@@ -1929,6 +2049,42 @@ module MB
         end
       end
 
+      # Raises an error for settings a #feedback tone can't play.
+      def check_feedback
+        raise ArgumentError, "Only sines take feedback (this is a #{wave_name})" unless @wave_type == :sine
+        raise ArgumentError, 'A feedback sine cannot be synced' if @sync_source
+        raise ArgumentError, 'A feedback sine cannot be warped (pwm)' if warped?
+        raise ArgumentError, 'A feedback sine cannot be noise' if random_advance != 0
+      end
+
+      # Ruby mirror of FastSynth.feedback_sine (see #feedback): the same
+      # phases as the naive kernel (#phases_ruby), then the feedback loop
+      # one sample at a time with the C kernel's operations in its order.
+      def feedback_ruby(count, freq, phase_mod, fb, fb_gain)
+        phases, _increments = phases_ruby(freq, count)
+        y1, y2 = @state.feedback
+        values = Numo::DFloat.zeros(count)
+        count.times do |i|
+          pm = input_at(phase_mod, i)
+          b = input_at(fb, i)
+          lvl = input_at(fb_gain, i)
+
+          radians = phases[i] * TWOPI
+          avg = y1 + y2
+          avg = avg * 0.5
+          m = b * avg
+          arg = radians + pm
+          arg = arg + m
+          y = Math.sin(arg) * lvl
+          y2 = y1
+          y1 = y
+          values[i] = y * @gain + @offset
+        end
+        @state.feedback[0] = y1
+        @state.feedback[1] = y2
+        values
+      end
+
       def check_sync(phase_mod)
         unless BandLimit::WARP_WAVES.include?(@wave_type) || wavetable?
           raise ArgumentError, "A #{@wave_type} can't be synced (only #{BandLimit::WARP_WAVES.join(', ')})"
@@ -1949,6 +2105,9 @@ module MB
             :wavetable
           elsif phasor?
             :phasor
+          elsif @feedback
+            check_feedback
+            :feedback
           elsif @sync_source
             :sync
           elsif blit?
@@ -2086,6 +2245,21 @@ module MB
           min_length = scan.length if scan && scan.length < min_length
         end
 
+        fb = @feedback
+        fb_gain = @feedback_gain
+        if fb
+          if fb.respond_to?(:sample)
+            fb = fb.sample(count)
+            fb = nil if fb&.empty?
+            min_length = fb.length if fb && fb.length < min_length
+          end
+          if fb_gain.respond_to?(:sample)
+            fb_gain = fb_gain.sample(count)
+            fb_gain = nil if fb_gain&.empty?
+            min_length = fb_gain.length if fb_gain && fb_gain.length < min_length
+          end
+        end
+
         # Timeline jumps (see #follow_timeline); a tempo node never ends
         if @lock
           jumps = @lock.sample(count)
@@ -2106,11 +2280,13 @@ module MB
           jumps = jumps[0...min_length] if jumps&.is_a?(Numo::NArray)
           jump_phase = jump_phase[0...min_length] if jump_phase&.is_a?(Numo::NArray)
           scan = scan[0...min_length] if scan&.is_a?(Numo::NArray)
+          fb = fb[0...min_length] if fb&.is_a?(Numo::NArray)
+          fb_gain = fb_gain[0...min_length] if fb_gain&.is_a?(Numo::NArray)
         end
 
         # One Array reused by every call (destructured by the callers), not
         # a new one per buffer
-        ret = (@upstream_inputs ||= Array.new(10))
+        ret = (@upstream_inputs ||= Array.new(12))
         ret[0] = min_length
         ret[1] = freq
         ret[2] = phase
@@ -2121,6 +2297,8 @@ module MB
         ret[7] = jumps
         ret[8] = jump_phase
         ret[9] = scan
+        ret[10] = fb
+        ret[11] = fb_gain
         ret
       end
 
