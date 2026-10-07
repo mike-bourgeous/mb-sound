@@ -407,43 +407,77 @@ module MB
         end
         alias value number
 
-        # A control signal that tweens from each event's value to the next
-        # along a +curve+ from the tweening library (MB::Sound::Curve; a
-        # name like :elastic, :bounce, :squiggle, :steps, a Curve, or a
-        # Proc), e.g. automation for a cutoff, a detune, or a mix.  Each
-        # event starts a tween from the current output to its value, taking
-        # +time+ (default: until the next event starts, so each value is
-        # reached as the next one begins; a Duration follows the tempo;
-        # also seconds, Lengths, or a node of seconds), then holding it.
-        # The first event jumps (unless +from:+ gives a start value); a
-        # looping clip tweens from its last value back to its first.
-        # +overshoot:+ and +cycles:+ go to a named curve.  The values are
-        # plain numbers (not note numbers), so `seq(200, 2000, 800)` tweens
-        # between those values.  A Notes::Glide underneath; see also
+        # A control signal that tweens between the clip's values along a
+        # +curve+ from the tweening library (MB::Sound::Curve; a name like
+        # :elastic, :bounce, :squiggle, :steps, a Curve, or a Proc), e.g.
+        # automation for a cutoff, a detune, or a mix.  Each event is a
+        # keyframe: the output is the event's value at its start and tweens
+        # to the next event's value, arriving as the next event starts (or
+        # after +time+, then holding; a Duration follows the tempo; also
+        # seconds, Lengths, or a node of seconds).  The last value holds,
+        # or with a looping clip tweens back to the first over the last
+        # step.  Repeat a value to hold it for a step.  Events starting
+        # together count once (the last one).  +overshoot:+ and +cycles:+
+        # go to a named curve.  A Notes::Glide underneath; see also
         # MB::Sound.tween.
         #
-        # With +log: true+ the tween moves in octaves (the log2 of the
-        # values, which must be positive) and outputs 2 to that power, so
-        # frequencies and cutoffs move evenly in pitch and overshoots stay
-        # positive (a linear elastic tween from 3400 to 700 Hz overshoots
-        # below 0 Hz).
+        # Values (see .tween_values): plain numbers tween linearly.
+        # Pitches (`300.hz`, Notes like A4) tween in octaves and the output
+        # is in Hz, so frequencies and cutoffs move evenly in pitch and
+        # overshoots stay above 0 Hz.  +log:+ overrides: true tweens plain
+        # (positive) numbers in octaves, false tweens Pitches linearly in
+        # Hz.  Mixing Pitches and plain numbers raises (say which you mean
+        # with `.hz` or plain numbers).  Seqs store Notes as note numbers,
+        # so `seq(A3, A4).tween` tweens note numbers (in semitones).
         #
-        #     cutoff = seq(300, 3000, 900, 1800).n2.loop.tween(curve: :elastic, log: true)
+        #     cutoff = seq(300.hz, 3000.hz, 900.hz, 1800.hz).n2.loop.tween(curve: :elastic)
         #     bg :pad, 110.hz.saw.filter(:lowpass, cutoff: cutoff, quality: 3) * 0.3
-        #     seq(0, 12).n1.loop.tween(1.n8, curve: :bounce)    # bounce to each value in an eighth
-        def tween(time = nil, curve: :smoothstep, overshoot: nil, cycles: nil, from: nil, log: false, transport: nil)
-          if log
-            raise ArgumentError, 'Log tweens need positive values' unless @events.all? { |e| e.value.is_a?(Numeric) && e.value > 0 }
-            raise ArgumentError, 'A log tween needs a positive from: value' if from && !(from.is_a?(Numeric) && from > 0)
-            octaves = map_clip { |e| e.with(value: Math.log2(e.value)) }
-            g = octaves.tween(time, curve: curve, overshoot: overshoot, cycles: cycles, from: from && Math.log2(from), transport: transport)
-            return (2 ** g).named("log #{g.graph_node_name}")
+        #     seq(0, 12, 12, 0).n2.tween(1.n8, curve: :bounce)    # bounce to each value in an eighth
+        def tween(time = nil, curve: :smoothstep, overshoot: nil, cycles: nil, log: nil, transport: nil)
+          keys = @events.group_by(&:start).sort_by(&:first).map { |start, es| [start, es.last.value] }
+          raise ArgumentError, 'A tween needs at least one value' if keys.empty?
+
+          values, log = Clip.tween_values(keys.map(&:last), log)
+          values = values.map { |v| Math.log2(v) } if log
+
+          # Keyframes as a glide clip: at each start, glide to the next value
+          # (around the loop if looping), from the first value
+          starts = keys.map(&:first)
+          n = starts.length
+          gaps = starts.each_with_index.map { |st, i| i + 1 < n ? starts[i + 1] - st : (@loop ? @length - st + starts[0] : nil) }
+          events = (@loop ? n : [n - 1, 1].max).times.map { |i|
+            target = n == 1 ? values[0] : values[(i + 1) % n]
+            gap = gaps[i] || [@length - starts[i], 1/64r].max
+            Event.new(start: starts[i], length: gap, value: target, velocity: DEFAULT_VELOCITY)
+          }
+          glide_clip = Clip.new(events, length: @length, loop: @loop, seed: @seed)
+
+          notes = glide_clip.notes(transport: transport)
+          name = "tween #{Curve.from(curve, **{ overshoot: overshoot, cycles: cycles }.compact)}"
+          g = Notes::Glide.new(
+            notes.note_stream, time: glide_clip.send(:tween_time, time, transport), from: values[0],
+            shape: curve, overshoot: overshoot, cycles: cycles, notes: notes
+          ).named(name)
+          log ? (2 ** g).named("#{name} (octaves)") : g
+        end
+
+        # Checks tween +values+ and resolves +log+ (nil: automatic) for
+        # Clip#tween: returns [Floats, log].  Pitches become frequencies in
+        # Hz and tween in octaves unless +log+ is false; plain numbers tween
+        # linearly unless +log+ is true.  Mixed Pitches and numbers raise.
+        def self.tween_values(values, log)
+          pitches = values.count { |v| v.is_a?(MB::Sound::Pitch) }
+          if pitches > 0 && pitches < values.length
+            raise ArgumentError, "Tween values mix Pitches and plain numbers (#{values.map(&:to_s).join(', ')}); use Pitches (e.g. 300.hz) or numbers throughout"
+          end
+          unless pitches > 0 || values.all?(Numeric)
+            raise ArgumentError, "Tween values must be numbers or Pitches (got #{values.inspect})"
           end
 
-          n = notes(transport: transport)
-          Notes::Glide.new(
-            n.note_stream, time: tween_time(time, transport), from: from, shape: curve, overshoot: overshoot, cycles: cycles, notes: n
-          ).named("tween #{Curve.from(curve, **{ overshoot: overshoot, cycles: cycles }.compact)}")
+          log = pitches > 0 if log.nil?
+          floats = values.map { |v| v.is_a?(MB::Sound::Pitch) ? v.frequency.to_f : v.to_f }
+          raise ArgumentError, "Tweens in octaves need positive values (got #{floats.inspect})" if log && !floats.all?(&:positive?)
+          [floats, !!log]
         end
 
         # A Pitch following this clip's notes (a Notes::NotePitch, like
