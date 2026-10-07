@@ -449,6 +449,56 @@ RSpec.describe(MB::Sound::Wavetable, aggregate_failures: true) do
       expect(t2.levels(:cubic)[2].data).to all_be_within(1e-5).of_array(t.levels(:cubic)[2].data)
       expect(t.metadata).to include(mode: 'cycle', frames: 1, period: 2048, aligned: 'false', taper: 'sigma', harmonics: 100)
       expect(tags).to include(period: 2048, frames: 1, harmonics: 100, spacing: Math.sqrt(2), interpolation: 'cubic', taper: 'sigma', name: 'sq')
+      expect(tags[:spacing_explicit].to_s).to eq('true')
+      expect(t2).to be_spacing_explicit
+    end
+
+    context 'with level spacings (levels are rebuilt on load)' do
+      def saved(**opts)
+        name = tmp_path('saved_spacing.flac')
+        w.from_harmonics(w::Library.saw(64), **opts).save(name, overwrite: true)
+        name
+      end
+
+      it 'keeps an explicitly chosen spacing' do
+        t = w.from_file(saved(mips: :octave))
+        expect(t.spacing).to eq(2.0)
+        expect(t).to be_spacing_explicit
+        expect(t.levels.map(&:bandwidth)).to eq(w.from_harmonics(w::Library.saw(64), mips: :octave).levels.map(&:bandwidth))
+        expect(w.from_file(saved(mips: [16, 4])).spacing).to eq([16, 4])
+        expect(w.from_file(saved(mips: false))).not_to be_mipped
+      end
+
+      it 'gives a table saved with the default spacing the current default' do
+        name = saved
+        info = {}
+        MB::Sound.read(name, metadata_out: info)
+        expect(w.table_metadata(info)[:spacing_explicit].to_s).to eq('false')
+
+        stub_const('MB::Sound::Wavetable::DEFAULT_MIPS', :octave)
+        t = w.from_file(name)
+        expect(t.spacing).to eq(2.0)
+        expect(t).not_to be_spacing_explicit
+      end
+
+      it 'lets mips: given to .from_file win' do
+        t = w.from_file(saved(mips: :octave), mips: :half_octave)
+        expect(t.spacing).to eq(Math.sqrt(2))
+        expect(w.from_file(saved(mips: false), mips: :default).spacing).to eq(Math.sqrt(2))
+      end
+
+      it 'keeps only surely explicit spacings of files saved without the explicit tag' do
+        name = tmp_path('legacy.flac')
+        frames = w.from_harmonics(w::Library.saw(64)).frames
+        w.save_frames(name, frames, metadata: { spacing: 2.0 })
+        expect(w.from_file(name).spacing).to eq(Math.sqrt(2))
+        w.save_frames(name, frames, overwrite: true, metadata: { spacing: 'none' })
+        expect(w.from_file(name)).not_to be_mipped
+        w.save_frames(name, frames, overwrite: true, metadata: { spacing: '16,4' })
+        expect(w.from_file(name).spacing).to eq([16, 4])
+        w.save_frames(name, frames, overwrite: true)
+        expect(w.from_file(name).spacing).to eq(Math.sqrt(2))
+      end
     end
 
     it 'saves peaks above 1 with a scale' do

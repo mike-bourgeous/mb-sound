@@ -41,8 +41,8 @@ module MB
     # == Levels (mipmaps)
     #
     # Each level keeps fewer harmonics (cycle mode) or a lower band (sample
-    # mode), +mips:+ apart: :half_octave (DEFAULT_MIPS; a ratio of the
-    # square root of 2), :octave, :third_octave, any ratio above 1, an Array of harmonic counts (cycle
+    # mode), +mips:+ apart: :default (DEFAULT_MIPS, :half_octave; a ratio
+    # of the square root of 2), :half_octave, :octave, :third_octave, any ratio above 1, an Array of harmonic counts (cycle
     # mode), or false for one level from the samples as given (the classic
     # aliasing sound, read with :cubic by default).  Levels are stored
     # OVERSAMPLE (4) times above their highest harmonic, so the
@@ -172,7 +172,7 @@ module MB
         # the class description for +complex+, +mips+, +interpolation+;
         # +align+ lines up frames in time (off by default, since the phases
         # are given).
-        def from_harmonics(amplitudes, phases = nil, size: 2048, complex: false, mips: DEFAULT_MIPS, interpolation: nil, align: false, taper: nil, name: nil)
+        def from_harmonics(amplitudes, phases = nil, size: 2048, complex: false, mips: :default, interpolation: nil, align: false, taper: nil, name: nil)
           spectra = Builder.spectra_from_harmonics(amplitudes, phases)
           max = (size - 1) / 2
           spectra = spectra[true, 0..max] if spectra.shape[1] - 1 > max
@@ -188,7 +188,7 @@ module MB
         # sample mode, +data+ is the sound (1D; +root+, +loop+, and
         # +sample_rate+ apply).  +harmonics+ limits a cycle table's
         # harmonics (default: all that fit the frame size).
-        def from_samples(data, mode: :cycle, complex: false, mips: DEFAULT_MIPS, interpolation: nil, align: true, aligned: false, normalize: false, taper: nil, harmonics: nil, root: nil, loop: nil, sample_rate: 48000, name: nil, source_info: nil)
+        def from_samples(data, mode: :cycle, complex: false, mips: :default, interpolation: nil, align: true, aligned: false, normalize: false, taper: nil, harmonics: nil, root: nil, loop: nil, sample_rate: 48000, name: nil, source_info: nil)
           data = to_narray(data)
 
           case mode
@@ -239,8 +239,15 @@ module MB
         # .from_samples.
         #
         # Settings saved by #save (see #metadata) are the defaults: the mode,
-        # levels, taper, interpolation, name, root, and loop; frames saved
-        # aligned aren't aligned again.
+        # level spacing, taper, interpolation, name, root, and loop; frames
+        # saved aligned aren't aligned again.  Files hold the frames (or the
+        # sound), not the levels: levels are always rebuilt on load.  A
+        # spacing chosen explicitly when the table was made (+mips:+ other
+        # than :default) is kept; a table made with the default spacing gets
+        # today's DEFAULT_MIPS, as do files without a spacing tag; +mips:+
+        # given here always wins (e.g. to re-mipmap a saved table).  Files
+        # saved before the spacing_explicit tag existed keep only 'none' and
+        # harmonic-count lists (never defaults); their ratios get the default.
         def from_file(path, mode: nil, slices: 10, ratio: 1.0, root: nil, loop: nil, **options)
           path = path.path if path.respond_to?(:path)
 
@@ -249,7 +256,9 @@ module MB
           info = table_metadata(info)
           mode ||= info[:mode]&.to_sym || :cycle
           options[:name] ||= info[:name] || File.basename(path.to_s)
-          options[:mips] = parse_saved_spacing(info[:spacing]) if !options.include?(:mips) && info.include?(:spacing)
+          if !options.include?(:mips) && saved_spacing_explicit?(info)
+            options[:mips] = parse_saved_spacing(info[:spacing])
+          end
           options[:taper] = info[:taper].to_sym if !options.include?(:taper) && info[:taper] && info[:taper] != ''
           options[:interpolation] ||= info[:interpolation]&.to_sym
           options[:harmonics] ||= info[:harmonics].to_i if mode == :cycle && info[:harmonics]
@@ -295,6 +304,21 @@ module MB
             return from_file(source.to_s) if defined?(Pathname) && source.is_a?(Pathname)
 
             raise ArgumentError, "Can't make a wavetable from #{source.inspect}"
+          end
+        end
+
+        # True if saved table metadata +info+ (see #metadata) holds a level
+        # spacing that was chosen explicitly (see .from_file).
+        def saved_spacing_explicit?(info)
+          return false unless info.include?(:spacing)
+
+          case info[:spacing_explicit].to_s
+          when 'true' then true
+          when 'false' then false
+          else
+            # Older files: only 'none' and harmonic counts were surely chosen
+            v = info[:spacing].to_s
+            v == 'none' || v.include?(',')
           end
         end
 
@@ -386,6 +410,12 @@ module MB
       # without levels (see #mipped?).
       attr_reader :spacing
 
+      # True if the level spacing was chosen with +mips:+ (anything but
+      # :default), so #save records it for .from_file to keep.
+      def spacing_explicit?
+        @spacing_explicit
+      end
+
       # The default interpolation (see INTERPOLATIONS).
       attr_reader :interpolation
 
@@ -416,12 +446,13 @@ module MB
       attr_accessor :name
 
       # Use the class methods (.from_harmonics, .from_samples, ...).
-      def initialize(mode: :cycle, spectra: nil, frames: nil, data: nil, size: nil, complex: false, mips: DEFAULT_MIPS, interpolation: nil, align: false, aligned: false, taper: nil, harmonics: nil, root: nil, loop: nil, sample_rate: 48000, name: nil, source_info: nil)
+      def initialize(mode: :cycle, spectra: nil, frames: nil, data: nil, size: nil, complex: false, mips: :default, interpolation: nil, align: false, aligned: false, taper: nil, harmonics: nil, root: nil, loop: nil, sample_rate: 48000, name: nil, source_info: nil)
         raise ArgumentError, "Unknown wavetable mode #{mode.inspect} (#{MODES.join(', ')})" unless MODES.include?(mode)
 
         @mode = mode
         @complex = !!complex
-        @spacing = parse_spacing(mips)
+        @spacing_explicit = mips != :default
+        @spacing = parse_spacing(mips == :default ? DEFAULT_MIPS : mips)
         @taper = taper
         @aligned = !!aligned
         @harmonic_limit = harmonics
@@ -798,11 +829,12 @@ module MB
 
       # Tags saved by #save that describe the table (others in #source_info
       # are saved too).
-      SAVED_KEYS = [:mode, :name, :frames, :period, :size, :aligned, :spacing, :taper, :interpolation, :complex, :root, :loop, :sample_rate, :scale, :harmonics].freeze
+      SAVED_KEYS = [:mode, :name, :frames, :period, :size, :aligned, :spacing, :spacing_explicit, :taper, :interpolation, :complex, :root, :loop, :sample_rate, :scale, :harmonics].freeze
 
       # The table's settings and derived values, as saved by #save (with
       # #source_info): mode, name, frame count, period (cycle mode samples
-      # per frame), whether the frames are aligned, level spacing, taper,
+      # per frame), whether the frames are aligned, level spacing (and
+      # whether it was chosen explicitly, see .from_file), taper,
       # interpolation, complex, harmonics (cycle mode), and in sample mode
       # the root (Hz), loop
       # ("begin...end" source samples), size, and sample rate.
@@ -814,6 +846,7 @@ module MB
                   end
         m = @source_info.merge(
           mode: @mode.to_s, name: @name, frames: @frame_count, aligned: @aligned.to_s, spacing: spacing,
+          spacing_explicit: @spacing_explicit.to_s,
           taper: @taper&.to_s, interpolation: @interpolation.to_s, complex: @complex.to_s
         )
         if @mode == :cycle
