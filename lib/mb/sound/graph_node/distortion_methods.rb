@@ -37,6 +37,46 @@ module MB
           Shaper.new(self, mode: :softclip, p1: threshold, p2: limit, antialias: false)
         end
 
+        # Shapes this signal through a tweening curve (MB::Sound::Curve: a
+        # name such as :smoothstep (default), :sine, :elastic, :bounce,
+        # :steps, :back, a Curve, a Proc, ...; +overshoot:+ and +cycles:+ go
+        # to a named curve).  +in:+ (default 0..1) is the input range mapped
+        # onto the curve's 0..1, and +out:+ (default 0..1) the output range
+        # its 0..1 maps onto (+range:+ sets both; a number n means 0..n).
+        # +edges:+ handles inputs outside the input range: :clamp (default),
+        # :extend, :wrap, :mirror, or :none; +symmetric: true+ shapes the
+        # magnitude and restores the sign (an odd waveshaper for audio).
+        # See GraphNode::CurveShaper.
+        #
+        # Antialiased like #softclip (half a sample of delay); #aease is the
+        # exact plain version for control signals (LFO gates, stepped
+        # automation).
+        #
+        # Named "ease" because #curve and #shape are Envelope settings and
+        # #shaper / Shaper are the clip family.
+        #
+        #     play 110.hz.ease(:bounce, range: -1..1, edges: :mirror) * 0.3       # a bouncing waveshaper
+        #     play 220.hz.ease(:elastic, symmetric: true) * 0.2                      # odd elastic shaping
+        #     amp = 1.bar.hz.phasor.aease(:steps, cycles: 4)                        # a 4-step gate ramp each bar
+        #     wah = 2.beats.lfo.aease(:bounce, in: -1..1, out: 300..3000)           # a bouncing filter LFO
+        def ease(curve = :smoothstep, range: nil, edges: :clamp, symmetric: false, overshoot: nil, cycles: nil, antialias: true, **io)
+          extra = io.keys - [:in, :out]
+          raise ArgumentError, "Unknown ease options #{extra.inspect} (in:, out:, range:, edges:, symmetric:, overshoot:, cycles:)" unless extra.empty?
+
+          c = MB::Sound::Curve.from(curve, **{ overshoot: overshoot, cycles: cycles }.compact)
+          CurveShaper.new(
+            self, curve: c, input: io.fetch(:in, range || (0.0..1.0)), output: io.fetch(:out, range || (0.0..1.0)),
+            edges: edges, symmetric: symmetric, antialias: antialias
+          )
+        end
+        alias shape_curve ease
+
+        # The plain (exact, aliasing) version of #ease, for control signals.
+        def aease(curve = :smoothstep, **options)
+          ease(curve, **options, antialias: false)
+        end
+        alias ashape_curve aease
+
         # Adds a quantizer to the node graph.  Values will be rounded to the
         # nearest multiple of +increment+.  To quantize to a given number of
         # bits, use e.g. `5.bits`.  An +increment+ of zero means no quantization.

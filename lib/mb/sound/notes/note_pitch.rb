@@ -172,7 +172,15 @@ module MB
         # is where the pitch starts, so the first note glides from it too.
         # An Interval +from:+ is relative to the first note (e.g. `-1.oct`).
         # +overshoot:+ passes the target by that fraction of the glide's
-        # distance before settling (0..1, default 0).  See Notes::Glide.
+        # distance before settling (0..1, default 0).  +shape:+ picks
+        # another glide curve from the tweening library (MB::Sound::Curve:
+        # :squiggle, :elastic, :back, :bounce, :steps, :s, a Curve, ...);
+        # +overshoot:+ and +cycles:+ then set its size and wiggles (each
+        # curve's default when not given).  See Notes::Glide.
+        #
+        # In a unison, +time+, +overshoot:+, +shape:+, and +cycles:+ may be
+        # per-copy values (a Range, `spread(a..b)`, `channels(...)`; see
+        # Unison::Copy), e.g. `channels(:squiggle, :elastic)`.
         #
         # Pitches with the same glide settings on one Notes instance share
         # one Glide node (e.g. every copy of a unison with
@@ -182,16 +190,25 @@ module MB
         #     play v.hz.glide(:gm, legato: true).saw * v.amp_env.legato
         #     play v.hz.glide(100.ms, from: 440.hz).saw * v.amp_env
         #     play v.hz.glide(300.ms, overshoot: 0.1).saw * v.amp_env
-        def glide(time, legato: false, from: nil, overshoot: 0)
+        #     play v.hz.glide(400.ms, shape: :squiggle).saw * v.amp_env
+        #     play v.hz.glide(500.ms, shape: :elastic, overshoot: 0.4, cycles: 4).saw * v.amp_env
+        def glide(time, legato: false, from: nil, overshoot: nil, shape: nil, cycles: nil)
           time = per_copy(time)
           # Per-copy starts of Intervals stay relative (see Unison::Copy)
           relative = Unison::Copy.per_copy?(from) && Unison::Copy.values_of(from).all?(Interval)
           from = per_copy(from)
           from = from.semitones if relative && from.is_a?(Numeric)
           overshoot = per_copy(overshoot)
+          shape = per_copy(shape)
+          cycles = per_copy(cycles)
           settings = [time, !!legato]
-          settings << from unless from.nil? && overshoot == 0
-          settings << overshoot.to_f unless overshoot == 0
+          if shape.nil? && cycles.nil?
+            overshoot ||= 0
+            settings << from unless from.nil? && overshoot == 0
+            settings << overshoot.to_f unless overshoot == 0
+          else
+            settings.push(from, overshoot&.to_f, shape, cycles&.to_f)
+          end
           with(glide: settings.freeze)
         end
 
@@ -232,9 +249,12 @@ module MB
         def number_node
           return @notes.number unless @settings[:glide]
 
-          time, legato, from, overshoot = @settings[:glide]
+          time, legato, from, overshoot, shape, cycles = @settings[:glide]
           @notes.send(:memo, [:glide, @settings[:glide], @sample_rate]) {
-            Glide.new(@notes.note_stream, time: time, legato: legato, from: from, overshoot: overshoot || 0, notes: @notes, sample_rate: @sample_rate)
+            Glide.new(
+              @notes.note_stream, time: time, legato: legato, from: from, overshoot: shape ? overshoot : overshoot || 0, shape: shape, cycles: cycles,
+              notes: @notes, sample_rate: @sample_rate
+            )
           }
         end
 

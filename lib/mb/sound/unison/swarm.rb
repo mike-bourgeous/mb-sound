@@ -32,10 +32,10 @@ module MB
       end
 
       # Builds a swarm of +pitch+ (see Pitch#swarm for the arguments).
-      def self.swarm(pitch, count, chord:, detune:, glide:, overshoot:, scatter:, from:, legato:, drift:, drift_rate:, **unison, &block)
+      def self.swarm(pitch, count, chord:, detune:, glide:, overshoot:, scatter:, from:, legato:, drift:, drift_rate:, shape: nil, cycles: nil, **unison, &block)
         notes = pitch.is_a?(Notes::NotePitch)
         glide = notes ? SWARM_GLIDE : nil if glide == :auto
-        if !notes && (glide || scatter || from || overshoot != 0)
+        if !notes && (glide || scatter || from || (overshoot && overshoot != 0) || shape)
           raise ArgumentError, 'Swarm glides need a Notes pitch (v.hz, clip.tone, midi.hz); give glide: nil for a fixed pitch'
         end
         raise ArgumentError, 'A swarm scatter or start band needs a glide' if (scatter || from) && !glide
@@ -53,7 +53,7 @@ module MB
             # A start band is absolute: the copy's own transpose (its chord
             # tone and detune) comes after the glide, so take it off
             start = band ? p.unison_copy.rand(band) - p.settings[:transpose] : scatter
-            p = p.glide(glide, legato: legato, from: start, overshoot: overshoot)
+            p = p.glide(glide, legato: legato, from: start, overshoot: overshoot, shape: shape, cycles: cycles)
           end
           if drift
             rate = p.unison_copy.pick(drift_rate)

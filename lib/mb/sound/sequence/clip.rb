@@ -407,6 +407,79 @@ module MB
         end
         alias value number
 
+        # A control signal that tweens between the clip's values along a
+        # +curve+ from the tweening library (MB::Sound::Curve; a name like
+        # :elastic, :bounce, :squiggle, :steps, a Curve, or a Proc), e.g.
+        # automation for a cutoff, a detune, or a mix.  Each event is a
+        # keyframe: the output is the event's value at its start and tweens
+        # to the next event's value, arriving as the next event starts (or
+        # after +time+, then holding; a Duration follows the tempo; also
+        # seconds, Lengths, or a node of seconds).  The last value holds,
+        # or with a looping clip tweens back to the first over the last
+        # step.  Repeat a value to hold it for a step.  Events starting
+        # together count once (the last one).  +overshoot:+ and +cycles:+
+        # go to a named curve.  A Notes::Glide underneath; see also
+        # MB::Sound.tween.
+        #
+        # Values (see .tween_values): plain numbers tween linearly.
+        # Pitches (`300.hz`, Notes like A4) tween in octaves and the output
+        # is in Hz, so frequencies and cutoffs move evenly in pitch and
+        # overshoots stay above 0 Hz.  +log:+ overrides: true tweens plain
+        # (positive) numbers in octaves, false tweens Pitches linearly in
+        # Hz.  Mixing Pitches and plain numbers raises (say which you mean
+        # with `.hz` or plain numbers).  Seqs store Notes as note numbers,
+        # so `seq(A3, A4).tween` tweens note numbers (in semitones).
+        #
+        #     cutoff = seq(300.hz, 3000.hz, 900.hz, 1800.hz).n2.loop.tween(curve: :elastic)
+        #     bg :pad, 110.hz.saw.filter(:lowpass, cutoff: cutoff, quality: 3) * 0.3
+        #     seq(0, 12, 12, 0).n2.tween(1.n8, curve: :bounce)    # bounce to each value in an eighth
+        def tween(time = nil, curve: :smoothstep, overshoot: nil, cycles: nil, log: nil, transport: nil)
+          keys = @events.group_by(&:start).sort_by(&:first).map { |start, es| [start, es.last.value] }
+          raise ArgumentError, 'A tween needs at least one value' if keys.empty?
+
+          values, log = Clip.tween_values(keys.map(&:last), log)
+          values = values.map { |v| Math.log2(v) } if log
+
+          # Keyframes as a glide clip: at each start, glide to the next value
+          # (around the loop if looping), from the first value
+          starts = keys.map(&:first)
+          n = starts.length
+          gaps = starts.each_with_index.map { |st, i| i + 1 < n ? starts[i + 1] - st : (@loop ? @length - st + starts[0] : nil) }
+          events = (@loop ? n : [n - 1, 1].max).times.map { |i|
+            target = n == 1 ? values[0] : values[(i + 1) % n]
+            gap = gaps[i] || [@length - starts[i], 1/64r].max
+            Event.new(start: starts[i], length: gap, value: target, velocity: DEFAULT_VELOCITY)
+          }
+          glide_clip = Clip.new(events, length: @length, loop: @loop, seed: @seed)
+
+          notes = glide_clip.notes(transport: transport)
+          name = "tween #{Curve.from(curve, **{ overshoot: overshoot, cycles: cycles }.compact)}"
+          g = Notes::Glide.new(
+            notes.note_stream, time: glide_clip.send(:tween_time, time, transport), from: values[0],
+            shape: curve, overshoot: overshoot, cycles: cycles, notes: notes
+          ).named(name)
+          log ? (2 ** g).named("#{name} (octaves)") : g
+        end
+
+        # Checks tween +values+ and resolves +log+ (nil: automatic) for
+        # Clip#tween: returns [Floats, log].  Pitches become frequencies in
+        # Hz and tween in octaves unless +log+ is false; plain numbers tween
+        # linearly unless +log+ is true.  Mixed Pitches and numbers raise.
+        def self.tween_values(values, log)
+          pitches = values.count { |v| v.is_a?(MB::Sound::Pitch) }
+          if pitches > 0 && pitches < values.length
+            raise ArgumentError, "Tween values mix Pitches and plain numbers (#{values.map(&:to_s).join(', ')}); use Pitches (e.g. 300.hz) or numbers throughout"
+          end
+          unless pitches > 0 || values.all?(Numeric)
+            raise ArgumentError, "Tween values must be numbers or Pitches (got #{values.inspect})"
+          end
+
+          log = pitches > 0 if log.nil?
+          floats = values.map { |v| v.is_a?(MB::Sound::Pitch) ? v.frequency.to_f : v.to_f }
+          raise ArgumentError, "Tweens in octaves need positive values (got #{floats.inspect})" if log && !floats.all?(&:positive?)
+          [floats, !!log]
+        end
+
         # A Pitch following this clip's notes (a Notes::NotePitch, like
         # `v.hz` in a synth voice): chain a wave type (`clip.hz.ramp`,
         # `clip.tone.square.at(0.5)`) or `.transpose(7)`.  Its oscillators
@@ -551,6 +624,46 @@ module MB
         end
 
         private
+
+        # The glide time for #tween: +time+ as given (a Duration becomes a
+        # tempo-following TempoNode), or by default each event's distance to
+        # the next start, in seconds at the current tempo.
+        def tween_time(time, transport)
+          case time
+          when Duration then TempoNode.new(time, mode: :seconds, transport: transport)
+          when nil
+            gaps = step_gaps
+            raise ArgumentError, 'A tween needs events, or an explicit time' if gaps.empty?
+            if gaps.values.uniq.length == 1
+              TempoNode.new(Duration.new(gaps.values.first), mode: :seconds, transport: transport)
+            else
+              # Each event's gap as a value, read when the event starts
+              gap_clip = Clip.new(@events.map { |e| e.with(value: gaps.fetch(e.start, gaps.values.last).to_f) }, length: @length, loop: @loop, seed: @seed)
+              gap_clip.number(transport: transport) * TempoNode.new(Duration.new(1r), mode: :seconds, transport: transport)
+            end
+          else time
+          end
+        end
+
+        # The distance (whole notes) from each distinct event start to the
+        # next one (around the loop for looping clips; the last event's
+        # length otherwise), as a Hash of start => gap.
+        def step_gaps
+          starts = @events.map(&:start).uniq.sort
+          return {} if starts.empty?
+
+          starts.each_with_index.to_h { |st, i|
+            nxt = starts[i + 1]
+            gap = if nxt
+                    nxt - st
+                  elsif @loop
+                    @length - st + starts.first
+                  else
+                    @events.select { |e| e.start == st }.map(&:length).max
+                  end
+            [st, gap]
+          }.select { |_, g| g > 0 }
+        end
 
         # Returns a non-looping clip that plays this clip +count+ times in a
         # row, without #repeat's warning for looping clips.

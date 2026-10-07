@@ -23,6 +23,7 @@ RSpec.describe('script runner scripts', :smoke) do
   # Script => extra arguments for a short render
   songs = {
     'bin/songs/antialias_song.rb' => ['--bars', '0.5'],
+    'bin/songs/bouncing_ball.rb' => ['--bars', '0.5'],
     'bin/songs/node_graph_benchmark.rb' => ['--bars', '0.5'],
     'bin/songs/node_graph_grit.rb' => ['--bars', '0.5'],
     'bin/songs/random_drum_pentatonic.rb' => ['--bars', '0.5'],
@@ -33,6 +34,7 @@ RSpec.describe('script runner scripts', :smoke) do
     'bin/songs/swap_song.rb' => ['--bars', '0.5'],
     'bin/songs/swarm_song.rb' => ['--bars', '0.5', '-c', '8'],
     'bin/songs/tempo_song.rb' => ['--bars', '0.5'],
+    'bin/songs/tween_song.rb' => ['--bars', '0.5', '-c', '4'],
     'bin/songs/unison_song.rb' => ['--bars', '0.5', '-l', 'even'],
     'bin/songs/wavetable_song.rb' => ['--bars', '0.5'],
     'bin/stereo_graph_example.rb' => ['--bars', '0.5'],

@@ -214,7 +214,14 @@ module MB
       #            0.9 s), or nil for no glide.
       # +legato:+ - Only legato notes glide (see Notes::NotePitch#glide).
       # +overshoot:+ - How far glides pass their target, as a fraction of
-      #                the glide (default 0; e.g. 0..0.15; see Notes::Glide).
+      #                the glide (default none; e.g. 0..0.15; see Notes::Glide;
+      #                with a +shape:+, that curve's size).
+      # +shape:+ - The glide curve (default nil: smoothstep; a name such as
+      #            :squiggle, :elastic, :back, :bounce, or :steps, or a
+      #            Curve; see Notes::NotePitch#glide and MB::Sound::Curve),
+      #            per copy with `channels(:squiggle, :bounce)`.
+      # +cycles:+ - Wiggles, swings, bounces, or steps of a named +shape+
+      #             (the curve's default when nil; per-copy values work).
       # +scatter:+ - Where copies start before the first note glides them
       #              in: an Interval (e.g. `1.oct`, either side of the first
       #              note, random per copy) or a Range of Intervals; nil
@@ -235,10 +242,11 @@ module MB
       #     midi.synth(voices: 2) { |v| v.hz.swarm(16, glide: spread(50.ms..1.5.seconds), overshoot: 0..0.1) * v.amp_env }
       #     midi.synth(voices: 1) { |v| v.hz.swarm(24, chord: [-12, 0, 7, 12, 16, 19], scatter: 2.oct, glide: 2..6) * v.amp_env(2, 0, 1, 3) }
       #     play 110.hz.swarm(9, glide: nil, drift: 15.cents)                                  # a drifting cloud on a fixed pitch
-      def swarm(count = 12, chord: nil, detune: 15.cents, glide: :auto, legato: false, overshoot: 0, scatter: nil, from: nil, drift: nil,
+      #     midi.synth(voices: 1) { |v| v.hz.swarm(10, glide: spread(40.ms..600.ms), shape: :squiggle, cycles: 3..6) * v.amp_env }
+      def swarm(count = 12, chord: nil, detune: 15.cents, glide: :auto, legato: false, overshoot: nil, shape: nil, cycles: nil, scatter: nil, from: nil, drift: nil,
                 drift_rate: Unison::SWARM_DRIFT_RATE, spread: 1, **unison, &block)
         Unison.swarm(
-          self, count, chord: chord, detune: detune, glide: glide, overshoot: overshoot, scatter: scatter, from: from, legato: legato,
+          self, count, chord: chord, detune: detune, glide: glide, overshoot: overshoot, shape: shape, cycles: cycles, scatter: scatter, from: from, legato: legato,
           drift: drift, drift_rate: drift_rate, spread: spread, **unison, &block
         )
       end

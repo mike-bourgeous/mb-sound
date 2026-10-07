@@ -107,6 +107,8 @@ MEMCHECK_SPECS = [
   'spec/lib/mb/sound/generation_methods_spec.rb',  # FastSound noise (splitmix64 state)
   'spec/lib/mb/sound/band_limit_spec.rb',          # FastSynth.oscillate_bl/blit/oscillate_sync
   'spec/lib/mb/sound/shaper_spec.rb',              # FastClip.shape
+  'spec/lib/mb/sound/graph_node/curve_shaper_spec.rb', # FastClip.shape_curve
+  'spec/lib/mb/sound/curve_spec.rb',               # FastClip.curve_lookup
   'spec/lib/mb/sound/envelope_spec.rb',            # FastEnvelope.process
   'spec/lib/mb/sound/envelope_segments_spec.rb',   # FastEnvelope.process (segment lists, loops)
   'spec/lib/mb/sound/filter/four_pole_spec.rb',    # FastFilter.four_pole

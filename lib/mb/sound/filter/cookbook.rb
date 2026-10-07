@@ -32,6 +32,12 @@ module MB
         }.freeze
 
         attr_reader :filter_type, :sample_rate, :center_frequency, :omega, :db_gain
+        # The lowest cutoff in Hz of #dynamic_process (cutoffs from graph
+        # nodes; NaN and negative values included), like
+        # FourPole::MIN_CUTOFF.  It was 1e-10 Hz until 2026-10-07, where a
+        # cookbook biquad's output grew without bound.
+        DYNAMIC_MIN_CUTOFF = 1.0
+
         attr_reader :cutoff, :quality, :bandwidth_oct, :shelf_slope
 
         # Initializes a filter based on Robert Bristow-Johnson's filter cookbook.
@@ -353,8 +359,7 @@ module MB
           @quality = 1e-10 if @quality < 1e-10
 
           f0 = cutoff[-1]
-          f0 = 1e-10 if f0 < 1e-10 || !f0.finite?
-          f0 = @f0_max if f0 > @f0_max
+          f0 = f0 >= DYNAMIC_MIN_CUTOFF ? [f0, @f0_max].min : DYNAMIC_MIN_CUTOFF
           @center_frequency = f0
           @cutoff = @center_frequency
 
@@ -375,7 +380,9 @@ module MB
           x2 = @x2
 
           samples.map_with_index { |x0, idx|
-            set_parameters(@filter_type, @sample_rate, cutoff[idx], db_gain: @db_gain, quality: quality[idx])
+            f0 = cutoff[idx]
+            f0 = DYNAMIC_MIN_CUTOFF unless f0 >= DYNAMIC_MIN_CUTOFF
+            set_parameters(@filter_type, @sample_rate, f0, db_gain: @db_gain, quality: quality[idx])
             out = MB::FastSound.biquad(@b0, @b1, @b2, @a1, @a2, x0, x1, x2, y1, y2)
             y2 = y1
             y1 = out

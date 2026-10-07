@@ -1606,6 +1606,9 @@ static VALUE ruby_cookbook(VALUE self, VALUE type_id, VALUE f_samp, VALUE f_cent
  *
  * returns samples
  */
+// Lowest cutoff of dynamic cookbook filters in Hz
+#define DYNAMIC_MIN_CUTOFF 1.0
+
 static VALUE ruby_dynamic_biquad(VALUE self, VALUE samples, VALUE cutoffs, VALUE qualities, VALUE type_id, VALUE sample_rate, VALUE db_gain, VALUE coeffs, VALUE state)
 {
 	Check_Type(coeffs, T_ARRAY);
@@ -1647,7 +1650,9 @@ static VALUE ruby_dynamic_biquad(VALUE self, VALUE samples, VALUE cutoffs, VALUE
 	double y1 = NUM2DBL(rb_ary_entry(state, 2));
 	double y2 = NUM2DBL(rb_ary_entry(state, 3));
 	for (size_t i = 0; i < length; i++) {
-		double f0 = fmax(1e-10, fmin(cut[i], f0_max));
+		// Clamped to DYNAMIC_MIN_CUTOFF (Cookbook::DYNAMIC_MIN_CUTOFF; NaN
+		// and negative cutoffs included), as FourPole clamps to 1 Hz
+		double f0 = cut[i] >= DYNAMIC_MIN_CUTOFF ? fmin(cut[i], f0_max) : DYNAMIC_MIN_CUTOFF;
 		double quality = fmax(q[i], 1e-10);
 
 		bq = cookbook(ftype, rate, f0, g, quality, NAN, NAN);

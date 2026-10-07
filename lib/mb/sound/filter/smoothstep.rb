@@ -24,17 +24,27 @@ module MB
         # description).
         #
         # +:sample_rate+ is the sample rate of the system in Hz.
+        # +:curve+ draws each transition along another tweening curve
+        # (anything MB::Sound::Curve.from takes, e.g. :elastic, :bounce,
+        # :back), or nil (default) for the smoothstep.
         # +:samples+ is the duration of a full transition in samples.  Only
         #            one of +:samples+ or +:seconds+ may be specified, not
         #            both.
         # +:seconds+ is the duration of a full transition in seconds.  Only one
         #            of +:samples+ or +:seconds+ may be specified, not both.
-        def initialize(sample_rate:, samples: nil, seconds: nil)
+        # The tweening curve of each transition (an MB::Sound::Curve), or
+        # nil for the smoothstep.
+        attr_reader :curve
+
+        def initialize(sample_rate:, samples: nil, seconds: nil, curve: nil)
           raise 'Sample rate must be a positive number' unless sample_rate.is_a?(Numeric) && sample_rate > 0
           @sample_rate = sample_rate.to_f
 
           raise 'Specify a transition duration in either samples or seconds' if samples.nil? && seconds.nil?
           raise 'Specify only one of samples or seconds, not both' unless samples.nil? || seconds.nil?
+
+          @curve = MB::Sound::Curve.from(curve)
+          @table = nil
 
           if samples
             self.fade_samples = samples
@@ -49,6 +59,7 @@ module MB
         def sample_rate=(sample_rate)
           @sample_rate = sample_rate
           @fade_samples = (@fade_seconds * @sample_rate).round if @fade_seconds
+          @table = nil
           self
         end
         alias at_rate sample_rate=
@@ -62,12 +73,14 @@ module MB
 
           @fade_samples = samples
           @fade_seconds = @fade_samples / @sample_rate
+          @table = nil
         end
 
         # Sets the duration of a transition in seconds.
         def fade_seconds=(seconds)
           @fade_seconds = seconds.to_f
           @fade_samples = (@fade_seconds * @sample_rate).round
+          @table = nil
         end
 
         # Resets the output to 0, or to the given value.
@@ -95,7 +108,7 @@ module MB
             # TODO: Port to C if it's slow?
             if @t < @fade_samples
               @t += 1
-              @v = MB::FastSound.smoothstep(@t.to_f / @fade_samples) * @d + @old
+              @v = blend(@t) * @d + @old
             else
               @v = s
             end
@@ -128,11 +141,21 @@ module MB
 
             if @t < @fade_samples
               @t += 1
-              @v = MB::FastSound.smoothstep(@t.to_f / @fade_samples) * @d + @old
+              @v = blend(@t) * @d + @old
             else
               @v = s
             end
           }
+        end
+
+        # The transition's progress (0..1) after +t+ of #fade_samples
+        # samples: the smoothstep, or the curve (from a table made once per
+        # transition length, so each sample is one lookup).
+        def blend(t)
+          return MB::FastSound.smoothstep(t.to_f / @fade_samples) if @curve.nil?
+
+          @table ||= @curve.map((Numo::DFloat.new(@fade_samples).seq + 1) / @fade_samples).to_a
+          @table[t - 1]
         end
 
         # Returns the current output value without changing the filter state.

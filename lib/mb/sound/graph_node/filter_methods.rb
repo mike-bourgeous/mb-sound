@@ -283,18 +283,23 @@ module MB
         # of gliding, so only changes without a reset glide (e.g. portamento
         # for legato notes only).
         #
+        # With +curve:+ (an MB::Sound::Curve name such as :elastic, :bounce,
+        # :back, :squiggle, a Curve, or a Proc), each change follows that
+        # curve instead of the smoothstep, e.g. a springy knob.
+        #
         # Examples:
         #     midi.number.smooth(0.1)
         #     120.hz.square.smooth(60.samples)
         #     clip.number.smooth(0.05, reset: clip.trigger)
+        #     midi.cc(74).smooth(300.ms, curve: :elastic)   # an elastic knob
         #
         # TODO: instead of reacting to step changes in the input, use an FIR
         # filter whose step response is the smoothstep function.
-        def smooth(length, reset: nil)
+        def smooth(length, reset: nil, curve: nil)
           if length.is_a?(MB::Sound::Length::Samples)
-            f = MB::Sound::Filter::Smoothstep.new(sample_rate: sample_rate, samples: length.value)
+            f = MB::Sound::Filter::Smoothstep.new(sample_rate: sample_rate, samples: length.value, curve: curve)
           else
-            f = MB::Sound::Filter::Smoothstep.new(sample_rate: sample_rate, seconds: MB::Sound::Length.seconds(length, sample_rate: sample_rate))
+            f = MB::Sound::Filter::Smoothstep.new(sample_rate: sample_rate, seconds: MB::Sound::Length.seconds(length, sample_rate: sample_rate), curve: curve)
           end
 
           return filter(f) if reset.nil?

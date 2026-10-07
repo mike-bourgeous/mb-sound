@@ -19,6 +19,91 @@ module MB
         Sequence::Seq.new([nil])
       end
 
+      # Returns a control signal that tweens through +values+, one per
+      # +step+, along +curve+ (a MB::Sound::Curve name such as :smoothstep
+      # (default), :elastic, :bounce, :squiggle, :steps, :back, a Curve, or a
+      # Proc): automation for a cutoff, a detune, a mix, ... following the
+      # session's tempo and timeline.  +step+ is a length (e.g. `1.bar`,
+      # `2.beats`, `3.n16`; a plain number counts bars) or an Array of
+      # lengths, one per value (cycling).  Values are keyframes: each is the
+      # output at the start of its step, and the step tweens to the next
+      # value (arriving as the next step starts, or after +time+ and then
+      # holding).  The last value holds, or with +loop: true+ (default)
+      # tweens back to the first over the last step; repeat a value to hold
+      # it.  +overshoot:+ and +cycles:+ go to a named curve.
+      #
+      # Pitches (`300.hz`, Notes) tween in octaves and give Hz, so cutoffs
+      # move evenly in pitch and overshoots stay above 0 Hz; plain numbers
+      # tween linearly; +log:+ true or false overrides; mixing Pitches and
+      # numbers raises.  Built on a Clip (Sequence::Clip#tween), so clips of
+      # values tween the same way.
+      #
+      #     # 300 -> 3000 Hz during bar 1, 3000 -> 800 during bar 2, back to 300 during bar 3
+      #     bg :pad, 110.hz.saw.filter(:lowpass, cutoff: tween([300.hz, 3000.hz, 800.hz], 1.bar, curve: :elastic), quality: 4) * 0.3
+      #     tween([0, 1, 0.3], 1.bar, curve: :bounce, loop: false)    # a bouncing mix knob, then 0.3
+      #     tween([0, 12, 12, 7], 2.beats, curve: :steps, cycles: 4)  # stepped automation, holding 12 for a step
+      def tween(values, step = 1.bar, curve: :smoothstep, time: nil, overshoot: nil, cycles: nil, log: nil, loop: true)
+        values = Array(values)
+        raise ArgumentError, 'A tween needs at least one value' if values.empty?
+        Sequence::Clip.tween_values(values, log) # checks the values early
+
+        steps = Array(step).map { |s|
+          s.is_a?(Numeric) ? Sequence::Duration.rational(s) * transport.bar_length : Sequence::Duration.whole_notes(s)
+        }
+        start = 0r
+        events = values.each_with_index.map { |v, i|
+          len = steps[i % steps.length]
+          e = Sequence::Event.new(start: start, length: len, value: v, velocity: Sequence::Clip::DEFAULT_VELOCITY)
+          start += len
+          e
+        }
+        Sequence::Clip.new(events, length: start, loop: loop).tween(time, curve: curve, overshoot: overshoot, cycles: cycles, log: log)
+      end
+
+      # Returns a Clip of hits timed like a bouncing ball (a geometric
+      # accelerando): dropped at the start, each bounce +elasticity+ (the
+      # restitution, 0 < e < 1) times as long as the one before, so the hits
+      # crowd together and converge exactly on +length+ (e.g. `2.bars`: a
+      # ball dropped on a bar line settles onto the bar line two bars later,
+      # back on the grid).  Hit i is at length × (1 - e^i) with velocity
+      # +velocity+ × e^i (impact speed), so loudness, pitch, or brightness
+      # mapped from `v.velocity` fall with each bounce.  +count+ hits at
+      # most; hits closer than +min_gap+ (whole notes) to the previous one
+      # are dropped.  With +reverse: true+ the hits accelerate apart instead
+      # (a buzz that slows into single hits, soft to loud).  +note+ is every
+      # hit's value.  The clip is +length+ long and doesn't loop (add
+      # `.loop`); its hit times match the contact points of Curve.bounce.
+      #
+      #     ball = bounce_hits(2.bars, count: 16, elasticity: 0.75, note: C2)
+      #     bg :ball, ball.loop.synth(voices: 2) { |v| (v.hz.transpose(v.velocity * 12).sine * v.amp_env(0.001, 0.2, 0, 0.1)) }
+      #     bounce_hits(1.bar, count: 40, elasticity: 0.92)            # settles into a buzz
+      #     bounce_hits(1.bar, reverse: true)                          # accelerating apart
+      def bounce_hits(length = 1.bar, count: 12, elasticity: 0.7, velocity: 1.0, note: 60, reverse: false, min_gap: 1/1024r)
+        e = elasticity.to_f
+        raise ArgumentError, "Bounce elasticity must be between 0 and 1, exclusive (got #{elasticity.inspect})" unless e > 0 && e < 1
+        count = Integer(count)
+        raise ArgumentError, "A bounce needs at least one hit (got #{count})" if count < 1
+
+        len = length.is_a?(Numeric) ? Sequence::Duration.rational(length) * transport.bar_length : Sequence::Duration.whole_notes(length)
+        er = Sequence::Duration.rational(e)
+        hits = []
+        count.times do |i|
+          t = len * (1 - er**i)
+          break if hits.any? && t - hits.last[0] < min_gap
+          hits << [t, velocity.to_f * e**i]
+        end
+        if reverse
+          last = hits.last[0]
+          hits = hits.reverse.map { |t, v| [last - t, v] }
+        end
+
+        events = hits.each_with_index.map { |(t, v), i|
+          nxt = hits[i + 1]&.first || len
+          Sequence::Event.new(start: t, length: [(nxt - t) / 2, 1/32r].min, value: note, velocity: v.clamp(0.0, 1.0))
+        }
+        Sequence::Clip.new(events, length: len)
+      end
+
       # Parses step-sequencer strings with steps of 1/+division+ whole notes
       # (an Integer note division or Rational whole notes).  One character is
       # one step: x = hit, X = accent, 1-9 = velocity, ? = 50% chance, . =
