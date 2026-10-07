@@ -11,7 +11,7 @@ RSpec.describe(MB::Sound::GraphNodeInput, :aggregate_failures) do
     end
 
     it 'uses graph node samplers to support parallel branches' do
-      graph = 24000.hz.square.at(1)
+      graph = 24000.hz.asquare.at(1) # naive: starts at +1 (a band-limited square starts on its edge midpoint, 0)
       gni = [graph, graph, graph, graph].as_input
       expect(gni.read(1)).to eq([Numo::SFloat[1]] * 4)
       expect(gni.sources.values).to all(be_a(MB::Sound::GraphNode::Tee::Branch))

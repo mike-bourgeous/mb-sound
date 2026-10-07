@@ -217,17 +217,18 @@ RSpec.describe(MB::Sound::Tone, '#wavetable', aggregate_failures: true) do
     end
 
     it 'morphs across frames with the scan input' do
-      # :basic's frames are loudness-normalized: sine, triangle, square, saw
-      # scaled to the saw's loudness
-      g = w[:basic].derivative_spectra[true, 1].abs / Numo::DFloat[1, 8 / Math::PI**2, 4 / Math::PI, 2 / Math::PI]
       sine = 100.hz.wavetable(:basic, scan: 0).sample(480)
       saw = 100.hz.wavetable(:basic, scan: 1).sample(480)
-      expect(sine).to all_be_within(1e-4).of_array(100.hz.sine.sample(480) * g[0])
+      expect(sine).to all_be_within(1e-4).of_array(100.hz.sine.sample(480))
       expect(saw).to all_be_within(1e-4).of_array(100.hz.wavetable(:saw).sample(480))
 
       half = 100.hz.wavetable(:basic, scan: 1.0 / 6).sample(480)
-      tri = 100.hz.wavetable(:triangle).sample(480) * g[1]
+      tri = 100.hz.wavetable(:triangle).sample(480)
       expect(half).to all_be_within(1e-4).of_array(sine * 0.5 + tri * 0.5)
+
+      # :basic_norm scales each frame to the saw's loudness
+      g = w[:basic_norm].derivative_spectra[0, 1].abs
+      expect(100.hz.wavetable(:basic_norm, scan: 0).sample(480)).to all_be_within(1e-4).of_array(sine * g)
     end
 
     it 'gives the same samples in C and Ruby with a wrapping scan' do
@@ -243,8 +244,7 @@ RSpec.describe(MB::Sound::Tone, '#wavetable', aggregate_failures: true) do
       expect(clamped).not_to be_scan_wrap
       expect(wrapped).to be_scan_wrap
       expect(clamped.sample(480)).to all_be_within(1e-4).of_array(100.hz.wavetable(:saw).sample(480))
-      sine_gain = w[:basic].derivative_spectra[0, 1].abs # loudness-normalized sine frame
-      expect(wrapped.sample(480)).to all_be_within(1e-4).of_array(100.hz.sine.sample(480) * sine_gain)
+      expect(wrapped.sample(480)).to all_be_within(1e-4).of_array(100.hz.sine.sample(480))
       expect(100.hz.wavetable(:basic, scan: 1, scan_wrap: true).sample(480)).to all_be_within(1e-4).of_array(100.hz.wavetable(:saw).sample(480))
       expect(MB::Sound::C3.wavetable(:basic, scan: 1.5, scan_wrap: true)).to be_scan_wrap
     end

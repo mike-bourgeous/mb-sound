@@ -64,13 +64,13 @@ module MB
     #      integrators (FastSynth.blit);
     #    - SYNC: phase driven by sync pulses with minBLEP/minBLAMP events in
     #      state.sync and state.sync_ring (FastSynth.oscillate_sync); also
-    #      band-limited tones with resets or a timeline (reset_sync?), whose
+    #      #clean band-limited tones with resets or a timeline (reset_sync?), whose
     #      jumps are hard sync events to the target phase;
     #    - PHASOR: the phase itself (FastSound.phasor).
     # 5. GAIN (fused into the kernel): y = v * gain + offset, from #at.
-    # 6. JUMP: a phase jump (reset input, timeline lock) of a tone on the
-    #    SYNC kernel (reset_sync?) is a sync event on its sample; for other
-    #    band-limited tones (phase modulation, LFO fades, wavetables) it
+    # 6. JUMP: a phase jump (reset input, timeline lock) of a #clean tone on
+    #    the SYNC kernel (reset_sync?) is a sync event on its sample; for
+    #    other band-limited tones (the default) it
     #    queues a minBLEP/minBLAMP step from the old waveform to the new
     #    (state.jump_residual), with its area set to that of an ideal step
     #    on the sample (see .jump_residual), so audio-rate resets don't
@@ -431,6 +431,7 @@ module MB
         @reset = nil
         @reset_to = nil
         @free = false
+        @clean = false
         @random_phase = false
         @seed = nil
         @noise_seed = nil
@@ -665,8 +666,11 @@ module MB
       # True if this complex tone plays from a complex wavetable (see
       # .complex_table) instead of the closed-form impulse trains (#blit?):
       # band-limited complex ramp, square, triangle, and sine with phase
-      # modulation (not sines, which stay exact), a warp (#pwm), sync, a
-      # reset input, or a timeline.
+      # modulation (not sines, which stay exact), a warp (#pwm), sync, or
+      # (with #clean) a reset input or a timeline.  Without #clean, resets
+      # of otherwise plain complex tones restart the impulse trains, as
+      # before (a minBLEP step on a complex table measured worse at edges,
+      # where the imaginary part peaks).
       # The wavetable kernels band-limit all of those (levels picked by the
       # motion per sample, PolyBLAMP warp corners, exact synced harmonics),
       # so complex shapes keep no negative frequencies or aliases beyond
@@ -676,23 +680,26 @@ module MB
       # at 1 kHz).
       def complex_table?
         COMPLEX_TABLE_WAVES.include?(@wave_type) && band_limit_setting == true && random_advance == 0 &&
-          (warped? || !@sync_source.nil? || !@reset.nil? || !@lock.nil? ||
+          (warped? || !@sync_source.nil? || (@clean && (!@reset.nil? || !@lock.nil?)) ||
             (@wave_type != :complex_sine && !(@phase_mod.nil? || @phase_mod == 0)))
       end
 
-      # True if this complex tone plays through the synced table kernel
-      # without sync events (FastWavetable.sync): with a phase warp (#pwm),
-      # whose corners are exact per harmonic there (aliasing -113 to -118 dB
-      # at 1-3 kHz with pwm(0.3), against -31 to -40 for the free-running
+      # True if this tone is #clean and a table kernel plays it with a warp,
+      # resets, or a timeline (and no sync, phase modulation, or noise): the
+      # synced table kernel without sync events (FastWavetable.sync) plays
+      # it, where warp corners are exact per harmonic (aliasing -110 to -118
+      # dB at 1-3 kHz with pwm(0.3), against -31 to -41 for the free-running
       # table kernel's PolyBLAMP corners; about 4x the cost and 2.8 samples
-      # of minimum-phase delay), or with resets or a timeline, whose jumps
-      # are hard sync events on their samples (see #reset_sync?; a minBLEP
-      # step can't follow the imaginary part's log peaks at the edges).  Not
-      # with phase modulation (the synced kernel has none): those use the
-      # free-running table kernel and its minBLEP steps (#table_jump).
-      def exact_warp?
-        complex_table? && @sync_source.nil? && (@phase_mod.nil? || @phase_mod == 0) &&
-          (warped? || !@reset.nil? || !@lock.nil?)
+      # of minimum-phase delay) and jumps are hard sync events on their
+      # samples (see #reset_sync?).  Complex shapes and cycle-mode
+      # band-limited wavetables (not key maps).
+      def clean_table?
+        return false unless @clean && @sync_source.nil? && random_advance == 0 && (@phase_mod.nil? || @phase_mod == 0)
+        return false unless warped? || !@reset.nil? || !@lock.nil?
+
+        return complex_table? unless wavetable?
+
+        @table.is_a?(MB::Sound::Wavetable) && @table.mode == :cycle && @table.mipped?
       end
 
       # True if a wavetable kernel plays this tone (#wavetable, or
@@ -721,7 +728,7 @@ module MB
       #     play 110.hz.pwm(0.5.hz.lfo.at(0.1..0.9)).square.at(-12.db)   # classic PWM
       #     play 110.hz.triangle.skew(0.1).at(-12.db)                    # nearly a saw
       #     play C2.sine.pwm(adsr(0.01, 0.3, 0.2, 0.3).at(0.5..0.05))   # CZ-style sweep
-      def pwm(width, dc: false)
+      def pwm(width, dc: false, clean: nil)
         unless width.nil? || width.is_a?(Numeric) || width.respond_to?(:sample)
           raise ArgumentError, "Width must be nil, a Numeric, or a graph node (got #{width.inspect})"
         end
@@ -729,6 +736,7 @@ module MB
         configure do
           @width = fixup_source(width)
           @keep_dc = !!dc
+          @clean = !!clean unless clean.nil?
         end
       end
       alias skew pwm
@@ -845,12 +853,12 @@ module MB
       # band-limited impulse trains, integrated; see BandLimit.blit_ruby):
       # no aliasing and no negative frequencies, with the top octave lifted
       # slightly (+2.6 dB at 20 kHz).  With phase modulation (#pm), a warp
-      # (#pwm), #sync/#softsync, a #reset input, or a timeline, they play
-      # from complex wavetables of the exact series instead (see
+      # (#pwm), #sync/#softsync, or (with #clean) a #reset input or a
+      # timeline, they play from complex wavetables of the exact series instead (see
       # #complex_table?), which band-limit all of those like any wavetable;
-      # warps, resets, and timeline jumps without phase modulation go
-      # through the synced table kernel, where warp corners and jumps are
-      # exact per harmonic (see #exact_warp?).  Complex sines take a warp,
+      # with #clean, warps, resets, and timeline jumps without phase
+      # modulation go through the synced table kernel, where warp corners
+      # and jumps are exact per harmonic (see #clean_table?).  Complex sines take a warp,
       # sync, and resets the same way.  The naive versions (acomplex_ramp,
       # ...) alias and clip their imaginary parts.
       #
@@ -1080,13 +1088,13 @@ module MB
       # - a graph node of radians, read at each reset sample,
       # - :random, a new random phase at each reset (the same as #rnd).
       #
-      # The jump is band-limited.  Band-limited ramps, squares, triangles, and
-      # warped shapes without phase modulation play through the synced
-      # kernel, where each reset is a hard sync event on its sample (see
-      # #reset_sync?), as clean as #sync; others (phase modulation, LFO
-      # fades) get a 32-sample minBLEP step from the value the wave would
-      # have had, including phase modulation at that sample, with an ideal
-      # step's area (Tone.jump_residual).  Works with #fm and #pm.  Buffers
+      # The jump is band-limited: a 32-sample minBLEP step from the value the
+      # wave would have had, including phase modulation at that sample, with
+      # an ideal step's area (Tone.jump_residual).  With +clean: true+ (see
+      # #clean), band-limited ramps, squares, triangles, warped shapes,
+      # wavetables, and complex shapes without phase modulation play through
+      # the synced kernels instead, where each reset is a hard sync event on
+      # its sample, as clean as #sync.  Works with #fm and #pm.  Buffers
       # with resets are computed in pieces
       # split at the reset samples; buffers without resets cost one scan of
       # the trigger buffer.  A reset input that ends (returns nil) means no
@@ -1103,7 +1111,8 @@ module MB
       #     bpm 120; c = grid(16, 'x..x..x.').loop
       #     play 55.hz.saw.reset(c.trigger) * c.env           # every hit starts at phase 0
       #     play 2.hz.lfo.reset(c.trigger, to: 90.degrees)    # an LFO that restarts at its peak
-      def reset(trigger, to: nil)
+      def reset(trigger, to: nil, clean: nil)
+        self.clean(clean) unless clean.nil?
         if trigger.nil?
           return configure do
             @reset = nil
@@ -1143,6 +1152,36 @@ module MB
 
       # The reset target given to #reset (nil, radians, or a node).
       def reset_to = @reset_to
+
+      # Plays this tone's phase jumps and warps through the synced kernels
+      # (+enabled+ true; false for the default): resets, key sync, and
+      # timeline jumps become hard sync events on their samples, as clean as
+      # #sync (band-limited ramps, squares, triangles, and warped shapes
+      # without phase modulation: #reset_sync?; harmonic error against the
+      # ideal reset waveform -72 to -86 dB instead of -19 to -38), and
+      # warped (#pwm) or reset wavetables and complex shapes get exact
+      # corners and jumps per harmonic (#clean_table?).  The cost: the tone
+      # becomes the naive waveform through the minBLEP's minimum-phase
+      # filter (about 2.8 samples of delay, minBLEP edges with their ringing,
+      # peaks up to ~1.4x PolyBLEP's) and about twice the oscillator's CPU
+      # (4x for tables).  Also #reset(trig, clean: true) and
+      # #pwm(w, clean: true).  Off by default (user's choice, 2026-10-08:
+      # predictable cost for key-synced voices).
+      #
+      #     play 700.hz.ramp.reset(200.hz.lfo.wraps, clean: true).at(-12.db)   # as clean as sync
+      #     play 110.hz.wavetable(:saw).pwm(0.3, clean: true).at(-12.db)        # exact warp corners
+      #     midi.synth { |v| v.hz.saw.clean * v.amp_env }                       # key-synced voices
+      def clean(enabled = true)
+        configure do
+          @clean = !!enabled
+        end
+      end
+
+      # True if this tone plays its jumps and warps through the synced
+      # kernels (see #clean).
+      def clean?
+        @clean
+      end
 
       # Marks this tone as never reset: a free-running oscillator whose phase
       # never restarts, like an analog oscillator.  Synth voices don't key
@@ -1595,9 +1634,9 @@ module MB
       # those of the reset sample (a reset input; see #sample_segments).
       def phase_jump(freq: state.last_freq, width: state.last_width, phase_mod: 0.0, scan: nil)
         state = @state
-        if kernel == :reset_sync || exact_warp?
+        if kernel == :reset_sync || clean_table?
           # A hard sync event on the jump sample (see #reset_sync?,
-          # #exact_warp?), or the start of a tone that hasn't played
+          # #clean_table?), or the start of a tone that hasn't played
           yield
           if state.sync[4] == 0
             state.sync[0] = state.phase[0]
@@ -1608,7 +1647,7 @@ module MB
         end
 
         before = state.phase[0]
-        played = freq != 0.0 && (state.blep[3] != 0 || state.blit[6] != 0 || state.table[2] != 0)
+        played = freq != 0.0 && (state.blep[3] == 1 || state.blit[6] != 0 || state.table[2] != 0)
         if table_kernel?
           table_before = current_table
           position = state.table[0]
@@ -1877,7 +1916,7 @@ module MB
             ).inplace!
             state.phase[0] = state.sync[0]
             buf
-          elsif exact_warp?
+          elsif clean_table?
             ensure_sync_ring(table)
             pulses, target = reset_pulse(out.length)
             buf = table.sync(
@@ -1952,7 +1991,7 @@ module MB
               @interpolation, @sample_rate, !@keep_dc, table.mipped?, scan_wrap: @scan_wrap
             )
             state.phase[0] = state.sync[0]
-          elsif exact_warp?
+          elsif clean_table?
             ensure_sync_ring(table)
             pulses, target = reset_pulse(count)
             values = table.sync_ruby(
@@ -2132,7 +2171,7 @@ module MB
         [bl.begin.to_f, bl.end.to_f].freeze
       end
 
-      # True if this tone's phase jumps (reset inputs, key sync, timeline
+      # True if this #clean tone's phase jumps (reset inputs, key sync, timeline
       # jumps) run through the synced oscillator kernel as hard sync events
       # on their samples (FastSynth.oscillate_sync with a reset phase), so
       # resets are exactly as clean as sync: the whole tone is the naive
@@ -2141,10 +2180,11 @@ module MB
       # -35), with each jump an exact event.  For band-limited (or warped)
       # ramps, squares, triangles, and warped sines and parabolas, with a
       # reset input or a timeline, without phase modulation, noise, an LFO
-      # fade, or sync; other tones queue a minBLEP step with the ideal
-      # step's area (Tone.jump_residual).
+      # fade, or sync.  Other tones (the default, user's choice 2026-10-08:
+      # predictable cost) queue a minBLEP step with the ideal step's area
+      # (Tone.jump_residual).
       def reset_sync?
-        (!@reset.nil? || !@lock.nil?) && @sync_source.nil? && band_limit_setting == true && synth_kernel? &&
+        @clean && (!@reset.nil? || !@lock.nil?) && @sync_source.nil? && band_limit_setting == true && synth_kernel? &&
           random_advance == 0 && (@phase_mod.nil? || @phase_mod == 0) && BandLimit::WARP_WAVES.include?(@wave_type)
       end
 

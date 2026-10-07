@@ -345,7 +345,8 @@ module MB
 
         phi = state[0].to_f
         prev_e, prev_inc, prev_pm, primed = bl_state
-        primed = primed != 0
+        fresh = primed == 0
+        primed = primed == 1
 
         out = Numo::SFloat.zeros(count)
         steps = 0.0
@@ -381,6 +382,8 @@ module MB
             v += pending
           elsif primed && (i > 0 || (wrap(prev_e + d_back - e + 0.5) - 0.5).abs < 1e-6)
             v += step(points, prev_e, d_back, advance, fade_lo, fade_hi)[1]
+          elsif fresh && i == 0
+            v += step(points, wrap(e - inc), inc, advance, fade_lo, fade_hi)[1]
           end
 
           if i + 1 < count

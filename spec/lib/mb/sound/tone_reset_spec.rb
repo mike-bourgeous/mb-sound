@@ -83,7 +83,7 @@ RSpec.describe('Tone reset inputs, free and random phases') do
       trig = triggers(256, 0, 5, 100, 101, 200, 255)
       [:ramp, :square, :triangle, :sine, :parabola].each do |wave|
         c, r = 2.times.map {
-          bl_osc(wave, frequency: input(fm), width: input(width), reset: input(trig), to: input(targets))
+          bl_osc(wave, frequency: input(fm), width: input(width), reset: input(trig), to: input(targets)).clean
         }
         expect(c.send(:kernel)).to eq(:reset_sync)
         expect(c.sample_c(256)).to eq(r.sample_ruby(256)), wave.to_s
@@ -166,9 +166,13 @@ RSpec.describe('Tone reset inputs, free and random phases') do
       expect(pieces(o, :sample, [100, 100, 100]) {}).to eq(pieces(ref, :sample, [100, 100, 100]) {})
     end
 
-    it 'gives the same samples as the synced kernel without events when the trigger is always zero' do
+    it 'gives the same samples as no reset input when the trigger is always zero' do
       o = bl_osc(:square, reset: input(triggers(256)))
-      expect(o.sample(256)).to eq(bl_osc(:square, sync: input(triggers(256))).sample(256))
+      expect(o.sample(256)).to eq(bl_osc(:square).sample(256))
+
+      # Clean: the synced kernel without events
+      c = bl_osc(:square, reset: input(triggers(256))).clean
+      expect(c.sample(256)).to eq(bl_osc(:square, sync: input(triggers(256))).sample(256))
 
       # Naive tones and tones with phase modulation: as with no reset input
       n = 1001.3.hz.asquare.reset(input(triggers(256)))

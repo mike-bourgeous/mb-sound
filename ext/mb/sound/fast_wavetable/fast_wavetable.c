@@ -1785,7 +1785,8 @@ static VALUE ruby_sync(int argc, VALUE *argv, VALUE self)
 	struct wt_harms hs = { 0 };
 
 	// The steady harmonic coefficients (see wt_steady_coefs), kept while
-	// the fundamental's frequency and the selection stay the same
+	// the fundamental's frequency and the selection stay the same (future
+	// option: block-interpolate them every 16 samples while gliding)
 	double *coef = bl ? ALLOC_N(double, 2 * (t.spec_cols + WT_CHAINS + 1)) : NULL;
 	if (bl) {
 		et.e0 = ALLOC_N(double, 2 * et.rows);

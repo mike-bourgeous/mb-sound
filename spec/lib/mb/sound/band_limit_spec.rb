@@ -360,7 +360,10 @@ RSpec.describe(MB::Sound::BandLimit) do
       it 'plays them from complex tables instead of the naive shapes' do
         expect(100.hz.complex_ramp.pm(3.hz.at(1)).blit?).to eq(false)
         expect(100.hz.complex_ramp.pm(3.hz.at(1)).send(:kernel)).to eq(:wavetable)
-        expect(100.hz.complex_square.pwm(0.3).send(:exact_warp?)).to eq(true)
+        expect(100.hz.complex_square.pwm(0.3).send(:clean_table?)).to eq(false)
+        expect(100.hz.complex_square.pwm(0.3, clean: true).send(:clean_table?)).to eq(true)
+        expect(100.hz.complex_ramp.reset(3.hz.lfo.wraps).send(:kernel)).to eq(:blit) # restarts, as before
+        expect(100.hz.complex_ramp.reset(3.hz.lfo.wraps, clean: true).send(:kernel)).to eq(:wavetable)
         expect(100.hz.complex_triangle.sync(ratio: 2).send(:kernel)).to eq(:wavetable)
         expect(100.hz.complex_ramp.send(:kernel)).to eq(:blit)
         expect(100.hz.complex_sine.pm(3.hz.at(1)).send(:kernel)).to eq(:naive) # an exponential stays exact
@@ -372,13 +375,14 @@ RSpec.describe(MB::Sound::BandLimit) do
         naive = complex_nhr { |p| p.acomplex_ramp.pm(p.sine.at(0.5)) }
         expect(pm).to be < -44
         expect(pm).to be < naive - 20
-        expect(complex_nhr { |p| p.complex_ramp.pwm(0.3) }).to be < -110
+        expect(complex_nhr { |p| p.complex_ramp.pwm(0.3) }).to be < -38
+        expect(complex_nhr { |p| p.complex_ramp.pwm(0.3, clean: true) }).to be < -110
         expect(complex_nhr { |p| p.complex_square.sync(ratio: 2.37) }).to be < -100
       end
 
-      it 'resets like sync to a pulse of 1 on the reset sample' do
+      it 'resets like sync to a pulse of 1 on the reset sample when clean' do
         trig = -> { MB::Sound::ArrayInput.new(data: [Numo::SFloat.zeros(900).tap { |t| t[[10, 300, 777]] = 1 }]) }
-        a = 440.hz.complex_triangle.reset(trig.call)
+        a = 440.hz.complex_triangle.reset(trig.call, clean: true)
         b = 440.hz.complex_triangle.sync(trig.call)
         expect(a.sample(900)).to eq(b.sample(900))
       end
@@ -388,6 +392,8 @@ RSpec.describe(MB::Sound::BandLimit) do
         [
           -> { 330.hz.complex_ramp.pm(330.hz.sine.at(0.5)) },
           -> { 330.hz.complex_square.pwm(2.hz.lfo.at(0.2..0.8)).reset(trig.call, to: 1.0) },
+          -> { 330.hz.complex_square.pwm(2.hz.lfo.at(0.2..0.8)).reset(trig.call, to: 1.0, clean: true) },
+          -> { 330.hz.wavetable(:organ).pwm(0.3, clean: true).reset(trig.call) },
           -> { 330.hz.complex_ramp.pm(330.hz.sine.at(0.5)).reset(trig.call) },
           -> { 330.hz.complex_sine.pwm(0.2).sync(ratio: 1.7) },
         ].each do |make|
@@ -634,22 +640,56 @@ RSpec.describe(MB::Sound::BandLimit) do
       oscillator(:ramp, frequency: 1001.3, **opts)
     end
 
-    it 'runs resets through the synced kernel as hard sync events on their samples' do
+    it 'turns a reset into a band-limited step from the continuing value, with the ideal area' do
+      continuing = bl_osc.sample(31).dup[30]
+      o = bl_osc.reset(trig(70, 30))
+      expect(o.send(:kernel)).to eq(:synth)
+      after = o.sample(70).dup[30..]
+
+      # The minBLEP holds the continuing value on the jump sample; the area
+      # correction's first tap moves it toward the new value
+      blep, _, area = MB::Sound::Tone.jump_tables
+      dv = 0 - continuing
+      expect(after[0]).to be_within(0.01).of(continuing + area[0] * (-0.5 * dv - blep.sum * dv))
+
+      # The step adds the area of an ideal step on the sample (-dv / 2)
+      fresh0 = bl_osc.sample(32)
+      fresh0[0] = 0 # the fresh tone's first sample is corrected as if it had run
+      expect((after[0...32] - fresh0).sum).to be_within(0.02).of(-0.5 * dv)
+    end
+
+    it 'runs clean resets through the synced kernel as hard sync events on their samples' do
       # A reset to the start phase is exactly sync to a pulse of 1 on the
-      # same sample (2026-10-08: resets as clean as sync)
-      o = bl_osc.reset(trig(200, 30, 77, 150))
+      # same sample (2026-10-08: clean resets as clean as sync)
+      o = bl_osc.reset(trig(200, 30, 77, 150), clean: true)
       s = bl_osc.sync(trig(200, 30, 77, 150))
       expect(o.send(:kernel)).to eq(:reset_sync)
+      expect(o).to be_clean
       expect(o.sample(200)).to eq(s.sample(200))
 
       # Unchanged before the reset; after the step settles, the same as a
       # tone (with a reset input) started at that phase
-      quiet = -> { bl_osc.reset(trig(100)) }
+      quiet = -> { bl_osc.reset(trig(100)).clean }
       continuing = quiet.call.sample(100).dup
-      after = bl_osc.reset(trig(100, 30)).sample(100).dup
+      after = bl_osc.reset(trig(100, 30)).clean.sample(100).dup
       expect(after[0...30]).to eq(continuing[0...30])
       fresh = quiet.call.sample(70).dup
       expect(after[(30 + 32)..]).to all_be_within(1e-6).of_array(fresh[32..])
+    end
+
+    it 'starts a tone as if it had always run (a square on its edge plays the midpoint first)' do
+      expect(1000.hz.square.sample(3).to_a).to eq([0.0, 1.0, 1.0])
+      expect(1000.hz.square.sample_ruby(3).to_a).to eq([0.0, 1.0, 1.0])
+      expect(1000.hz.ramp.with_phase(Math::PI).sample(1)[0]).to be_within(1e-6).of(0) # on the ramp's edge
+      expect(1000.hz.asquare.sample(1)[0]).to eq(1) # naive tones start on the edge's right side
+      expect(1000.hz.lfo.square.at(1).send(:band_limit_setting)).to be_a(Range)
+      expect(5.hz.lfo.square.sample(1)[0]).to eq(1) # slow LFOs keep exact edges
+
+      # A tone that jumped after playing doesn't get it (its jump step does)
+      o = bl_osc
+      o.sample(10)
+      o.send(:phase_jump) { o.state.phi = 0 }
+      expect(o.state.blep[3]).to eq(2)
     end
 
     it 'gives phase jump residuals the area of an ideal step or kink on the sample' do
@@ -689,11 +729,13 @@ RSpec.describe(MB::Sound::BandLimit) do
         pow = MB::Sound.real_fft(data).abs**2
         pow[(22500.0 / 48000 * data.length).ceil..].sum
       }
-      # Near Nyquist, above the minBLEP's passband (mostly aliasing there;
-      # -11.5 dB with the PolyBLEP tone and minBLEP steps before 2026-10-08,
-      # -21.8 through the synced kernel)
-      clean = energy.(bl_osc.reset(trig(256, 0, repeat: true)))
+      # Near Nyquist, above the minBLEP's passband (mostly aliasing there):
+      # -11.5 dB with PolyBLEP and minBLEP steps, -21.8 through the synced
+      # kernel (clean: true)
+      default = energy.(bl_osc.reset(trig(256, 0, repeat: true)))
+      clean = energy.(bl_osc.reset(trig(256, 0, repeat: true), clean: true))
       naive = energy.(oscillator(:ramp, frequency: 1001.3, band_limit: false).reset(trig(256, 0, repeat: true)))
+      expect(10 * Math.log10(default / naive)).to be < -9
       expect(10 * Math.log10(clean / naive)).to be < -18
     end
 

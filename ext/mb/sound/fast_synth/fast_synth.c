@@ -404,9 +404,10 @@ static inline double bl_step(struct bl_breakpoint *bp, int count, double e, doub
  *                offset, state, bl_state, fade_lo, fade_hi)
  *
  * +state+ is the phasor's [phi]; +bl_state+ is [last effective phase, last
- * increment, last phase_mod, primed (0 or 1)], carried between buffers so
- * the first sample of a buffer is corrected for an edge just before it.  A
- * jump in phase between buffers (a reset or sync) skips that correction.
+ * increment, last phase_mod, primed (1; 0 for a tone's first sample, which
+ * is corrected as if the tone had always run; 2 after a phase jump, which
+ * skips the correction)], carried between buffers so the first sample of a
+ * buffer is corrected for an edge just before it.
  * +fade_lo+ and +fade_hi+ (Hz) fade the corrections in with frequency (see
  * bl_fade; 0 and 0 for always on, infinity for never: a naive waveform).
  * +width+ (Numeric, NArray, or nil for 0.5) warps the phase (see the top of
@@ -434,7 +435,9 @@ static VALUE ruby_oscillate_bl(VALUE self, VALUE buffer, VALUE wave_type, VALUE 
 	double prev_e = NUM2DBL(rb_ary_entry(bl_state, 0));
 	double prev_inc = NUM2DBL(rb_ary_entry(bl_state, 1));
 	double prev_pm = NUM2DBL(rb_ary_entry(bl_state, 2));
-	_Bool primed = NUM2INT(rb_ary_entry(bl_state, 3)) != 0;
+	int primed_v = NUM2INT(rb_ary_entry(bl_state, 3));
+	_Bool primed = primed_v == 1;
+	_Bool fresh = primed_v == 0; // a tone's first sample (2: just after a phase jump)
 
 	_Bool was_inplace;
 	mb_ensure_inplace_sfloat(&buffer, &was_inplace);
@@ -519,6 +522,13 @@ static VALUE ruby_oscillate_bl(VALUE self, VALUE buffer, VALUE wave_type, VALUE 
 		} else if (primed && (i > 0 || fabs(mb_wrap(prev_e + d_back - e + 0.5, 1.0) - 0.5) < 1e-6)) {
 			double after;
 			bl_step(bp, nbp, prev_e, d_back, adv, lo, hi, &after);
+			v += after;
+		} else if (fresh && i == 0) {
+			// A tone's first sample, corrected as if it had always run at
+			// this frequency (a square starting on its edge at phase 0
+			// plays the edge's midpoint, 0, not +1)
+			double after;
+			bl_step(bp, nbp, mb_wrap(e - inc, 1.0), inc, adv, lo, hi, &after);
 			v += after;
 		}
 

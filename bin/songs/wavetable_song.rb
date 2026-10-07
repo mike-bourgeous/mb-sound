@@ -32,6 +32,8 @@
 #     bg :wsync, 110.hz.wavetable(:saw).pwm(0.3).sync(ratio: 0.17.hz.lfo.triangle.at(1..4)).at(0.3)  # synced and warped: exact corners, no DC drift (2026-10-08)
 #     bg :zones, C2.wavetable(Wavetable::KeyMap.zones([:sine, :organ, :square, :pulses], from: C2, size: 12, normalize: :loudness)).at(0.3)  # key zones matched by perceived loudness
 #     Wavetable[:pulses].loudness.map { |db| db.round(2) }            # every frame as loud as the saw (K-weighted dB)
+#     bg :norm, 110.hz.wavetable(:basic_norm, scan: 0.1.hz.lfo.triangle.at(0..1)).at(0.3)  # :basic with every shape as loud as the saw
+#     bg :cwarp, 110.hz.wavetable(:saw).pwm(0.2.hz.lfo.at(0.1..0.9), clean: true).at(0.3)  # exact warp corners (opt-in, ~4x the cost)
 #     bg :shape, 110.hz.sine.at(0.9).waveshape(:basic, scan: 0.1.hz.lfo.triangle.at(0..1)).at(0.3)  # a waveshaper (-1..1 across the table)
 #     bg :bright, 110.hz.sine.at(0.9).waveshape(:saw, increment: false).at(0.3)   # ...reading the brightest level (aliases)
 #     bg :phase, (110.hz.phasor + 2.hz.sine.at(0.1)).phase_table(:organ).at(0.3)    # any phase signal (cycles)

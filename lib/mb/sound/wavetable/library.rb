@@ -2,19 +2,19 @@ module MB
   module Sound
     class Wavetable
       # The named tables (Wavetable[:saw], ...; see Wavetable.register).
-      # The classic shapes (saw/ramp, square, triangle, basic, pulses) are
-      # the exact Fourier series of the naive Tone shapes, band-limited per
-      # level, so they match the PolyBLEP Tone#ramp etc. in RMS, harmonic
-      # level, and phase, while their peaks differ: the natural Gibbs
-      # overshoot reaches about 1.18 on the saw and square (user's choice,
-      # 2026-10-06: the exact series over the sigma taper, accepting
-      # different peaks into nonlinear effects; the taper option was removed
-      # 2026-10-08, preferring the bright top octave).  The other tables
-      # (organ, basic, pulses) are normalized by perceived loudness
-      # (normalize: :loudness, see Loudness; 2026-10-08): every frame as loud
-      # as the saw, so scans and table changes keep their level (organ was
-      # scaled to a peak of 1, and the scans' frames kept their natural
-      # levels: 7.3 dB apart).
+      # The classic shapes (saw/ramp, square, triangle) are the exact
+      # Fourier series of the naive Tone shapes, band-limited per level, so
+      # they match the PolyBLEP Tone#ramp etc. in RMS, harmonic level, and
+      # phase, while their peaks differ: the natural Gibbs overshoot reaches
+      # about 1.18 on the saw and square (user's choice, 2026-10-06: the
+      # exact series over the sigma taper, accepting different peaks into
+      # nonlinear effects; the taper option was removed 2026-10-08,
+      # preferring the bright top octave), as is :basic, a scan through them
+      # at their natural levels.  The other tables (organ, pulses,
+      # basic_norm) are normalized by perceived loudness (normalize:
+      # :loudness, see Loudness; 2026-10-08): every frame as loud as the saw,
+      # so scans and table changes keep their level (organ was scaled to a
+      # peak of 1, and the pulses' frames spread 7.3 dB).
       module Library
         HARMONICS = 1023
 
@@ -65,9 +65,20 @@ module MB
         from_harmonics(amps, normalize: :loudness)
       }
 
-      # Four classic shapes to scan through: sine, triangle, square, saw
-      # (each as loud as the saw).
+      # Four classic shapes to scan through: sine, triangle, square, saw,
+      # each its exact series (natural levels: the square 4.4 dB louder
+      # than the saw, the triangle 0.9 dB quieter).
       register(:basic) {
+        h = Library::HARMONICS
+        sine = [1.0] + Array.new(h - 1, 0.0)
+        from_harmonics([sine, Library.triangle, Library.square, Library.saw])
+      }
+
+      # :basic with every frame as loud as the saw (normalize: :loudness), so
+      # a scan keeps its level.  Named for what it is, basic normalized: it
+      # sorts next to :basic in Wavetable.names and echoes the normalize:
+      # option.
+      register(:basic_norm) {
         h = Library::HARMONICS
         sine = [1.0] + Array.new(h - 1, 0.0)
         from_harmonics([sine, Library.triangle, Library.square, Library.saw], normalize: :loudness)

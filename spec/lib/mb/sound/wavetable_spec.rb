@@ -302,8 +302,16 @@ RSpec.describe(MB::Sound::Wavetable, aggregate_failures: true) do
       end
     end
 
-    it 'has a scannable table of basic shapes, each as loud as the saw' do
+    it 'has a scannable table of basic shapes' do
       t = w[:basic]
+      expect(t.frame_count).to eq(4)
+      expect(t.value_at(0.25, scan: 0)).to be_within(1e-5).of(1)
+      expect(t.value_at(0.25, scan: 1)).to be_within(0.02).of(0.5)
+      expect(t.normalize).to be_nil
+    end
+
+    it 'has the basic shapes each as loud as the saw in :basic_norm' do
+      t = w[:basic_norm]
       expect(t.frame_count).to eq(4)
       gains = t.derivative_spectra[true, 1].abs / Numo::DFloat[1, 8 / Math::PI**2, 4 / Math::PI, 2 / Math::PI]
       expect(t.value_at(0.25, scan: 0)).to be_within(1e-5).of(gains[0])
@@ -314,7 +322,7 @@ RSpec.describe(MB::Sound::Wavetable, aggregate_failures: true) do
 
     it 'normalizes tables without classic shapes by perceived loudness' do
       ref = w::Loudness.reference_db
-      [:organ, :basic, :pulses].each do |name|
+      [:organ, :basic_norm, :pulses].each do |name|
         expect(w[name].loudness).to all(be_within(1e-9).of(ref)), name.to_s
       end
       # The classic shapes keep their exact series (not normalized)
