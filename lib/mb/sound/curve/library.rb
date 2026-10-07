@@ -247,7 +247,8 @@ module MB
           end
           y
         }
-        new("bounce(#{MB::M.sigfigs(ov, 6)}, #{n})", kind: :out, options: { overshoot: ov, cycles: n }, scalar: scalar, vector: vector)
+        # More table cells than usual: the contacts are kinks inside cells
+        new("bounce(#{MB::M.sigfigs(ov, 6)}, #{n})", kind: :out, options: { overshoot: ov, cycles: n }, scalar: scalar, vector: vector, cells: 8192)
       end
 
       # A staircase of +count+ equal jumps (default 4) along +curve+ (linear

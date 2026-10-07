@@ -189,8 +189,10 @@ module MB
 
         # #fill for a glide with a curve (see the class description) at
         # positions +t+ (0..1).
+        # The curve comes from its value table in C (Curve#lookup), as cheap
+        # as the plain smoothstep for any curve.
         def fill_curve(buf, from, to, t)
-          shaped = @curve.map(t)
+          shaped = @curve.lookup(t)
           shaped.inplace * (@number - @start)
           shaped.inplace + @start
           buf[from...to] = shaped

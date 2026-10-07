@@ -243,6 +243,89 @@ module MB
         end
       end
 
+      # Cells of the value table for #lookup (glides): fine enough that the
+      # cubic Hermite between nodes matches #map within about 1e-9 for the
+      # library's smooth curves.
+      LOOKUP_CELLS = 2048
+
+      # Positions within this fraction of a cell after a table node take
+      # the node's value in #lookup (the C CURVE_NODE_SNAP), as Curve.steps
+      # snaps rounding errors.
+      NODE_SNAP = 1e-6
+
+      # The value table of this curve for #lookup: [left values, right
+      # values, left slopes, right slopes] at +cells+ + 1 nodes over 0..1
+      # (frozen Numo::DFloats).  Left and right differ only at jumps (e.g.
+      # #steps, whose jumps land on nodes) and the slopes also at kinks;
+      # slopes are central differences, one-sided at the ends and at jumps.
+      def value_table(cells = nil)
+        cells = Integer(cells || @cells || LOOKUP_CELLS)
+        (@value_tables ||= {})[cells] ||= begin
+          h = 1e-6
+          step = 1.0 / cells
+          x = Numo::DFloat.new(cells + 1).seq * step
+          x[-1] = 1.0
+          f = map(x)
+          fl = map((x - 1e-7).clip(0.0, 1.0))
+          fr = map((x + 1e-7).clip(0.0, 1.0))
+          jump = (fr - fl).abs.gt(1e-5)
+          fl[~jump] = f[~jump]
+          fr[~jump] = f[~jump]
+
+          right = map((x + h).clip(0.0, 1.0))
+          left = map((x - h).clip(0.0, 1.0))
+          right2 = map((x + 2 * h).clip(0.0, 1.0))
+          left2 = map((x - 2 * h).clip(0.0, 1.0))
+          central = (right - left) / (2 * h)
+          dr = central.dup
+          dl = central.dup
+          # One-sided inside each cell at jumps and at the ends
+          dr[jump] = ((right2 - right) / h)[jump]
+          dl[jump] = ((left - left2) / h)[jump]
+          dr[0] = jump[0] == 1 ? (right2[0] - right[0]) / h : (right[0] - f[0]) / h
+          dl[0] = dr[0]
+          dl[-1] = jump[-1] == 1 ? (left[-1] - left2[-1]) / h : (f[-1] - left[-1]) / h
+          dr[-1] = dl[-1]
+          [fl, fr, dl, dr].map(&:freeze).freeze
+        end
+      end
+
+      # Like #map for positions within 0..1 (clamped), from the value table
+      # (#value_table) in C: about the cost of a plain smoothstep for any
+      # curve (4 us per 512 positions, against 10 to 170 us for #map),
+      # matching #map within about 1e-7 for smooth curves, exactly on the
+      # table's nodes and for staircases, within 1e-4 at the bounce's
+      # contacts (kinks inside cells), and only roughly in the first or
+      # last cell of curves with a vertical slope there (sqrt-like
+      # beziers and Procs; 1/2048 of the way).  Modifies +t+ in place if it is
+      # a contiguous Numo::DFloat; returns the values.  Used by glides.
+      def lookup(t)
+        t = Numo::DFloat.cast(t) unless t.is_a?(Numo::DFloat) && t.contiguous?
+        MB::Sound::FastClip.curve_lookup(t, *value_table)
+      end
+
+      # Ruby mirror of #lookup's C kernel (MB::Sound::FastClip.curve_lookup)
+      # for one position +x+ with value +table+ (see #value_table).
+      def self.lookup_ruby(table, x)
+        fl, fr, dl, dr = table
+        cells = fl.length - 1
+        pos = x * cells.to_f
+        pos = 0.0 unless pos > 0
+        pos = cells.to_f if pos > cells.to_f
+        j = pos.to_i
+        u = pos - j.to_f
+        return fl[j] if u < NODE_SNAP
+
+        h = 1.0 / cells.to_f
+        u2 = u * u
+        u3 = u2 * u
+        h00 = 2.0 * u3 - 3.0 * u2 + 1.0
+        h10 = u3 - 2.0 * u2 + u
+        h01 = -2.0 * u3 + 3.0 * u2
+        h11 = u3 - u2
+        h00 * fr[j] + h10 * h * dr[j] + h01 * fl[j + 1] + h11 * h * dl[j + 1]
+      end
+
       # The slopes [at 0, at 1] used by #map_edges :extend.
       def slopes
         @slopes ||= begin

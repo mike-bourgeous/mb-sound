@@ -222,3 +222,50 @@ RSpec.describe(MB::Sound::Curve) do
     end
   end
 end
+
+RSpec.describe('MB::Sound::Curve#lookup') do
+  let(:x) { Numo::DFloat.linspace(0, 1, 20001) }
+
+  def curves
+    MB::Sound::Curve.names.map { |n| MB::Sound::Curve[n] } + [
+      MB::Sound::Curve.steps(7), MB::Sound::Curve.steps(3, :sine), MB::Sound::Curve[:elastic, overshoot: 0.6, cycles: 8],
+      MB::Sound::Curve[:squiggle, cycles: 9, overshoot: 0.4], MB::Sound::Curve[:bounce, cycles: 8, overshoot: 0.7],
+      MB::Sound::Curve[:elastic].reverse, MB::Sound::Curve.new { |v| v**0.5 },
+    ]
+  end
+
+  it 'matches #map closely (exactly for staircases), clamping outside 0..1' do
+    curves.each do |c|
+      err = (c.lookup(x.dup) - c.map(x)).abs.max
+      limit = case c.to_s
+              when /bounce/ then 5e-4 # kinks inside cells
+              when /bezier\(0.42, 0.0, 1.0|bezier\(0.0, 0.0/ then 2e-3 # vertical end slopes
+              when /custom/ then 0.025 # sqrt: an infinite slope, wrong in the first cell (1/2048)
+              when /steps/ then 1e-15
+              else 1e-7
+              end
+      expect(err).to be <= limit, "#{c}: #{err}"
+    end
+    expect(MB::Sound::Curve[:elastic].lookup(Numo::DFloat[-1, 2]).to_a).to eq([0, 1])
+  end
+
+  it 'gives the same values as its Ruby mirror' do
+    curves.each do |c|
+      t = c.value_table
+      r = Numo::DFloat.cast(x.to_a.each_slice(97).map(&:first).map { |v| MB::Sound::Curve.lookup_ruby(t, v) })
+      expect(c.lookup(Numo::DFloat.cast(x.to_a.each_slice(97).map(&:first)))).to eq(r), c.to_s
+    end
+  end
+
+  it 'modifies a contiguous DFloat in place' do
+    t = Numo::DFloat[0, 0.5, 1]
+    expect(MB::Sound::Curve[:quad].lookup(t)).to equal(t)
+    expect(t[1]).to be_within(1e-9).of(0.25)
+  end
+
+  it 'rejects bad tables' do
+    expect { MB::Sound::FastClip.curve_lookup(Numo::SFloat[0], *MB::Sound::Curve[:quad].value_table) }.to raise_error(ArgumentError, /DFloat/)
+    expect { MB::Sound::FastClip.curve_lookup(Numo::DFloat[0], nil, nil, nil, nil) }.to raise_error(ArgumentError, /table/)
+    expect { MB::Sound::FastClip.curve_lookup(Numo::DFloat[0], Numo::DFloat[0, 1], Numo::DFloat[0], Numo::DFloat[0, 1], Numo::DFloat[0, 1]) }.to raise_error(ArgumentError, /short/)
+  end
+end

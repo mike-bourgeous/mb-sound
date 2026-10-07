@@ -17,7 +17,8 @@ RSpec.describe('Glide shapes (Notes::Glide with a Curve)') do
       out = glide_out(time: 0.02, shape: shape)
       curve = MB::Sound::Curve[shape]
       t = (Numo::DFloat.new(960).seq + 1) / 960.0
-      expect((out[480...1440] - (60 + 12 * curve.map(t))).abs.max).to be < 1e-4, shape.to_s
+      expect((out[480...1440] - (60 + 12 * curve.lookup(t.dup))).abs.max).to be < 1e-4, shape.to_s # SFloat output
+      expect((out[480...1440] - (60 + 12 * curve.map(t))).abs.max).to be < 2e-3, shape.to_s # bounce kinks
       expect(out[1440..].to_a.uniq).to eq([72.0])
     end
   end
