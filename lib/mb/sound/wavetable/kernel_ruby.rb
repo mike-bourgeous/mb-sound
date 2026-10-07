@@ -650,7 +650,8 @@ module MB
         end
 
         # Ruby version of FastWavetable.sync (see Wavetable#sync).
-        def sync(out, spec, freq, adv, g, off, sync_state, ring, pulses, soft, width, scan, interp, remove_dc, sine_table, m1, os, taps, bl)
+        def sync(out, spec, freq, adv, g, off, sync_state, ring, pulses, soft, width, scan, interp, remove_dc, sine_table, m1, os, taps, bl, reset_phase = nil)
+          reset_phase = reset_phase.nil? ? 0.0 : reset_phase.to_f
           count = out.length
           cs = spec[2][0].is_a?(Numo::SComplex) ? 2 : 1
           f_s, f_a = signal(freq, count)
@@ -711,7 +712,7 @@ module MB
                 else
                   dir = 1.0
                   nvel = prev_inc
-                  p = 0.0
+                  p = reset_phase
                 end
 
                 if bl

@@ -685,21 +685,22 @@ module MB
       # plays the sync levels' harmonics (#sync_levels) through the minBLEP's
       # filter, each harmonic switched with its exact minimum-phase residual
       # at every sync event and phase warp corner (see FastWavetable.sync).
-      # See Tone#sync.
-      def sync(out, freq, advance, gain, offset, sync_state, ring, pulses, soft, width, scan, interpolation, sample_rate, remove_dc, band_limit = true, scan_wrap: false)
+      # +reset_phase+ (cycles) is where hard sync events put the phase (0
+      # by default).  See Tone#sync.
+      def sync(out, freq, advance, gain, offset, sync_state, ring, pulses, soft, width, scan, interpolation, sample_rate, remove_dc, band_limit = true, scan_wrap: false, reset_phase: nil)
         MB::Sound::FastWavetable.sync(
           out, kernel_spec(sample_rate, interpolation, sync: band_limit, scan_wrap: scan_wrap), freq, advance.to_f, gain.to_f, offset.to_f, sync_state, ring,
           pulses, !!soft, width, scan, interpolation_code(interpolation), !!remove_dc, *Wavetable.sync_filter,
-          BandLimit::SYNC_OVERSAMPLE, BandLimit::SYNC_TAPS, !!band_limit, sinc_kernel(interpolation)
+          BandLimit::SYNC_OVERSAMPLE, BandLimit::SYNC_TAPS, !!band_limit, sinc_kernel(interpolation), reset_phase
         )
       end
 
       # Ruby mirror of #sync.
-      def sync_ruby(out, freq, advance, gain, offset, sync_state, ring, pulses, soft, width, scan, interpolation, sample_rate, remove_dc, band_limit = true, scan_wrap: false)
+      def sync_ruby(out, freq, advance, gain, offset, sync_state, ring, pulses, soft, width, scan, interpolation, sample_rate, remove_dc, band_limit = true, scan_wrap: false, reset_phase: nil)
         KernelRuby.sync(
           out, kernel_spec(sample_rate, interpolation, sync: band_limit, scan_wrap: scan_wrap), freq, advance.to_f, gain.to_f, offset.to_f, sync_state, ring,
           pulses, !!soft, width, scan, interpolation_code(interpolation), !!remove_dc, *Wavetable.sync_filter,
-          BandLimit::SYNC_OVERSAMPLE, BandLimit::SYNC_TAPS, !!band_limit
+          BandLimit::SYNC_OVERSAMPLE, BandLimit::SYNC_TAPS, !!band_limit, reset_phase
         )
       end
 

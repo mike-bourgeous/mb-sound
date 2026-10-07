@@ -337,8 +337,65 @@ RSpec.describe(MB::Sound::BandLimit) do
       end
     end
 
-    it 'falls back to the naive complex wave with phase modulation' do
-      expect(100.hz.complex_ramp.pm(3.hz.at(1)).blit?).to eq(false)
+    describe 'complex shapes with phase modulation, warps, sync, and resets (complex wavetables)' do
+      # Two-sided coherent aliasing of a complex +node+ (harmonics are the
+      # multiples of k on both sides; see bin/aliasing.rb -c), dB
+      def complex_nhr(k = 1365)
+        n = 65536
+        node = yield((k * 48000.0 / n).hz)
+        node.sample(4800)
+        data = Numo::DComplex.cast(Numo::NArray.concatenate(Array.new(n / 800 + 1) { node.sample(800).dup })[0...n])
+        pow = Numo::Pocketfft.fft(data).abs**2
+        harm = Numo::Bit.zeros(n)
+        (k...(n / 2)).step(k) { |b| harm[b] = 1; harm[n - b] = 1 }
+        limit = (20000.0 / 48000 * n).floor
+        audible = Numo::Bit.zeros(n)
+        audible[1..limit] = 1
+        audible[(n - limit)..] = 1
+        other = ~harm & audible
+        other[0] = 0
+        10 * Math.log10(pow[other].sum / pow[harm].sum)
+      end
+
+      it 'plays them from complex tables instead of the naive shapes' do
+        expect(100.hz.complex_ramp.pm(3.hz.at(1)).blit?).to eq(false)
+        expect(100.hz.complex_ramp.pm(3.hz.at(1)).send(:kernel)).to eq(:wavetable)
+        expect(100.hz.complex_square.pwm(0.3).send(:exact_warp?)).to eq(true)
+        expect(100.hz.complex_triangle.sync(ratio: 2).send(:kernel)).to eq(:wavetable)
+        expect(100.hz.complex_ramp.send(:kernel)).to eq(:blit)
+        expect(100.hz.complex_sine.pm(3.hz.at(1)).send(:kernel)).to eq(:naive) # an exponential stays exact
+        expect(100.hz.acomplex_ramp.pm(3.hz.at(1)).send(:kernel)).to eq(:naive)
+      end
+
+      it 'band-limits phase modulation, warps, and sync' do
+        pm = complex_nhr { |p| p.complex_ramp.pm(p.sine.at(0.5)) }
+        naive = complex_nhr { |p| p.acomplex_ramp.pm(p.sine.at(0.5)) }
+        expect(pm).to be < -44
+        expect(pm).to be < naive - 20
+        expect(complex_nhr { |p| p.complex_ramp.pwm(0.3) }).to be < -110
+        expect(complex_nhr { |p| p.complex_square.sync(ratio: 2.37) }).to be < -100
+      end
+
+      it 'resets like sync to a pulse of 1 on the reset sample' do
+        trig = -> { MB::Sound::ArrayInput.new(data: [Numo::SFloat.zeros(900).tap { |t| t[[10, 300, 777]] = 1 }]) }
+        a = 440.hz.complex_triangle.reset(trig.call)
+        b = 440.hz.complex_triangle.sync(trig.call)
+        expect(a.sample(900)).to eq(b.sample(900))
+      end
+
+      it 'gives the same samples in C and Ruby' do
+        trig = -> { MB::Sound::ArrayInput.new(data: [Numo::SFloat.zeros(900).tap { |t| t[[0, 300, 777]] = 1 }]) }
+        [
+          -> { 330.hz.complex_ramp.pm(330.hz.sine.at(0.5)) },
+          -> { 330.hz.complex_square.pwm(2.hz.lfo.at(0.2..0.8)).reset(trig.call, to: 1.0) },
+          -> { 330.hz.complex_ramp.pm(330.hz.sine.at(0.5)).reset(trig.call) },
+          -> { 330.hz.complex_sine.pwm(0.2).sync(ratio: 1.7) },
+        ].each do |make|
+          c = make.call
+          r = make.call
+          3.times { expect(c.sample_c(300)).to eq(r.sample_ruby(300)) }
+        end
+      end
     end
 
     it 'has naive versions named acomplex_*' do
@@ -349,11 +406,12 @@ RSpec.describe(MB::Sound::BandLimit) do
       end
     end
 
-    it 'starts again without a transient after a phase reset' do
-      trigger = MB::Sound::ArrayInput.new(data: [Numo::SFloat.zeros(1800).tap { |t| t[1000] = 1 }])
-      osc = blit_osc(:complex_triangle, frequency: 440).reset(trigger)
+    it 'starts again without a transient after a phase jump between buffers' do
+      osc = blit_osc(:complex_triangle, frequency: 440)
+      osc.sample(1000)
+      osc.send(:phase_jump) { osc.state.phi = 0 }
       fresh = blit_osc(:complex_triangle, frequency: 440)
-      expect(osc.sample(1800)[1000..]).to eq(fresh.sample(800))
+      expect(osc.sample(800)).to eq(fresh.sample(800))
     end
   end
 

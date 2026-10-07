@@ -55,6 +55,12 @@ RSpec.describe('Tone null-test reference') do
     # up to 1.38x those of PolyBLEP), harmonic error against the ideal reset
     # waveform -72 to -86 dB instead of -19 to -38 (reset_fm_pm and
     # tempo_lfo_changes have phase modulation or an LFO fade: unchanged)
+    # 2026-10-08: complex shapes with phase modulation, warps, sync, or
+    # resets play from complex wavetables (Tone#complex_table?) instead of
+    # the naive closed forms (PM) or restarted impulse trains (resets, now
+    # hard sync events in the synced table kernel)
+    'complex_ramp_pm' => 'complex shapes: PM from a complex table (was the naive acomplex_ramp)',
+    'reset_complex' => 'complex shapes: resets as sync events in the synced table kernel (was an unsmoothed restart)',
   }.freeze
 
   it 'has a reference for every case' do

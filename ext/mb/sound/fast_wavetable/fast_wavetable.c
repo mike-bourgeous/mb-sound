@@ -1671,7 +1671,7 @@ static inline void wt_steady(const struct wt_etab *et, const struct wt_harms *hs
  * A synced wavetable oscillator (see Wavetable#sync):
  *   sync(buffer, spec, frequency, advance, gain, offset, sync_state, ring,
  *        pulses, soft, width, scan, interpolation, remove_dc, sine_table,
- *        m1, oversample, taps, band_limit, sinc)
+ *        m1, oversample, taps, band_limit, sinc, reset_phase = nil)
  *
  * +sync_state+ is as for FastSynth.oscillate_sync ([phase, last increment,
  * direction, ring position, primed]); +ring+ is a DFloat of +taps+ pending
@@ -1680,12 +1680,15 @@ static inline void wt_steady(const struct wt_etab *et, const struct wt_harms *hs
  * +band_limit+ false reads the table's levels with no filtering or
  * residuals (naive sync).  +spec+ is normally the table's sync spec
  * (Wavetable#kernel_spec with sync: true); band-limiting needs its spectra.
+ * +reset_phase+ (cycles, nil for 0) is where hard sync events put the
+ * phase (Tone resets of complex shapes played through this kernel).
  */
 static VALUE ruby_sync(int argc, VALUE *argv, VALUE self)
 {
-	if (argc != 20) {
-		rb_raise(rb_eArgError, "wrong number of arguments (given %d, expected 20)", argc);
+	if (argc != 20 && argc != 21) {
+		rb_raise(rb_eArgError, "wrong number of arguments (given %d, expected 20..21)", argc);
 	}
+	double reset_phase = argc > 20 && !NIL_P(argv[20]) ? NUM2DBL(argv[20]) : 0.0;
 
 	VALUE buffer = argv[0], spec = argv[1], frequency = argv[2], sync_state = argv[6], ring = argv[7];
 	VALUE pulses = argv[8], width = argv[10], scan = argv[11], sine_v = argv[14], sinc = argv[19];
@@ -1834,7 +1837,7 @@ static VALUE ruby_sync(int argc, VALUE *argv, VALUE self)
 				} else {
 					dir = 1.0;
 					nvel = prev_inc;
-					p = 0;
+					p = reset_phase;
 				}
 
 				if (bl) {
