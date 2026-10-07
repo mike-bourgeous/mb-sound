@@ -26,7 +26,7 @@ MB::Sound.synth_script { |midi|
     # 64 about 26 dB(A) down and nearly a sine below 64, so F (the
     # carrier) now spans 14 dB and E (its modulator, the brightness) 18.
 
-    cenv = v.fm_env(0, 0.005, 0.151, 0.005, curve: [-30, 15, 15]).named('C Envelope')
+    cenv = v.fm_env(0, 0.005, 0.151, 0.005, curve: [-30, 15, 15], sensitivity: -18.db..0.db).named('C Envelope')
     cenv2 = v.fm_env(0, 0.01, 0.031, 0.01, curve: [-60, 30, 30], sensitivity: -30.3.db..0.db).named('C Mod Envelope')
     c = cenv * v.hz.at(1).fm(cenv2 * MB::Sound::C3.at(1).reset(v.trigger)).named('C')
 

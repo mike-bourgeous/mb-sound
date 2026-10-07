@@ -41,7 +41,11 @@ module MB
       alias amp_envelope amp_env
 
       # An FM modulation index envelope: :dx curves ([-30, 30, 30] dB),
-      # sustain 0 by default, and velocity from -18 dB to 0 dB (in dB).
+      # sustain 0 by default, and velocity from -12 dB to 0 dB (in dB), a
+      # moderate per-operator velocity sensitivity like classic FM synths
+      # (was -18 dB until 2026-10-07; in a chain of modulators the ranges
+      # add up, so 18 dB per operator gave about 30 dB of index range).
+      # Give +sensitivity:+ for more or less (e.g. `-18.db..0.db`).
       def fm_env(attack = nil, decay = nil, sustain = nil, release = nil, **options)
         MB::Sound::Envelope.preset(:fm_env, attack, decay, sustain, release, **options)
       end

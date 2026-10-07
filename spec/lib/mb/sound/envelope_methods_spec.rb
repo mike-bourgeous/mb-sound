@@ -2,7 +2,7 @@ RSpec.describe(MB::Sound::EnvelopeMethods) do
   {
     env: { curve: [12, 60, 60], sustain: 0.7, sensitivity: 0.5..1, velocity_scale: :linear, octaves: nil },
     amp_env: { curve: [12, 60, 40], sustain: 0.7, sensitivity: -18.db..0.db, velocity_scale: :db, octaves: nil },
-    fm_env: { curve: [-30, 30, 30], sustain: 0, sensitivity: -18.db..0.db, velocity_scale: :db, octaves: nil },
+    fm_env: { curve: [-30, 30, 30], sustain: 0, sensitivity: -12.db..0.db, velocity_scale: :db, octaves: nil },
     filter_env: { curve: [12, 60, 60], sustain: 0, sensitivity: 0.5..1, velocity_scale: :linear, octaves: 2 },
   }.each do |name, defaults|
     describe "##{name}" do

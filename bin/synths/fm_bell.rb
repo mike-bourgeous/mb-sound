@@ -29,7 +29,7 @@ MB::Sound.synth_script(
     # DX-style envelopes (straight lines in dB, as the old `.db(30)`): the
     # carriers' amplitude and the modulators' index
     ac_env = v.amp_env(0.001, 6, 0, 5, curve: :dx).named('A and C Envelope')
-    bd_env = v.fm_env(0, 5, 0, 4).named('B and D Envelope')
+    bd_env = v.fm_env(0, 5, 0, 4, sensitivity: -18.db..0.db).named('B and D Envelope')
     bd_ratio = v.cc(1, range: 3.5..4.0, name: 'B and D Ratio')
 
     # Fixed ratios as pitches: transposed up by thousandths of an octave
