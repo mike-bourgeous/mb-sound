@@ -33,18 +33,23 @@ module MB::Sound
       base2x = base.transpose(1.oct)
       mod = v.cc(1, range: 1.0..2.0, name: 'FM depth')
 
+      # Velocity (DX-style, per operator): the modulators carry most of
+      # it as brightness (C and D 7 dB, E 5 dB), the carrier F only 6.8
+      # dB, so soft notes stay present: 10 dB(A) from velocity 16 to 127,
+      # 5.6 down at 64 (it was 15.5 and 9.3, with the bite only above 96).
+      # Velocity 127 is unchanged.
+      #
       # TODO: True FM/PM feedback instead of a duplicate copy of the oscillator
-      cenv = v.fm_env(0, 0.2, 0, 0.1)
+      cenv = v.fm_env(0, 0.2, 0, 0.1, sensitivity: -7.db..0.db)
       c = cenv * base2x.complex_sine.at(1).pm(cenv * mod * base2x.at(1))
 
-      denv = v.fm_env(0, 0.3, 0, 0.35)
+      denv = v.fm_env(0, 0.3, 0, 0.35, sensitivity: -7.db..0.db)
       d = denv * (base2x.freq * 0.9996 - 0.22).tone.complex_sine.at(1).reset(v.trigger)
 
-      eenv = v.fm_env(0, 2, 0.573, 0.5, curve: [-10, 3, 7], sensitivity: -8.9.db..0.db)
+      eenv = v.fm_env(0, 2, 0.573, 0.5, curve: [-10, 3, 7], sensitivity: -5.db..0.db)
       e = eenv * base.complex_sine.at(1).pm(mod * (c + d))
 
-      # FIXME: sounds are too quiet below ~80 velocity
-      fenv = v.amp_env(0.001, 2, 0.699, 0.5, curve: [-10, 2, 8], sensitivity: -13.8.db..-3.2.db)
+      fenv = v.amp_env(0.001, 2, 0.699, 0.5, curve: [-10, 2, 8], sensitivity: -10.db..-3.2.db)
       f = fenv * base.complex_sine.at(1).pm(e * mod)
 
       f.real * 0.125
@@ -54,7 +59,8 @@ module MB::Sound
     s = s.softclip(0.8, 0.95).filter(15000.hz.lowpass)
     s = s.oversample(oversample, mode: :libsamplerate_fastest) if oversample > 1
 
-    s + s.delay(100.ms)
+    # Makeup gain to the level of the louder synth scripts (see velocity-fixes)
+    (s + s.delay(100.ms)) * 13.db
   end
 
   if main_script?(__FILE__)
