@@ -119,7 +119,7 @@ module MB::Sound
       Sequence::Event.new(start: (t * 0.9 * fall).rationalize(1/10_000r), length: 1/64r, value: 84 - (1 - h) * 14, velocity: 0.2 + 0.8 * h)
     }
     ball_clip = Sequence::Clip.new(hits, length: fall, loop: true)
-    ball = ball_clip.synth(voices: 4) { |v| v.hz.sine * v.amp_env(0.001, 0.12, 0, 0.05) + v.hz.transpose(19).sine.at(0.3) * v.amp_env(0.0005, 0.04, 0, 0.02) }
+    ball = ball_clip.synth(voices: 2) { |v| v.hz.sine * v.amp_env(0.001, 0.12, 0, 0.05) + v.hz.transpose(19).sine.at(0.3) * v.amp_env(0.0005, 0.04, 0, 0.02) }
     ball = ball.pan(0.3) * 0.6
 
     master { |mix| mix.reverb(:hall, wet: -14.db).softclip(0.6, 0.98) }
