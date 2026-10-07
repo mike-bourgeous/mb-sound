@@ -83,6 +83,14 @@ module MB
         CURVE_LOG2_RATIO = 7.6147098441152083
         LN2 = 0.69314718055994529
 
+        # 1 / i! for i = 0..13: the kernel's Taylor series for 2^y.
+        EXP_TAYLOR = [
+          1.0, 1.0, 0.5, 0.16666666666666666, 0.041666666666666664, 0.0083333333333333332,
+          0.0013888888888888889, 0.00019841269841269841, 2.4801587301587302e-05,
+          2.7557319223985893e-06, 2.7557319223985888e-07, 2.505210838544172e-08,
+          2.08767569878681e-09, 1.6059043836821613e-10,
+        ].freeze
+
         attr_reader :sample_rate, :cutoff, :resonance, :mode, :drive, :compensation, :k_max,
           :resonance_curve, :drive_mode, :clip
 
@@ -268,28 +276,33 @@ module MB
             res = res_arr ? res_arr[i] : res_scalar
 
             if fc != last_fc || res != last_res
-              last_fc = fc
-              last_res = res
-
-              if !(fc >= MIN_CUTOFF)
-                fc = MIN_CUTOFF
-              elsif fc > fc_max
-                fc = fc_max
-              end
-              if !(res >= 0.0)
-                res = 0.0
-              elsif res > 1.0
-                res = 1.0
+              # (NaN != NaN, like C, so NaN inputs recompute every sample)
+              if res != last_res
+                last_res = res
+                if !(res >= 0.0)
+                  res = 0.0
+                elsif res > 1.0
+                  res = 1.0
+                end
+                k = (curve == 1 ? resonance_curve(res) : res) * k_max
+                in_gain = 1.0 + comp * k
               end
 
-              g = tan(fc * pi_over_rate)
-              g_ = g / (1.0 + g)
-              one = 1.0 - g_
-              g2 = g_ * g_
-              g4 = g2 * g2
-              k = (curve == 1 ? resonance_curve(res) : res) * k_max
+              if fc != last_fc
+                last_fc = fc
+                if !(fc >= MIN_CUTOFF)
+                  fc = MIN_CUTOFF
+                elsif fc > fc_max
+                  fc = fc_max
+                end
+                g = tan(fc * pi_over_rate)
+                g_ = g / (1.0 + g)
+                one = 1.0 - g_
+                g2 = g_ * g_
+                g4 = g2 * g2
+              end
+
               inv = 1.0 / (1.0 + k * g4)
-              in_gain = 1.0 + comp * k
             end
 
             x = data[i]
@@ -382,8 +395,8 @@ module MB
         def self.exp2(y)
           n = y.floor
           x = (y - n) * LN2
-          p = 1.0
-          16.downto(1) { |i| p = 1.0 + x * p / i }
+          p = EXP_TAYLOR[13]
+          12.downto(0) { |i| p = p * x + EXP_TAYLOR[i] }
           Math.ldexp(p, n)
         end
 

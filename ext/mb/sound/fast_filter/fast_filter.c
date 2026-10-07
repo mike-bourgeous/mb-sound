@@ -119,15 +119,23 @@ static inline double fp_hard_secant(double x)
 	return 1.0 / a;
 }
 
-// 2^y for y >= 0: a Taylor series of e^(f ln 2) for the fraction f (good to
-// about 1e-15), scaled by 2^floor(y).
+// 1 / i! for i = 0..13 (FourPole::EXP_TAYLOR in Ruby).
+static const double fp_exp_taylor[14] = {
+	1.0, 1.0, 0.5, 0.16666666666666666, 0.041666666666666664, 0.0083333333333333332,
+	0.0013888888888888889, 0.00019841269841269841, 2.4801587301587302e-05,
+	2.7557319223985893e-06, 2.7557319223985888e-07, 2.505210838544172e-08,
+	2.08767569878681e-09, 1.6059043836821613e-10,
+};
+
+// 2^y for y >= 0: a degree 13 Taylor series of e^(f ln 2) for the fraction
+// f (relative error about 1e-13), scaled by 2^floor(y).
 static inline double fp_exp2(double y)
 {
 	double n = floor(y);
 	double x = (y - n) * FP_LN2;
-	double p = 1.0;
-	for (int i = 16; i >= 1; i--) {
-		p = 1.0 + x * p / i;
+	double p = fp_exp_taylor[13];
+	for (int i = 12; i >= 0; i--) {
+		p = p * x + fp_exp_taylor[i];
 	}
 	return ldexp(p, (int)n);
 }
@@ -233,6 +241,7 @@ static VALUE ruby_four_pole(int argc, VALUE *argv, VALUE self)
 	_Bool driven = drive > 0;
 
 	// Coefficients, recomputed only when the cutoff or resonance changes
+	// (the loop gain only when the resonance changes)
 	double last_fc = NAN, last_res = NAN;
 	double g = 0, G = 0, G4 = 0, one = 1, k = 0, inv = 1, in_gain = 1;
 
@@ -241,28 +250,32 @@ static VALUE ruby_four_pole(int argc, VALUE *argv, VALUE self)
 		double res = res_ptr ? res_ptr[i * res_step] : res_scalar;
 
 		if (fc != last_fc || res != last_res) {
-			last_fc = fc;
-			last_res = res;
-
-			if (!(fc >= FP_MIN_CUTOFF)) {
-				fc = FP_MIN_CUTOFF;
-			} else if (fc > fc_max) {
-				fc = fc_max;
-			}
-			if (!(res >= 0.0)) {
-				res = 0.0;
-			} else if (res > 1.0) {
-				res = 1.0;
+			if (res != last_res) {
+				last_res = res;
+				if (!(res >= 0.0)) {
+					res = 0.0;
+				} else if (res > 1.0) {
+					res = 1.0;
+				}
+				k = (curve ? fp_resonance_curve(res) : res) * k_max;
+				in_gain = 1.0 + comp * k;
 			}
 
-			g = fp_tan(fc * pi_over_rate);
-			G = g / (1.0 + g);
-			one = 1.0 - G;
-			double G2 = G * G;
-			G4 = G2 * G2;
-			k = (curve ? fp_resonance_curve(res) : res) * k_max;
+			if (fc != last_fc) {
+				last_fc = fc;
+				if (!(fc >= FP_MIN_CUTOFF)) {
+					fc = FP_MIN_CUTOFF;
+				} else if (fc > fc_max) {
+					fc = fc_max;
+				}
+				g = fp_tan(fc * pi_over_rate);
+				G = g / (1.0 + g);
+				one = 1.0 - G;
+				double G2 = G * G;
+				G4 = G2 * G2;
+			}
+
 			inv = 1.0 / (1.0 + k * G4);
-			in_gain = 1.0 + comp * k;
 		}
 
 		double x = data[i];
