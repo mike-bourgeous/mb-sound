@@ -94,7 +94,7 @@ Tone waveforms are antialiased by default (`lib/mb/sound/band_limit.rb`, kernels
   - `visualize` (alias `vis`) plots the mix live; `render` runs a `Session` into a file (or any output object); `wait` blocks until everything has ended, including master effects tails (use it at the end of scripts); `use_output` sets the background session's output (see Audio I/O below)
 - `MultichannelMethods` - `channels`, `stereo`, `spread` build multichannel signals and per-channel arguments (see Multichannel below)
 - `ScheduleMethods` - `at_bar` (alias `on_bar`) / `after` / `every` / `scheduled` / `cancel` run blocks at bars on the `Session` timeline; `bg`/`stop`/`resume`/`bpm` inside them take effect exactly at the scheduled time (see `bin/songs/scheduled_song.rb`)
-- `PlotMethods` - Terminal/gnuplot visualization
+- `PlotMethods` - Terminal/gnuplot visualization (`hist(data, density: true)` or `pdf:` plots estimated densities with a theory over them, via `density` and `overlay`; `bin/plot_noise.rb` shows every noise shape's distribution)
 - `FFTMethods` - Spectral analysis
 - `ScriptingMethods` - `effect_script` / `synth_script` / `song_script` / `script` for standalone scripts in bin/ (see Scripts below)
 - `GainMethods`, `WindowMethods`, `AnalysisMethods`
