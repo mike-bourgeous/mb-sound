@@ -437,14 +437,17 @@ static VALUE ruby_shape_curve(VALUE self, VALUE buffer, VALUE form, VALUE coeffs
 		VALUE map, VALUE edges, VALUE symmetric, VALUE state)
 {
 	struct curve_params p = { 0 };
-	p.form = (enum curve_form)NUM2INT(form);
-	p.edges = (enum curve_edges)NUM2INT(edges);
-	if (p.form < CURVE_TABLE || p.form > CURVE_EXP) {
-		rb_raise(rb_eArgError, "Unknown curve form %d", (int)p.form);
+	// Checked as ints (clang warns about comparing unsigned enums with 0)
+	int form_int = NUM2INT(form);
+	int edges_int = NUM2INT(edges);
+	if (form_int < CURVE_TABLE || form_int > CURVE_EXP) {
+		rb_raise(rb_eArgError, "Unknown curve form %d", form_int);
 	}
-	if (p.edges < EDGE_CLAMP || p.edges > EDGE_NONE) {
-		rb_raise(rb_eArgError, "Unknown curve edge mode %d", (int)p.edges);
+	if (edges_int < EDGE_CLAMP || edges_int > EDGE_NONE) {
+		rb_raise(rb_eArgError, "Unknown curve edge mode %d", edges_int);
 	}
+	p.form = (enum curve_form)form_int;
+	p.edges = (enum curve_edges)edges_int;
 
 	const double *m = curve_dfloat_ptr(map, 10, "map");
 	double in_lo = m[0], in_scale = m[1], out_lo = m[2], out_scale = m[3];
