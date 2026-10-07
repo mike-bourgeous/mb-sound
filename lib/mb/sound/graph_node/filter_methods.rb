@@ -99,9 +99,12 @@ module MB
         # Like the SQ-80 it never self-oscillates by default: full resonance
         # rings strongly and keeps most of the bass (about -6 dB, from the
         # CEM3379's passband compensation; +compensation: 0+ gives the
-        # classic 12 dB loss).  +self_oscillate: true+ lets the top of the
-        # resonance range (above about 0.74; 0.93 with the linear curve) oscillate, with the drive's
-        # saturation (+drive:+ 1 unless given) setting the level.  +drive:+
+        # classic 12 dB loss).  +self_oscillate: true+ gives the resonance
+        # its own curve, like a classic emphasis knob: the filter rings more
+        # and more up to 0.9, oscillates above it, and the rest of the knob
+        # sets how strongly (level growing about linearly to ~0.22 peak at 1;
+        # Filter::FourPole.self_oscillate_gain), with the drive's saturation
+        # (+drive:+ 1 unless given) setting the level.  +drive:+
         # (nil = linear) is the saturation level (unity gain for small
         # signals, limited above about 1 / drive), and +drive_mode:+ where it
         # acts: :input (default; the cascade input), :stages (every stage,
@@ -131,6 +134,8 @@ module MB
         #     play 110.hz.ramp.lp4(0.2.hz.lfo.at(200..3000), resonance: 0.9, mode: :lp2, drive_mode: :feedback, drive: 2) * 0.3
         #     # Self-oscillating sine at the cutoff
         #     play 0.constant.lp4(440, resonance: 1, self_oscillate: true)
+        #     # Emphasis swept through the onset (0.9): ringing, then a growing whistle
+        #     play 110.hz.ramp.at(0.3).lp4(1200, resonance: 0.1.hz.lfo.triangle.at(0.7..1), self_oscillate: true)
         def lp4(
           cutoff, resonance: nil, quality: nil, mode: :lp4, drive: nil, self_oscillate: false, compensation: nil,
           resonance_curve: :db, drive_mode: :input, clip: :soft

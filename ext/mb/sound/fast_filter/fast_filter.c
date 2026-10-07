@@ -18,6 +18,14 @@
  * makes the gain at the cutoff frequency (relative to DC) rise linearly in
  * dB from -12 dB at r = 0 to +33.8 dB at r = 1 (k = 3.9).
  *
+ * Self-oscillation curves (curve 2: linear below the onset, 3: dB below the
+ * onset; fp_self_osc_gain): the bottom FP_SELF_OSC_ONSET (0.9) of the knob
+ * is the linear or dB curve, compressed and reaching the oscillation edge
+ * k = 4 at the onset, and above it k rises as 4 + (k_max - 4) x^2 (x = 0..1
+ * over the rest of the knob), so the oscillation's amplitude (about
+ * proportional to sqrt(k - 4) near the edge) grows roughly linearly with
+ * the knob instead of jumping in.
+ *
  * Drive modes (all off with drive 0; tanh_d(z) = tanh(d z) / d):
  * - input: tanh_d on the solved input u of the cascade (one step after the
  *   linear loop solution).
@@ -60,6 +68,18 @@
 #define FP_CURVE_K 3.9
 #define FP_CURVE_LOG2_RATIO 7.6147098441152083
 #define FP_LN2 0.69314718055994529
+
+// Self-oscillation curves: the resonance where oscillation starts, and the
+// loop gain there (the analog filter's oscillation edge).
+#define FP_SELF_OSC_ONSET 0.9
+#define FP_SELF_OSC_EDGE 4.0
+
+// Resonance curve numbers (FourPole::RESONANCE_CURVES and
+// SELF_OSCILLATE_CURVES in Ruby).
+#define FP_CURVE_LINEAR 0
+#define FP_CURVE_DB 1
+#define FP_CURVE_SELF_OSC_LINEAR 2
+#define FP_CURVE_SELF_OSC_DB 3
 
 // Drive modes and clip shapes (FourPole::DRIVE_MODES and CLIPS in Ruby).
 #define FP_DRIVE_INPUT 0
@@ -156,6 +176,34 @@ static inline double fp_resonance_curve(double r)
 	return (e - 1.0) / ((1.0 + 0.25 * e) * FP_CURVE_K);
 }
 
+// The self-oscillation curves' loop gain k for resonance r (0..1) and top
+// loop gain k_max (see the file comment): the linear (db 0) or dB (db 1)
+// curve scaled to k = 4 at FP_SELF_OSC_ONSET, then a square rise to k_max.
+static inline double fp_self_osc_gain(double r, int db, double k_max)
+{
+	if (r <= FP_SELF_OSC_ONSET) {
+		double x = r / FP_SELF_OSC_ONSET;
+		return (db ? fp_resonance_curve(x) : x) * FP_SELF_OSC_EDGE;
+	}
+	double x = (r - FP_SELF_OSC_ONSET) / (1.0 - FP_SELF_OSC_ONSET);
+	return FP_SELF_OSC_EDGE + (k_max - FP_SELF_OSC_EDGE) * (x * x);
+}
+
+// The loop gain k for resonance r (0..1) on curve +curve+.
+static inline double fp_loop_gain(double r, int curve, double k_max)
+{
+	switch (curve) {
+		case FP_CURVE_DB:
+			return fp_resonance_curve(r) * k_max;
+		case FP_CURVE_SELF_OSC_LINEAR:
+			return fp_self_osc_gain(r, 0, k_max);
+		case FP_CURVE_SELF_OSC_DB:
+			return fp_self_osc_gain(r, 1, k_max);
+		default:
+			return r * k_max;
+	}
+}
+
 static double fp_state_value(VALUE state, long idx)
 {
 	double v = NUM2DBL(rb_ary_entry(state, idx));
@@ -172,7 +220,9 @@ static double fp_state_value(VALUE state, long idx)
  * as float32).  +state+ is a 4-element Array of the integrator states,
  * updated.  +drive+ 0 is linear.  +mix+ is 5 output gains for the cascade
  * input and the four stage outputs (lowpass 4: [0, 0, 0, 0, 1]).  +curve+ is
- * 0 (linear) or 1 (dB); +drive_mode+ 0 (input), 1 (stages), or 2
+ * 0 (linear), 1 (dB), 2 (self-oscillation over linear), or 3
+ * (self-oscillation over dB; +k_max+ is then the loop gain at r = 1);
+ * +drive_mode+ 0 (input), 1 (stages), or 2
  * (feedback); +clip+ 0 (soft) or 1 (hard), for the feedback mode.
  */
 static VALUE ruby_four_pole(int argc, VALUE *argv, VALUE self)
@@ -195,8 +245,8 @@ static VALUE ruby_four_pole(int argc, VALUE *argv, VALUE self)
 	int curve = argc > 9 ? NUM2INT(argv[9]) : 0;
 	int drive_mode = argc > 10 ? NUM2INT(argv[10]) : FP_DRIVE_INPUT;
 	int clip = argc > 11 ? NUM2INT(argv[11]) : FP_CLIP_SOFT;
-	if (curve < 0 || curve > 1) {
-		rb_raise(rb_eArgError, "Resonance curve must be 0 (linear) or 1 (dB)");
+	if (curve < FP_CURVE_LINEAR || curve > FP_CURVE_SELF_OSC_DB) {
+		rb_raise(rb_eArgError, "Resonance curve must be 0 (linear), 1 (dB), 2 (self-oscillating linear), or 3 (self-oscillating dB)");
 	}
 	if (drive_mode < FP_DRIVE_INPUT || drive_mode > FP_DRIVE_FEEDBACK) {
 		rb_raise(rb_eArgError, "Drive mode must be 0 (input), 1 (stages), or 2 (feedback)");
@@ -257,7 +307,7 @@ static VALUE ruby_four_pole(int argc, VALUE *argv, VALUE self)
 				} else if (res > 1.0) {
 					res = 1.0;
 				}
-				k = (curve ? fp_resonance_curve(res) : res) * k_max;
+				k = fp_loop_gain(res, curve, k_max);
 				in_gain = 1.0 + comp * k;
 			}
 
@@ -374,6 +424,12 @@ static VALUE ruby_resonance_curve(VALUE self, VALUE r)
 	return rb_float_new(fp_resonance_curve(NUM2DBL(r)));
 }
 
+// Exposes the self-oscillation curves' loop gain for specs.
+static VALUE ruby_self_osc_gain(VALUE self, VALUE r, VALUE db, VALUE k_max)
+{
+	return rb_float_new(fp_self_osc_gain(NUM2DBL(r), RTEST(db), NUM2DBL(k_max)));
+}
+
 void Init_fast_filter(void)
 {
 	VALUE mb = rb_define_module("MB");
@@ -385,4 +441,5 @@ void Init_fast_filter(void)
 	rb_define_module_function(fast_filter, "tanh", ruby_tanh, 1);
 	rb_define_module_function(fast_filter, "secant", ruby_secant, 2);
 	rb_define_module_function(fast_filter, "resonance_curve", ruby_resonance_curve, 1);
+	rb_define_module_function(fast_filter, "self_osc_gain", ruby_self_osc_gain, 3);
 }
