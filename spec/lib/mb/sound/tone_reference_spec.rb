@@ -30,6 +30,23 @@ RSpec.describe('Tone null-test reference') do
     # the phase moves backward was corrected as crossed and then never
     # crossed (a full-jump spike, peak 1 instead of 0.5, at each one)
     'negative_freq' => 'free-running backward edges on samples: no spikes (-440 Hz ramp)',
+    # Fix 2026-10-07: phase jumps (resets, key sync, timeline locks) get
+    # the area of an ideal step on the sample (no DC drift at audio-rate
+    # resets), and a reset on a jump in value starts from its left side
+    'clip_key_sync_variants' => 'phase jumps: ideal step area',
+    'clip_synth' => 'phase jumps: ideal step area',
+    'clip_tone' => 'phase jumps: ideal step area',
+    'reset' => 'phase jumps: ideal step area',
+    'reset_edges' => 'phase jumps: ideal step area',
+    'reset_fm_pm' => 'phase jumps: ideal step area',
+    'reset_pwm' => 'phase jumps: ideal step area',
+    'reset_random' => 'phase jumps: ideal step area',
+    'reset_to' => 'phase jumps: ideal step area',
+    'reset_to_node' => 'phase jumps: ideal step area',
+    'rnd_reset' => 'phase jumps: ideal step area',
+    'tempo_audio_rate_seek' => 'phase jumps: ideal step area',
+    'tempo_lfo_changes' => 'phase jumps: ideal step area',
+    'tone_ports_reset' => 'phase jumps: ideal step area',
   }.freeze
 
   it 'has a reference for every case' do

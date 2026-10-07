@@ -83,7 +83,9 @@ RSpec.describe('Tone reset inputs, free and random phases') do
       result = o.sample(100).dup
 
       expect(result[0...37]).to eq(continuing[0...37])
-      expect(result[37]).to be_within(0.01).of(continuing[37])
+      blep, _, area = MB::Sound::Tone.jump_tables
+      dv = 0 - continuing[37]
+      expect(result[37]).to be_within(0.01).of(continuing[37] + area[0] * (-0.5 * dv - blep.sum * dv))
 
       # After the 32-sample step, the same as an oscillator started at phase 0
       fresh = bl_osc.sample(63).dup
@@ -97,8 +99,9 @@ RSpec.describe('Tone reset inputs, free and random phases') do
       o = bl_osc(:triangle, phase_mod: input(pm), reset: input(triggers(200, 60)))
       result = o.sample(200).dup
 
-      # The step starts from the phase-modulated value the wave would have had
-      expect(result[60]).to be_within(0.01).of(continuing[60])
+      # Unchanged before the step (which starts from the phase-modulated
+      # value the wave would have had)
+      expect(result[0...60]).to eq(continuing[0...60])
 
       fresh = bl_osc(:triangle, phase_mod: input(pm[60..].dup)).sample(140).dup
       expect(result[(60 + 32)..]).to all_be_within(1e-5).of_array(fresh[32..])
