@@ -99,6 +99,48 @@ RSpec.describe(MB::Sound::BandLimit) do
     expect(clean[23]).to be_within(1e-6).of(1000.hz.aramp.sample(48)[23])
   end
 
+  describe 'edges landing exactly on samples while the phase moves backward' do
+    # Runs the C kernel and its Ruby mirror; returns both outputs.
+    def both(wave, freq, phi, count, phase_mod = 0)
+      c = Numo::SFloat.zeros(count)
+      MB::Sound::FastSynth.oscillate_bl(c.inplace, wave, freq, phase_mod, 1 / 48000.0, 1.0, 0.0, [phi], [0.0, 0.0, 0.0, 0], 0.0, 0.0, nil, false)
+      r = MB::Sound::BandLimit.oscillate_ruby(count, wave, freq, phase_mod, 1 / 48000.0, 1.0, 0.0, [phi], [0.0, 0.0, 0.0, 0], 0.0, 0.0)
+      [c.not_inplace!, r]
+    end
+
+    [:ramp, :square].each do |wave|
+      it "gives the midpoint for a #{wave} edge on a sample at a negative frequency" do
+        c, r = both(wave, -1000.0, 0.0, 4800)
+        expect(c).to eq(r)
+        off, _ = both(wave, -1000.0 * (1 + 1e-7), 0.0, 4800)
+        expect((c - off).abs.max).to be < 1e-3
+        # The edge at phase 0.5 lands on sample 24 (and every 48 after)
+        expect(c[24]).to be_within(1e-6).of(0)
+        expect(c.abs.max).to be <= 1.0
+      end
+
+      it "matches a nearby off-sample phase for a #{wave} reversing through-zero FM on an edge" do
+        # +-2400 Hz in 4-sample runs: the phase goes 0.4, 0.45, 0.5 (the
+        # edge), 0.55, 0.6, then back down through 0.5, again and again
+        fm = Numo::SFloat.cast(Array.new(4800) { |i| (i / 4).even? ? 2400 : -2400 })
+        c, r = both(wave, fm, 0.4, 4800)
+        expect(c).to eq(r)
+        off, _ = both(wave, fm, 0.4 + 1e-6, 4800)
+        expect((c - off).abs.max).to be < 1e-3
+        expect(c.abs.max).to be <= 1.0
+      end
+
+      it "matches a nearby off-sample phase for a #{wave} with phase modulation reversing on an edge" do
+        # 0.1 cycles of phase per sample, forward 3 samples then back 3
+        pm = Numo::SFloat.cast(Numo::DFloat.new(4800).seq.map { |i| j = i % 6; 2 * Math::PI * 0.1 * (j <= 3 ? j : 6 - j) })
+        c, r = both(wave, 0.0, 0.3, 4800, pm)
+        expect(c).to eq(r)
+        off, _ = both(wave, 0.0, 0.3 + 1e-6, 4800, pm)
+        expect((c - off).abs.max).to be < 1e-3
+      end
+    end
+  end
+
   it 'is not used for noise' do
     expect(1.hz.ramp.noise.band_limited?).to eq(false)
   end
