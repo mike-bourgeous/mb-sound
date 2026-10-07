@@ -37,13 +37,13 @@ MB::Sound.synth_script(
   s = midi.synth(voices: p.voices, retrigger: p.retrigger) { |v|
     # Body: a 1:1 pair whose index falls over a couple of seconds (warm
     # attack settling to a near-sine), deeper for harder notes
-    body_env = v.fm_env(0, 2.5, 0, 0.5, sensitivity: -18.db..0.db).named('Body index envelope')
+    body_env = v.fm_env(0, 2.5, 0, 0.5).named('Body index envelope')
     body_mod = (v.hz.sine.free * body_env * 1.4).named('Body modulator')
     body = v.hz.sine.free.pm(body_mod).named('Body')
 
     # Tine: a 14:1 modulator at a low index, gone in a fraction of a second,
     # for the metallic "bark" of a hard strike; the mod wheel adds more
-    tine_env = v.fm_env(0, 0.35, 0, 0.1, sensitivity: -18.db..0.db).named('Tine index envelope')
+    tine_env = v.fm_env(0, 0.35, 0, 0.1).named('Tine index envelope')
     tine_depth = v.cc(1, range: 0.4..1.6, default: 0, name: 'Tine brightness')
     tine_mod = (v.hz.transpose(Math.log2(14).oct).sine.free * tine_env * tine_depth * v.velocity).named('Tine modulator')
     tine = v.hz.sine.free.pm(tine_mod).named('Tine')

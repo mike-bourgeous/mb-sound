@@ -33,13 +33,13 @@ MB::Sound.synth_script { |midi|
     rq_const = 1.4.constant.named('R into Q')
 
     q_osc = op.(8).complex_sine.at(1).pm(r_out * rq_const).named('Q')
-    q_env = v.fm_env(2, 3, 0.334, 3, curve: [-30, 9, 21], sensitivity: -18.db..0.db).named('Q Envelope') * lfo.(0.1632, 0.5..1.5).named('Q LFO')
+    q_env = v.fm_env(2, 3, 0.334, 3, curve: [-30, 9, 21]).named('Q Envelope') * lfo.(0.1632, 0.5..1.5).named('Q LFO')
     q_out = (q_osc * q_env).named('Q Out')
     qb_mod = v.cc(1, range: 0.15..0.5, name: 'Q into B')
     qa_mod = v.cc(1, range: 0.25..4.0, name: 'Q into A')
 
     b_osc = op.(3.5, 2).complex_sine.at(1).pm(q_out * qb_mod).named('B')
-    b_env = v.fm_env(0, 5, 0.033, 4, curve: [-30, 24, 6], sensitivity: -18.db..0.db).named('B Envelope') * lfo.(0.223, 0.8..1.1).named('B LFO')
+    b_env = v.fm_env(0, 5, 0.033, 4, curve: [-30, 24, 6]).named('B Envelope') * lfo.(0.223, 0.8..1.1).named('B LFO')
     b_out = (b_osc * b_env).named('B Out')
 
     ba_vel = (v.velocity * 1.6 + 0.8).named('B into A')
@@ -48,7 +48,7 @@ MB::Sound.synth_script { |midi|
     a_out = (a_osc * a_env).named('A Out')
 
     d_osc = op.(3.5, 3).complex_sine.at(1).named('D')
-    d_env = v.fm_env(0, 5, 0.019, 4, curve: [-30, 26, 4], sensitivity: -18.db..0.db).named('D Envelope') * lfo.(0.157, 0.3..1.1).named('D LFO')
+    d_env = v.fm_env(0, 5, 0.019, 4, curve: [-30, 26, 4]).named('D Envelope') * lfo.(0.157, 0.3..1.1).named('D LFO')
     d_out = (d_osc * d_env).named('D Out')
 
     dc_vel = (v.velocity * 1.6 + 0.8).named('D into C')
