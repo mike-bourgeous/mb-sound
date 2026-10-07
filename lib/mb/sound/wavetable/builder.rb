@@ -44,11 +44,22 @@ module MB
           phs = phases.nil? ? amps.map { |r| Array.new(r.length, 0.0) } : to_rows(phases)
           raise ArgumentError, 'Amplitudes and phases need the same number of frames' unless phs.length == amps.length
 
+          amps.each_with_index do |row, r|
+            raise ArgumentError, "Frame #{r} has #{phs[r].length} phases for #{row.length} amplitudes" unless phs[r].length == row.length
+          end
+
+          harmonics = amps.map(&:length).max
+          MB::Sound::FastWavetable.harmonic_spectra(Numo::DComplex.zeros(amps.length, harmonics + 1), amps, phs)
+        end
+
+        # Ruby mirror of FastWavetable.harmonic_spectra (see
+        # .spectra_from_harmonics).
+        def spectra_from_harmonics_ruby(amplitudes, phases = nil)
+          amps = to_rows(amplitudes)
+          phs = phases.nil? ? amps.map { |r| Array.new(r.length, 0.0) } : to_rows(phases)
           harmonics = amps.map(&:length).max
           spectra = Numo::DComplex.zeros(amps.length, harmonics + 1)
           amps.each_with_index do |row, r|
-            raise ArgumentError, "Frame #{r} has #{phs[r].length} phases for #{row.length} amplitudes" unless phs[r].length == row.length
-
             row.each_with_index do |a, i|
               # a * sin(2 pi h x + p) = Re(a * e^(i (p - pi / 2)) * e^(2 pi i h x))
               spectra[r, i + 1] = Complex.polar(a.to_f, phs[r][i].to_f - Math::PI / 2)
@@ -148,6 +159,15 @@ module MB
         def half_means(spectra)
           rows, cols = spectra.shape
           out = Numo::DFloat.zeros(rows)
+          return out if rows == 0
+
+          MB::Sound::FastWavetable.half_means(out, Numo::DComplex.cast(spectra).then { |s| s.contiguous? ? s : s.dup })
+        end
+
+        # Ruby mirror of FastWavetable.half_means (see .half_means).
+        def half_means_ruby(spectra)
+          rows, cols = spectra.shape
+          out = Numo::DFloat.zeros(rows)
           rows.times do |r|
             sum = 0.0
             (1...cols).step(2) do |h|
@@ -204,6 +224,13 @@ module MB
         def wrap_guard(frames)
           rows, n = frames.shape
           out = frames.class.zeros(rows, n + 2 * GUARD)
+          if n >= GUARD
+            out[true, GUARD...(GUARD + n)] = frames
+            out[true, 0...GUARD] = frames[true, (n - GUARD)...n]
+            out[true, (GUARD + n)..] = frames[true, 0...GUARD]
+            return out
+          end
+
           rows.times do |r|
             row = frames[r, nil]
             out[r, GUARD...(GUARD + n)] = row

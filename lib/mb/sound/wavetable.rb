@@ -458,7 +458,11 @@ module MB
       # samples; resynthesized from the spectra for harmonic tables).  Sample
       # mode: the sound as a 1D NArray.
       def frames
-        @mode == :cycle ? @frames : @data
+        return @data unless @mode == :cycle
+
+        # Tables made from spectra synthesize their frames on first use (the
+        # kernels read the levels; HarmonicTable rebuilds tables often)
+        @frames ||= Builder.synthesize(@spectra, @size, complex: @complex, taper: @taper).freeze
       end
 
       # Cycle mode: the number of harmonics of the brightest level.
@@ -759,7 +763,7 @@ module MB
       # tables save their real parts.
       def save(filename, overwrite: false)
         if @mode == :cycle
-          frames = @taper && @spectra ? Builder.synthesize(@spectra, @size, complex: @complex) : @frames
+          frames = @taper && @spectra ? Builder.synthesize(@spectra, @size, complex: @complex) : self.frames
           frames = frames.real if @complex
           Wavetable.save_frames(filename, frames, overwrite: overwrite, metadata: metadata)
         else
@@ -843,11 +847,11 @@ module MB
             @aligned = true
           end
         else
-          @frames = Builder.synthesize(spectra, size, complex: @complex, taper: @taper)
+          @frames = nil # see #frames
         end
 
         @size = size
-        @frame_count = @frames.shape[0]
+        @frame_count = spectra ? spectra.shape[0] : @frames.shape[0]
         @spectra = spectra
         @half_means = spectra ? Builder.half_means(spectra) : half_means_of(@frames)
 
@@ -877,7 +881,7 @@ module MB
           datas, counts, bandwidths = Builder.cycle_levels(@spectra, @spacing, @complex, emphasis, @taper)
           levels = datas.each_with_index.map { |d, k| Level.new(d, counts[k], counts[k].to_f, bandwidths[k]) }
         else
-          frames = @frames
+          frames = self.frames
           if emphasis
             spectra = @spectra || Builder.spectra_from_frames(@frames)
             frames = Builder.synthesize(spectra, @size, complex: @complex, emphasis: emphasis, taper: @taper)

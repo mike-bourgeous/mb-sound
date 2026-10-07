@@ -16,6 +16,31 @@ module MB
             left, right = PanLaws.gains(option(:law), position)
             [[left], [right]]
           end
+
+          private
+
+          # Law numbers for MB::Sound::FastArithmetic.pan.
+          FAST_LAWS = { equal_power: 0, linear: 1, minus_4_5db: 2 }.freeze
+
+          # A moving position with single-precision buffers pans in C
+          # without allocating (the same values as #gains_for and #mix).
+          def mix_params(values, data)
+            position = values[:position]
+            input = data[0]
+            return nil unless position.is_a?(Numo::SFloat) && input.is_a?(Numo::SFloat)
+
+            length = input.length
+            if @pan_gains.nil? || @pan_gains[0].length != length
+              @pan_gains = Array.new(2) { Numo::SFloat.zeros(length) }
+              @pan_rows = @pan_gains.map { |g| [g] }
+              @pan_outputs = Array.new(2) { Numo::SFloat.zeros(length) }
+            end
+
+            return nil unless MB::Sound::FastArithmetic.pan(FAST_LAWS.fetch(option(:law)), position, input, @pan_gains, @pan_outputs)
+
+            @last_gains = @pan_rows
+            @pan_outputs
+          end
         end
 
         # Balances a stereo signal, as most DAWs' stereo track pan controls

@@ -412,6 +412,46 @@ RSpec.describe(MB::Sound::FastArithmetic) do
     end
   end
 
+  describe '.pan' do
+    let(:pan_laws) { MB::Sound::GraphNode::ChannelMixer::PanLaws }
+
+    # Positions past the ends, both zeros, NaN, and random values
+    let(:position) {
+      rng = Random.new(3)
+      Numo::SFloat.cast(Array.new(4000) { rng.rand * 2.4 - 1.2 } + [-1, 1, 0, -0.0, 0.5, -0.5, Float::NAN, 2, -3])
+    }
+    let(:input) {
+      rng = Random.new(4)
+      Numo::SFloat.cast(Array.new(position.length) { rng.rand * 2 - 1 })
+    }
+
+    [:equal_power, :linear, :minus_4_5db].each_with_index do |law, number|
+      it "gives exactly PanLaws.gains and the products for #{law}" do
+        left, right = pan_laws.gains(law, position)
+        gains = Array.new(2) { Numo::SFloat.zeros(position.length) }
+        outs = Array.new(2) { Numo::SFloat.zeros(position.length) }
+
+        expect(MB::Sound::FastArithmetic.pan(number, position, input, gains, outs)).to equal(outs)
+        expect(gains[0].to_binary).to eq(left.to_binary)
+        expect(gains[1].to_binary).to eq(right.to_binary)
+        expect(outs[0].to_binary).to eq((left * input).to_binary)
+        expect(outs[1].to_binary).to eq((right * input).to_binary)
+      end
+    end
+
+    it 'returns nil for other types, lengths, laws, or frozen outputs' do
+      bufs = -> { Array.new(2) { Numo::SFloat.zeros(4) } }
+      pos = Numo::SFloat.zeros(4)
+      x = Numo::SFloat.ones(4)
+      expect(MB::Sound::FastArithmetic.pan(0, Numo::DFloat.zeros(4), x, bufs.call, bufs.call)).to be_nil
+      expect(MB::Sound::FastArithmetic.pan(0, pos, Numo::DFloat.ones(4), bufs.call, bufs.call)).to be_nil
+      expect(MB::Sound::FastArithmetic.pan(0, Numo::SFloat.zeros(3), x, bufs.call, bufs.call)).to be_nil
+      expect(MB::Sound::FastArithmetic.pan(3, pos, x, bufs.call, bufs.call)).to be_nil
+      expect(MB::Sound::FastArithmetic.pan(0, pos, x, bufs.call, [Numo::SFloat.zeros(4), Numo::SFloat.zeros(4).freeze])).to be_nil
+      expect(MB::Sound::FastArithmetic.pan(0, pos, x, bufs.call.take(1), bufs.call)).to be_nil
+    end
+  end
+
   it 'does not allocate objects for full real buffers' do
     out = Numo::SFloat.zeros(128)
     sampled = [[Numo::SFloat.ones(128), 0.5], [Numo::SFloat.ones(128), 1]]

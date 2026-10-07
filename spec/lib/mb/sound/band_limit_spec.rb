@@ -415,11 +415,61 @@ RSpec.describe(MB::Sound::BandLimit) do
       expect(coherent_db(f.hz.pulse(0.3).sync(ratio: 1.7), k)).to be < -95
     end
 
-    it 'reduces aliasing of synced triangles and sines' do
-      k = 301
+    # The mean of the ideal (unlimited) synced waveform over one master
+    # cycle (hard sync) or two (soft sync).
+    def ideal_mean(wave, ratio, soft)
+      m = 1 << 14
+      periods = soft ? 2 : 1
+      p = 0.0
+      dir = 1.0
+      sum = 0.0
+      (m * periods).times do |i|
+        if i > 0 && i % m == 0
+          soft ? dir = -dir : p = 0.0
+        end
+        sum += MB::Sound::BandLimit.shape(wave, p + 0.5 * ratio * dir / m)
+        p = MB::Sound::BandLimit.wrap(p + ratio * dir / m)
+      end
+      sum / (m * periods)
+    end
+
+    [:ramp, :triangle, :parabola, :square, :sine].each do |wave|
+      [false, true].each do |soft|
+        it "keeps the ideal DC level for a #{soft ? 'soft' : 'hard'}-synced #{wave} at high pitch" do
+          # The minBLEP delays steps by about 2.78 samples; without delaying
+          # the segments to match, each step left that much area behind
+          # (DC of +0.82 for a ramp hard-synced at 2.37x of 3 kHz)
+          k = soft ? 4094 : 4097
+          f = k * 48000.0 / 65536
+          tone = f.hz.public_send(wave)
+          tone = soft ? tone.softsync(ratio: 2.37) : tone.sync(ratio: 2.37)
+          tone.sample(4800)
+          data = Numo::DFloat.cast(Numo::SFloat.zeros(0).concatenate(*Array.new(82) { tone.sample(800).dup }))[0...65536]
+          expect(data.mean).to be_within(2e-4).of(ideal_mean(wave, 2.37, soft))
+        end
+      end
+    end
+
+    it 'gives clean soft sync for squares, which reverse on their edge at phase 0' do
+      # Soft sync brings the phase back to its start (0, the square's edge)
+      # every two master cycles; it once crossed the edge backward without
+      # changing the naive value, spiking to 3 (-20 to -30 dB aliasing)
+      k = 682
       f = k * 48000.0 / 65536
-      expect(coherent_db(f.hz.triangle.sync(ratio: 3.31), k)).to be < coherent_db(f.hz.atriangle.sync(ratio: 3.31), k) - 30
-      expect(coherent_db(f.hz.sine.sync(ratio: 2.37), k)).to be < -80
+      tone = f.hz.square.softsync(ratio: 2.37)
+      expect(coherent_db(tone, k / 2)).to be < -95
+      expect(f.hz.square.softsync(ratio: 2.37).sample(4800).abs.max).to be < 1.6
+    end
+
+    it 'gives clean hard sync for triangles, sines, and warped sines' do
+      # Slope corners and sine segments were inexact before 2026-10-07
+      # (-59 and -65 dB at 1 kHz)
+      [301, 4097].each do |k|
+        f = k * 48000.0 / 65536
+        expect(coherent_db(f.hz.triangle.sync(ratio: 3.31), k)).to be < -90
+        expect(coherent_db(f.hz.sine.sync(ratio: 2.37), k)).to be < -100
+        expect(coherent_db(f.hz.sine.pwm(0.3).sync(ratio: 2.37), k)).to be < -95
+      end
     end
 
     it 'restarts the naive waveform at each master cycle' do
