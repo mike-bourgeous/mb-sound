@@ -1,5 +1,6 @@
 /*
- * MB::Sound::FastFilter: analog-style filter kernels.
+ * MB::Sound::FastFilter: analog-style filter kernels (the four-pole and the
+ * state-variable filter, ruby_svf below).
  *
  * four_pole: a 4-pole resonant lowpass in the style of the CEM3379 (and
  * CEM3320): four one-pole OTA-C stages in a cascade with resonance feedback
@@ -399,6 +400,201 @@ static VALUE ruby_four_pole(int argc, VALUE *argv, VALUE self)
 	return buffer;
 }
 
+/*
+ * svf: a linear trapezoidal state-variable filter (Andrew Simper's
+ * "Cytomic" SVF, "Linear Trap Optimised 2"), with output mixes for the
+ * RBJ cookbook responses (the same bilinear transform with the cutoff
+ * prewarped, so static responses match MB::Sound::Filter::Cookbook).
+ *
+ * Its two states are integrator (capacitor) states rather than past
+ * samples, so changing the cutoff, Q, or gain on any sample keeps the
+ * output continuous: no thumps when a cutoff dives quickly to low values
+ * (the direct form biquad's past outputs don't match new coefficients).
+ *
+ * Per change of cutoff fc, quality Q, or linear gain G:
+ *   g = tan(pi fc / rate) (fp_tan), k = 1 / Q
+ *   a1 = 1 / (1 + g (g + k)), a2 = g a1, a3 = g a2
+ * and per sample (ic1, ic2 the states):
+ *   v3 = x - ic2
+ *   v1 = a1 ic1 + a2 v3          (band)
+ *   v2 = ic2 + a2 ic1 + a3 v3    (low)
+ *   ic1 = 2 v1 - ic1, ic2 = 2 v2 - ic2
+ *   y = m0 x + m1 v1 + m2 v2
+ *
+ * Output mixes (m0, m1, m2), with A = sqrt(G) (the cookbook's
+ * 10^(dB / 40)):
+ *   lowpass (0, 0, 1); highpass (1, -k, -1); bandpass, 0 dB peak (0, k G, 0);
+ *   bandpass_skirt, peak Q (0, G, 0); notch (1, -k, 0); allpass (1, -2k, 0);
+ *   peak: k = 1 / (Q A), (1, k (G - 1), 0);
+ *   lowshelf: g / sqrt(A), (1, k (A - 1), G - 1);
+ *   highshelf: g sqrt(A), (G, k (1 - A) A, 1 - G).
+ *
+ * Exact Ruby mirror: MB::Sound::Filter::SVF.process_ruby (same operations;
+ * the extension is built with -ffp-contract=off).
+ */
+
+// Filter types (MB::Sound::Filter::SVF::FILTER_TYPES, the same order as
+// Cookbook::FILTER_TYPES)
+#define SVF_LOWPASS 0
+#define SVF_HIGHPASS 1
+#define SVF_BANDPASS 2
+#define SVF_NOTCH 3
+#define SVF_ALLPASS 4
+#define SVF_PEAK 5
+#define SVF_LOWSHELF 6
+#define SVF_HIGHSHELF 7
+#define SVF_BANDPASS_SKIRT 8
+
+// Lowest cutoff in Hz (NaN and negative values too), like FP_MIN_CUTOFF
+#define SVF_MIN_CUTOFF 1.0
+// Lowest quality and linear gain (NaN too)
+#define SVF_MIN_QUALITY 1e-10
+#define SVF_MIN_GAIN 1e-10
+
+/*
+ *   svf(buffer, cutoff, quality, gain, type, state, sample_rate)
+ *
+ * Filters +buffer+ (SFloat; modified in place if marked inplace).
+ * +cutoff+ (Hz), +quality+, and +gain+ (linear; used by bandpass, peak,
+ * and shelves) are Numerics or NArrays of the buffer's length (read as
+ * float32).  +state+ is [ic1, ic2], updated.
+ */
+static VALUE ruby_svf(VALUE self, VALUE buffer, VALUE cutoff, VALUE quality, VALUE gain, VALUE type_v, VALUE state, VALUE rate_v)
+{
+	int type = NUM2INT(type_v);
+	if (type < SVF_LOWPASS || type > SVF_BANDPASS_SKIRT) {
+		rb_raise(rb_eArgError, "SVF filter type must be 0..8");
+	}
+	double rate = NUM2DBL(rate_v);
+	if (!(rate > 0) || !isfinite(rate)) {
+		rb_raise(rb_eArgError, "Sample rate must be positive and finite");
+	}
+	Check_Type(state, T_ARRAY);
+	if (RARRAY_LEN(state) != 2) {
+		rb_raise(rb_eArgError, "SVF state must have two elements");
+	}
+	double ic1 = fp_state_value(state, 0);
+	double ic2 = fp_state_value(state, 1);
+
+	_Bool was_inplace;
+	mb_ensure_inplace_sfloat(&buffer, &was_inplace);
+	size_t length = RNARRAY_SHAPE(buffer)[0];
+	float *data = mb_sfloat_ptr(buffer);
+
+	double fc_scalar, q_scalar, g_scalar;
+	const float *fc_ptr, *q_ptr, *g_ptr;
+	size_t fc_step, q_step, g_step;
+	mb_read_signal_input(&cutoff, length, "Cutoff", &fc_scalar, &fc_ptr, &fc_step);
+	mb_read_signal_input(&quality, length, "Quality", &q_scalar, &q_ptr, &q_step);
+	if (NIL_P(gain)) {
+		gain = DBL2NUM(1.0);
+	}
+	mb_read_signal_input(&gain, length, "Gain", &g_scalar, &g_ptr, &g_step);
+
+	double pi_over_rate = M_PI / rate;
+	double fc_max = rate * FP_MAX_CUTOFF_RATIO;
+
+	// Coefficients, recomputed only when an input changes
+	double last_fc = NAN, last_q = NAN, last_g = NAN;
+	double a1 = 1, a2 = 0, a3 = 0, m0 = 0, m1 = 0, m2 = 0;
+
+	for (size_t i = 0; i < length; i++) {
+		double fc = fc_ptr ? fc_ptr[i * fc_step] : fc_scalar;
+		double q = q_ptr ? q_ptr[i * q_step] : q_scalar;
+		double G = g_ptr ? g_ptr[i * g_step] : g_scalar;
+
+		if (fc != last_fc || q != last_q || G != last_g) {
+			last_fc = fc;
+			last_q = q;
+			last_g = G;
+
+			if (!(fc >= SVF_MIN_CUTOFF)) {
+				fc = SVF_MIN_CUTOFF;
+			} else if (fc > fc_max) {
+				fc = fc_max;
+			}
+			if (!(q >= SVF_MIN_QUALITY)) {
+				q = SVF_MIN_QUALITY;
+			}
+			if (!(G >= SVF_MIN_GAIN)) {
+				G = SVF_MIN_GAIN;
+			}
+
+			double g = fp_tan(fc * pi_over_rate);
+			double k = 1.0 / q;
+			double A;
+
+			switch (type) {
+				case SVF_HIGHPASS:
+					m0 = 1.0; m1 = -k; m2 = -1.0;
+					break;
+				case SVF_BANDPASS:
+					m0 = 0.0; m1 = k * G; m2 = 0.0;
+					break;
+				case SVF_BANDPASS_SKIRT:
+					m0 = 0.0; m1 = G; m2 = 0.0;
+					break;
+				case SVF_NOTCH:
+					m0 = 1.0; m1 = -k; m2 = 0.0;
+					break;
+				case SVF_ALLPASS:
+					m0 = 1.0; m1 = -2.0 * k; m2 = 0.0;
+					break;
+				case SVF_PEAK:
+					A = sqrt(G);
+					k = 1.0 / (q * A);
+					m0 = 1.0; m1 = k * (G - 1.0); m2 = 0.0;
+					break;
+				case SVF_LOWSHELF:
+					A = sqrt(G);
+					g = g / sqrt(A);
+					m0 = 1.0; m1 = k * (A - 1.0); m2 = G - 1.0;
+					break;
+				case SVF_HIGHSHELF:
+					A = sqrt(G);
+					g = g * sqrt(A);
+					m0 = G; m1 = k * (1.0 - A) * A; m2 = 1.0 - G;
+					break;
+				default:
+					m0 = 0.0; m1 = 0.0; m2 = 1.0;
+					break;
+			}
+
+			a1 = 1.0 / (1.0 + g * (g + k));
+			a2 = g * a1;
+			a3 = g * a2;
+		}
+
+		double x = data[i];
+		double v3 = x - ic2;
+		double v1 = a1 * ic1 + a2 * v3;
+		double v2 = ic2 + a2 * ic1 + a3 * v3;
+		ic1 = 2.0 * v1 - ic1;
+		ic2 = 2.0 * v2 - ic2;
+		data[i] = m0 * x + m1 * v1 + m2 * v2;
+	}
+
+	if (!isfinite(ic1) || fabs(ic1) < FP_FLUSH) {
+		ic1 = 0.0;
+	}
+	if (!isfinite(ic2) || fabs(ic2) < FP_FLUSH) {
+		ic2 = 0.0;
+	}
+	rb_ary_store(state, 0, rb_float_new(ic1));
+	rb_ary_store(state, 1, rb_float_new(ic2));
+
+	if (!was_inplace) {
+		UNSET_INPLACE(buffer);
+	}
+
+	RB_GC_GUARD(buffer);
+	RB_GC_GUARD(cutoff);
+	RB_GC_GUARD(quality);
+	RB_GC_GUARD(gain);
+
+	return buffer;
+}
+
 // Exposes the tan approximation for specs and the Ruby mirror's checks.
 static VALUE ruby_tan(VALUE self, VALUE w)
 {
@@ -437,6 +633,7 @@ void Init_fast_filter(void)
 	VALUE fast_filter = rb_define_module_under(sound, "FastFilter");
 
 	rb_define_module_function(fast_filter, "four_pole", ruby_four_pole, -1);
+	rb_define_module_function(fast_filter, "svf", ruby_svf, 7);
 	rb_define_module_function(fast_filter, "tan", ruby_tan, 1);
 	rb_define_module_function(fast_filter, "tanh", ruby_tanh, 1);
 	rb_define_module_function(fast_filter, "secant", ruby_secant, 2);
