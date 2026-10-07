@@ -1,3 +1,5 @@
+require 'tempfile'
+
 module MB
   module Sound
     # Command-line interface methods related to plotting sounds.  MB::Sound
@@ -168,10 +170,25 @@ module MB
       # the largest dataset's largest values reaches the final histogram bin.
       # If +log+ is true, then a logarithmic histogram is plotted (log(n+1);
       # TODO: not sure if this is how it's supposed to be calculated).
-      def hist(data, bins: 800, log: false, graphical: false)
+      #
+      # With +density+ or +pdf+, plots each dataset's estimated probability
+      # density instead (counts / (samples * bin width), over its values on
+      # the X axis), across +range+ (a Range of values, default from minus to
+      # plus the largest magnitude; values outside are left out), with a
+      # theoretical density drawn over it: +pdf+ is a callable taking a
+      # value and returning the density, or a Hash of dataset names to
+      # callables (or nil), or a Hash of dataset names to Hashes of curve
+      # labels to callables for several curves (see #overlay).  E.g. the
+      # arcsine distribution of a sine at random phases:
+      #
+      #     arcsine = ->(x) { x.abs < 1 ? 1 / (Math::PI * Math.sqrt(1 - x * x)) : 0 }
+      #     MB::Sound.hist(1.hz.sine.noise.sample(100000), bins: 100, pdf: arcsine)
+      def hist(data, bins: 800, log: false, graphical: false, range: nil, density: false, pdf: nil)
         data = any_sound_to_hash(data)
 
         dmax = data.values.map { |d| d.abs.max }.max
+
+        return density_plot(data, bins: bins, range: range || (-dmax..dmax), pdf: pdf, graphical: graphical) if density || pdf
 
         histograms = data.map { |k, d|
           # TODO: Extract this histogram generation into mb-math maybe
@@ -194,6 +211,120 @@ module MB
         }.to_h
 
         plotter(graphical: graphical).plot(histograms)
+      end
+
+      # Estimated probability density of +data+ (an NArray) in +bins+ equal
+      # bins across +range+: [bin centers, densities] (DFloats).  Values
+      # outside the range (and NaN) are left out of the counts but not of
+      # the total, so the densities integrate to the fraction inside.
+      def density(data, bins: 100, range: nil)
+        data = Numo::DFloat.cast(data)
+        data = data.real if data.respond_to?(:real) && !data.is_a?(Numo::DFloat)
+        range ||= -data.abs.max..data.abs.max
+        lo = range.begin.to_f
+        hi = range.end.to_f
+        hi = lo + 1 if hi <= lo
+        width = (hi - lo) / bins
+
+        idx = ((data - lo) / width).floor
+        inside = (data >= lo) & (data <= hi)
+        idx = Numo::Int64.cast(idx[inside]).clip(0, bins - 1)
+        counts = Numo::DFloat.zeros(bins)
+        idx.each { |i| counts[i] += 1 }
+
+        centers = Numo::DFloat.new(bins).seq * width + (lo + width / 2)
+        [centers, counts / (data.length * width)]
+      end
+
+      # Plots several curves on the same axes in each pane: +panes+ is a Hash
+      # of pane titles to Hashes of curve labels to data (an Array of [x, y]
+      # pairs, or [xs, ys] NArrays), drawn with +styles+ (a gnuplot style for
+      # all curves, or an Array with one per curve position; default
+      # histogram steps for the first curve, lines for the rest).  Ranges:
+      # +xrange+ and +yrange+ (Arrays, or nil for each pane's own data, from
+      # 0 for y).  Prints terminal plots (or returns their lines if the
+      # plotter's print is off, as for #plot).  See #hist.
+      def overlay(panes, graphical: false, styles: nil, xrange: nil, yrange: nil, columns: nil)
+        plt = plotter(graphical: graphical)
+
+        @overlay_files&.each { |f| f.close! rescue nil }
+        @overlay_files = []
+
+        rows = columns ? (panes.size.to_f / columns).ceil : Math.sqrt(panes.size).ceil
+        cols = columns || (panes.size.to_f / rows).ceil
+        plt.command 'unset multiplot'
+        plt.command "set multiplot layout #{rows}, #{cols}"
+
+        panes.each do |title, curves|
+          ymax = 0
+          xs = []
+          parts = curves.each_with_index.map { |(label, data), i|
+            pairs = overlay_pairs(data)
+            ys = pairs.map { |_, y| y }.select(&:finite?)
+            ymax = [ymax, ys.max || 0].max
+            xs.concat(pairs.map(&:first))
+
+            file = Tempfile.new("overlay_#{i}")
+            @overlay_files << file
+            pairs.each { |x, y| file.puts "#{x} #{y.finite? ? y : 0}" }
+            file.flush
+
+            style = styles.is_a?(Array) ? styles[i] : styles
+            style ||= i == 0 ? 'steps' : 'lines'
+            "'#{file.path}' using 1:2 with #{style} title #{label.to_s.gsub("'", '').inspect.tr('"', "'")} noenhanced"
+          }
+
+          xr = xrange || [xs.min, xs.max]
+          yr = yrange || [0, ymax > 0 ? ymax * 1.05 : 1]
+          plt.command "set xrange [#{xr[0]}:#{xr[1]}]"
+          plt.command "set yrange [#{yr[0]}:#{yr[1]}]"
+          plt.command 'unset logscale x'
+          plt.command "set title #{title.to_s.inspect} noenhanced"
+          plt.command "plot #{parts.join(', ')}"
+        end
+
+        plt.command 'unset title'
+        output = plt.command('unset multiplot')
+        # Colored and printed like MB::M::Plot#plot's terminal plots
+        plt.send(:print_terminal_plot, true, output) if output && plt.instance_variable_get(:@terminal) == 'dumb'
+      end
+
+      # Plots estimated densities of +data+ (a Hash of names to NArrays) with
+      # theoretical densities from +pdf+ (see #hist).
+      private def density_plot(data, bins:, range:, pdf:, graphical:)
+        width = (range.end.to_f - range.begin.to_f) / bins
+        fine = Numo::DFloat.new(bins * 4 + 1).seq * (width / 4) + range.begin.to_f
+
+        panes = data.to_h { |name, d|
+          centers, dens = density(d, bins: bins, range: range)
+          curves = { 'estimate' => [centers, dens] }
+
+          theory = pdf.is_a?(Hash) ? pdf[name] : pdf
+          theory = { 'theory' => theory } if theory.respond_to?(:call)
+          theory&.each do |label, f|
+            next unless f
+
+            ys = fine.to_a.map { |x| f.call(x).to_f }
+            # Clip spikes (e.g. the arcsine's poles) to keep the estimate visible
+            cap = dens.max * 1.5
+            ys = Numo::DFloat.cast(ys)
+            ys = ys.clip(0, cap) if cap > 0
+            curves[label] = [fine, ys]
+          end
+
+          [name, curves]
+        }
+
+        overlay(panes, graphical: graphical, xrange: [range.begin, range.end])
+      end
+
+      # [[x, y], ...] for #overlay from pairs or [xs, ys].
+      private def overlay_pairs(data)
+        if data.is_a?(Array) && data.length == 2 && data.all? { |d| d.is_a?(Numo::NArray) || (d.is_a?(Array) && !d[0].is_a?(Array)) }
+          data[0].to_a.zip(data[1].to_a)
+        else
+          data.to_a
+        end
       end
 
       # Plots a subset of the given audio file, test tone, or data, starting at

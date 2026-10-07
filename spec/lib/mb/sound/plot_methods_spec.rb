@@ -48,6 +48,47 @@ RSpec.describe(MB::Sound::PlotMethods) do
     end
   end
 
+  describe '#density' do
+    it 'estimates a probability density over bin centers' do
+      x, d = MB::Sound.density(Numo::SFloat[-1, -0.5, 0.25, 0.75, 2], bins: 4, range: -1..1)
+      expect(x.to_a).to eq([-0.75, -0.25, 0.25, 0.75])
+      # 4 of 5 values inside, bins 0.5 wide: 1 / (5 * 0.5) in each bin
+      expect(d.to_a).to eq([0.4, 0.4, 0.4, 0.4])
+    end
+
+    it 'integrates to 1 for uniform noise' do
+      _, d = MB::Sound.density(1.hz.ramp.noise.sample(48000), bins: 20, range: -1..1)
+      expect(d.sum * 0.1).to be_within(1e-9).of(1)
+      expect(d).to all_be_within(0.05).of_array(Numo::DFloat.new(20).fill(0.5))
+    end
+  end
+
+  describe '#hist with a density' do
+    let(:arcsine) { ->(x) { x.abs < 1 ? 1 / (Math::PI * Math.sqrt(1 - x * x)) : 0 } }
+    let(:output) { MB::Sound.hist({ 'sine' => 1.hz.sine.noise.sample(48000) }, bins: 40, pdf: arcsine) }
+
+    it 'draws the estimate with the theory over it' do
+      expect(text).to include('sine', 'estimate', 'theory')
+      expect(lines.length).to be_between(38, 41)
+    rescue Exception => e
+      raise e.class, "#{e.message}\n\t\e[1m#{lines.map(&:inspect).join("\n\t")}\e[0m"
+    end
+  end
+
+  describe '#overlay' do
+    let(:output) {
+      MB::Sound.overlay({
+        'a_b' => { 'line_1' => [[0, 0], [1, 1]], 'line 2' => [Numo::DFloat[0, 1], Numo::DFloat[1, 0]] },
+        'c' => { 'flat' => [[0, 0.5], [1, 0.5]] },
+      })
+    }
+
+    it 'plots several curves per pane, keeping underscores in titles' do
+      expect(text).to include('a_b', 'line_1', 'line 2', 'flat')
+      expect(text.lines.count { |l| l.match?(/\+-{20,}\+/) }).to eq(4)
+    end
+  end
+
   describe '#mag_phase' do
     context 'with a tone' do
       let(:output) { MB::Sound.mag_phase(440.hz.sine) }
