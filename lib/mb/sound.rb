@@ -11,6 +11,7 @@ srand(Integer(ENV['RANDOM_SEED'])) if ENV['RANDOM_SEED']
 
 require_relative 'sound/length'
 require_relative 'sound/interval'
+require_relative 'sound/curve'
 require_relative 'sound/numeric_sound_mixins'
 
 # Load C extensions

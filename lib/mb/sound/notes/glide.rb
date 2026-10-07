@@ -56,19 +56,7 @@ module MB
         # bisection; 0 for no overshoot).  The bump only passes the target
         # once k > 3, so tiny overshoots still need k near 3.
         def self.overshoot_k(overshoot)
-          return 0.0 if overshoot <= 0
-
-          peak = ->(k) {
-            (1..999).map { |j| t = j / 1000.0; t * t * (3 - 2 * t) + k * t**3 * (1 - t)**2 }.max - 1
-          }
-          lo = 3.0
-          hi = 6.0
-          hi *= 2 while peak.(hi) < overshoot
-          60.times do
-            mid = (lo + hi) / 2
-            peak.(mid) < overshoot ? lo = mid : hi = mid
-          end
-          (lo + hi) / 2
+          MB::Sound::Curve.back_k(overshoot)
         end
 
         def initialize(stream, time:, legato: false, from: nil, overshoot: 0, notes: nil, sample_rate: 48000)
