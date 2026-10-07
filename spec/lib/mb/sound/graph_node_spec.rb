@@ -446,11 +446,104 @@ RSpec.describe(MB::Sound::GraphNode, aggregate_failures: true) do
       release = graph.sample(2000).abs.max
       expect(release).to be > (1.5 * sustain)
     end
+
+    context 'with filter structures' do
+      let(:noise) { MB::Sound.with_seed(2) { Numo::SFloat.cast(MB::Sound.noise.sample(48000)) } }
+      let(:input) { MB::Sound::ArrayInput.new(data: [noise]) }
+
+      def residual_db(a, b)
+        20 * Math.log10((a - b).abs.max / b.abs.max)
+      end
+
+      it 'uses a state-variable filter by default for types and Cookbook filters' do
+        expect(400.hz.ramp.filter(:lowpass, cutoff: 500).base_filter).to be_a(MB::Sound::Filter::SVF)
+        expect(400.hz.ramp.filter(400.hz.lowpass(quality: 5)).base_filter).to be_a(MB::Sound::Filter::SVF)
+        expect(400.hz.ramp.filter(800).base_filter).to be_a(MB::Sound::Filter::SVF)
+        expect(MB::Sound::GraphNode::FilterMethods::DEFAULT_FILTER_STRUCTURE).to eq(:svf)
+      end
+
+      it 'uses the cookbook biquad with structure: :biquad' do
+        f = 400.hz.ramp.filter(:lowpass, cutoff: 500, structure: :biquad)
+        expect(f.base_filter).to be_a(MB::Sound::Filter::Cookbook)
+        f = 400.hz.ramp.filter(400.hz.lowpass(quality: 5), structure: :biquad)
+        expect(f.base_filter).to be_a(MB::Sound::Filter::Cookbook)
+      end
+
+      [:lowpass, :highpass, :bandpass, :bandpass_skirt, :notch, :allpass, :peak, :lowshelf, :highshelf].each do |type|
+        it "gives the biquad's static #{type} response" do
+          gain = MB::Sound::Filter::SVF::GAIN_TYPES.include?(type) ? 2.0 : nil
+          svf = MB::Sound::ArrayInput.new(data: [noise]).filter(type, cutoff: 900, quality: 2, gain: gain).sample(48000)
+          biquad = MB::Sound::ArrayInput.new(data: [noise]).filter(type, cutoff: 900, quality: 2, gain: gain, structure: :biquad).sample(48000)
+          expect(residual_db(svf, biquad)).to be < -100
+        end
+      end
+
+      it 'has no DC bump when the cutoff dives quickly toward 0 Hz, unlike the biquad' do
+        # tween_song's pad cutoff before it tweened in octaves: a linear
+        # elastic tween from 3400 Hz to 700 Hz undershoots to -245 Hz
+        peak = ->(structure) {
+          MB::Sound.rewind
+          cutoff = MB::Sound.tween([3400, 700], 1.bar, curve: :elastic, overshoot: 0.35, cycles: 3)
+          f = 110.hz.ramp.at(0.5).filter(:lowpass, cutoff: cutoff, quality: 3, structure: structure)
+          200.times.map { f.sample(480).abs.max }.max
+        }
+        expect(peak.(nil)).to be < 1.2
+        expect(peak.(:biquad)).to be > 3
+      ensure
+        MB::Sound.rewind
+      end
+
+      it 'takes a gain node with the SVF only' do
+        gain = 0.25.hz.lfo.at(0.25..6)
+        f = 110.hz.ramp.filter(:peak, cutoff: 900, quality: 3, gain: gain)
+        expect(f.sources[:gain]).to be_a(MB::Sound::GraphNode)
+        expect(f.sample(4800).isfinite.all?).to eq(true)
+        expect { 110.hz.ramp.filter(:peak, cutoff: 900, gain: 0.5.constant, structure: :biquad) }.to raise_error(ArgumentError, /gain/)
+      end
+
+      it 'raises for unknown structures and filters without a structure' do
+        expect { 110.hz.ramp.filter(:lowpass, cutoff: 900, structure: :ladder) }.to raise_error(ArgumentError, /structure/)
+        expect { 110.hz.ramp.filter(:lp4, cutoff: 900, structure: :biquad) }.to raise_error(ArgumentError, /structure/)
+        expect { 110.hz.ramp.filter(MB::Sound::Filter::Gain.new(2, sample_rate: 48000), structure: :biquad) }.to raise_error(ArgumentError, /structure/)
+        expect { 110.hz.ramp.filter(:bogus, cutoff: 900) }.to raise_error(ArgumentError, /type/)
+      end
+
+      it 'passes structure: through channel bundles' do
+        b = MB::Sound.stereo(110.hz.ramp, 220.hz.ramp).filter(:lowpass, cutoff: 500, structure: :biquad)
+        expect(b.outputs.map { |o| o.base_filter.class }).to eq([MB::Sound::Filter::Cookbook] * 2)
+      end
+    end
   end
 
-  pending '#peq'
+  describe '#peq' do
+    it 'builds SVF peaking filters by default and biquads on request, with the same response' do
+      noise = MB::Sound.with_seed(4) { Numo::SFloat.cast(MB::Sound.noise.sample(24000)) }
+      svf = MB::Sound::ArrayInput.new(data: [noise]).peq(200.hz => -6.db, 2000.hz => [10.db, 2])
+      biquad = MB::Sound::ArrayInput.new(data: [noise]).peq({ 200.hz => -6.db, 2000.hz => [10.db, 2] }, structure: :biquad)
+      expect(svf.base_filter.filters.map(&:class)).to eq([MB::Sound::Filter::SVF] * 2)
+      expect(biquad.base_filter.filters.map(&:class)).to eq([MB::Sound::Filter::Cookbook] * 2)
+      a = svf.sample(24000)
+      b = biquad.sample(24000)
+      expect(20 * Math.log10((a - b).abs.max / b.abs.max)).to be < -100
+    end
+  end
+
   pending '#peq_series'
-  pending '#bandpass_series'
+
+  describe '#bandpass_series' do
+    it 'rings at each harmonic with SVF or biquad bandpasses' do
+      [nil, :biquad].each do |structure|
+        [440, 440.constant].each do |f0|
+          imp = Numo::SFloat.zeros(48000)
+          imp[0] = 1
+          node = MB::Sound::ArrayInput.new(data: [imp]).bandpass_series(f0, count: 3, ratio: 1, quality: 50, structure: structure)
+          spectrum = MB::Sound.real_fft(node.sample(48000)).abs
+          peaks = [440, 880, 1320].map { |hz| spectrum[hz] }
+          expect(peaks.min).to be > 10 * spectrum[660]
+        end
+      end
+    end
+  end
 
   describe '#hilbert_iir' do
     it 'removes negative frequencies' do

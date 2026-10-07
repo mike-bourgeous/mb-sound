@@ -4,13 +4,38 @@ module MB
       # Methods that append filters to a graph (see MB::Sound::Filter).
       # Included in GraphNode.
       module FilterMethods
+        # The filter structures #filter, #peq, and #bandpass_series build
+        # cookbook responses with: :svf (MB::Sound::Filter::SVF, the
+        # default; smooth when the cutoff, quality, or gain move) or :biquad
+        # (MB::Sound::Filter::Cookbook, the direct form biquad graphs used
+        # until 2026-10-08, which thumps when its cutoff dives quickly to low
+        # values; kept for that sound, e.g. drums).
+        FILTER_STRUCTURES = [:svf, :biquad].freeze
+
+        # The default for +structure:+ (see FILTER_STRUCTURES).
+        DEFAULT_FILTER_STRUCTURE = :svf
+
         # Applies the given filter (creating the filter if given a filter type)
         # to this sample source or sample chain.  If given a filter type, then a
-        # dynamically updating filter is created where the cutoff and quality are
-        # controlled by the given sample sources (e.g. numeric value, tone
-        # generator, audio input, or ADSR envelope).
+        # dynamically updating filter is created where the cutoff, quality, and
+        # gain are controlled by the given sample sources (e.g. numeric value,
+        # tone generator, audio input, or ADSR envelope).
         #
         # Defaults to generating a low-pass filter if given a frequency in Hz.
+        #
+        # Filter types are the cookbook responses (:lowpass, :highpass,
+        # :bandpass (0 dB peak), :bandpass_skirt (peak gain = quality),
+        # :notch, :allpass, :peak, :lowshelf, :highshelf; +gain:+ is a linear
+        # gain for the last three and an output gain for the bandpasses) and
+        # the four-pole types (FOUR_POLE_TYPES, see #lp4).
+        #
+        # Cookbook responses (types, and Cookbook objects such as
+        # `150.hz.highpass(quality: 4)`) run as a state-variable filter
+        # (Filter::SVF) unless +structure: :biquad+ asks for the direct form
+        # biquad (Filter::Cookbook) graphs used before 2026-10-08: the same
+        # static response, but a cutoff that dives quickly toward 0 Hz makes
+        # the biquad thump (a DC bump), which the SVF doesn't (see
+        # FILTER_STRUCTURES).  With the biquad, +gain:+ must be a number.
         #
         # Example:
         #     # Simple low-pass filter at 1200Hz center frequency
@@ -22,22 +47,34 @@ module MB
         #     # High-pass filter controlled by envelopes
         #     MB::Sound.play 500.hz.ramp.filter(:highpass, frequency: adsr() * 1000 + 100, quality: adsr() * -5 + 6)
         #
+        #     # A peaking EQ whose boost swells and fades
+        #     MB::Sound.play 110.hz.ramp.filter(:peak, cutoff: 900, quality: 3, gain: 0.25.hz.lfo.at(0.25..6))
+        #
+        #     # The old direct form biquad (thumps on fast dives, e.g. drums)
+        #     MB::Sound.play 220.hz.ramp.filter(:lowpass, cutoff: 0.5.hz.lfo.square.at(20..4000), structure: :biquad)
+        #
         #     # CEM3379-style 4-pole lowpass (see #lp4); takes resonance: 0..1
         #     MB::Sound.play 110.hz.ramp.filter(:lp4, cutoff: 0.2.hz.lfo.at(300..3000), resonance: 0.47)
         #
         # TODO: support SampleWrapper inputs argument
-        def filter(filter_or_type = :lowpass, cutoff: nil, quality: nil, gain: nil, resonance: nil, in_place: false)
+        def filter(filter_or_type = :lowpass, cutoff: nil, quality: nil, gain: nil, resonance: nil, structure: nil, in_place: false)
           f = filter_or_type
 
           if FOUR_POLE_TYPES.include?(f)
             raise ArgumentError, 'Cutoff frequency must be given when creating a filter by type' if cutoff.nil?
             raise ArgumentError, "Four-pole filters take resonance: 0..1 or quality:, not gain:" if gain
+            raise ArgumentError, 'Four-pole filters have no structure: option' if structure
             return lp4(cutoff, resonance: resonance, quality: quality, mode: f == :four_pole ? :lp4 : f)
           end
           raise ArgumentError, "Only four-pole filters (#{FOUR_POLE_TYPES.join(', ')}) take resonance:" if resonance
 
           f = f.hz if f.is_a?(Numeric)
           f = f.lowpass if f.is_a?(Tone) || f.is_a?(Pitch)
+
+          if structure && !(f.is_a?(Symbol) || f.is_a?(MB::Sound::Filter::Cookbook))
+            raise ArgumentError, "structure: applies to filter types and Cookbook filters (got #{filter_or_type.inspect})"
+          end
+          structure = filter_structure(structure)
 
           if f.respond_to?(:sample_rate)
             if f.sample_rate != self.sample_rate
@@ -56,15 +93,30 @@ module MB
             raise 'Cutoff frequency must be given when creating a filter by type' if cutoff.nil?
 
             quality = quality || 0.5 ** 0.5
-            # TODO: Support graph node sources for filter gain
-            f = MB::Sound::Filter::Cookbook.new(filter_or_type, sample_rate, 1, quality: 1, db_gain: gain&.to_db)
-            MB::Sound::Filter::SampleWrapper.new(f, self, inputs: { cutoff: cutoff, quality: quality })
 
-          when f.is_a?(MB::Sound::Filter::Cookbook)
+            if structure == :biquad
+              raise ArgumentError, 'The biquad structure takes a numeric gain: (use the default SVF for gain nodes)' if gain && !gain.is_a?(Numeric)
+              f = MB::Sound::Filter::Cookbook.new(filter_or_type, sample_rate, 1, quality: 1, db_gain: gain&.to_db)
+              MB::Sound::Filter::SampleWrapper.new(f, self, inputs: { cutoff: cutoff, quality: quality })
+            else
+              raise ArgumentError, "Invalid filter type #{filter_or_type.inspect}" unless MB::Sound::Filter::SVF::FILTER_TYPE_IDS.include?(f)
+              gain_node = gain.respond_to?(:sample) ? gain : nil
+              f = MB::Sound::Filter::SVF.new(
+                filter_or_type, sample_rate, 1, quality: 1,
+                gain: gain_node ? 1.0 : gain&.to_f
+              )
+              inputs = { cutoff: cutoff, quality: quality }
+              inputs[:gain] = gain_node if gain_node
+              MB::Sound::Filter::SampleWrapper.new(f, self, inputs: inputs)
+            end
+
+          when f.is_a?(MB::Sound::Filter::Cookbook) || f.is_a?(MB::Sound::Filter::SVF)
             # TODO: Support graph node sources for filter gain
             raise 'Only specify gain when creating a new filter' if gain
 
-            MB::Sound::Filter::SampleWrapper.new(f, self, inputs: { cutoff: cutoff || f.cutoff, quality: quality || f.quality })
+            inputs = { cutoff: cutoff || f.cutoff, quality: quality || f.quality || 0.5 ** 0.5 }
+            f = MB::Sound::Filter::SVF.from_cookbook(f) if f.is_a?(MB::Sound::Filter::Cookbook) && structure == :svf
+            MB::Sound::Filter::SampleWrapper.new(f, self, inputs: inputs)
 
           when f.respond_to?(:wrap)
             if cutoff || quality || gain
@@ -165,7 +217,13 @@ module MB
         #
         #     # Cut mids
         #     100.hz.ramp.peq(500.hz => [-10.db, 4])
-        def peq(pairs)
+        #
+        # +structure:+ is :svf (default) or :biquad (see FILTER_STRUCTURES;
+        # the static responses are the same).  Ruby passes a Hash without
+        # braces as keywords, so +freq_pairs+ collects it.
+        def peq(pairs = nil, structure: nil, **freq_pairs)
+          pairs ||= freq_pairs
+          structure = filter_structure(structure)
           raise "PEQ frequency/gain pairs must be a Hash from frequency to gain (got #{pairs.class})" unless pairs.is_a?(Hash)
 
           filters = pairs.map { |freq, gain|
@@ -184,7 +242,11 @@ module MB
               bandwidth = 1.0 / 3.0
             end
 
-            MB::Sound::Filter::Cookbook.new(:peak, self.sample_rate, freq, db_gain: gain.to_db, bandwidth_oct: bandwidth)
+            if structure == :biquad
+              MB::Sound::Filter::Cookbook.new(:peak, self.sample_rate, freq, db_gain: gain.to_db, bandwidth_oct: bandwidth)
+            else
+              MB::Sound::Filter::SVF.new(:peak, self.sample_rate, freq, db_gain: gain.to_db, bandwidth_oct: bandwidth)
+            end
           }
 
           # TODO: Expose PEQ parameters for MIDI control
@@ -200,7 +262,7 @@ module MB
         # +:ratio+ - The increment between harmonics (1.0 for integer harmonics).
         # +:gain+ - The gain of the peaking filters.
         # +:width+ - The bandwidth of the filters in octaves.
-        def peq_series(fundamental_hz, count: 5, ratio: 1.0, gain: 0.db, width: 0.1)
+        def peq_series(fundamental_hz, count: 5, ratio: 1.0, gain: 0.db, width: 0.1, structure: nil)
           # TODO: support GraphNode inputs like in #bandpass_series
           pairs = Array.new(count) do |idx|
             g = gain.respond_to?(:call) ? gain.call(idx) : gain
@@ -208,7 +270,7 @@ module MB
             [fundamental_hz * (1 + ratio * idx), { gain: g, width: w }]
           end
 
-          peq(pairs.to_h)
+          peq(pairs.to_h, structure: structure)
         end
 
         # Creates a harmonic series of bandpass filters starting at the given
@@ -229,7 +291,10 @@ module MB
         #
         #     # MIDI controlled
         #     play (midi.env(0.0, 0.00005, 0, 0.00005) * 100).bandpass_series(midi.frequency, quality: 500, count: 16, ratio: midi.cc(1, range: 1..4)).softclip(0.9).oversample(4)
-        def bandpass_series(fundamental_hz, count: 5, ratio: 1.0, quality: 14.14, gain: 0.db)
+        #
+        # +structure:+ is :svf (default) or :biquad (see FILTER_STRUCTURES).
+        def bandpass_series(fundamental_hz, count: 5, ratio: 1.0, quality: 14.14, gain: 0.db, structure: nil)
+          filter_class = filter_structure(structure) == :biquad ? MB::Sound::Filter::Cookbook : MB::Sound::Filter::SVF
           # TODO: figure out why lower frequencies ping softer with a single impulse
 
           fs = MB::Sound::Filter::FilterSum.new(
@@ -249,7 +314,7 @@ module MB
               freq = f_hz * (1 + r * idx)
 
               if freq.respond_to?(:sample) || q.respond_to?(:sample)
-                f = MB::Sound::Filter::Cookbook.new(:bandpass, self.sample_rate, 1000, quality: 1, db_gain: g.to_db)
+                f = filter_class.new(:bandpass, self.sample_rate, 1000, quality: 1, db_gain: g.to_db)
                 {
                   filter: f,
                   inputs: {
@@ -258,12 +323,21 @@ module MB
                   },
                 }
               else
-                MB::Sound::Filter::Cookbook.new(:bandpass, self.sample_rate, freq, quality: q, db_gain: g.to_db)
+                filter_class.new(:bandpass, self.sample_rate, freq, quality: q, db_gain: g.to_db)
               end
             end
           )
 
           self.filter(fs)
+        end
+
+        # Checks a +structure:+ option (nil for DEFAULT_FILTER_STRUCTURE).
+        private def filter_structure(structure)
+          structure ||= DEFAULT_FILTER_STRUCTURE
+          unless FILTER_STRUCTURES.include?(structure)
+            raise ArgumentError, "Filter structure must be one of #{FILTER_STRUCTURES.map(&:inspect).join(', ')} (got #{structure.inspect})"
+          end
+          structure
         end
 
         # Applies an IIR phase difference network to remove negative frequencies
