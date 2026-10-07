@@ -28,8 +28,10 @@ MB::Sound.synth_script { |midi|
 
     # Synth: a sine waveshaped by the table (the sine sweeps two cycles of
     # the table, centered on its middle; frames not aligned, since this is
-    # a shaper)
-    shaper = porta.tone.at(-0.5..1.5).phase_table(table, scan: nzlfo)
+    # a shaper).  The noise LFO reaches about 1.2, past the last frame, so
+    # the scan wraps around into the first frames, as the original's wave
+    # number did.
+    shaper = porta.tone.at(-0.5..1.5).phase_table(table, scan: nzlfo, scan_wrap: true)
     (gate * (shaper * 0.5 + porta.tone.triangle.at(0.1))).filter(:lowpass, cutoff: 5000, quality: 0.25).softclip
   }
 }
