@@ -144,6 +144,14 @@ module MB
           Reverb.reverb(preset, input: self, output_channels: output_channels, **kwargs)
         end
 
+        # Measures every channel together with one live loudness meter (see
+        # LoudnessMeter), returned as a bundle of the channels passed
+        # through.
+        def loudness_meter(weights: nil, true_peak: true)
+          LoudnessMeter.new(@outputs, weights: weights, true_peak: true_peak)
+        end
+        alias lufs_meter loudness_meter
+
         # Runs every channel into one feedback delay network reverb (see
         # GraphNode#fdn_reverb, which takes the same parameters), returning a
         # multi-output reverb node with one output per channel unless
