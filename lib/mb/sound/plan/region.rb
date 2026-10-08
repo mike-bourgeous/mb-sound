@@ -14,6 +14,10 @@ module MB
       # (Plan.changed) rebuilds the whole installation before the next
       # block.
       class Region
+        # How far node states may differ in check mode after a block of a
+        # program with inexact ops (relative to 1 or the value's size).
+        STATE_TOLERANCE = 1e-5
+
         # The node whose output this region computes.
         attr_reader :root
 
@@ -113,6 +117,15 @@ module MB
           @out = nil
           @out_views.clear
 
+          # Event-driven nodes run their per-block Ruby (see EventList),
+          # each once, in op order
+          @feeders = []
+          @program.ops.each do |op|
+            f = op.respond_to?(:feeder) ? op.feeder : nil
+            @feeders << f if f && @feeders.none? { |x| x.equal?(f) }
+          end
+          @feeders = Plan.group_feeders(@feeders)
+
           @started = false
           start_tones if start
           @program
@@ -162,6 +175,22 @@ module MB
           end
           start_tones unless @started
 
+          # A feeder whose stream is over may start ending (returning nil)
+          # in an order that depends on the graph: run this block unfused
+          # and replan with it as a boundary (see EventList)
+          feeders = @feeders
+          unless feeders.empty?
+            k = 0
+            while k < feeders.length
+              f = feeders[k]
+              if f.plan_finished?(count)
+                (f.respond_to?(:plan_nodes) ? f.plan_nodes : [f]).each { |x| @installation.exclude(x, 'its MIDI stream is over') }
+                return run_unfused(count)
+              end
+              k += 1
+            end
+          end
+
           if @installation.check
             stateful = @members.select { |m| m.respond_to?(:plan_snapshot) }
             before = stateful.map(&:plan_snapshot)
@@ -172,6 +201,12 @@ module MB
           return replay_unfused(count) if gathered == :mismatch
 
           n = gathered
+          k = 0
+          while k < feeders.length
+            feeders[k].plan_feed(count)
+            k += 1
+          end
+
           return check_block(n, count, stateful, before) if @installation.check
 
           @planned_blocks += 1
@@ -294,7 +329,13 @@ module MB
               inputs[i] = nil
               if op.optional
                 @ended[i] = true
-                @consumers[op].each { |c| c.plan_input_ended(op.source) if c.respond_to?(:plan_input_ended) }
+                @consumers[op].each do |c|
+                  # A consumer may ask for the block to run unfused (it reads
+                  # the ended input itself; see Envelope#plan_input_ended)
+                  if c.respond_to?(:plan_input_ended) && c.plan_input_ended(op.source) == :replay
+                    mismatch = true
+                  end
+                end
               else
                 ended = true
               end
@@ -309,6 +350,11 @@ module MB
                 mismatch = true
               end
               buf = buf.dup unless buf.contiguous?
+              if buf.length < count && op.optional && @consumers[op].any? { |c| c.respond_to?(:plan_pads_inputs?) && c.plan_pads_inputs? }
+                # A consumer that pads short inputs (Envelope) runs this
+                # block itself
+                mismatch = true
+              end
               min = buf.length if buf.length < min
               inputs[i] = buf
             end
@@ -431,7 +477,12 @@ module MB
           if problem.nil?
             stateful.each_with_index do |m, i|
               next if after[i] == planned_states[i]
-              problem = "the state of #{Plan.node_label(m)} differs: planned #{planned_states[i].inspect[0, 300]}, unfused #{after[i].inspect[0, 300]}"
+              # Inexact ops' differences can reach state through the ops
+              # after them (a fast sine modulating a frequency moves a
+              # phase), within the same tolerance
+              next if !@program.exact? && Plan.states_close?(after[i], planned_states[i], STATE_TOLERANCE)
+              detail = planned_states[i].is_a?(Snapshot) && after[i].is_a?(Snapshot) ? planned_states[i].diff(after[i]) : "planned #{planned_states[i].inspect[0, 300]}, unfused #{after[i].inspect[0, 300]}"
+              problem = "the state of #{Plan.node_label(m)} differs: #{detail}"
               break
             end
           end

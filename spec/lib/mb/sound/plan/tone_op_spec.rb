@@ -135,43 +135,51 @@ RSpec.describe(MB::Sound::Plan::Op::Tone) do
     end
   end
 
-  describe 'fast precision (Plan.precision = :fast)' do
+  describe 'fast precision (Plan.precision = :fast, the default)' do
     around do |ex|
+      old = MB::Sound::Plan.precision
       MB::Sound::Plan.precision = :fast
       ex.run
     ensure
-      MB::Sound::Plan.precision = :exact
+      MB::Sound::Plan.precision = old
     end
 
-    it 'stays within its stated tolerance for sines and complex sines with FM, PM, ranges, and resets' do
-      r = plan_compare(tolerance: 1e-6) {
+    it 'stays within its stated tolerance for sines with FM, PM, ranges, and resets' do
+      tol = MB::Sound::Plan::Op::Tone::FAST_TOLERANCE
+      r = plan_compare(tolerance: tol) {
         trig = src.new(kind: :impulses, at: reset_points)
         a = fm(1).tone.sine.pm(src.new(seed: 2, scale: 40) * 1).reset(trig)
-        b = fm(2, 3000, 2000).tone.complex_sine.at(0.5).pm(src.new(seed: 3, complex: true, scale: 3) * 1).reset(trig, to: 1.0)
-        a + b.real + b.imag * 0.5 + 440.hz.sine.at(-3..1)
+        b = fm(2, 3000, 2000).tone.sine.at(0.5).pm(src.new(seed: 3, complex: true, scale: 3) * 1).reset(trig, to: 1.0)
+        a + b + 440.hz.sine.at(-3..1)
       }
       expect(r.program.tones.map(&:fast)).to all(eq(true))
       expect(r.program).not_to be_exact
-      expect(r.program.to_s).to include('fast_sine', 'fast_complex_sine')
+      expect(r.program.to_s).to include('fast_sine')
     end
 
-    it 'gives the same samples in C and the Ruby mirror' do
-      r = plan_compare(tolerance: 1e-6, ruby_tolerance: 1e-6) { fm(1).tone.complex_sine.pm(src.new(seed: 2, scale: 5) * 1).real * 1 }
+    it 'gives exactly the same samples in C and the Ruby mirror (Plan::VecSine)' do
+      r = plan_compare { fm(1).tone.sine.at(0.7).pm(src.new(seed: 2, scale: 5) * 1) + 1234.5.hz.sine.pm(2.5) }
       c = r.outputs[:c].compact
       ruby = r.outputs[:ruby].compact
-      worst = c.zip(ruby).map { |x, y| (x - y).abs.max }.max
-      expect(worst).to be <= 1.2e-7 # float32 rounding of the same doubles (signed zeros aside)
+      expect(c.zip(ruby).map { |x, y| x.to_binary == y.to_binary }).to all(eq(true))
     end
 
-    it 'keeps other shapes exact' do
-      r = plan_compare { fm(1).tone.ramp * 1 + fm(2).tone.atriangle }
+    it 'keeps complex sines, noise, and other shapes exact' do
+      r = plan_compare(ruby_tolerance: 1e-6) { fm(1).tone.ramp * 1 + fm(2).tone.atriangle + fm(3).tone.complex_sine.real + fm(1).tone.sine.noise(0.2) }
       expect(r.program).to be_exact
     end
 
-    it 'measures the error of FastMath against libm' do
-      x = Numo::DFloat.new(100_001).seq(-3, 1e-4)
-      worst = x.to_a.map { |v| s, c = MB::Sound::Plan::FastMath.sincos_cycles(v); [(s - Math.sin(2 * Math::PI * v)).abs, (c - Math.cos(2 * Math::PI * v)).abs].max }.max
-      expect(worst).to be < 1e-9
+    it 'keeps sines exact with Plan.precision :exact' do
+      MB::Sound::Plan.precision = :exact
+      r = plan_compare { fm(1).tone.sine.pm(src.new(seed: 2, scale: 3) * 1) * 1 }
+      expect(r.program).to be_exact
+    end
+
+    it 'is within 6e-7 of libm\'s sine (-124 dB) for every phase' do
+      x = Numo::DFloat.new(100_001).seq(-3, 6e-5)
+      got = MB::Sound::Plan::VecSine.shape_ruby(x, 0, 1, 0)
+      worst = (Numo::DFloat.cast(got) - Numo::NMath.sin(x * (2 * Math::PI))).abs.max
+      expect(worst).to be < 6e-7
     end
   end
 

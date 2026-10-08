@@ -24,6 +24,7 @@
 #include "numo/narray.h"
 
 #include "mb_ext_helpers.h"
+#include "mb_smooth.h"
 
 #define STATE_LENGTH 7
 
@@ -77,68 +78,9 @@ static VALUE ruby_smooth(VALUE self, VALUE x, VALUE out, VALUE from_v, VALUE to_
 	double *r1 = dfloat_ptr(ring1);
 	double *r2 = dfloat_ptr(ring2);
 
-	double ref = st[0];
-	double last = st[1];
-	double s1 = st[2];
-	double s2 = st[3];
-	size_t p1 = (size_t)st[4];
-	size_t p2 = (size_t)st[5];
-	double since = st[6];
-	double settle = (double)(n1 + n2 - 2);
-	double d1 = (double)n1;
-	double d2 = (double)n2;
-	if (p1 >= n1 || p2 >= n2) {
-		rb_raise(rb_eArgError, "Ring positions %zu and %zu are outside rings of %zu and %zu", p1, p2, n1, n2);
+	if (mb_smooth_run(xp, op, from, to, st, r1, n1, r2, n2) != 0) {
+		rb_raise(rb_eArgError, "Ring positions %zu and %zu are outside rings of %zu and %zu", (size_t)st[4], (size_t)st[5], n1, n2);
 	}
-
-	for (long i = from; i < to; i++) {
-		double v = xp[i];
-
-		if (v != last) {
-			if (since >= settle) {
-				// Restart from the held value
-				ref = last;
-				memset(r1, 0, n1 * sizeof(double));
-				memset(r2, 0, n2 * sizeof(double));
-				s1 = 0.0;
-				s2 = 0.0;
-			}
-			since = 0.0;
-			last = v;
-		} else if (since < settle) {
-			since += 1.0;
-		}
-
-		if (since >= settle) {
-			op[i] = (float)v;
-		} else {
-			double d = v - ref;
-			s1 += d - r1[p1];
-			r1[p1] = d;
-			p1++;
-			if (p1 == n1) {
-				p1 = 0;
-			}
-
-			double s = s1 / d1;
-			s2 += s - r2[p2];
-			r2[p2] = s;
-			p2++;
-			if (p2 == n2) {
-				p2 = 0;
-			}
-
-			op[i] = (float)(ref + s2 / d2);
-		}
-	}
-
-	st[0] = ref;
-	st[1] = last;
-	st[2] = s1;
-	st[3] = s2;
-	st[4] = (double)p1;
-	st[5] = (double)p2;
-	st[6] = since;
 
 	return out;
 }

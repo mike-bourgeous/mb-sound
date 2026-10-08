@@ -1,1 +1,1 @@
-fast_envelope.o: $(srcdir)/../include/mb_ext_helpers.h
+fast_envelope.o: $(srcdir)/../include/mb_ext_helpers.h $(srcdir)/../include/mb_envelope.h

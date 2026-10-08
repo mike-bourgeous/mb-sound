@@ -10,8 +10,26 @@ module MB
       # Including it also prepends Planned, the hook that runs a region in
       # place of the node's own #sample when the node is a region's root.
       module Describable
+        # Prepends the Planned hook to +base+ and to every subclass (now and
+        # later), so a subclass's own #sample (e.g. Notes::NoteEnvelope's
+        # bookkeeping) never runs before a region it roots takes over.
         def self.included(base)
           base.prepend(Planned)
+          base.extend(Inherited)
+          stack = base.subclasses
+          until stack.empty?
+            c = stack.pop
+            c.prepend(Planned)
+            stack.concat(c.subclasses)
+          end
+        end
+
+        # Prepends Planned to subclasses as they are defined.
+        module Inherited
+          def inherited(sub)
+            super
+            sub.prepend(Planned)
+          end
         end
 
         # The handles (Tee branches) #plan_describe reads, for the region

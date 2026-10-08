@@ -19,9 +19,28 @@
 
 // Wraps +x+ to 0...+y+ like Ruby's % operator (not fmod, which keeps the
 // sign of +x+).
+//
+// floor() without a libm call: at x86-64 baseline flags (no SSE4.1
+// roundsd) GCC and clang call libm's floor for every wrap.  Exact for
+// |x| < 2^51 by the round-to-nearest trick ((x + 1.5 * 2^52) - 1.5 * 2^52
+// rounds x to an integer; one less if that was above x), libm otherwise
+// (NaN and infinities included).  The sign of a zero result follows x, as
+// floor's does (floor(-0.0) is -0.0).  Assumes the default rounding mode
+// and no -ffast-math (the extensions' flags).  From the research spike on
+// branch research-plan-optimizations (5f5cb7b6); naive sines ~10% and
+// ramps ~27% cheaper.
+static inline double mb_floor(double x)
+{
+	if (!(fabs(x) < 2251799813685248.0)) return floor(x);
+	const double magic = 6755399441055744.0;
+	double r = (x + magic) - magic;
+	if (r > x) return r - 1.0;
+	return r == 0.0 ? copysign(0.0, x) : r;
+}
+
 static inline double mb_wrap(double x, double y)
 {
-	return x - y * floor(x / y);
+	return x - y * mb_floor(x / y);
 }
 
 // Replaces *narray with a contiguous, inplace 1D SFloat NArray (a copy unless

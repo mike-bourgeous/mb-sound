@@ -1,6 +1,13 @@
 # The region finder, hooks, rebuilds, fallbacks, introspection, and check
 # mode of the plan layer.
 RSpec.describe(MB::Sound::Plan::Installation) do
+  around do |ex|
+    old = MB::Sound::Plan.precision
+    ex.run
+  ensure
+    MB::Sound::Plan.precision = old
+  end
+
   let(:src) { PlanSpecHelpers::Source }
 
   describe 'region finding' do
@@ -25,6 +32,7 @@ RSpec.describe(MB::Sound::Plan::Installation) do
     end
 
     it 'makes a node read from outside the region the root of its own region' do
+      MB::Sound::Plan.precision = :exact # bit-exact sines
       shared = 110.hz.sine * src.new(seed: 1) * 2
       g1 = shared * 330.hz.sine
       other = shared.proc { |v| v } # an unfused reader outside g1
@@ -204,6 +212,7 @@ RSpec.describe(MB::Sound::Plan::Installation) do
     end
 
     it 'gives a Synth the same samples with and without plans' do
+      MB::Sound::Plan.precision = :exact
       s, planned = render_synth(true)
       expect(s.plans.compact.length).to eq(s.lanes.length)
       expect(s.plans.compact.flat_map(&:regions).sum(&:planned_blocks)).to be > 0
@@ -211,7 +220,16 @@ RSpec.describe(MB::Sound::Plan::Installation) do
       expect(planned.map(&:to_binary)).to eq(unplanned.map(&:to_binary))
     end
 
+    it 'gives a Synth samples within -100 dB with fast sines (the default precision)' do
+      MB::Sound::Plan.precision = :fast
+      _, planned = render_synth(true)
+      _, unplanned = render_synth(false)
+      worst = planned.zip(unplanned).map { |a, b| (a - b).abs.max }.max
+      expect(worst).to be <= 1e-5
+    end
+
     it 'gives a rendered song the same samples with and without plans' do
+      MB::Sound::Plan.precision = :exact
       render = lambda do |plan|
         MB::Sound::Plan.enabled = plan
         MB::Sound.with_seed(3) {
