@@ -99,6 +99,12 @@ Rake::ExtensionTask.new 'mb-sound-fast_plan' do |ext|
   ext.lib_dir = 'lib/mb/sound'
 end
 
+Rake::ExtensionTask.new 'mb-sound-fast_loop' do |ext|
+  ext.name = 'fast_loop'
+  ext.ext_dir = 'ext/mb/sound/fast_loop'
+  ext.lib_dir = 'lib/mb/sound'
+end
+
 
 # Valgrind memcheck of the C extensions (`bundle exec rake memcheck`), using
 # ruby_memcheck, which runs rspec under Valgrind and filters out Ruby's own
@@ -158,6 +164,7 @@ MEMCHECK_SPECS = [
   'spec/lib/mb/sound/jack_spec.rb',                # DeviceOutput/Input and MIDI on one JACK client
   'spec/lib/mb/sound/plan/*_spec.rb',              # FastPlan.run through planned regions (tones, resets, fallbacks, events, envelopes, smoothing)
   'spec/lib/mb/sound/notes_fast_paths_spec.rb',    # FastPlan.run through Synth lanes' plans (envelopes, events, skipped lanes)
+  'spec/lib/mb/sound/graph_node/feedback_loop_spec.rb', # FastLoop.run (plan/loop_spec.rb runs with the plan specs)
 ].freeze
 
 begin

@@ -44,11 +44,50 @@ module MB
         #       .proc { |v| MB::Sound.real_fft(v) }
         #       .delay(3208.4.samples, feedback: 0.9, dry: 1, wet: 1)
         #       .proc { |v| MB::Sound.real_ifft(MB::M.shl(v, 0)) }
-        def delay(time = nil, seconds: nil, smoothing: true, max_delay: 1.0, feedback: false, dry: 0, wet: 1, interpolation: MB::Sound::DelayLine::DEFAULT_INTERPOLATION)
+        #
+        # With a block, the feedback runs through the block's nodes (an
+        # insert, e.g. a tape echo's tone filter and saturation) in a
+        # FeedbackLoop: the block gets the delayed signal and returns what the
+        # loop outputs and feeds back (times +:feedback+), one sample at a
+        # time, so inserts work at any delay length and block size.  The
+        # delay absorbs the insert's latency (an antialiased shaper's half
+        # sample, a lowpass's group delay), so repeats stay exactly +time+
+        # apart.  The output is +:wet+ times the loop plus +:dry+ times the
+        # input.  See GraphNode#feedback for what the block may contain.
+        #
+        #     sig.delay(0.3, feedback: 0.7, dry: 1) { |fb| fb.filter(:lowpass, cutoff: 3000).softclip(0.5, 1) }   # tape echo
+        #     sig.delay(lfo.at(1..5).ms, feedback: -0.8, dry: 1) { |fb| fb.softclip }                               # flanger
+        def delay(time = nil, seconds: nil, smoothing: true, max_delay: 1.0, feedback: false, dry: 0, wet: 1, interpolation: MB::Sound::DelayLine::DEFAULT_INTERPOLATION, &insert)
+          if insert
+            return feedback_delay(
+              time, seconds: seconds, smoothing: smoothing, max_delay: max_delay, feedback: feedback,
+              dry: dry, wet: wet, interpolation: interpolation, &insert
+            )
+          end
+
           filter(MB::Sound::GraphNode::DelayMethods.delay_filter(
             time, seconds: seconds, smoothing: smoothing, max_delay: max_delay,
             feedback: feedback, dry: dry, wet: wet, interpolation: interpolation
           ))
+        end
+
+        # #delay with a feedback insert block (see #delay).
+        def feedback_delay(time = nil, seconds: nil, smoothing: true, max_delay: 1.0, feedback: false, dry: 0, wet: 1, interpolation: MB::Sound::DelayLine::DEFAULT_INTERPOLATION, &insert)
+          if feedback.nil? || feedback == false
+            raise ArgumentError, 'A delay with a feedback insert block needs a feedback: gain (a number or a node)'
+          end
+
+          loop = self.feedback do |w, x|
+            delayed = (x + w * feedback).delay(time, seconds: seconds, smoothing: smoothing, max_delay: max_delay, interpolation: interpolation)
+            out = insert.call(delayed)
+            raise ArgumentError, "The delay's insert block must return a graph node (got #{out.inspect})" unless out.respond_to?(:sample)
+
+            out
+          end
+
+          out = wet.is_a?(Numeric) && wet == 1 ? loop : loop * wet
+          out = out + self * dry unless dry.is_a?(Numeric) && dry == 0
+          out
         end
 
         # Builds the MB::Sound::Filter::Delay for #delay and

@@ -428,6 +428,7 @@ module MB
       # the timeline (tempo LFOs), so lanes using them are never skipped.
       def self.long_memory?(node)
         node.is_a?(GraphNode::Reverb) || node.is_a?(GraphNode::FdnReverb) || node.is_a?(GraphNode::MultitapDelay) ||
+          node.is_a?(GraphNode::FeedbackLoop) ||
           node.is_a?(Sequence::TimelineNode) ||
           (node.respond_to?(:base_filter) && (node.base_filter.is_a?(Filter::Delay) || node.base_filter.is_a?(Filter::FIR))) ||
           node.is_a?(Filter::Delay) || node.is_a?(Filter::FIR)

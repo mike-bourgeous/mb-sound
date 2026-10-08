@@ -276,7 +276,9 @@ module MB
         def sources_of(obj)
           return [] unless obj.respond_to?(:sources)
 
-          s = obj.sources
+          # Nodes that run part of their graph themselves (a feedback loop's
+          # body) show the plan only their inputs
+          s = obj.respond_to?(:plan_sources) ? obj.plan_sources : obj.sources
           return [] unless s.respond_to?(:each_value)
 
           s.each_value.select { |v| !v.is_a?(Numeric) && (v.respond_to?(:sample) || v.is_a?(GraphNode::Tee)) }
