@@ -21,7 +21,7 @@ RSpec.describe('Tone#gain (output gain inside the oscillator)') do
     'a complex sine' => -> { 220.hz.complex_sine },
     'a complex ramp (BLIT)' => -> { 220.hz.complex_ramp },
     'a synced square' => -> { 150.hz.square.sync(ratio: 2.3) },
-    'a feedback sine' => -> { 220.hz.feedback(1.5) },
+    'a feedback sine' => -> { 220.hz.fm_feedback(1.5) },
     'a wavetable' => -> { 220.hz.wavetable(:saw, scan: 0.5) },
     'a tone with resets and FM' => -> {
       t = MB::Sound::ArrayInput.new(data: [Numo::SFloat.zeros(6000).tap { |a| a[[50, 700, 3000]] = 1 }])
@@ -68,8 +68,8 @@ RSpec.describe('Tone#gain (output gain inside the oscillator)') do
   end
 
   it 'composes with a feedback in-loop gain' do
-    a = collect(220.hz.feedback(1.5, gain: 0.5).gain(env), [2000])
-    b = collect(220.hz.feedback(1.5, gain: 0.5) * env, [2000])
+    a = collect(220.hz.fm_feedback(1.5, gain: 0.5).gain(env), [2000])
+    b = collect(220.hz.fm_feedback(1.5, gain: 0.5) * env, [2000])
     expect(a).to eq(b)
   end
 

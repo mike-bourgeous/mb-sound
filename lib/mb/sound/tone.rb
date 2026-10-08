@@ -69,7 +69,7 @@ module MB
     #    - PHASOR: the phase itself (FastSound.phasor);
     #    - FEEDBACK: a sine whose phase adds feedback * the average of its
     #      last two outputs, times an in-loop gain (FastSynth.feedback_sine,
-    #      state.feedback; see #feedback): a per-sample recurrence, so a
+    #      state.feedback; see #fm_feedback): a per-sample recurrence, so a
     #      fused plan keeps it as one sequential op.
     # 5. GAIN (fused into the kernel): y = v * gain + offset, from #at;
     #    then (after the JUMP residual) y *= the #gain input, if any
@@ -968,8 +968,8 @@ module MB
       # oscillator.  An input that ends (a one-shot envelope) ends the tone.
       # Also available as #amp.
       #
-      # On a #feedback sine this is the output gain, after the feedback
-      # loop: the timbre stays fixed while the level changes.  #feedback's
+      # On a #fm_feedback sine this is the output gain, after the feedback
+      # loop: the timbre stays fixed while the level changes.  #fm_feedback's
       # +gain:+ is the in-loop level instead, which the feedback reads, so
       # the timbre follows it (the FM-synth operator behavior).  Both can be
       # used together.
@@ -1166,7 +1166,7 @@ module MB
       # the tone is exactly a plain sine.
       #
       # Nothing clamps the amount; FEEDBACK_MAX (2pi, noise) is the top of
-      # the useful range, e.g. for a knob.  #feedback_cycles takes the
+      # the useful range, e.g. for a knob.  #fm_feedback_cycles takes the
       # amount in cycles instead (1.0 = 2pi).
       #
       # +gain:+ (a number or node, default 1) is the operator's output level
@@ -1191,18 +1191,18 @@ module MB
       # the worst alias is -103 dB at 1.0 rad, -59 dB at 1.5 rad, -30 dB at
       # 2.0 rad (a band-limited ramp: -41 dB); at 4 kHz -46 dB at 1.0 rad
       # and -27 dB at 1.5.  `oversample(4)` brings 1.5 rad at 1 kHz to -135
-      # dB (bin/aliasing.rb 'p.feedback(1.5)').  Cost: about 28 ns per
+      # dB (bin/aliasing.rb 'p.fm_feedback(1.5)').  Cost: about 28 ns per
       # sample whatever the amount (a plain sine: 21 ns; nodes for the
       # amount and gain add their own cost).  See .dx7_feedback for the DX7's
-      # 0-7 feedback setting in radians.  Also available as #fb.
+      # 0-7 feedback setting in radians.  Also available as #fm_fb.  (#feedback is graph feedback, GraphNode::FeedbackMethods.)
       #
       # Examples (bin/sound.rb):
-      #     play 110.hz.feedback(1.3).at(-12.db)                          # a saw-like sine
-      #     play 220.hz.feedback(2.hz.lfo.at(0..1.5)).at(-12.db)          # sweeping brightness
+      #     play 110.hz.fm_feedback(1.3).at(-12.db)                          # a saw-like sine
+      #     play 220.hz.fm_feedback(2.hz.lfo.at(0..1.5)).at(-12.db)          # sweeping brightness
       #     e = adsr(0.05, 0.4, 0.5, 0.3, hold: 1)
-      #     play 220.hz.feedback(1.4, gain: e).at(-6.db)                  # brass-like: bright as it swells
-      #     play 220.hz.pm(440.hz.feedback(1.0).at(1.5)).at(-12.db)       # a feedback modulator
-      def feedback(amount, gain: nil, dc: false)
+      #     play 220.hz.fm_feedback(1.4, gain: e).at(-6.db)                  # brass-like: bright as it swells
+      #     play 220.hz.pm(440.hz.fm_feedback(1.0).at(1.5)).at(-12.db)       # a feedback modulator
+      def fm_feedback(amount, gain: nil, dc: false)
         if amount.nil?
           return configure do
             @feedback = nil
@@ -1223,35 +1223,35 @@ module MB
           @feedback_dc = !!dc
         end
       end
-      alias fb feedback
+      alias fm_fb fm_feedback
 
-      # Like #feedback, with the amount in cycles of phase modulation per
+      # Like #fm_feedback, with the amount in cycles of phase modulation per
       # unit of output instead of radians (+cycles+ times 2pi radians; a
       # number or a node), like #with_phase_cycles: 1.0 is FEEDBACK_MAX
       # (2pi, noise), about 0.24 is saw-like, 0.32 the brightest clean
       # setting.
-      def feedback_cycles(cycles, gain: nil, dc: false)
-        return feedback(nil) if cycles.nil?
+      def fm_feedback_cycles(cycles, gain: nil, dc: false)
+        return fm_feedback(nil) if cycles.nil?
 
         amount = cycles * TWOPI
-        feedback(amount, gain: gain, dc: dc)
+        fm_feedback(amount, gain: gain, dc: dc)
       end
-      alias fb_cycles feedback_cycles
+      alias fm_fb_cycles fm_feedback_cycles
 
-      # The feedback amount (radians; a number or node) given to #feedback,
+      # The feedback amount (radians; a number or node) given to #fm_feedback,
       # or nil for none.
-      def feedback_amount = @feedback
+      def fm_feedback_amount = @feedback
 
-      # The in-loop gain given to #feedback (a number or node), or nil
+      # The in-loop gain given to #fm_feedback (a number or node), or nil
       # without feedback.
-      def feedback_gain = @feedback && @feedback_gain
+      def fm_feedback_gain = @feedback && @feedback_gain
 
-      # True if this tone has operator feedback (see #feedback).
-      def feedback?
+      # True if this tone has operator feedback (see #fm_feedback).
+      def fm_feedback?
         !@feedback.nil?
       end
 
-      # The top of the useful #feedback range: 2pi rad per unit of output,
+      # The top of the useful #fm_feedback range: 2pi rad per unit of output,
       # a DX7's FB 7 at full operator level (see .dx7_feedback), well into
       # noise.  The range for a feedback knob is 0..FEEDBACK_MAX, e.g.
       # `v.cc(1, range: 0.0..Tone::FEEDBACK_MAX)`.  Nothing clamps the
@@ -1262,7 +1262,7 @@ module MB
       DX7_FEEDBACK_MAX = FEEDBACK_MAX
 
       # Converts a DX7 feedback setting +fb+ (0 to 7) to radians for
-      # #feedback, for an operator whose #feedback gain is 1.0 at full
+      # #fm_feedback, for an operator whose #fm_feedback gain is 1.0 at full
       # level (output level 99, envelope at 99): 0 for 0, else 2pi *
       # 2**(fb - 7) (pi/32 at 1, ..., pi at 6, 2pi at 7).
       #
@@ -1270,7 +1270,7 @@ module MB
       # term is (y[n-1] + y[n-2]) >> (9 - fb) on Q24 values whose phase
       # unit is one cycle per 2**24, and a full-level operator's output
       # peaks at 2.0 (its maximum modulation index is 4pi).  So the DX7's
-      # feedback depends on the operator's level, which is what #feedback's
+      # feedback depends on the operator's level, which is what #fm_feedback's
       # +gain:+ is for: pass the operator's linear level (relative to full)
       # times its envelope.  Full-level FB 7 is noise, as on the DX7 (a known
       # noise trick); saw-like patches use FB 6-7 on quieter operators or
@@ -1307,7 +1307,7 @@ module MB
       # keeps playing through an envelope's release after its clip's
       # trigger has ended.
       #
-      # A #feedback sine clears its feedback history at each reset, so every
+      # A #fm_feedback sine clears its feedback history at each reset, so every
       # note starts the same; +keep_feedback:+ true keeps it (see
       # #keep_feedback; nil leaves that setting as it is).
       #
@@ -1357,9 +1357,9 @@ module MB
         end
       end
 
-      # Makes a #feedback sine keep its feedback history (and DC estimate)
+      # Makes a #fm_feedback sine keep its feedback history (and DC estimate)
       # across resets (see #reset) instead of clearing it, e.g. on a synth
-      # voice's key-synced tone: `v.hz.feedback(1.4).keep_feedback`.
+      # voice's key-synced tone: `v.hz.fm_feedback(1.4).keep_feedback`.
       def keep_feedback(keep = true)
         configure { @keep_feedback = !!keep }
       end
@@ -2456,7 +2456,7 @@ module MB
         end
       end
 
-      # Raises an error for settings a #feedback tone can't play.
+      # Raises an error for settings a #fm_feedback tone can't play.
       def check_feedback
         raise ArgumentError, "Only sines take feedback (this is a #{wave_name})" unless @wave_type == :sine
         raise ArgumentError, 'A feedback sine cannot be synced' if @sync_source
@@ -2465,10 +2465,10 @@ module MB
       end
 
       # The DC tracker's cutoff relative to the frequency (FB_DC_RATIO in
-      # fast_synth.c; see #feedback).
+      # fast_synth.c; see #fm_feedback).
       FEEDBACK_DC_RATIO = 1.0 / 20.0
 
-      # Ruby mirror of FastSynth.feedback_sine (see #feedback): the same
+      # Ruby mirror of FastSynth.feedback_sine (see #fm_feedback): the same
       # phases as the naive kernel (#phases_ruby), then the feedback loop
       # one sample at a time with the C kernel's operations in its order.
       def feedback_ruby(count, freq, phase_mod, fb, fb_gain)
