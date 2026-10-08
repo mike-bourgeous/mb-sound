@@ -446,6 +446,7 @@ module MB
         @feedback = nil
         @feedback_gain = nil
         @feedback_dc = false
+        @keep_feedback = false
 
         @frequency = nil
         @phase = nil
@@ -1054,8 +1055,12 @@ module MB
       # Only plain sines take feedback (not other shapes, warps (#pwm),
       # #sync, #noise, or wavetables; those raise an ArgumentError when the
       # tone starts).  It works with #fm, #pm, #reset (key sync), and
-      # timeline locks; resets jump the phase but keep the feedback history,
-      # so the loop doesn't restart from silence.
+      # timeline locks.  A reset (e.g. key sync at each note-on) clears the
+      # feedback history and the DC estimate too, so every note starts
+      # identically; `reset(trigger, keep_feedback: true)` or
+      # #keep_feedback (e.g. on a key-synced voice tone) keeps the history
+      # across resets instead.  Free-running tones (#free) never reset, and
+      # timeline jumps (seeks) keep the history.
       #
       # Feedback raises the bandwidth like FM, so high notes alias: at 1 kHz
       # the worst alias is -103 dB at 1.0 rad, -59 dB at 1.5 rad, -30 dB at
@@ -1172,6 +1177,10 @@ module MB
       # keeps playing through an envelope's release after its clip's
       # trigger has ended.
       #
+      # A #feedback sine clears its feedback history at each reset, so every
+      # note starts the same; +keep_feedback:+ true keeps it (see
+      # #keep_feedback; nil leaves that setting as it is).
+      #
       # A tone can't have both a reset input and #sync (an error: sync
       # already resets the phase, in its own kernel).  On a #free tone the
       # last call wins: a reset input makes it no longer free, and a fixed
@@ -1181,7 +1190,7 @@ module MB
       #     bpm 120; c = grid(16, 'x..x..x.').loop
       #     play 55.hz.saw.reset(c.trigger) * c.env           # every hit starts at phase 0
       #     play 2.hz.lfo.reset(c.trigger, to: 90.degrees)    # an LFO that restarts at its peak
-      def reset(trigger, to: nil)
+      def reset(trigger, to: nil, keep_feedback: nil)
         if trigger.nil?
           return configure do
             @reset = nil
@@ -1213,7 +1222,20 @@ module MB
 
           @reset = fixup_source(trigger)
           @reset_to = to.respond_to?(:sample) ? fixup_source(to) : to
+          @keep_feedback = keep_feedback unless keep_feedback.nil?
         end
+      end
+
+      # Makes a #feedback sine keep its feedback history (and DC estimate)
+      # across resets (see #reset) instead of clearing it, e.g. on a synth
+      # voice's key-synced tone: `v.hz.feedback(1.4).keep_feedback`.
+      def keep_feedback(keep = true)
+        configure { @keep_feedback = !!keep }
+      end
+
+      # True if resets keep the feedback history (see #keep_feedback).
+      def keep_feedback?
+        !!@keep_feedback
       end
 
       # The reset trigger input (see #reset), or nil.
@@ -1897,6 +1919,7 @@ module MB
             target = reset_target(targets, stop)
             phase_jump(**jump_args) {
               state.phi = target
+              state.feedback.fill(0.0) if @feedback && !@keep_feedback
               if wavetable?
                 # Samples restart; key zones are picked anew
                 state.table[0] = 0.0

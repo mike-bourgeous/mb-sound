@@ -48,6 +48,10 @@ RSpec.describe('Tone#feedback (operator self-feedback)') do
       'DC kept (dc: true)' => -> { 211.hz.fm(3.hz.lfo.at(40)).feedback(2.2, dc: true) },
       'an LFO-rate feedback sine with DC removal' => -> { 3.hz.feedback(1.5).at(0.2..0.8) },
       'cycles and a node gain' => -> { 150.hz.feedback_cycles(2.hz.lfo.at(0..0.3), gain: 5.hz.lfo.at(0.5..1)) },
+      'resets keeping the feedback history' => -> {
+        t = MB::Sound::ArrayInput.new(data: [Numo::SFloat.zeros(2000).tap { |a| a[[7, 300, 301, 900]] = 1 }])
+        170.hz.feedback(1.9).reset(t, keep_feedback: true)
+      },
       'random resets' => -> {
         t = MB::Sound::ArrayInput.new(data: [Numo::SFloat.zeros(2000).tap { |a| a[[5, 130, 131, 600]] = 1 }])
         170.hz.feedback(1.1).reset(t).rnd(seed: 3)
@@ -110,6 +114,52 @@ RSpec.describe('Tone#feedback (operator self-feedback)') do
       a.sample(1000)
       b.sample(1000)
       expect(a.state.feedback[0..1]).to eq(b.state.feedback[0..1])
+    end
+  end
+
+  describe 'resets' do
+    def trig(*at)
+      MB::Sound::ArrayInput.new(data: [Numo::SFloat.zeros(4000).tap { |a| a[at] = 1 }])
+    end
+
+    it 'clear the feedback history, so every note starts identically' do
+      t = 170.hz.feedback(1.9).reset(trig(1000, 2500))
+      x = t.sample(4000)
+      expect(x[2500...3000]).to eq(x[1000...1500])
+    end
+
+    it 'start like a fresh tone' do
+      fresh = 170.hz.feedback(1.9).sample(400).dup
+      t = 170.hz.feedback(1.9).reset(trig(1000))
+      expect(t.sample(4000)[1000...1400]).to eq(fresh)
+    end
+
+    it 'keep the history with keep_feedback: true or #keep_feedback' do
+      a = 170.hz.feedback(1.9).reset(trig(1000, 2500), keep_feedback: true).sample(4000).dup
+      expect(a[2500...3000]).not_to eq(a[1000...1500])
+      b = 170.hz.feedback(1.9).keep_feedback.reset(trig(1000, 2500)).sample(4000)
+      expect(b).to eq(a)
+      expect(170.hz.feedback(1).keep_feedback.keep_feedback?).to eq(true)
+      expect(170.hz.feedback(1).keep_feedback?).to eq(false)
+    end
+
+    it 'clear on key sync in synth voices unless kept' do
+      clip = MB::Sound.seq(MB::Sound::C4, MB::Sound::C4).n8
+      render = ->(keep) {
+        t = clip.tone.feedback(1.9)
+        t.keep_feedback if keep
+        out = []
+        while (b = t.sample(500))
+          out << b.dup
+          break if out.length > 30
+        end
+        Numo::SFloat.zeros(0).concatenate(*out)
+      }
+      n8 = (60.0 / 120 / 2 * 48000).round
+      x = render.call(false)
+      expect(x[n8...(n8 + 500)]).to eq(x[0...500])
+      y = render.call(true)
+      expect(y[n8...(n8 + 500)]).not_to eq(y[0...500])
     end
   end
 
