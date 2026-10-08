@@ -112,6 +112,8 @@ MEMCHECK_SPECS = [
   'spec/lib/mb/sound/tone_waveforms_spec.rb',      # FastSound.osc/oscillate, FastSynth.oscillate_bl
   'spec/lib/mb/sound/generation_methods_spec.rb',  # FastSound noise (splitmix64 state)
   'spec/lib/mb/sound/band_limit_spec.rb',          # FastSynth.oscillate_bl/blit/oscillate_sync
+  'spec/lib/mb/sound/tone_feedback_spec.rb',       # FastSynth.feedback_sine through Tone (resets, nodes)
+  'spec/lib/mb/sound/tone_gain_spec.rb',           # FastArithmetic.scale through Tone#gain
   'spec/lib/mb/sound/shaper_spec.rb',              # FastClip.shape
   'spec/lib/mb/sound/graph_node/curve_shaper_spec.rb', # FastClip.shape_curve
   'spec/lib/mb/sound/curve_spec.rb',               # FastClip.curve_lookup

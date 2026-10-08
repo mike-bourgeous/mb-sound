@@ -34,7 +34,7 @@ module MB
           !@key_sync.nil? && @reset.equal?(@key_sync)
         end
 
-        def reset(trigger, to: nil)
+        def reset(trigger, to: nil, keep_feedback: nil)
           drop_key_sync
           super
         end
