@@ -2,8 +2,9 @@ require_relative 'sequence/duration'
 require_relative 'sequence/numeric_durations'
 require_relative 'sequence/event'
 require_relative 'sequence/clip'
-require_relative 'sequence/seq'
 require_relative 'sequence/note_methods'
+require_relative 'sequence/note_marks'
+require_relative 'sequence/seq'
 require_relative 'sequence/grid'
 require_relative 'sequence/transport'
 require_relative 'sequence/timeline_node'
@@ -41,5 +42,16 @@ module MB
     end
 
     Note.include(Sequence::NoteMethods)
+    Note.include(Sequence::NoteMarks)
+
+    # A rest step for MB::Sound#seq (like nil): `seq(A1, Rest, C2)`.  Alias R.
+    Rest = Sequence::Seq::Step.new.freeze
+    R = Rest
+
+    # A tie step for MB::Sound#seq: holds the previous note one more step
+    # (`seq(A1, Tie, Tie, C2).n16` plays A1 for three sixteenths); after a
+    # rest or at the start it is a rest.  Alias T.
+    Tie = Sequence::Seq::Step.new(tie: true).freeze
+    T = Tie
   end
 end

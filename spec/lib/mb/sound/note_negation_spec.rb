@@ -31,6 +31,15 @@ RSpec.describe('Negating Notes, Steps, and nodes (audit for Note#!)') do
     expect('x if a != note').not_to match(risky)
   end
 
+  it 'overrides ! only on Notes and Steps' do
+    expect(!MB::Sound::C4).to be_a(MB::Sound::Sequence::Seq::Step)
+    expect((!MB::Sound::C4).accented?).to eq(true)
+    expect(!(!MB::Sound::C4)).to be_a(MB::Sound::Sequence::Seq::Step)
+    expect(!440.hz).to eq(false)
+    expect(!440.hz.ramp).to eq(false)
+    expect(!MB::Sound.seq(MB::Sound::C4)).to eq(false)
+  end
+
   describe 'paths that take Notes' do
     it 'compares Notes with != without calling #!' do
       c = MB::Sound::C4

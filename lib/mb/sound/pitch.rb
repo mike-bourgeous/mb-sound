@@ -400,6 +400,23 @@ module MB
         rebased(constant? ? @source * ratio : freq * ratio)
       end
 
+      # Octave marks: the pitch +octaves+ (default 1) higher (#up) or lower
+      # (#dn, alias #down), or moved by +octaves+ (#oct), through #transpose
+      # (so Notes stay Notes: `A1.up` is A2).  Sequence steps have the same
+      # marks (`(!A1).up`; see Sequence::NoteMarks).
+      def up(octaves = 1)
+        transpose(12 * octaves)
+      end
+
+      def dn(octaves = 1)
+        transpose(-12 * octaves)
+      end
+      alias down dn
+
+      def oct(octaves)
+        transpose(12 * octaves)
+      end
+
       # The period of one cycle in seconds and in samples.
       def period = 1.0 / frequency
       def period_samples = period * @sample_rate
