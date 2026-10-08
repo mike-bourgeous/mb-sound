@@ -120,6 +120,7 @@ MEMCHECK_SPECS = [
   'spec/lib/mb/sound/envelope_spec.rb',            # FastEnvelope.process
   'spec/lib/mb/sound/envelope_segments_spec.rb',   # FastEnvelope.process (segment lists, loops)
   'spec/lib/mb/sound/filter/four_pole_spec.rb',    # FastFilter.four_pole
+  'spec/lib/mb/sound/filter/diode_ladder_spec.rb', # FastFilter.diode_ladder
   'spec/lib/mb/sound/filter/svf_spec.rb',          # FastFilter.svf
   'spec/lib/mb/sound/loudness_spec.rb',            # FastLoudness.true_peak
   'spec/lib/mb/sound/wavetable_spec.rb',           # FastWavetable

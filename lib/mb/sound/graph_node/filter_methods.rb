@@ -138,7 +138,7 @@ module MB
         end
 
         # Filter types for #filter that make a four-pole filter (#lp4).
-        FOUR_POLE_TYPES = [:four_pole, :lp4, :lp2, :bp2, :bp4, :hp2, :hp4].freeze # Filter::FourPole::MODES
+        FOUR_POLE_TYPES = [:four_pole, :lp4, :lp2, :bp2, :bp4, :hp2, :hp4, :diode].freeze # Filter::FourPole::MODES
 
         # A CEM3379-style 4-pole resonant lowpass (24 dB/octave), the filter
         # of the Ensoniq SQ-80 and many analog polysynths (see
@@ -163,7 +163,7 @@ module MB
         # OTA style), or :feedback (only the resonance feedback, MS-20
         # style; +clip: :soft+ or :hard), the last two with drive 1 unless
         # given.  +mode:+ picks another tap mix: :lp2, :bp2, :bp4, :hp2,
-        # :hp4.
+        # :hp4, or :diode (a TB-303-style diode ladder; see #diode).
         #
         # +resonance_curve: :db+ (default) makes the gain at the cutoff
         # rise linearly in dB with +resonance+ (-12 dB to +33.8 dB; the peak
@@ -199,12 +199,29 @@ module MB
             resonance_curve: resonance_curve, drive_mode: drive_mode, clip: clip,
             sample_rate: sample_rate
           )
-          resonance = MB::Sound::GraphNode::FourPole.quality_resonance(quality, resonance_curve) if quality
+          resonance = MB::Sound::GraphNode::FourPole.quality_resonance(quality, resonance_curve, diode: mode == :diode) if quality
           resonance ||= 0.0
           MB::Sound::GraphNode::FourPole.new(self, f, cutoff: cutoff, resonance: resonance)
         end
         alias four_pole lp4
         alias lowpass4 lp4
+
+        # A TB-303-style diode ladder lowpass: #lp4 with +mode: :diode+ (see
+        # #lp4 for the options and Filter::FourPole for the model), with
+        # lp4's resonance scale and curves (the same knob positions sit the
+        # same distance from oscillation), self-oscillation, compensation,
+        # and drive (+drive_mode:+ :input or :feedback).  The resonant peak
+        # is at the cutoff, as with lp4, but the coupled stages spread their
+        # poles, so it is much darker without resonance (-25 dB at the
+        # cutoff) and the peak narrows and squelches as the resonance rises.
+        # Alias #diode_ladder.
+        #
+        #     play 55.hz.saw.diode(0.25.hz.lfo.at(150..2500), resonance: 0.8, drive: 2) * 0.5
+        #     v.hz.saw.diode(v.cutoff(300), resonance: v.reso(0.7))
+        def diode(cutoff, resonance: nil, **options)
+          lp4(cutoff, resonance: resonance, mode: :diode, **options)
+        end
+        alias diode_ladder diode
 
         # Adds a filter chain that applies parametric peaking EQ.  The +pairs+
         # parameter should be a Hash mapping a frequency in Hz (or a Tone) to a
