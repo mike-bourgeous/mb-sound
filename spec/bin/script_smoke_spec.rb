@@ -46,7 +46,7 @@ RSpec.describe('script runner scripts', :smoke) do
     'bin/effects/fdn_reverb.rb' => ['--decay', '0.3'],
     'bin/effects/flanger.rb' => ['--oversample', '1'],
     'bin/effects/grain_repeater.rb' => ['--delay', '0.05', '-n', '4'],
-    'bin/effects/juno_chorus.rb' => ['--mode', 'juno2', '--cutoff', '9000'],
+    'bin/effects/juno_chorus.rb' => ['--mode', 'lush', '--bbd', '--mix', '0.6'],
     'bin/effects/ping_pong_delay.rb' => ['--delay', '0.05', '--feedback', '0.3'],
     'bin/effects/reverb.rb' => ['--preset', 'room', '-w', '-6'],
     'bin/effects/reverse_delay.rb' => ['--delay', '0.1', '--oversample', '1'],
