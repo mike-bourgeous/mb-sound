@@ -52,6 +52,14 @@ RSpec.describe(MB::Sound::Drums::Kit, :aggregate_failures) do
       even_more = MB::Sound.tr808(MB::Sound.grid(16, cowbell: 'x'), cowbell: { level: 1 }, more_cowbell: 12)
       expect((more[:cowbell].knobs[:level] / plain[:cowbell].knobs[:level]).to_db).to be_within(0.01).of(6)
       expect(even_more[:cowbell].knobs[:level]).to be_within(1e-9).of(12.db)
+
+      # The decay grows with the level: x 2 ** (dB / 12)
+      expect(plain[:cowbell].knobs[:decay]).to eq(0.5)
+      expect(more[:cowbell].knobs[:decay]).to be_within(1e-9).of(0.5 * Math.sqrt(2))
+      expect(even_more[:cowbell].knobs[:decay]).to be_within(1e-9).of(1.0)
+      given = MB::Sound.tr808(MB::Sound.grid(16, cowbell: 'x'), cowbell: { decay: 0.2 }, more_cowbell: -12)
+      expect(given[:cowbell].knobs[:decay]).to be_within(1e-9).of(0.1)
+      expect(given[:cowbell].knobs[:level]).to be_within(1e-9).of(0.45 * -12.db)
     end
 
     it 'chokes the open hat with the closed hat' do

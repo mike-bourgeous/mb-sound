@@ -97,6 +97,17 @@ RSpec.describe(MB::Sound::Drums::TR808, :aggregate_failures) do
     expect(hf.(1.0)).to be > 3 * hf.(0.05)
   end
 
+  it 'keeps the snare heads short and the noise longer by default (round 2)' do
+    heads = collect(described_class.snare(hits, snappy: 0), 1)
+    MB::Sound.seed(0)
+    full = collect(described_class.snare(hits), 1)
+    # Heads ring 0.25 s to -60 dB: under -40 dB of their peak by 0.2 s
+    expect(peak(heads, 0.2, 0.5) / peak(heads, 0, 0.1)).to be < 0.01
+    # The noise (snappy 0.6: 0.25 s to -60 dB) is most of the first 50 ms
+    noise = full[0...2400] - heads[0...2400]
+    expect(Math.sqrt((noise**2).mean)).to be > Math.sqrt((heads[0...2400]**2).mean)
+  end
+
   it 'brightens the kick click with tone' do
     hf = ->(tone) {
       d = collect(described_class.kick(hits, tone: tone), 0.02)

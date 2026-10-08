@@ -37,13 +37,13 @@ module MB
         # balance (the kick peaks near 1 at full velocity).
         VOICES = {
           kick: { tune: 52.0, decay: 2.4, tone: 0.5, sigh: 0.45, level: 1.0 }.freeze,
-          snare: { tune: 180.0, decay: 0.75, tone: 0.5, snappy: 0.6, level: 0.7 }.freeze,
+          snare: { tune: 180.0, decay: 0.25, tone: 0.5, snappy: 0.6, level: 0.9 }.freeze,
           rimshot: { tune: 455.0, decay: 0.07, tone: 0.5, level: 0.5 }.freeze,
           clap: { decay: 0.2, tone: 0.5, level: 0.6 }.freeze,
           closed_hat: { tune: METAL[0], decay: 0.06, tone: 0.5, level: 0.35 }.freeze,
           open_hat: { tune: METAL[0], decay: 0.45, tone: 0.5, level: 0.35 }.freeze,
           cymbal: { tune: METAL[0], decay: 1.6, tone: 0.5, level: 0.3 }.freeze,
-          cowbell: { tune: 540.0, decay: 0.3, tone: 0.5, level: 0.45 }.freeze,
+          cowbell: { tune: 540.0, decay: 0.5, tone: 0.5, level: 0.45 }.freeze,
           low_tom: { tune: 95.0, decay: 1.7, tone: 0.5, snappy: 0.15, level: 0.7 }.freeze,
           mid_tom: { tune: 140.0, decay: 1.5, tone: 0.5, snappy: 0.15, level: 0.65 }.freeze,
           high_tom: { tune: 190.0, decay: 1.3, tone: 0.5, snappy: 0.15, level: 0.6 }.freeze,
@@ -53,6 +53,12 @@ module MB
           claves: { tune: 2500.0, decay: 0.15, tone: 0.5, level: 0.35 }.freeze,
           maracas: { decay: 0.06, tone: 0.5, level: 0.3 }.freeze,
         }.freeze
+
+        # dB of `more_cowbell: true` (see .more_cowbell).
+        MORE_COWBELL = 6.0
+
+        # dB of more cowbell that doubles its decay (see .more_cowbell).
+        MORE_COWBELL_DOUBLING = 12.0
 
         # Other names for voices (grid rows and keyword arguments).
         ALIASES = {
@@ -168,7 +174,8 @@ module MB
         # Voice knobs are Hashes by voice name (aliases work), e.g. `kick: {
         # tune: 48, decay: 1.2 }`; +:accent+ (dB, see Drums.accented) applies
         # to every voice unless a voice's Hash sets its own.  +:more_cowbell+
-        # raises the cowbell: true for +6 dB, or a number of dB.
+        # raises the cowbell and lengthens its decay: true for +6 dB, or a
+        # number of dB (see .more_cowbell).
         #
         # The open hat is choked by the closed hat, and the hats and cymbal
         # share one metal oscillator bank when their tunes are the same
@@ -180,11 +187,7 @@ module MB
             raise ArgumentError, "Knobs for the #{key} must be a Hash (got #{k.inspect})" unless k.is_a?(Hash)
             [key, k]
           }
-          if more_cowbell
-            db = more_cowbell == true ? 6.0 : more_cowbell.to_f
-            cb = settings[:cowbell] || {}
-            settings[:cowbell] = cb.merge(level: (cb[:level] || VOICES[:cowbell][:level]) * 10 ** (db / 20.0))
-          end
+          settings[:cowbell] = TR808.more_cowbell(settings[:cowbell] || {}, more_cowbell) if more_cowbell
 
           sources = voice_sources(source, only: only, map: map)
           raise ArgumentError, "Nothing in #{source} plays a TR-808 voice" if sources.empty?
@@ -214,6 +217,20 @@ module MB
           end
 
           Kit.new(voices, machine: :tr808)
+        end
+
+        # Returns cowbell +knobs+ with more cowbell: +amount+ is true (+6
+        # dB) or dB.  The level rises by +amount+ dB and the decay (given or
+        # default) grows with it, doubling every MORE_COWBELL_DOUBLING dB:
+        # decay × 2 ** (dB / 12), so +6 dB rings about 1.41x as long (0.71
+        # s by default) and +12 dB twice as long (1 s).  Negative amounts
+        # give less (and shorter) cowbell.
+        def more_cowbell(knobs, amount)
+          db = amount == true ? MORE_COWBELL : amount.to_f
+          knobs.merge(
+            level: knobs.fetch(:level, VOICES[:cowbell][:level]) * 10 ** (db / 20.0),
+            decay: knobs.fetch(:decay, VOICES[:cowbell][:decay]) * 2 ** (db / MORE_COWBELL_DOUBLING),
+          )
         end
 
         # Sources by voice name for .kit (see there).
@@ -261,6 +278,11 @@ module MB
         module Build
           S = MB::Sound
 
+          # Snare noise: seconds of decay per unit of snappy (plus 0.1 s),
+          # and gain per unit of snappy.
+          SNARE_NOISE_TIME = 0.25
+          SNARE_NOISE_GAIN = 1.4
+
           module_function
 
           # Bridged-T resonator pinged by the trigger, its pitch sweeping up
@@ -283,8 +305,8 @@ module MB
             noise = S.noise
               .filter(:highpass, cutoff: 1800, quality: 0.7)
               .filter(:lowpass, cutoff: Drums.exp2(tone - 0.5) * 9000, quality: 0.7)
-            noise_env = Drums.decay_env(t, snappy * 0.15 + 0.1)
-            (Drums.mix(Drums.mix(low, high) * 0.42, noise * noise_env * (snappy * 1.0)) * level).named('808 snare')
+            noise_env = Drums.decay_env(t, snappy * SNARE_NOISE_TIME + 0.1)
+            (Drums.mix(Drums.mix(low, high) * 0.33, noise * noise_env * (snappy * SNARE_NOISE_GAIN)) * level).named('808 snare')
           end
 
           # Two short pings (455 Hz and 3.66 × that; +tone+ favors the upper
