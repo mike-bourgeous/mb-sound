@@ -14,6 +14,7 @@ require_relative 'graph_node/delay_methods'
 require_relative 'graph_node/distortion_methods'
 require_relative 'graph_node/debug_methods'
 require_relative 'graph_node/channel_methods'
+require_relative 'graph_node/chorus'
 
 module MB
   module Sound
@@ -70,6 +71,7 @@ module MB
       include DistortionMethods
       include DebugMethods
       include ChannelMethods
+      include ChorusMethods
 
       # The per-channel DSL call that made this node, if any (see
       # ChannelDispatch and ChannelGroup).  Used by #graphviz.
@@ -307,6 +309,7 @@ require_relative 'graph_node/mixer'
 require_relative 'graph_node/multiplier'
 require_relative 'graph_node/node_sequence'
 require_relative 'graph_node/ringdown'
+require_relative 'graph_node/chorus_nodes'
 require_relative 'graph_node/proc_node'
 require_relative 'graph_node/tee'
 require_relative 'graph_node/multitap_delay'

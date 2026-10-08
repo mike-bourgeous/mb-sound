@@ -95,6 +95,7 @@ module MB
           :reverb, :fdn_reverb, :multitap, :multitap_delay,
           :samples, :seconds,
           :loudness_meter, :lufs_meter,
+          :chorus, :juno_chorus,
         ].freeze
 
         # Modules included in GraphNode that aren't per-channel DSL methods.
