@@ -8,6 +8,8 @@ module MB
       # clip, `midi`, a MIDI file, a Stream; GM drum notes are routed to the
       # voices).  Per-voice knobs go in Hashes by voice name; see
       # Drums::TR808.kit and Drums::TR808 for every voice and knob.
+      # +outputs: :separate+ gives one named channel per voice instead of
+      # the mix (see Drums::TR808.kit).
       #
       # Voices: kick, snare, rimshot, clap, closed_hat (hat), open_hat,
       # cymbal, cowbell, low/mid/high_tom, low/mid/high_conga, claves,
@@ -23,6 +25,8 @@ module MB
       #     bg :pads, tr808(midi)                       # play the kit from a MIDI drum pad (GM notes)
       #     bg :file, tr808('drums.mid')               # or a drum track
       #     play tr808(grid(16, kick: 'x...').loop, kick: { tune: 4.bars.lfo.at(45..60) })   # moving knobs
+      #     outs = tr808(grid(16, kick: 'x...x...', snare: '....x...').loop, outputs: :separate)
+      #     bg :drums, outs[:kick].softclip(0.5) + outs[:snare].reverb(:room)   # individual outputs
       def tr808(source, **settings)
         Drums::TR808.kit(source, **settings)
       end

@@ -56,6 +56,9 @@ module MB
           maracas: { decay: 0.06, tone: 0.5, level: 0.3 }.freeze,
         }.freeze
 
+        # Kit output modes (see .kit).
+        OUTPUTS = [:mix, :separate, :individual].freeze
+
         # dB of `more_cowbell: true` (see .more_cowbell).
         MORE_COWBELL = 6.0
 
@@ -190,7 +193,22 @@ module MB
         # share one metal oscillator bank when their tunes are the same
         # numbers, as on the 808.  Idle voices are skipped unless
         # +skip_idle: false+ (see Voice).
-        def kit(source, accent: DEFAULT_ACCENT, velocity_curve: nil, only: nil, map: {}, more_cowbell: nil, skip_idle: true, **settings)
+        #
+        # +outputs:+ :mix (default) returns the Kit, the voices mixed to one
+        # channel; :separate (alias :individual) returns a GraphNode::Channels
+        # bundle with one channel per voice instead, like a drum machine's
+        # individual outputs: the voices the kit builds, in VOICES order
+        # (kick, snare, rimshot, clap, closed_hat, open_hat, cymbal,
+        # cowbell, toms, congas, claves, maracas), named by voice, so
+        # `outs[:snare]` is the snare and `outs.names` lists them.  Chokes
+        # and the shared metal bank work as in the mix; sample every channel
+        # each buffer (as a Session does).  The channels add up to the mix
+        # exactly (summed in channel order in float32).
+        def kit(source, accent: DEFAULT_ACCENT, velocity_curve: nil, only: nil, map: {}, more_cowbell: nil, skip_idle: true, outputs: :mix, **settings)
+          unless OUTPUTS.include?(outputs)
+            raise ArgumentError, "Unknown outputs: #{outputs.inspect} (outputs: #{OUTPUTS.map(&:inspect).join(', ')})"
+          end
+
           settings = settings.to_h { |name, k|
             key = voice_name(name) || raise(ArgumentError, "Unknown TR-808 voice #{name.inspect} (voices: #{VOICES.keys.join(', ')})")
             raise ArgumentError, "Knobs for the #{key} must be a Hash (got #{k.inspect})" unless k.is_a?(Hash)
@@ -225,7 +243,11 @@ module MB
             voices[v] = voice(v, sources[v], **opts)
           end
 
-          Kit.new(voices, machine: :tr808)
+          if outputs == :mix
+            Kit.new(voices, machine: :tr808)
+          else
+            GraphNode::Channels.new(voices.values, names: voices.keys).named('tr808 outputs')
+          end
         end
 
         # Returns cowbell +knobs+ with more cowbell: +amount+ is true (+6

@@ -40,6 +40,50 @@ RSpec.describe(MB::Sound::Drums::Kit, :aggregate_failures) do
       expect((a - b).abs.max).to be < 1e-6
     end
 
+    describe 'outputs: :separate' do
+      let(:pattern) { MB::Sound.grid(16, kick: 'X...x...', snare: '....X..x', hat: 'x.x.xXx.', open_hat: '.x...x..', cymbal: 'x.......', cowbell: '..x...X.') }
+
+      # Samples every channel of +outs+ in turn per buffer (as a Session
+      # does), returning one Array per channel.
+      def collect_channels(outs, seconds)
+        data = outs.map { [] }
+        (seconds * 48000 / 800).ceil.times do
+          outs.each_with_index { |o, i| data[i] << (o.sample(800) || Numo::SFloat.zeros(800)).dup }
+        end
+        data.map { |d| Numo::SFloat.hstack(d) }
+      end
+
+      it 'gives one named channel per voice in VOICES order' do
+        outs = MB::Sound.tr808(pattern, outputs: :separate)
+        expect(outs).to be_a(MB::Sound::GraphNode::Channels)
+        expect(outs.names).to eq([:kick, :snare, :closed_hat, :open_hat, :cymbal, :cowbell])
+        expect(outs[:snare]).to be_a(MB::Sound::Drums::Voice).and(have_attributes(name: :snare))
+        expect(outs.graph_node_name).to eq('tr808 outputs')
+        expect(MB::Sound.tr808(pattern, outputs: :individual).channel_count).to eq(6)
+        expect { MB::Sound.tr808(pattern, outputs: :stereo) }.to raise_error(ArgumentError, /Unknown outputs: :stereo/)
+      end
+
+      [true, false].each do |skip|
+        it "adds up to the mixed kit bit for bit, with chokes and the shared metal bank (skip_idle: #{skip})" do
+          MB::Sound.seed(0)
+          mixed = collect(MB::Sound.tr808(pattern.loop, skip_idle: skip), 2.5)
+          MB::Sound.seed(0)
+          outs = MB::Sound.tr808(pattern.loop, skip_idle: skip, outputs: :separate)
+          channels = collect_channels(outs, 2.5)
+
+          sum = Numo::SFloat.zeros(mixed.length)
+          channels.each { |c| sum.inplace + c[0...mixed.length] }
+          expect(sum).to eq(mixed)
+
+          # The closed hat (step 2 = 0.25 s at 120 BPM) chokes the open hat
+          # (step 1 = 0.125 s; 0.45 s decay)
+          oh = channels[outs.channel_index(:open_hat)]
+          expect(peak(oh, 0.27, 0.35)).to be < 0.01 * peak(oh, 0.125, 0.2)
+          expect(peak(channels[outs.channel_index(:cowbell)], 0.25, 0.3)).to be > 0.05
+        end
+      end
+    end
+
     it 'takes per-voice knobs by voice name or alias' do
       kit = MB::Sound.tr808(MB::Sound.grid(16, kick: 'x', cowbell: 'x'), bd: { tune: 40 }, cowbell: { level: 0.1, decay: 0.5 })
       expect(kit[:kick].knobs[:tune]).to eq(40)
