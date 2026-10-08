@@ -51,9 +51,11 @@ module MB
       # frame.  +fade_in+ and +fade_out+ are fade lengths in bars; a player
       # with a +stop_at+ time and a +fade_out+ fades out from +stop_at+
       # instead of stopping there.  +keep+ is true if the player should be
-      # kept for #resume once it stops.
+      # kept for #resume once it stops.  +start+ becomes the start of the
+      # sample the player starts on; +launch+ stays the exact launch time
+      # (see Sequence::TimelineNode#start_at).
       Player = Struct.new(
-        :serial, :name, :input, :description, :start, :stop_at, :timeline_nodes,
+        :serial, :name, :input, :description, :start, :launch, :stop_at, :timeline_nodes,
         :started, :slow_warned, :loads, :gain, :gain_step, :fade_in, :fade_out, :keep,
         keyword_init: true
       ) do
@@ -209,7 +211,8 @@ module MB
       #
       # +:at+ sets when the graph starts on the timeline: :now, :beat (next
       # quarter note), :bar (next bar), :clip (next time every looping clip
-      # in the graph is back at its start), or a note length grid (an Integer
+      # in the graph is back at its start; launch-aligned loops, which start
+      # at their beginning anyway, don't count), or a note length grid (an Integer
       # note division or Rational whole notes, e.g. 2r for every two bars).
       # Defaults to :now if nothing else is playing, :bar otherwise.
       # +:start_time+ instead gives an exact timeline position in whole notes
@@ -496,7 +499,7 @@ module MB
         if seeked
           @generation = @transport.generation
           @mutex.synchronize { @players.values }.each do |p|
-            p.timeline_nodes.each { |n| n.start_at(from, origin: p.start, transport: @transport) } if p.started
+            p.timeline_nodes.each { |n| n.start_at(from, origin: p.start, launch: p.launch, transport: @transport) } if p.started
           end
           @scheduler.seeked(from)
         end
@@ -555,6 +558,7 @@ module MB
           input: input,
           description: description,
           start: start,
+          launch: start,
           timeline_nodes: timeline_nodes,
           started: false,
           slow_warned: false,
@@ -652,11 +656,11 @@ module MB
         @transport.next_boundary(grid)
       end
 
-      # The time between moments when every looping clip is at its start
-      # (the least common multiple of their lengths), or a bar if that is
-      # too long or there are no looping clips.
+      # The time between moments when every timeline-aligned looping clip
+      # is at its start (the least common multiple of their lengths), or a
+      # bar if that is too long or there are no such clips.
       def clip_grid(timeline_nodes)
-        lengths = timeline_nodes.grep(MIDI::ClipSource).map(&:clip).select(&:looping?).map(&:length).uniq
+        lengths = timeline_nodes.grep(MIDI::ClipSource).map(&:clip).select { |c| c.looping? && !c.launch_aligned? }.map(&:length).uniq
         return @transport.bar_length if lengths.empty?
 
         lcm = lengths.reduce { |a, b| Rational(a.numerator.lcm(b.numerator), a.denominator.gcd(b.denominator)) }
@@ -688,7 +692,7 @@ module MB
         unless p.started
           offset = MB::M.max(((p.start - from) / per_sample).floor, 0)
           start = from + offset * per_sample
-          p.timeline_nodes.each { |n| n.start_at(start, origin: start, transport: @transport) }
+          p.timeline_nodes.each { |n| n.start_at(start, origin: start, launch: p.launch, transport: @transport) }
           p.start = start
           p.started = true
           p.gain_step = fade_step(p.fade_in, rate) if p.fade_in

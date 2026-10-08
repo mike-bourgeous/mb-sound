@@ -79,6 +79,23 @@ RSpec.describe(MB::Sound::Session::ClipSwaps) do
     expect(data[96000 - 4000]).to eq(MB::Sound::C3.number) # bar 2 of the new loop, in phase
   end
 
+  it 'starts launch-aligned loops at their beginning on the swap, keeping that anchor through seeks' do
+    triplet = MB::Sound.seq(MB::Sound::D2, MB::Sound::F2, MB::Sound::A2).n4 # 3 beats
+    session.add(bass.number, name: :bass)
+    run(4000)
+    session.swap(:bass, triplet.loop(align: :launch))
+    data = run(96000)
+    expect(data[96000 - 4000 - 1]).to eq(MB::Sound::E2.number)
+    expect(data[96000 - 4000]).to eq(MB::Sound::D2.number) # a timeline loop would be on F2
+
+    # Seeking a beat past the swap's bar line plays the F2, and before it
+    # the cycle leading up to the swap (A2 in the beat before)
+    transport.seek(5/4r)
+    expect(run(800)[0]).to eq(MB::Sound::F2.number)
+    transport.seek(3/4r)
+    expect(run(800)[0]).to eq(MB::Sound::A2.number)
+  end
+
   it 'swaps stopped players, playing the new clip when resumed' do
     session.add(bass.number, name: :bass)
     run(800)

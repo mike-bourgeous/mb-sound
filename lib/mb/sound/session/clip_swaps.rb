@@ -20,8 +20,10 @@ module MB
         # follow the swap like any other clip node).  Drum kits from #grid (or Hashes of clips) may
         # be given as keys and values to swap each row with the same name.
         #
-        # Looping clips play in phase with the timeline; non-looping clips
-        # play from their start and end the graph when they finish.
+        # Looping clips play in phase with the timeline; launch-aligned
+        # loops (Clip#loop with +align: :launch+) start at their beginning on
+        # the swap and keep that anchor through later seeks; non-looping
+        # clips play from their start and end the graph when they finish.
         #
         # Stopped players (see #remove) can be swapped too; the new clips play
         # when they are resumed.

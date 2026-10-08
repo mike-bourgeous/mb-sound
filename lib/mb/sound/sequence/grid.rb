@@ -100,9 +100,10 @@ module MB
           @rows.each(&block)
         end
 
-        # Returns a Kit with every row looping independently.
-        def loop(seed: nil)
-          Kit.new(@rows.transform_values { |c| seed ? c.loop(seed: seed) : c.loop })
+        # Returns a Kit with every row looping independently (+:align+ as in
+        # Clip#loop).
+        def loop(seed: nil, align: :timeline)
+          Kit.new(@rows.transform_values { |c| seed ? c.loop(seed: seed, align: align) : c.loop(align: align) })
         end
 
         # Returns a Kit with every row's notes shortened (see Clip#legato).

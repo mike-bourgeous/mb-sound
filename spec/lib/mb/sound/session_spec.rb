@@ -324,6 +324,61 @@ RSpec.describe(MB::Sound::Session) do
       data = run(1600)
       expect(nonzero(data)).to eq([800])
     end
+
+    context 'with launch-aligned loops' do
+      # A 3-beat loop of one hit, which a timeline loop would play a beat
+      # into its cycle when launched on bar 2
+      let(:ball) { MB::Sound.grid(4, 'x..').vel(1) }
+
+      # Starts the session, then launches +graphs+ (name => graph) on the
+      # next bar (frame 96000), returning the frames from 0.
+      def launch(graphs, frames)
+        session.add(0.constant)
+        first = run(800)
+        graphs.each { |name, g| session.add(g, name: name, at: :bar) }
+        first.concatenate(run(frames - 800))
+      end
+
+      it 'starts them at their beginning when launched, staying in that phase' do
+        data = launch({ ball: ball.loop(align: :launch).trigger, timeline: ball.loop.trigger * 2 }, 96000 * 4)
+        # The timeline loop hits every 72000 frames from 0
+        expect(nonzero(data).map { |i| [i, data[i]] }).to eq([
+          [96000, 1], [144000, 2], [168000, 1], [216000, 2], [240000, 1], [288000, 2], [312000, 1], [360000, 2],
+        ])
+      end
+
+      it 'keeps their anchor through seeks and rewinds, like a timeline loop rotated by the launch time' do
+        launch({ ball: ball.loop(align: :launch).trigger, rotated: ball.rotate(1.bar).loop.trigger * 2 }, 96000 + 40000)
+
+        [1/4r, 7.3, 2r].each do |pos|
+          transport.seek(pos) # a rewind before the launch, then later
+          data = run(96000 * 2)
+          expect(nonzero(data).map { |i| data[i] }.uniq).to eq([3]), "seek to #{pos}"
+          expect(nonzero(data).length).to be >= 2
+        end
+      end
+
+      it 'counts them from the bar line when the launch falls between samples' do
+        transport.bpm = 112 # a bar is 102857 1/7 frames
+        bar = 96000 * 120 / 112r
+        session.add(0.constant)
+        first = run(800)
+        session.add(MB::Sound.grid(4, 'x').vel(1).loop(align: :launch).trigger, name: :beat, at: :bar)
+        session.add(MB::Sound.grid(4, 'x').vel(1).loop.trigger * 2, name: :grid, at: :bar)
+        data = first.concatenate(run(800 * 400))
+        hits = nonzero(data)
+        expect(hits.map { |i| data[i] }.uniq).to eq([3])
+        expect(hits.first).to eq(bar.floor)
+        expect(hits).to eq(hits.map { |i| ((i / (bar / 4)).round * bar / 4).floor })
+      end
+
+      it 'leaves them out of the :clip launch grid' do
+        session.add(0.constant)
+        run(800)
+        session.add(MB::Sound.grid(4, 'x...x.').loop(align: :launch).trigger + MB::Sound.grid(4, 'x.').loop.trigger, name: :p, at: :clip)
+        expect(session.instance_variable_get(:@players).values.last.start).to eq(1/2r)
+      end
+    end
   end
 
   it 'removes graphs that end' do

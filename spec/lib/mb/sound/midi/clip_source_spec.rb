@@ -115,6 +115,62 @@ RSpec.describe(MB::Sound::MIDI::ClipSource) do
     end
   end
 
+  describe 'launch-aligned loops' do
+    let(:clip) { MB::Sound.seq(MB::Sound::C4, MB::Sound::E4).n8 }
+    let(:launch_loop) { clip.loop(align: :launch) }
+
+    def notes(src, from, to)
+      src.read(from, to).map { |e| [e.time, e.type, e.note] }
+    end
+
+    it 'start at their beginning when launched' do
+      src = MB::Sound::MIDI::ClipSource.new(launch_loop, transport: transport)
+      src.start_at(3/8r, origin: 3/8r) # timeline loops would be 1/8 into the E4
+      expect(notes(src, 0, 1/2r)).to eq([[0r, :note_on, 60], [1/4r, :note_off, 60], [1/4r, :note_on, 64]])
+    end
+
+    it 'count from the exact launch time when the first sample starts before it' do
+      src = MB::Sound::MIDI::ClipSource.new(launch_loop, transport: transport)
+      src.start_at(3/8r - 1/1000r, origin: 3/8r - 1/1000r, launch: 3/8r)
+      # 120 BPM: 1/1000 whole note is 2 ms, then every 1/8 (0.25 s)
+      expect(notes(src, 0, 1/2r)).to eq([[1/500r, :note_on, 60], [63/250r, :note_off, 60], [63/250r, :note_on, 64]])
+    end
+
+    # A launch-aligned loop launched at +launch+ plays like the timeline
+    # loop rotated by +launch+, wherever the timeline seeks
+    it 'keep their anchor through seeks and rewinds, matching a rotated timeline loop' do
+      launch = 3/8r
+      src = MB::Sound::MIDI::ClipSource.new(launch_loop, transport: transport)
+      ref = MB::Sound::MIDI::ClipSource.new(clip.rotate(launch).loop, transport: transport)
+      [src, ref].each { |s| s.start_at(launch, origin: launch) }
+      expect(notes(src, 0, 1/3r)).to eq(notes(ref, 0, 1/3r))
+
+      [5/16r, 0r, 1/16r, 7/3r, 3/8r].each_with_index do |pos, i|
+        t = 1/3r * (i + 1)
+        [src, ref].each { |s| s.start_at(pos, origin: launch) }
+        expect(notes(src, t, t + 1/3r)).to eq(notes(ref, t, t + 1/3r)), "seek to #{pos}"
+        expect(src.chase&.event&.note).to eq(ref.chase&.event&.note)
+      end
+    end
+
+    it 'start at their beginning on a swap, keeping that anchor through seeks until a new launch' do
+      src = MB::Sound::MIDI::ClipSource.new(MB::Sound::D4.n4.loop, transport: transport)
+      src.start_at(0)
+      src.swap_clip(launch_loop, time: 3/8r)
+      # The swap at 3/8 whole note (0.75 s) starts the C4
+      expect(notes(src, 0, 1)).to eq([[0r, :note_on, 62], [1/2r, :note_off, 62], [1/2r, :note_on, 62], [3/4r, :note_off, 62], [3/4r, :note_on, 60]])
+
+      # A seek in the same graph keeps the swap's anchor (3/8): 1/2 is 1/8
+      # past it, in the E4 (the sounding C4 ends at the jump)
+      src.start_at(1/2r, origin: 0)
+      expect(notes(src, 1, 5/4r)).to eq([[1r, :note_off, 60], [1r, :note_on, 64]])
+
+      # A new launch (e.g. #resume) starts the clip over from there
+      src.start_at(5/8r, origin: 5/8r)
+      expect(notes(src, 5/4r, 3/2r)).to eq([[5/4r, :note_off, 64], [5/4r, :note_on, 60]])
+    end
+  end
+
   describe '#seek and #restart' do
     let(:src) { MB::Sound::MIDI::ClipSource.new(MB::Sound.seq(MB::Sound::C4, MB::Sound::E4, MB::Sound::G4).n8, transport: transport) }
 
