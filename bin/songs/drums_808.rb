@@ -16,13 +16,17 @@
 #
 # Snippets to try in bin/sound.rb (X is an accent, 6 dB louder by default):
 #     bg :drums, tr808(grid(16, kick: 'X..x..x...x.x...', snare: '....X.......X...', hat: 'x.xXx.x.x.xXx.x.').loop)
-#     bg :bell, tr808(grid(16, cowbell: 'X.x.x.X..x.X.x..').loop, more_cowbell: true)    # +6 dB of cowbell
+#     bg :bell, tr808(grid(16, cowbell: 'X.x.x.X..x.X.x..').loop, more_cowbell: true)    # +6 dB of cowbell, rings 1.41x longer
+#     bg :snare, tr808(grid(16, snare: '....X...x..X.x.x').loop, snare: { decay: 0.75, snappy: 0.4 })  # the round 1 tonal snare, roughly
 #     bg :drums, tr808(grid(16, bd: 'x...x...', oh: '..x...x.', ch: 'x.x.x.x.').loop, kick: { tune: 45, decay: 1.2 }, accent: 10)
 #     bg :boom, tr808(grid(16, kick: 'X.......x.x.....').loop, kick: { tune: seq(E1, G1, D1, A0).n1.loop.freq, decay: 3 })  # a tuned 808 bass
 #     bg :wobble, tr808(grid(16, kick: 'x...').loop, kick: { tune: 0.25.hz.lfo.at(40..70), sigh: 1 })                     # moving knobs
 #     bg :pads, tr808(midi)                  # a MIDI drum pad (GM notes: 36 kick, 38 snare, 42/46 hats, 56 cowbell, ...)
 #     bg :file, tr808('spec/test_data/c2_sustain.mid', only: :kick)    # a .mid drum track
 #     k = tr808(grid(16, kick: 'x...x...', clap: '....x...').loop); k[:kick]    # one voice of a kit
+#     # Individual outputs (one named channel per voice), each with its own effects:
+#     o = tr808(grid(16, kick: 'X...x...', snare: '....X...', hat: 'x.x.x.x.', cowbell: '..x..X..').loop, outputs: :separate)
+#     bg :outs, o[:kick].softclip(0.5) + o[:snare].reverb(:room) + o[:closed_hat] + o[:cowbell].delay(3.n16, feedback: 0.45)
 #     play 50.hz.lfo.square.wraps.ping(110, decay: 0.3)                # the resonator under the kick (any trigger)
 #
 # Voices: kick, snare, rimshot, clap, closed_hat (hat), open_hat, cymbal,
