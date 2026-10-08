@@ -14,7 +14,8 @@ module MB
       # - +phase+: [phase in cycles, 0...1] (FastSound.phasor/oscillate,
       #   FastSynth.oscillate_bl/blit).
       # - +blep+: [previous effective phase, previous increment, previous
-      #   phase modulation, primed 0/1] (FastSynth.oscillate_bl).
+      #   phase modulation, primed: 1, or 0 before the first sample, 2 after
+      #   a phase jump] (FastSynth.oscillate_bl).
       # - +blit+: [integrator re, im, gain re, im, previous phase, previous
       #   increment, primed 0/1] (FastSynth.blit).
       # - +sync+: [phase, previous increment, direction +1/-1, ring
@@ -126,7 +127,7 @@ module MB
         # Forgets band-limiting history after a phase jump (the kernels
         # start fresh from the new phase).
         def unprime(sync: false)
-          @blep[3] = 0
+          @blep[3] = 2 if @blep[3] == 1 # unprimed after a jump (0: never played, stays 0)
           @blit[6] = 0
           @table[2] = 0
           if sync

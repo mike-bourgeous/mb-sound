@@ -28,14 +28,18 @@
 #     bg :naive, (100 * 2 ** (0.1.hz.ramp.lfo.at(0..6))).tone.wavetable(Wavetable.from_harmonics(Wavetable::Library.saw, mips: false)).at(0.2)
 #     bg :warp, 110.hz.wavetable(:organ).pwm(0.2.hz.lfo.at(0.1..0.9)).at(0.3)       # phase warp of any table
 #     bg :sync, 110.hz.wavetable(:organ).sync(ratio: 0.2.hz.lfo.at(1..5)).at(0.3)    # hard-synced table
-#     bg :csync, 110.hz.wavetable(Wavetable.from_harmonics(Wavetable::Library.saw, complex: true)).sync(ratio: 0.2.hz.lfo.at(1..5)).real.at(0.3)  # complex table, synced
+#     bg :csync, 110.hz.wavetable(Wavetable.from_harmonics(Wavetable::Library.saw, complex: true)).sync(ratio: 0.2.hz.lfo.at(1..5)).real * 0.3  # complex table, synced
+#     bg :wsync, 110.hz.wavetable(:saw).pwm(0.3).sync(ratio: 0.17.hz.lfo.triangle.at(1..4)).at(0.3)  # synced and warped: exact corners, no DC drift (2026-10-08)
+#     bg :zones, C2.wavetable(Wavetable::KeyMap.zones([:sine, :organ, :square, :pulses], from: C2, size: 12, normalize: :loudness)).at(0.3)  # key zones matched by perceived loudness
+#     Wavetable[:pulses].loudness.map { |db| db.round(2) }            # every frame as loud as the saw (K-weighted dB)
+#     bg :norm, 110.hz.wavetable(:basic_norm, scan: 0.1.hz.lfo.triangle.at(0..1)).at(0.3)  # :basic with every shape as loud as the saw
+#     bg :cwarp, 110.hz.wavetable(:saw).pwm(0.2.hz.lfo.at(0.1..0.9), clean: true).at(0.3)  # exact warp corners (opt-in, ~4x the cost)
 #     bg :shape, 110.hz.sine.at(0.9).waveshape(:basic, scan: 0.1.hz.lfo.triangle.at(0..1)).at(0.3)  # a waveshaper (-1..1 across the table)
 #     bg :bright, 110.hz.sine.at(0.9).waveshape(:saw, increment: false).at(0.3)   # ...reading the brightest level (aliases)
 #     bg :phase, (110.hz.phasor + 2.hz.sine.at(0.1)).phase_table(:organ).at(0.3)    # any phase signal (cycles)
 #     bg :add, 55.hz.harmonics(Array.new(16) { |i| (0.2 * (i + 1)).hz.lfo.at(0..1.0 / (i + 1)) }).at(0.3)  # additive, 16 moving harmonics
 #     bg :noise, 1.hz.wavetable(:organ).noise.at(0.1)                            # noise with the table's distribution (bin/plot_noise.rb plots them)
-#     t = Wavetable[:saw]; u = Wavetable.from_harmonics(Wavetable::Library.saw, taper: :sigma)  # exact library saw (Gibbs peaks at 1.18) vs sigma taper (peaks near 1)
-#     bg :exact, 110.hz.wavetable(t).at(0.3); bg :tapered, 110.hz.wavetable(u).at(0.3)
+#     t = Wavetable[:saw]                                             # the exact library saw (Gibbs peaks at 1.18)
 #     t.save('/tmp/saw.flac'); Wavetable.from_file('/tmp/saw.flac').metadata   # saved tables keep their settings
 #     t = Wavetable.from_file('sounds/piano_120hz_b2.flac', mode: :sample, root: 120, loop: 12000...16000)
 #     bg :piano, E3.wavetable(t).at(0.5)                               # a looped sample at E3

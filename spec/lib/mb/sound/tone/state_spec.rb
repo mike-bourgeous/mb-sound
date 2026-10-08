@@ -51,7 +51,7 @@ RSpec.describe(MB::Sound::Tone::State) do
     s.sync.replace([0.9, 0.1, -1.0, 3, 1])
     s.sync_ring.fill(1)
     s.unprime(sync: true)
-    expect(s.blep[3]).to eq(0)
+    expect(s.blep[3]).to eq(2) # unprimed after a jump (a fresh 0 means a first sample)
     expect(s.blit[6]).to eq(0)
     expect(s.sync).to eq([0.4, 0.0, 1.0, 0, 0])
     expect(s.sync_ring.abs.max).to eq(0)

@@ -22,10 +22,16 @@
 #     left/right    seek -/+ 2 s (h/l too; up/down or j/k seek 10 s)
 #     0, home       back to the start of the pair
 #     n, p          next/previous pair (enter: next)
-#     m             level matching on/off (scales B to A's RMS)
+#     m             level matching on/off (scales B to A's loudness)
+#     M             match by integrated loudness (LUFS) or RMS
 #     L             loop on/off (off: go to the next pair at the end)
 #     ?             reveal which is which (--blind)
 #     q, ctrl-c     quit
+#
+# Level matching (-m, m key) scales B to A's integrated loudness (ITU-R
+# BS.1770 LUFS, see MB::Sound.loudness) by default, or to A's RMS with
+# --match-by rms (M key switches); pairs with a file below BS.1770's
+# -70 LUFS gate fall back to RMS.
 #
 # Switches crossfade over --crossfade ms.  The time shown is the playback
 # position written to the sound card, about one output queue ahead of
@@ -165,6 +171,14 @@ class ABPair
     }
   end
 
+  # Integrated loudness in LUFS of [A, B] (ITU-R BS.1770, each over its own
+  # length; mono files count as both channels, as they play).
+  def lufs
+    @lufs ||= @data.zip(@lengths).map { |d, len|
+      len == 0 ? -Float::INFINITY : MB::Sound.loudness(d.map { |c| c[0...len] }, sample_rate: @rate, true_peak: false).integrated
+    }
+  end
+
   # Peak level in dB of [A, B].
   def peak_db
     @peak_db ||= @data.map { |d|
@@ -180,7 +194,7 @@ class ABPlayer
   SEEK_LONG = 10.0
   FADE_IN = 0.005
 
-  def initialize(pairs, output:, crossfade:, blind:, auto:, loop:, match:, keys:, notes:)
+  def initialize(pairs, output:, crossfade:, blind:, auto:, loop:, match:, keys:, notes:, match_by: :lufs)
     @notes = notes
     @pairs = pairs
     @output = output
@@ -190,6 +204,7 @@ class ABPlayer
     @auto = auto
     @loop = loop
     @match = match
+    @match_by = match_by
     @keys = keys
     @queue = Queue.new
   end
@@ -241,8 +256,7 @@ class ABPlayer
     @flip = @blind ? rand < 0.5 : false
     @mix = @target = 1.0 if @flip
 
-    a_rms, b_rms = @pair.rms_db
-    @b_gain = (a_rms.finite? && b_rms.finite?) ? 10 ** ((a_rms - b_rms) / 20) : 1.0
+    update_match_gain
 
     $stderr.print "\r\e[K" if @keys
     say pair_info
@@ -252,6 +266,18 @@ class ABPlayer
       end
     end
     status_line
+  end
+
+  # Sets B's gain for level matching: A's level minus B's by integrated
+  # loudness (or RMS with --match-by rms, and for pairs with a file below the -70 LUFS gate).
+  def update_match_gain
+    a, b = @match_by == :lufs ? @pair.lufs : @pair.rms_db
+    @match_used = @match_by
+    unless a.finite? && b.finite?
+      a, b = @pair.rms_db
+      @match_used = :rms
+    end
+    @b_gain = (a.finite? && b.finite?) ? 10 ** ((a - b) / 20) : 1.0
   end
 
   # Prints lines to stderr, ending them with CR LF while the key reader
@@ -265,18 +291,24 @@ class ABPlayer
   def pair_info
     a_peak, b_peak = @pair.peak_db
     a_rms, b_rms = @pair.rms_db
+    a_lufs, b_lufs = @pair.lufs
     head = "\e[1m[#{@index + 1}/#{@pairs.length}] #{@pair.name}\e[0m  #{format('%.2f', @pair.frames.to_f / @rate)} s"
     return head if @blind
 
+    diff = ->(a, b, unit) { a.finite? && b.finite? ? "  (#{format('%+.1f', b - a)} #{unit})" : '' }
     [
       head,
-      "  A: #{@pair.a_path}  peak #{db(a_peak)}  rms #{db(a_rms)}",
-      "  B: #{@pair.b_path}  peak #{db(b_peak)}  rms #{db(b_rms)}  (#{format('%+.1f', b_rms - a_rms)} dB rms)",
+      "  A: #{@pair.a_path}  peak #{db(a_peak)}  rms #{db(a_rms)}  #{lufs(a_lufs)}",
+      "  B: #{@pair.b_path}  peak #{db(b_peak)}  rms #{db(b_rms)}  #{lufs(b_lufs)}#{diff.(a_rms, b_rms, 'dB rms')}#{diff.(a_lufs, b_lufs, 'LU')}",
     ].join("\n")
   end
 
   def db(v)
     v.finite? ? format('%.1f dB', v) : 'silent'
+  end
+
+  def lufs(v)
+    v.finite? ? format('%.1f LUFS', v) : '-- LUFS'
   end
 
   def label(which)
@@ -289,7 +321,7 @@ class ABPlayer
   def status_line(final: false)
     which = @target >= 0.5 ? 1 : 0
     flags = []
-    flags << 'match' if @match
+    flags << "match #{@match_used == :lufs ? 'LUFS' : 'RMS'}" if @match
     flags << 'loop' if @loop
     flags << "auto #{@auto}s" if @auto
     text = format("%s  %6.2f / %.2f s  %s", label(which), @pos.to_f / @rate, @pair.frames.to_f / @rate, flags.join(' '))
@@ -414,6 +446,10 @@ class ABPlayer
       when 'n', "\r", "\n" then next_pair(1)
       when 'p' then next_pair(-1)
       when 'm' then @match = !@match; status_line
+      when 'M'
+        @match_by = @match_by == :lufs ? :rms : :lufs
+        update_match_gain
+        status_line
       when 'L' then @loop = !@loop; status_line
       when '?'
         if @blind && !@revealed
@@ -435,7 +471,8 @@ MB::Sound.script(
   blind: [false, '-B', 'Blind test: label the files X and Y in random order (? reveals)'],
   auto: [nil, Float, '-a', 'Switch A/B every this many seconds and play each pair once (no keys needed)', 0.05..600.0],
   loop: [true, 'Loop each pair (--auto plays each pair once)'],
-  match: [false, '-m', 'Start with level matching on (B scaled to A by RMS)'],
+  match: [false, '-m', 'Start with level matching on (B scaled to A)'],
+  match_by: [:lufs, Symbol, 'Level matching measure: lufs (integrated loudness) or rms', %i[lufs rms]],
   crossfade: [10.0, Float, '-x', 'Crossfade time in milliseconds for switches', 0.0..1000.0],
   latency_profile: ['low', String, '-L', 'Latency profile (AUDIO_PROFILE wins)', %w[low default video safe]],
   notes: [true, 'Show README.md items that name each pair (what to listen for)'],
@@ -465,12 +502,12 @@ MB::Sound.script(
 
   keys = $stdin.tty?
   if keys
-    $stderr.puts "\e[2mspace/tab switch  a/b pick  ←/→ ±2 s  ↑/↓ ±10 s  0 start  n/p pair  m match  L loop#{p.blind ? '  ? reveal' : ''}  q quit\e[0m"
+    $stderr.puts "\e[2mspace/tab switch  a/b pick  ←/→ ±2 s  ↑/↓ ±10 s  0 start  n/p pair  m match  M lufs/rms  L loop#{p.blind ? '  ? reveal' : ''}  q quit\e[0m"
   end
 
   output = MB::Sound.output(channels: 2, shared: false, profile: p.latency_profile.to_sym)
   begin
-    ABPlayer.new(pairs, output: output, crossfade: p.crossfade / 1000.0, blind: p.blind, auto: p.auto, loop: p.loop && !p.auto, match: p.match, keys: keys, notes: p.notes).run
+    ABPlayer.new(pairs, output: output, crossfade: p.crossfade / 1000.0, blind: p.blind, auto: p.auto, loop: p.loop && !p.auto, match: p.match, match_by: p.match_by, keys: keys, notes: p.notes).run
   ensure
     output.close
   end

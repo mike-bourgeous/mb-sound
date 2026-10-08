@@ -28,9 +28,14 @@
 #     bg :drive, 2000.hz.sine.at(4).softclip * 0.3                    # ADAA soft clip; compare asoftclip
 #     bg :crush, 1500.hz.sine.quantize(0.25) * 0.3                    # antialiased bitcrush; compare aquantize
 #     bg :gate, 220.hz.sine.at(0.3) * 3.hz.ramp.lfo.at(0..1)           # an LFO keeps exact edges below 15 Hz
+#     bg :rst, 700.hz.ramp.reset(200.hz.lfo.wraps, clean: true).at(0.3)  # audio-rate resets as clean as sync (opt-in; compare without clean:)
+#     bg :cpm, 110.hz.complex_ramp.pm(220.hz.sine.at(0.7)).real * 0.3  # complex shapes band-limited under PM (a complex wavetable)
+#     bg :cpw, 110.hz.complex_square.pwm(0.3.hz.lfo.at(0.15..0.85), clean: true).real * 0.3  # ...and under pwm (exact corners with clean:)
+#     bg :csy, 110.hz.complex_ramp.sync(ratio: 0.2.hz.lfo.at(1..4)).real * 0.3  # ...and sync
 #     stop :saw                                                        # etc.; or stop all with `stop`
 #
 #     bin/aliasing.rb 'p.ramp.sync(ratio: 2.37)' 'p.aramp.sync(ratio: 2.37)'   # measure any expression
+#     bin/aliasing.rb -c 'p.complex_ramp.pm(p.sine.at(0.5))'          # complex outputs, two-sided
 
 require 'bundler/setup'
 require 'mb-sound'

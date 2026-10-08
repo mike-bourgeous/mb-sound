@@ -8,8 +8,15 @@ module MB
       # as the Event's note).  Note-offs have the default release velocity.
       #
       # It follows the timeline as a Sequence::TimelineNode: looping clips
-      # play in phase with the transport's timeline, and non-looping clips
-      # play from their start where the graph launched.  The tempo is read
+      # play in phase with the transport's timeline, launch-aligned looping
+      # clips (Clip#loop with +align: :launch+) and non-looping clips play
+      # from their start where the graph launched (or where #swap_clip
+      # brought them in).  When the timeline jumps (seek, rewind), timeline
+      # loops follow the new position; a launch-aligned loop keeps its
+      # anchor, playing the same cycle phase relative to its launch point it
+      # would have played without the jump (before the launch point, the
+      # cycles leading up to it); a non-looping clip moves to the jump's
+      # distance from the graph's launch (before it: silence until then).  The tempo is read
       # at each #read, so a reader at sample rate r that reads one buffer at
       # a time gets each edge on the sample where it falls at the tempo of
       # that buffer (the same samples as the old ClipNode renderers; see
@@ -40,6 +47,8 @@ module MB
           @transport = transport
           @clip_position = 0r
           @origin = 0r
+          @graph_origin = nil
+          @swap_anchor = nil
           @pending_swap = nil
           @node_type_name = 'MIDI Clip'
         end
@@ -113,9 +122,36 @@ module MB
         # in phase with the timeline (clip position = +time+), non-looping
         # clips from their start at +origin+.
         def timeline_start(time, origin)
-          @origin = @clip.looping? ? 0r : origin
-          @clip_position = time - @origin
+          # A new launch (rather than a seek of the same graph) forgets the
+          # anchor of an earlier swap
+          @swap_anchor = nil if @graph_origin != origin
+          @graph_origin = origin
+
+          @origin = clip_origin(@clip, @swap_anchor || timeline_launch || origin, origin)
+          @clip_position = wrap_position(time - @origin)
           jumped
+        end
+
+        # Where +clip+'s position 0 falls on the timeline for a clip
+        # launched at +launch+ (exact) in a graph whose first sample starts
+        # at +origin+: 0 for timeline loops, +launch+ for launch-aligned
+        # loops (so loop edges stay on the musical grid), +origin+ for
+        # non-looping clips (their first edge on the first sample).
+        def clip_origin(clip, launch, origin)
+          if clip.launch_aligned?
+            launch
+          elsif clip.looping?
+            0r
+          else
+            origin
+          end
+        end
+
+        # A launch-aligned loop before its anchor (after a rewind, or within
+        # the sample before an off-sample launch) plays the cycles leading up
+        # to it, so its position wraps into the loop.
+        def wrap_position(position)
+          position < 0 && @clip.launch_aligned? ? position % @clip.length : position
         end
 
         def read_events(from, to)
@@ -133,8 +169,10 @@ module MB
               split = time > start ? from + (time - start) / wnps : from
               out = split > from ? edges(from, split, wnps) : []
               @clip = clip
-              @origin = clip.looping? ? 0r : MB::M.max(time, start)
-              @clip_position = MB::M.max(time, start) - @origin
+              swap_time = MB::M.max(time, start)
+              @swap_anchor = clip.launch_aligned? ? swap_time : nil
+              @origin = clip_origin(clip, swap_time, swap_time)
+              @clip_position = swap_time - @origin
               @generation = generation + 1
               note = chase_event
               @chase = note && Chase.new(generation: @generation, time: split, event: note.at(split))

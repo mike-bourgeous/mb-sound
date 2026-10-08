@@ -253,4 +253,46 @@ RSpec.describe(MB::Sound::Session::Master) do
     transport.seek(1 - 800r / 96000)
     expect(run(1600)[0].to_a.values_at(0, 800)).to eq([0, 1])
   end
+
+  describe 'clips counted from the chain launch' do
+    before do
+      session.add(1.constant)
+      run(800)
+    end
+
+    it 'keeps the anchor of launch-aligned loops through seeks and rewinds' do
+      gate = MB::Sound.grid(4, 'x..').loop(align: :launch).gate # 3 beats, gate on in the first
+      session.master(start_time: 1r, fade: 0) { |m| m * gate }
+      data = run(96000 * 2)[0] # from frame 800
+      frames = [96000 - 1, 96000, 96000 + 23999, 96000 + 24000, 96000 + 71999, 96000 + 72000]
+      expect(data.to_a.values_at(*frames.map { |f| f - 800 })).to eq([1, 1, 1, 0, 0, 1]) # the mix passes before the chain
+
+      # Rewound to beat 2 (1/4): three beats before the anchor, so on.
+      # Seeked to bar 3 (2): a beat past a cycle start, so off (a restart
+      # would turn it on).
+      transport.seek(1/4r)
+      expect(run(800)[0][0]).to eq(1)
+      transport.seek(2r)
+      expect(run(800)[0][0]).to eq(0)
+      transport.seek(7/4r)
+      expect(run(800)[0][0]).to eq(1)
+    end
+
+    it 'counts non-looping clips from the chain start through seeks, like players' do
+      # One quarter note in a long non-looping clip (so the chain doesn't end)
+      gate = MB::Sound::Sequence::Clip.new(MB::Sound::C4.n4.events, length: 8).gate
+      session.master(start_time: 1r, fade: 0) { |m| m * gate }
+      data = run(96000 + 48000)[0] # from frame 800
+      expect(data.to_a.values_at(*[96000 - 1, 96000 + 23999, 96000 + 24000].map { |f| f - 800 })).to eq([1, 1, 0])
+
+      # Seeking past the note stays silent, and rewinding an eighth before
+      # the chain start plays the note an eighth (12000 frames) later; a
+      # restart would play it right away both times
+      transport.seek(1 + 3/8r)
+      expect(run(800)[0][0]).to eq(0)
+      transport.seek(7/8r)
+      data = run(12800)[0]
+      expect(data.to_a.values_at(0, 11999, 12000)).to eq([0, 0, 1])
+    end
+  end
 end

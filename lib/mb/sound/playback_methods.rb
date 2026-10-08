@@ -572,10 +572,37 @@ module MB
       # realtime: true streaming to a URL); it is closed when the render
       # finishes.
       #
+      # With +:loudness+ (a number of LUFS or a Loudness::TARGETS name like
+      # :spotify or :ebu_r128; see Loudness.target), the finished file is
+      # normalized in a second pass: measured per ITU-R BS.1770 and
+      # rewritten with the gain that reaches the target (see
+      # Loudness.normalize_file; gain only, no limiter).  +:peak+ says what
+      # to do when that gain would put the true peak above the target's
+      # ceiling: :warn (default) keeps the loudness and warns, :reduce lowers
+      # the gain to the ceiling (missing the loudness target, with a
+      # warning).  Needs a filename (not an output object).  The master
+      # gain still applies while rendering, so it doesn't change the result
+      # (except for clipping in integer formats, which the second pass
+      # can't undo: leave headroom, as the default -10 dB master gain does).
+      #
       # Example (bin/sound.rb):
       #     bass = seq(C2, C2, rest, C3).n16.loop
       #     render '/tmp/bass.flac', bass.tone.ramp.at(1) * bass.env * 0.5, bars: 4
-      def render(filename, *sounds, bars: nil, seconds: nil, tail: false, bpm: nil, channels: 2, overwrite: false, buffer_size: 800, gain: nil, &block)
+      #     render '/tmp/bass_spotify.flac', bass.tone.ramp.at(1) * bass.env, bars: 4, loudness: :spotify
+      def render(filename, *sounds, loudness: nil, peak: :warn, **kwargs, &block)
+        return render_session(filename, *sounds, **kwargs, &block) unless loudness
+
+        raise ArgumentError, 'render(loudness:) needs a filename to normalize (not an output object)' unless filename.is_a?(String)
+        target = Loudness.target(loudness)
+        seconds = render_session(filename, *sounds, **kwargs, &block)
+        Loudness.normalize_file(filename, target, peak: peak)
+        seconds
+      end
+
+      private
+
+      # Renders without normalization (see #render).
+      def render_session(filename, *sounds, bars: nil, seconds: nil, tail: false, bpm: nil, channels: 2, overwrite: false, buffer_size: 800, gain: nil, &block)
         raise ArgumentError, 'Pass one or more sounds or a block to render' if sounds.empty? && block.nil?
         raise ArgumentError, 'Pass bars: or seconds:, not both' if bars && seconds
 
@@ -628,8 +655,6 @@ module MB
       ensure
         session&.close
       end
-
-      private
 
       # Replaces the background session's output (see Session.use_output),
       # and points live MIDI sources opened by #midi at the new output's

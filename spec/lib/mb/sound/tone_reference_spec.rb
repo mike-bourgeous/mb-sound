@@ -33,13 +33,13 @@ RSpec.describe('Tone null-test reference') do
     # Fix 2026-10-07: phase jumps (resets, key sync, timeline locks) get
     # the area of an ideal step on the sample (no DC drift at audio-rate
     # resets), and a reset on a jump in value starts from its left side
-    'clip_key_sync_variants' => 'phase jumps: ideal step area',
+    'clip_key_sync_variants' => 'phase jumps: ideal step area; 2026-10-08: first sample as if the tone had always run',
     'clip_synth' => 'phase jumps: ideal step area',
     'clip_tone' => 'phase jumps: ideal step area',
     'reset' => 'phase jumps: ideal step area',
-    'reset_edges' => 'phase jumps: ideal step area',
+    'reset_edges' => 'phase jumps: ideal step area; 2026-10-08: first sample as if the tone had always run',
     'reset_fm_pm' => 'phase jumps: ideal step area',
-    'reset_pwm' => 'phase jumps: ideal step area',
+    'reset_pwm' => 'phase jumps: ideal step area; 2026-10-08: first sample as if the tone had always run',
     'reset_random' => 'phase jumps: ideal step area',
     'reset_to' => 'phase jumps: ideal step area',
     'reset_to_node' => 'phase jumps: ideal step area',
@@ -47,6 +47,31 @@ RSpec.describe('Tone null-test reference') do
     'tempo_audio_rate_seek' => 'phase jumps: ideal step area',
     'tempo_lfo_changes' => 'phase jumps: ideal step area',
     'tone_ports_reset' => 'phase jumps: ideal step area',
+    # 2026-10-08: complex shapes with phase modulation, warps, or sync play
+    # from complex wavetables (Tone#complex_table?) instead of the naive
+    # closed forms
+    'complex_ramp_pm' => 'complex shapes: PM from a complex table (was the naive acomplex_ramp)',
+    # Fix 2026-10-08: a band-limited (PolyBLEP) tone's first sample is
+    # corrected as if the tone had always run, so a square or pulse starting
+    # on its edge at phase 0 plays the edge's midpoint (0), not +1; only
+    # sample 0 changes (warp corners at phase 0 get their small kink term)
+    'pulse_dc' => 'first sample as if the tone had always run',
+    'pulse' => 'first sample as if the tone had always run',
+    'pm_index' => 'first sample as if the tone had always run',
+    'square_110' => 'first sample as if the tone had always run',
+    'rate_96000_fm' => 'first sample as if the tone had always run',
+    'notes' => 'first sample as if the tone had always run',
+    'ramp_pwm' => 'first sample as if the tone had always run',
+    'reset_lfo' => 'first sample as if the tone had always run',
+    'drumramp' => 'first sample as if the tone had always run',
+    'sine_pwm' => 'first sample as if the tone had always run',
+    'sync_tone_master' => 'first sample as if the tone had always run',
+    'pwm_node' => 'first sample as if the tone had always run',
+    'lfo_square_20' => 'first sample as if the tone had always run',
+    'square_3520' => 'first sample as if the tone had always run',
+    'skew_triangle' => 'first sample as if the tone had always run',
+    'negative_amp' => 'first sample as if the tone had always run',
+    'parabola_pwm' => 'first sample as if the tone had always run',
   }.freeze
 
   it 'has a reference for every case' do

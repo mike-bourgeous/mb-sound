@@ -15,14 +15,24 @@ module MB
       # @transport in their constructor (Sequence.transport by default).
       module TimelineNode
         # Starts following the timeline at position +time+ (in whole notes)
-        # for a graph launched at timeline position +origin+.  If a
-        # +transport+ is given, this node follows it from now on.  Returns
-        # self.
-        def start_at(time, origin: time, transport: nil)
+        # for a graph launched at timeline position +origin+ (the start of
+        # the graph's first sample).  +launch+ is the exact launch time the
+        # graph was scheduled for (e.g. a bar line), which can fall up to a
+        # sample after +origin+; launch-aligned looping clips count their
+        # cycles from it (see Sequence::Clip#loop).  If a +transport+ is
+        # given, this node follows it from now on.  Returns self.
+        def start_at(time, origin: time, launch: origin, transport: nil)
           @transport = transport if transport
           @timeline_paused = false
+          @timeline_launch = launch.to_r
           timeline_start(time.to_r, origin.to_r)
           self
+        end
+
+        # The exact launch time given to the last #start_at (whole notes), or
+        # nil before the first.
+        def timeline_launch
+          @timeline_launch
         end
 
         # Called by Session for each buffer rendered while the timeline is
