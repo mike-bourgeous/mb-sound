@@ -40,6 +40,12 @@ module MB
           @stale = true
         end
 
+        # Recompiles the region computing +node+ (if any) before its next
+        # block (see Plan.changed).
+        def settings_changed(node)
+          @region_of&.[](node)&.recompile
+        end
+
         # Finds and installs the regions.
         def build
           @stale = false
@@ -47,6 +53,20 @@ module MB
           assign
           @regions.each(&:install) unless @dry_run
           watch unless @dry_run
+          self
+        end
+
+        # Compiles every region that hasn't played yet (see
+        # Region#precompile), here and in the installations of nodes this
+        # one found already planned (e.g. a Synth's lanes when a Session
+        # adds the Synth), so playing starts without compiling.
+        def precompile
+          others = @seen.each_key.filter_map { |n|
+            next unless n.is_a?(Describable)
+            owner = n.instance_variable_get(:@plan_region) || n.instance_variable_get(:@plan_member)
+            owner&.installation unless owner&.installation.equal?(self)
+          }.uniq
+          (@regions + others.flat_map(&:regions)).each(&:precompile)
           self
         end
 

@@ -1021,7 +1021,7 @@ module MB
         @period_samples = @period * @sample_rate if @period
         @advance = nil
         @kernel = nil
-        Plan.changed(self)
+        Plan.changed(self, structure: false)
         self
       end
       alias at_rate sample_rate=

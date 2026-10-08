@@ -78,7 +78,9 @@ module MB
           .delay(0.005, feedback: -12.db, dry: 1, wet: 0.5)
           .proc { |buf| buf }
 
+        Plan.install(graph)
         calls.times { graph.sample(buffer) }
+        warm_up_plans(buffer)
 
         warm_up_notes(calls: [calls, 60].min, buffer: buffer) if midi
 
@@ -86,6 +88,26 @@ module MB
       end
 
       private
+
+      # Builds and compiles a fused plan (see Plan) again and again, so
+      # the planner's Ruby is compiled before a live graph's first block
+      # plans its regions (cold, that took about 10 ms per Synth lane).
+      def warm_up_plans(buffer)
+        return unless Plan.enabled
+
+        trig = Notes.new(seq(Note.new(48), Note.new(55)).n16.loop).trigger
+        lfo = 0.2.hz.triangle.lfo.at(-20..-6)
+        graph = (220.hz.complex_sine.pm(110.hz.sine.reset(trig) * 0.7.hz.lfo.at(0..2)).real * (10 ** (lfo / 20)) +
+          330.hz.ramp.reset(trig).at(0.2) - 0.5.constant * 165.hz.square.pwm(0.3)) * 0.5
+        inst = Plan.install(graph)
+        return unless inst
+
+        40.times do
+          inst.rebuild
+          graph.sample(buffer)
+        end
+        inst.uninstall
+      end
 
       # The MIDI path: a LiveSource on a fake input (live MIDI timing), a
       # Synth whose Notes voices use the common helpers (key-synced tones,

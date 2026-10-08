@@ -111,13 +111,33 @@ module MB
           @out = nil
           @out_views.clear
 
-          @program.tones.each { |op| op.tone.plan_start } if start
+          @started = false
+          start_tones if start
           @program
 
         rescue Unsupported => e
           @program = nil
           @installation.unsupported!(e.node, e.message)
           nil
+        end
+
+        # Asks for a recompile before the next block (a node's settings
+        # changed; see Plan.changed).  Safe to call from another thread.
+        def recompile
+          @recompile = true
+        end
+
+        # Compiles a region that hasn't played yet ahead of time (from
+        # Plan.install, so a live graph's first block doesn't compile;
+        # its tones start when it plays).  Returns the program or nil.
+        def precompile
+          return @program unless @planned_blocks == 0 && @unfused_blocks == 0
+
+          if @recompile
+            @recompile = false
+            @program = nil
+          end
+          compile(start: false)
         end
 
         # Runs one block (called by the root's Planned hook).
@@ -129,9 +149,20 @@ module MB
 
           return run_unfused(count) if @disabled || count <= 0
 
+          if @recompile
+            @recompile = false
+            @program = nil
+          end
+
           unless @program || compile
             return @root.sample(count) if @installation.stale?
             return run_unfused(count)
+          end
+          start_tones unless @started
+
+          if @installation.check
+            stateful = @members.select { |m| m.respond_to?(:plan_snapshot) }
+            before = stateful.map(&:plan_snapshot)
           end
 
           gathered = gather(count)
@@ -139,7 +170,7 @@ module MB
           return replay_unfused(count) if gathered == :mismatch
 
           n = gathered
-          return check_block(n) if @installation.check
+          return check_block(n, count, stateful, before) if @installation.check
 
           @planned_blocks += 1
           execute(n)
@@ -166,6 +197,12 @@ module MB
         end
 
         private
+
+        # Starts the region's tones as their first #sample would.
+        def start_tones
+          @program.tones.each { |op| op.tone.plan_start }
+          @started = true
+        end
 
         # Builder resolver: describes members inside the plan, reads
         # everything else as boundary inputs.
@@ -328,16 +365,13 @@ module MB
         # Check mode: runs the block planned, then unfused from the same
         # state with the same inputs, and compares the samples and the
         # nodes' states.  Returns the unfused samples.
-        def check_block(n)
-          stateful = @members.select { |m| m.respond_to?(:plan_snapshot) }
-          before = stateful.map(&:plan_snapshot)
-
+        def check_block(n, count, stateful, before)
           planned = execute(n)
           planned = planned.dup
           planned_states = stateful.map(&:plan_snapshot)
 
           stateful.each_with_index { |m, i| m.plan_restore(before[i]) }
-          reference = replay_unfused(n)
+          reference = replay_unfused(count)
           @unfused_blocks -= 1
           @planned_blocks += 1
 

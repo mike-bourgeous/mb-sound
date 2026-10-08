@@ -23,7 +23,7 @@ module MB
         # Changes the constant term.
         def constant=(value)
           @constant = value
-          Plan.changed(self)
+          Plan.changed(self, structure: false)
         end
 
         # Creates a Mixer with the given inputs, which must be either Numeric
@@ -174,9 +174,10 @@ module MB
         # indices instead, or use standalone addition and multiplication.
         def []=(summand, gain)
           # TODO: smooth gain changes
+          known = summand.is_a?(Integer) || @orig_to_samp.include?(summand)
           samp = find_summand(summand, create: true)
           @gains[samp] = gain
-          Plan.changed(self)
+          Plan.changed(self, structure: !known)
         end
 
         # Removes the given +summand+ from the mixer.  The +summand+ may be an

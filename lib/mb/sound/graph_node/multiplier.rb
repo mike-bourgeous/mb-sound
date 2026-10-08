@@ -115,7 +115,7 @@ module MB
         # Changes the constant factor.
         def constant=(value)
           @constant = value
-          Plan.changed(self)
+          Plan.changed(self, structure: false)
         end
 
         # Adds another multiplicand (e.g. an envelope generator) to the product.

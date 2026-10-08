@@ -137,15 +137,21 @@ module MB
 
           inst = Installation.new(outputs.flatten.flat_map { |o| o.respond_to?(:outputs) ? o.outputs.to_a : [o] }, engine: engine, check: check)
           inst.build
+          inst.precompile
           inst.regions.empty? ? (inst.uninstall; nil) : inst
         end
 
-        # Called by nodes (and Tees) after a structural change (inputs
-        # added or removed, settings, spies): installations covering
-        # +node+ rebuild their plans before their next block.
-        def changed(node)
+        # Called by nodes (and Tees) after a change: a structural change
+        # (inputs added or removed, spies, configuration) makes the
+        # installations covering +node+ rebuild their plans before their
+        # next block; a settings change (+structure: false+: a sample rate,
+        # a Multiplier's constant, a Mixer gain) only recompiles the region
+        # computing +node+.
+        def changed(node, structure: true)
           list = watch[node]
-          list&.each(&:stale!)
+          return nil unless list
+
+          list.each { |inst| structure ? inst.stale! : inst.settings_changed(node) }
           nil
         end
 
