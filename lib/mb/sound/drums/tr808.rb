@@ -292,7 +292,7 @@ module MB
           def rimshot(t, tune:, decay:, tone:, level:)
             f = Drums.hz(tune)
             pings = Drums.mix(t.ping(f, decay: decay) * (1.2 - 0.6 * tone), t.ping(f * 3.66, decay: decay * 0.6) * (0.4 + 0.8 * tone))
-            ((pings.filter(:highpass, cutoff: 400, quality: 0.7) * 1.1).softclip(0.7, 1.0) * level).named('808 rimshot')
+            ((pings.filter(:highpass, cutoff: 400, quality: 0.7) * 0.9).softclip(0.8, 1.0) * level).named('808 rimshot')
           end
 
           # Bandpassed noise (about 1.1 kHz, +tone+ moves it) with three
