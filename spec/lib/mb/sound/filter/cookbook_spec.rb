@@ -30,6 +30,13 @@ RSpec.describe(MB::Sound::Filter::Cookbook, :aggregate_failures) do
       expect(wrapper.sample(100)).to eq(nil)
     end
 
+    it 'accepts numbers for #dynamic_process parameters' do
+      f = MB::Sound::Filter::Cookbook.new(:lowpass, 48000, 1000, quality: 1)
+      out = f.dynamic_process(Numo::SFloat.ones(100), cutoff: 500, quality: 2.0)
+      expect(out.isfinite.all?).to eq(true)
+      expect(f.center_frequency).to eq(500)
+    end
+
     it 'can use an narray to control filter parameters' do
       f = 20000.hz.lowpass
       cutoff = 1.hz.lfo.square.at(20000..500).sample(48000) # an LFO keeps exact edges (a band-limited square starts at its midpoint)
@@ -251,6 +258,22 @@ RSpec.describe(MB::Sound::Filter::Cookbook, :aggregate_failures) do
 
       result = MB::Sound::Filter::Cookbook.new(:bandpass, 48000, 5000, quality: 50, db_gain: 5.to_db)
       expect(result.coefficients).to all_be_within(6).sigfigs.of_array(coeff)
+    end
+  end
+
+  context 'bandpass_skirt' do
+    it 'has the constant 0 dB peak bandpass zeros times the quality' do
+      peak = MB::Sound::Filter::Cookbook.new(:bandpass, 48000, 5000, quality: 50)
+      skirt = MB::Sound::Filter::Cookbook.new(:bandpass_skirt, 48000, 5000, quality: 50)
+      expect(skirt.coefficients).to all_be_within(10).sigfigs.of_array(peak.coefficients.each_with_index.map { |c, i| i < 3 ? c * 50 : c })
+      expect(skirt.response(2 * Math::PI * 5000 / 48000).abs).to be_within(1e-9).of(50)
+    end
+
+    it 'gives the same coefficients in C and Ruby, with gain' do
+      f = MB::Sound::Filter::Cookbook.new(:bandpass_skirt, 48000, 1234, quality: 3, db_gain: -4)
+      c = f.coefficients
+      f.set_parameters_ruby(:bandpass_skirt, 48000, 1234, quality: 3, db_gain: -4)
+      expect(f.coefficients).to all_be_within(14).sigfigs.of_array(c)
     end
   end
 

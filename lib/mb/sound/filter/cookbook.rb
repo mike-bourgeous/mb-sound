@@ -20,6 +20,7 @@ module MB
           :peak,
           :lowshelf,
           :highshelf,
+          :bandpass_skirt,
         ].freeze
 
         FILTER_TYPE_IDS = FILTER_TYPES.map.with_index.to_h.freeze
@@ -42,7 +43,8 @@ module MB
 
         # Initializes a filter based on Robert Bristow-Johnson's filter cookbook.
         # +filter_type+ is one of :lowpass, :highpass, :bandpass (peak at db_gain or 0dB),
-        # :notch, :allpass, :peak, :lowshelf, or :highshelf.
+        # :notch, :allpass, :peak, :lowshelf, :highshelf, or :bandpass_skirt
+        # (constant skirt gain: the peak gain is the quality, times db_gain).
         #
         # The +:shelf_slope+ should be 1.0 to have maximum slope without
         # overshoot.  See comments on https://www.musicdsp.org/en/latest/Filters/197-rbj-audio-eq-cookbook.html
@@ -219,6 +221,14 @@ module MB
             @b1 = 0
             @b2 = -alpha * a0_inv * linear_gain
 
+          when :bandpass_skirt
+            a0_inv = 1.0 / (1.0 + alpha)
+            @a1 = -2.0 * cosine * a0_inv
+            @a2 = (1.0 - alpha) * a0_inv
+            @b0 = 0.5 * sine * a0_inv * linear_gain
+            @b1 = 0
+            @b2 = -0.5 * sine * a0_inv * linear_gain
+
           when :notch
             a0_inv = 1.0 / (1.0 + alpha)
             @a1 = -2.0 * cosine * a0_inv
@@ -317,6 +327,11 @@ module MB
           samples = samples.real if samples.is_a?(Numo::SComplex) || samples.is_a?(Numo::DComplex)
           cutoff = cutoff.real if cutoff.is_a?(Numo::SComplex) || cutoff.is_a?(Numo::DComplex)
           quality = quality.real if quality.is_a?(Numo::SComplex) || quality.is_a?(Numo::DComplex)
+
+          # The kernel reads NArrays only (a number crashed it until
+          # 2026-10-08)
+          cutoff = Numo::SFloat.new(samples.length).fill(cutoff) if cutoff.is_a?(Numeric)
+          quality = Numo::SFloat.new(samples.length).fill(quality) if quality.is_a?(Numeric)
 
           # The kernel filters an inplace SFloat where it is and copies
           # anything else; copy a non-inplace SFloat into a reused buffer
