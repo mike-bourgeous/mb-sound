@@ -121,6 +121,23 @@ RSpec.describe(MB::Sound::Plan::Installation) do
       }
     end
 
+    it 'compares against the unfused nodes even when the plan is rebuilt during the block' do
+      # A boundary input that adds a reader to a fused node while it is
+      # read (a structural change in the middle of a block)
+      # (read first), so a region read later in the same block (+shared+,
+      # rooted separately) rebuilds the installation in the middle of the
+      # outer region's block
+      shared = 110.hz.sine * 2
+      other = shared.proc { |v| v } # an unplanned reader makes +shared+ a root
+      grower = Class.new(src) {
+        define_method(:sample) { |n| shared.get_sampler if position == 64; super(n) }
+      }
+      g = (grower.new(seed: 1) * 3 + shared * 0.5 + 330.hz.sine) * 2
+      inst = MB::Sound::Plan.install(g, check: :raise)
+      expect { [64, 64, 64, 64].each { |n| g.sample(n); other.sample(n) } }.not_to raise_error
+      expect(inst.regions.map(&:root)).to include(shared)
+    end
+
     it 'raises when a planned block differs from the unfused graph' do
       g = 220.hz.sine * src.new(seed: 1) * 2
       inst = MB::Sound::Plan.install(g, check: :raise)

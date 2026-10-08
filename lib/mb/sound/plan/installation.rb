@@ -66,7 +66,17 @@ module MB
             owner = n.instance_variable_get(:@plan_region) || n.instance_variable_get(:@plan_member)
             owner&.installation unless owner&.installation.equal?(self)
           }.uniq
-          (@regions + others.flat_map(&:regions)).each(&:precompile)
+          ([self] + others).each do |inst|
+            inst.regions.each(&:precompile)
+            # Nodes found unsupported while compiling (e.g. a shaper of a
+            # complex signal) replan now rather than at the first block
+            5.times do
+              break unless inst.stale?
+
+              inst.rebuild
+              inst.regions.each(&:precompile)
+            end
+          end
           self
         end
 

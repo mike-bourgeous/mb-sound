@@ -56,12 +56,19 @@ module MB
       # unfused, for a fallback or a check), and a node inside a region
       # that someone outside the plan reads makes the plan rebuild (see
       # Region#foreign_read).
+      #
+      # A region running its nodes unfused (a fallback or check mode's
+      # reference) sets @plan_bypass on them, so they run their own #sample
+      # even if the installation was rebuilt meanwhile (a node changed during
+      # the block) and their hooks point at a newer region.
       module Planned
         def sample(count)
-          if (region = @plan_region)
-            return region.sample(count) unless region.unfused
-          elsif (region = @plan_member) && !region.unfused
-            region.foreign_read(self)
+          unless @plan_bypass
+            if (region = @plan_region)
+              return region.sample(count) unless region.unfused
+            elsif (region = @plan_member) && !region.unfused
+              region.foreign_read(self)
+            end
           end
 
           super

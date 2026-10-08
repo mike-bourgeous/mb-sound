@@ -389,9 +389,11 @@ module MB
         def run_unfused(count)
           @unfused_blocks += 1
           @unfused = true
+          @members.each { |m| m.instance_variable_set(:@plan_bypass, true) }
           @root.sample(count)
         ensure
           @unfused = false
+          @members.each { |m| m.instance_variable_set(:@plan_bypass, false) }
         end
 
         # Check mode: runs the block planned, then unfused from the same
