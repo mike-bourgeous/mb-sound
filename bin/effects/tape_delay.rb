@@ -40,56 +40,36 @@ MB::Sound.effect_script(
   pitch: [false, 'Wobble the delay time for pitch effects'],
   oversample: [2.0, 'Oversampling factor'],
 ) { |input, p|
-  sample_rate = 48000
+  # The echo is a feedback loop (GraphNode#feedback through #delay's block)
+  # that runs one sample at a time, so any delay works (down to one
+  # sample) and the repeats are exactly --delay apart: the delay absorbs
+  # the tape sim's own latency.  (Until 2026-10-09 this script ran the loop
+  # in internal blocks of 32-512 samples with a spy, shortening the delay
+  # by a block; the sound is the same apart from the tape filters' few
+  # samples of latency, now compensated.)
+  #
+  # The delay time in seconds, wobbling for --pitch
+  time = p.pitch ? p.delay + -0.4.hz.ramp.at(0..(3250 / 48000.0)) : p.delay
 
-  delay_samples = MB::M.max((p.delay * sample_rate * p.oversample).round, 0)
-  wobble = p.pitch ? 3250 * p.oversample : 0
-
-  # The feedback comes back one internal buffer later, so the buffer must
-  # fit inside the shortest delay; larger buffers are much faster (measured
-  # in stereo: 32 samples ~180% of realtime, 256 ~45%)
-  internal_bufsize = [512, 256, 128, 64, 32].find { |n| n <= delay_samples - wobble } || 32
-
-  delay_samples = delay_samples + -0.4.hz.ramp.at(0..wobble) if p.pitch
-  delay_samples = delay_samples.constant if delay_samples.is_a?(Numeric)
-
-  # TODO: ping-pong
-  # TODO: MIDI control
-
-  # One tape echo per channel; the feedback loop keeps its own buffer, so it
-  # is built separately for each channel rather than per channel by the DSL
+  # One tape echo per channel
   tape_echo = ->(channel) {
-    # Read the input in full buffers, so the feedback loop can run with a
-    # smaller buffer size.
-    inp = channel.with_buffer(800).resample(mode: :libsamplerate_fastest).named('input')
+    # Resampled so --oversample runs the whole echo at the higher rate
+    inp = channel.resample(mode: :libsamplerate_fastest).named('input')
 
-    # Feedback buffer, overwritten by a later call to #spy
-    a = Numo::SFloat.zeros(internal_bufsize)
-
-    # Feedback injector and delay.  The feedback comes back one internal
-    # buffer late, so the delay line is that much shorter; the input is
-    # delayed by the same amount so the first echo isn't early.
-    adjusted_delay = (delay_samples.named('delay in samples') - internal_bufsize.constant.named('buffer size')).aclip(0, nil)
-    tape_in = inp.delay(internal_bufsize.samples, smoothing: false).named('loop latency')
-    b = (tape_in * p.drive.constant.named('drive') + 0.constant.proc { a }.named('feedback') * p.feedback)
-      .delay(adjusted_delay.samples, smoothing: p.smoothing)
-      .named('delay')
-
-    # Tape saturator
-    c = b
-      .filter(200.hz.highpass(quality: 0.5)).named('highpass')
-      .filter(3000.hz.lowpass(quality: 0.5)).named('lowpass')
-      .softclip(0, 0.5)
-      .named('tape sim')
-
-    # Feedback, with a spy to save feedback buffer, using a shorter buffer
-    # size for the feedback loop, allowing shorter delays
-    feedback_loop = c.spy { |z| a[] = z if z && z.length == a.length }
+    # The tape loop: drive into the delay, the feedback through the tape
+    # sim (band limits and saturation) on every pass, including the first
+    # echo (as the old spy loop did)
+    echo = (inp * p.drive.constant.named('drive')).delay(time, feedback: p.feedback, smoothing: p.smoothing) { |fb|
+      fb
+        .filter(200.hz.highpass(quality: 0.5)).named('highpass')
+        .filter(3000.hz.lowpass(quality: 0.5)).named('lowpass')
+        .softclip(0, 0.5)
+        .named('tape sim')
+    }.named('tape loop')
 
     # Final output
-    (p.dry.constant.named('dry') * inp + p.wet.constant.named('wet') * feedback_loop)
+    (p.dry.constant.named('dry') * inp + p.wet.constant.named('wet') * echo)
       .softclip(0.75, 0.95)
-      .with_buffer(internal_bufsize)
       .oversample(p.oversample, mode: :libsamplerate_fastest)
       .named('mixed output')
   }

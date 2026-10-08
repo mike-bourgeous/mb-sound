@@ -51,15 +51,6 @@ MB::Sound.effect_script(
 ) { |input, p|
   # Delays below are in samples at the oversampled processing rate
   sample_rate = 48000 * p.oversample
-
-  # The feedback comes back one internal buffer late (compensated below), so
-  # the buffer must fit inside the shortest delay (the MIDI mod wheel can
-  # double the depth); larger buffers are much faster (~45% of realtime with
-  # 512 samples vs. ~250% with 24, both at 1x).
-  shortest_delay = p.delay * sample_rate * (1 - p.depth.abs)
-  scale = [1, p.oversample].max
-  internal_bufsize = [512, 256, 128, 64, 32].map { |n| (n * scale).ceil }.find { |n| n <= shortest_delay } ||
-    (24 * scale).ceil
   channels = input.channel_count
 
   # FIXME: This doesn't work with a filter like 1000.hz.lowpass1p; maybe there's overshoot or something?
@@ -76,12 +67,9 @@ MB::Sound.effect_script(
   # TODO: Maybe want a graph-wide spy function that either prints stats, draws
   # meters, or plots graphs of multiple nodes by name or reference
 
-  # FIXME: feedback delay includes buffer size
   input.outputs.map.with_index { |inp, idx|
-    inp = inp.with_buffer(800).resample(mode: :libsamplerate_fastest)
-
-    # Feedback buffers, overwritten by later calls to #spy
-    a = Numo::SFloat.zeros(internal_bufsize)
+    # Resampled so --oversample runs the flanger at the higher rate
+    inp = inp.resample(mode: :libsamplerate_fastest)
 
     phase = channels > 1 ? idx * p.spread * Math::PI / (180.0 * (channels - 1)) : 0
     lfo = lfo_freq.tone.with_phase(phase).send(p.wave).at(0..1)
@@ -94,22 +82,20 @@ MB::Sound.effect_script(
     lfo_base = samples - lfo_scale * 0.5
     lfo_mod = (lfo * lfo_scale + lfo_base).aclip(0, nil)
 
-    # Split input into original and first delay
+    # The input through the swept delay
     inp_delayed = inp.delay(lfo_mod.samples, smoothing: delay_smoothing)
 
-    # Feedback injector and feedback delay (compensating for buffer size)
-    # TODO: better way of injecting an NArray into a node chain than
-    # constant.proc; e.g. maybe a node that takes a pointer to a buffer and
-    # always returns the buffer; or better way of just doing feedback
-    d_fb = (lfo_mod - internal_bufsize).aclip(0, nil)
-    b = 0.constant.proc { a }.delay(d_fb.samples, smoothing: delay_smoothing2)
-
-    # Effected output, with a spy to save feedback buffer
-    wet = (p.feedback * b - inp_delayed).softclip(0.85, 0.95).spy { |z| a[] = z if z && z.length == a.length }
+    # The flanged signal feeds back through the same sweep, one sample at a
+    # time (GraphNode#feedback), so the loop's period is exactly the swept
+    # delay at any delay or block size (the delay absorbs the softclip's
+    # half sample).  Until 2026-10-09 this ran in internal blocks with a
+    # spy, the feedback delay shortened by a block.
+    wet = inp.feedback { |y, _|
+      (p.feedback * y.delay(lfo_mod.samples, smoothing: delay_smoothing2) - inp_delayed).softclip(0.85, 0.95)
+    }.named('flanger loop')
 
     (inp * dryconst + wet * wetconst)
       .softclip(0.85, 0.95).named('final_softclip')
-      .with_buffer(internal_bufsize).named('final_bufsize')
       .filter(15000.hz.lowpass)
       .oversample(p.oversample, mode: :libsamplerate_fastest).named('final_oversample')
   }.channels

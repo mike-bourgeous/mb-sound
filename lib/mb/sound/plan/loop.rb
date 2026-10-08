@@ -532,13 +532,20 @@ module MB
 
             # The latency depends only on a few values (gains on parallel
             # paths, cutoffs, other delays); reuse it while they hold still
-            if @lat_deps
-              key = (@lat_key_buf ||= [])
-              key.clear
-              varying = false
-              @lat_deps.each { |v| x = values[v]; varying = true if x.is_a?(Numo::NArray); key << x }
-              @lat_rings.each { |g| x = g.last_delay; varying = true if x.is_a?(Numo::NArray); key << x }
-              return @lat_value if !varying && key == @lat_key
+            # (a buffer counts as the same only if it is the same frozen
+            # object: Constants and Notes nodes return one while they hold)
+            if @lat_deps && @lat_key
+              same = true
+              i = 0
+              @lat_deps.each do |v|
+                same &&= same_value?(values[v], @lat_key[i])
+                i += 1
+              end
+              @lat_rings.each do |g|
+                same &&= same_value?(g.last_delay, @lat_key[i])
+                i += 1
+              end
+              return @lat_value if same
             end
 
             @lat_record = [] unless @lat_deps
@@ -554,6 +561,14 @@ module MB
           end
 
           private
+
+          def same_value?(x, old)
+            if x.is_a?(Numo::NArray)
+              x.equal?(old) && x.frozen?
+            else
+              !old.is_a?(Numo::NArray) && x == old
+            end
+          end
 
           def compute_latency(values)
             memo = {}.compare_by_identity
@@ -772,14 +787,38 @@ module MB
             shift(m, (g * q * 2.0).then { |x| x.is_a?(Numo::NArray) ? factor / x : factor / x })
           end
 
-          def value_of(v, values)
+          # The value of +v+ for the latency estimate: a Const, a boundary
+          # input's or param's block data, or arithmetic on those inside a
+          # node's description (e.g. a Multiplier's constant times an input,
+          # before it multiplies the loop's signal), in double precision.
+          def value_of(v, values, memo = nil)
             case v
             when Plan::Const then v.parts[0]
             when Plan::Value
-              @lat_record << v if @lat_record
-              x = values[v]
-              raise "No value for #{v} in the latency estimate" if x.nil?
-              x
+              op = v.op
+              if op.is_a?(Plan::Op::Input) || op.is_a?(Plan::Op::Param)
+                @lat_record << v if @lat_record
+                x = values[v]
+                raise "No value for #{v} in the latency estimate" if x.nil?
+                return x.is_a?(Numo::NArray) ? Numo::DFloat.cast(x) : x
+              end
+
+              memo ||= {}.compare_by_identity
+              return memo[v] if memo.key?(v)
+
+              memo[v] = case op
+                        when Plan::Op::Fill then op.value.parts[0]
+                        when Plan::Op::Copy then value_of(op.a, values, memo)
+                        when Plan::Op::Mul then value_of(op.a, values, memo) * value_of(op.b, values, memo)
+                        when Plan::Op::Add then value_of(op.a, values, memo) + value_of(op.b, values, memo)
+                        when Plan::Op::Div then value_of(op.a, values, memo) / value_of(op.b, values, memo)
+                        when Plan::Op::Pow
+                          a = value_of(op.a, values, memo)
+                          b = value_of(op.b, values, memo)
+                          a.is_a?(Numo::NArray) || b.is_a?(Numo::NArray) ? Numo::DFloat.cast(a)**b : a**b
+                        else
+                          1.0 # (a loop value as a gain: no estimate)
+                        end
             else
               v.to_f
             end
