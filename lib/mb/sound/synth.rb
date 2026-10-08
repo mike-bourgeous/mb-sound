@@ -545,7 +545,8 @@ module MB
         end
 
         @boundary[idx].each do |n|
-          return :ended if n.sample(count).nil?
+          # Notes nodes advance without a buffer (also inside fused plans)
+          return :ended if (n.is_a?(Notes::Node) ? n.advance(count) : n.sample(count)).nil?
         end
 
         :skipped

@@ -78,6 +78,17 @@ RSpec.describe('Tone null-test reference') do
     expect(REFERENCE.keys.sort).to eq(ToneReferenceCases::CASES.keys.sort)
   end
 
+  # The references are exact renders; plans' default fast sines (Plan.precision
+  # :fast) are within -100 dB but not bit-identical (see
+  # spec/lib/mb/sound/plan/tone_op_spec.rb)
+  around do |ex|
+    old = MB::Sound::Plan.precision
+    MB::Sound::Plan.precision = :exact
+    ex.run
+  ensure
+    MB::Sound::Plan.precision = old
+  end
+
   ToneReferenceCases::CASES.each_key do |name|
     it "matches the reference for #{name}" do
       expected = REFERENCE.fetch(name)

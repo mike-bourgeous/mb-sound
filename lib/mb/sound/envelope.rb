@@ -1394,6 +1394,7 @@ module MB
       # Forgets the cached kernel arguments after a parameter change.
       def changed!
         @args = nil
+        Plan.changed(self) # plans read constants when they compile
       end
 
       # Kernel arguments with constants filled in (nil for nodes): [times,
@@ -1600,3 +1601,5 @@ module MB
     end
   end
 end
+
+require_relative 'envelope_plan'
