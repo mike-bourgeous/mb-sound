@@ -40,6 +40,21 @@ module MB
           { input: @input }
         end
 
+        # Plan layer (see MB::Sound::Plan): the real or imaginary part (a
+        # real input passes through; its imaginary part is zero).
+        include Plan::Describable
+
+        def plan_describe(p)
+          x = p[@input]
+          return x.real if @mode == :real
+
+          x.complex? ? x.imag : p.fill(0)
+        end
+
+        def plan_unsupported_reason
+          @mode == :real || @mode == :imag ? nil : "the #{@mode} mode"
+        end
+
         # Wraps upstream #at_rate to return self instead of upstream.
         def at_rate(new_rate)
           @input.at_rate(new_rate)

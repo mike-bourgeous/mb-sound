@@ -1021,6 +1021,7 @@ module MB
         @period_samples = @period * @sample_rate if @period
         @advance = nil
         @kernel = nil
+        Plan.changed(self, structure: false)
         self
       end
       alias at_rate sample_rate=
@@ -1626,6 +1627,13 @@ module MB
         count, freq_table, phase_table, width, pulses, resets, targets, jumps, jump_phase, scan, fb, fb_gain, out_gain = get_upstream_inputs(count)
         return nil if missing_input?(freq_table, phase_table, width, pulses, resets, targets, scan, fb, fb_gain, out_gain)
 
+        compute_ruby(count, freq_table, phase_table, width, pulses, resets, targets, jumps, jump_phase, scan, fb, fb_gain, out_gain)
+      end
+
+      # The samples of #sample_ruby from inputs already read (the inputs
+      # are as #get_upstream_inputs returns them).  Also the Ruby mirror of
+      # the plan layer's tone op (Plan::Op::Tone).
+      def compute_ruby(count, freq_table, phase_table, width, pulses, resets, targets, jumps, jump_phase, scan, fb, fb_gain, out_gain)
         pick_zone(freq_table) if @table.is_a?(MB::Sound::Wavetable::KeyMap) && (@zone_table.nil? || @reset.nil?)
         build_buffer(count)
 
@@ -1645,6 +1653,85 @@ module MB
         @state.last_width = width.is_a?(Numo::NArray) ? width[-1] : width
 
         buf.not_inplace!
+      end
+
+      # Plan layer (see MB::Sound::Plan and Plan::Op::Tone): one oscillator
+      # op on this tone's own state, for the :naive and :synth kernels.
+      include Plan::Describable
+
+      def plan_describe(p)
+        reset = @reset && !state.reset_ended ? p.boundary(@reset, optional: true) : nil
+        target = @reset_to.respond_to?(:sample) ? p.boundary(@reset_to) : nil
+        p.tone(
+          self,
+          frequency: p[@frequency], phase_mod: p[@phase_mod || 0], width: @width && p[@width],
+          reset: reset, target: target, gain: @out_gain && p[@out_gain]
+        )
+      end
+
+      def plan_inputs
+        [@frequency, @phase_mod, @width, @reset, @reset_to, @out_gain].select { |v| v.respond_to?(:sample) }
+      end
+
+      def plan_boundary_inputs
+        [@reset, @reset_to].select { |v| v.respond_to?(:sample) }
+      end
+
+      def plan_unsupported_reason
+        return 'ports (wraps or increment) in use' if @ports
+        return 'a timeline (tempo tone)' if @lock
+        return 'sync' if @sync_source
+
+        k = kernel
+        return "the #{k} kernel" unless Plan::Op::Tone::KERNELS.include?(k)
+        return 'a complex gain' if @out_gain.is_a?(Complex)
+
+        nil
+      end
+
+      def plan_output_type
+        BUFFER_CLASS[@wave_type] == Numo::SComplex ? :complex : :real
+      end
+
+      # For plans: true while Plan::Op::Tone's Ruby mirror runs a tone with
+      # fast shapes (Plan.precision = :fast; see Plan::FastMath).
+      attr_accessor :plan_fast_shapes
+
+      # For plans: starts the tone as its first #sample would.
+      def plan_start
+        start unless @started
+      end
+
+      # For plans (Plan::Op::Tone in C): the phase jump of a reset on the
+      # sample where the frequency is +freq+, the phase modulation
+      # +phase_mod+, the width +width+ (nil without #pwm), and the reset
+      # target input +target+ (radians, or nil without one); the same Ruby
+      # as an unplanned reset (see #sample_segments).
+      def plan_reset(freq, phase_mod, width, target)
+        reset_jump({ freq: freq, width: width, phase_mod: phase_mod }, reset_target_value(target))
+      end
+
+      # For plans: the executor added the first +n+ samples of the queued
+      # jump step (see #add_jump_residual).
+      def plan_residual_used(n)
+        residual = @state.jump_residual
+        @state.jump_residual = n < residual.length ? residual[n..].dup : nil
+      end
+
+      # For plans: the reset input (whose origin is +source+) ended.
+      def plan_input_ended(source)
+        @state.reset_ended = true if @reset && Plan.origin(@reset).equal?(source)
+      end
+
+      def plan_snapshot
+        @state&.to_h
+      end
+
+      def plan_restore(snapshot)
+        return unless snapshot
+
+        fresh = State.new(**snapshot)
+        fresh.instance_variables.each { |iv| @state.instance_variable_set(iv, fresh.instance_variable_get(iv)) }
       end
 
       # See GraphNode#sources.  Returns the frequency, phase modulation, and
@@ -1794,6 +1881,7 @@ module MB
         @kernel = nil
         @advance = nil
         @state = nil
+        Plan.changed(self)
         self
       end
 
@@ -2100,18 +2188,7 @@ module MB
             phase_jump(**jump_args) { state.phi = target }
           end
 
-          if points&.include?(stop)
-            target = reset_target(targets, stop)
-            phase_jump(**jump_args) {
-              state.phi = target
-              state.feedback.fill(0.0) if @feedback && !@keep_feedback
-              if table_kernel?
-                # Samples restart; key zones are picked anew
-                state.table[0] = 0.0
-                pick_zone(jump_args[:freq]) if @table.is_a?(MB::Sound::Wavetable::KeyMap)
-              end
-            }
-          end
+          reset_jump(jump_args, reset_target(targets, stop)) if points&.include?(stop)
 
           start = stop
         end
@@ -2121,11 +2198,32 @@ module MB
 
       # The phase in cycles for a reset at sample +i+ (see #reset).
       def reset_target(targets, i)
+        reset_target_value(targets && input_at(targets, i))
+      end
+
+      # The phase in cycles for a reset whose target input (see #reset's
+      # +to:+) is +value+ (radians, a Float), or nil without a target input.
+      def reset_target_value(value)
         return @state.random if @state.random?
-        return input_at(targets, i) / TWOPI if targets
+        return value / TWOPI if value
         return @reset_to / TWOPI if @reset_to
 
         @start_cycles
+      end
+
+      # Jumps the phase for a reset to +target+ (cycles; see #reset_target),
+      # band-limited at the reset sample's +jump_args+ (see #phase_jump).
+      def reset_jump(jump_args, target)
+        state = @state
+        phase_jump(**jump_args) {
+          state.phi = target
+          state.feedback.fill(0.0) if @feedback && !@keep_feedback
+          if table_kernel?
+            # Samples restart; key zones are picked anew
+            state.table[0] = 0.0
+            pick_zone(jump_args[:freq]) if @table.is_a?(MB::Sound::Wavetable::KeyMap)
+          end
+        }
       end
 
       # Sample +i+ of a kernel input (Numeric or NArray) as a real Float.
@@ -2286,7 +2384,11 @@ module MB
           values = Numo::SFloat.cast(phases)
         else
           phases, increments = phases_ruby(freq_table, count)
-          values = Tone.shape_ruby(@wave_type, phases, increments, phase_table) * @gain + @offset
+          values = if @plan_fast_shapes
+                     MB::Sound::Plan::FastMath.shape_ruby(@wave_type, phases, phase_table) * @gain + @offset
+                   else
+                     Tone.shape_ruby(@wave_type, phases, increments, phase_table) * @gain + @offset
+                   end
         end
 
         values = values.real if !out.is_a?(Numo::SComplex) && values.is_a?(Numo::DComplex)

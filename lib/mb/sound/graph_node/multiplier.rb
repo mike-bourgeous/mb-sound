@@ -14,7 +14,7 @@ module MB
         include ArithmeticNodeHelper
 
         # The constant value by which the output will be multiplied.
-        attr_accessor :constant
+        attr_reader :constant
 
         # The graph sample rate (irrelevant for a multiplier).
         #
@@ -112,6 +112,12 @@ module MB
           find_multiplicand(multiplicand)
         end
 
+        # Changes the constant factor.
+        def constant=(value)
+          @constant = value
+          Plan.changed(self, structure: false)
+        end
+
         # Adds another multiplicand (e.g. an envelope generator) to the product.
         def add(multiplicand)
           raise "Multiplicand #{multiplicand} must respond to :sample" unless multiplicand.respond_to?(:sample)
@@ -122,6 +128,7 @@ module MB
           @multiplicands[samp] = multiplicand
           @multmap[multiplicand] ||= Set.new()
           @multmap[multiplicand] << samp
+          Plan.changed(self)
 
           multiplicand
         end
@@ -150,6 +157,7 @@ module MB
 
             @multmap.delete(multiplicand)
           end
+          Plan.changed(self)
 
           multiplicand
         end
@@ -157,6 +165,7 @@ module MB
         # Removes all multiplicands, but does not reset the constant, if set.
         def clear
           @multiplicands.clear
+          Plan.changed(self)
         end
 
         # Returns the number of multiplicands (excluding constant(s)).
@@ -189,6 +198,29 @@ module MB
               [:"input_#{idx + 1}", src]
             }.to_h
           }
+        end
+
+        # Plan layer (see MB::Sound::Plan): the constant times each input, in
+        # order, as the fast path computes it.
+        include Plan::Describable
+
+        def plan_describe(p)
+          @multiplicands.keys.reduce(p.const(@constant, complex: plan_complex_buffer?)) { |product, m| product * p[m] }
+        end
+
+        def plan_inputs
+          @multiplicands.keys
+        end
+
+        def plan_unsupported_reason
+          return 'stop_early: false' unless @stop_early
+          return "a #{@buf.class} buffer" unless @buf.is_a?(Numo::SFloat) || @buf.is_a?(Numo::SComplex)
+
+          nil
+        end
+
+        def plan_output_type
+          plan_complex_buffer? || @constant.is_a?(Complex) ? :complex : :real
         end
 
         # Includes the arithmetic interpretation of the multiplier after GraphNode#to_s.

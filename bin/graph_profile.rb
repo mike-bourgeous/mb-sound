@@ -30,6 +30,14 @@
 # that allocated the most objects per buffer, with bytes
 # (ObjectSpace.memsize_of; Numo arrays include their data) and classes.
 #
+# Fused plans (MB::Sound::Plan) are on as when playing (Synth lanes plan
+# themselves; the captured graph is planned as Session#add would); --plan
+# off measures the unfused graph, --plan both alternates off and on runs
+# (--rounds of each, best of each reported), and each run lists its
+# regions and how many blocks ran planned.  For worst-case (modulated)
+# synth costs use spec/test_data/dense_modulated.mid (8 busy voices,
+# controllers and bend moving every 10 ms).
+#
 # Graphs that take an input (effects) get spec/test_data/arp_a7.flac unless
 # script arguments name another file; synths need a MIDI file argument.
 #
@@ -41,6 +49,7 @@
 #     $0 bin/synths/fm_bass.rb spec/test_data/midi.mid
 #     $0 -s 2 bin/songs/stereo_drone.rb
 #     $0 -n 128 -a 10 bin/effects/flanger.rb     # top 10 allocation sites
+#     $0 -n 128,512 --plan both bin/synths/fm_bass.rb spec/test_data/dense_modulated.mid
 #
 # Compare branches by running the same command in each worktree, in
 # alternating order (other work on the machine skews single runs).
@@ -322,12 +331,125 @@ def nodes_of(outputs)
   outputs.flat_map { |o| o.respond_to?(:graph) ? o.graph(include_tees: true) : [o] }.uniq
 end
 
+# Regions of fused plans (see MB::Sound::Plan) in the graphs feeding
+# +outputs+.
+def plan_regions(outputs)
+  nodes_of(outputs).filter_map { |n| n.instance_variable_get(:@plan_region) }.uniq
+end
+
+# Captures the script's graph with plans in +mode+ (:on, :off, or :ruby)
+# and installs plans on it as a Session would.
+def capture_with_plans(script, args, mode)
+  MB::Sound::Plan.enabled = mode != :off
+  MB::Sound::Plan.engine = mode == :ruby ? :ruby : :c
+  graph = capture_graph(script, args)
+  outputs = outputs_of(graph)
+  MB::Sound::Plan.install(outputs) if mode != :off
+  outputs
+end
+
+# Measures one run of +outputs+ at +n+ samples per buffer; prints the
+# report and returns the percentage of realtime.
+def measure(script, outputs, n, p, label)
+  SelfTime.reset
+
+  # Warm up (YJIT compiles methods after many calls), then start from a
+  # clean heap so a major GC left over from loading the script isn't
+  # counted as the graph's
+  [10, 12000 / n].max.times { outputs.each { |o| o.sample(n) } }
+
+  # Profile after the warm-up so plans are built: nodes inside fused
+  # regions never run, and a region's root reports the region's time
+  if p.profile
+    regions = plan_regions(outputs)
+    members = regions.flat_map { |r| r.members - [r.root] }.to_h { |m| [m, true] }.compare_by_identity
+    nodes_of(outputs).each do |node|
+      next unless node.respond_to?(:sample) && !node.frozen? && !members.key?(node)
+
+      SelfTime.wrap(node)
+      if (r = node.instance_variable_get(:@plan_region))
+        node.instance_variable_set(:@__self_time_class, "Plan region (#{r.members.length} nodes, root #{node.class.name.sub(/\AMB::Sound::/, '')})")
+      end
+    end
+  end
+
+  GC.start
+  frames = (p.seconds * 48000 / n).ceil
+  gc = GCStats.new(frames)
+  times = gc.buffer_times
+  gcs = gc.buffer_gcs
+
+  # The loop allocates nothing itself, so allocation counts are the graph's
+  gc.start
+  t0 = Process.clock_gettime(Process::CLOCK_PROCESS_CPUTIME_ID)
+  done = frames
+  frames.times do |i|
+    ended = false
+    count0 = GC.count
+    busy = GC.latest_gc_info(:state) != :none
+    b0 = Process.clock_gettime(Process::CLOCK_THREAD_CPUTIME_ID)
+    outputs.each { |o| ended = true if o.sample(n).nil? }
+    times[i] = Process.clock_gettime(Process::CLOCK_THREAD_CPUTIME_ID) - b0
+    # A buffer did GC work if a GC started or an incremental mark or lazy
+    # sweep was running at either end
+    gcs[i] = GC.count != count0 ? 2 : (busy || GC.latest_gc_info(:state) != :none) ? 1 : 0
+    if ended
+      done = i
+      break
+    end
+  end
+  elapsed = Process.clock_gettime(Process::CLOCK_PROCESS_CPUTIME_ID) - t0
+  gc.stop([done, 1].max)
+  played = done * n / 48000.0
+  percent = 100 * elapsed / played
+
+  puts format('%-40s buffer %5d: %7.1f%% of realtime (%d outputs, %.1f s%s%s)',
+    File.basename(script), n, percent, outputs.size, played, p.profile ? ', profiled' : '', label)
+  puts gc.report(elapsed, n / 48000.0)
+
+  regions = plan_regions(outputs)
+  unless regions.empty?
+    planned = regions.sum(&:planned_blocks)
+    unfused = regions.sum(&:unfused_blocks)
+    ops = regions.sum { |r| r.program ? r.program.ops.length : 0 }
+    puts format('    plans: %d regions covering %d nodes (%d ops); %d blocks planned, %d unfused',
+      regions.length, regions.sum { |r| r.members.length }, ops, planned, unfused)
+  end
+
+  if p.profile
+    total = SelfTime.totals.values.sum
+    SelfTime.totals.sort_by { |_, t| -t }.first(12).each do |klass, t|
+      calls = SelfTime.calls[klass]
+      puts format('    %-44s %5.1f%%  %8.2f us/call  %8d calls  %6.2f obj/call',
+        klass, 100 * t / total, t / calls * 1e6, calls, SelfTime.allocs[klass].to_f / calls)
+    end
+
+    allocating = SelfTime.allocs.select { |_, a| a > 0 }.sort_by { |_, a| -a }.first(8)
+    unless allocating.empty?
+      puts '    most allocations (self, per buffer):'
+      allocating.each do |klass, a|
+        puts format('      %-44s %8.2f obj/buffer', klass, a.to_f / done.clamp(1..))
+      end
+    end
+  end
+
+  if p.allocations > 0
+    traced = 100
+    sites = AllocationSites.trace(outputs, n, traced)
+    puts AllocationSites.report(sites, traced, p.allocations)
+  end
+
+  percent
+end
+
 MB::Sound.script(
   args: 1..,
   buffer: ['800', String, 'Comma-separated buffer sizes', '-n'],
   seconds: [4.0, '-s', 'Seconds of audio per buffer size', 0.1..],
-  profile: [false, 'Also report self time and self allocations per node class (slower; shares are what matter)'],
+  profile: [false, 'Also report self time and self allocations per node class (slower; shares are what matter; a fused region reports as one "Plan region")'],
   allocations: [0, Integer, '-a', 'Also list the top N allocation sites per buffer (traces 100 more buffers with GC off)', 0..],
+  plan: ['on', String, 'Fused plans (MB::Sound::Plan): on, off, ruby (the Ruby mirror), or both (alternating off and on runs, best of --rounds)', '-p', ['on', 'off', 'ruby', 'both']],
+  rounds: [3, Integer, '-r', 'Runs of each mode with --plan both', 1..],
 ) { |args, p|
   script, *script_args = args
   sizes = p.buffer.split(',').map { |v| Integer(v) }
@@ -339,70 +461,20 @@ MB::Sound.script(
     script_args << File.expand_path('../spec/test_data/arp_a7.flac', __dir__)
   end
 
+  modes = p.plan == 'both' ? [:off, :on] * p.rounds : [p.plan.to_sym]
+
   sizes.each do |n|
-    graph = capture_graph(script, script_args.dup)
-    outputs = outputs_of(graph)
-    SelfTime.reset
-    nodes_of(outputs).each { |node| SelfTime.wrap(node) if node.respond_to?(:sample) && !node.frozen? } if p.profile
-
-    # Warm up (YJIT compiles methods after many calls), then start from a
-    # clean heap so a major GC left over from loading the script isn't
-    # counted as the graph's
-    [10, 12000 / n].max.times { outputs.each { |o| o.sample(n) } }
-    GC.start
-    frames = (p.seconds * 48000 / n).ceil
-    gc = GCStats.new(frames)
-    times = gc.buffer_times
-    gcs = gc.buffer_gcs
-
-    # The loop allocates nothing itself, so allocation counts are the graph's
-    gc.start
-    t0 = Process.clock_gettime(Process::CLOCK_PROCESS_CPUTIME_ID)
-    done = frames
-    frames.times do |i|
-      ended = false
-      count0 = GC.count
-      busy = GC.latest_gc_info(:state) != :none
-      b0 = Process.clock_gettime(Process::CLOCK_THREAD_CPUTIME_ID)
-      outputs.each { |o| ended = true if o.sample(n).nil? }
-      times[i] = Process.clock_gettime(Process::CLOCK_THREAD_CPUTIME_ID) - b0
-      # A buffer did GC work if a GC started or an incremental mark or lazy
-      # sweep was running at either end
-      gcs[i] = GC.count != count0 ? 2 : (busy || GC.latest_gc_info(:state) != :none) ? 1 : 0
-      if ended
-        done = i
-        break
-      end
-    end
-    elapsed = Process.clock_gettime(Process::CLOCK_PROCESS_CPUTIME_ID) - t0
-    gc.stop([done, 1].max)
-    played = done * n / 48000.0
-
-    puts format('%-40s buffer %5d: %7.1f%% of realtime (%d outputs, %.1f s%s)',
-      File.basename(script), n, 100 * elapsed / played, outputs.size, played, p.profile ? ', profiled' : '')
-    puts gc.report(elapsed, n / 48000.0)
-
-    if p.profile
-      total = SelfTime.totals.values.sum
-      SelfTime.totals.sort_by { |_, t| -t }.first(12).each do |klass, t|
-        calls = SelfTime.calls[klass]
-        puts format('    %-44s %5.1f%%  %8.2f us/call  %8d calls  %6.2f obj/call',
-          klass, 100 * t / total, t / calls * 1e6, calls, SelfTime.allocs[klass].to_f / calls)
-      end
-
-      allocating = SelfTime.allocs.select { |_, a| a > 0 }.sort_by { |_, a| -a }.first(8)
-      unless allocating.empty?
-        puts '    most allocations (self, per buffer):'
-        allocating.each do |klass, a|
-          puts format('      %-44s %8.2f obj/buffer', klass, a.to_f / done.clamp(1..))
-        end
-      end
+    results = Hash.new { |h, k| h[k] = [] }
+    modes.each do |mode|
+      outputs = capture_with_plans(script, script_args.dup, mode)
+      results[mode] << measure(script, outputs, n, p, mode == :on ? '' : ", plans #{mode}")
     end
 
-    if p.allocations > 0
-      traced = 100
-      sites = AllocationSites.trace(outputs, n, traced)
-      puts AllocationSites.report(sites, traced, p.allocations)
+    if p.plan == 'both'
+      off = results[:off].min
+      on = results[:on].min
+      puts format('%-40s buffer %5d: best of %d: plans off %.1f%%, on %.1f%% of realtime (%+.1f%%)',
+        File.basename(script), n, p.rounds, off, on, 100 * (on - off) / off)
     end
   end
 }

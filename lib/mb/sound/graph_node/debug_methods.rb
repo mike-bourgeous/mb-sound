@@ -55,6 +55,9 @@ module MB
           @handled_spies[handle] ||= []
           @handled_spies[handle] << [block, interval, phase, Time.now - (interval || 1), false]
 
+          # A spied node is never fused into a plan (see Plan.observed?)
+          Plan.changed(self)
+
           self
         end
 
@@ -96,6 +99,7 @@ module MB
           else
             @handled_spies&.clear
           end
+          Plan.changed(self)
 
           self
         end
