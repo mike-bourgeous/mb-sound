@@ -115,11 +115,19 @@ module MB
         # A listing of the regions (with their programs) and the reasons
         # other nodes aren't fused.
         def explain
-          lines = ["#{@regions.length} planned region#{@regions.length == 1 ? '' : 's'} covering #{@regions.sum { |r| r.members.length }} nodes"]
-          @regions.each do |r|
-            r.compile(start: false)
-            lines << r.to_s
+          # Compile everything, replanning around nodes that turn out
+          # unsupported when described
+          10.times do
+            @regions.each { |r| r.compile(start: false) }
+            break unless stale?
+
+            @stale = false
+            traverse
+            assign
           end
+
+          lines = ["#{@regions.length} planned region#{@regions.length == 1 ? '' : 's'} covering #{@regions.sum { |r| r.members.length }} nodes"]
+          @regions.each { |r| lines << r.to_s }
           others = @order.select { |n| n.is_a?(GraphNode) && !n.is_a?(GraphNode::Tee::Branch) && !@region_of[n] }
           unless others.empty?
             lines << 'Unfused nodes:'

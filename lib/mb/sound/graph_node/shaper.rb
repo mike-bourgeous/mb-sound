@@ -54,6 +54,27 @@ module MB
           MB::Sound::FastClip.shape(@buf.inplace!, @mode, @p1, @p2, @antialias, @state).not_inplace!
         end
 
+        # Plan layer (see MB::Sound::Plan): one shaper op on this node's
+        # state (real inputs; complex inputs stay unfused).
+        include Plan::Describable
+
+        def plan_describe(p)
+          p.shape(self, p[@source])
+        end
+
+        # The state Array the kernels update (see FastClip.shape).
+        def plan_state
+          @state
+        end
+
+        def plan_snapshot
+          @state.dup
+        end
+
+        def plan_restore(snapshot)
+          @state.replace(snapshot)
+        end
+
         def to_s
           args = case @mode
                  when :softclip then "#{@p1}, #{@p2}"

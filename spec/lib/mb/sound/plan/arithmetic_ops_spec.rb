@@ -148,6 +148,28 @@ RSpec.describe(MB::Sound::Plan, 'arithmetic ops') do
     end
   end
 
+  describe 'Shaper' do
+    [[:softclip, [0.3, 0.9]], [:clip, [-0.4, 0.6]], [:abs, []], [:quantize, [0.125]]].each do |mode, args|
+      it "matches #{mode}, antialiased and plain" do
+        r = plan_compare {
+          x = src.new(seed: 1, scale: 1.5) * src.new(seed: 2)
+          x.send(mode, *args) + x.send(:"a#{mode}", *args) * 0.5
+        }
+        # (aquantize is GraphNode::Quantize, which has no ops yet)
+        expect(plan_op_names(r).count(:Shape)).to eq(mode == :quantize ? 1 : 2)
+      end
+    end
+
+    it 'matches a one-sided clip and a softclip of a planned tone' do
+      plan_compare { (220.hz.ramp * 1.5).clip(nil, 0.5) + (330.hz.sine.at(2) * src.new(seed: 3)).softclip }
+    end
+
+    it 'leaves a shaper of complex input unfused' do
+      text = MB::Sound::Plan.explain((src.new(seed: 1, complex: true) * 2).softclip * 3)
+      expect(text).to include('complex input')
+    end
+  end
+
   describe 'ends and short reads' do
     it 'ends when a required input ends, after a short block' do
       r = plan_compare(sizes: [100, 128, 128, 128]) { src.new(seed: 1, ends_at: 300) * src.new(seed: 2) * 2 }

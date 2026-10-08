@@ -284,6 +284,46 @@ module MB
           end
         end
 
+        # A waveshaper (GraphNode::Shaper: softclip, clip, abs, quantize,
+        # antialiased or plain) on a real Value, with the node's own state
+        # Array (the kernel shared with FastClip.shape through
+        # mb_clip_shape.h).  Antialiased shapers delay by half a sample
+        # (a feedback loop would count that as latency).
+        class Shape < Base
+          # Mode numbers of the C executor (enum clip_mode).
+          MODES = { softclip: 0, clip: 1, abs: 2, quantize: 3 }.freeze
+
+          attr_reader :a, :shaper
+
+          def initialize(dst, node, a, shaper)
+            super(dst, node)
+            raise Unsupported.new(shaper, 'complex input') if a.complex?
+
+            @a = a
+            @shaper = shaper
+          end
+
+          def operands
+            [@a]
+          end
+
+          def expression
+            args = case @shaper.mode
+                   when :softclip then "#{@shaper.p1}, #{@shaper.p2}"
+                   when :clip then "#{@shaper.p1}..#{@shaper.p2}"
+                   when :quantize then @shaper.p1.to_s
+                   else ''
+                   end
+            "#{@shaper.antialias ? '' : 'a'}#{@shaper.mode}(#{@a}#{args.empty? ? '' : ", #{args}"})"
+          end
+
+          def opcode = :shape
+
+          def run_ruby(env, count)
+            env[@dst] = MB::Sound::Shaper.shape_ruby(env.fetch(@a), @shaper.mode, @shaper.p1, @shaper.p2, @shaper.antialias, @shaper.plan_state)
+          end
+        end
+
         # The real or imaginary part of a complex Value (ComplexNode).
         class Part < Base
           attr_reader :a, :part

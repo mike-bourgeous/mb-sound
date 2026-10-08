@@ -50,6 +50,7 @@
 #include "mb_ext_helpers.h"
 #include "mb_osc_shapes.h"
 #include "mb_bl_osc.h"
+#include "mb_clip_shape.h"
 
 // Register kinds (Plan::Program::REG_KINDS)
 enum { REG_SLOT = 0, REG_INPUT = 1, REG_PARAM = 2, REG_OUT = 3 };
@@ -67,6 +68,7 @@ enum {
 	OP_PART,      // dst, a, which               dst = real (0) or imag (1) part of a
 	OP_TONE,      // see run_tone
 	OP_COPY,      // dst, a, 0                   dst = a
+	OP_SHAPE,     // dst, a, object, sc          dst = shaper(a) (FastClip.shape); object: state Array; sc: mode, p1, p2, antialias
 };
 
 // Kernels of OP_TONE (Plan::Op::Tone::KERNELS)
@@ -450,6 +452,39 @@ static void run_tone(const int32_t *op, const struct regs *R, const double *sc, 
 	RB_GC_GUARD(noise);
 }
 
+// OP_SHAPE: the shaper of FastClip.shape (mb_clip_shape.h) with the
+// node's state Array [last input, allpass last input, allpass last output,
+// primed].
+static void run_shape(const int32_t *op, const struct regs *R, const double *sc, VALUE objects, size_t n)
+{
+	VALUE state = rb_ary_entry(objects, op[3]);
+	const double *s = sc + op[4];
+	int mode = (int)s[0];
+	if (mode < CLIP_SOFT || mode > CLIP_QUANTIZE) rb_raise(rb_eArgError, "Bad plan shaper mode %d", mode);
+
+	struct clip_params cp;
+	const char *err = mb_clip_setup(&cp, (enum clip_mode)mode, s[1], s[2]);
+	if (err) rb_raise(rb_eArgError, "%s", err);
+	_Bool aa = s[3] != 0;
+
+	Check_Type(state, T_ARRAY);
+	if (RARRAY_LEN(state) != 4) rb_raise(rb_eArgError, "Shaper state must have four elements");
+	double x1 = NUM2DBL(rb_ary_entry(state, 0));
+	double ap_x1 = NUM2DBL(rb_ary_entry(state, 1));
+	double ap_y1 = NUM2DBL(rb_ary_entry(state, 2));
+	_Bool primed = NUM2INT(rb_ary_entry(state, 3)) != 0;
+
+	mb_clip_run(&cp, R->p[op[2]], R->p[op[1]], n, aa, &x1, &ap_x1, &ap_y1, &primed);
+
+	if (aa && n > 0) {
+		rb_ary_store(state, 0, rb_float_new(x1));
+		rb_ary_store(state, 1, rb_float_new(ap_x1));
+		rb_ary_store(state, 2, rb_float_new(ap_y1));
+		rb_ary_store(state, 3, INT2NUM(1));
+	}
+	RB_GC_GUARD(state);
+}
+
 // Checks a buffer for register r: contiguous, the register's class, and at
 // least n samples.  Returns its data.
 static float *buffer_for(VALUE v, _Bool is_complex, size_t n, const char *what, long idx)
@@ -554,6 +589,9 @@ static VALUE ruby_run(VALUE self, VALUE words, VALUE scalars, VALUE objects, VAL
 			case OP_TONE:
 				len = 12;
 				break;
+			case OP_SHAPE:
+				len = 5;
+				break;
 			default:
 				rb_raise(rb_eArgError, "Bad plan opcode %d at word %zu", op[0], pc);
 		}
@@ -628,6 +666,13 @@ static VALUE ruby_run(VALUE self, VALUE words, VALUE scalars, VALUE objects, VAL
 				break;
 			}
 
+			case OP_SHAPE:
+				if (cplx[d] || cplx[op[2]]) rb_raise(rb_eArgError, "Plan shapers are real only");
+				if (op[3] < 0 || op[3] >= RARRAY_LEN(objects)) rb_raise(rb_eArgError, "Bad plan shaper object at word %zu", pc);
+				if (op[4] < 0 || (size_t)op[4] + 4 > nscalars) rb_raise(rb_eArgError, "Bad plan shaper scalars at word %zu", pc);
+				run_shape(op, &R, sc, objects, n);
+				break;
+
 			case OP_COPY:
 				if (cplx[d] != cplx[op[2]]) rb_raise(rb_eArgError, "Plan copy needs registers of one type");
 				memcpy(ptrs[d], ptrs[op[2]], n * (cplx[d] ? 2 : 1) * sizeof(float));
@@ -684,6 +729,7 @@ static VALUE ruby_enums(VALUE self)
 	rb_hash_aset(h, ID2SYM(rb_intern("part")), INT2NUM(OP_PART));
 	rb_hash_aset(h, ID2SYM(rb_intern("tone")), INT2NUM(OP_TONE));
 	rb_hash_aset(h, ID2SYM(rb_intern("copy")), INT2NUM(OP_COPY));
+	rb_hash_aset(h, ID2SYM(rb_intern("shape")), INT2NUM(OP_SHAPE));
 	rb_hash_aset(h, ID2SYM(rb_intern("tone_naive")), INT2NUM(TONE_NAIVE));
 	rb_hash_aset(h, ID2SYM(rb_intern("tone_synth")), INT2NUM(TONE_SYNTH));
 	rb_hash_aset(h, ID2SYM(rb_intern("osc_sine")), INT2NUM(OSC_SINE));

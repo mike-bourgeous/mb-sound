@@ -35,93 +35,9 @@
 #include "numo/narray.h"
 
 #include "mb_ext_helpers.h"
-
-// Inputs closer than this use the shaper at their midpoint instead of the
-// divided difference.
-#define CLIP_TINY 1e-6
-
-// Coefficient of the half-sample Thiran allpass: (1 - D) / (1 + D), D = 0.5.
-#define CLIP_ALLPASS (1.0 / 3.0)
-
-enum clip_mode {
-	CLIP_SOFT,
-	CLIP_HARD,
-	CLIP_ABS,
-	CLIP_QUANTIZE,
-};
+#include "mb_clip_shape.h"
 
 static ID sym_softclip, sym_clip, sym_abs, sym_quantize;
-
-struct clip_params {
-	enum clip_mode mode;
-	double p1, p2;        // softclip: threshold, limit; clip: min, max; quantize: step
-	double a, b, c, k;    // softclip curve and antiderivative constant
-};
-
-// The shaper.
-static inline double clip_f(const struct clip_params *cp, double x)
-{
-	switch (cp->mode) {
-		case CLIP_SOFT: {
-			double ax = fabs(x);
-			if (ax <= cp->p1) {
-				return x;
-			}
-			double v = cp->a / (ax + cp->c) + cp->b;
-			return x < 0 ? -v : v;
-		}
-
-		case CLIP_HARD:
-			return x < cp->p1 ? cp->p1 : (x > cp->p2 ? cp->p2 : x);
-
-		case CLIP_ABS:
-			return fabs(x);
-
-		case CLIP_QUANTIZE:
-			return cp->p1 * floor(x / cp->p1 + 0.5);
-	}
-
-	return x;
-}
-
-// The antiderivative of g = f - x (G = F - x^2 / 2), written to keep
-// precision where g is small.
-static inline double clip_g_integral(const struct clip_params *cp, double x)
-{
-	switch (cp->mode) {
-		case CLIP_SOFT: {
-			double ax = fabs(x);
-			if (ax <= cp->p1) {
-				return 0;
-			}
-			double f = cp->b * ax + cp->k - 0.5 * x * x;
-			if (cp->a != 0) {
-				f += cp->a * log(ax + cp->c);
-			}
-			return f;
-		}
-
-		case CLIP_HARD:
-			if (x > cp->p2) {
-				double d = x - cp->p2;
-				return -0.5 * d * d;
-			} else if (x < cp->p1) {
-				double d = x - cp->p1;
-				return -0.5 * d * d;
-			}
-			return 0;
-
-		case CLIP_ABS:
-			return x < 0 ? -x * x : 0;
-
-		case CLIP_QUANTIZE: {
-			double d = x - cp->p1 * floor(x / cp->p1 + 0.5);
-			return -0.5 * d * d;
-		}
-	}
-
-	return 0;
-}
 
 /*
  * Applies a shaper to +buffer+ (SFloat, modified in place if marked
@@ -129,38 +45,30 @@ static inline double clip_g_integral(const struct clip_params *cp, double x)
  *   shape(buffer, mode, p1, p2, antialias, state)
  * +mode+ is :softclip (p1 threshold, p2 limit), :clip (p1 min, p2 max;
  * infinite for none), :abs, or :quantize (p1 step).  +state+ is [last
- * input, allpass last input, allpass last output, primed (0 or 1)].
+ * input, allpass last input, allpass last output, primed (0 or 1)].  The
+ * shaper itself is in mb_clip_shape.h.
  */
 static VALUE ruby_shape(VALUE self, VALUE buffer, VALUE mode, VALUE p1v, VALUE p2v, VALUE antialias, VALUE state)
 {
-	struct clip_params cp = { .p1 = NUM2DBL(p1v), .p2 = NUM2DBL(p2v) };
+	struct clip_params cp;
+	enum clip_mode m;
 
 	ID id = SYM2ID(mode);
 	if (id == sym_softclip) {
-		cp.mode = CLIP_SOFT;
-		double t = fabs(cp.p1), l = fabs(cp.p2);
-		if (l < t) {
-			rb_raise(rb_eArgError, "Limit must be greater than or equal to threshold");
-		}
-		cp.p1 = t;
-		cp.a = -(l - t) * (l - t);
-		cp.b = l;
-		cp.c = l - 2.0 * t;
-		cp.k = 0.5 * t * t - cp.b * t - (cp.a != 0 ? cp.a * log(t + cp.c) : 0);
+		m = CLIP_SOFT;
 	} else if (id == sym_clip) {
-		cp.mode = CLIP_HARD;
-		if (cp.p2 < cp.p1) {
-			rb_raise(rb_eArgError, "Clip max must be greater than or equal to min");
-		}
+		m = CLIP_HARD;
 	} else if (id == sym_abs) {
-		cp.mode = CLIP_ABS;
+		m = CLIP_ABS;
 	} else if (id == sym_quantize) {
-		cp.mode = CLIP_QUANTIZE;
-		if (!(cp.p1 > 0) || !isfinite(cp.p1)) {
-			rb_raise(rb_eArgError, "Quantize step must be positive and finite");
-		}
+		m = CLIP_QUANTIZE;
 	} else {
 		rb_raise(rb_eArgError, "Unknown shaper %"PRIsVALUE, mode);
+	}
+
+	const char *err = mb_clip_setup(&cp, m, NUM2DBL(p1v), NUM2DBL(p2v));
+	if (err) {
+		rb_raise(rb_eArgError, "%s", err);
 	}
 
 	Check_Type(state, T_ARRAY);
@@ -178,37 +86,7 @@ static VALUE ruby_shape(VALUE self, VALUE buffer, VALUE mode, VALUE p1v, VALUE p
 	size_t length = RNARRAY_SHAPE(buffer)[0];
 	float *data = mb_sfloat_ptr(buffer);
 
-	for (size_t i = 0; i < length; i++) {
-		double x = data[i];
-
-		if (!aa) {
-			data[i] = clip_f(&cp, x);
-			continue;
-		}
-
-		if (!primed) {
-			x1 = x;
-			ap_x1 = x;
-			ap_y1 = x;
-			primed = 1;
-		}
-
-		double d = x - x1;
-		double g;
-		if (fabs(d) < CLIP_TINY) {
-			double m = 0.5 * (x + x1);
-			g = clip_f(&cp, m) - m;
-		} else {
-			g = (clip_g_integral(&cp, x) - clip_g_integral(&cp, x1)) / d;
-		}
-
-		double dry = CLIP_ALLPASS * x + ap_x1 - CLIP_ALLPASS * ap_y1;
-		ap_x1 = x;
-		ap_y1 = dry;
-		x1 = x;
-
-		data[i] = dry + g;
-	}
+	mb_clip_run(&cp, data, data, length, aa, &x1, &ap_x1, &ap_y1, &primed);
 
 	if (aa && length > 0) {
 		rb_ary_store(state, 0, rb_float_new(x1));

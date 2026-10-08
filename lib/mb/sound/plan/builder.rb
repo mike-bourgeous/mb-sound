@@ -163,6 +163,11 @@ module MB
           emit(Op::Pow.new(value(:real), node, a, b))
         end
 
+        # +shaper+ (a GraphNode::Shaper) applied to +a+ (see Op::Shape).
+        def shape(shaper, a)
+          emit(Op::Shape.new(value(:real), node, self[a], shaper))
+        end
+
         # A copy of +a+ in a new register.
         def copy(a)
           emit(Op::Copy.new(value(a.type), node, a))

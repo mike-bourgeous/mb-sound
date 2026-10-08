@@ -107,6 +107,8 @@ module MB
           @params = Array.new(@param_ops.length)
           @ended = Array.new(@input_ops.length, false)
           @read = Array.new(@input_ops.length) { [] }
+          @want = @input_ops.map { |op| op.dst.complex? ? Numo::SComplex : Numo::SFloat }
+          @direct = @input_ops.map { |op| direct_source(op) }
           @out_class = output.complex? ? Numo::SComplex : Numo::SFloat
           @out = nil
           @out_views.clear
@@ -198,6 +200,21 @@ module MB
 
         private
 
+        # The node a region may read directly for boundary input +op+:
+        # its handles are every branch of one Tee on that node (so nothing
+        # else reads the Tee), else nil.
+        def direct_source(op)
+          tees = op.handles.map(&:tee).uniq
+          return nil unless tees.length == 1
+
+          tee = tees[0]
+          src = tee.sources[:input]
+          return nil if src.is_a?(GraphNode::Tee::Branch) || !src.equal?(op.source)
+          return nil unless tee.branches.length == op.handles.length && tee.branches.all? { |b| op.handles.any? { |h| h.equal?(b) } }
+
+          src
+        end
+
         # Starts the region's tones as their first #sample would.
         def start_tones
           @program.tones.each { |op| op.tone.plan_start }
@@ -258,12 +275,19 @@ module MB
             end
 
             handles = op.handles
-            buf = handles[0].sample(count)
-            read << buf
-            j = 1
-            while j < handles.length
-              read << handles[j].sample(count)
-              j += 1
+            if (direct = @direct[i])
+              # Every branch of the source's Tee is ours: read the source
+              # itself (the Tee is skipped like a fused node's)
+              buf = direct.sample(count)
+              read << buf
+            else
+              buf = handles[0].sample(count)
+              read << buf
+              j = 1
+              while j < handles.length
+                read << handles[j].sample(count)
+                j += 1
+              end
             end
 
             if buf.nil? || buf.empty?
@@ -275,8 +299,7 @@ module MB
                 ended = true
               end
             else
-              want = op.dst.complex? ? Numo::SComplex : Numo::SFloat
-              unless buf.class == want
+              unless buf.class == @want[i]
                 if buf.is_a?(Numo::SFloat) || buf.is_a?(Numo::SComplex)
                   @types[op.source] = buf.is_a?(Numo::SComplex) ? :complex : :real
                 else
@@ -343,10 +366,19 @@ module MB
         # boundary inputs the region already read.
         def replay_unfused(count)
           @input_ops.each_with_index do |op, i|
-            next if @ended[i] && @read[i].empty?
+            read = @read[i]
+            next if read.empty?
 
-            op.handles.each_with_index do |h, j|
-              h.replay = @read[i][j] if j < @read[i].length
+            if @direct[i]
+              # One read of the source for every branch, shared read-only
+              # as the Tee would share it
+              buf = read[0]
+              buf = buf[0..].freeze if buf && !buf.frozen? && op.handles.length > 1
+              op.handles.each { |h| h.replay = buf }
+            else
+              op.handles.each_with_index do |h, j|
+                h.replay = read[j] if j < read.length
+              end
             end
           end
           run_unfused(count)
