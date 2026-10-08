@@ -90,6 +90,12 @@ module MB
           # For internal use by Tee: the last shared frame this branch read.
           attr_accessor :frame
 
+          # For internal use by the plan layer (MB::Sound::Plan::Region): a
+          # buffer the next #sample returns instead of reading the Tee, so
+          # a region that already read its boundary inputs can run its nodes
+          # unfused on the same data.
+          attr_accessor :replay
+
           def_delegators :@tee, :sample_rate, :sample_rate=, :reset, :original_source
           def_delegators :@reader, :count, :length
 
@@ -121,6 +127,11 @@ module MB
           # internal buffer, or if this branch has not been read for a long
           # time and has fallen too far behind.
           def sample(count)
+            if (r = @replay)
+              @replay = nil
+              return r
+            end
+
             raise BranchDestroyedError, "Branch #{index} has been destroyed." unless @reader
 
             @tee.internal_sample(self, count)
@@ -198,6 +209,8 @@ module MB
           @branch_index += 1
 
           @branches << branch
+          Plan.changed(self)
+          Plan.changed(@source)
 
           branch
         end
@@ -205,6 +218,8 @@ module MB
         # For internal use by Branch#destroy.
         def remove_branch(b)
           @branches.delete(b)
+          Plan.changed(self)
+          Plan.changed(@source)
         end
 
         # Wraps upstream #at_rate to return self instead of upstream.

@@ -27,6 +27,7 @@ require_relative 'support/fork_script' # after subprocess_coverage
 require_relative 'support/jack_dummy'
 require_relative 'support/midi_list_source'
 require_relative 'support/clip_node_reference'
+require_relative 'support/plan_helpers'
 
 MB::U.sigquit_backtrace
 
@@ -72,6 +73,8 @@ RSpec.configure do |config|
     MB::Sound::Tuning.default.reset
     MB::Sound::Session.default.master_gain = MB::Sound::Session::DEFAULT_MASTER_GAIN
     MB::Sound.seed(MB::Sound.default_seed) # random phases etc. don't depend on example order
+    MB::Sound::Notes.control_smoothing = MB::Sound::Notes::CONTROL_SMOOTHING
+    MB::Sound::Notes.bend_smoothing = MB::Sound::Notes::BEND_SMOOTHING
   end
 
   # rspec-expectations config goes here. You can use an alternate

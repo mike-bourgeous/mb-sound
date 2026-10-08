@@ -318,6 +318,42 @@ module MB
           end
         end
 
+        # Keeps the note events of some note numbers (see Stream#keys).
+        class Keys < Transform
+          def initialize(parent, notes)
+            super(parent)
+            number = ->(n) {
+              n = n.number if n.respond_to?(:number) && !n.is_a?(Numeric)
+              raise ArgumentError, "Keys are note numbers, Ranges, or Notes (got #{n.inspect})" unless n.is_a?(Numeric)
+              n
+            }
+            list = Array(notes).flatten.flat_map { |n|
+              n.is_a?(Range) ? (number.(n.begin).to_i..number.(n.end).to_i).to_a : [number.(n)]
+            }
+            raise ArgumentError, 'Give at least one key' if list.empty?
+
+            @keys = list.uniq.sort.freeze
+            @key_set = @keys.to_h { |k| [k, true] }.freeze
+            @node_type_name = "keys(#{@keys.join(', ')})"
+          end
+
+          # The note numbers kept.
+          attr_reader :keys
+
+          private
+
+          # Note-ons, note-offs, poly pressure, and glides naming a note keep
+          # only the listed notes; channel-wide events pass through.
+          def process(events, _from, _to)
+            events.select { |e|
+              note_specific = e.note? || e.type == :poly_pressure || (e.type == :glide && e.note)
+              !note_specific || @key_set.key?(e.note)
+            }
+          end
+
+          alias map_note process_note
+        end
+
         # Shapes note-on velocities (see Stream#velocity_curve).
         class VelocityCurve < Transform
           def initialize(parent, curve)

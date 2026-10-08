@@ -170,6 +170,7 @@ module MB
 
           pr.tap { |pr|
             pr.instance_variable_set(:@operator, name)
+            pr.plan_operator = name
             def pr.arithmetic_string(separator = ' ')
               src = climb_tee_tree(@sources.values[0])
               dest = climb_tee_tree(@sources.values[1])

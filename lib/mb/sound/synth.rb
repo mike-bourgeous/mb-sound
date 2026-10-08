@@ -161,6 +161,10 @@ module MB
       # The MIDI::Allocator splitting the source among lanes.
       attr_reader :allocator
 
+      # The plan installation of each lane (see MB::Sound::Plan; nil for a
+      # lane without fused regions or with plans off).
+      attr_reader :plans
+
       # The Notes instance of each lane (in lane order).
       attr_reader :notes
 
@@ -227,6 +231,9 @@ module MB
           lane_outputs(graph, idx).map(&:get_sampler)
         }
         @notes.freeze
+
+        # Fused plans for each lane's graph (see MB::Sound::Plan)
+        @plans = @lanes.map { |outs| Plan.install(outs) }
 
         @channels = @lanes.map(&:length).max
         @done = Array.new(@lanes.length, false)

@@ -48,6 +48,11 @@ RSpec.describe(MB::Sound::Sequence::Grid) do
       expect(kit[:hat].length).to eq(3/16r)
     end
 
+    it 'accepts drum machine row aliases and GM conga names' do
+      kit = MB::Sound.grid(16, bd: 'x', oh: 'x', cymbal: 'x', mid_conga: 'x', low_conga: 'x', cabasa: 'x')
+      expect(kit.rows.values.map { |r| r.events[0].value }).to eq([36, 46, 49, 63, 64, 69])
+    end
+
     it 'raises an error for unknown row names' do
       expect { MB::Sound.grid(16, bongo_drum: 'x') }.to raise_error(ArgumentError, /Unknown grid row/)
       expect { MB::Sound.grid(16, kick: 'x')[:snare] }.to raise_error(KeyError, /No row/)

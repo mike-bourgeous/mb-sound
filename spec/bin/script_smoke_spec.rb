@@ -25,6 +25,7 @@ RSpec.describe('script runner scripts', :smoke) do
     'bin/songs/acid_song.rb' => ['--bars', '0.5', '-F', 'lp4'],
     'bin/songs/antialias_song.rb' => ['--bars', '0.5'],
     'bin/songs/bouncing_ball.rb' => ['--bars', '0.5'],
+    'bin/songs/drums_808.rb' => ['--bars', '0.5', '-c', '12'],
     'bin/songs/node_graph_benchmark.rb' => ['--bars', '0.5'],
     'bin/songs/node_graph_grit.rb' => ['--bars', '0.5'],
     'bin/songs/random_drum_pentatonic.rb' => ['--bars', '0.5'],
@@ -47,6 +48,7 @@ RSpec.describe('script runner scripts', :smoke) do
     'bin/effects/fdn_reverb.rb' => ['--decay', '0.3'],
     'bin/effects/flanger.rb' => ['--oversample', '1'],
     'bin/effects/grain_repeater.rb' => ['--delay', '0.05', '-n', '4'],
+    'bin/effects/juno_chorus.rb' => ['--mode', 'lush', '--bbd', '--mix', '0.6'],
     'bin/effects/ping_pong_delay.rb' => ['--delay', '0.05', '--feedback', '0.3'],
     'bin/effects/reverb.rb' => ['--preset', 'room', '-w', '-6'],
     'bin/effects/reverse_delay.rb' => ['--delay', '0.1', '--oversample', '1'],
@@ -86,6 +88,7 @@ RSpec.describe('script runner scripts', :smoke) do
   # Synth script => extra arguments; each plays a short MIDI file
   synths = {
     'bin/synths/acid.rb' => [],
+    'bin/synths/drums_808.rb' => ['-c', '6'],
     'bin/synths/ep2_syn.rb' => [],
     'bin/synths/filter_ping.rb' => [],
     'bin/synths/fm_bass.rb' => [],

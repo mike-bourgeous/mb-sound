@@ -224,6 +224,48 @@ module MB
           @elapsed_samples / @sample_rate
         end
 
+        # Plan layer (see MB::Sound::Plan): a Constant is a param, read
+        # live every block (see #plan_param).
+        include Plan::Describable
+
+        def plan_describe(p)
+          p.param(self, complex: plan_complex?)
+        end
+
+        def plan_inputs
+          []
+        end
+
+        def plan_output_type
+          plan_complex? ? :complex : :real
+        end
+
+        # True if this constant's buffers are complex (a complex value, now
+        # or queued).
+        def plan_complex?
+          @complex || @constant.is_a?(Complex)
+        end
+
+        # Everything #sample does for +count+ samples except filling a
+        # buffer: returns the value (a Numeric) while it holds, or this
+        # block's buffer (from #sample) while changes are queued.
+        def plan_param(count)
+          return sample(count) unless @changes.empty?
+
+          @elapsed_samples += count
+          @old_constant = @constant
+          @constant
+        end
+
+        def plan_snapshot
+          [@constant, @old_constant, @elapsed_samples, @changes.map(&:dup), @complex]
+        end
+
+        def plan_restore(snapshot)
+          @constant, @old_constant, @elapsed_samples, changes, @complex = snapshot
+          @changes.replace(changes.map(&:dup))
+        end
+
         # See GraphNode#to_s
         def to_s
           "#{super} -- value=#{value_string}"

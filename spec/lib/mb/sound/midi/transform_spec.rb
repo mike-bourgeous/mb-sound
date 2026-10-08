@@ -47,6 +47,36 @@ RSpec.describe(MB::Sound::MIDI::Transform) do
     end
   end
 
+  describe '#keys' do
+    # A new stream per call (views made later start at the slowest reader)
+    def s
+      stream(
+        ev.note_on(36), ev.note_on(38), ev.poly_pressure(38, 0.5), ev.cc(1, 0.5),
+        ev.note_off(36), ev.note_off(38), ev.note_on(42), ev.choke(nil)
+      )
+    end
+
+    it 'keeps the notes of the given keys and every channel-wide event' do
+      expect(summary(s.keys(36))).to eq([[:note_on, 36, 0], [:cc, 1, 3], [:note_off, 36, 4], [:choke, nil, 7]])
+      expect(summary(s.keys(38, 42)).map(&:first)).to eq([:note_on, :poly_pressure, :cc, :note_off, :note_on, :choke])
+    end
+
+    it 'accepts Arrays, Ranges, and Notes' do
+      expect(summary(s.keys([36, 42])).filter_map { |t, n, _| n if t == :note_on }).to eq([36, 42])
+      expect(summary(s.keys(36..38)).filter_map { |t, n, _| n if t == :note_on }).to eq([36, 38])
+      expect(summary(s.keys(MB::Sound::C2..MB::Sound::D2)).filter_map { |t, n, _| n if t == :note_on }).to eq([36, 38])
+    end
+
+    it 'raises for missing or bad keys' do
+      expect { s.keys }.to raise_error(ArgumentError, /at least one/)
+      expect { s.keys(:kick) }.to raise_error(ArgumentError, /note numbers/)
+    end
+
+    it 'names the keys' do
+      expect(s.keys(42, 36).to_s).to include('keys(36, 42)')
+    end
+  end
+
   describe '#transpose' do
     let(:s) { stream(ev.note_on(60), ev.poly_pressure(60, 0.5), ev.note_off(60), ev.cc(1, 1)) }
 

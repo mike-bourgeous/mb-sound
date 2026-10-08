@@ -51,6 +51,12 @@ Rake::ExtensionTask.new 'mb-sound-fast_envelope' do |ext|
   ext.lib_dir = 'lib/mb/sound'
 end
 
+Rake::ExtensionTask.new 'mb-sound-fast_resonator' do |ext|
+  ext.name = 'fast_resonator'
+  ext.ext_dir = 'ext/mb/sound/fast_resonator'
+  ext.lib_dir = 'lib/mb/sound'
+end
+
 Rake::ExtensionTask.new 'mb-sound-fast_filter' do |ext|
   ext.name = 'fast_filter'
   ext.ext_dir = 'ext/mb/sound/fast_filter'
@@ -69,6 +75,12 @@ Rake::ExtensionTask.new 'mb-sound-fast_unison' do |ext|
   ext.lib_dir = 'lib/mb/sound'
 end
 
+Rake::ExtensionTask.new 'mb-sound-fast_control' do |ext|
+  ext.name = 'fast_control'
+  ext.ext_dir = 'ext/mb/sound/fast_control'
+  ext.lib_dir = 'lib/mb/sound'
+end
+
 Rake::ExtensionTask.new 'mb-sound-fast_audio' do |ext|
   ext.name = 'fast_audio'
   ext.ext_dir = 'ext/mb/sound/fast_audio'
@@ -78,6 +90,12 @@ end
 Rake::ExtensionTask.new 'mb-sound-fast_midi' do |ext|
   ext.name = 'fast_midi'
   ext.ext_dir = 'ext/mb/sound/fast_midi'
+  ext.lib_dir = 'lib/mb/sound'
+end
+
+Rake::ExtensionTask.new 'mb-sound-fast_plan' do |ext|
+  ext.name = 'fast_plan'
+  ext.ext_dir = 'ext/mb/sound/fast_plan'
   ext.lib_dir = 'lib/mb/sound'
 end
 
@@ -119,9 +137,11 @@ MEMCHECK_SPECS = [
   'spec/lib/mb/sound/curve_spec.rb',               # FastClip.curve_lookup
   'spec/lib/mb/sound/envelope_spec.rb',            # FastEnvelope.process
   'spec/lib/mb/sound/envelope_segments_spec.rb',   # FastEnvelope.process (segment lists, loops)
+  'spec/lib/mb/sound/notes_smoothing_spec.rb',     # FastControl.smooth (controller smoothing)
   'spec/lib/mb/sound/filter/four_pole_spec.rb',    # FastFilter.four_pole
   'spec/lib/mb/sound/filter/diode_ladder_spec.rb', # FastFilter.diode_ladder
   'spec/lib/mb/sound/filter/svf_spec.rb',          # FastFilter.svf
+  'spec/lib/mb/sound/graph_node/resonator_spec.rb', # FastResonator.ping
   'spec/lib/mb/sound/loudness_spec.rb',            # FastLoudness.true_peak
   'spec/lib/mb/sound/wavetable_spec.rb',           # FastWavetable
   'spec/lib/mb/sound/graph_node/wavetable_spec.rb',
@@ -137,6 +157,7 @@ MEMCHECK_SPECS = [
   'spec/lib/mb/sound/midi/input_spec.rb',          # MIDI::Input on JACK and RtMidi (with a JACK dummy server)
   'spec/lib/mb/sound/midi/live_source_spec.rb',    # Playback#jack_clock (with a JACK dummy server)
   'spec/lib/mb/sound/jack_spec.rb',                # DeviceOutput/Input and MIDI on one JACK client
+  'spec/lib/mb/sound/plan/*_spec.rb',              # FastPlan.run through planned regions (tones, resets, fallbacks)
 ].freeze
 
 begin

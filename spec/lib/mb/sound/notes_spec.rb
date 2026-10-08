@@ -1,4 +1,11 @@
 RSpec.describe(MB::Sound::Notes) do
+
+  # These examples check values on exact event samples; controller
+  # smoothing has its own spec (notes_smoothing_spec.rb).
+  before do
+    MB::Sound::Notes.control_smoothing = false
+    MB::Sound::Notes.bend_smoothing = false
+  end
   let(:transport) { MB::Sound::Sequence::Transport.new(bpm: 120) }
   let(:ev) { MB::Sound::MIDI::Event }
   let(:rate) { 48000 }

@@ -114,15 +114,20 @@ module MB
         # linearly to its side (like the GM2 sound controllers), so the knob
         # starts in the middle at the value given on the command line.
         #
+        # The controller glides over +:smooth+ (default
+        # Notes.control_smoothing; a time, or false for exact steps; see
+        # Notes#cc).
+        #
         # Example:
         #     lfo_hz = p.midi_cc(1, :hz, range: 0.0..6.0) # 0 to 6 times --hz
-        def midi_cc(number, name, range:, relative: true)
+        #     mix = p.midi_cc(7, :mix, range: 0.0..1.0, smooth: 50.ms)
+        def midi_cc(number, name, range:, relative: true, smooth: nil)
           value = self[name]
           range = (value * range.begin)..(value * range.end) if relative
           spec = Values.cc_spec(number, name, value, range, @descriptions&.[](name.to_sym))
           (@control_specs ||= []) << spec unless @control_specs&.include?(spec)
           notes = midi
-          node = notes ? notes.control(spec) : value.constant
+          node = notes ? notes.control(spec, smooth: smooth) : value.constant
           node.named(name.to_s)
         end
 
