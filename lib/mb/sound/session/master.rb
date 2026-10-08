@@ -40,7 +40,7 @@ module MB
         # +ramp_from+ is the frame where its gain starts changing.
         Chain = Struct.new(
           :block, :source, :nodes, :timeline_nodes, :description,
-          :start, :started, :mode, :fade, :feeding, :gain, :gain_step,
+          :start, :launch, :started, :mode, :fade, :feeding, :gain, :gain_step,
           :tail_frames, :quiet_frames, :slow_warned, :loads,
           :input_from, :input_until, :ramp_from,
           keyword_init: true
@@ -196,10 +196,12 @@ module MB
           fade ? [:fade, fade] : [:cut, nil]
         end
 
-        # Marks a chain as started at timeline position +time+.  Called with
-        # @mutex held.
-        def start_master_chain(chain, time)
+        # Marks a chain as started at timeline position +time+ (the start of
+        # its first sample), launched at the exact time +launch+ (see
+        # Sequence::TimelineNode#start_at).  Called with @mutex held.
+        def start_master_chain(chain, time, launch: time)
           chain.start = time
+          chain.launch = launch
           chain.started = true
         end
 
@@ -219,7 +221,10 @@ module MB
 
           out = Array.new(@channels) { Numo::SFloat.zeros(count) }
           chains.each do |c|
-            c.timeline_nodes.each { |n| n.start_at(from, transport: @transport) } if resync && c.feeding
+            # Like players' clips: timeline loops follow the new position,
+            # launch-aligned loops keep their anchor, and non-looping clips
+            # count from the chain's start
+            c.timeline_nodes.each { |n| n.start_at(from, origin: c.start, launch: c.launch, transport: @transport) } if resync && c.feeding
 
             # Tempo-synced LFOs freeze while the timeline is paused
             c.timeline_nodes.each(&:pause_timeline) unless playing
@@ -246,8 +251,10 @@ module MB
 
             # While idle the timeline doesn't advance, so start right away
             offset = chain.start >= to ? 0 : MB::M.max(((chain.start - from) / per_sample).floor, 0)
-            start_master_chain(chain, from + offset * per_sample)
-            chain.timeline_nodes.each { |n| n.start_at(from, transport: @transport) }
+            start = from + offset * per_sample
+            launch = chain.start >= to ? start : MB::M.max(chain.start, start)
+            start_master_chain(chain, start, launch: launch)
+            chain.timeline_nodes.each { |n| n.start_at(from, origin: start, launch: launch, transport: @transport) }
 
             mode = chain.mode
             if mode != :cut && @realtime && (@load || 0) > OVERLOAD
