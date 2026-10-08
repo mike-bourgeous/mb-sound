@@ -6,20 +6,23 @@ module MB
       # value steps don't zipper: a linear FIR filter whose kernel is a
       # triangle (two cascaded moving averages of half the time each), so
       # each step becomes an S-shaped quadratic B-spline transition of
-      # +length+ (continuous slope; 5 ms or more of 7-bit steps leave the
-      # zipper's energy above 2 kHz 55-70 dB lower), and a stream of steps
+      # +length+ (continuous slope; on 7-bit pressure steps every 4 ms, 5
+      # and 10 ms leave the zipper's energy above 2 kHz about 60 and 70 dB
+      # lower), and a stream of steps
       # becomes their smooth interpolation.  The output reaches each new
       # value exactly after +length+ (no endless one-pole tail), and with
       # nothing moving the input buffer passes through unchanged (the frozen
       # constant buffers of Notes fast paths stay allocation-free).  Delay:
       # half the length (the kernel is symmetric).
       #
-      # The filter is computed from the input's recent history for each
-      # buffer (cumulative sums of the deviation from the buffer's final
-      # value in double precision), so settled stretches are exact and
-      # nothing drifts.  Jumps (see #process) restart the filter at a new
-      # value, for values that must change at once (a new note's poly
-      # pressure, content jumps).
+      # The filter runs in C (FastControl.smooth, exact Ruby mirror
+      # .smooth_ruby; ~1 us per moving 128-sample buffer) as running sums of
+      # the deviation from the last held value in double precision; once
+      # the input has held for the kernel's length the output is the input
+      # exactly and the sums restart, so settled stretches are exact and
+      # rounding doesn't carry across them.  Jumps (see #process) restart
+      # the filter at a new value, for values that must change at once (a
+      # new note's poly pressure, content jumps).
       class Smoother
         # The smoothing time as given (seconds or a Length).
         attr_reader :length
@@ -32,7 +35,7 @@ module MB
         # at +sample_rate+.
         def initialize(length, sample_rate:)
           @length = length
-          @value = nil
+          @state = nil
           self.sample_rate = sample_rate
         end
 
@@ -42,12 +45,13 @@ module MB
           @rate = rate.to_f
           n = Length.samples(@length, sample_rate: @rate).round
           n = 4 if n < 4
-          @n1 = n / 2
-          @n2 = n - @n1
-          @kernel_samples = @n1 + @n2 - 1
-          @history_samples = @n1 + @n2 - 2
-          @hist = nil
-          @settle = 0
+          n1 = n / 2
+          n2 = n - n1
+          @kernel_samples = n1 + n2 - 1
+          @settle = n1 + n2 - 2
+          @ring1 = Numo::DFloat.zeros(n1)
+          @ring2 = Numo::DFloat.zeros(n2)
+          settle_at(@state[1]) if @state
         end
 
         # The sample rate the kernel was computed for.
@@ -57,76 +61,94 @@ module MB
 
         # True if the output equals the input (nothing is moving).
         def settled?
-          @settle == 0
+          @state.nil? || @state[6] >= @settle
         end
 
-        # Returns the smoothed +buf+: +buf+ itself while settled and +buf+
-        # is +constant+ (its Float value, or nil if unknown) at the held
-        # value, else a reused buffer.  +jumps+ lists sample offsets (sorted)
-        # where the output jumps straight to the input instead.
+        # Returns the smoothed +buf+ (an SFloat): +buf+ itself while settled
+        # and +buf+ is +constant+ (its Float value, or nil if unknown) at the
+        # held value, else a reused buffer.  +jumps+ lists sample offsets
+        # (sorted) where the output jumps straight to the input instead.
         def process(buf, constant = nil, jumps = nil)
           count = buf.length
-          @value = (constant || buf[0]) if @value.nil?
-          return buf if @settle == 0 && constant && constant == @value && (jumps.nil? || jumps.empty?)
+          settle_at(constant || buf[0]) if @state.nil?
+          st = @state
+          return buf if constant && st[6] >= @settle && constant == st[1] && (jumps.nil? || jumps.empty?)
 
+          buf = Numo::SFloat.cast(buf) unless buf.is_a?(Numo::SFloat) && buf.contiguous?
           @out = Numo::SFloat.zeros(count) if @out.nil? || @out.length != count
           start = 0
           jumps&.each do |j|
             next if j < start || j >= count
-            segment(buf, start, j) if j > start
-            @value = buf[j]
-            @hist = nil
-            @settle = 0
+            FastControl.smooth(buf, @out, start, j, st, @ring1, @ring2) if j > start
+            st[1] = buf[j]
+            st[6] = @settle
             start = j
           end
-          segment(buf, start, count) if start < count
+          FastControl.smooth(buf, @out, start, count, st, @ring1, @ring2) if start < count
 
           @out
         end
 
-        private
+        # The Ruby mirror of FastControl.smooth (see
+        # ext/mb/sound/fast_control/fast_control.c): smooths x[from...to]
+        # into out[from...to] with +state+ [ref, last, sum1, sum2, p1, p2,
+        # since] and the rings' lengths as the two moving averages, giving
+        # exactly the same samples.
+        def self.smooth_ruby(x, out, from, to, state, ring1, ring2)
+          n1 = ring1.length
+          n2 = ring2.length
+          settle = (n1 + n2 - 2).to_f
+          ref, last, s1, s2, p1, p2, since = state.to_a
+          p1 = p1.to_i
+          p2 = p2.to_i
 
-        # Smooths buf[from...to] into @out[from...to].
-        def segment(buf, from, to)
-          n = to - from
-          x = buf[from...to]
-          last = x[-1]
+          (from...to).each do |i|
+            v = x[i]
 
-          # Where the input's final constant run starts (0 if it starts at or
-          # before the segment's start)
-          change = 0
-          if n > 1
-            idx = x[1..].ne(x[0...-1]).where
-            change = idx[-1] + 1 if idx.length > 0
+            if v != last
+              if since >= settle
+                ref = last
+                ring1.fill(0)
+                ring2.fill(0)
+                s1 = 0.0
+                s2 = 0.0
+              end
+              since = 0.0
+              last = v
+            elsif since < settle
+              since += 1.0
+            end
+
+            if since >= settle
+              out[i] = v
+            else
+              d = v - ref
+              s1 += d - ring1[p1]
+              ring1[p1] = d
+              p1 += 1
+              p1 = 0 if p1 == n1
+
+              s = s1 / n1.to_f
+              s2 += s - ring2[p2]
+              ring2[p2] = s
+              p2 += 1
+              p2 = 0 if p2 == n2
+
+              out[i] = ref + s2 / n2.to_f
+            end
           end
-          moved = change > 0 || x[0] != @value
 
-          if @settle == 0 && !moved
-            # Settled and unchanged: the output is the input
-            @out[from...to] = x
-          else
-            hist = @hist || Numo::DFloat.new(@history_samples).fill(@value)
-            ext = hist.concatenate(Numo::DFloat.cast(x))
-            y = boxcar(boxcar(ext - last, @n1), @n2)
-            @out[from...to] = y + last
-            @hist = ext[-@history_samples..].dup
-          end
-
-          # Samples after this segment until the output is exact again
-          @settle = moved ? [change + @kernel_samples - 1 - n, 0].max : [@settle - n, 0].max
-          @value = last
-          @hist = nil if @settle == 0
+          state[0...7] = [ref, last, s1, s2, p1.to_f, p2.to_f, since]
+          out
         end
 
-        # Moving average of +n+ samples over +x+ (the first n - 1 outputs
-        # are dropped, so the result is n - 1 shorter).
-        def boxcar(x, n)
-          return x if n <= 1
-          c = x.cumsum
-          head = c[n - 1].to_f
-          out = c[n..] - c[0...-n]
-          out = Numo::DFloat[head].concatenate(out)
-          out * (1.0 / n)
+        private
+
+        # Holds +value+ with nothing moving.
+        def settle_at(value)
+          @state = Numo::DFloat[value, value, 0, 0, 0, 0, @settle]
+          @ring1.fill(0)
+          @ring2.fill(0)
         end
       end
     end
