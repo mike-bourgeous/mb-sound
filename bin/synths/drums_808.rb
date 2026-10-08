@@ -24,7 +24,7 @@ MB::Sound.synth_script(
   kick_decay: [2.4, Float, '-d', 'Kick decay in seconds (to -60 dB)', 0.05..10.0],
   snappy: [0.6, Float, '-s', 'Snare snappy (noise), 0..1', 0.0..1.0],
   hat_decay: [0.45, Float, '-H', 'Open hat decay in seconds', 0.05..4.0],
-  accent: [6.0, Float, '-a', 'dB louder at full velocity than at velocity 0.75', 0.0..24.0],
+  accent: [6.0, Float, '-a', 'dB louder at velocity 127 than at 64 (6: about linear)', 0.0..24.0],
   cowbell: [0.0, Float, '-c', 'More cowbell, in dB', -24.0..24.0],
 ) { |midi, p|
   MB::Sound.tr808(

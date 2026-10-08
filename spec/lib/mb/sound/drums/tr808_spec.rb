@@ -131,6 +131,59 @@ RSpec.describe(MB::Sound::Drums::TR808, :aggregate_failures) do
     expect(peak(data, 1, 1.5)).to be_within(0.01).of(peak(data, 0, 0.5))
   end
 
+  describe 'velocity curves' do
+    # Impulses at full velocity, the grid's plain velocity, and MIDI 64
+    let(:heights) { [1.0, MB::Sound::Sequence::Clip::DEFAULT_VELOCITY, 64 / 127.0, 16 / 127.0] }
+    def impulses
+      MB::Sound::ArrayInput.new(data: [Numo::SFloat[*heights.flat_map { |h| [h, 0, 0, 0] }]])
+    end
+
+    def levels(curve, accent = 6)
+      out = MB::Sound::Drums.accented(impulses, accent, curve: curve).sample(16)
+      heights.each_index.map { |i| (out[i * 4] / out[0]).to_db }
+    end
+
+    it 'puts a grid x (velocity 0.75) accent dB below an X with :grid' do
+      l = levels(:grid)
+      expect(l[1]).to be_within(1e-4).of(-6)
+      expect(l[2]).to be_within(0.01).of(-14.3)
+      expect(levels(:grid, 12)[1]).to be_within(1e-4).of(-12)
+    end
+
+    it 'puts MIDI velocity 64 accent dB below 127 with :midi, about linear at 6 dB' do
+      l = levels(:midi)
+      expect(l[1]).to be_within(0.05).of(-2.5)
+      expect(l[2]).to be_within(1e-4).of(-6)
+      expect(l[3]).to be_within(0.01).of(20 * Math.log10(16 / 127.0) * 1.008)
+      expect(levels(:midi, 12)[2]).to be_within(1e-4).of(-12)
+    end
+
+    it 'raises for an unknown curve' do
+      expect { MB::Sound::Drums.accented(impulses, 6, curve: :log) }.to raise_error(ArgumentError, /Unknown velocity curve :log/)
+    end
+
+    it 'picks :grid for clips and grids, :midi for MIDI files, or the given curve' do
+      expect(described_class.kick(hits).knobs[:velocity_curve]).to eq(:grid)
+      expect(described_class.kick(MB::Sound::Notes.new(hits)).knobs[:velocity_curve]).to eq(:grid)
+      expect(described_class.kick(MB::Sound::Notes.new('spec/test_data/c2_sustain.mid')).knobs[:velocity_curve]).to eq(:midi)
+      expect(described_class.kick(hits, velocity_curve: :midi).knobs[:velocity_curve]).to eq(:midi)
+      expect(MB::Sound.tr808('spec/test_data/c2_sustain.mid')[:kick].knobs[:velocity_curve]).to eq(:midi)
+      expect(MB::Sound.tr808(MB::Sound.grid(4, kick: 'x')).voices.values.map { |v| v.knobs[:velocity_curve] }).to eq([:grid])
+      expect(MB::Sound.tr808(MB::Sound.seq(36, 38)).voices.values.map { |v| v.knobs[:velocity_curve] }).to eq([:grid, :grid])
+    end
+
+    it 'plays MIDI velocity 64 6 dB quieter than 127 with :midi (14.3 dB with :grid)' do
+      notes = ->(curve) {
+        clip = MB::Sound::Sequence::Clip.new([127, 64].each_with_index.map { |v, i| MB::Sound::Sequence::Event.new(start: i / 2r, length: 1 / 8r, value: 75, velocity: v / 127.0) })
+        collect(described_class.claves(clip, velocity_curve: curve), 2)
+      }
+      d = notes.(:midi)
+      expect((peak(d, 1, 1.15) / peak(d, 0, 0.5)).to_db).to be_within(0.1).of(-6)
+      d = notes.(:grid)
+      expect((peak(d, 1, 1.15) / peak(d, 0, 0.5)).to_db).to be_within(0.1).of(-14.3)
+    end
+  end
+
   it 'raises for unknown voices and knobs' do
     expect { described_class.voice(:tabla, hits) }.to raise_error(ArgumentError, /Unknown TR-808 voice/)
     expect { described_class.kick(hits, snappy: 1) }.to raise_error(ArgumentError, /Unknown kick knob :snappy.*tune/)

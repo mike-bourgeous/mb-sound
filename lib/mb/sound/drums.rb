@@ -12,12 +12,23 @@ module MB
     # API).  The goal is playability and inspiration, not exact emulation.
     module Drums
       # How much louder (dB) a grid accent (X, velocity 1) is than a plain
-      # hit (x, velocity Sequence::Clip::DEFAULT_VELOCITY) by default; see
-      # .accented.
+      # hit (x, velocity Sequence::Clip::DEFAULT_VELOCITY) by default, and a
+      # MIDI velocity of 127 than 64; see .accented.
       DEFAULT_ACCENT = 6.0
 
       # The level (dB) of the default grid velocity (0.75) relative to 1.
       DEFAULT_VELOCITY_DB = 20 * Math.log10(Sequence::Clip::DEFAULT_VELOCITY)
+
+      # The MIDI velocity that plays +accent+ dB below velocity 127 with the
+      # :midi velocity curve (see .accented), normalized (64 / 127).
+      MIDI_REFERENCE_VELOCITY = 64 / 127.0
+
+      # The normalized velocity +accent+ dB below full level for each
+      # velocity curve (see .accented).
+      VELOCITY_REFERENCES = {
+        grid: Sequence::Clip::DEFAULT_VELOCITY,
+        midi: MIDI_REFERENCE_VELOCITY,
+      }.freeze
 
       module_function
 
@@ -38,17 +49,54 @@ module MB
         notes ? notes.trigger : source
       end
 
-      # Maps the impulse heights (velocities) of +trigger+ so a grid accent
-      # (velocity 1) is +accent+ dB louder than a plain hit (velocity 0.75):
-      # velocity ** (accent / 2.5).  MIDI velocities follow the same curve
-      # (the default 6 dB is about velocity ** 2.4).  An accent of 0 makes
-      # every hit full level.
-      def accented(trigger, accent = DEFAULT_ACCENT)
-        exponent = accent.to_f / -DEFAULT_VELOCITY_DB
+      # Maps the impulse heights (normalized velocities) of +trigger+
+      # through a power curve, velocity ** e, chosen so the +curve+'s
+      # reference velocity plays +accent+ dB below full level (velocity 1):
+      # - :grid (clips and grids): a plain hit (x, velocity 0.75) is
+      #   +accent+ dB below an accent (X, velocity 1); e = accent / 2.5, so
+      #   the default 6 dB is velocity ** 2.4 (grid digit 5, velocity 0.56,
+      #   is -12 dB);
+      # - :midi (MIDI files, live MIDI, other streams): velocity 64 is
+      #   +accent+ dB below 127; e = accent / 5.95, so the default 6 dB is
+      #   about linear in amplitude (velocity ** 1.008: 96 is -2.5 dB, 32
+      #   -12 dB, 16 -18 dB).
+      # An accent of 0 makes every hit full level.  See .velocity_curve.
+      def accented(trigger, accent = DEFAULT_ACCENT, curve: :grid)
+        reference = VELOCITY_REFERENCES.fetch(curve) {
+          raise ArgumentError, "Unknown velocity curve #{curve.inspect} (curves: #{VELOCITY_REFERENCES.keys.map(&:inspect).join(', ')})"
+        }
+        exponent = accent.to_f / -(20 * Math.log10(reference))
         raise ArgumentError, "Accent must be 0 dB or more (got #{accent.inspect})" if exponent < 0
         return trigger if exponent == 1
 
         (trigger.aabs ** [exponent, 1e-3].max).named("accent #{MB::M.sigfigs(accent.to_f, 3)} dB")
+      end
+
+      # The velocity curve (see .accented) for drum +sources+ (one or an
+      # Array): :grid if every source is sequenced (a Clip, a grid, a Notes
+      # or MIDI::Stream reading a clip) or a plain trigger signal, :midi if
+      # any plays MIDI from elsewhere (a file, live input, another Source).
+      def velocity_curve(sources)
+        Array(sources).all? { |s| sequenced?(s) } ? :grid : :midi
+      end
+
+      # True if +source+ is a clip, grid, or trigger signal, or reads one
+      # (through Notes, Streams, and transforms); see .velocity_curve.
+      def sequenced?(source)
+        case source
+        when Sequence::Clip, Sequence::Kit, MIDI::ClipSource
+          true
+        when MB::Sound::Notes
+          sequenced?(source.stream)
+        when MIDI::Stream
+          sequenced?(source.source)
+        when MIDI::Transform
+          sequenced?(source.parent)
+        when GraphNode
+          true
+        else
+          false
+        end
       end
 
       # A one-shot decay envelope on every rising edge of +trigger+: rises

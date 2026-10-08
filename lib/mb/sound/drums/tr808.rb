@@ -20,8 +20,10 @@ module MB
       # - sigh (kick): how far the pitch sweeps up at the strike (0.45 is
       #   45% above +tune+, falling over 30 ms)
       #
-      # Every voice also takes +accent:+ (dB louder for a grid X than an x;
-      # see Drums.accented).
+      # Every voice also takes +accent:+ (dB louder for a grid X than an x,
+      # or for MIDI velocity 127 than 64; see Drums.accented) and
+      # +velocity_curve:+ (:grid or :midi, chosen from the source by
+      # default).
       #
       # Examples:
       #     TR808.kick(grid(16, 'X..x..x...x.x...').loop, tune: 48, decay: 1.5)
@@ -118,7 +120,10 @@ module MB
         # source (or sources) whose hits cut the voice off (the closed hat's,
         # in a kit); +:metal+ is a shared metal oscillator bank (see
         # .metal), as in a kit; +:skip_idle+ as for Voice.
-        def voice(name, source, accent: DEFAULT_ACCENT, choke: nil, metal: nil, skip_idle: true, **knobs)
+        # +:velocity_curve+ is :grid or :midi (see Drums.accented), by
+        # default chosen from the sources (Drums.velocity_curve: clips and
+        # grids :grid, MIDI files and live MIDI :midi).
+        def voice(name, source, accent: DEFAULT_ACCENT, velocity_curve: nil, choke: nil, metal: nil, skip_idle: true, **knobs)
           key = voice_name(name) || raise(ArgumentError, "Unknown TR-808 voice #{name.inspect} (voices: #{VOICES.keys.join(', ')})")
           k = Drums.knobs(key, VOICES[key], knobs)
 
@@ -133,9 +138,10 @@ module MB
             })
           }
 
+          velocity_curve ||= Drums.velocity_curve(source.is_a?(Array) ? source : [source])
           tap = Voice::Tap.new('trigger')
           inputs = [[trigger_source.(source), tap]]
-          trigger = Drums.accented(tap, accent)
+          trigger = Drums.accented(tap, accent, curve: velocity_curve)
 
           extra = {}
           if key == :open_hat && choke
@@ -148,7 +154,7 @@ module MB
           graph = Build.public_send(key, trigger, **k, **extra)
           Voice.new(
             graph, name: key, machine: :tr808, inputs: inputs, notes: notes,
-            knobs: k.merge(accent: accent), skip_idle: skip_idle
+            knobs: k.merge(accent: accent, velocity_curve: velocity_curve), skip_idle: skip_idle
           )
         end
 
@@ -173,7 +179,10 @@ module MB
         #
         # Voice knobs are Hashes by voice name (aliases work), e.g. `kick: {
         # tune: 48, decay: 1.2 }`; +:accent+ (dB, see Drums.accented) applies
-        # to every voice unless a voice's Hash sets its own.  +:more_cowbell+
+        # to every voice unless a voice's Hash sets its own, and so does
+        # +:velocity_curve+ (:grid or :midi, by default from the source:
+        # :grid for grids and clips, :midi for MIDI files and live MIDI;
+        # see Drums.accented).  +:more_cowbell+
         # raises the cowbell and lengthens its decay: true for +6 dB, or a
         # number of dB (see .more_cowbell).
         #
@@ -181,7 +190,7 @@ module MB
         # share one metal oscillator bank when their tunes are the same
         # numbers, as on the 808.  Idle voices are skipped unless
         # +skip_idle: false+ (see Voice).
-        def kit(source, accent: DEFAULT_ACCENT, only: nil, map: {}, more_cowbell: nil, skip_idle: true, **settings)
+        def kit(source, accent: DEFAULT_ACCENT, velocity_curve: nil, only: nil, map: {}, more_cowbell: nil, skip_idle: true, **settings)
           settings = settings.to_h { |name, k|
             key = voice_name(name) || raise(ArgumentError, "Unknown TR-808 voice #{name.inspect} (voices: #{VOICES.keys.join(', ')})")
             raise ArgumentError, "Knobs for the #{key} must be a Hash (got #{k.inspect})" unless k.is_a?(Hash)
@@ -210,7 +219,7 @@ module MB
             next unless sources.key?(v)
 
             knobs = settings.fetch(v, {})
-            opts = { accent: accent, skip_idle: skip_idle }.merge(knobs)
+            opts = { accent: accent, velocity_curve: velocity_curve, skip_idle: skip_idle }.merge(knobs)
             opts[:metal] = metal_for.(knobs, v) if [:closed_hat, :open_hat, :cymbal].include?(v)
             opts[:choke] = choke_sources.(sources[:closed_hat]) if v == :open_hat && sources[:closed_hat]
             voices[v] = voice(v, sources[v], **opts)
