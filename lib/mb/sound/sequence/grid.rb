@@ -15,8 +15,17 @@ module MB
           pedal_hat: 44, low_tom: 45, open_hat: 46, low_mid_tom: 47,
           mid_tom: 47, high_mid_tom: 48, crash: 49, high_tom: 50, ride: 51,
           china: 52, ride_bell: 53, tambourine: 54, splash: 55, cowbell: 56,
-          crash2: 57, ride2: 59, high_bongo: 60, low_bongo: 61, shaker: 70,
+          crash2: 57, ride2: 59, high_bongo: 60, low_bongo: 61, mute_high_conga: 62,
+          open_high_conga: 63, low_conga: 64, cabasa: 69, shaker: 70,
           maracas: 70, claves: 75,
+        }.freeze
+
+        # More row names: drum machine voices and short names, with the GM
+        # notes they play (see MB::Sound::Drums::TR808::GM_MAP).
+        ROW_ALIASES = {
+          bd: 36, sd: 38, rim: 37, cp: 39, ch: 42, oh: 46, cb: 56, cy: 49, cymbal: 49,
+          lt: 45, mt: 47, ht: 50, conga: 63, high_conga: 62, mid_conga: 63,
+          lc: 64, mc: 63, hc: 62, clave: 75,
         }.freeze
 
         # Step characters.  Values are a Hash of Seq::Step attributes for a
@@ -63,10 +72,10 @@ module MB
           Seq.new(steps, seed: seed)
         end
 
-        # Returns the note number for a grid row name: a GM_DRUMS Symbol, a
-        # Note, or a Numeric.
+        # Returns the note number for a grid row name: a GM_DRUMS or
+        # ROW_ALIASES Symbol, a Note, or a Numeric.
         def self.row_value(name, map = {})
-          v = map.fetch(name) { name.is_a?(Symbol) ? GM_DRUMS[name] : name }
+          v = map.fetch(name) { name.is_a?(Symbol) ? GM_DRUMS.fetch(name) { ROW_ALIASES[name] } : name }
           v = v.number if v.is_a?(MB::Sound::Note)
           raise ArgumentError, "Unknown grid row #{name.inspect}; use a GM drum name (#{GM_DRUMS.keys.first(6).join(', ')}, ...), a Note, a number, or map: {}" unless v.is_a?(Numeric)
           v

@@ -248,6 +248,19 @@ module MB
           Stream.new(Transform::Channel.new(self, channels))
         end
 
+        # Returns a stream with only the notes (note-ons, note-offs, poly
+        # pressure) of the given note numbers (Integers, Ranges, or Notes);
+        # channel-wide events (controllers, bend, chokes) pass through.  For
+        # routing drum notes to drum voices (see MB::Sound::Drums), or
+        # splitting a keyboard.
+        #
+        #     stream.keys(36)              # GM kick drum
+        #     stream.keys(42, 44)          # closed and pedal hi-hats
+        #     stream.keys(C2..B2)          # one octave
+        def keys(*notes)
+          Stream.new(Transform::Keys.new(self, notes))
+        end
+
         # Returns a stream with note numbers (including poly pressure)
         # shifted by +interval+ (an Interval or semitones, e.g. `7.st`,
         # `-1.oct`, or 12).  Notes outside 0..127 or between semitones are

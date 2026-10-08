@@ -50,6 +50,7 @@ require_relative 'sound/envelope_methods'
 require_relative 'sound/mod_methods'
 require_relative 'sound/random_methods'
 require_relative 'sound/live_methods'
+require_relative 'sound/drum_methods'
 
 module MB
   # Convenience functions for making quick work of sound.
@@ -77,6 +78,7 @@ module MB
     extend ModMethods
     extend RandomMethods
     extend LiveMethods
+    extend DrumMethods
 
     # Speed of sound for wavelength calculations, in meters per second.
     SPEED_OF_SOUND = 343.0
@@ -169,6 +171,7 @@ require_relative 'sound/sequence'
 require_relative 'sound/midi/streams'
 require_relative 'sound/notes'
 require_relative 'sound/synth'
+require_relative 'sound/drums'
 require_relative 'sound/session'
 
 require_relative 'sound/plot_output'
