@@ -277,6 +277,8 @@ module MB
       # #fm, #log_fm, #pm, #feedback/#fb, #lfo, #pwm/#skew, #noise), and a
       # pulse (Tone#pulse, #apulse).
       def at(amplitude) = tone.at(amplitude)
+      def gain(gain) = tone.gain(gain)
+      def amp(gain) = tone.gain(gain)
       def with_phase(phase) = tone.with_phase(phase)
       def fm(tone_or_node, index = nil) = tone.fm(tone_or_node, index)
       def log_fm(tone_or_node, index = nil) = tone.log_fm(tone_or_node, index)

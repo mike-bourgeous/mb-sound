@@ -32,7 +32,8 @@
  * only difference left possible under contraction is the sign of a zero
  * from a product that underflows (below ~1e-45 in float).
  *
- * .copy copies a buffer into another (for nodes that work in place on a
+ * .scale multiplies a real or complex float buffer by a real gain in place
+ * (Tone#gain).  .copy copies a buffer into another (for nodes that work in place on a
  * copy of a frozen input), and .min_max finds Numo's min and max of a real
  * buffer at once (for Synth's lane levels).  .divide and .power are the
  * in-place / and ** of GraphNode arithmetic procs for real buffers, and
@@ -957,6 +958,60 @@ static VALUE ruby_pan(VALUE self, VALUE law, VALUE position, VALUE input, VALUE 
 	return outs;
 }
 
+/*
+ * call-seq: MB::Sound::FastArithmetic.scale(out, gain) -> out or nil
+ *
+ * Multiplies +out+ (SFloat or SComplex, contiguous, writable) by +gain+ in
+ * place: a real Numeric (cast to float, as Numo's fill of a Multiplier's
+ * constant), or a contiguous SFloat as long as +out+.  The same values as
+ * Multiplier's product of the buffer and the gain (a real factor's
+ * imaginary part is zero, so each part is one float product).  Returns nil
+ * without changing +out+ for anything else (Tone#gain then uses Numo).
+ */
+static VALUE ruby_scale(VALUE self, VALUE out, VALUE gain)
+{
+	enum mb_arith_type ot = arith_type(out);
+	if ((ot != MB_ARITH_SF && ot != MB_ARITH_SC) || RNARRAY_NDIM(out) != 1 || !RTEST(nary_check_contiguous(out))) {
+		return Qnil;
+	}
+	VALUE data = out;
+	if (RNARRAY_TYPE(out) == NARRAY_VIEW_T) {
+		data = RNARRAY_VIEW(out)->data;
+	}
+	if (OBJ_FROZEN(data)) {
+		return Qnil;
+	}
+
+	size_t length = RNARRAY_SIZE(out);
+	const float *g = NULL;
+	float gc = 0;
+	if (RB_INTEGER_TYPE_P(gain) || RB_FLOAT_TYPE_P(gain)) {
+		gc = (float)NUM2DBL(gain);
+	} else if (arith_type(gain) == MB_ARITH_SF && shape_ok(gain, length)) {
+		g = (const float *)read_ptr(gain);
+	} else {
+		return Qnil;
+	}
+
+	float *o = (float *)(nary_get_pointer_for_write(out) + nary_get_offset(out));
+	if (ot == MB_ARITH_SF) {
+		if (g) {
+			for (size_t i = 0; i < length; i++) o[i] = o[i] * g[i];
+		} else {
+			for (size_t i = 0; i < length; i++) o[i] = o[i] * gc;
+		}
+	} else {
+		for (size_t i = 0; i < length; i++) {
+			float x = g ? g[i] : gc;
+			o[2 * i] = o[2 * i] * x;
+			o[2 * i + 1] = o[2 * i + 1] * x;
+		}
+	}
+
+	RB_GC_GUARD(gain);
+	return out;
+}
+
 void Init_fast_arithmetic(void)
 {
 	VALUE mb = rb_define_module("MB");
@@ -964,6 +1019,7 @@ void Init_fast_arithmetic(void)
 	VALUE fast_arithmetic = rb_define_module_under(sound, "FastArithmetic");
 
 	rb_define_module_function(fast_arithmetic, "product", ruby_product, 3);
+	rb_define_module_function(fast_arithmetic, "scale", ruby_scale, 2);
 	rb_define_module_function(fast_arithmetic, "mix", ruby_mix, 3);
 	rb_define_module_function(fast_arithmetic, "copy", ruby_copy, 2);
 	rb_define_module_function(fast_arithmetic, "min_max", ruby_min_max, 2);

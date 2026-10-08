@@ -69,7 +69,10 @@ module MB
     #      last two outputs, times an in-loop gain (FastSynth.feedback_sine,
     #      state.feedback; see #feedback): a per-sample recurrence, so a
     #      fused plan keeps it as one sequential op.
-    # 5. GAIN (fused into the kernel): y = v * gain + offset, from #at.
+    # 5. GAIN (fused into the kernel): y = v * gain + offset, from #at;
+    #    then (after the JUMP residual) y *= the #gain input, if any (one
+    #    Numo multiply on the output buffer, the same samples as a
+    #    following Multiplier).
     # 6. JUMP: a phase jump (reset input, timeline lock) of a band-limited
     #    tone queues a minBLEP/minBLAMP step from the old waveform to the
     #    new (state.jump_residual), with its area set to that of an ideal
@@ -447,6 +450,7 @@ module MB
         @feedback_gain = nil
         @feedback_dc = false
         @keep_feedback = false
+        @out_gain = nil
 
         @frequency = nil
         @phase = nil
@@ -866,6 +870,37 @@ module MB
           @amplitude_set = true
         end
       end
+
+      # Multiplies the tone's output by +gain+ (a number or a graph node,
+      # e.g. an envelope; nil removes it) inside the oscillator, after #at
+      # (its scale and offset) and any band-limited jump steps: the same
+      # samples as `tone.at(...) * gain` (bit for bit), without a separate
+      # Multiplier node, and a step the planner can fold into the
+      # oscillator.  An input that ends (a one-shot envelope) ends the tone.
+      # Also available as #amp.
+      #
+      # On a #feedback sine this is the output gain, after the feedback
+      # loop: the timbre stays fixed while the level changes.  #feedback's
+      # +gain:+ is the in-loop level instead, which the feedback reads, so
+      # the timbre follows it (the FM-synth operator behavior).  Both can be
+      # used together.
+      #
+      #     play 220.hz.saw.gain(adsr(0.01, 0.3, 0.5, 0.4, hold: 1))
+      #     v.hz.ramp.at(0.5).gain(v.amp_env)          # in a synth voice
+      def gain(gain)
+        raise ArgumentError, 'A phasor outputs cycles (0...1) and has no gain; scale it with arithmetic' if phasor?
+        unless gain.nil? || gain.is_a?(Numeric) || gain.respond_to?(:sample)
+          raise ArgumentError, "Gain must be nil, a Numeric, or a graph node (got #{gain.inspect})"
+        end
+
+        configure do
+          @out_gain = gain.is_a?(Numeric) || gain.nil? ? gain : fixup_source(gain)
+        end
+      end
+      alias amp gain
+
+      # The output gain given to #gain (a number or node), or nil.
+      def output_gain = @out_gain
 
       # True if #at was given a Range of Durations, so this tone outputs a
       # musical length in whole notes rather than a plain number.
@@ -1426,8 +1461,8 @@ module MB
         start unless @started
         return nil if one_shot_ended?
 
-        count, freq, phase, width, pulses, resets, targets, jumps, jump_phase, scan, fb, fb_gain = get_upstream_inputs(count)
-        return nil if missing_input?(freq, phase, width, pulses, resets, targets, scan, fb, fb_gain)
+        count, freq, phase, width, pulses, resets, targets, jumps, jump_phase, scan, fb, fb_gain, out_gain = get_upstream_inputs(count)
+        return nil if missing_input?(freq, phase, width, pulses, resets, targets, scan, fb, fb_gain, out_gain)
 
         state = @state
         if @ports
@@ -1449,6 +1484,7 @@ module MB
           buf = kernel_c(osc_view(count), freq, phase, width, pulses, scan, fb, fb_gain)
           add_jump_residual(buf) if state.jump_residual
         end
+        apply_output_gain(buf, out_gain) if out_gain
 
         state.last_freq = freq.is_a?(Numeric) ? freq : freq[-1]
         state.last_width = width.is_a?(Numo::NArray) ? width[-1] : width
@@ -1462,8 +1498,8 @@ module MB
         start unless @started
         return nil if one_shot_ended?
 
-        count, freq_table, phase_table, width, pulses, resets, targets, jumps, jump_phase, scan, fb, fb_gain = get_upstream_inputs(count)
-        return nil if missing_input?(freq_table, phase_table, width, pulses, resets, targets, scan, fb, fb_gain)
+        count, freq_table, phase_table, width, pulses, resets, targets, jumps, jump_phase, scan, fb, fb_gain, out_gain = get_upstream_inputs(count)
+        return nil if missing_input?(freq_table, phase_table, width, pulses, resets, targets, scan, fb, fb_gain, out_gain)
 
         pick_zone(freq_table) if @table.is_a?(MB::Sound::Wavetable::KeyMap) && (@zone_table.nil? || @reset.nil?)
         build_buffer(count)
@@ -1478,6 +1514,7 @@ module MB
           buf = kernel_ruby(osc_view(count), freq_table, phase_table, width, pulses, scan, fb, fb_gain)
           add_jump_residual(buf)
         end
+        buf.inplace * out_gain if out_gain # Numo: the mirror of FastArithmetic.scale
 
         @state.last_freq = freq_table.is_a?(Numeric) ? freq_table : freq_table[-1]
         @state.last_width = width.is_a?(Numo::NArray) ? width[-1] : width
@@ -1502,6 +1539,7 @@ module MB
           scan: @scan.respond_to?(:sample) ? @scan : nil,
           feedback: @feedback.respond_to?(:sample) ? @feedback : nil,
           feedback_gain: @feedback && @feedback_gain.respond_to?(:sample) ? @feedback_gain : nil,
+          gain: @out_gain.respond_to?(:sample) ? @out_gain : nil,
         }.compact
       end
 
@@ -1799,6 +1837,15 @@ module MB
         [value, slope * k]
       end
 
+      # Multiplies +buf+ (the output view) by the #gain input in place: in C
+      # (FastArithmetic.scale, no allocation) when it can, else with Numo;
+      # both give the same values as a following Multiplier.
+      def apply_output_gain(buf, out_gain)
+        return if MB::Sound::FastArithmetic.scale(buf, out_gain)
+
+        buf.inplace * out_gain
+      end
+
       # Adds any queued phase jump step (see #phase_jump) to +buf+, scaled
       # by the output gain.
       def add_jump_residual(buf)
@@ -1811,10 +1858,10 @@ module MB
       end
 
       # True if an input needed for the next samples has ended.
-      def missing_input?(freq, phase, width, pulses, resets, targets, scan = nil, fb = 0, fb_gain = 1)
+      def missing_input?(freq, phase, width, pulses, resets, targets, scan = nil, fb = 0, fb_gain = 1, out_gain = 1)
         freq.nil? || phase.nil? || (warped? && width.nil?) || (@sync_source && pulses.nil?) ||
           (@reset_to.respond_to?(:sample) && targets.nil?) || (@scan.respond_to?(:sample) && scan.nil?) ||
-          (@feedback && (fb.nil? || fb_gain.nil?))
+          (@feedback && (fb.nil? || fb_gain.nil?)) || (@out_gain && out_gain.nil?)
       end
 
       # True if this is a sample-mode one-shot (see Wavetable) that has
@@ -2355,6 +2402,13 @@ module MB
           end
         end
 
+        out_gain = @out_gain
+        if out_gain.respond_to?(:sample)
+          out_gain = out_gain.sample(count)
+          out_gain = nil if out_gain&.empty?
+          min_length = out_gain.length if out_gain && out_gain.length < min_length
+        end
+
         # Timeline jumps (see #follow_timeline); a tempo node never ends
         if @lock
           jumps = @lock.sample(count)
@@ -2377,11 +2431,12 @@ module MB
           scan = scan[0...min_length] if scan&.is_a?(Numo::NArray)
           fb = fb[0...min_length] if fb&.is_a?(Numo::NArray)
           fb_gain = fb_gain[0...min_length] if fb_gain&.is_a?(Numo::NArray)
+          out_gain = out_gain[0...min_length] if out_gain&.is_a?(Numo::NArray)
         end
 
         # One Array reused by every call (destructured by the callers), not
         # a new one per buffer
-        ret = (@upstream_inputs ||= Array.new(12))
+        ret = (@upstream_inputs ||= Array.new(13))
         ret[0] = min_length
         ret[1] = freq
         ret[2] = phase
@@ -2394,6 +2449,7 @@ module MB
         ret[9] = scan
         ret[10] = fb
         ret[11] = fb_gain
+        ret[12] = out_gain
         ret
       end
 
