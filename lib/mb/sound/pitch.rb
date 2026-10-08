@@ -274,13 +274,19 @@ module MB
       end
 
       # Shortcuts for a sine Tone at this pitch (see Tone#at, #with_phase,
-      # #fm, #log_fm, #pm, #lfo, #pwm/#skew, #noise), and a
+      # #fm, #log_fm, #pm, #feedback/#fb, #lfo, #pwm/#skew, #noise), and a
       # pulse (Tone#pulse, #apulse).
       def at(amplitude) = tone.at(amplitude)
+      def gain(gain) = tone.gain(gain)
+      def amp(gain) = tone.gain(gain)
       def with_phase(phase) = tone.with_phase(phase)
       def fm(tone_or_node, index = nil) = tone.fm(tone_or_node, index)
       def log_fm(tone_or_node, index = nil) = tone.log_fm(tone_or_node, index)
       def pm(tone_or_node, index = nil) = tone.pm(tone_or_node, index)
+      def feedback(amount, gain: nil, dc: false) = tone.feedback(amount, gain: gain, dc: dc)
+      def fb(amount, gain: nil, dc: false) = tone.feedback(amount, gain: gain, dc: dc)
+      def feedback_cycles(cycles, gain: nil, dc: false) = tone.feedback_cycles(cycles, gain: gain, dc: dc)
+      def fb_cycles(cycles, gain: nil, dc: false) = tone.feedback_cycles(cycles, gain: gain, dc: dc)
       def lfo = tone.lfo
       def sync(master = nil, ratio: nil) = tone.sync(master, ratio: ratio)
       def softsync(master = nil, ratio: nil) = tone.softsync(master, ratio: ratio)
@@ -314,7 +320,7 @@ module MB
       # Shortcuts for a sine Tone at this pitch with a reset input
       # (Tone#reset), never reset (Tone#free), or a random phase
       # (Tone#random_phase / #rnd).
-      def reset(trigger, to: nil) = tone.reset(trigger, to: to)
+      def reset(trigger, to: nil, keep_feedback: nil) = tone.reset(trigger, to: to, keep_feedback: keep_feedback)
       def free(free = true) = tone.free(free)
       def random_phase(seed: nil) = tone.random_phase(seed: seed)
       alias rnd random_phase

@@ -1,6 +1,7 @@
 /*
- * MB::Sound::FastSynth: synthesis kernels.  First, band-limited oscillators
- * (PolyBLEP / PolyBLAMP).
+ * MB::Sound::FastSynth: synthesis kernels.  Band-limited oscillators
+ * (PolyBLEP / PolyBLAMP), and at the end a feedback sine (FM operator
+ * self-feedback, ruby_feedback_sine).
  *
  * A naive waveform with jumps (ramp, square) or corners (triangle) aliases,
  * because those edges contain harmonics far above Nyquist.  The band-limited
@@ -1412,6 +1413,163 @@ static VALUE ruby_oscillate_sync(int argc, VALUE *argv, VALUE self)
 	return buffer;
 }
 
+/*
+ * Operator self-feedback: a sine whose phase is modulated by its own last
+ * two outputs, averaged (as the DX7 does, which tames the period-two
+ * "hunting" a one-sample loop has at high feedback):
+ *
+ *     m[i] = feedback[i] * ((y[i-1] + y[i-2]) * 0.5)
+ *     y[i] = sin(phase[i] * 2pi + pm[i] + m[i]) * level[i]
+ *     out[i] = (y[i] - dc[i]) * gain + offset
+ *
+ * dc[i] (when +remove_dc+ is true; else 0) is the feedback sine's DC
+ * offset (its mean grows with the amount, e.g. -0.25 at 2 rad), tracked
+ * by a one-pole lowpass whose cutoff follows the pitch (FB_DC_RATIO times
+ * the frequency, from |increment|), so subtracting it is a one-pole
+ * highpass at a fixed fraction of the fundamental: the same phase shift
+ * at every pitch (atan(FB_DC_RATIO) at the fundamental), LFOs included,
+ * and the estimate settles in a few cycles.  It is applied to the output
+ * only; the loop feeds back y[i] with its DC.
+ *
+ * The loop is per sample (each sample depends on the last), inside the
+ * kernel rather than through a graph loop, so the cost per sample is the
+ * same whatever the feedback amount (one sin plus a few multiplies).
+ * +level+ is the operator's in-loop output level (e.g. an envelope), so
+ * feedback follows it like an FM synth's operator; +gain+ and +offset+
+ * (Tone#at) are applied outside the loop.
+ *
+ * +frequency+ (Hz), +phase_mod+ (radians, or nil), +feedback+ (radians per
+ * unit of averaged output), and +level+ are Numerics or NArrays (read as
+ * float32).  +state+ is [phase in cycles]; the phase arithmetic is that of
+ * FastSound.oscillate (phase i = wrap(phi + sum of increments 0...i)), so
+ * with feedback 0 and level 1 the samples are a plain sine's.
+ * +fb_state+ is [y[n-1], y[n-2], dc] (doubles), carried between buffers.
+ *
+ * Every product and sum is its own statement so no compiler fuses a
+ * multiply-add (clang contracts within expressions by default), keeping
+ * the Ruby mirror (Tone#feedback_ruby) exact.
+ */
+#define FB_DC_RATIO (1.0 / 20.0)
+
+static VALUE ruby_feedback_sine(VALUE self, VALUE buffer, VALUE frequency, VALUE phase_mod, VALUE advance,
+		VALUE gain, VALUE offset, VALUE state, VALUE fb_state, VALUE feedback, VALUE level, VALUE remove_dc)
+{
+	double phi = bl_read_phi(state);
+	double adv = NUM2DBL(advance);
+	double g = NUM2DBL(gain);
+	double off = NUM2DBL(offset);
+
+	Check_Type(fb_state, T_ARRAY);
+	if (RARRAY_LEN(fb_state) != 3) {
+		rb_raise(rb_eArgError, "Feedback state must have three elements");
+	}
+	double y1 = NUM2DBL(rb_ary_entry(fb_state, 0));
+	double y2 = NUM2DBL(rb_ary_entry(fb_state, 1));
+	double dc = NUM2DBL(rb_ary_entry(fb_state, 2));
+	_Bool dc_off = RTEST(remove_dc);
+	const double dc_k = 2.0 * M_PI * FB_DC_RATIO;
+
+	_Bool was_inplace;
+	mb_ensure_inplace_sfloat(&buffer, &was_inplace);
+	size_t length = RNARRAY_SHAPE(buffer)[0];
+	float *out = mb_sfloat_ptr(buffer);
+
+	double freq;
+	const float *freqptr;
+	size_t freqstep;
+	mb_read_signal_input(&frequency, length, "Frequency", &freq, &freqptr, &freqstep);
+
+	double pm;
+	const float *pmptr;
+	size_t pmstep;
+	mb_read_signal_input(&phase_mod, length, "Phase modulation", &pm, &pmptr, &pmstep);
+
+	double fb;
+	const float *fbptr;
+	size_t fbstep;
+	mb_read_signal_input(&feedback, length, "Feedback", &fb, &fbptr, &fbstep);
+
+	double lvl;
+	const float *lvlptr;
+	size_t lvlstep;
+	mb_read_signal_input(&level, length, "Level", &lvl, &lvlptr, &lvlstep);
+
+	_Bool constant = !freqptr;
+	double steps = 0;
+	for (size_t i = 0; i < length; i++) {
+		if (freqptr) {
+			freq = freqptr[i * freqstep];
+		}
+		if (pmptr) {
+			pm = pmptr[i * pmstep];
+		}
+		if (fbptr) {
+			fb = fbptr[i * fbstep];
+		}
+		if (lvlptr) {
+			lvl = lvlptr[i * lvlstep];
+		}
+
+		double inc = freq * adv;
+		if (constant) {
+			steps = inc * i;
+		}
+
+		double ph = mb_wrap(phi + steps, 1.0);
+		double radians = ph * (2.0 * M_PI);
+		double avg = y1 + y2;
+		avg = avg * 0.5;
+		double m = fb * avg;
+		double arg = radians + pm;
+		arg = arg + m;
+		double y = sin(arg);
+		y = y * lvl;
+		y2 = y1;
+		y1 = y;
+
+		double v = y;
+		if (dc_off) {
+			// One-pole lowpass at FB_DC_RATIO times the frequency
+			double c = fabs(inc);
+			c = c * dc_k;
+			if (c > 1.0) {
+				c = 1.0;
+			}
+			double d = y - dc;
+			d = d * c;
+			dc = dc + d;
+			v = y - dc;
+		}
+		v = v * g;
+		out[i] = v + off;
+
+		if (!constant) {
+			steps += inc;
+		}
+	}
+
+	if (constant) {
+		steps = freq * adv;
+		steps = steps * length;
+	}
+	rb_ary_store(state, 0, rb_float_new(mb_wrap(phi + steps, 1.0)));
+	rb_ary_store(fb_state, 0, rb_float_new(y1));
+	rb_ary_store(fb_state, 1, rb_float_new(y2));
+	rb_ary_store(fb_state, 2, rb_float_new(dc));
+
+	if (!was_inplace) {
+		UNSET_INPLACE(buffer);
+	}
+
+	RB_GC_GUARD(frequency);
+	RB_GC_GUARD(phase_mod);
+	RB_GC_GUARD(feedback);
+	RB_GC_GUARD(level);
+	RB_GC_GUARD(buffer);
+
+	return buffer;
+}
+
 void Init_fast_synth(void)
 {
 	VALUE mb = rb_define_module("MB");
@@ -1430,4 +1588,5 @@ void Init_fast_synth(void)
 	rb_define_module_function(fast_synth, "oscillate_bl", ruby_oscillate_bl, 13);
 	rb_define_module_function(fast_synth, "blit", ruby_blit, 8);
 	rb_define_module_function(fast_synth, "oscillate_sync", ruby_oscillate_sync, -1);
+	rb_define_module_function(fast_synth, "feedback_sine", ruby_feedback_sine, 11);
 }
