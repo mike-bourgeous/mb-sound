@@ -84,10 +84,10 @@ module MB
       # Velocities start at +velocity+ and fall by +:decay+, separately
       # from the timing, so loudness, pitch, or brightness mapped from
       # `v.velocity` fall with each bounce:
-      # - :speed (default) - e^i, the impact speed: physical, but low
-      #   elasticities fade within a few hits.
-      # - :gentle - e^(i/2), half the fall in dB, so every bounce stays
-      #   audible.
+      # - :gentle (default) - e^(i/2), half the fall in dB, so every
+      #   bounce stays audible.
+      # - :speed - e^i, the impact speed: physical, but low elasticities
+      #   fade within a few hits (the default until 2026-10-08).
       # - :none - every hit at +velocity+.
       # - A number d - d^i (e.g. 0.85 per hit whatever the elasticity).
       # - A Curve or Curve name (e.g. :quad_out) - velocity × (1 -
@@ -104,9 +104,10 @@ module MB
       #     bg :ball, ball.loop(align: :launch).synth(voices: 2) { |v| (v.hz.transpose(v.velocity * 12).sine * v.amp_env(0.001, 0.2, 0, 0.1)) }
       #     bounce_hits(1.bar, count: 40, elasticity: 0.92)            # settles into a buzz
       #     bounce_hits(1.bar, reverse: true)                          # accelerating apart
-      #     bounce_hits(1.bar, elasticity: 0.5, decay: :gentle)        # a dead ball you can still hear
+      #     bounce_hits(1.bar, elasticity: 0.5, decay: :speed)         # physical: a dead ball fades fast
+      #     bounce_hits(1.bar, count: 20, decay: 0.9)                  # 0.9 per hit, whatever the elasticity
       #     bounce_hits(2.bars, count: 8, note: E3, pitch: -1)         # a tom dropping a semitone per bounce
-      def bounce_hits(length = 1.bar, count: 12, elasticity: 0.7, velocity: 1.0, decay: :speed, note: 60, pitch: nil, reverse: false, min_gap: 1/1024r)
+      def bounce_hits(length = 1.bar, count: 12, elasticity: 0.7, velocity: 1.0, decay: :gentle, note: 60, pitch: nil, reverse: false, min_gap: 1/1024r)
         e = elasticity.to_f
         raise ArgumentError, "Bounce elasticity must be between 0 and 1, exclusive (got #{elasticity.inspect})" unless e > 0 && e < 1
         count = Integer(count)

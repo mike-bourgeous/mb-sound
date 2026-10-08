@@ -2,7 +2,7 @@ RSpec.describe('MB::Sound.bounce_hits') do
   before { MB::Sound.bpm(120) }
 
   it 'times hits geometrically, converging on the length, with falling velocities' do
-    c = MB::Sound.bounce_hits(2.bars, count: 6, elasticity: 0.5, note: 36)
+    c = MB::Sound.bounce_hits(2.bars, count: 6, elasticity: 0.5, note: 36, decay: :speed)
     expect(c.map(&:start)).to eq([0r, 1r, 3/2r, 7/4r, 15/8r, 31/16r])
     expect(c.map(&:velocity)).to eq([1, 0.5, 0.25, 0.125, 0.0625, 0.03125])
     expect(c.map(&:value).uniq).to eq([36])
@@ -18,7 +18,7 @@ RSpec.describe('MB::Sound.bounce_hits') do
   end
 
   it 'accelerates apart with reverse: true, soft to loud' do
-    c = MB::Sound.bounce_hits(1.bar, count: 4, elasticity: 0.5, reverse: true)
+    c = MB::Sound.bounce_hits(1.bar, count: 4, elasticity: 0.5, reverse: true, decay: :speed)
     expect(c.map(&:start)).to eq([0r, 1/8r, 3/8r, 7/8r])
     expect(c.map(&:velocity)).to eq([0.125, 0.25, 0.5, 1.0])
   end
@@ -34,13 +34,13 @@ RSpec.describe('MB::Sound.bounce_hits') do
       MB::Sound.bounce_hits(1, count: 5, elasticity: 0.5, decay: decay, **opts).map { |e| e.velocity.round(6) }
     end
 
-    it 'defaults to the impact speed, e^i' do
+    it 'falls by the impact speed, e^i, with :speed' do
       expect(vels(:speed)).to eq([1, 0.5, 0.25, 0.125, 0.0625])
-      expect(MB::Sound.bounce_hits(1, count: 5, elasticity: 0.5).map(&:velocity)).to eq(vels(:speed))
     end
 
-    it 'falls by the square root with :gentle, and not at all with :none' do
+    it 'defaults to :gentle, the square root of the speed, and falls not at all with :none' do
       expect(vels(:gentle)).to eq([1, 0.707107, 0.5, 0.353553, 0.25])
+      expect(MB::Sound.bounce_hits(1, count: 5, elasticity: 0.5).map { |e| e.velocity.round(6) }).to eq(vels(:gentle))
       expect(vels(:none, velocity: 0.8)).to eq([0.8] * 5)
     end
 
