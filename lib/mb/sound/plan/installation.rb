@@ -19,6 +19,15 @@ module MB
       class Installation
         attr_reader :roots, :regions, :engine, :check
 
+        # The Plan::SharedInputs handing this installation's regions the
+        # buffers of inputs shared with other installations (a Synth's
+        # lanes), or nil.
+        attr_accessor :shared
+
+        # Counts builds (and region changes that affect shared inputs), so
+        # SharedInputs can tell when to recompute.
+        attr_reader :generation
+
         def initialize(roots, engine:, check:, dry_run: false)
           @roots = roots
           @engine = engine
@@ -28,6 +37,8 @@ module MB
           @excluded = {}
           @watched = []
           @stale = false
+          @generation = 0
+          @shared = nil
         end
 
         # True after a structural change; the next block rebuilds.
@@ -49,6 +60,7 @@ module MB
         # Finds and installs the regions.
         def build
           @stale = false
+          @generation += 1
           traverse
           assign
           @regions.each(&:install) unless @dry_run
@@ -82,8 +94,23 @@ module MB
 
         # Rebuilds after a structural change (see Plan.changed).
         def rebuild
+          # Readers of shared inputs may change in the middle of a block
+          @shared&.guard!
           uninstall
           build
+        end
+
+        # Marks a change that affects which inputs may be shared (a region
+        # stopped planning; see SharedInputs).
+        def touch
+          @generation += 1
+        end
+
+        # True if the planned graphs contain resamplers (nodes reading their
+        # inputs at another count than they are read), so inputs aren't
+        # shared with other installations (see SharedInputs).
+        def resamples?
+          @seen.nil? || @seen.each_key.any? { |n| n.is_a?(GraphNode::Resample) }
         end
 
         # Removes every hook; the graph runs unfused from the next block.

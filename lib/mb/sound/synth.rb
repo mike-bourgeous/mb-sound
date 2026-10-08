@@ -165,6 +165,10 @@ module MB
       # lane without fused regions or with plans off).
       attr_reader :plans
 
+      # The Plan::SharedInputs handing shared controllers to the lanes'
+      # regions (nil with plans off).
+      attr_reader :shared_inputs
+
       # The Notes instance of each lane (in lane order).
       attr_reader :notes
 
@@ -234,6 +238,11 @@ module MB
 
         # Fused plans for each lane's graph (see MB::Sound::Plan)
         @plans = @lanes.map { |outs| Plan.install(outs) }
+
+        # Channel-wide controllers read by several lanes' regions are
+        # sampled once per buffer and handed to every region (see
+        # Plan::SharedInputs)
+        @shared_inputs = @plans.any? ? Plan::SharedInputs.new(@plans) : nil
 
         @channels = @lanes.map(&:length).max
         @done = Array.new(@lanes.length, false)
@@ -544,7 +553,14 @@ module MB
           return :wake
         end
 
+        shared = @shared_inputs
         @boundary[idx].each do |n|
+          # Shared controllers were read for every lane (Plan::SharedInputs)
+          if shared && n.is_a?(GraphNode::Tee::Branch) && shared.shared_tee?(n.tee)
+            return :ended if shared.buffers[n.tee.sources[:input]].nil?
+            next
+          end
+
           # Notes nodes advance without a buffer (also inside fused plans)
           return :ended if (n.is_a?(Notes::Node) ? n.advance(count) : n.sample(count)).nil?
         end
@@ -604,11 +620,17 @@ module MB
       def sample_lanes(count)
         any = false
         data = (@lane_data ||= Array.new(@lanes.length))
-        idx = 0
-        while idx < @lanes.length
-          data[idx] = sample_lane(idx, count)
-          any = true unless data[idx].nil?
-          idx += 1
+        shared = @shared_inputs
+        shared&.begin_block(count)
+        begin
+          idx = 0
+          while idx < @lanes.length
+            data[idx] = sample_lane(idx, count)
+            any = true unless data[idx].nil?
+            idx += 1
+          end
+        ensure
+          shared&.end_block
         end
 
         any ? data : nil

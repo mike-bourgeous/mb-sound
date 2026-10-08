@@ -113,6 +113,7 @@ module MB
           @read = Array.new(@input_ops.length) { [] }
           @want = @input_ops.map { |op| op.dst.complex? ? Numo::SComplex : Numo::SFloat }
           @direct = @input_ops.map { |op| direct_source(op) }
+          @via_shared = Array.new(@input_ops.length, false)
           @out_class = output.complex? ? Numo::SComplex : Numo::SFloat
           @out = nil
           @out_views.clear
@@ -231,6 +232,8 @@ module MB
         # Stops planning this region (its nodes run unfused from now on).
         def disable(why)
           @disabled = why
+          @installation.shared&.guard!
+          @installation.touch
         end
 
         private
@@ -297,6 +300,7 @@ module MB
           mismatch = false
           inputs = @inputs
           ops = @input_ops
+          shared = @installation.shared&.buffers
 
           i = 0
           while i < ops.length
@@ -310,12 +314,20 @@ module MB
             end
 
             handles = op.handles
-            if (direct = @direct[i])
+            if shared && shared.key?(op.source)
+              # Read once for every installation sharing it (a Synth's
+              # lanes; see SharedInputs)
+              buf = shared[op.source]
+              read << buf
+              @via_shared[i] = true
+            elsif (direct = @direct[i])
               # Every branch of the source's Tee is ours: read the source
               # itself (the Tee is skipped like a fused node's)
               buf = direct.sample(count)
               read << buf
+              @via_shared[i] = false
             else
+              @via_shared[i] = false
               buf = handles[0].sample(count)
               read << buf
               j = 1
@@ -415,7 +427,7 @@ module MB
             read = @read[i]
             next if read.empty?
 
-            if @direct[i]
+            if @direct[i] || @via_shared[i]
               # One read of the source for every branch, shared read-only
               # as the Tee would share it
               buf = read[0]
@@ -427,12 +439,17 @@ module MB
               end
             end
           end
-          run_unfused(count)
+          run_unfused(count, replaying: true)
         ensure
           @input_ops&.each { |op| op.handles.each { |h| h.replay = nil } }
         end
 
-        def run_unfused(count)
+        # Runs the region's nodes themselves for this block (see
+        # #replay_unfused; without +replaying+, inputs shared with other
+        # installations are put on every branch first, see
+        # SharedInputs#guard!).
+        def run_unfused(count, replaying: false)
+          @installation.shared&.guard! unless replaying
           @unfused_blocks += 1
           @unfused = true
           @members.each { |m| m.instance_variable_set(:@plan_bypass, true) }
