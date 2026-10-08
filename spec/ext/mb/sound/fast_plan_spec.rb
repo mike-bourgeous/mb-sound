@@ -14,7 +14,7 @@ RSpec.describe(MB::Sound::FastPlan) do
     MB::Sound::Plan::Op::Tone::BL_WAVES.each { |k, v| expect(e[:"bl_#{k}"]).to eq(v), k.to_s }
     el = MB::Sound::Plan::EventList
     expect([e[:events_held], e[:events_impulses]]).to eq([el::MODE_HELD, el::MODE_IMPULSES])
-    expect([e[:ev_fill], e[:ev_impulse], e[:ev_glide], e[:ev_buffer]]).to eq([el::FILL, el::IMPULSE, el::GLIDE, el::BUFFER])
+    expect([e[:ev_fill], e[:ev_impulse], e[:ev_glide], e[:ev_buffer], e[:ev_ramp]]).to eq([el::FILL, el::IMPULSE, el::GLIDE, el::BUFFER, el::RAMP])
     expect(e[:env_state_size]).to eq(MB::Sound::FastEnvelope::STATE_SIZE)
   end
 
@@ -169,6 +169,7 @@ RSpec.describe(MB::Sound::FastPlan) do
           -> { list.held!.fill(0, [n / 3, 1].max, 1.0 / 3).glide([n / 3, 1].max, n, 40.0, 52.5, 3, 97, 0.4).fill(n, n + 5, 9) },
           -> { list.held!.glide(0, n, 60.0, 48.0, 0, 50, 0).buffer(n / 2, n, buf) },
           -> { list.impulses!.impulse(0, 0.5).impulse(n - 1, 1.0 / 7).impulse(n + 3, 2) },
+          -> { list.held!.ramp(0, [n / 2, 1].max, 3, 7).ramp([n / 2, 1].max, n, 100, 1001) },
         ]
         cases.each do |make|
           make.call
@@ -184,6 +185,22 @@ RSpec.describe(MB::Sound::FastPlan) do
         MB::Sound::Plan::EventList.glide_ruby(1, 40.0, 52.0, 7, 9, 0.2)[0]
       )
       expect(MB::Sound::Plan::EventList.glide_last(5, 40.0, 52.0, 3, 9, 0.2)).to eq(Numo::SFloat.cast(MB::Sound::Plan::EventList.glide_ruby(5, 40.0, 52.0, 3, 9, 0.2))[-1])
+    end
+
+    it 'smooths and takes maximums as the Ruby mirror does, with jumps' do
+      [1, 5, 128, 600].each do |n|
+        x = Numo::SFloat.cast((real(n, 4) * 3).round / 3)
+        y = real(n, 6)
+        sm1 = MB::Sound::Notes::Smoother.new(0.002, sample_rate: 48000)
+        sm2 = MB::Sound::Notes::Smoother.new(0.002, sample_rate: 48000)
+        [sm1, sm2].each { |sm| sm.plan_start(0.25) }
+        jumps = [n / 3, n / 2].uniq
+        prog = ->(sm) { program([x, y]) { |b, xi, yi| b.max(b.smooth(xi, sm, jumps), yi) } }
+        c = prog.(sm1).run(n, [x, y], [], Numo::SFloat.zeros(n))
+        r = prog.(sm2).run_ruby(n, [x, y], [])
+        expect(c.to_a).to eq(r.to_a)
+        expect(sm1.plan_snapshot).to eq(sm2.plan_snapshot)
+      end
     end
 
     it 'keeps the last sample in an instance variable or a Hash' do

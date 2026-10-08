@@ -39,6 +39,7 @@ module MB
         IMPULSE = 1  # a: the value at +from+
         GLIDE = 2    # a: start, b: target, c: position at +from+, d: length, e: overshoot k (Notes::Glide)
         BUFFER = 3   # a: an SFloat whose first to - from samples are copied
+        RAMP = 4     # a: position at +from+, b: length (Notes::FadeIn)
 
         ENTRY_SIZE = 8
 
@@ -66,6 +67,16 @@ module MB
 
         def mode
           @data[0]
+        end
+
+        # A held block of +count+ samples of +value+, leaving the list as it
+        # is if it already says that (a steady node's usual block).
+        def steady!(count, value)
+          d = @data
+          return self if d.length == 9 && d[0] == MODE_HELD && d[1] == FILL && d[3] == count && d[4] == value && d[2] == 0
+
+          held!
+          fill(0, count, value)
         end
 
         # +value+ from sample +from+ to +to+ (exclusive).
@@ -105,6 +116,27 @@ module MB
           self
         end
 
+        # A Notes::FadeIn ramp: (position + 1 + i) / length, clipped to 0..1,
+        # in single precision as FadeIn#fill computes it.
+        def ramp(from, to, position, length)
+          @data.push(RAMP, from, to, position.to_f, length.to_f, 0, 0, 0)
+          self
+        end
+
+        # The value of a held list's first sample (as the buffer would hold
+        # it), or 0.0.
+        def first_value
+          return 0.0 if @data.length < 1 + ENTRY_SIZE || @data[0] != MODE_HELD
+
+          kind, from, to, a, b = @data[1, 5]
+          return 0.0 unless from == 0
+          case kind
+          when FILL then Plan.float32(a)
+          when RAMP then render(1)[0]
+          else render(1)[0]
+          end
+        end
+
         # The first to - from samples of +buffer+ (an SFloat).
         def buffer(from, to, buffer)
           @data.push(BUFFER, from, to, buffer, 0, 0, 0, 0)
@@ -136,6 +168,8 @@ module MB
               out[from...to] = EventList.glide_ruby(to - from, a, b, c, d, e) if to > from
             when BUFFER
               out[from...to] = a[0...(to - from)] if to > from
+            when RAMP
+              out[from...to] = (Numo::SFloat.new(to - from).seq(a.to_i + 1) / b.to_i).clip(0.0, 1.0) if to > from
             else
               raise ArgumentError, "Unknown event list entry #{kind}"
             end
@@ -249,6 +283,20 @@ module MB
       end
 
       class << self
+        # +feeders+ (see EventList) with the ones whose class groups its
+        # feeds (.plan_group, e.g. Notes nodes on one stream) grouped, in
+        # order of first appearance.
+        def group_feeders(feeders)
+          groupable = feeders.select { |f| f.class.respond_to?(:plan_group) }
+          return feeders if groupable.length < 2
+
+          by_class = groupable.group_by { |f| f.class.method(:plan_group).owner }
+          grouped = by_class.values.flat_map { |list| list[0].class.plan_group(list) }
+          rest = feeders - groupable
+          first = ->(g) { (g.respond_to?(:plan_nodes) ? g.plan_nodes : [g]).map { |n| feeders.index { |f| f.equal?(n) } }.min }
+          (rest + grouped).sort_by { |g| first.(g) }
+        end
+
         # True if +node+ is an event-driven node a plan feeds (see
         # EventList), e.g. a Notes trigger.
         def event_node?(node)
@@ -292,6 +340,74 @@ module MB
 
           def run_ruby(env, count)
             env[@dst] = @list.render(count)
+          end
+        end
+
+        # A Notes::Smoother on a Value (a smoothed controller node's
+        # events), with the smoother's own state Arrays and the block's jump
+        # offsets (the node's feed fills them; see Notes::Node).  The kernel
+        # is FastControl.smooth's (mb_smooth.h); the mirror
+        # Notes::Smoother.smooth_ruby.
+        class Smooth < Base
+          attr_reader :a, :smoother, :jumps
+
+          def initialize(dst, node, a, smoother, jumps)
+            super(dst, node)
+            raise Unsupported.new(node, 'complex smoothing') if a.complex?
+
+            @a = a
+            @smoother = smoother
+            @jumps = jumps
+          end
+
+          def operands
+            [@a]
+          end
+
+          def expression
+            "smooth(#{@a}, #{MB::M.sigfigs(@smoother.kernel_samples, 4)} samples)"
+          end
+
+          def opcode = :smooth
+
+          # Notes::Smoother#process's segments between jumps.
+          def run_ruby(env, count)
+            x = env.fetch(@a)
+            x = x[0...count] if x.length > count
+            out = Numo::SFloat.zeros(count)
+            st, r1, r2 = @smoother.plan_arrays
+            settle = (r1.length + r2.length - 2).to_f
+            start = 0
+            @jumps.each do |j|
+              next if j < start || j >= count
+
+              MB::Sound::Notes::Smoother.smooth_ruby(x, out, start, j, st, r1, r2) if j > start
+              st[1] = x[j]
+              st[6] = settle
+              start = j
+            end
+            MB::Sound::Notes::Smoother.smooth_ruby(x, out, start, count, st, r1, r2) if start < count
+            env[@dst] = out
+          end
+        end
+
+        # The larger of two real Values, as Numo::SFloat.maximum chooses
+        # (a if a >= b or b is NaN, else b).
+        class Max < Binary
+          def initialize(dst, node, a, b)
+            super
+            raise Unsupported.new(node, 'complex maximum') if a.complex? || b.complex?
+            raise Unsupported.new(node, 'a constant maximum') unless a.is_a?(Value) && b.is_a?(Value)
+          end
+
+          def expression
+            "max(#{@a}, #{@b})"
+          end
+
+          def opcode = :max
+
+          def run_ruby(env, count)
+            env[@dst] = Numo::SFloat.maximum(env.fetch(@a)[0...count], env.fetch(@b)[0...count])
           end
         end
 

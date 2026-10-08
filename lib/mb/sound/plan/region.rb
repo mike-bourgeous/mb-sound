@@ -120,6 +120,7 @@ module MB
             f = op.respond_to?(:feeder) ? op.feeder : nil
             @feeders << f if f && @feeders.none? { |x| x.equal?(f) }
           end
+          @feeders = Plan.group_feeders(@feeders)
 
           @started = false
           start_tones if start
@@ -179,7 +180,7 @@ module MB
             while k < feeders.length
               f = feeders[k]
               if f.plan_finished?
-                @installation.exclude(f, 'its MIDI stream is over')
+                (f.respond_to?(:plan_nodes) ? f.plan_nodes : [f]).each { |x| @installation.exclude(x, 'its MIDI stream is over') }
                 return run_unfused(count)
               end
               k += 1
@@ -472,7 +473,8 @@ module MB
           if problem.nil?
             stateful.each_with_index do |m, i|
               next if after[i] == planned_states[i]
-              problem = "the state of #{Plan.node_label(m)} differs: planned #{planned_states[i].inspect[0, 300]}, unfused #{after[i].inspect[0, 300]}"
+              detail = planned_states[i].is_a?(Snapshot) && after[i].is_a?(Snapshot) ? planned_states[i].diff(after[i]) : "planned #{planned_states[i].inspect[0, 300]}, unfused #{after[i].inspect[0, 300]}"
+              problem = "the state of #{Plan.node_label(m)} differs: #{detail}"
               break
             end
           end

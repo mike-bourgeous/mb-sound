@@ -9,13 +9,19 @@ RSpec.describe('Plan: Notes nodes and envelopes') do
 
   let(:dense) { 'spec/test_data/dense_modulated.mid' }
 
-  # Tones' Ruby kernels (the mirror) differ from C by rounding
+  # Compares samples (C bit-exact; tones' Ruby kernels in the mirror differ
+  # from C by rounding), then runs the C plans again in check mode, which
+  # also compares every node's state after each block (e.g. a glide's
+  # position).
   def compare(file = dense, sizes: self.sizes, **kw, &block)
-    plan_compare(sizes: sizes, ruby_tolerance: 1e-6, **kw) { |c| block.call(MB::Sound::Notes.new(file), c) }
+    r = plan_compare(sizes: sizes, ruby_tolerance: 1e-6, **kw) { |c| block.call(MB::Sound::Notes.new(file), c) }
+    plan_compare(sizes: sizes, engines: [:c], check: :raise, fallbacks: true) { |c| block.call(MB::Sound::Notes.new(file), c) }
+    r
   end
 
+  # Op class names in every region of the C plans.
   def op_names(result)
-    plan_op_names(result).uniq
+    result.regions.flat_map { |r| r.program.ops.map { |op| op.class.name.split('::').last.to_sym } }.uniq
   end
 
   describe 'note nodes' do
@@ -40,6 +46,29 @@ RSpec.describe('Plan: Notes nodes and envelopes') do
         c.before_block(30) { v.stream.seek(2.0) }
         v.gate + v.number * 0.01 + v.velocity + v.trigger
       }
+    end
+  end
+
+  describe 'controllers' do
+    it 'matches smoothed controllers, bend, and channel pressure' do
+      r = compare { |v| v.cc(1) + v.mod * 0.5 + v.bend * 0.25 + v.bend_semitones * 0.1 + v.pressure + v.cc(74, smooth: false) * 0.3 }
+      expect(op_names(r)).to include(:Smooth)
+    end
+
+    it 'filters each controller\'s own events (several CCs in one feed group)' do
+      compare { |v| v.cc(1) * v.attack_time + v.cc(7) * v.release_time * v.decay_time }
+    end
+
+    it 'matches poly pressure (jumps at note-ons) and aftertouch' do
+      # (the file ends early, and its nodes then become boundaries)
+      compare('spec/test_data/poly_pressure.mid', fallbacks: true) { |v| v.poly_pressure + v.aftertouch * 0.5 }
+      r = compare { |v| v.poly_pressure + v.aftertouch * 0.5 }
+      expect(op_names(r)).to include(:Smooth, :Max)
+    end
+
+    it 'matches a delayed LFO (FadeIn ramps)' do
+      r = compare { |v| v.lfo(7, delay: 0.05) + v.hz.vibrato(6, depth: 30.cents, delay: 0.03).sine * 0.5 }
+      expect(r.regions.first.members.grep(MB::Sound::Notes::FadeIn)).not_to be_empty
     end
   end
 
@@ -69,6 +98,11 @@ RSpec.describe('Plan: Notes nodes and envelopes') do
     it 'matches amp_env, fm_env, and filter_env (GM time scaling from controllers)' do
       r = compare { |v| v.amp_env + v.fm_env(0, 0.2, 0, 0.1) + v.filter_env(0.01, 0.3, 0.2, 0.2, depth: 2) * 0.1 }
       expect(op_names(r)).to include(:Envelope, :Events)
+    end
+
+    it 'matches a region rooted at a Notes envelope (its own #sample bookkeeping doesn\'t run too)' do
+      r = compare { |v| v.amp_env(0.01, 0.1, 0.5, 0.2) }
+      expect(r.regions.first.root).to be_a(MB::Sound::Notes::NoteEnvelope)
     end
 
     it 'matches multi-segment, looping, and S-shaped envelopes' do

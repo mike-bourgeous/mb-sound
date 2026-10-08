@@ -20,6 +20,17 @@ module MB
           @plain.inspect
         end
 
+        # The instance variables (and extras) that differ from +other+'s, as
+        # a String for check mode messages.
+        def diff(other)
+          a, ax = @plain
+          b, bx = other.plain
+          keys = (a.keys | b.keys).reject { |k| a[k] == b[k] }
+          parts = keys.map { |k| "#{k}: #{a[k].inspect[0, 120]} vs #{b[k].inspect[0, 120]}" }
+          parts << "extra: #{ax.inspect[0, 120]} vs #{bx.inspect[0, 120]}" if ax != bx
+          parts.join('; ')
+        end
+
         # A snapshot of +node+'s instance variables named in +ivars+, plus
         # +extra+ (a plain value compared too, e.g. a reader's cursor).
         def self.capture(node, ivars, extra = nil)

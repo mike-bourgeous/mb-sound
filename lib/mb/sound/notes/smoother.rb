@@ -142,6 +142,41 @@ module MB
           out
         end
 
+        # For plans (Plan::Op::Smooth): true before the first block.
+        def plan_unstarted?
+          @state.nil?
+        end
+
+        # For plans: starts held at +value+ (the first block's first input,
+        # as #process does).
+        def plan_start(value)
+          settle_at(value)
+        end
+
+        # For plans: the filter's state Arrays [state, ring1, ring2]
+        # (DFloats read and written by the executor).
+        def plan_arrays
+          [@state, @ring1, @ring2]
+        end
+
+        # For check mode: the state as plain values.
+        def plan_snapshot
+          @state && [@state.to_a, @ring1.to_a, @ring2.to_a]
+        end
+
+        # For check mode: restores #plan_snapshot in place.
+        def plan_restore(snapshot)
+          if snapshot.nil?
+            @state = nil
+            return
+          end
+
+          @state ||= Numo::DFloat.zeros(7)
+          @state[0..] = snapshot[0]
+          @ring1[0..] = snapshot[1]
+          @ring2[0..] = snapshot[2]
+        end
+
         private
 
         # Holds +value+ with nothing moving.

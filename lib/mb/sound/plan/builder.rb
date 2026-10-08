@@ -192,6 +192,18 @@ module MB
           emit(Op::Events.new(value(:real), node, feeder: feeder, port: port))
         end
 
+        # +a+ smoothed by +smoother+ (a Notes::Smoother) with the jump
+        # offsets in +jumps+ (see Op::Smooth).
+        def smooth(a, smoother, jumps)
+          emit(Op::Smooth.new(value(:real), node, self[a], smoother, jumps))
+        end
+
+        # The larger of +a+ and +b+ (see Op::Max).
+        def max(a, b)
+          a, b = operands(a, b)
+          emit(Op::Max.new(value(:real), node, a, b))
+        end
+
         # Stores the last sample of +a+ in +target+'s instance variable
         # +ivar+ (a Symbol like :@value) or, for a Hash +target+, under key
         # +ivar+, after each block (see Op::Keep).

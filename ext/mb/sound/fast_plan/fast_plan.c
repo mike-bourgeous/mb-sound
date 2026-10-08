@@ -53,6 +53,7 @@
 #include "mb_clip_shape.h"
 #include "mb_fast_math.h"
 #include "mb_envelope.h"
+#include "mb_smooth.h"
 
 // Register kinds (Plan::Program::REG_KINDS)
 enum { REG_SLOT = 0, REG_INPUT = 1, REG_PARAM = 2, REG_OUT = 3 };
@@ -75,11 +76,13 @@ enum {
 	OP_EVENTS,    // dst, object, 0              dst = the event list object rendered (see run_events)
 	OP_KEEP,      // dst, a, object              object [target, name]: target's ivar name (or Hash key) = last sample of a; dst unused
 	OP_ENVELOPE,  // see run_envelope
+	OP_SMOOTH,    // dst, a, object              dst = a smoothed (see run_smooth); object [smoother, jumps]
+	OP_MAX,       // dst, a, b                   dst = Numo::SFloat.maximum(a, b) (real)
 };
 
 // Event list modes and entry kinds (Plan::EventList)
 enum { EVENTS_HELD = 0, EVENTS_IMPULSES = 1 };
-enum event_kind { EV_FILL = 0, EV_IMPULSE = 1, EV_GLIDE = 2, EV_BUFFER = 3 };
+enum event_kind { EV_FILL = 0, EV_IMPULSE = 1, EV_GLIDE = 2, EV_BUFFER = 3, EV_RAMP = 4 };
 #define EV_ENTRY_SIZE 8
 
 // Kernels of OP_TONE (Plan::Op::Tone::KERNELS)
@@ -88,7 +91,7 @@ enum { TONE_NAIVE = 0, TONE_SYNTH = 1 };
 typedef struct { float r, i; } mb_cf;
 
 static ID id_phase, id_blep, id_noise, id_jump_residual, id_last_freq, id_last_width;
-static ID id_plan_reset, id_plan_residual_used, id_note, id_frequency;
+static ID id_plan_reset, id_plan_residual_used, id_note, id_frequency, id_state, id_ring1, id_ring2;
 
 // The register file of one call.
 struct regs {
@@ -621,11 +624,76 @@ static void run_events(float *D, VALUE list, size_t n)
 				memcpy(D + from, src, (size_t)(to - from) * sizeof(float));
 				break;
 			}
+			case EV_RAMP: {
+				// Notes::FadeIn#fill: SFloat#seq(position + 1) (Numo's f_seq:
+				// float + float * double, rounded to float), / length in
+				// float, clipped to 0..1
+				float beg = (float)(NUM2DBL(e[j + 3]) + 1.0);
+				float len = (float)NUM2DBL(e[j + 4]);
+				float step = 1.0f;
+				for (long i = from; i < to; i++) {
+					float x = (float)(beg + step * (double)(i - from));
+					x = x / len;
+					if (x < 0.0f) x = 0.0f;
+					if (x > 1.0f) x = 1.0f;
+					D[i] = x;
+				}
+				break;
+			}
 			default:
 				rb_raise(rb_eArgError, "Bad plan event entry kind %ld", kind);
 		}
 	}
 	RB_GC_GUARD(list);
+}
+
+// A contiguous DFloat's data with at least +min+ values (its length in
+// *len).
+static double *smooth_array(VALUE v, size_t min, size_t *len, const char *what)
+{
+	if (CLASS_OF(v) != numo_cDFloat || RNARRAY_NDIM(v) != 1 || RNARRAY_SHAPE(v)[0] < min || !RTEST(nary_check_contiguous(v))) {
+		rb_raise(rb_eArgError, "A planned smoother's %s must be a contiguous DFloat of at least %zu values", what, min);
+	}
+	*len = RNARRAY_SHAPE(v)[0];
+	return (double *)(nary_get_pointer_for_write(v) + nary_get_offset(v));
+}
+
+/*
+ * OP_SMOOTH: Notes::Smoother#process on +n+ samples of A into D, with the
+ * smoother's own state and rings (its @state, @ring1, @ring2, read each
+ * block since a rate change replaces them) and the block's jump offsets
+ * (an Array of Integers: the output jumps to the input there).
+ */
+static void run_smooth(float *D, const float *A, VALUE obj, size_t n)
+{
+	VALUE smoother = rb_ary_entry(obj, 0);
+	VALUE jumps = rb_ary_entry(obj, 1);
+	Check_Type(jumps, T_ARRAY);
+	VALUE state = rb_ivar_get(smoother, id_state);
+	VALUE ring1 = rb_ivar_get(smoother, id_ring1);
+	VALUE ring2 = rb_ivar_get(smoother, id_ring2);
+	size_t sl, n1, n2;
+	double *st = smooth_array(state, 7, &sl, "state");
+	double *r1 = smooth_array(ring1, 1, &n1, "ring 1");
+	double *r2 = smooth_array(ring2, 1, &n2, "ring 2");
+	double settle = (double)(n1 + n2 - 2);
+
+	long start = 0;
+	long nj = RARRAY_LEN(jumps);
+	for (long k = 0; k < nj; k++) {
+		long j = NUM2LONG(rb_ary_entry(jumps, k));
+		if (j < start || j >= (long)n) continue;
+		if (j > start && mb_smooth_run(A, D, start, j, st, r1, n1, r2, n2) != 0) rb_raise(rb_eArgError, "Bad plan smoother ring positions");
+		st[1] = A[j];
+		st[6] = settle;
+		start = j;
+	}
+	if (start < (long)n && mb_smooth_run(A, D, start, (long)n, st, r1, n1, r2, n2) != 0) rb_raise(rb_eArgError, "Bad plan smoother ring positions");
+
+	RB_GC_GUARD(state);
+	RB_GC_GUARD(ring1);
+	RB_GC_GUARD(ring2);
+	RB_GC_GUARD(obj);
 }
 
 // An envelope signal from a register (real) or a scalar.
@@ -833,7 +901,7 @@ static VALUE ruby_run(VALUE self, VALUE words, VALUE scalars, VALUE objects, VAL
 			case OP_SHAPE: case OP_NOTE_FREQ:
 				len = 5;
 				break;
-			case OP_EVENTS: case OP_KEEP:
+			case OP_EVENTS: case OP_KEEP: case OP_SMOOTH: case OP_MAX:
 				len = 4;
 				break;
 			case OP_ENVELOPE:
@@ -852,7 +920,7 @@ static VALUE ruby_run(VALUE self, VALUE words, VALUE scalars, VALUE objects, VAL
 		if (op[0] != OP_FILL && op[0] != OP_TONE && op[0] != OP_EVENTS && op[0] != OP_ENVELOPE) {
 			if (op[2] < 0 || op[2] >= nregs || !ptrs[op[2]]) rb_raise(rb_eArgError, "Bad plan operand at word %zu", pc);
 		}
-		if ((op[0] == OP_MUL || op[0] == OP_ADD || op[0] == OP_DIV || op[0] == OP_POW) && (op[3] < 0 || op[3] >= nregs || !ptrs[op[3]])) {
+		if ((op[0] == OP_MUL || op[0] == OP_ADD || op[0] == OP_DIV || op[0] == OP_POW || op[0] == OP_MAX) && (op[3] < 0 || op[3] >= nregs || !ptrs[op[3]])) {
 			rb_raise(rb_eArgError, "Bad plan operand at word %zu", pc);
 		}
 		if ((op[0] == OP_FILL && (op[2] < 0 || (size_t)op[2] + 2 > nscalars)) ||
@@ -960,6 +1028,23 @@ static VALUE ruby_run(VALUE self, VALUE words, VALUE scalars, VALUE objects, VAL
 				break;
 			}
 
+			case OP_SMOOTH:
+				if (cplx[d] || cplx[op[2]]) rb_raise(rb_eArgError, "Plan smoothing is real only");
+				if (op[3] < 0 || op[3] >= RARRAY_LEN(objects)) rb_raise(rb_eArgError, "Bad plan smoother object at word %zu", pc);
+				run_smooth(ptrs[d], ptrs[op[2]], rb_ary_entry(objects, op[3]), n);
+				break;
+
+			case OP_MAX: {
+				if (cplx[d] || cplx[op[2]] || cplx[op[3]]) rb_raise(rb_eArgError, "Plan maximum is real only");
+				float *D = ptrs[d];
+				const float *A = ptrs[op[2]], *B = ptrs[op[3]];
+				for (size_t i = 0; i < n; i++) {
+					float a = A[i], b = B[i];
+					D[i] = (a >= b || b != b) ? a : b;
+				}
+				break;
+			}
+
 			case OP_ENVELOPE:
 				if (cplx[d]) rb_raise(rb_eArgError, "Plan envelopes are real");
 				if (op[2] < 0 || op[2] >= RARRAY_LEN(objects)) rb_raise(rb_eArgError, "Bad plan envelope object at word %zu", pc);
@@ -1023,6 +1108,9 @@ static VALUE ruby_enums(VALUE self)
 	rb_hash_aset(h, ID2SYM(rb_intern("events")), INT2NUM(OP_EVENTS));
 	rb_hash_aset(h, ID2SYM(rb_intern("keep")), INT2NUM(OP_KEEP));
 	rb_hash_aset(h, ID2SYM(rb_intern("envelope")), INT2NUM(OP_ENVELOPE));
+	rb_hash_aset(h, ID2SYM(rb_intern("smooth")), INT2NUM(OP_SMOOTH));
+	rb_hash_aset(h, ID2SYM(rb_intern("max")), INT2NUM(OP_MAX));
+	rb_hash_aset(h, ID2SYM(rb_intern("ev_ramp")), INT2NUM(EV_RAMP));
 	rb_hash_aset(h, ID2SYM(rb_intern("events_held")), INT2NUM(EVENTS_HELD));
 	rb_hash_aset(h, ID2SYM(rb_intern("events_impulses")), INT2NUM(EVENTS_IMPULSES));
 	rb_hash_aset(h, ID2SYM(rb_intern("ev_fill")), INT2NUM(EV_FILL));
@@ -1066,6 +1154,9 @@ void Init_fast_plan(void)
 	id_plan_residual_used = rb_intern("plan_residual_used");
 	id_note = rb_intern("note");
 	id_frequency = rb_intern("frequency");
+	id_state = rb_intern("@state");
+	id_ring1 = rb_intern("@ring1");
+	id_ring2 = rb_intern("@ring2");
 
 	rb_define_module_function(fast_plan, "run", ruby_run, 8);
 	rb_define_module_function(fast_plan, "enums", ruby_enums, 0);

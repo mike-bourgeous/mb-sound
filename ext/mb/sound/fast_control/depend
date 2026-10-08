@@ -1,1 +1,1 @@
-fast_control.o: $(srcdir)/../include/mb_ext_helpers.h
+fast_control.o: $(srcdir)/../include/mb_ext_helpers.h $(srcdir)/../include/mb_smooth.h
