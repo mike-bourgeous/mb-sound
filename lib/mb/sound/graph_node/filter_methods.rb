@@ -12,10 +12,8 @@ module MB
         # values; kept for that sound, e.g. drums).
         FILTER_STRUCTURES = [:svf, :biquad].freeze
 
-        # The default for +structure:+ (see FILTER_STRUCTURES): :svf, or
-        # the environment's MB_SOUND_FILTER_STRUCTURE (e.g. `biquad`, to
-        # render any script with the filters graphs used before 2026-10-08).
-        DEFAULT_FILTER_STRUCTURE = (ENV['MB_SOUND_FILTER_STRUCTURE'] || 'svf').to_sym
+        # The default for +structure:+ (see FILTER_STRUCTURES).
+        DEFAULT_FILTER_STRUCTURE = :svf
 
         # Applies the given filter (creating the filter if given a filter type)
         # to this sample source or sample chain.  If given a filter type, then a
