@@ -1362,7 +1362,7 @@ VALUE ruby_adsr_narray(VALUE self, VALUE narray, VALUE frame, VALUE rate, VALUE 
 // C conversion from MIDI note number to frequency.
 static double num2freq(double number, double tune_note, double tune_freq)
 {
-	return tune_freq * pow(2.0, (number - tune_note) / 12.0);
+	return mb_num2freq(number, tune_note, tune_freq);
 }
 
 /*

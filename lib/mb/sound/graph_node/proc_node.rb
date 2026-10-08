@@ -59,12 +59,18 @@ module MB
         # ArithmeticMethods); other procs run Ruby blocks and stay unfused.
         include Plan::Describable
 
-        # The arithmetic operator of a ProcNode made by GraphNode#/ or #**
-        # ('/' or '**'), or nil for other blocks.
+        # The operation of a ProcNode whose block is known to the plan
+        # layer: '/' or '**' (GraphNode#/ and #**), or :note_freq
+        # (Tuning#freq, with +plan_tuning+); nil for other blocks.
         attr_accessor :plan_operator
+
+        # The Tuning of a :note_freq ProcNode.
+        attr_accessor :plan_tuning
 
         def plan_describe(p)
           a = p[@source]
+          return p.note_freq(a, @plan_tuning) if @plan_operator == :note_freq
+
           b = p[@sources[:operand]]
           @plan_operator == '/' ? a / b : a ** b
         end
@@ -74,6 +80,7 @@ module MB
         end
 
         def plan_unsupported_reason
+          return nil if @plan_operator == :note_freq && @plan_tuning
           return 'a Ruby block' unless @plan_operator == '/' || @plan_operator == '**'
 
           operand = @sources[:operand]

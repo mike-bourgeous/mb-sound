@@ -168,6 +168,12 @@ module MB
           emit(Op::Shape.new(value(:real), node, self[a], shaper))
         end
 
+        # The frequencies of note numbers +a+ in +tuning+ (see
+        # Op::NoteFreq).
+        def note_freq(a, tuning)
+          emit(Op::NoteFreq.new(value(:real), node, self[a], tuning))
+        end
+
         # A copy of +a+ in a new register.
         def copy(a)
           emit(Op::Copy.new(value(a.type), node, a))

@@ -142,6 +142,17 @@ RSpec.describe(MB::Sound::Plan, 'arithmetic ops') do
       expect(plan_op_names(r)).to include(:Pow)
     end
 
+    it 'matches note numbers to frequencies (Tuning#freq), following tuning changes' do
+      r = plan_compare { |c|
+        c.before_block(5) { MB::Sound.tuning(b4: 480) }
+        c.before_block(9) { MB::Sound.tuning.reset }
+        MB::Sound.tuning.freq(src.new(seed: 1, scale: 12, offset: 60) * 1).tone.sine * MB::Sound::C4.freq.tone.ramp
+      }
+      expect(plan_op_names(r)).to include(:NoteFreq)
+    ensure
+      MB::Sound.tuning.reset
+    end
+
     it 'leaves other procs unfused' do
       g = (src.new(seed: 1) * 2).proc { |v| v * 2 } * 3
       expect(MB::Sound::Plan.explain(g)).to include('a Ruby block')

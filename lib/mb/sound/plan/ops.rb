@@ -324,6 +324,35 @@ module MB
           end
         end
 
+        # Note numbers to frequencies in a Tuning as it is when each block
+        # runs (Tuning#freq's node: FastSound.number_to_freq).
+        class NoteFreq < Base
+          attr_reader :a, :tuning
+
+          def initialize(dst, node, a, tuning)
+            super(dst, node)
+            raise Unsupported.new(node, 'complex note numbers') if a.complex?
+
+            @a = a
+            @tuning = tuning
+          end
+
+          def operands
+            [@a]
+          end
+
+          def expression
+            "note_freq(#{@a}, #{@tuning})"
+          end
+
+          def opcode = :note_freq
+
+          def run_ruby(env, count)
+            v = Numo::SFloat.cast(env.fetch(@a)).dup.inplace!
+            env[@dst] = MB::FastSound.number_to_freq(v, @tuning.note, @tuning.frequency).not_inplace!
+          end
+        end
+
         # The real or imaginary part of a complex Value (ComplexNode).
         class Part < Base
           attr_reader :a, :part

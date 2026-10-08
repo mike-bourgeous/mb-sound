@@ -464,4 +464,11 @@ static inline double complex shape_sample(enum wave_types wt, double phi, double
 	return osc_sample(wt, radians + pm);
 }
 
+// The frequency of fractional MIDI note +number+ in a tuning where note
+// +tune_note+ is +tune_freq+ Hz (FastSound.number_to_freq).
+static inline double mb_num2freq(double number, double tune_note, double tune_freq)
+{
+	return tune_freq * pow(2.0, (number - tune_note) / 12.0);
+}
+
 #endif

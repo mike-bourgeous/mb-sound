@@ -69,6 +69,7 @@ enum {
 	OP_TONE,      // see run_tone
 	OP_COPY,      // dst, a, 0                   dst = a
 	OP_SHAPE,     // dst, a, object, sc          dst = shaper(a) (FastClip.shape); object: state Array; sc: mode, p1, p2, antialias
+	OP_NOTE_FREQ, // dst, a, object, 0           dst = frequency of note numbers a (FastSound.number_to_freq) in the tuning object's current note/frequency
 };
 
 // Kernels of OP_TONE (Plan::Op::Tone::KERNELS)
@@ -77,7 +78,7 @@ enum { TONE_NAIVE = 0, TONE_SYNTH = 1 };
 typedef struct { float r, i; } mb_cf;
 
 static ID id_phase, id_blep, id_noise, id_jump_residual, id_last_freq, id_last_width;
-static ID id_plan_reset, id_plan_residual_used;
+static ID id_plan_reset, id_plan_residual_used, id_note, id_frequency;
 
 // The register file of one call.
 struct regs {
@@ -589,7 +590,7 @@ static VALUE ruby_run(VALUE self, VALUE words, VALUE scalars, VALUE objects, VAL
 			case OP_TONE:
 				len = 12;
 				break;
-			case OP_SHAPE:
+			case OP_SHAPE: case OP_NOTE_FREQ:
 				len = 5;
 				break;
 			default:
@@ -673,6 +674,18 @@ static VALUE ruby_run(VALUE self, VALUE words, VALUE scalars, VALUE objects, VAL
 				run_shape(op, &R, sc, objects, n);
 				break;
 
+			case OP_NOTE_FREQ: {
+				if (cplx[d] || cplx[op[2]]) rb_raise(rb_eArgError, "Plan note frequencies are real only");
+				if (op[3] < 0 || op[3] >= RARRAY_LEN(objects)) rb_raise(rb_eArgError, "Bad plan tuning object at word %zu", pc);
+				VALUE tuning = rb_ary_entry(objects, op[3]);
+				double tnum = NUM2DBL(rb_funcall(tuning, id_note, 0));
+				double tfrq = NUM2DBL(rb_funcall(tuning, id_frequency, 0));
+				float *D = ptrs[d];
+				const float *A = ptrs[op[2]];
+				for (size_t i = 0; i < n; i++) D[i] = mb_num2freq(A[i], tnum, tfrq);
+				break;
+			}
+
 			case OP_COPY:
 				if (cplx[d] != cplx[op[2]]) rb_raise(rb_eArgError, "Plan copy needs registers of one type");
 				memcpy(ptrs[d], ptrs[op[2]], n * (cplx[d] ? 2 : 1) * sizeof(float));
@@ -730,6 +743,7 @@ static VALUE ruby_enums(VALUE self)
 	rb_hash_aset(h, ID2SYM(rb_intern("tone")), INT2NUM(OP_TONE));
 	rb_hash_aset(h, ID2SYM(rb_intern("copy")), INT2NUM(OP_COPY));
 	rb_hash_aset(h, ID2SYM(rb_intern("shape")), INT2NUM(OP_SHAPE));
+	rb_hash_aset(h, ID2SYM(rb_intern("note_freq")), INT2NUM(OP_NOTE_FREQ));
 	rb_hash_aset(h, ID2SYM(rb_intern("tone_naive")), INT2NUM(TONE_NAIVE));
 	rb_hash_aset(h, ID2SYM(rb_intern("tone_synth")), INT2NUM(TONE_SYNTH));
 	rb_hash_aset(h, ID2SYM(rb_intern("osc_sine")), INT2NUM(OSC_SINE));
@@ -764,6 +778,8 @@ void Init_fast_plan(void)
 	id_last_width = rb_intern("@last_width");
 	id_plan_reset = rb_intern("plan_reset");
 	id_plan_residual_used = rb_intern("plan_residual_used");
+	id_note = rb_intern("note");
+	id_frequency = rb_intern("frequency");
 
 	rb_define_module_function(fast_plan, "run", ruby_run, 8);
 	rb_define_module_function(fast_plan, "enums", ruby_enums, 0);
