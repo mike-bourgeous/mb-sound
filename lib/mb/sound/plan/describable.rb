@@ -86,6 +86,10 @@ module MB
               return region.sample(count) unless region.unfused
             elsif (region = @plan_member) && !region.unfused
               region.foreign_read(self)
+            elsif (watch = @plan_restart) && watch.restarted?
+              # Left out when its stream ended, and the stream jumped back
+              # (see Installation#exclude): plan it again from the next block
+              watch.reinclude
             end
           end
 
