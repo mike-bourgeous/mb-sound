@@ -108,6 +108,13 @@ module MB
         # against the unfused graph (see the module description).
         attr_accessor :check
 
+        # :exact (the default: every op bit-exact with its node) or :fast
+        # (MB_SOUND_PLAN_PRECISION=fast): naive sine and complex sine tones
+        # use polynomial sines (Plan::FastMath; within 1e-6 of the Tone's
+        # samples, about -120 dB, at roughly a quarter of libm's cost).
+        # Read when a region compiles.
+        attr_accessor :precision
+
         # The fewest graph nodes a region must cover to be planned
         # (single-node regions gain nothing).
         attr_accessor :min_nodes
@@ -195,11 +202,13 @@ module MB
                    else :raise
                    end
       self.min_nodes = 2
+      self.precision = ENV['MB_SOUND_PLAN_PRECISION'] == 'fast' ? :fast : :exact
     end
   end
 end
 
 require_relative 'plan/value'
+require_relative 'plan/fast_math'
 require_relative 'plan/ops'
 require_relative 'plan/tone_op'
 require_relative 'plan/builder'

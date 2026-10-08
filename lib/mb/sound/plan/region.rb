@@ -416,7 +416,9 @@ module MB
             diff = (Numo::DComplex.cast(planned) - Numo::DComplex.cast(reference)).abs
             nan_ok = planned.isnan.eq(reference.isnan).all?
             worst = diff[~(diff.isnan)].max || 0.0
-            limit = @program.exact? ? 0.0 : @program.ops.map(&:tolerance).max
+            # Inexact ops (Plan.precision :fast) may differ by their
+            # tolerance, scaled by the output's level
+            limit = @program.exact? ? 0.0 : @program.ops.map(&:tolerance).max * [1.0, Numo::DComplex.cast(reference).abs.max].max
             if !nan_ok || worst > limit
               idx = diff.isnan.where.to_a.first || diff.max_index
               problem = "samples differ by up to #{worst} (first at #{idx}: planned #{planned[idx]}, unfused #{reference[idx]})"

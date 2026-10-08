@@ -19,8 +19,10 @@ RSpec.describe('bin/graph_profile.rb') do
     expect(groups[1..3].sum(&:to_i)).to eq((0.5 * 48000 / 128.0).ceil)
     expect(groups[2].to_i).to be <= gc[1].to_i
 
-    # Per-class self allocations
-    expect(text).to match(/GraphNode::Multiplier +[\d.]+% +[\d.]+ us\/call +\d+ calls +[\d.]+ obj\/call/)
+    # Per-class self allocations; fused regions report as one entry
+    expect(text).to match(/GraphNode::Shaper +[\d.]+% +[\d.]+ us\/call +\d+ calls +[\d.]+ obj\/call/)
+    expect(text).to match(/Plan region \(\d+ nodes, root GraphNode::\w+\) +[\d.]+% +[\d.]+ us\/call +\d+ calls/)
+    expect(text).to match(/plans: \d+ regions covering \d+ nodes \(\d+ ops\); \d+ blocks planned, 0 unfused/)
     expect(text).to include('most allocations (self, per buffer):')
 
     # Allocation sites: five lines under the header, paths relative to the
@@ -32,5 +34,12 @@ RSpec.describe('bin/graph_profile.rb') do
     expect(sites).to all(match(/\A +[\d.]+ obj +\d+ B +\S+:\d+ +\S/))
     expect(sites.join).to include('lib/mb/sound/')
     expect(text).not_to include('graph_profile.rb:')
+  end
+
+  it 'compares runs with plans off and on' do
+    text = `bin/graph_profile.rb -n 128 -s 0.2 --plan both -r 1 bin/effects/flanger.rb 2>&1`
+    expect($?).to be_success, text
+    expect(text).to match(/flanger\.rb +buffer +128: +[\d.]+% of realtime \(2 outputs, 0\.2 s, plans off\)/)
+    expect(text).to match(/best of 1: plans off [\d.]+%, on [\d.]+% of realtime \([-+][\d.]+%\)/)
   end
 end

@@ -307,7 +307,8 @@ module MB
               tone.advance, tone.random_advance, gain, offset, fade[0], fade[1],
               tone.instance_variable_get(:@keep_dc) ? 0 : 1,
               op.width.is_a?(Const) ? 1 : 0,
-              op.gain.nil? ? 0 : (op.gain.is_a?(Const) ? 1 : 2)
+              op.gain.nil? ? 0 : (op.gain.is_a?(Const) ? 1 : 2),
+              op.fast ? 1 : 0
             )
 
             @objects << [tone, state, op.frequency.is_a?(Const) ? op.frequency.value : nil, width_value].freeze

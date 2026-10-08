@@ -43,6 +43,17 @@ module MB
 
           attr_reader :tone, :frequency, :phase_mod, :width, :reset, :target, :gain, :kernel
 
+          # Waves with fast shapes in Plan.precision :fast.
+          FAST_WAVES = [:sine, :complex_sine].freeze
+
+          # The largest difference from the Tone's own samples with fast
+          # shapes, relative to the tone's output range (FastMath's error
+          # plus float32 rounding of a result near full scale).
+          FAST_TOLERANCE = 1e-6
+
+          # True if this op uses fast shapes (see Plan.precision).
+          attr_reader :fast
+
           def initialize(dst, node, tone, frequency:, phase_mod:, width: nil, reset: nil, target: nil, gain: nil)
             super(dst, node)
             @tone = tone
@@ -53,6 +64,7 @@ module MB
             @target = target
             @gain = gain
             @kernel = tone.send(:kernel)
+            @fast = Plan.precision == :fast && @kernel == :naive && FAST_WAVES.include?(tone.wave_type)
 
             raise Unsupported.new(tone, "the #{@kernel} kernel") unless KERNELS.include?(@kernel)
             raise Unsupported.new(tone, 'a complex frequency input') if @frequency.complex?
@@ -63,6 +75,18 @@ module MB
             [@frequency, @phase_mod, @width, @reset, @target, @gain].grep(Value)
           end
 
+          def exact?
+            !@fast
+          end
+
+          # Relative to 1; the tone's output range scales it (see #at).
+          def tolerance
+            return 0.0 unless @fast
+
+            gain, offset = @tone.send(:gain_and_offset)
+            FAST_TOLERANCE * [gain.abs, 1].max * (@gain.is_a?(Const) ? [@gain.value.abs, 1].max : 1)
+          end
+
           def expression
             args = ["freq: #{@frequency}"]
             args << "pm: #{@phase_mod}" unless @phase_mod.is_a?(Const) && @phase_mod.value == 0
@@ -70,7 +94,7 @@ module MB
             args << "reset: #{@reset}" if @reset
             args << "to: #{@target}" if @target
             args << "gain: #{@gain}" if @gain
-            "#{@kernel == :synth ? 'bl_' : ''}#{@tone.send(:wave_name)}(#{args.join(', ')})"
+            "#{@kernel == :synth ? 'bl_' : ''}#{@fast ? 'fast_' : ''}#{@tone.send(:wave_name)}(#{args.join(', ')})"
           end
 
           def opcode
@@ -80,10 +104,13 @@ module MB
           # The Tone's Ruby path on the same inputs.
           def run_ruby(env, count)
             reset = @reset && env[@reset] # nil once the input ended
+            @tone.plan_fast_shapes = @fast
             env[@dst] = @tone.compute_ruby(
               count, input(env, @frequency), input(env, @phase_mod), @width && input(env, @width),
               nil, reset, @target && input(env, @target), nil, nil, nil, nil, nil, @gain && input(env, @gain)
             )
+          ensure
+            @tone.plan_fast_shapes = nil
           end
 
           private

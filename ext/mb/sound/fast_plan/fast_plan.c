@@ -51,6 +51,7 @@
 #include "mb_osc_shapes.h"
 #include "mb_bl_osc.h"
 #include "mb_clip_shape.h"
+#include "mb_fast_math.h"
 
 // Register kinds (Plan::Program::REG_KINDS)
 enum { REG_SLOT = 0, REG_INPUT = 1, REG_PARAM = 2, REG_OUT = 3 };
@@ -100,84 +101,105 @@ static inline mb_cf cmul(float xr, float xi, float yr, float yi)
 	return z;
 }
 
-// Real or imaginary part of sample i of register r (imag 0 for real).
-static inline float reg_re(const struct regs *R, int r, size_t i)
-{
-	return R->c[r] ? R->p[r][2 * i] : R->p[r][i];
-}
-
-static inline float reg_im(const struct regs *R, int r, size_t i)
-{
-	return R->c[r] ? R->p[r][2 * i + 1] : 0.0f;
-}
+// The arithmetic ops below have one loop per operand type combination, so
+// the inner loops have no branches (a real operand of a complex result is
+// (x, +0.0), as Numo promotes it).
 
 static void op_mul(const struct regs *R, int d, int a, int b, size_t n)
 {
 	float *D = R->p[d];
+	const float *A = R->p[a], *B = R->p[b];
 	if (!R->c[d]) {
-		const float *A = R->p[a], *B = R->p[b];
 		for (size_t i = 0; i < n; i++) D[i] = A[i] * B[i];
 		return;
 	}
 
 	mb_cf *DC = (mb_cf *)D;
-	for (size_t i = 0; i < n; i++) {
-		DC[i] = cmul(reg_re(R, a, i), reg_im(R, a, i), reg_re(R, b, i), reg_im(R, b, i));
+	const float zero = 0.0f;
+	if (R->c[a] && R->c[b]) {
+		for (size_t i = 0; i < n; i++) DC[i] = cmul(A[2 * i], A[2 * i + 1], B[2 * i], B[2 * i + 1]);
+	} else if (R->c[a]) {
+		for (size_t i = 0; i < n; i++) DC[i] = cmul(A[2 * i], A[2 * i + 1], B[i], zero);
+	} else {
+		for (size_t i = 0; i < n; i++) DC[i] = cmul(A[i], zero, B[2 * i], B[2 * i + 1]);
 	}
 }
 
 static void op_muls(const struct regs *R, int d, int a, double cr, double ci, size_t n)
 {
 	float *D = R->p[d];
+	const float *A = R->p[a];
 	if (!R->c[d]) {
-		const float *A = R->p[a];
 		float c = (float)cr;
 		for (size_t i = 0; i < n; i++) D[i] = c * A[i];
 		return;
 	}
 
 	float xr = (float)cr, xi = (float)ci;
+	const float zero = 0.0f;
 	mb_cf *DC = (mb_cf *)D;
-	for (size_t i = 0; i < n; i++) {
-		DC[i] = cmul(xr, xi, reg_re(R, a, i), reg_im(R, a, i));
+	if (R->c[a]) {
+		for (size_t i = 0; i < n; i++) DC[i] = cmul(xr, xi, A[2 * i], A[2 * i + 1]);
+	} else {
+		for (size_t i = 0; i < n; i++) DC[i] = cmul(xr, xi, A[i], zero);
 	}
 }
 
 static void op_add(const struct regs *R, int d, int a, int b, size_t n)
 {
 	float *D = R->p[d];
+	const float *A = R->p[a], *B = R->p[b];
 	if (!R->c[d]) {
-		const float *A = R->p[a], *B = R->p[b];
 		for (size_t i = 0; i < n; i++) D[i] = A[i] + B[i];
 		return;
 	}
 
-	mb_cf *DC = (mb_cf *)D;
-	for (size_t i = 0; i < n; i++) {
-		float re = reg_re(R, a, i) + reg_re(R, b, i);
-		float im = reg_im(R, a, i) + reg_im(R, b, i);
-		DC[i].r = re;
-		DC[i].i = im;
+	const float zero = 0.0f;
+	if (R->c[a] && R->c[b]) {
+		for (size_t i = 0; i < 2 * n; i++) D[i] = A[i] + B[i];
+	} else if (R->c[a]) {
+		for (size_t i = 0; i < n; i++) {
+			float re = A[2 * i] + B[i];
+			float im = A[2 * i + 1] + zero;
+			D[2 * i] = re;
+			D[2 * i + 1] = im;
+		}
+	} else {
+		for (size_t i = 0; i < n; i++) {
+			float re = A[i] + B[2 * i];
+			float im = zero + B[2 * i + 1];
+			D[2 * i] = re;
+			D[2 * i + 1] = im;
+		}
 	}
 }
 
 static void op_adds(const struct regs *R, int d, int a, double cr, double ci, size_t n)
 {
 	float *D = R->p[d];
+	const float *A = R->p[a];
 	if (!R->c[d]) {
-		const float *A = R->p[a];
 		float c = (float)cr;
 		for (size_t i = 0; i < n; i++) D[i] = c + A[i];
 		return;
 	}
 
 	float xr = (float)cr, xi = (float)ci;
-	mb_cf *DC = (mb_cf *)D;
-	for (size_t i = 0; i < n; i++) {
-		float re = xr + reg_re(R, a, i);
-		float im = xi + reg_im(R, a, i);
-		DC[i].r = re;
-		DC[i].i = im;
+	const float zero = 0.0f;
+	if (R->c[a]) {
+		for (size_t i = 0; i < n; i++) {
+			float re = xr + A[2 * i];
+			float im = xi + A[2 * i + 1];
+			D[2 * i] = re;
+			D[2 * i + 1] = im;
+		}
+	} else {
+		for (size_t i = 0; i < n; i++) {
+			float re = xr + A[i];
+			float im = xi + zero;
+			D[2 * i] = re;
+			D[2 * i + 1] = im;
+		}
 	}
 }
 
@@ -220,7 +242,7 @@ static inline VALUE tone_input_at(const struct regs *R, int r, double scalar, si
 // FastSound.oscillate's loop (fast_sound.c ruby_oscillate) on one segment.
 static void naive_segment(enum wave_types wt, void *out, _Bool complex_out, size_t length,
 		const struct mb_signal *f, const struct mb_signal *p, double adv, double rndadv, double g, double off,
-		VALUE phase_state, VALUE noise)
+		VALUE phase_state, VALUE noise, _Bool fast)
 {
 	double phi = NUM2DBL(rb_ary_entry(phase_state, 0));
 
@@ -253,12 +275,31 @@ static void naive_segment(enum wave_types wt, void *out, _Bool complex_out, size
 			steps = inc * i;
 		}
 
-		double complex v = shape_sample(wt, mb_wrap(phi + steps, 1.0), inc, pm) * g + off;
-
-		if (complex_out) {
-			((complex float *)out)[i] = v;
+		if (fast) {
+			// Plan.precision :fast (sine and complex sine; see
+			// mb_fast_math.h and Plan::FastMath.shape_ruby)
+			double s, c;
+			double x = pm * (1.0 / (2.0 * M_PI));
+			x = mb_wrap(phi + steps, 1.0) + x;
+			mb_fast_sincos_cycles(x, &s, &c);
+			double re = s * g;
+			re = re + off;
+			if (complex_out) {
+				double im = -c;
+				im = im * g;
+				((float *)out)[2 * i] = (float)re;
+				((float *)out)[2 * i + 1] = (float)im;
+			} else {
+				((float *)out)[i] = (float)re;
+			}
 		} else {
-			((float *)out)[i] = creal(v);
+			double complex v = shape_sample(wt, mb_wrap(phi + steps, 1.0), inc, pm) * g + off;
+
+			if (complex_out) {
+				((complex float *)out)[i] = v;
+			} else {
+				((float *)out)[i] = creal(v);
+			}
 		}
 
 		if (!constant) {
@@ -336,7 +377,7 @@ static void add_residual(VALUE tone, VALUE state, float *seg, size_t length, dou
  * target_r, gain_r, sc (registers -1 for scalars or none).  Scalars from
  * sc: freq, pm, width, gain, advance, random advance, gain (#at), offset,
  * fade lo, fade hi, remove DC, has width, gain mode (0 none, 1 scalar, 2
- * register).  The object is [tone, state, frequency value, width value].
+ * register), fast shapes (Plan.precision :fast).  The object is [tone, state, frequency value, width value].
  * See Tone#sample_c and #sample_segments for the steps.
  */
 static void run_tone(const int32_t *op, const struct regs *R, const double *sc, VALUE objects, size_t n)
@@ -354,6 +395,8 @@ static void run_tone(const int32_t *op, const struct regs *R, const double *sc, 
 	double adv = s[4], rndadv = s[5], g = s[6], off = s[7], lo = s[8], hi = s[9];
 	_Bool dc = s[10] != 0, has_width = s[11] != 0;
 	int gain_mode = (int)s[12];
+	_Bool fast = s[13] != 0;
+	if (fast && wave != OSC_SINE && wave != OSC_COMPLEX_SINE) rb_raise(rb_eArgError, "Fast plan tones are sines only");
 
 	_Bool complex_out = R->c[dst];
 	float *out = R->p[dst];
@@ -396,7 +439,7 @@ static void run_tone(const int32_t *op, const struct regs *R, const double *sc, 
 				add_residual(tone, state, seg, len, g);
 			} else {
 				void *seg = complex_out ? (void *)(out + 2 * start) : (void *)(out + start);
-				naive_segment((enum wave_types)wave, seg, complex_out, len, &f, &p, adv, rndadv, g, off, phase_state, noise);
+				naive_segment((enum wave_types)wave, seg, complex_out, len, &f, &p, adv, rndadv, g, off, phase_state, noise, fast && kernel == TONE_NAIVE);
 			}
 		}
 
@@ -693,7 +736,7 @@ static VALUE ruby_run(VALUE self, VALUE words, VALUE scalars, VALUE objects, VAL
 
 			case OP_TONE: {
 				if (op[2] < 0 || op[2] >= RARRAY_LEN(objects)) rb_raise(rb_eArgError, "Bad plan tone object at word %zu", pc);
-				if (op[11] < 0 || (size_t)op[11] + 13 > nscalars) rb_raise(rb_eArgError, "Bad plan tone scalars at word %zu", pc);
+				if (op[11] < 0 || (size_t)op[11] + 14 > nscalars) rb_raise(rb_eArgError, "Bad plan tone scalars at word %zu", pc);
 				for (int k = 5; k <= 10; k++) {
 					if (op[k] >= nregs) rb_raise(rb_eArgError, "Bad plan tone input at word %zu", pc);
 				}
