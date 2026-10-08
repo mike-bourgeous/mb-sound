@@ -156,6 +156,17 @@ RSpec.describe(MB::Sound::Drums::TR808, :aggregate_failures) do
       expect(skipping.sleeping?).to eq(true)
     end
 
+    it 'keeps knobs that follow notes in step while skipped' do
+      notes = MB::Sound.seq(MB::Sound::A1, MB::Sound::A1, MB::Sound::E2, MB::Sound::E2).n4.loop
+      kick = tr808.kick(MB::Sound.grid(4, 'x.x.').loop, tune: notes.freq, decay: 0.15, sigh: 0)
+      data = collect(kick, 2)
+      expect(kick.skippable?).to eq(true)
+      # Hits at 0 s (A1) and 1 s (E2), the voice skipped in between
+      expect(frequency(data, 0.02, 0.12)).to be_within(6).of(55)
+      expect(frequency(data, 1.02, 1.12)).to be_within(8).of(82.4)
+      expect(kick.sleeping?).to eq(true)
+    end
+
     it 'never skips graphs with delays' do
       clap = tr808.clap(MB::Sound.grid(4, 'x...').loop)
       collect(clap, 0.1)

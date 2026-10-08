@@ -209,12 +209,14 @@ module MB
           @zeros
         end
 
-        # Finds whether the graph may be skipped, and the Tee branches it
-        # shares with other graphs (read while skipped, so the Tees stay in
-        # step), leaving out branches that other such branches read.
+        # Finds whether the graph may be skipped, and what it still reads
+        # while skipped: the Tee branches it shares with other graphs (so the
+        # Tees stay in step) and its Notes nodes (so their stream readers
+        # do), leaving out nodes that others of these read.
         def setup_skipping(enabled)
           nodes = @graph.graph(include_tees: true)
-          @skippable = !!enabled && nodes.none? { |n| MB::Sound::Synth.long_memory?(n) }
+          # Clip sources are read through Notes nodes, which stay in step
+          @skippable = !!enabled && nodes.none? { |n| MB::Sound::Synth.long_memory?(n) && !n.is_a?(MB::Sound::MIDI::Source) }
           @boundary = []
           return unless @skippable
 
@@ -225,7 +227,15 @@ module MB
           }
           upstream = {}
           shared.each { |n| n.graph(include_tees: true).each { |u| upstream[u.__id__] = true unless u.equal?(n) } }
-          @boundary = shared.reject { |n| upstream[n.__id__] }
+          shared.reject! { |n| upstream[n.__id__] }
+
+          # Notes nodes (e.g. a knob following a clip's notes) keep their
+          # readers in step, unless a shared branch above reads them
+          notes_nodes = nodes.select { |n| n.is_a?(MB::Sound::Notes::Node) && !upstream[n.__id__] }
+          notes_nodes.each { |n| n.graph(include_tees: true).each { |u| upstream[u.__id__] = true unless u.equal?(n) } }
+          notes_nodes.reject! { |n| upstream[n.__id__] }
+
+          @boundary = shared + notes_nodes
         end
       end
     end

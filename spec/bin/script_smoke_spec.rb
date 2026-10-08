@@ -24,6 +24,7 @@ RSpec.describe('script runner scripts', :smoke) do
   songs = {
     'bin/songs/antialias_song.rb' => ['--bars', '0.5'],
     'bin/songs/bouncing_ball.rb' => ['--bars', '0.5'],
+    'bin/songs/drums_808.rb' => ['--bars', '0.5', '-c', '12'],
     'bin/songs/node_graph_benchmark.rb' => ['--bars', '0.5'],
     'bin/songs/node_graph_grit.rb' => ['--bars', '0.5'],
     'bin/songs/random_drum_pentatonic.rb' => ['--bars', '0.5'],
@@ -84,6 +85,7 @@ RSpec.describe('script runner scripts', :smoke) do
 
   # Synth script => extra arguments; each plays a short MIDI file
   synths = {
+    'bin/synths/drums_808.rb' => ['-c', '6'],
     'bin/synths/ep2_syn.rb' => [],
     'bin/synths/filter_ping.rb' => [],
     'bin/synths/fm_bass.rb' => [],
