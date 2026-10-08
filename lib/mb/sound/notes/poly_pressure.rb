@@ -10,9 +10,15 @@ module MB
       # that note's pressure.  After the last key is released the value
       # holds (keyboards usually send 0 before the key-up), and a content
       # jump (seek, swap) chases to 0.
+      #
+      # Smoothed like channel controllers (see ChannelNode and
+      # Notes::Smoother; +:smooth+), except that each note-on and content
+      # jump starts its value at once (no glide from the previous note's
+      # pressure).
       class PolyPressure < NoteNode
-        def initialize(stream, notes: nil, sample_rate: 48000)
-          super
+        def initialize(stream, notes: nil, sample_rate: 48000, smooth: nil)
+          super(stream, notes: notes, sample_rate: sample_rate)
+          smooth_with(Notes.smoothing(smooth, Notes.control_smoothing))
           @pressures = {}
           @value = 0.0
           @node_type_name = 'Notes Poly Pressure'
@@ -43,6 +49,7 @@ module MB
 
         def note_on(event)
           @pressures[[event.channel, event.note]] = 0.0
+          smooth_jump
         end
 
         def note_off(event)
@@ -69,6 +76,7 @@ module MB
         end
 
         def chase(event)
+          smooth_jump
           @pressures.clear
           @pressures[[event.channel, event.note]] = 0.0
           @value = 0.0

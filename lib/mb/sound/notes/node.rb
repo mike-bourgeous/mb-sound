@@ -47,6 +47,8 @@ module MB
         # Reads +stream+ (a MIDI::Stream) for the Notes instance +notes+ (or
         # nil for a node shared by several Notes instances).
         def initialize(stream, notes: nil, sample_rate: 48000)
+          @smoother = nil
+          @jumps = nil
           @stream = stream
           @notes = notes
           @reader = stream.reader
@@ -85,8 +87,17 @@ module MB
             out = uniform.is_a?(Float) && Notes.fast_paths ? constant_buffer(count, uniform) : @buf
           end
 
+          out = smooth_output(out) if @smoother
+
           @tail += count if ended?
           out
+        end
+
+        # The smoothing time of this node's output (seconds or a Length; see
+        # Notes::Smoother and Notes.control_smoothing), or nil if it steps on
+        # exact samples.
+        def smooth_time
+          @smoother&.length
         end
 
         # The stream time (Rational seconds) this node has read up to.
@@ -123,6 +134,28 @@ module MB
         end
 
         private
+
+        # Smooths the output over +length+ (seconds or a Length; nil or false
+        # for none) with a Notes::Smoother.  For controller nodes (see
+        # ChannelNode).
+        def smooth_with(length)
+          @smoother = length ? Smoother.new(length, sample_rate: @sample_rate) : nil
+        end
+
+        # Returns the smoothed +out+ (see #smooth_with), with jumps at the
+        # offsets #smooth_jump recorded.
+        def smooth_output(out)
+          @smoother.sample_rate = @sample_rate if @smoother.sample_rate != @sample_rate
+          out = @smoother.process(out, out.frozen? ? out[0] : nil, @jumps)
+          @jumps&.clear
+          out
+        end
+
+        # Makes the smoothed output jump to the new value at the event being
+        # handled instead of gliding (see Held#render).
+        def smooth_jump
+          (@jumps ||= []) << @render_offset if @smoother
+        end
 
         # True if #sample should return nil (see the class description).
         def finished?
@@ -264,6 +297,7 @@ module MB
                 start = off
               end
 
+              @render_offset = off
               item.is_a?(MIDI::Source::Chase) ? chase(item.event) : handle(item)
             end
 
