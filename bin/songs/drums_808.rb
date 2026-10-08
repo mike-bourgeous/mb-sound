@@ -29,8 +29,10 @@
 # cowbell, low/mid/high_tom, low/mid/high_conga, claves, maracas.
 # Knobs: tune (Hz), decay (s), tone, snappy, level, sigh (kick).
 #
-# CPU (YJIT, % of realtime at 128 / 512-sample buffers, this container):
-# the whole song about 18 / 8 at its busiest (bars 13-16).
+# CPU (YJIT, % of realtime at 128 / 512-sample buffers, Linux container,
+# 2026-10-08): the whole 16-bar render averages 19.6 / 7.8 (with graph
+# building and warm-up); one 6-voice grid kit 10.7 / 4.7; a 16-voice GM kit
+# (live MIDI) 12.1 / 5.0 with idle voices skipped, 23.6 / 10.6 without.
 
 require 'bundler/setup'
 require 'mb-sound'
