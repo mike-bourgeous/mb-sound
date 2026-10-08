@@ -1,4 +1,11 @@
 RSpec.describe(MB::Sound::Notes, 'poly pressure') do
+
+  # These examples check values on exact event samples; controller
+  # smoothing has its own spec (notes_smoothing_spec.rb).
+  before do
+    MB::Sound::Notes.control_smoothing = false
+    MB::Sound::Notes.bend_smoothing = false
+  end
   let(:ev) { MB::Sound::MIDI::Event }
 
   # An Event parsed from raw MIDI bytes at +time+ (seconds).
@@ -126,12 +133,12 @@ RSpec.describe(MB::Sound::Notes, 'poly pressure') do
       spec = MB::Sound::MIDI::ControlSpec.poly_pressure
       expect(spec).to have_attributes(type: :poly_pressure, number: nil, name: 'Poly Aftertouch', status: 0xa0)
       v = MB::Sound::Notes.new(source(raw(0, 0x90, 60, 1)))
-      v.poly_pressure
-      v.mod
+      nodes = [v.poly_pressure, v.mod] # held: Notes caches nodes weakly
       expect(v.controls.types).to eq([:cc, :poly_pressure])
       xml = v.controls.to_acid_xml(name: 'x')
       expect(xml).to include(%Q{params="#{v.controls.groups.length - 1}"})
       expect(xml).not_to include('Poly')
+      expect(nodes.length).to eq(2)
     end
 
     it 'gives #aftertouch both pressure specs' do

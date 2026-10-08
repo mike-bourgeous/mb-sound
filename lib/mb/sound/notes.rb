@@ -126,8 +126,47 @@ module MB
         # sets MB_SOUND_NOTES_FAST=0.  The output is the same either way;
         # specs compare the two.
         attr_accessor :fast_paths
+
+        # The default smoothing time of controller nodes (#cc, the GM-named
+        # controls, #pressure, #poly_pressure, #aftertouch; seconds or a
+        # Length, or false for exact steps), CONTROL_SMOOTHING unless
+        # changed.  Applies to nodes made afterwards.  See Notes::Smoother.
+        attr_accessor :control_smoothing
+
+        # The default smoothing time of pitch bend (#bend,
+        # #bend_semitones, and so every #hz and #freq), BEND_SMOOTHING
+        # unless changed.  See .control_smoothing.
+        attr_accessor :bend_smoothing
+
+        # Resolves a node's +:smooth+ option: nil or true give +default+,
+        # false or 0 give nil (no smoothing), else a time (seconds or a
+        # Length) as is.
+        def smoothing(smooth, default)
+          smooth = default if smooth.nil? || smooth == true
+          return nil if smooth.nil? || smooth == false || smooth == 0
+
+          unless smooth.is_a?(Length) || (smooth.is_a?(Numeric) && smooth > 0)
+            raise ArgumentError, "Smoothing must be a time (seconds or a Length), true, or false (got #{smooth.inspect})"
+          end
+
+          smooth
+        end
       end
       self.fast_paths = ENV['MB_SOUND_NOTES_FAST'] != '0'
+
+      # The default smoothing time of controllers and pressure (see
+      # .control_smoothing): each MIDI value step becomes a 10 ms S-shaped
+      # transition (Notes::Smoother), delayed by half that.
+      CONTROL_SMOOTHING = 0.010
+
+      # The default smoothing time of pitch bend (see .bend_smoothing):
+      # shorter than CONTROL_SMOOTHING, since bend steps mostly come fast
+      # (14-bit wheels) and pitch steps zipper less than level or cutoff
+      # steps, while bends should feel immediate.
+      BEND_SMOOTHING = 0.005
+
+      self.control_smoothing = CONTROL_SMOOTHING
+      self.bend_smoothing = BEND_SMOOTHING
 
       # Shared channel-wide nodes per control stream (see .control_stream):
       # stream => { key => WeakRef(node) }.
@@ -314,38 +353,45 @@ module MB
       end
 
       # Pitch bend, -1..1 (a Notes::Bend shared by every Notes instance on
-      # the control stream).
-      def bend
-        shared(:bend) { Bend.new(@control_stream, sample_rate: @sample_rate) }
+      # the control stream), smoothed over +:smooth+ (default
+      # Notes.bend_smoothing; false for exact steps; see Notes::Smoother).
+      def bend(smooth: nil)
+        shared(smooth_key(:bend, smooth)) { Bend.new(@control_stream, sample_rate: @sample_rate, smooth: smooth) }
       end
 
       # Pitch bend in semitones (a shared Notes::Bend): with +range+ nil,
       # the stream's bend range (2 semitones unless RPN 0 or
       # MIDI::Stream#bend_range changes it; see MIDI::Event#bend_semitones),
       # or +range+ (an Interval or semitones, e.g. `12.st`) for full bend.
-      def bend_semitones(range = nil)
+      # Smoothed like #bend.
+      def bend_semitones(range = nil, smooth: nil)
         range = range.nil? ? :stream : Interval.semitones(range).to_f
-        shared([:bend, range]) { Bend.new(@control_stream, range: range, sample_rate: @sample_rate) }
+        shared(smooth_key([:bend, range], smooth)) { Bend.new(@control_stream, range: range, sample_rate: @sample_rate, smooth: smooth) }
       end
 
       # A MIDI controller as a shared Notes::Control node (one per control
       # stream and spec), mapped linearly from raw 0..127 to +range+ (see
       # MIDI::ControlSpec for other mappings; pass a spec to #control),
-      # starting at the raw +default+ (0..127).
+      # starting at the raw +default+ (0..127).  Each value step glides over
+      # +:smooth+ (default Notes.control_smoothing, 10 ms; a time in seconds
+      # or a Length, or false for exact steps on the event samples; switch
+      # controllers step unless given a time; see Notes::Smoother).
       #
       #     v.cc(1)                        # mod wheel, 0..1
       #     v.cc(16, range: 200..2000)     # general purpose 1 as a cutoff
-      def cc(number, range: 0.0..1.0, default: 0, name: nil, description: nil)
-        control(MIDI::ControlSpec.new(number: number, range: range, default: default, name: name, description: description))
+      #     v.cc(74, smooth: 30.ms)        # a slower glide
+      #     v.cc(20, smooth: false)        # exact steps
+      def cc(number, range: 0.0..1.0, default: 0, name: nil, description: nil, smooth: nil)
+        control(MIDI::ControlSpec.new(number: number, range: range, default: default, name: name, description: description), smooth: smooth)
       end
 
       # A shared Notes::Control node for a MIDI::ControlSpec (see #cc).
-      def control(spec)
-        shared([:cc, spec]) { Control.new(@control_stream, spec, sample_rate: @sample_rate) }
+      def control(spec, smooth: nil)
+        shared(smooth_key([:cc, spec], smooth)) { Control.new(@control_stream, spec, sample_rate: @sample_rate, smooth: smooth) }
       end
 
       GM_CONTROLS.each do |name, spec|
-        define_method(name) { control(spec) }
+        define_method(name) { |smooth: nil| control(spec, smooth: smooth) }
       end
       alias modulation mod
       alias mod_wheel mod
@@ -372,14 +418,14 @@ module MB
         cache = SHARED[@control_stream] || {}
         specs = cache.values.filter_map { |ref| live(ref) }.grep(ChannelNode).flat_map(&:control_specs)
         specs += MIDI::Transform::Sustain::CONTROL_SPECS if @sustain && live(@note_stream)
-        specs << MIDI::ControlSpec.poly_pressure if live(@nodes[:poly_pressure])
+        specs << MIDI::ControlSpec.poly_pressure if @nodes.any? { |k, ref| (k == :poly_pressure || (k.is_a?(Array) && k[0] == :poly_pressure)) && live(ref) }
         specs.uniq.sort_by { |s| [*s.key, s.name, s.range.begin] }
       end
 
-      # Channel pressure (aftertouch), 0..1 (a shared Notes::Pressure).
-      # See #aftertouch for either kind of pressure.
-      def pressure
-        shared(:pressure) { Pressure.new(@control_stream, sample_rate: @sample_rate) }
+      # Channel pressure (aftertouch), 0..1 (a shared Notes::Pressure),
+      # smoothed like #cc.  See #aftertouch for either kind of pressure.
+      def pressure(smooth: nil)
+        shared(smooth_key(:pressure, smooth)) { Pressure.new(@control_stream, sample_rate: @sample_rate, smooth: smooth) }
       end
       alias channel_pressure pressure
 
@@ -387,11 +433,12 @@ module MB
       # voice's note: the newest held note's pressure (a
       # Notes::PolyPressure).  In a Synth, each lane gets the pressure of
       # the key it plays (MIDI::Allocator routes it), so every note of a
-      # chord follows its own finger.
+      # chord follows its own finger.  Smoothed like #cc, except that each
+      # note starts at its own pressure at once.
       #
       #     play midi.synth { |v| v.hz.saw.lp4(v.cutoff(400) * (2 ** (v.poly_pressure * 3))) * v.amp_env }
-      def poly_pressure
-        memo(:poly_pressure) { PolyPressure.new(note_stream, notes: self, sample_rate: @sample_rate) }
+      def poly_pressure(smooth: nil)
+        memo(smooth_key(:poly_pressure, smooth)) { PolyPressure.new(note_stream, notes: self, sample_rate: @sample_rate, smooth: smooth) }
       end
       alias key_pressure poly_pressure
       alias poly_aftertouch poly_pressure
@@ -400,9 +447,9 @@ module MB
       # channel #pressure (a Notes::Aftertouch), so a patch works with
       # keyboards that send either (the SQ-80 sends one or the other) and
       # doesn't double when one sends both.  (Before poly pressure, this
-      # was an alias of #pressure.)
-      def aftertouch
-        memo(:aftertouch) { Aftertouch.new(poly_pressure, pressure, sample_rate: @sample_rate) }
+      # was an alias of #pressure.)  +:smooth+ applies to both (see #cc).
+      def aftertouch(smooth: nil)
+        memo(smooth_key(:aftertouch, smooth)) { Aftertouch.new(poly_pressure(smooth: smooth), pressure(smooth: smooth), sample_rate: @sample_rate) }
       end
 
       # Envelope helpers: the MB::Sound::EnvelopeMethods presets (positional
@@ -837,6 +884,12 @@ module MB
         { gate: node, trigger: node.trigger, velocity: node.velocity, choke: node.choke }
       end
 
+      # The cache key for a node made with smoothing option +smooth+: +key+
+      # for the default (nil or true), else [+key+, :smooth, +smooth+].
+      def smooth_key(key, smooth)
+        smooth.nil? || smooth == true ? key : [key, :smooth, smooth]
+      end
+
       # Like #memo, but shared by every Notes instance on the same control
       # stream (see .control_stream).
       def shared(key)
@@ -859,6 +912,7 @@ module MB
   end
 end
 
+require_relative 'notes/smoother'
 require_relative 'notes/node'
 require_relative 'notes/note_stack'
 require_relative 'notes/note_nodes'

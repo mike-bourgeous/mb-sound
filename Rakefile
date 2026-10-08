@@ -75,6 +75,12 @@ Rake::ExtensionTask.new 'mb-sound-fast_unison' do |ext|
   ext.lib_dir = 'lib/mb/sound'
 end
 
+Rake::ExtensionTask.new 'mb-sound-fast_control' do |ext|
+  ext.name = 'fast_control'
+  ext.ext_dir = 'ext/mb/sound/fast_control'
+  ext.lib_dir = 'lib/mb/sound'
+end
+
 Rake::ExtensionTask.new 'mb-sound-fast_audio' do |ext|
   ext.name = 'fast_audio'
   ext.ext_dir = 'ext/mb/sound/fast_audio'
@@ -125,6 +131,7 @@ MEMCHECK_SPECS = [
   'spec/lib/mb/sound/curve_spec.rb',               # FastClip.curve_lookup
   'spec/lib/mb/sound/envelope_spec.rb',            # FastEnvelope.process
   'spec/lib/mb/sound/envelope_segments_spec.rb',   # FastEnvelope.process (segment lists, loops)
+  'spec/lib/mb/sound/notes_smoothing_spec.rb',     # FastControl.smooth (controller smoothing)
   'spec/lib/mb/sound/filter/four_pole_spec.rb',    # FastFilter.four_pole
   'spec/lib/mb/sound/filter/svf_spec.rb',          # FastFilter.svf
   'spec/lib/mb/sound/graph_node/resonator_spec.rb', # FastResonator.ping
