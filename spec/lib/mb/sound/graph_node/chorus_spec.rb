@@ -187,12 +187,160 @@ RSpec.describe(MB::Sound::GraphNode::Chorus) do
     end
   end
 
+  describe 'mix:' do
+    let(:input) { -> { 220.hz.ramp.at(0.5) } }
+
+    def same(a, b, tol = 1e-6)
+      a.zip(b).each { |x, y| expect((x - y).abs.max).to be < tol }
+    end
+
+    it 'gives the dry signal at 0' do
+      same(render(input.call.chorus(mix: 0), 0.2), render(input.call.chorus(wet: 0), 0.2))
+    end
+
+    it 'gives the wet signal at 1' do
+      same(render(input.call.chorus(mix: 1), 0.2), render(input.call.chorus(dry: 0), 0.2))
+    end
+
+    it 'crossfades linearly, multiplying dry: and wet:' do
+      full = render(input.call.chorus, 0.2)
+      half = render(input.call.chorus(mix: 0.5), 0.2)
+      same(half, full.map { |c| c * 0.5 })
+
+      a = render(input.call.chorus(dry: 0.5, wet: 0.8, mix: 0.25), 0.2)
+      b = render(input.call.chorus(dry: 0.375, wet: 0.2), 0.2)
+      same(a, b)
+    end
+
+    it 'accepts a node, clamped to 0..1' do
+      same(render(input.call.chorus(mix: 0.3.constant), 0.2), render(input.call.chorus(mix: 0.3), 0.2))
+      same(render(input.call.chorus(mix: 1.5.constant), 0.2), render(input.call.chorus(mix: 1), 0.2))
+    end
+
+    it 'raises for numbers outside 0..1' do
+      expect { 220.hz.chorus(mix: 1.2) }.to raise_error(ArgumentError, /mix/)
+      expect { 220.hz.chorus(mix: -0.1) }.to raise_error(ArgumentError, /mix/)
+    end
+  end
+
+  describe ':lush (stacked I and II)' do
+    it 'is the equal-power sum of modes I and II, differing from I+II' do
+      in1 = clicks(1.2).chorus(:juno1, dry: 0)
+      in2 = clicks(1.2).chorus(:juno2, dry: 0)
+      lush = clicks(1.2).chorus(:lush, dry: 0)
+      a = render(in1, 1)
+      b = render(in2, 1)
+      c = render(lush, 1)
+      2.times do |ch|
+        expect((c[ch] - (a[ch] + b[ch]) * Math.sqrt(0.5)).abs.max).to be < 1e-5
+      end
+
+      d = render(clicks(1.2).chorus(:juno12, dry: 0), 1)
+      expect((c[0] - d[0]).abs.max).to be > 0.1
+    end
+
+    it 'contains both sweeps (two echoes per click, at the I and II delays)' do
+      l, _ = render(clicks(1.2).chorus(:lush, dry: 0), 1)
+      d1 = delays_for(:juno1, seconds: 1)[0]
+      d2 = delays_for(:juno2, seconds: 1)[0]
+      (0...(l.length / 480 - 1)).each do |k|
+        seg = l[(k * 480)...((k + 1) * 480)]
+        expect(seg[d1[k]].abs).to be > 0.3
+        expect(seg[d2[k]].abs).to be > 0.3
+      end
+    end
+
+    it 'has the aliases :juno3 and :stacked' do
+      a = render(220.hz.ramp.chorus(:lush), 0.1)
+      expect(render(220.hz.ramp.chorus(:juno3), 0.1)).to eq(a)
+      expect(render(220.hz.ramp.chorus(:stacked), 0.1)).to eq(a)
+    end
+
+    it 'no longer accepts :juno_both, keeping :juno_i_ii' do
+      expect { 220.hz.chorus(:juno_both) }.to raise_error(ArgumentError, /Unknown/)
+      expect(render(220.hz.ramp.chorus(:juno_i_ii), 0.1)).to eq(render(220.hz.ramp.chorus(:juno12), 0.1))
+    end
+
+    it 'takes one rate per LFO, or a number keeping their ratio' do
+      a = render(clicks(1.2).chorus(:lush, dry: 0, rate: [1, 1.5]), 1)
+      b = render(clicks(1.2).chorus(:lush, dry: 0, rate: 1), 1)
+      c = render(clicks(1.2).chorus(:lush, dry: 0, rate: [1, 0.863 / 0.513]), 1)
+      expect(a).not_to eq(b)
+      expect((b[0] - c[0]).abs.max).to be < 1e-6
+      expect { 220.hz.chorus(:lush, rate: [1]) }.to raise_error(ArgumentError, /2 rates/)
+      expect { 220.hz.chorus(:lush, rate: 1.bar) }.to raise_error(ArgumentError, /2 LFOs/)
+    end
+  end
+
+  describe 'ending' do
+    it 'ends after the input plus the delay tail, with the delayed signal in the tail' do
+      data = Numo::SFloat.zeros(4800)
+      data[-1] = 1
+      c = MB::Sound::ArrayInput.new(data: [data]).chorus(dry: 0, depth: 0, bbd: true, seed: 1)
+      outs = c.outputs
+      lengths = 0
+      bufs = []
+      100.times do
+        b = outs.map { |o| o.sample(480) }
+        break if b.any?(&:nil?)
+        bufs << b[0].dup
+        lengths += b[0].length
+      end
+      out = Numo::SFloat.cast(bufs).flatten
+      tail = ((0.00166 + 0.00535) / 2 + MB::Sound::GraphNode::Chorus::TAIL_EXTRA) * 48000
+      expect(lengths).to be_within(480).of(4800 + tail)
+      expect(out[4800..].abs.max).to be > 0.1
+    end
+
+    it 'fades the hiss out once an upstream Ringdown has ended' do
+      input = MB::Sound::ArrayInput.new(data: [Numo::SFloat.zeros(4800)]).ringdown
+      l, r = render(input.chorus(hiss: -40, seed: 1), 0.5)
+      expect(l[0...4800].abs.max).to be > -46.db
+      tail = (0.00535 + MB::Sound::GraphNode::Chorus::TAIL_EXTRA) * 48000
+      expect(l[(4800 + tail.ceil + 480)..].abs.max).to eq(0)
+      expect(r[(4800 + tail.ceil + 480)..].abs.max).to eq(0)
+    end
+
+    it 'keeps the hiss for inputs that never end' do
+      l, _ = render(0.constant.chorus(hiss: -40), 1)
+      expect(l[-4800..].abs.max).to be > -46.db
+    end
+  end
+
   describe 'BBD flavour' do
-    it 'darkens the wet path' do
-      clean = render(9000.hz.sine.chorus(:juno1, dry: 0, depth: 0), 0.1)[0][2400..]
-      dark = render(9000.hz.sine.chorus(:juno1, dry: 0, depth: 0, cutoff: 9000), 0.1)[0][2400..]
-      expect(clean.abs.max).to be_within(0.05).of(1)
-      expect(dark.abs.max).to be_within(0.05).of(0.5) # two 2-pole Butterworths, -3 dB each
+    # The analog all-pole response in dB of +poles+ at +f+ Hz.
+    def analog_db(poles, f, scale = 1)
+      s = Complex(0, f)
+      poles.sum { |pf, q|
+        pf *= scale
+        h = q ? pf**2 / (pf**2 - f**2 + s * pf / q) : pf / (pf + s)
+        20 * Math.log10(h.abs)
+      }
+    end
+
+    # The wet-only level in dB of a +freq+ sine through the chorus.
+    def wet_db(freq, **opts)
+      out = render(freq.hz.sine.chorus(:juno1, dry: 0, depth: 0, **opts), 0.2)[0][4800..]
+      out.abs.max.to_db
+    end
+
+    let(:poles) { MB::Sound::GraphNode::Chorus::BBD_PRE_POLES + MB::Sound::GraphNode::Chorus::BBD_POST_POLES }
+
+    it 'follows the Juno-60 filters (Holters and Parker) through the wet path' do
+      [500, 2000, 5420, 8000].each do |f|
+        expect(wet_db(f, cutoff: 5420)).to be_within(0.5).of(analog_db(poles, f))
+      end
+      # The bilinear transform cuts more near Nyquist (24 kHz)
+      expect(wet_db(12000, cutoff: 5420)).to be_between(analog_db(poles, 12000) - 7, analog_db(poles, 12000))
+      expect(wet_db(5420, bbd: true, hiss: -200)).to be_within(0.6).of(-3)
+      expect(wet_db(500, bbd: true, hiss: -200)).to be_within(0.1).of(0)
+    end
+
+    it 'scales every pole with cutoff:, also as a node' do
+      expect(wet_db(2710, cutoff: 2710)).to be_within(0.5).of(analog_db(poles, 2710, 0.5))
+      expect(wet_db(2710, cutoff: 2710.constant)).to be_within(0.6).of(analog_db(poles, 2710, 0.5))
+      # A node cutoff plays the real pole as a double pole (steeper)
+      expect(wet_db(6000, cutoff: 2710.constant)).to be_within(2.5).of(analog_db(poles, 6000, 0.5))
     end
   end
 
