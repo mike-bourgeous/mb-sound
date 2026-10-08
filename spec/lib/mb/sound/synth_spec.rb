@@ -443,8 +443,8 @@ RSpec.describe(MB::Sound::Synth) do
       expect(l1[10]).to be_within(1e-3).of(r1[10]) # centered at 64
       l2 = l.sample(480).dup
       r2 = r.sample(480).dup
-      expect(l2[400]).to be_within(1e-3).of(1)
-      expect(r2[400].abs).to be < 1e-3
+      expect(l2[479]).to be_within(1e-3).of(1) # after the 10 ms controller glide
+      expect(r2[479].abs).to be < 1e-3
     end
 
     it 'balances a stereo synth with CC 10' do

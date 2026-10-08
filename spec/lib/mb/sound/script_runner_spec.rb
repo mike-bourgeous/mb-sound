@@ -162,8 +162,8 @@ RSpec.describe(MB::Sound::ScriptRunner) do
       r = runner(:effect, [], hz: 0.5)
       midi = double('Notes')
       r.params.midi_source = -> { midi }
-      expect(midi).to receive(:control).with(have_attributes(number: 1, range: 0.0..3.0, center: 0.5, default: 64)).and_return(0.5.constant)
-      expect(midi).to receive(:control).with(have_attributes(number: 2, range: 0.0..6.0, center: 0.5, default: 64)).and_return(0.5.constant)
+      expect(midi).to receive(:control).with(have_attributes(number: 1, range: 0.0..3.0, center: 0.5, default: 64), smooth: nil).and_return(0.5.constant)
+      expect(midi).to receive(:control).with(have_attributes(number: 2, range: 0.0..6.0, center: 0.5, default: 64), smooth: nil).and_return(0.5.constant)
       r.params.midi_cc(1, :hz, range: 0.0..6.0)
       r.params.midi_cc(2, :hz, range: 0.0..6.0, relative: false)
     end
@@ -176,8 +176,9 @@ RSpec.describe(MB::Sound::ScriptRunner) do
       ))
       r.params.midi_source = -> { notes }
 
-      hz = r.params.midi_cc(1, :hz, range: 0.0..6.0)
-      dry = r.params.midi_cc(1, :dry, range: 1.0..0.0)
+      # Exact steps on the event samples (controllers glide 10 ms by default)
+      hz = r.params.midi_cc(1, :hz, range: 0.0..6.0, smooth: false)
+      dry = r.params.midi_cc(1, :dry, range: 1.0..0.0, smooth: false)
       expect(hz).to be_a(MB::Sound::Notes::Control)
       expect(hz.graph_node_name).to eq('hz')
       expect(r.params.midi).to equal(notes)

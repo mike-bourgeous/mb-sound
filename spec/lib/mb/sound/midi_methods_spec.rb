@@ -245,7 +245,7 @@ RSpec.describe(MB::Sound::MidiMethods, :aggregate_failures) do
 
       gate = midi.gate
       number = midi.number
-      mod = midi.mod
+      mod = midi.mod(smooth: false) # the value as sent, not its 10 ms glide
       sleep 0.1
       keyboard.send_bytes([0xb0, 1, 127].pack('C*'))
       keyboard.send_bytes([0x90, 67, 100].pack('C*'))
