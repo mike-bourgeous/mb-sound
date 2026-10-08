@@ -51,6 +51,12 @@ Rake::ExtensionTask.new 'mb-sound-fast_envelope' do |ext|
   ext.lib_dir = 'lib/mb/sound'
 end
 
+Rake::ExtensionTask.new 'mb-sound-fast_resonator' do |ext|
+  ext.name = 'fast_resonator'
+  ext.ext_dir = 'ext/mb/sound/fast_resonator'
+  ext.lib_dir = 'lib/mb/sound'
+end
+
 Rake::ExtensionTask.new 'mb-sound-fast_filter' do |ext|
   ext.name = 'fast_filter'
   ext.ext_dir = 'ext/mb/sound/fast_filter'
@@ -118,6 +124,7 @@ MEMCHECK_SPECS = [
   'spec/lib/mb/sound/envelope_spec.rb',            # FastEnvelope.process
   'spec/lib/mb/sound/envelope_segments_spec.rb',   # FastEnvelope.process (segment lists, loops)
   'spec/lib/mb/sound/filter/four_pole_spec.rb',    # FastFilter.four_pole
+  'spec/lib/mb/sound/graph_node/resonator_spec.rb', # FastResonator.ping
   'spec/lib/mb/sound/loudness_spec.rb',            # FastLoudness.true_peak
   'spec/lib/mb/sound/wavetable_spec.rb',           # FastWavetable
   'spec/lib/mb/sound/graph_node/wavetable_spec.rb',
