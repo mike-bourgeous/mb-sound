@@ -1013,10 +1013,22 @@ module MB
       #     1.5 rad    -7.0/-11.0 dB, to the 104th (a saw-like tone)
       #     2.0 rad    -6.6/-10.5 dB, to the 162nd (brightest clean setting)
       #
-      # Between about 2.1 and 2.2 rad the loop turns chaotic: a noisy buzz
-      # with strong content near Nyquist (non-harmonic power -10 to -5 dB
-      # from 2.2 rad up), as on a DX7 at full feedback.  Negative amounts
-      # give the same harmonic levels.
+      # Above about 2.2 rad the loop turns chaotic, but only above 12 kHz at
+      # first: up to about 3.5 rad the audible tone stays saw-like and a
+      # hiss sits at 12-24 kHz (non-harmonic power -11 to -6 dB of the
+      # total there, -50 to -40 dB below 4 kHz), which many playback chains
+      # and ears hardly reproduce.  Grit reaches the audible band from 3.5
+      # rad, and from about 4 rad it is broadband noise (non-harmonic power
+      # below 4 kHz -6 dB), as a DX7 at full feedback (2pi; see
+      # .dx7_feedback) is.  This doesn't depend on the pitch (55-440 Hz
+      # measured).  Negative amounts give the same harmonic levels.
+      #
+      # The output has a DC offset that grows with the amount (a mean of
+      # -0.04 at 1 rad, -0.14 at 1.5, -0.25 at 2, -0.38 at 3 at 110 Hz;
+      # -0.09 at 1 rad and -0.30 at 2 at 440 Hz; positive for negative
+      # amounts).  In a modulator that is a constant phase shift;
+      # for a carrier, a highpass (e.g. `.filter(20.hz.highpass)`) removes
+      # it.
       #
       # +gain:+ (a number or node, default 1) is the operator's output level
       # inside the loop, e.g. its envelope: the tone outputs the enveloped

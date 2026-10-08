@@ -15,7 +15,8 @@
 #     $0                                       # live MIDI
 #     $0 spec/test_data/c_major.mid brass.flac
 #     $0 --feedback 0 spec/test_data/c_major.mid nofb.flac   # A/B: no feedback
-#     $0 --feedback 2.4 spec/test_data/c_major.mid           # past the chaotic edge: buzzy
+#     $0 --feedback 3 spec/test_data/c_major.mid             # adds a chaotic hiss above 12 kHz
+#     $0 --feedback 5 spec/test_data/c_major.mid             # noise in the modulator: breathy, growling
 #
 # Operator feedback in the console (bin/sound.rb):
 #     play 110.hz.feedback(1.3).at(-12.db)                       # a sine turned saw-like
@@ -31,7 +32,7 @@ require 'bundler/setup'
 require 'mb-sound'
 
 MB::Sound.synth_script(
-  feedback: [1.4, Float, '-F', 'Modulator self-feedback in radians at full envelope (0 for none; noisy above ~2.1)', 0.0..3.2],
+  feedback: [1.4, Float, '-F', 'Modulator self-feedback in radians at full envelope (0 for none; hiss above 12 kHz from ~2.2, noise from ~4)', 0.0..6.3],
   index: [1.6, Float, '-x', 'Modulation index (radians) of the modulator into the carrier', 0.0..8.0],
   voices: [6, Integer, '-v', 'Number of voices', 1..32],
 ) { |midi, p|
