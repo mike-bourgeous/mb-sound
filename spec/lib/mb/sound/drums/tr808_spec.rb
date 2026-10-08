@@ -32,7 +32,9 @@ RSpec.describe(MB::Sound::Drums::TR808, :aggregate_failures) do
         accent = peak(data, 0, 0.5)
         plain = peak(data, 1, 1.5)
 
-        expect(accent).to be_between(0.7, 1.1)
+        # The snare at snappy 0.3 (the user's pick) peaks lower: its noise
+        # no longer stacks on the heads' first peak
+        expect(accent).to be_between(name == :snare ? 0.6 : 0.7, 1.1)
         expect((plain / accent).to_db).to be_between(-8.5, -3.5)
         expect(data.length).to be < 48000 * (2 + defaults[:decay] * 1.3 + 0.5)
         expect(data[-4800..].abs.max).to be < 1e-3
@@ -97,10 +99,10 @@ RSpec.describe(MB::Sound::Drums::TR808, :aggregate_failures) do
     expect(hf.(1.0)).to be > 3 * hf.(0.05)
   end
 
-  it 'keeps the snare heads short and the noise longer by default (round 2)' do
+  it 'keeps the snare heads short and the noise longer (round 2 heads; noise at snappy 0.6)' do
     heads = collect(described_class.snare(hits, snappy: 0), 1)
     MB::Sound.seed(0)
-    full = collect(described_class.snare(hits), 1)
+    full = collect(described_class.snare(hits, snappy: 0.6), 1)
     # Heads ring 0.25 s to -60 dB: under -40 dB of their peak by 0.2 s
     expect(peak(heads, 0.2, 0.5) / peak(heads, 0, 0.1)).to be < 0.01
     # The noise (snappy 0.6: 0.25 s to -60 dB) is most of the first 50 ms

@@ -39,13 +39,13 @@ module MB
         # balance (the kick peaks near 1 at full velocity).
         VOICES = {
           kick: { tune: 52.0, decay: 2.4, tone: 0.5, sigh: 0.45, level: 1.0 }.freeze,
-          snare: { tune: 180.0, decay: 0.25, tone: 0.5, snappy: 0.6, level: 0.9 }.freeze,
+          snare: { tune: 180.0, decay: 0.25, tone: 0.5, snappy: 0.3, level: 0.9 }.freeze,
           rimshot: { tune: 455.0, decay: 0.07, tone: 0.5, level: 0.5 }.freeze,
           clap: { decay: 0.2, tone: 0.5, level: 0.6 }.freeze,
           closed_hat: { tune: METAL[0], decay: 0.06, tone: 0.5, level: 0.35 }.freeze,
           open_hat: { tune: METAL[0], decay: 0.45, tone: 0.5, level: 0.35 }.freeze,
           cymbal: { tune: METAL[0], decay: 1.6, tone: 0.5, level: 0.3 }.freeze,
-          cowbell: { tune: 540.0, decay: 0.5, tone: 0.5, level: 0.45 }.freeze,
+          cowbell: { tune: 540.0, decay: 0.42, tone: 0.5, level: 0.45 }.freeze,
           low_tom: { tune: 95.0, decay: 1.7, tone: 0.5, snappy: 0.15, level: 0.7 }.freeze,
           mid_tom: { tune: 140.0, decay: 1.5, tone: 0.5, snappy: 0.15, level: 0.65 }.freeze,
           high_tom: { tune: 190.0, decay: 1.3, tone: 0.5, snappy: 0.15, level: 0.6 }.freeze,
