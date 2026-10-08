@@ -11,10 +11,12 @@ module MB
       # ringing level: the state is a complex number that each sample
       # rotates by 2 pi f / fs and shrinks by the decay factor (a complex
       # one-pole filter; C kernel MB::Sound::FastResonator.ping, exact Ruby
-      # mirror .process_ruby).  A resonant Cookbook biquad swept the same
-      # way pumps its ringing level by several dB (direct-form coefficients
-      # changing under a ringing state), which made 808 kick pitch sweeps
-      # ring about 8 dB too loud.
+      # mirror .process_ruby).  A resonant bandpass swept the same way rings
+      # louder: a constant-Q filter's ring scales with its frequency at the
+      # strike (+45% for an 808 kick's pitch sigh), and a direct-form biquad
+      # adds about 1 dB more from coefficients changing under a ringing
+      # state (measured 2026-10-08: peaks biquad 1.23, SVF 1.09, ping 0.74).
+      # The ring height here is the strike's at any frequency.
       #
       # Any signal may be the input: impulses (Notes#trigger, Tone#wraps)
       # ping it; a continuous input is filtered by a resonance whose peak
