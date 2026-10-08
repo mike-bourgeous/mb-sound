@@ -281,8 +281,10 @@ module MB
       def fm(tone_or_node, index = nil) = tone.fm(tone_or_node, index)
       def log_fm(tone_or_node, index = nil) = tone.log_fm(tone_or_node, index)
       def pm(tone_or_node, index = nil) = tone.pm(tone_or_node, index)
-      def feedback(amount, gain: nil) = tone.feedback(amount, gain: gain)
-      def fb(amount, gain: nil) = tone.feedback(amount, gain: gain)
+      def feedback(amount, gain: nil, dc: false) = tone.feedback(amount, gain: gain, dc: dc)
+      def fb(amount, gain: nil, dc: false) = tone.feedback(amount, gain: gain, dc: dc)
+      def feedback_cycles(cycles, gain: nil, dc: false) = tone.feedback_cycles(cycles, gain: gain, dc: dc)
+      def fb_cycles(cycles, gain: nil, dc: false) = tone.feedback_cycles(cycles, gain: gain, dc: dc)
       def lfo = tone.lfo
       def sync(master = nil, ratio: nil) = tone.sync(master, ratio: ratio)
       def softsync(master = nil, ratio: nil) = tone.softsync(master, ratio: ratio)

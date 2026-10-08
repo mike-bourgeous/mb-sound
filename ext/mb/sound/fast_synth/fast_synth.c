@@ -1406,7 +1406,16 @@ static VALUE ruby_oscillate_sync(int argc, VALUE *argv, VALUE self)
  *
  *     m[i] = feedback[i] * ((y[i-1] + y[i-2]) * 0.5)
  *     y[i] = sin(phase[i] * 2pi + pm[i] + m[i]) * level[i]
- *     out[i] = y[i] * gain + offset
+ *     out[i] = (y[i] - dc[i]) * gain + offset
+ *
+ * dc[i] (when +remove_dc+ is true; else 0) is the feedback sine's DC
+ * offset (its mean grows with the amount, e.g. -0.25 at 2 rad), tracked
+ * by a one-pole lowpass whose cutoff follows the pitch (FB_DC_RATIO times
+ * the frequency, from |increment|), so subtracting it is a one-pole
+ * highpass at a fixed fraction of the fundamental: the same phase shift
+ * at every pitch (atan(FB_DC_RATIO) at the fundamental), LFOs included,
+ * and the estimate settles in a few cycles.  It is applied to the output
+ * only; the loop feeds back y[i] with its DC.
  *
  * The loop is per sample (each sample depends on the last), inside the
  * kernel rather than through a graph loop, so the cost per sample is the
@@ -1420,14 +1429,16 @@ static VALUE ruby_oscillate_sync(int argc, VALUE *argv, VALUE self)
  * float32).  +state+ is [phase in cycles]; the phase arithmetic is that of
  * FastSound.oscillate (phase i = wrap(phi + sum of increments 0...i)), so
  * with feedback 0 and level 1 the samples are a plain sine's.
- * +fb_state+ is [y[n-1], y[n-2]] (doubles), carried between buffers.
+ * +fb_state+ is [y[n-1], y[n-2], dc] (doubles), carried between buffers.
  *
  * Every product and sum is its own statement so no compiler fuses a
  * multiply-add (clang contracts within expressions by default), keeping
  * the Ruby mirror (Tone#feedback_ruby) exact.
  */
+#define FB_DC_RATIO (1.0 / 20.0)
+
 static VALUE ruby_feedback_sine(VALUE self, VALUE buffer, VALUE frequency, VALUE phase_mod, VALUE advance,
-		VALUE gain, VALUE offset, VALUE state, VALUE fb_state, VALUE feedback, VALUE level)
+		VALUE gain, VALUE offset, VALUE state, VALUE fb_state, VALUE feedback, VALUE level, VALUE remove_dc)
 {
 	double phi = bl_read_phi(state);
 	double adv = NUM2DBL(advance);
@@ -1435,11 +1446,14 @@ static VALUE ruby_feedback_sine(VALUE self, VALUE buffer, VALUE frequency, VALUE
 	double off = NUM2DBL(offset);
 
 	Check_Type(fb_state, T_ARRAY);
-	if (RARRAY_LEN(fb_state) != 2) {
-		rb_raise(rb_eArgError, "Feedback state must have two elements");
+	if (RARRAY_LEN(fb_state) != 3) {
+		rb_raise(rb_eArgError, "Feedback state must have three elements");
 	}
 	double y1 = NUM2DBL(rb_ary_entry(fb_state, 0));
 	double y2 = NUM2DBL(rb_ary_entry(fb_state, 1));
+	double dc = NUM2DBL(rb_ary_entry(fb_state, 2));
+	_Bool dc_off = RTEST(remove_dc);
+	const double dc_k = 2.0 * M_PI * FB_DC_RATIO;
 
 	_Bool was_inplace;
 	mb_ensure_inplace_sfloat(&buffer, &was_inplace);
@@ -1499,7 +1513,20 @@ static VALUE ruby_feedback_sine(VALUE self, VALUE buffer, VALUE frequency, VALUE
 		y2 = y1;
 		y1 = y;
 
-		double v = y * g;
+		double v = y;
+		if (dc_off) {
+			// One-pole lowpass at FB_DC_RATIO times the frequency
+			double c = fabs(inc);
+			c = c * dc_k;
+			if (c > 1.0) {
+				c = 1.0;
+			}
+			double d = y - dc;
+			d = d * c;
+			dc = dc + d;
+			v = y - dc;
+		}
+		v = v * g;
 		out[i] = v + off;
 
 		if (!constant) {
@@ -1514,6 +1541,7 @@ static VALUE ruby_feedback_sine(VALUE self, VALUE buffer, VALUE frequency, VALUE
 	rb_ary_store(state, 0, rb_float_new(mb_wrap(phi + steps, 1.0)));
 	rb_ary_store(fb_state, 0, rb_float_new(y1));
 	rb_ary_store(fb_state, 1, rb_float_new(y2));
+	rb_ary_store(fb_state, 2, rb_float_new(dc));
 
 	if (!was_inplace) {
 		UNSET_INPLACE(buffer);
@@ -1546,5 +1574,5 @@ void Init_fast_synth(void)
 	rb_define_module_function(fast_synth, "oscillate_bl", ruby_oscillate_bl, 13);
 	rb_define_module_function(fast_synth, "blit", ruby_blit, 8);
 	rb_define_module_function(fast_synth, "oscillate_sync", ruby_oscillate_sync, -1);
-	rb_define_module_function(fast_synth, "feedback_sine", ruby_feedback_sine, 10);
+	rb_define_module_function(fast_synth, "feedback_sine", ruby_feedback_sine, 11);
 }

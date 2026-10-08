@@ -45,6 +45,9 @@ RSpec.describe('Tone#feedback (operator self-feedback)') do
         t = MB::Sound::Notes.new(MB::Sound.seq(MB::Sound::C4, MB::Sound::E4).n32.loop).trigger
         170.hz.feedback(1.4).reset(t, to: 1.0)
       },
+      'DC kept (dc: true)' => -> { 211.hz.fm(3.hz.lfo.at(40)).feedback(2.2, dc: true) },
+      'an LFO-rate feedback sine with DC removal' => -> { 3.hz.feedback(1.5).at(0.2..0.8) },
+      'cycles and a node gain' => -> { 150.hz.feedback_cycles(2.hz.lfo.at(0..0.3), gain: 5.hz.lfo.at(0.5..1)) },
       'random resets' => -> {
         t = MB::Sound::ArrayInput.new(data: [Numo::SFloat.zeros(2000).tap { |a| a[[5, 130, 131, 600]] = 1 }])
         170.hz.feedback(1.1).reset(t).rnd(seed: 3)
@@ -66,17 +69,60 @@ RSpec.describe('Tone#feedback (operator self-feedback)') do
     end
   end
 
-  it 'plays a plain sine with feedback 0' do
-    a = 123.4.hz.pm(5.hz.at(0.3)).feedback(0).sample(2000)
+  it 'plays a plain sine with feedback 0 and dc: true' do
+    a = 123.4.hz.pm(5.hz.at(0.3)).feedback(0, dc: true).sample(2000)
     b = 123.4.hz.pm(5.hz.at(0.3)).sample(2000)
     expect((a - b).abs.max).to be < 1e-6
   end
 
   it 'applies the gain inside the loop: feedback 0 with a gain node is the sine times the gain' do
     g = Numo::SFloat.linspace(0, 1, 1000)
-    a = 300.hz.feedback(0, gain: input(g)).sample(1000)
+    a = 300.hz.feedback(0, gain: input(g), dc: true).sample(1000)
     b = 300.hz.sample(1000) * g
     expect((a - b).abs.max).to be < 1e-6
+  end
+
+  describe 'DC offset' do
+    def mean_after(tone, settle = 48000)
+      tone.sample(settle)
+      tone.sample(48000).mean
+    end
+
+    it 'is removed by default at audio and LFO rates' do
+      expect(mean_after(110.hz.feedback(2.0)).abs).to be < 1e-3
+      expect(mean_after(440.hz.feedback(3.0)).abs).to be < 1e-3
+      expect(mean_after(2.hz.feedback(1.5), 480000).abs).to be < 1e-3
+    end
+
+    it 'is kept with dc: true' do
+      expect(mean_after(110.hz.feedback(2.0, dc: true))).to be_within(0.02).of(-0.25)
+    end
+
+    it 'barely changes the harmonics (a one-pole highpass at 1/20 of the frequency)' do
+      a = harmonics(steady(125.hz.feedback(1.5)), 10)
+      b = harmonics(steady(125.hz.feedback(1.5, dc: true)), 10)
+      expect(a.zip(b).map { |x, y| (x - y).abs }.max).to be < 0.05
+    end
+
+    it 'is removed from the output only: the loop and the in-loop gain are unchanged' do
+      a = 200.hz.feedback(1.8)
+      b = 200.hz.feedback(1.8, dc: true)
+      a.sample(1000)
+      b.sample(1000)
+      expect(a.state.feedback[0..1]).to eq(b.state.feedback[0..1])
+    end
+  end
+
+  it 'takes the amount in cycles with #feedback_cycles' do
+    a = 125.hz.feedback_cycles(0.25).sample(2000)
+    b = 125.hz.feedback(0.25 * 2 * Math::PI).sample(2000)
+    expect(a).to eq(b)
+    expect(100.hz.fb_cycles(0.1).feedback_amount).to be_within(1e-12).of(0.2 * Math::PI)
+  end
+
+  it 'has FEEDBACK_MAX = 2pi, the DX7 FB 7 value' do
+    expect(MB::Sound::Tone::FEEDBACK_MAX).to eq(2 * Math::PI)
+    expect(MB::Sound::Tone.dx7_feedback(7)).to eq(MB::Sound::Tone::FEEDBACK_MAX)
   end
 
   it 'applies #at outside the loop' do
@@ -201,7 +247,7 @@ RSpec.describe('Tone#feedback (operator self-feedback)') do
     t = 100.hz.feedback(1.5)
     t.sample(333)
     h = t.state.to_h
-    expect(h[:feedback].length).to eq(2)
+    expect(h[:feedback].length).to eq(3)
     expect(MB::Sound::Tone::State.new(**h).feedback).to eq(h[:feedback])
   end
 end

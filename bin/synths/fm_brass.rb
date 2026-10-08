@@ -9,7 +9,8 @@
 #
 # Usage: $0 [options] [midi_file_or_port [output_file]]
 #
-# CC 1 (the mod wheel) adds up to 0.6 rad of feedback.
+# CC 1 (the mod wheel) sets the feedback from 0 to 2pi (Tone::FEEDBACK_MAX),
+# starting at --feedback.
 #
 # Examples:
 #     $0                                       # live MIDI
@@ -40,7 +41,12 @@ MB::Sound.synth_script(
     # The modulator's level envelope, applied inside the feedback loop:
     # a swell, a quick fall from the peak, and a lower sustain
     menv = v.fm_env(0.07, 0.45, 0.6, 0.25, curve: [-6, 20, 30], sensitivity: -6.db..0.db).named('Modulator envelope')
-    amount = (p.feedback + v.cc(1, range: 0.0..0.6, name: 'Feedback')).named('Feedback amount')
+    # The mod wheel is the feedback knob over the full range, 0 to
+    # Tone::FEEDBACK_MAX (2pi), starting at --feedback (rounded to a wheel
+    # step, 2pi / 127 = 0.05 rad)
+    fb_max = MB::Sound::Tone::FEEDBACK_MAX
+    amount = v.cc(1, range: 0.0..fb_max, default: (p.feedback / fb_max * 127).round, name: 'Feedback',
+      description: 'Modulator self-feedback (radians)').named('Feedback amount')
     mod = v.hz.feedback(amount, gain: menv).at(p.index).named('Modulator')
 
     amp = v.amp_env(0.04, 0.8, 0.8, 0.25).named('Amplitude')

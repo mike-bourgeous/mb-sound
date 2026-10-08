@@ -445,6 +445,7 @@ module MB
         @scan_wrap = false
         @feedback = nil
         @feedback_gain = nil
+        @feedback_dc = false
 
         @frequency = nil
         @phase = nil
@@ -1023,12 +1024,24 @@ module MB
       # .dx7_feedback) is.  This doesn't depend on the pitch (55-440 Hz
       # measured).  Negative amounts give the same harmonic levels.
       #
-      # The output has a DC offset that grows with the amount (a mean of
-      # -0.04 at 1 rad, -0.14 at 1.5, -0.25 at 2, -0.38 at 3 at 110 Hz;
-      # -0.09 at 1 rad and -0.30 at 2 at 440 Hz; positive for negative
-      # amounts).  In a modulator that is a constant phase shift;
-      # for a carrier, a highpass (e.g. `.filter(20.hz.highpass)`) removes
-      # it.
+      # The feedback sine has a DC offset that grows with the amount (a
+      # mean of -0.04 at 1 rad, -0.14 at 1.5, -0.25 at 2, -0.38 at 3 at
+      # 110 Hz; -0.09 at 1 rad and -0.30 at 2 at 440 Hz; positive for
+      # negative amounts).  It is removed from the output by default, like
+      # #pwm's (pass dc: true to keep it): a one-pole DC tracker whose
+      # cutoff follows the pitch (1/20 of the frequency, so LFO-rate
+      # feedback sines work too) is subtracted after the loop, so the loop
+      # itself is unchanged.  That is a one-pole highpass at f/20: harmonic
+      # levels change by under 0.03 dB, the fundamental's phase by 2.9
+      # degrees, and the estimate settles within a few cycles after the
+      # amount or gain changes (a small low-frequency bump on attacks, as
+      # from an AC-coupled output).  In a modulator, removing DC removes a
+      # constant phase shift of the carrier.  With dc: true and feedback 0
+      # the tone is exactly a plain sine.
+      #
+      # Nothing clamps the amount; FEEDBACK_MAX (2pi, noise) is the top of
+      # the useful range, e.g. for a knob.  #feedback_cycles takes the
+      # amount in cycles instead (1.0 = 2pi).
       #
       # +gain:+ (a number or node, default 1) is the operator's output level
       # inside the loop, e.g. its envelope: the tone outputs the enveloped
@@ -1042,8 +1055,7 @@ module MB
       # #sync, #noise, or wavetables; those raise an ArgumentError when the
       # tone starts).  It works with #fm, #pm, #reset (key sync), and
       # timeline locks; resets jump the phase but keep the feedback history,
-      # so the loop doesn't restart from silence.  feedback(0) plays a plain
-      # sine (at the feedback kernel's cost).
+      # so the loop doesn't restart from silence.
       #
       # Feedback raises the bandwidth like FM, so high notes alias: at 1 kHz
       # the worst alias is -103 dB at 1.0 rad, -59 dB at 1.5 rad, -30 dB at
@@ -1060,11 +1072,12 @@ module MB
       #     e = adsr(0.05, 0.4, 0.5, 0.3, hold: 1)
       #     play 220.hz.feedback(1.4, gain: e).at(-6.db)                  # brass-like: bright as it swells
       #     play 220.hz.pm(440.hz.feedback(1.0).at(1.5)).at(-12.db)       # a feedback modulator
-      def feedback(amount, gain: nil)
+      def feedback(amount, gain: nil, dc: false)
         if amount.nil?
           return configure do
             @feedback = nil
             @feedback_gain = nil
+            @feedback_dc = false
           end
         end
 
@@ -1077,9 +1090,23 @@ module MB
         configure do
           @feedback = amount.is_a?(Numeric) ? amount.to_f : fixup_source(amount)
           @feedback_gain = gain.nil? ? 1.0 : (gain.is_a?(Numeric) ? gain.to_f : fixup_source(gain))
+          @feedback_dc = !!dc
         end
       end
       alias fb feedback
+
+      # Like #feedback, with the amount in cycles of phase modulation per
+      # unit of output instead of radians (+cycles+ times 2pi radians; a
+      # number or a node), like #with_phase_cycles: 1.0 is FEEDBACK_MAX
+      # (2pi, noise), about 0.24 is saw-like, 0.32 the brightest clean
+      # setting.
+      def feedback_cycles(cycles, gain: nil, dc: false)
+        return feedback(nil) if cycles.nil?
+
+        amount = cycles * TWOPI
+        feedback(amount, gain: gain, dc: dc)
+      end
+      alias fb_cycles feedback_cycles
 
       # The feedback amount (radians; a number or node) given to #feedback,
       # or nil for none.
@@ -1094,9 +1121,15 @@ module MB
         !@feedback.nil?
       end
 
-      # The DX7 feedback steps: 0 is off and each step up doubles the
-      # amount, to 2pi rad per unit of output at 7 (see .dx7_feedback).
-      DX7_FEEDBACK_MAX = 2 * Math::PI
+      # The top of the useful #feedback range: 2pi rad per unit of output,
+      # a DX7's FB 7 at full operator level (see .dx7_feedback), well into
+      # noise.  The range for a feedback knob is 0..FEEDBACK_MAX, e.g.
+      # `v.cc(1, range: 0.0..Tone::FEEDBACK_MAX)`.  Nothing clamps the
+      # amount: larger and negative amounts play as given.
+      FEEDBACK_MAX = 2 * Math::PI
+
+      # The DX7's FB 7 at full level (see .dx7_feedback; FEEDBACK_MAX).
+      DX7_FEEDBACK_MAX = FEEDBACK_MAX
 
       # Converts a DX7 feedback setting +fb+ (0 to 7) to radians for
       # #feedback, for an operator whose #feedback gain is 1.0 at full
@@ -1906,7 +1939,7 @@ module MB
         case kernel
         when :feedback
           MB::Sound::FastSynth.feedback_sine(
-            out, freq, phase, @advance, @gain, @offset, state.phase, state.feedback, fb, fb_gain
+            out, freq, phase, @advance, @gain, @offset, state.phase, state.feedback, fb, fb_gain, !@feedback_dc
           ).inplace!
         when :wavetable
           table = current_table
@@ -2080,12 +2113,18 @@ module MB
         raise ArgumentError, 'A feedback sine cannot be noise' if random_advance != 0
       end
 
+      # The DC tracker's cutoff relative to the frequency (FB_DC_RATIO in
+      # fast_synth.c; see #feedback).
+      FEEDBACK_DC_RATIO = 1.0 / 20.0
+
       # Ruby mirror of FastSynth.feedback_sine (see #feedback): the same
       # phases as the naive kernel (#phases_ruby), then the feedback loop
       # one sample at a time with the C kernel's operations in its order.
       def feedback_ruby(count, freq, phase_mod, fb, fb_gain)
-        phases, _increments = phases_ruby(freq, count)
-        y1, y2 = @state.feedback
+        phases, increments = phases_ruby(freq, count)
+        y1, y2, dc = @state.feedback
+        remove_dc = !@feedback_dc
+        dc_k = 2.0 * Math::PI * FEEDBACK_DC_RATIO
         values = Numo::DFloat.zeros(count)
         count.times do |i|
           pm = input_at(phase_mod, i)
@@ -2101,10 +2140,20 @@ module MB
           y = Math.sin(arg) * lvl
           y2 = y1
           y1 = y
-          values[i] = y * @gain + @offset
+
+          v = y
+          if remove_dc
+            inc = increments.is_a?(Numo::NArray) ? increments[i] : increments
+            c = inc.abs * dc_k
+            c = 1.0 if c > 1.0
+            dc = dc + (y - dc) * c
+            v = y - dc
+          end
+          values[i] = v * @gain + @offset
         end
         @state.feedback[0] = y1
         @state.feedback[1] = y2
+        @state.feedback[2] = dc
         values
       end
 
