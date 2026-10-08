@@ -404,9 +404,10 @@ static inline double bl_step(struct bl_breakpoint *bp, int count, double e, doub
  *                offset, state, bl_state, fade_lo, fade_hi)
  *
  * +state+ is the phasor's [phi]; +bl_state+ is [last effective phase, last
- * increment, last phase_mod, primed (0 or 1)], carried between buffers so
- * the first sample of a buffer is corrected for an edge just before it.  A
- * jump in phase between buffers (a reset or sync) skips that correction.
+ * increment, last phase_mod, primed (1; 0 for a tone's first sample, which
+ * is corrected as if the tone had always run; 2 after a phase jump, which
+ * skips the correction)], carried between buffers so the first sample of a
+ * buffer is corrected for an edge just before it.
  * +fade_lo+ and +fade_hi+ (Hz) fade the corrections in with frequency (see
  * bl_fade; 0 and 0 for always on, infinity for never: a naive waveform).
  * +width+ (Numeric, NArray, or nil for 0.5) warps the phase (see the top of
@@ -434,7 +435,9 @@ static VALUE ruby_oscillate_bl(VALUE self, VALUE buffer, VALUE wave_type, VALUE 
 	double prev_e = NUM2DBL(rb_ary_entry(bl_state, 0));
 	double prev_inc = NUM2DBL(rb_ary_entry(bl_state, 1));
 	double prev_pm = NUM2DBL(rb_ary_entry(bl_state, 2));
-	_Bool primed = NUM2INT(rb_ary_entry(bl_state, 3)) != 0;
+	int primed_v = NUM2INT(rb_ary_entry(bl_state, 3));
+	_Bool primed = primed_v == 1;
+	_Bool fresh = primed_v == 0; // a tone's first sample (2: just after a phase jump)
 
 	_Bool was_inplace;
 	mb_ensure_inplace_sfloat(&buffer, &was_inplace);
@@ -519,6 +522,13 @@ static VALUE ruby_oscillate_bl(VALUE self, VALUE buffer, VALUE wave_type, VALUE 
 		} else if (primed && (i > 0 || fabs(mb_wrap(prev_e + d_back - e + 0.5, 1.0) - 0.5) < 1e-6)) {
 			double after;
 			bl_step(bp, nbp, prev_e, d_back, adv, lo, hi, &after);
+			v += after;
+		} else if (fresh && i == 0) {
+			// A tone's first sample, corrected as if it had always run at
+			// this frequency (a square starting on its edge at phase 0
+			// plays the edge's midpoint, 0, not +1)
+			double after;
+			bl_step(bp, nbp, mb_wrap(e - inc, 1.0), inc, adv, lo, hi, &after);
 			v += after;
 		}
 
@@ -1178,7 +1188,7 @@ static const double *sync_table_arg(VALUE table, size_t len)
  *   oscillate_sync(buffer, wave_type, frequency, advance, gain, offset,
  *                  sync_state, ring, pulses, soft, width, remove_dc,
  *                  r0, r1, r2, oversample, taps, band_limit, m1, m2,
- *                  sine_table)
+ *                  sine_table, reset_phase)
  * +sync_state+ is [phase at the last sample (cycles), last increment,
  * direction (1 or -1), ring position, primed (0 or 1)]; the first sample of
  * an unprimed oscillator starts at the phase in sync_state[0].  +ring+ is a
@@ -1189,13 +1199,16 @@ static const double *sync_table_arg(VALUE table, size_t len)
  * are the residual tables and moments of h (see above;
  * MB::Sound::BandLimit.sync_tables); +band_limit+ false skips the
  * corrections and the filtering (naive sync).  +sine_table+ is
- * BandLimit.sync_sine_table for band-limited sines (nil otherwise).  See
+ * BandLimit.sync_sine_table for band-limited sines (nil otherwise).
+ * +reset_phase+ (cycles, or nil for 0) is where hard sync events put the
+ * phase: Tone resets (reset inputs, key sync, timeline jumps) are hard sync
+ * events on their sample (a pulse of 1) to the reset target.  See
  * MB::Sound::BandLimit.sync_ruby.
  */
 static VALUE ruby_oscillate_sync(int argc, VALUE *argv, VALUE self)
 {
-	if (argc != 21) {
-		rb_raise(rb_eArgError, "wrong number of arguments (given %d, expected 21)", argc);
+	if (argc != 21 && argc != 22) {
+		rb_raise(rb_eArgError, "wrong number of arguments (given %d, expected 21..22)", argc);
 	}
 
 	VALUE buffer = argv[0], frequency = argv[2], sync_state = argv[6], ring = argv[7], pulses = argv[8];
@@ -1212,6 +1225,7 @@ static VALUE ruby_oscillate_sync(int argc, VALUE *argv, VALUE self)
 	_Bool bl = RTEST(argv[17]);
 	double m1 = NUM2DBL(argv[18]);
 	double m2 = NUM2DBL(argv[19]);
+	double reset_phase = argc > 21 && !NIL_P(argv[21]) ? NUM2DBL(argv[21]) : 0.0;
 
 	Check_Type(sync_state, T_ARRAY);
 	if (RARRAY_LEN(sync_state) != 5) {
@@ -1329,7 +1343,7 @@ static VALUE ruby_oscillate_sync(int argc, VALUE *argv, VALUE self)
 				} else {
 					dir = 1.0;
 					nvel = prev_inc;
-					p = 0;
+					p = reset_phase;
 				}
 				sync_raw(wt, w, p, 0, nvel, a1);
 				if (sn) {

@@ -56,29 +56,14 @@ RSpec.describe(MB::Sound::Wavetable, aggregate_failures: true) do
       expect(gains[-1]).to be_within(0.01).of(1.13)
     end
 
-    it 'can taper each level with Lanczos sigma factors' do
-      t = w.from_harmonics(w::Library.saw, taper: :sigma)
-      expect(t.taper).to eq(:sigma)
-      l = t.levels(:cubic)[4]
-      expect(l.bandwidth).to eq(255)
-      data = l.data[0, w::GUARD...(w::GUARD + l.count)]
-      amps = harmonic_amplitudes(data)[1..255]
-      x = Numo::DFloat.new(255).seq(1) * (Math::PI / 256)
-      sigma = Numo::NMath.sin(x) / x
-      expect(amps).to all_be_within(1e-5).of_array(Numo::DFloat.cast(w::Library.saw(255)).abs * sigma)
-
-      # No Gibbs overshoot: the exact series peaks 18% high
-      expect(t.levels(:cubic).map { |lv| lv.data.abs.max }.max).to be < 1.03
-      expect(w.from_harmonics(w::Library.saw).levels(:cubic)[0].data.abs.max).to be > 1.15
-      expect { w.from_harmonics([1], taper: :hann) }.to raise_error(ArgumentError, /taper/)
+    it 'has no taper option (removed 2026-10-08)' do
+      expect { w.from_harmonics([1], taper: :sigma) }.to raise_error(ArgumentError, /taper/)
+      expect(w[:saw].metadata).not_to include(:taper)
     end
 
     it 'builds the library classic shapes from the exact series (no taper)' do
-      [:saw, :square, :triangle, :basic, :pulses].each do |name|
-        expect(w[name].taper).to be_nil
-      end
-      expect(w[:saw].metadata[:taper]).to be_nil
       expect(w[:saw].frames.abs.max).to be > 1.15
+      expect(w[:saw].levels(:cubic)[0].data.abs.max).to be > 1.15
     end
 
     it 'wraps the guard samples around the cycle' do
@@ -322,10 +307,47 @@ RSpec.describe(MB::Sound::Wavetable, aggregate_failures: true) do
       expect(t.frame_count).to eq(4)
       expect(t.value_at(0.25, scan: 0)).to be_within(1e-5).of(1)
       expect(t.value_at(0.25, scan: 1)).to be_within(0.02).of(0.5)
+      expect(t.normalize).to be_nil
     end
 
-    it 'scales tables without classic shapes to a peak of 1' do
-      expect(w[:organ].frames.abs.max).to be_within(1e-6).of(1)
+    it 'has the basic shapes each as loud as the saw in :basic_norm' do
+      t = w[:basic_norm]
+      expect(t.frame_count).to eq(4)
+      gains = t.derivative_spectra[true, 1].abs / Numo::DFloat[1, 8 / Math::PI**2, 4 / Math::PI, 2 / Math::PI]
+      expect(t.value_at(0.25, scan: 0)).to be_within(1e-5).of(gains[0])
+      expect(t.value_at(0.25, scan: 1)).to be_within(0.02).of(0.5 * gains[3])
+      expect(gains[3]).to be_within(1e-9).of(1) # the saw frame is the reference
+      expect(t.normalize).to eq(:loudness)
+    end
+
+    it 'normalizes tables without classic shapes by perceived loudness' do
+      ref = w::Loudness.reference_db
+      [:organ, :basic_norm, :pulses].each do |name|
+        expect(w[name].loudness).to all(be_within(1e-9).of(ref)), name.to_s
+      end
+      # The classic shapes keep their exact series (not normalized)
+      expect(w[:saw].loudness[0]).to eq(ref)
+      expect(w[:square].loudness[0]).to be_within(0.1).of(ref + 4.41)
+      expect(w[:sine].normalize).to be_nil
+      # The pulse scan spread 7.3 dB before
+      expect(w.from_harmonics(*w::Library.pulse(0.03)).loudness[0] - w.from_harmonics(*w::Library.pulse(0.5)).loudness[0]).to be < -7
+    end
+
+    it 'measures loudness with K weighting' do
+      l = w::Loudness
+      expect(10 * Math.log10(l.k_power(1000))).to be_within(0.1).of(0.7) # BS.1770: about +0.7 dB at 1 kHz
+      expect(10 * Math.log10(l.k_power(10000))).to be_within(0.2).of(4.0)
+      expect(10 * Math.log10(l.k_power(30))).to be < -5
+      # A sine's loudness is its power (|c|^2 / 2) times the weighting
+      expect(l.frame_db(Numo::DComplex[0, 1], [1000.0])).to be_within(1e-9).of(10 * Math.log10(0.5 * l.k_power(1000)))
+    end
+
+    it 'can normalize frames from samples by loudness, and saves the setting' do
+      frames = Numo::SFloat.cast([Array.new(256) { |i| Math.sin(2 * Math::PI * i / 256) }, Array.new(256) { |i| 0.1 * (i < 128 ? 1 : -1) }])
+      t = w.from_samples(frames, normalize: :loudness, align: false)
+      expect(t.loudness).to all(be_within(1e-6).of(w::Loudness.reference_db))
+      expect(t.metadata[:normalize]).to eq('loudness')
+      expect { w.from_harmonics([1], normalize: :rms) }.to raise_error(ArgumentError, /normalize/)
     end
   end
 
@@ -435,7 +457,7 @@ RSpec.describe(MB::Sound::Wavetable, aggregate_failures: true) do
 
     it 'saves the settings and derived values, which load as defaults' do
       name = tmp_path('saved_settings.flac')
-      t = w.from_harmonics(w::Library.square(100), mips: :half_octave, interpolation: :cubic, taper: :sigma, name: 'sq')
+      t = w.from_harmonics(w::Library.square(100), mips: :half_octave, interpolation: :cubic, name: 'sq')
       t.save(name)
 
       info = {}
@@ -445,12 +467,21 @@ RSpec.describe(MB::Sound::Wavetable, aggregate_failures: true) do
       expect(t2.name).to eq('sq')
       expect(t2.spacing).to eq(Math.sqrt(2))
       expect(t2.interpolation).to eq(:cubic)
-      expect(t2.taper).to eq(:sigma)
       expect(t2.levels(:cubic)[2].data).to all_be_within(1e-5).of_array(t.levels(:cubic)[2].data)
-      expect(t.metadata).to include(mode: 'cycle', frames: 1, period: 2048, aligned: 'false', taper: 'sigma', harmonics: 100)
-      expect(tags).to include(period: 2048, frames: 1, harmonics: 100, spacing: Math.sqrt(2), interpolation: 'cubic', taper: 'sigma', name: 'sq')
+      expect(t.metadata).to include(mode: 'cycle', frames: 1, period: 2048, aligned: 'false', harmonics: 100)
+      expect(tags).to include(period: 2048, frames: 1, harmonics: 100, spacing: Math.sqrt(2), interpolation: 'cubic', name: 'sq')
       expect(tags[:spacing_explicit].to_s).to eq('true')
       expect(t2).to be_spacing_explicit
+    end
+
+    it 'loads files saved with the removed sigma taper untapered, with a warning' do
+      name = tmp_path('saved_taper.flac')
+      t = w.from_harmonics(w::Library.square(100), name: 'sq')
+      w.save_frames(name, t.frames, metadata: t.metadata.merge(taper: 'sigma'))
+      t2 = nil
+      expect { t2 = w.from_file(name) }.to output(/ignoring the saved sigma taper/).to_stderr
+      expect(t2.levels(:cubic)[2].data).to all_be_within(1e-5).of_array(t.levels(:cubic)[2].data)
+      expect(t2.metadata).not_to include(:taper)
     end
 
     context 'with level spacings (levels are rebuilt on load)' do

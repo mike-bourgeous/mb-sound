@@ -176,6 +176,73 @@ RSpec.describe(MB::Sound::Sequence::Clip) do
     it 'rejects empty clips' do
       expect { MB::Sound::Sequence::Clip.new([]).loop }.to raise_error(ArgumentError, /positive length/)
     end
+
+    it 'aligns to the timeline by default, or to the launch with align: :launch' do
+      expect(c4.n8.loop.align).to eq(:timeline)
+      expect(c4.n8.loop).not_to be_launch_aligned
+
+      c = c4.n8.loop(align: :launch)
+      expect(c.align).to eq(:launch)
+      expect(c).to be_launch_aligned
+      expect(c.to_s).to include('loop from launch')
+      expect(c.loop).to be_launch_aligned
+      expect(c.loop(align: :timeline)).not_to be_launch_aligned
+
+      # Only looping clips are launch-aligned
+      expect(MB::Sound::Sequence::Clip.new(c4.n8.events, align: :launch)).not_to be_launch_aligned
+
+      expect { c4.n8.loop(align: :bar) }.to raise_error(ArgumentError, /alignment/)
+    end
+
+    it 'keeps the alignment through transforms and tweens' do
+      c = MB::Sound.seq(c4, e4).n8.loop(align: :launch)
+      [c.transpose(2), c.legato(0.5), c.reverse, c.permute([1, 0]), c.rotate(1/8r), c.vel(0.5)].each do |t|
+        expect(t).to be_launch_aligned
+      end
+      expect(MB::Sound.grid(16, kick: 'x...').loop(align: :launch)[:kick]).to be_launch_aligned
+    end
+  end
+
+  describe '#rotate' do
+    let(:clip) { MB::Sound.seq(c4, e4, MB::Sound::G4, MB::Sound::B4).n4 }
+
+    it 'moves events later by a Duration, wrapping around the length' do
+      r = clip.rotate(1.beat)
+      expect(times(r)).to eq([[71, 0, 1/4r], [60, 1/4r, 1/4r], [64, 1/2r, 1/4r], [67, 3/4r, 1/4r]])
+      expect(r.length).to eq(1)
+    end
+
+    it 'moves events earlier by a negative number of whole notes' do
+      expect(clip.rotate(-1/4r).events.map(&:value)).to eq([64, 67, 71, 60])
+      expect(clip.rotate(-1/4r).events.map(&:value)).to eq(clip.rotate(3.beats).events.map(&:value))
+    end
+
+    it 'wraps amounts longer than the clip, and keeps looping and seeds' do
+      c = clip.loop(seed: 5)
+      expect(times(c.rotate(9/4r))).to eq(times(c.rotate(1/4r)))
+      expect(c.rotate(1/4r)).to be_looping
+      expect(c.rotate(1/4r).seed).to eq(5)
+      expect(times(c.rotate(1.bar))).to eq(times(c))
+    end
+
+    it 'lets events that cross the end keep their length, ringing over the loop point' do
+      r = MB::Sound.seq(c4.n2, e4.n2).rotate(1/8r).loop
+      expect(times(r)).to eq([[64, 5/8r, 1/2r], [60, 1/8r, 1/2r]].sort_by { |e| e[1] })
+      edges = r.edges(1, 2).map { |t, type, e, _| [t, type, e.value] }
+      # The E4 started in the first cycle ends 1/8 into the second
+      expect(edges).to eq([[9/8r, :off, 64], [9/8r, :on, 60], [13/8r, :off, 60], [13/8r, :on, 64]])
+    end
+
+    it 'is rebuilt from a swapped-in clip' do
+      r = clip.rotate(1/4r)
+      other = MB::Sound.seq(MB::Sound::D4, MB::Sound::F4).n2
+      expect(r.source).to eq(clip)
+      expect(times(r.rederive(other))).to eq(times(other.rotate(1/4r)))
+    end
+
+    it 'rejects clips without a length' do
+      expect { MB::Sound::Sequence::Clip.new([]).rotate(1/4r) }.to raise_error(ArgumentError, /length/)
+    end
   end
 
   describe '#synth' do

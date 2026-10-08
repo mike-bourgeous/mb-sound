@@ -445,6 +445,33 @@ RSpec.describe(MB::Sound::PlaybackMethods) do
       expect(out).to be_closed
     end
 
+    describe 'with loudness:' do
+      it 'normalizes the file to a number of LUFS or a named target' do
+        expect(MB::Sound.render(filename, 1000.hz.sine.at(-30.db), seconds: 2, loudness: -16)).to eq(2)
+        expect(MB::Sound.loudness(filename).integrated).to be_within(0.05).of(-16)
+
+        MB::Sound.render(filename, 1000.hz.sine.at(-30.db), seconds: 2, loudness: :ebu_r128, overwrite: true)
+        expect(MB::Sound.loudness(filename).integrated).to be_within(0.05).of(-23)
+      end
+
+      it 'warns when the true peak would pass the ceiling, or reduces the gain with peak: :reduce' do
+        expect {
+          MB::Sound.render(filename, 1000.hz.sine.at(-30.db), seconds: 1, loudness: -0.5)
+        }.to output(/-1.0 dBTP; no limiter/).to_stderr
+
+        expect {
+          MB::Sound.render(filename, 1000.hz.sine.at(-30.db), seconds: 1, loudness: -0.5, peak: :reduce, overwrite: true)
+        }.to output(/gain reduced/).to_stderr
+        expect(MB::Sound.loudness(filename).true_peak).to be_within(0.05).of(-1)
+      end
+
+      it 'needs a filename' do
+        out = MB::Sound::NullOutput.new(channels: 2, sleep: false)
+        expect { MB::Sound.render(out, 1.constant, seconds: 0.1, loudness: -14) }.to raise_error(ArgumentError, /filename/)
+        expect { MB::Sound.render(filename, 1.constant, seconds: 0.1, loudness: :nope) }.to raise_error(ArgumentError, /Unknown loudness target/)
+      end
+    end
+
     it 'applies the master bus gain: -10 dB by default, or gain:' do
       MB::Sound.master_gain(MB::Sound::Session::DEFAULT_MASTER_GAIN)
       MB::Sound.render(filename, 1.constant, seconds: 0.1)

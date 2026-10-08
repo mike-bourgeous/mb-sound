@@ -164,30 +164,31 @@ module MB
         # at 0), each an Array or 1D NArray, or an Array of them for several
         # frames (scanned in order).  Amplitudes are kept exactly (no
         # normalizing), so e.g. the Fourier series of a ramp plays at the
-        # same level as Tone#ramp, Gibbs overshoot included (unless +taper+ is
-        # :sigma: each level's harmonics are scaled by Lanczos sigma factors,
-        # see Builder.taper_gains, so its peaks stay near 1).  +size+ is the
+        # same level as Tone#ramp, Gibbs overshoot included.  +size+ is the
         # length of #frames (and caps the harmonics at size / 2 - 1).  See
         # the class description for +complex+, +mips+, +interpolation+;
         # +align+ lines up frames in time (off by default, since the phases
-        # are given).
-        def from_harmonics(amplitudes, phases = nil, size: 2048, complex: false, mips: :default, interpolation: nil, align: false, taper: nil, name: nil)
+        # are given).  +normalize: :loudness+ scales each frame to the same
+        # perceived loudness as the library saw (see Loudness).
+        def from_harmonics(amplitudes, phases = nil, size: 2048, complex: false, mips: :default, interpolation: nil, align: false, normalize: nil, name: nil)
           spectra = Builder.spectra_from_harmonics(amplitudes, phases)
           max = (size - 1) / 2
           spectra = spectra[true, 0..max] if spectra.shape[1] - 1 > max
           spectra = Builder.align(spectra) if align && spectra.shape[0] > 1
 
-          new(spectra: spectra, size: size, complex: complex, mips: mips, interpolation: interpolation, taper: taper, name: name)
+          new(spectra: spectra, size: size, complex: complex, mips: mips, interpolation: interpolation, normalize: normalize, name: name)
         end
 
         # A table from samples.  In cycle mode (default), +data+ is one
         # cycle per row (a 2D NArray, an Array of rows, or one 1D cycle);
         # +align+ lines frames up in time (see the class description) and
-        # +normalize+ removes DC and scales each frame to a peak of 1.  In
+        # +normalize+ removes DC and scales each frame to a peak of 1 (true or
+        # :peak), or scales each frame to the library saw's perceived
+        # loudness (:loudness; see Loudness).  In
         # sample mode, +data+ is the sound (1D; +root+, +loop+, and
         # +sample_rate+ apply).  +harmonics+ limits a cycle table's
         # harmonics (default: all that fit the frame size).
-        def from_samples(data, mode: :cycle, complex: false, mips: :default, interpolation: nil, align: true, aligned: false, normalize: false, taper: nil, harmonics: nil, root: nil, loop: nil, sample_rate: 48000, name: nil, source_info: nil)
+        def from_samples(data, mode: :cycle, complex: false, mips: :default, interpolation: nil, align: true, aligned: false, normalize: false, harmonics: nil, root: nil, loop: nil, sample_rate: 48000, name: nil, source_info: nil)
           data = to_narray(data)
 
           case mode
@@ -196,8 +197,11 @@ module MB
             raise ArgumentError, 'Cycle frames must be a 1D or 2D NArray' unless data.ndim == 2
 
             data = data.is_a?(Numo::SComplex) || data.is_a?(Numo::DComplex) ? Numo::SComplex.cast(data) : Numo::SFloat.cast(data)
-            data = Wavetable.normalize(data.dup) if normalize
-            new(frames: data, complex: complex, mips: mips, interpolation: interpolation, align: align, aligned: aligned, taper: taper, harmonics: harmonics, name: name, source_info: source_info)
+            data = Wavetable.normalize(data.dup) if normalize == true || normalize == :peak
+            new(
+              frames: data, complex: complex, mips: mips, interpolation: interpolation, align: align, aligned: aligned, harmonics: harmonics,
+              normalize: normalize == :loudness ? :loudness : nil, name: name, source_info: source_info
+            )
 
           when :sample
             raise ArgumentError, 'A sample must be a 1D NArray' unless data.ndim == 1
@@ -238,7 +242,7 @@ module MB
         # .from_samples.
         #
         # Settings saved by #save (see #metadata) are the defaults: the mode,
-        # level spacing, taper, interpolation, name, root, and loop; frames
+        # level spacing, interpolation, name, root, and loop; frames
         # saved aligned aren't aligned again.  Files hold the frames (or the
         # sound), not the levels: levels are always rebuilt on load.  A
         # spacing chosen explicitly when the table was made (+mips:+ other
@@ -247,6 +251,9 @@ module MB
         # given here always wins (e.g. to re-mipmap a saved table).  Files
         # saved before the spacing_explicit tag existed keep only 'none' and
         # harmonic-count lists (never defaults); their ratios get the default.
+        # Files saved with a taper tag (the Lanczos sigma taper, removed
+        # 2026-10-08; such files hold the exact series) load untapered, with
+        # a warning.
         def from_file(path, mode: nil, slices: 10, ratio: 1.0, root: nil, loop: nil, **options)
           path = path.path if path.respond_to?(:path)
 
@@ -258,7 +265,9 @@ module MB
           if !options.include?(:mips) && saved_spacing_explicit?(info)
             options[:mips] = parse_saved_spacing(info[:spacing])
           end
-          options[:taper] = info[:taper].to_sym if !options.include?(:taper) && info[:taper] && info[:taper] != ''
+          if info[:taper] && info[:taper] != ''
+            warn "Wavetable #{options[:name]}: ignoring the saved #{info[:taper]} taper (removed); playing the exact series"
+          end
           options[:interpolation] ||= info[:interpolation]&.to_sym
           options[:harmonics] ||= info[:harmonics].to_i if mode == :cycle && info[:harmonics]
           options.delete(:interpolation) if options[:interpolation].nil?
@@ -428,9 +437,6 @@ module MB
       # see Builder.spectra_from_frames), or nil for unmipped tables.
       attr_reader :spectra
 
-      # The harmonic taper (:sigma) or nil (see .from_harmonics).
-      attr_reader :taper
-
       # True if the frames were aligned in time (see .from_samples).
       def aligned?
         @aligned
@@ -444,24 +450,57 @@ module MB
       # A name for displays (the library name or file name), or nil.
       attr_accessor :name
 
+      # :loudness if the frames were scaled to a matching perceived loudness
+      # (see .from_harmonics), else nil.
+      attr_reader :normalize
+
+      # Cycle mode: the perceived loudness of each frame in dB (an Array),
+      # averaged over +pitches+ (Hz; default C2-C6), see Loudness.  Sample
+      # mode: the loudness of the sound with its root at the first of
+      # +pitches+ (default the root).
+      def loudness(pitches = nil)
+        if @mode == :cycle
+          Loudness.spectra_db(derivative_spectra, pitches || Loudness::PITCHES)
+        else
+          [Loudness.sample_db(@data, @sample_rate, @root, (pitches || [@root])[0])]
+        end
+      end
+
+      # A copy of this table scaled by +gain+ (every setting kept; KeyMap
+      # uses it to match zones' loudness).
+      def scaled(gain)
+        return self if gain == 1
+
+        mips = @spacing_explicit ? (@spacing.nil? ? false : @spacing) : :default
+        common = { complex: @complex, mips: mips, interpolation: @interpolation, name: @name, source_info: @source_info }
+        if @mode == :sample
+          Wavetable.new(mode: :sample, data: @data * gain, root: @root, loop: @loop, sample_rate: @sample_rate, **common)
+        elsif @spectra
+          Wavetable.new(spectra: @spectra * gain, size: @size, aligned: @aligned, **common)
+        else
+          Wavetable.new(frames: @frames * gain, aligned: @aligned, **common)
+        end
+      end
+
       # Use the class methods (.from_harmonics, .from_samples, ...).
-      def initialize(mode: :cycle, spectra: nil, frames: nil, data: nil, size: nil, complex: false, mips: :default, interpolation: nil, align: false, aligned: false, taper: nil, harmonics: nil, root: nil, loop: nil, sample_rate: 48000, name: nil, source_info: nil)
+      def initialize(mode: :cycle, spectra: nil, frames: nil, data: nil, size: nil, complex: false, mips: :default, interpolation: nil, align: false, aligned: false, harmonics: nil, normalize: nil, root: nil, loop: nil, sample_rate: 48000, name: nil, source_info: nil)
         raise ArgumentError, "Unknown wavetable mode #{mode.inspect} (#{MODES.join(', ')})" unless MODES.include?(mode)
+        raise ArgumentError, "Unknown normalize #{normalize.inspect} (nil or :loudness)" unless normalize.nil? || normalize == :loudness
+        raise ArgumentError, 'Only cycle tables can be normalized by loudness (see KeyMap for samples)' if normalize && mode != :cycle
 
         @mode = mode
         @complex = !!complex
         @spacing_explicit = mips != :default
         @spacing = parse_spacing(mips == :default ? DEFAULT_MIPS : mips)
-        @taper = taper
         @aligned = !!aligned
         @harmonic_limit = harmonics
         @source_info = (source_info || {}).reject { |k, _| SAVED_KEYS.include?(k) }.freeze
-        Builder.taper_gains(taper, 1) if taper # checks it
         @name = name
         @kernel_specs = {}
         @interpolation = interpolation || (@spacing ? :optimal : :cubic)
         raise ArgumentError, "Unknown interpolation #{@interpolation.inspect} (#{INTERPOLATIONS.keys.join(', ')})" unless INTERPOLATIONS.include?(@interpolation)
 
+        @normalize = normalize
         if mode == :cycle
           build_cycle(spectra, frames, size, align)
         else
@@ -511,7 +550,7 @@ module MB
 
         # Tables made from spectra synthesize their frames on first use (the
         # kernels read the levels; HarmonicTable rebuilds tables often)
-        @frames ||= Builder.synthesize(@spectra, @size, complex: @complex, taper: @taper).freeze
+        @frames ||= Builder.synthesize(@spectra, @size, complex: @complex).freeze
       end
 
       # Cycle mode: the number of harmonics of the brightest level.
@@ -536,8 +575,8 @@ module MB
       # Builder.half_means), 8 loop datas, 9 loop counts, 10 loop rates, 11
       # loop start, 12 loop end, 13 end (source samples), 14 GUARD, 15 the
       # harmonic spectra for exact derivatives (cycle mode; see
-      # #derivative_spectra), 16 the harmonic count of each level, 17 the
-      # taper (1 for :sigma, else 0), 18 +scan_wrap+ (1 if scan positions
+      # #derivative_spectra), 16 the harmonic count of each level, 17
+      # +scan_wrap+ (1 if scan positions
       # wrap around instead of clamping, see Tone#wavetable, else 0).  With
       # +sync+ (band-limited cycle tables), the levels and thresholds are
       # the sync levels' (see #sync_levels and FastWavetable.sync).
@@ -566,7 +605,6 @@ module MB
             GUARD,
             derivative_spectra,
             @mode == :cycle ? levels.map { |l| l.bandwidth.finite? ? l.bandwidth.to_i : derivative_spectra.shape[1] - 1 }.freeze : nil,
-            @taper == :sigma ? 1 : 0,
             scan_wrap ? 1 : 0,
           ].freeze
         end
@@ -603,8 +641,8 @@ module MB
 
       # The highest frequency, in cycles per sample at +sample_rate+, of the
       # harmonics of a synced tone's levels: AUDIBLE_LIMIT, at most
-      # SYNC_BAND (where the residuals of FastWavetable.sync can still undo
-      # the minBLEP's own response).  Sync spreads every harmonic's spectrum,
+      # SYNC_BAND (inside the minBLEP's passband, which FastWavetable.sync
+      # filters every harmonic by).  Sync spreads every harmonic's spectrum,
       # so harmonics may not fold back from above Nyquist as in #ceiling.
       def sync_ceiling(sample_rate)
         [AUDIBLE_LIMIT / sample_rate, SYNC_BAND].min
@@ -633,7 +671,7 @@ module MB
             spacing *= 1.1 # very long frames: wider spacing to stay within the kernels' level limit
             counts = counts_for.(spacing)
           end
-          datas, lengths, bandwidths = Builder.cycle_levels(@spectra, counts, @complex, emphasis, @taper)
+          datas, lengths, bandwidths = Builder.cycle_levels(@spectra, counts, @complex, emphasis)
           datas.each_with_index.map { |d, k| d.freeze; Level.new(d, lengths[k], lengths[k].to_f, bandwidths[k]) }.freeze
         end
       end
@@ -685,24 +723,36 @@ module MB
       # with +sync_state+ and +pulses+ as for FastSynth.oscillate_sync and
       # +ring+ a DFloat of BandLimit::SYNC_TAPS pending corrections (twice
       # that for complex tables).  Unless +band_limit+ is false, the tone
-      # reads the sync levels (#sync_levels) and each harmonic gets an exact
-      # minimum-phase residual at every sync event (see .sync_residuals and
-      # FastWavetable.sync).  See Tone#sync.
-      def sync(out, freq, advance, gain, offset, sync_state, ring, pulses, soft, width, scan, interpolation, sample_rate, remove_dc, band_limit = true, scan_wrap: false)
+      # plays the sync levels' harmonics (#sync_levels) through the minBLEP's
+      # filter, each harmonic switched with its exact minimum-phase residual
+      # at every sync event and phase warp corner (see FastWavetable.sync).
+      # +reset_phase+ (cycles) is where hard sync events put the phase (0
+      # by default).  See Tone#sync.
+      def sync(out, freq, advance, gain, offset, sync_state, ring, pulses, soft, width, scan, interpolation, sample_rate, remove_dc, band_limit = true, scan_wrap: false, reset_phase: nil)
         MB::Sound::FastWavetable.sync(
           out, kernel_spec(sample_rate, interpolation, sync: band_limit, scan_wrap: scan_wrap), freq, advance.to_f, gain.to_f, offset.to_f, sync_state, ring,
-          pulses, !!soft, width, scan, interpolation_code(interpolation), !!remove_dc, Wavetable.sync_residuals,
-          BandLimit.minblep_tables[0], BandLimit::SYNC_OVERSAMPLE, BandLimit::SYNC_TAPS, !!band_limit, SYNC_RESIDUAL_LIMIT, sinc_kernel(interpolation)
+          pulses, !!soft, width, scan, interpolation_code(interpolation), !!remove_dc, *Wavetable.sync_filter,
+          BandLimit::SYNC_OVERSAMPLE, BandLimit::SYNC_TAPS, !!band_limit, sinc_kernel(interpolation), reset_phase
         )
       end
 
       # Ruby mirror of #sync.
-      def sync_ruby(out, freq, advance, gain, offset, sync_state, ring, pulses, soft, width, scan, interpolation, sample_rate, remove_dc, band_limit = true, scan_wrap: false)
+      def sync_ruby(out, freq, advance, gain, offset, sync_state, ring, pulses, soft, width, scan, interpolation, sample_rate, remove_dc, band_limit = true, scan_wrap: false, reset_phase: nil)
         KernelRuby.sync(
           out, kernel_spec(sample_rate, interpolation, sync: band_limit, scan_wrap: scan_wrap), freq, advance.to_f, gain.to_f, offset.to_f, sync_state, ring,
-          pulses, !!soft, width, scan, interpolation_code(interpolation), !!remove_dc, Wavetable.sync_residuals,
-          BandLimit.minblep_tables[0], BandLimit::SYNC_OVERSAMPLE, BandLimit::SYNC_TAPS, !!band_limit, SYNC_RESIDUAL_LIMIT
+          pulses, !!soft, width, scan, interpolation_code(interpolation), !!remove_dc, *Wavetable.sync_filter,
+          BandLimit::SYNC_OVERSAMPLE, BandLimit::SYNC_TAPS, !!band_limit, reset_phase
         )
+      end
+
+      # [residual table, m1] for FastWavetable.sync: the synced sines'
+      # unnormalized residuals of switching a complex exponential on
+      # (BandLimit.sync_sine_table; also its H(G) at t = 0) and the
+      # minBLEP's delay at low frequencies they are rotated by (see
+      # BandLimit.sync_tables).
+      def self.sync_filter
+        tables = BandLimit.sync_tables(:sine)
+        [tables[5], tables[3]]
       end
 
       # The most levels a table may have (WT_MAX_LEVELS in the kernels).
@@ -717,51 +767,6 @@ module MB
       # The highest harmonic frequency of synced tones' levels in cycles per
       # sample (see #sync_ceiling): the minBLEP passes 0.89 there.
       SYNC_BAND = 0.42
-
-      # Harmonics moving faster than this (cycles per sample; fast phase warp
-      # segments) get no exact sync residual, only a minBLEP for their value
-      # jump: past it the minBLEP's response H(f) is too small to divide out.
-      SYNC_RESIDUAL_LIMIT = 0.45
-
-      # Rows of .sync_residuals (frequencies 0 to 0.5 cycles per sample;
-      # FastWavetable.sync reads the nearest row).
-      SYNC_RESIDUAL_ROWS = 129
-
-      # The minimum-phase residuals of switching on a complex exponential
-      # (FastWavetable.sync): G(f, t) = (sum of h(s) e^(-2 pi i f s) for s
-      # < t) / H(f), with h the impulse of BandLimit.minblep_tables' step
-      # (its differences at the oversampled points, at their midpoints) and
-      # H(f) its whole sum, so G(0, t) is the step and G(f, t) is 1 from
-      # BandLimit::SYNC_TAPS samples on.  A contiguous 3D DComplex of
-      # [SYNC_RESIDUAL_ROWS frequencies from 0 to 0.5 cycles per sample,
-      # SYNC_OVERSAMPLE + 2 fractional offsets p, SYNC_TAPS taps j] for t =
-      # p / SYNC_OVERSAMPLE + j, so the taps the kernel reads for an event
-      # are contiguous.
-      def self.sync_residuals
-        @sync_residuals ||= begin
-          os = BandLimit::SYNC_OVERSAMPLE
-          taps = BandLimit::SYNC_TAPS
-          blep, _ = BandLimit.minblep_tables
-          step = blep + 1.0
-          h = step[1..] - step[0...-1]
-          s = (Numo::DFloat.new(h.length).seq + 0.5) / os
-          flat = Numo::DComplex.ones(SYNC_RESIDUAL_ROWS, step.length + os + 1)
-          SYNC_RESIDUAL_ROWS.times do |r|
-            f = r * 0.5 / (SYNC_RESIDUAL_ROWS - 1)
-            c = (h * Numo::NMath.exp(s * Complex(0, -2 * Math::PI * f))).cumsum
-            flat[r, 0] = 0
-            flat[r, 1...step.length] = c / c[-1]
-          end
-          flat[0, 0...step.length] = step
-          flat[true, step.length - 1] = 1.0
-
-          g = Numo::DComplex.zeros(SYNC_RESIDUAL_ROWS, os + 2, taps)
-          (os + 2).times do |p|
-            g[true, p, true] = flat[true, (p...(p + taps * os)).step(os).to_a]
-          end
-          g.freeze
-        end
-      end
 
       # Phase-driven lookup in C: fills +out+ from +phase+ (cycles, an
       # NArray) with +increments+ (cycles per sample for picking levels: an
@@ -812,12 +817,10 @@ module MB
       #
       # Everything derived while making the table is saved as tags (see
       # #metadata), so .from_file makes the same table again: frames saved
-      # aligned aren't aligned again, and a tapered table saves its exact
-      # series (the taper is applied per level when it loads).  Complex
-      # tables save their real parts.
+      # aligned aren't aligned again.  Complex tables save their real parts.
       def save(filename, overwrite: false)
         if @mode == :cycle
-          frames = @taper && @spectra ? Builder.synthesize(@spectra, @size, complex: @complex) : self.frames
+          frames = self.frames
           frames = frames.real if @complex
           Wavetable.save_frames(filename, frames, overwrite: overwrite, metadata: metadata)
         else
@@ -828,12 +831,12 @@ module MB
 
       # Tags saved by #save that describe the table (others in #source_info
       # are saved too).
-      SAVED_KEYS = [:mode, :name, :frames, :period, :size, :aligned, :spacing, :spacing_explicit, :taper, :interpolation, :complex, :root, :loop, :sample_rate, :scale, :harmonics].freeze
+      SAVED_KEYS = [:mode, :name, :frames, :period, :size, :aligned, :spacing, :spacing_explicit, :taper, :normalize, :interpolation, :complex, :root, :loop, :sample_rate, :scale, :harmonics].freeze
 
       # The table's settings and derived values, as saved by #save (with
       # #source_info): mode, name, frame count, period (cycle mode samples
       # per frame), whether the frames are aligned, level spacing (and
-      # whether it was chosen explicitly, see .from_file), taper,
+      # whether it was chosen explicitly, see .from_file),
       # interpolation, complex, harmonics (cycle mode), and in sample mode
       # the root (Hz), loop
       # ("begin...end" source samples), size, and sample rate.
@@ -846,7 +849,7 @@ module MB
         m = @source_info.merge(
           mode: @mode.to_s, name: @name, frames: @frame_count, aligned: @aligned.to_s, spacing: spacing,
           spacing_explicit: @spacing_explicit.to_s,
-          taper: @taper&.to_s, interpolation: @interpolation.to_s, complex: @complex.to_s
+          interpolation: @interpolation.to_s, complex: @complex.to_s, normalize: @normalize&.to_s
         )
         if @mode == :cycle
           m[:period] = @size
@@ -907,6 +910,14 @@ module MB
         end
 
         @size = size
+        if @normalize == :loudness
+          spectra ||= Builder.spectra_from_frames(@frames)
+          gains = Loudness.normalizing_gains(spectra)
+          spectra = spectra * Numo::DFloat.cast(gains).reshape(gains.length, 1)
+          if @frames
+            @frames = (@frames * Numo::DFloat.cast(gains).reshape(gains.length, 1)).then { |f| @complex ? Numo::SComplex.cast(f) : Numo::SFloat.cast(f) }
+          end
+        end
         @frame_count = spectra ? spectra.shape[0] : @frames.shape[0]
         @spectra = spectra
         @half_means = spectra ? Builder.half_means(spectra) : half_means_of(@frames)
@@ -934,13 +945,13 @@ module MB
 
       def build_cycle_levels(emphasis)
         if @spacing
-          datas, counts, bandwidths = Builder.cycle_levels(@spectra, @spacing, @complex, emphasis, @taper)
+          datas, counts, bandwidths = Builder.cycle_levels(@spectra, @spacing, @complex, emphasis)
           levels = datas.each_with_index.map { |d, k| Level.new(d, counts[k], counts[k].to_f, bandwidths[k]) }
         else
           frames = self.frames
           if emphasis
             spectra = @spectra || Builder.spectra_from_frames(@frames)
-            frames = Builder.synthesize(spectra, @size, complex: @complex, emphasis: emphasis, taper: @taper)
+            frames = Builder.synthesize(spectra, @size, complex: @complex, emphasis: emphasis)
           end
           levels = [Level.new(Builder.wrap_guard(frames), @size, @size.to_f, Float::INFINITY)]
         end
@@ -1051,3 +1062,4 @@ require_relative 'wavetable/kernel_ruby'
 require_relative 'wavetable/emphasis'
 require_relative 'wavetable/key_map'
 require_relative 'wavetable/library'
+require_relative 'wavetable/loudness'
