@@ -205,6 +205,20 @@ RSpec.describe('Note marks, Rest, Tie, and Seq#acid') do
       expect(acid.rederive(other).events).to eq(other.acid(gate: 0.25).events)
     end
 
+    it 'works on loops, which stay Seqs' do
+      l = line.loop
+      expect(l).to be_a(MB::Sound::Sequence::Seq)
+      expect(l.looping?).to eq(true)
+      [l.acid, l.acc, l.slide, l.up, l.permute(seed: 2), l.reverse, l.n8, l.legato(0.5)].each do |c|
+        expect(c).to be_a(MB::Sound::Sequence::Seq)
+        expect(c.looping?).to eq(true)
+      end
+      expect(l.acid.events).to eq(line.acid.events)
+      expect(line.loop(align: :launch).acid).to be_launch_aligned
+      expect(l.acid.rederive(MB::Sound.seq(c2).n16.loop).events).to eq(MB::Sound.seq(c2).n16.acid.events)
+      expect { expect(l.repeat(2).looping?).to eq(false) }.to output(/stop looping/).to_stderr
+    end
+
     it 'rejects velocities outside 0..1' do
       expect { line.acid(accent: 2) }.to raise_error(ArgumentError, /0\.\.1/)
     end

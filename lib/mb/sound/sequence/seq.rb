@@ -162,7 +162,7 @@ module MB
         # Creates a sequence from a list of items (see Seq.step).  Nested Seqs
         # are flattened so that their unset steps can still be given a length
         # (e.g. `seq(C4, rest, E4).n8`).
-        def initialize(items, seed: 0)
+        def initialize(items, seed: 0, loop: false, align: :timeline)
           @steps = items.flat_map { |i| i.is_a?(Seq) ? i.steps : [Seq.step(i)] }.freeze
 
           t = 0r
@@ -191,7 +191,14 @@ module MB
           end
           events << Seq.note_event(*held) if held
 
-          super(events, length: t, seed: seed)
+          super(events, length: t, seed: seed, loop: loop, align: align)
+        end
+
+        # Returns a looping copy of this Seq (see Clip#loop), still a Seq, so
+        # step transforms (#acid, #accent, #len, #permute, ...) keep working
+        # on loops: `line.loop.acc`.
+        def loop(seed: @seed, align: @align)
+          Seq.new(@steps, seed: seed, loop: true, align: align)
         end
 
         Duration::DIVISIONS.each do |k|
@@ -227,6 +234,7 @@ module MB
         #     seq(C4, E4).repeat(4).n8    # eight eighth notes
         def repeat(count)
           raise ArgumentError, "Repeat count must be a positive Integer (got #{count.inspect})" unless count.is_a?(Integer) && count > 0
+          warn "repeat makes a finite clip, so #{self} will stop looping; call .loop on the result to keep looping" if @loop
           Seq.new(@steps * count, seed: @seed)
         end
         alias * repeat
@@ -272,7 +280,7 @@ module MB
               units << [s.clip ? Step.new(**s.to_h.merge(clip: s.clip.reverse)) : s]
             end
           end
-          Seq.new(units.reverse.flatten(1), seed: @seed)
+          Seq.new(units.reverse.flatten(1), seed: @seed, loop: @loop, align: @align)
         end
         alias retrograde reverse
 
@@ -293,7 +301,7 @@ module MB
             steps[slot] = Step.new(**@steps[slot].to_h.merge(value: src.value, velocity: src.velocity, probability: src.probability, accented: src.accented, slid: src.slid))
           end
 
-          Seq.new(steps, seed: @seed)
+          Seq.new(steps, seed: @seed, loop: @loop, align: @align)
         end
         alias shuffle permute
 
@@ -384,12 +392,12 @@ module MB
         # Builds a new Seq with the same seed from steps changed by the block,
         # which may return a Step or a Hash of Step attributes.
         def map_steps
-          Seq.new(@steps.map { |s| r = yield s; r.is_a?(Hash) ? Step.new(**r) : r }, seed: @seed)
+          Seq.new(@steps.map { |s| r = yield s; r.is_a?(Hash) ? Step.new(**r) : r }, seed: @seed, loop: @loop, align: @align)
         end
 
         # Seq's own versions of Clip transforms also remember their source.
         track_derivations(
-          :repeat, :*, :stretch, :legato, :transpose, :vel, :reverse, :retrograde, :permute, :shuffle,
+          :loop, :repeat, :*, :stretch, :legato, :transpose, :vel, :reverse, :retrograde, :permute, :shuffle,
           :accent, :acc, :a!, :slide, :s!, :up, :dn, :down, :oct, :acid
         )
       end
