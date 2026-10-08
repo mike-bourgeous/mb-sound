@@ -466,4 +466,46 @@ RSpec.describe(MB::Sound::FastArithmetic) do
     end
     expect(GC.stat(:total_allocated_objects) - before).to be < 10
   end
+
+  describe '.scale' do
+    # Bitwise comparison treating NaNs as equal
+    def same(a, b)
+      a.to_a.flatten.zip(b.to_a.flatten).all? { |x, y|
+        xs = x.is_a?(Complex) ? [x.real, x.imag] : [x]
+        ys = y.is_a?(Complex) ? [y.real, y.imag] : [y]
+        xs.zip(ys).all? { |p, q| (p.nan? && q.nan?) || [p].pack('e') == [q].pack('e') }
+      }
+    end
+
+    [Numo::SFloat, Numo::SComplex].each do |cls|
+      it "multiplies #{cls} buffers in place like Numo, by an SFloat or a number" do
+        [make_input(Numo::SFloat, 37, 5), 0.3, -2, 1e-3].each do |g|
+          out = make_input(cls, 37, 9)
+          expected = out.dup.inplace * g
+          expect(MB::Sound::FastArithmetic.scale(out, g)).to equal(out)
+          expect(same(out, expected)).to eq(true)
+        end
+      end
+    end
+
+    it 'scales a view in place' do
+      buf = make_input(Numo::SFloat, 64, 2)
+      expected = buf[0...20].dup * 0.5
+      view = buf[0...20]
+      MB::Sound::FastArithmetic.scale(view, 0.5)
+      expect(same(buf[0...20], expected)).to eq(true)
+    end
+
+    it 'returns nil without changing the buffer for what it does not take' do
+      out = make_input(Numo::SFloat, 16, 3)
+      copy = out.dup
+      expect(MB::Sound::FastArithmetic.scale(out, Numo::SFloat.zeros(15))).to be_nil
+      expect(MB::Sound::FastArithmetic.scale(out, Numo::DFloat.zeros(16))).to be_nil
+      expect(MB::Sound::FastArithmetic.scale(out, Complex(1, 1))).to be_nil
+      expect(MB::Sound::FastArithmetic.scale(Numo::DFloat.zeros(16), 2)).to be_nil
+      expect(MB::Sound::FastArithmetic.scale(out.dup.freeze, 2)).to be_nil
+      expect(MB::Sound::FastArithmetic.scale(Numo::SFloat.zeros(4, 4), 2)).to be_nil
+      expect(same(out, copy)).to eq(true)
+    end
+  end
 end

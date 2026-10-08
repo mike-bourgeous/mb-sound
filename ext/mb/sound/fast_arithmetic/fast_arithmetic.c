@@ -965,7 +965,8 @@ static VALUE ruby_pan(VALUE self, VALUE law, VALUE position, VALUE input, VALUE 
  * place: a real Numeric (cast to float, as Numo's fill of a Multiplier's
  * constant), or a contiguous SFloat as long as +out+.  The same values as
  * Multiplier's product of the buffer and the gain (a real factor's
- * imaginary part is zero, so each part is one float product).  Returns nil
+ * imaginary part is zero; complex buffers use the full product, as Numo
+ * does, for the same signed zeros and NaNs).  Returns nil
  * without changing +out+ for anything else (Tone#gain then uses Numo).
  */
 static VALUE ruby_scale(VALUE self, VALUE out, VALUE gain)
@@ -1001,10 +1002,15 @@ static VALUE ruby_scale(VALUE self, VALUE out, VALUE gain)
 			for (size_t i = 0; i < length; i++) o[i] = o[i] * gc;
 		}
 	} else {
+		// Numo promotes the real gain to (x, 0) and multiplies in full
+		// (CMUL), which keeps its signed zeros and inf * 0 = NaN
+		const float zero = 0.0f;
 		for (size_t i = 0; i < length; i++) {
 			float x = g ? g[i] : gc;
-			o[2 * i] = o[2 * i] * x;
-			o[2 * i + 1] = o[2 * i + 1] * x;
+			float a = o[2 * i];
+			float b = o[2 * i + 1];
+			o[2 * i] = a * x - b * zero;
+			o[2 * i + 1] = a * zero + b * x;
 		}
 	}
 
