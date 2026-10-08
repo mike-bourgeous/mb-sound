@@ -22,6 +22,7 @@ module MB
         include MultiOutput
         include Traversable
         include Nameable
+        include ChorusMethods
 
         # The channel nodes.
         attr_reader :outputs
