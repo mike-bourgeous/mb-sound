@@ -18,7 +18,13 @@ module MB
         include ArithmeticNodeHelper
 
         # The constant value added to the output sum before any summands.
-        attr_accessor :constant
+        attr_reader :constant
+
+        # Changes the constant term.
+        def constant=(value)
+          @constant = value
+          Plan.changed(self)
+        end
 
         # Creates a Mixer with the given inputs, which must be either Numeric
         # values or objects that have a #sample method.  Each input may have an
@@ -124,6 +130,33 @@ module MB
           end
         end
 
+        # Plan layer (see MB::Sound::Plan): the constant plus each term in
+        # order (an input times its gain unless the gain is 1), as the fast
+        # path computes it.
+        include Plan::Describable
+
+        def plan_describe(p)
+          @gains.reduce(p.const(@constant, complex: plan_complex_buffer?)) { |sum, (m, gain)|
+            sum + (gain == 1 ? p[m] : p[m] * gain)
+          }
+        end
+
+        def plan_inputs
+          @gains.keys
+        end
+
+        def plan_unsupported_reason
+          return 'stop_early: false' unless @stop_early
+          return "a #{@buf.class} buffer" unless @buf.is_a?(Numo::SFloat) || @buf.is_a?(Numo::SComplex)
+          return 'a non-numeric gain' unless @gains.each_value.all? { |g| g.is_a?(Numeric) }
+
+          nil
+        end
+
+        def plan_output_type
+          plan_complex_buffer? || @constant.is_a?(Complex) || @gains.each_value.any? { |g| g.is_a?(Complex) } ? :complex : :real
+        end
+
         # Returns the gain value for the given +summand+, or nil if the summand
         # is not present.  The +summand+ may be an Integer to refer to a summand
         # by insertion order (starting at 0).
@@ -143,6 +176,7 @@ module MB
           # TODO: smooth gain changes
           samp = find_summand(summand, create: true)
           @gains[samp] = gain
+          Plan.changed(self)
         end
 
         # Removes the given +summand+ from the mixer.  The +summand+ may be an
@@ -158,6 +192,7 @@ module MB
           @gains.delete(samp)
           @orig_to_samp.delete_if { |_, v| v == samp }
           samp.destroy
+          Plan.changed(self)
         end
 
         # Removes all summands, but does not reset the constant, if set.
@@ -168,6 +203,7 @@ module MB
 
           @gains.clear
           @orig_to_samp.clear
+          Plan.changed(self)
         end
 
         # Returns the number of summands (excluding a possible constant value).

@@ -156,6 +156,13 @@ module MB
           }
         end
 
+        # True if this node's buffer has been promoted to complex (a plan
+        # then computes complex values even from real inputs, as the node
+        # does).
+        def plan_complex_buffer?
+          @buf.is_a?(Numo::SComplex) || @buf.is_a?(Numo::DComplex)
+        end
+
         # A view of the first +count+ samples of +buf+, reused while the
         # buffer and count stay the same.
         def arithmetic_view(buf, count, key)

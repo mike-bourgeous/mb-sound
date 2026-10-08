@@ -224,6 +224,7 @@ module MB
         fade = bars_or_nil(fade)
 
         nodes = match_rate(to_nodes(sound))
+        Plan.install(nodes) # fused plans (see MB::Sound::Plan)
         input = MB::Sound::GraphNodeInput.new(nodes)
         timeline_nodes = nodes.flat_map { |n| [n, *n.graph] }.grep(Sequence::TimelineNode).uniq
 

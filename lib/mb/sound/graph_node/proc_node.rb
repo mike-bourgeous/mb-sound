@@ -53,6 +53,35 @@ module MB
           return nil if data.nil?
           @cb.call(data)
         end
+
+        # Plan layer (see MB::Sound::Plan): GraphNode#/ and #** make
+        # ProcNodes whose operation is known (+plan_operator+, set by
+        # ArithmeticMethods); other procs run Ruby blocks and stay unfused.
+        include Plan::Describable
+
+        # The arithmetic operator of a ProcNode made by GraphNode#/ or #**
+        # ('/' or '**'), or nil for other blocks.
+        attr_accessor :plan_operator
+
+        def plan_describe(p)
+          a = p[@source]
+          b = p[@sources[:operand]]
+          @plan_operator == '/' ? a / b : a ** b
+        end
+
+        def plan_inputs
+          [@source, @sources[:operand]].select { |s| s.respond_to?(:sample) }
+        end
+
+        def plan_unsupported_reason
+          return 'a Ruby block' unless @plan_operator == '/' || @plan_operator == '**'
+
+          operand = @sources[:operand]
+          return 'a constant exponent (Numo multiplies)' if @plan_operator == '**' && !operand.respond_to?(:sample)
+          return "a #{operand.class} divisor" if @plan_operator == '/' && operand.is_a?(Numeric) && !operand.is_a?(Float) && !operand.is_a?(Integer)
+
+          nil
+        end
       end
     end
   end
