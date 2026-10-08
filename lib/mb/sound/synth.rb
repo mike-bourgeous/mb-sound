@@ -561,6 +561,7 @@ module MB
             return :ended if shared.buffers[n.tee.sources[:input]].nil?
             next
           end
+          next if shared&.shared_node?(n)
 
           # Notes nodes advance without a buffer (also inside fused plans)
           return :ended if (n.is_a?(Notes::Node) ? n.advance(count) : n.sample(count)).nil?

@@ -53,6 +53,11 @@ module MB
           @active
         end
 
+        # True if +node+ is sampled here in the current block.
+        def shared_node?(node)
+          @active && @buffers.key?(node)
+        end
+
         # True if +tee+'s source is shared in the current block (Synth's
         # skipped lanes don't read its branches).
         def shared_tee?(tee)
@@ -112,7 +117,7 @@ module MB
           @branches = []
 
           handles = Hash.new { |h, k| h[k] = [] }.compare_by_identity
-          regions_of = Hash.new { |h, k| h[k] = {}.compare_by_identity }.compare_by_identity
+          insts_of = Hash.new { |h, k| h[k] = {}.compare_by_identity }.compare_by_identity
           usable = @installations.reject { |inst| inst.resamples? }
           usable.each do |inst|
             inst.rebuild if inst.stale?
@@ -123,15 +128,16 @@ module MB
 
               prog.inputs.each do |op|
                 op.handles.each { |h| handles[op.source] << h unless handles[op.source].any? { |x| x.equal?(h) } }
-                regions_of[op.source][r] = true
+                insts_of[op.source][inst] = true
               end
             end
           end
 
           handles.each do |src, list|
-            # Several regions read it (a single region reads its own
-            # sources directly; see Region#direct_source)
-            next if regions_of[src].length < 2
+            # Several installations (lanes) read it: channel-wide nodes.
+            # A lane's own nodes stay with the lane (skipped lanes advance
+            # them themselves; see Synth#skip_lane)
+            next if insts_of[src].length < 2
 
             tees = list.map { |h| h.respond_to?(:tee) ? h.tee : nil }.uniq
             next unless tees.length == 1 && tees[0]

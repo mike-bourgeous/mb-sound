@@ -62,6 +62,25 @@ RSpec.describe(MB::Sound::Plan::SharedInputs) do
     end
   end
 
+  it "leaves a lane's own nodes with the lane (skipped lanes advance them)" do
+    # A lane's trigger read by two regions (two key-synced tones and a
+    # boundary shaper between them); c_major.mid leaves lanes idle, so
+    # they are skipped (a double advance once changed the sound and kept
+    # the synth from ending: bin/synths/fm_kick.rb)
+    make = -> {
+      MB::Sound.seed(0)
+      MB::Sound.synth('spec/test_data/c_major.mid', voices: 4) { |v|
+        a = (v.freq * 1.01).tone.sine.reset(v.trigger).filter(:lowpass, cutoff: 3000) * v.env(0, 0.2, 0, 0.1)
+        b = v.freq.tone.ramp.reset(v.trigger) * v.amp_env(0, 0.3, 0, 0.1)
+        a * 0.3 + b * 0.2
+      }
+    }
+    s = make.call
+    s.sample(128)
+    expect(s.shared_inputs.sources.grep(MB::Sound::Notes::Node).select { |n| n.notes }).to be_empty
+    expect(render(make.call, [128] * 300)).to eq(render(make.call, [128] * 300, unshared: true))
+  end
+
   it 'gives the same samples in check mode' do
     old = MB::Sound::Plan.check
     MB::Sound::Plan.check = :raise
