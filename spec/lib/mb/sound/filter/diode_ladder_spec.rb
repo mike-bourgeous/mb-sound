@@ -24,15 +24,18 @@ RSpec.describe(MB::Sound::Filter::FourPole, 'mode: :diode') do
     let(:cutoffs) { Numo::DFloat.new(4801).seq.map { |i| 25000 * Math.sin(i * 0.003)**2 - 300 } }
     let(:resonances) { Numo::SFloat.new(4801).seq.map { |i| 1.3 * Math.sin(i * 0.0021)**2 - 0.1 } }
 
-    [[0, 0, 0, 0.0], [1, 0, 0, 0.0], [1, 0, 0, 2.5], [0, 2, 0, 2.5], [1, 2, 1, 2.5], [2, 0, 0, 1.0], [3, 0, 0, 1.0], [3, 2, 1, 2.0]].each do |curve, drive_mode, clip, drive|
-      it "give identical samples with curve #{curve}, drive mode #{drive_mode}, clip #{clip}, drive #{drive}" do
+    [
+      [0, 0, 0, 0.0, 1], [1, 0, 0, 0.0, 1], [1, 0, 0, 2.5, 1], [0, 2, 0, 2.5, 1], [1, 2, 1, 2.5, 1], [2, 0, 0, 1.0, 1], [3, 0, 0, 1.0, 1], [3, 2, 1, 2.0, 1],
+      [1, 0, 0, 2.5, 0], [3, 0, 0, 1.0, 0], [1, 2, 1, 2.5, 0],
+    ].each do |curve, drive_mode, clip, drive, normalize|
+      it "give identical samples with curve #{curve}, drive mode #{drive_mode}, clip #{clip}, drive #{drive}, normalize #{normalize}" do
         s1 = [0.0] * 4
         s2 = [0.0] * 4
         loud = noise * 4
         k_max = curve >= 2 ? 5.0 : 3.9
         [0...800, 800...801, 801...2400, 2400...4801].each do |r|
-          c = ff.diode_ladder(loud[r].dup, cutoffs[r], resonances[r], s1, 48000, k_max, 0.375, drive, curve, drive_mode, clip)
-          ruby = fp.diode_process_ruby(loud[r].dup, cutoffs[r], resonances[r], s2, 48000, k_max, 0.375, drive, curve, drive_mode, clip)
+          c = ff.diode_ladder(loud[r].dup, cutoffs[r], resonances[r], s1, 48000, k_max, 0.375, drive, curve, drive_mode, clip, normalize)
+          ruby = fp.diode_process_ruby(loud[r].dup, cutoffs[r], resonances[r], s2, 48000, k_max, 0.375, drive, curve, drive_mode, clip, normalize)
           expect(c).to eq(ruby)
           expect(s1).to eq(s2)
         end
@@ -59,6 +62,30 @@ RSpec.describe(MB::Sound::Filter::FourPole, 'mode: :diode') do
           expect(ff.diode_loop_gain(rc, curve, curve >= 2 ? 5.0 : 3.9)).to eq(fp.diode_loop_gain(rc, curve, curve >= 2 ? 5.0 : 3.9))
         end
       end
+      Numo::DFloat.linspace(-2, 25, 271).to_a.each do |k|
+        expect(ff.diode_cutoff_scale(k)).to eq(fp.diode_cutoff_scale(k))
+        expect(ff.diode_headroom(k)).to eq(fp.diode_headroom(k))
+      end
+    end
+
+    it 'give the round-1 samples with normalize 0' do
+      # Normalization off leaves the stage frequency and saturator alone
+      expect(ff.diode_cutoff_scale(0)).to be_within(1e-12).of(1 + fp::DIODE_NORM_M0)
+      expect(ff.diode_cutoff_scale(fp::DIODE_EDGE_K)).to eq(1.0)
+      expect(ff.diode_headroom(0)).to eq(1.0)
+      expect(ff.diode_headroom(30)).to be_within(1e-12).of(fp::DIODE_SCALE)
+      a = ff.diode_ladder(noise.dup, 1000, 0.5, [0.0] * 4, 48000, 3.9, 0.375, 1.5, 1, 0, 0, 0)
+      b = ff.diode_ladder(noise.dup, 1000, 0.5, [0.0] * 4, 48000, 3.9, 0.375, 1.5, 1, 0, 0)
+      expect(a).not_to eq(b)
+      # Without resonance only the cutoff scale differs: the normalized
+      # ladder at fc / m0 is the round-1 ladder at fc
+      m0 = 1 + fp::DIODE_NORM_M0
+      f = fp.new(mode: :diode, cutoff: 1000, normalize: false)
+      g = fp.new(mode: :diode, cutoff: 1000 / m0)
+      [100, 1000, 5000].each do |hz|
+        w = 2 * Math::PI * hz / 48000
+        expect(g.response(w).abs).to be_within(0.03 * f.response(w).abs).of(f.response(w).abs)
+      end
     end
 
     it 'filter an inplace SFloat in place' do
@@ -74,6 +101,8 @@ RSpec.describe(MB::Sound::Filter::FourPole, 'mode: :diode') do
       expect { ff.diode_ladder(noise.dup, 1000, 0.5, [0.0] * 4, 48000, 3.9, 0.375, -1.0) }.to raise_error(ArgumentError, /finite/)
       expect { ff.diode_ladder(noise.dup, 1000, 0.5, [0.0] * 4, 48000, 3.9, 0.375, 0.0, 4) }.to raise_error(ArgumentError, /curve/)
       expect { ff.diode_ladder(noise.dup, Numo::SFloat.zeros(3), 0.5, [0.0] * 4, 48000, 3.9, 0.375, 0.0) }.to raise_error(ArgumentError, /length/)
+      expect { ff.diode_ladder(noise.dup, 1000, 0.5, [0.0] * 4, 48000, 3.9, 0.375, 0.0, 1, 0, 0, 2) }.to raise_error(ArgumentError, /Normalize/)
+      expect { fp.diode_process_ruby(noise.dup, 1000, 0.5, [0.0] * 4, 48000, 3.9, 0.375, 0.0, 1, 0, 0, 2) }.to raise_error(ArgumentError, /Normalize/)
     end
 
     it 'flushes tiny states to zero' do
@@ -100,6 +129,8 @@ RSpec.describe(MB::Sound::Filter::FourPole, 'mode: :diode') do
       expect(fp::DIODE_SCALE).to be_within(1e-15).of(fp::DIODE_EDGE_K / 4)
       expect(fp::DIODE_CURVE_K).to be_within(1e-12).of(0.975 * fp::DIODE_EDGE_K)
       expect(2**fp::DIODE_CURVE_LOG2_RATIO).to be_within(1e-9).of(40 + 39 * fp::DIODE_EDGE_K)
+      # The normalization's m0: the ladder alone is -12 dB at w / m0
+      expect(d.(Complex(0, w / (1 + fp::DIODE_NORM_M0))).abs).to be_within(1e-12).of(4)
     end
   end
 
@@ -115,20 +146,52 @@ RSpec.describe(MB::Sound::Filter::FourPole, 'mode: :diode') do
       end
     end
 
-    it 'is -25.3 dB at the cutoff without resonance, with slopes of about 14, 18, and 22 dB/octave' do
+    it 'is -12 dB at the cutoff without resonance like lp4, with slopes of about 8, 11, 16, and 21 dB/octave' do
       f = diode(cutoff: 1000, resonance: 0)
-      expect(analytic_db(f, 1000)).to be_within(0.05).of(20 * Math.log10(49 / 901.0))
+      expect(analytic_db(f, 1000)).to be_within(0.05).of(-12.04)
       expect(analytic_db(f, 1)).to be_within(0.01).of(0)
       f = diode(cutoff: 300, resonance: 0)
+      slopes = [300, 600, 1200, 2400].map { |hz| analytic_db(f, hz) - analytic_db(f, 2 * hz) }
+      expect(slopes[0]).to be_within(1.0).of(8)
+      expect(slopes[1]).to be_within(1.0).of(11)
+      expect(slopes[2]).to be_within(1.0).of(16)
+      expect(slopes[3]).to be_within(1.0).of(21)
+    end
+
+    it 'falls 12 dB below DC near lp4 at the same resonance, with the peak moving to the cutoff' do
+      point = ->(f, rel) {
+        dc = f.response(1e-6).abs
+        hz = 20000.0
+        hz /= 1.001 while f.response(2 * Math::PI * hz / 48000).abs < dc * 10**(rel / 20.0)
+        hz
+      }
+      peak = ->(f) { (500..1500).step(2).max_by { |hz| f.response(2 * Math::PI * hz / 48000).abs } }
+      [0, 0.15, 0.3, 0.45, 0.6, 0.75, 0.9].each do |r|
+        lp4 = fp.new(cutoff: 1000, resonance: r)
+        d = diode(cutoff: 1000, resonance: r)
+        old = diode(cutoff: 1000, resonance: r, normalize: false)
+        octaves = Math.log2(point.(d, -12) / point.(lp4, -12))
+        expect(octaves.abs).to be < 0.07, "r #{r}: #{octaves} octaves from lp4"
+        expect(Math.log2(point.(old, -12) / point.(lp4, -12))).to be < -0.3 if r <= 0.3
+      end
+      expect(peak.(diode(cutoff: 1000, resonance: 0.6))).to be_within(40).of(peak.(fp.new(cutoff: 1000, resonance: 0.6)))
+      expect(peak.(diode(cutoff: 1000, resonance: 0.9))).to be_within(5).of(peak.(fp.new(cutoff: 1000, resonance: 0.9)))
+    end
+
+    it 'is -25.3 dB at the cutoff without resonance with normalize: false, with slopes of about 14, 18, and 22 dB/octave' do
+      f = diode(cutoff: 1000, resonance: 0, normalize: false)
+      expect(analytic_db(f, 1000)).to be_within(0.05).of(20 * Math.log10(49 / 901.0))
+      expect(analytic_db(f, 1)).to be_within(0.01).of(0)
+      f = diode(cutoff: 300, resonance: 0, normalize: false)
       slopes = [300, 600, 1200].map { |hz| analytic_db(f, hz) - analytic_db(f, 2 * hz) }
       expect(slopes[0]).to be_within(1.0).of(14)
       expect(slopes[1]).to be_within(1.0).of(18)
       expect(slopes[2]).to be_within(1.0).of(22)
     end
 
-    it 'makes the gain at the cutoff linear in dB from -25.3 to +32.3 dB on the :db curve' do
+    it 'makes the gain at the cutoff linear in dB from -25.3 to +32.3 dB on the :db curve with normalize: false' do
       gains = [0, 0.25, 0.5, 0.75, 1].map { |r|
-        f = diode(cutoff: 1000, resonance: r)
+        f = diode(cutoff: 1000, resonance: r, normalize: false)
         analytic_db(f, 1000) - analytic_db(f, 0.01)
       }
       expect(gains[0]).to be_within(0.01).of(-25.29)
@@ -180,14 +243,33 @@ RSpec.describe(MB::Sound::Filter::FourPole, 'mode: :diode') do
       expect(out[-4800..].abs.max).to be < 1e-6
     end
 
-    it 'oscillates at the cutoff with self_oscillate: true, at a bounded level' do
-      f = diode(cutoff: 440, resonance: 1, self_oscillate: true)
-      out = ring(f, 2)
-      tail = Numo::DFloat.cast(out[-48000..])
-      # quieter than lp4's ~0.22: the ladder is -25 dB at the cutoff
-      expect(tail.abs.max).to be_between(0.03, 0.07)
+    it 'oscillates at the cutoff with self_oscillate: true, at lp4\'s level' do
+      [0.92, 0.97, 1].each do |r|
+        f = diode(cutoff: 440, resonance: r, self_oscillate: true)
+        out = ring(f, 2)
+        tail = Numo::DFloat.cast(out[-48000..])
+        lp4 = Numo::DFloat.cast(ring(fp.new(cutoff: 440, resonance: r, self_oscillate: true), 2)[-48000..])
+        expect(20 * Math.log10(tail.abs.max / lp4.abs.max)).to be_within(0.1).of(0)
+        crossings = (1...tail.length).count { |i| tail[i - 1] < 0 && tail[i] >= 0 }
+        expect(crossings).to be_within(2).of(440)
+      end
+    end
+
+    it 'oscillates 13 dB below lp4 with normalize: false' do
+      f = diode(cutoff: 440, resonance: 1, self_oscillate: true, normalize: false)
+      tail = Numo::DFloat.cast(ring(f, 2)[-48000..])
+      lp4 = Numo::DFloat.cast(ring(fp.new(cutoff: 440, resonance: 1, self_oscillate: true), 2)[-48000..])
+      expect(20 * Math.log10(tail.abs.max / lp4.abs.max)).to be_within(0.2).of(-20 * Math.log10(fp::DIODE_SCALE))
       crossings = (1...tail.length).count { |i| tail[i - 1] < 0 && tail[i] >= 0 }
       expect(crossings).to be_within(5).of(440)
+    end
+
+    it 'matches lp4\'s self-oscillation with drive_mode: :feedback either way' do
+      [true, false].each do |norm|
+        d = Numo::DFloat.cast(ring(diode(cutoff: 1000, resonance: 1, self_oscillate: true, drive_mode: :feedback, normalize: norm), 2)[-48000..])
+        lp4 = Numo::DFloat.cast(ring(fp.new(cutoff: 1000, resonance: 1, self_oscillate: true, drive_mode: :feedback), 2)[-48000..])
+        expect(20 * Math.log10(d.abs.max / lp4.abs.max)).to be_within(0.1).of(0)
+      end
     end
 
     it 'starts oscillating from silence above 0.9, not below' do
@@ -197,10 +279,10 @@ RSpec.describe(MB::Sound::Filter::FourPole, 'mode: :diode') do
       expect(loud[-4800..].abs.max).to be > 0.03
     end
 
-    it 'maps quality: to the same gain at the cutoff' do
+    it 'maps quality: to the same gain at the cutoff with normalize: false' do
       [0.707, 2, 10].each do |q|
         r = fp.quality_to_resonance(q, diode: true)
-        f = diode(cutoff: 1000, resonance: r)
+        f = diode(cutoff: 1000, resonance: r, normalize: false)
         expect(10**((analytic_db(f, 1000) - analytic_db(f, 0.01)) / 20)).to be_within(1e-6).of(q)
       end
       expect(fp.quality_to_resonance(Numo::SFloat[0.01, 2, 1000], diode: true).to_a.map { |v| v.round(5) }).to eq(
@@ -272,7 +354,10 @@ RSpec.describe(MB::Sound::Filter::FourPole, 'mode: :diode') do
       n = 110.hz.ramp.diode(2.hz.lfo.at(200..2000), resonance: 0.5.constant)
       expect(n.sample(4800).isfinite.all?).to eq(true)
       q = 110.hz.ramp.diode(800, quality: 4)
+      expect(q.resonance).to be_within(1e-12).of(fp.quality_to_resonance(4)) # lp4's knob
+      q = 110.hz.ramp.diode(800, quality: 4, normalize: false)
       expect(q.resonance).to be_within(1e-12).of(fp.quality_to_resonance(4, diode: true))
+      expect(q.filter).not_to be_normalize
     end
   end
 end

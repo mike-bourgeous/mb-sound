@@ -607,12 +607,21 @@ static VALUE ruby_svf(VALUE self, VALUE buffer, VALUE cutoff, VALUE quality, VAL
  * (relative to DC), (1 + k) / (K - k) for edge K, rises linearly in dB
  * from 1 / K (-25.3 dB) at r = 0 to +32.3 dB at r = 1 (k = 0.975 K).
  *
+ * Normalization (normalize = 1, the default; user decision 2026-10-09: easy
+ * switching between lp4 and the diode at the same settings, not hardware
+ * fidelity): the stages' frequency is raised by dl_cutoff_scale(k) (2.86
+ * without resonance, 1 at the oscillation edge), so the response falls 12 dB
+ * below DC at about lp4's frequency at the same knob position, and the
+ * input drive's saturator gets dl_headroom(k) (up to DL_SCALE), so ringing
+ * and self-oscillation reach lp4's levels.  Both change only with the
+ * resonance; normalize = 0 is the round-1 ladder described above.
+ *
  * Simulation: trapezoidal integrators (TPT) with every stage and the loop
  * solved implicitly each sample (zero-delay feedback): with g = tan(pi fc
- * / rate) / W180 and integrator states s, the stage outputs solve
- * (I - g A) y = s + g e1 u, a tridiagonal system (Thomas algorithm,
- * coefficients recomputed when the cutoff changes, so the cutoff may move
- * every sample), linear in u: y = p + q u, where p comes from the states
+ * / rate) m / W180 (m the normalization, 1 without) and integrator states
+ * s, the stage outputs solve (I - g A) y = s + g e1 u, a tridiagonal system
+ * (Thomas algorithm, coefficients recomputed when the cutoff or resonance
+ * changes, so both may move every sample), linear in u: y = p + q u, where p comes from the states
  * and q from the coefficients.  The loop is then solved in closed form,
  * u = (x (1 + c k) - k p4) / (1 + k q4), the drive applied like lp4's
  * (:input: tanh on u; :feedback: the secant step on the feedback y4 - c
@@ -651,6 +660,50 @@ static inline double dl_resonance_curve(double r)
 	return (e - 1.0) / ((1.0 + e * DL_INV_EDGE_K) * DL_CURVE_K);
 }
 
+// The diode ladder's cutoff normalization (normalize = 1, the default):
+// m0 - 1, where m0 = sqrt(10/7) / w12 and |D(j w12)| = 4 (the ladder alone
+// is -12 dB there, like lp4 at its cutoff), and the fitted rational's
+// coefficients (see dl_cutoff_scale).
+#define DL_NORM_M0 1.8585129771571043
+#define DL_NORM_B 14.4
+#define DL_NORM_C 4.85
+
+// The factor by which the normalized diode ladder raises its stages'
+// frequency above the round-1 mapping (resonant peak at the cutoff) for
+// loop gain k, so its response falls 12 dB below DC at about the frequency
+// where lp4's does at the same resonance knob (on the dB curve):
+// m = 1 + (m0 - 1) (1 - x) / (1 + b x + c x^2), x = k / DL_EDGE_K clamped
+// to 0..1; 2.86 at x = 0, 1 at the oscillation edge (self-oscillation at
+// the cutoff).
+static inline double dl_cutoff_scale(double k)
+{
+	double x = k * DL_INV_EDGE_K;
+	if (!(x > 0.0)) {
+		x = 0.0;
+	}
+	if (x >= 1.0) {
+		return 1.0;
+	}
+	return 1.0 + DL_NORM_M0 * (1.0 - x) / (1.0 + x * (DL_NORM_B + x * DL_NORM_C));
+}
+
+// The normalized diode ladder's saturation headroom for the input drive:
+// the ladder passes 1 / DL_EDGE_K of the loop's input at the resonant
+// frequency where lp4's cascade passes 1 / 4, so near the oscillation edge
+// the saturator works at DL_SCALE times the level, and ringing and
+// self-oscillation reach lp4's levels: 1 + (DL_SCALE - 1) x^2, x = k /
+// DL_EDGE_K clamped to 0..1 (low resonance saturates like lp4).
+static inline double dl_headroom(double k)
+{
+	double x = k * DL_INV_EDGE_K;
+	if (!(x > 0.0)) {
+		x = 0.0;
+	} else if (x > 1.0) {
+		x = 1.0;
+	}
+	return 1.0 + (DL_SCALE - 1.0) * (x * x);
+}
+
 // The diode ladder's loop gain for resonance r (0..1) on +curve+: lp4's
 // curves (fp_loop_gain, with the dB curve replaced by dl_resonance_curve)
 // times DL_SCALE.
@@ -682,8 +735,8 @@ static inline double dl_loop_gain(double r, int curve, double k_max)
  */
 static VALUE ruby_diode_ladder(int argc, VALUE *argv, VALUE self)
 {
-	if (argc < 8 || argc > 11) {
-		rb_raise(rb_eArgError, "wrong number of arguments (given %d, expected 8..11)", argc);
+	if (argc < 8 || argc > 12) {
+		rb_raise(rb_eArgError, "wrong number of arguments (given %d, expected 8..12)", argc);
 	}
 	VALUE buffer = argv[0], cutoff = argv[1], resonance = argv[2], state = argv[3];
 	double rate = NUM2DBL(argv[4]);
@@ -699,6 +752,7 @@ static VALUE ruby_diode_ladder(int argc, VALUE *argv, VALUE self)
 	int curve = argc > 8 ? NUM2INT(argv[8]) : 0;
 	int drive_mode = argc > 9 ? NUM2INT(argv[9]) : FP_DRIVE_INPUT;
 	int clip = argc > 10 ? NUM2INT(argv[10]) : FP_CLIP_SOFT;
+	int normalize = argc > 11 ? NUM2INT(argv[11]) : 1;
 	if (curve < FP_CURVE_LINEAR || curve > FP_CURVE_SELF_OSC_DB) {
 		rb_raise(rb_eArgError, "Resonance curve must be 0 (linear), 1 (dB), 2 (self-oscillating linear), or 3 (self-oscillating dB)");
 	}
@@ -707,6 +761,9 @@ static VALUE ruby_diode_ladder(int argc, VALUE *argv, VALUE self)
 	}
 	if (clip < FP_CLIP_SOFT || clip > FP_CLIP_HARD) {
 		rb_raise(rb_eArgError, "Clip must be 0 (soft) or 1 (hard)");
+	}
+	if (normalize != 0 && normalize != 1) {
+		rb_raise(rb_eArgError, "Normalize must be 0 (off) or 1 (on)");
 	}
 
 	Check_Type(state, T_ARRAY);
@@ -734,10 +791,13 @@ static VALUE ruby_diode_ladder(int argc, VALUE *argv, VALUE self)
 	_Bool driven = drive > 0;
 
 	// Coefficients, recomputed only when the cutoff or resonance changes:
-	// g, the Thomas algorithm's reciprocal pivots r1..r4 and
+	// the prewarped cutoff t, the stage frequency's scale (normalization
+	// included) and the input saturator's drive and its inverse (headroom
+	// included), g, the Thomas algorithm's reciprocal pivots r1..r4 and
 	// back-substitution factors a1..a3, the response q1..q4 of the forward
 	// pass to u, the loop gain k, and 1 / (1 + k q4)
 	double last_fc = NAN, last_res = NAN;
+	double t = 0, scale = DL_INV_W180, sat_drive = drive, sat_inv = inv_drive;
 	double g = 0, r1 = 1, r2 = 1, r3 = 1, r4 = 1, a1 = 0, a2 = 0, a3 = 0;
 	double q1 = 0, q2 = 0, q3 = 0, q4 = 0, k = 0, inv = 1, in_gain = 1;
 
@@ -755,6 +815,12 @@ static VALUE ruby_diode_ladder(int argc, VALUE *argv, VALUE self)
 				}
 				k = dl_loop_gain(res, curve, k_max);
 				in_gain = 1.0 + comp * k;
+				if (normalize) {
+					scale = dl_cutoff_scale(k) * DL_INV_W180;
+					double headroom = dl_headroom(k);
+					sat_drive = drive / headroom;
+					sat_inv = headroom * inv_drive;
+				}
 			}
 
 			if (fc != last_fc) {
@@ -764,20 +830,22 @@ static VALUE ruby_diode_ladder(int argc, VALUE *argv, VALUE self)
 				} else if (fc > fc_max) {
 					fc = fc_max;
 				}
-				g = mb_tan_pade(fc * pi_over_rate) * DL_INV_W180;
-				double d = 1.0 + 2.0 * g;
-				r1 = 1.0 / d;
-				a1 = g * r1;
-				r2 = 1.0 / (d - g * a1);
-				a2 = g * r2;
-				r3 = 1.0 / (d - g * a2);
-				a3 = g * r3;
-				r4 = 1.0 / ((1.0 + g) - g * a3);
-				q1 = g * r1;
-				q2 = g * q1 * r2;
-				q3 = g * q2 * r3;
-				q4 = g * q3 * r4;
+				t = mb_tan_pade(fc * pi_over_rate);
 			}
+
+			g = t * scale;
+			double d = 1.0 + 2.0 * g;
+			r1 = 1.0 / d;
+			a1 = g * r1;
+			r2 = 1.0 / (d - g * a1);
+			a2 = g * r2;
+			r3 = 1.0 / (d - g * a2);
+			a3 = g * r3;
+			r4 = 1.0 / ((1.0 + g) - g * a3);
+			q1 = g * r1;
+			q2 = g * q1 * r2;
+			q3 = g * q2 * r3;
+			q4 = g * q3 * r4;
 
 			inv = 1.0 / (1.0 + k * q4);
 		}
@@ -793,7 +861,7 @@ static VALUE ruby_diode_ladder(int argc, VALUE *argv, VALUE self)
 		double u = (x * in_gain - k * p4) * inv;
 		if (driven) {
 			if (drive_mode == FP_DRIVE_INPUT) {
-				u = fp_tanh(u * drive) * inv_drive;
+				u = fp_tanh(u * sat_drive) * sat_inv;
 			} else {
 				double fb = p4 + q4 * u - comp * x;
 				double T = clip == FP_CLIP_HARD ? fp_hard_secant(fb * drive) : fp_tanh_secant(fb * drive);
@@ -846,6 +914,18 @@ static VALUE ruby_diode_loop_gain(VALUE self, VALUE r, VALUE curve, VALUE k_max)
 	return rb_float_new(dl_loop_gain(NUM2DBL(r), NUM2INT(curve), NUM2DBL(k_max)));
 }
 
+// Exposes the diode ladder's cutoff normalization factor for specs.
+static VALUE ruby_diode_cutoff_scale(VALUE self, VALUE k)
+{
+	return rb_float_new(dl_cutoff_scale(NUM2DBL(k)));
+}
+
+// Exposes the diode ladder's input saturation headroom for specs.
+static VALUE ruby_diode_headroom(VALUE self, VALUE k)
+{
+	return rb_float_new(dl_headroom(NUM2DBL(k)));
+}
+
 // Exposes the tan approximation for specs and the Ruby mirror's checks.
 static VALUE ruby_tan(VALUE self, VALUE w)
 {
@@ -893,4 +973,6 @@ void Init_fast_filter(void)
 	rb_define_module_function(fast_filter, "diode_ladder", ruby_diode_ladder, -1);
 	rb_define_module_function(fast_filter, "diode_resonance_curve", ruby_diode_resonance_curve, 1);
 	rb_define_module_function(fast_filter, "diode_loop_gain", ruby_diode_loop_gain, 3);
+	rb_define_module_function(fast_filter, "diode_cutoff_scale", ruby_diode_cutoff_scale, 1);
+	rb_define_module_function(fast_filter, "diode_headroom", ruby_diode_headroom, 1);
 }
