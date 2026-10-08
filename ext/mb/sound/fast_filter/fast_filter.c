@@ -89,17 +89,6 @@
 #define FP_CLIP_SOFT 0
 #define FP_CLIP_HARD 1
 
-// tan(w) for 0 <= w < pi/2: a [5/4] Pade approximation of tan(w / 2) (good
-// to about 1e-16 at pi/4), then the double-angle formula.  Relative error
-// under 4e-7 up to 0.49 pi.
-static inline double fp_tan(double w)
-{
-	double y = w * 0.5;
-	double y2 = y * y;
-	double t = y * (945.0 - 105.0 * y2 + y2 * y2) / (945.0 - 420.0 * y2 + 15.0 * y2 * y2);
-	return 2.0 * t / (1.0 - t * t);
-}
-
 // A smooth saturator close to tanh: x (27 + x^2) / (27 + 9 x^2) up to |x| = 3
 // (where it reaches 1 with zero slope), then +-1.
 static inline double fp_tanh(double x)
@@ -205,12 +194,6 @@ static inline double fp_loop_gain(double r, int curve, double k_max)
 	}
 }
 
-static double fp_state_value(VALUE state, long idx)
-{
-	double v = NUM2DBL(rb_ary_entry(state, idx));
-	return isfinite(v) ? v : 0.0;
-}
-
 /*
  * Filters +buffer+ (SFloat, modified in place if marked inplace):
  *   four_pole(buffer, cutoff, resonance, state, sample_rate, k_max,
@@ -270,21 +253,19 @@ static VALUE ruby_four_pole(int argc, VALUE *argv, VALUE self)
 	double m3 = NUM2DBL(rb_ary_entry(mix_v, 3));
 	double m4 = NUM2DBL(rb_ary_entry(mix_v, 4));
 
-	double s0 = fp_state_value(state, 0);
-	double s1 = fp_state_value(state, 1);
-	double s2 = fp_state_value(state, 2);
-	double s3 = fp_state_value(state, 3);
+	double s0 = mb_finite_entry(state, 0);
+	double s1 = mb_finite_entry(state, 1);
+	double s2 = mb_finite_entry(state, 2);
+	double s3 = mb_finite_entry(state, 3);
 
 	_Bool was_inplace;
 	mb_ensure_inplace_sfloat(&buffer, &was_inplace);
 	size_t length = RNARRAY_SHAPE(buffer)[0];
 	float *data = mb_sfloat_ptr(buffer);
 
-	double fc_scalar, res_scalar;
-	const float *fc_ptr, *res_ptr;
-	size_t fc_step, res_step;
-	mb_read_signal_input(&cutoff, length, "Cutoff", &fc_scalar, &fc_ptr, &fc_step);
-	mb_read_signal_input(&resonance, length, "Resonance", &res_scalar, &res_ptr, &res_step);
+	struct mb_signal fc_in, res_in;
+	mb_signal_input(&cutoff, length, "Cutoff", &fc_in);
+	mb_signal_input(&resonance, length, "Resonance", &res_in);
 
 	double pi_over_rate = M_PI / rate;
 	double fc_max = rate * FP_MAX_CUTOFF_RATIO;
@@ -297,8 +278,8 @@ static VALUE ruby_four_pole(int argc, VALUE *argv, VALUE self)
 	double g = 0, G = 0, G4 = 0, one = 1, k = 0, inv = 1, in_gain = 1;
 
 	for (size_t i = 0; i < length; i++) {
-		double fc = fc_ptr ? fc_ptr[i * fc_step] : fc_scalar;
-		double res = res_ptr ? res_ptr[i * res_step] : res_scalar;
+		double fc = mb_signal_at(&fc_in, i);
+		double res = mb_signal_at(&res_in, i);
 
 		if (fc != last_fc || res != last_res) {
 			if (res != last_res) {
@@ -319,7 +300,7 @@ static VALUE ruby_four_pole(int argc, VALUE *argv, VALUE self)
 				} else if (fc > fc_max) {
 					fc = fc_max;
 				}
-				g = fp_tan(fc * pi_over_rate);
+				g = mb_tan_pade(fc * pi_over_rate);
 				G = g / (1.0 + g);
 				one = 1.0 - G;
 				double G2 = G * G;
@@ -412,7 +393,7 @@ static VALUE ruby_four_pole(int argc, VALUE *argv, VALUE self)
  * (the direct form biquad's past outputs don't match new coefficients).
  *
  * Per change of cutoff fc, quality Q, or linear gain G:
- *   g = tan(pi fc / rate) (fp_tan), k = 1 / Q
+ *   g = tan(pi fc / rate) (mb_tan_pade), k = 1 / Q
  *   a1 = 1 / (1 + g (g + k)), a2 = g a1, a3 = g a2
  * and per sample (ic1, ic2 the states):
  *   v3 = x - ic2
@@ -473,23 +454,21 @@ static VALUE ruby_svf(VALUE self, VALUE buffer, VALUE cutoff, VALUE quality, VAL
 	if (RARRAY_LEN(state) != 2) {
 		rb_raise(rb_eArgError, "SVF state must have two elements");
 	}
-	double ic1 = fp_state_value(state, 0);
-	double ic2 = fp_state_value(state, 1);
+	double ic1 = mb_finite_entry(state, 0);
+	double ic2 = mb_finite_entry(state, 1);
 
 	_Bool was_inplace;
 	mb_ensure_inplace_sfloat(&buffer, &was_inplace);
 	size_t length = RNARRAY_SHAPE(buffer)[0];
 	float *data = mb_sfloat_ptr(buffer);
 
-	double fc_scalar, q_scalar, g_scalar;
-	const float *fc_ptr, *q_ptr, *g_ptr;
-	size_t fc_step, q_step, g_step;
-	mb_read_signal_input(&cutoff, length, "Cutoff", &fc_scalar, &fc_ptr, &fc_step);
-	mb_read_signal_input(&quality, length, "Quality", &q_scalar, &q_ptr, &q_step);
+	struct mb_signal fc_in, q_in, g_in;
+	mb_signal_input(&cutoff, length, "Cutoff", &fc_in);
+	mb_signal_input(&quality, length, "Quality", &q_in);
 	if (NIL_P(gain)) {
 		gain = DBL2NUM(1.0);
 	}
-	mb_read_signal_input(&gain, length, "Gain", &g_scalar, &g_ptr, &g_step);
+	mb_signal_input(&gain, length, "Gain", &g_in);
 
 	double pi_over_rate = M_PI / rate;
 	double fc_max = rate * FP_MAX_CUTOFF_RATIO;
@@ -499,9 +478,9 @@ static VALUE ruby_svf(VALUE self, VALUE buffer, VALUE cutoff, VALUE quality, VAL
 	double a1 = 1, a2 = 0, a3 = 0, m0 = 0, m1 = 0, m2 = 0;
 
 	for (size_t i = 0; i < length; i++) {
-		double fc = fc_ptr ? fc_ptr[i * fc_step] : fc_scalar;
-		double q = q_ptr ? q_ptr[i * q_step] : q_scalar;
-		double G = g_ptr ? g_ptr[i * g_step] : g_scalar;
+		double fc = mb_signal_at(&fc_in, i);
+		double q = mb_signal_at(&q_in, i);
+		double G = mb_signal_at(&g_in, i);
 
 		if (fc != last_fc || q != last_q || G != last_g) {
 			last_fc = fc;
@@ -520,7 +499,7 @@ static VALUE ruby_svf(VALUE self, VALUE buffer, VALUE cutoff, VALUE quality, VAL
 				G = SVF_MIN_GAIN;
 			}
 
-			double g = fp_tan(fc * pi_over_rate);
+			double g = mb_tan_pade(fc * pi_over_rate);
 			double k = 1.0 / q;
 			double A;
 
@@ -598,7 +577,7 @@ static VALUE ruby_svf(VALUE self, VALUE buffer, VALUE cutoff, VALUE quality, VAL
 // Exposes the tan approximation for specs and the Ruby mirror's checks.
 static VALUE ruby_tan(VALUE self, VALUE w)
 {
-	return rb_float_new(fp_tan(NUM2DBL(w)));
+	return rb_float_new(mb_tan_pade(NUM2DBL(w)));
 }
 
 // Exposes the tanh approximation for specs.
