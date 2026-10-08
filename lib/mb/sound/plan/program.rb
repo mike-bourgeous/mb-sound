@@ -15,7 +15,7 @@ module MB
         # Register kinds and opcodes of the C executor (see fast_plan.c;
         # specs compare them with FastPlan.constants).
         REG_KINDS = { slot: 0, input: 1, param: 2, out: 3 }.freeze
-        OPCODES = { fill: 1, mul: 2, muls: 3, add: 4, adds: 5, div: 6, divs: 7, pow: 8, part: 9, tone: 10, copy: 11, shape: 12, note_freq: 13 }.freeze
+        OPCODES = { fill: 1, mul: 2, muls: 3, add: 4, adds: 5, div: 6, divs: 7, pow: 8, part: 9, tone: 10, copy: 11, shape: 12, note_freq: 13, events: 14, keep: 15, envelope: 16 }.freeze
 
         attr_reader :ops, :inputs, :params, :output
 
@@ -284,6 +284,14 @@ module MB
                scalar(Op::Shape::MODES.fetch(sh.mode), sh.p1, sh.p2, sh.antialias ? 1 : 0)]
             when Op::Tone
               encode_tone(op)
+            when Op::Events
+              @objects << op.list.data
+              [OPCODES[:events], reg(op.dst), @objects.length - 1, 0]
+            when Op::Keep
+              @objects << [op.target, op.ivar].freeze
+              [OPCODES[:keep], reg(op.dst), reg(op.a), @objects.length - 1]
+            when Op::Envelope
+              encode_envelope(op)
             else
               raise ArgumentError, "No lowering for #{op.class}"
             end
@@ -317,6 +325,28 @@ module MB
               value_reg(op.frequency), value_reg(op.phase_mod), value_reg(op.width),
               value_reg(op.reset), value_reg(op.target), value_reg(op.gain), sc
             ]
+          end
+
+          # See run_envelope in fast_plan.c.
+          def encode_envelope(op)
+            config = op.config
+            nseg = op.times.length
+            cval = ->(v) { v.is_a?(Const) ? v.value.to_f : 0.0 }
+            sc = scalar(
+              *config[0...9], config.length > 9 ? config[9] : -1,
+              *op.times.flat_map.with_index { |t, i| [cval.(t), cval.(op.curves[i]), cval.(op.levels[i])] },
+              cval.(op.hold),
+              *Op::Envelope::INPUTS.map { |k| v = op.inputs[k]; v.nil? ? Op::Envelope::NIL_VALUES[k] : cval.(v) }
+            )
+            @objects << [op.envelope, op.envelope.plan_state].freeze
+            shapes = op.shapes
+            words = [OPCODES[:envelope], reg(op.dst), @objects.length - 1, sc, nseg]
+            nseg.times do |i|
+              words.push(value_reg(op.times[i]), value_reg(op.curves[i]), value_reg(op.levels[i]), shapes[i])
+            end
+            words.push(value_reg(op.hold))
+            Op::Envelope::INPUTS.each { |k| words.push(value_reg(op.inputs[k])) }
+            words
           end
 
           def value_reg(v)

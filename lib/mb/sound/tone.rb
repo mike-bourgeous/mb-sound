@@ -1660,7 +1660,10 @@ module MB
       include Plan::Describable
 
       def plan_describe(p)
-        reset = @reset && !state.reset_ended ? p.boundary(@reset, optional: true) : nil
+        # A Notes trigger the region owns is described inside the plan (it
+        # stops planning before it could end; see Plan::EventList), anything
+        # else is an optional boundary input
+        reset = @reset && !state.reset_ended ? p.optional(@reset) : nil
         target = @reset_to.respond_to?(:sample) ? p.boundary(@reset_to) : nil
         p.tone(
           self,
@@ -1674,7 +1677,9 @@ module MB
       end
 
       def plan_boundary_inputs
-        [@reset, @reset_to].select { |v| v.respond_to?(:sample) }
+        list = [@reset_to].select { |v| v.respond_to?(:sample) }
+        list << @reset if @reset.respond_to?(:sample) && !Plan.event_node?(Plan.origin(@reset))
+        list
       end
 
       def plan_unsupported_reason

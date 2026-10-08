@@ -52,6 +52,7 @@
 #include "mb_bl_osc.h"
 #include "mb_clip_shape.h"
 #include "mb_fast_math.h"
+#include "mb_envelope.h"
 
 // Register kinds (Plan::Program::REG_KINDS)
 enum { REG_SLOT = 0, REG_INPUT = 1, REG_PARAM = 2, REG_OUT = 3 };
@@ -71,7 +72,15 @@ enum {
 	OP_COPY,      // dst, a, 0                   dst = a
 	OP_SHAPE,     // dst, a, object, sc          dst = shaper(a) (FastClip.shape); object: state Array; sc: mode, p1, p2, antialias
 	OP_NOTE_FREQ, // dst, a, object, 0           dst = frequency of note numbers a (FastSound.number_to_freq) in the tuning object's current note/frequency
+	OP_EVENTS,    // dst, object, 0              dst = the event list object rendered (see run_events)
+	OP_KEEP,      // dst, a, object              object [target, name]: target's ivar name (or Hash key) = last sample of a; dst unused
+	OP_ENVELOPE,  // see run_envelope
 };
+
+// Event list modes and entry kinds (Plan::EventList)
+enum { EVENTS_HELD = 0, EVENTS_IMPULSES = 1 };
+enum event_kind { EV_FILL = 0, EV_IMPULSE = 1, EV_GLIDE = 2, EV_BUFFER = 3 };
+#define EV_ENTRY_SIZE 8
 
 // Kernels of OP_TONE (Plan::Op::Tone::KERNELS)
 enum { TONE_NAIVE = 0, TONE_SYNTH = 1 };
@@ -529,6 +538,194 @@ static void run_shape(const int32_t *op, const struct regs *R, const double *sc,
 	RB_GC_GUARD(state);
 }
 
+// The ramp of Notes::Glide#fill (Plan::EventList.glide_ruby): every
+// operation in double precision as Numo does it, each in its own statement.
+static void glide_ramp(float *D, size_t n, double start, double target, double position, double length, double k)
+{
+	MB_ENV_NO_CONTRACT
+	double diff = target - start;
+	for (size_t i = 0; i < n; i++) {
+		double t = position + 1.0 + (double)i;
+		t = t / length;
+		t = t < 0.0 ? 0.0 : (t > 1.0 ? 1.0 : t);
+		double shaped = t * -2.0;
+		shaped = shaped + 3.0;
+		double sq = t * t;
+		shaped = shaped * sq;
+		if (k != 0) {
+			double bump = t * -1.0;
+			bump = bump + 1.0;
+			bump = bump * bump;
+			sq = sq * t;
+			bump = bump * sq;
+			bump = bump * k;
+			shaped = shaped + bump;
+		}
+		shaped = shaped * diff;
+		shaped = shaped + start;
+		D[i] = (float)shaped;
+	}
+}
+
+static inline long ev_long(VALUE v)
+{
+	return FIXNUM_P(v) ? FIX2LONG(v) : NUM2LONG(v);
+}
+
+/*
+ * OP_EVENTS: renders a Plan::EventList (a flat Array: the mode, then
+ * entries of EV_ENTRY_SIZE values: kind, from, to, five arguments) into
+ * +n+ samples of D.  Held lists' entries cover the block; impulse lists are
+ * zeros plus single samples.  Entries past +n+ (a short block) are cut.
+ */
+static void run_events(float *D, VALUE list, size_t n)
+{
+	Check_Type(list, T_ARRAY);
+	long len = RARRAY_LEN(list);
+	if (len < 1 || (len - 1) % EV_ENTRY_SIZE != 0) rb_raise(rb_eArgError, "Bad plan event list length %ld", len);
+	const VALUE *e = RARRAY_CONST_PTR(list);
+
+	long mode = ev_long(e[0]);
+	if (mode == EVENTS_IMPULSES) {
+		memset(D, 0, n * sizeof(float));
+	} else if (mode != EVENTS_HELD) {
+		rb_raise(rb_eArgError, "Bad plan event list mode %ld", mode);
+	}
+
+	for (long j = 1; j < len; j += EV_ENTRY_SIZE) {
+		long kind = ev_long(e[j]);
+		long from = ev_long(e[j + 1]);
+		long to = ev_long(e[j + 2]);
+		if (from < 0 || to < from) rb_raise(rb_eArgError, "Bad plan event entry %ld...%ld", from, to);
+		if ((size_t)from >= n) continue;
+		if ((size_t)to > n) to = (long)n;
+
+		switch (kind) {
+			case EV_FILL: {
+				float v = (float)NUM2DBL(e[j + 3]);
+				for (long i = from; i < to; i++) D[i] = v;
+				break;
+			}
+			case EV_IMPULSE:
+				D[from] = (float)NUM2DBL(e[j + 3]);
+				break;
+			case EV_GLIDE:
+				glide_ramp(D + from, (size_t)(to - from), NUM2DBL(e[j + 3]), NUM2DBL(e[j + 4]), NUM2DBL(e[j + 5]), NUM2DBL(e[j + 6]), NUM2DBL(e[j + 7]));
+				break;
+			case EV_BUFFER: {
+				VALUE b = e[j + 3];
+				if (CLASS_OF(b) != numo_cSFloat || RNARRAY_NDIM(b) != 1 || RNARRAY_SHAPE(b)[0] < (size_t)(to - from) || !RTEST(nary_check_contiguous(b))) {
+					rb_raise(rb_eArgError, "A plan event buffer must be a contiguous SFloat of at least %ld samples", to - from);
+				}
+				const float *src = (const float *)(nary_get_pointer_for_read(b) + nary_get_offset(b));
+				memcpy(D + from, src, (size_t)(to - from) * sizeof(float));
+				break;
+			}
+			default:
+				rb_raise(rb_eArgError, "Bad plan event entry kind %ld", kind);
+		}
+	}
+	RB_GC_GUARD(list);
+}
+
+// An envelope signal from a register (real) or a scalar.
+static inline void env_reg_signal(struct env_signal *s, const struct regs *R, int r, double scalar)
+{
+	s->scalar = scalar;
+	s->d = NULL;
+	s->f = r >= 0 ? R->p[r] : NULL;
+}
+
+/*
+ * OP_ENVELOPE: dst, object, sc, nseg, then per segment: time, curve, and
+ * level registers and the shape, then hold, gate, trigger, velocity,
+ * choke, lift, and octaves registers (-1: the scalar).  Scalars from sc:
+ * the config (flags, release node, velocity low, high, dB, choke samples,
+ * curve scale, slope samples, overshoot, loop node or -1), then per
+ * segment time, curve, level, then hold and the six inputs.  The object
+ * is [envelope, state DFloat].  An idle envelope whose gate and trigger
+ * stay quiet skips the kernel as Envelope#quiet_idle? does.
+ */
+static void run_envelope(const int32_t *op, const struct regs *R, const double *sc, VALUE objects, size_t n, long nregs)
+{
+	VALUE obj = rb_ary_entry(objects, op[2]);
+	VALUE state = rb_ary_entry(obj, 1);
+	if (CLASS_OF(state) != numo_cDFloat || RNARRAY_NDIM(state) != 1 || RNARRAY_SHAPE(state)[0] != ST_SIZE || !RTEST(nary_check_contiguous(state))) {
+		rb_raise(rb_eArgError, "A planned envelope's state must be a contiguous DFloat of %d values", ST_SIZE);
+	}
+	double *st = (double *)(nary_get_pointer_for_write(state) + nary_get_offset(state));
+	const double *s = sc + op[3];
+	long nseg = op[4];
+
+	struct mb_env_args a;
+	a.nseg = nseg;
+	a.flags = (int)s[0];
+	a.release_node = (long)s[1];
+	a.velocity_low = s[2];
+	a.velocity_high = s[3];
+	a.velocity_db = (int)s[4];
+	a.choke_samples = env_length(s[5]);
+	a.curve_scale = s[6];
+	a.slope_samples = s[7];
+	a.overshoot = s[8];
+	a.loop_node = (long)s[9];
+	if (a.release_node < 1 || a.release_node >= nseg) rb_raise(rb_eArgError, "Release node must be from 1 to %ld", nseg - 1);
+	if (a.loop_node < -1 || a.loop_node > a.release_node) rb_raise(rb_eArgError, "Bad plan envelope loop node %ld", a.loop_node);
+	if (a.velocity_db && !(a.velocity_low > 0 && a.velocity_high > 0)) rb_raise(rb_eArgError, "Velocity gains must be positive for dB scaling");
+
+	const int32_t *w = op + 5;
+	const double *segc = s + 10;
+	for (long k = 0; k < nseg; k++) {
+		for (int j = 0; j < 3; j++) {
+			if (w[4 * k + j] >= nregs || (w[4 * k + j] >= 0 && (R->c[w[4 * k + j]] || !R->p[w[4 * k + j]]))) rb_raise(rb_eArgError, "Bad plan envelope register");
+		}
+		env_reg_signal(&a.times[k], R, w[4 * k], segc[3 * k]);
+		env_reg_signal(&a.curves[k], R, w[4 * k + 1], segc[3 * k + 1]);
+		env_reg_signal(&a.levels[k], R, w[4 * k + 2], segc[3 * k + 2]);
+		a.shapes[k] = w[4 * k + 3];
+		if (a.shapes[k] != ENV_SHAPE_EXP && a.shapes[k] != ENV_SHAPE_S) rb_raise(rb_eArgError, "Unknown segment shape %d", a.shapes[k]);
+	}
+
+	const int32_t *in = w + 4 * nseg;
+	const double *inc = segc + 3 * nseg;
+	for (int j = 0; j < 7; j++) {
+		if (in[j] >= nregs || (in[j] >= 0 && (R->c[in[j]] || !R->p[in[j]]))) rb_raise(rb_eArgError, "Bad plan envelope input register");
+	}
+	env_reg_signal(&a.hold, R, in[0], inc[0]);
+	env_reg_signal(&a.gate, R, in[1], inc[1]);
+	env_reg_signal(&a.trigger, R, in[2], inc[2]);
+	env_reg_signal(&a.velocity, R, in[3], inc[3]);
+	env_reg_signal(&a.choke, R, in[4], inc[4]);
+	env_reg_signal(&a.lift, R, in[5], inc[5]);
+	env_reg_signal(&a.octaves, R, in[6], inc[6]);
+
+	float *o = R->p[op[1]];
+
+	// Envelope#quiet_idle?: idle, the gate low, no octaves, and the gate and
+	// trigger quiet for the whole block
+	if ((int)st[ST_STAGE] == ENV_IDLE && st[ST_GATE] == 0 && !(a.flags & ENV_OCTAVES)) {
+		int quiet = 1;
+		for (size_t i = 0; quiet && i < n; i++) {
+			if (env_at(&a.gate, i) != 0 || env_at(&a.trigger, i) > 0) quiet = 0;
+		}
+		if (quiet) {
+			memset(o, 0, n * sizeof(float));
+			st[ST_LEVEL] = 0;
+			st[ST_PREV_LEVEL] = 0;
+			st[ST_TRIGGER] = 0;
+			st[ST_NOTE_POSITION] += (double)n;
+			RB_GC_GUARD(obj);
+			return;
+		}
+	}
+
+	if (mb_env_process(&a, o, n, st) != 0) {
+		rb_raise(rb_eArgError, "Segment index %ld out of range in envelope state", (long)st[ST_SEGMENT]);
+	}
+	RB_GC_GUARD(obj);
+	RB_GC_GUARD(state);
+}
+
 // Checks a buffer for register r: contiguous, the register's class, and at
 // least n samples.  Returns its data.
 static float *buffer_for(VALUE v, _Bool is_complex, size_t n, const char *what, long idx)
@@ -636,6 +833,13 @@ static VALUE ruby_run(VALUE self, VALUE words, VALUE scalars, VALUE objects, VAL
 			case OP_SHAPE: case OP_NOTE_FREQ:
 				len = 5;
 				break;
+			case OP_EVENTS: case OP_KEEP:
+				len = 4;
+				break;
+			case OP_ENVELOPE:
+				if (pc + 5 > nwords || op[4] < 2 || op[4] > ENV_MAX_SEGMENTS) rb_raise(rb_eArgError, "Bad plan envelope at word %zu", pc);
+				len = 5 + 4 * (size_t)op[4] + 7;
+				break;
 			default:
 				rb_raise(rb_eArgError, "Bad plan opcode %d at word %zu", op[0], pc);
 		}
@@ -645,7 +849,7 @@ static VALUE ruby_run(VALUE self, VALUE words, VALUE scalars, VALUE objects, VAL
 		// is NULL, which only tone resets and targets may read)
 		int d = op[1];
 		if (d < 0 || d >= nregs || !ptrs[d]) rb_raise(rb_eArgError, "Bad plan destination at word %zu", pc);
-		if (op[0] != OP_FILL && op[0] != OP_TONE) {
+		if (op[0] != OP_FILL && op[0] != OP_TONE && op[0] != OP_EVENTS && op[0] != OP_ENVELOPE) {
 			if (op[2] < 0 || op[2] >= nregs || !ptrs[op[2]]) rb_raise(rb_eArgError, "Bad plan operand at word %zu", pc);
 		}
 		if ((op[0] == OP_MUL || op[0] == OP_ADD || op[0] == OP_DIV || op[0] == OP_POW) && (op[3] < 0 || op[3] >= nregs || !ptrs[op[3]])) {
@@ -734,6 +938,35 @@ static VALUE ruby_run(VALUE self, VALUE words, VALUE scalars, VALUE objects, VAL
 				memcpy(ptrs[d], ptrs[op[2]], n * (cplx[d] ? 2 : 1) * sizeof(float));
 				break;
 
+			case OP_EVENTS:
+				if (cplx[d]) rb_raise(rb_eArgError, "Plan events are real");
+				if (op[2] < 0 || op[2] >= RARRAY_LEN(objects)) rb_raise(rb_eArgError, "Bad plan event list at word %zu", pc);
+				run_events(ptrs[d], rb_ary_entry(objects, op[2]), n);
+				break;
+
+			case OP_KEEP: {
+				if (cplx[op[2]]) rb_raise(rb_eArgError, "Plan keep is real only");
+				if (op[3] < 0 || op[3] >= RARRAY_LEN(objects)) rb_raise(rb_eArgError, "Bad plan keep object at word %zu", pc);
+				if (n == 0) break;
+				VALUE ko = rb_ary_entry(objects, op[3]);
+				VALUE target = rb_ary_entry(ko, 0);
+				VALUE name = rb_ary_entry(ko, 1);
+				VALUE last = DBL2NUM(ptrs[op[2]][n - 1]);
+				if (RB_TYPE_P(target, T_HASH)) {
+					rb_hash_aset(target, name, last);
+				} else {
+					rb_ivar_set(target, SYM2ID(name), last);
+				}
+				break;
+			}
+
+			case OP_ENVELOPE:
+				if (cplx[d]) rb_raise(rb_eArgError, "Plan envelopes are real");
+				if (op[2] < 0 || op[2] >= RARRAY_LEN(objects)) rb_raise(rb_eArgError, "Bad plan envelope object at word %zu", pc);
+				if (op[3] < 0 || (size_t)op[3] + 10 + 3 * (size_t)op[4] + 7 > nscalars) rb_raise(rb_eArgError, "Bad plan envelope scalars at word %zu", pc);
+				run_envelope(op, &R, sc, objects, n, nregs);
+				break;
+
 			case OP_TONE: {
 				if (op[2] < 0 || op[2] >= RARRAY_LEN(objects)) rb_raise(rb_eArgError, "Bad plan tone object at word %zu", pc);
 				if (op[11] < 0 || (size_t)op[11] + 14 > nscalars) rb_raise(rb_eArgError, "Bad plan tone scalars at word %zu", pc);
@@ -787,6 +1020,16 @@ static VALUE ruby_enums(VALUE self)
 	rb_hash_aset(h, ID2SYM(rb_intern("copy")), INT2NUM(OP_COPY));
 	rb_hash_aset(h, ID2SYM(rb_intern("shape")), INT2NUM(OP_SHAPE));
 	rb_hash_aset(h, ID2SYM(rb_intern("note_freq")), INT2NUM(OP_NOTE_FREQ));
+	rb_hash_aset(h, ID2SYM(rb_intern("events")), INT2NUM(OP_EVENTS));
+	rb_hash_aset(h, ID2SYM(rb_intern("keep")), INT2NUM(OP_KEEP));
+	rb_hash_aset(h, ID2SYM(rb_intern("envelope")), INT2NUM(OP_ENVELOPE));
+	rb_hash_aset(h, ID2SYM(rb_intern("events_held")), INT2NUM(EVENTS_HELD));
+	rb_hash_aset(h, ID2SYM(rb_intern("events_impulses")), INT2NUM(EVENTS_IMPULSES));
+	rb_hash_aset(h, ID2SYM(rb_intern("ev_fill")), INT2NUM(EV_FILL));
+	rb_hash_aset(h, ID2SYM(rb_intern("ev_impulse")), INT2NUM(EV_IMPULSE));
+	rb_hash_aset(h, ID2SYM(rb_intern("ev_glide")), INT2NUM(EV_GLIDE));
+	rb_hash_aset(h, ID2SYM(rb_intern("ev_buffer")), INT2NUM(EV_BUFFER));
+	rb_hash_aset(h, ID2SYM(rb_intern("env_state_size")), INT2NUM(ST_SIZE));
 	rb_hash_aset(h, ID2SYM(rb_intern("tone_naive")), INT2NUM(TONE_NAIVE));
 	rb_hash_aset(h, ID2SYM(rb_intern("tone_synth")), INT2NUM(TONE_SYNTH));
 	rb_hash_aset(h, ID2SYM(rb_intern("osc_sine")), INT2NUM(OSC_SINE));

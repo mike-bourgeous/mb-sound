@@ -83,6 +83,16 @@ module MB
           end
         end
 
+        # Like #[], but an input the region doesn't own is read as an
+        # optional boundary input (one that may end; see #boundary), e.g. a
+        # tone's reset trigger, which is described inside the plan when it
+        # is a Notes trigger the region owns.
+        def optional(handle)
+          raise ArgumentError, "No plan resolver for #{handle.inspect}" unless @resolver
+
+          @resolver.call(self, handle, node, false, true)
+        end
+
         # Like #[], but always reads +handle+ as a boundary input, never
         # described inside the plan.  +optional: true+ for inputs that may
         # end without ending the node (the Value is then missing for the
@@ -172,6 +182,34 @@ module MB
         # Op::NoteFreq).
         def note_freq(a, tuning)
           emit(Op::NoteFreq.new(value(:real), node, self[a], tuning))
+        end
+
+        # The output of an event-driven node (see Plan::EventList), rendered
+        # from the list +feeder+'s #plan_feed records each block; +port+
+        # names one of several outputs (e.g. Notes::EnvelopeInputs'
+        # :trigger).
+        def events(feeder, port = nil)
+          emit(Op::Events.new(value(:real), node, feeder: feeder, port: port))
+        end
+
+        # Stores the last sample of +a+ in +target+'s instance variable
+        # +ivar+ (a Symbol like :@value) or, for a Hash +target+, under key
+        # +ivar+, after each block (see Op::Keep).
+        def keep_last(a, target, ivar)
+          emit(Op::Keep.new(value(:real), node, self[a], target, ivar))
+        end
+
+        # An envelope generator (see Op::Envelope) for +envelope+ (an
+        # MB::Sound::Envelope), with its parameters and inputs as Values,
+        # Consts, or numbers (nil inputs read as the kernel's defaults).
+        def envelope(envelope, times:, curves:, levels:, hold:, gate:, trigger:, velocity:, choke:, lift:, octaves:)
+          vals = ->(list) { list.map { |v| v.nil? ? nil : self[v] } }
+          emit(Op::Envelope.new(
+            value(:real), node, envelope,
+            times: vals.(times), curves: vals.(curves), levels: vals.(levels), hold: hold && self[hold],
+            gate: gate && self[gate], trigger: trigger && self[trigger], velocity: velocity && self[velocity],
+            choke: choke && self[choke], lift: lift && self[lift], octaves: octaves && self[octaves]
+          ))
         end
 
         # A copy of +a+ in a new register.

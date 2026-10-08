@@ -99,6 +99,22 @@ module MB
 
         # Called by Region#compile when a node turned out unsupported.
         def unsupported!(node, why)
+          warn "Plan: unsupported #{Plan.node_label(node)}: #{why}" if ENV['MB_SOUND_PLAN_DEBUG']
+          @excluded[node] = why
+          stale!
+        end
+
+        # The nodes left out of every region, with why (a Hash).
+        def excluded
+          @excluded.dup
+        end
+
+        # Leaves +node+ out of every region from the next block (it is read
+        # as a boundary input), saying +why+ in listings.
+        def exclude(node, why)
+          return if @excluded.key?(node)
+
+          warn "Plan: excluding #{Plan.node_label(node)}: #{why}" if ENV['MB_SOUND_PLAN_DEBUG']
           @excluded[node] = why
           stale!
         end

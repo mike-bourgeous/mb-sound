@@ -113,6 +113,14 @@ module MB
           @out = nil
           @out_views.clear
 
+          # Event-driven nodes run their per-block Ruby (see EventList),
+          # each once, in op order
+          @feeders = []
+          @program.ops.each do |op|
+            f = op.respond_to?(:feeder) ? op.feeder : nil
+            @feeders << f if f && @feeders.none? { |x| x.equal?(f) }
+          end
+
           @started = false
           start_tones if start
           @program
@@ -162,6 +170,22 @@ module MB
           end
           start_tones unless @started
 
+          # A feeder whose stream is over may start ending (returning nil)
+          # in an order that depends on the graph: run this block unfused
+          # and replan with it as a boundary (see EventList)
+          feeders = @feeders
+          unless feeders.empty?
+            k = 0
+            while k < feeders.length
+              f = feeders[k]
+              if f.plan_finished?
+                @installation.exclude(f, 'its MIDI stream is over')
+                return run_unfused(count)
+              end
+              k += 1
+            end
+          end
+
           if @installation.check
             stateful = @members.select { |m| m.respond_to?(:plan_snapshot) }
             before = stateful.map(&:plan_snapshot)
@@ -172,6 +196,12 @@ module MB
           return replay_unfused(count) if gathered == :mismatch
 
           n = gathered
+          k = 0
+          while k < feeders.length
+            feeders[k].plan_feed(count)
+            k += 1
+          end
+
           return check_block(n, count, stateful, before) if @installation.check
 
           @planned_blocks += 1
@@ -294,7 +324,13 @@ module MB
               inputs[i] = nil
               if op.optional
                 @ended[i] = true
-                @consumers[op].each { |c| c.plan_input_ended(op.source) if c.respond_to?(:plan_input_ended) }
+                @consumers[op].each do |c|
+                  # A consumer may ask for the block to run unfused (it reads
+                  # the ended input itself; see Envelope#plan_input_ended)
+                  if c.respond_to?(:plan_input_ended) && c.plan_input_ended(op.source) == :replay
+                    mismatch = true
+                  end
+                end
               else
                 ended = true
               end
@@ -309,6 +345,11 @@ module MB
                 mismatch = true
               end
               buf = buf.dup unless buf.contiguous?
+              if buf.length < count && op.optional && @consumers[op].any? { |c| c.respond_to?(:plan_pads_inputs?) && c.plan_pads_inputs? }
+                # A consumer that pads short inputs (Envelope) runs this
+                # block itself
+                mismatch = true
+              end
               min = buf.length if buf.length < min
               inputs[i] = buf
             end
