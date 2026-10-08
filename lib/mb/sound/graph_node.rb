@@ -330,6 +330,7 @@ require_relative 'graph_node/channel_mixer/unison'
 require_relative 'graph_node/fdn_reverb'
 require_relative 'graph_node/reverb'
 require_relative 'graph_node/semitone_shift'
+require_relative 'graph_node/resonator'
 
 # Generates per-channel DSL methods, so it must load after every *Methods module
 require_relative 'graph_node/channel_dispatch'

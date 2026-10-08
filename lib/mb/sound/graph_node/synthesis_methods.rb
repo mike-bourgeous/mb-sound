@@ -29,6 +29,21 @@ module MB
           self * MB::Sound::Envelope.preset(:adsr, attack, decay, sustain, release, sample_rate: sample_rate, **options)
         end
 
+        # Pings a struck resonator with this node (a GraphNode::Resonator):
+        # every impulse rings as a decaying sine at +freq+ (Hz: a number,
+        # node, or Pitch) with the impulse's height as its amplitude,
+        # falling 60 dB in +decay+ (seconds, a Length, or a node).  The
+        # frequency may move freely without changing the ringing level (e.g.
+        # a kick's pitch sweep).  +phase+ is the starting phase in radians.
+        #
+        # Examples:
+        #     play grid(16, 'x...x...').loop.trigger.ping(52, decay: 0.8)
+        #     play midi.trigger.ping(midi.freq, decay: 1.5)
+        def ping(freq, decay: 0.5, phase: 0)
+          Resonator.new(self, freq: freq, decay: decay, phase: phase, sample_rate: sample_rate)
+        end
+        alias resonator ping
+
         # Reads a cycle-mode MB::Sound::Wavetable (+table+: anything
         # Wavetable.[] accepts) with this node as the phase in cycles (0...1
         # is one cycle), +scan+ (0..1, a number or node; a Tone without an

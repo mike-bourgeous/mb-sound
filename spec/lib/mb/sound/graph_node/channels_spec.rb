@@ -36,6 +36,30 @@ RSpec.describe(MB::Sound::GraphNode::Channels) do
       expect(Array(bundle)).to eq([left, right])
     end
 
+    it 'looks up named channels by name, and keeps names through per-channel calls' do
+      named = MB::Sound::GraphNode::Channels.new([left, right, 3.constant], names: [:kick, 'snare', :hat])
+      expect(named.names).to eq([:kick, :snare, :hat])
+      expect(named[:snare]).to equal(right)
+      expect(named['kick']).to equal(left)
+      expect(named[0..1]).to eq([left, right])
+      expect(named.channel_index(:hat)).to eq(2)
+      expect(named.to_h).to eq(kick: left, snare: right, hat: named[2])
+      expect { named[:clap] }.to raise_error(KeyError, /No channel named :clap.*:kick, :snare, :hat/)
+      expect { bundle[:left] }.to raise_error(KeyError, /unnamed/)
+      expect(bundle.names).to be_nil
+      expect(bundle.to_h).to eq(channel_1: left, channel_2: right)
+
+      scaled = named * 2
+      expect(scaled.names).to eq([:kick, :snare, :hat])
+      expect(scaled[:snare].sample(1)[0]).to eq(4)
+      expect(named.mono.channel_count).to eq(1)
+    end
+
+    it 'rejects channel names that do not fit' do
+      expect { MB::Sound::GraphNode::Channels.new([left, right], names: [:a]) }.to raise_error(ArgumentError, /1 channel names for 2/)
+      expect { MB::Sound::GraphNode::Channels.new([left, right], names: [:a, 'a']) }.to raise_error(ArgumentError, /unique/)
+    end
+
     it 'does not act like Enumerable#filter' do
       expect(bundle).not_to be_a(Enumerable)
     end

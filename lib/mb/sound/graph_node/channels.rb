@@ -17,6 +17,14 @@ module MB
       #     pad = stereo(110.hz.ramp.at(0.3), 110.5.hz.ramp.at(0.3))
       #     l, r = pad
       #     bg pad
+      #
+      # Channels may have names (+names:+, e.g. a drum kit's separate
+      # outputs, see DrumMethods#tr808), so #[] also takes a name:
+      #     outs = tr808(grid(16, kick: 'x...', snare: '..x.').loop, outputs: :separate)
+      #     outs[:snare]          # the snare channel
+      #     outs.names            # [:kick, :snare]
+      # Per-channel DSL calls (see ChannelDispatch) keep the names when
+      # each channel gives one output.
       class Channels
         extend Forwardable
         include MultiOutput
@@ -26,12 +34,17 @@ module MB
         # The channel nodes.
         attr_reader :outputs
 
-        def_delegators :@outputs, :[], :each, :each_with_index, :map, :each_slice, :zip, :first, :last, :length, :size, :sum
+        def_delegators :@outputs, :each, :each_with_index, :map, :each_slice, :zip, :first, :last, :length, :size, :sum
         alias channels outputs
 
+        # The channel names (an Array of Symbols in channel order), or nil
+        # for unnamed channels.
+        attr_reader :names
+
         # Creates a bundle of +nodes+ (GraphNodes, or multi-output nodes
-        # whose outputs become channels here).
-        def initialize(nodes)
+        # whose outputs become channels here), optionally with +names+ (one
+        # unique Symbol or String per channel; see #[]).
+        def initialize(nodes, names: nil)
           nodes = nodes.flat_map { |n|
             unless n.is_a?(GraphNode) || n.is_a?(MultiOutput)
               raise ArgumentError, "Channels must be graph nodes (got #{n.class}); use e.g. 440.hz or 1.constant for numbers"
@@ -41,6 +54,38 @@ module MB
           raise ArgumentError, 'A channel bundle needs at least one channel' if nodes.empty?
 
           @outputs = nodes.freeze
+
+          if names
+            names = names.map(&:to_sym)
+            raise ArgumentError, "#{names.length} channel names for #{@outputs.length} channels" if names.length != @outputs.length
+            raise ArgumentError, "Channel names must be unique (got #{names.inspect})" if names.uniq.length != names.length
+            @names = names.freeze
+          end
+        end
+
+        # A channel by index (or a range of channels, as for Arrays), or by
+        # name (a Symbol or String) for named channels.
+        def [](*args)
+          if args.length == 1 && (args[0].is_a?(Symbol) || args[0].is_a?(String))
+            @outputs[channel_index(args[0])]
+          else
+            @outputs[*args]
+          end
+        end
+
+        # The index of the channel named +name+ (raises KeyError if there is
+        # none).
+        def channel_index(name)
+          idx = @names&.index(name.to_sym)
+          return idx if idx
+
+          known = @names ? "names: #{@names.map(&:inspect).join(', ')}" : 'the channels are unnamed'
+          raise KeyError, "No channel named #{name.inspect} (#{known})"
+        end
+
+        # The channels by name (or :channel_1, :channel_2, ... if unnamed).
+        def to_h
+          sources
         end
 
         # The channel nodes, as an Array.
@@ -55,6 +100,8 @@ module MB
 
         # Traversable: each channel is a source.
         def sources
+          return @names.zip(@outputs).to_h if @names
+
           @outputs.each_with_index.map { |n, idx| [:"channel_#{idx + 1}", n] }.to_h
         end
 

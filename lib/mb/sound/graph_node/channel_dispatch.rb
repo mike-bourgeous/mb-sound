@@ -140,7 +140,8 @@ module MB
           group = ChannelGroup.new(name, channel_inputs, results, per_channel_params(args, kwargs, picked), arg_nodes)
           results.each { |r| r.channel_group = group if r.respond_to?(:channel_group=) }
 
-          Channels.new(results)
+          names = receiver.names if receiver.is_a?(Channels) && results.sum { |r| r.outputs.length } == receiver.names&.length
+          Channels.new(results, names: names)
         end
 
         # Describes the arguments that differ per channel, e.g.
