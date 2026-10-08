@@ -72,19 +72,22 @@ module MB
       # - +normalize: true+ (default; diode only, user decision 2026-10-09:
       #   easy switching over hardware fidelity) matches the diode ladder to
       #   lp4 at the same settings.  Cutoff: the stages' frequency is raised
-      #   by .diode_cutoff_scale (2.86 without resonance, 1.29 at resonance
-      #   0.3, 1.04 at 0.6, 1 at the oscillation edge), so the response
-      #   falls 12 dB below DC at about lp4's frequency (-12 dB at the
-      #   cutoff without resonance, -3 dB at 0.28 × the cutoff against
-      #   lp4's 0.43; slopes about 8, 11, 16, 21 dB/octave over the first
-      #   four octaves, against 16, 21, 24) and the resonant peak moves to
-      #   the cutoff as the resonance rises (self-oscillation exactly at
-      #   it).  Level: the :input drive's saturator gets .diode_headroom
+      #   by .diode_cutoff_scale (2.86 without resonance, 2.14 at resonance
+      #   0.2, 1.65 at 0.3, 1.06 at 0.6, 1 at the oscillation edge), so
+      #   without resonance the response falls 12 dB below DC at lp4's
+      #   frequency (-12 dB at the cutoff, -3 dB at 0.28 × the cutoff
+      #   against lp4's 0.43; slopes about 8, 11, 16, 21 dB/octave over the
+      #   first four octaves, against 16, 21, 24), and from resonance 0.3 up
+      #   the resonant peak is at lp4's frequency, reaching the cutoff as
+      #   the resonance rises (self-oscillation exactly at it).  Bass: the
+      #   compensation is replaced by .diode_compensation, so the DC gain
+      #   is lp4's at every resonance.  Level: the :input drive's saturator
+      #   gets .diode_headroom
       #   (up to DIODE_SCALE near the edge), since the ladder passes 1 /
       #   18.39 of the loop's input at the resonant frequency where lp4
       #   passes 1 / 4, so self-oscillation and saturated ringing reach
       #   lp4's levels (:feedback drive already does).  It costs nothing
-      #   per sample for constant parameters and ~10% more per changing
+      #   per sample for constant parameters and ~10-20% more per changing
       #   resonance value.  +normalize: false+ is the round-1 ladder: the
       #   resonant peak at the cutoff at every resonance (-25 dB there
       #   without resonance, about 1.5-2 octaves darker than lp4) and
@@ -151,10 +154,12 @@ module MB
         # The diode ladder's cutoff normalization (.diode_cutoff_scale): m0 -
         # 1, where m0 = sqrt(10/7) / w12 and |D(j w12)| = 4 (the ladder
         # alone is -12 dB there, like lp4 at its cutoff), and the fitted
-        # rational's coefficients.
+        # rational's coefficients (round 3, 2026-10-09: fitted to put the
+        # resonant peak at lp4's frequency from resonance 0.3 up; round 2's
+        # 14.4 and 4.85 matched the -12 dB point, darker at 0.1-0.4).
         DIODE_NORM_M0 = 1.8585129771571043
-        DIODE_NORM_B = 14.4
-        DIODE_NORM_C = 4.85
+        DIODE_NORM_B = 2.1
+        DIODE_NORM_C = 10.6
 
         # Resonance curves (the kernel's +curve+ argument): :db (default)
         # makes the gain at the cutoff rise linearly in dB; :linear is the
@@ -296,7 +301,7 @@ module MB
           value = value.to_f
           k = loop_gain
           # Every stage holds the lowpass level, whatever the output mix
-          dc = value * (1.0 + @compensation * k) / (1.0 + k)
+          dc = value * (1.0 + passband_compensation(k) * k) / (1.0 + k)
           @state = [dc, dc, dc, dc]
           @state[0] += SELF_OSCILLATE_SEED if @self_oscillate
           self
@@ -321,7 +326,7 @@ module MB
             # angular frequency (g = tan(pi fc / rate) / sqrt(10/7))
             scale = @normalize ? self.class.diode_cutoff_scale(k) * DIODE_INV_W180 : DIODE_INV_W180
             s = (1 - z1) / ((1 + z1) * (g * scale))
-            return (1 + @compensation * k) / ((((s + 7) * s + 15) * s + 10) * s + 1 + k)
+            return (1 + passband_compensation(k) * k) / ((((s + 7) * s + 15) * s + 10) * s + 1 + k)
           end
 
           # One TPT stage: g (1 + z^-1) / ((1 + g) - (1 - g) z^-1)
@@ -413,12 +418,7 @@ module MB
                 elsif res > 1.0
                   res = 1.0
                 end
-                k = case curve
-                    when 1 then resonance_curve(res) * k_max
-                    when 2 then self_oscillate_gain(res, false, k_max)
-                    when 3 then self_oscillate_gain(res, true, k_max)
-                    else res * k_max
-                    end
+                k = lp4_loop_gain(res, curve, k_max)
                 in_gain = 1.0 + comp * k
               end
 
@@ -543,6 +543,7 @@ module MB
           k = 0.0
           inv = 1.0
           in_gain = 1.0
+          dcomp = comp
 
           length.times do |i|
             fc = fc_arr ? fc_arr[i] : fc_scalar
@@ -557,7 +558,10 @@ module MB
                   res = 1.0
                 end
                 k = diode_loop_gain(res, curve, k_max)
-                in_gain = 1.0 + comp * k
+                if normalize == 1
+                  dcomp = diode_compensation(k, lp4_loop_gain(res, curve, k_max), comp)
+                end
+                in_gain = 1.0 + dcomp * k
                 if normalize == 1
                   scale = diode_cutoff_scale(k) * DIODE_INV_W180
                   headroom = diode_headroom(k)
@@ -605,10 +609,10 @@ module MB
               if drive_mode == 0
                 u = tanh(u * sat_drive) * sat_inv
               else
-                fb = p4 + q4 * u - comp * x
+                fb = p4 + q4 * u - dcomp * x
                 t = secant(fb * drive, clip)
                 kt = k * t
-                u = (x * (1.0 + comp * kt) - kt * p4) / (1.0 + kt * q4)
+                u = (x * (1.0 + dcomp * kt) - kt * p4) / (1.0 + kt * q4)
               end
             end
 
@@ -664,18 +668,44 @@ module MB
 
         # The diode ladder's cutoff normalization (+normalize: true+): the
         # factor m by which the stages' frequency is raised above the round-1
-        # mapping (resonant peak at the cutoff) for loop gain +k+, so the
-        # response falls 12 dB below DC at about the frequency where lp4's
-        # does at the same resonance knob (on the :db curve).  m = 1 +
-        # (m0 - 1) (1 - x) / (1 + b x + c x²), x = k / DIODE_EDGE_K clamped
-        # to 0..1: 2.86 (m0, where the ladder is -12 dB at the cutoff) at x
-        # = 0, 1.29 at x 0.25 (resonance 0.3), 1.04 at 0.73 (0.6), and 1 at
-        # the oscillation edge, so self-oscillation is at the cutoff.
+        # mapping (resonant peak at the cutoff) for loop gain +k+: without
+        # resonance the response falls 12 dB below DC at the cutoff like
+        # lp4's, and from resonance 0.3 up (on the :db curve) the resonant
+        # peak is at lp4's frequency within 30 cents.  m = 1 + (m0 - 1) (1 -
+        # x) / (1 + b x + c x²), x = k / DIODE_EDGE_K clamped to 0..1: 2.86
+        # (m0, where the ladder is -12 dB at the cutoff) at x = 0, 1.65 at x
+        # 0.25 (resonance 0.3), 1.06 at 0.73 (0.6), and 1 at the
+        # oscillation edge, so self-oscillation is at the cutoff.
         def self.diode_cutoff_scale(k)
           x = k * DIODE_INV_EDGE_K
           x = 0.0 unless x > 0.0
           return 1.0 if x >= 1.0
           1.0 + DIODE_NORM_M0 * (1.0 - x) / (1.0 + x * (DIODE_NORM_B + x * DIODE_NORM_C))
+        end
+
+        # lp4's loop gain for resonance +r+ (0..1) on kernel curve +curve+
+        # (0..3) with top loop gain +k_max+.
+        def self.lp4_loop_gain(r, curve, k_max)
+          case curve
+          when 1 then resonance_curve(r) * k_max
+          when 2 then self_oscillate_gain(r, false, k_max)
+          when 3 then self_oscillate_gain(r, true, k_max)
+          else r * k_max
+          end
+        end
+
+        # The diode ladder's passband compensation (+normalize: true+) for
+        # loop gain +k+, where lp4 has loop gain +k4+ at the same knob
+        # (.lp4_loop_gain) and compensation +comp+: the c' for which the
+        # ladder's DC gain (1 + c' k) / (1 + k) equals lp4's (1 + comp k4) /
+        # (1 + k4), so bass and level match lp4's at every resonance (with
+        # the plain compensation the diode was 1-2 dB quieter from resonance
+        # 0.1 up: its loop gain runs higher for the same distance from
+        # oscillation).  +comp+ itself for k = 0.
+        def self.diode_compensation(k, k4, comp)
+          return comp unless k > 0.0
+          in_gain = (1.0 + k) * (1.0 + comp * k4) / (1.0 + k4)
+          (in_gain - 1.0) / k
         end
 
         # The diode ladder's saturation headroom for +drive_mode: :input+
@@ -825,6 +855,14 @@ module MB
         def kernel_options
           curves = @self_oscillate ? SELF_OSCILLATE_CURVES : RESONANCE_CURVES
           [curves.fetch(@resonance_curve), DRIVE_MODES.fetch(@drive_mode), CLIPS.fetch(@clip)]
+        end
+
+        # The compensation the kernel uses at loop gain +k+ (the current
+        # resonance's): .diode_compensation for the normalized diode ladder.
+        def passband_compensation(k)
+          return @compensation unless diode? && @normalize
+          r = @resonance.to_f.clamp(0.0, 1.0)
+          self.class.diode_compensation(k, self.class.lp4_loop_gain(r, kernel_options[0], @k_max), @compensation)
         end
 
         # The diode kernel's +normalize+ argument.

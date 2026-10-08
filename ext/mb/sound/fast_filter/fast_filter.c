@@ -610,10 +610,12 @@ static VALUE ruby_svf(VALUE self, VALUE buffer, VALUE cutoff, VALUE quality, VAL
  * Normalization (normalize = 1, the default; user decision 2026-10-09: easy
  * switching between lp4 and the diode at the same settings, not hardware
  * fidelity): the stages' frequency is raised by dl_cutoff_scale(k) (2.86
- * without resonance, 1 at the oscillation edge), so the response falls 12 dB
- * below DC at about lp4's frequency at the same knob position, and the
+ * without resonance, where the response falls 12 dB below DC at the cutoff
+ * like lp4's, to 1 at the oscillation edge; the resonant peak is at lp4's
+ * frequency from resonance 0.3 up), the compensation is replaced by
+ * dl_compensation (the DC gain is lp4's at the same knob position), and the
  * input drive's saturator gets dl_headroom(k) (up to DL_SCALE), so ringing
- * and self-oscillation reach lp4's levels.  Both change only with the
+ * and self-oscillation reach lp4's levels.  All three change only with the
  * resonance; normalize = 0 is the round-1 ladder described above.
  *
  * Simulation: trapezoidal integrators (TPT) with every stage and the loop
@@ -663,18 +665,20 @@ static inline double dl_resonance_curve(double r)
 // The diode ladder's cutoff normalization (normalize = 1, the default):
 // m0 - 1, where m0 = sqrt(10/7) / w12 and |D(j w12)| = 4 (the ladder alone
 // is -12 dB there, like lp4 at its cutoff), and the fitted rational's
-// coefficients (see dl_cutoff_scale).
+// coefficients (see dl_cutoff_scale; round 3, 2026-10-09: fitted to put
+// the resonant peak at lp4's frequency from resonance 0.3 up, where round
+// 2's 14.4 and 4.85 matched the -12 dB point and sounded darker).
 #define DL_NORM_M0 1.8585129771571043
-#define DL_NORM_B 14.4
-#define DL_NORM_C 4.85
+#define DL_NORM_B 2.1
+#define DL_NORM_C 10.6
 
 // The factor by which the normalized diode ladder raises its stages'
 // frequency above the round-1 mapping (resonant peak at the cutoff) for
-// loop gain k, so its response falls 12 dB below DC at about the frequency
-// where lp4's does at the same resonance knob (on the dB curve):
-// m = 1 + (m0 - 1) (1 - x) / (1 + b x + c x^2), x = k / DL_EDGE_K clamped
-// to 0..1; 2.86 at x = 0, 1 at the oscillation edge (self-oscillation at
-// the cutoff).
+// loop gain k: without resonance its response falls 12 dB below DC at the
+// cutoff like lp4's, and from resonance 0.3 up (dB curve) its resonant peak
+// is at lp4's frequency: m = 1 + (m0 - 1) (1 - x) / (1 + b x + c x^2),
+// x = k / DL_EDGE_K clamped to 0..1; 2.86 at x = 0, 1 at the oscillation
+// edge (self-oscillation at the cutoff).
 static inline double dl_cutoff_scale(double k)
 {
 	double x = k * DL_INV_EDGE_K;
@@ -702,6 +706,21 @@ static inline double dl_headroom(double k)
 		x = 1.0;
 	}
 	return 1.0 + (DL_SCALE - 1.0) * (x * x);
+}
+
+// The normalized diode ladder's passband compensation for loop gain k,
+// where lp4 has loop gain k4 at the same knob (fp_loop_gain): the c' for
+// which the ladder's DC gain (1 + c' k) / (1 + k) equals lp4's (1 + c k4) /
+// (1 + k4), so the bass and the level match lp4's at every resonance (the
+// plain c left the diode 1-2 dB quieter from resonance 0.1 up).  k = 0
+// keeps c (it multiplies k everywhere it is used).
+static inline double dl_compensation(double k, double k4, double comp)
+{
+	if (!(k > 0.0)) {
+		return comp;
+	}
+	double in_gain = (1.0 + k) * (1.0 + comp * k4) / (1.0 + k4);
+	return (in_gain - 1.0) / k;
 }
 
 // The diode ladder's loop gain for resonance r (0..1) on +curve+: lp4's
@@ -799,7 +818,7 @@ static VALUE ruby_diode_ladder(int argc, VALUE *argv, VALUE self)
 	double last_fc = NAN, last_res = NAN;
 	double t = 0, scale = DL_INV_W180, sat_drive = drive, sat_inv = inv_drive;
 	double g = 0, r1 = 1, r2 = 1, r3 = 1, r4 = 1, a1 = 0, a2 = 0, a3 = 0;
-	double q1 = 0, q2 = 0, q3 = 0, q4 = 0, k = 0, inv = 1, in_gain = 1;
+	double q1 = 0, q2 = 0, q3 = 0, q4 = 0, k = 0, inv = 1, in_gain = 1, dcomp = comp;
 
 	for (size_t i = 0; i < length; i++) {
 		double fc = mb_signal_at(&fc_in, i);
@@ -814,7 +833,10 @@ static VALUE ruby_diode_ladder(int argc, VALUE *argv, VALUE self)
 					res = 1.0;
 				}
 				k = dl_loop_gain(res, curve, k_max);
-				in_gain = 1.0 + comp * k;
+				if (normalize) {
+					dcomp = dl_compensation(k, fp_loop_gain(res, curve, k_max), comp);
+				}
+				in_gain = 1.0 + dcomp * k;
 				if (normalize) {
 					scale = dl_cutoff_scale(k) * DL_INV_W180;
 					double headroom = dl_headroom(k);
@@ -863,10 +885,10 @@ static VALUE ruby_diode_ladder(int argc, VALUE *argv, VALUE self)
 			if (drive_mode == FP_DRIVE_INPUT) {
 				u = fp_tanh(u * sat_drive) * sat_inv;
 			} else {
-				double fb = p4 + q4 * u - comp * x;
+				double fb = p4 + q4 * u - dcomp * x;
 				double T = clip == FP_CLIP_HARD ? fp_hard_secant(fb * drive) : fp_tanh_secant(fb * drive);
 				double kT = k * T;
-				u = (x * (1.0 + comp * kT) - kT * p4) / (1.0 + kT * q4);
+				u = (x * (1.0 + dcomp * kT) - kT * p4) / (1.0 + kT * q4);
 			}
 		}
 
@@ -918,6 +940,12 @@ static VALUE ruby_diode_loop_gain(VALUE self, VALUE r, VALUE curve, VALUE k_max)
 static VALUE ruby_diode_cutoff_scale(VALUE self, VALUE k)
 {
 	return rb_float_new(dl_cutoff_scale(NUM2DBL(k)));
+}
+
+// Exposes the normalized diode ladder's passband compensation for specs.
+static VALUE ruby_diode_compensation(VALUE self, VALUE k, VALUE k4, VALUE comp)
+{
+	return rb_float_new(dl_compensation(NUM2DBL(k), NUM2DBL(k4), NUM2DBL(comp)));
 }
 
 // Exposes the diode ladder's input saturation headroom for specs.
@@ -975,4 +1003,5 @@ void Init_fast_filter(void)
 	rb_define_module_function(fast_filter, "diode_loop_gain", ruby_diode_loop_gain, 3);
 	rb_define_module_function(fast_filter, "diode_cutoff_scale", ruby_diode_cutoff_scale, 1);
 	rb_define_module_function(fast_filter, "diode_headroom", ruby_diode_headroom, 1);
+	rb_define_module_function(fast_filter, "diode_compensation", ruby_diode_compensation, 3);
 }
