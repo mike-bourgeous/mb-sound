@@ -72,6 +72,10 @@ module PlanSpecHelpers
     end
   end
 
+  # The relative tolerance for programs with inexact ops (see
+  # #plan_compare): -100 dB.
+  INEXACT_TOLERANCE = 1e-5
+
   # A pseudo-random mix of block sizes from 1 to 800, with the edges
   # (1, 2, 127/128/129, 511/512, 800) included.
   SIZES = [1, 2, 3, 800, 127, 128, 129, 5, 511, 512, 64, 799, 17, 256, 1, 333, 700, 9, 128, 600, 41].freeze
@@ -144,6 +148,12 @@ module PlanSpecHelpers
         expect(got.length).to eq(ref.length), "block #{i} (#{n} samples, #{e}): got #{got.length} samples, expected #{ref.length}"
 
         tol = e == :ruby ? (ruby_tolerance || tolerance) : tolerance
+        # Programs with inexact ops (Plan.precision :fast's sines) are within
+        # -100 dB of the peak (errors of fast modulators accumulate in the
+        # phases they modulate over the whole comparison)
+        unless installations[e].regions.all? { |r| r.program.nil? || r.program.exact? }
+          tol = [tol || 0, INEXACT_TOLERANCE * [1.0, Numo::DComplex.cast(ref).abs.max].max].max
+        end
         if tol
           diff = (Numo::DComplex.cast(got) - Numo::DComplex.cast(ref)).abs.max
           expect(diff).to be <= tol, "block #{i} (#{n} samples, #{e}): differs by #{diff}\n#{installations[e].regions.map(&:to_s).join("\n")}"

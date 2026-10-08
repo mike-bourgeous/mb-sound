@@ -123,6 +123,14 @@ RSpec.describe(MB::Sound::FastPlan) do
   end
 
   describe 'tone op' do
+    around do |ex|
+      old = MB::Sound::Plan.precision
+      MB::Sound::Plan.precision = :exact
+      ex.run
+    ensure
+      MB::Sound::Plan.precision = old
+    end
+
     it 'runs a naive and a band-limited tone like the Tone does, including resets' do
       [[:sine, 0], [:complex_sine, 0], [:ramp, 1]].each do |wave, _|
         mk = -> { MB::Sound::Tone.new(wave_type: wave, frequency: 500) }

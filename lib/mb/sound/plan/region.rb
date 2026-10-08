@@ -14,6 +14,10 @@ module MB
       # (Plan.changed) rebuilds the whole installation before the next
       # block.
       class Region
+        # How far node states may differ in check mode after a block of a
+        # program with inexact ops (relative to 1 or the value's size).
+        STATE_TOLERANCE = 1e-5
+
         # The node whose output this region computes.
         attr_reader :root
 
@@ -473,6 +477,10 @@ module MB
           if problem.nil?
             stateful.each_with_index do |m, i|
               next if after[i] == planned_states[i]
+              # Inexact ops' differences can reach state through the ops
+              # after them (a fast sine modulating a frequency moves a
+              # phase), within the same tolerance
+              next if !@program.exact? && Plan.states_close?(after[i], planned_states[i], STATE_TOLERANCE)
               detail = planned_states[i].is_a?(Snapshot) && after[i].is_a?(Snapshot) ? planned_states[i].diff(after[i]) : "planned #{planned_states[i].inspect[0, 300]}, unfused #{after[i].inspect[0, 300]}"
               problem = "the state of #{Plan.node_label(m)} differs: #{detail}"
               break

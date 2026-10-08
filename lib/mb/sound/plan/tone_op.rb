@@ -43,13 +43,16 @@ module MB
 
           attr_reader :tone, :frequency, :phase_mod, :width, :reset, :target, :gain, :kernel
 
-          # Waves with fast shapes in Plan.precision :fast.
-          FAST_WAVES = [:sine, :complex_sine].freeze
+          # Waves with fast shapes in Plan.precision :fast (vectorized real
+          # sines; see Plan::VecSine).
+          FAST_WAVES = [:sine].freeze
 
           # The largest difference from the Tone's own samples with fast
-          # shapes, relative to the tone's output range (FastMath's error
-          # plus float32 rounding of a result near full scale).
-          FAST_TOLERANCE = 1e-6
+          # shapes, relative to the tone's output range: the polynomial's
+          # error (about 5e-7, plus float32 rounding near full scale), and
+          # as much again for fast sines upstream in the same block (a
+          # modulator's error moves this tone's phase); -108 dB.
+          FAST_TOLERANCE = 4e-6
 
           # True if this op uses fast shapes (see Plan.precision).
           attr_reader :fast
@@ -64,7 +67,8 @@ module MB
             @target = target
             @gain = gain
             @kernel = tone.send(:kernel)
-            @fast = Plan.precision == :fast && @kernel == :naive && FAST_WAVES.include?(tone.wave_type)
+            @fast = Plan.precision == :fast && @kernel == :naive && FAST_WAVES.include?(tone.wave_type) &&
+              tone.random_advance == 0 && !dst.complex?
 
             raise Unsupported.new(tone, "the #{@kernel} kernel") unless KERNELS.include?(@kernel)
             raise Unsupported.new(tone, 'a complex frequency input') if @frequency.complex?

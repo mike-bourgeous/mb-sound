@@ -60,6 +60,30 @@ module MB
           end
         end
       end
+
+      class << self
+        # True if node states +a+ and +b+ (Snapshots, or plain Hashes and
+        # Arrays of values) are the same except for Floats within +tol+
+        # (relative to 1 or their size); for check mode with inexact ops.
+        def states_close?(a, b, tol)
+          a = a.plain if a.is_a?(Snapshot)
+          b = b.plain if b.is_a?(Snapshot)
+          case a
+          when Float
+            return false unless b.is_a?(Numeric)
+            return true if a == b || (a.nan? && b.to_f.nan?)
+            (a - b).abs <= tol * [1.0, a.abs, b.abs].max
+          when Hash
+            b.is_a?(Hash) && a.keys == b.keys && a.all? { |k, v| states_close?(v, b[k], tol) }
+          when Array
+            b.is_a?(Array) && a.length == b.length && a.each_index.all? { |i| states_close?(a[i], b[i], tol) }
+          when Numo::NArray
+            b.is_a?(Numo::NArray) && states_close?(a.to_a, b.to_a, tol)
+          else
+            a == b
+          end
+        end
+      end
     end
   end
 end

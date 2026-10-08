@@ -1699,7 +1699,7 @@ module MB
       end
 
       # For plans: true while Plan::Op::Tone's Ruby mirror runs a tone with
-      # fast shapes (Plan.precision = :fast; see Plan::FastMath).
+      # fast shapes (Plan.precision = :fast; see Plan::VecSine).
       attr_accessor :plan_fast_shapes
 
       # For plans: starts the tone as its first #sample would.
@@ -2390,7 +2390,7 @@ module MB
         else
           phases, increments = phases_ruby(freq_table, count)
           values = if @plan_fast_shapes
-                     MB::Sound::Plan::FastMath.shape_ruby(@wave_type, phases, phase_table) * @gain + @offset
+                     MB::Sound::Plan::VecSine.shape_ruby(phases, phase_table, @gain, @offset)
                    else
                      Tone.shape_ruby(@wave_type, phases, increments, phase_table) * @gain + @offset
                    end

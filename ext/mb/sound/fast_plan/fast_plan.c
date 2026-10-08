@@ -51,7 +51,7 @@
 #include "mb_osc_shapes.h"
 #include "mb_bl_osc.h"
 #include "mb_clip_shape.h"
-#include "mb_fast_math.h"
+#include "mb_vec_sine.h"
 #include "mb_envelope.h"
 #include "mb_smooth.h"
 
@@ -254,7 +254,7 @@ static inline VALUE tone_input_at(const struct regs *R, int r, double scalar, si
 // FastSound.oscillate's loop (fast_sound.c ruby_oscillate) on one segment.
 static void naive_segment(enum wave_types wt, void *out, _Bool complex_out, size_t length,
 		const struct mb_signal *f, const struct mb_signal *p, double adv, double rndadv, double g, double off,
-		VALUE phase_state, VALUE noise, _Bool fast)
+		VALUE phase_state, VALUE noise)
 {
 	double phi = NUM2DBL(rb_ary_entry(phase_state, 0));
 
@@ -287,31 +287,11 @@ static void naive_segment(enum wave_types wt, void *out, _Bool complex_out, size
 			steps = inc * i;
 		}
 
-		if (fast) {
-			// Plan.precision :fast (sine and complex sine; see
-			// mb_fast_math.h and Plan::FastMath.shape_ruby)
-			double s, c;
-			double x = pm * (1.0 / (2.0 * M_PI));
-			x = mb_wrap(phi + steps, 1.0) + x;
-			mb_fast_sincos_cycles(x, &s, &c);
-			double re = s * g;
-			re = re + off;
-			if (complex_out) {
-				double im = -c;
-				im = im * g;
-				((float *)out)[2 * i] = (float)re;
-				((float *)out)[2 * i + 1] = (float)im;
-			} else {
-				((float *)out)[i] = (float)re;
-			}
+		double complex v = shape_sample(wt, mb_wrap(phi + steps, 1.0), inc, pm) * g + off;
+		if (complex_out) {
+			((complex float *)out)[i] = v;
 		} else {
-			double complex v = shape_sample(wt, mb_wrap(phi + steps, 1.0), inc, pm) * g + off;
-
-			if (complex_out) {
-				((complex float *)out)[i] = v;
-			} else {
-				((float *)out)[i] = creal(v);
-			}
+			((float *)out)[i] = creal(v);
 		}
 
 		if (!constant) {
@@ -326,6 +306,61 @@ static void naive_segment(enum wave_types wt, void *out, _Bool complex_out, size
 	if (!NIL_P(noise)) {
 		rb_ary_store(noise, 0, ULL2NUM(rng));
 	}
+}
+
+// Plan.precision :fast's real sine (mb_vec_sine.h): the phase pass is the
+// naive kernel's (the same phases and state as naive_segment), each phase
+// plus pm / 2 pi reduced to -0.5..0.5 cycles as a float, then the shape
+// pass's float polynomial, which the compiler vectorizes.  The Ruby mirror
+// is Plan::VecSine.shape_ruby on Tone#phases_ruby's phases.
+static void vec_sine_segment(float *out, size_t length, const struct mb_signal *f, const struct mb_signal *p,
+		double adv, double g, double off, VALUE phase_state)
+{
+	double phi = NUM2DBL(rb_ary_entry(phase_state, 0));
+	double freq = f->scalar;
+	const float *freqptr = f->ptr;
+	size_t freqstep = f->step;
+	double pm = p->scalar;
+	const float *pmptr = p->ptr;
+	size_t pmstep = p->step;
+	const double inv2pi = 1.0 / (2.0 * M_PI);
+	float gf = (float)g, of = (float)off;
+	float x[MB_VEC_CHUNK];
+
+	_Bool constant = !freqptr;
+	double steps = 0;
+	for (size_t start = 0; start < length; start += MB_VEC_CHUNK) {
+		size_t m = length - start < MB_VEC_CHUNK ? length - start : MB_VEC_CHUNK;
+		for (size_t k = 0; k < m; k++) {
+			size_t i = start + k;
+			if (freqptr) {
+				freq = freqptr[i * freqstep];
+			}
+			if (pmptr) {
+				pm = pmptr[i * pmstep];
+			}
+
+			double inc = freq * adv;
+			if (constant) {
+				steps = inc * i;
+			}
+
+			double ph = mb_wrap(phi + steps, 1.0);
+			double r = pm * inv2pi;
+			r = ph + r;
+			x[k] = mb_vec_reduce(r);
+
+			if (!constant) {
+				steps += inc;
+			}
+		}
+		mb_vec_sine_shape(out + start, x, m, gf, of);
+	}
+
+	if (constant) {
+		steps = freq * adv * length;
+	}
+	rb_ary_store(phase_state, 0, rb_float_new(mb_wrap(phi + steps, 1.0)));
 }
 
 // FastSynth.oscillate_bl through mb_bl_oscillate on one segment, with the
@@ -389,7 +424,7 @@ static void add_residual(VALUE tone, VALUE state, float *seg, size_t length, dou
  * target_r, gain_r, sc (registers -1 for scalars or none).  Scalars from
  * sc: freq, pm, width, gain, advance, random advance, gain (#at), offset,
  * fade lo, fade hi, remove DC, has width, gain mode (0 none, 1 scalar, 2
- * register), fast shapes (Plan.precision :fast).  The object is [tone, state, frequency value, width value].
+ * register), fast shapes (Plan.precision :fast: vec_sine_segment).  The object is [tone, state, frequency value, width value].
  * See Tone#sample_c and #sample_segments for the steps.
  */
 static void run_tone(const int32_t *op, const struct regs *R, const double *sc, VALUE objects, size_t n)
@@ -408,7 +443,7 @@ static void run_tone(const int32_t *op, const struct regs *R, const double *sc, 
 	_Bool dc = s[10] != 0, has_width = s[11] != 0;
 	int gain_mode = (int)s[12];
 	_Bool fast = s[13] != 0;
-	if (fast && wave != OSC_SINE && wave != OSC_COMPLEX_SINE) rb_raise(rb_eArgError, "Fast plan tones are sines only");
+	if (fast && (wave != OSC_SINE || kernel != TONE_NAIVE || rndadv != 0)) rb_raise(rb_eArgError, "Fast plan tones are naive sines without noise only");
 
 	_Bool complex_out = R->c[dst];
 	float *out = R->p[dst];
@@ -451,7 +486,11 @@ static void run_tone(const int32_t *op, const struct regs *R, const double *sc, 
 				add_residual(tone, state, seg, len, g);
 			} else {
 				void *seg = complex_out ? (void *)(out + 2 * start) : (void *)(out + start);
-				naive_segment((enum wave_types)wave, seg, complex_out, len, &f, &p, adv, rndadv, g, off, phase_state, noise, fast && kernel == TONE_NAIVE);
+				if (fast && !complex_out) {
+					vec_sine_segment((float *)seg, len, &f, &p, adv, g, off, phase_state);
+				} else {
+					naive_segment((enum wave_types)wave, seg, complex_out, len, &f, &p, adv, rndadv, g, off, phase_state, noise);
+				}
 			}
 		}
 
