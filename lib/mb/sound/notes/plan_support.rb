@@ -62,10 +62,16 @@ module MB
           (@plan_lists ||= {})[port] ||= Plan::EventList.new
         end
 
-        # True once the stream is over (see Plan::EventList: the node may
-        # start ending the graph).
-        def plan_finished?
-          ended?
+        # True once the stream is over, or when its last event comes before
+        # the end of the next +count+ samples (see Plan::EventList: the node
+        # may start ending the graph).  Ending inside a planned block would
+        # be exact, but check mode couldn't replay it (the stream doesn't
+        # keep events every reader has passed), so that block runs unfused.
+        def plan_finished?(count)
+          return true if ended?
+
+          last = @stream.music_end
+          !last.nil? && last < @stream.advance(@reader.cursor, count, @sample_rate)
         end
 
         # One planned block: the node's #sample without the buffer (see
@@ -338,10 +344,10 @@ module MB
           @lead = nodes[0]
         end
 
-        def plan_finished?
-          return @lead.plan_finished? if in_step?
+        def plan_finished?(count)
+          return @lead.plan_finished?(count) if in_step?
 
-          @plan_nodes.any?(&:plan_finished?)
+          @plan_nodes.any? { |n| n.plan_finished?(count) }
         end
 
         def plan_feed(count)
@@ -594,7 +600,7 @@ module MB
 
         # True once the stream is over (#sample may start returning nil):
         # #stream_over?.
-        def plan_finished?
+        def plan_finished?(count)
           last = plan_note_stream.music_end
           !last.nil? && last < @time
         end

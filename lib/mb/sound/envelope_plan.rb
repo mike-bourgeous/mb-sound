@@ -29,7 +29,7 @@ module MB
       end
 
       # True once a one-shot has ended (#sample returns nil from then on).
-      def plan_finished?
+      def plan_finished?(count)
         ended?
       end
 

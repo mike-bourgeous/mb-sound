@@ -159,7 +159,7 @@ RSpec.describe(MB::Sound::FastPlan) do
       Class.new {
         def plan_event_list(port = nil) = (@lists ||= {})[port] ||= MB::Sound::Plan::EventList.new
         def plan_feed(count); end
-        def plan_finished? = false
+        def plan_finished?(count) = false
       }.new
     }
 

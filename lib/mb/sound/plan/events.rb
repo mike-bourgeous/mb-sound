@@ -20,7 +20,7 @@ module MB
       # node (cheap without events) instead of buffer fills, constant
       # buffers, ports, and Tee branches.
       #
-      # Feeds may also end planning: #plan_finished? (checked before
+      # Feeds may also end planning: #plan_finished?(count) (checked before
       # anything is read) is true once the node's stream is over, when the
       # node could start returning nil (ending the graph) in an order that
       # depends on which node is sampled first; the Region then runs that
