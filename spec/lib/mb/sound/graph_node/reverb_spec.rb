@@ -111,23 +111,33 @@ RSpec.describe(MB::Sound::GraphNode::Reverb) do
   end
 
   describe 'gains' do
-    # Wet output energy (no feedback) for any lines, stages, inputs, and
-    # outputs is about the input's (the old network's level moved by up
-    # to 30 dB with these).
+    # Wet output energy (no feedback) for any lines and stages is about the
+    # input's with stereo in and out (the old network's level moved by up
+    # to 30 dB with these), and follows Reverb.channel_trim for mono in or
+    # out (+3 dB each, the pre-2026-10-10 levels).
     [1, 2].each do |inputs|
       [1, 2].each do |outputs|
         # (with 4 lines and 1-2 stages, copies of an input stay partly
         # coherent: up to +/-3 dB)
         [[8, 2], [8, 4], [16, 3], [2, 4]].each do |channels, stages|
-          it "keeps each output near the input energy with #{channels} lines, #{stages} stages, #{inputs} in, #{outputs} out" do
+          it "keeps each output near the input energy (channel trim included) with #{channels} lines, #{stages} stages, #{inputs} in, #{outputs} out" do
             irs = impulse(nil, inputs: inputs, outputs: outputs, total: 9600, channels: channels, stages: stages, diffusion_range: 0.01,
               feedback_range: 0.05, feedback_gain: 0.5, feedback_enabled: false, wet: 1, level: 1, seed: 1)
             irs.each do |c|
-              expect(energy_db(c)).to be_within(1.5).of(0)
+              expect(energy_db(c)).to be_within(1.5).of(10 * Math.log10(4.0 / (inputs * outputs)))
             end
           end
         end
       end
+    end
+
+    it 'trims mono inputs and outputs +3 dB each (total wet energy over the outputs kept)' do
+      expect(described_class.channel_trim(2, 2)).to eq(1)
+      expect(described_class.channel_trim(1, 2).to_db).to be_within(1e-4).of(3.0103)
+      expect(described_class.channel_trim(1, 1).to_db).to be_within(1e-4).of(6.0206)
+      mono = impulse(:hall, total: 4800, outputs: 1)
+      stereo = impulse(:hall, total: 4800, outputs: 2)
+      expect(energy_db(mono[0]) - stereo.map { |c| energy_db(c) }.sum / 2).to be_within(1).of(3)
     end
 
     it 'keeps the classic presets at their old level for stereo in and out' do
@@ -298,6 +308,24 @@ RSpec.describe(MB::Sound::GraphNode::Reverb) do
       end
     end
 
+    it 'gives exactly (1 - damping) times the reverb time at Nyquist with damping_design: :exact' do
+      [0.3, 0.5, 0.85, 0.95].each do |damping|
+        rev = 1.constant.reverb(room_size: 0.6, decay: 3, damping: damping, damping_design: :exact)
+        rev.layout.damping.each_with_index do |c, i|
+          p = 1 - c
+          nyquist = rev.gains[i] * c / (1 + p)
+          expect(Math.log(rev.gains[i]) / Math.log(nyquist)).to be_within(1e-9).of(1 - damping)
+        end
+      end
+    end
+
+    it 'keeps Jot damping as the default (its longer lines collapse at high damping)' do
+      jot = 1.constant.reverb(room_size: 0.6, decay: 3, damping: 0.5)
+      expect(jot.layout.damping).to eq(1.constant.reverb(room_size: 0.6, decay: 3, damping: 0.5, damping_design: :jot).layout.damping)
+      expect(1.constant.reverb(room_size: 0.6, decay: 3, damping: 0.85).layout.damping.min).to be_within(1e-12).of(0.001)
+      expect { 1.constant.reverb(room_size: 0.6, damping: 0.5, damping_design: :foo) }.to raise_error(ArgumentError, /damping design/)
+    end
+
     it 'uses a preset decay with a classic layout' do
       rev = 1.constant.reverb(:hall, decay: 2)
       expect((0...8).map { |i| rev.line_decay(i) }).to all(be_within(1e-9).of(2))
@@ -321,6 +349,67 @@ RSpec.describe(MB::Sound::GraphNode::Reverb) do
     end
   end
 
+  describe 'input reads' do
+    # A source that counts its reads, to check that every reverb path
+    # reads its inputs once per buffer (2026-10-10: a listening render
+    # sampled the old FdnReverb's first output twice per buffer, playing
+    # the input at double speed).
+    let(:counter_class) {
+      Class.new do
+        include MB::Sound::GraphNode
+        include MB::Sound::GraphNode::SampleRateHelper
+        attr_reader :reads, :samples
+        def initialize
+          @reads = 0
+          @samples = 0
+          @sample_rate = 48000.0
+        end
+
+        def sample(count)
+          @reads += 1
+          @samples += count
+          Numo::SFloat.new(count).rand(-1, 1)
+        end
+
+        def sources = {}
+      end
+    }
+
+    {
+      'a mono preset' => ->(l, _r) { l.reverb(:hall) },
+      'a mono preset with two outputs' => ->(l, _r) { l.reverb(:hall, output_channels: 2) },
+      'a stereo bundle with predelay' => ->(l, r) { MB::Sound::GraphNode::Channels.new([l, r]).reverb(:hall, predelay: 0.02) },
+      'an Array input' => ->(l, r) { [l, r].reverb(:room) },
+      'the room-size form' => ->(l, r) { MB::Sound::GraphNode::Channels.new([l, r]).reverb(room_size: 0.2, decay: 0.8, damping: 0.5) },
+      'the room-size form with 4 outputs and nodes' => ->(l, r) {
+        MB::Sound::GraphNode::Channels.new([l, r]).reverb(room_size: 0.8, mod: :lush, freeze: 0.constant, stretch: 0.2.hz.lfo.at(0.9..1.1), output_channels: 4)
+      },
+      'the gated preset' => ->(l, r) { MB::Sound::GraphNode::Channels.new([l, r]).reverb(:gated) },
+      'show_internals' => ->(l, r) { MB::Sound::GraphNode::Channels.new([l, r]).reverb(:hall, show_internals: true) },
+      'a dry path mixed with the reverb' => ->(l, r) { b = MB::Sound::GraphNode::Channels.new([l, r]); b + b.reverb(room_size: 0.4, dry: 0) },
+      'a mono input shared with the dry path' => ->(l, _r) { l + l.reverb(room_size: 0.4, dry: 0) },
+    }.each do |name, build|
+      it "reads each input once per buffer with #{name}" do
+        l = counter_class.new
+        r = counter_class.new
+        node = build.call(l, r)
+        outs = node.respond_to?(:to_a) ? node.to_a : [node]
+        10.times { outs.each { |o| expect(o.sample(800)).to be_a(Numo::NArray) } }
+        [l, r].reject { |c| c.reads == 0 }.each do |c|
+          expect(c.reads).to eq(10)
+          expect(c.samples).to eq(8000)
+        end
+        expect(l.reads).to eq(10)
+      end
+    end
+
+    it 'warns when an output is sampled again before the others' do
+      out = 1.constant.reverb(:room, output_channels: 2)
+      out[0].sample(100)
+      expect { out[0].sample(100) }.to output(/sampled again/).to_stderr
+    end
+  end
+
   describe 'Ruby mirror' do
     it 'sounds the same as the C kernel (MB_SOUND_REVERB=ruby)' do
       params = { room_size: 0.1, decay: 0.2, channels: 4, stages: 2, mod: :lush, diffusion_mod: :subtle, shimmer: 0.3, drive: 2, highpass: 50 }
@@ -333,6 +422,27 @@ RSpec.describe(MB::Sound::GraphNode::Reverb) do
       end
       expect(r).to eq(c)
     end
+  end
+
+  it 'rings out for extra_time after a single input node ends, like a multichannel input' do
+    blocks = ->(rev) {
+      outs = rev.respond_to?(:to_a) ? rev.to_a : [rev]
+      n = 0
+      tail = 0.0
+      loop do
+        b = outs.map { |o| o.sample(4800) }
+        break if b.any?(&:nil?) || n > 100
+        tail = b.map { |x| x.abs.max }.max if n == 5
+        n += 1
+      end
+      [n, tail]
+    }
+    hit = -> { imp = Numo::SFloat.zeros(4800); imp[0] = 1; MB::Sound::ArrayInput.new(data: [imp]) }
+    mono_n, mono_tail = blocks.(hit.().reverb(:room, extra_time: 1))
+    expect(mono_n).to be_between(10, 12) # 0.1 s of input + 1 s of extra time
+    expect(mono_tail).to be > 0
+    stereo_n, = blocks.(MB::Sound::GraphNode::Channels.new([hit.(), hit.()]).reverb(:room, extra_time: 1))
+    expect(mono_n).to eq(stereo_n)
   end
 
   it 'returns nil when its input ends' do

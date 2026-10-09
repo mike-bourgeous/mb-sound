@@ -932,24 +932,20 @@ module MB
           def sustain_stretch(list, params, at, i, w, t, oa, ob, g1, g2, rr, ri, hr, hi, dcp, negative)
             rate = @sustain[:filter].sample_rate.to_f
             fc = sustain_cutoff(t)
-            # NOTE: the lambda assigns this method's rr, ri, hr, and hi (Ruby
-            # closures share locals), so after the two calls below rr, ri are
-            # the response at w - h with the shelf and history, and hr, hi the
-            # shelf at w - h, which then apply once more.  The sustain T60s
-            # were tuned with this; FastLoop.pitch_track mirrors it exactly.
-            # Open question (2026-10-10): with block-local names the T60 at a
-            # lowpass on the pitch is +2.2% (110 Hz) / +1.7% (440 Hz) longer
-            # than without the filter, against +0.4% / 0% now.
+            # The response with the shelf and history at +wx+ (block-local
+            # names: until 2026-10-10 this lambda assigned the method's rr,
+            # ri, hr, hi, so the phase below came from w - h with the shelf
+            # applied twice; fixed by the user's decision, with the kernel)
             resp = ->(wx) {
-              rr, ri = loop_response(list, params, at, i, wx, oa, ob, true)
+              xr, xi = loop_response(list, params, at, i, wx, oa, ob, true)
               lr, li = svf_response(0, fc, SUSTAIN_SHELF_Q, 1.0, rate, wx)
-              hr = g1 + g2 * lr; hi = g2 * li
-              rr, ri = rr * hr - ri * hi, rr * hi + ri * hr
+              sr = g1 + g2 * lr; si = g2 * li
+              xr, xi = xr * sr - xi * si, xr * si + xi * sr
               if @history
                 cr = Math.cos(wx); ci = -Math.sin(wx)
-                rr, ri = rr * cr - ri * ci, rr * ci + ri * cr
+                xr, xi = xr * cr - xi * ci, xr * ci + xi * cr
               end
-              [rr, ri]
+              [xr, xi]
             }
             h = w * 1e-4
             ar, ai = resp.call(w + h)

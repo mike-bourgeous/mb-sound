@@ -19,8 +19,11 @@
  * (research-plan-optimizations: 20 -> 17 ns per sample on a 9-op body).
  *
  * After decoding, an exact rewriter (2026-10-10, research-fused-ops rank 4)
- * drops identity ops (x * 1 and copies: their destination becomes an alias
- * of their operand; not 0 + x, which turns -0 into +0) and turns reads of
+ * drops identity ops (x * 1, 0 + x, and copies: their destination becomes
+ * an alias of their operand; 0 + x would turn -0 into +0, which the user
+ * agreed doesn't matter for sound, 2026-10-10, so the C loop may keep a -0
+ * where the Ruby mirror and the unfused graph give +0: equal values) and
+ * turns reads of
  * constant whole-sample sinc delays into direct reads (OP_DREAD_INT,
  * without the per-sample delay clamp, speed estimate, and mode branches);
  * cubic and linear reads index the line without a modulo per tap when the
@@ -682,7 +685,7 @@ static VALUE ruby_run(VALUE self, VALUE words, VALUE scalars, VALUE objects, VAL
 					break;
 			}
 
-			if ((p->op == OP_MULS && p->k == 1.0f) || p->op == OP_COPY) {
+			if ((p->op == OP_MULS && p->k == 1.0f) || (p->op == OP_ADDS && p->k == 0.0f) || p->op == OP_COPY) {
 				alias[p->dst] = p->a;
 				continue;
 			}

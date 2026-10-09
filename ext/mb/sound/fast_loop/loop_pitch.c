@@ -431,16 +431,14 @@ static double pc_sustain_stretch(struct pc_ctx *c, double w, double t, double g1
 {
 	double fc = PC_SUSTAIN_SHELF * c->sus_rate / t;
 	double h = w * 1e-4;
-	double ar, ai, br, bi;
-	pc_shelf_response(c, w + h, fc, g1, g2, &ar, &ai, &hr, &hi);
-	pc_shelf_response(c, w - h, fc, g1, g2, &br, &bi, &hr, &hi);
+	double ar, ai, br, bi, sr, si;
+	pc_shelf_response(c, w + h, fc, g1, g2, &ar, &ai, &sr, &si);
+	pc_shelf_response(c, w - h, fc, g1, g2, &br, &bi, &sr, &si);
 	double gd = -atan2(ai * br - ar * bi, ar * br + ai * bi) / (2.0 * h);
 
-	// As #sustain_stretch: its resp lambda assigns the method's rr, ri, hr,
-	// and hi, so the phase is taken from the response at w - h (shelf and
-	// history included) with that point's shelf applied once more
-	rr = br;
-	ri = bi;
+	// The phase at w: the loop's response with the shelf at w (+hr+, +hi+)
+	// and the history (as #sustain_stretch; until 2026-10-10 both took it
+	// at w - h with the shelf applied twice)
 	pc_rotate(&rr, &ri, hr, hi);
 	if (c->history) {
 		pc_rotate(&rr, &ri, cos(w), -sin(w));

@@ -80,6 +80,27 @@ RSpec.describe(MB::Sound::MIDI::Transform::Arp, :midi_transforms) do
       expect(out.map(&:last)).to eq([1/20r, 1/20r + 1/8r, 1/20r + 1/4r, 1/20r + 3/8r])
     end
 
+    it 'plays the first step at the key and the rest on the grid with start: :hybrid' do
+      out = read_all(held(60, 64, on: 1/20r, off: 1/2r).arp(:up, 16, start: :hybrid, transport: transport))
+      expect(ons(out).map { |e| [e[1], e[2]] }).to eq([[60, 1/20r], [64, 1/8r], [60, 1/4r], [64, 3/8r]])
+      first_off = out.find { |e| e[0] == :note_off }
+      expect(first_off.first(3)).to eq([:note_off, 60, 1/20r + (1/8r - 1/20r) / 2])
+      expect_balanced(out)
+    end
+
+    it 'skips a grid step less than half a step after a hybrid start' do
+      out = arp_notes(held(60, on: 1/10r, off: 1/2r).arp(:up, 16, start: :hybrid, transport: transport))
+      expect(out.map(&:last)).to eq([1/10r, 1/4r, 3/8r])
+    end
+
+    it 'plays a hybrid start on a grid step like a grid start, without swinging the first note' do
+      grid = arp_notes(held(60, on: 1/8r, off: 1/2r).arp(:up, 16, transport: transport))
+      expect(arp_notes(held(60, on: 1/8r, off: 1/2r).arp(:up, 16, start: :hybrid, transport: transport))).to eq(grid)
+      swung = arp_notes(held(60, on: 1/20r, off: 1/2r).arp(:up, 16, start: :hybrid, swing: 2/3r, transport: transport))
+      expect(swung.first.last).to eq(1/20r)
+      expect(swung[1].last).to be > 1/8r
+    end
+
     it 'follows the session timeline, so a graph started mid-bar stays on the grid' do
       a = held(60, off: 1r).arp(:up, 4, transport: transport)
       a.source.start_at(1/8r) # an eighth into the timeline: next quarter step in 1/8 whole note = 1/4 s
