@@ -257,6 +257,17 @@ RSpec.describe(MB::Sound::GraphNode::Reverb) do
       expect(1.constant.reverb.parameters[:loop_extra]).to eq(MB::Sound::GraphNode::Reverb::CLASSIC_LOOP_EXTRA.to_f)
     end
 
+    it 'keeps a classic preset decay with shorter loops (loop_extra: 0)' do
+      [:room, :hall].each do |preset|
+        classic = 1.constant.reverb(preset)
+        compact = 1.constant.reverb(preset, loop_extra: 0)
+        8.times do |i|
+          expect(compact.line_decay(i)).to be_within(1e-9).of(classic.line_decay(i))
+        end
+        expect(compact.gains.min).to be > classic.gains.max
+      end
+    end
+
     it 'uses a preset decay with a classic layout' do
       rev = 1.constant.reverb(:hall, decay: 2)
       expect((0...8).map { |i| rev.line_decay(i) }).to all(be_within(1e-9).of(2))

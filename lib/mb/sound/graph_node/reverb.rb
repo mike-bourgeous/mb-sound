@@ -133,6 +133,7 @@ module MB
             feedback_gain: 0.45,
             feedback_enabled: true,
             loop_extra: CLASSIC_LOOP_EXTRA,
+            tuned_loop_extra: CLASSIC_LOOP_EXTRA,
             predelay: 0,
             dry: 1,
             wet: -16.db,
@@ -149,6 +150,7 @@ module MB
             feedback_gain: 0.9,
             feedback_enabled: true,
             loop_extra: CLASSIC_LOOP_EXTRA,
+            tuned_loop_extra: CLASSIC_LOOP_EXTRA,
             predelay: 0,
             dry: 1,
             wet: -20.db,
@@ -166,6 +168,7 @@ module MB
             feedback_gain: -4.db,
             feedback_enabled: true,
             loop_extra: CLASSIC_LOOP_EXTRA,
+            tuned_loop_extra: CLASSIC_LOOP_EXTRA,
             predelay: 0,
             dry: 1,
             wet: -6.db,
@@ -182,6 +185,7 @@ module MB
             feedback_gain: 0.97,
             feedback_enabled: true,
             loop_extra: CLASSIC_LOOP_EXTRA,
+            tuned_loop_extra: CLASSIC_LOOP_EXTRA,
             predelay: 0.01,
             dry: 1,
             wet: -4.5.db,
@@ -247,6 +251,7 @@ module MB
             feedback_gain: -6.db,
             feedback_enabled: true,
             loop_extra: CLASSIC_LOOP_EXTRA,
+            tuned_loop_extra: CLASSIC_LOOP_EXTRA,
             predelay: 0,
             dry: 1,
             wet: 1,
@@ -260,7 +265,7 @@ module MB
         # and +input+ (all nil by default, meaning the preset's value).
         OPTIONS = %i[
           extra_time channels stages diffusion_range feedback_range feedback_gain feedback_enabled
-          predelay wet dry mix level seed show_internals loop_extra decay room_size damping lowpass highpass drive drive_mode
+          predelay wet dry mix level seed show_internals loop_extra tuned_loop_extra decay room_size damping lowpass highpass drive drive_mode
           crush shimmer shimmer_pitch shimmer_window freeze stretch max_stretch modulation diffusion_modulation
           diffusion_delays feedback_delays
         ].freeze
@@ -479,6 +484,12 @@ module MB
         #                 the classic presets).
         # +:feedback_gain+ - The linear loop gain of every feedback line.
         #                    Must be less than 1.0 to avoid overload.
+        # +:tuned_loop_extra+ - The +:loop_extra:+ the feedback gain was
+        #                       chosen for (default: +:loop_extra:+); with
+        #                       another loop_extra each line's gain changes
+        #                       to keep its decay per second, so the classic
+        #                       presets (tuned at CLASSIC_LOOP_EXTRA) keep
+        #                       their RT60 with +loop_extra: 0+.
         # +:decay+ - The reverb time (RT60; seconds or any Length) instead
         #            of +:feedback_gain+: each line's gain is
         #            10 ** (-3 * loop / decay).
@@ -530,7 +541,7 @@ module MB
         #               lines are sized for +:max_stretch:+, default 2 for a
         #               node, else the number).
         def initialize(upstream:, channels:, output_channels:, stages:, sample_rate:, diffusion_range: nil, feedback_range: nil, feedback_gain: nil, feedback_enabled: true, predelay: 0, wet: 1, dry: 1, level: 1, seed: 0, show_internals: false,
-                       diffusion_delays: nil, feedback_delays: nil, loop_extra: 0, decay: nil, mix: nil, damping: nil, lowpass: nil, highpass: nil, drive: nil, drive_mode: :soft, crush: nil,
+                       diffusion_delays: nil, feedback_delays: nil, loop_extra: 0, tuned_loop_extra: nil, decay: nil, mix: nil, damping: nil, lowpass: nil, highpass: nil, drive: nil, drive_mode: :soft, crush: nil,
                        shimmer: nil, shimmer_pitch: 12, shimmer_window: 0.05, freeze: nil, stretch: nil, max_stretch: nil, modulation: nil, diffusion_modulation: nil)
           @random = Random.new(seed)
           @seed = seed
@@ -574,6 +585,7 @@ module MB
 
           @predelay = predelay # seconds or any length
           @loop_extra = MB::Sound::Length.seconds(loop_extra || 0, sample_rate: @sample_rate).to_f
+          @tuned_loop_extra = tuned_loop_extra.nil? ? @loop_extra : MB::Sound::Length.seconds(tuned_loop_extra, sample_rate: @sample_rate).to_f
           @decay = decay.nil? ? nil : MB::Sound::Length.seconds(decay, sample_rate: @sample_rate).to_f
           raise ArgumentError, 'Decay must be positive' if @decay && !(@decay > 0)
           raise ArgumentError, 'Give either damping or a lowpass' if damping && lowpass
@@ -1039,8 +1051,13 @@ module MB
             loop = (t * @sample_rate).round + (@loop_extra * @sample_rate).round
             if @decay
               10.0 ** (-3.0 * loop / (@decay * @sample_rate))
-            else
+            elsif @tuned_loop_extra == @loop_extra
               @feedback_gain
+            else
+              # The same decay per second as with loops of tap +
+              # tuned_loop_extra
+              tuned = (t * @sample_rate).round + (@tuned_loop_extra * @sample_rate).round
+              @feedback_gain.abs ** (loop.to_f / tuned) * (@feedback_gain < 0 ? -1 : 1)
             end
           }
         end

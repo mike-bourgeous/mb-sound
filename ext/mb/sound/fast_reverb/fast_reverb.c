@@ -47,6 +47,10 @@
 // LFOs compute a new target every this many samples of the stream.
 #define LFO_STEP 16
 
+// Loop values and filter states below this are flushed to zero
+// (subnormal arithmetic is slow).
+#define REV_FLUSH 1e-30
+
 // Parameter signals passed to #process, in order.
 enum rev_param {
 	P_DIFF_DEPTH = 0, // diffusion modulation depth (samples)
@@ -85,6 +89,7 @@ struct rev_line {
 };
 
 struct rev_lfo {
+	uint64_t rng; // this LFO's random targets (so LFOs never share a stream)
 	double phase;
 	double value;
 	double slope;
@@ -140,6 +145,12 @@ struct rev_net {
 
 	double *x; // n scratch
 	double *u; // n scratch
+	double *raw; // n loop reads before processing
+	double *raw_d; // n their delays
+
+	double *blk; // n * blk_cap: the block through the diffusion stages
+	double *tmp; // n * blk_cap scratch
+	long blk_cap;
 };
 
 static void rev_free(void *p)
@@ -177,6 +188,10 @@ static void rev_free(void *p)
 	free(r->hp);
 	free(r->x);
 	free(r->u);
+	free(r->raw);
+	free(r->raw_d);
+	free(r->blk);
+	free(r->tmp);
 	free(r);
 }
 
@@ -343,9 +358,18 @@ static inline double lfo_shape(int shape, const struct rev_lfo *l)
 	}
 }
 
+// sin(pi * +p+) for 0 <= p < 1 (the sine LFO's polynomial on a
+// triangle 0..1..0), for power-complementary shimmer grain windows.
+static inline double half_sine(double p)
+{
+	double t = 1.0 - fabs(2.0 * p - 1.0);
+	double t2 = t * t;
+	return t * (1.5707963267948966 - t2 * (0.6459640975062462 - t2 * (0.07969262624616703 - t2 * 0.004681754135318687)));
+}
+
 // Moves +l+ LFO_STEP samples ahead at +inc+ cycles per sample and sets its
 // slope toward the new value (drawing random targets at each wrap).
-static inline void lfo_step(struct rev_lfo *l, int shape, double inc, uint64_t *rng)
+static inline void lfo_step(struct rev_lfo *l, int shape, double inc)
 {
 	double target;
 	l->phase += inc * l->scale * LFO_STEP;
@@ -354,7 +378,7 @@ static inline void lfo_step(struct rev_lfo *l, int shape, double inc, uint64_t *
 			while (l->phase >= 1.0) {
 				l->phase -= 1.0;
 				l->prev = l->next;
-				l->next = rev_rand(rng);
+				l->next = rev_rand(&l->rng);
 			}
 			if (l->phase < 0) {
 				l->phase = 0;
@@ -403,6 +427,41 @@ static inline double clamp_delay(double d, double lo, const struct rev_line *l)
 		d = lo + 1.0;
 	}
 	return d;
+}
+
+// Reads +l+ at delay +d+ clamped as clamp_delay(d, +lo+, l) does, with
+// one floor (the same samples as line_read(l, pos, clamp_delay(d, lo,
+// l))).
+static inline double line_read_clamped(const struct rev_line *l, uint64_t pos, double d, double lo)
+{
+	double hi = (double)l->mask - 3.0;
+	if (!(d >= lo)) {
+		d = lo;
+	}
+	if (d > hi) {
+		d = hi;
+	}
+	double fl = mb_floor(d);
+	double t = d - fl;
+	if (t != 0 && d < lo + 1.0) {
+		d = lo + 1.0;
+		fl = d;
+		t = 0;
+	}
+	uint64_t di = (uint64_t)fl;
+	const float *b = l->buf;
+	uint64_t m = l->mask;
+	if (t == 0) {
+		return b[(pos - di) & m];
+	}
+	double ym1 = b[(pos - di + 1) & m];
+	double y0 = b[(pos - di) & m];
+	double y1 = b[(pos - di - 1) & m];
+	double y2 = b[(pos - di - 2) & m];
+	double c1 = 0.5 * (y1 - ym1);
+	double c2 = ym1 - 2.5 * y0 + 2.0 * y1 - 0.5 * y2;
+	double c3 = 0.5 * (y2 - ym1) + 1.5 * (y0 - y1);
+	return ((c3 * t + c2) * t + c1) * t + y0;
 }
 
 // The saturation shape for one sample at unit small-signal gain.
@@ -536,13 +595,15 @@ static VALUE rev_initialize(VALUE self, VALUE config)
 	// Random targets for every LFO (diffusion first, then feedback), and
 	// each LFO's value at sample 0
 	for (long i = 0; i < sn; i++) {
-		r->dlfo[i].prev = rev_rand(&r->rng);
-		r->dlfo[i].next = rev_rand(&r->rng);
+		r->dlfo[i].rng = rev_rand64(&r->rng);
+		r->dlfo[i].prev = rev_rand(&r->dlfo[i].rng);
+		r->dlfo[i].next = rev_rand(&r->dlfo[i].rng);
 		r->dlfo[i].value = lfo_shape(r->diff_shape, &r->dlfo[i]);
 	}
 	for (long i = 0; i < n; i++) {
-		r->flfo[i].prev = rev_rand(&r->rng);
-		r->flfo[i].next = rev_rand(&r->rng);
+		r->flfo[i].rng = rev_rand64(&r->rng);
+		r->flfo[i].prev = rev_rand(&r->flfo[i].rng);
+		r->flfo[i].next = rev_rand(&r->flfo[i].rng);
 		r->flfo[i].value = lfo_shape(r->fdn_shape, &r->flfo[i]);
 	}
 
@@ -550,6 +611,8 @@ static VALUE rev_initialize(VALUE self, VALUE config)
 	r->hp = rev_calloc(n, sizeof(double));
 	r->x = rev_calloc(n, sizeof(double));
 	r->u = rev_calloc(n, sizeof(double));
+	r->raw = rev_calloc(n, sizeof(double));
+	r->raw_d = rev_calloc(n, sizeof(double));
 
 	r->damp_hz = NAN;
 	r->hp_hz = NAN;
@@ -621,199 +684,285 @@ static VALUE rev_process(VALUE self, VALUE inputs, VALUE outputs, VALUE params, 
 	double *x = r->x;
 	double *u = r->u;
 	long stages = r->stages;
+	uint64_t pos0 = r->pos;
 
+	if (count > r->blk_cap) {
+		free(r->blk);
+		free(r->tmp);
+		r->blk = NULL;
+		r->tmp = NULL;
+		r->blk_cap = 0;
+		r->blk = rev_calloc((size_t)n * count, sizeof(double));
+		r->tmp = rev_calloc((size_t)n * count, sizeof(double));
+		r->blk_cap = count;
+	}
+	double *blk = r->blk;
+	double *tmp = r->tmp;
+
+	// The input on each line
+	for (long j = 0; j < n; j++) {
+		double *bj = blk + j * count;
+		for (long i = 0; i < count; i++) {
+			double freeze = mb_signal_at(&par[P_FREEZE], i);
+			freeze = !(freeze > 0) ? 0 : (freeze > 1 ? 1 : freeze);
+			bj[i] = mb_signal_at(&in[j], i) * r->in_gain[j] * (1.0 - freeze);
+		}
+	}
+
+	// Diffusion stages, a block at a time (they have no feedback, so this
+	// gives the same samples as running them one sample at a time)
+	for (long s = 0; s < stages; s++) {
+		struct rev_line *lines = r->diff + s * n;
+		const double *delay = r->diff_delay + s * n;
+		const double *pol = r->diff_pol + s * n;
+		const long *order = r->diff_order + s * n;
+		struct rev_lfo *lfo = r->dlfo + s * n;
+
+		for (long j = 0; j < n; j++) {
+			struct rev_line *l = &lines[j];
+			const double *bj = blk + j * count;
+			double *tj = tmp + j * count;
+			double pj = pol[j];
+			if (!r->diff_mod) {
+				uint64_t di = (uint64_t)clamp_delay(delay[j], 0, l);
+				for (long i = 0; i < count; i++) {
+					uint64_t p = pos0 + i;
+					l->buf[p & l->mask] = (float)bj[i];
+					tj[i] = l->buf[(p - di) & l->mask] * pj;
+				}
+			} else {
+				struct rev_lfo *lf = &lfo[j];
+				for (long i = 0; i < count; i++) {
+					uint64_t p = pos0 + i;
+					if ((p % LFO_STEP) == 0) {
+						lfo_step(lf, r->diff_shape, mb_signal_at(&par[P_DIFF_RATE], i) / fs);
+					}
+					l->buf[p & l->mask] = (float)bj[i];
+					double d = delay[j] + mb_signal_at(&par[P_DIFF_DEPTH], i) * (1.0 + lf->value);
+					tj[i] = line_read_clamped(l, p, d, 0) * pj;
+					lf->value += lf->slope;
+				}
+			}
+		}
+
+		// Fast Walsh-Hadamard transform across the lines, every sample
+		for (long h = 1; h < n; h <<= 1) {
+			for (long a = 0; a < n; a += h << 1) {
+				for (long b = a; b < a + h; b++) {
+					double *pb = tmp + b * count;
+					double *qb = tmp + (b + h) * count;
+					for (long i = 0; i < count; i++) {
+						double p = pb[i];
+						double q = qb[i];
+						pb[i] = p + q;
+						qb[i] = p - q;
+					}
+				}
+			}
+		}
+
+		// Shuffle and scale into the block
+		for (long k = 0; k < n; k++) {
+			const double *src = tmp + order[k] * count;
+			double *dst = blk + k * count;
+			for (long i = 0; i < count; i++) {
+				dst[i] = src[i] * r->diff_scale;
+			}
+		}
+	}
+
+	if (!r->feedback) {
+		for (long j = 0; j < n; j++) {
+			const double *bj = blk + j * count;
+			for (long i = 0; i < count; i++) {
+				out[j][i] = (float)bj[i];
+			}
+		}
+		r->pos = pos0 + count;
+		RB_GC_GUARD(in_vals);
+		RB_GC_GUARD(par_vals);
+		return outputs;
+	}
+
+	// Whole-sample loop and tap reads when nothing moves them
+	int direct = !r->fdn_mod && par[P_SIZE].ptr == NULL && par[P_SIZE].scalar == 1.0;
+	long *loop_int = ALLOCA_N(long, n);
+	long *tap_int = ALLOCA_N(long, n);
+	if (direct) {
+		for (long j = 0; j < n; j++) {
+			double dl = clamp_delay(r->loop[j], 1, &r->fdn[j]);
+			double dt = clamp_delay(r->tap[j], 0, &r->fdn[j]);
+			if (dl != mb_floor(dl) || dt != mb_floor(dt)) {
+				direct = 0;
+			}
+			loop_int[j] = (long)dl;
+			tap_int[j] = (long)dt;
+		}
+	}
+
+	// The feedback network, one sample at a time
 	for (long i = 0; i < count; i++) {
-		uint64_t pos = r->pos;
+		uint64_t pos = pos0 + i;
 
-		double diff_depth = mb_signal_at(&par[P_DIFF_DEPTH], i);
 		double fdn_depth = mb_signal_at(&par[P_FDN_DEPTH], i);
 		double freeze = mb_signal_at(&par[P_FREEZE], i);
-		if (!(freeze > 0)) {
-			freeze = 0;
-		} else if (freeze > 1) {
-			freeze = 1;
-		}
+		freeze = !(freeze > 0) ? 0 : (freeze > 1 ? 1 : freeze);
 
-		// LFOs: a new target every LFO_STEP samples of the stream
-		if ((pos % LFO_STEP) == 0) {
-			if (r->diff_mod) {
-				double inc = mb_signal_at(&par[P_DIFF_RATE], i) / fs;
-				for (long k = 0; k < stages * n; k++) {
-					lfo_step(&r->dlfo[k], r->diff_shape, inc, &r->rng);
-				}
-			}
-			if (r->fdn_mod && r->feedback) {
-				double inc = mb_signal_at(&par[P_FDN_RATE], i) / fs;
-				for (long k = 0; k < n; k++) {
-					lfo_step(&r->flfo[k], r->fdn_shape, inc, &r->rng);
-				}
-			}
-		}
-
-		double in_scale = 1.0 - freeze;
-		for (long j = 0; j < n; j++) {
-			x[j] = mb_signal_at(&in[j], i) * r->in_gain[j] * in_scale;
-		}
-
-		// Diffusion stages
-		for (long s = 0; s < stages; s++) {
-			struct rev_line *lines = r->diff + s * n;
-			const double *delay = r->diff_delay + s * n;
-			const double *pol = r->diff_pol + s * n;
-			const long *order = r->diff_order + s * n;
-			struct rev_lfo *lfo = r->dlfo + s * n;
-
-			for (long j = 0; j < n; j++) {
-				lines[j].buf[pos & lines[j].mask] = (float)x[j];
-				double d = delay[j];
-				if (r->diff_mod) {
-					d += diff_depth * (1.0 + lfo[j].value);
-				}
-				d = clamp_delay(d, 0, &lines[j]);
-				u[j] = line_read(&lines[j], pos, d) * pol[j];
-			}
-
-			for (long h = 1; h < n; h <<= 1) {
-				for (long a = 0; a < n; a += h << 1) {
-					for (long b = a; b < a + h; b++) {
-						double p = u[b];
-						double q = u[b + h];
-						u[b] = p + q;
-						u[b + h] = p - q;
-					}
-				}
-			}
-
+		if (r->fdn_mod && (pos % LFO_STEP) == 0) {
+			double inc = mb_signal_at(&par[P_FDN_RATE], i) / fs;
 			for (long k = 0; k < n; k++) {
-				x[k] = u[order[k]] * r->diff_scale;
+				lfo_step(&r->flfo[k], r->fdn_shape, inc);
 			}
 		}
 
-		if (!r->feedback) {
-			for (long j = 0; j < n; j++) {
-				out[j][i] = (float)x[j];
+		double size = mb_signal_at(&par[P_SIZE], i);
+		double damp_hz = mb_signal_at(&par[P_DAMPING], i);
+		double hp_hz = mb_signal_at(&par[P_HIGHPASS], i);
+		double drive = mb_signal_at(&par[P_DRIVE], i);
+		double shimmer = mb_signal_at(&par[P_SHIMMER], i);
+		double bits = mb_signal_at(&par[P_CRUSH], i);
+
+		if (!(size > 0)) {
+			size = 0;
+		}
+		if (damp_hz != r->damp_hz) {
+			r->damp_hz = damp_hz;
+			r->damp_c = damp_hz > 0 ? 1.0 - exp(-2.0 * M_PI * damp_hz / fs) : 1.0;
+		}
+		if (hp_hz != r->hp_hz) {
+			r->hp_hz = hp_hz;
+			r->hp_c = hp_hz > 0 ? 1.0 - exp(-2.0 * M_PI * hp_hz / fs) : 0.0;
+		}
+		if (bits != r->crush_bits) {
+			r->crush_bits = bits;
+			r->crush_q = bits > 0 ? pow(2.0, bits) : 0.0;
+		}
+		double shim_inc = 0, shim_dry = 1, shim_wet = 0;
+		if (shimmer > 0) {
+			if (shimmer > 1) {
+				shimmer = 1;
 			}
+			shim_inc = (mb_signal_at(&par[P_SHIMMER_RATIO], i) - 1.0) / r->shimmer_window;
+			// Equal power: the shifted grains are uncorrelated with the
+			// unshifted sound
+			shim_dry = sqrt(1.0 - shimmer);
+			shim_wet = sqrt(shimmer);
 		} else {
-			double size = mb_signal_at(&par[P_SIZE], i);
-			double damp_hz = mb_signal_at(&par[P_DAMPING], i);
-			double hp_hz = mb_signal_at(&par[P_HIGHPASS], i);
-			double drive = mb_signal_at(&par[P_DRIVE], i);
-			double shimmer = mb_signal_at(&par[P_SHIMMER], i);
-			double bits = mb_signal_at(&par[P_CRUSH], i);
+			shimmer = 0;
+		}
 
-			if (!(size > 0)) {
-				size = 0;
-			}
-			if (damp_hz != r->damp_hz) {
-				r->damp_hz = damp_hz;
-				r->damp_c = damp_hz > 0 ? 1.0 - exp(-2.0 * M_PI * damp_hz / fs) : 1.0;
-			}
-			if (hp_hz != r->hp_hz) {
-				r->hp_hz = hp_hz;
-				r->hp_c = hp_hz > 0 ? 1.0 - exp(-2.0 * M_PI * hp_hz / fs) : 0.0;
-			}
-			if (bits != r->crush_bits) {
-				r->crush_bits = bits;
-				r->crush_q = bits > 0 ? pow(2.0, bits) : 0.0;
-			}
-			double shim_inc = 0;
-			if (shimmer > 0) {
-				if (shimmer > 1) {
-					shimmer = 1;
-				}
-				shim_inc = (mb_signal_at(&par[P_SHIMMER_RATIO], i) - 1.0) / r->shimmer_window;
+		// Loop reads and in-loop processing
+		for (long j = 0; j < n; j++) {
+			struct rev_line *l = &r->fdn[j];
+			double v, d = 0;
+			if (direct) {
+				v = l->buf[(pos - loop_int[j]) & l->mask];
 			} else {
-				shimmer = 0;
-			}
-
-			// Loop reads and in-loop processing
-			for (long j = 0; j < n; j++) {
-				struct rev_line *l = &r->fdn[j];
 				double mod = r->fdn_mod ? fdn_depth * r->flfo[j].value : 0.0;
-				double d = clamp_delay(r->loop[j] * size + mod, 1, l);
-				double v = line_read(l, pos, d);
+				d = clamp_delay(r->loop[j] * size + mod, 1, l);
+				v = line_read(l, pos, d);
+			}
+			r->raw[j] = v;
+			r->raw_d[j] = d;
 
-				if (shimmer > 0) {
-					double ph = r->shim_phase[j] - shim_inc;
-					ph -= mb_floor(ph);
-					r->shim_phase[j] = ph;
-					double ph2 = ph + 0.5;
-					if (ph2 >= 1.0) {
-						ph2 -= 1.0;
-					}
-					double w = r->shimmer_window;
-					double s1 = line_read(l, pos, clamp_delay(d + w * ph, 1, l));
-					double s2 = line_read(l, pos, clamp_delay(d + w * ph2, 1, l));
-					double shifted = s1 * (1.0 - fabs(2.0 * ph - 1.0)) + s2 * (1.0 - fabs(2.0 * ph2 - 1.0));
-					v = v + (shifted - v) * shimmer;
+			if (shimmer > 0) {
+				if (direct) {
+					d = (double)loop_int[j];
 				}
-
-				double c = r->damp_a ? r->damp_a[j] : r->damp_c;
-				if (c < 1.0) {
-					r->lp[j] += c * (v - r->lp[j]);
-					v = r->lp[j] + (v - r->lp[j]) * freeze;
+				double ph = r->shim_phase[j] - shim_inc;
+				ph -= mb_floor(ph);
+				r->shim_phase[j] = ph;
+				double ph2 = ph + 0.5;
+				if (ph2 >= 1.0) {
+					ph2 -= 1.0;
 				}
-
-				if (r->hp_c > 0) {
-					r->hp[j] += r->hp_c * (v - r->hp[j]);
-					v = v - r->hp[j] * (1.0 - freeze);
-				}
-
-				if (drive > 0) {
-					v = drive_shape(r->drive_mode, v * drive) / drive;
-				}
-
-				// Quantized toward zero, so a decaying loop can't get stuck
-				// on a level (rounding to nearest could hold x when
-				// x * gain rounds back to x: a limit cycle)
-				if (r->crush_q > 0) {
-					double t = v * r->crush_q;
-					t = t < 0 ? -mb_floor(-t) : mb_floor(t);
-					v = t / r->crush_q;
-				}
-
-				double g = r->gain[j];
-				g += (1.0 - g) * freeze;
-				u[j] = x[j] + v * g;
+				double w = r->shimmer_window;
+				double s1 = line_read_clamped(l, pos, d + w * ph, 1);
+				double s2 = line_read_clamped(l, pos, d + w * ph2, 1);
+				// Power-complementary grain windows sin(pi ph), sin(pi ph2)
+				double shifted = s1 * half_sine(ph) + s2 * half_sine(ph2);
+				v = v * shim_dry + shifted * shim_wet;
 			}
 
-			// Householder reflection, shuffle, write
-			double dot = 0;
-			for (long j = 0; j < n; j++) {
-				dot += r->normal[j] * u[j];
-			}
-			double twice = 2.0 * dot;
-			for (long j = 0; j < n; j++) {
-				x[j] = u[j] - r->normal[j] * twice;
-			}
-			for (long j = 0; j < n; j++) {
-				struct rev_line *l = &r->fdn[j];
-				l->buf[pos & l->mask] = (float)x[r->order[j]];
+			double c = r->damp_a ? r->damp_a[j] : r->damp_c;
+			if (c < 1.0) {
+				double lp = r->lp[j] + c * (v - r->lp[j]);
+				if (fabs(lp) < REV_FLUSH) {
+					lp = 0;
+				}
+				r->lp[j] = lp;
+				v = lp + (v - lp) * freeze;
 			}
 
-			// Output taps
-			for (long j = 0; j < n; j++) {
-				struct rev_line *l = &r->fdn[j];
+			if (r->hp_c > 0) {
+				double hp = r->hp[j] + r->hp_c * (v - r->hp[j]);
+				if (fabs(hp) < REV_FLUSH) {
+					hp = 0;
+				}
+				r->hp[j] = hp;
+				v = v - hp * (1.0 - freeze);
+			}
+
+			if (drive > 0) {
+				v = drive_shape(r->drive_mode, v * drive) / drive;
+			}
+
+			// Quantized toward zero, so a decaying loop can't get stuck
+			// on a level (rounding to nearest could hold x when
+			// x * gain rounds back to x: a limit cycle)
+			if (r->crush_q > 0) {
+				double t = v * r->crush_q;
+				t = t < 0 ? -mb_floor(-t) : mb_floor(t);
+				v = t / r->crush_q;
+			}
+
+			double g = r->gain[j];
+			g += (1.0 - g) * freeze;
+			u[j] = blk[j * count + i] + v * g;
+		}
+
+		// Householder reflection, shuffle, write
+		double dot = 0;
+		for (long j = 0; j < n; j++) {
+			dot += r->normal[j] * u[j];
+		}
+		double twice = 2.0 * dot;
+		for (long j = 0; j < n; j++) {
+			x[j] = u[j] - r->normal[j] * twice;
+		}
+		for (long j = 0; j < n; j++) {
+			struct rev_line *l = &r->fdn[j];
+			double w = x[r->order[j]];
+			// (subnormal tails are slow everywhere they're read)
+			l->buf[pos & l->mask] = fabs(w) < REV_FLUSH ? 0.0f : (float)w;
+		}
+
+		// Output taps
+		for (long j = 0; j < n; j++) {
+			struct rev_line *l = &r->fdn[j];
+			if (direct) {
+				out[j][i] = l->buf[(pos - tap_int[j]) & l->mask];
+			} else {
 				double mod = r->fdn_mod ? fdn_depth * r->flfo[j].value : 0.0;
-				double d = clamp_delay(r->tap[j] * size + mod, 0, l);
-				out[j][i] = (float)line_read(l, pos, d);
+				double d = r->tap[j] * size + mod;
+				if (r->tap[j] == r->loop[j] && d == r->raw_d[j]) {
+					// The loop read the same sample (delays >= 1 read before
+					// and after this sample's write alike)
+					out[j][i] = (float)r->raw[j];
+				} else {
+					out[j][i] = (float)line_read_clamped(l, pos, d, 0);
+				}
 			}
 		}
 
-		// LFO ramps
-		if (r->diff_mod) {
-			for (long k = 0; k < stages * n; k++) {
-				r->dlfo[k].value += r->dlfo[k].slope;
-			}
-		}
-		if (r->fdn_mod && r->feedback) {
+		if (r->fdn_mod) {
 			for (long k = 0; k < n; k++) {
 				r->flfo[k].value += r->flfo[k].slope;
 			}
 		}
-
-		r->pos = pos + 1;
 	}
+
+	r->pos = pos0 + count;
 
 	RB_GC_GUARD(in_vals);
 	RB_GC_GUARD(par_vals);

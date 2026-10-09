@@ -13,13 +13,14 @@ module MB
             LFO_STEP = 16
             PARAM_COUNT = 12
             MASK64 = 0xFFFF_FFFF_FFFF_FFFF
+            FLUSH = 1e-30
 
             # A ring buffer of float32 values (Ruby Floats) with a
             # power-of-two capacity, indexed by the stream position.
             Line = Struct.new(:buf, :mask)
 
             # One LFO's state (see struct rev_lfo).
-            Lfo = Struct.new(:phase, :value, :slope, :prev, :next_value, :scale)
+            Lfo = Struct.new(:phase, :value, :slope, :prev, :next_value, :scale, :rng)
 
             attr_reader :position
 
@@ -61,13 +62,15 @@ module MB
               @shim_phase = floats(c, :shimmer_phase, @n)
 
               @dlfo.each do |l|
-                l.prev = rand_signed
-                l.next_value = rand_signed
+                l.rng = [rand64(self)]
+                l.prev = rand_signed(l.rng)
+                l.next_value = rand_signed(l.rng)
                 l.value = shape(@diff_shape, l)
               end
               @flfo.each do |l|
-                l.prev = rand_signed
-                l.next_value = rand_signed
+                l.rng = [rand64(self)]
+                l.prev = rand_signed(l.rng)
+                l.next_value = rand_signed(l.rng)
                 l.value = shape(@fdn_shape, l)
               end
 
@@ -167,9 +170,13 @@ module MB
                     @crush_q = bits > 0 ? 2.0 ** bits : 0.0
                   end
                   shim_inc = 0.0
+                  shim_dry = 1.0
+                  shim_wet = 0.0
                   if shimmer > 0
                     shimmer = 1.0 if shimmer > 1
                     shim_inc = (at(par[8], i) - 1.0) / @shimmer_window
+                    shim_dry = Math.sqrt(1.0 - shimmer)
+                    shim_wet = Math.sqrt(shimmer)
                   else
                     shimmer = 0.0
                   end
@@ -189,19 +196,23 @@ module MB
                       w = @shimmer_window
                       s1 = read(l, pos, clamp_delay(d + w * ph, 1, l))
                       s2 = read(l, pos, clamp_delay(d + w * ph2, 1, l))
-                      shifted = s1 * (1.0 - (2.0 * ph - 1.0).abs) + s2 * (1.0 - (2.0 * ph2 - 1.0).abs)
-                      v = v + (shifted - v) * shimmer
+                      shifted = s1 * half_sine(ph) + s2 * half_sine(ph2)
+                      v = v * shim_dry + shifted * shim_wet
                     end
 
                     c = @damp_a ? @damp_a[j] : @damp_c
                     if c < 1.0
-                      @lp[j] += c * (v - @lp[j])
-                      v = @lp[j] + (v - @lp[j]) * freeze
+                      lp = @lp[j] + c * (v - @lp[j])
+                      lp = 0.0 if lp.abs < FLUSH
+                      @lp[j] = lp
+                      v = lp + (v - lp) * freeze
                     end
 
                     if @hp_c > 0
-                      @hp[j] += @hp_c * (v - @hp[j])
-                      v = v - @hp[j] * (1.0 - freeze)
+                      hp = @hp[j] + @hp_c * (v - @hp[j])
+                      hp = 0.0 if hp.abs < FLUSH
+                      @hp[j] = hp
+                      v = v - hp * (1.0 - freeze)
                     end
 
                     v = drive_shape(v * drive) / drive if drive > 0
@@ -222,7 +233,8 @@ module MB
                   @n.times { |j| x[j] = u[j] - @normal[j] * twice }
                   @n.times do |j|
                     l = @fdn[j]
-                    l.buf[pos & l.mask] = f32(x[@order[j]])
+                    w = x[@order[j]]
+                    l.buf[pos & l.mask] = w.abs < FLUSH ? 0.0 : f32(w)
                   end
 
                   @n.times do |j|
@@ -287,12 +299,27 @@ module MB
               sig.is_a?(Array) ? sig[i] : sig
             end
 
-            def rand_signed
-              z = @rng = (@rng + 0x9e3779b97f4a7c15) & MASK64
+            # splitmix64 on the kernel's own state (+owner+ self) or an LFO's
+            # one-element Array.
+            def rand64(owner)
+              if owner.equal?(self)
+                z = @rng = (@rng + 0x9e3779b97f4a7c15) & MASK64
+              else
+                z = owner[0] = (owner[0] + 0x9e3779b97f4a7c15) & MASK64
+              end
               z = ((z ^ (z >> 30)) * 0xbf58476d1ce4e5b9) & MASK64
               z = ((z ^ (z >> 27)) * 0x94d049bb133111eb) & MASK64
-              z ^= z >> 31
-              (z >> 11) * (1.0 / 9007199254740992.0) * 2.0 - 1.0
+              z ^ (z >> 31)
+            end
+
+            def rand_signed(state)
+              (rand64(state) >> 11) * (1.0 / 9007199254740992.0) * 2.0 - 1.0
+            end
+
+            def half_sine(p)
+              t = 1.0 - (2.0 * p - 1.0).abs
+              t2 = t * t
+              t * (1.5707963267948966 - t2 * (0.6459640975062462 - t2 * (0.07969262624616703 - t2 * 0.004681754135318687)))
             end
 
             def shape(shape, l)
@@ -325,7 +352,7 @@ module MB
                   while l.phase >= 1.0
                     l.phase -= 1.0
                     l.prev = l.next_value
-                    l.next_value = rand_signed
+                    l.next_value = rand_signed(l.rng)
                   end
                   l.phase = 0.0 if l.phase < 0
                 else
