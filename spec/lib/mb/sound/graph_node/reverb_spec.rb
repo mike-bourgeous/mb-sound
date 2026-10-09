@@ -321,6 +321,67 @@ RSpec.describe(MB::Sound::GraphNode::Reverb) do
     end
   end
 
+  describe 'input reads' do
+    # A source that counts its reads, to check that every reverb path
+    # reads its inputs once per buffer (2026-10-10: a listening render
+    # sampled the old FdnReverb's first output twice per buffer, playing
+    # the input at double speed).
+    let(:counter_class) {
+      Class.new do
+        include MB::Sound::GraphNode
+        include MB::Sound::GraphNode::SampleRateHelper
+        attr_reader :reads, :samples
+        def initialize
+          @reads = 0
+          @samples = 0
+          @sample_rate = 48000.0
+        end
+
+        def sample(count)
+          @reads += 1
+          @samples += count
+          Numo::SFloat.new(count).rand(-1, 1)
+        end
+
+        def sources = {}
+      end
+    }
+
+    {
+      'a mono preset' => ->(l, _r) { l.reverb(:hall) },
+      'a mono preset with two outputs' => ->(l, _r) { l.reverb(:hall, output_channels: 2) },
+      'a stereo bundle with predelay' => ->(l, r) { MB::Sound::GraphNode::Channels.new([l, r]).reverb(:hall, predelay: 0.02) },
+      'an Array input' => ->(l, r) { [l, r].reverb(:room) },
+      'the room-size form' => ->(l, r) { MB::Sound::GraphNode::Channels.new([l, r]).reverb(room_size: 0.2, decay: 0.8, damping: 0.5) },
+      'the room-size form with 4 outputs and nodes' => ->(l, r) {
+        MB::Sound::GraphNode::Channels.new([l, r]).reverb(room_size: 0.8, mod: :lush, freeze: 0.constant, stretch: 0.2.hz.lfo.at(0.9..1.1), output_channels: 4)
+      },
+      'the gated preset' => ->(l, r) { MB::Sound::GraphNode::Channels.new([l, r]).reverb(:gated) },
+      'show_internals' => ->(l, r) { MB::Sound::GraphNode::Channels.new([l, r]).reverb(:hall, show_internals: true) },
+      'a dry path mixed with the reverb' => ->(l, r) { b = MB::Sound::GraphNode::Channels.new([l, r]); b + b.reverb(room_size: 0.4, dry: 0) },
+      'a mono input shared with the dry path' => ->(l, _r) { l + l.reverb(room_size: 0.4, dry: 0) },
+    }.each do |name, build|
+      it "reads each input once per buffer with #{name}" do
+        l = counter_class.new
+        r = counter_class.new
+        node = build.call(l, r)
+        outs = node.respond_to?(:to_a) ? node.to_a : [node]
+        10.times { outs.each { |o| expect(o.sample(800)).to be_a(Numo::NArray) } }
+        [l, r].reject { |c| c.reads == 0 }.each do |c|
+          expect(c.reads).to eq(10)
+          expect(c.samples).to eq(8000)
+        end
+        expect(l.reads).to eq(10)
+      end
+    end
+
+    it 'warns when an output is sampled again before the others' do
+      out = 1.constant.reverb(:room, output_channels: 2)
+      out[0].sample(100)
+      expect { out[0].sample(100) }.to output(/sampled again/).to_stderr
+    end
+  end
+
   describe 'Ruby mirror' do
     it 'sounds the same as the C kernel (MB_SOUND_REVERB=ruby)' do
       params = { room_size: 0.1, decay: 0.2, channels: 4, stages: 2, mod: :lush, diffusion_mod: :subtle, shimmer: 0.3, drive: 2, highpass: 50 }
