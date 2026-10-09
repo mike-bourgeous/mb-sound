@@ -58,13 +58,13 @@ CASES.merge!(
 end
 
 CASES.merge!(
-  phase_60deg: -> { 220.hz.sine.with_phase(Math::PI / 3).at(0.5) },
+  phase_60deg: -> { 220.hz.sine.with_phase(1.0 / 6).at(0.5) },
   range_lfo: -> { 3.hz.triangle.at(-0.2..0.7) },
   slow_ramp: -> { 0.3.hz.ramp.at(0.5) },
   fm: -> { 220.hz.sine.fm(110.hz.sine.at(300)).at(0.5) },
   log_fm: -> { 220.hz.sine.log_fm(55.hz.sine.at(2)).at(0.5) },
-  pm: -> { 220.hz.sine.pm(330.hz.sine.at(2)).at(0.5) },
-  pm_chain: -> { 110.hz.triangle.pm(220.hz.sine.pm(440.hz.sine.at(1)).at(2)).at(0.5) },
+  pm: -> { 220.hz.sine.pm(330.hz.sine.at(2).radians).at(0.5) },
+  pm_chain: -> { 110.hz.triangle.pm(220.hz.sine.pm(440.hz.sine.at(1).radians).at(2).radians).at(0.5) },
   noise: -> { 1.hz.noise.at(0.3) },
   noisy_sine: -> { 440.hz.sine.noise(false).at(0.3) },
   note_a4: -> { MB::Sound::A4.triangle.at(0.5) },
@@ -94,39 +94,40 @@ CASES.merge!(
 )
 
 # Phase quantities (with_phase, pm, reset targets, operator feedback, unison
-# phases, ping phases, harmonic phases)
+# phases, ping phases, harmonic phases), in cycles since 2026-10-10; the
+# radians values of the original cases are kept exactly with .radians
 CASES.merge!(
-  phase_ramp: -> { 220.hz.ramp.with_phase(2.0).at(0.5) },
-  pm_index: -> { 220.hz.sine.pm(330.hz.sine, 1.5).at(0.5) },
-  pm_index_node: -> { 220.hz.sine.pm(330.hz.sine, 0.5.hz.lfo.at(0..3)).at(0.5) },
-  pm_ramp: -> { 220.hz.ramp.pm(110.hz.sine.at(0.8)).at(0.5) },
-  pm_square_pwm: -> { 220.hz.square.pwm(0.3).pm(55.hz.sine.at(0.6)).at(0.5) },
-  pm_constant: -> { 220.hz.triangle.pm(1.2).at(0.5) },
+  phase_ramp: -> { 220.hz.ramp.with_phase(2.0.radians).at(0.5) },
+  pm_index: -> { 220.hz.sine.pm(330.hz.sine, 1.5.radians).at(0.5) },
+  pm_index_node: -> { 220.hz.sine.pm(330.hz.sine, 0.5.hz.lfo.at(0..3).radians).at(0.5) },
+  pm_ramp: -> { 220.hz.ramp.pm(110.hz.sine.at(0.8).radians).at(0.5) },
+  pm_square_pwm: -> { 220.hz.square.pwm(0.3).pm(55.hz.sine.at(0.6).radians).at(0.5) },
+  pm_constant: -> { 220.hz.triangle.pm(1.2.hz, 1.radians).at(0.5) },
   pm_complex_ramp: -> {
-    osc = 110.hz.complex_ramp.pm(220.hz.sine.at(0.7)).at(0.5)
+    osc = 110.hz.complex_ramp.pm(220.hz.sine.at(0.7).radians).at(0.5)
     [osc.real, osc.imag]
   },
-  pm_wavetable: -> { 220.hz.wavetable(:saw).pm(330.hz.sine.at(1.2)).at(0.5) },
-  pm_noise: -> { 220.hz.sine.noise(0.2).pm(110.hz.sine.at(0.4)).at(0.3) },
-  fb_const: -> { 110.hz.fm_feedback(1.3).at(0.5) },
-  fb_node: -> { 110.hz.fm_feedback(2.hz.lfo.at(0..2)).at(0.5) },
-  fb_pm_gain: -> { 220.hz.fm_feedback(1.6, gain: 3.hz.lfo.at(0..1)).pm(110.hz.sine.at(0.5)).at(0.5) },
+  pm_wavetable: -> { 220.hz.wavetable(:saw).pm(330.hz.sine.at(1.2).radians).at(0.5) },
+  pm_noise: -> { 220.hz.sine.noise(0.2).pm(110.hz.sine.at(0.4).radians).at(0.3) },
+  fb_const: -> { 110.hz.fm_feedback(1.3.radians).at(0.5) },
+  fb_node: -> { 110.hz.fm_feedback(2.hz.lfo.at(0..2).radians).at(0.5) },
+  fb_pm_gain: -> { 220.hz.fm_feedback(1.6.radians, gain: 3.hz.lfo.at(0..1)).pm(110.hz.sine.at(0.5).radians).at(0.5) },
   fb_dx7: -> { 110.hz.fm_feedback(MB::Sound::Tone.dx7_feedback(5)).at(0.5) },
   reset_to: -> {
     hits = MB::Sound.grid(16, 'x..x..x.x..x.x..').loop
-    300.hz.saw.reset(hits.trigger, to: 1.0).at(0.5)
+    300.hz.saw.reset(hits.trigger, to: 1.0.radians).at(0.5)
   },
   reset_to_node: -> {
     hits = MB::Sound.grid(16, 'x.x.x.x.x.x.x.x.').loop
-    300.hz.sine.reset(hits.trigger, to: 0.3.hz.lfo.at(0..3)).at(0.5)
+    300.hz.sine.reset(hits.trigger, to: 0.3.hz.lfo.at(0..3).radians).at(0.5)
   },
-  unison_phase: -> { 110.hz.unison(5, layout: :even, phase: 1.0) * 0.5 },
+  unison_phase: -> { 110.hz.unison(5, layout: :even, phase: 1.0.radians) * 0.5 },
   ping_phase: -> {
     hits = MB::Sound.grid(16, 'x...x...x...x...').loop
-    hits.trigger.ping(440, decay: 0.2, phase: Math::PI / 2) * 0.5
+    hits.trigger.ping(440, decay: 0.2, phase: 0.25) * 0.5
   },
-  harmonic_phases: -> { 220.hz.harmonics([1, 0.5, 0.3], phases: [0, Math::PI / 2, 1.0]) * 0.4 },
-  table_phases: -> { 220.hz.wavetable(MB::Sound::Wavetable.from_harmonics([1, 0.5, 0.25], [0, Math::PI / 2, 1.0])).at(0.4) },
+  harmonic_phases: -> { 220.hz.harmonics([1, 0.5, 0.3], phases: [0, 0.25, 1.0.radians]) * 0.4 },
+  table_phases: -> { 220.hz.wavetable(MB::Sound::Wavetable.from_harmonics([1, 0.5, 0.25], [0, 0.25, 1.0.radians])).at(0.4) },
 )
 
 MB::Sound.script(

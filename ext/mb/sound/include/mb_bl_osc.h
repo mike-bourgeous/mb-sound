@@ -12,7 +12,6 @@
 #include "mb_ext_helpers.h"
 
 #define BL_MAX_BREAKPOINTS 4
-#define BL_INV_2PI (1.0 / (2.0 * M_PI))
 #define BL_EPS 1e-9
 #define BL_MIN_WIDTH 1e-4
 
@@ -418,7 +417,7 @@ static inline void mb_bl_oscillate(enum bl_wave wt, float *out, size_t length,
 
 		e = mb_wrap(phi + steps, 1.0);
 		if (pm != 0) {
-			e = mb_wrap(e + pm * BL_INV_2PI, 1.0);
+			e = mb_wrap(e + pm, 1.0);
 		}
 		double v;
 		int snapped = bl_snap(bp, nbp, e);
@@ -433,7 +432,7 @@ static inline void mb_bl_oscillate(enum bl_wave wt, float *out, size_t length,
 		// while correcting the previous sample, unless its next phase
 		// modulation was extrapolated (between buffers, only if the phase
 		// continued without a jump)
-		double d_back = prev_inc + (pm - prev_pm) * BL_INV_2PI;
+		double d_back = prev_inc + (pm - prev_pm);
 		if (i > 0 && d_back == pending_d) {
 			v += pending;
 		} else if (primed && (i > 0 || fabs(mb_wrap(prev_e + d_back - e + 0.5, 1.0) - 0.5) < 1e-6)) {
@@ -457,7 +456,7 @@ static inline void mb_bl_oscillate(enum bl_wave wt, float *out, size_t length,
 		} else {
 			next_pm = pm + (pm - (i > 0 || primed ? prev_pm : pm));
 		}
-		double d_fwd = inc + (next_pm - pm) * BL_INV_2PI;
+		double d_fwd = inc + (next_pm - pm);
 		v += bl_step(bp, nbp, e, d_fwd, adv, lo, hi, &pending);
 		pending_d = d_fwd;
 

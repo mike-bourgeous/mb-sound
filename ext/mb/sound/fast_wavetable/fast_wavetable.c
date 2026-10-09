@@ -36,7 +36,6 @@
 #define WT_DERIV_ORDERS 2 // value and slope (phase warp corners)
 #define WT_GUARD 16 // Wavetable::GUARD
 #define WT_MAX_TAPS 64 // sync residual taps (BandLimit::SYNC_TAPS)
-#define WT_INV_2PI (1.0 / (2.0 * M_PI))
 #define WT_MIN_WIDTH 1e-4
 
 enum wt_interp {
@@ -785,7 +784,7 @@ static inline void wt_corner_step(const struct wt_table *t, double e, double d, 
  *
  * The phase (state[0], cycles) advances like FastSound.phasor and
  * FastSynth.oscillate_bl: sample i reads phase phi + (increments 0...i)
- * (i * increment for a constant frequency), plus phase_mod / 2pi, warped
+ * (i * increment for a constant frequency), plus phase_mod (cycles), warped
  * like oscillate_bl when +width+ isn't nil.  Levels are picked from the
  * motion per sample (increment plus the change in phase modulation) times
  * the warp's steeper slope.  With a warp and band-limited levels, the
@@ -882,7 +881,7 @@ static VALUE ruby_oscillate(int argc, VALUE *argv, VALUE self)
 
 		double e = wt_wrap(phi + steps, 1.0);
 		if (pm != 0) {
-			e = wt_wrap(e + pm * WT_INV_2PI, 1.0);
+			e = wt_wrap(e + pm, 1.0);
 		}
 
 		double u, wf;
@@ -899,7 +898,7 @@ static VALUE ruby_oscillate(int argc, VALUE *argv, VALUE self)
 		// Noise picks levels by the mean increment (the pitch; a random
 		// phase gives white noise with the table's distribution of values
 		// at any level)
-		double d = (rndadv != 0 ? freq * (adv + 0.5 * rndadv) : inc) + (pm - prev_pm) * WT_INV_2PI;
+		double d = (rndadv != 0 ? freq * (adv + 0.5 * rndadv) : inc) + (pm - prev_pm);
 		double m = fabs(d) * wf;
 		double re, im;
 		wt_reselect(&t, m, sc, &sel);
@@ -910,7 +909,7 @@ static VALUE ruby_oscillate(int argc, VALUE *argv, VALUE self)
 			// found while correcting the previous sample, unless its next
 			// phase modulation was extrapolated (between buffers, only if
 			// the phase continued without a jump)
-			double d_back = prev_inc + (pm - prev_pm) * WT_INV_2PI;
+			double d_back = prev_inc + (pm - prev_pm);
 			if (i > 0 && d_back == pending_d) {
 				re += pending_re;
 				im += pending_im;
@@ -929,7 +928,7 @@ static VALUE ruby_oscillate(int argc, VALUE *argv, VALUE self)
 			} else {
 				next_pm = pm + (pm - (i > 0 || primed ? prev_pm : pm));
 			}
-			double d_fwd = inc + (next_pm - pm) * WT_INV_2PI;
+			double d_fwd = inc + (next_pm - pm);
 			double bre, bim;
 			wt_corner_step(&t, e, d_fwd, w, m, sc, mode, &ks, &bre, &bim, &pending_re, &pending_im);
 			re += bre;

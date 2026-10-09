@@ -9,7 +9,7 @@ RSpec.describe(MB::Sound::Wavetable, aggregate_failures: true) do
 
   describe '.from_harmonics' do
     it 'keeps exact Fourier amplitudes and phases' do
-      t = w.from_harmonics([1, 0.5, 0, 0.25], [0, Math::PI / 2, 0, 0], size: 64)
+      t = w.from_harmonics([1, 0.5, 0, 0.25], [0, 0.25, 0, 0], size: 64)
       x = t.frames[0, nil]
       phase = Numo::DFloat.new(64).seq / 64 * 2 * Math::PI
       expected = Numo::NMath.sin(phase) + 0.5 * Numo::NMath.cos(2 * phase) + 0.25 * Numo::NMath.sin(4 * phase)
@@ -297,7 +297,7 @@ RSpec.describe(MB::Sound::Wavetable, aggregate_failures: true) do
     it 'has classic shapes that match the naive Tone shapes away from their edges' do
       { saw: :ramp, square: :square, triangle: :triangle }.each do |name, wave|
         [0.1, 0.2, 0.3, 0.6, 0.85].each do |ph|
-          expect(w[name].value_at(ph)).to be_within(0.005).of(MB::Sound::Tone.value_at_ruby(wave, ph * 2 * Math::PI)), "#{name} at #{ph}"
+          expect(w[name].value_at(ph)).to be_within(0.005).of(MB::Sound::Tone.value_at_ruby(wave, ph)), "#{name} at #{ph}"
         end
       end
     end

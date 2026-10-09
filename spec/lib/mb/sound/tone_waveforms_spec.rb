@@ -5,7 +5,7 @@ RSpec.describe MB::Sound::Tone do
     describe ".#{method}" do
       let(:method_name) { method }
 
-      # Calls Tone.value_at(wave, phi) as wave.send(method, phi)
+      # Calls Tone.value_at(wave, phase) as wave.send(method, phase) (cycles)
       def wave(type)
         m = method_name
         Struct.new(:type) do
@@ -17,105 +17,105 @@ RSpec.describe MB::Sound::Tone do
       it 'returns expected sine wave values for given phases' do
         lfo = wave(:sine)
         expect(lfo.send(method, 0).round(6)).to eq(0)
-        expect(lfo.send(method, 0.25 * Math::PI).round(6)).to eq((0.5 ** 0.5).round(6))
-        expect(lfo.send(method, 0.5 * Math::PI).round(6)).to eq(1)
-        expect(lfo.send(method, Math::PI).round(6)).to eq(0)
-        expect(lfo.send(method, 1.25 * Math::PI).round(6)).to eq(-(0.5 ** 0.5).round(6))
-        expect(lfo.send(method, 1.5 * Math::PI).round(6)).to eq(-1)
+        expect(lfo.send(method, 0.125).round(6)).to eq((0.5 ** 0.5).round(6))
+        expect(lfo.send(method, 0.25).round(6)).to eq(1)
+        expect(lfo.send(method, 0.5).round(6)).to eq(0)
+        expect(lfo.send(method, 0.625).round(6)).to eq(-(0.5 ** 0.5).round(6))
+        expect(lfo.send(method, 0.75).round(6)).to eq(-1)
       end
 
       it 'returns expected triangle wave values for given phases' do
         lfo = wave(:triangle)
         expect(lfo.send(method, 0).round(6)).to eq(0)
-        expect(lfo.send(method, 0.125 * Math::PI).round(6)).to eq(0.25)
-        expect(lfo.send(method, 0.25 * Math::PI).round(6)).to eq(0.5)
-        expect(lfo.send(method, 0.5 * Math::PI).round(6)).to eq(1)
-        expect(lfo.send(method, 0.75 * Math::PI).round(6)).to eq(0.5)
-        expect(lfo.send(method, Math::PI).round(6)).to eq(0)
-        expect(lfo.send(method, 1.25 * Math::PI).round(6)).to eq(-0.5)
-        expect(lfo.send(method, 1.5 * Math::PI).round(6)).to eq(-1)
-        expect(lfo.send(method, 1.75 * Math::PI).round(6)).to eq(-0.5)
-        expect(lfo.send(method, 1.875 * Math::PI).round(6)).to eq(-0.25)
+        expect(lfo.send(method, 0.0625).round(6)).to eq(0.25)
+        expect(lfo.send(method, 0.125).round(6)).to eq(0.5)
+        expect(lfo.send(method, 0.25).round(6)).to eq(1)
+        expect(lfo.send(method, 0.375).round(6)).to eq(0.5)
+        expect(lfo.send(method, 0.5).round(6)).to eq(0)
+        expect(lfo.send(method, 0.625).round(6)).to eq(-0.5)
+        expect(lfo.send(method, 0.75).round(6)).to eq(-1)
+        expect(lfo.send(method, 0.875).round(6)).to eq(-0.5)
+        expect(lfo.send(method, 0.9375).round(6)).to eq(-0.25)
       end
 
       it 'returns expected ramp wave values for given phases' do
         lfo = wave(:ramp)
         expect(lfo.send(method, 0).round(6)).to eq(0)
-        expect(lfo.send(method, 0.125 * Math::PI).round(6)).to eq(0.125)
-        expect(lfo.send(method, 0.25 * Math::PI).round(6)).to eq(0.25)
-        expect(lfo.send(method, 0.5 * Math::PI).round(6)).to eq(0.5)
-        expect(lfo.send(method, 0.75 * Math::PI).round(6)).to eq(0.75)
-        expect(lfo.send(method, 0.999 * Math::PI).round(6)).to eq(0.999)
-        expect(lfo.send(method, Math::PI).round(6)).to eq(-1)
-        expect(lfo.send(method, 1.25 * Math::PI).round(6)).to eq(-0.75)
-        expect(lfo.send(method, 1.5 * Math::PI).round(6)).to eq(-0.5)
-        expect(lfo.send(method, 1.875 * Math::PI).round(6)).to eq(-0.125)
-        expect(lfo.send(method, 1.999 * Math::PI).round(6)).to eq(-0.001)
+        expect(lfo.send(method, 0.0625).round(6)).to eq(0.125)
+        expect(lfo.send(method, 0.125).round(6)).to eq(0.25)
+        expect(lfo.send(method, 0.25).round(6)).to eq(0.5)
+        expect(lfo.send(method, 0.375).round(6)).to eq(0.75)
+        expect(lfo.send(method, 0.4995).round(6)).to eq(0.999)
+        expect(lfo.send(method, 0.5).round(6)).to eq(-1)
+        expect(lfo.send(method, 0.625).round(6)).to eq(-0.75)
+        expect(lfo.send(method, 0.75).round(6)).to eq(-0.5)
+        expect(lfo.send(method, 0.9375).round(6)).to eq(-0.125)
+        expect(lfo.send(method, 0.9995).round(6)).to eq(-0.001)
       end
 
       it 'returns expected square wave values for given phases' do
         lfo = wave(:square)
         expect(lfo.send(method, 0).round(6)).to eq(1)
-        expect(lfo.send(method, 0.125 * Math::PI).round(6)).to eq(1)
-        expect(lfo.send(method, 0.25 * Math::PI).round(6)).to eq(1)
-        expect(lfo.send(method, 0.5 * Math::PI).round(6)).to eq(1)
-        expect(lfo.send(method, 0.75 * Math::PI).round(6)).to eq(1)
-        expect(lfo.send(method, Math::PI).round(6)).to eq(-1)
-        expect(lfo.send(method, 1.25 * Math::PI).round(6)).to eq(-1)
-        expect(lfo.send(method, 1.5 * Math::PI).round(6)).to eq(-1)
-        expect(lfo.send(method, 1.875 * Math::PI).round(6)).to eq(-1)
+        expect(lfo.send(method, 0.0625).round(6)).to eq(1)
+        expect(lfo.send(method, 0.125).round(6)).to eq(1)
+        expect(lfo.send(method, 0.25).round(6)).to eq(1)
+        expect(lfo.send(method, 0.375).round(6)).to eq(1)
+        expect(lfo.send(method, 0.5).round(6)).to eq(-1)
+        expect(lfo.send(method, 0.625).round(6)).to eq(-1)
+        expect(lfo.send(method, 0.75).round(6)).to eq(-1)
+        expect(lfo.send(method, 0.9375).round(6)).to eq(-1)
       end
 
       it 'returns expected complex sine values' do
         o = wave(:complex_sine)
         expect(MB::M.round(o.send(method, 0), 6)).to eq(0-1i)
-        expect(MB::M.round(o.send(method, 45.degrees), 6)).to eq(MB::M.round(CMath.exp(-45i.degrees), 6))
-        expect(MB::M.round(o.send(method, 90.degrees), 6)).to eq(1+0i)
-        expect(MB::M.round(o.send(method, 180.degrees), 6)).to eq(0+1i)
-        expect(MB::M.round(o.send(method, 270.degrees), 6)).to eq(-1+0i)
+        expect(MB::M.round(o.send(method, 0.125), 6)).to eq(MB::M.round(CMath.exp(-45i.degrees), 6))
+        expect(MB::M.round(o.send(method, 0.25), 6)).to eq(1+0i)
+        expect(MB::M.round(o.send(method, 0.5), 6)).to eq(0+1i)
+        expect(MB::M.round(o.send(method, 0.75), 6)).to eq(-1+0i)
       end
 
       it 'returns expected complex square values' do
         o = wave(:complex_square)
-        expect(MB::M.round(o.send(method, 45.degrees), 6).real).to eq(1)
-        expect(MB::M.round(o.send(method, 45.degrees), 6).imag).to be < 0.25
+        expect(MB::M.round(o.send(method, 0.125), 6).real).to eq(1)
+        expect(MB::M.round(o.send(method, 0.125), 6).imag).to be < 0.25
 
-        expect(MB::M.round(o.send(method, 90.degrees), 6)).to eq(1)
+        expect(MB::M.round(o.send(method, 0.25), 6)).to eq(1)
 
-        expect(MB::M.round(o.send(method, 135.degrees), 6).real).to eq(1)
-        expect(MB::M.round(o.send(method, 135.degrees), 6).imag).to be > 0.25
+        expect(MB::M.round(o.send(method, 0.375), 6).real).to eq(1)
+        expect(MB::M.round(o.send(method, 0.375), 6).imag).to be > 0.25
 
-        expect(MB::M.round(o.send(method, 225.degrees), 6).real).to eq(-1)
-        expect(MB::M.round(o.send(method, 225.degrees), 6).imag).to be > 0.25
+        expect(MB::M.round(o.send(method, 0.625), 6).real).to eq(-1)
+        expect(MB::M.round(o.send(method, 0.625), 6).imag).to be > 0.25
 
-        expect(MB::M.round(o.send(method, 270.degrees), 6)).to eq(-1)
+        expect(MB::M.round(o.send(method, 0.75), 6)).to eq(-1)
 
-        expect(MB::M.round(o.send(method, 315.degrees), 6).real).to eq(-1)
-        expect(MB::M.round(o.send(method, 315.degrees), 6).imag).to be < -0.25
+        expect(MB::M.round(o.send(method, 0.875), 6).real).to eq(-1)
+        expect(MB::M.round(o.send(method, 0.875), 6).imag).to be < -0.25
       end
 
       it 'wraps around phase for triangle' do
         o = wave(:triangle)
-        expect(MB::M.round(o.send(method, 0.1), 6)).to eq(MB::M.round(o.send(method, 2*Math::PI + 0.1), 6))
-        expect(MB::M.round(o.send(method, -0.1), 6)).to eq(MB::M.round(o.send(method, 2*Math::PI - 0.1), 6))
+        expect(MB::M.round(o.send(method, 0.1), 6)).to eq(MB::M.round(o.send(method, 1.1), 6))
+        expect(MB::M.round(o.send(method, -0.1), 6)).to eq(MB::M.round(o.send(method, 0.9), 6))
       end
 
       it 'wraps around phase for gauss' do
         o = wave(:gauss)
-        expect(MB::M.round(o.send(method, 0.1), 6)).to eq(MB::M.round(o.send(method, 2*Math::PI + 0.1), 6))
-        expect(MB::M.round(o.send(method, -0.1), 6)).to eq(MB::M.round(o.send(method, 2*Math::PI - 0.1), 6))
+        expect(MB::M.round(o.send(method, 0.1), 6)).to eq(MB::M.round(o.send(method, 1.1), 6))
+        expect(MB::M.round(o.send(method, -0.1), 6)).to eq(MB::M.round(o.send(method, 0.9), 6))
       end
 
       it 'wraps around phase for square' do
         o = wave(:square)
-        expect(o.send(method, 0.1)).to eq(o.value_at(2*Math::PI + 0.1))
-        expect(o.send(method, -0.1)).to eq(o.value_at(2*Math::PI - 0.1))
+        expect(o.send(method, 0.1)).to eq(o.value_at(1.1))
+        expect(o.send(method, -0.1)).to eq(o.value_at(0.9))
       end
 
       it 'wraps around phase for parabola' do
         o = wave(:parabola)
-        expect(MB::M.round(o.send(method, 0.1), 6)).to eq(MB::M.round(o.send(method, 2*Math::PI + 0.1), 6))
-        expect(MB::M.round(o.send(method, -0.1), 6)).to eq(MB::M.round(o.send(method, 2*Math::PI - 0.1), 6))
+        expect(MB::M.round(o.send(method, 0.1), 6)).to eq(MB::M.round(o.send(method, 1.1), 6))
+        expect(MB::M.round(o.send(method, -0.1), 6)).to eq(MB::M.round(o.send(method, 0.9), 6))
       end
 
       pending 'returns expected gauss values'
@@ -162,11 +162,11 @@ RSpec.describe MB::Sound::Tone do
       end
 
       it 'takes phase into account' do
-        lfo = slow(:square, 10).with_phase(0.9 * Math::PI)
+        lfo = slow(:square, 10).with_phase(0.45)
         expect(one(lfo, method)).to eq(1)
         expect(one(lfo, method)).to eq(-1)
 
-        lfo = slow(:square, 2).with_phase(1.5 * Math::PI)
+        lfo = slow(:square, 2).with_phase(0.75)
         expect(one(lfo, method)).to eq(-1)
         expect(one(lfo, method)).to eq(1)
       end
@@ -281,15 +281,16 @@ RSpec.describe MB::Sound::Tone do
   end
 
   describe '#phi' do
-    it 'gives the starting phase before playing, wrapped to 0..2pi' do
-      expect(1.hz.with_phase(362.degrees).phi.round(5)).to eq(2.degrees.round(5))
-      expect(1.hz.with_phase(-2.degrees).phi.round(5)).to eq(358.degrees.round(5))
+    it 'gives the starting phase in cycles before playing, wrapped to 0..1' do
+      expect(1.hz.with_phase(1.25).phi).to eq(0.25)
+      expect(1.hz.with_phase(-0.25).phi).to eq(0.75)
+      expect(1.hz.with_phase(MB::Sound::Phase.degrees(362)).phi.round(9)).to eq((2 / 360.0).round(9))
     end
 
     it 'follows the phase while playing' do
       t = MB::Sound::Tone.new(frequency: 1, sample_rate: 4)
       t.sample(1)
-      expect(t.phi).to be_within(1e-12).of(Math::PI / 2)
+      expect(t.phi).to be_within(1e-12).of(0.25)
     end
   end
 

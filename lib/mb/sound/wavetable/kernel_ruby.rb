@@ -7,8 +7,6 @@ module MB
       # equal output.  Signal inputs given as NArrays are read as 32-bit
       # floats, as in C.  +spec+ is Wavetable#kernel_spec.
       module KernelRuby
-        INV_2PI = 1.0 / (2.0 * Math::PI)
-
         # Olli Niemitalo's optimal 4-point, 4th-order interpolator for 4x
         # oversampled data, z-form (even and odd coefficient pairs for c0..c4;
         # see the Wavetable class description).
@@ -65,7 +63,7 @@ module MB
             steps = inc * i if constant
 
             e = wrap(phi + steps)
-            e = wrap(e + pm * INV_2PI) if pm != 0
+            e = wrap(e + pm) if pm != 0
 
             if w != 0.5
               k1 = 0.5 / w
@@ -77,12 +75,12 @@ module MB
               wf = 1.0
             end
 
-            d = (rndadv != 0 ? fr * (adv + 0.5 * rndadv) : inc) + (pm - prev_pm) * INV_2PI
+            d = (rndadv != 0 ? fr * (adv + 0.5 * rndadv) : inc) + (pm - prev_pm)
             m = d.abs * wf
             v = value(spec, u, m, sc, interp)
 
             if corners
-              d_back = prev_inc + (pm - prev_pm) * INV_2PI
+              d_back = prev_inc + (pm - prev_pm)
               if i > 0 && d_back == pending_d
                 v = add(v, pending)
               elsif primed && (i > 0 || (wrap(prev_e + d_back - e + 0.5) - 0.5).abs < 1e-6)
@@ -95,7 +93,7 @@ module MB
               else
                 next_pm = pm + (pm - (i > 0 || primed ? prev_pm : pm))
               end
-              d_fwd = inc + (next_pm - pm) * INV_2PI
+              d_fwd = inc + (next_pm - pm)
               before, pending = corner_step(spec, e, d_fwd, w, m, sc, interp)
               v = add(v, before)
               pending_d = d_fwd

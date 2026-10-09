@@ -147,7 +147,7 @@ module MB
       attr_reader :period, :period_samples
       attr_reader :amplitude_set
 
-      # The phase modulation source (radians; a number or node), or nil.
+      # The phase modulation source (cycles; a number or node), or nil.
       attr_reader :phase_mod
 
       # The phase warp width (see #pwm), or nil.
@@ -172,14 +172,20 @@ module MB
         new(frequency: frequency)
       end
 
-      # Returns the value of +wave_type+ at phase +phi+ (radians), from -1 to
-      # 1 (C).
-      def self.value_at(wave_type, phi)
-        MB::FastSound.osc(wave_type, phi)
+      # Returns the value of +wave_type+ at +phase+ (cycles, or a Phase;
+      # e.g. 0.25 is the top of a sine), from -1 to 1 (C).
+      def self.value_at(wave_type, phase)
+        MB::FastSound.osc(wave_type, Phase.cycles(phase) * TWOPI)
       end
 
       # Ruby version of .value_at.
-      def self.value_at_ruby(wave_type, phi)
+      def self.value_at_ruby(wave_type, phase)
+        radians_value_ruby(wave_type, Phase.cycles(phase) * TWOPI)
+      end
+
+      # The formulas of .value_at_ruby, at +phi+ radians (the unit of the
+      # shapes' math; FastSound.osc's osc_sample in C).
+      def self.radians_value_ruby(wave_type, phi)
         case wave_type
         when :sine
           s = Math.sin(phi)
@@ -297,15 +303,20 @@ module MB
       end
 
       # Returns +wave_type+ at +phases+ (cycles, a DFloat NArray) plus
-      # +phase_mod+ (radians; Numeric or NArray), as a DFloat or DComplex
-      # NArray.  +increments+ (cycles; Numeric or NArray) offset complex
-      # square and ramp waves by half an increment.  Ruby version of
+      # +phase_mod+ (cycles; Numeric or NArray, real parts), as a DFloat or
+      # DComplex NArray.  +increments+ (cycles; Numeric or NArray) offset
+      # complex square and ramp waves by half an increment.  Ruby version of
       # MB::FastSound.shape (fast_sound.c), vectorized with Numo where the
-      # formula allows; see .value_at_ruby for the formulas.
+      # formula allows; see .radians_value_ruby for the formulas.
       def self.shape_ruby(wave_type, phases, increments, phase_mod)
         radians = phases * TWOPI
         radians = radians + increments * Math::PI if wave_type == :complex_square || wave_type == :complex_ramp
-        radians = radians + phase_mod if phase_mod
+        if phase_mod
+          pm = phase_mod
+          pm = pm.real if pm.is_a?(Complex) || pm.is_a?(Numo::SComplex) || pm.is_a?(Numo::DComplex)
+          pm = pm.is_a?(Numo::NArray) ? Numo::DFloat.cast(pm) : pm.to_f
+          radians = radians + pm * TWOPI
+        end
 
         case wave_type
         when :sine
@@ -353,7 +364,7 @@ module MB
 
         when :complex_triangle, :complex_square, :complex_ramp
           # These use complex integrals per sample (see .value_at_ruby)
-          Numo::DComplex.cast(radians.to_a.map { |phi| value_at_ruby(wave_type, phi) })
+          Numo::DComplex.cast(radians.to_a.map { |phi| radians_value_ruby(wave_type, phi) })
 
         else
           raise "Invalid wave type #{wave_type.inspect}"
@@ -420,8 +431,8 @@ module MB
       # +amplitude+ - The linear peak amplitude of the tone, or a Range
       #               (default 1: full scale, -1..1; the master bus is
       #               -10 dB by default, see Session#master_gain).
-      # +phase+ - The starting phase, in radians relative to a sine wave (0
-      #           radians phase starts at 0 and rises).
+      # +phase+ - The starting phase, in cycles relative to a sine wave (0
+      #           starts at 0 and rises; 0.25 at the top), or a Phase.
       # +sample_rate+ - The sample rate to use to calculate the frequency.
       def initialize(wave_type: :sine, frequency: 440, amplitude: 1.0, phase: 0, sample_rate: 48000)
         check_wave_type(wave_type)
@@ -523,7 +534,8 @@ module MB
       # shapers, or a sync master (see #sync).  Its phase runs like any
       # tone's (frequency and #reset inputs, timeline locks for tempo
       # pitches).  It has no amplitude (#at raises); scale it with
-      # arithmetic (e.g. `phasor * 2 * Math::PI` for radians).
+      # arithmetic (its output is already in cycles, the unit of every phase
+      # input, e.g. #pm).
       #
       # Example (bin/sound.rb):
       #     plot 100.hz.phasor, samples: 1000
@@ -805,7 +817,7 @@ module MB
       # starts at the bottom instead of the middle of its ramp.  This allows
       # using #drumramp oscillators to play beats in time with each other.
       def drumramp
-        ramp.with_phase(-Math::PI)
+        ramp.with_phase(-0.5)
       end
       alias envramp drumramp
 
@@ -1026,31 +1038,24 @@ module MB
       end
       alias at_rate sample_rate=
 
-      # Changes the initial phase of the tone, in radians relative to a sine
-      # wave.  0 phase starts oscillators at 0 and rising (or at the top half
-      # of the cycle for a square wave).
+      # Changes the initial phase of the tone, in cycles relative to a sine
+      # wave (0 to 1; whole cycles wrap): 0 starts oscillators at 0 and
+      # rising (or at the top half of the cycle for a square wave), 0.25 at
+      # the top of a sine.  +phase+ may also be an MB::Sound::Phase (e.g.
+      # `1.2.radians`, Phase.degrees(90)).  Also available as
+      # #with_phase_cycles.
       #
-      # +phase+ may also be an MB::Sound::Phase (e.g. `0.25.cycles`, the same
-      # as #with_phase_cycles).
-      #
-      # Example: 123.hz.with_phase(90.degrees)
+      # Example: 123.hz.with_phase(0.25)
       def with_phase(phase)
-        return with_phase_cycles(phase.to_cycles) if phase.is_a?(Phase) && !phase.node?
+        phase = Phase.cycles(phase)
+        raise ArgumentError, "A starting phase must be a number of cycles or a Phase (got #{phase.inspect})" unless phase.is_a?(Numeric)
 
         configure do
           @phase = phase
           @start_cycles = nil
         end
       end
-
-      # Like #with_phase, in cycles (0 to 1; e.g. 0.25 is 90 degrees).
-      def with_phase_cycles(cycles)
-        cycles = Phase.cycles(cycles)
-        configure do
-          @phase = cycles * TWOPI
-          @start_cycles = cycles
-        end
-      end
+      alias with_phase_cycles with_phase
 
       # Adds the given other +tone+ as a frequency modulator for this tone,
       # using the given modulation +index+ (good values range from 100 to
@@ -1109,13 +1114,22 @@ module MB
       # Adds the given other +tone+ or signal graph as a phase modulation
       # source for this tone.  Like #fm, but added to the phase given to the
       # oscillator, rather than to the frequency itself.  The phase
-      # modulation is in radians; an MB::Sound::Phase gives cycles instead:
-      # an +index+ like `0.4.cycles`, a node marked `node.cycles`, or a fixed
-      # phase offset like `0.25.cycles` (see also #pm_cycles).
+      # modulation is in cycles: the modulator's output (times +index+, a
+      # number or node, if given) is a phase offset in cycles, so
+      # `pm(330.hz.at(0.25))` swings a quarter cycle (90 degrees) either way.
+      # A Tone modulator without an amplitude plays at 1 (a full cycle).  An
+      # MB::Sound::Phase gives another unit (an +index+ like `2.4.radians`, a
+      # node marked `node.radians`) or a fixed phase offset (`0.25.cycles`
+      # makes a sine a cosine).  Also available as #pm_cycles and #pm_cyc.
+      #
+      # Examples (bin/sound.rb):
+      #     play 110.hz.pm(330.hz.sine, 0.4).at(-12.db)          # PM depth 0.4 cycles
+      #     play 110.hz.pm(330.hz.sine, 2.5.radians).at(-12.db)  # an FM index in radians
+      #     play 110.hz.pm(0.3.hz.lfo.at(0..0.5)).at(-12.db)     # a node in cycles
       def pm(tone, index = nil)
-        index = Phase.radians(index)
+        index = Phase.cycles(index)
         if tone.is_a?(Phase)
-          tone = tone.node? ? tone.to_radians : tone.to_radians.constant
+          tone = tone.node? ? tone.to_cycles : tone.to_cycles.constant
         end
 
         configure do
@@ -1136,19 +1150,8 @@ module MB
         end
       end
 
-      # Like #pm, with the modulation in cycles instead of radians: the
-      # modulator's output (times +index+, a number or node, if given) is a
-      # phase offset in cycles, so `pm_cycles(330.hz.at(0.25))` swings a
-      # quarter cycle (90 degrees) either way without typing Math::PI.
-      # Also available as #pm_cyc.
-      def pm_cycles(tone, index = nil)
-        return pm(tone, Phase.new(index)) unless index.nil?
-
-        tone = tone.hz if tone.is_a?(Numeric)
-        tone.or_at(1) if tone.is_a?(Tone)
-        pm(Phase.new(tone))
-      end
-      alias pm_cyc pm_cycles
+      alias pm_cycles pm
+      alias pm_cyc pm
 
       # Operator self-feedback (FM synth style): the sine's phase is
       # modulated by its own output, averaged over the last two samples (as
@@ -1156,32 +1159,34 @@ module MB
       # amounts), computed per sample inside the kernel rather than through
       # a graph loop:
       #
-      #     y[n] = sin(2pi * phase[n] + pm[n] + amount * (y[n-1] + y[n-2]) / 2) * gain[n]
+      #     y[n] = sin(2pi * (phase[n] + pm[n] + amount * (y[n-1] + y[n-2]) / 2)) * gain[n]
       #
-      # +amount+ is in radians of phase modulation per unit of output (a
-      # number or a node, read every sample; nil removes feedback).  A sine
-      # brightens towards a saw (measured at 125 Hz, H2/H3 relative to the
-      # fundamental; a saw is -6.0/-9.5 dB):
+      # +amount+ is in cycles of phase modulation per unit of output (a
+      # number or a node, read every sample; a Phase such as `1.5.radians`
+      # converts; nil removes feedback).  A sine brightens towards a saw
+      # (measured at 125 Hz, H2/H3 relative to the fundamental; a saw is
+      # -6.0/-9.5 dB; radians in parentheses):
       #
-      #     0.5 rad   -12.5/-21.5 dB, harmonics above -60 dB to the 9th
-      #     1.0 rad    -8.1/-12.9 dB, to the 36th
-      #     1.5 rad    -7.0/-11.0 dB, to the 104th (a saw-like tone)
-      #     2.0 rad    -6.6/-10.5 dB, to the 162nd (brightest clean setting)
+      #     0.08 (0.5 rad)   -12.5/-21.5 dB, harmonics above -60 dB to the 9th
+      #     0.16 (1.0 rad)    -8.1/-12.9 dB, to the 36th
+      #     0.24 (1.5 rad)    -7.0/-11.0 dB, to the 104th (a saw-like tone)
+      #     0.32 (2.0 rad)    -6.6/-10.5 dB, to the 162nd (brightest clean setting)
       #
-      # Above about 2.2 rad the loop turns chaotic, but only above 12 kHz at
-      # first: up to about 3.5 rad the audible tone stays saw-like and a
-      # hiss sits at 12-24 kHz (non-harmonic power -11 to -6 dB of the
-      # total there, -50 to -40 dB below 4 kHz), which many playback chains
-      # and ears hardly reproduce.  Grit reaches the audible band from 3.5
-      # rad, and from about 4 rad it is broadband noise (non-harmonic power
-      # below 4 kHz -6 dB), as a DX7 at full feedback (2pi; see
-      # .dx7_feedback) is.  This doesn't depend on the pitch (55-440 Hz
-      # measured).  Negative amounts give the same harmonic levels.
+      # Above about 0.35 cycles (2.2 rad) the loop turns chaotic, but only
+      # above 12 kHz at first: up to about 0.56 (3.5 rad) the audible tone
+      # stays saw-like and a hiss sits at 12-24 kHz (non-harmonic power -11
+      # to -6 dB of the total there, -50 to -40 dB below 4 kHz), which many
+      # playback chains and ears hardly reproduce.  Grit reaches the audible
+      # band from 0.56, and from about 0.64 (4 rad) it is broadband noise
+      # (non-harmonic power below 4 kHz -6 dB), as a DX7 at full feedback
+      # (1 cycle; see .dx7_feedback) is.  This doesn't depend on the pitch
+      # (55-440 Hz measured).  Negative amounts give the same harmonic
+      # levels.
       #
       # The feedback sine has a DC offset that grows with the amount (a
-      # mean of -0.04 at 1 rad, -0.14 at 1.5, -0.25 at 2, -0.38 at 3 at
-      # 110 Hz; -0.09 at 1 rad and -0.30 at 2 at 440 Hz; positive for
-      # negative amounts).  It is removed from the output by default, like
+      # mean of -0.04 at 0.16 cycles, -0.14 at 0.24, -0.25 at 0.32, -0.38 at
+      # 0.48 at 110 Hz; -0.09 at 0.16 and -0.30 at 0.32 at 440 Hz; positive
+      # for negative amounts).  It is removed from the output by default, like
       # #pwm's (pass dc: true to keep it): a one-pole DC tracker whose
       # cutoff follows the pitch (1/20 of the frequency, so LFO-rate
       # feedback sines work too) is subtracted after the loop, so the loop
@@ -1193,15 +1198,14 @@ module MB
       # constant phase shift of the carrier.  With dc: true and feedback 0
       # the tone is exactly a plain sine.
       #
-      # Nothing clamps the amount; FEEDBACK_MAX (2pi, noise) is the top of
-      # the useful range, e.g. for a knob.  #fm_feedback_cycles takes the
-      # amount in cycles instead (1.0 = 2pi).
+      # Nothing clamps the amount; FEEDBACK_MAX (1 cycle, noise) is the top
+      # of the useful range, e.g. for a knob.
       #
       # +gain:+ (a number or node, default 1) is the operator's output level
       # inside the loop, e.g. its envelope: the tone outputs the enveloped
       # signal, and the feedback reads it, so the timbre follows the level
       # (bright attacks, mellowing decays) as on an FM synth.  #at scales the
-      # output after the loop (e.g. a modulator's index in radians), so it
+      # output after the loop (e.g. a modulator's index in cycles), so it
       # doesn't change the operator's own timbre.  An input that ends (e.g.
       # a one-shot envelope) ends the tone.
       #
@@ -1216,22 +1220,24 @@ module MB
       # timeline jumps (seeks) keep the history.
       #
       # Feedback raises the bandwidth like FM, so high notes alias: at 1 kHz
-      # the worst alias is -103 dB at 1.0 rad, -59 dB at 1.5 rad, -30 dB at
-      # 2.0 rad (a band-limited ramp: -41 dB); at 4 kHz -46 dB at 1.0 rad
-      # and -27 dB at 1.5.  `oversample(4)` brings 1.5 rad at 1 kHz to -135
-      # dB (bin/aliasing.rb 'p.fm_feedback(1.5)').  Cost: about 28 ns per
+      # the worst alias is -103 dB at 0.16 cycles, -59 dB at 0.24, -30 dB at
+      # 0.32 (a band-limited ramp: -41 dB); at 4 kHz -46 dB at 0.16 and -27
+      # dB at 0.24.  `oversample(4)` brings 0.24 at 1 kHz to -135 dB
+      # (bin/aliasing.rb 'p.fm_feedback(0.24)').  Cost: about 28 ns per
       # sample whatever the amount (a plain sine: 21 ns; nodes for the
       # amount and gain add their own cost).  See .dx7_feedback for the DX7's
-      # 0-7 feedback setting in radians.  Also available as #fmfb and #fm_fb.  (#feedback is graph feedback, GraphNode::FeedbackMethods.)
+      # 0-7 feedback setting in cycles.  Also available as #fmfb, #fm_fb,
+      # and #fm_feedback_cycles.  (#feedback is graph feedback,
+      # GraphNode::FeedbackMethods.)
       #
       # Examples (bin/sound.rb):
-      #     play 110.hz.fm_feedback(1.3).at(-12.db)                          # a saw-like sine
-      #     play 220.hz.fm_feedback(2.hz.lfo.at(0..1.5)).at(-12.db)          # sweeping brightness
+      #     play 110.hz.fm_feedback(0.2).at(-12.db)                          # a saw-like sine
+      #     play 220.hz.fm_feedback(2.hz.lfo.at(0..0.24)).at(-12.db)         # sweeping brightness
       #     e = adsr(0.05, 0.4, 0.5, 0.3, hold: 1)
-      #     play 220.hz.fm_feedback(1.4, gain: e).at(-6.db)                  # brass-like: bright as it swells
-      #     play 220.hz.pm(440.hz.fm_feedback(1.0).at(1.5)).at(-12.db)       # a feedback modulator
+      #     play 220.hz.fm_feedback(0.22, gain: e).at(-6.db)                 # brass-like: bright as it swells
+      #     play 220.hz.pm(440.hz.fm_feedback(0.16).at(0.24)).at(-12.db)     # a feedback modulator
       def fm_feedback(amount, gain: nil, dc: false)
-        amount = Phase.radians(amount) # e.g. 0.3.cycles
+        amount = Phase.cycles(amount) # e.g. 1.5.radians
         if amount.nil?
           return configure do
             @feedback = nil
@@ -1254,23 +1260,11 @@ module MB
       end
       alias fm_fb fm_feedback
       alias fmfb fm_feedback
+      alias fm_feedback_cycles fm_feedback
+      alias fm_fb_cycles fm_feedback
+      alias fmfb_cycles fm_feedback
 
-      # Like #fm_feedback, with the amount in cycles of phase modulation per
-      # unit of output instead of radians (+cycles+ times 2pi radians; a
-      # number or a node), like #with_phase_cycles: 1.0 is FEEDBACK_MAX
-      # (2pi, noise), about 0.24 is saw-like, 0.32 the brightest clean
-      # setting.
-      def fm_feedback_cycles(cycles, gain: nil, dc: false)
-        return fm_feedback(nil) if cycles.nil?
-
-        cycles = Phase.cycles(cycles)
-        amount = cycles * TWOPI
-        fm_feedback(amount, gain: gain, dc: dc)
-      end
-      alias fm_fb_cycles fm_feedback_cycles
-      alias fmfb_cycles fm_feedback_cycles
-
-      # The feedback amount (radians; a number or node) given to #fm_feedback,
+      # The feedback amount (cycles; a number or node) given to #fm_feedback,
       # or nil for none.
       def fm_feedback_amount = @feedback
 
@@ -1283,25 +1277,25 @@ module MB
         !@feedback.nil?
       end
 
-      # The top of the useful #fm_feedback range: 2pi rad per unit of output,
-      # a DX7's FB 7 at full operator level (see .dx7_feedback), well into
-      # noise.  The range for a feedback knob is 0..FEEDBACK_MAX, e.g.
-      # `v.cc(1, range: 0.0..Tone::FEEDBACK_MAX)`.  Nothing clamps the
+      # The top of the useful #fm_feedback range: 1 cycle (2pi rad) per unit
+      # of output, a DX7's FB 7 at full operator level (see .dx7_feedback),
+      # well into noise.  The range for a feedback knob is 0..FEEDBACK_MAX,
+      # e.g. `v.cc(1, range: 0.0..Tone::FEEDBACK_MAX)`.  Nothing clamps the
       # amount: larger and negative amounts play as given.
-      FEEDBACK_MAX = 2 * Math::PI
+      FEEDBACK_MAX = 1.0
 
       # The DX7's FB 7 at full level (see .dx7_feedback; FEEDBACK_MAX).
       DX7_FEEDBACK_MAX = FEEDBACK_MAX
 
-      # Converts a DX7 feedback setting +fb+ (0 to 7) to radians for
+      # Converts a DX7 feedback setting +fb+ (0 to 7) to cycles for
       # #fm_feedback, for an operator whose #fm_feedback gain is 1.0 at full
-      # level (output level 99, envelope at 99): 0 for 0, else 2pi *
-      # 2**(fb - 7) (pi/32 at 1, ..., pi at 6, 2pi at 7).
+      # level (output level 99, envelope at 99): 0 for 0, else 2**(fb - 7)
+      # (1/64 cycle at 1, ..., 1/2 at 6, 1 at 7).
       #
       # From the arithmetic of MSFA (Apache-2.0, in Dexed): the feedback
       # term is (y[n-1] + y[n-2]) >> (9 - fb) on Q24 values whose phase
       # unit is one cycle per 2**24, and a full-level operator's output
-      # peaks at 2.0 (its maximum modulation index is 4pi).  So the DX7's
+      # peaks at 2.0 (its maximum modulation index is 2 cycles, 4pi).  So the DX7's
       # feedback depends on the operator's level, which is what #fm_feedback's
       # +gain:+ is for: pass the operator's linear level (relative to full)
       # times its envelope.  Full-level FB 7 is noise, as on the DX7 (a known
@@ -1321,9 +1315,9 @@ module MB
       # phase goes +to:+
       #
       # - nil (default): the starting phase (see #with_phase; 0 unless set),
-      # - a phase in radians, like #with_phase (e.g. 90.degrees), or an
-      #   MB::Sound::Phase (e.g. 0.5.cycles),
-      # - a graph node of radians, read at each reset sample,
+      # - a phase in cycles, like #with_phase (e.g. 0.25), or an
+      #   MB::Sound::Phase (e.g. 1.2.radians),
+      # - a graph node of cycles, read at each reset sample,
       # - :random, a new random phase at each reset (the same as #rnd).
       #
       # The jump is band-limited: a 32-sample minBLEP step from the value the
@@ -1352,9 +1346,9 @@ module MB
       # Examples (bin/sound.rb):
       #     bpm 120; c = grid(16, 'x..x..x.').loop
       #     play 55.hz.saw.reset(c.trigger) * c.env           # every hit starts at phase 0
-      #     play 2.hz.lfo.reset(c.trigger, to: 90.degrees)    # an LFO that restarts at its peak
+      #     play 2.hz.lfo.reset(c.trigger, to: 0.25)          # an LFO that restarts at its peak
       def reset(trigger, to: nil, clean: nil, keep_feedback: nil)
-        to = Phase.radians(to)
+        to = Phase.cycles(to)
         self.clean(clean) unless clean.nil?
         if trigger.nil?
           return configure do
@@ -1368,7 +1362,7 @@ module MB
         end
         raise ArgumentError, 'A synced tone cannot also have a reset input' if @sync_source
         unless to.nil? || to == :random || to.is_a?(Numeric) || to.respond_to?(:sample)
-          raise ArgumentError, "Reset target must be nil, :random, radians, or a graph node (got #{to.inspect})"
+          raise ArgumentError, "Reset target must be nil, :random, cycles, or a graph node (got #{to.inspect})"
         end
 
         configure do
@@ -1406,7 +1400,7 @@ module MB
       # The reset trigger input (see #reset), or nil.
       def reset_input = @reset
 
-      # The reset target given to #reset (nil, radians, or a node).
+      # The reset target given to #reset (nil, cycles, or a node).
       def reset_to = @reset_to
 
       # Plays this tone's phase jumps and warps through the synced kernels
@@ -1580,9 +1574,9 @@ module MB
         @state ||= initial_state
       end
 
-      # The current phase in radians (0 to 2pi).
+      # The current phase in cycles (0 to 1).
       def phi
-        state.phi * TWOPI
+        state.phi
       end
 
       # The last frequency value used for synthesis (0 before the first
@@ -1744,7 +1738,7 @@ module MB
       # For plans (Plan::Op::Tone in C): the phase jump of a reset on the
       # sample where the frequency is +freq+, the phase modulation
       # +phase_mod+, the width +width+ (nil without #pwm), and the reset
-      # target input +target+ (radians, or nil without one); the same Ruby
+      # target input +target+ (cycles, or nil without one); the same Ruby
       # as an unplanned reset (see #sample_segments).
       def plan_reset(freq, phase_mod, width, target)
         reset_jump({ freq: freq, width: width, phase_mod: phase_mod }, reset_target_value(target))
@@ -1941,7 +1935,7 @@ module MB
       # drawn if #rnd was used; the same arithmetic as the old Phasor#phase=,
       # so renders match), unprimed.
       def initial_state
-        start = @start_cycles || (@phase / TWOPI) % 1.0
+        start = @start_cycles || @phase % 1.0
         s = State.new(phase: start)
         s.noise = [@noise_seed & MASK64] if @noise != 0
         if @random_phase
@@ -1982,7 +1976,7 @@ module MB
       # Runs the block, which jumps the phase, and for a band-limited
       # tone that has played, queues a band-limited step for the following
       # samples.  The step is measured at frequency +freq+, warp +width+, and
-      # phase modulation +phase_mod+ (radians): by default those of the last
+      # phase modulation +phase_mod+ (cycles): by default those of the last
       # sample played and no phase modulation (a jump between buffers), or
       # those of the reset sample (a reset input; see #sample_segments).
       def phase_jump(freq: state.last_freq, width: state.last_width, phase_mod: 0.0, scan: nil)
@@ -2013,7 +2007,7 @@ module MB
         return unless played && @sync_source.nil? && synth_kernel? && !blit?
 
         w = BandLimit.clamp_width((width || 0.5).to_f)
-        pm = phase_mod / TWOPI
+        pm = phase_mod
         v0, s0 = jump_from_shape(w, pm == 0 ? before : BandLimit.wrap(before + pm), freq > 0)
         v1, s1 = BandLimit.sync_shape(@wave_type, w, pm == 0 ? after : BandLimit.wrap(after + pm))
         inc = freq * advance
@@ -2068,7 +2062,7 @@ module MB
           s0 = s1 = 0.0
         else
           w = width.nil? ? 0.5 : BandLimit.clamp_width(width.to_f)
-          pm = phase_mod / TWOPI
+          pm = phase_mod
           v0, s0 = table_shape(old_table, before + pm, w, inc, scan)
           v1, s1 = table_shape(table, after + pm, w, inc, scan)
         end
@@ -2241,11 +2235,11 @@ module MB
       end
 
       # The phase in cycles for a reset whose target input (see #reset's
-      # +to:+) is +value+ (radians, a Float), or nil without a target input.
+      # +to:+) is +value+ (cycles, a Float), or nil without a target input.
       def reset_target_value(value)
         return @state.random if @state.random?
-        return value / TWOPI if value
-        return @reset_to / TWOPI if @reset_to
+        return value if value
+        return @reset_to.to_f if @reset_to.is_a?(Numeric)
 
         @start_cycles
       end
@@ -2533,8 +2527,10 @@ module MB
           radians = phases[i] * TWOPI
           avg = y1 + y2
           avg = avg * 0.5
-          m = b * avg
-          arg = radians + pm
+          fbr = b * TWOPI
+          m = fbr * avg
+          pmr = pm * TWOPI
+          arg = radians + pmr
           arg = arg + m
           y = Math.sin(arg) * lvl
           y2 = y1

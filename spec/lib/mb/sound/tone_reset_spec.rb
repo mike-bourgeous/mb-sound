@@ -9,10 +9,10 @@ RSpec.describe('Tone reset inputs, free and random phases') do
     t
   end
 
-  # Jumps the phase of +osc+ to +radians+ between pieces, as a reset does
+  # Jumps the phase of +osc+ to +cycles+ between pieces, as a reset does
   # (the private band-limited jump; the old Oscillator#phi=).
-  def jump(osc, radians)
-    osc.send(:phase_jump) { osc.state.phi = radians / (2 * Math::PI) }
+  def jump(osc, cycles)
+    osc.send(:phase_jump) { osc.state.phi = cycles }
   end
 
   def triggers(count, *indices, value: 1)
@@ -46,7 +46,7 @@ RSpec.describe('Tone reset inputs, free and random phases') do
         end
 
         it 'puts a naive oscillator at the target phase on the reset sample' do
-          o = 1001.3.hz.aramp.reset(input(triggers(100, 37)), to: 0.5 * Math::PI)
+          o = 1001.3.hz.aramp.reset(input(triggers(100, 37)), to: 0.25)
           result = o.public_send(method, 100)
 
           expect(result[36]).not_to be_within(0.1).of(0.5)
@@ -70,7 +70,7 @@ RSpec.describe('Tone reset inputs, free and random phases') do
       trig = triggers(256, 5, 100, 101, 200)
 
       c, r = 2.times.map {
-        bl_osc(:square, frequency: input(fm), phase_mod: input(pm), width: input(width), reset: input(trig), to: 1.0)
+        bl_osc(:square, frequency: input(fm), phase_mod: input(pm), width: input(width), reset: input(trig), to: 1.0.radians)
       }
 
       expect(c.sample_c(256)).to eq(r.sample_ruby(256))
@@ -145,14 +145,14 @@ RSpec.describe('Tone reset inputs, free and random phases') do
 
     it 'reads a target node at the reset sample' do
       targets = Numo::SFloat.zeros(100)
-      targets[0...50] = 0.5 * Math::PI
-      targets[50..] = Math::PI
+      targets[0...50] = 0.25
+      targets[50..] = 0.5
 
       o = 100.hz.aramp.reset(input(triggers(100, 20, 70)), to: input(targets))
       result = o.sample(100)
 
       expect(result[20]).to be_within(1e-6).of(0.5)
-      expect(result[70]).to be_within(1e-6).of(-1.0) # pi on a ramp is the jump to -1
+      expect(result[70]).to be_within(1e-6).of(-1.0) # half a cycle on a ramp is the jump to -1
     end
 
     it 'can be removed with nil' do
@@ -199,7 +199,7 @@ RSpec.describe('Tone reset inputs, free and random phases') do
     end
 
     it 'gives sync pulses (the wraps port) at reset samples' do
-      o = 100.hz.aramp.reset(input(triggers(100, 30)), to: Math::PI)
+      o = 100.hz.aramp.reset(input(triggers(100, 30)), to: 0.5)
       wraps = o.wraps
       o.sample(100)
       pulses = wraps.sample(100)
@@ -227,16 +227,16 @@ RSpec.describe('Tone reset inputs, free and random phases') do
       it 'cannot be added once the tone is playing' do
         t = 100.hz.aramp
         t.sample(10)
-        expect { t.reset(input(triggers(10, 4)), to: 0.5 * Math::PI) }.to raise_error(FrozenError, /already playing/)
+        expect { t.reset(input(triggers(10, 4)), to: 0.25) }.to raise_error(FrozenError, /already playing/)
       end
 
-      it 'takes a phase in radians, like #with_phase' do
-        result = 100.hz.aramp.reset(input(triggers(100, 50)), to: 90.degrees).sample(100)
-        expect(result[50]).to be_within(1e-6).of(100.hz.aramp.with_phase(90.degrees).sample(1)[0])
+      it 'takes a phase in cycles, like #with_phase' do
+        result = 100.hz.aramp.reset(input(triggers(100, 50)), to: 0.25).sample(100)
+        expect(result[50]).to be_within(1e-6).of(100.hz.aramp.with_phase(0.25).sample(1)[0])
       end
 
       it 'goes to the starting phase from #with_phase by default' do
-        result = 100.hz.aramp.with_phase(Math::PI / 4).reset(input(triggers(100, 50))).sample(100)
+        result = 100.hz.aramp.with_phase(0.125).reset(input(triggers(100, 50))).sample(100)
         expect(result[50]).to be_within(1e-6).of(0.25)
       end
 
@@ -266,7 +266,7 @@ RSpec.describe('Tone reset inputs, free and random phases') do
       end
 
       it 'is removed by #free, with a warning (the last call wins)' do
-        t = 100.hz.aramp.reset(input(triggers(100, 50)), to: 1.0)
+        t = 100.hz.aramp.reset(input(triggers(100, 50)), to: 1.0.radians)
         expect { t.free }.to output(/free overrides reset/).to_stderr
         expect(t.free?).to eq(true)
         expect(t.reset_input).to be_nil
@@ -323,7 +323,7 @@ RSpec.describe('Tone reset inputs, free and random phases') do
 
         it 'replaces #rnd with a fixed target, with a warning (the last call wins)' do
           t = nil
-          expect { t = 100.hz.aramp.rnd.reset(input(triggers(100, 50)), to: 0.5 * Math::PI) }.to output(/overrides rnd/).to_stderr
+          expect { t = 100.hz.aramp.rnd.reset(input(triggers(100, 50)), to: 0.25) }.to output(/overrides rnd/).to_stderr
           expect(t.random_phase?).to eq(false)
           expect(t.sample(100)[50]).to be_within(1e-6).of(0.5)
         end
@@ -334,7 +334,7 @@ RSpec.describe('Tone reset inputs, free and random phases') do
 
           MB::Sound.seed(9)
           t = nil
-          expect { t = 100.hz.aramp.reset(input(triggers(300, 100, 200)), to: 1.0).rnd }.to output(/rnd overrides reset\(to:/).to_stderr
+          expect { t = 100.hz.aramp.reset(input(triggers(300, 100, 200)), to: 1.0.radians).rnd }.to output(/rnd overrides reset\(to:/).to_stderr
           expect(t.reset_to).to be_nil
           expect(t.sample(300)).to eq(a)
         end

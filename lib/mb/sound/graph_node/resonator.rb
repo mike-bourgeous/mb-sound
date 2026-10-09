@@ -21,8 +21,8 @@ module MB
       # Any signal may be the input: impulses (Notes#trigger, Tone#wraps)
       # ping it; a continuous input is filtered by a resonance whose peak
       # gain is about 1 / (1 - r) (r = 1000 ** (-1 / (decay * fs))), so keep
-      # continuous inputs quiet.  +phase+ (radians) is where each ring
-      # starts: 0 (default) a sine starting at zero, Math::PI / 2 a cosine
+      # continuous inputs quiet.  +phase+ (cycles, or a Phase) is where each
+      # ring starts: 0 (default) a sine starting at zero, 0.25 a cosine
       # starting at its peak (clickier).
       #
       # When the input ends the resonator rings out, then ends once its
@@ -55,7 +55,7 @@ module MB
         # The decay as given (a Length::Source holds it).
         attr_reader :decay
 
-        # The starting phase of each ring, in radians.
+        # The starting phase of each ring, in cycles.
         attr_reader :phase
 
         # Creates a resonator pinged by +input+ (see the class description).
@@ -72,9 +72,12 @@ module MB
           @freq = freq.is_a?(Numeric) ? freq.to_f : freq.get_sampler
           @decay = decay
           @decay_source = Length::Source.new(decay)
-          @phase = Phase.radians(phase).to_f # radians, or e.g. 0.25.cycles
-          @cos_phase = Math.cos(@phase)
-          @sin_phase = Math.sin(@phase)
+          raise ArgumentError, "Resonator phase must be a number of cycles or a Phase (got #{phase.inspect})" unless phase.is_a?(Numeric) || (phase.is_a?(Phase) && !phase.node?)
+
+          @phase = Phase.cycles(phase).to_f
+          radians = Phase.to_radians(phase).to_f # exact for a radians Phase
+          @cos_phase = Math.cos(radians)
+          @sin_phase = Math.sin(radians)
           @sample_rate = (sample_rate || input.sample_rate).to_f
           @state = Numo::DFloat.zeros(2)
           @input_ended = false

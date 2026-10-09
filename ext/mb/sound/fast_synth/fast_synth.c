@@ -11,8 +11,8 @@
  * here touch only the sample before and the sample after each edge, placed
  * at the edge's exact sub-sample time.
  *
- * Edges are found on the "effective phase" e = phase + phase_mod / 2pi (in
- * cycles), moving by d = increment + change in phase_mod / 2pi per sample,
+ * Edges are found on the "effective phase" e = phase + phase_mod (both in
+ * cycles), moving by d = increment + change in phase_mod per sample,
  * so frequency and phase modulation (including backward, through-zero
  * motion) are band-limited too.  The correction for the sample before an
  * edge uses the motion to the next sample, which is known inside a buffer
@@ -74,8 +74,8 @@ static double bl_read_phi(VALUE state)
  *   oscillate_bl(buffer, wave_type, frequency, phase_mod, advance, gain,
  *                offset, state, bl_state, fade_lo, fade_hi)
  *
- * +state+ is the phasor's [phi]; +bl_state+ is [last effective phase, last
- * increment, last phase_mod, primed (1; 0 for a tone's first sample, which
+ * +phase_mod+ is in cycles.  +state+ is the phasor's [phi]; +bl_state+ is
+ * [last effective phase, last increment, last phase_mod, primed (1; 0 for a tone's first sample, which
  * is corrected as if the tone had always run; 2 after a phase jump, which
  * skips the correction)], carried between buffers so the first sample of a
  * buffer is corrected for an edge just before it.
@@ -978,12 +978,12 @@ static VALUE ruby_oscillate_sync(int argc, VALUE *argv, VALUE self)
  * two outputs, averaged (as the DX7 does, which tames the period-two
  * "hunting" a one-sample loop has at high feedback):
  *
- *     m[i] = feedback[i] * ((y[i-1] + y[i-2]) * 0.5)
- *     y[i] = sin(phase[i] * 2pi + pm[i] + m[i]) * level[i]
+ *     m[i] = (feedback[i] * 2pi) * ((y[i-1] + y[i-2]) * 0.5)
+ *     y[i] = sin(phase[i] * 2pi + pm[i] * 2pi + m[i]) * level[i]
  *     out[i] = (y[i] - dc[i]) * gain + offset
  *
  * dc[i] (when +remove_dc+ is true; else 0) is the feedback sine's DC
- * offset (its mean grows with the amount, e.g. -0.25 at 2 rad), tracked
+ * offset (its mean grows with the amount, e.g. -0.25 at 0.32 cycles), tracked
  * by a one-pole lowpass whose cutoff follows the pitch (FB_DC_RATIO times
  * the frequency, from |increment|), so subtracting it is a one-pole
  * highpass at a fixed fraction of the fundamental: the same phase shift
@@ -998,9 +998,10 @@ static VALUE ruby_oscillate_sync(int argc, VALUE *argv, VALUE self)
  * feedback follows it like an FM synth's operator; +gain+ and +offset+
  * (Tone#at) are applied outside the loop.
  *
- * +frequency+ (Hz), +phase_mod+ (radians, or nil), +feedback+ (radians per
+ * +frequency+ (Hz), +phase_mod+ (cycles, or nil), +feedback+ (cycles per
  * unit of averaged output), and +level+ are Numerics or NArrays (read as
- * float32).  +state+ is [phase in cycles]; the phase arithmetic is that of
+ * float32); the phase modulation and feedback are converted to radians per
+ * sample (times 2pi, exact for 0).  +state+ is [phase in cycles]; the phase arithmetic is that of
  * FastSound.oscillate (phase i = wrap(phi + sum of increments 0...i)), so
  * with feedback 0 and level 1 the samples are a plain sine's.
  * +fb_state+ is [y[n-1], y[n-2], dc] (doubles), carried between buffers.
@@ -1079,8 +1080,10 @@ static VALUE ruby_feedback_sine(VALUE self, VALUE buffer, VALUE frequency, VALUE
 		double radians = ph * (2.0 * M_PI);
 		double avg = y1 + y2;
 		avg = avg * 0.5;
-		double m = fb * avg;
-		double arg = radians + pm;
+		double fbr = fb * (2.0 * M_PI);
+		double m = fbr * avg;
+		double pmr = pm * (2.0 * M_PI);
+		double arg = radians + pmr;
 		arg = arg + m;
 		double y = sin(arg);
 		y = y * lvl;

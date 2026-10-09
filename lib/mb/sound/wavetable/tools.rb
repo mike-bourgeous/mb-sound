@@ -208,7 +208,7 @@ module MB
         #     MB::Sound::Wavetable.generate(from: 2, to: 11, curve: nil) { |v, t| t + (t.frequency * v).hz }
         def generate(steps: 10, from: 0, to: 1, length: 2048, center: false, sort: false, normalize: true, fade_edges: true, curve: MB::M.method(:smoothstep))
           table = Array.new(steps) { |i|
-            tone = (48000.0 / length).hz.at(1).with_phase(Math::PI)
+            tone = (48000.0 / length).hz.at(1).with_phase(0.5)
             val = MB::M.interp(from, to, i.to_f / (steps - 1), func: curve)
 
             ret = yield val, tone

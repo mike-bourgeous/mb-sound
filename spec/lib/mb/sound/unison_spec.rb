@@ -152,9 +152,9 @@ RSpec.describe(MB::Sound::Unison, :aggregate_failures) do
         expect(mods).to all(be_random_phase)
       end
 
-      it 'starts every copy at a number of radians' do
-        tones = tones_for(phase: Math::PI / 2)
-        expect(tones.map(&:phase)).to eq([Math::PI / 2] * 3)
+      it 'starts every copy at a number of cycles' do
+        tones = tones_for(phase: 0.25)
+        expect(tones.map(&:phase)).to eq([0.25] * 3)
         expect(tones.map(&:random_phase?)).to eq([false] * 3)
       end
 

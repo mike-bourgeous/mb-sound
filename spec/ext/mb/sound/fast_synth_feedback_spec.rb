@@ -1,7 +1,9 @@
+# Phase modulation and feedback amounts are in cycles (2026-10-10).
 RSpec.describe('MB::Sound::FastSynth.feedback_sine') do
   let(:adv) { 1.0 / 48000 }
+  let(:rad) { 1 / (2 * Math::PI) } # cycles per radian
 
-  def run(buf, freq: 440.0, pm: nil, fb: 1.0, level: 1.0, state: [0.0], fb_state: [0.0, 0.0, 0.0], gain: 1.0, offset: 0.0, remove_dc: false)
+  def run(buf, freq: 440.0, pm: nil, fb: 1.0 / (2 * Math::PI), level: 1.0, state: [0.0], fb_state: [0.0, 0.0, 0.0], gain: 1.0, offset: 0.0, remove_dc: false)
     MB::Sound::FastSynth.feedback_sine(buf, freq, pm, adv, gain, offset, state, fb_state, fb, level, remove_dc)
   end
 
@@ -21,8 +23,8 @@ RSpec.describe('MB::Sound::FastSynth.feedback_sine') do
   it 'tracks and removes the DC offset when asked, without changing the loop' do
     kept_state = [0.0, 0.0, 0.0]
     removed_state = [0.0, 0.0, 0.0]
-    kept = run(Numo::SFloat.zeros(4800).inplace!, fb: 2.0, fb_state: kept_state).not_inplace!
-    removed = run(Numo::SFloat.zeros(4800).inplace!, fb: 2.0, fb_state: removed_state, remove_dc: true).not_inplace!
+    kept = run(Numo::SFloat.zeros(4800).inplace!, fb: 2.0 * rad, fb_state: kept_state).not_inplace!
+    removed = run(Numo::SFloat.zeros(4800).inplace!, fb: 2.0 * rad, fb_state: removed_state, remove_dc: true).not_inplace!
     expect(removed_state[0..1]).to eq(kept_state[0..1])
     expect(removed_state[2]).to be_within(0.03).of(kept[-440..].mean)
     expect((kept - removed - removed_state[2])[-1].abs).to be < 1e-6
@@ -41,7 +43,7 @@ RSpec.describe('MB::Sound::FastSynth.feedback_sine') do
     n = 100
     freq = Numo::DFloat.linspace(100, 300, n)
     pm = Numo::DFloat.linspace(0, 1, n)
-    fb = Numo::DFloat.linspace(0, 2, n)
+    fb = Numo::DFloat.linspace(0, 0.32, n)
     lvl = Numo::DFloat.linspace(1, 0.2, n)
     a = run(Numo::SFloat.zeros(n).inplace!, freq: freq, pm: pm, fb: fb, level: lvl)
     b = run(Numo::SFloat.zeros(n).inplace!, freq: Numo::SFloat.cast(freq), pm: Numo::SFloat.cast(pm), fb: Numo::SFloat.cast(fb), level: Numo::SFloat.cast(lvl))
@@ -50,7 +52,7 @@ RSpec.describe('MB::Sound::FastSynth.feedback_sine') do
 
   it 'reads non-contiguous views' do
     n = 50
-    fb = Numo::SFloat.linspace(0, 2, n * 2)[(0..) % 2]
+    fb = Numo::SFloat.linspace(0, 0.32, n * 2)[(0..) % 2]
     a = run(Numo::SFloat.zeros(n).inplace!, fb: fb)
     b = run(Numo::SFloat.zeros(n).inplace!, fb: fb.dup)
     expect(a).to eq(b)

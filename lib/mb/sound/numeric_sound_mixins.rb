@@ -146,12 +146,25 @@ module MB
 
       # Returns an oscillator Phase of this many cycles (1 cycle = 360
       # degrees = 2 pi radians): `440.hz.with_phase(0.25.cycles)`,
-      # `pm(mod, 0.4.cycles)`.  Also available as #cycle and #cyc.
+      # `pm(mod, 0.4.cycles)`.  Plain numbers are already cycles where a
+      # method takes a phase; this states the unit.  Also available as
+      # #cycle and #cyc.
       def cycles
         Phase.new(self)
       end
       alias cycle cycles
       alias cyc cycles
+
+      # Returns an oscillator Phase of this many radians (cycles × 2 pi),
+      # for phases and PM indices given in radians: `pm(mod, 2.4.radians)`,
+      # `fm_feedback(1.5.radians)`.  Replaces mb-math's Numeric#radians
+      # (which returned the number itself).  Also available as #radian and
+      # #rad.
+      def radians
+        Phase.radians(self)
+      end
+      alias radian radians
+      alias rad radians
 
       # Returns a Pitch at this frequency in Hz, which makes oscillators
       # (`100.hz.sine.at(-12.db)`) and plays as a sine when used as a signal.

@@ -160,9 +160,9 @@ module MB
 
       class << self
         # A table of sine harmonics: +amplitudes+ (first for harmonic 1) with
-        # +phases+ (radians; nil for all 0, every harmonic a sine starting
-        # at 0), each an Array or 1D NArray, or an Array of them for several
-        # frames (scanned in order).  Amplitudes are kept exactly (no
+        # +phases+ (cycles or Phases, e.g. 0.25 for a cosine; nil for all 0,
+        # every harmonic a sine starting at 0), each an Array or 1D NArray,
+        # or an Array of them for several frames (scanned in order).  Amplitudes are kept exactly (no
         # normalizing), so e.g. the Fourier series of a ramp plays at the
         # same level as Tone#ramp, Gibbs overshoot included.  +size+ is the
         # length of #frames (and caps the harmonics at size / 2 - 1).  See
@@ -171,7 +171,7 @@ module MB
         # are given).  +normalize: :loudness+ scales each frame to the same
         # perceived loudness as the library saw (see Loudness).
         def from_harmonics(amplitudes, phases = nil, size: 2048, complex: false, mips: :default, interpolation: nil, align: false, normalize: nil, name: nil)
-          spectra = Builder.spectra_from_harmonics(amplitudes, phases)
+          spectra = Builder.spectra_from_harmonics(amplitudes, Builder.phases_to_radians(phases))
           max = (size - 1) / 2
           spectra = spectra[true, 0..max] if spectra.shape[1] - 1 > max
           spectra = Builder.align(spectra) if align && spectra.shape[0] > 1
@@ -697,7 +697,7 @@ module MB
       # SComplex for complex tables) at +freq+ (Hz, Numeric or NArray), with
       # the phase accumulator +state+ ([phase in cycles]) advancing by freq *
       # +advance+ per sample, +tstate+ ([position, last phase modulation,
-      # primed]), +phase_mod+ (radians), +width+ (phase warp, nil for none),
+      # primed]), +phase_mod+ (cycles), +width+ (phase warp, nil for none),
       # +scan+ (0..1, or wrapping with +scan_wrap+; see the class
       # description), and output gain and offset; +remove_dc+ removes the
       # warp's DC offset; a nonzero +random_advance+ (cycles per Hz) adds

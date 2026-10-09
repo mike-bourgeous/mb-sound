@@ -83,7 +83,7 @@ RSpec.describe(MB::Sound::Sequence::TempoNode) do
     end
 
     it 'adds the phase offset from with_phase' do
-      session.add(1.bar.lfo.ramp.with_phase(Math::PI / 2))
+      session.add(1.bar.lfo.ramp.with_phase(0.25))
       expect(run(800)[0].round(3)).to eq(0.5)
     end
 

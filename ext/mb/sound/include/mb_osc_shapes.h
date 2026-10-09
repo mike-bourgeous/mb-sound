@@ -451,7 +451,7 @@ static inline double phasor_increment(double freq, double adv, double rndadv, ui
 }
 
 // Returns the waveform value at phase +phi+ (cycles) plus phase modulation
-// +pm+ (radians).  Complex square and ramp waves are sampled half an
+// +pm+ (cycles; added in radians, so pm 0 leaves the phase exact).  Complex square and ramp waves are sampled half an
 // increment (+inc+, cycles) later so their imaginary parts are symmetric.
 static inline double complex shape_sample(enum wave_types wt, double phi, double inc, double pm)
 {
@@ -461,7 +461,7 @@ static inline double complex shape_sample(enum wave_types wt, double phi, double
 		radians += inc * M_PI;
 	}
 
-	return osc_sample(wt, radians + pm);
+	return osc_sample(wt, radians + pm * (2.0 * M_PI));
 }
 
 // The frequency of fractional MIDI note +number+ in a tuning where note

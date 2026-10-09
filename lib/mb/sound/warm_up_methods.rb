@@ -66,7 +66,7 @@ module MB
 
         lfo = 0.3.hz.lfo.at(0.2..0.8)
         osc = 110.hz.ramp.at(0.3) + 220.hz.pulse(lfo).at(0.2) + 330.hz.triangle.skew(0.3).at(0.2) +
-          55.hz.sine.fm(110.hz.at(40)).at(0.3) + 165.hz.aramp.at(0.1) + 82.hz.sine.pm(164.hz.at(2)).at(0.2)
+          55.hz.sine.fm(110.hz.at(40)).at(0.3) + 165.hz.aramp.at(0.1) + 82.hz.sine.pm(164.hz.at(0.32)).at(0.2)
         env = osc * adsr(0.01, 0.1, 0.5, 0.2, hold: 1000)
         shaped = (env.softclip + env.clip(-0.5, 0.5) + env.abs * 0.1 + env.quantize(0.01)) * lfo
         # Clip-driven voices, as in songs
@@ -97,7 +97,7 @@ module MB
 
         trig = Notes.new(seq(Note.new(48), Note.new(55)).n16.loop).trigger
         lfo = 0.2.hz.triangle.lfo.at(-20..-6)
-        graph = (220.hz.complex_sine.pm(110.hz.sine.reset(trig) * 0.7.hz.lfo.at(0..2)).real * (10 ** (lfo / 20)) +
+        graph = (220.hz.complex_sine.pm(110.hz.sine.reset(trig) * 0.7.hz.lfo.at(0..0.32)).real * (10 ** (lfo / 20)) +
           330.hz.ramp.reset(trig).at(0.2) - 0.5.constant * 165.hz.square.pwm(0.3)) * 0.5
         inst = Plan.install(graph)
         return unless inst
@@ -118,7 +118,7 @@ module MB
         stream = MIDI::Stream.new(MIDI::LiveSource.new(WarmUpMIDI.new))
         synth = Synth.new(stream, voices: 2, spares: 1, seed: 1) { |v|
           pitch = v.hz.glide(50.ms)
-          op = pitch.transpose(1.oct).tone.complex_sine.at(1) * v.fm_env(0, 0.2, 0, 0.1)
+          op = pitch.transpose(1.oct).tone.complex_sine.at(0.16) * v.fm_env(0, 0.2, 0, 0.1)
           fm = (pitch.tone.complex_sine.at(1).pm(op * v.mod) * v.amp_env(0, 0.3, 0.5, 0.1)).real * 0.1
           v.hz.vibrato.saw.filter(:lowpass, cutoff: v.cutoff(600), quality: v.quality(2)) * v.amp_env(0.005, 0.1, 0.6, 0.05) + fm
         }

@@ -88,13 +88,13 @@ module ToneReferenceCases
     }
   end
   CASES['complex_ramp_pm'] = -> {
-    out = render(330.hz.complex_ramp.pm(55.hz.at(0.3)).at(0.5))['main']
+    out = render(330.hz.complex_ramp.pm(55.hz.at(0.3).radians).at(0.5))['main']
     { 'real' => out.real, 'imag' => out.imag }
   }
 
   CASES.merge!(
     'drumramp' => -> { render(220.hz.drumramp.at(0.5)) },
-    'phase_60deg' => -> { render(220.hz.sine.with_phase(Math::PI / 3).at(0.5)) },
+    'phase_60deg' => -> { render(220.hz.sine.with_phase(1.0 / 6).at(0.5)) },
     'range' => -> { render(30.hz.triangle.at(-0.2..0.7)) },
     'negative_amp' => -> { render(440.hz.square.at(-0.3)) },
     'slow_ramp' => -> { render(0.3.hz.ramp.at(0.5)) },
@@ -133,9 +133,9 @@ module ToneReferenceCases
     'fm_through_zero' => -> { render(200.hz.ramp.fm(50.hz.at(600)).at(0.5)) },
     'fm_stack' => -> { render(200.hz.triangle.fm(600.hz.at(500)).fm(300.hz.at(200)).at(0.5)) },
     'log_fm' => -> { render(220.hz.sine.log_fm(55.hz.sine.at(2)).at(0.5)) },
-    'pm' => -> { render(220.hz.sine.pm(330.hz.sine.at(2)).at(0.5)) },
-    'pm_index' => -> { render(220.hz.square.pm(330.hz, 1.5).at(0.5)) },
-    'pm_chain' => -> { render(110.hz.triangle.pm(220.hz.sine.pm(440.hz.sine.at(1)).at(2)).at(0.5)) },
+    'pm' => -> { render(220.hz.sine.pm(330.hz.sine.at(2).radians).at(0.5)) },
+    'pm_index' => -> { render(220.hz.square.pm(330.hz, 1.5.radians).at(0.5)) },
+    'pm_chain' => -> { render(110.hz.triangle.pm(220.hz.sine.pm(440.hz.sine.at(1).radians).at(2).radians).at(0.5)) },
     'freq_node' => -> { render(steps(100, 200, 300, 450).tone.ramp.at(0.5)) },
 
     # LFOs (band-limiting fades in from 15 to 30 Hz)
@@ -147,10 +147,10 @@ module ToneReferenceCases
     # Resets
     'reset' => -> { render(1001.3.hz.ramp.reset(triggers(173, 37, 80, value: 0.25)).at(0.5)) },
     'reset_edges' => -> { render(997.hz.square.reset(triggers(128, 0, 127)).at(0.5), sizes: [128, 64, 64, 1, 127]) },
-    'reset_to' => -> { render(440.hz.triangle.reset(triggers(300, 50), to: Math::PI / 2).at(0.5)) },
-    'reset_to_node' => -> { render(440.hz.ramp.reset(triggers(300, 50, 210), to: steps(150, 0.5, 2.0)).at(0.5)) },
+    'reset_to' => -> { render(440.hz.triangle.reset(triggers(300, 50), to: 0.25).at(0.5)) },
+    'reset_to_node' => -> { render(440.hz.ramp.reset(triggers(300, 50, 210), to: steps(150, 0.5, 2.0).radians).at(0.5)) },
     'reset_random' => -> { render(330.hz.saw.reset(triggers(200, 20, 120), to: :random).at(0.5)) },
-    'reset_fm_pm' => -> { render(500.hz.ramp.fm(70.hz.at(80)).pm(30.hz.at(0.5)).reset(triggers(256, 11, 130)).at(0.5)) },
+    'reset_fm_pm' => -> { render(500.hz.ramp.fm(70.hz.at(80)).pm(30.hz.at(0.5).radians).reset(triggers(256, 11, 130)).at(0.5)) },
     'reset_pwm' => -> { render(300.hz.pwm(10.hz.lfo.at(0.2..0.8)).square.reset(triggers(400, 99, 333)).at(0.5)) },
     'reset_naive' => -> { render(700.hz.aramp.reset(triggers(250, 60)).at(0.5)) },
     'reset_sine' => -> { render(1300.hz.sine.reset(triggers(222, 17)).at(0.5)) },
@@ -158,7 +158,7 @@ module ToneReferenceCases
       out = render(330.hz.complex_ramp.reset(triggers(300, 77)).at(0.5))['main']
       { 'real' => out.real, 'imag' => out.imag }
     },
-    'reset_lfo' => -> { render(25.hz.lfo.square.reset(triggers(400, 150), to: Math::PI / 4)) },
+    'reset_lfo' => -> { render(25.hz.lfo.square.reset(triggers(400, 150), to: 0.125)) },
     'rnd' => -> { render(220.hz.saw.rnd(seed: 3).at(0.5)) },
     'rnd_drawn' => -> { S.seed(5); render(220.hz.square.rnd.at(0.5)) },
     'rnd_reset' => -> { render(220.hz.saw.reset(triggers(300, 90)).rnd(seed: 9).at(0.5)) },
@@ -208,7 +208,7 @@ module ToneReferenceCases
     },
     'tempo_audio_rate_seek' => -> {
       session(bpm: 1920, buffers: 30) { |s, t, i|
-        s.add(1.n128.hz.ramp.at(0.5) + 1.n64.hz.square.with_phase(1.0).at(0.3)) if i == 0
+        s.add(1.n128.hz.ramp.at(0.5) + 1.n64.hz.square.with_phase(1.0.radians).at(0.3)) if i == 0
         t.seek(1/7r) if i == 9
         t.seek(5/9r) if i == 21
       }
@@ -216,7 +216,7 @@ module ToneReferenceCases
     'tempo_late_start' => -> {
       session(bpm: 1920, buffers: 30) { |s, _t, i|
         s.add(0.constant) if i == 0
-        s.add(1.bar.lfo.ramp.with_phase(Math::PI / 2), at: :beat) if i == 3
+        s.add(1.bar.lfo.ramp.with_phase(0.25), at: :beat) if i == 3
       }
     },
     'tempo_pause_freewheel' => -> {

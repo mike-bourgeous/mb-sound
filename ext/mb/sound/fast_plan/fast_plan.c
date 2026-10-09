@@ -322,7 +322,7 @@ static void naive_segment(enum wave_types wt, void *out, _Bool complex_out, size
 
 // Plan.precision :fast's real sine (mb_vec_sine.h): the phase pass is the
 // naive kernel's (the same phases and state as naive_segment), each phase
-// plus pm / 2 pi reduced to -0.5..0.5 cycles as a float, then the shape
+// plus pm (cycles) reduced to -0.5..0.5 cycles as a float, then the shape
 // pass's float polynomial, which the compiler vectorizes.  The Ruby mirror
 // is Plan::VecSine.shape_ruby on Tone#phases_ruby's phases.
 static void vec_sine_segment(float *out, size_t length, const struct mb_signal *f, const struct mb_signal *p,
@@ -335,7 +335,6 @@ static void vec_sine_segment(float *out, size_t length, const struct mb_signal *
 	double pm = p->scalar;
 	const float *pmptr = p->ptr;
 	size_t pmstep = p->step;
-	const double inv2pi = 1.0 / (2.0 * M_PI);
 	float gf = (float)g, of = (float)off;
 	float x[MB_VEC_CHUNK];
 
@@ -358,8 +357,7 @@ static void vec_sine_segment(float *out, size_t length, const struct mb_signal *
 			}
 
 			double ph = mb_wrap(phi + steps, 1.0);
-			double r = pm * inv2pi;
-			r = ph + r;
+			double r = ph + pm;
 			x[k] = mb_vec_reduce(r);
 
 			if (!constant) {

@@ -62,14 +62,23 @@ module MB
           Length::Samples.new(self)
         end
 
-        # Marks this node's output as a phase in cycles (an MB::Sound::Phase),
-        # e.g. a phase modulation depth for methods that otherwise take
-        # radians: `110.hz.pm(330.hz.at(0..0.4).cycles)`.  Also available as
-        # #cyc.
+        # Marks this node's output as a phase in cycles (an MB::Sound::Phase).
+        # Plain nodes are already cycles where a method takes a phase, so
+        # this only documents the unit: `110.hz.pm(330.hz.at(0..0.4).cycles)`.
+        # Also available as #cyc.
         def cycles
           Phase.new(self)
         end
         alias cyc cycles
+
+        # Marks this node's output as a phase in radians (an MB::Sound::Phase
+        # whose cycles are this node divided by 2 pi), e.g. a modulator whose
+        # level is a PM index in radians: `110.hz.pm(330.hz.at(2.4).radians)`.
+        # Also available as #rad.
+        def radians
+          Phase.radians(self)
+        end
+        alias rad radians
 
         # Marks this node's output as a length in seconds (Length::Seconds).
         # Plain nodes are already seconds where a method counts in seconds.
