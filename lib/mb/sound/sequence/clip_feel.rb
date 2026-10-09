@@ -8,19 +8,32 @@ module MB
       # know their future), unlike live stream transforms, which only delay
       # (user decision 7: humanize and quantize are mainly for clips).
       class Clip
+        # The default largest timing offset of #humanize (+/-4 ms).
+        HUMANIZE_TIME = MB::Sound::Length::Seconds.new(0.004)
+
         # Returns a clip with each note moved by a random amount up to
-        # +time+ earlier or later (a Duration like 1.n64, Rational whole
-        # notes, an Integer note division, or a Length converted at the
-        # current tempo) and its velocity changed by up to +:velocity+ (a
-        # fraction: 0.1 = 10% softer or louder).  Random values come from
-        # +:seed+ (the clip's seed by default, like #permute), so the same
-        # call gives the same feel.  Notes of a looping clip wrap around its
-        # length; others don't move before 0.  With +vary: true+, a looping
-        # clip gets new offsets in every cycle (see #variations).
+        # +time+ earlier or later (a Length like 4.ms, a Duration like
+        # 1.n64, Rational whole notes, or an Integer note division; Lengths
+        # are converted at the current tempo) and its velocity changed by
+        # up to +:velocity+ (a fraction: 0.1 = 10% softer or louder).  The
+        # default, +/-4 ms (HUMANIZE_TIME), stays within a few ms of the
+        # grid (user, 2026-10-10: 1/64 was too much; 1/128 is 15.6 ms at
+        # 120 BPM).  Random values come from +:seed+ (the clip's seed by
+        # default, like #permute), so the same call gives the same feel.
+        # Notes of a looping clip wrap around its length; others don't move
+        # before 0.
         #
+        # +:vary+ (default: true for looping clips; user, 2026-10-10) gives
+        # a looping clip new offsets in every cycle (see #variations).  A
+        # clip that isn't looping yet is humanized once, so humanize after
+        # #loop for a loop that varies (`riff.loop.humanize`); pass
+        # +vary: false+ for the same offsets every cycle.
+        #
+        #     riff.loop.humanize                    # +/-4 ms, new every cycle
         #     riff.humanize(1.n64, velocity: 0.15)
-        #     riff.loop.humanize(1.n128, vary: true)
-        def humanize(time = 1/128r, velocity: 0, seed: @seed, vary: false)
+        #     riff.loop.humanize(8.ms, vary: false)
+        def humanize(time = HUMANIZE_TIME, velocity: 0, seed: @seed, vary: nil)
+          vary = @loop if vary.nil?
           amount = Duration.whole_notes(time)
           raise ArgumentError, "Humanize velocity must be from 0 to 1 (got #{velocity.inspect})" unless velocity.is_a?(Numeric) && velocity.between?(0, 1)
           seed = Integer(seed)

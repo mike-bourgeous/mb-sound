@@ -12,6 +12,12 @@ module MB
         # steps waits for the next step (a quantized start, decision 7).
         # +start: :key+ starts the clock at the first key pressed while
         # nothing was held, Juno-style, then steps every +rate+ from there.
+        # +start: :hybrid+ (user, 2026-10-10) plays the first step at once
+        # when a key is pressed with nothing held, then locks the following
+        # steps to the grid: the next one is the first grid step at least
+        # half a step after the key (so the first note lasts 0.5 to 1.5
+        # steps, never a flam against the grid).  A key pressed exactly on
+        # a grid step plays the same as +start: :grid+.
         #
         # Pattern: the held notes (sorted by pitch, or in the order played
         # for :played), copied +octaves+ times, each copy moved by +step+
@@ -42,7 +48,7 @@ module MB
           ].freeze
 
           # Clock starts (see the class description).
-          STARTS = [:grid, :key].freeze
+          STARTS = [:grid, :key, :hybrid].freeze
 
           # The step length in whole notes.
           attr_reader :rate
@@ -80,13 +86,14 @@ module MB
             @index = 0      # steps played since the pattern started
             @origin = nil   # timeline position of step 0 (start: :key)
             @next_step = nil # the next step's timeline position, or nil when idle
+            @immediate = nil # an off-grid first step's position (start: :hybrid)
 
             parts = [mode.inspect, @rate_label]
             parts << "octaves: #{octaves}" if octaves != 1
             parts << "gate: #{gate}" if gate != 0.5
             parts << "swing: #{swing}" if swing != 0.5
             parts << 'latch: true' if latch
-            parts << 'start: :key' if start == :key
+            parts << "start: #{start.inspect}" if start != :grid
             parts << "steps: #{Array(steps).map(&:to_s).join(', ')}" if steps
             parts << "scale: #{@scale}" unless @scale.chromatic?
             @node_type_name = "arp(#{parts.join(', ')})"
@@ -122,7 +129,8 @@ module MB
                 # They may have stopped or restarted the clock
                 if next_step(from) == step
                   play_step(*step)
-                  @next_step = step[0] + @rate
+                  @next_step = step[0] == @immediate ? hybrid_next(step[0]) : step[0] + @rate
+                  @immediate = nil if step[0] == @immediate
                 end
               else
                 break if idx >= events.length
@@ -161,7 +169,7 @@ module MB
 
           # Every other step is late by the swing (0.5 = straight).
           def swung(step_wn)
-            return step_wn if @swing == 1/2r
+            return step_wn if @swing == 1/2r || step_wn == @immediate
             phase = @start == :key && @origin ? step_wn - @origin : step_wn
             ((phase / @rate).round.odd?) ? step_wn + (@swing - 1/2r) * 2 * @rate : step_wn
           end
@@ -177,6 +185,9 @@ module MB
                 if @start == :key
                   @origin = now
                   @next_step = now
+                elsif @start == :hybrid
+                  @next_step = now
+                  @immediate = (now % @rate == 0) ? nil : now
                 else
                   @next_step = (now / @rate).ceil * @rate
                 end
@@ -253,7 +264,8 @@ module MB
                      end
 
             offset = @offsets && @offsets[@index % @offsets.length]
-            length = (stream_time_at(swung(step_wn + @rate)) - step_time)
+            following = step_wn == @immediate ? hybrid_next(step_wn) : step_wn + @rate
+            length = (stream_time_at(swung(following)) - step_time)
             length = @rate / transport.whole_notes_per_second if length <= 0
             off_time = step_time + length * @gate
 
@@ -267,6 +279,12 @@ module MB
             end
 
             @index += 1
+          end
+
+          # The first grid step at least half a step after an immediate
+          # first step at +wn+ (start: :hybrid).
+          def hybrid_next(wn)
+            ((wn + @rate / 2) / @rate).ceil * @rate
           end
 
           def step_velocity(played)
@@ -285,12 +303,14 @@ module MB
           def timeline_jumped(time, old)
             @origin += time - old if @origin && old
             @next_step = nil
+            @immediate = nil
           end
 
           def cut_state
             @held.clear
             @latched.clear
             @next_step = nil
+            @immediate = nil
           end
         end
       end
