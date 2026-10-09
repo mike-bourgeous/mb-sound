@@ -332,11 +332,25 @@ module MB
             ]
           end
 
-          # See run_envelope in fast_plan.c.
+          # See run_envelope in fast_plan.c.  Parameters filled with a
+          # constant (an Op::Fill, e.g. a product folded to zero by
+          # Plan::Fold) go to the kernel as numbers, as the float the fill
+          # writes, so its runs apply (constants of the patch; see
+          # mb_envelope.h).
           def encode_envelope(op)
             config = op.config
             nseg = op.times.length
-            cval = ->(v) { v.is_a?(Const) ? v.value.to_f : 0.0 }
+            filled = ->(v) { v.is_a?(Value) && v.real? && v.op.is_a?(Op::Fill) && v.op.value.real? }
+            cval = ->(v) {
+              if v.is_a?(Const)
+                v.value.to_f
+              elsif filled.(v)
+                Numo::SFloat[v.op.value.parts[0]][0]
+              else
+                0.0
+              end
+            }
+            value_reg = ->(v) { filled.(v) ? -1 : value_reg(v) }
             sc = scalar(
               *config[0...9], config.length > 9 ? config[9] : -1,
               *op.times.flat_map.with_index { |t, i| [cval.(t), cval.(op.curves[i]), cval.(op.levels[i])] },
@@ -347,10 +361,10 @@ module MB
             shapes = op.shapes
             words = [OPCODES[:envelope], reg(op.dst), @objects.length - 1, sc, nseg]
             nseg.times do |i|
-              words.push(value_reg(op.times[i]), value_reg(op.curves[i]), value_reg(op.levels[i]), shapes[i])
+              words.push(value_reg.(op.times[i]), value_reg.(op.curves[i]), value_reg.(op.levels[i]), shapes[i])
             end
-            words.push(value_reg(op.hold))
-            Op::Envelope::INPUTS.each { |k| words.push(value_reg(op.inputs[k])) }
+            words.push(value_reg.(op.hold))
+            Op::Envelope::INPUTS.each { |k| words.push(value_reg.(op.inputs[k])) }
             words
           end
 
