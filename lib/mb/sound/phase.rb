@@ -10,7 +10,8 @@ module MB
     #
     # A Phase object says its unit explicitly: `0.25.cycles` (aliases
     # `cycle`, `cyc`), `1.5.radians` (alias `radian`, `rad`; or
-    # Phase.radians(1.5)), Phase.degrees(90), or `node.cycles` /
+    # Phase.radians(1.5)), `90.degrees` (alias `degree`; or
+    # Phase.degrees(90)), or `node.cycles` /
     # `node.radians` for a graph node whose output is in that unit (e.g. an
     # old radians modulator: `mod.radians`).  Methods that take phases
     # convert Phases with Phase.cycles.  A radians Phase keeps its radians,
@@ -64,17 +65,18 @@ module MB
         new(radians, unit: :radians)
       end
 
-      # A Phase of +degrees+ (a number): Phase.degrees(90) is 0.25 cycles.
-      # (Numeric#degrees is mb-math's conversion to plain radians for
-      # trigonometry, which phase methods would read as cycles.)
+      # A Phase of +degrees+ (a real number), the same as `degrees.degrees`:
+      # Phase.degrees(90) is 0.25 cycles.  Its #to_radians is mb-math's
+      # degrees-to-radians value (degrees * pi / 180) exactly.
       def self.degrees(degrees)
-        raise ArgumentError, "Degrees must be a number (got #{degrees.inspect})" unless degrees.is_a?(Numeric)
+        raise ArgumentError, "Degrees must be a real number (got #{degrees.inspect})" unless degrees.is_a?(Numeric) && degrees.real?
 
-        new(degrees / 360.0)
+        new(degrees, unit: :degrees)
       end
 
-      # A phase of +value+ in +unit+ (:cycles or :radians; a number, or a
-      # graph node whose output is in that unit).
+      # A phase of +value+ in +unit+ (:cycles, :radians, or :degrees; a
+      # number, or for cycles and radians a graph node whose output is in
+      # that unit).
       def initialize(value, unit: :cycles)
         unless value.is_a?(Numeric) || value.respond_to?(:sample)
           raise ArgumentError, "A phase needs a number or a graph node (got #{value.inspect})"
@@ -87,8 +89,14 @@ module MB
         when :radians
           @radians = value
           @cycles = value.is_a?(Numeric) ? value / TWOPI : value * (1.0 / TWOPI)
+        when :degrees
+          raise ArgumentError, 'A degrees phase needs a number' unless value.is_a?(Numeric)
+
+          @degrees = value
+          @radians = value * Math::PI / 180.0 # mb-math's Numeric#degrees
+          @cycles = value / 360.0
         else
-          raise ArgumentError, "Unknown phase unit #{unit.inspect} (use :cycles or :radians)"
+          raise ArgumentError, "Unknown phase unit #{unit.inspect} (use :cycles, :radians, or :degrees)"
         end
       end
 
@@ -99,7 +107,12 @@ module MB
 
       # True if this phase was given in radians (e.g. 1.5.radians).
       def radians?
-        !@radians.nil?
+        !@radians.nil? && @degrees.nil?
+      end
+
+      # True if this phase was given in degrees (e.g. 90.degrees).
+      def degrees?
+        !@degrees.nil?
       end
 
       def to_cycles
@@ -118,8 +131,24 @@ module MB
 
       def to_degrees
         raise ArgumentError, 'A node phase has no fixed degrees' if node?
+        return @degrees if @degrees
 
         @cycles * 360
+      end
+
+      # The phase in radians as a Float, for numeric code (e.g. Math.sin(
+      # 30.degrees.to_f)); see #to_radians.
+      def to_f
+        raise ArgumentError, 'A node phase has no fixed value' if node?
+
+        to_radians.to_f
+      end
+
+      # mb-math's rotation matrix for this phase's angle (so
+      # `90.degrees.rotation` keeps working now that Numeric#degrees returns
+      # a Phase).
+      def rotation
+        to_f.rotation
       end
 
       def +(other)
@@ -184,6 +213,7 @@ module MB
       def to_s
         return "#{@radians} (radians)" if node? && @radians
         return "#{@cycles} (cycles)" if node?
+        return "#{MB::M.sigfigs(@degrees.to_f, 6)} degrees" if @degrees
         return "#{MB::M.sigfigs(@radians.to_f, 6)} radians" if @radians
 
         "#{MB::M.sigfigs(@cycles.to_f, 6)} cycles"

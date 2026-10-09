@@ -34,6 +34,32 @@ RSpec.describe(MB::Sound::Phase) do
       expect(0.25.cycles).not_to be_radians
     end
 
+    it 'makes degrees phases (overriding mb-math Numeric#degrees) without breaking mb-math' do
+      ph = 90.degrees
+      expect(ph).to be_a(MB::Sound::Phase)
+      expect(ph).to be_degrees
+      expect(ph.to_cycles).to eq(0.25)
+      expect(ph.to_degrees).to eq(90)
+      expect(ph.to_radians).to eq(90 * Math::PI / 180.0)
+      expect(ph.to_f).to eq(Math::PI / 2)
+      expect(45.5.degree).to eq(MB::Sound::Phase.degrees(45.5))
+      expect(ph.to_s).to eq('90.0 degrees')
+      expect(Math.sin(30.degrees.to_f)).to be_within(1e-15).of(0.5)
+
+      # mb-math's uses of degrees as radians
+      expect(90.degree.rotation).to eq(Matrix[[0.0, -1.0], [1.0, 0.0]])
+      expect(MB::M.parse_complex('1 < 90')).to eq(Complex.polar(1.0, Math::PI / 2))
+      expect(MB::M.parse_complex('0.5<37')).to eq(Complex.polar(0.5, 37 * Math::PI / 180.0))
+      expect(MB::M.parse_complex('3-.2i')).to eq(Complex(3, -0.2))
+      expect(MB::M.parse_complex('.5')).to eq(0.5)
+      expect((-45i).degrees).to eq(-45i * Math::PI / 180.0) # complex: still radians
+      expect(3i.to_polar_s).to eq("3.0\u2220" + "90.0\u00b0")
+
+      # In phase inputs
+      expect(440.hz.sine.with_phase(90.degrees).sample(1)[0]).to be_within(1e-7).of(1)
+      expect(MB::Sound::Tone.value_at(:ramp, 90.degrees)).to be_within(1e-12).of(0.5)
+    end
+
     it 'compares, adds, and scales' do
       expect(0.25.cycles + 0.5.cycles).to eq(0.75.cycles)
       expect(0.75.cycles - 0.5.cycles).to eq(0.25.cycles)

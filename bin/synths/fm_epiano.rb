@@ -38,16 +38,16 @@ MB::Sound.synth_script(
     # Body: a 1:1 pair whose index falls over a couple of seconds (warm
     # attack settling to a near-sine), deeper for harder notes
     body_env = v.fm_env(0, 2.5, 0, 0.5).named('Body index envelope')
-    # (indices in radians, marked .radians: phase inputs count cycles)
-    body_mod = (v.hz.sine.free * body_env * 1.4).named('Body modulator')
-    body = v.hz.sine.free.pm(body_mod.radians).named('Body')
+    # (indices in cycles; retuned 2026-10-10 from radians, within 0.6%)
+    body_mod = (v.hz.sine.free * body_env * 0.223).named('Body modulator')
+    body = v.hz.sine.free.pm(body_mod).named('Body')
 
     # Tine: a 14:1 modulator at a low index, gone in a fraction of a second,
     # for the metallic "bark" of a hard strike; the mod wheel adds more
     tine_env = v.fm_env(0, 0.35, 0, 0.1).named('Tine index envelope')
-    tine_depth = v.cc(1, range: 0.4..1.6, default: 0, name: 'Tine brightness')
+    tine_depth = v.cc(1, range: 0.064..0.255, default: 0, name: 'Tine brightness')
     tine_mod = (v.hz.transpose(Math.log2(14).oct).sine.free * tine_env * tine_depth * v.velocity).named('Tine modulator')
-    tine = v.hz.sine.free.pm(tine_mod.radians).named('Tine')
+    tine = v.hz.sine.free.pm(tine_mod).named('Tine')
 
     amp = v.amp_env(0.002, 3.5, 0, p.release, curve: [12, 40, 40]).named('Amplitude')
     ((body + tine * 0.35) * amp * 0.4).named('Voice')

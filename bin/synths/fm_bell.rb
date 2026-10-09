@@ -24,9 +24,8 @@ MB::Sound.synth_script(
   retrigger: [:ring, Symbol, '-r', 'Same-note retrigger mode', MB::Sound::Synth::RETRIGGER_MODES],
 ) { |midi, p|
   s = midi.synth(voices: 4, retrigger: p[:retrigger]) { |v|
-    # (modulation indices are in radians, marked .radians: phase
-    # inputs count cycles since 2026-10-10)
-    ba_dc_mod = (v.velocity * 1.6 + 1.6).named('B into A, D into C')
+    # (modulation indices in cycles; retuned 2026-10-10 from radians, within 0.6%)
+    ba_dc_mod = (v.velocity * 0.255 + 0.255).named('B into A, D into C')
 
     # DX-style envelopes (straight lines in dB, as the old `.db(30)`): the
     # carriers' amplitude and the modulators' index
@@ -42,13 +41,13 @@ MB::Sound.synth_script(
     b_osc = (v.freq * bd_ratio * (2 ** (7.0 / 1000.0))).tone.complex_sine.at(1).reset(v.key_trigger).named('B')
     b_out = (b_osc * bd_env).named('B Out')
 
-    a_osc = v.hz.transpose(0.007.oct).complex_sine.at(1).pm((b_out * ba_dc_mod).radians).named('A')
+    a_osc = v.hz.transpose(0.007.oct).complex_sine.at(1).pm(b_out * ba_dc_mod).named('A')
     a_out = (a_osc * ac_env).named('A Out')
 
     d_osc = (v.freq * bd_ratio * (2 ** (5.0 / 1000.0))).tone.complex_sine.at(1).reset(v.key_trigger).named('D')
     d_out = (d_osc * bd_env).named('D Out')
 
-    c_osc = v.hz.transpose(0.002.oct).complex_sine.at(1).pm((d_out * ba_dc_mod).radians).named('C')
+    c_osc = v.hz.transpose(0.002.oct).complex_sine.at(1).pm(d_out * ba_dc_mod).named('C')
     c_out = (c_osc * ac_env).named('C Out')
 
     sum = (a_out + c_out).real

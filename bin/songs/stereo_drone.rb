@@ -27,9 +27,9 @@ module MB::Sound
 
     notes.map.with_index { |note, idx|
       fade = 10 ** (lfo_freq.hz.triangle.lfo.at(-90..-12).with_phase(0.125 + phase * idx) / 20) # dB to gain
-      modulator = (note.freq * 2.hz.lfo.at(2.98..3.02)).tone.at(2) * (lfo_freq / 2 + lfo_freq / notes.count * idx).hz.lfo.at(0..1)
+      modulator = (note.freq * 2.hz.lfo.at(2.98..3.02)).tone.at(0.32) * (lfo_freq / 2 + lfo_freq / notes.count * idx).hz.lfo.at(0..1)
 
-      fade * note.sine.pm(modulator.radians) # a PM index of 2 radians
+      fade * note.sine.pm(modulator) # PM index 0.32 cycles (about 2 radians)
     }
   end
 

@@ -11,7 +11,7 @@
 #
 # CC 1 (the mod wheel) sets the feedback from 0 to 1 cycle (2pi radians,
 # Tone::FEEDBACK_MAX), starting at --feedback.  Feedback and index are in
-# cycles (phases count cycles since 2026-10-10; the defaults are the
+# cycles (phases count cycles since 2026-10-10; the defaults are about the
 # patch's original 1.4 and 1.6 radians).
 #
 # Examples:
@@ -36,8 +36,8 @@ require 'bundler/setup'
 require 'mb-sound'
 
 MB::Sound.synth_script(
-  feedback: [1.4.radians.to_cycles, Float, '-F', 'Modulator self-feedback in cycles at full envelope (0.2228 = the original 1.4 radians; 0 for none; hiss above 12 kHz from ~0.35, noise from ~0.64)', 0.0..1.0],
-  index: [1.6.radians.to_cycles, Float, '-x', 'Modulation index in cycles of the modulator into the carrier (0.2546 = the original 1.6 radians)', 0.0..1.3],
+  feedback: [0.223, Float, '-F', 'Modulator self-feedback in cycles at full envelope (about 1.4 radians; 0 for none; hiss above 12 kHz from ~0.35, noise from ~0.64)', 0.0..1.0],
+  index: [0.255, Float, '-x', 'Modulation index in cycles of the modulator into the carrier (about 1.6 radians)', 0.0..1.3],
   voices: [6, Integer, '-v', 'Number of voices', 1..32],
 ) { |midi, p|
   midi.synth(voices: p.voices) { |v|
