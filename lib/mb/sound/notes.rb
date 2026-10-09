@@ -574,6 +574,67 @@ module MB
       end
       alias resonance_amount reso
 
+      # Velocity at or above which #accent counts a note as accented: 0.8
+      # (MIDI 102) sits between the plain accent velocity (1.0) and both
+      # the default (0.75) and Seq#acid's normal velocity (0.6).
+      ACCENT_THRESHOLD = 0.8
+
+      # The accent sweep's gain (see #accent_sweep).
+      ACCENT_SWEEP_GAIN = 1.6
+
+      # 1 while the latest note is accented (velocity at least +threshold+),
+      # else 0, held per note (a Notes::Accent).  Accents come from note
+      # marks (`!A1`, Seq#acid) or played velocity.
+      #
+      #     amp = v.amp_env * (0.6 + 0.4 * v.accent)
+      def accent(threshold = ACCENT_THRESHOLD)
+        memo([:accent, threshold.to_f]) { Accent.new(note_stream, threshold: threshold, notes: self, sample_rate: @sample_rate) }
+      end
+
+      # The TB-303's accent sweep: +env+ (usually #acid_env) on accented
+      # notes (#accent with +threshold+) through a capacitor that doesn't
+      # fully discharge between notes (a first-order lowpass at
+      # 2 - 0.8 × +resonance+ Hz, or +hz+), times ACCENT_SWEEP_GAIN, so
+      # runs of accents build up: peaks of about 0.57, 0.78, 0.86 on three
+      # accented sixteenths in a row at 128 BPM (a 0.2 s decay, resonance
+      # 0.75).  On the 303 the resonance pot sits in this path, so more
+      # resonance gives a slower, longer sweep; +resonance+ is a number.
+      # Add it to a filter's octaves and to the level (see
+      # bin/synths/acid.rb).
+      #
+      #     meg = v.acid_env(decay: 0.6)
+      #     sweep = v.accent_sweep(meg, resonance: 0.8)
+      #     cutoff = 2 ** (meg * 3 + sweep * 2) * 300
+      def accent_sweep(env, resonance: 0.5, hz: nil, threshold: ACCENT_THRESHOLD)
+        resonance = Float(resonance)
+        hz = Float(hz || (2.0 - 0.8 * resonance.clamp(0.0, 1.0)))
+        raise ArgumentError, "Accent sweep frequency must be positive (got #{hz})" unless hz > 0
+
+        lowpass = MB::Sound::Filter::FirstOrder.new(:lowpass, @sample_rate, hz)
+        ((env * accent(threshold)).filter(lowpass) * ACCENT_SWEEP_GAIN).named('Accent sweep')
+      end
+
+      # The TB-303's filter envelope (MEG): an instant attack and a decay
+      # to 0 over +decay+ seconds (a number, Length, or node; the 303's
+      # DECAY knob spans 0.2 to 2 s), or +accent_decay+ (the shortest) on
+      # accented notes (#accent with +threshold+).  Velocity doesn't scale
+      # it (use #accent or #accent_sweep).  Legato (slid notes don't
+      # restart it), linear by default (+curve:+ takes Envelope curves,
+      # e.g. 30 for an exponential fall).  Multiply by the envelope amount
+      # in octaves for a cutoff.
+      #
+      #     cutoff = 2 ** (v.acid_env(decay: 0.5) * 3) * 250
+      def acid_env(decay: 0.6, accent_decay: 0.2, attack: 0.003, release: 0.02, threshold: ACCENT_THRESHOLD, curve: :linear, gm: false)
+        decay = Length.seconds(decay) unless decay.respond_to?(:sample)
+        accent_decay = Length.seconds(accent_decay)
+        time = if decay.respond_to?(:sample)
+                 decay + accent(threshold) * (decay * -1 + accent_decay)
+               else
+                 accent(threshold) * (accent_decay - decay) + decay
+               end
+        env(attack, time, 0.0, release, sensitivity: 1.0..1.0, curve: curve, gm: gm).legato
+      end
+
       # Vibrato in semitones (a node, for pitch offsets; see
       # NotePitch#vibrato): a sine LFO at +rate+ Hz reset at each note-on, ×
       # +depth+ semitones, × a fade-in over +delay+ seconds after each

@@ -1,10 +1,10 @@
 module MB
   module Sound
     module GraphNode
-      # A CEM3379-style 4-pole resonant filter node (see
+      # A CEM3379-style 4-pole resonant filter node, or a diode ladder (see
       # MB::Sound::Filter::FourPole for the sound and options), created by
-      # GraphNode#lp4 (aliases #four_pole, #lowpass4) or
-      # `filter(:lp4, cutoff:, resonance:)`.
+      # GraphNode#lp4 (aliases #four_pole, #lowpass4), GraphNode#diode
+      # (+mode: :diode+), or `filter(:lp4, cutoff:, resonance:)`.
       #
       # The cutoff (Hz) and resonance (0..1) are numbers or graph nodes read
       # per sample, so envelopes, LFOs, and audio-rate filter FM all work.
@@ -60,11 +60,11 @@ module MB
         # gain at the cutoff of a 2-pole filter of quality +quality+ (a
         # number or node such as Notes#quality; see
         # Filter::FourPole.quality_to_resonance).
-        def self.quality_resonance(quality, curve = :db)
-          return MB::Sound::Filter::FourPole.quality_to_resonance(quality, curve: curve) if quality.is_a?(Numeric)
+        def self.quality_resonance(quality, curve = :db, diode: false)
+          return MB::Sound::Filter::FourPole.quality_to_resonance(quality, curve: curve, diode: diode) if quality.is_a?(Numeric)
           raise ArgumentError, "Quality must be a number or graph node (got #{quality.inspect})" unless quality.respond_to?(:sample)
 
-          quality.proc(type_name: 'Q to resonance') { |q| MB::Sound::Filter::FourPole.quality_to_resonance(q, curve: curve) }
+          quality.proc(type_name: 'Q to resonance') { |q| MB::Sound::Filter::FourPole.quality_to_resonance(q, curve: curve, diode: diode) }
         end
 
         def sources

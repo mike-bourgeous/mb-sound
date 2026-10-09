@@ -29,11 +29,13 @@ module MB
         }.freeze
 
         # Step characters.  Values are a Hash of Seq::Step attributes for a
-        # hit (merged over the defaults), :rest for an empty step, or :ignore
+        # hit (merged over the defaults), :rest for an empty step, :tie for a
+        # step that holds the previous hit (MB::Sound::Tie), or :ignore
         # for characters that don't take up a step (for readability).
         SYMBOLS = {
           'x' => {},
-          'X' => { velocity: Clip::ACCENT_VELOCITY },
+          'X' => { velocity: Clip::ACCENT_VELOCITY, accented: true },
+          '-' => :tie,
           '?' => { probability: 0.5 },
           '.' => :rest,
           '|' => :ignore,
@@ -42,7 +44,7 @@ module MB
         (1..9).each { |d| SYMBOLS[d.to_s] = { velocity: d / 9.0 } }
 
         # Adds or replaces a grid character.  +attrs+ is a Hash of Seq::Step
-        # attributes (e.g. `{ velocity: 0.3 }`), :rest, or :ignore.
+        # attributes (e.g. `{ velocity: 0.3 }`), :rest, :tie, or :ignore.
         def self.register(char, attrs)
           raise ArgumentError, 'Grid symbols must be a single character' unless char.is_a?(String) && char.length == 1
           SYMBOLS[char] = attrs
@@ -64,6 +66,8 @@ module MB
               nil
             when :rest
               Seq::Step.new(length: length)
+            when :tie
+              Seq::Step.new(length: length, tie: true)
             else
               Seq::Step.new(value: value, length: length, velocity: Clip::DEFAULT_VELOCITY, **attrs)
             end

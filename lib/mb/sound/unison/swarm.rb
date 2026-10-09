@@ -33,9 +33,9 @@ module MB
 
       # Builds a swarm of +pitch+ (see Pitch#swarm for the arguments).
       def self.swarm(pitch, count, chord:, detune:, glide:, overshoot:, scatter:, from:, legato:, drift:, drift_rate:, shape: nil, cycles: nil, **unison, &block)
-        notes = pitch.is_a?(Notes::NotePitch)
-        glide = notes ? SWARM_GLIDE : nil if glide == :auto
-        if !notes && (glide || scatter || from || (overshoot && overshoot != 0) || shape)
+        notes_pitch = pitch.is_a?(Notes::NotePitch)
+        glide = notes_pitch ? SWARM_GLIDE : nil if glide == :auto
+        if !notes_pitch && (glide || scatter || from || (overshoot && overshoot != 0) || shape)
           raise ArgumentError, 'Swarm glides need a Notes pitch (v.hz, clip.tone, midi.hz); give glide: nil for a fixed pitch'
         end
         raise ArgumentError, 'A swarm scatter or start band needs a glide' if (scatter || from) && !glide

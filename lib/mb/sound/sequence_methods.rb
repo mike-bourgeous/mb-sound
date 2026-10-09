@@ -14,6 +14,18 @@ module MB
         Sequence::Seq.new(items, seed: seed)
       end
 
+      # Returns a Seq of +items+ (see #seq) with every unset step +step+
+      # long (a note division, default 16, or Rational whole notes), played
+      # like a TB-303's sequencer (Sequence::Seq#acid: half-step gates,
+      # accents `!A1` at +accent:+ velocity, other notes at +normal:+, slides
+      # `~A1` overlapping the next note).  Tie (T) holds a note one more
+      # step, Rest (R) is a rest, and `.up`/`.dn` move a note an octave.
+      #
+      #     bass = acid(A1, !A1, ~A2, A1, R, C2, !A1, T, ~D2, E2, A1.up, R).loop
+      def acid(*items, step: 16, seed: 0, **options)
+        seq(*items, seed: seed).len(step).acid(**options)
+      end
+
       # Returns a one-step rest with its length unset (e.g. `rest.n8`).
       def rest
         Sequence::Seq.new([nil])

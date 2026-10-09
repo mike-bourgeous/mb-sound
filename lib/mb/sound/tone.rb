@@ -1975,10 +1975,10 @@ module MB
         end
         yield
         after = state.phase[0]
-        state.unprime(sync: !!@sync_source)
+        state.unprime(sync: !@sync_source.nil?)
 
-        return table_jump(table_before, before, after, position, freq, width, phase_mod, scan) if table_kernel? && played && !@sync_source
-        return unless played && !@sync_source && synth_kernel? && !blit?
+        return table_jump(table_before, before, after, position, freq, width, phase_mod, scan) if table_kernel? && played && @sync_source.nil?
+        return unless played && @sync_source.nil? && synth_kernel? && !blit?
 
         w = BandLimit.clamp_width((width || 0.5).to_f)
         pm = phase_mod / TWOPI

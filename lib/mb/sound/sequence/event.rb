@@ -7,8 +7,11 @@ module MB
       # of the clip.  +value+ is usually a MIDI note number, but may be any
       # Numeric (e.g. a filter cutoff for a control sequence).  +velocity+
       # ranges from 0 to 1.  +probability+ is the chance from 0 to 1 that the
-      # event plays in any given loop cycle (nil means always).
-      Event = Struct.new(:start, :length, :value, :velocity, :probability, keyword_init: true) do
+      # event plays in any given loop cycle (nil means always).  +accented+
+      # and +slid+ are true for notes marked as accented or slid in a Seq (see
+      # Seq::Step#accent and #slide): a slid note overlaps the next one, and
+      # Clip#legato leaves it alone.
+      Event = Struct.new(:start, :length, :value, :velocity, :probability, :accented, :slid, keyword_init: true) do
         # The time at which the event ends, in whole notes.
         def end_time
           start + length
@@ -24,6 +27,8 @@ module MB
           s = "#{value.is_a?(Numeric) ? MB::M.sigfigs(value, 6) : (value.is_a?(MB::Sound::Pitch) ? value.to_s : value.inspect)}@#{t}+#{Duration.format(length)}"
           s << " v#{MB::M.sigfigs(velocity, 3)}" if velocity != Clip::DEFAULT_VELOCITY
           s << " p#{probability}" if probability
+          s << ' !' if accented
+          s << ' ~' if slid
           s
         end
       end

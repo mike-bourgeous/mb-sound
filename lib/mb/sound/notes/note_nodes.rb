@@ -139,6 +139,28 @@ module MB
         end
       end
 
+      # 1 while the latest note's velocity is at least +threshold+, else 0
+      # (see Notes#accent).
+      class Accent < Velocity
+        attr_reader :threshold
+
+        def initialize(stream, threshold:, notes: nil, sample_rate: 48000)
+          @threshold = Float(threshold)
+          super(stream, notes: notes, sample_rate: sample_rate)
+          @node_type_name = 'Notes Accent'
+        end
+
+        def value
+          @velocity >= @threshold ? 1.0 : 0.0
+        end
+
+        private
+
+        def level
+          value
+        end
+      end
+
       # The release velocity (0..1) of the latest note-off (see Notes#lift).
       class Lift < NoteNode
         def initialize(stream, notes: nil, sample_rate: 48000)
