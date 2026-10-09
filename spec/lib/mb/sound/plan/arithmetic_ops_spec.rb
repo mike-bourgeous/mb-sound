@@ -212,6 +212,12 @@ RSpec.describe(MB::Sound::Plan, 'arithmetic ops') do
         ref = (a.dup.inplace ** b).not_inplace!
         expect(got.to_a.zip(ref.to_a).map { |g, r| g.equal?(r) || g == r || (g.nan? && r.nan?) }).to all(eq(true))
 
+        # Note numbers whose 2^x is beyond the polynomial's limit, and NaN
+        n = Numo::SFloat[69 + 12 * 250, 69 - 12 * 250, Float::NAN, Float::INFINITY, -Float::INFINITY, 69]
+        got = vx.note_freq(n, 69, 440)
+        ref = MB::FastSound.number_to_freq(n.dup.inplace!, 69, 440).not_inplace!
+        expect(got.to_a.zip(ref.to_a).map { |g, r| g == r || (g.nan? && r.nan?) }).to all(eq(true))
+
         # Results down through float's subnormals to 0 (2^-160..2^40) through
         # the plan
         r = plan_compare(sizes: [13, 64]) { 2 ** (src.new(seed: 1, scale: 100, offset: -60) * 1) * 1 }

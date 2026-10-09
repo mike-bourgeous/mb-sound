@@ -8,7 +8,8 @@ module MB
       # kernel's floats exactly.  Matched libm's pow on every float tested
       # (see the header); counted as within TOLERANCE.
       module VecExp2
-        # |x| limit (see MB_EXP2_LIMIT).
+        # |x| limit of the polynomial path (see MB_EXP2_LIMIT): beyond it and
+        # for NaN, libm's result.
         LIMIT = 200.0
 
         # 1.5 * 2^52 (round to the nearest integer by adding and subtracting).
@@ -24,11 +25,10 @@ module MB
         # difference was found in testing).
         TOLERANCE = 2.4e-7
 
-        # 2^x for a DFloat +x+ (a new DFloat).
+        # 2^x for a DFloat +x+ with every |x| <= LIMIT (a new DFloat; see
+        # mb_vec_exp2).
         def self.exp2(x)
-          x = Numo::DFloat.cast(x).dup
-          x[x < -LIMIT] = -LIMIT
-          x[x > LIMIT] = LIMIT
+          x = Numo::DFloat.cast(x)
           m = x + ROUND
           kf = m - ROUND
           f = x - kf
@@ -50,11 +50,20 @@ module MB
         def self.note_freq(a, tnum, tfrq)
           x = Numo::DFloat.cast(a) - tnum.to_f
           x = x / 12.0
-          Numo::SFloat.cast(exp2(x) * tfrq.to_f)
+          ok = x.abs <= LIMIT
+          xs = x.dup
+          xs[~ok] = 0.0
+          out = Numo::SFloat.cast(exp2(xs) * tfrq.to_f)
+          unless ok.all?
+            idx = (~ok).where
+            out[idx] = Numo::SFloat.cast((Numo::DFloat.new(idx.length).fill(2.0)**x[idx]) * tfrq.to_f)
+          end
+          out
         end
 
         # a ** b as an SFloat (mb_vec_pow): 2^(b log2 a) where a is positive
-        # and finite and b finite, Numo's float power elsewhere.
+        # and finite, b finite, and |b log2 a| <= LIMIT, Numo's float power
+        # elsewhere.
         def self.pow(a, b)
           a = Numo::SFloat.cast(a)
           b = Numo::SFloat.cast(b)
@@ -63,6 +72,8 @@ module MB
           ok = (ad > 0) & (ad < Float::INFINITY) & bd.isfinite
           la = Numo::NMath.log2(ad)
           x = bd * la
+          x[~ok] = 0.0
+          ok &= x.abs <= LIMIT
           x[~ok] = 0.0
           out = Numo::SFloat.cast(exp2(x))
           unless ok.all?

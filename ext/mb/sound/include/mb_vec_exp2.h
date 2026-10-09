@@ -3,11 +3,13 @@
  * :fast): note frequencies (Op::NoteFreq, tune_freq * 2^((n - note) / 12))
  * and powers of a patch-constant base (Op::Pow with a Constant base,
  * a^b = 2^(b log2 a)), replacing libm's pow per sample.  Branch-free (GCC
- * and clang vectorize the loops at the extensions' flags): x is clamped to
- * +/-MB_EXP2_LIMIT (beyond it every float result is already 0 or
- * infinite), rounded to k + f with the magic-number trick (|f| <= 0.5), 2^f
- * by a degree-11 Taylor polynomial of e^(f ln 2) (relative error under
- * 2e-16), and 2^k built in the exponent bits.  The results, cast to float,
+ * and clang vectorize the loops at the extensions' flags): x rounded to k + f
+ * with the magic-number trick (|f| <= 0.5), 2^f by a degree-11 Taylor
+ * polynomial of e^(f ln 2) (relative error under 2e-16), and 2^k built in
+ * the exponent bits.  Samples with |x| beyond MB_EXP2_LIMIT (every float
+ * result there is 0 or infinite) or NaN are counted in the vector loop and
+ * recomputed with libm afterwards, so they are libm's exactly (a clamp in
+ * the loop kept GCC from vectorizing it).  The results, cast to float,
  * matched libm's on every value tested (research-fused-ops 3b8c8b7f: notes
  * 0..127 with bend steps, 10^x for x in -3..3; 383k values); the plan
  * layer still counts them as within a tolerance (Op::NoteFreq#tolerance).
@@ -26,8 +28,8 @@
 
 #include "mb_vec_sine.h"
 
-// |x| limit: 2^200 overflows float, 2^-200 is below float's smallest
-// subnormal, so every float result matches libm's 0 or infinity there.
+// |x| limit of the polynomial path (2^200 overflows float, 2^-200 is below
+// its smallest subnormal); beyond it (and for NaN) libm's result is used.
 #define MB_EXP2_LIMIT 200.0
 
 // ln 2 and the Taylor coefficients 1/n! (n = 11 down to 2)
@@ -42,12 +44,11 @@
 #define MB_EXP2_C4 (1.0 / 24.0)
 #define MB_EXP2_C3 (1.0 / 6.0)
 
-// 2^x for one double (vectorized when inlined into a loop).
+// 2^x for one double with |x| <= MB_EXP2_LIMIT (vectorized when inlined
+// into a loop; garbage beyond the limit).
 static inline double mb_vec_exp2(double x)
 {
 	MB_VEC_NO_CONTRACT
-	x = x < -MB_EXP2_LIMIT ? -MB_EXP2_LIMIT : x;
-	x = x > MB_EXP2_LIMIT ? MB_EXP2_LIMIT : x;
 	double m = x + MB_VEC_ROUND;
 	double kf = m - MB_VEC_ROUND;
 	double f = x - kf;
@@ -88,19 +89,32 @@ static inline double mb_vec_exp2(double x)
 static inline void mb_vec_note_freq(float *restrict d, const float *restrict a, size_t n, double tnum, double tfrq)
 {
 	MB_VEC_NO_CONTRACT
+	long bad = 0;
 	for (size_t i = 0; i < n; i++) {
 		double x = (double)a[i] - tnum;
 		x = x / 12.0;
+		bad += fabs(x) <= MB_EXP2_LIMIT ? 0 : 1;
 		double e = mb_vec_exp2(x);
 		d[i] = (float)(tfrq * e);
+	}
+
+	if (bad) {
+		for (size_t i = 0; i < n; i++) {
+			double x = (double)a[i] - tnum;
+			x = x / 12.0;
+			if (!(fabs(x) <= MB_EXP2_LIMIT)) {
+				d[i] = (float)(tfrq * pow(2.0, x));
+			}
+		}
 	}
 }
 
 // d[i] = (float)a[i]^b[i] (Op::Pow): 2^(b log2 a) where a is positive and
-// finite and b finite (log2 recomputed only when a changes, as a patch
-// constant base rarely does; Plan::Program lowers to this only for a
-// Constant base), libm's pow elsewhere (the cases where 2^(b log2 a)
-// differs from pow: a <= 0, a infinite, a = 1 with b infinite, NaNs).
+// finite, b finite, and |b log2 a| <= MB_EXP2_LIMIT (log2 recomputed only
+// when a changes, as a patch constant base rarely does; Plan::Program
+// lowers to this only for a Constant base), libm's pow elsewhere (the
+// cases where 2^(b log2 a) could differ from pow: a <= 0, a infinite,
+// a = 1 with b infinite, NaNs, results beyond float's range).
 static inline void mb_vec_pow(float *restrict d, const float *restrict a, const float *restrict b, size_t n)
 {
 	MB_VEC_NO_CONTRACT
@@ -129,13 +143,14 @@ static inline void mb_vec_pow(float *restrict d, const float *restrict a, const 
 		}
 
 		for (size_t i = 0; i < m; i++) {
+			bad += fabs(x[i]) <= MB_EXP2_LIMIT ? 0 : 1;
 			D[i] = (float)mb_vec_exp2(x[i]);
 		}
 
 		if (bad) {
 			for (size_t i = 0; i < m; i++) {
 				float av = A[i];
-				if (!(av > 0.0f && av < INFINITY && isfinite((double)B[i]))) {
+				if (!(av > 0.0f && av < INFINITY && isfinite((double)B[i])) || !(fabs(x[i]) <= MB_EXP2_LIMIT)) {
 					D[i] = pow(av, B[i]);
 				}
 			}
