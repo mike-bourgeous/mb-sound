@@ -188,7 +188,7 @@ module MB
         #
         # Example (bin/sound.rb):
         #     master { |mix| mix.reverb(:hall, wet: -6.db).softclip(0.6, 0.98) }
-        def reverb(preset = :default, output_channels: channel_count, **kwargs)
+        def reverb(preset = nil, output_channels: channel_count, **kwargs)
           Reverb.reverb(preset, input: self, output_channels: output_channels, **kwargs)
         end
 
@@ -199,15 +199,6 @@ module MB
           LoudnessMeter.new(@outputs, weights: weights, true_peak: true_peak)
         end
         alias lufs_meter loudness_meter
-
-        # Runs every channel into one feedback delay network reverb (see
-        # GraphNode#fdn_reverb, which takes the same parameters), returning a
-        # multi-output reverb node with one output per channel unless
-        # +:output_channels+ is given.
-        def fdn_reverb(**kwargs)
-          return @outputs[0].fdn_reverb(**kwargs) if channel_count == 1
-          DelayMethods.instance_method(:fdn_reverb).bind_call(self, **kwargs)
-        end
 
         # Pans a one-channel bundle like a single node (see
         # ChannelMethods#pan), or balances a stereo bundle (see #balance), as

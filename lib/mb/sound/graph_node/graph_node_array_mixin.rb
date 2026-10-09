@@ -40,7 +40,7 @@ module MB
         # Example:
         #     play [l, r].reverb(:hall)
         #     master { |l, r| [l, r].reverb(:hall).map(&:softclip) }
-        def reverb(preset = :default, output_channels: length, **kwargs)
+        def reverb(preset = nil, output_channels: length, **kwargs)
           unless self.length >= 1 && self.all?(MB::Sound::GraphNode)
             raise ArgumentError, 'All Array elements must be GraphNodes to run them through a reverb'
           end

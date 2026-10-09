@@ -92,7 +92,7 @@ module MB
         EXCLUDED = [
           :get_sampler, :tee, :as_input, :multi_sample, :coerce,
           :spy, :debug, :clear_spies,
-          :reverb, :fdn_reverb, :multitap, :multitap_delay,
+          :reverb, :multitap, :multitap_delay,
           :samples, :seconds,
           :loudness_meter, :lufs_meter,
           :chorus, :juno_chorus,
