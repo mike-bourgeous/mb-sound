@@ -26,6 +26,17 @@ module MB
         seq(*items, seed: seed).len(step).acid(**options)
       end
 
+      # Returns a MB::Sound::Scale (see Scale.new and Scale.[]): a name such
+      # as :minor or :dorian (Scale.names), or an Array of offsets in
+      # semitones, with a +root+ (a Note, note number, or name like :a).
+      # Degrees of the chromatic scale (the default) are semitones.
+      #
+      #     scale(:minor, :a)[2]          # => C5 (degree 0 is A4)
+      #     scale(:dorian, D3).chord(0)   # => [50, 53, 57]
+      def scale(intervals = nil, root = nil)
+        Scale[intervals, root]
+      end
+
       # Returns a one-step rest with its length unset (e.g. `rest.n8`).
       def rest
         Sequence::Seq.new([nil])
