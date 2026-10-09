@@ -358,9 +358,17 @@ module MB
 
         # Shapes note-on velocities (see Stream#velocity_curve).
         class VelocityCurve < Transform
-          def initialize(parent, curve)
+          def initialize(parent, curve, name: nil)
             super(parent)
-            if curve.is_a?(Numeric)
+            if name && curve.respond_to?(:call)
+              @curve = curve
+              @node_type_name = name
+            elsif curve.is_a?(Range)
+              lo = curve.begin.to_f
+              hi = curve.end.to_f
+              @curve = ->(v) { lo + (hi - lo) * v }
+              @node_type_name = "velocity_curve(#{curve})"
+            elsif curve.is_a?(Numeric)
               raise ArgumentError, "A velocity curve exponent must be positive (got #{curve})" unless curve > 0
               exponent = curve
               @curve = ->(v) { v ** exponent }

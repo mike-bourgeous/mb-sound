@@ -10,8 +10,11 @@ module MB
       # event plays in any given loop cycle (nil means always).  +accented+
       # and +slid+ are true for notes marked as accented or slid in a Seq (see
       # Seq::Step#accent and #slide): a slid note overlaps the next one, and
-      # Clip#legato leaves it alone.
-      Event = Struct.new(:start, :length, :value, :velocity, :probability, :accented, :slid, keyword_init: true) do
+      # Clip#legato leaves it alone.  +condition+ is nil (every cycle) or
+      # [n, from]: the event plays every +n+th loop cycle starting with
+      # cycle +from+ (counting from 1; Elektron's "from:n" trig condition;
+      # see Seq::Step#every and Clip#every).
+      Event = Struct.new(:start, :length, :value, :velocity, :probability, :accented, :slid, :condition, keyword_init: true) do
         # The time at which the event ends, in whole notes.
         def end_time
           start + length
@@ -27,6 +30,7 @@ module MB
           s = "#{value.is_a?(Numeric) ? MB::M.sigfigs(value, 6) : (value.is_a?(MB::Sound::Pitch) ? value.to_s : value.inspect)}@#{t}+#{Duration.format(length)}"
           s << " v#{MB::M.sigfigs(velocity, 3)}" if velocity != Clip::DEFAULT_VELOCITY
           s << " p#{probability}" if probability
+          s << " #{condition[1]}:#{condition[0]}" if condition
           s << ' !' if accented
           s << ' ~' if slid
           s

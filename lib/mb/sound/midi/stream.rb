@@ -291,10 +291,13 @@ module MB
         end
 
         # Returns a stream with note-on velocities (0..1) passed through a
-        # curve: an exponent (1 is linear, 2 softer, 0.5 louder) or a block
-        # (or Proc) from velocity to velocity.  Results are clamped to 0..1.
+        # curve: an exponent (1 is linear, 2 softer, 0.5 louder), a Range
+        # (0..1 mapped linearly onto it, e.g. 0.4..0.9 to compress), or a
+        # block (or Proc) from velocity to velocity.  Results are clamped
+        # to 0..1.  See also #vel (a fixed velocity).
         #
         #     stream.velocity_curve(2)
+        #     stream.velocity_curve(0.5..1.0)
         #     stream.velocity_curve { |v| 0.3 + 0.7 * v }
         def velocity_curve(curve = 1, &block)
           Stream.new(Transform::VelocityCurve.new(self, block || curve))

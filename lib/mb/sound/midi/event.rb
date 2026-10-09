@@ -398,7 +398,10 @@ module MB
           raise ArgumentError, "MIDI channels are Integers from 0 to 15 (got #{channel.inspect})" unless channel.is_a?(Integer) && channel.between?(0, 15)
 
           b = bytes
-          b = [(b[0] & 0xf0) | channel, *b[1..]] if b.is_a?(Array) && !b.empty? && b[0] >= 0x80 && b[0] < 0xf0
+          if b && !b.empty? && b.getbyte(0) >= 0x80 && b.getbyte(0) < 0xf0
+            b = b.dup
+            b.setbyte(0, (b.getbyte(0) & 0xf0) | channel)
+          end
           with(channel: channel, bytes: b)
         end
 

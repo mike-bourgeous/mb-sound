@@ -55,14 +55,17 @@ module MB
           end
 
           def timeline_start(time, _origin)
+            old = @timeline_time && timeline_at(position)
             @timeline_time = position
             @timeline_wn = time
-            timeline_jumped(time)
+            timeline_jumped(time, old)
           end
 
           # Called after the timeline jumped (or a Session started the
-          # graph) to +time+ whole notes at the next read's start.
-          def timeline_jumped(time)
+          # graph) to +time+ whole notes at the next read's start; +old+ is
+          # where the timeline would have been without the jump (nil before
+          # the first read).
+          def timeline_jumped(time, old)
           end
 
           # Moves the anchor to stream time +to+ (the end of a read).

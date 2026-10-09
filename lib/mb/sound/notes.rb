@@ -844,6 +844,19 @@ module MB
         end
       end
 
+      # Two Notes splitting the keys at +point+ (see MIDI::Stream#split).
+      #
+      #     lo, hi = midi.split(C4)
+      def split(point)
+        @stream.split(point).map { |s| Notes.new(s, sustain: sustain?, sample_rate: @sample_rate) }
+      end
+
+      # A Notes on this instance's stream merged with +others+ (Notes,
+      # Streams, Clips; see MIDI::Stream#merge).
+      def merge(*others)
+        Notes.new(@stream.merge(*others), sustain: sustain?, sample_rate: @sample_rate)
+      end
+
       # A polyphonic MB::Sound::Synth playing this instance's stream (see
       # Synth.new for the options and the block), for console and script
       # code that has a mono Notes (`midi`) and wants voices.
