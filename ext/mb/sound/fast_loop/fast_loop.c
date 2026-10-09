@@ -18,6 +18,14 @@
  * once per call to its label, and each sample jumps from op to op
  * (research-plan-optimizations: 20 -> 17 ns per sample on a 9-op body).
  *
+ * After decoding, an exact rewriter (2026-10-10, research-fused-ops rank 4)
+ * drops identity ops (x * 1 and copies: their destination becomes an alias
+ * of their operand; not 0 + x, which turns -0 into +0) and turns reads of
+ * constant whole-sample sinc delays into direct reads (OP_DREAD_INT,
+ * without the per-sample delay clamp, speed estimate, and mode branches);
+ * cubic and linear reads index the line without a modulo per tap when the
+ * taps don't wrap.  Same samples and state bit for bit.
+ *
  * Exact Ruby mirror: Plan::Loop::Program#run_ruby (float32 rounding after
  * each op, the shapers', SVF's, and delay lines' own Ruby kernels).  Built
  * with -ffp-contract=off so no compiler fuses products and sums.
@@ -89,7 +97,11 @@ enum {
 	OP_HWRITE,    // hist, a               the history's value = a
 	OP_MULADD,    // dst, a, b, c          dst = a + b * c (two roundings, as OP_MUL then OP_ADD)
 	OP_MULSADD,   // dst, a, b, sc         dst = a + (float)c * b (as OP_MULS then OP_ADD)
-	OP_COUNT
+	OP_COUNT,
+
+	// Internal ops made by the decode-time rewriter (never in words)
+	OP_DREAD_INT = OP_COUNT, // dst, ring    a constant whole-sample sinc delay read directly
+	OP_ALL
 };
 
 // Operand words per opcode (after the opcode)
@@ -164,6 +176,7 @@ struct ring_state {
 	const double *dd;
 	const float *df;
 	double dconst;
+	long dint; // the delay of OP_DREAD_INT reads (0: none)
 	VALUE obj, read_state;
 };
 
@@ -223,6 +236,48 @@ static inline double ring_sinc(struct ring_state *g, long base, double dd, doubl
 	return g->cwsum != 0 ? sum / g->cwsum : 0;
 }
 
+// The cubic read of DELAY_INTERP (the same arithmetic) with the taps
+// indexed directly when none of them wraps.
+static inline double ring_cubic(const struct ring_state *g, long base, double d, double rate)
+{
+	double dmin = floor(d);
+	double t = d - dmin;
+	long di = (long)dmin;
+	long im1 = base - (di > 0 ? di - 1 : 0);
+	long i2 = base - di - 2;
+	if (di < 0 || i2 < 0 || im1 >= g->cap) {
+		return loop_interp(g->buf, g->cap, base, d, DELAY_CUBIC, &g->k, rate);
+	}
+
+	const float *buf = g->buf;
+	double ym1 = buf[im1];
+	double y0 = buf[base - di];
+	double y1 = buf[base - di - 1];
+	double y2 = buf[i2];
+	double c0 = y0;
+	double c1 = 0.5 * (y1 - ym1);
+	double c2 = ym1 - 2.5 * y0 + 2.0 * y1 - 0.5 * y2;
+	double c3 = 0.5 * (y2 - ym1) + 1.5 * (y0 - y1);
+	return ((c3 * t + c2) * t + c1) * t + c0;
+}
+
+// The linear read of DELAY_INTERP with the taps indexed directly when
+// neither wraps.
+static inline double ring_linear(const struct ring_state *g, long base, double d, double rate)
+{
+	double dmin = floor(d);
+	double t = d - dmin;
+	long di = (long)dmin;
+	long i1 = base - di - 1;
+	if (di < 0 || i1 < 0) {
+		return loop_interp(g->buf, g->cap, base, d, DELAY_LINEAR, &g->k, rate);
+	}
+
+	double a = g->buf[base - di];
+	double b = g->buf[i1];
+	return a * (1.0 - t) + b * t;
+}
+
 // Reads the ring at +dd+ samples before its newest stored sample (the
 // delay minus one), with the ring's interpolation.
 static inline double ring_read(struct ring_state *g, double dd, double rate)
@@ -242,11 +297,11 @@ static inline double ring_read(struct ring_state *g, double dd, double rate)
 			double support = g->k.half / fc;
 			double ws = (dd - (support - LOOP_SINC_BLEND)) / LOOP_SINC_BLEND;
 			if (ws <= 0) {
-				return loop_interp(g->buf, g->cap, base, dd, DELAY_CUBIC, &g->k, rate);
+				return ring_cubic(g, base, dd, rate);
 			}
 			if (ws < 1) {
 				double s = ring_sinc(g, base, dd, rate);
-				double c = loop_interp(g->buf, g->cap, base, dd, DELAY_CUBIC, &g->k, rate);
+				double c = ring_cubic(g, base, dd, rate);
 				return ws * s + (1.0 - ws) * c;
 			}
 		}
@@ -255,7 +310,10 @@ static inline double ring_read(struct ring_state *g, double dd, double rate)
 	if (g->mode == DELAY_SINC) {
 		return ring_sinc(g, base, dd, rate);
 	}
-	return loop_interp(g->buf, g->cap, base, dd, g->mode, &g->k, rate);
+	if (g->mode == DELAY_CUBIC) {
+		return ring_cubic(g, base, dd, rate);
+	}
+	return ring_linear(g, base, dd, rate);
 }
 
 static float *sfloat_ptr(VALUE v, size_t count, const char *what, long idx, _Bool write)
@@ -326,6 +384,7 @@ static void read_ring(struct ring_state *g, VALUE obj, VALUE delay, size_t count
 	g->dd = NULL;
 	g->df = NULL;
 	g->dconst = 0;
+	g->dint = 0;
 	g->moving = 0;
 	if (rb_obj_is_kind_of(delay, numo_cNArray)) {
 		VALUE cls = CLASS_OF(delay);
@@ -448,13 +507,13 @@ static VALUE ruby_run(VALUE self, VALUE words, VALUE scalars, VALUE objects, VAL
 	memset(ring_written, 0, sizeof(_Bool) * (nrings + 1));
 
 #if MB_LOOP_GOTO
-	static void *labels[OP_COUNT] = {
+	static void *labels[OP_ALL] = {
 		[OP_END] = &&L_OP_END, [OP_FILL] = &&L_OP_FILL, [OP_MUL] = &&L_OP_MUL, [OP_MULS] = &&L_OP_MULS,
 		[OP_ADD] = &&L_OP_ADD, [OP_ADDS] = &&L_OP_ADDS, [OP_DIV] = &&L_OP_DIV, [OP_DIVS] = &&L_OP_DIVS,
 		[OP_POW] = &&L_OP_POW, [OP_MAX] = &&L_OP_MAX, [OP_COPY] = &&L_OP_COPY, [OP_SHAPE] = &&L_OP_SHAPE,
 		[OP_SVF] = &&L_OP_SVF, [OP_DREAD] = &&L_OP_DREAD, [OP_DWRITE] = &&L_OP_DWRITE,
 		[OP_HREAD] = &&L_OP_HREAD, [OP_HWRITE] = &&L_OP_HWRITE, [OP_MULADD] = &&L_OP_MULADD,
-		[OP_MULSADD] = &&L_OP_MULSADD,
+		[OP_MULSADD] = &&L_OP_MULSADD, [OP_DREAD_INT] = &&L_OP_DREAD_INT,
 	};
 #endif
 
@@ -588,6 +647,71 @@ static VALUE ruby_run(VALUE self, VALUE words, VALUE scalars, VALUE objects, VAL
 #undef SCALAR
 #undef OBJECT
 
+	// The exact rewriter (see the description): identity aliasing and
+	// direct whole-sample reads
+	{
+		int *alias = ALLOCA_N(int, nregs);
+		for (int r = 0; r < nregs; r++) {
+			alias[r] = r;
+		}
+		size_t kept = 0;
+		for (size_t j = 0; j < nops; j++) {
+			struct ins *p = &code[j];
+			switch (p->op) {
+				case OP_END: case OP_FILL: case OP_DREAD: case OP_HREAD:
+					break;
+				case OP_SVF:
+					p->a = alias[p->a];
+					for (int m = 0; m < 3; m++) {
+						if (p->kreg[m] >= 0) {
+							p->kreg[m] = alias[p->kreg[m]];
+						}
+					}
+					break;
+				case OP_MUL: case OP_ADD: case OP_DIV: case OP_POW: case OP_MAX: case OP_MULSADD:
+					p->a = alias[p->a];
+					p->b = alias[p->b];
+					break;
+				case OP_MULADD:
+					p->a = alias[p->a];
+					p->b = alias[p->b];
+					p->c = alias[p->c];
+					break;
+				default: // one register operand in a
+					p->a = alias[p->a];
+					break;
+			}
+
+			if ((p->op == OP_MULS && p->k == 1.0f) || p->op == OP_COPY) {
+				alias[p->dst] = p->a;
+				continue;
+			}
+
+			if (p->op == OP_DREAD) {
+				struct ring_state *g = &rings[p->st];
+				if (!g->moving && g->mode == DELAY_SINC) {
+					double d = g->dconst;
+					if (!(d >= 1)) {
+						d = 1;
+					} else if (d > g->max) {
+						d = g->max;
+					}
+					if (d == floor(d)) {
+						g->dint = (long)d;
+						p->op = OP_DREAD_INT;
+#if MB_LOOP_GOTO
+						p->label = labels[p->op];
+#endif
+					}
+				}
+			}
+
+			code[kept++] = *p;
+		}
+		nops = kept;
+		out_reg = alias[out_reg];
+	}
+
 	float *R = ALLOCA_N(float, nregs);
 	memset(R, 0, sizeof(float) * nregs);
 
@@ -674,6 +798,17 @@ static VALUE ruby_run(VALUE self, VALUE words, VALUE scalars, VALUE objects, VAL
 			R[p->dst] = (float)ring_read(g, d - 1.0, rate);
 			NEXT;
 		}
+		OPCASE(OP_DREAD_INT) {
+			// ring_read's whole-sample sinc read at d - 1 before the newest
+			// sample: buf[w - 1 - (d - 1)]
+			const struct ring_state *g = &rings[p->st];
+			long idx = g->w - g->dint;
+			if (idx < 0) {
+				idx += g->cap;
+			}
+			R[p->dst] = g->buf[idx];
+			NEXT;
+		}
 		OPCASE(OP_DWRITE) {
 			struct ring_state *g = &rings[p->st];
 			g->buf[g->w] = R[p->a];
@@ -716,6 +851,11 @@ sample_done:
 	for (int k = 0; k < nrings; k++) {
 		struct ring_state *g = &rings[k];
 		rb_ary_store(g->obj, 1, LONG2NUM(g->w));
+		if (g->dint > 0 && n > 0) {
+			// As OP_DREAD would have left it
+			g->prev = (double)g->dint;
+			g->have_prev = 1;
+		}
 		if (g->have_prev) {
 			rb_ary_store(g->read_state, 0, rb_float_new(g->prev));
 		}

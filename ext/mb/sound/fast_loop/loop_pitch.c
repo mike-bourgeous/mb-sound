@@ -106,7 +106,7 @@ static void pc_get_src(struct pc_src *s, VALUE v, long count)
 		if (RNARRAY_NDIM(v) != 1 || (long)RNARRAY_SIZE(v) < count) {
 			rb_raise(rb_eArgError, "pitch_track sources must be 1-D NArrays of at least the block length");
 		}
-		if (!nary_check_contiguous(v)) {
+		if (!RTEST(nary_check_contiguous(v))) {
 			rb_raise(rb_eArgError, "pitch_track sources must be contiguous");
 		}
 		if (CLASS_OF(v) == numo_cDFloat) {
@@ -522,13 +522,13 @@ static void pc_point(struct pc_ctx *c, long i, long stream_index, double *st, do
 static VALUE pc_track(VALUE self, VALUE code, VALUE scalars, VALUE srcs, VALUE count_v, VALUE first_v, VALUE pos_v,
 		VALUE state, VALUE outs)
 {
-	if (CLASS_OF(code) != numo_cInt32 || !nary_check_contiguous(code)) {
+	if (CLASS_OF(code) != numo_cInt32 || !RTEST(nary_check_contiguous(code))) {
 		rb_raise(rb_eArgError, "pitch_track code must be a contiguous Int32 NArray");
 	}
-	if (CLASS_OF(scalars) != numo_cDFloat || !nary_check_contiguous(scalars)) {
+	if (CLASS_OF(scalars) != numo_cDFloat || !RTEST(nary_check_contiguous(scalars))) {
 		rb_raise(rb_eArgError, "pitch_track scalars must be a contiguous DFloat NArray");
 	}
-	if (CLASS_OF(state) != numo_cDFloat || !nary_check_contiguous(state) || RNARRAY_SIZE(state) < 10) {
+	if (CLASS_OF(state) != numo_cDFloat || !RTEST(nary_check_contiguous(state)) || RNARRAY_SIZE(state) < 10) {
 		rb_raise(rb_eArgError, "pitch_track state must be a contiguous DFloat NArray of 10 values");
 	}
 	Check_Type(srcs, T_ARRAY);
@@ -610,7 +610,7 @@ static VALUE pc_track(VALUE self, VALUE code, VALUE scalars, VALUE srcs, VALUE c
 	double *o[3];
 	for (int k = 0; k < 3; k++) {
 		VALUE v = rb_ary_entry(outs, k);
-		if (CLASS_OF(v) != numo_cDFloat || !nary_check_contiguous(v) || (long)RNARRAY_SIZE(v) < count) {
+		if (CLASS_OF(v) != numo_cDFloat || !RTEST(nary_check_contiguous(v)) || (long)RNARRAY_SIZE(v) < count) {
 			rb_raise(rb_eArgError, "pitch_track outputs must be contiguous DFloat NArrays of at least the block length");
 		}
 		o[k] = (double *)(nary_get_pointer_for_write(v) + nary_get_offset(v));
