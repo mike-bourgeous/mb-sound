@@ -378,6 +378,33 @@ module MB
           with(velocity: velocity.to_f, value: velocity.to_f, raw: raw, bytes: Event.note_bytes(type, channel, note, raw))
         end
 
+        # Returns a note event (note-on, note-off, poly pressure, or glide)
+        # moved by +step+: scale degrees of +:scale+ (a Scale, a name like
+        # :minor, or nil for the chromatic scale, whose degrees are
+        # semitones) for numbers, or an exact Interval (`7.st`, `1.oct`).
+        # Other events are returned unchanged.  See Transform::Steps.
+        #
+        #     e.transpose(12)                          # an octave up
+        #     e.transpose(2, scale: Scale[:minor, :a])  # two steps up A minor
+        def transpose(step, scale: nil)
+          return self unless note? || type == :poly_pressure || (type == :glide && note)
+          with_note(Transform::Transpose.whole(Transform::Steps.new(step, scale: scale).apply(note)))
+        end
+
+        # Returns this event on 0-based +channel+ (0..15), rebuilding its
+        # bytes.  Events without a channel are returned unchanged.
+        def with_channel(channel)
+          return self if self.channel.nil? || channel == self.channel
+          raise ArgumentError, "MIDI channels are Integers from 0 to 15 (got #{channel.inspect})" unless channel.is_a?(Integer) && channel.between?(0, 15)
+
+          b = bytes
+          if b && !b.empty? && b.getbyte(0) >= 0x80 && b.getbyte(0) < 0xf0
+            b = b.dup
+            b.setbyte(0, (b.getbyte(0) & 0xf0) | channel)
+          end
+          with(channel: channel, bytes: b)
+        end
+
         def to_s
           t = MB::M.sigfigs(time.to_f, 6)
           desc = case type

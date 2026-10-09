@@ -441,7 +441,7 @@ module MB
         end
 
         def to_s
-          node_type_name
+          @node_type_name
         end
 
         # Reads the input up to +to+ seconds and sends its events to the

@@ -26,6 +26,110 @@ module MB
         seq(*items, seed: seed).len(step).acid(**options)
       end
 
+      # Returns a MB::Sound::Scale (see Scale.new and Scale.[]): a name such
+      # as :minor or :dorian (Scale.names), or an Array of offsets in
+      # semitones, with a +root+ (a Note, note number, or name like :a).
+      # Degrees of the chromatic scale (the default) are semitones.
+      #
+      #     scale(:minor, :a)[2]          # => C5 (degree 0 is A4)
+      #     scale(:dorian, D3).chord(0)   # => [50, 53, 57]
+      def scale(intervals = nil, root = nil)
+        Scale[intervals, root]
+      end
+
+      # Returns a Euclidean rhythm (Sequence::Generators.euclid_pattern):
+      # +hits+ notes spread as evenly as possible over +steps+ steps of
+      # +:step+ (a note division like 16, a Duration, or Rational whole
+      # notes), as a Seq of +note+ (the GM kick by default, like #grid) and
+      # rests, moved +:rotate+ steps later.  Loop it, mark it, or use it as
+      # a melody's rhythm like any Seq.
+      #
+      #     euclid(3, 8).loop                   # x..x..x. kicks
+      #     euclid(5, 16, D2, rotate: 2).loop   # a bass rhythm
+      #     melody(scale(:minor, :a), rhythm: euclid(7, 16))
+      def euclid(hits, steps, note = Sequence::Grid::GM_DRUMS[:kick], step: 16, rotate: 0, velocity: nil)
+        pattern = Sequence::Generators.euclid_pattern(hits, steps, rotate: rotate)
+        items = pattern.map { |hit|
+          next nil unless hit
+          s = Sequence::Seq.step(note)
+          velocity ? Sequence::Seq::Step.new(**s.to_h.merge(velocity: velocity.to_f)) : s
+        }
+        Sequence::Seq.new(items).len(step)
+      end
+
+      # Returns a random melody in +scale+ (a Scale, or anything
+      # Scale.[] takes; chromatic by default): +count+ notes of +:step+
+      # (a note division, Duration, or Rational whole notes), or the
+      # rhythm of +:rhythm+ (a Clip whose notes get new pitches, keeping
+      # their timing and velocities).  The line walks the scale from degree
+      # +:start+, moving at most +:leap+ degrees per note within +:range+
+      # (Notes or note numbers; an octave either side of the root by
+      # default), preferring small steps and degrees with high +:weights+
+      # (per degree; by default the root, third, and fifth); +:rest+ is
+      # the chance of a rest per note.  Choices come from +:seed+ (by
+      # default drawn from MB::Sound's root seed, so scripts repeat; it is
+      # the clip's #seed).  With +vary: true+ a looping melody picks new
+      # notes in every cycle, repeatably from the seed and the cycle.
+      #
+      #     melody(scale(:minor_pentatonic, :a), 8, seed: 3).loop
+      #     melody(scale(:dorian, D3), rhythm: euclid(5, 8, D3), leap: 2).loop
+      #     melody(scale(:major, :c), 16, vary: true).loop   # new every bar
+      def melody(scale = nil, count = 8, step: 16, rhythm: nil, start: 0, leap: 3, range: nil, weights: nil, rest: 0, seed: nil, vary: false)
+        scale = Scale[scale]
+        seed = seed.nil? ? MB::Sound.next_seed : Integer(seed)
+        range ||= (scale.root - 12)..(scale.root + 12)
+        lo = Scale.root_number(range.begin)
+        hi = Scale.root_number(range.end)
+        raise ArgumentError, "A melody range needs room (got #{range})" unless hi >= lo
+        raise ArgumentError, "Melody rest must be from 0 to 1 (got #{rest.inspect})" unless rest.is_a?(Numeric) && rest.between?(0, 1)
+
+        slots = if rhythm
+                  Sequence::Clip.from(rhythm).events
+                else
+                  len = Sequence::Duration.whole_notes(step)
+                  Array.new(count) { |i| Sequence::Event.new(start: len * i, length: len, value: 0, velocity: Sequence::Clip::DEFAULT_VELOCITY) }
+                end
+        length = rhythm ? Sequence::Clip.from(rhythm).length : Sequence::Duration.whole_notes(step) * count
+
+        make = ->(s) {
+          notes = Sequence::Generators.melody_notes(scale, slots.length, rng: Random.new(s), range: [lo, hi], weights: weights, leap: leap, rest: rest, start: start)
+          slots.zip(notes).filter_map { |slot, n| n && slot.with(value: n) }
+        }
+
+        clip = Sequence::Clip.new(make.(seed), length: length, seed: seed)
+        return clip unless vary
+
+        Sequence::Clip.new(clip.events, length: length, seed: seed, variations: [Sequence::Clip::Variation.new(name: "melody(seed: #{seed})", block: ->(_events, cycle, _clip) {
+          make.(Sequence::Clip.cycle_seed(seed, cycle))
+        })])
+      end
+
+      # Unattached MIDI transforms (MIDI::Transform::Spec) for
+      # Sequence::Clip#bake and MIDI::Stream#through, chainable like the
+      # stream methods of the same names (see MIDI::Stream#echo, #arp,
+      # #strum, #chord):
+      #
+      #     riff.loop.bake(echo(3.n16, 3, pitch: 7.st, velocity: 0.6))
+      #     bg :keys, midi.through(arp(:up, 16).echo(3.n16, 2)).synth { |v| ... }
+      def echo(*args, **kwargs, &block)
+        MIDI::Transform::Spec.new.echo(*args, **kwargs, &block)
+      end
+
+      # An unattached arpeggiator (see #echo and MIDI::Stream#arp).
+      def arp(*args, **kwargs)
+        MIDI::Transform::Spec.new.arp(*args, **kwargs)
+      end
+
+      # An unattached strum (see #echo and MIDI::Stream#strum).
+      def strum(*args, **kwargs)
+        MIDI::Transform::Spec.new.strum(*args, **kwargs)
+      end
+
+      # An unattached chord transform (see #echo and MIDI::Stream#chord).
+      def chord(*args, **kwargs)
+        MIDI::Transform::Spec.new.chord(*args, **kwargs)
+      end
+
       # Returns a one-step rest with its length unset (e.g. `rest.n8`).
       def rest
         Sequence::Seq.new([nil])

@@ -43,6 +43,19 @@ module MB
         end
         alias s! slide
         alias ~ slide
+
+        # A Seq::Step of this note playing with probability +p+ per loop
+        # cycle (see Seq::Step#chance).  Alias #maybe.
+        def chance(p)
+          to_step.chance(p)
+        end
+        alias maybe chance
+
+        # A Seq::Step of this note playing every +n+th loop cycle from cycle
+        # +from+ (see Seq::Step#every).
+        def every(n, from: 1)
+          to_step.every(n, from: from)
+        end
       end
     end
   end

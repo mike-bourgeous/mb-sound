@@ -60,7 +60,7 @@ module MB
             names.each do |name|
               define_method(name) do |*args, **kwargs, &block|
                 super(*args, **kwargs, &block).tap { |c|
-                  c.derive_from(self, name, args, kwargs) if c.is_a?(Clip) && !c.equal?(self)
+                  c.derive_from(self, name, args, kwargs, block) if c.is_a?(Clip) && !c.equal?(self)
                 }
               end
             end
@@ -81,23 +81,54 @@ module MB
         # from where it was launched).  See #loop.
         attr_reader :align
 
+        # Per-cycle changes of a looping clip (see #variations): a +name+
+        # for display and a +block+ called with (events, cycle, clip) that
+        # returns the events for that cycle (each at most one clip length
+        # long or starting inside the cycle).
+        Variation = Data.define(:name, :block)
+
         # Creates a clip from a list of Events.  The +:length+ defaults to the
         # end of the last event.  +:align+ only matters for looping clips
-        # (see #loop).
-        def initialize(events, length: nil, loop: false, seed: 0, align: :timeline)
+        # (see #loop).  +:variations+ are Variations applied per loop cycle
+        # (see #variations).
+        def initialize(events, length: nil, loop: false, seed: 0, align: :timeline, variations: [])
           @events = events.sort_by(&:start).freeze
           max_end = @events.map(&:end_time).max || 0
           @length = (length || max_end).to_r
           @loop = !!loop
           @seed = Integer(seed)
           @align = align
+          @variations = variations.freeze
+          @cycle_cache = {}
 
           raise ArgumentError, 'A looping clip must have a positive length' if @loop && @length <= 0
           raise ArgumentError, "Clip alignment must be one of #{ALIGNMENTS.map(&:inspect).join(', ')} (got #{align.inspect})" unless ALIGNMENTS.include?(align)
 
           # How many loop cycles an event can span, for finding note-off events
-          # that belong to earlier cycles.
-          @lookback = @length > 0 ? (max_end / @length).ceil : 0
+          # that belong to earlier cycles (one more with variations, which
+          # may move events within their cycle).
+          @lookback = @length > 0 ? (max_end / @length).ceil + (@variations.empty? ? 0 : 1) : 0
+        end
+
+        # Changes applied anew in every loop cycle (Variations), e.g. from
+        # `permute(vary: true)` or `humanize(..., vary: true)`, so a loop
+        # plays a different version each cycle, repeatably from the clip's
+        # seed and the cycle number.  Transforms that map events (#transpose,
+        # #legato, ...) keep them, applied after their own change; clips made
+        # from several clips (#|, #&) play cycle 0's version.
+        attr_reader :variations
+
+        # The events of loop +cycle+ (0 for the first): #events with every
+        # Variation applied (just #events without variations).
+        def events_for(cycle)
+          return @events if @variations.empty?
+
+          cached = @cycle_cache[cycle]
+          return cached if cached
+
+          @cycle_cache.shift if @cycle_cache.length >= 8
+          list = @variations.reduce(@events) { |evs, v| v.block.call(evs, cycle, self) }
+          @cycle_cache[cycle] = list.sort_by(&:start).freeze
         end
 
         # Yields each Event.
@@ -136,22 +167,22 @@ module MB
         #
         #     bg :ball, bounce_hits(3.beats).loop(align: :launch).synth { |v| ... }
         def loop(seed: @seed, align: @align)
-          Clip.new(@events, length: @length, loop: true, seed: seed, align: align)
+          Clip.new(@events, length: @length, loop: true, seed: seed, align: align, variations: @variations)
         end
 
         # Returns a non-looping clip that plays this clip followed by +other+
         # (a Clip, Note, Numeric, or nil for a quarter rest).
         def |(other)
           other = Clip.from(other)
-          shifted = other.events.map { |e| e.with(start: e.start + @length) }
-          Clip.new(@events + shifted, length: @length + other.length, seed: @seed)
+          shifted = other.events_for(0).map { |e| e.with(start: e.start + @length) }
+          Clip.new(events_for(0) + shifted, length: @length + other.length, seed: @seed)
         end
 
         # Returns a non-looping clip that plays this clip and +other+ at the
         # same time.  The length is the longer of the two.
         def &(other)
           other = Clip.from(other)
-          Clip.new(@events + other.events, length: MB::M.max(@length, other.length), seed: @seed)
+          Clip.new(events_for(0) + other.events_for(0), length: MB::M.max(@length, other.length), seed: @seed)
         end
 
         # Returns a non-looping clip that plays this clip +count+ times in a
@@ -324,12 +355,36 @@ module MB
         #
         #     seq(C4, E4, G4, B4).n8.permute([3, 2, 0, 1])   # B4, G4, C4, E4
         #     seq(C4, E4, G4, B4).n8.permute(seed: 3)
-        def permute(order = nil, seed: @seed)
+        #
+        # With +vary: true+, a looping clip plays a new random order in
+        # every cycle, repeatable from +:seed+ and the cycle number (see
+        # #variations): `riff.loop.permute(vary: true)`.
+        def permute(order = nil, seed: @seed, vary: false)
+          if vary
+            raise ArgumentError, 'permute(vary: true) picks its own orders; leave out the order' if order
+            seed = Integer(seed)
+            return with_events(@events, variations: @variations + [Variation.new(name: "permute(seed: #{seed})", block: ->(events, cycle, _clip) {
+              Clip.permuted(events, Clip.check_permutation(nil, events.length, Clip.cycle_seed(seed, cycle)))
+            })])
+          end
+
           order = Clip.check_permutation(order, @events.length, seed)
-          with_events(@events.each_with_index.map { |slot, idx|
-            note = @events[order[idx]]
-            slot.with(value: note.value, velocity: note.velocity, probability: note.probability)
-          })
+          with_events(Clip.permuted(@events, order))
+        end
+
+        # Returns +events+ with their notes (values, velocities,
+        # probabilities, conditions) moved by +order+ (see #permute).
+        def self.permuted(events, order)
+          events.each_with_index.map { |slot, idx|
+            note = events[order[idx]]
+            slot.with(value: note.value, velocity: note.velocity, probability: note.probability, condition: note.condition)
+          }
+        end
+
+        # A seed for loop +cycle+ of something seeded with +seed+ (used by
+        # per-cycle Variations).
+        def self.cycle_seed(seed, cycle)
+          ((seed * 1_000_003 + cycle) * 999_983) & ((1 << 62) - 1)
         end
         alias shuffle permute
 
@@ -376,7 +431,7 @@ module MB
           out = []
           (first..last).each do |cycle|
             offset = cycle * @length
-            @events.each_with_index do |e, idx|
+            events_for(cycle).each_with_index do |e, idx|
               next unless plays?(e, cycle, idx)
 
               on = offset + e.start
@@ -397,7 +452,8 @@ module MB
           return nil if @events.empty? || position < 0
 
           phase = @loop ? position % @length : position
-          @events.reverse_each.find { |e| e.start <= phase } || (@loop ? @events.last : nil)
+          events = @loop ? events_for((position / @length).floor) : @events
+          events.reverse_each.find { |e| e.start <= phase } || (@loop ? events.last : nil)
         end
 
         # Returns true if the event at +index+ plays in the given loop
@@ -405,8 +461,27 @@ module MB
         # generator seeded from the clip's seed, the cycle, and the index, so
         # the same cycle always plays the same events.
         def plays?(event, cycle, index)
+          if (cond = event.condition)
+            n, from = cond
+            return false if cycle < from - 1 || (cycle - (from - 1)) % n != 0
+          end
+
           return true if event.probability.nil? || event.probability >= 1
           Random.new((@seed * 1_000_003 + cycle) * 1_000_003 + index).rand < event.probability
+        end
+
+        # Validates a probability (0..1) for #chance and Seq::Step#chance.
+        def self.check_probability(p)
+          raise ArgumentError, "A probability is a number from 0 to 1 (got #{p.inspect})" unless p.is_a?(Numeric) && p >= 0 && p <= 1
+          p
+        end
+
+        # Validates a cycle condition for #every and Seq::Step#every,
+        # returning [n, from].
+        def self.check_condition(n, from)
+          raise ArgumentError, "every needs a positive Integer (got #{n.inspect})" unless n.is_a?(Integer) && n > 0
+          raise ArgumentError, "every's from: is a cycle from 1 (got #{from.inspect})" unless from.is_a?(Integer) && from > 0
+          [n, from].freeze
         end
 
         # Returns a MIDI::Stream playing this clip: a new MIDI::ClipSource
@@ -644,12 +719,13 @@ module MB
         # with transpose(12).  Raises an error for clips without a source.
         def rederive(clip)
           raise ArgumentError, "#{self} wasn't made from another clip" unless @derivation
-          name, args, kwargs = @derivation
-          clip.public_send(name, *args, **kwargs)
+          name, args, kwargs, block = @derivation
+          clip.public_send(name, *args, **kwargs, &block)
         end
 
         def to_s
-          "#{self.class.name.rpartition('::').last}(#{Duration.format(@length)}#{' loop' if @loop}#{' from launch' if launch_aligned?}: #{@events.map(&:to_s).join(', ')})"
+          vary = @variations.empty? ? '' : " varying #{@variations.map(&:name).join(', ')}"
+          "#{self.class.name.rpartition('::').last}(#{Duration.format(@length)}#{' loop' if @loop}#{' from launch' if launch_aligned?}#{vary}: #{@events.map(&:to_s).join(', ')})"
         end
 
         def inspect
@@ -660,16 +736,16 @@ module MB
 
         # Records that this clip was made by calling +name+ on +source+ with
         # +args+ and +kwargs+ (see #source).  Returns self.
-        def derive_from(source, name, args, kwargs)
+        def derive_from(source, name, args, kwargs, block = nil)
           @source = source
-          @derivation = [name, args.freeze, kwargs.freeze].freeze
+          @derivation = [name, args.freeze, kwargs.freeze, block].freeze
           self
         end
 
         # Returns a Clip with the given +events+ that keeps this clip's
         # looping and seed.
-        def with_events(events, length: @length)
-          Clip.new(events, length: length, loop: @loop, seed: @seed, align: @align)
+        def with_events(events, length: @length, variations: @variations)
+          Clip.new(events, length: length, loop: @loop, seed: @seed, align: @align, variations: variations)
         end
 
         # Returns a Clip with each event transformed by the block.
@@ -723,8 +799,13 @@ module MB
         # row, without #repeat's warning for looping clips.
         def repeated(count)
           raise ArgumentError, "Repeat count must be a positive Integer (got #{count.inspect})" unless count.is_a?(Integer) && count > 0
+          # Variations and cycle conditions unroll: copy c plays cycle c's
+          # version (probabilities stay, decided per copy as before)
           Clip.new(
-            Array.new(count) { |c| @events.map { |e| e.with(start: e.start + c * @length) } }.flatten,
+            Array.new(count) { |c|
+              events_for(c).select { |e| e.condition.nil? || plays?(e.with(probability: nil), c, 0) }
+                .map { |e| e.with(start: e.start + c * @length, condition: nil) }
+            }.flatten,
             length: @length * count,
             seed: @seed
           )

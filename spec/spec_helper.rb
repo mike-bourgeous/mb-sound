@@ -26,6 +26,7 @@ require_relative 'support/subprocess_coverage' if SPEC_COVERAGE # after spec_tmp
 require_relative 'support/fork_script' # after subprocess_coverage
 require_relative 'support/jack_dummy'
 require_relative 'support/midi_list_source'
+require_relative 'support/midi_transform_helpers'
 require_relative 'support/clip_node_reference'
 require_relative 'support/plan_helpers'
 

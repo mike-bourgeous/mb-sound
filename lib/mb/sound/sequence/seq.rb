@@ -34,7 +34,7 @@ module MB
         # previous note one more step (MB::Sound::Tie).  Marks return new
         # Steps and chain in any order: `~!A1`, `!A1.up`, `A1.!.~`,
         # `A1.acc.s!.n8`.
-        Step = Struct.new(:value, :length, :velocity, :probability, :legato, :clip, :accented, :slid, :tie, keyword_init: true) do
+        Step = Struct.new(:value, :length, :velocity, :probability, :legato, :clip, :accented, :slid, :tie, :condition, keyword_init: true) do
           include NoteMethods
 
           # True for a rest (no note, clip, or tie).
@@ -77,6 +77,22 @@ module MB
           end
           alias s! slide
           alias ~ slide
+
+          # Returns a copy of this step that plays with probability +p+
+          # (0..1) in each loop cycle, decided from the clip's seed, the
+          # cycle, and the step (see Clip#plays?).  Alias #maybe.
+          def chance(p)
+            marked(probability: Clip.check_probability(p))
+          end
+          alias maybe chance
+
+          # Returns a copy of this step that plays every +n+th loop cycle,
+          # starting with cycle +from+ (counting from 1): `C4.every(4)`
+          # plays on cycles 1, 5, 9, ...; `C4.every(2, from: 2)` on the even
+          # ones (Elektron's 2:2).  See Clip#every.
+          def every(n, from: 1)
+            marked(condition: Clip.check_condition(n, from))
+          end
 
           # Returns a copy of this step +octaves+ (default 1) higher.
           def up(octaves = 1)
@@ -152,7 +168,8 @@ module MB
           legato = slide ? (slide == true ? SLIDE_LEGATO : slide) : (step.legato || 1)
           Event.new(
             start: start, length: total - last + last * legato, value: step.value, velocity: step.velocity,
-            probability: step.probability, accented: step.accented || nil, slid: slide ? true : nil
+            probability: step.probability, accented: step.accented || nil, slid: slide ? true : nil,
+            condition: step.condition
           )
         end
 
@@ -235,6 +252,8 @@ module MB
         def repeat(count)
           raise ArgumentError, "Repeat count must be a positive Integer (got #{count.inspect})" unless count.is_a?(Integer) && count > 0
           warn "repeat makes a finite clip, so #{self} will stop looping; call .loop on the result to keep looping" if @loop
+          # Cycle conditions (Step#every) unroll per copy, as in Clip#repeat
+          return repeated(count) if @events.any?(&:condition)
           Seq.new(@steps * count, seed: @seed)
         end
         alias * repeat
@@ -291,14 +310,16 @@ module MB
         # before it).
         # See Clip#permute for +order+ and +:seed+; +order+ indexes the note
         # steps only.
-        def permute(order = nil, seed: @seed)
+        def permute(order = nil, seed: @seed, vary: false)
+          return Clip.new(@events, length: @length, loop: @loop, seed: @seed, align: @align).permute(order, seed: seed, vary: vary) if vary
+
           notes = @steps.each_index.select { |i| @steps[i].value }
           order = Clip.check_permutation(order, notes.length, seed)
 
           steps = @steps.dup
           notes.each_with_index do |slot, idx|
             src = @steps[notes[order[idx]]]
-            steps[slot] = Step.new(**@steps[slot].to_h.merge(value: src.value, velocity: src.velocity, probability: src.probability, accented: src.accented, slid: src.slid))
+            steps[slot] = Step.new(**@steps[slot].to_h.merge(value: src.value, velocity: src.velocity, probability: src.probability, accented: src.accented, slid: src.slid, condition: src.condition))
           end
 
           Seq.new(steps, seed: @seed, loop: @loop, align: @align)
@@ -310,6 +331,19 @@ module MB
           map_steps { |s|
             s.to_h.merge(velocity: s.value && velocity.to_f, clip: s.clip&.vel(velocity))
           }
+        end
+
+        # Returns a Seq whose notes play with probability +p+ in each loop
+        # cycle (see Step#chance).  Alias #maybe.
+        def chance(p)
+          map_notes { |s| s.chance(p) }
+        end
+        alias maybe chance
+
+        # Returns a Seq whose notes play every +n+th loop cycle from cycle
+        # +from+ (see Step#every).
+        def every(n, from: 1)
+          map_notes { |s| s.every(n, from: from) }
         end
 
         # Returns a Seq with every note accented (see Step#accent).  Aliases
@@ -398,7 +432,7 @@ module MB
         # Seq's own versions of Clip transforms also remember their source.
         track_derivations(
           :loop, :repeat, :*, :stretch, :legato, :transpose, :vel, :reverse, :retrograde, :permute, :shuffle,
-          :accent, :acc, :a!, :slide, :s!, :up, :dn, :down, :oct, :acid
+          :accent, :acc, :a!, :slide, :s!, :up, :dn, :down, :oct, :acid, :chance, :maybe, :every
         )
       end
     end

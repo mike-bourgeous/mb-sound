@@ -71,6 +71,10 @@ RSpec.describe(MB::Sound::MIDI::Allocator) do
   end
 
   describe '#initialize' do
+    it 'names itself (for graph views)' do
+      expect(alloc(voices: 3).to_s).to eq('allocator(3 voices)')
+    end
+
     it 'makes voices + spares lanes that are Streams' do
       a = alloc(voices: 3, spares: 2)
       expect(a.lanes.length).to eq(5)

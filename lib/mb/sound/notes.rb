@@ -832,6 +832,31 @@ module MB
         @stream
       end
 
+      # MIDI transforms (MIDI::Stream::TRANSFORMS: #echo, #arp, #transpose,
+      # #channel, ...): each returns a Notes on #stream through the
+      # transform, with the same pedal setting, so the pedals hold
+      # transformed notes (echoes, arpeggios) like played ones.
+      #
+      #     bg :keys, midi.echo(3.n16, 3, pitch: 7.st, velocity: 0.7).synth(voices: 16) { |v| ... }
+      MIDI::Stream::TRANSFORMS.each do |name|
+        define_method(name) do |*args, **kwargs, &block|
+          Notes.new(@stream.public_send(name, *args, **kwargs, &block), sustain: sustain?, sample_rate: @sample_rate)
+        end
+      end
+
+      # Two Notes splitting the keys at +point+ (see MIDI::Stream#split).
+      #
+      #     lo, hi = midi.split(C4)
+      def split(point)
+        @stream.split(point).map { |s| Notes.new(s, sustain: sustain?, sample_rate: @sample_rate) }
+      end
+
+      # A Notes on this instance's stream merged with +others+ (Notes,
+      # Streams, Clips; see MIDI::Stream#merge).
+      def merge(*others)
+        Notes.new(@stream.merge(*others), sustain: sustain?, sample_rate: @sample_rate)
+      end
+
       # A polyphonic MB::Sound::Synth playing this instance's stream (see
       # Synth.new for the options and the block), for console and script
       # code that has a mono Notes (`midi`) and wants voices.

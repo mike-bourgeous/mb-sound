@@ -262,11 +262,17 @@ module MB
         end
 
         # Returns a stream with note numbers (including poly pressure)
-        # shifted by +interval+ (an Interval or semitones, e.g. `7.st`,
-        # `-1.oct`, or 12).  Notes outside 0..127 or between semitones are
-        # kept but have no MIDI bytes.
-        def transpose(interval)
-          Stream.new(Transform::Transpose.new(self, interval))
+        # shifted by +step+: scale degrees of +:scale+ (chromatic by
+        # default, so plain numbers are semitones), an Interval (`7.st`,
+        # `-1.oct`), or an Array of them added together (see
+        # Transform::Steps).  Notes between scale notes keep their distance
+        # from the scale note below.  Notes outside 0..127 or between
+        # semitones are kept but have no MIDI bytes.
+        #
+        #     stream.transpose(12)
+        #     stream.transpose(2, scale: :minor, root: :a)   # up a diatonic third
+        def transpose(step, scale: nil, root: nil)
+          Stream.new(Transform::Transpose.new(self, step, scale: scale, root: root))
         end
 
         # Returns a stream with piano pedals applied to the notes, the only
@@ -285,10 +291,13 @@ module MB
         end
 
         # Returns a stream with note-on velocities (0..1) passed through a
-        # curve: an exponent (1 is linear, 2 softer, 0.5 louder) or a block
-        # (or Proc) from velocity to velocity.  Results are clamped to 0..1.
+        # curve: an exponent (1 is linear, 2 softer, 0.5 louder), a Range
+        # (0..1 mapped linearly onto it, e.g. 0.4..0.9 to compress), or a
+        # block (or Proc) from velocity to velocity.  Results are clamped
+        # to 0..1.  See also #vel (a fixed velocity).
         #
         #     stream.velocity_curve(2)
+        #     stream.velocity_curve(0.5..1.0)
         #     stream.velocity_curve { |v| 0.3 + 0.7 * v }
         def velocity_curve(curve = 1, &block)
           Stream.new(Transform::VelocityCurve.new(self, block || curve))
@@ -301,8 +310,12 @@ module MB
           Stream.new(Transform::BendRange.new(self, interval))
         end
 
+        # A transform's input stream, skipping the transform itself (it
+        # shows as this stream's name), except for transforms that follow
+        # the timeline (Transform::Timeline), which a Session must find.
         def sources
-          @source.is_a?(Transform) ? @source.sources : { source: @source }
+          return { source: @source } unless @source.is_a?(Transform)
+          @source.is_a?(Sequence::TimelineNode) ? { transform: @source } : @source.sources
         end
 
         def to_s

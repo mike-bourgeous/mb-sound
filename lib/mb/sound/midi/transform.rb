@@ -147,10 +147,11 @@ module MB
 
         # Shifts note numbers (see Stream#transpose).
         class Transpose < Transform
-          def initialize(parent, interval)
+          def initialize(parent, step, scale: nil, root: nil)
             super(parent)
-            @semitones = Interval.semitones(interval)
-            @node_type_name = "transpose(#{interval})"
+            @steps = Steps.new(step, scale: scale, root: root)
+            @semitones = @steps.scale.chromatic? ? @steps.degrees + @steps.semitones : nil
+            @node_type_name = @steps.scale.chromatic? ? "transpose(#{step})" : "transpose(#{step}, scale: #{@steps.scale})"
           end
 
           private
@@ -159,7 +160,8 @@ module MB
           def process(events, _from, _to)
             events.map { |e|
               next e unless e.note? || e.type == :poly_pressure || (e.type == :glide && e.note)
-              e.with_note(Transpose.whole(Sequence.transpose_value(e.note, @semitones)))
+              note = @semitones ? Sequence.transpose_value(e.note, @semitones) : @steps.apply(e.note)
+              e.with_note(Transpose.whole(note))
             }
           end
 
@@ -356,9 +358,17 @@ module MB
 
         # Shapes note-on velocities (see Stream#velocity_curve).
         class VelocityCurve < Transform
-          def initialize(parent, curve)
+          def initialize(parent, curve, name: nil)
             super(parent)
-            if curve.is_a?(Numeric)
+            if name && curve.respond_to?(:call)
+              @curve = curve
+              @node_type_name = name
+            elsif curve.is_a?(Range)
+              lo = curve.begin.to_f
+              hi = curve.end.to_f
+              @curve = ->(v) { lo + (hi - lo) * v }
+              @node_type_name = "velocity_curve(#{curve})"
+            elsif curve.is_a?(Numeric)
               raise ArgumentError, "A velocity curve exponent must be positive (got #{curve})" unless curve > 0
               exponent = curve
               @curve = ->(v) { v ** exponent }
