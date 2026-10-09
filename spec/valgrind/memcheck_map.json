@@ -416,6 +416,9 @@
       ],
       "fast_synth": [
         "FastSynth.oscillate_bl"
+      ],
+      "fast_wavetable": [
+        "FastWavetable.oscillate"
       ]
     },
     "spec/lib/mb/sound/graph_node/constant_spec.rb": {
@@ -803,6 +806,7 @@
         "FastArithmetic.product"
       ],
       "fast_control": [
+        "FastControl.adaptive",
         "FastControl.smooth"
       ],
       "fast_sound": [
@@ -914,6 +918,7 @@
         "FastClip.curve_lookup"
       ],
       "fast_control": [
+        "FastControl.adaptive",
         "FastControl.smooth"
       ],
       "fast_envelope": [
