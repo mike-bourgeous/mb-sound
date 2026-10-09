@@ -396,10 +396,12 @@ module MB
           # inputs and outputs.
           inputs = input.is_a?(Array) ? input : input.outputs
           extra_time = MB::Sound::Length.seconds(params.delete(:extra_time), sample_rate: rate)
-          if extra_time > 0 && (inputs.length > 1 || input.is_a?(Array) || input.is_a?(InputChannelSplit::InputChannelNode))
-            # A separate silence node for each input so each gets the full time
+          if extra_time > 0
+            # A separate silence node for each input so each gets the full
+            # time (single nodes too since 2026-10-10: before, a reverb fed
+            # by one node ended with its input, cutting the tail)
             upstream = inputs.map { |i| i.and_then(MB::Sound.silence(extra_time)) }
-            upstream = upstream[0] if input.is_a?(InputChannelSplit::InputChannelNode)
+            upstream = upstream[0] unless input.is_a?(Array) || inputs.length > 1
           else
             upstream = input
           end

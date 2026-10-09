@@ -424,6 +424,27 @@ RSpec.describe(MB::Sound::GraphNode::Reverb) do
     end
   end
 
+  it 'rings out for extra_time after a single input node ends, like a multichannel input' do
+    blocks = ->(rev) {
+      outs = rev.respond_to?(:to_a) ? rev.to_a : [rev]
+      n = 0
+      tail = 0.0
+      loop do
+        b = outs.map { |o| o.sample(4800) }
+        break if b.any?(&:nil?) || n > 100
+        tail = b.map { |x| x.abs.max }.max if n == 5
+        n += 1
+      end
+      [n, tail]
+    }
+    hit = -> { imp = Numo::SFloat.zeros(4800); imp[0] = 1; MB::Sound::ArrayInput.new(data: [imp]) }
+    mono_n, mono_tail = blocks.(hit.().reverb(:room, extra_time: 1))
+    expect(mono_n).to be_between(10, 12) # 0.1 s of input + 1 s of extra time
+    expect(mono_tail).to be > 0
+    stereo_n, = blocks.(MB::Sound::GraphNode::Channels.new([hit.(), hit.()]).reverb(:room, extra_time: 1))
+    expect(mono_n).to eq(stereo_n)
+  end
+
   it 'returns nil when its input ends' do
     rev = MB::Sound.silence(0.05).and_then(MB::Sound.silence(0)).reverb(:hall, extra_time: 0)
     expect(Array.new(10) { rev.sample(800) }.last).to be_nil
