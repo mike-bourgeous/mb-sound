@@ -1,1 +1,1 @@
-fast_plan.o: $(srcdir)/../include/mb_ext_helpers.h $(srcdir)/../include/mb_osc_shapes.h $(srcdir)/../include/mb_bl_osc.h $(srcdir)/../include/mb_clip_shape.h $(srcdir)/../include/mb_vec_sine.h $(srcdir)/../include/mb_envelope.h $(srcdir)/../include/mb_smooth.h
+fast_plan.o: $(srcdir)/../include/mb_ext_helpers.h $(srcdir)/../include/mb_osc_shapes.h $(srcdir)/../include/mb_bl_osc.h $(srcdir)/../include/mb_clip_shape.h $(srcdir)/../include/mb_vec_sine.h $(srcdir)/../include/mb_envelope.h $(srcdir)/../include/mb_smooth.h $(srcdir)/../include/mb_vec_exp2.h

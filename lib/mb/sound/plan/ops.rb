@@ -249,10 +249,35 @@ module MB
         # a ** b, real only, both Values (the ** of GraphNode arithmetic:
         # FastArithmetic.power, C's double pow rounded to float32).
         class Pow < Binary
+          # True when this op uses the vectorized 2^(b log2 a) (see
+          # Plan::VecExp2): Plan.precision :fast and a Constant base (a
+          # patch constant, so the per-block cost doesn't depend on the
+          # notes played).
+          attr_reader :fast
+
+          def initialize(dst, node, a, b)
+            super
+            @fast = Plan.precision == :fast && a.is_a?(Value) && (a.op.is_a?(Param) || a.op.is_a?(Fill))
+          end
+
           def symbol = '**'
-          def opcode = :pow
+          def opcode = @fast ? :powf : :pow
+
+          def exact?
+            !@fast
+          end
+
+          def tolerance
+            @fast ? VecExp2::TOLERANCE : 0.0
+          end
 
           def run_ruby(env, count)
+            if @fast
+              a = operand_buffer(env, @a, count, false)
+              env[@dst] = VecExp2.pow(a.length > count ? a[0...count] : a, env.fetch(@b))
+              return env[@dst]
+            end
+
             out = Numo::SFloat.zeros(count)
             out[true] = operand_buffer(env, @a, count, false)
             out.inplace ** env.fetch(@b)
@@ -329,12 +354,25 @@ module MB
         class NoteFreq < Base
           attr_reader :a, :tuning
 
+          # True when this op uses the vectorized 2^x (Plan.precision :fast;
+          # see Plan::VecExp2).
+          attr_reader :fast
+
           def initialize(dst, node, a, tuning)
             super(dst, node)
             raise Unsupported.new(node, 'complex note numbers') if a.complex?
 
             @a = a
             @tuning = tuning
+            @fast = Plan.precision == :fast
+          end
+
+          def exact?
+            !@fast
+          end
+
+          def tolerance
+            @fast ? VecExp2::TOLERANCE : 0.0
           end
 
           def operands
@@ -348,6 +386,11 @@ module MB
           def opcode = :note_freq
 
           def run_ruby(env, count)
+            if @fast
+              env[@dst] = VecExp2.note_freq(env.fetch(@a), @tuning.note, @tuning.frequency)
+              return env[@dst]
+            end
+
             v = Numo::SFloat.cast(env.fetch(@a)).dup.inplace!
             env[@dst] = MB::FastSound.number_to_freq(v, @tuning.note, @tuning.frequency).not_inplace!
           end

@@ -217,6 +217,7 @@ end
 
 require_relative 'plan/value'
 require_relative 'plan/vec_sine'
+require_relative 'plan/vec_exp2'
 require_relative 'plan/ops'
 require_relative 'plan/tone_op'
 require_relative 'plan/events'

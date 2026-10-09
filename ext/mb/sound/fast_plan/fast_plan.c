@@ -54,6 +54,7 @@
 #include "mb_vec_sine.h"
 #include "mb_envelope.h"
 #include "mb_smooth.h"
+#include "mb_vec_exp2.h"
 
 // Register kinds (Plan::Program::REG_KINDS)
 enum { REG_SLOT = 0, REG_INPUT = 1, REG_PARAM = 2, REG_OUT = 3 };
@@ -72,12 +73,13 @@ enum {
 	OP_TONE,      // see run_tone
 	OP_COPY,      // dst, a, 0                   dst = a
 	OP_SHAPE,     // dst, a, object, sc          dst = shaper(a) (FastClip.shape); object: state Array; sc: mode, p1, p2, antialias
-	OP_NOTE_FREQ, // dst, a, object, 0           dst = frequency of note numbers a (FastSound.number_to_freq) in the tuning object's current note/frequency
+	OP_NOTE_FREQ, // dst, a, object, fast        dst = frequency of note numbers a (FastSound.number_to_freq) in the tuning object's current note/frequency; fast 1: mb_vec_note_freq (Plan.precision :fast)
 	OP_EVENTS,    // dst, object, 0              dst = the event list object rendered (see run_events)
 	OP_KEEP,      // dst, a, object              object [target, name]: target's ivar name (or Hash key) = last sample of a; dst unused
 	OP_ENVELOPE,  // see run_envelope
 	OP_SMOOTH,    // dst, a, object              dst = a smoothed (see run_smooth); object [smoother, jumps]
 	OP_MAX,       // dst, a, b                   dst = Numo::SFloat.maximum(a, b) (real)
+	OP_POWF,      // dst, a, b                   dst = a ** b by mb_vec_pow (Plan.precision :fast, a Constant base)
 };
 
 // Event list modes and entry kinds (Plan::EventList)
@@ -931,7 +933,7 @@ static VALUE ruby_run(VALUE self, VALUE words, VALUE scalars, VALUE objects, VAL
 			case OP_FILL:
 				len = 3;
 				break;
-			case OP_MUL: case OP_MULS: case OP_ADD: case OP_ADDS: case OP_DIV: case OP_DIVS: case OP_POW: case OP_PART: case OP_COPY:
+			case OP_MUL: case OP_MULS: case OP_ADD: case OP_ADDS: case OP_DIV: case OP_DIVS: case OP_POW: case OP_POWF: case OP_PART: case OP_COPY:
 				len = 4;
 				break;
 			case OP_TONE:
@@ -959,7 +961,7 @@ static VALUE ruby_run(VALUE self, VALUE words, VALUE scalars, VALUE objects, VAL
 		if (op[0] != OP_FILL && op[0] != OP_TONE && op[0] != OP_EVENTS && op[0] != OP_ENVELOPE) {
 			if (op[2] < 0 || op[2] >= nregs || !ptrs[op[2]]) rb_raise(rb_eArgError, "Bad plan operand at word %zu", pc);
 		}
-		if ((op[0] == OP_MUL || op[0] == OP_ADD || op[0] == OP_DIV || op[0] == OP_POW || op[0] == OP_MAX) && (op[3] < 0 || op[3] >= nregs || !ptrs[op[3]])) {
+		if ((op[0] == OP_MUL || op[0] == OP_ADD || op[0] == OP_DIV || op[0] == OP_POW || op[0] == OP_POWF || op[0] == OP_MAX) && (op[3] < 0 || op[3] >= nregs || !ptrs[op[3]])) {
 			rb_raise(rb_eArgError, "Bad plan operand at word %zu", pc);
 		}
 		if ((op[0] == OP_FILL && (op[2] < 0 || (size_t)op[2] + 2 > nscalars)) ||
@@ -1013,6 +1015,12 @@ static VALUE ruby_run(VALUE self, VALUE words, VALUE scalars, VALUE objects, VAL
 				break;
 			}
 
+			case OP_POWF: {
+				if (cplx[d] || cplx[op[2]] || cplx[op[3]]) rb_raise(rb_eArgError, "Plan power is real only");
+				mb_vec_pow(ptrs[d], ptrs[op[2]], ptrs[op[3]], n);
+				break;
+			}
+
 			case OP_PART: {
 				if (cplx[d] || !cplx[op[2]]) rb_raise(rb_eArgError, "Plan part needs a complex operand and a real result");
 				float *D = ptrs[d];
@@ -1036,7 +1044,11 @@ static VALUE ruby_run(VALUE self, VALUE words, VALUE scalars, VALUE objects, VAL
 				double tfrq = NUM2DBL(rb_funcall(tuning, id_frequency, 0));
 				float *D = ptrs[d];
 				const float *A = ptrs[op[2]];
-				for (size_t i = 0; i < n; i++) D[i] = mb_num2freq(A[i], tnum, tfrq);
+				if (op[4]) {
+					mb_vec_note_freq(D, A, n, tnum, tfrq);
+				} else {
+					for (size_t i = 0; i < n; i++) D[i] = mb_num2freq(A[i], tnum, tfrq);
+				}
 				break;
 			}
 
@@ -1149,6 +1161,7 @@ static VALUE ruby_enums(VALUE self)
 	rb_hash_aset(h, ID2SYM(rb_intern("envelope")), INT2NUM(OP_ENVELOPE));
 	rb_hash_aset(h, ID2SYM(rb_intern("smooth")), INT2NUM(OP_SMOOTH));
 	rb_hash_aset(h, ID2SYM(rb_intern("max")), INT2NUM(OP_MAX));
+	rb_hash_aset(h, ID2SYM(rb_intern("powf")), INT2NUM(OP_POWF));
 	rb_hash_aset(h, ID2SYM(rb_intern("ev_ramp")), INT2NUM(EV_RAMP));
 	rb_hash_aset(h, ID2SYM(rb_intern("events_held")), INT2NUM(EVENTS_HELD));
 	rb_hash_aset(h, ID2SYM(rb_intern("events_impulses")), INT2NUM(EVENTS_IMPULSES));
