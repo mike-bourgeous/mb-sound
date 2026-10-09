@@ -72,7 +72,7 @@ module MB
           @freq = freq.is_a?(Numeric) ? freq.to_f : freq.get_sampler
           @decay = decay
           @decay_source = Length::Source.new(decay)
-          @phase = phase.to_f
+          @phase = Phase.radians(phase).to_f # radians, or e.g. 0.25.cycles
           @cos_phase = Math.cos(@phase)
           @sin_phase = Math.sin(@phase)
           @sample_rate = (sample_rate || input.sample_rate).to_f

@@ -55,6 +55,21 @@ RSpec.describe('Plan: Notes nodes and envelopes') do
       expect(op_names(r)).to include(:Smooth)
     end
 
+    it 'matches adaptive smoothing' do
+      r = compare { |v| v.cc(1, smooth: :adaptive) + v.bend(smooth: 2.ms..80.ms) * 0.25 + v.poly_pressure(smooth: :adaptive) }
+      expect(op_names(r)).to include(:Smooth)
+    end
+
+    it 'matches live changes of the global smoothing defaults' do
+      compare { |v, c|
+        c.before_block(10) { MB::Sound::Notes.control_smoothing = 40.ms }
+        c.before_block(20) { MB::Sound::Notes.bend_smoothing = :adaptive }
+        c.before_block(30) { MB::Sound::Notes.control_smoothing = false }
+        c.before_block(40) { MB::Sound::Notes.control_smoothing = 5.ms..30.ms }
+        v.cc(1) + v.mod * 0.5 + v.bend * 0.25 + v.pressure + v.cc(74, smooth: 20.ms) * 0.3
+      }
+    end
+
     it 'filters each controller\'s own events (several CCs in one feed group)' do
       compare { |v| v.cc(1) * v.attack_time + v.cc(7) * v.release_time * v.decay_time }
     end

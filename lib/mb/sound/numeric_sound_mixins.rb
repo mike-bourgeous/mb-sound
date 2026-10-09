@@ -144,6 +144,15 @@ module MB
       end
       alias cent cents
 
+      # Returns an oscillator Phase of this many cycles (1 cycle = 360
+      # degrees = 2 pi radians): `440.hz.with_phase(0.25.cycles)`,
+      # `pm(mod, 0.4.cycles)`.  Also available as #cycle and #cyc.
+      def cycles
+        Phase.new(self)
+      end
+      alias cycle cycles
+      alias cyc cycles
+
       # Returns a Pitch at this frequency in Hz, which makes oscillators
       # (`100.hz.sine.at(-12.db)`) and plays as a sine when used as a signal.
       # If this is a Meters or Feet object, then the frequency is calculated

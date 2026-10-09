@@ -403,6 +403,17 @@ RSpec.describe(MB::Sound::PlaybackMethods) do
       expect(MB::Sound::Session.default.instance_variable_get(:@taps)).to be_empty
     end
 
+    it 'returns when its stop callable returns true, then removes its tap' do
+      MB::Sound.bg(220.hz.sine)
+      plotted = 0
+      allow_any_instance_of(MB::Sound::PlotOutput).to receive(:plot) { plotted += 1 }
+      allow($stdout).to receive(:write)
+
+      result = MB::Sound.visualize(stop: -> { plotted >= 3 })
+      expect(result[:frames]).to be >= 3
+      expect(MB::Sound::Session.default.instance_variable_get(:@taps)).to be_empty
+    end
+
     it "shows each buffer after the output's latency, when it is heard" do
       out = MB::Sound::NullOutput.new(channels: 2)
       out.define_singleton_method(:latency) { 0.2 }

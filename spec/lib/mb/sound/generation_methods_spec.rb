@@ -76,6 +76,32 @@ RSpec.describe(MB::Sound::GenerationMethods) do
       expect(m.state.to_h[:noise]).to eq(n.state.to_h[:noise])
     end
 
+    # Until 2026-10-10, ~1% of samples differed by an ulp between block
+    # sizes (the per-block sum of increments of up to +-freq/2 cycles
+    # rounded differently); the phase now wraps every sample.
+    {
+      'MB::Sound.noise' => -> { MB::Sound.noise(seed: 4) },
+      'a noise blend' => -> { 440.hz.ramp.noise(0.3, seed: 4) },
+      'FM noise' => -> { (100.hz.sine.at(50) + 300).tone.noise(seed: 4) },
+      'wavetable noise' => -> { 220.hz.wavetable(:basic, scan: 0.4).noise(0.01, seed: 4) },
+    }.each do |name, make|
+      it "gives the same samples in any block sizes (#{name})" do
+        runs = [[48000], [1], [128], [7, 300, 64, 801]].map { |sizes|
+          n = make.call
+          out = []
+          got = 0
+          sizes.cycle do |c|
+            break if got >= 48000
+            c = [c, 48000 - got].min
+            out << n.sample(c).dup
+            got += c
+          end
+          out.reduce(:concatenate)
+        }
+        runs[1..].each { |r| expect(r.to_a).to eq(runs[0].to_a) }
+      end
+    end
+
     [
       ['uniform noise', -> { 2000.hz.ramp.noise(seed: 1) }],
       ['gauss noise', -> { 1.hz.gauss.noise(seed: 2) }],

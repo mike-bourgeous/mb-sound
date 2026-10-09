@@ -83,4 +83,52 @@ static inline int mb_smooth_run(const float *xp, float *op, long from, long to, 
 	return 0;
 }
 
+
+// Adaptive smoothing (Notes::Smoother with a Range length; Ruby mirror
+// Notes::Smoother.adaptive_ruby): each input step glides linearly from the
+// current output to the new value over the samples since the previous
+// step, clamped to [lo, hi].  State st (8 doubles): output, last input,
+// ramp start, samples since the last step, ramp length, ramp position, lo,
+// hi.
+static inline void mb_adaptive_run(const float *xp, float *op, long from, long to, double *st)
+{
+	double y = st[0];
+	double last = st[1];
+	double start = st[2];
+	double since = st[3];
+	double t = st[4];
+	double pos = st[5];
+	double lo = st[6];
+	double hi = st[7];
+
+	for (long i = from; i < to; i++) {
+		double v = xp[i];
+		if (since < hi) {
+			since += 1.0;
+		}
+		if (v != last) {
+			t = since < lo ? lo : since;
+			start = y;
+			last = v;
+			pos = 0.0;
+			since = 0.0;
+		}
+
+		if (pos < t) {
+			pos += 1.0;
+			y = pos >= t ? v : start + (v - start) * (pos / t);
+		} else {
+			y = v;
+		}
+		op[i] = (float)y;
+	}
+
+	st[0] = y;
+	st[1] = last;
+	st[2] = start;
+	st[3] = since;
+	st[4] = t;
+	st[5] = pos;
+}
+
 #endif

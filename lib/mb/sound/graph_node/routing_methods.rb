@@ -62,6 +62,15 @@ module MB
           Length::Samples.new(self)
         end
 
+        # Marks this node's output as a phase in cycles (an MB::Sound::Phase),
+        # e.g. a phase modulation depth for methods that otherwise take
+        # radians: `110.hz.pm(330.hz.at(0..0.4).cycles)`.  Also available as
+        # #cyc.
+        def cycles
+          Phase.new(self)
+        end
+        alias cyc cycles
+
         # Marks this node's output as a length in seconds (Length::Seconds).
         # Plain nodes are already seconds where a method counts in seconds.
         def seconds

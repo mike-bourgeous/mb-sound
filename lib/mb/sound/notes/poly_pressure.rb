@@ -18,7 +18,7 @@ module MB
       class PolyPressure < NoteNode
         def initialize(stream, notes: nil, sample_rate: 48000, smooth: nil)
           super(stream, notes: notes, sample_rate: sample_rate)
-          smooth_with(Notes.smoothing(smooth, Notes.control_smoothing))
+          smooth_with(smooth, :control)
           @pressures = {}
           @value = 0.0
           @node_type_name = 'Notes Poly Pressure'

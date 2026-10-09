@@ -304,7 +304,9 @@ static void naive_segment(enum wave_types wt, void *out, _Bool complex_out, size
 			((float *)out)[i] = creal(v);
 		}
 
-		if (!constant) {
+		if (rndadv != 0) {
+			phi = mb_wrap(phi + inc, 1.0); // noise: block-size independent (as fast_sound.c)
+		} else if (!constant) {
 			steps += inc;
 		}
 	}
@@ -723,6 +725,27 @@ static void run_smooth(float *D, const float *A, VALUE obj, size_t n)
 	VALUE ring2 = rb_ivar_get(smoother, id_ring2);
 	size_t sl, n1, n2;
 	double *st = smooth_array(state, 7, &sl, "state");
+
+	if (sl == 8) {
+		// Adaptive smoothing (Notes::Smoother::ADAPTIVE_STATE; jumps as
+		// Notes::Smoother.jump)
+		long start = 0;
+		long nj = RARRAY_LEN(jumps);
+		for (long k = 0; k < nj; k++) {
+			long j = NUM2LONG(rb_ary_entry(jumps, k));
+			if (j < start || j >= (long)n) continue;
+			if (j > start) mb_adaptive_run(A, D, start, j, st);
+			st[0] = st[1] = st[2] = A[j];
+			st[3] = 0.0;
+			st[5] = st[4];
+			start = j;
+		}
+		if (start < (long)n) mb_adaptive_run(A, D, start, (long)n, st);
+		RB_GC_GUARD(state);
+		RB_GC_GUARD(obj);
+		return;
+	}
+
 	double *r1 = smooth_array(ring1, 1, &n1, "ring 1");
 	double *r2 = smooth_array(ring2, 1, &n2, "ring 2");
 	double settle = (double)(n1 + n2 - 2);

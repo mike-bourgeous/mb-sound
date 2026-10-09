@@ -947,7 +947,9 @@ static VALUE ruby_oscillate(int argc, VALUE *argv, VALUE self)
 		prev_inc = inc;
 		primed = 1;
 
-		if (!constant) {
+		if (rndadv != 0) {
+			phi = wt_wrap(phi + inc, 1.0); // noise: block-size independent (as fast_sound.c)
+		} else if (!constant) {
 			steps += inc;
 		}
 	}

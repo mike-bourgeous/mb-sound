@@ -476,6 +476,25 @@ RSpec.describe(MB::Sound::ScriptRunner) do
         expect(MB::Sound.scheduled).to be_empty
         expect(later).to eq(false)
       end
+
+      it 'exits at the end of the song with --plot (the plot stops when the song has ended)' do
+        plotted = 0
+        allow_any_instance_of(MB::Sound::PlotOutput).to receive(:plot) { plotted += 1 }
+        allow($stdout).to receive(:write)
+
+        r = runner(:song, ['-q', '--plot', '--bars', '0.25'])
+        t = MB::U.clock_now
+        Timeout.timeout(15) {
+          r.run_song {
+            MB::Sound.bpm 120
+            MB::Sound.bg(:tone, 220.hz.sine, fade: 0)
+          }
+        }
+
+        expect(MB::U.clock_now - t).to be_between(0.4, 5)
+        expect(plotted).to be > 0
+        expect(MB::Sound::Session.default.instance_variable_get(:@taps)).to be_empty
+      end
     end
   end
 end

@@ -129,27 +129,60 @@ module MB
 
         # The default smoothing time of controller nodes (#cc, the GM-named
         # controls, #pressure, #poly_pressure, #aftertouch; seconds or a
-        # Length, or false for exact steps), CONTROL_SMOOTHING unless
-        # changed.  Applies to nodes made afterwards.  See Notes::Smoother.
-        attr_accessor :control_smoothing
+        # Length, :adaptive or a Range of times for adaptive smoothing, or
+        # false for exact steps), CONTROL_SMOOTHING unless changed.  Changes
+        # apply live: every node made with the default (no +:smooth+, or
+        # true) follows it from its next buffer, gliding on from its current
+        # output; nodes given their own +:smooth+ keep it.  See
+        # Notes::Smoother.
+        attr_reader :control_smoothing
 
         # The default smoothing time of pitch bend (#bend,
         # #bend_semitones, and so every #hz and #freq), BEND_SMOOTHING
-        # unless changed.  See .control_smoothing.
-        attr_accessor :bend_smoothing
+        # unless changed; live like .control_smoothing.
+        attr_reader :bend_smoothing
+
+        # Counts changes of the global defaults, so default-following nodes
+        # notice them with one comparison per buffer.
+        attr_reader :smoothing_generation
+
+        def control_smoothing=(smooth)
+          smoothing(smooth, false) # validates
+          @control_smoothing = smooth
+          @smoothing_generation = (@smoothing_generation || 0) + 1
+        end
+
+        def bend_smoothing=(smooth)
+          smoothing(smooth, false) # validates
+          @bend_smoothing = smooth
+          @smoothing_generation = (@smoothing_generation || 0) + 1
+        end
 
         # Resolves a node's +:smooth+ option: nil or true give +default+,
-        # false or 0 give nil (no smoothing), else a time (seconds or a
-        # Length) as is.
+        # false or 0 give nil (no smoothing), :adaptive gives
+        # ADAPTIVE_SMOOTHING, else a time (seconds or a Length) or a Range of
+        # times (adaptive smoothing, see Notes::Smoother) as is.
         def smoothing(smooth, default)
           smooth = default if smooth.nil? || smooth == true
           return nil if smooth.nil? || smooth == false || smooth == 0
+          return ADAPTIVE_SMOOTHING if smooth == :adaptive
 
-          unless smooth.is_a?(Length) || (smooth.is_a?(Numeric) && smooth > 0)
-            raise ArgumentError, "Smoothing must be a time (seconds or a Length), true, or false (got #{smooth.inspect})"
+          if smooth.is_a?(Range)
+            lo, hi = smooth.begin, smooth.end
+            if smoothing_time?(lo) && smoothing_time?(hi) && Length.seconds(lo) <= Length.seconds(hi)
+              return smooth
+            end
+          elsif smoothing_time?(smooth)
+            return smooth
           end
 
-          smooth
+          raise ArgumentError, "Smoothing must be a time (seconds or a Length), :adaptive or a Range of times, true, or false (got #{smooth.inspect})"
+        end
+
+        private
+
+        def smoothing_time?(t)
+          t.is_a?(Length) || (t.is_a?(Numeric) && t > 0)
         end
       end
       self.fast_paths = ENV['MB_SOUND_NOTES_FAST'] != '0'
@@ -164,6 +197,12 @@ module MB
       # (14-bit wheels) and pitch steps zipper less than level or cutoff
       # steps, while bends should feel immediate.
       BEND_SMOOTHING = 0.005
+
+      # The bounds of `smooth: :adaptive` (see Notes::Smoother): ramps of
+      # the time between value steps, at least 5 ms (a fast 7-bit knob
+      # steps every few ms) and at most 200 ms (a slow 7-bit wheel steps
+      # every 30-150 ms; longer gaps start new gestures).
+      ADAPTIVE_SMOOTHING = (0.005..0.2)
 
       self.control_smoothing = CONTROL_SMOOTHING
       self.bend_smoothing = BEND_SMOOTHING
