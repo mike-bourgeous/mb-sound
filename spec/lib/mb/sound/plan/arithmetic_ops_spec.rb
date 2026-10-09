@@ -305,11 +305,21 @@ RSpec.describe(MB::Sound::Plan::Fold) do
     expect(folds(r)).to be_empty
   end
 
-  it 'gives 0 where the unfused graph would give NaN for a non-finite factor (a patch bug)' do
+  it 'gives 0 where the unfused graph would give NaN for a non-finite factor (a patch bug, which check mode reports)' do
+    old_check = MB::Sound::Plan.check
+    MB::Sound::Plan.check = nil
     inf = 0.constant.proc { |v| Numo::SFloat.new(v.length).fill(Float::INFINITY) }
     g = inf * 1 * 0 + 1.constant * 1
     MB::Sound::Plan.install(g)
     expect(g.sample(16).to_a).to all(eq(1.0))
+
+    MB::Sound::Plan.check = :raise
+    inf2 = 0.constant.proc { |v| Numo::SFloat.new(v.length).fill(Float::INFINITY) }
+    g2 = inf2 * 1 * 0 + 1.constant * 1
+    MB::Sound::Plan.install(g2)
+    expect { g2.sample(16) }.to raise_error(MB::Sound::Plan::CheckFailed)
+  ensure
+    MB::Sound::Plan.check = old_check
   end
 
   it 'lists folds in Plan.explain and warns once per kind of node' do

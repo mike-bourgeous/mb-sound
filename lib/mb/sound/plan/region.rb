@@ -486,7 +486,8 @@ module MB
           else
             diff = (Numo::DComplex.cast(planned) - Numo::DComplex.cast(reference)).abs
             nan_ok = planned.isnan.eq(reference.isnan).all?
-            worst = diff[~(diff.isnan)].max || 0.0
+            finite = diff[~(diff.isnan)]
+            worst = finite.empty? ? 0.0 : finite.max # (every sample NaN on one side only: nan_ok reports it)
             # Inexact ops (Plan.precision :fast) may differ by their
             # tolerance, scaled by the output's level
             limit = @program.exact? ? 0.0 : @program.ops.map(&:tolerance).max * [1.0, Numo::DComplex.cast(reference).abs.max].max
