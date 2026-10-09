@@ -124,6 +124,10 @@ module MB
             list&.delete(self)
           end
           @watched = []
+          @roots.each do |r|
+            list = r.instance_variable_get(:@plan_installations) if r.respond_to?(:sample)
+            list&.delete_if { |i| i.equal?(self) }
+          end
         end
 
         # Called by Region#compile when a node turned out unsupported.
@@ -357,13 +361,24 @@ module MB
           (regions - @regions).each { |r| r.members.each { |n| @region_of.delete(n) } }
         end
 
+        # Registers this installation for Plan.changed on every node it
+        # covers (weakly both ways, see Plan.watch), and keeps it alive from
+        # its roots while the graph lives (so an installation left without
+        # regions still rebuilds after a later change).
         def watch
           @seen.each_key do |obj|
             next if obj.is_a?(Numeric)
 
-            list = (Plan.watch[obj] ||= [])
-            list << self unless list.any? { |i| i.equal?(self) }
+            list = (Plan.watch[obj] ||= ObjectSpace::WeakMap.new)
+            list[self] = true
             @watched << obj
+          end
+
+          @roots.each do |r|
+            next unless r.respond_to?(:sample) && !r.frozen?
+
+            list = r.instance_variable_get(:@plan_installations) || r.instance_variable_set(:@plan_installations, [])
+            list << self unless list.any? { |i| i.equal?(self) }
           end
         end
       end

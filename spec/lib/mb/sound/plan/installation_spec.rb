@@ -245,5 +245,30 @@ RSpec.describe(MB::Sound::Plan::Installation) do
       b = render.call(false)
       expect(a.map(&:to_a)).to eq(b.map(&:to_a))
     end
+
+    it 'lets dropped Synths and their plans be garbage collected' do
+      # Plan.watch once held its Installations strongly, and they hold
+      # their graphs, so every planned Synth (with ~80 MB of Tee buffers
+      # for a 6-lane synth) stayed alive forever (the plan specs reached
+      # 3 GB under Valgrind).
+      make = lambda do
+        s = MB::Sound::Synth.new(MB::Sound.seq(MB::Sound::C3, MB::Sound::E3).n4.loop, voices: 2) { |v| v.hz.sine.at(0.2) * v.amp_env }
+        s.sample(128)
+        expect(s.plans.compact).not_to be_empty
+        nil
+      end
+      10.times { make.call }
+      GC.start(full_mark: true, immediate_sweep: true)
+      GC.start
+      # A few may stay on the machine stack (conservative scanning)
+      expect(ObjectSpace.each_object(MB::Sound::Synth).count).to be <= 3
+
+      # Plans still follow changes on a graph that is alive
+      g = (src.new(seed: 1) * 2 + src.new(seed: 2) * 3) * 0.5
+      inst = MB::Sound::Plan.install(g)
+      GC.start
+      MB::Sound::Plan.changed(g)
+      expect(inst.stale?).to eq(true)
+    end
   end
 end

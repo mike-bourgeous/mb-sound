@@ -159,7 +159,7 @@ module MB
           list = watch[node]
           return nil unless list
 
-          list.each { |inst| structure ? inst.stale! : inst.settings_changed(node) }
+          list.keys.each { |inst| structure ? inst.stale! : inst.settings_changed(node) }
           nil
         end
 
@@ -181,7 +181,14 @@ module MB
           !!spies && !spies.empty?
         end
 
-        # For internal use: Installations covering each node (weak keys).
+        # For internal use: Installations covering each node, as a weak
+        # set (an ObjectSpace::WeakMap of Installation => true) per node
+        # (weak keys).  Both sides are weak: an Installation references
+        # its graph, so a strong value would keep every node (and with
+        # them every Synth, Notes, and buffer) alive forever (2026-10-09:
+        # the plan specs grew by ~80 MB per synth).  Installations are kept
+        # alive by their regions' hooks on the nodes and by their roots
+        # (Installation#watch).
         def watch
           @watch ||= ObjectSpace::WeakKeyMap.new
         end
