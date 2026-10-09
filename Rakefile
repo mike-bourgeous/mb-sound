@@ -120,53 +120,30 @@ end
 #                                                   values with an extension on the stack
 #   rake memcheck:debug                             rebuild extensions at -O0 first
 #
+# Selective runs (spec/valgrind/memcheck_selection.rb has the rules):
+#
+#   rake memcheck:changed[BASE,TO]  only the specs for extensions changed since
+#                                   the merge-base of HEAD and BASE (default
+#                                   master-ai), up to TO (default: the working
+#                                   tree, uncommitted and untracked included)
+#     MEMCHECK_DRY=1                print the selection, don't run Valgrind
+#     FULL=auto                     run the full list when a full run is due
+#     FULL=1                        run the full list
+#   rake memcheck:status            last full run and whether one is due
+#   rake memcheck:map               rerecord spec/valgrind/memcheck_map.json
+#                                   (natively, ~5 min; a full run does it too
+#                                   unless MEMCHECK_MAP=0)
+#   rake depend:check               compare ext depend files with the includes
+#
+# A full run (no MEMCHECK_SPECS) writes the stamp in the main checkout's
+# tmp/memcheck_full.stamp and refreshes the map.
+#
 # Suppressions for known false positives go in spec/valgrind/ruby.supp (or
 # ruby-4.0.supp etc. for one Ruby version).
-MEMCHECK_SPECS = [
-  # Direct tests of every extension function
-  'spec/ext/**/*_spec.rb',
-  'spec/lib/mb/fast_sound_spec.rb',
-
-  # Ruby classes whose inner loops are in C (cross-checks against Ruby
-  # reference implementations, odd buffer sizes, wraparound)
-  'spec/lib/mb/sound/delay_line_spec.rb',          # FastDelay.read/feedback
-  'spec/lib/mb/sound/graph_node/multitap_delay_spec.rb',
-  'spec/lib/mb/sound/filter/delay_spec.rb',
-  'spec/lib/mb/sound/tone_phasor_spec.rb',         # FastSound.phasor/oscillate
-  'spec/lib/mb/sound/tone_waveforms_spec.rb',      # FastSound.osc/oscillate, FastSynth.oscillate_bl
-  'spec/lib/mb/sound/generation_methods_spec.rb',  # FastSound noise (splitmix64 state)
-  'spec/lib/mb/sound/band_limit_spec.rb',          # FastSynth.oscillate_bl/blit/oscillate_sync
-  'spec/lib/mb/sound/tone_feedback_spec.rb',       # FastSynth.feedback_sine through Tone (resets, nodes)
-  'spec/lib/mb/sound/tone_gain_spec.rb',           # FastArithmetic.scale through Tone#gain
-  'spec/lib/mb/sound/shaper_spec.rb',              # FastClip.shape
-  'spec/lib/mb/sound/graph_node/curve_shaper_spec.rb', # FastClip.shape_curve
-  'spec/lib/mb/sound/curve_spec.rb',               # FastClip.curve_lookup
-  'spec/lib/mb/sound/envelope_spec.rb',            # FastEnvelope.process
-  'spec/lib/mb/sound/envelope_segments_spec.rb',   # FastEnvelope.process (segment lists, loops)
-  'spec/lib/mb/sound/notes_smoothing_spec.rb',     # FastControl.smooth (controller smoothing)
-  'spec/lib/mb/sound/filter/four_pole_spec.rb',    # FastFilter.four_pole
-  'spec/lib/mb/sound/filter/diode_ladder_spec.rb', # FastFilter.diode_ladder
-  'spec/lib/mb/sound/filter/svf_spec.rb',          # FastFilter.svf
-  'spec/lib/mb/sound/graph_node/resonator_spec.rb', # FastResonator.ping
-  'spec/lib/mb/sound/loudness_spec.rb',            # FastLoudness.true_peak
-  'spec/lib/mb/sound/wavetable_spec.rb',           # FastWavetable
-  'spec/lib/mb/sound/graph_node/wavetable_spec.rb',
-  'spec/lib/mb/sound/tone_wavetable_spec.rb',      # FastWavetable through Tone (sync, resets, sample mode)
-  'spec/lib/mb/sound/graph_node/harmonic_table_spec.rb',
-  'spec/lib/mb/sound/filter/biquad_spec.rb',       # FastSound.biquad*
-  'spec/lib/mb/sound/filter/cookbook_spec.rb',     # FastSound.cookbook, dynamic_biquad
-  'spec/lib/mb/sound/filter/smoothstep_spec.rb',   # FastSound.smoothstep*
-  'spec/lib/mb/sound/graph_node/resample_spec.rb', # FastResample (libsamplerate)
-  'spec/lib/mb/sound/graph_node/constant_spec.rb', # FastSound.smootherstep_buf
-  'spec/lib/mb/sound/device_output_spec.rb',       # FastAudio::Playback
-  'spec/lib/mb/sound/device_input_spec.rb',        # FastAudio::Capture
-  'spec/lib/mb/sound/midi/input_spec.rb',          # MIDI::Input on JACK and RtMidi (with a JACK dummy server)
-  'spec/lib/mb/sound/midi/live_source_spec.rb',    # Playback#jack_clock (with a JACK dummy server)
-  'spec/lib/mb/sound/jack_spec.rb',                # DeviceOutput/Input and MIDI on one JACK client
-  'spec/lib/mb/sound/plan/*_spec.rb',              # FastPlan.run through planned regions (tones, resets, fallbacks, events, envelopes, smoothing)
-  'spec/lib/mb/sound/notes_fast_paths_spec.rb',    # FastPlan.run through Synth lanes' plans (envelopes, events, skipped lanes)
-  'spec/lib/mb/sound/graph_node/feedback_loop_spec.rb', # FastLoop.run (plan/loop_spec.rb runs with the plan specs)
-].freeze
+# The spec list and the selection for `memcheck:changed` are in
+# spec/valgrind/memcheck_selection.rb.
+require_relative 'spec/valgrind/memcheck_selection'
+MEMCHECK_SPECS = MemcheckSelection::SPECS
 
 begin
   require 'ruby_memcheck'
@@ -230,18 +207,32 @@ begin
     )
   end
 
-  desc 'Run the C extension specs under Valgrind memcheck (MEMCHECK_SPECS=... for others)'
-  task memcheck: :compile do
+  # Runs +specs+ under Valgrind; a full run (the whole list) then writes the
+  # full-run stamp and refreshes the spec map (MEMCHECK_MAP=0 skips that).
+  run_memcheck = lambda do |specs, full:|
     config = memcheck_config.call
-    RubyMemcheck::RSpec::RakeTask.new(config, :memcheck_rspec) do |t|
-      specs = ENV['MEMCHECK_SPECS'].to_s.split
-      t.pattern = specs.empty? ? MEMCHECK_SPECS : specs
+    task_name = :"memcheck_rspec_#{Process.clock_gettime(Process::CLOCK_MONOTONIC, :nanosecond)}"
+    RubyMemcheck::RSpec::RakeTask.new(config, task_name) do |t|
+      t.pattern = specs
       t.rspec_opts = ['--format', 'progress']
       t.rspec_opts += ['--require', './spec/valgrind/gc_stress_calls.rb'] if ENV['MEMCHECK_GC_STRESS'] == '1'
     end
-    Rake::Task[:memcheck_rspec].invoke
+    started = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+    Rake::Task[task_name].invoke
+    puts format('memcheck: %d spec files clean in %.1f min', Array(specs).length, (Process.clock_gettime(Process::CLOCK_MONOTONIC) - started) / 60)
+    if full
+      stamp = MemcheckSelection.write_stamp
+      puts "memcheck: full run recorded in #{MemcheckSelection.stamp_path} (#{stamp['commit'][0, 10]}#{stamp['dirty'] ? ', uncommitted changes' : ''})"
+      Rake::Task['memcheck:map'].invoke unless ENV['MEMCHECK_MAP'] == '0'
+    end
   ensure
     FileUtils.rm_rf(config.temp_dir) if config
+  end
+
+  desc 'Run the C extension specs under Valgrind memcheck (MEMCHECK_SPECS=... for others)'
+  task memcheck: :compile do
+    specs = ENV['MEMCHECK_SPECS'].to_s.split
+    run_memcheck.call(specs.empty? ? MEMCHECK_SPECS : specs, full: specs.empty?)
   end
 
   namespace :memcheck do
@@ -253,8 +244,44 @@ begin
       Rake::Task['clobber'].invoke # extconf flags are only read when tmp/ is empty
       Rake::Task['memcheck'].invoke
     end
+
+    desc 'Memcheck only the specs for extensions changed since the merge-base with BASE (default master-ai); MEMCHECK_DRY=1 prints the selection, FULL=auto|1'
+    task :changed, [:base, :to] do |_, args|
+      sel = MemcheckSelection.select(base: args[:base], to: args[:to])
+      MemcheckSelection.describe(sel)
+      due, status = MemcheckSelection.full_status
+      puts status
+      full = sel.full? || ENV['FULL'] == '1' || (ENV['FULL'] == 'auto' && due)
+      puts "FULL=#{ENV['FULL']}: running the full list (#{MEMCHECK_SPECS.length} globs)" if full && !sel.full?
+      next if ENV['MEMCHECK_DRY'] == '1'
+      next puts('memcheck:changed: nothing to run') if sel.empty? && !full
+
+      Rake::Task[:compile].invoke
+      run_memcheck.call(full ? MEMCHECK_SPECS : sel.specs, full: full)
+    end
   end
 rescue LoadError => e
   desc 'Run the C extension specs under Valgrind memcheck (needs the ruby_memcheck gem)'
   task(:memcheck) { abort "rake memcheck needs the ruby_memcheck gem (bundle install): #{e.message}" }
+end
+
+namespace :memcheck do
+  desc 'Show the last full memcheck run and whether one is due'
+  task :status do
+    puts MemcheckSelection.full_status[1]
+  end
+
+  desc 'Record which extensions each memcheck spec calls (spec/valgrind/memcheck_map.json; native rspec, a few minutes)'
+  task :map do
+    sh({ 'MEMCHECK_MAP' => '1' }, 'bundle', 'exec', 'rspec', *MemcheckSelection.spec_files)
+  end
+end
+
+namespace :depend do
+  desc "Check every extension's depend file against the headers its sources include"
+  task :check do
+    problems = MemcheckSelection.depend_problems
+    abort("depend:check:\n  #{problems.join("\n  ")}") unless problems.empty?
+    puts "depend:check: #{MemcheckSelection.extensions.length} extensions OK"
+  end
 end

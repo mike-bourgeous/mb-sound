@@ -29,6 +29,9 @@ require_relative 'support/midi_list_source'
 require_relative 'support/clip_node_reference'
 require_relative 'support/plan_helpers'
 
+# Records the extension methods each memcheck spec calls (rake memcheck:map)
+require_relative 'valgrind/memcheck_map_recorder' if ENV['MEMCHECK_MAP'] == '1'
+
 MB::U.sigquit_backtrace
 
 RSpec::Matchers.define_negated_matcher :not_change, :change

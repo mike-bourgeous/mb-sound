@@ -1,0 +1,1039 @@
+{
+  "about": "Extensions (and their methods) each memcheck spec file calls; `rake memcheck:map` regenerates it.  See spec/valgrind/memcheck_selection.rb.",
+  "generated": "2026-10-09",
+  "specs": {
+    "spec/ext/mb/fast_sound_spec.rb": {
+      "fast_sound": [
+        "FastSound.matrix_mix",
+        "FastSound.narray_log",
+        "FastSound.narray_log10",
+        "FastSound.narray_log2",
+        "FastSound.number_to_freq"
+      ]
+    },
+    "spec/ext/mb/sound/fast_arithmetic_spec.rb": {
+      "fast_arithmetic": [
+        "FastArithmetic.circular_read",
+        "FastArithmetic.circular_write",
+        "FastArithmetic.complex_part",
+        "FastArithmetic.copy",
+        "FastArithmetic.divide",
+        "FastArithmetic.min_max",
+        "FastArithmetic.mix",
+        "FastArithmetic.pan",
+        "FastArithmetic.power",
+        "FastArithmetic.product",
+        "FastArithmetic.scale",
+        "FastArithmetic.wet_dry"
+      ]
+    },
+    "spec/ext/mb/sound/fast_audio_jack_spec.rb": {
+      "fast_audio": [
+        "FastAudio.jack_close",
+        "FastAudio.jack_connect",
+        "FastAudio.jack_connections",
+        "FastAudio.jack_disconnect",
+        "FastAudio.jack_info",
+        "FastAudio.jack_open",
+        "FastAudio.jack_ports",
+        "FastAudio.jack_server?",
+        "FastAudio::Capture#backend",
+        "FastAudio::Capture#close",
+        "FastAudio::Capture#initialize",
+        "FastAudio::Capture#jack_ports",
+        "FastAudio::Capture#period",
+        "FastAudio::Capture#read",
+        "FastAudio::JackMIDIInput#close",
+        "FastAudio::JackMIDIInput#closed?",
+        "FastAudio::JackMIDIInput#initialize",
+        "FastAudio::JackMIDIInput#port_name",
+        "FastAudio::JackMIDIInput#read",
+        "FastAudio::JackMIDIInput#stats",
+        "FastAudio::JackMIDIOutput#close",
+        "FastAudio::JackMIDIOutput#initialize",
+        "FastAudio::JackMIDIOutput#port_name",
+        "FastAudio::JackMIDIOutput#stats",
+        "FastAudio::JackMIDIOutput#write",
+        "FastAudio::Playback#backend",
+        "FastAudio::Playback#captured",
+        "FastAudio::Playback#close",
+        "FastAudio::Playback#closed?",
+        "FastAudio::Playback#device_name",
+        "FastAudio::Playback#device_rate",
+        "FastAudio::Playback#initialize",
+        "FastAudio::Playback#jack_clock",
+        "FastAudio::Playback#jack_ports",
+        "FastAudio::Playback#period",
+        "FastAudio::Playback#resampling?",
+        "FastAudio::Playback#sample_rate",
+        "FastAudio::Playback#stats",
+        "FastAudio::Playback#write"
+      ],
+      "fast_midi": [
+        "FastMIDI::Output#close",
+        "FastMIDI::Output#send_bytes",
+        "FastMIDI::Output.new"
+      ]
+    },
+    "spec/ext/mb/sound/fast_audio_spec.rb": {
+      "fast_audio": [
+        "FastAudio.boost_thread_priority",
+        "FastAudio.devices",
+        "FastAudio.enabled_backends",
+        "FastAudio::Playback#backend",
+        "FastAudio::Playback#captured",
+        "FastAudio::Playback#close",
+        "FastAudio::Playback#closed?",
+        "FastAudio::Playback#device_channels",
+        "FastAudio::Playback#device_name",
+        "FastAudio::Playback#device_rate",
+        "FastAudio::Playback#initialize",
+        "FastAudio::Playback#max_queue",
+        "FastAudio::Playback#period",
+        "FastAudio::Playback#periods",
+        "FastAudio::Playback#queue_limit",
+        "FastAudio::Playback#queue_limit=",
+        "FastAudio::Playback#resampling?",
+        "FastAudio::Playback#sample_rate",
+        "FastAudio::Playback#stats",
+        "FastAudio::Playback#write"
+      ]
+    },
+    "spec/ext/mb/sound/fast_control_spec.rb": {
+      "fast_control": [
+        "FastControl.smooth"
+      ]
+    },
+    "spec/ext/mb/sound/fast_delay_spec.rb": {
+      "fast_delay": [
+        "FastDelay.feedback",
+        "FastDelay.read"
+      ]
+    },
+    "spec/ext/mb/sound/fast_loop_spec.rb": {
+      "fast_loop": [
+        "FastLoop.run"
+      ]
+    },
+    "spec/ext/mb/sound/fast_midi_spec.rb": {
+      "fast_audio": [
+        "FastAudio.jack_close"
+      ],
+      "fast_midi": [
+        "FastMIDI.compiled_apis",
+        "FastMIDI.input_ports",
+        "FastMIDI::Input#api",
+        "FastMIDI::Input#close",
+        "FastMIDI::Input#closed?",
+        "FastMIDI::Input#initialize",
+        "FastMIDI::Input#ports",
+        "FastMIDI::Input#read",
+        "FastMIDI::Output#close",
+        "FastMIDI::Output#send_bytes",
+        "FastMIDI::Output.new"
+      ]
+    },
+    "spec/ext/mb/sound/fast_plan_spec.rb": {
+      "fast_arithmetic": [
+        "FastArithmetic.divide"
+      ],
+      "fast_envelope": [
+        "FastEnvelope.process"
+      ],
+      "fast_plan": [
+        "FastPlan.enums",
+        "FastPlan.run"
+      ],
+      "fast_sound": [
+        "FastSound.oscillate"
+      ],
+      "fast_synth": [
+        "FastSynth.oscillate_bl"
+      ]
+    },
+    "spec/ext/mb/sound/fast_resample_spec.rb": {
+      "fast_resample": [
+        "FastResample#initialize",
+        "FastResample#lookup_converter",
+        "FastResample#mode_id",
+        "FastResample#mode_name",
+        "FastResample#read",
+        "FastResample#setup_converter_type"
+      ]
+    },
+    "spec/ext/mb/sound/fast_resonator_spec.rb": {
+      "fast_resonator": [
+        "FastResonator.ping"
+      ]
+    },
+    "spec/ext/mb/sound/fast_synth_feedback_spec.rb": {
+      "fast_synth": [
+        "FastSynth.feedback_sine"
+      ]
+    },
+    "spec/ext/mb/sound/fast_unison_spec.rb": {
+      "fast_unison": [
+        "FastUnison.exact",
+        "FastUnison.interp",
+        "FastUnison.scale"
+      ]
+    },
+    "spec/ext/mb/sound/fast_wavetable_spec.rb": {
+      "fast_arithmetic": [
+        "FastArithmetic.product"
+      ],
+      "fast_sound": [
+        "FastSound.phasor"
+      ],
+      "fast_synth": [
+        "FastSynth.oscillate_sync"
+      ],
+      "fast_wavetable": [
+        "FastWavetable.half_means",
+        "FastWavetable.harmonic_spectra",
+        "FastWavetable.lookup",
+        "FastWavetable.oscillate",
+        "FastWavetable.play",
+        "FastWavetable.sync"
+      ]
+    },
+    "spec/lib/mb/fast_sound_spec.rb": {
+      "fast_sound": [
+        "FastSound.smootherstep_buf",
+        "FastSound.smoothstep_buf"
+      ]
+    },
+    "spec/lib/mb/sound/band_limit_spec.rb": {
+      "fast_sound": [
+        "FastSound.number_to_freq",
+        "FastSound.oscillate",
+        "FastSound.phasor"
+      ],
+      "fast_synth": [
+        "FastSynth.blit",
+        "FastSynth.oscillate_bl",
+        "FastSynth.oscillate_sync"
+      ],
+      "fast_wavetable": [
+        "FastWavetable.half_means",
+        "FastWavetable.harmonic_spectra",
+        "FastWavetable.oscillate",
+        "FastWavetable.sync"
+      ]
+    },
+    "spec/lib/mb/sound/curve_spec.rb": {
+      "fast_clip": [
+        "FastClip.curve_lookup"
+      ],
+      "fast_envelope": [
+        "FastEnvelope.process"
+      ]
+    },
+    "spec/lib/mb/sound/delay_line_spec.rb": {
+      "fast_arithmetic": [
+        "FastArithmetic.circular_read",
+        "FastArithmetic.circular_write"
+      ],
+      "fast_delay": [
+        "FastDelay.feedback",
+        "FastDelay.read"
+      ]
+    },
+    "spec/lib/mb/sound/device_input_spec.rb": {
+      "fast_arithmetic": [
+        "FastArithmetic.circular_read",
+        "FastArithmetic.circular_write"
+      ],
+      "fast_audio": [
+        "FastAudio.devices",
+        "FastAudio::Capture#backend",
+        "FastAudio::Capture#close",
+        "FastAudio::Capture#closed?",
+        "FastAudio::Capture#device_name",
+        "FastAudio::Capture#device_rate",
+        "FastAudio::Capture#initialize",
+        "FastAudio::Capture#period",
+        "FastAudio::Capture#periods",
+        "FastAudio::Capture#queue_limit",
+        "FastAudio::Capture#read",
+        "FastAudio::Capture#resampling?",
+        "FastAudio::Capture#sample_rate",
+        "FastAudio::Capture#stats"
+      ]
+    },
+    "spec/lib/mb/sound/device_output_spec.rb": {
+      "fast_audio": [
+        "FastAudio.devices",
+        "FastAudio::Playback#backend",
+        "FastAudio::Playback#captured",
+        "FastAudio::Playback#close",
+        "FastAudio::Playback#closed?",
+        "FastAudio::Playback#device_name",
+        "FastAudio::Playback#device_rate",
+        "FastAudio::Playback#initialize",
+        "FastAudio::Playback#max_queue",
+        "FastAudio::Playback#period",
+        "FastAudio::Playback#periods",
+        "FastAudio::Playback#queue_limit",
+        "FastAudio::Playback#queue_limit=",
+        "FastAudio::Playback#resampling?",
+        "FastAudio::Playback#sample_rate",
+        "FastAudio::Playback#stats",
+        "FastAudio::Playback#write"
+      ],
+      "fast_synth": [
+        "FastSynth.oscillate_bl"
+      ]
+    },
+    "spec/lib/mb/sound/envelope_segments_spec.rb": {
+      "fast_arithmetic": [
+        "FastArithmetic.circular_read",
+        "FastArithmetic.circular_write",
+        "FastArithmetic.product"
+      ],
+      "fast_envelope": [
+        "FastEnvelope.process"
+      ]
+    },
+    "spec/lib/mb/sound/envelope_spec.rb": {
+      "fast_arithmetic": [
+        "FastArithmetic.product"
+      ],
+      "fast_envelope": [
+        "FastEnvelope.process"
+      ]
+    },
+    "spec/lib/mb/sound/filter/biquad_spec.rb": {
+      "fast_sound": [
+        "FastSound.biquad",
+        "FastSound.biquad_complex",
+        "FastSound.biquad_narray",
+        "FastSound.cookbook",
+        "FastSound.oscillate"
+      ]
+    },
+    "spec/lib/mb/sound/filter/cookbook_spec.rb": {
+      "fast_arithmetic": [
+        "FastArithmetic.copy"
+      ],
+      "fast_filter": [
+        "FastFilter.svf"
+      ],
+      "fast_sound": [
+        "FastSound.biquad",
+        "FastSound.biquad_narray",
+        "FastSound.cookbook",
+        "FastSound.dynamic_biquad",
+        "FastSound.oscillate"
+      ],
+      "fast_synth": [
+        "FastSynth.oscillate_bl"
+      ]
+    },
+    "spec/lib/mb/sound/filter/delay_spec.rb": {
+      "fast_arithmetic": [
+        "FastArithmetic.circular_write",
+        "FastArithmetic.min_max",
+        "FastArithmetic.product",
+        "FastArithmetic.wet_dry"
+      ],
+      "fast_delay": [
+        "FastDelay.feedback",
+        "FastDelay.read"
+      ],
+      "fast_resample": [
+        "FastResample#initialize",
+        "FastResample#lookup_converter",
+        "FastResample#read",
+        "FastResample#setup_converter_type"
+      ],
+      "fast_sound": [
+        "FastSound.cookbook",
+        "FastSound.oscillate"
+      ],
+      "fast_synth": [
+        "FastSynth.oscillate_bl"
+      ]
+    },
+    "spec/lib/mb/sound/filter/diode_ladder_spec.rb": {
+      "fast_filter": [
+        "FastFilter.diode_compensation",
+        "FastFilter.diode_cutoff_scale",
+        "FastFilter.diode_headroom",
+        "FastFilter.diode_ladder",
+        "FastFilter.diode_loop_gain",
+        "FastFilter.diode_resonance_curve",
+        "FastFilter.four_pole"
+      ],
+      "fast_sound": [
+        "FastSound.oscillate"
+      ],
+      "fast_synth": [
+        "FastSynth.oscillate_bl"
+      ]
+    },
+    "spec/lib/mb/sound/filter/four_pole_spec.rb": {
+      "fast_filter": [
+        "FastFilter.four_pole",
+        "FastFilter.resonance_curve",
+        "FastFilter.secant",
+        "FastFilter.self_osc_gain",
+        "FastFilter.tan",
+        "FastFilter.tanh"
+      ],
+      "fast_sound": [
+        "FastSound.oscillate"
+      ]
+    },
+    "spec/lib/mb/sound/filter/smoothstep_spec.rb": {
+      "fast_sound": [
+        "FastSound.smoothstep"
+      ]
+    },
+    "spec/lib/mb/sound/filter/svf_spec.rb": {
+      "fast_filter": [
+        "FastFilter.svf"
+      ],
+      "fast_sound": [
+        "FastSound.biquad_narray",
+        "FastSound.cookbook",
+        "FastSound.oscillate"
+      ]
+    },
+    "spec/lib/mb/sound/generation_methods_spec.rb": {
+      "fast_arithmetic": [
+        "FastArithmetic.mix"
+      ],
+      "fast_sound": [
+        "FastSound.oscillate",
+        "FastSound.phasor"
+      ],
+      "fast_synth": [
+        "FastSynth.oscillate_bl"
+      ]
+    },
+    "spec/lib/mb/sound/graph_node/constant_spec.rb": {
+      "fast_sound": [
+        "FastSound.smoothstep_buf"
+      ]
+    },
+    "spec/lib/mb/sound/graph_node/curve_shaper_spec.rb": {
+      "fast_arithmetic": [
+        "FastArithmetic.copy"
+      ],
+      "fast_clip": [
+        "FastClip.shape_curve"
+      ]
+    },
+    "spec/lib/mb/sound/graph_node/feedback_loop_spec.rb": {
+      "fast_arithmetic": [
+        "FastArithmetic.circular_write",
+        "FastArithmetic.min_max",
+        "FastArithmetic.mix",
+        "FastArithmetic.product",
+        "FastArithmetic.wet_dry"
+      ],
+      "fast_delay": [
+        "FastDelay.feedback",
+        "FastDelay.read"
+      ],
+      "fast_envelope": [
+        "FastEnvelope.process"
+      ],
+      "fast_filter": [
+        "FastFilter.svf"
+      ],
+      "fast_loop": [
+        "FastLoop.run"
+      ],
+      "fast_plan": [
+        "FastPlan.run"
+      ],
+      "fast_resample": [
+        "FastResample#initialize",
+        "FastResample#lookup_converter",
+        "FastResample#read",
+        "FastResample#setup_converter_type"
+      ],
+      "fast_sound": [
+        "FastSound.cookbook",
+        "FastSound.oscillate"
+      ],
+      "fast_synth": [
+        "FastSynth.oscillate_bl"
+      ]
+    },
+    "spec/lib/mb/sound/graph_node/harmonic_table_spec.rb": {
+      "fast_sound": [
+        "FastSound.oscillate"
+      ],
+      "fast_wavetable": [
+        "FastWavetable.half_means",
+        "FastWavetable.harmonic_spectra",
+        "FastWavetable.oscillate"
+      ]
+    },
+    "spec/lib/mb/sound/graph_node/multitap_delay_spec.rb": {
+      "fast_arithmetic": [
+        "FastArithmetic.circular_write",
+        "FastArithmetic.min_max",
+        "FastArithmetic.product"
+      ],
+      "fast_delay": [
+        "FastDelay.read"
+      ],
+      "fast_resample": [
+        "FastResample#initialize",
+        "FastResample#lookup_converter",
+        "FastResample#read",
+        "FastResample#setup_converter_type"
+      ],
+      "fast_sound": [
+        "FastSound.oscillate"
+      ]
+    },
+    "spec/lib/mb/sound/graph_node/resample_spec.rb": {
+      "fast_arithmetic": [
+        "FastArithmetic.circular_read",
+        "FastArithmetic.circular_write"
+      ],
+      "fast_filter": [
+        "FastFilter.svf"
+      ],
+      "fast_resample": [
+        "FastResample#initialize",
+        "FastResample#lookup_converter",
+        "FastResample#read",
+        "FastResample#setup_converter_type"
+      ],
+      "fast_sound": [
+        "FastSound.cookbook",
+        "FastSound.oscillate"
+      ],
+      "fast_synth": [
+        "FastSynth.oscillate_bl"
+      ]
+    },
+    "spec/lib/mb/sound/graph_node/resonator_spec.rb": {
+      "fast_arithmetic": [
+        "FastArithmetic.product"
+      ],
+      "fast_resonator": [
+        "FastResonator.ping"
+      ],
+      "fast_sound": [
+        "FastSound.number_to_freq",
+        "FastSound.oscillate"
+      ]
+    },
+    "spec/lib/mb/sound/graph_node/wavetable_spec.rb": {
+      "fast_arithmetic": [
+        "FastArithmetic.product"
+      ],
+      "fast_sound": [
+        "FastSound.oscillate",
+        "FastSound.phasor"
+      ],
+      "fast_wavetable": [
+        "FastWavetable.half_means",
+        "FastWavetable.harmonic_spectra",
+        "FastWavetable.lookup",
+        "FastWavetable.oscillate"
+      ]
+    },
+    "spec/lib/mb/sound/graph_sweep_spec.rb": {
+      "fast_arithmetic": [
+        "FastArithmetic.circular_read",
+        "FastArithmetic.circular_write",
+        "FastArithmetic.complex_part",
+        "FastArithmetic.copy",
+        "FastArithmetic.divide",
+        "FastArithmetic.min_max",
+        "FastArithmetic.mix",
+        "FastArithmetic.pan",
+        "FastArithmetic.power",
+        "FastArithmetic.product",
+        "FastArithmetic.scale",
+        "FastArithmetic.wet_dry"
+      ],
+      "fast_clip": [
+        "FastClip.shape",
+        "FastClip.shape_curve"
+      ],
+      "fast_control": [
+        "FastControl.smooth"
+      ],
+      "fast_delay": [
+        "FastDelay.feedback",
+        "FastDelay.read"
+      ],
+      "fast_envelope": [
+        "FastEnvelope.process"
+      ],
+      "fast_filter": [
+        "FastFilter.diode_ladder",
+        "FastFilter.four_pole",
+        "FastFilter.svf"
+      ],
+      "fast_loop": [
+        "FastLoop.run"
+      ],
+      "fast_loudness": [
+        "FastLoudness.true_peak"
+      ],
+      "fast_plan": [
+        "FastPlan.run"
+      ],
+      "fast_resample": [
+        "FastResample#initialize",
+        "FastResample#lookup_converter",
+        "FastResample#read",
+        "FastResample#setup_converter_type"
+      ],
+      "fast_resonator": [
+        "FastResonator.ping"
+      ],
+      "fast_sound": [
+        "FastSound.biquad_narray",
+        "FastSound.cookbook",
+        "FastSound.dynamic_biquad",
+        "FastSound.matrix_mix",
+        "FastSound.narray_log",
+        "FastSound.narray_log2",
+        "FastSound.number_to_freq",
+        "FastSound.oscillate",
+        "FastSound.phasor",
+        "FastSound.smoothstep"
+      ],
+      "fast_synth": [
+        "FastSynth.feedback_sine",
+        "FastSynth.oscillate_bl",
+        "FastSynth.oscillate_sync"
+      ],
+      "fast_unison": [
+        "FastUnison.exact",
+        "FastUnison.scale"
+      ],
+      "fast_wavetable": [
+        "FastWavetable.half_means",
+        "FastWavetable.harmonic_spectra",
+        "FastWavetable.lookup",
+        "FastWavetable.oscillate",
+        "FastWavetable.play",
+        "FastWavetable.sync"
+      ]
+    },
+    "spec/lib/mb/sound/jack_spec.rb": {
+      "fast_audio": [
+        "FastAudio.jack_close",
+        "FastAudio.jack_connect",
+        "FastAudio.jack_connections",
+        "FastAudio.jack_info",
+        "FastAudio.jack_open",
+        "FastAudio.jack_ports",
+        "FastAudio.jack_server?",
+        "FastAudio::Capture#backend",
+        "FastAudio::Capture#close",
+        "FastAudio::Capture#device_name",
+        "FastAudio::Capture#device_rate",
+        "FastAudio::Capture#initialize",
+        "FastAudio::Capture#jack_ports",
+        "FastAudio::Capture#period",
+        "FastAudio::Capture#periods",
+        "FastAudio::Capture#read",
+        "FastAudio::Capture#resampling?",
+        "FastAudio::Capture#sample_rate",
+        "FastAudio::JackMIDIInput#close",
+        "FastAudio::JackMIDIInput#initialize",
+        "FastAudio::JackMIDIOutput#close",
+        "FastAudio::JackMIDIOutput#initialize",
+        "FastAudio::Playback#backend",
+        "FastAudio::Playback#close",
+        "FastAudio::Playback#device_name",
+        "FastAudio::Playback#device_rate",
+        "FastAudio::Playback#initialize",
+        "FastAudio::Playback#jack_ports",
+        "FastAudio::Playback#period",
+        "FastAudio::Playback#periods",
+        "FastAudio::Playback#queue_limit",
+        "FastAudio::Playback#resampling?",
+        "FastAudio::Playback#sample_rate",
+        "FastAudio::Playback#stats",
+        "FastAudio::Playback#write"
+      ],
+      "fast_midi": [
+        "FastMIDI.compiled_apis",
+        "FastMIDI::Output#close",
+        "FastMIDI::Output.new"
+      ]
+    },
+    "spec/lib/mb/sound/loudness_spec.rb": {
+      "fast_loudness": [
+        "FastLoudness.true_peak"
+      ],
+      "fast_sound": [
+        "FastSound.biquad_narray"
+      ]
+    },
+    "spec/lib/mb/sound/midi/input_spec.rb": {
+      "fast_audio": [
+        "FastAudio.jack_close",
+        "FastAudio.jack_connect",
+        "FastAudio.jack_connections",
+        "FastAudio.jack_info",
+        "FastAudio.jack_open",
+        "FastAudio.jack_ports",
+        "FastAudio.jack_server?",
+        "FastAudio::JackMIDIInput#close",
+        "FastAudio::JackMIDIInput#closed?",
+        "FastAudio::JackMIDIInput#initialize",
+        "FastAudio::JackMIDIInput#port_name",
+        "FastAudio::JackMIDIInput#read"
+      ],
+      "fast_midi": [
+        "FastMIDI.compiled_apis",
+        "FastMIDI::Output#close",
+        "FastMIDI::Output#send_bytes",
+        "FastMIDI::Output.new"
+      ]
+    },
+    "spec/lib/mb/sound/midi/live_source_spec.rb": {
+      "fast_audio": [
+        "FastAudio.jack_close",
+        "FastAudio.jack_connect",
+        "FastAudio.jack_info",
+        "FastAudio.jack_open",
+        "FastAudio.jack_ports",
+        "FastAudio.jack_server?",
+        "FastAudio::JackMIDIInput#close",
+        "FastAudio::JackMIDIInput#initialize",
+        "FastAudio::JackMIDIInput#port_name",
+        "FastAudio::JackMIDIInput#read",
+        "FastAudio::Playback#backend",
+        "FastAudio::Playback#captured",
+        "FastAudio::Playback#close",
+        "FastAudio::Playback#device_name",
+        "FastAudio::Playback#device_rate",
+        "FastAudio::Playback#initialize",
+        "FastAudio::Playback#jack_clock",
+        "FastAudio::Playback#jack_ports",
+        "FastAudio::Playback#period",
+        "FastAudio::Playback#periods",
+        "FastAudio::Playback#queue_limit",
+        "FastAudio::Playback#resampling?",
+        "FastAudio::Playback#sample_rate",
+        "FastAudio::Playback#stats",
+        "FastAudio::Playback#write"
+      ],
+      "fast_midi": [
+        "FastMIDI.compiled_apis",
+        "FastMIDI::Output#close",
+        "FastMIDI::Output#send_bytes",
+        "FastMIDI::Output.new"
+      ]
+    },
+    "spec/lib/mb/sound/notes_fast_paths_spec.rb": {
+      "fast_arithmetic": [
+        "FastArithmetic.circular_read",
+        "FastArithmetic.circular_write",
+        "FastArithmetic.min_max",
+        "FastArithmetic.mix",
+        "FastArithmetic.product"
+      ],
+      "fast_control": [
+        "FastControl.smooth"
+      ],
+      "fast_envelope": [
+        "FastEnvelope.process"
+      ],
+      "fast_filter": [
+        "FastFilter.svf"
+      ],
+      "fast_plan": [
+        "FastPlan.run"
+      ],
+      "fast_sound": [
+        "FastSound.number_to_freq",
+        "FastSound.oscillate"
+      ],
+      "fast_synth": [
+        "FastSynth.oscillate_bl"
+      ]
+    },
+    "spec/lib/mb/sound/notes_smoothing_spec.rb": {
+      "fast_arithmetic": [
+        "FastArithmetic.mix",
+        "FastArithmetic.product"
+      ],
+      "fast_control": [
+        "FastControl.smooth"
+      ],
+      "fast_sound": [
+        "FastSound.number_to_freq"
+      ]
+    },
+    "spec/lib/mb/sound/plan/arithmetic_ops_spec.rb": {
+      "fast_arithmetic": [
+        "FastArithmetic.complex_part",
+        "FastArithmetic.copy",
+        "FastArithmetic.divide",
+        "FastArithmetic.mix",
+        "FastArithmetic.power",
+        "FastArithmetic.product"
+      ],
+      "fast_clip": [
+        "FastClip.shape"
+      ],
+      "fast_plan": [
+        "FastPlan.run"
+      ],
+      "fast_sound": [
+        "FastSound.number_to_freq",
+        "FastSound.oscillate",
+        "FastSound.smoothstep_buf"
+      ],
+      "fast_synth": [
+        "FastSynth.oscillate_bl"
+      ]
+    },
+    "spec/lib/mb/sound/plan/installation_spec.rb": {
+      "fast_arithmetic": [
+        "FastArithmetic.circular_read",
+        "FastArithmetic.circular_write",
+        "FastArithmetic.complex_part",
+        "FastArithmetic.copy",
+        "FastArithmetic.divide",
+        "FastArithmetic.min_max",
+        "FastArithmetic.mix",
+        "FastArithmetic.power",
+        "FastArithmetic.product"
+      ],
+      "fast_clip": [
+        "FastClip.shape"
+      ],
+      "fast_envelope": [
+        "FastEnvelope.process"
+      ],
+      "fast_plan": [
+        "FastPlan.run"
+      ],
+      "fast_sound": [
+        "FastSound.number_to_freq",
+        "FastSound.oscillate"
+      ],
+      "fast_synth": [
+        "FastSynth.oscillate_bl"
+      ]
+    },
+    "spec/lib/mb/sound/plan/loop_spec.rb": {
+      "fast_arithmetic": [
+        "FastArithmetic.mix"
+      ],
+      "fast_loop": [
+        "FastLoop.constants",
+        "FastLoop.run"
+      ],
+      "fast_sound": [
+        "FastSound.cookbook",
+        "FastSound.oscillate"
+      ],
+      "fast_synth": [
+        "FastSynth.oscillate_bl"
+      ]
+    },
+    "spec/lib/mb/sound/plan/notes_ops_spec.rb": {
+      "fast_arithmetic": [
+        "FastArithmetic.complex_part",
+        "FastArithmetic.min_max",
+        "FastArithmetic.mix",
+        "FastArithmetic.product"
+      ],
+      "fast_clip": [
+        "FastClip.curve_lookup"
+      ],
+      "fast_control": [
+        "FastControl.smooth"
+      ],
+      "fast_envelope": [
+        "FastEnvelope.process"
+      ],
+      "fast_plan": [
+        "FastPlan.run"
+      ],
+      "fast_sound": [
+        "FastSound.number_to_freq",
+        "FastSound.oscillate"
+      ],
+      "fast_synth": [
+        "FastSynth.oscillate_bl"
+      ]
+    },
+    "spec/lib/mb/sound/plan/shared_inputs_spec.rb": {
+      "fast_arithmetic": [
+        "FastArithmetic.min_max",
+        "FastArithmetic.mix",
+        "FastArithmetic.product"
+      ],
+      "fast_control": [
+        "FastControl.smooth"
+      ],
+      "fast_envelope": [
+        "FastEnvelope.process"
+      ],
+      "fast_filter": [
+        "FastFilter.svf"
+      ],
+      "fast_plan": [
+        "FastPlan.run"
+      ],
+      "fast_sound": [
+        "FastSound.cookbook",
+        "FastSound.number_to_freq",
+        "FastSound.oscillate"
+      ]
+    },
+    "spec/lib/mb/sound/plan/stream_restart_spec.rb": {
+      "fast_arithmetic": [
+        "FastArithmetic.product"
+      ],
+      "fast_envelope": [
+        "FastEnvelope.process"
+      ],
+      "fast_plan": [
+        "FastPlan.run"
+      ],
+      "fast_sound": [
+        "FastSound.number_to_freq"
+      ],
+      "fast_synth": [
+        "FastSynth.oscillate_bl"
+      ]
+    },
+    "spec/lib/mb/sound/plan/tone_op_spec.rb": {
+      "fast_arithmetic": [
+        "FastArithmetic.complex_part",
+        "FastArithmetic.mix",
+        "FastArithmetic.product",
+        "FastArithmetic.scale"
+      ],
+      "fast_plan": [
+        "FastPlan.run"
+      ],
+      "fast_sound": [
+        "FastSound.oscillate",
+        "FastSound.smoothstep_buf"
+      ],
+      "fast_synth": [
+        "FastSynth.oscillate_bl"
+      ]
+    },
+    "spec/lib/mb/sound/shaper_spec.rb": {
+      "fast_arithmetic": [
+        "FastArithmetic.copy"
+      ],
+      "fast_clip": [
+        "FastClip.shape"
+      ],
+      "fast_sound": [
+        "FastSound.oscillate"
+      ]
+    },
+    "spec/lib/mb/sound/tone_feedback_spec.rb": {
+      "fast_arithmetic": [
+        "FastArithmetic.mix",
+        "FastArithmetic.product"
+      ],
+      "fast_envelope": [
+        "FastEnvelope.process"
+      ],
+      "fast_sound": [
+        "FastSound.number_to_freq",
+        "FastSound.oscillate",
+        "FastSound.phasor"
+      ],
+      "fast_synth": [
+        "FastSynth.feedback_sine"
+      ]
+    },
+    "spec/lib/mb/sound/tone_gain_spec.rb": {
+      "fast_arithmetic": [
+        "FastArithmetic.mix",
+        "FastArithmetic.product",
+        "FastArithmetic.scale"
+      ],
+      "fast_envelope": [
+        "FastEnvelope.process"
+      ],
+      "fast_sound": [
+        "FastSound.oscillate",
+        "FastSound.phasor"
+      ],
+      "fast_synth": [
+        "FastSynth.blit",
+        "FastSynth.feedback_sine",
+        "FastSynth.oscillate_bl",
+        "FastSynth.oscillate_sync"
+      ],
+      "fast_wavetable": [
+        "FastWavetable.oscillate"
+      ]
+    },
+    "spec/lib/mb/sound/tone_phasor_spec.rb": {
+      "fast_arithmetic": [
+        "FastArithmetic.product"
+      ],
+      "fast_sound": [
+        "FastSound.oscillate",
+        "FastSound.phasor",
+        "FastSound.shape"
+      ],
+      "fast_synth": [
+        "FastSynth.oscillate_bl"
+      ]
+    },
+    "spec/lib/mb/sound/tone_waveforms_spec.rb": {
+      "fast_arithmetic": [
+        "FastArithmetic.mix"
+      ],
+      "fast_sound": [
+        "FastSound.osc",
+        "FastSound.oscillate"
+      ],
+      "fast_synth": [
+        "FastSynth.oscillate_bl"
+      ]
+    },
+    "spec/lib/mb/sound/tone_wavetable_spec.rb": {
+      "fast_arithmetic": [
+        "FastArithmetic.copy",
+        "FastArithmetic.mix",
+        "FastArithmetic.product"
+      ],
+      "fast_sound": [
+        "FastSound.number_to_freq",
+        "FastSound.oscillate",
+        "FastSound.phasor"
+      ],
+      "fast_synth": [
+        "FastSynth.oscillate_bl",
+        "FastSynth.oscillate_sync"
+      ],
+      "fast_wavetable": [
+        "FastWavetable.half_means",
+        "FastWavetable.harmonic_spectra",
+        "FastWavetable.oscillate",
+        "FastWavetable.play",
+        "FastWavetable.sync"
+      ]
+    },
+    "spec/lib/mb/sound/wavetable_spec.rb": {
+      "fast_sound": [
+        "FastSound.smootherstep_buf"
+      ],
+      "fast_wavetable": [
+        "FastWavetable.half_means",
+        "FastWavetable.harmonic_spectra"
+      ]
+    }
+  }
+}

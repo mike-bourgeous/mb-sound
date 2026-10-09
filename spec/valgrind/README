@@ -5,3 +5,18 @@ ruby-4.0.supp for 4.0.x, etc.  Generate entries with
 MEMCHECK_GEN_SUPPRESSIONS=1 bundle exec rake memcheck, and add a comment
 explaining why each one is a false positive (or a known leak outside our
 code, like RtMidi's in ruby.supp).
+
+Selective memcheck (`rake memcheck:changed`, see Rakefile):
+
+- memcheck_selection.rb: the memcheck spec list, the changed files ->
+  extensions -> specs selection, the full-run stamp and policy, and the
+  depend file check (`rake depend:check`).
+- memcheck_map.json: which extensions (and methods) each memcheck spec
+  file calls, recorded natively by `rake memcheck:map` through
+  memcheck_map_recorder.rb (spec_helper loads it with MEMCHECK_MAP=1).
+  Every full `rake memcheck` refreshes it; commit it.
+- memcheck_selection_spec.rb: guard specs (every extension has a mapped
+  spec, the map names existing specs, depend files match the includes).
+
+Changes to these tooling files don't trigger a full run; changes to the
+suppressions or gc_stress_calls.rb do.
