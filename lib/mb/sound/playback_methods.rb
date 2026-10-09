@@ -427,8 +427,12 @@ module MB
       # The mix is rendered a little ahead of what you hear (by the output's
       # buffering), so the plot may lead the sound slightly.
       #
+      # +:stop+ is an optional callable checked about every 50 ms; plotting
+      # ends when it returns true (e.g. when a script's #wait has returned,
+      # so `--plot` doesn't keep a finished script running).
+      #
       # Returns a Hash with the number of frames drawn and the frame rate.
-      def visualize(graphical: false, spectrum: false)
+      def visualize(graphical: false, spectrum: false, stop: nil)
         session = Session.default
         unless session.running?
           warn 'Nothing is playing in the background; start something with bg first'
@@ -465,8 +469,14 @@ module MB
         frames = 0
         start = MB::U.clock_now
         shown = nil
+        next_check = start
         loop do
           now = MB::U.clock_now
+          if stop && now >= next_check
+            break if stop.call
+            next_check = now + 0.05
+          end
+
           due_lock.synchronize {
             latest = due.shift[1] while due.first && due.first[0] <= now
           }
@@ -482,9 +492,10 @@ module MB
           frames += 1
         end
 
+        visualize_result(start, frames)
+
       rescue Interrupt
-        elapsed = MB::U.clock_now - start if start
-        { frames: frames, fps: elapsed && elapsed > 0 ? (frames / elapsed).round(1) : 0 }
+        visualize_result(start, frames)
 
       ensure
         session.remove_tap(tap) if tap
@@ -600,6 +611,12 @@ module MB
       end
 
       private
+
+      # The frame count and rate returned by #visualize.
+      def visualize_result(start, frames)
+        elapsed = MB::U.clock_now - start if start
+        { frames: frames || 0, fps: elapsed && elapsed > 0 ? ((frames || 0) / elapsed).round(1) : 0 }
+      end
 
       # Renders without normalization (see #render).
       def render_session(filename, *sounds, bars: nil, seconds: nil, tail: false, bpm: nil, channels: 2, overwrite: false, buffer_size: 800, gain: nil, &block)
