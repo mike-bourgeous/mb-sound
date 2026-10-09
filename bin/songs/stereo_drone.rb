@@ -22,14 +22,14 @@ module MB::Sound
   # Phase-modulated tones on +notes+ (Notes or other Pitches), each fading
   # in and out in turn over +interval+ seconds.
   def self.toneseq(interval, *notes)
-    phase = -2.0 * Math::PI / notes.length
+    phase = -1.0 / notes.length # cycles
     lfo_freq = 1.0 / interval
 
     notes.map.with_index { |note, idx|
-      fade = 10 ** (lfo_freq.hz.triangle.lfo.at(-90..-12).with_phase(Math::PI * 0.25 + phase * idx) / 20) # dB to gain
+      fade = 10 ** (lfo_freq.hz.triangle.lfo.at(-90..-12).with_phase(0.125 + phase * idx) / 20) # dB to gain
       modulator = (note.freq * 2.hz.lfo.at(2.98..3.02)).tone.at(2) * (lfo_freq / 2 + lfo_freq / notes.count * idx).hz.lfo.at(0..1)
 
-      fade * note.sine.pm(modulator)
+      fade * note.sine.pm(modulator.radians) # a PM index of 2 radians
     }
   end
 

@@ -40,7 +40,7 @@ module MB
         #
         # This can be used for spectral distortion:
         #
-        #     graph = (60.hz * 0.5.hz.ramp.at(1..0).with_phase(-Math::PI))
+        #     graph = (60.hz * 0.5.hz.ramp.at(1..0).with_phase(-0.5))
         #       .proc { |v| MB::Sound.real_fft(v) }
         #       .delay(3208.4.samples, feedback: 0.9, dry: 1, wet: 1)
         #       .proc { |v| MB::Sound.real_ifft(MB::M.shl(v, 0)) }

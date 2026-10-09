@@ -37,7 +37,7 @@ MB::Sound.synth_script { |midi|
     noise_source = 1000.hz.gauss.noise.at(0.4).filter(:lowpass, cutoff: noise_cutoff) *
       v.fm_env(0.0001, 0.04, 0, 0.04, curve: [-60, 60, 60], sensitivity: -30.db..0.db)
 
-    falling_sine = (attack_env + v.freq * (0.06 * pitch_env + 0.97)).tone.at(1).pm(noise_source).reset(v.trigger)
+    falling_sine = (attack_env + v.freq * (0.06 * pitch_env + 0.97)).tone.at(1).pm(noise_source.radians).reset(v.trigger) # noise PM in radians
     falling_sine_amp = falling_sine * v.amp_env(0.0001, decay_time, 0, decay_time, curve: [-60, 60, 60], sensitivity: -12.db..0.db)
 
     sub = falling_sine_amp.peq({

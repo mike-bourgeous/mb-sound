@@ -21,9 +21,9 @@ module MB
         # For example, compare the sound of the following (turn volume down):
         #
         #     # No oversampling; has prominent lower frequency aliasing
-        #     play 355.hz.pm(630.hz.at(100) * 0.5.hz.drumramp.at(0.9..1).filter(10.hz.lowpass))
+        #     play 355.hz.pm(630.hz.at(16) * 0.5.hz.drumramp.at(0.9..1).filter(10.hz.lowpass))
         #     # With oversampling; does not have the same aliasing
-        #     play 355.hz.pm(630.hz.at(100) * 0.5.hz.drumramp.at(0.9..1).filter(10.hz.lowpass)).oversample(16)
+        #     play 355.hz.pm(630.hz.at(16) * 0.5.hz.drumramp.at(0.9..1).filter(10.hz.lowpass)).oversample(16)
         def oversample(multiplier, mode: MB::Sound::GraphNode::Resample::DEFAULT_MODE)
           # FIXME: calling oversample twice on the same node causes the upstream rate to keep multiplying.  Should we assume a 48kHz output rate?  Maybe add a sample_rate parameter to this method?
           current_rate = self.sample_rate

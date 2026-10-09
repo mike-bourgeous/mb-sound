@@ -49,7 +49,7 @@ module MB::Sound
     pad = chords.synth(voices: 2) { |v|
       stereo(v.hz.ramp.at(0.5), v.hz.transpose(0.1).ramp.at(0.5)) * v.env(0.4, 1.0, 0.8, 1.5, curve: :smooth)
     }
-    sweep = channels(4.bars.lfo.triangle.at(350..2400), 4.bars.lfo.triangle.with_phase(Math::PI).at(350..2400))
+    sweep = channels(4.bars.lfo.triangle.at(350..2400), 4.bars.lfo.triangle.with_phase(0.5).at(350..2400))
     pad = pad.filter(:lowpass, cutoff: sweep, quality: 1.5) * 0.1
 
     # Arpeggio panned back and forth every two bars (linear decays here, the

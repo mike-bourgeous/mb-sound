@@ -18,7 +18,7 @@ MB::Sound.synth_script { |midi|
     # at each note, from their with_phase phase)
     op = ->(ratio) { v.hz.transpose(Math.log2(ratio).oct) }
 
-    q = op.(2.001).at(1).with_phase(Math::PI / 3) + 0.1.hz.lfo.at(1) * op.(1.001).at(Math::PI)
+    q = (op.(2.001).at(1).with_phase(1.0 / 6) + 0.1.hz.lfo.at(1) * op.(1.001).at(Math::PI)).radians # PM in radians
     a = (
       (
         (op.(6.001).at(0.1).pm(q) + op.(8.001).at(0.1).pm(q)) + op.(0.501).ramp.at(0.3).filter(:lowpass, cutoff: 0.23.hz.lfo.at(130..2500))

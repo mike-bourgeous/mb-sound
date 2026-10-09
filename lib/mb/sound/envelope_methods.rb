@@ -16,7 +16,7 @@ module MB
     #     play 220.hz.ramp * adsr(0.01, 0.3, 0.5, 1, curve: :swell, hold: 2)
     #     play 220.hz.ramp * amp_env(0.002, 1, 0, 1)
     #     play 220.hz.ramp.filter(:lowpass, cutoff: 150.constant * filter_env(0.005, 0.5, depth: 5), quality: 6)
-    #     play 220.hz.pm(440.hz.at(3) * fm_env(0.002, 2)) * amp_env(0.002, 2, 0.2, 1)
+    #     play 220.hz.pm(440.hz.at(0.5) * fm_env(0.002, 2)) * amp_env(0.002, 2, 0.2, 1)
     #     play (120.hz.ramp * adsr(gate: 2.hz.lfo.square.at(0..1))).filter(1200.hz.lowpass)
     module EnvelopeMethods
       # A generic envelope with :analog curves ([12, 60, 60] dB) and velocity

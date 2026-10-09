@@ -69,7 +69,9 @@ module MB
         end
 
         # Appends a node that returns the instantaneous phase of a complex
-        # signal, or zeros or Math::PI for a real signal.
+        # signal, or zeros or Math::PI for a real signal, in radians (the
+        # complex argument, as Numo's and Complex#arg; phase inputs count
+        # cycles, so feed it to one as `sig.arg.radians`).
         def arg
           MB::Sound::GraphNode::ComplexNode.new(self, mode: :arg)
         end

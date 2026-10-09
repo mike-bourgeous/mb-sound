@@ -67,7 +67,7 @@ module MB::Sound
     # over eight bars, in opposite directions
     pad = chords.synth(voices: 2) { |v|
       (v.hz.wavetable(:basic, scan: 8.bars.lfo.triangle.at(0..1)) +
-        v.hz.transpose(0.07).wavetable(:basic, scan: 8.bars.lfo.triangle.with_phase(Math::PI).at(0..1))) *
+        v.hz.transpose(0.07).wavetable(:basic, scan: 8.bars.lfo.triangle.with_phase(0.5).at(0..1))) *
         v.env(0.4, 1.0, 0.8, 1.2)
     }.filter(:lowpass, cutoff: 3000, quality: 0.7) * 0.25
 

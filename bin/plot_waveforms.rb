@@ -12,13 +12,13 @@ MB::Sound.script(
   width: [1800, 'Plot width in pixels', 1..],
   height: [900, 'Plot height in pixels', 1..],
 ) { |waves, p|
-  input = Numo::DComplex.linspace(0, 64.0 * Math::PI, 64000)
+  input = Numo::DComplex.linspace(0, 32.0, 64000) # 32 cycles
 
   plots = MB::Sound::Tone::WAVE_TYPES.flat_map { |w|
     next unless waves.empty? || waves.include?(w.to_s)
 
     time = input.map { |v|
-      MB::Sound::Tone.value_at(w, v.real % (2.0 * Math::PI))
+      MB::Sound::Tone.value_at(w, v.real % 1.0)
     }
     freq = MB::Sound.fft(time).abs.map(&:to_db)
 

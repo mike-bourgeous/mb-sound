@@ -30,20 +30,22 @@ MB::Sound.synth_script { |midi|
     r_osc = op.(8 * 3.5).complex_sine.at(1).named('R')
     r_env = v.fm_env(0.05, 4, 0.029, 4, curve: [-20, 18, 2], sensitivity: -12.4.db..0.db).named('R Envelope')
     r_out = (r_osc * r_env).named('R Out')
+    # (modulation indices below are in radians, marked .radians: phase
+    # inputs count cycles since 2026-10-10)
     rq_const = 1.4.constant.named('R into Q')
 
-    q_osc = op.(8).complex_sine.at(1).pm(r_out * rq_const).named('Q')
+    q_osc = op.(8).complex_sine.at(1).pm((r_out * rq_const).radians).named('Q')
     q_env = v.fm_env(2, 3, 0.334, 3, curve: [-30, 9, 21]).named('Q Envelope') * lfo.(0.1632, 0.5..1.5).named('Q LFO')
     q_out = (q_osc * q_env).named('Q Out')
     qb_mod = v.cc(1, range: 0.15..0.5, name: 'Q into B')
     qa_mod = v.cc(1, range: 0.25..4.0, name: 'Q into A')
 
-    b_osc = op.(3.5, 2).complex_sine.at(1).pm(q_out * qb_mod).named('B')
+    b_osc = op.(3.5, 2).complex_sine.at(1).pm((q_out * qb_mod).radians).named('B')
     b_env = v.fm_env(0, 5, 0.033, 4, curve: [-30, 24, 6]).named('B Envelope') * lfo.(0.223, 0.8..1.1).named('B LFO')
     b_out = (b_osc * b_env).named('B Out')
 
     ba_vel = (v.velocity * 1.6 + 0.8).named('B into A')
-    a_osc = op.(1, 2).complex_sine.at(1).pm(b_out * ba_vel + q_out * qa_mod).named('A')
+    a_osc = op.(1, 2).complex_sine.at(1).pm((b_out * ba_vel + q_out * qa_mod).radians).named('A')
     a_env = v.amp_env(0.001, 6, 0.151, 5, curve: [-30, 15, 15]).named('A Envelope') * lfo.(0.111, 0.9..1.0).named('A LFO')
     a_out = (a_osc * a_env).named('A Out')
 
@@ -52,7 +54,7 @@ MB::Sound.synth_script { |midi|
     d_out = (d_osc * d_env).named('D Out')
 
     dc_vel = (v.velocity * 1.6 + 0.8).named('D into C')
-    c_osc = op.(1, 1).complex_sine.at(1).pm(d_out * dc_vel).named('C')
+    c_osc = op.(1, 1).complex_sine.at(1).pm((d_out * dc_vel).radians).named('C')
     c_env = v.amp_env(0.001, 6, 0.186, 5, curve: [-30, 13.5, 16.5]).named('C Envelope') * lfo.(0.317, 0.9..1.0).named('C LFO')
     c_out = (c_osc * c_env).named('C Out')
 

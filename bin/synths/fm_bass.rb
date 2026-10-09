@@ -31,6 +31,8 @@ module MB::Sound
       # over 0.1 s.
       base = v.hz.glide(100.ms)
       base2x = base.transpose(1.oct)
+      # FM depth in radians (1 to 2; phase inputs count cycles, so the
+      # modulators below are marked .radians)
       mod = v.cc(1, range: 1.0..2.0, name: 'FM depth')
 
       # Real sines (complex until 2026-10-09: phase modulation reads only
@@ -44,16 +46,16 @@ module MB::Sound
       #
       # TODO: True FM/PM feedback instead of a duplicate copy of the oscillator
       cenv = v.fm_env(0, 0.2, 0, 0.1, sensitivity: -7.db..0.db)
-      c = cenv * base2x.sine.at(1).pm(cenv * mod * base2x.at(1))
+      c = cenv * base2x.sine.at(1).pm((cenv * mod * base2x.at(1)).radians)
 
       denv = v.fm_env(0, 0.3, 0, 0.35, sensitivity: -7.db..0.db)
       d = denv * (base2x.freq * 0.9996 - 0.22).tone.sine.at(1).reset(v.trigger)
 
       eenv = v.fm_env(0, 2, 0.573, 0.5, curve: [-10, 3, 7], sensitivity: -5.db..0.db)
-      e = eenv * base.sine.at(1).pm(mod * (c + d))
+      e = eenv * base.sine.at(1).pm((mod * (c + d)).radians)
 
       fenv = v.amp_env(0.001, 2, 0.699, 0.5, curve: [-10, 2, 8], sensitivity: -10.db..-3.2.db)
-      f = fenv * base.sine.at(1).pm(e * mod)
+      f = fenv * base.sine.at(1).pm((e * mod).radians)
 
       f * 0.125
     }

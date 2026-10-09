@@ -38,8 +38,10 @@ MB::Sound.synth_script { |midi|
     b_env = v.fm_env(0.4, 3.1, 0.59, 6, curve: [-20, 4, 16], sensitivity: -9.db..0.db).named('B Envelope')
     b_out = (b_osc * b_env).named('B Out')
 
+    # (modulation indices below are in radians, marked .radians: phase
+    # inputs count cycles since 2026-10-10)
     ba_mod = v.cc(1, range: 1.3..2.6, name: 'B into A')
-    a_osc = v.hz.transpose(0.007.oct).at(1).pm(b_out * ba_mod * noise_lfo).named('A')
+    a_osc = v.hz.transpose(0.007.oct).at(1).pm((b_out * ba_mod * noise_lfo).radians).named('A')
     a_env = v.amp_env(0.9, 3.2, 0.698, 6.1, curve: [-30, 3, 27], sensitivity: -6.db..0.db).named('A Envelope')
     a_out = (a_osc * a_env).named('A Out')
 
@@ -48,7 +50,7 @@ MB::Sound.synth_script { |midi|
     d_out = (d_osc * d_env).named('D Out')
 
     dc_mod = v.cc(1, range: 1.25..2.5, name: 'D into C')
-    c_osc = v.hz.transpose(0.002.oct).at(1).pm(d_out * dc_mod * noise_lfo).named('C')
+    c_osc = v.hz.transpose(0.002.oct).at(1).pm((d_out * dc_mod * noise_lfo).radians).named('C')
     c_env = v.amp_env(1.1, 3.1, 0.582, 6.8, curve: [-30, 4.5, 25.5], sensitivity: -6.db..0.db).named('C Envelope')
     c_out = (c_osc * c_env).named('C Out')
 
