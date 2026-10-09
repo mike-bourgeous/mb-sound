@@ -57,6 +57,7 @@ MB::Sound.script(
   args: 0..1,
   seconds: [1.0, '-s', 'Length of each case in seconds', 0.01..],
   only: [nil, String, 'Comma-separated substrings; render only matching cases'],
+  ext: ['flac', String, 'Output format (wav = 32-bit float)', ['flac', 'wav']],
   list: [false, '-l', 'List case names and exit'],
 ) { |(outdir), p|
   if p.list
@@ -75,7 +76,7 @@ MB::Sound.script(
     sound = sound.outputs if sound.respond_to?(:outputs) && sound.channel_count > 1
     sound = sound.to_a if sound.respond_to?(:to_a) && !sound.is_a?(MB::Sound::GraphNode)
     channels = sound.is_a?(Array) ? sound.length : 1
-    path = File.join(outdir, "#{name}.flac")
+    path = File.join(outdir, "#{name}.#{p.ext}")
     MB::Sound.render(path, sound, seconds: p.seconds, bpm: 120, channels: channels, gain: 1, overwrite: true)
     puts "#{name}: #{path}"
   end

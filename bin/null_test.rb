@@ -78,17 +78,37 @@ CASES = {
   'fx_reverb_hall' => "bin/effects/reverb.rb -q -f --preset hall #{ARP} %{out}",
   'fx_reverb_room_size' => "bin/effects/reverb.rb -q -f --room-size 0.6 --decay 1.5 #{ARP} %{out}",
   'fx_grain_repeater' => "bin/effects/grain_repeater.rb -q -f #{ARP} %{out}",
+
+  # Phase-unit users (radians to cycles migration, 2026-10-10)
+  'synth_fm_brass' => "bin/synths/fm_brass.rb -q -f #{MIDI_FILE} %{out}",
+  'synth_sq80_voice' => "bin/synths/sq80_voice.rb -q -f #{MIDI_FILE} %{out}",
+  'synth_acid' => "bin/synths/acid.rb -q -f #{MIDI_FILE} %{out}",
+  'synth_drums_808' => "bin/synths/drums_808.rb -q -f #{MIDI_FILE} %{out}",
+  'synth_pluck' => "bin/synths/pluck.rb -q -f #{MIDI_FILE} %{out}",
+  'song_unison_song' => 'bin/songs/unison_song.rb -q -f -b 4 %{out}',
+  'song_swarm_song' => 'bin/songs/swarm_song.rb -q -f -b 4 %{out}',
+  'song_wavetable_song' => 'bin/songs/wavetable_song.rb -q -f -b 4 %{out}',
+  'song_drums_808' => 'bin/songs/drums_808.rb -q -f -b 4 %{out}',
+  'song_acid_song' => 'bin/songs/acid_song.rb -q -f -b 4 %{out}',
+  'song_node_graph_benchmark' => 'bin/songs/node_graph_benchmark.rb -q -f -b 2 %{out}',
+  'song_tween_song' => 'bin/songs/tween_song.rb -q -f -b 4 %{out}',
+  'song_feedback_song' => 'bin/songs/feedback_song.rb -q -f -b 4 %{out}',
+  'song_bouncing_ball' => 'bin/songs/bouncing_ball.rb -q -f -b 4 %{out}',
+  'song_midi_transforms_song' => 'bin/songs/midi_transforms_song.rb -q -f -b 4 %{out}',
+  'song_stereo_graph_example' => 'bin/stereo_graph_example.rb -q -f -b 2 %{out}',
+  'fx_juno_chorus' => "bin/effects/juno_chorus.rb -q -f #{ARP} %{out}",
 }.freeze
 
 # Renders every case (or those whose names contain one of +only+) from the
 # tree at +root+ into +dir+.
-def render_all(root, dir, only)
+def render_all(root, dir, only, ext = 'flac')
   FileUtils.mkdir_p(dir)
   CASES.each do |name, cmd|
     next if only && only.none? { |o| name.include?(o) }
 
     out = File.join(File.expand_path(dir), name.delete_suffix('/'))
-    out += '.flac' unless name.end_with?('/')
+    out += ".#{ext}" unless name.end_with?('/')
+    cmd = cmd.sub('%{out}', "--ext #{ext} %{out}") if name.end_with?('/') && ext != 'flac'
     FileUtils.rm_rf(out)
     t = MB::U.clock_now
     # BUNDLE_GEMFILE: this script's bundler/setup exported its own tree's
@@ -104,10 +124,10 @@ def render_all(root, dir, only)
 end
 
 # Returns the audio files for a case output (a file or a directory).
-def case_files(dir, name)
-  return Dir[File.join(dir, name, '*.flac')].sort if name.end_with?('/')
+def case_files(dir, name, ext = 'flac')
+  return Dir[File.join(dir, name, "*.{flac,wav}")].sort if name.end_with?('/')
 
-  [File.join(dir, "#{name}.flac")]
+  [File.join(dir, "#{name}.#{ext}")]
 end
 
 def db(ratio)
@@ -140,6 +160,7 @@ def compare_file(ref_path, new_path)
     raw_db: ref_energy > 0 ? db(Math.sqrt(raw / ref_energy)) : db(Math.sqrt(raw)),
     aligned_db: ref_energy > 0 ? db(Math.sqrt(aligned / ref_energy)) : db(Math.sqrt(aligned)),
     aligned_dbfs: db(Math.sqrt(aligned / samples)),
+    max_abs: ref.zip(new).map { |r, n| (r - n).abs.max }.max,
     exact: raw == 0,
   }
 end
@@ -150,6 +171,7 @@ MB::Sound.script(
   only: [nil, String, 'Comma-separated substrings; only matching cases'],
   limit: [-80.0, Float, 'Maximum gain-matched residual in dB relative to the reference'],
   floor: [-120.0, Float, 'Gain-matched residuals below this dBFS always pass'],
+  ext: ['flac', String, 'Render format: flac (24-bit) or wav (32-bit float, for exact comparisons)', ['flac', 'wav']],
   list: [false, '-l', 'List case names and exit'],
 ) { |(command, dir1, dir2), p|
   if p.list
@@ -169,28 +191,28 @@ MB::Sound.script(
         begin
           puts "Compiling #{p.ref} in #{tree}"
           system('bundle', 'exec', 'rake', 'compile', chdir: tree, out: File::NULL, exception: true)
-          render_all(tree, dir1, only)
+          render_all(tree, dir1, only, p.ext)
         ensure
           system('git', '-C', ROOT, 'worktree', 'remove', '--force', tree)
         end
       end
     else
-      render_all(ROOT, dir1, only)
+      render_all(ROOT, dir1, only, p.ext)
     end
     puts "References in #{dir1}"
 
   when 'compare'
     abort 'Give the reference directory' unless dir1
     new_dir = dir2 || Dir.mktmpdir('null-test-new-')
-    render_all(ROOT, new_dir, only)
+    render_all(ROOT, new_dir, only, p.ext)
 
     failures = 0
-    puts format('%-40s %8s %6s %9s %9s %11s %9s', 'case', 'frames', 'len±', 'gain dB', 'raw dB', 'matched dB', 'dBFS')
+    puts format('%-40s %8s %6s %9s %9s %11s %9s %9s', 'case', 'frames', 'len±', 'gain dB', 'raw dB', 'matched dB', 'dBFS', 'max diff')
     CASES.each_key do |name|
       next if only && only.none? { |o| name.include?(o) }
 
-      case_files(dir1, name).each do |ref_path|
-        label = name.end_with?('/') ? "#{name}#{File.basename(ref_path, '.flac')}" : name
+      case_files(dir1, name, p.ext).each do |ref_path|
+        label = name.end_with?('/') ? "#{name}#{File.basename(ref_path, '.*')}" : name
         new_path = File.join(new_dir, name.end_with?('/') ? name : '', File.basename(ref_path))
         unless File.exist?(new_path)
           puts format('%-40s missing', label)
@@ -207,7 +229,7 @@ MB::Sound.script(
 
         ok = (r[:aligned_db] <= p.limit || r[:aligned_dbfs] <= p.floor) && r[:length_diff] == 0
         failures += 1 unless ok
-        puts format('%-40s %8d %6d %9.2f %9.1f %11.1f %9.1f %s', label, r[:frames], r[:length_diff], r[:gain_db], r[:raw_db], r[:aligned_db], r[:aligned_dbfs], ok ? (r[:exact] ? 'exact' : '') : 'FAIL')
+        puts format('%-40s %8d %6d %9.2f %9.1f %11.1f %9.1f %9.2g %s', label, r[:frames], r[:length_diff], r[:gain_db], r[:raw_db], r[:aligned_db], r[:aligned_dbfs], r[:max_abs], ok ? (r[:exact] ? 'exact' : '') : 'FAIL')
       end
     end
 
