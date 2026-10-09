@@ -59,6 +59,39 @@ module MB
       # - +mode:+ picks an output tap mix (Oberheim Xpander style): :lp4
       #   (default), :lp2, :bp2, :bp4, :hp2, :hp4.  Compensation only
       #   applies to the lowpass modes.
+      # - +mode: :diode+ is a TB-303-style diode ladder instead of the OTA
+      #   cascade (MB::Sound::FastFilter.diode_ladder; mirror
+      #   .diode_process_ruby): four stages that load their neighbors, so
+      #   the poles spread, oscillating at loop gain 18.39 (DIODE_EDGE_K)
+      #   instead of 4.  The same knobs: the resonance 0..1 sits the same
+      #   distance from oscillation as lp4's (curves scaled by DIODE_SCALE;
+      #   the :db curve makes the gain at the peak frequency rise from
+      #   -25.3 dB at 0 to +32.3 dB at 1, linear in dB), +self_oscillate:+
+      #   has the same onset and rise, and compensation and drive work
+      #   alike (:input or :feedback).
+      # - +normalize: true+ (default; diode only, user decision 2026-10-09:
+      #   easy switching over hardware fidelity) matches the diode ladder to
+      #   lp4 at the same settings.  Cutoff: the stages' frequency is raised
+      #   by .diode_cutoff_scale (2.86 without resonance, 2.14 at resonance
+      #   0.2, 1.65 at 0.3, 1.06 at 0.6, 1 at the oscillation edge), so
+      #   without resonance the response falls 12 dB below DC at lp4's
+      #   frequency (-12 dB at the cutoff, -3 dB at 0.28 × the cutoff
+      #   against lp4's 0.43; slopes about 8, 11, 16, 21 dB/octave over the
+      #   first four octaves, against 16, 21, 24), and from resonance 0.3 up
+      #   the resonant peak is at lp4's frequency, reaching the cutoff as
+      #   the resonance rises (self-oscillation exactly at it).  Bass: the
+      #   compensation is replaced by .diode_compensation, so the DC gain
+      #   is lp4's at every resonance.  Level: the :input drive's saturator
+      #   gets .diode_headroom
+      #   (up to DIODE_SCALE near the edge), since the ladder passes 1 /
+      #   18.39 of the loop's input at the resonant frequency where lp4
+      #   passes 1 / 4, so self-oscillation and saturated ringing reach
+      #   lp4's levels (:feedback drive already does).  It costs nothing
+      #   per sample for constant parameters and ~10-20% more per changing
+      #   resonance value.  +normalize: false+ is the round-1 ladder: the
+      #   resonant peak at the cutoff at every resonance (-25 dB there
+      #   without resonance, about 1.5-2 octaves darker than lp4) and
+      #   self-oscillation 13 dB below lp4's.
       class FourPole < Filter
         # Loop gain at full resonance by default (no self-oscillation).
         MAX_K = 3.9
@@ -96,10 +129,37 @@ module MB
           bp4: [0.0, 0.0, 4.0, -8.0, 4.0],
           hp2: [1.0, -2.0, 1.0, 0.0, 0.0],
           hp4: [1.0, -4.0, 6.0, -4.0, 1.0],
+          diode: [0.0, 0.0, 0.0, 0.0, 1.0], # the diode ladder's fourth stage
         }.freeze
 
         # Modes that use passband compensation by default.
-        LOWPASS_MODES = [:lp4, :lp2].freeze
+        LOWPASS_MODES = [:lp4, :lp2, :diode].freeze
+
+        # The diode ladder (+mode: :diode+; see fast_filter.c): its
+        # oscillation frequency in units of the stages' angular frequency is
+        # sqrt(10/7) (DIODE_INV_W180 is the inverse), where the loop
+        # oscillates at k = 901/49 (DIODE_EDGE_K); its curves are lp4's
+        # scaled by DIODE_SCALE (DIODE_EDGE_K / 4).
+        DIODE_INV_W180 = 0.8366600265340756
+        DIODE_EDGE_K = 18.387755102040817
+        DIODE_INV_EDGE_K = 0.05438401775804661
+        DIODE_SCALE = 4.596938775510204
+
+        # The diode ladder's dB curve: its top loop gain (0.975 ×
+        # DIODE_EDGE_K) and log2(40 + 39 × DIODE_EDGE_K), the gain ratio at
+        # the cutoff between r = 1 and 0 (.diode_resonance_curve).
+        DIODE_CURVE_K = 17.928061224489795
+        DIODE_CURVE_LOG2_RATIO = 9.564382835097447
+
+        # The diode ladder's cutoff normalization (.diode_cutoff_scale): m0 -
+        # 1, where m0 = sqrt(10/7) / w12 and |D(j w12)| = 4 (the ladder
+        # alone is -12 dB there, like lp4 at its cutoff), and the fitted
+        # rational's coefficients (round 3, 2026-10-09: fitted to put the
+        # resonant peak at lp4's frequency from resonance 0.3 up; round 2's
+        # 14.4 and 4.85 matched the -12 dB point, darker at 0.1-0.4).
+        DIODE_NORM_M0 = 1.8585129771571043
+        DIODE_NORM_B = 2.1
+        DIODE_NORM_C = 10.6
 
         # Resonance curves (the kernel's +curve+ argument): :db (default)
         # makes the gain at the cutoff rise linearly in dB; :linear is the
@@ -137,15 +197,17 @@ module MB
         # class description for the options).
         def initialize(
           cutoff: 1000.0, resonance: 0.0, mode: :lp4, drive: nil, self_oscillate: false, compensation: nil,
-          resonance_curve: :db, drive_mode: :input, clip: :soft, sample_rate: 48000
+          resonance_curve: :db, drive_mode: :input, clip: :soft, normalize: true, sample_rate: 48000
         )
           raise ArgumentError, "Unknown four-pole mode #{mode.inspect} (use one of #{MODES.keys.join(', ')})" unless MODES.include?(mode)
           raise ArgumentError, "Unknown resonance curve #{resonance_curve.inspect} (use :db or :linear)" unless RESONANCE_CURVES.include?(resonance_curve)
           raise ArgumentError, "Unknown drive mode #{drive_mode.inspect} (use :input, :stages, or :feedback)" unless DRIVE_MODES.include?(drive_mode)
           raise ArgumentError, "Unknown clip #{clip.inspect} (use :soft or :hard)" unless CLIPS.include?(clip)
           raise ArgumentError, 'clip: only applies to drive_mode: :feedback' if clip != :soft && drive_mode != :feedback
+          raise ArgumentError, 'The diode ladder takes drive_mode: :input or :feedback' if mode == :diode && drive_mode == :stages
 
           @mode = mode
+          @normalize = !!normalize
           @resonance_curve = resonance_curve
           @drive_mode = drive_mode
           @clip = clip
@@ -167,6 +229,17 @@ module MB
 
           @state = [0.0, 0.0, 0.0, 0.0]
           reset(0)
+        end
+
+        # True for the diode ladder (+mode: :diode+).
+        def diode?
+          @mode == :diode
+        end
+
+        # True if the diode ladder's cutoff and saturation are matched to
+        # lp4's (+normalize: true+, the default; see the class description).
+        def normalize?
+          @normalize
         end
 
         # Whether the resonance may reach self-oscillation.
@@ -201,7 +274,11 @@ module MB
         # NArrays of the same length (read per sample).
         def dynamic_process(samples, cutoff:, resonance:)
           samples = samples.real if samples.is_a?(Numo::SComplex) || samples.is_a?(Numo::DComplex)
-          out = MB::Sound::FastFilter.four_pole(samples, cutoff, resonance, @state, @sample_rate, @k_max, @compensation, @drive, @mix, *kernel_options)
+          out = if diode?
+                  MB::Sound::FastFilter.diode_ladder(samples, cutoff, resonance, @state, @sample_rate, @k_max, @compensation, @drive, *kernel_options, diode_normalize)
+                else
+                  MB::Sound::FastFilter.four_pole(samples, cutoff, resonance, @state, @sample_rate, @k_max, @compensation, @drive, @mix, *kernel_options)
+                end
           remember(cutoff, resonance)
           out
         end
@@ -209,7 +286,11 @@ module MB
         # Same as #dynamic_process, through the Ruby mirror (slow; for specs).
         def dynamic_process_ruby(samples, cutoff:, resonance:)
           samples = samples.real if samples.is_a?(Numo::SComplex) || samples.is_a?(Numo::DComplex)
-          out = self.class.process_ruby(samples, cutoff, resonance, @state, @sample_rate, @k_max, @compensation, @drive, @mix, *kernel_options)
+          out = if diode?
+                  self.class.diode_process_ruby(samples, cutoff, resonance, @state, @sample_rate, @k_max, @compensation, @drive, *kernel_options, diode_normalize)
+                else
+                  self.class.process_ruby(samples, cutoff, resonance, @state, @sample_rate, @k_max, @compensation, @drive, @mix, *kernel_options)
+                end
           remember(cutoff, resonance)
           out
         end
@@ -220,7 +301,7 @@ module MB
           value = value.to_f
           k = loop_gain
           # Every stage holds the lowpass level, whatever the output mix
-          dc = value * (1.0 + @compensation * k) / (1.0 + k)
+          dc = value * (1.0 + passband_compensation(k) * k) / (1.0 + k)
           @state = [dc, dc, dc, dc]
           @state[0] += SELF_OSCILLATE_SEED if @self_oscillate
           self
@@ -239,6 +320,15 @@ module MB
           k = loop_gain
           z1 = omega.is_a?(Numo::NArray) ? Numo::NMath.exp(Numo::DComplex.cast(omega) * -1i) : CMath.exp(-1i * omega)
 
+          if diode?
+            # The bilinear transform of (1 + c k) / (D(s) + k), D(s) = s^4 +
+            # 7 s^3 + 15 s^2 + 10 s + 1, with s in units of the stages'
+            # angular frequency (g = tan(pi fc / rate) / sqrt(10/7))
+            scale = @normalize ? self.class.diode_cutoff_scale(k) * DIODE_INV_W180 : DIODE_INV_W180
+            s = (1 - z1) / ((1 + z1) * (g * scale))
+            return (1 + passband_compensation(k) * k) / ((((s + 7) * s + 15) * s + 10) * s + 1 + k)
+          end
+
           # One TPT stage: g (1 + z^-1) / ((1 + g) - (1 - g) z^-1)
           h = g * (z1 + 1) / ((1 + g) - (1 - g) * z1)
           u = (1 + @compensation * k) / (1 + k * h**4)
@@ -251,6 +341,8 @@ module MB
         # .self_oscillate_gain): 0 to #k_max.
         def loop_gain(resonance = @resonance)
           r = resonance.to_f.clamp(0.0, 1.0)
+          return self.class.diode_loop_gain(r, kernel_options[0], @k_max) if diode?
+
           return self.class.self_oscillate_gain(r, @resonance_curve == :db, @k_max) if @self_oscillate
 
           r = self.class.resonance_curve(r) if @resonance_curve == :db
@@ -326,12 +418,7 @@ module MB
                 elsif res > 1.0
                   res = 1.0
                 end
-                k = case curve
-                    when 1 then resonance_curve(res) * k_max
-                    when 2 then self_oscillate_gain(res, false, k_max)
-                    when 3 then self_oscillate_gain(res, true, k_max)
-                    else res * k_max
-                    end
+                k = lp4_loop_gain(res, curve, k_max)
                 in_gain = 1.0 + comp * k
               end
 
@@ -409,6 +496,233 @@ module MB
           out
         end
 
+        # The Ruby mirror of MB::Sound::FastFilter.diode_ladder (the diode
+        # ladder, +mode: :diode+): four_pole's arguments without the mix,
+        # the same operations in the same order (see fast_filter.c for the
+        # model).  Returns a new SFloat.
+        def self.diode_process_ruby(buffer, cutoff, resonance, state, sample_rate, k_max, comp, drive, curve = 0, drive_mode = 0, clip = 0, normalize = 1)
+          rate = sample_rate.to_f
+          raise ArgumentError, 'Sample rate must be positive and finite' unless rate > 0 && rate.finite?
+          k_max = k_max.to_f
+          comp = comp.to_f
+          drive = drive.to_f
+          raise ArgumentError, 'Filter parameters must be finite (and drive not negative)' unless k_max.finite? && comp.finite? && drive >= 0 && drive.finite?
+          raise ArgumentError, 'Resonance curve must be 0 (linear), 1 (dB), 2 (self-oscillating linear), or 3 (self-oscillating dB)' unless [0, 1, 2, 3].include?(curve)
+          raise ArgumentError, 'Diode ladder drive mode must be 0 (input) or 2 (feedback)' unless [0, 2].include?(drive_mode)
+          raise ArgumentError, 'Clip must be 0 (soft) or 1 (hard)' unless [0, 1].include?(clip)
+          raise ArgumentError, 'Normalize must be 0 (off) or 1 (on)' unless [0, 1].include?(normalize)
+          raise ArgumentError, 'Diode ladder state must have four elements' unless state.is_a?(Array) && state.length == 4
+
+          s0, s1, s2, s3 = state.map { |v| v = v.to_f; v.finite? ? v : 0.0 }
+
+          data = Numo::SFloat.cast(buffer)
+          raise ArgumentError, "Only 1D NArrays may be processed (got #{data.ndim} dimensions)" unless data.ndim == 1
+          length = data.length
+          out = Numo::SFloat.zeros(length)
+
+          fc_arr = signal_input(cutoff, length, 'Cutoff')
+          res_arr = signal_input(resonance, length, 'Resonance')
+          fc_scalar = fc_arr ? nil : (cutoff.nil? ? 0.0 : cutoff.to_f)
+          res_scalar = res_arr ? nil : (resonance.nil? ? 0.0 : resonance.to_f)
+
+          pi_over_rate = Math::PI / rate
+          fc_max = rate * MAX_CUTOFF_RATIO
+          inv_drive = drive > 0 ? 1.0 / drive : 0.0
+          driven = drive > 0
+
+          last_fc = Float::NAN
+          last_res = Float::NAN
+          t = 0.0
+          scale = DIODE_INV_W180
+          sat_drive = drive
+          sat_inv = inv_drive
+          g = 0.0
+          r1 = r2 = r3 = r4 = 1.0
+          a1 = a2 = a3 = 0.0
+          q1 = q2 = q3 = q4 = 0.0
+          k = 0.0
+          inv = 1.0
+          in_gain = 1.0
+          dcomp = comp
+
+          length.times do |i|
+            fc = fc_arr ? fc_arr[i] : fc_scalar
+            res = res_arr ? res_arr[i] : res_scalar
+
+            if fc != last_fc || res != last_res
+              if res != last_res
+                last_res = res
+                if !(res >= 0.0)
+                  res = 0.0
+                elsif res > 1.0
+                  res = 1.0
+                end
+                k = diode_loop_gain(res, curve, k_max)
+                if normalize == 1
+                  dcomp = diode_compensation(k, lp4_loop_gain(res, curve, k_max), comp)
+                end
+                in_gain = 1.0 + dcomp * k
+                if normalize == 1
+                  scale = diode_cutoff_scale(k) * DIODE_INV_W180
+                  headroom = diode_headroom(k)
+                  sat_drive = drive / headroom
+                  sat_inv = headroom * inv_drive
+                end
+              end
+
+              if fc != last_fc
+                last_fc = fc
+                if !(fc >= MIN_CUTOFF)
+                  fc = MIN_CUTOFF
+                elsif fc > fc_max
+                  fc = fc_max
+                end
+                t = tan(fc * pi_over_rate)
+              end
+
+              g = t * scale
+              d = 1.0 + 2.0 * g
+              r1 = 1.0 / d
+              a1 = g * r1
+              r2 = 1.0 / (d - g * a1)
+              a2 = g * r2
+              r3 = 1.0 / (d - g * a2)
+              a3 = g * r3
+              r4 = 1.0 / ((1.0 + g) - g * a3)
+              q1 = g * r1
+              q2 = g * q1 * r2
+              q3 = g * q2 * r3
+              q4 = g * q3 * r4
+
+              inv = 1.0 / (1.0 + k * q4)
+            end
+
+            x = data[i]
+
+            p1 = s0 * r1
+            p2 = (s1 + g * p1) * r2
+            p3 = (s2 + g * p2) * r3
+            p4 = (s3 + g * p3) * r4
+
+            u = (x * in_gain - k * p4) * inv
+            if driven
+              if drive_mode == 0
+                u = tanh(u * sat_drive) * sat_inv
+              else
+                fb = p4 + q4 * u - dcomp * x
+                t = secant(fb * drive, clip)
+                kt = k * t
+                u = (x * (1.0 + dcomp * kt) - kt * p4) / (1.0 + kt * q4)
+              end
+            end
+
+            y4 = p4 + q4 * u
+            y3 = p3 + q3 * u + a3 * y4
+            y2 = p2 + q2 * u + a2 * y3
+            y1 = p1 + q1 * u + a1 * y2
+
+            s0 = 2.0 * y1 - s0
+            s1 = 2.0 * y2 - s1
+            s2 = 2.0 * y3 - s2
+            s3 = 2.0 * y4 - s3
+
+            out[i] = y4
+          end
+
+          [s0, s1, s2, s3].each_with_index do |s, j|
+            s = 0.0 if !s.finite? || s.abs < FLUSH
+            state[j] = s
+          end
+
+          out
+        end
+
+        # The diode ladder's dB resonance curve: k / DIODE_CURVE_K for
+        # resonance +r+ (0..1).  Like .resonance_curve, the gain at the
+        # cutoff relative to DC, (1 + k) / (K - k) with K = DIODE_EDGE_K,
+        # rises linearly in dB: G = 2^(r log2(757.12)) / K, from -25.3 dB
+        # to +32.3 dB, and k = (K G - 1) / (1 + G).
+        def self.diode_resonance_curve(r)
+          return 0.0 unless r > 0.0
+          return 1.0 if r >= 1.0
+          e = exp2(r * DIODE_CURVE_LOG2_RATIO)
+          (e - 1.0) / ((1.0 + e * DIODE_INV_EDGE_K) * DIODE_CURVE_K)
+        end
+
+        # The diode ladder's loop gain for resonance +r+ on kernel curve
+        # +curve+ (0..3) with lp4's +k_max+: lp4's curves (the dB curve
+        # replaced by .diode_resonance_curve) times DIODE_SCALE.
+        def self.diode_loop_gain(r, curve, k_max)
+          case curve
+          when 1 then diode_resonance_curve(r) * k_max * DIODE_SCALE
+          when 2 then self_oscillate_gain(r, false, k_max) * DIODE_SCALE
+          when 3
+            if r <= SELF_OSCILLATE_ONSET
+              diode_resonance_curve(r / SELF_OSCILLATE_ONSET) * SELF_OSCILLATE_EDGE * DIODE_SCALE
+            else
+              self_oscillate_gain(r, true, k_max) * DIODE_SCALE
+            end
+          else r * k_max * DIODE_SCALE
+          end
+        end
+
+        # The diode ladder's cutoff normalization (+normalize: true+): the
+        # factor m by which the stages' frequency is raised above the round-1
+        # mapping (resonant peak at the cutoff) for loop gain +k+: without
+        # resonance the response falls 12 dB below DC at the cutoff like
+        # lp4's, and from resonance 0.3 up (on the :db curve) the resonant
+        # peak is at lp4's frequency within 30 cents.  m = 1 + (m0 - 1) (1 -
+        # x) / (1 + b x + c x²), x = k / DIODE_EDGE_K clamped to 0..1: 2.86
+        # (m0, where the ladder is -12 dB at the cutoff) at x = 0, 1.65 at x
+        # 0.25 (resonance 0.3), 1.06 at 0.73 (0.6), and 1 at the
+        # oscillation edge, so self-oscillation is at the cutoff.
+        def self.diode_cutoff_scale(k)
+          x = k * DIODE_INV_EDGE_K
+          x = 0.0 unless x > 0.0
+          return 1.0 if x >= 1.0
+          1.0 + DIODE_NORM_M0 * (1.0 - x) / (1.0 + x * (DIODE_NORM_B + x * DIODE_NORM_C))
+        end
+
+        # lp4's loop gain for resonance +r+ (0..1) on kernel curve +curve+
+        # (0..3) with top loop gain +k_max+.
+        def self.lp4_loop_gain(r, curve, k_max)
+          case curve
+          when 1 then resonance_curve(r) * k_max
+          when 2 then self_oscillate_gain(r, false, k_max)
+          when 3 then self_oscillate_gain(r, true, k_max)
+          else r * k_max
+          end
+        end
+
+        # The diode ladder's passband compensation (+normalize: true+) for
+        # loop gain +k+, where lp4 has loop gain +k4+ at the same knob
+        # (.lp4_loop_gain) and compensation +comp+: the c' for which the
+        # ladder's DC gain (1 + c' k) / (1 + k) equals lp4's (1 + comp k4) /
+        # (1 + k4), so bass and level match lp4's at every resonance (with
+        # the plain compensation the diode was 1-2 dB quieter from resonance
+        # 0.1 up: its loop gain runs higher for the same distance from
+        # oscillation).  +comp+ itself for k = 0.
+        def self.diode_compensation(k, k4, comp)
+          return comp unless k > 0.0
+          in_gain = (1.0 + k) * (1.0 + comp * k4) / (1.0 + k4)
+          (in_gain - 1.0) / k
+        end
+
+        # The diode ladder's saturation headroom for +drive_mode: :input+
+        # (+normalize: true+): the input saturator works at DIODE_SCALE
+        # times the level near the oscillation edge (the ladder passes 1 /
+        # DIODE_EDGE_K of the loop's input at the resonant frequency, lp4's
+        # cascade 1 / 4), so ringing and self-oscillation reach lp4's levels;
+        # 1 + (DIODE_SCALE - 1) x², x = k / DIODE_EDGE_K clamped to 0..1,
+        # so low resonance saturates like lp4 (x² over x or x³: the closest
+        # saturated saw peaks to lp4's at resonance 0.6-0.9).
+        def self.diode_headroom(k)
+          x = k * DIODE_INV_EDGE_K
+          x = 0.0 unless x > 0.0
+          x = 1.0 if x > 1.0
+          1.0 + (DIODE_SCALE - 1.0) * (x * x)
+        end
+
         # The kernel's dB resonance curve: k / k_max for resonance +r+
         # (0..1; see the class description).  G = 2^(r log2(196)) / 4 is the
         # gain at the cutoff relative to DC, from 1/4 (-12 dB) to 49 (+33.8
@@ -462,17 +776,23 @@ module MB
         # log(4 q) / log(196) with the :db curve (q 0.25 or less gives 0,
         # 0.707 gives 0.19, 4 gives 0.39, 10 gives 0.70, 49 or more gives
         # 1), or the same loop gain with the :linear curve.  +q+ may be a
-        # number or an NArray.
-        def self.quality_to_resonance(q, curve: :db)
+        # number or an NArray.  +diode: true+ maps to the diode ladder's
+        # curves (log(18.39 q) / log(757.12) on the :db curve).
+        def self.quality_to_resonance(q, curve: :db, diode: false)
+          # Gain ratio at the cutoff from r = 0 to 1 and the gain at r = 0
+          log_ratio = Math.log(diode ? 40 + 39 * DIODE_EDGE_K : 196)
+          edge = diode ? DIODE_EDGE_K : 4.0
+          to_linear = ->(v) { diode ? diode_resonance_curve(v) : resonance_curve(v) }
+
           if q.is_a?(Numo::NArray)
-            r = (Numo::NMath.log(Numo::DFloat.cast(q).clip(0.25, nil) * 4) * (1.0 / Math.log(196))).clip(0.0, 1.0)
-            r = r.map { |v| resonance_curve(v) } if curve == :linear
+            r = (Numo::NMath.log(Numo::DFloat.cast(q).clip(1.0 / edge, nil) * edge) * (1.0 / log_ratio)).clip(0.0, 1.0)
+            r = r.map { |v| to_linear.(v) } if curve == :linear
             return Numo::SFloat.cast(r)
           end
 
           q = q.to_f
-          r = q > 0.25 ? (Math.log(4 * q) / Math.log(196)).clamp(0.0, 1.0) : 0.0
-          curve == :linear ? resonance_curve(r) : r
+          r = q > 1.0 / edge ? (Math.log(edge * q) / log_ratio).clamp(0.0, 1.0) : 0.0
+          curve == :linear ? to_linear.(r) : r
         end
 
         # The kernel's 2^y for y >= 0 (a Taylor series for the fraction).
@@ -535,6 +855,19 @@ module MB
         def kernel_options
           curves = @self_oscillate ? SELF_OSCILLATE_CURVES : RESONANCE_CURVES
           [curves.fetch(@resonance_curve), DRIVE_MODES.fetch(@drive_mode), CLIPS.fetch(@clip)]
+        end
+
+        # The compensation the kernel uses at loop gain +k+ (the current
+        # resonance's): .diode_compensation for the normalized diode ladder.
+        def passband_compensation(k)
+          return @compensation unless diode? && @normalize
+          r = @resonance.to_f.clamp(0.0, 1.0)
+          self.class.diode_compensation(k, self.class.lp4_loop_gain(r, kernel_options[0], @k_max), @compensation)
+        end
+
+        # The diode kernel's +normalize+ argument.
+        def diode_normalize
+          @normalize ? 1 : 0
         end
 
         # Keeps the last cutoff and resonance (for #reset, #response, #to_s).

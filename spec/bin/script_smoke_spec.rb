@@ -22,6 +22,7 @@ RSpec.describe('script runner scripts', :smoke) do
 
   # Script => extra arguments for a short render
   songs = {
+    'bin/songs/acid_song.rb' => ['--bars', '0.5', '-F', 'lp4'],
     'bin/songs/antialias_song.rb' => ['--bars', '0.5'],
     'bin/songs/bouncing_ball.rb' => ['--bars', '0.5'],
     'bin/songs/drums_808.rb' => ['--bars', '0.5', '-c', '12'],
@@ -86,6 +87,7 @@ RSpec.describe('script runner scripts', :smoke) do
 
   # Synth script => extra arguments; each plays a short MIDI file
   synths = {
+    'bin/synths/acid.rb' => [],
     'bin/synths/drums_808.rb' => ['-c', '6'],
     'bin/synths/ep2_syn.rb' => [],
     'bin/synths/filter_ping.rb' => [],

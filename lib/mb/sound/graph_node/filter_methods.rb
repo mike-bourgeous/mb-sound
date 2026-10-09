@@ -138,7 +138,7 @@ module MB
         end
 
         # Filter types for #filter that make a four-pole filter (#lp4).
-        FOUR_POLE_TYPES = [:four_pole, :lp4, :lp2, :bp2, :bp4, :hp2, :hp4].freeze # Filter::FourPole::MODES
+        FOUR_POLE_TYPES = [:four_pole, :lp4, :lp2, :bp2, :bp4, :hp2, :hp4, :diode].freeze # Filter::FourPole::MODES
 
         # A CEM3379-style 4-pole resonant lowpass (24 dB/octave), the filter
         # of the Ensoniq SQ-80 and many analog polysynths (see
@@ -163,7 +163,7 @@ module MB
         # OTA style), or :feedback (only the resonance feedback, MS-20
         # style; +clip: :soft+ or :hard), the last two with drive 1 unless
         # given.  +mode:+ picks another tap mix: :lp2, :bp2, :bp4, :hp2,
-        # :hp4.
+        # :hp4, or :diode (a TB-303-style diode ladder; see #diode).
         #
         # +resonance_curve: :db+ (default) makes the gain at the cutoff
         # rise linearly in dB with +resonance+ (-12 dB to +33.8 dB; the peak
@@ -190,21 +190,47 @@ module MB
         #     play 110.hz.ramp.at(0.3).lp4(1200, resonance: 0.1.hz.lfo.triangle.at(0.7..1), self_oscillate: true)
         def lp4(
           cutoff, resonance: nil, quality: nil, mode: :lp4, drive: nil, self_oscillate: false, compensation: nil,
-          resonance_curve: :db, drive_mode: :input, clip: :soft
+          resonance_curve: :db, drive_mode: :input, clip: :soft, normalize: true
         )
           raise ArgumentError, 'Give lp4 resonance: or quality:, not both' if resonance && quality
 
           f = MB::Sound::Filter::FourPole.new(
             mode: mode, drive: drive, self_oscillate: self_oscillate, compensation: compensation,
-            resonance_curve: resonance_curve, drive_mode: drive_mode, clip: clip,
+            resonance_curve: resonance_curve, drive_mode: drive_mode, clip: clip, normalize: normalize,
             sample_rate: sample_rate
           )
-          resonance = MB::Sound::GraphNode::FourPole.quality_resonance(quality, resonance_curve) if quality
+          # The normalized diode ladder takes lp4's knob for a Q (same settings, similar sound)
+          diode = mode == :diode && !normalize
+          resonance = MB::Sound::GraphNode::FourPole.quality_resonance(quality, resonance_curve, diode: diode) if quality
           resonance ||= 0.0
           MB::Sound::GraphNode::FourPole.new(self, f, cutoff: cutoff, resonance: resonance)
         end
         alias four_pole lp4
         alias lowpass4 lp4
+
+        # A TB-303-style diode ladder lowpass: #lp4 with +mode: :diode+ (see
+        # #lp4 for the options and Filter::FourPole for the model), with
+        # lp4's resonance scale and curves (the same knob positions sit the
+        # same distance from oscillation), self-oscillation, compensation,
+        # and drive (+drive_mode:+ :input or :feedback).  The coupled stages
+        # spread their poles: a gentler, longer slope (about 8, 11, 16, and
+        # 21 dB/octave over the first four octaves above the cutoff without
+        # resonance, against lp4's 16, 21, 24) and a peak that narrows and squelches as the resonance
+        # rises.  By default (+normalize: true+) it is matched to lp4 for
+        # easy switching: -12 dB at the cutoff without resonance, the
+        # resonant peak moving to the cutoff as the resonance rises,
+        # self-oscillation at lp4's level, and +quality:+ giving lp4's knob
+        # position; +normalize: false+ is the unmatched ladder (resonant
+        # peak at the cutoff at every resonance, so -25 dB there without
+        # resonance, about two octaves darker; quieter self-oscillation).
+        # Alias #diode_ladder.
+        #
+        #     play 55.hz.saw.diode(0.25.hz.lfo.at(150..2500), resonance: 0.8, drive: 2) * 0.5
+        #     v.hz.saw.diode(v.cutoff(300), resonance: v.reso(0.7))
+        def diode(cutoff, resonance: nil, **options)
+          lp4(cutoff, resonance: resonance, mode: :diode, **options)
+        end
+        alias diode_ladder diode
 
         # Adds a filter chain that applies parametric peaking EQ.  The +pairs+
         # parameter should be a Hash mapping a frequency in Hz (or a Tone) to a

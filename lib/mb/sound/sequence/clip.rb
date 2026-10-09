@@ -264,12 +264,13 @@ module MB
         # Returns a clip where every note sounds for +fraction+ of its length,
         # leaving the rest of each step silent (or overlapping the next note
         # if +fraction+ is more than 1).  Note start times don't change.
+        # Slid notes (Seq::Step#slide, `~C4`) keep their overlap.
         #
         # Example:
         #     seq(C4, E4, G4).n8.legato(0.85)   # a little breathing room
         def legato(fraction)
           fraction = Clip.check_legato(fraction)
-          map_clip { |e| e.with(length: e.length * fraction) }
+          map_clip { |e| e.slid ? e : e.with(length: e.length * fraction) }
         end
 
         # Short notes: legato(0.5).

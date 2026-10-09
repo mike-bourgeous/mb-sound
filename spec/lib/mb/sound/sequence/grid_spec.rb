@@ -16,7 +16,7 @@ RSpec.describe(MB::Sound::Sequence::Grid) do
     end
 
     it 'raises an error for unknown characters' do
-      expect { described_class.parse(16, 'x-x') }.to raise_error(ArgumentError, /Unknown grid character "-"/)
+      expect { described_class.parse(16, 'x+x') }.to raise_error(ArgumentError, /Unknown grid character "\+"/)
     end
   end
 
