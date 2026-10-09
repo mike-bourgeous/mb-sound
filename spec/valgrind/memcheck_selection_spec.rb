@@ -49,8 +49,10 @@ RSpec.describe(MemcheckSelection) do
       allow(MemcheckSelection).to receive(:stamp_path).and_return(tmp_path('memcheck_full.stamp'))
     end
 
-    it 'is due without a stamp' do
-      expect(MemcheckSelection.full_status[0]).to eq(true)
+    it 'counts from FULL_BASELINE without a stamp' do
+      expect(MemcheckSelection.full_status[1]).to include('counting from 7cf41ccd4a')
+      later = Time.parse(MemcheckSelection::FULL_BASELINE['date']) + MemcheckSelection::FULL_EVERY_DAYS * 86400 + 1
+      expect(MemcheckSelection.full_status(now: later)[0]).to eq(true)
     end
 
     it 'is not due right after a full run, and due after FULL_EVERY_DAYS' do

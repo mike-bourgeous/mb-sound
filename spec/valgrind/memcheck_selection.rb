@@ -109,6 +109,16 @@ module MemcheckSelection
   FULL_EVERY_MERGES = 3
   FULL_EVERY_DAYS = 7
 
+  # Where the policy's clock starts until a full run writes the stamp (user
+  # decision 2026-10-09: the first full run waits until the policy says one
+  # is due): the feedback-loops tip selective memcheck was built on.  This
+  # is not a recorded clean run, just the starting point.
+  FULL_BASELINE = {
+    'commit' => '7cf41ccd4a3d863f3bfd65bd55da3faa315e2c0e',
+    'branch' => 'feedback-loops (baseline, no full run recorded)',
+    'date' => '2026-10-09T00:00:00Z',
+  }.freeze
+
   Extension = Struct.new(:name, :dir, :modules, keyword_init: true)
 
   Selection = Struct.new(
@@ -443,13 +453,13 @@ module MemcheckSelection
 
   # [due?, message]
   def full_status(now: Time.now)
-    stamp = read_stamp
-    return [true, "No full memcheck recorded (#{stamp_path}); a full run is due"] unless stamp
+    stamp = read_stamp || FULL_BASELINE
 
     days = (now - Time.parse(stamp['date'])) / 86400.0
     merges = ext_merges_since(stamp['commit'])
     due = days >= FULL_EVERY_DAYS || merges.nil? || merges >= FULL_EVERY_MERGES
-    msg = format('Last full memcheck %s on %s (%.1f days ago, %s ext merges since)',
+    lead = stamp.equal?(FULL_BASELINE) ? 'No full memcheck stamp yet; counting from' : 'Last full memcheck'
+    msg = format("#{lead} %s on %s (%.1f days ago, %s ext merges since)",
                  stamp['commit'][0, 10], stamp['branch'], days, merges.nil? ? 'unknown' : merges)
     msg += due ? "; a full run is DUE (every #{FULL_EVERY_MERGES} ext merges or #{FULL_EVERY_DAYS} days; FULL=auto runs it)" :
       "; next full run after #{FULL_EVERY_MERGES} ext merges or #{FULL_EVERY_DAYS} days"
