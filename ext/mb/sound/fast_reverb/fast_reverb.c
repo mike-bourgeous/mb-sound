@@ -109,6 +109,7 @@ struct rev_lfo {
 };
 
 struct rev_net {
+	int ready; // set when initialize finished
 	long n;
 	long stages;
 	int feedback;
@@ -256,7 +257,7 @@ static struct rev_net *rev_get(VALUE self)
 {
 	struct rev_net *r;
 	TypedData_Get_Struct(self, struct rev_net, &rev_type, r);
-	if (r->n == 0) {
+	if (!r->ready) {
 		rb_raise(rb_eRuntimeError, "Reverb network not initialized");
 	}
 	return r;
@@ -281,35 +282,55 @@ static VALUE cfg(VALUE config, const char *key)
 	return v;
 }
 
-// Copies config Array +key+ of +len+ numbers into a new double array.
-static double *cfg_doubles(VALUE config, const char *key, long len)
+// Returns config Array +key+, checked to hold +len+ real numbers (raising
+// before anything is allocated, so a bad config leaks nothing).
+static VALUE cfg_array(VALUE config, const char *key, long len)
 {
 	VALUE ary = cfg(config, key);
 	Check_Type(ary, T_ARRAY);
 	if (RARRAY_LEN(ary) != len) {
 		rb_raise(rb_eArgError, "Reverb config :%s needs %ld values, got %ld", key, len, RARRAY_LEN(ary));
 	}
+	for (long i = 0; i < len; i++) {
+		VALUE v = rb_ary_entry(ary, i);
+		if (!RB_FLOAT_TYPE_P(v) && !RB_INTEGER_TYPE_P(v)) {
+			rb_raise(rb_eArgError, "Reverb config :%s needs numbers", key);
+		}
+	}
+	return ary;
+}
+
+// Element +i+ of an Array checked by cfg_array.
+static inline double cfg_at(VALUE ary, long i)
+{
+	return NUM2DBL(rb_ary_entry(ary, i));
+}
+
+// Copies config Array +key+ of +len+ numbers into a new double array.
+static double *cfg_doubles(VALUE config, const char *key, long len)
+{
+	VALUE ary = cfg_array(config, key, len);
 	double *out = rev_calloc(len, sizeof(double));
 	for (long i = 0; i < len; i++) {
-		out[i] = NUM2DBL(rb_ary_entry(ary, i));
+		out[i] = cfg_at(ary, i);
 	}
 	return out;
 }
 
-// Copies config Array +key+ of +len+ indices below +limit+ into a new array.
+// Copies config Array +key+ of +len+ indices below +limit+ into a new array
+// (checked before allocating).
 static long *cfg_indices(VALUE config, const char *key, long len, long limit)
 {
-	VALUE ary = cfg(config, key);
-	Check_Type(ary, T_ARRAY);
-	if (RARRAY_LEN(ary) != len) {
-		rb_raise(rb_eArgError, "Reverb config :%s needs %ld values, got %ld", key, len, RARRAY_LEN(ary));
+	VALUE ary = cfg_array(config, key, len);
+	for (long i = 0; i < len; i++) {
+		long v = NUM2LONG(rb_ary_entry(ary, i));
+		if (v < 0 || v >= limit) {
+			rb_raise(rb_eArgError, "Reverb config :%s index %ld out of range", key, v);
+		}
 	}
 	long *out = rev_calloc(len, sizeof(long));
 	for (long i = 0; i < len; i++) {
 		out[i] = NUM2LONG(rb_ary_entry(ary, i));
-		if (out[i] < 0 || out[i] >= limit) {
-			rb_raise(rb_eArgError, "Reverb config :%s index %ld out of range", key, out[i]);
-		}
 	}
 	return out;
 }
@@ -518,7 +539,7 @@ static VALUE rev_initialize(VALUE self, VALUE config)
 	struct rev_net *r;
 	TypedData_Get_Struct(self, struct rev_net, &rev_type, r);
 	if (r->n != 0) {
-		rb_raise(rb_eRuntimeError, "Reverb network already initialized");
+		rb_raise(rb_eRuntimeError, "Reverb network already initialized (or failed to)");
 	}
 	Check_Type(config, T_HASH);
 
@@ -554,9 +575,8 @@ static VALUE rev_initialize(VALUE self, VALUE config)
 		rb_raise(rb_eArgError, "Shimmer window must be at least 4 samples");
 	}
 
-	// n and stages are set last-ish so a raise above leaves an
-	// uninitialized (n == 0) network that rev_get refuses; arrays below
-	// are freed by rev_free whatever happens.
+	// Everything allocated below belongs to the struct at once, so rev_free
+	// frees it whatever raises; rev_get refuses the network until ready.
 	long sn = stages * n;
 	r->stages = stages;
 	r->n = n;
@@ -565,50 +585,43 @@ static VALUE rev_initialize(VALUE self, VALUE config)
 	r->diff_delay = cfg_doubles(config, "diff_delay", sn);
 	r->diff_pol = cfg_doubles(config, "diff_polarity", sn);
 	r->diff_order = cfg_indices(config, "diff_order", sn, n);
-	double *diff_cap = cfg_doubles(config, "diff_capacity", sn);
+	VALUE diff_cap = cfg_array(config, "diff_capacity", sn);
 	r->diff = rev_calloc(sn, sizeof(struct rev_line));
 	for (long i = 0; i < sn; i++) {
-		line_init(&r->diff[i], diff_cap[i]);
+		line_init(&r->diff[i], cfg_at(diff_cap, i));
 	}
-	free(diff_cap);
 
 	r->tap = cfg_doubles(config, "tap", n);
 	r->loop = cfg_doubles(config, "loop", n);
 	r->gain = cfg_doubles(config, "gain", n);
 	r->normal = cfg_doubles(config, "normal", n);
 	r->order = cfg_indices(config, "order", n, n);
-	double *fdn_cap = cfg_doubles(config, "fdn_capacity", n);
+	VALUE fdn_cap = cfg_array(config, "fdn_capacity", n);
 	r->fdn = rev_calloc(n, sizeof(struct rev_line));
 	for (long i = 0; i < n; i++) {
-		line_init(&r->fdn[i], r->feedback ? fdn_cap[i] : 0);
+		line_init(&r->fdn[i], r->feedback ? cfg_at(fdn_cap, i) : 0);
 	}
-	free(fdn_cap);
 
 	VALUE damp = rb_hash_aref(config, ID2SYM(rb_intern("damp_coeffs")));
 	if (!NIL_P(damp)) {
 		r->damp_a = cfg_doubles(config, "damp_coeffs", n);
 	}
 
-	double *diff_scales = cfg_doubles(config, "diff_rate_scale", sn);
-	double *diff_phases = cfg_doubles(config, "diff_phase", sn);
-	double *fdn_scales = cfg_doubles(config, "fdn_rate_scale", n);
-	double *fdn_phases = cfg_doubles(config, "fdn_phase", n);
-	double *shim = cfg_doubles(config, "shimmer_phase", n);
+	VALUE diff_scales = cfg_array(config, "diff_rate_scale", sn);
+	VALUE diff_phases = cfg_array(config, "diff_phase", sn);
+	VALUE fdn_scales = cfg_array(config, "fdn_rate_scale", n);
+	VALUE fdn_phases = cfg_array(config, "fdn_phase", n);
+	r->shim_phase = cfg_doubles(config, "shimmer_phase", n);
 	r->dlfo = rev_calloc(sn, sizeof(struct rev_lfo));
 	r->flfo = rev_calloc(n, sizeof(struct rev_lfo));
 	for (long i = 0; i < sn; i++) {
-		r->dlfo[i].scale = diff_scales[i];
-		r->dlfo[i].phase = diff_phases[i];
+		r->dlfo[i].scale = cfg_at(diff_scales, i);
+		r->dlfo[i].phase = cfg_at(diff_phases, i);
 	}
 	for (long i = 0; i < n; i++) {
-		r->flfo[i].scale = fdn_scales[i];
-		r->flfo[i].phase = fdn_phases[i];
+		r->flfo[i].scale = cfg_at(fdn_scales, i);
+		r->flfo[i].phase = cfg_at(fdn_phases, i);
 	}
-	r->shim_phase = shim;
-	free(diff_scales);
-	free(diff_phases);
-	free(fdn_scales);
-	free(fdn_phases);
 
 	// Random targets for every LFO (diffusion first, then feedback), and
 	// each LFO's value at sample 0
@@ -638,6 +651,7 @@ static VALUE rev_initialize(VALUE self, VALUE config)
 	r->duck_db = NAN;
 	r->dynamics = RTEST(cfg(config, "dynamics"));
 	r->dyn_gain = 1.0;
+	r->ready = 1;
 
 	return self;
 }

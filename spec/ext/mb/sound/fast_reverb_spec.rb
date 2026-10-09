@@ -185,5 +185,10 @@ RSpec.describe(MB::Sound::FastReverb::Network) do
     expect { described_class.new(config).process([0] * 3, [], params, 1) }.to raise_error(ArgumentError)
     net = described_class.new(config)
     expect { net.process([0] * 4, Array.new(4) { Numo::SFloat.zeros(2) }, params, 3) }.to raise_error(ArgumentError, /at least 3/)
+    expect { described_class.new(config.merge(diff_capacity: ['x'] * 8)) }.to raise_error(ArgumentError, /numbers/)
+    expect { described_class.new(config.merge(fdn_capacity: [1e12] * 4)) }.to raise_error(ArgumentError, /line length/)
+    half = described_class.allocate
+    expect { half.send(:initialize, config.merge(fdn_capacity: [1e12] * 4)) }.to raise_error(ArgumentError)
+    expect { half.process([0] * 4, Array.new(4) { Numo::SFloat.zeros(2) }, params, 2) }.to raise_error(RuntimeError, /not initialized/)
   end
 end
