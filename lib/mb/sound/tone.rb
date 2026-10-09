@@ -1194,7 +1194,7 @@ module MB
       # dB (bin/aliasing.rb 'p.fm_feedback(1.5)').  Cost: about 28 ns per
       # sample whatever the amount (a plain sine: 21 ns; nodes for the
       # amount and gain add their own cost).  See .dx7_feedback for the DX7's
-      # 0-7 feedback setting in radians.  Also available as #fm_fb.  (#feedback is graph feedback, GraphNode::FeedbackMethods.)
+      # 0-7 feedback setting in radians.  Also available as #fmfb and #fm_fb.  (#feedback is graph feedback, GraphNode::FeedbackMethods.)
       #
       # Examples (bin/sound.rb):
       #     play 110.hz.fm_feedback(1.3).at(-12.db)                          # a saw-like sine
@@ -1224,6 +1224,7 @@ module MB
         end
       end
       alias fm_fb fm_feedback
+      alias fmfb fm_feedback
 
       # Like #fm_feedback, with the amount in cycles of phase modulation per
       # unit of output instead of radians (+cycles+ times 2pi radians; a
@@ -1237,6 +1238,7 @@ module MB
         fm_feedback(amount, gain: gain, dc: dc)
       end
       alias fm_fb_cycles fm_feedback_cycles
+      alias fmfb_cycles fm_feedback_cycles
 
       # The feedback amount (radians; a number or node) given to #fm_feedback,
       # or nil for none.

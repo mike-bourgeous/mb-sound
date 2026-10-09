@@ -168,6 +168,8 @@ RSpec.describe('Tone#fm_feedback (operator self-feedback)') do
     b = 125.hz.fm_feedback(0.25 * 2 * Math::PI).sample(2000)
     expect(a).to eq(b)
     expect(100.hz.fm_fb_cycles(0.1).fm_feedback_amount).to be_within(1e-12).of(0.2 * Math::PI)
+    expect(100.hz.fmfb_cycles(0.1).fm_feedback_amount).to be_within(1e-12).of(0.2 * Math::PI)
+    expect(100.hz.sine.fmfb_cycles(0.1).fm_feedback_amount).to be_within(1e-12).of(0.2 * Math::PI)
   end
 
   it 'has FEEDBACK_MAX = 2pi, the DX7 FB 7 value' do
@@ -232,7 +234,11 @@ RSpec.describe('Tone#fm_feedback (operator self-feedback)') do
     expect(100.hz.fm_feedback(1).sources.keys).not_to include(:feedback, :feedback_gain)
   end
 
-  it 'has a Pitch shortcut and an alias' do
+  it 'has Pitch shortcuts and the aliases fmfb and fm_fb' do
+    expect(100.hz.fmfb(0.7).fm_feedback_amount).to eq(0.7)
+    expect(100.hz.sine.fmfb(0.7).fm_feedback_amount).to eq(0.7)
+    expect(100.hz.sine.fm_fb(0.7).fm_feedback_amount).to eq(0.7)
+
     t = 100.hz.fm_fb(1.2, gain: 0.5)
     expect(t).to be_a(MB::Sound::Tone)
     expect(t.fm_feedback?).to eq(true)
