@@ -2408,7 +2408,7 @@ module MB
       # as DFloat NArrays (increments is a Float if every sample advances by
       # the same amount).  The same math as MB::FastSound.phasor: phase[i] =
       # phi + sum(increments[0...i]) (i * increment when constant), wrapped
-      # once to 0...1.
+      # once to 0...1; with noise, a running phase wrapped every sample.
       def phases_ruby(freq, count)
         freq = Numo::DFloat.cast(freq) if freq.is_a?(Numo::NArray)
 
@@ -2416,6 +2416,20 @@ module MB
           rng = @state.noise
           random = Numo::DFloat.cast(Array.new(count) { Tone.noise_random(rng) })
           increments = freq * (random * @random_advance + @advance)
+
+          # Noise: a running wrapped phase, as the C kernels, so the output
+          # doesn't depend on block boundaries (increments reach +-freq/2
+          # cycles, and summing them per block rounded differently by block
+          # size)
+          phases = Numo::DFloat.zeros(count)
+          phi = @state.phi
+          count.times do |i|
+            phases[i] = phi - phi.floor
+            phi += increments[i]
+            phi -= phi.floor
+          end
+          @state.phi = phi
+          return [phases, increments]
         else
           increments = freq * @advance
         end

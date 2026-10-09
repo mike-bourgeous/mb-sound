@@ -666,7 +666,12 @@ static VALUE ruby_phasor(VALUE self, VALUE buffer, VALUE frequency, VALUE advanc
 			incptr[i] = inc;
 		}
 
-		if (!constant) {
+		if (rndadv != 0) {
+			// Noise: a running wrapped phase, so the output doesn't depend on
+			// where blocks start (steps of up to +-freq/2 cycles summed per
+			// block rounded differently by block size)
+			phi = wrap(phi + inc, 1.0);
+		} else if (!constant) {
 			steps += inc;
 		}
 	}
@@ -809,7 +814,12 @@ static VALUE ruby_oscillate(VALUE self, VALUE buffer, VALUE wave_type, VALUE fre
 			((float *)out)[i] = creal(v);
 		}
 
-		if (!constant) {
+		if (rndadv != 0) {
+			// Noise: a running wrapped phase, so the output doesn't depend on
+			// where blocks start (steps of up to +-freq/2 cycles summed per
+			// block rounded differently by block size)
+			phi = wrap(phi + inc, 1.0);
+		} else if (!constant) {
 			steps += inc;
 		}
 	}

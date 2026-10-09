@@ -304,7 +304,9 @@ static void naive_segment(enum wave_types wt, void *out, _Bool complex_out, size
 			((float *)out)[i] = creal(v);
 		}
 
-		if (!constant) {
+		if (rndadv != 0) {
+			phi = mb_wrap(phi + inc, 1.0); // noise: block-size independent (as fast_sound.c)
+		} else if (!constant) {
 			steps += inc;
 		}
 	}
