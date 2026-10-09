@@ -188,6 +188,7 @@ module MB
         # The smoother's part of a feed (Node#smooth_output before its
         # kernel): its rate, its first value, and this block's jumps.
         def plan_smoother_feed(count)
+          follow_smoothing if @smooth_follow
           @smoother.sample_rate = @sample_rate if @smoother.sample_rate != @sample_rate
           list = plan_event_list
           @smoother.plan_start(list.first_value) if @smoother.plan_unstarted?

@@ -72,6 +72,11 @@ RSpec.describe('Tone null-test reference') do
     'skew_triangle' => 'first sample as if the tone had always run',
     'negative_amp' => 'first sample as if the tone had always run',
     'parabola_pwm' => 'first sample as if the tone had always run',
+    # 2026-10-10: noise tones keep a running phase wrapped every sample, so
+    # the output no longer depends on block sizes (last-bit differences;
+    # RMS and peak equal to 9 digits)
+    'noise_root_seed' => 'noise: block-size independent phase (last bits)',
+    'noise_seeded_blend' => 'noise: block-size independent phase (last bits)',
   }.freeze
 
   it 'has a reference for every case' do

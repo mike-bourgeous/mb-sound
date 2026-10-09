@@ -365,28 +365,20 @@ module MB
           end
 
           def expression
-            "smooth(#{@a}, #{MB::M.sigfigs(@smoother.kernel_samples, 4)} samples)"
+            kind = @smoother.adaptive? ? 'adaptive, up to ' : ''
+            "smooth(#{@a}, #{kind}#{MB::M.sigfigs(@smoother.kernel_samples, 4)} samples)"
           end
 
           def opcode = :smooth
 
-          # Notes::Smoother#process's segments between jumps.
+          # Notes::Smoother#process's segments between jumps (the fixed or
+          # adaptive kernel, by the state's length), with the Ruby mirrors.
           def run_ruby(env, count)
             x = env.fetch(@a)
             x = x[0...count] if x.length > count
             out = Numo::SFloat.zeros(count)
             st, r1, r2 = @smoother.plan_arrays
-            settle = (r1.length + r2.length - 2).to_f
-            start = 0
-            @jumps.each do |j|
-              next if j < start || j >= count
-
-              MB::Sound::Notes::Smoother.smooth_ruby(x, out, start, j, st, r1, r2) if j > start
-              st[1] = x[j]
-              st[6] = settle
-              start = j
-            end
-            MB::Sound::Notes::Smoother.smooth_ruby(x, out, start, count, st, r1, r2) if start < count
+            MB::Sound::Notes::Smoother.run(x, out, 0, count, st, r1, r2, @jumps, c: false)
             env[@dst] = out
           end
         end

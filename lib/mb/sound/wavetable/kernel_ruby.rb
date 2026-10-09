@@ -108,7 +108,11 @@ module MB
             prev_e = e
             prev_inc = inc
             primed = true
-            steps += inc unless constant
+            if rndadv != 0
+              phi = wrap(phi + inc) # noise: a running wrapped phase (block-size independent)
+            elsif !constant
+              steps += inc
+            end
           end
 
           steps = f_s * adv * count if constant

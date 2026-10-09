@@ -694,12 +694,24 @@ module MB
       end
 
       # Waits for live playback to end (or Ctrl-C), plotting with --plot.
+      #
+      # With --plot, #wait runs in a thread and the plot stops when it
+      # returns (visualize only returned on Ctrl-C before, so --plot scripts
+      # never exited); Ctrl-C during the plot still stops only the plot.
       def live
         puts 'Playing (Ctrl-C to stop)' unless @options[:quiet]
-        MB::Sound.visualize if @options[:plot]
-        MB::Sound.wait
+        if @options[:plot]
+          waiter = Thread.new { MB::Sound.wait }
+          waiter.report_on_exception = false
+          MB::Sound.visualize(stop: -> { !waiter.alive? })
+          waiter.value
+        else
+          MB::Sound.wait
+        end
       rescue Interrupt
         puts
+      ensure
+        waiter&.kill
       end
 
       # Returns the nodes in +graph+ whose sources can end while the graph

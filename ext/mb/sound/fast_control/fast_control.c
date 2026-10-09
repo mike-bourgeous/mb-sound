@@ -27,6 +27,7 @@
 #include "mb_smooth.h"
 
 #define STATE_LENGTH 7
+#define ADAPTIVE_STATE_LENGTH 8
 
 // Checks that +narray+ is a writable contiguous 1D NArray of class +klass+
 // with at least +min+ values; returns its length.
@@ -85,6 +86,30 @@ static VALUE ruby_smooth(VALUE self, VALUE x, VALUE out, VALUE from_v, VALUE to_
 	return out;
 }
 
+static VALUE ruby_adaptive(VALUE self, VALUE x, VALUE out, VALUE from_v, VALUE to_v, VALUE state)
+{
+	size_t length = check_array(x, numo_cSFloat, 0, "The input");
+	if (check_array(out, numo_cSFloat, 0, "The output") != length) {
+		rb_raise(rb_eArgError, "The output must have as many values as the input");
+	}
+	if (check_array(state, numo_cDFloat, ADAPTIVE_STATE_LENGTH, "The state") != ADAPTIVE_STATE_LENGTH) {
+		rb_raise(rb_eArgError, "The adaptive state must have %d values", ADAPTIVE_STATE_LENGTH);
+	}
+	rb_check_frozen(out);
+	rb_check_frozen(state);
+
+	long from = NUM2LONG(from_v);
+	long to = NUM2LONG(to_v);
+	if (from < 0 || to < from || (size_t)to > length) {
+		rb_raise(rb_eRangeError, "Range %ld...%ld is outside the %zu-sample buffer", from, to, length);
+	}
+
+	const float *xp = (const float *)(nary_get_pointer_for_read(x) + nary_get_offset(x));
+	mb_adaptive_run(xp, mb_sfloat_ptr(out), from, to, dfloat_ptr(state));
+
+	return out;
+}
+
 void Init_fast_control(void)
 {
 	VALUE mb = rb_define_module("MB");
@@ -92,4 +117,5 @@ void Init_fast_control(void)
 	VALUE fast_control = rb_define_module_under(sound, "FastControl");
 
 	rb_define_module_function(fast_control, "smooth", ruby_smooth, 7);
+	rb_define_module_function(fast_control, "adaptive", ruby_adaptive, 5);
 }

@@ -94,9 +94,12 @@ module MB
         end
 
         # The smoothing time of this node's output (seconds or a Length; see
-        # Notes::Smoother and Notes.control_smoothing), or nil if it steps on
-        # exact samples.
+        # Notes::Smoother and Notes.control_smoothing; a Range for adaptive
+        # smoothing; the current global default for nodes that follow it),
+        # or nil if it steps on exact samples.
         def smooth_time
+          return Notes.smoothing(nil, Notes.public_send(@smooth_follow)) if @smooth_follow
+
           @smoother&.length
         end
 
@@ -135,16 +138,38 @@ module MB
 
         private
 
-        # Smooths the output over +length+ (seconds or a Length; nil or false
-        # for none) with a Notes::Smoother.  For controller nodes (see
-        # ChannelNode).
-        def smooth_with(length)
-          @smoother = length ? Smoother.new(length, sample_rate: @sample_rate) : nil
+        # Smooths the output as the +:smooth+ option +smooth+ says (see
+        # Notes.smoothing) with a Notes::Smoother.  For controller nodes (see
+        # ChannelNode).  With nil or true, the node follows the global
+        # default named by +default+ (:control for Notes.control_smoothing,
+        # :bend for Notes.bend_smoothing; nil for no smoothing, as switches
+        # have) live: it keeps a smoother (passing its input through while
+        # the default is false) whose length follows the default.
+        def smooth_with(smooth, default)
+          if (smooth.nil? || smooth == true) && default
+            @smooth_follow = default == :bend ? :bend_smoothing : :control_smoothing
+            @smooth_generation = Notes.smoothing_generation
+            @smoother = Smoother.new(Notes.smoothing(nil, Notes.public_send(@smooth_follow)), sample_rate: @sample_rate)
+          else
+            length = Notes.smoothing(smooth, false)
+            @smoother = length ? Smoother.new(length, sample_rate: @sample_rate) : nil
+          end
+        end
+
+        # Applies a change of the global default this node follows (see
+        # #smooth_with) to its smoother.
+        def follow_smoothing
+          gen = Notes.smoothing_generation
+          return if gen == @smooth_generation
+
+          @smooth_generation = gen
+          @smoother.length = Notes.smoothing(nil, Notes.public_send(@smooth_follow))
         end
 
         # Returns the smoothed +out+ (see #smooth_with), with jumps at the
         # offsets #smooth_jump recorded.
         def smooth_output(out)
+          follow_smoothing if @smooth_follow
           @smoother.sample_rate = @sample_rate if @smoother.sample_rate != @sample_rate
           out = @smoother.process(out, out.frozen? ? out[0] : nil, @jumps)
           @jumps&.clear

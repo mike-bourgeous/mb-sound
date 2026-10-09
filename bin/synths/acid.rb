@@ -31,6 +31,7 @@
 #     bg :acid, acid_voice(line, cutoff: 0.25.bars.lfo.at(150..900), reso: 0.8)  # a knob tweak
 #     bg :acid, acid_voice(line.permute(seed: 3), filter: :lp4)                   # lp4 to compare
 #     bg :acid, acid_voice(midi)                        # a keyboard
+#     bg :acid, acid_voice(line, env_curve: 30)         # exponential MEG instead of linear (A/B: listening bench omnibus2)
 #
 # Building blocks on their own (any Notes n: clip.notes, midi, or a synth voice):
 #     n.accent                                    # 1 on accented notes, else 0
@@ -61,13 +62,13 @@ module MB::Sound
   # The 303-style patch for one Notes voice +n+ (see .acid_voice).
   def self.acid_patch(
     n, wave: :saw, cutoff: 300, reso: 0.6, env_mod: 3.0, decay: 0.6, accent: 0.8,
-    filter: :diode, drive: 1.5, glide: 0.06, sweep: true
+    filter: :diode, drive: 1.5, glide: 0.06, sweep: true, env_curve: :linear
   )
     pitch = n.hz.glide(glide, legato: true)
     osc = wave.to_sym == :square ? pitch.square : pitch.saw
 
     acc = n.accent
-    meg = n.acid_env(decay: decay)
+    meg = n.acid_env(decay: decay, curve: env_curve)
     knob = reso.respond_to?(:sample) ? 0.6 : reso.to_f
     sw = sweep ? n.accent_sweep(meg, resonance: knob) : meg * acc
 

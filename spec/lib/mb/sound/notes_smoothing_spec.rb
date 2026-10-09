@@ -102,6 +102,145 @@ RSpec.describe('MB::Sound::Notes controller smoothing', :check_shared) do
     end
   end
 
+  describe 'adaptive smoothing' do
+    # A slow 7-bit bend: 0 to 1 in 64 MSB-only steps every 31.25 ms
+    let(:slow_bend) {
+      (1..64).map { |k| ev.bend(k / 64.0, time: Rational(k * 3125, 100_000) + 0.01r) }
+    }
+
+    it 'matches its Ruby mirror in any buffer sizes, with jumps' do
+      x = Numo::SFloat.zeros(30000)
+      t = 50
+      v = 0.0
+      while t < 30000
+        x[t..] = v
+        t += [7, 240, 1500, 3, 9000, 480].sample(random: Random.new(t))
+        v = (v * 7 + 0.37) % 1.3 - 0.4
+      end
+
+      runs = [true, false].map { |c|
+        s = MB::Sound::Notes::Smoother.new(5.ms..100.ms, sample_rate: 48000)
+        expect(s).to be_adaptive
+        expect(s.kernel_samples).to eq(4800)
+        out = []
+        pos = 0
+        [128, 300, 64, 1000, 1].cycle do |n|
+          break if pos >= x.length
+          b = x[pos...[pos + n, x.length].min].dup
+          s.send(:settle_at, b[0]) unless s.plan_arrays[0]
+          o = Numo::SFloat.zeros(b.length)
+          jumps = pos == 12800 ? [5] : nil
+          MB::Sound::Notes::Smoother.run(b, o, 0, b.length, s.plan_arrays[0], s.plan_arrays[1], s.plan_arrays[2], jumps, c: c)
+          out << o
+          pos += n
+        end
+        out.reduce(:concatenate)
+      }
+      expect(runs[0].to_a).to eq(runs[1].to_a)
+      expect(runs[0][12805]).to eq(x[12805])
+    end
+
+    it 'turns a slow 7-bit bend staircase into a line' do
+      fixed = read(notes_for(*slow_bend).bend, 120_000)
+      adaptive = read(notes_for(*slow_bend).bend(smooth: :adaptive), 120_000)
+      expect(notes_for.bend(smooth: :adaptive).smooth_time).to eq(MB::Sound::Notes::ADAPTIVE_SMOOTHING)
+
+      # Between the second and the last step: a constant slope (each ramp
+      # ends as the next step arrives), where the 5 ms default holds flat
+      # for about 26 ms of every 31 ms step
+      mid = 6000...96000
+      slope = 1 / 64.0 / 1500
+      d_adaptive = Numo::DFloat.cast(adaptive[mid]).diff
+      d_fixed = Numo::DFloat.cast(fixed[mid]).diff
+      expect((d_adaptive - slope).abs.max).to be < 1e-6
+      expect(d_fixed.eq(0).count).to be > 0.7 * d_fixed.length
+
+      # Lags one step interval, ends exactly at the last value
+      expect(adaptive[-1]).to eq(1.0)
+      expect((adaptive[50000] - fixed[50000 - 1500]).abs).to be < 0.02
+    end
+
+    it 'glides an isolated step over the maximum and fast steps over the minimum' do
+      events = [ev.cc_raw(1, 64, time: 0.5r)] + (1..20).map { |k| ev.cc_raw(1, 64 + k, time: 1.0r + Rational(k, 1000)) }
+      out = read(notes_for(*events).mod(smooth: 5.ms..50.ms), 60000)
+      done = (24000...48000).find { |i| out[i] == (64 / 127.0).to_f.then { |f| Numo::SFloat[f][0] } }
+      expect(done).to eq(24000 + 2399)
+
+      # 1 ms steps glide over 5 ms: the output trails the input by about
+      # 240 samples at the end of the run
+      expect(out[48000 + 20 * 48 + 240]).to eq(Numo::SFloat[84 / 127.0][0])
+      expect(out[48000 + 20 * 48 + 100]).to be < 84 / 127.0
+    end
+
+    it 'takes :adaptive and Ranges of times, and refuses bad Ranges' do
+      v = notes_for
+      expect(v.cc(1, smooth: :adaptive).smooth_time).to eq(0.005..0.2)
+      expect(v.cc(1, smooth: 2.ms..50.ms).smooth_time).to eq(2.ms..50.ms)
+      expect { v.cc(2, smooth: 0.1..0.01) }.to raise_error(ArgumentError, /Smoothing/)
+      expect { v.cc(2, smooth: 0..0.01) }.to raise_error(ArgumentError, /Smoothing/)
+      expect { MB::Sound::Notes.control_smoothing = :slow }.to raise_error(ArgumentError, /Smoothing/)
+    end
+  end
+
+  describe 'live global defaults' do
+    it 'changes nodes made with the default from their next buffer; explicit ones keep theirs' do
+      events = [ev.cc_raw(1, 127, time: 0.01r), ev.cc_raw(1, 0, time: 0.2r), ev.cc_raw(1, 127, time: 0.4r), ev.cc_raw(1, 0, time: 0.6r)]
+      v = notes_for(*events)
+      default = v.mod
+      own = v.mod(smooth: 10.ms)
+      a = read(default, 4800)
+      b = read(own, 4800)
+      expect(a.to_a).to eq(b.to_a)
+
+      # Longer: the default node's step at 0.2 s now takes 50 ms
+      MB::Sound::Notes.control_smoothing = 50.ms
+      expect(default.smooth_time).to eq(50.ms)
+      expect(own.smooth_time).to eq(10.ms)
+      a = read(default, 14400)
+      b = read(own, 14400)
+      expect(b[(9600 - 4800 + 480)..].to_a.uniq).to eq([0.0])
+      expect(a[9600 - 4800 + 1000]).to be > 0.5
+      expect(a[(9600 - 4800 + 2400)..].to_a.uniq).to eq([0.0])
+
+      # Off: exact steps
+      MB::Sound::Notes.control_smoothing = false
+      expect(default.smooth_time).to be_nil
+      a = read(default, 9600)
+      expect(a[(19200 - 19200)...(19200 - 19200 + 1)].to_a).to eq([1.0]) # 0.4 s: step on the sample
+      expect(a[0..].to_a.uniq).to eq([1.0])
+
+      # And adaptive
+      MB::Sound::Notes.control_smoothing = :adaptive
+      a = read(default, 9600)
+      expect(a[(28800 - 28800 + 10)]).to be_between(0.5, 1.0)
+    end
+
+    it 'glides on from the current output when the default changes mid-glide' do
+      v = notes_for(ev.cc_raw(1, 127, time: 0.01r))
+      node = v.mod
+      first = read(node, 480 + 200).dup
+      MB::Sound::Notes.control_smoothing = 100.ms
+      rest = read(node, 4000)
+      expect(first[-1]).to be_between(0.2, 0.8)
+      expect(rest[0]).to be_within(0.01).of(first[-1])
+      expect(Numo::DFloat.cast(rest).diff.abs.max).to be < 0.01 # no jump
+      expect(rest[-1]).to be < 1.0 # still gliding over 100 ms
+
+      MB::Sound::Notes.control_smoothing = false
+      expect(read(node, 1).to_a).to eq([1.0]) # off: the input at once
+    end
+
+    it 'follows bend_smoothing in #freq' do
+      v = notes_for(ev.note_on(69, 1, time: 0r), ev.bend(1.0, time: 0.1r))
+      f = v.freq
+      read(f, 2400)
+      MB::Sound::Notes.bend_smoothing = false
+      out = read(f, 4800)
+      expect(out[4800 - 2400 - 1]).to be_within(0.01).of(440)
+      expect(out[4800 - 2400]).to be_within(0.01).of(493.883)
+    end
+  end
+
   describe 'defaults and options' do
     it 'smooths controllers, pressure, and poly pressure over 10 ms and bend over 5 ms' do
       v = notes_for

@@ -7,9 +7,10 @@ module MB
       # the value to its default where MIDI RP-15 says so (see #reset?).
       #
       # The output is smoothed (Notes::Smoother) over +:smooth+ (seconds or
-      # a Length; nil or true for the default, Notes.control_smoothing or
-      # Notes.bend_smoothing; false or 0 for exact steps on the event
-      # samples), so controller steps don't zipper.
+      # a Length; :adaptive or a Range for adaptive smoothing; nil or true
+      # for the default, Notes.control_smoothing or Notes.bend_smoothing,
+      # followed live when it changes; false or 0 for exact steps on the
+      # event samples), so controller steps don't zipper.
       class ChannelNode < Node::Held
         # The current value.
         def value
@@ -52,7 +53,7 @@ module MB
 
         def initialize(stream, range: nil, sample_rate: 48000, smooth: nil)
           super(stream, sample_rate: sample_rate)
-          smooth_with(Notes.smoothing(smooth, Notes.bend_smoothing))
+          smooth_with(smooth, :bend)
           raise ArgumentError, "Bend range must be nil, :stream, or semitones (got #{range.inspect})" unless range.nil? || range == :stream || range.is_a?(Numeric)
 
           @range = range
@@ -118,7 +119,7 @@ module MB
         def initialize(stream, spec, sample_rate: 48000, smooth: nil)
           super(stream, sample_rate: sample_rate)
           @spec = spec
-          smooth_with(Notes.smoothing(smooth, spec.curve == :switch ? false : Notes.control_smoothing))
+          smooth_with(smooth, spec.curve == :switch ? nil : :control)
           @value = spec.default_value
           @node_type_name = "Notes CC #{spec.number} #{spec.name}"
         end
@@ -157,7 +158,7 @@ module MB
       class Pressure < ChannelNode
         def initialize(stream, sample_rate: 48000, smooth: nil)
           super(stream, sample_rate: sample_rate)
-          smooth_with(Notes.smoothing(smooth, Notes.control_smoothing))
+          smooth_with(smooth, :control)
           @pressure = 0.0
           @node_type_name = 'Notes Pressure'
         end
