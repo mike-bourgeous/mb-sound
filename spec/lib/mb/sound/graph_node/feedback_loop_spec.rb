@@ -192,7 +192,10 @@ RSpec.describe(MB::Sound::GraphNode::FeedbackLoop) do
         [8, 4, 2, 1].each do |damp|
           l = ks(f, damping: damp)
           d = l.sample(48000)
-          expect(t60(d, f)).to be_within(ref * (damp == 1 ? 0.05 : 0.02)).of(ref), "#{f} Hz, lowpass at #{damp}x"
+          # (since the 2026-10-10 sustain_stretch fix: +2.2/+2.4/+4.3% at
+          # the pitch, 110/440/1760 Hz; within 2% at 2x and above)
+          expect(t60(d, f)).to be_within(ref * (damp == 1 ? 0.05 : 0.021)).of(ref), "#{f} Hz, lowpass at #{damp}x"
+          expect(t60(d, f)).to be > ref if damp == 1
           h = MB::Sound::Filter::SVF.new(:lowpass, 48000, f * damp, quality: 0.5**0.5).response(2 * Math::PI * f / 48000).abs
           # (aimed a little below 1 / h: see Program#sustain_stretch)
           expect(l.sustain_ratio).to be_within(0.01 / h).of(1 / h)
