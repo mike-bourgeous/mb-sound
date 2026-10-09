@@ -58,6 +58,8 @@
 #include "mb_svf.h"
 #include "mb_delay_interp.h"
 
+#include "loop_pitch.h"
+
 // Computed goto where the compiler has labels as values (GCC, clang), unless
 // built with -DMB_LOOP_SWITCH (for comparisons)
 #if defined(__GNUC__) && !defined(MB_LOOP_SWITCH)
@@ -774,4 +776,6 @@ void Init_fast_loop(void)
 
 	rb_define_module_function(fast_loop, "run", ruby_run, 8);
 	rb_define_module_function(fast_loop, "constants", ruby_constants, 0);
+
+	mb_loop_pitch_init(fast_loop);
 }

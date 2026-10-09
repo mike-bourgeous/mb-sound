@@ -674,7 +674,17 @@ module MB
           # previous point's values over the next PITCH_STEP samples; Floats
           # while they hold still (exactly the values at the pitch), DFloats
           # per sample while they ramp.  +count+ is the block's length.
+          #
+          # Runs in C (FastLoop.pitch_track, see loop_pitch.rb) unless the
+          # plan engine is :ruby; #pitch_track_ruby is its exact mirror.
           def pitch_track(values, count)
+            return pitch_track_ruby(values, count) if Plan.engine == :ruby
+
+            pitch_track_c(values, count)
+          end
+
+          # The Ruby version of #pitch_track (the mirror of the C kernel).
+          def pitch_track_ruby(values, count)
             return [0.0, 1.0, 0.0] unless @pitch_ring
 
             pos = @pitch_pos || 0
@@ -922,6 +932,14 @@ module MB
           def sustain_stretch(list, params, at, i, w, t, oa, ob, g1, g2, rr, ri, hr, hi, dcp, negative)
             rate = @sustain[:filter].sample_rate.to_f
             fc = sustain_cutoff(t)
+            # NOTE: the lambda assigns this method's rr, ri, hr, and hi (Ruby
+            # closures share locals), so after the two calls below rr, ri are
+            # the response at w - h with the shelf and history, and hr, hi the
+            # shelf at w - h, which then apply once more.  The sustain T60s
+            # were tuned with this; FastLoop.pitch_track mirrors it exactly.
+            # Open question (2026-10-10): with block-local names the T60 at a
+            # lowpass on the pitch is +2.2% (110 Hz) / +1.7% (440 Hz) longer
+            # than without the filter, against +0.4% / 0% now.
             resp = ->(wx) {
               rr, ri = loop_response(list, params, at, i, wx, oa, ob, true)
               lr, li = svf_response(0, fc, SUSTAIN_SHELF_Q, 1.0, rate, wx)

@@ -46,20 +46,14 @@ static inline void mb_svf_init(struct mb_svf *s)
 	s->a2 = s->a3 = s->m0 = s->m1 = s->m2 = 0;
 }
 
-// Updates the coefficients of +s+ for filter +type+ if the cutoff +fc+
-// (Hz), quality +q+, or linear gain +G+ changed (clamped as in
-// FastFilter.svf; +pi_over_rate+ is pi / sample rate, +fc_max+ the
-// highest cutoff).
-static inline void mb_svf_coefficients(struct mb_svf *s, int type, double fc, double q, double G, double pi_over_rate, double fc_max)
+// The design of filter +type+ for cutoff +fc+ (Hz), quality +q+, and
+// linear gain +G+, clamped as in FastFilter.svf (+pi_over_rate+ is pi /
+// sample rate, +fc_max+ the highest cutoff): the prewarped integrator gain
+// *gp, damping *kp, and output mix m[0..2] (Filter::SVF.coefficients'
+// g, k, m0, m1, m2; also used by the loops' pitch tracking for the
+// filter's response, FastLoop.pitch_track).
+static inline void mb_svf_design(int type, double fc, double q, double G, double pi_over_rate, double fc_max, double *gp, double *kp, double *m)
 {
-	if (fc == s->last_fc && q == s->last_q && G == s->last_g) {
-		return;
-	}
-
-	s->last_fc = fc;
-	s->last_q = q;
-	s->last_g = G;
-
 	if (!(fc >= SVF_MIN_CUTOFF)) {
 		fc = SVF_MIN_CUTOFF;
 	} else if (fc > fc_max) {
@@ -113,9 +107,33 @@ static inline void mb_svf_coefficients(struct mb_svf *s, int type, double fc, do
 			break;
 	}
 
-	s->m0 = m0;
-	s->m1 = m1;
-	s->m2 = m2;
+	*gp = g;
+	*kp = k;
+	m[0] = m0;
+	m[1] = m1;
+	m[2] = m2;
+}
+
+// Updates the coefficients of +s+ for filter +type+ if the cutoff +fc+
+// (Hz), quality +q+, or linear gain +G+ changed (clamped as in
+// FastFilter.svf; +pi_over_rate+ is pi / sample rate, +fc_max+ the
+// highest cutoff).
+static inline void mb_svf_coefficients(struct mb_svf *s, int type, double fc, double q, double G, double pi_over_rate, double fc_max)
+{
+	if (fc == s->last_fc && q == s->last_q && G == s->last_g) {
+		return;
+	}
+
+	s->last_fc = fc;
+	s->last_q = q;
+	s->last_g = G;
+
+	double g, k, m[3];
+	mb_svf_design(type, fc, q, G, pi_over_rate, fc_max, &g, &k, m);
+
+	s->m0 = m[0];
+	s->m1 = m[1];
+	s->m2 = m[2];
 	s->a1 = 1.0 / (1.0 + g * (g + k));
 	s->a2 = g * s->a1;
 	s->a3 = g * s->a2;
