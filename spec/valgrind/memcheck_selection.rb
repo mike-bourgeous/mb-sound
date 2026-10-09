@@ -13,6 +13,7 @@
 #   extension defines (`FastSynth`, word match; the whole file when it is
 #   new or deleted) -> that extension
 # - a changed spec in SPECS -> that spec
+# - ALWAYS (the graph sweep) joins every selection that runs anything
 # - FULL_TRIGGERS, a changed Rakefile memcheck section, ruby_memcheck in
 #   Gemfile.lock, a new extension, or more than FULL_FRACTION of the
 #   extensions -> the full list
@@ -77,7 +78,14 @@ module MemcheckSelection
     'spec/lib/mb/sound/plan/*_spec.rb',              # FastPlan.run through planned regions (tones, resets, fallbacks, events, envelopes, smoothing)
     'spec/lib/mb/sound/notes_fast_paths_spec.rb',    # FastPlan.run through Synth lanes' plans (envelopes, events, skipped lanes)
     'spec/lib/mb/sound/graph_node/feedback_loop_spec.rb', # FastLoop.run (plan/loop_spec.rb runs with the plan specs)
+
+    # Every node and filter type, planned and unplanned (memcheck light)
+    'spec/lib/mb/sound/graph_sweep_spec.rb',
   ].freeze
+
+  # Specs every selective run includes (when it runs anything): the graph
+  # sweep reaches combinations of C paths the per-extension specs don't.
+  ALWAYS = ['spec/lib/mb/sound/graph_sweep_spec.rb'].freeze
 
   MAP_PATH = 'spec/valgrind/memcheck_map.json'
   INCLUDE_DIR = 'ext/mb/sound/include'
@@ -386,7 +394,11 @@ module MemcheckSelection
     specs = full ? list : list.select { |s|
       changed_specs.include?(s) || unmapped.include?(s) || (mapped[s] & exts.keys).any?
     }
-    specs = [] if !full && exts.empty? && changed_specs.empty?
+    if !full && exts.empty? && changed_specs.empty?
+      specs = []
+    elsif !full
+      specs = (specs | (ALWAYS & list)).sort
+    end
 
     Selection.new(
       base: base, to: to, files: files, full: full, full_reasons: full_reasons.uniq,
@@ -409,7 +421,7 @@ module MemcheckSelection
       io.puts 'No extension changes: nothing to check'
     else
       io.puts "Selected #{sel.specs.length} of #{spec_files.length} spec files:"
-      sel.specs.each { |s| io.puts "  #{s}#{sel.unmapped_specs.include?(s) ? ' (not in the map yet)' : ''}" }
+      sel.specs.each { |s| io.puts "  #{s}#{sel.unmapped_specs.include?(s) ? ' (not in the map yet)' : ALWAYS.include?(s) ? ' (always)' : ''}" }
     end
   end
 

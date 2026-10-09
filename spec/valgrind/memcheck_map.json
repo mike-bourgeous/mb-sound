@@ -541,6 +541,88 @@
         "FastWavetable.oscillate"
       ]
     },
+    "spec/lib/mb/sound/graph_sweep_spec.rb": {
+      "fast_arithmetic": [
+        "FastArithmetic.circular_read",
+        "FastArithmetic.circular_write",
+        "FastArithmetic.complex_part",
+        "FastArithmetic.copy",
+        "FastArithmetic.divide",
+        "FastArithmetic.min_max",
+        "FastArithmetic.mix",
+        "FastArithmetic.pan",
+        "FastArithmetic.power",
+        "FastArithmetic.product",
+        "FastArithmetic.scale",
+        "FastArithmetic.wet_dry"
+      ],
+      "fast_clip": [
+        "FastClip.shape",
+        "FastClip.shape_curve"
+      ],
+      "fast_control": [
+        "FastControl.smooth"
+      ],
+      "fast_delay": [
+        "FastDelay.feedback",
+        "FastDelay.read"
+      ],
+      "fast_envelope": [
+        "FastEnvelope.process"
+      ],
+      "fast_filter": [
+        "FastFilter.diode_ladder",
+        "FastFilter.four_pole",
+        "FastFilter.svf"
+      ],
+      "fast_loop": [
+        "FastLoop.run"
+      ],
+      "fast_loudness": [
+        "FastLoudness.true_peak"
+      ],
+      "fast_plan": [
+        "FastPlan.run"
+      ],
+      "fast_resample": [
+        "FastResample#initialize",
+        "FastResample#lookup_converter",
+        "FastResample#read",
+        "FastResample#setup_converter_type"
+      ],
+      "fast_resonator": [
+        "FastResonator.ping"
+      ],
+      "fast_sound": [
+        "FastSound.biquad_narray",
+        "FastSound.cookbook",
+        "FastSound.dynamic_biquad",
+        "FastSound.matrix_mix",
+        "FastSound.narray_log",
+        "FastSound.narray_log2",
+        "FastSound.number_to_freq",
+        "FastSound.oscillate",
+        "FastSound.phasor",
+        "FastSound.smoothstep"
+      ],
+      "fast_synth": [
+        "FastSynth.feedback_sine",
+        "FastSynth.oscillate_bl",
+        "FastSynth.oscillate_sync"
+      ],
+      "fast_unison": [
+        "FastUnison.exact",
+        "FastUnison.scale"
+      ],
+      "fast_wavetable": [
+        "FastWavetable.half_means",
+        "FastWavetable.harmonic_spectra",
+        "FastWavetable.lookup",
+        "FastWavetable.oscillate",
+        "FastWavetable.play",
+        "FastWavetable.sync"
+      ]
+    },
     "spec/lib/mb/sound/jack_spec.rb": {
       "fast_audio": [
         "FastAudio.jack_close",

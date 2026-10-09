@@ -83,6 +83,11 @@ RSpec.describe(MemcheckSelection) do
       expect(sel.specs).not_to include('spec/ext/mb/sound/fast_audio_spec.rb')
     end
 
+    it 'includes the ALWAYS specs in every selection that runs' do
+      expect(select('ext/mb/sound/fast_loudness/fast_loudness.c').specs).to include(*MemcheckSelection::ALWAYS)
+      expect(MemcheckSelection.spec_files).to include(*MemcheckSelection::ALWAYS)
+    end
+
     it 'selects the users of a shared header' do
       sel = select('ext/mb/sound/include/mb_svf.h')
       expect(sel.extensions.keys).to eq(['fast_filter', 'fast_loop'])
@@ -117,7 +122,7 @@ RSpec.describe(MemcheckSelection) do
     it 'selects a changed memcheck spec by itself' do
       sel = select('spec/lib/mb/sound/curve_spec.rb')
       expect(sel.extensions).to be_empty
-      expect(sel.specs).to eq(['spec/lib/mb/sound/curve_spec.rb'])
+      expect(sel.specs).to eq(['spec/lib/mb/sound/curve_spec.rb', *MemcheckSelection::ALWAYS].sort)
     end
 
     it 'selects nothing for unrelated files' do
