@@ -12,6 +12,7 @@
 
 #include "mb_ext_helpers.h"
 #include "mb_svf.h"
+#include "mb_four_pole.h"
 
 #include "plan_filters.h"
 
@@ -20,7 +21,7 @@
 #define PF_FLUSH 1e-30
 #define PF_MAX_CUTOFF_RATIO 0.49
 
-static ID id_sample_rate, id_type_id, id_cutoff, id_quality, id_gain, id_state;
+static ID id_sample_rate, id_type_id, id_cutoff, id_quality, id_gain, id_state, id_resonance;
 
 static void pf_ids(void)
 {
@@ -31,6 +32,7 @@ static void pf_ids(void)
 		id_quality = rb_intern("@quality");
 		id_gain = rb_intern("@gain");
 		id_state = rb_intern("@state");
+		id_resonance = rb_intern("@resonance");
 	}
 }
 
@@ -82,6 +84,62 @@ void mb_plan_svf(float *d, const float *a, const struct mb_plan_param *fc, const
 		if (remember_gain) {
 			rb_ivar_set(filter, id_gain, rb_float_new(mb_plan_param_at(g, n - 1)));
 		}
+	}
+
+	RB_GC_GUARD(state);
+	RB_GC_GUARD(obj);
+}
+
+void mb_plan_four_pole(float *d, const float *a, const struct mb_plan_param *fc, const struct mb_plan_param *res,
+		const double *cfg, VALUE obj, size_t n)
+{
+	pf_ids();
+	VALUE filter = obj;
+	VALUE state = rb_ivar_get(filter, id_state); // (read each block: FourPole#reset replaces it)
+	Check_Type(state, T_ARRAY);
+	if (RARRAY_LEN(state) != 4) {
+		rb_raise(rb_eArgError, "Four-pole state must have four elements");
+	}
+	double rate = NUM2DBL(rb_ivar_get(filter, id_sample_rate));
+	if (!(rate > 0) || !isfinite(rate)) {
+		rb_raise(rb_eArgError, "Sample rate must be positive and finite");
+	}
+
+	struct mb_fp_args args = {
+		.rate = rate, .k_max = cfg[0], .comp = cfg[1], .drive = cfg[2],
+		.mix = { cfg[3], cfg[4], cfg[5], cfg[6], cfg[7] },
+		.curve = (int)cfg[8], .drive_mode = (int)cfg[9], .clip = (int)cfg[10], .normalize = (int)cfg[11],
+	};
+	_Bool diode = cfg[12] != 0;
+	if (!isfinite(args.k_max) || !isfinite(args.comp) || !(args.drive >= 0) || !isfinite(args.drive) ||
+			args.curve < FP_CURVE_LINEAR || args.curve > FP_CURVE_SELF_OSC_DB ||
+			args.drive_mode < FP_DRIVE_INPUT || args.drive_mode > FP_DRIVE_FEEDBACK || (diode && args.drive_mode == FP_DRIVE_STAGES) ||
+			args.clip < FP_CLIP_SOFT || args.clip > FP_CLIP_HARD) {
+		rb_raise(rb_eArgError, "Bad plan four-pole settings");
+	}
+
+	struct mb_signal fc_sig = { .scalar = fc->scalar, .ptr = fc->p, .step = 1 };
+	struct mb_signal res_sig = { .scalar = res->scalar, .ptr = res->p, .step = 1 };
+	double st[4];
+	for (int j = 0; j < 4; j++) {
+		st[j] = mb_finite_entry(state, j);
+	}
+
+	if (diode) {
+		mb_diode_ladder_run(&args, a, d, n, &fc_sig, &res_sig, st);
+	} else {
+		mb_four_pole_run(&args, a, d, n, &fc_sig, &res_sig, st);
+	}
+
+	mb_fp_flush(st);
+	for (int j = 0; j < 4; j++) {
+		rb_ary_store(state, j, rb_float_new(st[j]));
+	}
+
+	// FourPole#remember
+	if (n > 0) {
+		rb_ivar_set(filter, id_cutoff, rb_float_new(mb_plan_param_at(fc, n - 1)));
+		rb_ivar_set(filter, id_resonance, rb_float_new(mb_plan_param_at(res, n - 1)));
 	}
 
 	RB_GC_GUARD(state);

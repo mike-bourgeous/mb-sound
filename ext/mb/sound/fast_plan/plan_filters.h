@@ -27,4 +27,13 @@ static inline double mb_plan_param_at(const struct mb_plan_param *s, size_t i)
 void mb_plan_svf(float *d, const float *a, const struct mb_plan_param *fc, const struct mb_plan_param *q,
 		const struct mb_plan_param *g, _Bool remember_gain, VALUE obj, size_t n);
 
+// OP_FOUR_POLE: GraphNode::FourPole (Filter::FourPole#dynamic_process:
+// FastFilter.four_pole or .diode_ladder through mb_four_pole.h) on +a+ into
+// +d+; +cfg+ is [k_max, compensation, drive, mix (5), curve, drive mode,
+// clip, normalize, diode]; +obj+ the Filter::FourPole (its @state and
+// @sample_rate read each block, @cutoff and @resonance set to the last
+// values as #remember does).
+void mb_plan_four_pole(float *d, const float *a, const struct mb_plan_param *fc, const struct mb_plan_param *res,
+		const double *cfg, VALUE obj, size_t n);
+
 #endif

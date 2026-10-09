@@ -62,4 +62,51 @@ RSpec.describe(MB::Sound::Plan, 'filter ops') do
       expect(MB::Sound::Plan.explain(g)).to include('a Filter::FirstOrder filter')
     end
   end
+
+  describe 'four-pole (GraphNode::FourPole)' do
+    fp = MB::Sound::Filter::FourPole
+
+    fp::MODES.each_key do |mode|
+      it "matches #{mode} with moving cutoff and resonance" do
+        r = plan_compare(check: :raise) {
+          (src.new(seed: 1) * 0.8).lp4(src.new(seed: 2, scale: 1500, offset: 2000), resonance: src.new(seed: 3, scale: 0.5, offset: 0.5), mode: mode) * 1
+        }
+        expect(op_names(r)).to include(:FourPole)
+      end
+
+      it "matches #{mode} self-oscillating" do
+        plan_compare(check: :raise) {
+          (src.new(seed: 4) * 0.1).lp4(src.new(seed: 5, scale: 400, offset: 900), resonance: src.new(seed: 6, scale: 0.1, offset: 0.92), mode: mode, self_oscillate: true) * 1
+        }
+      end
+    end
+
+    fp::MODES.keys.product(fp::DRIVE_MODES.keys, fp::CLIPS.keys).each do |mode, drive_mode, clip|
+      next if mode == :diode && drive_mode == :stages
+      next if clip != :soft && drive_mode != :feedback
+
+      it "matches #{mode} with drive_mode #{drive_mode}, clip #{clip}" do
+        plan_compare(check: :raise) {
+          (src.new(seed: 7) * 2).lp4(src.new(seed: 8, scale: 1000, offset: 1500), resonance: 0.8, mode: mode, drive: 2.5, drive_mode: drive_mode, clip: clip) * 1
+        }
+      end
+    end
+
+    it 'matches constant parameters, the linear curve, a quality node, and an unnormalized diode ladder' do
+      r = plan_compare(check: :raise) {
+        s = src.new(seed: 9) * 1
+        s.lp4(700, resonance: 0.5, resonance_curve: :linear) + s.lp4(1200, quality: src.new(seed: 10, scale: 2, offset: 3)) +
+          s.lp4(900, resonance: 0.6, mode: :diode, normalize: false)
+      }
+      expect(op_names(r).count(:FourPole)).to eq(3)
+    end
+
+    it 'follows a reset between blocks and keeps the last parameter values for an ending input' do
+      plan_compare(check: :raise) { |c|
+        g = (src.new(seed: 11) * 1).lp4(src.new(seed: 12, scale: 500, offset: 1000, ends_at: 2000), resonance: 0.7)
+        c.before_block(6) { g.reset(0.2) }
+        g * 1
+      }
+    end
+  end
 end

@@ -88,6 +88,50 @@ module MB
 
         # Sets the filter state as if +value+ had been the input for a long
         # time (see MB::Sound::Filter::FourPole#reset).
+        include Plan::Describable
+
+        # Plan layer (see Plan::Describable and Plan::Op::FourPole): the
+        # filter as one op, its cutoff and resonance numbers or Values.  Node
+        # parameters outside the region are optional boundary inputs: when
+        # one ends, the block replays unfused (#read keeps its last value)
+        # and it is that number from the next plan on, as for envelopes.
+        def plan_describe(p)
+          a = p[@source]
+          a = a.real if a.complex?
+          p.four_pole(@filter, a, cutoff: plan_param(p, :cutoff, @cutoff), resonance: plan_param(p, :resonance, @resonance))
+        end
+
+        def plan_inputs
+          [@source, @cutoff, @resonance].select { |v| v.respond_to?(:sample) }
+        end
+
+        # Called by a region when the optional boundary input +source+ (a
+        # cutoff or resonance node) ended: the block replays unfused, and
+        # the parameter is its last value from the next plan on.
+        def plan_input_ended(source)
+          (@plan_ended ||= {}.compare_by_identity)[source] = true
+          Plan.changed(self)
+          :replay
+        end
+
+        # True: short parameter buffers are padded with their last value
+        # (see #read), so a block with one runs unfused.
+        def plan_pads_inputs?
+          true
+        end
+
+        def plan_snapshot
+          [@filter.instance_variable_get(:@state).dup, @filter.cutoff, @filter.resonance, @last.dup]
+        end
+
+        def plan_restore(snapshot)
+          state, cutoff, resonance, last = snapshot
+          @filter.instance_variable_get(:@state).replace(state)
+          @filter.instance_variable_set(:@cutoff, cutoff)
+          @filter.instance_variable_set(:@resonance, resonance)
+          @last.replace(last)
+        end
+
         def reset(value = 0)
           @filter.reset(value)
           self
@@ -106,6 +150,20 @@ module MB
         end
 
         private
+
+        # A parameter as a number or a Value (its real part), keeping its
+        # last sample in @last as #read does (see #plan_describe).
+        def plan_param(p, key, value)
+          return value if value.is_a?(Numeric)
+
+          node = Plan.origin(value)
+          return @last.fetch(key) { key == :cutoff ? @filter.cutoff : @filter.resonance } if @plan_ended&.key?(node)
+
+          v = p.optional(value)
+          v = v.real if v.complex?
+          p.keep_last(v, @last, key)
+          v
+        end
 
         # A parameter's value for this buffer: a number, or the node's
         # buffer fitted to +count+ (padded with its last value; a node that

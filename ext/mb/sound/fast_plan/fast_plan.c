@@ -83,6 +83,7 @@ enum {
 	OP_MAX,       // dst, a, b                   dst = Numo::SFloat.maximum(a, b) (real)
 	OP_POWF,      // dst, a, b                   dst = a ** b by mb_vec_pow (Plan.precision :fast, a Constant base)
 	OP_SVF,       // dst, a, fc, q, g, object, sc  dst = Filter::SVF on a (plan_filters.c); fc/q/g registers or -1 (scalars sc[0..2]); sc[3]: remember the gain; object: the Filter::SVF
+	OP_FOUR_POLE, // dst, a, fc, res, object, sc   dst = GraphNode::FourPole on a (plan_filters.c); fc/res registers or -1 (scalars sc[13], sc[14]); sc[0..12] settings; object: the Filter::FourPole
 };
 
 // Event list modes and entry kinds (Plan::EventList)
@@ -951,6 +952,9 @@ static VALUE ruby_run(VALUE self, VALUE words, VALUE scalars, VALUE objects, VAL
 			case OP_SVF:
 				len = 8;
 				break;
+			case OP_FOUR_POLE:
+				len = 7;
+				break;
 			case OP_ENVELOPE:
 				if (pc + 5 > nwords || op[4] < 2 || op[4] > ENV_MAX_SEGMENTS) rb_raise(rb_eArgError, "Bad plan envelope at word %zu", pc);
 				len = 5 + 4 * (size_t)op[4] + 7;
@@ -1039,6 +1043,21 @@ static VALUE ruby_run(VALUE self, VALUE words, VALUE scalars, VALUE objects, VAL
 					prm[k].scalar = sc[op[7] + k];
 				}
 				mb_plan_svf(ptrs[d], ptrs[op[2]], &prm[0], &prm[1], &prm[2], sc[op[7] + 3] != 0, rb_ary_entry(objects, op[6]), n);
+				break;
+			}
+
+			case OP_FOUR_POLE: {
+				if (cplx[d] || cplx[op[2]]) rb_raise(rb_eArgError, "Plan four-pole filters are real");
+				if (op[5] < 0 || op[5] >= RARRAY_LEN(objects)) rb_raise(rb_eArgError, "Bad plan four-pole object at word %zu", pc);
+				if (op[6] < 0 || (size_t)op[6] + 15 > nscalars) rb_raise(rb_eArgError, "Bad plan four-pole scalars at word %zu", pc);
+				struct mb_plan_param prm[2];
+				for (int k = 0; k < 2; k++) {
+					int r = op[3 + k];
+					if (r >= nregs || (r >= 0 && (cplx[r] || !ptrs[r]))) rb_raise(rb_eArgError, "Bad plan four-pole parameter register at word %zu", pc);
+					prm[k].p = r >= 0 ? ptrs[r] : NULL;
+					prm[k].scalar = sc[op[6] + 13 + k];
+				}
+				mb_plan_four_pole(ptrs[d], ptrs[op[2]], &prm[0], &prm[1], sc + op[6], rb_ary_entry(objects, op[5]), n);
 				break;
 			}
 
@@ -1184,6 +1203,7 @@ static VALUE ruby_enums(VALUE self)
 	rb_hash_aset(h, ID2SYM(rb_intern("max")), INT2NUM(OP_MAX));
 	rb_hash_aset(h, ID2SYM(rb_intern("powf")), INT2NUM(OP_POWF));
 	rb_hash_aset(h, ID2SYM(rb_intern("svf")), INT2NUM(OP_SVF));
+	rb_hash_aset(h, ID2SYM(rb_intern("four_pole")), INT2NUM(OP_FOUR_POLE));
 	rb_hash_aset(h, ID2SYM(rb_intern("ev_ramp")), INT2NUM(EV_RAMP));
 	rb_hash_aset(h, ID2SYM(rb_intern("events_held")), INT2NUM(EVENTS_HELD));
 	rb_hash_aset(h, ID2SYM(rb_intern("events_impulses")), INT2NUM(EVENTS_IMPULSES));
