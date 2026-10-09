@@ -85,6 +85,9 @@ enum {
 	OP_SVF,       // dst, a, fc, q, g, object, sc  dst = Filter::SVF on a (plan_filters.c); fc/q/g registers or -1 (scalars sc[0..2]); sc[3]: remember the gain; object: the Filter::SVF
 	OP_FOUR_POLE, // dst, a, fc, res, object, sc   dst = GraphNode::FourPole on a (plan_filters.c); fc/res registers or -1 (scalars sc[13], sc[14]); sc[0..12] settings; object: the Filter::FourPole
 	OP_BIQUAD,    // dst, a, cut, q, object, type  dst = Filter::Cookbook (structure: :biquad) on a (plan_biquad.c); cut/q registers; object: the Filter::Cookbook
+	OP_CLIP,      // dst, a, sc                  dst = Numo clip of a to (float)sc[0]..(float)sc[1] (NaN stays NaN)
+	OP_EXP,       // dst, a, 0                   dst = (float)exp((double)a) (Numo::NMath.exp on an SFloat)
+	OP_TIME_SCALE,// dst, a, sc                  dst = SQ80::TimeScale#time of a: sc [kind (0 velocity, 1 key), seconds, amount]
 };
 
 // Event list modes and entry kinds (Plan::EventList)
@@ -956,6 +959,9 @@ static VALUE ruby_run(VALUE self, VALUE words, VALUE scalars, VALUE objects, VAL
 			case OP_FOUR_POLE: case OP_BIQUAD:
 				len = 7;
 				break;
+			case OP_CLIP: case OP_EXP: case OP_TIME_SCALE:
+				len = 4;
+				break;
 			case OP_ENVELOPE:
 				if (pc + 5 > nwords || op[4] < 2 || op[4] > ENV_MAX_SEGMENTS) rb_raise(rb_eArgError, "Bad plan envelope at word %zu", pc);
 				len = 5 + 4 * (size_t)op[4] + 7;
@@ -1059,6 +1065,42 @@ static VALUE ruby_run(VALUE self, VALUE words, VALUE scalars, VALUE objects, VAL
 					prm[k].scalar = sc[op[6] + 13 + k];
 				}
 				mb_plan_four_pole(ptrs[d], ptrs[op[2]], &prm[0], &prm[1], sc + op[6], rb_ary_entry(objects, op[5]), n);
+				break;
+			}
+
+			case OP_CLIP: {
+				if (cplx[d] || cplx[op[2]]) rb_raise(rb_eArgError, "Plan clips are real");
+				if (op[3] < 0 || (size_t)op[3] + 2 > nscalars) rb_raise(rb_eArgError, "Bad plan clip scalars at word %zu", pc);
+				float lo = (float)sc[op[3]], hi = (float)sc[op[3] + 1];
+				float *D = ptrs[d];
+				const float *A = ptrs[op[2]];
+				for (size_t i = 0; i < n; i++) {
+					float x = A[i];
+					D[i] = x < lo ? lo : (x > hi ? hi : x);
+				}
+				break;
+			}
+
+			case OP_EXP: {
+				if (cplx[d] || cplx[op[2]]) rb_raise(rb_eArgError, "Plan exp is real");
+				float *D = ptrs[d];
+				const float *A = ptrs[op[2]];
+				for (size_t i = 0; i < n; i++) D[i] = (float)exp((double)A[i]);
+				break;
+			}
+
+			case OP_TIME_SCALE: {
+				if (cplx[d] || cplx[op[2]]) rb_raise(rb_eArgError, "Plan time scales are real");
+				if (op[3] < 0 || (size_t)op[3] + 3 > nscalars) rb_raise(rb_eArgError, "Bad plan time scale scalars at word %zu", pc);
+				const double *k = sc + op[3];
+				float *D = ptrs[d];
+				const float *A = ptrs[op[2]];
+				double seconds = k[1], amount = k[2];
+				if (k[0] == 0) {
+					for (size_t i = 0; i < n; i++) D[i] = (float)(seconds * (1.0 - amount * (double)A[i]));
+				} else {
+					for (size_t i = 0; i < n; i++) D[i] = (float)(seconds * pow(2.0, -amount * ((double)A[i] - 60.0) / 12.0));
+				}
 				break;
 			}
 
@@ -1216,6 +1258,9 @@ static VALUE ruby_enums(VALUE self)
 	rb_hash_aset(h, ID2SYM(rb_intern("svf")), INT2NUM(OP_SVF));
 	rb_hash_aset(h, ID2SYM(rb_intern("four_pole")), INT2NUM(OP_FOUR_POLE));
 	rb_hash_aset(h, ID2SYM(rb_intern("biquad")), INT2NUM(OP_BIQUAD));
+	rb_hash_aset(h, ID2SYM(rb_intern("clip")), INT2NUM(OP_CLIP));
+	rb_hash_aset(h, ID2SYM(rb_intern("exp")), INT2NUM(OP_EXP));
+	rb_hash_aset(h, ID2SYM(rb_intern("time_scale")), INT2NUM(OP_TIME_SCALE));
 	rb_hash_aset(h, ID2SYM(rb_intern("ev_ramp")), INT2NUM(EV_RAMP));
 	rb_hash_aset(h, ID2SYM(rb_intern("events_held")), INT2NUM(EVENTS_HELD));
 	rb_hash_aset(h, ID2SYM(rb_intern("events_impulses")), INT2NUM(EVENTS_IMPULSES));

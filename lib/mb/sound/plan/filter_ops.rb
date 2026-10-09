@@ -95,6 +95,72 @@ module MB
           end
         end
 
+        # +a+ limited to lo..hi as Numo's SFloat#clip does (the bounds cast
+        # to float; NaN stays NaN): Notes filter parameter nodes.
+        class Clip < Base
+          attr_reader :a, :lo, :hi
+
+          def initialize(dst, node, a, lo, hi)
+            super(dst, node)
+            raise Unsupported.new(node, 'a complex clip input') if a.complex?
+
+            @a = a
+            @lo = lo.to_f
+            @hi = hi.to_f
+          end
+
+          def operands = [@a]
+          def expression = "clip(#{@a}, #{@lo}..#{@hi})"
+          def opcode = :clip
+
+          def run_ruby(env, count)
+            env[@dst] = Numo::SFloat.cast(env.fetch(@a)).clip(@lo, @hi)
+          end
+        end
+
+        # e^a in float as Numo::NMath.exp on an SFloat ((float)exp(double)):
+        # Notes::Cutoff's key tracking.
+        class Exp < Base
+          attr_reader :a
+
+          def initialize(dst, node, a)
+            super(dst, node)
+            raise Unsupported.new(node, 'a complex exp input') if a.complex?
+
+            @a = a
+          end
+
+          def operands = [@a]
+          def expression = "exp(#{@a})"
+          def opcode = :exp
+
+          def run_ruby(env, count)
+            env[@dst] = Numo::NMath.exp(Numo::SFloat.cast(env.fetch(@a)))
+          end
+        end
+
+        # SQ80::TimeScale#time per sample (double precision, stored as
+        # float).
+        class TimeScale < Base
+          attr_reader :a, :scale
+
+          def initialize(dst, node, a, scale)
+            super(dst, node)
+            raise Unsupported.new(node, 'a complex time scale input') if a.complex?
+
+            @a = a
+            @scale = scale
+          end
+
+          def operands = [@a]
+          def expression = "#{@scale.kind}_time(#{@a}, #{@scale.seconds} s, amount #{@scale.amount})"
+          def opcode = :time_scale
+
+          def run_ruby(env, count)
+            env[@dst] = Numo::SFloat.cast(Numo::SFloat.cast(env.fetch(@a)).to_a.map { |v| @scale.time(v) })
+          end
+        end
+
         # GraphNode::FourPole on a block: Filter::FourPole#dynamic_process
         # (FastFilter.four_pole or .diode_ladder, through mb_four_pole.h) on
         # the filter's own state, every mode, drive mode, clip, curve,
@@ -152,6 +218,21 @@ module MB
         # +filter+ (a Filter::Cookbook) on +a+ (see Op::FilterBiquad).
         def filter_biquad(filter, a, cutoff:, quality:)
           emit(Op::FilterBiquad.new(value(:real), node, filter, self[a], cutoff: self[cutoff], quality: self[quality]))
+        end
+
+        # +a+ clipped to +lo+..+hi+ (see Op::Clip).
+        def clip(a, lo, hi)
+          emit(Op::Clip.new(value(:real), node, self[a], lo, hi))
+        end
+
+        # e^+a+ (see Op::Exp).
+        def exp(a)
+          emit(Op::Exp.new(value(:real), node, self[a]))
+        end
+
+        # SQ80::TimeScale +scale+'s times for +a+ (see Op::TimeScale).
+        def time_scale(scale, a)
+          emit(Op::TimeScale.new(value(:real), node, self[a], scale))
         end
 
         # +filter+ (a Filter::FourPole) on +a+ (see Op::FourPole).

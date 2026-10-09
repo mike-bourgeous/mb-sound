@@ -29,6 +29,12 @@ module MB
 
         private
 
+        # The start of #sample's buffer for the plan: a number (as the float
+        # #start fills) or a Value.
+        def plan_start(p, value)
+          value.is_a?(Numeric) ? p.const(Numo::SFloat[value][0]) : p[value]
+        end
+
         def input(value)
           value.respond_to?(:sample) ? value.get_sampler : value.to_f
         end
@@ -119,6 +125,23 @@ module MB
         def sources
           { base: @base, brightness: @gm_input, env: @env, number: @number }.compact
         end
+
+        include Plan::Describable
+
+        # Plan layer: the base times the GM brightness, the envelope, and
+        # the key tracking factor e^((n - 60) k ln 2 / 12), clipped, in the
+        # same float operations as #sample (Plan::Op::Exp, Op::Clip).
+        def plan_describe(p)
+          buf = plan_start(p, @base)
+          buf = buf * p[@gm_input] if @gm_input
+          buf = buf * p[@env] if @env
+          if @number
+            t = (p[@number] + p.const(-60.0)) * p.const(@keytrack * Math.log(2) / 12.0)
+            buf = buf * p.exp(t)
+          end
+          buf = p.fill(buf) if buf.is_a?(Plan::Const)
+          p.clip(buf, 1.0, 0.49 * @sample_rate)
+        end
       end
 
       # A filter quality that follows resonance (CC 71; see Notes#quality):
@@ -145,6 +168,15 @@ module MB
 
         def sources
           { quality: @quality, resonance: @gm_input }.compact
+        end
+
+        include Plan::Describable
+
+        # Plan layer: the base times the GM resonance controller.
+        def plan_describe(p)
+          buf = plan_start(p, @quality)
+          buf = buf * p[@gm_input] if @gm_input
+          buf.is_a?(Plan::Const) ? p.fill(buf) : buf
         end
       end
 
@@ -186,6 +218,22 @@ module MB
 
         def sources
           { amount: @amount, control: @gm_input }.compact
+        end
+
+        include Plan::Describable
+
+        # Plan layer: the amount clipped to 0..1, then moved toward 0 or 1 by
+        # the controller as #sample does (buf (down - up + 1) + up).
+        def plan_describe(p)
+          buf = plan_start(p, @amount)
+          buf = p.fill(buf) if buf.is_a?(Plan::Const)
+          buf = p.clip(buf, 0.0, 1.0)
+          return buf unless @gm_input
+
+          pos = p[@gm_input]
+          up = p.clip(pos, 0.0, 1.0)
+          down = p.clip(pos, -1.0, 0.0)
+          buf * ((down + up * -1.0) + 1.0) + up
         end
       end
     end
