@@ -63,6 +63,30 @@ RSpec.describe(MB::Sound::Plan, 'filter ops') do
     end
   end
 
+  describe 'cookbook biquad (structure: :biquad)' do
+    MB::Sound::Filter::Cookbook::FILTER_TYPES.each do |type|
+      gain = MB::Sound::Filter::SVF::GAIN_TYPES.include?(type) ? 2.0 : nil
+
+      it "matches #{type} with moving cutoff and quality" do
+        r = plan_compare(check: :raise) {
+          (src.new(seed: 1) * 0.8).filter(type, cutoff: src.new(seed: 2, scale: 1500, offset: 2000), quality: src.new(seed: 3, scale: 2, offset: 2.5),
+                                          gain: gain, structure: :biquad) * 1
+        }
+        expect(op_names(r)).to include(:FilterBiquad)
+      end
+    end
+
+    it 'matches constant parameters, cutoffs past the limits, and a reset' do
+      plan_compare(check: :raise) { |c|
+        s = src.new(seed: 4) * 1
+        a = s.filter(:lowpass, cutoff: 700, quality: 0.7, structure: :biquad)
+        b = s.filter(:highpass, cutoff: src.new(seed: 5, scale: 30000, offset: 0), quality: src.new(seed: 6, scale: 1, offset: 0), structure: :biquad)
+        c.before_block(5) { a.reset(0.25) }
+        a + b * 0.1
+      }
+    end
+  end
+
   describe 'four-pole (GraphNode::FourPole)' do
     fp = MB::Sound::Filter::FourPole
 

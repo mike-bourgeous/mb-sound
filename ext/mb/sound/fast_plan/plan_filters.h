@@ -36,4 +36,12 @@ void mb_plan_svf(float *d, const float *a, const struct mb_plan_param *fc, const
 void mb_plan_four_pole(float *d, const float *a, const struct mb_plan_param *fc, const struct mb_plan_param *res,
 		const double *cfg, VALUE obj, size_t n);
 
+// OP_BIQUAD (plan_biquad.c): Filter::Cookbook#dynamic_process
+// (FastSound.dynamic_biquad through mb_biquad.h) on +a+ into +d+ with the
+// cutoff and quality registers +cut+ and +q+; +type+ the cookbook filter
+// type id; +obj+ the Filter::Cookbook (its sample rate, dB gain, f0 limit,
+// and x/y state read each block, its coefficients, state, quality, and
+// cutoff set afterwards as #dynamic_process_c does).
+void mb_plan_biquad(float *d, const float *a, const float *cut, const float *q, int type, VALUE obj, size_t n);
+
 #endif

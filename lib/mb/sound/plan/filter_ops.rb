@@ -52,6 +52,49 @@ module MB
           end
         end
 
+        # A Filter::Cookbook on a block (Filter::SampleWrapper with cutoff
+        # and quality inputs: `structure: :biquad`): Cookbook#dynamic_process
+        # (FastSound.dynamic_biquad's loop, through mb_biquad.h; fast_plan's
+        # OP_BIQUAD in plan_biquad.c) on the filter's coefficients and x/y
+        # state, setting its last quality and cutoff as the node does.  The
+        # mirror runs the node's own #dynamic_process (the cookbook biquad
+        # has no Ruby mirror of its dynamic kernel).
+        class FilterBiquad < Base
+          attr_reader :a, :filter, :cutoff, :quality
+
+          def initialize(dst, node, filter, a, cutoff:, quality:)
+            super(dst, node)
+            raise Unsupported.new(node, 'a complex filter input') if a.complex?
+            [cutoff, quality].each do |v|
+              raise Unsupported.new(node, 'a biquad parameter that is not a signal') unless v.is_a?(Value)
+              raise Unsupported.new(node, 'a complex filter parameter') if v.complex?
+            end
+
+            @filter = filter
+            @a = a
+            @cutoff = cutoff
+            @quality = quality
+          end
+
+          def operands
+            [@a, @cutoff, @quality]
+          end
+
+          def expression
+            "biquad_#{@filter.filter_type}(#{@a}, cutoff: #{@cutoff}, quality: #{@quality})"
+          end
+
+          def opcode = :biquad
+
+          def type_id
+            Filter::Cookbook::FILTER_TYPE_IDS.fetch(@filter.filter_type)
+          end
+
+          def run_ruby(env, count)
+            env[@dst] = @filter.dynamic_process(Numo::SFloat.cast(env.fetch(@a)), cutoff: env.fetch(@cutoff), quality: env.fetch(@quality))
+          end
+        end
+
         # GraphNode::FourPole on a block: Filter::FourPole#dynamic_process
         # (FastFilter.four_pole or .diode_ladder, through mb_four_pole.h) on
         # the filter's own state, every mode, drive mode, clip, curve,
@@ -104,6 +147,11 @@ module MB
         # +filter+ (a Filter::SVF) on +a+ (see Op::FilterSvf).
         def filter_svf(filter, a, cutoff:, quality:, gain:, gain_input:)
           emit(Op::FilterSvf.new(value(:real), node, filter, self[a], cutoff: self[cutoff], quality: self[quality], gain: self[gain], gain_input: gain_input))
+        end
+
+        # +filter+ (a Filter::Cookbook) on +a+ (see Op::FilterBiquad).
+        def filter_biquad(filter, a, cutoff:, quality:)
+          emit(Op::FilterBiquad.new(value(:real), node, filter, self[a], cutoff: self[cutoff], quality: self[quality]))
         end
 
         # +filter+ (a Filter::FourPole) on +a+ (see Op::FourPole).

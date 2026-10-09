@@ -84,6 +84,7 @@ enum {
 	OP_POWF,      // dst, a, b                   dst = a ** b by mb_vec_pow (Plan.precision :fast, a Constant base)
 	OP_SVF,       // dst, a, fc, q, g, object, sc  dst = Filter::SVF on a (plan_filters.c); fc/q/g registers or -1 (scalars sc[0..2]); sc[3]: remember the gain; object: the Filter::SVF
 	OP_FOUR_POLE, // dst, a, fc, res, object, sc   dst = GraphNode::FourPole on a (plan_filters.c); fc/res registers or -1 (scalars sc[13], sc[14]); sc[0..12] settings; object: the Filter::FourPole
+	OP_BIQUAD,    // dst, a, cut, q, object, type  dst = Filter::Cookbook (structure: :biquad) on a (plan_biquad.c); cut/q registers; object: the Filter::Cookbook
 };
 
 // Event list modes and entry kinds (Plan::EventList)
@@ -952,7 +953,7 @@ static VALUE ruby_run(VALUE self, VALUE words, VALUE scalars, VALUE objects, VAL
 			case OP_SVF:
 				len = 8;
 				break;
-			case OP_FOUR_POLE:
+			case OP_FOUR_POLE: case OP_BIQUAD:
 				len = 7;
 				break;
 			case OP_ENVELOPE:
@@ -1058,6 +1059,16 @@ static VALUE ruby_run(VALUE self, VALUE words, VALUE scalars, VALUE objects, VAL
 					prm[k].scalar = sc[op[6] + 13 + k];
 				}
 				mb_plan_four_pole(ptrs[d], ptrs[op[2]], &prm[0], &prm[1], sc + op[6], rb_ary_entry(objects, op[5]), n);
+				break;
+			}
+
+			case OP_BIQUAD: {
+				if (cplx[d] || cplx[op[2]]) rb_raise(rb_eArgError, "Plan biquad filters are real");
+				if (op[5] < 0 || op[5] >= RARRAY_LEN(objects)) rb_raise(rb_eArgError, "Bad plan biquad object at word %zu", pc);
+				for (int k = 3; k <= 4; k++) {
+					if (op[k] < 0 || op[k] >= nregs || cplx[op[k]] || !ptrs[op[k]]) rb_raise(rb_eArgError, "Bad plan biquad parameter register at word %zu", pc);
+				}
+				mb_plan_biquad(ptrs[d], ptrs[op[2]], ptrs[op[3]], ptrs[op[4]], op[6], rb_ary_entry(objects, op[5]), n);
 				break;
 			}
 
@@ -1204,6 +1215,7 @@ static VALUE ruby_enums(VALUE self)
 	rb_hash_aset(h, ID2SYM(rb_intern("powf")), INT2NUM(OP_POWF));
 	rb_hash_aset(h, ID2SYM(rb_intern("svf")), INT2NUM(OP_SVF));
 	rb_hash_aset(h, ID2SYM(rb_intern("four_pole")), INT2NUM(OP_FOUR_POLE));
+	rb_hash_aset(h, ID2SYM(rb_intern("biquad")), INT2NUM(OP_BIQUAD));
 	rb_hash_aset(h, ID2SYM(rb_intern("ev_ramp")), INT2NUM(EV_RAMP));
 	rb_hash_aset(h, ID2SYM(rb_intern("events_held")), INT2NUM(EVENTS_HELD));
 	rb_hash_aset(h, ID2SYM(rb_intern("events_impulses")), INT2NUM(EVENTS_IMPULSES));

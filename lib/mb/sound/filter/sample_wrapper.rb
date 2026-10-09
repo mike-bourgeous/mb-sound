@@ -128,6 +128,8 @@ module MB
             gain = gain_node ? p[gain_node] : p.const(f.gain || 1.0)
             p.filter_svf(f, p[@source], cutoff: p[@inputs.fetch(:cutoff)], quality: p[@inputs.fetch(:quality)],
                          gain: gain, gain_input: !gain_node.nil?)
+          when MB::Sound::Filter::Cookbook
+            p.filter_biquad(f, p[@source], cutoff: p[@inputs.fetch(:cutoff)], quality: p[@inputs.fetch(:quality)])
           else
             raise Plan::Unsupported.new(self, plan_unsupported_reason)
           end
@@ -140,13 +142,22 @@ module MB
             return 'an SVF with inputs other than cutoff, quality, and gain' unless (@inputs.keys - [:cutoff, :quality, :gain]).empty?
 
             nil
+          when MB::Sound::Filter::Cookbook
+            return 'a cookbook filter without cutoff and quality inputs' unless @inputs.keys.sort == [:cutoff, :quality]
+            return 'a cookbook filter type without a C kernel' unless MB::Sound::Filter::Cookbook::FILTER_TYPE_IDS.key?(@base_filter.filter_type)
+
+            nil
           else
             "a #{@base_filter.class.name.sub('MB::Sound::', '')} filter"
           end
         end
 
+        # Ivars of Filter::Cookbook that its dynamic kernel changes.
+        PLAN_BIQUAD_IVARS = [:@omega, :@b0, :@b1, :@b2, :@a1, :@a2, :@x1, :@x2, :@y1, :@y2, :@quality, :@center_frequency, :@cutoff].freeze
+
         def plan_snapshot
           f = @base_filter
+          return PLAN_BIQUAD_IVARS.map { |v| f.instance_variable_get(v) } if f.is_a?(MB::Sound::Filter::Cookbook)
           return nil unless f.is_a?(MB::Sound::Filter::SVF)
 
           [f.instance_variable_get(:@state).dup, f.cutoff, f.quality, f.gain]
@@ -156,6 +167,11 @@ module MB
           return unless snapshot
 
           f = @base_filter
+          if f.is_a?(MB::Sound::Filter::Cookbook)
+            PLAN_BIQUAD_IVARS.each_with_index { |v, i| f.instance_variable_set(v, snapshot[i]) }
+            return
+          end
+
           state, cutoff, quality, gain = snapshot
           f.instance_variable_get(:@state).replace(state)
           f.instance_variable_set(:@cutoff, cutoff)

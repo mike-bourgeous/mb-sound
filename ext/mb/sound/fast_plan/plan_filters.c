@@ -5,6 +5,13 @@
  * it, so a plan can drop at any block boundary.  Built with
  * -ffp-contract=off like the rest of fast_plan.
  */
+// Nothing is contracted into multiply-adds, as in fast_filter and fast_loop
+// (built with -ffp-contract=off), whose kernels these share: GCC doesn't
+// contract in ISO C mode, clang does by default.
+#if defined(__clang__)
+#pragma STDC FP_CONTRACT OFF
+#endif
+
 #include <math.h>
 
 #include <ruby.h>
