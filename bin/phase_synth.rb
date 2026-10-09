@@ -105,10 +105,11 @@ MB::Sound.script(
       phase = phases[phase_idx][:phase]
     end
 
-    # phase is divided by 360 for half phase in each channel
-    base_phase = sample * freq * 2.0 * Math::PI / RATE
-    data[0][sample] = amp * MB::Sound::Tone.value_at(p.wave, (base_phase + phase * Math::PI / 360.0) % (2.0 * Math::PI))
-    data[1][sample] = amp * MB::Sound::Tone.value_at(p.wave, (base_phase - phase * Math::PI / 360.0) % (2.0 * Math::PI))
+    # Phases in cycles; the phase difference (degrees) is divided by 720 for
+    # half the difference in each channel
+    base_phase = sample * freq / RATE
+    data[0][sample] = amp * MB::Sound::Tone.value_at(p.wave, (base_phase + phase / 720.0) % 1.0)
+    data[1][sample] = amp * MB::Sound::Tone.value_at(p.wave, (base_phase - phase / 720.0) % 1.0)
 
     sample += 1
 

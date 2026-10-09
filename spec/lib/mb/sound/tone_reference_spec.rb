@@ -38,11 +38,11 @@ RSpec.describe('Tone null-test reference') do
     'clip_tone' => 'phase jumps: ideal step area',
     'reset' => 'phase jumps: ideal step area',
     'reset_edges' => 'phase jumps: ideal step area; 2026-10-08: first sample as if the tone had always run',
-    'reset_fm_pm' => 'phase jumps: ideal step area',
+    'reset_fm_pm' => 'phase jumps: ideal step area; 2026-10-10: PM in cycles (last bits, residual below -130 dB)',
     'reset_pwm' => 'phase jumps: ideal step area; 2026-10-08: first sample as if the tone had always run',
     'reset_random' => 'phase jumps: ideal step area',
     'reset_to' => 'phase jumps: ideal step area',
-    'reset_to_node' => 'phase jumps: ideal step area',
+    'reset_to_node' => 'phase jumps: ideal step area; 2026-10-10: reset targets in cycles (a radians node scaled; last bits, -130 dB)',
     'rnd_reset' => 'phase jumps: ideal step area',
     'tempo_audio_rate_seek' => 'phase jumps: ideal step area',
     'tempo_lfo_changes' => 'phase jumps: ideal step area',
@@ -50,14 +50,14 @@ RSpec.describe('Tone null-test reference') do
     # 2026-10-08: complex shapes with phase modulation, warps, or sync play
     # from complex wavetables (Tone#complex_table?) instead of the naive
     # closed forms
-    'complex_ramp_pm' => 'complex shapes: PM from a complex table (was the naive acomplex_ramp)',
+    'complex_ramp_pm' => 'complex shapes: PM from a complex table (was the naive acomplex_ramp); 2026-10-10: PM in cycles (last bits, residual below -130 dB)',
     # Fix 2026-10-08: a band-limited (PolyBLEP) tone's first sample is
     # corrected as if the tone had always run, so a square or pulse starting
     # on its edge at phase 0 plays the edge's midpoint (0), not +1; only
     # sample 0 changes (warp corners at phase 0 get their small kink term)
     'pulse_dc' => 'first sample as if the tone had always run',
     'pulse' => 'first sample as if the tone had always run',
-    'pm_index' => 'first sample as if the tone had always run',
+    'pm_index' => 'first sample as if the tone had always run; 2026-10-10: PM in cycles (last bits, residual below -130 dB)',
     'square_110' => 'first sample as if the tone had always run',
     'rate_96000_fm' => 'first sample as if the tone had always run',
     'notes' => 'first sample as if the tone had always run',
@@ -77,6 +77,12 @@ RSpec.describe('Tone null-test reference') do
     # RMS and peak equal to 9 digits)
     'noise_root_seed' => 'noise: block-size independent phase (last bits)',
     'noise_seeded_blend' => 'noise: block-size independent phase (last bits)',
+    # 2026-10-10: phase modulation is in cycles (kernels add it to the phase
+    # in cycles; the cases' radians modulators are scaled by 1 / 2pi), so
+    # PM renders differ in the last bits (residuals -130 to -145 dB, max
+    # sample difference 1.3e-6)
+    'pm' => 'PM in cycles (last bits)',
+    'pm_chain' => 'PM in cycles (last bits)',
   }.freeze
 
   it 'has a reference for every case' do

@@ -37,10 +37,10 @@ class NoiseGenerator
 
   # A slow naive LFO (a Tone sampled once per hop) with power shaping: the
   # value raised to +pre_power+ (keeping its sign), scaled from -1..1 to
-  # +range+, then raised to +post_power+.
+  # +range+, then raised to +post_power+.  +phase+ is in radians.
   LFO = Struct.new(:tone, :range, :pre_power, :post_power) do
     def self.make(wave, frequency:, phase:, range: nil, pre_power: 1, post_power: 1)
-      tone = MB::Sound::Tone.new(wave_type: wave, frequency: frequency, phase: phase, sample_rate: LFO_RATE)
+      tone = MB::Sound::Tone.new(wave_type: wave, frequency: frequency, phase: phase.radians, sample_rate: LFO_RATE)
       tone = tone.atriangle if wave == :triangle
       new(tone, range, pre_power, post_power)
     end

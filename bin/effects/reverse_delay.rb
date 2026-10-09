@@ -57,10 +57,10 @@ MB::Sound.effect_script(
     a = Numo::SFloat.zeros(internal_buffer)
 
     # The amplitude LFO mutes the sound while the delay buffer jumps back to the present
-    amp_lfo = lfo_freq.tone.sine.at(0..1000).with_phase((idx + 0.5) * 2.0 * Math::PI / channels).aclip(0, 1).named('Amp LFO')
+    amp_lfo = lfo_freq.tone.sine.at(0..1000).with_phase((idx + 0.5) / channels).aclip(0, 1).named('Amp LFO')
 
     # The delay LFO controls the position in the delay buffer
-    delay_lfo = lfo_freq.tone.ramp.lfo.at(0..2).with_phase(idx * 2.0 * Math::PI / channels).named('Delay LFO') * delay_time
+    delay_lfo = lfo_freq.tone.ramp.lfo.at(0..2).with_phase(idx.to_f / channels).named('Delay LFO') * delay_time
 
     delayed = inp.delay(seconds: delay_lfo, smoothing: false) * amp_lfo
 

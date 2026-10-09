@@ -43,10 +43,11 @@ module MB
           Array.new(h) { |i| n = i + 1; n.odd? ? (((n - 1) / 2).even? ? 8.0 : -8.0) / (Math::PI**2 * n**2) : 0.0 }
         end
 
-        # [amplitudes, phases] of a pulse of +width+ with its DC removed.
+        # [amplitudes, phases] of a pulse of +width+ with its DC removed (the
+        # phases as radians Phases: pi / 2 - pi n width).
         def pulse(width, h = HARMONICS)
           amps = Array.new(h) { |i| n = i + 1; 4.0 / (Math::PI * n) * Math.sin(Math::PI * n * width) }
-          phases = Array.new(h) { |i| n = i + 1; Math::PI / 2 - Math::PI * n * width }
+          phases = Array.new(h) { |i| n = i + 1; Phase.radians(Math::PI / 2 - Math::PI * n * width) }
           [amps, phases]
         end
       end

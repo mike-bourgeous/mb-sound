@@ -18,11 +18,9 @@ module MB
         S11 = -2.50521079e-08
         TWO_PI = 6.28318548
 
-        INV_TWO_PI = 1.0 / (2.0 * Math::PI)
-
-        # sin(2 pi phases + phase_mod) * gain + offset as an SFloat, for
+        # sin(2 pi (phases + phase_mod)) * gain + offset as an SFloat, for
         # +phases+ in cycles (a DFloat from Tone#phases_ruby) and
-        # +phase_mod+ radians (a number or an NArray; real parts).
+        # +phase_mod+ in cycles (a number or an NArray; real parts).
         def self.shape_ruby(phases, phase_mod, gain, offset)
           pm = phase_mod
           if pm.is_a?(Numo::NArray)
@@ -32,8 +30,7 @@ module MB
             pm = (pm || 0).to_f
           end
 
-          r = pm * INV_TWO_PI
-          r = phases + r
+          r = phases + pm
           r = Numo::DFloat.cast(r) unless r.is_a?(Numo::NArray)
           k = (r + ROUND) - ROUND
           x = Numo::SFloat.cast(r - k)

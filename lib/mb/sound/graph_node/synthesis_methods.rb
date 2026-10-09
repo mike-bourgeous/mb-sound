@@ -34,8 +34,9 @@ module MB
         # node, or Pitch) with the impulse's height as its amplitude,
         # falling 60 dB in +decay+ (seconds, a Length, or a node).  The
         # frequency may move freely without changing the ringing level (e.g.
-        # a kick's pitch sweep).  +phase+ is the starting phase in radians
-        # (or an MB::Sound::Phase, e.g. 0.25.cycles).
+        # a kick's pitch sweep).  +phase+ is the starting phase in cycles
+        # (0.25 starts at the peak; or an MB::Sound::Phase, e.g.
+        # 1.2.radians).
         #
         # Examples:
         #     play grid(16, 'x...x...').loop.trigger.ping(52, decay: 0.8)

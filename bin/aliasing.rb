@@ -33,7 +33,7 @@
 #     $0 'p.ramp' 'p.aramp'               # compare two expressions
 #     $0 -k 4097 'p.sine.at(4).softclip'  # one frequency (~3 kHz)
 #     $0 --render /tmp/sweeps 'p.ramp' 'p.aramp'
-#     $0 -c 'p.complex_ramp' 'p.complex_ramp.pm(p.sine.at(0.5))'  # complex outputs, two-sided
+#     $0 -c 'p.complex_ramp' 'p.complex_ramp.pm(p.sine.at(0.08))'  # complex outputs, two-sided
 
 require 'bundler/setup'
 require 'fileutils'

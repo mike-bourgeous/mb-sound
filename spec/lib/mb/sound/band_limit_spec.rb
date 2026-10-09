@@ -42,9 +42,9 @@ RSpec.describe(MB::Sound::BandLimit) do
           it 'give identical samples with frequency and phase modulation, including moving backward' do
             make = -> {
               fm = MB::Sound::ArrayInput.new(data: [Numo::SFloat.new(4800).seq * 3 + 50], sample_rate: rate).with_buffer(480)
-              # 30 radians of phase modulation at ~200 Hz moves the phase
+              # 5 cycles of phase modulation at ~200 Hz moves the phase
               # backward through edges
-              pm = MB::Sound::ArrayInput.new(data: [Numo::SFloat.cast(Numo::DFloat.new(4800).seq.map { |i| 30 * Math.sin(i / 37.0) })], sample_rate: rate).with_buffer(480)
+              pm = MB::Sound::ArrayInput.new(data: [Numo::SFloat.cast(Numo::DFloat.new(4800).seq.map { |i| 5 * Math.sin(i / 37.0) })], sample_rate: rate).with_buffer(480)
               oscillator(wave, rate: rate, frequency: fm, phase_mod: pm)
             }
             c = make.call
@@ -371,8 +371,8 @@ RSpec.describe(MB::Sound::BandLimit) do
       end
 
       it 'band-limits phase modulation, warps, and sync' do
-        pm = complex_nhr { |p| p.complex_ramp.pm(p.sine.at(0.5)) }
-        naive = complex_nhr { |p| p.acomplex_ramp.pm(p.sine.at(0.5)) }
+        pm = complex_nhr { |p| p.complex_ramp.pm(p.sine.at(0.5).radians) }
+        naive = complex_nhr { |p| p.acomplex_ramp.pm(p.sine.at(0.5).radians) }
         expect(pm).to be < -44
         expect(pm).to be < naive - 20
         expect(complex_nhr { |p| p.complex_ramp.pwm(0.3) }).to be < -38
@@ -680,7 +680,7 @@ RSpec.describe(MB::Sound::BandLimit) do
     it 'starts a tone as if it had always run (a square on its edge plays the midpoint first)' do
       expect(1000.hz.square.sample(3).to_a).to eq([0.0, 1.0, 1.0])
       expect(1000.hz.square.sample_ruby(3).to_a).to eq([0.0, 1.0, 1.0])
-      expect(1000.hz.ramp.with_phase(Math::PI).sample(1)[0]).to be_within(1e-6).of(0) # on the ramp's edge
+      expect(1000.hz.ramp.with_phase(0.5).sample(1)[0]).to be_within(1e-6).of(0) # on the ramp's edge
       expect(1000.hz.asquare.sample(1)[0]).to eq(1) # naive tones start on the edge's right side
       expect(1000.hz.lfo.square.at(1).send(:band_limit_setting)).to be_a(Range)
       expect(5.hz.lfo.square.sample(1)[0]).to eq(1) # slow LFOs keep exact edges

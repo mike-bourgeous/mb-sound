@@ -695,7 +695,7 @@ static VALUE ruby_phasor(VALUE self, VALUE buffer, VALUE frequency, VALUE advanc
 
 /*
  * Fills +buffer+ (SFloat, or SComplex for complex waves) with +wave_type+
- * shaped from +phases+ (cycles), plus +phase_mod+ (radians; Numeric, NArray,
+ * shaped from +phases+ (cycles), plus +phase_mod+ (cycles; Numeric, NArray,
  * or nil), scaled by +gain+ and moved by +offset+.  +increments+ (cycles, or
  * nil for zero) matter only for complex square and ramp waves.  See
  * Oscillator.shape_c.
@@ -760,7 +760,7 @@ static VALUE ruby_shape(VALUE self, VALUE buffer, VALUE wave_type, VALUE phases,
 /*
  * A phasor and shaper in one loop (the usual oscillator path, avoiding a
  * phase buffer): fills +buffer+ with +wave_type+ at +frequency+ (Hz; Numeric
- * or NArray) plus +phase_mod+, advancing the phase in state[0] (cycles).
+ * or NArray) plus +phase_mod+ (cycles), advancing the phase in state[0] (cycles).
  * Same math as ruby_phasor followed by ruby_shape.  +noise+ is as for
  * ruby_phasor.  See Oscillator#sample_c.
  */

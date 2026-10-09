@@ -24,7 +24,8 @@ MB::Sound.synth_script(
   retrigger: [:ring, Symbol, '-r', 'Same-note retrigger mode', MB::Sound::Synth::RETRIGGER_MODES],
 ) { |midi, p|
   s = midi.synth(voices: 4, retrigger: p[:retrigger]) { |v|
-    ba_dc_mod = (v.velocity * 1.6 + 1.6).named('B into A, D into C')
+    # (modulation indices in cycles; retuned 2026-10-10 from radians, within 0.6%)
+    ba_dc_mod = (v.velocity * 0.255 + 0.255).named('B into A, D into C')
 
     # DX-style envelopes (straight lines in dB, as the old `.db(30)`): the
     # carriers' amplitude and the modulators' index

@@ -34,7 +34,7 @@ WORKLOADS = {
       [7, 5, 3, 2, 1].each_with_index do |ratio, idx|
         op = (f * ratio).hz.sine.at(1)
         op = op.pm(mod) if mod
-        mod = op * (1.5 - idx * 0.2)
+        mod = op * (0.24 - idx * 0.032) # PM index in cycles (about 1.5 radians down by 0.2)
       end
       f.hz.sine.at(0.1).pm(mod)
     }
@@ -43,7 +43,7 @@ WORKLOADS = {
   'supersaw 7 x8 voices' => -> {
     voices = 8.times.map { |v|
       f = 110 * 2**(v / 12.0)
-      7.times.map { |i| (f * 2**((i - 3) * 0.1 / 12)).hz.ramp.at(0.02).with_phase(i) }.sum
+      7.times.map { |i| (f * 2**((i - 3) * 0.1 / 12)).hz.ramp.at(0.02).with_phase(i.radians) }.sum
     }
     voices.sum
   },

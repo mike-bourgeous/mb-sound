@@ -54,7 +54,7 @@ MB::Sound.synth_script { |midi|
 
       # Wavetable oscillator an octave up (the old version read the table
       # twice per cycle), starting half a cycle in, as before
-      a = (portamento.(v.hz.transpose(detune.())) * 2).tone.reset(v.trigger).with_phase(Math::PI)
+      a = (portamento.(v.hz.transpose(detune.())) * 2).tone.reset(v.trigger).with_phase(0.5)
         .wavetable(synthwave, scan: cc1).named('A Wavetable')
         .filter(:lowpass, cutoff: 5000, quality: 0.4).named('A Filter')
 

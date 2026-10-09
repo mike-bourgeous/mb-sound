@@ -66,7 +66,7 @@ RSpec.describe(MB::Sound::Shaper) do
 
     it 'delays by about half a sample' do
       data = 100.hz.sine.at(0.2).softclip.sample(4800)
-      expected = 100.hz.sine.at(0.2).with_phase(-2 * Math::PI * 100 * 0.5 / 48000).sample(4800)
+      expected = 100.hz.sine.at(0.2).with_phase(-100 * 0.5 / 48000.0).sample(4800)
       expect(data[100..]).to all_be_within(1e-4).of_array(expected[100..])
     end
   end

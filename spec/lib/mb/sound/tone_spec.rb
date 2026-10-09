@@ -151,8 +151,8 @@ RSpec.describe MB::Sound::Tone do
     it 'picks up changes made after the state was inspected' do
       t = 220.hz.ramp
       expect(t.phi).to eq(0)
-      t.with_phase(Math::PI / 2)
-      expect(t.phi).to be_within(1e-12).of(Math::PI / 2)
+      t.with_phase(0.25)
+      expect(t.phi).to eq(0.25)
     end
   end
 
@@ -186,8 +186,8 @@ RSpec.describe MB::Sound::Tone do
     end
 
     it 'starts at its initial phase' do
-      tone = 220.hz.with_phase(180.degrees)
-      expect(tone.phase).to eq(180.degrees)
+      tone = 220.hz.with_phase(0.5)
+      expect(tone.phase).to eq(0.5)
 
       data = tone.sample(48000)
       expect(data[0].round(8)).to eq(0)

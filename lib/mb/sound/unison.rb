@@ -120,8 +120,8 @@ module MB
       end
 
       # Gives +tone+ the unison starting +phase+ (see Pitch#unison):
-      # :random calls Tone#rnd, a number (radians) or Phase (e.g.
-      # 0.25.cycles) Tone#with_phase, and
+      # :random calls Tone#rnd, a number (cycles) or Phase (e.g.
+      # 1.2.radians) Tone#with_phase, and
       # :reset leaves the tone as it is.  Returns the tone.
       def self.apply_phase(tone, phase)
         case phase
@@ -135,7 +135,7 @@ module MB
       def self.check_phase(phase)
         return if phase == :random || phase == :reset || phase.is_a?(Numeric) || (phase.is_a?(Phase) && !phase.node?)
 
-        raise ArgumentError, "Unison phase must be :random, :reset, radians, or a Phase like 0.25.cycles (got #{phase.inspect})"
+        raise ArgumentError, "Unison phase must be :random, :reset, cycles, or a Phase like 1.2.radians (got #{phase.inspect})"
       end
 
       # Builds a unison of +pitch+ (see Pitch#unison for the arguments):

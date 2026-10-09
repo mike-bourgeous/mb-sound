@@ -35,6 +35,18 @@ module MB
           spectra
         end
 
+        # Converts harmonic +phases+ for .spectra_from_harmonics from cycles
+        # (numbers, Phases, NArrays, or nested Arrays of them; see
+        # Wavetable.from_harmonics) to radians (exact for radians Phases).
+        def phases_to_radians(phases)
+          case phases
+          when nil then nil
+          when Numo::NArray then Numo::DFloat.cast(phases) * Phase::TWOPI
+          when Array then phases.map { |p| phases_to_radians(p) }
+          else Phase.to_radians(phases).to_f
+          end
+        end
+
         # Returns the spectra (see spectra_from_frames) of sine harmonics
         # with +amplitudes+ (an Array or 1D NArray, the first for harmonic 1,
         # or an Array of them for several frames) and +phases+ (radians, the

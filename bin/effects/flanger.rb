@@ -71,7 +71,7 @@ MB::Sound.effect_script(
     # Resampled so --oversample runs the flanger at the higher rate
     inp = inp.resample(mode: :libsamplerate_fastest)
 
-    phase = channels > 1 ? idx * p.spread * Math::PI / (180.0 * (channels - 1)) : 0
+    phase = channels > 1 ? idx * p.spread / (360.0 * (channels - 1)) : 0 # cycles
     lfo = lfo_freq.tone.with_phase(phase).send(p.wave).at(0..1)
 
     # Delay in samples

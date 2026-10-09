@@ -31,7 +31,8 @@ module MB::Sound
       # over 0.1 s.
       base = v.hz.glide(100.ms)
       base2x = base.transpose(1.oct)
-      mod = v.cc(1, range: 1.0..2.0, name: 'FM depth')
+      # FM depth in cycles (was 1 to 2 radians before 2026-10-10)
+      mod = v.cc(1, range: 0.16..0.32, name: 'FM depth')
 
       # Real sines (complex until 2026-10-09: phase modulation reads only
       # the real part, so they played the same, within rounding)

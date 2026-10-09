@@ -58,7 +58,7 @@ RSpec.describe(MB::Sound::FFTMethods) do
       }
 
       let(:cosine_input) {
-        tone = Numo::DFloat.cast(12000.hz.with_phase(90.degrees).at(1).sample(24))
+        tone = Numo::DFloat.cast(12000.hz.with_phase(0.25).at(1).sample(24))
         n.times do
           tone = Numo::DFloat.cast([tone] * 24)
         end

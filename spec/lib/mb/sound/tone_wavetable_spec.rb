@@ -178,7 +178,7 @@ RSpec.describe(MB::Sound::Tone, '#wavetable', aggregate_failures: true) do
     it 'gives the same samples in C and Ruby with resets' do
       trigger = -> { MB::Sound::ArrayInput.new(data: [Numo::SFloat.zeros(1200).tap { |z| z[[50, 333, 700]] = 1 }]) }
       expect_c_and_ruby { 330.hz.wavetable(:saw).reset(trigger.call) }
-      expect_c_and_ruby { 330.hz.wavetable(:basic, scan: 0.6).reset(trigger.call, to: Math::PI / 2) }
+      expect_c_and_ruby { 330.hz.wavetable(:basic, scan: 0.6).reset(trigger.call, to: 0.25) }
     end
 
     it 'plays the table one cycle per period' do
@@ -235,7 +235,7 @@ RSpec.describe(MB::Sound::Tone, '#wavetable', aggregate_failures: true) do
       expect_c_and_ruby { 440.hz.wavetable(:basic, scan: 0.7.hz.phasor * 3 - 1, scan_wrap: true) }
       expect_c_and_ruby { 440.hz.wavetable(:pulses, scan: 1.3, scan_wrap: true).pwm(3.hz.lfo.at(0.2..0.8)) }
       expect_c_and_ruby { 220.hz.wavetable(:basic, scan: 2.hz.lfo.at(-1..2.5), scan_wrap: true).sync(ratio: 2.5) }
-      expect_c_and_ruby { 330.hz.wavetable(:basic, scan: 1.2, scan_wrap: true).reset(4.hz.lfo.square.at(0..1), to: Math::PI / 2) }
+      expect_c_and_ruby { 330.hz.wavetable(:basic, scan: 1.2, scan_wrap: true).reset(4.hz.lfo.square.at(0..1), to: 0.25) }
     end
 
     it 'clamps the scan by default, or wraps it around with scan_wrap: true' do
@@ -273,7 +273,7 @@ RSpec.describe(MB::Sound::Tone, '#wavetable', aggregate_failures: true) do
     it 'can be complex' do
       t = 100.hz.wavetable(w.from_harmonics([1], complex: true)).sample(480)
       expect(t).to be_a(Numo::SComplex)
-      expect(t.imag).to all_be_within(1e-4).of_array(100.hz.sine.with_phase(Math::PI / 2).sample(480) * -1)
+      expect(t.imag).to all_be_within(1e-4).of_array(100.hz.sine.with_phase(0.25).sample(480) * -1)
     end
 
     it 'can be noise with the distribution of the table (the same in C and Ruby)' do

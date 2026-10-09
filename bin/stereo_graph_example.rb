@@ -11,7 +11,7 @@ require 'bundler/setup'
 require 'mb-sound'
 
 MB::Sound.song_script(bars: 8) {
-  q = 120.1.hz.at(1).with_phase(Math::PI/3) + 0.1.hz.lfo.at(1) * 60.hz.lfo.at(Math::PI)
+  q = 120.1.hz.at(0.16).with_phase(1.0 / 6) + 0.1.hz.lfo.at(1) * 60.hz.lfo.at(0.5) # PM in cycles
 
   a = (
     (360.3.hz.pm(q) + 481.4.hz.pm(q)).oversample(3) + 30.hz.ramp.at(0.3).filter(:lowpass, cutoff: 0.23.hz.lfo.at(130..2500))

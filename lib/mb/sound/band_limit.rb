@@ -110,8 +110,6 @@ module MB
       # Passed as the fade band for a naive (unband-limited) warped waveform.
       NEVER = [Float::INFINITY, Float::INFINITY].freeze
 
-      INV_2PI = 1.0 / (2.0 * Math::PI)
-
       # Phases this close to an edge (cycles) count as on it.
       EPS = 1e-9
 
@@ -329,7 +327,7 @@ module MB
       end
 
       # Ruby mirror of MB::Sound::FastSynth.oscillate_bl, returning +count+
-      # samples as an SFloat.  +freq+, +phase_mod+ (radians), and +width+ are
+      # samples as an SFloat.  +freq+, +phase_mod+ (cycles), and +width+ are
       # Numerics or NArrays (+width+ nil for 0.5); +state+ is the phasor's
       # [phi] and +bl_state+ the band-limiting state, both updated like the C
       # version.
@@ -368,7 +366,7 @@ module MB
           steps = inc * i unless freqs
 
           e = wrap(phi + steps)
-          e = wrap(e + pm * INV_2PI) if pm != 0
+          e = wrap(e + pm) if pm != 0
           snapped = snap(points, e)
           if snapped
             e = points[snapped][0]
@@ -377,7 +375,7 @@ module MB
             v = shape(wave_type, warp(e, w))
           end
 
-          d_back = prev_inc + (pm - prev_pm) * INV_2PI
+          d_back = prev_inc + (pm - prev_pm)
           if i > 0 && d_back == pending_d
             v += pending
           elsif primed && (i > 0 || (wrap(prev_e + d_back - e + 0.5) - 0.5).abs < 1e-6)
@@ -391,7 +389,7 @@ module MB
           else
             next_pm = pm + (pm - (i > 0 || primed ? prev_pm : pm))
           end
-          d_fwd = inc + (next_pm - pm) * INV_2PI
+          d_fwd = inc + (next_pm - pm)
           before, pending = step(points, e, d_fwd, advance, fade_lo, fade_hi)
           v += before
           pending_d = d_fwd

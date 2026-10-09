@@ -69,8 +69,8 @@ play '/tmp/ramp.flac'
 
 # Some hi-hat rhythms
 # (ramps in dB, converted to gains with 10 ** (dB / 20))
-play 1000.hz.sine.noise.at(-30.db).filter(7000.hz.highpass(quality: 10)).filter(12345.hz.lowpass(quality: 4)) * (10 ** (1.25.hz.ramp.with_phase(Math::PI).at(0..-60) / 20) + 10 ** (2.5.hz.ramp.at(-10..-70) / 20))
-play 1000.hz.sine.noise.at(-30.db).filter(7000.hz.highpass(quality: 10)).filter(12345.hz.lowpass(quality: 4)) * (10 ** (5.hz.ramp.with_phase(Math::PI).at(0..-60) / 20) + 10 ** (5.hz.ramp.at(-10..-70) / 20))
+play 1000.hz.sine.noise.at(-30.db).filter(7000.hz.highpass(quality: 10)).filter(12345.hz.lowpass(quality: 4)) * (10 ** (1.25.hz.ramp.with_phase(0.5).at(0..-60) / 20) + 10 ** (2.5.hz.ramp.at(-10..-70) / 20))
+play 1000.hz.sine.noise.at(-30.db).filter(7000.hz.highpass(quality: 10)).filter(12345.hz.lowpass(quality: 4)) * (10 ** (5.hz.ramp.with_phase(0.5).at(0..-60) / 20) + 10 ** (5.hz.ramp.at(-10..-70) / 20))
 
 # Heavily distorted synth kick
 play (2.5.hz.ramp.at(1.85) ** 13).filter(10.hz.highpass).softclip(0.1, 0.6).filter(cutoff: 2.5.hz.ramp.at(1..0) ** 10 * 0.2.hz.sine.at(120..300) + 40, quality: 14).filter(40.hz.highpass).softclip
@@ -87,7 +87,7 @@ play synth(voices: 6) { |v| v.hz.saw.filter(:lowpass, cutoff: v.cutoff(800), qua
 # Oversampling (this tells all graph nodes before .oversample to run at 4x
 # their previous sample rate)
 play 123.hz.ramp.at(1)
-  .pm(61.5.hz.triangle.at(2).adsr(0.05, 1.5, 0.7, 1, curve: 10))
+  .pm(61.5.hz.triangle.at(0.32).adsr(0.05, 1.5, 0.7, 1, curve: 10)) # PM depth in cycles
   .adsr(0.2, 0.5, 0.75, 1, curve: 20)
   .filter(:lowpass, cutoff: 100 + 3200 * adsr(0.2, 1.95, 0.05, 1, curve: 40), quality: 9)
   .softclip
@@ -95,7 +95,7 @@ play 123.hz.ramp.at(1)
 
 # Quantization/decimation
 play 123.hz.ramp.at(1)
-  .pm(61.5.hz.triangle.at(2).adsr(0.05, 1.5, 0.7, 1, curve: 10))
+  .pm(61.5.hz.triangle.at(0.32).adsr(0.05, 1.5, 0.7, 1, curve: 10)) # PM depth in cycles
   .adsr(0.2, 0.5, 0.75, 1, curve: 20)
   .filter(:lowpass, cutoff: 100 + 1600 * adsr(0.2, 1.95, 0.05, 1, curve: 40), quality: 0.7)
   .softclip

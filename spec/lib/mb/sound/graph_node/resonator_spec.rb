@@ -32,7 +32,7 @@ RSpec.describe(MB::Sound::GraphNode::Resonator, :aggregate_failures) do
   end
 
   it 'starts at the given phase' do
-    out = impulses(100, { 0 => 1 }).ping(100, decay: 1, phase: Math::PI / 2).sample(100)
+    out = impulses(100, { 0 => 1 }).ping(100, decay: 1, phase: 0.25).sample(100)
     expect(out[0]).to be_within(1e-6).of(1)
   end
 

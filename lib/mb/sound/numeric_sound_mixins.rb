@@ -146,12 +146,44 @@ module MB
 
       # Returns an oscillator Phase of this many cycles (1 cycle = 360
       # degrees = 2 pi radians): `440.hz.with_phase(0.25.cycles)`,
-      # `pm(mod, 0.4.cycles)`.  Also available as #cycle and #cyc.
+      # `pm(mod, 0.4.cycles)`.  Plain numbers are already cycles where a
+      # method takes a phase; this states the unit.  Also available as
+      # #cycle and #cyc.
       def cycles
         Phase.new(self)
       end
       alias cycle cycles
       alias cyc cycles
+
+      # Returns an oscillator Phase of this many radians (cycles × 2 pi),
+      # for phases and PM indices given in radians: `pm(mod, 2.4.radians)`,
+      # `fm_feedback(1.5.radians)`.  Replaces mb-math's Numeric#radians
+      # (which returned the number itself).  Also available as #radian and
+      # #rad.
+      def radians
+        Phase.radians(self)
+      end
+      alias radian radians
+      alias rad radians
+
+      # Returns an oscillator Phase of this many degrees (360 = 1 cycle):
+      # `440.hz.with_phase(90.degrees)` starts at the top of a sine.  Also
+      # available as #degree.
+      #
+      # This overrides mb-math's Numeric#degrees, which returned plain
+      # radians (user decision 2026-10-10: "override mb-math's method for
+      # now and we can move/refactor later"; it belongs in mb-math).  For
+      # trigonometry use `30.degrees.to_radians` (or #to_f, also radians).
+      # Complex numbers keep mb-math's version (complex radians), and
+      # mb-math's own callers keep working: MB::M.parse_complex is patched
+      # below to convert explicitly, and Phase#rotation gives
+      # `90.degrees.rotation`.
+      def degrees
+        return super unless real?
+
+        Phase.degrees(self)
+      end
+      alias degree degrees
 
       # Returns a Pitch at this frequency in Hz, which makes oscillators
       # (`100.hz.sine.at(-12.db)`) and plays as a sine when used as a signal.
@@ -209,5 +241,21 @@ module MB
     end
 
     ::Numeric.include(NumericSoundMixins)
+
+    # mb-math callers of Numeric#degrees that need plain radians (see
+    # NumericSoundMixins#degrees; move with the override into mb-math).
+    module MBMathDegreesPatch
+      # MB::M.parse_complex's polar form ('0.5<37' is 0.5 at 37 degrees),
+      # converting degrees to radians explicitly.
+      def parse_complex(v)
+        if v.is_a?(String) && v.match?(/\A\s*[+-]?(\.\d+|\d+(\.\d+)?)\s*<\s*[+-]?(\.\d+|\d+(\.\d+)?)\s*\z/)
+          mag, deg = v.split('<')
+          return Complex.polar(Float(mag.strip), Float(deg.strip) * Math::PI / 180.0)
+        end
+
+        super
+      end
+    end
+    ::MB::M.singleton_class.prepend(MBMathDegreesPatch)
   end
 end

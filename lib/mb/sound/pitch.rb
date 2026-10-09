@@ -127,7 +127,7 @@ module MB
       #            which in synth voices means new random phases at every
       #            note-on (key sync with random targets), so notes start
       #            without the zipping, flanging attack of copies starting
-      #            together; radians (e.g. 0) or a Phase (e.g. 0.25.cycles) start (and key sync) every copy
+      #            together; cycles (e.g. 0 or 0.25) or a Phase (e.g. 1.2.radians) start (and key sync) every copy
       #            at that phase, for a hard, repeatable attack; :reset leaves
       #            the block's oscillators as they are.  Call #free in the
       #            block for free-running copies that never reset (random
@@ -283,14 +283,14 @@ module MB
       def fm(tone_or_node, index = nil) = tone.fm(tone_or_node, index)
       def log_fm(tone_or_node, index = nil) = tone.log_fm(tone_or_node, index)
       def pm(tone_or_node, index = nil) = tone.pm(tone_or_node, index)
-      def pm_cycles(tone_or_node, index = nil) = tone.pm_cycles(tone_or_node, index)
-      alias pm_cyc pm_cycles
+      alias pm_cycles pm
+      alias pm_cyc pm
       def fm_feedback(amount, gain: nil, dc: false) = tone.fm_feedback(amount, gain: gain, dc: dc)
-      def fm_fb(amount, gain: nil, dc: false) = tone.fm_feedback(amount, gain: gain, dc: dc)
-      def fmfb(amount, gain: nil, dc: false) = tone.fm_feedback(amount, gain: gain, dc: dc)
-      def fm_feedback_cycles(cycles, gain: nil, dc: false) = tone.fm_feedback_cycles(cycles, gain: gain, dc: dc)
-      def fm_fb_cycles(cycles, gain: nil, dc: false) = tone.fm_feedback_cycles(cycles, gain: gain, dc: dc)
-      def fmfb_cycles(cycles, gain: nil, dc: false) = tone.fm_feedback_cycles(cycles, gain: gain, dc: dc)
+      alias fm_fb fm_feedback
+      alias fmfb fm_feedback
+      alias fm_feedback_cycles fm_feedback
+      alias fm_fb_cycles fm_feedback
+      alias fmfb_cycles fm_feedback
       def lfo = tone.lfo
       def sync(master = nil, ratio: nil) = tone.sync(master, ratio: ratio)
       def softsync(master = nil, ratio: nil) = tone.softsync(master, ratio: ratio)
@@ -342,7 +342,7 @@ module MB
       # Returns a phasor (a Tone that outputs its phase in cycles; see
       # Tone#phasor) at this pitch, starting at +phase+ (cycles).
       def phasor(phase: 0.0)
-        tone(:phasor).with_phase_cycles(phase % 1.0)
+        tone(:phasor).with_phase(Phase.cycles(phase) % 1.0)
       end
 
       # The sine this pitch plays as when used directly as a signal (created

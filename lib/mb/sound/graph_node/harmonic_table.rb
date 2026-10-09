@@ -14,8 +14,8 @@ module MB
       # at each update; the first is harmonic 1), or anything that responds
       # to #call, called at each update with the time in seconds since the
       # oscillator started and returning amplitudes, or [amplitudes, phases]
-      # (Arrays or NArrays).  +phases+ (radians, sine phase) may also be
-      # given as an Array.
+      # (Arrays or NArrays).  +phases+ (cycles or Phases, sine phase, e.g.
+      # 0.25 for a cosine) may also be given as an Array.
       #
       # Examples (bin/sound.rb):
       #     play 110.hz.harmonics([1, 0.5.hz.lfo.at(0..1), 0, 0.3.hz.lfo.at(0..0.5)]).at(0.3)
@@ -47,7 +47,7 @@ module MB
         # +frequency+ - Hz (a number or a graph node).
         # +spectrum+ - Amplitudes (an Array of numbers or nodes) or a
         #              callable (see the class description).
-        # +phases+ - Radians per harmonic (an Array), or nil for 0.
+        # +phases+ - Cycles per harmonic (an Array), or nil for 0.
         # +update+ - Samples between rebuilds (and the crossfade length).
         # +interpolation+ - See MB::Sound::Wavetable (default :optimal).
         def initialize(frequency:, spectrum:, phases: nil, update: DEFAULT_UPDATE, interpolation: nil, sample_rate: 48000)
@@ -201,7 +201,7 @@ module MB
           end
 
           amps = amps.to_a.map(&:to_f)
-          phases = phases&.to_a&.map(&:to_f)
+          phases = phases&.to_a&.map { |p| p.is_a?(Phase) ? p : p.to_f }
           [amps, phases]
         end
       end

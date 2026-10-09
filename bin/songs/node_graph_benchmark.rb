@@ -42,7 +42,7 @@ def benchmark_song
 
   c = (
     266.66667.hz.triangle.at(-4.db).softclip(0.05, 0.5).filter(1900.hz.lowpass1p) * 0.1.hz.lfo.at(0..1) +
-    250.hz.complex_triangle.at(-3.db).softclip(0.05, 0.5).filter(1900.hz.lowpass1p) * 0.1.hz.lfo.at(0..1).with_phase(Math::PI)
+    250.hz.complex_triangle.at(-3.db).softclip(0.05, 0.5).filter(1900.hz.lowpass1p) * 0.1.hz.lfo.at(0..1).with_phase(0.5)
   ).softclip(0.05, 0.25) * 10.db * cenv
 
   denv = song_envelope(4, 170, 1, 6)
@@ -72,7 +72,7 @@ def benchmark_song
   flanger_l = -4.db * l - -5.db * l.delay(seconds: 0.1.hz.triangle.lfo.at(0.001..0.008))
   final_l = flanger_l.softclip(0.5, 0.99)
 
-  flanger_r = -4.db * r - -5.db * r.delay(seconds: 0.1.hz.triangle.lfo.with_phase(Math::PI).at(0.001..0.008))
+  flanger_r = -4.db * r - -5.db * r.delay(seconds: 0.1.hz.triangle.lfo.with_phase(0.5).at(0.001..0.008))
   final_r = flanger_r.softclip(0.5, 0.99)
 
   [final_l, final_r, envelopes]
