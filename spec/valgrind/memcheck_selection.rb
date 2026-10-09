@@ -9,8 +9,9 @@
 # - ext/mb/sound/include/*.h -> every extension whose sources include it,
 #   directly or through other headers (scanned at run time; depend files
 #   aren't trusted)
-# - lib/**/*.rb mentioning a module an extension defines (`FastSynth`, word
-#   match) -> that extension
+# - lib/**/*.rb whose changed lines (added or removed) mention a module an
+#   extension defines (`FastSynth`, word match; the whole file when it is
+#   new or deleted) -> that extension
 # - a changed spec in SPECS -> that spec
 # - FULL_TRIGGERS, a changed Rakefile memcheck section, ruby_memcheck in
 #   Gemfile.lock, a new extension, or more than FULL_FRACTION of the
@@ -274,6 +275,22 @@ module MemcheckSelection
     to ? git('show', "#{to}:#{file}", allow_fail: true) : (File.file?(path(file)) ? File.read(path(file)) : nil)
   end
 
+  # Text a changed lib file is matched against for Fast* module names: the
+  # added and removed lines of its diff, or the whole file when it is new
+  # (or deleted).
+  def lib_change_text(f, base, to, synthetic, changes = {})
+    return changes[f] if changes.key?(f)
+    return file_content(f, to) if synthetic
+
+    old = git('cat-file', '-e', "#{base}:#{f}", allow_fail: true)
+    new = to ? git('cat-file', '-e', "#{to}:#{f}", allow_fail: true) : File.file?(path(f))
+    return file_content(f, to) unless old
+    return git('show', "#{base}:#{f}") unless new
+
+    git('diff', '-U0', '--no-renames', base, *to, '--', f).lines
+      .select { |l| l =~ /^[-+]/ && !l.start_with?('+++', '---') }.join
+  end
+
   # Line range of the memcheck section of the Rakefile (from its heading
   # comment to the end of the file).
   def rakefile_section(content)
@@ -287,7 +304,10 @@ module MemcheckSelection
   # Selects memcheck specs for the changes since +base+ (default: the
   # merge-base with master-ai).  +files+ replaces the git diff (synthetic
   # selections; a Rakefile listed there counts as a memcheck section change).
-  def select(base: nil, to: nil, files: nil, map: load_map)
+  # +changes+ ({file => changed lines}) stands in for the git diff of
+  # lib files in synthetic selections (files without an entry are matched
+  # whole, as new files are).
+  def select(base: nil, to: nil, files: nil, map: load_map, changes: {})
     synthetic = !files.nil?
     unless synthetic
       base = resolve_base(base)
@@ -331,7 +351,7 @@ module MemcheckSelection
       elsif f.start_with?('ext/')
         ignored << f
       elsif f.start_with?('lib/') && f.end_with?('.rb')
-        content = file_content(f, to) || (synthetic ? nil : git('show', "#{base}:#{f}", allow_fail: true))
+        content = lib_change_text(f, base, to, synthetic, changes)
         mods = content.to_s.scan(/\b(Fast[A-Z]\w*)\b/).flatten.uniq & module_extensions.keys
         mods.each { |m| exts[module_extensions[m]] << "#{f} (#{m})" }
         ignored << f if mods.empty?

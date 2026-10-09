@@ -92,6 +92,26 @@ RSpec.describe(MemcheckSelection) do
       expect(sel.extensions.keys).to eq(['fast_loudness'])
     end
 
+    it 'matches lib files on their changed lines when given' do
+      sel = MemcheckSelection.select(
+        files: ['lib/mb/sound/tone.rb'], map: map,
+        changes: { 'lib/mb/sound/tone.rb' => "-    MB::Sound::FastSynth.feedback_sine(a)\n+    x = 1\n" }
+      )
+      expect(sel.extensions.keys).to eq(['fast_synth'])
+
+      sel = MemcheckSelection.select(files: ['lib/mb/sound/tone.rb'], map: map, changes: { 'lib/mb/sound/tone.rb' => "+  # comment\n" })
+      expect(sel.empty?).to eq(true)
+    end
+
+    it 'uses only the changed lines of a lib file in a git diff' do
+      # c5c2867a (op-feedback) changed tone.rb, which names four extensions,
+      # but its changed lines name only FastSynth and FastArithmetic
+      text = MemcheckSelection.lib_change_text('lib/mb/sound/tone.rb', 'c5c2867a^1', 'c5c2867a', false)
+      mods = text.scan(/\bFast[A-Z]\w*/).uniq.sort
+      expect(mods).to include('FastSynth')
+      expect(mods).not_to include('FastWavetable')
+    end
+
     it 'selects a changed memcheck spec by itself' do
       sel = select('spec/lib/mb/sound/curve_spec.rb')
       expect(sel.extensions).to be_empty
