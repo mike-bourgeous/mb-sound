@@ -34,6 +34,10 @@ module MB
         # The compiled program (nil before the region first plays).
         attr_reader :program
 
+        # The products folded to zero in the program (Op::ZeroFold; see
+        # Plan::Fold), after it compiled.
+        attr_reader :folds
+
         # Why the region stopped planning (nil while it plans).
         attr_reader :disabled
 
@@ -105,7 +109,9 @@ module MB
 
           @input_ops = b.inputs
           @param_ops = b.params
-          @program = Program.new(ops: b.ops, inputs: b.inputs, params: b.params, output: output, title: Plan.node_label(@root))
+          ops, @folds = Fold.zero_products(b.ops)
+          Fold.report(@folds)
+          @program = Program.new(ops: ops, inputs: b.inputs, params: b.params, output: output, title: Plan.node_label(@root))
           @program.lower if @installation.engine == :c
           @inputs = Array.new(@input_ops.length)
           @params = Array.new(@param_ops.length)

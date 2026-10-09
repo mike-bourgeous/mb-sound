@@ -260,3 +260,67 @@ RSpec.describe(MB::Sound::Plan, 'arithmetic ops') do
     end
   end
 end
+
+RSpec.describe(MB::Sound::Plan::Fold) do
+  let(:src) { PlanSpecHelpers::Source }
+
+  around do |ex|
+    old = MB::Sound::Plan.fold_warnings
+    MB::Sound::Plan.fold_warnings = false
+    ex.run
+  ensure
+    MB::Sound::Plan.fold_warnings = old
+  end
+
+  def folds(r)
+    r.regions.flat_map { |g| g.folds || [] }
+  end
+
+  it 'folds 0 * x to 0 and propagates through later products, matching the unfused graph' do
+    r = plan_compare(check: :raise) { (src.new(seed: 1) * 1 * 0) * 3 * src.new(seed: 2) + src.new(seed: 3) * 1 }
+    expect(folds(r).length).to be >= 2
+    expect(folds(r).map(&:primary)).to include(true, false)
+    expect(r.program.to_s).to include('folded: 0 *')
+  end
+
+  it 'keeps running the folded factor\'s ops, so their nodes\' state advances as unfused (checked per block)' do
+    r = plan_compare(check: :raise) {
+      tone = 123.hz.ramp.pm(src.new(seed: 1) * 0.5)
+      tone * 0 + 77.hz.sine * 0.5
+    }
+    expect(folds(r).length).to eq(1)
+    expect(r.program.tones.length).to eq(2)
+  end
+
+  it 'keeps Tee branches of the folded factor in step with their other readers' do
+    s = src.new(seed: 4)
+    x = s * 2
+    g = x * 0 + (x * 0.5).proc { |v| v } # the proc reads x's other branch outside the region
+    MB::Sound::Plan.install(g)
+    expect { 300.times { |i| g.sample([64, 128, 7][i % 3]) } }.not_to raise_error
+  end
+
+  it 'leaves a Constant node\'s live value of 0 unfolded (0 * node makes one)' do
+    r = plan_compare { 0 * (src.new(seed: 1) * 1) + 1 }
+    expect(folds(r)).to be_empty
+  end
+
+  it 'gives 0 where the unfused graph would give NaN for a non-finite factor (a patch bug)' do
+    inf = 0.constant.proc { |v| Numo::SFloat.new(v.length).fill(Float::INFINITY) }
+    g = inf * 1 * 0 + 1.constant * 1
+    MB::Sound::Plan.install(g)
+    expect(g.sample(16).to_a).to all(eq(1.0))
+  end
+
+  it 'lists folds in Plan.explain and warns once per kind of node' do
+    MB::Sound::Plan.fold_warnings = true
+    MB::Sound::Plan::Fold.instance_variable_set(:@warned, nil)
+    g = src.new(seed: 1) * 1 * 0 + src.new(seed: 2) * 1 * 0
+    text = nil
+    expect { text = MB::Sound::Plan.explain(g) }.to output(/folded 0 \* x to 0/).to_stderr
+    expect(text).to include('Folded 0 * x to 0').and include('x still computed')
+    expect { MB::Sound::Plan.install(g); g.sample(10) }.not_to output.to_stderr
+    g2 = src.new(seed: 3) * 1 * 0 + 1
+    expect { MB::Sound::Plan.install(g2); g2.sample(10) }.not_to output.to_stderr
+  end
+end
