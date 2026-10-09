@@ -43,6 +43,9 @@ module MB
             [:freeze, :plain],
             [:stretch, :plain],
             [:crush, :plain],
+            [:duck, :plain],
+            [:gate, :plain],
+            [:threshold, :plain],
           ].freeze
 
           # The delays, gains, and mixing of a reverb network, all in
@@ -78,7 +81,9 @@ module MB
           # +shimmer_window+ - the shimmer's grain length in seconds.
           # +max_stretch+ - the largest +:stretch+ the lines are sized for.
           # +seed+ - seeds the random LFO targets.
-          def initialize(layout:, params:, sample_rate:, diffusion_mod: nil, feedback_mod: nil, drive_mode: :soft, shimmer_window: 0.05, max_stretch: 1, seed: 0, ruby: ENV['MB_SOUND_REVERB'] == 'ruby')
+          # +dynamics+ - true to run the ducking and gate stage (+:duck:+,
+          #              +:gate:+, +:threshold:+).
+          def initialize(layout:, params:, sample_rate:, diffusion_mod: nil, feedback_mod: nil, drive_mode: :soft, shimmer_window: 0.05, max_stretch: 1, seed: 0, dynamics: false, ruby: ENV['MB_SOUND_REVERB'] == 'ruby')
             @layout = layout
             @diffusion_mod = diffusion_mod
             @feedback_mod = feedback_mod
@@ -86,6 +91,7 @@ module MB
             @shimmer_window = shimmer_window
             @max_stretch = max_stretch.to_f
             @seed = seed
+            @dynamics = dynamics
             @ruby = ruby
 
             @params = PARAMS.map { |name, _| params[name] }
@@ -154,6 +160,7 @@ module MB
               fdn_rate_scale: fmod ? fmod.rate_scales : Array.new(n, 1.0),
               fdn_phase: fmod ? fmod.phases : Array.new(n, 0.0),
               shimmer_phase: Array.new(n) { |i| i.to_f / n },
+              dynamics: @dynamics,
             }
           end
 

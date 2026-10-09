@@ -26,6 +26,13 @@
  *      read at their output taps tap[i] * size + depth * lfo (after the
  *      write, so a tap may be 0 samples; taps equal to the loops read the
  *      same samples as the loops).
+ *   5. With dynamics on, a peak follower on the inputs ducks or gates the
+ *      outputs (see rev_dynamics).
+ *
+ * The diffusion stages (steps 2-3) have no feedback, so #process runs
+ * them a block at a time, line by line (the same samples as the order
+ * above; each LFO has its own random stream so the order of lines doesn't
+ * matter), and only the feedback network one sample at a time.
  *
  * MB::Sound::FastReverb::Network.new(config) builds the state (see
  * Reverb::Network for the config Hash); #process(inputs, outputs, params)
@@ -65,6 +72,9 @@ enum rev_param {
 	P_FREEZE, // freeze (0..1)
 	P_SIZE, // delay scale for the FDN lines (1 = as built)
 	P_CRUSH, // bit depth in the loop (<= 0 off)
+	P_DUCK, // wet reduction in dB while the input is above the threshold
+	P_GATE, // gate hold time in seconds after the input falls below the threshold (<= 0 off)
+	P_THRESHOLD, // input level (linear peak) for ducking and the gate
 	P_COUNT
 };
 
@@ -142,6 +152,14 @@ struct rev_net {
 	double hp_c;
 	double crush_bits;
 	double crush_q;
+
+	// Ducking and gate (see rev_dynamics)
+	int dynamics;
+	double env;
+	double dyn_gain;
+	double hold;
+	double duck_db;
+	double duck_g;
 
 	double *x; // n scratch
 	double *u; // n scratch
@@ -617,6 +635,9 @@ static VALUE rev_initialize(VALUE self, VALUE config)
 	r->damp_hz = NAN;
 	r->hp_hz = NAN;
 	r->crush_bits = NAN;
+	r->duck_db = NAN;
+	r->dynamics = RTEST(cfg(config, "dynamics"));
+	r->dyn_gain = 1.0;
 
 	return self;
 }
@@ -633,6 +654,80 @@ static float *out_ptr(VALUE outputs, long idx, size_t count)
 		rb_raise(rb_eFrozenError, "Output %ld is frozen", idx);
 	}
 	return (float *)(nary_get_pointer_for_write(o) + nary_get_offset(o));
+}
+
+// Ducking and the gate: a peak follower on the inputs (instant attack,
+// DYN_ENV_TIME release) opens a gain that multiplies every output.
+// Ducking lowers the wet sound by P_DUCK dB while the input is above
+// P_THRESHOLD (falling over DUCK_FALL, recovering over DUCK_RISE); the
+// gate closes the wet sound P_GATE seconds after the input falls below
+// P_THRESHOLD (closing over GATE_FALL, opening over GATE_RISE): the
+// classic gated reverb.
+#define DYN_ENV_TIME 0.05
+#define DUCK_FALL 0.01
+#define DUCK_RISE 0.3
+#define GATE_FALL 0.02
+#define GATE_RISE 0.001
+static void rev_dynamics(struct rev_net *r, const struct mb_signal *in, const struct mb_signal *par, float **out, long count)
+{
+	long n = r->n;
+	double fs = r->sample_rate;
+	double env_c = exp(-1.0 / (DYN_ENV_TIME * fs));
+	double duck_fall = exp(-1.0 / (DUCK_FALL * fs));
+	double duck_rise = exp(-1.0 / (DUCK_RISE * fs));
+	double gate_fall = exp(-1.0 / (GATE_FALL * fs));
+	double gate_rise = exp(-1.0 / (GATE_RISE * fs));
+
+	for (long i = 0; i < count; i++) {
+		double m = 0;
+		for (long j = 0; j < n; j++) {
+			double a = fabs(mb_signal_at(&in[j], i));
+			if (a > m) {
+				m = a;
+			}
+		}
+		r->env = m > r->env ? m : r->env * env_c;
+		if (r->env < REV_FLUSH) {
+			r->env = 0;
+		}
+
+		double thr = mb_signal_at(&par[P_THRESHOLD], i);
+		double duck = mb_signal_at(&par[P_DUCK], i);
+		double gate = mb_signal_at(&par[P_GATE], i);
+		int above = r->env > thr;
+		double target = 1.0;
+		double c;
+
+		if (duck != r->duck_db) {
+			r->duck_db = duck;
+			r->duck_g = duck > 0 ? pow(10.0, -duck / 20.0) : 1.0;
+		}
+		if (above && duck > 0) {
+			target = r->duck_g;
+		}
+
+		if (gate > 0) {
+			if (above) {
+				r->hold = gate * fs;
+			} else if (r->hold > 0) {
+				r->hold -= 1.0;
+			}
+			if (!(r->hold > 0)) {
+				target = 0;
+			}
+			c = target < r->dyn_gain ? gate_fall : gate_rise;
+		} else {
+			c = target < r->dyn_gain ? duck_fall : duck_rise;
+		}
+
+		r->dyn_gain = target + (r->dyn_gain - target) * c;
+		if (fabs(r->dyn_gain - target) < REV_FLUSH) {
+			r->dyn_gain = target;
+		}
+		for (long j = 0; j < n; j++) {
+			out[j][i] = (float)(out[j][i] * r->dyn_gain);
+		}
+	}
 }
 
 /*
@@ -777,6 +872,9 @@ static VALUE rev_process(VALUE self, VALUE inputs, VALUE outputs, VALUE params, 
 			for (long i = 0; i < count; i++) {
 				out[j][i] = (float)bj[i];
 			}
+		}
+		if (r->dynamics) {
+			rev_dynamics(r, in, par, out, count);
 		}
 		r->pos = pos0 + count;
 		RB_GC_GUARD(in_vals);
@@ -962,6 +1060,9 @@ static VALUE rev_process(VALUE self, VALUE inputs, VALUE outputs, VALUE params, 
 		}
 	}
 
+	if (r->dynamics) {
+		rev_dynamics(r, in, par, out, count);
+	}
 	r->pos = pos0 + count;
 
 	RB_GC_GUARD(in_vals);

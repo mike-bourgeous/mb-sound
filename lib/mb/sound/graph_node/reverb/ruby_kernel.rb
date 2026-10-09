@@ -11,7 +11,7 @@ module MB
           # than C; for specs and MB_SOUND_REVERB=ruby.
           class RubyKernel
             LFO_STEP = 16
-            PARAM_COUNT = 12
+            PARAM_COUNT = 15
             MASK64 = 0xFFFF_FFFF_FFFF_FFFF
             FLUSH = 1e-30
 
@@ -79,6 +79,12 @@ module MB
               @damp_hz = @hp_hz = @crush_bits = Float::NAN
               @damp_c = @hp_c = @crush_q = 0.0
               @position = 0
+              @dynamics = !!c.fetch(:dynamics)
+              @env = 0.0
+              @dyn_gain = 1.0
+              @hold = 0.0
+              @duck_db = Float::NAN
+              @duck_g = 1.0
             end
 
             # See FastReverb::Network#process.
@@ -251,6 +257,8 @@ module MB
                 @position = pos + 1
               end
 
+              dynamics(ins, par, outs, count) if @dynamics
+
               outputs.each_with_index do |o, j|
                 o[0...count] = outs[j]
               end
@@ -263,6 +271,55 @@ module MB
             end
 
             private
+
+            # See rev_dynamics in fast_reverb.c.
+            def dynamics(ins, par, outs, count)
+              env_c = Math.exp(-1.0 / (0.05 * @rate))
+              duck_fall = Math.exp(-1.0 / (0.01 * @rate))
+              duck_rise = Math.exp(-1.0 / (0.3 * @rate))
+              gate_fall = Math.exp(-1.0 / (0.02 * @rate))
+              gate_rise = Math.exp(-1.0 / (0.001 * @rate))
+
+              count.times do |i|
+                m = 0.0
+                ins.each do |sig|
+                  a = at(sig, i).abs
+                  m = a if a > m
+                end
+                @env = m > @env ? m : @env * env_c
+                @env = 0.0 if @env < FLUSH
+
+                thr = at(par[14], i)
+                duck = at(par[12], i)
+                gate = at(par[13], i)
+                above = @env > thr
+                target = 1.0
+
+                unless duck == @duck_db
+                  @duck_db = duck
+                  @duck_g = duck > 0 ? 10.0 ** (-duck / 20.0) : 1.0
+                end
+                target = @duck_g if above && duck > 0
+
+                if gate > 0
+                  if above
+                    @hold = gate * @rate
+                  elsif @hold > 0
+                    @hold -= 1.0
+                  end
+                  target = 0.0 unless @hold > 0
+                  c = target < @dyn_gain ? gate_fall : gate_rise
+                else
+                  c = target < @dyn_gain ? duck_fall : duck_rise
+                end
+
+                @dyn_gain = target + (@dyn_gain - target) * c
+                @dyn_gain = target if (@dyn_gain - target).abs < FLUSH
+                outs.each do |o|
+                  o[i] = f32(o[i] * @dyn_gain)
+                end
+              end
+            end
 
             def floats(c, key, len)
               v = c.fetch(key)

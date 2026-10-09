@@ -245,6 +245,36 @@ RSpec.describe(MB::Sound::GraphNode::Reverb) do
     end
   end
 
+  describe 'ducking and gate' do
+    # A 50 ms noise burst at 0.5, then silence; wet output RMS per 10 ms.
+    def burst_rms(**params)
+      Numo::NArray.srand(4)
+      data = Numo::SFloat.new(48000).rand(-0.5, 0.5)
+      data[2400..] = 0
+      rev = MB::Sound::ArrayInput.new(data: [data]).reverb(room_size: 0.6, decay: 2, mod: false, dry: 0, extra_time: 0, **params)
+      Array.new(100) { b = rev.sample(480); Math.sqrt((b**2).mean) }
+    end
+
+    it 'cuts the tail off after the gate time' do
+      open = burst_rms
+      gated = burst_rms(gate: 0.2)
+      # Still open 100 ms after the burst; the follower falls below -30 dB
+      # about 140 ms after it (50 ms release), then 200 ms of hold and a
+      # 20 ms close
+      expect(gated[15]).to be_within(open[15] * 0.01).of(open[15])
+      expect(gated[55]).to be < open[55] * 2e-3
+      expect(gated[55]).to be >= 0
+    end
+
+    it 'ducks the tail while the input is loud' do
+      open = burst_rms
+      ducked = burst_rms(duck: 12)
+      expect(ducked[3] / open[3]).to be_within(0.05).of(-12.db)
+      # Mostly recovered a second later (300 ms rise)
+      expect(ducked[99] / open[99]).to be > 0.9
+    end
+  end
+
   describe 'room-size layout (friendly factory)' do
     it 'builds one from room_size, decay, or damping without a preset' do
       rev = 1.constant.reverb(room_size: 0.8, decay: 3.seconds, damping: 0.4)
@@ -283,7 +313,7 @@ RSpec.describe(MB::Sound::GraphNode::Reverb) do
     end
 
     it 'has room-size presets' do
-      [:plate, :shimmer, :grit, :lofi, :drone].each do |preset|
+      [:plate, :shimmer, :grit, :lofi, :gated, :drone].each do |preset|
         out = impulse(preset, total: 4800, outputs: 2)
         expect(out.map { |c| c.abs.max }.max).to be > 1e-4
         expect(out.all? { |c| c.isfinite.all? }).to be true

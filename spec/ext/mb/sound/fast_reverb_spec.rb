@@ -1,7 +1,7 @@
 RSpec.describe(MB::Sound::FastReverb::Network) do
   # A small random network config (lines, stages) with every feature
   # optionally switched on.
-  def config(lines: 4, stages: 2, feedback: true, diff_mod: false, fdn_mod: false, damp: false, seed: 3, extra: 0, diff_shape: 3, fdn_shape: 0, drive_mode: 0)
+  def config(lines: 4, stages: 2, feedback: true, diff_mod: false, fdn_mod: false, damp: false, seed: 3, extra: 0, diff_shape: 3, fdn_shape: 0, drive_mode: 0, dynamics: false)
     rng = Random.new(seed)
     sn = lines * stages
     taps = Array.new(lines) { rng.rand(20..60) }
@@ -37,6 +37,7 @@ RSpec.describe(MB::Sound::FastReverb::Network) do
       fdn_rate_scale: Array.new(lines) { rng.rand(0.7..1.3) },
       fdn_phase: Array.new(lines) { rng.rand },
       shimmer_phase: Array.new(lines) { |i| i.to_f / lines },
+      dynamics: dynamics,
     }
   end
 
@@ -44,7 +45,7 @@ RSpec.describe(MB::Sound::FastReverb::Network) do
   def params(**over)
     p = {
       diffusion_depth: 0, diffusion_rate: 0, depth: 0, rate: 0, lowpass: 0, highpass: 0,
-      drive: 0, shimmer: 0, shimmer_ratio: 2.0, freeze: 0, stretch: 1.0, crush: 0,
+      drive: 0, shimmer: 0, shimmer_ratio: 2.0, freeze: 0, stretch: 1.0, crush: 0, duck: 0, gate: 0, threshold: 0.1,
     }.merge(over)
     MB::Sound::GraphNode::Reverb::Network::PARAMS.map { |name, _| p.fetch(name) }
   end
@@ -109,6 +110,13 @@ RSpec.describe(MB::Sound::FastReverb::Network) do
     }
     compare(config(fdn_mod: true, damp: true), par)
     compare(config(fdn_mod: true), par)
+  end
+
+  it 'matches the Ruby mirror with ducking and a gate' do
+    compare(config(dynamics: true), params(duck: 12, threshold: 0.5))
+    compare(config(dynamics: true, feedback: false), params(gate: 0.0005, threshold: 0.7))
+    par = ->(count) { params(duck: Numo::SFloat.new(count).seq(0, 0.1), gate: 0.001, threshold: Numo::SFloat.new(count).fill(0.6)) }
+    compare(config(dynamics: true), par)
   end
 
   it 'gives the same samples at every block size' do

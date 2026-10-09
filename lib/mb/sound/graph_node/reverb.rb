@@ -233,6 +233,16 @@ module MB
             modulation: :chorus,
             seed: 5,
           },
+          gated: {
+            description: '1980s gated reverb: a big room cut off 0.25 s after the hit',
+            room_size: 0.7,
+            decay: 2.5,
+            damping: 0.3,
+            gate: 0.25,
+            threshold: -30.db,
+            modulation: false,
+            seed: 7,
+          },
           drone: {
             description: 'Endless ambient wash (30 s decay)',
             room_size: 1.0,
@@ -266,7 +276,7 @@ module MB
         OPTIONS = %i[
           extra_time channels stages diffusion_range feedback_range feedback_gain feedback_enabled
           predelay wet dry mix level seed show_internals loop_extra tuned_loop_extra decay room_size damping lowpass highpass drive drive_mode
-          crush shimmer shimmer_pitch shimmer_window freeze stretch max_stretch modulation diffusion_modulation
+          crush shimmer shimmer_pitch shimmer_window freeze stretch max_stretch modulation diffusion_modulation duck gate threshold
           diffusion_delays feedback_delays
         ].freeze
 
@@ -537,12 +547,23 @@ module MB
         #               +:shimmer_window:+ (default 50 ms).
         # +:freeze:+ - 0..1: 1 mutes the input and holds the tail (loop gain
         #              1, damping and highpass bypassed).
+        # After the network (on the wet sound, keyed by the input's peak):
+        # +:duck:+ - dB to lower the wet sound while the input is above
+        #            +:threshold:+ (falls in 10 ms, recovers over 300 ms),
+        #            so the reverb blooms in the gaps.
+        # +:gate:+ - seconds (or a Length) the wet sound stays open after
+        #            the input falls below +:threshold:+, then closes over
+        #            20 ms: the classic gated reverb (big room or plate,
+        #            gate 0.2-0.4 s, on drums).
+        # +:threshold:+ - the input peak level for both (default -30 dB).
+        #
         # +:stretch:+ - scales the feedback delays live (1 = as built; the
         #               lines are sized for +:max_stretch:+, default 2 for a
         #               node, else the number).
         def initialize(upstream:, channels:, output_channels:, stages:, sample_rate:, diffusion_range: nil, feedback_range: nil, feedback_gain: nil, feedback_enabled: true, predelay: 0, wet: 1, dry: 1, level: 1, seed: 0, show_internals: false,
                        diffusion_delays: nil, feedback_delays: nil, loop_extra: 0, tuned_loop_extra: nil, decay: nil, mix: nil, damping: nil, lowpass: nil, highpass: nil, drive: nil, drive_mode: :soft, crush: nil,
-                       shimmer: nil, shimmer_pitch: 12, shimmer_window: 0.05, freeze: nil, stretch: nil, max_stretch: nil, modulation: nil, diffusion_modulation: nil)
+                       shimmer: nil, shimmer_pitch: 12, shimmer_window: 0.05, freeze: nil, stretch: nil, max_stretch: nil, modulation: nil, diffusion_modulation: nil,
+                       duck: nil, gate: nil, threshold: -30.db)
           @random = Random.new(seed)
           @seed = seed
           @show_internals = !!show_internals
@@ -681,6 +702,9 @@ module MB
                 freeze: freeze == true ? 1 : (freeze || 0),
                 stretch: stretch,
                 crush: crush || 0,
+                duck: duck || 0,
+                gate: gate.is_a?(GraphNode) ? gate : MB::Sound::Length.seconds(gate || 0, sample_rate: @sample_rate).to_f,
+                threshold: threshold,
                 **modulation_params(modulation, MODULATION, ''),
                 **modulation_params(diffusion_modulation, DIFFUSION_MODULATION, 'diffusion_'),
               },
@@ -690,6 +714,7 @@ module MB
               shimmer_window: MB::Sound::Length.seconds(shimmer_window, sample_rate: @sample_rate).to_f,
               max_stretch: max_stretch,
               seed: (seed || 0) * 1_000_003 + 0x5EED,
+              dynamics: [duck, gate].any? { |v| v.is_a?(GraphNode) || (v && v != 0) },
             )
           end
 
