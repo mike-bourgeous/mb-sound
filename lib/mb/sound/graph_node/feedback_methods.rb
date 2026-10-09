@@ -32,9 +32,11 @@ module MB
         #     play input.feedback { |fb, input| input + fb.delay(5.ms) * 0.7 }
         #     # A one-pole lowpass built from nodes (fb is the previous sample)
         #     play noise.feedback { |fb, input| input + (fb - input) * 0.95 }
-        #     # Karplus-Strong (see bin/synths/pluck.rb)
-        #     exc = noise.at(0.5) * adsr(0, 0.003, 0, 0.003, hold: 0.003)
-        #     play exc.feedback { |fb, input| d = fb.delay(110.hz.period, smoothing: false); input + (d + d.delay(1.samples)) * 0.498 }
+        #     # Karplus-Strong (see bin/synths/pluck.rb): one period of noise into
+        #     # the delay line, the string is the loop's output (and_then keeps
+        #     # the input going, or the loop ends with it)
+        #     exc = (noise.at(0.5) * adsr(0, 0, 1, 0, hold: 110.hz.period)).and_then(0.constant)
+        #     play exc.feedback { |fb, input| d = (fb + input).delay(110.hz.period, smoothing: false); (d + d.delay(1.samples)) * 0.498 }
         def feedback(*args, compensate: true, sustain: true, &block)
           unless args.empty?
             raise ArgumentError, "#feedback is graph feedback and takes a block (`sig.feedback { |fb, input| ... }`); for FM operator self-feedback use #fm_feedback(#{args.map(&:inspect).join(', ')})"

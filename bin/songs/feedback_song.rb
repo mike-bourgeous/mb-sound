@@ -27,9 +27,10 @@
 #     bg :pipe, seq(A3, C4, E4).n8.loop.synth { |v| v.hz.saw * v.amp_env(0, 0.2, 0, 0.1) }.delay(3.n16, feedback: 0.7, dry: 1) { |d| d.fb { |fb| fb.filter(1500.hz.lowpass).softclip(0.3, 0.9) }; d.wet { |wet| wet.filter(5000.hz.lowpass) } }
 #     # A self-oscillating loop: a resonant bandpass and a softclip with loop gain above unity sing on their own (1.3 dies away)
 #     bg :sing, (noise.at(0.01) * adsr(0, 0.01, 0, 0.01, hold: false)).feedback { |fb, input| input + fb.delay(2.ms).filter(:bandpass, cutoff: 880, quality: 8).softclip(0.2, 0.5) * 2 }
-#     # A Karplus-Strong string excited by a kick drum, tuned by a clip
+#     # A Karplus-Strong string excited by a kick drum, tuned by a clip (the kick goes into the
+#     # delay line only, so it is heard through the string; add input to the result for a dry kick)
 #     bass = seq(E2, G2, D2, A1).n4.loop
-#     bg :kickstring, tr808(grid(16, kick: 'x...x...').loop).feedback { |fb, input| d = fb.delay(bass.period, smoothing: false); input * 0.3 + (d + d.delay(1.samples)) * 0.496 }
+#     bg :kickstring, tr808(grid(16, kick: 'x...x...').loop).feedback { |fb, input| d = (fb + input * 0.3).delay(bass.period, smoothing: false); (d + d.delay(1.samples)) * 0.496 }
 #     # Feedback through a moving delay: a flanger (try --feedback near -1 in bin/effects/flanger.rb)
 #     bg :flange, 110.hz.saw.at(0.2).feedback { |fb, input| (input + fb.delay(0.1.hz.lfo.at(0.0005..0.005), smoothing: false) * -0.85).softclip(0.8, 1) }
 #     # What a loop costs and does
@@ -59,7 +60,7 @@ module MB::Sound
       C4, E4, G4, C5, E5, C5, G4, E4,
       G3, B3, D4, G4, B4, G4, D4, B3,
     ).n16.loop
-    strings = arp.synth(voices: 6) { |v| pluck_voice(v, sustain: 2.5, damping: 6, pick: 0.006, release: 0.2) }
+    strings = arp.synth(voices: 6) { |v| pluck_voice(v, sustain: 2.5, damping: 6, release: 0.2) }
 
     # Tape echo: a dotted-eighth repeat whose loop runs through a band limit
     # and a soft saturator on every pass
@@ -90,7 +91,7 @@ module MB::Sound
     master_gain(-4.db)
     master { |mix| mix.softclip(0.7, 0.98) }
 
-    bg :strings, (tape * 1.8).pan(-0.15)
+    bg :strings, (tape * 0.9).pan(-0.15)
     at_bar(5) { bg :pad, flanged.pan(0.25), fade: 0 }
     at_bar(9) { bg :drums, drum_string, fade: 0 }
     at_bar(13) { stop :pad, fade: 2 }
