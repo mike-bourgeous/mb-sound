@@ -73,6 +73,17 @@ RSpec.describe(MB::Sound::ScheduleMethods) do
     # samples.  Notes put an edge on the sample whose window holds it
     # (floor), so a graph launched on a bar must start on that sample too,
     # or a clip's first note lands before its first sample and is lost.
+    # The MIDI transforms research (proposal §8, 2026-10-05) found the first
+    # note of a looping clip launched this way missing; fixed by a967d3f8.
+    it 'plays the first note of a looping clip launched on bar 3 (bar line on a sample)' do
+      clip = MB::Sound.seq(MB::Sound::A2).n1.legato(1/8r).loop
+      within do
+        MB::Sound.bg(:a, 0.constant)
+        MB::Sound.at_bar(3) { MB::Sound.bg(:b, clip.synth(voices: 1) { |v| v.gate }) }
+      end
+      expect(changes(run(96000 * 3)).first(2)).to eq([[0, 0], [192000, 1]])
+    end
+
     context 'when the bar line falls between samples' do
       let(:transport) { MB::Sound::Sequence::Transport.new(bpm: 112) }
       let(:bar2) { (transport.bar_length / transport.whole_notes_per_second * 48000).floor }
