@@ -56,6 +56,8 @@
 #include "mb_smooth.h"
 #include "mb_vec_exp2.h"
 
+#include "plan_filters.h"
+
 // Register kinds (Plan::Program::REG_KINDS)
 enum { REG_SLOT = 0, REG_INPUT = 1, REG_PARAM = 2, REG_OUT = 3 };
 
@@ -80,6 +82,7 @@ enum {
 	OP_SMOOTH,    // dst, a, object              dst = a smoothed (see run_smooth); object [smoother, jumps]
 	OP_MAX,       // dst, a, b                   dst = Numo::SFloat.maximum(a, b) (real)
 	OP_POWF,      // dst, a, b                   dst = a ** b by mb_vec_pow (Plan.precision :fast, a Constant base)
+	OP_SVF,       // dst, a, fc, q, g, object, sc  dst = Filter::SVF on a (plan_filters.c); fc/q/g registers or -1 (scalars sc[0..2]); sc[3]: remember the gain; object: the Filter::SVF
 };
 
 // Event list modes and entry kinds (Plan::EventList)
@@ -945,6 +948,9 @@ static VALUE ruby_run(VALUE self, VALUE words, VALUE scalars, VALUE objects, VAL
 			case OP_EVENTS: case OP_KEEP: case OP_SMOOTH: case OP_MAX:
 				len = 4;
 				break;
+			case OP_SVF:
+				len = 8;
+				break;
 			case OP_ENVELOPE:
 				if (pc + 5 > nwords || op[4] < 2 || op[4] > ENV_MAX_SEGMENTS) rb_raise(rb_eArgError, "Bad plan envelope at word %zu", pc);
 				len = 5 + 4 * (size_t)op[4] + 7;
@@ -1018,6 +1024,21 @@ static VALUE ruby_run(VALUE self, VALUE words, VALUE scalars, VALUE objects, VAL
 			case OP_POWF: {
 				if (cplx[d] || cplx[op[2]] || cplx[op[3]]) rb_raise(rb_eArgError, "Plan power is real only");
 				mb_vec_pow(ptrs[d], ptrs[op[2]], ptrs[op[3]], n);
+				break;
+			}
+
+			case OP_SVF: {
+				if (cplx[d] || cplx[op[2]]) rb_raise(rb_eArgError, "Plan SVF filters are real");
+				if (op[6] < 0 || op[6] >= RARRAY_LEN(objects)) rb_raise(rb_eArgError, "Bad plan SVF object at word %zu", pc);
+				if (op[7] < 0 || (size_t)op[7] + 4 > nscalars) rb_raise(rb_eArgError, "Bad plan SVF scalars at word %zu", pc);
+				struct mb_plan_param prm[3];
+				for (int k = 0; k < 3; k++) {
+					int r = op[3 + k];
+					if (r >= nregs || (r >= 0 && (cplx[r] || !ptrs[r]))) rb_raise(rb_eArgError, "Bad plan SVF parameter register at word %zu", pc);
+					prm[k].p = r >= 0 ? ptrs[r] : NULL;
+					prm[k].scalar = sc[op[7] + k];
+				}
+				mb_plan_svf(ptrs[d], ptrs[op[2]], &prm[0], &prm[1], &prm[2], sc[op[7] + 3] != 0, rb_ary_entry(objects, op[6]), n);
 				break;
 			}
 
@@ -1162,6 +1183,7 @@ static VALUE ruby_enums(VALUE self)
 	rb_hash_aset(h, ID2SYM(rb_intern("smooth")), INT2NUM(OP_SMOOTH));
 	rb_hash_aset(h, ID2SYM(rb_intern("max")), INT2NUM(OP_MAX));
 	rb_hash_aset(h, ID2SYM(rb_intern("powf")), INT2NUM(OP_POWF));
+	rb_hash_aset(h, ID2SYM(rb_intern("svf")), INT2NUM(OP_SVF));
 	rb_hash_aset(h, ID2SYM(rb_intern("ev_ramp")), INT2NUM(EV_RAMP));
 	rb_hash_aset(h, ID2SYM(rb_intern("events_held")), INT2NUM(EVENTS_HELD));
 	rb_hash_aset(h, ID2SYM(rb_intern("events_impulses")), INT2NUM(EVENTS_IMPULSES));

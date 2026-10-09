@@ -15,7 +15,7 @@ module MB
         # Register kinds and opcodes of the C executor (see fast_plan.c;
         # specs compare them with FastPlan.constants).
         REG_KINDS = { slot: 0, input: 1, param: 2, out: 3 }.freeze
-        OPCODES = { fill: 1, mul: 2, muls: 3, add: 4, adds: 5, div: 6, divs: 7, pow: 8, part: 9, tone: 10, copy: 11, shape: 12, note_freq: 13, events: 14, keep: 15, envelope: 16, smooth: 17, max: 18, powf: 19 }.freeze
+        OPCODES = { fill: 1, mul: 2, muls: 3, add: 4, adds: 5, div: 6, divs: 7, pow: 8, part: 9, tone: 10, copy: 11, shape: 12, note_freq: 13, events: 14, keep: 15, envelope: 16, smooth: 17, max: 18, powf: 19, svf: 20 }.freeze
 
         attr_reader :ops, :inputs, :params, :output
 
@@ -297,6 +297,11 @@ module MB
               [OPCODES[:smooth], reg(op.dst), reg(op.a), @objects.length - 1]
             when Op::Max
               [OPCODES[:max], reg(op.dst), reg(op.a), reg(op.b)]
+            when Op::FilterSvf
+              @objects << op.filter
+              cnum = ->(v) { v.is_a?(Const) ? v.parts[0] : 0.0 }
+              [OPCODES[:svf], reg(op.dst), reg(op.a), value_reg(op.cutoff), value_reg(op.quality), value_reg(op.gain),
+               @objects.length - 1, scalar(cnum.(op.cutoff), cnum.(op.quality), cnum.(op.gain), op.gain_input ? 1 : 0)]
             else
               raise ArgumentError, "No lowering for #{op.class}"
             end

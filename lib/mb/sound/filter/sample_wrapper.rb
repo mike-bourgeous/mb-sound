@@ -116,6 +116,53 @@ module MB
           end
         end
 
+        include Plan::Describable
+
+        # Plan layer (see Plan::Describable): SVF filters with their cutoff,
+        # quality, and gain inputs (Plan::Op::FilterSvf).
+        def plan_describe(p)
+          f = @base_filter
+          case f
+          when MB::Sound::Filter::SVF
+            gain_node = @inputs[:gain]
+            gain = gain_node ? p[gain_node] : p.const(f.gain || 1.0)
+            p.filter_svf(f, p[@source], cutoff: p[@inputs.fetch(:cutoff)], quality: p[@inputs.fetch(:quality)],
+                         gain: gain, gain_input: !gain_node.nil?)
+          else
+            raise Plan::Unsupported.new(self, plan_unsupported_reason)
+          end
+        end
+
+        def plan_unsupported_reason
+          case @base_filter
+          when MB::Sound::Filter::SVF
+            return 'an SVF without cutoff and quality inputs' unless @inputs.key?(:cutoff) && @inputs.key?(:quality)
+            return 'an SVF with inputs other than cutoff, quality, and gain' unless (@inputs.keys - [:cutoff, :quality, :gain]).empty?
+
+            nil
+          else
+            "a #{@base_filter.class.name.sub('MB::Sound::', '')} filter"
+          end
+        end
+
+        def plan_snapshot
+          f = @base_filter
+          return nil unless f.is_a?(MB::Sound::Filter::SVF)
+
+          [f.instance_variable_get(:@state).dup, f.cutoff, f.quality, f.gain]
+        end
+
+        def plan_restore(snapshot)
+          return unless snapshot
+
+          f = @base_filter
+          state, cutoff, quality, gain = snapshot
+          f.instance_variable_get(:@state).replace(state)
+          f.instance_variable_set(:@cutoff, cutoff)
+          f.instance_variable_set(:@quality, quality)
+          f.instance_variable_set(:@gain, gain)
+        end
+
         # See GraphNode#sources.
         def sources
           if @base_filter.respond_to?(:sources)
