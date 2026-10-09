@@ -31,7 +31,7 @@ RSpec.describe(MemcheckSelection) do
 
   describe '.header_users' do
     it 'finds the users of a shared header' do
-      expect(MemcheckSelection.header_users('ext/mb/sound/include/mb_svf.h')).to contain_exactly('fast_filter', 'fast_loop')
+      expect(MemcheckSelection.header_users('ext/mb/sound/include/mb_svf.h')).to contain_exactly('fast_filter', 'fast_loop', 'fast_plan')
     end
 
     it 'follows includes through other headers' do
@@ -90,7 +90,7 @@ RSpec.describe(MemcheckSelection) do
 
     it 'selects the users of a shared header' do
       sel = select('ext/mb/sound/include/mb_svf.h')
-      expect(sel.extensions.keys).to eq(['fast_filter', 'fast_loop'])
+      expect(sel.extensions.keys).to eq(['fast_filter', 'fast_loop', 'fast_plan'])
       expect(sel.specs).to include('spec/lib/mb/sound/filter/svf_spec.rb', 'spec/ext/mb/sound/fast_loop_spec.rb')
     end
 
@@ -186,6 +186,7 @@ RSpec.describe(MemcheckSelection) do
       )
       expect(MemcheckSelection.depend_problems_for(ext)).to contain_exactly(
         'ext/mb/sound/fast_filter/depend: fast_filter.o is missing ext/mb/sound/include/mb_svf.h',
+        'ext/mb/sound/fast_filter/depend: fast_filter.o is missing ext/mb/sound/include/mb_four_pole.h',
         "ext/mb/sound/fast_filter/depend: fast_filter.o lists ext/mb/sound/include/mb_envelope.h, which it doesn't include",
         'ext/mb/sound/fast_filter/depend: gone.o has no source file'
       )
