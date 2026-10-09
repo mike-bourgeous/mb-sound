@@ -22,11 +22,11 @@
 #
 # Karplus-Strong in the console (bin/sound.rb):
 #     exc = noise.at(0.5) * adsr(0, 0.003, 0, 0.003, hold: false)
-#     play exc.feedback { |y, x| d = y.delay(220.hz.period, smoothing: false); x + (d + d.delay(1.samples)) * 0.498 }
+#     play exc.feedback { |fb, input| d = fb.delay(220.hz.period, smoothing: false); input + (d + d.delay(1.samples)) * 0.498 }
 #     # The same string, out of tune without latency compensation (about 4 cents flat at 220 Hz)
-#     play exc.feedback(compensate: false) { |y, x| d = y.delay(220.hz.period, smoothing: false); x + (d + d.delay(1.samples)) * 0.498 }
+#     play exc.feedback(compensate: false) { |fb, input| d = fb.delay(220.hz.period, smoothing: false); input + (d + d.delay(1.samples)) * 0.498 }
 #     # A delay time that moves: the string bends (try a slow LFO)
-#     play exc.feedback { |y, x| d = y.delay((1 / (220.hz.freq * 0.3.hz.lfo.at(1..1.06))), smoothing: false); x + (d + d.delay(1.samples)) * 0.498 }
+#     play exc.feedback { |fb, input| d = fb.delay((1 / (220.hz.freq * 0.3.hz.lfo.at(1..1.06))), smoothing: false); input + (d + d.delay(1.samples)) * 0.498 }
 
 require 'bundler/setup'
 require 'mb-sound'
@@ -52,12 +52,12 @@ module MB::Sound
       cutoff = v.freq * (damping - (damping - 2) * wheel)
     end
 
-    string = burst.feedback { |y, x|
-      d = y.delay(v.period, smoothing: false, max_delay: 0.05)
+    string = burst.feedback { |fb, input|
+      d = fb.delay(v.period, smoothing: false, max_delay: 0.05)
       s = (d + d.delay(1.samples)) * (gain * 0.5)
       s = s.filter(:lowpass, cutoff: cutoff, quality: 0.5**0.5) if damping > 0
       s = (s * (1 + stretch)).softclip(0.3, 1) * (1.0 / (1 + stretch)) if stretch > 0
-      x + s
+      input + s
     }
 
     # Makeup gain to the level of the other synth scripts (a plucked string

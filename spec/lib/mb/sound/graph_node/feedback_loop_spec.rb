@@ -25,11 +25,11 @@ RSpec.describe(MB::Sound::GraphNode::FeedbackLoop) do
   # optional lowpass SVF at +damping+ times +f+.
   def ks(f, compensate: true, damping: nil)
     exc = MB::Sound.noise(seed: 1).at(0.5) * MB::Sound.adsr(0, 0.002, 0, 0.002, hold: false)
-    exc.feedback(compensate: compensate) { |y, x|
-      d = y.delay((48000.0 / f).samples, smoothing: false)
+    exc.feedback(compensate: compensate) { |fb, input|
+      d = fb.delay((48000.0 / f).samples, smoothing: false)
       lp = (d + d.delay(1.samples)) * 0.4985
       lp = lp.filter(:lowpass, cutoff: f * damping, quality: 0.5**0.5) if damping
-      x + lp
+      input + lp
     }
   end
 
@@ -80,7 +80,7 @@ RSpec.describe(MB::Sound::GraphNode::FeedbackLoop) do
 
     it 'counts the one-sample history when a path has no delay' do
       impulse = PlanSpecHelpers::Source.new(kind: :impulses, at: [0])
-      l = impulse.feedback { |y, x| x + y * 0.3 + y.delay(10.samples) * 0.3 }
+      l = impulse.feedback { |fb, input| input + fb * 0.3 + fb.delay(10.samples) * 0.3 }
       out = l.sample(40).to_a
       expect(l.latency).to eq(1.0)
       # x at 0, its echo through the delay at 10 (0.3), through the history at 1 (0.3)
@@ -91,7 +91,7 @@ RSpec.describe(MB::Sound::GraphNode::FeedbackLoop) do
   end
 
   describe 'fallback' do
-    let(:fm_loop) { -> { 220.hz.ramp.at(0.3).feedback { |y, x| x + 110.hz.pm(y.delay(2.ms) * 2).at(0.5) } } }
+    let(:fm_loop) { -> { 220.hz.ramp.at(0.3).feedback { |fb, input| input + 110.hz.pm(fb.delay(2.ms) * 2).at(0.5) } } }
 
     it 'raises in scripts for a node without loop ops' do
       expect { fm_loop.call }.to raise_error(MB::Sound::Plan::Unsupported, /oscillator.*live mode it runs as a block graph/)
@@ -119,10 +119,10 @@ RSpec.describe(MB::Sound::GraphNode::FeedbackLoop) do
 
       it 'runs a loop without a delay one sample at a time (the same samples as the op loop)' do
         l = nil
-        expect { l = 220.hz.ramp.at(0.3).feedback { |y, x| (x + (y - x) * 0.95).proc { |v| v } } }.to output.to_stderr
+        expect { l = 220.hz.ramp.at(0.3).feedback { |fb, input| (input + (fb - input) * 0.95).proc { |v| v } } }.to output.to_stderr
         expect(l.instance_variable_get(:@fallback).block).to eq(1)
         MB::Sound.live = false
-        ref = 220.hz.ramp.at(0.3).feedback { |y, x| x + (y - x) * 0.95 }
+        ref = 220.hz.ramp.at(0.3).feedback { |fb, input| input + (fb - input) * 0.95 }
         expect(Array.new(10) { l.sample(64).to_a }.flatten).to eq(Array.new(10) { ref.sample(64).to_a }.flatten)
       end
 
@@ -130,7 +130,7 @@ RSpec.describe(MB::Sound::GraphNode::FeedbackLoop) do
         impulse = -> { PlanSpecHelpers::Source.new(kind: :impulses, at: [0]) }
         l = nil
         expect {
-          l = impulse.call.feedback { |y, x| x + y.delay(300.samples, smoothing: false).proc { |v| v } * 0.5 }
+          l = impulse.call.feedback { |fb, input| input + fb.delay(300.samples, smoothing: false).proc { |v| v } * 0.5 }
         }.to output.to_stderr
         expect(l.instance_variable_get(:@fallback).block).to eq(256)
         out = Numo::SFloat.cast(Array.new(10) { l.sample(100).to_a }.flatten)
@@ -151,19 +151,19 @@ RSpec.describe(MB::Sound::GraphNode::FeedbackLoop) do
     end
 
     it "needs the block's result to use the loop variable" do
-      expect { 220.hz.sine.feedback { |y, x| x * 0.5 } }.to raise_error(ArgumentError, /doesn't use the loop variable/)
+      expect { 220.hz.sine.feedback { |fb, input| input * 0.5 } }.to raise_error(ArgumentError, /doesn't use the loop variable/)
     end
 
     it 'refuses nodes on the loop that are also read outside it' do
       inner = nil
       expect {
-        220.hz.sine.feedback { |y, x| inner = y.delay(10.samples) * 0.5; inner.get_sampler; x + inner }
+        220.hz.sine.feedback { |fb, input| inner = fb.delay(10.samples) * 0.5; inner.get_sampler; input + inner }
       }.to raise_error(ArgumentError, /also read outside/)
     end
 
     it 'refuses a delay with its own feedback inside a loop' do
       expect {
-        220.hz.sine.feedback { |y, x| x + y.delay(10.samples, feedback: 0.5) * 0.5 }
+        220.hz.sine.feedback { |fb, input| input + fb.delay(10.samples, feedback: 0.5) * 0.5 }
       }.to raise_error(MB::Sound::Plan::Unsupported, /no feedback:/)
     end
 
@@ -202,7 +202,7 @@ RSpec.describe(MB::Sound::GraphNode::FeedbackLoop) do
       MB::Sound::Plan.precision = :exact
       build = -> {
         x = 220.hz.sine * 0.5 * 0.3.hz.lfo.at(0.5..1)
-        x.feedback { |y, i| i + y.delay(3.hz.lfo.at(100..200).samples, smoothing: false).softclip * 0.5 } * 0.8
+        x.feedback { |fb, inp| inp + fb.delay(3.hz.lfo.at(100..200).samples, smoothing: false).softclip * 0.5 } * 0.8
       }
       planned = build.call
       inst = MB::Sound::Plan.install(planned)
@@ -233,7 +233,7 @@ RSpec.describe(MB::Sound::GraphNode::FeedbackLoop) do
         MB::Sound.synth('spec/test_data/c_major.mid', voices: 4) { |v|
           # (MB::Sound.noise isn't bit-identical across block sizes)
           exc = PlanSpecHelpers::Source.new(seed: 5, scale: 0.5) * v.env(0, 0.004, 0, 0.004)
-          exc.feedback { |y, x| d = y.delay(v.period, smoothing: false); x + (d + d.delay(1.samples)) * 0.499 } * v.amp_env(0, 1, 1, 0.1)
+          exc.feedback { |fb, input| d = fb.delay(v.period, smoothing: false); input + (d + d.delay(1.samples)) * 0.499 } * v.amp_env(0, 1, 1, 0.1)
         }
       }
       a = []

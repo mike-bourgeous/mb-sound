@@ -77,8 +77,8 @@ module MB
             raise ArgumentError, 'A delay with a feedback insert block needs a feedback: gain (a number or a node)'
           end
 
-          loop = self.feedback do |w, x|
-            delayed = (x + w * feedback).delay(time, seconds: seconds, smoothing: smoothing, max_delay: max_delay, interpolation: interpolation)
+          loop = self.feedback do |fb, input|
+            delayed = (input + fb * feedback).delay(time, seconds: seconds, smoothing: smoothing, max_delay: max_delay, interpolation: interpolation)
             out = insert.call(delayed)
             raise ArgumentError, "The delay's insert block must return a graph node (got #{out.inspect})" unless out.respond_to?(:sample)
 

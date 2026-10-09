@@ -90,8 +90,8 @@ MB::Sound.effect_script(
     # delay at any delay or block size (the delay absorbs the softclip's
     # half sample).  Until 2026-10-09 this ran in internal blocks with a
     # spy, the feedback delay shortened by a block.
-    wet = inp.feedback { |y, _|
-      (p.feedback * y.delay(lfo_mod.samples, smoothing: delay_smoothing2) - inp_delayed).softclip(0.85, 0.95)
+    wet = inp.feedback { |fb, _|
+      (p.feedback * fb.delay(lfo_mod.samples, smoothing: delay_smoothing2) - inp_delayed).softclip(0.85, 0.95)
     }.named('flanger loop')
 
     (inp * dryconst + wet * wetconst)

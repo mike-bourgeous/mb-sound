@@ -2,15 +2,16 @@ module MB
   module Sound
     module GraphNode
       # A feedback loop (GraphNode#feedback, alias #fb; #delay with a block):
-      # the graph built by a block from the loop variable +y+ (and the input
-      # +x+) is the loop's body, and +y+ is the loop's own output, so the body
+      # the graph built by a block from the loop variable (+fb+ in the
+      # examples) and the input (+input+) is the loop's body, and +fb+ is the
+      # loop's own output, so the body
       # can feed its output back into itself through any of the nodes that
       # have loop ops: arithmetic (Mixer, Multiplier, Constant, / and **),
       # shapers (softclip, clip, abs, quantize, antialiased or not), delays
-      # (`y.delay(t)`, any interpolation; constant, moving, or tempo-synced
+      # (`fb.delay(t)`, any interpolation; constant, moving, or tempo-synced
       # times), and SVF filters (`filter(:lowpass, cutoff:, quality:)`, any
       # type; cutoff, quality, and gain may move).  Nodes that don't depend
-      # on +y+ (the input, LFOs, envelopes, MIDI controls, delay times,
+      # on +fb+ (the input, LFOs, envelopes, MIDI controls, delay times,
       # cutoffs) can be anything: the graph computes them a block at a time
       # and the loop reads them per sample.
       #
@@ -20,23 +21,25 @@ module MB
       # loops) and short loops (Karplus-Strong strings, flangers, filters
       # built from nodes) work.  See Plan::Loop for the details.
       #
-      # == What y is
+      # == What the loop variable is
       #
-      # When every path from +y+ to the output goes through a delay, +y+ is
-      # the current output, and the delays give the loop its length:
-      # `x.feedback { |y| x + y.delay(t) * 0.5 }` is a comb filter whose
-      # echoes are exactly +t+ apart.  Otherwise (a path without a delay) +y+
-      # is the output one sample earlier: `x.feedback { |y| x + (y - x) *
-      # 0.99 }` is a one-pole lowpass.
+      # When every path from +fb+ to the output goes through a delay, +fb+
+      # is the current output, and the delays give the loop its length:
+      # `sig.feedback { |fb, input| input + fb.delay(t) * 0.5 }` is a comb
+      # filter whose echoes are exactly +t+ apart.  Otherwise (a path without
+      # a delay) +fb+ is the output one sample earlier:
+      # `sig.feedback { |fb, input| input + (fb - input) * 0.99 }` is a
+      # one-pole lowpass.
       #
       # == Latency compensation (on by default)
       #
       # The longest delay on the loop reads earlier by the latency of the
       # rest of the loop (the one-sample history, an antialiased shaper's
       # half sample, a lowpass SVF's group delay, other delays), so the
-      # loop's period is exactly that delay's time: `exc.feedback { |y| exc
-      # + (y.delay(t) ...).softclip }` repeats every +t+.  #latency gives the
-      # compensation of the last block; `compensate: false` turns it off.
+      # loop's period is exactly that delay's time:
+      # `exc.feedback { |fb, input| input + (fb.delay(t) ...).softclip }`
+      # repeats every +t+.  #latency gives the compensation of the last
+      # block; `compensate: false` turns it off.
       #
       # Delays shorter than the sinc kernel's reach (about 13 samples) can't
       # read the samples newer than the read position (they aren't computed
@@ -47,27 +50,27 @@ module MB
       # == Fallback
       #
       # A body with a node that has no loop op on the loop (an oscillator
-      # modulated by +y+, a four-pole filter, a reverb, a Ruby proc) can't
+      # modulated by +fb+, a four-pole filter, a reverb, a Ruby proc) can't
       # run per sample.  That's an error in scripts and specs; in live mode
       # (MB::Sound.live_error) it warns and runs the body as a graph in
-      # small blocks instead: +y+ is the output one block earlier and the
+      # small blocks instead: +fb+ is the output one block earlier and the
       # longest delay reads that much earlier (op latencies are not
       # compensated).  Short delays then cost a lot of CPU (a block of 1 for
       # loops without a delay).
       #
       # Examples (bin/sound.rb):
       #     # Comb filter / echo with exact 3/16 note repeats
-      #     play file_input('sounds/drums.flac').feedback { |y, x| x + y.delay(3.n16) * 0.5 }
+      #     play file_input('sounds/drums.flac').feedback { |fb, input| input + fb.delay(3.n16) * 0.5 }
       #     # Karplus-Strong pluck (see bin/synths/pluck.rb)
       #     exc = noise.at(0.5) * adsr(0, 0.005, 0, 0.005, hold: 0.005)
-      #     play exc.feedback { |y, x| x + y.delay(220.hz.period).then { |d| (d + d.delay(1.samples)) * 0.498 } }
+      #     play exc.feedback { |fb, input| input + fb.delay(220.hz.period).then { |d| (d + d.delay(1.samples)) * 0.498 } }
       #     # Tape echo with saturation and tone in the loop
       #     play input.delay(0.3, feedback: 0.7) { |fb| fb.filter(:lowpass, cutoff: 3000).softclip(0.5, 1) }
       class FeedbackLoop
         include GraphNode
         include GraphNode::SampleRateHelper
 
-        # The loop variable (+y+ in the block): the loop's output (see the
+        # The loop variable (+fb+ in the examples): the loop's output (see the
         # class description).  Its #sample is only used by the fallback.
         class Variable
           include GraphNode

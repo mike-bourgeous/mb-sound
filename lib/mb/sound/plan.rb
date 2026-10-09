@@ -70,7 +70,7 @@ module MB
     #
     # The executor runs ops a block at a time.  Feedback regions (the
     # loop-region API sketched in proposals/feedback_loops.md:
-    # `sig.delay(t, feedback: g) { |fb| ... }`, `feedback_loop { |y| ... }`)
+    # `sig.delay(t, feedback: g) { |fb| ... }`, `sig.feedback { |fb, input| ... }`)
     # will add a per-sample mode: a Program flagged as a loop, whose ops
     # run in one per-sample loop (each op as a scalar step), with state
     # slots for one-sample histories (Value of the previous sample, a

@@ -17,8 +17,8 @@ module MB
       #
       # - Op::LoopHistory: the loop output one sample earlier (z^-1), used when
       #   a path from the loop variable to the output has no delay (a one-pole
-      #   built from nodes, `x.feedback { |y| x + (y - x) * 0.1 }`).
-      # - Op::DelayRead / a ring write: a Filter::Delay node (`y.delay(t)`)
+      #   built from nodes, `sig.feedback { |fb, input| input + (fb - input) * 0.1 }`).
+      # - Op::DelayRead / a ring write: a Filter::Delay node (`fb.delay(t)`)
       #   reads its delay line before the sample's write, at its delay counted
       #   from the sample being computed (at least one sample), with its own
       #   time handling (Length::Source, smoothing) run per block outside the

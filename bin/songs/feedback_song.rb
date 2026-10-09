@@ -17,19 +17,19 @@
 #     feedback_song
 #
 # Snippets to try in bin/sound.rb:
-#     # A comb filter: echoes exactly 5 ms apart (y is the loop's own output)
-#     bg :comb, tr808(grid(16, kick: 'x...', snare: '..x.').loop).feedback { |y, x| x + y.delay(5.ms) * 0.8 }
-#     # A one-pole lowpass built from nodes (no delay: y is the previous sample)
-#     bg :lp, noise.at(0.3).feedback { |y, x| x + (y - x) * 0.97 }
+#     # A comb filter: echoes exactly 5 ms apart (fb is the loop's own output)
+#     bg :comb, tr808(grid(16, kick: 'x...', snare: '..x.').loop).feedback { |fb, input| input + fb.delay(5.ms) * 0.8 }
+#     # A one-pole lowpass built from nodes (no delay: fb is the previous sample)
+#     bg :lp, noise.at(0.3).feedback { |fb, input| input + (fb - input) * 0.97 }
 #     # Tape echo: the insert runs on every repeat; repeats stay exactly 3/16 apart
 #     bg :echo, seq(A3, C4, E4).n8.loop.synth { |v| v.hz.saw * v.amp_env(0, 0.2, 0, 0.1) }.delay(3.n16, feedback: 0.7, dry: 1) { |fb| fb.filter(2000.hz.lowpass).softclip(0.3, 0.9) }
 #     # A self-oscillating loop: a resonant bandpass and a softclip with loop gain above unity sing on their own (1.3 dies away)
-#     bg :sing, (noise.at(0.01) * adsr(0, 0.01, 0, 0.01, hold: false)).feedback { |y, x| x + y.delay(2.ms).filter(:bandpass, cutoff: 880, quality: 8).softclip(0.2, 0.5) * 2 }
+#     bg :sing, (noise.at(0.01) * adsr(0, 0.01, 0, 0.01, hold: false)).feedback { |fb, input| input + fb.delay(2.ms).filter(:bandpass, cutoff: 880, quality: 8).softclip(0.2, 0.5) * 2 }
 #     # A Karplus-Strong string excited by a kick drum, tuned by a clip
 #     bass = seq(E2, G2, D2, A1).n4.loop
-#     bg :kickstring, tr808(grid(16, kick: 'x...x...').loop).feedback { |y, x| d = y.delay(bass.period, smoothing: false); x * 0.3 + (d + d.delay(1.samples)) * 0.496 }
+#     bg :kickstring, tr808(grid(16, kick: 'x...x...').loop).feedback { |fb, input| d = fb.delay(bass.period, smoothing: false); input * 0.3 + (d + d.delay(1.samples)) * 0.496 }
 #     # Feedback through a moving delay: a flanger (try --feedback near -1 in bin/effects/flanger.rb)
-#     bg :flange, 110.hz.saw.at(0.2).feedback { |y, x| (x + y.delay(0.1.hz.lfo.at(0.0005..0.005), smoothing: false) * -0.85).softclip(0.8, 1) }
+#     bg :flange, 110.hz.saw.at(0.2).feedback { |fb, input| (input + fb.delay(0.1.hz.lfo.at(0.0005..0.005), smoothing: false) * -0.85).softclip(0.8, 1) }
 #     # What a loop costs and does
 #     l = noise.at(0.1).delay(0.3, feedback: 0.6) { |fb| fb.filter(3000.hz.lowpass).softclip }
 #     puts l.explain    # the loop program
@@ -68,8 +68,8 @@ module MB::Sound
     # A pad flanged by a feedback loop with a slowly sweeping delay
     chords = seq(A2, F2, C3, G2).n1.loop
     pad = chords.synth(voices: 2) { |v| (v.hz.saw + v.hz.transpose(7.01).saw) * v.amp_env(0.6, 1, 0.8, 1.5) * 0.12 }
-    flanged = pad.feedback { |y, x|
-      (x + y.delay(0.07.hz.lfo.at(0.0008..0.006), smoothing: false) * -0.8).softclip(0.6, 0.95)
+    flanged = pad.feedback { |fb, input|
+      (input + fb.delay(0.07.hz.lfo.at(0.0008..0.006), smoothing: false) * -0.8).softclip(0.6, 0.95)
     }
 
     # Drums ringing through a comb tuned to the bass line: the loop's delay
@@ -80,9 +80,9 @@ module MB::Sound
       snare: '....X.......X...',
       hat:   'x.x.x.x.x.xxx.x.',
     ).loop, kick: { tune: 48 })
-    drum_string = kit.feedback { |y, x|
-      d = y.delay(bass.period, smoothing: false)
-      x * 0.6 + (d + d.delay(1.samples)) * 0.49
+    drum_string = kit.feedback { |fb, input|
+      d = fb.delay(bass.period, smoothing: false)
+      input * 0.6 + (d + d.delay(1.samples)) * 0.49
     } * 0.3
 
     master_gain(-4.db)
