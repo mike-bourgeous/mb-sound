@@ -34,6 +34,33 @@ RSpec.describe(MB::Sound::GraphNode::Tee, aggregate_failures: true) do
     expect(a1).to be_frozen
   end
 
+  it 'makes its CircularBuffer and readers only when it first leaves lockstep' do
+    t = MB::Sound::GraphNode::Tee.new(157.hz.ramp, 3)
+    a, b, c = t.branches
+    3.times { [a, b, c].each { |x| x.sample(64) } }
+    expect(t.instance_variable_get(:@cbuf)).to be_nil
+    expect([a, b, c].map(&:reader)).to all(be_a(MB::Sound::GraphNode::Tee::IdleReader))
+    expect(a.length).to eq(0)
+
+    a1 = a.sample(64).dup
+    a2 = a.sample(64).dup # out of step: buffered from here
+    expect(t.instance_variable_get(:@cbuf)).to be_a(MB::Sound::CircularBuffer)
+    expect([a, b, c].map(&:reader)).to all(be_a(MB::Sound::CircularBuffer::Reader))
+    expect(b.sample(64)).to eq(a1)
+    expect(c.sample(128)).to eq(a1.concatenate(a2))
+    d = t.add_branch
+    expect(d.reader).to be_a(MB::Sound::CircularBuffer::Reader)
+  end
+
+  it 'destroys a branch that never left lockstep' do
+    a, b = 157.hz.tee
+    a.sample(10)
+    b.sample(10)
+    b.destroy
+    expect { b.sample(10) }.to raise_error(MB::Sound::GraphNode::Tee::BranchDestroyedError)
+    expect(a.sample(10).length).to eq(10)
+  end
+
   it 'passes a frozen source buffer through as it is' do
     buf = Numo::SFloat.new(100).fill(0.5).freeze
     a, b = 0.constant.proc { buf }.tee
