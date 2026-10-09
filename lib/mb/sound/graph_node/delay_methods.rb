@@ -248,19 +248,37 @@ module MB
         end
         alias multitap_delay multitap
 
-        # Appends a reverb to this node.  Named presets change default
-        # parameters, but you can override any of the preset's parameters.
+        # Appends a reverb to this node (see GraphNode::Reverb).  Named presets
+        # change default parameters, but you can override any of the preset's
+        # parameters.
         #
         # If this is a multi-output node (e.g. a splittable input object), then
         # the outputs are broken out as a multichannel input to the Reverb.
         #
-        # Presets: :room, :hall, :stadium, :space, :default.  See
-        # Reverb::PRESETS.
+        # Presets: :room, :hall, :stadium, :space, :default (the classic
+        # presets, as they sounded in 2026-01), plus the room-size presets
+        # :plate, :shimmer, :grit, :lofi, :gated, :drone.  See Reverb::PRESETS.
         #
-        # See MB::Sound::GraphNode::Reverb#initialize for parameter descriptions.
+        # The friendly form: without a preset, +:room_size:+ (0..1),
+        # +:decay:+ (the reverb time, RT60, in seconds or any Length), and
+        # +:damping:+ (0..1, how much faster highs decay) build a reverb
+        # from a room-size layout (see Reverb::ROOM_DEFAULTS), with subtle
+        # delay modulation on.  +:predelay:+, +:mix:+ (0..1) or +:wet:+ and
+        # +:dry:+, and every option below work with it too.
         #
-        # The +:extra_time+ parameter controls how much time to add to input
-        # objects to allow the reverb to decay.
+        # Options (see MB::Sound::GraphNode::Reverb#initialize for details):
+        # - layout: +:channels:+, +:stages:+, +:diffusion_range:+,
+        #   +:feedback_range:+, +:feedback_gain:+ or +:decay:+, +:seed:+,
+        #   +:loop_extra:+, +:feedback_enabled:+, +:predelay:+
+        # - mix: +:wet:+, +:dry:+, +:mix:+, +:extra_time:+ (silence added to
+        #   inputs so the tail rings out)
+        # - modulation: +:modulation:+ (alias +:mod:+; feedback lines) and
+        #   +:diffusion_modulation:+ (alias +:diffusion_mod:+): true, a
+        #   preset name (:subtle, :lush, :chorus, :seasick), a depth, or a
+        #   Hash of +:depth:+, +:rate:+, +:shape:+, +:spread:+
+        # - in the feedback loop: +:damping:+ or +:lowpass:+, +:highpass:+,
+        #   +:drive:+ (+:drive_mode:+), +:crush:+, +:shimmer:+
+        #   (+:shimmer_pitch:+), +:freeze:+, +:stretch:+ (most may be nodes)
         #
         # If +:output_channels+ is greater than one, then this method returns a
         # channel bundle (GraphNode::Channels).  Otherwise it returns a single
@@ -270,71 +288,10 @@ module MB
         # Example (bin/sound.rb):
         #     play file_input('sounds/drums.flac').reverb
         #     play file_input('sounds/piano0.flac').reverb(:space)
-        def reverb(preset = :default, extra_time: nil, output_channels: 1, channels: nil, stages: nil, diffusion_range: nil, feedback_range: nil, feedback_gain: nil, feedback_enabled: nil, predelay: nil, wet: nil, dry: nil, seed: nil, show_internals: false)
-          MB::Sound::GraphNode::Reverb.reverb(
-            preset,
-            input: self,
-            extra_time: extra_time,
-            output_channels: output_channels,
-            channels: channels,
-            stages: stages,
-            diffusion_range: diffusion_range,
-            feedback_range: feedback_range,
-            feedback_gain: feedback_gain,
-            feedback_enabled: feedback_enabled,
-            predelay: predelay,
-            wet: wet,
-            dry: dry,
-            seed: seed,
-            show_internals: show_internals
-          )
-        end
-
-        # Adds a reverb effect to this node using diffusion stages and a
-        # feedback delay network.  See GraphNode::FdnReverb for details.
-        #
-        # When called on a MultiOutput node (e.g. from InputChannelSplit),
-        # the individual outputs are automatically used as separate input
-        # channels to the reverb.
-        #
-        # When +tail+ is given (in seconds), the reverb continues processing
-        # silence after the inputs end, allowing the reverb tail to decay.
-        # Defaults to +decay + 0.5+.  Set +tail: 0+ or +tail: false+ to
-        # disable.
-        #
-        # Example:
-        #     play 440.hz.sine.adsr(0.005, 0.05, 1, 0.05, hold: 0.5).fdn_reverb(room_size: 0.8, decay: 3.0)
-        #
-        #     # Stereo file input -> stereo reverb
-        #     play file_input('sounds/synth0.flac').fdn_reverb
-        def fdn_reverb(room_size: 0.5, decay: 2.0, damping: 0.5, diffusion_steps: 4, channels: 8, output_channels: nil, wet: 0.3, dry: 0.7, seed: 0, sample_rate: self.sample_rate, tail: nil)
-          decay = MB::Sound::Length.seconds(decay, sample_rate: sample_rate)
-          tail = decay + 0.5 if tail.nil?
-          tail = 0 if tail == false
-          tail = MB::Sound::Length.seconds(tail, sample_rate: sample_rate)
-
-          input = if channel_count > 1
-            self.outputs.map { |out|
-              node = out.get_sampler
-              tail > 0 ? node.and_then(MB::Sound.silence(tail)) : node
-            }
-          else
-            tail > 0 ? self.and_then(MB::Sound.silence(tail)) : self
-          end
-
-          MB::Sound::GraphNode::FdnReverb.new(
-            input,
-            room_size: room_size,
-            decay: decay,
-            damping: damping,
-            diffusion_steps: diffusion_steps,
-            channels: channels,
-            output_channels: output_channels,
-            wet: wet,
-            dry: dry,
-            seed: seed,
-            sample_rate: sample_rate
-          )
+        #     play file_input('sounds/piano0.flac').reverb(room_size: 0.8, decay: 4, damping: 0.6, output_channels: 2)
+        #     play file_input('sounds/piano0.flac').reverb(:hall, mod: :lush, shimmer: 0.4, output_channels: 2)
+        def reverb(preset = nil, output_channels: 1, **options)
+          MB::Sound::GraphNode::Reverb.reverb(preset, input: self, output_channels: output_channels, **options)
         end
       end
     end

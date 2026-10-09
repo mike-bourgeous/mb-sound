@@ -60,6 +60,7 @@ module MemcheckSelection
     'spec/lib/mb/sound/filter/diode_ladder_spec.rb', # FastFilter.diode_ladder
     'spec/lib/mb/sound/filter/svf_spec.rb',          # FastFilter.svf
     'spec/lib/mb/sound/graph_node/resonator_spec.rb', # FastResonator.ping
+    'spec/lib/mb/sound/graph_node/reverb_spec.rb',   # FastReverb::Network through Reverb (modulation, loop processing, graph mode)
     'spec/lib/mb/sound/loudness_spec.rb',            # FastLoudness.true_peak
     'spec/lib/mb/sound/wavetable_spec.rb',           # FastWavetable
     'spec/lib/mb/sound/graph_node/wavetable_spec.rb',

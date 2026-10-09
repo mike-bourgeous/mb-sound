@@ -52,7 +52,7 @@ CASES = {
   multitap_modulated: -> { source.multitap(0.5.hz.lfo.at(0.001..0.005), 0.7.hz.lfo.at(0.002..0.006)).to_a.sum * 0.5 },
   multitap_stereo: -> { source.multitap(0.01, samples(733.3)).to_a },
   reverb_hall: -> { source.reverb(:hall) },
-  fdn_reverb: -> { source.fdn_reverb(seed: 1) },
+  reverb_room_size: -> { source.reverb(room_size: 0.5, decay: 2, seed: 1) },
 }
 
 MB::Sound.script(

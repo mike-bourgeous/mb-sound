@@ -18,4 +18,18 @@ RSpec.describe('bin/effects/reverb.rb') do
     expect($?).to be_success, "bin/effects/reverb.rb failed: #{output}"
     expect(MB::Sound::FFMPEGInput.parse_info(outfile).dig(:streams, 0, :channels)).to eq(1)
   end
+
+  it 'builds the room-size form with modulation and loop processing (the old fdn_reverb.rb options)' do
+    output = `bin/effects/reverb.rb --quiet --room-size 0.8 --decay 1.0 --damping 0.7 --mod lush --mod-rate 0.3 --drive 2 --drive-mode fold --crush 10 --shimmer 0.3 spec/test_data/arp_a7.flac #{outfile.shellescape} 2>&1`
+    expect($?).to be_success, output
+    info = MB::Sound::FFMPEGInput.parse_info(outfile)
+    expect(info.dig(:format, :duration)).to be_between(1.0, 3.5)
+    expect(info.dig(:streams, 0, :channels)).to eq(2)
+  end
+
+  it 'takes a preset with modulation off and draws its graph' do
+    output = `DISPLAY= bin/effects/reverb.rb --quiet -p plate --mod off --diffusion-mod 0.05 spec/test_data/arp_a7.flac #{outfile.shellescape} --graphviz 2>&1`
+    expect($?).to be_success, output
+    expect(File.size(outfile)).to be > 1000
+  end
 end

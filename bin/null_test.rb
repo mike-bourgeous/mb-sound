@@ -76,7 +76,7 @@ CASES = {
   'fx_multitap_delay' => "bin/effects/multitap_delay.rb -q -f #{ARP} %{out}",
   'fx_multitap_delay_frac' => "bin/effects/multitap_delay.rb -q -f --delay 0.10001 #{ARP} %{out}",
   'fx_reverb_hall' => "bin/effects/reverb.rb -q -f --preset hall #{ARP} %{out}",
-  'fx_fdn_reverb' => "bin/effects/fdn_reverb.rb -q -f #{ARP} %{out}",
+  'fx_reverb_room_size' => "bin/effects/reverb.rb -q -f --room-size 0.6 --decay 1.5 #{ARP} %{out}",
   'fx_grain_repeater' => "bin/effects/grain_repeater.rb -q -f #{ARP} %{out}",
 }.freeze
 

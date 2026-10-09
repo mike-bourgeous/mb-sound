@@ -54,7 +54,7 @@ RSpec.describe(MB::Sound::Session::Master) do
     end
 
     it 'accepts MultiOutput nodes' do
-      session.master { |l, r| l.fdn_reverb(output_channels: 2, dry: 1, wet: 0) }
+      session.master { |l, r| l.reverb(room_size: 0.2, output_channels: 2, dry: 1, wet: 0) }
       expect(run(800).map { |c| c[0].round(5) }).to eq([1, 1])
     end
 

@@ -156,9 +156,10 @@ RSpec.describe(MemcheckSelection) do
     end
 
     it 'runs everything when more than half of the extensions are affected' do
-      files = MemcheckSelection.extensions.first(9).map { |e| "#{e.dir}/extconf.rb" }
+      half = (MemcheckSelection.extension_names.length * MemcheckSelection::FULL_FRACTION).floor
+      files = MemcheckSelection.extensions.first(half + 1).map { |e| "#{e.dir}/extconf.rb" }
       expect(select(*files).full?).to eq(true)
-      expect(select(*files.first(8)).full?).to eq(false)
+      expect(select(*files.first(half)).full?).to eq(false)
     end
   end
 

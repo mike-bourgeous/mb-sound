@@ -213,7 +213,13 @@ module GraphSweep
       ['delay cubic and linear', ->(c) { c.sig.delay(c.mod(0.001, 0.003), interpolation: :cubic) + c.sig.delay(0.0021, interpolation: :linear) }],
       ['multitap', ->(c) { c.sig.multitap(0.001, c.mod(0.002, 0.003), 37.samples).mixdown }],
       ['reverb', ->(c) { c.stereo_sig.reverb(:room) }],
-      ['fdn_reverb', ->(c) { c.sig.fdn_reverb + c.sig.fdn_reverb(output_channels: 2).mixdown }],
+      ['reverb room-size factory', ->(c) { c.sig.reverb(room_size: 0.3, decay: 0.5, damping: 0.5) + c.sig.reverb(room_size: 0.2, decay: 0.3, output_channels: 2).mixdown }],
+      ['reverb modulation and loop processing', ->(c) {
+        c.stereo_sig.reverb(:room, mod: :lush, diffusion_mod: :subtle, lowpass: 4000, highpass: 80, drive: 2, crush: 10, shimmer: 0.3).mixdown
+      }],
+      ['reverb parameter nodes', ->(c) {
+        c.sig.reverb(room_size: 0.2, decay: 0.4, mod: { depth: c.mod(0, 0.001), rate: c.mod(0.2, 2) }, lowpass: c.mod(500, 8000), freeze: c.mod(0, 1), stretch: c.mod(0.8, 1.2), shimmer: c.mod(0, 1), drive: c.mod(0, 3), drive_mode: :fold, duck: c.mod(0, 12), gate: c.mod(0, 0.1))
+      }],
       ['chorus', ->(c) { c.stereo_sig.chorus(:juno2) }],
       ['chorus with hiss (HissGate)', ->(c) { c.sig.chorus(:juno1, hiss: -60) }],
       ['ping (Resonator)', ->(c) { c.trigger.ping(c.mod(200, 2000), decay: 0.05) }],

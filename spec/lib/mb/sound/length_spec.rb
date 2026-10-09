@@ -140,12 +140,13 @@ RSpec.describe(MB::Sound::Length, :aggregate_failures) do
       expect(MB::Sound::Sequence::Duration.whole_notes(0.5.seconds)).to eq(MB::Sound::Sequence.transport.whole_notes_per_second / 2)
     end
 
-    it 'with_buffer, smooth, reverb predelay, and fdn_reverb decay' do
+    it 'with_buffer, smooth, reverb predelay, and reverb decay' do
       expect(1.constant.with_buffer(1.ms).instance_variable_get(:@upstream_count)).to eq(48)
       expect(1.constant.smooth(60.samples)).to be_a(MB::Sound::GraphNode)
       expect(1.constant.smooth(100.ms)).to be_a(MB::Sound::GraphNode)
       expect { 1.constant.reverb(:hall, predelay: 10.ms).sample(10) }.not_to raise_error
-      expect { 1.constant.fdn_reverb(decay: 1.second, tail: 100.ms).sample(10) }.not_to raise_error
+      expect { 1.constant.reverb(decay: 1.second, extra_time: 100.ms).sample(10) }.not_to raise_error
+      expect(1.constant.reverb(decay: 1500.ms).parameters[:decay]).to eq(1.5)
     end
 
     it 'HaasPan delays' do

@@ -47,12 +47,11 @@ RSpec.describe('script runner scripts', :smoke) do
 
   # Effect script => extra arguments; each processes a short test file
   effects = {
-    'bin/effects/fdn_reverb.rb' => ['--decay', '0.3'],
     'bin/effects/flanger.rb' => ['--oversample', '1'],
     'bin/effects/grain_repeater.rb' => ['--delay', '0.05', '-n', '4'],
     'bin/effects/juno_chorus.rb' => ['--mode', 'lush', '--bbd', '--mix', '0.6'],
     'bin/effects/ping_pong_delay.rb' => ['--delay', '0.05', '--feedback', '0.3'],
-    'bin/effects/reverb.rb' => ['--preset', 'room', '-w', '-6'],
+    'bin/effects/reverb.rb' => ['--preset', 'room', '-w', '-6', '--mod', 'lush', '--drive', '2', '--shimmer', '0.3'],
     'bin/effects/reverse_delay.rb' => ['--delay', '0.1', '--oversample', '1'],
     'bin/effects/tape_delay.rb' => ['--feedback', '0.3', '--oversample', '1'],
     'bin/effects/multitap_delay.rb' => ['--delay', '0.05', '--oversample', '1'],
