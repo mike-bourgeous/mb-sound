@@ -51,6 +51,34 @@ module MB
       # DC instead (exact for echo centers of mass, a few cents flat for
       # strings with a lowpass near the pitch; per sample when inputs move).
       #
+      # == Sustain (on by default)
+      #
+      # A lowpass in a string's loop takes loop gain from its fundamental
+      # every period (at 2x the pitch, 0.26 dB: T60 0.47 s instead of 4.7 s
+      # at 440 Hz).  With `sustain: true` (or :pitch; user's request
+      # 2026-10-09, the default chosen by playability) a loop with SVF
+      # filters gets a hidden shelf on its pitch delay's input that makes
+      # the loop's gain at the pitch (1 / the delay's time) what it would be
+      # without the filters, so the ring time follows the loop's gains while
+      # the filters change the tone (T60 within 2% from 8x the pitch down
+      # to 2x, 5% at 1x, at 110-1760 Hz).  It is a high shelf (DC keeps its
+      # loop gain: a flat boost would make the loop's DC mode grow), capped
+      # at a boost of 2 (+6 dB; below about 0.6x the pitch the ring shortens
+      # again), and only boosts for gentle lowpasses (every SVF a lowpass
+      # with a quality up to 1 / sqrt(2), paths that join filtered alike):
+      # other filters can have more gain at the harmonics than at the
+      # pitch.  Where the filters have gain above 1 at the pitch (a
+      # resonant lowpass there) it cuts flat instead.  Loops without SVFs
+      # and `sustain: false` are unchanged; #delay echo loops have none
+      # (their pitch would be 1 / the echo time).  It follows moving
+      # cutoffs and delay times with Plan::Loop's pitch tracking (every 16
+      # samples, ramped; the same at any block size; held while nothing
+      # moves); #sustain_ratio gives the shelf's gain at the pitch.  Cost:
+      # one more SVF and multiply-add per sample (constant parameters, KS
+      # at 440 Hz: 0.62% of realtime instead of 0.52 at 512-sample blocks),
+      # about twice the pitch tracking's Ruby while parameters move (cutoff
+      # LFO: 7.0% instead of 3.8%).  Not in the fallback.
+      #
       # Delays shorter than the sinc kernel's reach (about 13 samples) can't
       # read the samples newer than the read position (they aren't computed
       # yet), so inside loops sinc reads blend into cubic reads from about
@@ -136,9 +164,20 @@ module MB
         # class description).
         attr_reader :compensate
 
+        # :pitch if the loop's gain at the pitch is normalized for its
+        # filters, false if not (see the class description).
+        attr_reader :sustain
+
+        # The sustain shelf's gain at the pitch for the last block (1.0
+        # without sustain, before the first block, or for a loop without
+        # SVF filters): the factor that makes up for the filters' loss.
+        def sustain_ratio
+          @program&.sustain ? @program.sustain_ratio : 1.0
+        end
+
         # Builds a loop on +input+ (a node or nil) by calling +block+ with
         # the loop variable (and +input+).  See GraphNode#feedback.
-        def initialize(input = nil, compensate: true, sample_rate: nil, &block)
+        def initialize(input = nil, compensate: true, sustain: true, sample_rate: nil, &block)
           raise ArgumentError, 'A feedback loop needs a block that builds its body from the loop variable' unless block
 
           @input = input
@@ -149,6 +188,11 @@ module MB
                         when false, nil then false
                         else raise ArgumentError, "compensate: must be true (:pitch), :dc, or false (got #{compensate.inspect})"
                         end
+          @sustain = case sustain
+                     when true, :pitch then :pitch
+                     when false, nil then false
+                     else raise ArgumentError, "sustain: must be true (:pitch) or false (got #{sustain.inspect})"
+                     end
           @variable = Variable.new(self)
           @node_type_name = 'FeedbackLoop'
 
@@ -228,7 +272,8 @@ module MB
         # scripts and specs, or warns and builds the fallback in live mode
         # (MB::Sound.live_error).
         def compile
-          @program = Compiler.new(self, @variable, @body, compensate: @compensate).program
+          @program = Compiler.new(self, @variable, @body, compensate: @compensate, sustain: @sustain).program
+          @sustain_ops = @program.params.grep(Plan::Loop::Op::SustainParam)
           @input_ops = @program.inputs
           @param_ops = @program.params
           @inputs = Array.new(@input_ops.length)
@@ -273,6 +318,8 @@ module MB
           end
 
           @param_ops.each_with_index do |op, i|
+            next if op.is_a?(Plan::Loop::Op::SustainParam) # (set below)
+
             v = op.constant.plan_param(count)
             @params[i] = v
             @values[op.dst] = v.is_a?(Numo::NArray) ? v : v.to_f
@@ -298,11 +345,14 @@ module MB
             @delays[i] = d
           end
 
+          # The latency and the sustain shelf at the pitch
+          track = @program.pitch_track(@values, n) if @compensate == :pitch || @program.sustain
+          set_sustain(track, n) if @program.sustain
+
           if (comp = @program.compensated)
             idx = rings.index { |g| g.equal?(comp) }
             if @compensate
-              l = @compensate == :dc ? @program.latency(@values) : @program.pitch_latency(@values, n)
-              l = l[0...n] if l.is_a?(Numo::NArray) && l.length > n
+              l = @compensate == :dc ? @program.latency(@values) : track[0]
               d = comp.last_delay
               @delays[idx] = d.is_a?(Numo::NArray) || l.is_a?(Numo::NArray) ? Numo::DFloat.cast(d - l) : d - l
               @latency = l.is_a?(Numo::NArray) ? l.mean : l
@@ -310,6 +360,21 @@ module MB
           end
 
           run(n)
+        end
+
+        # Sets the sustain shelf's params for a block of +n+ samples from
+        # Program#pitch_track's [latency, gain, rest] (cutoff from the pitch
+        # delay's time, per sample when it moves).
+        def set_sustain(track, n)
+          @sustain_ops.each do |op|
+            v = case op.role
+                when :gain then track[1]
+                when :rest then track[2]
+                when :cutoff then @program.sustain_cutoff(@program.pitch_ring.last_delay)
+                end
+            v = Numo::SFloat.cast(v.length > n ? v[0...n] : v) if v.is_a?(Numo::NArray)
+            @params[op.index] = v
+          end
         end
 
         def run(n)
@@ -410,11 +475,12 @@ module MB
           # The compiled Plan::Loop::Program.
           attr_reader :program
 
-          def initialize(loop, variable, body, compensate:)
+          def initialize(loop, variable, body, compensate:, sustain: false)
             @loop = loop
             @y = variable
             @body = body
             @compensate = compensate
+            @sustain = sustain
 
             traverse
             check_readers
@@ -534,18 +600,40 @@ module MB
             end
 
             rings = b.rings
-            if @compensate && !rings.empty?
-              # The longest delay absorbs the latency (node times count as
-              # longest; the first of equals)
+            sustain = nil
+            unless rings.empty?
+              # The longest delay sets the pitch and absorbs the latency
+              # (node times count as longest; the first of equals)
               best = rings.max_by.with_index { |g, i| [g.constant_samples || Float::INFINITY, -i] }
-              best.compensated = true
+              best.compensated = true if @compensate
+              best.pitched = true if @compensate || @sustain
+
+              # The sustain shelf on its input, for loops with SVF filters
+              sustain = sustain_shelf(b, best) if @sustain && b.ops.any? { |op| op.is_a?(Plan::Loop::Op::Svf) }
             end
 
             @program = Plan::Loop::Program.new(
               ops: b.ops, inputs: b.inputs, params: b.params, rings: rings, histories: b.histories,
-              output: @output, history: @history, title: Plan.node_label(@loop)
+              output: @output, history: @history, title: Plan.node_label(@loop), sustain: sustain
             )
             @program.lower
+          end
+
+          # Builds the sustain shelf (Plan::Loop::Program#pitch_track) on
+          # +ring+'s input: gain * x + rest * lowpass(x).
+          def sustain_shelf(b, ring)
+            b.node_stack.push(@loop)
+            x = ring.input
+            gain = b.sustain_param(:gain)
+            rest = b.sustain_param(:rest)
+            cutoff = b.sustain_param(:cutoff)
+            filter = MB::Sound::Filter::SVF.new(:lowpass, @loop.sample_rate, 1000, quality: Plan::Loop::Program::SUSTAIN_SHELF_Q)
+            lp = b.svf(filter, x, cutoff: cutoff, quality: Plan::Loop::Program::SUSTAIN_SHELF_Q, gain: 1.0)
+            y = b.add(b.mul(x, gain), b.mul(lp, rest))
+            ring.input = y
+            { input: x, output: y, filter: filter, gain: gain, rest: rest, cutoff: cutoff, svf: lp.op }
+          ensure
+            b.node_stack.pop
           end
 
           def describe_node(b, node)

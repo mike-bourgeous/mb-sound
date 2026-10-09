@@ -23,12 +23,12 @@ RSpec.describe(MB::Sound::GraphNode::FeedbackLoop) do
   # A Karplus-Strong string at +f+ Hz: a noise burst into a delay of one
   # period with a two-sample average (half a sample of latency), and an
   # optional lowpass SVF at +damping+ times +f+.
-  def ks(f, compensate: true, damping: nil)
+  def ks(f, compensate: true, damping: nil, sustain: true, quality: 0.5**0.5)
     exc = MB::Sound.noise(seed: 1).at(0.5) * MB::Sound.adsr(0, 0.002, 0, 0.002, hold: false)
-    exc.feedback(compensate: compensate) { |fb, input|
+    exc.feedback(compensate: compensate, sustain: sustain) { |fb, input|
       d = fb.delay((48000.0 / f).samples, smoothing: false)
       lp = (d + d.delay(1.samples)) * 0.4985
-      lp = lp.filter(:lowpass, cutoff: f * damping, quality: 0.5**0.5) if damping
+      lp = lp.filter(:lowpass, cutoff: f * damping, quality: quality) if damping
       input + lp
     }
   end
@@ -59,11 +59,14 @@ RSpec.describe(MB::Sound::GraphNode::FeedbackLoop) do
 
     it "tunes a string with a loop lowpass at the played pitch (within 0.05 cents at 4x and 8x, 0.25 at 2x)" do
       [[220, 8, 0.05], [880, 4, 0.05], [440, 2, 0.25]].each do |f, damp, tol|
-        l = ks(f, damping: damp)
-        d = l.sample(96000)[4800...(4800 + 65536)]
-        expect(cents(pitch(d, f), f).abs).to be < tol
-        expect(l.latency).to be_within(1e-9).of(ks_phase_delay(f, damp))
-        expect(l.compensate).to eq(:pitch)
+        [false, true].each do |sustain|
+          l = ks(f, damping: damp, sustain: sustain)
+          d = l.sample(96000)[4800...(4800 + 65536)]
+          expect(cents(pitch(d, f), f).abs).to be < tol
+          expect(l.compensate).to eq(:pitch)
+          # (with sustain, the shelf's phase at the pitch is in the latency)
+          expect(l.latency).to be_within(1e-9).of(ks_phase_delay(f, damp)) unless sustain
+        end
       end
     end
 
@@ -97,6 +100,25 @@ RSpec.describe(MB::Sound::GraphNode::FeedbackLoop) do
       expect(b.latency).to be_between(3.0, 8.0)
       # In tune while the cutoff sweeps (the fundamental over 1.4 s)
       expect(cents(pitch(x[4800...(4800 + 65536)], 440), 440).abs).to be < 0.1
+    end
+
+    it 'follows a highpass cutoff that changes after holding still (not only lowpasses and allpasses)' do
+      exc = MB::Sound.noise(seed: 1).at(0.5) * MB::Sound.adsr(0, 0.002, 0, 0.002, hold: false)
+      cutoff = 100.constant
+      l = exc.feedback(sustain: false) { |fb, input|
+        input + fb.delay(440.hz.period, smoothing: false).filter(:highpass, cutoff: cutoff, quality: 0.5**0.5) * 0.9
+      }
+      3.times { l.sample(512) }
+      before = l.latency
+      cutoff.constant = 400
+      3.times { l.sample(512) }
+      expect(l.latency).not_to eq(before)
+
+      ref = exc.feedback(sustain: false) { |fb, input|
+        input + fb.delay(440.hz.period, smoothing: false).filter(:highpass, cutoff: 400, quality: 0.5**0.5) * 0.9
+      }
+      ref.sample(512)
+      expect(l.latency).to be_within(1e-9).of(ref.latency)
     end
 
     it 'rejects an unknown compensation mode' do
@@ -134,6 +156,113 @@ RSpec.describe(MB::Sound::GraphNode::FeedbackLoop) do
       expect(out[0]).to eq(1.0)
       expect(out[1]).to be_within(1e-7).of(0.3)
       expect(out[10]).to be > 0.3
+    end
+  end
+
+  describe 'sustain' do
+    # The amplitude of +f+ Hz in +d+ over 20 periods from sample +start+
+    # (mean and trend removed: the loop's slowly decaying DC mode).
+    def level(d, f, start)
+      n = (20 * 48000.0 / f).round
+      x = Numo::DFloat.cast(d[start...(start + n)])
+      k = Numo::DFloat.new(n).seq
+      x -= x.mean
+      kc = k - (n - 1) / 2.0
+      x -= kc * ((x * kc).sum / (kc * kc).sum)
+      w = 2 * Math::PI * f / 48000
+      2 * Math.hypot((x * Numo::NMath.cos(k * w)).sum, (x * Numo::NMath.sin(k * w)).sum) / n
+    end
+
+    # T60 in seconds of the fundamental: a line fit to its level in dB
+    # every 10 periods from 0.05 s to the end of +d+ (less 20 periods) or
+    # until it is 50 dB down
+    def t60(d, f)
+      step = (10 * 48000.0 / f).round
+      pts = (2400...(d.length - 2 * step)).step(step).map { |i| [i / 48000.0, 20 * Math.log10(level(d, f, i))] }
+      pts = pts.take_while { |_, y| y > pts[0][1] - 50 }
+      mx = pts.sum(&:first) / pts.length
+      my = pts.sum(&:last) / pts.length
+      slope = pts.sum { |x, y| (x - mx) * (y - my) } / pts.sum { |x, _| (x - mx)**2 }
+      -60 / slope
+    end
+
+    it 'keeps the fundamental ringing as long as without the loop lowpass (T60 within 2%, 5% at the pitch), from 8x down to the pitch' do
+      [110, 440, 1760].each do |f|
+        ref = t60(ks(f).sample(48000), f)
+        [8, 4, 2, 1].each do |damp|
+          l = ks(f, damping: damp)
+          d = l.sample(48000)
+          expect(t60(d, f)).to be_within(ref * (damp == 1 ? 0.05 : 0.02)).of(ref), "#{f} Hz, lowpass at #{damp}x"
+          h = MB::Sound::Filter::SVF.new(:lowpass, 48000, f * damp, quality: 0.5**0.5).response(2 * Math::PI * f / 48000).abs
+          # (aimed a little below 1 / h: see Program#sustain_stretch)
+          expect(l.sustain_ratio).to be_within(0.01 / h).of(1 / h)
+        end
+        # Without sustain, a lowpass at 2x the pitch rings a tenth as long
+        # (110-440 Hz; a quarter at 1760 Hz, where the average damps too)
+        expect(t60(ks(f, damping: 2, sustain: false).sample(48000), f)).to be < ref * (f < 1000 ? 0.12 : 0.3)
+      end
+    end
+
+    it 'limits the boost (a lowpass at half the pitch rings shorter again, but stays stable)' do
+      l = ks(440, damping: 0.5)
+      d = l.sample(96000)
+      expect(l.sustain_ratio).to be_between(2.0, 2.2)
+      expect(d[-4800..].abs.max).to be < 1e-3
+      expect(d.to_a.all?(&:finite?)).to eq(true)
+    end
+
+    it 'leaves loops without SVF filters and filter types other than gentle lowpasses unboosted' do
+      plain = ks(440)
+      expect(plain.program.sustain).to be_nil
+      expect(plain.sample(4800)).to eq(ks(440, sustain: false).sample(4800))
+
+      exc = MB::Sound.noise(seed: 1).at(0.5) * MB::Sound.adsr(0, 0.002, 0, 0.002, hold: false)
+      hp = exc.feedback { |fb, input| input + fb.delay(440.hz.period, smoothing: false).filter(:highpass, cutoff: 660, quality: 0.5**0.5) * 0.99 }
+      d = hp.sample(96000)
+      expect(hp.sustain_ratio).to eq(1.0)
+      expect(d[-4800..].abs.max).to be < 1e-3
+
+      resonant = ks(440, damping: 0.8, quality: 1)
+      resonant.sample(4800)
+      expect(resonant.sustain_ratio).to eq(1.0)
+    end
+
+    it 'cuts flat where a filter has gain above 1 at the pitch' do
+      l = ks(440, damping: 1, quality: 2)
+      l.sample(4800)
+      expect(l.sustain_ratio).to be_within(0.005).of(1 / 2.0)
+    end
+
+    it 'is off for #delay echo loops and with sustain: false' do
+      expect(MB::Sound.noise.delay(0.1, feedback: 0.5) { |fb| fb.filter(:lowpass, cutoff: 3000) }.sustain).to eq(false)
+      expect(ks(440, sustain: false).sustain).to eq(false)
+      expect(ks(440, damping: 2).sustain).to eq(:pitch)
+    end
+
+    it 'rejects an unknown sustain mode' do
+      expect { MB::Sound.noise.feedback(sustain: :dc) { |fb, input| input + fb.delay(0.01) * 0.5 } }.to raise_error(ArgumentError, /sustain/)
+    end
+
+    it 'keeps a swept cutoff in tune and the same at every block size' do
+      make = -> {
+        exc = MB::Sound.noise(seed: 1).at(0.5) * MB::Sound.adsr(0, 0.002, 0, 0.002, hold: false)
+        exc.feedback { |fb, input|
+          d = fb.delay((48000.0 / 440).samples, smoothing: false)
+          input + ((d + d.delay(1.samples)) * 0.4985).filter(:lowpass, cutoff: 3.hz.lfo.at(330..1320), quality: 0.5**0.5)
+        }
+      }
+      a = make.call
+      x = Array.new(375) { a.sample(256).to_a }.flatten
+      b = make.call
+      sizes = [1, 37, 512, 15, 800, 64, 16, 333]
+      y = []
+      i = 0
+      y.concat(b.sample(sizes[(i += 1) % sizes.length]).to_a) while y.length < x.length
+      expect(y.first(x.length)).to eq(x)
+      expect(cents(pitch(x[4800...(4800 + 65536)], 440), 440).abs).to be < 0.1
+      # The fundamental still rings after 1.5 s of the cutoff dipping below
+      # the pitch (without sustain it is gone, under -180 dB)
+      expect(level(x, 440, 74400)).to be > 1e-4
     end
   end
 

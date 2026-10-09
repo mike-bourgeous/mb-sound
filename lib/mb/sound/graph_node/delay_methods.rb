@@ -96,7 +96,8 @@ module MB
           delay_opts = { seconds: seconds, smoothing: smoothing, max_delay: max_delay, interpolation: interpolation }
           pipeline = nil
 
-          loop = self.feedback do |fb, input|
+          # (echo loops: no sustain shelf, whose pitch would be 1 / time)
+          loop = self.feedback(sustain: false) do |fb, input|
             delayed = (input + fb * feedback).delay(time, **delay_opts)
             pipeline = InsertPipeline.new(delayed)
             out = pipeline.call(insert)

@@ -75,6 +75,12 @@ RSpec.describe(MB::Sound::Plan::Loop) do
         input + (pk + bp * 0.3).softclip * 0.7
       }
     },
+    'a sustain shelf with a sweeping loop lowpass and a gliding delay (boost ramps every 16 samples)' => ->(s) {
+      s.input(4, 0.2).feedback { |fb, input|
+        d = fb.delay(1.7.hz.lfo.at(100..140).samples)
+        input + ((d + d.delay(1.samples)) * 0.4985).filter(:lowpass, cutoff: 2.3.hz.lfo.at(250..1500), quality: 0.5**0.5)
+      }
+    },
     'division, power, and a plain shaper' => ->(s) {
       s.input.feedback { |fb, input|
         d = fb.delay(64.samples)

@@ -19,7 +19,10 @@ module MB
         # absorbs the loop's other latency (by default its phase delay at the
         # loop's fundamental; `compensate: :dc` uses the group delay at DC),
         # so its time is the loop's period (`compensate: false` turns that
-        # off; FeedbackLoop#latency).
+        # off; FeedbackLoop#latency).  With SVF filters on the loop, the
+        # loop's gain at that pitch is normalized for the filters' loss
+        # there (`sustain: true`, the default; see FeedbackLoop), so the ring
+        # time follows the loop's gains while the filters change its tone.
         #
         # (Tone's FM operator self-feedback, #feedback until 2026-10-09, is
         # Tone#fm_feedback.)
@@ -32,13 +35,13 @@ module MB
         #     # Karplus-Strong (see bin/synths/pluck.rb)
         #     exc = noise.at(0.5) * adsr(0, 0.003, 0, 0.003, hold: 0.003)
         #     play exc.feedback { |fb, input| d = fb.delay(110.hz.period, smoothing: false); input + (d + d.delay(1.samples)) * 0.498 }
-        def feedback(*args, compensate: true, &block)
+        def feedback(*args, compensate: true, sustain: true, &block)
           unless args.empty?
             raise ArgumentError, "#feedback is graph feedback and takes a block (`sig.feedback { |fb, input| ... }`); for FM operator self-feedback use #fm_feedback(#{args.map(&:inspect).join(', ')})"
           end
           raise ArgumentError, 'Pass a block that builds the loop body from the loop variable: `sig.feedback { |fb, input| input + fb.delay(t) * 0.5 }`' unless block
 
-          FeedbackLoop.new(self, compensate: compensate, &block)
+          FeedbackLoop.new(self, compensate: compensate, sustain: sustain, &block)
         end
         alias fb feedback
       end

@@ -12,7 +12,7 @@
 #
 # Plays live MIDI (or a MIDI file) through 6 voices.  CC 1 (the mod wheel)
 # darkens the string (the loop's lowpass, from --damping down to 2x the
-# pitch).  Run with --help for all options.
+# pitch; the loop's sustain keeps the ring time, so only the tone changes).  Run with --help for all options.
 #
 # Examples:
 #     $0 spec/test_data/c_major.mid                          # nylon-ish strings
@@ -25,9 +25,15 @@
 #     play exc.feedback { |fb, input| d = fb.delay(220.hz.period, smoothing: false); input + (d + d.delay(1.samples)) * 0.498 }
 #     # The same string, out of tune without latency compensation (about 4 cents flat at 220 Hz)
 #     play exc.feedback(compensate: false) { |fb, input| d = fb.delay(220.hz.period, smoothing: false); input + (d + d.delay(1.samples)) * 0.498 }
-#     # A loop lowpass at 2x the pitch: in tune at the played pitch (the default), about 13 cents flat with compensate: :dc
-#     play exc.feedback { |fb, input| d = fb.delay(440.hz.period, smoothing: false); input + ((d + d.delay(1.samples)) * 0.4985).filter(:lowpass, cutoff: 880, quality: 0.5**0.5) }
-#     play exc.feedback(compensate: :dc) { |fb, input| d = fb.delay(440.hz.period, smoothing: false); input + ((d + d.delay(1.samples)) * 0.4985).filter(:lowpass, cutoff: 880, quality: 0.5**0.5) }
+#     # A loop lowpass at 2x the pitch, the burst through it too (a burst added
+#     # after the filter plays full-band, 40 dB above the dark string): in tune
+#     # at the played pitch (the default), about 13 cents flat with compensate: :dc
+#     play exc.feedback { |fb, input| d = fb.delay(440.hz.period, smoothing: false); (input + (d + d.delay(1.samples)) * 0.4985).filter(:lowpass, cutoff: 880, quality: 0.5**0.5) }
+#     play exc.feedback(compensate: :dc) { |fb, input| d = fb.delay(440.hz.period, smoothing: false); (input + (d + d.delay(1.samples)) * 0.4985).filter(:lowpass, cutoff: 880, quality: 0.5**0.5) }
+#     # sustain (the default) keeps the ring time while the lowpass darkens it: without it the
+#     # fundamental's T60 falls from 4.7 s to 0.47 s (sweep the cutoff with a slow LFO to compare)
+#     play exc.feedback(sustain: false) { |fb, input| d = fb.delay(440.hz.period, smoothing: false); (input + (d + d.delay(1.samples)) * 0.4985).filter(:lowpass, cutoff: 0.3.hz.lfo.at(440..3520), quality: 0.5**0.5) }
+#     play exc.feedback { |fb, input| d = fb.delay(440.hz.period, smoothing: false); (input + (d + d.delay(1.samples)) * 0.4985).filter(:lowpass, cutoff: 0.3.hz.lfo.at(440..3520), quality: 0.5**0.5) }
 #     # A delay time that moves: the string bends (try a slow LFO)
 #     play exc.feedback { |fb, input| d = fb.delay((1 / (220.hz.freq * 0.3.hz.lfo.at(1..1.06))), smoothing: false); input + (d + d.delay(1.samples)) * 0.498 }
 

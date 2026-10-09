@@ -48,7 +48,9 @@ module MB
       # in scalar Ruby (the same bits at any block split) and ramped between
       # those points; the DC estimate unwraps the phase and gives the sign
       # of the loop gain (a negative gain is a polarity, not a delay), and
-      # linear-phase loops keep the exact DC value.
+      # linear-phase loops keep the exact DC value.  The same points give
+      # the sustain shelf's gains (FeedbackLoop's `sustain:`,
+      # Program#pitch_track).
       module Loop
         # Ops that only exist in loop programs.
         module Op
@@ -64,6 +66,20 @@ module MB
 
             def expression = 'history (output one sample earlier)'
             def opcode = :hread
+          end
+
+          # A per-block value the FeedbackLoop computes for the sustain shelf
+          # (see Program#pitch_track): the shelf's dry gain (:gain), its
+          # lowpass gain (:rest), or its lowpass cutoff (:cutoff).
+          class SustainParam < Plan::Op::Param
+            attr_reader :role
+
+            def initialize(dst, node, role:, index:)
+              super(dst, node, constant: nil, index: index)
+              @role = role
+            end
+
+            def expression = "sustain #{@role} (param #{@index})"
           end
 
           # A delay line read inside a loop (see Ring).
@@ -129,6 +145,11 @@ module MB
 
           # True for the delay that absorbs the loop's latency (see Loop).
           attr_accessor :compensated
+
+          # True for the delay whose time sets the loop's pitch (1 / its
+          # time) for the latency at the pitch and for sustain: the
+          # compensated delay, or the longest delay without compensation.
+          attr_accessor :pitched
 
           # The constant delay in samples at compile time (nil for a node
           # delay), for choosing the compensated delay.
@@ -251,6 +272,13 @@ module MB
             emit(Op::Svf.new(value(:real), node, a, filter, cutoff: self[cutoff], quality: self[quality], gain: self[gain]))
           end
 
+          # A value FeedbackLoop sets every block (see Op::SustainParam).
+          def sustain_param(role)
+            op = Op::SustainParam.new(value(:real), node, role: role, index: @params.length)
+            @params << op
+            emit(op)
+          end
+
           def fill(c)
             c = const(c) unless c.is_a?(Plan::Const)
             raise Unsupported.new(node, 'a complex constant in a feedback loop') if c.complex?
@@ -322,7 +350,21 @@ module MB
           # A title for listings.
           attr_accessor :title
 
-          def initialize(ops:, inputs:, params:, rings:, histories:, output:, history:, title: nil)
+          # The sustain shelf (see #pitch_track), or nil: a Hash with the
+          # shelf's :input and :output Values, its :filter (the hidden
+          # lowpass Filter::SVF), and its :gain, :rest, and :cutoff params.
+          attr_reader :sustain
+
+          # The ring whose time sets the loop's pitch (see Ring#pitched).
+          attr_reader :pitch_ring
+
+          # The shelf's gain at the pitch (the sustain boost or cut) at the
+          # last point #pitch_track evaluated (1.0 before or without sustain).
+          attr_reader :sustain_ratio
+
+          def initialize(ops:, inputs:, params:, rings:, histories:, output:, history:, title: nil, sustain: nil)
+            @sustain = sustain
+            @sustain_ratio = 1.0
             @ops = ops.freeze
             @inputs = inputs.freeze
             @params = params.freeze
@@ -332,6 +374,7 @@ module MB
             @history = history
             @title = title
             @compensated = @rings.find(&:compensated)
+            @pitch_ring = @rings.find(&:pitched) || @compensated
             @lowered = nil
           end
 
@@ -536,7 +579,7 @@ module MB
           # the block's data for each boundary input and param Value (see
           # Loop's description).  0.0 without a compensated delay.
           def latency(values)
-            return 0.0 unless @compensated
+            return 0.0 unless @pitch_ring
 
             # The latency depends only on a few values (gains on parallel
             # paths, cutoffs, other delays); reuse it while they hold still
@@ -570,30 +613,77 @@ module MB
             @lat_value = l
           end
 
-          # Samples between the points where #pitch_latency evaluates the
-          # phase delay (it ramps linearly between points).
+          # Samples between the points where #pitch_track evaluates the
+          # loop's response at the pitch (it ramps linearly between points).
           PITCH_STEP = 16
 
-          # The loop's latency apart from the compensated delay at the
-          # played pitch (see Loop): the phase delay of the rest of the loop
-          # at the loop's fundamental 1 / T (T the compensated delay's time),
-          # so the fundamental is exactly 1 / T even where the filters'
-          # phase delay at the pitch differs from their group delay at DC.
+          # The sustain shelf's lowpass cutoff as a fraction of the pitch
+          # (see #pitch_track; chosen 2026-10-09 by simulating KS strings at
+          # 55 Hz to 3.5 kHz: shelves at 0.7 and 0.85 of the pitch were stable
+          # up to boosts of 2.0 and 2.3, 0.35 only to 1.5).
+          SUSTAIN_SHELF = 0.85
+
+          # The shelf lowpass's quality (critically damped: no peak).
+          SUSTAIN_SHELF_Q = 0.5
+
+          # The largest sustain boost (the shelf's high gain, about +6 dB):
+          # a lowpass whose loss at the pitch needs more (a cutoff below
+          # about 0.6 times the pitch) shortens the ring again.  Larger
+          # boosts make the shelf's transition ring on its own (a mode below
+          # the pitch, where the loop's delay phase meets the shelf's phase
+          # lead) and grow without bound (2.6 did at every pitch tested).
+          SUSTAIN_MAX = 2.0
+
+          # Points of #pitch_track between evaluations of the sustain
+          # stretch (Program#sustain_stretch, the costliest part; it changes
+          # slowly): every 64 samples of the stream.
+          STRETCH_EVERY = 4
+
+          # The smallest sustain gain (a flat cut where the filters have
+          # gain above 1 at the pitch, e.g. a resonant peak there).
+          SUSTAIN_MIN = 1.0 / 64
+
+          # The loop's latency apart from the pitch delay at the played
+          # pitch (see Loop), and the sustain shelf's gains when the loop
+          # has one: [latency, gain, rest].  The latency is the phase delay
+          # of the rest of the loop at the loop's fundamental 1 / T (T the
+          # pitch delay's time), so the fundamental is exactly 1 / T even
+          # where the filters' phase delay at the pitch differs from their
+          # group delay at DC.
+          #
+          # Sustain (FeedbackLoop's `sustain: true`): the shelf y = gain x +
+          # rest lowpass(x) on the pitch delay's input makes the loop's gain
+          # at the pitch what it would be with every SVF on the loop
+          # replaced by a wire, so the fundamental rings as long as the
+          # loop's other gains say whatever the filters do there.  A boost
+          # (filters losing gain at the pitch) is a high shelf (gain s, rest
+          # 1 - s, lowpass at SUSTAIN_SHELF times the pitch) so DC and the
+          # lowest frequencies keep their loop gain: a flat boost would make
+          # the loop's DC mode grow (a lowpass passes DC at full gain).  The
+          # shelf's gain at the pitch is solved exactly, its phase there is
+          # part of the latency, and s is limited to SUSTAIN_MAX.  Boosts
+          # only make up for lowpass shapes (every SVF on the loop a lowpass
+          # with a quality up to 1 / sqrt(2) at that point, and joining paths
+          # filtered alike): other filters
+          # can have more gain at the harmonics than at the pitch, so a
+          # boost would make those grow.  A cut (filter gain above 1 at the
+          # pitch, e.g. a resonant lowpass there) is flat (gain r, rest 0).
+          #
           # Evaluated at every PITCH_STEP-th sample of the stream (so the
           # result is the same at any block size), ramping linearly from the
-          # previous point's value over the next PITCH_STEP samples; a
-          # Float while it holds still (exactly the value at the pitch), a
-          # DFloat per sample while it ramps.  +count+ is the block's length.
-          def pitch_latency(values, count)
-            return 0.0 unless @compensated
+          # previous point's values over the next PITCH_STEP samples; Floats
+          # while they hold still (exactly the values at the pitch), DFloats
+          # per sample while they ramp.  +count+ is the block's length.
+          def pitch_track(values, count)
+            return [0.0, 1.0, 0.0] unless @pitch_ring
 
             pos = @pitch_pos || 0
             dc = latency(values)
-            t = @compensated.last_delay
+            t = @pitch_ring.last_delay
             first = (-pos) % PITCH_STEP
             m = first < count ? (count - 1 - first) / PITCH_STEP + 1 : 0
 
-            # Nothing moved since the last evaluation: the held value
+            # Nothing moved since the last evaluation: the held values
             if @pitch_b && @pitch_a == @pitch_b && @lat_hit && !t.is_a?(Numo::NArray) && t == @pitch_t
               @pitch_pos = pos + count
               return @pitch_b
@@ -602,7 +692,7 @@ module MB
             lp = []
             if m > 0
               idx = Numo::Int64.new(m).seq(first, PITCH_STEP)
-              lp = phase_latency(values, idx, t, dc)
+              lp = pitch_points(values, idx, t, dc, pos)
               @pitch_a ||= lp[0]
               @pitch_b ||= lp[0]
             end
@@ -617,29 +707,37 @@ module MB
 
             # Sample i is in segment j (0 before the block's first point),
             # ramping from chain[j] to chain[j + 1]
-            chain = Numo::DFloat[a, b, *lp]
             i = Numo::Int64.new(count).seq
             j = (i - first) / PITCH_STEP + 1
             j[i.lt(first)] = 0 if first > 0
             frac = Numo::DFloat.cast((i + pos) % PITCH_STEP) / PITCH_STEP
-            ca = chain[j]
-            out = frac * (chain[j + 1] - ca) + ca
-            a, b = m > 0 ? [chain[m], chain[m + 1]] : [a, b]
+            pts = [a, b, *lp]
+            out = Array.new(b.length) do |k|
+              chain = Numo::DFloat.cast(pts.map { |p| p[k] })
+              ca = chain[j]
+              frac * (chain[j + 1] - ca) + ca
+            end
+            a, b = m > 0 ? [pts[m], pts[m + 1]] : [a, b]
             @pitch_a = a
             @pitch_b = b
             @pitch_pos = pos + count
             out
           end
 
+          # The sustain shelf's lowpass cutoff in Hz for the pitch delay's
+          # time +t+ in samples (a Float or a DFloat).
+          def sustain_cutoff(t)
+            SUSTAIN_SHELF * @sustain[:filter].sample_rate.to_f / t
+          end
+
           private
 
-          # The phase delay at 2 pi / T of the loop apart from the
-          # compensated delay, at the samples +idx+ of the block (an Array of
-          # Floats), unwrapped toward the group delay at DC +dc+.  Each
-          # point runs the same scalar code (#response_program), so the
-          # result doesn't depend on where blocks split or on whether an
-          # input moved.
-          def phase_latency(values, idx, t, dc)
+          # [latency, gain, rest] at the samples +idx+ of the block (see
+          # #pitch_track): the latency unwrapped toward the group delay at
+          # DC +dc+.  Each point runs the same scalar code
+          # (#response_program), so the result doesn't depend on where
+          # blocks split or on whether an input moved.
+          def pitch_points(values, idx, t, dc, pos = 0)
             list, oa, ob = response_program
             # Values at the points: Arrays where they move, Floats where
             # they hold (read by point number)
@@ -659,57 +757,30 @@ module MB
             t = pts.call(t)
             dc = pts.call(dc)
             gain = pts.call(@lat_gain)
-
-            n = list.length
-            ar = Array.new(n, 0.0); ai = Array.new(n, 0.0)
-            br = Array.new(n, 0.0); bi = Array.new(n, 0.0)
-            ha = Array.new(n, false); hb = Array.new(n, false)
             twopi = 2 * Math::PI
 
             Array.new(idx.length) do |i|
-              w = twopi / at.call(t, i)
+              ti = at.call(t, i)
+              w = twopi / ti
               dcp = at.call(dc, i)
-              next dcp if oa.nil? || ob.nil?
+              next [dcp, 1.0, 0.0] if oa.nil? || ob.nil?
 
-              list.each_with_index do |e, k|
-                case e[0]
-                when :one_a
-                  ar[k] = 1.0; ai[k] = 0.0; ha[k] = true; hb[k] = false
-                when :one_b
-                  br[k] = 1.0; bi[k] = 0.0; hb[k] = true; ha[k] = false
-                when :add
-                  x = e[2]; y = e[3]
-                  ha[k] = ha[x] || ha[y]
-                  hb[k] = hb[x] || hb[y]
-                  ar[k] = (ha[x] ? ar[x] : 0.0) + (ha[y] ? ar[y] : 0.0)
-                  ai[k] = (ha[x] ? ai[x] : 0.0) + (ha[y] ? ai[y] : 0.0)
-                  br[k] = (hb[x] ? br[x] : 0.0) + (hb[y] ? br[y] : 0.0)
-                  bi[k] = (hb[x] ? bi[x] : 0.0) + (hb[y] ? bi[y] : 0.0)
-                else
-                  x = e[2]
-                  case e[0]
-                  when :scale
-                    cr = at.call(params[k], i); ci = 0.0
-                  when :copy
-                    cr = 1.0; ci = 0.0
-                  when :delay
-                    ph = w * at.call(params[k], i)
-                    cr = Math.cos(ph); ci = -Math.sin(ph)
-                  when :half
-                    cr = Math.cos(w * 0.5); ci = -Math.sin(w * 0.5)
-                  when :svf
-                    fc, q, g = params[k]
-                    cr, ci = svf_point(e[3], at.call(fc, i), at.call(q, i), at.call(g, i), w)
-                  end
-                  ha[k] = ha[x]; hb[k] = hb[x]
-                  ar[k] = ar[x] * cr - ai[x] * ci; ai[k] = ar[x] * ci + ai[x] * cr
-                  br[k] = br[x] * cr - bi[x] * ci; bi[k] = br[x] * ci + bi[x] * cr
+              rr, ri = loop_response(list, params, at, i, w, oa, ob, true)
+              next [dcp, 1.0, 0.0] if rr.nil?
+
+              g1 = 1.0
+              g2 = 0.0
+              if @sustain
+                # The stretch (every STRETCH_EVERY points of the stream, from
+                # the shelf for the previous stretch)
+                g1, g2, hr, hi, m0 = sustain_point(list, params, at, i, w, ti, oa, ob, rr, ri, @stretch || 1.0)
+                if !(g1 == 1.0 && g2 == 0.0) && (@stretch.nil? || ((pos + idx[i]) / PITCH_STEP) % STRETCH_EVERY == 0)
+                  @stretch = sustain_stretch(list, params, at, i, w, ti, oa, ob, g1, g2, rr, ri, hr, hi, dcp, at.call(gain, i) < 0)
+                  g1, g2, hr, hi = sustain_point(list, params, at, i, w, ti, oa, ob, rr, ri, @stretch, m0)
                 end
+                rr, ri = rr * hr - ri * hi, rr * hi + ri * hr
               end
-              next dcp unless ha[oa] && hb[ob]
 
-              rr = ar[oa] * br[ob] - ai[oa] * bi[ob]
-              ri = ar[oa] * bi[ob] + ai[oa] * br[ob]
               if @history
                 cr = Math.cos(w); ci = -Math.sin(w)
                 rr, ri = rr * cr - ri * ci, rr * ci + ri * cr
@@ -728,8 +799,207 @@ module MB
 
               # Linear-phase loops (delays, averages, shapers) have the same
               # delay at every frequency: keep the exact DC value there
-              (l - dcp).abs < 1e-9 ? dcp : l
+              [(l - dcp).abs < 1e-9 ? dcp : l, g1, g2]
             end
+          end
+
+          # The loop's response (real and imaginary parts) at +w+ radians
+          # per sample apart from the pitch delay, at point +i+, or nil
+          # without a path; with +svf+ false every SVF counts as a wire.
+          def loop_response(list, params, at, i, w, oa, ob, svf)
+            n = list.length
+            ar = (@resp_ar ||= []); ai = (@resp_ai ||= [])
+            br = (@resp_br ||= []); bi = (@resp_bi ||= [])
+            ha = (@resp_ha ||= []); hb = (@resp_hb ||= [])
+            if ar.length != n
+              [ar, ai, br, bi].each { |x| x.replace(Array.new(n, 0.0)) }
+              [ha, hb].each { |x| x.replace(Array.new(n, false)) }
+            end
+
+            list.each_with_index do |e, k|
+              case e[0]
+              when :one_a
+                ar[k] = 1.0; ai[k] = 0.0; ha[k] = true; hb[k] = false
+              when :one_b
+                br[k] = 1.0; bi[k] = 0.0; hb[k] = true; ha[k] = false
+              when :add
+                x = e[2]; y = e[3]
+                ha[k] = ha[x] || ha[y]
+                hb[k] = hb[x] || hb[y]
+                ar[k] = (ha[x] ? ar[x] : 0.0) + (ha[y] ? ar[y] : 0.0)
+                ai[k] = (ha[x] ? ai[x] : 0.0) + (ha[y] ? ai[y] : 0.0)
+                br[k] = (hb[x] ? br[x] : 0.0) + (hb[y] ? br[y] : 0.0)
+                bi[k] = (hb[x] ? bi[x] : 0.0) + (hb[y] ? bi[y] : 0.0)
+              else
+                x = e[2]
+                case e[0]
+                when :scale
+                  cr = at.call(params[k], i); ci = 0.0
+                when :copy
+                  cr = 1.0; ci = 0.0
+                when :delay
+                  ph = w * at.call(params[k], i)
+                  cr = Math.cos(ph); ci = -Math.sin(ph)
+                when :half
+                  cr = Math.cos(w * 0.5); ci = -Math.sin(w * 0.5)
+                when :svf
+                  if svf
+                    fc, q, g = params[k]
+                    cr, ci = svf_point(e[3], at.call(fc, i), at.call(q, i), at.call(g, i), w)
+                  else
+                    cr = 1.0; ci = 0.0
+                  end
+                end
+                ha[k] = ha[x]; hb[k] = hb[x]
+                ar[k] = ar[x] * cr - ai[x] * ci; ai[k] = ar[x] * ci + ai[x] * cr
+                br[k] = br[x] * cr - bi[x] * ci; bi[k] = br[x] * ci + bi[x] * cr
+              end
+            end
+            return nil unless ha[oa] && hb[ob]
+
+            [ar[oa] * br[ob] - ai[oa] * bi[ob], ar[oa] * bi[ob] + ai[oa] * br[ob]]
+          end
+
+          # The sustain shelf at point +i+ (see #pitch_track): [gain, rest,
+          # the shelf's response at +w+ (real, imaginary)], from the loop's
+          # response +rr+, +ri+ there (with its SVFs).
+          # +stretch+ raises the unfiltered loop gain to that power (see
+          # #sustain_stretch).
+          # (+m0+, the unfiltered loop gain at the pitch, is returned last
+          # and may be passed back to skip its computation.)
+          def sustain_point(list, params, at, i, w, t, oa, ob, rr, ri, stretch = 1.0, m0 = nil)
+            m = Math.hypot(rr, ri)
+            unless m0
+              r0, i0 = loop_response(list, params, at, i, w, oa, ob, false)
+              m0 = r0 ? Math.hypot(r0, i0) : 0.0
+            end
+            return [1.0, 0.0, 1.0, 0.0, m0] unless m0 > 1e-12 && m > 0 && m.finite?
+
+            r = m0**stretch / m
+            if r <= 1
+              # A flat cut
+              r = SUSTAIN_MIN if r < SUSTAIN_MIN
+              @sustain_ratio = r
+              return [r, 0.0, r, 0.0, m0]
+            end
+
+            # Only lowpass shapes are made up for: a filter with more gain
+            # above the pitch than at it (a highpass, bandpass, notch, peak
+            # cut, a resonant lowpass, or a filtered path mixed with an
+            # unfiltered one) would push the harmonics above unity
+            # (measured: highpasses, bandpasses, notches, peak cuts, and
+            # mixed paths near the pitch grew without bound when boosted)
+            if harmonic_risk?(list, params, at, i)
+              @sustain_ratio = 1.0
+              return [1.0, 0.0, 1.0, 0.0, m0]
+            end
+
+            # A high shelf: |s (1 - lp) + lp| = r at the pitch
+            lr, li = svf_response(0, sustain_cutoff(t), SUSTAIN_SHELF_Q, 1.0, @sustain[:filter].sample_rate.to_f, w)
+            xr = 1.0 - lr; xi = -li
+            qa = xr * xr + xi * xi
+            qb = 2.0 * (xr * lr + xi * li)
+            qc = lr * lr + li * li - r * r
+            s = (-qb + Math.sqrt(qb * qb - 4.0 * qa * qc)) / (2.0 * qa)
+
+            s = SUSTAIN_MAX if s > SUSTAIN_MAX
+            s = 1.0 if s < 1.0
+
+            hr = s * xr + lr
+            hi = s * xi + li
+            @sustain_ratio = Math.hypot(hr, hi)
+            [s, 1.0 - s, hr, hi, m0]
+          end
+
+          # The ratio of the loop's group delay at the pitch to its period
+          # +t+, with the shelf (+g1+, +g2+) in it: a mode's envelope decays
+          # by the loop gain once per group delay, not per period, so the
+          # gain to aim for is the unfiltered gain to this power (a lowpass
+          # at the pitch delays the envelope by about a fifth of a period:
+          # without this its strings rang 4% longer at 110 Hz and about 15%
+          # at 1760 Hz).  The group delay is a central difference of the
+          # phase at w (1 +/- 1e-4); limited to 0.5..4.
+          def sustain_stretch(list, params, at, i, w, t, oa, ob, g1, g2, rr, ri, hr, hi, dcp, negative)
+            rate = @sustain[:filter].sample_rate.to_f
+            fc = sustain_cutoff(t)
+            resp = ->(wx) {
+              rr, ri = loop_response(list, params, at, i, wx, oa, ob, true)
+              lr, li = svf_response(0, fc, SUSTAIN_SHELF_Q, 1.0, rate, wx)
+              hr = g1 + g2 * lr; hi = g2 * li
+              rr, ri = rr * hr - ri * hi, rr * hi + ri * hr
+              if @history
+                cr = Math.cos(wx); ci = -Math.sin(wx)
+                rr, ri = rr * cr - ri * ci, rr * ci + ri * cr
+              end
+              [rr, ri]
+            }
+            h = w * 1e-4
+            ar, ai = resp.call(w + h)
+            br, bi = resp.call(w - h)
+            gd = -Math.atan2(ai * br - ar * bi, ar * br + ai * bi) / (2 * h)
+
+            rr, ri = rr * hr - ri * hi, rr * hi + ri * hr
+            if @history
+              cr = Math.cos(w); ci = -Math.sin(w)
+              rr, ri = rr * cr - ri * ci, rr * ci + ri * cr
+            end
+            if negative
+              rr = -rr
+              ri = -ri
+            end
+            twopi = 2 * Math::PI
+            arg = Math.atan2(ri, rr)
+            phase = (((w * dcp + arg) / twopi).round * twopi - arg) / w
+
+            ((t - phase + gd) / t).clamp(0.5, 4.0)
+          end
+
+          # True when an SVF on the loop could have more gain above the
+          # pitch than at it (anything but a lowpass with a quality up to
+          # 1 / sqrt(2), whose gain falls monotonically).
+          def harmonic_risk?(list, params, at, i)
+            return true if uneven_filters?(list)
+
+            list.each_with_index.any? { |e, k|
+              next false unless e[0] == :svf
+
+              e[3].filter.filter_type != :lowpass || at.call(params[k][1], i) > 0.7072
+            }
+          end
+
+          # True when paths that join on the loop went through different
+          # SVFs (e.g. a filtered and a dry signal mixed): the filters'
+          # response is then no product of lowpasses and may rise again
+          # (measured: half a lowpass at a quarter of the pitch plus half
+          # the dry signal grew when boosted).
+          def uneven_filters?(list)
+            return @uneven_filters unless @uneven_filters.nil?
+
+            sets = []
+            uneven = false
+            list.each_with_index do |e, k|
+              sets[k] = case e[0]
+                        when :one_a, :one_b then []
+                        when :svf then (sets[e[2]] + [e[3]]).sort_by(&:object_id)
+                        when :add
+                          a = sets[e[2]]; b = sets[e[3]]
+                          uneven ||= a.map(&:object_id) != b.map(&:object_id)
+                          a
+                        else sets[e[2]]
+                        end
+            end
+            @uneven_filters = uneven
+          end
+
+          # An SVF's response at +w+ for a type id, cutoff, quality, and gain
+          # (as #svf_point, without the cache).
+          def svf_response(type_id, fc, q, gain, rate, w)
+            g, k, _, m0, m1, m2 = Filter::SVF.coefficients(type_id, fc, q, gain, rate)
+            si = Math.tan(w * 0.5) / g
+            nr = m2; ni = m1 * si
+            dr = 1.0 - si * si; di = k * si
+            den = dr * dr + di * di
+            [(nr * dr + ni * di) / den + m0, (ni * dr - nr * di) / den]
           end
 
           # The loop's response at the pitch as a list of scalar steps, in
@@ -748,10 +1018,12 @@ module MB
                 next memo[v] if memo.key?(v)
 
                 memo[v] = nil # breaks cycles through uncompensated delays
+                next memo[v] = build.call(@sustain[:input]) if @sustain && v.equal?(@sustain[:output])
+
                 op = v.op
                 r = case op
                     when Op::DelayRead
-                      if op.ring.equal?(@compensated)
+                      if op.ring.equal?(@pitch_ring)
                         emit.call([:one_a, nil])
                       else
                         x = build.call(op.ring.input)
@@ -789,7 +1061,7 @@ module MB
                 memo[v] = r
               end
               oa = build.call(@output)
-              ob = build.call(@compensated.input)
+              ob = build.call(@pitch_ring.input)
               [list.freeze, oa, ob]
             end
           end
@@ -827,7 +1099,7 @@ module MB
           def compute_latency(values)
             memo = {}.compare_by_identity
             out = moments(@output, values, memo)
-            din = moments(@compensated.input, values, memo)
+            din = moments(@pitch_ring.input, values, memo)
             a = ratio(out[0], out[1])
             b = ratio(din[2], din[3])
             @lat_gain = out[0] * din[2]
@@ -973,10 +1245,14 @@ module MB
             return memo[v] if memo.key?(v)
 
             memo[v] = ZERO # breaks cycles through uncompensated delays (their inputs come later)
+            # The sustain shelf counts as no latency (its phase at the pitch
+            # is in #pitch_track)
+            return memo[v] = moments(@sustain[:input], values, memo) if @sustain && v.equal?(@sustain[:output])
+
             op = v.op
             m = case op
                 when Op::DelayRead
-                  if op.ring.equal?(@compensated)
+                  if op.ring.equal?(@pitch_ring)
                     [1.0, 0.0, 0.0, 0.0]
                   else
                     @lat_record_rings << op.ring if @lat_record_rings
@@ -1029,13 +1305,16 @@ module MB
           def svf_latency(op, m, values)
             return m if m.equal?(ZERO)
 
+            # Every parameter counts as a dependency (#pitch_track evaluates
+            # every type's response at the pitch while any of them moves)
+            value_of(op.gain, values) if @lat_record && op.gain.is_a?(Plan::Value)
+            fc = value_of(op.cutoff, values)
+            q = value_of(op.quality, values)
             factor = case op.filter.filter_type
                      when :lowpass then 1.0
                      when :allpass then 2.0
                      else return m
                      end
-            fc = value_of(op.cutoff, values)
-            q = value_of(op.quality, values)
             rate = op.filter.sample_rate.to_f
             g = fc.is_a?(Numo::NArray) ? Numo::NMath.tan(Numo::DFloat.cast(fc).clip(1.0, rate * 0.49) * (Math::PI / rate)) : Math.tan(fc.to_f.clamp(1.0, rate * 0.49) * Math::PI / rate)
             q = q.is_a?(Numo::NArray) ? Numo::DFloat.cast(q).clip(1e-10, Float::INFINITY) : [q.to_f, 1e-10].max
