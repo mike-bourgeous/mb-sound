@@ -41,6 +41,16 @@ module MB
       # repeats every +t+.  #latency gives the compensation of the last
       # block; `compensate: false` turns it off.
       #
+      # By default (`compensate: true` or `:pitch`, user decision
+      # 2026-10-09) the latency is the rest of the loop's phase delay at
+      # the loop's fundamental 1 / t, so a string with a loop lowpass plays
+      # exactly at 1 / t (its higher partials keep the filter's
+      # dispersion); it's evaluated every 16 samples of the stream and
+      # ramps between those points while anything moves (Plan::Loop's
+      # Program#pitch_latency).  `compensate: :dc` uses the group delay at
+      # DC instead (exact for echo centers of mass, a few cents flat for
+      # strings with a lowpass near the pitch; per sample when inputs move).
+      #
       # Delays shorter than the sinc kernel's reach (about 13 samples) can't
       # read the samples newer than the read position (they aren't computed
       # yet), so inside loops sinc reads blend into cubic reads from about
@@ -133,7 +143,12 @@ module MB
 
           @input = input
           @sample_rate = (sample_rate || input&.sample_rate || 48000).to_f
-          @compensate = !!compensate
+          @compensate = case compensate
+                        when true, :pitch then :pitch
+                        when :dc then :dc
+                        when false, nil then false
+                        else raise ArgumentError, "compensate: must be true (:pitch), :dc, or false (got #{compensate.inspect})"
+                        end
           @variable = Variable.new(self)
           @node_type_name = 'FeedbackLoop'
 
@@ -286,7 +301,7 @@ module MB
           if (comp = @program.compensated)
             idx = rings.index { |g| g.equal?(comp) }
             if @compensate
-              l = @program.latency(@values)
+              l = @compensate == :dc ? @program.latency(@values) : @program.pitch_latency(@values, n)
               l = l[0...n] if l.is_a?(Numo::NArray) && l.length > n
               d = comp.last_delay
               @delays[idx] = d.is_a?(Numo::NArray) || l.is_a?(Numo::NArray) ? Numo::DFloat.cast(d - l) : d - l

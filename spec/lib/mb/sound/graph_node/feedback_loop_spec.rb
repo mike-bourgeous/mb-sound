@@ -49,15 +49,58 @@ RSpec.describe(MB::Sound::GraphNode::FeedbackLoop) do
       expect(cents(pitch(d, 440), 440)).to be_within(0.05).of(expected)
     end
 
-    it "includes a lowpass SVF's group delay (within 3 cents at 4x the pitch)" do
-      [[220, 8, 0.5], [880, 4, 3]].each do |f, damp, tol|
+    # The phase delay at f of the KS loop with a lowpass at damp * f (the
+    # two-sample average's half sample plus the SVF's phase delay)
+    def ks_phase_delay(f, damp)
+      svf = MB::Sound::Filter::SVF.new(:lowpass, 48000, f * damp, quality: 0.5**0.5)
+      w = 2 * Math::PI * f / 48000.0
+      0.5 - svf.response(w).arg / w
+    end
+
+    it "tunes a string with a loop lowpass at the played pitch (within 0.05 cents at 4x and 8x, 0.25 at 2x)" do
+      [[220, 8, 0.05], [880, 4, 0.05], [440, 2, 0.25]].each do |f, damp, tol|
         l = ks(f, damping: damp)
+        d = l.sample(96000)[4800...(4800 + 65536)]
+        expect(cents(pitch(d, f), f).abs).to be < tol
+        expect(l.latency).to be_within(1e-9).of(ks_phase_delay(f, damp))
+        expect(l.compensate).to eq(:pitch)
+      end
+    end
+
+    it "with compensate: :dc uses the group delay at DC (within 3 cents at 4x the pitch)" do
+      [[220, 8, 0.5], [880, 4, 3]].each do |f, damp, tol|
+        l = ks(f, damping: damp, compensate: :dc)
         d = l.sample(96000)[4800...(4800 + 65536)]
         expect(cents(pitch(d, f), f).abs).to be < tol
         g = Math.tan(Math::PI * f * damp / 48000.0)
         expect(l.latency).to be_within(1e-9).of(0.5 + 1 / (2 * g * 0.5**0.5))
         expect(cents(pitch(ks(f, damping: damp, compensate: false).sample(96000)[4800...(4800 + 65536)], f), f)).to be < -40
       end
+    end
+
+    it 'keeps a moving loop lowpass in tune and the same at every block size (ramps every 16 samples)' do
+      make = -> {
+        exc = MB::Sound.noise(seed: 1).at(0.5) * MB::Sound.adsr(0, 0.002, 0, 0.002, hold: false)
+        exc.feedback { |fb, input|
+          d = fb.delay((48000.0 / 440).samples, smoothing: false)
+          input + ((d + d.delay(1.samples)) * 0.4985).filter(:lowpass, cutoff: 3.hz.lfo.at(1320..2640), quality: 0.5**0.5)
+        }
+      }
+      a = make.call
+      x = Array.new(375) { a.sample(256).to_a }.flatten
+      b = make.call
+      sizes = [1, 37, 512, 15, 800, 64, 16, 333]
+      y = []
+      i = 0
+      y.concat(b.sample(sizes[(i += 1) % sizes.length]).to_a) while y.length < x.length
+      expect(y.first(x.length)).to eq(x)
+      expect(b.latency).to be_between(3.0, 8.0)
+      # In tune while the cutoff sweeps (the fundamental over 1.4 s)
+      expect(cents(pitch(x[4800...(4800 + 65536)], 440), 440).abs).to be < 0.1
+    end
+
+    it 'rejects an unknown compensation mode' do
+      expect { MB::Sound.noise.feedback(compensate: :maybe) { |fb, input| input + fb.delay(10.samples) * 0.5 } }.to raise_error(ArgumentError, /compensate/)
     end
 
     it 'keeps tape echoes exactly the delay apart with a saturating, filtered insert' do
@@ -73,9 +116,13 @@ RSpec.describe(MB::Sound::GraphNode::FeedbackLoop) do
         center = (win * idx).sum / win.sum
         expect(center).to be_within(0.01).of(0), "echo at #{t}: center #{center}"
       end
+      # The phase delay at the echoes' fundamental (100 Hz), within a
+      # thousandth of a sample of the group delay at DC (1 / (2 g Q))
+      svf = l.program.ops.grep(MB::Sound::Plan::Loop::Op::Svf)[0].filter
+      w = 2 * Math::PI / 480
+      expect(l.latency).to be_within(1e-9).of(0.5 - svf.response(w).arg / w)
       g = Math.tan(Math::PI * 4000 / 48000.0)
-      q = l.program.ops.grep(MB::Sound::Plan::Loop::Op::Svf)[0].filter.quality
-      expect(l.latency).to be_within(1e-9).of(0.5 + 1 / (2 * g * q))
+      expect(l.latency).to be_within(1e-3).of(0.5 + 1 / (2 * g * svf.quality))
     end
 
     it 'counts the one-sample history when a path has no delay' do

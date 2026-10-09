@@ -25,6 +25,9 @@
 #     play exc.feedback { |fb, input| d = fb.delay(220.hz.period, smoothing: false); input + (d + d.delay(1.samples)) * 0.498 }
 #     # The same string, out of tune without latency compensation (about 4 cents flat at 220 Hz)
 #     play exc.feedback(compensate: false) { |fb, input| d = fb.delay(220.hz.period, smoothing: false); input + (d + d.delay(1.samples)) * 0.498 }
+#     # A loop lowpass at 2x the pitch: in tune at the played pitch (the default), about 13 cents flat with compensate: :dc
+#     play exc.feedback { |fb, input| d = fb.delay(440.hz.period, smoothing: false); input + ((d + d.delay(1.samples)) * 0.4985).filter(:lowpass, cutoff: 880, quality: 0.5**0.5) }
+#     play exc.feedback(compensate: :dc) { |fb, input| d = fb.delay(440.hz.period, smoothing: false); input + ((d + d.delay(1.samples)) * 0.4985).filter(:lowpass, cutoff: 880, quality: 0.5**0.5) }
 #     # A delay time that moves: the string bends (try a slow LFO)
 #     play exc.feedback { |fb, input| d = fb.delay((1 / (220.hz.freq * 0.3.hz.lfo.at(1..1.06))), smoothing: false); input + (d + d.delay(1.samples)) * 0.498 }
 

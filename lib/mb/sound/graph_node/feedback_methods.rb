@@ -16,8 +16,10 @@ module MB
         # on the path from +fb+ to the output; anything else (oscillators,
         # envelopes, LFOs, MIDI nodes) only where it doesn't depend on +fb+
         # (e.g. as a delay time or a gain).  The longest delay on the loop
-        # absorbs the loop's other latency, so its time is the loop's period
-        # (`compensate: false` turns that off; FeedbackLoop#latency).
+        # absorbs the loop's other latency (by default its phase delay at the
+        # loop's fundamental; `compensate: :dc` uses the group delay at DC),
+        # so its time is the loop's period (`compensate: false` turns that
+        # off; FeedbackLoop#latency).
         #
         # (Tone's FM operator self-feedback, #feedback until 2026-10-09, is
         # Tone#fm_feedback.)

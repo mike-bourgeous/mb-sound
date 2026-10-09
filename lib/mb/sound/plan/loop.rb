@@ -40,7 +40,15 @@ module MB
       # parallel paths: an average of a signal and its one-sample delay is
       # half a sample), computed per block in Ruby from the boundary inputs
       # (per sample when they change, e.g. a cutoff LFO).  #latency reports
-      # it.
+      # it.  That's the `compensate: :dc` mode; the default (`:pitch`,
+      # Program#pitch_latency, user decision 2026-10-09) uses the loop's
+      # phase delay at the fundamental 1 / T instead, from each op's complex
+      # response (delays e^(-iwd), gains, antialiased shapers' half sample,
+      # SVFs' exact response), evaluated at every 16th sample of the stream
+      # in scalar Ruby (the same bits at any block split) and ramped between
+      # those points; the DC estimate unwraps the phase and gives the sign
+      # of the loop gain (a negative gain is a polarity, not a delay), and
+      # linear-phase loops keep the exact DC value.
       module Loop
         # Ops that only exist in loop programs.
         module Op
@@ -545,8 +553,10 @@ module MB
                 same &&= same_value?(g.last_delay, @lat_key[i])
                 i += 1
               end
+              @lat_hit = same
               return @lat_value if same
             end
+            @lat_hit = false
 
             @lat_record = [] unless @lat_deps
             @lat_record_rings = [] unless @lat_deps
@@ -560,7 +570,251 @@ module MB
             @lat_value = l
           end
 
+          # Samples between the points where #pitch_latency evaluates the
+          # phase delay (it ramps linearly between points).
+          PITCH_STEP = 16
+
+          # The loop's latency apart from the compensated delay at the
+          # played pitch (see Loop): the phase delay of the rest of the loop
+          # at the loop's fundamental 1 / T (T the compensated delay's time),
+          # so the fundamental is exactly 1 / T even where the filters'
+          # phase delay at the pitch differs from their group delay at DC.
+          # Evaluated at every PITCH_STEP-th sample of the stream (so the
+          # result is the same at any block size), ramping linearly from the
+          # previous point's value over the next PITCH_STEP samples; a
+          # Float while it holds still (exactly the value at the pitch), a
+          # DFloat per sample while it ramps.  +count+ is the block's length.
+          def pitch_latency(values, count)
+            return 0.0 unless @compensated
+
+            pos = @pitch_pos || 0
+            dc = latency(values)
+            t = @compensated.last_delay
+            first = (-pos) % PITCH_STEP
+            m = first < count ? (count - 1 - first) / PITCH_STEP + 1 : 0
+
+            # Nothing moved since the last evaluation: the held value
+            if @pitch_b && @pitch_a == @pitch_b && @lat_hit && !t.is_a?(Numo::NArray) && t == @pitch_t
+              @pitch_pos = pos + count
+              return @pitch_b
+            end
+
+            lp = []
+            if m > 0
+              idx = Numo::Int64.new(m).seq(first, PITCH_STEP)
+              lp = phase_latency(values, idx, t, dc)
+              @pitch_a ||= lp[0]
+              @pitch_b ||= lp[0]
+            end
+            @pitch_t = t.is_a?(Numo::NArray) ? nil : t
+
+            a = @pitch_a
+            b = @pitch_b
+            if lp.all? { |x| x == b } && a == b
+              @pitch_pos = pos + count
+              return b
+            end
+
+            # Sample i is in segment j (0 before the block's first point),
+            # ramping from chain[j] to chain[j + 1]
+            chain = Numo::DFloat[a, b, *lp]
+            i = Numo::Int64.new(count).seq
+            j = (i - first) / PITCH_STEP + 1
+            j[i.lt(first)] = 0 if first > 0
+            frac = Numo::DFloat.cast((i + pos) % PITCH_STEP) / PITCH_STEP
+            ca = chain[j]
+            out = frac * (chain[j + 1] - ca) + ca
+            a, b = m > 0 ? [chain[m], chain[m + 1]] : [a, b]
+            @pitch_a = a
+            @pitch_b = b
+            @pitch_pos = pos + count
+            out
+          end
+
           private
+
+          # The phase delay at 2 pi / T of the loop apart from the
+          # compensated delay, at the samples +idx+ of the block (an Array of
+          # Floats), unwrapped toward the group delay at DC +dc+.  Each
+          # point runs the same scalar code (#response_program), so the
+          # result doesn't depend on where blocks split or on whether an
+          # input moved.
+          def phase_latency(values, idx, t, dc)
+            list, oa, ob = response_program
+            # Values at the points: Arrays where they move, Floats where
+            # they hold (read by point number)
+            pts = ->(x) { x.is_a?(Numo::NArray) ? Numo::DFloat.cast(x[idx]).to_a : x.to_f }
+            at = ->(x, j) { x.is_a?(Array) ? x[j] : x }
+
+            # Per-block values of each entry's parameters
+            params = list.map { |e|
+              case e[0]
+              when :delay then pts.call(e[3].last_delay)
+              when :scale then pts.call(value_of(e[3], values).then { |x| e[4] ? inverse(x) : x })
+              when :svf
+                op = e[3]
+                [value_of(op.cutoff, values), value_of(op.quality, values), op.gain.nil? ? 1.0 : value_of(op.gain, values)].map(&pts)
+              end
+            }
+            t = pts.call(t)
+            dc = pts.call(dc)
+            gain = pts.call(@lat_gain)
+
+            n = list.length
+            ar = Array.new(n, 0.0); ai = Array.new(n, 0.0)
+            br = Array.new(n, 0.0); bi = Array.new(n, 0.0)
+            ha = Array.new(n, false); hb = Array.new(n, false)
+            twopi = 2 * Math::PI
+
+            Array.new(idx.length) do |i|
+              w = twopi / at.call(t, i)
+              dcp = at.call(dc, i)
+              next dcp if oa.nil? || ob.nil?
+
+              list.each_with_index do |e, k|
+                case e[0]
+                when :one_a
+                  ar[k] = 1.0; ai[k] = 0.0; ha[k] = true; hb[k] = false
+                when :one_b
+                  br[k] = 1.0; bi[k] = 0.0; hb[k] = true; ha[k] = false
+                when :add
+                  x = e[2]; y = e[3]
+                  ha[k] = ha[x] || ha[y]
+                  hb[k] = hb[x] || hb[y]
+                  ar[k] = (ha[x] ? ar[x] : 0.0) + (ha[y] ? ar[y] : 0.0)
+                  ai[k] = (ha[x] ? ai[x] : 0.0) + (ha[y] ? ai[y] : 0.0)
+                  br[k] = (hb[x] ? br[x] : 0.0) + (hb[y] ? br[y] : 0.0)
+                  bi[k] = (hb[x] ? bi[x] : 0.0) + (hb[y] ? bi[y] : 0.0)
+                else
+                  x = e[2]
+                  case e[0]
+                  when :scale
+                    cr = at.call(params[k], i); ci = 0.0
+                  when :copy
+                    cr = 1.0; ci = 0.0
+                  when :delay
+                    ph = w * at.call(params[k], i)
+                    cr = Math.cos(ph); ci = -Math.sin(ph)
+                  when :half
+                    cr = Math.cos(w * 0.5); ci = -Math.sin(w * 0.5)
+                  when :svf
+                    fc, q, g = params[k]
+                    cr, ci = svf_point(e[3], at.call(fc, i), at.call(q, i), at.call(g, i), w)
+                  end
+                  ha[k] = ha[x]; hb[k] = hb[x]
+                  ar[k] = ar[x] * cr - ai[x] * ci; ai[k] = ar[x] * ci + ai[x] * cr
+                  br[k] = br[x] * cr - bi[x] * ci; bi[k] = br[x] * ci + bi[x] * cr
+                end
+              end
+              next dcp unless ha[oa] && hb[ob]
+
+              rr = ar[oa] * br[ob] - ai[oa] * bi[ob]
+              ri = ar[oa] * bi[ob] + ai[oa] * br[ob]
+              if @history
+                cr = Math.cos(w); ci = -Math.sin(w)
+                rr, ri = rr * cr - ri * ci, rr * ci + ri * cr
+              end
+
+              # A negative loop gain is a polarity, not a delay: measure
+              # the phase against the sign of the loop gain at DC (from
+              # #latency's moments)
+              if at.call(gain, i) < 0
+                rr = -rr
+                ri = -ri
+              end
+
+              arg = Math.atan2(ri, rr)
+              l = (((w * dcp + arg) / twopi).round * twopi - arg) / w
+
+              # Linear-phase loops (delays, averages, shapers) have the same
+              # delay at every frequency: keep the exact DC value there
+              (l - dcp).abs < 1e-9 ? dcp : l
+            end
+          end
+
+          # The loop's response at the pitch as a list of scalar steps, in
+          # an order where sources come first: [list, a slot of the
+          # output, b slot of the compensated delay's input] (slots nil
+          # where there is no path).  Like #moments, a is relative to the
+          # compensated delay's output, b to the loop variable.
+          def response_program
+            @response_program ||= begin
+              list = []
+              memo = {}.compare_by_identity
+              build = nil
+              emit = ->(e) { list << e; list.length - 1 }
+              build = lambda do |v|
+                next nil unless v.is_a?(Plan::Value)
+                next memo[v] if memo.key?(v)
+
+                memo[v] = nil # breaks cycles through uncompensated delays
+                op = v.op
+                r = case op
+                    when Op::DelayRead
+                      if op.ring.equal?(@compensated)
+                        emit.call([:one_a, nil])
+                      else
+                        x = build.call(op.ring.input)
+                        x && emit.call([:delay, nil, x, op.ring])
+                      end
+                    when Op::LoopHistory, Op::LoopOutput
+                      emit.call([:one_b, nil])
+                    when Plan::Op::Mul
+                      x = build.call(op.a)
+                      y = build.call(op.b)
+                      if x && y then emit.call([:add, nil, x, y])
+                      elsif x then emit.call([:scale, nil, x, op.b, false])
+                      elsif y then emit.call([:scale, nil, y, op.a, false])
+                      end
+                    when Plan::Op::Div
+                      x = build.call(op.a)
+                      y = build.call(op.b)
+                      if x && !y then emit.call([:scale, nil, x, op.b, true])
+                      elsif x && y then emit.call([:add, nil, x, y])
+                      else y
+                      end
+                    when Plan::Op::Add, Plan::Op::Pow, Plan::Op::Max
+                      x = build.call(op.a)
+                      y = build.call(op.b)
+                      x && y ? emit.call([:add, nil, x, y]) : (x || y)
+                    when Plan::Op::Copy
+                      build.call(op.a)
+                    when Plan::Op::Shape
+                      x = build.call(op.a)
+                      x && op.shaper.antialias ? emit.call([:half, nil, x]) : x
+                    when Op::Svf
+                      x = build.call(op.a)
+                      x && emit.call([:svf, nil, x, op])
+                    end
+                memo[v] = r
+              end
+              oa = build.call(@output)
+              ob = build.call(@compensated.input)
+              [list.freeze, oa, ob]
+            end
+          end
+
+          # The SVF's response (real and imaginary parts) at +w+ radians per
+          # sample for a cutoff, quality, and gain (Filter::SVF#response),
+          # with the last point's coefficients reused while they hold.
+          def svf_point(op, fc, q, gain, w)
+            c = (@svf_coefs ||= {}.compare_by_identity)[op]
+            unless c && c[0] == fc && c[1] == q && c[2] == gain
+              f = op.filter
+              c = [fc, q, gain, *Filter::SVF.coefficients(f.instance_variable_get(:@type_id), fc, q, gain, f.sample_rate.to_f)]
+              @svf_coefs[op] = c
+            end
+            g = c[3]; k = c[4]; m0 = c[6]; m1 = c[7]; m2 = c[8]
+
+            # s = (1 - z^-1) / (g (1 + z^-1)) = i tan(w / 2) / g
+            sr = 0.0
+            si = Math.tan(w * 0.5) / g
+            # (m1 s + m2) / (s^2 + k s + 1) + m0
+            nr = m1 * sr + m2; ni = m1 * si
+            dr = sr * sr - si * si + k * sr + 1.0; di = 2.0 * sr * si + k * si
+            den = dr * dr + di * di
+            [(nr * dr + ni * di) / den + m0, (ni * dr - nr * di) / den]
+          end
 
           def same_value?(x, old)
             if x.is_a?(Numo::NArray)
@@ -576,6 +830,7 @@ module MB
             din = moments(@compensated.input, values, memo)
             a = ratio(out[0], out[1])
             b = ratio(din[2], din[3])
+            @lat_gain = out[0] * din[2]
             l = add(a, b)
             @history ? add(l, 1.0) : l
           end
