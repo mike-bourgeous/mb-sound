@@ -13,13 +13,15 @@ module MB
       # process the sound inside the feedback loop (damping, highpass,
       # saturation, bit crushing, shimmer, freeze; see #initialize).
       #
-      # Gains are energy-normalized for any channel, stage, input, and
-      # output count: the inputs are spread over the lines at 1/sqrt(lines
-      # per input), the diffusion stages' Hadamard matrices are orthogonal
-      # (1/sqrt(N)), the feedback matrix is a Householder reflection, and
-      # each output's group of lines is scaled by sqrt(N / group size), so
-      # a +:wet:+ of 1 gives each output about the input's energy before the
-      # feedback network's decay adds its own.
+      # Gains are energy-normalized for any channel and stage count: the
+      # inputs are spread over the lines at 1/sqrt(lines per input), the
+      # diffusion stages' Hadamard matrices are orthogonal (1/sqrt(N)), the
+      # feedback matrix is a Householder reflection, and each output's
+      # group of lines is scaled by sqrt(N / group size), so with stereo in
+      # and out a +:wet:+ of 1 gives each output about its input's energy
+      # before the feedback network's decay adds its own.  Other input and
+      # output counts follow Reverb.channel_trim (mono in or out +3 dB
+      # each, as before 2026-10-10).
       #
       # See MB::Sound::GraphNode#reverb for a starting point for parameters,
       # as it's easy to make something that sounds bad.
@@ -114,6 +116,21 @@ module MB
         def self.classic_level(n, stages)
           old = stages == 0 ? 1.0 / n : 1.0 / (stages * n * n)
           Math.sqrt(n / 2.0) * n**(stages / 2.0) * old / Math.sqrt(2)
+        end
+
+        # The wet level for +inputs+ input and +outputs+ output channels
+        # relative to stereo in and out: 2 / sqrt(inputs * outputs), so the
+        # reverb answers the inputs' mean power and spreads one total wet
+        # energy over its outputs (user's decision, 2026-10-10: mono inputs
+        # and mono outputs got 3 dB quieter each with the energy-normalized
+        # gains; this restores the pre-2026-10-10 levels for every channel
+        # count, so a mono source and the same source on both stereo
+        # channels sound equally wet, a mono output carries the energy of a
+        # stereo pair, and surround or per-voice bundles follow the same
+        # rule: 6 outputs -4.8 dB each, 8 voice inputs -6 dB each).  Stereo
+        # in and out (and the classic presets' calibration) are unchanged.
+        def self.channel_trim(inputs, outputs)
+          2.0 / Math.sqrt(inputs * outputs)
         end
 
         # Some known-reasonable parameters for the reverb algorithm (plus an
@@ -663,9 +680,11 @@ module MB
           @gains = @layout.gains
           @layout.damping = damping_coefficients(damping, design: damping_design) if damping && @feedback_enabled
 
-          # Each output's group of lines, scaled to the energy of all lines
+          # Each output's group of lines, scaled to the energy of all lines,
+          # then by the channel-count trim (see Reverb.channel_trim)
+          @channel_trim = self.class.channel_trim(@upstreams.length, @output_channels)
           @output_scales = partition_outputs(Array.new(@channels) { |i| i }, @output_channels).map { |g|
-            Math.sqrt(@channels.to_f / g.length)
+            Math.sqrt(@channels.to_f / g.length) * @channel_trim
           }
 
           if @show_internals

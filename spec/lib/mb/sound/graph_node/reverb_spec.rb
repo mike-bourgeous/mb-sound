@@ -111,23 +111,33 @@ RSpec.describe(MB::Sound::GraphNode::Reverb) do
   end
 
   describe 'gains' do
-    # Wet output energy (no feedback) for any lines, stages, inputs, and
-    # outputs is about the input's (the old network's level moved by up
-    # to 30 dB with these).
+    # Wet output energy (no feedback) for any lines and stages is about the
+    # input's with stereo in and out (the old network's level moved by up
+    # to 30 dB with these), and follows Reverb.channel_trim for mono in or
+    # out (+3 dB each, the pre-2026-10-10 levels).
     [1, 2].each do |inputs|
       [1, 2].each do |outputs|
         # (with 4 lines and 1-2 stages, copies of an input stay partly
         # coherent: up to +/-3 dB)
         [[8, 2], [8, 4], [16, 3], [2, 4]].each do |channels, stages|
-          it "keeps each output near the input energy with #{channels} lines, #{stages} stages, #{inputs} in, #{outputs} out" do
+          it "keeps each output near the input energy (channel trim included) with #{channels} lines, #{stages} stages, #{inputs} in, #{outputs} out" do
             irs = impulse(nil, inputs: inputs, outputs: outputs, total: 9600, channels: channels, stages: stages, diffusion_range: 0.01,
               feedback_range: 0.05, feedback_gain: 0.5, feedback_enabled: false, wet: 1, level: 1, seed: 1)
             irs.each do |c|
-              expect(energy_db(c)).to be_within(1.5).of(0)
+              expect(energy_db(c)).to be_within(1.5).of(10 * Math.log10(4.0 / (inputs * outputs)))
             end
           end
         end
       end
+    end
+
+    it 'trims mono inputs and outputs +3 dB each (total wet energy over the outputs kept)' do
+      expect(described_class.channel_trim(2, 2)).to eq(1)
+      expect(described_class.channel_trim(1, 2).to_db).to be_within(1e-4).of(3.0103)
+      expect(described_class.channel_trim(1, 1).to_db).to be_within(1e-4).of(6.0206)
+      mono = impulse(:hall, total: 4800, outputs: 1)
+      stereo = impulse(:hall, total: 4800, outputs: 2)
+      expect(energy_db(mono[0]) - stereo.map { |c| energy_db(c) }.sum / 2).to be_within(1).of(3)
     end
 
     it 'keeps the classic presets at their old level for stereo in and out' do
