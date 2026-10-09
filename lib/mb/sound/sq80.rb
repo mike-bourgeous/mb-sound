@@ -206,6 +206,15 @@ module MB
           { @kind => @source }
         end
 
+        include Plan::Describable
+
+        # Plan layer: #time per sample (Plan::Op::TimeScale).
+        def plan_describe(p)
+          v = p[@source]
+          v = v.real if v.complex?
+          p.time_scale(self, v)
+        end
+
         def to_s
           "#{@node_type_name} #{MB::M.sigfigs(@seconds, 4)} s"
         end

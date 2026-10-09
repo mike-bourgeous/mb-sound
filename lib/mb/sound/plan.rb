@@ -120,6 +120,10 @@ module MB
         # (single-node regions gain nothing).
         attr_accessor :min_nodes
 
+        # Whether folding 0 * x to 0 (Plan::Fold) warns, once per kind of
+        # node (default true; MB_SOUND_PLAN_FOLD_WARN=0 turns it off).
+        attr_accessor :fold_warnings
+
         # Labels a node for listings and messages: its name or class and id.
         def node_label(node)
           return node.to_s if node.is_a?(Numeric)
@@ -210,6 +214,7 @@ module MB
                    else :raise
                    end
       self.min_nodes = 2
+      self.fold_warnings = ENV['MB_SOUND_PLAN_FOLD_WARN'] != '0'
       self.precision = ENV['MB_SOUND_PLAN_PRECISION'] == 'exact' ? :exact : :fast
     end
   end
@@ -217,15 +222,19 @@ end
 
 require_relative 'plan/value'
 require_relative 'plan/vec_sine'
+require_relative 'plan/vec_exp2'
 require_relative 'plan/ops'
 require_relative 'plan/tone_op'
 require_relative 'plan/events'
 require_relative 'plan/envelope_op'
 require_relative 'plan/snapshot'
 require_relative 'plan/builder'
+require_relative 'plan/fold'
+require_relative 'plan/filter_ops'
 require_relative 'plan/program'
 require_relative 'plan/describable'
 require_relative 'plan/region'
 require_relative 'plan/installation'
 require_relative 'plan/shared_inputs'
 require_relative 'plan/loop'
+require_relative 'plan/loop_pitch'

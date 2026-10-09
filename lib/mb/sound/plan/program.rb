@@ -15,7 +15,7 @@ module MB
         # Register kinds and opcodes of the C executor (see fast_plan.c;
         # specs compare them with FastPlan.constants).
         REG_KINDS = { slot: 0, input: 1, param: 2, out: 3 }.freeze
-        OPCODES = { fill: 1, mul: 2, muls: 3, add: 4, adds: 5, div: 6, divs: 7, pow: 8, part: 9, tone: 10, copy: 11, shape: 12, note_freq: 13, events: 14, keep: 15, envelope: 16, smooth: 17, max: 18 }.freeze
+        OPCODES = { fill: 1, mul: 2, muls: 3, add: 4, adds: 5, div: 6, divs: 7, pow: 8, part: 9, tone: 10, copy: 11, shape: 12, note_freq: 13, events: 14, keep: 15, envelope: 16, smooth: 17, max: 18, powf: 19, svf: 20, four_pole: 21, biquad: 22, clip: 23, exp: 24, time_scale: 25 }.freeze
 
         attr_reader :ops, :inputs, :params, :output
 
@@ -269,14 +269,14 @@ module MB
                 [OPCODES[:div], reg(op.dst), reg(op.a), reg(op.b)]
               end
             when Op::Pow
-              [OPCODES[:pow], reg(op.dst), reg(op.a), reg(op.b)]
+              [OPCODES[op.fast ? :powf : :pow], reg(op.dst), reg(op.a), reg(op.b)]
             when Op::Part
               [OPCODES[:part], reg(op.dst), reg(op.a), op.part == :imag ? 1 : 0]
             when Op::Copy
               [OPCODES[:copy], reg(op.dst), reg(op.a), 0]
             when Op::NoteFreq
               @objects << op.tuning
-              [OPCODES[:note_freq], reg(op.dst), reg(op.a), @objects.length - 1, 0]
+              [OPCODES[:note_freq], reg(op.dst), reg(op.a), @objects.length - 1, op.fast ? 1 : 0]
             when Op::Shape
               sh = op.shaper
               @objects << sh.plan_state
@@ -297,6 +297,26 @@ module MB
               [OPCODES[:smooth], reg(op.dst), reg(op.a), @objects.length - 1]
             when Op::Max
               [OPCODES[:max], reg(op.dst), reg(op.a), reg(op.b)]
+            when Op::FilterSvf
+              @objects << op.filter
+              cnum = ->(v) { v.is_a?(Const) ? v.parts[0] : 0.0 }
+              [OPCODES[:svf], reg(op.dst), reg(op.a), value_reg(op.cutoff), value_reg(op.quality), value_reg(op.gain),
+               @objects.length - 1, scalar(cnum.(op.cutoff), cnum.(op.quality), cnum.(op.gain), op.gain_input ? 1 : 0)]
+            when Op::Clip
+              [OPCODES[:clip], reg(op.dst), reg(op.a), scalar(op.lo, op.hi)]
+            when Op::Exp
+              [OPCODES[:exp], reg(op.dst), reg(op.a), 0]
+            when Op::TimeScale
+              sc = op.scale
+              [OPCODES[:time_scale], reg(op.dst), reg(op.a), scalar(sc.kind == :velocity ? 0 : 1, sc.seconds, sc.amount)]
+            when Op::FilterBiquad
+              @objects << op.filter
+              [OPCODES[:biquad], reg(op.dst), reg(op.a), reg(op.cutoff), reg(op.quality), @objects.length - 1, op.type_id]
+            when Op::FourPole
+              @objects << op.filter
+              cnum = ->(v) { v.is_a?(Const) ? v.parts[0] : 0.0 }
+              [OPCODES[:four_pole], reg(op.dst), reg(op.a), value_reg(op.cutoff), value_reg(op.resonance),
+               @objects.length - 1, scalar(*op.settings, cnum.(op.cutoff), cnum.(op.resonance))]
             else
               raise ArgumentError, "No lowering for #{op.class}"
             end
@@ -332,11 +352,25 @@ module MB
             ]
           end
 
-          # See run_envelope in fast_plan.c.
+          # See run_envelope in fast_plan.c.  Parameters filled with a
+          # constant (an Op::Fill, e.g. a product folded to zero by
+          # Plan::Fold) go to the kernel as numbers, as the float the fill
+          # writes, so its runs apply (constants of the patch; see
+          # mb_envelope.h).
           def encode_envelope(op)
             config = op.config
             nseg = op.times.length
-            cval = ->(v) { v.is_a?(Const) ? v.value.to_f : 0.0 }
+            filled = ->(v) { v.is_a?(Value) && v.real? && v.op.is_a?(Op::Fill) && v.op.value.real? }
+            cval = ->(v) {
+              if v.is_a?(Const)
+                v.value.to_f
+              elsif filled.(v)
+                Numo::SFloat[v.op.value.parts[0]][0]
+              else
+                0.0
+              end
+            }
+            value_reg = ->(v) { filled.(v) ? -1 : value_reg(v) }
             sc = scalar(
               *config[0...9], config.length > 9 ? config[9] : -1,
               *op.times.flat_map.with_index { |t, i| [cval.(t), cval.(op.curves[i]), cval.(op.levels[i])] },
@@ -347,10 +381,10 @@ module MB
             shapes = op.shapes
             words = [OPCODES[:envelope], reg(op.dst), @objects.length - 1, sc, nseg]
             nseg.times do |i|
-              words.push(value_reg(op.times[i]), value_reg(op.curves[i]), value_reg(op.levels[i]), shapes[i])
+              words.push(value_reg.(op.times[i]), value_reg.(op.curves[i]), value_reg.(op.levels[i]), shapes[i])
             end
-            words.push(value_reg(op.hold))
-            Op::Envelope::INPUTS.each { |k| words.push(value_reg(op.inputs[k])) }
+            words.push(value_reg.(op.hold))
+            Op::Envelope::INPUTS.each { |k| words.push(value_reg.(op.inputs[k])) }
             words
           end
 

@@ -34,6 +34,10 @@ module MB
         # The compiled program (nil before the region first plays).
         attr_reader :program
 
+        # The products folded to zero in the program (Op::ZeroFold; see
+        # Plan::Fold), after it compiled.
+        attr_reader :folds
+
         # Why the region stopped planning (nil while it plans).
         attr_reader :disabled
 
@@ -105,7 +109,9 @@ module MB
 
           @input_ops = b.inputs
           @param_ops = b.params
-          @program = Program.new(ops: b.ops, inputs: b.inputs, params: b.params, output: output, title: Plan.node_label(@root))
+          ops, @folds = Fold.zero_products(b.ops)
+          Fold.report(@folds)
+          @program = Program.new(ops: ops, inputs: b.inputs, params: b.params, output: output, title: Plan.node_label(@root))
           @program.lower if @installation.engine == :c
           @inputs = Array.new(@input_ops.length)
           @params = Array.new(@param_ops.length)
@@ -480,7 +486,8 @@ module MB
           else
             diff = (Numo::DComplex.cast(planned) - Numo::DComplex.cast(reference)).abs
             nan_ok = planned.isnan.eq(reference.isnan).all?
-            worst = diff[~(diff.isnan)].max || 0.0
+            finite = diff[~(diff.isnan)]
+            worst = finite.empty? ? 0.0 : finite.max # (every sample NaN on one side only: nan_ok reports it)
             # Inexact ops (Plan.precision :fast) may differ by their
             # tolerance, scaled by the output's level
             limit = @program.exact? ? 0.0 : @program.ops.map(&:tolerance).max * [1.0, Numo::DComplex.cast(reference).abs.max].max

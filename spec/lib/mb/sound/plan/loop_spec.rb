@@ -81,6 +81,12 @@ RSpec.describe(MB::Sound::Plan::Loop) do
         input + ((d + d.delay(1.samples)) * 0.4985).filter(:lowpass, cutoff: 2.3.hz.lfo.at(250..1500), quality: 0.5**0.5)
       }
     },
+    'sustain with a one-sample history, a negative loop gain, and a gain chain (pitch tracking in C)' => ->(s) {
+      s.input(5, 0.2).feedback { |fb, input|
+        g = (0.5.hz.lfo.at(0.2..0.4) * 2 + 0.1) / 3.constant
+        input + (fb * -0.3 + fb.delay(1.1.hz.lfo.at(48..60).samples) * g * -1).filter(:lowpass, cutoff: 3.hz.lfo.at(2000..6000), quality: 0.6)
+      }
+    },
     'division, power, and a plain shaper' => ->(s) {
       s.input.feedback { |fb, input|
         d = fb.delay(64.samples)

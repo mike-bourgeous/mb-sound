@@ -218,6 +218,13 @@ module MB
 
           lines = ["#{@regions.length} planned region#{@regions.length == 1 ? '' : 's'} covering #{@regions.sum { |r| r.members.length }} nodes"]
           @regions.each { |r| lines << r.to_s }
+          folds = @regions.flat_map { |r| r.folds || [] }
+          unless folds.empty?
+            lines << "Folded 0 * x to 0 (Plan::Fold; x still computed every block): #{folds.length}"
+            folds.group_by { |f| Plan.class_label(f.node) }.each do |label, fs|
+              lines << "  #{label}: #{fs.map { |f| "#{Plan.node_label(f.node)} (0 * #{f.folded})" }.first(8).join(', ')}#{fs.length > 8 ? ", ... (#{fs.length})" : ''}"
+            end
+          end
           others = @order.select { |n| n.is_a?(GraphNode) && !n.is_a?(GraphNode::Tee::Branch) && !@region_of[n] }
           unless others.empty?
             lines << 'Unfused nodes:'

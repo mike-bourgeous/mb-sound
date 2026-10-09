@@ -396,6 +396,95 @@ static inline int mb_env_process(const struct mb_env_args *a, float *o, size_t n
 	}
 
 	for (size_t i = 0; i < n; i++) {
+		// Runs (2026-10-10): while an exp segment's time, curve, and level
+		// (and the hold time without a gate) are constants of the patch, a
+		// sustain's level is, or the envelope is idle, the samples until the
+		// segment lands or an input changes (gate, choke, trigger; checked
+		// every sample, never assumed steady) are the general path's
+		// operations without its per-sample parameter reads and re-plan
+		// checks; bit for bit the same.  Parameters given as signals always
+		// take the general path (user decision 2026-10-09: specialize only on
+		// inputs constant in the patch, so a note's cost doesn't depend on
+		// whether its inputs happen to hold still).
+		size_t run_end = i;
+		if (stage == ENV_SEGMENT && planned && plan_shape == ENV_SHAPE_EXP && seg >= 0 && seg < nseg &&
+				!seg_times[seg].f && !seg_times[seg].d && !seg_curves[seg].f && !seg_curves[seg].d &&
+				!seg_levels[seg].f && !seg_levels[seg].d) {
+			double t = seg_times[seg].scalar;
+			double length = env_length(seg >= release_node ? t * release_scale : t);
+			double curve = seg_curves[seg].scalar;
+			if (!isfinite(curve)) {
+				curve = 0;
+			}
+			double target = seg_levels[seg].scalar * peak;
+			if (length == plan_length && curve == plan_curve && target == plan_target && e < length) {
+				run_end = n;
+				if (isfinite(length) && ceil(length - e) < (double)(n - i)) {
+					run_end = i + (size_t)ceil(length - e);
+				}
+			}
+		} else if (stage == ENV_SUSTAIN && release_node >= 1 && !seg_levels[release_node - 1].f && !seg_levels[release_node - 1].d &&
+				(!has_gate || gate_prev)) {
+			run_end = n;
+		} else if (stage == ENV_IDLE || stage == ENV_ENDED) {
+			run_end = n;
+		}
+		if (run_end > i && !has_gate && (stage == ENV_SEGMENT ? seg < release_node : stage == ENV_SUSTAIN)) {
+			// Notes without a gate release when they reach the hold time
+			if (hold_sig.f || hold_sig.d) {
+				run_end = i;
+			} else {
+				double hl = env_length(hold_sig.scalar);
+				if (!(note_position < hl)) {
+					run_end = i;
+				} else if (isfinite(hl) && ceil(hl - note_position) < (double)(run_end - i)) {
+					run_end = i + (size_t)ceil(hl - note_position);
+				}
+			}
+		}
+		if (run_end > i) {
+			size_t j = i;
+			double sustain_level = stage == ENV_SUSTAIN ? seg_levels[release_node - 1].scalar * peak : 0;
+			while (j < run_end) {
+				int gate_now = has_gate && env_at(&gate_sig, j) != 0;
+				int trigger_now = has_trigger && env_at(&trigger_sig, j) > 0;
+				if (gate_now != gate_prev || trigger_now != trigger_prev) {
+					break;
+				}
+				if (stage == ENV_SEGMENT || stage == ENV_SUSTAIN) {
+					if (env_at(&choke_sig, j) != 0) {
+						break;
+					}
+				}
+
+				double y_last = y;
+				if (stage == ENV_SEGMENT) {
+					if (linear) {
+						y = y0 + scale * (e - e0);
+					} else {
+						if (e > e0) {
+							w *= g;
+						}
+						y = y0 + scale * (1.0 - w);
+					}
+					e += 1;
+				} else if (stage == ENV_SUSTAIN) {
+					y = sustain_level;
+					e += 1;
+				} else {
+					y = 0;
+				}
+				y_prev = y_last;
+				note_position += 1;
+				o[j] = use_octaves ? pow(2.0, y * env_at(&octaves_sig, j)) : y;
+				j++;
+			}
+			if (j > i) {
+				i = j - 1;
+				continue;
+			}
+		}
+
 		int gate_now = has_gate && env_at(&gate_sig, i) != 0;
 		int start = stage == ENV_PENDING;
 		int landed = 0;

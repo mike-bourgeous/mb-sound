@@ -16,6 +16,10 @@ module MB
       # all branches have caught up.  A branch that is never read keeps the
       # Tee in that mode until its reader falls a whole CircularBuffer behind
       # (it then raises BranchBufferOverflow if it ever reads, as before).
+      # The CircularBuffer and the branches' readers (a second-long buffer
+      # each) are made when the Tee first leaves lockstep, so Tees that
+      # never do (every Tee in the bin/ scripts measured 2026-10-09) cost
+      # no memory for them (sq80_voice: 719 Tees, 324 MB before).
       #
       # Nodes must not modify a frozen buffer they are given (copy it first;
       # see the nodes that process in place).  Numo raises for most writes to
@@ -60,6 +64,18 @@ module MB
         # modified a buffer shared by all branches.
         class SharedBufferModified < RuntimeError; end
 
+        # A branch's reader until the Tee first leaves lockstep and makes its
+        # CircularBuffer (see #buffers!): nothing buffered, never overflowed.
+        class IdleReader
+          def length = 0
+          alias count length
+
+          def empty? = true
+          def overflowed? = false
+          def closed? = false
+          def close; end
+        end
+
         class << self
           # Whether lockstep branches share one buffer (default true; false
           # with MB_SOUND_SHARED_TEE=0).
@@ -86,6 +102,10 @@ module MB
 
           # Values for internal use by Tee.
           attr_reader :index, :reader, :tee
+
+          # For internal use by Tee: the branch's CircularBuffer reader (an
+          # IdleReader until the Tee leaves lockstep for the first time).
+          attr_writer :reader
 
           # For internal use by Tee: the last shared frame this branch read.
           attr_accessor :frame
@@ -178,7 +198,9 @@ module MB
           @original_source = @source
           @original_source = @original_source.original_source while @original_source.is_a?(Branch)
 
-          @cbuf = CircularBuffer.new(buffer_size: circular_buffer_size)
+          # Made when first needed (#buffers!)
+          @cbuf = nil
+          @cbuf_size = circular_buffer_size
 
           @branch_index = 0
           @branches = []
@@ -202,7 +224,7 @@ module MB
         # This is part of the code to allow multiple references to a single
         # graph node without explicit teeing.
         def add_branch
-          reader = @cbuf.reader
+          reader = @cbuf ? @cbuf.reader : IdleReader.new
           branch = Branch.new(self, @branch_index, reader)
           branch.frame = @frame || 0
 
@@ -315,10 +337,22 @@ module MB
           end
         end
 
+        # Makes the CircularBuffer and a reader for each branch, the first
+        # time the Tee leaves lockstep (nothing was ever written before, so
+        # every reader starts empty at the start of the buffer, as readers
+        # made with the Tee would be).
+        def buffers!
+          return if @cbuf
+
+          @cbuf = CircularBuffer.new(buffer_size: @cbuf_size)
+          @branches.each { |b| b.reader = @cbuf.reader }
+        end
+
         # Leaves lockstep: puts the current shared buffer into the
         # CircularBuffer for the branches that haven't read it, then serves
         # +branch+ from the CircularBuffer.
         def switch_to_buffer(branch, count)
+          buffers!
           check_frame if @frame_snapshot
           @frame_snapshot = nil
 
@@ -338,6 +372,7 @@ module MB
         # the source as needed, and returns to lockstep once every branch has
         # caught up.
         def buffered_sample(branch, count)
+          buffers!
           r = branch.reader
 
           while !@done && r.length < count

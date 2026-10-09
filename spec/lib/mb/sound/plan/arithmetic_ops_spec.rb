@@ -153,6 +153,78 @@ RSpec.describe(MB::Sound::Plan, 'arithmetic ops') do
       MB::Sound.tuning.reset
     end
 
+    describe 'vectorized 2^x (Plan.precision :fast, the default)' do
+      around do |ex|
+        old = MB::Sound::Plan.precision
+        MB::Sound::Plan.precision = :fast
+        ex.run
+      ensure
+        MB::Sound::Plan.precision = old
+        MB::Sound.tuning.reset
+      end
+
+      let(:vx) { MB::Sound::Plan::VecExp2 }
+
+      it 'gives exactly the same samples in C and the Ruby mirror (Plan::VecExp2) for powers and note frequencies' do
+        r = plan_compare { |c|
+          c.before_block(5) { MB::Sound.tuning(b4: 480) }
+          f = MB::Sound.tuning.freq(src.new(seed: 1, scale: 30, offset: 60) * 1)
+          g = 10 ** (src.new(seed: 3, scale: 40, offset: -30) * 1 / 20)
+          h = 2 ** (src.new(seed: 5, scale: 3) * 1)
+          f.tone.sine * g + h * 0.1
+        }
+        ops = r.program.ops.select { |op| op.is_a?(MB::Sound::Plan::Op::Pow) || op.is_a?(MB::Sound::Plan::Op::NoteFreq) }
+        expect(ops.length).to eq(3)
+        expect(ops.map(&:fast)).to all(eq(true))
+        expect(r.program).not_to be_exact
+        c = r.outputs[:c].compact
+        ruby = r.outputs[:ruby].compact
+        expect(c.zip(ruby).map { |x, y| x.to_binary == y.to_binary }).to all(eq(true))
+      end
+
+      it 'keeps powers of a node base and Plan.precision :exact on libm' do
+        r = plan_compare { (src.new(seed: 1, offset: 2) * 1) ** (src.new(seed: 2) * 1) * 1 }
+        expect(r.program).to be_exact
+
+        MB::Sound::Plan.precision = :exact
+        r = plan_compare { 10 ** (src.new(seed: 1) * 1) * MB::Sound.tuning.freq(src.new(seed: 2, scale: 12, offset: 60) * 1) }
+        expect(r.program).to be_exact
+      end
+
+      it 'matches libm within a float step for every note (and bend step) and 10^x' do
+        n = Numo::SFloat.new(182_858).seq(0, 0.0007)
+        got = vx.note_freq(n, 69, 440)
+        ref = MB::FastSound.number_to_freq(n.dup.inplace!, 69, 440).not_inplace!
+        rel = ((Numo::DFloat.cast(got) - ref) / ref).abs.max
+        expect(rel).to be <= 1.2e-7
+
+        x = Numo::SFloat.new(200_000).seq(-3, 0.00003)
+        got = vx.pow(Numo::SFloat.new(x.length).fill(10), x)
+        ref = (Numo::SFloat.new(x.length).fill(10).inplace ** x).not_inplace!
+        rel = ((Numo::DFloat.cast(got) - ref) / ref).abs.max
+        expect(rel).to be <= 1.2e-7
+      end
+
+      it 'gives libm\'s results for bases and exponents outside the fast path, and at the limits' do
+        a = Numo::SFloat[-2, 0, 1, 1, 2, Float::INFINITY, Float::NAN, 2, 2, 2, 10, 10, 0.5]
+        b = Numo::SFloat[3, 2, Float::INFINITY, Float::NAN, Float::NAN, 0, 1, Float::INFINITY, -Float::INFINITY, 1000, -60, 39, 200]
+        got = vx.pow(a, b)
+        ref = (a.dup.inplace ** b).not_inplace!
+        expect(got.to_a.zip(ref.to_a).map { |g, r| g.equal?(r) || g == r || (g.nan? && r.nan?) }).to all(eq(true))
+
+        # Note numbers whose 2^x is beyond the polynomial's limit, and NaN
+        n = Numo::SFloat[69 + 12 * 250, 69 - 12 * 250, Float::NAN, Float::INFINITY, -Float::INFINITY, 69]
+        got = vx.note_freq(n, 69, 440)
+        ref = MB::FastSound.number_to_freq(n.dup.inplace!, 69, 440).not_inplace!
+        expect(got.to_a.zip(ref.to_a).map { |g, r| g == r || (g.nan? && r.nan?) }).to all(eq(true))
+
+        # Results down through float's subnormals to 0 (2^-160..2^40) through
+        # the plan
+        r = plan_compare(sizes: [13, 64]) { 2 ** (src.new(seed: 1, scale: 100, offset: -60) * 1) * 1 }
+        expect(r.program).not_to be_exact
+      end
+    end
+
     it 'leaves other procs unfused' do
       g = (src.new(seed: 1) * 2).proc { |v| v * 2 } * 3
       expect(MB::Sound::Plan.explain(g)).to include('a Ruby block')
@@ -186,5 +258,79 @@ RSpec.describe(MB::Sound::Plan, 'arithmetic ops') do
       r = plan_compare(sizes: [100, 128, 128, 128]) { src.new(seed: 1, ends_at: 300) * src.new(seed: 2) * 2 }
       expect(r.outputs[:c].map { |o| o&.length }).to eq([100, 128, 72, nil])
     end
+  end
+end
+
+RSpec.describe(MB::Sound::Plan::Fold) do
+  let(:src) { PlanSpecHelpers::Source }
+
+  around do |ex|
+    old = MB::Sound::Plan.fold_warnings
+    MB::Sound::Plan.fold_warnings = false
+    ex.run
+  ensure
+    MB::Sound::Plan.fold_warnings = old
+  end
+
+  def folds(r)
+    r.regions.flat_map { |g| g.folds || [] }
+  end
+
+  it 'folds 0 * x to 0 and propagates through later products, matching the unfused graph' do
+    r = plan_compare(check: :raise) { (src.new(seed: 1) * 1 * 0) * 3 * src.new(seed: 2) + src.new(seed: 3) * 1 }
+    expect(folds(r).length).to be >= 2
+    expect(folds(r).map(&:primary)).to include(true, false)
+    expect(r.program.to_s).to include('folded: 0 *')
+  end
+
+  it 'keeps running the folded factor\'s ops, so their nodes\' state advances as unfused (checked per block)' do
+    r = plan_compare(check: :raise) {
+      tone = 123.hz.ramp.pm(src.new(seed: 1) * 0.5)
+      tone * 0 + 77.hz.sine * 0.5
+    }
+    expect(folds(r).length).to eq(1)
+    expect(r.program.tones.length).to eq(2)
+  end
+
+  it 'keeps Tee branches of the folded factor in step with their other readers' do
+    s = src.new(seed: 4)
+    x = s * 2
+    g = x * 0 + (x * 0.5).proc { |v| v } # the proc reads x's other branch outside the region
+    MB::Sound::Plan.install(g)
+    expect { 300.times { |i| g.sample([64, 128, 7][i % 3]) } }.not_to raise_error
+  end
+
+  it 'leaves a Constant node\'s live value of 0 unfolded (0 * node makes one)' do
+    r = plan_compare { 0 * (src.new(seed: 1) * 1) + 1 }
+    expect(folds(r)).to be_empty
+  end
+
+  it 'gives 0 where the unfused graph would give NaN for a non-finite factor (a patch bug, which check mode reports)' do
+    old_check = MB::Sound::Plan.check
+    MB::Sound::Plan.check = nil
+    inf = 0.constant.proc { |v| Numo::SFloat.new(v.length).fill(Float::INFINITY) }
+    g = inf * 1 * 0 + 1.constant * 1
+    MB::Sound::Plan.install(g)
+    expect(g.sample(16).to_a).to all(eq(1.0))
+
+    MB::Sound::Plan.check = :raise
+    inf2 = 0.constant.proc { |v| Numo::SFloat.new(v.length).fill(Float::INFINITY) }
+    g2 = inf2 * 1 * 0 + 1.constant * 1
+    MB::Sound::Plan.install(g2)
+    expect { g2.sample(16) }.to raise_error(MB::Sound::Plan::CheckFailed)
+  ensure
+    MB::Sound::Plan.check = old_check
+  end
+
+  it 'lists folds in Plan.explain and warns once per kind of node' do
+    MB::Sound::Plan.fold_warnings = true
+    MB::Sound::Plan::Fold.instance_variable_set(:@warned, nil)
+    g = src.new(seed: 1) * 1 * 0 + src.new(seed: 2) * 1 * 0
+    text = nil
+    expect { text = MB::Sound::Plan.explain(g) }.to output(/folded 0 \* x to 0/).to_stderr
+    expect(text).to include('Folded 0 * x to 0').and include('x still computed')
+    expect { MB::Sound::Plan.install(g); g.sample(10) }.not_to output.to_stderr
+    g2 = src.new(seed: 3) * 1 * 0 + 1
+    expect { MB::Sound::Plan.install(g2); g2.sample(10) }.not_to output.to_stderr
   end
 end

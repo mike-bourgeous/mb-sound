@@ -444,6 +444,7 @@
         "FastFilter.svf"
       ],
       "fast_loop": [
+        "FastLoop.pitch_track",
         "FastLoop.run"
       ],
       "fast_plan": [
@@ -457,7 +458,8 @@
       ],
       "fast_sound": [
         "FastSound.cookbook",
-        "FastSound.oscillate"
+        "FastSound.oscillate",
+        "FastSound.smoothstep_buf"
       ],
       "fast_synth": [
         "FastSynth.oscillate_bl"
@@ -576,6 +578,7 @@
         "FastFilter.svf"
       ],
       "fast_loop": [
+        "FastLoop.pitch_track",
         "FastLoop.run"
       ],
       "fast_loudness": [
@@ -606,6 +609,7 @@
         "FastSound.smoothstep"
       ],
       "fast_synth": [
+        "FastSynth.blit",
         "FastSynth.feedback_sine",
         "FastSynth.oscillate_bl",
         "FastSynth.oscillate_sync"
@@ -796,6 +800,26 @@
         "FastSynth.oscillate_bl"
       ]
     },
+    "spec/lib/mb/sound/plan/filter_ops_spec.rb": {
+      "fast_arithmetic": [
+        "FastArithmetic.copy",
+        "FastArithmetic.mix",
+        "FastArithmetic.product"
+      ],
+      "fast_filter": [
+        "FastFilter.diode_ladder",
+        "FastFilter.four_pole",
+        "FastFilter.svf"
+      ],
+      "fast_plan": [
+        "FastPlan.run"
+      ],
+      "fast_sound": [
+        "FastSound.cookbook",
+        "FastSound.dynamic_biquad",
+        "FastSound.smoothstep_buf"
+      ]
+    },
     "spec/lib/mb/sound/plan/installation_spec.rb": {
       "fast_arithmetic": [
         "FastArithmetic.circular_read",
@@ -827,10 +851,13 @@
     },
     "spec/lib/mb/sound/plan/loop_spec.rb": {
       "fast_arithmetic": [
-        "FastArithmetic.mix"
+        "FastArithmetic.divide",
+        "FastArithmetic.mix",
+        "FastArithmetic.product"
       ],
       "fast_loop": [
         "FastLoop.constants",
+        "FastLoop.pitch_track",
         "FastLoop.run"
       ],
       "fast_sound": [
@@ -843,6 +870,8 @@
     },
     "spec/lib/mb/sound/plan/notes_ops_spec.rb": {
       "fast_arithmetic": [
+        "FastArithmetic.circular_read",
+        "FastArithmetic.circular_write",
         "FastArithmetic.complex_part",
         "FastArithmetic.min_max",
         "FastArithmetic.mix",
@@ -856,6 +885,10 @@
       ],
       "fast_envelope": [
         "FastEnvelope.process"
+      ],
+      "fast_filter": [
+        "FastFilter.four_pole",
+        "FastFilter.svf"
       ],
       "fast_plan": [
         "FastPlan.run"
@@ -880,14 +913,10 @@
       "fast_envelope": [
         "FastEnvelope.process"
       ],
-      "fast_filter": [
-        "FastFilter.svf"
-      ],
       "fast_plan": [
         "FastPlan.run"
       ],
       "fast_sound": [
-        "FastSound.cookbook",
         "FastSound.number_to_freq",
         "FastSound.oscillate"
       ]
@@ -975,6 +1004,8 @@
         "FastSynth.oscillate_sync"
       ],
       "fast_wavetable": [
+        "FastWavetable.half_means",
+        "FastWavetable.harmonic_spectra",
         "FastWavetable.oscillate"
       ]
     },

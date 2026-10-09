@@ -348,7 +348,7 @@ module MB
           end
 
           # The latency and the sustain shelf at the pitch
-          track = @program.pitch_track(@values, n) if @compensate == :pitch || @program.sustain
+          track = pitch_track(n) if @compensate == :pitch || @program.sustain
           set_sustain(track, n) if @program.sustain
 
           if (comp = @program.compensated)
@@ -362,6 +362,24 @@ module MB
           end
 
           run(n)
+        end
+
+        # Program#pitch_track for a block of +n+ samples; in check mode the C
+        # kernel and its Ruby mirror from the same state, compared bit for bit.
+        def pitch_track(n)
+          unless MB::Sound::Plan.check && !@check_failed && MB::Sound::Plan.engine != :ruby
+            return @program.pitch_track(@values, n)
+          end
+
+          track, problem = @program.pitch_track_check(@values, n)
+          return track unless problem
+
+          message = "Feedback loop check failed: #{problem}\n#{@program}"
+          raise Plan::CheckFailed, message if Plan.check == :raise
+
+          warn "#{message}\nNot checking this loop from now on."
+          @check_failed = true
+          track
         end
 
         # Sets the sustain shelf's params for a block of +n+ samples from

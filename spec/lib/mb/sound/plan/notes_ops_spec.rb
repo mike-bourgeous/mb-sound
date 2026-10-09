@@ -177,4 +177,33 @@ RSpec.describe('Plan: Notes nodes and envelopes') do
       expect(excluded).to be_empty
     end
   end
+
+  describe 'filter parameter nodes' do
+    it 'matches cutoff (base, GM brightness, filter envelope, key tracking), quality, and reso with their filters' do
+      r = compare { |v|
+        sig = v.hz.saw
+        a = sig.filter(:lowpass, cutoff: v.cutoff(400, env: v.filt_env(0.01, 0.3, 0.4, 0.2, depth: 3), keytrack: 1), quality: v.quality(2))
+        b = sig.lp4(v.cutoff(800), resonance: v.reso(0.6))
+        (a + b) * v.amp_env
+      }
+      expect(op_names(r)).to include(:Exp, :Clip, :FilterSvf, :FourPole)
+      members = r.regions.flat_map(&:members)
+      expect(members.grep(MB::Sound::Notes::Cutoff).length).to eq(2)
+      expect(members.grep(MB::Sound::Notes::Quality).length).to eq(1)
+      expect(members.grep(MB::Sound::Notes::Resonance).length).to eq(1)
+    end
+
+    it 'matches parameter nodes with node bases, without GM controllers, and without key tracking' do
+      compare { |v|
+        sig = v.hz.ramp
+        c = v.cutoff(v.velocity * 2000 + 300, env: false, keytrack: 0, gm: false)
+        sig.filter(:bandpass, cutoff: c, quality: v.quality(v.velocity * 3 + 0.5, gm: false)).lp4(900, resonance: v.reso(v.velocity, gm: false)) * v.env
+      }
+    end
+
+    it 'matches SQ-80 velocity and key time scaling' do
+      r = compare { |v| v.hz.sine * v.sq80_env(t1: 20, t2: 30, t3: 25, t4: 30, l1: 63, l2: 40, l3: 30, t1v: 40, tk: 30) }
+      expect(op_names(r)).to include(:TimeScale)
+    end
+  end
 end

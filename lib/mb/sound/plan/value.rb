@@ -46,6 +46,14 @@ module MB
           @op = op
         end
 
+        # For internal use by Plan::Fold: the op that now computes this
+        # value in place of +old+ (its replacement in the op list).
+        def replace_op(old, op)
+          raise 'Not the op computing this value' unless @op.equal?(old)
+
+          @op = op
+        end
+
         def complex?
           @type == :complex
         end

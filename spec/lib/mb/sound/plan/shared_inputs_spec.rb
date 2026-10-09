@@ -91,7 +91,7 @@ RSpec.describe(MB::Sound::Plan::SharedInputs) do
   end
 
   it 'leaves out a controller read by a node outside every region' do
-    s = make_synth { |v, out| out * v.cc(1, range: 1.0..2.0).filter(10.hz.lowpass) }
+    s = make_synth { |v, out| out * v.cc(1, range: 1.0..2.0).proc { |x| x } }
     s.sample(64)
     shared = s.shared_inputs.sources
     expect(shared.map { |x| MB::Sound::Plan.class_label(x) }).to include('Notes::Bend')
@@ -99,8 +99,8 @@ RSpec.describe(MB::Sound::Plan::SharedInputs) do
     expect(shared.select { |x| x.equal?(mod) }).to be_empty
     expect(shared.length).to be >= 2
 
-    a = render(make_synth { |v, out| out * v.cc(1, range: 1.0..2.0).filter(10.hz.lowpass) }, sizes.first(20))
-    b = render(make_synth { |v, out| out * v.cc(1, range: 1.0..2.0).filter(10.hz.lowpass) }, sizes.first(20), unshared: true)
+    a = render(make_synth { |v, out| out * v.cc(1, range: 1.0..2.0).proc { |x| x } }, sizes.first(20))
+    b = render(make_synth { |v, out| out * v.cc(1, range: 1.0..2.0).proc { |x| x } }, sizes.first(20), unshared: true)
     expect(a).to eq(b)
   end
 

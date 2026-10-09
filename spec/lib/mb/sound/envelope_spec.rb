@@ -156,6 +156,50 @@ RSpec.describe(MB::Sound::Envelope) do
       end
     end
 
+    it 'give the same samples with constant parameters (the run path) as with the same values as signals (the general path)' do
+      rng = Random.new(777)
+      200.times do |trial|
+        flags = 0
+        flags |= MB::Sound::Envelope::FLAG_GATE if rng.rand < 0.6
+        flags |= MB::Sound::Envelope::FLAG_TRIGGER if rng.rand < 0.5
+        flags |= MB::Sound::Envelope::FLAG_ONE_SHOT if flags & 3 == 0
+        flags |= MB::Sound::Envelope::FLAG_OCTAVES if rng.rand < 0.2
+        flags |= MB::Sound::Envelope::FLAG_ADD if trial.odd?
+        config = [flags, 2, 0.1, 1.0, 0, rng.rand(0.0..300.0), MB::Sound::Envelope::CURVE_SCALE, 96.0, 0.01]
+        shapes = trial % 4 == 3 ? [1, 0, 0] : [0, 0, 0]
+        # (float values, so the signals hold the same numbers)
+        f = ->(v) { Numo::SFloat[v][0] }
+        times = Array.new(3) { rng.rand < 0.1 ? 0.0 : f.(rng.rand(0.0..400.0)) }
+        times[2] = Float::INFINITY if trial % 7 == 0
+        curves = Array.new(3) { rng.rand < 0.1 ? 0.0 : f.(rng.rand(-90.0..90.0)) }
+        levels = [1.0, f.(rng.rand(0.0..1.2)), 0.0]
+        hold = f.(rng.rand(0.0..300.0))
+
+        states = Array.new(2) {
+          st = Numo::DFloat.zeros(MB::Sound::Envelope::STATE_SIZE)
+          st[MB::Sound::Envelope::STATE_STAGE] = flags & MB::Sound::Envelope::FLAG_ONE_SHOT != 0 ? 5 : 0
+          st[MB::Sound::Envelope::STATE_PEAK] = 1
+          st
+        }
+        4.times do
+          n = rng.rand(1..900)
+          inputs = [
+            flags & 1 != 0 ? gates(rng, n, 0.003) : nil,
+            flags & 2 != 0 ? sparse(rng, n, 0.002) : nil,
+            rng.rand,
+            rng.rand < 0.5 ? sparse(rng, n, 0.0005) : nil,
+            nil,
+            rng.rand(-3.0..3.0),
+          ]
+          sig = ->(v) { Numo::SFloat.new(n).fill(v) }
+          a = MB::Sound::FastEnvelope.process(Numo::SFloat.zeros(n), states[0], times, curves, levels, hold, inputs, config, shapes)
+          b = MB::Sound::FastEnvelope.process(Numo::SFloat.zeros(n), states[1], times.map { |t| t.finite? ? sig.(t) : t }, curves.map(&sig), levels.map(&sig), sig.(hold), inputs, config, shapes)
+          expect(a.to_binary).to eq(b.to_binary), "trial #{trial}: outputs differ"
+          expect(states[0].to_a).to eq(states[1].to_a), "trial #{trial}: states differ"
+        end
+      end
+    end
+
     it 'agree for whole envelopes with node parameters and inputs' do
       make = ->(m) {
         n = array_node_class

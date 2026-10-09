@@ -10,8 +10,9 @@
 # modulated sources and short clips.  Filter entries are generated from the
 # filters' own type lists (Filter::SVF::FILTER_TYPES, Cookbook::FILTER_TYPES,
 # FourPole::MODES / DRIVE_MODES), so new types are swept automatically.
-# When filters become plan ops, the planned variant of the sweep covers
-# their fused regions with no change here.
+# Filters are plan ops (SVF, cookbook biquad, four-pole; 2026-10-10), so
+# the planned variant covers their fused regions; an example checks every
+# filter entry is fused.
 #
 # The guard records every GraphNode, multi-output, and Filter class
 # constructed while building the factories, and requires every such class
@@ -329,6 +330,24 @@ RSpec.describe('graph sweep (memcheck light)', :check_shared) do
         end
       end
     end
+  end
+
+  # Filters are plan ops (2026-10-10): the planned variant above runs them
+  # fused.  This keeps it that way: every SVF, cookbook biquad, and
+  # four-pole entry (outside feedback loops) has its filter node in a
+  # region when planned.
+  it 'fuses every filter entry in the planned variant' do
+    MB::Sound::Plan.enabled = true
+    filters = GraphSweep.factories.select { |name, _| name.start_with?('filter(:', 'lp4', 'diode') }
+    expect(filters.length).to be > 40
+    unfused = filters.reject { |name, factory|
+      MB::Sound.seed(1)
+      graph = factory.call(GraphSweep::Context.new)
+      inst = MB::Sound::Plan.install(graph)
+      members = inst ? inst.regions.flat_map(&:members) : []
+      members.any? { |m| m.is_a?(MB::Sound::Filter::SampleWrapper) || m.is_a?(MB::Sound::GraphNode::FourPole) }
+    }.map(&:first)
+    expect(unfused).to eq([])
   end
 
   describe 'coverage guard' do

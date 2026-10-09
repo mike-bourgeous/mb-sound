@@ -1,1 +1,1 @@
-fast_sound.o: $(srcdir)/../sound/include/mb_ext_helpers.h $(srcdir)/../sound/include/mb_osc_shapes.h
+fast_sound.o: $(srcdir)/../sound/include/mb_ext_helpers.h $(srcdir)/../sound/include/mb_osc_shapes.h $(srcdir)/../sound/include/mb_biquad.h
