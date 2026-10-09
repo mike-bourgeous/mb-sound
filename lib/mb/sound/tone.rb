@@ -1030,8 +1030,13 @@ module MB
       # wave.  0 phase starts oscillators at 0 and rising (or at the top half
       # of the cycle for a square wave).
       #
+      # +phase+ may also be an MB::Sound::Phase (e.g. `0.25.cycles`, the same
+      # as #with_phase_cycles).
+      #
       # Example: 123.hz.with_phase(90.degrees)
       def with_phase(phase)
+        return with_phase_cycles(phase.to_cycles) if phase.is_a?(Phase) && !phase.node?
+
         configure do
           @phase = phase
           @start_cycles = nil
@@ -1040,6 +1045,7 @@ module MB
 
       # Like #with_phase, in cycles (0 to 1; e.g. 0.25 is 90 degrees).
       def with_phase_cycles(cycles)
+        cycles = Phase.cycles(cycles)
         configure do
           @phase = cycles * TWOPI
           @start_cycles = cycles
@@ -1102,8 +1108,16 @@ module MB
 
       # Adds the given other +tone+ or signal graph as a phase modulation
       # source for this tone.  Like #fm, but added to the phase given to the
-      # oscillator, rather than to the frequency itself.
+      # oscillator, rather than to the frequency itself.  The phase
+      # modulation is in radians; an MB::Sound::Phase gives cycles instead:
+      # an +index+ like `0.4.cycles`, a node marked `node.cycles`, or a fixed
+      # phase offset like `0.25.cycles` (see also #pm_cycles).
       def pm(tone, index = nil)
+        index = Phase.radians(index)
+        if tone.is_a?(Phase)
+          tone = tone.node? ? tone.to_radians : tone.to_radians.constant
+        end
+
         configure do
           tone = tone.hz if tone.is_a?(Numeric)
           if tone.is_a?(Tone)
@@ -1121,6 +1135,20 @@ module MB
           @phase_mod = tone
         end
       end
+
+      # Like #pm, with the modulation in cycles instead of radians: the
+      # modulator's output (times +index+, a number or node, if given) is a
+      # phase offset in cycles, so `pm_cycles(330.hz.at(0.25))` swings a
+      # quarter cycle (90 degrees) either way without typing Math::PI.
+      # Also available as #pm_cyc.
+      def pm_cycles(tone, index = nil)
+        return pm(tone, Phase.new(index)) unless index.nil?
+
+        tone = tone.hz if tone.is_a?(Numeric)
+        tone.or_at(1) if tone.is_a?(Tone)
+        pm(Phase.new(tone))
+      end
+      alias pm_cyc pm_cycles
 
       # Operator self-feedback (FM synth style): the sine's phase is
       # modulated by its own output, averaged over the last two samples (as
@@ -1203,6 +1231,7 @@ module MB
       #     play 220.hz.fm_feedback(1.4, gain: e).at(-6.db)                  # brass-like: bright as it swells
       #     play 220.hz.pm(440.hz.fm_feedback(1.0).at(1.5)).at(-12.db)       # a feedback modulator
       def fm_feedback(amount, gain: nil, dc: false)
+        amount = Phase.radians(amount) # e.g. 0.3.cycles
         if amount.nil?
           return configure do
             @feedback = nil
@@ -1234,6 +1263,7 @@ module MB
       def fm_feedback_cycles(cycles, gain: nil, dc: false)
         return fm_feedback(nil) if cycles.nil?
 
+        cycles = Phase.cycles(cycles)
         amount = cycles * TWOPI
         fm_feedback(amount, gain: gain, dc: dc)
       end
@@ -1291,7 +1321,8 @@ module MB
       # phase goes +to:+
       #
       # - nil (default): the starting phase (see #with_phase; 0 unless set),
-      # - a phase in radians, like #with_phase (e.g. 90.degrees),
+      # - a phase in radians, like #with_phase (e.g. 90.degrees), or an
+      #   MB::Sound::Phase (e.g. 0.5.cycles),
       # - a graph node of radians, read at each reset sample,
       # - :random, a new random phase at each reset (the same as #rnd).
       #
@@ -1323,6 +1354,7 @@ module MB
       #     play 55.hz.saw.reset(c.trigger) * c.env           # every hit starts at phase 0
       #     play 2.hz.lfo.reset(c.trigger, to: 90.degrees)    # an LFO that restarts at its peak
       def reset(trigger, to: nil, clean: nil, keep_feedback: nil)
+        to = Phase.radians(to)
         self.clean(clean) unless clean.nil?
         if trigger.nil?
           return configure do
