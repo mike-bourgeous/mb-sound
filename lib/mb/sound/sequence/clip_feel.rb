@@ -136,15 +136,19 @@ module MB
         # with any clip.  A non-looping clip keeps everything the transform
         # makes (its length grows to fit the tail).  Lengths in seconds are
         # read at the current tempo (Durations stay exact).  Probabilities,
-        # conditions, and variations are played out (cycle 0's, or the
-        # cycles around the baked one for loops).
+        # conditions, and variations are played out: a loop bakes +:cycles+
+        # cycles (1 by default) into one loop that many cycles long, so
+        # pass e.g. `cycles: 4` to keep four different cycles of a loop
+        # that varies (#variations) or plays notes by chance.
         #
         # Note: this may change with the library and live-performance work
         # (user, 2026-10-09).
         #
         #     riff.loop.bake(echo(3.n16, 3, pitch: 7.st, velocity: 0.6))
         #     chords.bake { |s| s.strum(1.n32).humanize(5.ms) }
-        def bake(fx = nil, &block)
+        #     line.loop.permute(vary: true).bake(echo(1.n8, 2), cycles: 4)
+        def bake(fx = nil, cycles: 1, &block)
+          raise ArgumentError, "Bake cycles must be a positive Integer (got #{cycles.inspect})" unless cycles.is_a?(Integer) && cycles > 0
           fx ||= block
           raise ArgumentError, 'Pass a transform (e.g. echo(1.n8, 3)) or a block taking a MIDI::Stream' unless fx
           apply = fx.respond_to?(:apply) ? fx.method(:apply) : fx
@@ -160,16 +164,34 @@ module MB
 
           # Find how many cycles the transform's tail spans, then play enough
           # cycles before and after the baked one for a steady state
-          _, tail = Clip.bake_notes(repeated(1), apply, transport)
+          _, tail = Clip.bake_notes(unrolled(cycles, 0), apply, transport)
           warm = (tail / @length).ceil + 1
-          notes, = Clip.bake_notes(repeated(warm + 2), apply, transport)
+          notes, = Clip.bake_notes(unrolled(cycles, warm, warm + cycles + 1), apply, transport)
+
+          # Copies warm...warm + cycles hold cycles 0...cycles, after warm-up
+          # copies that play the same cycles in loop order
           from = @length * warm
-          to = from + @length
+          to = from + @length * cycles
           events = notes.select { |start, *| start >= from && start < to }.map { |start, length, value, velocity|
             Event.new(start: start - from, length: length, value: value, velocity: velocity)
           }
-          Clip.new(events, length: @length, loop: true, seed: @seed, align: @align)
+          Clip.new(events, length: @length * cycles, loop: true, seed: @seed, align: @align)
         end
+
+        # A non-looping clip of +total+ copies of this loop's cycles
+        # 0...+cycles+ in loop order, copy +first+ holding cycle 0 (copies
+        # before it hold the cycles leading up to it), with probabilities
+        # and conditions decided for those cycles.  Used by #bake.
+        def unrolled(cycles, first, total = cycles)
+          events = (0...total).flat_map { |j|
+            cycle = (j - first) % cycles
+            events_for(cycle).each_with_index.select { |e, idx| plays?(e, cycle, idx) }.map { |e, _|
+              e.with(start: e.start + j * @length, probability: nil, condition: nil)
+            }
+          }
+          Clip.new(events, length: @length * total, seed: @seed)
+        end
+        protected :unrolled
 
         # Plays +clip+ (not looping) through +apply+ at +transport+'s tempo
         # and returns [notes, tail]: notes as [start, length, value,

@@ -252,6 +252,8 @@ module MB
         def repeat(count)
           raise ArgumentError, "Repeat count must be a positive Integer (got #{count.inspect})" unless count.is_a?(Integer) && count > 0
           warn "repeat makes a finite clip, so #{self} will stop looping; call .loop on the result to keep looping" if @loop
+          # Cycle conditions (Step#every) unroll per copy, as in Clip#repeat
+          return repeated(count) if @events.any?(&:condition)
           Seq.new(@steps * count, seed: @seed)
         end
         alias * repeat

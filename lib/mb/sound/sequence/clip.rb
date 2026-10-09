@@ -799,9 +799,13 @@ module MB
         # row, without #repeat's warning for looping clips.
         def repeated(count)
           raise ArgumentError, "Repeat count must be a positive Integer (got #{count.inspect})" unless count.is_a?(Integer) && count > 0
-          # Variations unroll: copy c plays cycle c's version
+          # Variations and cycle conditions unroll: copy c plays cycle c's
+          # version (probabilities stay, decided per copy as before)
           Clip.new(
-            Array.new(count) { |c| events_for(c).map { |e| e.with(start: e.start + c * @length) } }.flatten,
+            Array.new(count) { |c|
+              events_for(c).select { |e| e.condition.nil? || plays?(e.with(probability: nil), c, 0) }
+                .map { |e| e.with(start: e.start + c * @length, condition: nil) }
+            }.flatten,
             length: @length * count,
             seed: @seed
           )

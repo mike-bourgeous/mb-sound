@@ -93,8 +93,13 @@ module MB
           # The note-on Event as #map_on would first send it, for Notes'
           # held values after jumps (see Transform#chase).
           def map_note(event)
+            # Notes nodes ask for the chased note often after a jump; map
+            # each one once (blocks may have side effects)
+            return @chased[1] if @chased && @chased[0] == event
+
             first = map_on(event).first
-            first && first[0]
+            @chased = [event, first && first[0]]
+            @chased[1]
           end
         end
 

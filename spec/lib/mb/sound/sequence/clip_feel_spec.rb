@@ -148,6 +148,24 @@ RSpec.describe(MB::Sound::Sequence::Clip, :midi_transforms) do
       MB::Sound::Sequence.transport.bpm = old
     end
 
+    it 'bakes several cycles of a varying loop with cycles:, wrapping from the last' do
+      line = MB::Sound.seq(MB::Sound::C4, MB::Sound::E4, MB::Sound::G4, MB::Sound::B4).n8.loop.permute(vary: true, seed: 1)
+      b = line.bake(MB::Sound.echo(1.n8, 1, pitch: 12), cycles: 3)
+      expect(b.length).to eq(3 * line.length)
+      dry = b.events.select { |e| e.velocity == 0.75 && e.value < 72 }.map(&:value)
+      expect(dry).to eq((0..2).flat_map { |c| line.events_for(c).map(&:value) })
+      # The first echo (at 1/8) comes from cycle 2's last note, wrapped around
+      wrapped = b.events.find { |e| e.start == 0 && e.value >= 72 }
+      expect(wrapped.value).to eq(line.events_for(2).last.value + 12)
+    end
+
+    it 'plays out cycle conditions per baked cycle' do
+      c = MB::Sound.seq(MB::Sound::C4, MB::Sound::E4.every(2, from: 2)).n4.loop
+      b = c.bake(->(s) { s }, cycles: 2)
+      expect(b.events.map { |e| [e.value, e.start] }).to eq([[60, 0r], [60, 1/2r], [64, 3/4r]])
+      expect(c.repeat(2).events.map { |e| [e.value, e.start] }).to eq([[60, 0r], [60, 1/2r], [64, 3/4r]])
+    end
+
     it 'needs a transform' do
       expect { riff.bake }.to raise_error(ArgumentError, /transform/)
     end

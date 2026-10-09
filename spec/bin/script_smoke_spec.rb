@@ -27,6 +27,7 @@ RSpec.describe('script runner scripts', :smoke) do
     'bin/songs/bouncing_ball.rb' => ['--bars', '0.5'],
     'bin/songs/drums_808.rb' => ['--bars', '0.5', '-c', '12'],
     'bin/songs/feedback_song.rb' => ['--bars', '0.5', '-e', '0.7'],
+    'bin/songs/midi_transforms_song.rb' => ['--bars', '0.5', '-s'],
     'bin/songs/node_graph_benchmark.rb' => ['--bars', '0.5'],
     'bin/songs/node_graph_grit.rb' => ['--bars', '0.5'],
     'bin/songs/random_drum_pentatonic.rb' => ['--bars', '0.5'],
