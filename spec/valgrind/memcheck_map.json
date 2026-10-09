@@ -166,6 +166,12 @@
         "FastResonator.ping"
       ]
     },
+    "spec/ext/mb/sound/fast_reverb_spec.rb": {
+      "fast_reverb": [
+        "FastReverb::Network#initialize",
+        "FastReverb::Network#process"
+      ]
+    },
     "spec/ext/mb/sound/fast_synth_feedback_spec.rb": {
       "fast_synth": [
         "FastSynth.feedback_sine"
@@ -528,6 +534,29 @@
         "FastSound.oscillate"
       ]
     },
+    "spec/lib/mb/sound/graph_node/reverb_spec.rb": {
+      "fast_arithmetic": [
+        "FastArithmetic.circular_read",
+        "FastArithmetic.circular_write",
+        "FastArithmetic.mix",
+        "FastArithmetic.product",
+        "FastArithmetic.wet_dry"
+      ],
+      "fast_delay": [
+        "FastDelay.read"
+      ],
+      "fast_reverb": [
+        "FastReverb::Network#initialize",
+        "FastReverb::Network#lfo_values",
+        "FastReverb::Network#process"
+      ],
+      "fast_sound": [
+        "FastSound.biquad_narray",
+        "FastSound.cookbook",
+        "FastSound.matrix_mix",
+        "FastSound.oscillate"
+      ]
+    },
     "spec/lib/mb/sound/graph_node/wavetable_spec.rb": {
       "fast_arithmetic": [
         "FastArithmetic.product"
@@ -595,6 +624,10 @@
       ],
       "fast_resonator": [
         "FastResonator.ping"
+      ],
+      "fast_reverb": [
+        "FastReverb::Network#initialize",
+        "FastReverb::Network#process"
       ],
       "fast_sound": [
         "FastSound.biquad_narray",
@@ -1004,8 +1037,6 @@
         "FastSynth.oscillate_sync"
       ],
       "fast_wavetable": [
-        "FastWavetable.half_means",
-        "FastWavetable.harmonic_spectra",
         "FastWavetable.oscillate"
       ]
     },
