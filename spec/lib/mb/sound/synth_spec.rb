@@ -674,6 +674,11 @@ RSpec.describe(MB::Sound::Synth) do
       expect(diff.max).to be < 0.05
     end
 
+    it 'skips lanes of a stream through MIDI transforms (they only make events)' do
+      s = described_class.new(MB::Sound::MIDI::Stream.new(source(*notes)).echo(0.1, 2).arp(:up, 16), voices: 2, spares: 1, &exact_patch)
+      expect(s.skippable_lanes).to eq([0, 1, 2])
+    end
+
     it 'never skips lanes with delays or reverbs, or with skip_idle: false' do
       s = described_class.new(source(*notes), voices: 2, spares: 0) { |v| (v.hz.saw * v.amp_env).delay(0.1) }
       expect(s.skippable_lanes).to eq([])
