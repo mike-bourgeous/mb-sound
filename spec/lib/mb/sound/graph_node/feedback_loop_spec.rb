@@ -196,6 +196,82 @@ RSpec.describe(MB::Sound::GraphNode::FeedbackLoop) do
     end
   end
 
+  describe '#delay with an insert pipeline (d.fb, d.wet)' do
+    def impulse = PlanSpecHelpers::Source.new(kind: :impulses, at: [0])
+
+    # Each echo of an impulse through +l+ at multiples of 480 samples:
+    # [sum (DC gain), center of mass relative to the echo time, energy],
+    # plus the echo's samples
+    def echoes(l, n = 3)
+      out = Numo::DFloat.cast(l.sample(480 * (n + 1)))
+      idx = Numo::DFloat.new(120).seq - 60
+      Array.new(n) { |i|
+        w = out[(480 * (i + 1) - 60)...(480 * (i + 1) + 60)]
+        { sum: w.sum, center: (w * idx).sum / w.sum, energy: (w**2).sum, data: w }
+      }
+    end
+
+    it 'with d.fb processes only the repeats (first echo clean)' do
+      e = echoes(impulse.delay(480.samples, feedback: 0.8, smoothing: false) { |d| d.fb { |fb| fb * 0.5 } })
+      expect(e.map { |x| x[:data][60] }.zip([1.0, 0.4, 0.16]).map { |a, b| (a - b).abs }.max).to be < 1e-6
+
+      e = echoes(impulse.delay(480.samples, feedback: 0.8, smoothing: false) { |d| d.fb { |fb| fb.filter(3000.hz.lowpass) } })
+      expect(e[0][:data][60]).to eq(1.0)
+      expect(e[0][:energy]).to be_within(1e-9).of(1.0) # clean
+      # Each repeat lowpassed once more (DC gain 0.8 per pass, less energy),
+      # exactly on time (the loop's delay absorbs the filter's latency)
+      expect(e.map { |x| x[:sum] }).to match([be_within(1e-4).of(1), be_within(1e-4).of(0.8), be_within(1e-3).of(0.64)])
+      expect(e[1][:energy] / 0.64).to be < 0.25
+      expect(e[2][:energy] / e[1][:energy]).to be < 0.8
+      expect(e[1][:center]).to be_within(0.01).of(0)
+      expect(e[2][:center]).to be_within(0.01).of(0)
+    end
+
+    it 'with d.wet processes every echo once, without feeding it back' do
+      e = echoes(impulse.delay(480.samples, feedback: 0.8, smoothing: false) { |d| d.wet { |wet| wet.filter(3000.hz.lowpass) } })
+      # Every echo has the same (lowpassed) shape, 0.8 times the last
+      expect(e[0][:energy]).to be < 0.25
+      expect((e[1][:data] - e[0][:data] * 0.8).abs.max).to be < 1e-6
+      expect((e[2][:data] - e[1][:data] * 0.8).abs.max).to be < 1e-6
+      # The wet chain is outside the loop: its latency isn't compensated
+      expect(e[0][:center]).to be > 1
+    end
+
+    it 'with both, processes the repeats in the loop and every echo on the way out' do
+      both = echoes(impulse.delay(480.samples, feedback: 0.8, smoothing: false) { |d|
+        d.fb { |fb| fb.filter(3000.hz.lowpass) }
+        d.wet { |wet| wet.filter(5000.hz.lowpass) }
+      })
+      wet = echoes(impulse.delay(480.samples, feedback: 0.8, smoothing: false) { |d| d.wet { |w| w.filter(5000.hz.lowpass) } })
+      expect((both[0][:data] - wet[0][:data]).abs.max).to be < 1e-6 # first echo: only the wet chain
+      expect(both[1][:energy]).to be < wet[1][:energy] * 0.75 # repeats darker
+      # The same as the d.fb-only echoes through the wet chain afterwards
+      ref = impulse.delay(480.samples, feedback: 0.8, smoothing: false) { |d| d.fb { |f| f.filter(3000.hz.lowpass) } }.filter(5000.hz.lowpass)
+      after = echoes(ref)
+      both.zip(after).each { |a, b| expect((a[:data] - b[:data]).abs.max).to be < 1e-6 }
+      expect(both.map { |x| x[:sum] }).to match([be_within(1e-3).of(1), be_within(1e-3).of(0.8), be_within(1e-3).of(0.64)])
+    end
+
+    it 'keeps the tape-style block (a returned node) processing every echo' do
+      e = echoes(impulse.delay(480.samples, feedback: 0.8, smoothing: false) { |fb| fb * 0.5 })
+      expect(e.map { |x| x[:data][60] }.zip([0.5, 0.2, 0.08]).map { |a, b| (a - b).abs }.max).to be < 1e-6
+    end
+
+    it 'mixes dry and wet levels around the pipeline' do
+      l = impulse.delay(480.samples, feedback: 0.5, smoothing: false, dry: 0.25, wet: 0.5) { |d| d.fb { |fb| fb * 0.5 } }
+      out = l.sample(1500).to_a
+      expect(out[0]).to eq(0.25)
+      expect(out[480]).to be_within(1e-7).of(0.5)
+      expect(out[960]).to be_within(1e-7).of(0.5 * 0.25)
+    end
+
+    it 'raises without a builder block or with a builder given twice' do
+      expect { impulse.delay(48.samples, feedback: 0.5) { |d| d.fb } }.to raise_error(ArgumentError, /d.fb takes a block/)
+      expect { impulse.delay(48.samples, feedback: 0.5) { |d| d.wet { |w| w }; d.wet { |w| w } } }.to raise_error(ArgumentError, /only be given once/)
+      expect { impulse.delay(48.samples, feedback: 0.5) { |d| d.fb { |f| 3 } } }.to raise_error(ArgumentError, /must return a graph node/)
+    end
+  end
+
   describe 'in graphs' do
     it 'lets the plan layer fuse what feeds it, with the same samples as unplanned' do
       old = MB::Sound::Plan.precision

@@ -23,6 +23,8 @@
 #     bg :lp, noise.at(0.3).feedback { |fb, input| input + (fb - input) * 0.97 }
 #     # Tape echo: the insert runs on every repeat; repeats stay exactly 3/16 apart
 #     bg :echo, seq(A3, C4, E4).n8.loop.synth { |v| v.hz.saw * v.amp_env(0, 0.2, 0, 0.1) }.delay(3.n16, feedback: 0.7, dry: 1) { |fb| fb.filter(2000.hz.lowpass).softclip(0.3, 0.9) }
+#     # Insert pipeline: the first echo clean, repeats darker and dirtier (d.fb, in the loop), every echo softened on the way out (d.wet)
+#     bg :pipe, seq(A3, C4, E4).n8.loop.synth { |v| v.hz.saw * v.amp_env(0, 0.2, 0, 0.1) }.delay(3.n16, feedback: 0.7, dry: 1) { |d| d.fb { |fb| fb.filter(1500.hz.lowpass).softclip(0.3, 0.9) }; d.wet { |wet| wet.filter(5000.hz.lowpass) } }
 #     # A self-oscillating loop: a resonant bandpass and a softclip with loop gain above unity sing on their own (1.3 dies away)
 #     bg :sing, (noise.at(0.01) * adsr(0, 0.01, 0, 0.01, hold: false)).feedback { |fb, input| input + fb.delay(2.ms).filter(:bandpass, cutoff: 880, quality: 8).softclip(0.2, 0.5) * 2 }
 #     # A Karplus-Strong string excited by a kick drum, tuned by a clip
