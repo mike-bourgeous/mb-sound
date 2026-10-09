@@ -56,6 +56,9 @@ RSpec.describe(MB::Sound::Plan::Loop) do
     'a flanger (moving sinc delay, softclip)' => ->(s) {
       s.input.feedback { |fb, input| input + (fb.delay(3.1.hz.lfo.at(40..400).samples, smoothing: false) * -0.8).softclip(0.85, 0.95) }
     },
+    'identity ops the C rewriter drops (x * 1, 0 + x; -0 may stay -0 there, equal values)' => ->(s) {
+      s.input.feedback { |fb, input| (input + 0) + (fb.delay(37.samples) * 1 + 0) * -0.7 }
+    },
     'a short moving delay through the sinc/cubic blend' => ->(s) {
       s.input.feedback { |fb, input| input + fb.delay(7.hz.lfo.at(2..30).samples, smoothing: false) * 0.6 }
     },
