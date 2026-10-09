@@ -55,6 +55,7 @@
 #include "numo/narray.h"
 
 #include "mb_ext_helpers.h"
+#include "mb_svf.h"
 
 // Cutoff limits: at least 1 Hz, at most this fraction of the sample rate.
 #define FP_MIN_CUTOFF 1.0
@@ -415,24 +416,6 @@ static VALUE ruby_four_pole(int argc, VALUE *argv, VALUE self)
  * the extension is built with -ffp-contract=off).
  */
 
-// Filter types (MB::Sound::Filter::SVF::FILTER_TYPES, the same order as
-// Cookbook::FILTER_TYPES)
-#define SVF_LOWPASS 0
-#define SVF_HIGHPASS 1
-#define SVF_BANDPASS 2
-#define SVF_NOTCH 3
-#define SVF_ALLPASS 4
-#define SVF_PEAK 5
-#define SVF_LOWSHELF 6
-#define SVF_HIGHSHELF 7
-#define SVF_BANDPASS_SKIRT 8
-
-// Lowest cutoff in Hz (NaN and negative values too), like FP_MIN_CUTOFF
-#define SVF_MIN_CUTOFF 1.0
-// Lowest quality and linear gain (NaN too)
-#define SVF_MIN_QUALITY 1e-10
-#define SVF_MIN_GAIN 1e-10
-
 /*
  *   svf(buffer, cutoff, quality, gain, type, state, sample_rate)
  *
@@ -475,83 +458,12 @@ static VALUE ruby_svf(VALUE self, VALUE buffer, VALUE cutoff, VALUE quality, VAL
 	double fc_max = rate * FP_MAX_CUTOFF_RATIO;
 
 	// Coefficients, recomputed only when an input changes
-	double last_fc = NAN, last_q = NAN, last_g = NAN;
-	double a1 = 1, a2 = 0, a3 = 0, m0 = 0, m1 = 0, m2 = 0;
+	struct mb_svf svf;
+	mb_svf_init(&svf);
 
 	for (size_t i = 0; i < length; i++) {
-		double fc = mb_signal_at(&fc_in, i);
-		double q = mb_signal_at(&q_in, i);
-		double G = mb_signal_at(&g_in, i);
-
-		if (fc != last_fc || q != last_q || G != last_g) {
-			last_fc = fc;
-			last_q = q;
-			last_g = G;
-
-			if (!(fc >= SVF_MIN_CUTOFF)) {
-				fc = SVF_MIN_CUTOFF;
-			} else if (fc > fc_max) {
-				fc = fc_max;
-			}
-			if (!(q >= SVF_MIN_QUALITY)) {
-				q = SVF_MIN_QUALITY;
-			}
-			if (!(G >= SVF_MIN_GAIN)) {
-				G = SVF_MIN_GAIN;
-			}
-
-			double g = mb_tan_pade(fc * pi_over_rate);
-			double k = 1.0 / q;
-			double A;
-
-			switch (type) {
-				case SVF_HIGHPASS:
-					m0 = 1.0; m1 = -k; m2 = -1.0;
-					break;
-				case SVF_BANDPASS:
-					m0 = 0.0; m1 = k * G; m2 = 0.0;
-					break;
-				case SVF_BANDPASS_SKIRT:
-					m0 = 0.0; m1 = G; m2 = 0.0;
-					break;
-				case SVF_NOTCH:
-					m0 = 1.0; m1 = -k; m2 = 0.0;
-					break;
-				case SVF_ALLPASS:
-					m0 = 1.0; m1 = -2.0 * k; m2 = 0.0;
-					break;
-				case SVF_PEAK:
-					A = sqrt(G);
-					k = 1.0 / (q * A);
-					m0 = 1.0; m1 = k * (G - 1.0); m2 = 0.0;
-					break;
-				case SVF_LOWSHELF:
-					A = sqrt(G);
-					g = g / sqrt(A);
-					m0 = 1.0; m1 = k * (A - 1.0); m2 = G - 1.0;
-					break;
-				case SVF_HIGHSHELF:
-					A = sqrt(G);
-					g = g * sqrt(A);
-					m0 = G; m1 = k * (1.0 - A) * A; m2 = 1.0 - G;
-					break;
-				default:
-					m0 = 0.0; m1 = 0.0; m2 = 1.0;
-					break;
-			}
-
-			a1 = 1.0 / (1.0 + g * (g + k));
-			a2 = g * a1;
-			a3 = g * a2;
-		}
-
-		double x = data[i];
-		double v3 = x - ic2;
-		double v1 = a1 * ic1 + a2 * v3;
-		double v2 = ic2 + a2 * ic1 + a3 * v3;
-		ic1 = 2.0 * v1 - ic1;
-		ic2 = 2.0 * v2 - ic2;
-		data[i] = m0 * x + m1 * v1 + m2 * v2;
+		mb_svf_coefficients(&svf, type, mb_signal_at(&fc_in, i), mb_signal_at(&q_in, i), mb_signal_at(&g_in, i), pi_over_rate, fc_max);
+		data[i] = mb_svf_step(&svf, data[i], &ic1, &ic2);
 	}
 
 	if (!isfinite(ic1) || fabs(ic1) < FP_FLUSH) {

@@ -10,9 +10,12 @@ na = Gem.loaded_specs['numo-narray-alt'] || Gem.loaded_specs['numo-narray']
 raise "Could not find the numo-narray Gem; try running with Bundler" if na.nil?
 raise 'Could not find narray.h' unless find_header('numo/narray.h', File.join(na.extension_dir, 'numo'))
 
-# Shared headers (mb_delay_interp.h, also used by fast_loop)
+# Helpers shared with the other purpose-specific extensions
 $INCFLAGS << " -I#{File.expand_path('../include', __dir__)}"
 
-with_cflags("#{$CFLAGS} -O3 -ggdb3 -Wall -Wextra -Werror -Wno-unused-parameter #{ENV['EXTRACFLAGS']} -std=c99 -D_XOPEN_SOURCE -D_ISOC99_SOURCE -D_GNU_SOURCE") do
-  create_makefile('mb/sound/fast_delay')
+# -ffp-contract=off: specs compare the kernel with its Ruby mirror
+# (MB::Sound::Plan::Loop::Program#run_ruby) for exact equality, so clang (the
+# default on macOS) must not fuse multiplies and adds into FMAs.
+with_cflags("#{$CFLAGS} -O3 -ggdb3 -Wall -Wextra -Werror -Wno-unused-parameter #{ENV['EXTRACFLAGS']} -ffp-contract=off -std=c99 -D_XOPEN_SOURCE -D_ISOC99_SOURCE -D_GNU_SOURCE") do
+  create_makefile('mb/sound/fast_loop')
 end

@@ -19,6 +19,15 @@ module MB
       class Installation
         attr_reader :roots, :regions, :engine, :check
 
+        # The Plan::SharedInputs handing this installation's regions the
+        # buffers of inputs shared with other installations (a Synth's
+        # lanes), or nil.
+        attr_accessor :shared
+
+        # Counts builds (and region changes that affect shared inputs), so
+        # SharedInputs can tell when to recompute.
+        attr_reader :generation
+
         def initialize(roots, engine:, check:, dry_run: false)
           @roots = roots
           @engine = engine
@@ -26,8 +35,12 @@ module MB
           @dry_run = dry_run
           @regions = []
           @excluded = {}
+          @unsupported = {}.compare_by_identity
+          @restart_watches = []
           @watched = []
           @stale = false
+          @generation = 0
+          @shared = nil
         end
 
         # True after a structural change; the next block rebuilds.
@@ -49,6 +62,7 @@ module MB
         # Finds and installs the regions.
         def build
           @stale = false
+          @generation += 1
           traverse
           assign
           @regions.each(&:install) unless @dry_run
@@ -82,8 +96,23 @@ module MB
 
         # Rebuilds after a structural change (see Plan.changed).
         def rebuild
+          # Readers of shared inputs may change in the middle of a block
+          @shared&.guard!
           uninstall
           build
+        end
+
+        # Marks a change that affects which inputs may be shared (a region
+        # stopped planning; see SharedInputs).
+        def touch
+          @generation += 1
+        end
+
+        # True if the planned graphs contain resamplers (nodes reading their
+        # inputs at another count than they are read), so inputs aren't
+        # shared with other installations (see SharedInputs).
+        def resamples?
+          @seen.nil? || @seen.each_key.any? { |n| n.is_a?(GraphNode::Resample) }
         end
 
         # Removes every hook; the graph runs unfused from the next block.
@@ -95,12 +124,17 @@ module MB
             list&.delete(self)
           end
           @watched = []
+          @roots.each do |r|
+            list = r.instance_variable_get(:@plan_installations) if r.respond_to?(:sample)
+            list&.delete_if { |i| i.equal?(self) }
+          end
         end
 
         # Called by Region#compile when a node turned out unsupported.
         def unsupported!(node, why)
           warn "Plan: unsupported #{Plan.node_label(node)}: #{why}" if ENV['MB_SOUND_PLAN_DEBUG']
           @excluded[node] = why
+          @unsupported[node] = true
           stale!
         end
 
@@ -110,12 +144,42 @@ module MB
         end
 
         # Leaves +node+ out of every region from the next block (it is read
-        # as a boundary input), saying +why+ in listings.
-        def exclude(node, why)
+        # as a boundary input), saying +why+ in listings.  With
+        # +until_restart+ (an event-driven node whose MIDI stream is over),
+        # the node comes back when its stream's content jumps (a seek,
+        # restart, or rewind: live sets loop and seek; see RestartWatch).
+        def exclude(node, why, until_restart: false)
           return if @excluded.key?(node)
 
           warn "Plan: excluding #{Plan.node_label(node)}: #{why}" if ENV['MB_SOUND_PLAN_DEBUG']
           @excluded[node] = why
+          if until_restart && node.respond_to?(:plan_generation)
+            watch = RestartWatch.new(self, node, node.plan_generation)
+            node.instance_variable_set(:@plan_restart, watch)
+            @restart_watches << watch
+          end
+          stale!
+        end
+
+        # Takes back into planning every node left out because its stream
+        # ended whose stream has jumped since (see #exclude; called by the
+        # first such node to notice), all at once, since nodes on one
+        # stream depend on each other (e.g. Notes::EnvelopeInputs and its
+        # ports).  Nodes found unsupported meanwhile are looked at again
+        # too (they may have been unsupported only because of an excluded
+        # input).  The regions rebuild before their next block.
+        def reinclude
+          back = @restart_watches.select(&:restarted?)
+          return if back.empty?
+
+          @restart_watches -= back
+          back.each do |w|
+            w.node.instance_variable_set(:@plan_restart, nil)
+            @excluded.delete(w.node)
+            warn "Plan: replanning #{Plan.node_label(w.node)}: its MIDI stream jumped" if ENV['MB_SOUND_PLAN_DEBUG']
+          end
+          @unsupported.each_key { |n| @excluded.delete(n) }
+          @unsupported.clear
           stale!
         end
 
@@ -216,7 +280,9 @@ module MB
         def sources_of(obj)
           return [] unless obj.respond_to?(:sources)
 
-          s = obj.sources
+          # Nodes that run part of their graph themselves (a feedback loop's
+          # body) show the plan only their inputs
+          s = obj.respond_to?(:plan_sources) ? obj.plan_sources : obj.sources
           return [] unless s.respond_to?(:each_value)
 
           s.each_value.select { |v| !v.is_a?(Numeric) && (v.respond_to?(:sample) || v.is_a?(GraphNode::Tee)) }
@@ -295,14 +361,52 @@ module MB
           (regions - @regions).each { |r| r.members.each { |n| @region_of.delete(n) } }
         end
 
+        # Registers this installation for Plan.changed on every node it
+        # covers (weakly both ways, see Plan.watch), and keeps it alive from
+        # its roots while the graph lives (so an installation left without
+        # regions still rebuilds after a later change).
         def watch
           @seen.each_key do |obj|
             next if obj.is_a?(Numeric)
 
-            list = (Plan.watch[obj] ||= [])
-            list << self unless list.any? { |i| i.equal?(self) }
+            list = (Plan.watch[obj] ||= ObjectSpace::WeakMap.new)
+            list[self] = true
             @watched << obj
           end
+
+          @roots.each do |r|
+            next unless r.respond_to?(:sample) && !r.frozen?
+
+            list = r.instance_variable_get(:@plan_installations) || r.instance_variable_set(:@plan_installations, [])
+            list << self unless list.any? { |i| i.equal?(self) }
+          end
+        end
+      end
+
+      # Watches a node left out of planning because its MIDI stream was
+      # over (Installation#exclude with +until_restart+): the node's
+      # Planned hook asks #restarted? on each #sample (one ivar read while
+      # nothing changed), and once the stream's generation moves (a seek,
+      # restart, or rewind) the installation takes the node back.
+      class RestartWatch
+        # The node left out.
+        attr_reader :node
+
+        def initialize(installation, node, generation)
+          @installation = installation
+          @node = node
+          @generation = generation
+        end
+
+        # True once the stream's content has jumped since the exclusion.
+        def restarted?
+          @node.plan_generation != @generation
+        end
+
+        # Replans with the node and every other node of its installation
+        # whose stream jumped (see Installation#reinclude).
+        def reinclude
+          @installation.reinclude
         end
       end
 

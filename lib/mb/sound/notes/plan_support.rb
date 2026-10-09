@@ -106,6 +106,11 @@ module MB
         def plan_reader = @reader
         def plan_stream = @stream
 
+        # The stream's content generation (changes at seeks and restarts),
+        # so a plan that left this node out once its stream ended can take
+        # it back (see Plan::Installation#exclude).
+        def plan_generation = @reader.generation
+
         # Groups +feeders+ (Notes nodes in one region) by stream and sample
         # rate into FeedGroups (see Plan::Region).
         def self.plan_group(feeders)
@@ -603,6 +608,11 @@ module MB
         def plan_finished?(count)
           last = plan_note_stream.music_end
           !last.nil? && last < @time
+        end
+
+        # The note stream's content generation (see Node#plan_generation).
+        def plan_generation
+          plan_note_stream.generation
         end
 
         private

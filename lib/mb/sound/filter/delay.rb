@@ -31,6 +31,11 @@ module MB
         # MB::Sound::DelayLine::INTERPOLATION).
         attr_reader :interpolation
 
+        # Samples subtracted from the delay after smoothing (nil or 0 for
+        # none): set by a GraphNode::FeedbackLoop running its body as a block
+        # graph, to make up for the loop's block latency.
+        attr_accessor :loop_offset
+
         # Initializes a single-channel delay with a +:delay+ time: a number of
         # seconds, a length (`5.samples`, `250.ms`, `3.n16`), or a graph node
         # (see #delay=).  The time keeps its unit when the sample rate
@@ -384,11 +389,11 @@ module MB
 
             if settled
               min, max = delays.minmax
-              return min.to_f if min == max && min == @filter.peek
+              return apply_loop_offset(min.to_f) if min == max && min == @filter.peek
             end
           else
             target = @time.constant_samples(@sample_rate)
-            return target if !@smoothing || (settled && @filter.peek == target)
+            return apply_loop_offset(target) if !@smoothing || (settled && @filter.peek == target)
 
             @filter_buf = Numo::SFloat.zeros(count) if @filter_buf.length < count
             delays = @filter_buf[0...count].fill(target)
@@ -398,7 +403,15 @@ module MB
             delays = (@frozen_copy ||= GraphNode::FrozenCopy.new).copy(delays) if delays.frozen? # a shared buffer (see GraphNode::Tee)
             delays = @filter.process(delays.inplace).not_inplace!
           end
-          delays
+          apply_loop_offset(delays)
+        end
+
+        # Subtracts #loop_offset from +delays+ (a Numeric or an NArray).
+        def apply_loop_offset(delays)
+          off = @loop_offset
+          return delays if off.nil? || off == 0
+
+          delays.is_a?(Numo::NArray) ? Numo::DFloat.cast(delays) - off : delays - off
         end
       end
     end

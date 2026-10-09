@@ -342,6 +342,13 @@ module MB
       end
       alias frequency freq
 
+      # The period of #freq in seconds (a node: 1 / freq), e.g. the delay
+      # of a Karplus-Strong string (`y.delay(v.period, smoothing: false)`;
+      # see GraphNode#feedback and bin/synths/pluck.rb).
+      def period
+        memo(:period) { 1 / freq }
+      end
+
       # The Notes::Frequency for NotePitch +settings+ at +sample_rate+,
       # made by the block once and shared by every pitch with the same
       # settings (e.g. each `v.hz.transpose(7)`), so tones on equal pitches

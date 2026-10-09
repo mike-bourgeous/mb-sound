@@ -89,6 +89,33 @@ module MB
           buf&.not_inplace!
         end
 
+        # Feedback loops (GraphNode::FeedbackLoop, Plan::Loop): a delay
+        # (Filter::Delay with no feedback of its own, wet 1, dry 0) reads its
+        # delay line once per sample before the sample's write, and an SVF
+        # filters one sample at a time.  Other filters have no loop ops.
+        def loop_describe(p)
+          case @base_filter
+          when MB::Sound::Filter::Delay
+            d = @base_filter
+            unless d.feedback == false && d.wet == 1 && d.dry == 0
+              raise Plan::Unsupported.new(self, 'a delay inside a feedback loop takes no feedback:, wet:, or dry: of its own (build them into the loop)')
+            end
+
+            ring = Plan::Loop::Ring.new(self)
+            v = p.delay_read(ring)
+            p.defer(ring, @source)
+            v
+
+          when MB::Sound::Filter::SVF
+            f = @base_filter
+            gain = @inputs[:gain] || (f.gain || 1.0)
+            p.svf(f, p[@source], cutoff: p[@inputs.fetch(:cutoff)], quality: p[@inputs.fetch(:quality)], gain: p[gain])
+
+          else
+            raise Plan::Unsupported.new(self, "#{@base_filter.class.name.sub('MB::Sound::', '')} has no loop ops (delays and SVF filters run inside feedback loops)")
+          end
+        end
+
         # See GraphNode#sources.
         def sources
           if @base_filter.respond_to?(:sources)

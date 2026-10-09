@@ -31,7 +31,7 @@ module MB
       #   #wavetable tones
       #   (FastWavetable.oscillate/play, Wavetable::KernelRuby).
       # - +feedback+: [y[n-1], y[n-2], dc], the last two outputs of a
-      #   #feedback sine before #at and its DC estimate
+      #   #fm_feedback sine before #at and its DC estimate
       #   (FastSynth.feedback_sine, Tone#feedback_ruby).  Kept across phase
       #   jumps.
       #

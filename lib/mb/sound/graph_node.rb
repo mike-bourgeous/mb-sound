@@ -11,6 +11,7 @@ require_relative 'graph_node/synthesis_methods'
 require_relative 'graph_node/resample_methods'
 require_relative 'graph_node/filter_methods'
 require_relative 'graph_node/delay_methods'
+require_relative 'graph_node/feedback_methods'
 require_relative 'graph_node/distortion_methods'
 require_relative 'graph_node/debug_methods'
 require_relative 'graph_node/channel_methods'
@@ -68,6 +69,7 @@ module MB
       include ResampleMethods
       include FilterMethods
       include DelayMethods
+      include FeedbackMethods
       include DistortionMethods
       include DebugMethods
       include ChannelMethods
@@ -313,6 +315,7 @@ require_relative 'graph_node/chorus_nodes'
 require_relative 'graph_node/proc_node'
 require_relative 'graph_node/tee'
 require_relative 'graph_node/multitap_delay'
+require_relative 'graph_node/feedback_loop'
 require_relative 'graph_node/complex_node'
 require_relative 'graph_node/buffer_adapter'
 require_relative 'graph_node/resample'

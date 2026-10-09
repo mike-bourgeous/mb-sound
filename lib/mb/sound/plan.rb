@@ -70,7 +70,7 @@ module MB
     #
     # The executor runs ops a block at a time.  Feedback regions (the
     # loop-region API sketched in proposals/feedback_loops.md:
-    # `sig.delay(t, feedback: g) { |fb| ... }`, `feedback_loop { |y| ... }`)
+    # `sig.delay(t, feedback: g) { |fb| ... }`, `sig.feedback { |fb, input| ... }`)
     # will add a per-sample mode: a Program flagged as a loop, whose ops
     # run in one per-sample loop (each op as a scalar step), with state
     # slots for one-sample histories (Value of the previous sample, a
@@ -159,7 +159,7 @@ module MB
           list = watch[node]
           return nil unless list
 
-          list.each { |inst| structure ? inst.stale! : inst.settings_changed(node) }
+          list.keys.each { |inst| structure ? inst.stale! : inst.settings_changed(node) }
           nil
         end
 
@@ -181,7 +181,14 @@ module MB
           !!spies && !spies.empty?
         end
 
-        # For internal use: Installations covering each node (weak keys).
+        # For internal use: Installations covering each node, as a weak
+        # set (an ObjectSpace::WeakMap of Installation => true) per node
+        # (weak keys).  Both sides are weak: an Installation references
+        # its graph, so a strong value would keep every node (and with
+        # them every Synth, Notes, and buffer) alive forever (2026-10-09:
+        # the plan specs grew by ~80 MB per synth).  Installations are kept
+        # alive by their regions' hooks on the nodes and by their roots
+        # (Installation#watch).
         def watch
           @watch ||= ObjectSpace::WeakKeyMap.new
         end
@@ -220,3 +227,5 @@ require_relative 'plan/program'
 require_relative 'plan/describable'
 require_relative 'plan/region'
 require_relative 'plan/installation'
+require_relative 'plan/shared_inputs'
+require_relative 'plan/loop'

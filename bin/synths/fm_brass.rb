@@ -1,6 +1,6 @@
 #!/usr/bin/env -S RUBY_THREAD_TIMESLICE=10 RUBY_YJIT_ENABLE=1 ruby
 # A two-operator FM brass in the DX tradition: a 1:1 modulator with
-# operator self-feedback (Tone#feedback) phase-modulating a sine carrier.
+# operator self-feedback (Tone#fm_feedback) phase-modulating a sine carrier.
 # The feedback runs inside the modulator's loop after its envelope (the
 # `gain:` input), as on the DX7, so the modulator is brightest at the
 # swell of each note and mellows as it decays: the brassy "blat".
@@ -20,13 +20,13 @@
 #     $0 --feedback 5 spec/test_data/c_major.mid             # noise in the modulator: breathy, growling
 #
 # Operator feedback in the console (bin/sound.rb):
-#     play 110.hz.feedback(1.3).at(-12.db)                       # a sine turned saw-like
-#     play 110.hz.feedback(2.hz.lfo.at(0..2)).at(-12.db)         # sweeping brightness
+#     play 110.hz.fm_feedback(1.3).at(-12.db)                       # a sine turned saw-like
+#     play 110.hz.fm_feedback(2.hz.lfo.at(0..2)).at(-12.db)         # sweeping brightness
 #     e = adsr(0.08, 0.5, 0.6, 0.3, hold: 1)
-#     play 220.hz.feedback(1.6, gain: e).at(-6.db)               # brightness follows the envelope
-#     play (220.hz.feedback(1.6) * e).at(-6.db)                  # the same envelope outside: constant timbre
-#     play 220.hz.pm(220.hz.feedback(1.2).at(1.5)).at(-12.db)    # a feedback modulator
-#     play 880.hz.feedback(1.8).oversample(4).at(-12.db)         # high notes alias; oversample helps
+#     play 220.hz.fm_feedback(1.6, gain: e).at(-6.db)               # brightness follows the envelope
+#     play (220.hz.fm_feedback(1.6) * e).at(-6.db)                  # the same envelope outside: constant timbre
+#     play 220.hz.pm(220.hz.fm_feedback(1.2).at(1.5)).at(-12.db)    # a feedback modulator
+#     play 880.hz.fm_feedback(1.8).oversample(4).at(-12.db)         # high notes alias; oversample helps
 #     Tone.dx7_feedback(6)                                       # => pi (DX7 FB 6 at full operator level)
 
 require 'bundler/setup'
@@ -47,7 +47,7 @@ MB::Sound.synth_script(
     fb_max = MB::Sound::Tone::FEEDBACK_MAX
     amount = v.cc(1, range: 0.0..fb_max, default: (p.feedback / fb_max * 127).round, name: 'Feedback',
       description: 'Modulator self-feedback (radians)').named('Feedback amount')
-    mod = v.hz.feedback(amount, gain: menv).at(p.index).named('Modulator')
+    mod = v.hz.fm_feedback(amount, gain: menv).at(p.index).named('Modulator')
 
     amp = v.amp_env(0.04, 0.8, 0.8, 0.25).named('Amplitude')
     (v.hz.sine.pm(mod) * amp * 0.8).named('Voice')

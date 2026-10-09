@@ -76,6 +76,9 @@ module MB
 
         attr_reader :filter_type, :sample_rate, :cutoff, :quality, :gain
 
+        # The filter type's number in the kernels (FILTER_TYPE_IDS).
+        attr_reader :type_id
+
         # Makes an SVF with the parameters of a Filter::Cookbook (its
         # quality, computed from a bandwidth or shelf slope if it was made
         # with one, at its center frequency), with fresh state.

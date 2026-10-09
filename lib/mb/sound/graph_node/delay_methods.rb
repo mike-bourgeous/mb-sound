@@ -44,11 +44,168 @@ module MB
         #       .proc { |v| MB::Sound.real_fft(v) }
         #       .delay(3208.4.samples, feedback: 0.9, dry: 1, wet: 1)
         #       .proc { |v| MB::Sound.real_ifft(MB::M.shl(v, 0)) }
-        def delay(time = nil, seconds: nil, smoothing: true, max_delay: 1.0, feedback: false, dry: 0, wet: 1, interpolation: MB::Sound::DelayLine::DEFAULT_INTERPOLATION)
+        #
+        # With a block, the feedback runs through the block's nodes (an
+        # insert, e.g. a tape echo's tone filter and saturation) in a
+        # FeedbackLoop: the block gets the delayed signal and returns what the
+        # loop outputs and feeds back (times +:feedback+), one sample at a
+        # time, so inserts work at any delay length and block size.  The
+        # delay absorbs the insert's latency (an antialiased shaper's half
+        # sample, a lowpass's group delay), so repeats stay exactly +time+
+        # apart.  The output is +:wet+ times the loop plus +:dry+ times the
+        # input.  See GraphNode#feedback for what the block may contain.
+        #
+        #     sig.delay(0.3, feedback: 0.7, dry: 1) { |fb| fb.filter(:lowpass, cutoff: 3000).softclip(0.5, 1) }   # tape echo
+        #     sig.delay(lfo.at(1..5).ms, feedback: -0.8, dry: 1) { |fb| fb.softclip }                               # flanger
+        #
+        # Insert pipelines: when the block calls the builders on its argument
+        # (see InsertPipeline), `d.fb { |fb| ... }` processes only the
+        # recirculated signal (in the loop: the first echo is clean, every
+        # later repeat is processed once more), and `d.wet { |wet| ... }`
+        # processes every echo on its way out without feeding it back
+        # (outside the loop).  Either may be left out.
+        #
+        #     sig.delay(0.3, feedback: 0.7, dry: 1) { |d|
+        #       d.fb { |fb| fb.filter(3000.hz.lowpass).softclip }    # repeats get darker and dirtier
+        #       d.wet { |wet| wet.filter(5000.hz.lowpass) }          # every echo, once
+        #     }
+        #
+        # With d.fb the echoes come from a second delay line outside the
+        # loop (the loop's own delay reads early by the insert's latency),
+        # so pipeline delays cost about one more delay.
+        def delay(time = nil, seconds: nil, smoothing: true, max_delay: 1.0, feedback: false, dry: 0, wet: 1, interpolation: MB::Sound::DelayLine::DEFAULT_INTERPOLATION, &insert)
+          if insert
+            return feedback_delay(
+              time, seconds: seconds, smoothing: smoothing, max_delay: max_delay, feedback: feedback,
+              dry: dry, wet: wet, interpolation: interpolation, &insert
+            )
+          end
+
           filter(MB::Sound::GraphNode::DelayMethods.delay_filter(
             time, seconds: seconds, smoothing: smoothing, max_delay: max_delay,
             feedback: feedback, dry: dry, wet: wet, interpolation: interpolation
           ))
+        end
+
+        # #delay with a feedback insert block (see #delay).
+        def feedback_delay(time = nil, seconds: nil, smoothing: true, max_delay: 1.0, feedback: false, dry: 0, wet: 1, interpolation: MB::Sound::DelayLine::DEFAULT_INTERPOLATION, &insert)
+          if feedback.nil? || feedback == false
+            raise ArgumentError, 'A delay with a feedback insert block needs a feedback: gain (a number or a node)'
+          end
+
+          delay_opts = { seconds: seconds, smoothing: smoothing, max_delay: max_delay, interpolation: interpolation }
+          pipeline = nil
+
+          # (echo loops: no sustain shelf, whose pitch would be 1 / time)
+          loop = self.feedback(sustain: false) do |fb, input|
+            delayed = (input + fb * feedback).delay(time, **delay_opts)
+            pipeline = InsertPipeline.new(delayed)
+            out = pipeline.call(insert)
+            raise ArgumentError, "The delay's insert block must return a graph node (got #{out.inspect})" unless out.respond_to?(:sample)
+
+            out
+          end
+
+          echoes = loop
+          if pipeline.pipeline? && pipeline.fb_insert
+            # The loop outputs the processed repeats; the echoes on their
+            # way out are the delay line's own output (first echo clean),
+            # rebuilt outside the loop from the same input and repeats
+            echoes = (self + loop * feedback).delay(time, **delay_opts)
+          end
+          echoes = pipeline.apply_wet(echoes) if pipeline.pipeline?
+
+          out = wet.is_a?(Numeric) && wet == 1 ? echoes : echoes * wet
+          out = out + self * dry unless dry.is_a?(Numeric) && dry == 0
+          out
+        end
+
+        # The argument of #delay's insert block: the delayed signal (a graph
+        # node, for tape-style inserts that return the processed signal),
+        # with two pipeline builders while the block runs:
+        #
+        # - `d.fb { |fb| ... }` processes only the recirculated signal (the
+        #   repeats from the second on are processed, the first echo is
+        #   clean); it runs in the loop, one sample at a time.
+        # - `d.wet { |wet| ... }` processes every echo on its way to the
+        #   output and isn't fed back (a feed-forward chain outside the
+        #   loop, run a block at a time).
+        #
+        # A block that calls either builder is a pipeline (its return value
+        # is ignored); any other block returns the tape-style insert.
+        class InsertPipeline
+          attr_reader :fb_insert, :wet_insert
+
+          def initialize(delayed)
+            @delayed = delayed
+            @pipeline = false
+            @fb_insert = nil
+            @wet_insert = nil
+          end
+
+          # True if the block called d.fb or d.wet.
+          def pipeline?
+            @pipeline
+          end
+
+          # Calls the user's insert block with the delayed signal and the
+          # builders attached, and returns the loop's output node.
+          def call(block)
+            pipe = self
+            d = @delayed
+            d.define_singleton_method(:fb) do |&b|
+              raise ArgumentError, 'd.fb takes a block that processes the recirculated signal' unless b
+
+              pipe.send(:set_fb, b)
+            end
+            d.define_singleton_method(:wet) do |&b|
+              raise ArgumentError, 'd.wet takes a block that processes the echoes on their way out' unless b
+
+              pipe.send(:set_wet, b)
+            end
+
+            begin
+              ret = block.call(d)
+            ensure
+              d.singleton_class.send(:remove_method, :fb)
+              d.singleton_class.send(:remove_method, :wet)
+            end
+
+            return ret unless @pipeline
+
+            @fb_insert || d
+          end
+
+          # Runs the wet block on +echoes+ (outside the loop).
+          def apply_wet(echoes)
+            return echoes unless @wet_block
+
+            out = @wet_block.call(echoes)
+            raise ArgumentError, "d.wet's block must return a graph node (got #{out.inspect})" unless out.respond_to?(:sample)
+
+            @wet_insert = out
+          end
+
+          private
+
+          def set_fb(b)
+            raise ArgumentError, 'd.fb may only be given once' if @fb_insert
+
+            @pipeline = true
+            out = b.call(@delayed)
+            raise ArgumentError, "d.fb's block must return a graph node (got #{out.inspect})" unless out.respond_to?(:sample)
+
+            @fb_insert = out
+            self
+          end
+
+          def set_wet(b)
+            raise ArgumentError, 'd.wet may only be given once' if @wet_block
+
+            @pipeline = true
+            @wet_block = b
+            self
+          end
         end
 
         # Builds the MB::Sound::Filter::Delay for #delay and

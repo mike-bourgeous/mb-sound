@@ -20,7 +20,7 @@ RSpec.describe('bin/graph_profile.rb') do
     expect(groups[2].to_i).to be <= gc[1].to_i
 
     # Per-class self allocations; fused regions report as one entry
-    expect(text).to match(/GraphNode::Shaper +[\d.]+% +[\d.]+ us\/call +\d+ calls +[\d.]+ obj\/call/)
+    expect(text).to match(/GraphNode::FeedbackLoop +[\d.]+% +[\d.]+ us\/call +\d+ calls +[\d.]+ obj\/call/)
     expect(text).to match(/Plan region \(\d+ nodes, root GraphNode::\w+\) +[\d.]+% +[\d.]+ us\/call +\d+ calls/)
     expect(text).to match(/plans: \d+ regions covering \d+ nodes \(\d+ ops\); \d+ blocks planned, 0 unfused/)
     expect(text).to include('most allocations (self, per buffer):')

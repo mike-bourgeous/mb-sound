@@ -1,4 +1,4 @@
-RSpec.describe('Tone#feedback (operator self-feedback)') do
+RSpec.describe('Tone#fm_feedback (operator self-feedback)') do
   let(:rate) { 48000 }
 
   # Samples +tone+ in pieces of the given +lengths+ with +method+
@@ -31,30 +31,30 @@ RSpec.describe('Tone#feedback (operator self-feedback)') do
     let(:lengths) { [1, 127, 128, 300, 513, 64] }
 
     {
-      'a constant amount' => -> { 125.hz.feedback(1.3) },
-      'a large constant amount (chaotic)' => -> { 431.7.hz.feedback(3.5) },
-      'a negative amount' => -> { 125.hz.feedback(-1.2) },
-      'an amount node' => -> { 211.hz.feedback(3.hz.lfo.at(0..2)) },
+      'a constant amount' => -> { 125.hz.fm_feedback(1.3) },
+      'a large constant amount (chaotic)' => -> { 431.7.hz.fm_feedback(3.5) },
+      'a negative amount' => -> { 125.hz.fm_feedback(-1.2) },
+      'an amount node' => -> { 211.hz.fm_feedback(3.hz.lfo.at(0..2)) },
       'a gain node (envelope)' => -> {
-        125.hz.feedback(1.5, gain: MB::Sound.adsr(0.002, 0.01, 0.4, 0.005, hold: 0.015))
+        125.hz.fm_feedback(1.5, gain: MB::Sound.adsr(0.002, 0.01, 0.4, 0.005, hold: 0.015))
       },
       'gain and amount nodes, #at, FM and PM' => -> {
-        200.hz.fm(7.hz.lfo.at(30)).pm(301.hz.at(0.8)).feedback(5.hz.lfo.at(0.3..1.7), gain: 2.hz.lfo.at(0.2..1)).at(0.7..0.1)
+        200.hz.fm(7.hz.lfo.at(30)).pm(301.hz.at(0.8)).fm_feedback(5.hz.lfo.at(0.3..1.7), gain: 2.hz.lfo.at(0.2..1)).at(0.7..0.1)
       },
       'resets (key sync) and a reset target' => -> {
         t = MB::Sound::Notes.new(MB::Sound.seq(MB::Sound::C4, MB::Sound::E4).n32.loop).trigger
-        170.hz.feedback(1.4).reset(t, to: 1.0)
+        170.hz.fm_feedback(1.4).reset(t, to: 1.0)
       },
-      'DC kept (dc: true)' => -> { 211.hz.fm(3.hz.lfo.at(40)).feedback(2.2, dc: true) },
-      'an LFO-rate feedback sine with DC removal' => -> { 3.hz.feedback(1.5).at(0.2..0.8) },
-      'cycles and a node gain' => -> { 150.hz.feedback_cycles(2.hz.lfo.at(0..0.3), gain: 5.hz.lfo.at(0.5..1)) },
+      'DC kept (dc: true)' => -> { 211.hz.fm(3.hz.lfo.at(40)).fm_feedback(2.2, dc: true) },
+      'an LFO-rate feedback sine with DC removal' => -> { 3.hz.fm_feedback(1.5).at(0.2..0.8) },
+      'cycles and a node gain' => -> { 150.hz.fm_feedback_cycles(2.hz.lfo.at(0..0.3), gain: 5.hz.lfo.at(0.5..1)) },
       'resets keeping the feedback history' => -> {
         t = MB::Sound::ArrayInput.new(data: [Numo::SFloat.zeros(2000).tap { |a| a[[7, 300, 301, 900]] = 1 }])
-        170.hz.feedback(1.9).reset(t, keep_feedback: true)
+        170.hz.fm_feedback(1.9).reset(t, keep_feedback: true)
       },
       'random resets' => -> {
         t = MB::Sound::ArrayInput.new(data: [Numo::SFloat.zeros(2000).tap { |a| a[[5, 130, 131, 600]] = 1 }])
-        170.hz.feedback(1.1).reset(t).rnd(seed: 3)
+        170.hz.fm_feedback(1.1).reset(t).rnd(seed: 3)
       },
     }.each do |name, make|
       it "gives the same samples with #{name}" do
@@ -74,14 +74,14 @@ RSpec.describe('Tone#feedback (operator self-feedback)') do
   end
 
   it 'plays a plain sine with feedback 0 and dc: true' do
-    a = 123.4.hz.pm(5.hz.at(0.3)).feedback(0, dc: true).sample(2000)
+    a = 123.4.hz.pm(5.hz.at(0.3)).fm_feedback(0, dc: true).sample(2000)
     b = 123.4.hz.pm(5.hz.at(0.3)).sample(2000)
     expect((a - b).abs.max).to be < 1e-6
   end
 
   it 'applies the gain inside the loop: feedback 0 with a gain node is the sine times the gain' do
     g = Numo::SFloat.linspace(0, 1, 1000)
-    a = 300.hz.feedback(0, gain: input(g), dc: true).sample(1000)
+    a = 300.hz.fm_feedback(0, gain: input(g), dc: true).sample(1000)
     b = 300.hz.sample(1000) * g
     expect((a - b).abs.max).to be < 1e-6
   end
@@ -93,24 +93,24 @@ RSpec.describe('Tone#feedback (operator self-feedback)') do
     end
 
     it 'is removed by default at audio and LFO rates' do
-      expect(mean_after(110.hz.feedback(2.0)).abs).to be < 1e-3
-      expect(mean_after(440.hz.feedback(3.0)).abs).to be < 1e-3
-      expect(mean_after(2.hz.feedback(1.5), 480000).abs).to be < 1e-3
+      expect(mean_after(110.hz.fm_feedback(2.0)).abs).to be < 1e-3
+      expect(mean_after(440.hz.fm_feedback(3.0)).abs).to be < 1e-3
+      expect(mean_after(2.hz.fm_feedback(1.5), 480000).abs).to be < 1e-3
     end
 
     it 'is kept with dc: true' do
-      expect(mean_after(110.hz.feedback(2.0, dc: true))).to be_within(0.02).of(-0.25)
+      expect(mean_after(110.hz.fm_feedback(2.0, dc: true))).to be_within(0.02).of(-0.25)
     end
 
     it 'barely changes the harmonics (a one-pole highpass at 1/20 of the frequency)' do
-      a = harmonics(steady(125.hz.feedback(1.5)), 10)
-      b = harmonics(steady(125.hz.feedback(1.5, dc: true)), 10)
+      a = harmonics(steady(125.hz.fm_feedback(1.5)), 10)
+      b = harmonics(steady(125.hz.fm_feedback(1.5, dc: true)), 10)
       expect(a.zip(b).map { |x, y| (x - y).abs }.max).to be < 0.05
     end
 
     it 'is removed from the output only: the loop and the in-loop gain are unchanged' do
-      a = 200.hz.feedback(1.8)
-      b = 200.hz.feedback(1.8, dc: true)
+      a = 200.hz.fm_feedback(1.8)
+      b = 200.hz.fm_feedback(1.8, dc: true)
       a.sample(1000)
       b.sample(1000)
       expect(a.state.feedback[0..1]).to eq(b.state.feedback[0..1])
@@ -123,30 +123,30 @@ RSpec.describe('Tone#feedback (operator self-feedback)') do
     end
 
     it 'clear the feedback history, so every note starts identically' do
-      t = 170.hz.feedback(1.9).reset(trig(1000, 2500))
+      t = 170.hz.fm_feedback(1.9).reset(trig(1000, 2500))
       x = t.sample(4000)
       expect(x[2500...3000]).to eq(x[1000...1500])
     end
 
     it 'start like a fresh tone' do
-      fresh = 170.hz.feedback(1.9).sample(400).dup
-      t = 170.hz.feedback(1.9).reset(trig(1000))
+      fresh = 170.hz.fm_feedback(1.9).sample(400).dup
+      t = 170.hz.fm_feedback(1.9).reset(trig(1000))
       expect(t.sample(4000)[1000...1400]).to eq(fresh)
     end
 
     it 'keep the history with keep_feedback: true or #keep_feedback' do
-      a = 170.hz.feedback(1.9).reset(trig(1000, 2500), keep_feedback: true).sample(4000).dup
+      a = 170.hz.fm_feedback(1.9).reset(trig(1000, 2500), keep_feedback: true).sample(4000).dup
       expect(a[2500...3000]).not_to eq(a[1000...1500])
-      b = 170.hz.feedback(1.9).keep_feedback.reset(trig(1000, 2500)).sample(4000)
+      b = 170.hz.fm_feedback(1.9).keep_feedback.reset(trig(1000, 2500)).sample(4000)
       expect(b).to eq(a)
-      expect(170.hz.feedback(1).keep_feedback.keep_feedback?).to eq(true)
-      expect(170.hz.feedback(1).keep_feedback?).to eq(false)
+      expect(170.hz.fm_feedback(1).keep_feedback.keep_feedback?).to eq(true)
+      expect(170.hz.fm_feedback(1).keep_feedback?).to eq(false)
     end
 
     it 'clear on key sync in synth voices unless kept' do
       clip = MB::Sound.seq(MB::Sound::C4, MB::Sound::C4).n8
       render = ->(keep) {
-        t = clip.tone.feedback(1.9)
+        t = clip.tone.fm_feedback(1.9)
         t.keep_feedback if keep
         out = []
         while (b = t.sample(500))
@@ -163,11 +163,13 @@ RSpec.describe('Tone#feedback (operator self-feedback)') do
     end
   end
 
-  it 'takes the amount in cycles with #feedback_cycles' do
-    a = 125.hz.feedback_cycles(0.25).sample(2000)
-    b = 125.hz.feedback(0.25 * 2 * Math::PI).sample(2000)
+  it 'takes the amount in cycles with #fm_feedback_cycles' do
+    a = 125.hz.fm_feedback_cycles(0.25).sample(2000)
+    b = 125.hz.fm_feedback(0.25 * 2 * Math::PI).sample(2000)
     expect(a).to eq(b)
-    expect(100.hz.fb_cycles(0.1).feedback_amount).to be_within(1e-12).of(0.2 * Math::PI)
+    expect(100.hz.fm_fb_cycles(0.1).fm_feedback_amount).to be_within(1e-12).of(0.2 * Math::PI)
+    expect(100.hz.fmfb_cycles(0.1).fm_feedback_amount).to be_within(1e-12).of(0.2 * Math::PI)
+    expect(100.hz.sine.fmfb_cycles(0.1).fm_feedback_amount).to be_within(1e-12).of(0.2 * Math::PI)
   end
 
   it 'has FEEDBACK_MAX = 2pi, the DX7 FB 7 value' do
@@ -176,19 +178,19 @@ RSpec.describe('Tone#feedback (operator self-feedback)') do
   end
 
   it 'applies #at outside the loop' do
-    a = 125.hz.feedback(1.3).sample(1000).dup
-    b = 125.hz.feedback(1.3).at(0.25..0.75).sample(1000)
+    a = 125.hz.fm_feedback(1.3).sample(1000).dup
+    b = 125.hz.fm_feedback(1.3).at(0.25..0.75).sample(1000)
     expect((b - (a * 0.25 + 0.5)).abs.max).to be < 1e-6
   end
 
   it 'carries state across buffers' do
-    a = 211.hz.feedback(1.7).sample(1000).dup
-    b = pieces(211.hz.feedback(1.7), :sample, [3, 500, 497])
+    a = 211.hz.fm_feedback(1.7).sample(1000).dup
+    b = pieces(211.hz.fm_feedback(1.7), :sample, [3, 500, 497])
     expect(b).to eq(a)
   end
 
   it 'turns a sine saw-like at about 1.3 rad' do
-    h = harmonics(steady(125.hz.feedback(1.3)), 10)
+    h = harmonics(steady(125.hz.fm_feedback(1.3)), 10)
     # A saw is -6.0, -9.5, -12.0, -14.0, -15.6 dB; the feedback sine's
     # first harmonics are a little lower
     expect(h[0]).to be_between(-10, -5)
@@ -196,26 +198,26 @@ RSpec.describe('Tone#feedback (operator self-feedback)') do
   end
 
   it 'adds only weak harmonics at 0.3 rad' do
-    h = harmonics(steady(125.hz.feedback(0.3)), 10)
+    h = harmonics(steady(125.hz.fm_feedback(0.3)), 10)
     expect(h[0]).to be_between(-25, -15)
     expect(h[2]).to be < -35
   end
 
   it 'gets darker as the in-loop gain falls' do
-    loud = harmonics(steady(125.hz.feedback(1.3, gain: 1)), 10)
-    soft = harmonics(steady(125.hz.feedback(1.3, gain: 0.3)), 10)
+    loud = harmonics(steady(125.hz.fm_feedback(1.3, gain: 1)), 10)
+    soft = harmonics(steady(125.hz.fm_feedback(1.3, gain: 0.3)), 10)
     expect(soft[0]).to be < loud[0] - 6
   end
 
   it 'follows an amount node' do
-    a = 125.hz.feedback(MB::Sound::GraphNode::Constant.new(1.3, sample_rate: 48000)).sample(4000)
-    b = 125.hz.feedback(1.3).sample(4000)
+    a = 125.hz.fm_feedback(MB::Sound::GraphNode::Constant.new(1.3, sample_rate: 48000)).sample(4000)
+    b = 125.hz.fm_feedback(1.3).sample(4000)
     expect((a - b).abs.max).to be < 1e-6
   end
 
   it 'ends when its gain input ends' do
     env = MB::Sound.adsr(0.001, 0.001, 0.5, 0.001, hold: 0.002)
-    t = 200.hz.feedback(1, gain: env)
+    t = 200.hz.fm_feedback(1, gain: env)
     n = 0
     while (buf = t.sample(100))
       n += buf.length
@@ -227,24 +229,28 @@ RSpec.describe('Tone#feedback (operator self-feedback)') do
   it 'lists node inputs in #sources' do
     amount = 2.hz.lfo
     gain = MB::Sound.adsr(0.1, 0.1, 0.5, 0.1)
-    s = 100.hz.feedback(amount, gain: gain).sources
+    s = 100.hz.fm_feedback(amount, gain: gain).sources
     expect(s.keys).to include(:feedback, :feedback_gain)
-    expect(100.hz.feedback(1).sources.keys).not_to include(:feedback, :feedback_gain)
+    expect(100.hz.fm_feedback(1).sources.keys).not_to include(:feedback, :feedback_gain)
   end
 
-  it 'has a Pitch shortcut and an alias' do
-    t = 100.hz.fb(1.2, gain: 0.5)
+  it 'has Pitch shortcuts and the aliases fmfb and fm_fb' do
+    expect(100.hz.fmfb(0.7).fm_feedback_amount).to eq(0.7)
+    expect(100.hz.sine.fmfb(0.7).fm_feedback_amount).to eq(0.7)
+    expect(100.hz.sine.fm_fb(0.7).fm_feedback_amount).to eq(0.7)
+
+    t = 100.hz.fm_fb(1.2, gain: 0.5)
     expect(t).to be_a(MB::Sound::Tone)
-    expect(t.feedback?).to eq(true)
-    expect(t.feedback_amount).to eq(1.2)
-    expect(t.feedback_gain).to eq(0.5)
-    expect(100.hz.sine.feedback?).to eq(false)
-    expect(100.hz.feedback(1).feedback(nil).feedback?).to eq(false)
+    expect(t.fm_feedback?).to eq(true)
+    expect(t.fm_feedback_amount).to eq(1.2)
+    expect(t.fm_feedback_gain).to eq(0.5)
+    expect(100.hz.sine.fm_feedback?).to eq(false)
+    expect(100.hz.fm_feedback(1).fm_feedback(nil).fm_feedback?).to eq(false)
   end
 
   it 'works in key-synced synth voices' do
     clip = MB::Sound.seq(MB::Sound::C4, MB::Sound::G4).n8
-    t = clip.tone.feedback(1.2, gain: clip.amp_env)
+    t = clip.tone.fm_feedback(1.2, gain: clip.amp_env)
     expect(t).to be_a(MB::Sound::Notes::KeyedTone)
     out = []
     while (b = t.sample(512))
@@ -257,25 +263,25 @@ RSpec.describe('Tone#feedback (operator self-feedback)') do
 
   describe 'unsupported settings' do
     it 'raises for other shapes' do
-      expect { 100.hz.ramp.feedback(1) }.to raise_error(ArgumentError, /Only sines/)
-      expect { 100.hz.feedback(1).ramp.sample(10) }.to raise_error(ArgumentError, /Only sines/)
+      expect { 100.hz.ramp.fm_feedback(1) }.to raise_error(ArgumentError, /Only sines/)
+      expect { 100.hz.fm_feedback(1).ramp.sample(10) }.to raise_error(ArgumentError, /Only sines/)
     end
 
     it 'raises with sync, pwm, or noise' do
-      expect { 100.hz.feedback(1).sync(ratio: 2).sample(10) }.to raise_error(ArgumentError, /synced/)
-      expect { 100.hz.feedback(1).pwm(0.3).sample(10) }.to raise_error(ArgumentError, /warped/)
-      expect { 100.hz.feedback(1).noise(0.5).sample(10) }.to raise_error(ArgumentError, /noise/)
+      expect { 100.hz.fm_feedback(1).sync(ratio: 2).sample(10) }.to raise_error(ArgumentError, /synced/)
+      expect { 100.hz.fm_feedback(1).pwm(0.3).sample(10) }.to raise_error(ArgumentError, /warped/)
+      expect { 100.hz.fm_feedback(1).noise(0.5).sample(10) }.to raise_error(ArgumentError, /noise/)
     end
 
     it 'raises for bad values' do
-      expect { 100.hz.feedback('x') }.to raise_error(ArgumentError)
-      expect { 100.hz.feedback(1, gain: :x) }.to raise_error(ArgumentError)
+      expect { 100.hz.fm_feedback('x') }.to raise_error(ArgumentError)
+      expect { 100.hz.fm_feedback(1, gain: :x) }.to raise_error(ArgumentError)
     end
 
     it 'is fixed once playing' do
-      t = 100.hz.feedback(1)
+      t = 100.hz.fm_feedback(1)
       t.sample(10)
-      expect { t.feedback(2) }.to raise_error(FrozenError)
+      expect { t.fm_feedback(2) }.to raise_error(FrozenError)
     end
   end
 
@@ -294,7 +300,7 @@ RSpec.describe('Tone#feedback (operator self-feedback)') do
   end
 
   it 'saves and restores the feedback history in the state' do
-    t = 100.hz.feedback(1.5)
+    t = 100.hz.fm_feedback(1.5)
     t.sample(333)
     h = t.state.to_h
     expect(h[:feedback].length).to eq(3)
