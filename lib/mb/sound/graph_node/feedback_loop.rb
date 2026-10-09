@@ -99,9 +99,11 @@ module MB
       # Examples (bin/sound.rb):
       #     # Comb filter / echo with exact 3/16 note repeats
       #     play file_input('sounds/drums.flac').feedback { |fb, input| input + fb.delay(3.n16) * 0.5 }
-      #     # Karplus-Strong pluck (see bin/synths/pluck.rb)
-      #     exc = noise.at(0.5) * adsr(0, 0.005, 0, 0.005, hold: 0.005)
-      #     play exc.feedback { |fb, input| input + fb.delay(220.hz.period).then { |d| (d + d.delay(1.samples)) * 0.498 } }
+      #     # Karplus-Strong pluck (see bin/synths/pluck.rb): one period of noise
+      #     # into the delay line, the string is the loop's output (and_then
+      #     # keeps the input going, or the loop ends with it)
+      #     exc = (noise.at(0.5) * adsr(0, 0, 1, 0, hold: 220.hz.period)).and_then(0.constant)
+      #     play exc.feedback { |fb, input| d = (fb + input).delay(220.hz.period, smoothing: false); (d + d.delay(1.samples)) * 0.498 }
       #     # Tape echo with saturation and tone in the loop
       #     play input.delay(0.3, feedback: 0.7) { |fb| fb.filter(:lowpass, cutoff: 3000).softclip(0.5, 1) }
       class FeedbackLoop
