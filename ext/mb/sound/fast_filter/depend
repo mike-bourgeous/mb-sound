@@ -1,1 +1,1 @@
-fast_filter.o: $(srcdir)/../include/mb_ext_helpers.h $(srcdir)/../include/mb_svf.h
+fast_filter.o: $(srcdir)/../include/mb_ext_helpers.h $(srcdir)/../include/mb_svf.h $(srcdir)/../include/mb_four_pole.h
