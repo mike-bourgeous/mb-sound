@@ -129,6 +129,12 @@ module MB
           drop_gm_node(segment)
           return time unless @gm
 
+          # A zero time scaled is zero for any (finite) GM factor: no node,
+          # so the planner has no 0 * x to fold (2026-10-10)
+          return time if time.is_a?(Numeric) && time == 0
+          return time if time.is_a?(Length) && !(time.respond_to?(:node) && time.node) &&
+            Length.seconds(time, sample_rate: @sample_rate).to_f == 0
+
           role = self.class.segment_role(names.index(segment), release_node)
           factor = @notes.public_send(GM_TIMES.fetch(role))
           node = case time

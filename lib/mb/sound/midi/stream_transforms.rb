@@ -73,8 +73,9 @@ module MB
         # - +:swing+ (0.5 straight; 0.66 for a triplet feel).
         # - +:latch+: keep playing released keys until the next new chord.
         # - +:start+: :grid (default; steps on the timeline grid, a key
-        #   pressed between steps waits for the next) or :key (Juno-style:
-        #   the clock starts at the first key).
+        #   pressed between steps waits for the next), :key (Juno-style:
+        #   the clock starts at the first key), or :hybrid (the first step
+        #   sounds at the key, later steps on the grid).
         # - +:steps+: an Array of pitch offsets cycled per step (scale
         #   degrees of +:scale+/+:root+ or Intervals), e.g. [0, 0, 12, 7].
         # - +:seed+ for :random, +:overlap+/+:jump+ (see Scheduled).

@@ -20,7 +20,8 @@ RSpec.describe(MB::Sound::Sequence::Clip, :midi_transforms) do
     it 'keeps non-looping notes from starting before 0 and wraps loops' do
       h = riff.humanize(1/16r, seed: 1)
       expect(h.events.map(&:start).min).to be >= 0
-      l = riff.loop.humanize(1/16r, seed: 1)
+      l = riff.loop.humanize(1/16r, seed: 1, vary: false)
+      expect(l.events).not_to eq(riff.loop.events)
       expect(l.events.map(&:start)).to all(be_between(0, riff.length))
     end
 
@@ -28,6 +29,18 @@ RSpec.describe(MB::Sound::Sequence::Clip, :midi_transforms) do
       v = riff.humanize(0r + 1/1024r, velocity: 0.3, seed: 1).events.map(&:velocity)
       expect(v).to all(be_between(0.75 * 0.7, 0.75 * 1.3))
       expect(v.uniq.length).to be > 1
+    end
+
+    it 'defaults to +/-4 ms, varying every cycle of a loop' do
+      h = riff.humanize(seed: 5)
+      whole = 240.0 / MB::Sound::Sequence.transport.bpm
+      offsets = h.events.zip(riff.events).map { |a, b| (a.start - b.start) * whole }
+      expect(offsets.map(&:abs).max).to be <= 0.004 + 1e-9
+      expect(offsets.map(&:abs).max).to be > 0.001
+      l = riff.loop.humanize(seed: 5)
+      expect(l.variations.length).to eq(1)
+      expect(played(l, 2).first(4)).not_to eq(played(l, 2).last(4).map { |v, t| [v, t - riff.length] })
+      expect(riff.humanize.variations).to be_empty
     end
 
     it 'varies every cycle with vary: true' do

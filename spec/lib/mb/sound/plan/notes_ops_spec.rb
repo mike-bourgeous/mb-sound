@@ -134,6 +134,16 @@ RSpec.describe('Plan: Notes nodes and envelopes') do
       }
     end
 
+    it 'builds no GM time node (no 0 * x fold) for zero-length segments, sounding the same' do
+      r = compare { |v| v.env(0, 0, 1, 0, gate: false, hold: 0.05) + v.amp_env(0.01, 0, 0.6, 0.1) + v.fm_env(0.seconds, 0.2, 0, 0) }
+      expect(r.regions.flat_map { |g| g.folds || [] }).to eq([])
+      n = MB::Sound::Notes.new(dense)
+      e = n.env(0, 0, 1, 0, gate: false, hold: 0.05)
+      expect(e.instance_variable_get(:@gm_nodes).keys).to eq([])
+      gm_off = MB::Sound::Notes.new(dense).env(0, 0, 1, 0, gate: false, hold: 0.05).gm(false)
+      expect(Array.new(20) { e.sample(256)&.dup }).to eq(Array.new(20) { gm_off.sample(256)&.dup })
+    end
+
     it 'matches envelopes without GM scaling and with node parameters' do
       compare { |v|
         lfo = 2.hz.lfo.at(0.3..0.7)

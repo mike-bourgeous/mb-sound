@@ -49,7 +49,8 @@ MB::Sound.effect_script(
     offset = delay.clip_rate(2, sample_rate: processing_sample_rate)
 
     delays = Array.new(NUM_TAPS) { |i|
-      base + offset * (i + (idx.odd? ? 0.5 : 0))
+      k = i + (idx.odd? ? 0.5 : 0)
+      k == 0 ? base : base + offset * k # (no offset * 0 for the first tap)
     }
 
     taps = inp.multitap(*delays).to_a.shuffle

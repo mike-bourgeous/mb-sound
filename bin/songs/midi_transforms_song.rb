@@ -50,12 +50,14 @@
 #     bg :keys, midi.chord(2, 4, scale: am).synth(voices: 16, &pluck)
 #     bg :keys, midi.chord(:min7).strum(40.ms, window: 20.ms).synth(voices: 16, &pluck)
 #     # Chains, unattached and reused:
+#     bg :keys, midi.arp(:up, 16, start: :hybrid).synth(voices: 8, &pluck)   # first note at once, then the grid
 #     fx = arp(:up, 16, octaves: 2).echo(3.n16, 2, velocity: 0.5)
 #     bg :keys, midi.through(fx).synth(voices: 16, &pluck)
 #     # Clips: feel, chance, conditions, per-loop permute, bake
 #     riff = seq(A3, C4, E4, G4).n8
 #     bg :riff, riff.loop.permute(vary: true).synth(voices: 4, &pluck)          # new order every loop
-#     bg :riff, riff.loop.humanize(1.n64, velocity: 0.2, vary: true).synth(voices: 4, &pluck)
+#     bg :riff, riff.loop.humanize(velocity: 0.2).synth(voices: 4, &pluck)        # +/-4 ms, new every loop
+#     bg :riff, riff.loop.humanize(1.n64, velocity: 0.2).synth(voices: 4, &pluck)  # sloppier
 #     bg :riff, seq(A3, C4, E4.every(2), G4.maybe(0.5)).n8.loop.synth(voices: 4, &pluck)
 #     baked = riff.loop.bake(echo(3.n16, 3, pitch: 12, velocity: 0.5)); puts baked   # echoes wrapped into the loop
 #     bg :riff, baked.swing(0.6).synth(voices: 12, &pluck)
