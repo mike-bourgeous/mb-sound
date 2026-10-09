@@ -276,9 +276,17 @@ module MB
         #   +:diffusion_modulation:+ (alias +:diffusion_mod:+): true, a
         #   preset name (:subtle, :lush, :chorus, :seasick), a depth, or a
         #   Hash of +:depth:+, +:rate:+, +:shape:+, +:spread:+
-        # - in the feedback loop: +:damping:+ or +:lowpass:+, +:highpass:+,
-        #   +:drive:+ (+:drive_mode:+), +:crush:+, +:shimmer:+
-        #   (+:shimmer_pitch:+), +:freeze:+, +:stretch:+ (most may be nodes)
+        # - in the feedback loop: +:damping:+ (+:damping_design:+) or
+        #   +:lowpass:+, +:highpass:+, +:drive:+ (+:drive_mode:+), +:crush:+,
+        #   +:shimmer:+ (+:shimmer_pitch:+), +:freeze:+, +:stretch:+
+        # - after the network: +:duck:+, +:gate:+, +:threshold:+
+        #
+        # Live parameters (numbers or nodes, read every sample):
+        # +:lowpass:+, +:highpass:+, +:drive:+, +:crush:+, +:shimmer:+,
+        # +:freeze:+, +:stretch:+, +:duck:+, +:gate:+, +:threshold:+, and the
+        # modulation depths and rates.  Fixed when built: +:room_size:+,
+        # +:decay:+, +:damping:+, +:shimmer_pitch:+, +:predelay:+, the layout,
+        # and +:wet:+/+:dry:+ (plain numbers, settable on the Reverb).
         #
         # If +:output_channels+ is greater than one, then this method returns a
         # channel bundle (GraphNode::Channels).  Otherwise it returns a single

@@ -275,7 +275,7 @@ module MB
         # and +input+ (all nil by default, meaning the preset's value).
         OPTIONS = %i[
           extra_time channels stages diffusion_range feedback_range feedback_gain feedback_enabled
-          predelay wet dry mix level seed show_internals loop_extra tuned_loop_extra decay room_size damping lowpass highpass drive drive_mode
+          predelay wet dry mix level seed show_internals loop_extra tuned_loop_extra decay room_size damping damping_design lowpass highpass drive drive_mode
           crush shimmer shimmer_pitch shimmer_window freeze stretch max_stretch modulation diffusion_modulation duck gate threshold
           diffusion_delays feedback_delays
         ].freeze
@@ -533,6 +533,10 @@ module MB
         # +:damping:+ - 0..1 (a number): high frequencies decay faster, the
         #               reverb time at Nyquist (1 - damping) times the low
         #               reverb time (Jot's first-order absorption filters).
+        # +:damping_design:+ - :jot (default; Jot's approximate pole, which
+        #               damps more than asked and kills the longer lines
+        #               above about 0.7) or :exact (see
+        #               #damping_coefficients; experimental, 2026-10-10).
         # +:lowpass:+ - a one-pole lowpass cutoff (Hz or Pitch) in every
         #               line (instead of +:damping:+).
         # +:highpass:+ - a one-pole highpass cutoff (Hz) in every line.
@@ -561,7 +565,7 @@ module MB
         #               lines are sized for +:max_stretch:+, default 2 for a
         #               node, else the number).
         def initialize(upstream:, channels:, output_channels:, stages:, sample_rate:, diffusion_range: nil, feedback_range: nil, feedback_gain: nil, feedback_enabled: true, predelay: 0, wet: 1, dry: 1, level: 1, seed: 0, show_internals: false,
-                       diffusion_delays: nil, feedback_delays: nil, loop_extra: 0, tuned_loop_extra: nil, decay: nil, mix: nil, damping: nil, lowpass: nil, highpass: nil, drive: nil, drive_mode: :soft, crush: nil,
+                       diffusion_delays: nil, feedback_delays: nil, loop_extra: 0, tuned_loop_extra: nil, decay: nil, mix: nil, damping: nil, damping_design: :jot, lowpass: nil, highpass: nil, drive: nil, drive_mode: :soft, crush: nil,
                        shimmer: nil, shimmer_pitch: 12, shimmer_window: 0.05, freeze: nil, stretch: nil, max_stretch: nil, modulation: nil, diffusion_modulation: nil,
                        duck: nil, gate: nil, threshold: -30.db)
           @random = Random.new(seed)
@@ -657,7 +661,7 @@ module MB
 
           @layout = plan_layout(diffusion_delays: diffusion_delays, feedback_delays: feedback_delays)
           @gains = @layout.gains
-          @layout.damping = damping_coefficients(damping) if damping && @feedback_enabled
+          @layout.damping = damping_coefficients(damping, design: damping_design) if damping && @feedback_enabled
 
           # Each output's group of lines, scaled to the energy of all lines
           @output_scales = partition_outputs(Array.new(@channels) { |i| i }, @output_channels).map { |g|
@@ -1093,15 +1097,36 @@ module MB
         # time at Nyquist over the reverb time at DC (1 - +damping+, at
         # least 0.05), so high frequencies decay faster by the same factor
         # in every line.  Returns the kernel's one-pole coefficients 1 - p.
-        def damping_coefficients(damping)
+        #
+        # Jot's pole is a small-pole approximation: it overshoots the
+        # damping already at 0.5 (Nyquist RT60 0.4x instead of 0.5x) and,
+        # for damping above about 0.7, reaches the 0.999 clamp on the longer
+        # lines, whose cutoffs then fall to ~8 Hz, so those lines die within
+        # tens of ms at every frequency (2026-10-10, "0.85 barely has any
+        # tail").  +design+ :exact instead solves for the pole that gives
+        # exactly alpha at Nyquist: g (1 - p) / (1 + p) = g ** (1 / alpha),
+        # i.e. r = g ** (1 / alpha - 1), p = (1 - r) / (1 + r) (the
+        # filter's DC gain is 1, so DC keeps the line's decay).
+        def damping_coefficients(damping, design: :jot)
           damping = damping.to_f
           raise ArgumentError, 'Damping must be between 0.0 and 1.0' unless damping.between?(0, 1)
 
           alpha = [1.0 - damping, 0.05].max
-          @gains.map { |g|
-            p = Math.log(10) / 4 * Math.log10(g.clamp(1e-9, 1.0)) * (1 - 1 / alpha**2)
-            1.0 - p.clamp(0.0, 0.999)
-          }
+          case design
+          when :jot
+            @gains.map { |g|
+              p = Math.log(10) / 4 * Math.log10(g.clamp(1e-9, 1.0)) * (1 - 1 / alpha**2)
+              1.0 - p.clamp(0.0, 0.999)
+            }
+          when :exact
+            @gains.map { |g|
+              r = g.clamp(1e-9, 1.0) ** (1 / alpha - 1)
+              p = (1 - r) / (1 + r)
+              1.0 - p.clamp(0.0, 0.999)
+            }
+          else
+            raise ArgumentError, "Unknown damping design #{design.inspect} (:jot or :exact)"
+          end
         end
 
         # For internal use (+:show_internals:+).  A diffusion stage as

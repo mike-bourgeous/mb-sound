@@ -298,6 +298,24 @@ RSpec.describe(MB::Sound::GraphNode::Reverb) do
       end
     end
 
+    it 'gives exactly (1 - damping) times the reverb time at Nyquist with damping_design: :exact' do
+      [0.3, 0.5, 0.85, 0.95].each do |damping|
+        rev = 1.constant.reverb(room_size: 0.6, decay: 3, damping: damping, damping_design: :exact)
+        rev.layout.damping.each_with_index do |c, i|
+          p = 1 - c
+          nyquist = rev.gains[i] * c / (1 + p)
+          expect(Math.log(rev.gains[i]) / Math.log(nyquist)).to be_within(1e-9).of(1 - damping)
+        end
+      end
+    end
+
+    it 'keeps Jot damping as the default (its longer lines collapse at high damping)' do
+      jot = 1.constant.reverb(room_size: 0.6, decay: 3, damping: 0.5)
+      expect(jot.layout.damping).to eq(1.constant.reverb(room_size: 0.6, decay: 3, damping: 0.5, damping_design: :jot).layout.damping)
+      expect(1.constant.reverb(room_size: 0.6, decay: 3, damping: 0.85).layout.damping.min).to be_within(1e-12).of(0.001)
+      expect { 1.constant.reverb(room_size: 0.6, damping: 0.5, damping_design: :foo) }.to raise_error(ArgumentError, /damping design/)
+    end
+
     it 'uses a preset decay with a classic layout' do
       rev = 1.constant.reverb(:hall, decay: 2)
       expect((0...8).map { |i| rev.line_decay(i) }).to all(be_within(1e-9).of(2))
