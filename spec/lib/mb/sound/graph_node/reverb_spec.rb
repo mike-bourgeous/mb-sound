@@ -103,10 +103,15 @@ RSpec.describe(MB::Sound::GraphNode::Reverb) do
       expect(rev.network.kernel_config[:loop]).to eq(rev.feedback_delays.map(&:to_f))
     end
 
-    it 'gives the classic presets loops of their taps plus 1024 samples at 48 kHz' do
-      rev = 100.hz.ramp.reverb(:room)
-      taps = rev.network.kernel_config[:tap]
-      expect(rev.feedback_delays.zip(taps).map { |l, t| l - t }).to all(eq(1024))
+    it 'gives the classic presets loops of their taps plus 1024 samples at 48 kHz (:hall compact since 2026-10-10)' do
+      [:room, :stadium, :space, :default].each do |preset|
+        rev = 100.hz.ramp.reverb(preset)
+        taps = rev.network.kernel_config[:tap]
+        expect(rev.feedback_delays.zip(taps).map { |l, t| l - t }).to all(eq(1024)), preset.inspect
+      end
+
+      rev = 100.hz.ramp.reverb(:hall)
+      expect(rev.feedback_delays).to eq(rev.network.kernel_config[:tap].map(&:round))
     end
   end
 
@@ -165,7 +170,7 @@ RSpec.describe(MB::Sound::GraphNode::Reverb) do
     it 'keeps a mix: setting between dry and wet' do
       rev = 1.constant.reverb(:room, mix: 0.25)
       expect(rev.dry).to eq(0.75)
-      expect(rev.wet).to be_within(1e-9).of(0.25 * -16.db)
+      expect(rev.wet).to be_within(1e-9).of(0.25)
     end
   end
 
@@ -299,7 +304,7 @@ RSpec.describe(MB::Sound::GraphNode::Reverb) do
 
     it 'keeps a classic preset decay with shorter loops (loop_extra: 0)' do
       [:room, :hall].each do |preset|
-        classic = 1.constant.reverb(preset)
+        classic = 1.constant.reverb(preset, loop_extra: MB::Sound::GraphNode::Reverb::CLASSIC_LOOP_EXTRA)
         compact = 1.constant.reverb(preset, loop_extra: 0)
         8.times do |i|
           expect(compact.line_decay(i)).to be_within(1e-9).of(classic.line_decay(i))
@@ -319,10 +324,46 @@ RSpec.describe(MB::Sound::GraphNode::Reverb) do
       end
     end
 
-    it 'keeps Jot damping as the default (its longer lines collapse at high damping)' do
-      jot = 1.constant.reverb(room_size: 0.6, decay: 3, damping: 0.5)
-      expect(jot.layout.damping).to eq(1.constant.reverb(room_size: 0.6, decay: 3, damping: 0.5, damping_design: :jot).layout.damping)
-      expect(1.constant.reverb(room_size: 0.6, decay: 3, damping: 0.85).layout.damping.min).to be_within(1e-12).of(0.001)
+    # The room-size presets' damping was retuned for the exact design on
+    # 2026-10-10 so each sounds as it did with Jot's: the network's reverb
+    # time (mean per-line decay rate) at 1 kHz, 8 kHz, and Nyquist
+    {
+      nil => [0.5, {}], plate: [0.3, {}], shimmer: [0.5, {}], grit: [0.2, {}], gated: [0.3, {}], drone: [0.6, {}],
+    }.each do |preset, (jot_damping, opts)|
+      it "keeps #{preset.inspect}'s reverb time at every frequency with the exact design (Jot #{jot_damping} before)" do
+        rt = ->(rev, f) {
+          w = 2 * Math::PI * f / 48000
+          rates = rev.gains.each_with_index.map { |g, i|
+            c = rev.layout.damping[i]
+            p = 1 - c
+            20 * Math.log10(g * c / Math.sqrt(1 - 2 * p * Math.cos(w) + p * p)) / (rev.feedback_delays[i] / 48000.0)
+          }
+          -60 * rates.length / rates.sum
+        }
+        args = preset ? [preset] : [nil]
+        extra = preset ? {} : { room_size: 0.5 }
+        new = 1.constant.reverb(*args, **extra, **opts)
+        old = 1.constant.reverb(*args, **extra, **opts, damping: jot_damping, damping_design: :jot)
+        [1000, 8000, 24000].each do |f|
+          expect(rt.(new, f)).to be_within(0.02 * rt.(old, f)).of(rt.(old, f)), "#{f} Hz"
+        end
+      end
+    end
+
+    it 'plays :room wet at 0 dB and :hall with compact loops (user picks, 2026-10-10)' do
+      expect(described_class::PRESETS[:room][:wet]).to eq(1)
+      expect(described_class::PRESETS[:hall][:loop_extra]).to eq(0)
+      [:space, :stadium, :default, :room].each do |preset|
+        expect(described_class::PRESETS[preset][:loop_extra]).to eq(described_class::CLASSIC_LOOP_EXTRA)
+      end
+    end
+
+    it 'uses the exact damping design by default, keeping Jot as an option (its longer lines collapse at high damping)' do
+      exact = 1.constant.reverb(room_size: 0.6, decay: 3, damping: 0.5)
+      expect(exact.layout.damping).to eq(1.constant.reverb(room_size: 0.6, decay: 3, damping: 0.5, damping_design: :exact).layout.damping)
+      expect(exact.layout.damping).not_to eq(1.constant.reverb(room_size: 0.6, decay: 3, damping: 0.5, damping_design: :jot).layout.damping)
+      expect(1.constant.reverb(room_size: 0.6, decay: 3, damping: 0.85, damping_design: :jot).layout.damping.min).to be_within(1e-12).of(0.001)
+      expect(1.constant.reverb(room_size: 0.6, decay: 3, damping: 0.85).layout.damping.min).to be > 0.1
       expect { 1.constant.reverb(room_size: 0.6, damping: 0.5, damping_design: :foo) }.to raise_error(ArgumentError, /damping design/)
     end
 

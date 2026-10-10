@@ -88,7 +88,7 @@ module MB
         ROOM_DEFAULTS = {
           room_size: 0.5,
           decay: 2.0,
-          damping: 0.5,
+          damping: 0.6,
           channels: 8,
           stages: 4,
           modulation: :subtle,
@@ -135,11 +135,18 @@ module MB
 
         # Some known-reasonable parameters for the reverb algorithm (plus an
         # extra_time value for roughly how long it takes for the reverb to ring
-        # out).  The classic presets keep their 2026-01 sound and level for
-        # stereo in and out (their +:level:+ is the old structure's gain, see
-        # Reverb.classic_level; mono inputs and mono outputs are now as loud
-        # as stereo ones, 3 dB quieter each than before).  Presets with
-        # +:room_size:+ use the room-size layout.
+        # out).  The classic presets (:room, :hall, :stadium, :space,
+        # :default) keep their 2026-01 structure and level (their +:level:+ is
+        # the old structure's gain, see Reverb.classic_level; other channel
+        # counts follow Reverb.channel_trim).  :stadium, :space, and :default
+        # still sound exactly as in 2026-01 (impulse responses null to
+        # -122..-143 dB); since 2026-10-10 (user's picks by ear) :room plays
+        # its wet at 0 dB (was -16 dB; otherwise the same) and :hall has
+        # compact loops (+loop_extra: 0+, the same decay per second).
+        # Presets with +:room_size:+ use the room-size layout; their
+        # +:damping:+ values were retuned on 2026-10-10 for
+        # +damping_design: :exact+ (the new default) so they sound as with
+        # Jot's design (the same RT60 at every frequency within 2%).
         PRESETS = {
           room: {
             description: 'Subtle in-room reverb',
@@ -153,7 +160,7 @@ module MB
             tuned_loop_extra: CLASSIC_LOOP_EXTRA,
             predelay: 0,
             dry: 1,
-            wet: -16.db,
+            wet: 1, # 0 dB since 2026-10-10 (was -16 dB; user's pick by ear)
             level: classic_level(8, 4),
             seed: 0,
             extra_time: 1,
@@ -166,7 +173,9 @@ module MB
             feedback_range: 0.03..0.14,
             feedback_gain: 0.9,
             feedback_enabled: true,
-            loop_extra: CLASSIC_LOOP_EXTRA,
+            # Compact loops since 2026-10-10 (user's pick by ear): the line
+            # delays alone, gains retuned to the classic decay per second
+            loop_extra: 0,
             tuned_loop_extra: CLASSIC_LOOP_EXTRA,
             predelay: 0,
             dry: 1,
@@ -214,7 +223,7 @@ module MB
             description: 'Dense and bright, a short plate (room-size layout)',
             room_size: 0.35,
             decay: 2.2,
-            damping: 0.3,
+            damping: 0.34,
             modulation: :subtle,
             diffusion_modulation: :subtle,
             seed: 2,
@@ -223,7 +232,7 @@ module MB
             description: 'A big space whose tail climbs in octaves',
             room_size: 0.8,
             decay: 6,
-            damping: 0.5,
+            damping: 0.6,
             highpass: 150,
             shimmer: 0.5,
             modulation: :lush,
@@ -233,7 +242,7 @@ module MB
             description: 'A tail that saturates and crumbles as it decays',
             room_size: 0.6,
             decay: 4,
-            damping: 0.2,
+            damping: 0.22,
             highpass: 80,
             drive: 3,
             crush: 9,
@@ -254,7 +263,7 @@ module MB
             description: '1980s gated reverb: a big room cut off 0.25 s after the hit',
             room_size: 0.7,
             decay: 2.5,
-            damping: 0.3,
+            damping: 0.34,
             gate: 0.25,
             threshold: -30.db,
             modulation: false,
@@ -264,7 +273,7 @@ module MB
             description: 'Endless ambient wash (30 s decay)',
             room_size: 1.0,
             decay: 30,
-            damping: 0.6,
+            damping: 0.72,
             highpass: 60,
             modulation: :lush,
             diffusion_modulation: :subtle,
@@ -551,11 +560,12 @@ module MB
         # Inside the feedback loop (numbers or nodes unless noted):
         # +:damping:+ - 0..1 (a number): high frequencies decay faster, the
         #               reverb time at Nyquist (1 - damping) times the low
-        #               reverb time (Jot's first-order absorption filters).
-        # +:damping_design:+ - :jot (default; Jot's approximate pole, which
-        #               damps more than asked and kills the longer lines
-        #               above about 0.7) or :exact (see
-        #               #damping_coefficients; experimental, 2026-10-10).
+        #               reverb time (first-order absorption filters in every line).
+        # +:damping_design:+ - :exact (default since 2026-10-10; see
+        #               #damping_coefficients) or :jot (Jot's approximate
+        #               pole, the default before: it damps more than asked,
+        #               e.g. Jot 0.5 = exact 0.6, and kills the longer lines
+        #               above about 0.7).
         # +:lowpass:+ - a one-pole lowpass cutoff (Hz or Pitch) in every
         #               line (instead of +:damping:+).
         # +:highpass:+ - a one-pole highpass cutoff (Hz) in every line.
@@ -584,7 +594,7 @@ module MB
         #               lines are sized for +:max_stretch:+, default 2 for a
         #               node, else the number).
         def initialize(upstream:, channels:, output_channels:, stages:, sample_rate:, diffusion_range: nil, feedback_range: nil, feedback_gain: nil, feedback_enabled: true, predelay: 0, wet: 1, dry: 1, level: 1, seed: 0, show_internals: false,
-                       diffusion_delays: nil, feedback_delays: nil, loop_extra: 0, tuned_loop_extra: nil, decay: nil, mix: nil, damping: nil, damping_design: :jot, lowpass: nil, highpass: nil, drive: nil, drive_mode: :soft, crush: nil,
+                       diffusion_delays: nil, feedback_delays: nil, loop_extra: 0, tuned_loop_extra: nil, decay: nil, mix: nil, damping: nil, damping_design: :exact, lowpass: nil, highpass: nil, drive: nil, drive_mode: :soft, crush: nil,
                        shimmer: nil, shimmer_pitch: 12, shimmer_window: 0.05, freeze: nil, stretch: nil, max_stretch: nil, modulation: nil, diffusion_modulation: nil,
                        duck: nil, gate: nil, threshold: -30.db)
           @random = Random.new(seed)
@@ -1112,7 +1122,9 @@ module MB
           }
         end
 
-        # Jot's first-order absorption filters (JOS, PASP, "First-Order
+        # First-order absorption filters for +damping+.  +design+ :exact
+        # (default since 2026-10-10) solves for each line's pole exactly
+        # (below); :jot is Jot's design (JOS, PASP, "First-Order
         # Delay-Filter Design"): for each line's loop gain g at DC, the pole
         # p = ln(10) / 4 * log10(g) * (1 - 1 / alpha**2), alpha the reverb
         # time at Nyquist over the reverb time at DC (1 - +damping+, at
@@ -1128,7 +1140,7 @@ module MB
         # exactly alpha at Nyquist: g (1 - p) / (1 + p) = g ** (1 / alpha),
         # i.e. r = g ** (1 / alpha - 1), p = (1 - r) / (1 + r) (the
         # filter's DC gain is 1, so DC keeps the line's decay).
-        def damping_coefficients(damping, design: :jot)
+        def damping_coefficients(damping, design: :exact)
           damping = damping.to_f
           raise ArgumentError, 'Damping must be between 0.0 and 1.0' unless damping.between?(0, 1)
 

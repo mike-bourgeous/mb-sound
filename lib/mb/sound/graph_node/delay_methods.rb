@@ -256,12 +256,14 @@ module MB
         # the outputs are broken out as a multichannel input to the Reverb.
         #
         # Presets: :room, :hall, :stadium, :space, :default (the classic
-        # presets, as they sounded in 2026-01), plus the room-size presets
+        # presets, as they sounded in 2026-01, except :room's wet now at 0 dB
+        # and :hall's compact loops, 2026-10-10), plus the room-size presets
         # :plate, :shimmer, :grit, :lofi, :gated, :drone.  See Reverb::PRESETS.
         #
         # The friendly form: without a preset, +:room_size:+ (0..1),
         # +:decay:+ (the reverb time, RT60, in seconds or any Length), and
-        # +:damping:+ (0..1, how much faster highs decay) build a reverb
+        # +:damping:+ (0..1: the reverb time at Nyquist is 1 - damping times
+        # the reverb time; default 0.6) build a reverb
         # from a room-size layout (see Reverb::ROOM_DEFAULTS), with subtle
         # delay modulation on.  +:predelay:+, +:mix:+ (0..1) or +:wet:+ and
         # +:dry:+, and every option below work with it too.
