@@ -30,6 +30,8 @@
 #     swap :acid, line.acc                           # everything accented: the sweep piles up
 #     swap :acid, line.slide                         # everything slid: one long glide
 #     swap :acid, line.acid(gate: 0.25)              # shorter, plucky gates
+#     bg :acid, acid_voice(line, decay: 0.8)          # a shorter MEG (exponential, curve 30; default 1.56 s)
+#     bg :acid, acid_voice(line, env_curve: :linear, decay: 0.6, accent_decay: 0.2)  # the earlier linear MEG
 #     # Marks work in any seq, not just acid ones:
 #     bg :lead, seq(E4, !G4, ~A4, B4, R, !D5, T, B4).n8.loop.synth(voices: 1) { |v| v.hz.glide(40.ms, legato: true).saw.lp4(v.cutoff(900), resonance: 0.5) * v.amp_env.legato }
 
@@ -56,7 +58,8 @@ module MB::Sound
 
     # The cutoff knob rises from 180 to 900 Hz and back over 8 bars
     knob = 8.bars.lfo.triangle.at(180..900)
-    acid = acid_voice(main, cutoff: knob, reso: 0.7, decay: 0.5, filter: filter)
+    # MEG decay 1.3 s on the exponential curve (0.5 s linear before 2026-10-10)
+    acid = acid_voice(main, cutoff: knob, reso: 0.7, decay: 1.3, filter: filter)
 
     kick = (45.constant + 120 * beat[:kick].env(0, 0.03, 0, 0.01)).tone.sine.at(1) * beat[:kick].env(0, 0.25, 0, 0.05) * 0.8
     hats = noise.at(1).filter(:highpass, cutoff: 8000) * beat[:hat].env(0, 0.03, 0, 0.02, sensitivity: 0.3..1, curve: :linear) * 0.2

@@ -641,7 +641,7 @@ module MB
       # Add it to a filter's octaves and to the level (see
       # bin/synths/acid.rb).
       #
-      #     meg = v.acid_env(decay: 0.6)
+      #     meg = v.acid_env(decay: 1.56)
       #     sweep = v.accent_sweep(meg, resonance: 0.8)
       #     cutoff = 2 ** (meg * 3 + sweep * 2) * 300
       def accent_sweep(env, resonance: 0.5, hz: nil, threshold: ACCENT_THRESHOLD)
@@ -653,17 +653,39 @@ module MB
         ((env * accent(threshold)).filter(lowpass) * ACCENT_SWEEP_GAIN).named('Accent sweep')
       end
 
+      # #acid_env's default curve: an exponential fall like the 303's RC
+      # discharge (user's pick, 2026-10-10, listening bench omnibus2 round
+      # 2: "curve 30, times x2.6 (equal half-way)").
+      ACID_ENV_CURVE = 30
+
+      # How much longer #acid_env's curve-30 decay times are than linear
+      # ones that pass half-way at the same time (a curve-30 fall is
+      # half-way at 0.192 of its time, a linear one at 0.5).
+      ACID_ENV_TIME_SCALE = 2.6
+
+      # #acid_env's default decay (0.6 s linear, x ACID_ENV_TIME_SCALE).
+      ACID_ENV_DECAY = 0.6 * ACID_ENV_TIME_SCALE
+
+      # #acid_env's default accent decay (0.2 s linear, x
+      # ACID_ENV_TIME_SCALE).
+      ACID_ENV_ACCENT_DECAY = 0.2 * ACID_ENV_TIME_SCALE
+
       # The TB-303's filter envelope (MEG): an instant attack and a decay
-      # to 0 over +decay+ seconds (a number, Length, or node; the 303's
-      # DECAY knob spans 0.2 to 2 s), or +accent_decay+ (the shortest) on
-      # accented notes (#accent with +threshold+).  Velocity doesn't scale
-      # it (use #accent or #accent_sweep).  Legato (slid notes don't
-      # restart it), linear by default (+curve:+ takes Envelope curves,
-      # e.g. 30 for an exponential fall).  Multiply by the envelope amount
-      # in octaves for a cutoff.
+      # to 0 over +decay+ seconds (a number, Length, or node), or
+      # +accent_decay+ (the shortest) on accented notes (#accent with
+      # +threshold+).  Velocity doesn't scale it (use #accent or
+      # #accent_sweep).  Legato (slid notes don't restart it).  The fall
+      # is exponential (+curve:+ ACID_ENV_CURVE, 30; takes Envelope
+      # curves), with times ACID_ENV_TIME_SCALE (2.6) times a linear
+      # fall's that passes half-way at the same moment: defaults 1.56 s
+      # and 0.52 s (0.6 and 0.2 linear; the 303's DECAY knob spans 0.2 to
+      # 2 s half-way-equivalent linear, so about 0.5 to 5.2 s here).
+      # `curve: :linear, decay: 0.6, accent_decay: 0.2` is the earlier
+      # linear MEG.  Multiply by the envelope amount in octaves for a
+      # cutoff.
       #
-      #     cutoff = 2 ** (v.acid_env(decay: 0.5) * 3) * 250
-      def acid_env(decay: 0.6, accent_decay: 0.2, attack: 0.003, release: 0.02, threshold: ACCENT_THRESHOLD, curve: :linear, gm: false)
+      #     cutoff = 2 ** (v.acid_env(decay: 1.3) * 3) * 250
+      def acid_env(decay: ACID_ENV_DECAY, accent_decay: ACID_ENV_ACCENT_DECAY, attack: 0.003, release: 0.02, threshold: ACCENT_THRESHOLD, curve: ACID_ENV_CURVE, gm: false)
         decay = Length.seconds(decay) unless decay.respond_to?(:sample)
         accent_decay = Length.seconds(accent_decay)
         time = if decay.respond_to?(:sample)
