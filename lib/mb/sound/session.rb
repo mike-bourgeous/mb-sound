@@ -1,6 +1,7 @@
 require 'monitor'
 
 require_relative 'session/journal'
+require_relative 'session/names'
 require_relative 'session/changes'
 require_relative 'session/fades'
 require_relative 'session/strip'
@@ -239,6 +240,40 @@ module MB
         init_changes
         init_strip
         init_undo
+        @names = Names.new
+        @arrangement = nil
+      end
+
+      # The Session's top-level names (see Names).
+      attr_reader :names
+
+      # The Set layer of this Session (tracks and scenes; see
+      # MB::Sound::Arrangement), created when first needed.
+      def arrangement
+        @arrangement ||= Arrangement.new(self)
+      end
+
+      # True if a player named +name+ will be playing once the changes
+      # waiting in the change queue have landed.
+      def playing_after_queue?(name)
+        @render_lock.synchronize {
+          playing = @mutex.synchronize { @players.each_value.any? { |p| p.name == name && p.current? } }
+          @changes.each do |c|
+            next unless c.subject == name
+            playing = true if START_KINDS.include?(c.kind) && c.kind != :restore
+            playing = false if c.kind == :stop
+          end
+          playing
+        }
+      end
+
+      # The timeline nodes of the player named +name+ (playing, stopped, or
+      # waiting in the change queue), or an empty Array.
+      def timeline_nodes_of(name)
+        @render_lock.synchronize {
+          p = @mutex.synchronize { @players.values.select { |o| o.name == name && o.current? }.last || @stopped[name] }
+          p&.timeline_nodes || @changes.select { |c| c.subject == name && c.starts }.last&.starts || []
+        }
       end
 
       # Adds a graph to play: a GraphNode, an Array of GraphNodes (one per

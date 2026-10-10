@@ -47,6 +47,8 @@ module MB
         # Pass no names to remove the group.  Returns the group's names.
         def mute_group(name, *names)
           names = names.flatten
+          return nil unless names.empty? || @names.claim(name, :group)
+
           @render_lock.synchronize {
             if names.empty?
               @mute_groups.delete(name)

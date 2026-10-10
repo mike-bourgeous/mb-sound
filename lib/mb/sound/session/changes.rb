@@ -34,6 +34,11 @@ module MB
         # timeline moving while nothing else plays).
         START_KINDS = [:bg, :resume, :restore].freeze
 
+        # Change kinds whose subject isn't a player or :master (no undo
+        # snapshots; e.g. scene launches, whose players' changes are
+        # separate).
+        NO_SNAPSHOT_KINDS = [:scene].freeze
+
         # The Journal of changes made to this Session.
         attr_reader :journal
 
@@ -205,12 +210,13 @@ module MB
         # raised with +raise_errors+).
         def commit_change(c, land_pos:, land_frame:, commits:, immediate:)
           c.lands = stamp(land_pos, frame: land_frame)
-          c.before = undo_snapshot(c.subject)
+          snapshot = !NO_SNAPSHOT_KINDS.include?(c.kind)
+          c.before = undo_snapshot(c.subject) if snapshot
           @landing_frame = land_frame # for ramps that start on the landing sample (see Strip)
           # A past time (e.g. a scheduled block that ran late) is passed on,
           # so launch-aligned clips keep their anchor, as before the queue
           c.action.call(c.time || land_pos)
-          c.after = undo_snapshot(c.subject)
+          c.after = undo_snapshot(c.subject) if snapshot
           @landing_frame = nil
 
           if immediate

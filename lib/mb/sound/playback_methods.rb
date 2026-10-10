@@ -159,6 +159,17 @@ module MB
         name, sound = sound.nil? ? [nil, name_or_sound] : [name_or_sound, sound]
         raise ArgumentError, ':all is reserved for stop(:all)' if name == :all
 
+        # A clip given to a track with a patch plays through the patch (see
+        # ArrangementMethods#track)
+        if name && (sound.is_a?(Sequence::Clip) || sound.is_a?(Sequence::Kit))
+          session = Session.current
+          if session.arrangement.tracks[name]
+            time = Session.context&.[](:time)
+            time = session.send(:launch_time, at, []) if at || time.nil? && !session.arrangement.tracks[name].q
+            return session.arrangement.play(name, sound, start_time: time, fade: fade)
+          end
+        end
+
         session_command(name, label: "bg #{name.inspect}", kind: :bg) { |session, time|
           session.add(sound, at: at, name: name, fade: fade, start_time: at ? nil : time)
         }
