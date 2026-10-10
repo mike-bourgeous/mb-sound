@@ -36,7 +36,7 @@
 #     $0 spec/test_data/c_major.mid                          # nylon-ish strings
 #     $0 --sustain 8 --damping 0 spec/test_data/c_major.mid  # bright, ringing (no loop lowpass)
 #     $0 --sustain 0.6 --brightness 3 spec/test_data/c_major.mid   # muted, plucky
-#     $0 --bright -C 0.5 spec/test_data/c_major.mid          # the bright voice everywhere, half the click
+#     $0 --bright -C 0.5 spec/test_data/c_major.mid          # the bright voice everywhere, half the raw burst
 #     $0 --clean --pick 4 spec/test_data/c_major.mid         # classic KS everywhere, a longer, scratchier pick
 #     $0 --stretch 2 spec/test_data/c_major.mid               # a softclip in the loop: buzzy, sitar-like
 #     $0 --hammer                                            # live: play legato for hammer-ons and pull-offs
@@ -88,8 +88,12 @@ module MB::Sound
   #   seconds) noise burst lowpassed at 1500 + 9000 x velocity Hz, heard
   #   raw on the output (the bright, scratchy start) and going around the
   #   string; the output fades in over one period from the note-on.
-  #   +click+ scales the raw part (the start's brightness) against the ring
-  #   (1 = the old voice; 0.5 is 6 dB less click, same ring).
+  #   +click+ scales the raw part (the burst before it has gone around the
+  #   string) against the ring (1 = the old voice; 0.5: 6 dB less, same
+  #   ring).  It changes the first period only: what follows is the burst
+  #   going around the string (at 110 Hz the first period's RMS falls 6 dB
+  #   with 0.5, the next 20 ms not at all; above ~400 Hz a period is
+  #   shorter than the burst, so it changes little).
   # - clean (high notes; classic Karplus-Strong): +pick+ periods of noise,
   #   lowpassed at the pitch x (1 + velocity x +brightness+) (or from 1500 Hz
   #   up to +brightness_hz+ if positive), written into the delay line only,
@@ -263,7 +267,7 @@ module MB::Sound
       bright: [false, '-b', 'The bright voice (raw 8 ms burst) at every pitch (default: bright below about --crossover Hz, clean above)'],
       clean: [false, 'The clean voice (a period of noise into the string only) at every pitch'],
       crossover: [PLUCK_CROSSOVER, Float, '-X', 'Center of the octave over which low notes\' bright voice crossfades to high notes\' clean one (Hz)', 20.0..20000.0],
-      click: [1.0, Float, '-C', 'Level of the bright voice\'s raw burst against its ring (1: the old voice; 0.5: 6 dB less click)', 0.0..4.0],
+      click: [1.0, Float, '-C', 'Level of the bright voice\'s raw burst (its first period, before it goes around the string; mostly matters on low notes) against its ring (1: the old voice)', 0.0..4.0],
       pick: [1.0, Float, '-k', 'Length of the clean voice\'s noise burst in periods of the note (1 is classic Karplus-Strong)', 0.25..8.0],
       brightness: [12.0, Float, '-B', 'Clean voice\'s noise lowpass at full velocity as a multiple of the pitch (softer notes are darker)', 0.5..64.0],
       stretch: [0.0, Float, '-t', 'Softclip drive inside the loop (0 for none; buzzy, sitar-like)', 0.0..20.0],
