@@ -2,9 +2,13 @@ module MB
   module Sound
     # Methods for generating noise with different spectral characteristics.
     module Noise
-      # TODO: Remember why a separate Random instance was used here, and make a
-      # better way to set the seed for reproducibility.
-      RAND = ENV['RANDOM_SEED'] ? Random.new(ENV['RANDOM_SEED'].to_i) : Random.new
+      # Spectral noise draws its phases from the root generator
+      # (MB::Sound.root_rng, see RandomMethods), so it follows `seed`,
+      # RANDOM_SEED, and MB::Sound.with_seed like other randomness, and
+      # repeats from run to run (user decision 2026-10-10; it used to keep
+      # its own generator, seeded at load time, so forks of a loaded process
+      # couldn't change it).
+      def self.rng = MB::Sound.root_rng
 
       # Returns the given number of (positive plus zero) bins of frequency
       # domain white noise.  For example, to generate 4800 time domain samples,
@@ -17,7 +21,7 @@ module MB
         # There's probably a statistical way to derive a true value.
         gain = 0.25 / Math.sqrt(bins)
         Numo::DComplex.zeros(bins).inplace!.map { |_|
-          Complex.polar(gain, RAND.rand(2.0 * Math::PI))
+          Complex.polar(gain, rng.rand(2.0 * Math::PI))
         }.not_inplace!
       end
 
@@ -38,7 +42,7 @@ module MB
           # with amplitude and not power, and power is amplitude squared.
           div = idx > 0 ? Math.sqrt(idx) : 1
           amp = gain / div
-          Complex.polar(amp, RAND.rand(2.0 * Math::PI))
+          Complex.polar(amp, rng.rand(2.0 * Math::PI))
         }.not_inplace!
       end
 
@@ -57,7 +61,7 @@ module MB
         Numo::DComplex.zeros(bins).inplace!.map_with_index { |_, idx|
           div = idx > 0 ? idx : 1
           amp = gain / div
-          Complex.polar(amp, RAND.rand(2.0 * Math::PI))
+          Complex.polar(amp, rng.rand(2.0 * Math::PI))
         }.not_inplace!
       end
 
@@ -82,7 +86,7 @@ module MB
           div = idx > 0 ? idx ** power : 1
           amp = gain / div
           amp_sum += amp
-          Complex.polar(amp, RAND.rand(2.0 * Math::PI))
+          Complex.polar(amp, rng.rand(2.0 * Math::PI))
         }
 
         noise *= linear_gain / amp_sum

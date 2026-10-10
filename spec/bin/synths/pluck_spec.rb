@@ -146,12 +146,13 @@ RSpec.describe('bin/synths/pluck.rb') do
 
   it 'renders a MIDI file with --hammer, --bright, and --click' do
     out_file = tmp_path('pluck_hammer.flac')
-    out = `bin/synths/pluck.rb -q --hammer --bright -C 0.5 spec/test_data/c_major.mid #{out_file.shellescape} 2>&1`
-    expect($?).to be_success, out
+    # In forks (see ForkScript); the example above is the real run
+    out, status = fork_script('bin/synths/pluck.rb', *%w[-q --hammer --bright -C 0.5 spec/test_data/c_major.mid], out_file)
+    expect(status).to be_success, out
     expect(File.size(out_file)).to be > 1000
 
-    out = `bin/synths/pluck.rb -q --hammer -G 0.1 spec/test_data/c_major.mid #{out_file.shellescape} 2>&1`
-    expect($?).not_to be_success
+    out, status = fork_script('bin/synths/pluck.rb', *%w[-q --hammer -G 0.1 spec/test_data/c_major.mid], out_file)
+    expect(status).not_to be_success
     expect(out).to include('--glide or --hammer')
   end
 end

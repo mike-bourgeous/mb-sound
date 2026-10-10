@@ -10,11 +10,12 @@ RSpec.describe(MB::Sound::Plan::Op::Tone) do
     super(ruby_tolerance: 1e-6, **kw, &block)
   end
 
-  # Resets at block edges (the cumulative block starts of SIZES), inside
-  # blocks, close together (within a band-limited jump's 32 samples), and at
-  # sample 0.
+  # Resets at block edges (the cumulative block starts of the sizes
+  # plan_compare uses for them: SIZES repeated past 6200), inside blocks,
+  # close together (within a band-limited jump's 32 samples), and at sample
+  # 0.
   let(:reset_points) {
-    starts = PlanSpecHelpers::SIZES.each_with_object([0]) { |n, acc| acc << acc.last + n }
+    starts = PlanSpecHelpers.sizes_for(samples: 6201).each_with_object([0]) { |n, acc| acc << acc.last + n }
     (starts.values_at(1, 3, 5, 8, 12) + [0, 50, 51, 70, 900, 931, 1500, 1501, 1502, 4000, 4010, 6200]).uniq.sort
   }
 
@@ -76,7 +77,7 @@ RSpec.describe(MB::Sound::Plan::Op::Tone) do
     it 'keeps playing after its reset input ends' do
       r = plan_compare { fm(1).tone.sine.reset(src.new(kind: :impulses, at: [10, 200], ends_at: 600)) * 1 }
       # (the reset input's short last buffer shortens that block, as it does unplanned)
-      expect(r.outputs[:c].last.length).to eq(PlanSpecHelpers::SIZES.last)
+      expect(r.outputs[:c].last.length).to eq(r.sizes.last)
     end
 
     it 'ends when its frequency input ends' do

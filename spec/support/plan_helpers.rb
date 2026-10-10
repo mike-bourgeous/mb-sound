@@ -1,6 +1,11 @@
 # Spec support for the plan layer (MB::Sound::Plan): deterministic boundary
 # inputs and a helper that runs the same graph unplanned, planned in C, and
 # planned with the Ruby mirror, block by block, and compares the samples.
+#
+# Block sizes: the default suite runs 1, 7, 128, and 800 samples plus one
+# random size seeded by RSpec's seed (QUICK_SIZES); MB_SOUND_PLAN_FULL=1
+# (`rake plan:full`) runs the full 21-size sweep (FULL_SIZES) for branches
+# that change the plan layer itself.
 module PlanSpecHelpers
   # A graph node a plan reads as a boundary input (it has no ops): a
   # deterministic signal of the absolute sample index, so it gives the same
@@ -17,6 +22,10 @@ module PlanSpecHelpers
 
     attr_reader :position
 
+    # The last sample index this source needs a comparison to reach for its
+    # events to happen (impulses, the end), or nil.
+    attr_reader :last_event
+
     def initialize(kind: :wave, seed: 1, scale: 1.0, offset: 0.0, at: [], value: 1.0, every: 100, complex: false, ends_at: nil, sample_rate: 48000)
       @kind = kind
       @seed = seed
@@ -29,6 +38,9 @@ module PlanSpecHelpers
       @ends_at = ends_at
       @sample_rate = sample_rate.to_f
       @position = 0
+
+      @last_event = [(at.max if kind == :impulses), ends_at].compact.max
+      Thread.current[:plan_spec_sources]&.push(self)
     end
 
     def sources
@@ -76,9 +88,33 @@ module PlanSpecHelpers
   # #plan_compare): -100 dB.
   INEXACT_TOLERANCE = 1e-5
 
+  # True with MB_SOUND_PLAN_FULL=1 (`rake plan:full`): the full block-size
+  # sweep.
+  FULL = %w[1 true yes].include?(ENV['MB_SOUND_PLAN_FULL'].to_s.downcase)
+
   # A pseudo-random mix of block sizes from 1 to 800, with the edges
-  # (1, 2, 127/128/129, 511/512, 800) included.
-  SIZES = [1, 2, 3, 800, 127, 128, 129, 5, 511, 512, 64, 799, 17, 256, 1, 333, 700, 9, 128, 600, 41].freeze
+  # (1, 2, 127/128/129, 511/512, 800) included (5166 samples).
+  FULL_SIZES = [1, 2, 3, 800, 127, 128, 129, 5, 511, 512, 64, 799, 17, 256, 1, 333, 700, 9, 128, 600, 41].freeze
+
+  # One random block size from 2 to 799 (not 7 or 128), from RSpec's seed,
+  # so `rspec --seed N` repeats it.
+  RANDOM_SIZE = ((2..799).to_a - [7, 128]).sample(random: Random.new(RSpec.configuration.seed.to_i))
+
+  # The default suite's block sizes (user decision 2026-10-10): one sample,
+  # an odd small size, 128, 800, and RANDOM_SIZE.
+  QUICK_SIZES = [1, 7, 128, 800, RANDOM_SIZE].freeze
+
+  # The block sizes plan specs use (QUICK_SIZES, or FULL_SIZES with
+  # MB_SOUND_PLAN_FULL=1).
+  SIZES = FULL ? FULL_SIZES : QUICK_SIZES
+
+  # SIZES repeated until they cover at least +samples+ samples and +blocks+
+  # blocks.
+  def self.sizes_for(samples: 0, blocks: 0)
+    list = []
+    list << SIZES[list.length % SIZES.length] while list.sum < samples || list.length < blocks
+    list.freeze
+  end
 
   # Per-copy context for #plan_compare's build block: register actions to
   # run before given blocks (parameter changes, structural changes).
@@ -97,7 +133,7 @@ module PlanSpecHelpers
   end
 
   # The result of #plan_compare.
-  Result = Struct.new(:outputs, :installations, :graphs, keyword_init: true) do
+  Result = Struct.new(:outputs, :installations, :graphs, :sizes, keyword_init: true) do
     def regions(engine = :c)
       installations[engine]&.regions || []
     end
@@ -114,11 +150,36 @@ module PlanSpecHelpers
   # unfused samples exactly (or within +tolerance+, relative to 1;
   # +ruby_tolerance+ for the Ruby mirror, whose tone ops are the Tone's own
   # Ruby path, exact for most shapes but not complex sines).  Also
-  # expects every planned block to have run planned unless +fallbacks+.
+  # expects every planned block to have run planned unless +fallbacks+
+  # (true allows any unfused blocks, an Integer at most that many per region).
   # Returns a Result.
-  def plan_compare(sizes: SIZES, tolerance: nil, ruby_tolerance: nil, engines: [:c, :ruby], fallbacks: false, check: nil, &build)
+  #
+  # The default +sizes+ (SIZES) are repeated as needed to reach every
+  # Copy#before_block index and every Source's last event (impulse or end),
+  # followed by another pass over SIZES (so what happens after an event,
+  # e.g. a rebuild once an input ended, is compared too), and cover at least
+  # one pass; explicit +sizes+ that miss an event raise, so no event is
+  # silently left out.  Result#sizes has the sizes used.
+  def plan_compare(sizes: nil, tolerance: nil, ruby_tolerance: nil, engines: [:c, :ruby], fallbacks: false, check: nil, &build)
     copies = ([:unfused] + engines).to_h { |e| [e, Copy.new(e)] }
-    graphs = copies.to_h { |e, ctx| [e, MB::Sound.with_seed(1234) { build.call(ctx) }] }
+    sources = []
+    graphs = copies.to_h do |e, ctx|
+      Thread.current[:plan_spec_sources] = sources
+      [e, MB::Sound.with_seed(1234) { build.call(ctx) }]
+    ensure
+      Thread.current[:plan_spec_sources] = nil
+    end
+
+    last_block = copies.values.flat_map { |ctx| ctx.events.select { |_, list| list.any? }.keys }.max || -1
+    last_sample = sources.filter_map(&:last_event).max || -1
+    if sizes
+      if last_block >= sizes.length || last_sample >= sizes.sum
+        raise ArgumentError, "plan_compare sizes #{sizes.length} blocks / #{sizes.sum} samples miss an event (block #{last_block}, sample #{last_sample})"
+      end
+    else
+      reach = PlanSpecHelpers.sizes_for(samples: last_sample + 1, blocks: last_block + 1)
+      sizes = PlanSpecHelpers.sizes_for(blocks: reach.length + SIZES.length)
+    end
 
     installations = {}
     engines.each do |e|
@@ -168,15 +229,15 @@ module PlanSpecHelpers
       end
     end
 
-    unless fallbacks
+    unless fallbacks == true
       installations.each do |e, inst|
         inst.regions.each do |r|
-          expect(r.unfused_blocks).to eq(0), "#{e}: #{r.unfused_blocks} blocks ran unfused (#{r.disabled})\n#{r}"
+          expect(r.unfused_blocks).to be <= (fallbacks || 0), "#{e}: #{r.unfused_blocks} blocks ran unfused (#{r.disabled})\n#{r}"
         end
       end
     end
 
-    Result.new(outputs: outputs, installations: installations, graphs: graphs)
+    Result.new(outputs: outputs, installations: installations, graphs: graphs, sizes: sizes)
   end
 
   # The ops of a Result's first region, as op class names (e.g. [:Mul, :Tone]).

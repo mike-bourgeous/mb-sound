@@ -11,8 +11,9 @@ RSpec.describe('bin/effects/tape_delay.rb') do
   end
 
   it 'can generate a graphviz image' do
-    output = `DISPLAY= bin/effects/tape_delay.rb --quiet spec/test_data/arp_a7.flac #{outfile.shellescape} --graphviz 2>&1`
-    expect($?).to be_success
+    # In a fork (see ForkScript); the example above is the real run
+    output, status = fork_script('bin/effects/tape_delay.rb', '--quiet', 'spec/test_data/arp_a7.flac', outfile, '--graphviz', env: { 'DISPLAY' => '' })
+    expect(status).to be_success, output
 
     png_line = output.lines.find { |l| l.include?('.png') && l.include?(' image to ') }
     png_file = png_line.strip.rpartition(' image to ').last

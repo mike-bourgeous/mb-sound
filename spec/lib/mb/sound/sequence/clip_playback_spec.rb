@@ -21,10 +21,13 @@ RSpec.describe(MB::Sound::Sequence::Clip, 'playback') do
   end
 
   describe '#trigger' do
+    # One-sample buffers (a Ruby call per sample) run through the third
+    # note only.
     it 'outputs an impulse on the exact sample of each note, across buffer sizes' do
       [1, 441, 800, 1000].each do |buffer|
-        data = render(two_notes.loop.trigger(transport: transport), buffer: buffer, max: 48000)[0...48000]
-        expect(nonzero_indices(data)).to eq([0, 12000, 24000, 36000]), "failed with buffer size #{buffer}"
+        total = buffer == 1 ? 24001 : 48000
+        data = render(two_notes.loop.trigger(transport: transport), buffer: buffer, max: total)[0...total]
+        expect(nonzero_indices(data)).to eq([0, 12000, 24000, 36000].select { |i| i < total }), "failed with buffer size #{buffer}"
       end
     end
 
@@ -149,13 +152,16 @@ RSpec.describe(MB::Sound::Sequence::Clip, 'playback') do
   describe 'clip swaps (MIDI::ClipSource#swap_clip)' do
     let(:sixteenths) { MB::Sound.grid(16, 'x').loop }
 
+    # One-sample buffers (a Ruby call per sample) run through the swap and
+    # the first note after it.
     it 'switches clips on the exact sample, across buffer sizes' do
       [1, 441, 800, 1000].each do |buffer|
+        total = buffer == 1 ? 30001 : 48000
         n = two_notes.loop.notes(transport: transport)
         node = n.trigger
         n.stream.source.swap_clip(sixteenths, time: 1/4r)
-        data = render(node, buffer: buffer, max: 48000)[0...48000]
-        expect(nonzero_indices(data)).to eq([0, 12000, 24000, 30000, 36000, 42000]), "failed with buffer size #{buffer}"
+        data = render(node, buffer: buffer, max: total)[0...total]
+        expect(nonzero_indices(data)).to eq([0, 12000, 24000, 30000, 36000, 42000].select { |i| i < total }), "failed with buffer size #{buffer}"
       end
     end
 

@@ -37,8 +37,9 @@ RSpec.describe('bin/graph_profile.rb') do
   end
 
   it 'compares runs with plans off and on' do
-    text = `bin/graph_profile.rb -n 128 -s 0.2 --plan both -r 1 bin/effects/flanger.rb 2>&1`
-    expect($?).to be_success, text
+    # In a fork (see ForkScript); the example above is the real run
+    text, status = fork_script('bin/graph_profile.rb', *%w[-n 128 -s 0.2 --plan both -r 1 bin/effects/flanger.rb])
+    expect(status).to be_success, text
     expect(text).to match(/flanger\.rb +buffer +128: +[\d.]+% of realtime \(2 outputs, 0\.2 s, plans off\)/)
     expect(text).to match(/best of 1: plans off [\d.]+%, on [\d.]+% of realtime \([-+][\d.]+%\)/)
   end

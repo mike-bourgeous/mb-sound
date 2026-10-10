@@ -37,10 +37,10 @@ RSpec.describe('bin/midi_check.rb') do
       end
     end
 
-    text = `bin/midi_check.rb --listen 2.5 -c mbspec_keys 2>&1`
+    text = `bin/midi_check.rb --listen 1 -c mbspec_keys 2>&1`
     sender.kill
     expect($?).to be_success, text
-    expect(text).to include('Listening for 2.5 s on jack (mbspec_keys:out)')
+    expect(text).to include('Listening for 1.0 s on jack (mbspec_keys:out)')
     expect(text).to match(/^\s+[\d.]+  90 40 5a$/)
   ensure
     sender&.join

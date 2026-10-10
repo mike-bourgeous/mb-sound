@@ -1,7 +1,8 @@
 require 'timeout'
 
 # Effect scripts' MIDI controls (p.midi_cc): live MIDI on the shared JACK
-# client, -m/--midi PORT, and -m/--midi FILE.mid.  Real processes.
+# client, -m/--midi PORT, and -m/--midi FILE.mid.  Live runs are real
+# processes; file renders run in forks.
 RSpec.describe('effect scripts with MIDI control', :aggregate_failures) do
   before(:context) { @jack_error = JackDummy.start }
   after(:context) { JackDummy.stop }
@@ -45,11 +46,19 @@ RSpec.describe('effect scripts with MIDI control', :aggregate_failures) do
     keyboard&.close
   end
 
+  # File renders open no live MIDI or audio device, so they run in forks
+  # (see ForkScript); the examples above are the real-process runs.
+  def flanger_fork(*args)
+    text, status = fork_script('bin/effects/flanger.rb', '--oversample', '1', *args)
+    expect(status).to be_success, text
+    text
+  end
+
   it 'follows a MIDI file given with --midi, also when rendering' do
     plain = tmp_path('plain.flac')
     midi = tmp_path('midi.flac')
-    flanger('spec/test_data/arp_a7.flac', '-o', plain)
-    text = flanger('spec/test_data/arp_a7.flac', '-o', midi, '-m', 'spec/test_data/mod_wheel.mid')
+    flanger_fork('spec/test_data/arp_a7.flac', '-o', plain)
+    text = flanger_fork('spec/test_data/arp_a7.flac', '-o', midi, '-m', 'spec/test_data/mod_wheel.mid')
     expect(text).to include('MIDI control from spec/test_data/mod_wheel.mid')
 
     a = MB::Sound.read(plain)[0]
@@ -59,7 +68,7 @@ RSpec.describe('effect scripts with MIDI control', :aggregate_failures) do
   end
 
   it 'refuses a --midi file that is not MIDI' do
-    text = flanger('spec/test_data/arp_a7.flac', '-o', tmp_path('x.flac'), '-m', 'spec/test_data/arp_a7.flac')
+    text = flanger_fork('spec/test_data/arp_a7.flac', '-o', tmp_path('x.flac'), '-m', 'spec/test_data/arp_a7.flac')
     expect(text).to include('MIDI control disabled (spec/test_data/arp_a7.flac is not a MIDI file')
   end
 end

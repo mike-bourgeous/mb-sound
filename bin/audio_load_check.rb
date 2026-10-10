@@ -17,7 +17,8 @@
 #     AUDIO_BACKEND=null $0 -s 3           # no sound card
 #
 # Listen too: each setting plays the riff and drone for --seconds, and
-# glitches mean underruns.  Underruns are counted after a warmup second.
+# glitches mean underruns.  Underruns are counted after a warmup second
+# (--warmup).
 
 require 'bundler/setup'
 require 'mb-sound'
@@ -103,9 +104,9 @@ def parse_settings(text)
   }
 end
 
-# Plays +load+ with +setting+ for +seconds+ after a warmup second, returning
-# measurements.
-def measure(load, setting, seconds:, midi:, oversample:, rate:, device:, backends:)
+# Plays +load+ with +setting+ for +seconds+ after +warmup+ seconds (not
+# measured), returning measurements.
+def measure(load, setting, seconds:, midi:, oversample:, rate:, device:, backends:, warmup: 1)
   out = MB::Sound::DeviceOutput.new(
     channels: 2, sample_rate: rate, device: device, backends: backends,
     **setting.slice(:profile, :buffer_size, :period, :latency)
@@ -144,7 +145,7 @@ def measure(load, setting, seconds:, midi:, oversample:, rate:, device:, backend
     session.add(MB::Sound.fm_bass(midi, oversample: oversample), at: :now) unless load == 'stereo_drone'
   end
 
-  sleep 1
+  sleep warmup
   warm = true
   underruns = out.underruns
   gc_start = GC.stat(:major_gc_count)
@@ -168,7 +169,8 @@ MB::Sound.script(
   buffers: [nil, String, 'Instead of --settings, a grid: write sizes (frames, comma-separated)'],
   periods: ['128,256', String, 'Grid: sound card periods (frames, comma-separated)'],
   latencies: ['0,0.02,0.05', String, 'Grid: queue lengths (seconds; at least two writes each)'],
-  seconds: [10.0, '-s', 'Seconds to play each setting', 2.0..600.0],
+  seconds: [10.0, '-s', 'Seconds to play each setting (under 2 only for quick checks)', 0.1..600.0],
+  warmup: [1.0, 'Seconds to play before measuring each setting', 0.0..60.0],
   oversample: [4, Integer, 'fm_bass oversampling factor (1 for none)', 1..8],
   backend: [nil, String, '-b', 'Backends to try, comma-separated (e.g. jack,pulseaudio)'],
   device: [nil, String, '-d', 'Device index or part of its name'],
@@ -202,9 +204,9 @@ MB::Sound.script(
     results = settings.map do |setting|
       # A new riff file for each setting, as long as the setting plays
       midi = File.join(tmpdir, "riff_#{index += 1}.mid")
-      write_riff(midi, p.seconds + 2)
+      write_riff(midi, p.seconds + p.warmup + 1)
 
-      r = measure(load, setting, seconds: p.seconds, midi: midi, oversample: p.oversample, rate: p.rate, device: p.device, backends: backends)
+      r = measure(load, setting, seconds: p.seconds, warmup: p.warmup, midi: midi, oversample: p.oversample, rate: p.rate, device: p.device, backends: backends)
 
       puts format('%-12s write %4d  period %4d  queue %5d (%5.1f ms)  latency %5.1f..%5.1f ms  ' \
                   'load mean %3d%% p99 %3d%% max %4d%%  spikes %2d (GC %d of %d)  peak %6.1f dB  underruns %d%s',

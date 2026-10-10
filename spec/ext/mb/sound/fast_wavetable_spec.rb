@@ -2,7 +2,11 @@ RSpec.describe(MB::Sound::FastWavetable, aggregate_failures: true) do
   # The C kernels must give exactly the same samples as their Ruby mirrors
   # (MB::Sound::Wavetable::KernelRuby).
   let(:w) { MB::Sound::Wavetable }
-  let(:n) { 300 }
+  # Samples per case; under Valgrind (SPEC_MEMCHECK) 100, with the sweeps
+  # below stretched (by 300.0 / n) to cover the same ranges of scan and
+  # phase, and sync pulses every 37 or 29 samples still in every case.
+  let(:n) { SPEC_MEMCHECK ? 100 : 300 }
+  let(:stretch) { 300.0 / n }
 
   let(:cycle_tables) {
     {
@@ -56,7 +60,7 @@ RSpec.describe(MB::Sound::FastWavetable, aggregate_failures: true) do
       edges = Numo::SFloat.cast(Array.new(n) { |i| [0, 1, 1.5, 2, -0.5, -1, 4.0 / 3, 1.25, Float::NAN, 1e30, -1e30, -1e-30][i % 12] })
       cases = [
         [440.0, 0, nil, rand_input(-3.5, 3.5)],
-        [rand_input(20, 12000), rand_input(-3, 3), rand_input(0, 1), Numo::SFloat.new(n).seq * 0.02 - 3],
+        [rand_input(20, 12000), rand_input(-3, 3), rand_input(0, 1), Numo::SFloat.new(n).seq * 0.02 * stretch - 3],
         [220.0, 0, nil, edges],
         [rand_input(20, 20000), 0.5, 0.3, -1.7],
       ]
@@ -218,7 +222,7 @@ RSpec.describe(MB::Sound::FastWavetable, aggregate_failures: true) do
       phase = rand_input(-1.5, 2.5)
       incs = rand_input(-0.2, 0.2)
       scan = rand_input(-0.2, 1.2)
-      slow = Numo::SFloat.new(n).seq * 0.003 - 0.7
+      slow = Numo::SFloat.new(n).seq * 0.003 * stretch - 0.7
 
       cycle_tables.each do |name, t|
         w::INTERPOLATIONS.each_key do |interp|

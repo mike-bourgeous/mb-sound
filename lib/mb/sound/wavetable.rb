@@ -257,9 +257,9 @@ module MB
         def from_file(path, mode: nil, slices: 10, ratio: 1.0, root: nil, loop: nil, **options)
           path = path.path if path.respond_to?(:path)
 
-          info = {}
-          channels = MB::Sound.read(path.to_s, metadata_out: info)
-          info = table_metadata(info)
+          tags = {}
+          channels = MB::Sound.read(path.to_s, metadata_out: tags)
+          info = table_metadata(tags)
           mode ||= info[:mode]&.to_sym || :cycle
           options[:name] ||= info[:name] || File.basename(path.to_s)
           if !options.include?(:mips) && saved_spacing_explicit?(info)
@@ -275,7 +275,7 @@ module MB
           case mode
           when :cycle
             source = {}
-            frames = load_frames(path.to_s, slices: slices, ratio: ratio, metadata_out: source)
+            frames = frames_from_channels(channels, tags, slices: slices, ratio: ratio, metadata_out: source)
             if source[:aligned].to_s == 'true' && !options.include?(:align)
               options[:align] = false
               options[:aligned] = true

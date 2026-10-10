@@ -3,19 +3,31 @@
 # the unfused graph, bit for bit, over block sizes from 1 to 800, on MIDI
 # files with dense notes and controllers.
 RSpec.describe('Plan: Notes nodes and envelopes') do
-  # A pass over SIZES is about 0.13 s; four cover the files' first notes,
-  # chords, retriggers, and releases.
-  let(:sizes) { PlanSpecHelpers::SIZES * 4 }
+  # A pass over the full block-size sweep (FULL_SIZES, 5166 samples) is about
+  # 0.13 s; four cover the files' first notes, chords, retriggers, and
+  # releases, so the default suite's SIZES repeat over as many samples.
+  # Under Valgrind (SPEC_MEMCHECK) one pass's worth runs the same event,
+  # envelope, and smoothing ops on the files' first notes and chords (42
+  # blocks, for the examples that change settings before block 40).
+  let(:sizes) {
+    if SPEC_MEMCHECK
+      PlanSpecHelpers.sizes_for(samples: PlanSpecHelpers::FULL_SIZES.sum, blocks: 42)
+    else
+      PlanSpecHelpers.sizes_for(samples: 4 * PlanSpecHelpers::FULL_SIZES.sum)
+    end
+  }
 
   let(:dense) { 'spec/test_data/dense_modulated.mid' }
 
   # Compares samples (C bit-exact; tones' Ruby kernels in the mirror differ
   # from C by rounding), then runs the C plans again in check mode, which
   # also compares every node's state after each block (e.g. a glide's
-  # position).
+  # position).  Under Valgrind (SPEC_MEMCHECK) the check-mode pass is left
+  # out: it runs the same C ops again (its snapshots and comparisons are
+  # Ruby).
   def compare(file = dense, sizes: self.sizes, **kw, &block)
     r = plan_compare(sizes: sizes, ruby_tolerance: 1e-6, **kw) { |c| block.call(MB::Sound::Notes.new(file), c) }
-    plan_compare(sizes: sizes, engines: [:c], check: :raise, fallbacks: true) { |c| block.call(MB::Sound::Notes.new(file), c) }
+    plan_compare(sizes: sizes, engines: [:c], check: :raise, fallbacks: true) { |c| block.call(MB::Sound::Notes.new(file), c) } unless SPEC_MEMCHECK
     r
   end
 
@@ -184,8 +196,12 @@ RSpec.describe('Plan: Notes nodes and envelopes') do
   end
 
   describe 'the end of a stream' do
+    # c_major.mid's music ends 0.206 s (9888 samples) after the seek; the
+    # comparison must run past it (the one-pass SPEC_MEMCHECK sizes, ~9000
+    # samples at 42 blocks, did not always).
     it 'runs blocks unfused once the stream is over, with the same samples' do
-      r = compare('spec/test_data/c_major.mid', fallbacks: true) { |v, c|
+      long = sizes.sum >= 12000 ? sizes : PlanSpecHelpers.sizes_for(samples: 12000, blocks: sizes.length)
+      r = compare('spec/test_data/c_major.mid', sizes: long, fallbacks: true) { |v, c|
         c.before_block(0) { v.stream.seek(5.6) }
         v.hz.sine * v.amp_env(0.01, 0.1, 0.5, 0.1) + v.gate
       }

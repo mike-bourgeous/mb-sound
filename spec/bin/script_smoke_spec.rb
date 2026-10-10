@@ -141,12 +141,28 @@ RSpec.describe('script runner scripts', :smoke) do
   # Every general script (MB::Sound.script) prints its header and options
   general = Dir['bin/**/*.rb'].select { |f| File.read(f).match?(/MB::Sound\.script\b/) }.sort
 
+  # True if the script's own spec (spec/bin/.../NAME_spec.rb) runs it as a
+  # real process (backticks, IO.popen, or run_script(real: true)), so the
+  # smoke --help may fork without losing a real-process run.
+  real_run_elsewhere = ->(script) {
+    rel = script.delete_prefix('bin/').delete_suffix('.rb')
+    spec = "spec/bin/#{rel}_spec.rb"
+    File.exist?(spec) && File.read(spec).match?(/`[^`]*#{Regexp.escape(script)}|IO\.popen|real: true/)
+  }
+
   general.each do |script|
     describe script do
       it 'prints its header and options with --help' do
-        # A real process run: this is the only run of general scripts here
-        text = `#{script.shellescape} --help 2>&1`
-        expect($?).to be_success, text
+        if real_run_elsewhere.(script)
+          # Forked (see ForkScript); the script's own spec runs it as a
+          # real process
+          text, status = fork_script(script, '--help')
+          expect(status).to be_success, text
+        else
+          # A real process run: this is the only run of the script in specs
+          text = `#{script.shellescape} --help 2>&1`
+          expect($?).to be_success, text
+        end
         header = File.readlines(script)[1].delete_prefix('#').strip
         expect(text).to include(header, "Options for #{File.basename(script)}", '--help')
       end

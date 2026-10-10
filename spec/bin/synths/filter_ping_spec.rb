@@ -24,7 +24,12 @@ RSpec.describe('bin/synths/filter_ping.rb') do
   end
 
   context 'with flags for files' do
-    let (:output) { `bin/synths/filter_ping.rb -i #{midi_file.shellescape} --output #{audio_file.shellescape}` }
+    # In a fork (see ForkScript); the context above is the real run
+    let (:output) {
+      text, status = fork_script('bin/synths/filter_ping.rb', '-i', midi_file, '--output', audio_file)
+      expect(status).to be_success, text
+      text
+    }
     it_behaves_like :synthesizers
   end
 end

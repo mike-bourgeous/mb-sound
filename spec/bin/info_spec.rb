@@ -1,7 +1,9 @@
 RSpec.describe('bin/info.rb') do
   it 'can print help' do
-    expect(MB::U.remove_ansi(`bin/info.rb --help`)).to include('bin/info.rb filename')
-    expect($?).to be_success
+    # In a fork (see ForkScript); the next example is the real run
+    text, status = fork_script('bin/info.rb', '--help')
+    expect(MB::U.remove_ansi(text)).to include('bin/info.rb filename')
+    expect(status).to be_success
   end
 
   it 'can parse a FLAC file' do

@@ -24,12 +24,19 @@ module MB
         # (see .save_frames, without the tag prefix) or the slicing details
         # (see .slice_frames).
         def load_frames(filename, slices: 10, ratio: 1.0, metadata_out: nil)
+          metadata = {}
+          channels = MB::Sound.read(filename, metadata_out: metadata)
+          frames_from_channels(channels, metadata, slices: slices, ratio: ratio, metadata_out: metadata_out)
+        end
+
+        # The table frames in +channels+ read from a file with +metadata+
+        # (its tags, as MB::Sound.read's +:metadata_out+ gives them), as
+        # .load_frames returns them (for callers that already read the file).
+        def frames_from_channels(channels, metadata, slices: 10, ratio: 1.0, metadata_out: nil)
           # Using weighted mixing for now; TODO: find a safe way to combine
           # channels with minimal cancellation of reverb or introduction of high
           # frequency oscillation when normalizing
-          metadata = {}
-          data = MB::Sound.read(filename, metadata_out: metadata)
-          data = data.map.with_index { |c, idx| c / (idx + 1) }.sum
+          data = channels.map.with_index { |c, idx| c / (idx + 1) }.sum
 
           period = metadata[:mb_sound_wavetable_period]&.to_i
           raise 'Wavetable period must be greater than 1' if period.is_a?(Integer) && period <= 1
