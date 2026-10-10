@@ -249,9 +249,9 @@ module MB
           raise ArgumentError, "#{output} exists"
         end
 
-        input = FFMPEGInput.new(path)
-        rate = input.sample_rate
-        input.close
+        # ffprobe only (an FFMPEGInput would also start ffmpeg, and closing
+        # it right away waits for ffmpeg's startup)
+        rate = FFMPEGInput.parse_info(path).dig(:streams, 0, :sample_rate)
         factor = 10.0 ** (gain / 20.0)
         data = MB::Sound.read(path, sample_rate: nil).map { |c| c * factor }
 

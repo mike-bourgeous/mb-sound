@@ -1,14 +1,16 @@
 require 'shellwords'
 
 RSpec.describe('bin/plot_envelope.rb') do
-  def run(*args)
-    text = `bin/plot_envelope.rb #{args.shelljoin} 2>&1`
-    expect($?).to be_success, text
+  # Runs the script in a fork (see ForkScript), or as a real process with
+  # +real+ (the first example).
+  def run(*args, real: false)
+    text, status = run_script('bin/plot_envelope.rb', *args, real: real)
+    expect(status).to be_success, text
     text
   end
 
   it 'prints the stages of a one-shot at exact samples' do
-    text = run('--print', '0.01', '0.02', '0.5', '0.03')
+    text = run('--print', '0.01', '0.02', '0.5', '0.03', real: true)
     expect(text).to include('adsr(0.01, 0.02, 0.5, 0.03) curve analog')
     expect(text).to match(/^0 +0\.00000 +0\.000000  attack$/)
     expect(text).to match(/^480 +0\.01000 +1\.000000  decay$/)

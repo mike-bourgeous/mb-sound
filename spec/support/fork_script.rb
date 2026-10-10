@@ -51,6 +51,17 @@ module ForkScript
 
     [output, $?]
   end
+
+  # Runs +script+ with +args+ in a fork (see #fork_script), or as a real
+  # process with +real+ (stdout and stderr combined, stdin from /dev/null),
+  # returning the output text and the Process::Status.  Lets a spec switch
+  # one run to a real process without a second helper.
+  def run_script(script, *args, env: {}, real: false)
+    return fork_script(script, *args, env: env) unless real
+
+    output = IO.popen(env, [script, *args.map(&:to_s)], err: [:child, :out], in: File::NULL, &:read)
+    [output, $?]
+  end
 end
 
 module SubprocessCoverage

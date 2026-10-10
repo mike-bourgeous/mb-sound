@@ -15,7 +15,8 @@ RSpec.describe('bin/loudness.rb') do
     MB::U.remove_ansi(text)
   end
 
-  # A stereo 1 kHz sine at +db+ dBFS (reads +db+ LUFS).
+  # A stereo 1 kHz sine at +db+ dBFS (reads +db+ LUFS).  Tables check
+  # short-term and LRA values, which need the default 4 s.
   def tone(name, db, seconds: 4)
     path = tmp_path(name)
     data = 1000.hz.at(db.db).sample((seconds * 48000).round)
@@ -60,7 +61,7 @@ RSpec.describe('bin/loudness.rb') do
   end
 
   it 'writes normalized copies, keeping existing files unless forced' do
-    a = tone('a.flac', -20)
+    a = tone('a.flac', -20, seconds: 1)
     text = run('-n', '-14', a)
     out = File.join(File.dirname(a), 'a_-14lufs.flac')
     expect(text).to include("#{out}: +6.0 dB -> -14.0 LUFS, true peak -14.0 dBTP")
@@ -75,7 +76,7 @@ RSpec.describe('bin/loudness.rb') do
   end
 
   it 'warns when a normalized copy peaks above -1 dBTP' do
-    a = tone('a.flac', -6)
+    a = tone('a.flac', -6, seconds: 1)
     text = run('-n', '1', '-o', tmp_path('loud.flac'), a)
     expect(text).to include("is above 1 LUFS's -1.0 dBTP (clips in integer formats)")
 
@@ -84,7 +85,7 @@ RSpec.describe('bin/loudness.rb') do
   end
 
   it 'normalizes to named targets' do
-    a = tone('a.flac', -20)
+    a = tone('a.flac', -20, seconds: 1)
     text = run('-n', 'ebu', a)
     out = File.join(File.dirname(a), 'a_ebu_r128.flac')
     expect(text).to include("#{out}: -3.0 dB -> -23.0 LUFS")

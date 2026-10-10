@@ -1,9 +1,16 @@
 require 'shellwords'
 
 RSpec.describe('bin/ab_listen.rb') do
-  def run(*args)
-    text = `OUTPUT_TYPE=null bin/ab_listen.rb #{args.shelljoin} 2>&1 < /dev/null`
-    expect($?).to be_success, text
+  # Runs the script in a fork (see ForkScript), or as a real process with
+  # +real+ (the --auto README example, so load-order problems still show).
+  def run(*args, real: false)
+    if real
+      text = `OUTPUT_TYPE=null bin/ab_listen.rb #{args.shelljoin} 2>&1 < /dev/null`
+      status = $?
+    else
+      text, status = fork_script('bin/ab_listen.rb', *args, env: { 'OUTPUT_TYPE' => 'null' })
+    end
+    expect(status).to be_success, text
     text
   end
 
@@ -55,8 +62,8 @@ RSpec.describe('bin/ab_listen.rb') do
   end
 
   it 'asks for a folder when run without arguments' do
-    text = `OUTPUT_TYPE=null bin/ab_listen.rb 2>&1 < /dev/null`
-    expect($?).not_to be_success
+    text, status = fork_script('bin/ab_listen.rb', env: { 'OUTPUT_TYPE' => 'null' })
+    expect(status).not_to be_success
     expect(text).to include('pass a folder of before/after renders')
   end
 
@@ -71,7 +78,7 @@ RSpec.describe('bin/ab_listen.rb') do
     tone('one_after.flac', 0.25, seconds: 0.2)
     File.write(File.join(dir, 'README.md'), "# Set\n\n- **one:** quieter after\n- other: unrelated\n")
 
-    text = run('--auto', '0.1', dir)
+    text = run('--auto', '0.1', dir, real: true)
     expect(text).to include('[1/1] one', 'peak -6.0 dB', '(-6.0 dB rms)', 'quieter after')
     expect(text).not_to include('unrelated')
     expect(text).to match(/A \(before\) +0\.00 \/ 0\.30 s/)

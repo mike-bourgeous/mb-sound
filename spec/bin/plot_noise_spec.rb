@@ -1,9 +1,16 @@
 require 'shellwords'
 
 RSpec.describe('bin/plot_noise.rb') do
-  def run(*args, env: {})
-    text = IO.popen(env, "bin/plot_noise.rb #{args.shelljoin} 2>&1", &:read)
-    expect($?).to be_success, text
+  # Runs the script in a fork (see ForkScript), or as a real process with
+  # +real+ (the terminal plot example, so load-order problems still show).
+  def run(*args, env: {}, real: false)
+    if real
+      text = IO.popen(env, "bin/plot_noise.rb #{args.shelljoin} 2>&1", &:read)
+      status = $?
+    else
+      text, status = fork_script('bin/plot_noise.rb', *args, env: env)
+    end
+    expect(status).to be_success, text
     MB::U.remove_ansi(text)
   end
 
@@ -66,14 +73,14 @@ RSpec.describe('bin/plot_noise.rb') do
   end
 
   it 'plots densities with the theory in the terminal' do
-    text = run('--only', 'sine,uniform', '-n', '20000', '-b', '40', env: { 'PLOT_WIDTH' => '80', 'PLOT_HEIGHT' => '20' })
+    text = run('--only', 'sine,uniform', '-n', '20000', '-b', '40', env: { 'PLOT_WIDTH' => '80', 'PLOT_HEIGHT' => '20' }, real: true)
     expect(text).to include('sine: 1.hz.sine.noise', 'uniform: 1.hz.ramp.noise', 'estimate', 'arcsine')
     expect(text.lines.count { |l| l.match?(/\+-{20,}\+/) }).to eq(4) # two plots, each with two borders
   end
 
   it 'rejects unknown shapes' do
-    text = IO.popen('bin/plot_noise.rb --only bogus 2>&1', &:read)
-    expect($?).not_to be_success
+    text, status = fork_script('bin/plot_noise.rb', '--only', 'bogus')
+    expect(status).not_to be_success
     expect(text).to include('Unknown shape bogus')
   end
 end

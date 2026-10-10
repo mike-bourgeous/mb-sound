@@ -6,8 +6,9 @@ RSpec.describe('bin/freq_estimate.rb') do
   end
 
   it 'prints the expected value of a single piano note' do
-    text = `bin/freq_estimate.rb sounds/piano_120hz_b2.flac`
-    expect($?).to be_success
+    # In a fork (see ForkScript); the example above is the real run
+    text, status = fork_script('bin/freq_estimate.rb', 'sounds/piano_120hz_b2.flac')
+    expect(status).to be_success, text
     expect(text.strip).to eq('120Hz')
   end
 end

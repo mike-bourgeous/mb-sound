@@ -16,7 +16,9 @@ RSpec.describe('bin/make_wavetable.rb', aggregate_failures: true) do
   end
 
   it 'can change the table size' do
-    text = `bin/make_wavetable.rb --quiet sounds/piano_120hz_b2.flac #{name.shellescape} --size=30 2>&1`
+    # In a fork (see ForkScript); the example above is the real run
+    text, status = fork_script('bin/make_wavetable.rb', '--quiet', 'sounds/piano_120hz_b2.flac', name, '--size=30')
+    expect(status).to be_success, text
     expect(MB::U.remove_ansi(text)).to match(/120.*|.*B2/)
 
     info = MB::Sound::FFMPEGInput.parse_info(name)

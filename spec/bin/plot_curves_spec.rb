@@ -1,14 +1,16 @@
 require 'shellwords'
 
 RSpec.describe('bin/plot_curves.rb') do
-  def run(*args)
-    text = `bin/plot_curves.rb #{args.shelljoin} 2>&1`
-    expect($?).to be_success, text
+  # Runs the script in a fork (see ForkScript), or as a real process with
+  # +real+ (the first table).
+  def run(*args, real: false)
+    text, status = run_script('bin/plot_curves.rb', *args, real: real)
+    expect(status).to be_success, text
     text
   end
 
   it 'prints curve tables with options and edge modes' do
-    text = run('--print', '--cycles', '4', 'steps', 'bounce', '30')
+    text = run('--print', '--cycles', '4', 'steps', 'bounce', '30', real: true)
     expect(text).to match(/^steps\(4\) +0\.000 +0\.250 +0\.250 +0\.500/)
     expect(text).to match(/^bounce\(0\.25, 4\) +0\.000 /)
     expect(text).to match(/^db\(30\.0\) +0\.000 /)

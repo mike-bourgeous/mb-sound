@@ -3,6 +3,13 @@ RSpec.describe('bin/matrix_process.rb') do
   let(:qs_out) { tmp_path('matrix_process_qs.flac') }
   let(:qs_enc_out) { tmp_path('matrix_process_qs_enc.flac') }
 
+  # Runs the script in a fork (see ForkScript), returning its output; the
+  # first example is the real-process run.
+  def run(*args)
+    text, @status = fork_script('bin/matrix_process.rb', *args)
+    text
+  end
+
   it 'can convert a 2ch file to a 4ch file' do
     text = `bin/matrix_process.rb spec/test_data/arp_a7.flac matrices/hafler.yml #{test_out.shellescape}`
     expect($?).to be_success
@@ -16,8 +23,8 @@ RSpec.describe('bin/matrix_process.rb') do
   end
 
   it 'can decode and re-encode using an included complex-valued matrix' do
-    text = `bin/matrix_process.rb --decode spec/test_data/arp_a7.flac qs.yml #{qs_out.shellescape}`
-    expect($?).to be_success
+    text = run('--decode', 'spec/test_data/arp_a7.flac', 'qs.yml', qs_out)
+    expect(@status).to be_success
     expect(text).to include('included matrix')
     expect(text).to include('Success')
 
@@ -27,8 +34,8 @@ RSpec.describe('bin/matrix_process.rb') do
     expect(out_info[:streams][0][:channels]).to eq(4)
     expect(out_info[:streams][0][:duration_ts]).to eq(in_info[:streams][0][:duration_ts])
 
-    text = `bin/matrix_process.rb #{qs_out.shellescape} qs.yml #{qs_enc_out.shellescape}`
-    expect($?).to be_success
+    text = run(qs_out, 'qs.yml', qs_enc_out)
+    expect(@status).to be_success
     expect(text).to include('included matrix')
     expect(text).to include('Success')
 
@@ -39,8 +46,8 @@ RSpec.describe('bin/matrix_process.rb') do
   end
 
   it 'lists included matrices when given the --list flag' do
-    text = `bin/matrix_process.rb --list 2>&1`
-    expect($?).to be_success
+    text = run('--list')
+    expect(@status).to be_success
     expect(text).to include('Built-in matrices')
     expect(text).to include('hafler.yml')
     expect(text).to include('qs.yml')
@@ -50,8 +57,8 @@ RSpec.describe('bin/matrix_process.rb') do
   end
 
   it 'shows matrix details when given the --show flag' do
-    text = MB::U.remove_ansi(`bin/matrix_process.rb --show qs.yml`)
-    expect($?).to be_success
+    text = MB::U.remove_ansi(run('--show', 'qs.yml'))
+    expect(@status).to be_success
     lines = text.lines
     expect(lines).not_to include(match(/Transposing.*decoding/))
     expect(lines).to include(match(/QS Regular Matrix/))
@@ -61,8 +68,8 @@ RSpec.describe('bin/matrix_process.rb') do
   end
 
   it 'can show a transposed matrix with the --show and --decode flags' do
-    text = MB::U.remove_ansi(`bin/matrix_process.rb --show --decode qs.yml`)
-    expect($?).to be_success
+    text = MB::U.remove_ansi(run('--show', '--decode', 'qs.yml'))
+    expect(@status).to be_success
     lines = text.lines
     expect(lines).to include(match(/Transposing.*decoding/))
     expect(lines).to include(match(/QS Regular Matrix/))
