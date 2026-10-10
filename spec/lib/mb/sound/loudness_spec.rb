@@ -5,6 +5,12 @@
 # (loudness range), not read from the EBU's test files: stereo sines at the
 # given dBFS (peak) levels, with the phase continuing across level changes.
 RSpec.describe(MB::Sound::Loudness, :aggregate_failures) do
+  # Under Valgrind (SPEC_MEMCHECK) the conformance and gating cases with 40
+  # to 100 s of audio are left out: they run the same K-weighting and true
+  # peak kernels as cases 1, 2, and 9, the bursts, the 44.1 kHz segment
+  # checks, and the true-peak examples, which still run there.
+  LONG_INPUT = 'long input; its C paths (true peak, K-weighting) run in the shorter cases' unless defined?(LONG_INPUT)
+
   # Sine segments [[dBFS, seconds], ...] on every channel at +freq+ Hz.
   def segments(list, freq: 1000, rate: 48000)
     total = list.sum { |_, s| (s * rate).round }
@@ -78,22 +84,22 @@ RSpec.describe(MB::Sound::Loudness, :aggregate_failures) do
       expect(r.integrated).to be_within(0.01).of(-23)
     end
 
-    it 'case 3: -36/-23/-36 dBFS (10/60/10 s) reads -23.0 (relative gate)' do
+    it 'case 3: -36/-23/-36 dBFS (10/60/10 s) reads -23.0 (relative gate)', memcheck_skip: LONG_INPUT do
       r = MB::Sound.loudness(stereo([[-36, 10], [-23, 60], [-36, 10]]))
       expect(r.integrated).to be_within(0.1).of(-23)
     end
 
-    it 'case 4: -72/-36/-23/-36/-72 dBFS (10/10/60/10/10 s) reads -23.0 (both gates)' do
+    it 'case 4: -72/-36/-23/-36/-72 dBFS (10/10/60/10/10 s) reads -23.0 (both gates)', memcheck_skip: LONG_INPUT do
       r = MB::Sound.loudness(stereo([[-72, 10], [-36, 10], [-23, 60], [-36, 10], [-72, 10]]))
       expect(r.integrated).to be_within(0.1).of(-23)
     end
 
-    it 'case 5: -26/-20/-26 dBFS (20/20.1/20 s) reads -23.0' do
+    it 'case 5: -26/-20/-26 dBFS (20/20.1/20 s) reads -23.0', memcheck_skip: LONG_INPUT do
       r = MB::Sound.loudness(stereo([[-26, 20], [-20, 20.1], [-26, 20]]))
       expect(r.integrated).to be_within(0.1).of(-23)
     end
 
-    it 'case 6: 5.0 channels at -28/-28/-24/-30/-30 dBFS read -23.0 (surround weights)' do
+    it 'case 6: 5.0 channels at -28/-28/-24/-30/-30 dBFS read -23.0 (surround weights)', memcheck_skip: LONG_INPUT do
       data = [-28, -28, -24, -30, -30].map { |db| segments([[db, 20]]) }
       r = MB::Sound.loudness(data)
       expect(r.integrated).to be_within(0.1).of(-23)
@@ -120,7 +126,7 @@ RSpec.describe(MB::Sound::Loudness, :aggregate_failures) do
       end
     end
 
-    it 'measures 44.1 kHz audio the same way' do
+    it 'measures 44.1 kHz audio the same way', memcheck_skip: LONG_INPUT do
       r = MB::Sound.loudness(stereo([[-23, 20]], rate: 44100), sample_rate: 44100)
       expect(r.integrated).to be_within(0.1).of(-23)
       expect(r.sample_rate).to eq(44100)
@@ -134,7 +140,7 @@ RSpec.describe(MB::Sound::Loudness, :aggregate_failures) do
       3 => [[[-40, 20], [-20, 20]], 20],
       4 => [[[-50, 20], [-35, 20], [-20, 20], [-35, 20], [-50, 20]], 15],
     }.each do |number, (list, expected)|
-      it "case #{number}: #{list.map(&:first).join('/')} dBFS gives #{expected} LU" do
+      it "case #{number}: #{list.map(&:first).join('/')} dBFS gives #{expected} LU", memcheck_skip: LONG_INPUT do
         r = MB::Sound.loudness(stereo(list), true_peak: false)
         expect(r.range).to be_within(1).of(expected)
         expect(r.lra).to be_within(0.1).of(expected)
@@ -238,7 +244,7 @@ RSpec.describe(MB::Sound::Loudness, :aggregate_failures) do
   describe 'gating' do
     # The three blocks straddling the level change pass both gates, so the
     # result is about 0.06 LU under -23.
-    it 'ignores blocks below the -70 LUFS absolute gate' do
+    it 'ignores blocks below the -70 LUFS absolute gate', memcheck_skip: LONG_INPUT do
       r = MB::Sound.loudness(stereo([[-23, 10], [-75, 60]]), true_peak: false)
       expect(r.integrated).to be_within(0.1).of(-23)
 
@@ -248,13 +254,13 @@ RSpec.describe(MB::Sound::Loudness, :aggregate_failures) do
       expect(r.integrated).to eq(-Float::INFINITY)
     end
 
-    it 'ignores blocks more than 10 LU below the absolutely gated loudness' do
+    it 'ignores blocks more than 10 LU below the absolutely gated loudness', memcheck_skip: LONG_INPUT do
       r = MB::Sound.loudness(stereo([[-23, 20], [-40, 20]]), true_peak: false)
       expect(r.integrated).to be_within(0.05).of(-23)
       expect(r.relative_threshold).to be_within(0.5).of(-23 - 3 - 10)
     end
 
-    it 'averages energy (not loudness) of blocks within the gates' do
+    it 'averages energy (not loudness) of blocks within the gates', memcheck_skip: LONG_INPUT do
       r = MB::Sound.loudness(stereo([[-20, 20], [-26, 20]]), true_peak: false)
       expected = 10 * Math.log10((10 ** -2.0 + 10 ** -2.6) / 2)
       expect(r.integrated).to be_within(0.05).of(expected)

@@ -115,7 +115,10 @@ RSpec.describe(MB::Sound::Plan::Loop) do
   BODIES.each do |name, body|
     describe name do
       let(:build) { -> { body.call(self) } }
-      let(:total) { 12000 }
+      # Under Valgrind (SPEC_MEMCHECK) 4000 samples (the longest loop delay
+      # is 733 samples) run the same ops; most of the time is the Ruby mirror.
+      let(:total) { SPEC_MEMCHECK ? 4000 : 12000 }
+      let(:short) { SPEC_MEMCHECK ? 1500 : 3000 }
 
       it 'runs in C exactly as its Ruby mirror, at any block sizes' do
         c = render(build, PlanSpecHelpers::SIZES, total)
@@ -129,15 +132,15 @@ RSpec.describe(MB::Sound::Plan::Loop) do
       it 'gives the same samples at every block size' do
         a = render(build, [800], total)
         b = render(build, PlanSpecHelpers::SIZES, total)
-        c = render(build, [1, 2, 3], 3000)
+        c = render(build, [1, 2, 3], short)
         expect(b).to eq(a)
-        expect(c).to eq(a.first(3000))
+        expect(c).to eq(a.first(short))
       end
 
       it 'passes check mode' do
         old = MB::Sound::Plan.check
         MB::Sound::Plan.check = :raise
-        expect { render(build, PlanSpecHelpers::SIZES, 4000) }.not_to raise_error
+        expect { render(build, PlanSpecHelpers::SIZES, SPEC_MEMCHECK ? 2000 : 4000) }.not_to raise_error
       ensure
         MB::Sound::Plan.check = old
       end

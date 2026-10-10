@@ -219,9 +219,13 @@ begin
   run_memcheck = lambda do |specs, full:|
     config = memcheck_config.call
     task_name = :"memcheck_rspec_#{Process.clock_gettime(Process::CLOCK_MONOTONIC, :nanosecond)}"
+    # Specs shrink their inputs and skip memcheck_skip examples under
+    # Valgrind (SPEC_MEMCHECK in spec/spec_helper.rb); per-example times go to
+    # tmp/memcheck_times.json (for finding what to trim next).
+    ENV['MB_SOUND_MEMCHECK'] = '1'
     RubyMemcheck::RSpec::RakeTask.new(config, task_name) do |t|
       t.pattern = specs
-      t.rspec_opts = ['--format', 'progress']
+      t.rspec_opts = ['--format', 'progress', '--format', 'json', '--out', 'tmp/memcheck_times.json']
       t.rspec_opts += ['--require', './spec/valgrind/gc_stress_calls.rb'] if ENV['MEMCHECK_GC_STRESS'] == '1'
     end
     started = Process.clock_gettime(Process::CLOCK_MONOTONIC)

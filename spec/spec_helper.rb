@@ -21,6 +21,12 @@ require 'mb/util'
 require 'mb/m/rspec_matchers'
 require 'mb/sound'
 
+# True when the specs run under Valgrind (rake memcheck sets
+# MB_SOUND_MEMCHECK=1): specs may use smaller inputs there, and examples
+# tagged memcheck_skip: 'reason' (the reason naming what else runs their C
+# paths under Valgrind) are left out.
+SPEC_MEMCHECK = ENV['MB_SOUND_MEMCHECK'] == '1'
+
 require_relative 'support/spec_tmp'
 require_relative 'support/subprocess_coverage' if SPEC_COVERAGE # after spec_tmp
 require_relative 'support/fork_script' # after subprocess_coverage
@@ -67,6 +73,10 @@ RSpec.configure do |config|
   # script and take several minutes, so plain `rspec` skips them; run them
   # with `bundle exec rspec --tag smoke` (CI runs them as a separate job).
   config.filter_run_excluding smoke: true
+
+  # Under Valgrind, leave out examples whose C paths other examples cover
+  # (see SPEC_MEMCHECK).
+  config.filter_run_excluding memcheck_skip: ->(reason) { SPEC_MEMCHECK && reason } if SPEC_MEMCHECK
 
   # Each example gets new outputs from MB::Sound.output.  A cached
   # NullOutput paces writes to real time, so an example that stubs sleep

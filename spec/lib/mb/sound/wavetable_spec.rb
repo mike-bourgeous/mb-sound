@@ -446,7 +446,10 @@ RSpec.describe(MB::Sound::Wavetable, aggregate_failures: true) do
     end
   end
 
-  describe '#save' do
+  # Under Valgrind (SPEC_MEMCHECK) the file round trips are left out: their
+  # time is ffmpeg (not traced) and Ruby; building, mipmapping, and playing
+  # the tables runs the same extension calls as the examples above.
+  describe '#save', memcheck_skip: 'file round trips; table building runs in the other examples' do
     it 'saves frames that load again' do
       name = tmp_path('saved_table.flac')
       t = w.from_harmonics([[1], [0.5, 0.5]], size: 64)

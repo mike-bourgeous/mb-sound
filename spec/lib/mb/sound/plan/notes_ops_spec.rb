@@ -6,17 +6,28 @@ RSpec.describe('Plan: Notes nodes and envelopes') do
   # A pass over the full block-size sweep (FULL_SIZES, 5166 samples) is about
   # 0.13 s; four cover the files' first notes, chords, retriggers, and
   # releases, so the default suite's SIZES repeat over as many samples.
-  let(:sizes) { PlanSpecHelpers.sizes_for(samples: 4 * PlanSpecHelpers::FULL_SIZES.sum) }
+  # Under Valgrind (SPEC_MEMCHECK) one pass's worth runs the same event,
+  # envelope, and smoothing ops on the files' first notes and chords (42
+  # blocks, for the examples that change settings before block 40).
+  let(:sizes) {
+    if SPEC_MEMCHECK
+      PlanSpecHelpers.sizes_for(samples: PlanSpecHelpers::FULL_SIZES.sum, blocks: 42)
+    else
+      PlanSpecHelpers.sizes_for(samples: 4 * PlanSpecHelpers::FULL_SIZES.sum)
+    end
+  }
 
   let(:dense) { 'spec/test_data/dense_modulated.mid' }
 
   # Compares samples (C bit-exact; tones' Ruby kernels in the mirror differ
   # from C by rounding), then runs the C plans again in check mode, which
   # also compares every node's state after each block (e.g. a glide's
-  # position).
+  # position).  Under Valgrind (SPEC_MEMCHECK) the check-mode pass is left
+  # out: it runs the same C ops again (its snapshots and comparisons are
+  # Ruby).
   def compare(file = dense, sizes: self.sizes, **kw, &block)
     r = plan_compare(sizes: sizes, ruby_tolerance: 1e-6, **kw) { |c| block.call(MB::Sound::Notes.new(file), c) }
-    plan_compare(sizes: sizes, engines: [:c], check: :raise, fallbacks: true) { |c| block.call(MB::Sound::Notes.new(file), c) }
+    plan_compare(sizes: sizes, engines: [:c], check: :raise, fallbacks: true) { |c| block.call(MB::Sound::Notes.new(file), c) } unless SPEC_MEMCHECK
     r
   end
 

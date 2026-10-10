@@ -20,7 +20,11 @@
 require 'set'
 
 module GraphSweep
-  SIZES = { 1 => 40, 128 => 6, 800 => 3 }.freeze # buffer size => buffers
+  # buffer size => buffers; under Valgrind (SPEC_MEMCHECK) 20 one-sample
+  # buffers instead of 40 (each is a full graph call, the costliest part
+  # there; the 128- and 800-sample buffers, where the clips' events land,
+  # are unchanged)
+  SIZES = (SPEC_MEMCHECK ? { 1 => 20, 128 => 6, 800 => 3 } : { 1 => 40, 128 => 6, 800 => 3 }).freeze
 
   # Inputs shared by the factories (a new context per graph).
   class Context
