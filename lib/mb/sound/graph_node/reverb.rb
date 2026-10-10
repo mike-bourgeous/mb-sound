@@ -59,7 +59,7 @@ module MB
         # Feedback-stage modulation presets (see #initialize's
         # +:modulation:+).  Depths in seconds, rates in Hz, +:spread:+ the
         # per-line rate spread (rates 1 - spread to 1 + spread times
-        # +:rate:+).  From common practice (CLAUDE.md, Reverbs): ValhallaRoom
+        # +:rate:+).  From common practice (design/notes/reverbs.md): ValhallaRoom
         # ~0.5 Hz to smooth, >1 Hz to chorus; Dattorro's plate tank
         # ~0.17-0.27 ms at ~1 Hz; Lexicon "wander" is random.
         MODULATION = {

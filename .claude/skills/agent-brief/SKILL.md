@@ -7,7 +7,7 @@ description: Template for briefing a background agent on mb-sound work (feature 
 
 A background agent starts with no conversation context.  Its prompt must stand alone.  Include, in order:
 
-1. **Read first:** `/app/CLAUDE.md` (authoritative; it imports `.claude/collaboration.md`), plus any proposal, research branch, or note the work builds on (give exact paths, branches and commits).
+1. **Read first:** `/app/CLAUDE.md` (authoritative; it imports `.claude/collaboration.md`), the `design/notes/<topic>.md` files for the subsystems it touches, plus any proposal, research branch, or note the work builds on (give exact paths, branches and commits).
 2. **Where to work:** a new worktree `.claude/worktrees/<topic>` on a new branch `<topic>` off `master-ai` (give the current tip), then `bundle exec rake -f Rakefile compile` (`clean compile` if ext/ changed since the last build).  Name any other branch an agent is working on and the files to avoid.
 3. **The maintainer's decisions, verbatim or exactly paraphrased,** with dates.  Separate what is decided from what the agent may choose ("conservative choice, list it as a question").
 4. **Scope in order,** with the order to stop in if time runs out ("finish in order at clean, tested commit boundaries and say what's left").

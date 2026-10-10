@@ -38,7 +38,7 @@
 #     puts l.explain    # the loop program
 #     l.latency         # samples the delay absorbs (after the first block)
 #
-# CPU: see the Feedback loops section of CLAUDE.md for per-loop costs.
+# CPU: see design/notes/feedback_loops.md for per-loop costs.
 
 require 'bundler/setup'
 require 'mb-sound'
