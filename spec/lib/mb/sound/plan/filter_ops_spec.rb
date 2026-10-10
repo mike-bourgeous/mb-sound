@@ -125,16 +125,26 @@ RSpec.describe(MB::Sound::Plan, 'filter ops') do
       expect(op_names(r).count(:FourPole)).to eq(3)
     end
 
-    it 'follows a reset between blocks and keeps the last parameter values for an ending input' do
-      # Up to 2 blocks may run unfused around the input's end: spec-speed-2
-      # found that a reset of the region's counters hid 1-2 unfused blocks
-      # here, so the old 0 passed for the wrong reason.  A plan-layer
-      # follow-up (2026-10-10) investigates and should restore an exact count.
-      plan_compare(check: :raise, fallbacks: 2) { |c|
-        g = (src.new(seed: 11) * 1).lp4(src.new(seed: 12, scale: 500, offset: 1000, ends_at: 2000), resonance: 0.7)
-        c.before_block(6) { g.reset(0.2) }
-        g * 1
-      }
+    [nil, [100, 100, 100, 100, 600, 1000, 1, 7, 128, 800]].each do |sizes|
+      it "follows a reset between blocks and keeps the last parameter values for an ending input (#{sizes ? 'ending on a block edge' : 'default sizes'})" do
+        r = plan_compare(sizes: sizes, check: :raise, fallbacks: true) { |c|
+          g = (src.new(seed: 11) * 1).lp4(src.new(seed: 12, scale: 500, offset: 1000, ends_at: 2000), resonance: 0.7)
+          c.before_block(6) { g.reset(0.2) }
+          g * 1
+        }
+
+        # By design (see FourPole#plan_input_ended and #plan_pads_inputs?),
+        # the cutoff's end runs unfused: the block where it gives a short
+        # buffer (the node pads it with its last value), unless it ends on a
+        # block edge, and the block where it first gives nil (the node reads
+        # its last value; the plan is rebuilt with that value as a
+        # constant).  The counts survive the rebuild (Installation carries
+        # them over to the new region).
+        edges = r.sizes.each_with_object([0]) { |n, list| list << list.last + n }
+        expected = edges.include?(2000) ? 1 : 2
+        expect(r.unfused_blocks(:c)).to eq(expected)
+        expect(r.unfused_blocks(:ruby)).to eq(expected)
+      end
     end
   end
 end

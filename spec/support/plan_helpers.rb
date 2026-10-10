@@ -141,6 +141,13 @@ module PlanSpecHelpers
     def program(engine = :c)
       regions(engine).first&.program
     end
+
+    # Blocks that ran unfused in every region the installation had,
+    # including regions replaced by rebuilds (see
+    # Plan::Installation#unfused_blocks).
+    def unfused_blocks(engine = :c)
+      installations[engine].unfused_blocks
+    end
   end
 
   # Builds the graph with the block (called with a Copy, inside
@@ -234,6 +241,9 @@ module PlanSpecHelpers
         inst.regions.each do |r|
           expect(r.unfused_blocks).to be <= (fallbacks || 0), "#{e}: #{r.unfused_blocks} blocks ran unfused (#{r.disabled})\n#{r}"
         end
+        # Regions a rebuild replaced without a successor on the same root
+        dropped = inst.dropped_blocks[1]
+        expect(dropped).to be <= (fallbacks || 0), "#{e}: #{dropped} blocks ran unfused in regions a rebuild dropped"
       end
     end
 

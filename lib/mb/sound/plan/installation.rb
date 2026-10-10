@@ -46,6 +46,27 @@ module MB
           @stale = false
           @generation = 0
           @shared = nil
+          @retired = {}.compare_by_identity
+        end
+
+        # Blocks run planned and unfused by every region this installation
+        # has had (for stats and specs; see Region#planned_blocks): the
+        # current regions, whose counts include those of the regions they
+        # replaced, plus regions that went away in a rebuild without a
+        # successor (#dropped_blocks).
+        def planned_blocks
+          @regions.sum(&:planned_blocks) + @retired.each_value.sum { |c| c[0] }
+        end
+
+        def unfused_blocks
+          @regions.sum(&:unfused_blocks) + @retired.each_value.sum { |c| c[1] }
+        end
+
+        # The [planned, unfused] block counts of regions that went away in a
+        # rebuild without a new region on the same root (or of every region
+        # while uninstalled).
+        def dropped_blocks
+          [0, 1].map { |k| @retired.each_value.sum { |c| c[k] } }
         end
 
         # True after a structural change; the next block rebuilds.
@@ -70,6 +91,10 @@ module MB
           @generation += 1
           traverse
           assign
+          @regions.each do |r|
+            planned, unfused = @retired.delete(r.root)
+            r.carry_counts(planned, unfused) if planned
+          end
           @regions.each(&:install) unless @dry_run
           watch unless @dry_run
           self
@@ -126,6 +151,13 @@ module MB
         # Removes every hook; the graph runs unfused from the next block.
         def uninstall
           @regions.each(&:uninstall)
+          # Counts carry over to the regions on the same roots after a
+          # rebuild (see #build)
+          @regions.each do |r|
+            c = (@retired[r.root] ||= [0, 0])
+            c[0] += r.planned_blocks
+            c[1] += r.unfused_blocks
+          end
           @regions = []
           @watched.each do |obj|
             list = Plan.watch[obj]

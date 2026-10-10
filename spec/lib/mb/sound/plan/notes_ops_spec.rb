@@ -164,10 +164,14 @@ RSpec.describe('Plan: Notes nodes and envelopes') do
     end
 
     it 'matches a plain envelope on a tone gate (and a one-shot)' do
-      plan_compare(sizes: sizes, ruby_tolerance: 1e-6) {
+      r = plan_compare(sizes: sizes, ruby_tolerance: 1e-6, fallbacks: true) {
         gate = 3.hz.lfo.asquare.at(0..1)
         MB::Sound.adsr(0.01, 0.05, 0.5, 0.1, gate: gate) * 300.hz.sine + MB::Sound.adsr(0.01, 0.02, 0.5, 0.03, hold: 0.05) * 1
       }
+      # By design, the block in which the one-shot ends runs unfused (a
+      # feeder whose stream is over becomes a boundary; see
+      # Plan::Region#prepare), whatever the block sizes
+      expect([r.unfused_blocks(:c), r.unfused_blocks(:ruby)]).to eq([1, 1])
     end
 
     it 'reads an input that ends as the envelope does (the block replays, then a constant)' do
@@ -176,7 +180,12 @@ RSpec.describe('Plan: Notes nodes and envelopes') do
         gate = 7.hz.lfo.asquare.at(0..1)
         MB::Sound.adsr(0.01, 0.05, 0.5, 0.1, gate: gate, velocity: vel) * 1
       }
-      expect(r.regions.sum(&:unfused_blocks)).to be <= 2
+      # By design (see Envelope#plan_input_ended and #plan_pads_inputs?),
+      # the block where the velocity gives a short buffer (unless it ends on
+      # a block edge) and the block where it first gives nil run unfused
+      edges = r.sizes.each_with_object([0]) { |n, list| list << list.last + n }
+      expected = edges.include?(3000) ? 1 : 2
+      expect([r.unfused_blocks(:c), r.unfused_blocks(:ruby)]).to eq([expected, expected])
     end
 
     it 'matches an fm_bass voice' do
