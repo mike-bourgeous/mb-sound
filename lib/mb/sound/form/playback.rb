@@ -336,11 +336,13 @@ module MB
               @later = nil
             end
 
-            @boundary = time + length_from(sec.length, time)
-            @session.markers.set(name, kind: :section, pos: time)
-
+            # The scene first: its block may change the meter (e.g. a 2/4
+            # bar), which the section's length in bars counts in
             scene = scene_of(sec)
             @arrangement.go(scene, on: :now, fade: sec.fade) if scene && @arrangement.scenes.key?(scene)
+
+            @boundary = time + length_from(sec.length, time)
+            @session.markers.set(name, kind: :section, pos: time)
 
             add_phrase_fills(time, @boundary)
 

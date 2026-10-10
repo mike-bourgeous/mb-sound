@@ -4,7 +4,9 @@
 # command by command, the way you would type it at the bin/sound.rb prompt
 # (each line is printed as it lands), using the Set layer: tracks that
 # remember their patches, scenes as whole states launched with `go`, soft
-# mutes and solos, and undo of a mistake.
+# mutes and solos, and undo of a mistake.  Phase 2 (song forms with
+# `flow`, follow actions, fills, ring-outs, a meter change) continues in
+# night_bus_flow.rb.
 #
 #   1-4    intro      a fifths pad alone (go :intro)
 #   5-12   build      a sparse 303 line and a four-on-the-floor kick join;

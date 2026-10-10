@@ -159,13 +159,14 @@ module MB
         end
 
         # Returns a Kit whose named rows (every row if none are named) play
-        # only outside fills (see Clip#nofill), e.g. hats that drop out
-        # under a fill.
-        def nofill(*names)
+        # only outside fills (outside fill +name+ if given; see
+        # Clip#nofill), e.g. hats that drop out under a fill:
+        # `beat.nofill(:clap, name: :turn)`.
+        def nofill(*names, name: nil)
           names = @rows.keys if names.empty?
           unknown = names - @rows.keys
           raise ArgumentError, "No rows #{unknown.map(&:inspect).join(', ')} (rows: #{@rows.keys.map(&:inspect).join(', ')})" unless unknown.empty?
-          Kit.new(@rows.to_h { |k, c| [k, names.include?(k) ? c.nofill : c] })
+          Kit.new(@rows.to_h { |k, c| [k, names.include?(k) ? c.nofill(name) : c] })
         end
 
         # Returns a single Clip with all rows stacked (see Clip#&).
