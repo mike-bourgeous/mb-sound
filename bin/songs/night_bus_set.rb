@@ -39,7 +39,8 @@
 #     solo :drums, :bass; solo       # a break, then everything back
 #     mute :drums, on: :bar, fade: 2 # a synced two-bar fade out from the next bar
 #     go :drop, on: 4                # on the next 4-bar line (plain numbers are bars)
-#     go :drop, in: 2.bars           # two bars from now; `in: 2.bars, on: :beat` then the next beat
+#     go :drop, in: 2.bars           # two bars from now, then each track's own q: (drums: a 4-bar line)
+#     go :drop, in: 2.bars, on: :beat  # two bars from now, then the next beat for every track
 #     go :drop, at: bar(33)          # at bar 33 on the timeline
 #     go :breakdown, fade: 1         # tracks that stop or start fade over a bar
 #     swap :bass, bass_b.transpose(6); undo   # undo cancels it if it hasn't landed yet

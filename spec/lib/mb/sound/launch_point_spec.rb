@@ -52,42 +52,67 @@ RSpec.describe(MB::Sound::LaunchPoint) do
 
   describe 'in: (relative placement)' do
     {
-      { in: 1 } => 4000 + 96000,
-      { in: 1/4r } => 4000 + 24000,
-      { in: 2.beats } => 4000 + 48000,
-      { in: 2400.samples } => 4000 + 2400,
-      { in: 0 } => 4000,
+      { in: 1, on: :now } => 4000 + 96000,
+      { in: 1/4r, on: :now } => 4000 + 24000,
+      { in: 2.beats, on: :now } => 4000 + 48000,
+      { in: 2400.samples, on: :now } => 4000 + 2400,
+      { in: 0, on: :now } => 4000,
       { in: 1.beat, on: :beat } => 48000,
       { in: 1, on: 2 } => 192000,
       { in: 2.bars, on: :beat } => 4000 + 192000 + 20000,
+      # Without on:, the alignment it would have anyway (:bar while
+      # something plays)
+      { in: 0 } => 96000,
+      { in: 1/4r } => 96000,
+      { in: 1 } => 192000,
     }.each do |opts, expected|
       it "lands #{opts} on sample #{expected}" do
         expect(landing(**opts)).to eq(expected)
       end
+    end
+
+    it 'lands exactly when nothing plays (the default alignment is :now)' do
+      session.add(1.constant, name: :x, fade: 0, in: 1/4r)
+      data = run(48000)
+      expect(data.to_a.index { |v| v != 0 }).to eq(24000)
     end
   end
 
   describe 'at: (absolute placement)' do
     {
       { at: MB::Sound.bar(2) } => 96000,
-      { at: MB::Sound.bar(2, beat: 3) } => 96000 + 48000,
-      { at: 3.beats } => 72000,
+      { at: MB::Sound.bar(2, beat: 3), on: :now } => 96000 + 48000,
+      { at: MB::Sound.bar(2, beat: 3) } => 192000, # :bar, as without at:
+      { at: MB::Sound.bar(1, beat: 4), on: :now } => 72000,
       { at: MB::Sound.bar(2), on: 1.n16 } => 96000,
-      { at: 3.beats + 1.n16, on: :beat } => 96000,
+      { at: MB::Sound.bar(1, beat: 4), on: 1.n16 } => 72000,
     }.each do |opts, expected|
       it "lands #{opts} on sample #{expected}" do
         expect(landing(**opts)).to eq(expected)
       end
     end
 
-    it 'lands a position that has already passed now, with a warning' do
+    it 'rejects a position that has already passed, or lands it now in live mode' do
       session.add(0.constant, name: :bed)
-      run(96000 * 2)
+      run(96000 * 2 + 800)
       expect {
         session.add(1.constant, name: :x, fade: 0, at: MB::Sound.bar(2))
-      }.to output(/has passed; landing now/).to_stderr
+      }.to raise_error(ArgumentError, /bar\(2\) has already passed \(the timeline is at 3:1\.0/)
+
+      MB::Sound.live = true
+      expect {
+        session.add(1.constant, name: :x, fade: 0, at: MB::Sound.bar(2), on: :now)
+      }.to output(/already passed.*landing now/).to_stderr
       data = run(8000)
       expect(data[0]).to eq(1)
+    ensure
+      MB::Sound.live = false
+    end
+
+    it 'rejects Durations and Lengths, pointing to bar(n)' do
+      expect { session.add(1.constant, at: 32.bars) }.to raise_error(ArgumentError, /not lengths.*bar\(n\)/)
+      expect { session.add(1.constant, at: 3.beats) }.to raise_error(ArgumentError, /bar\(n, beat: b\)/)
+      expect { session.add(1.constant, at: 2.seconds) }.to raise_error(ArgumentError, /not lengths/)
     end
   end
 
@@ -144,7 +169,8 @@ RSpec.describe(MB::Sound::LaunchPoint) do
     it 'returns nil without a launch point or default, and uses the default otherwise' do
       expect(resolve(now: 1/8r)).to be_nil
       expect(resolve(now: 1/8r, default: :bar)).to eq(1r)
-      expect(resolve(now: 1/8r, in: 1/4r, default: :bar)).to eq(1/8r + 1/4r)
+      expect(resolve(now: 1/8r, in: 1/4r, default: :bar)).to eq(1r) # in:, then the default alignment
+      expect(resolve(now: 1/8r, in: 1/4r)).to eq(1/8r + 1/4r)       # no default alignment: exact
     end
 
     it 'keeps a time already on the grid' do
@@ -181,9 +207,12 @@ RSpec.describe(MB::Sound::LaunchPoint) do
     it 'count in: from a scheduled block time' do
       within do
         MB::Sound.bg(:bed, 0.constant)
-        MB::Sound.at_bar(2) { MB::Sound.bg(:x, 1.constant, in: 1.beat, fade: 0) }
+        MB::Sound.at_bar(2) { MB::Sound.bg(:x, 1.constant, in: 1.beat, on: :now, fade: 0) }
+        MB::Sound.at_bar(2) { MB::Sound.bg(:y, 2.constant, in: 1.beat, fade: 0) } # then the next bar
       end
-      expect(first_change(run(96000 * 3))).to eq(96000 + 24000)
+      data = run(96000 * 3)
+      expect(first_change(data)).to eq(96000 + 24000)
+      expect(first_change(data, 96000 + 24000)).to eq(192000)
     end
 
     it 'land swap, resume, and master at each form' do
@@ -195,7 +224,7 @@ RSpec.describe(MB::Sound::LaunchPoint) do
         MB::Sound.bg(:bed, 0.constant, fade: 0) # keeps the timeline moving after :x stops
         MB::Sound.bg(:x, clip_a.number, fade: 0, on: :now)
         MB::Sound.swap(:x, clip_b, at: MB::Sound.bar(3))
-        MB::Sound.master(in: 1/2r) { |m| m * 2 }
+        MB::Sound.master(in: 1/2r, on: :now) { |m| m * 2 }
       end
       data = run(96000 * 4)
       expect(data[0]).to eq(c3)
@@ -247,6 +276,32 @@ RSpec.describe(MB::Sound::LaunchPoint) do
       within { MB::Sound.go(:one) }
       expect(first_change(run(96000 * 5))).to eq(96000 * 4 - 4000)
       expect(within { MB::Sound.quant(2.beats) }).to eq(2.beats)
+    end
+
+    it 'aligns Set tracks to their q: after in: or at: unless on: is given' do
+      set = session.arrangement
+      clip = MB::Sound.seq(MB::Sound::C3).n1.loop
+      clip2 = MB::Sound.seq(MB::Sound::D3).n1.loop
+      within do
+        MB::Sound.bg(:bed, 0.constant)
+        set.track(:a, q: 4) { |c| c.number }
+        set.track(:b, q: :beat) { |c| c.number }
+        set.scene(:one, a: clip, b: clip2)
+      end
+      run(4000)
+      # a: 1 bar + 4000 frames, then the next 4-bar line; b: the next beat
+      within { MB::Sound.go(:one, in: 1) }
+      expect(session.queued(:a).map { |e| e.lands.pos }).to eq([4r])
+      expect(session.queued(:b).map { |e| e.lands.pos }).to eq([5/4r])
+      session.cancel_changes(*session.queued.map(&:seq))
+
+      within { MB::Sound.go(:one, in: 1, on: :now) }
+      expect(session.queued(:a).map { |e| e.lands.pos }).to eq([1 + 4000/96000r])
+      session.cancel_changes(*session.queued.map(&:seq))
+
+      within { MB::Sound.go(:one, at: MB::Sound.bar(2, beat: 2)) }
+      expect(session.queued(:a).map { |e| e.lands.pos }).to eq([4r])
+      expect(session.queued(:b).map { |e| e.lands.pos }).to eq([5/4r])
     end
   end
 end

@@ -18,18 +18,23 @@ module MB
     # - +in:+ places the change that far from now (Session#now: a scheduled
     #   block's time inside one): a number of bars, or a Duration or Length.
     # - +at:+ places it at an absolute timeline position: bar(n) (see
-    #   ScheduleMethods#bar; bars count from 1), or a Duration or Length
-    #   from the start of the timeline.  The launch-point Symbols are also
-    #   accepted as aliases of +on:+ (`at: :bar` reads fine).  A plain
-    #   number is an error (it used to mean a note grid in #bg and bars in
-    #   the Set), with a message suggesting the new forms.
+    #   ScheduleMethods#bar; bars count from 1).  The launch-point Symbols
+    #   are also accepted as aliases of +on:+ (`at: :bar` reads fine).  A
+    #   plain number is an error (it used to mean a note grid in #bg and
+    #   bars in the Set), with a message suggesting the new forms, and so
+    #   are Durations and Lengths (`at: 32.bars` would be bar 33; write
+    #   bar(33)).  A position that has already passed is an error too (in
+    #   live mode it warns and lands now).
     #
     # The time starts from now, adds +in:+ (or jumps to +at:+), then aligns
-    # forward to +on:+; without +on:+, a change given +in:+ or +at:+ lands
-    # exactly there.  Without any of them, each command has its default
-    # (e.g. #bg: :now if nothing plays, else :bar; a track's +q:+ in the
-    # Set; mutes right away).  Errors go through MB::Sound.live_error, so a
-    # live set skips the command with a warning.
+    # forward to +on:+, or without +on:+ to the alignment the command would
+    # have had anyway (maintainer, 2026-10-10: "Tracks should keep the same
+    # time alignment they would have otherwise"): #bg, #swap, #resume, and
+    # #master align to :now if nothing plays, else :bar; Set tracks to
+    # their +q:+ (else the scene's, else the set's #quant); mutes and solos
+    # don't align (right away, or exactly at +in:+/+at:+); #undo aligns to
+    # :bar.  Errors go through MB::Sound.live_error, so a live set skips the
+    # command with a warning.
     #
     # +in+ is a Ruby keyword, so methods that take +in:+ read it (with the
     # others) through LaunchPoint.of(binding).
@@ -96,8 +101,12 @@ module MB
           )
         end
 
-        unless at.nil? || at.is_a?(Bar) || at.is_a?(Length)
-          return error("at: must be bar(n), a Duration or Length from the start of the timeline, or one of #{ALIGNMENTS.map(&:inspect).join(', ')} (got #{at.inspect})")
+        if at.is_a?(Length)
+          return error("at: takes bar positions, not lengths (at: #{at.inspect}); write at: bar(n) or bar(n, beat: b) (bars count from 1), or in: #{at.inspect} for that long from now")
+        end
+
+        unless at.nil? || at.is_a?(Bar)
+          return error("at: must be bar(n) (or bar(n, beat: b)) or one of #{ALIGNMENTS.map(&:inspect).join(', ')} (got #{at.inspect})")
         end
 
         return error('Give at: (an absolute position) or in: (an offset from now), not both') if at && offset
@@ -129,7 +138,7 @@ module MB
       end
       private_class_method :error, :length_like?
 
-      # The absolute position (bar(n), a Duration or Length), or nil.
+      # The absolute position (a Bar from bar(n)), or nil.
       attr_reader :at
 
       # The alignment (a Symbol, a number of bars, or a Duration or
@@ -153,27 +162,28 @@ module MB
       end
 
       # Resolves to an exact timeline position in whole notes, counting
-      # from +now+ with +transport+'s bar length and tempo.  Without +at:+,
-      # +on:+, or +in:+, aligns to +default+ (an +on:+ value), or returns
-      # nil if +default+ is nil (the caller's "right away").  +clip_grid+
-      # is called for :clip (it returns the grid in whole notes).
+      # from +now+ with +transport+'s bar length and tempo.  Without +on:+,
+      # aligns to +default+ (an +on:+ value: the command's own alignment),
+      # or not at all if +default+ is nil; with nothing given and no
+      # +default+, returns nil (the caller's "right away").  +clip_grid+ is
+      # called for :clip (it returns the grid in whole notes).
       #
-      # An absolute +at:+ that has already passed lands now, with a warning
-      # (like ScheduleMethods#at_bar, which warns for passed bars).
-      def resolve(now:, transport:, default: nil, clip_grid: nil)
-        on = @on
-        if !given?
-          return nil if default.nil?
-          on = default
-        end
+      # An absolute +at:+ that has already passed goes through
+      # MB::Sound.live_error (landing now in live mode), unless +replay+ is
+      # true (a take replaying a line that landed late live: it lands now,
+      # where the take forces it anyway).
+      def resolve(now:, transport:, default: nil, clip_grid: nil, replay: false)
+        return nil if !given? && default.nil?
+        on = @on.nil? ? default : @on
+        on = :now if on.is_a?(Numeric) && on == 0
 
         bar_length = transport.bar_length.to_r
         time = now.to_r
 
         if @at
-          time = @at.is_a?(Bar) ? @at.whole_notes(bar_length) : whole_notes(@at, transport)
+          time = @at.whole_notes(bar_length)
           if time < now
-            warn "\e[33mLaunch point at: #{@at.inspect} has passed; landing now\e[0m"
+            MB::Sound.live_error(ArgumentError.new("at: #{@at.inspect} has already passed (the timeline is at #{Session::Stamp.new(pos: now.to_r, bar_length: bar_length)}); landing now in live mode")) unless replay
             time = now.to_r
           end
         elsif @offset

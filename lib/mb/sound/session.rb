@@ -813,14 +813,16 @@ module MB
       # launch point +point+ (a LaunchPoint, or nil for the default) lands,
       # counting from #now (a scheduled block's time inside one).
       # +timeline_nodes+ give :clip its clips.  +default+ is the alignment
-      # used when +point+ gives none: :auto (the default) for :now if
-      # nothing is playing or waiting to start and :bar otherwise, or nil
-      # to return nil (right away).
+      # used when +point+ gives no +on:+ (also after +in:+ or +at:+): :auto
+      # (the default) for :now if nothing is playing or waiting to start
+      # and :bar otherwise, an +on:+ value, or nil for none (and nil, right
+      # away, if +point+ gives nothing).
       def launch_time(point, timeline_nodes = [], default: :auto)
         point ||= LaunchPoint::NONE
         point = LaunchPoint.on(point) if point.is_a?(Symbol)
         default = @players.empty? && !queued_start? ? :now : :bar if default == :auto
-        point.resolve(now: now, transport: @transport, default: default, clip_grid: -> { clip_grid(timeline_nodes) })
+        replay = Session.perform&.[](:source) == :replay
+        point.resolve(now: now, transport: @transport, default: default, clip_grid: -> { clip_grid(timeline_nodes) }, replay: replay)
       end
 
       # The time between moments when every timeline-aligned looping clip

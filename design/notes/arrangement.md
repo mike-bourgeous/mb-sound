@@ -46,6 +46,8 @@ Maintainer: "Yes, with a realtime demo script that shows a set being sculpted". 
 - `scene :verse, pad: chords, bass: bass_a, drums: beat` (alias `define_scene`): a full state; values are a Clip or Kit, `:on`, `:off`/`nil`, or `:keep`; tracks not named stop unless `others: :keep` (partial scenes like fills and risers); a block runs at launch with commands landing at the launch time.  `scenes` lists them (current one marked).
 - `go :drop` (alias `launch_scene`, `on:`/`in:`/`at:`, `fade:`): each track changes at its own launch point (the call's `on:`/`in:`/`at:`, then the track's `q:`, the scene's `q:`, the set's `quant`, 1 bar by default).  Only differences change: a patch track already playing swaps clips (keeping graph and effect state), rebuilding when swap can't map the clips or a Kit brings rows the old kit lacks; a track playing the scene's clip is left alone; stops get a 5 ms declick unless the scene or call gives a fade.  One undo step; returns the `:scene` journal entry (`scene :drop lands 13:1 (queued)`).
 - Track and scene `q:` and `quant` are alignments (`on:` values): `:now`, `:beat`, `:bar`, `:clip`, a Duration, or a number of **bars** (fades are bars too).
+- Scene keys naming a non-track (e.g. a mute group) go through `live_error`; unknown tracks raise at `go`.
+- Reserved, not built (later phases): `turn`/`move` (knobs, phase 3), `loop!`/`onward`/`unloop!` (forms, phase 2), `form`/`flow` (phase 2).
 
 ## Launch points: `on:`, `in:`, `at:` (`lib/mb/sound/launch_point.rb`)
 
@@ -54,16 +56,14 @@ Maintainer, 2026-10-10 ("Do we have a name for alignment vs placement elsewhere?
 ```ruby
 go :drop, on: :bar                # alignment: :now, :beat, :bar, :clip, 4 (bars), 1.n4, 2.beats
 go :drop, in: 2.bars              # relative placement from Session#now (bars, Durations, Lengths)
-go :drop, at: bar(33)             # absolute placement: bar(n, beat: 1) counts from 1 like at_bar; Durations from 0
+go :drop, at: bar(33)             # absolute placement: bar(n, beat: 1), counting from 1 like at_bar
 go :drop, in: 2.bars, on: :beat   # two bars from now, then the next beat
 ```
 
-- Order: start from `Session#now`, add `in:` or jump to `at:`, then align forward to `on:` (ceil; a time already on the grid stays).  `in:`/`at:` without `on:` land exactly there; with none of them, the command's default (`bg`/`swap`/`resume`/`master`: `:now` if idle, else `:bar`; the Set: track/scene `q:`, then `quant`; mutes: right away; undo: `:bar`).
-- `at:` Symbols are aliases of `on:` ("at the bar").  A plain number in `at:` goes through `live_error` with a message suggesting `on: 1.n4` / `on: 4` / `in: 4` / `at: bar(4)`; `at:` with `in:`, `at: :bar` with `on:`, and `in: bar(n)` are errors too.  An absolute `at:` that has passed lands now with a warning (like `at_bar`'s warning).
-- One resolver: `LaunchPoint.of(binding)` reads the keywords (the only place that reads the `in` keyword), validates, and returns a frozen `LaunchPoint` (nil if skipped in live mode); console methods pass it down as `at:`; `Session#launch_time(point, nodes, default:)` and `Arrangement#resolve` (wrapping `q:` with `LaunchPoint.on`) call `LaunchPoint#resolve`.  Landing samples are unchanged for equivalent inputs (old `at: 4r` = `on: 4`; the take replay spec still matches bit for bit).
-- Name check for the console `bar(n)` (`ScheduleMethods#bar`, returns `LaunchPoint::Bar`): no collision with `MB::Sound`, `Kernel`, `GraphNode`, or Pry commands; `Numeric#bar` (`1.bar`, a Duration) lives on a receiver.  Beware `at: 32.bars` (a Duration from the start: bar 33) vs `at: bar(32)`.
-- Scene keys naming a non-track (e.g. a mute group) go through `live_error`; unknown tracks raise at `go`.
-- Reserved, not built (later phases): `turn`/`move` (knobs, phase 3), `loop!`/`onward`/`unloop!` (forms, phase 2), `form`/`flow` (phase 2).
+- Order: start from `Session#now`, add `in:` or jump to `at:`, then align forward to `on:` (ceil; a time already on the grid stays).  Without `on:`, a change still aligns the way it would without `in:`/`at:` (maintainer, 2026-10-10: "Tracks should keep the same time alignment they would have otherwise"): `bg`/`swap`/`resume`/`master` to `:now` if idle, else `:bar` (so `bg :x, g, in: 2.bars` lands on the bar line after two bars while something plays); Set tracks to their effective `q:` (track, scene, `quant`), each on its own; mutes/solos not at all (exactly at `in:`/`at:`, right away without them); `undo` to `:bar`.  Write `on: :now` for an exact offset or position.  Take replays force recorded landing times, so they stay exact.
+- `at:` takes only `bar(n)`/`bar(n, beat:)` (and alignment Symbols as aliases of `on:`, "at the bar").  Through `live_error`: a plain number (suggesting `on: 1.n4` / `on: 4` / `in: 4` / `at: bar(4)`), a Duration or Length (maintainer: "Agreed"; `at: 32.bars` would have been bar 33; the message points to `bar(n)`; they stay valid in `in:` and `on:`), `at:` with `in:`, `at: :bar` with `on:`, `in: bar(n)`, and a position that has already passed (maintainer: "live_error"; live, it warns and lands now; a replaying take lands it now silently, where the take forces it).  `at_bar` blocks keep warning and skipping for passed bars (unchanged: raising there could break scripts that schedule blocks after playback has moved on).
+- One resolver: `LaunchPoint.of(binding)` reads the keywords (the only place that reads the `in` keyword), validates, and returns a frozen `LaunchPoint` (nil if skipped in live mode); console methods pass it down as `at:`; `Session#launch_time(point, nodes, default:)` and `Arrangement#resolve(q, track, point)` (the effective `q:` as the default alignment) call `LaunchPoint#resolve`.  Landing samples are unchanged for equivalent inputs (old `at: 4r` = `on: 4`; the take replay spec still matches bit for bit).
+- Name check for the console `bar(n)` (`ScheduleMethods#bar`, returns `LaunchPoint::Bar`): no collision with `MB::Sound`, `Kernel`, `GraphNode`, or Pry commands; `Numeric#bar` (`1.bar`, a Duration) lives on a receiver.
 
 ## Takes (`lib/mb/sound/take.rb`, `take/replay.rb`)
 

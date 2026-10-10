@@ -18,7 +18,8 @@ module MB
     # Launch quantizations (+q:+, +quant+) are alignments like +on:+ (see
     # LaunchPoint): :now, :beat, :bar, :clip, a number of bars (e.g. 4 for
     # the next 4-bar line), or a Duration (e.g. 2.beats).  #go and #play
-    # also take +on:+, +in:+, and +at:+, which override them.
+    # also take +on:+ (which overrides them), and +in:+ and +at:+ (after
+    # which tracks still align to their quantization).
     class Arrangement
       # A track: a +patch+ (a block that builds a graph from a clip, or
       # nil), a +graph+ (for tracks without a patch), its launch
@@ -164,13 +165,13 @@ module MB
 
         _, changes = @session.command("go #{name.inspect}") {
           before = undo_state
-          time = resolve(point.given? ? point : sc.q || @quant)
+          time = resolve(sc.q || @quant, nil, point)
           entry = @session.change(:scene, name, time, data: { scene: name }) { |_t| }
 
           tracks.each_value do |tr|
             value = sc.values.key?(tr.name) ? sc.values[tr.name] : (sc.others == :keep ? :keep : :off)
             next if value == :keep
-            set_track(tr, value, resolve(point.given? ? point : tr.q || sc.q || @quant, tr), fade: fade.nil? ? sc.fade : fade)
+            set_track(tr, value, resolve(tr.q || sc.q || @quant, tr, point), fade: fade.nil? ? sc.fade : fade)
           end
 
           if sc.block
@@ -197,7 +198,7 @@ module MB
         result = nil
         @session.command("bg #{name.inspect}") {
           before = undo_state
-          time = start_time ? start_time.to_r : resolve(point.given? ? point : tr.q || @quant, tr)
+          time = start_time ? start_time.to_r : resolve(tr.q || @quant, tr, point)
           result = set_track(tr, value, time, fade: fade)
           @session.note_undo_extra(self, before, undo_state)
         }
@@ -240,13 +241,14 @@ module MB
         }
       end
 
-      # Resolves a launch point (a LaunchPoint, or a quantization: see the
-      # class comment) to an exact timeline position, counting from
+      # Resolves launch quantization +q+ (see the class comment), after
+      # +point+'s +in:+ or +at:+ if given (a LaunchPoint; its +on:+
+      # replaces +q+), to an exact timeline position, counting from
       # Session#now.  +track+ gives :clip the track's clips.
-      def resolve(q, track = nil)
-        point = q.is_a?(LaunchPoint) ? q : LaunchPoint.on(q)
-        nodes = point.on == :clip && track ? @session.timeline_nodes_of(track.name) : []
-        @session.send(:launch_time, point, nodes, default: :bar)
+      def resolve(q, track = nil, point = nil)
+        point ||= LaunchPoint::NONE
+        nodes = (point.on || q) == :clip && track ? @session.timeline_nodes_of(track.name) : []
+        @session.send(:launch_time, point, nodes, default: q)
       end
 
       private
