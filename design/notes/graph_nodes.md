@@ -1,0 +1,19 @@
+# Core Abstraction: GraphNode DSL
+
+Detailed notes moved from CLAUDE.md (2026-10-10); CLAUDE.md keeps a summary and points here.  Update both when behavior changes.
+
+
+The central pattern is `GraphNode` (`lib/mb/sound/graph_node.rb`), a module mixed into any class that implements `#sample`. It enables fluent chaining to build signal processing graphs:
+
+```ruby
+play 123.hz.triangle.at(-20.db)   # oscillators play until Ctrl-C
+play 123.hz.fm(369.hz.at(1000)).softclip.filter(150.hz.highpass(quality: 4))
+```
+
+The DSL methods (`#filter`, `#delay`, `#softclip`, arithmetic operators, etc.) live in topic modules included by `GraphNode`, in `lib/mb/sound/graph_node/*_methods.rb`; `graph_node.rb` keeps naming, graph traversal, and shared private helpers.  Graph nodes support traversal via the `Traversable` mixin; key node types live in `lib/mb/sound/graph_node/`, MIDI nodes in `lib/mb/sound/notes/`.
+
+Every consumer of GraphNodes must call `get_sampler` on the node(s) it stores in its constructor (e.g. `Tone#fixup_source`, `ProcNode`, `Filter::Delay` for delay-time nodes).  That branches a node used in several places through a `Tee`, so each use gets the same samples instead of advancing it twice (the user is open to an alternate design later).
+
+When a Tee's branches read in lockstep (each reads every buffer once with the same count, as in a Session), they all get one frozen view of the source's buffer; otherwise the Tee copies through a CircularBuffer until they catch up (`lib/mb/sound/graph_node/tee.rb`); the CircularBuffer and the branches' one-second readers are made only when a Tee first leaves lockstep (`Tee#buffers!`, `Tee::IdleReader` before; 2026-10-10: no script ever left it, and sq80_voice's 719 Tees held 324 MB: graph_profile peak RSS 406 → 96 MB, fm_bass 226 → 75).  So a node that processes its input in place copies it first only if `buf.frozen?` (user rule, so unshared chains keep passing one buffer through; e.g. Reverb's dry path, `SampleWrapper(in_place: true)`, Delay smoothing; `GraphNode::FrozenCopy` reuses one copy buffer).  Constants, TempoNodes, and Notes nodes return one frozen buffer while their value holds.  Numo blocks most writes to frozen views but not in-place arithmetic (`buf.inplace * 2`), so `Tee.shared_check` (env `MB_SOUND_CHECK_SHARED=1`) verifies shared buffers: raising in scripts and specs (the `:check_shared` tag; on in the smoke suite), warning and copying in `bin/sound.rb` (off by default there).  `MB_SOUND_SHARED_TEE=0` turns sharing off.  Multiplier and Mixer have allocation-free fast paths for full buffers that don't promote their type (`ArithmeticNodeHelper#arithmetic_fast?`, C kernels in `fast_arithmetic`), bit-identical to the general path; so does `ChannelMixer::Pan` with a node position (`FastArithmetic.pan`, Numo's float steps, cos and sin in separate loops so no compiler merges them into sincos).
+
+Measure graph cost with `bin/graph_profile.rb [-n 32,128,800] [--profile] [--plan on|off|ruby|both] script.rb` (captures a bin script's graph; reports GC runs and time, objects per buffer, and buffer CPU times with and without a GC; `--profile` adds self time and allocations per node class, inflated ~3 us per call, a fused region as one "Plan region"; `-a N` lists the top N allocation sites; `--plan both` alternates unplanned and planned runs, best of `-r`; synth worst case: `spec/test_data/dense_modulated.mid`); compare branches in alternating runs against a master-ai worktree.  Cost on 2026-10-06 (best of 5, % of realtime at 128/512-sample buffers): fm_bass 32.8/19.4, fm_epiano 16.9/6.2, stereo_drone 58.0/39.8, tempo_song 13.1/4.4, antialias_song 15.0/5.4.  Objects per 128-sample buffer on 2026-10-07: fm_epiano 44 (was 94; most of the rest are MIDI stream Rationals), stereo_drone 21 (40), fm_bass 76 (80).
