@@ -28,6 +28,12 @@
 #define PF_FLUSH 1e-30
 #define PF_MAX_CUTOFF_RATIO 0.49
 
+// Samples per pass of the lane-major kernels: each pass first works out
+// every lane's coefficients for these samples (lane by lane, as the single
+// filter kernel does, with its caching), then runs the recursions with the
+// lanes interleaved.
+#define PF_CHUNK 64
+
 static ID id_sample_rate, id_type_id, id_cutoff, id_quality, id_gain, id_state, id_resonance;
 
 static void pf_ids(void)
@@ -121,11 +127,6 @@ void mb_plan_svf(float *d, const float *a, const struct mb_plan_param *fc, const
 	RB_GC_GUARD(obj);
 }
 
-// Samples per pass of the lane-major kernels: each pass first works out
-// every lane's coefficients for these samples (lane by lane, as the single
-// filter kernel does, with its caching), then runs the recursions with the
-// lanes interleaved.
-#define PF_CHUNK 64
 
 void mb_plan_svf_lanes(int lanes, float *const *d, const float *const *a, const struct mb_plan_param *prm,
 		const _Bool *remember_gain, const VALUE *objs, size_t n)
@@ -198,14 +199,22 @@ void mb_plan_svf_lanes(int lanes, float *const *d, const float *const *a, const 
 	ALLOCV_END(tmpv);
 }
 
-void mb_plan_four_pole(float *d, const float *a, const struct mb_plan_param *fc, const struct mb_plan_param *res,
-		const double *cfg, VALUE obj, size_t n)
+// A four-pole's (or diode ladder's) settings and state, read from the
+// Filter::FourPole +filter+ (its @state and @sample_rate, read each block:
+// FourPole#reset replaces the state Array) and the op's settings +cfg+.
+struct pf_fp_lane {
+	VALUE filter, state;
+	struct mb_fp_args args;
+	_Bool diode;
+	double st[4];
+};
+
+static void pf_fp_read(struct pf_fp_lane *f, VALUE filter, const double *cfg)
 {
-	pf_ids();
-	VALUE filter = obj;
-	VALUE state = rb_ivar_get(filter, id_state); // (read each block: FourPole#reset replaces it)
-	Check_Type(state, T_ARRAY);
-	if (RARRAY_LEN(state) != 4) {
+	f->filter = filter;
+	f->state = rb_ivar_get(filter, id_state);
+	Check_Type(f->state, T_ARRAY);
+	if (RARRAY_LEN(f->state) != 4) {
 		rb_raise(rb_eArgError, "Four-pole state must have four elements");
 	}
 	double rate = NUM2DBL(rb_ivar_get(filter, id_sample_rate));
@@ -218,38 +227,171 @@ void mb_plan_four_pole(float *d, const float *a, const struct mb_plan_param *fc,
 		.mix = { cfg[3], cfg[4], cfg[5], cfg[6], cfg[7] },
 		.curve = (int)cfg[8], .drive_mode = (int)cfg[9], .clip = (int)cfg[10], .normalize = (int)cfg[11],
 	};
-	_Bool diode = cfg[12] != 0;
+	f->args = args;
+	f->diode = cfg[12] != 0;
 	if (!isfinite(args.k_max) || !isfinite(args.comp) || !(args.drive >= 0) || !isfinite(args.drive) ||
 			args.curve < FP_CURVE_LINEAR || args.curve > FP_CURVE_SELF_OSC_DB ||
-			args.drive_mode < FP_DRIVE_INPUT || args.drive_mode > FP_DRIVE_FEEDBACK || (diode && args.drive_mode == FP_DRIVE_STAGES) ||
+			args.drive_mode < FP_DRIVE_INPUT || args.drive_mode > FP_DRIVE_FEEDBACK || (f->diode && args.drive_mode == FP_DRIVE_STAGES) ||
 			args.clip < FP_CLIP_SOFT || args.clip > FP_CLIP_HARD) {
 		rb_raise(rb_eArgError, "Bad plan four-pole settings");
 	}
 
+	for (int j = 0; j < 4; j++) {
+		f->st[j] = mb_finite_entry(f->state, j);
+	}
+}
+
+// Flushes and stores the state, and remembers the last parameters
+// (FourPole#remember).
+static void pf_fp_write(struct pf_fp_lane *f, const struct mb_plan_param *fc, const struct mb_plan_param *res, size_t n)
+{
+	mb_fp_flush(f->st);
+	for (int j = 0; j < 4; j++) {
+		rb_ary_store(f->state, j, rb_float_new(f->st[j]));
+	}
+
+	if (n > 0) {
+		rb_ivar_set(f->filter, id_cutoff, rb_float_new(mb_plan_param_at(fc, n - 1)));
+		rb_ivar_set(f->filter, id_resonance, rb_float_new(mb_plan_param_at(res, n - 1)));
+	}
+}
+
+void mb_plan_four_pole(float *d, const float *a, const struct mb_plan_param *fc, const struct mb_plan_param *res,
+		const double *cfg, VALUE obj, size_t n)
+{
+	pf_ids();
+	struct pf_fp_lane f;
+	pf_fp_read(&f, obj, cfg);
+
 	struct mb_signal fc_sig = { .scalar = fc->scalar, .ptr = fc->p, .step = 1 };
 	struct mb_signal res_sig = { .scalar = res->scalar, .ptr = res->p, .step = 1 };
-	double st[4];
-	for (int j = 0; j < 4; j++) {
-		st[j] = mb_finite_entry(state, j);
-	}
 
-	if (diode) {
-		mb_diode_ladder_run(&args, a, d, n, &fc_sig, &res_sig, st);
+	if (f.diode) {
+		mb_diode_ladder_run(&f.args, a, d, n, &fc_sig, &res_sig, f.st);
 	} else {
-		mb_four_pole_run(&args, a, d, n, &fc_sig, &res_sig, st);
+		mb_four_pole_run(&f.args, a, d, n, &fc_sig, &res_sig, f.st);
 	}
 
-	mb_fp_flush(st);
-	for (int j = 0; j < 4; j++) {
-		rb_ary_store(state, j, rb_float_new(st[j]));
-	}
+	pf_fp_write(&f, fc, res, n);
 
-	// FourPole#remember
-	if (n > 0) {
-		rb_ivar_set(filter, id_cutoff, rb_float_new(mb_plan_param_at(fc, n - 1)));
-		rb_ivar_set(filter, id_resonance, rb_float_new(mb_plan_param_at(res, n - 1)));
-	}
-
-	RB_GC_GUARD(state);
+	RB_GC_GUARD(f.state);
 	RB_GC_GUARD(obj);
+}
+
+void mb_plan_four_pole_lanes(int lanes, float *const *d, const float *const *a, const struct mb_plan_param *prm,
+		const double *const *cfg, const VALUE *objs, size_t n)
+{
+	pf_ids();
+	size_t L = (size_t)lanes;
+
+	struct pf_fp_lane f[L];
+	for (size_t l = 0; l < L; l++) {
+		pf_fp_read(&f[l], objs[l], cfg[l]);
+	}
+
+	// Four-poles and diode ladders, each lane-major among their own kind
+	size_t nfp = 0, ndl = 0;
+	size_t fp_lane[L], dl_lane[L];
+	for (size_t l = 0; l < L; l++) {
+		if (f[l].diode) {
+			dl_lane[ndl++] = l;
+		} else {
+			fp_lane[nfp++] = l;
+		}
+	}
+
+	VALUE tmpv;
+	size_t ncoef = sizeof(struct mb_dl_coef) > sizeof(struct mb_fp_coef) ? sizeof(struct mb_dl_coef) : sizeof(struct mb_fp_coef);
+	char *mem = ALLOCV_N(char, tmpv, PF_CHUNK * L * (ncoef + sizeof(double)));
+	double *X = (double *)mem;
+	void *coefs = mem + PF_CHUNK * L * sizeof(double);
+	struct mb_fp_coef *FC = coefs;
+	struct mb_dl_coef *DC = coefs;
+
+	if (nfp > 0) {
+		struct mb_fp_cache cc[nfp];
+		double pi_over_rate[nfp], fc_max[nfp], inv_drive[nfp];
+		_Bool driven[nfp];
+		for (size_t j = 0; j < nfp; j++) {
+			const struct mb_fp_args *args = &f[fp_lane[j]].args;
+			mb_fp_cache_init(&cc[j]);
+			pi_over_rate[j] = M_PI / args->rate;
+			fc_max[j] = args->rate * FP_MAX_CUTOFF_RATIO;
+			inv_drive[j] = args->drive > 0 ? 1.0 / args->drive : 0.0;
+			driven[j] = args->drive > 0;
+		}
+
+		for (size_t c0 = 0; c0 < n; c0 += PF_CHUNK) {
+			size_t m = n - c0 < PF_CHUNK ? n - c0 : PF_CHUNK;
+			for (size_t j = 0; j < nfp; j++) {
+				size_t l = fp_lane[j];
+				const struct mb_plan_param *p = prm + 2 * l;
+				for (size_t k = 0; k < m; k++) {
+					size_t i = c0 + k;
+					mb_fp_coef_update(&cc[j], &f[l].args, mb_plan_param_at(&p[0], i), mb_plan_param_at(&p[1], i), pi_over_rate[j], fc_max[j]);
+					FC[k * nfp + j] = cc[j].c;
+					X[k * nfp + j] = a[l][i];
+				}
+			}
+			for (size_t k = 0; k < m; k++) {
+				for (size_t j = 0; j < nfp; j++) {
+					size_t l = fp_lane[j];
+					X[k * nfp + j] = mb_fp_step(&f[l].args, &FC[k * nfp + j], inv_drive[j], driven[j], X[k * nfp + j], f[l].st);
+				}
+			}
+			for (size_t j = 0; j < nfp; j++) {
+				float *dl = d[fp_lane[j]] + c0;
+				for (size_t k = 0; k < m; k++) {
+					dl[k] = (float)X[k * nfp + j];
+				}
+			}
+		}
+	}
+
+	if (ndl > 0) {
+		struct mb_dl_cache cc[ndl];
+		double pi_over_rate[ndl], fc_max[ndl];
+		_Bool driven[ndl];
+		for (size_t j = 0; j < ndl; j++) {
+			const struct mb_fp_args *args = &f[dl_lane[j]].args;
+			mb_dl_cache_init(&cc[j], args);
+			pi_over_rate[j] = M_PI / args->rate;
+			fc_max[j] = args->rate * FP_MAX_CUTOFF_RATIO;
+			driven[j] = args->drive > 0;
+		}
+
+		for (size_t c0 = 0; c0 < n; c0 += PF_CHUNK) {
+			size_t m = n - c0 < PF_CHUNK ? n - c0 : PF_CHUNK;
+			for (size_t j = 0; j < ndl; j++) {
+				size_t l = dl_lane[j];
+				const struct mb_plan_param *p = prm + 2 * l;
+				for (size_t k = 0; k < m; k++) {
+					size_t i = c0 + k;
+					mb_dl_coef_update(&cc[j], &f[l].args, mb_plan_param_at(&p[0], i), mb_plan_param_at(&p[1], i), pi_over_rate[j], fc_max[j]);
+					DC[k * ndl + j] = cc[j].c;
+					X[k * ndl + j] = a[l][i];
+				}
+			}
+			for (size_t k = 0; k < m; k++) {
+				for (size_t j = 0; j < ndl; j++) {
+					size_t l = dl_lane[j];
+					X[k * ndl + j] = mb_dl_step(&f[l].args, &DC[k * ndl + j], driven[j], X[k * ndl + j], f[l].st);
+				}
+			}
+			for (size_t j = 0; j < ndl; j++) {
+				float *dl = d[dl_lane[j]] + c0;
+				for (size_t k = 0; k < m; k++) {
+					dl[k] = (float)X[k * ndl + j];
+				}
+			}
+		}
+	}
+
+	for (size_t l = 0; l < L; l++) {
+		const struct mb_plan_param *p = prm + 2 * l;
+		pf_fp_write(&f[l], &p[0], &p[1], n);
+		RB_GC_GUARD(f[l].state);
+	}
+
+	ALLOCV_END(tmpv);
 }

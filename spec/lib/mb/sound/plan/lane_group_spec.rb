@@ -23,6 +23,7 @@ RSpec.describe(MB::Sound::Plan::LaneGroup) do
       saw = v.amp_env * base.ramp.pm(e * mod + v.bend) * 0.1
       out = saw.filter(:lowpass, cutoff: v.cutoff(800), quality: 2) +
         saw.lp4(v.cutoff(1200), resonance: v.reso(0.4)) * 0.5 +
+        saw.diode(v.cutoff(700), resonance: v.reso(0.6), drive: 1.5) * 0.3 +
         saw.filter(:highpass, cutoff: 300, structure: :biquad) * 0.25
       extra ? extra.call(v, out) : out
     }
@@ -153,6 +154,69 @@ RSpec.describe(MB::Sound::Plan::LaneGroup) do
     expect(group.runs).to be > 0
   ensure
     MB::Sound::Plan.enabled = true
+  end
+
+  describe 'lane-major filter kernels' do
+    # One graph per lane: +build+ is called with the lane index and a
+    # fresh input source; the lanes' regions are grouped by hand.
+    def compare_lanes(lanes, sizes: self.sizes, &build)
+      MB::Sound.seed(0)
+      graphs = lanes.times.map { |i| build.call(i, PlanSpecHelpers::Source.new(seed: i + 1)).get_sampler }
+      insts = graphs.map { |g| MB::Sound::Plan.install(g) }
+      expect(insts.map { |inst| inst.regions.length }.uniq).to eq([1])
+      regions = insts.map { |inst| inst.regions.first }
+      expect(regions.map { |r| r.program.signature }.uniq.length).to eq(1)
+      group = MB::Sound::Plan::LaneGroup.new(regions)
+
+      MB::Sound.seed(0)
+      MB::Sound::Plan.enabled = false
+      refs = lanes.times.map { |i| build.call(i, PlanSpecHelpers::Source.new(seed: i + 1)).get_sampler }
+      MB::Sound::Plan.enabled = true
+
+      sizes.each_with_index do |n, b|
+        got = graphs.map { |g| g.sample(n).dup }
+        exp = refs.map { |g| g.sample(n) }
+        lanes.times do |i|
+          expect(got[i].to_binary).to eq(exp[i].to_binary), "lane #{i}, block #{b} (#{n} samples): differs by #{(got[i] - exp[i]).abs.max}"
+        end
+      end
+      expect(group.lane_runs).to be > 0
+      group
+    ensure
+      MB::Sound::Plan.enabled = true
+    end
+
+    it 'runs SVFs of every type with moving parameters' do
+      types = MB::Sound::Filter::SVF::FILTER_TYPES
+      compare_lanes(types.length) { |i, src|
+        cutoff = PlanSpecHelpers::Source.new(seed: i + 7, scale: 900, offset: 1200)
+        quality = PlanSpecHelpers::Source.new(kind: :steps, seed: i + 3, scale: 2, offset: 2.5, every: 77)
+        gain = PlanSpecHelpers::Source.new(kind: :steps, seed: i + 5, scale: 4, offset: 5, every: 131)
+        (src * 0.5).filter(types[i], cutoff: cutoff, quality: quality, gain: gain) * 2
+      }
+    end
+
+    it 'runs four-poles and diode ladders in every drive mode, mixed in one group' do
+      settings = [
+        { mode: :lp4 }, { mode: :hp4 }, { mode: :bp2, drive: 2, drive_mode: :input },
+        { drive: 1.5, drive_mode: :stages }, { drive: 2, drive_mode: :feedback, clip: :hard },
+        { mode: :diode }, { mode: :diode, drive: 2 }, { mode: :diode, drive: 1, drive_mode: :feedback },
+        { self_oscillate: true },
+      ]
+      compare_lanes(settings.length) { |i, src|
+        cutoff = PlanSpecHelpers::Source.new(seed: i + 2, scale: 1500, offset: 2000)
+        res = PlanSpecHelpers::Source.new(kind: :steps, seed: i + 4, scale: 0.45, offset: 0.5, every: 90)
+        (src * 0.5).lp4(cutoff, resonance: res, **settings[i]) * 2
+      }
+    end
+
+    it 'runs cookbook biquads with moving parameters' do
+      compare_lanes(5) { |i, src|
+        cutoff = PlanSpecHelpers::Source.new(seed: i + 2, scale: 1500, offset: 2000)
+        quality = PlanSpecHelpers::Source.new(kind: :steps, seed: i + 4, scale: 2, offset: 3, every: 90)
+        (src * 0.5).filter(:bandpass, cutoff: cutoff, quality: quality, structure: :biquad) * 2
+      }
+    end
   end
 
   describe 'FastPlan.run_lanes' do

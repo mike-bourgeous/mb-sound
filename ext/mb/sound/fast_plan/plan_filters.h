@@ -43,6 +43,12 @@ void mb_plan_svf_lanes(int lanes, float *const *d, const float *const *a, const 
 void mb_plan_four_pole(float *d, const float *a, const struct mb_plan_param *fc, const struct mb_plan_param *res,
 		const double *cfg, VALUE obj, size_t n);
 
+// OP_FOUR_POLE for several lanes at once (see mb_plan_svf_lanes): prm
+// holds each lane's cutoff and resonance (2 per lane), cfg[l] each lane's
+// settings.
+void mb_plan_four_pole_lanes(int lanes, float *const *d, const float *const *a, const struct mb_plan_param *prm,
+		const double *const *cfg, const VALUE *objs, size_t n);
+
 // OP_BIQUAD (plan_biquad.c): Filter::Cookbook#dynamic_process
 // (FastSound.dynamic_biquad through mb_biquad.h) on +a+ into +d+ with the
 // cutoff and quality registers +cut+ and +q+; +type+ the cookbook filter
@@ -50,5 +56,10 @@ void mb_plan_four_pole(float *d, const float *a, const struct mb_plan_param *fc,
 // and x/y state read each block, its coefficients, state, quality, and
 // cutoff set afterwards as #dynamic_process_c does).
 void mb_plan_biquad(float *d, const float *a, const float *cut, const float *q, int type, VALUE obj, size_t n);
+
+// OP_BIQUAD for several lanes at once (see mb_plan_svf_lanes; the filter
+// type is the op's, the same for every lane).
+void mb_plan_biquad_lanes(int lanes, float *const *d, const float *const *a, const float *const *cut, const float *const *q,
+		int type, const VALUE *objs, size_t n);
 
 #endif

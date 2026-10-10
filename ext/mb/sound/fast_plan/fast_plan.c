@@ -1037,6 +1037,37 @@ static void svf_operands(const int32_t *op, size_t pc, const struct regs *R, lon
 	*remember = sc[op[7] + 3] != 0;
 }
 
+// The four-pole op's operands for one lane, checked (see OP_FOUR_POLE).
+static void four_pole_operands(const int32_t *op, size_t pc, const struct regs *R, long nregs, const double *sc, size_t nscalars, VALUE objects,
+		struct mb_plan_param prm[2], VALUE *obj)
+{
+	float *const *ptrs = R->p;
+	const char *cplx = R->c;
+	if (cplx[op[1]] || cplx[op[2]]) rb_raise(rb_eArgError, "Plan four-pole filters are real");
+	if (op[5] < 0 || op[5] >= RARRAY_LEN(objects)) rb_raise(rb_eArgError, "Bad plan four-pole object at word %zu", pc);
+	if (op[6] < 0 || (size_t)op[6] + 15 > nscalars) rb_raise(rb_eArgError, "Bad plan four-pole scalars at word %zu", pc);
+	for (int k = 0; k < 2; k++) {
+		int r = op[3 + k];
+		if (r >= nregs || (r >= 0 && (cplx[r] || !ptrs[r]))) rb_raise(rb_eArgError, "Bad plan four-pole parameter register at word %zu", pc);
+		prm[k].p = r >= 0 ? ptrs[r] : NULL;
+		prm[k].scalar = sc[op[6] + 13 + k];
+	}
+	*obj = rb_ary_entry(objects, op[5]);
+}
+
+// The biquad op's operands for one lane, checked (see OP_BIQUAD).
+static void biquad_operands(const int32_t *op, size_t pc, const struct regs *R, long nregs, VALUE objects, VALUE *obj)
+{
+	float *const *ptrs = R->p;
+	const char *cplx = R->c;
+	if (cplx[op[1]] || cplx[op[2]]) rb_raise(rb_eArgError, "Plan biquad filters are real");
+	if (op[5] < 0 || op[5] >= RARRAY_LEN(objects)) rb_raise(rb_eArgError, "Bad plan biquad object at word %zu", pc);
+	for (int k = 3; k <= 4; k++) {
+		if (op[k] < 0 || op[k] >= nregs || cplx[op[k]] || !ptrs[op[k]]) rb_raise(rb_eArgError, "Bad plan biquad parameter register at word %zu", pc);
+	}
+	*obj = rb_ary_entry(objects, op[5]);
+}
+
 // Runs the op at +pc+ (+op+) for one lane's registers +R+.
 static void run_op(const int32_t *op, size_t pc, const struct regs *R, long nregs, const double *sc, size_t nscalars, VALUE objects, size_t n)
 {
@@ -1108,17 +1139,10 @@ static void run_op(const int32_t *op, size_t pc, const struct regs *R, long nreg
 		}
 
 		case OP_FOUR_POLE: {
-			if (cplx[d] || cplx[op[2]]) rb_raise(rb_eArgError, "Plan four-pole filters are real");
-			if (op[5] < 0 || op[5] >= RARRAY_LEN(objects)) rb_raise(rb_eArgError, "Bad plan four-pole object at word %zu", pc);
-			if (op[6] < 0 || (size_t)op[6] + 15 > nscalars) rb_raise(rb_eArgError, "Bad plan four-pole scalars at word %zu", pc);
 			struct mb_plan_param prm[2];
-			for (int k = 0; k < 2; k++) {
-				int r = op[3 + k];
-				if (r >= nregs || (r >= 0 && (cplx[r] || !ptrs[r]))) rb_raise(rb_eArgError, "Bad plan four-pole parameter register at word %zu", pc);
-				prm[k].p = r >= 0 ? ptrs[r] : NULL;
-				prm[k].scalar = sc[op[6] + 13 + k];
-			}
-			mb_plan_four_pole(ptrs[d], ptrs[op[2]], &prm[0], &prm[1], sc + op[6], rb_ary_entry(objects, op[5]), n);
+			VALUE obj;
+			four_pole_operands(op, pc, R, nregs, sc, nscalars, objects, prm, &obj);
+			mb_plan_four_pole(ptrs[d], ptrs[op[2]], &prm[0], &prm[1], sc + op[6], obj, n);
 			break;
 		}
 
@@ -1159,12 +1183,9 @@ static void run_op(const int32_t *op, size_t pc, const struct regs *R, long nreg
 		}
 
 		case OP_BIQUAD: {
-			if (cplx[d] || cplx[op[2]]) rb_raise(rb_eArgError, "Plan biquad filters are real");
-			if (op[5] < 0 || op[5] >= RARRAY_LEN(objects)) rb_raise(rb_eArgError, "Bad plan biquad object at word %zu", pc);
-			for (int k = 3; k <= 4; k++) {
-				if (op[k] < 0 || op[k] >= nregs || cplx[op[k]] || !ptrs[op[k]]) rb_raise(rb_eArgError, "Bad plan biquad parameter register at word %zu", pc);
-			}
-			mb_plan_biquad(ptrs[d], ptrs[op[2]], ptrs[op[3]], ptrs[op[4]], op[6], rb_ary_entry(objects, op[5]), n);
+			VALUE obj;
+			biquad_operands(op, pc, R, nregs, objects, &obj);
+			mb_plan_biquad(ptrs[d], ptrs[op[2]], ptrs[op[3]], ptrs[op[4]], op[6], obj, n);
 			break;
 		}
 
@@ -1392,6 +1413,33 @@ static VALUE ruby_run_lanes(VALUE self, VALUE words, VALUE scalars_list, VALUE o
 				al[l] = R[l].p[op[2]];
 			}
 			mb_plan_svf_lanes((int)L, dl, al, prm, remember, objs, n);
+		} else if (L > 1 && op[0] == OP_FOUR_POLE) {
+			float *dl[L];
+			const float *al[L];
+			struct mb_plan_param prm[2 * L];
+			const double *cfg[L];
+			VALUE objs[L];
+			for (long l = 0; l < L; l++) {
+				check_op(op, pc, &R[l], nregs, nscalars[l]);
+				four_pole_operands(op, pc, &R[l], nregs, sc[l], nscalars[l], objects[l], prm + 2 * l, &objs[l]);
+				cfg[l] = sc[l] + op[6];
+				dl[l] = R[l].p[op[1]];
+				al[l] = R[l].p[op[2]];
+			}
+			mb_plan_four_pole_lanes((int)L, dl, al, prm, cfg, objs, n);
+		} else if (L > 1 && op[0] == OP_BIQUAD) {
+			float *dl[L];
+			const float *al[L], *cl[L], *ql[L];
+			VALUE objs[L];
+			for (long l = 0; l < L; l++) {
+				check_op(op, pc, &R[l], nregs, nscalars[l]);
+				biquad_operands(op, pc, &R[l], nregs, objects[l], &objs[l]);
+				dl[l] = R[l].p[op[1]];
+				al[l] = R[l].p[op[2]];
+				cl[l] = R[l].p[op[3]];
+				ql[l] = R[l].p[op[4]];
+			}
+			mb_plan_biquad_lanes((int)L, dl, al, cl, ql, op[6], objs, n);
 		} else {
 			for (long l = 0; l < L; l++) {
 				run_op(op, pc, &R[l], nregs, sc[l], nscalars[l], objects[l], n);
@@ -1411,6 +1459,7 @@ static VALUE ruby_run_lanes(VALUE self, VALUE words, VALUE scalars_list, VALUE o
 
 	return outs;
 }
+
 
 // The executor's enum values, for specs that check the Ruby side's tables.
 static VALUE ruby_enums(VALUE self)
