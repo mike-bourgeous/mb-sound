@@ -21,8 +21,9 @@ RSpec.describe('Noise generation scripts') do
       end
 
       it 'can generate multiple channels' do
-        text = `RANDOM_SEED=0 bin/write_#{n}_noise.rb --channels 4 --bins 2401 --seconds 0.1 #{output.shellescape} 2>&1`
-        result = ($?)
+        # A fork (spectral noise draws from MB::Sound.root_rng, reset before
+        # every example); the example above is the script's real run.
+        text, result = fork_script("bin/write_#{n}_noise.rb", '--channels', '4', '--bins', '2401', '--seconds', '0.1', output)
         expect(result).to be_success
         expect(out_sound.length).to eq(4)
         out_sound.each do |c|

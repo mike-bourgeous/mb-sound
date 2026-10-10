@@ -150,7 +150,8 @@ module PlanSpecHelpers
   # unfused samples exactly (or within +tolerance+, relative to 1;
   # +ruby_tolerance+ for the Ruby mirror, whose tone ops are the Tone's own
   # Ruby path, exact for most shapes but not complex sines).  Also
-  # expects every planned block to have run planned unless +fallbacks+.
+  # expects every planned block to have run planned unless +fallbacks+
+  # (true allows any unfused blocks, an Integer at most that many per region).
   # Returns a Result.
   #
   # The default +sizes+ (SIZES) are repeated as needed to reach every
@@ -228,10 +229,10 @@ module PlanSpecHelpers
       end
     end
 
-    unless fallbacks
+    unless fallbacks == true
       installations.each do |e, inst|
         inst.regions.each do |r|
-          expect(r.unfused_blocks).to eq(0), "#{e}: #{r.unfused_blocks} blocks ran unfused (#{r.disabled})\n#{r}"
+          expect(r.unfused_blocks).to be <= (fallbacks || 0), "#{e}: #{r.unfused_blocks} blocks ran unfused (#{r.disabled})\n#{r}"
         end
       end
     end
