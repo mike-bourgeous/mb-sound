@@ -11,9 +11,8 @@ RSpec.describe('bin/plot_windows.rb') do
   end
 
   it 'can be given a specific window' do
-    # In a fork (see ForkScript); the example above is the real run
-    text, status = fork_script('bin/plot_windows.rb', 'DoubleHann', env: { 'PLOT_TERMINAL' => 'dumb' })
-    expect(status).to be_success, text
+    text = `PLOT_TERMINAL=dumb bin/plot_windows.rb DoubleHann 2>&1`
+    expect($?).to be_success
     expect(text).to include('DoubleHann')
     expect(text).not_to include('Rectangular')
   end

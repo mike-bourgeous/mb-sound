@@ -108,12 +108,15 @@ RSpec.describe(MB::Sound::GraphNode::Resample, :aggregate_failures) do
           expect(delta.abs.max).to be_between(-250.db, max_delta)
         end
 
+        # 6048 output samples (28 chunks of 216) read ~265000 input samples
+        # each way; 27000 (125 chunks) took ~1.3 s per mode.
         it 'does not matter what the downsampling chunk size is' do
-          large_window = 43.hz.at(1).at_rate(17521).resample(400, mode: resample_mode).sample(27000)
-          small_window = 43.hz.at(1).at_rate(17521).resample(400, mode: resample_mode).multi_sample(216, 125)
+          large_window = 43.hz.at(1).at_rate(17521).resample(400, mode: resample_mode).sample(6048)
+          small_window = 43.hz.at(1).at_rate(17521).resample(400, mode: resample_mode).multi_sample(216, 28)
           large_window, small_window = select_whole_cycles(large_window, small_window)
-          large_window = large_window[0...16000]
-          small_window = small_window[0...16000]
+          expect(large_window.length).to be > 5000
+          large_window = large_window[0...5000]
+          small_window = small_window[0...5000]
 
           delta = large_window - small_window
 
