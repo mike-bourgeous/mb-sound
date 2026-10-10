@@ -277,7 +277,9 @@ module MB
           check_clip(tr, value)
           if playing && tr.clip.equal?(value)
             nil
-          elsif playing && tr.patch? && tr.clip
+          elsif playing && tr.patch? && (tr.clip.nil? || new_rows?(tr.clip, value))
+            start_track(tr, value, time, fade)
+          elsif playing && tr.patch?
             begin
               @session.swap(tr.name, { tr.clip => value }, start_time: time)
               @mutex.synchronize { tr.clip = value }
@@ -288,7 +290,7 @@ module MB
               start_track(tr, value, time, fade)
             end
           elsif playing
-            @session.swap(tr.name, value, start_time: time)
+            @session.swap(tr.name, tr.clip && !value.is_a?(Sequence::Clip) ? { tr.clip => value } : value, start_time: time)
             @mutex.synchronize { tr.clip = value }
             last_change(tr.name)
           else
@@ -320,6 +322,15 @@ module MB
       def last_change(name)
         group = Thread.current[:mb_sound_command]
         group && group[:changes].reverse.find { |c| c.subject == name }
+      end
+
+      # True if +value+ is a Kit with rows +old+ doesn't have (a patch built
+      # from +old+ has no voices for them, so it is built again instead of
+      # swapped).
+      def new_rows?(old, value)
+        return false unless value.is_a?(Sequence::Kit)
+        return true unless old.is_a?(Sequence::Kit)
+        !(value.rows.keys - old.rows.keys).empty?
       end
 
       def check_clip(tr, value)

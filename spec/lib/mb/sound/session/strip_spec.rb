@@ -94,6 +94,23 @@ RSpec.describe(MB::Sound::Session::Strip) do
     expect(session.strip_info[:soloed]).to eq([])
   end
 
+  it 'clears every solo that has landed when the clear lands, even one queued before it' do
+    session.add(1.constant, name: :a)
+    session.add(2.constant, name: :b)
+    run(800)
+    session.solo(:a, start_time: 1/2r)
+    session.command('solo') { session.solo(start_time: 3/4r) } # clears all: :a's solo hasn't landed yet
+    expect(session.strip_info[:soloed]).to eq([])
+    data = run(96000)
+    expect(data[48000 - 800 + 300]).to eq(1)
+    expect(data[72000 - 800 + 300]).to eq(3)
+    expect(session.strip_info[:soloed]).to eq([])
+    expect(session.journal.changes.last).to have_attributes(kind: :unsolo, subject: :strip, status: :landed)
+
+    session.undo(at: :now)
+    expect(run(1600)[-1]).to eq(1)
+  end
+
   it 'mutes groups of players' do
     session.add(1.constant, name: :a)
     session.add(2.constant, name: :b)

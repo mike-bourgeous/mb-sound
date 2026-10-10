@@ -22,9 +22,10 @@ module MB
           strip_change(:mute, names, at: at, fade: fade, start_time: start_time) { |n| @muted << n }
         end
 
-        # Unmutes the named players (all muted players if none are named).
+        # Unmutes the named players (all muted players if none are named:
+        # those muted when the change lands).
         def unmute(*names, at: nil, fade: nil, start_time: nil)
-          names = @muted.to_a if names.empty?
+          return strip_all_change(:unmute, at: at, fade: fade, start_time: start_time) { @muted.clear } if names.empty?
           strip_change(:unmute, names, at: at, fade: fade, start_time: start_time) { |n| @muted.delete(n) }
         end
 
@@ -35,9 +36,10 @@ module MB
           strip_change(:solo, names, at: at, fade: fade, start_time: start_time) { |n| @soloed << n }
         end
 
-        # Clears the solo of the named players (all solos if none are named).
+        # Clears the solo of the named players (all solos if none are named:
+        # those soloed when the change lands, so a queued solo isn't missed).
         def unsolo(*names, at: nil, fade: nil, start_time: nil)
-          names = @soloed.to_a if names.empty?
+          return strip_all_change(:unsolo, at: at, fade: fade, start_time: start_time) { @soloed.clear } if names.empty?
           strip_change(:unsolo, names, at: at, fade: fade, start_time: start_time) { |n| @soloed.delete(n) }
         end
 
@@ -124,6 +126,21 @@ module MB
               apply_strip(fade)
             }
           }
+        end
+
+        # Queues one change to every player's mute or solo flags (subject
+        # :strip), calling +update+ when it lands.  Returns the changes.
+        def strip_all_change(kind, at:, fade:, start_time:, &update)
+          fade = bars_or_nil(fade) if fade
+          time = start_time ? start_time.to_r : (at.nil? ? nil : launch_time(at, []))
+          [change(kind, :strip, time, data: { fade: fade }) { |_t| update.call; apply_strip(fade) }]
+        end
+
+        # Puts every mute and solo flag back to a StripState (for undo).
+        def restore_strip(state, fade = nil)
+          @muted.replace(state.muted)
+          @soloed.replace(state.soloed)
+          apply_strip(fade)
         end
 
         # True if a player named +name+ should be heard.  Called with

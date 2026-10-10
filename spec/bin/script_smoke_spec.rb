@@ -30,6 +30,7 @@ RSpec.describe('script runner scripts', :smoke) do
     'bin/songs/midi_transforms_song.rb' => ['--bars', '0.5', '-s'],
     'bin/songs/node_graph_benchmark.rb' => ['--bars', '0.5'],
     'bin/songs/node_graph_grit.rb' => ['--bars', '0.5'],
+    'bin/songs/night_bus_set.rb' => ['--bars', '0.5', '-c', '900'],
     'bin/songs/random_drum_pentatonic.rb' => ['--bars', '0.5'],
     'bin/songs/scheduled_song.rb' => ['--bars', '0.5'],
     'bin/songs/sequence_demo.rb' => ['--bars', '0.5', '--bpm', '100'],

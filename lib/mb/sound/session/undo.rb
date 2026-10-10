@@ -32,6 +32,10 @@ module MB
         # bypass) and description.
         MasterState = Struct.new(:block, :description, keyword_init: true)
 
+        # Every mute and solo flag around a change to all of them (subject
+        # :strip, e.g. `solo` with no names).
+        StripState = Struct.new(:muted, :soloed, keyword_init: true)
+
         # One undo step: the changes one command made (see Changes::Change),
         # Set-level state around it (+extras+: [participant, before, after]
         # triples), and +cancelled+ changes (a step that undid queued
@@ -237,6 +241,10 @@ module MB
             }
           end
 
+          if subject == :strip
+            return change(:restore, :strip, time, data: {}, undoes: original.seq) { |_t| restore_strip(original.before) }
+          end
+
           state = original.before
           starts = state.is_a?(PlayerState) && state.player ? state.player.timeline_nodes : nil
           change(:restore, subject, time, data: {}, undoes: original.seq, starts: starts) { |t|
@@ -247,6 +255,8 @@ module MB
         # Snapshots a change's subject (see PlayerState and MasterState).
         # Called with @render_lock held.
         def undo_snapshot(subject)
+          return StripState.new(muted: @muted.dup, soloed: @soloed.dup) if subject == :strip
+
           if subject == :master
             chain = @mutex.synchronize { @master_chains&.last }
             return MasterState.new(block: chain&.block, description: chain&.description || 'bypass')
