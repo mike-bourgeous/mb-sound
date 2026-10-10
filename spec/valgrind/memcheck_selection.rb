@@ -454,13 +454,19 @@ module MemcheckSelection
 
   # Merges into HEAD (first-parent history) since the stamped commit that
   # changed ext/, not counting the merge that brought in the checked commit.
+  #
+  # Ancestry comes from one --ancestry-path listing (the commits between
+  # +sha+ and HEAD that descend from +sha+) rather than a `git merge-base
+  # --is-ancestor` per merge, which took ~140 ms each in this repository.
   def ext_merges_since(sha)
     return nil unless git('cat-file', '-e', "#{sha}^{commit}", allow_fail: true)
 
-    git('rev-list', '--first-parent', '--merges', "#{sha}..HEAD").lines.map(&:chomp).count { |m|
-      !git('diff', '--quiet', "#{m}^1", m, '--', 'ext', allow_fail: true) &&
-        !(git('merge-base', '--is-ancestor', sha, "#{m}^2", allow_fail: true) &&
-          !git('merge-base', '--is-ancestor', sha, "#{m}^1", allow_fail: true))
+    sha = git('rev-parse', "#{sha}^{commit}").strip
+    descendants = git('rev-list', '--ancestry-path', "#{sha}..HEAD").lines.map(&:chomp).to_set << sha
+    git('rev-list', '--first-parent', '--merges', '--parents', "#{sha}..HEAD").lines.count { |line|
+      m, first, second = line.split
+      !git('diff', '--quiet', first, m, '--', 'ext', allow_fail: true) &&
+        !(descendants.include?(second) && !descendants.include?(first))
     }
   end
 
