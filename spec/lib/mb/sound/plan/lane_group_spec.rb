@@ -77,6 +77,24 @@ RSpec.describe(MB::Sound::Plan::LaneGroup) do
     expect(s.skipped_lanes).to be_empty
   end
 
+  it "doesn't group lanes with unfused work of their own (idle lanes keep being skipped)" do
+    MB::Sound::Plan.lanes = true
+    MB::Sound.seed(0)
+    s = MB::Sound.synth('spec/test_data/c_major.mid', voices: 4) { |v| (v.hz.saw * v.amp_env).proc { |x| x } }
+    expect(s.lane_groups).to be_nil
+    expect(s.skippable_lanes).not_to be_empty
+  end
+
+  it 'groups lanes that are never skipped anyway (long-memory nodes) even with unfused work' do
+    MB::Sound::Plan.lanes = true
+    MB::Sound.seed(0)
+    s = MB::Sound.synth('spec/test_data/c_major.mid', voices: 3) { |v|
+      (v.hz.saw.filter(:lowpass, cutoff: 900) * v.amp_env).proc { |x| x }.delay(0.001) * 0.5
+    }
+    expect(s.skippable_lanes).to be_empty
+    expect(s.lane_groups&.groups.to_a).not_to be_empty
+  end
+
   it 'still skips idle lanes with lane groups off' do
     MB::Sound::Plan.lanes = false
     MB::Sound.seed(0)

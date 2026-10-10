@@ -248,10 +248,10 @@ module MB
         # Plan::SharedInputs)
         @shared_inputs = @plans.any? ? Plan::SharedInputs.new(@plans) : nil
 
-        # Lanes whose regions have the same shape run them together, every
-        # lane every buffer (see Plan::LaneGroup; such lanes aren't skipped
-        # while idle)
-        @lane_groups = Plan.lanes && @plans.any? ? Plan::LaneGroups.new(@plans) : nil
+        # Lanes whose regions have the same shape may run them together,
+        # every lane every buffer (see Plan::LaneGroup and
+        # #setup_idle_skipping)
+        @lane_groups = nil
 
         @channels = @lanes.map(&:length).max
         @done = Array.new(@lanes.length, false)
@@ -478,6 +478,17 @@ module MB
         @skippable_base = graphs.each_with_index.map { |g, idx|
           @skip_idle && g.none? { |n| Synth.long_memory?(n) } && g.any? { |n| n.is_a?(Notes::Node) && n.notes.equal?(@notes[idx]) }
         }
+
+        # Lane groups compute every lane every buffer (user decision
+        # 2026-10-10), so the lanes are grouped only if that gives up no
+        # skipping of unfused work: each lane is never skipped anyway (it
+        # has long-memory nodes, or skipping is off) or runs all of its own
+        # nodes in plan regions.  Otherwise (e.g. unison oscillators outside
+        # the regions) the lanes run their regions alone and idle lanes are
+        # skipped as before.
+        if Plan.lanes && @plans.any? && graphs.each_index.all? { |idx| !@skippable_base[idx] || lane_planned?(graphs, sets, idx) }
+          @lane_groups = Plan::LaneGroups.new(@plans)
+        end
         update_skippable
 
         # What a skipped lane still reads: its own Notes nodes, and its
@@ -498,6 +509,19 @@ module MB
           own + shared
         }
         @clock_node = @boundary.map { |b| b.find { |n| n.is_a?(Notes::Node) } }
+      end
+
+      # True if every graph node of lane +idx+'s graph (+graphs+, with the
+      # id sets +sets+; MIDI streams aren't graph nodes) other than Tees, the
+      # lane's own Notes nodes, and nodes shared with other lanes is
+      # computed in a plan region.
+      def lane_planned?(graphs, sets, idx)
+        graphs[idx].all? { |n|
+          !n.is_a?(GraphNode) || n.is_a?(GraphNode::Tee) || n.is_a?(GraphNode::Tee::Branch) ||
+            (n.is_a?(Notes::Node) && n.notes.equal?(@notes[idx])) ||
+            sets.each_with_index.any? { |set, j| j != idx && set[n.__id__] } ||
+            !n.instance_variable_get(:@plan_region).nil? || !n.instance_variable_get(:@plan_member).nil?
+        }
       end
 
       # Lanes with regions in lane groups are computed every buffer (user
