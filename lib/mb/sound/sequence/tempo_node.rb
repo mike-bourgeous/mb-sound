@@ -159,6 +159,35 @@ module MB
           {}
         end
 
+        # Plan layer: the value read every block as a param (Plan::Op::Param,
+        # like a Constant's), while no port is in use.
+        include Plan::Describable
+
+        def plan_describe(p)
+          p.param(self, complex: false)
+        end
+
+        def plan_unsupported_reason
+          return 'ports (timeline jumps) in use' if @ports
+
+          nil
+        end
+
+        # For plans: this block's value (#sample's, as a number).
+        def plan_param(count)
+          @mode == :hz && timeline_paused? && !freewheel? ? 0.0 : value
+        end
+
+        # For plans: a tempo is never complex.
+        def plan_complex?
+          false
+        end
+
+        # For plan listings.
+        def value_string
+          "#{MB::M.sigfigs(value, 5)} #{@mode == :hz ? 'Hz' : 's'} (#{@duration})"
+        end
+
         private
 
         # Returns one frozen buffer while the value and count stay the same

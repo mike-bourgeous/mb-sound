@@ -57,11 +57,19 @@ module MB
             n = trig.length
           end
 
+          trig = trig[0...n] if trig.length != n
+          process(trig, data, n)
+        end
+
+        # The output for trigger samples +trig+ (+n+ of them) and source
+        # samples +data+ (nil in random mode), updating the held value and
+        # the trigger's last sample; returns the output buffer (reused).
+        # Also the Ruby mirror of the plan op (Plan::Op::SampleHold).
+        def process(trig, data, n)
           @held ||= data ? data[0].to_f : draw
 
           # Rising edges: sample i > 0 after i - 1 <= 0.  Most buffers of a
           # slow trigger have no change (all high or all low).
-          trig = trig[0...n] if trig.length != n
           pos = trig.gt(0)
           high = pos.count_true
           if high == 0
@@ -94,6 +102,33 @@ module MB
 
         def to_s
           @source ? 'Sample & Hold' : "Random Hold #{MB::M.sigfigs(@range.begin, 3)}..#{MB::M.sigfigs(@range.end, 3)}"
+        end
+
+        # Plan layer (see MB::Sound::Plan and Plan::Op::SampleHold): the
+        # edge detection and holding in C on this node's state, drawing
+        # random values through #plan_draw.
+        include Plan::Describable
+
+        def plan_inputs
+          [@trigger, @source].compact
+        end
+
+        def plan_describe(p)
+          p.sample_hold(self, p[@trigger], @source && p[@source])
+        end
+
+        # For plans: the next random value (random mode).
+        def plan_draw
+          draw
+        end
+
+        def plan_snapshot
+          [@held, @prev, @random && Marshal.dump(@random)]
+        end
+
+        def plan_restore(snapshot)
+          @held, @prev, random = snapshot
+          @random = Marshal.load(random) if random
         end
 
         private

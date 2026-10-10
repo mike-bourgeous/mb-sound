@@ -91,6 +91,7 @@ enum {
 	OP_CLIP,      // dst, a, sc                  dst = Numo clip of a to (float)sc[0]..(float)sc[1] (NaN stays NaN)
 	OP_EXP,       // dst, a, 0                   dst = (float)exp((double)a) (Numo::NMath.exp on an SFloat)
 	OP_TIME_SCALE,// dst, a, sc                  dst = SQ80::TimeScale#time of a: sc [kind (0 velocity, 1 key), seconds, amount]
+	OP_SAMPLE_HOLD,// dst, trig, src, object     dst = GraphNode::SampleHold (see run_sample_hold); src -1: random draws
 };
 
 // Event list modes and entry kinds (Plan::EventList)
@@ -105,6 +106,7 @@ typedef struct { float r, i; } mb_cf;
 
 static ID id_phase, id_blep, id_noise, id_jump_residual, id_last_freq, id_last_width;
 static ID id_plan_reset, id_plan_residual_used, id_note, id_frequency, id_state, id_ring1, id_ring2, id_table, id_plan_wavetable;
+static ID id_held, id_prev, id_plan_draw;
 
 // The register file of one call.
 struct regs {
@@ -1008,6 +1010,9 @@ static size_t op_length(const struct plan_words *pw, size_t pc)
 		case OP_CLIP: case OP_EXP: case OP_TIME_SCALE:
 			len = 4;
 			break;
+		case OP_SAMPLE_HOLD:
+			len = 5;
+			break;
 		case OP_ENVELOPE:
 			if (pc + 5 > pw->nwords || op[4] < 2 || op[4] > ENV_MAX_SEGMENTS) rb_raise(rb_eArgError, "Bad plan envelope at word %zu", pc);
 			len = 5 + 4 * (size_t)op[4] + 7;
@@ -1107,6 +1112,51 @@ static void run_note_freq(const int32_t *op, const struct regs *R, double tnum, 
 	} else {
 		for (size_t i = 0; i < n; i++) D[i] = mb_num2freq(A[i], tnum, tfrq);
 	}
+}
+
+/*
+ * OP_SAMPLE_HOLD: GraphNode::SampleHold#process on the trigger register
+ * (op[2]) and source register (op[3], or -1 for random values drawn with
+ * SampleHold#plan_draw), with the node's @held (nil before the first
+ * block: the source's first sample or a draw) and @prev (the trigger's last
+ * sample): at each rising edge (> 0 after <= 0) the held value becomes the
+ * source's sample there (or a draw).
+ */
+static void run_sample_hold(const int32_t *op, size_t pc, const struct regs *R, long nregs, VALUE objects, size_t n)
+{
+	if (R->c[op[1]] || R->c[op[2]]) rb_raise(rb_eArgError, "Plan sample and hold is real");
+	if (op[3] >= nregs || (op[3] >= 0 && (R->c[op[3]] || !R->p[op[3]]))) rb_raise(rb_eArgError, "Bad plan sample and hold source at word %zu", pc);
+	if (op[4] < 0 || op[4] >= RARRAY_LEN(objects)) rb_raise(rb_eArgError, "Bad plan sample and hold object at word %zu", pc);
+	if (n == 0) {
+		return;
+	}
+
+	VALUE node = rb_ary_entry(objects, op[4]);
+	const float *T = R->p[op[2]];
+	const float *S = op[3] >= 0 ? R->p[op[3]] : NULL;
+	float *D = R->p[op[1]];
+
+	VALUE held_v = rb_ivar_get(node, id_held);
+	double held;
+	if (NIL_P(held_v)) {
+		held = S ? (double)S[0] : NUM2DBL(rb_funcall(node, id_plan_draw, 0));
+	} else {
+		held = NUM2DBL(held_v);
+	}
+	_Bool prev_pos = NUM2DBL(rb_ivar_get(node, id_prev)) > 0;
+
+	for (size_t i = 0; i < n; i++) {
+		_Bool pos = T[i] > 0;
+		if (pos && !prev_pos) {
+			held = S ? (double)S[i] : NUM2DBL(rb_funcall(node, id_plan_draw, 0));
+		}
+		D[i] = (float)held;
+		prev_pos = pos;
+	}
+
+	rb_ivar_set(node, id_prev, DBL2NUM(T[n - 1]));
+	rb_ivar_set(node, id_held, DBL2NUM(held));
+	RB_GC_GUARD(node);
 }
 
 // Runs the op at +pc+ (+op+) for one lane's registers +R+.
@@ -1294,6 +1344,10 @@ static void run_op(const int32_t *op, size_t pc, const struct regs *R, long nreg
 			}
 			break;
 		}
+
+		case OP_SAMPLE_HOLD:
+			run_sample_hold(op, pc, R, nregs, objects, n);
+			break;
 
 		case OP_ENVELOPE:
 			if (cplx[d]) rb_raise(rb_eArgError, "Plan envelopes are real");
@@ -1541,6 +1595,7 @@ static VALUE ruby_enums(VALUE self)
 	rb_hash_aset(h, ID2SYM(rb_intern("clip")), INT2NUM(OP_CLIP));
 	rb_hash_aset(h, ID2SYM(rb_intern("exp")), INT2NUM(OP_EXP));
 	rb_hash_aset(h, ID2SYM(rb_intern("time_scale")), INT2NUM(OP_TIME_SCALE));
+	rb_hash_aset(h, ID2SYM(rb_intern("sample_hold")), INT2NUM(OP_SAMPLE_HOLD));
 	rb_hash_aset(h, ID2SYM(rb_intern("ev_ramp")), INT2NUM(EV_RAMP));
 	rb_hash_aset(h, ID2SYM(rb_intern("events_held")), INT2NUM(EVENTS_HELD));
 	rb_hash_aset(h, ID2SYM(rb_intern("events_impulses")), INT2NUM(EVENTS_IMPULSES));
@@ -1591,6 +1646,9 @@ void Init_fast_plan(void)
 	id_ring2 = rb_intern("@ring2");
 	id_table = rb_intern("@table");
 	id_plan_wavetable = rb_intern("plan_wavetable");
+	id_held = rb_intern("@held");
+	id_prev = rb_intern("@prev");
+	id_plan_draw = rb_intern("plan_draw");
 
 	rb_define_module_function(fast_plan, "run", ruby_run, 8);
 	rb_define_module_function(fast_plan, "run_lanes", ruby_run_lanes, 8);
