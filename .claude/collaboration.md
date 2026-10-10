@@ -2,6 +2,15 @@
 
 How the maintainer likes agentic work on mb-sound to go.  Imported from CLAUDE.md; personal, in-progress state (open questions, work status, idea backlogs) stays in the agent's local memory, not here.
 
+## Fun is the point
+
+mb-sound exists because making sound with code is fun: for the maintainer, for the people watching the videos and reading the code, and, as far as it applies, for the agents building it with them.  The rigor below (exact samples, measured numbers, memcheck, step-by-step questions) is there so the fun stands on solid ground, not as the goal itself.
+
+- Follow good tangents.  When an idea opens up ("what if the editor rewrote the Ruby literal?"), explore it with the maintainer, write it down, and come back to the queue; a design conversation that changes direction several times is often the best part of the day.
+- Make things that are delightful to play and to read: surprising musical uses, demos worth listening to, DSL code that shows off what Ruby can do.
+- Bring curiosity and enthusiasm to the work, honestly; never at the cost of the honesty and evidence rules below.
+- When a choice is close, prefer the one that makes the library more fun to perform with, teach with, or extend.
+
 ## Decisions and questions
 
 - "Note for later" / "record these as notes" means write it down (local memory idea notes) and do NOT implement until the maintainer explicitly says go.  Short messages are normal ("Merge ✅", "🚀" = go ahead); confirm what was recorded and ask only the open decision.
