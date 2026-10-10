@@ -1068,6 +1068,26 @@ static void biquad_operands(const int32_t *op, size_t pc, const struct regs *R, 
 	*obj = rb_ary_entry(objects, op[5]);
 }
 
+// The note frequency op's tuning object for one lane, checked.
+static VALUE note_freq_operands(const int32_t *op, size_t pc, const struct regs *R, VALUE objects)
+{
+	if (R->c[op[1]] || R->c[op[2]]) rb_raise(rb_eArgError, "Plan note frequencies are real only");
+	if (op[3] < 0 || op[3] >= RARRAY_LEN(objects)) rb_raise(rb_eArgError, "Bad plan tuning object at word %zu", pc);
+	return rb_ary_entry(objects, op[3]);
+}
+
+// OP_NOTE_FREQ with the tuning's note number +tnum+ and frequency +tfrq+.
+static void run_note_freq(const int32_t *op, const struct regs *R, double tnum, double tfrq, size_t n)
+{
+	float *D = R->p[op[1]];
+	const float *A = R->p[op[2]];
+	if (op[4]) {
+		mb_vec_note_freq(D, A, n, tnum, tfrq);
+	} else {
+		for (size_t i = 0; i < n; i++) D[i] = mb_num2freq(A[i], tnum, tfrq);
+	}
+}
+
 // Runs the op at +pc+ (+op+) for one lane's registers +R+.
 static void run_op(const int32_t *op, size_t pc, const struct regs *R, long nregs, const double *sc, size_t nscalars, VALUE objects, size_t n)
 {
@@ -1205,18 +1225,8 @@ static void run_op(const int32_t *op, size_t pc, const struct regs *R, long nreg
 			break;
 
 		case OP_NOTE_FREQ: {
-			if (cplx[d] || cplx[op[2]]) rb_raise(rb_eArgError, "Plan note frequencies are real only");
-			if (op[3] < 0 || op[3] >= RARRAY_LEN(objects)) rb_raise(rb_eArgError, "Bad plan tuning object at word %zu", pc);
-			VALUE tuning = rb_ary_entry(objects, op[3]);
-			double tnum = NUM2DBL(rb_funcall(tuning, id_note, 0));
-			double tfrq = NUM2DBL(rb_funcall(tuning, id_frequency, 0));
-			float *D = ptrs[d];
-			const float *A = ptrs[op[2]];
-			if (op[4]) {
-				mb_vec_note_freq(D, A, n, tnum, tfrq);
-			} else {
-				for (size_t i = 0; i < n; i++) D[i] = mb_num2freq(A[i], tnum, tfrq);
-			}
+			VALUE tuning = note_freq_operands(op, pc, R, objects);
+			run_note_freq(op, R, NUM2DBL(rb_funcall(tuning, id_note, 0)), NUM2DBL(rb_funcall(tuning, id_frequency, 0)), n);
 			break;
 		}
 
@@ -1440,6 +1450,21 @@ static VALUE ruby_run_lanes(VALUE self, VALUE words, VALUE scalars_list, VALUE o
 				ql[l] = R[l].p[op[4]];
 			}
 			mb_plan_biquad_lanes((int)L, dl, al, cl, ql, op[6], objs, n);
+		} else if (L > 1 && op[0] == OP_NOTE_FREQ) {
+			// Lanes reading the same tuning object (e.g. the session's
+			// current tuning) ask it once
+			VALUE last = Qundef;
+			double tnum = 0, tfrq = 0;
+			for (long l = 0; l < L; l++) {
+				check_op(op, pc, &R[l], nregs, nscalars[l]);
+				VALUE tuning = note_freq_operands(op, pc, &R[l], objects[l]);
+				if (tuning != last) {
+					tnum = NUM2DBL(rb_funcall(tuning, id_note, 0));
+					tfrq = NUM2DBL(rb_funcall(tuning, id_frequency, 0));
+					last = tuning;
+				}
+				run_note_freq(op, &R[l], tnum, tfrq, n);
+			}
 		} else {
 			for (long l = 0; l < L; l++) {
 				run_op(op, pc, &R[l], nregs, sc[l], nscalars[l], objects[l], n);
