@@ -115,6 +115,55 @@ RSpec.describe(MB::Sound::MIDI::ClipSource) do
     end
   end
 
+  describe 'loops with notes moved before their cycle (humanize)' do
+    let(:base) { MB::Sound.seq(MB::Sound::C4, MB::Sound::E4).n8 }
+    # Every downbeat 1/64 early (1/32 s at 120 BPM)
+    let(:early) {
+      v = MB::Sound::Sequence::Clip::Variation.new(name: 'early', block: ->(events, _cycle, _clip) {
+        events.each_with_index.map { |e, i| i == 0 ? e.with(start: e.start - 1/64r) : e }
+      })
+      MB::Sound::Sequence::Clip.new(base.events, length: base.length, loop: true, variations: [v])
+    }
+
+    def ons(src, from, to)
+      src.read(from, to).select(&:note_on?).map { |e| [e.time, e.note] }
+    end
+
+    it 'plays the first downbeat at the start and later ones before their bar lines' do
+      src = MB::Sound::MIDI::ClipSource.new(early, transport: transport)
+      # 120 BPM: a cycle (1/4 whole note) per 1/2 s, 1/64 whole note = 1/32 s
+      expect(ons(src, 0, 1/4r) + ons(src, 1/4r, 1)).to eq([[0r, 60], [1/4r, 64], [1/2r - 1/32r, 60], [3/4r, 64], [1r - 1/32r, 60]])
+    end
+
+    it 'plays a downbeat moved before the position a loop is launched or seeked to, once' do
+      src = MB::Sound::MIDI::ClipSource.new(early, transport: transport)
+      src.start_at(1/4r, origin: 1/4r) # cycle 1's downbeat was due 1/32 s before
+      expect(ons(src, 0, 1/2r)).to eq([[0r, 60], [1/4r, 64], [1/2r - 1/32r, 60]])
+      expect(ons(src, 1/2r, 1)).to eq([[3/4r, 64], [1r - 1/32r, 60]])
+
+      src.seek(1) # seconds into the clip: cycle 2's start
+      expect(ons(src, 1, 3/2r)).to eq([[1r, 60], [5/4r, 64], [3/2r - 1/32r, 60]])
+
+      # A seek into the middle of a cycle doesn't replay its downbeat
+      src.seek(1/4r)
+      expect(ons(src, 3/2r, 2)).to eq([[3/2r, 64], [7/4r - 1/32r, 60]])
+    end
+
+    it 'plays the downbeat of a cycle that a launch-aligned loop is launched on' do
+      src = MB::Sound::MIDI::ClipSource.new(early.loop(align: :launch), transport: transport)
+      src.start_at(3/8r, origin: 3/8r)
+      expect(ons(src, 0, 1/2r)).to eq([[0r, 60], [1/4r, 64], [1/2r - 1/32r, 60]])
+    end
+
+    it 'plays the downbeat of the cycle a swap lands on' do
+      src = MB::Sound::MIDI::ClipSource.new(base.loop, transport: transport)
+      expect(ons(src, 0, 1/4r)).to eq([[0r, 60]])
+      src.swap_clip(early, time: 1/4r)
+      # The swap lands on cycle 2 at 1/2 s, whose downbeat was due 1/32 s earlier
+      expect(ons(src, 1/4r, 1)).to eq([[1/4r, 64], [1/2r, 60], [3/4r, 64], [1r - 1/32r, 60]])
+    end
+  end
+
   describe 'launch-aligned loops' do
     let(:clip) { MB::Sound.seq(MB::Sound::C4, MB::Sound::E4).n8 }
     let(:launch_loop) { clip.loop(align: :launch) }

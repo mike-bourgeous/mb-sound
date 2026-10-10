@@ -9,8 +9,9 @@
 # - VCF: the diode ladder (GraphNode#diode, --filter diode) or lp4 to
 #   compare, with drive; cutoff (CC 74 brightness moves it +-2 octaves) and
 #   resonance (CC 71).
-# - MEG: Notes#acid_env, decay --decay (accented notes use the shortest,
-#   0.2 s), times --env-mod octaves on the cutoff.
+# - MEG: Notes#acid_env, an exponential fall (curve 30) over --decay
+#   (1.56 s, passing half-way when a linear 0.6 s fall would; accented
+#   notes use the shortest, 0.52 s), times --env-mod octaves on the cutoff.
 # - Accent: velocity >= 0.8 (Notes#accent; `!A1` in a seq) adds level and
 #   the accent sweep (Notes#accent_sweep: the 303's capacitor, so runs of
 #   accents open the filter further), --accent sets how much.
@@ -31,12 +32,13 @@
 #     bg :acid, acid_voice(line, cutoff: 0.25.bars.lfo.at(150..900), reso: 0.8)  # a knob tweak
 #     bg :acid, acid_voice(line.permute(seed: 3), filter: :lp4)                   # lp4 to compare
 #     bg :acid, acid_voice(midi)                        # a keyboard
-#     bg :acid, acid_voice(line, env_curve: 30)         # exponential MEG instead of linear (A/B: listening bench omnibus2)
-#     bg :acid, acid_voice(line, env_curve: 30, decay: 1.17, accent_decay: 0.39)   # the same average sweep as linear (equal area, x1.95)
+#     bg :acid, acid_voice(line, decay: 2.6)            # a longer MEG (exponential, curve 30; times x2.6 a linear fall's)
+#     bg :acid, acid_voice(line, env_curve: :linear, decay: 0.6, accent_decay: 0.2)  # the earlier linear MEG (same half-way times)
+#     bg :acid, acid_voice(line, decay: 1.17, accent_decay: 0.39)   # curve 30 with linear's average sweep (equal area, x1.95)
 #
 # Building blocks on their own (any Notes n: clip.notes, midi, or a synth voice):
 #     n.accent                                    # 1 on accented notes, else 0
-#     meg = n.acid_env(decay: 0.5)                # the MEG; accented notes decay in 0.2 s
+#     meg = n.acid_env(decay: 1.3)                # the MEG (curve 30); accented notes decay in 0.52 s
 #     n.accent_sweep(meg, resonance: 0.7)         # accents build up: 0.57, 0.78, 0.86
 #     n.hz.glide(60.ms, legato: true).saw.diode(2 ** (meg * 3) * 250, resonance: 0.7, drive: 1.5)
 
@@ -62,8 +64,9 @@ module MB::Sound
 
   # The 303-style patch for one Notes voice +n+ (see .acid_voice).
   def self.acid_patch(
-    n, wave: :saw, cutoff: 300, reso: 0.6, env_mod: 3.0, decay: 0.6, accent: 0.8,
-    filter: :diode, drive: 1.5, glide: 0.06, sweep: true, env_curve: :linear, accent_decay: 0.2
+    n, wave: :saw, cutoff: 300, reso: 0.6, env_mod: 3.0, decay: Notes::ACID_ENV_DECAY, accent: 0.8,
+    filter: :diode, drive: 1.5, glide: 0.06, sweep: true, env_curve: Notes::ACID_ENV_CURVE,
+    accent_decay: Notes::ACID_ENV_ACCENT_DECAY
   )
     pitch = n.hz.glide(glide, legato: true)
     osc = wave.to_sym == :square ? pitch.square : pitch.saw
@@ -99,7 +102,7 @@ module MB::Sound
       cutoff: [300.0, Float, 'Filter cutoff in Hz before the envelopes (CC 74 moves it)', 20.0..5000.0],
       reso: [0.6, Float, 'Resonance 0..1 (CC 71 moves it)', 0.0..1.0],
       env_mod: [3.0, Float, '-e', 'Filter envelope depth in octaves', 0.0..8.0],
-      decay: [0.6, Float, 'Filter envelope decay in seconds (accents: 0.2)', 0.05..4.0],
+      decay: [Notes::ACID_ENV_DECAY, Float, 'Filter envelope decay in seconds, exponential (accents: 0.52; x2.6 a linear fall with the same half-way time)', 0.05..10.0],
       accent: [0.8, Float, '-a', 'Accent amount 0..1 (level and sweep)', 0.0..1.0],
       filter: [:diode, Symbol, '-F', 'Filter: diode ladder or lp4', [:diode, :lp4]],
       drive: [1.5, Float, 'Filter drive', 0.1..10.0],

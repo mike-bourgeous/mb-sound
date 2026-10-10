@@ -50,6 +50,7 @@ module MB
           @graph_origin = nil
           @swap_anchor = nil
           @pending_swap = nil
+          @early = true
           @node_type_name = 'MIDI Clip'
         end
 
@@ -177,11 +178,20 @@ module MB
               note = chase_event
               @chase = note && Chase.new(generation: @generation, time: split, event: note.at(split))
               out << Jump.new(split)
+              @early = true
               return out.concat(edges(split, to, wnps))
             end
           end
 
           edges(from, to, wnps)
+        end
+
+        # Records a content jump (see Source#jumped); the next read plays
+        # notes humanized to just before the new position (see
+        # Sequence::Clip#edges's +:early+).
+        def jumped
+          super
+          @early = true
         end
 
         # Converts the clip's edges for stream times [from, to) to Events and
@@ -190,8 +200,10 @@ module MB
           wn_from = @clip_position
           wn_to = wn_from + (to - from) * wnps
           @clip_position = wn_to
+          early = @early
+          @early = false
 
-          @clip.edges(wn_from, wn_to).map { |time, type, event, _cycle|
+          @clip.edges(wn_from, wn_to, early: early).map { |time, type, event, _cycle|
             t = from + (time - wn_from) / wnps
             if type == :on
               Event.note_on(event.value, event.velocity, channel: @channel, time: t)
