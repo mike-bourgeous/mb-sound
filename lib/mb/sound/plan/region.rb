@@ -41,8 +41,26 @@ module MB
         # Why the region stopped planning (nil while it plans).
         attr_reader :disabled
 
-        # Blocks run planned and unfused (for stats and specs).
-        attr_reader :planned_blocks, :unfused_blocks
+        # Blocks run planned and unfused (for stats and specs), counted
+        # since the region's root was first planned: a rebuild (see
+        # Installation#rebuild) carries the counts of the region it
+        # replaces over to the new region with the same root (see
+        # #carry_counts), so blocks that ran unfused before a rebuild still
+        # count.
+        def planned_blocks
+          @planned_blocks + @carried_planned
+        end
+
+        def unfused_blocks
+          @unfused_blocks + @carried_unfused
+        end
+
+        # For internal use by Installation: adds +planned+ and +unfused+
+        # blocks counted by the regions this one replaces.
+        def carry_counts(planned, unfused)
+          @carried_planned += planned
+          @carried_unfused += unfused
+        end
 
         def initialize(installation, root, members)
           @installation = installation
@@ -56,6 +74,8 @@ module MB
           @types = {}
           @planned_blocks = 0
           @unfused_blocks = 0
+          @carried_planned = 0
+          @carried_unfused = 0
           @out_views = {}
         end
 
@@ -231,7 +251,7 @@ module MB
             while k < feeders.length
               f = feeders[k]
               if f.plan_finished?(count)
-                (f.respond_to?(:plan_nodes) ? f.plan_nodes : [f]).each { |x| @installation.exclude(x, 'its MIDI stream is over', until_restart: true) }
+                (f.respond_to?(:plan_nodes) ? f.plan_nodes : [f]).each { |x| @installation.exclude(x, 'its event stream is over', until_restart: true) }
                 @result = run_unfused(count)
                 return :done
               end
