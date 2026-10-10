@@ -27,6 +27,13 @@ static inline double mb_plan_param_at(const struct mb_plan_param *s, size_t i)
 void mb_plan_svf(float *d, const float *a, const struct mb_plan_param *fc, const struct mb_plan_param *q,
 		const struct mb_plan_param *g, _Bool remember_gain, VALUE obj, size_t n);
 
+// OP_SVF for several lanes at once (FastPlan.run_lanes): +lanes+ filters,
+// each with its output d[l], input a[l], parameters prm[3 * l ...], gain
+// flag, and Filter::SVF objs[l], giving each exactly what mb_plan_svf gives
+// it, with the lanes' recursions interleaved sample by sample.
+void mb_plan_svf_lanes(int lanes, float *const *d, const float *const *a, const struct mb_plan_param *prm,
+		const _Bool *remember_gain, const VALUE *objs, size_t n);
+
 // OP_FOUR_POLE: GraphNode::FourPole (Filter::FourPole#dynamic_process:
 // FastFilter.four_pole or .diode_ladder through mb_four_pole.h) on +a+ into
 // +d+; +cfg+ is [k_max, compensation, drive, mix (5), curve, drive mode,
@@ -36,6 +43,12 @@ void mb_plan_svf(float *d, const float *a, const struct mb_plan_param *fc, const
 void mb_plan_four_pole(float *d, const float *a, const struct mb_plan_param *fc, const struct mb_plan_param *res,
 		const double *cfg, VALUE obj, size_t n);
 
+// OP_FOUR_POLE for several lanes at once (see mb_plan_svf_lanes): prm
+// holds each lane's cutoff and resonance (2 per lane), cfg[l] each lane's
+// settings.
+void mb_plan_four_pole_lanes(int lanes, float *const *d, const float *const *a, const struct mb_plan_param *prm,
+		const double *const *cfg, const VALUE *objs, size_t n);
+
 // OP_BIQUAD (plan_biquad.c): Filter::Cookbook#dynamic_process
 // (FastSound.dynamic_biquad through mb_biquad.h) on +a+ into +d+ with the
 // cutoff and quality registers +cut+ and +q+; +type+ the cookbook filter
@@ -43,5 +56,20 @@ void mb_plan_four_pole(float *d, const float *a, const struct mb_plan_param *fc,
 // and x/y state read each block, its coefficients, state, quality, and
 // cutoff set afterwards as #dynamic_process_c does).
 void mb_plan_biquad(float *d, const float *a, const float *cut, const float *q, int type, VALUE obj, size_t n);
+
+// OP_BIQUAD for several lanes at once (see mb_plan_svf_lanes; the filter
+// type is the op's, the same for every lane).
+void mb_plan_biquad_lanes(int lanes, float *const *d, const float *const *a, const float *const *cut, const float *const *q,
+		int type, const VALUE *objs, size_t n);
+
+// The wavetable kernel of OP_TONE (plan_wavetable.c): one segment of a
+// planned wavetable tone (FastWavetable.oscillate's loop through
+// mb_wavetable.h) into +out+; +tinfo+ is Tone#plan_wavetable's [kernel
+// spec, interpolation code, sinc kernel]; +phase_state+, +tstate+, and
+// +noise+ the Tone::State's phase, table, and noise Arrays, updated.
+struct mb_signal;
+void mb_plan_wavetable_segment(VALUE tinfo, float *out, size_t length, const struct mb_signal *f, const struct mb_signal *p,
+		const struct mb_signal *w, _Bool warped, const struct mb_signal *scan, double adv, double rndadv, double g, double off,
+		_Bool remove_dc, VALUE phase_state, VALUE tstate, VALUE noise);
 
 #endif

@@ -116,6 +116,11 @@ module MB
         # bit-exact with its node.  Read when a region compiles.
         attr_accessor :precision
 
+        # Whether structurally identical regions (e.g. a Synth's lanes) run
+        # together in LaneGroups (default true; MB_SOUND_PLAN_LANES=0 turns
+        # it off).
+        attr_accessor :lanes
+
         # The fewest graph nodes a region must cover to be planned
         # (single-node regions gain nothing).
         attr_accessor :min_nodes
@@ -142,15 +147,20 @@ module MB
 
         # Installs plans on the graphs feeding +outputs+ (GraphNodes,
         # bundles, or Arrays of them): finds the regions, hooks their root
-        # nodes, and returns the Installation (nil when plans are off or
-        # nothing could be planned).
-        def install(*outputs, engine: self.engine, check: self.check)
+        # nodes, groups regions of the same shape (LaneGroups, with +lanes+;
+        # a Synth passes false and groups its lanes' regions together), and
+        # returns the Installation (nil when plans are off or nothing could
+        # be planned).
+        def install(*outputs, engine: self.engine, check: self.check, lanes: self.lanes)
           return nil unless enabled
 
           inst = Installation.new(outputs.flatten.flat_map { |o| o.respond_to?(:outputs) ? o.outputs.to_a : [o] }, engine: engine, check: check)
           inst.build
           inst.precompile
-          inst.regions.empty? ? (inst.uninstall; nil) : inst
+          return (inst.uninstall; nil) if inst.regions.empty?
+
+          inst.lane_groups = LaneGroups.new([inst], roots_only: true) if lanes
+          inst
         end
 
         # Called by nodes (and Tees) after a change: a structural change
@@ -214,6 +224,7 @@ module MB
                    else :raise
                    end
       self.min_nodes = 2
+      self.lanes = ENV['MB_SOUND_PLAN_LANES'] != '0'
       self.fold_warnings = ENV['MB_SOUND_PLAN_FOLD_WARN'] != '0'
       self.precision = ENV['MB_SOUND_PLAN_PRECISION'] == 'exact' ? :exact : :fast
     end
@@ -231,10 +242,12 @@ require_relative 'plan/snapshot'
 require_relative 'plan/builder'
 require_relative 'plan/fold'
 require_relative 'plan/filter_ops'
+require_relative 'plan/hold_ops'
 require_relative 'plan/program'
 require_relative 'plan/describable'
 require_relative 'plan/region'
 require_relative 'plan/installation'
 require_relative 'plan/shared_inputs'
+require_relative 'plan/lane_group'
 require_relative 'plan/loop'
 require_relative 'plan/loop_pitch'

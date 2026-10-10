@@ -119,6 +119,62 @@ RSpec.describe(MB::Sound::Plan::Op::Tone) do
     end
   end
 
+  describe 'wavetables' do
+    it 'matches a wavetable with frequency and phase modulation' do
+      r = plan_compare { fm(1, 300, 80).tone.wavetable(:saw).pm(src.new(seed: 2, scale: 0.2) * 1) * 0.5 }
+      expect(r.program.tones.map(&:kernel)).to eq([:wavetable])
+    end
+
+    it 'matches a moving scan, with and without scan_wrap' do
+      plan_compare {
+        scan = src.new(seed: 4, scale: 0.6, offset: 0.5)
+        fm(1, 220).tone.wavetable(:basic, scan: scan) + fm(2, 330).tone.wavetable(:pulses, scan: scan * 1.2, scan_wrap: true) * 0.5
+      }
+    end
+
+    it 'matches a fixed scan and every interpolation' do
+      plan_compare {
+        [:optimal, :cubic, :linear, :none, :sinc].each_with_index.map { |interp, i|
+          fm(i + 1, 200 + 150 * i).tone.wavetable(:basic, scan: 0.3, interpolation: interp) * 0.2
+        }.reduce(:+)
+      }
+    end
+
+    it 'matches a warped wavetable (pwm with band-limited corners)' do
+      plan_compare {
+        w = src.new(seed: 3, scale: 0.3, offset: 0.5)
+        fm(1, 700).tone.wavetable(:saw).pwm(w) + fm(2, 400).tone.wavetable(:triangle).pwm(0.3, dc: true) * 0.5
+      }
+    end
+
+    it 'matches a noise wavetable' do
+      plan_compare { fm(1, 300).tone.wavetable(:saw).noise(0.4) * 1 }
+    end
+
+    it 'matches key-sync resets with band-limited steps' do
+      plan_compare { fm(1, 900, 300).tone.wavetable(:square).reset(src.new(kind: :impulses, at: reset_points)) * 1 }
+    end
+
+    it 'matches a KeyMap picking zones at resets and, without resets, every block (also in check mode)' do
+      plan_compare(check: :raise) {
+        km = MB::Sound::Wavetable::KeyMap.new(MB::Sound::C1...MB::Sound::C4 => :saw, MB::Sound::C4...MB::Sound::C5 => :square, MB::Sound::C5..MB::Sound::C8 => :triangle)
+        sweep = -> (seed) { src.new(seed: seed, scale: 400, offset: 450) * 1 }
+        a = sweep.(1).tone.wavetable(km).reset(src.new(kind: :impulses, at: reset_points))
+        b = sweep.(2).tone.wavetable(km)
+        a * 0.5 + b * 0.5
+      }
+    end
+
+    it 'leaves sample-mode, complex, and clean wavetables unplanned' do
+      samples = MB::Sound::Wavetable.from_samples(Numo::SFloat.new(2000).rand(-1, 1), mode: :sample, root: 440)
+      tone = 300.hz.wavetable(:saw)
+      expect(tone.plan_unsupported_reason).to be_nil
+      expect(300.hz.wavetable(:saw).clean.reset(src.new(kind: :impulses, at: [5])).plan_unsupported_reason).to match(/clean/)
+      expect(300.hz.complex_ramp.pm(0.1).plan_unsupported_reason).to match(/complex shape/)
+      expect(300.hz.wavetable(samples).plan_unsupported_reason).to match(/sample-mode/)
+    end
+  end
+
   describe 'FM stacks' do
     it 'matches a 4-operator stack of complex sines with key-sync resets and envelopes as inputs' do
       r = plan_compare {

@@ -15,7 +15,7 @@ module MB
         # Register kinds and opcodes of the C executor (see fast_plan.c;
         # specs compare them with FastPlan.constants).
         REG_KINDS = { slot: 0, input: 1, param: 2, out: 3 }.freeze
-        OPCODES = { fill: 1, mul: 2, muls: 3, add: 4, adds: 5, div: 6, divs: 7, pow: 8, part: 9, tone: 10, copy: 11, shape: 12, note_freq: 13, events: 14, keep: 15, envelope: 16, smooth: 17, max: 18, powf: 19, svf: 20, four_pole: 21, biquad: 22, clip: 23, exp: 24, time_scale: 25 }.freeze
+        OPCODES = { fill: 1, mul: 2, muls: 3, add: 4, adds: 5, div: 6, divs: 7, pow: 8, part: 9, tone: 10, copy: 11, shape: 12, note_freq: 13, events: 14, keep: 15, envelope: 16, smooth: 17, max: 18, powf: 19, svf: 20, four_pole: 21, biquad: 22, clip: 23, exp: 24, time_scale: 25, sample_hold: 26 }.freeze
 
         attr_reader :ops, :inputs, :params, :output
 
@@ -82,6 +82,14 @@ module MB
             @nslots = nslots
             @registers = regs
           }
+        end
+
+        # The lowered words as a String (see #lower): programs with the same
+        # signature have the same ops, registers, and scalar layout, and
+        # differ at most in their scalars and objects (the nodes and states
+        # they run on), so they can run together (Plan::LaneGroup).
+        def signature
+          @signature ||= lower[0].to_binary.freeze
         end
 
         # The register name of +value+ after lowering (for listings).
@@ -312,6 +320,9 @@ module MB
             when Op::FilterBiquad
               @objects << op.filter
               [OPCODES[:biquad], reg(op.dst), reg(op.a), reg(op.cutoff), reg(op.quality), @objects.length - 1, op.type_id]
+            when Op::SampleHold
+              @objects << op.hold
+              [OPCODES[:sample_hold], reg(op.dst), reg(op.trigger), value_reg(op.source), @objects.length - 1]
             when Op::FourPole
               @objects << op.filter
               cnum = ->(v) { v.is_a?(Const) ? v.parts[0] : 0.0 }
@@ -329,7 +340,11 @@ module MB
             kernel = op.kernel
             gain, offset = tone.send(:gain_and_offset)
             fade = tone.instance_variable_get(:@fade_band) || [0.0, 0.0]
-            wave = kernel == :synth ? Op::Tone::BL_WAVES.fetch(tone.wave_type) : Op::Tone::WAVES.fetch(tone.wave_type)
+            wave = case kernel
+                   when :synth then Op::Tone::BL_WAVES.fetch(tone.wave_type)
+                   when :wavetable then 0
+                   else Op::Tone::WAVES.fetch(tone.wave_type)
+                   end
             width_value = op.width.is_a?(Const) ? op.width.value : nil
 
             sc = scalar(
@@ -341,14 +356,15 @@ module MB
               tone.instance_variable_get(:@keep_dc) ? 0 : 1,
               op.width.is_a?(Const) ? 1 : 0,
               op.gain.nil? ? 0 : (op.gain.is_a?(Const) ? 1 : 2),
-              op.fast ? 1 : 0
+              op.fast ? 1 : 0,
+              op.scan.is_a?(Const) ? op.scan.value : 0
             )
 
             @objects << [tone, state, op.frequency.is_a?(Const) ? op.frequency.value : nil, width_value].freeze
             [
               OPCODES[:tone], reg(op.dst), @objects.length - 1, Op::Tone::KERNELS.fetch(kernel), wave,
               value_reg(op.frequency), value_reg(op.phase_mod), value_reg(op.width),
-              value_reg(op.reset), value_reg(op.target), value_reg(op.gain), sc
+              value_reg(op.reset), value_reg(op.target), value_reg(op.gain), value_reg(op.scan), sc
             ]
           end
 

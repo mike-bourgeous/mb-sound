@@ -287,16 +287,142 @@ static inline void mb_fp_flush(double *st4)
 	}
 }
 
+// The four-pole cascade's coefficients for one cutoff and resonance (see
+// mb_fp_coef_update), and the parameters they were computed for.
+struct mb_fp_coef {
+	double g, G, one, G4, k, inv, in_gain;
+};
+
+struct mb_fp_cache {
+	double last_fc, last_res;
+	struct mb_fp_coef c;
+};
+
+// Starts a cache with no coefficients (the first update computes them).
+static inline void mb_fp_cache_init(struct mb_fp_cache *cc)
+{
+	cc->last_fc = NAN;
+	cc->last_res = NAN;
+	cc->c.g = 0;
+	cc->c.G = 0;
+	cc->c.G4 = 0;
+	cc->c.one = 1;
+	cc->c.k = 0;
+	cc->c.inv = 1;
+	cc->c.in_gain = 1;
+}
+
+// Updates the coefficients for cutoff +fc+ and resonance +res+ if either
+// changed (the loop gain only when the resonance changes; +pi_over_rate+ is
+// pi / sample rate, +fc_max+ the highest cutoff).
+static inline void mb_fp_coef_update(struct mb_fp_cache *cc, const struct mb_fp_args *args, double fc, double res, double pi_over_rate, double fc_max)
+{
+	if (fc != cc->last_fc || res != cc->last_res) {
+		struct mb_fp_coef *c = &cc->c;
+		if (res != cc->last_res) {
+			cc->last_res = res;
+			if (!(res >= 0.0)) {
+				res = 0.0;
+			} else if (res > 1.0) {
+				res = 1.0;
+			}
+			c->k = fp_loop_gain(res, args->curve, args->k_max);
+			c->in_gain = 1.0 + args->comp * c->k;
+		}
+
+		if (fc != cc->last_fc) {
+			cc->last_fc = fc;
+			if (!(fc >= FP_MIN_CUTOFF)) {
+				fc = FP_MIN_CUTOFF;
+			} else if (fc > fc_max) {
+				fc = fc_max;
+			}
+			c->g = mb_tan_pade(fc * pi_over_rate);
+			c->G = c->g / (1.0 + c->g);
+			c->one = 1.0 - c->G;
+			double G2 = c->G * c->G;
+			c->G4 = G2 * G2;
+		}
+
+		c->inv = 1.0 / (1.0 + c->k * c->G4);
+	}
+}
+
+// One sample +x+ through the four-pole cascade with coefficients +c+ and
+// states st[0..3] (+inv_drive+ is 1 / drive, +driven+ whether drive > 0);
+// returns the output (before rounding to float).  Also the lane-major plan
+// kernel's step (fast_plan's mb_plan_four_pole_lanes).
+static inline double mb_fp_step(const struct mb_fp_args *args, const struct mb_fp_coef *c, double inv_drive, _Bool driven, double x, double *st)
+{
+	double s0 = st[0], s1 = st[1], s2 = st[2], s3 = st[3];
+	double g = c->g, G = c->G, one = c->one, G4 = c->G4, k = c->k, inv = c->inv, in_gain = c->in_gain;
+	double comp = args->comp, drive = args->drive;
+	int drive_mode = args->drive_mode, clip = args->clip;
+
+	double sum = ((s0 * one * G + s1 * one) * G + s2 * one) * G + s3 * one;
+	double u = (x * in_gain - k * sum) * inv;
+
+	// Per-stage gains (all G unless the stages saturate)
+	double Ga = G, Gb = G, Gc = G, Gd = G;
+
+	if (driven) {
+		if (drive_mode == FP_DRIVE_INPUT) {
+			u = fp_tanh(u * drive) * inv_drive;
+		} else if (drive_mode == FP_DRIVE_FEEDBACK) {
+			double r = G4 * u + sum - comp * x;
+			double T = clip == FP_CLIP_HARD ? fp_hard_secant(r * drive) : fp_tanh_secant(r * drive);
+			double kT = k * T;
+			u = (x * (1.0 + comp * kT) - kT * sum) / (1.0 + kT * G4);
+		} else {
+			// Linear predictions of each stage's input difference
+			double p1 = G * (u - s0) + s0;
+			double p2 = G * (p1 - s1) + s1;
+			double p3 = G * (p2 - s2) + s2;
+			double p4 = G * (p3 - s3) + s3;
+			double ga = g * fp_tanh_secant((u - p1) * drive);
+			double gb = g * fp_tanh_secant((p1 - p2) * drive);
+			double gc = g * fp_tanh_secant((p2 - p3) * drive);
+			double gd = g * fp_tanh_secant((p3 - p4) * drive);
+			Ga = ga / (1.0 + ga);
+			Gb = gb / (1.0 + gb);
+			Gc = gc / (1.0 + gc);
+			Gd = gd / (1.0 + gd);
+			double sum2 = ((s0 * (1.0 - Ga) * Gb + s1 * (1.0 - Gb)) * Gc + s2 * (1.0 - Gc)) * Gd + s3 * (1.0 - Gd);
+			u = (x * in_gain - k * sum2) / (1.0 + k * (Ga * Gb * Gc * Gd));
+			u = fp_tanh(u * drive) * inv_drive;
+		}
+	}
+
+	double v, y1, y2, y3, y4;
+	v = Ga * (u - s0);
+	y1 = v + s0;
+	s0 = y1 + v;
+	v = Gb * (y1 - s1);
+	y2 = v + s1;
+	s1 = y2 + v;
+	v = Gc * (y2 - s2);
+	y3 = v + s2;
+	s2 = y3 + v;
+	v = Gd * (y3 - s3);
+	y4 = v + s3;
+	s3 = y4 + v;
+
+	st[0] = s0;
+	st[1] = s1;
+	st[2] = s2;
+	st[3] = s3;
+
+	return args->mix[0] * u + args->mix[1] * y1 + args->mix[2] * y2 + args->mix[3] * y3 + args->mix[4] * y4;
+}
+
 // Filters +length+ samples of +in+ into +out+ (may be the same buffer) with
 // the four-pole cascade (fast_filter.c's four_pole), updating the states
 // +st4+ (not flushed).
 static inline void mb_four_pole_run(const struct mb_fp_args *args, const float *in, float *out, size_t length,
 		const struct mb_signal *fc_sig, const struct mb_signal *res_sig, double *st4)
 {
-	double rate = args->rate, k_max = args->k_max, comp = args->comp, drive = args->drive;
-	int curve = args->curve, drive_mode = args->drive_mode, clip = args->clip;
-	double m0 = args->mix[0], m1 = args->mix[1], m2 = args->mix[2], m3 = args->mix[3], m4 = args->mix[4];
-	double s0 = st4[0], s1 = st4[1], s2 = st4[2], s3 = st4[3];
+	double rate = args->rate, drive = args->drive;
+	double st[4] = { st4[0], st4[1], st4[2], st4[3] };
 	struct mb_signal fc_in = *fc_sig, res_in = *res_sig;
 
 	double pi_over_rate = M_PI / rate;
@@ -306,98 +432,152 @@ static inline void mb_four_pole_run(const struct mb_fp_args *args, const float *
 
 	// Coefficients, recomputed only when the cutoff or resonance changes
 	// (the loop gain only when the resonance changes)
-	double last_fc = NAN, last_res = NAN;
-	double g = 0, G = 0, G4 = 0, one = 1, k = 0, inv = 1, in_gain = 1;
+	struct mb_fp_cache cc;
+	mb_fp_cache_init(&cc);
 
 	for (size_t i = 0; i < length; i++) {
-		double fc = mb_signal_at(&fc_in, i);
-		double res = mb_signal_at(&res_in, i);
-
-		if (fc != last_fc || res != last_res) {
-			if (res != last_res) {
-				last_res = res;
-				if (!(res >= 0.0)) {
-					res = 0.0;
-				} else if (res > 1.0) {
-					res = 1.0;
-				}
-				k = fp_loop_gain(res, curve, k_max);
-				in_gain = 1.0 + comp * k;
-			}
-
-			if (fc != last_fc) {
-				last_fc = fc;
-				if (!(fc >= FP_MIN_CUTOFF)) {
-					fc = FP_MIN_CUTOFF;
-				} else if (fc > fc_max) {
-					fc = fc_max;
-				}
-				g = mb_tan_pade(fc * pi_over_rate);
-				G = g / (1.0 + g);
-				one = 1.0 - G;
-				double G2 = G * G;
-				G4 = G2 * G2;
-			}
-
-			inv = 1.0 / (1.0 + k * G4);
-		}
-
-		double x = in[i];
-		double sum = ((s0 * one * G + s1 * one) * G + s2 * one) * G + s3 * one;
-		double u = (x * in_gain - k * sum) * inv;
-
-		// Per-stage gains (all G unless the stages saturate)
-		double Ga = G, Gb = G, Gc = G, Gd = G;
-
-		if (driven) {
-			if (drive_mode == FP_DRIVE_INPUT) {
-				u = fp_tanh(u * drive) * inv_drive;
-			} else if (drive_mode == FP_DRIVE_FEEDBACK) {
-				double r = G4 * u + sum - comp * x;
-				double T = clip == FP_CLIP_HARD ? fp_hard_secant(r * drive) : fp_tanh_secant(r * drive);
-				double kT = k * T;
-				u = (x * (1.0 + comp * kT) - kT * sum) / (1.0 + kT * G4);
-			} else {
-				// Linear predictions of each stage's input difference
-				double p1 = G * (u - s0) + s0;
-				double p2 = G * (p1 - s1) + s1;
-				double p3 = G * (p2 - s2) + s2;
-				double p4 = G * (p3 - s3) + s3;
-				double ga = g * fp_tanh_secant((u - p1) * drive);
-				double gb = g * fp_tanh_secant((p1 - p2) * drive);
-				double gc = g * fp_tanh_secant((p2 - p3) * drive);
-				double gd = g * fp_tanh_secant((p3 - p4) * drive);
-				Ga = ga / (1.0 + ga);
-				Gb = gb / (1.0 + gb);
-				Gc = gc / (1.0 + gc);
-				Gd = gd / (1.0 + gd);
-				double sum2 = ((s0 * (1.0 - Ga) * Gb + s1 * (1.0 - Gb)) * Gc + s2 * (1.0 - Gc)) * Gd + s3 * (1.0 - Gd);
-				u = (x * in_gain - k * sum2) / (1.0 + k * (Ga * Gb * Gc * Gd));
-				u = fp_tanh(u * drive) * inv_drive;
-			}
-		}
-
-		double v, y1, y2, y3, y4;
-		v = Ga * (u - s0);
-		y1 = v + s0;
-		s0 = y1 + v;
-		v = Gb * (y1 - s1);
-		y2 = v + s1;
-		s1 = y2 + v;
-		v = Gc * (y2 - s2);
-		y3 = v + s2;
-		s2 = y3 + v;
-		v = Gd * (y3 - s3);
-		y4 = v + s3;
-		s3 = y4 + v;
-
-		out[i] = (float)(m0 * u + m1 * y1 + m2 * y2 + m3 * y3 + m4 * y4);
+		mb_fp_coef_update(&cc, args, mb_signal_at(&fc_in, i), mb_signal_at(&res_in, i), pi_over_rate, fc_max);
+		out[i] = (float)mb_fp_step(args, &cc.c, inv_drive, driven, in[i], st);
 	}
 
-	st4[0] = s0;
-	st4[1] = s1;
-	st4[2] = s2;
-	st4[3] = s3;
+	st4[0] = st[0];
+	st4[1] = st[1];
+	st4[2] = st[2];
+	st4[3] = st[3];
+}
+
+// The diode ladder's coefficients for one cutoff and resonance (see
+// mb_dl_coef_update): g, the Thomas algorithm's reciprocal pivots r1..r4
+// and back-substitution factors a1..a3, the response q1..q4 of the forward
+// pass to u, the loop gain k, 1 / (1 + k q4), the input gain, the
+// compensation (normalized or not), and the input saturator's drive and
+// its inverse (headroom included).
+struct mb_dl_coef {
+	double g, r1, r2, r3, r4, a1, a2, a3, q1, q2, q3, q4, k, inv, in_gain, dcomp, sat_drive, sat_inv;
+};
+
+// ...and the parameters they were computed for, with the prewarped cutoff
+// t and the stage frequency's scale (normalization included).
+struct mb_dl_cache {
+	double last_fc, last_res, t, scale;
+	struct mb_dl_coef c;
+};
+
+static inline void mb_dl_cache_init(struct mb_dl_cache *cc, const struct mb_fp_args *args)
+{
+	double drive = args->drive;
+	cc->last_fc = NAN;
+	cc->last_res = NAN;
+	cc->t = 0;
+	cc->scale = DL_INV_W180;
+	struct mb_dl_coef *c = &cc->c;
+	c->sat_drive = drive;
+	c->sat_inv = drive > 0 ? 1.0 / drive : 0.0;
+	c->g = 0;
+	c->r1 = c->r2 = c->r3 = c->r4 = 1;
+	c->a1 = c->a2 = c->a3 = 0;
+	c->q1 = c->q2 = c->q3 = c->q4 = 0;
+	c->k = 0;
+	c->inv = 1;
+	c->in_gain = 1;
+	c->dcomp = args->comp;
+}
+
+// Updates the coefficients for cutoff +fc+ and resonance +res+ if either
+// changed (see mb_fp_coef_update).
+static inline void mb_dl_coef_update(struct mb_dl_cache *cc, const struct mb_fp_args *args, double fc, double res, double pi_over_rate, double fc_max)
+{
+	if (fc != cc->last_fc || res != cc->last_res) {
+		struct mb_dl_coef *c = &cc->c;
+		if (res != cc->last_res) {
+			cc->last_res = res;
+			if (!(res >= 0.0)) {
+				res = 0.0;
+			} else if (res > 1.0) {
+				res = 1.0;
+			}
+			c->k = dl_loop_gain(res, args->curve, args->k_max);
+			if (args->normalize) {
+				c->dcomp = dl_compensation(c->k, fp_loop_gain(res, args->curve, args->k_max), args->comp);
+			}
+			c->in_gain = 1.0 + c->dcomp * c->k;
+			if (args->normalize) {
+				cc->scale = dl_cutoff_scale(c->k) * DL_INV_W180;
+				double headroom = dl_headroom(c->k);
+				double inv_drive = args->drive > 0 ? 1.0 / args->drive : 0.0;
+				c->sat_drive = args->drive / headroom;
+				c->sat_inv = headroom * inv_drive;
+			}
+		}
+
+		if (fc != cc->last_fc) {
+			cc->last_fc = fc;
+			if (!(fc >= FP_MIN_CUTOFF)) {
+				fc = FP_MIN_CUTOFF;
+			} else if (fc > fc_max) {
+				fc = fc_max;
+			}
+			cc->t = mb_tan_pade(fc * pi_over_rate);
+		}
+
+		double g = cc->t * cc->scale;
+		c->g = g;
+		double d = 1.0 + 2.0 * g;
+		c->r1 = 1.0 / d;
+		c->a1 = g * c->r1;
+		c->r2 = 1.0 / (d - g * c->a1);
+		c->a2 = g * c->r2;
+		c->r3 = 1.0 / (d - g * c->a2);
+		c->a3 = g * c->r3;
+		c->r4 = 1.0 / ((1.0 + g) - g * c->a3);
+		c->q1 = g * c->r1;
+		c->q2 = g * c->q1 * c->r2;
+		c->q3 = g * c->q2 * c->r3;
+		c->q4 = g * c->q3 * c->r4;
+
+		c->inv = 1.0 / (1.0 + c->k * c->q4);
+	}
+}
+
+// One sample +x+ through the diode ladder with coefficients +c+ and states
+// st[0..3]; returns the output (before rounding to float).  Also the
+// lane-major plan kernel's step.
+static inline double mb_dl_step(const struct mb_fp_args *args, const struct mb_dl_coef *c, _Bool driven, double x, double *st)
+{
+	double s0 = st[0], s1 = st[1], s2 = st[2], s3 = st[3];
+	double g = c->g, r1 = c->r1, r2 = c->r2, r3 = c->r3, r4 = c->r4, a1 = c->a1, a2 = c->a2, a3 = c->a3;
+	double q1 = c->q1, q2 = c->q2, q3 = c->q3, q4 = c->q4, k = c->k, inv = c->inv, in_gain = c->in_gain, dcomp = c->dcomp;
+	double drive = args->drive;
+
+	// Forward pass from the states alone (u = 0)
+	double p1 = s0 * r1;
+	double p2 = (s1 + g * p1) * r2;
+	double p3 = (s2 + g * p2) * r3;
+	double p4 = (s3 + g * p3) * r4;
+
+	double u = (x * in_gain - k * p4) * inv;
+	if (driven) {
+		if (args->drive_mode == FP_DRIVE_INPUT) {
+			u = fp_tanh(u * c->sat_drive) * c->sat_inv;
+		} else {
+			double fb = p4 + q4 * u - dcomp * x;
+			double T = args->clip == FP_CLIP_HARD ? fp_hard_secant(fb * drive) : fp_tanh_secant(fb * drive);
+			double kT = k * T;
+			u = (x * (1.0 + dcomp * kT) - kT * p4) / (1.0 + kT * q4);
+		}
+	}
+
+	double y4 = p4 + q4 * u;
+	double y3 = p3 + q3 * u + a3 * y4;
+	double y2 = p2 + q2 * u + a2 * y3;
+	double y1 = p1 + q1 * u + a1 * y2;
+
+	st[0] = 2.0 * y1 - s0;
+	st[1] = 2.0 * y2 - s1;
+	st[2] = 2.0 * y3 - s2;
+	st[3] = 2.0 * y4 - s3;
+
+	return y4;
 }
 
 // Filters +length+ samples of +in+ into +out+ (may be the same buffer) with
@@ -406,116 +586,27 @@ static inline void mb_four_pole_run(const struct mb_fp_args *args, const float *
 static inline void mb_diode_ladder_run(const struct mb_fp_args *args, const float *in, float *out, size_t length,
 		const struct mb_signal *fc_sig, const struct mb_signal *res_sig, double *st4)
 {
-	double rate = args->rate, k_max = args->k_max, comp = args->comp, drive = args->drive;
-	int curve = args->curve, drive_mode = args->drive_mode, clip = args->clip, normalize = args->normalize;
-	double s0 = st4[0], s1 = st4[1], s2 = st4[2], s3 = st4[3];
+	double rate = args->rate;
+	double st[4] = { st4[0], st4[1], st4[2], st4[3] };
 	struct mb_signal fc_in = *fc_sig, res_in = *res_sig;
 
 	double pi_over_rate = M_PI / rate;
 	double fc_max = rate * FP_MAX_CUTOFF_RATIO;
-	double inv_drive = drive > 0 ? 1.0 / drive : 0.0;
-	_Bool driven = drive > 0;
+	_Bool driven = args->drive > 0;
 
-	// Coefficients, recomputed only when the cutoff or resonance changes:
-	// the prewarped cutoff t, the stage frequency's scale (normalization
-	// included) and the input saturator's drive and its inverse (headroom
-	// included), g, the Thomas algorithm's reciprocal pivots r1..r4 and
-	// back-substitution factors a1..a3, the response q1..q4 of the forward
-	// pass to u, the loop gain k, and 1 / (1 + k q4)
-	double last_fc = NAN, last_res = NAN;
-	double t = 0, scale = DL_INV_W180, sat_drive = drive, sat_inv = inv_drive;
-	double g = 0, r1 = 1, r2 = 1, r3 = 1, r4 = 1, a1 = 0, a2 = 0, a3 = 0;
-	double q1 = 0, q2 = 0, q3 = 0, q4 = 0, k = 0, inv = 1, in_gain = 1, dcomp = comp;
+	// Coefficients, recomputed only when the cutoff or resonance changes
+	struct mb_dl_cache cc;
+	mb_dl_cache_init(&cc, args);
 
 	for (size_t i = 0; i < length; i++) {
-		double fc = mb_signal_at(&fc_in, i);
-		double res = mb_signal_at(&res_in, i);
-
-		if (fc != last_fc || res != last_res) {
-			if (res != last_res) {
-				last_res = res;
-				if (!(res >= 0.0)) {
-					res = 0.0;
-				} else if (res > 1.0) {
-					res = 1.0;
-				}
-				k = dl_loop_gain(res, curve, k_max);
-				if (normalize) {
-					dcomp = dl_compensation(k, fp_loop_gain(res, curve, k_max), comp);
-				}
-				in_gain = 1.0 + dcomp * k;
-				if (normalize) {
-					scale = dl_cutoff_scale(k) * DL_INV_W180;
-					double headroom = dl_headroom(k);
-					sat_drive = drive / headroom;
-					sat_inv = headroom * inv_drive;
-				}
-			}
-
-			if (fc != last_fc) {
-				last_fc = fc;
-				if (!(fc >= FP_MIN_CUTOFF)) {
-					fc = FP_MIN_CUTOFF;
-				} else if (fc > fc_max) {
-					fc = fc_max;
-				}
-				t = mb_tan_pade(fc * pi_over_rate);
-			}
-
-			g = t * scale;
-			double d = 1.0 + 2.0 * g;
-			r1 = 1.0 / d;
-			a1 = g * r1;
-			r2 = 1.0 / (d - g * a1);
-			a2 = g * r2;
-			r3 = 1.0 / (d - g * a2);
-			a3 = g * r3;
-			r4 = 1.0 / ((1.0 + g) - g * a3);
-			q1 = g * r1;
-			q2 = g * q1 * r2;
-			q3 = g * q2 * r3;
-			q4 = g * q3 * r4;
-
-			inv = 1.0 / (1.0 + k * q4);
-		}
-
-		double x = in[i];
-
-		// Forward pass from the states alone (u = 0)
-		double p1 = s0 * r1;
-		double p2 = (s1 + g * p1) * r2;
-		double p3 = (s2 + g * p2) * r3;
-		double p4 = (s3 + g * p3) * r4;
-
-		double u = (x * in_gain - k * p4) * inv;
-		if (driven) {
-			if (drive_mode == FP_DRIVE_INPUT) {
-				u = fp_tanh(u * sat_drive) * sat_inv;
-			} else {
-				double fb = p4 + q4 * u - dcomp * x;
-				double T = clip == FP_CLIP_HARD ? fp_hard_secant(fb * drive) : fp_tanh_secant(fb * drive);
-				double kT = k * T;
-				u = (x * (1.0 + dcomp * kT) - kT * p4) / (1.0 + kT * q4);
-			}
-		}
-
-		double y4 = p4 + q4 * u;
-		double y3 = p3 + q3 * u + a3 * y4;
-		double y2 = p2 + q2 * u + a2 * y3;
-		double y1 = p1 + q1 * u + a1 * y2;
-
-		s0 = 2.0 * y1 - s0;
-		s1 = 2.0 * y2 - s1;
-		s2 = 2.0 * y3 - s2;
-		s3 = 2.0 * y4 - s3;
-
-		out[i] = (float)(y4);
+		mb_dl_coef_update(&cc, args, mb_signal_at(&fc_in, i), mb_signal_at(&res_in, i), pi_over_rate, fc_max);
+		out[i] = (float)mb_dl_step(args, &cc.c, driven, in[i], st);
 	}
 
-	st4[0] = s0;
-	st4[1] = s1;
-	st4[2] = s2;
-	st4[3] = s3;
+	st4[0] = st[0];
+	st4[1] = st[1];
+	st4[2] = st[2];
+	st4[3] = st[3];
 }
 
 #endif
