@@ -489,9 +489,13 @@ module MB
                   on = from
                 end
               end
+              on_in = on >= from && on < to
+              off_in = off >= from && off < to
+              next unless on_in || off_in
+              # Fill marks are decided at the note-on, so both edges agree
               next if e.fill_mark && !e.plays_in_fill?(fills ? fills.call(on) : FillMap::NONE)
-              out << [on, :on, e, cycle] if on >= from && on < to
-              out << [off, :off, e, cycle] if off >= from && off < to
+              out << [on, :on, e, cycle] if on_in
+              out << [off, :off, e, cycle] if off_in
             end
           end
 

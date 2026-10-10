@@ -362,8 +362,12 @@ RSpec.describe(MB::Sound::Form) do
         b 1, times: 2, fill: { names: [:z], on: :leave }
         a times: 1
       end
-      run_bars(5)
-      expect(transport.fills.entries.map { |e| [e.name, e.from] }).to eq([[:x, 0r], [:y, 1r], [:x, 2r], [:z, 4r], [:x, 5r]]) # the last a is pass 1 again
+      seen = []
+      6.times {
+        run_bars(1)
+        seen |= transport.fills.entries.map { |e| [e.name, e.from] } # (old fills are pruned)
+      }
+      expect(seen.sort_by(&:last)).to eq([[:x, 0r], [:y, 1r], [:x, 2r], [:z, 4r], [:x, 5r]]) # the last a is pass 1 again
     end
 
     it 'adds phrase fills every N bars from each section start; longest period wins, layers stack' do

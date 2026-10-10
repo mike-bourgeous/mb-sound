@@ -344,6 +344,7 @@ module MB
             @boundary = time + length_from(sec.length, time)
             @session.markers.set(name, kind: :section, pos: time)
 
+            @transport.fills.prune(time - 1) # fills that ended over a whole note ago
             add_phrase_fills(time, @boundary)
 
             @fill_start = sec.fill ? [time, @boundary - length_before(sec.fill.length, @boundary)].max : nil

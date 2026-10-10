@@ -153,8 +153,28 @@ module MB
           ring = p.ring
           quiet = (RING_QUIET_SECONDS * rate).round
 
+          chans = data.filter_map { |d|
+            next if d.nil? || d.empty?
+            d = d.real if d.is_a?(Numo::SComplex) || d.is_a?(Numo::DComplex)
+            d.length > frames ? d[0...frames] : d
+          }
+
+          # Fast paths for buffers shorter than the quiet stretch (no quiet
+          # stretch can start and end inside one): a silent buffer, or one
+          # whose last sample is loud (the tail is still going)
+          if frames < quiet
+            peak = chans.map { |d| d.abs.max }.max || 0
+            if peak < Master::TAIL_THRESHOLD
+              ending = ring.quiet_from + quiet
+              return ending <= frame + frames ? MB::M.max(ending - frame, 0) : frames
+            elsif chans.any? { |d| d.length == frames && d[-1].abs >= Master::TAIL_THRESHOLD }
+              ring.quiet_from = MB::M.max(ring.quiet_from, frame + frames)
+              return frames
+            end
+          end
+
           loud = nil
-          data.each do |d|
+          chans.each do |d|
             next if d.nil? || d.empty?
             d = d.real if d.is_a?(Numo::SComplex) || d.is_a?(Numo::DComplex)
             m = d[0...MB::M.min(d.length, frames)].abs.ge(Master::TAIL_THRESHOLD)

@@ -68,8 +68,13 @@ module MB
           list = @entries
           return NONE if list.empty?
 
-          active = list.select { |e| e.from <= pos && pos < e.to }
-          return NONE if active.empty?
+          # (entries are sorted by start)
+          active = nil
+          list.each do |e|
+            break if e.from > pos
+            (active ||= []) << e if pos < e.to
+          end
+          return NONE if active.nil?
 
           top = active.reject(&:layer).max_by(&:priority)
           names = active.select(&:layer).map(&:name)
