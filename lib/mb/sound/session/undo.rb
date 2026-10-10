@@ -37,8 +37,21 @@ module MB
         # triples), and +cancelled+ changes (a step that undid queued
         # changes, which redo issues again).
         Step = Struct.new(:label, :changes, :extras, :cancelled, :line, keyword_init: true) do
+          # The label and where the step's changes land, e.g. "go :drop
+          # lands 9:1".
           def to_s
-            label
+            stamps = changes.map { |c| c.lands || c.entry&.lands }.compact
+            where = stamps.empty? ? '' : " lands #{stamps.min_by { |st| st.pos || 0 }}"
+            where = ' (cancelled)' if stamps.empty? && cancelled
+            "#{label}#{where}"
+          end
+
+          def inspect
+            "#<#{self}>"
+          end
+
+          def pretty_print(q)
+            q.text(inspect)
           end
         end
 
@@ -54,8 +67,8 @@ module MB
 
         # Undoes the last undo step (or the last +count+), landing at the
         # launch point +at+ (the next bar by default; :now for right away).
-        # Returns the undone steps' labels, or nil if there is nothing to
-        # undo.
+        # Returns the steps that redo them (whose labels say what was undone
+        # and where it lands), or nil if there is nothing to undo.
         def undo(count = 1, at: :bar, start_time: nil)
           shift_steps(@undo_stack, @redo_stack, 'undo', count, at, start_time)
         end
@@ -103,7 +116,7 @@ module MB
         # The Player objects held by the undo and redo lists that are no
         # longer playing or resumable (for memory measurements).
         def retired_graphs
-          live = @mutex.synchronize { (@players.values + @stopped.values).map(&:input) }
+          live = live_inputs
           @undo_lock.synchronize { retired_inputs(@undo_stack + @redo_stack, live) }
         end
 
@@ -129,7 +142,7 @@ module MB
 
         # Drops the oldest steps beyond UNDO_LIMIT or RETIRED_GRAPH_LIMIT.
         def prune_steps
-          live = @mutex.synchronize { (@players.values + @stopped.values).map(&:input) }
+          live = live_inputs
           @undo_lock.synchronize {
             [@undo_stack, @redo_stack].each do |stack|
               stack.shift while stack.length > UNDO_LIMIT
@@ -140,6 +153,12 @@ module MB
               stack.shift
             end
           }
+        end
+
+        # Inputs of graphs that play on (not being replaced or stopped) or
+        # are kept for #resume.
+        def live_inputs
+          @mutex.synchronize { (@players.values.select(&:current?) + @stopped.values).map(&:input) }
         end
 
         # Distinct graph inputs held by +steps+' snapshots that aren't in
@@ -155,17 +174,17 @@ module MB
         # before each one (cancelling changes that haven't landed), and
         # pushes the steps that do the reverse onto +to+.
         def shift_steps(from, to, verb, count, at, start_time)
-          labels = []
+          reverses = []
           count.times do
             step = @undo_lock.synchronize { from.pop }
             break if step.nil?
 
             reverse = revert_step(step, verb, at, start_time)
             @undo_lock.synchronize { to << reverse }
-            labels << step.label
+            reverses << reverse
           end
           prune_steps
-          labels.empty? ? nil : labels
+          reverses.empty? ? nil : reverses
         end
 
         # Reverts one step (see #shift_steps).  Returns the step that would
@@ -188,7 +207,7 @@ module MB
               restores << change(c.kind, c.subject, c.time && c.time > now ? c.time : time, data: c.entry.data, undoes: c.seq, starts: c.starts, &c.action)
             end
 
-            landed.group_by(&:subject).each do |subject, list|
+            landed.reject { |c| Changes::NO_SNAPSHOT_KINDS.include?(c.kind) }.group_by(&:subject).each do |subject, list|
               first = list.min_by(&:seq)
               restores << restore_change(subject, first, time)
             end

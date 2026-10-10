@@ -20,7 +20,12 @@ module MB
             k = frame - start
             return from if k <= 0
             return to if k >= length
-            from + (to - from) * (k.to_f / length)
+            k * slope + from
+          end
+
+          # The level change per frame.
+          def slope
+            (to - from) / length.to_f
           end
 
           # True if the ramp has reached +to+ by session frame +frame+.
@@ -29,10 +34,15 @@ module MB
           end
 
           # A Numo::SFloat of the levels for +count+ frames from session
-          # frame +frame+ (the same values as #at).
+          # frame +frame+ (the same values as #at: each depends only on its
+          # frame, so any buffer size gives the same levels).
           def levels(frame, count)
-            k = Numo::DFloat.new(count).seq(frame - start).clip(0, length)
-            Numo::SFloat.cast((k / length.to_f) * (to - from) + from)
+            k0 = frame - start
+            k = Numo::DFloat.new(count).seq(k0)
+            k = k.clip(0, length) if k0 < 0 || k0 + count > length
+            # SFloat, since multiplying SFloat audio by a DFloat is ~20x
+            # slower in Numo than casting first
+            Numo::SFloat.cast(k.inplace * slope + from)
           end
         end
 
