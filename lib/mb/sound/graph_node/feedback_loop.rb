@@ -411,7 +411,10 @@ module MB
 
         # Check mode (MB_SOUND_PLAN_CHECK): runs the block in C, then from
         # the same state with the Ruby mirror, and compares the samples and
-        # the state bit for bit.
+        # the state: bit for bit, except that a zero's sign may differ (the
+        # C decoder drops x + 0, so a -0 can stay -0 where the mirror gives
+        # +0: equal values, accepted by the user 2026-10-10; the state's
+        # Floats compare by value too).
         def check_run(n, out)
           before = snapshot
           @program.run(n, @inputs, @params, @delays, out)
@@ -423,9 +426,15 @@ module MB
 
           problem = nil
           if c_out.to_binary != r_out.to_binary
-            diff = (Numo::DFloat.cast(c_out) - Numo::DFloat.cast(r_out)).abs
-            problem = "samples differ by up to #{diff.max} (first at #{(diff > 0).where.to_a.first})"
-          elsif c_state != r_state
+            c = Numo::DFloat.cast(c_out)
+            r = Numo::DFloat.cast(r_out)
+            differ = c.ne(r) & ~(c.isnan & r.isnan)
+            if differ.count_true > 0
+              diff = (c - r).abs
+              problem = "samples differ by up to #{diff[differ].max} (first at #{differ.where.to_a.first})"
+            end
+          end
+          if problem.nil? && !same_state?(c_state, r_state)
             problem = 'the loop state differs'
           end
           return unless problem
@@ -453,6 +462,28 @@ module MB
             end
           }
           [rings, states]
+        end
+
+        # True if loop states +a+ and +b+ (see #snapshot) hold equal values
+        # (delay lines compared by value, so a zero's sign may differ; see
+        # #check_run).
+        def same_state?(a, b)
+          return true if a == b
+
+          ra, sa = a
+          rb, sb = b
+          return false unless sa == sb && ra.length == rb.length
+
+          ra.each_with_index.all? { |(bin, w, bs, rs), i|
+            bin2, w2, bs2, rs2 = rb[i]
+            next false unless w == w2 && bs == bs2 && rs == rs2
+            next true if bin == bin2
+
+            cls = @program.rings[i].line.instance_variable_get(:@buffer).class
+            x = cls.from_binary(bin)
+            y = cls.from_binary(bin2)
+            (x.ne(y) & ~(x.isnan & y.isnan)).count_true == 0
+          }
         end
 
         def restore(snap)
