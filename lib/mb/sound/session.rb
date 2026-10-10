@@ -908,6 +908,21 @@ module MB
           offset = wake
         end
 
+        # A mute ramp ending in this buffer: the graph stops on the ramp's
+        # last frame (not the end of the buffer), so free-running
+        # oscillators sleep at the same point whatever the buffer size
+        if p.strip_ramp && p.strip_ramp.to <= 0
+          silent_from = p.strip_ramp.start + p.strip_ramp.length
+          if silent_from <= base + offset
+            p.strip_level = 0.0
+            p.strip_ramp = nil
+            p.asleep = true
+            fade_ramp(p, base + offset, frames)
+            return finish_player(p, false, base + offset + frames)
+          end
+          frames = MB::M.min(frames, silent_from - (base + offset))
+        end
+
         t = MB::U.clock_now
         data = p.input.read(frames)
         check_speed(p, MB::U.clock_now - t, frames)

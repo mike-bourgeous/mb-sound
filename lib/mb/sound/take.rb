@@ -31,7 +31,7 @@ module MB
       # Commands that play in the foreground or show things (they would
       # block or draw during a replay), skipped by replays: lines that start
       # with one of these words are kept in the script as comments.
-      FOREGROUND = %w[play plot vis visualize wait spy take changes players stopped scheduled scenes tracks mutes help ls].freeze
+      FOREGROUND = %w[play plot vis visualize wait spy take changes players stopped scheduled scenes tracks help ls].freeze
 
       class << self
         # The console's take, created when first needed.
@@ -42,6 +42,12 @@ module MB
         # Replaces the console's take with a fresh one.
         def restart
           @current = new
+        end
+
+        # A fresh binding like the console's (Pry's binding in MB::Sound:
+        # self and constants are MB::Sound's), with no local variables yet.
+        def console_binding
+          MB::Sound.module_eval('binding')
         end
 
         # The id of the console line being evaluated on this thread, or nil.
@@ -168,6 +174,7 @@ module MB
           next if k == :time
           out << "  #{k}: #{ruby_value(v)},\n"
         end
+        out << "  ends: #{ruby_value(session.transport.position)},\n"
         out << ") do |r|\n"
         lines.each do |l|
           if l.skipped
@@ -178,8 +185,16 @@ module MB
           l.code.each_line { |c| out << "    #{c.chomp}\n" }
           out << "  RUBY\n"
         end
-        out << "end.main(ARGV)\n"
+        out << "end.main(ARGV, __FILE__)\n"
         out
+      end
+
+      # A Replay of this take (see Replay), as #save would write it.
+      def replay
+        lines = @mutex.synchronize { @lines.reject(&:skipped) }
+        Replay.new(**@start.except(:time), ends: session.transport.position) do |r|
+          lines.each { |l| r.line(l.issued.pos, l.lands.dup, l.code) }
+        end
       end
 
       # Saves the replay script and prints where.  With no +path+, saves to
@@ -243,3 +258,5 @@ module MB
     end
   end
 end
+
+require_relative 'take/replay'
