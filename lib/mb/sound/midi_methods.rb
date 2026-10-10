@@ -101,6 +101,32 @@ module MB
         MB::Sound::Synth.new(source.nil? ? midi : source, voices: voices, **options, &block)
       end
 
+      # A value that differs per synth voice, for use inside a synth's voice
+      # block: a list of values gives one value per lane (repeating from the
+      # start when the list is shorter than the lanes), and a Range spreads
+      # evenly across the lanes (voices plus spares; the first lane gets the
+      # range's start and the last its end).  The voice-level sibling of
+      # MultichannelMethods#per_channel (inside a voice block, #channels and
+      # #per_channel keep their multichannel meaning).
+      #
+      # Examples (bin/sound.rb):
+      #     # voices detuned from -10 to +10 cents, alternately panned left and right
+      #     play synth(voices: 4) { |v| (v.hz.transpose(per_voice(-0.1..0.1)).saw * v.amp_env).pan(per_voice(-0.5, 0.5)) }
+      def per_voice(*items)
+        items = items[0] if items.length == 1 && items[0].is_a?(Array)
+        raise ArgumentError, 'per_voice needs at least one value or a Range' if items.empty?
+
+        lane = MB::Sound::Synth.current_lane
+        raise ArgumentError, 'per_voice is for synth voice blocks (e.g. synth { |v| v.hz.saw.at(per_voice(0.5, 0.3)) })' unless lane
+
+        index, count = lane
+        if items.length == 1 && items[0].is_a?(Range)
+          GraphNode::ChannelSpread.new(items[0]).value(index, count)
+        else
+          items[index % items.length]
+        end
+      end
+
       private
 
       # Points the live MIDI sources of #midi at the background session's

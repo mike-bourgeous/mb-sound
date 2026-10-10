@@ -162,7 +162,7 @@ Extensions under `ext/mb/sound/` (plus `ext/mb/fast_sound/`), each building `lib
 
 ### Multichannel (`design/notes/multichannel.md`)
 
-Nodes have `outputs`/`channel_count`; `GraphNode::Channels` is the bundle (`stereo(l, r)`, `channels(a, b, c)`; Array-like but deliberately not Enumerable).  DSL calls on bundles run per channel (NumPy-style broadcasting; per-channel args via bundles, `channels(...)`, `spread(a..b)`); `reverb` is the exception (one reverb for all channels).  Conversions are `GraphNode::ChannelMixer` nodes: `pan`/`balance`, `width`, `mono`, `swap`, `mid_side`, `matrix`, `place`, `left`/`right`.  Sample all outputs of a mixer in turn.  Demo `bin/songs/stereo_song.rb`.
+Nodes have `outputs`/`channel_count`; `GraphNode::Channels` is the bundle (`stereo(l, r)`, `channels(a, b, c)`; Array-like but deliberately not Enumerable).  DSL calls on bundles run per channel (NumPy-style broadcasting; per-channel args via bundles or `per_channel(list | a..b)` (aliases `channels(...)`, `spread(a..b)`); in synth voice blocks `per_voice(list | a..b)` gives per-lane values); `reverb` is the exception (one reverb for all channels).  Conversions are `GraphNode::ChannelMixer` nodes: `pan`/`balance`, `width`, `mono`, `swap`, `mid_side`, `matrix`, `place`, `left`/`right`.  Sample all outputs of a mixer in turn.  Demo `bin/songs/stereo_song.rb`.
 
 ### Master effects (`design/notes/master_effects.md`)
 

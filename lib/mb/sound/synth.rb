@@ -187,6 +187,21 @@ module MB
       # The same-note retrigger mode (see the class description).
       attr_reader :retrigger
 
+      # The [index, count] of the synth lane whose voice block is running on
+      # this thread, or nil outside voice blocks (see MidiMethods#per_voice).
+      def self.current_lane
+        Thread.current[:mb_sound_synth_lane]
+      end
+
+      # Runs the block with .current_lane returning [+index+, +count+].
+      def self.with_lane(index, count)
+        old = Thread.current[:mb_sound_synth_lane]
+        Thread.current[:mb_sound_synth_lane] = [index, count].freeze
+        yield
+      ensure
+        Thread.current[:mb_sound_synth_lane] = old
+      end
+
       # See the class description.
       def initialize(
         source, voices: 8, spares: 2, steal: nil, protect: nil, mono: nil,
@@ -230,7 +245,9 @@ module MB
           v = Notes.new(lane, sustain: false, sample_rate: @sample_rate)
           v.quiet_check = -> { @quiet[idx] }
           v.level_check = -> { @peaks[idx] }
-          graph = MB::Sound.with_seed(@seed + idx) { block.call(v, idx) }
+          graph = Synth.with_lane(idx, @allocator.lanes.length) {
+            MB::Sound.with_seed(@seed + idx) { block.call(v, idx) }
+          }
           lane.idle_check = -> { v.idle? }
           lane.level_check = -> { v.level }
           lane.louder_check = ->(velocity) { louder_lane?(v, velocity) }
