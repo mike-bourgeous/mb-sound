@@ -8,9 +8,10 @@ RUN apt-get -y update && apt-get -y upgrade && apt-get -y --no-install-recommend
 COPY .bash_aliases /root/.bash_aliases
 COPY .bashrc /root/.bashrc
 
+# TODO: Don't copy in tmp/
 RUN mkdir /app
 COPY . /app
-RUN cd /app && bundle install && bundle exec rake compile
+RUN cd /app && bundle install && bundle exec rake clean compile
 
 VOLUME /app
 WORKDIR /

@@ -79,7 +79,7 @@ module MB
     # loop.  The pieces are in place: ops are Ruby objects with explicit
     # operands, the C executor dispatches on opcodes over a register file,
     # and node state is already explicit (Tone::State).  See the design
-    # note in CLAUDE.md's Plan layer section.
+    # notes in design/notes/plan_layer.md.
     module Plan
       # Raised by #plan_describe (or ops) for settings a plan can't run;
       # the region finder treats the node as a boundary.
