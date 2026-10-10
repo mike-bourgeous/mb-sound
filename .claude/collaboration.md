@@ -33,6 +33,6 @@ How the maintainer likes agentic work on mb-sound to go.  Imported from CLAUDE.m
 - Commits are step by step with detailed messages; preserve false starts in history (don't rewrite commit messages); `--no-ff` merges only when the maintainer says merge.  Never push.
 - Merges that change only one `bin/` script (plus its spec) need only that script's specs before and after merging, not the full suite and smoke run.
 - Compiling extensions in the shared main checkout is fine: macOS builds `.bundle` and Linux builds `.so` in separate `tmp/<platform>/` directories.
-- Background agents get self-contained prompts (see the `agent-brief` skill) and run at most about three at once on the 7 GB container (check-mode suites and Valgrind are memory-heavy).
+- Background agents get self-contained prompts (see the `agent-brief` skill), send the main session regular one-line progress updates (relayed to the maintainer as one-liners, so they can see what's running without asking), and run at most about three at once on the 7 GB container (check-mode suites and Valgrind are memory-heavy).
 - After every merge, follow the `post-merge` skill (merge report, post-merge tests, "did you know" note).
 - Keep notes local by default; don't post to GitHub unless asked.
