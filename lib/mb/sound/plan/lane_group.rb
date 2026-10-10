@@ -75,7 +75,7 @@ module MB
           end
 
           if @delivered[idx] || @count != count
-            if @members.any? { |r| !current?(r) }
+            if !@members.all? { |r| current?(r) }
               # A member's installation rebuilt (its region was replaced):
               # every member runs alone until the owner regroups (see
               # LaneGroups#check)
@@ -114,33 +114,41 @@ module MB
         # Runs every member for a +count+-sample block.
         def run(count)
           members = @members
+          status = @status
           @running = true
           @count = count
           @runs += 1
           ready = @ready
           ready.clear
           begin
-            members.each_index do |i|
-              @status[i] = nil
+            i = 0
+            while i < members.length
+              status[i] = nil
               @delivered[i] = false
+              i += 1
             end
 
-            members.each_with_index do |r, i|
-              next if @status[i] # run already (asked for during the run)
-
-              n = r.prepare(count)
-              next if @status[i] # asked for while preparing (inside it)
-
-              if n == :done
-                @status[i] = :done
-                @results[i] = r.result
-              else
-                @status[i] = :ready
-                @n[i] = n
+            i = 0
+            while i < members.length
+              unless status[i] # run already (asked for during the run)
+                r = members[i]
+                n = r.prepare(count)
+                unless status[i] # asked for while preparing (inside it)
+                  if n.is_a?(Integer)
+                    status[i] = :ready
+                    @n[i] = n
+                    ready << i
+                  else
+                    status[i] = :done
+                    @results[i] = r.result
+                  end
+                end
               end
+              i += 1
             end
 
-            members.each_with_index { |r, i| ready << i if @status[i] == :ready }
+            # Members finished early (asked for during the run) are done
+            ready.select! { |k| status[k] == :ready }
             execute(ready, count) unless ready.empty?
           ensure
             @running = false
@@ -149,19 +157,25 @@ module MB
 
         # True if +region+ is still its root's installed region.
         def current?(region)
-          region.root.instance_variable_get(:@plan_region).equal?(region) && !region.installation.stale?
+          region.installed? && !region.installation.stale?
         end
 
         # Runs the ready members (indices +ready+): those with full blocks
         # and the leader's program shape together, the rest alone.
         def execute(ready, count)
+          together = (@together ||= [])
+          together.clear
           lead = nil
-          together = []
-          ready.each do |i|
+          k = 0
+          while k < ready.length
+            i = ready[k]
+            k += 1
             r = @members[i]
-            if @n[i] == count && r.program && r.installation.engine == :c
-              lead ||= r.program.signature
-              if r.program.signature == lead
+            prog = r.program
+            if @n[i] == count && prog && r.installation.engine == :c
+              sig = prog.signature
+              lead ||= sig
+              if sig.equal?(lead) || sig == lead
                 together << i
                 next
               end
@@ -179,10 +193,13 @@ module MB
           end
 
           run_lanes(together, count)
-          together.each do |i|
+          k = 0
+          while k < together.length
+            i = together[k]
             r = @members[i]
             @status[i] = :done
             @results[i] = r.finish(count, count, r.out_view(count))
+            k += 1
           end
           @lane_runs += together.length
         end
@@ -193,26 +210,29 @@ module MB
           @lists.each(&:clear)
           words = nil
           nslots = 0
-          lanes.each do |i|
-            r = @members[i]
-            w, sc, objs, ns = r.program.lower
-            words ||= w
-            nslots = ns
-            ins, pars = r.run_arguments
-            scalars << sc
-            objects << objs
-            inputs << ins
-            params << pars
+          k = 0
+          while k < lanes.length
+            r = @members[lanes[k]]
+            low = r.program.lower
+            words ||= low[0]
+            nslots = low[3]
+            scalars << low[1]
+            objects << low[2]
+            inputs << r.inputs
+            params << r.params
             outs << r.out_view(count)
+            k += 1
           end
 
           stride = 2 * count
-          need = [nslots * stride * lanes.length, 1].max
+          need = nslots * stride * lanes.length
+          need = 1 if need < 1
           if @scratch.nil? || @scratch.length < need
             @scratch = Numo::SFloat.zeros(need)
+            @scratch_views = {}
           end
           # The C side divides the scratch evenly among the lanes
-          scratch = @scratch.length == need ? @scratch : (@scratch_views ||= {})[need] ||= @scratch[0...need]
+          scratch = @scratch.length == need ? @scratch : (@scratch_views[need] ||= @scratch[0...need])
           MB::Sound::FastPlan.run_lanes(words, scalars, objects, inputs, params, scratch, outs, count)
         end
       end

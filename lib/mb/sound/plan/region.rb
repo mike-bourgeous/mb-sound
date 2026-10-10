@@ -72,8 +72,14 @@ module MB
           @member_set.key?(node)
         end
 
+        # True while the region is installed on its nodes.
+        def installed?
+          @installed
+        end
+
         # Hooks the nodes (see Planned).
         def install
+          @installed = true
           @members.each do |n|
             if n.equal?(@root)
               n.instance_variable_set(:@plan_region, self)
@@ -85,6 +91,7 @@ module MB
 
         # Removes the hooks; the nodes run unfused from the next block.
         def uninstall
+          @installed = false
           @members.each do |n|
             n.instance_variable_set(:@plan_region, nil) if n.instance_variable_get(:@plan_region).equal?(self)
             n.instance_variable_set(:@plan_member, nil) if n.instance_variable_get(:@plan_member).equal?(self)
@@ -179,7 +186,7 @@ module MB
         # Runs one block of this region by itself (see #sample).
         def sample_alone(count)
           n = prepare(count)
-          return @result if n == :done
+          return @result unless n.is_a?(Integer)
 
           finish(n, count)
         end
@@ -273,12 +280,9 @@ module MB
           planned || execute(n)
         end
 
-        # For internal use by LaneGroup: the arguments FastPlan.run takes
-        # for this region's gathered block (inputs and params as #gather
-        # read them).
-        def run_arguments
-          [@inputs, @params]
-        end
+        # For internal use by LaneGroup: the boundary input buffers and
+        # params of the gathered block, as FastPlan.run takes them.
+        attr_reader :inputs, :params
 
         # Called by a node inside this region that was read from outside
         # the plan (a reader the region finder didn't see, e.g. a Tee made
