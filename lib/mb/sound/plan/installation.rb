@@ -185,7 +185,7 @@ module MB
 
         # Leaves +node+ out of every region from the next block (it is read
         # as a boundary input), saying +why+ in listings.  With
-        # +until_restart+ (an event-driven node whose MIDI stream is over),
+        # +until_restart+ (an event-driven node whose event stream is over),
         # the node comes back when its stream's content jumps (a seek,
         # restart, or rewind: live sets loop and seek; see RestartWatch).
         def exclude(node, why, until_restart: false)

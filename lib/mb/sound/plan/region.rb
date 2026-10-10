@@ -251,7 +251,7 @@ module MB
             while k < feeders.length
               f = feeders[k]
               if f.plan_finished?(count)
-                (f.respond_to?(:plan_nodes) ? f.plan_nodes : [f]).each { |x| @installation.exclude(x, 'its MIDI stream is over', until_restart: true) }
+                (f.respond_to?(:plan_nodes) ? f.plan_nodes : [f]).each { |x| @installation.exclude(x, 'its event stream is over', until_restart: true) }
                 @result = run_unfused(count)
                 return :done
               end

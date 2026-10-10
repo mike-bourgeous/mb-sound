@@ -214,7 +214,7 @@ RSpec.describe('Plan: Notes nodes and envelopes') do
         c.before_block(0) { v.stream.seek(5.6) }
         v.hz.sine * v.amp_env(0.01, 0.1, 0.5, 0.1) + v.gate
       }
-      expect(r.installations[:c].excluded.values).to include('its MIDI stream is over')
+      expect(r.installations[:c].excluded.values).to include('its event stream is over')
     end
   end
 
