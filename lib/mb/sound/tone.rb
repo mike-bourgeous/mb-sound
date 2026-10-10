@@ -1318,7 +1318,8 @@ module MB
       # - a phase in cycles, like #with_phase (e.g. 0.25), or an
       #   MB::Sound::Phase (e.g. 1.2.radians),
       # - a graph node of cycles, read at each reset sample,
-      # - :random, a new random phase at each reset (the same as #rnd).
+      # - :random, a new random phase at each reset (the same as #rnd; +seed:+
+      #   as for #rnd).
       #
       # The jump is band-limited: a 32-sample minBLEP step from the value the
       # wave would have had, including phase modulation at that sample, with
@@ -1347,7 +1348,7 @@ module MB
       #     bpm 120; c = grid(16, 'x..x..x.').loop
       #     play 55.hz.saw.reset(c.trigger) * c.env           # every hit starts at phase 0
       #     play 2.hz.lfo.reset(c.trigger, to: 0.25)          # an LFO that restarts at its peak
-      def reset(trigger, to: nil, clean: nil, keep_feedback: nil)
+      def reset(trigger, to: nil, clean: nil, keep_feedback: nil, seed: nil)
         to = Phase.cycles(to)
         self.clean(clean) unless clean.nil?
         if trigger.nil?
@@ -1373,7 +1374,7 @@ module MB
 
           if to == :random
             to = nil
-            random_phase
+            random_phase(seed: seed)
           elsif to && @random_phase
             override_warning("reset(to: #{make_source_name(to)}) overrides rnd (no more random phases)")
             @random_phase = false

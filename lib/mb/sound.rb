@@ -197,3 +197,8 @@ require_relative 'sound/multi_writer'
 require_relative 'sound/process_reader'
 
 require_relative 'sound/io_logger'
+
+# Records the DSL calls that build graphs (GraphNode#to_ruby); loads last so
+# every DSL method exists
+require_relative 'sound/graph_node/recipe'
+MB::Sound::GraphNode::Recipe.install!
