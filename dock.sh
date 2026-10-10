@@ -6,6 +6,19 @@ APPNAME=mb-sound
 
 set -eu
 
+# Claude Code's config is split in two so two machines can share one /app
+# (e.g. the Mac's checkout, sshfs-mounted on Linux):
+# - LOCAL_CLAUDE (per machine, never shared): credentials, .claude.json,
+#   sessions, daemon sockets and PIDs, history, transcripts, caches.  Mounted
+#   at /claude, which is CLAUDE_CONFIG_DIR in the container.
+# - SHARED_CLAUDE (in the repo, gitignored): memory, skills, and plans,
+#   bind-mounted over those folders inside /claude.  Directories only: Claude
+#   Code replaces files by renaming, which a single-file mount can't take.
+REPO_DIR="$(cd "$(dirname "$0")" && pwd)"
+LOCAL_CLAUDE="${LOCAL_CLAUDE:-$HOME/.mb-sound-claude}"
+SHARED_CLAUDE="${SHARED_CLAUDE:-$REPO_DIR/.claude-shared}"
+SHARED_DIRS="memory:projects/-app/memory skills:skills plans:plans"
+
 trap echo EXIT
 
 hl()
@@ -37,5 +50,27 @@ elif docker ps -a 2>&1 | grep -q $APPNAME; then
 
 else
 	hl "Creating"
-	docker run --name $APPNAME -it -p 3000:3000 -v .:/app $APPNAME /bin/bash
+
+	if [[ -d "$REPO_DIR/.claude-user" && ! -e "$LOCAL_CLAUDE" ]]; then
+		echo "Found the old $REPO_DIR/.claude-user but no $LOCAL_CLAUDE."
+		echo "Move its shared folders into $SHARED_CLAUDE and the rest to"
+		echo "$LOCAL_CLAUDE first (see the comment at the top of dock.sh)."
+		exit 1
+	fi
+
+	# Create the mount points ourselves so they belong to this user, not
+	# root.  Nested bind mounts: the shared folders cover their mount points
+	# inside the local config.
+	mounts=(-v "$REPO_DIR":/app -v "$LOCAL_CLAUDE":/claude)
+	for pair in $SHARED_DIRS; do
+		src="$SHARED_CLAUDE/${pair%%:*}"
+		dst="${pair#*:}"
+		mkdir -p "$src" "$LOCAL_CLAUDE/$dst"
+		mounts+=(-v "$src":"/claude/$dst")
+	done
+
+	docker run --name $APPNAME -it -p 3000:3000 \
+		"${mounts[@]}" \
+		-e CLAUDE_CONFIG_DIR=/claude \
+		$APPNAME /bin/bash
 fi
