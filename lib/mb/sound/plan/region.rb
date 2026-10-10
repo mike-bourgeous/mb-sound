@@ -130,6 +130,8 @@ module MB
           @out_class = output.complex? ? Numo::SComplex : Numo::SFloat
           @out = nil
           @out_views.clear
+          @out_alt = nil
+          @out_views_alt = nil
 
           # Event-driven nodes run their per-block Ruby (see EventList),
           # each once, in op order
@@ -491,6 +493,18 @@ module MB
             @out_views.clear
           end
           @out_views[n] ||= @out[0...n]
+        end
+
+        # For internal use by LaneGroup: switches to the other of two output
+        # buffers.  A group computes every member when any member is read,
+        # so a member's next block is written before the member's own
+        # readers (a Tee sharing its last buffer as a frozen frame) have
+        # asked for it; with two buffers the block they hold stays intact
+        # until they read again.
+        def swap_out!
+          @out, @out_alt = @out_alt, @out
+          @out_views, @out_views_alt = (@out_views_alt || {}), @out_views
+          self
         end
 
         private

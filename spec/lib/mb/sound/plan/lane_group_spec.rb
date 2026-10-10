@@ -95,6 +95,25 @@ RSpec.describe(MB::Sound::Plan::LaneGroup) do
     expect(s.lane_groups&.groups.to_a).not_to be_empty
   end
 
+  it "keeps each member's last block intact for its Tee until it reads again", :check_shared do
+    # The group writes every member's next block when the first member is
+    # read; members' outputs shared by Tees (frozen frames) must not change
+    # before their own readers ask (Region#swap_out!)
+    build = ->(lanes) {
+      MB::Sound::Plan.lanes = lanes
+      MB::Sound.seed(0)
+      MB::Sound.synth('spec/test_data/dense_modulated.mid', voices: 3, spares: 1) { |v|
+        f = v.freq
+        (f.tone.ramp * v.amp_env).proc { |x| x } * 0.1 + (f / 1000.constant).delay(0.001) * 0.01
+      }
+    }
+    s = build.(true)
+    expect(s.lane_groups.groups).not_to be_empty
+    a = render(s, sizes.first(20))
+    b = render(build.(false), sizes.first(20))
+    expect(a).to eq(b)
+  end
+
   it 'still skips idle lanes with lane groups off' do
     MB::Sound::Plan.lanes = false
     MB::Sound.seed(0)
@@ -204,6 +223,19 @@ RSpec.describe(MB::Sound::Plan::LaneGroup) do
       groups = inst.lane_groups.groups
       expect(groups.map { |g| g.members.length }).to eq([2])
       expect(groups[0].lane_runs).to be > 0
+    end
+
+    it "doesn't group regions inside a graph (a drum kit's voices push buffers to their subgraphs)" do
+      kit = ->(lanes) {
+        MB::Sound::Plan.lanes = lanes
+        MB::Sound.seed(0)
+        k = MB::Sound.tr808(MB::Sound.grid(16, bd: 'x.x.x...', lt: '..x...x.', mt: '.x...x..', ht: 'x...x...'))
+        MB::Sound::Plan.install(k)
+        k
+      }
+      a = kit.(true)
+      b = kit.(false)
+      sizes.first(20).each { |n| expect(a.sample(n).to_a).to eq(b.sample(n).to_a) }
     end
 
     it 'regroups after a rebuild' do

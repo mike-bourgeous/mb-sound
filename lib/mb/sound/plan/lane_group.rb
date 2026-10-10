@@ -131,6 +131,9 @@ module MB
             while i < members.length
               status[i] = nil
               @delivered[i] = false
+              # Write this block's outputs into each member's other buffer
+              # (see Region#swap_out!)
+              members[i].swap_out!
               i += 1
             end
 
@@ -252,19 +255,29 @@ module MB
       # Finds and keeps the LaneGroups of a set of installations (a Synth's
       # lanes, or one installation, e.g. a Session player's): every region
       # with the same program signature and output type is in one group,
-      # within an installation (e.g. the left and right channels of a
-      # stereo patch, unison copies, or the same filter on several inputs)
-      # and across installations (a Synth's voices and spares, and each
-      # voice's channels).  #check regroups after any installation rebuilt
-      # or a region stopped planning.
+      # across installations (a Synth's voices and spares, and each voice's
+      # channels) and, for one installation, among the regions computing its
+      # outputs (e.g. the left and right channels of a stereo patch; see
+      # +roots_only+).  In installations with resamplers (whose regions may
+      # run at different sample counts, inside and outside an oversampler)
+      # only the n-th region of a shape of each installation share a group.
+      # #check regroups after any installation rebuilt or a region stopped
+      # planning.
       class LaneGroups
         # The current groups.
         attr_reader :groups
 
         # +installations+: the lanes' Installations (nil entries for lanes
-        # without plans).
-        def initialize(installations)
+        # without plans).  With +roots_only+ (Plan.install's grouping inside
+        # one installation) only regions computing an output of their
+        # installation are grouped: inside a graph, nodes like a drum
+        # voice push buffers to their subgraphs (Drums::Voice::Tap) or skip
+        # them while idle, so computing another region before its owner
+        # asks for it isn't safe; an installation's outputs are read by its
+        # owner (a Session) every block.
+        def initialize(installations, roots_only: false)
           @all = installations
+          @roots_only = roots_only
           @installations = installations.compact
           @groups = []
           @generations = nil
@@ -299,8 +312,10 @@ module MB
             # only the n-th region of one shape in each installation group
             # (a Synth's lanes have the same graph: the same counts)
             seen = inst.resamples? ? Hash.new(0) : nil
+            outputs = @roots_only ? inst.roots.map { |o| Plan.origin(o) } : nil
             inst.regions.each do |r|
               next if r.disabled
+              next if outputs && outputs.none? { |o| o.equal?(r.root) }
 
               prog = r.program || r.precompile
               next unless prog

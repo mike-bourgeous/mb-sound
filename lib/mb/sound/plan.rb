@@ -159,7 +159,7 @@ module MB
           inst.precompile
           return (inst.uninstall; nil) if inst.regions.empty?
 
-          inst.lane_groups = LaneGroups.new([inst]) if lanes
+          inst.lane_groups = LaneGroups.new([inst], roots_only: true) if lanes
           inst
         end
 
