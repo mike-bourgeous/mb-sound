@@ -216,22 +216,22 @@ RSpec.describe(MB::Sound::Form) do
       run_bars(5)
       expect(set.playback.history).to eq([:a, :a, :a])
       d = within { MB::Sound.onward }
-      expect(d.to_s).to eq('next :a at 7:1') # already committed: the next boundary
+      expect(d.to_s).to eq('next :b at 7:1 (open)') # decided at the boundary
       run_bars(3)
-      expect(set.playback.history).to eq([:a, :a, :a, :a, :b])
+      expect(set.playback.history).to eq([:a, :a, :a, :b])
     end
 
     it 'applies goto before the commit point to this boundary, after it to the following one' do
       setup_scenes(:a, :b, :c)
       flow do
-        a 4
+        a 4, fill: :x # (no scene :x; the fill's start is the commit point)
         b 2
         c 2, next: :end
       end
       run_bars(2)
       d = within { MB::Sound.goto(:c) }
       expect(d.to_s).to eq('next :c at 5:1 (open)')
-      run_to(3 + 1/8r) # past the commit point (start of the last bar)
+      run_to(3 + 1/8r) # past the commit point (the fill's start)
       d = within { MB::Sound.goto(:a) } # waits for the following boundary
       expect(d.to_s).to eq('next :c at 5:1')
       run_bars(4)
@@ -448,6 +448,25 @@ RSpec.describe(MB::Sound::Form) do
       within { MB::Sound.seek(:vo) }
       expect(transport.position).to eq(4)
       expect { within { MB::Sound.seek(:nope) } }.to raise_error(ArgumentError, /No section or marker :nope/)
+    end
+  end
+
+  describe 'console names' do
+    names = %i[
+      flow form play_form section loop! loop_section onward unloop! continue_form goto goto_section
+      skip skip_section finish finish_form practice rehearse marker markers at_marker meter time_signature
+    ]
+
+    it 'are FormMethods, not Kernel or Object methods, and not Pry commands' do
+      require 'pry'
+      pry_commands = Pry::Commands.keys.map(&:to_s)
+      names.each do |n|
+        expect(MB::Sound.method(n).owner).to eq(MB::Sound::FormMethods), "#{n} is defined by #{MB::Sound.method(n).owner}"
+        expect(Object.new.respond_to?(n, true)).to eq(false), "#{n} is an Object method"
+        expect(pry_commands).not_to include(n.to_s)
+      end
+      expect(pry_commands).not_to include('seek')
+      expect(MB::Sound.method(:seek).owner).to eq(MB::Sound::SequenceMethods)
     end
   end
 

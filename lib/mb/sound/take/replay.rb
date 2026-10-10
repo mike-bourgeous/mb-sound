@@ -32,8 +32,8 @@ module MB
 
         attr_reader :lines, :ends
 
-        def initialize(bpm:, bar_length:, master_gain:, fade_in:, fade_out:, rng:, ends: nil)
-          @start = { bpm: bpm, bar_length: bar_length, master_gain: master_gain, fade_in: fade_in, fade_out: fade_out, rng: rng }
+        def initialize(bpm:, bar_length:, master_gain:, fade_in:, fade_out:, rng:, meters: [], ends: nil)
+          @start = { bpm: bpm, bar_length: bar_length, meters: meters, master_gain: master_gain, fade_in: fade_in, fade_out: fade_out, rng: rng }
           @ends = ends&.to_r
           @lines = []
           yield self if block_given?
@@ -52,6 +52,7 @@ module MB
         def schedule(session)
           t = session.transport
           t.bar_length = @start[:bar_length]
+          (@start[:meters] || []).each { |pos, len| t.meter(len, at: pos) }
           t.bpm = @start[:bpm]
           session.master_gain = @start[:master_gain]
           session.fade_in = @start[:fade_in]

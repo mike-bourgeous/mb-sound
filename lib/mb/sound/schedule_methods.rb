@@ -28,7 +28,7 @@ module MB
         raise ArgumentError, "Beat must be a number of at least 1 (got #{beat.inspect})" unless beat.is_a?(Numeric) && beat >= 1
 
         session = Session.current
-        time = (bar.to_r - 1) * session.transport.bar_length + (beat.to_r - 1) / 4
+        time = session.transport.bar_position(bar) + (beat.to_r - 1) / 4
         description = beat == 1 ? "bar #{bar}" : "bar #{bar} beat #{beat}"
 
         if time < session.transport.position
@@ -60,8 +60,9 @@ module MB
         bars = Sequence::Duration.bars(bars, t.bar_length, transport: t)
         raise ArgumentError, "Bars must be a number of at least 1 (got #{bars.inspect})" unless bars.is_a?(Numeric) && bars >= 1
 
-        time = t.next_boundary(t.bar_length) + (bars.to_r - 1) * t.bar_length
-        session.schedule(time, description: "bar #{(time / t.bar_length).floor + 1}", &block)
+        first = t.next_bar_line(t.position)
+        time = t.bar_position(t.bar_at(first) + bars.to_r - 1)
+        session.schedule(time, description: "bar #{t.bar_at(time).floor}", &block)
       end
 
       # Runs the block every +bars+ bars, on bar +:offset+ + 1 of each group
@@ -76,11 +77,15 @@ module MB
         raise ArgumentError, "Bars must be a positive number (got #{bars.inspect})" unless bars.is_a?(Numeric) && bars > 0
         raise ArgumentError, "Offset must be a number from 0 up to the bar count (got #{offset.inspect})" unless offset.is_a?(Numeric) && offset >= 0 && offset < bars
 
-        period = bars.to_r * t.bar_length
-        base = offset.to_r * t.bar_length
-        time = base + ((t.position - base) / period).ceil * period
+        # The first bar line whose number is offset more than a multiple of
+        # bars (counting from bar 1, through the meter map); the period is
+        # in whole notes at that bar's meter
+        b = t.bar_at(t.position)
+        n = ((b - 1 - offset.to_r) / bars.to_r).ceil * bars.to_r + 1 + offset.to_r
+        time = t.bar_position(n)
+        period = bars.to_r * t.bar_length(time)
 
-        session.schedule(time, period: period, description: "every #{bars} bars from bar #{(time / t.bar_length).floor + 1}", &block)
+        session.schedule(time, period: period, description: "every #{bars} bars from bar #{t.bar_at(time).floor}", &block)
       end
 
       # Returns a Hash from schedule id to a description of when it runs.

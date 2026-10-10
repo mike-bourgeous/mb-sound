@@ -12,20 +12,30 @@ module MB
       # +bar_length+ is only for display: stamps print as bar:beat (e.g.
       # "9:1", or "13:2.5" between beats), counting from 1.  The display is
       # never parsed; Ruby input uses Ruby values (`at: bar(9)`, `in: 3.beats`).
-      Stamp = Data.define(:frame, :pos, :bar_length) do
-        def initialize(frame: nil, pos: nil, bar_length: 1r)
-          super(frame: frame, pos: pos&.to_r, bar_length: bar_length.to_r)
+      #
+      # With a meter map (see Sequence::Transport#meter), +meter_pos+ and
+      # +meter_bar+ are where the meter in effect at +pos+ starts and its
+      # first bar number, so bar numbers count through earlier meters.
+      Stamp = Data.define(:frame, :pos, :bar_length, :meter_pos, :meter_bar) do
+        # A Stamp for timeline position +pos+ on +transport+'s meter map.
+        def self.at(pos, transport, frame: nil)
+          m = pos && transport.meter_at(pos)
+          new(frame: frame, pos: pos, bar_length: m ? m.bar_length : transport.bar_length, meter_pos: m&.pos || 0r, meter_bar: m&.bar || 1)
+        end
+
+        def initialize(frame: nil, pos: nil, bar_length: 1r, meter_pos: 0r, meter_bar: 1)
+          super(frame: frame, pos: pos&.to_r, bar_length: bar_length.to_r, meter_pos: meter_pos.to_r, meter_bar: meter_bar)
         end
 
         # The bar number (counting from 1) of the position.
         def bar
-          pos && (pos / bar_length).floor + 1
+          pos && ((pos - meter_pos) / bar_length).floor + meter_bar
         end
 
         # The quarter-note beat within the bar (counting from 1; a Rational
         # between beats).
         def beat
-          pos && (pos % bar_length) * 4 + 1
+          pos && ((pos - meter_pos) % bar_length) * 4 + 1
         end
 
         # bar:beat, e.g. "9:1" or "13:2.5"; "?" if the position is unknown.

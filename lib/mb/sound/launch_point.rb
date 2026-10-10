@@ -55,6 +55,7 @@ module MB
         # The position in whole notes with +bar_length+ whole notes per
         # bar (the same arithmetic as ScheduleMethods#at_bar).
         def whole_notes(bar_length)
+          return bar_length.bar_position(bar) + (beat.to_r - 1) / 4 if bar_length.is_a?(Sequence::Transport)
           (bar.to_r - 1) * bar_length + (beat.to_r - 1) / 4
         end
 
@@ -181,21 +182,21 @@ module MB
         time = now.to_r
 
         if @at
-          time = @at.whole_notes(bar_length)
+          time = @at.whole_notes(transport)
           if time < now
-            MB::Sound.live_error(ArgumentError.new("at: #{@at.inspect} has already passed (the timeline is at #{Session::Stamp.new(pos: now.to_r, bar_length: bar_length)}); landing now in live mode")) unless replay
+            MB::Sound.live_error(ArgumentError.new("at: #{@at.inspect} has already passed (the timeline is at #{Session::Stamp.at(now.to_r, transport)}); landing now in live mode")) unless replay
             time = now.to_r
           end
         elsif @offset
-          time += @offset.is_a?(Numeric) ? Sequence::Duration.rational(@offset) * bar_length : whole_notes(@offset, transport)
+          time += @offset.is_a?(Numeric) ? transport.bars_length(time, Sequence::Duration.rational(@offset)) : whole_notes(@offset, transport)
         end
 
         grid = case on
                when nil, :now then return time
                when :beat then 1/4r
-               when :bar then bar_length
-               when :clip then clip_grid ? clip_grid.call.to_r : bar_length
-               when Numeric then Sequence::Duration.rational(on) * bar_length
+               when :bar then return transport.next_bar_line(time)
+               when :clip then clip_grid ? clip_grid.call.to_r : (return transport.next_bar_line(time))
+               when Numeric then return transport.next_bar_line(time, Sequence::Duration.rational(on))
                else whole_notes(on, transport)
                end
 

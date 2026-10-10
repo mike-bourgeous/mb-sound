@@ -48,7 +48,7 @@ module MB
               time: time,
               period: period&.to_r,
               block: block,
-              description: description || "bar #{(time / @transport.bar_length).floor + 1}"
+              description: description || "bar #{@transport.bar_at(time).floor}"
             )
             @next_id
           }

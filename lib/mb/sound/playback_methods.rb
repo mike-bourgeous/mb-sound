@@ -663,7 +663,9 @@ module MB
         rate = output.sample_rate
         bars = Sequence::Duration.bars(bars, transport.bar_length, transport: transport, sample_rate: rate)
         seconds = Length.seconds(seconds, sample_rate: rate, transport: transport) if seconds
-        end_time = bars && bars.to_r * transport.bar_length
+        # The end bar's position through the meter map (read every buffer,
+        # so meter changes made while rendering count)
+        end_time = bars && -> { transport.bar_position(bars.to_r + 1) }
         max_frames = ((seconds || MAX_RENDER_SECONDS) * rate).round
 
         sounds.each { |s| session.add(s, on: :now) }
@@ -675,7 +677,7 @@ module MB
         frames_left = -> {
           left = max_frames - frames
           if end_time
-            to_go = end_time - transport.position
+            to_go = end_time.call - transport.position
             left = MB::M.min(left, to_go <= 0 ? 0 : (to_go / transport.whole_notes_per_second * rate).ceil)
           end
           left

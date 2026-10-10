@@ -1126,7 +1126,7 @@ module MB
 
       # The bar number (counting from 1) of a timeline position.
       def bar_of(position)
-        (position / @transport.bar_length).floor + 1
+        @transport.bar_at(position).floor
       end
     end
   end

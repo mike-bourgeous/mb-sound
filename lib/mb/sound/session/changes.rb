@@ -50,7 +50,7 @@ module MB
         # timeline position where a change made right now lands (see also
         # #transport_record).
         def clock
-          @render_lock.synchronize { Stamp.new(frame: @frame, pos: @transport.position, bar_length: @transport.bar_length) }
+          @render_lock.synchronize { Stamp.at(@transport.position, @transport, frame: @frame) }
         end
 
         # The per-buffer transport record (contract K1): the frame and
@@ -62,7 +62,7 @@ module MB
 
         # A Stamp for timeline position +pos+ (frame unknown unless given).
         def stamp(pos, frame: nil)
-          Stamp.new(frame: frame, pos: pos, bar_length: @transport.bar_length)
+          Stamp.at(pos, @transport, frame: frame)
         end
 
         # The timeline position that commands resolve their launch points
@@ -115,7 +115,7 @@ module MB
 
             c.entry = @journal.add(Journal::Entry.new(
               seq: seq, kind: kind, subject: subject,
-              issued: Stamp.new(frame: @frame, pos: perform&.[](:now) || now_unlocked(pos), bar_length: @transport.bar_length),
+              issued: Stamp.at(perform&.[](:now) || now_unlocked(pos), @transport, frame: @frame),
               commits: nil,
               lands: stamp(time.nil? || time < pos ? pos : time),
               status: :queued, source: source, line: line, data: data.freeze, undoes: undoes

@@ -8,8 +8,8 @@ module MB
       # `flow do ... end`).
       #
       # Commit points: what comes after a pass is decided at the start of
-      # the section's fill (if it has one), else at the start of its last
-      # bar.  Performer controls (#loop!, #onward, #goto, #finish) issued
+      # the section's fill (if it has one), else at its end (the bar line
+      # where the next section starts).  Performer controls (#loop!, #onward, #goto, #finish) issued
       # before the commit point change that boundary; issued after it, they
       # change the following one.  The decision is made by a scheduled
       # block that runs a little ahead of time, so a control arriving after
@@ -88,8 +88,16 @@ module MB
             @started = true
             @start_time = time.to_r
             first = @steps.first or raise ArgumentError, 'The form has no sections'
-            gen = @gen
-            schedule(@start_time, 'form start') { begin_pass(0, first[0], 1, @start_time) if gen == @gen }
+            if @start_time <= @session.now
+              # Starting now: launch the first section right away (a
+              # scheduled block would run a buffer later when idle)
+              Session.with_context(session: @session, time: @start_time, source: Session.context&.[](:source) || :set) {
+                begin_pass(0, first[0], 1, @start_time)
+              }
+            else
+              gen = @gen
+              schedule(@start_time, 'form start') { begin_pass(0, first[0], 1, @start_time) if gen == @gen }
+            end
           }
           self
         end
@@ -337,8 +345,7 @@ module MB
             add_phrase_fills(time, @boundary)
 
             @fill_start = sec.fill ? [time, @boundary - length_before(sec.fill.length, @boundary)].max : nil
-            last_bar = @boundary - length_before(1, @boundary)
-            @commit_time = @fill_start || [time, last_bar].max
+            @commit_time = @fill_start || @boundary
 
             gen = @gen
             schedule(@commit_time, "#{name} commit") { commit if gen == @gen }
