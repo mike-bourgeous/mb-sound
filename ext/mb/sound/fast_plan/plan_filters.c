@@ -128,6 +128,25 @@ void mb_plan_svf(float *d, const float *a, const struct mb_plan_param *fc, const
 }
 
 
+// True if parameter +p+ holds one value over samples +from+ to +to+
+// (exclusive): a number, or a register whose samples there are all equal
+// (bitwise, so a NaN or -0 counts as a change, as the coefficient caches
+// see them).
+static inline _Bool pf_param_steady(const struct mb_plan_param *p, size_t from, size_t to)
+{
+	if (!p->p) {
+		return 1;
+	}
+
+	const float *v = p->p;
+	float first = v[from];
+	_Bool same = 1;
+	for (size_t i = from + 1; i < to; i++) {
+		same &= v[i] == first;
+	}
+	return same && first == first;
+}
+
 void mb_plan_svf_lanes(int lanes, float *const *d, const float *const *a, const struct mb_plan_param *prm,
 		const _Bool *remember_gain, const VALUE *objs, size_t n)
 {
@@ -135,11 +154,12 @@ void mb_plan_svf_lanes(int lanes, float *const *d, const float *const *a, const 
 	size_t L = (size_t)lanes;
 
 	VALUE tmpv;
-	size_t nd = 7 * PF_CHUNK * L + 2 * L;
+	size_t nd = 7 * PF_CHUNK * L + 8 * L;
 	double *mem = ALLOCV_N(double, tmpv, nd);
 	double *X = mem, *A1 = X + PF_CHUNK * L, *A2 = A1 + PF_CHUNK * L, *A3 = A2 + PF_CHUNK * L;
 	double *M0 = A3 + PF_CHUNK * L, *M1 = M0 + PF_CHUNK * L, *M2 = M1 + PF_CHUNK * L;
 	double *IC1 = M2 + PF_CHUNK * L, *IC2 = IC1 + L;
+	double *B1 = IC2 + L, *B2 = B1 + L, *B3 = B2 + L, *N0 = B3 + L, *N1 = N0 + L, *N2 = N1 + L;
 
 	struct pf_svf_lane f[L];
 	struct mb_svf svf[L];
@@ -153,10 +173,58 @@ void mb_plan_svf_lanes(int lanes, float *const *d, const float *const *a, const 
 	for (size_t c0 = 0; c0 < n; c0 += PF_CHUNK) {
 		size_t m = n - c0 < PF_CHUNK ? n - c0 : PF_CHUNK;
 
-		// Coefficients (and inputs), lane by lane
+		// Coefficients (and inputs), lane by lane: one set for a lane whose
+		// parameters hold for the whole pass (the single kernel's cache would
+		// compute it on the pass's first sample and keep it), else one per
+		// sample
+		_Bool all_steady = 1;
 		for (size_t l = 0; l < L; l++) {
 			const struct mb_plan_param *p = prm + 3 * l;
 			struct mb_svf *s = &svf[l];
+			const float *al = a[l] + c0;
+			if (pf_param_steady(&p[0], c0, c0 + m) && pf_param_steady(&p[1], c0, c0 + m) && pf_param_steady(&p[2], c0, c0 + m)) {
+				mb_svf_coefficients(s, f[l].type, mb_plan_param_at(&p[0], c0), mb_plan_param_at(&p[1], c0), mb_plan_param_at(&p[2], c0),
+						f[l].pi_over_rate, f[l].fc_max);
+				B1[l] = s->a1;
+				B2[l] = s->a2;
+				B3[l] = s->a3;
+				N0[l] = s->m0;
+				N1[l] = s->m1;
+				N2[l] = s->m2;
+				for (size_t k = 0; k < m; k++) {
+					X[k * L + l] = al[k];
+				}
+				if (!all_steady) {
+					for (size_t k = 0; k < m; k++) {
+						size_t j = k * L + l;
+						A1[j] = s->a1;
+						A2[j] = s->a2;
+						A3[j] = s->a3;
+						M0[j] = s->m0;
+						M1[j] = s->m1;
+						M2[j] = s->m2;
+					}
+				}
+				continue;
+			}
+
+			if (all_steady) {
+				// Lanes before this one held their coefficients: spread them
+				// over the pass for the per-sample loop
+				all_steady = 0;
+				for (size_t q = 0; q < l; q++) {
+					for (size_t k = 0; k < m; k++) {
+						size_t j = k * L + q;
+						A1[j] = B1[q];
+						A2[j] = B2[q];
+						A3[j] = B3[q];
+						M0[j] = N0[q];
+						M1[j] = N1[q];
+						M2[j] = N2[q];
+					}
+				}
+			}
+
 			for (size_t k = 0; k < m; k++) {
 				size_t i = c0 + k;
 				mb_svf_coefficients(s, f[l].type, mb_plan_param_at(&p[0], i), mb_plan_param_at(&p[1], i), mb_plan_param_at(&p[2], i),
@@ -168,15 +236,24 @@ void mb_plan_svf_lanes(int lanes, float *const *d, const float *const *a, const 
 				M0[j] = s->m0;
 				M1[j] = s->m1;
 				M2[j] = s->m2;
-				X[j] = a[l][i];
+				X[j] = al[k];
 			}
 		}
 
 		// The recursions, every lane's sample k before any lane's k + 1
-		for (size_t k = 0; k < m; k++) {
-			for (size_t l = 0; l < L; l++) {
-				size_t j = k * L + l;
-				X[j] = mb_svf_step_with(A1[j], A2[j], A3[j], M0[j], M1[j], M2[j], X[j], &IC1[l], &IC2[l]);
+		if (all_steady) {
+			for (size_t k = 0; k < m; k++) {
+				double *x = X + k * L;
+				for (size_t l = 0; l < L; l++) {
+					x[l] = mb_svf_step_with(B1[l], B2[l], B3[l], N0[l], N1[l], N2[l], x[l], &IC1[l], &IC2[l]);
+				}
+			}
+		} else {
+			for (size_t k = 0; k < m; k++) {
+				for (size_t l = 0; l < L; l++) {
+					size_t j = k * L + l;
+					X[j] = mb_svf_step_with(A1[j], A2[j], A3[j], M0[j], M1[j], M2[j], X[j], &IC1[l], &IC2[l]);
+				}
 			}
 		}
 
@@ -321,22 +398,32 @@ void mb_plan_four_pole_lanes(int lanes, float *const *d, const float *const *a, 
 			driven[j] = args->drive > 0;
 		}
 
+		_Bool steady[nfp];
 		for (size_t c0 = 0; c0 < n; c0 += PF_CHUNK) {
 			size_t m = n - c0 < PF_CHUNK ? n - c0 : PF_CHUNK;
 			for (size_t j = 0; j < nfp; j++) {
 				size_t l = fp_lane[j];
 				const struct mb_plan_param *p = prm + 2 * l;
+				// Parameters that hold for the pass: the cache's one set (see
+				// mb_plan_svf_lanes)
+				steady[j] = pf_param_steady(&p[0], c0, c0 + m) && pf_param_steady(&p[1], c0, c0 + m);
+				if (steady[j]) {
+					mb_fp_coef_update(&cc[j], &f[l].args, mb_plan_param_at(&p[0], c0), mb_plan_param_at(&p[1], c0), pi_over_rate[j], fc_max[j]);
+				}
 				for (size_t k = 0; k < m; k++) {
 					size_t i = c0 + k;
-					mb_fp_coef_update(&cc[j], &f[l].args, mb_plan_param_at(&p[0], i), mb_plan_param_at(&p[1], i), pi_over_rate[j], fc_max[j]);
-					FC[k * nfp + j] = cc[j].c;
+					if (!steady[j]) {
+						mb_fp_coef_update(&cc[j], &f[l].args, mb_plan_param_at(&p[0], i), mb_plan_param_at(&p[1], i), pi_over_rate[j], fc_max[j]);
+						FC[k * nfp + j] = cc[j].c;
+					}
 					X[k * nfp + j] = a[l][i];
 				}
 			}
 			for (size_t k = 0; k < m; k++) {
 				for (size_t j = 0; j < nfp; j++) {
 					size_t l = fp_lane[j];
-					X[k * nfp + j] = mb_fp_step(&f[l].args, &FC[k * nfp + j], inv_drive[j], driven[j], X[k * nfp + j], f[l].st);
+					const struct mb_fp_coef *c = steady[j] ? &cc[j].c : &FC[k * nfp + j];
+					X[k * nfp + j] = mb_fp_step(&f[l].args, c, inv_drive[j], driven[j], X[k * nfp + j], f[l].st);
 				}
 			}
 			for (size_t j = 0; j < nfp; j++) {
@@ -360,22 +447,30 @@ void mb_plan_four_pole_lanes(int lanes, float *const *d, const float *const *a, 
 			driven[j] = args->drive > 0;
 		}
 
+		_Bool steady[ndl];
 		for (size_t c0 = 0; c0 < n; c0 += PF_CHUNK) {
 			size_t m = n - c0 < PF_CHUNK ? n - c0 : PF_CHUNK;
 			for (size_t j = 0; j < ndl; j++) {
 				size_t l = dl_lane[j];
 				const struct mb_plan_param *p = prm + 2 * l;
+				steady[j] = pf_param_steady(&p[0], c0, c0 + m) && pf_param_steady(&p[1], c0, c0 + m);
+				if (steady[j]) {
+					mb_dl_coef_update(&cc[j], &f[l].args, mb_plan_param_at(&p[0], c0), mb_plan_param_at(&p[1], c0), pi_over_rate[j], fc_max[j]);
+				}
 				for (size_t k = 0; k < m; k++) {
 					size_t i = c0 + k;
-					mb_dl_coef_update(&cc[j], &f[l].args, mb_plan_param_at(&p[0], i), mb_plan_param_at(&p[1], i), pi_over_rate[j], fc_max[j]);
-					DC[k * ndl + j] = cc[j].c;
+					if (!steady[j]) {
+						mb_dl_coef_update(&cc[j], &f[l].args, mb_plan_param_at(&p[0], i), mb_plan_param_at(&p[1], i), pi_over_rate[j], fc_max[j]);
+						DC[k * ndl + j] = cc[j].c;
+					}
 					X[k * ndl + j] = a[l][i];
 				}
 			}
 			for (size_t k = 0; k < m; k++) {
 				for (size_t j = 0; j < ndl; j++) {
 					size_t l = dl_lane[j];
-					X[k * ndl + j] = mb_dl_step(&f[l].args, &DC[k * ndl + j], driven[j], X[k * ndl + j], f[l].st);
+					const struct mb_dl_coef *c = steady[j] ? &cc[j].c : &DC[k * ndl + j];
+					X[k * ndl + j] = mb_dl_step(&f[l].args, c, driven[j], X[k * ndl + j], f[l].st);
 				}
 			}
 			for (size_t j = 0; j < ndl; j++) {
