@@ -167,7 +167,7 @@ RSpec.describe(MB::Sound::Session::Changes) do
         MB::Sound.at_bar(5) do
           MB::Sound.bg(:beat, 1.constant, at: :beat)
           MB::Sound.bg(:bar, 2.constant, at: :bar)
-          MB::Sound.bg(:two, 4.constant, at: 2r)
+          MB::Sound.bg(:two, 4.constant, on: 2)
           MB::Sound.bg(:none, 8.constant)
         end
       end

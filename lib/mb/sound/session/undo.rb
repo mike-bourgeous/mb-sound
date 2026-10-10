@@ -4,7 +4,7 @@ module MB
       # Undo and redo for a Session's changes (see Changes): every console
       # command (#bg, #stop, #swap, #resume, #master, #mute, scene launches,
       # ...) is one undo step, and undoing it launches the state from before
-      # it, at the next bar by default (+at: :now+ for right away).  Undo is
+      # it, at the next bar by default (+on: :now+ for right away).  Undo is
       # itself a change, so it is logged, quantized, and redoable.
       #
       # A step whose changes haven't landed yet is cancelled instead (right
@@ -70,16 +70,19 @@ module MB
         end
 
         # Undoes the last undo step (or the last +count+), landing at the
-        # launch point +at+ (the next bar by default; :now for right away).
+        # launch point (+on:+, +in:+, +at:+; see LaunchPoint; the next bar
+        # by default, +on: :now+ for right away).
         # Returns the steps that redo them (whose labels say what was undone
         # and where it lands), or nil if there is nothing to undo.
-        def undo(count = 1, at: :bar, start_time: nil)
-          shift_steps(@undo_stack, @redo_stack, 'undo', count, at, start_time)
+        def undo(count = 1, at: nil, on: nil, in: nil, start_time: nil)
+          point = LaunchPoint.of(binding) or return nil
+          shift_steps(@undo_stack, @redo_stack, 'undo', count, point, start_time)
         end
 
         # Redoes the last undone step (or the last +count+).  See #undo.
-        def redo(count = 1, at: :bar, start_time: nil)
-          shift_steps(@redo_stack, @undo_stack, 'redo', count, at, start_time)
+        def redo(count = 1, at: nil, on: nil, in: nil, start_time: nil)
+          point = LaunchPoint.of(binding) or return nil
+          shift_steps(@redo_stack, @undo_stack, 'redo', count, point, start_time)
         end
 
         # Runs the block as one undoable command labeled +label+: every
@@ -202,7 +205,7 @@ module MB
             cancel_changes(*w)
             [l, w]
           }
-          time = start_time ? start_time.to_r : (landed.empty? ? nil : launch_time(at, []))
+          time = start_time ? start_time.to_r : (landed.empty? ? nil : launch_time(at, [], default: :bar))
 
           restores = []
           Session.with_perform(source: :undo) do

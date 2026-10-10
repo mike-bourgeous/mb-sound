@@ -139,10 +139,10 @@ def measure(load, setting, seconds:, midi:, oversample:, rate:, device:, backend
 
   case load
   when 'oscillators'
-    session.add(oscillators, at: :now)
+    session.add(oscillators, on: :now)
   else
-    session.add(MB::Sound.stereo_drone, at: :now) unless load == 'fm_bass'
-    session.add(MB::Sound.fm_bass(midi, oversample: oversample), at: :now) unless load == 'stereo_drone'
+    session.add(MB::Sound.stereo_drone, on: :now) unless load == 'fm_bass'
+    session.add(MB::Sound.fm_bass(midi, oversample: oversample), on: :now) unless load == 'stereo_drone'
   end
 
   sleep warmup

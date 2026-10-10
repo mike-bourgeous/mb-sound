@@ -27,7 +27,7 @@ RSpec.describe(MB::Sound::Take) do
       250 => ['mute :pad'],
       300 => ['unmute :pad, at: :bar'],
       371 => ['bg :spark, 0.05.constant, fade: 1/4r'],
-      450 => ['go :turn', 'swap :bass, a, at: 4r'], # two queued changes for one track
+      450 => ['go :turn', 'swap :bass, a, on: 4'], # two queued changes for one track
       470 => ['undo'],                                # cancels the swap (not landed yet)
       530 => ['solo :bass, fade: 1/8r'],
       600 => ['solo'],

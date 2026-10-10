@@ -6,8 +6,8 @@ module MB
       # state (e.g. reverb tails) while the notes change.
       module ClipSwaps
         # Swaps clips in the graph of the player named +name+ when the
-        # timeline reaches the launch point +:at+ (the next bar by default;
-        # see #add) or +:start_time+, on the exact sample.  Returns the number
+        # timeline reaches the launch point (+:on+, +:in+, +:at+; the next
+        # bar by default; see #add and LaunchPoint) or +:start_time+, on the exact sample.  Returns the number
         # of clip sources (MIDI::ClipSource, found in the graph like other
         # timeline nodes) that will change.
         #
@@ -33,13 +33,14 @@ module MB
         # out from the clips playing when it lands.  Errors that are already
         # clear when the swap is made (no such player, no clips, unrelated
         # clips) are raised right away.
-        def swap(name, clips, at: nil, start_time: nil)
+        def swap(name, clips, at: nil, on: nil, in: nil, start_time: nil)
           raise IOError, 'Session is closed' if @closed
+          point = LaunchPoint.of(binding) or return nil
 
           player, stopped, nodes = @render_lock.synchronize { @mutex.synchronize { swap_target(name) } }
           count = planned_swaps(name, nodes, clips).length
 
-          time = stopped ? nil : (start_time ? start_time.to_r : launch_time(at, nodes))
+          time = stopped ? nil : (start_time ? start_time.to_r : launch_time(point, nodes))
           change(:swap, name, time, data: { clip: clip_label(clips) }) { |t|
             swap_now(name, clips, stopped ? nil : t)
           }

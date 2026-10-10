@@ -18,29 +18,33 @@ module MB
       module Strip
         # Mutes the players named +names+ (or mute groups; see #mute_group).
         # Returns the changes (see Changes#change).
-        def mute(*names, at: nil, fade: nil, start_time: nil)
-          strip_change(:mute, names, at: at, fade: fade, start_time: start_time) { |n| @muted << n }
+        def mute(*names, at: nil, on: nil, in: nil, fade: nil, start_time: nil)
+          point = LaunchPoint.of(binding) or return nil
+          strip_change(:mute, names, at: point, fade: fade, start_time: start_time) { |n| @muted << n }
         end
 
         # Unmutes the named players (all muted players if none are named:
         # those muted when the change lands).
-        def unmute(*names, at: nil, fade: nil, start_time: nil)
-          return strip_all_change(:unmute, at: at, fade: fade, start_time: start_time) { @muted.clear } if names.empty?
-          strip_change(:unmute, names, at: at, fade: fade, start_time: start_time) { |n| @muted.delete(n) }
+        def unmute(*names, at: nil, on: nil, in: nil, fade: nil, start_time: nil)
+          point = LaunchPoint.of(binding) or return nil
+          return strip_all_change(:unmute, at: point, fade: fade, start_time: start_time) { @muted.clear } if names.empty?
+          strip_change(:unmute, names, at: point, fade: fade, start_time: start_time) { |n| @muted.delete(n) }
         end
 
         # Solos the named players: while any player is soloed, players that
         # aren't are silent.  With no names, clears every solo (see #unsolo).
-        def solo(*names, at: nil, fade: nil, start_time: nil)
-          return unsolo(at: at, fade: fade, start_time: start_time) if names.empty?
-          strip_change(:solo, names, at: at, fade: fade, start_time: start_time) { |n| @soloed << n }
+        def solo(*names, at: nil, on: nil, in: nil, fade: nil, start_time: nil)
+          point = LaunchPoint.of(binding) or return nil
+          return unsolo(at: point, fade: fade, start_time: start_time) if names.empty?
+          strip_change(:solo, names, at: point, fade: fade, start_time: start_time) { |n| @soloed << n }
         end
 
         # Clears the solo of the named players (all solos if none are named:
         # those soloed when the change lands, so a queued solo isn't missed).
-        def unsolo(*names, at: nil, fade: nil, start_time: nil)
-          return strip_all_change(:unsolo, at: at, fade: fade, start_time: start_time) { @soloed.clear } if names.empty?
-          strip_change(:unsolo, names, at: at, fade: fade, start_time: start_time) { |n| @soloed.delete(n) }
+        def unsolo(*names, at: nil, on: nil, in: nil, fade: nil, start_time: nil)
+          point = LaunchPoint.of(binding) or return nil
+          return strip_all_change(:unsolo, at: point, fade: fade, start_time: start_time) { @soloed.clear } if names.empty?
+          strip_change(:unsolo, names, at: point, fade: fade, start_time: start_time) { |n| @soloed.delete(n) }
         end
 
         # Defines a mute group: +name+ stands for the players +names+ in
@@ -118,7 +122,7 @@ module MB
         def strip_change(kind, names, at:, fade:, start_time:, &update)
           names = expand_mute_groups(names.flatten)
           fade = bars_or_nil(fade) if fade
-          time = start_time ? start_time.to_r : (at.nil? ? nil : launch_time(at, []))
+          time = start_time ? start_time.to_r : launch_time(at, [], default: nil)
 
           names.map { |n|
             change(kind, n, time, data: { fade: fade }) { |_t|
@@ -132,7 +136,7 @@ module MB
         # :strip), calling +update+ when it lands.  Returns the changes.
         def strip_all_change(kind, at:, fade:, start_time:, &update)
           fade = bars_or_nil(fade) if fade
-          time = start_time ? start_time.to_r : (at.nil? ? nil : launch_time(at, []))
+          time = start_time ? start_time.to_r : launch_time(at, [], default: nil)
           [change(kind, :strip, time, data: { fade: fade }) { |_t| update.call; apply_strip(fade) }]
         end
 

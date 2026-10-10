@@ -1,5 +1,7 @@
 require 'monitor'
 
+require_relative 'launch_point'
+
 require_relative 'session/journal'
 require_relative 'session/names'
 require_relative 'session/changes'
@@ -80,8 +82,8 @@ module MB
         end
       end
 
-      # Launch points for #add's +:at+ parameter (see #launch_time).
-      LAUNCH_POINTS = [:now, :beat, :bar, :clip].freeze
+      # Launch point alignments for +:on+ (see LaunchPoint).
+      LAUNCH_POINTS = LaunchPoint::ALIGNMENTS
 
       # The longest :clip launch wait, in bars, before falling back to :bar.
       MAX_CLIP_LAUNCH_BARS = 8
@@ -288,21 +290,24 @@ module MB
       # given, new graphs fade in over #fade_in bars, and replacements switch
       # without a fade.  Pass 0 or false for no fade.
       #
-      # +:at+ sets when the graph starts on the timeline: :now, :beat (next
-      # quarter note), :bar (next bar), :clip (next time every looping clip
-      # in the graph is back at its start; launch-aligned loops, which start
-      # at their beginning anyway, don't count), or a note length grid (an Integer
-      # note division or Rational whole notes, e.g. 2r for every two bars).
-      # Defaults to :now if nothing else is playing, :bar otherwise.
-      # +:start_time+ instead gives an exact timeline position in whole notes
-      # (used for scheduled actions).  Inside a scheduled block, launch
-      # points count from the block's time (see Changes#now).
+      # +:on+, +:in+, and +:at+ set when the graph starts on the timeline
+      # (see LaunchPoint): +on:+ aligns to :now, :beat (next quarter note),
+      # :bar (next bar), :clip (next time every looping clip in the graph is
+      # back at its start; launch-aligned loops, which start at their
+      # beginning anyway, don't count), a number of bars, or a note length
+      # grid (e.g. 1.n4); +in:+ is an offset from now and +at:+ an absolute
+      # position (e.g. bar(9)).  Defaults to on: :now if nothing else is
+      # playing, :bar otherwise.  +:start_time+ instead gives an exact
+      # timeline position in whole notes (used for scheduled actions).
+      # Inside a scheduled block, launch points count from the block's time
+      # (see Changes#now).
       #
       # The graph is built and prepared right away; the change goes through
       # the change queue (see Changes), so it lands exactly at its time even
       # if other changes for the same name are waiting.
-      def add(sound, at: nil, name: nil, fade: nil, description: nil, start_time: nil)
+      def add(sound, at: nil, on: nil, in: nil, name: nil, fade: nil, description: nil, start_time: nil)
         raise IOError, 'Session is closed' if @closed
+        point = LaunchPoint.of(binding) or return nil
         raise ArgumentError, "Player names must be Symbols or Integers (got #{name.inspect})" unless name.nil? || name.is_a?(Symbol) || name.is_a?(Integer)
         explicit_fade = !fade.nil?
         fade = bars_or_nil(fade)
@@ -313,7 +318,7 @@ module MB
         timeline_nodes = nodes.flat_map { |n| [n, *n.graph] }.grep(Sequence::TimelineNode).uniq
         description = shorten(description || MB::Sound.send(:playback_info, sound).to_s)
 
-        time = start_time ? start_time.to_r : launch_time(at, timeline_nodes)
+        time = start_time ? start_time.to_r : launch_time(point, timeline_nodes)
 
         @render_lock.synchronize {
           name = @mutex.synchronize {
@@ -380,7 +385,8 @@ module MB
       # Looping clips come back in phase with the timeline.  Other nodes
       # keep their state from when they stopped, so e.g. a delay or reverb
       # may replay the start of an old tail.
-      def resume(name = nil, at: nil, fade: nil, start_time: nil)
+      def resume(name = nil, at: nil, on: nil, in: nil, fade: nil, start_time: nil)
+        point = LaunchPoint.of(binding) or return nil
         fade = fade.nil? ? @fade_in : bars_or_nil(fade)
 
         @render_lock.synchronize {
@@ -392,7 +398,7 @@ module MB
           }
           next nil if p.nil? || @changes.any? { |c| c.subject == name && START_KINDS.include?(c.kind) }
 
-          time = start_time ? start_time.to_r : launch_time(at, p.timeline_nodes)
+          time = start_time ? start_time.to_r : launch_time(point, p.timeline_nodes)
           change(:resume, name, time, data: { fade: fade }, starts: p.timeline_nodes) { |t| resume_now(name, start: t, fade: fade) }
           @mutex.synchronize { @order.delete(name); @order << name }
           name
@@ -803,29 +809,18 @@ module MB
         }
       end
 
-      # Returns the timeline position where a new graph should start (see
-      # #add), counting from #now (a scheduled block's time inside one).
-      def launch_time(at, timeline_nodes)
-        at ||= @players.empty? && !queued_start? ? :now : :bar
-        from = now
-
-        grid = case at
-               when :now
-                 return from
-               when :beat
-                 1/4r
-               when :bar
-                 @transport.bar_length
-               when :clip
-                 clip_grid(timeline_nodes)
-               when Symbol
-                 raise ArgumentError, "Unknown launch point #{at.inspect} (use #{LAUNCH_POINTS.map(&:inspect).join(', ')}, or a note length)"
-               else
-                 Sequence::Duration.whole_notes(at)
-               end
-
-        grid = grid.to_r
-        (from / grid).ceil * grid
+      # Returns the timeline position in whole notes where a change at
+      # launch point +point+ (a LaunchPoint, or nil for the default) lands,
+      # counting from #now (a scheduled block's time inside one).
+      # +timeline_nodes+ give :clip its clips.  +default+ is the alignment
+      # used when +point+ gives none: :auto (the default) for :now if
+      # nothing is playing or waiting to start and :bar otherwise, or nil
+      # to return nil (right away).
+      def launch_time(point, timeline_nodes = [], default: :auto)
+        point ||= LaunchPoint::NONE
+        point = LaunchPoint.on(point) if point.is_a?(Symbol)
+        default = @players.empty? && !queued_start? ? :now : :bar if default == :auto
+        point.resolve(now: now, transport: @transport, default: default, clip_grid: -> { clip_grid(timeline_nodes) })
       end
 
       # The time between moments when every timeline-aligned looping clip

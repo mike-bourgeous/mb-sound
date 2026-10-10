@@ -14,7 +14,8 @@ module MB
     #     go :intro
     #     go :verse          # => scene :verse lands 3:1 (queued)
     #     mute :pad          # now, with a 5 ms declick
-    #     unmute :pad, at: :bar
+    #     unmute :pad, on: :bar
+    #     go :drop, at: bar(33)   # or in: 2.bars, on: 4 (bars), on: :beat
     #     solo :bass; solo   # solo, then clear solos
     #     undo               # the last change, at the next bar
     #     take.save          # a replay script of everything played
@@ -46,16 +47,18 @@ module MB
         Session.current.arrangement.scene_info
       end
 
-      # Launches a scene at its launch point (+at:+ overrides it; see
-      # Arrangement#go).  Returns the journal entry, which says where it
+      # Launches a scene at its launch point (+on:+, +in:+, or +at:+
+      # overrides it; see LaunchPoint and Arrangement#go).  Returns the journal entry, which says where it
       # lands.  Also available as #launch_scene.
-      def go(name, at: nil, fade: nil)
-        Session.current.arrangement.go(name, at: at, fade: fade)
+      def go(name, at: nil, on: nil, in: nil, fade: nil)
+        point = LaunchPoint.of(binding) or return nil
+        Session.current.arrangement.go(name, at: point, fade: fade)
       end
       alias launch_scene go
 
-      # With an argument, sets the set-wide launch quantization (a number
-      # of bars, :beat, :bar, :clip, :now, or a Duration).  Returns it.
+      # With an argument, sets the set-wide launch quantization (an
+      # alignment like +on:+: a number of bars, :beat, :bar, :clip, :now, or
+      # a Duration).  Returns it.
       def quant(q = nil)
         arrangement = Session.current.arrangement
         arrangement.quant = q unless q.nil?
@@ -63,28 +66,32 @@ module MB
       end
 
       # Mutes background players or tracks (or mute groups; see #mutes):
-      # right away with a 5 ms declick, or at +at:+ (a launch point) over
-      # +fade:+ bars.  Muted players sleep (cost no CPU) and come back in
-      # time with the timeline.  Returns the change's journal entry (an
-      # Array for several names).
-      def mute(*names, at: nil, fade: nil)
-        strip_command(:mute, names, at: at, fade: fade)
+      # right away with a 5 ms declick, or at a launch point (+on:+, +in:+,
+      # +at:+; see LaunchPoint) over +fade:+ bars.  Muted players sleep
+      # (cost no CPU) and come back in time with the timeline.  Returns the
+      # change's journal entry (an Array for several names).
+      def mute(*names, at: nil, on: nil, in: nil, fade: nil)
+        point = LaunchPoint.of(binding) or return nil
+        strip_command(:mute, names, point, fade: fade)
       end
 
       # Unmutes players (every muted player if none are named).  See #mute.
-      def unmute(*names, at: nil, fade: nil)
-        strip_command(:unmute, names, at: at, fade: fade)
+      def unmute(*names, at: nil, on: nil, in: nil, fade: nil)
+        point = LaunchPoint.of(binding) or return nil
+        strip_command(:unmute, names, point, fade: fade)
       end
 
       # Solos players: while any player is soloed, the others are silent
       # (and sleep).  With no names, clears every solo.  See #mute.
-      def solo(*names, at: nil, fade: nil)
-        strip_command(:solo, names, at: at, fade: fade)
+      def solo(*names, at: nil, on: nil, in: nil, fade: nil)
+        point = LaunchPoint.of(binding) or return nil
+        strip_command(:solo, names, point, fade: fade)
       end
 
       # Clears the solo of the named players (every solo if none are named).
-      def unsolo(*names, at: nil, fade: nil)
-        strip_command(:unsolo, names, at: at, fade: fade)
+      def unsolo(*names, at: nil, on: nil, in: nil, fade: nil)
+        point = LaunchPoint.of(binding) or return nil
+        strip_command(:unsolo, names, point, fade: fade)
       end
 
       # With a group name and player names, defines a mute group that
@@ -101,20 +108,23 @@ module MB
 
       # Undoes the last change (a command, scene launch, mute, ...; or the
       # last +count+) by launching the state from before it, at the next bar
-      # by default (+at: :now+ for right away).  Changes that haven't landed
+      # by default (+on: :now+ for right away; +on:+, +in:+, and +at:+ as in
+      # LaunchPoint).  Changes that haven't landed
       # yet are cancelled instead.  Undo is itself undoable with #redo!.
       # Returns what was undone and where it lands.  Also available as
       # #undo_change.
-      def undo(count = 1, at: :bar)
-        steps = Session.current.undo(count, at: at)
+      def undo(count = 1, at: nil, on: nil, in: nil)
+        point = LaunchPoint.of(binding) or return nil
+        steps = Session.current.undo(count, at: point)
         steps && (steps.length == 1 ? steps.first : steps)
       end
       alias undo_change undo
 
       # Redoes the last undone change (see #undo).  (`redo` is a Ruby
       # keyword.)  Also available as #redo_change.
-      def redo!(count = 1, at: :bar)
-        steps = Session.current.redo(count, at: at)
+      def redo!(count = 1, at: nil, on: nil, in: nil)
+        point = LaunchPoint.of(binding) or return nil
+        steps = Session.current.redo(count, at: point)
         steps && (steps.length == 1 ? steps.first : steps)
       end
       alias redo_change redo!
@@ -135,11 +145,11 @@ module MB
 
       # Runs a mute/solo command through #session_command (so it lands at a
       # scheduled block's time inside one, and is one undo step).
-      def strip_command(kind, names, at:, fade:)
+      def strip_command(kind, names, point, fade:)
         names = names.flatten.map { |n| player_name(n) }
         label = "#{kind} #{names.map(&:inspect).join(', ')}".strip
         value = session_command(names, label: label) { |session, time|
-          session.public_send(kind, *names, at: at, fade: fade, start_time: at ? nil : time)
+          session.public_send(kind, *names, at: point, fade: fade, start_time: point.given? ? nil : time)
         }
         return value unless value.is_a?(Array) && value.all?(Session::Changes::Change)
 

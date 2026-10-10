@@ -72,13 +72,14 @@ module MB
         #
         # The change goes through the change queue (see Changes), so several
         # master changes can wait for different times.
-        def master(at: nil, fade: nil, start_time: nil, description: nil, &block)
+        def master(at: nil, on: nil, in: nil, fade: nil, start_time: nil, description: nil, &block)
           raise IOError, 'Session is closed' if @closed
+          point = LaunchPoint.of(binding) or return nil
 
           chain = build_master(block, description: description)
           chain.mode, chain.fade = master_mode(fade)
 
-          time = start_time ? start_time.to_r : launch_time(at, chain.timeline_nodes)
+          time = start_time ? start_time.to_r : launch_time(point, chain.timeline_nodes)
           change(:master, :master, time, data: { description: chain.description, fade: fade }) { |t|
             start_master(chain, t)
           }
@@ -112,11 +113,11 @@ module MB
           return if chain.nil? || chain.bypass? && @master_chains.length == 1
 
           time = nil if time && time <= @transport.position
-          master(at: :now, start_time: time, fade: 0, description: chain.description, &chain.block)
+          master(on: :now, start_time: time, fade: 0, description: chain.description, &chain.block)
         rescue => e
           raise if @raise_errors
           warn "Could not rebuild the master chain (#{e.class}: #{e.message}); bypassing it"
-          master(at: :now, start_time: time, fade: 0)
+          master(on: :now, start_time: time, fade: 0)
         end
 
         # Returns true if the mix runs through any effects (not just bypass),

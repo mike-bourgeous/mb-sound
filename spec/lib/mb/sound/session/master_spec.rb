@@ -124,7 +124,7 @@ RSpec.describe(MB::Sound::Session::Master) do
       session.master(at: :now) { |m| m.delay(4000.samples) }
       run(8000)
 
-      session.master(at: 2400r / 96000 + transport.position) { |m| m * 1 }
+      session.master(in: 2400.samples) { |m| m * 1 }
       data = run(56000)[0]
 
       # The delay's tail of the old input plays on top of the new chain

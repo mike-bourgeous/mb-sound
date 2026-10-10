@@ -66,7 +66,7 @@ module MB
         end
 
         # The timeline position that commands resolve their launch points
-        # from: the scheduled time inside a scheduled block (so `at: :beat`
+        # from: the scheduled time inside a scheduled block (so `on: :beat`
         # in `at_bar(5) { ... }` means the beat at or after bar 5), the
         # recorded issue time while a take replays, and the transport
         # position otherwise.

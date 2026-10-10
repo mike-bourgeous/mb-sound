@@ -11,7 +11,7 @@ module MB
       #
       # +bar_length+ is only for display: stamps print as bar:beat (e.g.
       # "9:1", or "13:2.5" between beats), counting from 1.  The display is
-      # never parsed; Ruby input uses Ruby values (`at: 4.bars`, `3.beats`).
+      # never parsed; Ruby input uses Ruby values (`at: bar(9)`, `in: 3.beats`).
       Stamp = Data.define(:frame, :pos, :bar_length) do
         def initialize(frame: nil, pos: nil, bar_length: 1r)
           super(frame: frame, pos: pos&.to_r, bar_length: bar_length.to_r)

@@ -119,7 +119,7 @@ module MB
           live = MB::Sound.live?
           MB::Sound.live = true
           schedule(session)
-          session.add(0.constant, name: :take_clock, at: :now) # keeps the timeline moving between lines
+          session.add(0.constant, name: :take_clock, on: :now) # keeps the timeline moving between lines
           sleep 0.1 until session.transport.position >= (@ends || 0)
           MB::Sound.outro
           MB::Sound.wait

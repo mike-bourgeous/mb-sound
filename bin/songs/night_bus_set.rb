@@ -37,7 +37,10 @@
 #     go :drop                       # => scene :drop lands 13:1 (queued): drums wait for a 4-bar line
 #     mute :pad                      # now, with a 5 ms declick; muted tracks cost no CPU
 #     solo :drums, :bass; solo       # a break, then everything back
-#     mute :drums, at: :bar, fade: 2 # a synced two-bar fade out
+#     mute :drums, on: :bar, fade: 2 # a synced two-bar fade out from the next bar
+#     go :drop, on: 4                # on the next 4-bar line (plain numbers are bars)
+#     go :drop, in: 2.bars           # two bars from now; `in: 2.bars, on: :beat` then the next beat
+#     go :drop, at: bar(33)          # at bar 33 on the timeline
 #     go :breakdown, fade: 1         # tracks that stop or start fade over a bar
 #     swap :bass, bass_b.transpose(6); undo   # undo cancels it if it hasn't landed yet
 #     bg :bass, bass_c               # a clip on a track plays through the track's patch
@@ -111,10 +114,10 @@ module MB::Sound
   def self.night_bus_performance(c)
     say = ->(bar, line) { puts format("\e[2mbar %-5s\e[0m \e[36m›\e[0m %s", bar, line) }
 
-    at_bar(1) { say[1, 'go :intro'];                go :intro, at: :now }
+    at_bar(1) { say[1, 'go :intro'];                go :intro, on: :now }
     at_bar(5) { say[5, 'go :build'];                go :build }
     at_bar(9) { say[9, 'go :lift   # a riser on top'];  go :lift }
-    at_bar(11) { say[11, 'swap :bass, wrong   # oops: a tritone off'];  swap :bass, c[:wrong], at: :now }
+    at_bar(11) { say[11, 'swap :bass, wrong   # oops: a tritone off'];  swap :bass, c[:wrong], on: :now }
     at_bar(11, beat: 3) { say['11.3', 'undo   # back on the next bar'];  undo }
     at_bar(13) { say[13, 'go :drop'];               go :drop; stop :riser, fade: 0 }
     at_bar(17) { say[17, 'mute :pad   # air'];      mute :pad }
@@ -125,7 +128,7 @@ module MB::Sound
     at_bar(33) { say[33, 'go :drop2'];              go :drop2; stop :riser, fade: 0 }
     at_bar(39, beat: 3) { say['39.3', 'mute :rhythm   # drums and bass drop out'];  mute :rhythm }
     at_bar(41) { say[41, 'go :outro; unmute :rhythm']; go :outro; unmute :rhythm }
-    at_bar(45) { say[45, 'mute :drums, at: :bar, fade: 2'];  mute :drums, fade: 2 }
+    at_bar(45) { say[45, 'mute :drums, on: :bar, fade: 2'];  mute :drums, fade: 2 }
     at_bar(47) { say[47, 'outro fade: 2'];          outro fade: 2 }
   end
 

@@ -15,9 +15,10 @@ module MB
     # One Arrangement belongs to each Session (Session#arrangement).  The
     # console methods are in ArrangementMethods.
     #
-    # Launch points (+q:+, +quant+, +at:+) are :now, :beat, :bar, :clip, a
-    # number of bars (e.g. 4 for the next 4-bar line), or a Duration (e.g.
-    # 2.beats).  Unlike #bg's +at:+, plain numbers are bars, like fades.
+    # Launch quantizations (+q:+, +quant+) are alignments like +on:+ (see
+    # LaunchPoint): :now, :beat, :bar, :clip, a number of bars (e.g. 4 for
+    # the next 4-bar line), or a Duration (e.g. 2.beats).  #go and #play
+    # also take +on:+, +in:+, and +at:+, which override them.
     class Arrangement
       # A track: a +patch+ (a block that builds a graph from a clip, or
       # nil), a +graph+ (for tracks without a patch), its launch
@@ -141,13 +142,15 @@ module MB
       end
 
       # Launches the scene +name+: each track that should change does, at
-      # its launch point (+at:+ for every track if given, else the track's
-      # +q:+, the scene's, or the set's #quant).  Tracks already playing
+      # its launch point (+on:+, +in:+, +at:+ for every track if given (see
+      # LaunchPoint), else the track's +q:+, the scene's, or the set's
+      # #quant).  Tracks already playing
       # what the scene says are left alone, so a scene can be launched
       # again freely.  +fade:+ overrides the scene's fade.  Returns the
       # journal entry for the scene launch (it lands at the scene's launch
       # point).
-      def go(name, at: nil, fade: nil)
+      def go(name, at: nil, on: nil, in: nil, fade: nil)
+        point = LaunchPoint.of(binding) or return nil
         sc = @mutex.synchronize { @scenes[name] }
         if sc.nil?
           known = scenes.keys
@@ -161,13 +164,13 @@ module MB
 
         _, changes = @session.command("go #{name.inspect}") {
           before = undo_state
-          time = resolve(at || sc.q || @quant)
+          time = resolve(point.given? ? point : sc.q || @quant)
           entry = @session.change(:scene, name, time, data: { scene: name }) { |_t| }
 
           tracks.each_value do |tr|
             value = sc.values.key?(tr.name) ? sc.values[tr.name] : (sc.others == :keep ? :keep : :off)
             next if value == :keep
-            set_track(tr, value, resolve(at || tr.q || sc.q || @quant, tr), fade: fade.nil? ? sc.fade : fade)
+            set_track(tr, value, resolve(point.given? ? point : tr.q || sc.q || @quant, tr), fade: fade.nil? ? sc.fade : fade)
           end
 
           if sc.block
@@ -184,15 +187,17 @@ module MB
       end
 
       # Plays +value+ (a Clip or Kit for a track with a patch, :on, or
-      # :off) on track +name+ at +at:+ or +start_time:+ (else the track's
-      # launch point).  Used by `bg :name, clip` on tracks.  Returns the
+      # :off) on track +name+ at the launch point (+on:+, +in:+, +at:+; see
+      # LaunchPoint) or +start_time:+ (else the track's +q:+ or the set's
+      # #quant).  Used by `bg :name, clip` on tracks.  Returns the
       # journal entry of the track's change.
-      def play(name, value, at: nil, start_time: nil, fade: nil)
+      def play(name, value, at: nil, on: nil, in: nil, start_time: nil, fade: nil)
+        point = LaunchPoint.of(binding) or return nil
         tr = tracks[name] or raise ArgumentError, "No track #{name.inspect}"
         result = nil
         @session.command("bg #{name.inspect}") {
           before = undo_state
-          time = start_time ? start_time.to_r : resolve(at || tr.q || @quant, tr)
+          time = start_time ? start_time.to_r : resolve(point.given? ? point : tr.q || @quant, tr)
           result = set_track(tr, value, time, fade: fade)
           @session.note_undo_extra(self, before, undo_state)
         }
@@ -235,25 +240,19 @@ module MB
         }
       end
 
-      # Resolves a launch point (see the class comment) to an exact
-      # timeline position, counting from Session#now.  +track+ gives :clip
-      # the track's clips.
+      # Resolves a launch point (a LaunchPoint, or a quantization: see the
+      # class comment) to an exact timeline position, counting from
+      # Session#now.  +track+ gives :clip the track's clips.
       def resolve(q, track = nil)
-        q = :now if q == 0
-        at = case q
-             when Symbol then q
-             when Sequence::Duration then q.whole_notes
-             when Numeric then Sequence::Duration.rational(q) * @session.transport.bar_length
-             else raise ArgumentError, "Unknown launch point #{q.inspect}"
-             end
-        nodes = q == :clip && track ? @session.timeline_nodes_of(track.name) : []
-        @session.send(:launch_time, at, nodes)
+        point = q.is_a?(LaunchPoint) ? q : LaunchPoint.on(q)
+        nodes = point.on == :clip && track ? @session.timeline_nodes_of(track.name) : []
+        @session.send(:launch_time, point, nodes, default: :bar)
       end
 
       private
 
       def check_quant(q)
-        ok = q.is_a?(Sequence::Duration) || Session::LAUNCH_POINTS.include?(q) || (q.is_a?(Numeric) && q >= 0)
+        ok = q.is_a?(Length) || Session::LAUNCH_POINTS.include?(q) || (q.is_a?(Numeric) && q >= 0)
         raise ArgumentError, "Launch quantization must be #{Session::LAUNCH_POINTS.map(&:inspect).join(', ')}, a number of bars, or a Duration (got #{q.inspect})" unless ok
       end
 

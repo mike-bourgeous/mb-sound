@@ -135,8 +135,10 @@ module MB
       # sound filename.  Everything played with #bg is mixed in one shared
       # Session, locked to one timeline, so sequences stay in sync.  If
       # something is already playing, the new sound starts on the next bar;
-      # pass +:at+ to change that (:now, :beat, :bar, :clip, or a note length
-      # grid; see Session#add).
+      # pass +:on+ to align it elsewhere (:now, :beat, :bar, :clip, a number
+      # of bars, or a note length grid like 1.n4), +:in+ to start it that
+      # long from now (bars or a Duration), or +:at+ for a position on the
+      # timeline (e.g. bar(9)); see LaunchPoint.
       #
       # Errors during playback are printed and remove only the sound that
       # failed.
@@ -155,7 +157,8 @@ module MB
       #     stop       # stops the last one started (player 1)
       #     outro      # fades everything out over four bars
       #     panic      # stops everything right away
-      def bg(name_or_sound, sound = nil, at: nil, fade: nil)
+      def bg(name_or_sound, sound = nil, at: nil, on: nil, in: nil, fade: nil)
+        point = LaunchPoint.of(binding) or return nil
         name, sound = sound.nil? ? [nil, name_or_sound] : [name_or_sound, sound]
         raise ArgumentError, ':all is reserved for stop(:all)' if name == :all
 
@@ -164,14 +167,16 @@ module MB
         if name && (sound.is_a?(Sequence::Clip) || sound.is_a?(Sequence::Kit))
           session = Session.current
           if session.arrangement.tracks[name]
+            return session.arrangement.play(name, sound, at: point, fade: fade) if point.given?
+
             time = Session.context&.[](:time)
-            time = session.send(:launch_time, at, []) if at || time.nil? && !session.arrangement.tracks[name].q
+            time = session.send(:launch_time, nil, []) if time.nil? && !session.arrangement.tracks[name].q
             return session.arrangement.play(name, sound, start_time: time, fade: fade)
           end
         end
 
         session_command(name, label: "bg #{name.inspect}", kind: :bg) { |session, time|
-          session.add(sound, at: at, name: name, fade: fade, start_time: at ? nil : time)
+          session.add(sound, at: point, name: name, fade: fade, start_time: point.given? ? nil : time)
         }
       end
 
@@ -315,7 +320,7 @@ module MB
       # with no arguments to see what is set.
       #
       # Like #bg, new effects start on the next bar while anything is
-      # playing (+:at+ picks another launch point).  By default the old
+      # playing (+:on+, +:in+, or +:at+ picks another launch point; see #bg).  By default the old
       # effects get no more sound from that point but finish what they were
       # doing, so reverb and delay tails ring out ("spillover").  Pass
       # +:fade+ to crossfade over a number of bars instead, or 0 to cut over.
@@ -329,7 +334,8 @@ module MB
       #     master { |l, r| [l, r.delay(seconds: 0.012)] }   # Haas widening
       #     master          # shows the current effects
       #     master nil      # removes them on the next bar
-      def master(effects = :show, at: nil, fade: nil, &block)
+      def master(effects = :show, at: nil, on: nil, in: nil, fade: nil, &block)
+        point = LaunchPoint.of(binding) or return nil
         session = Session.current
         if block.nil? && effects == :show
           return session.master_info
@@ -340,7 +346,7 @@ module MB
         end
 
         session_command(nil, label: block ? 'master' : 'master nil', kind: :master) { |s, time|
-          s.master(at: at, fade: fade, start_time: at ? nil : time, &block)
+          s.master(at: point, fade: fade, start_time: point.given? ? nil : time, &block)
         }
       end
       alias master_fx master
@@ -367,7 +373,8 @@ module MB
       # Changes the sequence a background player (see #bg) plays, keeping
       # its synth and effects as they are, e.g. to try a new bass line
       # through the same filter and reverb.  Like #bg, the change happens
-      # on the next bar (+:at+ picks another launch point), exactly on the
+      # on the next bar (+:on+, +:in+, or +:at+ picks another launch point;
+      # see #bg), exactly on the
       # sample.  Returns the change's journal entry (see #bg).
       #
       # Pass the new clip to replace the clip that every clip in the graph
@@ -385,14 +392,15 @@ module MB
       #     beat = grid(16, kick: 'x...x...', snare: '....x...')
       #     beat2 = grid(16, kick: 'x..x..x.', snare: '....x..x')
       #     swap :drums, beat => beat2               # swaps each matching row
-      def swap(name, clips = nil, at: nil, **pairs)
+      def swap(name, clips = nil, at: nil, on: nil, in: nil, **pairs)
+        point = LaunchPoint.of(binding) or return nil
         raise ArgumentError, 'Pass a new clip or old => new pairs, not both' if clips && !pairs.empty?
         clips ||= pairs
         raise ArgumentError, 'Pass a new clip or old => new pairs to swap' if clips.is_a?(Hash) && clips.empty?
 
         name = player_name(name)
         session_command(name, label: "swap #{name.inspect}", kind: :swap) { |session, time|
-          session.swap(name, clips, at: at, start_time: at ? nil : time)
+          session.swap(name, clips, at: point, start_time: point.given? ? nil : time)
           name
         }
       end
@@ -400,8 +408,8 @@ module MB
       # Brings back a named background player that was stopped (see #bg and
       # #stop), unchanged, e.g. to fade a track back in.  With no name,
       # resumes the most recently stopped player.  Like #bg, it starts on the
-      # next bar and fades in over half a bar by default (+:at+ and +:fade+
-      # work the same way).  Returns the change's journal entry (see #bg),
+      # next bar and fades in over half a bar by default (+:on+, +:in+,
+      # +:at+, and +:fade+ work the same way).  Returns the change's journal entry (see #bg),
       # or nil if there was nothing to resume.
       #
       # Only players with Symbol names are kept after stopping; see
@@ -411,10 +419,11 @@ module MB
       #     bg :pad, pad_graph
       #     stop :pad      # fades out over four bars
       #     resume :pad    # fades the same graph back in on the next bar
-      def resume(name = nil, at: nil, fade: nil)
+      def resume(name = nil, at: nil, on: nil, in: nil, fade: nil)
+        point = LaunchPoint.of(binding) or return nil
         name = player_name(name)
         session_command(name, label: "resume #{name.inspect}", kind: :resume) { |session, time|
-          session.resume(name, at: at, fade: fade, start_time: at ? nil : time).tap { |resumed|
+          session.resume(name, at: point, fade: fade, start_time: point.given? ? nil : time).tap { |resumed|
             if resumed.nil?
               what = name ? "#{name.inspect} (not stopped, or already playing)" : '(nothing has been stopped)'
               warn "No background player to resume #{what}"
@@ -653,7 +662,7 @@ module MB
         end_time = bars && bars.to_r * transport.bar_length
         max_frames = ((seconds || MAX_RENDER_SECONDS) * rate).round
 
-        sounds.each { |s| session.add(s, at: :now) }
+        sounds.each { |s| session.add(s, on: :now) }
         Session.with_context(session: session) { block.call } if block
 
         # Frames left to render: up to the end bar at the current tempo (so
