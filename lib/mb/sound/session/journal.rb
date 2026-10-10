@@ -141,6 +141,15 @@ module MB
           nil
         end
 
+        # Records from the render thread something that happened by itself
+        # (not a change), e.g. a ringing player going to sleep (:rung_out).
+        # It becomes a :landed entry with a new +seq+ and source :session
+        # when the journal is next read.  Only queues a note.
+        def note_entry(kind:, subject:, lands:, data: {})
+          @notes << [:entry, kind, subject, lands, data]
+          nil
+        end
+
         # Every entry, oldest first (status changes included as separate
         # entries).
         def entries
@@ -176,7 +185,17 @@ module MB
         # every read and write.
         def fold
           until @notes.empty?
-            seq, commits, lands, error = @notes.pop(true)
+            seq, commits, lands, error, data = @notes.pop(true)
+
+            if seq == :entry
+              kind, subject = commits, lands
+              stamp = error
+              append(Entry.new(
+                seq: next_seq, kind: kind, subject: subject, issued: stamp, commits: stamp, lands: stamp,
+                status: :landed, source: :session, line: nil, data: data.freeze, undoes: nil
+              ))
+              next
+            end
             prior = @mutex.synchronize { @latest[seq] }
             next if prior.nil?
 

@@ -33,13 +33,20 @@ module MB
       end
 
       # A scene: what each track plays (+values+: a Clip or Kit, :on, :off
-      # or nil, or :keep), its launch quantization +q+, a +fade+ for the
-      # tracks that change, whether tracks it doesn't name stop or keep
-      # playing (+others+: :stop or :keep), and a +block+ run at launch.
+      # or nil, :cut, or :keep), its launch quantization +q+, a +fade+ for
+      # the tracks that change, what happens to tracks it doesn't name
+      # (+others+: :stop (or :ring) rings them out, :cut cuts them, :keep
+      # keeps them playing), and a +block+ run at launch.  Tracks a scene
+      # stops ring out unless +others+ is :cut (tracks given :cut always
+      # cut).
       Scene = Struct.new(:name, :values, :q, :fade, :others, :block, keyword_init: true)
 
       # Values a scene can give a track besides clips.
-      TRACK_STATES = [:on, :off, :keep, true, false, nil].freeze
+      TRACK_STATES = [:on, :off, :cut, :keep, true, false, nil].freeze
+
+      # How a scene stops tracks: :stop (or :ring) rings them out, :cut
+      # stops them with a 5 ms declick (see Scene's +others+).
+      STOP_MODES = [:stop, :ring, :cut].freeze
 
       attr_reader :session
 
@@ -116,7 +123,11 @@ module MB
       # keyword names a track and gives a Clip or Kit to play, :on to play
       # what it played last (or its graph), :off or nil to stop, or :keep.
       # Tracks not named stop (a scene is a full state), unless +others:
-      # :keep+ (a partial scene, e.g. a fill).  +q:+ is the scene's launch
+      # :keep+ (a partial scene, e.g. a fill).  Stopping tracks ring out:
+      # their clips stop sending notes at the launch point and the track
+      # plays on until it is silent (see Session::Tails), so releases,
+      # delays, and reverbs inside it finish.  +others: :cut+ (or a track's
+      # value :cut) stops with a 5 ms declick instead, and +fade:+ fades.  +q:+ is the scene's launch
       # quantization (tracks' own +q:+ come first), and +fade:+ a fade in
       # bars for the tracks that start or stop.  A block runs at launch for
       # anything else (it gets the launch time, and #bg and the other
@@ -127,7 +138,7 @@ module MB
       #     scene :fill, drums: roll, others: :keep
       def scene(name, q: nil, fade: nil, others: :stop, **values, &block)
         raise ArgumentError, "Scene names must be Symbols (got #{name.inspect})" unless name.is_a?(Symbol)
-        raise ArgumentError, "others: must be :stop or :keep (got #{others.inspect})" unless [:stop, :keep].include?(others)
+        raise ArgumentError, "others: must be :stop (or :ring), :cut, or :keep (got #{others.inspect})" unless [*STOP_MODES, :keep].include?(others)
         check_quant(q) if q
 
         values.each_key do |k|
@@ -171,7 +182,8 @@ module MB
           tracks.each_value do |tr|
             value = sc.values.key?(tr.name) ? sc.values[tr.name] : (sc.others == :keep ? :keep : :off)
             next if value == :keep
-            set_track(tr, value, resolve(tr.q || sc.q || @quant, tr, point), fade: fade.nil? ? sc.fade : fade)
+            stop = sc.others == :cut ? :cut : :ring
+            set_track(tr, value, resolve(tr.q || sc.q || @quant, tr, point), fade: fade.nil? ? sc.fade : fade, stop: stop)
           end
 
           if sc.block
@@ -260,14 +272,21 @@ module MB
 
       # Changes track +tr+ to +value+ at +time+.  Returns the last change
       # made (or nil).
-      def set_track(tr, value, time, fade:)
+      #
+      # Stopping tracks ring out (+stop: :ring+; see Session::Tails) unless
+      # given a fade, +stop: :cut+, or the value :cut (a 5 ms declick).
+      def set_track(tr, value, time, fade:, stop: :ring)
         fade = tr.fade if fade.nil?
         playing = @session.playing_after_queue?(tr.name)
 
         case value
-        when :off, false, nil
+        when :off, :cut, false, nil
           return nil unless playing
-          @session.remove(tr.name, fade: fade || @session.declick_bars, time: time)
+          if fade || value == :cut || stop == :cut
+            @session.remove(tr.name, fade: fade || @session.declick_bars, time: time)
+          else
+            @session.remove(tr.name, ring: true, time: time)
+          end
           last_change(tr.name)
 
         when :on, true
@@ -303,12 +322,15 @@ module MB
       # Starts track +tr+ with +clip+ at +time+: builds its patch, or plays
       # its graph (resuming it if it was stopped).
       def start_track(tr, clip, time, fade)
-        if tr.patch?
+        if tr.patch? && clip && clip.equal?(tr.clip) && @session.ringing?(tr.name)
+          # Still ringing out with this clip: bring the same graph back
+          @session.resume(tr.name, start_time: time, fade: 0)
+        elsif tr.patch?
           raise ArgumentError, "Track #{tr.name.inspect} has a patch; give it a clip to play" if clip.nil?
           graph = tr.patch.call(clip)
           @session.add(graph, name: tr.name, start_time: time, fade: fade || 0, description: "#{tr.name}: #{label_of(clip)}")
           @mutex.synchronize { tr.clip = clip }
-        elsif @session.stopped.key?(tr.name)
+        elsif @session.resumable?(tr.name)
           @session.resume(tr.name, start_time: time, fade: fade || 0)
           @session.swap(tr.name, clip, start_time: time) if clip && !clip.equal?(tr.clip)
         else

@@ -272,7 +272,7 @@ module MB
             PlayerState.new(
               player: player,
               stopped: stopped,
-              clips: nodes.to_h { |n| [n, n.pending_clip || n.clip] }.compare_by_identity,
+              clips: nodes.to_h { |n| [n, n.ring_clip || n.pending_clip || n.clip] }.compare_by_identity,
               muted: @muted.include?(subject),
               soloed: @soloed.include?(subject)
             )
@@ -301,8 +301,11 @@ module MB
                   end
                 end
 
+                # A graph still ringing out comes back as it is (see Tails)
                 old = state.player
-                start_player(name: name, input: old.input, description: old.description, timeline_nodes: old.timeline_nodes, start: time, fade: current ? declick : nil)
+                unless revive_ringing(name, time, input: old.input)
+                  start_player(name: name, input: old.input, description: old.description, timeline_nodes: old.timeline_nodes, start: time, fade: current ? declick : nil)
+                end
               end
             elsif current
               current.keep = true
@@ -315,7 +318,7 @@ module MB
           }
 
           state.clips.each do |node, clip|
-            node.swap_clip(clip, time: time) unless (node.pending_clip || node.clip).equal?(clip)
+            node.swap_clip(clip, time: time) unless (node.ring_clip || node.pending_clip || node.clip).equal?(clip)
           end
 
           strip_changed = false

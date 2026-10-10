@@ -9,6 +9,7 @@ require_relative 'session/fades'
 require_relative 'session/strip'
 require_relative 'session/undo'
 require_relative 'session/master'
+require_relative 'session/tails'
 require_relative 'session/clip_swaps'
 require_relative 'session/scheduler'
 require_relative 'session/graph_view'
@@ -53,6 +54,7 @@ module MB
       include Strip
       include Undo
       include Master
+      include Tails
       include ClipSwaps
       include GraphView
 
@@ -70,10 +72,13 @@ module MB
       #
       # +strip_level+ and +strip_ramp+ are the mute/solo level (see Strip);
       # +asleep+ is true while a muted player isn't being rendered.
+      #
+      # +ring+ is a Tails::Ring while the player rings out after a stop
+      # (see Tails).
       Player = Struct.new(
         :serial, :name, :input, :description, :start, :launch, :stop_at, :timeline_nodes,
         :started, :slow_warned, :loads, :gain, :ramp, :fade_in, :fade_out, :fading_out, :keep,
-        :strip_level, :strip_ramp, :asleep,
+        :strip_level, :strip_ramp, :asleep, :ring,
         keyword_init: true
       ) do
         # True unless this player is being replaced or stopped.
@@ -351,8 +356,13 @@ module MB
       # notes instead of now (used for scheduled actions).  A stop for now
       # also cancels graphs waiting in the change queue to start under those
       # names.
-      def remove(*names, fade: nil, time: nil)
-        fade = fade.nil? ? @fade_out : bars_or_nil(fade)
+      #
+      # +ring: true+ rings players out instead (see Tails): their clips stop
+      # sending notes at the stop time and the graph keeps playing until it
+      # is silent (+fade+ is then ignored; graphs without clips fade out
+      # over Tails::RING_DRONE_FADE bars).
+      def remove(*names, fade: nil, time: nil, ring: false)
+        fade = ring ? nil : (fade.nil? ? @fade_out : bars_or_nil(fade))
         time = time&.to_r
         time = nil if time && time <= @transport.position
 
@@ -366,7 +376,8 @@ module MB
             cancel_changes(*waiting) if time.nil?
 
             if playing || (time && !waiting.empty?)
-              change(:stop, n, time, data: { fade: fade }) { |t| remove_now(n, fade: fade, time: t) }
+              data = ring ? { ring: true } : { fade: fade }
+              change(:stop, n, time, data: data) { |t| remove_now(n, fade: fade, time: t, ring: ring) }
             end
 
             playing || !waiting.empty?
@@ -392,7 +403,7 @@ module MB
         @render_lock.synchronize {
           p = @mutex.synchronize {
             name ||= @stopped.keys.last
-            p = @stopped[name]
+            p = @stopped[name] || ringing_player(name)
             next nil if p.nil? || @players.each_value.any? { |o| o.name == name && o.current? }
             p
           }
@@ -428,9 +439,9 @@ module MB
 
       # Removes the most recently added player that is still playing (see
       # #remove for +:fade+).  Returns its name, or nil if nothing is playing.
-      def remove_last(fade: nil, time: nil)
+      def remove_last(fade: nil, time: nil, ring: false)
         name = @render_lock.synchronize { @mutex.synchronize { @order.last } }
-        name && remove(name, fade: fade, time: time).first
+        name && remove(name, fade: fade, time: time, ring: ring).first
       end
 
       # Changes the tempo to +bpm+ when the timeline reaches +time+ (whole
@@ -485,6 +496,8 @@ module MB
               p = list.find(&:current?) || list.first
               status = if !p.current? && p.stop_at > @transport.position
                          " (stops at bar #{bar_of(p.stop_at)})"
+                       elsif !p.current? && p.ring&.active
+                         ' (ringing out)'
                        elsif !p.current?
                          ' (fading out)'
                        elsif !p.started
@@ -663,7 +676,7 @@ module MB
 
       # Stops (or starts fading out) the players named +name+ at +time+, or
       # now if +time+ is nil or has passed (applied by the change queue).
-      def remove_now(name, fade:, time:)
+      def remove_now(name, fade:, time:, ring: false)
         time = nil if time && time <= @transport.position
 
         @mutex.synchronize {
@@ -671,7 +684,22 @@ module MB
           matches.each do |p|
             p.keep = true if p.current? && p.name.is_a?(Symbol)
 
-            if time
+            # Another stop takes over from ringing out (the clips stay
+            # silent until the player is retired)
+            p.ring.active = false if p.ring && !ring
+
+            if ring && p.ring
+              # Already ringing out
+            elsif ring && p.current? && (p.started || (time && p.start < time))
+              unless start_ringing(p, time || @transport.position)
+                stop = time || @transport.position
+                p.stop_at = MB::M.min(p.stop_at || stop, stop)
+                p.fade_out = RING_DRONE_FADE
+                p.fading_out = false
+              end
+            elsif ring && !p.current?
+              # Being replaced: it stops at its replacement's start as before
+            elsif time
               if !p.started && p.start >= time
                 # It would never have played
                 @players.delete(p.serial)
@@ -700,6 +728,9 @@ module MB
       # queue).
       def resume_now(name, start:, fade:)
         @mutex.synchronize {
+          # A player still ringing out comes back as it is (see Tails)
+          next name if revive_ringing(name, start)
+
           p = @stopped[name]
           next nil if p.nil? || @players.each_value.any? { |o| o.name == name && o.current? }
 
@@ -741,7 +772,8 @@ module MB
           keep: false,
           strip_level: initial_strip_level(name),
           strip_ramp: nil,
-          asleep: false
+          asleep: false,
+          ring: nil
         )
 
         @order.delete(name)
@@ -752,6 +784,7 @@ module MB
       # Keeps a stopped player for #resume if it was marked to be kept.
       # Called with @mutex held.
       def keep_stopped(p)
+        end_ring(p)
         return unless p.keep
         @stopped.delete(p.name)
         @stopped[p.name] = p
@@ -767,6 +800,7 @@ module MB
       # true and the player was stopped with #remove, it is kept for #resume.
       def retire(p, keep: false)
         @mutex.synchronize {
+          end_ring(p)
           @players.delete(p.serial)
           keep_stopped(p) if keep
           @order.delete(p.name) unless @players.each_value.any? { |o| o.name == p.name }
@@ -870,8 +904,13 @@ module MB
           p.ramp = Fades::Ramp.new(0.0, 1.0, base + offset, fade_frames(p.fade_in, rate)) if p.fade_in
         end
 
+        ringing = p.ring&.active && !p.fade_out
         if p.stop_at && p.stop_at < to
-          if p.fade_out
+          if ringing
+            # Stops its notes on the exact sample of its stop time, then
+            # rings out (see Tails)
+            begin_ring(p, base, MB::M.max(((p.stop_at - from) / per_sample).floor, offset)) if p.ring.stop_frame.nil?
+          elsif p.fade_out
             # Fades out from the exact sample of its stop time
             unless p.fading_out
               stop_idx = MB::M.max(((p.stop_at - from) / per_sample).floor, offset)
@@ -883,8 +922,11 @@ module MB
         end
 
         frames = count - offset
-        frames = MB::M.min(frames, ((p.stop_at - from) / per_sample).floor - offset) if p.stop_at && !p.fade_out
+        frames = MB::M.min(frames, ((p.stop_at - from) / per_sample).floor - offset) if p.stop_at && !p.fade_out && !ringing
         return retire(p, keep: p.keep) if frames <= 0
+
+        # A muted player has nothing to ring out
+        return retire(p, keep: p.keep) if ringing && p.ring.stop_frame && (p.asleep || (p.strip_level <= 0 && p.strip_ramp.nil?))
 
         # Sleeping (muted) players aren't rendered until their unmute ramp
         # starts; then their clips catch up with the timeline
@@ -929,6 +971,22 @@ module MB
           return
         end
 
+        # A ringing tail stops on the sample where it has been quiet long
+        # enough, or fades out once it has rung too long
+        rung_out = false
+        if ringing && p.ring.stop_frame
+          cap_ring(p, base + offset + frames, rate)
+          keep = follow_ring(p, data, base + offset, frames, rate)
+          if keep < frames
+            rung_out = true
+            frames = keep
+            if frames == 0
+              note_rung_out(p, base + offset, rate)
+              return retire(p, keep: true)
+            end
+          end
+        end
+
         ramp = fade_ramp(p, base + offset, frames)
         strip = ramp_levels(p, :strip_level, :strip_ramp, base + offset, frames)
         ramp = ramp ? (strip ? ramp * strip : ramp) : strip
@@ -941,6 +999,11 @@ module MB
           d = d[0...len]
           d = d * ramp[0...len] if ramp
           m[offset...(offset + len)] = m[offset...(offset + len)] + d
+        end
+
+        if rung_out
+          note_rung_out(p, base + offset + frames, rate)
+          return retire(p, keep: true)
         end
 
         # A short read means the graph ended
@@ -959,7 +1022,7 @@ module MB
       def finish_player(p, ended, frame, to: nil)
         # A replaced graph ends at its replacement's start unless it is
         # fading; a fade out ends at silence
-        cut = to && p.stop_at && p.stop_at < to && !p.fade_out
+        cut = to && p.stop_at && p.stop_at < to && !p.fade_out && !p.ring&.active
         faded = p.fading_out && p.ramp.nil? && p.gain <= 0
 
         if ended
@@ -967,6 +1030,7 @@ module MB
         elsif cut
           retire(p, keep: p.keep)
         elsif faded
+          note_rung_out(p, frame, output.sample_rate) if p.ring&.active
           retire(p, keep: true)
         elsif p.strip_level <= 0 && p.strip_ramp.nil?
           p.asleep = true

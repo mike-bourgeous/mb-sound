@@ -187,15 +187,19 @@ module MB
       # bars, or 0 to stop right away.  Returns the names of the players that
       # were stopped.  When nothing is left playing, the timeline pauses where
       # it is (see SequenceMethods#seek and #rewind).
-      def stop(*names, fade: nil)
+      #
+      # +ring: true+ rings the players out instead (as scenes do; see
+      # Session::Tails): their clips stop sending notes and each keeps
+      # playing until its tail is silent, e.g. `stop :bass, ring: true`.
+      def stop(*names, fade: nil, ring: false)
         names = names.map { |n| player_name(n) }
         session_command(names, label: "stop #{names.map(&:inspect).join(', ')}".strip) { |session, time|
           if names.empty?
-            [session.remove_last(fade: fade, time: time)].compact
+            [session.remove_last(fade: fade, time: time, ring: ring)].compact
           elsif names == [:all]
-            session.remove(fade: fade, time: time)
+            session.remove(fade: fade, time: time, ring: ring)
           else
-            session.remove(*names, fade: fade, time: time).tap { |stopped|
+            session.remove(*names, fade: fade, time: time, ring: ring).tap { |stopped|
               (names - stopped).each do |name|
                 warn "No background player #{name.inspect} is playing"
               end

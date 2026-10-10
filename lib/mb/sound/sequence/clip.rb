@@ -67,6 +67,12 @@ module MB
           })
         end
 
+        # A shared looping one-bar clip with no notes (what a ringing-out
+        # player's clip sources play; see Session::Tails).
+        def self.silent
+          @silent ||= new([], length: 1, loop: true)
+        end
+
         # Converts +obj+ to a Clip: Clips are returned as-is, Notes, Numerics,
         # and nil (a rest) become one-step Seqs.
         def self.from(obj)

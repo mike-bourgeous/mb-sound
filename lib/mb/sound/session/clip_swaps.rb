@@ -78,7 +78,9 @@ module MB
           # A swap waiting to happen can be swapped again, or replaced by a
           # swap of the clip playing now
           swaps = nodes.filter_map { |n|
-            c = n.pending_clip && swapped_clip(n.pending_clip, mapping)
+            # (a ringing-out source swaps the clip it will play again)
+            c = n.ring_clip && swapped_clip(n.ring_clip, mapping)
+            c ||= n.pending_clip && swapped_clip(n.pending_clip, mapping)
             c ||= swapped_clip(n.clip, mapping)
             [n, c] if c
           }
@@ -135,7 +137,7 @@ module MB
         # Returns a mapping from the clip that every clip source's clip was
         # made from (the nearest common one) to +clip+.
         def auto_swap_mapping(name, nodes, clip)
-          lineages = nodes.map { |n| (n.pending_clip || n.clip).lineage }
+          lineages = nodes.map { |n| (n.ring_clip || n.pending_clip || n.clip).lineage }
           common = lineages.reduce { |a, b| a.select { |c| b.any? { |x| x.equal?(c) } } }
 
           if common.empty?
