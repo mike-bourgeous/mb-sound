@@ -17,12 +17,119 @@ RSpec.describe(MB::Sound::Sequence::Clip, :midi_transforms) do
       expect(h.events.map(&:length)).to eq(riff.events.map(&:length))
     end
 
-    it 'keeps non-looping notes from starting before 0 and wraps loops' do
+    it 'keeps non-looping notes from starting before 0' do
       h = riff.humanize(1/16r, seed: 1)
       expect(h.events.map(&:start).min).to be >= 0
+    end
+
+    it 'humanizes loops per cycle, the same in every cycle with vary: false' do
       l = riff.loop.humanize(1/16r, seed: 1, vary: false)
-      expect(l.events).not_to eq(riff.loop.events)
-      expect(l.events.map(&:start)).to all(be_between(0, riff.length))
+      expect(l.variations.length).to eq(1)
+      expect(l.to_s).to include('vary: false')
+      expect(l.events_for(0)).not_to eq(riff.loop.events)
+      expect(l.events_for(0)).to eq(l.events_for(5))
+      # Starts stay relative to their own cycle (no wrapping)
+      expect(l.events_for(0).map(&:start)).to all(be_between(-1/16r, riff.length + 1/16r))
+      c1 = played(l, 3).select { |_, t| t >= riff.length && t < 2 * riff.length }
+      c2 = played(l, 3).select { |_, t| t >= 2 * riff.length }.map { |v, t| [v, t - riff.length] }
+      expect(c2).to eq(c1)
+    end
+
+    # Notes per grid step (an eighth) over +cycles+ cycles of +clip+: a
+    # Hash of step index => played note values.
+    def steps(clip, cycles)
+      played(clip, cycles).group_by { |_, t| (t * 8).round }.transform_values { |l| l.map(&:first) }
+    end
+
+    [true, false].each do |vary|
+      it "plays every note exactly once across loop boundaries (vary: #{vary})" do
+        values = riff.events.map(&:value)
+        30.times do |seed|
+          l = riff.loop.humanize(1/32r, seed: seed, vary: vary)
+          got = steps(l, 6).reject { |i, _| i >= 24 } # (the next cycle's early downbeat may land before 3)
+          expected = (0...24).to_h { |i| [i, [values[i % 4]]] }
+          expect(got).to eq(expected), "seed #{seed}: #{played(l, 6).inspect}"
+        end
+      end
+    end
+
+    it 'plays the default +/-4 ms feel of the round-2 riff with every downbeat (listening bug 2026-10-10)' do
+      r = MB::Sound.seq(MB::Sound::A3, MB::Sound::C4, MB::Sound::E4, MB::Sound::G4, MB::Sound::E4, MB::Sound::C4, MB::Sound::D4, MB::Sound::B3).n8.loop
+      h = r.humanize(velocity: 0.3)
+      got = h.edges(0r, 6r).select { |_, type, _, _| type == :on }.group_by { |t, *| (t * 8).round }
+      expect(got.keys.sort).to eq((0...48).to_a)
+      expect(got.values.map(&:length).uniq).to eq([1])
+    end
+
+    describe 'notes moved across the loop boundary' do
+      let(:base) { MB::Sound.seq(MB::Sound::C4, MB::Sound::E4, MB::Sound::G4, MB::Sound::B4).n8.loop }
+      # Odd cycles move their first note 1/64 earlier, every cycle moves its
+      # last note 1/8 + 1/64 later (1/64 past the cycle's end)
+      let(:moved) {
+        v = MB::Sound::Sequence::Clip::Variation.new(name: 'test', block: ->(events, cycle, _clip) {
+          events.each_with_index.map { |e, i|
+            if i == 0 && cycle.odd?
+              e.with(start: e.start - 1/64r)
+            elsif i == 3
+              e.with(start: e.start + 1/8r + 1/64r)
+            else
+              e
+            end
+          }
+        })
+        MB::Sound::Sequence::Clip.new(base.events, length: base.length, loop: true, variations: [v])
+      }
+
+      def ons(clip, from, to, early: false)
+        clip.edges(from, to, early: early).select { |_, type, _, _| type == :on }.map { |t, _, e, c| [e.value, t, c] }
+      end
+
+      it 'plays early notes at the end of the previous cycle and late ones in the next, once each' do
+        c, e, g, b = base.events.map(&:value)
+        expect(ons(moved, 0r, 1r)).to eq([
+          [c, 0r, 0], [e, 1/8r, 0], [g, 1/4r, 0],
+          [c, 1/2r - 1/64r, 1], [b, 1/2r + 1/64r, 0], [e, 5/8r, 1], [g, 3/4r, 1],
+        ])
+        # Cycle 1's late note plays in the next read; cycle 3's early
+        # downbeat in this one
+        expect(ons(moved, 1r, 3/2r)).to eq([
+          [c, 1r, 2], [b, 1r + 1/64r, 1], [e, 9/8r, 2], [g, 5/4r, 2], [c, 3/2r - 1/64r, 3],
+        ])
+      end
+
+      it 'matches when read in any block sizes' do
+        whole = ons(moved, 0r, 3r)
+        [1/7r, 1/16r, 1/64r, 1/3r].each do |step|
+          parts = (0...(3 / step).ceil).flat_map { |i| ons(moved, i * step, MB::M.min((i + 1) * step, 3r)) }
+          expect(parts).to eq(whole), "step #{step}"
+        end
+      end
+
+      it 'plays the first cycle\'s early notes at 0' do
+        v = MB::Sound::Sequence::Clip::Variation.new(name: 'early', block: ->(events, _cycle, _clip) {
+          events.map { |e| e.with(start: e.start - 1/64r) }
+        })
+        clip = MB::Sound::Sequence::Clip.new(base.events, length: base.length, loop: true, variations: [v])
+        expect(ons(clip, 0r, 1/2r).map { |v_, t, _| [v_, t] }).to eq([
+          [base.events[0].value, 0r], [base.events[1].value, 1/8r - 1/64r], [base.events[2].value, 1/4r - 1/64r],
+          [base.events[3].value, 3/8r - 1/64r], [base.events[0].value, 1/2r - 1/64r],
+        ])
+      end
+
+      it 'plays a launched cycle\'s early notes at the read start with early: true' do
+        expect(ons(moved, 1/2r, 5/8r).map(&:first)).not_to include(base.events[0].value)
+        expect(ons(moved, 1/2r, 5/8r, early: true).first).to eq([base.events[0].value, 1/2r, 1])
+        # Notes of earlier cycles don't move
+        expect(ons(moved, 1/2r + 1/32r, 5/8r, early: true).map(&:first)).not_to include(base.events[0].value)
+      end
+
+      it 'unrolls with #repeat and #| without notes before 0' do
+        r = moved.send(:repeated, 3)
+        expect(r.events.map(&:start).min).to eq(0)
+        expect(r.events.length).to eq(12)
+        expect(r.events.map(&:start)).to include(1/2r - 1/64r)
+        expect((moved | base).events.map(&:start).min).to eq(0)
+      end
     end
 
     it 'changes velocities with velocity:' do

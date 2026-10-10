@@ -20,14 +20,23 @@ module MB
         # grid (user, 2026-10-10: 1/64 was too much; 1/128 is 15.6 ms at
         # 120 BPM).  Random values come from +:seed+ (the clip's seed by
         # default, like #permute), so the same call gives the same feel.
-        # Notes of a looping clip wrap around its length; others don't move
-        # before 0.
+        # Notes of a non-looping clip don't move before 0.
+        #
+        # A looping clip is humanized per cycle (a Variation, see
+        # #variations and #events_for): a note moved across the loop
+        # boundary belongs to its own cycle, so a downbeat moved earlier
+        # plays just before its bar line, at the end of the previous cycle,
+        # and a last note moved later plays just after it, each exactly
+        # once.  The first cycle's early notes (and those of a cycle a
+        # launch, seek, or swap lands on) play at its start, since nothing
+        # played before it (see #edges; 2026-10-10: wrapping offsets within
+        # the cycle lost or doubled downbeats of varying loops).
         #
         # +:vary+ (default: true for looping clips; user, 2026-10-10) gives
-        # a looping clip new offsets in every cycle (see #variations).  A
-        # clip that isn't looping yet is humanized once, so humanize after
-        # #loop for a loop that varies (`riff.loop.humanize`); pass
-        # +vary: false+ for the same offsets every cycle.
+        # a looping clip new offsets in every cycle.  A clip that isn't
+        # looping yet is humanized once, so humanize after #loop for a loop
+        # that varies (`riff.loop.humanize`); pass +vary: false+ for the
+        # same offsets every cycle.
         #
         #     riff.loop.humanize                    # +/-4 ms, new every cycle
         #     riff.humanize(1.n64, velocity: 0.15)
@@ -37,25 +46,28 @@ module MB
           amount = Duration.whole_notes(time)
           raise ArgumentError, "Humanize velocity must be from 0 to 1 (got #{velocity.inspect})" unless velocity.is_a?(Numeric) && velocity.between?(0, 1)
           seed = Integer(seed)
-          if vary
-            with_events(@events, variations: @variations + [Variation.new(name: "humanize(#{Duration.format(amount)}, seed: #{seed})", block: ->(events, cycle, clip) {
-              Clip.humanized(events, amount, velocity.to_f, Clip.cycle_seed(seed, cycle), clip.length)
+          if @loop
+            name = "humanize(#{Duration.format(amount)}, seed: #{seed}#{vary ? '' : ', vary: false'})"
+            with_events(@events, variations: @variations + [Variation.new(name: name, block: ->(events, cycle, clip) {
+              Clip.humanized(events, amount, velocity.to_f, vary ? Clip.cycle_seed(seed, cycle) : seed, clip.length)
             })])
           else
-            with_events(Clip.humanized(@events, amount, velocity.to_f, seed, @loop ? @length : nil))
+            with_events(Clip.humanized(@events, amount, velocity.to_f, seed, nil))
           end
         end
 
         # Returns +events+ moved by up to +amount+ whole notes and with
-        # velocities changed by up to +velocity+ (see #humanize).  +wrap+ is
-        # the loop length, or nil.
-        def self.humanized(events, amount, velocity, seed, wrap)
+        # velocities changed by up to +velocity+ (see #humanize).  +cycle+
+        # is the loop length, or nil: loop notes may move up to (not
+        # including) a whole cycle outside it (see Clip::Variation), others
+        # don't move before 0.
+        def self.humanized(events, amount, velocity, seed, cycle)
           rng = Random.new(seed)
           events.map { |e|
             shift = Duration.rational((rng.rand * 2 - 1) * amount.to_f)
             v = rng.rand * 2 - 1
             start = e.start + shift
-            start = wrap ? start % wrap : MB::M.max(start, 0r)
+            start = cycle ? MB::M.clamp(start, -cycle + Rational(1, 2**40), 2 * cycle - Rational(1, 2**40)) : MB::M.max(start, 0r)
             changes = { start: start }
             changes[:velocity] = MB::M.clamp(e.velocity * (1 + v * velocity), 1 / 127.0, 1.0) if velocity > 0 && e.velocity
             e.with(**changes)
@@ -199,7 +211,7 @@ module MB
           events = (0...total).flat_map { |j|
             cycle = (j - first) % cycles
             events_for(cycle).each_with_index.select { |e, idx| plays?(e, cycle, idx) }.map { |e, _|
-              e.with(start: e.start + j * @length, probability: nil, condition: nil)
+              e.with(start: MB::M.max(e.start + j * @length, 0r), probability: nil, condition: nil)
             }
           }
           Clip.new(events, length: @length * total, seed: @seed)

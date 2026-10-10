@@ -83,8 +83,10 @@ module MB
 
         # Per-cycle changes of a looping clip (see #variations): a +name+
         # for display and a +block+ called with (events, cycle, clip) that
-        # returns the events for that cycle (each at most one clip length
-        # long or starting inside the cycle).
+        # returns the events for that cycle.  Starts are relative to the
+        # cycle and may lie up to one clip length outside it: a negative
+        # start plays at the end of the previous cycle (e.g. a downbeat
+        # humanized early), a start past the length in the next one.
         Variation = Data.define(:name, :block)
 
         # Creates a clip from a list of Events.  The +:length+ defaults to the
@@ -108,6 +110,9 @@ module MB
           # that belong to earlier cycles (one more with variations, which
           # may move events within their cycle).
           @lookback = @length > 0 ? (max_end / @length).ceil + (@variations.empty? ? 0 : 1) : 0
+          # And how many later cycles can start early (variations may move
+          # events up to a cycle before their own, see Variation).
+          @lookahead = @variations.empty? ? 0 : 1
         end
 
         # Changes applied anew in every loop cycle (Variations), e.g. from
@@ -174,16 +179,26 @@ module MB
         # (a Clip, Note, Numeric, or nil for a quarter rest).
         def |(other)
           other = Clip.from(other)
-          shifted = other.events_for(0).map { |e| e.with(start: e.start + @length) }
-          Clip.new(events_for(0) + shifted, length: @length + other.length, seed: @seed)
+          shifted = other.first_cycle_events.map { |e| e.with(start: e.start + @length) }
+          Clip.new(first_cycle_events + shifted, length: @length + other.length, seed: @seed)
         end
 
         # Returns a non-looping clip that plays this clip and +other+ at the
         # same time.  The length is the longer of the two.
         def &(other)
           other = Clip.from(other)
-          Clip.new(events_for(0) + other.events_for(0), length: MB::M.max(@length, other.length), seed: @seed)
+          Clip.new(first_cycle_events + other.first_cycle_events, length: MB::M.max(@length, other.length), seed: @seed)
         end
+
+        # The events of cycle 0 (see #events_for) with early starts (see
+        # Variation) at 0, as cycle 0 plays them.  Used where a clip's
+        # first cycle becomes a non-looping clip (#|, #&).
+        def first_cycle_events
+          list = events_for(0)
+          return list unless list.any? { |e| e.start < 0 }
+          list.map { |e| e.start < 0 ? e.with(start: 0r) : e }
+        end
+        protected :first_cycle_events
 
         # Returns a non-looping clip that plays this clip +count+ times in a
         # row.  Repeating a looping clip warns, since the result is finite;
@@ -417,13 +432,23 @@ module MB
         # [time, :on/:off, event, cycle] sorted by time.  Note-offs sort before
         # note-ons at the same time so repeated notes retrigger.
         #
+        # Events of a loop's variations may start before their cycle (see
+        # Variation, e.g. a downbeat humanized early): they play at the end
+        # of the previous cycle, so each plays exactly once in continuous
+        # playback.  Cycle 0 has no previous cycle, so its early notes play
+        # at 0.  When +:early+ is true (the first read after a launch, seek,
+        # or swap, from MIDI::ClipSource), notes of cycles starting at or
+        # after +from+ whose early start is before +from+ play at +from+
+        # instead of being lost (a downbeat humanized early still sounds
+        # when a loop is launched on it).
+        #
         # Used by MIDI::ClipSource.
-        def edges(from, to)
+        def edges(from, to, early: false)
           return [] if @length <= 0 && @events.empty?
 
           if @loop
             first = MB::M.max((from / @length).floor - @lookback, 0)
-            last = (to / @length).floor
+            last = (to / @length).floor + @lookahead
           else
             first = last = 0
           end
@@ -436,6 +461,15 @@ module MB
 
               on = offset + e.start
               off = on + e.length
+              if on < offset
+                # An early note of this cycle
+                if cycle == 0
+                  next if off <= 0
+                  on = 0r
+                elsif early && offset >= from && on < from && off > from
+                  on = from
+                end
+              end
               out << [on, :on, e, cycle] if on >= from && on < to
               out << [off, :off, e, cycle] if off >= from && off < to
             end
@@ -804,7 +838,7 @@ module MB
           Clip.new(
             Array.new(count) { |c|
               events_for(c).select { |e| e.condition.nil? || plays?(e.with(probability: nil), c, 0) }
-                .map { |e| e.with(start: e.start + c * @length, condition: nil) }
+                .map { |e| e.with(start: MB::M.max(e.start + c * @length, 0r), condition: nil) }
             }.flatten,
             length: @length * count,
             seed: @seed
