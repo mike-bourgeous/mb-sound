@@ -10,6 +10,7 @@ require_relative 'session/strip'
 require_relative 'session/undo'
 require_relative 'session/master'
 require_relative 'session/tails'
+require_relative 'session/markers'
 require_relative 'session/clip_swaps'
 require_relative 'session/scheduler'
 require_relative 'session/graph_view'
@@ -254,6 +255,11 @@ module MB
       # The Session's top-level names (see Names).
       attr_reader :names
 
+      # The marker table (see Markers), created when first needed.
+      def markers
+        @markers ||= Markers.new(self)
+      end
+
       # The Set layer of this Session (tracks and scenes; see
       # MB::Sound::Arrangement), created when first needed.
       def arrangement
@@ -463,6 +469,15 @@ module MB
       # #cancel.  See Scheduler for how and when blocks run.
       def schedule(time, period: nil, description: nil, &block)
         @scheduler.schedule(time, period: period, description: description, &block)
+      end
+
+      # Starts the background rendering thread of a realtime session (and
+      # opens its output) if it isn't running, so scheduled blocks run even
+      # before anything plays (e.g. a song form's first section).
+      def ensure_running
+        return unless @realtime && !@closed
+        output
+        start_thread
       end
 
       # Removes scheduled blocks (all of them if no ids are given).  Returns

@@ -65,6 +65,53 @@ module MB
         @current_scene = nil
         @labels = {}.compare_by_identity
         @mutex = Mutex.new
+        @sections = {}
+        @playback = nil
+      end
+
+      # Sections declared outside a form with #section (a Hash from name to
+      # Form::Section), which bare calls in a `flow` block can play.
+      def sections
+        @mutex.synchronize { @sections.dup }
+      end
+
+      # Declares a section outside a form (see Form::Builder for the
+      # options): `section :verse, 8.bars, next: { chorus: 3, drop: 1 }`.
+      # Returns the Form::Section.
+      def section(name, length, times: 1, next: :next, fill: nil, scene: nil, fade: nil)
+        sec = Form::Section.new(
+          name: name, length: length, times: times, next_action: binding.local_variable_get(:next),
+          fill: Form::Fill.from(fill, section: name), scene: scene, fade: fade
+        )
+        @mutex.synchronize { @sections[name] = sec }
+      end
+
+      # Builds a Form from a block (see Form::Builder), with the sections
+      # declared by #section available to bare calls.
+      def build_form(&block)
+        Form.build(sections: sections, &block)
+      end
+
+      # The form playing (or played last), a Form::Playback, or nil.
+      attr_reader :playback
+
+      # Plays +form+ (a Form) from its launch point (+on:+, +in:+, +at:+;
+      # the next bar by default, or now if nothing plays), replacing any
+      # form already playing (which stops launching sections).  +seed+ seeds
+      # its chance follow actions (MB::Sound.next_seed by default, so takes
+      # replay the same choices).  Returns the Form::Playback.
+      def play_form(form, at: nil, on: nil, in: nil, seed: nil)
+        point = LaunchPoint.of(binding) or return nil
+        raise ArgumentError, "Expected a Form (got #{form.class})" unless form.is_a?(Form)
+
+        seed ||= MB::Sound.next_seed
+        pb = Form::Playback.new(self, form, seed: seed)
+        time = @session.send(:launch_time, point, [])
+        old = @mutex.synchronize { prev = @playback; @playback = pb; prev }
+        old&.stop
+        pb.start(time)
+        @session.ensure_running
+        pb
       end
 
       # Sets the set-wide launch quantization (see the class comment).

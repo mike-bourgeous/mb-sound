@@ -34,7 +34,7 @@ module MB
         # previous note one more step (MB::Sound::Tie).  Marks return new
         # Steps and chain in any order: `~!A1`, `!A1.up`, `A1.!.~`,
         # `A1.acc.s!.n8`.
-        Step = Struct.new(:value, :length, :velocity, :probability, :legato, :clip, :accented, :slid, :tie, :condition, keyword_init: true) do
+        Step = Struct.new(:value, :length, :velocity, :probability, :legato, :clip, :accented, :slid, :tie, :condition, :fill_mark, keyword_init: true) do
           include NoteMethods
 
           # True for a rest (no note, clip, or tie).
@@ -92,6 +92,21 @@ module MB
           # ones (Elektron's 2:2).  See Clip#every.
           def every(n, from: 1)
             marked(condition: Clip.check_condition(n, from))
+          end
+
+          # Returns a copy of this step that plays only during fills (only
+          # fill +name+ if given): Elektron's FILL condition.  A playing
+          # song form sets fills at the ends of sections and every few bars
+          # (see Form and Clip#fill): `seq(C4, E4, G4.fill, C5.fill(:big))`.
+          def fill(name = nil)
+            marked(fill_mark: Clip.check_fill(:fill, name))
+          end
+
+          # Returns a copy of this step that plays only outside fills
+          # (outside fill +name+ if given), e.g. hats that drop out while a
+          # fill plays.
+          def nofill(name = nil)
+            marked(fill_mark: Clip.check_fill(:nofill, name))
           end
 
           # Returns a copy of this step +octaves+ (default 1) higher.
@@ -169,7 +184,7 @@ module MB
           Event.new(
             start: start, length: total - last + last * legato, value: step.value, velocity: step.velocity,
             probability: step.probability, accented: step.accented || nil, slid: slide ? true : nil,
-            condition: step.condition
+            condition: step.condition, fill_mark: step.fill_mark
           )
         end
 
@@ -319,7 +334,7 @@ module MB
           steps = @steps.dup
           notes.each_with_index do |slot, idx|
             src = @steps[notes[order[idx]]]
-            steps[slot] = Step.new(**@steps[slot].to_h.merge(value: src.value, velocity: src.velocity, probability: src.probability, accented: src.accented, slid: src.slid, condition: src.condition))
+            steps[slot] = Step.new(**@steps[slot].to_h.merge(value: src.value, velocity: src.velocity, probability: src.probability, accented: src.accented, slid: src.slid, condition: src.condition, fill_mark: src.fill_mark))
           end
 
           Seq.new(steps, seed: @seed, loop: @loop, align: @align)
@@ -344,6 +359,20 @@ module MB
         # +from+ (see Step#every).
         def every(n, from: 1)
           map_notes { |s| s.every(n, from: from) }
+        end
+
+        # With no argument or a fill name, returns a Seq whose notes play
+        # only during fills (see Step#fill); with a span, repeats the Seq
+        # to fill it (see Clip#fill).
+        def fill(span = nil)
+          return super unless span.nil? || span.is_a?(Symbol)
+          map_notes { |s| s.fill(span) }
+        end
+
+        # Returns a Seq whose notes play only outside fills (see
+        # Step#nofill).
+        def nofill(name = nil)
+          map_notes { |s| s.nofill(name) }
         end
 
         # Returns a Seq with every note accented (see Step#accent).  Aliases

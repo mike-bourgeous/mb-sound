@@ -236,7 +236,8 @@ module MB
           early = @early
           @early = false
 
-          @clip.edges(wn_from, wn_to, early: early).map { |time, type, event, _cycle|
+          fills = @fills_at ||= ->(pos) { transport.fills.names_at(pos + @origin) }
+          @clip.edges(wn_from, wn_to, early: early, fills: fills).map { |time, type, event, _cycle|
             t = from + (time - wn_from) / wnps
             if type == :on
               Event.note_on(event.value, event.velocity, channel: @channel, time: t)

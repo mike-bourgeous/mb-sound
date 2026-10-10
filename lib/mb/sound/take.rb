@@ -127,13 +127,60 @@ module MB
         session.journal.changes.select { |e| ids.include?(e.line) }
       end
 
-      # The scene launches in the take, as [Stamp, scene name] pairs.  The
-      # form as played (`take.form` returning a Form whose `to_ruby` prints
-      # a `flow do ... end` block) arrives with song forms.
+      # The song as played, as a Form (its inspect and #to_ruby print a
+      # `flow do ... end` block to paste or edit): the passes of the song
+      # form that played (its sections in the order they played, repeats
+      # as times:, the last one ending with next: :end if the form ended),
+      # or, without a form, the scene launches as sections lasting until
+      # the next launch.
       def form
-        warn 'take.form: song forms (flow do ... end) arrive in a later phase; here are the scene launches'
-        session.journal.changes.select { |e| e.kind == :scene && e.status == :landed }.map { |e| [e.lands, e.subject] }
+        pb = session.arrangement.playback
+        return form_from_history(pb) if pb && !pb.history.empty?
+        form_from_scenes
       end
+
+      # A linear Form of a form playback's passes.
+      def form_from_history(pb)
+        runs = pb.history.chunk_while { |a, b| a == b }.map { |r| [r.first, r.length] }
+        linear_form(runs, ended: pb.ended?) { |name| pb.form.sections[name] }
+      end
+
+      # A linear Form of the scene launches (each lasting until the next,
+      # the last until now), in bars.
+      def form_from_scenes
+        t = session.transport
+        launches = session.journal.changes.select { |e| e.kind == :scene && e.status == :landed }.map { |e| [e.subject, e.lands.pos] }
+        launches = launches.chunk_while { |a, b| a[0] == b[0] }.map(&:first)
+        return Form.new(sections: {}, order: []) if launches.empty?
+
+        ends = launches.drop(1).map(&:last) + [[t.position, launches.last.last].max]
+        lengths = launches.zip(ends).map { |(name, from), to| [name, t.bar_at(to) - t.bar_at(from)] }
+        sections = {}
+        runs = lengths.map { |name, bars|
+          bars = bars.denominator == 1 ? bars.to_i : bars
+          key = sections.find { |_, s| s.name == name && s.length == bars }&.first
+          key ||= sections.key?(name) ? :"#{name}_#{sections.length}" : name
+          sections[key] ||= Form::Section.new(name: key, length: bars.zero? ? 1 : bars, scene: key == name ? nil : name)
+          [key, 1]
+        }
+        linear_form(runs, ended: false) { |name| sections[name] }
+      end
+
+      # Builds a linear Form from [name, passes] runs, taking each section's
+      # length, fill, scene, and fade from the block's Section (follow
+      # actions dropped: the form plays as it was played).
+      def linear_form(runs, ended:)
+        sections = {}
+        order = runs.each_with_index.map { |(name, count), i|
+          src = yield(name)
+          sections[name] ||= src.with(times: count, next_action: :next)
+          last = i == runs.length - 1
+          sections[name] = sections[name].with(next_action: :end) if last && ended && i == runs.index { |n, _| n == name }
+          Form::Play.new(name: name, times: count == sections[name].times ? nil : count)
+        }
+        Form.new(sections: sections, order: order)
+      end
+      private :form_from_history, :form_from_scenes, :linear_form
 
       def to_s
         n = @mutex.synchronize { @lines.length }

@@ -221,7 +221,15 @@ module MB
         #
         # Example:
         #     C4.n32.fill(4)   # eight 32nd notes filling a quarter note
-        def fill(span)
+        #
+        # With no argument or a Symbol, marks every event to play only
+        # during fills instead (only fill +name+ if given; Elektron's FILL
+        # condition): a playing song form (see Form) sets fills at the ends
+        # of sections and every few bars, e.g. `roll.fill` or
+        # `crash.fill(:big)`.  See also #nofill and Seq::Step#fill.
+        def fill(span = nil)
+          return map_clip { |e| e.with(fill_mark: Clip.check_fill(:fill, span)) } if span.nil? || span.is_a?(Symbol)
+
           span = Duration.whole_notes(span)
           raise ArgumentError, 'Cannot fill with an empty clip' if @length <= 0
 
@@ -449,7 +457,12 @@ module MB
         # when a loop is launched on it).
         #
         # Used by MIDI::ClipSource.
-        def edges(from, to, early: false)
+        #
+        # +:fills+, if given, is called with a clip position (whole notes)
+        # and returns the names of the fills playing there (see FillMap);
+        # events with fill marks (see #fill) are kept or dropped by it.
+        # Without it, no fills play.
+        def edges(from, to, early: false, fills: nil)
           return [] if @length <= 0 && @events.empty?
 
           if @loop
@@ -476,6 +489,7 @@ module MB
                   on = from
                 end
               end
+              next if e.fill_mark && !e.plays_in_fill?(fills ? fills.call(on) : FillMap::NONE)
               out << [on, :on, e, cycle] if on >= from && on < to
               out << [off, :off, e, cycle] if off >= from && off < to
             end
@@ -508,6 +522,19 @@ module MB
 
           return true if event.probability.nil? || event.probability >= 1
           Random.new((@seed * 1_000_003 + cycle) * 1_000_003 + index).rand < event.probability
+        end
+
+        # Returns a clip whose events play only outside fills (outside fill
+        # +name+ if given; see #fill).
+        def nofill(name = nil)
+          map_clip { |e| e.with(fill_mark: Clip.check_fill(:nofill, name)) }
+        end
+
+        # Validates a fill mark for #fill and #nofill, returning [mode,
+        # name].
+        def self.check_fill(mode, name)
+          raise ArgumentError, "Fill names must be Symbols (got #{name.inspect})" unless name.nil? || name.is_a?(Symbol)
+          [mode, name].freeze
         end
 
         # Validates a probability (0..1) for #chance and Seq::Step#chance.

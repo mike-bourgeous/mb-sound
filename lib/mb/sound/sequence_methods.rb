@@ -284,12 +284,28 @@ module MB
       end
 
       # Moves the background playback timeline (see PlaybackMethods#bg) to the
-      # start of +bar+, counting from 1 (fractions are allowed, e.g. 2.5).
-      # Sounds already playing jump there on their next buffer.  Returns the
+      # start of +bar+, counting from 1 (fractions are allowed, e.g. 2.5;
+      # through the meter map, see Sequence::Transport#meter).  Sounds
+      # already playing jump there on their next buffer.  Returns the
       # transport.
+      #
+      # With a Symbol: a section of the song form playing (see
+      # FormMethods#flow) plays from the next bar line (the timeline keeps
+      # running; returns where it lands), or else the timeline moves to the
+      # marker of that name (see FormMethods#marker).
       def seek(bar)
+        if bar.is_a?(Symbol)
+          session = Session.current
+          pb = session.arrangement.playback
+          return pb.seek(bar) if pb && !pb.ended? && pb.form.sections.key?(bar)
+
+          pos = session.markers.position(bar)
+          raise ArgumentError, "No section or marker #{bar.inspect} (markers: #{session.markers.to_h.keys.map(&:inspect).join(', ')})" if pos.nil?
+          return transport.seek(pos)
+        end
+
         raise ArgumentError, "Bar must be a number of at least 1 (got #{bar.inspect})" unless bar.is_a?(Numeric) && bar >= 1
-        transport.seek((bar.to_r - 1) * transport.bar_length)
+        transport.seek(transport.bar_position(bar))
       end
 
       # Moves the background playback timeline back to the start (see #seek).

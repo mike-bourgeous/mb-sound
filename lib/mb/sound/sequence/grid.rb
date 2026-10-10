@@ -124,6 +124,50 @@ module MB
           Kit.new(@rows.transform_values { |c| c.legato(fraction) })
         end
 
+        # Returns a Kit that adds fill notes: rows (Clips, or a Kit or Hash
+        # of Clips given as +other+ or returned by the block) that play only
+        # during fills (only fill +name+ if given; see Clip#fill), layered
+        # onto rows of the same name or added as new rows.  Layered rows
+        # loop again if they looped (each row keeps its seed and alignment;
+        # variations are played out as in Clip#&).
+        #
+        #     beat = grid(16, kick: 'X...x...X...x...', clap: '....X.......X...')
+        #       .fill { grid(16, clap: '..........x.xxxx') }        # any fill
+        #       .fill(:big, crash: grid(16, 'X...............', value: 49))
+        #       .nofill(:hat)
+        #       .loop
+        def fill(name = nil, other = nil, **rows, &block)
+          raise ArgumentError, "Fill names must be Symbols (got #{name.inspect}); pass rows as keywords or a Kit" unless name.nil? || name.is_a?(Symbol)
+          other = block.call if block
+          other = other.rows if other.is_a?(Kit)
+          other = (other || {}).merge(rows)
+          raise ArgumentError, 'Kit#fill needs rows: keywords, a Kit, or a block returning a Kit' if other.empty?
+
+          new_rows = @rows.dup
+          other.each do |row, clip|
+            clip = Clip.from(clip) unless clip.is_a?(Clip)
+            marked = clip.fill(name)
+            old = new_rows[row]
+            new_rows[row] = if old.nil?
+                              marked
+                            else
+                              layered = old & marked
+                              old.looping? ? layered.loop(seed: old.seed, align: old.align) : layered
+                            end
+          end
+          Kit.new(new_rows)
+        end
+
+        # Returns a Kit whose named rows (every row if none are named) play
+        # only outside fills (see Clip#nofill), e.g. hats that drop out
+        # under a fill.
+        def nofill(*names)
+          names = @rows.keys if names.empty?
+          unknown = names - @rows.keys
+          raise ArgumentError, "No rows #{unknown.map(&:inspect).join(', ')} (rows: #{@rows.keys.map(&:inspect).join(', ')})" unless unknown.empty?
+          Kit.new(@rows.to_h { |k, c| [k, names.include?(k) ? c.nofill : c] })
+        end
+
         # Returns a single Clip with all rows stacked (see Clip#&).
         def to_clip
           @rows.values.reduce(:&)
