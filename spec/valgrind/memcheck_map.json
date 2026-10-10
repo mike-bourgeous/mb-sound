@@ -1,6 +1,6 @@
 {
   "about": "Extensions (and their methods) each memcheck spec file calls; `rake memcheck:map` regenerates it.  See spec/valgrind/memcheck_selection.rb.",
-  "generated": "2026-10-09",
+  "generated": "2026-10-10",
   "specs": {
     "spec/ext/mb/fast_sound_spec.rb": {
       "fast_sound": [
@@ -210,6 +210,9 @@
       ]
     },
     "spec/lib/mb/sound/band_limit_spec.rb": {
+      "fast_arithmetic": [
+        "FastArithmetic.product"
+      ],
       "fast_sound": [
         "FastSound.number_to_freq",
         "FastSound.oscillate",
@@ -457,7 +460,8 @@
         "FastLoop.run"
       ],
       "fast_plan": [
-        "FastPlan.run"
+        "FastPlan.run",
+        "FastPlan.run_lanes"
       ],
       "fast_resample": [
         "FastResample#initialize",
@@ -617,7 +621,8 @@
         "FastLoudness.true_peak"
       ],
       "fast_plan": [
-        "FastPlan.run"
+        "FastPlan.run",
+        "FastPlan.run_lanes"
       ],
       "fast_resample": [
         "FastResample#initialize",
@@ -790,7 +795,8 @@
         "FastFilter.svf"
       ],
       "fast_plan": [
-        "FastPlan.run"
+        "FastPlan.run",
+        "FastPlan.run_lanes"
       ],
       "fast_sound": [
         "FastSound.number_to_freq",
@@ -857,6 +863,18 @@
         "FastSound.smoothstep_buf"
       ]
     },
+    "spec/lib/mb/sound/plan/hold_tempo_ops_spec.rb": {
+      "fast_arithmetic": [
+        "FastArithmetic.mix",
+        "FastArithmetic.product"
+      ],
+      "fast_plan": [
+        "FastPlan.run"
+      ],
+      "fast_sound": [
+        "FastSound.oscillate"
+      ]
+    },
     "spec/lib/mb/sound/plan/installation_spec.rb": {
       "fast_arithmetic": [
         "FastArithmetic.circular_read",
@@ -876,9 +894,55 @@
         "FastEnvelope.process"
       ],
       "fast_plan": [
-        "FastPlan.run"
+        "FastPlan.run",
+        "FastPlan.run_lanes"
       ],
       "fast_sound": [
+        "FastSound.number_to_freq",
+        "FastSound.oscillate"
+      ],
+      "fast_synth": [
+        "FastSynth.oscillate_bl"
+      ]
+    },
+    "spec/lib/mb/sound/plan/lane_group_spec.rb": {
+      "fast_arithmetic": [
+        "FastArithmetic.circular_write",
+        "FastArithmetic.copy",
+        "FastArithmetic.min_max",
+        "FastArithmetic.mix",
+        "FastArithmetic.power",
+        "FastArithmetic.product",
+        "FastArithmetic.wet_dry"
+      ],
+      "fast_clip": [
+        "FastClip.shape"
+      ],
+      "fast_control": [
+        "FastControl.smooth"
+      ],
+      "fast_delay": [
+        "FastDelay.read"
+      ],
+      "fast_envelope": [
+        "FastEnvelope.process"
+      ],
+      "fast_filter": [
+        "FastFilter.diode_ladder",
+        "FastFilter.four_pole",
+        "FastFilter.svf"
+      ],
+      "fast_plan": [
+        "FastPlan.enums",
+        "FastPlan.run",
+        "FastPlan.run_lanes"
+      ],
+      "fast_resonator": [
+        "FastResonator.ping"
+      ],
+      "fast_sound": [
+        "FastSound.cookbook",
+        "FastSound.dynamic_biquad",
         "FastSound.number_to_freq",
         "FastSound.oscillate"
       ],
@@ -929,7 +993,8 @@
         "FastFilter.svf"
       ],
       "fast_plan": [
-        "FastPlan.run"
+        "FastPlan.run",
+        "FastPlan.run_lanes"
       ],
       "fast_sound": [
         "FastSound.number_to_freq",
@@ -952,7 +1017,8 @@
         "FastEnvelope.process"
       ],
       "fast_plan": [
-        "FastPlan.run"
+        "FastPlan.run",
+        "FastPlan.run_lanes"
       ],
       "fast_sound": [
         "FastSound.number_to_freq",
@@ -992,6 +1058,11 @@
       ],
       "fast_synth": [
         "FastSynth.oscillate_bl"
+      ],
+      "fast_wavetable": [
+        "FastWavetable.half_means",
+        "FastWavetable.harmonic_spectra",
+        "FastWavetable.oscillate"
       ]
     },
     "spec/lib/mb/sound/shaper_spec.rb": {
