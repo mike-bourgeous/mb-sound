@@ -124,7 +124,7 @@ module MB
             list
           }
 
-          due.sort_by(&:last).each do |e, time|
+          due.sort_by { |e, time| [time, e.id] }.each do |e, time|
             # Blocks for times still ahead must finish in time; blocks whose
             # time has already come run as soon as possible
             deadline = time > from ? time : nil
@@ -149,14 +149,17 @@ module MB
         # them if the block finished before +deadline+.
         def run(entry, time, deadline)
           batch = []
-          Session.with_context(session: @session, time: time, batch: batch) do
+          Session.with_context(session: @session, time: time, batch: batch, source: :schedule) do
             entry.block.call
           end
 
           if deadline && @transport.position >= deadline
             warn "Skipped the commands scheduled for #{entry.description}: the block finished after its time"
           else
-            batch.each(&:call)
+            # The block's commands are one undo step (see Session#undo)
+            Session.with_context(session: @session, time: time, source: :schedule) do
+              @session.command(entry.description) { batch.each(&:call) }
+            end
           end
 
         rescue => e

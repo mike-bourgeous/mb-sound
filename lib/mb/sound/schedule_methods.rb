@@ -40,6 +40,17 @@ module MB
       end
       alias on_bar at_bar
 
+      # An absolute timeline position for the +at:+ keyword of #bg, #go,
+      # #mute, and the other commands (see LaunchPoint): the start of bar
+      # +bar+ (counting from 1, like #at_bar, so bar(1) is the start of the
+      # timeline), or quarter-note +:beat+ within it (counting from 1).
+      #
+      #     go :drop, at: bar(33)
+      #     bg :fill, fill, at: bar(16, beat: 4)
+      def bar(bar, beat: 1)
+        LaunchPoint::Bar.new(bar: bar, beat: beat)
+      end
+
       # Runs the block +bars+ bars (a number, or a Duration like 2.bars) from
       # the next bar line (so `after 1` runs at the next bar).  Returns a
       # schedule id for #cancel.

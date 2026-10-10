@@ -77,6 +77,14 @@ end
 
 show_intro
 
+# The take: an always-on log of every line typed and exactly where each change
+# it made landed (see MB::Sound::Take); `take.save` writes a script that
+# replays the performance.  Started after warm_up, so it records the random
+# generator as the first line will find it.
+MB::Sound::Take.current
+Pry.config.hooks.add_hook(:before_eval, :mb_sound_take) { |code, _pry| MB::Sound::Take.current.begin_line(code) }
+Pry.config.hooks.add_hook(:after_eval, :mb_sound_take) { |_result, _pry| MB::Sound::Take.current.end_line }
+
 Pry.config.commands.rename_command('pry-play', 'play')
 Pry.config.commands.rename_command('pry-reset', 'reset')
 Pry.config.commands.rename_command('pry-hist', 'hist')

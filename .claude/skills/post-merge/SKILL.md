@@ -45,3 +45,4 @@ A merge isn't finished until these are done, in this order, without being asked 
 - SIMD across voices in Surge XT and VCV Rack (Surge's QuadFilterChain runs 4 voices' filters in one SSE register; VCV Rack's 16-channel polyphonic cables and float_4 processing), after plan-p3b (2026-10-10)
 - Ableton Link (LAN tempo/beat/phase sync with no master; peers align phase modulo a "quantum" so bar launches line up across apps; C wrapper abl_link; GPLv2 or commercial license), after spec-speed-2 (2026-10-10)
 - CLAP plugin events (sample-offset parameter and note events in each process() call, per-note modulation, thread-pool extension; vs VST3 ParameterChanges point queues), after plan-unfused-count (2026-10-10)
+- Music structure analysis (self-similarity matrices + Foote's checkerboard novelty curve for section boundaries; beat/downbeat tracking as in madmom/librosa; to pull a reference track's form into a flow), after arrange-1 (2026-10-10)
