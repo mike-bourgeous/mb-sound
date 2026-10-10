@@ -202,11 +202,13 @@ module MB
               names = Surface.own_surface(c)
               names |= dsl + ELEMENT_ACCESS + [:coerce] if c == Channels
               names |= MB::Sound::Sequence::NoteMethods.public_instance_methods(false) if c == MB::Sound::Sequence::Seq
+              names |= MB::Sound::ModMethods.public_instance_methods(false) if c == MB::Sound::Notes
               record(c, names)
             end
             record(MB::Sound::Note, MB::Sound::Sequence::NoteMethods.public_instance_methods(false), key: MB::Sound::Note)
 
             record(MB::Sound.singleton_class, Surface.top_level, key: :sound)
+            record(MB::Sound::Wavetable::KeyMap.singleton_class, [:zones], key: MB::Sound::Wavetable::KeyMap.singleton_class)
           end
 
           # Classes that include GraphNode or MultiOutput directly (their

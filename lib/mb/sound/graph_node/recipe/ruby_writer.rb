@@ -90,6 +90,8 @@ module MB
             @locals = nil
             @scope = nil
             @seed_warning = false
+            @output_owner = {}.compare_by_identity
+            @given_inputs.each_value { |obj| register_outputs(obj) }
           end
 
           def build
@@ -111,15 +113,29 @@ module MB
             lines.map { |l|
               notes = []
               l = l.gsub(/\u0003(\d+)\u0003/) { notes << @fixmes[$1.to_i]; 'nil' }
+              l = l.gsub(/\u0004(\d+)\u0004/) { notes << @fixmes[$1.to_i]; '' }
               notes.empty? ? l : "#{l} # FIXME(graph-io): #{notes.uniq.join('; ')}"
             }
           end
 
+          # A marker that adds a FIXME comment to its line (and the header).
+          def note_fixme(problem)
+            "\u0004#{fixme_index(problem)}\u0004"
+          end
+
+          # The index of +problem+ in @fixmes (the same for the same text, so
+          # synth lanes with the same problem print alike).
+          def fixme_index(problem)
+            @problems << problem
+            idx = @fixmes.index(problem)
+            return idx if idx
+            @fixmes << problem
+            @fixmes.length - 1
+          end
+
           # A placeholder that prints as nil with a FIXME comment.
           def fixme(problem)
-            @problems << problem
-            @fixmes << problem
-            "\u0003#{@fixmes.length - 1}\u0003"
+            "\u0003#{fixme_index(problem)}\u0003"
           end
 
           ### Scopes and variables
@@ -128,9 +144,13 @@ module MB
           # +scope+ (nil for the top level) reachable from +roots+.
           def emit_scope(scope, roots, lines, indent)
             info = analyze(scope, roots)
+            # Objects that drew random seeds are made in their original order
+            # (seeds come from MB::Sound's generator in creation order)
+            seeded = info[:order].select { |o| seeded_key(o) }
+            seeded = [] if seeded.length < 2
             vars = info[:order].select { |o|
               next false if scope.nil? && o.equal?(@root)
-              info[:counts][o] > 1 || info[:forced].include?(o) || local_name(o)
+              info[:counts][o] > 1 || info[:forced].include?(o) || local_name(o) || seeded.include?(o)
             }
             vars.sort_by.with_index { |o, i| [order_key(o), i] }.each do |o|
               next if @names.key?(o)
@@ -154,6 +174,7 @@ module MB
             visit = ->(o) {
               counts[o] += 1
               next if counts[o] > 1 || @names.key?(o)
+              register_outputs(o)
               c = Recipe.call_of(o, scope)
               if c.nil?
                 unrecorded_deps(o).each { |d| visit.(d) }
@@ -215,7 +236,24 @@ module MB
           # Graph objects an unrecorded object prints through (a bundle made
           # by the library prints as channels(...) of its channels).
           def unrecorded_deps(o)
+            return [@output_owner[o][0]] if @output_owner.key?(o)
             o.is_a?(Channels) && channels_printable?(o) ? o.to_a : []
+          end
+
+          # Remembers the outputs of multichannel node +o+ (not a bundle), so
+          # a channel taken with o.outputs[i] prints that way.
+          def register_outputs(o)
+            return if o.is_a?(Channels) || o.is_a?(Array) || !o.respond_to?(:outputs) || !o.respond_to?(:channel_count)
+            return unless o.channel_count > 1
+
+            o.outputs.each_with_index { |out, i| @output_owner[out] ||= [o, i] unless out.equal?(o) }
+          rescue StandardError
+            nil
+          end
+
+          # The seq of the first call that drew a random seed for +o+, or nil.
+          def seeded_key(o)
+            ([Recipe.call_of(o, @scope)] + Recipe.config_of(o)).compact.select(&:seeds).map(&:seq).min
           end
 
           def objects_in(v, acc = [])
@@ -233,6 +271,8 @@ module MB
 
           # Order by the last recorded call touching an object.
           def order_key(o)
+            seeded = seeded_key(o)
+            return seeded if seeded
             c = Recipe.call_of(o, @scope)
             ([c&.seq || 0] + Recipe.config_of(o).map(&:seq)).max
           end
@@ -361,6 +401,10 @@ module MB
           # Text for an object without a recipe: a value, a bundle of
           # printable channels, or a free input.
           def unrecorded(o, indent, arith)
+            if (owner = @output_owner[o])
+              return ["#{receiver_text(owner[0], indent)}.outputs[#{owner[1]}]", ATOM]
+            end
+
             case o
             when Constant
               v = live_constant(o)
@@ -389,6 +433,10 @@ module MB
           # Names a free input.
           def input_name(o)
             name = unique(o.is_a?(MB::Sound::Notes) ? 'midi' : (o.is_a?(MB::Sound::Sequence::Clip) ? 'clip' : 'input'))
+            file = (Object.const_source_location(o.class.name)&.first if o.class.name)
+            unless file&.start_with?(LIB_DIR)
+              @problems << "#{name} is a #{o.class.name || o.class.inspect}, a class defined outside the library (an input here)"
+            end
             @names[o] = name
             @inputs[name] = o
             name
@@ -496,6 +544,9 @@ module MB
 
             skeletons = templates.map(&:first)
             if skeletons.uniq.length > 1
+              if ENV['MB_SOUND_RECIPE_DEBUG']
+                skeletons.uniq.first(2).each_with_index { |sk, i| warn "--- variant #{i}\n#{fill(sk) { |j| templates[skeletons.index(sk)][1][j][0] }}" }
+              end
               @warnings << "#{c.name}'s block built #{skeletons.uniq.length} different graphs over #{invs.length} calls; printed the first call's"
               text, slots = templates[0]
               return fill(text) { |i| slots[i][0] }
@@ -566,6 +617,8 @@ module MB
             lines.join("\n")
           ensure
             @names, @used, @locals, @scope = saved
+            # Free inputs found inside keep their names everywhere
+            @inputs.each { |n, obj| @names[obj] = n; @used << n }
           end
 
           # Objects a statement's block uses from the enclosing scope.
@@ -576,7 +629,14 @@ module MB
           # A runtime block's source text, found with Prism.
           def runtime_block(c, block)
             src = Recipe.block_source(block, c.name)
-            return " #{src}" if src
+            if src
+              outer = Recipe.outer_locals(block, src)
+              return " #{src}" if outer.empty?
+
+              note = note_fixme("the #{c.name} block uses #{outer.join(', ')} from the code around it")
+              first, rest = src.split("\n", 2)
+              return " #{first}#{note}#{"\n#{rest}" if rest}"
+            end
 
             " { |*| #{fixme("the #{c.name} block's source wasn't found")} }"
           end
@@ -628,6 +688,9 @@ module MB
             when Module then class_name(v)
             when MB::Sound::Wavetable then wavetable_text(v)
             when Proc then Recipe.block_source(v, nil) || fixme("a #{v.lambda? ? 'lambda' : 'proc'} whose source wasn't found")
+            when Data
+              fields = v.to_h.map { |k, x| "#{key_text(k)} #{value(x, indent)}" }
+              "#{class_name(v.class)}.new(#{fields.join(', ')})"
             else fixme("can't print a #{v.class}")
             end
           end
@@ -680,8 +743,21 @@ module MB
 
           DURATION_DENOMINATORS = [1, 2, 3, 4, 5, 6, 7, 8, 12, 16, 24, 32, 64, 128].freeze
 
+          DURATION_MODS = { 'dotted' => 'dotted', 'double dotted' => 'dd', 'triplet' => 'triplet' }.freeze
+
           def duration_text(v)
             r = v.whole_notes
+            # The spelling it was made with, when that rebuilds it exactly
+            if (m = v.to_s.match(/\A(?:(dotted|double dotted|triplet) )?(?:(\d+) × )?n(\d+)\z/))
+              k = (m[2] || 1).to_i
+              d = k.public_send("n#{m[3]}")
+              d = d.public_send(DURATION_MODS[m[1]]) if m[1]
+              return "#{k}.n#{m[3]}#{".#{DURATION_MODS[m[1]]}" if m[1]}" if d.whole_notes == r
+            elsif (m = v.to_s.match(/\A(\d+) (bar|beat)s?\z/))
+              unit = m[1] == '1' ? m[2] : "#{m[2]}s"
+              return "#{m[1]}.#{unit}" if m[1].to_i.public_send(unit).whole_notes == r
+            end
+
             DURATION_DENOMINATORS.each do |n|
               k = r * n
               next unless k.denominator == 1
@@ -749,6 +825,29 @@ module MB
         end
 
         class << self
+          # Local variables from the code around +block+ that its source
+          # text +src+ reads (it can't be printed on its own).
+          def outer_locals(block, src)
+            outer = block.binding.local_variables
+            return [] if outer.empty?
+
+            require 'prism'
+            names = []
+            walk = ->(node) {
+              return if node.nil?
+              if node.is_a?(Prism::CallNode) && node.receiver.nil? && node.variable_call?
+                names << node.name
+              elsif node.is_a?(Prism::LocalVariableReadNode) && node.depth > 0
+                names << node.name
+              end
+              node.compact_child_nodes.each { |n| walk.(n) }
+            }
+            walk.(Prism.parse(src).value)
+            (names & outer).uniq
+          rescue StandardError
+            []
+          end
+
           # The source text of +block+ (a `{ ... }`/`do ... end` literal or a
           # lambda literal) from the file it was written in, found with Prism
           # from its source location; +call_name+ picks among several blocks

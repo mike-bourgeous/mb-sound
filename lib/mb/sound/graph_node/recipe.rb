@@ -147,7 +147,8 @@ module MB
           def call_of(obj, scope = nil)
             rec = record_of(obj)
             return nil unless rec
-            (rec.scoped && scope && rec.scoped[scope]) || rec.call
+            return rec.scoped[scope] if rec.scoped&.key?(scope)
+            rec.call
           end
 
           # Calls that configured +obj+ after it was made (Tone#at, #named...).
@@ -313,7 +314,7 @@ module MB
               um ? [um.owner, um.original_name] : name
             }
             groups.each_value do |(first, *aliases)|
-              if ELEMENT_ACCESS.include?(first) && target <= Channels
+              if target <= Channels && ([first] + aliases).any? { |n| ELEMENT_ACCESS.include?(n) }
                 mod.define_method(first) do |*args, **kwargs, &block|
                   Recipe.note_elements(self)
                   super(*args, **kwargs, &block)
