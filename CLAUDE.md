@@ -19,6 +19,7 @@ mb-sound is a Ruby library for sound processing with a fluent DSL for building s
 bundle install                    # Install dependencies
 bundle exec rake compile          # Compile C extensions (required before running)
 bundle exec rspec                 # Run full test suite
+bundle exec rake spec:parallel    # the suite in PARALLEL=4 processes (~1.5 min), then its slowest files and examples
 bundle exec rspec spec/some_spec.rb        # Run a single test file
 bundle exec rspec spec/some_spec.rb:42     # Run a specific test line
 bundle exec rake                  # Default task (runs spec)
@@ -31,7 +32,7 @@ bundle exec rake plan:full        # plan specs over the full 21 block sizes (MB_
 bundle exec rake plan:changed     # plan:full if the branch changed the plan layer by 50+ lines since master-ai (PLAN_DRY=1)
 ```
 
-Testing: run affected specs while working, and the full suite (about 2 minutes) before and after each merge, or more often for good reason.  Save suite output to a file and grep it instead of rerunning.  Concurrent spec processes work (per-process temp dirs and coverage files); parallelizing the suite is deliberately postponed, since slow or leaky specs are better fixed than hidden.
+Testing: run affected specs while working, and the full suite (about 5 minutes in one process on 2026-10-10, ~1.5 with `rake spec:parallel`) before and after each merge, or more often for good reason.  Save suite output to a file and grep it instead of rerunning.  Concurrent spec processes work (per-process temp dirs and coverage files).  `rake spec:parallel` (`spec/parallel_specs.rb`; `PARALLEL=N`, `SPECS=` for a subset) splits files by their last measured times (`tmp/spec_file_times.json`) and ends with the slowest files and examples, marking files over 8 s and examples over 2 s, since slow or leaky specs are better fixed than hidden (the maintainer's preference; parallelism came last in the 2026-10-10 spec speed project).
 
 Spec conventions (`spec/support/`):
 - Temp files: `tmp_path('name.flac')` gives a path in an empty directory per example, inside a random per-process `Dir.mktmpdir` removed at exit (`KEEP_SPEC_TMP=1` keeps it); never write fixed names under `tmp/`.

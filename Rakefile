@@ -288,6 +288,15 @@ namespace :memcheck do
   end
 end
 
+namespace :spec do
+  desc 'Run the specs in PARALLEL (default 4) rspec processes, then list the slowest files and examples (SPECS="spec/lib ..." for a subset)'
+  task :parallel do
+    require_relative 'spec/parallel_specs'
+    ok = ParallelSpecs.run(count: Integer(ENV['PARALLEL'] || 4), patterns: ENV['SPECS'].to_s.split)
+    abort 'spec:parallel: failures' unless ok
+  end
+end
+
 # The plan layer's full block-size sweep (user decision 2026-10-10: not run
 # before every merge, only for branches that change the plan layer itself).
 # The default suite runs plan comparisons at block sizes 1, 7, 128, 800, and
