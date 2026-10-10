@@ -243,11 +243,11 @@ module MB
           end
 
           gathered = gather(count)
-          if gathered == :ended
+          if gathered.equal?(:ended)
             @result = nil
             return :done
           end
-          if gathered == :mismatch
+          if gathered.equal?(:mismatch)
             @result = replay_unfused(count)
             return :done
           end
