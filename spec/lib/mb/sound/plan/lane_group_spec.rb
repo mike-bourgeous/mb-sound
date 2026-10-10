@@ -199,6 +199,20 @@ RSpec.describe(MB::Sound::Plan::LaneGroup) do
     end
   end
 
+  describe 'with resamplers' do
+    it 'groups regions of one shape in an installation with resamplers only across installations' do
+      # Regions inside and outside a resampler may run at different counts
+      MB::Sound.seed(0)
+      chans = [1, 2].map { |i| (PlanSpecHelpers::Source.new(seed: i) * 0.5).filter(:lowpass, cutoff: 900) * 2 }
+      chans << PlanSpecHelpers::Source.new(seed: 3).resample(24000) * 0.5
+      inst = MB::Sound::Plan.install(MB::Sound::GraphNode::Channels.new(chans))
+      expect(inst.resamples?).to eq(true)
+      shapes = inst.regions.map { |r| r.program.signature }
+      expect(shapes.length).to be > shapes.uniq.length
+      expect(inst.lane_groups.groups).to be_empty
+    end
+  end
+
   describe 'lane-major filter kernels' do
     # One graph per lane: +build+ is called with the lane index and a
     # fresh input source; the lanes' regions are grouped by hand.

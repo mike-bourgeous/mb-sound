@@ -99,6 +99,12 @@ module MB
         # A member asked for while the group is gathering (an input of
         # another member): runs it now.
         def sample_during_run(region, idx, count)
+          if count != @count && @status[idx] == :ready
+            # (LaneGroups doesn't group regions that may run at different
+            # counts; see #refresh)
+            raise "#{self}: a member read for #{count} samples was gathered for #{@count}"
+          end
+
           case @status[idx]
           when :ready
             @status[idx] = :done
@@ -288,13 +294,24 @@ module MB
           buckets = Hash.new { |h, k| h[k] = [] }
           @installations.each do |inst|
             inst.rebuild(regroup: false) if inst.stale?
+            # Regions of an installation with resamplers may run at different
+            # sample counts (inside and outside an oversampler), so there
+            # only the n-th region of one shape in each installation group
+            # (a Synth's lanes have the same graph: the same counts)
+            seen = inst.resamples? ? Hash.new(0) : nil
             inst.regions.each do |r|
               next if r.disabled
 
               prog = r.program || r.precompile
               next unless prog
 
-              buckets[[prog.signature, prog.output_type]] << r
+              shape = [prog.signature, prog.output_type]
+              key = shape
+              if seen
+                key = shape + [seen[shape]]
+                seen[shape] += 1
+              end
+              buckets[key] << r
             end
           end
 
