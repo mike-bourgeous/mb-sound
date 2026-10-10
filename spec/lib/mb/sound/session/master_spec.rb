@@ -102,11 +102,22 @@ RSpec.describe(MB::Sound::Session::Master) do
       expect(data[1000]).to eq(3)
     end
 
-    it 'only keeps the latest of several chains waiting to start' do
+    it 'keeps the latest of several chains starting at the same time' do
       session.master { |m| m * 2 }
       session.master { |m| m * 3 }
-      expect(chains.length).to eq(2) # the bypass and the chain waiting to start
+      expect(session.queued(:master).length).to eq(2) # both wait in the change queue
       expect(run(96000)[0][-1]).to eq(3)
+    end
+
+    it 'starts chains queued for different times at each time' do
+      # Played 1600 frames already; 1/4r is frame 24000
+      session.master(start_time: 1/2r) { |m| m * 3 }
+      session.master(start_time: 1/4r) { |m| m * 2 }
+      data = run(96000)[0]
+      expect(data[24000 - 1600 - 1]).to eq(1)
+      expect(data[24000 - 1600]).to eq(2)
+      expect(data[48000 - 1600 - 1]).to eq(2)
+      expect(data[48000 - 1600]).to eq(3)
     end
 
     it 'lets the old chain spill over its tail by default' do

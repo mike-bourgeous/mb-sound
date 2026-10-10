@@ -129,17 +129,27 @@ RSpec.describe(MB::Sound::PlaybackMethods) do
       it 'returns reused player numbers and lists players' do
         a = MB::Sound.bg(220.hz.sine)
         b = MB::Sound.bg(330.hz.sine)
-        expect([a, b]).to eq([1, 2])
+        expect([a, b].map(&:name)).to eq([1, 2])
         expect(MB::Sound.players.keys).to eq([1, 2])
 
-        MB::Sound.stop(1, fade: 0)
-        expect(MB::Sound.bg(440.hz.sine)).to eq(1)
+        MB::Sound.stop(a, fade: 0) # an entry stands for its player
+        expect(MB::Sound.bg(440.hz.sine).name).to eq(1)
       end
 
       it 'accepts a name and replaces the player with the same name' do
-        expect(MB::Sound.bg(:bass, 220.hz.sine)).to eq(:bass)
-        expect(MB::Sound.bg(:bass, 110.hz.sine)).to eq(:bass)
+        expect(MB::Sound.bg(:bass, 220.hz.sine).name).to eq(:bass)
+        expect(MB::Sound.bg(:bass, 110.hz.sine).name).to eq(:bass)
         expect(MB::Sound.players.keys).to eq([:bass])
+      end
+
+      it 'returns the journal entry, which says where the change lands' do
+        MB::Sound.bg(:a, 220.hz.sine)
+        MB::Sound::Session.default.transport.seek(1/8r) # mid-bar, so the next graph waits for bar 2
+        entry = MB::Sound.bg(:b, 330.hz.sine)
+        expect(entry).to be_a(MB::Sound::Session::Journal::Entry)
+        expect(entry).to have_attributes(kind: :bg, subject: :b, status: :queued)
+        expect(entry.to_s).to eq('bg :b lands 2:1 (queued)')
+        expect(MB::Sound.players[:b]).to match(/starts at bar 2/)
       end
 
       it 'returns right away' do
@@ -262,7 +272,7 @@ RSpec.describe(MB::Sound::PlaybackMethods) do
 
     it 'sets, shows, and removes master effects' do
       expect(MB::Sound.master).to eq('bypass')
-      expect(MB::Sound.master { |mix| mix.softclip }).to start_with('master:')
+      expect(MB::Sound.master { |mix| mix.softclip }.data[:description]).to start_with('master:')
       expect(MB::Sound.master).to start_with('master:')
       expect(MB::Sound::Session.default.master_active?).to eq(true)
       MB::Sound.master(nil)
@@ -272,7 +282,7 @@ RSpec.describe(MB::Sound::PlaybackMethods) do
     end
 
     it 'is also available as master_fx' do
-      expect(MB::Sound.master_fx(false)).to eq('bypass')
+      expect(MB::Sound.master_fx(false).data[:description]).to eq('bypass')
     end
 
     it 'rejects a block and a value together, or other values' do
@@ -346,8 +356,8 @@ RSpec.describe(MB::Sound::PlaybackMethods) do
 
     it 'swaps a clip in a background player' do
       MB::Sound.bg(:bass, bass.tone)
-      expect(MB::Sound.swap(:bass, MB::Sound.seq(MB::Sound::D2).n4.loop)).to eq(:bass)
-      expect(MB::Sound.swap(:bass, bass => MB::Sound.seq(MB::Sound::E2).n4.loop, at: :now)).to eq(:bass)
+      expect(MB::Sound.swap(:bass, MB::Sound.seq(MB::Sound::D2).n4.loop).name).to eq(:bass)
+      expect(MB::Sound.swap(:bass, bass => MB::Sound.seq(MB::Sound::E2).n4.loop, at: :now).name).to eq(:bass)
     end
 
     it 'rejects missing or doubled arguments' do
@@ -367,7 +377,7 @@ RSpec.describe(MB::Sound::PlaybackMethods) do
       MB::Sound.bg(:pad, 220.hz.sine)
       MB::Sound.stop(:pad, fade: 0)
       expect(MB::Sound.stopped.keys).to eq([:pad])
-      expect(MB::Sound.resume(:pad)).to eq(:pad)
+      expect(MB::Sound.resume(:pad).name).to eq(:pad)
       expect(MB::Sound.players.keys).to eq([:pad])
       expect(MB::Sound.forget).to eq([])
     end

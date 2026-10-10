@@ -376,7 +376,7 @@ RSpec.describe(MB::Sound::Session) do
         session.add(0.constant)
         run(800)
         session.add(MB::Sound.grid(4, 'x...x.').loop(align: :launch).trigger + MB::Sound.grid(4, 'x.').loop.trigger, name: :p, at: :clip)
-        expect(session.instance_variable_get(:@players).values.last.start).to eq(1/2r)
+        expect(session.queued(:p).first.lands.pos).to eq(1/2r)
       end
     end
   end

@@ -69,23 +69,18 @@ module MB
         #     session.master { |mix| mix.softclip(0.5, 0.95) }
         #     session.master { |l, r| [l, r.delay(seconds: 0.01)] }
         #     session.master # bypass
+        #
+        # The change goes through the change queue (see Changes), so several
+        # master changes can wait for different times.
         def master(at: nil, fade: nil, start_time: nil, description: nil, &block)
           raise IOError, 'Session is closed' if @closed
 
           chain = build_master(block, description: description)
           chain.mode, chain.fade = master_mode(fade)
 
-          @mutex.synchronize {
-            @master_chains ||= []
-
-            # The mix before any master chain was set is a bypass chain
-            if @master_chains.none?(&:started)
-              @master_chains.unshift(build_master(nil).tap { |c| start_master_chain(c, @transport.position) })
-            end
-
-            @master_chains.reject! { |c| !c.started }
-            chain.start = start_time ? start_time.to_r : launch_time(at, chain.timeline_nodes)
-            @master_chains << chain
+          time = start_time ? start_time.to_r : launch_time(at, chain.timeline_nodes)
+          change(:master, :master, time, data: { description: chain.description, fade: fade }) { |t|
+            start_master(chain, t)
           }
 
           start_thread if @realtime
@@ -95,6 +90,11 @@ module MB
         # Returns a description of the master chain, noting when a new chain
         # is waiting to start.
         def master_info
+          waiting = @render_lock.synchronize { @changes.select { |c| c.kind == :master } }
+          unless waiting.empty?
+            return "#{waiting.last.entry.data[:description]} (starts at bar #{bar_of(waiting.last.time)})"
+          end
+
           @mutex.synchronize {
             chain = @master_chains&.last
             next 'bypass' if chain.nil?
@@ -131,6 +131,23 @@ module MB
         end
 
         private
+
+        # Hands a chain built by #master to the mix at timeline position
+        # +time+ (applied by the change queue).
+        def start_master(chain, time)
+          @mutex.synchronize {
+            @master_chains ||= []
+
+            # The mix before any master chain was set is a bypass chain
+            if @master_chains.none?(&:started)
+              @master_chains.unshift(build_master(nil).tap { |c| start_master_chain(c, @transport.position) })
+            end
+
+            @master_chains.reject! { |c| !c.started }
+            chain.start = time
+            @master_chains << chain
+          }
+        end
 
         # Builds a Chain from a master block (a bypass chain for nil).
         def build_master(block, description: nil)

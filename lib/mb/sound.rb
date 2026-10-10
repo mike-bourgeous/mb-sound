@@ -178,6 +178,7 @@ require_relative 'sound/notes'
 require_relative 'sound/synth'
 require_relative 'sound/drums'
 require_relative 'sound/session'
+require_relative 'sound/take'
 
 require_relative 'sound/plot_output'
 require_relative 'sound/filter'

@@ -27,36 +27,84 @@ module MB
         #
         # Stopped players (see #remove) can be swapped too; the new clips play
         # when they are resumed.
+        #
+        # The swap goes through the change queue (see Changes), so a player
+        # can have several swaps waiting for different times; each is worked
+        # out from the clips playing when it lands.  Errors that are already
+        # clear when the swap is made (no such player, no clips, unrelated
+        # clips) are raised right away.
         def swap(name, clips, at: nil, start_time: nil)
           raise IOError, 'Session is closed' if @closed
 
-          @mutex.synchronize {
-            player = @players.values.select { |p| p.name == name && p.current? }.last
-            stopped = player.nil?
-            player ||= @stopped[name]
-            raise ArgumentError, "No background player #{name.inspect} is playing or stopped" if player.nil?
+          player, stopped, nodes = @render_lock.synchronize { @mutex.synchronize { swap_target(name) } }
+          count = planned_swaps(name, nodes, clips).length
 
+          time = stopped ? nil : (start_time ? start_time.to_r : launch_time(at, nodes))
+          change(:swap, name, time, data: { clip: clip_label(clips) }) { |t|
+            swap_now(name, clips, stopped ? nil : t)
+          }
+
+          count
+        end
+
+        private
+
+        # Finds the player whose clips #swap changes: the current player
+        # named +name+, the stopped one, or the one waiting in the change
+        # queue to start.  Returns [player, stopped?, clip sources].  Called
+        # with @render_lock and @mutex held.
+        def swap_target(name)
+          player = @players.values.select { |p| p.name == name && p.current? }.last
+          stopped = player.nil? && @stopped.key?(name)
+          player ||= @stopped[name]
+
+          if player.nil?
+            nodes = @changes.select { |c| c.subject == name && c.starts }.last&.starts&.grep(MIDI::ClipSource)
+            raise ArgumentError, "No background player #{name.inspect} is playing or stopped" if nodes.nil?
+          else
             nodes = player.timeline_nodes.grep(MIDI::ClipSource)
-            raise ArgumentError, "Player #{name.inspect} doesn't play any clips" if nodes.empty?
+          end
 
-            mapping = clips.is_a?(Sequence::Clip) ? auto_swap_mapping(name, nodes, clips) : swap_mapping(clips)
-            time = start_time ? start_time.to_r : launch_time(at, nodes) unless stopped
+          raise ArgumentError, "Player #{name.inspect} doesn't play any clips" if nodes.empty?
+          [player, stopped, nodes]
+        end
 
-            # A swap waiting to happen can be swapped again, or replaced by
-            # a swap of the clip playing now
-            swaps = nodes.filter_map { |n|
-              c = n.pending_clip && swapped_clip(n.pending_clip, mapping)
-              c ||= swapped_clip(n.clip, mapping)
-              [n, c] if c
-            }
-            raise ArgumentError, "Player #{name.inspect} doesn't play any of the clips being replaced" if swaps.empty?
+        # Returns [node, new clip] pairs for swapping +clips+ into the clip
+        # sources +nodes+, raising if none of them change.
+        def planned_swaps(name, nodes, clips)
+          mapping = clips.is_a?(Sequence::Clip) ? auto_swap_mapping(name, nodes, clips) : swap_mapping(clips)
 
+          # A swap waiting to happen can be swapped again, or replaced by a
+          # swap of the clip playing now
+          swaps = nodes.filter_map { |n|
+            c = n.pending_clip && swapped_clip(n.pending_clip, mapping)
+            c ||= swapped_clip(n.clip, mapping)
+            [n, c] if c
+          }
+          raise ArgumentError, "Player #{name.inspect} doesn't play any of the clips being replaced" if swaps.empty?
+          swaps
+        end
+
+        # Swaps clips at +time+ (applied by the change queue; nil for a
+        # stopped player, whose clips change when it resumes).  Returns the
+        # number of clip sources that change.
+        def swap_now(name, clips, time)
+          @mutex.synchronize {
+            _, _, nodes = swap_target(name)
+            swaps = planned_swaps(name, nodes, clips)
             swaps.each { |n, c| n.swap_clip(c, time: time) }
             swaps.length
           }
         end
 
-        private
+        # A short description of what #swap swaps in, for the journal.
+        def clip_label(clips)
+          case clips
+          when Hash then "#{clips.length} pair#{clips.length == 1 ? '' : 's'}"
+          when Sequence::Clip then clips.to_s[0, 40]
+          else clips.class.name.split('::').last
+          end
+        end
 
         # Converts a Hash of old clips to new clips (or Kits from #grid or
         # Hashes of clips, matched by row name) to a Hash compared by

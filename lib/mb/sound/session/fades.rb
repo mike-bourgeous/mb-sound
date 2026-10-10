@@ -3,8 +3,43 @@ module MB
     class Session
       # Fade handling for Session players: default fade lengths in bars, and
       # per-frame gain ramps for fading in, out, and across replacements.
-      # Fade lengths follow the Session's transport tempo.
+      # Fade lengths follow the Session's transport tempo when the fade
+      # starts.
+      #
+      # Ramps are counted in session frames from their first sample (see
+      # Ramp), so a fade starts on the exact sample of its time and has the
+      # same values whatever the buffer size (a take replays bit for bit at
+      # any buffer size; see MB::Sound::Take).
       module Fades
+        # A linear gain ramp from +from+ to +to+ over +length+ frames,
+        # starting at session frame +start+ (where the level is still
+        # +from+; it reaches +to+ at +start+ + +length+).
+        Ramp = Struct.new(:from, :to, :start, :length) do
+          # The level at session frame +frame+.
+          def at(frame)
+            k = frame - start
+            return from if k <= 0
+            return to if k >= length
+            from + (to - from) * (k.to_f / length)
+          end
+
+          # True if the ramp has reached +to+ by session frame +frame+.
+          def done?(frame)
+            frame - start >= length
+          end
+
+          # A Numo::SFloat of the levels for +count+ frames from session
+          # frame +frame+ (the same values as #at).
+          def levels(frame, count)
+            k = Numo::DFloat.new(count).seq(frame - start).clip(0, length)
+            Numo::SFloat.cast((k / length.to_f) * (to - from) + from)
+          end
+        end
+
+        # Seconds for a declick ramp: mutes, solos, and undo switch over
+        # this quickly unless given a fade.
+        DECLICK_SECONDS = 0.005
+
         # Bars to fade in new graphs when Session#add isn't given a +:fade+
         # (nil for no fade).  Graphs replacing a named graph switch over
         # without a fade unless Session#add is given one.
@@ -24,6 +59,12 @@ module MB
           @fade_out = bars_or_nil(bars)
         end
 
+        # A declick length (DECLICK_SECONDS) in bars at the current tempo,
+        # for fades that should be as short as possible without clicking.
+        def declick_bars
+          Rational(DECLICK_SECONDS.to_r * @transport.whole_notes_per_second, @transport.bar_length)
+        end
+
         private
 
         # Converts a fade length (a number of bars or a Duration like
@@ -37,20 +78,54 @@ module MB
         end
 
         # The gain change per frame for a fade lasting +bars+ at the current
-        # tempo.
+        # tempo (used by master chain crossfades).
         def fade_step(bars, rate)
           1.0 / (@transport.seconds(bars * @transport.bar_length) * rate)
         end
 
-        # Returns a Numo::SFloat of per-frame gains for a fading player (and
-        # advances its fade), or nil if the player is at full volume.
-        def fade_ramp(p, frames)
-          return nil if p.gain >= 1 && p.gain_step >= 0
+        # The number of frames (at least 1) in a fade lasting +bars+ at the
+        # current tempo.
+        def fade_frames(bars, rate)
+          MB::M.max((@transport.seconds(bars * @transport.bar_length) * rate).round, 1)
+        end
 
-          ramp = Numo::SFloat.new(frames).seq(p.gain, p.gain_step).clip(0, 1)
-          p.gain = MB::M.clamp(p.gain + p.gain_step * frames, 0.0, 1.0)
-          p.gain_step = 0.0 if p.gain >= 1 && p.gain_step > 0
-          ramp
+        # A player's fade level at session frame +frame+.
+        def fade_level(p, frame)
+          p.ramp ? p.ramp.at(frame) : p.gain
+        end
+
+        # Starts a player's fade out at session frame +frame+, from its
+        # level there, at the speed of a full fade over +bars+ (so a player
+        # still fading in fades out sooner).
+        def start_fade_out(p, frame, bars, rate)
+          level = fade_level(p, frame)
+          p.ramp = Ramp.new(level, 0.0, frame, MB::M.max((level * fade_frames(bars, rate)).round, 1))
+          p.fading_out = true
+        end
+
+        # Returns a Numo::SFloat of per-frame gains for +frames+ frames from
+        # session frame +frame+ through a ramp (or nil at full level), and
+        # settles the ramp into the constant level once it is done.  +level+
+        # and +ramp+ are read and written through the given accessors.
+        def ramp_levels(p, level_field, ramp_field, frame, frames)
+          ramp = p[ramp_field]
+          if ramp.nil?
+            level = p[level_field]
+            return nil if level >= 1
+            return Numo::SFloat.new(frames).fill(level)
+          end
+
+          levels = ramp.levels(frame, frames)
+          if ramp.done?(frame + frames)
+            p[level_field] = ramp.to
+            p[ramp_field] = nil
+          end
+          levels
+        end
+
+        # Returns per-frame gains for a player's fade (see #ramp_levels).
+        def fade_ramp(p, frame, frames)
+          ramp_levels(p, :gain, :ramp, frame, frames)
         end
       end
     end

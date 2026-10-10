@@ -1,4 +1,10 @@
+require 'monitor'
+
+require_relative 'session/journal'
+require_relative 'session/changes'
 require_relative 'session/fades'
+require_relative 'session/strip'
+require_relative 'session/undo'
 require_relative 'session/master'
 require_relative 'session/clip_swaps'
 require_relative 'session/scheduler'
@@ -39,7 +45,10 @@ module MB
     # before it reaches the output.  The clips a graph plays can be changed
     # without replacing the graph (see #swap).
     class Session
+      include Changes
       include Fades
+      include Strip
+      include Undo
       include Master
       include ClipSwaps
       include GraphView
@@ -47,16 +56,21 @@ module MB
       # A graph being played by the session.  +serial+ is unique; +name+ is
       # shared by a graph and the graph replacing it until the switch.
       #
-      # +gain+ is the current fade level (0..1), changing by +gain_step+ per
-      # frame.  +fade_in+ and +fade_out+ are fade lengths in bars; a player
-      # with a +stop_at+ time and a +fade_out+ fades out from +stop_at+
-      # instead of stopping there.  +keep+ is true if the player should be
-      # kept for #resume once it stops.  +start+ becomes the start of the
-      # sample the player starts on; +launch+ stays the exact launch time
-      # (see Sequence::TimelineNode#start_at).
+      # +gain+ is the current fade level (0..1) while +ramp+ (a Fades::Ramp)
+      # is nil; +ramp+ is a fade in progress.  +fade_in+ and +fade_out+ are
+      # fade lengths in bars; a player with a +stop_at+ time and a
+      # +fade_out+ fades out from +stop_at+ (+fading_out+ once it has
+      # begun) instead of stopping there.  +keep+ is true if the player
+      # should be kept for #resume once it stops.  +start+ becomes the start
+      # of the sample the player starts on; +launch+ stays the exact launch
+      # time (see Sequence::TimelineNode#start_at).
+      #
+      # +strip_level+ and +strip_ramp+ are the mute/solo level (see Strip);
+      # +asleep+ is true while a muted player isn't being rendered.
       Player = Struct.new(
         :serial, :name, :input, :description, :start, :launch, :stop_at, :timeline_nodes,
-        :started, :slow_warned, :loads, :gain, :gain_step, :fade_in, :fade_out, :keep,
+        :started, :slow_warned, :loads, :gain, :ramp, :fade_in, :fade_out, :fading_out, :keep,
+        :strip_level, :strip_ramp, :asleep,
         keyword_init: true
       ) do
         # True unless this player is being replaced or stopped.
@@ -138,6 +152,32 @@ module MB
         context&.[](:session) || default
       end
 
+      # The performance context of the current thread, set by
+      # #with_perform while a take replays (see Take): a Hash with the
+      # +:session+, the +:forced+ landing times of the line's changes, the
+      # logical +:now+ (the line's recorded issue time), the +:source+ of
+      # changes, and the take +:line+ id.  Nil outside a replay or undo.
+      def self.perform
+        Thread.current[:mb_sound_session_perform]
+      end
+
+      # Merges +settings+ into the current thread's performance context
+      # (see .perform) while the block runs.
+      def self.with_perform(**settings)
+        old = Thread.current[:mb_sound_session_perform]
+        Thread.current[:mb_sound_session_perform] = (old || {}).merge(settings)
+        yield
+      ensure
+        Thread.current[:mb_sound_session_perform] = old
+      end
+
+      # Adds a change to the undoable command running on this thread, if
+      # any (see Undo#command).  Called by Changes#change.
+      def self.note_command_change(session, change)
+        group = Thread.current[:mb_sound_command]
+        group[:changes] << change if group && group[:session].equal?(session)
+      end
+
       # The Sequence::Transport whose timeline this session advances.
       attr_reader :transport
 
@@ -195,6 +235,10 @@ module MB
         @closed = false
         @generation = @transport.generation
         @scheduler = Scheduler.new(self, realtime: realtime, raise_errors: raise_errors)
+
+        init_changes
+        init_strip
+        init_undo
       end
 
       # Adds a graph to play: a GraphNode, an Array of GraphNodes (one per
@@ -216,7 +260,12 @@ module MB
       # note division or Rational whole notes, e.g. 2r for every two bars).
       # Defaults to :now if nothing else is playing, :bar otherwise.
       # +:start_time+ instead gives an exact timeline position in whole notes
-      # (used for scheduled actions).
+      # (used for scheduled actions).  Inside a scheduled block, launch
+      # points count from the block's time (see Changes#now).
+      #
+      # The graph is built and prepared right away; the change goes through
+      # the change queue (see Changes), so it lands exactly at its time even
+      # if other changes for the same name are waiting.
       def add(sound, at: nil, name: nil, fade: nil, description: nil, start_time: nil)
         raise IOError, 'Session is closed' if @closed
         raise ArgumentError, "Player names must be Symbols or Integers (got #{name.inspect})" unless name.nil? || name.is_a?(Symbol) || name.is_a?(Integer)
@@ -227,34 +276,21 @@ module MB
         input = MB::Sound::GraphNodeInput.new(nodes)
         Plan.install(nodes) # fused plans (see MB::Sound::Plan), after the input's branches
         timeline_nodes = nodes.flat_map { |n| [n, *n.graph] }.grep(Sequence::TimelineNode).uniq
+        description = shorten(description || MB::Sound.send(:playback_info, sound).to_s)
 
-        name = @mutex.synchronize {
-          name ||= (1..).find { |i| !names_in_use.include?(i) }
-          start = start_time ? start_time.to_r : launch_time(at, timeline_nodes)
-          @stopped.delete(name)
+        time = start_time ? start_time.to_r : launch_time(at, timeline_nodes)
 
-          replacing = @players.each_value.any? { |p| p.name == name && p.current? && p.started }
-          fade = @fade_in unless explicit_fade || replacing
+        @render_lock.synchronize {
+          name = @mutex.synchronize {
+            name ||= (1..).find { |i| !names_in_use.include?(i) }
+            @order.delete(name)
+            @order << name
+            name
+          }
 
-          # Hand over from the graph being replaced at the new start time
-          @players.each_value do |p|
-            next unless p.name == name && p.current?
-            if p.started
-              p.stop_at = start
-              p.fade_out = fade
-            else
-              @players.delete(p.serial)
-            end
-          end
-
-          start_player(
-            name: name,
-            input: input,
-            description: shorten(description || MB::Sound.send(:playback_info, sound).to_s),
-            timeline_nodes: timeline_nodes,
-            start: start,
-            fade: fade
-          )
+          change(:bg, name, time, data: { description: description, fade: fade }, starts: timeline_nodes) { |t|
+            add_now(name: name, input: input, description: description, timeline_nodes: timeline_nodes, start: t, fade: fade, explicit_fade: explicit_fade)
+          }
         }
 
         if @realtime
@@ -272,42 +308,31 @@ module MB
       # Players with Symbol names are kept once they stop, for #resume.
       #
       # +:time+ stops (or starts fading) at that timeline position in whole
-      # notes instead of now (used for scheduled actions).
+      # notes instead of now (used for scheduled actions).  A stop for now
+      # also cancels graphs waiting in the change queue to start under those
+      # names.
       def remove(*names, fade: nil, time: nil)
         fade = fade.nil? ? @fade_out : bars_or_nil(fade)
         time = time&.to_r
         time = nil if time && time <= @transport.position
 
-        @mutex.synchronize {
-          names = names_in_use if names.empty?
+        @render_lock.synchronize {
+          names = @mutex.synchronize { names_in_use } if names.empty?
           removed = names.select { |n|
-            matches = @players.values.select { |p| p.name == n }
-            matches.each do |p|
-              p.keep = true if p.current? && p.name.is_a?(Symbol)
+            playing = @mutex.synchronize { @players.each_value.any? { |p| p.name == n } }
+            waiting = @changes.select { |c| c.subject == n && START_KINDS.include?(c.kind) }
 
-              if time
-                if !p.started && p.start >= time
-                  # It would never have played
-                  @players.delete(p.serial)
-                  keep_stopped(p)
-                else
-                  p.stop_at = MB::M.min(p.stop_at || time, time)
-                  p.fade_out = fade
-                end
-              elsif fade && p.started
-                # Fade from wherever the player is now, even if it was already
-                # being replaced or faded
-                p.stop_at = MB::M.min(p.stop_at || @transport.position, @transport.position)
-                p.fade_out = fade
-                p.gain_step = 0 if p.gain_step > 0
-              else
-                @players.delete(p.serial)
-                keep_stopped(p)
-              end
+            # A stop for now cancels starts that haven't happened yet
+            cancel_changes(*waiting) if time.nil?
+
+            if playing || (time && !waiting.empty?)
+              change(:stop, n, time, data: { fade: fade }) { |t| remove_now(n, fade: fade, time: t) }
             end
-            matches.any?
+
+            playing || !waiting.empty?
           }
-          @order -= removed
+
+          @mutex.synchronize { @order -= removed }
           removed
         }
       end
@@ -323,27 +348,25 @@ module MB
       def resume(name = nil, at: nil, fade: nil, start_time: nil)
         fade = fade.nil? ? @fade_in : bars_or_nil(fade)
 
-        name = @mutex.synchronize {
-          name ||= @stopped.keys.last
-          p = @stopped[name]
-          next nil if p.nil? || @players.each_value.any? { |o| o.name == name && o.current? }
+        @render_lock.synchronize {
+          p = @mutex.synchronize {
+            name ||= @stopped.keys.last
+            p = @stopped[name]
+            next nil if p.nil? || @players.each_value.any? { |o| o.name == name && o.current? }
+            p
+          }
+          next nil if p.nil? || @changes.any? { |c| c.subject == name && START_KINDS.include?(c.kind) }
 
-          @stopped.delete(name)
-          start_player(
-            name: name,
-            input: p.input,
-            description: p.description,
-            timeline_nodes: p.timeline_nodes,
-            start: start_time ? start_time.to_r : launch_time(at, p.timeline_nodes),
-            fade: fade
-          )
+          time = start_time ? start_time.to_r : launch_time(at, p.timeline_nodes)
+          change(:resume, name, time, data: { fade: fade }, starts: p.timeline_nodes) { |t| resume_now(name, start: t, fade: fade) }
+          @mutex.synchronize { @order.delete(name); @order << name }
+          name
+        }.tap { |resumed|
+          if resumed && @realtime
+            output
+            start_thread
+          end
         }
-
-        if name && @realtime
-          output
-          start_thread
-        end
-        name
       end
 
       # Returns a Hash from name to description of stopped graphs that can be
@@ -365,7 +388,7 @@ module MB
       # Removes the most recently added player that is still playing (see
       # #remove for +:fade+).  Returns its name, or nil if nothing is playing.
       def remove_last(fade: nil, time: nil)
-        name = @mutex.synchronize { @order.last }
+        name = @render_lock.synchronize { @mutex.synchronize { @order.last } }
         name && remove(name, fade: fade, time: time).first
       end
 
@@ -411,19 +434,35 @@ module MB
       # that are waiting for their start time, stopping, or fading out.  If a
       # name has both a current player and one being replaced, the current
       # player is shown.
+      #
+      # Graphs waiting in the change queue to start are listed too, and
+      # queued stops are noted.
       def players
-        @mutex.synchronize {
-          @players.values.group_by(&:name).transform_values { |list|
-            p = list.find(&:current?) || list.first
-            status = if !p.current? && p.stop_at > @transport.position
-                       " (stops at bar #{bar_of(p.stop_at)})"
-                     elsif !p.current?
-                       ' (fading out)'
-                     elsif !p.started
-                       " (starts at bar #{bar_of(p.start)})"
-                     end
-            "#{p.description}#{status}"
+        @render_lock.synchronize {
+          list = @mutex.synchronize {
+            @players.values.group_by(&:name).transform_values { |list|
+              p = list.find(&:current?) || list.first
+              status = if !p.current? && p.stop_at > @transport.position
+                         " (stops at bar #{bar_of(p.stop_at)})"
+                       elsif !p.current?
+                         ' (fading out)'
+                       elsif !p.started
+                         " (starts at bar #{bar_of(p.start)})"
+                       end
+              status = "#{status} (muted)" if p.asleep || p.strip_level == 0 && p.strip_ramp.nil?
+              "#{p.description}#{status}"
+            }
           }
+
+          @changes.each do |c|
+            if START_KINDS.include?(c.kind) && !list.key?(c.subject)
+              list[c.subject] = "#{c.entry.data[:description] || @stopped[c.subject]&.description || c.subject} (starts at bar #{bar_of(c.time)})"
+            elsif c.kind == :stop && list.key?(c.subject) && !list[c.subject].include?('(stops')
+              list[c.subject] = "#{list[c.subject]} (stops at bar #{bar_of(c.time)})"
+            end
+          end
+
+          list
         }
       end
 
@@ -456,9 +495,10 @@ module MB
         !!@thread&.alive?
       end
 
-      # Returns true if no players are playing or waiting to start.
+      # Returns true if no players are playing or waiting to start
+      # (including graphs waiting in the change queue).
       def idle?
-        @mutex.synchronize { @players.empty? }
+        @render_lock.synchronize { @mutex.synchronize { @players.empty? } && !queued_start? }
       end
 
       # The sample rate graphs play at: the output's (opening it if needed).
@@ -488,34 +528,46 @@ module MB
       # of Numo::SFloat, one per channel).
       def process_buffer(count = buffer_size)
         started = MB::U.clock_now
-        @scheduler.apply_timed_changes
 
-        per_sample = @transport.whole_notes_per_second / output.sample_rate.to_r
-        from = @transport.position
-        to = from + count * per_sample
+        mix = @render_lock.synchronize {
+          @scheduler.apply_timed_changes
 
-        # If the timeline was seeked, move every running graph's clips there,
-        # and move repeating schedules to their next time
-        seeked = @generation != @transport.generation
-        if seeked
-          @generation = @transport.generation
-          @mutex.synchronize { @players.values }.each do |p|
-            p.timeline_nodes.each { |n| n.start_at(from, origin: p.start, launch: p.launch, transport: @transport) } if p.started
+          per_sample = @transport.whole_notes_per_second / output.sample_rate.to_r
+          from = @transport.position
+          to = from + count * per_sample
+
+          # If the timeline was seeked, move every running graph's clips there,
+          # and move repeating schedules to their next time
+          seeked = @generation != @transport.generation
+          if seeked
+            @generation = @transport.generation
+            @mutex.synchronize { @players.values }.each do |p|
+              p.timeline_nodes.each { |n| n.start_at(from, origin: p.start, launch: p.launch, transport: @transport) } if p.started
+            end
+            @scheduler.seeked(from)
           end
-          @scheduler.seeked(from)
-        end
 
-        @scheduler.dispatch(from, to, playing: !idle?)
+          @scheduler.dispatch(from, to, playing: !idle?)
 
-        players = @mutex.synchronize { @players.values }
+          # Changes landing in this buffer, after scheduled blocks (which may
+          # queue some for this buffer)
+          commit_due(from, to, per_sample)
 
-        mix = Array.new(@channels) { Numo::SFloat.zeros(count) }
-        players.each do |p|
-          render_player(p, mix, from, to, per_sample, count)
-        end
+          players = @mutex.synchronize { @players.values }
 
-        @transport.advance(to - from) unless players.empty?
-        mix = process_master(mix, from, to, per_sample, count, playing: !players.empty?, seeked: seeked)
+          mix = Array.new(@channels) { Numo::SFloat.zeros(count) }
+          players.each do |p|
+            render_player(p, mix, from, to, per_sample, count)
+          end
+
+          playing = !players.empty? || queued_start?
+          @transport.advance(to - from) if playing
+          mix = process_master(mix, from, to, per_sample, count, playing: playing, seeked: seeked)
+
+          @frame += count
+          @transport_record = transport_record_for(playing)
+          mix
+        }
 
         # How busy rendering is (before the output blocks), for deciding
         # whether master chains can crossfade
@@ -544,6 +596,84 @@ module MB
 
       private
 
+      # Starts a graph built by #add at timeline position +start+, handing
+      # over from the graph it replaces (applied by the change queue).
+      def add_now(name:, input:, description:, timeline_nodes:, start:, fade:, explicit_fade:)
+        @mutex.synchronize {
+          @stopped.delete(name)
+
+          replacing = @players.each_value.any? { |p| p.name == name && p.current? && p.started }
+          fade = @fade_in unless explicit_fade || replacing
+
+          # Hand over from the graph being replaced at the new start time
+          @players.each_value do |p|
+            next unless p.name == name && p.current?
+            if p.started
+              p.stop_at = start
+              p.fade_out = fade
+            else
+              @players.delete(p.serial)
+            end
+          end
+
+          start_player(name: name, input: input, description: description, timeline_nodes: timeline_nodes, start: start, fade: fade)
+        }
+      end
+
+      # Stops (or starts fading out) the players named +name+ at +time+, or
+      # now if +time+ is nil or has passed (applied by the change queue).
+      def remove_now(name, fade:, time:)
+        time = nil if time && time <= @transport.position
+
+        @mutex.synchronize {
+          matches = @players.values.select { |p| p.name == name }
+          matches.each do |p|
+            p.keep = true if p.current? && p.name.is_a?(Symbol)
+
+            if time
+              if !p.started && p.start >= time
+                # It would never have played
+                @players.delete(p.serial)
+                keep_stopped(p)
+              else
+                p.stop_at = MB::M.min(p.stop_at || time, time)
+                p.fade_out = fade
+              end
+            elsif fade && p.started
+              # Fade from wherever the player is now, even if it was already
+              # being replaced or faded
+              p.stop_at = MB::M.min(p.stop_at || @transport.position, @transport.position)
+              p.fade_out = fade
+              p.fading_out = false
+            else
+              @players.delete(p.serial)
+              keep_stopped(p)
+            end
+          end
+          @order.delete(name) unless matches.empty?
+          matches.any?
+        }
+      end
+
+      # Starts a stopped player again at +start+ (applied by the change
+      # queue).
+      def resume_now(name, start:, fade:)
+        @mutex.synchronize {
+          p = @stopped[name]
+          next nil if p.nil? || @players.each_value.any? { |o| o.name == name && o.current? }
+
+          @stopped.delete(name)
+          start_player(
+            name: name,
+            input: p.input,
+            description: p.description,
+            timeline_nodes: p.timeline_nodes,
+            start: start,
+            fade: fade
+          )
+        }
+      end
+
       # Shortens a graph description for #players.
       def shorten(text, max = 60)
         text.length > max ? "#{text[0, max - 3]}..." : text
@@ -564,9 +694,13 @@ module MB
           started: false,
           slow_warned: false,
           gain: fade ? 0.0 : 1.0,
-          gain_step: 0.0,
+          ramp: nil,
           fade_in: fade,
-          keep: false
+          fading_out: false,
+          keep: false,
+          strip_level: initial_strip_level(name),
+          strip_ramp: nil,
+          asleep: false
         )
 
         @order.delete(name)
@@ -582,10 +716,10 @@ module MB
         @stopped[p.name] = p
       end
 
-      # Names of players that are playing, waiting to start, or fading out.
-      # Called with @mutex held.
+      # Names of players that are playing, waiting to start (also in the
+      # change queue), or fading out.  Called with @mutex held.
       def names_in_use
-        @players.each_value.map(&:name).uniq
+        (@players.each_value.map(&:name) + @changes.select { |c| START_KINDS.include?(c.kind) }.map(&:subject)).uniq
       end
 
       # Removes one player by serial number, e.g. when it ends.  If +keep+ is
@@ -634,14 +768,15 @@ module MB
         }
       end
 
-      # Returns the timeline position where a new graph should start.  See
-      # #add.  Called with @mutex held.
+      # Returns the timeline position where a new graph should start (see
+      # #add), counting from #now (a scheduled block's time inside one).
       def launch_time(at, timeline_nodes)
-        at ||= @players.empty? ? :now : :bar
+        at ||= @players.empty? && !queued_start? ? :now : :bar
+        from = now
 
         grid = case at
                when :now
-                 return @transport.position
+                 return from
                when :beat
                  1/4r
                when :bar
@@ -654,7 +789,8 @@ module MB
                  Sequence::Duration.whole_notes(at)
                end
 
-        @transport.next_boundary(grid)
+        grid = grid.to_r
+        (from / grid).ceil * grid
       end
 
       # The time between moments when every timeline-aligned looping clip
@@ -676,14 +812,17 @@ module MB
       # Renders one player into +mix+, starting it partway through the buffer
       # if its launch time falls there, stopping it partway through if it is
       # being replaced, and removing it when it ends or raises an error.
+      #
+      # The player's strip (contract K7) runs in order: the fade ramp (in,
+      # out, and across replacements), then the mute/solo level (see
+      # Strip).  Ramps start on the exact sample of their time.  A player
+      # that is silent because of a mute or solo sleeps (isn't rendered)
+      # until it is unmuted.
       def render_player(p, mix, from, to, per_sample, count)
         return if p.start >= to
 
         rate = output.sample_rate.to_f
-        if p.stop_at && p.stop_at <= from
-          return retire(p, keep: p.keep) unless p.fade_out
-          p.gain_step = -fade_step(p.fade_out, rate) if p.gain_step >= 0
-        end
+        base = @frame
 
         # A graph launched at time t starts on the sample whose window
         # [i, i + 1) holds t, where Notes nodes put an edge at t (see
@@ -696,12 +835,44 @@ module MB
           p.timeline_nodes.each { |n| n.start_at(start, origin: start, launch: p.launch, transport: @transport) }
           p.start = start
           p.started = true
-          p.gain_step = fade_step(p.fade_in, rate) if p.fade_in
+          p.ramp = Fades::Ramp.new(0.0, 1.0, base + offset, fade_frames(p.fade_in, rate)) if p.fade_in
+        end
+
+        if p.stop_at && p.stop_at < to
+          if p.fade_out
+            # Fades out from the exact sample of its stop time
+            unless p.fading_out
+              stop_idx = MB::M.max(((p.stop_at - from) / per_sample).floor, offset)
+              start_fade_out(p, base + stop_idx, p.fade_out, rate)
+            end
+          elsif p.stop_at <= from
+            return retire(p, keep: p.keep)
+          end
         end
 
         frames = count - offset
         frames = MB::M.min(frames, ((p.stop_at - from) / per_sample).floor - offset) if p.stop_at && !p.fade_out
         return retire(p, keep: p.keep) if frames <= 0
+
+        # Sleeping (muted) players aren't rendered until their unmute ramp
+        # starts; then their clips catch up with the timeline
+        if p.asleep || (p.strip_level <= 0 && p.strip_ramp.nil?)
+          wake = p.strip_ramp && p.strip_ramp.to > 0 ? MB::M.max(p.strip_ramp.start - base, offset) : nil
+          if wake.nil? || wake >= offset + frames
+            p.asleep = true
+            fade_ramp(p, base + offset, frames) # keeps fades moving while asleep
+            return finish_player(p, false, base + offset + frames)
+          end
+
+          if p.asleep || wake > offset
+            wake_pos = from + wake * per_sample
+            p.timeline_nodes.each { |n| n.start_at(wake_pos, origin: p.start, launch: p.launch, transport: @transport) }
+            p.asleep = false
+          end
+          frames -= wake - offset
+          offset = wake
+        end
+
         t = MB::U.clock_now
         data = p.input.read(frames)
         check_speed(p, MB::U.clock_now - t, frames)
@@ -711,7 +882,9 @@ module MB
           return
         end
 
-        ramp = fade_ramp(p, frames)
+        ramp = fade_ramp(p, base + offset, frames)
+        strip = ramp_levels(p, :strip_level, :strip_ramp, base + offset, frames)
+        ramp = ramp ? (strip ? ramp * strip : ramp) : strip
 
         mix.each_with_index do |m, c|
           d = data[c % data.length]
@@ -723,23 +896,34 @@ module MB
           m[offset...(offset + len)] = m[offset...(offset + len)] + d
         end
 
-        # A short read means the graph ended; a replaced graph ends at its
-        # replacement's start unless it is fading; a fade out ends at silence
+        # A short read means the graph ended
         ended = data.any? { |d| d.nil? || d.length < frames }
-        cut = p.stop_at && p.stop_at < to && !p.fade_out
-        faded = p.gain <= 0 && p.gain_step < 0
+        finish_player(p, ended, base + offset + frames, to: to)
+
+      rescue => e
+        retire(p)
+        raise if @raise_errors
+        warn "Player #{p.name.inspect} (#{p.description}) stopped with an error: #{e.class}: #{e.message}\n\t#{e.backtrace&.first(5)&.join("\n\t")}"
+      end
+
+      # Retires a player after a buffer if it ended, was cut off by its
+      # replacement, or has faded out; puts a fully muted player to sleep.
+      # +frame+ is the session frame after its last rendered sample.
+      def finish_player(p, ended, frame, to: nil)
+        # A replaced graph ends at its replacement's start unless it is
+        # fading; a fade out ends at silence
+        cut = to && p.stop_at && p.stop_at < to && !p.fade_out
+        faded = p.fading_out && p.ramp.nil? && p.gain <= 0
+
         if ended
           retire(p)
         elsif cut
           retire(p, keep: p.keep)
         elsif faded
           retire(p, keep: true)
+        elsif p.strip_level <= 0 && p.strip_ramp.nil?
+          p.asleep = true
         end
-
-      rescue => e
-        retire(p)
-        raise if @raise_errors
-        warn "Player #{p.name.inspect} (#{p.description}) stopped with an error: #{e.class}: #{e.message}\n\t#{e.backtrace&.first(5)&.join("\n\t")}"
       end
 
       # Calls each #add_tap block with the mix, removing blocks that raise.

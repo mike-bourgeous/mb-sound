@@ -72,9 +72,10 @@ RSpec.describe(MB::Sound::Session::ClipSwaps) do
     run(4000)
     four = MB::Sound.seq(MB::Sound::A2, MB::Sound::C3, MB::Sound::E3, MB::Sound::G3).n1.loop
     expect(session.swap(:pad, four)).to eq(1)
-    expect(clips(:pad)).to eq([four])
+    expect(session.queued(:pad).map(&:kind)).to eq([:swap]) # waits in the change queue until the bar
 
     data = run(96000)
+    expect(clips(:pad)).to eq([four])
     expect(data[96000 - 4000 - 1]).to eq(MB::Sound::A2.number)
     expect(data[96000 - 4000]).to eq(MB::Sound::C3.number) # bar 2 of the new loop, in phase
   end
