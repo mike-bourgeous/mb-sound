@@ -196,8 +196,12 @@ RSpec.describe('Plan: Notes nodes and envelopes') do
   end
 
   describe 'the end of a stream' do
+    # c_major.mid's music ends 0.206 s (9888 samples) after the seek; the
+    # comparison must run past it (the one-pass SPEC_MEMCHECK sizes, ~9000
+    # samples at 42 blocks, did not always).
     it 'runs blocks unfused once the stream is over, with the same samples' do
-      r = compare('spec/test_data/c_major.mid', fallbacks: true) { |v, c|
+      long = sizes.sum >= 12000 ? sizes : PlanSpecHelpers.sizes_for(samples: 12000, blocks: sizes.length)
+      r = compare('spec/test_data/c_major.mid', sizes: long, fallbacks: true) { |v, c|
         c.before_block(0) { v.stream.seek(5.6) }
         v.hz.sine * v.amp_env(0.01, 0.1, 0.5, 0.1) + v.gate
       }
