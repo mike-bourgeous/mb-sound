@@ -265,6 +265,27 @@ module GraphSweep
       ['synth', ->(c) { c.clip.synth(voices: 2) { |v, _i| v.hz.ramp.filter(:lowpass, cutoff: v.cutoff(1000)) * v.amp_env(0.001, 0.002, 0.5, 0.002) } }],
       ['synth stereo voices', ->(c) { c.clip.synth(voices: 2) { |v, _i| (v.hz.ramp * v.env).pan(0.3) } }],
       ['drums (Kit, Voice)', ->(c) { c.s.tr808(c.s.grid(16, bd: 'x.x.', snare: '.x..', hat: 'xxxx')) }],
+
+      # Plan lane groups (Plan::LaneGroup: FastPlan.run_lanes with the
+      # lane-major SVF, four-pole, diode, and biquad kernels, wavetable
+      # tones, sample and hold, tempo params)
+      ['synth lane groups (lane-major filters)', ->(c) {
+        c.clip.synth(voices: 3, spares: 1) { |v, _i|
+          saw = v.hz.ramp * v.amp_env(0.001, 0.002, 0.5, 0.002)
+          saw.filter(:lowpass, cutoff: v.cutoff(1000), quality: 2) + saw.lp4(v.cutoff(1500), resonance: 0.4) * 0.5 +
+            saw.diode(v.cutoff(700), resonance: 0.6, drive: 1.5) * 0.3 + saw.filter(:highpass, cutoff: v.cutoff(300), quality: 1, structure: :biquad) * 0.2
+        }
+      }],
+      ['synth wavetable voices (KeyMap, sample and hold, tempo times)', ->(c) {
+        km = MB::Sound::Wavetable::KeyMap.new(MB::Sound::C1...MB::Sound::C4 => :saw, MB::Sound::C4..MB::Sound::C8 => :square)
+        c.clip.synth(voices: 2) { |v, _i|
+          chop = v.env([[1, 1.n64, 24], [0, 1.n64, -12], [0, 0.002]], release_at: 2, loop: 0, curve: :linear, sensitivity: 0, gm: false)
+          v.hz.wavetable(km, scan: v.lfo(3, shape: :noise) * 0.5 + 0.5).pwm(0.4) * v.amp_env(0.001, 0.002, 0.5, 0.002) * chop
+        }
+      }],
+      ['stereo channels of one shape (installation lane group)', ->(c) {
+        c.s.stereo(c.sig(110).filter(:lowpass, cutoff: c.mod(400, 900)) * 0.5, c.sig(165).filter(:lowpass, cutoff: c.mod(500, 800, 5)) * 0.5)
+      }],
     ]
   end
 
