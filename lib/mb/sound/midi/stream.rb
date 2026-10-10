@@ -371,7 +371,9 @@ module MB
           @last_events = events
 
           reader.cursor = to
-          drop
+          # Nothing to drop while every logged event is at or after +to+ (no
+          # reader is past it); drop's reader scan allocates
+          drop unless @log.empty? || @log[0].time >= to
           events
         end
 
@@ -407,7 +409,12 @@ module MB
         end
 
         def sorted?(events)
-          events.each_cons(2).all? { |a, b| a.time <= b.time }
+          i = 1
+          while i < events.length
+            return false if events[i - 1].time > events[i].time
+            i += 1
+          end
+          true
         end
 
         # The earliest reader cursor, or nil if there are no readers.
