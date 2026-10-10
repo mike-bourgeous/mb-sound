@@ -426,13 +426,14 @@ module MB
       # Node classes whose state can hold sound that comes back after a
       # silent stretch (delays, reverbs, long FIR filters) or that follow
       # the timeline (tempo LFOs), so lanes using them are never skipped.
-      # MIDI transforms upstream of the allocator (echo, arp, ...) follow
-      # the timeline too but only make events, which wake lanes, so they
-      # don't count.
+      # MIDI transforms upstream of the allocator (echo, arp, ...) and clip
+      # sources follow the timeline too but only make events, which wake
+      # lanes, so they don't count (clip synths skip idle lanes since
+      # 2026-10-10, user decision "yes, for now").
       def self.long_memory?(node)
         node.is_a?(GraphNode::Reverb) || node.is_a?(GraphNode::MultitapDelay) ||
           node.is_a?(GraphNode::FeedbackLoop) ||
-          (node.is_a?(Sequence::TimelineNode) && !node.is_a?(MIDI::Transform)) ||
+          (node.is_a?(Sequence::TimelineNode) && !node.is_a?(MIDI::Transform) && !node.is_a?(MIDI::ClipSource)) ||
           (node.respond_to?(:base_filter) && (node.base_filter.is_a?(Filter::Delay) || node.base_filter.is_a?(Filter::FIR))) ||
           node.is_a?(Filter::Delay) || node.is_a?(Filter::FIR)
       end

@@ -264,7 +264,9 @@ module ToneReferenceCases
       session(bpm: 960, buffers: 60) { |s, _t, i|
         if i == 0
           clip = S.seq(S::C3, S::E3.n16, S::G3, S::C4.n16).n8.legato(1.5).loop
-          s.add(clip.synth(voices: 2) { |v| (v.hz.saw.at(0.3) + v.hz.vibrato(6, depth: 30.cents).transpose(7).square.at(0.2)) * v.amp_env(0.002, 0.05, 0.6, 0.02) })
+          # skip_idle: false: the reference pins oscillators, not idle-lane skipping
+          # (clip synths skip idle lanes since 2026-10-10)
+          s.add(clip.synth(voices: 2, skip_idle: false) { |v| (v.hz.saw.at(0.3) + v.hz.vibrato(6, depth: 30.cents).transpose(7).square.at(0.2)) * v.amp_env(0.002, 0.05, 0.6, 0.02) })
         end
       }
     },

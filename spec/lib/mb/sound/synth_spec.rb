@@ -679,6 +679,22 @@ RSpec.describe(MB::Sound::Synth) do
       expect(s.skippable_lanes).to eq([0, 1, 2])
     end
 
+    it 'skips idle lanes of clip synths (clip sources only make events)' do
+      clip = MB::Sound.seq(MB::Sound::C4, MB::Sound::E4, MB::Sound::Rest, MB::Sound::Rest).n8.loop
+      s = clip.synth(voices: 2, &exact_patch)
+      expect(s.skippable_lanes).to eq((0...s.allocator.lanes.length).to_a)
+      out, skipped = run(s, 100, 256)
+      expect(skipped.flatten).not_to be_empty
+      expect(out.abs.max).to be > 0.1
+    ensure
+      MB::Sound.rewind
+    end
+
+    it 'never skips lanes with tempo-locked nodes' do
+      s = described_class.new(source(*notes), voices: 2, spares: 0) { |v| v.hz.saw * v.amp_env * 1.beat.lfo }
+      expect(s.skippable_lanes).to eq([])
+    end
+
     it 'never skips lanes with delays or reverbs, or with skip_idle: false' do
       s = described_class.new(source(*notes), voices: 2, spares: 0) { |v| (v.hz.saw * v.amp_env).delay(0.1) }
       expect(s.skippable_lanes).to eq([])
