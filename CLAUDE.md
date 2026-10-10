@@ -279,6 +279,10 @@ Specs send real messages through a private JACK dummy server (`spec/support/jack
 - `mb-math` - Math utilities (GitHub dependency)
 - `mb-util` - General utilities (GitHub dependency)
 
+## Collaboration
+
+How the maintainer likes agentic work to go (decisions, questions, honesty, API taste, process) is in @.claude/collaboration.md.  Skills: `post-merge` (steps after every merge) and `agent-brief` (briefing background agents), in `.claude/skills/`.
+
 ## Source Control
 
 - Use worktrees (and branches) for feature development; new worktrees go in `.claude/worktrees/` and need `bundle exec rake compile` before specs run

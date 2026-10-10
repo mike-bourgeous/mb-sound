@@ -1,0 +1,21 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(bundle exec rspec:*)",
+      "Bash(bundle exec rake compile:*)",
+      "Bash(bundle exec rake -f Rakefile compile:*)",
+      "Bash(bundle exec rake -f Rakefile clean compile:*)",
+      "Bash(bundle exec rake depend:check:*)",
+      "Bash(bundle exec rake -f Rakefile memcheck:status:*)",
+      "Bash(git status:*)",
+      "Bash(git diff:*)",
+      "Bash(git log:*)",
+      "Bash(git show:*)",
+      "Bash(git branch --list:*)",
+      "Bash(git worktree list:*)",
+      "Bash(wc:*)",
+      "Bash(ls:*)",
+      "Bash(grep:*)"
+    ]
+  }
+}
