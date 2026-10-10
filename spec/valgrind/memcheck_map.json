@@ -1165,9 +1165,6 @@
       ]
     },
     "spec/lib/mb/sound/wavetable_spec.rb": {
-      "fast_sound": [
-        "FastSound.smootherstep_buf"
-      ],
       "fast_wavetable": [
         "FastWavetable.half_means",
         "FastWavetable.harmonic_spectra"

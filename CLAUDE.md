@@ -24,7 +24,7 @@ bundle exec rspec spec/some_spec.rb        # Run a single test file
 bundle exec rspec spec/some_spec.rb:42     # Run a specific test line
 bundle exec rake                  # Default task (runs spec)
 bin/sound.rb                      # Launch interactive Pry console with MB::Sound context
-bundle exec rake memcheck         # C extension specs under Valgrind (full: ~30-45 min, up to 1.3 GB; options in Rakefile)
+bundle exec rake memcheck         # C extension specs under Valgrind (full: ~30 min on 2026-10-10, up to 1.3 GB; options in Rakefile)
 bundle exec rake memcheck:changed # only the memcheck specs for extensions changed since master-ai (MEMCHECK_DRY=1, FULL=auto)
 bundle exec rake memcheck:status  # last full memcheck and whether one is due
 bundle exec rake depend:check     # ext depend files against the headers the sources include

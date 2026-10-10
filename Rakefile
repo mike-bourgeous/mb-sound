@@ -229,7 +229,11 @@ begin
       t.rspec_opts += ['--require', './spec/valgrind/gc_stress_calls.rb'] if ENV['MEMCHECK_GC_STRESS'] == '1'
     end
     started = Process.clock_gettime(Process::CLOCK_MONOTONIC)
-    Rake::Task[task_name].invoke
+    begin
+      Rake::Task[task_name].invoke
+    ensure
+      ENV.delete('MB_SOUND_MEMCHECK')
+    end
     puts format('memcheck: %d spec files clean in %.1f min', Array(specs).length, (Process.clock_gettime(Process::CLOCK_MONOTONIC) - started) / 60)
     if full
       stamp = MemcheckSelection.write_stamp
@@ -282,9 +286,11 @@ namespace :memcheck do
     puts MemcheckSelection.full_status[1]
   end
 
+  # In memcheck mode (MB_SOUND_MEMCHECK=1, as under Valgrind), so the map
+  # lists the calls the Valgrind runs make (memcheck_skip examples left out)
   desc 'Record which extensions each memcheck spec calls (spec/valgrind/memcheck_map.json; native rspec, a few minutes)'
   task :map do
-    sh({ 'MEMCHECK_MAP' => '1' }, 'bundle', 'exec', 'rspec', *MemcheckSelection.spec_files)
+    sh({ 'MEMCHECK_MAP' => '1', 'MB_SOUND_MEMCHECK' => '1' }, 'bundle', 'exec', 'rspec', *MemcheckSelection.spec_files)
   end
 end
 
